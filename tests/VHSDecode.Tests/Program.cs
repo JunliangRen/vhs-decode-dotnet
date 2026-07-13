@@ -5824,6 +5824,122 @@ public void CvbsAutoSyncDetectsAndAppliesFieldLevels()
     AssertClose(1.0, measuredField.OutputConverter.HzIre, 1e-12);
 }
 
+[Fact(DisplayName = "CVBS clamp AGC levels follow upstream speculative decode delay")]
+public void CvbsClampAgcLevelsFollowSpeculativeDecodeDelay()
+{
+    const int lineLength = 200;
+    const int lineCount = 20;
+    var analyzer = new SyncAnalyzer(
+        sampleRateHz: 1_000_000.0,
+        linePeriodUs: 100.0,
+        hsyncPulseUs: 10.0,
+        equalizingPulseUs: 5.0,
+        vsyncPulseUs: 20.0);
+    var frameSpec = new TbcFrameSpec(
+        "NTSC",
+        lineLength,
+        lineCount,
+        OutputSampleRateHz: 4_000_000.0,
+        ColourBurstStart: null,
+        ColourBurstEnd: null,
+        ActiveVideoStart: null,
+        ActiveVideoEnd: null);
+    var converter = new VideoOutputConverter(
+        ire0: 0.0,
+        hzIre: 1.0,
+        outputZero: 256,
+        vsyncIre: -40.0,
+        outputScale: 10.0);
+    var renderer = new TbcFieldRenderer(
+        frameSpec,
+        converter,
+        cvbsClampAgc: new CvbsClampAgcOptions(Speed: 1.0, GainFactor: 1.0, SetGain: 1.0));
+    var pipeline = new TbcFieldDecodePipeline(
+        analyzer,
+        renderer,
+        converter,
+        "NTSC",
+        TbcDropoutDetectionOptions.Disabled,
+        syncDetectionOptions: new SyncDetectionOptions(
+            DetectLevels: false,
+            LevelDetectDivisor: 1,
+            CvbsAutoSync: true),
+        decodeType: "cvbs");
+    double[] lineLocations = Enumerable.Range(0, lineCount + 1)
+        .Select(line => line * (double)lineLength)
+        .ToArray();
+
+    static double[] BuildClampField(double syncLevel, double blankLevel)
+    {
+        double[] samples = Enumerable.Repeat(200.0, lineLength * lineCount).ToArray();
+        for (int line = 0; line < lineCount; line++)
+        {
+            int lineBase = line * lineLength;
+            Array.Fill(samples, syncLevel, lineBase + 12, 60);
+            Array.Fill(samples, blankLevel, lineBase + 96, 68);
+        }
+
+        return samples;
+    }
+
+    double[] decodeVideo = Enumerable.Repeat(100.0, 5_000).ToArray();
+    PaintPulse(decodeVideo, 10, 10, -40.0);
+    PaintPulse(decodeVideo, 110, 10, -40.0);
+    PaintPulse(decodeVideo, 210, 10, -40.0);
+    PaintTestVBlank(decodeVideo, line0: 310, isFirstField: true, system: "NTSC");
+    for (int line = 11; line <= 34; line++)
+    {
+        PaintPulse(decodeVideo, 310 + (line * 100), 10, -40.0);
+    }
+
+    CvbsSyncLevels detected = CvbsSyncLevelDetector.Find(decodeVideo, analyzer)
+        ?? throw new InvalidOperationException("Expected CVBS levels for the speculative field.");
+    renderer.RenderField(BuildClampField(syncLevel: 60.0, blankLevel: 100.0), lineLocations);
+
+    TbcDecodedField first = pipeline.Decode(new RfDecodedSpan(
+        0,
+        decodeVideo,
+        decodeVideo,
+        decodeVideo,
+        VideoLowPass: decodeVideo));
+    AssertTrue(first.OutputConverter is not null);
+    AssertClose(detected.BlankLevel, first.OutputConverter!.Ire0, 1e-12);
+    AssertClose(
+        (detected.BlankLevel - detected.SyncLevel) / 40.0,
+        first.OutputConverter.HzIre,
+        1e-12);
+    TbcFieldDecodeState afterFirst = pipeline.CaptureState();
+    AssertClose(60.0, afterFirst.DelayedCvbsSyncLevels!.Value.SyncLevel, 1e-12);
+    AssertClose(100.0, afterFirst.DelayedCvbsSyncLevels.Value.BlankLevel, 1e-12);
+
+    renderer.RenderField(BuildClampField(syncLevel: 20.0, blankLevel: 180.0), lineLocations);
+    object preparedSecond = InvokePrivateMethod(
+        pipeline,
+        "PrepareSyncSpan",
+        new RfDecodedSpan(
+            0,
+            decodeVideo,
+            decodeVideo,
+            decodeVideo,
+            VideoLowPass: decodeVideo),
+        null,
+        true,
+        true)!;
+    var delayedConverter = (VideoOutputConverter?)PrivatePropertyValue(preparedSecond, "ConverterOverride");
+    AssertTrue(delayedConverter is not null);
+    AssertClose(100.0, delayedConverter!.Ire0, 1e-12);
+    AssertClose(1.0, delayedConverter.HzIre, 1e-12);
+    AssertClose(20.0, renderer.LastCvbsSyncLevels!.Value.SyncLevel, 1e-12);
+    AssertEqual(afterFirst.DelayedCvbsSyncLevels, pipeline.CaptureState().DelayedCvbsSyncLevels);
+
+    SetPrivateFieldValue(
+        pipeline,
+        "_delayedCvbsSyncLevels",
+        ((double SyncLevel, double BlankLevel)?)(20.0, 180.0));
+    pipeline.RestoreStateForRetry(afterFirst);
+    AssertEqual(afterFirst.DelayedCvbsSyncLevels, pipeline.CaptureState().DelayedCvbsSyncLevels);
+}
+
 [Fact(DisplayName = "LD sync calibration matches upstream retry and pulse windows")]
 public void LaserDiscSyncCalibrationMatchesUpstream()
 {
