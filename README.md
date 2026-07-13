@@ -569,7 +569,9 @@ Implemented:
   `refine_linelocs_burst`; PAL CVBS has no corresponding burst refiner
 - CVBS clamp AGC preserves per-line blank/sync ordering for piecewise DC
   correction and carries the previous field's final-third median levels into
-  the next auto-sync pass as v0.4.0 `agc_blank_level`/`agc_sync_level` state
+  the next auto-sync pass as v0.4.0 `agc_blank_level`/`agc_sync_level` state;
+  its median, in-place DC correction, gain division, and VSYNC subtraction
+  retain NumPy's float32 staging before the final float64 output scaling
 - CVBS clamp AGC tracks separate raw detected and smoothed used gain extrema;
   successful CLI runs print the four v0.4.0 statistics lines to stderr and the
   final `saving JSON and exiting` line to stdout (fixed `--agc_set_gain` does
@@ -579,6 +581,9 @@ Implemented:
   recovering HSYNC pulses whose back porch was included by the first pass
 - vblank group filtering preserves the separate v0.4.0 minimum spans: VHS uses
   the relaxed greater-than-9 threshold while LD/CVBS require greater than 12
+- PAL CVBS bad-line repair preserves the release override that disables
+  second-derivative error marking, while PAL LD still recomputes that mask after
+  pilot refinement
 - VHS/CVBS HSYNC line-location refinement now runs against the 0.5 MHz
   low-pass branch when available, including upstream-style sync/porch midpoint
   recrossing and sample-rate-scaled right-edge correction; `--skip_hsync_refine`
@@ -887,10 +892,13 @@ Implemented:
   accepted parser values PAL-M, MESECAM, 405, 819, and NLINHA fail with the
   upstream `Unknown video system!` tuple; their core parameter/filter baselines
   remain covered without exposing behavior the release executable did not have
-- on a deterministic varying-level PAL CVBS fixture, `--clamp_agc` now differs
-  from v0.4.0 at only 21 of 710,510 TBC samples, each by one LSB; phase, burst,
-  VITS, location metadata, AGC statistics, and normalized logs match, while the
-  remaining sample tails are covered by the DUCC precision item below
+- on a deterministic varying-level PAL CVBS fixture, `--clamp_agc` now
+  reproduces v0.4.0 byte for byte across all 710,510 TBC samples; the TBC and
+  JSON SHA-256 hashes are respectively
+  `96149002C71C87735AE9D609DCC5693F60A12AD361A09D2F26DCB3CBF9FAF624`
+  and `783A0DAC238A72433523659AC73C6A2D11357684631071A0A8DEE206E323EBDC`,
+  while phase, burst, VITS, location metadata, AGC statistics, and normalized
+  logs also match
 - on the same varying-level fixture, default non-clamped CVBS with `--threads 0`
   now reproduces v0.4.0's synchronous speculative-field timing: each requested
   field is rendered with the next decoded field's `ire0`/`hz_ire`, the producer
@@ -969,7 +977,7 @@ dotnet test VHSDecodeDotNet.slnx --no-build
 ```
 
 The current formal solution build completes with zero warnings and errors, and
-the xUnit project exposes 219 independently discoverable compatibility tests to
+the xUnit project exposes 221 independently discoverable compatibility tests to
 `dotnet test` and Visual Studio Test Explorer. On the
 same Windows machine and fixtures, Release wall-clock measurements for one
 frame were 2.346 s versus 7.193 s for NTSC VHS and 1.651 s versus 5.865 s for

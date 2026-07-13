@@ -6651,6 +6651,29 @@ public void LaserDiscLineLocationRepairMatchesUpstreamRules()
     AssertClose(150.0, notRepaired.Locations[1], 1e-12);
 }
 
+[Fact(DisplayName = "CVBS line location repair preserves its overridden derivative mask")]
+public void CvbsLineLocationRepairPreservesOverriddenDerivativeMask()
+{
+    var source = new LineLocationResult(
+        [0.0, 100.0, 205.0, 360.0, 405.0, 505.0],
+        [false, false, false, true, false, false]);
+
+    LineLocationResult repaired = LaserDiscLineLocationRepair.FixBadLines(
+        source,
+        system: "PAL",
+        markDerivativeErrors: false);
+
+    bool[] expectedErrors = [false, false, false, true, false, false];
+    for (int line = 0; line < expectedErrors.Length; line++)
+    {
+        AssertEqual(expectedErrors[line], repaired.Filled[line]);
+    }
+
+    AssertClose(305.0, repaired.Locations[3], 1e-12);
+    AssertClose(205.0, repaired.Locations[2], 1e-12);
+    AssertClose(405.0, repaired.Locations[4], 1e-12);
+}
+
 [Fact(DisplayName = "LD line location builder repairs player skips from field end")]
 public void LaserDiscLineLocationBuilderRepairsPlayerSkipsFromFieldEnd()
 {
@@ -7590,6 +7613,59 @@ public void TbcFieldRendererAppliesCvbsClampAgc()
     AssertClose(0.25, session.TbcRenderer.CvbsClampAgc!.Speed, 1e-12);
     AssertClose(1.5, session.TbcRenderer.CvbsClampAgc.GainFactor, 1e-12);
     AssertClose(2.0, session.TbcRenderer.CvbsClampAgc.SetGain, 1e-12);
+}
+
+[Fact(DisplayName = "CVBS clamp AGC matches NumPy float32 staging")]
+public void CvbsClampAgcMatchesNumpyFloat32Staging()
+{
+    const int lineLength = 200;
+    const int lineCount = 20;
+    var spec = new TbcFrameSpec(
+        "PAL",
+        lineLength,
+        lineCount,
+        OutputSampleRateHz: 17_734_475.0,
+        ColourBurstStart: null,
+        ColourBurstEnd: null,
+        ActiveVideoStart: null,
+        ActiveVideoEnd: null);
+    VideoOutputConverter converter = VideoOutputConverter.FromParameters(
+        FormatCatalog.Default.GetCvbsParameters("PAL"));
+    var options = new CvbsClampAgcOptions(Speed: 1.0, GainFactor: 1.0, SetGain: 0.0);
+    var renderer = new TbcFieldRenderer(spec, converter, cvbsClampAgc: options);
+    var field = new double[lineLength * lineCount];
+    for (int line = 0; line < lineCount; line++)
+    {
+        float blank = 10_000.0f + (line * 17.25f);
+        int lineStart = line * lineLength;
+        for (int x = 0; x < lineLength; x++)
+        {
+            field[lineStart + x] = blank + (2_000.0f + (((x % 37) - 18) * 13.125f));
+        }
+
+        for (int x = 12; x < 72; x++)
+        {
+            field[lineStart + x] = blank + (-8_000.0f + (((x % 5) - 2) * 0.125f));
+        }
+
+        for (int x = 96; x < 164; x++)
+        {
+            field[lineStart + x] = blank + (((x % 7) - 3) * 0.0625f);
+        }
+    }
+
+    int roundingBoundary = (6 * lineLength) + 180;
+    field[roundingBoundary] = 12_906.9931640625f;
+    ushort[] samples = (ushort[])InvokePrivateMethod(
+        renderer,
+        "ConvertCvbsClampAgc",
+        field,
+        options)!;
+
+    AssertEqual((ushort)42_405, samples[roundingBoundary]);
+    AssertEqual(
+        "31B045161C504B79C5491F6A80B0E48C46D7B03705F0E4AD2666F035CE34D039",
+        Convert.ToHexString(SHA256.HashData(TbcOutputWriter.ToLittleEndianBytes(samples))));
 }
 
 [Fact(DisplayName = "CVBS AGC statistics match upstream reporting")]

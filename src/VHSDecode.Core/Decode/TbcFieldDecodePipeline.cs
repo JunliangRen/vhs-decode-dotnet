@@ -710,7 +710,10 @@ public sealed class TbcFieldDecodePipeline
             parity.IsFirstField);
         if (_decodeVbiData && FormatCatalog.ParentSystem(_system) == "PAL")
         {
-            lineLocations = LaserDiscLineLocationRepair.FixBadLines(lineLocations, _system);
+            lineLocations = LaserDiscLineLocationRepair.FixBadLines(
+                lineLocations,
+                _system,
+                markDerivativeErrors: _decodeLaserDiscVbi);
         }
 
         int outputFirstLine = OutputFirstLine(parity.IsFirstField);

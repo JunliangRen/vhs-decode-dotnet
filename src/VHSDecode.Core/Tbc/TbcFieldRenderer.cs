@@ -295,13 +295,20 @@ public sealed class TbcFieldRenderer
             return _converter.ConvertHz(input);
         }
 
-        double[] blankLevels = LineMedians(input, 96, 164);
-        double[] syncLevels = LineMedians(input, 12, 72);
+        double[] blankLevels = ClampLineMediansFloat32(input, 96, 164);
+        double[] syncLevels = ClampLineMediansFloat32(input, 12, 72);
         int measuredStart = (FrameSpec.OutputLineCount / 3) * 2;
         LastCvbsSyncLevels = (
             Median(syncLevels, measuredStart, FrameSpec.OutputLineCount),
             Median(blankLevels, measuredStart, FrameSpec.OutputLineCount));
-        double[] reduced = input.ToArray();
+        // Upstream stores the resampled field as float32, so every in-place
+        // clamp operation rounds back to float32 before the next operation.
+        var reduced = new float[input.Length];
+        for (int i = 0; i < input.Length; i++)
+        {
+            reduced[i] = (float)input[i];
+        }
+
         int lineLength = FrameSpec.OutputLineLength;
         int lineCount = FrameSpec.OutputLineCount;
 
@@ -330,7 +337,8 @@ public sealed class TbcFieldRenderer
         var output = new ushort[reduced.Length];
         for (int i = 0; i < reduced.Length; i++)
         {
-            double value = (reduced[i] / gainScale) - _converter.VSyncIre;
+            float divided = (float)(reduced[i] / gainScale);
+            float value = divided - (float)_converter.VSyncIre;
             output[i] = ClipToUInt16((value * _converter.OutputScale) + _converter.OutputZero);
         }
 
@@ -377,21 +385,24 @@ public sealed class TbcFieldRenderer
         return start >= 0 && end > start && end <= FrameSpec.OutputLineLength;
     }
 
-    private double[] LineMedians(double[] data, int start, int end, bool sortOutput = false)
+    private double[] ClampLineMediansFloat32(double[] data, int start, int end)
     {
         var medians = new double[FrameSpec.OutputLineCount];
         int width = end - start;
-        var scratch = new double[width];
+        var scratch = new float[width];
         for (int line = 0; line < FrameSpec.OutputLineCount; line++)
         {
-            Array.Copy(data, (line * FrameSpec.OutputLineLength) + start, scratch, 0, width);
-            Array.Sort(scratch);
-            medians[line] = MedianSorted(scratch);
-        }
+            int lineStart = (line * FrameSpec.OutputLineLength) + start;
+            for (int i = 0; i < width; i++)
+            {
+                scratch[i] = (float)data[lineStart + i];
+            }
 
-        if (sortOutput)
-        {
-            Array.Sort(medians);
+            Array.Sort(scratch);
+            int middle = scratch.Length / 2;
+            medians[line] = scratch.Length % 2 == 0
+                ? (scratch[middle - 1] + scratch[middle]) / 2.0f
+                : scratch[middle];
         }
 
         return medians;
@@ -512,15 +523,15 @@ public sealed class TbcFieldRenderer
         return MedianSorted(scratch);
     }
 
-    private static void SubtractRange(double[] data, int start, int end, double value)
+    private static void SubtractRange(float[] data, int start, int end, double value)
     {
         for (int i = start; i < end; i++)
         {
-            data[i] -= value;
+            data[i] = (float)(data[i] - value);
         }
     }
 
-    private static void SubtractLinear(double[] data, int start, int end, double from, double to)
+    private static void SubtractLinear(float[] data, int start, int end, double from, double to)
     {
         int count = end - start;
         if (count <= 0)
@@ -528,10 +539,17 @@ public sealed class TbcFieldRenderer
             return;
         }
 
+        if (count == 1)
+        {
+            data[start] = (float)(data[start] - from);
+            return;
+        }
+
+        double step = (to - from) / (count - 1);
         for (int i = 0; i < count; i++)
         {
-            double t = count == 1 ? 0.0 : (double)i / (count - 1);
-            data[start + i] -= from + ((to - from) * t);
+            double level = i == count - 1 ? to : from + (i * step);
+            data[start + i] = (float)(data[start + i] - level);
         }
     }
 
