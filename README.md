@@ -771,6 +771,11 @@ Implemented:
   clear an active status line, and cleanup reports total decode time plus
   post-setup FPS; a one-frame PAL CVBS transcript is byte-exact on stdout, has
   the exact phase warning on stderr, and matches the upstream timing-line shape
+- VHS streaming output now takes the same periodic recovery JSON snapshots
+  before checking free output-disk space: every read while fewer than 100 fields
+  have been written and again at each 500-field boundary; below 10 GiB it emits
+  the exact pause/resume messages and polls once per second until space returns,
+  while disk-query errors are ignored and LD/CVBS remain unaffected
 - `-t/--threads` now drives parallel RF block demodulation and filtering while
   keeping stream/FFmpeg/GNU Radio reads ordered; `-t 1` and debug-plot `0`
   retain the deterministic single-thread path, and parallel blocks are stitched
@@ -954,7 +959,7 @@ dotnet test VHSDecodeDotNet.slnx --no-build
 ```
 
 The current formal solution build completes with zero warnings and errors, and
-the xUnit project exposes 213 independently discoverable compatibility tests to
+the xUnit project exposes 214 independently discoverable compatibility tests to
 `dotnet test` and Visual Studio Test Explorer. On the
 same Windows machine and fixtures, Release wall-clock measurements for one
 frame were 2.346 s versus 7.193 s for NTSC VHS and 1.651 s versus 5.865 s for

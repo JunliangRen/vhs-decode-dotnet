@@ -32,7 +32,11 @@ public static class TbcOutputMetadataWriter
             _verbose = session.ExecutionOptions.VerboseVits;
             _fieldBuilder = new FieldObjectBuilder(session);
             _fieldsWriter = new StreamWriter(
-                File.Create(_fieldsPath),
+                new FileStream(
+                    _fieldsPath,
+                    FileMode.Create,
+                    FileAccess.Write,
+                    FileShare.Read),
                 new UTF8Encoding(encoderShouldEmitUTF8Identifier: false));
         }
 
@@ -63,6 +67,13 @@ public static class TbcOutputMetadataWriter
             return fieldInfo;
         }
 
+        public void WriteSnapshot()
+        {
+            ObjectDisposedException.ThrowIf(_fieldsWriter is null, this);
+            _fieldsWriter.Flush();
+            WriteCurrentJson();
+        }
+
         public void Complete()
         {
             if (_completed)
@@ -71,7 +82,30 @@ public static class TbcOutputMetadataWriter
             }
 
             CloseFieldsWriter();
+            try
+            {
+                WriteCurrentJson();
+                _completed = true;
+            }
+            finally
+            {
+                File.Delete(_fieldsPath);
+            }
+        }
+
+        public void Dispose()
+        {
+            CloseFieldsWriter();
+            if (!_completed)
+            {
+                File.Delete(_fieldsPath);
+            }
+        }
+
+        private void WriteCurrentJson()
+        {
             string tempPath = _jsonPath + ".tmp";
+            bool moved = false;
             try
             {
                 using (var output = new StreamWriter(
@@ -80,7 +114,11 @@ public static class TbcOutputMetadataWriter
                 {
                     WritePrefix(output);
                     using (var fields = new StreamReader(
-                        File.OpenRead(_fieldsPath),
+                        new FileStream(
+                            _fieldsPath,
+                            FileMode.Open,
+                            FileAccess.Read,
+                            FileShare.ReadWrite),
                         Encoding.UTF8,
                         detectEncodingFromByteOrderMarks: false))
                     {
@@ -96,24 +134,14 @@ public static class TbcOutputMetadataWriter
                 }
 
                 File.Move(tempPath, _jsonPath, overwrite: true);
-                _completed = true;
+                moved = true;
             }
             finally
             {
-                File.Delete(_fieldsPath);
-                if (!_completed)
+                if (!moved)
                 {
                     File.Delete(tempPath);
                 }
-            }
-        }
-
-        public void Dispose()
-        {
-            CloseFieldsWriter();
-            if (!_completed)
-            {
-                File.Delete(_fieldsPath);
             }
         }
 

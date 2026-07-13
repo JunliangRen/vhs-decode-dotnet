@@ -7677,6 +7677,67 @@ public void DecodeRuntimeReporterMatchesUpstreamStreamProtocol()
         error.ToString());
 }
 
+[Fact(DisplayName = "VHS disk guard matches upstream cadence and pause protocol")]
+public void VhsDiskGuardMatchesUpstreamCadenceAndPauseProtocol()
+{
+    AssertTrue(VhsDiskSpaceGuard.ShouldCheck(0));
+    AssertTrue(VhsDiskSpaceGuard.ShouldCheck(99));
+    AssertFalse(VhsDiskSpaceGuard.ShouldCheck(100));
+    AssertFalse(VhsDiskSpaceGuard.ShouldCheck(499));
+    AssertTrue(VhsDiskSpaceGuard.ShouldCheck(500));
+    AssertFalse(VhsDiskSpaceGuard.ShouldCheck(501));
+    AssertTrue(VhsDiskSpaceGuard.ShouldCheck(1_000));
+
+    var output = new StringWriter();
+    var error = new StringWriter();
+    var reporter = new DecodeRuntimeReporter(output, error, () => 0.0);
+    reporter.Status("active status");
+    var freeBytes = new Queue<long>(
+        [VhsDiskSpaceGuard.MinimumFreeBytes - 1, VhsDiskSpaceGuard.MinimumFreeBytes - 1, VhsDiskSpaceGuard.MinimumFreeBytes]);
+    var waits = new List<TimeSpan>();
+    string? checkedDirectory = null;
+    var guard = new VhsDiskSpaceGuard(
+        directory =>
+        {
+            checkedDirectory = directory;
+            return freeBytes.Dequeue();
+        },
+        waits.Add);
+    string outputBase = Path.Combine(Path.GetTempPath(), "vhs-disk-guard", "capture");
+
+    guard.Check(outputBase, fieldsWritten: 1, reporter);
+
+    string status = "active status";
+    AssertEqual(status + new string(' ', 80 - status.Length) + '\r', output.ToString());
+    AssertEqual(Path.GetDirectoryName(Path.GetFullPath(outputBase)), checkedDirectory);
+    AssertEqual(2, waits.Count);
+    AssertEqual(TimeSpan.FromSeconds(1.0), waits[0]);
+    AssertEqual(TimeSpan.FromSeconds(1.0), waits[1]);
+    AssertEqual(
+        Environment.NewLine
+        + "Less than 10GB of free disk space is remaining, decoding paused. "
+        + "Decoding will resume once there is more space, or press Ctrl+C to exit."
+        + Environment.NewLine
+        + Environment.NewLine
+        + "Disk space available, resuming decode."
+        + Environment.NewLine,
+        error.ToString());
+
+    int skippedQueries = 0;
+    new VhsDiskSpaceGuard(_ =>
+    {
+        skippedQueries++;
+        return 0;
+    }).Check(outputBase, fieldsWritten: 100, reporter);
+    AssertEqual(0, skippedQueries);
+
+    var ignoredError = new StringWriter();
+    var ignoredReporter = new DecodeRuntimeReporter(TextWriter.Null, ignoredError, () => 0.0);
+    new VhsDiskSpaceGuard(_ => throw new IOException("unavailable"))
+        .Check(outputBase, fieldsWritten: 1, ignoredReporter);
+    AssertEqual(string.Empty, ignoredError.ToString());
+}
+
 [Fact(DisplayName = "TBC field decode pipeline detects sync and renders a field")]
 public void TbcFieldDecodePipelineDetectsSyncAndRendersField()
 {
@@ -9795,6 +9856,8 @@ public void TbcFieldSequenceEnginePerformsVhsTerminalLookahead()
         DecodeSessionLogWriter.Write(session);
 
         int reads = 0;
+        int diskChecks = 0;
+        var snapshotFieldCounts = new List<int>();
         var begins = new List<long>();
         TbcDecodedField? ReadField(DecodeSession activeSession, Stream _, long begin, int __, int ___)
         {
@@ -9816,8 +9879,19 @@ public void TbcFieldSequenceEnginePerformsVhsTerminalLookahead()
                 };
         }
 
+        var diskGuard = new VhsDiskSpaceGuard(
+            _ =>
+            {
+                diskChecks++;
+                using JsonDocument snapshot = JsonDocument.Parse(
+                    File.ReadAllText(outputBase + ".tbc.json"));
+                snapshotFieldCounts.Add(snapshot.RootElement.GetProperty("fields").GetArrayLength());
+                return long.MaxValue;
+            },
+            _ => throw new Exception("The disk guard should not wait when space is available."));
         TbcFieldSequenceDecodeResult result = new TbcFieldSequenceDecodeEngine(
-            readField: ReadField).TryDecodeAndWrite(session, Stream.Null);
+            readField: ReadField,
+            vhsDiskSpaceGuard: diskGuard).TryDecodeAndWrite(session, Stream.Null);
 
         if (!result.Success)
         {
@@ -9825,6 +9899,8 @@ public void TbcFieldSequenceEnginePerformsVhsTerminalLookahead()
         }
         AssertEqual(2, result.WrittenFieldCount);
         AssertEqual(3, reads);
+        AssertEqual(2, diskChecks);
+        AssertTrue(snapshotFieldCounts.SequenceEqual([1, 2]));
         AssertTrue(begins.SequenceEqual([0L, 100L, 200L]));
         using JsonDocument document = JsonDocument.Parse(File.ReadAllText(result.Paths!.JsonPath));
         AssertEqual(2, document.RootElement.GetProperty("fields").GetArrayLength());

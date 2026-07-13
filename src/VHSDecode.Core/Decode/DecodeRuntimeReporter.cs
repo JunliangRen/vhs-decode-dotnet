@@ -83,6 +83,16 @@ public sealed class DecodeRuntimeReporter
         }
     }
 
+    public void WriteDirectErrorLine(string message)
+    {
+        ArgumentNullException.ThrowIfNull(message);
+        lock (_sync)
+        {
+            _error.WriteLine(message);
+            _error.Flush();
+        }
+    }
+
     public void WriteStatistics()
     {
         lock (_sync)
