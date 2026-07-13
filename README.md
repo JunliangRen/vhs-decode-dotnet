@@ -868,6 +868,11 @@ Implemented:
   from v0.4.0 at only 21 of 710,510 TBC samples, each by one LSB; phase, burst,
   VITS, location metadata, AGC statistics, and normalized logs match, while the
   remaining sample tails are covered by the DUCC precision item below
+- on the same varying-level fixture, default non-clamped CVBS with `--threads 0`
+  now reproduces v0.4.0's synchronous speculative-field timing: each requested
+  field is rendered with the next decoded field's `ire0`/`hz_ire`, the producer
+  lookahead is not written past `--length`, all 710,510 TBC samples are
+  byte-exact, and normalized logs match in order and content
 - a one-frame real NTSC LD/LDF fixture with default EFM and analog audio also
   matches v0.4.0 byte for byte: main TBC
   `7F19286F84D563D58983C50326CE16433ED9DA90459ADA658532EB38A5AF686A`,
@@ -888,10 +893,10 @@ Not complete yet:
 - CVBS double-precision FFT round-trip tails still differ at approximately
   1e-11 when upstream uses SciPy 1.18's DUCC backend; this disappears in the
   current float32 channel baselines but remains an explicit parity item
-- default non-clamped CVBS output still cannot deterministically reproduce the
-  Python decoder's shared `ire0`/`hz_ire` scheduling race: with `--threads 0`
-  each current field is rendered using the synchronously decoded next field's
-  levels, while worker-thread runs can use either set depending on timing
+- worker-thread default non-clamped CVBS output still cannot deterministically
+  reproduce the Python decoder's shared `ire0`/`hz_ire` scheduling race;
+  `--threads 0` is deterministic and byte-exact, while worker runs can render
+  with either the current or next field's levels depending on timing
 - remaining container-specific resampling edge cases
 - remaining real-capture PAL LD and AC3 end-to-end fixtures, external AC3
   tool-pipeline parity, and remaining verbose VITS field calibration details
@@ -919,7 +924,7 @@ dotnet test VHSDecodeDotNet.slnx --no-build
 ```
 
 The current formal solution build completes with zero warnings and errors, and
-the xUnit project exposes 202 independently discoverable compatibility tests to
+the xUnit project exposes 205 independently discoverable compatibility tests to
 `dotnet test` and Visual Studio Test Explorer. On the
 same Windows machine and fixtures, Release wall-clock measurements for one
 frame were 2.346 s versus 7.193 s for NTSC VHS and 1.651 s versus 5.865 s for

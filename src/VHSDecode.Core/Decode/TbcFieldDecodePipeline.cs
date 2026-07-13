@@ -40,7 +40,16 @@ public sealed record TbcDecodedField(
     int SyncConfidence = 100,
     VideoOutputConverter? OutputConverter = null,
     double? BlackToWhiteRfRatio = null,
-    bool LaserDiscAgcAdjusted = false);
+    bool LaserDiscAgcAdjusted = false)
+{
+    internal TbcDeferredRenderSource? DeferredRenderSource { get; init; }
+}
+
+internal sealed record TbcDeferredRenderSource(
+    double[] VideoHz,
+    double[] LineLocations,
+    int FirstLine,
+    int FieldNumber);
 
 public sealed record LaserDiscAnalogAudioOutputOptions(
     double LinePeriodUs,
@@ -467,13 +476,31 @@ public sealed class TbcFieldDecodePipeline
     }
 
     public TbcDecodedField Decode(RfDecodedSpan span, double? syncThresholdHz = null, int fieldNumber = 0)
+        => DecodeCore(span, syncThresholdHz, fieldNumber, deferCvbsOutputConversion: false);
+
+    internal TbcDecodedField DecodeForSequence(RfDecodedSpan span, int fieldNumber)
+        => DecodeCore(span, syncThresholdHz: null, fieldNumber, deferCvbsOutputConversion: true);
+
+    internal bool CanDeferCvbsOutputConversion
+        => string.Equals(_decodeType, "cvbs", StringComparison.Ordinal)
+            && _syncDetectionOptions.CvbsAutoSync
+            && _renderer.CvbsClampAgc is null;
+
+    private TbcDecodedField DecodeCore(
+        RfDecodedSpan span,
+        double? syncThresholdHz,
+        int fieldNumber,
+        bool deferCvbsOutputConversion)
     {
         (double SyncLevel, double BlankLevel)? previouslyRenderedCvbsLevels = _renderer.LastCvbsSyncLevels;
         SyncPreparedSpan prepared = PrepareSyncSpan(span, syncThresholdHz);
         TbcDecodedField decoded;
         try
         {
-            decoded = DecodePrepared(prepared, fieldNumber);
+            decoded = DecodePrepared(
+                prepared,
+                fieldNumber,
+                deferCvbsOutputConversion && CanDeferCvbsOutputConversion);
         }
         catch (InvalidOperationException ex) when (prepared.UsedSavedLevels && IsSyncLocationFailure(ex))
         {
@@ -483,7 +510,10 @@ public sealed class TbcFieldDecodePipeline
                 syncThresholdHz,
                 allowSavedLevels: false,
                 fallbackToSavedLevels: false);
-            decoded = DecodePrepared(retried, fieldNumber);
+            decoded = DecodePrepared(
+                retried,
+                fieldNumber,
+                deferCvbsOutputConversion && CanDeferCvbsOutputConversion);
         }
 
         if (_syncDetectionOptions.CvbsAutoSync && _renderer.CvbsClampAgc is not null)
@@ -496,7 +526,10 @@ public sealed class TbcFieldDecodePipeline
         return decoded;
     }
 
-    private TbcDecodedField DecodePrepared(SyncPreparedSpan prepared, int fieldNumber)
+    private TbcDecodedField DecodePrepared(
+        SyncPreparedSpan prepared,
+        int fieldNumber,
+        bool deferCvbsOutputConversion)
     {
         RfDecodedSpan span = prepared.Span;
         double threshold = prepared.Threshold;
@@ -741,12 +774,21 @@ public sealed class TbcFieldDecodePipeline
                 fieldConverter ?? _videoOutput);
         }
 
-        TbcRenderedField rendered = _renderer.RenderFieldPayload(
-            span.Video,
-            renderLineLocations,
-            firstLine: outputFirstLine,
-            fieldNumber: fieldNumber,
-            converterOverride: fieldConverter);
+        TbcDeferredRenderSource? deferredRenderSource = deferCvbsOutputConversion
+            ? new TbcDeferredRenderSource(
+                span.Video,
+                renderLineLocations,
+                outputFirstLine,
+                fieldNumber)
+            : null;
+        TbcRenderedField rendered = deferredRenderSource is null
+            ? _renderer.RenderFieldPayload(
+                span.Video,
+                renderLineLocations,
+                firstLine: outputFirstLine,
+                fieldNumber: fieldNumber,
+                converterOverride: fieldConverter)
+            : new TbcRenderedField([]);
         double? blackToWhiteRfRatio = ComputeLaserDiscBlackToWhiteRfRatio(
             span.Input,
             rendered.Samples,
@@ -823,7 +865,10 @@ public sealed class TbcFieldDecodePipeline
             SyncConfidence: syncConfidence,
             OutputConverter: fieldConverter,
             BlackToWhiteRfRatio: blackToWhiteRfRatio,
-            LaserDiscAgcAdjusted: laserDiscAgcAdjusted);
+            LaserDiscAgcAdjusted: laserDiscAgcAdjusted)
+        {
+            DeferredRenderSource = deferredRenderSource
+        };
     }
 
     private double? ComputeLaserDiscBlackToWhiteRfRatio(
