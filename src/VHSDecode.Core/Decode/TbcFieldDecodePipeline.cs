@@ -120,6 +120,7 @@ internal sealed record Line0FallbackCandidate(
 
 internal sealed record TbcFieldDecodeState(
     (double SyncLevel, double BlankLevel)? LastDetectedSyncLevels,
+    (double SyncLevel, double BlankLevel)? DelayedCvbsSyncLevels,
     long? PreviousAnalogAudioStartSample,
     long PreviousAnalogAudioFieldNumber,
     int? ChromaRotationIndex,
@@ -169,6 +170,7 @@ public sealed class TbcFieldDecodePipeline
     private readonly bool _debug;
     private readonly int _inputBlockCutSamples;
     private (double SyncLevel, double BlankLevel)? _lastDetectedSyncLevels;
+    private (double SyncLevel, double BlankLevel)? _delayedCvbsSyncLevels;
     private long? _previousAnalogAudioStartSample;
     private long _previousAnalogAudioFieldNumber;
     private int? _chromaRotationIndex;
@@ -229,6 +231,7 @@ public sealed class TbcFieldDecodePipeline
         _laserDiscPilotRefineOptions = laserDiscPilotRefineOptions;
         _hSyncRefineOptions = hSyncRefineOptions ?? HSyncRefineOptions.Disabled;
         _syncDetectionOptions = syncDetectionOptions ?? SyncDetectionOptions.Disabled;
+        _delayedCvbsSyncLevels = renderer.LastCvbsSyncLevels;
         _decodeLaserDiscVbi = decodeLaserDiscVbi;
         _decodeVbiData = decodeLaserDiscVbi || decodeVbiData;
         _preserveRawMetricSources = preserveRawMetricSources;
@@ -255,6 +258,7 @@ public sealed class TbcFieldDecodePipeline
     {
         return new TbcFieldDecodeState(
             _lastDetectedSyncLevels,
+            _delayedCvbsSyncLevels,
             _previousAnalogAudioStartSample,
             _previousAnalogAudioFieldNumber,
             _chromaRotationIndex,
@@ -279,6 +283,7 @@ public sealed class TbcFieldDecodePipeline
     {
         VideoOutputConverter? adjustedAgcConverter = _laserDiscAgcConverter;
         _lastDetectedSyncLevels = state.LastDetectedSyncLevels;
+        _delayedCvbsSyncLevels = state.DelayedCvbsSyncLevels;
         _previousAnalogAudioStartSample = state.PreviousAnalogAudioStartSample;
         _previousAnalogAudioFieldNumber = state.PreviousAnalogAudioFieldNumber;
         _chromaRotationIndex = state.ChromaRotationIndex;
@@ -463,10 +468,12 @@ public sealed class TbcFieldDecodePipeline
 
     public TbcDecodedField Decode(RfDecodedSpan span, double? syncThresholdHz = null, int fieldNumber = 0)
     {
+        (double SyncLevel, double BlankLevel)? previouslyRenderedCvbsLevels = _renderer.LastCvbsSyncLevels;
         SyncPreparedSpan prepared = PrepareSyncSpan(span, syncThresholdHz);
+        TbcDecodedField decoded;
         try
         {
-            return DecodePrepared(prepared, fieldNumber);
+            decoded = DecodePrepared(prepared, fieldNumber);
         }
         catch (InvalidOperationException ex) when (prepared.UsedSavedLevels && IsSyncLocationFailure(ex))
         {
@@ -476,8 +483,17 @@ public sealed class TbcFieldDecodePipeline
                 syncThresholdHz,
                 allowSavedLevels: false,
                 fallbackToSavedLevels: false);
-            return DecodePrepared(retried, fieldNumber);
+            decoded = DecodePrepared(retried, fieldNumber);
         }
+
+        if (_syncDetectionOptions.CvbsAutoSync && _renderer.CvbsClampAgc is not null)
+        {
+            // Upstream starts the next field before downscaling the current one,
+            // so a clamp measurement is first visible to the following decode.
+            _delayedCvbsSyncLevels = previouslyRenderedCvbsLevels;
+        }
+
+        return decoded;
     }
 
     private TbcDecodedField DecodePrepared(SyncPreparedSpan prepared, int fieldNumber)
@@ -1273,7 +1289,7 @@ public sealed class TbcFieldDecodePipeline
             ReadOnlySpan<double> cvbsSyncReference = span.VideoLowPass is { Length: > 0 } cvbsLowPass
                 ? cvbsLowPass
                 : span.Video;
-            CvbsSyncLevels? cvbsLevels = _renderer.LastCvbsSyncLevels is { } measured
+            CvbsSyncLevels? cvbsLevels = _delayedCvbsSyncLevels is { } measured
                 ? new CvbsSyncLevels(measured.SyncLevel, measured.BlankLevel)
                 : CvbsSyncLevelDetector.Find(cvbsSyncReference, _syncAnalyzer);
             if (cvbsLevels.HasValue)

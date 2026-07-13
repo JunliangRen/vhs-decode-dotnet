@@ -413,7 +413,9 @@ Implemented:
   `--no_auto_sync` raw-sample mapping before existing video/TBC processing
 - CVBS `--clamp_agc` field-output clamp/gain path, including upstream blank
   and sync median windows, per-line blank ramp subtraction, AGC speed smoothing,
-  `--agc_gain_factor`, and `--agc_set_gain`
+  `--agc_gain_factor`, and `--agc_set_gain`; measured sync/blank levels use the
+  upstream speculative-field delay rather than becoming visible one field too
+  early, and that delay participates in transactional field-state restore
 - VHS `--clamp` blanking DC offset compensation during sync level detection,
   while keeping upstream's default `--noclamp`/`--no_clamping` no-op behavior
 - CVBS `.tbc.json` field metadata now follows the upstream LD-shaped path,
@@ -862,6 +864,10 @@ Implemented:
   accepted parser values PAL-M, MESECAM, 405, 819, and NLINHA fail with the
   upstream `Unknown video system!` tuple; their core parameter/filter baselines
   remain covered without exposing behavior the release executable did not have
+- on a deterministic varying-level PAL CVBS fixture, `--clamp_agc` now differs
+  from v0.4.0 at only 21 of 710,510 TBC samples, each by one LSB; phase, burst,
+  VITS, location metadata, AGC statistics, and normalized logs match, while the
+  remaining sample tails are covered by the DUCC precision item below
 - a one-frame real NTSC LD/LDF fixture with default EFM and analog audio also
   matches v0.4.0 byte for byte: main TBC
   `7F19286F84D563D58983C50326CE16433ED9DA90459ADA658532EB38A5AF686A`,
@@ -882,11 +888,10 @@ Not complete yet:
 - CVBS double-precision FFT round-trip tails still differ at approximately
   1e-11 when upstream uses SciPy 1.18's DUCC backend; this disappears in the
   current float32 channel baselines but remains an explicit parity item
-- CVBS `--clamp_agc` reproduces the upstream median, ramp, and gain arithmetic,
-  but the Python decoder starts its speculative next-field decode before
-  downscaling the current field; the current sequential port therefore applies
-  the newly measured sync/blank levels one field earlier and is not yet
-  end-to-end bit-compatible for this option
+- default non-clamped CVBS output still cannot deterministically reproduce the
+  Python decoder's shared `ire0`/`hz_ire` scheduling race: with `--threads 0`
+  each current field is rendered using the synchronously decoded next field's
+  levels, while worker-thread runs can use either set depending on timing
 - remaining container-specific resampling edge cases
 - remaining real-capture PAL LD and AC3 end-to-end fixtures, external AC3
   tool-pipeline parity, and remaining verbose VITS field calibration details
@@ -914,7 +919,7 @@ dotnet test VHSDecodeDotNet.slnx --no-build
 ```
 
 The current formal solution build completes with zero warnings and errors, and
-the xUnit project exposes 201 independently discoverable compatibility tests to
+the xUnit project exposes 202 independently discoverable compatibility tests to
 `dotnet test` and Visual Studio Test Explorer. On the
 same Windows machine and fixtures, Release wall-clock measurements for one
 frame were 2.346 s versus 7.193 s for NTSC VHS and 1.651 s versus 5.865 s for
