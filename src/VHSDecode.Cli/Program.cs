@@ -3,9 +3,33 @@ using VHSDecode.Core.Decode;
 
 string? executablePath = Environment.ProcessPath;
 string[] invocation = DecodeDispatcher.NormalizeInvocation(args, executablePath);
-return Run(invocation, DecodeDispatcher.InvocationProgramName(executablePath), Console.Out, Console.Error);
+using var cancellationSource = new CancellationTokenSource();
+ConsoleCancelEventHandler cancelHandler = (_, eventArgs) =>
+{
+    eventArgs.Cancel = true;
+    cancellationSource.Cancel();
+};
+Console.CancelKeyPress += cancelHandler;
+try
+{
+    return Run(
+        invocation,
+        DecodeDispatcher.InvocationProgramName(executablePath),
+        Console.Out,
+        Console.Error,
+        cancellationSource.Token);
+}
+finally
+{
+    Console.CancelKeyPress -= cancelHandler;
+}
 
-static int Run(string[] args, string programName, TextWriter output, TextWriter error)
+static int Run(
+    string[] args,
+    string programName,
+    TextWriter output,
+    TextWriter error,
+    CancellationToken cancellationToken)
 {
     if (args.Length == 0)
     {
@@ -35,7 +59,7 @@ static int Run(string[] args, string programName, TextWriter output, TextWriter 
 
     try
     {
-        return new DecodeRunner().Run(command, output, error);
+        return new DecodeRunner().Run(command, output, error, cancellationToken);
     }
     catch (Exception ex) when (ex is ArgumentException or FormatException or OverflowException)
     {

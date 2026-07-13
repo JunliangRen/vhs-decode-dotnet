@@ -5,17 +5,23 @@ public sealed class VhsDiskSpaceGuard
     internal const long MinimumFreeBytes = 10L * 1024L * 1024L * 1024L;
     private static readonly TimeSpan PollInterval = TimeSpan.FromSeconds(1.0);
     private readonly Func<string, long> _availableFreeBytes;
-    private readonly Action<TimeSpan> _wait;
+    private readonly Action<TimeSpan, CancellationToken> _wait;
 
     public VhsDiskSpaceGuard(
         Func<string, long>? availableFreeBytes = null,
         Action<TimeSpan>? wait = null)
     {
         _availableFreeBytes = availableFreeBytes ?? AvailableFreeBytes;
-        _wait = wait ?? Thread.Sleep;
+        _wait = wait is null
+            ? Wait
+            : (duration, _) => wait(duration);
     }
 
-    public void Check(string outputBase, int fieldsWritten, DecodeRuntimeReporter? reporter)
+    public void Check(
+        string outputBase,
+        int fieldsWritten,
+        DecodeRuntimeReporter? reporter,
+        CancellationToken cancellationToken = default)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(outputBase);
         ArgumentOutOfRangeException.ThrowIfNegative(fieldsWritten);
@@ -26,6 +32,7 @@ public sealed class VhsDiskSpaceGuard
 
         try
         {
+            cancellationToken.ThrowIfCancellationRequested();
             string outputDirectory = Path.GetDirectoryName(Path.GetFullPath(outputBase))!;
             if (_availableFreeBytes(outputDirectory) >= MinimumFreeBytes)
             {
@@ -38,7 +45,8 @@ public sealed class VhsDiskSpaceGuard
                 + "Decoding will resume once there is more space, or press Ctrl+C to exit.");
             do
             {
-                _wait(PollInterval);
+                _wait(PollInterval, cancellationToken);
+                cancellationToken.ThrowIfCancellationRequested();
             }
             while (_availableFreeBytes(outputDirectory) < MinimumFreeBytes);
 
@@ -54,6 +62,14 @@ public sealed class VhsDiskSpaceGuard
 
     internal static bool ShouldCheck(int fieldsWritten)
         => TbcOutputMetadataWriter.ShouldWriteRecoverySnapshot(fieldsWritten);
+
+    private static void Wait(TimeSpan duration, CancellationToken cancellationToken)
+    {
+        if (cancellationToken.WaitHandle.WaitOne(duration))
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+        }
+    }
 
     private static long AvailableFreeBytes(string outputDirectory)
     {

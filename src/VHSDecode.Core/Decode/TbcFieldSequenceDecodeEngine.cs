@@ -28,6 +28,7 @@ public sealed class TbcFieldSequenceDecodeEngine
     private readonly ILaserDiscEfmOutputWriter _efmOutputWriter;
     private readonly TbcFieldSequenceReadField _readField;
     private readonly VhsDiskSpaceGuard _vhsDiskSpaceGuard;
+    private readonly CancellationToken _cancellationToken;
     private readonly bool _usesSessionReader;
 
     private sealed class CvbsPrefetchSlot : IDisposable
@@ -81,7 +82,8 @@ public sealed class TbcFieldSequenceDecodeEngine
         ILdTestLdfWriter? testLdfWriter = null,
         ILaserDiscEfmOutputWriter? efmOutputWriter = null,
         TbcFieldSequenceReadField? readField = null,
-        VhsDiskSpaceGuard? vhsDiskSpaceGuard = null)
+        VhsDiskSpaceGuard? vhsDiskSpaceGuard = null,
+        CancellationToken cancellationToken = default)
     {
         if (extraReadLines < 0)
         {
@@ -92,6 +94,7 @@ public sealed class TbcFieldSequenceDecodeEngine
         _testLdfWriter = testLdfWriter ?? new FfmpegLdTestLdfWriter();
         _efmOutputWriter = efmOutputWriter ?? new LaserDiscEfmOutputWriter();
         _vhsDiskSpaceGuard = vhsDiskSpaceGuard ?? new VhsDiskSpaceGuard();
+        _cancellationToken = cancellationToken;
         _usesSessionReader = readField is null;
         _readField = readField ?? ReadFieldFromSession;
     }
@@ -145,6 +148,7 @@ public sealed class TbcFieldSequenceDecodeEngine
         int? maxFields)
     {
         StreamingOutputSession? output = null;
+        bool outputCompleted = false;
         try
         {
             SequenceDecodeSummary summary = DecodeSequence(
@@ -164,6 +168,7 @@ public sealed class TbcFieldSequenceDecodeEngine
                 });
             output ??= new StreamingOutputSession(session, _efmOutputWriter);
             TbcFieldSequenceDecodeResult result = output.Complete();
+            outputCompleted = true;
             LdTestLdfWriteResult? testLdf = WriteOptionalTestLdf(session, input, summary);
             return testLdf.HasValue
                 ? result with
@@ -172,6 +177,16 @@ public sealed class TbcFieldSequenceDecodeEngine
                     TestLdf = testLdf
                 }
                 : result;
+        }
+        catch (OperationCanceledException)
+        {
+            if (!outputCompleted)
+            {
+                output ??= new StreamingOutputSession(session, _efmOutputWriter);
+                _ = output.Complete();
+            }
+
+            throw;
         }
         finally
         {
@@ -202,6 +217,7 @@ public sealed class TbcFieldSequenceDecodeEngine
             throw new ArgumentOutOfRangeException(nameof(maxFields));
         }
 
+        _cancellationToken.ThrowIfCancellationRequested();
         if (requestedFields == 0)
         {
             return new SequenceDecodeSummary([], 0, null, null);
@@ -240,7 +256,11 @@ public sealed class TbcFieldSequenceDecodeEngine
             writeMetadataSnapshot?.Invoke();
             if (session.Spec.Name == "vhs")
             {
-                _vhsDiskSpaceGuard.Check(session.OutputBase, fieldsWritten, session.RuntimeReporter);
+                _vhsDiskSpaceGuard.Check(
+                    session.OutputBase,
+                    fieldsWritten,
+                    session.RuntimeReporter,
+                    _cancellationToken);
             }
         }
 
@@ -313,6 +333,7 @@ public sealed class TbcFieldSequenceDecodeEngine
             ? decodedFieldCount < requestedFields
             : writePlanner.WrittenFieldCount < requestedFields)
         {
+            _cancellationToken.ThrowIfCancellationRequested();
             TbcDecodedField? field;
             TbcFieldDecodeState? fieldState = autoMtf is null
                 ? null
@@ -337,6 +358,8 @@ public sealed class TbcFieldSequenceDecodeEngine
                         field = _readField(session, input, begin, readLength, decodedFieldCount);
                     }
                 }
+
+                _cancellationToken.ThrowIfCancellationRequested();
             }
             catch (TbcFieldDecodeRecoveryException ex)
             {
@@ -516,7 +539,9 @@ public sealed class TbcFieldSequenceDecodeEngine
         {
             try
             {
+                _cancellationToken.ThrowIfCancellationRequested();
                 _ = _readField(session, input, begin, readLength, decodedFieldCount);
+                _cancellationToken.ThrowIfCancellationRequested();
             }
             catch (TbcFieldDecodeRecoveryException ex)
             {
@@ -684,8 +709,14 @@ public sealed class TbcFieldSequenceDecodeEngine
         int fieldNumber)
     {
         return Task.Factory.StartNew(
-            () => _readField(session, input, begin, readLength, fieldNumber),
-            CancellationToken.None,
+            () =>
+            {
+                _cancellationToken.ThrowIfCancellationRequested();
+                TbcDecodedField? field = _readField(session, input, begin, readLength, fieldNumber);
+                _cancellationToken.ThrowIfCancellationRequested();
+                return field;
+            },
+            _cancellationToken,
             TaskCreationOptions.LongRunning | TaskCreationOptions.DenyChildAttach,
             TaskScheduler.Default);
     }

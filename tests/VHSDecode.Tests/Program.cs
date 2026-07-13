@@ -7736,6 +7736,131 @@ public void VhsDiskGuardMatchesUpstreamCadenceAndPauseProtocol()
     new VhsDiskSpaceGuard(_ => throw new IOException("unavailable"))
         .Check(outputBase, fieldsWritten: 1, ignoredReporter);
     AssertEqual(string.Empty, ignoredError.ToString());
+
+    using var cancellationSource = new CancellationTokenSource();
+    var cancellationError = new StringWriter();
+    var cancellationReporter = new DecodeRuntimeReporter(
+        TextWriter.Null,
+        cancellationError,
+        () => 0.0);
+    var cancellationGuard = new VhsDiskSpaceGuard(
+        _ => VhsDiskSpaceGuard.MinimumFreeBytes - 1,
+        _ => cancellationSource.Cancel());
+    AssertThrows<OperationCanceledException>(() => cancellationGuard.Check(
+        outputBase,
+        fieldsWritten: 1,
+        cancellationReporter,
+        cancellationSource.Token));
+    AssertEqual(
+        Environment.NewLine
+        + "Less than 10GB of free disk space is remaining, decoding paused. "
+        + "Decoding will resume once there is more space, or press Ctrl+C to exit."
+        + Environment.NewLine,
+        cancellationError.ToString());
+}
+
+[Fact(DisplayName = "decode cancellation finalizes partial output and matches upstream streams")]
+public void DecodeCancellationFinalizesPartialOutputAndMatchesUpstreamStreams()
+{
+    string tempDirectory = Path.Combine(Path.GetTempPath(), "vhsdecode-dotnet-tests-" + Guid.NewGuid().ToString("N"));
+    Directory.CreateDirectory(tempDirectory);
+    try
+    {
+        string partialBase = Path.Combine(tempDirectory, "partial");
+        using DecodeSession session = DecodeSessionFactory.Create(Parse(CliSpecs.Vhs, [
+            "--pal",
+            "input.u8",
+            partialBase
+        ]));
+        using var fieldCancellation = new CancellationTokenSource();
+        int reads = 0;
+        TbcDecodedField? ReadField(DecodeSession activeSession, Stream _, long begin, int __, int ___)
+        {
+            reads++;
+            if (reads == 2)
+            {
+                fieldCancellation.Cancel();
+                fieldCancellation.Token.ThrowIfCancellationRequested();
+            }
+
+            return BuildSyntheticTbcField(
+                    begin,
+                    new ushort[activeSession.TbcFrameSpec.FieldSampleCount],
+                    detectedFirstField: true)
+                with
+                {
+                    NextFieldOffsetSamples = 100.0,
+                    ChromaSamples = new ushort[activeSession.TbcFrameSpec.FieldSampleCount]
+                };
+        }
+
+        var engine = new TbcFieldSequenceDecodeEngine(
+            readField: ReadField,
+            cancellationToken: fieldCancellation.Token);
+        AssertThrows<OperationCanceledException>(() => engine.TryDecodeAndWrite(session, Stream.Null));
+        AssertEqual(2, reads);
+        AssertEqual(
+            session.TbcFrameSpec.FieldSampleCount * sizeof(ushort),
+            new FileInfo(partialBase + ".tbc").Length);
+        AssertEqual(
+            session.TbcFrameSpec.FieldSampleCount * sizeof(ushort),
+            new FileInfo(partialBase + "_chroma.tbc").Length);
+        using (JsonDocument partialJson = JsonDocument.Parse(File.ReadAllText(partialBase + ".tbc.json")))
+        {
+            AssertEqual(1, partialJson.RootElement.GetProperty("fields").GetArrayLength());
+        }
+
+        AssertFalse(File.Exists(partialBase + ".tbc.json.tmp"));
+        AssertFalse(File.Exists(partialBase + ".tbc.json.fields.tmp"));
+
+        string inputPath = Path.Combine(tempDirectory, "empty.u8");
+        File.WriteAllBytes(inputPath, []);
+        string runnerBase = Path.Combine(tempDirectory, "runner");
+        ParsedCommand command = Parse(CliSpecs.Vhs, [
+            "--pal",
+            "--no_resample",
+            "--length", "1",
+            inputPath,
+            runnerBase
+        ]);
+        using var runnerCancellation = new CancellationTokenSource();
+        runnerCancellation.Cancel();
+        var output = new StringWriter();
+        var error = new StringWriter();
+
+        int exitCode = new DecodeRunner().Run(
+            command,
+            output,
+            error,
+            runnerCancellation.Token);
+
+        string termination = Environment.NewLine
+            + "Terminated, saving JSON and exiting"
+            + Environment.NewLine;
+        AssertEqual(1, exitCode);
+        AssertEqual(termination, output.ToString());
+        AssertEqual(string.Empty, error.ToString());
+        using (JsonDocument runnerJson = JsonDocument.Parse(File.ReadAllText(runnerBase + ".tbc.json")))
+        {
+            AssertEqual(0, runnerJson.RootElement.GetProperty("fields").GetArrayLength());
+        }
+
+        var ldOutput = new StringWriter();
+        var ldError = new StringWriter();
+        DecodeRunner.WriteTerminationMessage(CliSpecs.LaserDisc, ldOutput, ldError);
+        AssertEqual(string.Empty, ldOutput.ToString());
+        AssertEqual(termination, ldError.ToString());
+
+        var cvbsOutput = new StringWriter();
+        var cvbsError = new StringWriter();
+        DecodeRunner.WriteTerminationMessage(CliSpecs.Cvbs, cvbsOutput, cvbsError);
+        AssertEqual(termination, cvbsOutput.ToString());
+        AssertEqual(string.Empty, cvbsError.ToString());
+    }
+    finally
+    {
+        Directory.Delete(tempDirectory, recursive: true);
+    }
 }
 
 [Fact(DisplayName = "TBC field decode pipeline detects sync and renders a field")]

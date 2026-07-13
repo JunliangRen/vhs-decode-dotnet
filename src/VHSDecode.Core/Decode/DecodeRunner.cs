@@ -7,7 +7,11 @@ namespace VHSDecode.Core.Decode;
 
 public sealed class DecodeRunner
 {
-    public int Run(ParsedCommand command, TextWriter output, TextWriter error)
+    public int Run(
+        ParsedCommand command,
+        TextWriter output,
+        TextWriter error,
+        CancellationToken cancellationToken = default)
     {
         if (command.Get<bool>("help"))
         {
@@ -75,7 +79,8 @@ public sealed class DecodeRunner
             {
                 DecodeSessionLogWriter.Write(session);
                 WriteSessionCompatibilityWarnings(session, error);
-                TbcFieldSequenceDecodeResult result = new TbcFieldSequenceDecodeEngine().TryDecodeAndWrite(session);
+                TbcFieldSequenceDecodeResult result = new TbcFieldSequenceDecodeEngine(
+                    cancellationToken: cancellationToken).TryDecodeAndWrite(session);
                 if (result.Success && command.Spec == CliSpecs.Cvbs)
                 {
                     WriteCvbsAgcStatistics(session.TbcRenderer.CvbsAgcStatistics, error);
@@ -96,11 +101,21 @@ public sealed class DecodeRunner
 
                 return result.Success ? 0 : 1;
             }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            {
+                WriteTerminationMessage(command.Spec, output, error);
+                return 1;
+            }
             finally
             {
                 session.Dispose();
                 runtimeReporter.WriteStatistics();
             }
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            WriteTerminationMessage(command.Spec, output, error);
+            return 1;
         }
         catch (Exception ex) when (ex is ArgumentException
             or FormatException
@@ -179,6 +194,20 @@ public sealed class DecodeRunner
         error.WriteLine(writtenFieldCount > 0
             ? "Completed: saving JSON and exiting."
             : "Completed without handling any frames.");
+    }
+
+    public static void WriteTerminationMessage(
+        DecodeCommandSpec spec,
+        TextWriter output,
+        TextWriter error)
+    {
+        ArgumentNullException.ThrowIfNull(spec);
+        ArgumentNullException.ThrowIfNull(output);
+        ArgumentNullException.ThrowIfNull(error);
+        TextWriter target = spec.Name == "ld" ? error : output;
+        target.WriteLine();
+        target.WriteLine("Terminated, saving JSON and exiting");
+        target.Flush();
     }
 
     public static void WriteTestLdfReport(LdTestLdfWriteResult result, TextWriter error)

@@ -776,6 +776,10 @@ Implemented:
   at each 500-field boundary; VHS then checks free output-disk space and, below
   10 GiB, emits the exact pause/resume messages and polls once per second until
   space returns, while disk-query errors are ignored and LD/CVBS never query it
+- Ctrl+C now cancels LD, VHS, and CVBS field decoding plus VHS low-disk waits,
+  finalizes any partial TBC/JSON output without temporary metadata files, emits
+  v0.4.0's exact termination line on stderr for LD or stdout for VHS/CVBS, then
+  reports cleanup timing and exits with status 1
 - `-t/--threads` now drives parallel RF block demodulation and filtering while
   keeping stream/FFmpeg/GNU Radio reads ordered; `-t 1` and debug-plot `0`
   retain the deterministic single-thread path, and parallel blocks are stitched
@@ -959,7 +963,7 @@ dotnet test VHSDecodeDotNet.slnx --no-build
 ```
 
 The current formal solution build completes with zero warnings and errors, and
-the xUnit project exposes 214 independently discoverable compatibility tests to
+the xUnit project exposes 215 independently discoverable compatibility tests to
 `dotnet test` and Visual Studio Test Explorer. On the
 same Windows machine and fixtures, Release wall-clock measurements for one
 frame were 2.346 s versus 7.193 s for NTSC VHS and 1.651 s versus 5.865 s for
