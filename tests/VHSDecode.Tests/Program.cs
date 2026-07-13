@@ -7648,6 +7648,35 @@ public void CvbsAgcStatisticsMatchUpstreamReporting()
         testLdfReport.ToString());
 }
 
+[Fact(DisplayName = "decode runtime reporter matches upstream stream protocol")]
+public void DecodeRuntimeReporterMatchesUpstreamStreamProtocol()
+{
+    var output = new StringWriter();
+    var error = new StringWriter();
+    double elapsedSeconds = 0.0;
+    var reporter = new DecodeRuntimeReporter(output, error, () => elapsedSeconds);
+
+    reporter.Status("Frame status");
+    reporter.Log("DEBUG", "log-only detail");
+    reporter.Log("WARNING", "visible warning");
+    AssertEqual(
+        "Frame status" + new string(' ', 80 - "Frame status".Length) + '\r' + Environment.NewLine,
+        output.ToString());
+    AssertEqual("visible warning" + Environment.NewLine, error.ToString());
+
+    elapsedSeconds = 1.0;
+    reporter.FieldsWritten(1);
+    elapsedSeconds = 2.0;
+    reporter.FieldsWritten(1);
+    elapsedSeconds = 5.0;
+    reporter.WriteStatistics();
+    reporter.WriteStatistics();
+    AssertEqual(
+        "visible warning" + Environment.NewLine
+        + "Took 5.00 seconds to decode 1 frames (0.25 FPS post-setup)" + Environment.NewLine,
+        error.ToString());
+}
+
 [Fact(DisplayName = "TBC field decode pipeline detects sync and renders a field")]
 public void TbcFieldDecodePipelineDetectsSyncAndRendersField()
 {
@@ -9758,6 +9787,11 @@ public void TbcFieldSequenceEnginePerformsVhsTerminalLookahead()
             "input.u8",
             outputBase
         ]));
+        var statusOutput = new StringWriter();
+        session.RuntimeReporter = new DecodeRuntimeReporter(
+            statusOutput,
+            new StringWriter(),
+            () => 0.0);
         DecodeSessionLogWriter.Write(session);
 
         int reads = 0;
@@ -9800,6 +9834,10 @@ public void TbcFieldSequenceEnginePerformsVhsTerminalLookahead()
         int statusIndex = log.IndexOf("File Frame 0: VHS ", StringComparison.Ordinal);
         AssertTrue(lookaheadIndex >= 0);
         AssertTrue(statusIndex > lookaheadIndex);
+        string status = "File Frame 0: VHS ";
+        AssertEqual(
+            status + new string(' ', 80 - status.Length) + '\r',
+            statusOutput.ToString());
     }
     finally
     {
@@ -9823,6 +9861,11 @@ public void TbcFieldSequenceEngineEmitsLdFrameStatus()
             "input.s16",
             outputBase
         ]));
+        var statusOutput = new StringWriter();
+        session.RuntimeReporter = new DecodeRuntimeReporter(
+            statusOutput,
+            new StringWriter(),
+            () => 0.0);
 
         TbcDecodedField? ReadField(DecodeSession activeSession, Stream _, long begin, int __, int fieldNumber)
         {
@@ -9858,6 +9901,12 @@ public void TbcFieldSequenceEngineEmitsLdFrameStatus()
         AssertTrue(log.Contains(
             "DEBUG - Frame 2/2: File Frame 1: CAV Frame #123",
             StringComparison.Ordinal));
+        string firstStatus = "Frame 1/2: File Frame 0: CAV Pulldown/Telecine Frame";
+        string secondStatus = "Frame 2/2: File Frame 1: CAV Frame #123";
+        AssertEqual(
+            firstStatus + new string(' ', 80 - firstStatus.Length) + '\r'
+            + secondStatus + new string(' ', 80 - secondStatus.Length) + '\r',
+            statusOutput.ToString());
     }
     finally
     {

@@ -52,7 +52,28 @@ public static class DecodeSessionLogWriter
     public static void Append(DecodeSession session, string level, string message)
     {
         ArgumentNullException.ThrowIfNull(session);
-        Append(session.OutputBase + ".log", level, message);
+        ArgumentException.ThrowIfNullOrWhiteSpace(level);
+        ArgumentNullException.ThrowIfNull(message);
+        var builder = new StringBuilder();
+        AppendRecord(builder, level, message);
+        lock (WriteLock)
+        {
+            File.AppendAllText(session.OutputBase + ".log", builder.ToString());
+            session.RuntimeReporter?.Log(level, message);
+        }
+    }
+
+    public static void Status(DecodeSession session, string message)
+    {
+        ArgumentNullException.ThrowIfNull(session);
+        ArgumentNullException.ThrowIfNull(message);
+        var builder = new StringBuilder();
+        AppendRecord(builder, "DEBUG", message);
+        lock (WriteLock)
+        {
+            File.AppendAllText(session.OutputBase + ".log", builder.ToString());
+            session.RuntimeReporter?.Status(message);
+        }
     }
 
     public static void Append(string path, string level, string message)

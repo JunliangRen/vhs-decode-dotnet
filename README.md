@@ -765,6 +765,12 @@ Implemented:
   VHS/LD report `Completed without handling any frames.`, and the process exits
   successfully; non-empty VHS/LD completion uses the exact upstream
   `Completed: saving JSON and exiting.` stderr text
+- runtime reporting now mirrors v0.4.0 across LD, VHS, and CVBS: frame status
+  text is logged at DEBUG while stdout receives the same 80-column padded
+  carriage-return line, INFO-and-higher diagnostics go to stderr and first
+  clear an active status line, and cleanup reports total decode time plus
+  post-setup FPS; a one-frame PAL CVBS transcript is byte-exact on stdout, has
+  the exact phase warning on stderr, and matches the upstream timing-line shape
 - `-t/--threads` now drives parallel RF block demodulation and filtering while
   keeping stream/FFmpeg/GNU Radio reads ordered; `-t 1` and debug-plot `0`
   retain the deterministic single-thread path, and parallel blocks are stitched
@@ -948,7 +954,7 @@ dotnet test VHSDecodeDotNet.slnx --no-build
 ```
 
 The current formal solution build completes with zero warnings and errors, and
-the xUnit project exposes 212 independently discoverable compatibility tests to
+the xUnit project exposes 213 independently discoverable compatibility tests to
 `dotnet test` and Visual Studio Test Explorer. On the
 same Windows machine and fixtures, Release wall-clock measurements for one
 frame were 2.346 s versus 7.193 s for NTSC VHS and 1.651 s versus 5.865 s for

@@ -39,6 +39,8 @@ public sealed record DecodeSession(
     LaserDiscAudioOptions? LaserDiscAudioOptions,
     string? TestLdfOutputPath) : IDisposable
 {
+    internal DecodeRuntimeReporter? RuntimeReporter { get; set; }
+
     public void Dispose()
     {
         Pipeline.Dispose();

@@ -230,7 +230,11 @@ public sealed class TbcFieldSequenceDecodeEngine
                     }
                 }
 
-                writeFields?.Invoke(writes);
+                if (writeFields is not null)
+                {
+                    writeFields(writes);
+                    session.RuntimeReporter?.FieldsWritten(writes.Count);
+                }
             }
 
             bool isFirstField = completedField.DetectedFirstField ?? ((decodedIndex & 1) == 0);
@@ -253,9 +257,8 @@ public sealed class TbcFieldSequenceDecodeEngine
                         framesPerSecond);
                     laserDiscLeadIn |= interpretation.LeadIn;
                     laserDiscLeadOut |= interpretation.LeadOut;
-                    DecodeSessionLogWriter.Append(
+                    DecodeSessionLogWriter.Status(
                         session,
-                        "DEBUG",
                         FormatLaserDiscFrameStatus(
                             decodedIndex,
                             session.RunBounds.RequestedFieldCount / 2,
@@ -269,9 +272,8 @@ public sealed class TbcFieldSequenceDecodeEngine
             {
                 int rawFrame = checked((int)Math.Floor(
                     ComputeFieldDiskLocation(session, completedField) / 2.0));
-                DecodeSessionLogWriter.Append(
+                DecodeSessionLogWriter.Status(
                     session,
-                    "DEBUG",
                     $"File Frame {rawFrame}: CAV Pulldown/Telecine Frame");
             }
         }
@@ -328,7 +330,7 @@ public sealed class TbcFieldSequenceDecodeEngine
 
             if (pendingTapeFrameStatus is not null)
             {
-                DecodeSessionLogWriter.Append(session, "DEBUG", pendingTapeFrameStatus);
+                DecodeSessionLogWriter.Status(session, pendingTapeFrameStatus);
                 pendingTapeFrameStatus = null;
             }
 
@@ -462,7 +464,7 @@ public sealed class TbcFieldSequenceDecodeEngine
 
         if (pendingTapeFrameStatus is not null)
         {
-            DecodeSessionLogWriter.Append(session, "DEBUG", pendingTapeFrameStatus);
+            DecodeSessionLogWriter.Status(session, pendingTapeFrameStatus);
         }
 
         return new SequenceDecodeSummary(

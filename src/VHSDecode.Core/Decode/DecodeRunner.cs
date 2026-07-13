@@ -68,7 +68,9 @@ public sealed class DecodeRunner
                 }
             }
 
+            var runtimeReporter = new DecodeRuntimeReporter(output, error);
             DecodeSession session = DecodeSessionFactory.Create(command);
+            session.RuntimeReporter = runtimeReporter;
             try
             {
                 DecodeSessionLogWriter.Write(session);
@@ -97,6 +99,7 @@ public sealed class DecodeRunner
             finally
             {
                 session.Dispose();
+                runtimeReporter.WriteStatistics();
             }
         }
         catch (Exception ex) when (ex is ArgumentException
