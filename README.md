@@ -771,11 +771,11 @@ Implemented:
   clear an active status line, and cleanup reports total decode time plus
   post-setup FPS; a one-frame PAL CVBS transcript is byte-exact on stdout, has
   the exact phase warning on stderr, and matches the upstream timing-line shape
-- VHS streaming output now takes the same periodic recovery JSON snapshots
-  before checking free output-disk space: every read while fewer than 100 fields
-  have been written and again at each 500-field boundary; below 10 GiB it emits
-  the exact pause/resume messages and polls once per second until space returns,
-  while disk-query errors are ignored and LD/CVBS remain unaffected
+- LD, VHS, and CVBS streaming output now take the same periodic recovery JSON
+  snapshots: every read while fewer than 100 fields have been written and again
+  at each 500-field boundary; VHS then checks free output-disk space and, below
+  10 GiB, emits the exact pause/resume messages and polls once per second until
+  space returns, while disk-query errors are ignored and LD/CVBS never query it
 - `-t/--threads` now drives parallel RF block demodulation and filtering while
   keeping stream/FFmpeg/GNU Radio reads ordered; `-t 1` and debug-plot `0`
   retain the deterministic single-thread path, and parallel blocks are stitched

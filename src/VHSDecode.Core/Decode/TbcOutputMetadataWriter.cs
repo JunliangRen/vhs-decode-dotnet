@@ -12,6 +12,12 @@ public static class TbcOutputMetadataWriter
 {
     private sealed record LaserDiscNtscLine19ColorInfo(double Level, double PhaseDegrees, double RawSnr);
 
+    internal static bool ShouldWriteRecoverySnapshot(int fieldsWritten)
+    {
+        ArgumentOutOfRangeException.ThrowIfNegative(fieldsWritten);
+        return fieldsWritten < 100 || fieldsWritten % 500 == 0;
+    }
+
     internal sealed class StreamingWriter : IDisposable
     {
         private readonly DecodeSession _session;

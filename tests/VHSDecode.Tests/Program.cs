@@ -9945,6 +9945,15 @@ public void TbcFieldSequenceEngineEmitsLdFrameStatus()
 
         TbcDecodedField? ReadField(DecodeSession activeSession, Stream _, long begin, int __, int fieldNumber)
         {
+            if (fieldNumber > 0)
+            {
+                using JsonDocument snapshot = JsonDocument.Parse(
+                    File.ReadAllText(outputBase + ".tbc.json"));
+                AssertEqual(
+                    fieldNumber,
+                    snapshot.RootElement.GetProperty("fields").GetArrayLength());
+            }
+
             if (fieldNumber >= 4)
             {
                 return null;
@@ -9966,8 +9975,11 @@ public void TbcFieldSequenceEngineEmitsLdFrameStatus()
                 };
         }
 
+        var diskGuard = new VhsDiskSpaceGuard(
+            _ => throw new Exception("LD recovery snapshots must not query free disk space."));
         TbcFieldSequenceDecodeResult result = new TbcFieldSequenceDecodeEngine(
-            readField: ReadField).TryDecodeAndWrite(session, Stream.Null);
+            readField: ReadField,
+            vhsDiskSpaceGuard: diskGuard).TryDecodeAndWrite(session, Stream.Null);
 
         AssertTrue(result.Success);
         string log = File.ReadAllText(outputBase + ".log");
@@ -10503,13 +10515,18 @@ public void CvbsSerialLengthLookaheadIsDecodedButNotWritten()
     Directory.CreateDirectory(tempDirectory);
     try
     {
+        string outputBase = Path.Combine(tempDirectory, "cvbs-prefetch");
         using DecodeSession session = DecodeSessionFactory.Create(Parse(CliSpecs.Cvbs, [
             "--pal",
             "--threads", "0",
             "--length", "1",
             "input.s16",
-            Path.Combine(tempDirectory, "cvbs-prefetch")
+            outputBase
         ]));
+        session.RuntimeReporter = new DecodeRuntimeReporter(
+            TextWriter.Null,
+            TextWriter.Null,
+            () => 0.0);
         VideoOutputConverter[] converters =
         [
             BuildCvbsTestConverter(session, ire0: 10.0),
@@ -10535,13 +10552,23 @@ public void CvbsSerialLengthLookaheadIsDecodedButNotWritten()
         TbcDecodedField? ReadField(DecodeSession _, Stream __, long begin, int ___, int fieldNumber)
         {
             reads++;
+            if (fieldNumber == 2)
+            {
+                using JsonDocument snapshot = JsonDocument.Parse(
+                    File.ReadAllText(outputBase + ".tbc.json"));
+                AssertEqual(1, snapshot.RootElement.GetProperty("fields").GetArrayLength());
+            }
+
             return fieldNumber < sourceFields.Length
                 ? sourceFields[fieldNumber] with { StartSample = begin }
                 : null;
         }
 
+        var diskGuard = new VhsDiskSpaceGuard(
+            _ => throw new Exception("CVBS recovery snapshots must not query free disk space."));
         TbcFieldSequenceDecodeResult result = new TbcFieldSequenceDecodeEngine(
-            readField: ReadField).TryDecodeAndWrite(session, Stream.Null);
+            readField: ReadField,
+            vhsDiskSpaceGuard: diskGuard).TryDecodeAndWrite(session, Stream.Null);
 
         AssertTrue(result.Success);
         AssertEqual(3, reads);

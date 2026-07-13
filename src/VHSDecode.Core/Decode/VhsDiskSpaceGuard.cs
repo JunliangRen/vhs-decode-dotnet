@@ -53,7 +53,7 @@ public sealed class VhsDiskSpaceGuard
     }
 
     internal static bool ShouldCheck(int fieldsWritten)
-        => fieldsWritten < 100 || fieldsWritten % 500 == 0;
+        => TbcOutputMetadataWriter.ShouldWriteRecoverySnapshot(fieldsWritten);
 
     private static long AvailableFreeBytes(string outputDirectory)
     {

@@ -221,19 +221,25 @@ public sealed class TbcFieldSequenceDecodeEngine
         bool laserDiscLeadOut = false;
         bool haveFirstTapeField = false;
         string? pendingTapeFrameStatus = null;
-        int? pendingTapeDiskCheckFieldCount = null;
+        int? pendingTapeCheckpointFieldCount = null;
         (TbcDecodedField Field, int DecodedIndex)? pendingCvbsField = null;
+        bool pendingCvbsEndOfInputCheckpoint = false;
         bool useCvbsWorkerPrefetch = ShouldUseCvbsWorkerPrefetch(session);
         using var cvbsPrefetch = new CvbsPrefetchSlot();
         LaserDiscAutoMtfController? autoMtf = session.Spec.Name == "ld"
             ? new LaserDiscAutoMtfController()
             : null;
 
-        void CheckTapeDiskSpace(int fieldsWritten)
+        void CheckpointOutput(int fieldsWritten)
         {
-            if (session.Spec.Name == "vhs" && VhsDiskSpaceGuard.ShouldCheck(fieldsWritten))
+            if (!TbcOutputMetadataWriter.ShouldWriteRecoverySnapshot(fieldsWritten))
             {
-                writeMetadataSnapshot?.Invoke();
+                return;
+            }
+
+            writeMetadataSnapshot?.Invoke();
+            if (session.Spec.Name == "vhs")
+            {
                 _vhsDiskSpaceGuard.Check(session.OutputBase, fieldsWritten, session.RuntimeReporter);
             }
         }
@@ -359,15 +365,23 @@ public sealed class TbcFieldSequenceDecodeEngine
                 pendingTapeFrameStatus = null;
             }
 
-            if (pendingTapeDiskCheckFieldCount.HasValue)
+            if (pendingTapeCheckpointFieldCount.HasValue)
             {
-                CheckTapeDiskSpace(pendingTapeDiskCheckFieldCount.Value);
-                pendingTapeDiskCheckFieldCount = null;
+                CheckpointOutput(pendingTapeCheckpointFieldCount.Value);
+                pendingTapeCheckpointFieldCount = null;
             }
 
             if (field is null)
             {
-                CheckTapeDiskSpace(writePlanner.WrittenFieldCount);
+                if (session.Spec.Name == "cvbs")
+                {
+                    pendingCvbsEndOfInputCheckpoint = true;
+                }
+                else
+                {
+                    CheckpointOutput(writePlanner.WrittenFieldCount);
+                }
+
                 break;
             }
 
@@ -399,8 +413,10 @@ public sealed class TbcFieldSequenceDecodeEngine
                     field.OutputConverter),
                     pendingCvbsField.Value.DecodedIndex);
                 pendingCvbsField = null;
+                CheckpointOutput(writePlanner.WrittenFieldCount);
             }
 
+            bool completedCurrentField = false;
             if (field.DeferredRenderSource is not null)
             {
                 if (useCvbsWorkerPrefetch)
@@ -412,6 +428,7 @@ public sealed class TbcFieldSequenceDecodeEngine
                             cvbsPrefetch.Current,
                             waitForInitialProducer: decodedFieldCount == 1),
                         decodedFieldCount - 1);
+                    completedCurrentField = true;
                 }
                 else
                 {
@@ -423,6 +440,7 @@ public sealed class TbcFieldSequenceDecodeEngine
             else
             {
                 CompleteField(field, decodedFieldCount - 1);
+                completedCurrentField = true;
             }
 
             autoMtf?.ObserveAcceptedField(field, session.System);
@@ -432,18 +450,22 @@ public sealed class TbcFieldSequenceDecodeEngine
                 if (isFirstField)
                 {
                     haveFirstTapeField = true;
-                    CheckTapeDiskSpace(writePlanner.WrittenFieldCount);
+                    CheckpointOutput(writePlanner.WrittenFieldCount);
                 }
                 else if (haveFirstTapeField)
                 {
                     int rawFrame = checked((int)Math.Floor(ComputeFieldDiskLocation(session, field) / 2.0));
                     pendingTapeFrameStatus = $"File Frame {rawFrame}: {session.Parameters.TapeFormat} ";
-                    pendingTapeDiskCheckFieldCount = writePlanner.WrittenFieldCount;
+                    pendingTapeCheckpointFieldCount = writePlanner.WrittenFieldCount;
                 }
                 else
                 {
-                    CheckTapeDiskSpace(writePlanner.WrittenFieldCount);
+                    CheckpointOutput(writePlanner.WrittenFieldCount);
                 }
+            }
+            else if (completedCurrentField)
+            {
+                CheckpointOutput(writePlanner.WrittenFieldCount);
             }
 
             if (ShouldStopAfterLaserDiscLeadOut(
@@ -469,6 +491,7 @@ public sealed class TbcFieldSequenceDecodeEngine
                     pendingCvbsField.Value.Field,
                     pendingCvbsField.Value.Field.OutputConverter),
                     pendingCvbsField.Value.DecodedIndex);
+                CheckpointOutput(writePlanner.WrittenFieldCount);
             }
             else if (fields is not null)
             {
@@ -479,6 +502,11 @@ public sealed class TbcFieldSequenceDecodeEngine
                     pendingCvbsField.Value.Field,
                     pendingCvbsField.Value.Field.OutputConverter));
             }
+        }
+
+        if (pendingCvbsEndOfInputCheckpoint)
+        {
+            CheckpointOutput(writePlanner.WrittenFieldCount);
         }
 
         bool reachedRequestedTapeOutput = !maxFields.HasValue
@@ -505,9 +533,9 @@ public sealed class TbcFieldSequenceDecodeEngine
             DecodeSessionLogWriter.Status(session, pendingTapeFrameStatus);
         }
 
-        if (pendingTapeDiskCheckFieldCount.HasValue)
+        if (pendingTapeCheckpointFieldCount.HasValue)
         {
-            CheckTapeDiskSpace(pendingTapeDiskCheckFieldCount.Value);
+            CheckpointOutput(pendingTapeCheckpointFieldCount.Value);
         }
 
         return new SequenceDecodeSummary(
