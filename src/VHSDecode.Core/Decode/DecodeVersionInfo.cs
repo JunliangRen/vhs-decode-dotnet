@@ -5,7 +5,7 @@ namespace VHSDecode.Core.Decode;
 
 public static class DecodeVersionInfo
 {
-    public const string Version = "vhs_decode:g43155200";
+    public const string Version = "vhs_decode:g4315520";
 
     public static string OsInfo()
     {

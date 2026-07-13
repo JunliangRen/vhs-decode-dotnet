@@ -40,7 +40,16 @@ public sealed record TbcDecodedField(
     int SyncConfidence = 100,
     VideoOutputConverter? OutputConverter = null,
     double? BlackToWhiteRfRatio = null,
-    bool LaserDiscAgcAdjusted = false);
+    bool LaserDiscAgcAdjusted = false)
+{
+    internal TbcDeferredRenderSource? DeferredRenderSource { get; init; }
+}
+
+internal sealed record TbcDeferredRenderSource(
+    double[] VideoHz,
+    double[] LineLocations,
+    int FirstLine,
+    int FieldNumber);
 
 public sealed record LaserDiscAnalogAudioOutputOptions(
     double LinePeriodUs,
@@ -110,7 +119,8 @@ internal sealed record Line0Resolution(
     int ExpectedFirstFieldConfidence,
     bool UsedPreviousEstimate = false,
     double FirstHSyncLocation = double.NaN,
-    double UnalignedFirstHSyncLocation = double.NaN);
+    double UnalignedFirstHSyncLocation = double.NaN,
+    int InitialSyncConfidence = 100);
 
 internal sealed record Line0FallbackCandidate(
     double ExpectedLocation,
@@ -121,6 +131,7 @@ internal sealed record Line0FallbackCandidate(
 internal sealed record TbcFieldDecodeState(
     (double SyncLevel, double BlankLevel)? LastDetectedSyncLevels,
     (double SyncLevel, double BlankLevel)? DelayedCvbsSyncLevels,
+    VideoOutputConverter CurrentCvbsOutputConverter,
     long? PreviousAnalogAudioStartSample,
     long PreviousAnalogAudioFieldNumber,
     int? ChromaRotationIndex,
@@ -133,6 +144,7 @@ internal sealed record TbcFieldDecodeState(
     VideoOutputConverter? LaserDiscSyncConverter,
     double? PreviousFirstHSyncLocation,
     long? PreviousFirstHSyncReadLocation,
+    int? PreviousSyncConfidence,
     bool? PreviousDetectedFirstField,
     double PreviousHSyncDifference,
     double LaserDiscNtscPhaseAdjustMedian,
@@ -171,6 +183,7 @@ public sealed class TbcFieldDecodePipeline
     private readonly int _inputBlockCutSamples;
     private (double SyncLevel, double BlankLevel)? _lastDetectedSyncLevels;
     private (double SyncLevel, double BlankLevel)? _delayedCvbsSyncLevels;
+    private VideoOutputConverter _currentCvbsOutputConverter;
     private long? _previousAnalogAudioStartSample;
     private long _previousAnalogAudioFieldNumber;
     private int? _chromaRotationIndex;
@@ -183,6 +196,7 @@ public sealed class TbcFieldDecodePipeline
     private VideoOutputConverter? _laserDiscSyncConverter;
     private double? _previousFirstHSyncLocation;
     private long? _previousFirstHSyncReadLocation;
+    private int? _previousSyncConfidence;
     private bool? _previousDetectedFirstField;
     private double _previousHSyncDifference = -1.0;
     private double _laserDiscNtscPhaseAdjustMedian;
@@ -232,6 +246,7 @@ public sealed class TbcFieldDecodePipeline
         _hSyncRefineOptions = hSyncRefineOptions ?? HSyncRefineOptions.Disabled;
         _syncDetectionOptions = syncDetectionOptions ?? SyncDetectionOptions.Disabled;
         _delayedCvbsSyncLevels = renderer.LastCvbsSyncLevels;
+        _currentCvbsOutputConverter = videoOutput;
         _decodeLaserDiscVbi = decodeLaserDiscVbi;
         _decodeVbiData = decodeLaserDiscVbi || decodeVbiData;
         _preserveRawMetricSources = preserveRawMetricSources;
@@ -259,6 +274,7 @@ public sealed class TbcFieldDecodePipeline
         return new TbcFieldDecodeState(
             _lastDetectedSyncLevels,
             _delayedCvbsSyncLevels,
+            Volatile.Read(ref _currentCvbsOutputConverter),
             _previousAnalogAudioStartSample,
             _previousAnalogAudioFieldNumber,
             _chromaRotationIndex,
@@ -271,6 +287,7 @@ public sealed class TbcFieldDecodePipeline
             _laserDiscSyncConverter,
             _previousFirstHSyncLocation,
             _previousFirstHSyncReadLocation,
+            _previousSyncConfidence,
             _previousDetectedFirstField,
             _previousHSyncDifference,
             _laserDiscNtscPhaseAdjustMedian,
@@ -284,6 +301,7 @@ public sealed class TbcFieldDecodePipeline
         VideoOutputConverter? adjustedAgcConverter = _laserDiscAgcConverter;
         _lastDetectedSyncLevels = state.LastDetectedSyncLevels;
         _delayedCvbsSyncLevels = state.DelayedCvbsSyncLevels;
+        Volatile.Write(ref _currentCvbsOutputConverter, state.CurrentCvbsOutputConverter);
         _previousAnalogAudioStartSample = state.PreviousAnalogAudioStartSample;
         _previousAnalogAudioFieldNumber = state.PreviousAnalogAudioFieldNumber;
         _chromaRotationIndex = state.ChromaRotationIndex;
@@ -296,6 +314,7 @@ public sealed class TbcFieldDecodePipeline
         _laserDiscSyncConverter = state.LaserDiscSyncConverter;
         _previousFirstHSyncLocation = state.PreviousFirstHSyncLocation;
         _previousFirstHSyncReadLocation = state.PreviousFirstHSyncReadLocation;
+        _previousSyncConfidence = state.PreviousSyncConfidence;
         _previousDetectedFirstField = state.PreviousDetectedFirstField;
         _previousHSyncDifference = state.PreviousHSyncDifference;
         _laserDiscNtscPhaseAdjustMedian = state.LaserDiscNtscPhaseAdjustMedian;
@@ -467,13 +486,41 @@ public sealed class TbcFieldDecodePipeline
     }
 
     public TbcDecodedField Decode(RfDecodedSpan span, double? syncThresholdHz = null, int fieldNumber = 0)
+        => DecodeCore(span, syncThresholdHz, fieldNumber, deferCvbsOutputConversion: false);
+
+    internal TbcDecodedField DecodeForSequence(RfDecodedSpan span, int fieldNumber)
+        => DecodeCore(span, syncThresholdHz: null, fieldNumber, deferCvbsOutputConversion: true);
+
+    internal bool CanDeferCvbsOutputConversion
+        => string.Equals(_decodeType, "cvbs", StringComparison.Ordinal)
+            && _syncDetectionOptions.CvbsAutoSync
+            && _renderer.CvbsClampAgc is null;
+
+    internal VideoOutputConverter CurrentCvbsOutputConverter
+    {
+        get => Volatile.Read(ref _currentCvbsOutputConverter);
+        set
+        {
+            ArgumentNullException.ThrowIfNull(value);
+            Volatile.Write(ref _currentCvbsOutputConverter, value);
+        }
+    }
+
+    private TbcDecodedField DecodeCore(
+        RfDecodedSpan span,
+        double? syncThresholdHz,
+        int fieldNumber,
+        bool deferCvbsOutputConversion)
     {
         (double SyncLevel, double BlankLevel)? previouslyRenderedCvbsLevels = _renderer.LastCvbsSyncLevels;
         SyncPreparedSpan prepared = PrepareSyncSpan(span, syncThresholdHz);
         TbcDecodedField decoded;
         try
         {
-            decoded = DecodePrepared(prepared, fieldNumber);
+            decoded = DecodePrepared(
+                prepared,
+                fieldNumber,
+                deferCvbsOutputConversion && CanDeferCvbsOutputConversion);
         }
         catch (InvalidOperationException ex) when (prepared.UsedSavedLevels && IsSyncLocationFailure(ex))
         {
@@ -483,7 +530,10 @@ public sealed class TbcFieldDecodePipeline
                 syncThresholdHz,
                 allowSavedLevels: false,
                 fallbackToSavedLevels: false);
-            decoded = DecodePrepared(retried, fieldNumber);
+            decoded = DecodePrepared(
+                retried,
+                fieldNumber,
+                deferCvbsOutputConversion && CanDeferCvbsOutputConversion);
         }
 
         if (_syncDetectionOptions.CvbsAutoSync && _renderer.CvbsClampAgc is not null)
@@ -496,7 +546,10 @@ public sealed class TbcFieldDecodePipeline
         return decoded;
     }
 
-    private TbcDecodedField DecodePrepared(SyncPreparedSpan prepared, int fieldNumber)
+    private TbcDecodedField DecodePrepared(
+        SyncPreparedSpan prepared,
+        int fieldNumber,
+        bool deferCvbsOutputConversion)
     {
         RfDecodedSpan span = prepared.Span;
         double threshold = prepared.Threshold;
@@ -717,6 +770,7 @@ public sealed class TbcFieldDecodePipeline
         int syncConfidence = SyncConfidenceCalculator.Compute(
             lineLocations.Locations,
             currentFieldLineCount,
+            initialConfidence: line0.InitialSyncConfidence,
             lineOffset: Math.Max(0, outputFirstLine - 1));
         (VideoOutputConverter? agcConverter, bool laserDiscAgcAdjusted) = ResolveLaserDiscAgcConverter(
             span,
@@ -741,12 +795,21 @@ public sealed class TbcFieldDecodePipeline
                 fieldConverter ?? _videoOutput);
         }
 
-        TbcRenderedField rendered = _renderer.RenderFieldPayload(
-            span.Video,
-            renderLineLocations,
-            firstLine: outputFirstLine,
-            fieldNumber: fieldNumber,
-            converterOverride: fieldConverter);
+        TbcDeferredRenderSource? deferredRenderSource = deferCvbsOutputConversion
+            ? new TbcDeferredRenderSource(
+                span.Video,
+                renderLineLocations,
+                outputFirstLine,
+                fieldNumber)
+            : null;
+        TbcRenderedField rendered = deferredRenderSource is null
+            ? _renderer.RenderFieldPayload(
+                span.Video,
+                renderLineLocations,
+                firstLine: outputFirstLine,
+                fieldNumber: fieldNumber,
+                converterOverride: fieldConverter)
+            : new TbcRenderedField([]);
         double? blackToWhiteRfRatio = ComputeLaserDiscBlackToWhiteRfRatio(
             span.Input,
             rendered.Samples,
@@ -794,6 +857,8 @@ public sealed class TbcFieldDecodePipeline
             CommitChromaState(chroma);
         }
 
+        _previousSyncConfidence = syncConfidence;
+
         return new TbcDecodedField(
             span.StartSample,
             rendered.Samples,
@@ -823,7 +888,10 @@ public sealed class TbcFieldDecodePipeline
             SyncConfidence: syncConfidence,
             OutputConverter: fieldConverter,
             BlackToWhiteRfRatio: blackToWhiteRfRatio,
-            LaserDiscAgcAdjusted: laserDiscAgcAdjusted);
+            LaserDiscAgcAdjusted: laserDiscAgcAdjusted)
+        {
+            DeferredRenderSource = deferredRenderSource
+        };
     }
 
     private double? ComputeLaserDiscBlackToWhiteRfRatio(
@@ -1303,6 +1371,10 @@ public sealed class TbcFieldDecodePipeline
                         _videoOutput.OutputZero,
                         _videoOutput.VSyncIre,
                         _videoOutput.OutputScale);
+                    if (CanDeferCvbsOutputConversion)
+                    {
+                        CurrentCvbsOutputConverter = converterOverride;
+                    }
                 }
             }
         }
@@ -3525,7 +3597,10 @@ public sealed class TbcFieldDecodePipeline
                 fallback?.ExpectedFirstField,
                 fallback?.ExpectedFirstFieldConfidence ?? 0,
                 FirstHSyncLocation: combined.FirstHSyncLocation,
-                UnalignedFirstHSyncLocation: combined.UnalignedFirstHSyncLocation);
+                UnalignedFirstHSyncLocation: combined.UnalignedFirstHSyncLocation,
+                InitialSyncConfidence: InitialLine0SyncConfidence(
+                    hasStrongLocalEstimate: true,
+                    hasNextEstimate: true));
         }
 
         if (fallback is not null)
@@ -3550,7 +3625,10 @@ public sealed class TbcFieldDecodePipeline
                 null,
                 0,
                 FirstHSyncLocation: singleVBlank.FirstHSyncLocation,
-                UnalignedFirstHSyncLocation: singleVBlank.UnalignedFirstHSyncLocation);
+                UnalignedFirstHSyncLocation: singleVBlank.UnalignedFirstHSyncLocation,
+                InitialSyncConfidence: InitialLine0SyncConfidence(
+                    hasStrongLocalEstimate: vBlankConsensus?.First is not null,
+                    hasNextEstimate: vBlankConsensus?.Last is not null));
         }
 
         Line0Resolution? previousEstimate = TryEstimateLine0FromPrevious(
@@ -3894,7 +3972,55 @@ public sealed class TbcFieldDecodePipeline
             ExpectedFirstFieldConfidence: 0,
             UsedPreviousEstimate: true,
             FirstHSyncLocation: firstHSync,
-            UnalignedFirstHSyncLocation: unalignedFirstHSync);
+            UnalignedFirstHSyncLocation: unalignedFirstHSync,
+            InitialSyncConfidence: InitialLine0SyncConfidence(
+                hasStrongLocalEstimate: false,
+                hasNextEstimate: false));
+    }
+
+    private int InitialLine0SyncConfidence(
+        bool hasStrongLocalEstimate,
+        bool hasNextEstimate)
+    {
+        if (_decodeType is not ("ld" or "cvbs"))
+        {
+            return 100;
+        }
+
+        bool hasPreviousEstimate = _previousFirstHSyncLocation is > 0.0
+            && _previousSyncConfidence.HasValue;
+        return ResolveLegacyLine0SyncConfidence(
+            hasStrongLocalEstimate,
+            hasNextEstimate,
+            hasPreviousEstimate,
+            _previousSyncConfidence ?? 100);
+    }
+
+    internal static int ResolveLegacyLine0SyncConfidence(
+        bool hasStrongLocalEstimate,
+        bool hasNextEstimate,
+        bool hasPreviousEstimate,
+        int previousConfidence,
+        int nextConfidence = 100)
+    {
+        if (hasStrongLocalEstimate && hasNextEstimate && hasPreviousEstimate)
+        {
+            return 100;
+        }
+
+        if (hasStrongLocalEstimate)
+        {
+            return 90;
+        }
+
+        if (hasPreviousEstimate)
+        {
+            return Math.Max(Math.Clamp(previousConfidence, 0, 100) - 10, 10);
+        }
+
+        return hasNextEstimate
+            ? Math.Clamp(nextConfidence, 0, 100)
+            : 100;
     }
 
     private Line0FallbackCandidate? TryResolveFallbackLine0(

@@ -30,7 +30,10 @@ public sealed record TrackPhaseIre0OffsetOptions(
     }
 }
 
-public sealed record TbcRenderedField(ushort[] Samples, TbcOutputPayload? OutputPayload = null);
+public sealed record TbcRenderedField(
+    ushort[] Samples,
+    TbcOutputPayload? OutputPayload = null,
+    VideoOutputConverter? OutputConverter = null);
 
 public sealed class TbcFieldRenderer
 {
@@ -119,6 +122,43 @@ public sealed class TbcFieldRenderer
         int? lineCount = null,
         int fieldNumber = 0,
         VideoOutputConverter? converterOverride = null)
+        => RenderFieldPayloadCore(
+            videoHz,
+            lineLocations,
+            firstLine,
+            lineCount,
+            fieldNumber,
+            converterOverride,
+            converterProvider: null);
+
+    internal TbcRenderedField RenderFieldPayloadWithConverterProvider(
+        ReadOnlySpan<double> videoHz,
+        IReadOnlyList<double> lineLocations,
+        int firstLine,
+        int? lineCount,
+        int fieldNumber,
+        VideoOutputConverter? converterFallback,
+        Func<VideoOutputConverter?> converterProvider)
+    {
+        ArgumentNullException.ThrowIfNull(converterProvider);
+        return RenderFieldPayloadCore(
+            videoHz,
+            lineLocations,
+            firstLine,
+            lineCount,
+            fieldNumber,
+            converterFallback,
+            converterProvider);
+    }
+
+    private TbcRenderedField RenderFieldPayloadCore(
+        ReadOnlySpan<double> videoHz,
+        IReadOnlyList<double> lineLocations,
+        int firstLine,
+        int? lineCount,
+        int fieldNumber,
+        VideoOutputConverter? converterOverride,
+        Func<VideoOutputConverter?>? converterProvider)
     {
         double[] resampled = ResampleField(videoHz, lineLocations, firstLine, lineCount);
         if (YCombLimitHz != 0.0)
@@ -137,7 +177,13 @@ public sealed class TbcFieldRenderer
             return new TbcRenderedField(ConvertCvbsClampAgc(resampled, CvbsClampAgc), rawPayload);
         }
 
-        return new TbcRenderedField(BuildFieldConverter(resampled, fieldNumber, converterOverride).ConvertHz(resampled), rawPayload);
+        VideoOutputConverter activeConverter = converterProvider?.Invoke()
+            ?? converterOverride
+            ?? _converter;
+        return new TbcRenderedField(
+            BuildFieldConverter(resampled, fieldNumber, activeConverter).ConvertHz(resampled),
+            rawPayload,
+            activeConverter);
     }
 
     public static void ApplyYCombInPlace(double[] data, int lineLength, double limit)
