@@ -1,0 +1,45 @@
+name: Release build
+
+on:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+env:
+  DOTNET_CLI_TELEMETRY_OPTOUT: "1"
+  DOTNET_NOLOGO: "1"
+
+jobs:
+  build:
+    name: Build and test Windows release
+    runs-on: windows-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+
+      - name: Set up .NET 10
+        uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: 10.0.x
+
+      - name: Restore dependencies
+        run: dotnet restore VHSDecodeDotNet.slnx
+
+      - name: Build release
+        run: dotnet build VHSDecodeDotNet.slnx --configuration Release --no-restore
+
+      - name: Run tests
+        run: dotnet test VHSDecodeDotNet.slnx --configuration Release --no-build
+
+      - name: Upload release build artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: vhs-decode-dotnet-windows-${{ github.sha }}
+          path: src/VHSDecode.Cli/bin/Release/net10.0/
+          if-no-files-found: error
+          retention-days: 30
