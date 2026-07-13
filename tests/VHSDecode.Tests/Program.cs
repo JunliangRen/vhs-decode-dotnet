@@ -5822,6 +5822,8 @@ public void CvbsAutoSyncDetectsAndAppliesFieldLevels()
     AssertTrue(measuredField.OutputConverter is not null);
     AssertClose(100.0, measuredField.OutputConverter!.Ire0, 1e-12);
     AssertClose(1.0, measuredField.OutputConverter.HzIre, 1e-12);
+    AssertEqual(90, measuredField.SyncConfidence);
+    AssertEqual<int?>(90, measuredPipeline.CaptureState().PreviousSyncConfidence);
 }
 
 [Fact(DisplayName = "CVBS clamp AGC levels follow upstream speculative decode delay")]
@@ -5936,8 +5938,10 @@ public void CvbsClampAgcLevelsFollowSpeculativeDecodeDelay()
         pipeline,
         "_delayedCvbsSyncLevels",
         ((double SyncLevel, double BlankLevel)?)(20.0, 180.0));
+    SetPrivateFieldValue(pipeline, "_previousSyncConfidence", 12);
     pipeline.RestoreStateForRetry(afterFirst);
     AssertEqual(afterFirst.DelayedCvbsSyncLevels, pipeline.CaptureState().DelayedCvbsSyncLevels);
+    AssertEqual(afterFirst.PreviousSyncConfidence, pipeline.CaptureState().PreviousSyncConfidence);
 }
 
 [Fact(DisplayName = "LD sync calibration matches upstream retry and pulse windows")]
@@ -6572,6 +6576,47 @@ public void SyncConfidenceCalculatorMatchesUpstreamRule()
     AssertEqual(100, SyncConfidenceCalculator.Compute(palLocations, 312));
     AssertEqual(45, SyncConfidenceCalculator.Compute(palLocations, 312, lineOffset: 2));
     AssertThrows<ArgumentOutOfRangeException>(() => SyncConfidenceCalculator.Compute(palLocations, 312, lineOffset: -1));
+}
+
+[Fact(DisplayName = "LD and CVBS line-zero sync confidence follows upstream anchor priority")]
+public void LegacyLineZeroSyncConfidenceFollowsUpstreamAnchorPriority()
+{
+    AssertEqual(100, TbcFieldDecodePipeline.ResolveLegacyLine0SyncConfidence(
+        hasStrongLocalEstimate: true,
+        hasNextEstimate: true,
+        hasPreviousEstimate: true,
+        previousConfidence: 45));
+    AssertEqual(90, TbcFieldDecodePipeline.ResolveLegacyLine0SyncConfidence(
+        hasStrongLocalEstimate: true,
+        hasNextEstimate: true,
+        hasPreviousEstimate: false,
+        previousConfidence: 100));
+    AssertEqual(90, TbcFieldDecodePipeline.ResolveLegacyLine0SyncConfidence(
+        hasStrongLocalEstimate: true,
+        hasNextEstimate: false,
+        hasPreviousEstimate: true,
+        previousConfidence: 45));
+    AssertEqual(35, TbcFieldDecodePipeline.ResolveLegacyLine0SyncConfidence(
+        hasStrongLocalEstimate: false,
+        hasNextEstimate: false,
+        hasPreviousEstimate: true,
+        previousConfidence: 45));
+    AssertEqual(10, TbcFieldDecodePipeline.ResolveLegacyLine0SyncConfidence(
+        hasStrongLocalEstimate: false,
+        hasNextEstimate: false,
+        hasPreviousEstimate: true,
+        previousConfidence: 5));
+    AssertEqual(50, TbcFieldDecodePipeline.ResolveLegacyLine0SyncConfidence(
+        hasStrongLocalEstimate: false,
+        hasNextEstimate: true,
+        hasPreviousEstimate: false,
+        previousConfidence: 100,
+        nextConfidence: 50));
+    AssertEqual(100, TbcFieldDecodePipeline.ResolveLegacyLine0SyncConfidence(
+        hasStrongLocalEstimate: false,
+        hasNextEstimate: false,
+        hasPreviousEstimate: false,
+        previousConfidence: 100));
 }
 
 [Fact(DisplayName = "LD line location repair matches upstream bad-line rules")]

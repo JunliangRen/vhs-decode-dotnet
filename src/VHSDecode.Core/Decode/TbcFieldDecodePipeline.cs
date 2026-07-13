@@ -119,7 +119,8 @@ internal sealed record Line0Resolution(
     int ExpectedFirstFieldConfidence,
     bool UsedPreviousEstimate = false,
     double FirstHSyncLocation = double.NaN,
-    double UnalignedFirstHSyncLocation = double.NaN);
+    double UnalignedFirstHSyncLocation = double.NaN,
+    int InitialSyncConfidence = 100);
 
 internal sealed record Line0FallbackCandidate(
     double ExpectedLocation,
@@ -142,6 +143,7 @@ internal sealed record TbcFieldDecodeState(
     VideoOutputConverter? LaserDiscSyncConverter,
     double? PreviousFirstHSyncLocation,
     long? PreviousFirstHSyncReadLocation,
+    int? PreviousSyncConfidence,
     bool? PreviousDetectedFirstField,
     double PreviousHSyncDifference,
     double LaserDiscNtscPhaseAdjustMedian,
@@ -192,6 +194,7 @@ public sealed class TbcFieldDecodePipeline
     private VideoOutputConverter? _laserDiscSyncConverter;
     private double? _previousFirstHSyncLocation;
     private long? _previousFirstHSyncReadLocation;
+    private int? _previousSyncConfidence;
     private bool? _previousDetectedFirstField;
     private double _previousHSyncDifference = -1.0;
     private double _laserDiscNtscPhaseAdjustMedian;
@@ -280,6 +283,7 @@ public sealed class TbcFieldDecodePipeline
             _laserDiscSyncConverter,
             _previousFirstHSyncLocation,
             _previousFirstHSyncReadLocation,
+            _previousSyncConfidence,
             _previousDetectedFirstField,
             _previousHSyncDifference,
             _laserDiscNtscPhaseAdjustMedian,
@@ -305,6 +309,7 @@ public sealed class TbcFieldDecodePipeline
         _laserDiscSyncConverter = state.LaserDiscSyncConverter;
         _previousFirstHSyncLocation = state.PreviousFirstHSyncLocation;
         _previousFirstHSyncReadLocation = state.PreviousFirstHSyncReadLocation;
+        _previousSyncConfidence = state.PreviousSyncConfidence;
         _previousDetectedFirstField = state.PreviousDetectedFirstField;
         _previousHSyncDifference = state.PreviousHSyncDifference;
         _laserDiscNtscPhaseAdjustMedian = state.LaserDiscNtscPhaseAdjustMedian;
@@ -750,6 +755,7 @@ public sealed class TbcFieldDecodePipeline
         int syncConfidence = SyncConfidenceCalculator.Compute(
             lineLocations.Locations,
             currentFieldLineCount,
+            initialConfidence: line0.InitialSyncConfidence,
             lineOffset: Math.Max(0, outputFirstLine - 1));
         (VideoOutputConverter? agcConverter, bool laserDiscAgcAdjusted) = ResolveLaserDiscAgcConverter(
             span,
@@ -835,6 +841,8 @@ public sealed class TbcFieldDecodePipeline
         {
             CommitChromaState(chroma);
         }
+
+        _previousSyncConfidence = syncConfidence;
 
         return new TbcDecodedField(
             span.StartSample,
@@ -3570,7 +3578,10 @@ public sealed class TbcFieldDecodePipeline
                 fallback?.ExpectedFirstField,
                 fallback?.ExpectedFirstFieldConfidence ?? 0,
                 FirstHSyncLocation: combined.FirstHSyncLocation,
-                UnalignedFirstHSyncLocation: combined.UnalignedFirstHSyncLocation);
+                UnalignedFirstHSyncLocation: combined.UnalignedFirstHSyncLocation,
+                InitialSyncConfidence: InitialLine0SyncConfidence(
+                    hasStrongLocalEstimate: true,
+                    hasNextEstimate: true));
         }
 
         if (fallback is not null)
@@ -3595,7 +3606,10 @@ public sealed class TbcFieldDecodePipeline
                 null,
                 0,
                 FirstHSyncLocation: singleVBlank.FirstHSyncLocation,
-                UnalignedFirstHSyncLocation: singleVBlank.UnalignedFirstHSyncLocation);
+                UnalignedFirstHSyncLocation: singleVBlank.UnalignedFirstHSyncLocation,
+                InitialSyncConfidence: InitialLine0SyncConfidence(
+                    hasStrongLocalEstimate: vBlankConsensus?.First is not null,
+                    hasNextEstimate: vBlankConsensus?.Last is not null));
         }
 
         Line0Resolution? previousEstimate = TryEstimateLine0FromPrevious(
@@ -3939,7 +3953,55 @@ public sealed class TbcFieldDecodePipeline
             ExpectedFirstFieldConfidence: 0,
             UsedPreviousEstimate: true,
             FirstHSyncLocation: firstHSync,
-            UnalignedFirstHSyncLocation: unalignedFirstHSync);
+            UnalignedFirstHSyncLocation: unalignedFirstHSync,
+            InitialSyncConfidence: InitialLine0SyncConfidence(
+                hasStrongLocalEstimate: false,
+                hasNextEstimate: false));
+    }
+
+    private int InitialLine0SyncConfidence(
+        bool hasStrongLocalEstimate,
+        bool hasNextEstimate)
+    {
+        if (_decodeType is not ("ld" or "cvbs"))
+        {
+            return 100;
+        }
+
+        bool hasPreviousEstimate = _previousFirstHSyncLocation is > 0.0
+            && _previousSyncConfidence.HasValue;
+        return ResolveLegacyLine0SyncConfidence(
+            hasStrongLocalEstimate,
+            hasNextEstimate,
+            hasPreviousEstimate,
+            _previousSyncConfidence ?? 100);
+    }
+
+    internal static int ResolveLegacyLine0SyncConfidence(
+        bool hasStrongLocalEstimate,
+        bool hasNextEstimate,
+        bool hasPreviousEstimate,
+        int previousConfidence,
+        int nextConfidence = 100)
+    {
+        if (hasStrongLocalEstimate && hasNextEstimate && hasPreviousEstimate)
+        {
+            return 100;
+        }
+
+        if (hasStrongLocalEstimate)
+        {
+            return 90;
+        }
+
+        if (hasPreviousEstimate)
+        {
+            return Math.Max(Math.Clamp(previousConfidence, 0, 100) - 10, 10);
+        }
+
+        return hasNextEstimate
+            ? Math.Clamp(nextConfidence, 0, 100)
+            : 100;
     }
 
     private Line0FallbackCandidate? TryResolveFallbackLine0(

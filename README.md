@@ -263,9 +263,11 @@ Implemented:
 - normal CLI `--length` termination counts that same written sequence, matching
   v0.4.0: dropped fields make decoding continue, while inserted fillers count
   toward the requested two-fields-per-frame target and can end the loop
-- final field `syncConf` applies v0.4.0's positive second-difference test over
-  `linelocs`: a maximum above four samples caps confidence at 45, then field-order
-  repair confidence can lower it further
+- LD/CVBS `syncConf` now carries v0.4.0's line-zero anchor confidence: three
+  local/next/previous estimates retain 100, a strong local-only estimate caps
+  at 90, and previous-field recovery subtracts 10 with a floor of 10; the final
+  positive second-difference test over `linelocs` can cap that value at 45,
+  after which field-order repair confidence can lower it further
 - JSON layout matches v0.4.0's streaming dumper: VHS/CVBS and ordinary LD output
   are compact, while LD `--verboseVITS` keeps root keys flush-left and indents
   each nested object by four spaces
@@ -872,7 +874,8 @@ Implemented:
   now reproduces v0.4.0's synchronous speculative-field timing: each requested
   field is rendered with the next decoded field's `ire0`/`hz_ire`, the producer
   lookahead is not written past `--length`, all 710,510 TBC samples are
-  byte-exact, and normalized logs match in order and content
+  byte-exact, both fields' 90/45 `syncConf` and all other non-build JSON field
+  metadata match, and normalized logs match in order and content
 - a one-frame real NTSC LD/LDF fixture with default EFM and analog audio also
   matches v0.4.0 byte for byte: main TBC
   `7F19286F84D563D58983C50326CE16433ED9DA90459ADA658532EB38A5AF686A`,
@@ -924,7 +927,7 @@ dotnet test VHSDecodeDotNet.slnx --no-build
 ```
 
 The current formal solution build completes with zero warnings and errors, and
-the xUnit project exposes 205 independently discoverable compatibility tests to
+the xUnit project exposes 206 independently discoverable compatibility tests to
 `dotnet test` and Visual Studio Test Explorer. On the
 same Windows machine and fixtures, Release wall-clock measurements for one
 frame were 2.346 s versus 7.193 s for NTSC VHS and 1.651 s versus 5.865 s for
