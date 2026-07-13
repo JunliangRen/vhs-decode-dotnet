@@ -780,6 +780,12 @@ Implemented:
   finalizes any partial TBC/JSON output without temporary metadata files, emits
   v0.4.0's exact termination line on stderr for LD or stdout for VHS/CVBS, then
   reports cleanup timing and exits with status 1
+- unexpected LD, VHS, and CVBS field-read exceptions now emit v0.4.0's exact
+  bug-report header, current sample, argparse `Namespace(...)` value spelling
+  and ordering, and exception line on stderr, followed by a Python-shaped
+  source traceback; default-versus-explicit numeric values, suppressed
+  `noAGC`, quoted paths, and `params_file` handles retain Python repr behavior,
+  while partial TBC/chroma/JSON/SQLite output is finalized before exit status 1
 - `-t/--threads` now drives parallel RF block demodulation and filtering while
   keeping stream/FFmpeg/GNU Radio reads ordered; `-t 1` and debug-plot `0`
   retain the deterministic single-thread path, and parallel blocks are stitched
@@ -963,7 +969,7 @@ dotnet test VHSDecodeDotNet.slnx --no-build
 ```
 
 The current formal solution build completes with zero warnings and errors, and
-the xUnit project exposes 215 independently discoverable compatibility tests to
+the xUnit project exposes 219 independently discoverable compatibility tests to
 `dotnet test` and Visual Studio Test Explorer. On the
 same Windows machine and fixtures, Release wall-clock measurements for one
 frame were 2.346 s versus 7.193 s for NTSC VHS and 1.651 s versus 5.865 s for

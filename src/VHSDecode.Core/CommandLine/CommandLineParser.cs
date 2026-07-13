@@ -12,11 +12,15 @@ public sealed class CommandLineParser
         ArgumentNullException.ThrowIfNull(args);
 
         var values = spec.Options.ToDictionary(option => option.Destination, option => option.DefaultValue);
+        var optionSources = spec.Options.ToDictionary(
+            option => option.Destination,
+            _ => ParsedOptionSource.Default);
         OptionSpec? versionOption = spec.Options.FirstOrDefault(option => option.Destination == "version");
         if (versionOption is not null && args.Any(versionOption.Names.Contains))
         {
             values[versionOption.Destination] = true;
-            return new ParsedCommand(spec, values, [], programName);
+            optionSources[versionOption.Destination] = ParsedOptionSource.Flag;
+            return new ParsedCommand(spec, values, [], programName, optionSources);
         }
 
         var positionals = new List<(int Index, string Value)>();
@@ -53,11 +57,18 @@ public sealed class CommandLineParser
             OptionSpec? option = ResolveOption(spec, optionName);
             if (option is null
                 && inlineValue is null
-                && TryProcessShortCluster(spec, args, token, values, ref i, out bool clusterHelp))
+                && TryProcessShortCluster(
+                    spec,
+                    args,
+                    token,
+                    values,
+                    optionSources,
+                    ref i,
+                    out bool clusterHelp))
             {
                 if (clusterHelp)
                 {
-                    return BuildResult(spec, values, positionals, programName);
+                    return BuildResult(spec, values, optionSources, positionals, programName);
                 }
 
                 continue;
@@ -69,9 +80,9 @@ public sealed class CommandLineParser
                 continue;
             }
 
-            if (ApplyOption(args, option, inlineValue, values, ref i))
+            if (ApplyOption(args, option, inlineValue, values, optionSources, ref i))
             {
-                return BuildResult(spec, values, positionals, programName);
+                return BuildResult(spec, values, optionSources, positionals, programName);
             }
         }
 
@@ -99,7 +110,7 @@ public sealed class CommandLineParser
             throw new CommandLineParseException($"unrecognized arguments: {arguments}");
         }
 
-        return BuildResult(spec, values, positionals, programName);
+        return BuildResult(spec, values, optionSources, positionals, programName);
     }
 
     private static void AddPositional(
@@ -129,6 +140,7 @@ public sealed class CommandLineParser
     private static ParsedCommand BuildResult(
         DecodeCommandSpec spec,
         Dictionary<string, object?> values,
+        Dictionary<string, ParsedOptionSource> optionSources,
         List<(int Index, string Value)> positionals,
         string? programName)
     {
@@ -136,7 +148,8 @@ public sealed class CommandLineParser
             spec,
             values,
             positionals.Take(spec.MaximumPositionals).Select(item => item.Value).ToList(),
-            programName);
+            programName,
+            optionSources);
     }
 
     private static OptionSpec? ResolveOption(DecodeCommandSpec spec, string optionName)
@@ -180,6 +193,7 @@ public sealed class CommandLineParser
         IReadOnlyList<string> args,
         string token,
         Dictionary<string, object?> values,
+        Dictionary<string, ParsedOptionSource> optionSources,
         ref int index,
         out bool help)
     {
@@ -210,6 +224,7 @@ public sealed class CommandLineParser
             if (option.Arity == OptionArity.Flag)
             {
                 values[option.Destination] = true;
+                optionSources[option.Destination] = ParsedOptionSource.Flag;
                 if (option.Destination == "help")
                 {
                     help = true;
@@ -220,7 +235,7 @@ public sealed class CommandLineParser
             }
 
             string? inlineValue = offset + 1 < token.Length ? token[(offset + 1)..] : null;
-            help = ApplyOption(args, option, inlineValue, values, ref index);
+            help = ApplyOption(args, option, inlineValue, values, optionSources, ref index);
             return true;
         }
 
@@ -232,6 +247,7 @@ public sealed class CommandLineParser
         OptionSpec option,
         string? inlineValue,
         Dictionary<string, object?> values,
+        Dictionary<string, ParsedOptionSource> optionSources,
         ref int index)
     {
         switch (option.Arity)
@@ -244,11 +260,13 @@ public sealed class CommandLineParser
                 }
 
                 values[option.Destination] = true;
+                optionSources[option.Destination] = ParsedOptionSource.Flag;
                 return option.Destination == "help";
 
             case OptionArity.Value:
                 string value = inlineValue ?? ReadRequiredValue(args, ref index, option);
                 values[option.Destination] = ConvertOptionValue(option, value);
+                optionSources[option.Destination] = ParsedOptionSource.ExplicitValue;
                 return false;
 
             case OptionArity.OptionalValue:
@@ -256,6 +274,9 @@ public sealed class CommandLineParser
                 values[option.Destination] = optionalValue is null
                     ? option.ConstValue
                     : ConvertOptionValue(option, optionalValue);
+                optionSources[option.Destination] = optionalValue is null
+                    ? ParsedOptionSource.Constant
+                    : ParsedOptionSource.ExplicitValue;
                 return false;
 
             default:

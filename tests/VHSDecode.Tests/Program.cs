@@ -7863,6 +7863,187 @@ public void DecodeCancellationFinalizesPartialOutputAndMatchesUpstreamStreams()
     }
 }
 
+[Fact(DisplayName = "VHS runtime Namespace matches Release 4.0 argparse repr")]
+public void VhsRuntimeNamespaceMatchesRelease40ArgparseRepr()
+{
+    ParsedCommand command = Parse(CliSpecs.Vhs, [
+        "-",
+        "namespace-out.tmp",
+        "--noAGC",
+        "--frequency", "0.00001",
+        "--fm_audio_notch",
+        "--y_comb"
+    ]);
+
+    AssertEqual(
+        "Namespace(infile='-', outfile='namespace-out.tmp', AGC=False, system='NTSC', start=0, "
+        + "start_fileloc=-1, length=99999999, overwrite=False, write_db=False, inputfreq=1e-05, "
+        + "cxadc=False, threads=5, chroma_trap=False, sharpness=0, notch=None, notch_q=10.0, "
+        + "pal=False, ntsc=False, palm=False, ntscj=False, debug=False, skip_hsync_refine=False, "
+        + "tape_format='VHS', tape_speed='sp', params_file=None, orc=False, level_adjust=0.1, "
+        + "ire0_adjust=False, high_boost=None, wow_level_adjust_smoothing=None, "
+        + "wow_interpolation_method='linear', disable_diff_demod=False, fm_audio_notch=10, "
+        + "disable_dc_offset=True, enable_dc_offset=False, nldeemp=False, subdeemp=False, "
+        + "y_comb=1.5, cafc=False, track_phase=None, detect_chroma_track_phase=False, "
+        + "disable_phase_correction=False, disable_burst_hsync=False, enable_color_killer=False, "
+        + "disable_comb=False, skip_chroma=False, debug_plot=None, disable_right_hsync=False, "
+        + "level_detect_divisor=3, no_resample=False, fallback_vsync=False, relaxed_line0=False, "
+        + "field_order_confidence=100, field_order_action='detect', saved_levels=False, "
+        + "export_raw_tbc=False, nodod=False, dod_threshold_p=None, dod_threshold_a=None, "
+        + "dod_hysteresis=1.25, gnrc_afe=False, noAGC=True)",
+        PythonNamespaceFormatter.Format(command));
+
+    string paramsPath = typeof(CompatibilityTests).Assembly.Location;
+    ParsedCommand paramsCommand = Parse(CliSpecs.Vhs, ["--params_file", paramsPath, "-", "out"]);
+    string paramsNamespace = PythonNamespaceFormatter.Format(paramsCommand);
+    AssertContains(
+        paramsNamespace,
+        $"params_file=<_io.TextIOWrapper name={PythonNamespaceFormatter.FormatString(paramsPath)} mode='r' encoding=");
+}
+
+[Fact(DisplayName = "CVBS runtime Namespace matches Release 4.0 argparse repr")]
+public void CvbsRuntimeNamespaceMatchesRelease40ArgparseRepr()
+{
+    ParsedCommand command = Parse(CliSpecs.Cvbs, [
+        "--noAGC",
+        "-A",
+        "--clamp_agc",
+        "--agc_speed", "0.25",
+        "--frequency", "0.00001",
+        "-",
+        "namespace-out.tmp"
+    ]);
+
+    AssertEqual(
+        "Namespace(infile='-', outfile='namespace-out.tmp', AGC=False, system='NTSC', start=0, "
+        + "start_fileloc=-1, length=99999999, overwrite=False, write_db=False, inputfreq=1e-05, "
+        + "cxadc=False, threads=5, chroma_trap=False, sharpness=0, notch=None, notch_q=10.0, "
+        + "pal=False, ntsc=False, palm=False, ntscj=False, debug=False, skip_hsync_refine=False, "
+        + "seek=-1, auto_sync=True, no_auto_sync=False, clamp_agc=True, agc_speed=0.25, "
+        + "agc_gain_factor=1.0, agc_set_gain=0.0, rhs_hsync=False, wow_level_adjust_smoothing=0, "
+        + "wow_interpolation_method='linear', noAGC=True)",
+        PythonNamespaceFormatter.Format(command));
+}
+
+[Fact(DisplayName = "LD runtime Namespace matches Release 4.0 argparse repr")]
+public void LaserDiscRuntimeNamespaceMatchesRelease40ArgparseRepr()
+{
+    ParsedCommand command = Parse(CliSpecs.LaserDisc, [
+        "in'put.s16",
+        "out\"base",
+        "--start_fileloc", "-1",
+        "--deemp_strength", "1",
+        "--frequency", "0.00001"
+    ]);
+
+    AssertEqual(
+        "Namespace(infile=\"in'put.s16\", outfile='out\"base', start=0, length=110000, seek=-1, "
+        + "pal=False, ntsc=False, ntscj=False, MTF=1.0, MTF_offset=0, noAGC=False, nodod=False, "
+        + "noefm=False, prefm=False, daa=False, AC3=False, start_fileloc=-1.0, ignoreleadout=False, "
+        + "verboseVITS=False, RF_TBC=False, lowband=False, NTSC_color_notch_filter=False, "
+        + "V4300D_notch_filter=False, deemp_low=0, deemp_high=0, deemp_strength=1.0, "
+        + "wow_level_adjust_smoothing=0, wow_interpolation_method='linear', threads=4, "
+        + "inputfreq=1e-05, analog_audio_freq=44100, ntsc_audio_rate=False, vbpf_low=None, "
+        + "vbpf_high=None, vlpf=None, vlpf_order=-1, audio_filterwidth=None, use_profiler=False, "
+        + "write_test_ldf=None)",
+        PythonNamespaceFormatter.Format(command));
+    AssertEqual("1e+16", PythonNamespaceFormatter.FormatValue(1e16));
+    AssertEqual("-0.0", PythonNamespaceFormatter.FormatValue(-0.0));
+    AssertEqual("'line\\n\\x00'", PythonNamespaceFormatter.FormatValue("line\n\0"));
+}
+
+[Fact(DisplayName = "decode read errors report context and finalize partial output")]
+public void DecodeReadErrorsReportContextAndFinalizePartialOutput()
+{
+    string tempDirectory = Path.Combine(Path.GetTempPath(), "vhsdecode-dotnet-tests-" + Guid.NewGuid().ToString("N"));
+    Directory.CreateDirectory(tempDirectory);
+    try
+    {
+        string inputPath = Path.Combine(tempDirectory, "empty.u8");
+        string outputBase = Path.Combine(tempDirectory, "partial-error");
+        File.WriteAllBytes(inputPath, []);
+        ParsedCommand command = Parse(CliSpecs.Vhs, [
+            "--pal",
+            "--no_resample",
+            "--write_db",
+            "--length", "1",
+            inputPath,
+            outputBase
+        ]);
+        int reads = 0;
+        int fieldSampleCount = 0;
+        TbcDecodedField? ReadField(
+            DecodeSession activeSession,
+            Stream _,
+            long begin,
+            int __,
+            int ___)
+        {
+            reads++;
+            if (reads == 2)
+            {
+                throw new InvalidOperationException("synthetic field failure");
+            }
+
+            fieldSampleCount = activeSession.TbcFrameSpec.FieldSampleCount;
+            return BuildSyntheticTbcField(
+                    begin,
+                    new ushort[activeSession.TbcFrameSpec.FieldSampleCount],
+                    detectedFirstField: true)
+                with
+                {
+                    NextFieldOffsetSamples = 100.0,
+                    ChromaSamples = new ushort[activeSession.TbcFrameSpec.FieldSampleCount]
+                };
+        }
+
+        var runner = new DecodeRunner(cancellationToken => new TbcFieldSequenceDecodeEngine(
+            readField: ReadField,
+            vhsDiskSpaceGuard: new VhsDiskSpaceGuard(
+                _ => VhsDiskSpaceGuard.MinimumFreeBytes + 1),
+            cancellationToken: cancellationToken));
+        var output = new StringWriter();
+        var error = new StringWriter();
+
+        int exitCode = runner.Run(command, output, error);
+
+        string errorText = error.ToString();
+        AssertEqual(1, exitCode);
+        AssertEqual(2, reads);
+        AssertEqual(string.Empty, output.ToString());
+        AssertTrue(errorText.StartsWith(
+            Environment.NewLine
+            + "ERROR - please paste the following into a bug report:"
+            + Environment.NewLine,
+            StringComparison.Ordinal));
+        AssertContains(errorText, "current sample: 100" + Environment.NewLine);
+        AssertContains(
+            errorText,
+            "arguments: " + PythonNamespaceFormatter.Format(command) + Environment.NewLine);
+        AssertContains(errorText, "Exception: synthetic field failure  Traceback:" + Environment.NewLine);
+        AssertContains(errorText, "  File \"");
+        AssertContains(errorText, "g__ReadField");
+        AssertContains(errorText, "Took ");
+
+        AssertEqual(fieldSampleCount * (long)sizeof(ushort), new FileInfo(outputBase + ".tbc").Length);
+        AssertEqual(
+            fieldSampleCount * (long)sizeof(ushort),
+            new FileInfo(outputBase + "_chroma.tbc").Length);
+        using (JsonDocument partialJson = JsonDocument.Parse(File.ReadAllText(outputBase + ".tbc.json")))
+        {
+            AssertEqual(1, partialJson.RootElement.GetProperty("fields").GetArrayLength());
+        }
+
+        AssertEqual(1L, SqliteLong(outputBase + ".tbc.db", "SELECT COUNT(*) FROM field_record"));
+        AssertFalse(File.Exists(outputBase + ".tbc.json.tmp"));
+        AssertFalse(File.Exists(outputBase + ".tbc.json.fields.tmp"));
+    }
+    finally
+    {
+        Directory.Delete(tempDirectory, recursive: true);
+    }
+}
+
 [Fact(DisplayName = "TBC field decode pipeline detects sync and renders a field")]
 public void TbcFieldDecodePipelineDetectsSyncAndRendersField()
 {

@@ -16,6 +16,10 @@ public sealed class OptionSpec
 
     public object? ConstValue { get; init; }
 
+    public object? PythonDefaultValue { get; init; }
+
+    public object? PythonConstValue { get; init; }
+
     public string[]? Choices { get; init; }
 
     public Func<string, bool>? IsValidOptionalValue { get; init; }

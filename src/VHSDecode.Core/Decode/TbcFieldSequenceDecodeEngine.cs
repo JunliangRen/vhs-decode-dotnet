@@ -178,7 +178,7 @@ public sealed class TbcFieldSequenceDecodeEngine
                 }
                 : result;
         }
-        catch (OperationCanceledException)
+        catch (Exception ex) when (ex is OperationCanceledException or DecodeFieldReadException)
         {
             if (!outputCompleted)
             {
@@ -342,7 +342,7 @@ public sealed class TbcFieldSequenceDecodeEngine
             {
                 Task<TbcDecodedField?>? prefetchedField = cvbsPrefetch.Take();
                 field = prefetchedField is null
-                    ? _readField(session, input, begin, readLength, decodedFieldCount)
+                    ? ReadFieldWithContext(session, input, begin, readLength, decodedFieldCount)
                     : prefetchedField.GetAwaiter().GetResult();
                 if (field is not null && autoMtf is not null)
                 {
@@ -355,7 +355,12 @@ public sealed class TbcFieldSequenceDecodeEngine
                     if (mtfUpdate.RequiresRetry || field.LaserDiscAgcAdjusted)
                     {
                         session.TbcFieldDecoder.RestoreStateForRetry(fieldState!);
-                        field = _readField(session, input, begin, readLength, decodedFieldCount);
+                        field = ReadFieldWithContext(
+                            session,
+                            input,
+                            begin,
+                            readLength,
+                            decodedFieldCount);
                     }
                 }
 
@@ -372,14 +377,17 @@ public sealed class TbcFieldSequenceDecodeEngine
                 begin = Math.Max(0L, checked(begin + ex.SuggestedOffsetSamples));
                 continue;
             }
-            catch (InvalidOperationException)
+            catch (OperationCanceledException) when (_cancellationToken.IsCancellationRequested)
             {
-                if (decodedFieldCount == 0)
-                {
-                    throw;
-                }
-
-                break;
+                throw;
+            }
+            catch (DecodeFieldReadException)
+            {
+                throw;
+            }
+            catch (Exception ex)
+            {
+                throw new DecodeFieldReadException(begin, ex);
             }
 
             if (pendingTapeFrameStatus is not null)
@@ -540,16 +548,12 @@ public sealed class TbcFieldSequenceDecodeEngine
             try
             {
                 _cancellationToken.ThrowIfCancellationRequested();
-                _ = _readField(session, input, begin, readLength, decodedFieldCount);
+                _ = ReadFieldWithContext(session, input, begin, readLength, decodedFieldCount);
                 _cancellationToken.ThrowIfCancellationRequested();
             }
             catch (TbcFieldDecodeRecoveryException ex)
             {
                 LogRecovery(session, ex);
-            }
-            catch (InvalidOperationException)
-            {
-                // Upstream may have one producer field in flight after the requested output is complete.
             }
         }
 
@@ -712,7 +716,12 @@ public sealed class TbcFieldSequenceDecodeEngine
             () =>
             {
                 _cancellationToken.ThrowIfCancellationRequested();
-                TbcDecodedField? field = _readField(session, input, begin, readLength, fieldNumber);
+                TbcDecodedField? field = ReadFieldWithContext(
+                    session,
+                    input,
+                    begin,
+                    readLength,
+                    fieldNumber);
                 _cancellationToken.ThrowIfCancellationRequested();
                 return field;
             },
@@ -780,6 +789,35 @@ public sealed class TbcFieldSequenceDecodeEngine
             : session.TbcFieldDecoder.Decode(span, fieldNumber: fieldNumber);
     }
 
+    private TbcDecodedField? ReadFieldWithContext(
+        DecodeSession session,
+        Stream input,
+        long begin,
+        int readLength,
+        int fieldNumber)
+    {
+        try
+        {
+            return _readField(session, input, begin, readLength, fieldNumber);
+        }
+        catch (TbcFieldDecodeRecoveryException)
+        {
+            throw;
+        }
+        catch (OperationCanceledException) when (_cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (DecodeFieldReadException)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            throw new DecodeFieldReadException(begin, ex);
+        }
+    }
+
     internal static bool ShouldDeferCvbsOutputConversion(DecodeSession session)
     {
         return session.Spec.Name == "cvbs"
@@ -845,14 +883,24 @@ public sealed class TbcFieldSequenceDecodeEngine
     {
         frameNumber = 0;
         frameStart = begin;
-        TbcDecodedField? first = _readField(session, input, begin, readLength, fieldNumber: 0);
+        TbcDecodedField? first = ReadFieldWithContext(
+            session,
+            input,
+            begin,
+            readLength,
+            fieldNumber: 0);
         if (first is null)
         {
             return false;
         }
 
         long secondBegin = EstimateNextFieldStart(session, first);
-        TbcDecodedField? second = _readField(session, input, secondBegin, readLength, fieldNumber: 1);
+        TbcDecodedField? second = ReadFieldWithContext(
+            session,
+            input,
+            secondBegin,
+            readLength,
+            fieldNumber: 1);
         if (second is null)
         {
             return false;
