@@ -1,0 +1,152 @@
+usage: decode.py [-h] [--system system] [-s start]
+                 [--start_fileloc start_fileloc] [-l length] [--overwrite]
+                 [--write_db] [-f FREQ] [-t threads] [--ct] [--sl sharpness]
+                 [--notch notch] [--notch_q notch_q] [-p] [-n] [--pm]
+                 [--NTSCJ] [--debug] [--skip_hsync_refine] [--tf tape_format]
+                 [--ts tape_speed] [--params_file params_file_json] [--orc]
+                 [-L IRE Multiplier] [--ire0_adjust [IRE0_ADJUST]]
+                 [--high_boost High frequency boost multiplier]
+                 [--wow_level_adjust_smoothing WOW_LEVEL_ADJUST_SMOOTHING]
+                 [--wow_interpolation_method {linear,quadratic,cubic}]
+                 [--nodd] [--fm_audio_notch [Q]] [--clamp] [--nld] [--sd]
+                 [--y_comb [IRE]] [--cafc] [-T Track phase] [--dctp] [--dpc]
+                 [--dbh] [--ck] [--no_comb] [--skip_chroma] [--dp DEBUG_PLOT]
+                 [--drh] [--level_detect_divisor value] [--no_resample]
+                 [--fallback_vsync] [--relaxed_line0]
+                 [--field_order_confidence value] [--field_order_action value]
+                 [--use_saved_levels] [--export_raw_tbc] [--noDOD] [-D value]
+                 [--dod_t_abs value] [--dod_h value] [--gnrc]
+                 [infile] [outfile]
+
+Extracts video from RAW RF captures of colour-under & composite modulated tapes
+
+positional arguments:
+  infile                source file
+  outfile               base name for destination files
+
+options:
+  -h, --help            show this help message and exit
+  --system system       video system (overriden by individual options)
+  -t threads, --threads threads
+                        number of CPU threads to use
+  --tf tape_format, --tape_format tape_format
+                        Tape format - TYPEC UMATIC_SP HI8 TYPEB UMATIC BETAMAX VCR_LP VHD VHS VIDEO2000 UMATIC_HI SVHS EIAJ VCR QUADRUPLEX VHSHQ BETAMAX_HIFI VIDEO8 SUPERBETA SVHS_ETare supported
+  --ts tape_speed, --tape_speed tape_speed
+                        Tape speed selection for adjusting format parameters. SP (default), LP, SLP, EP, and VP. Only supported for some formats. SLP and EP refers to the same speed.
+  --params_file params_file_json
+                        Override format/system parameters with specified json file.
+  --orc                 Use new naming tbc file convention for decode orc (command name subject to change).
+
+File options:
+  -s start, --start start
+                        rough jump to frame n of capture (default is 0)
+  --start_fileloc start_fileloc
+                        jump to precise sample # in the file
+  -l length, --length length
+                        limit length to n frames
+  --overwrite           Overwrite existing decode files.
+  --write_db            Enable sqlite output (slow on hdds), not finalized, option may change
+
+Input format:
+  -f FREQ, --frequency FREQ
+                        RF sampling frequency in source file (default is 40MHz)
+
+Extra filtering:
+  --ct, --chroma_trap   Enable luma filter that filters in some areas around the color frequency. This will soften the image and have a noticeable impact on decoding speed.
+  --sl sharpness, --sharpness sharpness
+                        Enable a crude sharpness filter - Sharpness level (0~100)
+  --notch notch         Center frequency of optional notch filter on rf and chroma.
+  --notch_q notch_q     Q factor for notch filter
+
+Video system options:
+  -p, --pal             source is in PAL format
+  -n, --ntsc            source is in NTSC format
+  --pm, --palm          source is in PAL-M format
+  --NTSCJ               source is in NTSC-J (IRE 0 black) format
+
+Debug options:
+  --debug               Set log legel to DEBUG.
+  --skip_hsync_refine   Skip refining line locations using hsync - less accurate line start detection but may avoid issues in some cases..
+  --dp DEBUG_PLOT, --debug_plot DEBUG_PLOT
+                        Do a plot for the requested data, separated by whitespace. Current options are: demodblock, deemphasis, raw_pulses, line_locs.
+  --drh, --disable_right_hsync
+                        Disable use of right side of hsync for lineloc detection (old behaviour)
+  --level_detect_divisor value
+                        Use only every nth sample for vsync serration code - may improve speed at cost of minor accuracy. Limited to max 10.
+  --no_resample         Skip resampling input to 40 mhz (needs testing).
+  --fallback_vsync      Enable vsync detect fallback. Will be enabled by default once more tested, so expect this option to change. Always enabled when using TypeC tape format
+  --relaxed_line0       Enable relaxed line0 detection fallback logic. Useful for damaged tapes where standard detection fails. Requires --fallback_vsync.
+  --field_order_confidence value
+                        Allow field order cadence to change after n percent of field order pulses detected.
+                          Reduce this number if you experience field order issues when decoding sources with multiple recordings, such as home recordings
+                          Increase this number if there is damage to the v-sync area to prevent incorrect field order detection
+                          Range 0-100; Sane Values 50-100
+                            100, (default) all field order pulses must match to change field cadence
+                             50, half of field order pulses must match to change field cadence
+                              0, any field order pulse can match to change field cadence
+  --field_order_action value
+                        Decides how to handle field order discontinuities,
+                          When the field order cadence is broken such that there are two Top or two Bottom fields.
+                          * `detect`:    (default) use the distance between the dropped field to determine whether to drop or duplicate.
+                          * `duplicate`: always duplicate the last valid field
+                          * `drop`:      always drop the last valid field
+                          * `none`:      do nothing, (field order will be out of sync causing issues for interlaced video)
+  --use_saved_levels    Try re-using video levels detected from the first decoded fields instead of re-calculating each frame. Will be done by default once well tested
+  --export_raw_tbc      export a raw TBC without deemphasis applied for filter tuning
+
+Luma decoding options:
+  -L IRE Multiplier, --level_adjust IRE Multiplier
+                        Multiply top/bottom IRE in json by 1 +/- this value (used to avoid clipping on RGB conversion in chroma decoder).
+  --ire0_adjust [IRE0_ADJUST]
+                        Automatically adjust video levels after vsync and TBC.
+                        Add this flag with no arguments for the default, or supply one or more of the below options as a comma separated string. 
+                          backporch [default] adjusts the black level based on the backporch level
+                          hsync               adjusts the level scaling based on the measured hsync / backporch ratio. This can correct automatic gain control issues with second generation tapes.
+  --high_boost High frequency boost multiplier
+                        Multiplier for boost to high rf frequencies, uses default if not specified. Subject to change.
+  --wow_level_adjust_smoothing WOW_LEVEL_ADJUST_SMOOTHING
+                        Adjusts the amount of smoothing in lines that is performed when compensating for brightness variations caused by wow.
+                          Default is (video system lines / 2) i.e. NTSC=525/2, PAL=625/2, etc.
+                          Wow calculation is based on position of hsync pulses which is affected by the accuracy of the TBC. 
+                          If you see vertical brightness variations (banding), setting to a value larger than 0 will smooth the wow adjustment.
+  --wow_interpolation_method {linear,quadratic,cubic}
+                        Sets the type of interpolation spline used to correct wow.
+                          linear     [default]
+                          quadratic
+                          cubic
+  --nodd, --no_diff_demod
+                        Disable diff demod
+  --fm_audio_notch [Q]  Enable notch filter on FM audio frequencies to filter out wave-like pattern from interference, mainly useful on VHS. Optional argument to specify Q factor (filter width)
+  --clamp               Enable blanking DC offset clamping/compensation
+  --nld, --non_linear_deemphasis
+                        Enable primitive clipping non-linear deemphasis, can help reduce ringing and oversharpening. (WIP).
+  --sd, --sub_deemphasis
+                        Enable non-linear sub deemphasis. (WIP).
+  --y_comb [IRE]        Enable y comb filter, optionally specifying IRE limit.
+
+Chroma decoding options:
+  --cafc, --chroma_AFC  Tries to detect the chroma carrier frequency on a field basis within some limit instead of using the default one for the format. Mainly useful for debug purposes and used on PAL betamax.
+  -T Track phase, --track_phase Track phase
+                        If set to 0 or 1, force use of video track phase. (No effect on U-matic)
+  --dctp, --detect_chroma_track_phase
+                        Detects and corrects color-under heterodyne rotation change around head-switching area. Corrects chroma artifacts around head-switching area for color-under formats. (Experimental feature)
+  --dpc, --disable_phase_correction
+                        Disables phase correction after up-heterodyning color under formats. This can safely be disabled if not using the NTSC 3D decoder. (currently only applicable to NTSC)
+  --dbh, --disable_burst_hsync
+                        Disables using the color burst phase to refine hsync.
+  --ck, --enable_color_killer
+                        Enables color killer, i.e. burst detection to enable/disable chroma decoding and hsync refinement.
+  --no_comb             Disable internal chroma comb filter.
+  --skip_chroma         Don't output chroma even for formats that may have it and possibly skip some of the chroma processing.
+
+Dropout detection options:
+  --noDOD               Disable dropout detector.
+  -D value, --dod_t value, --dod_threshold_p value
+                        RF level fraction threshold for dropouts as percentage of average (in decimal).
+  --dod_t_abs value, --dod_threshold_abs value
+                        RF level threshold absolute value. Note that RF levels vary greatly between tapes and recording setups.
+  --dod_h value, --dod_hysteresis value
+                        Dropout detection hysteresis, the rf level needs to go above the dropout threshold multiplied by this for a dropout to end.
+  --gnrc, --gnuradio_rf_afe
+                        Open a ZMQ pipe back and forth to GNU Radio for RF AFE/EQ/Group delay measurements. (WIP)
+                        You might want to use this with -t 1

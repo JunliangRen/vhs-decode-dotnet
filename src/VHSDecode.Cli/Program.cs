@@ -1,0 +1,50 @@
+using VHSDecode.Core.CommandLine;
+using VHSDecode.Core.Decode;
+
+string? executablePath = Environment.ProcessPath;
+string[] invocation = DecodeDispatcher.NormalizeInvocation(args, executablePath);
+return Run(invocation, DecodeDispatcher.InvocationProgramName(executablePath), Console.Out, Console.Error);
+
+static int Run(string[] args, string programName, TextWriter output, TextWriter error)
+{
+    if (args.Length == 0)
+    {
+        PrintTopLevelOptions(output);
+        return 0;
+    }
+
+    if (!DecodeDispatcher.TryDispatch(args, out DecodeCommandSpec? spec, out string[] remaining) || spec is null)
+    {
+        PrintTopLevelOptions(output);
+        output.WriteLine($"Instead got: {args[0].ToLowerInvariant()}");
+        return 0;
+    }
+
+    ParsedCommand command;
+    try
+    {
+        var parser = new CommandLineParser();
+        command = parser.Parse(spec, remaining, programName, output);
+    }
+    catch (CommandLineParseException ex)
+    {
+        error.Write(CommandHelpFormatter.FormatUsage(spec, programName));
+        error.WriteLine($"{programName}: error: {ex.Message}");
+        return 2;
+    }
+
+    try
+    {
+        return new DecodeRunner().Run(command, output, error);
+    }
+    catch (Exception ex) when (ex is ArgumentException or FormatException or OverflowException)
+    {
+        error.WriteLine(ex.Message);
+        return 2;
+    }
+}
+
+static void PrintTopLevelOptions(TextWriter output)
+{
+    output.WriteLine("Options are vhs, cvbs, ld, hifi, filter-tune, decode-launcher");
+}

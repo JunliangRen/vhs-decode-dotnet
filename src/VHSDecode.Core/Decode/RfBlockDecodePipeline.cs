@@ -1,0 +1,399 @@
+using System.Numerics;
+using VHSDecode.Core.Dsp;
+using VHSDecode.Core.Rf;
+using VHSDecode.Core.Tbc;
+
+namespace VHSDecode.Core.Decode;
+
+public sealed record CvbsDecodeOptions(bool AutoSync, VideoOutputConverter VideoOutput);
+
+public sealed class RfBlockDecodePipeline : IDisposable
+{
+    private readonly IRfSampleLoader _loader;
+    private readonly DecodeFilterSet _filters;
+    private readonly DecodeFilterOptions _filterOptions;
+    private readonly RfDemodulator _demodulator;
+    private readonly RfVideoReferenceFilterSet? _referenceFilters;
+    private readonly CvbsDecodeOptions? _cvbsOptions;
+    private readonly IRfInputProcessor? _inputProcessor;
+
+    public RfBlockDecodePipeline(
+        IRfSampleLoader loader,
+        DecodeFilterSet filters,
+        double sampleRateHz,
+        DecodeFilterOptions? filterOptions = null,
+        CvbsDecodeOptions? cvbsOptions = null,
+        IRfInputProcessor? inputProcessor = null)
+    {
+        _loader = loader;
+        _filters = filters;
+        _filterOptions = filterOptions ?? new DecodeFilterOptions();
+        _demodulator = new RfDemodulator(sampleRateHz);
+        _referenceFilters = filters.LdVideoBurst is null && filters.LdVideoPilot is null && !_filterOptions.LdClipDemodForVideo
+            ? null
+            : new RfVideoReferenceFilterSet(
+                filters.LdVideoBurst,
+                filters.LdVideoBurstOffset,
+                filters.LdVideoPilot,
+                _filterOptions.LdClipDemodForVideo);
+        _cvbsOptions = cvbsOptions;
+        _inputProcessor = inputProcessor;
+    }
+
+    public IRfInputProcessor? InputProcessor => _inputProcessor;
+
+    internal int RfHighPassOffset => _filters.RfHighPassOffset;
+
+    internal bool RequiresSequentialBlockDecode => _filterOptions.SharpnessEq is not null;
+
+    public RfDemodulatedBlock? DecodeBlock(Stream stream, long sample, int blockLength)
+    {
+        return DecodeBlockWithInput(stream, sample, blockLength)?.Demodulated;
+    }
+
+    internal LaserDiscAnalogAudioBlock ApplyLaserDiscAnalogAudioPhase2(LaserDiscAnalogAudioBlock fieldAudio)
+    {
+        return _filters.LdAnalogAudio is null
+            ? fieldAudio
+            : LaserDiscAnalogAudioPhase2.Apply(fieldAudio, _filters.LdAnalogAudio);
+    }
+
+    public RfPipelineBlock? DecodeBlockWithInput(Stream stream, long sample, int blockLength)
+    {
+        double[]? input = LoadBlockInput(stream, sample, blockLength);
+        if (input is null)
+        {
+            return null;
+        }
+
+        return DecodePreparedBlock(input);
+    }
+
+    internal double[]? LoadBlockInput(Stream stream, long sample, int blockLength)
+    {
+        double[]? loadedInput = _loader.Read(stream, sample, blockLength);
+        return loadedInput is null
+            ? null
+            : _inputProcessor?.Process(loadedInput) ?? loadedInput;
+    }
+
+    internal RfPipelineBlock DecodePreparedBlock(double[] input)
+    {
+        ArgumentNullException.ThrowIfNull(input);
+
+        if (_cvbsOptions is not null)
+        {
+            return new RfPipelineBlock(input, DecodeCvbsBlock(input));
+        }
+
+        Complex[]? inputSpectrum = _filters.LdEfm is not null || _filters.LdAnalogAudio is not null
+            ? PocketFftComplex.ForwardReal(input)
+            : null;
+        RfDemodulatedBlock demodulated = _demodulator.Demodulate(
+            input,
+            _filters.RfVideo,
+            _filters.RfHighPass,
+            _filters.RfMtf,
+            _filters.Video,
+            _filters.VideoLowPass05,
+            _filters.VideoLowPass05Offset,
+            _filterOptions.LdPalV4300DNotch,
+            _filterOptions.RfHighBoost,
+            _filterOptions.DiffDemodRepair,
+            _filterOptions.ChromaTrap,
+            _filterOptions.SharpnessEq,
+            _filterOptions.NonlinearDeemphasis,
+            _filterOptions.SubDeemphasis,
+            _filterOptions.BetamaxFscNotchHz,
+            _referenceFilters,
+            _filterOptions.FmDemodulatorMode,
+            _filters.VhsEnvelopeSos,
+            _filters.VhsRfTopSos,
+            inputSpectrum);
+        if (_filterOptions.LdClipDemodForVideo)
+        {
+            QuantizeLaserDiscVideoChannels(demodulated);
+        }
+
+        if (_filters.ChromaBurst is not null || _filters.ChromaBurstSos is not null)
+        {
+            demodulated = demodulated with
+            {
+                Chroma = _filterOptions.UseChromaAfc
+                    ? input.ToArray()
+                    : DecodeChromaBurst(
+                        _filters.ChromaBurstUsesDemodulatedVideo
+                            ? demodulated.Video
+                            : input,
+                        _filters)
+            };
+        }
+
+        if (_filters.LdEfm is not null)
+        {
+            inputSpectrum ??= PocketFftComplex.ForwardReal(input);
+            demodulated = demodulated with { Efm = DecodeEfmBlock(inputSpectrum, _filters.LdEfm) };
+        }
+
+        if (_filters.LdAnalogAudio is not null)
+        {
+            inputSpectrum ??= PocketFftComplex.ForwardReal(input);
+            demodulated = demodulated with { AnalogAudio = DecodeAnalogAudioBlock(inputSpectrum, _filters.LdAnalogAudio) };
+        }
+
+        if (_filterOptions.ExportRawTbc)
+        {
+            demodulated = demodulated with { Video = demodulated.DemodRaw };
+        }
+
+        return new RfPipelineBlock(input, demodulated);
+    }
+
+    public void Dispose()
+    {
+        _inputProcessor?.Dispose();
+    }
+
+    private static double[] DecodeChromaBurst(
+        ReadOnlySpan<double> input,
+        DecodeFilterSet filters)
+    {
+        bool retainFloat32 = filters.ChromaBurstSos is not null
+            && !filters.ChromaBurstUsesDemodulatedVideo;
+        double[] chroma = filters.ChromaBurstSos is not null
+            ? retainFloat32
+                ? SosFilter.ApplyForwardBackwardFloat32(filters.ChromaBurstSos, input)
+                : SosFilter.ApplyForwardBackward(filters.ChromaBurstSos, input)
+            : FilterRealSignal(
+                PocketFftComplex.ForwardReal(input),
+                filters.ChromaBurst ?? throw new InvalidOperationException("A chroma burst filter is required."));
+        if (filters.ChromaBurstAudioNotch is not null)
+        {
+            chroma = IirFilter.ApplyForwardBackward(filters.ChromaBurstAudioNotch, chroma);
+            retainFloat32 = false;
+        }
+
+        if (filters.ChromaBurstVideoNotch is not null)
+        {
+            chroma = IirFilter.ApplyForwardBackward(filters.ChromaBurstVideoNotch, chroma);
+            retainFloat32 = false;
+        }
+
+        if (retainFloat32)
+        {
+            return VhsChromaDecoder.ShiftChromaAndRemoveDcFloat32(chroma, filters.ChromaOffsetSamples);
+        }
+
+        if (filters.ChromaOffsetSamples != 0)
+        {
+            chroma = FrequencyDomainFilter.Roll(chroma, filters.ChromaOffsetSamples);
+        }
+
+        double mean = chroma.Length == 0 ? 0.0 : chroma.Average();
+        for (int i = 0; i < chroma.Length; i++)
+        {
+            chroma[i] -= mean;
+        }
+
+        return chroma;
+    }
+
+    private RfDemodulatedBlock DecodeCvbsBlock(ReadOnlySpan<double> input)
+    {
+        Complex[] inputSpectrum = PocketFftComplex.ForwardReal(input);
+        var inputHalfSpectrum = new Complex[(input.Length / 2) + 1];
+        inputSpectrum.AsSpan(0, inputHalfSpectrum.Length).CopyTo(inputHalfSpectrum);
+        double[] reconstructedInput = PocketFftReal.Inverse(inputHalfSpectrum, input.Length);
+        double[] luma = _cvbsOptions!.AutoSync
+            ? reconstructedInput
+            : ConvertCvbsRawToHz(reconstructedInput, _cvbsOptions.VideoOutput);
+        if (_filterOptions.ChromaTrap is not null)
+        {
+            luma = RfDemodulator.ApplyChromaTrap(luma, _demodulator.SampleRateHz, _filterOptions.ChromaTrap.FscHz);
+        }
+
+        if (_filterOptions.VideoNotchHz is { } notchHz)
+        {
+            luma = IirFilter.ApplyForwardBackward(
+                IirFilterDesign.Notch(
+                    notchHz / (_demodulator.SampleRateHz / 2.0),
+                    _filterOptions.VideoNotchQ),
+                luma);
+        }
+
+        Complex[] lumaSpectrum = PocketFftReal.Forward(luma);
+        double[] video = luma.ToArray();
+        double[] videoLowPass = FilterRealSignalPocket(
+            lumaSpectrum,
+            _filters.VideoLowPass05,
+            luma.Length);
+        if (_filters.VideoLowPass05Offset != 0)
+        {
+            videoLowPass = FrequencyDomainFilter.Roll(videoLowPass, -_filters.VideoLowPass05Offset);
+        }
+
+        double[]? videoBurst = _filters.CvbsVideoBurst is null
+            ? null
+            : FilterRealSignalPocket(lumaSpectrum, _filters.CvbsVideoBurst, luma.Length);
+        if (videoBurst is not null)
+        {
+            for (int i = 0; i < videoBurst.Length; i++)
+            {
+                videoBurst[i] = (float)videoBurst[i];
+            }
+        }
+
+        double[] envelope = new double[luma.Length];
+        for (int i = 0; i < envelope.Length; i++)
+        {
+            envelope[i] = Math.Abs(luma[i]);
+        }
+
+        return new RfDemodulatedBlock(
+            video,
+            luma.ToArray(),
+            [],
+            envelope,
+            videoLowPass,
+            luma.ToArray(),
+            VideoBurst: videoBurst);
+    }
+
+    public static double[] ConvertCvbsRawToHz(ReadOnlySpan<double> input, VideoOutputConverter converter)
+    {
+        var output = new double[input.Length];
+        double whiteHz = converter.IreToHz(100.0);
+        double syncHz = converter.IreToHz(converter.VSyncIre);
+        for (int i = 0; i < output.Length; i++)
+        {
+            double luma = input[i] + (ushort.MaxValue / 2.0);
+            luma /= 4.0 * ushort.MaxValue;
+            luma *= whiteHz;
+            luma += syncHz;
+            output[i] = luma;
+        }
+
+        return output;
+    }
+
+    private static double[] FilterRealSignal(ReadOnlySpan<Complex> spectrum, ReadOnlySpan<Complex> filter)
+    {
+        if (filter.Length != spectrum.Length)
+        {
+            throw new ArgumentException("Frequency filter length must match input block length.", nameof(filter));
+        }
+
+        var filtered = new Complex[spectrum.Length];
+        for (int i = 0; i < filtered.Length; i++)
+        {
+            filtered[i] = spectrum[i] * filter[i];
+        }
+
+        Complex[] complex = PocketFftComplex.Inverse(filtered);
+        var real = new double[complex.Length];
+        for (int i = 0; i < real.Length; i++)
+        {
+            real[i] = complex[i].Real;
+        }
+
+        return real;
+    }
+
+    private static double[] FilterRealSignalPocket(
+        ReadOnlySpan<Complex> halfSpectrum,
+        ReadOnlySpan<Complex> fullFilter,
+        int realLength)
+    {
+        int expectedHalfLength = (realLength / 2) + 1;
+        if (halfSpectrum.Length != expectedHalfLength)
+        {
+            throw new ArgumentException("Half-spectrum length must match the real input length.", nameof(halfSpectrum));
+        }
+
+        if (fullFilter.Length < expectedHalfLength)
+        {
+            throw new ArgumentException("Frequency filter is shorter than the real half-spectrum.", nameof(fullFilter));
+        }
+
+        var filtered = new Complex[expectedHalfLength];
+        for (int i = 0; i < filtered.Length; i++)
+        {
+            Complex value = halfSpectrum[i];
+            Complex coefficient = fullFilter[i];
+            filtered[i] = new Complex(
+                (value.Real * coefficient.Real) - (value.Imaginary * coefficient.Imaginary),
+                (value.Real * coefficient.Imaginary) + (value.Imaginary * coefficient.Real));
+        }
+
+        return PocketFftReal.Inverse(filtered, realLength);
+    }
+
+    private static short[] DecodeEfmBlock(ReadOnlySpan<Complex> spectrum, ReadOnlySpan<Complex> efmFilter)
+    {
+        double[] filtered = FilterRealSignal(spectrum, efmFilter);
+        var output = new short[filtered.Length];
+        for (int i = 0; i < output.Length; i++)
+        {
+            double clipped = Math.Clamp(filtered[i], short.MinValue, short.MaxValue);
+            output[i] = (short)clipped;
+        }
+
+        return output;
+    }
+
+    private static LaserDiscAnalogAudioBlock DecodeAnalogAudioBlock(
+        ReadOnlySpan<Complex> spectrum,
+        LaserDiscAnalogAudioFilterSet filters)
+    {
+        double[] left = DecodeAnalogAudioChannel(spectrum, filters.Left);
+        double[] right = DecodeAnalogAudioChannel(spectrum, filters.Right);
+        return new LaserDiscAnalogAudioBlock(left, right, filters.DecimationFactor);
+    }
+
+    private static double[] DecodeAnalogAudioChannel(
+        ReadOnlySpan<Complex> spectrum,
+        LaserDiscAnalogAudioChannelFilter filter)
+    {
+        Complex[] sliced = DecodeFilterSetBuilder.SliceSpectrum(spectrum, filter.LowBin, filter.BinCount, spectrum.Length);
+        for (int i = 0; i < sliced.Length; i++)
+        {
+            sliced[i] *= filter.Stage1Filter[i];
+        }
+
+        Complex[] analytic = PocketFftComplex.Inverse(sliced);
+        double[] demodulated = PortedMath.UnwrapHilbert(analytic, filter.SliceSampleRateHz);
+        for (int i = 0; i < demodulated.Length; i++)
+        {
+            demodulated[i] = (float)(demodulated[i] + filter.LowFrequencyHz);
+        }
+
+        return demodulated;
+    }
+
+    private static void QuantizeLaserDiscVideoChannels(RfDemodulatedBlock block)
+    {
+        QuantizeToFloat32InPlace(block.Video);
+        QuantizeToFloat32InPlace(block.DemodRaw);
+        QuantizeToFloat32InPlace(block.VideoLowPass);
+        QuantizeToFloat32InPlace(block.RfHighPass);
+        if (block.VideoBurst is not null)
+        {
+            QuantizeToFloat32InPlace(block.VideoBurst);
+        }
+
+        if (block.VideoPilot is not null)
+        {
+            QuantizeToFloat32InPlace(block.VideoPilot);
+        }
+    }
+
+    private static void QuantizeToFloat32InPlace(Span<double> values)
+    {
+        for (int i = 0; i < values.Length; i++)
+        {
+            values[i] = (float)values[i];
+        }
+    }
+}
+
+public sealed record RfPipelineBlock(double[] Input, RfDemodulatedBlock Demodulated);

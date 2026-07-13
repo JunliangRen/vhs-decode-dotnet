@@ -1,0 +1,9 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/VHSDecode.Cli/VHSDecode.Cli.csproj" />
+    <Project Path="src/VHSDecode.Core/VHSDecode.Core.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/VHSDecode.Tests/VHSDecode.Tests.csproj" />
+  </Folder>
+</Solution>

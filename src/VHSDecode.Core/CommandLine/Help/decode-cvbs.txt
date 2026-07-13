@@ -1,0 +1,71 @@
+usage: decode.py [-h] [--system system] [-s start]
+                 [--start_fileloc start_fileloc] [-l length] [--overwrite]
+                 [--write_db] [-f FREQ] [-t threads] [--ct] [--sl sharpness]
+                 [--notch notch] [--notch_q notch_q] [-p] [-n] [--pm]
+                 [--NTSCJ] [--debug] [--skip_hsync_refine] [-S seek]
+                 [--no_auto_sync] [-C] [--agc_speed speed]
+                 [--agc_gain_factor factor] [--agc_set_gain gain]
+                 [--right_hand_hsync]
+                 [--wow_level_adjust_smoothing WOW_LEVEL_ADJUST_SMOOTHING]
+                 [--wow_interpolation_method {linear,quadratic,cubic}]
+                 [infile] [outfile]
+
+Extracts video from raw cvbs captures
+
+positional arguments:
+  infile                source file
+  outfile               base name for destination files
+
+options:
+  -h, --help            show this help message and exit
+  --system system       video system (overriden by individual options)
+  -t threads, --threads threads
+                        number of CPU threads to use
+  -S seek, --seek seek  seek to frame n of capture
+  --no_auto_sync        Disable auto sync level detection.
+  -C, --clamp_agc       Clamp signal (black level) and enable automatic gain control.
+  --agc_speed speed     sets how fast the AGC should react (0 = never, 1 = immediate).
+  --agc_gain_factor factor
+                        adjusts the AGC white level by given factor.
+  --agc_set_gain gain   override gain of AGC.
+  --right_hand_hsync    Additionally use right hand side of hsync for line start detection. Improves accuracy on tape sources but might cause issues on high bandwidth stable ones
+  --wow_level_adjust_smoothing WOW_LEVEL_ADJUST_SMOOTHING
+                        Adjusts the amount of smoothing in lines that is performed when compensating for brightness variations caused by wow. (default 0)
+                          Wow calculation is based on position of hsync pulses which is affected by the accuracy of the TBC. 
+                          If you see vertical brightness variations (banding), setting to a value larger than 0 will smooth the wow adjustment.
+  --wow_interpolation_method {linear,quadratic,cubic}
+                        Sets the type of interpolation spline used to correct wow.
+                          linear     [default]
+                          quadratic
+                          cubic
+
+File options:
+  -s start, --start start
+                        rough jump to frame n of capture (default is 0)
+  --start_fileloc start_fileloc
+                        jump to precise sample # in the file
+  -l length, --length length
+                        limit length to n frames
+  --overwrite           Overwrite existing decode files.
+  --write_db            Enable sqlite output (slow on hdds), not finalized, option may change
+
+Input format:
+  -f FREQ, --frequency FREQ
+                        RF sampling frequency in source file (default is 40MHz)
+
+Extra filtering:
+  --ct, --chroma_trap   Enable luma filter that filters in some areas around the color frequency. This will soften the image and have a noticeable impact on decoding speed.
+  --sl sharpness, --sharpness sharpness
+                        Enable a crude sharpness filter - Sharpness level (0~100)
+  --notch notch         Center frequency of optional notch filter on rf and chroma.
+  --notch_q notch_q     Q factor for notch filter
+
+Video system options:
+  -p, --pal             source is in PAL format
+  -n, --ntsc            source is in NTSC format
+  --pm, --palm          source is in PAL-M format
+  --NTSCJ               source is in NTSC-J (IRE 0 black) format
+
+Debug options:
+  --debug               Set log legel to DEBUG.
+  --skip_hsync_refine   Skip refining line locations using hsync - less accurate line start detection but may avoid issues in some cases..
