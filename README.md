@@ -537,9 +537,9 @@ Implemented:
   `.tbc` output, writes `outbase.log` diagnostics, returns `0` on success and
   the conventional runtime failure code `1` without the former .NET-port
   disclaimer; argument errors remain exit code `2`
-- release identity now matches the tagged v0.4.0 source checkout as
-  `vhs_decode:g43155200`; LD `--version`, JSON/SQLite `version` and git fields, and
-  `outbase.log` all use that same upstream-compatible value and logging prefix
+- release identity now matches v0.4.0's generated `vhsdecode._version` metadata
+  as `vhs_decode:g4315520`; LD `--version`, JSON/SQLite `version` and git fields,
+  and `outbase.log` all use that same upstream-compatible value and logging prefix
 - SOS direct-form filtering plus forward/backward zero-phase filtering;
   high-order Butterworth band-pass design now follows SciPy's ZPK transform,
   NumPy/OpenBLAS complex-product rounding, and `np.poly` convolution order,
@@ -873,9 +873,11 @@ Implemented:
 - on the same varying-level fixture, default non-clamped CVBS with `--threads 0`
   now reproduces v0.4.0's synchronous speculative-field timing: each requested
   field is rendered with the next decoded field's `ire0`/`hz_ire`, the producer
-  lookahead is not written past `--length`, all 710,510 TBC samples are
-  byte-exact, both fields' 90/45 `syncConf` and all other non-build JSON field
-  metadata match, and normalized logs match in order and content
+  lookahead is not written past `--length`, all 710,510 TBC samples and the
+  complete JSON are byte-exact with respective SHA-256 hashes
+  `EA2060F1C50E450ECD68E41719F55060733BF1E0CF26DF1F784EF61E3513EF51`
+  and `783A0DAC238A72433523659AC73C6A2D11357684631071A0A8DEE206E323EBDC`,
+  and normalized logs match in order and content
 - a one-frame real NTSC LD/LDF fixture with default EFM and analog audio also
   matches v0.4.0 byte for byte: main TBC
   `7F19286F84D563D58983C50326CE16433ED9DA90459ADA658532EB38A5AF686A`,

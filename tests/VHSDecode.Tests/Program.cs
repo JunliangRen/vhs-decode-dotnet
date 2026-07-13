@@ -493,7 +493,7 @@ public void DecodeVersionInfoParsesUpstreamGitFormats()
     AssertEqual(("main", "abcdef"), DecodeVersionInfo.ExtractGitVersionParts("main:abcdef:extra"));
     AssertEqual(("feature", "1234567"), DecodeVersionInfo.ExtractGitVersionParts("feature/1234567"));
     AssertEqual(("release", "beefcafe"), DecodeVersionInfo.ExtractGitVersionParts("1.2.3+git.beefcafe.dirty"));
-    AssertEqual(("vhs_decode", "g43155200"), DecodeVersionInfo.ExtractGitVersionParts(DecodeVersionInfo.Version));
+    AssertEqual(("vhs_decode", "g4315520"), DecodeVersionInfo.ExtractGitVersionParts(DecodeVersionInfo.Version));
 }
 
 [Fact(DisplayName = "decode version OS info matches Python platform shape")]
@@ -556,7 +556,7 @@ public void DecodeSessionLogsMatchUpstreamEntryPoints()
             Path.Combine(tempDirectory, "ld")
         ]), blockLength: 4096);
         string ldLog = File.ReadAllText(DecodeSessionLogWriter.Write(ld));
-        AssertContains(ldLog, " - lddecode - DEBUG - ld-decode version vhs_decode:g43155200");
+        AssertContains(ldLog, " - lddecode - DEBUG - ld-decode version vhs_decode:g4315520");
         AssertFalse(ldLog.Contains("Sys Parameters", StringComparison.Ordinal));
         AssertFalse(ldLog.Contains("RF Parameters", StringComparison.Ordinal));
 
@@ -2075,7 +2075,7 @@ public void DecodeRunnerHandlesEmptyNativeDecodes()
         AssertEqual(0L, SqliteLong(ldDbPath, "SELECT COUNT(*) FROM field_record"));
         AssertContains(
             File.ReadAllText(Path.Combine(tempDirectory, "ld-pal.log")),
-            " - lddecode - DEBUG - ld-decode version vhs_decode:g43155200");
+            " - lddecode - DEBUG - ld-decode version vhs_decode:g4315520");
 
         string resamplingBase = Path.Combine(tempDirectory, "resampling");
         ParsedCommand resamplingMissingInput = Parse(CliSpecs.Vhs, ["-f", "8fsc", Path.Combine(tempDirectory, "missing.u8"), resamplingBase]);
@@ -9427,7 +9427,7 @@ public void TbcFirstFieldEngineWritesOutputArtifacts()
         AssertEqual(DecodeVersionInfo.Version, video.GetProperty("version").GetString());
         AssertFalse(string.IsNullOrWhiteSpace(video.GetProperty("osInfo").GetString()));
         AssertEqual("vhs_decode", video.GetProperty("gitBranch").GetString());
-        AssertEqual("g43155200", video.GetProperty("gitCommit").GetString());
+        AssertEqual("g4315520", video.GetProperty("gitCommit").GetString());
         AssertEqual("PAL", video.GetProperty("system").GetString());
         AssertFalse(video.TryGetProperty("decoder", out _));
         AssertEqual("VHS", video.GetProperty("tapeFormat").GetString());
@@ -10016,7 +10016,7 @@ public void TbcFieldSequenceEngineWritesSqliteDebugDb()
         AssertEqual("PAL", SqliteString(result.Paths.DbPath!, "SELECT system FROM capture"));
         AssertEqual("ld-decode", SqliteString(result.Paths.DbPath!, "SELECT decoder FROM capture"));
         AssertEqual("vhs_decode", SqliteString(result.Paths.DbPath!, "SELECT git_branch FROM capture"));
-        AssertEqual("g43155200", SqliteString(result.Paths.DbPath!, "SELECT git_commit FROM capture"));
+        AssertEqual("g4315520", SqliteString(result.Paths.DbPath!, "SELECT git_commit FROM capture"));
         AssertEqual(2L, SqliteLong(result.Paths.DbPath!, "SELECT number_of_sequential_fields FROM capture"));
         AssertEqual(2L, SqliteLong(result.Paths.DbPath!, "SELECT COUNT(*) FROM field_record"));
         AssertEqual(1L, SqliteLong(result.Paths.DbPath!, "SELECT capture_id FROM field_record WHERE field_id = 0"));
@@ -10947,7 +10947,7 @@ public void TbcMetadataWriterEmitsLdUpstreamFields()
         AssertEqual(DecodeVersionInfo.Version, videoParameters.GetProperty("version").GetString());
         AssertFalse(string.IsNullOrWhiteSpace(videoParameters.GetProperty("osInfo").GetString()));
         AssertEqual("vhs_decode", videoParameters.GetProperty("gitBranch").GetString());
-        AssertEqual("g43155200", videoParameters.GetProperty("gitCommit").GetString());
+        AssertEqual("g4315520", videoParameters.GetProperty("gitCommit").GetString());
         AssertClose(session.VideoOutput.ConvertHz(session.VideoOutput.IreToHz(session.BlackIre)), JsonDouble(videoParameters, "black16bIre"), 1e-12);
         JsonElement fields = document.RootElement.GetProperty("fields");
         JsonElement first = fields[0];
@@ -11349,7 +11349,7 @@ public void TbcMetadataWriterEmitsCvbsUpstreamFields()
         AssertEqual(DecodeVersionInfo.Version, video.GetProperty("version").GetString());
         AssertFalse(string.IsNullOrWhiteSpace(video.GetProperty("osInfo").GetString()));
         AssertEqual("vhs_decode", video.GetProperty("gitBranch").GetString());
-        AssertEqual("g43155200", video.GetProperty("gitCommit").GetString());
+        AssertEqual("g4315520", video.GetProperty("gitCommit").GetString());
         AssertEqual("PAL-M", video.GetProperty("system").GetString());
         AssertFalse(video.TryGetProperty("decoder", out _));
         AssertFalse(video.TryGetProperty("tapeFormat", out _));
