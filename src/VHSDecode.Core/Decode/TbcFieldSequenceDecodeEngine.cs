@@ -201,6 +201,9 @@ public sealed class TbcFieldSequenceDecodeEngine
         int decodedFieldCount = 0;
         long laserDiscWrittenFieldCount = 0;
         int laserDiscLeadOutCount = 0;
+        TbcDecodedField? firstLaserDiscField = null;
+        bool laserDiscLeadIn = false;
+        bool laserDiscLeadOut = false;
         bool haveFirstTapeField = false;
         string? pendingTapeFrameStatus = null;
         (TbcDecodedField Field, int DecodedIndex)? pendingCvbsField = null;
@@ -231,7 +234,38 @@ public sealed class TbcFieldSequenceDecodeEngine
             }
 
             bool isFirstField = completedField.DetectedFirstField ?? ((decodedIndex & 1) == 0);
-            if (session.Spec.Name == "cvbs" && !isFirstField)
+            if (session.Spec.Name == "ld")
+            {
+                if (isFirstField)
+                {
+                    firstLaserDiscField = completedField;
+                }
+                else if (firstLaserDiscField is not null)
+                {
+                    int rawFrame = checked((int)Math.Floor(
+                        ComputeFieldDiskLocation(session, completedField) / 2.0));
+                    int framesPerSecond = string.Equals(
+                        session.System,
+                        "PAL",
+                        StringComparison.OrdinalIgnoreCase) ? 25 : 30;
+                    LaserDiscVbiInterpretation interpretation = LaserDiscVbiInterpreter.Interpret(
+                        (firstLaserDiscField.VbiData ?? []).Concat(completedField.VbiData ?? []),
+                        framesPerSecond);
+                    laserDiscLeadIn |= interpretation.LeadIn;
+                    laserDiscLeadOut |= interpretation.LeadOut;
+                    DecodeSessionLogWriter.Append(
+                        session,
+                        "DEBUG",
+                        FormatLaserDiscFrameStatus(
+                            decodedIndex,
+                            session.RunBounds.RequestedFieldCount / 2,
+                            rawFrame,
+                            interpretation,
+                            laserDiscLeadIn,
+                            laserDiscLeadOut));
+                }
+            }
+            else if (session.Spec.Name == "cvbs" && !isFirstField)
             {
                 int rawFrame = checked((int)Math.Floor(
                     ComputeFieldDiskLocation(session, completedField) / 2.0));
@@ -436,6 +470,55 @@ public sealed class TbcFieldSequenceDecodeEngine
             decodedFieldCount,
             firstDecodedSample,
             endDecodedSample);
+    }
+
+    internal static string FormatLaserDiscFrameStatus(
+        int decodedFieldIndex,
+        int estimatedFrames,
+        int rawFrame,
+        LaserDiscVbiInterpretation interpretation,
+        bool leadIn,
+        bool leadOut)
+    {
+        int frame = (decodedFieldIndex / 2) + 1;
+        string diskType = interpretation.IsClv ? "CLV" : "CAV";
+        string prefix = $"Frame {frame}/{estimatedFrames}: File Frame {rawFrame}: {diskType} ";
+        if (interpretation.IsClv
+            && interpretation.IsEarlyClv
+            && interpretation.ClvMinutes.HasValue)
+        {
+            return prefix + $"Timecode {interpretation.ClvMinutes.Value}:xx";
+        }
+
+        if (interpretation.IsClv
+            && interpretation.FrameNumber.HasValue
+            && interpretation.ClvMinutes.HasValue
+            && interpretation.ClvSeconds.HasValue
+            && interpretation.ClvFrameNumber.HasValue)
+        {
+            return prefix
+                + $"Timecode {interpretation.ClvMinutes.Value}:"
+                + $"{interpretation.ClvSeconds.Value:00}."
+                + $"{interpretation.ClvFrameNumber.Value:00} "
+                + $"Frame #{interpretation.FrameNumber.Value}";
+        }
+
+        if (interpretation.FrameNumber is > 0)
+        {
+            return prefix + $"Frame #{interpretation.FrameNumber.Value}";
+        }
+
+        if (leadIn)
+        {
+            return prefix + "Lead In";
+        }
+
+        if (leadOut)
+        {
+            return prefix + "Lead Out";
+        }
+
+        return prefix + "Pulldown/Telecine Frame";
     }
 
     private static TbcDecodedField FinalizeDeferredCvbsRender(

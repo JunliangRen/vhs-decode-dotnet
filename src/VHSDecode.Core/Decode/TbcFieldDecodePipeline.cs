@@ -1708,23 +1708,18 @@ public sealed class TbcFieldDecodePipeline
             return lineLocations;
         }
 
-        int fieldLineBoundary = CurrentFieldLineCount(isFirstField)
-            + LaserDiscLineOffset(isFirstField);
         double[] firstPass = RefineLaserDiscPalLineLocationsFromPilotPass(
             pilot,
-            lineLocations.Locations,
-            fieldLineBoundary);
+            lineLocations.Locations);
         double[] secondPass = RefineLaserDiscPalLineLocationsFromPilotPass(
             pilot,
-            firstPass,
-            fieldLineBoundary);
+            firstPass);
         return lineLocations with { Locations = secondPass };
     }
 
     private double[] RefineLaserDiscPalLineLocationsFromPilotPass(
         ReadOnlySpan<double> pilot,
-        IReadOnlyList<double> lineLocations,
-        int fieldLineBoundary)
+        IReadOnlyList<double> lineLocations)
     {
         double[] output = lineLocations.ToArray();
         int lineCount = Math.Min(323, lineLocations.Count);
@@ -1743,7 +1738,6 @@ public sealed class TbcFieldDecodePipeline
                 lineLocations,
                 line,
                 pilotHalfPeriods[line],
-                fieldLineBoundary,
                 out double phase)
                 ? phase
                 : line > 0 ? zeroCrossingPhases[line - 1] : 0.0;
@@ -1766,7 +1760,6 @@ public sealed class TbcFieldDecodePipeline
         IReadOnlyList<double> lineLocations,
         int line,
         double pilotHalfPeriodSamples,
-        int fieldLineBoundary,
         out double phase)
     {
         phase = 0.0;
@@ -1775,7 +1768,6 @@ public sealed class TbcFieldDecodePipeline
                 pilot,
                 lineLocations,
                 line,
-                fieldLineBoundary,
                 out int start,
                 out int length,
                 out double lineOffset))
@@ -1808,7 +1800,6 @@ public sealed class TbcFieldDecodePipeline
         ReadOnlySpan<double> source,
         IReadOnlyList<double> lineLocations,
         int line,
-        int fieldLineBoundary,
         out int start,
         out int length,
         out double lineOffset)
@@ -1827,15 +1818,24 @@ public sealed class TbcFieldDecodePipeline
             return false;
         }
 
-        double lineSamplesPerUsec = LaserDiscLineSamplesPerUsec(
-            lineLocations,
-            line,
-            fieldLineBoundary);
-        start = Math.Clamp((int)Math.Floor(lineStart), 0, source.Length);
-        int end = Math.Clamp((int)Math.Floor(lineStart + (6.0 * lineSamplesPerUsec) + 1.0), start, source.Length);
-        length = end - start;
-        lineOffset = lineStart - start;
+        (start, length, lineOffset) = LaserDiscPilotSliceBounds(
+            lineStart,
+            _syncAnalyzer.SampleRateMHz,
+            source.Length);
         return length > 1;
+    }
+
+    internal static (int Start, int Length, double LineOffset) LaserDiscPilotSliceBounds(
+        double lineStart,
+        double sampleRateMHz,
+        int sourceLength)
+    {
+        int start = Math.Clamp((int)Math.Floor(lineStart), 0, sourceLength);
+        int end = Math.Clamp(
+            (int)Math.Floor(lineStart + (6.0 * sampleRateMHz) + 1.0),
+            start,
+            sourceLength);
+        return (start, end - start, lineStart - start);
     }
 
     private double LaserDiscPilotHalfPeriodSamples(IReadOnlyList<double> lineLocations, int line)

@@ -889,6 +889,13 @@ Implemented:
   and the same JSON hash
   `783A0DAC238A72433523659AC73C6A2D11357684631071A0A8DEE206E323EBDC`,
   while normalized logs also match in order and content
+- a deterministic one-frame 40 MHz PAL LD RF fixture now exercises the full
+  pilot/burst/vblank, bad-line repair, eight-field phase, dropout, VITS,
+  TBC/JSON/SQLite, and frame-status path; PAL pilot repair recomputes the final
+  derivative-error mask like v0.4.0, restoring exact `syncConf` values 90/100
+  and the exact second-field dropout coordinates, while normalized logs match
+  in order and content; three repeated .NET runs produced stable TBC, JSON, and
+  SQLite hashes, and the remaining numerical deltas are recorded below
 - a one-frame real NTSC LD/LDF fixture with default EFM and analog audio also
   matches v0.4.0 byte for byte: main TBC
   `7F19286F84D563D58983C50326CE16433ED9DA90459ADA658532EB38A5AF686A`,
@@ -909,6 +916,11 @@ Not complete yet:
 - CVBS double-precision FFT round-trip tails still differ at approximately
   1e-11 when upstream uses SciPy 1.18's DUCC backend; this disappears in the
   current float32 channel baselines but remains an explicit parity item
+- the deterministic PAL LD fixture has 428,608 of 710,510 TBC samples exact;
+  the remaining samples have mean absolute error 4.618 and extrema -2,556 to
+  +2,546, while JSON and SQLite differ only in first-field `medianBurstIRE`
+  (4.177 versus 4.175) and `bPSNR` (21.2 versus 21.3); these residual PAL LD
+  pilot/RF numerical differences remain a bit-parity item
 - remaining container-specific resampling edge cases
 - remaining real-capture PAL LD and AC3 end-to-end fixtures, external AC3
   tool-pipeline parity, and remaining verbose VITS field calibration details
@@ -936,7 +948,7 @@ dotnet test VHSDecodeDotNet.slnx --no-build
 ```
 
 The current formal solution build completes with zero warnings and errors, and
-the xUnit project exposes 209 independently discoverable compatibility tests to
+the xUnit project exposes 212 independently discoverable compatibility tests to
 `dotnet test` and Visual Studio Test Explorer. On the
 same Windows machine and fixtures, Release wall-clock measurements for one
 frame were 2.346 s versus 7.193 s for NTSC VHS and 1.651 s versus 5.865 s for

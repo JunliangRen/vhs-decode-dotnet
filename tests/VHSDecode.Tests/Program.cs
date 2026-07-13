@@ -6634,8 +6634,8 @@ public void LaserDiscLineLocationRepairMatchesUpstreamRules()
     }
 
     var repairSource = new LineLocationResult(
-        [0.0, 100.0, 250.0, 400.0, 500.0],
-        [false, false, true, true, false]);
+        [0.0, 100.0, 200.0, 350.0, 500.0, 650.0],
+        new bool[6]);
     LineLocationResult repaired = LaserDiscLineLocationRepair.FixBadLines(
         repairSource,
         system: "NTSC");
@@ -8681,6 +8681,18 @@ public void TbcFieldDecodePipelineRefinesLdPalPilotLineLocations()
     AssertClose(1.2, boundaryLineRate, 1e-12);
 }
 
+[Fact(DisplayName = "LD PAL pilot slice uses nominal input frequency")]
+public void LaserDiscPalPilotSliceUsesNominalInputFrequency()
+{
+    (int start, int length, double lineOffset) = TbcFieldDecodePipeline.LaserDiscPilotSliceBounds(
+        lineStart: 100.25,
+        sampleRateMHz: 1.0,
+        sourceLength: 1_000);
+    AssertEqual(100, start);
+    AssertEqual(7, length);
+    AssertClose(0.25, lineOffset, 1e-12);
+}
+
 [Fact(DisplayName = "TBC field decode determines PAL eight-field burst phase transactionally")]
 public void TbcFieldDecodeDeterminesPalBurstPhaseTransactionally()
 {
@@ -9793,6 +9805,109 @@ public void TbcFieldSequenceEnginePerformsVhsTerminalLookahead()
     {
         Directory.Delete(tempDirectory, recursive: true);
     }
+}
+
+[Fact(DisplayName = "TBC field sequence engine emits LD frame status")]
+public void TbcFieldSequenceEngineEmitsLdFrameStatus()
+{
+    string tempDirectory = Path.Combine(Path.GetTempPath(), "vhsdecode-dotnet-tests-" + Guid.NewGuid().ToString("N"));
+    Directory.CreateDirectory(tempDirectory);
+    try
+    {
+        string outputBase = Path.Combine(tempDirectory, "ld-status");
+        using DecodeSession session = DecodeSessionFactory.Create(Parse(CliSpecs.LaserDisc, [
+            "--PAL",
+            "--length", "2",
+            "--noEFM",
+            "--disable_analog_audio",
+            "input.s16",
+            outputBase
+        ]));
+
+        TbcDecodedField? ReadField(DecodeSession activeSession, Stream _, long begin, int __, int fieldNumber)
+        {
+            if (fieldNumber >= 4)
+            {
+                return null;
+            }
+
+            int[] vbiData = fieldNumber == 3
+                ? [EncodeLaserDiscCavFrameCode(123)]
+                : [];
+            return BuildSyntheticTbcField(
+                    begin,
+                    new ushort[activeSession.TbcFrameSpec.FieldSampleCount],
+                    detectedFirstField: (fieldNumber & 1) == 0)
+                with
+                {
+                    DiskLocation = fieldNumber,
+                    FieldPhaseId = fieldNumber + 1,
+                    NextFieldOffsetSamples = 100.0,
+                    VbiData = vbiData
+                };
+        }
+
+        TbcFieldSequenceDecodeResult result = new TbcFieldSequenceDecodeEngine(
+            readField: ReadField).TryDecodeAndWrite(session, Stream.Null);
+
+        AssertTrue(result.Success);
+        string log = File.ReadAllText(outputBase + ".log");
+        AssertTrue(log.Contains(
+            "DEBUG - Frame 1/2: File Frame 0: CAV Pulldown/Telecine Frame",
+            StringComparison.Ordinal));
+        AssertTrue(log.Contains(
+            "DEBUG - Frame 2/2: File Frame 1: CAV Frame #123",
+            StringComparison.Ordinal));
+    }
+    finally
+    {
+        Directory.Delete(tempDirectory, recursive: true);
+    }
+}
+
+[Fact(DisplayName = "LD frame status formats CLV and persistent lead states")]
+public void LaserDiscFrameStatusFormatsClvAndPersistentLeadStates()
+{
+    var earlyClv = new LaserDiscVbiInterpretation(
+        FrameNumber: 4_980,
+        IsClv: true,
+        IsEarlyClv: true,
+        ClvMinutes: 83,
+        ClvSeconds: null,
+        ClvFrameNumber: null,
+        LeadIn: false,
+        LeadOut: false);
+    AssertEqual(
+        "Frame 1/10: File Frame 4: CLV Timecode 83:xx",
+        TbcFieldSequenceDecodeEngine.FormatLaserDiscFrameStatus(1, 10, 4, earlyClv, false, false));
+
+    var clv = earlyClv with
+    {
+        FrameNumber = 149_862,
+        IsEarlyClv = false,
+        ClvSeconds = 15,
+        ClvFrameNumber = 12
+    };
+    AssertEqual(
+        "Frame 2/10: File Frame 5: CLV Timecode 83:15.12 Frame #149862",
+        TbcFieldSequenceDecodeEngine.FormatLaserDiscFrameStatus(3, 10, 5, clv, false, false));
+
+    var noCode = new LaserDiscVbiInterpretation(null, false, false, null, null, null, false, false);
+    AssertEqual(
+        "Frame 3/10: File Frame 6: CAV Lead In",
+        TbcFieldSequenceDecodeEngine.FormatLaserDiscFrameStatus(5, 10, 6, noCode, true, true));
+    AssertEqual(
+        "Frame 3/10: File Frame 6: CAV Lead Out",
+        TbcFieldSequenceDecodeEngine.FormatLaserDiscFrameStatus(5, 10, 6, noCode, false, true));
+    AssertEqual(
+        "Frame 3/10: File Frame 6: CAV Pulldown/Telecine Frame",
+        TbcFieldSequenceDecodeEngine.FormatLaserDiscFrameStatus(
+            5,
+            10,
+            6,
+            noCode with { FrameNumber = 0 },
+            false,
+            false));
 }
 
 [Fact(DisplayName = "TBC field sequence engine streams fields before decode completes")]
