@@ -878,6 +878,17 @@ Implemented:
   `EA2060F1C50E450ECD68E41719F55060733BF1E0CF26DF1F784EF61E3513EF51`
   and `783A0DAC238A72433523659AC73C6A2D11357684631071A0A8DEE206E323EBDC`,
   and normalized logs match in order and content
+- worker-thread CVBS now reproduces v0.4.0's shared `ire0`/`hz_ire` timing as
+  well: the next field starts before current-field resampling, the first
+  producer handoff preserves Python's resampler warm-up window, later fields
+  snapshot whichever shared levels are visible after resampling, and unused
+  lookahead completes without being written past `--length`; two- and
+  four-field runs are byte-exact for TBC and complete JSON, with the two-field
+  TBC hash
+  `995ACC39AE430A5B279D4E52750F8899C69B3B292A08E71BA5B6D507C298001A`
+  and the same JSON hash
+  `783A0DAC238A72433523659AC73C6A2D11357684631071A0A8DEE206E323EBDC`,
+  while normalized logs also match in order and content
 - a one-frame real NTSC LD/LDF fixture with default EFM and analog audio also
   matches v0.4.0 byte for byte: main TBC
   `7F19286F84D563D58983C50326CE16433ED9DA90459ADA658532EB38A5AF686A`,
@@ -898,10 +909,6 @@ Not complete yet:
 - CVBS double-precision FFT round-trip tails still differ at approximately
   1e-11 when upstream uses SciPy 1.18's DUCC backend; this disappears in the
   current float32 channel baselines but remains an explicit parity item
-- worker-thread default non-clamped CVBS output still cannot deterministically
-  reproduce the Python decoder's shared `ire0`/`hz_ire` scheduling race;
-  `--threads 0` is deterministic and byte-exact, while worker runs can render
-  with either the current or next field's levels depending on timing
 - remaining container-specific resampling edge cases
 - remaining real-capture PAL LD and AC3 end-to-end fixtures, external AC3
   tool-pipeline parity, and remaining verbose VITS field calibration details
@@ -929,7 +936,7 @@ dotnet test VHSDecodeDotNet.slnx --no-build
 ```
 
 The current formal solution build completes with zero warnings and errors, and
-the xUnit project exposes 206 independently discoverable compatibility tests to
+the xUnit project exposes 209 independently discoverable compatibility tests to
 `dotnet test` and Visual Studio Test Explorer. On the
 same Windows machine and fixtures, Release wall-clock measurements for one
 frame were 2.346 s versus 7.193 s for NTSC VHS and 1.651 s versus 5.865 s for

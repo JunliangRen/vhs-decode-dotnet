@@ -131,6 +131,7 @@ internal sealed record Line0FallbackCandidate(
 internal sealed record TbcFieldDecodeState(
     (double SyncLevel, double BlankLevel)? LastDetectedSyncLevels,
     (double SyncLevel, double BlankLevel)? DelayedCvbsSyncLevels,
+    VideoOutputConverter CurrentCvbsOutputConverter,
     long? PreviousAnalogAudioStartSample,
     long PreviousAnalogAudioFieldNumber,
     int? ChromaRotationIndex,
@@ -182,6 +183,7 @@ public sealed class TbcFieldDecodePipeline
     private readonly int _inputBlockCutSamples;
     private (double SyncLevel, double BlankLevel)? _lastDetectedSyncLevels;
     private (double SyncLevel, double BlankLevel)? _delayedCvbsSyncLevels;
+    private VideoOutputConverter _currentCvbsOutputConverter;
     private long? _previousAnalogAudioStartSample;
     private long _previousAnalogAudioFieldNumber;
     private int? _chromaRotationIndex;
@@ -244,6 +246,7 @@ public sealed class TbcFieldDecodePipeline
         _hSyncRefineOptions = hSyncRefineOptions ?? HSyncRefineOptions.Disabled;
         _syncDetectionOptions = syncDetectionOptions ?? SyncDetectionOptions.Disabled;
         _delayedCvbsSyncLevels = renderer.LastCvbsSyncLevels;
+        _currentCvbsOutputConverter = videoOutput;
         _decodeLaserDiscVbi = decodeLaserDiscVbi;
         _decodeVbiData = decodeLaserDiscVbi || decodeVbiData;
         _preserveRawMetricSources = preserveRawMetricSources;
@@ -271,6 +274,7 @@ public sealed class TbcFieldDecodePipeline
         return new TbcFieldDecodeState(
             _lastDetectedSyncLevels,
             _delayedCvbsSyncLevels,
+            Volatile.Read(ref _currentCvbsOutputConverter),
             _previousAnalogAudioStartSample,
             _previousAnalogAudioFieldNumber,
             _chromaRotationIndex,
@@ -297,6 +301,7 @@ public sealed class TbcFieldDecodePipeline
         VideoOutputConverter? adjustedAgcConverter = _laserDiscAgcConverter;
         _lastDetectedSyncLevels = state.LastDetectedSyncLevels;
         _delayedCvbsSyncLevels = state.DelayedCvbsSyncLevels;
+        Volatile.Write(ref _currentCvbsOutputConverter, state.CurrentCvbsOutputConverter);
         _previousAnalogAudioStartSample = state.PreviousAnalogAudioStartSample;
         _previousAnalogAudioFieldNumber = state.PreviousAnalogAudioFieldNumber;
         _chromaRotationIndex = state.ChromaRotationIndex;
@@ -490,6 +495,16 @@ public sealed class TbcFieldDecodePipeline
         => string.Equals(_decodeType, "cvbs", StringComparison.Ordinal)
             && _syncDetectionOptions.CvbsAutoSync
             && _renderer.CvbsClampAgc is null;
+
+    internal VideoOutputConverter CurrentCvbsOutputConverter
+    {
+        get => Volatile.Read(ref _currentCvbsOutputConverter);
+        set
+        {
+            ArgumentNullException.ThrowIfNull(value);
+            Volatile.Write(ref _currentCvbsOutputConverter, value);
+        }
+    }
 
     private TbcDecodedField DecodeCore(
         RfDecodedSpan span,
@@ -1356,6 +1371,10 @@ public sealed class TbcFieldDecodePipeline
                         _videoOutput.OutputZero,
                         _videoOutput.VSyncIre,
                         _videoOutput.OutputScale);
+                    if (CanDeferCvbsOutputConversion)
+                    {
+                        CurrentCvbsOutputConverter = converterOverride;
+                    }
                 }
             }
         }

@@ -7255,6 +7255,44 @@ public void TbcFieldRendererEmitsRawFloatPayloads()
     AssertEqual((ushort)666, rendered.Samples[0]);
 }
 
+[Fact(DisplayName = "TBC field renderer snapshots a dynamic converter after resampling")]
+public void TbcFieldRendererSnapshotsDynamicConverterAfterResampling()
+{
+    var spec = new TbcFrameSpec(
+        "NTSC",
+        OutputLineLength: 3,
+        OutputLineCount: 2,
+        OutputSampleRateHz: 14_318_180.0,
+        ColourBurstStart: null,
+        ColourBurstEnd: null,
+        ActiveVideoStart: null,
+        ActiveVideoEnd: null);
+    var fallback = new VideoOutputConverter(0.0, 1.0, 256, -40.0, 10.0);
+    var selected = new VideoOutputConverter(5.0, 2.0, 256, -40.0, 10.0);
+    var renderer = new TbcFieldRenderer(spec, fallback);
+    double[] videoHz = [10.0, 20.0, 30.0, 40.0, 50.0, 60.0];
+    int providerCalls = 0;
+
+    TbcRenderedField rendered = renderer.RenderFieldPayloadWithConverterProvider(
+        videoHz,
+        [0.0, 3.0, 6.0],
+        firstLine: 0,
+        lineCount: null,
+        fieldNumber: 0,
+        converterFallback: fallback,
+        converterProvider: () =>
+        {
+            providerCalls++;
+            Array.Fill(videoHz, 1_000.0);
+            return selected;
+        });
+
+    AssertEqual(1, providerCalls);
+    AssertEqual(selected.ConvertHz(10.0), rendered.Samples[0]);
+    AssertTrue(rendered.Samples[0] != selected.ConvertHz(1_000.0));
+    AssertTrue(ReferenceEquals(selected, rendered.OutputConverter));
+}
+
 [Fact(DisplayName = "TBC field renderer applies y-comb")]
 public void TbcFieldRendererAppliesYComb()
 {
@@ -10107,8 +10145,8 @@ public void TbcFieldSequenceEngineHonorsDecodedNextFieldOffsets()
     AssertEqual(375L, TbcFieldSequenceDecodeEngine.EstimateNextFieldStart(session, fields[^1]));
 }
 
-[Fact(DisplayName = "CVBS serial output deferral is enabled only for the deterministic path")]
-public void CvbsSerialOutputDeferralIsEnabledOnlyForDeterministicPath()
+[Fact(DisplayName = "CVBS output deferral covers serial and worker auto-sync paths")]
+public void CvbsOutputDeferralCoversSerialAndWorkerAutoSyncPaths()
 {
     using DecodeSession serial = DecodeSessionFactory.Create(Parse(CliSpecs.Cvbs, [
         "--threads", "0", "input.s16", "serial"
@@ -10124,9 +10162,59 @@ public void CvbsSerialOutputDeferralIsEnabledOnlyForDeterministicPath()
     ]));
 
     AssertTrue(TbcFieldSequenceDecodeEngine.ShouldDeferCvbsOutputConversion(serial));
-    AssertFalse(TbcFieldSequenceDecodeEngine.ShouldDeferCvbsOutputConversion(worker));
+    AssertTrue(TbcFieldSequenceDecodeEngine.ShouldDeferCvbsOutputConversion(worker));
     AssertFalse(TbcFieldSequenceDecodeEngine.ShouldDeferCvbsOutputConversion(staticLevels));
     AssertFalse(TbcFieldSequenceDecodeEngine.ShouldDeferCvbsOutputConversion(clamp));
+}
+
+[Fact(DisplayName = "CVBS worker prefetch exposes next-field levels before current conversion")]
+public void CvbsWorkerPrefetchExposesNextFieldLevelsBeforeCurrentConversion()
+{
+    using DecodeSession session = DecodeSessionFactory.Create(Parse(CliSpecs.Cvbs, [
+        "--pal", "--threads", "1", "input.s16", "out"
+    ]));
+    VideoOutputConverter firstConverter = BuildCvbsTestConverter(session, ire0: 10.0);
+    VideoOutputConverter secondConverter = BuildCvbsTestConverter(session, ire0: 20.0);
+    TbcDecodedField[] sourceFields =
+    [
+        BuildDeferredCvbsField(session, 0, 0, 50.0, firstConverter, true),
+        BuildDeferredCvbsField(session, 100, 1, 60.0, secondConverter, false)
+    ];
+    ushort firstOwnLevel = RenderDeferredCvbsFirstSample(session, sourceFields[0], firstConverter);
+    ushort firstNextLevel = RenderDeferredCvbsFirstSample(session, sourceFields[0], secondConverter);
+    int callingThread = Environment.CurrentManagedThreadId;
+    int secondReaderThread = 0;
+    int reads = 0;
+
+    TbcDecodedField? ReadField(DecodeSession activeSession, Stream _, long begin, int __, int fieldNumber)
+    {
+        Interlocked.Increment(ref reads);
+        VideoOutputConverter converter = fieldNumber == 0 ? firstConverter : secondConverter;
+        activeSession.TbcFieldDecoder.CurrentCvbsOutputConverter = converter;
+        if (fieldNumber == 1)
+        {
+            Volatile.Write(ref secondReaderThread, Environment.CurrentManagedThreadId);
+        }
+
+        return fieldNumber < sourceFields.Length
+            ? sourceFields[fieldNumber] with { StartSample = begin }
+            : null;
+    }
+
+    var engine = new TbcFieldSequenceDecodeEngine(readField: ReadField)
+    {
+        EnableWorkerPrefetchForCustomReader = true
+    };
+    IReadOnlyList<TbcDecodedField> fields = engine.DecodeFields(session, Stream.Null, maxFields: 2);
+
+    AssertEqual(2, reads);
+    AssertEqual(2, fields.Count);
+    AssertEqual(firstNextLevel, fields[0].Samples[0]);
+    AssertTrue(firstOwnLevel != fields[0].Samples[0]);
+    AssertClose(secondConverter.Ire0, fields[0].OutputConverter!.Ire0, 0.0);
+    AssertClose(secondConverter.Ire0, fields[1].OutputConverter!.Ire0, 0.0);
+    AssertTrue(Volatile.Read(ref secondReaderThread) != callingThread);
+    AssertTrue(fields.All(field => field.DeferredRenderSource is null));
 }
 
 [Fact(DisplayName = "CVBS serial max-fields conversion uses the next field and flushes the tail")]
@@ -10240,6 +10328,70 @@ public void CvbsSerialLengthLookaheadIsDecodedButNotWritten()
         AssertTrue(logLines[1].EndsWith(
             "DEBUG - File Frame 0: CAV Pulldown/Telecine Frame",
             StringComparison.Ordinal));
+    }
+    finally
+    {
+        Directory.Delete(tempDirectory, recursive: true);
+    }
+}
+
+[Fact(DisplayName = "CVBS worker length lookahead completes without being written")]
+public void CvbsWorkerLengthLookaheadCompletesWithoutBeingWritten()
+{
+    string tempDirectory = Path.Combine(Path.GetTempPath(), "vhsdecode-dotnet-tests-" + Guid.NewGuid().ToString("N"));
+    Directory.CreateDirectory(tempDirectory);
+    try
+    {
+        using DecodeSession session = DecodeSessionFactory.Create(Parse(CliSpecs.Cvbs, [
+            "--pal",
+            "--threads", "1",
+            "--length", "1",
+            "input.s16",
+            Path.Combine(tempDirectory, "cvbs-worker-prefetch")
+        ]));
+        VideoOutputConverter[] converters =
+        [
+            BuildCvbsTestConverter(session, ire0: 10.0),
+            BuildCvbsTestConverter(session, ire0: 20.0),
+            BuildCvbsTestConverter(session, ire0: 30.0)
+        ];
+        TbcDecodedField[] sourceFields = converters
+            .Select((converter, fieldNumber) => BuildDeferredCvbsField(
+                session,
+                fieldNumber * 100L,
+                fieldNumber,
+                50.0 + (fieldNumber * 10.0),
+                converter,
+                detectedFirstField: (fieldNumber & 1) == 0))
+            .ToArray();
+        int reads = 0;
+
+        TbcDecodedField? ReadField(DecodeSession activeSession, Stream _, long begin, int __, int fieldNumber)
+        {
+            Interlocked.Increment(ref reads);
+            if (fieldNumber >= sourceFields.Length)
+            {
+                return null;
+            }
+
+            activeSession.TbcFieldDecoder.CurrentCvbsOutputConverter = converters[fieldNumber];
+            return sourceFields[fieldNumber] with { StartSample = begin };
+        }
+
+        var engine = new TbcFieldSequenceDecodeEngine(readField: ReadField)
+        {
+            EnableWorkerPrefetchForCustomReader = true
+        };
+        TbcFieldSequenceDecodeResult result = engine.TryDecodeAndWrite(session, Stream.Null);
+
+        AssertTrue(result.Success);
+        AssertEqual(3, reads);
+        AssertEqual(2, result.WrittenFieldCount);
+        AssertEqual(
+            session.TbcFrameSpec.FieldSampleCount * 2 * sizeof(ushort),
+            File.ReadAllBytes(result.Paths!.TbcPath).Length);
+        using JsonDocument document = JsonDocument.Parse(File.ReadAllText(result.Paths.JsonPath));
+        AssertEqual(2, document.RootElement.GetProperty("fields").GetArrayLength());
     }
     finally
     {

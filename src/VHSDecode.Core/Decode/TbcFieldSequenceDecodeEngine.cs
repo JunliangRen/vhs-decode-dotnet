@@ -27,6 +27,48 @@ public sealed class TbcFieldSequenceDecodeEngine
     private readonly ILdTestLdfWriter _testLdfWriter;
     private readonly ILaserDiscEfmOutputWriter _efmOutputWriter;
     private readonly TbcFieldSequenceReadField _readField;
+    private readonly bool _usesSessionReader;
+
+    private sealed class CvbsPrefetchSlot : IDisposable
+    {
+        public Task<TbcDecodedField?>? Current { get; private set; }
+
+        public void Set(Task<TbcDecodedField?> task)
+        {
+            if (Current is not null)
+            {
+                throw new InvalidOperationException("A CVBS field prefetch is already in progress.");
+            }
+
+            Current = task;
+        }
+
+        public Task<TbcDecodedField?>? Take()
+        {
+            Task<TbcDecodedField?>? task = Current;
+            Current = null;
+            return task;
+        }
+
+        public void Dispose()
+        {
+            Task<TbcDecodedField?>? task = Take();
+            if (task is null)
+            {
+                return;
+            }
+
+            try
+            {
+                _ = task.GetAwaiter().GetResult();
+            }
+            catch (Exception)
+            {
+                // Producer lookahead is discarded once output is complete.
+            }
+        }
+    }
+
     private sealed record SequenceDecodeSummary(
         IReadOnlyList<TbcDecodedField> Fields,
         int DecodedFieldCount,
@@ -47,10 +89,13 @@ public sealed class TbcFieldSequenceDecodeEngine
         ExtraReadLines = extraReadLines;
         _testLdfWriter = testLdfWriter ?? new FfmpegLdTestLdfWriter();
         _efmOutputWriter = efmOutputWriter ?? new LaserDiscEfmOutputWriter();
+        _usesSessionReader = readField is null;
         _readField = readField ?? ReadFieldFromSession;
     }
 
     public int ExtraReadLines { get; }
+
+    internal bool EnableWorkerPrefetchForCustomReader { get; init; }
 
     public TbcFieldSequenceDecodeResult TryDecodeAndWrite(DecodeSession session, int? maxFields = null)
     {
@@ -159,6 +204,8 @@ public sealed class TbcFieldSequenceDecodeEngine
         bool haveFirstTapeField = false;
         string? pendingTapeFrameStatus = null;
         (TbcDecodedField Field, int DecodedIndex)? pendingCvbsField = null;
+        bool useCvbsWorkerPrefetch = ShouldUseCvbsWorkerPrefetch(session);
+        using var cvbsPrefetch = new CvbsPrefetchSlot();
         LaserDiscAutoMtfController? autoMtf = session.Spec.Name == "ld"
             ? new LaserDiscAutoMtfController()
             : null;
@@ -205,7 +252,10 @@ public sealed class TbcFieldSequenceDecodeEngine
                 : session.TbcFieldDecoder.CaptureState();
             try
             {
-                field = _readField(session, input, begin, readLength, decodedFieldCount);
+                Task<TbcDecodedField?>? prefetchedField = cvbsPrefetch.Take();
+                field = prefetchedField is null
+                    ? _readField(session, input, begin, readLength, decodedFieldCount)
+                    : prefetchedField.GetAwaiter().GetResult();
                 if (field is not null && autoMtf is not null)
                 {
                     LaserDiscMtfUpdate mtfUpdate = autoMtf.Observe(field.BlackToWhiteRfRatio);
@@ -256,6 +306,22 @@ public sealed class TbcFieldSequenceDecodeEngine
             decodedFieldCount++;
             firstDecodedSample ??= field.StartSample;
             endDecodedSample = EstimateNextFieldStart(session, field);
+            long nextBegin = endDecodedSample.Value;
+            if (nextBegin <= begin)
+            {
+                throw new InvalidOperationException("Decoded field did not advance the input position.");
+            }
+
+            bool mayPrefetchNextField = !maxFields.HasValue || decodedFieldCount < requestedFields;
+            if (useCvbsWorkerPrefetch && mayPrefetchNextField)
+            {
+                cvbsPrefetch.Set(StartCvbsPrefetch(
+                    session,
+                    input,
+                    nextBegin,
+                    readLength,
+                    fieldNumber: decodedFieldCount));
+            }
 
             if (pendingCvbsField is not null)
             {
@@ -269,9 +335,22 @@ public sealed class TbcFieldSequenceDecodeEngine
 
             if (field.DeferredRenderSource is not null)
             {
-                // v0.4.0 with --threads 0 synchronously decodes the next field
-                // before downscaling the current one, exposing the next levels.
-                pendingCvbsField = (field, decodedFieldCount - 1);
+                if (useCvbsWorkerPrefetch)
+                {
+                    CompleteField(
+                        FinalizeDeferredCvbsWorkerRender(
+                            session,
+                            field,
+                            cvbsPrefetch.Current,
+                            waitForInitialProducer: decodedFieldCount == 1),
+                        decodedFieldCount - 1);
+                }
+                else
+                {
+                    // v0.4.0 with --threads 0 synchronously decodes the next field
+                    // before downscaling the current one, exposing the next levels.
+                    pendingCvbsField = (field, decodedFieldCount - 1);
+                }
             }
             else
             {
@@ -300,12 +379,6 @@ public sealed class TbcFieldSequenceDecodeEngine
                     ref laserDiscLeadOutCount))
             {
                 break;
-            }
-
-            long nextBegin = endDecodedSample.Value;
-            if (nextBegin <= begin)
-            {
-                throw new InvalidOperationException("Decoded field did not advance the input position.");
             }
 
             begin = nextBegin;
@@ -392,6 +465,75 @@ public sealed class TbcFieldSequenceDecodeEngine
         };
     }
 
+    private static TbcDecodedField FinalizeDeferredCvbsWorkerRender(
+        DecodeSession session,
+        TbcDecodedField field,
+        Task<TbcDecodedField?>? prefetchedField,
+        bool waitForInitialProducer)
+    {
+        TbcDeferredRenderSource? source = field.DeferredRenderSource;
+        if (source is null)
+        {
+            return field;
+        }
+
+        TbcRenderedField rendered = session.TbcRenderer.RenderFieldPayloadWithConverterProvider(
+            source.VideoHz,
+            source.LineLocations,
+            firstLine: source.FirstLine,
+            lineCount: null,
+            fieldNumber: source.FieldNumber,
+            converterFallback: field.OutputConverter,
+            converterProvider: () => ResolveCvbsWorkerOutputConverter(
+                session,
+                field.OutputConverter,
+                prefetchedField,
+                waitForInitialProducer));
+        return field with
+        {
+            Samples = rendered.Samples,
+            OutputPayload = rendered.OutputPayload,
+            OutputConverter = rendered.OutputConverter ?? field.OutputConverter,
+            DeferredRenderSource = null
+        };
+    }
+
+    private static VideoOutputConverter ResolveCvbsWorkerOutputConverter(
+        DecodeSession session,
+        VideoOutputConverter? fieldConverter,
+        Task<TbcDecodedField?>? prefetchedField,
+        bool waitForInitialProducer)
+    {
+        if (waitForInitialProducer && prefetchedField is not null)
+        {
+            // The first v0.4.0 Numba downscale leaves enough warm-up time for
+            // the speculative producer to publish its auto-sync levels.
+            VideoOutputConverter initialConverter = fieldConverter
+                ?? session.TbcFieldDecoder.CurrentCvbsOutputConverter;
+            SpinWait.SpinUntil(() =>
+                prefetchedField.IsCompleted
+                || !ReferenceEquals(
+                    initialConverter,
+                    session.TbcFieldDecoder.CurrentCvbsOutputConverter));
+        }
+
+        return session.TbcFieldDecoder.CurrentCvbsOutputConverter;
+    }
+
+    private Task<TbcDecodedField?> StartCvbsPrefetch(
+        DecodeSession session,
+        Stream input,
+        long begin,
+        int readLength,
+        int fieldNumber)
+    {
+        return Task.Factory.StartNew(
+            () => _readField(session, input, begin, readLength, fieldNumber),
+            CancellationToken.None,
+            TaskCreationOptions.LongRunning | TaskCreationOptions.DenyChildAttach,
+            TaskScheduler.Default);
+    }
+
     private static void LogRecovery(DecodeSession session, TbcFieldDecodeRecoveryException exception)
     {
         if (session.Spec.Name != "vhs")
@@ -454,8 +596,14 @@ public sealed class TbcFieldSequenceDecodeEngine
     internal static bool ShouldDeferCvbsOutputConversion(DecodeSession session)
     {
         return session.Spec.Name == "cvbs"
-            && session.ExecutionOptions.RequestedThreads == 0
             && session.TbcFieldDecoder.CanDeferCvbsOutputConversion;
+    }
+
+    private bool ShouldUseCvbsWorkerPrefetch(DecodeSession session)
+    {
+        return (_usesSessionReader || EnableWorkerPrefetchForCustomReader)
+            && session.ExecutionOptions.RequestedThreads != 0
+            && ShouldDeferCvbsOutputConversion(session);
     }
 
     private long ResolveInitialDecodeStart(DecodeSession session, Stream input, int readLength)
