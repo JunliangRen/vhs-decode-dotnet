@@ -658,7 +658,7 @@ public sealed class HiFiCompatibilityTests
         using var decoder = new HiFiBlockDecoder(options);
         float[] input = CreateDeterministicFloatInput(524_288);
 
-        HiFiDemodulatedBlock block = decoder.Decode(input);
+        HiFiDemodulatedBlock block = decoder.DecodeDemodulated(input);
 
         Assert.NotNull(block.Left);
         Assert.NotNull(block.Right);
@@ -668,6 +668,80 @@ public sealed class HiFiCompatibilityTests
         Assert.Equal(expectedRightDcBits, BitConverter.SingleToUInt32Bits(block.RightDc).ToString("X8"));
         Assert.Equal(expectedLeftHash, BinarySha256(block.Left));
         Assert.Equal(expectedRightHash, BinarySha256(block.Right));
+    }
+
+    [Theory(DisplayName = "HiFi complete block processing matches v0.4.0 float bits")]
+    [InlineData("s", "full", true, 48000, 1.0, 629, "BE838838", "BE09159B", "208C036C426C4CCA461FF8B8D4C770820A6E06DF23E63A3E7C47C2757F38B907", "208C036C426C4CCA461FF8B8D4C770820A6E06DF23E63A3E7C47C2757F38B907", false)]
+    [InlineData("ms", "mute", false, 44100, 1.25, 578, "BE838838", "BE09159B", "C9F915AD404290EB5A5162CA2E553453A5AE635BCC884FF6857D7E09741C4E07", "35956830DC0E1C6938923D39E417EBA774C6B059BB38A8A8DE026DA72F74DA51", false)]
+    [InlineData("d", "full", true, 48000, 1.0, 629, "BE838838", "BE09159B", "208C036C426C4CCA461FF8B8D4C770820A6E06DF23E63A3E7C47C2757F38B907", "208C036C426C4CCA461FF8B8D4C770820A6E06DF23E63A3E7C47C2757F38B907", false)]
+    [InlineData("dms", "full", true, 48000, 1.0, 629, "BE838838", "BE09159B", "208C036C426C4CCA461FF8B8D4C770820A6E06DF23E63A3E7C47C2757F38B907", "4330D0001EC7082BB5BC85059C5C88B7D41138EC33E6C1527BA9EDF67B7DC935", false)]
+    [InlineData("l", "full", true, 48000, 1.5, 629, "BE838838", "00000000", "DABE8B87A1C2702662C808BF9773DC48939E7489ACA1DCD76C73D9CF466D8A40", "DABE8B87A1C2702662C808BF9773DC48939E7489ACA1DCD76C73D9CF466D8A40", true)]
+    [InlineData("r", "full", true, 48000, 1.5, 629, "00000000", "BE09159B", "DABE8B87A1C2702662C808BF9773DC48939E7489ACA1DCD76C73D9CF466D8A40", "DABE8B87A1C2702662C808BF9773DC48939E7489ACA1DCD76C73D9CF466D8A40", true)]
+    [InlineData("sum", "off", false, 192000, 0.75, 2517, "BE838838", "BE09159B", "0706583B82645CCBCCE76B21EC61846389C187938AE970859F353BA8DB2F06CC", "0706583B82645CCBCCE76B21EC61846389C187938AE970859F353BA8DB2F06CC", false)]
+    public void HiFiCompleteBlockProcessingMatchesV040FloatBits(
+        string audioMode,
+        string dropoutCompensation,
+        bool headSwitchingInterpolation,
+        int audioRateHz,
+        double gain,
+        int expectedLength,
+        string expectedLeftDcBits,
+        string expectedRightDcBits,
+        string expectedLeftHash,
+        string expectedRightHash,
+        bool expectedAlias)
+    {
+        HiFiDecodeOptions options = DefaultOptions() with
+        {
+            AudioMode = audioMode,
+            DropoutCompensation = dropoutCompensation,
+            HeadSwitchingInterpolation = headSwitchingInterpolation,
+            AudioRateHz = audioRateHz,
+            Gain = gain,
+            ResamplerQuality = "high"
+        };
+        using var decoder = new HiFiBlockDecoder(options);
+
+        HiFiDecodedBlock block = decoder.Decode(CreateDeterministicFloatInput(524_288));
+
+        Assert.Equal(expectedLength, block.Left.Length);
+        Assert.Equal(expectedLength, block.Right.Length);
+        Assert.Equal(expectedAlias, ReferenceEquals(block.Left, block.Right));
+        Assert.Equal(expectedLeftDcBits, BitConverter.SingleToUInt32Bits(block.LeftDc).ToString("X8"));
+        Assert.Equal(expectedRightDcBits, BitConverter.SingleToUInt32Bits(block.RightDc).ToString("X8"));
+        Assert.Equal(expectedLeftHash, BinarySha256(block.Left));
+        Assert.Equal(expectedRightHash, BinarySha256(block.Right));
+    }
+
+    [Fact(DisplayName = "HiFi automatic fine tuning updates the next v0.4.0 block")]
+    public void HiFiAutomaticFineTuningUpdatesNextV040Block()
+    {
+        HiFiDecodeOptions options = DefaultOptions() with
+        {
+            AutoFineTune = true,
+            DropoutCompensation = HiFiConstants.DropoutCompensationDisabled,
+            HeadSwitchingInterpolation = false,
+            AudioRateHz = HiFiConstants.IntermediateAudioRate,
+            ResamplerQuality = "high"
+        };
+        using var decoder = new HiFiBlockDecoder(options);
+        float[] input = CreateDeterministicFloatInput(524_288);
+
+        _ = decoder.Decode(input);
+        HiFiDemodulatedBlock nextBlock = decoder.DecodeDemodulated(input);
+
+        Assert.Equal(1_290_000.0, decoder.LeftCarrierHz);
+        Assert.Equal(1_690_000.0, decoder.RightCarrierHz);
+        Assert.NotNull(nextBlock.Left);
+        Assert.NotNull(nextBlock.Right);
+        Assert.Equal("BE8EFBCD", BitConverter.SingleToUInt32Bits(nextBlock.LeftDc).ToString("X8"));
+        Assert.Equal("BE186602", BitConverter.SingleToUInt32Bits(nextBlock.RightDc).ToString("X8"));
+        Assert.Equal(
+            "363016368BABEBADFA1401E478C598E9B95B9968A2D68C6DEBEB32C11BC0A40A",
+            BinarySha256(nextBlock.Left));
+        Assert.Equal(
+            "89D407E78179ADDC1299F5F3A81FFB6310374A9484A45E3932499DF103185873",
+            BinarySha256(nextBlock.Right));
     }
 
     [Theory(DisplayName = "HiFi Numba fast mean reduction matches v0.4.0 float bits")]
@@ -988,7 +1062,8 @@ public sealed class HiFiCompatibilityTests
         };
         using var decoder = new HiFiBlockDecoder(options);
 
-        HiFiDemodulatedBlock block = decoder.Decode(CreateDeterministicFloatInput(524_288));
+        HiFiDemodulatedBlock block = decoder.DecodeDemodulated(
+            CreateDeterministicFloatInput(524_288));
 
         Assert.Equal(expectsLeft, block.Left is not null);
         Assert.Equal(expectsRight, block.Right is not null);

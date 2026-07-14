@@ -6,18 +6,28 @@ public sealed record HiFiDemodulatedBlock(
     float LeftDc,
     float RightDc);
 
+public sealed record HiFiDecodedBlock(
+    float[] Left,
+    float[] Right,
+    float LeftDc,
+    float RightDc);
+
 public sealed class HiFiBlockDecoder : IDisposable
 {
     private readonly HiFiDecodePlan _plan;
     private readonly HiFiBlockResamplers _resamplers;
-    private readonly HiFiAfeFilter _leftAfe;
-    private readonly HiFiAfeFilter _rightAfe;
-    private readonly HiFiQuadratureDiscriminator? _leftQuadrature;
-    private readonly HiFiQuadratureDiscriminator? _rightQuadrature;
-    private readonly HiFiHilbertDiscriminator? _leftHilbert;
-    private readonly HiFiHilbertDiscriminator? _rightHilbert;
+    private readonly HiFiHeadSwitchProcessor? _headSwitchProcessor;
+    private readonly int _maximumOscillatorLength;
     private readonly bool _decodeLeft;
     private readonly bool _decodeRight;
+    private HiFiAfeFilter _leftAfe = null!;
+    private HiFiAfeFilter _rightAfe = null!;
+    private HiFiQuadratureDiscriminator? _leftQuadrature;
+    private HiFiQuadratureDiscriminator? _rightQuadrature;
+    private HiFiHilbertDiscriminator? _leftHilbert;
+    private HiFiHilbertDiscriminator? _rightHilbert;
+    private double _leftCarrierHz;
+    private double _rightCarrierHz;
 
     public HiFiBlockDecoder(HiFiDecodeOptions options)
     {
@@ -26,41 +36,77 @@ public sealed class HiFiBlockDecoder : IDisposable
         Options = options;
         _plan = HiFiDecodePlan.FromOptions(options);
         _resamplers = new HiFiBlockResamplers(_plan);
-        (_leftAfe, _rightAfe) = HiFiAfeFilter.FromPlan(_plan);
         _decodeLeft = options.AudioMode != HiFiConstants.AudioModeMonoRight;
         _decodeRight = options.AudioMode != HiFiConstants.AudioModeMonoLeft;
-
-        int maximumOscillatorLength = _plan.InitialBlockSizes.IfSamples;
-        if (options.DemodType == HiFiConstants.DemodQuadrature)
-        {
-            _leftQuadrature = new HiFiQuadratureDiscriminator(
-                _plan.IfRateHz,
-                _plan.Afe.LeftCarrierHz,
-                _plan.Afe.LeftCarrierDeviationHz,
-                maximumOscillatorLength);
-            _rightQuadrature = new HiFiQuadratureDiscriminator(
-                _plan.IfRateHz,
-                _plan.Afe.RightCarrierHz,
-                _plan.Afe.RightCarrierDeviationHz,
-                maximumOscillatorLength);
-        }
-        else
-        {
-            _leftHilbert = new HiFiHilbertDiscriminator(
-                _plan.IfRateHz,
-                _plan.Afe.LeftCarrierHz,
-                _plan.Afe.LeftCarrierDeviationHz);
-            _rightHilbert = new HiFiHilbertDiscriminator(
-                _plan.IfRateHz,
-                _plan.Afe.RightCarrierHz,
-                _plan.Afe.RightCarrierDeviationHz);
-        }
+        _maximumOscillatorLength = _plan.InitialBlockSizes.IfSamples;
+        _leftCarrierHz = _plan.Afe.LeftCarrierHz;
+        _rightCarrierHz = _plan.Afe.RightCarrierHz;
+        ConfigureSignalPath();
+        _headSwitchProcessor = options.HeadSwitchingInterpolation
+            ? new HiFiHeadSwitchProcessor(_plan.AudioRateHz, _plan.Afe.FieldRateHz)
+            : null;
     }
 
     public HiFiDecodeOptions Options { get; }
     public HiFiDecodePlan Plan => _plan;
+    public double LeftCarrierHz => _leftCarrierHz;
+    public double RightCarrierHz => _rightCarrierHz;
 
-    public HiFiDemodulatedBlock Decode(ReadOnlySpan<float> rfData)
+    public HiFiDecodedBlock Decode(ReadOnlySpan<float> rfData)
+    {
+        HiFiDemodulatedBlock demodulated = DecodeDemodulated(rfData);
+        float[]? left = demodulated.Left;
+        float[]? right = demodulated.Right;
+
+        HiFiDropoutCompensator.Compensate(
+            left,
+            right,
+            Options.AudioMode,
+            Options.DropoutCompensation);
+
+        if (_headSwitchProcessor is not null)
+        {
+            if (left is not null)
+            {
+                left = _headSwitchProcessor.RemoveNoise(left);
+            }
+
+            if (right is not null)
+            {
+                right = _headSwitchProcessor.RemoveNoise(right);
+            }
+        }
+
+        if (left is not null)
+        {
+            left = _resamplers.ResampleLeftAudioToFinal(left);
+        }
+
+        if (right is not null)
+        {
+            right = _resamplers.ResampleRightAudioToFinal(right);
+        }
+
+        if (Options.AutoFineTune)
+        {
+            AutoFineTune(demodulated.LeftDc, demodulated.RightDc);
+        }
+
+        (float[] mixedLeft, float[] mixedRight) = MixForMode(left, right, Options.AudioMode);
+        if (Options.Gain != 1.0)
+        {
+            AdjustGain(mixedLeft, Options.Gain);
+            AdjustGain(mixedRight, Options.Gain);
+        }
+
+        return new HiFiDecodedBlock(
+            mixedLeft,
+            mixedRight,
+            demodulated.LeftDc,
+            demodulated.RightDc);
+    }
+
+    internal HiFiDemodulatedBlock DecodeDemodulated(ReadOnlySpan<float> rfData)
     {
         if (rfData.IsEmpty)
         {
@@ -126,5 +172,153 @@ public sealed class HiFiBlockDecoder : IDisposable
         }
 
         return output;
+    }
+
+    private void AutoFineTune(float leftDc, float rightDc)
+    {
+        if (_decodeLeft)
+        {
+            double updated = Math.Round(
+                _plan.Afe.LeftCarrierHz + (leftDc * _plan.Afe.LeftCarrierDeviationHz),
+                MidpointRounding.ToEven);
+            _leftCarrierHz = Math.Clamp(
+                updated,
+                _plan.Afe.LeftCarrierHz - 10_000.0,
+                _plan.Afe.LeftCarrierHz + 10_000.0);
+        }
+
+        if (_decodeRight)
+        {
+            double updated = Math.Round(
+                _plan.Afe.RightCarrierHz + (rightDc * _plan.Afe.RightCarrierDeviationHz),
+                MidpointRounding.ToEven);
+            _rightCarrierHz = Math.Clamp(
+                updated,
+                _plan.Afe.RightCarrierHz - 10_000.0,
+                _plan.Afe.RightCarrierHz + 10_000.0);
+        }
+
+        ConfigureSignalPath();
+    }
+
+    private void ConfigureSignalPath()
+    {
+        _leftAfe = new HiFiAfeFilter(
+            _plan.IfRateHz,
+            _leftCarrierHz,
+            _plan.Afe.LeftNotchWidthHz);
+        _rightAfe = new HiFiAfeFilter(
+            _plan.IfRateHz,
+            _rightCarrierHz,
+            _plan.Afe.RightNotchWidthHz);
+
+        if (Options.DemodType == HiFiConstants.DemodQuadrature)
+        {
+            _leftQuadrature = new HiFiQuadratureDiscriminator(
+                _plan.IfRateHz,
+                _leftCarrierHz,
+                _plan.Afe.LeftCarrierDeviationHz,
+                _maximumOscillatorLength);
+            _rightQuadrature = new HiFiQuadratureDiscriminator(
+                _plan.IfRateHz,
+                _rightCarrierHz,
+                _plan.Afe.RightCarrierDeviationHz,
+                _maximumOscillatorLength);
+            _leftHilbert = null;
+            _rightHilbert = null;
+        }
+        else
+        {
+            _leftHilbert = new HiFiHilbertDiscriminator(
+                _plan.IfRateHz,
+                _leftCarrierHz,
+                _plan.Afe.LeftCarrierDeviationHz);
+            _rightHilbert = new HiFiHilbertDiscriminator(
+                _plan.IfRateHz,
+                _rightCarrierHz,
+                _plan.Afe.RightCarrierDeviationHz);
+            _leftQuadrature = null;
+            _rightQuadrature = null;
+        }
+    }
+
+    private static (float[] Left, float[] Right) MixForMode(
+        float[]? left,
+        float[]? right,
+        string audioMode)
+        => audioMode switch
+        {
+            HiFiConstants.AudioModeStereoMidSide or HiFiConstants.AudioModeDualMonoMidSide
+                => AddSubtractChannels(left, right),
+            HiFiConstants.AudioModeMonoLeft => DuplicateChannel(left, nameof(left)),
+            HiFiConstants.AudioModeMonoRight => DuplicateChannel(right, nameof(right)),
+            HiFiConstants.AudioModeMonoSum => SumChannels(left, right),
+            HiFiConstants.AudioModeStereo or HiFiConstants.AudioModeDualMono
+                => RequireStereo(left, right),
+            _ => throw new ArgumentException($"Unsupported HiFi audio mode: {audioMode}.", nameof(audioMode))
+        };
+
+    private static (float[] Left, float[] Right) AddSubtractChannels(
+        float[]? left,
+        float[]? right)
+    {
+        (float[] sourceLeft, float[] sourceRight) = RequireStereo(left, right);
+        var mixedLeft = new float[sourceLeft.Length];
+        var mixedRight = new float[sourceLeft.Length];
+        for (int i = 0; i < mixedLeft.Length; i++)
+        {
+            float sum = sourceLeft[i] + sourceRight[i];
+            float difference = sourceLeft[i] - sourceRight[i];
+            mixedLeft[i] = sum * 0.5f;
+            mixedRight[i] = difference * 0.5f;
+        }
+
+        return (mixedLeft, mixedRight);
+    }
+
+    private static (float[] Left, float[] Right) SumChannels(
+        float[]? left,
+        float[]? right)
+    {
+        (float[] sourceLeft, float[] sourceRight) = RequireStereo(left, right);
+        var mixedLeft = new float[sourceLeft.Length];
+        for (int i = 0; i < mixedLeft.Length; i++)
+        {
+            float sum = sourceLeft[i] + sourceRight[i];
+            mixedLeft[i] = sum * 0.5f;
+        }
+
+        return (mixedLeft, mixedLeft.ToArray());
+    }
+
+    private static (float[] Left, float[] Right) DuplicateChannel(
+        float[]? channel,
+        string parameterName)
+    {
+        ArgumentNullException.ThrowIfNull(channel, parameterName);
+        return (channel, channel);
+    }
+
+    private static (float[] Left, float[] Right) RequireStereo(
+        float[]? left,
+        float[]? right)
+    {
+        ArgumentNullException.ThrowIfNull(left);
+        ArgumentNullException.ThrowIfNull(right);
+        if (left.Length != right.Length)
+        {
+            throw new ArgumentException("HiFi channel lengths must match before stereo mixing.");
+        }
+
+        return (left, right);
+    }
+
+    private static void AdjustGain(Span<float> audio, double gain)
+    {
+        float gainFloat = (float)gain;
+        for (int i = 0; i < audio.Length; i++)
+        {
+            audio[i] *= gainFloat;
+        }
     }
 }
