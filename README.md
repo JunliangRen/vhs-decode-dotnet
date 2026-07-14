@@ -848,12 +848,14 @@ Implemented:
   real-input Hilbert transforms, and NumPy complex-magnitude rounding preserve
   the float64 source bits while those formats continue not to emit a chroma
   sidecar
-- nine deterministic full-field chroma baselines cover PAL-M VHS, MESECAM VHS,
-  PAL/NTSC Video8, PAL/NTSC Hi8, PAL Betamax AFC, and PAL/NTSC Video8 AFC with
-  chroma-audio plus user notches. All 2,733,332 output samples match v0.4.0 bit
-  for bit, with staged hashes locking prefilters, notches, carrier estimates,
-  heterodyne/phase compensation, final filters, deemphasis, comb, and automatic
-  chroma gain
+- thirty independently discoverable deterministic full-field chroma baselines
+  cover every explicitly routed PAL/NTSC color-under family: VHS, VHSHQ,
+  S-VHS/S-VHS ET, U-matic variants, Betamax/HiFi/SuperBeta, Video8/Hi8, EIAJ,
+  VCR/VCR-LP, and Video 2000, plus PAL-M, MESECAM, NLINHA, Betamax AFC, and
+  PAL/NTSC Video8 AFC with chroma-audio plus user notches. All 9,150,099 output
+  samples match v0.4.0 bit for bit, with staged hashes locking prefilters,
+  notches, carrier estimates, heterodyne/phase compensation, final filters,
+  deemphasis, comb, and automatic chroma gain
 - complete deterministic 313-line PAL VHS burst-phase sequences with track
   detection both disabled and enabled match v0.4.0 bit for bit, including
   every per-line phase/I/Q/magnitude tuple, bottom-of-field lookahead and phase
@@ -998,7 +1000,7 @@ dotnet test VHSDecodeDotNet.slnx --no-build
 ```
 
 The current formal solution build completes with zero warnings and errors, and
-the xUnit v3 project exposes 236 independently discoverable compatibility tests
+the xUnit v3 project exposes 262 independently discoverable compatibility tests
 to `dotnet test` and Visual Studio Test Explorer. On the
 same Windows machine and fixtures, Release wall-clock measurements for one
 frame were 2.346 s versus 7.193 s for NTSC VHS and 1.651 s versus 5.865 s for

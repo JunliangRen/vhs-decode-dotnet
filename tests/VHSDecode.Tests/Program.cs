@@ -3403,90 +3403,107 @@ public void VhsChromaDecoderEmitsFieldSamples()
     AssertFalse(expectedPrecisionSamples.SequenceEqual(wrongDoublePrecisionSamples));
 }
 
-[Fact(DisplayName = "format-specific VHS chroma fields match v0.4.0 bits")]
-public void FormatSpecificVhsChromaFieldsMatchReleaseBits()
+[Theory(DisplayName = "format-specific chroma field matches v0.4.0 bits")]
+[InlineData(0, "PAL_M", "VHS", "481FAD75D80528B5B24AC9DC0662CA93EDD193BB3C0CE9EE86A89BDB667756FE")]
+[InlineData(1, "MESECAM", "VHS", "5F727C2341456CD7B9A77179A8C5E72FFFF5E01C84E6496AB4F84E3E49C68AE7")]
+[InlineData(2, "PAL", "VIDEO8", "D0C90ACD8472376761F707FEE6800FC04003E530A403E0452001A65C854AE71A")]
+[InlineData(3, "NTSC", "VIDEO8", "33830785F4E97F98C79792EC0AFB551BF54927E9DCCE15802D19CA8BDC5411D3")]
+[InlineData(4, "PAL", "HI8", "C855C6FAC7B9104E90C5790F14D36DAE98095CB59A1A8CFA1D500FB665CE368A")]
+[InlineData(5, "NTSC", "HI8", "355A497C272467AEA6A96D66F899755C62F96F23DF7A8D7F3A3D5F918F0E08E8")]
+[InlineData(6, "PAL", "BETAMAX", "094AB253A2FBDD1178BBEB30EB08B29971DA05A829C49F6CB55887EDD72A63DB")]
+[InlineData(7, "NTSC", "BETAMAX", "AF3927A3C4B0627C9524F5762477287C0BFBEA5BEA0515F3FBE6BF03B732032C")]
+[InlineData(8, "NTSC", "BETAMAX_HIFI", "2D25B8CF323C2074B1BEC298DCD45326F56ADAD25FD5CA8563F35D7A5887E040")]
+[InlineData(9, "NTSC", "SUPERBETA", "6C363EB432C1D0614E8E1B22F5C133B7C52C4EE55697A29B0C342347EB472DCB")]
+[InlineData(10, "PAL", "UMATIC", "F5D0165ABFBEBE08D69CD46124AA464B112C7B8F00D571CF606404B043A093C4")]
+[InlineData(11, "PAL", "UMATIC_HI", "E033E041B967E16853F156DE6D653A017F31ED4AAE4460CDB206D38B448A08A1")]
+[InlineData(12, "PAL", "UMATIC_SP", "C1149028299896FC891360546FBA135F0F447F5F5F2EDADB35B824A717F60153")]
+[InlineData(13, "PAL", "EIAJ", "6BAE892D9D5003069ECAC135630A79FCFD6AB1B55EC96DAB5D2151EF0423811A")]
+[InlineData(14, "PAL", "VCR", "DCFD099B3D99C54B79C722F61C9CBA623F3646DA35A0CE73E6E710E4C767C002")]
+[InlineData(15, "PAL", "VCR_LP", "9CBEE9C0BE2BC4A91FCC7930240CBE3EA85896352E6270AE0071288DEDB684DB")]
+[InlineData(16, "PAL", "VIDEO2000", "E5F7E5A4A4F275B9027CF9BADB3A8723A0EBECFA77812FF3AAFB54ACACBE39B5")]
+[InlineData(17, "PAL", "VHSHQ", "B4636C71044769326039D759C6B9F61AC7FFDE90964761879E161EA241DD405B")]
+[InlineData(18, "PAL", "SVHS", "CEFA28AFCE2BF3A2A4FB6BCF7177AE43A77A6A707E4C0892DCD40CF3F8EFEE86")]
+[InlineData(19, "PAL", "SVHS_ET", "F745052A75D0FEBAD2C95C0B3C3B85323076B6E899C9ECB6B3A3F853DC3DCA34")]
+[InlineData(20, "NTSC", "UMATIC", "18834718B936D8DB2B1598831E38F29AE61ED4964A029D1EC564273EEFEC44E5")]
+[InlineData(21, "NTSC", "VHSHQ", "1C503EAA76D4F968585F98CD3502B2CE365758E7E0DCD134AC05DD17FDA5994B")]
+[InlineData(22, "NTSC", "SVHS", "97AC5FC2F8AADC8104A271C9B2E2FA961F246143C78FC754F0463F4E9E23225F")]
+[InlineData(23, "NTSC", "SVHS_ET", "2BA7F57E26DC932AE19905D7654E1F30313E448EED995A3949AD601AC5CB1006")]
+[InlineData(24, "NLINHA", "VHS", "B35A743D46E45AA1DF82BD4D3ADC0AC055454437849EC85515687DC23D730421")]
+[InlineData(25, "PAL", "VHS", "61033C0998FF4B024670D5F0C4074CB8EF49613CA974621ABA38518A60CE3EEE")]
+[InlineData(26, "NTSC", "VHS", "B4ACBFE26CE1DD6F2D69C53C30E922B8D287E1EAF4E40BAFB57F8CEDB1EC01C6")]
+public void FormatSpecificChromaFieldMatchesReleaseBits(
+    int caseIndex,
+    string system,
+    string format,
+    string expectedHash)
 {
-    var cases = new (string System, string Format, string Hash)[]
+    FormatParameterSet parameters = FormatCatalog.Default.GetTapeParameters(system, format, "sp");
+    TbcFrameSpec frameSpec = TbcFrameSpec.FromParameters(parameters);
+    bool chromaDeemphasis = format is "VIDEO8" or "HI8";
+    var decodeOptions = new ChromaDecodeOptions(
+        IsColorUnder: true,
+        WriteChroma: true,
+        SkipChroma: false,
+        UseChromaAfc: false,
+        DisableComb: system == "MESECAM",
+        ChromaDeemphasisFilter: chromaDeemphasis,
+        ChromaAudioNotch: false,
+        ChromaOffsetSamples: 0,
+        DetectChromaTrackPhase: false,
+        EnableColorKiller: false,
+        DisableBurstHsync: false,
+        DisablePhaseCorrection: false,
+        UseOldRawChromaOutput: false);
+    VhsChromaFieldOptions options = TbcFieldDecodePipeline.BuildChromaFieldOptions(
+        system,
+        parameters,
+        frameSpec,
+        decodeOptions)
+        ?? throw new InvalidOperationException($"Chroma options were not built for {system} {format}.");
+
+    var chroma = new double[frameSpec.FieldSampleCount];
+    uint state = unchecked(0x12345678u + ((uint)caseIndex * 0x01020304u));
+    for (int i = 0; i < chroma.Length; i++)
     {
-        ("PAL_M", "VHS", "481FAD75D80528B5B24AC9DC0662CA93EDD193BB3C0CE9EE86A89BDB667756FE"),
-        ("MESECAM", "VHS", "5F727C2341456CD7B9A77179A8C5E72FFFF5E01C84E6496AB4F84E3E49C68AE7"),
-        ("PAL", "VIDEO8", "D0C90ACD8472376761F707FEE6800FC04003E530A403E0452001A65C854AE71A"),
-        ("NTSC", "VIDEO8", "33830785F4E97F98C79792EC0AFB551BF54927E9DCCE15802D19CA8BDC5411D3"),
-        ("PAL", "HI8", "C855C6FAC7B9104E90C5790F14D36DAE98095CB59A1A8CFA1D500FB665CE368A"),
-        ("NTSC", "HI8", "355A497C272467AEA6A96D66F899755C62F96F23DF7A8D7F3A3D5F918F0E08E8")
-    };
-
-    for (int caseIndex = 0; caseIndex < cases.Length; caseIndex++)
-    {
-        (string system, string format, string expectedHash) = cases[caseIndex];
-        FormatParameterSet parameters = FormatCatalog.Default.GetTapeParameters(system, format, "sp");
-        TbcFrameSpec frameSpec = TbcFrameSpec.FromParameters(parameters);
-        bool chromaDeemphasis = format is "VIDEO8" or "HI8";
-        var decodeOptions = new ChromaDecodeOptions(
-            IsColorUnder: true,
-            WriteChroma: true,
-            SkipChroma: false,
-            UseChromaAfc: false,
-            DisableComb: system == "MESECAM",
-            ChromaDeemphasisFilter: chromaDeemphasis,
-            ChromaAudioNotch: false,
-            ChromaOffsetSamples: 0,
-            DetectChromaTrackPhase: false,
-            EnableColorKiller: false,
-            DisableBurstHsync: false,
-            DisablePhaseCorrection: false,
-            UseOldRawChromaOutput: false);
-        VhsChromaFieldOptions options = TbcFieldDecodePipeline.BuildChromaFieldOptions(
-            system,
-            parameters,
-            frameSpec,
-            decodeOptions)
-            ?? throw new InvalidOperationException($"Chroma options were not built for {system} {format}.");
-
-        var chroma = new double[frameSpec.FieldSampleCount];
-        uint state = unchecked(0x12345678u + ((uint)caseIndex * 0x01020304u));
-        for (int i = 0; i < chroma.Length; i++)
-        {
-            state = unchecked((state * 1_664_525u) + 1_013_904_223u);
-            int signed = (int)((state >> 8) & 0xFFFFu) - 32_768;
-            chroma[i] = (float)((signed / 8.0) + (((i % 17) - 8) * 0.03125));
-        }
-
-        int lineOffset = FormatCatalog.ParentSystem(system) == "NTSC" ? 1 : 3;
-        ChromaPhaseLine[] phaseLines = Enumerable.Range(0, frameSpec.OutputLineCount)
-            .Select(index =>
-            {
-                int line = lineOffset + index;
-                return new ChromaPhaseLine(
-                    line,
-                    ((line * 3) + caseIndex + 1) % 4,
-                    ((line * 17) + (caseIndex * 23)) % 360 - 180.0,
-                    BurstPhaseOffsetDegrees: 0.0,
-                    BurstMagnitude: 30_000.0,
-                    I: 30_000.0,
-                    Q: 0.0);
-            })
-            .ToArray();
-        var phase = new ChromaPhaseSequenceResult(
-            NextChromaRotationIndex: 0,
-            phaseLines,
-            BurstDetectedLine: 0,
-            BurstMagnitudeAverage: 30_000.0,
-            BurstPhaseAverageDegrees: 0.0,
-            EvenBurstPhaseAverageDegrees: 0.0,
-            OddBurstPhaseAverageDegrees: 0.0);
-
-        VhsChromaFieldResult result = VhsChromaDecoder.DecodeFieldWithPhase(
-            chroma,
-            options,
-            phase,
-            isFirstField: true,
-            fieldNumber: 0,
-            lineOffset: lineOffset);
-        string actualHash = Convert.ToHexString(SHA256.HashData(
-            TbcOutputWriter.ToLittleEndianBytes(result.Samples)));
-        AssertEqual($"{system} {format}: {expectedHash}", $"{system} {format}: {actualHash}");
+        state = unchecked((state * 1_664_525u) + 1_013_904_223u);
+        int signed = (int)((state >> 8) & 0xFFFFu) - 32_768;
+        chroma[i] = (float)((signed / 8.0) + (((i % 17) - 8) * 0.03125));
     }
+
+    int lineOffset = FormatCatalog.ParentSystem(system) == "NTSC" ? 1 : 3;
+    ChromaPhaseLine[] phaseLines = Enumerable.Range(0, frameSpec.OutputLineCount)
+        .Select(index =>
+        {
+            int line = lineOffset + index;
+            return new ChromaPhaseLine(
+                line,
+                ((line * 3) + caseIndex + 1) % 4,
+                ((line * 17) + (caseIndex * 23)) % 360 - 180.0,
+                BurstPhaseOffsetDegrees: 0.0,
+                BurstMagnitude: 30_000.0,
+                I: 30_000.0,
+                Q: 0.0);
+        })
+        .ToArray();
+    var phase = new ChromaPhaseSequenceResult(
+        NextChromaRotationIndex: 0,
+        phaseLines,
+        BurstDetectedLine: 0,
+        BurstMagnitudeAverage: 30_000.0,
+        BurstPhaseAverageDegrees: 0.0,
+        EvenBurstPhaseAverageDegrees: 0.0,
+        OddBurstPhaseAverageDegrees: 0.0);
+
+    VhsChromaFieldResult result = VhsChromaDecoder.DecodeFieldWithPhase(
+        chroma,
+        options,
+        phase,
+        isFirstField: true,
+        fieldNumber: 0,
+        lineOffset: lineOffset);
+    string actualHash = Convert.ToHexString(SHA256.HashData(
+        TbcOutputWriter.ToLittleEndianBytes(result.Samples)));
+    AssertEqual($"{system} {format}: {expectedHash}", $"{system} {format}: {actualHash}");
 }
 
 [Fact(DisplayName = "PAL Betamax chroma AFC field matches v0.4.0 bits")]
