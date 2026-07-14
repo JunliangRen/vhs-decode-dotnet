@@ -115,7 +115,8 @@ internal sealed class HiFiDecodeRunner : IHiFiCommandRunner
             input,
             audioOutput,
             output,
-            cancellationToken);
+            cancellationToken,
+            () => stopwatch.Elapsed);
 
         output.WriteLine();
         output.WriteLine("Decode finishing up. Emptying the queue");

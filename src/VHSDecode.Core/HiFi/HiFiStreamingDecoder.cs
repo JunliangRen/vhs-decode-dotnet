@@ -42,8 +42,15 @@ internal sealed class HiFiStreamingDecoder
         IHiFiSampleReader input,
         HiFiOutputWriter output,
         TextWriter diagnostics,
-        CancellationToken cancellationToken = default)
-        => DecodeAsync(options, input, output, diagnostics, cancellationToken)
+        CancellationToken cancellationToken = default,
+        Func<TimeSpan>? elapsedProvider = null)
+        => DecodeAsync(
+                options,
+                input,
+                output,
+                diagnostics,
+                cancellationToken,
+                elapsedProvider)
             .GetAwaiter()
             .GetResult();
 
@@ -52,7 +59,8 @@ internal sealed class HiFiStreamingDecoder
         IHiFiSampleReader input,
         HiFiOutputWriter output,
         TextWriter diagnostics,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        Func<TimeSpan>? elapsedProvider)
     {
         ArgumentNullException.ThrowIfNull(options);
         ArgumentNullException.ThrowIfNull(input);
@@ -84,7 +92,18 @@ internal sealed class HiFiStreamingDecoder
         CancellationToken stopToken = stopSource.Token;
 
         var framer = new HiFiBlockFramer(plan, input);
-        Task producer = ProduceBlocks(framer, jobs.Writer, stopSource, stopToken);
+        var progressReporter = new HiFiProgressReporter(
+            diagnostics,
+            plan.InputRateHz,
+            plan.FinalAudioRateHz,
+            input.TotalSamples,
+            elapsedProvider);
+        Task producer = ProduceBlocks(
+            framer,
+            jobs.Writer,
+            progressReporter,
+            stopSource,
+            stopToken);
         Task[] workers = Enumerable.Range(0, workerCount)
             .Select(_ => DecodeBlocks(
                 options,
@@ -125,6 +144,10 @@ internal sealed class HiFiStreamingDecoder
                         ordered.Job.BlockNumber);
                     output.Write(processed);
                     audioFrames = checked(audioFrames + processed.Left.Length);
+                    progressReporter.ReportOutput(
+                        framer.InputSamplesRead,
+                        audioFrames,
+                        framer.BlockCount);
                     nextBlock++;
                 }
             }
@@ -164,6 +187,7 @@ internal sealed class HiFiStreamingDecoder
     private static async Task ProduceBlocks(
         HiFiBlockFramer framer,
         ChannelWriter<HiFiDecodeJob> writer,
+        HiFiProgressReporter progressReporter,
         CancellationTokenSource stopSource,
         CancellationToken cancellationToken)
     {
@@ -173,6 +197,9 @@ internal sealed class HiFiStreamingDecoder
             while (framer.ReadNext(cancellationToken) is { } job)
             {
                 await writer.WriteAsync(job, cancellationToken);
+                progressReporter.ReportInput(
+                    framer.InputSamplesRead,
+                    framer.BlockCount);
                 if (job.IsLastBlock)
                 {
                     break;
@@ -385,8 +412,11 @@ internal sealed class HiFiBlockFramer
         }
     }
 
-    public int BlockCount { get; private set; }
-    public long InputSamplesRead { get; private set; }
+    private int _blockCount;
+    private long _inputSamplesRead;
+
+    public int BlockCount => Volatile.Read(ref _blockCount);
+    public long InputSamplesRead => Volatile.Read(ref _inputSamplesRead);
 
     public HiFiDecodeJob? ReadNext(CancellationToken cancellationToken = default)
     {
@@ -397,9 +427,11 @@ internal sealed class HiFiBlockFramer
 
         var input = new float[_readLength];
         int framesRead = _reader.Read(input, cancellationToken);
-        InputSamplesRead = checked(InputSamplesRead + framesRead);
+        Volatile.Write(
+            ref _inputSamplesRead,
+            checked(_inputSamplesRead + framesRead));
         bool isLastBlock = framesRead < input.Length;
-        int blockNumber = BlockCount++;
+        int blockNumber = _blockCount++;
 
         float[] block;
         int planInputSamples;

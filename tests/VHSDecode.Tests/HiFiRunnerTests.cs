@@ -180,6 +180,60 @@ public sealed class HiFiRunnerTests
         Assert.All(terminal.Samples[4..], value => Assert.Equal(0.0f, value));
     }
 
+    [Fact(DisplayName = "HiFi progress reporting matches Release 4.0 formatting")]
+    public void HiFiProgressReportingMatchesRelease40Formatting()
+    {
+        Assert.Equal(
+            "Progress [####################                    ] 50.00%",
+            HiFiProgressReporter.FormatProgressBar(16, 32));
+        Assert.Equal(
+            "Progress [##                                      ] 6.25%",
+            HiFiProgressReporter.FormatProgressBar(1, 16));
+        Assert.Equal(
+            Lines(
+                "- Decoding speed: 10000 kFrames/s (2.00x), 3 blocks enqueued",
+                "- Input position: 0:00:01.000",
+                "- Audio position: 0:00:01.000",
+                "- Audio buffer  : 0:00:00.000",
+                "- Wall time     : 0:00:00.500"),
+            HiFiProgressReporter.FormatStatus(
+                5_000_000,
+                44_100,
+                3,
+                5_000_000,
+                44_100,
+                TimeSpan.FromSeconds(0.5)));
+        Assert.Equal(
+            Lines(
+                "- Decoding speed: 1000 kFrames/s (0.03x), 7 blocks enqueued",
+                "- Input position: 0:00:00.309",
+                "- Audio position: 0:00:00.208",
+                "- Audio buffer  : 0:00:00.100",
+                "- Wall time     : 0:00:12.346"),
+            HiFiProgressReporter.FormatStatus(
+                12_345_678,
+                10_000,
+                7,
+                40_000_000,
+                48_000,
+                TimeSpan.FromSeconds(12.3456784)));
+        Assert.Equal(
+            Lines(
+                "- Decoding speed: 4042 kFrames/s (0.10x), 42 blocks enqueued",
+                "- Input position: 0:06:10.000",
+                "- Audio position: 0:05:33.333",
+                "- Audio buffer  : 0:00:36.667",
+                "- Wall time     : 1:01:01.235"),
+            HiFiProgressReporter.FormatStatus(
+                14_800_000_000,
+                16_000_000,
+                42,
+                40_000_000,
+                48_000,
+                TimeSpan.FromSeconds(3661.2345678)));
+        Assert.Equal("0:00:00.005", HiFiProgressReporter.FormatSeconds(264.0 / 48_000.0));
+    }
+
     [Fact(DisplayName = "HiFi decoded block trimming matches Release 4.0 worker offsets")]
     public void HiFiDecodedBlockTrimmingMatchesRelease40WorkerOffsets()
     {
@@ -239,13 +293,15 @@ public sealed class HiFiRunnerTests
             using var writer = new HiFiOutputWriter(options);
             var decoder = new HiFiStreamingDecoder(
                 activeOptions => new ZeroBlockDecoder(activeOptions));
+            var diagnostics = new StringWriter();
 
             HiFiStreamingDecodeResult result = decoder.Decode(
                 options,
                 reader,
                 writer,
-                TextWriter.Null,
-                TestContext.Current.CancellationToken);
+                diagnostics,
+                TestContext.Current.CancellationToken,
+                () => TimeSpan.FromSeconds(0.5));
             writer.Complete(result.LeftPeak, result.RightPeak, TextWriter.Null);
 
             Assert.Equal(10, result.InputSamples);
@@ -256,6 +312,19 @@ public sealed class HiFiRunnerTests
             byte[] wave = File.ReadAllBytes(path);
             Assert.Equal(1_584u, BinaryPrimitives.ReadUInt32LittleEndian(wave.AsSpan(40, 4)));
             Assert.All(ReadPcm16(wave), value => Assert.Equal((short)0, value));
+            Assert.Contains(
+                "Progress [########################################] 100.00%",
+                diagnostics.ToString(),
+                StringComparison.Ordinal);
+            Assert.Contains(
+                "- Audio position: 0:00:00.005",
+                diagnostics.ToString(),
+                StringComparison.Ordinal);
+            Assert.Equal(
+                2,
+                diagnostics.ToString().Split(
+                    "- Decoding speed:",
+                    StringSplitOptions.None).Length - 1);
         }
         finally
         {
@@ -664,6 +733,9 @@ public sealed class HiFiRunnerTests
 
     private static string ReadAscii(byte[] bytes, int offset)
         => System.Text.Encoding.ASCII.GetString(bytes, offset, 4);
+
+    private static string Lines(params string[] lines)
+        => string.Join(Environment.NewLine, lines) + Environment.NewLine;
 
     private static short[] ReadPcm16(byte[] wave)
     {
