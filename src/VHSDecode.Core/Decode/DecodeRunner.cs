@@ -1,5 +1,6 @@
 using VHSDecode.Core.CommandLine;
 using VHSDecode.Core.Formats;
+using VHSDecode.Core.HiFi;
 using VHSDecode.Core.Tbc;
 using System.Diagnostics;
 using System.Globalization;
@@ -9,17 +10,29 @@ namespace VHSDecode.Core.Decode;
 public sealed class DecodeRunner
 {
     private readonly Func<CancellationToken, TbcFieldSequenceDecodeEngine> _engineFactory;
+    private readonly IHiFiCommandRunner _hiFiRunner;
 
     public DecodeRunner()
-        : this(cancellationToken => new TbcFieldSequenceDecodeEngine(
-            cancellationToken: cancellationToken))
+        : this(
+            cancellationToken => new TbcFieldSequenceDecodeEngine(
+                cancellationToken: cancellationToken),
+            new HiFiDecodeRunner())
     {
     }
 
     internal DecodeRunner(Func<CancellationToken, TbcFieldSequenceDecodeEngine> engineFactory)
+        : this(engineFactory, new HiFiDecodeRunner())
+    {
+    }
+
+    internal DecodeRunner(
+        Func<CancellationToken, TbcFieldSequenceDecodeEngine> engineFactory,
+        IHiFiCommandRunner hiFiRunner)
     {
         ArgumentNullException.ThrowIfNull(engineFactory);
+        ArgumentNullException.ThrowIfNull(hiFiRunner);
         _engineFactory = engineFactory;
+        _hiFiRunner = hiFiRunner;
     }
 
     public int Run(
@@ -38,6 +51,29 @@ public sealed class DecodeRunner
         {
             output.WriteLine(DecodeVersionInfo.Version);
             return 0;
+        }
+
+        if (command.Spec == CliSpecs.HiFi)
+        {
+            try
+            {
+                return _hiFiRunner.Run(command, output, error, cancellationToken);
+            }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            {
+                output.WriteLine();
+                output.WriteLine("Ctrl-C was pressed, stopping decode...");
+                return 1;
+            }
+            catch (Exception ex) when (ex is ArgumentException
+                or FormatException
+                or OverflowException
+                or NotSupportedException
+                or IOException)
+            {
+                error.WriteLine(ex.Message);
+                return 1;
+            }
         }
 
         if (command.Spec.Name is "vhs" or "cvbs"

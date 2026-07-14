@@ -64,7 +64,7 @@ public static class CliSpecs
         minimumPositionals: 0,
         maximumPositionals: 2);
 
-    public static DecodeCommandSpec[] AllCommands { get; } = [Vhs, Cvbs, LaserDisc];
+    public static DecodeCommandSpec[] AllCommands { get; } = [Vhs, Cvbs, LaserDisc, HiFi];
 
     private static IEnumerable<OptionSpec> CommonOptions(int defaultThreads)
     {

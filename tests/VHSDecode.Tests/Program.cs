@@ -114,6 +114,11 @@ public void DispatcherRecognizesSubcommands()
         ["ld", "--version"],
         DecodeDispatcher.NormalizeInvocation(["--version"], "ld-decode.exe"));
     AssertStringSequence(
+        ["hifi", "--pal", "in.s16", "out.wav"],
+        DecodeDispatcher.NormalizeInvocation(
+            ["--pal", "in.s16", "out.wav"],
+            "hifi-decode.exe"));
+    AssertStringSequence(
         ["vhs", "in", "out"],
         DecodeDispatcher.NormalizeInvocation(["vhs", "in", "out"], "decode.exe"));
 }
@@ -309,13 +314,15 @@ public void DecodeRunnerPrintsCommandHelpBeforeValidation()
     {
         ["vhs"] = "174450C2379D07D59109F289FF9F587BDA433E8E38C63EFE604535BBCD9077C4",
         ["cvbs"] = "7933C5EFFD23A835419449AA805D7110ABA4298E23FD46FF51805AF933712D15",
-        ["ld"] = "E890F90169572401CF3C1565FF5EF44B23354824516E330250BD80BA136FB579"
+        ["ld"] = "E890F90169572401CF3C1565FF5EF44B23354824516E330250BD80BA136FB579",
+        ["hifi"] = "27E40DE774B9CD5E3A6E126A497B074AD239319AD7A79004D4594F74CB7ECC2B"
     };
     var facadeHashes = new Dictionary<string, string>(StringComparer.Ordinal)
     {
         ["vhs"] = "9FE63E4A3C18927DE477D66BCF612085FB01ED85DA8BFD7AE2FACAE9E0E0EDA1",
         ["cvbs"] = "A19F45D777A92EDB940880F5953A9E2D2298AF850F7769A3615FB14CDC12877B",
-        ["ld"] = "62D9A869755E04C5F7EC0ADCD682AC856554C1EE861B8D463DC9AA21BDDC2F68"
+        ["ld"] = "62D9A869755E04C5F7EC0ADCD682AC856554C1EE861B8D463DC9AA21BDDC2F68",
+        ["hifi"] = "14F69F3DD5869D3BAF3D44558ADF32DAC040F97F37CF00A2F3127FA101D7765E"
     };
 
     foreach (DecodeCommandSpec spec in CliSpecs.AllCommands)

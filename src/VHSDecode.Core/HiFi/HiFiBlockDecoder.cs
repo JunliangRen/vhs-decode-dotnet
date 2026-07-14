@@ -12,7 +12,7 @@ public sealed record HiFiDecodedBlock(
     float LeftDc,
     float RightDc);
 
-public sealed class HiFiBlockDecoder : IDisposable
+public sealed class HiFiBlockDecoder : IHiFiBlockDecoder
 {
     private readonly HiFiDecodePlan _plan;
     private readonly HiFiBlockResamplers _resamplers;
@@ -20,6 +20,7 @@ public sealed class HiFiBlockDecoder : IDisposable
     private readonly int _maximumOscillatorLength;
     private readonly bool _decodeLeft;
     private readonly bool _decodeRight;
+    private readonly Action<float[]>? _gnuRadioSink;
     private HiFiAfeFilter _leftAfe = null!;
     private HiFiAfeFilter _rightAfe = null!;
     private HiFiQuadratureDiscriminator? _leftQuadrature;
@@ -30,10 +31,18 @@ public sealed class HiFiBlockDecoder : IDisposable
     private double _rightCarrierHz;
 
     public HiFiBlockDecoder(HiFiDecodeOptions options)
+        : this(options, null)
+    {
+    }
+
+    internal HiFiBlockDecoder(
+        HiFiDecodeOptions options,
+        Action<float[]>? gnuRadioSink)
     {
         ArgumentNullException.ThrowIfNull(options);
 
         Options = options;
+        _gnuRadioSink = gnuRadioSink;
         _plan = HiFiDecodePlan.FromOptions(options);
         _resamplers = new HiFiBlockResamplers(_plan);
         _decodeLeft = options.AudioMode != HiFiConstants.AudioModeMonoRight;
@@ -116,26 +125,57 @@ public sealed class HiFiBlockDecoder : IDisposable
         float[] ifData = _resamplers.ResampleInputToIf(rfData);
         float[]? left = null;
         float[]? right = null;
+        float[]? filteredLeft = null;
+        float[]? filteredRight = null;
         float leftDc = 0.0f;
         float rightDc = 0.0f;
 
         if (_decodeLeft)
         {
-            float[] filtered = _leftAfe.Apply(ifData);
-            float[] demodulated = DemodulateLeft(filtered);
-            left = _resamplers.ResampleLeftIfToAudio(demodulated);
-            leftDc = HiFiAudioProcessing.CancelDcAndTrim(left, _plan.PreTrimSamples);
+            filteredLeft = _leftAfe.Apply(ifData);
         }
 
         if (_decodeRight)
         {
-            float[] filtered = _rightAfe.Apply(ifData);
-            float[] demodulated = DemodulateRight(filtered);
+            filteredRight = _rightAfe.Apply(ifData);
+        }
+
+        if (_gnuRadioSink is not null)
+        {
+            _gnuRadioSink(SumFilteredChannels(filteredLeft, filteredRight));
+        }
+
+        if (filteredLeft is not null)
+        {
+            float[] demodulated = DemodulateLeft(filteredLeft);
+            left = _resamplers.ResampleLeftIfToAudio(demodulated);
+            leftDc = HiFiAudioProcessing.CancelDcAndTrim(left, _plan.PreTrimSamples);
+        }
+
+        if (filteredRight is not null)
+        {
+            float[] demodulated = DemodulateRight(filteredRight);
             right = _resamplers.ResampleRightIfToAudio(demodulated);
             rightDc = HiFiAudioProcessing.CancelDcAndTrim(right, _plan.PreTrimSamples);
         }
 
         return new HiFiDemodulatedBlock(left, right, leftDc, rightDc);
+    }
+
+    private static float[] SumFilteredChannels(float[]? left, float[]? right)
+    {
+        ReadOnlySpan<float> sourceLeft = left ?? [];
+        ReadOnlySpan<float> sourceRight = right ?? [];
+        int length = Math.Max(sourceLeft.Length, sourceRight.Length);
+        var output = new float[length];
+        for (int i = 0; i < length; i++)
+        {
+            float leftSample = i < sourceLeft.Length ? sourceLeft[i] : 0.0f;
+            float rightSample = i < sourceRight.Length ? sourceRight[i] : 0.0f;
+            output[i] = leftSample + rightSample;
+        }
+
+        return output;
     }
 
     public void Dispose()

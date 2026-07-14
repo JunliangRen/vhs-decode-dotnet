@@ -7,7 +7,8 @@ public static class DecodeDispatcher
         {
             ["vhs-decode"] = "vhs",
             ["cvbs-decode"] = "cvbs",
-            ["ld-decode"] = "ld"
+            ["ld-decode"] = "ld",
+            ["hifi-decode"] = "hifi"
         };
 
     public static string[] UpstreamTopLevelCommands { get; } =

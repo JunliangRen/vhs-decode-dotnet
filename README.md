@@ -36,15 +36,24 @@ Implemented:
 - `net10.0` CLI and core library plus a standard
   `Microsoft.NET.Test.Sdk`/xUnit v3 test project discoverable in Visual Studio
   Test Explorer
-- `decode.py`-style top-level dispatch for `vhs`, `cvbs`, and `ld`
+- `decode.py`-style top-level dispatch for `vhs`, `cvbs`, `ld`, and `hifi`
 - the CLI builds as `decode.exe` and also emits `vhs-decode.exe`,
-  `cvbs-decode.exe`, and `ld-decode.exe` apphost aliases that infer their
-  subcommand from the executable name
+  `cvbs-decode.exe`, `ld-decode.exe`, and `hifi-decode.exe` apphost aliases
+  that infer their subcommand from the executable name
 - compatibility option registry for VHS, CVBS, and LaserDisc decode commands
 - the complete v0.4.0 HiFi argparse surface is represented by a typed command
   spec: all 42 options, aliases, defaults, frequency parsing, VHS/8mm default
   selection, preview overrides, and both standalone/facade help snapshots are
-  locked to upstream; dispatch remains gated on completing the audio pipeline
+  locked to upstream
+- HiFi command execution now connects native raw/container input routing,
+  Release 4.0 bias measurement behavior, exact first/middle/final overlap
+  framing, bounded parallel block decoding, ordered audio post-processing,
+  dual-mono naming and padding, WAV PCM16 or FLAC PCM24 output, normalization,
+  cancellation/error finalization, and facade/standalone command dispatch
+- HiFi `--gnuradio` now exposes the Release 4.0 REP endpoint on port 5555 and
+  returns the summed filtered channels as native float32 after each client
+  request; the streaming decoder forces the same single-worker ordering for
+  this mode
 - HiFi raw-input normalization covers `u8`, `u10le`, `u12le`, `u16le`, `s8`,
   `s10le`, `s12le`, `s16le`/`raw`, and `f32le`; representative extrema and
   center values match all 54 upstream v0.4.0 float32 bit patterns exactly
@@ -1043,7 +1052,9 @@ Not complete yet:
   pairs, and 1,428 float32-exact channels across all 357 valid tape
   system/format/speed cases
 - remaining container-specific resampling edge cases
-- remaining HiFi preview/GNU Radio integration and final command dispatch
+- remaining HiFi real-capture end-to-end output baselines, live audio-preview
+  playback, and hosted GUI behavior; the command runner and GNU Radio path are
+  wired, while preview currently follows upstream's no-`sounddevice` fallback
 - remaining real-capture PAL LD and AC3 end-to-end fixtures, external AC3
   tool-pipeline parity, and remaining verbose VITS field calibration details
 - remaining non-default VHS/CVBS vblank edge cases, real-capture chroma
@@ -1066,12 +1077,16 @@ dotnet test VHSDecodeDotNet.slnx --no-build
 ```
 
 The current formal solution build completes with zero warnings and errors, and
-the xUnit v3 project exposes 412 independently discoverable compatibility tests
+the xUnit v3 project exposes 429 independently discoverable compatibility tests
 to `dotnet test` and Visual Studio Test Explorer. On the
 same Windows machine and fixtures, Release wall-clock measurements for one
 frame were 2.346 s versus 7.193 s for NTSC VHS and 1.651 s versus 5.865 s for
 NTSC LD (this port versus the v0.4.0 Python virtual environment); all output
 hashes listed above remained identical.
+
+`ffmpeg` must be available on `PATH` for FFmpeg-backed container inputs and
+default HiFi FLAC output. HiFi `.wav` and recognized raw input paths do not
+require it.
 
 To regenerate the embedded format parameter snapshot from the checked-out
 upstream source:

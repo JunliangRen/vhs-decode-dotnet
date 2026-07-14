@@ -88,13 +88,8 @@ public sealed class HiFiAudioPostProcessor
     {
         var stereo = new float[checked(left.Length * 2)];
         int startSample = firstBlock
-            ? (int)(0.0015 * _sampleRateHz)
+            ? Math.Min((int)(0.0015 * _sampleRateHz), left.Length)
             : 0;
-        if (startSample > left.Length)
-        {
-            throw new ArgumentException(
-                "The first HiFi block is shorter than the startup mute interval.");
-        }
 
         float leftPeak = 0.0f;
         float rightPeak = 0.0f;
