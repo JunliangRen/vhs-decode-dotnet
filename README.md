@@ -48,6 +48,11 @@ Implemented:
 - HiFi raw-input normalization covers `u8`, `u10le`, `u12le`, `u16le`, `s8`,
   `s10le`, `s12le`, `s16le`/`raw`, and `f32le`; representative extrema and
   center values match all 54 upstream v0.4.0 float32 bit patterns exactly
+- HiFi AFE and stream planning covers all VHS/8mm PAL/NTSC carrier,
+  deviation, notch-width, field-rate, and override combinations plus the
+  quadrature/Hilbert IF rates, exact `Fraction(float)` resampling ratios,
+  soxr quality profiles, half-second/custom block sizing, overlap rounding,
+  rate-sync warning state, and final-block output lengths from v0.4.0
 - upstream `-h` / `--help` handling for all three decode commands, including
   zero-exit help before positional argument validation
 - complete v0.4.0 argparse help snapshots for the three standalone and three
@@ -992,9 +997,10 @@ Not complete yet:
   pairs, and 1,428 float32-exact channels across all 357 valid tape
   system/format/speed cases
 - remaining container-specific resampling edge cases
-- remaining HiFi AFE/FM demodulation, resampling, dropout compensation,
-  head-switch interpolation, expander/deemphasis/noise reduction, streaming
-  output, preview/GNU Radio integration, and final command dispatch
+- remaining HiFi AFE filter execution, FM demodulation, sample resampling,
+  dropout compensation, head-switch interpolation,
+  expander/deemphasis/noise reduction, streaming output, preview/GNU Radio
+  integration, and final command dispatch
 - remaining real-capture PAL LD and AC3 end-to-end fixtures, external AC3
   tool-pipeline parity, and remaining verbose VITS field calibration details
 - remaining non-default VHS/CVBS vblank edge cases, real-capture chroma
@@ -1017,7 +1023,7 @@ dotnet test VHSDecodeDotNet.slnx --no-build
 ```
 
 The current formal solution build completes with zero warnings and errors, and
-the xUnit v3 project exposes 278 independently discoverable compatibility tests
+the xUnit v3 project exposes 294 independently discoverable compatibility tests
 to `dotnet test` and Visual Studio Test Explorer. On the
 same Windows machine and fixtures, Release wall-clock measurements for one
 frame were 2.346 s versus 7.193 s for NTSC VHS and 1.651 s versus 5.865 s for

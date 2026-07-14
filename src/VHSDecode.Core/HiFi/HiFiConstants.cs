@@ -52,6 +52,11 @@ public static class HiFiConstants
 
     public const double DefaultSpectralNoiseReductionAmount = 0.0;
     public const string DefaultResamplerQuality = "high";
+    public const int BlocksPerSecond = 2;
+    public const int IntermediateAudioRate = 192_000;
+    public const int HilbertIfRate = 1 << 23;
+    public const int BlockPreTrimSamples = 1_000;
+    public const int MinimumResamplerOverlapPadding = 50;
     public const int DefaultFinalAudioRate = 48_000;
     public const int PreviewAudioRate = 44_100;
     public const string DemodQuadrature = "quadrature";

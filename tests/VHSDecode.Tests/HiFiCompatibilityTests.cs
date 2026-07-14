@@ -1,4 +1,5 @@
 using System.Globalization;
+using System.Numerics;
 using System.Security.Cryptography;
 using System.Text;
 using VHSDecode.Core.CommandLine;
@@ -147,6 +148,204 @@ public sealed class HiFiCompatibilityTests
         Assert.Contains("Deemphasis tuning options (advanced):", standalone, StringComparison.Ordinal);
         Assert.Equal("27E40DE774B9CD5E3A6E126A497B074AD239319AD7A79004D4594F74CB7ECC2B", Utf8LfSha256(standalone));
         Assert.Equal("14F69F3DD5869D3BAF3D44558ADF32DAC040F97F37CF00A2F3127FA101D7765E", Utf8LfSha256(facade));
+    }
+
+    [Theory(DisplayName = "HiFi AFE standards match v0.4.0")]
+    [InlineData("vhs", "n", 59.94, 15_750.0, 150_000.0, 150_000.0, 371_506.25, 371_506.25, 1_300_000.0, 1_700_000.0)]
+    [InlineData("vhs", "p", 50.0, null, 150_000.0, 150_000.0, 371_506.25, 371_506.25, 1_400_000.0, 1_800_000.0)]
+    [InlineData("8mm", "n", 59.94, 15_750.0, 100_000.0, 50_000.0, 240_000.0, 75_000.0, 1_500_000.0, 1_700_000.0)]
+    [InlineData("8mm", "p", 50.0, 15_625.0, 100_000.0, 50_000.0, 240_000.0, 75_000.0, 1_500_000.0, 1_700_000.0)]
+    public void HiFiAfeStandardsMatchV040(
+        string tapeFormat,
+        string standard,
+        double fieldRateHz,
+        double? horizontalFrequencyHz,
+        double leftDeviationHz,
+        double rightDeviationHz,
+        double leftNotchWidthHz,
+        double rightNotchWidthHz,
+        double leftCarrierHz,
+        double rightCarrierHz)
+    {
+        HiFiDecodeOptions options = DefaultOptions() with
+        {
+            TapeFormat = tapeFormat,
+            Standard = standard
+        };
+        HiFiAfeParameters actual = HiFiAfeParameters.FromOptions(options);
+
+        Assert.Equal(fieldRateHz, actual.FieldRateHz);
+        Assert.Equal(horizontalFrequencyHz, actual.HorizontalFrequencyHz);
+        Assert.Equal(leftDeviationHz, actual.LeftCarrierDeviationHz);
+        Assert.Equal(rightDeviationHz, actual.RightCarrierDeviationHz);
+        Assert.Equal(leftNotchWidthHz, actual.LeftNotchWidthHz);
+        Assert.Equal(rightNotchWidthHz, actual.RightNotchWidthHz);
+        Assert.Equal(leftCarrierHz, actual.LeftCarrierHz);
+        Assert.Equal(rightCarrierHz, actual.RightCarrierHz);
+        Assert.Equal(leftCarrierHz - leftNotchWidthHz, actual.LeftBandPassLowHz);
+        Assert.Equal(rightCarrierHz + rightNotchWidthHz, actual.RightBandPassHighHz);
+    }
+
+    [Fact(DisplayName = "HiFi AFE overrides preserve v0.4.0 notch widths")]
+    public void HiFiAfeOverridesPreserveV040NotchWidths()
+    {
+        HiFiDecodeOptions options = DefaultOptions() with
+        {
+            AfeLeftCarrierDeviationHz = 123_456.0,
+            AfeRightCarrierDeviationHz = 234_567.0,
+            AfeLeftCarrierHz = 1_456_789.0,
+            AfeRightCarrierHz = 1_765_432.0
+        };
+        HiFiAfeParameters actual = HiFiAfeParameters.FromOptions(options);
+
+        Assert.Equal(123_456.0, actual.LeftCarrierDeviationHz);
+        Assert.Equal(234_567.0, actual.RightCarrierDeviationHz);
+        Assert.Equal(1_456_789.0, actual.LeftCarrierHz);
+        Assert.Equal(1_765_432.0, actual.RightCarrierHz);
+        Assert.Equal(371_506.25, actual.LeftNotchWidthHz);
+        Assert.Equal(371_506.25, actual.RightNotchWidthHz);
+    }
+
+    [Fact(DisplayName = "HiFi quadrature block plan matches v0.4.0")]
+    public void HiFiQuadratureBlockPlanMatchesV040()
+    {
+        HiFiDecodePlan plan = HiFiDecodePlan.FromOptions(DefaultOptions());
+
+        Assert.Equal(40_000_000, plan.InputRateHz);
+        Assert.Equal(40_000_000, plan.IfRateHz);
+        Assert.Equal(192_000, plan.AudioRateHz);
+        Assert.Equal(48_000, plan.FinalAudioRateHz);
+        AssertRatio(plan.ResamplingRatios.InputToIf, "1", "1");
+        AssertRatio(plan.ResamplingRatios.IfToAudio, "5534023222112865", "1152921504606846976");
+        AssertRatio(plan.ResamplingRatios.AudioToFinal, "1", "4");
+        Assert.Equal(new HiFiBlockSizes(0.5, 20_000_000, 20_000_000, 96_000, 24_000), plan.InitialBlockSizes);
+        Assert.Equal(new HiFiBlockOverlap(440_000, 220_000, 220_000, 264, false), plan.BlockOverlap);
+        Assert.Equal(1_000, plan.PreTrimSamples);
+    }
+
+    [Fact(DisplayName = "HiFi Hilbert IF plan matches v0.4.0")]
+    public void HiFiHilbertIfPlanMatchesV040()
+    {
+        HiFiDecodePlan plan = HiFiDecodePlan.FromOptions(DefaultOptions() with
+        {
+            DemodType = HiFiConstants.DemodHilbert
+        });
+
+        Assert.Equal(8_388_608, plan.IfRateHz);
+        AssertRatio(plan.ResamplingRatios.InputToIf, "944473296573929", "4503599627370496");
+        AssertRatio(plan.ResamplingRatios.IfToAudio, "375", "16384");
+        Assert.Equal(4_194_304, plan.InitialBlockSizes.IfSamples);
+        Assert.Equal(new HiFiBlockOverlap(440_000, 220_000, 220_000, 264, false), plan.BlockOverlap);
+    }
+
+    [Fact(DisplayName = "HiFi 44.1 kHz overlap plan matches v0.4.0")]
+    public void HiFi44100OverlapPlanMatchesV040()
+    {
+        HiFiDecodePlan plan = HiFiDecodePlan.FromOptions(DefaultOptions() with
+        {
+            AudioRateHz = 44_100
+        });
+
+        AssertRatio(plan.ResamplingRatios.AudioToFinal, "4137682157646643", "18014398509481984");
+        Assert.Equal(new HiFiBlockSizes(0.5, 20_000_000, 20_000_000, 96_000, 22_050), plan.InitialBlockSizes);
+        Assert.Equal(new HiFiBlockOverlap(3_482_994, 1_741_497, 1_741_497, 1_920, false), plan.BlockOverlap);
+    }
+
+    [Fact(DisplayName = "HiFi fractional input rate truncation matches v0.4.0")]
+    public void HiFiFractionalInputRateTruncationMatchesV040()
+    {
+        HiFiDecodePlan plan = HiFiDecodePlan.FromOptions(DefaultOptions() with
+        {
+            InputRateHz = 28_636_363.636363637,
+            DemodType = HiFiConstants.DemodHilbert,
+            AudioRateHz = 96_000
+        });
+
+        Assert.Equal(28_636_363, plan.InputRateHz);
+        AssertRatio(plan.ResamplingRatios.InputToIf, "659632158297427", "2251799813685248");
+        AssertRatio(plan.ResamplingRatios.IfToAudio, "375", "16384");
+        AssertRatio(plan.ResamplingRatios.AudioToFinal, "1", "2");
+        Assert.Equal(new HiFiBlockSizes(0.5, 14_318_182, 4_194_304, 96_000, 48_000), plan.InitialBlockSizes);
+        Assert.Equal(new HiFiBlockOverlap(313_210, 156_605, 156_606, 525, true), plan.BlockOverlap);
+    }
+
+    [Fact(DisplayName = "HiFi custom block sizing keeps initial overlap like v0.4.0")]
+    public void HiFiCustomBlockSizingKeepsInitialOverlapLikeV040()
+    {
+        HiFiDecodePlan plan = HiFiDecodePlan.FromOptions(DefaultOptions());
+        HiFiBlockSizes custom = plan.CalculateBlockSizes(1_234_567);
+
+        Assert.Equal(0.030864175, custom.BlocksPerSecondRatio);
+        Assert.Equal(1_234_567, custom.InputSamples);
+        Assert.Equal(1_234_567, custom.IfSamples);
+        Assert.Equal(5_926, custom.AudioSamples);
+        Assert.Equal(1_482, custom.FinalAudioSamples);
+        Assert.Equal(new HiFiBlockOverlap(440_000, 220_000, 220_000, 264, false), plan.BlockOverlap);
+        Assert.Equal(23_472, plan.CalculateFinalAudioLength(20_000_000, false));
+        Assert.Equal(1_464, plan.CalculateFinalAudioLength(1_000_000, true));
+    }
+
+    [Fact(DisplayName = "HiFi irregular final rate plan matches v0.4.0")]
+    public void HiFiIrregularFinalRatePlanMatchesV040()
+    {
+        HiFiDecodePlan plan = HiFiDecodePlan.FromOptions(DefaultOptions() with
+        {
+            InputRateHz = 40_000_000.75,
+            AudioRateHz = 47_999
+        });
+
+        Assert.Equal(40_000_000, plan.InputRateHz);
+        AssertRatio(plan.ResamplingRatios.AudioToFinal, "4503505802378259", "18014398509481984");
+        Assert.Equal(new HiFiBlockSizes(0.5, 20_000_000, 20_000_000, 96_000, 24_000), plan.InitialBlockSizes);
+        Assert.Equal(new HiFiBlockOverlap(440_010, 220_005, 220_005, 264, false), plan.BlockOverlap);
+    }
+
+    [Theory(DisplayName = "HiFi resampler profiles match v0.4.0")]
+    [InlineData("high", "VHQ", "VHQ", "VHQ")]
+    [InlineData("medium", "LQ", "MQ", "HQ")]
+    [InlineData("low", "LQ", "LQ", "LQ")]
+    [InlineData("unexpected", "LQ", "LQ", "LQ")]
+    public void HiFiResamplerProfilesMatchV040(
+        string quality,
+        string inputToIf,
+        string ifToAudio,
+        string audioToFinal)
+    {
+        HiFiDecodePlan plan = HiFiDecodePlan.FromOptions(DefaultOptions() with
+        {
+            ResamplerQuality = quality
+        });
+
+        Assert.Equal(new HiFiResamplerConverters(inputToIf, ifToAudio, audioToFinal), plan.ResamplerConverters);
+    }
+
+    [Fact(DisplayName = "HiFi plan rejects unsupported decode configuration")]
+    public void HiFiPlanRejectsUnsupportedDecodeConfiguration()
+    {
+        Assert.Throws<ArgumentException>(() => HiFiDecodePlan.FromOptions(DefaultOptions() with
+        {
+            DemodType = "phase-locked-loop"
+        }));
+        Assert.Throws<ArgumentException>(() => HiFiAfeParameters.FromOptions(DefaultOptions() with
+        {
+            TapeFormat = "betamax"
+        }));
+        Assert.Throws<ArgumentOutOfRangeException>(() => HiFiDecodePlan.FromOptions(DefaultOptions() with
+        {
+            InputRateHz = 0.0
+        }));
+    }
+
+    private static HiFiDecodeOptions DefaultOptions()
+    {
+        ParsedCommand command = new CommandLineParser().Parse(CliSpecs.HiFi, ["-", "out.flac"]);
+        return HiFiDecodeOptions.FromCommand(command);
+    }
+
+    private static void AssertRatio(HiFiRateRatio actual, string numerator, string denominator)
+    {
+        Assert.Equal(BigInteger.Parse(numerator, CultureInfo.InvariantCulture), actual.Numerator);
+        Assert.Equal(BigInteger.Parse(denominator, CultureInfo.InvariantCulture), actual.Denominator);
     }
 
     private static string Utf8LfSha256(string value)
