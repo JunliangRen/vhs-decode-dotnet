@@ -88,6 +88,11 @@ Implemented:
   tuning; full RF-to-audio blocks covering all seven audio modes and a retuned
   second block match upstream output bits, including the mono alias/double-gain
   quirk
+- the stateful HiFi audio post-processor reproduces Release 4.0's cascaded
+  1 Hz DC blocker, VHS and 8mm deemphasis order, peak/RMS expander envelopes,
+  first-block state priming, 1.5 ms startup mute, stereo interleave, and
+  per-channel peak tracking; five two-block scenarios match upstream float32
+  output and state bits exactly
 - upstream `-h` / `--help` handling for all three decode commands, including
   zero-exit help before positional argument validation
 - complete v0.4.0 argparse help snapshots for the three standalone and three
@@ -1032,7 +1037,7 @@ Not complete yet:
   pairs, and 1,428 float32-exact channels across all 357 valid tape
   system/format/speed cases
 - remaining container-specific resampling edge cases
-- remaining HiFi expander/deemphasis/noise reduction, streaming output,
+- remaining nonzero HiFi spectral noise reduction, streaming output,
   preview/GNU Radio integration, and final command dispatch
 - remaining real-capture PAL LD and AC3 end-to-end fixtures, external AC3
   tool-pipeline parity, and remaining verbose VITS field calibration details
@@ -1056,7 +1061,7 @@ dotnet test VHSDecodeDotNet.slnx --no-build
 ```
 
 The current formal solution build completes with zero warnings and errors, and
-the xUnit v3 project exposes 399 independently discoverable compatibility tests
+the xUnit v3 project exposes 407 independently discoverable compatibility tests
 to `dotnet test` and Visual Studio Test Explorer. On the
 same Windows machine and fixtures, Release wall-clock measurements for one
 frame were 2.346 s versus 7.193 s for NTSC VHS and 1.651 s versus 5.865 s for
