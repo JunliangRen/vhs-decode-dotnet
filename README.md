@@ -390,6 +390,13 @@ Implemented:
   non-power-of-two transforms use a Bluestein FFT, and peak selection follows
   v0.4.0 by choosing the closest strict local maximum above one third of the
   global power peak rather than simply choosing the strongest bin
+- post-TBC chroma filter design, carrier probing, and heterodyne generation use
+  v0.4.0's `4 * fsc_mhz` rate instead of the inherited TBC `outfreq`; this
+  preserves MESECAM's distinct 17.624 MHz chroma path while its field output
+  remains at the PAL-family 17.734475 MHz rate
+- PAL Betamax's mandatory chroma AFC path preserves the upstream float64 SOS
+  prefilter after TBC, then reproduces the rolled float64 Numba fast-math mean
+  reduction before carrier estimation and float32 heterodyne processing
 - VHS chroma burst phase now feeds upstream-style burst-locked line-location
   refinement before field rendering, with `--disable_burst_hsync` preserving
   the sync-only line positions
@@ -836,6 +843,11 @@ Implemented:
   real-input Hilbert transforms, and NumPy complex-magnitude rounding preserve
   the float64 source bits while those formats continue not to emit a chroma
   sidecar
+- seven deterministic full-field chroma baselines cover PAL-M VHS, MESECAM
+  VHS, PAL/NTSC Video8, PAL/NTSC Hi8, and PAL Betamax AFC. All 2,138,747 output
+  samples match v0.4.0 bit for bit, with the Betamax case also locking the SOS
+  coefficients, prefilter, carrier estimate, heterodyne, final filter, PAL comb,
+  and automatic chroma-gain stage hashes
 - a two-field real NTSC VHS/FLAC fixture now matches the v0.4.0 checkout byte
   for byte: main TBC
   `60A6409696FD27F2012D9DF40DB97D141BE1F3D6315D3F6D4AD45A88B59FB1FF`,
@@ -955,8 +967,8 @@ Not complete yet:
 - remaining container-specific resampling edge cases
 - remaining real-capture PAL LD and AC3 end-to-end fixtures, external AC3
   tool-pipeline parity, and remaining verbose VITS field calibration details
-- remaining non-default VHS/CVBS vblank edge cases and PAL/SECAM/format-specific
-  chroma bit-parity processing
+- remaining non-default VHS/CVBS vblank edge cases and real-capture chroma
+  track-phase, optional notch, and uncommon option-combination parity
 - remaining upstream TBC field-writer integration and bit-compat edge handling
 - remaining rare real-capture first-HSYNC/vblank edge cases and complete
   upstream JSON/SQLite field metadata
@@ -975,8 +987,8 @@ dotnet test VHSDecodeDotNet.slnx --no-build
 ```
 
 The current formal solution build completes with zero warnings and errors, and
-the xUnit v3 project exposes 229 independently discoverable compatibility tests to
-`dotnet test` and Visual Studio Test Explorer. On the
+the xUnit v3 project exposes 231 independently discoverable compatibility tests
+to `dotnet test` and Visual Studio Test Explorer. On the
 same Windows machine and fixtures, Release wall-clock measurements for one
 frame were 2.346 s versus 7.193 s for NTSC VHS and 1.651 s versus 5.865 s for
 NTSC LD (this port versus the v0.4.0 Python virtual environment); all output

@@ -193,7 +193,7 @@ public static class VhsChromaDecoder
         ValidateLineShape(chromaField.Length, options.OutputLineCount, options.OutputLineLength);
         ValidateBurstRange(options.BurstStart, options.BurstEnd, options.OutputLineLength);
 
-        double outputSampleRateMHz = options.OutputSampleRateHz / 1_000_000.0;
+        double outputSampleRateMHz = options.FscMHz * 4.0;
         double phaseCarrierHz = options.ChromaAfcTrackCarrier
             ? previousChromaAfcCarrierHz ?? options.ColorUnderCarrierHz
             : options.ColorUnderCarrierHz;
@@ -273,7 +273,7 @@ public static class VhsChromaDecoder
         }
 
         chromaField = ApplyChromaPreFilter(chromaField, options, previousChromaAfcCarrierHz);
-        double outputSampleRateMHz = options.OutputSampleRateHz / 1_000_000.0;
+        double outputSampleRateMHz = options.FscMHz * 4.0;
         double[] carrierProbe = chromaField;
         if (options.ChromaAfcTrackCarrier && options.ChromaAfcMeasurementFilters is { } measurementFilters)
         {
@@ -284,7 +284,7 @@ public static class VhsChromaDecoder
         ChromaCarrierEstimate? carrierEstimate = options.ChromaAfcTrackCarrier
             ? EstimateChromaCarrier(
                 carrierProbe,
-                options.OutputSampleRateHz,
+                options.FscMHz * 4_000_000.0,
                 options.ColorUnderCarrierHz,
                 options.ChromaAfcLineFrequencyHz,
                 options.ChromaAfcFineTuneStepHz)
@@ -409,10 +409,9 @@ public static class VhsChromaDecoder
                 options.ChromaAfcDecodeSampleRateHz);
         }
 
-        bool retainFloat32 = preSosFilter is not null;
         if (preSosFilter is not null)
         {
-            output = SosFilter.ApplyForwardBackwardFloat32(preSosFilter, output);
+            output = SosFilter.ApplyForwardBackward(preSosFilter, output);
         }
         else if (preFilter is not null)
         {
@@ -425,18 +424,14 @@ public static class VhsChromaDecoder
         if (options.ChromaAudioNotchFilter is not null)
         {
             output = IirFilter.ApplyForwardBackward(options.ChromaAudioNotchFilter, output);
-            retainFloat32 = false;
         }
 
         if (options.ChromaVideoNotchFilter is not null)
         {
             output = IirFilter.ApplyForwardBackward(options.ChromaVideoNotchFilter, output);
-            retainFloat32 = false;
         }
 
-        return retainFloat32
-            ? ShiftChromaAndRemoveDcFloat32(output, options.ChromaPreFilterMoveSamples)
-            : ShiftChromaAndRemoveDc(output, options.ChromaPreFilterMoveSamples);
+        return ShiftChromaAndRemoveDc(output, options.ChromaPreFilterMoveSamples);
     }
 
     public static ChromaCarrierEstimate? EstimateChromaCarrier(
@@ -913,16 +908,15 @@ public static class VhsChromaDecoder
             return output;
         }
 
-        double mean = 0.0;
         for (int i = 0; i < chroma.Length; i++)
         {
-            mean += chroma[i];
+            output[PositiveModulo(i + move, chroma.Length)] = chroma[i];
         }
 
-        mean /= chroma.Length;
-        for (int i = 0; i < chroma.Length; i++)
+        double mean = MeanFloat64FastMath(output);
+        for (int i = 0; i < output.Length; i++)
         {
-            output[PositiveModulo(i + move, chroma.Length)] = chroma[i] - mean;
+            output[i] -= mean;
         }
 
         return output;
@@ -1108,6 +1102,60 @@ public static class VhsChromaDecoder
         }
 
         return lanes[0] / values.Length;
+    }
+
+    private static double MeanFloat64FastMath(ReadOnlySpan<double> values)
+    {
+        const int VectorWidth = 4;
+        const int Interleave = 4;
+        const int Stride = VectorWidth * Interleave;
+        Span<double> accumulators = stackalloc double[Stride];
+        int index = 0;
+        int vectorizedEnd = values.Length - (values.Length % Stride);
+        for (; index < vectorizedEnd; index += Stride)
+        {
+            for (int group = 0; group < Interleave; group++)
+            {
+                for (int lane = 0; lane < VectorWidth; lane++)
+                {
+                    int accumulator = (group * VectorWidth) + lane;
+                    accumulators[accumulator] += values[index + accumulator];
+                }
+            }
+        }
+
+        Span<double> lanes = stackalloc double[VectorWidth];
+        for (int lane = 0; lane < VectorWidth; lane++)
+        {
+            double left = accumulators[lane] + accumulators[VectorWidth + lane];
+            double right = accumulators[(2 * VectorWidth) + lane]
+                + accumulators[(3 * VectorWidth) + lane];
+            lanes[lane] = left + right;
+        }
+
+        double sum = (lanes[0] + lanes[2]) + (lanes[1] + lanes[3]);
+        int fourLaneEnd = values.Length - ((values.Length - index) % VectorWidth);
+        if (index < fourLaneEnd)
+        {
+            lanes.Clear();
+            lanes[0] = sum;
+            for (; index < fourLaneEnd; index += VectorWidth)
+            {
+                for (int lane = 0; lane < VectorWidth; lane++)
+                {
+                    lanes[lane] += values[index + lane];
+                }
+            }
+
+            sum = (lanes[0] + lanes[2]) + (lanes[1] + lanes[3]);
+        }
+
+        for (; index < values.Length; index++)
+        {
+            sum += values[index];
+        }
+
+        return sum / values.Length;
     }
 
     internal static (double[] Sin, double[] Cos) BuildCarrierTables(

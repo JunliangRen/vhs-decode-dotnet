@@ -1262,6 +1262,7 @@ public sealed class TbcFieldDecodePipeline
         }
 
         double outputSamplesPerUsec = JsonDouble(parameters.SysParams, "outfreq");
+        double chromaSampleRateHz = JsonDouble(parameters.SysParams, "fsc_mhz") * 4_000_000.0;
         int burstStart = Math.Clamp(
             checked((int)Math.Floor(colorBurstRange[0].GetDouble() * outputSamplesPerUsec) - 5),
             0,
@@ -1287,10 +1288,10 @@ public sealed class TbcFieldDecodePipeline
             chromaOptions.EnableColorKiller,
             chromaOptions.DetectChromaTrackPhase)
         {
-            FinalFilter = DecodeFilterSetBuilder.BuildChromaFinalFilter(parameters, frameSpec.OutputSampleRateHz, chromaOptions.IsColorUnder),
-            FinalSosFilter = DecodeFilterSetBuilder.BuildChromaFinalSosFilter(parameters, frameSpec.OutputSampleRateHz, chromaOptions.IsColorUnder),
+            FinalFilter = DecodeFilterSetBuilder.BuildChromaFinalFilter(parameters, chromaSampleRateHz, chromaOptions.IsColorUnder),
+            FinalSosFilter = DecodeFilterSetBuilder.BuildChromaFinalSosFilter(parameters, chromaSampleRateHz, chromaOptions.IsColorUnder),
             ChromaDeemphasisFilter = chromaOptions.ChromaDeemphasisFilter
-                ? DecodeFilterSetBuilder.BuildChromaDeemphasisFilter(parameters, frameSpec.OutputSampleRateHz)
+                ? DecodeFilterSetBuilder.BuildChromaDeemphasisFilter(parameters, chromaSampleRateHz)
                 : null,
             ChromaPreFilter = chromaOptions.UseChromaAfc
                 ? DecodeFilterSetBuilder.BuildChromaAfcBandPassFilter(parameters, decodeSampleRateHz)
@@ -1299,10 +1300,10 @@ public sealed class TbcFieldDecodePipeline
                 ? DecodeFilterSetBuilder.BuildChromaAfcBandPassSosFilter(parameters, decodeSampleRateHz)
                 : null,
             ChromaAudioNotchFilter = chromaOptions.UseChromaAfc && chromaOptions.ChromaAudioNotch
-                ? DecodeFilterSetBuilder.BuildChromaAudioNotchFilter(parameters, frameSpec.OutputSampleRateHz)
+                ? DecodeFilterSetBuilder.BuildChromaAudioNotchFilter(parameters, chromaSampleRateHz)
                 : null,
             ChromaVideoNotchFilter = chromaOptions.UseChromaAfc
-                ? DecodeFilterSetBuilder.BuildChromaVideoNotchFilter(filterOptions, frameSpec.OutputSampleRateHz)
+                ? DecodeFilterSetBuilder.BuildChromaVideoNotchFilter(filterOptions, chromaSampleRateHz)
                 : null,
             ChromaPreFilterMoveSamples = chromaOptions.UseChromaAfc
                 ? (int)(10.0 * (frameSpec.OutputSampleRateHz / 40_000_000.0))
@@ -1315,7 +1316,7 @@ public sealed class TbcFieldDecodePipeline
                 ? ChromaAfcFineTuneStepHz(parameters)
                 : 0.0,
             ChromaAfcMeasurementFilters = chromaOptions.UseChromaAfc
-                ? DecodeFilterSetBuilder.BuildChromaAfcMeasurementFilters(parameters, frameSpec.OutputSampleRateHz)
+                ? DecodeFilterSetBuilder.BuildChromaAfcMeasurementFilters(parameters, chromaSampleRateHz)
                 : null,
             ChromaAfcPreFilterLowHz = chromaOptions.UseChromaAfc
                 ? JsonDoubleOrDefault(parameters.RfParams, "chroma_bpf_lower", 60_000.0)
