@@ -522,6 +522,9 @@ Implemented:
   correction, and a wider-gap skipped field retains v0.4.0's early-return
   metadata shape: no `decodeFaults`, `vitsMetrics`, or `vbi` JSON keys and no
   corresponding SQLite VITS/VBI rows, with `decode_faults` left `NULL`
+- LD/CVBS/VHS filler writes reuse the previously serialized field metadata
+  verbatim, while LD refreshes only the repeated PCM/EFM counts; this prevents
+  filler insertion from inventing phase faults or advancing VITS/VBI state
 - CVBS field-order repair follows its inherited LD state machine rather than
   VHS `detect/drop`: close repeated parity is corrected and written with fault
   bit 1, wider gaps insert the cached opposite raw parity, and the current
@@ -1002,7 +1005,7 @@ dotnet test VHSDecodeDotNet.slnx --no-build
 ```
 
 The current formal solution build completes with zero warnings and errors, and
-the xUnit v3 project exposes 264 independently discoverable compatibility tests
+the xUnit v3 project exposes 265 independently discoverable compatibility tests
 to `dotnet test` and Visual Studio Test Explorer. On the
 same Windows machine and fixtures, Release wall-clock measurements for one
 frame were 2.346 s versus 7.193 s for NTSC VHS and 1.651 s versus 5.865 s for

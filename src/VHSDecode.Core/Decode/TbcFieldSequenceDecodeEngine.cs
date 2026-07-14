@@ -982,10 +982,20 @@ public sealed class TbcFieldSequenceDecodeEngine
         }
 
         IReadOnlyList<TbcDecodedField> metadataFields = _efmOutputWriter.Write(session, writtenFields);
-        TbcOutputMetadataWriter.WriteJson(session, metadataFields, paths.JsonPath, writtenOrder);
+        TbcOutputMetadataWriter.WriteJson(
+            session,
+            metadataFields,
+            paths.JsonPath,
+            writtenOrder,
+            writtenFields);
         if (session.Spec.Name == "ld" || session.ExecutionOptions.WriteDebugData)
         {
-            TbcSqliteMetadataWriter.Write(session, metadataFields, paths.DbPath!, writtenOrder);
+            TbcSqliteMetadataWriter.Write(
+                session,
+                metadataFields,
+                paths.DbPath!,
+                writtenOrder,
+                writtenFields);
         }
 
         return new TbcFieldSequenceDecodeResult(
@@ -1200,7 +1210,7 @@ public sealed class TbcFieldSequenceDecodeEngine
             }
 
             TbcDecodedField metadataField = _laserDiscOutput.Write(field);
-            System.Text.Json.Nodes.JsonObject fieldInfo = _metadata.Add(metadataField, decision);
+            System.Text.Json.Nodes.JsonObject fieldInfo = _metadata.Add(metadataField, decision, field);
             _sqlite?.Add(fieldInfo);
             _writtenFieldCount++;
         }

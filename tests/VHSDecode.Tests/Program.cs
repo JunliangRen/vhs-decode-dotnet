@@ -13736,10 +13736,10 @@ public void TbcFieldSequenceEngineAppliesFieldOrderWrites()
         ]));
         TbcDecodedField[] ldSkippedFields =
         [
-            BuildSequenceField(ldSkippedSession, FieldStart(ldSkippedSession, 0.0), 0x1111, true),
-            BuildSequenceField(ldSkippedSession, FieldStart(ldSkippedSession, 1.0), 0x2222, false),
-            BuildSequenceField(ldSkippedSession, FieldStart(ldSkippedSession, 2.0), 0x3333, true),
-            BuildSequenceField(ldSkippedSession, FieldStart(ldSkippedSession, 3.4), 0x4444, true)
+            BuildSequenceField(ldSkippedSession, FieldStart(ldSkippedSession, 0.0), 0x1111, true) with { FieldPhaseId = 1 },
+            BuildSequenceField(ldSkippedSession, FieldStart(ldSkippedSession, 1.0), 0x2222, false) with { FieldPhaseId = 2 },
+            BuildSequenceField(ldSkippedSession, FieldStart(ldSkippedSession, 2.0), 0x3333, true) with { FieldPhaseId = 3 },
+            BuildSequenceField(ldSkippedSession, FieldStart(ldSkippedSession, 3.4), 0x4444, true) with { FieldPhaseId = 4 }
         ];
 
         TbcFieldSequenceDecodeResult ldSkippedResult = engine.WriteDecodedFields(ldSkippedSession, ldSkippedFields);
@@ -13754,6 +13754,7 @@ public void TbcFieldSequenceEngineAppliesFieldOrderWrites()
         using JsonDocument ldSkippedJson = JsonDocument.Parse(File.ReadAllText(ldSkippedResult.Paths.JsonPath));
         JsonElement ldSkippedJsonFields = ldSkippedJson.RootElement.GetProperty("fields");
         AssertEqual(5, ldSkippedJsonFields.GetArrayLength());
+        AssertEqual(ldSkippedJsonFields[1].GetRawText(), ldSkippedJsonFields[3].GetRawText());
         AssertEqual(4, JsonInt(ldSkippedJsonFields[4], "seqNo"));
         AssertEqual(0, JsonInt(ldSkippedJsonFields[4], "syncConf"));
         AssertFalse(ldSkippedJsonFields[4].TryGetProperty("decodeFaults", out _));
@@ -13761,6 +13762,7 @@ public void TbcFieldSequenceEngineAppliesFieldOrderWrites()
         AssertFalse(ldSkippedJsonFields[4].TryGetProperty("vbi", out _));
         AssertTrue(ldSkippedJsonFields[4].TryGetProperty("audioSamples", out _));
         AssertTrue(ldSkippedJsonFields[4].TryGetProperty("efmTValues", out _));
+        AssertEqual(1L, SqliteLong(ldSkippedResult.Paths.DbPath!, "SELECT decode_faults IS NULL FROM field_record WHERE field_id = 3"));
         AssertEqual(1L, SqliteLong(ldSkippedResult.Paths.DbPath!, "SELECT decode_faults IS NULL FROM field_record WHERE field_id = 4"));
         AssertEqual(0L, SqliteLong(ldSkippedResult.Paths.DbPath!, "SELECT COUNT(*) FROM vits_metrics WHERE field_id = 4"));
         AssertEqual(0L, SqliteLong(ldSkippedResult.Paths.DbPath!, "SELECT COUNT(*) FROM vbi WHERE field_id = 4"));
@@ -13830,6 +13832,53 @@ public void TbcFieldSequenceEngineAppliesFieldOrderWrites()
     }
 }
 
+[Fact(DisplayName = "TBC streaming metadata reuses LD filler field info")]
+public void TbcStreamingMetadataReusesLdFillerFieldInfo()
+{
+    string tempDirectory = Path.Combine(Path.GetTempPath(), "vhsdecode-dotnet-tests-" + Guid.NewGuid().ToString("N"));
+    Directory.CreateDirectory(tempDirectory);
+    try
+    {
+        using DecodeSession session = DecodeSessionFactory.Create(Parse(CliSpecs.LaserDisc, [
+            "--NTSC",
+            "--noEFM",
+            "--disable_analog_audio",
+            "input.s16",
+            Path.Combine(tempDirectory, "ld-streaming")
+        ]));
+        TbcDecodedField[] fields =
+        [
+            BuildSequenceField(session, FieldStart(session, 0.0), 0x1111, true) with { FieldPhaseId = 1 },
+            BuildSequenceField(session, FieldStart(session, 1.0), 0x2222, false) with { FieldPhaseId = 2 },
+            BuildSequenceField(session, FieldStart(session, 2.0), 0x3333, true) with { FieldPhaseId = 3 },
+            BuildSequenceField(session, FieldStart(session, 3.4), 0x4444, true) with { FieldPhaseId = 4 }
+        ];
+
+        TbcDecodedField? ReadField(DecodeSession _, Stream __, long ___, int ____, int fieldNumber)
+            => fieldNumber < fields.Length ? fields[fieldNumber] : null;
+
+        TbcFieldSequenceDecodeResult result = new TbcFieldSequenceDecodeEngine(readField: ReadField)
+            .TryDecodeAndWrite(session, Stream.Null);
+
+        AssertTrue(result.Success);
+        AssertEqual(5, result.WrittenFieldCount);
+        using JsonDocument document = JsonDocument.Parse(File.ReadAllText(result.Paths!.JsonPath));
+        JsonElement outputFields = document.RootElement.GetProperty("fields");
+        AssertEqual(5, outputFields.GetArrayLength());
+        AssertEqual(outputFields[1].GetRawText(), outputFields[3].GetRawText());
+        AssertEqual(
+            1L,
+            SqliteLong(result.Paths.DbPath!, "SELECT decode_faults IS NULL FROM field_record WHERE field_id = 3"));
+        AssertFalse(
+            File.ReadAllText(session.OutputBase + ".log")
+                .Contains("Field phaseID sequence mismatch (3->2)", StringComparison.Ordinal));
+    }
+    finally
+    {
+        Directory.Delete(tempDirectory, recursive: true);
+    }
+}
+
 [Fact(DisplayName = "TBC field sequence engine applies CVBS LD-style field-order writes")]
 public void TbcFieldSequenceEngineAppliesCvbsLdStyleFieldOrderWrites()
 {
@@ -13867,6 +13916,7 @@ public void TbcFieldSequenceEngineAppliesCvbsLdStyleFieldOrderWrites()
         AssertEqual(10, JsonInt(outputFields[1], "syncConf"));
         AssertEqual(1, JsonInt(outputFields[1], "decodeFaults"));
         AssertEqual(2, JsonInt(outputFields[2], "seqNo"));
+        AssertEqual(outputFields[1].GetRawText(), outputFields[2].GetRawText());
         AssertFalse(outputFields[3].TryGetProperty("decodeFaults", out _));
         AssertFalse(outputFields[3].TryGetProperty("vitsMetrics", out _));
         AssertFalse(outputFields[3].TryGetProperty("vbi", out _));
