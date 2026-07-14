@@ -3132,6 +3132,80 @@ public void PalVhsChromaPhaseSequenceMatchesReleaseBits()
     AssertEqual(0x4074997460E7FB3BUL, BitConverter.DoubleToUInt64Bits(result.OddBurstPhaseAverageDegrees));
 }
 
+[Fact(DisplayName = "PAL VHS chroma track-phase sequence matches v0.4.0 float64 bits")]
+public void PalVhsChromaTrackPhaseSequenceMatchesReleaseBits()
+{
+    FormatParameterSet parameters = FormatCatalog.Default.GetTapeParameters("PAL", "VHS", "sp");
+    TbcFrameSpec frameSpec = TbcFrameSpec.FromParameters(parameters);
+    var decodeOptions = new ChromaDecodeOptions(
+        IsColorUnder: true,
+        WriteChroma: true,
+        SkipChroma: false,
+        UseChromaAfc: false,
+        DisableComb: false,
+        ChromaDeemphasisFilter: false,
+        ChromaAudioNotch: false,
+        ChromaOffsetSamples: 0,
+        DetectChromaTrackPhase: true,
+        EnableColorKiller: false,
+        DisableBurstHsync: false,
+        DisablePhaseCorrection: false,
+        UseOldRawChromaOutput: false);
+    VhsChromaFieldOptions options = TbcFieldDecodePipeline.BuildChromaFieldOptions(
+        "PAL",
+        parameters,
+        frameSpec,
+        decodeOptions)
+        ?? throw new InvalidOperationException("Chroma options were not built for PAL VHS.");
+
+    double[] chroma = Enumerable.Range(0, frameSpec.FieldSampleCount)
+        .Select(index => (((index * 37) % 101 - 50) / 8.0) + Math.ScaleB(index + 1.0, -35))
+        .ToArray();
+    const int LineOffset = 3;
+    const int InputLineLength = 2_560;
+    double[] lineLocations = Enumerable.Range(0, LineOffset + frameSpec.OutputLineCount + 2)
+        .Select(line => line * (double)InputLineLength)
+        .ToArray();
+    ChromaPhaseSequenceResult result = VhsChromaDecoder.AnalyzeFieldPhase(
+        chroma,
+        options,
+        lineLocations,
+        InputLineLength,
+        lineOffset: LineOffset);
+
+    AssertEqual(1, result.NextChromaRotationIndex);
+    AssertEqual(313, result.PhaseSequence.Length);
+    AssertEqual(0, result.BurstDetectedLine);
+    AssertIntSequence(
+        [0, 3, 2, 1, 0, 3, 2, 1, 0, 3, 2, 1, 0, 3, 2, 1],
+        result.PhaseSequence[^16..].Select(line => line.PhaseRotation).ToArray());
+    ChromaPhaseLine last = result.PhaseSequence[^1];
+    AssertEqual(315, last.LineNumber);
+    AssertEqual(1, last.PhaseRotation);
+    AssertEqual(0x406601C518E0EA83UL, BitConverter.DoubleToUInt64Bits(last.BurstPhaseDegrees));
+    AssertEqual(0UL, BitConverter.DoubleToUInt64Bits(last.BurstPhaseOffsetDegrees));
+    AssertEqual(0x403352BDFF350DC5UL, BitConverter.DoubleToUInt64Bits(last.BurstMagnitude));
+    double[] flattened = result.PhaseSequence
+        .SelectMany(line => new[]
+        {
+            (double)line.LineNumber,
+            line.PhaseRotation,
+            line.BurstPhaseDegrees,
+            line.BurstPhaseOffsetDegrees,
+            line.BurstMagnitude,
+            line.I,
+            line.Q
+        })
+        .ToArray();
+    AssertEqual(
+        "1D46B6D78C7F04A749AF47146EFB5A8075917825520B80047D6DF6904D02BAD4",
+        DoubleBitsSha256(flattened));
+    AssertEqual(0x4037E9036918DF9AUL, BitConverter.DoubleToUInt64Bits(result.BurstMagnitudeAverage));
+    AssertEqual(0x40749879C9CA5F7FUL, BitConverter.DoubleToUInt64Bits(result.BurstPhaseAverageDegrees));
+    AssertEqual(0x4074978FCAA356D3UL, BitConverter.DoubleToUInt64Bits(result.EvenBurstPhaseAverageDegrees));
+    AssertEqual(0x4074997460E7FB3BUL, BitConverter.DoubleToUInt64Bits(result.OddBurstPhaseAverageDegrees));
+}
+
 [Fact(DisplayName = "VHS chroma carrier matches NumPy float32 trigonometry")]
 public void VhsChromaCarrierMatchesNumpyFloat32Trigonometry()
 {

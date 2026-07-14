@@ -854,9 +854,11 @@ Implemented:
   for bit, with staged hashes locking prefilters, notches, carrier estimates,
   heterodyne/phase compensation, final filters, deemphasis, comb, and automatic
   chroma gain
-- a complete deterministic 313-line PAL VHS burst-phase sequence matches
-  v0.4.0 bit for bit, including every per-line phase/I/Q/magnitude tuple, the
-  next-track rotation index, burst detection, and odd/even/combined averages
+- complete deterministic 313-line PAL VHS burst-phase sequences with track
+  detection both disabled and enabled match v0.4.0 bit for bit, including
+  every per-line phase/I/Q/magnitude tuple, bottom-of-field lookahead and phase
+  reuse, the next-track rotation index, burst detection, and
+  odd/even/combined averages
 - a two-field real NTSC VHS/FLAC fixture now matches the v0.4.0 checkout byte
   for byte: main TBC
   `60A6409696FD27F2012D9DF40DB97D141BE1F3D6315D3F6D4AD45A88B59FB1FF`,
@@ -976,8 +978,8 @@ Not complete yet:
 - remaining container-specific resampling edge cases
 - remaining real-capture PAL LD and AC3 end-to-end fixtures, external AC3
   tool-pipeline parity, and remaining verbose VITS field calibration details
-- remaining non-default VHS/CVBS vblank edge cases and real-capture chroma
-  track-phase plus uncommon cross-option parity
+- remaining non-default VHS/CVBS vblank edge cases, real-capture chroma
+  track-phase transitions, and uncommon cross-option parity
 - remaining upstream TBC field-writer integration and bit-compat edge handling
 - remaining rare real-capture first-HSYNC/vblank edge cases and complete
   upstream JSON/SQLite field metadata
@@ -996,7 +998,7 @@ dotnet test VHSDecodeDotNet.slnx --no-build
 ```
 
 The current formal solution build completes with zero warnings and errors, and
-the xUnit v3 project exposes 235 independently discoverable compatibility tests
+the xUnit v3 project exposes 236 independently discoverable compatibility tests
 to `dotnet test` and Visual Studio Test Explorer. On the
 same Windows machine and fixtures, Release wall-clock measurements for one
 frame were 2.346 s versus 7.193 s for NTSC VHS and 1.651 s versus 5.865 s for
