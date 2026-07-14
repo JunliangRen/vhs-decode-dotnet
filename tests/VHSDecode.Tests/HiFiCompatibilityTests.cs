@@ -698,6 +698,133 @@ public sealed class HiFiCompatibilityTests
         Assert.Equal(expectedBits, BitConverter.SingleToUInt32Bits(actual).ToString("X8"));
     }
 
+    [Fact(DisplayName = "HiFi DOC FFT statistics match v0.4.0 float bits")]
+    public void HiFiDocFftStatisticsMatchV040FloatBits()
+    {
+        float[] input = CreateDeterministicFloatInput(128);
+        for (int i = 0; i < input.Length; i++)
+        {
+            input[i] *= 4.0f;
+        }
+
+        (float mean, float standardDeviation) = HiFiDropoutCompensator.AnalyzeWindow(input);
+
+        Assert.Equal("41A1682B", BitConverter.SingleToUInt32Bits(mean).ToString("X8"));
+        Assert.Equal("41288938", BitConverter.SingleToUInt32Bits(standardDeviation).ToString("X8"));
+    }
+
+    [Fact(DisplayName = "HiFi DOC raised-cosine DC interpolation matches v0.4.0 float bits")]
+    public void HiFiDocRaisedCosineDcInterpolationMatchesV040FloatBits()
+    {
+        float[] source = CreateDeterministicFloatInput(1024);
+        Assert.Equal(
+            "3B1AEAC0",
+            BitConverter.SingleToUInt32Bits(HiFiAudioProcessing.NumbaFastMean(source[..256])).ToString("X8"));
+        Assert.Equal(
+            "3D42B4CC",
+            BitConverter.SingleToUInt32Bits(HiFiAudioProcessing.NumbaFastMean(source[768..])).ToString("X8"));
+        float before = BitConverter.UInt32BitsToSingle(0x3B1AEAC0);
+        float after = BitConverter.UInt32BitsToSingle(0x3D42B4CC);
+
+        float[] actual = HiFiDropoutCompensator.InterpolateDc(before, after, 768);
+
+        Assert.Equal(
+            "691BB95900C3651B1C13D6A8C2CAA834AB446E209AB853D836986C46F850EBA8",
+            BinarySha256(actual));
+    }
+
+    [Fact(DisplayName = "HiFi DOC window detection matches v0.4.0 boundaries")]
+    public void HiFiDocWindowDetectionMatchesV040Boundaries()
+    {
+        var zeros = new float[1024];
+        float[] broad = CreateScaledDeterministicFloatInput(1024, 0x12345678, 4.0f);
+        var mixed = new float[1024];
+        for (int i = 0; i < mixed.Length; i++)
+        {
+            mixed[i] = (float)Math.Sin(i * 2.0 * Math.PI * 1000.0 / 192_000.0) * 0.02f;
+        }
+
+        CreateScaledDeterministicFloatInput(512, 0x89ABCDEF, 4.0f)
+            .CopyTo(mixed, 256);
+
+        Assert.Empty(HiFiDropoutCompensator.Detect(zeros));
+        Assert.Equal(
+            [new HiFiSampleRange(0, 1024)],
+            HiFiDropoutCompensator.Detect(broad));
+        Assert.Equal(
+            [new HiFiSampleRange(256, 896)],
+            HiFiDropoutCompensator.Detect(mixed));
+    }
+
+    [Fact(DisplayName = "HiFi DOC cross-channel ranges match v0.4.0")]
+    public void HiFiDocCrossChannelRangesMatchV040()
+    {
+        List<HiFiDropoutAction> actual = HiFiDropoutCompensator.CheckOtherChannel(
+            [new HiFiSampleRange(100, 500), new HiFiSampleRange(700, 900)],
+            [
+                new HiFiSampleRange(50, 150),
+                new HiFiSampleRange(250, 350),
+                new HiFiSampleRange(450, 750),
+                new HiFiSampleRange(800, 850)
+            ]);
+
+        HiFiDropoutAction[] expected =
+        [
+            new(null, new HiFiSampleRange(100, 150)),
+            new(new HiFiSampleRange(150, 250), null),
+            new(null, new HiFiSampleRange(250, 350)),
+            new(new HiFiSampleRange(350, 450), null),
+            new(null, new HiFiSampleRange(450, 500)),
+            new(null, new HiFiSampleRange(700, 750)),
+            new(new HiFiSampleRange(750, 800), null),
+            new(null, new HiFiSampleRange(800, 850)),
+            new(new HiFiSampleRange(850, 900), null)
+        ];
+        Assert.Equal(expected, actual);
+    }
+
+    [Theory(DisplayName = "HiFi DOC fill and mute fades match v0.4.0 float bits")]
+    [InlineData(256, 768, false, "E2AF4B5D18F2068A7D159A82AC2D69CCCB6B41C73C3089D419A2B4EB212063F8")]
+    [InlineData(256, 768, true, "AE1B6E97DC6BA3D807110B4EA178F323E1089738C68F3D1507258973665F2266")]
+    [InlineData(0, 192, false, "A42C5AD0724A2D9FD909BC1C95C439F93A4656D4ED5EEE2B80726FFDB47B5028")]
+    [InlineData(832, 1024, true, "B235D23172065F5D7DAD0B87A40356583B0612BFBFF6E74489F7CD4EA37B7C91")]
+    public void HiFiDocFillAndMuteFadesMatchV040FloatBits(
+        int start,
+        int end,
+        bool mute,
+        string expectedHash)
+    {
+        float[] outer = CreateDeterministicFloatInput(1024);
+        float[] inner = CreateDeterministicFloatInput(1024, 0x89ABCDEF);
+
+        HiFiDropoutCompensator.Fill(start, end, outer, inner, mute);
+
+        Assert.Equal(expectedHash, BinarySha256(outer));
+    }
+
+    [Theory(DisplayName = "HiFi DOC stereo and mono processing matches v0.4.0 float bits")]
+    [InlineData("s", "full", "FDDB655A235FFC66E67AB10342D2F443EEAAF327C530D9D9D0B556253E612454", "94EC7A02B6CD457123453B0EB65F9CE9666DCEA501376517DAF81A8698B657BC")]
+    [InlineData("s", "mute", "D376429A282712B9833FA9A5EF764BA6D2CC64D9E322C7ACB7F80BD790CF705C", "120CA997BC15F26CDD4A0DA052E6F8D7CF735A537741A891830037578B1F4DD5")]
+    [InlineData("d", "full", "D376429A282712B9833FA9A5EF764BA6D2CC64D9E322C7ACB7F80BD790CF705C", "120CA997BC15F26CDD4A0DA052E6F8D7CF735A537741A891830037578B1F4DD5")]
+    [InlineData("l", "full", "D376429A282712B9833FA9A5EF764BA6D2CC64D9E322C7ACB7F80BD790CF705C", "090D7754D6AFEC7357C2FB491A8F620A79A7A12BA136D9642C0013E50EB5F3A8")]
+    [InlineData("r", "full", "1751BFBABCB4B76E9885062C5225F0AE1C1E47DC3C4D767F5DD0DD3D4D54EEA8", "120CA997BC15F26CDD4A0DA052E6F8D7CF735A537741A891830037578B1F4DD5")]
+    public void HiFiDocStereoAndMonoProcessingMatchesV040FloatBits(
+        string decodeMode,
+        string compensationMode,
+        string expectedLeftHash,
+        string expectedRightHash)
+    {
+        float[] left = CreateScaledDeterministicFloatInput(4096, 0x12345678, 0.02f);
+        float[] right = CreateScaledDeterministicFloatInput(4096, 0x89ABCDEF, 0.02f);
+        CreateScaledDeterministicFloatInput(768, 0x31415926, 4.0f).CopyTo(left, 1024);
+        CreateScaledDeterministicFloatInput(896, 0x27182818, 4.0f).CopyTo(right, 1408);
+
+        HiFiDropoutCompensator.Compensate(left, right, decodeMode, compensationMode);
+
+        Assert.Equal(expectedLeftHash, BinarySha256(left));
+        Assert.Equal(expectedRightHash, BinarySha256(right));
+    }
+
     [Theory(DisplayName = "HiFi mono block channel routing matches v0.4.0")]
     [InlineData("l", true, false)]
     [InlineData("r", false, true)]
@@ -740,13 +867,30 @@ public sealed class HiFiCompatibilityTests
         => Convert.ToHexString(SHA256.HashData(MemoryMarshal.AsBytes(values)));
 
     private static float[] CreateDeterministicFloatInput(int length)
+        => CreateDeterministicFloatInput(length, 0x12345678);
+
+    private static float[] CreateDeterministicFloatInput(int length, uint seed)
     {
-        uint state = 0x12345678;
+        uint state = seed;
         var input = new float[length];
         for (int i = 0; i < input.Length; i++)
         {
             state = unchecked((state * 1_664_525) + 1_013_904_223);
             input[i] = ((int)(state >> 8) - 0x800000) / (float)0x800000;
+        }
+
+        return input;
+    }
+
+    private static float[] CreateScaledDeterministicFloatInput(
+        int length,
+        uint seed,
+        float scale)
+    {
+        float[] input = CreateDeterministicFloatInput(length, seed);
+        for (int i = 0; i < input.Length; i++)
+        {
+            input[i] *= scale;
         }
 
         return input;
