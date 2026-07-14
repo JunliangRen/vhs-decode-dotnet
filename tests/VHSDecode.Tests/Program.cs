@@ -7427,6 +7427,68 @@ public void VideoOutputConverterMapsHzToTbcSamples()
     AssertEqual(expectedBlank, palConverter.ConvertHz(palConverter.IreToHz(0.0)));
 }
 
+[Fact(DisplayName = "video output array conversion matches Numba fastmath boundaries")]
+public void VideoOutputArrayConversionMatchesNumbaFastMathBoundaries()
+{
+    var converter = new VideoOutputConverter(
+        ire0: 7_100_000.0,
+        hzIre: 8_000.0,
+        outputZero: 256,
+        vsyncIre: -42.857142857142854,
+        outputScale: 376.32);
+
+    ushort[] converted = converter.ConvertHz(
+        [6_760_937.5, 6_789_062.5, 6_754_687.5, 6_767_187.5]);
+    AssertEqual((ushort)434, converted[0]);
+    AssertEqual((ushort)1_757, converted[1]);
+    AssertEqual((ushort)140, converted[2]);
+    AssertEqual((ushort)728, converted[3]);
+}
+
+[Fact(DisplayName = "LD sync pulse search uses the upstream minus 20 IRE threshold")]
+public void LaserDiscSyncPulseSearchUsesMinusTwentyIreThreshold()
+{
+    var analyzer = new SyncAnalyzer(
+        sampleRateHz: 40_000_000.0,
+        linePeriodUs: 64.0,
+        hsyncPulseUs: 4.7,
+        equalizingPulseUs: 2.35,
+        vsyncPulseUs: 27.3);
+    var frameSpec = new TbcFrameSpec(
+        "PAL",
+        OutputLineLength: 4,
+        OutputLineCount: 2,
+        OutputSampleRateHz: 17_734_475.0,
+        ColourBurstStart: null,
+        ColourBurstEnd: null,
+        ActiveVideoStart: null,
+        ActiveVideoEnd: null);
+    var converter = new VideoOutputConverter(
+        ire0: 7_100_000.0,
+        hzIre: 8_000.0,
+        outputZero: 256,
+        vsyncIre: -42.857142857142854,
+        outputScale: 376.32);
+    var pipeline = new TbcFieldDecodePipeline(
+        analyzer,
+        new TbcFieldRenderer(frameSpec, converter),
+        converter,
+        "PAL",
+        TbcDropoutDetectionOptions.Disabled,
+        syncDetectionOptions: SyncDetectionOptions.Disabled,
+        decodeType: "ld");
+    double[] samples = [7_100_000.0];
+    object prepared = InvokePrivateMethod(
+        pipeline,
+        "PrepareSyncSpan",
+        new RfDecodedSpan(0, samples, samples, samples, VideoLowPass: samples),
+        null,
+        true,
+        true)!;
+
+    AssertClose(6_940_000.0, Convert.ToDouble(PrivatePropertyValue(prepared, "Threshold")), 0.0);
+}
+
 [Fact(DisplayName = "TBC field renderer emits upstream-shaped little-endian fields")]
 public void TbcFieldRendererEmitsUpstreamShapedFields()
 {

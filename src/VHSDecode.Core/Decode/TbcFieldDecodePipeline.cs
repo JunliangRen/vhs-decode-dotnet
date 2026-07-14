@@ -1386,7 +1386,10 @@ public sealed class TbcFieldDecodePipeline
             ?? _laserDiscAgcConverter
             ?? _laserDiscSyncConverter
             ?? _videoOutput;
-        double defaultThreshold = thresholdConverter.IreToHz(thresholdConverter.VSyncIre / 2.0);
+        double defaultThreshold = thresholdConverter.IreToHz(
+            string.Equals(_decodeType, "ld", StringComparison.Ordinal)
+                ? -20.0
+                : thresholdConverter.VSyncIre / 2.0);
 
         if (!_syncDetectionOptions.DetectLevels)
         {

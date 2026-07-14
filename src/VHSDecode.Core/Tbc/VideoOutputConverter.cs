@@ -115,9 +115,26 @@ public sealed class VideoOutputConverter
             throw new ArgumentException("Output length must match input length.", nameof(output));
         }
 
+        double inverseHzIre = 1.0 / HzIre;
+        double fastMathOffset = (OutputZero + 0.5) - (VSyncIre * OutputScale);
         for (int i = 0; i < input.Length; i++)
         {
-            output[i] = ConvertHz(input[i]);
+            // Upstream's ndarray conversion is Numba fastmath code, which
+            // reassociates around ire0 and contracts the final multiply-add.
+            double scaledDelta = OutputScale * (input[i] - Ire0);
+            double value = Math.FusedMultiplyAdd(scaledDelta, inverseHzIre, fastMathOffset);
+            if (value <= 0.0)
+            {
+                output[i] = 0;
+            }
+            else if (value >= ushort.MaxValue)
+            {
+                output[i] = ushort.MaxValue;
+            }
+            else
+            {
+                output[i] = (ushort)value;
+            }
         }
     }
 
