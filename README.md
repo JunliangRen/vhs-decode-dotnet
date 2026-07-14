@@ -21,7 +21,9 @@ This port targets the decode CLIs only:
 - `decode.py vhs`
 - `decode.py cvbs`
 - `decode.py ld`
-- standalone aliases equivalent to `vhs-decode`, `cvbs-decode`, and `ld-decode`
+- `decode.py hifi`
+- standalone aliases equivalent to `vhs-decode`, `cvbs-decode`, `ld-decode`,
+  and `hifi-decode`
 
 GUI launcher, filter tuning, and TBC utility tools are intentionally outside the
 port scope unless they are required by the decode pipeline itself.
@@ -39,6 +41,13 @@ Implemented:
   `cvbs-decode.exe`, and `ld-decode.exe` apphost aliases that infer their
   subcommand from the executable name
 - compatibility option registry for VHS, CVBS, and LaserDisc decode commands
+- the complete v0.4.0 HiFi argparse surface is represented by a typed command
+  spec: all 42 options, aliases, defaults, frequency parsing, VHS/8mm default
+  selection, preview overrides, and both standalone/facade help snapshots are
+  locked to upstream; dispatch remains gated on completing the audio pipeline
+- HiFi raw-input normalization covers `u8`, `u10le`, `u12le`, `u16le`, `s8`,
+  `s10le`, `s12le`, `s16le`/`raw`, and `f32le`; representative extrema and
+  center values match all 54 upstream v0.4.0 float32 bit patterns exactly
 - upstream `-h` / `--help` handling for all three decode commands, including
   zero-exit help before positional argument validation
 - complete v0.4.0 argparse help snapshots for the three standalone and three
@@ -983,6 +992,9 @@ Not complete yet:
   pairs, and 1,428 float32-exact channels across all 357 valid tape
   system/format/speed cases
 - remaining container-specific resampling edge cases
+- remaining HiFi AFE/FM demodulation, resampling, dropout compensation,
+  head-switch interpolation, expander/deemphasis/noise reduction, streaming
+  output, preview/GNU Radio integration, and final command dispatch
 - remaining real-capture PAL LD and AC3 end-to-end fixtures, external AC3
   tool-pipeline parity, and remaining verbose VITS field calibration details
 - remaining non-default VHS/CVBS vblank edge cases, real-capture chroma
@@ -1005,7 +1017,7 @@ dotnet test VHSDecodeDotNet.slnx --no-build
 ```
 
 The current formal solution build completes with zero warnings and errors, and
-the xUnit v3 project exposes 265 independently discoverable compatibility tests
+the xUnit v3 project exposes 278 independently discoverable compatibility tests
 to `dotnet test` and Visual Studio Test Explorer. On the
 same Windows machine and fixtures, Release wall-clock measurements for one
 frame were 2.346 s versus 7.193 s for NTSC VHS and 1.651 s versus 5.865 s for

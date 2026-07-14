@@ -1,3 +1,5 @@
+using VHSDecode.Core.HiFi;
+
 namespace VHSDecode.Core.CommandLine;
 
 public static class CliSpecs
@@ -52,6 +54,14 @@ public static class CliSpecs
         ["ld-decode"],
         LaserDiscOptions(),
         minimumPositionals: 2,
+        maximumPositionals: 2);
+
+    public static DecodeCommandSpec HiFi { get; } = new(
+        "hifi",
+        "Extracts audio from RAW HiFi FM RF captures",
+        ["hifi-decode"],
+        HiFiOptions(),
+        minimumPositionals: 0,
         maximumPositionals: 2);
 
     public static DecodeCommandSpec[] AllCommands { get; } = [Vhs, Cvbs, LaserDisc];
@@ -200,6 +210,74 @@ public static class CliSpecs
         yield return Str("write_test_ldf", ["--write-test-ldf"], null);
     }
 
+    private static IEnumerable<OptionSpec> HiFiOptions()
+    {
+        yield return Flag("help", ["-h", "--help"]);
+        yield return Freq("inputfreq", ["--frequency", "-f"], 40.0, pythonDefaultValue: 40);
+        yield return Flag("overwrite", ["--overwrite"]);
+        yield return Int("threads", ["--threads", "-t"], Environment.ProcessorCount);
+        yield return Flag("preview", ["--preview"]);
+        yield return Flag("UI", ["--gui"]);
+        yield return Flag("GRC", ["--gnuradio"]);
+        yield return Str("raw_format", ["--raw_format"], null);
+        yield return Flag("pal", ["--pal", "-p"]);
+        yield return Flag("ntsc", ["--ntsc", "-n"]);
+        yield return Flag("format_8mm", ["--8mm"]);
+        yield return Str("demod_type", ["--demod"], HiFiConstants.DefaultDemod, normalize: Lower);
+        yield return Flag("bias_guess", ["--bias_guess", "--bg"]);
+        yield return Str("auto_fine_tune", ["--auto_fine_tune"], "off", normalize: Lower);
+        yield return Freq("afe_left_carrier", ["--AFE_left_carrier"], 0.0, pythonDefaultValue: 0);
+        yield return Freq(
+            "afe_left_carrier_deviation",
+            ["--AFE_left_carrier_deviation"],
+            0.0,
+            pythonDefaultValue: 0);
+        yield return Freq("afe_right_carrier", ["--AFE_right_carrier"], 0.0, pythonDefaultValue: 0);
+        yield return Freq(
+            "afe_right_carrier_deviation",
+            ["--AFE_right_carrier_deviation"],
+            0.0,
+            pythonDefaultValue: 0);
+        yield return Flag("normalize", ["--normalize"]);
+        yield return Dbl("gain", ["--gain"], 1.0);
+        yield return Str("mode", ["--audio_mode"], null, normalize: Lower);
+        yield return Int("rate", ["--audio_rate", "--ar"], HiFiConstants.DefaultFinalAudioRate);
+        yield return Str(
+            "resampler_quality",
+            ["--resampler_quality"],
+            HiFiConstants.DefaultResamplerQuality);
+        yield return Str(
+            "head_switching_interpolation",
+            ["--head_switching_interpolation"],
+            "on",
+            normalize: Lower);
+        yield return Str("doc", ["--doc"], HiFiConstants.DefaultDropoutCompensation, normalize: Lower);
+        yield return Dbl(
+            "spectral_nr_amount",
+            ["--NR_spectral_amount"],
+            HiFiConstants.DefaultSpectralNoiseReductionAmount,
+            pythonDefaultValue: 0);
+        yield return Str("enable_expander", ["--expander"], "on", normalize: Lower);
+        yield return Dbl("expander_gain", ["--expander_gain"], null);
+        yield return Dbl("expander_ratio", ["--expander_ratio"], null);
+        yield return Str("expander_env_detection", ["--expander_env_detection"], null, normalize: Lower);
+        yield return Dbl("expander_attack_tau", ["--expander_attack_tau"], null);
+        yield return Dbl("expander_hold_tau", ["--expander_hold_tau"], null);
+        yield return Dbl("expander_release_tau", ["--expander_release_tau"], null);
+        yield return Dbl("expander_weighting_low_tau", ["--expander_weighting_low_tau"], null);
+        yield return Dbl("expander_weighting_high_tau", ["--expander_weighting_high_tau"], null);
+        yield return Dbl("expander_weighting_low_pass", ["--expander_weighting_low_pass"], null);
+        yield return Dbl(
+            "expander_weighting_low_pass_transition",
+            ["--expander_weighting_low_pass_transition"],
+            null);
+        yield return Str("enable_deemphasis", ["--deemphasis"], "on", normalize: Lower);
+        yield return Dbl("deemphasis_low_tau", ["--deemphasis_low_tau"], null);
+        yield return Dbl("deemphasis_high_tau", ["--deemphasis_high_tau"], null);
+        yield return Dbl("nr_deemphasis_low_tau", ["--nr_deemphasis_low_tau"], null);
+        yield return Dbl("nr_deemphasis_high_tau", ["--nr_deemphasis_high_tau"], null);
+    }
+
     private static OptionSpec Flag(string dest, string[] names, bool defaultValue = false, bool hidden = false)
         => new()
         {
@@ -308,7 +386,8 @@ public static class CliSpecs
         string[] names,
         double? defaultValue,
         Func<string, double>? parseFrequencyMHz = null,
-        string parseErrorTypeName = "parse_frequency")
+        string parseErrorTypeName = "parse_frequency",
+        object? pythonDefaultValue = null)
         => new()
         {
             Destination = dest,
@@ -317,7 +396,7 @@ public static class CliSpecs
             ValueKind = OptionValueKind.FrequencyMHz,
             ParseErrorTypeName = parseErrorTypeName,
             DefaultValue = defaultValue,
-            PythonDefaultValue = defaultValue,
+            PythonDefaultValue = pythonDefaultValue ?? defaultValue,
             ParseFrequencyMHz = parseFrequencyMHz
         };
 

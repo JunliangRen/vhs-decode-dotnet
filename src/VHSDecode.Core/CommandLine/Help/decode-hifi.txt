@@ -1,0 +1,167 @@
+usage: decode.py [-h] [--frequency ] [--overwrite] [--threads ] [--preview]
+                 [--gui] [--gnuradio] [--raw_format ] [--pal] [--ntsc] [--8mm]
+                 [--demod ] [--bias_guess] [--auto_fine_tune ]
+                 [--AFE_left_carrier ] [--AFE_left_carrier_deviation ]
+                 [--AFE_right_carrier ] [--AFE_right_carrier_deviation ]
+                 [--normalize] [--gain ] [--audio_mode ] [--audio_rate ]
+                 [--resampler_quality ] [--head_switching_interpolation ]
+                 [--doc ] [--NR_spectral_amount ] [--expander ]
+                 [--expander_gain ] [--expander_ratio ]
+                 [--expander_env_detection ] [--expander_attack_tau ]
+                 [--expander_hold_tau ] [--expander_release_tau ]
+                 [--expander_weighting_low_tau ]
+                 [--expander_weighting_high_tau ]
+                 [--expander_weighting_low_pass ]
+                 [--expander_weighting_low_pass_transition ] [--deemphasis ]
+                 [--deemphasis_low_tau ] [--deemphasis_high_tau ]
+                 [--nr_deemphasis_low_tau ] [--nr_deemphasis_high_tau ]
+                 [infile] [outfile]
+
+Extracts audio from RAW HiFi FM RF captures
+
+positional arguments:
+  infile                source file path or '-' for stdin
+                          NOTE: `--raw_format` is required for stdin
+  outfile               output file
+
+options:
+  -h, --help            show this help message and exit
+  --frequency, -f       RF sampling frequency in source file (default is 40MHz)
+  --overwrite           Overwrite existing decode files.
+  --threads, -t         number of CPU threads to use
+  --preview             Preview the audio through your speakers as it decodes. Uses preview quality (faster and noisier)
+  --gui                 Opens hifi-decode GUI graphical user interface
+  --gnuradio            Opens ZMQ REP pipe to gnuradio at port 5555
+  --raw_format          Specify RF input data precision. Packed data is unsupported.
+                          Required for stdin.
+                          This option can be used to override the precision of the input file for better normalization.
+                          (i.e. when decoding 10bit data is stored in 16bit FLAC, specifying `--raw_format s10le` will normalize the input data as 10bit)
+                        Input Formats:
+                          u8    	8 bit unsigned integer
+                          u16le  	16 bit unsigned integer
+                          u10le  	16 bit (10 bit precision) unsigned integer
+                          u12le  	16 bit (12 bit precision) unsigned integer
+                          s8    	8 bit signed integer
+                          s16le  	16 bit signed integer
+                          s10le  	16 bit (10 bit precision) signed integer
+                          s12le  	16 bit (12 bit precision) signed integer
+                          f32le  	32 bit floating point
+
+System options:
+  --pal, -p             source is in PAL format
+  --ntsc, -n            source is in NTSC format
+  --8mm                 Use settings for Video8 and Hi8 tape formats.
+
+Demodulation options:
+  --demod               Set the FM demodulation type 
+                          quadrature [default]
+                          hilbert
+  --bias_guess, --bg    Do carrier bias guess
+  --auto_fine_tune      Set auto tuning of the analog front end on/off
+  --AFE_left_carrier    Overrides the left carrier center frequency.
+  --AFE_left_carrier_deviation 
+                        Overrides the left carrier maximum deviation. This represents the maximum frequency offset + or - from the center frequency.
+  --AFE_right_carrier   Overrides the right carrier center frequency.
+  --AFE_right_carrier_deviation 
+                        Overrides the right carrier maximum deviation. This represents the maximum frequency offset + or - from the center frequency.
+
+Audio processing options:
+  --normalize           (recommended) Automatically amplifies the audio to the peak gain of the decode. 
+                        This will create a temporary file ending in "tmp_normalize.raw" that is deleted after the amplification step is complete.
+  --gain                Manually adjust the gain/volume of the output audio. 
+                          1.0 [default]
+  --audio_mode          Audio modes 
+                          s 	Stereo (L, R) [VHS default]
+                          ms 	Stereo (L+R, L-R) [8mm default]
+                          d 	Dual Mono (L) (R)
+                          dms 	Dual Mono (L+R) (L-R)
+                          l 	Mono (L)
+                          r 	Mono (R)
+                          sum 	Mono Sum (L+R)
+  --audio_rate, --ar    Output sample rate in Hz 
+                          192000
+                          96000
+                          48000 [default]
+                          41000
+  --resampler_quality   Sets quality of resampling to use in the audio chain.
+                          high 	slowest, best quality [default]
+                          medium
+                          low 	fast, low quality
+
+Noise reduction options:
+  --head_switching_interpolation 
+                        Enables head switching noise interpolation. 
+                          on 	enabled [default]
+                          off 	disabled
+  --doc                 Dropout compensation method (what happens when there is no hifi carrier) 
+                          full 	copies audio from the other channel, or mutes if both channels have a dropout [default]
+                          mute 	always mute dropouts
+                          off 	disabled
+  --NR_spectral_amount 
+                        Sets the amount of broadband spectral noise reduction to apply
+                          0.0 	off
+                          0 	[default]
+                          1.0 	full spectral noise reduction
+
+Expander tuning options (advanced):
+  --expander            Enable / Disable Expander 
+                          on 	enabled [default]
+                          off 	disabled
+  --expander_gain       Sets the expander gain 
+                          30 	[VHS default]
+                          6	[8mm default]
+  --expander_ratio      Sets the expander ratio 
+                          2 	[VHS default]
+                          2	[8mm default]
+  --expander_env_detection 
+                        Set the expander envelope detection method  
+                          peak 	uses peak detection (JVC standard, IEC 60774-2) [default]
+                          rms 	uses rms detection (Some Panasonic and early VCRs)
+  --expander_attack_tau 
+                        Sets the expander attack speed in seconds 
+                          0.0065 	[VHS default]
+                          0.003	[8mm default]
+  --expander_hold_tau   Sets the expander hold time in seconds 
+                          0 	[VHS default]
+                          0.015	[8mm default]
+  --expander_release_tau 
+                        Sets the expander release speed in seconds 
+                          0.07 	[VHS default]
+                          0.04	[8mm default]
+  --expander_weighting_low_tau 
+                        Sets the expander weighting high-pass shelf filter low point in tau 
+                          0.00024 	[VHS default]
+                          7.5e-05	[8mm default]
+  --expander_weighting_high_tau 
+                        Sets the expander weighting high-pass shelf filter high point in tau 
+                          2.4e-05 	[VHS default]
+                          2.7e-05	[8mm default]
+  --expander_weighting_low_pass 
+                        Sets the expander weighting low-pass filter cutoff frequency in Hz 
+                          20000 	[VHS default]
+                          20000	[8mm default]
+  --expander_weighting_low_pass_transition 
+                        Sets the expander weighting low-pass filter cutoff rate in Hz 
+                          100000 	[VHS default]
+                          100000	[8mm default]
+
+Deemphasis tuning options (advanced):
+  --deemphasis          Enable / Disable Deemphasis 
+                          on 	enabled [default]
+                          off 	disabled
+  --deemphasis_low_tau 
+                        Sets the deemphasis low-pass shelf filter low point in tau 
+                          5.6e-05 	[VHS default]
+                          7.5e-05	[8mm default]
+  --deemphasis_high_tau 
+                        Sets the deemphasis low-pass shelf filter high point in tau 
+                          2e-05 	[VHS default]
+                          2.7e-05	[8mm default]
+  --nr_deemphasis_low_tau 
+                        Sets the noise reduction deemphasis low-pass shelf filter low point in tau 
+                          0.00024 	[VHS default]
+                          7.5e-05	[8mm default]
+  --nr_deemphasis_high_tau 
+                        Sets the noise reduction deemphasis low-pass shelf filter high point in tau 
+                          5.6e-05 	[VHS default]
+                          1.9e-05	[8mm default]
