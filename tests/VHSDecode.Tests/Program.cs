@@ -2760,7 +2760,7 @@ public void VhsChromaDecoderDetectsBurstPhaseSequence()
     AssertClose(2.0, burst.Q, 1e-12);
 
     double[] numbaBurst = Enumerable.Range(0, 70)
-        .Select(i => (double)(float)(((i * 37) % 101 - 50) / 8.0))
+        .Select(i => (((i * 37) % 101 - 50) / 8.0) + Math.ScaleB(i + 1.0, -35))
         .ToArray();
     double[] numbaSin = Enumerable.Range(0, 96)
         .Select(i => (double)(float)(((i * 17) % 53 - 26) / 16.0))
@@ -2775,28 +2775,11 @@ public void VhsChromaDecoderDetectsBurstPhaseSequence()
         burstStart: 7,
         numbaSin,
         numbaCos);
-    ulong[] expectedNumbaBurstBits =
-    [
-        0x4065763e42867cb0,
-        0x3fe4a28575e4bbda,
-        0x4038fd155990fddb,
-        0xc038ba0000000000,
-        0x400ce00000000000
-    ];
-    double[] numbaBurstValues =
-    [
-        numbaBurstResult.PhaseDegrees,
-        numbaBurstResult.PhaseOffsetDegrees,
-        numbaBurstResult.Magnitude,
-        numbaBurstResult.I,
-        numbaBurstResult.Q
-    ];
-    for (int i = 0; i < expectedNumbaBurstBits.Length; i++)
-    {
-        AssertEqual(
-            expectedNumbaBurstBits[i],
-            unchecked((ulong)BitConverter.DoubleToInt64Bits(numbaBurstValues[i])));
-    }
+    AssertEqual(0xC038BA000003D400UL, BitConverter.DoubleToUInt64Bits(numbaBurstResult.I));
+    AssertEqual(0x400CDFFFFF95D000UL, BitConverter.DoubleToUInt64Bits(numbaBurstResult.Q));
+    AssertEqual(0x4038FD155992DCC5UL, BitConverter.DoubleToUInt64Bits(numbaBurstResult.Magnitude));
+    AssertEqual(0x4065763E428A68F1UL, BitConverter.DoubleToUInt64Bits(numbaBurstResult.PhaseDegrees));
+    AssertEqual(0x3FE4A28575E4BBDAUL, BitConverter.DoubleToUInt64Bits(numbaBurstResult.PhaseOffsetDegrees));
 
     double[] chroma = Enumerable.Range(0, 12).Select(value => (double)value).ToArray();
     double[] carrierSin = new double[12];
@@ -2967,8 +2950,8 @@ public void VhsChromaDecoderDetectsBurstPhaseSequence()
         colorSystem: "PAL"));
 }
 
-[Fact(DisplayName = "VHS chroma burst magnitude matches NumPy hypot")]
-public void VhsChromaBurstMagnitudeMatchesNumpyHypot()
+[Fact(DisplayName = "VHS chroma burst magnitude matches v0.4.0 Numba hypot")]
+public void VhsChromaBurstMagnitudeMatchesReleaseHypot()
 {
     ChromaBurstDemodulationResult burst = VhsChromaDecoder.DemodBurst(
         [-1937.88232421875, -110.7741928100586, 42.956520080566406, -197.7586212158203],
@@ -2978,7 +2961,175 @@ public void VhsChromaBurstMagnitudeMatchesNumpyHypot()
         burstSin: [0.0, 0.0, 1.0, 1.0],
         burstCos: [1.0, 1.0, 0.0, 0.0]);
 
-    AssertEqual(0x40A00CFE6035537FUL, BitConverter.DoubleToUInt64Bits(burst.Magnitude));
+    AssertEqual(0x40A00CFE60355380UL, BitConverter.DoubleToUInt64Bits(burst.Magnitude));
+}
+
+[Fact(DisplayName = "PAL VHS chroma burst probe matches v0.4.0 float64 bits")]
+public void PalVhsChromaBurstProbeMatchesReleaseBits()
+{
+    FormatParameterSet parameters = FormatCatalog.Default.GetTapeParameters("PAL", "VHS", "sp");
+    TbcFrameSpec frameSpec = TbcFrameSpec.FromParameters(parameters);
+    var decodeOptions = new ChromaDecodeOptions(
+        IsColorUnder: true,
+        WriteChroma: true,
+        SkipChroma: false,
+        UseChromaAfc: false,
+        DisableComb: false,
+        ChromaDeemphasisFilter: false,
+        ChromaAudioNotch: false,
+        ChromaOffsetSamples: 0,
+        DetectChromaTrackPhase: false,
+        EnableColorKiller: false,
+        DisableBurstHsync: false,
+        DisablePhaseCorrection: false,
+        UseOldRawChromaOutput: false);
+    VhsChromaFieldOptions options = TbcFieldDecodePipeline.BuildChromaFieldOptions(
+        "PAL",
+        parameters,
+        frameSpec,
+        decodeOptions)
+        ?? throw new InvalidOperationException("Chroma options were not built for PAL VHS.");
+
+    AssertEqual(94, options.BurstStart);
+    AssertEqual(150, options.BurstEnd);
+    AssertEqual(
+        "E2A9F54E967697937EBE3D44357B8805D0740FBC6C7651C8B596CC4A69992E86",
+        DoubleBitsSha256(options.FinalSosFilter!.SelectMany(section => new[]
+        {
+            section.B0,
+            section.B1,
+            section.B2,
+            section.A0,
+            section.A1,
+            section.A2
+        }).ToArray()));
+
+    int sampleCount = 3 * frameSpec.OutputLineLength;
+    double[] chroma = Enumerable.Range(0, sampleCount)
+        .Select(index => (((index * 37) % 101 - 50) / 8.0) + Math.ScaleB(index + 1.0, -35))
+        .ToArray();
+    double[][] heterodyne = VhsChromaDecoder.BuildHeterodyneTable(
+        sampleCount,
+        options.FscMHz,
+        options.ColorUnderCarrierHz / 1_000_000.0,
+        options.FscMHz * 4.0);
+    (double[] burstSin, double[] burstCos) = VhsChromaDecoder.BuildCarrierTables(
+        sampleCount,
+        options.FscMHz,
+        options.FscMHz * 4.0);
+    double[]? capturedMixed = null;
+    double[]? capturedFiltered = null;
+    ChromaBurstDemodulationResult result = VhsChromaDecoder.ProbeUpconvertedBurst(
+        chroma,
+        heterodyne,
+        phaseRotation: 3,
+        options.BurstStart,
+        options.BurstEnd,
+        burstSin,
+        burstCos,
+        lineScale: 0.9989764459848242,
+        lineNumber: 2,
+        lineOffset: 1,
+        frameSpec.OutputLineLength,
+        burstFilter: padded =>
+        {
+            capturedMixed = padded.ToArray();
+            capturedFiltered = SosFilter.ApplyForwardBackward(options.FinalSosFilter!, padded);
+            return capturedFiltered;
+        });
+
+    AssertEqual(
+        "330869D467CD9D3DBB93F7CF5898D8565F75FFE0C646AA91FF19F272E7147C02",
+        DoubleBitsSha256(capturedMixed!));
+    AssertEqual(
+        "25B6D459D47519976AB97BBBED41FFA88AA1E9F4038ACDF246959264BB827929",
+        DoubleBitsSha256(capturedFiltered!));
+    AssertEqual(0x4064C329592D3C5FUL, BitConverter.DoubleToUInt64Bits(result.PhaseDegrees));
+    AssertEqual(0x4021518B70A91DA9UL, BitConverter.DoubleToUInt64Bits(result.PhaseOffsetDegrees));
+    AssertEqual(0x402B4FBACBBD83FCUL, BitConverter.DoubleToUInt64Bits(result.Magnitude));
+    AssertEqual(0xC02A82F3B467500FUL, BitConverter.DoubleToUInt64Bits(result.I));
+    AssertEqual(0x400A3F02088DC1E6UL, BitConverter.DoubleToUInt64Bits(result.Q));
+}
+
+[Fact(DisplayName = "PAL VHS chroma phase sequence matches v0.4.0 float64 bits")]
+public void PalVhsChromaPhaseSequenceMatchesReleaseBits()
+{
+    FormatParameterSet parameters = FormatCatalog.Default.GetTapeParameters("PAL", "VHS", "sp");
+    TbcFrameSpec frameSpec = TbcFrameSpec.FromParameters(parameters);
+    var decodeOptions = new ChromaDecodeOptions(
+        IsColorUnder: true,
+        WriteChroma: true,
+        SkipChroma: false,
+        UseChromaAfc: false,
+        DisableComb: false,
+        ChromaDeemphasisFilter: false,
+        ChromaAudioNotch: false,
+        ChromaOffsetSamples: 0,
+        DetectChromaTrackPhase: false,
+        EnableColorKiller: false,
+        DisableBurstHsync: false,
+        DisablePhaseCorrection: false,
+        UseOldRawChromaOutput: false);
+    VhsChromaFieldOptions options = TbcFieldDecodePipeline.BuildChromaFieldOptions(
+        "PAL",
+        parameters,
+        frameSpec,
+        decodeOptions)
+        ?? throw new InvalidOperationException("Chroma options were not built for PAL VHS.");
+
+    double[] chroma = Enumerable.Range(0, frameSpec.FieldSampleCount)
+        .Select(index => (((index * 37) % 101 - 50) / 8.0) + Math.ScaleB(index + 1.0, -35))
+        .ToArray();
+    const int LineOffset = 3;
+    const int InputLineLength = 2_560;
+    double[] lineLocations = Enumerable.Range(0, LineOffset + frameSpec.OutputLineCount + 2)
+        .Select(line => line * (double)InputLineLength)
+        .ToArray();
+    ChromaPhaseSequenceResult result = VhsChromaDecoder.AnalyzeFieldPhase(
+        chroma,
+        options,
+        lineLocations,
+        InputLineLength,
+        lineOffset: LineOffset);
+
+    AssertEqual(1, result.NextChromaRotationIndex);
+    AssertEqual(313, result.PhaseSequence.Length);
+    AssertEqual(0, result.BurstDetectedLine);
+    ChromaPhaseLine first = result.PhaseSequence[0];
+    AssertEqual(3, first.LineNumber);
+    AssertEqual(0, first.PhaseRotation);
+    AssertEqual(0x4073B300258A63F3UL, BitConverter.DoubleToUInt64Bits(first.BurstPhaseDegrees));
+    AssertEqual(0UL, BitConverter.DoubleToUInt64Bits(first.BurstPhaseOffsetDegrees));
+    AssertEqual(0x403C5B2A5B4885C9UL, BitConverter.DoubleToUInt64Bits(first.BurstMagnitude));
+    AssertEqual(0x40341DC74D25B16AUL, BitConverter.DoubleToUInt64Bits(first.I));
+    AssertEqual(0xC033FC2D3DEDF498UL, BitConverter.DoubleToUInt64Bits(first.Q));
+    ChromaPhaseLine last = result.PhaseSequence[^1];
+    AssertEqual(315, last.LineNumber);
+    AssertEqual(0, last.PhaseRotation);
+    AssertEqual(0x405E9C37E95E4BDAUL, BitConverter.DoubleToUInt64Bits(last.BurstPhaseDegrees));
+    AssertEqual(0UL, BitConverter.DoubleToUInt64Bits(last.BurstPhaseOffsetDegrees));
+    AssertEqual(0xC02FDC176ECE9795UL, BitConverter.DoubleToUInt64Bits(last.I));
+    AssertEqual(0x40390FD7498989E1UL, BitConverter.DoubleToUInt64Bits(last.Q));
+    AssertEqual(0x403DB233AAC37DF0UL, BitConverter.DoubleToUInt64Bits(last.BurstMagnitude));
+    double[] flattened = result.PhaseSequence
+        .SelectMany(line => new[]
+        {
+            (double)line.LineNumber,
+            line.PhaseRotation,
+            line.BurstPhaseDegrees,
+            line.BurstPhaseOffsetDegrees,
+            line.BurstMagnitude,
+            line.I,
+            line.Q
+        })
+        .ToArray();
+    AssertEqual(
+        "8BFBCFFD123B67693FA6EC24B9EFD91A5D90A9BF38BA1BA8926B41F24B9754FB",
+        DoubleBitsSha256(flattened));
+    AssertEqual(0x4037E9036918DF9AUL, BitConverter.DoubleToUInt64Bits(result.BurstMagnitudeAverage));
+    AssertEqual(0x40749879C9CA5F7FUL, BitConverter.DoubleToUInt64Bits(result.BurstPhaseAverageDegrees));
+    AssertEqual(0x4074978FCAA356D3UL, BitConverter.DoubleToUInt64Bits(result.EvenBurstPhaseAverageDegrees));
+    AssertEqual(0x4074997460E7FB3BUL, BitConverter.DoubleToUInt64Bits(result.OddBurstPhaseAverageDegrees));
 }
 
 [Fact(DisplayName = "VHS chroma carrier matches NumPy float32 trigonometry")]

@@ -676,30 +676,30 @@ public static class DecodeFilterSetBuilder
             return null;
         }
 
-        double nyquistHz = outputSampleRateHz / 2.0;
-        double fscHz = fscMHz * 1_000_000.0;
-        double lowerHz;
-        double upperHz;
+        double nyquistMHz = (fscMHz * 4.0) / 2.0;
+        double colorUnderMHz = colorUnderHz / 1_000_000.0;
+        double lowerMHz;
+        double upperMHz;
         if (colorUnderFormat)
         {
-            lowerHz = fscHz - (colorUnderHz * 0.9);
-            upperHz = fscHz + (colorUnderHz * 0.75);
+            lowerMHz = fscMHz - (colorUnderMHz * 0.9);
+            upperMHz = fscMHz + (colorUnderMHz * 0.75);
         }
         else
         {
-            lowerHz = fscHz - 100_000.0;
-            upperHz = fscHz + 100_000.0;
+            lowerMHz = fscMHz - 0.1;
+            upperMHz = fscMHz + 0.1;
         }
 
-        if (lowerHz <= 0.0 || upperHz <= lowerHz || upperHz >= nyquistHz)
+        if (lowerMHz <= 0.0 || upperMHz <= lowerMHz || upperMHz >= nyquistMHz)
         {
             throw new ArgumentOutOfRangeException(nameof(parameters), "Final chroma band-pass frequencies must be inside the TBC output Nyquist range.");
         }
 
         return IirFilterDesign.ButterworthBandPass(
             order: 4,
-            normalizedLowCutoff: lowerHz / nyquistHz,
-            normalizedHighCutoff: upperHz / nyquistHz);
+            normalizedLowCutoff: lowerMHz / nyquistMHz,
+            normalizedHighCutoff: upperMHz / nyquistMHz);
     }
 
     public static SosSection[]? BuildChromaFinalSosFilter(
@@ -723,30 +723,30 @@ public static class DecodeFilterSetBuilder
             return null;
         }
 
-        double nyquistHz = outputSampleRateHz / 2.0;
-        double fscHz = fscMHz * 1_000_000.0;
-        double lowerHz;
-        double upperHz;
+        double nyquistMHz = (fscMHz * 4.0) / 2.0;
+        double colorUnderMHz = colorUnderHz / 1_000_000.0;
+        double lowerMHz;
+        double upperMHz;
         if (colorUnderFormat)
         {
-            lowerHz = fscHz - (colorUnderHz * 0.9);
-            upperHz = fscHz + (colorUnderHz * 0.75);
+            lowerMHz = fscMHz - (colorUnderMHz * 0.9);
+            upperMHz = fscMHz + (colorUnderMHz * 0.75);
         }
         else
         {
-            lowerHz = fscHz - 100_000.0;
-            upperHz = fscHz + 100_000.0;
+            lowerMHz = fscMHz - 0.1;
+            upperMHz = fscMHz + 0.1;
         }
 
-        if (lowerHz <= 0.0 || upperHz <= lowerHz || upperHz >= nyquistHz)
+        if (lowerMHz <= 0.0 || upperMHz <= lowerMHz || upperMHz >= nyquistMHz)
         {
             throw new ArgumentOutOfRangeException(nameof(parameters), "Final chroma band-pass frequencies must be inside the TBC output Nyquist range.");
         }
 
         return IirFilterDesign.ButterworthBandPassSos(
             order: 4,
-            normalizedLowCutoff: lowerHz / nyquistHz,
-            normalizedHighCutoff: upperHz / nyquistHz);
+            normalizedLowCutoff: lowerMHz / nyquistMHz,
+            normalizedHighCutoff: upperMHz / nyquistMHz);
     }
 
     public static TransferFunction BuildChromaDeemphasisFilter(FormatParameterSet parameters, double outputSampleRateHz)

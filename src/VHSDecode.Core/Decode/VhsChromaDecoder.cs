@@ -1,4 +1,5 @@
 using System.Numerics;
+using System.Runtime.InteropServices;
 using VHSDecode.Core.Dsp;
 
 namespace VHSDecode.Core.Decode;
@@ -203,7 +204,7 @@ public static class VhsChromaDecoder
         Func<double[], double[]>? effectiveBurstFilter = burstFilter;
         if (effectiveBurstFilter is null && options.FinalSosFilter is not null)
         {
-            effectiveBurstFilter = values => SosFilter.ApplyForwardBackwardFloat32(options.FinalSosFilter, values);
+            effectiveBurstFilter = values => SosFilter.ApplyForwardBackward(options.FinalSosFilter, values);
         }
         else if (effectiveBurstFilter is null && options.FinalFilter is not null)
         {
@@ -567,16 +568,24 @@ public static class VhsChromaDecoder
             {
                 int first = index + lane;
                 int second = first + 4;
-                float firstSample = (float)burst[first];
-                float secondSample = (float)burst[second];
-                float firstI = firstSample * (float)burstCos[burstStart + first];
-                float secondI = secondSample * (float)burstCos[burstStart + second];
-                float firstQ = firstSample * (float)burstSin[burstStart + first];
-                float secondQ = secondSample * (float)burstSin[burstStart + second];
-                iFirst[lane] += firstI;
-                iSecond[lane] += secondI;
-                qFirst[lane] += firstQ;
-                qSecond[lane] += secondQ;
+                double firstSample = burst[first];
+                double secondSample = burst[second];
+                iFirst[lane] = Math.FusedMultiplyAdd(
+                    firstSample,
+                    (float)burstCos[burstStart + first],
+                    iFirst[lane]);
+                iSecond[lane] = Math.FusedMultiplyAdd(
+                    secondSample,
+                    (float)burstCos[burstStart + second],
+                    iSecond[lane]);
+                qFirst[lane] = Math.FusedMultiplyAdd(
+                    firstSample,
+                    (float)burstSin[burstStart + first],
+                    qFirst[lane]);
+                qSecond[lane] = Math.FusedMultiplyAdd(
+                    secondSample,
+                    (float)burstSin[burstStart + second],
+                    qSecond[lane]);
             }
         }
 
@@ -592,18 +601,18 @@ public static class VhsChromaDecoder
         double qComponent = (q0 + q2) + (q1 + q3);
         for (int index = vectorLength; index < burst.Length; index++)
         {
-            float sample = (float)burst[index];
-            iComponent += sample * (float)burstCos[burstStart + index];
-            qComponent += sample * (float)burstSin[burstStart + index];
+            double sample = burst[index];
+            iComponent = Math.FusedMultiplyAdd(sample, (float)burstCos[burstStart + index], iComponent);
+            qComponent = Math.FusedMultiplyAdd(sample, (float)burstSin[burstStart + index], qComponent);
         }
 
-        double phaseDegrees = PositiveDegrees(Math.Atan2(qComponent, iComponent) * 180.0 / Math.PI);
+        double phaseDegrees = PositiveDegrees(Math.Atan2(qComponent, iComponent) * (180.0 / Math.PI));
         double phaseOffsetDegrees = PositiveDegrees(
             (burstStart - lineStart) * Math.FusedMultiplyAdd(-lineScale, 90.0, 90.0));
         return new ChromaBurstDemodulationResult(
             phaseDegrees,
             phaseOffsetDegrees,
-            double.Hypot(iComponent, qComponent),
+            NumpyHypot(iComponent, qComponent),
             iComponent,
             qComponent);
     }
@@ -644,8 +653,7 @@ public static class VhsChromaDecoder
         {
             int sourceIndex = paddedStart + i;
             float heterodyneSample = (float)heterodyne[sourceIndex];
-            float chromaSample = (float)chroma[sourceIndex];
-            paddedBurst[i] = heterodyneSample * chromaSample;
+            paddedBurst[i] = heterodyneSample * chroma[sourceIndex];
         }
 
         double[] filteredPadded = burstFilter?.Invoke(paddedBurst) ?? paddedBurst;
@@ -1601,6 +1609,35 @@ public static class VhsChromaDecoder
         double result = degrees % 360.0;
         return result < 0.0 ? result + 360.0 : result;
     }
+
+    private static double NumpyHypot(double x, double y)
+    {
+        if (OperatingSystem.IsWindows())
+        {
+            return WindowsHypot(x, y);
+        }
+
+        if (OperatingSystem.IsLinux())
+        {
+            return LinuxHypot(x, y);
+        }
+
+        if (OperatingSystem.IsMacOS())
+        {
+            return MacOsHypot(x, y);
+        }
+
+        return double.Hypot(x, y);
+    }
+
+    [DllImport("ucrtbase.dll", EntryPoint = "_hypot", ExactSpelling = true)]
+    private static extern double WindowsHypot(double x, double y);
+
+    [DllImport("libm.so.6", EntryPoint = "hypot", ExactSpelling = true)]
+    private static extern double LinuxHypot(double x, double y);
+
+    [DllImport("/usr/lib/libSystem.B.dylib", EntryPoint = "hypot", ExactSpelling = true)]
+    private static extern double MacOsHypot(double x, double y);
 
     private static double SignedPhaseDeltaDegrees(double current, double previous)
     {

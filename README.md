@@ -366,8 +366,9 @@ Implemented:
   demodulation, line-scale phase offset, phase-rotation sequencing, rotation
   flip checks, burst-level averaging, and color-killer line detection
 - VHS chroma burst probing now mirrors upstream padded burst extraction,
-  heterodyne multiplication, optional burst filtering hook, and carrier-table
-  I/Q demodulation
+  float32-heterodyne/float64-chroma multiplication, float64 zero-phase burst
+  filtering, and carrier-table I/Q demodulation with Numba's double-FMA
+  reduction order
 - VHS chroma field decode now wires TBC-resampled `demod_burst` samples through
   phase probing, upconversion, comb/ACC, uint16 conversion, and
   `TbcDecodedField.ChromaSamples` for sidecar writes
@@ -675,10 +676,10 @@ Implemented:
 - chroma heterodyne/FSC tables, mixed `uphet` samples, comb arithmetic, and
   final SOS filtering now retain the upstream float32 boundaries through to
   ACC, including `sci-rs` float32 state/coefficient arithmetic
-- final chroma filtering now retains SciPy's four-section Butterworth SOS shape
-  and uses the upstream `sci-rs` float32 forward/backward implementation for
-  both burst probing and the full upconverted field instead of collapsing the
-  eighth-order response to one BA polynomial
+- final chroma filtering now retains SciPy's four-section Butterworth SOS shape;
+  the full upconverted field uses upstream `sci-rs` float32 filtering, while
+  burst probing preserves the float64 TBC chroma path, upstream MHz cutoff
+  arithmetic, double-FMA I/Q reduction, and platform C-runtime `hypot`
 - RF color-under extraction likewise uses float32 `sci-rs` SOS filtering and
   reproduces Numba fastmath's vectorized float32 DC-mean reduction; the path
   promotes to double only when an upstream SciPy BA audio/video notch is active
@@ -848,6 +849,9 @@ Implemented:
   samples match v0.4.0 bit for bit, with the Betamax case also locking the SOS
   coefficients, prefilter, carrier estimate, heterodyne, final filter, PAL comb,
   and automatic chroma-gain stage hashes
+- a complete deterministic 313-line PAL VHS burst-phase sequence matches
+  v0.4.0 bit for bit, including every per-line phase/I/Q/magnitude tuple, the
+  next-track rotation index, burst detection, and odd/even/combined averages
 - a two-field real NTSC VHS/FLAC fixture now matches the v0.4.0 checkout byte
   for byte: main TBC
   `60A6409696FD27F2012D9DF40DB97D141BE1F3D6315D3F6D4AD45A88B59FB1FF`,
@@ -987,7 +991,7 @@ dotnet test VHSDecodeDotNet.slnx --no-build
 ```
 
 The current formal solution build completes with zero warnings and errors, and
-the xUnit v3 project exposes 231 independently discoverable compatibility tests
+the xUnit v3 project exposes 233 independently discoverable compatibility tests
 to `dotnet test` and Visual Studio Test Explorer. On the
 same Windows machine and fixtures, Release wall-clock measurements for one
 frame were 2.346 s versus 7.193 s for NTSC VHS and 1.651 s versus 5.865 s for
