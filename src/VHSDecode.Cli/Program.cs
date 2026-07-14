@@ -1,6 +1,8 @@
 using VHSDecode.Core.CommandLine;
 using VHSDecode.Core.Decode;
 
+namespace VHSDecode.Cli;
+
 internal static class Program
 {
     public static int Main(string[] args)
