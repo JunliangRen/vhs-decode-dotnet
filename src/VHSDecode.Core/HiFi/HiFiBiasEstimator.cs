@@ -50,10 +50,15 @@ internal static class HiFiBiasEstimator
             throw new InvalidDataException("No RF samples were available for HiFi carrier bias measurement.");
         }
 
-        HiFiBiasEstimate estimate = MeasureBlocks(options, blocks, cancellationToken);
-        output.WriteLine(
-            $"Carrier L {estimate.LeftCarrierHz / 1_000_000.0:F6} MHz, "
-            + $"R {estimate.RightCarrierHz / 1_000_000.0:F6} MHz");
+        HiFiBiasEstimate estimate = MeasureBlocks(
+            options,
+            blocks,
+            cancellationToken,
+            (current, total, currentEstimate) =>
+            {
+                output.Write(FormatProgress(current, total, currentEstimate));
+                output.Write('\r');
+            });
         output.WriteLine();
         output.WriteLine("done!");
         double updatedLeft = options.TapeFormat == "vhs"
@@ -78,7 +83,8 @@ internal static class HiFiBiasEstimator
     internal static HiFiBiasEstimate MeasureBlocks(
         HiFiDecodeOptions options,
         IReadOnlyList<float[]> blocks,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default,
+        Action<int, int, HiFiBiasEstimate>? progress = null)
     {
         ArgumentNullException.ThrowIfNull(options);
         ArgumentNullException.ThrowIfNull(blocks);
@@ -89,8 +95,9 @@ internal static class HiFiBiasEstimator
 
         HiFiDecodePlan plan = HiFiDecodePlan.FromOptions(options);
         HiFiAfeParameters afe = plan.Afe;
-        var leftMeans = new double[blocks.Count];
-        var rightMeans = new double[blocks.Count];
+        double leftSum = 0.0;
+        double rightSum = 0.0;
+        HiFiBiasEstimate estimate = default;
         using var resampler = new SoxrFloat32Resampler(
             plan.InputRateHz,
             HiFiConstants.HilbertIfRate,
@@ -128,18 +135,39 @@ internal static class HiFiBiasEstimator
                 throw new InvalidDataException("HiFi bias block is too short after demodulation.");
             }
 
-            leftMeans[i] = NumpyMeanFloat32(
+            leftSum += NumpyMeanFloat32(
                 demodulatedLeft.AsSpan(HiFiConstants.BlockPreTrimSamples, count));
-            rightMeans[i] = NumpyMeanFloat32(
+            rightSum += NumpyMeanFloat32(
                 demodulatedRight.AsSpan(HiFiConstants.BlockPreTrimSamples, count));
+            estimate = CreateEstimate(
+                afe,
+                leftSum / (i + 1),
+                rightSum / (i + 1));
+            progress?.Invoke(i + 1, blocks.Count, estimate);
         }
 
-        double leftMean = leftMeans.Sum() / leftMeans.Length;
-        double rightMean = rightMeans.Sum() / rightMeans.Length;
-        return new HiFiBiasEstimate(
+        return estimate;
+    }
+
+    internal static string FormatProgress(
+        int current,
+        int total,
+        HiFiBiasEstimate estimate)
+    {
+        string label = string.Create(
+            System.Globalization.CultureInfo.InvariantCulture,
+            $"Carrier L {estimate.LeftCarrierHz / 1_000_000.0:F6} MHz, "
+            + $"R {estimate.RightCarrierHz / 1_000_000.0:F6} MHz");
+        return HiFiProgressReporter.FormatProgressBar(current, total, label);
+    }
+
+    private static HiFiBiasEstimate CreateEstimate(
+        HiFiAfeParameters afe,
+        double leftMean,
+        double rightMean)
+        => new(
             (leftMean * afe.LeftCarrierDeviationHz) + afe.LeftCarrierHz + 1_000_000.0,
             (rightMean * afe.RightCarrierDeviationHz) + afe.RightCarrierHz + 1_000_000.0);
-    }
 
     private static float NumpyMeanFloat32(ReadOnlySpan<float> values)
         => PairwiseSumFloat32(values) / values.Length;

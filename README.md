@@ -46,8 +46,9 @@ Implemented:
   selection, preview overrides, and both standalone/facade help snapshots are
   locked to upstream
 - HiFi command execution now connects native raw/container input routing,
-  Release 4.0 bias measurement behavior, exact first/middle/final overlap
-  framing, bounded parallel block decoding, ordered audio post-processing,
+  Release 4.0 bias measurement behavior and per-block carrier progress, exact
+  first/middle/final overlap framing, bounded parallel block decoding, ordered
+  audio post-processing,
   dual-mono naming and padding, WAV PCM16 or FLAC PCM24 output, normalization,
   cancellation/error finalization, Release 4.0's per-block progress bar and
   five-line timing/buffer reports, and facade/standalone command dispatch
@@ -1078,7 +1079,7 @@ dotnet test VHSDecodeDotNet.slnx --no-build
 ```
 
 The current formal solution build completes with zero warnings and errors, and
-the xUnit v3 project exposes 430 independently discoverable compatibility tests
+the xUnit v3 project exposes 431 independently discoverable compatibility tests
 to `dotnet test` and Visual Studio Test Explorer. On the
 same Windows machine and fixtures, Release wall-clock measurements for one
 frame were 2.346 s versus 7.193 s for NTSC VHS and 1.651 s versus 5.865 s for

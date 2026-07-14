@@ -77,10 +77,14 @@ internal sealed class HiFiProgressReporter
         }
     }
 
-    internal static string FormatProgressBar(long value, long maximum)
+    internal static string FormatProgressBar(
+        long value,
+        long maximum,
+        string label = "Progress")
     {
         ArgumentOutOfRangeException.ThrowIfNegative(value);
         ArgumentOutOfRangeException.ThrowIfNegativeOrZero(maximum);
+        ArgumentException.ThrowIfNullOrEmpty(label);
         int completed = checked((int)Math.Round(
             value * (double)ProgressWidth / maximum,
             MidpointRounding.ToEven));
@@ -88,7 +92,7 @@ internal sealed class HiFiProgressReporter
         string percentage = (value * 100.0 / maximum).ToString(
             "F2",
             CultureInfo.InvariantCulture);
-        return "Progress ["
+        return label + " ["
             + new string('#', Math.Max(0, completed))
             + new string(' ', Math.Max(0, remaining))
             + "] " + percentage + "%";

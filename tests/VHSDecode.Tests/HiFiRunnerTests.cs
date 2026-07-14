@@ -436,6 +436,39 @@ public sealed class HiFiRunnerTests
         Assert.InRange(estimate.RightCarrierHz, 2_679_245.5, 2_679_246.8);
     }
 
+    [Fact(DisplayName = "HiFi carrier bias progress matches Release 4.0 running averages")]
+    public void HiFiCarrierBiasProgressMatchesRelease40RunningAverages()
+    {
+        HiFiDecodeOptions options = DefaultOptions() with
+        {
+            InputRateHz = 5_000_000.0,
+            DemodType = HiFiConstants.DemodHilbert,
+            BiasGuess = true
+        };
+        var progress = new List<string>();
+
+        HiFiBiasEstimate estimate = HiFiBiasEstimator.MeasureBlocks(
+            options,
+            [
+                CreateDeterministicFloatInput(131_072, 0x12345678),
+                CreateDeterministicFloatInput(131_072, 0x9ABCDEF0)
+            ],
+            TestContext.Current.CancellationToken,
+            (current, total, currentEstimate) => progress.Add(
+                HiFiBiasEstimator.FormatProgress(current, total, currentEstimate)));
+
+        Assert.Equal(
+            [
+                "Carrier L 2.270868 MHz, R 2.679246 MHz "
+                    + "[####################                    ] 50.00%",
+                "Carrier L 2.270676 MHz, R 2.679689 MHz "
+                    + "[########################################] 100.00%"
+            ],
+            progress);
+        Assert.InRange(estimate.LeftCarrierHz, 2_270_675.0, 2_270_676.3);
+        Assert.InRange(estimate.RightCarrierHz, 2_679_688.2, 2_679_689.5);
+    }
+
     [Fact(DisplayName = "HiFi WAV output matches libsndfile PCM16 quantization and padding")]
     public void HiFiWaveOutputMatchesLibsndfilePcm16QuantizationAndPadding()
     {
@@ -718,9 +751,10 @@ public sealed class HiFiRunnerTests
         return samples;
     }
 
-    private static float[] CreateDeterministicFloatInput(int length)
+    private static float[] CreateDeterministicFloatInput(
+        int length,
+        uint state = 0x12345678)
     {
-        uint state = 0x12345678;
         var input = new float[length];
         for (int i = 0; i < input.Length; i++)
         {
