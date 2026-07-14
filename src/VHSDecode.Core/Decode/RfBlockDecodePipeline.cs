@@ -87,7 +87,7 @@ public sealed class RfBlockDecodePipeline : IDisposable
         }
 
         Complex[]? inputSpectrum = _filters.LdEfm is not null || _filters.LdAnalogAudio is not null
-            ? PocketFftComplex.ForwardReal(input)
+            ? PocketFftComplex.ForwardDuccRealFull(input)
             : null;
         RfDemodulatedBlock demodulated = _demodulator.Demodulate(
             input,
@@ -131,13 +131,13 @@ public sealed class RfBlockDecodePipeline : IDisposable
 
         if (_filters.LdEfm is not null)
         {
-            inputSpectrum ??= PocketFftComplex.ForwardReal(input);
+            inputSpectrum ??= PocketFftComplex.ForwardDuccRealFull(input);
             demodulated = demodulated with { Efm = DecodeEfmBlock(inputSpectrum, _filters.LdEfm) };
         }
 
         if (_filters.LdAnalogAudio is not null)
         {
-            inputSpectrum ??= PocketFftComplex.ForwardReal(input);
+            inputSpectrum ??= PocketFftComplex.ForwardDuccRealFull(input);
             demodulated = demodulated with { AnalogAudio = DecodeAnalogAudioBlock(inputSpectrum, _filters.LdAnalogAudio) };
         }
 

@@ -2270,7 +2270,7 @@ public void RfDemodulatorRecoversFmBlockWithFrequencyFilters()
     var demodulator = new RfDemodulator(sampleRate);
     Complex[] identity = RfDemodulator.IdentityFilter(n);
     RfDemodulatedBlock block = demodulator.Demodulate(raw, identity, identity);
-    Complex[] precomputedSpectrum = PocketFftComplex.ForwardReal(raw);
+    Complex[] precomputedSpectrum = PocketFftComplex.ForwardDuccRealFull(raw);
     RfDemodulatedBlock precomputedBlock = demodulator.Demodulate(
         raw,
         identity,
@@ -3810,6 +3810,72 @@ public void ComplexFftMatchesScipyDuccPacketTransforms()
         ComplexBitsSha256(PocketFftComplex.InverseDucc(forward)));
 }
 
+[Fact(DisplayName = "real full FFT matches SciPy DUCC packet transform")]
+public void RealFullFftMatchesScipyDuccPacketTransform()
+{
+    const int length = 32_768;
+    var input = new double[length];
+    for (ulong i = 0; i < (ulong)input.Length; i++)
+    {
+        input[(int)i] = (unchecked((i * 1_103_515_245UL) + 12_345UL) & 0xffffUL) - 32_768.0;
+    }
+
+    Complex[] spectrum = PocketFftComplex.ForwardDuccRealFull(input);
+    AssertEqual(
+        "5ED16316814D498111E0A6EE33EDED7E0862CBD7ACBACD9D00DA13C8125FACF4",
+        ComplexBitsSha256(spectrum));
+    AssertEqual(
+        BitConverter.DoubleToInt64Bits(-0.0),
+        BitConverter.DoubleToInt64Bits(spectrum[0].Imaginary));
+    AssertEqual(
+        BitConverter.DoubleToInt64Bits(-0.0),
+        BitConverter.DoubleToInt64Bits(spectrum[length / 2].Imaginary));
+}
+
+[Fact(DisplayName = "LD IIR filters match SciPy 1.18 bits")]
+public void LaserDiscIirFiltersMatchScipy18Bits()
+{
+    TransferFunction videoLowPass = IirFilterDesign.ButterworthLowPassTransferFunction(
+        order: 7,
+        normalizedCutoff: 5_800_000.0 / 20_000_000.0);
+    AssertEqual(
+        "330DABE20E63227AC920B082C47AD60D9510E58FCEFADC2C3BC40635D82E2D76",
+        DoubleBitsSha256(videoLowPass.Numerator));
+    AssertEqual(
+        "43B80CA9955D7FD32F468AF225F1775A2C4874DDA74BA71B653BAE2D93155E48",
+        DoubleBitsSha256(videoLowPass.Denominator));
+    AssertEqual(
+        "117E917EFACCF2211FE4CE705D02D472530B8752CEF95FC462E7AC3F7D100C69",
+        ComplexBitsSha256(IirFilterDesign.FrequencyResponse(videoLowPass, 32_768)));
+
+    TransferFunction rfLowPass = IirFilterDesign.ButterworthLowPassTransferFunction(
+        order: 3,
+        normalizedCutoff: 14_000_000.0 / 20_000_000.0);
+    AssertEqual(
+        "D5D55F5E68E61BEE04034B426E2DDC86C297D1B2D50C78BC835DCFDF4E2FD001",
+        DoubleBitsSha256(rfLowPass.Numerator));
+    AssertEqual(
+        "E35C5B36DE2A4261E4E4D6082395D489F79689B5CC833F2CC83A907D303EF035",
+        DoubleBitsSha256(rfLowPass.Denominator));
+    AssertEqual(
+        "5E8B76A504F7484FB0A04016F3993C8AB8E94E3446C8E333ECF1D27C6F891D1C",
+        ComplexBitsSha256(IirFilterDesign.FrequencyResponse(rfLowPass, 32_768)));
+
+    TransferFunction deemphasis = IirFilterDesign.EmphasisIir(
+        zeroTimeConstant: 100e-9,
+        poleTimeConstant: 400e-9,
+        sampleRateHz: 40_000_000.0);
+    AssertEqual(
+        "E2EF9503A35F287431765D364614BC90D90BDBE09F3B0813B47C479AA07A54FC",
+        DoubleBitsSha256(deemphasis.Numerator));
+    AssertEqual(
+        "AFC5EFD261856C97E7ED87FBF4759C50ED89B27EBFD40322B3B67F0FC86E9461",
+        DoubleBitsSha256(deemphasis.Denominator));
+    AssertEqual(
+        "BF1845F29E85D81BCA34BC0069536F58BADFDC40AE5AB1A2DE06F1A55CE3561D",
+        ComplexBitsSha256(IirFilterDesign.FrequencyResponse(deemphasis, 32_768)));
+}
+
 [Fact(DisplayName = "IIR filter design builds LD emphasis filters")]
 public void IirFilterDesignBuildsLdEmphasisFilters()
 {
@@ -4490,6 +4556,88 @@ public void LaserDiscV04BlockDemodulationMatchesUpstreamFloat32Hashes()
     AssertEqual(
         "B59CC4E9A487CF06482B97793B61124ACADA0FD1C7B6B6327D0CDDA1F35939C0",
         FloatBitsSha256(block.VideoBurst!));
+}
+
+[Fact(DisplayName = "PAL LD v0.4 block demodulation matches upstream bits")]
+public void PalLaserDiscV04BlockDemodulationMatchesUpstreamBits()
+{
+    const int blockLength = 32_768;
+    const double sampleRateHz = 40_000_000.0;
+    FormatParameterSet parameters = FormatCatalog.Default.GetLaserDiscParameters("PAL", lowBand: false);
+    var options = new DecodeFilterOptions(
+        LdDecodeDigitalAudio: false,
+        LdDecodeAnalogAudio: false,
+        LdMtfLevel: 1.0,
+        LdMtfOffset: 0.0,
+        LdClipDemodForVideo: true);
+    DecodeFilterSet filters = DecodeFilterSetBuilder.BuildBasic(
+        parameters,
+        sampleRateHz,
+        blockLength,
+        options);
+    var references = new RfVideoReferenceFilterSet(
+        filters.LdVideoBurst,
+        filters.LdVideoBurstOffset,
+        filters.LdVideoPilot,
+        ClipDemodForVideo: true);
+
+    var input = new double[blockLength];
+    for (ulong i = 0; i < (ulong)input.Length; i++)
+    {
+        input[(int)i] = (unchecked((i * 1_103_515_245UL) + 12_345UL) & 0xffffUL) - 32_768.0;
+    }
+
+    AssertEqual(
+        "F57895C848D823B791F4A015D3A8B1FDF4FF16E9A83E8FEE72C1D5FF4BB1AC77",
+        ComplexBitsSha256(filters.RfMtf));
+    AssertEqual(
+        "117E917EFACCF2211FE4CE705D02D472530B8752CEF95FC462E7AC3F7D100C69",
+        ComplexBitsSha256(filters.VideoLowPass));
+    AssertEqual(
+        "6474816519E6AA38B324A16B7271584621C1AFC6B909AFA1100C6AE0B5B8C459",
+        ComplexBitsSha256(filters.VideoLowPass05));
+    AssertEqual(
+        "8A4706CD55C8BE77C2382B63C59FE01C512C418AED506AEE912AB17C5C7FF8CF",
+        ComplexBitsSha256(filters.LdVideoBurst!));
+    AssertEqual(
+        "F63020FE0A0AB422BA3D384B47464B0924B9EC0C3C79DD65F0319A8297DF403D",
+        ComplexBitsSha256(filters.LdVideoPilot!));
+
+    RfDemodulatedBlock block = new RfDemodulator(sampleRateHz).Demodulate(
+        input,
+        filters.RfVideo,
+        filters.RfHighPass,
+        filters.RfMtf,
+        filters.Video,
+        filters.VideoLowPass05,
+        filters.VideoLowPass05Offset,
+        referenceFilters: references,
+        fmDemodulatorMode: RfFmDemodulatorMode.ConjugateProduct);
+
+    AssertEqual(
+        "20525ABB338B1640D387EAE935FCBB0D1D0729A38008819AAD0ADB900C4D8C33",
+        ComplexBitsSha256(block.Analytic));
+    AssertEqual(
+        "FEDE6AC5EFBEE32513A9247CA4F89491B73769E046BC708ABD781BFBCC09FEF6",
+        DoubleBitsSha256(block.DemodRaw));
+    AssertEqual(
+        "F55C50873424A2A56706BC360792B8706ABFE596C43A0E6973E72FE6BAA64507",
+        DoubleBitsSha256(block.VideoPilot!));
+    AssertEqual(
+        "ADFFFDAEEDDE27DC86E34A26CED2C7D6B424592769BA212881C4ECC558744C08",
+        FloatBitsSha256(block.Video));
+    AssertEqual(
+        "E4AC0D4BB8769F27761AFEF067E3F935919E53707AA0C06D08988FD24E1C8CD2",
+        FloatBitsSha256(block.DemodRaw));
+    AssertEqual(
+        "8488CE08A2AA742547BD4A959319AE40D928EE4F060391C479E2B4BEDA969810",
+        FloatBitsSha256(block.VideoLowPass));
+    AssertEqual(
+        "15B13EB9267EF8AFF44F8C0AEB0E66214981019B7BD3078E80D7966F2AD23154",
+        FloatBitsSha256(block.VideoBurst!));
+    AssertEqual(
+        "23B44A32BD6CEF0BBD8D957390856AD1D29330E9849546FE18027A7CB636E950",
+        FloatBitsSha256(block.VideoPilot!));
 }
 
 [Fact(DisplayName = "LD analog audio phase 2 matches upstream overlap and peak suppression")]

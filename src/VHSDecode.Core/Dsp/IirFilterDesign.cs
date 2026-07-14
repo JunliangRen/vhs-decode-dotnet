@@ -63,18 +63,21 @@ public static class IirFilterDesign
             Complex denominator = new(
                 bilinearScale - analogPoles[i].Real,
                 -analogPoles[i].Imaginary);
-            digitalPoles[i] = NumpyComplexDivide(
+            Complex digitalPole = NumpyComplexDivide(
                 new Complex(
                     bilinearScale + analogPoles[i].Real,
                     analogPoles[i].Imaginary),
                 denominator);
-            bilinearDenominatorProduct = NumpyComplexMultiply(
+            digitalPoles[i] = digitalPole.Imaginary == 0.0
+                ? new Complex(digitalPole.Real, 0.0)
+                : digitalPole;
+            bilinearDenominatorProduct = NumpySimdComplexMultiply(
                 bilinearDenominatorProduct,
                 denominator);
         }
 
-        double digitalGain = NumpyComplexDivide(
-            new Complex(analogGain, 0.0),
+        double digitalGain = analogGain * NumpyComplexDivide(
+            Complex.One,
             bilinearDenominatorProduct).Real;
         return (digitalPoles, digitalGain);
     }
@@ -465,19 +468,6 @@ public static class IirFilterDesign
                 left.Imaginary,
                 right.Real,
                 left.Real * right.Imaginary));
-    }
-
-    private static Complex NumpyComplexMultiplyAdd(Complex add, Complex left, Complex right)
-    {
-        return new Complex(
-            Math.FusedMultiplyAdd(
-                -left.Imaginary,
-                right.Imaginary,
-                add.Real + (left.Real * right.Real)),
-            Math.FusedMultiplyAdd(
-                left.Imaginary,
-                right.Real,
-                add.Imaginary + (left.Real * right.Imaginary)));
     }
 
     private static Complex NumpyComplexDivide(Complex left, Complex right)
@@ -1110,15 +1100,21 @@ public static class IirFilterDesign
             throw new ArgumentException("Only first-order transfer functions are supported.");
         }
 
-        double c = 2.0 * sampleRate;
-        double n0 = (analogNumerator[0] * c) + analogNumerator[1];
-        double n1 = (-analogNumerator[0] * c) + analogNumerator[1];
-        double d0 = (analogDenominator[0] * c) + analogDenominator[1];
-        double d1 = (-analogDenominator[0] * c) + analogDenominator[1];
+        // SciPy 1.18 splits 2*fs through sqrt before polynomial expansion.
+        double factor = Math.Sqrt(sampleRate * 2.0);
+        double inverseFactor = 1.0 / factor;
+        double numeratorConstant = (analogNumerator[1] * inverseFactor)
+            + (analogNumerator[0] * -factor);
+        double numeratorLinear = (analogNumerator[1] * inverseFactor)
+            + (analogNumerator[0] * factor);
+        double denominatorConstant = (analogDenominator[1] * inverseFactor)
+            + (analogDenominator[0] * -factor);
+        double denominatorLinear = (analogDenominator[1] * inverseFactor)
+            + (analogDenominator[0] * factor);
 
         return new TransferFunction(
-            [n0 / d0, n1 / d0],
-            [1.0, d1 / d0]);
+            [numeratorLinear / denominatorLinear, numeratorConstant / denominatorLinear],
+            [denominatorLinear / denominatorLinear, denominatorConstant / denominatorLinear]);
     }
 
     private static Complex EvaluatePolynomial(ReadOnlySpan<double> coefficients, double omega)
@@ -1163,26 +1159,7 @@ public static class IirFilterDesign
 
     internal static Complex[] PolynomialFromRootsNumpy(IReadOnlyList<Complex> roots)
     {
-        Complex[] coefficients = [Complex.One];
-        foreach (Complex root in roots)
-        {
-            var next = new Complex[coefficients.Length + 1];
-            Complex negativeRoot = -root;
-            next[0] = coefficients[0];
-            for (int i = 1; i < coefficients.Length; i++)
-            {
-                next[i] = NumpyComplexMultiplyAdd(
-                    coefficients[i],
-                    coefficients[i - 1],
-                    negativeRoot);
-            }
-
-            next[^1] = NumpyComplexMultiply(coefficients[^1], negativeRoot);
-
-            coefficients = next;
-        }
-
-        return coefficients;
+        return PolynomialFromRootsOpenBlasDot(roots);
     }
 
     private static Complex[] PolynomialFromRootsOpenBlasDot(IReadOnlyList<Complex> roots)

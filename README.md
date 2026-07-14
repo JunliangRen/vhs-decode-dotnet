@@ -108,10 +108,11 @@ Implemented:
 - LD block output now applies v0.4.0's float32 storage boundary to filtered
   video, raw demod, 0.5 MHz video, burst/pilot references, RF high-pass data,
   and first-stage analog-audio channels before cross-block/field processing
-- an NTSC LD 32768-sample v0.4.0 reference block is bit-exact after float32
-  storage for `demod_raw`, `video`, `video05`, and `demod_burst`; a deterministic
-  full-scale block locks all four complete-output SHA-256 values in regression
-  tests
+- NTSC and PAL LD 32768-sample v0.4.0 reference blocks are bit-exact after
+  float32 storage: NTSC covers `demod_raw`, `video`, `video05`, and
+  `demod_burst`, while PAL also covers `demod_pilot`; the PAL regression locks
+  SciPy-compatible real-input FFT, IIR response, analytic-signal, raw-demod,
+  and pilot double bits before the float32 storage boundary
 - LD 0.5 MHz sync/reference video path now follows upstream `FVideo05` by using
   `Fvideo_lpf * Fdeemp * F0_5`, excluding the output-only group-delay equalizer
   and `video_deemp_strength`
@@ -939,7 +940,7 @@ Implemented:
 
 Not complete yet:
 
-- the current numerical baselines include four bit-exact LD v0.4.0 block
+- the current numerical baselines include nine bit-exact LD v0.4.0 block
   channels, three float32-exact CVBS channels, two 491520-sample bit-exact VHS
   video/reference spans, two 239330-sample bit-exact VHS luma/chroma field
   pairs, and 1,353 float32-exact visible channels across all 357 valid tape
@@ -947,8 +948,9 @@ Not complete yet:
 - the deterministic PAL LD fixture has 428,608 of 710,510 TBC samples exact;
   the remaining samples have mean absolute error 4.618 and extrema -2,556 to
   +2,546, while JSON and SQLite differ only in first-field `medianBurstIRE`
-  (4.177 versus 4.175) and `bPSNR` (21.2 versus 21.3); these residual PAL LD
-  pilot/RF numerical differences remain a bit-parity item
+  (4.177 versus 4.175) and `bPSNR` (21.2 versus 21.3); all five source demod
+  channels are now byte-exact, locating these residuals in downstream
+  field/TBC processing
 - remaining container-specific resampling edge cases
 - remaining real-capture PAL LD and AC3 end-to-end fixtures, external AC3
   tool-pipeline parity, and remaining verbose VITS field calibration details
@@ -976,7 +978,7 @@ dotnet test VHSDecodeDotNet.slnx --no-build
 ```
 
 The current formal solution build completes with zero warnings and errors, and
-the xUnit project exposes 222 independently discoverable compatibility tests to
+the xUnit project exposes 225 independently discoverable compatibility tests to
 `dotnet test` and Visual Studio Test Explorer. On the
 same Windows machine and fixtures, Release wall-clock measurements for one
 frame were 2.346 s versus 7.193 s for NTSC VHS and 1.651 s versus 5.865 s for

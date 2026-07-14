@@ -170,6 +170,22 @@ public static class PocketFftComplex
         return output;
     }
 
+    internal static Complex[] ForwardDuccRealFull(ReadOnlySpan<double> input)
+    {
+        Complex[] halfSpectrum = ForwardDuccReal(input);
+        var output = new Complex[input.Length];
+        halfSpectrum.CopyTo(output, 0);
+        for (int i = 1; i < halfSpectrum.Length - 1; i++)
+        {
+            output[^i] = Complex.Conjugate(halfSpectrum[i]);
+        }
+
+        // scipy.fft.fft(real) preserves negative imaginary zero at both real-only bins.
+        output[0] = new Complex(output[0].Real, -0.0);
+        output[input.Length / 2] = new Complex(output[input.Length / 2].Real, -0.0);
+        return output;
+    }
+
     internal static double[] InverseDuccReal(ReadOnlySpan<Complex> input, int outputLength)
     {
         ValidateLength(outputLength, nameof(outputLength));

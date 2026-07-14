@@ -353,10 +353,10 @@ public static class DecodeFilterSetBuilder
             else if (lowOrder > 0 && highOrder > 0)
             {
                 Complex[] highPass = IirFilterDesign.FrequencyResponse(
-                    IirFilterDesign.ButterworthHighPass(lowOrder, low / nyquistHz),
+                    IirFilterDesign.ButterworthHighPassTransferFunction(lowOrder, low / nyquistHz),
                     blockLength);
                 Complex[] lowPass = IirFilterDesign.FrequencyResponse(
-                    IirFilterDesign.ButterworthLowPass(highOrder, high / nyquistHz),
+                    IirFilterDesign.ButterworthLowPassTransferFunction(highOrder, high / nyquistHz),
                     blockLength);
                 output = Multiply(highPass, lowPass);
             }
@@ -953,18 +953,11 @@ public static class DecodeFilterSetBuilder
         TransferFunction lowPassTransfer = IirFilterDesign.ButterworthLowPassTransferFunction(
             order,
             normalizedCutoff);
-        if (order == 10 && lowPassTransfer.Denominator.Length == 11)
-        {
-            lowPassTransfer.Denominator[8] = Math.BitDecrement(lowPassTransfer.Denominator[8]);
-        }
-
         Complex[] lowPass = IirFilterDesign.FrequencyResponse(lowPassTransfer, blockLength);
         TransferFunction deemphasisTransfer = IirFilterDesign.EmphasisIir(
             5.3e-6,
             75e-6,
             sliceSampleRateHz);
-        deemphasisTransfer.Numerator[0] = Math.BitIncrement(deemphasisTransfer.Numerator[0]);
-        deemphasisTransfer.Denominator[1] = Math.BitDecrement(deemphasisTransfer.Denominator[1]);
         Complex[] deemphasis = IirFilterDesign.FrequencyResponse(
             deemphasisTransfer,
             blockLength);
@@ -1080,7 +1073,7 @@ public static class DecodeFilterSetBuilder
                 blockLength);
             for (int i = 0; i < video.Length; i++)
             {
-                video[i] *= groupDelayEqualizer[i];
+                video[i] = NumpyVectorComplexMultiply(video[i], groupDelayEqualizer[i]);
             }
         }
 
@@ -1122,7 +1115,7 @@ public static class DecodeFilterSetBuilder
 
             for (int i = 0; i < video.Length; i++)
             {
-                video[i] *= deemphasis[i];
+                video[i] = NumpyVectorComplexMultiply(video[i], deemphasis[i]);
             }
         }
         else if (rfParams.TryGetProperty("video_deemp", out JsonElement timeConstantsElement)
@@ -1141,7 +1134,10 @@ public static class DecodeFilterSetBuilder
 
             for (int i = 0; i < video.Length; i++)
             {
-                video[i] *= strength == 1.0 ? deemphasis[i] : Complex.Pow(deemphasis[i], strength);
+                Complex factor = strength == 1.0
+                    ? deemphasis[i]
+                    : Complex.Pow(deemphasis[i], strength);
+                video[i] = NumpyVectorComplexMultiply(video[i], factor);
             }
         }
     }
