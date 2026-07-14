@@ -4,12 +4,12 @@ using VHSDecode.Core.Decode;
 string? executablePath = Environment.ProcessPath;
 string[] invocation = DecodeDispatcher.NormalizeInvocation(args, executablePath);
 using var cancellationSource = new CancellationTokenSource();
-ConsoleCancelEventHandler cancelHandler = (_, eventArgs) =>
+void CancelHandler(object? _, ConsoleCancelEventArgs eventArgs)
 {
     eventArgs.Cancel = true;
     cancellationSource.Cancel();
-};
-Console.CancelKeyPress += cancelHandler;
+}
+Console.CancelKeyPress += CancelHandler;
 try
 {
     return Run(
@@ -21,7 +21,7 @@ try
 }
 finally
 {
-    Console.CancelKeyPress -= cancelHandler;
+    Console.CancelKeyPress -= CancelHandler;
 }
 
 static int Run(
