@@ -4,6 +4,7 @@
     <TargetFramework>net10.0</TargetFramework>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
   </PropertyGroup>
 
   <ItemGroup>
@@ -17,6 +18,29 @@
     <PackageReference Include="Microsoft.Data.Sqlite.Core" Version="10.0.9" />
     <PackageReference Include="NetMQ" Version="4.0.4.2" />
     <PackageReference Include="SQLitePCLRaw.bundle_winsqlite3" Version="2.1.11" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <None Include="runtimes\win-x64\native\soxr.dll"
+          CopyToOutputDirectory="PreserveNewest"
+          CopyToPublishDirectory="PreserveNewest"
+          TargetPath="soxr.dll" />
+    <None Include="..\..\third_party\libsoxr\COPYING.LGPL"
+          CopyToOutputDirectory="PreserveNewest"
+          CopyToPublishDirectory="PreserveNewest"
+          Link="licenses\libsoxr\COPYING.LGPL" />
+    <None Include="..\..\third_party\libsoxr\LICENCE"
+          CopyToOutputDirectory="PreserveNewest"
+          CopyToPublishDirectory="PreserveNewest"
+          Link="licenses\libsoxr\LICENCE" />
+    <None Include="..\..\third_party\libsoxr\README.md"
+          CopyToOutputDirectory="PreserveNewest"
+          CopyToPublishDirectory="PreserveNewest"
+          Link="licenses\libsoxr\README.md" />
+    <None Include="..\..\third_party\libsoxr\soxr-a66f3ee-source.zip"
+          CopyToOutputDirectory="PreserveNewest"
+          CopyToPublishDirectory="PreserveNewest"
+          Link="licenses\libsoxr\soxr-a66f3ee-source.zip" />
   </ItemGroup>
 
 </Project>

@@ -35,12 +35,16 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 `VHSDecode.Core.Dsp.SoxrQuickResampler` contains a C# adaptation of
 libsoxr's quick-quality fixed-point clock and `cubic_stage_fn` interpolation
-formula.
+formula. The HiFi decoder also dynamically loads an unmodified Windows x64
+build of libsoxr commit `a66f3eeeeb62a32403ff143b756eed92b1ec6b62`, the
+revision embedded by python-soxr 1.1.0 and used by vhs-decode v0.4.0. Build
+provenance, the complete corresponding source archive, and license texts are
+under `third_party/libsoxr` and are copied into release output.
 
 Copyright (c) 2007-2018 robs@users.sourceforge.net
 
 libsoxr is free software; you can redistribute it and/or modify it under the
 terms of the GNU Lesser General Public License as published by the Free
 Software Foundation; either version 2.1 of the License, or (at your option)
-any later version. See https://github.com/chirlu/soxr and its `COPYING.LGPL`
-file for the complete license text.
+any later version. See `third_party/libsoxr/COPYING.LGPL` for the complete
+license text.
