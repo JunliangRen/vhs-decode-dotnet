@@ -170,6 +170,54 @@ public static class PocketFftComplex
         return output;
     }
 
+    internal static double[] InverseDuccReal(ReadOnlySpan<Complex> input, int outputLength)
+    {
+        ValidateLength(outputLength, nameof(outputLength));
+        if (input.Length != (outputLength / 2) + 1)
+        {
+            throw new ArgumentException(
+                "Half-spectrum length does not match the requested real output length.",
+                nameof(input));
+        }
+
+        int complexLength = outputLength / 2;
+        var packedSpectrum = new Complex[complexLength];
+        packedSpectrum[0] = new Complex(
+            0.5 * (input[0].Real + input[^1].Real),
+            0.5 * (input[0].Real - input[^1].Real));
+        var roots = new SinCos2PiByN(outputLength);
+        for (int i = 1, xi = complexLength - 1; i <= xi; i++, xi--)
+        {
+            Complex left = input[i];
+            Complex right = input[xi];
+            Value even = new(
+                left.Real + right.Real,
+                left.Imaginary - right.Imaginary);
+            Value rotated = new(
+                left.Real - right.Real,
+                left.Imaginary + right.Imaginary);
+            Value odd = SpecialMultiply(rotated, roots.Get(i), forward: false);
+            packedSpectrum[i] = new Complex(
+                0.5 * (even.Real - odd.Imaginary),
+                0.5 * (even.Imaginary + odd.Real));
+            packedSpectrum[xi] = new Complex(
+                0.5 * (even.Real + odd.Imaginary),
+                0.5 * (odd.Real - even.Imaginary));
+        }
+
+        Complex[] transformed = complexLength > 10_000
+            ? TransformDuccPacketized(packedSpectrum, forward: false)
+            : Inverse(packedSpectrum);
+        var output = new double[outputLength];
+        for (int i = 0; i < transformed.Length; i++)
+        {
+            output[2 * i] = transformed[i].Real;
+            output[(2 * i) + 1] = transformed[i].Imaginary;
+        }
+
+        return output;
+    }
+
     public static Complex[] ForwardReal(ReadOnlySpan<double> input)
     {
         ValidateLength(input.Length, nameof(input));

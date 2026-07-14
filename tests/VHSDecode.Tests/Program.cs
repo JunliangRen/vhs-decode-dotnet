@@ -5055,6 +5055,8 @@ public void CvbsV04BlockFiltersMatchUpstreamFloat32Hashes()
         input,
         new DecodeFilterOptions(),
         autoSync: true,
+        "3DAE4DFDEA2CB35381BAB7FA78905D9AB0DFD534CABD834F7805724CA69441D0",
+        "36AC5FFB7704AF4B8004CF08D3B5DE8EFCB2161EB65593C8FBDEBB28DAEBF5CB",
         "7977594BEB52A0C6BA1C1CE96A62F3C036FCDF81B9F6FAC467E1BADB380FD0B1",
         "45F1F20764D84B3950C3E216FB827C78736DC31DC210EF418C18BC3F4B024159",
         "EBB605C0FD21EE5499202CE9456DB5B28538DA421215F66BEC1FC4CDF620B80A");
@@ -5063,6 +5065,8 @@ public void CvbsV04BlockFiltersMatchUpstreamFloat32Hashes()
         input,
         new DecodeFilterOptions(),
         autoSync: false,
+        "81D70D24493E54E3094D9CBD62F9AE2B7975A8DC8FCCE044C865C5643E629EBF",
+        "EF971B10B1B630C3E55D4A9C0100DB30CB5034F9FE80AD6A179A152634EC31D0",
         "2AB184BA686E60AFC61737E665CD23A5914B895B8DF05F417CE575A3D7A368E3",
         "BE92347A04CAFCDF0D71409EE64918F6C7F4647EA0434211AF00BEB4B7A95662",
         "3D9B7A1A7403727941C4F8C0E758F1E458C842D38E385C15DE51DCA92352A986");
@@ -5071,6 +5075,8 @@ public void CvbsV04BlockFiltersMatchUpstreamFloat32Hashes()
         input,
         new DecodeFilterOptions(VideoNotchHz: 2_500_000.0, VideoNotchQ: 15.0),
         autoSync: true,
+        "9064E2552859B8CD15CEED9141B382E6458B85955E0CB36D96008CBE2A349222",
+        "CF856DDC49407AB9F37873D218B7F3A35AC73F570C6B28E6C70880D45183E11D",
         "FD22A43C118D6BBEA7B357FB9535DC338F09047688BC7701FFC9355B3C7FE5A7",
         "99D7FC86631EAB0A8B275425359D059E619115D6D52EBA8DD994B426CD4922C4",
         "A62D9F7CBB1F31813D1B52BE6B83C42EB3D4C341529027C7A22805301C975F74");
@@ -5081,6 +5087,8 @@ static void AssertCvbsV04Hashes(
     double[] input,
     DecodeFilterOptions options,
     bool autoSync,
+    string demodDoubleHash,
+    string video05DoubleHash,
     string demodHash,
     string video05Hash,
     string burstHash)
@@ -5097,17 +5105,87 @@ static void AssertCvbsV04Hashes(
         options,
         new CvbsDecodeOptions(autoSync, VideoOutputConverter.FromParameters(parameters)));
     RfDemodulatedBlock block = pipeline.DecodePreparedBlock(input).Demodulated;
+    AssertEqual(demodDoubleHash, DoubleBitsSha256(block.DemodRaw));
+    AssertEqual(video05DoubleHash, DoubleBitsSha256(block.VideoLowPass));
     AssertEqual(demodHash, FloatBitsSha256(block.DemodRaw));
     AssertEqual(video05Hash, FloatBitsSha256(block.VideoLowPass));
     AssertEqual(burstHash, FloatBitsSha256(block.VideoBurst!));
 }
 
+[Fact(DisplayName = "CVBS DUCC real FFT filtering matches SciPy double bits")]
+public void CvbsDuccRealFftFilteringMatchesScipyDoubleBits()
+{
+    const int blockLength = 32_768;
+    uint state = 0x12345678;
+    var input = new double[blockLength];
+    for (int i = 0; i < input.Length; i++)
+    {
+        state = unchecked((state * 1664525) + 1013904223);
+        int value = (int)((state >> 8) & 0xFFFF) - 32768;
+        input[i] = value == 0 ? 1 : value;
+    }
+
+    AssertEqual(
+        "A8B3FFBA42B93344094A5BD9B3056EE8E1358FC589EAB1AB0F9C47C634E71560",
+        DoubleBitsSha256(input));
+
+    DecodeFilterSet filters = DecodeFilterSetBuilder.BuildBasic(
+        FormatCatalog.Default.GetCvbsParameters("NTSC"),
+        40_000_000.0,
+        blockLength);
+    AssertEqual(
+        "7E0AA1AB29320D3DFDB5C8C5843274C57611EB30434335A32EE61775DDCF1E35",
+        ComplexBitsSha256(filters.VideoLowPass05));
+
+    Complex[] halfSpectrum = PocketFftComplex.ForwardDuccReal(input);
+    AssertEqual(
+        "14467469A931E878E066F4E9F7CB04950D951A32DD5FFB7A6BD9B4BF693F1768",
+        ComplexBitsSha256(halfSpectrum));
+    double[] reconstructed = PocketFftComplex.InverseDuccReal(halfSpectrum, blockLength);
+    AssertEqual(
+        "3DAE4DFDEA2CB35381BAB7FA78905D9AB0DFD534CABD834F7805724CA69441D0",
+        DoubleBitsSha256(reconstructed));
+    Complex[] reconstructedSpectrum = PocketFftComplex.ForwardDuccReal(reconstructed);
+    AssertEqual(
+        "4536090FA1058E7761561A0A2377188ED1A9F96167F6C746C5D26E48740F1D01",
+        ComplexBitsSha256(reconstructedSpectrum));
+
+    var filteredSpectrum = new Complex[reconstructedSpectrum.Length];
+    for (int i = 0; i < filteredSpectrum.Length; i++)
+    {
+        Complex value = reconstructedSpectrum[i];
+        Complex coefficient = filters.VideoLowPass05[i];
+        filteredSpectrum[i] = new Complex(
+            Math.FusedMultiplyAdd(
+                value.Real,
+                coefficient.Real,
+                -(value.Imaginary * coefficient.Imaginary)),
+            Math.FusedMultiplyAdd(
+                value.Real,
+                coefficient.Imaginary,
+                value.Imaginary * coefficient.Real));
+    }
+
+    AssertEqual(
+        "8B98C81888AC03D255815CA8043790BD502890A4CD68541DCC9FDE80E5922339",
+        ComplexBitsSha256(filteredSpectrum));
+    AssertEqual(
+        "40B996E074F1A1CD7A8F9989864CD61F4457CCFCFAC5C1B4B62629A307D83593",
+        DoubleBitsSha256(PocketFftComplex.InverseDuccReal(filteredSpectrum, blockLength)));
+
+    double[] secondRoundTrip = PocketFftComplex.InverseDuccReal(
+        reconstructedSpectrum,
+        blockLength);
+    AssertEqual(
+        "5347913DE0967DB8EB0605C4603769AA2150CBB8CF03103BA3A7334C39CE5855",
+        DoubleBitsSha256(secondRoundTrip));
+    AssertThrows<ArgumentException>(() => PocketFftComplex.InverseDuccReal(halfSpectrum, 1024));
+}
+
 static double[] CvbsFftRoundTrip(ReadOnlySpan<double> input)
 {
-    Complex[] fullSpectrum = PocketFftComplex.ForwardReal(input);
-    var halfSpectrum = new Complex[(input.Length / 2) + 1];
-    fullSpectrum.AsSpan(0, halfSpectrum.Length).CopyTo(halfSpectrum);
-    return PocketFftReal.Inverse(halfSpectrum, input.Length);
+    Complex[] halfSpectrum = PocketFftComplex.ForwardDuccReal(input);
+    return PocketFftComplex.InverseDuccReal(halfSpectrum, input.Length);
 }
 
 [Fact(DisplayName = "RF block stream decoder stitches overlap-save blocks")]

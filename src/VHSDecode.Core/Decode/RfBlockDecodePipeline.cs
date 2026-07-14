@@ -200,10 +200,8 @@ public sealed class RfBlockDecodePipeline : IDisposable
 
     private RfDemodulatedBlock DecodeCvbsBlock(ReadOnlySpan<double> input)
     {
-        Complex[] inputSpectrum = PocketFftComplex.ForwardReal(input);
-        var inputHalfSpectrum = new Complex[(input.Length / 2) + 1];
-        inputSpectrum.AsSpan(0, inputHalfSpectrum.Length).CopyTo(inputHalfSpectrum);
-        double[] reconstructedInput = PocketFftReal.Inverse(inputHalfSpectrum, input.Length);
+        Complex[] inputHalfSpectrum = PocketFftComplex.ForwardDuccReal(input);
+        double[] reconstructedInput = PocketFftComplex.InverseDuccReal(inputHalfSpectrum, input.Length);
         double[] luma = _cvbsOptions!.AutoSync
             ? reconstructedInput
             : ConvertCvbsRawToHz(reconstructedInput, _cvbsOptions.VideoOutput);
@@ -221,7 +219,7 @@ public sealed class RfBlockDecodePipeline : IDisposable
                 luma);
         }
 
-        Complex[] lumaSpectrum = PocketFftReal.Forward(luma);
+        Complex[] lumaSpectrum = PocketFftComplex.ForwardDuccReal(luma);
         double[] video = luma.ToArray();
         double[] videoLowPass = FilterRealSignalPocket(
             lumaSpectrum,
@@ -321,11 +319,17 @@ public sealed class RfBlockDecodePipeline : IDisposable
             Complex value = halfSpectrum[i];
             Complex coefficient = fullFilter[i];
             filtered[i] = new Complex(
-                (value.Real * coefficient.Real) - (value.Imaginary * coefficient.Imaginary),
-                (value.Real * coefficient.Imaginary) + (value.Imaginary * coefficient.Real));
+                Math.FusedMultiplyAdd(
+                    value.Real,
+                    coefficient.Real,
+                    -(value.Imaginary * coefficient.Imaginary)),
+                Math.FusedMultiplyAdd(
+                    value.Real,
+                    coefficient.Imaginary,
+                    value.Imaginary * coefficient.Real));
         }
 
-        return PocketFftReal.Inverse(filtered, realLength);
+        return PocketFftComplex.InverseDuccReal(filtered, realLength);
     }
 
     private static short[] DecodeEfmBlock(ReadOnlySpan<Complex> spectrum, ReadOnlySpan<Complex> efmFilter)

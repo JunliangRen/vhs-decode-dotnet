@@ -410,8 +410,8 @@ Implemented:
 - RF block decode pipeline that connects a sample loader, filter set, and FM
   demodulator for one block
 - CVBS direct-luma block path that bypasses RF FM demodulation, preserves
-  the upstream complex-FFT/real-IFFT input round-trip, preserves auto-sync
-  composite samples as luma, and applies upstream-style
+  the upstream SciPy 1.18 DUCC real-FFT/inverse-FFT input round-trip, preserves
+  auto-sync composite samples as luma, and applies upstream-style
   `--no_auto_sync` raw-sample mapping before existing video/TBC processing
 - CVBS `--clamp_agc` field-output clamp/gain path, including upstream blank
   and sync median windows, per-line blank ramp subtraction, AGC speed smoothing,
@@ -562,8 +562,10 @@ Implemented:
 - CVBS block demodulation now preserves v0.4.0's direct-luma path rather than
   passing video through the LD/VHS `FVideo` response; its 65-tap `demod_05` and
   81-tap FSC +/- 0.2 MHz `demod_burst` branches are independent FIR outputs,
-  including the upstream float32 quantization of burst samples; deterministic
-  full-block float32 hashes match all three upstream channels
+  including the upstream float32 quantization of burst samples; the DUCC real
+  transforms and NumPy SIMD complex multiplication are double-bit exact for
+  `demod` and `demod_05`, while deterministic full-block float32 hashes match
+  all three upstream channels
 - CVBS NTSC retains the inherited LD burst line-location refiner because the
   v0.4.0 class defines `_refine_linelocs_burst` instead of overriding
   `refine_linelocs_burst`; PAL CVBS has no corresponding burst refiner
@@ -942,9 +944,6 @@ Not complete yet:
   video/reference spans, two 239330-sample bit-exact VHS luma/chroma field
   pairs, and 1,353 float32-exact visible channels across all 357 valid tape
   system/format/speed cases
-- CVBS double-precision FFT round-trip tails still differ at approximately
-  1e-11 when upstream uses SciPy 1.18's DUCC backend; this disappears in the
-  current float32 channel baselines but remains an explicit parity item
 - the deterministic PAL LD fixture has 428,608 of 710,510 TBC samples exact;
   the remaining samples have mean absolute error 4.618 and extrema -2,556 to
   +2,546, while JSON and SQLite differ only in first-field `medianBurstIRE`
@@ -977,7 +976,7 @@ dotnet test VHSDecodeDotNet.slnx --no-build
 ```
 
 The current formal solution build completes with zero warnings and errors, and
-the xUnit project exposes 221 independently discoverable compatibility tests to
+the xUnit project exposes 222 independently discoverable compatibility tests to
 `dotnet test` and Visual Studio Test Explorer. On the
 same Windows machine and fixtures, Release wall-clock measurements for one
 frame were 2.346 s versus 7.193 s for NTSC VHS and 1.651 s versus 5.865 s for
