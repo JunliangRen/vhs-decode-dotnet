@@ -326,7 +326,11 @@ public void DecodeRunnerPrintsCommandHelpBeforeValidation()
             var output = new StringWriter();
             var error = new StringWriter();
 
-            int exitCode = new DecodeRunner().Run(command, output, error);
+            int exitCode = new DecodeRunner().Run(
+                command,
+                output,
+                error,
+                TestContext.Current.CancellationToken);
 
             AssertEqual(0, exitCode);
             AssertContains(output.ToString(), $"usage: {spec.Aliases[0]}");
@@ -340,7 +344,11 @@ public void DecodeRunnerPrintsCommandHelpBeforeValidation()
 
         ParsedCommand facade = new CommandLineParser().Parse(spec, ["--help"], "decode.py");
         var facadeOutput = new StringWriter();
-        AssertEqual(0, new DecodeRunner().Run(facade, facadeOutput, TextWriter.Null));
+        AssertEqual(0, new DecodeRunner().Run(
+            facade,
+            facadeOutput,
+            TextWriter.Null,
+            TestContext.Current.CancellationToken));
         AssertContains(facadeOutput.ToString(), "usage: decode.py ");
         AssertFalse(facadeOutput.ToString().Contains($"usage: decode.py {spec.Name}", StringComparison.Ordinal));
         AssertEqual(facadeHashes[spec.Name], Utf8LfSha256(facadeOutput.ToString()));
@@ -412,7 +420,11 @@ public void VhsSystemSelectionRejectsConflicts()
             ParsedCommand conflict = Parse(spec, [.. options, inputPath, Path.Combine(tempDirectory, $"out-{i}")]);
             var output = new StringWriter();
             var error = new StringWriter();
-            AssertEqual(1, new DecodeRunner().Run(conflict, output, error));
+            AssertEqual(1, new DecodeRunner().Run(
+                conflict,
+                output,
+                error,
+                TestContext.Current.CancellationToken));
             AssertEqual(message + Environment.NewLine, output.ToString());
             AssertEqual(string.Empty, error.ToString());
         }
@@ -445,7 +457,11 @@ public void CvbsRunnerPreservesReleaseUnsupportedSystemFailures()
             var output = new StringWriter();
             var error = new StringWriter();
 
-            AssertEqual(1, new DecodeRunner().Run(command, output, error));
+            AssertEqual(1, new DecodeRunner().Run(
+                command,
+                output,
+                error,
+                TestContext.Current.CancellationToken));
             AssertEqual(string.Empty, output.ToString());
             string normalized = system == "PALM" ? "PAL_M" : system;
             AssertEqual($"('Unknown video system!', '{normalized}')" + Environment.NewLine, error.ToString());
@@ -483,7 +499,11 @@ public void LdParserAllowsVersionWithoutPositionals()
     AssertTrue(command.Get<bool>("version"));
     AssertEqual(0, command.Positionals.Count);
     var output = new StringWriter();
-    AssertEqual(0, new DecodeRunner().Run(command, output, TextWriter.Null));
+    AssertEqual(0, new DecodeRunner().Run(
+        command,
+        output,
+        TextWriter.Null,
+        TestContext.Current.CancellationToken));
     AssertEqual(DecodeVersionInfo.Version + Environment.NewLine, output.ToString());
 }
 
@@ -1975,7 +1995,11 @@ public void DecodeOutputPreflightRejectsConflictingOutputs()
         AssertEqual(outputBase + "_chroma.tbc", conflicts[0]);
         AssertThrows<ArgumentException>(() => DecodeOutputPreflight.Validate(conflict));
         var conflictOutput = new StringWriter();
-        AssertEqual(1, new DecodeRunner().Run(conflict, conflictOutput, TextWriter.Null));
+        AssertEqual(1, new DecodeRunner().Run(
+            conflict,
+            conflictOutput,
+            TextWriter.Null,
+            TestContext.Current.CancellationToken));
         AssertEqual(
             "Existing decode files found, remove them or run command with --overwrite" + Environment.NewLine
             + "\t " + outputBase + "_chroma.tbc" + Environment.NewLine,
@@ -2023,7 +2047,11 @@ public void DecodeRunnerHandlesEmptyNativeDecodes()
         string nativeBase = Path.Combine(tempDirectory, "native");
         ParsedCommand native = Parse(CliSpecs.Vhs, ["--pal", nativeInput, nativeBase]);
         var nativeError = new StringWriter();
-        int nativeExit = new DecodeRunner().Run(native, TextWriter.Null, nativeError);
+        int nativeExit = new DecodeRunner().Run(
+            native,
+            TextWriter.Null,
+            nativeError,
+            TestContext.Current.CancellationToken);
         AssertEqual(0, nativeExit);
         AssertContains(nativeError.ToString(), "Completed without handling any frames.");
         AssertFalse(nativeError.ToString().Contains("Input ended before enough samples were available", StringComparison.Ordinal));
@@ -2045,7 +2073,8 @@ public void DecodeRunnerHandlesEmptyNativeDecodes()
         int cxadcExit = new DecodeRunner().Run(
             Parse(CliSpecs.Vhs, ["--pal", "--cxadc", "--no_resample", nativeInput, cxadcBase]),
             TextWriter.Null,
-            cxadcError);
+            cxadcError,
+            TestContext.Current.CancellationToken);
         AssertEqual(0, cxadcExit);
         AssertContains(cxadcError.ToString(), "--cxadc is deprecated! use -f 8fsc instead!");
         string cxadcLog = File.ReadAllText(cxadcBase + ".log");
@@ -2062,7 +2091,8 @@ public void DecodeRunnerHandlesEmptyNativeDecodes()
         int ldExit = new DecodeRunner().Run(
             Parse(CliSpecs.LaserDisc, ["--PAL", "--ntsc_audio_rate", ldInput, Path.Combine(tempDirectory, "ld-pal")]),
             TextWriter.Null,
-            ldPalWarning);
+            ldPalWarning,
+            TestContext.Current.CancellationToken);
         AssertEqual(0, ldExit);
         AssertContains(ldPalWarning.ToString(), "WARNING: --ntsc_audio_rate ignored for PAL (audio is already frame-locked at 44100hz)");
         AssertContains(ldPalWarning.ToString(), "Completed without handling any frames.");
@@ -2080,7 +2110,11 @@ public void DecodeRunnerHandlesEmptyNativeDecodes()
         string resamplingBase = Path.Combine(tempDirectory, "resampling");
         ParsedCommand resamplingMissingInput = Parse(CliSpecs.Vhs, ["-f", "8fsc", Path.Combine(tempDirectory, "missing.u8"), resamplingBase]);
         var missingInputOutput = new StringWriter();
-        AssertEqual(1, new DecodeRunner().Run(resamplingMissingInput, missingInputOutput, TextWriter.Null));
+        AssertEqual(1, new DecodeRunner().Run(
+            resamplingMissingInput,
+            missingInputOutput,
+            TextWriter.Null,
+            TestContext.Current.CancellationToken));
         AssertContains(missingInputOutput.ToString(), "ERROR: input file");
     }
     finally
@@ -5069,11 +5103,15 @@ public async Task GnuRadioRfAfeBridgeMatchesUpstreamZmqProtocol()
         sink.SendFrame(BuildFloat32Bytes(firstResponse));
         AssertTrue(sink.ReceiveFrameBytes().SequenceEqual([(byte)'0']));
         sink.SendFrame(BuildFloat32Bytes(secondResponse));
-    });
+    }, TestContext.Current.CancellationToken);
 
-    AssertTrue(companionReady.Wait(TimeSpan.FromSeconds(5)));
+    AssertTrue(companionReady.Wait(
+        TimeSpan.FromSeconds(5),
+        TestContext.Current.CancellationToken));
     double[] processed = bridge.Process(input);
-    await companion.WaitAsync(TimeSpan.FromSeconds(5));
+    await companion.WaitAsync(
+        TimeSpan.FromSeconds(5),
+        TestContext.Current.CancellationToken);
     AssertSequence(firstResponse.Concat(secondResponse).ToArray(), processed);
     AssertTrue(log.ToString().Contains($"tcp://localhost:{sendPort}", StringComparison.Ordinal));
     AssertTrue(log.ToString().Contains($"tcp://*:{receivePort}", StringComparison.Ordinal));
@@ -8123,7 +8161,11 @@ public void VhsDiskGuardMatchesUpstreamCadenceAndPauseProtocol()
         waits.Add);
     string outputBase = Path.Combine(Path.GetTempPath(), "vhs-disk-guard", "capture");
 
-    guard.Check(outputBase, fieldsWritten: 1, reporter);
+    guard.Check(
+        outputBase,
+        fieldsWritten: 1,
+        reporter,
+        TestContext.Current.CancellationToken);
 
     string status = "active status";
     AssertEqual(status + new string(' ', 80 - status.Length) + '\r', output.ToString());
@@ -8146,13 +8188,21 @@ public void VhsDiskGuardMatchesUpstreamCadenceAndPauseProtocol()
     {
         skippedQueries++;
         return 0;
-    }).Check(outputBase, fieldsWritten: 100, reporter);
+    }).Check(
+        outputBase,
+        fieldsWritten: 100,
+        reporter,
+        TestContext.Current.CancellationToken);
     AssertEqual(0, skippedQueries);
 
     var ignoredError = new StringWriter();
     var ignoredReporter = new DecodeRuntimeReporter(TextWriter.Null, ignoredError, () => 0.0);
     new VhsDiskSpaceGuard(_ => throw new IOException("unavailable"))
-        .Check(outputBase, fieldsWritten: 1, ignoredReporter);
+        .Check(
+            outputBase,
+            fieldsWritten: 1,
+            ignoredReporter,
+            TestContext.Current.CancellationToken);
     AssertEqual(string.Empty, ignoredError.ToString());
 
     using var cancellationSource = new CancellationTokenSource();
@@ -8423,7 +8473,11 @@ public void DecodeReadErrorsReportContextAndFinalizePartialOutput()
         var output = new StringWriter();
         var error = new StringWriter();
 
-        int exitCode = runner.Run(command, output, error);
+        int exitCode = runner.Run(
+            command,
+            output,
+            error,
+            TestContext.Current.CancellationToken);
 
         string errorText = error.ToString();
         AssertEqual(1, exitCode);

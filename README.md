@@ -32,7 +32,7 @@ Implemented:
 
 - Visual Studio compatible `VHSDecodeDotNet.slnx`
 - `net10.0` CLI and core library plus a standard
-  `Microsoft.NET.Test.Sdk`/xUnit test project discoverable in Visual Studio
+  `Microsoft.NET.Test.Sdk`/xUnit v3 test project discoverable in Visual Studio
   Test Explorer
 - `decode.py`-style top-level dispatch for `vhs`, `cvbs`, and `ld`
 - the CLI builds as `decode.exe` and also emits `vhs-decode.exe`,
@@ -975,7 +975,7 @@ dotnet test VHSDecodeDotNet.slnx --no-build
 ```
 
 The current formal solution build completes with zero warnings and errors, and
-the xUnit project exposes 229 independently discoverable compatibility tests to
+the xUnit v3 project exposes 229 independently discoverable compatibility tests to
 `dotnet test` and Visual Studio Test Explorer. On the
 same Windows machine and fixtures, Release wall-clock measurements for one
 frame were 2.346 s versus 7.193 s for NTSC VHS and 1.651 s versus 5.865 s for
