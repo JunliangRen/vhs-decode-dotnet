@@ -836,10 +836,10 @@ public static class VhsChromaDecoder
             int i = lineStart;
             for (; i < vectorEnd; i += 4)
             {
-                output[i] = (double)(float)((float)chroma[i] * -Math.Cos(theta0));
-                output[i + 1] = (double)(float)((float)chroma[i + 1] * -Math.Cos(theta1));
-                output[i + 2] = (double)(float)((float)chroma[i + 2] * -Math.Cos(theta2));
-                output[i + 3] = (double)(float)((float)chroma[i + 3] * -Math.Cos(theta3));
+                output[i] = (double)(float)(chroma[i] * -Math.Cos(theta0));
+                output[i + 1] = (double)(float)(chroma[i + 1] * -Math.Cos(theta1));
+                output[i + 2] = (double)(float)(chroma[i + 2] * -Math.Cos(theta2));
+                output[i + 3] = (double)(float)(chroma[i + 3] * -Math.Cos(theta3));
                 theta0 += fourTimesCoefficient;
                 theta1 += fourTimesCoefficient;
                 theta2 += fourTimesCoefficient;
@@ -849,7 +849,7 @@ public static class VhsChromaDecoder
             theta += hetCoefficient * vectorCount;
             for (; i < lineEnd; i++)
             {
-                output[i] = (double)(float)((float)chroma[i] * -Math.Cos(theta));
+                output[i] = (double)(float)(chroma[i] * -Math.Cos(theta));
                 theta += hetCoefficient;
             }
         }
@@ -1061,8 +1061,10 @@ public static class VhsChromaDecoder
             int delayedStart = (line - lineDistance) * lineLength;
             for (int i = 0; i < lineLength; i++)
             {
-                double combined =
-                    ((chroma[lineStart + i] * 2.0) - chroma[advancedStart + i] - chroma[delayedStart + i]) / 4.0;
+                // Numba lowers PAL's float64 2H expression with the delayed term first; NTSC 1H retains source order.
+                double combined = !retainFloat32 && lineDistance == 2
+                    ? ((chroma[lineStart + i] * 2.0) - chroma[delayedStart + i] - chroma[advancedStart + i]) / 4.0
+                    : ((chroma[lineStart + i] * 2.0) - chroma[advancedStart + i] - chroma[delayedStart + i]) / 4.0;
                 output[lineStart + i] = retainFloat32 ? (double)(float)combined : combined;
             }
         }

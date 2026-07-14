@@ -3550,6 +3550,368 @@ public void PalBetamaxChromaAfcFieldMatchesReleaseBits()
         Convert.ToHexString(SHA256.HashData(TbcOutputWriter.ToLittleEndianBytes(result.Samples))));
 }
 
+[Fact(DisplayName = "PAL Video8 chroma AFC notch stages match v0.4.0 bits")]
+public void PalVideo8ChromaAfcNotchStagesMatchReleaseBits()
+{
+    FormatParameterSet parameters = FormatCatalog.Default.GetTapeParameters("PAL", "VIDEO8", "sp");
+    TbcFrameSpec frameSpec = TbcFrameSpec.FromParameters(parameters);
+    var decodeOptions = new ChromaDecodeOptions(
+        IsColorUnder: true,
+        WriteChroma: true,
+        SkipChroma: false,
+        UseChromaAfc: true,
+        DisableComb: false,
+        ChromaDeemphasisFilter: true,
+        ChromaAudioNotch: true,
+        ChromaOffsetSamples: 5,
+        DetectChromaTrackPhase: false,
+        EnableColorKiller: false,
+        DisableBurstHsync: false,
+        DisablePhaseCorrection: false,
+        UseOldRawChromaOutput: false);
+    var filterOptions = new DecodeFilterOptions(
+        VideoNotchHz: 2_500_000.0,
+        VideoNotchQ: 20.0,
+        UseChromaAfc: true);
+    VhsChromaFieldOptions options = TbcFieldDecodePipeline.BuildChromaFieldOptions(
+        "PAL",
+        parameters,
+        frameSpec,
+        decodeOptions,
+        filterOptions,
+        decodeSampleRateHz: 40_000_000.0)
+        ?? throw new InvalidOperationException("Chroma options were not built for PAL Video8.");
+
+    double[] chroma = Enumerable.Range(0, frameSpec.FieldSampleCount)
+        .Select(index => (((index * 37) % 1009 - 504) / 16.0) + Math.ScaleB(index + 1.0, -38))
+        .ToArray();
+    AssertEqual(
+        "B6E7F9D11E7590251DF679134348A993A965100237785106073111D30426D661",
+        DoubleBitsSha256(chroma));
+    AssertEqual(4, options.ChromaPreFilterMoveSamples);
+    AssertEqual(
+        "C1B4827F13A540C821CE52B1B7949ED0CC8DD353948F23202AFF291CAD14DEAE",
+        DoubleBitsSha256(options.ChromaPreSosFilter!.SelectMany(section => new[]
+        {
+            section.B0,
+            section.B1,
+            section.B2,
+            section.A0,
+            section.A1,
+            section.A2
+        }).ToArray()));
+    double[] prefiltered = SosFilter.ApplyForwardBackward(options.ChromaPreSosFilter!, chroma);
+    AssertEqual(
+        "8DCADDC1D99E48EF097E27C2A6ABDE576716E2E4CB6B242311C8C5BB9E216BED",
+        DoubleBitsSha256(prefiltered));
+
+    TransferFunction audioNotch = options.ChromaAudioNotchFilter
+        ?? throw new InvalidOperationException("PAL Video8 chroma audio notch was not built.");
+    AssertEqual(
+        "EBD8C993F4A13029975F960A48757CDB900D794B5C480AC552753A362F50D164",
+        DoubleBitsSha256(audioNotch.Numerator));
+    AssertEqual(
+        "DD55346011633A862B26189FEDFAC818E3C7F6DBB5918E7530FDC93FA676B2C6",
+        DoubleBitsSha256(audioNotch.Denominator));
+    double[] afterAudio = IirFilter.ApplyForwardBackward(audioNotch, prefiltered);
+    AssertEqual(
+        "3A000F5F90DF82BDBEE492186E79316E09D9D910DCD41F94CA6D56F7B49304EE",
+        DoubleBitsSha256(afterAudio));
+
+    TransferFunction videoNotch = options.ChromaVideoNotchFilter
+        ?? throw new InvalidOperationException("PAL Video8 chroma video notch was not built.");
+    AssertEqual(
+        "B430632801F26DE0FE7A47C64AD1F21BA473E4AB6804623E9F780D7B1E05D284",
+        DoubleBitsSha256(videoNotch.Numerator));
+    AssertEqual(
+        "D9361FA6F897C3E657C2F2949E847FAA1B66FCC03A1415CA37CB08F666D16084",
+        DoubleBitsSha256(videoNotch.Denominator));
+    double[] afterVideo = IirFilter.ApplyForwardBackward(videoNotch, afterAudio);
+    AssertEqual(
+        "D610B01E5B9063DA016A038154DEBB2F7C623498EAE71512515A18F9CE42A1DC",
+        DoubleBitsSha256(afterVideo));
+
+    double[] shifted = VhsChromaDecoder.ApplyChromaPreFilter(chroma, options);
+    AssertEqual(
+        "8850F30E8DCCA202ACE4FF9ED1FB27E3A84625979B39FED8575D6724C1D43231",
+        DoubleBitsSha256(shifted));
+
+    const int LineOffset = 3;
+    ChromaPhaseLine[] phaseLines = Enumerable.Range(0, frameSpec.OutputLineCount)
+        .Select(index =>
+        {
+            int line = LineOffset + index;
+            return new ChromaPhaseLine(
+                line,
+                ((line * 3) + 2) % 4,
+                ((line * 17) + 11) % 360 - 180.0,
+                BurstPhaseOffsetDegrees: 0.0,
+                BurstMagnitude: 30_000.0,
+                I: 30_000.0,
+                Q: 0.0);
+        })
+        .ToArray();
+    var phase = new ChromaPhaseSequenceResult(
+        NextChromaRotationIndex: 0,
+        phaseLines,
+        BurstDetectedLine: 0,
+        BurstMagnitudeAverage: 30_000.0,
+        BurstPhaseAverageDegrees: 0.0,
+        EvenBurstPhaseAverageDegrees: 0.0,
+        OddBurstPhaseAverageDegrees: 0.0);
+    VhsChromaFieldResult result = VhsChromaDecoder.DecodeFieldWithPhase(
+        chroma,
+        options,
+        phase,
+        isFirstField: true,
+        fieldNumber: 0,
+        lineOffset: LineOffset);
+    ChromaCarrierEstimate carrier = result.CarrierEstimate
+        ?? throw new InvalidOperationException("PAL Video8 chroma AFC did not estimate a carrier.");
+    AssertEqual(0x41265A0BC0000000UL, BitConverter.DoubleToUInt64Bits(carrier.NominalCarrierHz));
+    AssertEqual(0x41265970D7EDC111UL, BitConverter.DoubleToUInt64Bits(carrier.CarrierHz));
+    AssertEqual(0xC0535D0247DDE000UL, BitConverter.DoubleToUInt64Bits(carrier.OffsetHz));
+    AssertEqual(0UL, BitConverter.DoubleToUInt64Bits(carrier.PhaseRadians));
+
+    double[] upconverted = VhsChromaDecoder.UpconvertChroma(
+        shifted,
+        LineOffset,
+        frameSpec.OutputLineLength,
+        phase.PhaseSequence,
+        VhsChromaDecoder.BuildHeterodyneTable(
+            shifted.Length,
+            options.FscMHz,
+            carrier.CarrierHz / 1_000_000.0,
+            options.FscMHz * 4.0,
+            carrier.PhaseRadians));
+    AssertEqual(
+        "041DF1E00CF5B76A566AD045AF96BF0E266782BE583AAC6583116BCFDB0D0EEE",
+        FloatBitsSha256(upconverted));
+    double[] final = SosFilter.ApplyForwardBackwardFloat32(options.FinalSosFilter!, upconverted);
+    AssertEqual(
+        "2D98CAD5F0FC9798C48F7C46B988CF352568BE5646D9287912900F7DD12D9B81",
+        FloatBitsSha256(final));
+
+    TransferFunction deemphasis = options.ChromaDeemphasisFilter
+        ?? throw new InvalidOperationException("PAL Video8 chroma deemphasis was not built.");
+    AssertEqual(
+        "EE08B71006DADC75E379AF7D3BDE25DA4CB5260F31A68642DB3D6552B784D708",
+        DoubleBitsSha256(deemphasis.Numerator));
+    AssertEqual(
+        "A8E9E38D1AB7F9FCAA428AF95168A8A1C5C9576681DE8F5A34D415E27572CD47",
+        DoubleBitsSha256(deemphasis.Denominator));
+    double[] deemphasized = IirFilter.ApplyForward(deemphasis, final);
+    AssertEqual(
+        "DA42D875C0FBDFE4E7E390103F9B3F647C3FD2908EDC82EB8A931B6E0893AAB0",
+        DoubleBitsSha256(deemphasized));
+    double[] combined = VhsChromaDecoder.ApplyPalComb(
+        deemphasized,
+        frameSpec.OutputLineLength,
+        retainFloat32: false);
+    AssertEqual(
+        "C884AA2F0882D5A3FB6697766C5AE1622D29C33473BA93641E1E4DAC4D39D97F",
+        DoubleBitsSha256(combined));
+    AutomaticChromaGainResult gained = VhsChromaDecoder.ApplyAutomaticChromaGain(
+        combined,
+        options.BurstAbsRef,
+        options.BurstStart,
+        options.BurstEnd,
+        options.OutputLineLength,
+        options.OutputLineCount,
+        burstDetectedLine: 0,
+        useFloat32Rms: false);
+    int line16Start = 16 * options.OutputLineLength;
+    AssertEqual(0x3FB55C4B60C8F0D5UL, BitConverter.DoubleToUInt64Bits(combined[line16Start]));
+    AssertEqual(0x40B181A0E988718EUL, BitConverter.DoubleToUInt64Bits(gained.Samples[line16Start]));
+    AssertEqual(0x3FC431611A5BC9C4UL, BitConverter.DoubleToUInt64Bits(gained.MeanBurstRms));
+    AssertEqual(
+        "9BA09CDA0429425FA616D47ADDEE36420305E77ACB1C7590B3EE810A5F665482",
+        DoubleBitsSha256(gained.Samples));
+    AssertEqual(
+        "7E2DC277018708D982DF3C518807118D8E30CF0597661B2B16D0DB042A2CDED0",
+        Convert.ToHexString(SHA256.HashData(TbcOutputWriter.ToLittleEndianBytes(result.Samples))));
+}
+
+[Fact(DisplayName = "NTSC Video8 chroma AFC notch field matches v0.4.0 bits")]
+public void NtscVideo8ChromaAfcNotchFieldMatchesReleaseBits()
+{
+    FormatParameterSet parameters = FormatCatalog.Default.GetTapeParameters("NTSC", "VIDEO8", "sp");
+    TbcFrameSpec frameSpec = TbcFrameSpec.FromParameters(parameters);
+    var decodeOptions = new ChromaDecodeOptions(
+        IsColorUnder: true,
+        WriteChroma: true,
+        SkipChroma: false,
+        UseChromaAfc: true,
+        DisableComb: false,
+        ChromaDeemphasisFilter: true,
+        ChromaAudioNotch: true,
+        ChromaOffsetSamples: 5,
+        DetectChromaTrackPhase: false,
+        EnableColorKiller: false,
+        DisableBurstHsync: false,
+        DisablePhaseCorrection: false,
+        UseOldRawChromaOutput: false);
+    var filterOptions = new DecodeFilterOptions(
+        VideoNotchHz: 2_500_000.0,
+        VideoNotchQ: 20.0,
+        UseChromaAfc: true);
+    VhsChromaFieldOptions options = TbcFieldDecodePipeline.BuildChromaFieldOptions(
+        "NTSC",
+        parameters,
+        frameSpec,
+        decodeOptions,
+        filterOptions,
+        decodeSampleRateHz: 40_000_000.0)
+        ?? throw new InvalidOperationException("Chroma options were not built for NTSC Video8.");
+
+    AssertEqual(70, options.BurstStart);
+    AssertEqual(122, options.BurstEnd);
+    AssertEqual(3, options.ChromaPreFilterMoveSamples);
+    AssertEqual(4_100.0, options.BurstAbsRef);
+    double[] chroma = Enumerable.Range(0, frameSpec.FieldSampleCount)
+        .Select(index => (((index * 37) % 1009 - 504) / 16.0) + Math.ScaleB(index + 1.0, -38))
+        .ToArray();
+    AssertEqual(
+        "0DEC95390F9EA9D4C5D107BE5735DB6D4F388A328DE359000BC9B23535111F26",
+        DoubleBitsSha256(chroma));
+    AssertEqual(
+        "C1B4827F13A540C821CE52B1B7949ED0CC8DD353948F23202AFF291CAD14DEAE",
+        DoubleBitsSha256(options.ChromaPreSosFilter!.SelectMany(section => new[]
+        {
+            section.B0,
+            section.B1,
+            section.B2,
+            section.A0,
+            section.A1,
+            section.A2
+        }).ToArray()));
+    double[] rawPrefiltered = SosFilter.ApplyForwardBackward(options.ChromaPreSosFilter!, chroma);
+    AssertEqual(
+        "7B1DF5C0A54B4E19AC3358B433DA17090F0B087AD5E871C478EFE4E645206DEC",
+        DoubleBitsSha256(rawPrefiltered));
+
+    TransferFunction audioNotch = options.ChromaAudioNotchFilter
+        ?? throw new InvalidOperationException("NTSC Video8 chroma audio notch was not built.");
+    AssertEqual(
+        "536717C5CDBBD6D3156A8F6AE9206E84A83AB7D7BDC52BD683E263646C5BBF07",
+        DoubleBitsSha256(audioNotch.Numerator));
+    AssertEqual(
+        "0D879E20592216C09AC2C00CDC93ACAF1F7E0FC72B7B12EFD77AB54984F72B53",
+        DoubleBitsSha256(audioNotch.Denominator));
+    TransferFunction videoNotch = options.ChromaVideoNotchFilter
+        ?? throw new InvalidOperationException("NTSC Video8 chroma video notch was not built.");
+    AssertEqual(
+        "7BB4EEB22A771B14DDA878BA3DE8FC6C58FF5B85BD2006633380BC4C983CC8AA",
+        DoubleBitsSha256(videoNotch.Numerator));
+    AssertEqual(
+        "7E240C5672C10A594698EF75390D2C61AB541AC278E620241FED5189849D9703",
+        DoubleBitsSha256(videoNotch.Denominator));
+    double[] shifted = VhsChromaDecoder.ApplyChromaPreFilter(chroma, options);
+    AssertEqual(
+        "5A58E5EBCB401031D876E98D7C17F475CE32D217304F2556E0EBDEC0939C511A",
+        DoubleBitsSha256(shifted));
+
+    const int LineOffset = 1;
+    ChromaPhaseLine[] phaseLines = Enumerable.Range(0, frameSpec.OutputLineCount)
+        .Select(index =>
+        {
+            int line = LineOffset + index;
+            return new ChromaPhaseLine(
+                line,
+                ((line * 3) + 2) % 4,
+                ((line * 17) + 11) % 360 - 180.0,
+                BurstPhaseOffsetDegrees: 0.0,
+                BurstMagnitude: 30_000.0,
+                I: 30_000.0,
+                Q: 0.0);
+        })
+        .ToArray();
+    var phase = new ChromaPhaseSequenceResult(
+        NextChromaRotationIndex: 0,
+        phaseLines,
+        BurstDetectedLine: 0,
+        BurstMagnitudeAverage: 30_000.0,
+        BurstPhaseAverageDegrees: 0.0,
+        EvenBurstPhaseAverageDegrees: 0.0,
+        OddBurstPhaseAverageDegrees: 0.0);
+    VhsChromaFieldResult result = VhsChromaDecoder.DecodeFieldWithPhase(
+        chroma,
+        options,
+        phase,
+        isFirstField: true,
+        fieldNumber: 0,
+        lineOffset: LineOffset);
+    AssertEqual(1, result.FieldPhaseId);
+    ChromaCarrierEstimate carrier = result.CarrierEstimate
+        ?? throw new InvalidOperationException("NTSC Video8 chroma AFC did not estimate a carrier.");
+    AssertEqual(0x4126A389808FC2E8UL, BitConverter.DoubleToUInt64Bits(carrier.CarrierHz));
+    AssertEqual(0xC0993D3829E03C00UL, BitConverter.DoubleToUInt64Bits(carrier.OffsetHz));
+    AssertEqual(0UL, BitConverter.DoubleToUInt64Bits(carrier.PhaseRadians));
+
+    double[] burstDeemphasized = VhsChromaDecoder.ApplyBurstDeemphasis(
+        shifted,
+        LineOffset,
+        frameSpec.OutputLineCount,
+        frameSpec.OutputLineLength,
+        options.BurstStart,
+        options.BurstEnd);
+    AssertEqual(
+        "7402948922F352B6F278BC5C3A2AAC75F3BC0DAF05C7D844C1AAFF93C1A0218D",
+        DoubleBitsSha256(burstDeemphasized));
+    double[] upconverted = VhsChromaDecoder.UpconvertChromaPhaseCompensated(
+        burstDeemphasized,
+        LineOffset,
+        frameSpec.OutputLineLength,
+        phase.PhaseSequence,
+        options.ColorUnderCarrierHz,
+        options.FscMHz,
+        targetPhaseEvenDegrees: -33.0,
+        targetPhaseOddDegrees: -33.0);
+    AssertEqual(
+        "A4A6D4BB874F1581F783562FB3A5158859A3A1EF126E0694B14CE97CCB938109",
+        FloatBitsSha256(upconverted));
+    double[] final = SosFilter.ApplyForwardBackwardFloat32(options.FinalSosFilter!, upconverted);
+    AssertEqual(
+        "4298B29BBCBEFAD3FA65827DBE0F64CE307C9DFB04BCE0EEF74D47799B0FD9D5",
+        FloatBitsSha256(final));
+
+    TransferFunction deemphasis = options.ChromaDeemphasisFilter
+        ?? throw new InvalidOperationException("NTSC Video8 chroma deemphasis was not built.");
+    AssertEqual(
+        "CB8C8CE40001180E6B0FC224AB24715F674BD9352567822238CDC26B1C449FB4",
+        DoubleBitsSha256(deemphasis.Numerator));
+    AssertEqual(
+        "13D6AA3FC2CA709B0BE2F47F5852C312E62ED577151DA9049925A4F2C5E4CB36",
+        DoubleBitsSha256(deemphasis.Denominator));
+    double[] deemphasized = IirFilter.ApplyForward(deemphasis, final);
+    AssertEqual(
+        "312339E85BACF17572EF28914B49C8AEE43DA03CCD2E49B530AA367673B77391",
+        DoubleBitsSha256(deemphasized));
+    double[] combined = VhsChromaDecoder.ApplyNtscComb(
+        deemphasized,
+        frameSpec.OutputLineLength,
+        retainFloat32: false);
+    AssertEqual(
+        "0BBCE9403D67AAEF2C9463192EEB8245AAEDF106D21FA3FC37A32BD0984175DC",
+        DoubleBitsSha256(combined));
+    AutomaticChromaGainResult gained = VhsChromaDecoder.ApplyAutomaticChromaGain(
+        combined,
+        options.BurstAbsRef,
+        options.BurstStart,
+        options.BurstEnd,
+        options.OutputLineLength,
+        options.OutputLineCount,
+        burstDetectedLine: 0,
+        useFloat32Rms: false);
+    AssertEqual(0x3FC4DCC0311381E5UL, BitConverter.DoubleToUInt64Bits(gained.MeanBurstRms));
+    AssertEqual(
+        "30817DCD29D76CFE8C3BB4024519DB6EF3FB80F0B9626925F9FA2796B009BF67",
+        DoubleBitsSha256(gained.Samples));
+    AssertEqual(
+        "A639D0AD8D38590162FDF8D5345A5F06FE5DB90BAD5B4B36A9CE5E195A74C183",
+        Convert.ToHexString(SHA256.HashData(TbcOutputWriter.ToLittleEndianBytes(result.Samples))));
+}
+
 [Fact(DisplayName = "VHS chroma AFC tracks carrier offset")]
 public void VhsChromaAfcTracksCarrierOffset()
 {

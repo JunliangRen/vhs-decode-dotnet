@@ -398,6 +398,10 @@ Implemented:
 - PAL Betamax's mandatory chroma AFC path preserves the upstream float64 SOS
   prefilter after TBC, then reproduces the rolled float64 Numba fast-math mean
   reduction before carrier estimation and float32 heterodyne processing
+- PAL/NTSC Video8 AFC now preserves the complete optional chroma-audio/user
+  notch chain, keeps NTSC phase-compensated multiplication in float64 until the
+  float32 `uphet` write, and reproduces Numba's distinct float64 2H PAL and 1H
+  NTSC comb subtraction orders
 - VHS chroma burst phase now feeds upstream-style burst-locked line-location
   refinement before field rendering, with `--disable_burst_hsync` preserving
   the sync-only line positions
@@ -844,11 +848,12 @@ Implemented:
   real-input Hilbert transforms, and NumPy complex-magnitude rounding preserve
   the float64 source bits while those formats continue not to emit a chroma
   sidecar
-- seven deterministic full-field chroma baselines cover PAL-M VHS, MESECAM
-  VHS, PAL/NTSC Video8, PAL/NTSC Hi8, and PAL Betamax AFC. All 2,138,747 output
-  samples match v0.4.0 bit for bit, with the Betamax case also locking the SOS
-  coefficients, prefilter, carrier estimate, heterodyne, final filter, PAL comb,
-  and automatic chroma-gain stage hashes
+- nine deterministic full-field chroma baselines cover PAL-M VHS, MESECAM VHS,
+  PAL/NTSC Video8, PAL/NTSC Hi8, PAL Betamax AFC, and PAL/NTSC Video8 AFC with
+  chroma-audio plus user notches. All 2,733,332 output samples match v0.4.0 bit
+  for bit, with staged hashes locking prefilters, notches, carrier estimates,
+  heterodyne/phase compensation, final filters, deemphasis, comb, and automatic
+  chroma gain
 - a complete deterministic 313-line PAL VHS burst-phase sequence matches
   v0.4.0 bit for bit, including every per-line phase/I/Q/magnitude tuple, the
   next-track rotation index, burst detection, and odd/even/combined averages
@@ -972,7 +977,7 @@ Not complete yet:
 - remaining real-capture PAL LD and AC3 end-to-end fixtures, external AC3
   tool-pipeline parity, and remaining verbose VITS field calibration details
 - remaining non-default VHS/CVBS vblank edge cases and real-capture chroma
-  track-phase, optional notch, and uncommon option-combination parity
+  track-phase plus uncommon cross-option parity
 - remaining upstream TBC field-writer integration and bit-compat edge handling
 - remaining rare real-capture first-HSYNC/vblank edge cases and complete
   upstream JSON/SQLite field metadata
@@ -991,7 +996,7 @@ dotnet test VHSDecodeDotNet.slnx --no-build
 ```
 
 The current formal solution build completes with zero warnings and errors, and
-the xUnit v3 project exposes 233 independently discoverable compatibility tests
+the xUnit v3 project exposes 235 independently discoverable compatibility tests
 to `dotnet test` and Visual Studio Test Explorer. On the
 same Windows machine and fixtures, Release wall-clock measurements for one
 frame were 2.346 s versus 7.193 s for NTSC VHS and 1.651 s versus 5.865 s for
