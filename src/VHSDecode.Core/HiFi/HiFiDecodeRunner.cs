@@ -18,23 +18,27 @@ internal sealed class HiFiDecodeRunner : IHiFiCommandRunner
     private readonly HiFiStreamingDecoder _streamingDecoder;
     private readonly Func<HiFiDecodeOptions, TextWriter, IHiFiSampleReader> _inputFactory;
     private readonly Func<HiFiDecodeOptions, HiFiOutputWriter> _outputFactory;
+    private readonly Func<int, IHiFiPreviewSink?> _previewFactory;
 
     public HiFiDecodeRunner()
         : this(
             new HiFiStreamingDecoder(),
             HiFiInputReader.Open,
-            options => new HiFiOutputWriter(options))
+            options => new HiFiOutputWriter(options),
+            HiFiPreviewSinkFactory.TryCreate)
     {
     }
 
     internal HiFiDecodeRunner(
         HiFiStreamingDecoder streamingDecoder,
         Func<HiFiDecodeOptions, TextWriter, IHiFiSampleReader> inputFactory,
-        Func<HiFiDecodeOptions, HiFiOutputWriter> outputFactory)
+        Func<HiFiDecodeOptions, HiFiOutputWriter> outputFactory,
+        Func<int, IHiFiPreviewSink?>? previewFactory = null)
     {
         _streamingDecoder = streamingDecoder ?? throw new ArgumentNullException(nameof(streamingDecoder));
         _inputFactory = inputFactory ?? throw new ArgumentNullException(nameof(inputFactory));
         _outputFactory = outputFactory ?? throw new ArgumentNullException(nameof(outputFactory));
+        _previewFactory = previewFactory ?? HiFiPreviewSinkFactory.TryCreate;
     }
 
     public int Run(
@@ -95,7 +99,10 @@ internal sealed class HiFiDecodeRunner : IHiFiCommandRunner
             // Release 4.0 workers build their AFE/FM path before receiving the measured standard.
         }
 
-        if (options.Preview)
+        using IHiFiPreviewSink? previewSink = options.Preview
+            ? _previewFactory(options.AudioRateHz)
+            : null;
+        if (options.Preview && previewSink is null)
         {
             output.WriteLine("Import of sounddevice failed, preview is not available!");
         }
@@ -116,6 +123,7 @@ internal sealed class HiFiDecodeRunner : IHiFiCommandRunner
             audioOutput,
             output,
             cancellationToken,
+            previewSink,
             () => stopwatch.Elapsed);
 
         output.WriteLine();

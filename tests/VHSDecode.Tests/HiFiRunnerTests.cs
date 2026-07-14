@@ -301,7 +301,7 @@ public sealed class HiFiRunnerTests
                 writer,
                 diagnostics,
                 TestContext.Current.CancellationToken,
-                () => TimeSpan.FromSeconds(0.5));
+                elapsedProvider: () => TimeSpan.FromSeconds(0.5));
             writer.Complete(result.LeftPeak, result.RightPeak, TextWriter.Null);
 
             Assert.Equal(10, result.InputSamples);
@@ -467,6 +467,169 @@ public sealed class HiFiRunnerTests
             progress);
         Assert.InRange(estimate.LeftCarrierHz, 2_270_675.0, 2_270_676.3);
         Assert.InRange(estimate.RightCarrierHz, 2_679_688.2, 2_679_689.5);
+    }
+
+    [Fact(DisplayName = "HiFi preview conversion matches Release 4.0 int16 wrapping")]
+    public void HiFiPreviewConversionMatchesRelease40Int16Wrapping()
+    {
+        float[] input =
+        [
+            -2.0f,
+            -1.1f,
+            -1.0f,
+            -0.99999f,
+            -0.5f,
+            -1.0f / 65_536.0f,
+            0.0f,
+            1.0f / 65_536.0f,
+            0.5f,
+            0.99999f,
+            1.0f,
+            1.1f,
+            2.0f,
+            float.NaN,
+            float.PositiveInfinity,
+            float.NegativeInfinity
+        ];
+
+        Assert.Equal(
+            [0, 29_492, -32_768, -32_767, -16_384, 0, 0, 0,
+                16_384, 32_767, -32_768, -29_492, 0, 0, 0, 0],
+            WinMmHiFiPreviewSink.ConvertToPcm16(input));
+        Assert.Equal(
+            [16_384, 8_192],
+            WinMmHiFiPreviewSink.ConvertToPcm16([0.5f, 0.25f, 1.0f]));
+    }
+
+    [Fact(DisplayName = "HiFi preview factory safely probes the host audio device")]
+    public void HiFiPreviewFactorySafelyProbesTheHostAudioDevice()
+    {
+        using IHiFiPreviewSink? preview = HiFiPreviewSinkFactory.TryCreate(44_100);
+        if (!OperatingSystem.IsWindows())
+        {
+            Assert.Null(preview);
+        }
+        else
+        {
+            preview?.Write(
+                new float[44 * 2],
+                TestContext.Current.CancellationToken);
+        }
+    }
+
+    [Fact(DisplayName = "HiFi preview routes post-processed stereo to a 44.1 kHz sink")]
+    public void HiFiPreviewRoutesPostProcessedStereoTo44100HzSink()
+    {
+        string directory = CreateTempDirectory();
+        try
+        {
+            string path = Path.Combine(directory, "preview.wav");
+            var preview = new RecordingPreviewSink();
+            int requestedRate = 0;
+            var streamingDecoder = new HiFiStreamingDecoder(
+                activeOptions => new ZeroBlockDecoder(activeOptions));
+            var runner = new HiFiDecodeRunner(
+                streamingDecoder,
+                (_, _) => new ArraySampleReader(new float[10]),
+                activeOptions => new HiFiOutputWriter(activeOptions),
+                sampleRate =>
+                {
+                    requestedRate = sampleRate;
+                    return preview;
+                });
+            var output = new StringWriter();
+            var error = new StringWriter();
+
+            int exitCode = runner.Run(
+                ParseHiFi(["--preview", "--raw_format", "s16le", "-", path]),
+                output,
+                error,
+                TestContext.Current.CancellationToken);
+
+            Assert.Equal(0, exitCode);
+            Assert.Equal(44_100, requestedRate);
+            Assert.Single(preview.Blocks);
+            Assert.NotEmpty(preview.Blocks[0]);
+            Assert.Equal(0, preview.Blocks[0].Length % 2);
+            Assert.True(preview.Disposed);
+            Assert.DoesNotContain(
+                "preview is not available",
+                output.ToString(),
+                StringComparison.Ordinal);
+            Assert.Equal(string.Empty, error.ToString());
+            byte[] wave = File.ReadAllBytes(path);
+            Assert.Equal(44_100u, BinaryPrimitives.ReadUInt32LittleEndian(wave.AsSpan(24, 4)));
+        }
+        finally
+        {
+            Directory.Delete(directory, recursive: true);
+        }
+    }
+
+    [Fact(DisplayName = "HiFi preview falls back without suppressing file output")]
+    public void HiFiPreviewFallsBackWithoutSuppressingFileOutput()
+    {
+        string directory = CreateTempDirectory();
+        try
+        {
+            string path = Path.Combine(directory, "fallback.wav");
+            var streamingDecoder = new HiFiStreamingDecoder(
+                activeOptions => new ZeroBlockDecoder(activeOptions));
+            var runner = new HiFiDecodeRunner(
+                streamingDecoder,
+                (_, _) => new ArraySampleReader(new float[10]),
+                activeOptions => new HiFiOutputWriter(activeOptions),
+                _ => null);
+            var output = new StringWriter();
+
+            int exitCode = runner.Run(
+                ParseHiFi(["--preview", "--raw_format", "s16le", "-", path]),
+                output,
+                TextWriter.Null,
+                TestContext.Current.CancellationToken);
+
+            Assert.Equal(0, exitCode);
+            Assert.Contains(
+                "Import of sounddevice failed, preview is not available!",
+                output.ToString(),
+                StringComparison.Ordinal);
+            Assert.True(File.Exists(path));
+            Assert.True(new FileInfo(path).Length > 44);
+        }
+        finally
+        {
+            Directory.Delete(directory, recursive: true);
+        }
+    }
+
+    [Fact(DisplayName = "HiFi preview is disposed when input opening fails")]
+    public void HiFiPreviewIsDisposedWhenInputOpeningFails()
+    {
+        string directory = CreateTempDirectory();
+        try
+        {
+            string path = Path.Combine(directory, "input-failure.wav");
+            var preview = new RecordingPreviewSink();
+            var runner = new HiFiDecodeRunner(
+                new HiFiStreamingDecoder(
+                    activeOptions => new ZeroBlockDecoder(activeOptions)),
+                (_, _) => throw new IOException("synthetic preview input failure"),
+                activeOptions => new HiFiOutputWriter(activeOptions),
+                _ => preview);
+
+            IOException exception = Assert.Throws<IOException>(() => runner.Run(
+                ParseHiFi(["--preview", "--raw_format", "s16le", "-", path]),
+                TextWriter.Null,
+                TextWriter.Null,
+                TestContext.Current.CancellationToken));
+
+            Assert.Equal("synthetic preview input failure", exception.Message);
+            Assert.True(preview.Disposed);
+        }
+        finally
+        {
+            Directory.Delete(directory, recursive: true);
+        }
     }
 
     [Fact(DisplayName = "HiFi WAV output matches libsndfile PCM16 quantization and padding")]
@@ -860,5 +1023,21 @@ public sealed class HiFiRunnerTests
         public void Dispose()
         {
         }
+    }
+
+    private sealed class RecordingPreviewSink : IHiFiPreviewSink
+    {
+        public List<float[]> Blocks { get; } = [];
+        public bool Disposed { get; private set; }
+
+        public void Write(
+            ReadOnlySpan<float> stereoSamples,
+            CancellationToken cancellationToken = default)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            Blocks.Add(stereoSamples.ToArray());
+        }
+
+        public void Dispose() => Disposed = true;
     }
 }

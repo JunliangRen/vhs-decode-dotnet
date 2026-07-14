@@ -56,6 +56,11 @@ Implemented:
   returns the summed filtered channels as native float32 after each client
   request; the streaming decoder forces the same single-worker ordering for
   this mode
+- HiFi `--preview` now routes every post-processed stereo block to a native
+  Windows WinMM 44.1 kHz PCM16 stream while continuing to write the requested
+  output file; float32 conversion preserves Release 4.0's truncate-and-wrap
+  behavior, and systems without an available device retain its existing
+  `preview is not available` fallback
 - HiFi raw-input normalization covers `u8`, `u10le`, `u12le`, `u16le`, `s8`,
   `s10le`, `s12le`, `s16le`/`raw`, and `f32le`; representative extrema and
   center values match all 54 upstream v0.4.0 float32 bit patterns exactly
@@ -1054,9 +1059,9 @@ Not complete yet:
   pairs, and 1,428 float32-exact channels across all 357 valid tape
   system/format/speed cases
 - remaining container-specific resampling edge cases
-- remaining HiFi real-capture end-to-end output baselines, live audio-preview
-  playback, and hosted GUI behavior; the command runner and GNU Radio path are
-  wired, while preview currently follows upstream's no-`sounddevice` fallback
+- remaining HiFi real-capture end-to-end output baselines and hosted GUI
+  behavior; the command runner, Windows live preview, and GNU Radio path are
+  wired
 - remaining real-capture PAL LD and AC3 end-to-end fixtures, external AC3
   tool-pipeline parity, and remaining verbose VITS field calibration details
 - remaining non-default VHS/CVBS vblank edge cases, real-capture chroma
@@ -1079,7 +1084,7 @@ dotnet test VHSDecodeDotNet.slnx --no-build
 ```
 
 The current formal solution build completes with zero warnings and errors, and
-the xUnit v3 project exposes 431 independently discoverable compatibility tests
+the xUnit v3 project exposes 436 independently discoverable compatibility tests
 to `dotnet test` and Visual Studio Test Explorer. On the
 same Windows machine and fixtures, Release wall-clock measurements for one
 frame were 2.346 s versus 7.193 s for NTSC VHS and 1.651 s versus 5.865 s for

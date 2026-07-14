@@ -43,6 +43,7 @@ internal sealed class HiFiStreamingDecoder
         HiFiOutputWriter output,
         TextWriter diagnostics,
         CancellationToken cancellationToken = default,
+        IHiFiPreviewSink? previewSink = null,
         Func<TimeSpan>? elapsedProvider = null)
         => DecodeAsync(
                 options,
@@ -50,6 +51,7 @@ internal sealed class HiFiStreamingDecoder
                 output,
                 diagnostics,
                 cancellationToken,
+                previewSink,
                 elapsedProvider)
             .GetAwaiter()
             .GetResult();
@@ -60,6 +62,7 @@ internal sealed class HiFiStreamingDecoder
         HiFiOutputWriter output,
         TextWriter diagnostics,
         CancellationToken cancellationToken,
+        IHiFiPreviewSink? previewSink,
         Func<TimeSpan>? elapsedProvider)
     {
         ArgumentNullException.ThrowIfNull(options);
@@ -143,6 +146,7 @@ internal sealed class HiFiStreamingDecoder
                         ordered.Decoded,
                         ordered.Job.BlockNumber);
                     output.Write(processed);
+                    previewSink?.Write(processed.Stereo, stopToken);
                     audioFrames = checked(audioFrames + processed.Left.Length);
                     progressReporter.ReportOutput(
                         framer.InputSamplesRead,
