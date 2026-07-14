@@ -3789,6 +3789,60 @@ public void FirFrequencyResponseMatchesScipyDuccPacketFft()
         ComplexBitsSha256(response.AsSpan(0, 16_385)));
 }
 
+[Fact(DisplayName = "VHS video low-pass matches SciPy SOS response bits")]
+public void VhsVideoLowPassMatchesScipySosResponseBits()
+{
+    const int blockLength = 32_768;
+    SosSection[] sections = IirFilterDesign.ButterworthLowPassScipySos(
+        order: 6,
+        normalizedCutoff: 5_200_000.0 / 20_000_000.0);
+    AssertEqual(
+        "030CEA3602790BB439DCD6FBE34EB5F35C770BA152D959C0A7825653BD71A87E",
+        DoubleBitsSha256(sections.SelectMany(section => new[]
+        {
+            section.B0,
+            section.B1,
+            section.B2,
+            section.A0,
+            section.A1,
+            section.A2
+        }).ToArray()));
+
+    Complex[] response = IirFilterDesign.FrequencyResponse(sections, blockLength);
+    AssertEqual(
+        "02A0BB695FE1B7A001012161FC502DBB4E80E9B79DA4C1B558E28A5DD570598E",
+        ComplexBitsSha256(response.AsSpan(0, (blockLength / 2) + 1)));
+
+    FormatParameterSet parameters = FormatCatalog.Default.GetTapeParameters("PAL", "QUADRUPLEX", "sp");
+    DecodeFilterSet filters = DecodeFilterSetBuilder.BuildBasic(
+        parameters,
+        sampleRateHz: 40_000_000.0,
+        blockLength);
+    double[] magnitude = filters.VideoLowPass
+        .AsSpan(0, (blockLength / 2) + 1)
+        .ToArray()
+        .Select(value => value.Real)
+        .ToArray();
+    AssertEqual(
+        "448F993297D9C20DDCB15802F79A0CC9536926EEFD7954A2D60B38B0AE27B8DE",
+        DoubleBitsSha256(magnitude));
+}
+
+[Fact(DisplayName = "sub-deemphasis analytic magnitude matches SciPy hilbert bits")]
+public void SubDeemphasisAnalyticMagnitudeMatchesScipyHilbertBits()
+{
+    const int length = 32_768;
+    var input = new double[length];
+    for (ulong i = 0; i < (ulong)input.Length; i++)
+    {
+        input[(int)i] = (unchecked((i * 1_103_515_245UL) + 12_345UL) & 0xffffUL) - 32_768.0;
+    }
+
+    AssertEqual(
+        "2AD6816EF4E085A2C65950897ACD97863248F3152377DE6F17322CB38AA9ED13",
+        DoubleBitsSha256(RfDemodulator.BuildAnalyticMagnitude(input)));
+}
+
 [Fact(DisplayName = "complex FFT matches SciPy DUCC packet transforms")]
 public void ComplexFftMatchesScipyDuccPacketTransforms()
 {
@@ -13384,8 +13438,8 @@ public void AllCvbsAndLdVariantsBuildAndDemodulateBlock()
     AssertEqual(4, laserDiscDecoded);
 }
 
-[Fact(DisplayName = "v0.4 tape-family blocks match upstream visible channels")]
-public void TapeFamilyBlocksMatchUpstreamVisibleChannels()
+[Fact(DisplayName = "v0.4 tape-family blocks match upstream channels")]
+public void TapeFamilyBlocksMatchUpstreamChannels()
 {
     const int blockLength = 32_768;
     const string resourceName = "VHSDecode.Tests.Fixtures.tape-family-v0.4.0.json";
@@ -13405,6 +13459,7 @@ public void TapeFamilyBlocksMatchUpstreamVisibleChannels()
 
     int cases = 0;
     int comparedChannels = 0;
+    var burstMismatches = new List<string>();
     foreach (JsonElement item in baseline.RootElement.GetProperty("cases").EnumerateArray())
     {
         string system = item.GetProperty("system").GetString()!;
@@ -13427,19 +13482,26 @@ public void TapeFamilyBlocksMatchUpstreamVisibleChannels()
 
         AssertNamedHash(label, "demod", item, FloatBitsSha256(block.Video));
         AssertNamedHash(label, "demod_05", item, FloatBitsSha256(block.VideoLowPass));
-        AssertNamedHash(label, "envelope", item, FloatBitsSha256(block.Envelope));
-        comparedChannels += 3;
-        if (FormatCatalog.IsColorUnder(tapeFormat))
+        try
         {
             AssertNamedHash(label, "demod_burst", item, FloatBitsSha256(block.Chroma!));
-            comparedChannels++;
         }
+        catch (Exception ex)
+        {
+            burstMismatches.Add(ex.Message);
+        }
+        AssertNamedHash(label, "envelope", item, FloatBitsSha256(block.Envelope));
+        comparedChannels += 4;
 
         cases++;
     }
 
     AssertEqual(357, cases);
-    AssertEqual(1_353, comparedChannels);
+    AssertEqual(1_428, comparedChannels);
+    if (burstMismatches.Count != 0)
+    {
+        throw new Exception(string.Join(Environment.NewLine, burstMismatches));
+    }
 }
 
 static void AssertNamedHash(string label, string channel, JsonElement expectedCase, string actual)

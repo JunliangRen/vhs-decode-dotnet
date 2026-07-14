@@ -49,9 +49,10 @@ Implemented:
 - byte-for-byte regenerated v0.4.0 format parameter catalog covering all 560
   tape system/format/speed combinations, 7 CVBS systems, and 4 LD variants
 - a full decode compatibility matrix constructs filters and demodulates one
-  32768-sample RF block for all 357 valid tape combinations; 1,353 externally
-  observable float32 channels match v0.4.0 byte for byte, with smoke coverage
-  for all 7 CVBS systems and all 4 normal/lowband LD variants
+  32768-sample RF block for all 357 valid tape combinations; all 1,428
+  float32 channels match v0.4.0 byte for byte, including the 75 internal
+  non-color-under burst references, with smoke coverage for all 7 CVBS systems
+  and all 4 normal/lowband LD variants
 - native RF sample loader foundation for `.u8`, `.r8`, `.s16`, `.u16`, `.r16`,
   `.rf`, `.lds`, `.r30`, and mono PCM16 `.wav`
 - FFmpeg-backed RF container loader path for upstream `.ldf`, `.flac`, `.vhs`,
@@ -829,10 +830,12 @@ Implemented:
   transaction, bounding sequence memory to the field-order/previous-field state
 - deterministic 32768-sample v0.4.0 block baselines cover all 357 valid
   system/format/speed combinations across PAL, PAL-M, NTSC, MESECAM, 405, 819,
-  and NLINHA: all 1,353 externally observable `demod`, `demod_05`, `envelope`,
-  and color-under `demod_burst` channels are float32 byte-exact;
-  non-color-under formats also construct the upstream narrow internal burst
-  filter from demodulated luma while continuing not to emit a chroma sidecar
+  and NLINHA: all 1,428 `demod`, `demod_05`, `demod_burst`, and `envelope`
+  channels are float32 byte-exact, including all 75 narrow internal burst
+  references for non-color-under formats; SciPy SOS section ordering,
+  real-input Hilbert transforms, and NumPy complex-magnitude rounding preserve
+  the float64 source bits while those formats continue not to emit a chroma
+  sidecar
 - a two-field real NTSC VHS/FLAC fixture now matches the v0.4.0 checkout byte
   for byte: main TBC
   `60A6409696FD27F2012D9DF40DB97D141BE1F3D6315D3F6D4AD45A88B59FB1FF`,
@@ -947,17 +950,13 @@ Not complete yet:
 - the current numerical baselines include nine bit-exact LD v0.4.0 block
   channels, three float32-exact CVBS channels, two 491520-sample bit-exact VHS
   video/reference spans, two 239330-sample bit-exact VHS luma/chroma field
-  pairs, and 1,353 float32-exact visible channels across all 357 valid tape
+  pairs, and 1,428 float32-exact channels across all 357 valid tape
   system/format/speed cases
 - remaining container-specific resampling edge cases
 - remaining real-capture PAL LD and AC3 end-to-end fixtures, external AC3
   tool-pipeline parity, and remaining verbose VITS field calibration details
 - remaining non-default VHS/CVBS vblank edge cases and PAL/SECAM/format-specific
   chroma bit-parity processing
-- on the adversarial white-noise matrix, 58 of 75 hidden non-color-under
-  `demod_burst` buffer hashes differ because their float64 FFT source can cross
-  float32 rounding boundaries; those buffers are not consumed by the affected
-  formats' TBC/JSON/output paths
 - remaining upstream TBC field-writer integration and bit-compat edge handling
 - remaining rare real-capture first-HSYNC/vblank edge cases and complete
   upstream JSON/SQLite field metadata
@@ -976,7 +975,7 @@ dotnet test VHSDecodeDotNet.slnx --no-build
 ```
 
 The current formal solution build completes with zero warnings and errors, and
-the xUnit project exposes 227 independently discoverable compatibility tests to
+the xUnit project exposes 229 independently discoverable compatibility tests to
 `dotnet test` and Visual Studio Test Explorer. On the
 same Windows machine and fixtures, Release wall-clock measurements for one
 frame were 2.346 s versus 7.193 s for NTSC VHS and 1.651 s versus 5.865 s for

@@ -17,6 +17,21 @@ public static class IirFilterDesign
         return ButterworthLowHighPass(order, normalizedCutoff, highPass: false);
     }
 
+    internal static SosSection[] ButterworthLowPassScipySos(int order, double normalizedCutoff)
+    {
+        if ((order & 1) != 0)
+        {
+            throw new ArgumentException("The current SciPy SOS conversion requires an even filter order.", nameof(order));
+        }
+
+        (Complex[] digitalPoles, double digitalGain) = DesignButterworthLowPassZpk(
+            order,
+            normalizedCutoff);
+        var digitalZeros = new Complex[order];
+        Array.Fill(digitalZeros, -Complex.One);
+        return ZpkToNearestSos(digitalZeros, digitalPoles, digitalGain);
+    }
+
     internal static TransferFunction ButterworthLowPassTransferFunction(int order, double normalizedCutoff)
     {
         (Complex[] digitalPoles, double digitalGain) = DesignButterworthLowPassZpk(

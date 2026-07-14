@@ -1035,14 +1035,18 @@ public static class DecodeFilterSetBuilder
         }
         else
         {
-            response = IirFilterDesign.FrequencyResponse(
-                IirFilterDesign.ButterworthLowPassTransferFunction(order, corner / nyquistHz),
-                blockLength);
+            response = zeroPhaseMagnitude && (order & 1) == 0
+                ? IirFilterDesign.FrequencyResponse(
+                    IirFilterDesign.ButterworthLowPassScipySos(order, corner / nyquistHz),
+                    blockLength)
+                : IirFilterDesign.FrequencyResponse(
+                    IirFilterDesign.ButterworthLowPassTransferFunction(order, corner / nyquistHz),
+                    blockLength);
             if (zeroPhaseMagnitude)
             {
                 for (int i = 0; i < response.Length; i++)
                 {
-                    response[i] = new Complex(response[i].Magnitude, 0.0);
+                    response[i] = new Complex(NumpyComplexMagnitude(response[i]), 0.0);
                 }
             }
         }

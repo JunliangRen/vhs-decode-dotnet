@@ -1348,9 +1348,9 @@ public sealed class RfDemodulator
             length);
     }
 
-    private static double[] BuildAnalyticMagnitude(ReadOnlySpan<double> input)
+    internal static double[] BuildAnalyticMagnitude(ReadOnlySpan<double> input)
     {
-        Complex[] spectrum = PocketFftComplex.ForwardReal(input);
+        Complex[] spectrum = PocketFftComplex.ForwardDuccRealFull(input);
         int nyquist = spectrum.Length / 2;
         for (int i = 1; i < nyquist; i++)
         {
@@ -1362,14 +1362,39 @@ public sealed class RfDemodulator
             spectrum[i] = Complex.Zero;
         }
 
-        Complex[] analytic = PocketFftComplex.Inverse(spectrum);
+        Complex[] analytic = PocketFftComplex.InverseDucc(spectrum);
         var magnitude = new double[analytic.Length];
         for (int i = 0; i < magnitude.Length; i++)
         {
-            magnitude[i] = analytic[i].Magnitude;
+            magnitude[i] = NumpyComplexMagnitude(analytic[i]);
         }
 
         return magnitude;
+    }
+
+    private static double NumpyComplexMagnitude(Complex value)
+    {
+        double real = Math.Abs(value.Real);
+        double imaginary = Math.Abs(value.Imaginary);
+        if (double.IsInfinity(real) || double.IsInfinity(imaginary))
+        {
+            return double.PositiveInfinity;
+        }
+
+        if (double.IsNaN(real) || double.IsNaN(imaginary))
+        {
+            return double.NaN;
+        }
+
+        double larger = Math.Max(real, imaginary);
+        double smaller = Math.Min(real, imaginary);
+        if (larger == 0.0)
+        {
+            return 0.0;
+        }
+
+        double ratio = smaller / larger;
+        return Math.Sqrt(Math.FusedMultiplyAdd(ratio, ratio, 1.0)) * larger;
     }
 
     private static double Max(double[] values, int start, int end)
