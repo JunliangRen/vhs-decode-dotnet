@@ -811,7 +811,8 @@ public sealed class TbcFieldDecodePipeline
                 renderLineLocations,
                 firstLine: outputFirstLine,
                 fieldNumber: fieldNumber,
-                converterOverride: fieldConverter)
+                converterOverride: fieldConverter,
+                trackPhaseOverride: chromaPhase?.NextChromaRotationIndex)
             : new TbcRenderedField([]);
         double? blackToWhiteRfRatio = ComputeLaserDiscBlackToWhiteRfRatio(
             span.Input,

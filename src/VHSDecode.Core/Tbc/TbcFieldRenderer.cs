@@ -23,9 +23,9 @@ public sealed record TrackPhaseIre0OffsetOptions(
     double Offset0Hz,
     double Offset1Hz)
 {
-    public double GetOffsetHz(int fieldNumber)
+    public double GetOffsetHz(int fieldNumber, int? trackPhaseOverride = null)
     {
-        int phase = TrackPhase ^ (fieldNumber & 1);
+        int phase = (trackPhaseOverride ?? TrackPhase) ^ (fieldNumber & 1);
         return phase == 0 ? Offset0Hz : Offset1Hz;
     }
 }
@@ -95,9 +95,17 @@ public sealed class TbcFieldRenderer
         int firstLine = 0,
         int? lineCount = null,
         int fieldNumber = 0,
-        VideoOutputConverter? converterOverride = null)
+        VideoOutputConverter? converterOverride = null,
+        int? trackPhaseOverride = null)
     {
-        return RenderFieldPayload(videoHz, lineLocations, firstLine, lineCount, fieldNumber, converterOverride).Samples;
+        return RenderFieldPayload(
+            videoHz,
+            lineLocations,
+            firstLine,
+            lineCount,
+            fieldNumber,
+            converterOverride,
+            trackPhaseOverride).Samples;
     }
 
     public double[] ResampleField(
@@ -121,7 +129,8 @@ public sealed class TbcFieldRenderer
         int firstLine = 0,
         int? lineCount = null,
         int fieldNumber = 0,
-        VideoOutputConverter? converterOverride = null)
+        VideoOutputConverter? converterOverride = null,
+        int? trackPhaseOverride = null)
         => RenderFieldPayloadCore(
             videoHz,
             lineLocations,
@@ -129,7 +138,8 @@ public sealed class TbcFieldRenderer
             lineCount,
             fieldNumber,
             converterOverride,
-            converterProvider: null);
+            converterProvider: null,
+            trackPhaseOverride);
 
     internal TbcRenderedField RenderFieldPayloadWithConverterProvider(
         ReadOnlySpan<double> videoHz,
@@ -138,7 +148,8 @@ public sealed class TbcFieldRenderer
         int? lineCount,
         int fieldNumber,
         VideoOutputConverter? converterFallback,
-        Func<VideoOutputConverter?> converterProvider)
+        Func<VideoOutputConverter?> converterProvider,
+        int? trackPhaseOverride = null)
     {
         ArgumentNullException.ThrowIfNull(converterProvider);
         return RenderFieldPayloadCore(
@@ -148,7 +159,8 @@ public sealed class TbcFieldRenderer
             lineCount,
             fieldNumber,
             converterFallback,
-            converterProvider);
+            converterProvider,
+            trackPhaseOverride);
     }
 
     private TbcRenderedField RenderFieldPayloadCore(
@@ -158,7 +170,8 @@ public sealed class TbcFieldRenderer
         int? lineCount,
         int fieldNumber,
         VideoOutputConverter? converterOverride,
-        Func<VideoOutputConverter?>? converterProvider)
+        Func<VideoOutputConverter?>? converterProvider,
+        int? trackPhaseOverride)
     {
         double[] resampled = ResampleField(videoHz, lineLocations, firstLine, lineCount);
         if (YCombLimitHz != 0.0)
@@ -181,7 +194,7 @@ public sealed class TbcFieldRenderer
             ?? converterOverride
             ?? _converter;
         return new TbcRenderedField(
-            BuildFieldConverter(resampled, fieldNumber, activeConverter).ConvertHz(resampled),
+            BuildFieldConverter(resampled, fieldNumber, activeConverter, trackPhaseOverride).ConvertHz(resampled),
             rawPayload,
             activeConverter);
     }
@@ -233,16 +246,25 @@ public sealed class TbcFieldRenderer
         int firstLine = 0,
         int? lineCount = null,
         int fieldNumber = 0,
-        VideoOutputConverter? converterOverride = null)
+        VideoOutputConverter? converterOverride = null,
+        int? trackPhaseOverride = null)
     {
-        TbcRenderedField field = RenderFieldPayload(videoHz, lineLocations, firstLine, lineCount, fieldNumber, converterOverride);
+        TbcRenderedField field = RenderFieldPayload(
+            videoHz,
+            lineLocations,
+            firstLine,
+            lineCount,
+            fieldNumber,
+            converterOverride,
+            trackPhaseOverride);
         return field.OutputPayload?.Bytes ?? TbcOutputWriter.ToLittleEndianBytes(field.Samples);
     }
 
     private VideoOutputConverter BuildFieldConverter(
         double[] resampled,
         int fieldNumber,
-        VideoOutputConverter? converterOverride)
+        VideoOutputConverter? converterOverride,
+        int? trackPhaseOverride = null)
     {
         VideoOutputConverter baseConverter = converterOverride ?? _converter;
         if (Ire0Adjust is null && TrackPhaseIre0Offset is null)
@@ -277,7 +299,7 @@ public sealed class TbcFieldRenderer
 
         if (TrackPhaseIre0Offset is not null)
         {
-            ire0 += TrackPhaseIre0Offset.GetOffsetHz(fieldNumber);
+            ire0 += TrackPhaseIre0Offset.GetOffsetHz(fieldNumber, trackPhaseOverride);
         }
 
         return new VideoOutputConverter(

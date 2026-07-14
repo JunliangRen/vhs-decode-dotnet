@@ -8638,6 +8638,7 @@ public void TbcFieldRendererAppliesIre0Adjust()
         "BuildFieldConverter",
         precisionField,
         0,
+        null,
         null)!;
     AssertEqual(0x49700083, BitConverter.SingleToInt32Bits((float)measuredConverter.Ire0));
 
@@ -8666,6 +8667,7 @@ public void TbcFieldRendererAppliesIre0Adjust()
         "BuildFieldConverter",
         hsyncPrecisionField,
         0,
+        null,
         null)!;
     AssertEqual(
         (double)(float)(((float)hsyncPrecisionConverter.Ire0 - (float)13.37) / 40.0f),
@@ -8706,6 +8708,8 @@ public void TbcFieldRendererAppliesTrackPhaseOffsets()
     AssertEqual((ushort)50, phase0.RenderField(video, lineLocations, fieldNumber: 1)[0]);
     AssertEqual((ushort)50, phase1.RenderField(video, lineLocations, fieldNumber: 0)[0]);
     AssertEqual((ushort)48, phase1.RenderField(video, lineLocations, fieldNumber: 1)[0]);
+    AssertEqual((ushort)50, phase0.RenderField(video, lineLocations, fieldNumber: 0, trackPhaseOverride: 1)[0]);
+    AssertEqual((ushort)48, phase1.RenderField(video, lineLocations, fieldNumber: 0, trackPhaseOverride: 0)[0]);
 }
 
 [Fact(DisplayName = "TBC field renderer applies CVBS clamp AGC")]
@@ -10650,6 +10654,103 @@ public void TbcFieldDecodePipelineEmitsChromaSamples()
     int line16 = 16 * spec.OutputLineLength;
     AssertEqual(32746, decoded.ChromaSamples[line16]);
     AssertEqual(32746, decoded.ChromaSamples[line16 + 2]);
+}
+
+[Theory(DisplayName = "TBC field decode pipeline applies analyzed VHS track phase to luma")]
+[InlineData(0, 0, 456, 0, 656)]
+[InlineData(1, 0, 456, 0, 656)]
+public void TbcFieldDecodePipelineAppliesAnalyzedVhsTrackPhaseToLuma(
+    int initialTrackPhase,
+    int firstNextTrackPhase,
+    ushort firstExpectedSample,
+    int secondNextTrackPhase,
+    ushort secondExpectedSample)
+{
+    var spec = new TbcFrameSpec(
+        "PAL",
+        OutputLineLength: 20,
+        OutputLineCount: 40,
+        OutputSampleRateHz: 4_000_000.0,
+        ColourBurstStart: 5,
+        ColourBurstEnd: 10,
+        ActiveVideoStart: null,
+        ActiveVideoEnd: null);
+    var converter = new VideoOutputConverter(
+        ire0: 0.0,
+        hzIre: 1.0,
+        outputZero: 256,
+        vsyncIre: -40.0,
+        outputScale: 10.0);
+    var analyzer = new SyncAnalyzer(
+        sampleRateHz: 1_000_000.0,
+        linePeriodUs: 100.0,
+        hsyncPulseUs: 10.0,
+        equalizingPulseUs: 5.0,
+        vsyncPulseUs: 20.0,
+        numPulses: 5);
+    var chromaOptions = new VhsChromaFieldOptions(
+        ColorSystem: "PAL",
+        OutputLineLength: spec.OutputLineLength,
+        OutputLineCount: spec.OutputLineCount,
+        OutputSampleRateHz: spec.OutputSampleRateHz,
+        FscMHz: 1.0,
+        ColorUnderCarrierHz: 0.0,
+        BurstStart: 5,
+        BurstEnd: 10,
+        BurstAbsRef: 10.0,
+        ChromaRotation: [0, 3],
+        DisableComb: true,
+        DisablePhaseCorrection: true,
+        EnableColorKiller: false,
+        DetectChromaTrackPhase: false)
+    {
+        DisableBurstHsync = true,
+        InitialChromaRotationIndex = initialTrackPhase
+    };
+    var renderer = new TbcFieldRenderer(
+        spec,
+        converter,
+        trackPhaseIre0Offset: new TrackPhaseIre0OffsetOptions(
+            initialTrackPhase,
+            Offset0Hz: 20.0,
+            Offset1Hz: 0.0));
+    var pipeline = new TbcFieldDecodePipeline(
+        analyzer,
+        renderer,
+        converter,
+        "PAL",
+        TbcDropoutDetectionOptions.Disabled,
+        chromaFieldOptions: chromaOptions,
+        decodeType: "vhs");
+
+    double[] video = Enumerable.Repeat(0.0, 6_500).ToArray();
+    PaintPulse(video, 10, 10, -40.0);
+    PaintPulse(video, 110, 10, -40.0);
+    PaintTestVBlank(video, line0: 210, isFirstField: true, system: "PAL");
+    for (int line = 11; line <= 60; line++)
+    {
+        PaintPulse(video, 210 + (line * 100), 10, -40.0);
+    }
+
+    double[] chroma = BuildRawChromaCarrier(
+        video.Length,
+        firstLineStart: 210,
+        lineLength: 100,
+        lineCount: 61,
+        outputLineLength: spec.OutputLineLength,
+        fscMHz: chromaOptions.FscMHz,
+        outputSampleRateHz: spec.OutputSampleRateHz);
+    var firstSpan = new RfDecodedSpan(0, video, video, video, VideoLowPass: video, Chroma: chroma);
+    var secondSpan = firstSpan with { StartSample = video.Length };
+    int stableLumaSample = (16 * spec.OutputLineLength) + 5;
+
+    TbcDecodedField first = pipeline.Decode(firstSpan, fieldNumber: 0);
+    AssertEqual<int?>(firstNextTrackPhase, pipeline.CaptureState().ChromaRotationIndex);
+    AssertEqual(firstExpectedSample, first.Samples[stableLumaSample]);
+
+    TbcDecodedField second = pipeline.Decode(secondSpan, fieldNumber: 1);
+    AssertEqual<int?>(secondNextTrackPhase, pipeline.CaptureState().ChromaRotationIndex);
+    AssertEqual(secondExpectedSample, second.Samples[stableLumaSample]);
 }
 
 static double[] BuildOutputChromaCarrier(int lineLength, int lineCount, double fscMHz, double outputSampleRateHz)

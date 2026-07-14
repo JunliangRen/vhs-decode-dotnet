@@ -344,8 +344,9 @@ Implemented:
   black/blanking from the middle-third backporch medians and optionally
   rescaling Hz/IRE from the hsync-to-backporch difference
 - VHS `--track_phase` field-output IRE0 compensation, applying
-  `track_ire0_offset[track_phase ^ field_number]` during Hz-to-TBC conversion
-  and matching upstream SECAM/MESECAM ignore behavior plus 0/1 validation
+  `track_ire0_offset[next_track_phase ^ field_number]` after burst phase lock,
+  falling back to the CLI-seeded phase when chroma analysis is skipped, and
+  matching upstream SECAM/MESECAM ignore behavior plus 0/1 validation
 - VHS chroma option model for colour-under write/no-write decisions,
   `--skip_chroma`, `--chroma_AFC`, Betamax PAL CAFC auto-enable,
   SECAM/MESECAM comb disabling, Video8/Hi8 chroma de-emphasis, chroma audio
@@ -410,8 +411,9 @@ Implemented:
   NTSC fields apply the upstream post-burst amplitude doubling before
   heterodyne upconversion
 - VHS `--track_phase 0|1` now seeds the first field's chroma rotation index as
-  well as the track-dependent luma `ire0` adjustment, with subsequent fields
-  continuing from the detected/alternated v0.4.0 rotation state
+  well as the track-dependent luma `ire0` adjustment, with each rendered field
+  consuming the same detected/alternated next-track index that v0.4.0 stores
+  before Hz-to-TBC conversion
 - VHS `--export_raw_tbc` raw TBC path, switching the TBC video source to
   demodulated RF, writing resampled fields as little-endian float32 samples,
   and emitting raw-Hz JSON video level metadata
@@ -1000,7 +1002,7 @@ dotnet test VHSDecodeDotNet.slnx --no-build
 ```
 
 The current formal solution build completes with zero warnings and errors, and
-the xUnit v3 project exposes 262 independently discoverable compatibility tests
+the xUnit v3 project exposes 264 independently discoverable compatibility tests
 to `dotnet test` and Visual Studio Test Explorer. On the
 same Windows machine and fixtures, Release wall-clock measurements for one
 frame were 2.346 s versus 7.193 s for NTSC VHS and 1.651 s versus 5.865 s for
