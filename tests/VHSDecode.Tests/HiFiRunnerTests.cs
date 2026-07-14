@@ -121,6 +121,42 @@ public sealed class HiFiRunnerTests
         }
     }
 
+    [Fact(DisplayName = "HiFi bias guess rejects stdin after its Release 4.0 heading")]
+    public void HiFiBiasGuessRejectsStdinAfterRelease40Heading()
+    {
+        string directory = CreateTempDirectory();
+        try
+        {
+            string outputPath = Path.Combine(directory, "stdin-bias.wav");
+            ParsedCommand command = ParseHiFi(
+                ["--bias_guess", "--raw_format", "s16le", "-", outputPath]);
+            var output = new StringWriter();
+            var error = new StringWriter();
+
+            int exitCode = new DecodeRunner().Run(
+                command,
+                output,
+                error,
+                TestContext.Current.CancellationToken);
+
+            Assert.Equal(1, exitCode);
+            Assert.Equal(
+                Lines(
+                    "Initializing ...",
+                    "NTSC VHS format selected, Audio mode is s",
+                    "Measuring carrier bias ... "),
+                output.ToString());
+            Assert.Equal(
+                "`--raw_format <format>` is required for stdin input" + Environment.NewLine,
+                error.ToString());
+            Assert.False(File.Exists(outputPath));
+        }
+        finally
+        {
+            Directory.Delete(directory, recursive: true);
+        }
+    }
+
     [Fact(DisplayName = "HiFi block framer matches Release 4.0 first middle and final overlap")]
     public void HiFiBlockFramerMatchesRelease40FirstMiddleAndFinalOverlap()
     {
@@ -469,6 +505,49 @@ public sealed class HiFiRunnerTests
         Assert.InRange(estimate.RightCarrierHz, 2_679_688.2, 2_679_689.5);
     }
 
+    [Fact(DisplayName = "HiFi bias input ignores raw format overrides like Release 4.0")]
+    public void HiFiBiasInputIgnoresRawFormatOverridesLikeRelease40()
+    {
+        string directory = CreateTempDirectory();
+        try
+        {
+            string inputPath = Path.Combine(directory, "capture.u8");
+            string outputPath = Path.Combine(directory, "bias.wav");
+            File.WriteAllBytes(inputPath, [0]);
+            HiFiDecodeOptions? openedOptions = null;
+            var runner = new HiFiDecodeRunner(
+                new HiFiStreamingDecoder(),
+                (activeOptions, _) =>
+                {
+                    openedOptions = activeOptions;
+                    throw new IOException("stop after observing bias input options");
+                },
+                activeOptions => new HiFiOutputWriter(activeOptions));
+            var output = new StringWriter();
+
+            IOException exception = Assert.Throws<IOException>(() => runner.Run(
+                ParseHiFi(
+                    ["--bias_guess", "--raw_format", "s16le", inputPath, outputPath]),
+                output,
+                TextWriter.Null,
+                TestContext.Current.CancellationToken));
+
+            Assert.Equal("stop after observing bias input options", exception.Message);
+            Assert.NotNull(openedOptions);
+            Assert.Equal(inputPath, openedOptions.InputFile);
+            Assert.Null(openedOptions.InputFormatOverride);
+            Assert.EndsWith(
+                "Measuring carrier bias ... " + Environment.NewLine,
+                output.ToString(),
+                StringComparison.Ordinal);
+            Assert.False(File.Exists(outputPath));
+        }
+        finally
+        {
+            Directory.Delete(directory, recursive: true);
+        }
+    }
+
     [Fact(DisplayName = "HiFi preview conversion matches Release 4.0 int16 wrapping")]
     public void HiFiPreviewConversionMatchesRelease40Int16Wrapping()
     {
@@ -810,6 +889,85 @@ public sealed class HiFiRunnerTests
             Assert.Throws<ArgumentException>(() => HiFiInputReader.Open(
                 DefaultOptions() with { InputFile = "-", InputFormatOverride = null },
                 TextWriter.Null));
+        }
+        finally
+        {
+            Directory.Delete(directory, recursive: true);
+        }
+    }
+
+    [Fact(DisplayName = "HiFi FLAC STREAMINFO exposes the Release 4.0 frame total")]
+    public void HiFiFlacStreamInfoExposesRelease40FrameTotal()
+    {
+        string directory = CreateTempDirectory();
+        try
+        {
+            const long ExpectedSamples = 0x0ABCDEF12;
+            string path = Path.Combine(directory, "stream-info.flac");
+            var bytes = new byte[42];
+            "fLaC"u8.CopyTo(bytes);
+            bytes[4] = 0x80;
+            bytes[7] = 34;
+            ulong packed = ((ulong)48_000 << 44)
+                | ((ulong)(2 - 1) << 41)
+                | ((ulong)(24 - 1) << 36)
+                | ExpectedSamples;
+            BinaryPrimitives.WriteUInt64BigEndian(bytes.AsSpan(18, 8), packed);
+            File.WriteAllBytes(path, bytes);
+
+            Assert.Equal(ExpectedSamples, HiFiInputReader.TryReadFlacTotalSamples(path));
+            Assert.Null(HiFiInputReader.TryReadFlacTotalSamples(Path.Combine(directory, "missing.flac")));
+        }
+        finally
+        {
+            Directory.Delete(directory, recursive: true);
+        }
+    }
+
+    [Fact(DisplayName = "HiFi short 24-bit FLAC input matches Release 4.0 libsndfile samples")]
+    public void HiFiShort24BitFlacInputMatchesRelease40LibsndfileSamples()
+    {
+        Assert.SkipUnless(CanRunFfmpeg(), "ffmpeg is not available on PATH.");
+        string directory = CreateTempDirectory();
+        try
+        {
+            const int SampleCount = 10_000;
+            string outputPath = Path.Combine(directory, "source.flac");
+            HiFiDecodeOptions writeOptions = DefaultOptions(outputPath) with
+            {
+                AudioMode = HiFiConstants.AudioModeDualMono
+            };
+            var expected = new float[SampleCount];
+            for (int i = 0; i < expected.Length; i++)
+            {
+                short sample = unchecked((short)(i * 7_919));
+                expected[i] = sample / 32_768.0f;
+            }
+
+            using (var writer = new HiFiOutputWriter(writeOptions))
+            {
+                writer.Write(new HiFiPostProcessedBlock(
+                    expected,
+                    expected,
+                    [],
+                    1.0f,
+                    1.0f));
+                writer.Complete(1.0f, 1.0f, TextWriter.Null);
+            }
+
+            string inputPath = HiFiOutputWriter.GetDualMonoFilename(
+                outputPath,
+                "channel_1");
+            using IHiFiSampleReader reader = HiFiInputReader.Open(
+                DefaultOptions() with { InputFile = inputPath },
+                TextWriter.Null);
+            var actual = new float[SampleCount];
+
+            int read = reader.Read(actual, TestContext.Current.CancellationToken);
+
+            Assert.Equal(SampleCount, reader.TotalSamples);
+            Assert.Equal(SampleCount, read);
+            Assert.Equal(expected, actual);
         }
         finally
         {

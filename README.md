@@ -52,6 +52,14 @@ Implemented:
   dual-mono naming and padding, WAV PCM16 or FLAC PCM24 output, normalization,
   cancellation/error finalization, Release 4.0's per-block progress bar and
   five-line timing/buffer reports, and facade/standalone command dispatch
+- HiFi bias pre-reading preserves Release 4.0's omission of `--raw_format`:
+  raw files are measured according to their extension, while stdin prints the
+  measurement heading and then raises the same required-format error even when
+  an override was supplied
+- HiFi FLAC input uses buffered FFmpeg decoding as the bit-exact stand-in for
+  Release 4.0's libsndfile path, avoiding `nobuffer` short-file truncation;
+  10,000 deterministic 24-bit samples match after int16 normalization and FLAC
+  `STREAMINFO` supplies the exact progress total
 - HiFi `--gnuradio` now exposes the Release 4.0 REP endpoint on port 5555 and
   returns the summed filtered channels as native float32 after each client
   request; the streaming decoder forces the same single-worker ordering for
@@ -1084,7 +1092,7 @@ dotnet test VHSDecodeDotNet.slnx --no-build
 ```
 
 The current formal solution build completes with zero warnings and errors, and
-the xUnit v3 project exposes 436 independently discoverable compatibility tests
+the xUnit v3 project exposes 440 independently discoverable compatibility tests
 to `dotnet test` and Visual Studio Test Explorer. On the
 same Windows machine and fixtures, Release wall-clock measurements for one
 frame were 2.346 s versus 7.193 s for NTSC VHS and 1.651 s versus 5.865 s for

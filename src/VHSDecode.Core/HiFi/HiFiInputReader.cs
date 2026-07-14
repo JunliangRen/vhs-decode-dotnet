@@ -1,4 +1,5 @@
 using System.Buffers;
+using System.Buffers.Binary;
 using System.ComponentModel;
 using System.Diagnostics;
 using System.Text;
@@ -106,7 +107,25 @@ internal static class HiFiInputReader
                 + "LDF file format may not decode correctly");
         }
 
-        if (extension is not ("flac" or "ldf"))
+        if (extension == "flac")
+        {
+            try
+            {
+                return OpenFfmpeg(
+                    inputPath,
+                    overrideFormat ?? HiFiRawSampleFormat.S16Le,
+                    useNoBuffer: false,
+                    TryReadFlacTotalSamples(inputPath));
+            }
+            catch (Win32Exception ex)
+            {
+                throw new NotSupportedException(
+                    "ffmpeg is not installed (or not in PATH), cannot decode this input format.",
+                    ex);
+            }
+        }
+
+        if (extension != "ldf")
         {
             output.WriteLine("WARN: Unknown file format.");
             output.WriteLine("WARN: Attempting to decode with ffmpeg");
@@ -114,7 +133,11 @@ internal static class HiFiInputReader
 
         try
         {
-            return OpenFfmpeg(inputPath, overrideFormat ?? HiFiRawSampleFormat.S16Le);
+            return OpenFfmpeg(
+                inputPath,
+                overrideFormat ?? HiFiRawSampleFormat.S16Le,
+                useNoBuffer: true,
+                totalSamples: null);
         }
         catch (Win32Exception) when (extension == "wav")
         {
@@ -137,6 +160,45 @@ internal static class HiFiInputReader
             .Replace("32", "32le", StringComparison.Ordinal);
     }
 
+    internal static long? TryReadFlacTotalSamples(string path)
+    {
+        try
+        {
+            using var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read);
+            Span<byte> signature = stackalloc byte[4];
+            stream.ReadExactly(signature);
+            if (!signature.SequenceEqual("fLaC"u8))
+            {
+                return null;
+            }
+
+            bool lastBlock = false;
+            Span<byte> header = stackalloc byte[4];
+            while (!lastBlock)
+            {
+                stream.ReadExactly(header);
+                lastBlock = (header[0] & 0x80) != 0;
+                int blockType = header[0] & 0x7f;
+                int blockLength = (header[1] << 16) | (header[2] << 8) | header[3];
+                if (blockType == 0 && blockLength >= 18)
+                {
+                    Span<byte> streamInfo = stackalloc byte[18];
+                    stream.ReadExactly(streamInfo);
+                    ulong packed = BinaryPrimitives.ReadUInt64BigEndian(streamInfo[10..]);
+                    long totalSamples = checked((long)(packed & 0x0000000FFFFFFFFFUL));
+                    return totalSamples == 0 ? null : totalSamples;
+                }
+
+                stream.Seek(blockLength, SeekOrigin.Current);
+            }
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+        }
+
+        return null;
+    }
+
     private static IHiFiSampleReader OpenWave(string path, HiFiRawSampleFormat format)
     {
         var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read);
@@ -156,26 +218,40 @@ internal static class HiFiInputReader
         }
     }
 
-    private static IHiFiSampleReader OpenFfmpeg(string path, HiFiRawSampleFormat format)
-        => OpenProcess(
-            "ffmpeg",
-            [
-                "-hide_banner",
-                "-loglevel", "error",
-                "-ignore_unknown",
-                "-fflags", "nobuffer",
-                "-i", path,
-                "-f", "s16le",
-                "-acodec", "pcm_s16le",
-                "-avoid_negative_ts", "disabled",
-                "-"
-            ],
-            format);
+    private static IHiFiSampleReader OpenFfmpeg(
+        string path,
+        HiFiRawSampleFormat format,
+        bool useNoBuffer,
+        long? totalSamples)
+    {
+        var arguments = new List<string>
+        {
+            "-hide_banner",
+            "-loglevel", "error",
+            "-ignore_unknown"
+        };
+        if (useNoBuffer)
+        {
+            arguments.Add("-fflags");
+            arguments.Add("nobuffer");
+        }
+
+        arguments.AddRange(
+        [
+            "-i", path,
+            "-f", "s16le",
+            "-acodec", "pcm_s16le",
+            "-avoid_negative_ts", "disabled",
+            "-"
+        ]);
+        return OpenProcess("ffmpeg", arguments, format, totalSamples);
+    }
 
     private static IHiFiSampleReader OpenProcess(
         string fileName,
         IReadOnlyList<string> arguments,
-        HiFiRawSampleFormat format)
+        HiFiRawSampleFormat format,
+        long? totalSamples = null)
     {
         var startInfo = new ProcessStartInfo(fileName)
         {
@@ -196,7 +272,7 @@ internal static class HiFiInputReader
             throw new InvalidOperationException($"Failed to start {fileName}.");
         }
 
-        return new ProcessSampleReader(process, format);
+        return new ProcessSampleReader(process, format, totalSamples);
     }
 
     private static bool CommandExists(string fileName, TextWriter output)
@@ -240,7 +316,10 @@ internal static class HiFiInputReader
         private readonly Task<string> _stderrTask;
         private bool _disposed;
 
-        public ProcessSampleReader(Process process, HiFiRawSampleFormat format)
+        public ProcessSampleReader(
+            Process process,
+            HiFiRawSampleFormat format,
+            long? totalSamples)
         {
             _process = process;
             _reader = new NormalizedStreamReader(
@@ -248,9 +327,10 @@ internal static class HiFiInputReader
                 format,
                 ownsStream: false);
             _stderrTask = process.StandardError.ReadToEndAsync();
+            TotalSamples = totalSamples;
         }
 
-        public long? TotalSamples => null;
+        public long? TotalSamples { get; }
 
         public int Read(Span<float> destination, CancellationToken cancellationToken = default)
         {

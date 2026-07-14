@@ -12,20 +12,21 @@ internal static class HiFiBiasEstimator
 
     public static HiFiDecodeOptions Measure(
         HiFiDecodeOptions options,
-        IHiFiSampleReader reader,
+        Func<IHiFiSampleReader> readerFactory,
         TextWriter output,
         CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(options);
-        ArgumentNullException.ThrowIfNull(reader);
+        ArgumentNullException.ThrowIfNull(readerFactory);
         ArgumentNullException.ThrowIfNull(output);
+        output.WriteLine("Measuring carrier bias ... ");
         if (options.InputFile == "-")
         {
-            throw new NotSupportedException(
-                "HiFi --bias_guess cannot rewind stdin for the subsequent decode.");
+            throw new ArgumentException(
+                "`--raw_format <format>` is required for stdin input");
         }
 
-        output.WriteLine("Measuring carrier bias ... ");
+        using IHiFiSampleReader reader = readerFactory();
         HiFiDecodePlan originalPlan = HiFiDecodePlan.FromOptions(options);
         int blockLength = originalPlan.InputRateHz;
         var blocks = new List<float[]>(MaximumBlocks);

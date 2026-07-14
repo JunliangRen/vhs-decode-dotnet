@@ -90,10 +90,10 @@ internal sealed class HiFiDecodeRunner : IHiFiCommandRunner
         output.WriteLine($"{system} {format} format selected, Audio mode is {options.AudioMode}");
         if (options.BiasGuess)
         {
-            using IHiFiSampleReader biasInput = _inputFactory(options, output);
+            HiFiDecodeOptions biasInputOptions = options with { InputFormatOverride = null };
             _ = HiFiBiasEstimator.Measure(
                 options,
-                biasInput,
+                () => _inputFactory(biasInputOptions, output),
                 output,
                 cancellationToken);
             // Release 4.0 workers build their AFE/FM path before receiving the measured standard.
