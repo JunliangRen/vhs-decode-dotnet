@@ -208,6 +208,48 @@ public sealed class HiFiCompatibilityTests
         Assert.Equal(371_506.25, actual.RightNotchWidthHz);
     }
 
+    [Theory(DisplayName = "HiFi AFE Chebyshev-II filters match v0.4.0 float bits")]
+    [InlineData(40_000_000, 1_300_000.0, 371_506.25, "013DD3F9C36B5EB32E8D30492C8C3399D07CCA80DA65DBECE4C6E9A54A785D59", "68E787344B944B50302EDCB8DE13C51915E21D6686D0174146BE6BBD115344B5")]
+    [InlineData(40_000_000, 1_700_000.0, 371_506.25, "2724B050D8C33E44F8C957A007F2DF214FF169AFC8D50872765100C9E6419541", "47B6C958B4DC3775C784C0ED42E66B23C66906463A19FE087A2399781C5F2672")]
+    [InlineData(40_000_000, 1_400_000.0, 371_506.25, "BC9934C999496F968091F375E493EEE44FEFBA48243A1E3EEB2353253C338B3D", "DFEBB44A9F59676A3AE97F4680286A41BDC41AD347838DDCDF16CDA1DD069DBA")]
+    [InlineData(40_000_000, 1_800_000.0, 371_506.25, "F259E8F9866E5F57348EFB68ABBEE77DDF47143619CFD07C4998425759A3D5F4", "AFD5CED3CDCD97A1A2B27E215B84AEE20A8468F466F5E9AD33BEFAD793C8E7E3")]
+    [InlineData(40_000_000, 1_500_000.0, 240_000.0, "D05789CF147962A83F9270C797754C7AEBC291E5BD05A3E5494ABA99D28BC435", "59F30845739FDF2F5670802A3D8B569E9995D2C9AB30E51463FEF71D8BA60AC7")]
+    [InlineData(40_000_000, 1_700_000.0, 75_000.0, "65B44189091CEC193669D5994E1EB9048A8D946B37500BA51D2207AC7F2D657E", "E280782EEE0B87ED122464196FDE2C88F4F9248E5FDE742AA2DEB7E7C269575D")]
+    [InlineData(8_388_608, 1_300_000.0, 371_506.25, "63AF471BB1FD22CCCC6CA1D7A59DF622B34A1B34A33427718F06525BCDEE9603", "CBE5AE6280D37D3B6BC706CC138C0B2964C8DCE9989158325ACCCD77BC822685")]
+    [InlineData(8_388_608, 1_700_000.0, 371_506.25, "A3E5376A2BC2CE94A5365B1FB3DDDF78016BD59055BC65BCDD7B15A88180E9DE", "57A2896302EF6D42CE5EEDF7A7991B1F31311BAB6DCB00CE780691363ED8B771")]
+    [InlineData(8_388_608, 1_400_000.0, 371_506.25, "0A880586ABF4DBDCFF03512BDD937801ACEE6BF1E5E99E5C7CB8D6B66B52EEDE", "AB972B13E48CAE6DDF2DBD2199B12AFBB57D81E64DEFD03DF657A837B827C863")]
+    [InlineData(8_388_608, 1_800_000.0, 371_506.25, "847073D192D1B141B848CDC200FA2807138A6F14A1A2B3D9632585FA349A830D", "15010F0BCBFF79CCA74B462D9981D74A9E25A6943BF05CA1424FC577F9BDCC14")]
+    [InlineData(8_388_608, 1_500_000.0, 240_000.0, "BAF9FA4890B48EC2D60AF8CBB5D9DD7622EB22929DF1130BB191B3B30280DBEB", "B31DCA42595F44CDDA94C273D9179CCA3263BAFF7DEB736E04A0D3D8D88A6F27")]
+    [InlineData(8_388_608, 1_700_000.0, 75_000.0, "A0B14E389944B65F560ABB3A662A9D4BAA3B6C9F1E6D5818951160629652AC57", "06481F9EA0EEB4CF5334337E147417BB6B3FAA019DD8345307CF34E170C8436D")]
+    [InlineData(40_000_000, 1_456_789.0, 371_506.25, "EDD5304DE99A4A9FEB87EF3B9BD119387B5D2B001E0A4F2BDDA6EC6E71ACC61D", "E8DBEC146CBE01A90353961217E6B717A03B5D53CF4EED51B3A18C6A1AE6DD2B")]
+    public void HiFiAfeChebyshevTypeIIFiltersMatchV040FloatBits(
+        int sampleRateHz,
+        double carrierHz,
+        double widthHz,
+        string expectedSosHash,
+        string expectedOutputHash)
+    {
+        var filter = new HiFiAfeFilter(sampleRateHz, carrierHz, widthHz);
+        SosSection[] sections = filter.Sections.ToArray();
+        float[] flattened = sections
+            .SelectMany(section => new[]
+            {
+                (float)section.B0,
+                (float)section.B1,
+                (float)section.B2,
+                (float)section.A0,
+                (float)section.A1,
+                (float)section.A2
+            })
+            .ToArray();
+        float[] input = CreateDeterministicFloatInput(2048);
+        float[] output = filter.Apply(input);
+
+        Assert.Equal(22, sections.Length);
+        Assert.Equal(expectedSosHash, BinarySha256(flattened));
+        Assert.Equal(expectedOutputHash, BinarySha256(output));
+    }
+
     [Fact(DisplayName = "HiFi quadrature block plan matches v0.4.0")]
     public void HiFiQuadratureBlockPlanMatchesV040()
     {
@@ -595,6 +637,88 @@ public sealed class HiFiCompatibilityTests
         Assert.Equal(input, finalOutput);
         Assert.NotSame(input, ifOutput);
         Assert.NotSame(input, finalOutput);
+    }
+
+    [Theory(DisplayName = "HiFi AFE/FM/audio block chain matches v0.4.0 float bits")]
+    [InlineData("quadrature", "BE838838", "BE09159B", "7EFD9C87BF46CB6A144BF6477FF7734D89CBA36511A1F9680FA016D2C49A7FCD", "B9DD71B88D94E838F68AC47CD81E6683ABBC1B4EA813EC97170EDC2CA70C571C")]
+    [InlineData("hilbert", "BE66626D", "BDC46843", "50C1401C2DECE67C50791412FAA8FE274C1147B792A44C509DB7E0B751B149E9", "F125DA33072028149CED2BB4F2F0DE668C6348F870ADB34AF8DC5DEDF9E55B6D")]
+    public void HiFiAfeFmAudioBlockChainMatchesV040FloatBits(
+        string demodType,
+        string expectedLeftDcBits,
+        string expectedRightDcBits,
+        string expectedLeftHash,
+        string expectedRightHash)
+    {
+        HiFiDecodeOptions options = DefaultOptions() with
+        {
+            DemodType = demodType,
+            ResamplerQuality = "high",
+            AudioMode = HiFiConstants.AudioModeStereo
+        };
+        using var decoder = new HiFiBlockDecoder(options);
+        float[] input = CreateDeterministicFloatInput(524_288);
+
+        HiFiDemodulatedBlock block = decoder.Decode(input);
+
+        Assert.NotNull(block.Left);
+        Assert.NotNull(block.Right);
+        Assert.Equal(2517, block.Left.Length);
+        Assert.Equal(2517, block.Right.Length);
+        Assert.Equal(expectedLeftDcBits, BitConverter.SingleToUInt32Bits(block.LeftDc).ToString("X8"));
+        Assert.Equal(expectedRightDcBits, BitConverter.SingleToUInt32Bits(block.RightDc).ToString("X8"));
+        Assert.Equal(expectedLeftHash, BinarySha256(block.Left));
+        Assert.Equal(expectedRightHash, BinarySha256(block.Right));
+    }
+
+    [Theory(DisplayName = "HiFi Numba fast mean reduction matches v0.4.0 float bits")]
+    [InlineData(1, "BDABCD90")]
+    [InlineData(2, "3E84E70A")]
+    [InlineData(3, "BD7CB00B")]
+    [InlineData(4, "BE18A7D8")]
+    [InlineData(5, "BDE4AC60")]
+    [InlineData(7, "3E184DD0")]
+    [InlineData(8, "3E78149B")]
+    [InlineData(15, "3D2D8BA0")]
+    [InlineData(31, "3DA15834")]
+    [InlineData(32, "3DCA08BA")]
+    [InlineData(33, "3DCF74F6")]
+    [InlineData(35, "3D97072A")]
+    [InlineData(36, "3D8B1850")]
+    [InlineData(63, "BAF7E410")]
+    [InlineData(64, "BC64B85E")]
+    [InlineData(65, "BABBDC10")]
+    [InlineData(517, "BD2BAEF9")]
+    [InlineData(94_000, "3B33FA9D")]
+    public void HiFiNumbaFastMeanReductionMatchesV040FloatBits(
+        int length,
+        string expectedBits)
+    {
+        float actual = HiFiAudioProcessing.NumbaFastMean(CreateDeterministicFloatInput(length));
+
+        Assert.Equal(expectedBits, BitConverter.SingleToUInt32Bits(actual).ToString("X8"));
+    }
+
+    [Theory(DisplayName = "HiFi mono block channel routing matches v0.4.0")]
+    [InlineData("l", true, false)]
+    [InlineData("r", false, true)]
+    public void HiFiMonoBlockChannelRoutingMatchesV040(
+        string audioMode,
+        bool expectsLeft,
+        bool expectsRight)
+    {
+        HiFiDecodeOptions options = DefaultOptions() with
+        {
+            AudioMode = audioMode,
+            ResamplerQuality = "high"
+        };
+        using var decoder = new HiFiBlockDecoder(options);
+
+        HiFiDemodulatedBlock block = decoder.Decode(CreateDeterministicFloatInput(524_288));
+
+        Assert.Equal(expectsLeft, block.Left is not null);
+        Assert.Equal(expectsRight, block.Right is not null);
+        Assert.Equal(expectsLeft ? "BE838838" : "00000000", BitConverter.SingleToUInt32Bits(block.LeftDc).ToString("X8"));
+        Assert.Equal(expectsRight ? "BE09159B" : "00000000", BitConverter.SingleToUInt32Bits(block.RightDc).ToString("X8"));
     }
 
     private static HiFiDecodeOptions DefaultOptions()

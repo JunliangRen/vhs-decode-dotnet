@@ -142,6 +142,32 @@ public static class SosFilter
             return [];
         }
 
+        var values = new float[input.Length];
+        for (int i = 0; i < values.Length; i++)
+        {
+            values[i] = (float)input[i];
+        }
+
+        float[] filtered = ApplyForwardBackwardFloat32(sections, values, padLength);
+        var output = new double[filtered.Length];
+        for (int i = 0; i < output.Length; i++)
+        {
+            output[i] = filtered[i];
+        }
+
+        return output;
+    }
+
+    public static float[] ApplyForwardBackwardFloat32(
+        IReadOnlyList<SosSection> sections,
+        ReadOnlySpan<float> input,
+        int? padLength = null)
+    {
+        if (input.IsEmpty)
+        {
+            return [];
+        }
+
         int edge = padLength ?? DefaultPadLength(sections);
         if (edge < 0)
         {
@@ -161,13 +187,7 @@ public static class SosFilter
                 (float)section.A2);
         }
 
-        var values = new float[input.Length];
-        for (int i = 0; i < values.Length; i++)
-        {
-            values[i] = (float)input[i];
-        }
-
-        float[] extended = edge == 0 ? values : OddExtensionFloat32(values, edge);
+        float[] extended = edge == 0 ? input.ToArray() : OddExtensionFloat32(input, edge);
         float[,] zi = SteadyStateInitialConditionsFloat32(floatSections);
         float[,] firstZi = ScaleInitialConditionsFloat32(zi, extended[0]);
         float[] forward = ApplyForwardFloat32(floatSections, extended, firstZi);
@@ -177,13 +197,7 @@ public static class SosFilter
         Array.Reverse(backward);
 
         int outputStart = edge == 0 ? 0 : edge;
-        var output = new double[input.Length];
-        for (int i = 0; i < output.Length; i++)
-        {
-            output[i] = backward[outputStart + i];
-        }
-
-        return output;
+        return backward.AsSpan(outputStart, input.Length).ToArray();
     }
 
     public static int DefaultPadLength(IReadOnlyList<SosSection> sections)

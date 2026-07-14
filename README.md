@@ -63,6 +63,15 @@ Implemented:
   `Fraction(float)` rates, `last=True` flushing, per-block `clear()`, separate
   stereo state, and unchanged-rate bypasses; 11 vectors spanning every real
   HiFi rate stage match v0.4.0 float32 output byte for byte
+- HiFi AFE execution reproduces the 22nd-order, 220 dB Chebyshev-II
+  forward/backward band-pass path at the actual Rust float32 coefficient
+  boundary for every VHS/8mm carrier-width pair, both 40 MHz quadrature and
+  8,388,608 Hz Hilbert IF rates, and arbitrary carrier overrides
+- the pre-DOC HiFi block decoder now connects exact IF resampling, independent
+  left/right AFE filters, quadrature or Hilbert FM, 192 kHz resampling, and
+  Numba-fastmath-compatible DC cancellation/trimming; two deterministic
+  524,288-sample stereo chains and mono channel routing match v0.4.0 output
+  bits, including reduction boundaries from 1 through 94,000 samples
 - upstream `-h` / `--help` handling for all three decode commands, including
   zero-exit help before positional argument validation
 - complete v0.4.0 argparse help snapshots for the three standalone and three
@@ -1007,9 +1016,7 @@ Not complete yet:
   pairs, and 1,428 float32-exact channels across all 357 valid tape
   system/format/speed cases
 - remaining container-specific resampling edge cases
-- remaining HiFi AFE filter execution, integration of the verified FM and
-  resampling kernels into the block decoder, dropout compensation,
-  head-switch interpolation,
+- remaining HiFi dropout compensation, head-switch interpolation,
   expander/deemphasis/noise reduction, streaming output, preview/GNU Radio
   integration, and final command dispatch
 - remaining real-capture PAL LD and AC3 end-to-end fixtures, external AC3
@@ -1034,7 +1041,7 @@ dotnet test VHSDecodeDotNet.slnx --no-build
 ```
 
 The current formal solution build completes with zero warnings and errors, and
-the xUnit v3 project exposes 338 independently discoverable compatibility tests
+the xUnit v3 project exposes 373 independently discoverable compatibility tests
 to `dotnet test` and Visual Studio Test Explorer. On the
 same Windows machine and fixtures, Release wall-clock measurements for one
 frame were 2.346 s versus 7.193 s for NTSC VHS and 1.651 s versus 5.865 s for
