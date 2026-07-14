@@ -131,18 +131,57 @@ public sealed class HiFiPostProcessorTests
         }
     }
 
-    [Fact(DisplayName = "HiFi post-processor rejects nonzero spectral NR until implemented")]
-    public void HiFiPostProcessorRejectsNonzeroSpectralNoiseReduction()
+    [Fact(DisplayName = "HiFi spectral NR post-processing matches v0.4.0")]
+    public void HiFiSpectralNoiseReductionPostProcessingMatchesV040()
     {
-        HiFiDecodeOptions options = CreateOptions(GetScenario("vhs-default-48k")) with
+        HiFiDecodeOptions options = CreateOptions(GetScenario("vhs-disabled-48k")) with
         {
-            SpectralNoiseReductionAmount = 0.1
+            SpectralNoiseReductionAmount = 0.5
         };
+        var processor = new HiFiAudioPostProcessor(options);
+        int blockLength = options.AudioRateHz / HiFiConstants.BlocksPerSecond;
+        PostProcessorExpected[] expected =
+        [
+            new PostProcessorExpected(
+                "D24BBCAB55730F4E4FF3691E2809AA103CA2EF3DB42B85DE49C89442A0D77F84",
+                "CEE4DDCF45103D3A868A1B4D1D2749D9E1629C6EDE7443148C1C22CC75D59BA8",
+                "22D83662498190EE805DBC55774796348E76A4ED003299F450DF730C615D448F",
+                "3E8D29D9",
+                "3E4FF56C"),
+            new PostProcessorExpected(
+                "C68361A5820FC925F69B1E161B97DD612A5027BC76AA66EDB79FE1E3B9422E1F",
+                "882C622EC13CAA01242C76FA376FBCCD370ED20D96B3606D37B86676722EFD44",
+                "E8D41F083F46759D91392A8B069C161F83442FBF89455134B9A1E61932FAF665",
+                "3E63B9F5",
+                "3E27DDC6")
+        ];
 
-        NotSupportedException exception = Assert.Throws<NotSupportedException>(
-            () => new HiFiAudioPostProcessor(options));
+        for (int blockNumber = 0; blockNumber < expected.Length; blockNumber++)
+        {
+            var decoded = new HiFiDecodedBlock(
+                CreateInput(
+                    blockLength,
+                    0x12345678u + (uint)blockNumber,
+                    0.42f,
+                    0.075f),
+                CreateInput(
+                    blockLength,
+                    0x87654321u + (uint)blockNumber,
+                    0.31f,
+                    -0.055f),
+                0.0f,
+                0.0f);
 
-        Assert.Contains("spectral noise reduction", exception.Message, StringComparison.Ordinal);
+            HiFiPostProcessedBlock actual = processor.Process(
+                decoded,
+                blockNumber);
+
+            Assert.Equal(expected[blockNumber].LeftSha256, BinarySha256(actual.Left));
+            Assert.Equal(expected[blockNumber].RightSha256, BinarySha256(actual.Right));
+            Assert.Equal(expected[blockNumber].StereoSha256, BinarySha256(actual.Stereo));
+            Assert.Equal(expected[blockNumber].LeftPeakBits, Bits(actual.LeftPeak));
+            Assert.Equal(expected[blockNumber].RightPeakBits, Bits(actual.RightPeak));
+        }
     }
 
     [Fact(DisplayName = "HiFi post-processor requires ordered blocks")]
@@ -392,4 +431,11 @@ public sealed class HiFiPostProcessorTests
         string DcY1Bits,
         string EnvelopeBits,
         int HoldState);
+
+    private sealed record PostProcessorExpected(
+        string LeftSha256,
+        string RightSha256,
+        string StereoSha256,
+        string LeftPeakBits,
+        string RightPeakBits);
 }

@@ -17,12 +17,6 @@ public sealed class HiFiAudioPostProcessor
     public HiFiAudioPostProcessor(HiFiDecodeOptions options)
     {
         ArgumentNullException.ThrowIfNull(options);
-        if (options.SpectralNoiseReductionAmount > 0.0)
-        {
-            throw new NotSupportedException(
-                "HiFi spectral noise reduction has not been implemented yet.");
-        }
-
         if (options.TapeFormat is not ("vhs" or "8mm"))
         {
             throw new ArgumentException(
@@ -141,6 +135,7 @@ internal sealed class HiFiChannelPostProcessor
     private readonly HiFiFirstOrderFilter _deemphasisPost;
     private readonly HiFiFirstOrderFilter _noiseReductionDeemphasis;
     private readonly HiFiExpander _expander;
+    private readonly HiFiSpectralNoiseReduction? _spectralNoiseReduction;
 
     internal HiFiChannelPostProcessor(HiFiDecodeOptions options)
     {
@@ -160,6 +155,13 @@ internal sealed class HiFiChannelPostProcessor
         _deemphasisPost = new HiFiFirstOrderFilter(deemphasis);
         _noiseReductionDeemphasis = new HiFiFirstOrderFilter(
             noiseReductionDeemphasis);
+        if (options.SpectralNoiseReductionAmount > 0.0)
+        {
+            _spectralNoiseReduction = new HiFiSpectralNoiseReduction(
+                options.AudioRateHz,
+                options.SpectralNoiseReductionAmount);
+        }
+
         _expander = new HiFiExpander(
             options.AudioRateHz,
             options.ExpanderGain,
@@ -192,8 +194,17 @@ internal sealed class HiFiChannelPostProcessor
 
         _dcBlocker.Process(pre);
 
-        // Release 4.0 copies the DC-blocked signal when spectral NR is disabled.
-        float[] post = pre.ToArray();
+        var post = new float[pre.Length];
+        if (_spectralNoiseReduction is null)
+        {
+            // Release 4.0 copies the DC-blocked signal when spectral NR is disabled.
+            pre.CopyTo(post, 0);
+        }
+        else
+        {
+            _spectralNoiseReduction.Process(pre, post);
+        }
+
         if (_tapeFormat == "8mm")
         {
             Process8Mm(pre, post, firstBlock);

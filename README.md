@@ -93,6 +93,12 @@ Implemented:
   first-block state priming, 1.5 ms startup mute, stereo interleave, and
   per-channel peak tracking; five two-block scenarios match upstream float32
   output and state bits exactly
+- nonzero HiFi spectral noise reduction reproduces Release 4.0's stateful
+  nonstationary gate, including SciPy float32 STFT/ISTFT, noisereduce mask
+  geometry, forward/backward temporal smoothing, two-block history, end
+  padding, and independent stereo state; three-block 44.1/48 kHz baselines at
+  reduction amounts 0.25, 0.5, and 1.0 plus a two-block full post-processing
+  chain match upstream float32 output byte for byte
 - upstream `-h` / `--help` handling for all three decode commands, including
   zero-exit help before positional argument validation
 - complete v0.4.0 argparse help snapshots for the three standalone and three
@@ -1037,8 +1043,7 @@ Not complete yet:
   pairs, and 1,428 float32-exact channels across all 357 valid tape
   system/format/speed cases
 - remaining container-specific resampling edge cases
-- remaining nonzero HiFi spectral noise reduction, streaming output,
-  preview/GNU Radio integration, and final command dispatch
+- remaining HiFi preview/GNU Radio integration and final command dispatch
 - remaining real-capture PAL LD and AC3 end-to-end fixtures, external AC3
   tool-pipeline parity, and remaining verbose VITS field calibration details
 - remaining non-default VHS/CVBS vblank edge cases, real-capture chroma
@@ -1061,7 +1066,7 @@ dotnet test VHSDecodeDotNet.slnx --no-build
 ```
 
 The current formal solution build completes with zero warnings and errors, and
-the xUnit v3 project exposes 407 independently discoverable compatibility tests
+the xUnit v3 project exposes 412 independently discoverable compatibility tests
 to `dotnet test` and Visual Studio Test Explorer. On the
 same Windows machine and fixtures, Release wall-clock measurements for one
 frame were 2.346 s versus 7.193 s for NTSC VHS and 1.651 s versus 5.865 s for

@@ -2,9 +2,10 @@
 
 ## pocketfft
 
-`VHSDecode.Core.Dsp.PocketFftReal` and `VHSDecode.Core.Dsp.PocketFftComplex`
-contain C# adaptations of pocketfft's radix-2/radix-4 real-transform path and
-radix-2/radix-4/radix-8 complex-transform path, as used by NumPy 2.4.6.
+`VHSDecode.Core.Dsp.PocketFftReal`, `PocketFftReal32`, and
+`PocketFftComplex` contain C# adaptations of pocketfft's radix-2/radix-4
+real-transform path and radix-2/radix-4/radix-8 complex-transform path, as
+used by NumPy 2.4.6 and SciPy 1.18.0.
 
 Copyright (C) 2010-2021 Max-Planck-Society
 
@@ -44,9 +45,11 @@ text is in `third_party/licenses/numpy-LICENSE.txt`.
 
 ## SciPy
 
-`VHSDecode.Core.Dsp.IirFilterDesign` and
-`VHSDecode.Core.HiFi.SciPyPeakFinder` contain modified C# adaptations of
-filter-design and peak-finding behavior from SciPy 1.18.0.
+`VHSDecode.Core.Dsp.IirFilterDesign`,
+`VHSDecode.Core.HiFi.SciPyPeakFinder`, and the STFT, ISTFT, temporal-filter,
+and mask-convolution paths in `HiFiSpectralNoiseReduction` contain modified
+C# adaptations of filter-design, peak-finding, and signal-processing behavior
+from SciPy 1.18.0.
 
 Copyright (c) 2001-2002 Enthought, Inc. 2003, SciPy Developers.
 All rights reserved.
