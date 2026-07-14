@@ -1,4 +1,3 @@
-using System.Numerics;
 using System.Runtime.InteropServices;
 using VHSDecode.Core.Dsp;
 
@@ -59,15 +58,26 @@ internal static class HiFiDropoutCompensator
             throw new ArgumentException($"DOC analysis windows must contain {WindowSize} samples.", nameof(window));
         }
 
-        Complex[] spectrum = PocketFftComplex.ForwardReal(ToDouble(window));
-        Span<float> magnitude = stackalloc float[FftEnd - FftStart];
-        for (int i = FftStart; i < FftEnd; i++)
+        float[] magnitude = AnalyzeWindowMagnitude(window);
+        return HiFiAudioProcessing.NumbaFastMeanStandardDeviation(magnitude);
+    }
+
+    internal static float[] AnalyzeWindowMagnitude(ReadOnlySpan<float> window)
+    {
+        if (window.Length != WindowSize)
         {
-            Complex value = spectrum[i];
-            magnitude[i - FftStart] = (float)NumpyHypot(value.Real, value.Imaginary);
+            throw new ArgumentException($"DOC analysis windows must contain {WindowSize} samples.", nameof(window));
         }
 
-        return HiFiAudioProcessing.NumbaFastMeanStandardDeviation(magnitude);
+        Complex32[] spectrum = NumpyComplex64Fft.ForwardReal(window);
+        var magnitude = new float[FftEnd - FftStart];
+        for (int i = FftStart; i < FftEnd; i++)
+        {
+            Complex32 value = spectrum[i];
+            magnitude[i - FftStart] = NumpyHypot(value.Real, value.Imaginary);
+        }
+
+        return magnitude;
     }
 
     internal static List<HiFiDropoutAction> CheckOtherChannel(
@@ -329,35 +339,31 @@ internal static class HiFiDropoutCompensator
         return merged;
     }
 
-    private static double[] ToDouble(ReadOnlySpan<float> values)
+    // Modified NumPy SIMD complex-absolute adaptation; see THIRD-PARTY-NOTICES.md.
+    private static float NumpyHypot(float left, float right)
     {
-        var output = new double[values.Length];
-        for (int i = 0; i < values.Length; i++)
+        float absoluteLeft = MathF.Abs(left);
+        float absoluteRight = MathF.Abs(right);
+        if (float.IsInfinity(absoluteLeft) || float.IsInfinity(absoluteRight))
         {
-            output[i] = values[i];
+            return float.PositiveInfinity;
         }
 
-        return output;
-    }
-
-    private static double NumpyHypot(double left, double right)
-    {
-        if (OperatingSystem.IsWindows())
+        if (float.IsNaN(absoluteLeft) || float.IsNaN(absoluteRight))
         {
-            return WindowsHypot(left, right);
+            return float.NaN;
         }
 
-        if (OperatingSystem.IsLinux())
+        float larger = MathF.Max(absoluteLeft, absoluteRight);
+        if (larger == 0.0f)
         {
-            return LinuxHypot(left, right);
+            return 0.0f;
         }
 
-        if (OperatingSystem.IsMacOS())
-        {
-            return MacOsHypot(left, right);
-        }
-
-        return double.Hypot(left, right);
+        float smaller = MathF.Min(absoluteLeft, absoluteRight);
+        float ratio = smaller / larger;
+        float scaled = MathF.Sqrt(MathF.FusedMultiplyAdd(ratio, ratio, 1.0f));
+        return scaled * larger;
     }
 
     private static double PlatformCos(double value)
@@ -379,15 +385,6 @@ internal static class HiFiDropoutCompensator
 
         return Math.Cos(value);
     }
-
-    [DllImport("ucrtbase.dll", EntryPoint = "_hypot", ExactSpelling = true)]
-    private static extern double WindowsHypot(double left, double right);
-
-    [DllImport("libm.so.6", EntryPoint = "hypot", ExactSpelling = true)]
-    private static extern double LinuxHypot(double left, double right);
-
-    [DllImport("/usr/lib/libSystem.B.dylib", EntryPoint = "hypot", ExactSpelling = true)]
-    private static extern double MacOsHypot(double left, double right);
 
     [DllImport("ucrtbase.dll", EntryPoint = "cos", ExactSpelling = true)]
     private static extern double WindowsCos(double value);

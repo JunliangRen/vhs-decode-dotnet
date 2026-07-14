@@ -445,6 +445,53 @@ public static class IirFilterDesign
         return ZpkToConjugateNearestSos(zeros, poles, gain);
     }
 
+    // Modified SciPy filter-design adaptation; see THIRD-PARTY-NOTICES.md.
+    internal static SosSection[] ChebyshevTypeIIHighPassSos(
+        int order,
+        double stopAttenuationDb,
+        double cutoffHz,
+        double sampleRateHz)
+    {
+        if (order <= 0 || (order & 1) != 0)
+        {
+            throw new ArgumentOutOfRangeException(nameof(order), "HiFi Chebyshev-II order must be positive and even.");
+        }
+
+        if (!double.IsFinite(stopAttenuationDb) || stopAttenuationDb <= 0.0)
+        {
+            throw new ArgumentOutOfRangeException(nameof(stopAttenuationDb));
+        }
+
+        if (!double.IsFinite(sampleRateHz) || sampleRateHz <= 0.0)
+        {
+            throw new ArgumentOutOfRangeException(nameof(sampleRateHz));
+        }
+
+        if (!double.IsFinite(cutoffHz) || cutoffHz <= 0.0 || cutoffHz >= sampleRateHz / 2.0)
+        {
+            throw new ArgumentOutOfRangeException(nameof(cutoffHz));
+        }
+
+        (Complex[] zeros, Complex[] poles, double gain) = BuildChebyshevTypeIIPrototype(
+            order,
+            stopAttenuationDb);
+        const double designSampleRate = 2.0;
+        double normalizedCutoff = cutoffHz / (sampleRateHz / 2.0);
+        double warpedCutoff = 2.0 * designSampleRate
+            * Math.Tan(Math.PI * normalizedCutoff / designSampleRate);
+        (zeros, poles, gain) = LowPassToHighPassZpk(
+            zeros,
+            poles,
+            gain,
+            warpedCutoff);
+        (zeros, poles, gain) = BilinearZpk(
+            zeros,
+            poles,
+            gain,
+            designSampleRate);
+        return ZpkToConjugateNearestSos(zeros, poles, gain);
+    }
+
     public static SosSection[] ButterworthBandPassSos(int order, double normalizedLowCutoff, double normalizedHighCutoff)
     {
         if (order == 1)
@@ -1129,6 +1176,38 @@ public static class IirFilterDesign
         ];
         Complex[] bandPassPoles = [.. positivePoles, .. negativePoles];
         return (bandPassZeros, bandPassPoles, gain * Math.Pow(bandwidth, degree));
+    }
+
+    private static (Complex[] Zeros, Complex[] Poles, double Gain) LowPassToHighPassZpk(
+        IReadOnlyList<Complex> zeros,
+        IReadOnlyList<Complex> poles,
+        double gain,
+        double cutoff)
+    {
+        int degree = poles.Count - zeros.Count;
+        var highPassZeros = new Complex[zeros.Count + degree];
+        Complex zeroProduct = Complex.One;
+        for (int i = 0; i < zeros.Count; i++)
+        {
+            highPassZeros[i] = NumpyComplexDivide(new Complex(cutoff, 0.0), zeros[i]);
+            zeroProduct = NumpyComplexMultiply(zeroProduct, -zeros[i]);
+        }
+
+        for (int i = zeros.Count; i < highPassZeros.Length; i++)
+        {
+            highPassZeros[i] = Complex.Zero;
+        }
+
+        var highPassPoles = new Complex[poles.Count];
+        Complex poleProduct = Complex.One;
+        for (int i = 0; i < poles.Count; i++)
+        {
+            highPassPoles[i] = NumpyComplexDivide(new Complex(cutoff, 0.0), poles[i]);
+            poleProduct = NumpyComplexMultiply(poleProduct, -poles[i]);
+        }
+
+        double highPassGain = gain * NumpyComplexDivide(zeroProduct, poleProduct).Real;
+        return (highPassZeros, highPassPoles, highPassGain);
     }
 
     private static (Complex[] Zeros, Complex[] Poles, double Gain) BilinearZpk(

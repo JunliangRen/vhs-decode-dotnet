@@ -707,8 +707,16 @@ public sealed class HiFiCompatibilityTests
             input[i] *= 4.0f;
         }
 
+        Complex32[] spectrum = NumpyComplex64Fft.ForwardReal(input);
         (float mean, float standardDeviation) = HiFiDropoutCompensator.AnalyzeWindow(input);
+        float[] magnitude = HiFiDropoutCompensator.AnalyzeWindowMagnitude(input);
 
+        Assert.Equal(
+            "9B3DEA37E677027C1F81ACBC1D90E48D03779BB7B340E0892ECC8E35DB3D141F",
+            BinarySha256(spectrum));
+        Assert.Equal(
+            "BE4A8DFE3659D0E3EFFEAAED4CAFB447FC5FBAAFF2222C0698AC6B8A79A80928",
+            BinarySha256(magnitude));
         Assert.Equal("41A1682B", BitConverter.SingleToUInt32Bits(mean).ToString("X8"));
         Assert.Equal("41288938", BitConverter.SingleToUInt32Bits(standardDeviation).ToString("X8"));
     }
@@ -825,6 +833,146 @@ public sealed class HiFiCompatibilityTests
         Assert.Equal(expectedRightHash, BinarySha256(right));
     }
 
+    [Fact(DisplayName = "HiFi head-switch Chebyshev-II filter matches v0.4.0 float bits")]
+    public void HiFiHeadSwitchChebyshevTypeIIFilterMatchesV040FloatBits()
+    {
+        SosSection[] sections = IirFilterDesign.ChebyshevTypeIIHighPassSos(
+            22,
+            200.0,
+            28_000.0,
+            192_000.0);
+        float[] flattened = sections
+            .SelectMany(section => new[]
+            {
+                (float)section.B0,
+                (float)section.B1,
+                (float)section.B2,
+                (float)section.A0,
+                (float)section.A1,
+                (float)section.A2
+            })
+            .ToArray();
+
+        Assert.Equal(11, sections.Length);
+        Assert.Equal(
+            "5A31F030E244ADAA18B4416142B0AC5DF66537F6A9B38550F69DFDA850F3D868",
+            BinarySha256(flattened));
+    }
+
+    [Fact(DisplayName = "HiFi head-switch peak detection matches v0.4.0 float bits")]
+    public void HiFiHeadSwitchPeakDetectionMatchesV040FloatBits()
+    {
+        var processor = new HiFiHeadSwitchProcessor(192_000, 59.94);
+        float[] audio = CreateHeadSwitchAudio();
+
+        HiFiHeadSwitchDetection detection = processor.Detect(audio);
+        List<HiFiSampleRange> boundaries = processor.CalculateBoundaries(detection.Peaks);
+        double[] flattenedPeaks = detection.Peaks
+            .SelectMany(peak => new[]
+            {
+                (double)peak.Center,
+                peak.Start,
+                peak.End,
+                peak.Prominence
+            })
+            .ToArray();
+
+        Assert.Equal(
+            "5D981DACDD3D6B95FFBC1571BDF6FEE4C28F2D92608A7669981370AFFA6C2493",
+            BinarySha256(audio));
+        Assert.Equal(
+            "4A62B4337CE43F57B712985AD198E37F479E4CF53C7DA2B5602C5082F20932CF",
+            BinarySha256(detection.Filtered));
+        Assert.Equal(
+            "A1E75D095FA747C85017EFCC684F9ABB7CCFB7B362270CA93252B9064B9F13B3",
+            BinarySha256(detection.Absolute));
+        Assert.Equal("00000000", BitConverter.SingleToUInt32Bits(detection.Mean).ToString("X8"));
+        Assert.Equal("3C50E90D", BitConverter.SingleToUInt32Bits(detection.StandardDeviation).ToString("X8"));
+        Assert.Equal(16, detection.Peaks.Count);
+        Assert.Equal(
+            "B769A8412BBFB084480E01D1278680220F6D52D4AF89B42081129BD45B156969",
+            BinarySha256(flattenedPeaks));
+        Assert.Equal(
+            [
+                new HiFiSampleRange(2813, 2826),
+                new HiFiSampleRange(5883, 5885),
+                new HiFiSampleRange(9202, 9208),
+                new HiFiSampleRange(9217, 9232),
+                new HiFiSampleRange(12392, 12394),
+                new HiFiSampleRange(15606, 15614),
+                new HiFiSampleRange(15621, 15637),
+                new HiFiSampleRange(18541, 18544),
+                new HiFiSampleRange(22039, 22047)
+            ],
+            boundaries);
+    }
+
+    [Fact(DisplayName = "HiFi head-switch NumPy AVX2 peak priority order matches v0.4.0")]
+    public void HiFiHeadSwitchPeakPriorityOrderMatchesV040()
+    {
+        var processor = new HiFiHeadSwitchProcessor(192_000, 59.94);
+        HiFiHeadSwitchDetection detection = processor.Detect(CreateHeadSwitchAudio());
+        List<int> maxima = SciPyPeakFinder.FindLocalMaxima(detection.Absolute);
+        double[] priorities = maxima.Select(index => (double)detection.Absolute[index]).ToArray();
+        long[] order = NumpyAvx2ArgSort.SortIndices(priorities)
+            .Select(index => (long)index)
+            .ToArray();
+
+        Assert.Equal(9_928, maxima.Count);
+        Assert.Equal(
+            "85AC89536CCD1C857D1260C0EE4309275E73D21D2D4B24632754B2FEEC949F6D",
+            BinarySha256(order));
+    }
+
+    [Fact(DisplayName = "NumPy AVX2 256-value argsort network matches v0.4.0")]
+    public void NumpyAvx2ArgSortNetworkMatchesV040()
+    {
+        uint state = 0x12345678;
+        var values = new double[256];
+        for (int i = 0; i < values.Length; i++)
+        {
+            state = unchecked((state * 1_664_525) + 1_013_904_223);
+            values[i] = (state >> 16) % 13;
+        }
+
+        long[] order = NumpyAvx2ArgSort.SortIndices(values)
+            .Select(index => (long)index)
+            .ToArray();
+
+        Assert.Equal(
+            "74199A7D8CF44E7AF89A32C88CAE3BA44022F6F99D20F702FDE2DE51EDAE7D28",
+            BinarySha256(order));
+    }
+
+    [Fact(DisplayName = "HiFi head-switch interpolation matches v0.4.0 float bits")]
+    public void HiFiHeadSwitchInterpolationMatchesV040FloatBits()
+    {
+        var processor = new HiFiHeadSwitchProcessor(192_000, 59.94);
+        float[] audio = CreateHeadSwitchAudio();
+        HiFiHeadSwitchDetection detection = processor.Detect(audio);
+        List<HiFiSampleRange> boundaries = processor.CalculateBoundaries(detection.Peaks);
+
+        float[] interpolated = HiFiHeadSwitchProcessor.InterpolateBoundaries(audio, boundaries);
+        float[] removed = processor.RemoveNoise(audio);
+        float[] simple = Enumerable.Range(0, 64).Select(index => index / 10.0f).ToArray();
+        float[] simpleInterpolated = HiFiHeadSwitchProcessor.InterpolateBoundaries(
+            simple,
+            [
+                new HiFiSampleRange(8, 13),
+                new HiFiSampleRange(27, 35),
+                new HiFiSampleRange(-2, 3),
+                new HiFiSampleRange(60, 67)
+            ]);
+
+        Assert.Equal(
+            "C2B6BE3504B284C13D8B81AA056D3FB4614221F0FE1D9C404BEA0030F863DDA7",
+            BinarySha256(interpolated));
+        Assert.Equal(BinarySha256(interpolated), BinarySha256(removed));
+        Assert.Equal(
+            "AF6123FD82AD552CF6BA8DF2C56C30131CB911D181B9A585BE5D364E15FFCF78",
+            BinarySha256(simpleInterpolated));
+    }
+
     [Theory(DisplayName = "HiFi mono block channel routing matches v0.4.0")]
     [InlineData("l", true, false)]
     [InlineData("r", false, true)]
@@ -866,6 +1014,12 @@ public sealed class HiFiCompatibilityTests
     private static string BinarySha256(ReadOnlySpan<double> values)
         => Convert.ToHexString(SHA256.HashData(MemoryMarshal.AsBytes(values)));
 
+    private static string BinarySha256(ReadOnlySpan<long> values)
+        => Convert.ToHexString(SHA256.HashData(MemoryMarshal.AsBytes(values)));
+
+    private static string BinarySha256(ReadOnlySpan<Complex32> values)
+        => Convert.ToHexString(SHA256.HashData(MemoryMarshal.AsBytes(values)));
+
     private static float[] CreateDeterministicFloatInput(int length)
         => CreateDeterministicFloatInput(length, 0x12345678);
 
@@ -894,6 +1048,32 @@ public sealed class HiFiCompatibilityTests
         }
 
         return input;
+    }
+
+    private static float[] CreateHeadSwitchAudio()
+    {
+        var audio = new float[26_000];
+        float[] shape = [0.08f, 0.3f, 0.72f, 1.0f, 0.64f, 0.25f, 0.06f];
+        (int Center, double Amplitude)[] pulses =
+        [
+            (2800, 1.8),
+            (9205, -2.4),
+            (15610, 3.2),
+            (22025, -1.5)
+        ];
+        foreach ((int center, double amplitude) in pulses)
+        {
+            float amplitudeFloat = (float)amplitude;
+            for (int i = 0; i < shape.Length; i++)
+            {
+                audio[center - 3 + i] += shape[i] * amplitudeFloat;
+            }
+
+            audio[center + 18] += (float)(amplitude * -0.42);
+            audio[center + 23] += (float)(amplitude * 0.31);
+        }
+
+        return audio;
     }
 
     private static string Utf8LfSha256(string value)

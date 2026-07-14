@@ -31,6 +31,54 @@ ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
 (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
 SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
+## NumPy
+
+`VHSDecode.Core.Dsp.NumpyComplex64Fft` and the NumPy-compatible magnitude
+path in `VHSDecode.Core.HiFi.HiFiDropoutCompensator` contain modified C#
+adaptations of numerical dispatch and SIMD behavior from NumPy 2.4.6.
+
+Copyright (c) 2005-2025, NumPy Developers. All rights reserved.
+
+NumPy is distributed under the BSD 3-Clause License. The complete license
+text is in `third_party/licenses/numpy-LICENSE.txt`.
+
+## SciPy
+
+`VHSDecode.Core.Dsp.IirFilterDesign` and
+`VHSDecode.Core.HiFi.SciPyPeakFinder` contain modified C# adaptations of
+filter-design and peak-finding behavior from SciPy 1.18.0.
+
+Copyright (c) 2001-2002 Enthought, Inc. 2003, SciPy Developers.
+All rights reserved.
+
+SciPy is distributed under the BSD 3-Clause License. The complete license
+text is in `third_party/licenses/scipy-LICENSE.txt`.
+
+## x86-simd-sort
+
+`VHSDecode.Core.HiFi.NumpyAvx2ArgSort` contains a modified scalar C#
+adaptation of the partition and bitonic argsort paths from Intel
+x86-simd-sort commit `5adb33411f3cea8bdbafa9d91bd75bc4bf19c7dd`, as used
+by NumPy 2.4.6.
+
+Copyright (c) 2022, Intel. All rights reserved.
+
+x86-simd-sort is distributed under the BSD 3-Clause License. The complete
+license text is in `third_party/licenses/x86-simd-sort-LICENSE.md`.
+
+## Microsoft C++ Standard Library
+
+The exhausted-partition fallback in
+`VHSDecode.Core.HiFi.NumpyAvx2ArgSort` contains a modified C# adaptation of
+the insertion-sort, median partition, introsort, and heap-sort routines from
+the Microsoft C++ Standard Library shipped with Visual C++ 14.44.
+
+Copyright (c) Microsoft Corporation.
+
+The Microsoft C++ Standard Library is distributed under the Apache License
+2.0 with LLVM Exception. The complete license and exception text is in
+`third_party/licenses/msvc-stl-LICENSE.txt`.
+
 ## libsoxr
 
 `VHSDecode.Core.Dsp.SoxrQuickResampler` contains a C# adaptation of
