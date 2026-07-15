@@ -1,0 +1,257 @@
+using System.Text.Json.Nodes;
+using Microsoft.Data.Sqlite;
+using VHSDecode.Core.CommandLine;
+using VHSDecode.Core.Decode;
+using VHSDecode.Core.Dsp;
+using Xunit;
+
+namespace VHSDecode.Tests;
+
+public sealed class TbcSqliteLifecycleCompatibilityTests
+{
+    [Theory(DisplayName = "Zero-field metadata artifacts match v0.4.0")]
+    [InlineData("vhs")]
+    [InlineData("cvbs")]
+    [InlineData("ld")]
+    public void ZeroFieldMetadataArtifactsMatchV040(string decoder)
+    {
+        string tempDirectory = CreateTempDirectory();
+        try
+        {
+            string outputBase = Path.Combine(tempDirectory, decoder);
+            using DecodeSession session = CreateSession(decoder, outputBase);
+
+            TbcFieldSequenceDecodeResult result = new TbcFieldSequenceDecodeEngine()
+                .WriteDecodedFields(session, []);
+
+            Assert.True(result.Success);
+            Assert.Equal(0, result.WrittenFieldCount);
+            Assert.Equal(0, new FileInfo(result.Paths!.TbcPath).Length);
+            Assert.False(File.Exists(result.Paths.JsonPath));
+            Assert.Equal("{", File.ReadAllText(result.Paths.JsonPath + ".tmp"));
+            Assert.NotNull(result.Paths.DbPath);
+            Assert.Equal(0, QueryLong(result.Paths.DbPath!, "SELECT COUNT(*) FROM capture"));
+            Assert.Equal(0, QueryLong(result.Paths.DbPath!, "SELECT COUNT(*) FROM field_record"));
+        }
+        finally
+        {
+            Directory.Delete(tempDirectory, recursive: true);
+        }
+    }
+
+    [Fact(DisplayName = "SQLite capture count commits with every field like v0.4.0")]
+    public void SqliteCaptureCountCommitsWithEveryFieldLikeV040()
+    {
+        string tempDirectory = CreateTempDirectory();
+        try
+        {
+            string databasePath = Path.Combine(tempDirectory, "capture.tbc.db");
+            using DecodeSession session = CreateSession("vhs", Path.Combine(tempDirectory, "capture"));
+            var builder = new TbcOutputMetadataWriter.FieldObjectBuilder(session);
+            using var writer = new TbcSqliteMetadataWriter.SequenceWriter(session, databasePath);
+
+            writer.Add(
+                builder.Add(BuildField(0, true), BuildDecision(1, true)),
+                fieldCount: 1,
+                converter: null);
+            Assert.Equal(1, QueryLong(databasePath, "SELECT number_of_sequential_fields FROM capture"));
+            Assert.Equal(1, QueryLong(databasePath, "SELECT COUNT(*) FROM field_record"));
+
+            writer.Add(
+                builder.Add(BuildField(1, false), BuildDecision(2, false)),
+                fieldCount: 2,
+                converter: null);
+            Assert.Equal(2, QueryLong(databasePath, "SELECT number_of_sequential_fields FROM capture"));
+            Assert.Equal(2, QueryLong(databasePath, "SELECT COUNT(*) FROM field_record"));
+
+            writer.Complete(fieldCount: 2);
+        }
+        finally
+        {
+            Directory.Delete(tempDirectory, recursive: true);
+        }
+    }
+
+    [Fact(DisplayName = "First SQLite capture header commits before its field row like v0.4.0")]
+    public void FirstSqliteCaptureHeaderCommitsBeforeFieldRowLikeV040()
+    {
+        string tempDirectory = CreateTempDirectory();
+        try
+        {
+            string databasePath = Path.Combine(tempDirectory, "capture.tbc.db");
+            using DecodeSession session = CreateSession("vhs", Path.Combine(tempDirectory, "capture"));
+            using (var writer = new TbcSqliteMetadataWriter.SequenceWriter(session, databasePath))
+            {
+                Assert.Throws<InvalidOperationException>(() => writer.Add(
+                    new JsonObject(),
+                    fieldCount: 1,
+                    converter: null));
+            }
+
+            Assert.Equal(1, QueryLong(databasePath, "SELECT COUNT(*) FROM capture"));
+            Assert.Equal(1, QueryLong(databasePath, "SELECT number_of_sequential_fields FROM capture"));
+            Assert.Equal(0, QueryLong(databasePath, "SELECT COUNT(*) FROM field_record"));
+        }
+        finally
+        {
+            Directory.Delete(tempDirectory, recursive: true);
+        }
+    }
+
+    [Fact(DisplayName = "Output failures finalize previously committed metadata like v0.4.0")]
+    public void OutputFailuresFinalizePreviouslyCommittedMetadataLikeV040()
+    {
+        string tempDirectory = CreateTempDirectory();
+        try
+        {
+            string outputBase = Path.Combine(tempDirectory, "partial");
+            using DecodeSession session = CreateSession("ld", outputBase);
+            int reads = 0;
+            TbcDecodedField? ReadField(DecodeSession activeSession, Stream _, long begin, int __, int ___)
+            {
+                reads++;
+                if (reads > 2)
+                {
+                    return null;
+                }
+
+                return BuildField(begin, detectedFirstField: reads == 1) with
+                {
+                    Samples = new ushort[activeSession.TbcFrameSpec.FieldSampleCount],
+                    NextFieldOffsetSamples = 100,
+                    NominalFieldLengthSamples = 100
+                };
+            }
+
+            var engine = new TbcFieldSequenceDecodeEngine(
+                efmOutputWriter: new ThrowOnSecondFieldOutputWriter(),
+                readField: ReadField);
+
+            TbcFieldSequenceDecodeResult result = engine.TryDecodeAndWrite(
+                session,
+                Stream.Null,
+                maxFields: 2);
+
+            Assert.False(result.Success);
+            Assert.Contains("synthetic output failure", result.Message, StringComparison.Ordinal);
+            JsonNode document = JsonNode.Parse(File.ReadAllText(outputBase + ".tbc.json"))
+                ?? throw new InvalidOperationException("Partial metadata JSON was empty.");
+            Assert.Single(document["fields"]?.AsArray()
+                ?? throw new InvalidOperationException("Partial metadata JSON did not contain fields."));
+            Assert.Equal(1, QueryLong(outputBase + ".tbc.db", "SELECT COUNT(*) FROM field_record"));
+            Assert.Equal(
+                1,
+                QueryLong(outputBase + ".tbc.db", "SELECT number_of_sequential_fields FROM capture"));
+            Assert.False(File.Exists(outputBase + ".tbc.json.tmp"));
+            Assert.False(File.Exists(outputBase + ".tbc.json.fields.tmp"));
+        }
+        finally
+        {
+            Directory.Delete(tempDirectory, recursive: true);
+        }
+    }
+
+    private static DecodeSession CreateSession(string decoder, string outputBase)
+    {
+        (DecodeCommandSpec Spec, string[] Arguments) command = decoder switch
+        {
+            "vhs" => (CliSpecs.Vhs, ["--pal", "--write_db", "input.u8", outputBase]),
+            "cvbs" => (CliSpecs.Cvbs, ["--pal", "--write_db", "input.u8", outputBase]),
+            "ld" => (CliSpecs.LaserDisc, [
+                "--PAL",
+                "--noEFM",
+                "--disable_analog_audio",
+                "input.s16",
+                outputBase
+            ]),
+            _ => throw new ArgumentOutOfRangeException(nameof(decoder), decoder, "Unknown decoder.")
+        };
+        ParsedCommand parsed = new CommandLineParser().Parse(command.Spec, command.Arguments);
+        return DecodeSessionFactory.Create(parsed);
+    }
+
+    private static TbcDecodedField BuildField(long startSample, bool detectedFirstField)
+    {
+        return new TbcDecodedField(
+            StartSample: startSample,
+            Samples: [],
+            LineLocations: new LineLocationResult([], []),
+            Timing: new SyncTiming(
+                0,
+                0,
+                0,
+                new SyncRange(0, 0),
+                new SyncRange(0, 0),
+                new SyncRange(0, 0)),
+            SyncThresholdHz: 0,
+            MeanLineLength: 0,
+            RawPulseCount: 0,
+            ClassifiedPulseCount: 0,
+            DetectedFirstField: detectedFirstField,
+            DetectedFirstFieldConfidence: 100);
+    }
+
+    private static TbcFieldOrderDecision BuildDecision(int seqNo, bool isFirstField)
+    {
+        return new TbcFieldOrderDecision(
+            SeqNo: seqNo,
+            IsFirstField: isFirstField,
+            DetectedFirstField: isFirstField,
+            IsDuplicateField: false,
+            WriteField: true,
+            SyncConfidence: 100,
+            DecodeFaults: 0);
+    }
+
+    private static long QueryLong(string databasePath, string sql)
+    {
+        using var connection = new SqliteConnection(
+            new SqliteConnectionStringBuilder { DataSource = databasePath, Pooling = false }.ToString());
+        connection.Open();
+        using SqliteCommand command = connection.CreateCommand();
+        command.CommandText = sql;
+        return (long)(command.ExecuteScalar()
+            ?? throw new InvalidOperationException("SQLite query did not return a value."));
+    }
+
+    private static string CreateTempDirectory()
+    {
+        string directory = Path.Combine(
+            Path.GetTempPath(),
+            "vhsdecode-dotnet-tests-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(directory);
+        return directory;
+    }
+
+    private sealed class ThrowOnSecondFieldOutputWriter : ILaserDiscEfmOutputWriter
+    {
+        public IReadOnlyList<TbcDecodedField> Write(
+            DecodeSession session,
+            IReadOnlyList<TbcDecodedField> fields)
+        {
+            throw new NotSupportedException("The batch path is not used by this test.");
+        }
+
+        public ILaserDiscFieldOutputSession Open(DecodeSession session)
+        {
+            return new OutputSession();
+        }
+
+        private sealed class OutputSession : ILaserDiscFieldOutputSession
+        {
+            private int _fieldCount;
+
+            public TbcDecodedField Write(TbcDecodedField field)
+            {
+                _fieldCount++;
+                return _fieldCount == 2
+                    ? throw new IOException("synthetic output failure")
+                    : field;
+            }
+
+            public void Dispose()
+            {
+            }
+        }
+    }
+}

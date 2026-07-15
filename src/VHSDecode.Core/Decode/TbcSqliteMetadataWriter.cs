@@ -143,8 +143,8 @@ public static class TbcSqliteMetadataWriter
         private readonly DecodeSession _session;
         private readonly string _dbPath;
         private readonly SqliteConnection _connection;
-        private SqliteTransaction _transaction;
-        private readonly long _captureId;
+        private SqliteTransaction? _transaction;
+        private long? _captureId;
         private int _fieldIndex;
         private bool _completed;
         private bool _disposed;
@@ -176,34 +176,52 @@ public static class TbcSqliteMetadataWriter
                 }
 
                 _transaction = _connection.BeginTransaction();
-                JsonObject header = TbcOutputMetadataWriter.BuildHeader(session, 0);
-                _captureId = InsertCapture(_connection, _transaction, header);
-                InsertPcmAudioParameters(_connection, _transaction, header, _captureId);
             }
             catch
             {
+                _transaction?.Dispose();
                 _connection.Dispose();
                 throw;
             }
         }
 
-        public void Add(JsonObject fieldInfo)
+        public void Add(
+            JsonObject fieldInfo,
+            int fieldCount,
+            VideoOutputConverter? converter)
         {
             ObjectDisposedException.ThrowIf(_disposed, this);
+            if (fieldCount != _fieldIndex + 1)
+            {
+                throw new InvalidOperationException(
+                    $"SQLite metadata field count {fieldCount} did not follow committed field count {_fieldIndex}.");
+            }
+
+            JsonObject header = TbcOutputMetadataWriter.BuildHeader(
+                _session,
+                fieldCount,
+                converter ?? _session.VideoOutput);
+            if (!_captureId.HasValue)
+            {
+                _captureId = InsertCapture(_connection, Transaction, header);
+                InsertPcmAudioParameters(_connection, Transaction, header, _captureId.Value);
+                CommitAndBeginTransaction();
+            }
+
             InsertField(
                 _connection,
-                _transaction,
+                Transaction,
                 _session,
                 fieldInfo,
-                _captureId,
+                _captureId.Value,
                 _fieldIndex);
+            UpdateCapture(_connection, Transaction, header, _captureId.Value);
+            UpdatePcmAudioParameters(_connection, Transaction, header, _captureId.Value);
+            CommitAndBeginTransaction();
             _fieldIndex++;
-            _transaction.Commit();
-            _transaction.Dispose();
-            _transaction = _connection.BeginTransaction();
         }
 
-        public void Complete(int fieldCount, VideoOutputConverter? converter)
+        public void Complete(int fieldCount)
         {
             ObjectDisposedException.ThrowIf(_disposed, this);
             if (_completed)
@@ -217,12 +235,8 @@ public static class TbcSqliteMetadataWriter
                     $"SQLite metadata field count {_fieldIndex} did not match JSON field count {fieldCount}.");
             }
 
-            JsonObject header = TbcOutputMetadataWriter.BuildHeader(
-                _session,
-                fieldCount,
-                converter ?? _session.VideoOutput);
-            UpdateCapture(_connection, _transaction, header, _captureId);
-            _transaction.Commit();
+            _transaction?.Dispose();
+            _transaction = null;
             _completed = true;
         }
 
@@ -234,12 +248,24 @@ public static class TbcSqliteMetadataWriter
             }
 
             _disposed = true;
-            _transaction.Dispose();
+            _transaction?.Dispose();
             _connection.Dispose();
             if (_completed)
             {
                 NormalizeSqliteHeader(_dbPath);
             }
+        }
+
+        private SqliteTransaction Transaction => _transaction
+            ?? throw new InvalidOperationException("The SQLite metadata transaction is not available.");
+
+        private void CommitAndBeginTransaction()
+        {
+            SqliteTransaction transaction = Transaction;
+            transaction.Commit();
+            transaction.Dispose();
+            _transaction = null;
+            _transaction = _connection.BeginTransaction();
         }
     }
 
@@ -259,57 +285,27 @@ public static class TbcSqliteMetadataWriter
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(dbPath);
 
-        if (File.Exists(dbPath))
-        {
-            File.Delete(dbPath);
-        }
-
-        string? directory = Path.GetDirectoryName(dbPath);
-        if (!string.IsNullOrEmpty(directory))
-        {
-            Directory.CreateDirectory(directory);
-        }
-
         JsonObject metadata = TbcOutputMetadataWriter.BuildJson(
             session,
             fields,
             fieldOrder,
             fieldIdentities);
-        using var connection = new SqliteConnection(new SqliteConnectionStringBuilder { DataSource = dbPath, Pooling = false }.ToString());
-        connection.Open();
-
-        foreach (string statement in SchemaStatements)
+        JsonArray metadataFields = RequiredArray(metadata, "fields");
+        using var writer = new SequenceWriter(session, dbPath);
+        VideoOutputConverter? converter = null;
+        for (int i = 0; i < metadataFields.Count; i++)
         {
-            Execute(connection, transaction: null, NormalizeSchemaSql(statement));
-        }
-
-        SqliteTransaction transaction = connection.BeginTransaction();
-        try
-        {
-            JsonObject initialMetadata = TbcOutputMetadataWriter.BuildHeader(session, 0);
-            long captureId = InsertCapture(connection, transaction, initialMetadata);
-            InsertPcmAudioParameters(connection, transaction, initialMetadata, captureId);
-            JsonArray metadataFields = RequiredArray(metadata, "fields");
-            for (int i = 0; i < metadataFields.Count; i++)
+            JsonObject field = metadataFields[i]?.AsObject()
+                ?? throw new InvalidOperationException("Field metadata entry was not an object.");
+            if (i < fields.Count && fields[i].OutputConverter is not null)
             {
-                JsonObject field = metadataFields[i]?.AsObject()
-                    ?? throw new InvalidOperationException("Field metadata entry was not an object.");
-                InsertField(connection, transaction, session, field, captureId, i);
-                transaction.Commit();
-                transaction.Dispose();
-                transaction = connection.BeginTransaction();
+                converter = fields[i].OutputConverter;
             }
 
-            UpdateCapture(connection, transaction, metadata, captureId);
-            transaction.Commit();
-        }
-        finally
-        {
-            transaction.Dispose();
+            writer.Add(field, i + 1, converter);
         }
 
-        connection.Close();
-        NormalizeSqliteHeader(dbPath);
+        writer.Complete(metadataFields.Count);
     }
 
     private static void NormalizeSqliteHeader(string dbPath)
@@ -436,6 +432,31 @@ public static class TbcSqliteMetadataWriter
             BoolIntValue(pcm, "isLittleEndian"),
             BoolIntValue(pcm, "isSigned"),
             NumberValue(pcm, "sampleRate"));
+    }
+
+    private static void UpdatePcmAudioParameters(
+        SqliteConnection connection,
+        SqliteTransaction transaction,
+        JsonObject metadata,
+        long captureId)
+    {
+        JsonObject pcm = RequiredObject(metadata, "pcmAudioParameters");
+        Execute(
+            connection,
+            transaction,
+            """
+            UPDATE pcm_audio_parameters SET
+                bits = $p0,
+                is_little_endian = $p1,
+                is_signed = $p2,
+                sample_rate = $p3
+            WHERE capture_id = $p4
+            """,
+            DbValue(pcm, "bits"),
+            BoolIntValue(pcm, "isLittleEndian"),
+            BoolIntValue(pcm, "isSigned"),
+            NumberValue(pcm, "sampleRate"),
+            captureId);
     }
 
     private static void InsertField(

@@ -212,7 +212,11 @@ public static class DecodeSessionFactory
         TbcFieldOrderOptions fieldOrderOptions = BuildFieldOrderOptions(command, parameters);
         LaserDiscAudioOptions? laserDiscAudioOptions = BuildLaserDiscAudioOptions(command, system);
         HSyncRefineOptions hSyncRefineOptions = BuildHSyncRefineOptions(command);
-        SyncDetectionOptions syncDetectionOptions = BuildSyncDetectionOptions(command, sampleRateMHz);
+        SyncDetectionOptions syncDetectionOptions = BuildSyncDetectionOptions(
+            command,
+            system,
+            parameters,
+            sampleRateMHz);
         var tbcFieldDecoder = new TbcFieldDecodePipeline(
             SyncAnalyzer.FromParameters(
                 parameters,
@@ -323,7 +327,11 @@ public static class DecodeSessionFactory
             : new HSyncRefineOptions(Enabled: true, UseRightHSync: !BoolValueOrDefault(command, "disable_right_hsync"));
     }
 
-    private static SyncDetectionOptions BuildSyncDetectionOptions(ParsedCommand command, double sampleRateMHz)
+    private static SyncDetectionOptions BuildSyncDetectionOptions(
+        ParsedCommand command,
+        string system,
+        FormatParameterSet parameters,
+        double sampleRateMHz)
     {
         if (command.Spec.Name == "cvbs")
         {
@@ -348,12 +356,14 @@ public static class DecodeSessionFactory
             divisor = Math.Max(1, (int)Math.Floor(sampleRateMHz / 4.0));
         }
 
+        bool useImplicitFallbackVSync = parameters.TapeFormat is "TYPEC" or "EIAJ"
+            || system is "405" or "819";
         return new SyncDetectionOptions(
             DetectLevels: true,
             LevelDetectDivisor: divisor,
             UseSavedLevels: BoolValueOrDefault(command, "saved_levels"),
             ClampDcOffset: BoolValueOrDefault(command, "enable_dc_offset"),
-            UseFallbackVSync: BoolValueOrDefault(command, "fallback_vsync"),
+            UseFallbackVSync: BoolValueOrDefault(command, "fallback_vsync") || useImplicitFallbackVSync,
             RelaxedLine0: BoolValueOrDefault(command, "relaxed_line0"));
     }
 
@@ -667,7 +677,7 @@ public static class DecodeSessionFactory
 
         if (command.Values.TryGetValue("field_order_confidence", out object? confidenceValue) && confidenceValue is int parsedConfidence)
         {
-            confidence = parsedConfidence;
+            confidence = Math.Clamp(parsedConfidence, 0, 100);
         }
 
         bool allowProgressiveFlip = parameters.TapeFormat != "TYPEC";

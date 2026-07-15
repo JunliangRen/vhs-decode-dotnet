@@ -385,9 +385,9 @@ Implemented:
 - VHS/CVBS `-f cxadc` resolves to v0.4.0's `28.636363... MHz` special value,
   while LD continues to reject it; interpolation and field-order choices remain
   case-sensitive like their argparse definitions
-- `--field_order_confidence` preserves any parsed integer without clamping;
-  values outside the documented 0-100 range therefore retain v0.4.0's raw
-  Cython threshold behavior
+- `--field_order_confidence` applies v0.4.0's `0..100` clamp before the value
+  reaches field-cadence detection, including exact handling of negative and
+  greater-than-100 CLI values
 - LD `--version`/`-v` is scanned before all other arguments, and VHS
   `--params_file` validates files during parsing while retaining argparse's `-`
   stdin input convention
@@ -527,7 +527,8 @@ Implemented:
 - VHS `--field_order_confidence` and `--field_order_action` field-cadence
   handling, including TYPEC's upstream forced `none` action, disabled
   progressive flip, duplicate/drop compensation in TBC field writes, and JSON
-  metadata
+  metadata; progressive correction forces `syncConf: 10` even when the raw
+  field confidence is lower, while ordinary fields retain that raw lower value
 - SVHS custom luma filter support for embedded upstream response files plus
   high/low shelf entries
 - RF block decode pipeline that connects a sample loader, filter set, and FM
@@ -745,6 +746,8 @@ Implemented:
   read offset, derives its approximate search center from
   `frame_lines / 2 - 8`, and snaps a damaged/missing line0 to a pulse within
   0.7H; `--relaxed_line0` forces that prediction when no nearby pulse is found
+- fallback VSync is implicitly enabled for TYPEC, EIAJ, 405-line, and 819-line
+  VHS decoding exactly as in v0.4.0, without requiring `--fallback_vsync`
 - `--fallback_vsync` also ports the v0.4.0 first-field recovery path that needs
   no previous-field state: close duplicate-pulse filtering, four ordered
   HSYNC/EQ/VSYNC boundary patterns, 0.08H candidate validation, out-of-range
@@ -804,7 +807,11 @@ Implemented:
   uncentered root-mean-square value
 - VHS metadata now preserves v0.4.0's PAL-field workaround: PAL-parent tape
   formats emit `fieldPhaseID: 1` on every field, while PAL-M/NLINHA retain the
-  NTSC field-class four-phase fallback
+  NTSC field-class four-phase fallback; the NTSC fallback uses the originally
+  detected parity even when progressive handling repairs `isFirstField`
+- VHS JSON and SQLite capture metadata now use the inherited parent system like
+  v0.4.0, so CLI-reachable MESECAM, 405-line, and 819-line captures identify as
+  `PAL` while PAL-M/NLINHA preserve their existing `PAL-M` behavior
 - JSON `osInfo` now follows Python `platform`'s `system:release:version` shape
   (for example `Windows:11:10.0.26220`) instead of .NET's distinguishable OS
   description and `VersionString`
@@ -893,11 +900,12 @@ Implemented:
 - LD line-location lookahead lengths now follow the parity-specific v0.4.0
   formulas: NTSC uses `outlinecount + 10`, while PAL includes its 2/3-line
   field offset plus three additional lookahead lines
-- valid inputs that end before one complete field now follow the upstream clean
-  EOF path: empty TBC/JSON and enabled chroma/LD audio sidecars are created,
-  VHS/LD report `Completed without handling any frames.`, and the process exits
-  successfully; non-empty VHS/LD completion uses the exact upstream
-  `Completed: saving JSON and exiting.` stderr text
+- valid inputs that end before one complete field now follow the upstream
+  zero-field path: TBC and enabled chroma/LD audio sidecars are empty, no final
+  JSON is published, `.tbc.json.tmp` contains only `{`, and an enabled SQLite
+  database contains its schema but no capture or field rows; VHS/LD report
+  `Completed without handling any frames.` and exit successfully, while
+  non-empty completion uses the exact upstream completion text
 - runtime reporting now mirrors v0.4.0 across LD, VHS, and CVBS: frame status
   text is logged at DEBUG while stdout receives the same 80-column padded
   carriage-return line, INFO-and-higher diagnostics go to stderr and first
@@ -909,10 +917,11 @@ Implemented:
   at each 500-field boundary; VHS then checks free output-disk space and, below
   10 GiB, emits the exact pause/resume messages and polls once per second until
   space returns, while disk-query errors are ignored and LD/CVBS never query it
-- Ctrl+C now cancels LD, VHS, and CVBS field decoding plus VHS low-disk waits,
-  finalizes any partial TBC/JSON output without temporary metadata files, emits
-  v0.4.0's exact termination line on stderr for LD or stdout for VHS/CVBS, then
-  reports cleanup timing and exits with status 1
+- Ctrl+C now cancels LD, VHS, and CVBS field decoding plus VHS low-disk waits;
+  after at least one committed field it finalizes partial TBC/JSON output
+  without temporary metadata files, while pre-field cancellation preserves the
+  zero-field JSON-dumper artifact; it then emits v0.4.0's exact termination
+  line, reports cleanup timing, and exits with status 1
 - unexpected LD, VHS, and CVBS field-read exceptions now emit v0.4.0's exact
   bug-report header, current sample, argparse `Namespace(...)` value spelling
   and ordering, and exception line on stderr, followed by a Python-shaped
@@ -950,8 +959,20 @@ Implemented:
   sidecars stay open and preserve their cross-field state instead of retaining
   every decoded payload until EOF; VITS/3D metadata is calculated before the
   large RF/video/chroma/audio arrays are released, JSON fields stream through
-  a temporary fragment, and SQLite rows are inserted incrementally in one
-  transaction, bounding sequence memory to the field-order/previous-field state
+  a temporary fragment, and SQLite rows are inserted incrementally, bounding
+  sequence memory to the field-order/previous-field state
+- SQLite capture/PCM rows are created lazily immediately before the first field
+  row and committed first like v0.4.0; each accepted field then refreshes and
+  commits `number_of_sequential_fields`, so recovery databases never retain the
+  previous `0` count, and output-stage failures finalize earlier JSON/DB state
+  while preserving the original error
+- LD streaming output now preserves v0.4.0's write order across failure points:
+  pre-EFM/EFM precede JSON/SQLite metadata, main TBC follows metadata, and
+  RF_TBC/AC3 plus analog PCM follow main TBC; a field with no analog payload
+  records `audioSamples: 0` without failing, and disabled EFM records zero
+  T-values even if stale counts are supplied; startup creates analog PCM before
+  EFM/pre-EFM and then RF_TBC/AC3, retaining the same earlier empty artifacts
+  when a later sidecar cannot be created
 - deterministic 32768-sample v0.4.0 block baselines cover all 357 valid
   system/format/speed combinations across PAL, PAL-M, NTSC, MESECAM, 405, 819,
   and NLINHA: all 1,428 `demod`, `demod_05`, `demod_burst`, and `envelope`
@@ -1050,9 +1071,9 @@ Implemented:
   are byte-exact with respective SHA-256 hashes
   `6EDE21D03EF83CEB25231E57A79921023DD146B802BE081C2AA07F59E2DD302C`
   and `8139B8B89EB9516ACD0CA6B2502214A5DF0B2598527B8A76B132E6174BBBD60B`
-- zero-field CVBS runs preserve v0.4.0's JSON-dumper failure artifacts: an
-  empty `.tbc`, no final `.tbc.json`, a one-byte `.tbc.json.tmp` containing
-  `{`, and the `Unable to find any sync pulses, skipping one second` log entry
+- zero-field CVBS runs additionally preserve the
+  `Unable to find any sync pulses, skipping one second` log entry alongside the
+  shared LD/VHS/CVBS zero-field artifacts described above
 - on the same varying-level fixture, default non-clamped CVBS with `--threads 0`
   now reproduces v0.4.0's synchronous speculative-field timing: each requested
   field is rendered with the next decoded field's `ire0`/`hz_ire`, the producer
@@ -1161,7 +1182,7 @@ dotnet test VHSDecodeDotNet.slnx --no-build
 ```
 
 The current formal solution build completes with zero warnings and errors, and
-the xUnit v3 project exposes 465 independently discoverable compatibility tests
+the xUnit v3 project exposes 487 independently discoverable compatibility tests
 to `dotnet test` and Visual Studio Test Explorer. On the
 same Windows machine and fixtures, Release wall-clock measurements for one
 frame were 2.346 s versus 7.193 s for NTSC VHS and 1.651 s versus 5.865 s for
