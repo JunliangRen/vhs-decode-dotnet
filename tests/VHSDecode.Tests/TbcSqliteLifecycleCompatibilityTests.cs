@@ -430,6 +430,45 @@ public sealed class TbcSqliteLifecycleCompatibilityTests
         }
     }
 
+    [Fact(DisplayName = "CVBS completion message precedes payload close like v0.4.0")]
+    public void CvbsCompletionMessagePrecedesPayloadCloseLikeV040()
+    {
+        string tempDirectory = CreateTempDirectory();
+        try
+        {
+            string outputBase = Path.Combine(tempDirectory, "cvbs-completion-order");
+            using DecodeSession session = CreateSession("cvbs", outputBase);
+            var output = new StringWriter();
+            var error = new StringWriter();
+            session.RuntimeReporter = new DecodeRuntimeReporter(output, error);
+            int payloadsClosed = 0;
+            var engine = new TbcFieldSequenceDecodeEngine(readField: (_, _, _, _, _) => null)
+            {
+                CreateTbcOutput = _ => new DisposeTrackingStream("cvbs", _ =>
+                {
+                    payloadsClosed++;
+                    Assert.Contains("saving JSON and exiting", output.ToString(), StringComparison.Ordinal);
+                })
+            };
+
+            TbcFieldSequenceDecodeResult result = engine.TryDecodeAndWrite(
+                session,
+                Stream.Null,
+                maxFields: 1);
+
+            Assert.True(result.Success);
+            Assert.True(payloadsClosed > 0);
+            string completionOutput = output.ToString();
+            Assert.Equal("saving JSON and exiting" + Environment.NewLine, completionOutput);
+            session.RuntimeReporter.WriteCvbsCompletion(session.TbcRenderer.CvbsAgcStatistics);
+            Assert.Equal(completionOutput, output.ToString());
+        }
+        finally
+        {
+            Directory.Delete(tempDirectory, recursive: true);
+        }
+    }
+
     private static DecodeSession CreateSession(string decoder, string outputBase)
     {
         (DecodeCommandSpec Spec, string[] Arguments) command = decoder switch

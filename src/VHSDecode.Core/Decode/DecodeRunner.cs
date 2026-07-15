@@ -134,15 +134,14 @@ public sealed class DecodeRunner
                     .TryDecodeAndWrite(session);
                 if (result.Success && command.Spec == CliSpecs.Cvbs)
                 {
-                    WriteCvbsAgcStatistics(session.TbcRenderer.CvbsAgcStatistics, error);
-                    output.WriteLine("saving JSON and exiting");
+                    runtimeReporter.WriteCvbsCompletion(session.TbcRenderer.CvbsAgcStatistics);
                 }
                 else if (result.Success)
                 {
-                    WriteCompletionMessage(result.WrittenFieldCount, error);
+                    runtimeReporter.WriteCompletionMessage(result.WrittenFieldCount);
                     if (result.TestLdf is { } testLdf)
                     {
-                        WriteTestLdfReport(testLdf, error);
+                        runtimeReporter.CompleteTestLdfReport(testLdf);
                     }
                 }
                 else
@@ -294,10 +293,24 @@ public sealed class DecodeRunner
             return;
         }
 
+        WriteTestLdfReportStart(result.OutputPath, result.StartSample, result.EndSample, error);
+        WriteTestLdfReportCompletion(result, error);
+    }
+
+    internal static void WriteTestLdfReportStart(
+        string outputPath,
+        long startSample,
+        long endSample,
+        TextWriter error)
+    {
         error.WriteLine();
-        error.WriteLine($"Writing input samples to {result.OutputPath}...");
-        error.WriteLine($"  Start sample: {result.StartSample}");
-        error.WriteLine($"  End sample: {result.EndSample}");
+        error.WriteLine($"Writing input samples to {outputPath}...");
+        error.WriteLine($"  Start sample: {startSample}");
+        error.WriteLine($"  End sample: {endSample}");
+    }
+
+    internal static void WriteTestLdfReportCompletion(LdTestLdfWriteResult result, TextWriter error)
+    {
         if (result.EndSample <= result.StartSample)
         {
             error.WriteLine("WARNING: No samples to write");

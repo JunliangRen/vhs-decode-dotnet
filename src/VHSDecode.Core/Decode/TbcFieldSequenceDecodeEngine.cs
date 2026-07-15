@@ -166,9 +166,18 @@ public sealed class TbcFieldSequenceDecodeEngine
                 {
                     output.WriteMetadataSnapshot();
                 });
+            if (session.Spec.Name == "cvbs")
+            {
+                session.RuntimeReporter?.WriteCvbsCompletion(session.TbcRenderer.CvbsAgcStatistics);
+            }
+            else
+            {
+                session.RuntimeReporter?.WriteCompletionMessage(output.WrittenFieldCount);
+            }
+
+            LdTestLdfWriteResult? testLdf = WriteOptionalTestLdf(session, input, summary);
             TbcFieldSequenceDecodeResult result = output.Complete();
             outputCompleted = true;
-            LdTestLdfWriteResult? testLdf = WriteOptionalTestLdf(session, input, summary);
             return testLdf.HasValue
                 ? result with
                 {
@@ -1078,9 +1087,22 @@ public sealed class TbcFieldSequenceDecodeEngine
         }
 
         long endSample = checked(summary.EndSample + TestLdfLookaheadSamples);
-        return endSample > summary.StartSample
-            ? _testLdfWriter.Write(session, summary.StartSample, endSample, input)
-            : null;
+        if (endSample <= summary.StartSample)
+        {
+            return null;
+        }
+
+        session.RuntimeReporter?.BeginTestLdfReport(
+            session.TestLdfOutputPath,
+            summary.StartSample,
+            endSample);
+        LdTestLdfWriteResult result = _testLdfWriter.Write(
+            session,
+            summary.StartSample,
+            endSample,
+            input);
+        session.RuntimeReporter?.CompleteTestLdfReport(result);
+        return result;
     }
 
     public static (long StartSample, long EndSample)? ComputeTestLdfSampleRange(
@@ -1149,6 +1171,8 @@ public sealed class TbcFieldSequenceDecodeEngine
         private bool _payloadsClosed;
         private bool _completed;
         private int _writtenFieldCount;
+
+        public int WrittenFieldCount => _writtenFieldCount;
 
         public StreamingOutputSession(
             DecodeSession session,

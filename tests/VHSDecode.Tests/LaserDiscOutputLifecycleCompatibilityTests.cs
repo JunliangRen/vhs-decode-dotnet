@@ -502,6 +502,123 @@ public sealed class LaserDiscOutputLifecycleCompatibilityTests
         }
     }
 
+    [Fact(DisplayName = "LD test LDF runs before JSON and payload completion like v0.4.0")]
+    public void LdTestLdfRunsBeforeJsonAndPayloadCompletionLikeV040()
+    {
+        string tempDirectory = CreateTempDirectory();
+        try
+        {
+            string outputBase = Path.Combine(tempDirectory, "ldf-completion-order");
+            string ldfPath = Path.Combine(tempDirectory, "completion-order.ldf");
+            using DecodeSession session = CreateNtscSession(
+                outputBase,
+                "--disable_analog_audio",
+                "--noEFM",
+                "--length",
+                "0",
+                "--write-test-ldf",
+                ldfPath);
+            var output = new StringWriter();
+            var error = new StringWriter();
+            session.RuntimeReporter = new DecodeRuntimeReporter(output, error);
+            bool payloadClosed = false;
+            bool writerCalled = false;
+            var testLdfWriter = new DelegateLdTestLdfWriter((activeSession, startSample, endSample, _) =>
+            {
+                writerCalled = true;
+                Assert.False(payloadClosed);
+                Assert.False(File.Exists(outputBase + ".tbc.json.tmp"));
+                string liveError = error.ToString();
+                Assert.Contains("Completed without handling any frames.", liveError, StringComparison.Ordinal);
+                Assert.Contains($"Writing input samples to {ldfPath}...", liveError, StringComparison.Ordinal);
+                Assert.DoesNotContain("Samples written:", liveError, StringComparison.Ordinal);
+                return new LdTestLdfWriteResult(
+                    true,
+                    "recorded LD test LDF lifecycle",
+                    endSample - startSample,
+                    startSample,
+                    endSample,
+                    activeSession.TestLdfOutputPath);
+            });
+            var engine = new TbcFieldSequenceDecodeEngine(
+                testLdfWriter: testLdfWriter,
+                readField: (_, _, _, _, _) => throw new InvalidOperationException("zero length must not decode"))
+            {
+                CreateTbcOutput = _ => new DisposeTrackingStream("video", _ => payloadClosed = true)
+            };
+
+            TbcFieldSequenceDecodeResult result = engine.TryDecodeAndWrite(session, Stream.Null);
+
+            Assert.True(result.Success);
+            Assert.True(writerCalled);
+            Assert.True(payloadClosed);
+            Assert.Equal("{", File.ReadAllText(outputBase + ".tbc.json.tmp"));
+            string finalError = error.ToString();
+            Assert.True(finalError.IndexOf("Completed without handling any frames.", StringComparison.Ordinal)
+                < finalError.IndexOf("Writing input samples to", StringComparison.Ordinal));
+            Assert.True(finalError.IndexOf("Writing input samples to", StringComparison.Ordinal)
+                < finalError.IndexOf("Samples written:", StringComparison.Ordinal));
+            Assert.True(finalError.IndexOf("Samples written:", StringComparison.Ordinal)
+                < finalError.IndexOf("Successfully wrote", StringComparison.Ordinal));
+
+            session.RuntimeReporter.WriteCompletionMessage(result.WrittenFieldCount);
+            session.RuntimeReporter.CompleteTestLdfReport(Assert.IsType<LdTestLdfWriteResult>(result.TestLdf));
+            Assert.Equal(finalError, error.ToString());
+        }
+        finally
+        {
+            Directory.Delete(tempDirectory, recursive: true);
+        }
+    }
+
+    [Fact(DisplayName = "LD test LDF reports samples before closing its output pipe like v0.4.0")]
+    public void LdTestLdfReportsSamplesBeforeClosingOutputPipeLikeV040()
+    {
+        string tempDirectory = CreateTempDirectory();
+        try
+        {
+            string inputPath = Path.Combine(tempDirectory, "input.s16");
+            string outputBase = Path.Combine(tempDirectory, "ldf-pipe-order");
+            string ldfPath = Path.Combine(tempDirectory, "pipe-order.ldf");
+            File.WriteAllBytes(inputPath, [0, 0, 1, 0, 2, 0, 3, 0]);
+            ParsedCommand command = new CommandLineParser().Parse(CliSpecs.LaserDisc, [
+                "--NTSC",
+                "--threads",
+                "0",
+                "--disable_analog_audio",
+                "--noEFM",
+                "--write-test-ldf",
+                ldfPath,
+                inputPath,
+                outputBase
+            ]);
+            using DecodeSession session = DecodeSessionFactory.Create(command);
+            var output = new StringWriter();
+            var error = new StringWriter();
+            session.RuntimeReporter = new DecodeRuntimeReporter(output, error);
+            bool pipeClosed = false;
+            var writer = new FfmpegLdTestLdfWriter(
+                _ => new DisposeTrackingStream("ldf", _ =>
+                {
+                    pipeClosed = true;
+                    Assert.Contains("  Samples written: 3", error.ToString(), StringComparison.Ordinal);
+                    Assert.DoesNotContain("Successfully wrote", error.ToString(), StringComparison.Ordinal);
+                }),
+                chunkSamples: 2);
+            using FileStream input = File.OpenRead(inputPath);
+
+            LdTestLdfWriteResult result = writer.Write(session, 0, 3, input);
+
+            Assert.True(result.Success);
+            Assert.True(pipeClosed);
+            Assert.Contains($"Successfully wrote {ldfPath}", error.ToString(), StringComparison.Ordinal);
+        }
+        finally
+        {
+            Directory.Delete(tempDirectory, recursive: true);
+        }
+    }
+
     private static DecodeSession CreateSession(string outputBase, params string[] options)
         => CreateSessionForSystem(outputBase, "--PAL", options);
 
@@ -668,5 +785,17 @@ public sealed class LaserDiscOutputLifecycleCompatibilityTests
                 endSample,
                 session.TestLdfOutputPath);
         }
+    }
+
+    private sealed class DelegateLdTestLdfWriter(
+        Func<DecodeSession, long, long, Stream, LdTestLdfWriteResult> write)
+        : ILdTestLdfWriter
+    {
+        public LdTestLdfWriteResult Write(
+            DecodeSession session,
+            long startSample,
+            long endSample,
+            Stream input)
+            => write(session, startSample, endSample, input);
     }
 }
