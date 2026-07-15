@@ -13,6 +13,12 @@ public interface ILaserDiscEfmOutputWriter
 public interface ILaserDiscFieldOutputSession : IDisposable
 {
     TbcDecodedField Write(TbcDecodedField field);
+
+    TbcDecodedField WriteBeforeMetadata(TbcDecodedField field) => Write(field);
+
+    void WriteAfterVideo(TbcDecodedField field)
+    {
+    }
 }
 
 public sealed class LaserDiscEfmOutputWriter : ILaserDiscEfmOutputWriter
@@ -124,9 +130,15 @@ public sealed class LaserDiscEfmOutputWriter : ILaserDiscEfmOutputWriter
 
         public TbcDecodedField Write(TbcDecodedField field)
         {
+            TbcDecodedField prepared = WriteBeforeMetadata(field);
+            WriteAfterVideo(prepared);
+            return prepared;
+        }
+
+        public TbcDecodedField WriteBeforeMetadata(TbcDecodedField field)
+        {
             ObjectDisposedException.ThrowIf(_disposed, this);
-            int efmTValueCount = field.EfmTValueCount;
-            int audioSampleCount = field.AudioSampleCount;
+            int efmTValueCount = 0;
             if (_efmOutput is not null)
             {
                 if (field.Efm is null)
@@ -144,16 +156,19 @@ public sealed class LaserDiscEfmOutputWriter : ILaserDiscEfmOutputWriter
                 efmTValueCount = efmTValues.Length;
             }
 
-            if (_pcmOutput is not null)
+            int audioSampleCount = _pcmOutput is not null && field.AudioPcm is not null
+                ? field.AudioPcm.Length / 2
+                : 0;
+            return field with
             {
-                if (field.AudioPcm is null)
-                {
-                    throw new InvalidOperationException("LD analog audio output was enabled but the decoded field did not contain PCM samples.");
-                }
+                EfmTValueCount = efmTValueCount,
+                AudioSampleCount = audioSampleCount
+            };
+        }
 
-                WriteInt16LittleEndian(_pcmOutput, field.AudioPcm);
-                audioSampleCount = field.AudioPcm.Length / 2;
-            }
+        public void WriteAfterVideo(TbcDecodedField field)
+        {
+            ObjectDisposedException.ThrowIf(_disposed, this);
 
             if (_rfTbcOutput is not null)
             {
@@ -176,11 +191,10 @@ public sealed class LaserDiscEfmOutputWriter : ILaserDiscEfmOutputWriter
                 _ac3Output.Write(ac3Bytes, 0, ac3Bytes.Length);
             }
 
-            return field with
+            if (_pcmOutput is not null && field.AudioPcm is not null)
             {
-                EfmTValueCount = efmTValueCount,
-                AudioSampleCount = audioSampleCount
-            };
+                WriteInt16LittleEndian(_pcmOutput, field.AudioPcm);
+            }
         }
 
         public void Dispose()

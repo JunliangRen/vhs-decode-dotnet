@@ -966,6 +966,11 @@ Implemented:
   commits `number_of_sequential_fields`, so recovery databases never retain the
   previous `0` count, and output-stage failures finalize earlier JSON/DB state
   while preserving the original error
+- LD streaming output now preserves v0.4.0's write order across failure points:
+  pre-EFM/EFM precede JSON/SQLite metadata, main TBC follows metadata, and
+  RF_TBC/AC3 plus analog PCM follow main TBC; a field with no analog payload
+  records `audioSamples: 0` without failing, and disabled EFM records zero
+  T-values even if stale counts are supplied
 - deterministic 32768-sample v0.4.0 block baselines cover all 357 valid
   system/format/speed combinations across PAL, PAL-M, NTSC, MESECAM, 405, 819,
   and NLINHA: all 1,428 `demod`, `demod_05`, `demod_burst`, and `envelope`
@@ -1175,7 +1180,7 @@ dotnet test VHSDecodeDotNet.slnx --no-build
 ```
 
 The current formal solution build completes with zero warnings and errors, and
-the xUnit v3 project exposes 481 independently discoverable compatibility tests
+the xUnit v3 project exposes 485 independently discoverable compatibility tests
 to `dotnet test` and Visual Studio Test Explorer. On the
 same Windows machine and fixtures, Release wall-clock measurements for one
 frame were 2.346 s versus 7.193 s for NTSC VHS and 1.651 s versus 5.865 s for

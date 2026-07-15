@@ -1258,6 +1258,10 @@ public sealed class TbcFieldSequenceDecodeEngine
                     $"Decoded field sample count {field.Samples.Length} does not match TBC frame spec {_session.TbcFrameSpec.FieldSampleCount} for {_paths.TbcPath}.");
             }
 
+            TbcDecodedField metadataField = _laserDiscOutput.WriteBeforeMetadata(field);
+            System.Text.Json.Nodes.JsonObject fieldInfo = _metadata.Add(metadataField, decision, field);
+            _sqlite?.Add(fieldInfo, _metadata.FieldCount, _metadata.LastOutputConverter);
+
             TbcOutputWriter.WriteFrame(_tbc, field.Samples, _session.TbcFrameSpec, field.OutputPayload);
             if (_chroma is not null)
             {
@@ -1275,10 +1279,8 @@ public sealed class TbcFieldSequenceDecodeEngine
                 TbcOutputWriter.WriteFrame(_chroma, field.ChromaSamples, _session.TbcFrameSpec);
             }
 
-            TbcDecodedField metadataField = _laserDiscOutput.Write(field);
-            System.Text.Json.Nodes.JsonObject fieldInfo = _metadata.Add(metadataField, decision, field);
-            _sqlite?.Add(fieldInfo, _metadata.FieldCount, _metadata.LastOutputConverter);
             _writtenFieldCount++;
+            _laserDiscOutput.WriteAfterVideo(metadataField);
         }
 
         private void ClosePayloads()
