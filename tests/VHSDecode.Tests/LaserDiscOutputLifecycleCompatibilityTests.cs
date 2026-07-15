@@ -221,6 +221,7 @@ public sealed class LaserDiscOutputLifecycleCompatibilityTests
                 AudioPcm = [100, -100],
                 Efm = BuildEfmSquareWave(2048)
             };
+            int readCalls = 0;
             var engine = new TbcFieldSequenceDecodeEngine(
                 efmOutputWriter: new LaserDiscEfmOutputWriter(path =>
                 {
@@ -231,7 +232,11 @@ public sealed class LaserDiscOutputLifecycleCompatibilityTests
 
                     return File.Create(path);
                 }),
-                readField: OneFieldReader(field));
+                readField: (_, _, _, _, fieldNumber) =>
+                {
+                    readCalls++;
+                    return fieldNumber == 0 ? field : null;
+                });
 
             TbcFieldSequenceDecodeResult result = engine.TryDecodeAndWrite(
                 session,
@@ -240,6 +245,7 @@ public sealed class LaserDiscOutputLifecycleCompatibilityTests
 
             Assert.False(result.Success);
             Assert.Contains("synthetic EFM creation failure", result.Message, StringComparison.Ordinal);
+            Assert.Equal(0, readCalls);
             Assert.Equal(0, new FileInfo(outputBase + ".tbc").Length);
             Assert.Equal(0, new FileInfo(outputBase + ".pcm").Length);
             Assert.False(File.Exists(outputBase + ".efm"));

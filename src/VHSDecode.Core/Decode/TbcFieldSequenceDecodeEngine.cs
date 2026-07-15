@@ -147,7 +147,7 @@ public sealed class TbcFieldSequenceDecodeEngine
         Stream input,
         int? maxFields)
     {
-        StreamingOutputSession? output = null;
+        var output = new StreamingOutputSession(session, _efmOutputWriter);
         bool outputCompleted = false;
         try
         {
@@ -158,15 +158,12 @@ public sealed class TbcFieldSequenceDecodeEngine
                 retainFields: false,
                 writeFields: writes =>
                 {
-                    output ??= new StreamingOutputSession(session, _efmOutputWriter);
                     output.Write(writes);
                 },
                 writeMetadataSnapshot: () =>
                 {
-                    output ??= new StreamingOutputSession(session, _efmOutputWriter);
                     output.WriteMetadataSnapshot();
                 });
-            output ??= new StreamingOutputSession(session, _efmOutputWriter);
             TbcFieldSequenceDecodeResult result = output.Complete();
             outputCompleted = true;
             LdTestLdfWriteResult? testLdf = WriteOptionalTestLdf(session, input, summary);
@@ -178,25 +175,17 @@ public sealed class TbcFieldSequenceDecodeEngine
                 }
                 : result;
         }
-        catch (Exception ex)
+        catch (Exception)
         {
             if (!outputCompleted)
             {
-                if (output is null && ex is OperationCanceledException or DecodeFieldReadException)
+                try
                 {
-                    output = new StreamingOutputSession(session, _efmOutputWriter);
+                    _ = output.Complete();
                 }
-
-                if (output is not null)
+                catch
                 {
-                    try
-                    {
-                        _ = output.Complete();
-                    }
-                    catch
-                    {
-                        // Preserve the exception that interrupted decoding.
-                    }
+                    // Preserve the exception that interrupted decoding.
                 }
             }
 
@@ -204,7 +193,7 @@ public sealed class TbcFieldSequenceDecodeEngine
         }
         finally
         {
-            output?.Dispose();
+            output.Dispose();
         }
     }
 
@@ -1174,15 +1163,24 @@ public sealed class TbcFieldSequenceDecodeEngine
             TbcSqliteMetadataWriter.SequenceWriter? sqlite = null;
             try
             {
+                bool isLaserDisc = session.Spec.Name == "ld";
+                bool writeSqlite = isLaserDisc || session.ExecutionOptions.WriteDebugData;
+                if (writeSqlite && !isLaserDisc)
+                {
+                    sqlite = new TbcSqliteMetadataWriter.SequenceWriter(session, _paths.DbPath!);
+                }
+
                 tbc = File.Create(_paths.TbcPath);
                 chroma = session.ChromaOptions?.WriteChroma == true
                     ? File.Create(_paths.ChromaPath!)
                     : null;
                 laserDiscOutput = efmOutputWriter.Open(session);
+                if (writeSqlite && isLaserDisc)
+                {
+                    sqlite = new TbcSqliteMetadataWriter.SequenceWriter(session, _paths.DbPath!);
+                }
+
                 metadata = new TbcOutputMetadataWriter.StreamingWriter(session, _paths.JsonPath);
-                sqlite = session.Spec.Name == "ld" || session.ExecutionOptions.WriteDebugData
-                    ? new TbcSqliteMetadataWriter.SequenceWriter(session, _paths.DbPath!)
-                    : null;
                 _tbc = tbc;
                 _chroma = chroma;
                 _laserDiscOutput = laserDiscOutput;

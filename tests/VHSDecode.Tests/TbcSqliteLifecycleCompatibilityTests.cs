@@ -9,6 +9,158 @@ namespace VHSDecode.Tests;
 
 public sealed class TbcSqliteLifecycleCompatibilityTests
 {
+    [Theory(DisplayName = "VHS/CVBS SQLite creation failures precede video creation and field reads like v0.4.0")]
+    [InlineData("vhs")]
+    [InlineData("cvbs")]
+    public void TapeSqliteCreationFailuresPrecedeVideoAndFieldReadsLikeV040(string decoder)
+    {
+        string tempDirectory = CreateTempDirectory();
+        try
+        {
+            string outputBase = Path.Combine(tempDirectory, decoder + "-db-failure");
+            Directory.CreateDirectory(outputBase + ".tbc.db");
+            using DecodeSession session = CreateSession(decoder, outputBase);
+            int readCalls = 0;
+            var engine = new TbcFieldSequenceDecodeEngine(readField: (_, _, _, _, _) =>
+            {
+                readCalls++;
+                return null;
+            });
+
+            _ = Assert.Throws<SqliteException>(() => engine.TryDecodeAndWrite(
+                session,
+                Stream.Null,
+                maxFields: 1));
+
+            Assert.Equal(0, readCalls);
+            Assert.False(File.Exists(outputBase + ".tbc"));
+            Assert.False(File.Exists(outputBase + "_chroma.tbc"));
+            Assert.False(File.Exists(outputBase + ".tbc.json"));
+            Assert.False(File.Exists(outputBase + ".tbc.json.tmp"));
+            Assert.False(File.Exists(outputBase + ".tbc.json.fields.tmp"));
+        }
+        finally
+        {
+            Directory.Delete(tempDirectory, recursive: true);
+        }
+    }
+
+    [Theory(DisplayName = "VHS/CVBS video creation failures retain the earlier SQLite schema like v0.4.0")]
+    [InlineData("vhs")]
+    [InlineData("cvbs")]
+    public void TapeVideoCreationFailuresRetainEarlierSqliteSchemaLikeV040(string decoder)
+    {
+        string tempDirectory = CreateTempDirectory();
+        try
+        {
+            string outputBase = Path.Combine(tempDirectory, decoder + "-video-failure");
+            Directory.CreateDirectory(outputBase + ".tbc");
+            using DecodeSession session = CreateSession(decoder, outputBase);
+            int readCalls = 0;
+            var engine = new TbcFieldSequenceDecodeEngine(readField: (_, _, _, _, _) =>
+            {
+                readCalls++;
+                return null;
+            });
+
+            TbcFieldSequenceDecodeResult result = engine.TryDecodeAndWrite(
+                session,
+                Stream.Null,
+                maxFields: 1);
+
+            Assert.False(result.Success);
+            Assert.Equal(0, readCalls);
+            Assert.True(Directory.Exists(outputBase + ".tbc"));
+            Assert.Equal(0, QueryLong(outputBase + ".tbc.db", "SELECT COUNT(*) FROM capture"));
+            Assert.Equal(0, QueryLong(outputBase + ".tbc.db", "SELECT COUNT(*) FROM field_record"));
+            Assert.False(File.Exists(outputBase + "_chroma.tbc"));
+            Assert.False(File.Exists(outputBase + ".tbc.json"));
+            Assert.False(File.Exists(outputBase + ".tbc.json.tmp"));
+            Assert.False(File.Exists(outputBase + ".tbc.json.fields.tmp"));
+        }
+        finally
+        {
+            Directory.Delete(tempDirectory, recursive: true);
+        }
+    }
+
+    [Fact(DisplayName = "VHS chroma creation failures retain earlier SQLite and video artifacts like v0.4.0")]
+    public void VhsChromaCreationFailuresRetainEarlierSqliteAndVideoLikeV040()
+    {
+        string tempDirectory = CreateTempDirectory();
+        try
+        {
+            string outputBase = Path.Combine(tempDirectory, "vhs-chroma-failure");
+            Directory.CreateDirectory(outputBase + "_chroma.tbc");
+            using DecodeSession session = CreateSession("vhs", outputBase);
+            int readCalls = 0;
+            var engine = new TbcFieldSequenceDecodeEngine(readField: (_, _, _, _, _) =>
+            {
+                readCalls++;
+                return null;
+            });
+
+            TbcFieldSequenceDecodeResult result = engine.TryDecodeAndWrite(
+                session,
+                Stream.Null,
+                maxFields: 1);
+
+            Assert.False(result.Success);
+            Assert.Equal(0, readCalls);
+            Assert.Equal(0, new FileInfo(outputBase + ".tbc").Length);
+            Assert.True(Directory.Exists(outputBase + "_chroma.tbc"));
+            Assert.Equal(0, QueryLong(outputBase + ".tbc.db", "SELECT COUNT(*) FROM capture"));
+            Assert.Equal(0, QueryLong(outputBase + ".tbc.db", "SELECT COUNT(*) FROM field_record"));
+            Assert.False(File.Exists(outputBase + ".tbc.json"));
+            Assert.False(File.Exists(outputBase + ".tbc.json.tmp"));
+            Assert.False(File.Exists(outputBase + ".tbc.json.fields.tmp"));
+        }
+        finally
+        {
+            Directory.Delete(tempDirectory, recursive: true);
+        }
+    }
+
+    [Fact(DisplayName = "LD SQLite creation failures retain earlier video and PCM artifacts like v0.4.0")]
+    public void LdSqliteCreationFailuresRetainEarlierVideoAndPcmLikeV040()
+    {
+        string tempDirectory = CreateTempDirectory();
+        try
+        {
+            string outputBase = Path.Combine(tempDirectory, "ld-db-failure");
+            Directory.CreateDirectory(outputBase + ".tbc.db");
+            ParsedCommand parsed = new CommandLineParser().Parse(CliSpecs.LaserDisc, [
+                "--PAL",
+                "--noEFM",
+                "input.s16",
+                outputBase
+            ]);
+            using DecodeSession session = DecodeSessionFactory.Create(parsed);
+            int readCalls = 0;
+            var engine = new TbcFieldSequenceDecodeEngine(readField: (_, _, _, _, _) =>
+            {
+                readCalls++;
+                return null;
+            });
+
+            _ = Assert.Throws<SqliteException>(() => engine.TryDecodeAndWrite(
+                session,
+                Stream.Null,
+                maxFields: 1));
+
+            Assert.Equal(0, readCalls);
+            Assert.Equal(0, new FileInfo(outputBase + ".tbc").Length);
+            Assert.Equal(0, new FileInfo(outputBase + ".pcm").Length);
+            Assert.False(File.Exists(outputBase + ".tbc.json"));
+            Assert.False(File.Exists(outputBase + ".tbc.json.tmp"));
+            Assert.False(File.Exists(outputBase + ".tbc.json.fields.tmp"));
+        }
+        finally
+        {
+            Directory.Delete(tempDirectory, recursive: true);
+        }
+    }
+
     [Theory(DisplayName = "Zero-field metadata artifacts match v0.4.0")]
     [InlineData("vhs")]
     [InlineData("cvbs")]
