@@ -3,6 +3,8 @@ using System.ComponentModel;
 using System.Diagnostics;
 using System.Globalization;
 using System.Text;
+using System.Text.Json;
+using System.Threading.Channels;
 
 namespace VHSDecode.Core.Rf;
 
@@ -18,7 +20,7 @@ public sealed class FfmpegPcm16SampleLoader : IRfSampleLoader, IDisposable
     private readonly Func<int?>? _exitCodeAfterOutputEnd;
     private readonly Func<string>? _stderrProvider;
     private readonly StringBuilder _stderr = new();
-    private int? _containerAudioSampleRateHz;
+    private ContainerAudioInfo? _containerAudioInfo;
     private Stream? _output;
     private Process? _process;
     private long _positionBytes;
@@ -166,6 +168,55 @@ public sealed class FfmpegPcm16SampleLoader : IRfSampleLoader, IDisposable
         ];
     }
 
+    internal static IReadOnlyList<string> BuildPyAvFramedFfmpegArguments(
+        string filename,
+        long targetSample,
+        int sampleRateHz)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(filename);
+        if (targetSample < 0)
+        {
+            throw new ArgumentOutOfRangeException(nameof(targetSample));
+        }
+
+        if (sampleRateHz <= 0)
+        {
+            throw new ArgumentOutOfRangeException(nameof(sampleRateHz));
+        }
+
+        var arguments = new List<string>
+        {
+            "-hide_banner",
+            "-loglevel",
+            "level+info",
+            "-nostdin",
+            "-copyts"
+        };
+        long seekTimestamp = Math.Max(0, (targetSample / 1000) - sampleRateHz);
+        if (seekTimestamp > 0)
+        {
+            arguments.Add("-ss");
+            arguments.Add(FormatSeekSeconds(seekTimestamp, 1_000_000));
+            arguments.Add("-noaccurate_seek");
+            arguments.Add("-seek_timestamp");
+            arguments.Add("1");
+            arguments.Add("-seek2any");
+            arguments.Add("1");
+        }
+
+        arguments.AddRange(
+        [
+            "-i", filename,
+            "-map", "0:a:0",
+            "-af", "aformat=sample_fmts=s16:channel_layouts=mono,ashowinfo",
+            "-f", "s16le",
+            "-acodec", "pcm_s16le",
+            "-ac", "1",
+            "-"
+        ]);
+        return arguments;
+    }
+
     private double[]? ReadSegment(long sample, int readLength)
     {
         Func<string, long, int, byte[]?> readSegment =
@@ -280,7 +331,15 @@ public sealed class FfmpegPcm16SampleLoader : IRfSampleLoader, IDisposable
     private Stream OpenFfmpegOutput(string filename, long sample)
     {
         _stderr.Clear();
-        int containerAudioSampleRateHz = ResolveContainerAudioSampleRate(filename);
+        ContainerAudioInfo audioInfo = ResolveContainerAudioInfo(filename);
+        Channel<PyAvAudioFrameGeometry>? frameGeometry = audioInfo.RequiresPyAvPlanePadding
+            ? Channel.CreateUnbounded<PyAvAudioFrameGeometry>(new UnboundedChannelOptions
+            {
+                SingleReader = true,
+                SingleWriter = true
+            })
+            : null;
+
         var startInfo = new ProcessStartInfo("ffmpeg")
         {
             UseShellExecute = false,
@@ -289,7 +348,10 @@ public sealed class FfmpegPcm16SampleLoader : IRfSampleLoader, IDisposable
             CreateNoWindow = true
         };
 
-        foreach (string argument in BuildFfmpegArguments(filename, sample, containerAudioSampleRateHz))
+        IReadOnlyList<string> arguments = audioInfo.RequiresPyAvPlanePadding
+            ? BuildPyAvFramedFfmpegArguments(filename, sample, audioInfo.SampleRateHz)
+            : BuildFfmpegArguments(filename, sample, audioInfo.SampleRateHz);
+        foreach (string argument in arguments)
         {
             startInfo.ArgumentList.Add(argument);
         }
@@ -297,7 +359,16 @@ public sealed class FfmpegPcm16SampleLoader : IRfSampleLoader, IDisposable
         _process = new Process { StartInfo = startInfo };
         _process.ErrorDataReceived += (_, args) =>
         {
-            if (args.Data is { Length: > 0 })
+            if (args.Data is null)
+            {
+                frameGeometry?.Writer.TryComplete();
+            }
+            else if (frameGeometry is not null
+                && TryParsePyAvAudioFrameGeometry(args.Data, out PyAvAudioFrameGeometry geometry))
+            {
+                frameGeometry.Writer.TryWrite(geometry);
+            }
+            else if (frameGeometry is null || IsFfmpegErrorLine(args.Data))
             {
                 _stderr.AppendLine(args.Data);
             }
@@ -312,26 +383,103 @@ public sealed class FfmpegPcm16SampleLoader : IRfSampleLoader, IDisposable
         }
         catch (Win32Exception ex)
         {
+            frameGeometry?.Writer.TryComplete(ex);
             throw new NotSupportedException("FFmpeg is required to decode .ldf/.flac/.vhs/raw.oga RF inputs.", ex);
         }
 
         _process.BeginErrorReadLine();
-        return _process.StandardOutput.BaseStream;
+        Stream output = _process.StandardOutput.BaseStream;
+        return frameGeometry is null
+            ? output
+            : new PyAvAudioPlanePaddingStream(
+                output,
+                () => ReadNextFrameGeometry(frameGeometry.Reader),
+                sample);
     }
 
-    private int ResolveContainerAudioSampleRate(string filename)
+    internal static bool TryParsePyAvAudioFrameGeometry(
+        string line,
+        out PyAvAudioFrameGeometry geometry)
     {
-        if (_containerAudioSampleRateHz.HasValue)
+        geometry = default;
+        if (!line.Contains("Parsed_ashowinfo_", StringComparison.Ordinal)
+            || !TryParseInt64Field(line, "nb_samples:", out long logicalSamples)
+            || logicalSamples <= 0
+            || logicalSamples > int.MaxValue)
         {
-            return _containerAudioSampleRateHz.Value;
+            return false;
         }
 
-        _containerAudioSampleRateHz = ProbeContainerAudioSampleRate(filename)
-            ?? ContainerAudioSampleRateHz;
-        return _containerAudioSampleRateHz.Value;
+        long? presentationRfSample = null;
+        if (TryParseInt64Field(line, "pts:", out long presentationSample)
+            && presentationSample is >= long.MinValue / 1000 and <= long.MaxValue / 1000)
+        {
+            presentationRfSample = presentationSample * 1000;
+        }
+
+        geometry = new PyAvAudioFrameGeometry(
+            checked((int)logicalSamples),
+            presentationRfSample);
+        return true;
     }
 
-    private static int? ProbeContainerAudioSampleRate(string filename)
+    private static bool TryParseInt64Field(string line, string field, out long value)
+    {
+        int start = line.IndexOf(field, StringComparison.Ordinal);
+        if (start < 0)
+        {
+            value = 0;
+            return false;
+        }
+
+        start += field.Length;
+        int end = line.IndexOf(' ', start);
+        ReadOnlySpan<char> token = end < 0
+            ? line.AsSpan(start)
+            : line.AsSpan(start, end - start);
+        return long.TryParse(
+            token,
+            NumberStyles.Integer,
+            CultureInfo.InvariantCulture,
+            out value);
+    }
+
+    private static PyAvAudioFrameGeometry? ReadNextFrameGeometry(
+        ChannelReader<PyAvAudioFrameGeometry> reader)
+    {
+        if (reader.TryRead(out PyAvAudioFrameGeometry geometry))
+        {
+            return geometry;
+        }
+
+        try
+        {
+            return reader.ReadAsync().AsTask().GetAwaiter().GetResult();
+        }
+        catch (ChannelClosedException)
+        {
+            return null;
+        }
+    }
+
+    private static bool IsFfmpegErrorLine(string line)
+        => line.Contains("[error]", StringComparison.OrdinalIgnoreCase)
+            || line.Contains("[fatal]", StringComparison.OrdinalIgnoreCase)
+            || line.Contains("[panic]", StringComparison.OrdinalIgnoreCase);
+
+    private ContainerAudioInfo ResolveContainerAudioInfo(string filename)
+    {
+        if (_containerAudioInfo is not null)
+        {
+            return _containerAudioInfo;
+        }
+
+        _containerAudioInfo = ProbeContainerAudioInfo(filename)
+            ?? ContainerAudioInfo.Default;
+        return _containerAudioInfo;
+    }
+
+    private static ContainerAudioInfo? ProbeContainerAudioInfo(string filename)
     {
         var startInfo = new ProcessStartInfo("ffprobe")
         {
@@ -344,8 +492,9 @@ public sealed class FfmpegPcm16SampleLoader : IRfSampleLoader, IDisposable
         {
             "-v", "error",
             "-select_streams", "a:0",
-            "-show_entries", "stream=sample_rate",
-            "-of", "default=noprint_wrappers=1:nokey=1",
+            "-read_intervals", "%+#1",
+            "-show_entries", "stream=sample_rate,channels,sample_fmt:frame=nb_samples",
+            "-of", "json",
             filename
         })
         {
@@ -360,19 +509,72 @@ public sealed class FfmpegPcm16SampleLoader : IRfSampleLoader, IDisposable
                 return null;
             }
 
-            string output = process.StandardOutput.ReadToEnd().Trim();
-            _ = process.StandardError.ReadToEnd();
+            Task<string> standardOutput = process.StandardOutput.ReadToEndAsync();
+            Task<string> standardError = process.StandardError.ReadToEndAsync();
             process.WaitForExit();
+            Task.WhenAll(standardOutput, standardError).GetAwaiter().GetResult();
             return process.ExitCode == 0
-                && int.TryParse(output, NumberStyles.Integer, CultureInfo.InvariantCulture, out int sampleRate)
-                && sampleRate > 0
-                    ? sampleRate
-                    : null;
+                ? ParseContainerAudioInfo(standardOutput.Result)
+                : null;
         }
-        catch (Exception ex) when (ex is Win32Exception or InvalidOperationException)
+        catch (Exception ex) when (ex is Win32Exception
+            or InvalidOperationException
+            or JsonException
+            or FormatException
+            or OverflowException)
         {
             return null;
         }
+    }
+
+    private static ContainerAudioInfo? ParseContainerAudioInfo(string json)
+    {
+        using JsonDocument document = JsonDocument.Parse(json);
+        JsonElement root = document.RootElement;
+        if (!root.TryGetProperty("streams", out JsonElement streams)
+            || streams.ValueKind != JsonValueKind.Array
+            || streams.GetArrayLength() == 0)
+        {
+            return null;
+        }
+
+        JsonElement stream = streams[0];
+        string? sampleRateText = stream.TryGetProperty("sample_rate", out JsonElement sampleRateValue)
+            ? sampleRateValue.GetString()
+            : null;
+        if (!int.TryParse(
+                sampleRateText,
+                NumberStyles.Integer,
+                CultureInfo.InvariantCulture,
+                out int sampleRate)
+            || sampleRate <= 0)
+        {
+            return null;
+        }
+
+        int channels = stream.TryGetProperty("channels", out JsonElement channelValue)
+            ? channelValue.GetInt32()
+            : 1;
+        string sampleFormat = stream.TryGetProperty("sample_fmt", out JsonElement sampleFormatValue)
+            ? sampleFormatValue.GetString() ?? string.Empty
+            : string.Empty;
+        int frameSamples = 0;
+        if (root.TryGetProperty("frames", out JsonElement frames)
+            && frames.ValueKind == JsonValueKind.Array
+            && frames.GetArrayLength() > 0
+            && frames[0].TryGetProperty("nb_samples", out JsonElement frameSamplesValue))
+        {
+            frameSamples = frameSamplesValue.GetInt32();
+        }
+
+        bool requiresPadding = frameSamples > 0
+            && channels > 0
+            && sampleFormat.Length > 0
+            && (channels != 1 || !string.Equals(sampleFormat, "s16", StringComparison.Ordinal));
+        return new ContainerAudioInfo(
+            sampleRate,
+            frameSamples,
+            requiresPadding);
     }
 
     private byte[] ReadData(int count)
@@ -566,5 +768,16 @@ public sealed class FfmpegPcm16SampleLoader : IRfSampleLoader, IDisposable
         catch (InvalidOperationException)
         {
         }
+    }
+
+    private sealed record ContainerAudioInfo(
+        int SampleRateHz,
+        int FrameSamples,
+        bool RequiresPyAvPlanePadding)
+    {
+        public static ContainerAudioInfo Default { get; } = new(
+            ContainerAudioSampleRateHz,
+            0,
+            false);
     }
 }

@@ -114,6 +114,11 @@ public void DispatcherRecognizesSubcommands()
         ["ld", "--version"],
         DecodeDispatcher.NormalizeInvocation(["--version"], "ld-decode.exe"));
     AssertStringSequence(
+        ["hifi", "--pal", "in.s16", "out.wav"],
+        DecodeDispatcher.NormalizeInvocation(
+            ["--pal", "in.s16", "out.wav"],
+            "hifi-decode.exe"));
+    AssertStringSequence(
         ["vhs", "in", "out"],
         DecodeDispatcher.NormalizeInvocation(["vhs", "in", "out"], "decode.exe"));
 }
@@ -309,13 +314,15 @@ public void DecodeRunnerPrintsCommandHelpBeforeValidation()
     {
         ["vhs"] = "174450C2379D07D59109F289FF9F587BDA433E8E38C63EFE604535BBCD9077C4",
         ["cvbs"] = "7933C5EFFD23A835419449AA805D7110ABA4298E23FD46FF51805AF933712D15",
-        ["ld"] = "E890F90169572401CF3C1565FF5EF44B23354824516E330250BD80BA136FB579"
+        ["ld"] = "E890F90169572401CF3C1565FF5EF44B23354824516E330250BD80BA136FB579",
+        ["hifi"] = "27E40DE774B9CD5E3A6E126A497B074AD239319AD7A79004D4594F74CB7ECC2B"
     };
     var facadeHashes = new Dictionary<string, string>(StringComparer.Ordinal)
     {
         ["vhs"] = "9FE63E4A3C18927DE477D66BCF612085FB01ED85DA8BFD7AE2FACAE9E0E0EDA1",
         ["cvbs"] = "A19F45D777A92EDB940880F5953A9E2D2298AF850F7769A3615FB14CDC12877B",
-        ["ld"] = "62D9A869755E04C5F7EC0ADCD682AC856554C1EE861B8D463DC9AA21BDDC2F68"
+        ["ld"] = "62D9A869755E04C5F7EC0ADCD682AC856554C1EE861B8D463DC9AA21BDDC2F68",
+        ["hifi"] = "14F69F3DD5869D3BAF3D44558ADF32DAC040F97F37CF00A2F3127FA101D7765E"
     };
 
     foreach (DecodeCommandSpec spec in CliSpecs.AllCommands)
@@ -326,7 +333,11 @@ public void DecodeRunnerPrintsCommandHelpBeforeValidation()
             var output = new StringWriter();
             var error = new StringWriter();
 
-            int exitCode = new DecodeRunner().Run(command, output, error);
+            int exitCode = new DecodeRunner().Run(
+                command,
+                output,
+                error,
+                TestContext.Current.CancellationToken);
 
             AssertEqual(0, exitCode);
             AssertContains(output.ToString(), $"usage: {spec.Aliases[0]}");
@@ -340,7 +351,11 @@ public void DecodeRunnerPrintsCommandHelpBeforeValidation()
 
         ParsedCommand facade = new CommandLineParser().Parse(spec, ["--help"], "decode.py");
         var facadeOutput = new StringWriter();
-        AssertEqual(0, new DecodeRunner().Run(facade, facadeOutput, TextWriter.Null));
+        AssertEqual(0, new DecodeRunner().Run(
+            facade,
+            facadeOutput,
+            TextWriter.Null,
+            TestContext.Current.CancellationToken));
         AssertContains(facadeOutput.ToString(), "usage: decode.py ");
         AssertFalse(facadeOutput.ToString().Contains($"usage: decode.py {spec.Name}", StringComparison.Ordinal));
         AssertEqual(facadeHashes[spec.Name], Utf8LfSha256(facadeOutput.ToString()));
@@ -412,7 +427,11 @@ public void VhsSystemSelectionRejectsConflicts()
             ParsedCommand conflict = Parse(spec, [.. options, inputPath, Path.Combine(tempDirectory, $"out-{i}")]);
             var output = new StringWriter();
             var error = new StringWriter();
-            AssertEqual(1, new DecodeRunner().Run(conflict, output, error));
+            AssertEqual(1, new DecodeRunner().Run(
+                conflict,
+                output,
+                error,
+                TestContext.Current.CancellationToken));
             AssertEqual(message + Environment.NewLine, output.ToString());
             AssertEqual(string.Empty, error.ToString());
         }
@@ -445,7 +464,11 @@ public void CvbsRunnerPreservesReleaseUnsupportedSystemFailures()
             var output = new StringWriter();
             var error = new StringWriter();
 
-            AssertEqual(1, new DecodeRunner().Run(command, output, error));
+            AssertEqual(1, new DecodeRunner().Run(
+                command,
+                output,
+                error,
+                TestContext.Current.CancellationToken));
             AssertEqual(string.Empty, output.ToString());
             string normalized = system == "PALM" ? "PAL_M" : system;
             AssertEqual($"('Unknown video system!', '{normalized}')" + Environment.NewLine, error.ToString());
@@ -483,7 +506,11 @@ public void LdParserAllowsVersionWithoutPositionals()
     AssertTrue(command.Get<bool>("version"));
     AssertEqual(0, command.Positionals.Count);
     var output = new StringWriter();
-    AssertEqual(0, new DecodeRunner().Run(command, output, TextWriter.Null));
+    AssertEqual(0, new DecodeRunner().Run(
+        command,
+        output,
+        TextWriter.Null,
+        TestContext.Current.CancellationToken));
     AssertEqual(DecodeVersionInfo.Version + Environment.NewLine, output.ToString());
 }
 
@@ -1975,7 +2002,11 @@ public void DecodeOutputPreflightRejectsConflictingOutputs()
         AssertEqual(outputBase + "_chroma.tbc", conflicts[0]);
         AssertThrows<ArgumentException>(() => DecodeOutputPreflight.Validate(conflict));
         var conflictOutput = new StringWriter();
-        AssertEqual(1, new DecodeRunner().Run(conflict, conflictOutput, TextWriter.Null));
+        AssertEqual(1, new DecodeRunner().Run(
+            conflict,
+            conflictOutput,
+            TextWriter.Null,
+            TestContext.Current.CancellationToken));
         AssertEqual(
             "Existing decode files found, remove them or run command with --overwrite" + Environment.NewLine
             + "\t " + outputBase + "_chroma.tbc" + Environment.NewLine,
@@ -2023,7 +2054,11 @@ public void DecodeRunnerHandlesEmptyNativeDecodes()
         string nativeBase = Path.Combine(tempDirectory, "native");
         ParsedCommand native = Parse(CliSpecs.Vhs, ["--pal", nativeInput, nativeBase]);
         var nativeError = new StringWriter();
-        int nativeExit = new DecodeRunner().Run(native, TextWriter.Null, nativeError);
+        int nativeExit = new DecodeRunner().Run(
+            native,
+            TextWriter.Null,
+            nativeError,
+            TestContext.Current.CancellationToken);
         AssertEqual(0, nativeExit);
         AssertContains(nativeError.ToString(), "Completed without handling any frames.");
         AssertFalse(nativeError.ToString().Contains("Input ended before enough samples were available", StringComparison.Ordinal));
@@ -2045,7 +2080,8 @@ public void DecodeRunnerHandlesEmptyNativeDecodes()
         int cxadcExit = new DecodeRunner().Run(
             Parse(CliSpecs.Vhs, ["--pal", "--cxadc", "--no_resample", nativeInput, cxadcBase]),
             TextWriter.Null,
-            cxadcError);
+            cxadcError,
+            TestContext.Current.CancellationToken);
         AssertEqual(0, cxadcExit);
         AssertContains(cxadcError.ToString(), "--cxadc is deprecated! use -f 8fsc instead!");
         string cxadcLog = File.ReadAllText(cxadcBase + ".log");
@@ -2062,7 +2098,8 @@ public void DecodeRunnerHandlesEmptyNativeDecodes()
         int ldExit = new DecodeRunner().Run(
             Parse(CliSpecs.LaserDisc, ["--PAL", "--ntsc_audio_rate", ldInput, Path.Combine(tempDirectory, "ld-pal")]),
             TextWriter.Null,
-            ldPalWarning);
+            ldPalWarning,
+            TestContext.Current.CancellationToken);
         AssertEqual(0, ldExit);
         AssertContains(ldPalWarning.ToString(), "WARNING: --ntsc_audio_rate ignored for PAL (audio is already frame-locked at 44100hz)");
         AssertContains(ldPalWarning.ToString(), "Completed without handling any frames.");
@@ -2080,7 +2117,11 @@ public void DecodeRunnerHandlesEmptyNativeDecodes()
         string resamplingBase = Path.Combine(tempDirectory, "resampling");
         ParsedCommand resamplingMissingInput = Parse(CliSpecs.Vhs, ["-f", "8fsc", Path.Combine(tempDirectory, "missing.u8"), resamplingBase]);
         var missingInputOutput = new StringWriter();
-        AssertEqual(1, new DecodeRunner().Run(resamplingMissingInput, missingInputOutput, TextWriter.Null));
+        AssertEqual(1, new DecodeRunner().Run(
+            resamplingMissingInput,
+            missingInputOutput,
+            TextWriter.Null,
+            TestContext.Current.CancellationToken));
         AssertContains(missingInputOutput.ToString(), "ERROR: input file");
     }
     finally
@@ -2270,7 +2311,7 @@ public void RfDemodulatorRecoversFmBlockWithFrequencyFilters()
     var demodulator = new RfDemodulator(sampleRate);
     Complex[] identity = RfDemodulator.IdentityFilter(n);
     RfDemodulatedBlock block = demodulator.Demodulate(raw, identity, identity);
-    Complex[] precomputedSpectrum = PocketFftComplex.ForwardReal(raw);
+    Complex[] precomputedSpectrum = PocketFftComplex.ForwardDuccRealFull(raw);
     RfDemodulatedBlock precomputedBlock = demodulator.Demodulate(
         raw,
         identity,
@@ -2726,7 +2767,7 @@ public void VhsChromaDecoderDetectsBurstPhaseSequence()
     AssertClose(2.0, burst.Q, 1e-12);
 
     double[] numbaBurst = Enumerable.Range(0, 70)
-        .Select(i => (double)(float)(((i * 37) % 101 - 50) / 8.0))
+        .Select(i => (((i * 37) % 101 - 50) / 8.0) + Math.ScaleB(i + 1.0, -35))
         .ToArray();
     double[] numbaSin = Enumerable.Range(0, 96)
         .Select(i => (double)(float)(((i * 17) % 53 - 26) / 16.0))
@@ -2741,28 +2782,11 @@ public void VhsChromaDecoderDetectsBurstPhaseSequence()
         burstStart: 7,
         numbaSin,
         numbaCos);
-    ulong[] expectedNumbaBurstBits =
-    [
-        0x4065763e42867cb0,
-        0x3fe4a28575e4bbda,
-        0x4038fd155990fddb,
-        0xc038ba0000000000,
-        0x400ce00000000000
-    ];
-    double[] numbaBurstValues =
-    [
-        numbaBurstResult.PhaseDegrees,
-        numbaBurstResult.PhaseOffsetDegrees,
-        numbaBurstResult.Magnitude,
-        numbaBurstResult.I,
-        numbaBurstResult.Q
-    ];
-    for (int i = 0; i < expectedNumbaBurstBits.Length; i++)
-    {
-        AssertEqual(
-            expectedNumbaBurstBits[i],
-            unchecked((ulong)BitConverter.DoubleToInt64Bits(numbaBurstValues[i])));
-    }
+    AssertEqual(0xC038BA000003D400UL, BitConverter.DoubleToUInt64Bits(numbaBurstResult.I));
+    AssertEqual(0x400CDFFFFF95D000UL, BitConverter.DoubleToUInt64Bits(numbaBurstResult.Q));
+    AssertEqual(0x4038FD155992DCC5UL, BitConverter.DoubleToUInt64Bits(numbaBurstResult.Magnitude));
+    AssertEqual(0x4065763E428A68F1UL, BitConverter.DoubleToUInt64Bits(numbaBurstResult.PhaseDegrees));
+    AssertEqual(0x3FE4A28575E4BBDAUL, BitConverter.DoubleToUInt64Bits(numbaBurstResult.PhaseOffsetDegrees));
 
     double[] chroma = Enumerable.Range(0, 12).Select(value => (double)value).ToArray();
     double[] carrierSin = new double[12];
@@ -2933,8 +2957,8 @@ public void VhsChromaDecoderDetectsBurstPhaseSequence()
         colorSystem: "PAL"));
 }
 
-[Fact(DisplayName = "VHS chroma burst magnitude matches NumPy hypot")]
-public void VhsChromaBurstMagnitudeMatchesNumpyHypot()
+[Fact(DisplayName = "VHS chroma burst magnitude matches v0.4.0 Numba hypot")]
+public void VhsChromaBurstMagnitudeMatchesReleaseHypot()
 {
     ChromaBurstDemodulationResult burst = VhsChromaDecoder.DemodBurst(
         [-1937.88232421875, -110.7741928100586, 42.956520080566406, -197.7586212158203],
@@ -2944,7 +2968,249 @@ public void VhsChromaBurstMagnitudeMatchesNumpyHypot()
         burstSin: [0.0, 0.0, 1.0, 1.0],
         burstCos: [1.0, 1.0, 0.0, 0.0]);
 
-    AssertEqual(0x40A00CFE6035537FUL, BitConverter.DoubleToUInt64Bits(burst.Magnitude));
+    AssertEqual(0x40A00CFE60355380UL, BitConverter.DoubleToUInt64Bits(burst.Magnitude));
+}
+
+[Fact(DisplayName = "PAL VHS chroma burst probe matches v0.4.0 float64 bits")]
+public void PalVhsChromaBurstProbeMatchesReleaseBits()
+{
+    FormatParameterSet parameters = FormatCatalog.Default.GetTapeParameters("PAL", "VHS", "sp");
+    TbcFrameSpec frameSpec = TbcFrameSpec.FromParameters(parameters);
+    var decodeOptions = new ChromaDecodeOptions(
+        IsColorUnder: true,
+        WriteChroma: true,
+        SkipChroma: false,
+        UseChromaAfc: false,
+        DisableComb: false,
+        ChromaDeemphasisFilter: false,
+        ChromaAudioNotch: false,
+        ChromaOffsetSamples: 0,
+        DetectChromaTrackPhase: false,
+        EnableColorKiller: false,
+        DisableBurstHsync: false,
+        DisablePhaseCorrection: false,
+        UseOldRawChromaOutput: false);
+    VhsChromaFieldOptions options = TbcFieldDecodePipeline.BuildChromaFieldOptions(
+        "PAL",
+        parameters,
+        frameSpec,
+        decodeOptions)
+        ?? throw new InvalidOperationException("Chroma options were not built for PAL VHS.");
+
+    AssertEqual(94, options.BurstStart);
+    AssertEqual(150, options.BurstEnd);
+    AssertEqual(
+        "E2A9F54E967697937EBE3D44357B8805D0740FBC6C7651C8B596CC4A69992E86",
+        DoubleBitsSha256(options.FinalSosFilter!.SelectMany(section => new[]
+        {
+            section.B0,
+            section.B1,
+            section.B2,
+            section.A0,
+            section.A1,
+            section.A2
+        }).ToArray()));
+
+    int sampleCount = 3 * frameSpec.OutputLineLength;
+    double[] chroma = Enumerable.Range(0, sampleCount)
+        .Select(index => (((index * 37) % 101 - 50) / 8.0) + Math.ScaleB(index + 1.0, -35))
+        .ToArray();
+    double[][] heterodyne = VhsChromaDecoder.BuildHeterodyneTable(
+        sampleCount,
+        options.FscMHz,
+        options.ColorUnderCarrierHz / 1_000_000.0,
+        options.FscMHz * 4.0);
+    (double[] burstSin, double[] burstCos) = VhsChromaDecoder.BuildCarrierTables(
+        sampleCount,
+        options.FscMHz,
+        options.FscMHz * 4.0);
+    double[]? capturedMixed = null;
+    double[]? capturedFiltered = null;
+    ChromaBurstDemodulationResult result = VhsChromaDecoder.ProbeUpconvertedBurst(
+        chroma,
+        heterodyne,
+        phaseRotation: 3,
+        options.BurstStart,
+        options.BurstEnd,
+        burstSin,
+        burstCos,
+        lineScale: 0.9989764459848242,
+        lineNumber: 2,
+        lineOffset: 1,
+        frameSpec.OutputLineLength,
+        burstFilter: padded =>
+        {
+            capturedMixed = padded.ToArray();
+            capturedFiltered = SosFilter.ApplyForwardBackward(options.FinalSosFilter!, padded);
+            return capturedFiltered;
+        });
+
+    AssertEqual(
+        "330869D467CD9D3DBB93F7CF5898D8565F75FFE0C646AA91FF19F272E7147C02",
+        DoubleBitsSha256(capturedMixed!));
+    AssertEqual(
+        "25B6D459D47519976AB97BBBED41FFA88AA1E9F4038ACDF246959264BB827929",
+        DoubleBitsSha256(capturedFiltered!));
+    AssertEqual(0x4064C329592D3C5FUL, BitConverter.DoubleToUInt64Bits(result.PhaseDegrees));
+    AssertEqual(0x4021518B70A91DA9UL, BitConverter.DoubleToUInt64Bits(result.PhaseOffsetDegrees));
+    AssertEqual(0x402B4FBACBBD83FCUL, BitConverter.DoubleToUInt64Bits(result.Magnitude));
+    AssertEqual(0xC02A82F3B467500FUL, BitConverter.DoubleToUInt64Bits(result.I));
+    AssertEqual(0x400A3F02088DC1E6UL, BitConverter.DoubleToUInt64Bits(result.Q));
+}
+
+[Fact(DisplayName = "PAL VHS chroma phase sequence matches v0.4.0 float64 bits")]
+public void PalVhsChromaPhaseSequenceMatchesReleaseBits()
+{
+    FormatParameterSet parameters = FormatCatalog.Default.GetTapeParameters("PAL", "VHS", "sp");
+    TbcFrameSpec frameSpec = TbcFrameSpec.FromParameters(parameters);
+    var decodeOptions = new ChromaDecodeOptions(
+        IsColorUnder: true,
+        WriteChroma: true,
+        SkipChroma: false,
+        UseChromaAfc: false,
+        DisableComb: false,
+        ChromaDeemphasisFilter: false,
+        ChromaAudioNotch: false,
+        ChromaOffsetSamples: 0,
+        DetectChromaTrackPhase: false,
+        EnableColorKiller: false,
+        DisableBurstHsync: false,
+        DisablePhaseCorrection: false,
+        UseOldRawChromaOutput: false);
+    VhsChromaFieldOptions options = TbcFieldDecodePipeline.BuildChromaFieldOptions(
+        "PAL",
+        parameters,
+        frameSpec,
+        decodeOptions)
+        ?? throw new InvalidOperationException("Chroma options were not built for PAL VHS.");
+
+    double[] chroma = Enumerable.Range(0, frameSpec.FieldSampleCount)
+        .Select(index => (((index * 37) % 101 - 50) / 8.0) + Math.ScaleB(index + 1.0, -35))
+        .ToArray();
+    const int LineOffset = 3;
+    const int InputLineLength = 2_560;
+    double[] lineLocations = Enumerable.Range(0, LineOffset + frameSpec.OutputLineCount + 2)
+        .Select(line => line * (double)InputLineLength)
+        .ToArray();
+    ChromaPhaseSequenceResult result = VhsChromaDecoder.AnalyzeFieldPhase(
+        chroma,
+        options,
+        lineLocations,
+        InputLineLength,
+        lineOffset: LineOffset);
+
+    AssertEqual(1, result.NextChromaRotationIndex);
+    AssertEqual(313, result.PhaseSequence.Length);
+    AssertEqual(0, result.BurstDetectedLine);
+    ChromaPhaseLine first = result.PhaseSequence[0];
+    AssertEqual(3, first.LineNumber);
+    AssertEqual(0, first.PhaseRotation);
+    AssertEqual(0x4073B300258A63F3UL, BitConverter.DoubleToUInt64Bits(first.BurstPhaseDegrees));
+    AssertEqual(0UL, BitConverter.DoubleToUInt64Bits(first.BurstPhaseOffsetDegrees));
+    AssertEqual(0x403C5B2A5B4885C9UL, BitConverter.DoubleToUInt64Bits(first.BurstMagnitude));
+    AssertEqual(0x40341DC74D25B16AUL, BitConverter.DoubleToUInt64Bits(first.I));
+    AssertEqual(0xC033FC2D3DEDF498UL, BitConverter.DoubleToUInt64Bits(first.Q));
+    ChromaPhaseLine last = result.PhaseSequence[^1];
+    AssertEqual(315, last.LineNumber);
+    AssertEqual(0, last.PhaseRotation);
+    AssertEqual(0x405E9C37E95E4BDAUL, BitConverter.DoubleToUInt64Bits(last.BurstPhaseDegrees));
+    AssertEqual(0UL, BitConverter.DoubleToUInt64Bits(last.BurstPhaseOffsetDegrees));
+    AssertEqual(0xC02FDC176ECE9795UL, BitConverter.DoubleToUInt64Bits(last.I));
+    AssertEqual(0x40390FD7498989E1UL, BitConverter.DoubleToUInt64Bits(last.Q));
+    AssertEqual(0x403DB233AAC37DF0UL, BitConverter.DoubleToUInt64Bits(last.BurstMagnitude));
+    double[] flattened = result.PhaseSequence
+        .SelectMany(line => new[]
+        {
+            (double)line.LineNumber,
+            line.PhaseRotation,
+            line.BurstPhaseDegrees,
+            line.BurstPhaseOffsetDegrees,
+            line.BurstMagnitude,
+            line.I,
+            line.Q
+        })
+        .ToArray();
+    AssertEqual(
+        "8BFBCFFD123B67693FA6EC24B9EFD91A5D90A9BF38BA1BA8926B41F24B9754FB",
+        DoubleBitsSha256(flattened));
+    AssertEqual(0x4037E9036918DF9AUL, BitConverter.DoubleToUInt64Bits(result.BurstMagnitudeAverage));
+    AssertEqual(0x40749879C9CA5F7FUL, BitConverter.DoubleToUInt64Bits(result.BurstPhaseAverageDegrees));
+    AssertEqual(0x4074978FCAA356D3UL, BitConverter.DoubleToUInt64Bits(result.EvenBurstPhaseAverageDegrees));
+    AssertEqual(0x4074997460E7FB3BUL, BitConverter.DoubleToUInt64Bits(result.OddBurstPhaseAverageDegrees));
+}
+
+[Fact(DisplayName = "PAL VHS chroma track-phase sequence matches v0.4.0 float64 bits")]
+public void PalVhsChromaTrackPhaseSequenceMatchesReleaseBits()
+{
+    FormatParameterSet parameters = FormatCatalog.Default.GetTapeParameters("PAL", "VHS", "sp");
+    TbcFrameSpec frameSpec = TbcFrameSpec.FromParameters(parameters);
+    var decodeOptions = new ChromaDecodeOptions(
+        IsColorUnder: true,
+        WriteChroma: true,
+        SkipChroma: false,
+        UseChromaAfc: false,
+        DisableComb: false,
+        ChromaDeemphasisFilter: false,
+        ChromaAudioNotch: false,
+        ChromaOffsetSamples: 0,
+        DetectChromaTrackPhase: true,
+        EnableColorKiller: false,
+        DisableBurstHsync: false,
+        DisablePhaseCorrection: false,
+        UseOldRawChromaOutput: false);
+    VhsChromaFieldOptions options = TbcFieldDecodePipeline.BuildChromaFieldOptions(
+        "PAL",
+        parameters,
+        frameSpec,
+        decodeOptions)
+        ?? throw new InvalidOperationException("Chroma options were not built for PAL VHS.");
+
+    double[] chroma = Enumerable.Range(0, frameSpec.FieldSampleCount)
+        .Select(index => (((index * 37) % 101 - 50) / 8.0) + Math.ScaleB(index + 1.0, -35))
+        .ToArray();
+    const int LineOffset = 3;
+    const int InputLineLength = 2_560;
+    double[] lineLocations = Enumerable.Range(0, LineOffset + frameSpec.OutputLineCount + 2)
+        .Select(line => line * (double)InputLineLength)
+        .ToArray();
+    ChromaPhaseSequenceResult result = VhsChromaDecoder.AnalyzeFieldPhase(
+        chroma,
+        options,
+        lineLocations,
+        InputLineLength,
+        lineOffset: LineOffset);
+
+    AssertEqual(1, result.NextChromaRotationIndex);
+    AssertEqual(313, result.PhaseSequence.Length);
+    AssertEqual(0, result.BurstDetectedLine);
+    AssertIntSequence(
+        [0, 3, 2, 1, 0, 3, 2, 1, 0, 3, 2, 1, 0, 3, 2, 1],
+        result.PhaseSequence[^16..].Select(line => line.PhaseRotation).ToArray());
+    ChromaPhaseLine last = result.PhaseSequence[^1];
+    AssertEqual(315, last.LineNumber);
+    AssertEqual(1, last.PhaseRotation);
+    AssertEqual(0x406601C518E0EA83UL, BitConverter.DoubleToUInt64Bits(last.BurstPhaseDegrees));
+    AssertEqual(0UL, BitConverter.DoubleToUInt64Bits(last.BurstPhaseOffsetDegrees));
+    AssertEqual(0x403352BDFF350DC5UL, BitConverter.DoubleToUInt64Bits(last.BurstMagnitude));
+    double[] flattened = result.PhaseSequence
+        .SelectMany(line => new[]
+        {
+            (double)line.LineNumber,
+            line.PhaseRotation,
+            line.BurstPhaseDegrees,
+            line.BurstPhaseOffsetDegrees,
+            line.BurstMagnitude,
+            line.I,
+            line.Q
+        })
+        .ToArray();
+    AssertEqual(
+        "1D46B6D78C7F04A749AF47146EFB5A8075917825520B80047D6DF6904D02BAD4",
+        DoubleBitsSha256(flattened));
+    AssertEqual(0x4037E9036918DF9AUL, BitConverter.DoubleToUInt64Bits(result.BurstMagnitudeAverage));
+    AssertEqual(0x40749879C9CA5F7FUL, BitConverter.DoubleToUInt64Bits(result.BurstPhaseAverageDegrees));
+    AssertEqual(0x4074978FCAA356D3UL, BitConverter.DoubleToUInt64Bits(result.EvenBurstPhaseAverageDegrees));
+    AssertEqual(0x4074997460E7FB3BUL, BitConverter.DoubleToUInt64Bits(result.OddBurstPhaseAverageDegrees));
 }
 
 [Fact(DisplayName = "VHS chroma carrier matches NumPy float32 trigonometry")]
@@ -3142,6 +3408,606 @@ public void VhsChromaDecoderEmitsFieldSamples()
             burstDetectedLine: 0,
             useFloat32Rms: false).Samples);
     AssertFalse(expectedPrecisionSamples.SequenceEqual(wrongDoublePrecisionSamples));
+}
+
+[Theory(DisplayName = "format-specific chroma field matches v0.4.0 bits")]
+[InlineData(0, "PAL_M", "VHS", "481FAD75D80528B5B24AC9DC0662CA93EDD193BB3C0CE9EE86A89BDB667756FE")]
+[InlineData(1, "MESECAM", "VHS", "5F727C2341456CD7B9A77179A8C5E72FFFF5E01C84E6496AB4F84E3E49C68AE7")]
+[InlineData(2, "PAL", "VIDEO8", "D0C90ACD8472376761F707FEE6800FC04003E530A403E0452001A65C854AE71A")]
+[InlineData(3, "NTSC", "VIDEO8", "33830785F4E97F98C79792EC0AFB551BF54927E9DCCE15802D19CA8BDC5411D3")]
+[InlineData(4, "PAL", "HI8", "C855C6FAC7B9104E90C5790F14D36DAE98095CB59A1A8CFA1D500FB665CE368A")]
+[InlineData(5, "NTSC", "HI8", "355A497C272467AEA6A96D66F899755C62F96F23DF7A8D7F3A3D5F918F0E08E8")]
+[InlineData(6, "PAL", "BETAMAX", "094AB253A2FBDD1178BBEB30EB08B29971DA05A829C49F6CB55887EDD72A63DB")]
+[InlineData(7, "NTSC", "BETAMAX", "AF3927A3C4B0627C9524F5762477287C0BFBEA5BEA0515F3FBE6BF03B732032C")]
+[InlineData(8, "NTSC", "BETAMAX_HIFI", "2D25B8CF323C2074B1BEC298DCD45326F56ADAD25FD5CA8563F35D7A5887E040")]
+[InlineData(9, "NTSC", "SUPERBETA", "6C363EB432C1D0614E8E1B22F5C133B7C52C4EE55697A29B0C342347EB472DCB")]
+[InlineData(10, "PAL", "UMATIC", "F5D0165ABFBEBE08D69CD46124AA464B112C7B8F00D571CF606404B043A093C4")]
+[InlineData(11, "PAL", "UMATIC_HI", "E033E041B967E16853F156DE6D653A017F31ED4AAE4460CDB206D38B448A08A1")]
+[InlineData(12, "PAL", "UMATIC_SP", "C1149028299896FC891360546FBA135F0F447F5F5F2EDADB35B824A717F60153")]
+[InlineData(13, "PAL", "EIAJ", "6BAE892D9D5003069ECAC135630A79FCFD6AB1B55EC96DAB5D2151EF0423811A")]
+[InlineData(14, "PAL", "VCR", "DCFD099B3D99C54B79C722F61C9CBA623F3646DA35A0CE73E6E710E4C767C002")]
+[InlineData(15, "PAL", "VCR_LP", "9CBEE9C0BE2BC4A91FCC7930240CBE3EA85896352E6270AE0071288DEDB684DB")]
+[InlineData(16, "PAL", "VIDEO2000", "E5F7E5A4A4F275B9027CF9BADB3A8723A0EBECFA77812FF3AAFB54ACACBE39B5")]
+[InlineData(17, "PAL", "VHSHQ", "B4636C71044769326039D759C6B9F61AC7FFDE90964761879E161EA241DD405B")]
+[InlineData(18, "PAL", "SVHS", "CEFA28AFCE2BF3A2A4FB6BCF7177AE43A77A6A707E4C0892DCD40CF3F8EFEE86")]
+[InlineData(19, "PAL", "SVHS_ET", "F745052A75D0FEBAD2C95C0B3C3B85323076B6E899C9ECB6B3A3F853DC3DCA34")]
+[InlineData(20, "NTSC", "UMATIC", "18834718B936D8DB2B1598831E38F29AE61ED4964A029D1EC564273EEFEC44E5")]
+[InlineData(21, "NTSC", "VHSHQ", "1C503EAA76D4F968585F98CD3502B2CE365758E7E0DCD134AC05DD17FDA5994B")]
+[InlineData(22, "NTSC", "SVHS", "97AC5FC2F8AADC8104A271C9B2E2FA961F246143C78FC754F0463F4E9E23225F")]
+[InlineData(23, "NTSC", "SVHS_ET", "2BA7F57E26DC932AE19905D7654E1F30313E448EED995A3949AD601AC5CB1006")]
+[InlineData(24, "NLINHA", "VHS", "B35A743D46E45AA1DF82BD4D3ADC0AC055454437849EC85515687DC23D730421")]
+[InlineData(25, "PAL", "VHS", "61033C0998FF4B024670D5F0C4074CB8EF49613CA974621ABA38518A60CE3EEE")]
+[InlineData(26, "NTSC", "VHS", "B4ACBFE26CE1DD6F2D69C53C30E922B8D287E1EAF4E40BAFB57F8CEDB1EC01C6")]
+public void FormatSpecificChromaFieldMatchesReleaseBits(
+    int caseIndex,
+    string system,
+    string format,
+    string expectedHash)
+{
+    FormatParameterSet parameters = FormatCatalog.Default.GetTapeParameters(system, format, "sp");
+    TbcFrameSpec frameSpec = TbcFrameSpec.FromParameters(parameters);
+    bool chromaDeemphasis = format is "VIDEO8" or "HI8";
+    var decodeOptions = new ChromaDecodeOptions(
+        IsColorUnder: true,
+        WriteChroma: true,
+        SkipChroma: false,
+        UseChromaAfc: false,
+        DisableComb: system == "MESECAM",
+        ChromaDeemphasisFilter: chromaDeemphasis,
+        ChromaAudioNotch: false,
+        ChromaOffsetSamples: 0,
+        DetectChromaTrackPhase: false,
+        EnableColorKiller: false,
+        DisableBurstHsync: false,
+        DisablePhaseCorrection: false,
+        UseOldRawChromaOutput: false);
+    VhsChromaFieldOptions options = TbcFieldDecodePipeline.BuildChromaFieldOptions(
+        system,
+        parameters,
+        frameSpec,
+        decodeOptions)
+        ?? throw new InvalidOperationException($"Chroma options were not built for {system} {format}.");
+
+    var chroma = new double[frameSpec.FieldSampleCount];
+    uint state = unchecked(0x12345678u + ((uint)caseIndex * 0x01020304u));
+    for (int i = 0; i < chroma.Length; i++)
+    {
+        state = unchecked((state * 1_664_525u) + 1_013_904_223u);
+        int signed = (int)((state >> 8) & 0xFFFFu) - 32_768;
+        chroma[i] = (float)((signed / 8.0) + (((i % 17) - 8) * 0.03125));
+    }
+
+    int lineOffset = FormatCatalog.ParentSystem(system) == "NTSC" ? 1 : 3;
+    ChromaPhaseLine[] phaseLines = Enumerable.Range(0, frameSpec.OutputLineCount)
+        .Select(index =>
+        {
+            int line = lineOffset + index;
+            return new ChromaPhaseLine(
+                line,
+                ((line * 3) + caseIndex + 1) % 4,
+                ((line * 17) + (caseIndex * 23)) % 360 - 180.0,
+                BurstPhaseOffsetDegrees: 0.0,
+                BurstMagnitude: 30_000.0,
+                I: 30_000.0,
+                Q: 0.0);
+        })
+        .ToArray();
+    var phase = new ChromaPhaseSequenceResult(
+        NextChromaRotationIndex: 0,
+        phaseLines,
+        BurstDetectedLine: 0,
+        BurstMagnitudeAverage: 30_000.0,
+        BurstPhaseAverageDegrees: 0.0,
+        EvenBurstPhaseAverageDegrees: 0.0,
+        OddBurstPhaseAverageDegrees: 0.0);
+
+    VhsChromaFieldResult result = VhsChromaDecoder.DecodeFieldWithPhase(
+        chroma,
+        options,
+        phase,
+        isFirstField: true,
+        fieldNumber: 0,
+        lineOffset: lineOffset);
+    string actualHash = Convert.ToHexString(SHA256.HashData(
+        TbcOutputWriter.ToLittleEndianBytes(result.Samples)));
+    AssertEqual($"{system} {format}: {expectedHash}", $"{system} {format}: {actualHash}");
+}
+
+[Fact(DisplayName = "PAL Betamax chroma AFC field matches v0.4.0 bits")]
+public void PalBetamaxChromaAfcFieldMatchesReleaseBits()
+{
+    FormatParameterSet parameters = FormatCatalog.Default.GetTapeParameters("PAL", "BETAMAX", "sp");
+    TbcFrameSpec frameSpec = TbcFrameSpec.FromParameters(parameters);
+    var decodeOptions = new ChromaDecodeOptions(
+        IsColorUnder: true,
+        WriteChroma: true,
+        SkipChroma: false,
+        UseChromaAfc: true,
+        DisableComb: false,
+        ChromaDeemphasisFilter: false,
+        ChromaAudioNotch: false,
+        ChromaOffsetSamples: 5,
+        DetectChromaTrackPhase: false,
+        EnableColorKiller: false,
+        DisableBurstHsync: false,
+        DisablePhaseCorrection: false,
+        UseOldRawChromaOutput: false);
+    VhsChromaFieldOptions options = TbcFieldDecodePipeline.BuildChromaFieldOptions(
+        "PAL",
+        parameters,
+        frameSpec,
+        decodeOptions,
+        decodeSampleRateHz: 40_000_000.0)
+        ?? throw new InvalidOperationException("Chroma options were not built for PAL Betamax.");
+
+    var chroma = new double[frameSpec.FieldSampleCount];
+    uint state = 0xCAFEBABEu;
+    for (int i = 0; i < chroma.Length; i++)
+    {
+        state = unchecked((state * 1_664_525u) + 1_013_904_223u);
+        double noise = ((int)((state >> 16) & 0xFFFFu) - 32_768) / 256.0;
+        double square = ((i * 40) & 1023) < 512 ? 3_000.0 : -3_000.0;
+        chroma[i] = (float)(square + noise);
+    }
+
+    const int LineOffset = 3;
+    ChromaPhaseLine[] phaseLines = Enumerable.Range(0, frameSpec.OutputLineCount)
+        .Select(index =>
+        {
+            int line = LineOffset + index;
+            return new ChromaPhaseLine(
+                line,
+                ((line * 3) + 2) % 4,
+                ((line * 17) + 11) % 360 - 180.0,
+                BurstPhaseOffsetDegrees: 0.0,
+                BurstMagnitude: 30_000.0,
+                I: 30_000.0,
+                Q: 0.0);
+        })
+        .ToArray();
+    var phase = new ChromaPhaseSequenceResult(
+        NextChromaRotationIndex: 0,
+        phaseLines,
+        BurstDetectedLine: 0,
+        BurstMagnitudeAverage: 30_000.0,
+        BurstPhaseAverageDegrees: 0.0,
+        EvenBurstPhaseAverageDegrees: 0.0,
+        OddBurstPhaseAverageDegrees: 0.0);
+
+    VhsChromaFieldResult result = VhsChromaDecoder.DecodeFieldWithPhase(
+        chroma,
+        options,
+        phase,
+        isFirstField: true,
+        fieldNumber: 0,
+        lineOffset: LineOffset);
+
+    ChromaCarrierEstimate carrier = result.CarrierEstimate
+        ?? throw new InvalidOperationException("PAL Betamax chroma AFC did not estimate a carrier.");
+    AssertEqual(0x4124E70A0A0C8458UL, BitConverter.DoubleToUInt64Bits(carrier.CarrierHz));
+    AssertEqual(0xC0A40DF5F37BA800UL, BitConverter.DoubleToUInt64Bits(carrier.OffsetHz));
+    AssertEqual(0UL, BitConverter.DoubleToUInt64Bits(carrier.PhaseRadians));
+    AssertEqual(
+        "0A4872FDB67D33A999D8F74BA5701FDD6DC3D26FD9B94248D2D6DBC7178A300E",
+        DoubleBitsSha256(options.ChromaPreSosFilter!.SelectMany(section => new[]
+        {
+            section.B0,
+            section.B1,
+            section.B2,
+            section.A0,
+            section.A1,
+            section.A2
+        }).ToArray()));
+    double[] rawPrefiltered = SosFilter.ApplyForwardBackward(options.ChromaPreSosFilter!, chroma);
+    AssertEqual(
+        "B41DA0F37284E6271D41790BED83A69DA89FBE13E8A28D83419607124A36EC6B",
+        DoubleBitsSha256(rawPrefiltered));
+    double[] prefiltered = VhsChromaDecoder.ApplyChromaPreFilter(chroma, options);
+    AssertEqual(
+        "7030D3DF464EFB398474BA43ECB1B1BF224FBC299CA09922F1F51762D969A357",
+        DoubleBitsSha256(prefiltered));
+    double[] mixed = VhsChromaDecoder.UpconvertChroma(
+        prefiltered,
+        LineOffset,
+        frameSpec.OutputLineLength,
+        phase.PhaseSequence,
+        VhsChromaDecoder.BuildHeterodyneTable(
+            prefiltered.Length,
+            options.FscMHz,
+            carrier.CarrierHz / 1_000_000.0,
+            options.FscMHz * 4.0,
+            carrier.PhaseRadians));
+    AssertEqual(
+        "89DA11D0A4277D7B5532133D0FFE59D7B0CB27EA2F1E25CFDF3344A8FE3EAFBE",
+        FloatBitsSha256(mixed));
+    double[] filtered = SosFilter.ApplyForwardBackwardFloat32(options.FinalSosFilter!, mixed);
+    AssertEqual(
+        "01287D5AE385CD82DBFFEB4E3003411C7ECA84442E4B2EDED5100D6588483EA0",
+        FloatBitsSha256(filtered));
+    double[] combined = VhsChromaDecoder.ApplyPalComb(
+        filtered,
+        frameSpec.OutputLineLength,
+        retainFloat32: true);
+    AssertEqual(
+        "E20514D67A9066387E0C5EA09E80A42AE6319DEEEDB0447A183CFA39640C03E6",
+        FloatBitsSha256(combined));
+    double[] gained = VhsChromaDecoder.ApplyAutomaticChromaGain(
+        combined,
+        options.BurstAbsRef,
+        options.BurstStart,
+        options.BurstEnd,
+        options.OutputLineLength,
+        options.OutputLineCount,
+        burstDetectedLine: 0,
+        useFloat32Rms: true).Samples;
+    AssertEqual(
+        "18A0B3EB6B99CE174B1D0643C65C86C7BDD749268C0433EFA5AFA0BE86A6070A",
+        DoubleBitsSha256(gained));
+    AssertEqual(
+        "9EA84B99076A817D74D9D4C7A55A5D5E5FC385104DB8E5F9B5B866AB772917BE",
+        Convert.ToHexString(SHA256.HashData(TbcOutputWriter.ToLittleEndianBytes(result.Samples))));
+}
+
+[Fact(DisplayName = "PAL Video8 chroma AFC notch stages match v0.4.0 bits")]
+public void PalVideo8ChromaAfcNotchStagesMatchReleaseBits()
+{
+    FormatParameterSet parameters = FormatCatalog.Default.GetTapeParameters("PAL", "VIDEO8", "sp");
+    TbcFrameSpec frameSpec = TbcFrameSpec.FromParameters(parameters);
+    var decodeOptions = new ChromaDecodeOptions(
+        IsColorUnder: true,
+        WriteChroma: true,
+        SkipChroma: false,
+        UseChromaAfc: true,
+        DisableComb: false,
+        ChromaDeemphasisFilter: true,
+        ChromaAudioNotch: true,
+        ChromaOffsetSamples: 5,
+        DetectChromaTrackPhase: false,
+        EnableColorKiller: false,
+        DisableBurstHsync: false,
+        DisablePhaseCorrection: false,
+        UseOldRawChromaOutput: false);
+    var filterOptions = new DecodeFilterOptions(
+        VideoNotchHz: 2_500_000.0,
+        VideoNotchQ: 20.0,
+        UseChromaAfc: true);
+    VhsChromaFieldOptions options = TbcFieldDecodePipeline.BuildChromaFieldOptions(
+        "PAL",
+        parameters,
+        frameSpec,
+        decodeOptions,
+        filterOptions,
+        decodeSampleRateHz: 40_000_000.0)
+        ?? throw new InvalidOperationException("Chroma options were not built for PAL Video8.");
+
+    double[] chroma = Enumerable.Range(0, frameSpec.FieldSampleCount)
+        .Select(index => (((index * 37) % 1009 - 504) / 16.0) + Math.ScaleB(index + 1.0, -38))
+        .ToArray();
+    AssertEqual(
+        "B6E7F9D11E7590251DF679134348A993A965100237785106073111D30426D661",
+        DoubleBitsSha256(chroma));
+    AssertEqual(4, options.ChromaPreFilterMoveSamples);
+    AssertEqual(
+        "C1B4827F13A540C821CE52B1B7949ED0CC8DD353948F23202AFF291CAD14DEAE",
+        DoubleBitsSha256(options.ChromaPreSosFilter!.SelectMany(section => new[]
+        {
+            section.B0,
+            section.B1,
+            section.B2,
+            section.A0,
+            section.A1,
+            section.A2
+        }).ToArray()));
+    double[] prefiltered = SosFilter.ApplyForwardBackward(options.ChromaPreSosFilter!, chroma);
+    AssertEqual(
+        "8DCADDC1D99E48EF097E27C2A6ABDE576716E2E4CB6B242311C8C5BB9E216BED",
+        DoubleBitsSha256(prefiltered));
+
+    TransferFunction audioNotch = options.ChromaAudioNotchFilter
+        ?? throw new InvalidOperationException("PAL Video8 chroma audio notch was not built.");
+    AssertEqual(
+        "EBD8C993F4A13029975F960A48757CDB900D794B5C480AC552753A362F50D164",
+        DoubleBitsSha256(audioNotch.Numerator));
+    AssertEqual(
+        "DD55346011633A862B26189FEDFAC818E3C7F6DBB5918E7530FDC93FA676B2C6",
+        DoubleBitsSha256(audioNotch.Denominator));
+    double[] afterAudio = IirFilter.ApplyForwardBackward(audioNotch, prefiltered);
+    AssertEqual(
+        "3A000F5F90DF82BDBEE492186E79316E09D9D910DCD41F94CA6D56F7B49304EE",
+        DoubleBitsSha256(afterAudio));
+
+    TransferFunction videoNotch = options.ChromaVideoNotchFilter
+        ?? throw new InvalidOperationException("PAL Video8 chroma video notch was not built.");
+    AssertEqual(
+        "B430632801F26DE0FE7A47C64AD1F21BA473E4AB6804623E9F780D7B1E05D284",
+        DoubleBitsSha256(videoNotch.Numerator));
+    AssertEqual(
+        "D9361FA6F897C3E657C2F2949E847FAA1B66FCC03A1415CA37CB08F666D16084",
+        DoubleBitsSha256(videoNotch.Denominator));
+    double[] afterVideo = IirFilter.ApplyForwardBackward(videoNotch, afterAudio);
+    AssertEqual(
+        "D610B01E5B9063DA016A038154DEBB2F7C623498EAE71512515A18F9CE42A1DC",
+        DoubleBitsSha256(afterVideo));
+
+    double[] shifted = VhsChromaDecoder.ApplyChromaPreFilter(chroma, options);
+    AssertEqual(
+        "8850F30E8DCCA202ACE4FF9ED1FB27E3A84625979B39FED8575D6724C1D43231",
+        DoubleBitsSha256(shifted));
+
+    const int LineOffset = 3;
+    ChromaPhaseLine[] phaseLines = Enumerable.Range(0, frameSpec.OutputLineCount)
+        .Select(index =>
+        {
+            int line = LineOffset + index;
+            return new ChromaPhaseLine(
+                line,
+                ((line * 3) + 2) % 4,
+                ((line * 17) + 11) % 360 - 180.0,
+                BurstPhaseOffsetDegrees: 0.0,
+                BurstMagnitude: 30_000.0,
+                I: 30_000.0,
+                Q: 0.0);
+        })
+        .ToArray();
+    var phase = new ChromaPhaseSequenceResult(
+        NextChromaRotationIndex: 0,
+        phaseLines,
+        BurstDetectedLine: 0,
+        BurstMagnitudeAverage: 30_000.0,
+        BurstPhaseAverageDegrees: 0.0,
+        EvenBurstPhaseAverageDegrees: 0.0,
+        OddBurstPhaseAverageDegrees: 0.0);
+    VhsChromaFieldResult result = VhsChromaDecoder.DecodeFieldWithPhase(
+        chroma,
+        options,
+        phase,
+        isFirstField: true,
+        fieldNumber: 0,
+        lineOffset: LineOffset);
+    ChromaCarrierEstimate carrier = result.CarrierEstimate
+        ?? throw new InvalidOperationException("PAL Video8 chroma AFC did not estimate a carrier.");
+    AssertEqual(0x41265A0BC0000000UL, BitConverter.DoubleToUInt64Bits(carrier.NominalCarrierHz));
+    AssertEqual(0x41265970D7EDC111UL, BitConverter.DoubleToUInt64Bits(carrier.CarrierHz));
+    AssertEqual(0xC0535D0247DDE000UL, BitConverter.DoubleToUInt64Bits(carrier.OffsetHz));
+    AssertEqual(0UL, BitConverter.DoubleToUInt64Bits(carrier.PhaseRadians));
+
+    double[] upconverted = VhsChromaDecoder.UpconvertChroma(
+        shifted,
+        LineOffset,
+        frameSpec.OutputLineLength,
+        phase.PhaseSequence,
+        VhsChromaDecoder.BuildHeterodyneTable(
+            shifted.Length,
+            options.FscMHz,
+            carrier.CarrierHz / 1_000_000.0,
+            options.FscMHz * 4.0,
+            carrier.PhaseRadians));
+    AssertEqual(
+        "041DF1E00CF5B76A566AD045AF96BF0E266782BE583AAC6583116BCFDB0D0EEE",
+        FloatBitsSha256(upconverted));
+    double[] final = SosFilter.ApplyForwardBackwardFloat32(options.FinalSosFilter!, upconverted);
+    AssertEqual(
+        "2D98CAD5F0FC9798C48F7C46B988CF352568BE5646D9287912900F7DD12D9B81",
+        FloatBitsSha256(final));
+
+    TransferFunction deemphasis = options.ChromaDeemphasisFilter
+        ?? throw new InvalidOperationException("PAL Video8 chroma deemphasis was not built.");
+    AssertEqual(
+        "EE08B71006DADC75E379AF7D3BDE25DA4CB5260F31A68642DB3D6552B784D708",
+        DoubleBitsSha256(deemphasis.Numerator));
+    AssertEqual(
+        "A8E9E38D1AB7F9FCAA428AF95168A8A1C5C9576681DE8F5A34D415E27572CD47",
+        DoubleBitsSha256(deemphasis.Denominator));
+    double[] deemphasized = IirFilter.ApplyForward(deemphasis, final);
+    AssertEqual(
+        "DA42D875C0FBDFE4E7E390103F9B3F647C3FD2908EDC82EB8A931B6E0893AAB0",
+        DoubleBitsSha256(deemphasized));
+    double[] combined = VhsChromaDecoder.ApplyPalComb(
+        deemphasized,
+        frameSpec.OutputLineLength,
+        retainFloat32: false);
+    AssertEqual(
+        "C884AA2F0882D5A3FB6697766C5AE1622D29C33473BA93641E1E4DAC4D39D97F",
+        DoubleBitsSha256(combined));
+    AutomaticChromaGainResult gained = VhsChromaDecoder.ApplyAutomaticChromaGain(
+        combined,
+        options.BurstAbsRef,
+        options.BurstStart,
+        options.BurstEnd,
+        options.OutputLineLength,
+        options.OutputLineCount,
+        burstDetectedLine: 0,
+        useFloat32Rms: false);
+    int line16Start = 16 * options.OutputLineLength;
+    AssertEqual(0x3FB55C4B60C8F0D5UL, BitConverter.DoubleToUInt64Bits(combined[line16Start]));
+    AssertEqual(0x40B181A0E988718EUL, BitConverter.DoubleToUInt64Bits(gained.Samples[line16Start]));
+    AssertEqual(0x3FC431611A5BC9C4UL, BitConverter.DoubleToUInt64Bits(gained.MeanBurstRms));
+    AssertEqual(
+        "9BA09CDA0429425FA616D47ADDEE36420305E77ACB1C7590B3EE810A5F665482",
+        DoubleBitsSha256(gained.Samples));
+    AssertEqual(
+        "7E2DC277018708D982DF3C518807118D8E30CF0597661B2B16D0DB042A2CDED0",
+        Convert.ToHexString(SHA256.HashData(TbcOutputWriter.ToLittleEndianBytes(result.Samples))));
+}
+
+[Fact(DisplayName = "NTSC Video8 chroma AFC notch field matches v0.4.0 bits")]
+public void NtscVideo8ChromaAfcNotchFieldMatchesReleaseBits()
+{
+    FormatParameterSet parameters = FormatCatalog.Default.GetTapeParameters("NTSC", "VIDEO8", "sp");
+    TbcFrameSpec frameSpec = TbcFrameSpec.FromParameters(parameters);
+    var decodeOptions = new ChromaDecodeOptions(
+        IsColorUnder: true,
+        WriteChroma: true,
+        SkipChroma: false,
+        UseChromaAfc: true,
+        DisableComb: false,
+        ChromaDeemphasisFilter: true,
+        ChromaAudioNotch: true,
+        ChromaOffsetSamples: 5,
+        DetectChromaTrackPhase: false,
+        EnableColorKiller: false,
+        DisableBurstHsync: false,
+        DisablePhaseCorrection: false,
+        UseOldRawChromaOutput: false);
+    var filterOptions = new DecodeFilterOptions(
+        VideoNotchHz: 2_500_000.0,
+        VideoNotchQ: 20.0,
+        UseChromaAfc: true);
+    VhsChromaFieldOptions options = TbcFieldDecodePipeline.BuildChromaFieldOptions(
+        "NTSC",
+        parameters,
+        frameSpec,
+        decodeOptions,
+        filterOptions,
+        decodeSampleRateHz: 40_000_000.0)
+        ?? throw new InvalidOperationException("Chroma options were not built for NTSC Video8.");
+
+    AssertEqual(70, options.BurstStart);
+    AssertEqual(122, options.BurstEnd);
+    AssertEqual(3, options.ChromaPreFilterMoveSamples);
+    AssertEqual(4_100.0, options.BurstAbsRef);
+    double[] chroma = Enumerable.Range(0, frameSpec.FieldSampleCount)
+        .Select(index => (((index * 37) % 1009 - 504) / 16.0) + Math.ScaleB(index + 1.0, -38))
+        .ToArray();
+    AssertEqual(
+        "0DEC95390F9EA9D4C5D107BE5735DB6D4F388A328DE359000BC9B23535111F26",
+        DoubleBitsSha256(chroma));
+    AssertEqual(
+        "C1B4827F13A540C821CE52B1B7949ED0CC8DD353948F23202AFF291CAD14DEAE",
+        DoubleBitsSha256(options.ChromaPreSosFilter!.SelectMany(section => new[]
+        {
+            section.B0,
+            section.B1,
+            section.B2,
+            section.A0,
+            section.A1,
+            section.A2
+        }).ToArray()));
+    double[] rawPrefiltered = SosFilter.ApplyForwardBackward(options.ChromaPreSosFilter!, chroma);
+    AssertEqual(
+        "7B1DF5C0A54B4E19AC3358B433DA17090F0B087AD5E871C478EFE4E645206DEC",
+        DoubleBitsSha256(rawPrefiltered));
+
+    TransferFunction audioNotch = options.ChromaAudioNotchFilter
+        ?? throw new InvalidOperationException("NTSC Video8 chroma audio notch was not built.");
+    AssertEqual(
+        "536717C5CDBBD6D3156A8F6AE9206E84A83AB7D7BDC52BD683E263646C5BBF07",
+        DoubleBitsSha256(audioNotch.Numerator));
+    AssertEqual(
+        "0D879E20592216C09AC2C00CDC93ACAF1F7E0FC72B7B12EFD77AB54984F72B53",
+        DoubleBitsSha256(audioNotch.Denominator));
+    TransferFunction videoNotch = options.ChromaVideoNotchFilter
+        ?? throw new InvalidOperationException("NTSC Video8 chroma video notch was not built.");
+    AssertEqual(
+        "7BB4EEB22A771B14DDA878BA3DE8FC6C58FF5B85BD2006633380BC4C983CC8AA",
+        DoubleBitsSha256(videoNotch.Numerator));
+    AssertEqual(
+        "7E240C5672C10A594698EF75390D2C61AB541AC278E620241FED5189849D9703",
+        DoubleBitsSha256(videoNotch.Denominator));
+    double[] shifted = VhsChromaDecoder.ApplyChromaPreFilter(chroma, options);
+    AssertEqual(
+        "5A58E5EBCB401031D876E98D7C17F475CE32D217304F2556E0EBDEC0939C511A",
+        DoubleBitsSha256(shifted));
+
+    const int LineOffset = 1;
+    ChromaPhaseLine[] phaseLines = Enumerable.Range(0, frameSpec.OutputLineCount)
+        .Select(index =>
+        {
+            int line = LineOffset + index;
+            return new ChromaPhaseLine(
+                line,
+                ((line * 3) + 2) % 4,
+                ((line * 17) + 11) % 360 - 180.0,
+                BurstPhaseOffsetDegrees: 0.0,
+                BurstMagnitude: 30_000.0,
+                I: 30_000.0,
+                Q: 0.0);
+        })
+        .ToArray();
+    var phase = new ChromaPhaseSequenceResult(
+        NextChromaRotationIndex: 0,
+        phaseLines,
+        BurstDetectedLine: 0,
+        BurstMagnitudeAverage: 30_000.0,
+        BurstPhaseAverageDegrees: 0.0,
+        EvenBurstPhaseAverageDegrees: 0.0,
+        OddBurstPhaseAverageDegrees: 0.0);
+    VhsChromaFieldResult result = VhsChromaDecoder.DecodeFieldWithPhase(
+        chroma,
+        options,
+        phase,
+        isFirstField: true,
+        fieldNumber: 0,
+        lineOffset: LineOffset);
+    AssertEqual(1, result.FieldPhaseId);
+    ChromaCarrierEstimate carrier = result.CarrierEstimate
+        ?? throw new InvalidOperationException("NTSC Video8 chroma AFC did not estimate a carrier.");
+    AssertEqual(0x4126A389808FC2E8UL, BitConverter.DoubleToUInt64Bits(carrier.CarrierHz));
+    AssertEqual(0xC0993D3829E03C00UL, BitConverter.DoubleToUInt64Bits(carrier.OffsetHz));
+    AssertEqual(0UL, BitConverter.DoubleToUInt64Bits(carrier.PhaseRadians));
+
+    double[] burstDeemphasized = VhsChromaDecoder.ApplyBurstDeemphasis(
+        shifted,
+        LineOffset,
+        frameSpec.OutputLineCount,
+        frameSpec.OutputLineLength,
+        options.BurstStart,
+        options.BurstEnd);
+    AssertEqual(
+        "7402948922F352B6F278BC5C3A2AAC75F3BC0DAF05C7D844C1AAFF93C1A0218D",
+        DoubleBitsSha256(burstDeemphasized));
+    double[] upconverted = VhsChromaDecoder.UpconvertChromaPhaseCompensated(
+        burstDeemphasized,
+        LineOffset,
+        frameSpec.OutputLineLength,
+        phase.PhaseSequence,
+        options.ColorUnderCarrierHz,
+        options.FscMHz,
+        targetPhaseEvenDegrees: -33.0,
+        targetPhaseOddDegrees: -33.0);
+    AssertEqual(
+        "A4A6D4BB874F1581F783562FB3A5158859A3A1EF126E0694B14CE97CCB938109",
+        FloatBitsSha256(upconverted));
+    double[] final = SosFilter.ApplyForwardBackwardFloat32(options.FinalSosFilter!, upconverted);
+    AssertEqual(
+        "4298B29BBCBEFAD3FA65827DBE0F64CE307C9DFB04BCE0EEF74D47799B0FD9D5",
+        FloatBitsSha256(final));
+
+    TransferFunction deemphasis = options.ChromaDeemphasisFilter
+        ?? throw new InvalidOperationException("NTSC Video8 chroma deemphasis was not built.");
+    AssertEqual(
+        "CB8C8CE40001180E6B0FC224AB24715F674BD9352567822238CDC26B1C449FB4",
+        DoubleBitsSha256(deemphasis.Numerator));
+    AssertEqual(
+        "13D6AA3FC2CA709B0BE2F47F5852C312E62ED577151DA9049925A4F2C5E4CB36",
+        DoubleBitsSha256(deemphasis.Denominator));
+    double[] deemphasized = IirFilter.ApplyForward(deemphasis, final);
+    AssertEqual(
+        "312339E85BACF17572EF28914B49C8AEE43DA03CCD2E49B530AA367673B77391",
+        DoubleBitsSha256(deemphasized));
+    double[] combined = VhsChromaDecoder.ApplyNtscComb(
+        deemphasized,
+        frameSpec.OutputLineLength,
+        retainFloat32: false);
+    AssertEqual(
+        "0BBCE9403D67AAEF2C9463192EEB8245AAEDF106D21FA3FC37A32BD0984175DC",
+        DoubleBitsSha256(combined));
+    AutomaticChromaGainResult gained = VhsChromaDecoder.ApplyAutomaticChromaGain(
+        combined,
+        options.BurstAbsRef,
+        options.BurstStart,
+        options.BurstEnd,
+        options.OutputLineLength,
+        options.OutputLineCount,
+        burstDetectedLine: 0,
+        useFloat32Rms: false);
+    AssertEqual(0x3FC4DCC0311381E5UL, BitConverter.DoubleToUInt64Bits(gained.MeanBurstRms));
+    AssertEqual(
+        "30817DCD29D76CFE8C3BB4024519DB6EF3FB80F0B9626925F9FA2796B009BF67",
+        DoubleBitsSha256(gained.Samples));
+    AssertEqual(
+        "A639D0AD8D38590162FDF8D5345A5F06FE5DB90BAD5B4B36A9CE5E195A74C183",
+        Convert.ToHexString(SHA256.HashData(TbcOutputWriter.ToLittleEndianBytes(result.Samples))));
 }
 
 [Fact(DisplayName = "VHS chroma AFC tracks carrier offset")]
@@ -3789,6 +4655,60 @@ public void FirFrequencyResponseMatchesScipyDuccPacketFft()
         ComplexBitsSha256(response.AsSpan(0, 16_385)));
 }
 
+[Fact(DisplayName = "VHS video low-pass matches SciPy SOS response bits")]
+public void VhsVideoLowPassMatchesScipySosResponseBits()
+{
+    const int blockLength = 32_768;
+    SosSection[] sections = IirFilterDesign.ButterworthLowPassScipySos(
+        order: 6,
+        normalizedCutoff: 5_200_000.0 / 20_000_000.0);
+    AssertEqual(
+        "030CEA3602790BB439DCD6FBE34EB5F35C770BA152D959C0A7825653BD71A87E",
+        DoubleBitsSha256(sections.SelectMany(section => new[]
+        {
+            section.B0,
+            section.B1,
+            section.B2,
+            section.A0,
+            section.A1,
+            section.A2
+        }).ToArray()));
+
+    Complex[] response = IirFilterDesign.FrequencyResponse(sections, blockLength);
+    AssertEqual(
+        "02A0BB695FE1B7A001012161FC502DBB4E80E9B79DA4C1B558E28A5DD570598E",
+        ComplexBitsSha256(response.AsSpan(0, (blockLength / 2) + 1)));
+
+    FormatParameterSet parameters = FormatCatalog.Default.GetTapeParameters("PAL", "QUADRUPLEX", "sp");
+    DecodeFilterSet filters = DecodeFilterSetBuilder.BuildBasic(
+        parameters,
+        sampleRateHz: 40_000_000.0,
+        blockLength);
+    double[] magnitude = filters.VideoLowPass
+        .AsSpan(0, (blockLength / 2) + 1)
+        .ToArray()
+        .Select(value => value.Real)
+        .ToArray();
+    AssertEqual(
+        "448F993297D9C20DDCB15802F79A0CC9536926EEFD7954A2D60B38B0AE27B8DE",
+        DoubleBitsSha256(magnitude));
+}
+
+[Fact(DisplayName = "sub-deemphasis analytic magnitude matches SciPy hilbert bits")]
+public void SubDeemphasisAnalyticMagnitudeMatchesScipyHilbertBits()
+{
+    const int length = 32_768;
+    var input = new double[length];
+    for (ulong i = 0; i < (ulong)input.Length; i++)
+    {
+        input[(int)i] = (unchecked((i * 1_103_515_245UL) + 12_345UL) & 0xffffUL) - 32_768.0;
+    }
+
+    AssertEqual(
+        "2AD6816EF4E085A2C65950897ACD97863248F3152377DE6F17322CB38AA9ED13",
+        DoubleBitsSha256(RfDemodulator.BuildAnalyticMagnitude(input)));
+}
+
 [Fact(DisplayName = "complex FFT matches SciPy DUCC packet transforms")]
 public void ComplexFftMatchesScipyDuccPacketTransforms()
 {
@@ -3808,6 +4728,72 @@ public void ComplexFftMatchesScipyDuccPacketTransforms()
     AssertEqual(
         "F3B5C7DCE8BF5BC11B087BD2930FFC3D6EA656DC1196344B995EC192218E6B96",
         ComplexBitsSha256(PocketFftComplex.InverseDucc(forward)));
+}
+
+[Fact(DisplayName = "real full FFT matches SciPy DUCC packet transform")]
+public void RealFullFftMatchesScipyDuccPacketTransform()
+{
+    const int length = 32_768;
+    var input = new double[length];
+    for (ulong i = 0; i < (ulong)input.Length; i++)
+    {
+        input[(int)i] = (unchecked((i * 1_103_515_245UL) + 12_345UL) & 0xffffUL) - 32_768.0;
+    }
+
+    Complex[] spectrum = PocketFftComplex.ForwardDuccRealFull(input);
+    AssertEqual(
+        "5ED16316814D498111E0A6EE33EDED7E0862CBD7ACBACD9D00DA13C8125FACF4",
+        ComplexBitsSha256(spectrum));
+    AssertEqual(
+        BitConverter.DoubleToInt64Bits(-0.0),
+        BitConverter.DoubleToInt64Bits(spectrum[0].Imaginary));
+    AssertEqual(
+        BitConverter.DoubleToInt64Bits(-0.0),
+        BitConverter.DoubleToInt64Bits(spectrum[length / 2].Imaginary));
+}
+
+[Fact(DisplayName = "LD IIR filters match SciPy 1.18 bits")]
+public void LaserDiscIirFiltersMatchScipy18Bits()
+{
+    TransferFunction videoLowPass = IirFilterDesign.ButterworthLowPassTransferFunction(
+        order: 7,
+        normalizedCutoff: 5_800_000.0 / 20_000_000.0);
+    AssertEqual(
+        "330DABE20E63227AC920B082C47AD60D9510E58FCEFADC2C3BC40635D82E2D76",
+        DoubleBitsSha256(videoLowPass.Numerator));
+    AssertEqual(
+        "43B80CA9955D7FD32F468AF225F1775A2C4874DDA74BA71B653BAE2D93155E48",
+        DoubleBitsSha256(videoLowPass.Denominator));
+    AssertEqual(
+        "117E917EFACCF2211FE4CE705D02D472530B8752CEF95FC462E7AC3F7D100C69",
+        ComplexBitsSha256(IirFilterDesign.FrequencyResponse(videoLowPass, 32_768)));
+
+    TransferFunction rfLowPass = IirFilterDesign.ButterworthLowPassTransferFunction(
+        order: 3,
+        normalizedCutoff: 14_000_000.0 / 20_000_000.0);
+    AssertEqual(
+        "D5D55F5E68E61BEE04034B426E2DDC86C297D1B2D50C78BC835DCFDF4E2FD001",
+        DoubleBitsSha256(rfLowPass.Numerator));
+    AssertEqual(
+        "E35C5B36DE2A4261E4E4D6082395D489F79689B5CC833F2CC83A907D303EF035",
+        DoubleBitsSha256(rfLowPass.Denominator));
+    AssertEqual(
+        "5E8B76A504F7484FB0A04016F3993C8AB8E94E3446C8E333ECF1D27C6F891D1C",
+        ComplexBitsSha256(IirFilterDesign.FrequencyResponse(rfLowPass, 32_768)));
+
+    TransferFunction deemphasis = IirFilterDesign.EmphasisIir(
+        zeroTimeConstant: 100e-9,
+        poleTimeConstant: 400e-9,
+        sampleRateHz: 40_000_000.0);
+    AssertEqual(
+        "E2EF9503A35F287431765D364614BC90D90BDBE09F3B0813B47C479AA07A54FC",
+        DoubleBitsSha256(deemphasis.Numerator));
+    AssertEqual(
+        "AFC5EFD261856C97E7ED87FBF4759C50ED89B27EBFD40322B3B67F0FC86E9461",
+        DoubleBitsSha256(deemphasis.Denominator));
+    AssertEqual(
+        "BF1845F29E85D81BCA34BC0069536F58BADFDC40AE5AB1A2DE06F1A55CE3561D",
+        ComplexBitsSha256(IirFilterDesign.FrequencyResponse(deemphasis, 32_768)));
 }
 
 [Fact(DisplayName = "IIR filter design builds LD emphasis filters")]
@@ -4492,6 +5478,88 @@ public void LaserDiscV04BlockDemodulationMatchesUpstreamFloat32Hashes()
         FloatBitsSha256(block.VideoBurst!));
 }
 
+[Fact(DisplayName = "PAL LD v0.4 block demodulation matches upstream bits")]
+public void PalLaserDiscV04BlockDemodulationMatchesUpstreamBits()
+{
+    const int blockLength = 32_768;
+    const double sampleRateHz = 40_000_000.0;
+    FormatParameterSet parameters = FormatCatalog.Default.GetLaserDiscParameters("PAL", lowBand: false);
+    var options = new DecodeFilterOptions(
+        LdDecodeDigitalAudio: false,
+        LdDecodeAnalogAudio: false,
+        LdMtfLevel: 1.0,
+        LdMtfOffset: 0.0,
+        LdClipDemodForVideo: true);
+    DecodeFilterSet filters = DecodeFilterSetBuilder.BuildBasic(
+        parameters,
+        sampleRateHz,
+        blockLength,
+        options);
+    var references = new RfVideoReferenceFilterSet(
+        filters.LdVideoBurst,
+        filters.LdVideoBurstOffset,
+        filters.LdVideoPilot,
+        ClipDemodForVideo: true);
+
+    var input = new double[blockLength];
+    for (ulong i = 0; i < (ulong)input.Length; i++)
+    {
+        input[(int)i] = (unchecked((i * 1_103_515_245UL) + 12_345UL) & 0xffffUL) - 32_768.0;
+    }
+
+    AssertEqual(
+        "F57895C848D823B791F4A015D3A8B1FDF4FF16E9A83E8FEE72C1D5FF4BB1AC77",
+        ComplexBitsSha256(filters.RfMtf));
+    AssertEqual(
+        "117E917EFACCF2211FE4CE705D02D472530B8752CEF95FC462E7AC3F7D100C69",
+        ComplexBitsSha256(filters.VideoLowPass));
+    AssertEqual(
+        "6474816519E6AA38B324A16B7271584621C1AFC6B909AFA1100C6AE0B5B8C459",
+        ComplexBitsSha256(filters.VideoLowPass05));
+    AssertEqual(
+        "8A4706CD55C8BE77C2382B63C59FE01C512C418AED506AEE912AB17C5C7FF8CF",
+        ComplexBitsSha256(filters.LdVideoBurst!));
+    AssertEqual(
+        "F63020FE0A0AB422BA3D384B47464B0924B9EC0C3C79DD65F0319A8297DF403D",
+        ComplexBitsSha256(filters.LdVideoPilot!));
+
+    RfDemodulatedBlock block = new RfDemodulator(sampleRateHz).Demodulate(
+        input,
+        filters.RfVideo,
+        filters.RfHighPass,
+        filters.RfMtf,
+        filters.Video,
+        filters.VideoLowPass05,
+        filters.VideoLowPass05Offset,
+        referenceFilters: references,
+        fmDemodulatorMode: RfFmDemodulatorMode.ConjugateProduct);
+
+    AssertEqual(
+        "20525ABB338B1640D387EAE935FCBB0D1D0729A38008819AAD0ADB900C4D8C33",
+        ComplexBitsSha256(block.Analytic));
+    AssertEqual(
+        "FEDE6AC5EFBEE32513A9247CA4F89491B73769E046BC708ABD781BFBCC09FEF6",
+        DoubleBitsSha256(block.DemodRaw));
+    AssertEqual(
+        "F55C50873424A2A56706BC360792B8706ABFE596C43A0E6973E72FE6BAA64507",
+        DoubleBitsSha256(block.VideoPilot!));
+    AssertEqual(
+        "ADFFFDAEEDDE27DC86E34A26CED2C7D6B424592769BA212881C4ECC558744C08",
+        FloatBitsSha256(block.Video));
+    AssertEqual(
+        "E4AC0D4BB8769F27761AFEF067E3F935919E53707AA0C06D08988FD24E1C8CD2",
+        FloatBitsSha256(block.DemodRaw));
+    AssertEqual(
+        "8488CE08A2AA742547BD4A959319AE40D928EE4F060391C479E2B4BEDA969810",
+        FloatBitsSha256(block.VideoLowPass));
+    AssertEqual(
+        "15B13EB9267EF8AFF44F8C0AEB0E66214981019B7BD3078E80D7966F2AD23154",
+        FloatBitsSha256(block.VideoBurst!));
+    AssertEqual(
+        "23B44A32BD6CEF0BBD8D957390856AD1D29330E9849546FE18027A7CB636E950",
+        FloatBitsSha256(block.VideoPilot!));
+}
+
 [Fact(DisplayName = "LD analog audio phase 2 matches upstream overlap and peak suppression")]
 public void LaserDiscAnalogAudioPhase2MatchesUpstreamOverlapAndPeakSuppression()
 {
@@ -4867,11 +5935,15 @@ public async Task GnuRadioRfAfeBridgeMatchesUpstreamZmqProtocol()
         sink.SendFrame(BuildFloat32Bytes(firstResponse));
         AssertTrue(sink.ReceiveFrameBytes().SequenceEqual([(byte)'0']));
         sink.SendFrame(BuildFloat32Bytes(secondResponse));
-    });
+    }, TestContext.Current.CancellationToken);
 
-    AssertTrue(companionReady.Wait(TimeSpan.FromSeconds(5)));
+    AssertTrue(companionReady.Wait(
+        TimeSpan.FromSeconds(5),
+        TestContext.Current.CancellationToken));
     double[] processed = bridge.Process(input);
-    await companion.WaitAsync(TimeSpan.FromSeconds(5));
+    await companion.WaitAsync(
+        TimeSpan.FromSeconds(5),
+        TestContext.Current.CancellationToken);
     AssertSequence(firstResponse.Concat(secondResponse).ToArray(), processed);
     AssertTrue(log.ToString().Contains($"tcp://localhost:{sendPort}", StringComparison.Ordinal));
     AssertTrue(log.ToString().Contains($"tcp://*:{receivePort}", StringComparison.Ordinal));
@@ -5055,6 +6127,8 @@ public void CvbsV04BlockFiltersMatchUpstreamFloat32Hashes()
         input,
         new DecodeFilterOptions(),
         autoSync: true,
+        "3DAE4DFDEA2CB35381BAB7FA78905D9AB0DFD534CABD834F7805724CA69441D0",
+        "36AC5FFB7704AF4B8004CF08D3B5DE8EFCB2161EB65593C8FBDEBB28DAEBF5CB",
         "7977594BEB52A0C6BA1C1CE96A62F3C036FCDF81B9F6FAC467E1BADB380FD0B1",
         "45F1F20764D84B3950C3E216FB827C78736DC31DC210EF418C18BC3F4B024159",
         "EBB605C0FD21EE5499202CE9456DB5B28538DA421215F66BEC1FC4CDF620B80A");
@@ -5063,6 +6137,8 @@ public void CvbsV04BlockFiltersMatchUpstreamFloat32Hashes()
         input,
         new DecodeFilterOptions(),
         autoSync: false,
+        "81D70D24493E54E3094D9CBD62F9AE2B7975A8DC8FCCE044C865C5643E629EBF",
+        "EF971B10B1B630C3E55D4A9C0100DB30CB5034F9FE80AD6A179A152634EC31D0",
         "2AB184BA686E60AFC61737E665CD23A5914B895B8DF05F417CE575A3D7A368E3",
         "BE92347A04CAFCDF0D71409EE64918F6C7F4647EA0434211AF00BEB4B7A95662",
         "3D9B7A1A7403727941C4F8C0E758F1E458C842D38E385C15DE51DCA92352A986");
@@ -5071,6 +6147,8 @@ public void CvbsV04BlockFiltersMatchUpstreamFloat32Hashes()
         input,
         new DecodeFilterOptions(VideoNotchHz: 2_500_000.0, VideoNotchQ: 15.0),
         autoSync: true,
+        "9064E2552859B8CD15CEED9141B382E6458B85955E0CB36D96008CBE2A349222",
+        "CF856DDC49407AB9F37873D218B7F3A35AC73F570C6B28E6C70880D45183E11D",
         "FD22A43C118D6BBEA7B357FB9535DC338F09047688BC7701FFC9355B3C7FE5A7",
         "99D7FC86631EAB0A8B275425359D059E619115D6D52EBA8DD994B426CD4922C4",
         "A62D9F7CBB1F31813D1B52BE6B83C42EB3D4C341529027C7A22805301C975F74");
@@ -5081,6 +6159,8 @@ static void AssertCvbsV04Hashes(
     double[] input,
     DecodeFilterOptions options,
     bool autoSync,
+    string demodDoubleHash,
+    string video05DoubleHash,
     string demodHash,
     string video05Hash,
     string burstHash)
@@ -5097,17 +6177,87 @@ static void AssertCvbsV04Hashes(
         options,
         new CvbsDecodeOptions(autoSync, VideoOutputConverter.FromParameters(parameters)));
     RfDemodulatedBlock block = pipeline.DecodePreparedBlock(input).Demodulated;
+    AssertEqual(demodDoubleHash, DoubleBitsSha256(block.DemodRaw));
+    AssertEqual(video05DoubleHash, DoubleBitsSha256(block.VideoLowPass));
     AssertEqual(demodHash, FloatBitsSha256(block.DemodRaw));
     AssertEqual(video05Hash, FloatBitsSha256(block.VideoLowPass));
     AssertEqual(burstHash, FloatBitsSha256(block.VideoBurst!));
 }
 
+[Fact(DisplayName = "CVBS DUCC real FFT filtering matches SciPy double bits")]
+public void CvbsDuccRealFftFilteringMatchesScipyDoubleBits()
+{
+    const int blockLength = 32_768;
+    uint state = 0x12345678;
+    var input = new double[blockLength];
+    for (int i = 0; i < input.Length; i++)
+    {
+        state = unchecked((state * 1664525) + 1013904223);
+        int value = (int)((state >> 8) & 0xFFFF) - 32768;
+        input[i] = value == 0 ? 1 : value;
+    }
+
+    AssertEqual(
+        "A8B3FFBA42B93344094A5BD9B3056EE8E1358FC589EAB1AB0F9C47C634E71560",
+        DoubleBitsSha256(input));
+
+    DecodeFilterSet filters = DecodeFilterSetBuilder.BuildBasic(
+        FormatCatalog.Default.GetCvbsParameters("NTSC"),
+        40_000_000.0,
+        blockLength);
+    AssertEqual(
+        "7E0AA1AB29320D3DFDB5C8C5843274C57611EB30434335A32EE61775DDCF1E35",
+        ComplexBitsSha256(filters.VideoLowPass05));
+
+    Complex[] halfSpectrum = PocketFftComplex.ForwardDuccReal(input);
+    AssertEqual(
+        "14467469A931E878E066F4E9F7CB04950D951A32DD5FFB7A6BD9B4BF693F1768",
+        ComplexBitsSha256(halfSpectrum));
+    double[] reconstructed = PocketFftComplex.InverseDuccReal(halfSpectrum, blockLength);
+    AssertEqual(
+        "3DAE4DFDEA2CB35381BAB7FA78905D9AB0DFD534CABD834F7805724CA69441D0",
+        DoubleBitsSha256(reconstructed));
+    Complex[] reconstructedSpectrum = PocketFftComplex.ForwardDuccReal(reconstructed);
+    AssertEqual(
+        "4536090FA1058E7761561A0A2377188ED1A9F96167F6C746C5D26E48740F1D01",
+        ComplexBitsSha256(reconstructedSpectrum));
+
+    var filteredSpectrum = new Complex[reconstructedSpectrum.Length];
+    for (int i = 0; i < filteredSpectrum.Length; i++)
+    {
+        Complex value = reconstructedSpectrum[i];
+        Complex coefficient = filters.VideoLowPass05[i];
+        filteredSpectrum[i] = new Complex(
+            Math.FusedMultiplyAdd(
+                value.Real,
+                coefficient.Real,
+                -(value.Imaginary * coefficient.Imaginary)),
+            Math.FusedMultiplyAdd(
+                value.Real,
+                coefficient.Imaginary,
+                value.Imaginary * coefficient.Real));
+    }
+
+    AssertEqual(
+        "8B98C81888AC03D255815CA8043790BD502890A4CD68541DCC9FDE80E5922339",
+        ComplexBitsSha256(filteredSpectrum));
+    AssertEqual(
+        "40B996E074F1A1CD7A8F9989864CD61F4457CCFCFAC5C1B4B62629A307D83593",
+        DoubleBitsSha256(PocketFftComplex.InverseDuccReal(filteredSpectrum, blockLength)));
+
+    double[] secondRoundTrip = PocketFftComplex.InverseDuccReal(
+        reconstructedSpectrum,
+        blockLength);
+    AssertEqual(
+        "5347913DE0967DB8EB0605C4603769AA2150CBB8CF03103BA3A7334C39CE5855",
+        DoubleBitsSha256(secondRoundTrip));
+    AssertThrows<ArgumentException>(() => PocketFftComplex.InverseDuccReal(halfSpectrum, 1024));
+}
+
 static double[] CvbsFftRoundTrip(ReadOnlySpan<double> input)
 {
-    Complex[] fullSpectrum = PocketFftComplex.ForwardReal(input);
-    var halfSpectrum = new Complex[(input.Length / 2) + 1];
-    fullSpectrum.AsSpan(0, halfSpectrum.Length).CopyTo(halfSpectrum);
-    return PocketFftReal.Inverse(halfSpectrum, input.Length);
+    Complex[] halfSpectrum = PocketFftComplex.ForwardDuccReal(input);
+    return PocketFftComplex.InverseDuccReal(halfSpectrum, input.Length);
 }
 
 [Fact(DisplayName = "RF block stream decoder stitches overlap-save blocks")]
@@ -6634,8 +7784,8 @@ public void LaserDiscLineLocationRepairMatchesUpstreamRules()
     }
 
     var repairSource = new LineLocationResult(
-        [0.0, 100.0, 250.0, 400.0, 500.0],
-        [false, false, true, true, false]);
+        [0.0, 100.0, 200.0, 350.0, 500.0, 650.0],
+        new bool[6]);
     LineLocationResult repaired = LaserDiscLineLocationRepair.FixBadLines(
         repairSource,
         system: "NTSC");
@@ -6649,6 +7799,29 @@ public void LaserDiscLineLocationRepairMatchesUpstreamRules()
         noNtscLineZeroAnchor,
         system: "NTSC");
     AssertClose(150.0, notRepaired.Locations[1], 1e-12);
+}
+
+[Fact(DisplayName = "CVBS line location repair preserves its overridden derivative mask")]
+public void CvbsLineLocationRepairPreservesOverriddenDerivativeMask()
+{
+    var source = new LineLocationResult(
+        [0.0, 100.0, 205.0, 360.0, 405.0, 505.0],
+        [false, false, false, true, false, false]);
+
+    LineLocationResult repaired = LaserDiscLineLocationRepair.FixBadLines(
+        source,
+        system: "PAL",
+        markDerivativeErrors: false);
+
+    bool[] expectedErrors = [false, false, false, true, false, false];
+    for (int line = 0; line < expectedErrors.Length; line++)
+    {
+        AssertEqual(expectedErrors[line], repaired.Filled[line]);
+    }
+
+    AssertClose(305.0, repaired.Locations[3], 1e-12);
+    AssertClose(205.0, repaired.Locations[2], 1e-12);
+    AssertClose(405.0, repaired.Locations[4], 1e-12);
 }
 
 [Fact(DisplayName = "LD line location builder repairs player skips from field end")]
@@ -7178,6 +8351,68 @@ public void VideoOutputConverterMapsHzToTbcSamples()
     AssertEqual(expectedBlank, palConverter.ConvertHz(palConverter.IreToHz(0.0)));
 }
 
+[Fact(DisplayName = "video output array conversion matches Numba fastmath boundaries")]
+public void VideoOutputArrayConversionMatchesNumbaFastMathBoundaries()
+{
+    var converter = new VideoOutputConverter(
+        ire0: 7_100_000.0,
+        hzIre: 8_000.0,
+        outputZero: 256,
+        vsyncIre: -42.857142857142854,
+        outputScale: 376.32);
+
+    ushort[] converted = converter.ConvertHz(
+        [6_760_937.5, 6_789_062.5, 6_754_687.5, 6_767_187.5]);
+    AssertEqual((ushort)434, converted[0]);
+    AssertEqual((ushort)1_757, converted[1]);
+    AssertEqual((ushort)140, converted[2]);
+    AssertEqual((ushort)728, converted[3]);
+}
+
+[Fact(DisplayName = "LD sync pulse search uses the upstream minus 20 IRE threshold")]
+public void LaserDiscSyncPulseSearchUsesMinusTwentyIreThreshold()
+{
+    var analyzer = new SyncAnalyzer(
+        sampleRateHz: 40_000_000.0,
+        linePeriodUs: 64.0,
+        hsyncPulseUs: 4.7,
+        equalizingPulseUs: 2.35,
+        vsyncPulseUs: 27.3);
+    var frameSpec = new TbcFrameSpec(
+        "PAL",
+        OutputLineLength: 4,
+        OutputLineCount: 2,
+        OutputSampleRateHz: 17_734_475.0,
+        ColourBurstStart: null,
+        ColourBurstEnd: null,
+        ActiveVideoStart: null,
+        ActiveVideoEnd: null);
+    var converter = new VideoOutputConverter(
+        ire0: 7_100_000.0,
+        hzIre: 8_000.0,
+        outputZero: 256,
+        vsyncIre: -42.857142857142854,
+        outputScale: 376.32);
+    var pipeline = new TbcFieldDecodePipeline(
+        analyzer,
+        new TbcFieldRenderer(frameSpec, converter),
+        converter,
+        "PAL",
+        TbcDropoutDetectionOptions.Disabled,
+        syncDetectionOptions: SyncDetectionOptions.Disabled,
+        decodeType: "ld");
+    double[] samples = [7_100_000.0];
+    object prepared = InvokePrivateMethod(
+        pipeline,
+        "PrepareSyncSpan",
+        new RfDecodedSpan(0, samples, samples, samples, VideoLowPass: samples),
+        null,
+        true,
+        true)!;
+
+    AssertClose(6_940_000.0, Convert.ToDouble(PrivatePropertyValue(prepared, "Threshold")), 0.0);
+}
+
 [Fact(DisplayName = "TBC field renderer emits upstream-shaped little-endian fields")]
 public void TbcFieldRendererEmitsUpstreamShapedFields()
 {
@@ -7410,6 +8645,7 @@ public void TbcFieldRendererAppliesIre0Adjust()
         "BuildFieldConverter",
         precisionField,
         0,
+        null,
         null)!;
     AssertEqual(0x49700083, BitConverter.SingleToInt32Bits((float)measuredConverter.Ire0));
 
@@ -7438,6 +8674,7 @@ public void TbcFieldRendererAppliesIre0Adjust()
         "BuildFieldConverter",
         hsyncPrecisionField,
         0,
+        null,
         null)!;
     AssertEqual(
         (double)(float)(((float)hsyncPrecisionConverter.Ire0 - (float)13.37) / 40.0f),
@@ -7478,6 +8715,8 @@ public void TbcFieldRendererAppliesTrackPhaseOffsets()
     AssertEqual((ushort)50, phase0.RenderField(video, lineLocations, fieldNumber: 1)[0]);
     AssertEqual((ushort)50, phase1.RenderField(video, lineLocations, fieldNumber: 0)[0]);
     AssertEqual((ushort)48, phase1.RenderField(video, lineLocations, fieldNumber: 1)[0]);
+    AssertEqual((ushort)50, phase0.RenderField(video, lineLocations, fieldNumber: 0, trackPhaseOverride: 1)[0]);
+    AssertEqual((ushort)48, phase1.RenderField(video, lineLocations, fieldNumber: 0, trackPhaseOverride: 0)[0]);
 }
 
 [Fact(DisplayName = "TBC field renderer applies CVBS clamp AGC")]
@@ -7592,6 +8831,59 @@ public void TbcFieldRendererAppliesCvbsClampAgc()
     AssertClose(2.0, session.TbcRenderer.CvbsClampAgc.SetGain, 1e-12);
 }
 
+[Fact(DisplayName = "CVBS clamp AGC matches NumPy float32 staging")]
+public void CvbsClampAgcMatchesNumpyFloat32Staging()
+{
+    const int lineLength = 200;
+    const int lineCount = 20;
+    var spec = new TbcFrameSpec(
+        "PAL",
+        lineLength,
+        lineCount,
+        OutputSampleRateHz: 17_734_475.0,
+        ColourBurstStart: null,
+        ColourBurstEnd: null,
+        ActiveVideoStart: null,
+        ActiveVideoEnd: null);
+    VideoOutputConverter converter = VideoOutputConverter.FromParameters(
+        FormatCatalog.Default.GetCvbsParameters("PAL"));
+    var options = new CvbsClampAgcOptions(Speed: 1.0, GainFactor: 1.0, SetGain: 0.0);
+    var renderer = new TbcFieldRenderer(spec, converter, cvbsClampAgc: options);
+    var field = new double[lineLength * lineCount];
+    for (int line = 0; line < lineCount; line++)
+    {
+        float blank = 10_000.0f + (line * 17.25f);
+        int lineStart = line * lineLength;
+        for (int x = 0; x < lineLength; x++)
+        {
+            field[lineStart + x] = blank + (2_000.0f + (((x % 37) - 18) * 13.125f));
+        }
+
+        for (int x = 12; x < 72; x++)
+        {
+            field[lineStart + x] = blank + (-8_000.0f + (((x % 5) - 2) * 0.125f));
+        }
+
+        for (int x = 96; x < 164; x++)
+        {
+            field[lineStart + x] = blank + (((x % 7) - 3) * 0.0625f);
+        }
+    }
+
+    int roundingBoundary = (6 * lineLength) + 180;
+    field[roundingBoundary] = 12_906.9931640625f;
+    ushort[] samples = (ushort[])InvokePrivateMethod(
+        renderer,
+        "ConvertCvbsClampAgc",
+        field,
+        options)!;
+
+    AssertEqual((ushort)42_405, samples[roundingBoundary]);
+    AssertEqual(
+        "31B045161C504B79C5491F6A80B0E48C46D7B03705F0E4AD2666F035CE34D039",
+        Convert.ToHexString(SHA256.HashData(TbcOutputWriter.ToLittleEndianBytes(samples))));
+}
+
 [Fact(DisplayName = "CVBS AGC statistics match upstream reporting")]
 public void CvbsAgcStatisticsMatchUpstreamReporting()
 {
@@ -7646,6 +8938,418 @@ public void CvbsAgcStatisticsMatchUpstreamReporting()
         + "  Samples written: 23" + Environment.NewLine
         + "Successfully wrote bug.ldf" + Environment.NewLine,
         testLdfReport.ToString());
+}
+
+[Fact(DisplayName = "decode runtime reporter matches upstream stream protocol")]
+public void DecodeRuntimeReporterMatchesUpstreamStreamProtocol()
+{
+    var output = new StringWriter();
+    var error = new StringWriter();
+    double elapsedSeconds = 0.0;
+    var reporter = new DecodeRuntimeReporter(output, error, () => elapsedSeconds);
+
+    reporter.Status("Frame status");
+    reporter.Log("DEBUG", "log-only detail");
+    reporter.Log("WARNING", "visible warning");
+    AssertEqual(
+        "Frame status" + new string(' ', 80 - "Frame status".Length) + '\r' + Environment.NewLine,
+        output.ToString());
+    AssertEqual("visible warning" + Environment.NewLine, error.ToString());
+
+    elapsedSeconds = 1.0;
+    reporter.FieldsWritten(1);
+    elapsedSeconds = 2.0;
+    reporter.FieldsWritten(1);
+    elapsedSeconds = 5.0;
+    reporter.WriteStatistics();
+    reporter.WriteStatistics();
+    AssertEqual(
+        "visible warning" + Environment.NewLine
+        + "Took 5.00 seconds to decode 1 frames (0.25 FPS post-setup)" + Environment.NewLine,
+        error.ToString());
+}
+
+[Fact(DisplayName = "VHS disk guard matches upstream cadence and pause protocol")]
+public void VhsDiskGuardMatchesUpstreamCadenceAndPauseProtocol()
+{
+    AssertTrue(VhsDiskSpaceGuard.ShouldCheck(0));
+    AssertTrue(VhsDiskSpaceGuard.ShouldCheck(99));
+    AssertFalse(VhsDiskSpaceGuard.ShouldCheck(100));
+    AssertFalse(VhsDiskSpaceGuard.ShouldCheck(499));
+    AssertTrue(VhsDiskSpaceGuard.ShouldCheck(500));
+    AssertFalse(VhsDiskSpaceGuard.ShouldCheck(501));
+    AssertTrue(VhsDiskSpaceGuard.ShouldCheck(1_000));
+
+    var output = new StringWriter();
+    var error = new StringWriter();
+    var reporter = new DecodeRuntimeReporter(output, error, () => 0.0);
+    reporter.Status("active status");
+    var freeBytes = new Queue<long>(
+        [VhsDiskSpaceGuard.MinimumFreeBytes - 1, VhsDiskSpaceGuard.MinimumFreeBytes - 1, VhsDiskSpaceGuard.MinimumFreeBytes]);
+    var waits = new List<TimeSpan>();
+    string? checkedDirectory = null;
+    var guard = new VhsDiskSpaceGuard(
+        directory =>
+        {
+            checkedDirectory = directory;
+            return freeBytes.Dequeue();
+        },
+        waits.Add);
+    string outputBase = Path.Combine(Path.GetTempPath(), "vhs-disk-guard", "capture");
+
+    guard.Check(
+        outputBase,
+        fieldsWritten: 1,
+        reporter,
+        TestContext.Current.CancellationToken);
+
+    string status = "active status";
+    AssertEqual(status + new string(' ', 80 - status.Length) + '\r', output.ToString());
+    AssertEqual(Path.GetDirectoryName(Path.GetFullPath(outputBase)), checkedDirectory);
+    AssertEqual(2, waits.Count);
+    AssertEqual(TimeSpan.FromSeconds(1.0), waits[0]);
+    AssertEqual(TimeSpan.FromSeconds(1.0), waits[1]);
+    AssertEqual(
+        Environment.NewLine
+        + "Less than 10GB of free disk space is remaining, decoding paused. "
+        + "Decoding will resume once there is more space, or press Ctrl+C to exit."
+        + Environment.NewLine
+        + Environment.NewLine
+        + "Disk space available, resuming decode."
+        + Environment.NewLine,
+        error.ToString());
+
+    int skippedQueries = 0;
+    new VhsDiskSpaceGuard(_ =>
+    {
+        skippedQueries++;
+        return 0;
+    }).Check(
+        outputBase,
+        fieldsWritten: 100,
+        reporter,
+        TestContext.Current.CancellationToken);
+    AssertEqual(0, skippedQueries);
+
+    var ignoredError = new StringWriter();
+    var ignoredReporter = new DecodeRuntimeReporter(TextWriter.Null, ignoredError, () => 0.0);
+    new VhsDiskSpaceGuard(_ => throw new IOException("unavailable"))
+        .Check(
+            outputBase,
+            fieldsWritten: 1,
+            ignoredReporter,
+            TestContext.Current.CancellationToken);
+    AssertEqual(string.Empty, ignoredError.ToString());
+
+    using var cancellationSource = new CancellationTokenSource();
+    var cancellationError = new StringWriter();
+    var cancellationReporter = new DecodeRuntimeReporter(
+        TextWriter.Null,
+        cancellationError,
+        () => 0.0);
+    var cancellationGuard = new VhsDiskSpaceGuard(
+        _ => VhsDiskSpaceGuard.MinimumFreeBytes - 1,
+        _ => cancellationSource.Cancel());
+    AssertThrows<OperationCanceledException>(() => cancellationGuard.Check(
+        outputBase,
+        fieldsWritten: 1,
+        cancellationReporter,
+        cancellationSource.Token));
+    AssertEqual(
+        Environment.NewLine
+        + "Less than 10GB of free disk space is remaining, decoding paused. "
+        + "Decoding will resume once there is more space, or press Ctrl+C to exit."
+        + Environment.NewLine,
+        cancellationError.ToString());
+}
+
+[Fact(DisplayName = "decode cancellation finalizes partial output and matches upstream streams")]
+public void DecodeCancellationFinalizesPartialOutputAndMatchesUpstreamStreams()
+{
+    string tempDirectory = Path.Combine(Path.GetTempPath(), "vhsdecode-dotnet-tests-" + Guid.NewGuid().ToString("N"));
+    Directory.CreateDirectory(tempDirectory);
+    try
+    {
+        string partialBase = Path.Combine(tempDirectory, "partial");
+        using DecodeSession session = DecodeSessionFactory.Create(Parse(CliSpecs.Vhs, [
+            "--pal",
+            "input.u8",
+            partialBase
+        ]));
+        using var fieldCancellation = new CancellationTokenSource();
+        int reads = 0;
+        TbcDecodedField? ReadField(DecodeSession activeSession, Stream _, long begin, int __, int ___)
+        {
+            reads++;
+            if (reads == 2)
+            {
+                fieldCancellation.Cancel();
+                fieldCancellation.Token.ThrowIfCancellationRequested();
+            }
+
+            return BuildSyntheticTbcField(
+                    begin,
+                    new ushort[activeSession.TbcFrameSpec.FieldSampleCount],
+                    detectedFirstField: true)
+                with
+                {
+                    NextFieldOffsetSamples = 100.0,
+                    ChromaSamples = new ushort[activeSession.TbcFrameSpec.FieldSampleCount]
+                };
+        }
+
+        var engine = new TbcFieldSequenceDecodeEngine(
+            readField: ReadField,
+            cancellationToken: fieldCancellation.Token);
+        AssertThrows<OperationCanceledException>(() => engine.TryDecodeAndWrite(session, Stream.Null));
+        AssertEqual(2, reads);
+        AssertEqual(
+            session.TbcFrameSpec.FieldSampleCount * sizeof(ushort),
+            new FileInfo(partialBase + ".tbc").Length);
+        AssertEqual(
+            session.TbcFrameSpec.FieldSampleCount * sizeof(ushort),
+            new FileInfo(partialBase + "_chroma.tbc").Length);
+        using (JsonDocument partialJson = JsonDocument.Parse(File.ReadAllText(partialBase + ".tbc.json")))
+        {
+            AssertEqual(1, partialJson.RootElement.GetProperty("fields").GetArrayLength());
+        }
+
+        AssertFalse(File.Exists(partialBase + ".tbc.json.tmp"));
+        AssertFalse(File.Exists(partialBase + ".tbc.json.fields.tmp"));
+
+        string inputPath = Path.Combine(tempDirectory, "empty.u8");
+        File.WriteAllBytes(inputPath, []);
+        string runnerBase = Path.Combine(tempDirectory, "runner");
+        ParsedCommand command = Parse(CliSpecs.Vhs, [
+            "--pal",
+            "--no_resample",
+            "--length", "1",
+            inputPath,
+            runnerBase
+        ]);
+        using var runnerCancellation = new CancellationTokenSource();
+        runnerCancellation.Cancel();
+        var output = new StringWriter();
+        var error = new StringWriter();
+
+        int exitCode = new DecodeRunner().Run(
+            command,
+            output,
+            error,
+            runnerCancellation.Token);
+
+        string termination = Environment.NewLine
+            + "Terminated, saving JSON and exiting"
+            + Environment.NewLine;
+        AssertEqual(1, exitCode);
+        AssertEqual(termination, output.ToString());
+        AssertEqual(string.Empty, error.ToString());
+        using (JsonDocument runnerJson = JsonDocument.Parse(File.ReadAllText(runnerBase + ".tbc.json")))
+        {
+            AssertEqual(0, runnerJson.RootElement.GetProperty("fields").GetArrayLength());
+        }
+
+        var ldOutput = new StringWriter();
+        var ldError = new StringWriter();
+        DecodeRunner.WriteTerminationMessage(CliSpecs.LaserDisc, ldOutput, ldError);
+        AssertEqual(string.Empty, ldOutput.ToString());
+        AssertEqual(termination, ldError.ToString());
+
+        var cvbsOutput = new StringWriter();
+        var cvbsError = new StringWriter();
+        DecodeRunner.WriteTerminationMessage(CliSpecs.Cvbs, cvbsOutput, cvbsError);
+        AssertEqual(termination, cvbsOutput.ToString());
+        AssertEqual(string.Empty, cvbsError.ToString());
+    }
+    finally
+    {
+        Directory.Delete(tempDirectory, recursive: true);
+    }
+}
+
+[Fact(DisplayName = "VHS runtime Namespace matches Release 4.0 argparse repr")]
+public void VhsRuntimeNamespaceMatchesRelease40ArgparseRepr()
+{
+    ParsedCommand command = Parse(CliSpecs.Vhs, [
+        "-",
+        "namespace-out.tmp",
+        "--noAGC",
+        "--frequency", "0.00001",
+        "--fm_audio_notch",
+        "--y_comb"
+    ]);
+
+    AssertEqual(
+        "Namespace(infile='-', outfile='namespace-out.tmp', AGC=False, system='NTSC', start=0, "
+        + "start_fileloc=-1, length=99999999, overwrite=False, write_db=False, inputfreq=1e-05, "
+        + "cxadc=False, threads=5, chroma_trap=False, sharpness=0, notch=None, notch_q=10.0, "
+        + "pal=False, ntsc=False, palm=False, ntscj=False, debug=False, skip_hsync_refine=False, "
+        + "tape_format='VHS', tape_speed='sp', params_file=None, orc=False, level_adjust=0.1, "
+        + "ire0_adjust=False, high_boost=None, wow_level_adjust_smoothing=None, "
+        + "wow_interpolation_method='linear', disable_diff_demod=False, fm_audio_notch=10, "
+        + "disable_dc_offset=True, enable_dc_offset=False, nldeemp=False, subdeemp=False, "
+        + "y_comb=1.5, cafc=False, track_phase=None, detect_chroma_track_phase=False, "
+        + "disable_phase_correction=False, disable_burst_hsync=False, enable_color_killer=False, "
+        + "disable_comb=False, skip_chroma=False, debug_plot=None, disable_right_hsync=False, "
+        + "level_detect_divisor=3, no_resample=False, fallback_vsync=False, relaxed_line0=False, "
+        + "field_order_confidence=100, field_order_action='detect', saved_levels=False, "
+        + "export_raw_tbc=False, nodod=False, dod_threshold_p=None, dod_threshold_a=None, "
+        + "dod_hysteresis=1.25, gnrc_afe=False, noAGC=True)",
+        PythonNamespaceFormatter.Format(command));
+
+    string paramsPath = typeof(CompatibilityTests).Assembly.Location;
+    ParsedCommand paramsCommand = Parse(CliSpecs.Vhs, ["--params_file", paramsPath, "-", "out"]);
+    string paramsNamespace = PythonNamespaceFormatter.Format(paramsCommand);
+    AssertContains(
+        paramsNamespace,
+        $"params_file=<_io.TextIOWrapper name={PythonNamespaceFormatter.FormatString(paramsPath)} mode='r' encoding=");
+}
+
+[Fact(DisplayName = "CVBS runtime Namespace matches Release 4.0 argparse repr")]
+public void CvbsRuntimeNamespaceMatchesRelease40ArgparseRepr()
+{
+    ParsedCommand command = Parse(CliSpecs.Cvbs, [
+        "--noAGC",
+        "-A",
+        "--clamp_agc",
+        "--agc_speed", "0.25",
+        "--frequency", "0.00001",
+        "-",
+        "namespace-out.tmp"
+    ]);
+
+    AssertEqual(
+        "Namespace(infile='-', outfile='namespace-out.tmp', AGC=False, system='NTSC', start=0, "
+        + "start_fileloc=-1, length=99999999, overwrite=False, write_db=False, inputfreq=1e-05, "
+        + "cxadc=False, threads=5, chroma_trap=False, sharpness=0, notch=None, notch_q=10.0, "
+        + "pal=False, ntsc=False, palm=False, ntscj=False, debug=False, skip_hsync_refine=False, "
+        + "seek=-1, auto_sync=True, no_auto_sync=False, clamp_agc=True, agc_speed=0.25, "
+        + "agc_gain_factor=1.0, agc_set_gain=0.0, rhs_hsync=False, wow_level_adjust_smoothing=0, "
+        + "wow_interpolation_method='linear', noAGC=True)",
+        PythonNamespaceFormatter.Format(command));
+}
+
+[Fact(DisplayName = "LD runtime Namespace matches Release 4.0 argparse repr")]
+public void LaserDiscRuntimeNamespaceMatchesRelease40ArgparseRepr()
+{
+    ParsedCommand command = Parse(CliSpecs.LaserDisc, [
+        "in'put.s16",
+        "out\"base",
+        "--start_fileloc", "-1",
+        "--deemp_strength", "1",
+        "--frequency", "0.00001"
+    ]);
+
+    AssertEqual(
+        "Namespace(infile=\"in'put.s16\", outfile='out\"base', start=0, length=110000, seek=-1, "
+        + "pal=False, ntsc=False, ntscj=False, MTF=1.0, MTF_offset=0, noAGC=False, nodod=False, "
+        + "noefm=False, prefm=False, daa=False, AC3=False, start_fileloc=-1.0, ignoreleadout=False, "
+        + "verboseVITS=False, RF_TBC=False, lowband=False, NTSC_color_notch_filter=False, "
+        + "V4300D_notch_filter=False, deemp_low=0, deemp_high=0, deemp_strength=1.0, "
+        + "wow_level_adjust_smoothing=0, wow_interpolation_method='linear', threads=4, "
+        + "inputfreq=1e-05, analog_audio_freq=44100, ntsc_audio_rate=False, vbpf_low=None, "
+        + "vbpf_high=None, vlpf=None, vlpf_order=-1, audio_filterwidth=None, use_profiler=False, "
+        + "write_test_ldf=None)",
+        PythonNamespaceFormatter.Format(command));
+    AssertEqual("1e+16", PythonNamespaceFormatter.FormatValue(1e16));
+    AssertEqual("-0.0", PythonNamespaceFormatter.FormatValue(-0.0));
+    AssertEqual("'line\\n\\x00'", PythonNamespaceFormatter.FormatValue("line\n\0"));
+}
+
+[Fact(DisplayName = "decode read errors report context and finalize partial output")]
+public void DecodeReadErrorsReportContextAndFinalizePartialOutput()
+{
+    string tempDirectory = Path.Combine(Path.GetTempPath(), "vhsdecode-dotnet-tests-" + Guid.NewGuid().ToString("N"));
+    Directory.CreateDirectory(tempDirectory);
+    try
+    {
+        string inputPath = Path.Combine(tempDirectory, "empty.u8");
+        string outputBase = Path.Combine(tempDirectory, "partial-error");
+        File.WriteAllBytes(inputPath, []);
+        ParsedCommand command = Parse(CliSpecs.Vhs, [
+            "--pal",
+            "--no_resample",
+            "--write_db",
+            "--length", "1",
+            inputPath,
+            outputBase
+        ]);
+        int reads = 0;
+        int fieldSampleCount = 0;
+        TbcDecodedField? ReadField(
+            DecodeSession activeSession,
+            Stream _,
+            long begin,
+            int __,
+            int ___)
+        {
+            reads++;
+            if (reads == 2)
+            {
+                throw new InvalidOperationException("synthetic field failure");
+            }
+
+            fieldSampleCount = activeSession.TbcFrameSpec.FieldSampleCount;
+            return BuildSyntheticTbcField(
+                    begin,
+                    new ushort[activeSession.TbcFrameSpec.FieldSampleCount],
+                    detectedFirstField: true)
+                with
+                {
+                    NextFieldOffsetSamples = 100.0,
+                    ChromaSamples = new ushort[activeSession.TbcFrameSpec.FieldSampleCount]
+                };
+        }
+
+        var runner = new DecodeRunner(cancellationToken => new TbcFieldSequenceDecodeEngine(
+            readField: ReadField,
+            vhsDiskSpaceGuard: new VhsDiskSpaceGuard(
+                _ => VhsDiskSpaceGuard.MinimumFreeBytes + 1),
+            cancellationToken: cancellationToken));
+        var output = new StringWriter();
+        var error = new StringWriter();
+
+        int exitCode = runner.Run(
+            command,
+            output,
+            error,
+            TestContext.Current.CancellationToken);
+
+        string errorText = error.ToString();
+        AssertEqual(1, exitCode);
+        AssertEqual(2, reads);
+        AssertEqual(string.Empty, output.ToString());
+        AssertTrue(errorText.StartsWith(
+            Environment.NewLine
+            + "ERROR - please paste the following into a bug report:"
+            + Environment.NewLine,
+            StringComparison.Ordinal));
+        AssertContains(errorText, "current sample: 100" + Environment.NewLine);
+        AssertContains(
+            errorText,
+            "arguments: " + PythonNamespaceFormatter.Format(command) + Environment.NewLine);
+        AssertContains(errorText, "Exception: synthetic field failure  Traceback:" + Environment.NewLine);
+        AssertContains(errorText, "  File \"");
+        AssertContains(errorText, "g__ReadField");
+        AssertContains(errorText, "Took ");
+
+        AssertEqual(fieldSampleCount * (long)sizeof(ushort), new FileInfo(outputBase + ".tbc").Length);
+        AssertEqual(
+            fieldSampleCount * (long)sizeof(ushort),
+            new FileInfo(outputBase + "_chroma.tbc").Length);
+        using (JsonDocument partialJson = JsonDocument.Parse(File.ReadAllText(outputBase + ".tbc.json")))
+        {
+            AssertEqual(1, partialJson.RootElement.GetProperty("fields").GetArrayLength());
+        }
+
+        AssertEqual(1L, SqliteLong(outputBase + ".tbc.db", "SELECT COUNT(*) FROM field_record"));
+        AssertFalse(File.Exists(outputBase + ".tbc.json.tmp"));
+        AssertFalse(File.Exists(outputBase + ".tbc.json.fields.tmp"));
+    }
+    finally
+    {
+        Directory.Delete(tempDirectory, recursive: true);
+    }
 }
 
 [Fact(DisplayName = "TBC field decode pipeline detects sync and renders a field")]
@@ -8681,6 +10385,18 @@ public void TbcFieldDecodePipelineRefinesLdPalPilotLineLocations()
     AssertClose(1.2, boundaryLineRate, 1e-12);
 }
 
+[Fact(DisplayName = "LD PAL pilot slice uses nominal input frequency")]
+public void LaserDiscPalPilotSliceUsesNominalInputFrequency()
+{
+    (int start, int length, double lineOffset) = TbcFieldDecodePipeline.LaserDiscPilotSliceBounds(
+        lineStart: 100.25,
+        sampleRateMHz: 1.0,
+        sourceLength: 1_000);
+    AssertEqual(100, start);
+    AssertEqual(7, length);
+    AssertClose(0.25, lineOffset, 1e-12);
+}
+
 [Fact(DisplayName = "TBC field decode determines PAL eight-field burst phase transactionally")]
 public void TbcFieldDecodeDeterminesPalBurstPhaseTransactionally()
 {
@@ -8945,6 +10661,103 @@ public void TbcFieldDecodePipelineEmitsChromaSamples()
     int line16 = 16 * spec.OutputLineLength;
     AssertEqual(32746, decoded.ChromaSamples[line16]);
     AssertEqual(32746, decoded.ChromaSamples[line16 + 2]);
+}
+
+[Theory(DisplayName = "TBC field decode pipeline applies analyzed VHS track phase to luma")]
+[InlineData(0, 0, 456, 0, 656)]
+[InlineData(1, 0, 456, 0, 656)]
+public void TbcFieldDecodePipelineAppliesAnalyzedVhsTrackPhaseToLuma(
+    int initialTrackPhase,
+    int firstNextTrackPhase,
+    ushort firstExpectedSample,
+    int secondNextTrackPhase,
+    ushort secondExpectedSample)
+{
+    var spec = new TbcFrameSpec(
+        "PAL",
+        OutputLineLength: 20,
+        OutputLineCount: 40,
+        OutputSampleRateHz: 4_000_000.0,
+        ColourBurstStart: 5,
+        ColourBurstEnd: 10,
+        ActiveVideoStart: null,
+        ActiveVideoEnd: null);
+    var converter = new VideoOutputConverter(
+        ire0: 0.0,
+        hzIre: 1.0,
+        outputZero: 256,
+        vsyncIre: -40.0,
+        outputScale: 10.0);
+    var analyzer = new SyncAnalyzer(
+        sampleRateHz: 1_000_000.0,
+        linePeriodUs: 100.0,
+        hsyncPulseUs: 10.0,
+        equalizingPulseUs: 5.0,
+        vsyncPulseUs: 20.0,
+        numPulses: 5);
+    var chromaOptions = new VhsChromaFieldOptions(
+        ColorSystem: "PAL",
+        OutputLineLength: spec.OutputLineLength,
+        OutputLineCount: spec.OutputLineCount,
+        OutputSampleRateHz: spec.OutputSampleRateHz,
+        FscMHz: 1.0,
+        ColorUnderCarrierHz: 0.0,
+        BurstStart: 5,
+        BurstEnd: 10,
+        BurstAbsRef: 10.0,
+        ChromaRotation: [0, 3],
+        DisableComb: true,
+        DisablePhaseCorrection: true,
+        EnableColorKiller: false,
+        DetectChromaTrackPhase: false)
+    {
+        DisableBurstHsync = true,
+        InitialChromaRotationIndex = initialTrackPhase
+    };
+    var renderer = new TbcFieldRenderer(
+        spec,
+        converter,
+        trackPhaseIre0Offset: new TrackPhaseIre0OffsetOptions(
+            initialTrackPhase,
+            Offset0Hz: 20.0,
+            Offset1Hz: 0.0));
+    var pipeline = new TbcFieldDecodePipeline(
+        analyzer,
+        renderer,
+        converter,
+        "PAL",
+        TbcDropoutDetectionOptions.Disabled,
+        chromaFieldOptions: chromaOptions,
+        decodeType: "vhs");
+
+    double[] video = Enumerable.Repeat(0.0, 6_500).ToArray();
+    PaintPulse(video, 10, 10, -40.0);
+    PaintPulse(video, 110, 10, -40.0);
+    PaintTestVBlank(video, line0: 210, isFirstField: true, system: "PAL");
+    for (int line = 11; line <= 60; line++)
+    {
+        PaintPulse(video, 210 + (line * 100), 10, -40.0);
+    }
+
+    double[] chroma = BuildRawChromaCarrier(
+        video.Length,
+        firstLineStart: 210,
+        lineLength: 100,
+        lineCount: 61,
+        outputLineLength: spec.OutputLineLength,
+        fscMHz: chromaOptions.FscMHz,
+        outputSampleRateHz: spec.OutputSampleRateHz);
+    var firstSpan = new RfDecodedSpan(0, video, video, video, VideoLowPass: video, Chroma: chroma);
+    var secondSpan = firstSpan with { StartSample = video.Length };
+    int stableLumaSample = (16 * spec.OutputLineLength) + 5;
+
+    TbcDecodedField first = pipeline.Decode(firstSpan, fieldNumber: 0);
+    AssertEqual<int?>(firstNextTrackPhase, pipeline.CaptureState().ChromaRotationIndex);
+    AssertEqual(firstExpectedSample, first.Samples[stableLumaSample]);
+
+    TbcDecodedField second = pipeline.Decode(secondSpan, fieldNumber: 1);
+    AssertEqual<int?>(secondNextTrackPhase, pipeline.CaptureState().ChromaRotationIndex);
+    AssertEqual(secondExpectedSample, second.Samples[stableLumaSample]);
 }
 
 static double[] BuildOutputChromaCarrier(int lineLength, int lineCount, double fscMHz, double outputSampleRateHz)
@@ -9746,9 +11559,16 @@ public void TbcFieldSequenceEnginePerformsVhsTerminalLookahead()
             "input.u8",
             outputBase
         ]));
+        var statusOutput = new StringWriter();
+        session.RuntimeReporter = new DecodeRuntimeReporter(
+            statusOutput,
+            new StringWriter(),
+            () => 0.0);
         DecodeSessionLogWriter.Write(session);
 
         int reads = 0;
+        int diskChecks = 0;
+        var snapshotFieldCounts = new List<int>();
         var begins = new List<long>();
         TbcDecodedField? ReadField(DecodeSession activeSession, Stream _, long begin, int __, int ___)
         {
@@ -9770,8 +11590,19 @@ public void TbcFieldSequenceEnginePerformsVhsTerminalLookahead()
                 };
         }
 
+        var diskGuard = new VhsDiskSpaceGuard(
+            _ =>
+            {
+                diskChecks++;
+                using JsonDocument snapshot = JsonDocument.Parse(
+                    File.ReadAllText(outputBase + ".tbc.json"));
+                snapshotFieldCounts.Add(snapshot.RootElement.GetProperty("fields").GetArrayLength());
+                return long.MaxValue;
+            },
+            _ => throw new Exception("The disk guard should not wait when space is available."));
         TbcFieldSequenceDecodeResult result = new TbcFieldSequenceDecodeEngine(
-            readField: ReadField).TryDecodeAndWrite(session, Stream.Null);
+            readField: ReadField,
+            vhsDiskSpaceGuard: diskGuard).TryDecodeAndWrite(session, Stream.Null);
 
         if (!result.Success)
         {
@@ -9779,6 +11610,8 @@ public void TbcFieldSequenceEnginePerformsVhsTerminalLookahead()
         }
         AssertEqual(2, result.WrittenFieldCount);
         AssertEqual(3, reads);
+        AssertEqual(2, diskChecks);
+        AssertTrue(snapshotFieldCounts.SequenceEqual([1, 2]));
         AssertTrue(begins.SequenceEqual([0L, 100L, 200L]));
         using JsonDocument document = JsonDocument.Parse(File.ReadAllText(result.Paths!.JsonPath));
         AssertEqual(2, document.RootElement.GetProperty("fields").GetArrayLength());
@@ -9788,11 +11621,141 @@ public void TbcFieldSequenceEnginePerformsVhsTerminalLookahead()
         int statusIndex = log.IndexOf("File Frame 0: VHS ", StringComparison.Ordinal);
         AssertTrue(lookaheadIndex >= 0);
         AssertTrue(statusIndex > lookaheadIndex);
+        string status = "File Frame 0: VHS ";
+        AssertEqual(
+            status + new string(' ', 80 - status.Length) + '\r',
+            statusOutput.ToString());
     }
     finally
     {
         Directory.Delete(tempDirectory, recursive: true);
     }
+}
+
+[Fact(DisplayName = "TBC field sequence engine emits LD frame status")]
+public void TbcFieldSequenceEngineEmitsLdFrameStatus()
+{
+    string tempDirectory = Path.Combine(Path.GetTempPath(), "vhsdecode-dotnet-tests-" + Guid.NewGuid().ToString("N"));
+    Directory.CreateDirectory(tempDirectory);
+    try
+    {
+        string outputBase = Path.Combine(tempDirectory, "ld-status");
+        using DecodeSession session = DecodeSessionFactory.Create(Parse(CliSpecs.LaserDisc, [
+            "--PAL",
+            "--length", "2",
+            "--noEFM",
+            "--disable_analog_audio",
+            "input.s16",
+            outputBase
+        ]));
+        var statusOutput = new StringWriter();
+        session.RuntimeReporter = new DecodeRuntimeReporter(
+            statusOutput,
+            new StringWriter(),
+            () => 0.0);
+
+        TbcDecodedField? ReadField(DecodeSession activeSession, Stream _, long begin, int __, int fieldNumber)
+        {
+            if (fieldNumber > 0)
+            {
+                using JsonDocument snapshot = JsonDocument.Parse(
+                    File.ReadAllText(outputBase + ".tbc.json"));
+                AssertEqual(
+                    fieldNumber,
+                    snapshot.RootElement.GetProperty("fields").GetArrayLength());
+            }
+
+            if (fieldNumber >= 4)
+            {
+                return null;
+            }
+
+            int[] vbiData = fieldNumber == 3
+                ? [EncodeLaserDiscCavFrameCode(123)]
+                : [];
+            return BuildSyntheticTbcField(
+                    begin,
+                    new ushort[activeSession.TbcFrameSpec.FieldSampleCount],
+                    detectedFirstField: (fieldNumber & 1) == 0)
+                with
+                {
+                    DiskLocation = fieldNumber,
+                    FieldPhaseId = fieldNumber + 1,
+                    NextFieldOffsetSamples = 100.0,
+                    VbiData = vbiData
+                };
+        }
+
+        var diskGuard = new VhsDiskSpaceGuard(
+            _ => throw new Exception("LD recovery snapshots must not query free disk space."));
+        TbcFieldSequenceDecodeResult result = new TbcFieldSequenceDecodeEngine(
+            readField: ReadField,
+            vhsDiskSpaceGuard: diskGuard).TryDecodeAndWrite(session, Stream.Null);
+
+        AssertTrue(result.Success);
+        string log = File.ReadAllText(outputBase + ".log");
+        AssertTrue(log.Contains(
+            "DEBUG - Frame 1/2: File Frame 0: CAV Pulldown/Telecine Frame",
+            StringComparison.Ordinal));
+        AssertTrue(log.Contains(
+            "DEBUG - Frame 2/2: File Frame 1: CAV Frame #123",
+            StringComparison.Ordinal));
+        string firstStatus = "Frame 1/2: File Frame 0: CAV Pulldown/Telecine Frame";
+        string secondStatus = "Frame 2/2: File Frame 1: CAV Frame #123";
+        AssertEqual(
+            firstStatus + new string(' ', 80 - firstStatus.Length) + '\r'
+            + secondStatus + new string(' ', 80 - secondStatus.Length) + '\r',
+            statusOutput.ToString());
+    }
+    finally
+    {
+        Directory.Delete(tempDirectory, recursive: true);
+    }
+}
+
+[Fact(DisplayName = "LD frame status formats CLV and persistent lead states")]
+public void LaserDiscFrameStatusFormatsClvAndPersistentLeadStates()
+{
+    var earlyClv = new LaserDiscVbiInterpretation(
+        FrameNumber: 4_980,
+        IsClv: true,
+        IsEarlyClv: true,
+        ClvMinutes: 83,
+        ClvSeconds: null,
+        ClvFrameNumber: null,
+        LeadIn: false,
+        LeadOut: false);
+    AssertEqual(
+        "Frame 1/10: File Frame 4: CLV Timecode 83:xx",
+        TbcFieldSequenceDecodeEngine.FormatLaserDiscFrameStatus(1, 10, 4, earlyClv, false, false));
+
+    var clv = earlyClv with
+    {
+        FrameNumber = 149_862,
+        IsEarlyClv = false,
+        ClvSeconds = 15,
+        ClvFrameNumber = 12
+    };
+    AssertEqual(
+        "Frame 2/10: File Frame 5: CLV Timecode 83:15.12 Frame #149862",
+        TbcFieldSequenceDecodeEngine.FormatLaserDiscFrameStatus(3, 10, 5, clv, false, false));
+
+    var noCode = new LaserDiscVbiInterpretation(null, false, false, null, null, null, false, false);
+    AssertEqual(
+        "Frame 3/10: File Frame 6: CAV Lead In",
+        TbcFieldSequenceDecodeEngine.FormatLaserDiscFrameStatus(5, 10, 6, noCode, true, true));
+    AssertEqual(
+        "Frame 3/10: File Frame 6: CAV Lead Out",
+        TbcFieldSequenceDecodeEngine.FormatLaserDiscFrameStatus(5, 10, 6, noCode, false, true));
+    AssertEqual(
+        "Frame 3/10: File Frame 6: CAV Pulldown/Telecine Frame",
+        TbcFieldSequenceDecodeEngine.FormatLaserDiscFrameStatus(
+            5,
+            10,
+            6,
+            noCode with { FrameNumber = 0 },
+            false,
+            false));
 }
 
 [Fact(DisplayName = "TBC field sequence engine streams fields before decode completes")]
@@ -10263,13 +12226,18 @@ public void CvbsSerialLengthLookaheadIsDecodedButNotWritten()
     Directory.CreateDirectory(tempDirectory);
     try
     {
+        string outputBase = Path.Combine(tempDirectory, "cvbs-prefetch");
         using DecodeSession session = DecodeSessionFactory.Create(Parse(CliSpecs.Cvbs, [
             "--pal",
             "--threads", "0",
             "--length", "1",
             "input.s16",
-            Path.Combine(tempDirectory, "cvbs-prefetch")
+            outputBase
         ]));
+        session.RuntimeReporter = new DecodeRuntimeReporter(
+            TextWriter.Null,
+            TextWriter.Null,
+            () => 0.0);
         VideoOutputConverter[] converters =
         [
             BuildCvbsTestConverter(session, ire0: 10.0),
@@ -10295,13 +12263,23 @@ public void CvbsSerialLengthLookaheadIsDecodedButNotWritten()
         TbcDecodedField? ReadField(DecodeSession _, Stream __, long begin, int ___, int fieldNumber)
         {
             reads++;
+            if (fieldNumber == 2)
+            {
+                using JsonDocument snapshot = JsonDocument.Parse(
+                    File.ReadAllText(outputBase + ".tbc.json"));
+                AssertEqual(1, snapshot.RootElement.GetProperty("fields").GetArrayLength());
+            }
+
             return fieldNumber < sourceFields.Length
                 ? sourceFields[fieldNumber] with { StartSample = begin }
                 : null;
         }
 
+        var diskGuard = new VhsDiskSpaceGuard(
+            _ => throw new Exception("CVBS recovery snapshots must not query free disk space."));
         TbcFieldSequenceDecodeResult result = new TbcFieldSequenceDecodeEngine(
-            readField: ReadField).TryDecodeAndWrite(session, Stream.Null);
+            readField: ReadField,
+            vhsDiskSpaceGuard: diskGuard).TryDecodeAndWrite(session, Stream.Null);
 
         AssertTrue(result.Success);
         AssertEqual(3, reads);
@@ -11765,10 +13743,10 @@ public void TbcFieldSequenceEngineAppliesFieldOrderWrites()
         ]));
         TbcDecodedField[] ldSkippedFields =
         [
-            BuildSequenceField(ldSkippedSession, FieldStart(ldSkippedSession, 0.0), 0x1111, true),
-            BuildSequenceField(ldSkippedSession, FieldStart(ldSkippedSession, 1.0), 0x2222, false),
-            BuildSequenceField(ldSkippedSession, FieldStart(ldSkippedSession, 2.0), 0x3333, true),
-            BuildSequenceField(ldSkippedSession, FieldStart(ldSkippedSession, 3.4), 0x4444, true)
+            BuildSequenceField(ldSkippedSession, FieldStart(ldSkippedSession, 0.0), 0x1111, true) with { FieldPhaseId = 1 },
+            BuildSequenceField(ldSkippedSession, FieldStart(ldSkippedSession, 1.0), 0x2222, false) with { FieldPhaseId = 2 },
+            BuildSequenceField(ldSkippedSession, FieldStart(ldSkippedSession, 2.0), 0x3333, true) with { FieldPhaseId = 3 },
+            BuildSequenceField(ldSkippedSession, FieldStart(ldSkippedSession, 3.4), 0x4444, true) with { FieldPhaseId = 4 }
         ];
 
         TbcFieldSequenceDecodeResult ldSkippedResult = engine.WriteDecodedFields(ldSkippedSession, ldSkippedFields);
@@ -11783,6 +13761,7 @@ public void TbcFieldSequenceEngineAppliesFieldOrderWrites()
         using JsonDocument ldSkippedJson = JsonDocument.Parse(File.ReadAllText(ldSkippedResult.Paths.JsonPath));
         JsonElement ldSkippedJsonFields = ldSkippedJson.RootElement.GetProperty("fields");
         AssertEqual(5, ldSkippedJsonFields.GetArrayLength());
+        AssertEqual(ldSkippedJsonFields[1].GetRawText(), ldSkippedJsonFields[3].GetRawText());
         AssertEqual(4, JsonInt(ldSkippedJsonFields[4], "seqNo"));
         AssertEqual(0, JsonInt(ldSkippedJsonFields[4], "syncConf"));
         AssertFalse(ldSkippedJsonFields[4].TryGetProperty("decodeFaults", out _));
@@ -11790,6 +13769,7 @@ public void TbcFieldSequenceEngineAppliesFieldOrderWrites()
         AssertFalse(ldSkippedJsonFields[4].TryGetProperty("vbi", out _));
         AssertTrue(ldSkippedJsonFields[4].TryGetProperty("audioSamples", out _));
         AssertTrue(ldSkippedJsonFields[4].TryGetProperty("efmTValues", out _));
+        AssertEqual(1L, SqliteLong(ldSkippedResult.Paths.DbPath!, "SELECT decode_faults IS NULL FROM field_record WHERE field_id = 3"));
         AssertEqual(1L, SqliteLong(ldSkippedResult.Paths.DbPath!, "SELECT decode_faults IS NULL FROM field_record WHERE field_id = 4"));
         AssertEqual(0L, SqliteLong(ldSkippedResult.Paths.DbPath!, "SELECT COUNT(*) FROM vits_metrics WHERE field_id = 4"));
         AssertEqual(0L, SqliteLong(ldSkippedResult.Paths.DbPath!, "SELECT COUNT(*) FROM vbi WHERE field_id = 4"));
@@ -11859,6 +13839,53 @@ public void TbcFieldSequenceEngineAppliesFieldOrderWrites()
     }
 }
 
+[Fact(DisplayName = "TBC streaming metadata reuses LD filler field info")]
+public void TbcStreamingMetadataReusesLdFillerFieldInfo()
+{
+    string tempDirectory = Path.Combine(Path.GetTempPath(), "vhsdecode-dotnet-tests-" + Guid.NewGuid().ToString("N"));
+    Directory.CreateDirectory(tempDirectory);
+    try
+    {
+        using DecodeSession session = DecodeSessionFactory.Create(Parse(CliSpecs.LaserDisc, [
+            "--NTSC",
+            "--noEFM",
+            "--disable_analog_audio",
+            "input.s16",
+            Path.Combine(tempDirectory, "ld-streaming")
+        ]));
+        TbcDecodedField[] fields =
+        [
+            BuildSequenceField(session, FieldStart(session, 0.0), 0x1111, true) with { FieldPhaseId = 1 },
+            BuildSequenceField(session, FieldStart(session, 1.0), 0x2222, false) with { FieldPhaseId = 2 },
+            BuildSequenceField(session, FieldStart(session, 2.0), 0x3333, true) with { FieldPhaseId = 3 },
+            BuildSequenceField(session, FieldStart(session, 3.4), 0x4444, true) with { FieldPhaseId = 4 }
+        ];
+
+        TbcDecodedField? ReadField(DecodeSession _, Stream __, long ___, int ____, int fieldNumber)
+            => fieldNumber < fields.Length ? fields[fieldNumber] : null;
+
+        TbcFieldSequenceDecodeResult result = new TbcFieldSequenceDecodeEngine(readField: ReadField)
+            .TryDecodeAndWrite(session, Stream.Null);
+
+        AssertTrue(result.Success);
+        AssertEqual(5, result.WrittenFieldCount);
+        using JsonDocument document = JsonDocument.Parse(File.ReadAllText(result.Paths!.JsonPath));
+        JsonElement outputFields = document.RootElement.GetProperty("fields");
+        AssertEqual(5, outputFields.GetArrayLength());
+        AssertEqual(outputFields[1].GetRawText(), outputFields[3].GetRawText());
+        AssertEqual(
+            1L,
+            SqliteLong(result.Paths.DbPath!, "SELECT decode_faults IS NULL FROM field_record WHERE field_id = 3"));
+        AssertFalse(
+            File.ReadAllText(session.OutputBase + ".log")
+                .Contains("Field phaseID sequence mismatch (3->2)", StringComparison.Ordinal));
+    }
+    finally
+    {
+        Directory.Delete(tempDirectory, recursive: true);
+    }
+}
+
 [Fact(DisplayName = "TBC field sequence engine applies CVBS LD-style field-order writes")]
 public void TbcFieldSequenceEngineAppliesCvbsLdStyleFieldOrderWrites()
 {
@@ -11896,6 +13923,7 @@ public void TbcFieldSequenceEngineAppliesCvbsLdStyleFieldOrderWrites()
         AssertEqual(10, JsonInt(outputFields[1], "syncConf"));
         AssertEqual(1, JsonInt(outputFields[1], "decodeFaults"));
         AssertEqual(2, JsonInt(outputFields[2], "seqNo"));
+        AssertEqual(outputFields[1].GetRawText(), outputFields[2].GetRawText());
         AssertFalse(outputFields[3].TryGetProperty("decodeFaults", out _));
         AssertFalse(outputFields[3].TryGetProperty("vitsMetrics", out _));
         AssertFalse(outputFields[3].TryGetProperty("vbi", out _));
@@ -12447,8 +14475,8 @@ public void AllCvbsAndLdVariantsBuildAndDemodulateBlock()
     AssertEqual(4, laserDiscDecoded);
 }
 
-[Fact(DisplayName = "v0.4 tape-family blocks match upstream visible channels")]
-public void TapeFamilyBlocksMatchUpstreamVisibleChannels()
+[Fact(DisplayName = "v0.4 tape-family blocks match upstream channels")]
+public void TapeFamilyBlocksMatchUpstreamChannels()
 {
     const int blockLength = 32_768;
     const string resourceName = "VHSDecode.Tests.Fixtures.tape-family-v0.4.0.json";
@@ -12468,6 +14496,7 @@ public void TapeFamilyBlocksMatchUpstreamVisibleChannels()
 
     int cases = 0;
     int comparedChannels = 0;
+    var burstMismatches = new List<string>();
     foreach (JsonElement item in baseline.RootElement.GetProperty("cases").EnumerateArray())
     {
         string system = item.GetProperty("system").GetString()!;
@@ -12490,19 +14519,26 @@ public void TapeFamilyBlocksMatchUpstreamVisibleChannels()
 
         AssertNamedHash(label, "demod", item, FloatBitsSha256(block.Video));
         AssertNamedHash(label, "demod_05", item, FloatBitsSha256(block.VideoLowPass));
-        AssertNamedHash(label, "envelope", item, FloatBitsSha256(block.Envelope));
-        comparedChannels += 3;
-        if (FormatCatalog.IsColorUnder(tapeFormat))
+        try
         {
             AssertNamedHash(label, "demod_burst", item, FloatBitsSha256(block.Chroma!));
-            comparedChannels++;
         }
+        catch (Exception ex)
+        {
+            burstMismatches.Add(ex.Message);
+        }
+        AssertNamedHash(label, "envelope", item, FloatBitsSha256(block.Envelope));
+        comparedChannels += 4;
 
         cases++;
     }
 
     AssertEqual(357, cases);
-    AssertEqual(1_353, comparedChannels);
+    AssertEqual(1_428, comparedChannels);
+    if (burstMismatches.Count != 0)
+    {
+        throw new Exception(string.Join(Environment.NewLine, burstMismatches));
+    }
 }
 
 static void AssertNamedHash(string label, string channel, JsonElement expectedCase, string actual)

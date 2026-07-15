@@ -24,8 +24,14 @@ public static class LaserDiscLineLocationRepair
     public static LineLocationResult FixBadLines(
         LineLocationResult lineLocations,
         string system,
-        LineLocationResult? backup = null)
+        LineLocationResult? backup = null,
+        bool markDerivativeErrors = true)
     {
+        if (markDerivativeErrors)
+        {
+            lineLocations = MarkDerivativeErrors(lineLocations);
+        }
+
         double[] locations = lineLocations.Locations.ToArray();
         bool[] errors = lineLocations.Filled.ToArray();
         if (backup is not null)

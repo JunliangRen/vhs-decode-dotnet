@@ -17,6 +17,21 @@ public static class IirFilterDesign
         return ButterworthLowHighPass(order, normalizedCutoff, highPass: false);
     }
 
+    internal static SosSection[] ButterworthLowPassScipySos(int order, double normalizedCutoff)
+    {
+        if ((order & 1) != 0)
+        {
+            throw new ArgumentException("The current SciPy SOS conversion requires an even filter order.", nameof(order));
+        }
+
+        (Complex[] digitalPoles, double digitalGain) = DesignButterworthLowPassZpk(
+            order,
+            normalizedCutoff);
+        var digitalZeros = new Complex[order];
+        Array.Fill(digitalZeros, -Complex.One);
+        return ZpkToNearestSos(digitalZeros, digitalPoles, digitalGain);
+    }
+
     internal static TransferFunction ButterworthLowPassTransferFunction(int order, double normalizedCutoff)
     {
         (Complex[] digitalPoles, double digitalGain) = DesignButterworthLowPassZpk(
@@ -63,18 +78,21 @@ public static class IirFilterDesign
             Complex denominator = new(
                 bilinearScale - analogPoles[i].Real,
                 -analogPoles[i].Imaginary);
-            digitalPoles[i] = NumpyComplexDivide(
+            Complex digitalPole = NumpyComplexDivide(
                 new Complex(
                     bilinearScale + analogPoles[i].Real,
                     analogPoles[i].Imaginary),
                 denominator);
-            bilinearDenominatorProduct = NumpyComplexMultiply(
+            digitalPoles[i] = digitalPole.Imaginary == 0.0
+                ? new Complex(digitalPole.Real, 0.0)
+                : digitalPole;
+            bilinearDenominatorProduct = NumpySimdComplexMultiply(
                 bilinearDenominatorProduct,
                 denominator);
         }
 
-        double digitalGain = NumpyComplexDivide(
-            new Complex(analogGain, 0.0),
+        double digitalGain = analogGain * NumpyComplexDivide(
+            Complex.One,
             bilinearDenominatorProduct).Real;
         return (digitalPoles, digitalGain);
     }
@@ -369,6 +387,111 @@ public static class IirFilterDesign
         return new TransferFunction(ToRealCoefficients(numerator), ToRealCoefficients(denominator));
     }
 
+    internal static SosSection[] ChebyshevTypeIIBandPassSos(
+        int order,
+        double stopAttenuationDb,
+        double lowCutoffHz,
+        double highCutoffHz,
+        double sampleRateHz)
+    {
+        if (order <= 0 || (order & 1) != 0)
+        {
+            throw new ArgumentOutOfRangeException(nameof(order), "HiFi Chebyshev-II order must be positive and even.");
+        }
+
+        if (!double.IsFinite(stopAttenuationDb) || stopAttenuationDb <= 0.0)
+        {
+            throw new ArgumentOutOfRangeException(nameof(stopAttenuationDb));
+        }
+
+        if (!double.IsFinite(sampleRateHz) || sampleRateHz <= 0.0)
+        {
+            throw new ArgumentOutOfRangeException(nameof(sampleRateHz));
+        }
+
+        if (!double.IsFinite(lowCutoffHz)
+            || !double.IsFinite(highCutoffHz)
+            || lowCutoffHz <= 0.0
+            || lowCutoffHz >= highCutoffHz
+            || highCutoffHz >= sampleRateHz / 2.0)
+        {
+            throw new ArgumentException("Band-pass frequencies must satisfy 0 < low < high < Nyquist.");
+        }
+
+        (Complex[] zeros, Complex[] poles, double gain) = BuildChebyshevTypeIIPrototype(
+            order,
+            stopAttenuationDb);
+        double nyquist = sampleRateHz / 2.0;
+        double normalizedLow = lowCutoffHz / nyquist;
+        double normalizedHigh = highCutoffHz / nyquist;
+        const double designSampleRate = 2.0;
+        double warpedLow = 2.0 * designSampleRate
+            * Math.Tan(Math.PI * normalizedLow / designSampleRate);
+        double warpedHigh = 2.0 * designSampleRate
+            * Math.Tan(Math.PI * normalizedHigh / designSampleRate);
+        double bandwidth = warpedHigh - warpedLow;
+        double center = Math.Sqrt(warpedLow * warpedHigh);
+        (zeros, poles, gain) = LowPassToBandPassZpk(
+            zeros,
+            poles,
+            gain,
+            center,
+            bandwidth);
+        (zeros, poles, gain) = BilinearZpk(
+            zeros,
+            poles,
+            gain,
+            designSampleRate);
+        return ZpkToConjugateNearestSos(zeros, poles, gain);
+    }
+
+    // Modified SciPy filter-design adaptation; see THIRD-PARTY-NOTICES.md.
+    internal static SosSection[] ChebyshevTypeIIHighPassSos(
+        int order,
+        double stopAttenuationDb,
+        double cutoffHz,
+        double sampleRateHz)
+    {
+        if (order <= 0 || (order & 1) != 0)
+        {
+            throw new ArgumentOutOfRangeException(nameof(order), "HiFi Chebyshev-II order must be positive and even.");
+        }
+
+        if (!double.IsFinite(stopAttenuationDb) || stopAttenuationDb <= 0.0)
+        {
+            throw new ArgumentOutOfRangeException(nameof(stopAttenuationDb));
+        }
+
+        if (!double.IsFinite(sampleRateHz) || sampleRateHz <= 0.0)
+        {
+            throw new ArgumentOutOfRangeException(nameof(sampleRateHz));
+        }
+
+        if (!double.IsFinite(cutoffHz) || cutoffHz <= 0.0 || cutoffHz >= sampleRateHz / 2.0)
+        {
+            throw new ArgumentOutOfRangeException(nameof(cutoffHz));
+        }
+
+        (Complex[] zeros, Complex[] poles, double gain) = BuildChebyshevTypeIIPrototype(
+            order,
+            stopAttenuationDb);
+        const double designSampleRate = 2.0;
+        double normalizedCutoff = cutoffHz / (sampleRateHz / 2.0);
+        double warpedCutoff = 2.0 * designSampleRate
+            * Math.Tan(Math.PI * normalizedCutoff / designSampleRate);
+        (zeros, poles, gain) = LowPassToHighPassZpk(
+            zeros,
+            poles,
+            gain,
+            warpedCutoff);
+        (zeros, poles, gain) = BilinearZpk(
+            zeros,
+            poles,
+            gain,
+            designSampleRate);
+        return ZpkToConjugateNearestSos(zeros, poles, gain);
+    }
+
     public static SosSection[] ButterworthBandPassSos(int order, double normalizedLowCutoff, double normalizedHighCutoff)
     {
         if (order == 1)
@@ -465,19 +588,6 @@ public static class IirFilterDesign
                 left.Imaginary,
                 right.Real,
                 left.Real * right.Imaginary));
-    }
-
-    private static Complex NumpyComplexMultiplyAdd(Complex add, Complex left, Complex right)
-    {
-        return new Complex(
-            Math.FusedMultiplyAdd(
-                -left.Imaginary,
-                right.Imaginary,
-                add.Real + (left.Real * right.Real)),
-            Math.FusedMultiplyAdd(
-                left.Imaginary,
-                right.Real,
-                add.Imaginary + (left.Real * right.Imaginary)));
     }
 
     private static Complex NumpyComplexDivide(Complex left, Complex right)
@@ -980,6 +1090,163 @@ public static class IirFilterDesign
         return (digitalZeros, digitalPoles, new Complex(digitalGain, 0.0));
     }
 
+    private static (Complex[] Zeros, Complex[] Poles, double Gain)
+        BuildChebyshevTypeIIPrototype(int order, double stopAttenuationDb)
+    {
+        double epsilon = 1.0 / Math.Sqrt(Math.Pow(10.0, 0.1 * stopAttenuationDb) - 1.0);
+        double mu = Math.Asinh(1.0 / epsilon) / order;
+        int zeroCount = (order & 1) == 0 ? order : order - 1;
+        var zeros = new Complex[zeroCount];
+        int zeroIndex = 0;
+        for (int m = -order + 1; m < order; m += 2)
+        {
+            if ((order & 1) != 0 && m == 0)
+            {
+                continue;
+            }
+
+            zeros[zeroIndex++] = new Complex(
+                0.0,
+                1.0 / Math.Sin(m * Math.PI / (2.0 * order)));
+        }
+
+        var poles = new Complex[order];
+        for (int index = 0, m = -order + 1; index < order; index++, m += 2)
+        {
+            double theta = Math.PI * m / (2.0 * order);
+            Complex hyperbolicSine = new(
+                Math.Sinh(mu) * Math.Cos(theta),
+                Math.Cosh(mu) * Math.Sin(theta));
+            poles[index] = NumpyComplexDivide(-Complex.One, hyperbolicSine);
+        }
+
+        Complex poleProduct = Complex.One;
+        foreach (Complex pole in poles)
+        {
+            poleProduct = NumpyComplexMultiply(poleProduct, -pole);
+        }
+
+        Complex zeroProduct = Complex.One;
+        foreach (Complex zero in zeros)
+        {
+            zeroProduct = NumpyComplexMultiply(zeroProduct, -zero);
+        }
+
+        double gain = NumpyComplexDivide(poleProduct, zeroProduct).Real;
+        return (zeros, poles, gain);
+    }
+
+    private static (Complex[] Zeros, Complex[] Poles, double Gain) LowPassToBandPassZpk(
+        IReadOnlyList<Complex> zeros,
+        IReadOnlyList<Complex> poles,
+        double gain,
+        double center,
+        double bandwidth)
+    {
+        int degree = poles.Count - zeros.Count;
+        double scale = bandwidth / 2.0;
+        double centerSquared = center * center;
+        var positiveZeros = new Complex[zeros.Count];
+        var negativeZeros = new Complex[zeros.Count];
+        for (int i = 0; i < zeros.Count; i++)
+        {
+            Complex scaled = new(zeros[i].Real * scale, zeros[i].Imaginary * scale);
+            Complex squared = NumpySimdComplexMultiply(scaled, scaled);
+            Complex root = Complex.Sqrt(new Complex(squared.Real - centerSquared, squared.Imaginary));
+            positiveZeros[i] = scaled + root;
+            negativeZeros[i] = scaled - root;
+        }
+
+        var positivePoles = new Complex[poles.Count];
+        var negativePoles = new Complex[poles.Count];
+        for (int i = 0; i < poles.Count; i++)
+        {
+            Complex scaled = new(poles[i].Real * scale, poles[i].Imaginary * scale);
+            Complex squared = NumpySimdComplexMultiply(scaled, scaled);
+            Complex root = Complex.Sqrt(new Complex(squared.Real - centerSquared, squared.Imaginary));
+            positivePoles[i] = scaled + root;
+            negativePoles[i] = scaled - root;
+        }
+
+        Complex[] bandPassZeros =
+        [
+            .. positiveZeros,
+            .. negativeZeros,
+            .. Enumerable.Repeat(Complex.Zero, degree)
+        ];
+        Complex[] bandPassPoles = [.. positivePoles, .. negativePoles];
+        return (bandPassZeros, bandPassPoles, gain * Math.Pow(bandwidth, degree));
+    }
+
+    private static (Complex[] Zeros, Complex[] Poles, double Gain) LowPassToHighPassZpk(
+        IReadOnlyList<Complex> zeros,
+        IReadOnlyList<Complex> poles,
+        double gain,
+        double cutoff)
+    {
+        int degree = poles.Count - zeros.Count;
+        var highPassZeros = new Complex[zeros.Count + degree];
+        Complex zeroProduct = Complex.One;
+        for (int i = 0; i < zeros.Count; i++)
+        {
+            highPassZeros[i] = NumpyComplexDivide(new Complex(cutoff, 0.0), zeros[i]);
+            zeroProduct = NumpyComplexMultiply(zeroProduct, -zeros[i]);
+        }
+
+        for (int i = zeros.Count; i < highPassZeros.Length; i++)
+        {
+            highPassZeros[i] = Complex.Zero;
+        }
+
+        var highPassPoles = new Complex[poles.Count];
+        Complex poleProduct = Complex.One;
+        for (int i = 0; i < poles.Count; i++)
+        {
+            highPassPoles[i] = NumpyComplexDivide(new Complex(cutoff, 0.0), poles[i]);
+            poleProduct = NumpyComplexMultiply(poleProduct, -poles[i]);
+        }
+
+        double highPassGain = gain * NumpyComplexDivide(zeroProduct, poleProduct).Real;
+        return (highPassZeros, highPassPoles, highPassGain);
+    }
+
+    private static (Complex[] Zeros, Complex[] Poles, double Gain) BilinearZpk(
+        IReadOnlyList<Complex> zeros,
+        IReadOnlyList<Complex> poles,
+        double gain,
+        double sampleRate)
+    {
+        int degree = poles.Count - zeros.Count;
+        double scale = 2.0 * sampleRate;
+        var digitalZeros = new Complex[zeros.Count + degree];
+        Complex zeroProduct = Complex.One;
+        for (int i = 0; i < zeros.Count; i++)
+        {
+            Complex numerator = new(scale + zeros[i].Real, zeros[i].Imaginary);
+            Complex denominator = new(scale - zeros[i].Real, -zeros[i].Imaginary);
+            digitalZeros[i] = NumpyComplexDivide(numerator, denominator);
+            zeroProduct = NumpySimdComplexMultiply(zeroProduct, denominator);
+        }
+
+        for (int i = zeros.Count; i < digitalZeros.Length; i++)
+        {
+            digitalZeros[i] = -Complex.One;
+        }
+
+        var digitalPoles = new Complex[poles.Count];
+        Complex poleProduct = Complex.One;
+        for (int i = 0; i < poles.Count; i++)
+        {
+            Complex numerator = new(scale + poles[i].Real, poles[i].Imaginary);
+            Complex denominator = new(scale - poles[i].Real, -poles[i].Imaginary);
+            digitalPoles[i] = NumpyComplexDivide(numerator, denominator);
+            poleProduct = NumpySimdComplexMultiply(poleProduct, denominator);
+        }
+
+        double digitalGain = gain * NumpyComplexDivide(zeroProduct, poleProduct).Real;
+        return (digitalZeros, digitalPoles, digitalGain);
+    }
+
     private static SosSection[] ZpkToNearestSos(
         IReadOnlyCollection<Complex> zeros,
         IReadOnlyCollection<Complex> poles,
@@ -1059,6 +1326,69 @@ public static class IirFilterDesign
         return sections.ToArray();
     }
 
+    private static SosSection[] ZpkToConjugateNearestSos(
+        IReadOnlyCollection<Complex> zeros,
+        IReadOnlyCollection<Complex> poles,
+        double gain)
+    {
+        if (zeros.Count != poles.Count || (poles.Count & 1) != 0)
+        {
+            throw new ArgumentException("Digital SOS conversion requires an equal, even number of zeros and poles.");
+        }
+
+        var remainingPoles = poles.ToList();
+        var polePairs = new List<(Complex First, Complex Second, double Radius)>();
+        while (remainingPoles.Count > 0)
+        {
+            int firstIndex = remainingPoles.FindIndex(value => value.Imaginary > 1e-12);
+            if (firstIndex < 0)
+            {
+                throw new ArgumentException("Conjugate SOS conversion requires complex pole pairs.", nameof(poles));
+            }
+
+            Complex first = remainingPoles[firstIndex];
+            remainingPoles.RemoveAt(firstIndex);
+            int secondIndex = IndexOfNearest(remainingPoles, Complex.Conjugate(first));
+            Complex second = remainingPoles[secondIndex];
+            remainingPoles.RemoveAt(secondIndex);
+            polePairs.Add((first, second, Math.Max(first.Magnitude, second.Magnitude)));
+        }
+
+        var remainingZeros = zeros.ToList();
+        var assigned = new List<(Complex Pole1, Complex Pole2, Complex Zero1, Complex Zero2, double Radius)>();
+        foreach ((Complex first, Complex second, double radius) in polePairs.OrderByDescending(pair => pair.Radius))
+        {
+            int zero1Index = IndexOfNearest(remainingZeros, first);
+            Complex zero1 = remainingZeros[zero1Index];
+            remainingZeros.RemoveAt(zero1Index);
+            int zero2Index = IndexOfNearest(remainingZeros, Complex.Conjugate(zero1));
+            Complex zero2 = remainingZeros[zero2Index];
+            remainingZeros.RemoveAt(zero2Index);
+            assigned.Add((first, second, zero1, zero2, radius));
+        }
+
+        var sections = new List<SosSection>(assigned.Count);
+        foreach (var pair in assigned.OrderBy(pair => pair.Radius))
+        {
+            sections.Add(new SosSection(
+                1.0,
+                -(pair.Zero1 + pair.Zero2).Real,
+                (pair.Zero1 * pair.Zero2).Real,
+                1.0,
+                -(pair.Pole1 + pair.Pole2).Real,
+                (pair.Pole1 * pair.Pole2).Real));
+        }
+
+        SosSection firstSection = sections[0];
+        sections[0] = firstSection with
+        {
+            B0 = firstSection.B0 * gain,
+            B1 = firstSection.B1 * gain,
+            B2 = firstSection.B2 * gain
+        };
+        return sections.ToArray();
+    }
+
     private static int IndexOfNearest(IReadOnlyList<Complex> values, Complex target)
     {
         int selected = 0;
@@ -1110,15 +1440,21 @@ public static class IirFilterDesign
             throw new ArgumentException("Only first-order transfer functions are supported.");
         }
 
-        double c = 2.0 * sampleRate;
-        double n0 = (analogNumerator[0] * c) + analogNumerator[1];
-        double n1 = (-analogNumerator[0] * c) + analogNumerator[1];
-        double d0 = (analogDenominator[0] * c) + analogDenominator[1];
-        double d1 = (-analogDenominator[0] * c) + analogDenominator[1];
+        // SciPy 1.18 splits 2*fs through sqrt before polynomial expansion.
+        double factor = Math.Sqrt(sampleRate * 2.0);
+        double inverseFactor = 1.0 / factor;
+        double numeratorConstant = (analogNumerator[1] * inverseFactor)
+            + (analogNumerator[0] * -factor);
+        double numeratorLinear = (analogNumerator[1] * inverseFactor)
+            + (analogNumerator[0] * factor);
+        double denominatorConstant = (analogDenominator[1] * inverseFactor)
+            + (analogDenominator[0] * -factor);
+        double denominatorLinear = (analogDenominator[1] * inverseFactor)
+            + (analogDenominator[0] * factor);
 
         return new TransferFunction(
-            [n0 / d0, n1 / d0],
-            [1.0, d1 / d0]);
+            [numeratorLinear / denominatorLinear, numeratorConstant / denominatorLinear],
+            [denominatorLinear / denominatorLinear, denominatorConstant / denominatorLinear]);
     }
 
     private static Complex EvaluatePolynomial(ReadOnlySpan<double> coefficients, double omega)
@@ -1163,26 +1499,7 @@ public static class IirFilterDesign
 
     internal static Complex[] PolynomialFromRootsNumpy(IReadOnlyList<Complex> roots)
     {
-        Complex[] coefficients = [Complex.One];
-        foreach (Complex root in roots)
-        {
-            var next = new Complex[coefficients.Length + 1];
-            Complex negativeRoot = -root;
-            next[0] = coefficients[0];
-            for (int i = 1; i < coefficients.Length; i++)
-            {
-                next[i] = NumpyComplexMultiplyAdd(
-                    coefficients[i],
-                    coefficients[i - 1],
-                    negativeRoot);
-            }
-
-            next[^1] = NumpyComplexMultiply(coefficients[^1], negativeRoot);
-
-            coefficients = next;
-        }
-
-        return coefficients;
+        return PolynomialFromRootsOpenBlasDot(roots);
     }
 
     private static Complex[] PolynomialFromRootsOpenBlasDot(IReadOnlyList<Complex> roots)

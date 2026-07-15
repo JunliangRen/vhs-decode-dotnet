@@ -248,6 +248,14 @@ public static class TbcSqliteMetadataWriter
         IReadOnlyList<TbcDecodedField> fields,
         string dbPath,
         IReadOnlyList<TbcFieldOrderDecision>? fieldOrder = null)
+        => Write(session, fields, dbPath, fieldOrder, fieldIdentities: null);
+
+    internal static void Write(
+        DecodeSession session,
+        IReadOnlyList<TbcDecodedField> fields,
+        string dbPath,
+        IReadOnlyList<TbcFieldOrderDecision>? fieldOrder,
+        IReadOnlyList<TbcDecodedField>? fieldIdentities)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(dbPath);
 
@@ -262,7 +270,11 @@ public static class TbcSqliteMetadataWriter
             Directory.CreateDirectory(directory);
         }
 
-        JsonObject metadata = TbcOutputMetadataWriter.BuildJson(session, fields, fieldOrder);
+        JsonObject metadata = TbcOutputMetadataWriter.BuildJson(
+            session,
+            fields,
+            fieldOrder,
+            fieldIdentities);
         using var connection = new SqliteConnection(new SqliteConnectionStringBuilder { DataSource = dbPath, Pooling = false }.ToString());
         connection.Open();
 

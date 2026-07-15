@@ -12,6 +12,12 @@ public static class TbcOutputMetadataWriter
 {
     private sealed record LaserDiscNtscLine19ColorInfo(double Level, double PhaseDegrees, double RawSnr);
 
+    internal static bool ShouldWriteRecoverySnapshot(int fieldsWritten)
+    {
+        ArgumentOutOfRangeException.ThrowIfNegative(fieldsWritten);
+        return fieldsWritten < 100 || fieldsWritten % 500 == 0;
+    }
+
     internal sealed class StreamingWriter : IDisposable
     {
         private readonly DecodeSession _session;
@@ -32,7 +38,11 @@ public static class TbcOutputMetadataWriter
             _verbose = session.ExecutionOptions.VerboseVits;
             _fieldBuilder = new FieldObjectBuilder(session);
             _fieldsWriter = new StreamWriter(
-                File.Create(_fieldsPath),
+                new FileStream(
+                    _fieldsPath,
+                    FileMode.Create,
+                    FileAccess.Write,
+                    FileShare.Read),
                 new UTF8Encoding(encoderShouldEmitUTF8Identifier: false));
         }
 
@@ -40,10 +50,13 @@ public static class TbcOutputMetadataWriter
 
         public VideoOutputConverter? LastOutputConverter => _lastOutputConverter;
 
-        public JsonObject Add(TbcDecodedField field, TbcFieldOrderDecision decision)
+        public JsonObject Add(
+            TbcDecodedField field,
+            TbcFieldOrderDecision decision,
+            TbcDecodedField? fieldIdentity = null)
         {
             ObjectDisposedException.ThrowIf(_fieldsWriter is null, this);
-            JsonObject fieldInfo = _fieldBuilder.Add(field, decision);
+            JsonObject fieldInfo = _fieldBuilder.Add(field, decision, fieldIdentity);
             if (FieldCount != 0)
             {
                 _fieldsWriter!.Write(',');
@@ -63,6 +76,13 @@ public static class TbcOutputMetadataWriter
             return fieldInfo;
         }
 
+        public void WriteSnapshot()
+        {
+            ObjectDisposedException.ThrowIf(_fieldsWriter is null, this);
+            _fieldsWriter.Flush();
+            WriteCurrentJson();
+        }
+
         public void Complete()
         {
             if (_completed)
@@ -71,7 +91,30 @@ public static class TbcOutputMetadataWriter
             }
 
             CloseFieldsWriter();
+            try
+            {
+                WriteCurrentJson();
+                _completed = true;
+            }
+            finally
+            {
+                File.Delete(_fieldsPath);
+            }
+        }
+
+        public void Dispose()
+        {
+            CloseFieldsWriter();
+            if (!_completed)
+            {
+                File.Delete(_fieldsPath);
+            }
+        }
+
+        private void WriteCurrentJson()
+        {
             string tempPath = _jsonPath + ".tmp";
+            bool moved = false;
             try
             {
                 using (var output = new StreamWriter(
@@ -80,7 +123,11 @@ public static class TbcOutputMetadataWriter
                 {
                     WritePrefix(output);
                     using (var fields = new StreamReader(
-                        File.OpenRead(_fieldsPath),
+                        new FileStream(
+                            _fieldsPath,
+                            FileMode.Open,
+                            FileAccess.Read,
+                            FileShare.ReadWrite),
                         Encoding.UTF8,
                         detectEncodingFromByteOrderMarks: false))
                     {
@@ -96,24 +143,14 @@ public static class TbcOutputMetadataWriter
                 }
 
                 File.Move(tempPath, _jsonPath, overwrite: true);
-                _completed = true;
+                moved = true;
             }
             finally
             {
-                File.Delete(_fieldsPath);
-                if (!_completed)
+                if (!moved)
                 {
                     File.Delete(tempPath);
                 }
-            }
-        }
-
-        public void Dispose()
-        {
-            CloseFieldsWriter();
-            if (!_completed)
-            {
-                File.Delete(_fieldsPath);
             }
         }
 
@@ -179,8 +216,16 @@ public static class TbcOutputMetadataWriter
         IReadOnlyList<TbcDecodedField> fields,
         string jsonPath,
         IReadOnlyList<TbcFieldOrderDecision>? fieldOrder = null)
+        => WriteJson(session, fields, jsonPath, fieldOrder, fieldIdentities: null);
+
+    internal static void WriteJson(
+        DecodeSession session,
+        IReadOnlyList<TbcDecodedField> fields,
+        string jsonPath,
+        IReadOnlyList<TbcFieldOrderDecision>? fieldOrder,
+        IReadOnlyList<TbcDecodedField>? fieldIdentities)
     {
-        JsonObject root = BuildJson(session, fields, fieldOrder);
+        JsonObject root = BuildJson(session, fields, fieldOrder, fieldIdentities);
         string tempPath = jsonPath + ".tmp";
         File.WriteAllText(tempPath, SerializeJson(root, session.ExecutionOptions.VerboseVits));
         File.Move(tempPath, jsonPath, overwrite: true);
@@ -189,12 +234,13 @@ public static class TbcOutputMetadataWriter
     internal static JsonObject BuildJson(
         DecodeSession session,
         IReadOnlyList<TbcDecodedField> fields,
-        IReadOnlyList<TbcFieldOrderDecision>? fieldOrder = null)
+        IReadOnlyList<TbcFieldOrderDecision>? fieldOrder = null,
+        IReadOnlyList<TbcDecodedField>? fieldIdentities = null)
     {
         VideoOutputConverter converter = fields.LastOrDefault(field => field.OutputConverter is not null)?.OutputConverter
             ?? session.VideoOutput;
         JsonObject root = BuildHeader(session, fields.Count, converter);
-        root["fields"] = BuildFieldArray(session, fields, fieldOrder);
+        root["fields"] = BuildFieldArray(session, fields, fieldOrder, fieldIdentities);
         return root;
     }
 
@@ -445,11 +491,17 @@ public static class TbcOutputMetadataWriter
     private static JsonArray BuildFieldArray(
         DecodeSession session,
         IReadOnlyList<TbcDecodedField> fields,
-        IReadOnlyList<TbcFieldOrderDecision>? fieldOrder)
+        IReadOnlyList<TbcFieldOrderDecision>? fieldOrder,
+        IReadOnlyList<TbcDecodedField>? fieldIdentities)
     {
         if (fieldOrder is not null && fieldOrder.Count != fields.Count)
         {
             throw new ArgumentException("Field order decision count must match decoded field count.", nameof(fieldOrder));
+        }
+
+        if (fieldIdentities is not null && fieldIdentities.Count != fields.Count)
+        {
+            throw new ArgumentException("Field identity count must match decoded field count.", nameof(fieldIdentities));
         }
 
         var array = new JsonArray();
@@ -467,7 +519,7 @@ public static class TbcOutputMetadataWriter
                     WriteField: true,
                     SyncConfidence: field.SyncConfidence,
                     DecodeFaults: 0);
-            array.Add(builder.Add(field, decision));
+            array.Add(builder.Add(field, decision, fieldIdentities?[i]));
         }
 
         return array;
@@ -476,6 +528,8 @@ public static class TbcOutputMetadataWriter
     internal sealed class FieldObjectBuilder
     {
         private readonly DecodeSession _session;
+        private readonly Dictionary<TbcDecodedField, (int SeqNo, JsonObject Metadata)> _writtenMetadata =
+            new(ReferenceEqualityComparer.Instance);
         private TbcDecodedField? _previousLaserDiscFirstField;
         private int? _previousLaserDiscFirstFieldPhaseId;
         private int? _previousLaserDiscFieldPhaseId;
@@ -485,8 +539,25 @@ public static class TbcOutputMetadataWriter
             _session = session;
         }
 
-        public JsonObject Add(TbcDecodedField field, TbcFieldOrderDecision decision)
+        public JsonObject Add(
+            TbcDecodedField field,
+            TbcFieldOrderDecision decision,
+            TbcDecodedField? fieldIdentity = null)
         {
+            TbcDecodedField identity = fieldIdentity ?? field;
+            if (_writtenMetadata.TryGetValue(identity, out var previous)
+                && previous.SeqNo == decision.SeqNo)
+            {
+                JsonObject duplicate = previous.Metadata.DeepClone().AsObject();
+                if (_session.Spec.Name == "ld")
+                {
+                    duplicate["audioSamples"] = field.AudioSampleCount;
+                    duplicate["efmTValues"] = field.EfmTValueCount;
+                }
+
+                return duplicate;
+            }
+
             int decodeFaults = decision.DecodeFaults;
             int syncConfidence = Math.Min(decision.SyncConfidence, field.SyncConfidence);
             JsonObject fieldInfo;
@@ -622,6 +693,7 @@ public static class TbcOutputMetadataWriter
                 throw new InvalidOperationException($"Unsupported metadata decoder '{_session.Spec.Name}'.");
             }
 
+            _writtenMetadata[identity] = (decision.SeqNo, fieldInfo);
             return fieldInfo;
         }
 

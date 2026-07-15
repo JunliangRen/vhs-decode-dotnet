@@ -21,7 +21,9 @@ This port targets the decode CLIs only:
 - `decode.py vhs`
 - `decode.py cvbs`
 - `decode.py ld`
-- standalone aliases equivalent to `vhs-decode`, `cvbs-decode`, and `ld-decode`
+- `decode.py hifi`
+- standalone aliases equivalent to `vhs-decode`, `cvbs-decode`, `ld-decode`,
+  and `hifi-decode`
 
 GUI launcher, filter tuning, and TBC utility tools are intentionally outside the
 port scope unless they are required by the decode pipeline itself.
@@ -32,13 +34,104 @@ Implemented:
 
 - Visual Studio compatible `VHSDecodeDotNet.slnx`
 - `net10.0` CLI and core library plus a standard
-  `Microsoft.NET.Test.Sdk`/xUnit test project discoverable in Visual Studio
+  `Microsoft.NET.Test.Sdk`/xUnit v3 test project discoverable in Visual Studio
   Test Explorer
-- `decode.py`-style top-level dispatch for `vhs`, `cvbs`, and `ld`
+- `decode.py`-style top-level dispatch for `vhs`, `cvbs`, `ld`, and `hifi`
 - the CLI builds as `decode.exe` and also emits `vhs-decode.exe`,
-  `cvbs-decode.exe`, and `ld-decode.exe` apphost aliases that infer their
-  subcommand from the executable name
+  `cvbs-decode.exe`, `ld-decode.exe`, and `hifi-decode.exe` apphost aliases
+  that infer their subcommand from the executable name
 - compatibility option registry for VHS, CVBS, and LaserDisc decode commands
+- the complete v0.4.0 HiFi argparse surface is represented by a typed command
+  spec: all 42 options, aliases, defaults, frequency parsing, VHS/8mm default
+  selection, preview overrides, and both standalone/facade help snapshots are
+  locked to upstream
+- HiFi command execution now connects native raw/container input routing,
+  Release 4.0 bias measurement behavior and per-block carrier progress, exact
+  first/middle/final overlap framing, bounded parallel block decoding, ordered
+  audio post-processing,
+  dual-mono naming and padding, WAV PCM16 or FLAC PCM24 output, normalization,
+  cancellation/error finalization, Release 4.0's per-block progress bar and
+  five-line timing/buffer reports, and facade/standalone command dispatch
+- a full-command 2,800,000-sample, 6 MHz PAL VHS HiFi synthetic RF baseline
+  reproduces Release 4.0's single first/final block and Numba negative-index
+  worker copy behavior; the resulting 22,796-frame PCM16 WAV is byte-for-byte
+  identical with SHA-256
+  `325A4ABFB4922FE814338BAB377A94E6C2FD96277244813433A72F6ED5723553`
+- HiFi bias pre-reading preserves Release 4.0's omission of `--raw_format`:
+  raw files are measured according to their extension, while stdin prints the
+  measurement heading and then raises the same required-format error even when
+  an override was supplied
+- HiFi FLAC input uses buffered FFmpeg decoding as the bit-exact stand-in for
+  Release 4.0's libsndfile path, avoiding `nobuffer` short-file truncation;
+  10,000 deterministic 24-bit samples match after int16 normalization and FLAC
+  `STREAMINFO` supplies the exact progress total
+- HiFi LDF and unknown-container routing now preserves Release 4.0's observable
+  tool sequence and arguments: both LD readers are probed first, LDF prefers the
+  `flac` raw decoder before FFmpeg, and fallback FFmpeg paths retain
+  `-fflags nobuffer` plus their version/warning diagnostics
+- HiFi `--gnuradio` now exposes the Release 4.0 REP endpoint on port 5555 and
+  returns the summed filtered channels as native float32 after each client
+  request; the streaming decoder forces the same single-worker ordering for
+  this mode
+- HiFi `--preview` now routes every post-processed stereo block to a native
+  Windows WinMM 44.1 kHz PCM16 stream while continuing to write the requested
+  output file; float32 conversion preserves Release 4.0's truncate-and-wrap
+  behavior, and systems without an available device retain its existing
+  `preview is not available` fallback
+- HiFi raw-input normalization covers `u8`, `u10le`, `u12le`, `u16le`, `s8`,
+  `s10le`, `s12le`, `s16le`/`raw`, and `f32le`; representative extrema and
+  center values match all 54 upstream v0.4.0 float32 bit patterns exactly
+- HiFi AFE and stream planning covers all VHS/8mm PAL/NTSC carrier,
+  deviation, notch-width, field-rate, and override combinations plus the
+  quadrature/Hilbert IF rates, exact `Fraction(float)` resampling ratios,
+  soxr quality profiles, half-second/custom block sizing, overlap rounding,
+  rate-sync warning state, and final-block output lengths from v0.4.0
+- HiFi quadrature and Hilbert FM discriminator kernels preserve v0.4.0's
+  carrier/deviation casts, finite oscillator geometry, conjugate phase
+  differencing, analytic-signal multiplier quirk, unwrap behavior, float32
+  clipping, and untouched final output sample; deterministic power-of-two and
+  arbitrary-length vectors match all 29 upstream output/oscillator hashes
+- HiFi block resampling dynamically uses the exact libsoxr revision embedded by
+  python-soxr 1.1.0, with LQ/MQ/HQ/VHQ routing, exact large
+  `Fraction(float)` rates, `last=True` flushing, per-block `clear()`, separate
+  stereo state, and unchanged-rate bypasses; 11 vectors spanning every real
+  HiFi rate stage match v0.4.0 float32 output byte for byte
+- HiFi AFE execution reproduces the 22nd-order, 220 dB Chebyshev-II
+  forward/backward band-pass path at the actual Rust float32 coefficient
+  boundary for every VHS/8mm carrier-width pair, both 40 MHz quadrature and
+  8,388,608 Hz Hilbert IF rates, and arbitrary carrier overrides
+- the HiFi block demodulation stage connects exact IF resampling, independent
+  left/right AFE filters, quadrature or Hilbert FM, 192 kHz resampling, and
+  Numba-fastmath-compatible DC cancellation/trimming; two deterministic
+  524,288-sample stereo chains and mono channel routing match v0.4.0 output
+  bits, including reduction boundaries from 1 through 94,000 samples
+- the standalone HiFi dropout-compensation kernel reproduces Release 4.0's
+  128-point NumPy complex64 FFT and SIMD magnitude detector,
+  Numba-fastmath mean/standard-deviation reductions, overlapping range
+  routing, raised-cosine DC correction, and copy/mute fades for stereo,
+  dual-mono, and single-channel modes bit for bit
+- the standalone HiFi head-switch interpolation path reproduces Release 4.0's
+  22nd-order, 200 dB Chebyshev-II high-pass filter, SciPy peak distance,
+  prominence and width semantics, Windows NumPy AVX2 equal-priority order,
+  boundary merging, linear gap repair, and Numba-compatible smoothing bit for
+  bit
+- the public HiFi block decoder now follows Release 4.0's complete in-block
+  order through DOC, head-switch repair, final libsoxr conversion, stereo,
+  mid/side and mono mixing, float32 gain, and next-block automatic carrier
+  tuning; full RF-to-audio blocks covering all seven audio modes and a retuned
+  second block match upstream output bits, including the mono alias/double-gain
+  quirk
+- the stateful HiFi audio post-processor reproduces Release 4.0's cascaded
+  1 Hz DC blocker, VHS and 8mm deemphasis order, peak/RMS expander envelopes,
+  first-block state priming, 1.5 ms startup mute, stereo interleave, and
+  per-channel peak tracking; five two-block scenarios match upstream float32
+  output and state bits exactly
+- nonzero HiFi spectral noise reduction reproduces Release 4.0's stateful
+  nonstationary gate, including SciPy float32 STFT/ISTFT, noisereduce mask
+  geometry, forward/backward temporal smoothing, two-block history, end
+  padding, and independent stereo state; three-block 44.1/48 kHz baselines at
+  reduction amounts 0.25, 0.5, and 1.0 plus a two-block full post-processing
+  chain match upstream float32 output byte for byte
 - upstream `-h` / `--help` handling for all three decode commands, including
   zero-exit help before positional argument validation
 - complete v0.4.0 argparse help snapshots for the three standalone and three
@@ -49,9 +142,10 @@ Implemented:
 - byte-for-byte regenerated v0.4.0 format parameter catalog covering all 560
   tape system/format/speed combinations, 7 CVBS systems, and 4 LD variants
 - a full decode compatibility matrix constructs filters and demodulates one
-  32768-sample RF block for all 357 valid tape combinations; 1,353 externally
-  observable float32 channels match v0.4.0 byte for byte, with smoke coverage
-  for all 7 CVBS systems and all 4 normal/lowband LD variants
+  32768-sample RF block for all 357 valid tape combinations; all 1,428
+  float32 channels match v0.4.0 byte for byte, including the 75 internal
+  non-color-under burst references, with smoke coverage for all 7 CVBS systems
+  and all 4 normal/lowband LD variants
 - native RF sample loader foundation for `.u8`, `.r8`, `.s16`, `.u16`, `.r16`,
   `.rf`, `.lds`, `.r30`, and mono PCM16 `.wav`
 - FFmpeg-backed RF container loader path for upstream `.ldf`, `.flac`, `.vhs`,
@@ -60,6 +154,15 @@ Implemented:
 - container seeks probe the decoded stream's actual sample rate and convert RF
   sample offsets to FFmpeg timestamps from that rate, so `--no_resample`
   captures such as 17.9 MHz FLAC do not silently seek as if they were 40 MHz
+- converted container streams reproduce v0.4.0 PyAV `AudioResampler` plane
+  geometry: `ffprobe` supplies stream rate/channel/format data, while FFmpeg
+  frame metadata supplies every converted frame's sample count and first-frame
+  PTS. The loader retains the observable 32-sample aligned plane padding and
+  maps seeks in that padded sample space. Release 4.0 SHA and reconstructed
+  plane baselines cover 40 kHz and 17.9 kHz mono/stereo WAV, PCM16/PCM24 FLAC,
+  Ogg/FLAC LDF, AAC, MP3, ALAC, and stereo float WAV, including MP3's short
+  initial frame, variable terminal frames, nonzero restarts beyond the 2 MB
+  rewind window, and EOF frame flushing
 - upstream-style FFmpeg stdin fallback for unrecognized RF input containers
 - upstream-style FFmpeg stdin resampling loader for raw RF inputs when
   `--inputfreq`, `-f`, or `--cxadc` requires conversion to 40 MHz, including
@@ -108,10 +211,11 @@ Implemented:
 - LD block output now applies v0.4.0's float32 storage boundary to filtered
   video, raw demod, 0.5 MHz video, burst/pilot references, RF high-pass data,
   and first-stage analog-audio channels before cross-block/field processing
-- an NTSC LD 32768-sample v0.4.0 reference block is bit-exact after float32
-  storage for `demod_raw`, `video`, `video05`, and `demod_burst`; a deterministic
-  full-scale block locks all four complete-output SHA-256 values in regression
-  tests
+- NTSC and PAL LD 32768-sample v0.4.0 reference blocks are bit-exact after
+  float32 storage: NTSC covers `demod_raw`, `video`, `video05`, and
+  `demod_burst`, while PAL also covers `demod_pilot`; the PAL regression locks
+  SciPy-compatible real-input FFT, IIR response, analytic-signal, raw-demod,
+  and pilot double bits before the float32 storage boundary
 - LD 0.5 MHz sync/reference video path now follows upstream `FVideo05` by using
   `Fvideo_lpf * Fdeemp * F0_5`, excluding the output-only group-delay equalizer
   and `video_deemp_strength`
@@ -170,8 +274,12 @@ Implemented:
 - LD `--AC3` RF audio path, including upstream-style AC3 band-pass FFT filter,
   internal RF_TBC generation when AC3 is enabled, signed 8-bit AC3 demod input
   scaling, and the default `sox | ld-ac3-demodulate | ld-ac3-decode` pipeline
-  for `.ac3` sidecar output; only the decoder's stdout/stderr is copied as raw
-  bytes to `.ac3.log`, matching v0.4.0's subprocess redirection
+  for `.ac3` sidecar output; on Windows, inherited native anonymous-pipe
+  handles connect the three processes directly and the decoder's stdout/stderr
+  share one `.ac3.log` handle, matching v0.4.0's process topology and stream
+  boundaries. A real-tool integration baseline compares output bytes and
+  stable diagnostics with the equivalent direct OS pipeline and covers output
+  paths containing spaces
 - LD AC3 front-end tests now use a deterministic 32768-sample RF_TBC fixture
   generated against SciPy's `butter`/`freqz`/FFT path, checking selected complex
   response bins and the SHA-256 of all 31744 emitted signed-8-bit samples
@@ -342,8 +450,9 @@ Implemented:
   black/blanking from the middle-third backporch medians and optionally
   rescaling Hz/IRE from the hsync-to-backporch difference
 - VHS `--track_phase` field-output IRE0 compensation, applying
-  `track_ire0_offset[track_phase ^ field_number]` during Hz-to-TBC conversion
-  and matching upstream SECAM/MESECAM ignore behavior plus 0/1 validation
+  `track_ire0_offset[next_track_phase ^ field_number]` after burst phase lock,
+  falling back to the CLI-seeded phase when chroma analysis is skipped, and
+  matching upstream SECAM/MESECAM ignore behavior plus 0/1 validation
 - VHS chroma option model for colour-under write/no-write decisions,
   `--skip_chroma`, `--chroma_AFC`, Betamax PAL CAFC auto-enable,
   SECAM/MESECAM comb disabling, Video8/Hi8 chroma de-emphasis, chroma audio
@@ -364,8 +473,9 @@ Implemented:
   demodulation, line-scale phase offset, phase-rotation sequencing, rotation
   flip checks, burst-level averaging, and color-killer line detection
 - VHS chroma burst probing now mirrors upstream padded burst extraction,
-  heterodyne multiplication, optional burst filtering hook, and carrier-table
-  I/Q demodulation
+  float32-heterodyne/float64-chroma multiplication, float64 zero-phase burst
+  filtering, and carrier-table I/Q demodulation with Numba's double-FMA
+  reduction order
 - VHS chroma field decode now wires TBC-resampled `demod_burst` samples through
   phase probing, upconversion, comb/ACC, uint16 conversion, and
   `TbcDecodedField.ChromaSamples` for sidecar writes
@@ -388,6 +498,17 @@ Implemented:
   non-power-of-two transforms use a Bluestein FFT, and peak selection follows
   v0.4.0 by choosing the closest strict local maximum above one third of the
   global power peak rather than simply choosing the strongest bin
+- post-TBC chroma filter design, carrier probing, and heterodyne generation use
+  v0.4.0's `4 * fsc_mhz` rate instead of the inherited TBC `outfreq`; this
+  preserves MESECAM's distinct 17.624 MHz chroma path while its field output
+  remains at the PAL-family 17.734475 MHz rate
+- PAL Betamax's mandatory chroma AFC path preserves the upstream float64 SOS
+  prefilter after TBC, then reproduces the rolled float64 Numba fast-math mean
+  reduction before carrier estimation and float32 heterodyne processing
+- PAL/NTSC Video8 AFC now preserves the complete optional chroma-audio/user
+  notch chain, keeps NTSC phase-compensated multiplication in float64 until the
+  float32 `uphet` write, and reproduces Numba's distinct float64 2H PAL and 1H
+  NTSC comb subtraction orders
 - VHS chroma burst phase now feeds upstream-style burst-locked line-location
   refinement before field rendering, with `--disable_burst_hsync` preserving
   the sync-only line positions
@@ -396,8 +517,9 @@ Implemented:
   NTSC fields apply the upstream post-burst amplitude doubling before
   heterodyne upconversion
 - VHS `--track_phase 0|1` now seeds the first field's chroma rotation index as
-  well as the track-dependent luma `ire0` adjustment, with subsequent fields
-  continuing from the detected/alternated v0.4.0 rotation state
+  well as the track-dependent luma `ire0` adjustment, with each rendered field
+  consuming the same detected/alternated next-track index that v0.4.0 stores
+  before Hz-to-TBC conversion
 - VHS `--export_raw_tbc` raw TBC path, switching the TBC video source to
   demodulated RF, writing resampled fields as little-endian float32 samples,
   and emitting raw-Hz JSON video level metadata
@@ -410,8 +532,8 @@ Implemented:
 - RF block decode pipeline that connects a sample loader, filter set, and FM
   demodulator for one block
 - CVBS direct-luma block path that bypasses RF FM demodulation, preserves
-  the upstream complex-FFT/real-IFFT input round-trip, preserves auto-sync
-  composite samples as luma, and applies upstream-style
+  the upstream SciPy 1.18 DUCC real-FFT/inverse-FFT input round-trip, preserves
+  auto-sync composite samples as luma, and applies upstream-style
   `--no_auto_sync` raw-sample mapping before existing video/TBC processing
 - CVBS `--clamp_agc` field-output clamp/gain path, including upstream blank
   and sync median windows, per-line blank ramp subtraction, AGC speed smoothing,
@@ -506,6 +628,9 @@ Implemented:
   correction, and a wider-gap skipped field retains v0.4.0's early-return
   metadata shape: no `decodeFaults`, `vitsMetrics`, or `vbi` JSON keys and no
   corresponding SQLite VITS/VBI rows, with `decode_faults` left `NULL`
+- LD/CVBS/VHS filler writes reuse the previously serialized field metadata
+  verbatim, while LD refreshes only the repeated PCM/EFM counts; this prevents
+  filler insertion from inventing phase faults or advancing VITS/VBI state
 - CVBS field-order repair follows its inherited LD state machine rather than
   VHS `detect/drop`: close repeated parity is corrected and written with fault
   bit 1, wider gaps insert the cached opposite raw parity, and the current
@@ -562,14 +687,18 @@ Implemented:
 - CVBS block demodulation now preserves v0.4.0's direct-luma path rather than
   passing video through the LD/VHS `FVideo` response; its 65-tap `demod_05` and
   81-tap FSC +/- 0.2 MHz `demod_burst` branches are independent FIR outputs,
-  including the upstream float32 quantization of burst samples; deterministic
-  full-block float32 hashes match all three upstream channels
+  including the upstream float32 quantization of burst samples; the DUCC real
+  transforms and NumPy SIMD complex multiplication are double-bit exact for
+  `demod` and `demod_05`, while deterministic full-block float32 hashes match
+  all three upstream channels
 - CVBS NTSC retains the inherited LD burst line-location refiner because the
   v0.4.0 class defines `_refine_linelocs_burst` instead of overriding
   `refine_linelocs_burst`; PAL CVBS has no corresponding burst refiner
 - CVBS clamp AGC preserves per-line blank/sync ordering for piecewise DC
   correction and carries the previous field's final-third median levels into
-  the next auto-sync pass as v0.4.0 `agc_blank_level`/`agc_sync_level` state
+  the next auto-sync pass as v0.4.0 `agc_blank_level`/`agc_sync_level` state;
+  its median, in-place DC correction, gain division, and VSYNC subtraction
+  retain NumPy's float32 staging before the final float64 output scaling
 - CVBS clamp AGC tracks separate raw detected and smoothed used gain extrema;
   successful CLI runs print the four v0.4.0 statistics lines to stderr and the
   final `saving JSON and exiting` line to stdout (fixed `--agc_set_gain` does
@@ -579,6 +708,9 @@ Implemented:
   recovering HSYNC pulses whose back porch was included by the first pass
 - vblank group filtering preserves the separate v0.4.0 minimum spans: VHS uses
   the relaxed greater-than-9 threshold while LD/CVBS require greater than 12
+- PAL CVBS bad-line repair preserves the release override that disables
+  second-derivative error marking, while PAL LD still recomputes that mask after
+  pilot refinement
 - VHS/CVBS HSYNC line-location refinement now runs against the 0.5 MHz
   low-pass branch when available, including upstream-style sync/porch midpoint
   recrossing and sample-rate-scaled right-edge correction; `--skip_hsync_refine`
@@ -659,10 +791,10 @@ Implemented:
 - chroma heterodyne/FSC tables, mixed `uphet` samples, comb arithmetic, and
   final SOS filtering now retain the upstream float32 boundaries through to
   ACC, including `sci-rs` float32 state/coefficient arithmetic
-- final chroma filtering now retains SciPy's four-section Butterworth SOS shape
-  and uses the upstream `sci-rs` float32 forward/backward implementation for
-  both burst probing and the full upconverted field instead of collapsing the
-  eighth-order response to one BA polynomial
+- final chroma filtering now retains SciPy's four-section Butterworth SOS shape;
+  the full upconverted field uses upstream `sci-rs` float32 filtering, while
+  burst probing preserves the float64 TBC chroma path, upstream MHz cutoff
+  arithmetic, double-FMA I/Q reduction, and platform C-runtime `hypot`
 - RF color-under extraction likewise uses float32 `sci-rs` SOS filtering and
   reproduces Numba fastmath's vectorized float32 DC-mean reduction; the path
   promotes to double only when an upstream SciPy BA audio/video notch is active
@@ -765,6 +897,27 @@ Implemented:
   VHS/LD report `Completed without handling any frames.`, and the process exits
   successfully; non-empty VHS/LD completion uses the exact upstream
   `Completed: saving JSON and exiting.` stderr text
+- runtime reporting now mirrors v0.4.0 across LD, VHS, and CVBS: frame status
+  text is logged at DEBUG while stdout receives the same 80-column padded
+  carriage-return line, INFO-and-higher diagnostics go to stderr and first
+  clear an active status line, and cleanup reports total decode time plus
+  post-setup FPS; a one-frame PAL CVBS transcript is byte-exact on stdout, has
+  the exact phase warning on stderr, and matches the upstream timing-line shape
+- LD, VHS, and CVBS streaming output now take the same periodic recovery JSON
+  snapshots: every read while fewer than 100 fields have been written and again
+  at each 500-field boundary; VHS then checks free output-disk space and, below
+  10 GiB, emits the exact pause/resume messages and polls once per second until
+  space returns, while disk-query errors are ignored and LD/CVBS never query it
+- Ctrl+C now cancels LD, VHS, and CVBS field decoding plus VHS low-disk waits,
+  finalizes any partial TBC/JSON output without temporary metadata files, emits
+  v0.4.0's exact termination line on stderr for LD or stdout for VHS/CVBS, then
+  reports cleanup timing and exits with status 1
+- unexpected LD, VHS, and CVBS field-read exceptions now emit v0.4.0's exact
+  bug-report header, current sample, argparse `Namespace(...)` value spelling
+  and ordering, and exception line on stderr, followed by a Python-shaped
+  source traceback; default-versus-explicit numeric values, suppressed
+  `noAGC`, quoted paths, and `params_file` handles retain Python repr behavior,
+  while partial TBC/chroma/JSON/SQLite output is finalized before exit status 1
 - `-t/--threads` now drives parallel RF block demodulation and filtering while
   keeping stream/FFmpeg/GNU Radio reads ordered; `-t 1` and debug-plot `0`
   retain the deterministic single-thread path, and parallel blocks are stitched
@@ -800,10 +953,25 @@ Implemented:
   transaction, bounding sequence memory to the field-order/previous-field state
 - deterministic 32768-sample v0.4.0 block baselines cover all 357 valid
   system/format/speed combinations across PAL, PAL-M, NTSC, MESECAM, 405, 819,
-  and NLINHA: all 1,353 externally observable `demod`, `demod_05`, `envelope`,
-  and color-under `demod_burst` channels are float32 byte-exact;
-  non-color-under formats also construct the upstream narrow internal burst
-  filter from demodulated luma while continuing not to emit a chroma sidecar
+  and NLINHA: all 1,428 `demod`, `demod_05`, `demod_burst`, and `envelope`
+  channels are float32 byte-exact, including all 75 narrow internal burst
+  references for non-color-under formats; SciPy SOS section ordering,
+  real-input Hilbert transforms, and NumPy complex-magnitude rounding preserve
+  the float64 source bits while those formats continue not to emit a chroma
+  sidecar
+- thirty independently discoverable deterministic full-field chroma baselines
+  cover every explicitly routed PAL/NTSC color-under family: VHS, VHSHQ,
+  S-VHS/S-VHS ET, U-matic variants, Betamax/HiFi/SuperBeta, Video8/Hi8, EIAJ,
+  VCR/VCR-LP, and Video 2000, plus PAL-M, MESECAM, NLINHA, Betamax AFC, and
+  PAL/NTSC Video8 AFC with chroma-audio plus user notches. All 9,150,099 output
+  samples match v0.4.0 bit for bit, with staged hashes locking prefilters,
+  notches, carrier estimates, heterodyne/phase compensation, final filters,
+  deemphasis, comb, and automatic chroma gain
+- complete deterministic 313-line PAL VHS burst-phase sequences with track
+  detection both disabled and enabled match v0.4.0 bit for bit, including
+  every per-line phase/I/Q/magnitude tuple, bottom-of-field lookahead and phase
+  reuse, the next-track rotation index, burst detection, and
+  odd/even/combined averages
 - a two-field real NTSC VHS/FLAC fixture now matches the v0.4.0 checkout byte
   for byte: main TBC
   `60A6409696FD27F2012D9DF40DB97D141BE1F3D6315D3F6D4AD45A88B59FB1FF`,
@@ -866,10 +1034,13 @@ Implemented:
   accepted parser values PAL-M, MESECAM, 405, 819, and NLINHA fail with the
   upstream `Unknown video system!` tuple; their core parameter/filter baselines
   remain covered without exposing behavior the release executable did not have
-- on a deterministic varying-level PAL CVBS fixture, `--clamp_agc` now differs
-  from v0.4.0 at only 21 of 710,510 TBC samples, each by one LSB; phase, burst,
-  VITS, location metadata, AGC statistics, and normalized logs match, while the
-  remaining sample tails are covered by the DUCC precision item below
+- on a deterministic varying-level PAL CVBS fixture, `--clamp_agc` now
+  reproduces v0.4.0 byte for byte across all 710,510 TBC samples; the TBC and
+  JSON SHA-256 hashes are respectively
+  `96149002C71C87735AE9D609DCC5693F60A12AD361A09D2F26DCB3CBF9FAF624`
+  and `783A0DAC238A72433523659AC73C6A2D11357684631071A0A8DEE206E323EBDC`,
+  while phase, burst, VITS, location metadata, AGC statistics, and normalized
+  logs also match
 - on the same varying-level fixture, default non-clamped CVBS with `--threads 0`
   now reproduces v0.4.0's synchronous speculative-field timing: each requested
   field is rendered with the next decoded field's `ire0`/`hz_ire`, the producer
@@ -889,6 +1060,17 @@ Implemented:
   and the same JSON hash
   `783A0DAC238A72433523659AC73C6A2D11357684631071A0A8DEE206E323EBDC`,
   while normalized logs also match in order and content
+- a deterministic one-frame 40 MHz PAL LD RF fixture now exercises the full
+  pilot/burst/vblank, bad-line repair, eight-field phase, dropout, VITS,
+  TBC/JSON/SQLite, and frame-status path; PAL pilot repair recomputes the final
+  derivative-error mask like v0.4.0, restoring exact `syncConf` values 90/100
+  and the exact second-field dropout coordinates; all 710,510 main TBC samples,
+  the complete JSON, and SQLite now match v0.4.0 byte for byte with respective
+  SHA-256 hashes
+  `CEB246557CCEE237A1743D7D6D6CB456F8B9C434C2E32162BB53013B9BBE9E2B`,
+  `36C054543634092C86DC1F1D21CDCBD88586A617E3D9872A86429C7258E179AE`,
+  and `1BDF01C859AC0459BD7C1FB870E617B59BA002089A996A2C2160D27A5EA87550`,
+  while normalized logs match in order and content
 - a one-frame real NTSC LD/LDF fixture with default EFM and analog audio also
   matches v0.4.0 byte for byte: main TBC
   `7F19286F84D563D58983C50326CE16433ED9DA90459ADA658532EB38A5AF686A`,
@@ -901,23 +1083,20 @@ Implemented:
 
 Not complete yet:
 
-- the current numerical baselines include four bit-exact LD v0.4.0 block
+- the current numerical baselines include nine bit-exact LD v0.4.0 block
   channels, three float32-exact CVBS channels, two 491520-sample bit-exact VHS
   video/reference spans, two 239330-sample bit-exact VHS luma/chroma field
-  pairs, and 1,353 float32-exact visible channels across all 357 valid tape
+  pairs, and 1,428 float32-exact channels across all 357 valid tape
   system/format/speed cases
-- CVBS double-precision FFT round-trip tails still differ at approximately
-  1e-11 when upstream uses SciPy 1.18's DUCC backend; this disappears in the
-  current float32 channel baselines but remains an explicit parity item
-- remaining container-specific resampling edge cases
-- remaining real-capture PAL LD and AC3 end-to-end fixtures, external AC3
-  tool-pipeline parity, and remaining verbose VITS field calibration details
-- remaining non-default VHS/CVBS vblank edge cases and PAL/SECAM/format-specific
-  chroma bit-parity processing
-- on the adversarial white-noise matrix, 58 of 75 hidden non-color-under
-  `demod_burst` buffer hashes differ because their float64 FFT source can cross
-  float32 rounding boundaries; those buffers are not consumed by the affected
-  formats' TBC/JSON/output paths
+- remaining rare container codec/timestamp edge cases outside the verified PCM
+  WAV, native FLAC, Ogg/FLAC LDF, AAC, MP3, ALAC, and float WAV paths
+- remaining HiFi real-capture end-to-end output baselines and hosted GUI
+  behavior; the command runner, Windows live preview, and GNU Radio path are
+  wired
+- remaining real-capture PAL LD and AC3 end-to-end fixtures and remaining
+  verbose VITS field calibration details
+- remaining non-default VHS/CVBS vblank edge cases, real-capture chroma
+  track-phase transitions, and uncommon cross-option parity
 - remaining upstream TBC field-writer integration and bit-compat edge handling
 - remaining rare real-capture first-HSYNC/vblank edge cases and complete
   upstream JSON/SQLite field metadata
@@ -936,12 +1115,16 @@ dotnet test VHSDecodeDotNet.slnx --no-build
 ```
 
 The current formal solution build completes with zero warnings and errors, and
-the xUnit project exposes 209 independently discoverable compatibility tests to
-`dotnet test` and Visual Studio Test Explorer. On the
+the xUnit v3 project exposes 447 independently discoverable compatibility tests
+to `dotnet test` and Visual Studio Test Explorer. On the
 same Windows machine and fixtures, Release wall-clock measurements for one
 frame were 2.346 s versus 7.193 s for NTSC VHS and 1.651 s versus 5.865 s for
 NTSC LD (this port versus the v0.4.0 Python virtual environment); all output
 hashes listed above remained identical.
+
+`ffmpeg` and `ffprobe` must be available on `PATH` for FFmpeg-backed RF
+container inputs; `ffmpeg` is also required for default HiFi FLAC output. HiFi
+`.wav` and recognized raw input paths do not require either tool.
 
 To regenerate the embedded format parameter snapshot from the checked-out
 upstream source:

@@ -710,7 +710,10 @@ public sealed class TbcFieldDecodePipeline
             parity.IsFirstField);
         if (_decodeVbiData && FormatCatalog.ParentSystem(_system) == "PAL")
         {
-            lineLocations = LaserDiscLineLocationRepair.FixBadLines(lineLocations, _system);
+            lineLocations = LaserDiscLineLocationRepair.FixBadLines(
+                lineLocations,
+                _system,
+                markDerivativeErrors: _decodeLaserDiscVbi);
         }
 
         int outputFirstLine = OutputFirstLine(parity.IsFirstField);
@@ -808,7 +811,8 @@ public sealed class TbcFieldDecodePipeline
                 renderLineLocations,
                 firstLine: outputFirstLine,
                 fieldNumber: fieldNumber,
-                converterOverride: fieldConverter)
+                converterOverride: fieldConverter,
+                trackPhaseOverride: chromaPhase?.NextChromaRotationIndex)
             : new TbcRenderedField([]);
         double? blackToWhiteRfRatio = ComputeLaserDiscBlackToWhiteRfRatio(
             span.Input,
@@ -1259,6 +1263,7 @@ public sealed class TbcFieldDecodePipeline
         }
 
         double outputSamplesPerUsec = JsonDouble(parameters.SysParams, "outfreq");
+        double chromaSampleRateHz = JsonDouble(parameters.SysParams, "fsc_mhz") * 4_000_000.0;
         int burstStart = Math.Clamp(
             checked((int)Math.Floor(colorBurstRange[0].GetDouble() * outputSamplesPerUsec) - 5),
             0,
@@ -1284,10 +1289,10 @@ public sealed class TbcFieldDecodePipeline
             chromaOptions.EnableColorKiller,
             chromaOptions.DetectChromaTrackPhase)
         {
-            FinalFilter = DecodeFilterSetBuilder.BuildChromaFinalFilter(parameters, frameSpec.OutputSampleRateHz, chromaOptions.IsColorUnder),
-            FinalSosFilter = DecodeFilterSetBuilder.BuildChromaFinalSosFilter(parameters, frameSpec.OutputSampleRateHz, chromaOptions.IsColorUnder),
+            FinalFilter = DecodeFilterSetBuilder.BuildChromaFinalFilter(parameters, chromaSampleRateHz, chromaOptions.IsColorUnder),
+            FinalSosFilter = DecodeFilterSetBuilder.BuildChromaFinalSosFilter(parameters, chromaSampleRateHz, chromaOptions.IsColorUnder),
             ChromaDeemphasisFilter = chromaOptions.ChromaDeemphasisFilter
-                ? DecodeFilterSetBuilder.BuildChromaDeemphasisFilter(parameters, frameSpec.OutputSampleRateHz)
+                ? DecodeFilterSetBuilder.BuildChromaDeemphasisFilter(parameters, chromaSampleRateHz)
                 : null,
             ChromaPreFilter = chromaOptions.UseChromaAfc
                 ? DecodeFilterSetBuilder.BuildChromaAfcBandPassFilter(parameters, decodeSampleRateHz)
@@ -1296,10 +1301,10 @@ public sealed class TbcFieldDecodePipeline
                 ? DecodeFilterSetBuilder.BuildChromaAfcBandPassSosFilter(parameters, decodeSampleRateHz)
                 : null,
             ChromaAudioNotchFilter = chromaOptions.UseChromaAfc && chromaOptions.ChromaAudioNotch
-                ? DecodeFilterSetBuilder.BuildChromaAudioNotchFilter(parameters, frameSpec.OutputSampleRateHz)
+                ? DecodeFilterSetBuilder.BuildChromaAudioNotchFilter(parameters, chromaSampleRateHz)
                 : null,
             ChromaVideoNotchFilter = chromaOptions.UseChromaAfc
-                ? DecodeFilterSetBuilder.BuildChromaVideoNotchFilter(filterOptions, frameSpec.OutputSampleRateHz)
+                ? DecodeFilterSetBuilder.BuildChromaVideoNotchFilter(filterOptions, chromaSampleRateHz)
                 : null,
             ChromaPreFilterMoveSamples = chromaOptions.UseChromaAfc
                 ? (int)(10.0 * (frameSpec.OutputSampleRateHz / 40_000_000.0))
@@ -1312,7 +1317,7 @@ public sealed class TbcFieldDecodePipeline
                 ? ChromaAfcFineTuneStepHz(parameters)
                 : 0.0,
             ChromaAfcMeasurementFilters = chromaOptions.UseChromaAfc
-                ? DecodeFilterSetBuilder.BuildChromaAfcMeasurementFilters(parameters, frameSpec.OutputSampleRateHz)
+                ? DecodeFilterSetBuilder.BuildChromaAfcMeasurementFilters(parameters, chromaSampleRateHz)
                 : null,
             ChromaAfcPreFilterLowHz = chromaOptions.UseChromaAfc
                 ? JsonDoubleOrDefault(parameters.RfParams, "chroma_bpf_lower", 60_000.0)
@@ -1383,7 +1388,10 @@ public sealed class TbcFieldDecodePipeline
             ?? _laserDiscAgcConverter
             ?? _laserDiscSyncConverter
             ?? _videoOutput;
-        double defaultThreshold = thresholdConverter.IreToHz(thresholdConverter.VSyncIre / 2.0);
+        double defaultThreshold = thresholdConverter.IreToHz(
+            string.Equals(_decodeType, "ld", StringComparison.Ordinal)
+                ? -20.0
+                : thresholdConverter.VSyncIre / 2.0);
 
         if (!_syncDetectionOptions.DetectLevels)
         {
@@ -1708,23 +1716,18 @@ public sealed class TbcFieldDecodePipeline
             return lineLocations;
         }
 
-        int fieldLineBoundary = CurrentFieldLineCount(isFirstField)
-            + LaserDiscLineOffset(isFirstField);
         double[] firstPass = RefineLaserDiscPalLineLocationsFromPilotPass(
             pilot,
-            lineLocations.Locations,
-            fieldLineBoundary);
+            lineLocations.Locations);
         double[] secondPass = RefineLaserDiscPalLineLocationsFromPilotPass(
             pilot,
-            firstPass,
-            fieldLineBoundary);
+            firstPass);
         return lineLocations with { Locations = secondPass };
     }
 
     private double[] RefineLaserDiscPalLineLocationsFromPilotPass(
         ReadOnlySpan<double> pilot,
-        IReadOnlyList<double> lineLocations,
-        int fieldLineBoundary)
+        IReadOnlyList<double> lineLocations)
     {
         double[] output = lineLocations.ToArray();
         int lineCount = Math.Min(323, lineLocations.Count);
@@ -1743,7 +1746,6 @@ public sealed class TbcFieldDecodePipeline
                 lineLocations,
                 line,
                 pilotHalfPeriods[line],
-                fieldLineBoundary,
                 out double phase)
                 ? phase
                 : line > 0 ? zeroCrossingPhases[line - 1] : 0.0;
@@ -1766,7 +1768,6 @@ public sealed class TbcFieldDecodePipeline
         IReadOnlyList<double> lineLocations,
         int line,
         double pilotHalfPeriodSamples,
-        int fieldLineBoundary,
         out double phase)
     {
         phase = 0.0;
@@ -1775,7 +1776,6 @@ public sealed class TbcFieldDecodePipeline
                 pilot,
                 lineLocations,
                 line,
-                fieldLineBoundary,
                 out int start,
                 out int length,
                 out double lineOffset))
@@ -1808,7 +1808,6 @@ public sealed class TbcFieldDecodePipeline
         ReadOnlySpan<double> source,
         IReadOnlyList<double> lineLocations,
         int line,
-        int fieldLineBoundary,
         out int start,
         out int length,
         out double lineOffset)
@@ -1827,15 +1826,24 @@ public sealed class TbcFieldDecodePipeline
             return false;
         }
 
-        double lineSamplesPerUsec = LaserDiscLineSamplesPerUsec(
-            lineLocations,
-            line,
-            fieldLineBoundary);
-        start = Math.Clamp((int)Math.Floor(lineStart), 0, source.Length);
-        int end = Math.Clamp((int)Math.Floor(lineStart + (6.0 * lineSamplesPerUsec) + 1.0), start, source.Length);
-        length = end - start;
-        lineOffset = lineStart - start;
+        (start, length, lineOffset) = LaserDiscPilotSliceBounds(
+            lineStart,
+            _syncAnalyzer.SampleRateMHz,
+            source.Length);
         return length > 1;
+    }
+
+    internal static (int Start, int Length, double LineOffset) LaserDiscPilotSliceBounds(
+        double lineStart,
+        double sampleRateMHz,
+        int sourceLength)
+    {
+        int start = Math.Clamp((int)Math.Floor(lineStart), 0, sourceLength);
+        int end = Math.Clamp(
+            (int)Math.Floor(lineStart + (6.0 * sampleRateMHz) + 1.0),
+            start,
+            sourceLength);
+        return (start, end - start, lineStart - start);
     }
 
     private double LaserDiscPilotHalfPeriodSamples(IReadOnlyList<double> lineLocations, int line)

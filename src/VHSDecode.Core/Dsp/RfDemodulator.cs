@@ -155,7 +155,7 @@ public sealed class RfDemodulator
         }
         else
         {
-            Complex[] spectrum = precomputedInputSpectrum ?? PocketFftComplex.ForwardReal(input);
+            Complex[] spectrum = precomputedInputSpectrum ?? PocketFftComplex.ForwardDuccRealFull(input);
             if (spectrum.Length != input.Length)
             {
                 throw new ArgumentException(
@@ -164,7 +164,7 @@ public sealed class RfDemodulator
             }
 
             Complex[] rfHighPassSpectrum = ApplyFrequencyFilter(spectrum, rfHighPassFilter);
-            Complex[] rfHighPassComplex = PocketFftComplex.Inverse(rfHighPassSpectrum);
+            Complex[] rfHighPassComplex = PocketFftComplex.InverseDucc(rfHighPassSpectrum);
             rfHighPass = new double[rfHighPassComplex.Length];
             for (int i = 0; i < rfHighPass.Length; i++)
             {
@@ -185,7 +185,7 @@ public sealed class RfDemodulator
             hilbertMultiplier = PortedMath.BuildHilbertMultiplier(rfFilteredSpectrum.Length);
             Complex[] analyticSpectrum = rfFilteredSpectrum.ToArray();
             ApplyHilbertMultiplierInPlace(analyticSpectrum, hilbertMultiplier);
-            analytic = PocketFftComplex.Inverse(analyticSpectrum);
+            analytic = PocketFftComplex.InverseDucc(analyticSpectrum);
         }
 
         double[] envelope = vhsEnvelopeSource is not null && vhsEnvelopeFilter is not null
@@ -226,7 +226,7 @@ public sealed class RfDemodulator
         {
             Complex[] analyticSpectrum = rfFilteredSpectrum.ToArray();
             ApplyHilbertMultiplierInPlace(analyticSpectrum, hilbertMultiplier!);
-            analytic = PocketFftComplex.Inverse(analyticSpectrum);
+            analytic = PocketFftComplex.InverseDucc(analyticSpectrum);
         }
 
         double[] demodRaw = DemodulateAnalytic(analytic, fmDemodulatorMode);
@@ -263,9 +263,9 @@ public sealed class RfDemodulator
         }
         else
         {
-            demodSpectrum = PocketFftComplex.ForwardReal(demodVideoSource);
+            demodSpectrum = PocketFftComplex.ForwardDuccRealFull(demodVideoSource);
             videoSpectrum = ApplyFrequencyFilter(demodSpectrum, videoFilter);
-            Complex[] videoComplex = PocketFftComplex.Inverse(videoSpectrum);
+            Complex[] videoComplex = PocketFftComplex.InverseDucc(videoSpectrum);
             video = new double[videoComplex.Length];
             for (int i = 0; i < video.Length; i++)
             {
@@ -292,7 +292,7 @@ public sealed class RfDemodulator
         else
         {
             Complex[] videoLowPassSpectrum = ApplyFrequencyFilter(demodSpectrum, videoLowPassFilter);
-            Complex[] videoLowPassComplex = PocketFftComplex.Inverse(videoLowPassSpectrum);
+            Complex[] videoLowPassComplex = PocketFftComplex.InverseDucc(videoLowPassSpectrum);
             videoLowPass = new double[videoLowPassComplex.Length];
             for (int i = 0; i < videoLowPass.Length; i++)
             {
@@ -690,7 +690,7 @@ public sealed class RfDemodulator
         var output = new Complex[spectrum.Length];
         for (int i = 0; i < output.Length; i++)
         {
-            output[i] = spectrum[i] * filter[i];
+            output[i] = NumpyVectorComplexMultiply(spectrum[i], filter[i]);
         }
 
         return output;
@@ -819,7 +819,7 @@ public sealed class RfDemodulator
         }
 
         Complex[] filteredSpectrum = ApplyFrequencyFilter(spectrum, filter);
-        Complex[] filtered = PocketFftComplex.Inverse(filteredSpectrum);
+        Complex[] filtered = PocketFftComplex.InverseDucc(filteredSpectrum);
         var output = new double[filtered.Length];
         for (int i = 0; i < output.Length; i++)
         {
@@ -873,8 +873,21 @@ public sealed class RfDemodulator
 
         for (int i = 0; i < spectrum.Length; i++)
         {
-            spectrum[i] *= filter[i];
+            spectrum[i] = NumpyVectorComplexMultiply(spectrum[i], filter[i]);
         }
+    }
+
+    private static Complex NumpyVectorComplexMultiply(Complex left, Complex right)
+    {
+        return new Complex(
+            Math.FusedMultiplyAdd(
+                left.Real,
+                right.Real,
+                -(left.Imaginary * right.Imaginary)),
+            Math.FusedMultiplyAdd(
+                left.Real,
+                right.Imaginary,
+                left.Imaginary * right.Real));
     }
 
     private static bool ApplyVhsRfHighBoostIfPresent(
@@ -1335,9 +1348,9 @@ public sealed class RfDemodulator
             length);
     }
 
-    private static double[] BuildAnalyticMagnitude(ReadOnlySpan<double> input)
+    internal static double[] BuildAnalyticMagnitude(ReadOnlySpan<double> input)
     {
-        Complex[] spectrum = PocketFftComplex.ForwardReal(input);
+        Complex[] spectrum = PocketFftComplex.ForwardDuccRealFull(input);
         int nyquist = spectrum.Length / 2;
         for (int i = 1; i < nyquist; i++)
         {
@@ -1349,14 +1362,39 @@ public sealed class RfDemodulator
             spectrum[i] = Complex.Zero;
         }
 
-        Complex[] analytic = PocketFftComplex.Inverse(spectrum);
+        Complex[] analytic = PocketFftComplex.InverseDucc(spectrum);
         var magnitude = new double[analytic.Length];
         for (int i = 0; i < magnitude.Length; i++)
         {
-            magnitude[i] = analytic[i].Magnitude;
+            magnitude[i] = NumpyComplexMagnitude(analytic[i]);
         }
 
         return magnitude;
+    }
+
+    private static double NumpyComplexMagnitude(Complex value)
+    {
+        double real = Math.Abs(value.Real);
+        double imaginary = Math.Abs(value.Imaginary);
+        if (double.IsInfinity(real) || double.IsInfinity(imaginary))
+        {
+            return double.PositiveInfinity;
+        }
+
+        if (double.IsNaN(real) || double.IsNaN(imaginary))
+        {
+            return double.NaN;
+        }
+
+        double larger = Math.Max(real, imaginary);
+        double smaller = Math.Min(real, imaginary);
+        if (larger == 0.0)
+        {
+            return 0.0;
+        }
+
+        double ratio = smaller / larger;
+        return Math.Sqrt(Math.FusedMultiplyAdd(ratio, ratio, 1.0)) * larger;
     }
 
     private static double Max(double[] values, int start, int end)

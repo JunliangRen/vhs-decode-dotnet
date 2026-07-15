@@ -1,4 +1,5 @@
 using System.Numerics;
+using System.Runtime.InteropServices;
 using VHSDecode.Core.Dsp;
 
 namespace VHSDecode.Core.Decode;
@@ -193,7 +194,7 @@ public static class VhsChromaDecoder
         ValidateLineShape(chromaField.Length, options.OutputLineCount, options.OutputLineLength);
         ValidateBurstRange(options.BurstStart, options.BurstEnd, options.OutputLineLength);
 
-        double outputSampleRateMHz = options.OutputSampleRateHz / 1_000_000.0;
+        double outputSampleRateMHz = options.FscMHz * 4.0;
         double phaseCarrierHz = options.ChromaAfcTrackCarrier
             ? previousChromaAfcCarrierHz ?? options.ColorUnderCarrierHz
             : options.ColorUnderCarrierHz;
@@ -203,7 +204,7 @@ public static class VhsChromaDecoder
         Func<double[], double[]>? effectiveBurstFilter = burstFilter;
         if (effectiveBurstFilter is null && options.FinalSosFilter is not null)
         {
-            effectiveBurstFilter = values => SosFilter.ApplyForwardBackwardFloat32(options.FinalSosFilter, values);
+            effectiveBurstFilter = values => SosFilter.ApplyForwardBackward(options.FinalSosFilter, values);
         }
         else if (effectiveBurstFilter is null && options.FinalFilter is not null)
         {
@@ -273,7 +274,7 @@ public static class VhsChromaDecoder
         }
 
         chromaField = ApplyChromaPreFilter(chromaField, options, previousChromaAfcCarrierHz);
-        double outputSampleRateMHz = options.OutputSampleRateHz / 1_000_000.0;
+        double outputSampleRateMHz = options.FscMHz * 4.0;
         double[] carrierProbe = chromaField;
         if (options.ChromaAfcTrackCarrier && options.ChromaAfcMeasurementFilters is { } measurementFilters)
         {
@@ -284,7 +285,7 @@ public static class VhsChromaDecoder
         ChromaCarrierEstimate? carrierEstimate = options.ChromaAfcTrackCarrier
             ? EstimateChromaCarrier(
                 carrierProbe,
-                options.OutputSampleRateHz,
+                options.FscMHz * 4_000_000.0,
                 options.ColorUnderCarrierHz,
                 options.ChromaAfcLineFrequencyHz,
                 options.ChromaAfcFineTuneStepHz)
@@ -409,10 +410,9 @@ public static class VhsChromaDecoder
                 options.ChromaAfcDecodeSampleRateHz);
         }
 
-        bool retainFloat32 = preSosFilter is not null;
         if (preSosFilter is not null)
         {
-            output = SosFilter.ApplyForwardBackwardFloat32(preSosFilter, output);
+            output = SosFilter.ApplyForwardBackward(preSosFilter, output);
         }
         else if (preFilter is not null)
         {
@@ -425,18 +425,14 @@ public static class VhsChromaDecoder
         if (options.ChromaAudioNotchFilter is not null)
         {
             output = IirFilter.ApplyForwardBackward(options.ChromaAudioNotchFilter, output);
-            retainFloat32 = false;
         }
 
         if (options.ChromaVideoNotchFilter is not null)
         {
             output = IirFilter.ApplyForwardBackward(options.ChromaVideoNotchFilter, output);
-            retainFloat32 = false;
         }
 
-        return retainFloat32
-            ? ShiftChromaAndRemoveDcFloat32(output, options.ChromaPreFilterMoveSamples)
-            : ShiftChromaAndRemoveDc(output, options.ChromaPreFilterMoveSamples);
+        return ShiftChromaAndRemoveDc(output, options.ChromaPreFilterMoveSamples);
     }
 
     public static ChromaCarrierEstimate? EstimateChromaCarrier(
@@ -572,16 +568,24 @@ public static class VhsChromaDecoder
             {
                 int first = index + lane;
                 int second = first + 4;
-                float firstSample = (float)burst[first];
-                float secondSample = (float)burst[second];
-                float firstI = firstSample * (float)burstCos[burstStart + first];
-                float secondI = secondSample * (float)burstCos[burstStart + second];
-                float firstQ = firstSample * (float)burstSin[burstStart + first];
-                float secondQ = secondSample * (float)burstSin[burstStart + second];
-                iFirst[lane] += firstI;
-                iSecond[lane] += secondI;
-                qFirst[lane] += firstQ;
-                qSecond[lane] += secondQ;
+                double firstSample = burst[first];
+                double secondSample = burst[second];
+                iFirst[lane] = Math.FusedMultiplyAdd(
+                    firstSample,
+                    (float)burstCos[burstStart + first],
+                    iFirst[lane]);
+                iSecond[lane] = Math.FusedMultiplyAdd(
+                    secondSample,
+                    (float)burstCos[burstStart + second],
+                    iSecond[lane]);
+                qFirst[lane] = Math.FusedMultiplyAdd(
+                    firstSample,
+                    (float)burstSin[burstStart + first],
+                    qFirst[lane]);
+                qSecond[lane] = Math.FusedMultiplyAdd(
+                    secondSample,
+                    (float)burstSin[burstStart + second],
+                    qSecond[lane]);
             }
         }
 
@@ -597,18 +601,18 @@ public static class VhsChromaDecoder
         double qComponent = (q0 + q2) + (q1 + q3);
         for (int index = vectorLength; index < burst.Length; index++)
         {
-            float sample = (float)burst[index];
-            iComponent += sample * (float)burstCos[burstStart + index];
-            qComponent += sample * (float)burstSin[burstStart + index];
+            double sample = burst[index];
+            iComponent = Math.FusedMultiplyAdd(sample, (float)burstCos[burstStart + index], iComponent);
+            qComponent = Math.FusedMultiplyAdd(sample, (float)burstSin[burstStart + index], qComponent);
         }
 
-        double phaseDegrees = PositiveDegrees(Math.Atan2(qComponent, iComponent) * 180.0 / Math.PI);
+        double phaseDegrees = PositiveDegrees(Math.Atan2(qComponent, iComponent) * (180.0 / Math.PI));
         double phaseOffsetDegrees = PositiveDegrees(
             (burstStart - lineStart) * Math.FusedMultiplyAdd(-lineScale, 90.0, 90.0));
         return new ChromaBurstDemodulationResult(
             phaseDegrees,
             phaseOffsetDegrees,
-            double.Hypot(iComponent, qComponent),
+            NumpyHypot(iComponent, qComponent),
             iComponent,
             qComponent);
     }
@@ -649,8 +653,7 @@ public static class VhsChromaDecoder
         {
             int sourceIndex = paddedStart + i;
             float heterodyneSample = (float)heterodyne[sourceIndex];
-            float chromaSample = (float)chroma[sourceIndex];
-            paddedBurst[i] = heterodyneSample * chromaSample;
+            paddedBurst[i] = heterodyneSample * chroma[sourceIndex];
         }
 
         double[] filteredPadded = burstFilter?.Invoke(paddedBurst) ?? paddedBurst;
@@ -833,10 +836,10 @@ public static class VhsChromaDecoder
             int i = lineStart;
             for (; i < vectorEnd; i += 4)
             {
-                output[i] = (double)(float)((float)chroma[i] * -Math.Cos(theta0));
-                output[i + 1] = (double)(float)((float)chroma[i + 1] * -Math.Cos(theta1));
-                output[i + 2] = (double)(float)((float)chroma[i + 2] * -Math.Cos(theta2));
-                output[i + 3] = (double)(float)((float)chroma[i + 3] * -Math.Cos(theta3));
+                output[i] = (double)(float)(chroma[i] * -Math.Cos(theta0));
+                output[i + 1] = (double)(float)(chroma[i + 1] * -Math.Cos(theta1));
+                output[i + 2] = (double)(float)(chroma[i + 2] * -Math.Cos(theta2));
+                output[i + 3] = (double)(float)(chroma[i + 3] * -Math.Cos(theta3));
                 theta0 += fourTimesCoefficient;
                 theta1 += fourTimesCoefficient;
                 theta2 += fourTimesCoefficient;
@@ -846,7 +849,7 @@ public static class VhsChromaDecoder
             theta += hetCoefficient * vectorCount;
             for (; i < lineEnd; i++)
             {
-                output[i] = (double)(float)((float)chroma[i] * -Math.Cos(theta));
+                output[i] = (double)(float)(chroma[i] * -Math.Cos(theta));
                 theta += hetCoefficient;
             }
         }
@@ -913,16 +916,15 @@ public static class VhsChromaDecoder
             return output;
         }
 
-        double mean = 0.0;
         for (int i = 0; i < chroma.Length; i++)
         {
-            mean += chroma[i];
+            output[PositiveModulo(i + move, chroma.Length)] = chroma[i];
         }
 
-        mean /= chroma.Length;
-        for (int i = 0; i < chroma.Length; i++)
+        double mean = MeanFloat64FastMath(output);
+        for (int i = 0; i < output.Length; i++)
         {
-            output[PositiveModulo(i + move, chroma.Length)] = chroma[i] - mean;
+            output[i] -= mean;
         }
 
         return output;
@@ -1059,8 +1061,10 @@ public static class VhsChromaDecoder
             int delayedStart = (line - lineDistance) * lineLength;
             for (int i = 0; i < lineLength; i++)
             {
-                double combined =
-                    ((chroma[lineStart + i] * 2.0) - chroma[advancedStart + i] - chroma[delayedStart + i]) / 4.0;
+                // Numba lowers PAL's float64 2H expression with the delayed term first; NTSC 1H retains source order.
+                double combined = !retainFloat32 && lineDistance == 2
+                    ? ((chroma[lineStart + i] * 2.0) - chroma[delayedStart + i] - chroma[advancedStart + i]) / 4.0
+                    : ((chroma[lineStart + i] * 2.0) - chroma[advancedStart + i] - chroma[delayedStart + i]) / 4.0;
                 output[lineStart + i] = retainFloat32 ? (double)(float)combined : combined;
             }
         }
@@ -1108,6 +1112,60 @@ public static class VhsChromaDecoder
         }
 
         return lanes[0] / values.Length;
+    }
+
+    private static double MeanFloat64FastMath(ReadOnlySpan<double> values)
+    {
+        const int VectorWidth = 4;
+        const int Interleave = 4;
+        const int Stride = VectorWidth * Interleave;
+        Span<double> accumulators = stackalloc double[Stride];
+        int index = 0;
+        int vectorizedEnd = values.Length - (values.Length % Stride);
+        for (; index < vectorizedEnd; index += Stride)
+        {
+            for (int group = 0; group < Interleave; group++)
+            {
+                for (int lane = 0; lane < VectorWidth; lane++)
+                {
+                    int accumulator = (group * VectorWidth) + lane;
+                    accumulators[accumulator] += values[index + accumulator];
+                }
+            }
+        }
+
+        Span<double> lanes = stackalloc double[VectorWidth];
+        for (int lane = 0; lane < VectorWidth; lane++)
+        {
+            double left = accumulators[lane] + accumulators[VectorWidth + lane];
+            double right = accumulators[(2 * VectorWidth) + lane]
+                + accumulators[(3 * VectorWidth) + lane];
+            lanes[lane] = left + right;
+        }
+
+        double sum = (lanes[0] + lanes[2]) + (lanes[1] + lanes[3]);
+        int fourLaneEnd = values.Length - ((values.Length - index) % VectorWidth);
+        if (index < fourLaneEnd)
+        {
+            lanes.Clear();
+            lanes[0] = sum;
+            for (; index < fourLaneEnd; index += VectorWidth)
+            {
+                for (int lane = 0; lane < VectorWidth; lane++)
+                {
+                    lanes[lane] += values[index + lane];
+                }
+            }
+
+            sum = (lanes[0] + lanes[2]) + (lanes[1] + lanes[3]);
+        }
+
+        for (; index < values.Length; index++)
+        {
+            sum += values[index];
+        }
+
+        return sum / values.Length;
     }
 
     internal static (double[] Sin, double[] Cos) BuildCarrierTables(
@@ -1553,6 +1611,35 @@ public static class VhsChromaDecoder
         double result = degrees % 360.0;
         return result < 0.0 ? result + 360.0 : result;
     }
+
+    private static double NumpyHypot(double x, double y)
+    {
+        if (OperatingSystem.IsWindows())
+        {
+            return WindowsHypot(x, y);
+        }
+
+        if (OperatingSystem.IsLinux())
+        {
+            return LinuxHypot(x, y);
+        }
+
+        if (OperatingSystem.IsMacOS())
+        {
+            return MacOsHypot(x, y);
+        }
+
+        return double.Hypot(x, y);
+    }
+
+    [DllImport("ucrtbase.dll", EntryPoint = "_hypot", ExactSpelling = true)]
+    private static extern double WindowsHypot(double x, double y);
+
+    [DllImport("libm.so.6", EntryPoint = "hypot", ExactSpelling = true)]
+    private static extern double LinuxHypot(double x, double y);
+
+    [DllImport("/usr/lib/libSystem.B.dylib", EntryPoint = "hypot", ExactSpelling = true)]
+    private static extern double MacOsHypot(double x, double y);
 
     private static double SignedPhaseDeltaDegrees(double current, double previous)
     {

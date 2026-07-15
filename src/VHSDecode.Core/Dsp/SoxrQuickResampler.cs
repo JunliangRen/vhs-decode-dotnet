@@ -78,7 +78,7 @@ public static class SoxrQuickResampler
             throw new ArgumentOutOfRangeException(nameof(maxDenominator));
         }
 
-        (BigInteger numerator, BigInteger denominator) = ExactPositiveDoubleRatio(value);
+        (BigInteger numerator, BigInteger denominator) = ExactRatio(value);
         if (denominator <= maxDenominator)
         {
             return (checked((int)numerator), checked((int)denominator));
@@ -119,6 +119,16 @@ public static class SoxrQuickResampler
         return chooseBound2
             ? (checked((int)bound2Numerator), checked((int)bound2Denominator))
             : (checked((int)bound1Numerator), checked((int)bound1Denominator));
+    }
+
+    public static (BigInteger Numerator, BigInteger Denominator) ExactRatio(double value)
+    {
+        if (!double.IsFinite(value) || value <= 0.0)
+        {
+            throw new ArgumentOutOfRangeException(nameof(value));
+        }
+
+        return ExactPositiveDoubleRatio(value);
     }
 
     private static float SampleOrZero(ReadOnlySpan<float> input, int index)

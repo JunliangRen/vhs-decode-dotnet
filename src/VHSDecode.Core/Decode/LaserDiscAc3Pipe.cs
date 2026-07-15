@@ -43,7 +43,9 @@ public static class LaserDiscAc3Pipe
         ArgumentException.ThrowIfNullOrWhiteSpace(outputFilename);
         try
         {
-            return new Ac3PipeStream(outputFilename);
+            return OperatingSystem.IsWindows()
+                ? new WindowsLaserDiscAc3PipeStream(outputFilename)
+                : new Ac3PipeStream(outputFilename);
         }
         catch (Win32Exception ex)
         {

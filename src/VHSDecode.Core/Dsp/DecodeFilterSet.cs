@@ -353,10 +353,10 @@ public static class DecodeFilterSetBuilder
             else if (lowOrder > 0 && highOrder > 0)
             {
                 Complex[] highPass = IirFilterDesign.FrequencyResponse(
-                    IirFilterDesign.ButterworthHighPass(lowOrder, low / nyquistHz),
+                    IirFilterDesign.ButterworthHighPassTransferFunction(lowOrder, low / nyquistHz),
                     blockLength);
                 Complex[] lowPass = IirFilterDesign.FrequencyResponse(
-                    IirFilterDesign.ButterworthLowPass(highOrder, high / nyquistHz),
+                    IirFilterDesign.ButterworthLowPassTransferFunction(highOrder, high / nyquistHz),
                     blockLength);
                 output = Multiply(highPass, lowPass);
             }
@@ -676,30 +676,30 @@ public static class DecodeFilterSetBuilder
             return null;
         }
 
-        double nyquistHz = outputSampleRateHz / 2.0;
-        double fscHz = fscMHz * 1_000_000.0;
-        double lowerHz;
-        double upperHz;
+        double nyquistMHz = (fscMHz * 4.0) / 2.0;
+        double colorUnderMHz = colorUnderHz / 1_000_000.0;
+        double lowerMHz;
+        double upperMHz;
         if (colorUnderFormat)
         {
-            lowerHz = fscHz - (colorUnderHz * 0.9);
-            upperHz = fscHz + (colorUnderHz * 0.75);
+            lowerMHz = fscMHz - (colorUnderMHz * 0.9);
+            upperMHz = fscMHz + (colorUnderMHz * 0.75);
         }
         else
         {
-            lowerHz = fscHz - 100_000.0;
-            upperHz = fscHz + 100_000.0;
+            lowerMHz = fscMHz - 0.1;
+            upperMHz = fscMHz + 0.1;
         }
 
-        if (lowerHz <= 0.0 || upperHz <= lowerHz || upperHz >= nyquistHz)
+        if (lowerMHz <= 0.0 || upperMHz <= lowerMHz || upperMHz >= nyquistMHz)
         {
             throw new ArgumentOutOfRangeException(nameof(parameters), "Final chroma band-pass frequencies must be inside the TBC output Nyquist range.");
         }
 
         return IirFilterDesign.ButterworthBandPass(
             order: 4,
-            normalizedLowCutoff: lowerHz / nyquistHz,
-            normalizedHighCutoff: upperHz / nyquistHz);
+            normalizedLowCutoff: lowerMHz / nyquistMHz,
+            normalizedHighCutoff: upperMHz / nyquistMHz);
     }
 
     public static SosSection[]? BuildChromaFinalSosFilter(
@@ -723,30 +723,30 @@ public static class DecodeFilterSetBuilder
             return null;
         }
 
-        double nyquistHz = outputSampleRateHz / 2.0;
-        double fscHz = fscMHz * 1_000_000.0;
-        double lowerHz;
-        double upperHz;
+        double nyquistMHz = (fscMHz * 4.0) / 2.0;
+        double colorUnderMHz = colorUnderHz / 1_000_000.0;
+        double lowerMHz;
+        double upperMHz;
         if (colorUnderFormat)
         {
-            lowerHz = fscHz - (colorUnderHz * 0.9);
-            upperHz = fscHz + (colorUnderHz * 0.75);
+            lowerMHz = fscMHz - (colorUnderMHz * 0.9);
+            upperMHz = fscMHz + (colorUnderMHz * 0.75);
         }
         else
         {
-            lowerHz = fscHz - 100_000.0;
-            upperHz = fscHz + 100_000.0;
+            lowerMHz = fscMHz - 0.1;
+            upperMHz = fscMHz + 0.1;
         }
 
-        if (lowerHz <= 0.0 || upperHz <= lowerHz || upperHz >= nyquistHz)
+        if (lowerMHz <= 0.0 || upperMHz <= lowerMHz || upperMHz >= nyquistMHz)
         {
             throw new ArgumentOutOfRangeException(nameof(parameters), "Final chroma band-pass frequencies must be inside the TBC output Nyquist range.");
         }
 
         return IirFilterDesign.ButterworthBandPassSos(
             order: 4,
-            normalizedLowCutoff: lowerHz / nyquistHz,
-            normalizedHighCutoff: upperHz / nyquistHz);
+            normalizedLowCutoff: lowerMHz / nyquistMHz,
+            normalizedHighCutoff: upperMHz / nyquistMHz);
     }
 
     public static TransferFunction BuildChromaDeemphasisFilter(FormatParameterSet parameters, double outputSampleRateHz)
@@ -953,18 +953,11 @@ public static class DecodeFilterSetBuilder
         TransferFunction lowPassTransfer = IirFilterDesign.ButterworthLowPassTransferFunction(
             order,
             normalizedCutoff);
-        if (order == 10 && lowPassTransfer.Denominator.Length == 11)
-        {
-            lowPassTransfer.Denominator[8] = Math.BitDecrement(lowPassTransfer.Denominator[8]);
-        }
-
         Complex[] lowPass = IirFilterDesign.FrequencyResponse(lowPassTransfer, blockLength);
         TransferFunction deemphasisTransfer = IirFilterDesign.EmphasisIir(
             5.3e-6,
             75e-6,
             sliceSampleRateHz);
-        deemphasisTransfer.Numerator[0] = Math.BitIncrement(deemphasisTransfer.Numerator[0]);
-        deemphasisTransfer.Denominator[1] = Math.BitDecrement(deemphasisTransfer.Denominator[1]);
         Complex[] deemphasis = IirFilterDesign.FrequencyResponse(
             deemphasisTransfer,
             blockLength);
@@ -1042,14 +1035,18 @@ public static class DecodeFilterSetBuilder
         }
         else
         {
-            response = IirFilterDesign.FrequencyResponse(
-                IirFilterDesign.ButterworthLowPassTransferFunction(order, corner / nyquistHz),
-                blockLength);
+            response = zeroPhaseMagnitude && (order & 1) == 0
+                ? IirFilterDesign.FrequencyResponse(
+                    IirFilterDesign.ButterworthLowPassScipySos(order, corner / nyquistHz),
+                    blockLength)
+                : IirFilterDesign.FrequencyResponse(
+                    IirFilterDesign.ButterworthLowPassTransferFunction(order, corner / nyquistHz),
+                    blockLength);
             if (zeroPhaseMagnitude)
             {
                 for (int i = 0; i < response.Length; i++)
                 {
-                    response[i] = new Complex(response[i].Magnitude, 0.0);
+                    response[i] = new Complex(NumpyComplexMagnitude(response[i]), 0.0);
                 }
             }
         }
@@ -1080,7 +1077,7 @@ public static class DecodeFilterSetBuilder
                 blockLength);
             for (int i = 0; i < video.Length; i++)
             {
-                video[i] *= groupDelayEqualizer[i];
+                video[i] = NumpyVectorComplexMultiply(video[i], groupDelayEqualizer[i]);
             }
         }
 
@@ -1122,7 +1119,7 @@ public static class DecodeFilterSetBuilder
 
             for (int i = 0; i < video.Length; i++)
             {
-                video[i] *= deemphasis[i];
+                video[i] = NumpyVectorComplexMultiply(video[i], deemphasis[i]);
             }
         }
         else if (rfParams.TryGetProperty("video_deemp", out JsonElement timeConstantsElement)
@@ -1141,7 +1138,10 @@ public static class DecodeFilterSetBuilder
 
             for (int i = 0; i < video.Length; i++)
             {
-                video[i] *= strength == 1.0 ? deemphasis[i] : Complex.Pow(deemphasis[i], strength);
+                Complex factor = strength == 1.0
+                    ? deemphasis[i]
+                    : Complex.Pow(deemphasis[i], strength);
+                video[i] = NumpyVectorComplexMultiply(video[i], factor);
             }
         }
     }

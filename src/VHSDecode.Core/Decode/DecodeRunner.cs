@@ -1,13 +1,45 @@
 using VHSDecode.Core.CommandLine;
 using VHSDecode.Core.Formats;
+using VHSDecode.Core.HiFi;
 using VHSDecode.Core.Tbc;
+using System.Diagnostics;
 using System.Globalization;
 
 namespace VHSDecode.Core.Decode;
 
 public sealed class DecodeRunner
 {
-    public int Run(ParsedCommand command, TextWriter output, TextWriter error)
+    private readonly Func<CancellationToken, TbcFieldSequenceDecodeEngine> _engineFactory;
+    private readonly IHiFiCommandRunner _hiFiRunner;
+
+    public DecodeRunner()
+        : this(
+            cancellationToken => new TbcFieldSequenceDecodeEngine(
+                cancellationToken: cancellationToken),
+            new HiFiDecodeRunner())
+    {
+    }
+
+    internal DecodeRunner(Func<CancellationToken, TbcFieldSequenceDecodeEngine> engineFactory)
+        : this(engineFactory, new HiFiDecodeRunner())
+    {
+    }
+
+    internal DecodeRunner(
+        Func<CancellationToken, TbcFieldSequenceDecodeEngine> engineFactory,
+        IHiFiCommandRunner hiFiRunner)
+    {
+        ArgumentNullException.ThrowIfNull(engineFactory);
+        ArgumentNullException.ThrowIfNull(hiFiRunner);
+        _engineFactory = engineFactory;
+        _hiFiRunner = hiFiRunner;
+    }
+
+    public int Run(
+        ParsedCommand command,
+        TextWriter output,
+        TextWriter error,
+        CancellationToken cancellationToken = default)
     {
         if (command.Get<bool>("help"))
         {
@@ -19,6 +51,29 @@ public sealed class DecodeRunner
         {
             output.WriteLine(DecodeVersionInfo.Version);
             return 0;
+        }
+
+        if (command.Spec == CliSpecs.HiFi)
+        {
+            try
+            {
+                return _hiFiRunner.Run(command, output, error, cancellationToken);
+            }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            {
+                output.WriteLine();
+                output.WriteLine("Ctrl-C was pressed, stopping decode...");
+                return 1;
+            }
+            catch (Exception ex) when (ex is ArgumentException
+                or FormatException
+                or OverflowException
+                or NotSupportedException
+                or IOException)
+            {
+                error.WriteLine(ex.Message);
+                return 1;
+            }
         }
 
         if (command.Spec.Name is "vhs" or "cvbs"
@@ -68,12 +123,15 @@ public sealed class DecodeRunner
                 }
             }
 
+            var runtimeReporter = new DecodeRuntimeReporter(output, error);
             DecodeSession session = DecodeSessionFactory.Create(command);
+            session.RuntimeReporter = runtimeReporter;
             try
             {
                 DecodeSessionLogWriter.Write(session);
                 WriteSessionCompatibilityWarnings(session, error);
-                TbcFieldSequenceDecodeResult result = new TbcFieldSequenceDecodeEngine().TryDecodeAndWrite(session);
+                TbcFieldSequenceDecodeResult result = _engineFactory(cancellationToken)
+                    .TryDecodeAndWrite(session);
                 if (result.Success && command.Spec == CliSpecs.Cvbs)
                 {
                     WriteCvbsAgcStatistics(session.TbcRenderer.CvbsAgcStatistics, error);
@@ -94,10 +152,26 @@ public sealed class DecodeRunner
 
                 return result.Success ? 0 : 1;
             }
+            catch (DecodeFieldReadException ex)
+            {
+                WriteRuntimeErrorReport(command, ex, error);
+                return 1;
+            }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            {
+                WriteTerminationMessage(command.Spec, output, error);
+                return 1;
+            }
             finally
             {
                 session.Dispose();
+                runtimeReporter.WriteStatistics();
             }
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            WriteTerminationMessage(command.Spec, output, error);
+            return 1;
         }
         catch (Exception ex) when (ex is ArgumentException
             or FormatException
@@ -178,6 +252,41 @@ public sealed class DecodeRunner
             : "Completed without handling any frames.");
     }
 
+    public static void WriteTerminationMessage(
+        DecodeCommandSpec spec,
+        TextWriter output,
+        TextWriter error)
+    {
+        ArgumentNullException.ThrowIfNull(spec);
+        ArgumentNullException.ThrowIfNull(output);
+        ArgumentNullException.ThrowIfNull(error);
+        TextWriter target = spec.Name == "ld" ? error : output;
+        target.WriteLine();
+        target.WriteLine("Terminated, saving JSON and exiting");
+        target.Flush();
+    }
+
+    public static void WriteRuntimeErrorReport(
+        ParsedCommand command,
+        DecodeFieldReadException exception,
+        TextWriter error)
+    {
+        ArgumentNullException.ThrowIfNull(command);
+        ArgumentNullException.ThrowIfNull(exception);
+        ArgumentNullException.ThrowIfNull(error);
+
+        Exception cause = exception.InnerException ?? exception;
+        error.WriteLine();
+        error.WriteLine("ERROR - please paste the following into a bug report:");
+        error.WriteLine(string.Create(
+            CultureInfo.InvariantCulture,
+            $"current sample: {exception.CurrentSample}"));
+        error.WriteLine($"arguments: {PythonNamespaceFormatter.Format(command)}");
+        error.WriteLine($"Exception: {cause.Message}  Traceback:");
+        WritePythonStyleTraceback(exception, cause, error);
+        error.Flush();
+    }
+
     public static void WriteTestLdfReport(LdTestLdfWriteResult result, TextWriter error)
     {
         if (string.IsNullOrWhiteSpace(result.OutputPath))
@@ -210,6 +319,29 @@ public sealed class DecodeRunner
         return formatted.Contains('E', StringComparison.Ordinal)
             ? formatted.Replace('E', 'e')
             : formatted;
+    }
+
+    private static void WritePythonStyleTraceback(
+        DecodeFieldReadException exception,
+        Exception cause,
+        TextWriter error)
+    {
+        StackFrame[] wrapperFrames = new StackTrace(exception, true).GetFrames() ?? [];
+        StackFrame[] causeFrames = new StackTrace(cause, true).GetFrames() ?? [];
+        IEnumerable<StackFrame> orderedFrames = wrapperFrames.Length == 0
+            ? causeFrames.Reverse()
+            : wrapperFrames.Reverse().SkipLast(1).Concat(causeFrames.Reverse());
+
+        foreach (StackFrame frame in orderedFrames)
+        {
+            string methodName = frame.GetMethod()?.Name ?? "<unknown>";
+            string fileName = frame.GetFileName()
+                ?? frame.GetMethod()?.DeclaringType?.FullName
+                ?? "<unknown>";
+            error.WriteLine(string.Create(
+                CultureInfo.InvariantCulture,
+                $"  File \"{fileName}\", line {frame.GetFileLineNumber()}, in {methodName}"));
+        }
     }
 
     private static void ValidateSystemSpecificOptions(ParsedCommand command)
