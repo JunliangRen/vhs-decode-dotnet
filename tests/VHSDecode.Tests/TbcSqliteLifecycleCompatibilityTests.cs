@@ -161,6 +161,133 @@ public sealed class TbcSqliteLifecycleCompatibilityTests
         }
     }
 
+    [Fact(DisplayName = "LD main TBC write failures retain first-field metadata like v0.4.0")]
+    public void LdMainTbcWriteFailuresRetainFirstFieldMetadataLikeV040()
+    {
+        string tempDirectory = CreateTempDirectory();
+        try
+        {
+            string outputBase = Path.Combine(tempDirectory, "ld-video-write-failure");
+            using DecodeSession session = CreateSession("ld", outputBase);
+            TbcDecodedField field = BuildField(0, detectedFirstField: true) with
+            {
+                Samples = new ushort[session.TbcFrameSpec.FieldSampleCount],
+                NextFieldOffsetSamples = 100,
+                NominalFieldLengthSamples = 100
+            };
+            var engine = new TbcFieldSequenceDecodeEngine(
+                readField: (_, _, _, _, fieldNumber) => fieldNumber == 0 ? field : null)
+            {
+                CreateTbcOutput = _ => new ThrowingWriteStream("synthetic main TBC failure")
+            };
+
+            TbcFieldSequenceDecodeResult result = engine.TryDecodeAndWrite(
+                session,
+                Stream.Null,
+                maxFields: 1);
+
+            Assert.False(result.Success);
+            Assert.Contains("synthetic main TBC failure", result.Message, StringComparison.Ordinal);
+            JsonNode document = JsonNode.Parse(File.ReadAllText(outputBase + ".tbc.json"))
+                ?? throw new InvalidOperationException("Partial metadata JSON was empty.");
+            Assert.Single(document["fields"]?.AsArray()
+                ?? throw new InvalidOperationException("Partial metadata JSON did not contain fields."));
+            Assert.Equal(1, QueryLong(outputBase + ".tbc.db", "SELECT COUNT(*) FROM field_record"));
+            Assert.False(File.Exists(outputBase + ".tbc.json.tmp"));
+            Assert.False(File.Exists(outputBase + ".tbc.json.fields.tmp"));
+        }
+        finally
+        {
+            Directory.Delete(tempDirectory, recursive: true);
+        }
+    }
+
+    [Fact(DisplayName = "VHS chroma write failures retain first-field metadata like v0.4.0")]
+    public void VhsChromaWriteFailuresRetainFirstFieldMetadataLikeV040()
+    {
+        string tempDirectory = CreateTempDirectory();
+        try
+        {
+            string outputBase = Path.Combine(tempDirectory, "vhs-chroma-write-failure");
+            using DecodeSession session = CreateSession("vhs", outputBase);
+            TbcDecodedField field = BuildField(0, detectedFirstField: true) with
+            {
+                Samples = new ushort[session.TbcFrameSpec.FieldSampleCount],
+                ChromaSamples = new ushort[session.TbcFrameSpec.FieldSampleCount],
+                NextFieldOffsetSamples = 100,
+                NominalFieldLengthSamples = 100
+            };
+            TrackingWriteStream? video = null;
+            var engine = new TbcFieldSequenceDecodeEngine(
+                readField: (_, _, _, _, fieldNumber) => fieldNumber == 0 ? field : null)
+            {
+                CreateTbcOutput = path => path.EndsWith("_chroma.tbc", StringComparison.OrdinalIgnoreCase)
+                    ? new ThrowingWriteStream("synthetic chroma TBC failure")
+                    : video = new TrackingWriteStream()
+            };
+
+            TbcFieldSequenceDecodeResult result = engine.TryDecodeAndWrite(
+                session,
+                Stream.Null,
+                maxFields: 1);
+
+            Assert.False(result.Success);
+            Assert.Contains("synthetic chroma TBC failure", result.Message, StringComparison.Ordinal);
+            Assert.NotNull(video);
+            Assert.Equal(
+                session.TbcFrameSpec.FieldSampleCount * (long)sizeof(ushort),
+                video.BytesWritten);
+            JsonNode document = JsonNode.Parse(File.ReadAllText(outputBase + ".tbc.json"))
+                ?? throw new InvalidOperationException("Partial metadata JSON was empty.");
+            Assert.Single(document["fields"]?.AsArray()
+                ?? throw new InvalidOperationException("Partial metadata JSON did not contain fields."));
+            Assert.Equal(1, QueryLong(outputBase + ".tbc.db", "SELECT COUNT(*) FROM field_record"));
+            Assert.False(File.Exists(outputBase + ".tbc.json.tmp"));
+            Assert.False(File.Exists(outputBase + ".tbc.json.fields.tmp"));
+        }
+        finally
+        {
+            Directory.Delete(tempDirectory, recursive: true);
+        }
+    }
+
+    [Fact(DisplayName = "VHS zero-field JSON finalizes before chroma and video close like v0.4.0")]
+    public void VhsZeroFieldJsonFinalizesBeforeChromaAndVideoCloseLikeV040()
+    {
+        string tempDirectory = CreateTempDirectory();
+        try
+        {
+            string outputBase = Path.Combine(tempDirectory, "vhs-close-order");
+            using DecodeSession session = CreateSession("vhs", outputBase);
+            var closeOrder = new List<string>();
+            var metadataReady = new List<bool>();
+            var engine = new TbcFieldSequenceDecodeEngine(readField: (_, _, _, _, _) => null)
+            {
+                CreateTbcOutput = path => new DisposeTrackingStream(
+                    path.EndsWith("_chroma.tbc", StringComparison.OrdinalIgnoreCase) ? "chroma" : "video",
+                    label =>
+                    {
+                        closeOrder.Add(label);
+                        metadataReady.Add(File.Exists(outputBase + ".tbc.json.tmp"));
+                    })
+            };
+
+            TbcFieldSequenceDecodeResult result = engine.TryDecodeAndWrite(
+                session,
+                Stream.Null,
+                maxFields: 1);
+
+            Assert.True(result.Success);
+            Assert.Equal(["chroma", "video"], closeOrder);
+            Assert.All(metadataReady, Assert.True);
+            Assert.Equal("{", File.ReadAllText(outputBase + ".tbc.json.tmp"));
+        }
+        finally
+        {
+            Directory.Delete(tempDirectory, recursive: true);
+        }
+    }
+
     [Theory(DisplayName = "Zero-field metadata artifacts match v0.4.0")]
     [InlineData("vhs")]
     [InlineData("cvbs")]
@@ -373,6 +500,52 @@ public sealed class TbcSqliteLifecycleCompatibilityTests
             "vhsdecode-dotnet-tests-" + Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(directory);
         return directory;
+    }
+
+    private class TrackingWriteStream : MemoryStream
+    {
+        public long BytesWritten { get; private set; }
+
+        public override void Write(byte[] buffer, int offset, int count)
+        {
+            BytesWritten += count;
+            base.Write(buffer, offset, count);
+        }
+
+        public override void Write(ReadOnlySpan<byte> buffer)
+        {
+            BytesWritten += buffer.Length;
+            base.Write(buffer);
+        }
+    }
+
+    private sealed class ThrowingWriteStream(string message) : TrackingWriteStream
+    {
+        public override void Write(byte[] buffer, int offset, int count)
+        {
+            throw new IOException(message);
+        }
+
+        public override void Write(ReadOnlySpan<byte> buffer)
+        {
+            throw new IOException(message);
+        }
+    }
+
+    private sealed class DisposeTrackingStream(string label, Action<string> onDispose) : MemoryStream
+    {
+        private bool _disposed;
+
+        protected override void Dispose(bool disposing)
+        {
+            if (disposing && !_disposed)
+            {
+                _disposed = true;
+                onDispose(label);
+            }
+
+            base.Dispose(disposing);
+        }
     }
 
     private sealed class ThrowOnSecondFieldOutputWriter : ILaserDiscEfmOutputWriter

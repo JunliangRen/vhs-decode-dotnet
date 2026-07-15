@@ -971,6 +971,10 @@ Implemented:
   while LD creates main video and enabled PCM/EFM/RF/AC3 sidecars before its
   mandatory database, so startup failures retain exactly the earlier artifacts
   without starting JSON metadata
+- output cleanup now publishes JSON and completes SQLite before closing payloads,
+  then closes VHS chroma/main video or LD main video/PCM/EFM/RF/AC3 in v0.4.0
+  order; first-field main TBC or chroma write failures retain the field already
+  committed to JSON/SQLite even though `fields_written` has not advanced
 - LD streaming output now preserves v0.4.0's write order across failure points:
   pre-EFM/EFM precede JSON/SQLite metadata, main TBC follows metadata, and
   RF_TBC/AC3 plus analog PCM follow main TBC; a field with no analog payload
@@ -1187,7 +1191,7 @@ dotnet test VHSDecodeDotNet.slnx --no-build
 ```
 
 The current formal solution build completes with zero warnings and errors, and
-the xUnit v3 project exposes 493 independently discoverable compatibility tests
+the xUnit v3 project exposes 497 independently discoverable compatibility tests
 to `dotnet test` and Visual Studio Test Explorer. On the
 same Windows machine and fixtures, Release wall-clock measurements for one
 frame were 2.346 s versus 7.193 s for NTSC VHS and 1.651 s versus 5.865 s for

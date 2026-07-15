@@ -208,6 +208,53 @@ public sealed class LaserDiscOutputLifecycleCompatibilityTests
         }
     }
 
+    [Fact(DisplayName = "LD zero-field JSON finalizes before payload close in v0.4.0 order")]
+    public void LdZeroFieldJsonFinalizesBeforePayloadCloseInV040Order()
+    {
+        string tempDirectory = CreateTempDirectory();
+        try
+        {
+            string outputBase = Path.Combine(tempDirectory, "close-order");
+            using DecodeSession session = CreateNtscSession(
+                outputBase,
+                "--RF_TBC",
+                "--AC3");
+            var closeOrder = new List<string>();
+            var metadataReady = new List<bool>();
+            void RecordClose(string label)
+            {
+                closeOrder.Add(label);
+                metadataReady.Add(File.Exists(outputBase + ".tbc.json.tmp"));
+            }
+
+            var writer = new LaserDiscEfmOutputWriter(path => new DisposeTrackingStream(
+                path.EndsWith(".tbc.ldf", StringComparison.OrdinalIgnoreCase)
+                    ? "rf"
+                    : Path.GetExtension(path).TrimStart('.'),
+                RecordClose));
+            var engine = new TbcFieldSequenceDecodeEngine(
+                efmOutputWriter: writer,
+                readField: (_, _, _, _, _) => null)
+            {
+                CreateTbcOutput = _ => new DisposeTrackingStream("video", RecordClose)
+            };
+
+            TbcFieldSequenceDecodeResult result = engine.TryDecodeAndWrite(
+                session,
+                Stream.Null,
+                maxFields: 1);
+
+            Assert.True(result.Success);
+            Assert.Equal(["video", "pcm", "efm", "rf", "ac3"], closeOrder);
+            Assert.All(metadataReady, Assert.True);
+            Assert.Equal("{", File.ReadAllText(outputBase + ".tbc.json.tmp"));
+        }
+        finally
+        {
+            Directory.Delete(tempDirectory, recursive: true);
+        }
+    }
+
     [Fact(DisplayName = "LD EFM creation failures retain earlier PCM artifact like v0.4.0")]
     public void LdEfmCreationFailuresRetainEarlierPcmArtifactLikeV040()
     {
@@ -372,6 +419,22 @@ public sealed class LaserDiscOutputLifecycleCompatibilityTests
         public override void Write(byte[] buffer, int offset, int count)
         {
             throw new IOException(message);
+        }
+    }
+
+    private sealed class DisposeTrackingStream(string label, Action<string> onDispose) : MemoryStream
+    {
+        private bool _disposed;
+
+        protected override void Dispose(bool disposing)
+        {
+            if (disposing && !_disposed)
+            {
+                _disposed = true;
+                onDispose(label);
+            }
+
+            base.Dispose(disposing);
         }
     }
 }
