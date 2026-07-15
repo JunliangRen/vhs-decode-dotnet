@@ -964,6 +964,10 @@ Implemented:
   large RF/video/chroma/audio arrays are released, JSON fields stream through
   a temporary fragment, and SQLite rows are inserted incrementally, bounding
   sequence memory to the field-order/previous-field state
+- recovery JSON checkpoints now run on a single background writer like v0.4.0:
+  checkpoints are skipped while that writer is busy, each accepted snapshot is
+  frozen at its current field boundary, and cleanup always queues and joins the
+  final snapshot before SQLite and payload finalization continue
 - SQLite capture/PCM rows are created lazily immediately before the first field
   row and committed first like v0.4.0; each accepted field then refreshes and
   commits `number_of_sequential_fields`, so recovery databases never retain the
@@ -1197,7 +1201,7 @@ dotnet test VHSDecodeDotNet.slnx --no-build
 ```
 
 The current formal solution build completes with zero warnings and errors, and
-the xUnit v3 project exposes 504 independently discoverable compatibility tests
+the xUnit v3 project exposes 505 independently discoverable compatibility tests
 to `dotnet test` and Visual Studio Test Explorer. On the
 same Windows machine and fixtures, Release wall-clock measurements for one
 frame were 2.346 s versus 7.193 s for NTSC VHS and 1.651 s versus 5.865 s for

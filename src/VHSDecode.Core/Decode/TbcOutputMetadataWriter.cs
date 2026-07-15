@@ -1,4 +1,5 @@
 using System.Buffers.Binary;
+using System.Collections.Concurrent;
 using System.Globalization;
 using System.Text;
 using System.Text.Json;
@@ -20,16 +21,33 @@ public static class TbcOutputMetadataWriter
 
     internal sealed class StreamingWriter : IDisposable
     {
+        private sealed record SnapshotWorkItem(
+            string Prefix,
+            long FieldsByteCount,
+            string Suffix,
+            bool IsSentinel = false);
+
+        private static readonly SnapshotWorkItem SnapshotSentinel = new("", 0, "", IsSentinel: true);
+
         private readonly DecodeSession _session;
         private readonly string _jsonPath;
         private readonly string _fieldsPath;
         private readonly bool _verbose;
         private readonly FieldObjectBuilder _fieldBuilder;
+        private readonly Func<string, Stream> _createSnapshotOutput;
+        private readonly BlockingCollection<SnapshotWorkItem> _snapshotQueue = [];
+        private readonly ManualResetEventSlim _snapshotWriting = new();
+        private readonly Thread _snapshotThread;
         private StreamWriter? _fieldsWriter;
         private VideoOutputConverter? _lastOutputConverter;
+        private bool _snapshotWorkerStopped;
         private bool _completed;
+        private bool _disposed;
 
-        public StreamingWriter(DecodeSession session, string jsonPath)
+        public StreamingWriter(
+            DecodeSession session,
+            string jsonPath,
+            Func<string, Stream>? createSnapshotOutput = null)
         {
             ArgumentException.ThrowIfNullOrWhiteSpace(jsonPath);
             _session = session;
@@ -37,6 +55,7 @@ public static class TbcOutputMetadataWriter
             _fieldsPath = jsonPath + ".fields.tmp";
             _verbose = session.ExecutionOptions.VerboseVits;
             _fieldBuilder = new FieldObjectBuilder(session);
+            _createSnapshotOutput = createSnapshotOutput ?? (static path => File.Create(path));
             _fieldsWriter = new StreamWriter(
                 new FileStream(
                     _fieldsPath,
@@ -44,6 +63,12 @@ public static class TbcOutputMetadataWriter
                     FileAccess.Write,
                     FileShare.Read),
                 new UTF8Encoding(encoderShouldEmitUTF8Identifier: false));
+            _snapshotThread = new Thread(ConsumeSnapshots)
+            {
+                IsBackground = true,
+                Name = "vhs-decode-json-dumper"
+            };
+            _snapshotThread.Start();
         }
 
         public int FieldCount { get; private set; }
@@ -79,8 +104,10 @@ public static class TbcOutputMetadataWriter
         public void WriteSnapshot()
         {
             ObjectDisposedException.ThrowIf(_fieldsWriter is null, this);
-            _fieldsWriter.Flush();
-            WriteCurrentJson();
+            if (!_snapshotWriting.IsSet)
+            {
+                _snapshotQueue.Add(CaptureSnapshot());
+            }
         }
 
         public void Complete()
@@ -90,10 +117,11 @@ public static class TbcOutputMetadataWriter
                 throw new InvalidOperationException("The streaming metadata writer was already completed.");
             }
 
+            SnapshotWorkItem finalSnapshot = CaptureSnapshot();
             CloseFieldsWriter();
             try
             {
-                WriteCurrentJson();
+                StopSnapshotWorker(finalSnapshot);
                 _completed = true;
             }
             finally
@@ -112,6 +140,7 @@ public static class TbcOutputMetadataWriter
             CloseFieldsWriter();
             try
             {
+                StopSnapshotWorker();
                 File.Delete(_jsonPath);
                 File.WriteAllText(
                     _jsonPath + ".tmp",
@@ -127,63 +156,133 @@ public static class TbcOutputMetadataWriter
 
         public void Dispose()
         {
+            if (_disposed)
+            {
+                return;
+            }
+
             CloseFieldsWriter();
+            StopSnapshotWorker();
             if (!_completed)
             {
                 File.Delete(_fieldsPath);
             }
+
+            _snapshotQueue.Dispose();
+            _snapshotWriting.Dispose();
+            _disposed = true;
         }
 
-        private void WriteCurrentJson()
+        private SnapshotWorkItem CaptureSnapshot()
         {
-            string tempPath = _jsonPath + ".tmp";
-            bool moved = false;
+            ObjectDisposedException.ThrowIf(_fieldsWriter is null, this);
+            _fieldsWriter.Flush();
+
+            using var prefix = new StringWriter(CultureInfo.InvariantCulture);
+            WritePrefix(prefix, FieldCount, _lastOutputConverter);
+            using var suffix = new StringWriter(CultureInfo.InvariantCulture);
+            WriteSuffix(suffix);
+            return new SnapshotWorkItem(
+                prefix.ToString(),
+                _fieldsWriter.BaseStream.Position,
+                suffix.ToString());
+        }
+
+        private void ConsumeSnapshots()
+        {
             try
             {
-                using (var output = new StreamWriter(
-                    File.Create(tempPath),
-                    new UTF8Encoding(encoderShouldEmitUTF8Identifier: false)))
+                while (true)
                 {
-                    WritePrefix(output);
-                    using (var fields = new StreamReader(
-                        new FileStream(
-                            _fieldsPath,
-                            FileMode.Open,
-                            FileAccess.Read,
-                            FileShare.ReadWrite),
-                        Encoding.UTF8,
-                        detectEncodingFromByteOrderMarks: false))
+                    SnapshotWorkItem snapshot = _snapshotQueue.Take();
+                    if (snapshot.IsSentinel)
                     {
-                        char[] buffer = new char[16 * 1024];
-                        int read;
-                        while ((read = fields.Read(buffer, 0, buffer.Length)) != 0)
-                        {
-                            output.Write(buffer, 0, read);
-                        }
+                        return;
                     }
 
-                    WriteSuffix(output);
+                    _snapshotWriting.Set();
+                    try
+                    {
+                        WriteCurrentJson(snapshot);
+                    }
+                    finally
+                    {
+                        _snapshotWriting.Reset();
+                    }
                 }
-
-                File.Move(tempPath, _jsonPath, overwrite: true);
-                moved = true;
             }
-            finally
+            catch (Exception)
             {
-                if (!moved)
-                {
-                    File.Delete(tempPath);
-                }
+                // v0.4.0 lets JSON-dumper thread failures terminate only that worker.
             }
         }
 
-        private void WritePrefix(TextWriter output)
+        private void StopSnapshotWorker(SnapshotWorkItem? finalSnapshot = null)
+        {
+            if (_snapshotWorkerStopped)
+            {
+                return;
+            }
+
+            if (finalSnapshot is not null)
+            {
+                _snapshotQueue.Add(finalSnapshot);
+            }
+
+            _snapshotQueue.Add(SnapshotSentinel);
+            _snapshotThread.Join();
+            _snapshotWorkerStopped = true;
+        }
+
+        private void WriteCurrentJson(SnapshotWorkItem snapshot)
+        {
+            string tempPath = _jsonPath + ".tmp";
+            using (Stream output = _createSnapshotOutput(tempPath))
+            {
+                WriteUtf8(output, snapshot.Prefix);
+                using (var fields = new FileStream(
+                    _fieldsPath,
+                    FileMode.Open,
+                    FileAccess.Read,
+                    FileShare.ReadWrite))
+                {
+                    byte[] buffer = new byte[16 * 1024];
+                    long remaining = snapshot.FieldsByteCount;
+                    while (remaining > 0)
+                    {
+                        int read = fields.Read(buffer, 0, (int)Math.Min(buffer.Length, remaining));
+                        if (read == 0)
+                        {
+                            throw new EndOfStreamException("The streaming metadata field snapshot ended unexpectedly.");
+                        }
+
+                        output.Write(buffer, 0, read);
+                        remaining -= read;
+                    }
+                }
+
+                WriteUtf8(output, snapshot.Suffix);
+            }
+
+            File.Move(tempPath, _jsonPath, overwrite: true);
+        }
+
+        private static void WriteUtf8(Stream output, string value)
+        {
+            byte[] bytes = Encoding.UTF8.GetBytes(value);
+            output.Write(bytes, 0, bytes.Length);
+        }
+
+        private void WritePrefix(
+            TextWriter output,
+            int fieldCount,
+            VideoOutputConverter? outputConverter)
         {
             JsonObject pcm = BuildPcmAudioParameters(_session);
             JsonObject video = BuildVideoParameters(
                 _session,
-                FieldCount,
-                _lastOutputConverter ?? _session.VideoOutput);
+                fieldCount,
+                outputConverter ?? _session.VideoOutput);
             if (!_verbose)
             {
                 output.Write('{');
