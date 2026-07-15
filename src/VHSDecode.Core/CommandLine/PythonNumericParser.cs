@@ -38,6 +38,26 @@ internal static class PythonNumericParser
         return value;
     }
 
+    public static double DivideIntegerByPowerOfTen(BigInteger value, int decimalPlaces)
+    {
+        ArgumentOutOfRangeException.ThrowIfNegative(decimalPlaces);
+
+        string scaledValue = string.Concat(
+            value.ToString(CultureInfo.InvariantCulture),
+            "e-",
+            decimalPlaces.ToString(CultureInfo.InvariantCulture));
+        double result = double.Parse(
+            scaledValue,
+            NumberStyles.Float,
+            CultureInfo.InvariantCulture);
+        if (double.IsInfinity(result))
+        {
+            throw new OverflowException("integer division result too large for a float");
+        }
+
+        return result;
+    }
+
     public static double ParseFloat(string text)
     {
         ArgumentNullException.ThrowIfNull(text);

@@ -1,3 +1,4 @@
+using System.Numerics;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using VHSDecode.Core.CommandLine;
@@ -602,9 +603,13 @@ public static class DecodeSessionFactory
         string system,
         FormatParameterSet parameters)
     {
-        if (command.Spec.Name != "vhs"
-            || !command.Values.TryGetValue("track_phase", out object? value)
-            || value is not int trackPhase)
+        if (command.Spec.Name != "vhs")
+        {
+            return null;
+        }
+
+        BigInteger? trackPhaseValue = NullableInteger(command, "track_phase");
+        if (!trackPhaseValue.HasValue)
         {
             return null;
         }
@@ -615,10 +620,13 @@ public static class DecodeSessionFactory
             return null;
         }
 
-        if (trackPhase is not 0 and not 1)
+        if (trackPhaseValue.Value != BigInteger.Zero
+            && trackPhaseValue.Value != BigInteger.One)
         {
             throw new ArgumentException("Track phase can only be 0, 1 or None");
         }
+
+        int trackPhase = (int)trackPhaseValue.Value;
 
         double offset0 = 0.0;
         double offset1 = 0.0;
@@ -655,6 +663,11 @@ public static class DecodeSessionFactory
                 return Math.Max(0.0, intValue);
             }
 
+            if (value is BigInteger integerValue)
+            {
+                return integerValue.Sign <= 0 ? 0.0 : (double)integerValue;
+            }
+
             if (value is double doubleValue)
             {
                 return Math.Max(0.0, doubleValue);
@@ -675,9 +688,14 @@ public static class DecodeSessionFactory
             action = TbcFieldOrderPlanner.ParseAction(actionText);
         }
 
-        if (command.Values.TryGetValue("field_order_confidence", out object? confidenceValue) && confidenceValue is int parsedConfidence)
+        BigInteger? parsedConfidence = NullableInteger(command, "field_order_confidence");
+        if (parsedConfidence.HasValue)
         {
-            confidence = Math.Clamp(parsedConfidence, 0, 100);
+            confidence = parsedConfidence.Value <= BigInteger.Zero
+                ? 0
+                : parsedConfidence.Value >= new BigInteger(100)
+                    ? 100
+                    : (int)parsedConfidence.Value;
         }
 
         bool allowProgressiveFlip = parameters.TapeFormat != "TYPEC";
@@ -821,9 +839,8 @@ public static class DecodeSessionFactory
 
     private static SharpnessEqOptions? BuildSharpnessEqOptions(ParsedCommand command, FormatParameterSet parameters)
     {
-        if (!command.Values.TryGetValue("sharpness", out object? sharpnessValue)
-            || sharpnessValue is not int sharpness
-            || sharpness == 0)
+        BigInteger? sharpness = NullableInteger(command, "sharpness");
+        if (!sharpness.HasValue || sharpness.Value.IsZero)
         {
             return null;
         }
@@ -835,7 +852,7 @@ public static class DecodeSessionFactory
         }
 
         return new SharpnessEqOptions(
-            sharpness / 100.0,
+            PythonNumericParser.DivideIntegerByPowerOfTen(sharpness.Value, 2),
             JsonRequiredDouble(lowBand, "corner"),
             JsonRequiredDouble(lowBand, "transition"),
             JsonRequiredInt(lowBand, "order_limit"));
@@ -1011,6 +1028,21 @@ public static class DecodeSessionFactory
         return command.Values.TryGetValue(name, out object? value) && value is double doubleValue
             ? doubleValue
             : null;
+    }
+
+    private static BigInteger? NullableInteger(ParsedCommand command, string name)
+    {
+        if (!command.Values.TryGetValue(name, out object? value))
+        {
+            return null;
+        }
+
+        return value switch
+        {
+            int intValue => new BigInteger(intValue),
+            BigInteger integerValue => integerValue,
+            _ => null
+        };
     }
 
     private static int IntValueOrDefault(ParsedCommand command, string name, int defaultValue)
