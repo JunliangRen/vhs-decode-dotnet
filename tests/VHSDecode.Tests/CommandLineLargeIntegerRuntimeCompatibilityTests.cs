@@ -1,3 +1,4 @@
+using System.Buffers.Binary;
 using System.Numerics;
 using VHSDecode.Core.CommandLine;
 using VHSDecode.Core.Decode;
@@ -96,6 +97,108 @@ public sealed class CommandLineLargeIntegerRuntimeCompatibilityTests
         Assert.Equal("ERROR: Seeking failed", ldException.Message);
     }
 
+    [Fact(DisplayName = "Ignored large LD integer options do not overflow before decoding")]
+    public void IgnoredLargeLdIntegerOptionsDoNotOverflowBeforeDecoding()
+    {
+        const string hugeValue = "99999999999999999999999999999999999999999999999999";
+        using DecodeSession disabledAudio = Create(
+            CliSpecs.LaserDisc,
+            "--PAL",
+            "--disable_analog_audio",
+            "--analog_audio_frequency",
+            hugeValue,
+            "--video_lpf_order",
+            "-" + hugeValue);
+        using DecodeSession ntscRate = Create(
+            CliSpecs.LaserDisc,
+            "--NTSC",
+            "--ntsc_audio_rate",
+            "--analog_audio_frequency",
+            hugeValue);
+
+        Assert.False(disabledAudio.LaserDiscAudioOptions!.DecodeAnalogAudio);
+        Assert.Equal(0.0, disabledAudio.LaserDiscAudioOptions.AnalogAudioFrequency);
+        Assert.Equal(BigInteger.Zero, disabledAudio.LaserDiscAudioOptions.AnalogAudioFrequencyInteger);
+        Assert.Equal(7, disabledAudio.Parameters.RfParams.GetProperty("video_lpf_order").GetInt32());
+        Assert.Equal(-2.8, ntscRate.LaserDiscAudioOptions!.AnalogAudioFrequency);
+        Assert.Null(ntscRate.LaserDiscAudioOptions.AnalogAudioFrequencyInteger);
+    }
+
+    [Fact(DisplayName = "Large positive LD audio rates survive zero-field finalization like Python integers")]
+    public void LargePositiveLdAudioRatesSurviveZeroFieldFinalizationLikePythonIntegers()
+    {
+        string hugeValue = "1" + new string('0', 400);
+        string tempDirectory = CreateTempDirectory();
+        try
+        {
+            string outputBase = Path.Combine(tempDirectory, "positive");
+            using DecodeSession session = CreateLaserDiscWithOutput(
+                outputBase,
+                "--PAL",
+                "--length",
+                "0",
+                "--threads",
+                "0",
+                "--noEFM",
+                "--analog_audio_frequency",
+                hugeValue);
+
+            Assert.True(double.IsPositiveInfinity(session.LaserDiscAudioOptions!.AnalogAudioFrequency));
+            Assert.Equal(
+                BigInteger.Parse(hugeValue),
+                session.LaserDiscAudioOptions.AnalogAudioFrequencyInteger);
+
+            TbcFieldSequenceDecodeResult result = new TbcFieldSequenceDecodeEngine()
+                .TryDecodeAndWrite(session, new MemoryStream());
+
+            Assert.True(result.Success);
+            Assert.Equal("{", File.ReadAllText(outputBase + ".tbc.json.tmp"));
+            Assert.True(File.Exists(outputBase + ".pcm"));
+        }
+        finally
+        {
+            Directory.Delete(tempDirectory, recursive: true);
+        }
+    }
+
+    [Fact(DisplayName = "Large negative LD audio rates overflow during final metadata like v0.4.0")]
+    public void LargeNegativeLdAudioRatesOverflowDuringFinalMetadataLikeV040()
+    {
+        string hugeValue = "-1" + new string('0', 400);
+        string tempDirectory = CreateTempDirectory();
+        try
+        {
+            string outputBase = Path.Combine(tempDirectory, "negative");
+            using DecodeSession session = CreateLaserDiscWithOutput(
+                outputBase,
+                "--PAL",
+                "--length",
+                "0",
+                "--threads",
+                "0",
+                "--noEFM",
+                "--analog_audio_frequency",
+                hugeValue);
+
+            OverflowException exception = Assert.Throws<OverflowException>(
+                () => new TbcFieldSequenceDecodeEngine().TryDecodeAndWrite(
+                    session,
+                    new MemoryStream()));
+
+            Assert.Equal("int too large to convert to float", exception.Message);
+            Assert.True(File.Exists(outputBase + ".pcm"));
+            Assert.False(File.Exists(outputBase + ".tbc.json.tmp"));
+            byte[] sqlite = File.ReadAllBytes(outputBase + ".tbc.db");
+            Assert.Equal(
+                3_050_004u,
+                BinaryPrimitives.ReadUInt32BigEndian(sqlite.AsSpan(96, sizeof(uint))));
+        }
+        finally
+        {
+            Directory.Delete(tempDirectory, recursive: true);
+        }
+    }
+
     private static DecodeSession CreateVhs(params string[] options)
         => Create(CliSpecs.Vhs, options);
 
@@ -108,5 +211,23 @@ public sealed class CommandLineLargeIntegerRuntimeCompatibilityTests
         };
         ParsedCommand command = new CommandLineParser().Parse(spec, arguments);
         return DecodeSessionFactory.Create(command);
+    }
+
+    private static DecodeSession CreateLaserDiscWithOutput(string outputBase, params string[] options)
+    {
+        var arguments = new List<string>(options)
+        {
+            "input.s16",
+            outputBase
+        };
+        ParsedCommand command = new CommandLineParser().Parse(CliSpecs.LaserDisc, arguments);
+        return DecodeSessionFactory.Create(command);
+    }
+
+    private static string CreateTempDirectory()
+    {
+        string path = Path.Combine(Path.GetTempPath(), "vhsdecode-large-int-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(path);
+        return path;
     }
 }

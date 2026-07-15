@@ -250,10 +250,7 @@ public static class TbcSqliteMetadataWriter
             _disposed = true;
             _transaction?.Dispose();
             _connection.Dispose();
-            if (_completed)
-            {
-                NormalizeSqliteHeader(_dbPath);
-            }
+            NormalizeSqliteHeader(_dbPath);
         }
 
         private SqliteTransaction Transaction => _transaction

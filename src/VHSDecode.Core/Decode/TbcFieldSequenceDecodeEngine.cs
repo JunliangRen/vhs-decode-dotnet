@@ -1269,6 +1269,7 @@ public sealed class TbcFieldSequenceDecodeEngine
 
             if (_metadata.FieldCount == 0)
             {
+                TbcOutputMetadataWriter.ValidatePcmAudioParameters(_session);
                 _metadata.LeaveIncompleteJson();
             }
             else

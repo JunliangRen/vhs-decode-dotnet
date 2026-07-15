@@ -88,7 +88,10 @@ public sealed record LaserDiscAudioOptions(
     bool Ac3,
     bool WriteRfTbc,
     bool UseAgc,
-    double? AudioFilterWidthHz);
+    double? AudioFilterWidthHz)
+{
+    public BigInteger? AnalogAudioFrequencyInteger { get; init; }
+}
 
 public static class DecodeSessionFactory
 {
@@ -477,14 +480,27 @@ public static class DecodeSessionFactory
             return null;
         }
 
-        double analogAudioFrequency = command.Get<int>("analog_audio_freq");
         bool useNtscAudioRate = command.Get<bool>("ntsc_audio_rate");
-        if (useNtscAudioRate && string.Equals(system, "NTSC", StringComparison.OrdinalIgnoreCase))
+        bool decodeAnalogAudio = !command.Get<bool>("daa");
+        double analogAudioFrequency;
+        BigInteger? analogAudioFrequencyInteger;
+        if (!decodeAnalogAudio)
+        {
+            analogAudioFrequency = 0.0;
+            analogAudioFrequencyInteger = BigInteger.Zero;
+        }
+        else if (useNtscAudioRate && string.Equals(system, "NTSC", StringComparison.OrdinalIgnoreCase))
         {
             analogAudioFrequency = -2.8;
+            analogAudioFrequencyInteger = null;
+        }
+        else
+        {
+            BigInteger parsedAudioFrequency = command.Get<BigInteger>("analog_audio_freq");
+            analogAudioFrequency = (double)parsedAudioFrequency;
+            analogAudioFrequencyInteger = parsedAudioFrequency;
         }
 
-        bool decodeAnalogAudio = !command.Get<bool>("daa");
         double? parsedAudioFilterWidth = NullableDouble(command, "audio_filterwidth");
         double? audioFilterWidthHz = parsedAudioFilterWidth.HasValue && parsedAudioFilterWidth.Value > 0.0
             ? parsedAudioFilterWidth.Value
@@ -494,12 +510,15 @@ public static class DecodeSessionFactory
             DecodeDigitalAudio: !command.Get<bool>("noefm"),
             WritePreEfm: command.Get<bool>("prefm"),
             DecodeAnalogAudio: decodeAnalogAudio,
-            AnalogAudioFrequency: decodeAnalogAudio ? analogAudioFrequency : 0.0,
+            AnalogAudioFrequency: analogAudioFrequency,
             UseNtscAudioRate: useNtscAudioRate,
             Ac3: command.Get<bool>("AC3"),
             WriteRfTbc: command.Get<bool>("RF_TBC"),
             UseAgc: !command.Get<bool>("noAGC"),
-            AudioFilterWidthHz: audioFilterWidthHz);
+            AudioFilterWidthHz: audioFilterWidthHz)
+        {
+            AnalogAudioFrequencyInteger = analogAudioFrequencyInteger
+        };
     }
 
     private static CvbsDecodeOptions? BuildCvbsDecodeOptions(ParsedCommand command, VideoOutputConverter videoOutput)
@@ -969,10 +988,10 @@ public static class DecodeSessionFactory
             rfParams["audio_filterwidth"] = parsedAudioFilterWidth.Value;
         }
 
-        int vlpfOrder = command.Get<int>("vlpf_order");
-        if (vlpfOrder >= 1)
+        BigInteger vlpfOrder = command.Get<BigInteger>("vlpf_order");
+        if (vlpfOrder >= BigInteger.One)
         {
-            rfParams["video_lpf_order"] = vlpfOrder;
+            rfParams["video_lpf_order"] = command.Get<int>("vlpf_order");
         }
 
         double deempLow = command.Get<double>("deemp_low");
