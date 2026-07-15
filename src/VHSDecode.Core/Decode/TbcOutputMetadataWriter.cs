@@ -924,7 +924,10 @@ public static class TbcOutputMetadataWriter
                         source: field.PreTbcVideoSamples,
                         out double[] blackPreTbcValues))
                 {
-                    AddRawMetric(metrics, "blackLinePreTBCIRE", session.VideoOutput.HzToIre(Mean(blackPreTbcValues)));
+                    AddRawMetric(
+                        metrics,
+                        "blackLinePreTBCIRE",
+                        MeanPreTbcIreNumpyFloat32(blackPreTbcValues, session.VideoOutput));
                 }
 
                 AddRawMetric(metrics, "blackLinePostTBCIRE", MeanIre(blackValues, session, quantizedOutput));
@@ -1322,6 +1325,71 @@ public static class TbcOutputMetadataWriter
         }
 
         return sum / values.Length;
+    }
+
+    private static double MeanPreTbcIreNumpyFloat32(
+        IReadOnlyList<double> values,
+        VideoOutputConverter converter)
+    {
+        if (values.Count == 0)
+        {
+            return 0.0;
+        }
+
+        float mean = PairwiseSumNumpyFloat32(values, 0, values.Count) / values.Count;
+        return (mean - (float)converter.Ire0) / (float)converter.HzIre;
+    }
+
+    private static float PairwiseSumNumpyFloat32(
+        IReadOnlyList<double> values,
+        int start,
+        int count)
+    {
+        // NumPy reduces float32 means recursively in 128-value blocks with eight accumulators.
+        const int pairwiseBlockSize = 128;
+        if (count < 8)
+        {
+            float sum = -0.0f;
+            for (int i = 0; i < count; i++)
+            {
+                sum += (float)values[start + i];
+            }
+
+            return sum;
+        }
+
+        if (count <= pairwiseBlockSize)
+        {
+            Span<float> lanes = stackalloc float[8];
+            for (int lane = 0; lane < lanes.Length; lane++)
+            {
+                lanes[lane] = (float)values[start + lane];
+            }
+
+            int index = 8;
+            int vectorizedEnd = count - (count % lanes.Length);
+            for (; index < vectorizedEnd; index += lanes.Length)
+            {
+                for (int lane = 0; lane < lanes.Length; lane++)
+                {
+                    lanes[lane] += (float)values[start + index + lane];
+                }
+            }
+
+            float sum = ((lanes[0] + lanes[1]) + (lanes[2] + lanes[3]))
+                + ((lanes[4] + lanes[5]) + (lanes[6] + lanes[7]));
+            for (; index < count; index++)
+            {
+                sum += (float)values[start + index];
+            }
+
+            return sum;
+        }
+
+        int leftCount = count / 2;
+        leftCount -= leftCount % 8;
+        return PairwiseSumNumpyFloat32(values, start, leftCount)
+            + PairwiseSumNumpyFloat32(values, start + leftCount, count - leftCount);
     }
 
     private static float StandardDeviationFloat32(ReadOnlySpan<float> values)

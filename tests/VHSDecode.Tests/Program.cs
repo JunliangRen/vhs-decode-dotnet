@@ -10672,6 +10672,69 @@ public void TbcFieldDecodePipelineRefinesLdNtscBurstLineLocations()
         shiftedProbe.Locations);
 }
 
+[Fact(DisplayName = "LD NTSC burst search matches Release 4.0 zero-crossing limit")]
+public void LaserDiscNtscBurstSearchMatchesRelease40ZeroCrossingLimit()
+{
+    const double fscMHz = 0.25;
+    var spec = new TbcFrameSpec(
+        "NTSC",
+        OutputLineLength: 4,
+        OutputLineCount: 2,
+        OutputSampleRateHz: 14_318_180.0,
+        ColourBurstStart: null,
+        ColourBurstEnd: null,
+        ActiveVideoStart: null,
+        ActiveVideoEnd: null);
+    var converter = new VideoOutputConverter(
+        ire0: 0.0,
+        hzIre: 1_000.0,
+        outputZero: 256,
+        vsyncIre: -40.0,
+        outputScale: 10.0);
+    var analyzer = new SyncAnalyzer(
+        sampleRateHz: 1_000_000.0,
+        linePeriodUs: 100.0,
+        hsyncPulseUs: 10.0,
+        equalizingPulseUs: 5.0,
+        vsyncPulseUs: 20.0);
+    var pipeline = new TbcFieldDecodePipeline(
+        analyzer,
+        new TbcFieldRenderer(spec, converter),
+        converter,
+        "NTSC",
+        TbcDropoutDetectionOptions.Disabled,
+        decodeLaserDiscVbi: true,
+        laserDiscNtscBurstRefineOptions: new LaserDiscNtscBurstRefineOptions(fscMHz));
+
+    var burst = new double[300];
+    for (int offset = 0; offset < 28; offset++)
+    {
+        burst[84 + offset] = offset switch
+        {
+            0 => -10.0,
+            >= 20 and <= 24 => 3.0,
+            _ => -1.0
+        };
+    }
+
+    double[] video = burst.ToArray();
+    bool found = pipeline.TryComputeLaserDiscLineBurst(
+        video,
+        burst,
+        [0.0, 100.0, 200.0],
+        line: 0,
+        previousPhaseAdjustment: 0.125,
+        fieldLineBoundary: 2,
+        fscMHz,
+        converter.HzIre,
+        out bool rising,
+        out double phaseAdjustment);
+
+    AssertTrue(found);
+    AssertFalse(rising);
+    AssertClose(0.125, phaseAdjustment, 0.0);
+}
+
 [Fact(DisplayName = "TBC field decode pipeline emits chroma samples")]
 public void TbcFieldDecodePipelineEmitsChromaSamples()
 {
@@ -13393,6 +13456,28 @@ public void TbcMetadataWriterEmitsLdUpstreamFields()
             Environment.NewLine + "\"fields\":[" + Environment.NewLine + "{" + Environment.NewLine + "    \"isFirstField\": true",
             StringComparison.Ordinal));
         AssertTrue(verboseJson.Contains("\"sampleRate\": 0", StringComparison.Ordinal));
+
+        var floatMeanPreTbcVideo = new double[verboseRawInput.Length];
+        PaintPreTbcMetricSlice(
+            floatMeanPreTbcVideo,
+            verboseSession,
+            verboseLineLocations,
+            isFirstField: true,
+            line: verboseBlackLine,
+            startUsec: verboseBlackStart,
+            lengthUsec: verboseBlackLength,
+            delaySamples: 0,
+            sampleAt: i => i == 0
+                ? verboseSession.VideoOutput.Ire0 - 0.5
+                : verboseSession.VideoOutput.Ire0);
+        string floatMeanJsonPath = Path.Combine(tempDirectory, "float-mean.tbc.json");
+        TbcOutputMetadataWriter.WriteJson(
+            verboseSession,
+            [cavFirst with { PreTbcVideoSamples = floatMeanPreTbcVideo }, cavSecond],
+            floatMeanJsonPath);
+        string floatMeanJson = File.ReadAllText(floatMeanJsonPath);
+        AssertTrue(floatMeanJson.Contains("\"blackLinePreTBCIRE\": 0.0", StringComparison.Ordinal));
+        AssertFalse(floatMeanJson.Contains("\"blackLinePreTBCIRE\": -0.0", StringComparison.Ordinal));
 
         string pythonFloatJsonPath = Path.Combine(tempDirectory, "python-float.tbc.json");
         TbcOutputMetadataWriter.WriteJson(

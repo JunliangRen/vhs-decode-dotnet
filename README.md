@@ -1079,10 +1079,15 @@ Implemented:
   adapter to expose the intended metric values while this port emits valid JSON
 - a deterministic one-frame 40 MHz NTSC LD cadence fixture now follows
   v0.4.0's three-way local/next/previous line-zero median and its integer
-  nominal-line-length burst timing; field phases `3`/`4`, sync confidence,
+  nominal-line-length burst timing, including the 16-sample zero-crossing scan
+  limit and stop-on-miss behavior; field phases `3`/`4`, sync confidence,
   dropout coordinates, verbose VITS values, and the absence of a phase-sequence
-  warning match upstream. All active-picture samples match; 1,219 samples on
-  five sharp VBlank boundary lines remain under numerical parity audit
+  warning match upstream. All 478,660 main TBC samples, the complete JSON, and
+  SQLite match v0.4.0 byte for byte with respective SHA-256 hashes
+  `DF8E6DAA683029BADBA311083A88F3F65BCF29B2F0F2F3269A53B62EFE33922D`,
+  `93B7123DE4322001E086961310EC9B1FDCB30DD173DD69A8224F615FFD7E7E4A`,
+  and `B78F02B5CEA3577FCEEEA43C72CED2634968CFAD2D13DE18169C6384C2429A15`,
+  while normalized logs match in order and content
 - a one-frame real NTSC LD/LDF fixture with default EFM and analog audio also
   matches v0.4.0 byte for byte: main TBC
   `7F19286F84D563D58983C50326CE16433ED9DA90459ADA658532EB38A5AF686A`,
@@ -1127,7 +1132,7 @@ dotnet test VHSDecodeDotNet.slnx --no-build
 ```
 
 The current formal solution build completes with zero warnings and errors, and
-the xUnit v3 project exposes 455 independently discoverable compatibility tests
+the xUnit v3 project exposes 456 independently discoverable compatibility tests
 to `dotnet test` and Visual Studio Test Explorer. On the
 same Windows machine and fixtures, Release wall-clock measurements for one
 frame were 2.346 s versus 7.193 s for NTSC VHS and 1.651 s versus 5.865 s for

@@ -2189,7 +2189,7 @@ public sealed class TbcFieldDecodePipeline
         return lineLocations with { Locations = shifted };
     }
 
-    private bool TryComputeLaserDiscLineBurst(
+    internal bool TryComputeLaserDiscLineBurst(
         ReadOnlySpan<double> video,
         ReadOnlySpan<double> burst,
         IReadOnlyList<double> lineLocations,
@@ -2283,11 +2283,6 @@ public sealed class TbcFieldDecodePipeline
                 adjustedPhase);
         }
 
-        if (zeroCrossingCount == 0)
-        {
-            return false;
-        }
-
         rising = risingCount > (zeroCrossingCount / 2.0);
         phaseAdjustment = -adjustedPhase;
         return double.IsFinite(phaseAdjustment);
@@ -2317,7 +2312,7 @@ public sealed class TbcFieldDecodePipeline
                     burstArea,
                     position,
                     target: 0.0f,
-                    count: burstArea.Length - position - 1);
+                    count: 16);
                 if (zeroCrossing.HasValue)
                 {
                     isRising[zeroCrossingCount] = centered < 0.0;
@@ -2326,6 +2321,8 @@ public sealed class TbcFieldDecodePipeline
                     position = (int)zeroCrossing.Value + 1;
                     continue;
                 }
+
+                break;
             }
 
             position++;
