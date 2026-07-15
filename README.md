@@ -52,6 +52,11 @@ Implemented:
   dual-mono naming and padding, WAV PCM16 or FLAC PCM24 output, normalization,
   cancellation/error finalization, Release 4.0's per-block progress bar and
   five-line timing/buffer reports, and facade/standalone command dispatch
+- a full-command 2,800,000-sample, 6 MHz PAL VHS HiFi synthetic RF baseline
+  reproduces Release 4.0's single first/final block and Numba negative-index
+  worker copy behavior; the resulting 22,796-frame PCM16 WAV is byte-for-byte
+  identical with SHA-256
+  `325A4ABFB4922FE814338BAB377A94E6C2FD96277244813433A72F6ED5723553`
 - HiFi bias pre-reading preserves Release 4.0's omission of `--raw_format`:
   raw files are measured according to their extension, while stdin prints the
   measurement heading and then raises the same required-format error even when
@@ -1107,7 +1112,7 @@ dotnet test VHSDecodeDotNet.slnx --no-build
 ```
 
 The current formal solution build completes with zero warnings and errors, and
-the xUnit v3 project exposes 446 independently discoverable compatibility tests
+the xUnit v3 project exposes 447 independently discoverable compatibility tests
 to `dotnet test` and Visual Studio Test Explorer. On the
 same Windows machine and fixtures, Release wall-clock measurements for one
 frame were 2.346 s versus 7.193 s for NTSC VHS and 1.651 s versus 5.865 s for

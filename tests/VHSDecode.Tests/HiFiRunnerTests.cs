@@ -1,6 +1,7 @@
 using System.Buffers.Binary;
 using System.Diagnostics;
 using System.Runtime.InteropServices;
+using System.Security.Cryptography;
 using NetMQ;
 using NetMQ.Sockets;
 using VHSDecode.Core.CommandLine;
@@ -307,6 +308,63 @@ public sealed class HiFiRunnerTests
         Assert.Equal(1_464, final.Left.Length);
         Assert.Equal(22_272.0f, final.Left[0]);
         Assert.Equal(23_735.0f, final.Left[^1]);
+
+        float[] shortLeft = Enumerable.Range(0, 1_464).Select(value => (float)value).ToArray();
+        float[] shortRight = shortLeft.Select(value => -value).ToArray();
+        HiFiDecodedBlock wrapped = HiFiStreamingDecoder.TrimDecodedBlock(
+            new HiFiDecodedBlock(shortLeft, shortRight, 0.25f, -0.5f),
+            plan,
+            finalJob);
+        Assert.Equal(1_200.0f, wrapped.Left[0]);
+        Assert.Equal(1_463.0f, wrapped.Left[263]);
+        Assert.Equal(0.0f, wrapped.Left[264]);
+        Assert.Equal(1_199.0f, wrapped.Left[^1]);
+        Assert.Equal(-1_200.0f, wrapped.Right[0]);
+    }
+
+    [Fact(DisplayName = "HiFi runner matches Release 4.0 PAL VHS synthetic RF WAV")]
+    public void HiFiRunnerMatchesRelease40PalVhsSyntheticRfWave()
+    {
+        string directory = CreateTempDirectory();
+        try
+        {
+            string inputPath = Path.Combine(directory, "pal-vhs-hifi.s16");
+            string outputPath = Path.Combine(directory, "pal-vhs-hifi.wav");
+            WritePalVhsHiFiRf(inputPath);
+            Assert.Equal(
+                "055D25D26C86D18F5390BA98DBA32FB65F28B1B186616F8AA52D53E14F940EC4",
+                Convert.ToHexString(SHA256.HashData(File.ReadAllBytes(inputPath))));
+            ParsedCommand command = ParseHiFi(
+            [
+                "--pal", "--frequency", "6", "--threads", "1",
+                "--raw_format", "s16le", "--audio_mode", "s",
+                "--audio_rate", "48000", "--resampler_quality", "low",
+                "--doc", "off", "--head_switching_interpolation", "off",
+                "--expander", "off", "--deemphasis", "off",
+                "--NR_spectral_amount", "0", "--overwrite",
+                inputPath, outputPath
+            ]);
+            var output = new StringWriter();
+            var error = new StringWriter();
+
+            int exitCode = new DecodeRunner().Run(
+                command,
+                output,
+                error,
+                TestContext.Current.CancellationToken);
+
+            Assert.Equal(0, exitCode);
+            Assert.Equal(string.Empty, error.ToString());
+            byte[] wave = File.ReadAllBytes(outputPath);
+            Assert.Equal(91_228, wave.Length);
+            Assert.Equal(
+                "325A4ABFB4922FE814338BAB377A94E6C2FD96277244813433A72F6ED5723553",
+                Convert.ToHexString(SHA256.HashData(wave)));
+        }
+        finally
+        {
+            Directory.Delete(directory, recursive: true);
+        }
     }
 
     [Fact(DisplayName = "HiFi parallel streaming pipeline completes and preserves block order")]
@@ -1206,6 +1264,45 @@ public sealed class HiFiRunnerTests
         }
 
         return input;
+    }
+
+    private static void WritePalVhsHiFiRf(string path)
+    {
+        const int SampleRate = 6_000_000;
+        const int SampleCount = 2_800_000;
+        const int ChunkSamples = 262_144;
+        const double LeftCarrier = 1_400_000.0;
+        const double RightCarrier = 1_800_000.0;
+        const double CarrierDeviation = 150_000.0;
+        const double LeftModulationHz = 997.0;
+        const double RightModulationHz = 1_433.0;
+
+        using var stream = new FileStream(path, FileMode.Create, FileAccess.Write, FileShare.None);
+        var bytes = new byte[ChunkSamples * sizeof(short)];
+        for (int start = 0; start < SampleCount; start += ChunkSamples)
+        {
+            int length = Math.Min(ChunkSamples, SampleCount - start);
+            for (int offset = 0; offset < length; offset++)
+            {
+                int sample = start + offset;
+                double time = (double)sample / SampleRate;
+                double leftPhase = ((2.0 * Math.PI * LeftCarrier) * time)
+                    + (((CarrierDeviation * 0.40) / LeftModulationHz)
+                        * (1.0 - Math.Cos((2.0 * Math.PI * LeftModulationHz) * time)));
+                double rightPhase = ((2.0 * Math.PI * RightCarrier) * time)
+                    + (((CarrierDeviation * 0.30) / RightModulationHz)
+                        * (1.0 - Math.Cos((2.0 * Math.PI * RightModulationHz) * time)));
+                double rf = (0.46 * Math.Sin(leftPhase)) + (0.46 * Math.Sin(rightPhase));
+                short pcm = checked((short)Math.Round(
+                    rf * short.MaxValue,
+                    MidpointRounding.ToEven));
+                BinaryPrimitives.WriteInt16LittleEndian(
+                    bytes.AsSpan(offset * sizeof(short), sizeof(short)),
+                    pcm);
+            }
+
+            stream.Write(bytes, 0, length * sizeof(short));
+        }
     }
 
     private static string ReadAscii(byte[] bytes, int offset)

@@ -303,7 +303,9 @@ internal sealed class HiFiStreamingDecoder
                 checked((int)Math.Round(
                     (decoded.Left.Length - desiredLength) / 2.0,
                     MidpointRounding.ToEven)));
-        if (trimStart < 0 || trimStart > decoded.Left.Length - desiredLength)
+        if (desiredLength > decoded.Left.Length
+            || trimStart < -decoded.Left.Length
+            || (trimStart >= 0 && trimStart > decoded.Left.Length - desiredLength))
         {
             throw new InvalidDataException(
                 $"HiFi block {job.BlockNumber} produced {decoded.Left.Length} samples, "
@@ -312,9 +314,28 @@ internal sealed class HiFiStreamingDecoder
 
         return decoded with
         {
-            Left = decoded.Left.AsSpan(trimStart, desiredLength).ToArray(),
-            Right = decoded.Right.AsSpan(trimStart, desiredLength).ToArray()
+            Left = CopyRelease40WorkerSlice(decoded.Left, trimStart, desiredLength),
+            Right = CopyRelease40WorkerSlice(decoded.Right, trimStart, desiredLength)
         };
+    }
+
+    private static float[] CopyRelease40WorkerSlice(
+        float[] source,
+        int sourceOffset,
+        int length)
+    {
+        if (sourceOffset >= 0)
+        {
+            return source.AsSpan(sourceOffset, length).ToArray();
+        }
+
+        // The Release 4.0 Numba worker indexes each sample separately. A negative
+        // source offset therefore wraps through the array's tail before index zero.
+        var destination = new float[length];
+        int wrappedLength = Math.Min(-sourceOffset, length);
+        source.AsSpan(source.Length + sourceOffset, wrappedLength).CopyTo(destination);
+        source.AsSpan(0, length - wrappedLength).CopyTo(destination.AsSpan(wrappedLength));
+        return destination;
     }
 
     private static void WriteBias(
