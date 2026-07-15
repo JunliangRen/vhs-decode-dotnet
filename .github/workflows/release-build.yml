@@ -4,6 +4,9 @@ on:
   push:
     branches:
       - main
+  pull_request:
+    branches:
+      - main
 
 permissions:
   contents: read
@@ -27,6 +30,9 @@ jobs:
         with:
           dotnet-version: 10.0.x
 
+      - name: Install FFmpeg test dependency
+        run: choco install ffmpeg --yes --no-progress --limit-output
+
       - name: Restore dependencies
         run: dotnet restore VHSDecodeDotNet.slnx
 
@@ -37,6 +43,7 @@ jobs:
         run: dotnet test VHSDecodeDotNet.slnx --configuration Release --no-build
 
       - name: Upload release build artifact
+        if: github.event_name == 'push'
         uses: actions/upload-artifact@v7
         with:
           name: vhs-decode-dotnet-windows-${{ github.sha }}

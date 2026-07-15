@@ -172,7 +172,7 @@ public static class TbcSqliteMetadataWriter
             {
                 foreach (string statement in SchemaStatements)
                 {
-                    Execute(_connection, transaction: null, statement);
+                    Execute(_connection, transaction: null, NormalizeSchemaSql(statement));
                 }
 
                 _transaction = _connection.BeginTransaction();
@@ -280,7 +280,7 @@ public static class TbcSqliteMetadataWriter
 
         foreach (string statement in SchemaStatements)
         {
-            Execute(connection, transaction: null, statement);
+            Execute(connection, transaction: null, NormalizeSchemaSql(statement));
         }
 
         SqliteTransaction transaction = connection.BeginTransaction();
@@ -599,6 +599,12 @@ public static class TbcSqliteMetadataWriter
         }
 
         command.ExecuteNonQuery();
+    }
+
+    internal static string NormalizeSchemaSql(string statement)
+    {
+        ArgumentNullException.ThrowIfNull(statement);
+        return statement.ReplaceLineEndings("\n");
     }
 
     private static JsonObject RequiredObject(JsonObject obj, string name)

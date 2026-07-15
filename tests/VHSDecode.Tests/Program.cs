@@ -12217,6 +12217,15 @@ public void TbcFieldSequenceEngineWritesSqliteDebugDb()
     }
 }
 
+[Fact(DisplayName = "TBC SQLite schema is checkout-line-ending independent")]
+public void TbcSqliteSchemaIsCheckoutLineEndingIndependent()
+{
+    const string checkoutSchema = "CREATE TABLE first (id INTEGER);\r\nCREATE TABLE second (id INTEGER);\r\n";
+    const string upstreamSchema = "CREATE TABLE first (id INTEGER);\nCREATE TABLE second (id INTEGER);\n";
+
+    AssertEqual(upstreamSchema, TbcSqliteMetadataWriter.NormalizeSchemaSql(checkoutSchema));
+}
+
 [Fact(DisplayName = "TBC field sequence engine honors decoded next-field offsets")]
 public void TbcFieldSequenceEngineHonorsDecodedNextFieldOffsets()
 {
