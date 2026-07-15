@@ -582,7 +582,9 @@ public static class TbcOutputMetadataWriter
             }
 
             int decodeFaults = decision.DecodeFaults;
-            int syncConfidence = Math.Min(decision.SyncConfidence, field.SyncConfidence);
+            int syncConfidence = (decision.DecodeFaults & 1) != 0
+                ? 10
+                : Math.Min(decision.SyncConfidence, field.SyncConfidence);
             JsonObject fieldInfo;
 
             if (_session.Spec.Name == "ld")
@@ -854,7 +856,7 @@ public static class TbcOutputMetadataWriter
             return 1;
         }
 
-        return (decision.IsFirstField, (decision.SeqNo / 2) % 2) switch
+        return (decision.DetectedFirstField, (decision.SeqNo / 2) % 2) switch
         {
             (true, 0) => 1,
             (false, 1) => 2,
@@ -1737,6 +1739,11 @@ public static class TbcOutputMetadataWriter
             && session.System is "PAL_M" or "PALM" or "NLINHA")
         {
             return "PAL-M";
+        }
+
+        if (session.Spec.Name == "vhs")
+        {
+            return FormatCatalog.ParentSystem(session.System);
         }
 
         return session.System;

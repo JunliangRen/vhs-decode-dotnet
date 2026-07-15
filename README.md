@@ -385,9 +385,9 @@ Implemented:
 - VHS/CVBS `-f cxadc` resolves to v0.4.0's `28.636363... MHz` special value,
   while LD continues to reject it; interpolation and field-order choices remain
   case-sensitive like their argparse definitions
-- `--field_order_confidence` preserves any parsed integer without clamping;
-  values outside the documented 0-100 range therefore retain v0.4.0's raw
-  Cython threshold behavior
+- `--field_order_confidence` applies v0.4.0's `0..100` clamp before the value
+  reaches field-cadence detection, including exact handling of negative and
+  greater-than-100 CLI values
 - LD `--version`/`-v` is scanned before all other arguments, and VHS
   `--params_file` validates files during parsing while retaining argparse's `-`
   stdin input convention
@@ -527,7 +527,8 @@ Implemented:
 - VHS `--field_order_confidence` and `--field_order_action` field-cadence
   handling, including TYPEC's upstream forced `none` action, disabled
   progressive flip, duplicate/drop compensation in TBC field writes, and JSON
-  metadata
+  metadata; progressive correction forces `syncConf: 10` even when the raw
+  field confidence is lower, while ordinary fields retain that raw lower value
 - SVHS custom luma filter support for embedded upstream response files plus
   high/low shelf entries
 - RF block decode pipeline that connects a sample loader, filter set, and FM
@@ -745,6 +746,8 @@ Implemented:
   read offset, derives its approximate search center from
   `frame_lines / 2 - 8`, and snaps a damaged/missing line0 to a pulse within
   0.7H; `--relaxed_line0` forces that prediction when no nearby pulse is found
+- fallback VSync is implicitly enabled for TYPEC, EIAJ, 405-line, and 819-line
+  VHS decoding exactly as in v0.4.0, without requiring `--fallback_vsync`
 - `--fallback_vsync` also ports the v0.4.0 first-field recovery path that needs
   no previous-field state: close duplicate-pulse filtering, four ordered
   HSYNC/EQ/VSYNC boundary patterns, 0.08H candidate validation, out-of-range
@@ -804,7 +807,11 @@ Implemented:
   uncentered root-mean-square value
 - VHS metadata now preserves v0.4.0's PAL-field workaround: PAL-parent tape
   formats emit `fieldPhaseID: 1` on every field, while PAL-M/NLINHA retain the
-  NTSC field-class four-phase fallback
+  NTSC field-class four-phase fallback; the NTSC fallback uses the originally
+  detected parity even when progressive handling repairs `isFirstField`
+- VHS JSON and SQLite capture metadata now use the inherited parent system like
+  v0.4.0, so CLI-reachable MESECAM, 405-line, and 819-line captures identify as
+  `PAL` while PAL-M/NLINHA preserve their existing `PAL-M` behavior
 - JSON `osInfo` now follows Python `platform`'s `system:release:version` shape
   (for example `Windows:11:10.0.26220`) instead of .NET's distinguishable OS
   description and `VersionString`
@@ -1161,7 +1168,7 @@ dotnet test VHSDecodeDotNet.slnx --no-build
 ```
 
 The current formal solution build completes with zero warnings and errors, and
-the xUnit v3 project exposes 465 independently discoverable compatibility tests
+the xUnit v3 project exposes 475 independently discoverable compatibility tests
 to `dotnet test` and Visual Studio Test Explorer. On the
 same Windows machine and fixtures, Release wall-clock measurements for one
 frame were 2.346 s versus 7.193 s for NTSC VHS and 1.651 s versus 5.865 s for

@@ -1392,7 +1392,7 @@ public void DecodeSessionFactoryAppliesFieldOrderOptions()
     ]));
 
     AssertEqual(TbcFieldOrderAction.Drop, explicitDrop.FieldOrderOptions.Action);
-    AssertEqual(125, explicitDrop.FieldOrderOptions.Confidence);
+    AssertEqual(100, explicitDrop.FieldOrderOptions.Confidence);
     AssertTrue(explicitDrop.FieldOrderOptions.AllowProgressiveFlip);
 
     DecodeSession negativeConfidence = DecodeSessionFactory.Create(Parse(CliSpecs.Vhs, [
@@ -1401,7 +1401,7 @@ public void DecodeSessionFactoryAppliesFieldOrderOptions()
         "input.u8",
         "out"
     ]));
-    AssertEqual(-10, negativeConfidence.FieldOrderOptions.Confidence);
+    AssertEqual(0, negativeConfidence.FieldOrderOptions.Confidence);
 
     DecodeSession typeC = DecodeSessionFactory.Create(Parse(CliSpecs.Vhs, [
         "--tf",
