@@ -3,6 +3,7 @@ using System.ComponentModel;
 using System.Diagnostics;
 using System.Security.Cryptography;
 using System.Text;
+using System.Text.Json;
 using VHSDecode.Core.Rf;
 using Xunit;
 
@@ -173,9 +174,200 @@ public sealed class RfContainerLoaderIntegrationTests
             ReadToEnd(skipped));
     }
 
-    private static short[] CreateSamples()
+    [Fact(DisplayName = "PyAV plane padding follows variable frame geometry and first-frame PTS")]
+    public void PyAvPlanePaddingFollowsVariableFrameGeometryAndFirstFramePts()
     {
-        var samples = new short[SampleCount];
+        short[] source = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12];
+        int[] frameLengths = [3, 5, 4];
+        short[] expected = BuildPaddedSamples(source, frameLengths);
+
+        using (PyAvAudioPlanePaddingStream stream = CreateVariablePaddingStream(source, 1_002))
+        {
+            Assert.Equal(Pcm16Bytes(expected[2..]), ReadToEnd(stream));
+        }
+
+        using (PyAvAudioPlanePaddingStream stream = CreateVariablePaddingStream(source, 1_066))
+        {
+            Assert.Equal(Pcm16Bytes(expected[66..]), ReadToEnd(stream));
+        }
+
+        using PyAvAudioPlanePaddingStream beforeFirstPts = CreateVariablePaddingStream(source, 999);
+        Assert.Equal(Pcm16Bytes(expected), ReadToEnd(beforeFirstPts));
+    }
+
+    [Fact(DisplayName = "PyAV framed FFmpeg metadata and seek arguments match Release 4.0")]
+    public void PyAvFramedFfmpegMetadataAndSeekArgumentsMatchRelease40()
+    {
+        IReadOnlyList<string> noSeek = FfmpegPcm16SampleLoader.BuildPyAvFramedFfmpegArguments(
+            "RF source.vhs",
+            5_000_000,
+            40_000);
+        Assert.DoesNotContain("-ss", noSeek);
+
+        IReadOnlyList<string> seek = FfmpegPcm16SampleLoader.BuildPyAvFramedFfmpegArguments(
+            "RF source.vhs",
+            80_000_000,
+            40_000);
+        Assert.Contains(
+            "-copyts -ss 0.04 -noaccurate_seek -seek_timestamp 1 -seek2any 1 -i RF source.vhs",
+            string.Join(' ', seek),
+            StringComparison.Ordinal);
+
+        const string line = "[Parsed_ashowinfo_0 @ 000001] [info] "
+            + "n:0 pts:1105 pts_time:0.0250567 fmt:s16 channels:1 "
+            + "chlayout:mono rate:44100 nb_samples:47 checksum:00000000";
+        Assert.True(FfmpegPcm16SampleLoader.TryParsePyAvAudioFrameGeometry(
+            line,
+            out PyAvAudioFrameGeometry geometry));
+        Assert.Equal(47, geometry.LogicalSamples);
+        Assert.Equal(1_105_000, geometry.PresentationRfSample);
+
+        const string noPtsLine = "[Parsed_ashowinfo_0 @ 000001] [info] "
+            + "n:0 pts:NOPTS pts_time:NOPTS fmt:s16 channels:1 "
+            + "chlayout:mono rate:40000 nb_samples:2848 checksum:00000000";
+        Assert.True(FfmpegPcm16SampleLoader.TryParsePyAvAudioFrameGeometry(
+            noPtsLine,
+            out PyAvAudioFrameGeometry noPtsGeometry));
+        Assert.Equal(2_848, noPtsGeometry.LogicalSamples);
+        Assert.Null(noPtsGeometry.PresentationRfSample);
+        Assert.False(FfmpegPcm16SampleLoader.TryParsePyAvAudioFrameGeometry(
+            "[info] unrelated FFmpeg output",
+            out _));
+    }
+
+    [Fact(DisplayName = "PyAV plane padding rejects truncated reported frames")]
+    public void PyAvPlanePaddingRejectsTruncatedReportedFrames()
+    {
+        var geometries = new Queue<PyAvAudioFrameGeometry>(
+            [new PyAvAudioFrameGeometry(4, 0)]);
+        using var stream = new PyAvAudioPlanePaddingStream(
+            new MemoryStream(Pcm16Bytes([1, 2, 3])),
+            () => geometries.TryDequeue(out PyAvAudioFrameGeometry geometry) ? geometry : null,
+            targetSample: 0);
+
+        Assert.Throws<InvalidDataException>(() => ReadToEnd(stream));
+    }
+
+    [Fact(DisplayName = "RF ALAC variable terminal frame and EOF match Release 4.0")]
+    public void RfAlacVariableTerminalFrameAndEofMatchRelease40()
+    {
+        Assert.SkipUnless(
+            CommandIsAvailable("ffmpeg") && CommandIsAvailable("ffprobe"),
+            "ffmpeg and ffprobe must be available on PATH.");
+
+        string directory = CreateTestDirectory();
+        try
+        {
+            short[] source = CreateSamples(52_000);
+            string wavePath = Path.Combine(directory, "variable ALAC source.wav");
+            string alacPath = Path.Combine(directory, "variable ALAC frames.m4a");
+            WriteWave(wavePath, source);
+            EncodeAlac(wavePath, alacPath);
+
+            int[] frameLengths = ProbeAudioFrameLengths(alacPath);
+            Assert.True(frameLengths.Length > 1);
+            Assert.True(frameLengths[^1] < frameLengths[0]);
+            short[] expected = BuildPaddedSamples(source, frameLengths);
+
+            using var loader = new FfmpegPcm16SampleLoader(alacPath);
+            using FileStream input = File.OpenRead(alacPath);
+            Assert.Equal(
+                expected.Select(value => (double)value),
+                loader.Read(input, 0, expected.Length));
+            Assert.Null(loader.Read(input, expected.Length - 8, 16));
+        }
+        finally
+        {
+            Directory.Delete(directory, recursive: true);
+        }
+    }
+
+    [Fact(DisplayName = "RF MP3 variable frames and first PTS match Release 4.0")]
+    public void RfMp3VariableFramesAndFirstPtsMatchRelease40()
+    {
+        Assert.SkipUnless(
+            CommandIsAvailable("ffmpeg") && CommandIsAvailable("ffprobe"),
+            "ffmpeg and ffprobe must be available on PATH.");
+
+        string directory = CreateTestDirectory();
+        try
+        {
+            short[] source = CreateSamples(57_330);
+            string wavePath = Path.Combine(directory, "variable MP3 source.wav");
+            string mp3Path = Path.Combine(directory, "variable MP3 frames.vhs");
+            WriteWave(wavePath, source, sampleRate: 44_100);
+            EncodeMp3(wavePath, mp3Path);
+
+            int[] frameLengths = ProbeAudioFrameLengths(mp3Path);
+            Assert.True(frameLengths.Length > 1);
+            int firstFrameLength = frameLengths[0];
+            Assert.True(frameLengths[1] > firstFrameLength + 16);
+            short[] decoded = DecodePcm16(mp3Path);
+            int paddedFirstFrameLength = PyAvAudioPlanePaddingStream.CalculatePaddedFrameSamples(
+                firstFrameLength);
+            int comparisonOffset = paddedFirstFrameLength + firstFrameLength;
+
+            using (var loader = new FfmpegPcm16SampleLoader(mp3Path))
+            using (FileStream input = File.OpenRead(mp3Path))
+            {
+                double[] actual = Assert.IsType<double[]>(loader.Read(
+                    input,
+                    0,
+                    comparisonOffset + 16));
+                Assert.Equal(
+                    decoded
+                        .AsSpan(firstFrameLength * 2, 16)
+                        .ToArray()
+                        .Select(value => (double)value),
+                    actual.AsSpan(comparisonOffset, 16).ToArray());
+            }
+
+            using var zeroLoader = new FfmpegPcm16SampleLoader(mp3Path);
+            using var offsetLoader = new FfmpegPcm16SampleLoader(mp3Path);
+            using FileStream zeroInput = File.OpenRead(mp3Path);
+            using FileStream offsetInput = File.OpenRead(mp3Path);
+            Assert.Equal(
+                zeroLoader.Read(zeroInput, 0, 32),
+                offsetLoader.Read(offsetInput, 40, 32));
+        }
+        finally
+        {
+            Directory.Delete(directory, recursive: true);
+        }
+    }
+
+    [Fact(DisplayName = "RF AAC and float WAV frame geometry match Release 4.0")]
+    public void RfAacAndFloatWaveFrameGeometryMatchRelease40()
+    {
+        Assert.SkipUnless(
+            CommandIsAvailable("ffmpeg") && CommandIsAvailable("ffprobe"),
+            "ffmpeg and ffprobe must be available on PATH.");
+
+        string directory = CreateTestDirectory();
+        try
+        {
+            short[] source = CreateSamples(50_000);
+            string monoWavePath = Path.Combine(directory, "AAC source.wav");
+            string aacPath = Path.Combine(directory, "AAC frames.vhs");
+            string stereoWavePath = Path.Combine(directory, "float source.wav");
+            string floatWavePath = Path.Combine(directory, "float RF frames.wav");
+            WriteWave(monoWavePath, source, sampleRate: 44_100);
+            WriteWave(stereoWavePath, source, stereo: true);
+            EncodeAac(monoWavePath, aacPath);
+            EncodeFloatWave(stereoWavePath, floatWavePath);
+
+            VerifyDecodedPlaneGeometry(aacPath);
+            VerifyDecodedPlaneGeometry(floatWavePath);
+        }
+        finally
+        {
+            Directory.Delete(directory, recursive: true);
+        }
+    }
+
+    private static short[] CreateSamples(int sampleCount = SampleCount)
+    {
+        var samples = new short[sampleCount];
         for (ulong index = 0; index < (ulong)samples.Length; index++)
         {
             ulong value = ((index * 1_103_515_245UL) + 12_345UL) >> 8;
@@ -183,6 +375,48 @@ public sealed class RfContainerLoaderIntegrationTests
         }
 
         return samples;
+    }
+
+    private static PyAvAudioPlanePaddingStream CreateVariablePaddingStream(
+        short[] source,
+        long targetSample)
+    {
+        var geometries = new Queue<PyAvAudioFrameGeometry>(
+        [
+            new PyAvAudioFrameGeometry(3, 1_000),
+            new PyAvAudioFrameGeometry(5, 1_064),
+            new PyAvAudioFrameGeometry(4, 1_128)
+        ]);
+        return new PyAvAudioPlanePaddingStream(
+            new MemoryStream(Pcm16Bytes(source)),
+            () => geometries.TryDequeue(out PyAvAudioFrameGeometry geometry) ? geometry : null,
+            targetSample);
+    }
+
+    private static short[] BuildPaddedSamples(short[] source, IReadOnlyList<int> frameLengths)
+    {
+        var output = new List<short>();
+        int sourceOffset = 0;
+        foreach (int frameLength in frameLengths)
+        {
+            Assert.InRange(frameLength, 1, source.Length - sourceOffset);
+            output.AddRange(source.AsSpan(sourceOffset, frameLength).ToArray());
+            int paddedLength = PyAvAudioPlanePaddingStream.CalculatePaddedFrameSamples(frameLength);
+            output.AddRange(new short[paddedLength - frameLength]);
+            sourceOffset += frameLength;
+        }
+
+        Assert.Equal(source.Length, sourceOffset);
+        return output.ToArray();
+    }
+
+    private static string CreateTestDirectory()
+    {
+        string directory = Path.Combine(
+            Path.GetTempPath(),
+            "vhsdecode-dotnet-container-tests-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(directory);
+        return directory;
     }
 
     private static void VerifyReads(string path, short[] source)
@@ -226,6 +460,19 @@ public sealed class RfContainerLoaderIntegrationTests
             Assert.NotNull(actual);
             Assert.Equal(readCase.Sha256, Sha256(actual));
         }
+    }
+
+    private static void VerifyDecodedPlaneGeometry(string path)
+    {
+        int[] frameLengths = ProbeAudioFrameLengths(path);
+        short[] decoded = DecodePcm16(path);
+        short[] expected = BuildPaddedSamples(decoded, frameLengths);
+        using var loader = new FfmpegPcm16SampleLoader(path);
+        using FileStream input = File.OpenRead(path);
+        Assert.Equal(
+            expected.Select(value => (double)value),
+            loader.Read(input, 0, expected.Length));
+        Assert.Null(loader.Read(input, expected.Length - 8, 16));
     }
 
     private static string Sha256(double[] samples)
@@ -317,14 +564,7 @@ public sealed class RfContainerLoaderIntegrationTests
 
     private static void EncodeFlac(string inputPath, string outputPath, bool oggContainer)
     {
-        var startInfo = new ProcessStartInfo("ffmpeg")
-        {
-            UseShellExecute = false,
-            RedirectStandardOutput = true,
-            RedirectStandardError = true,
-            CreateNoWindow = true
-        };
-        foreach (string argument in new[]
+        var arguments = new List<string>
         {
             "-y",
             "-hide_banner",
@@ -334,20 +574,68 @@ public sealed class RfContainerLoaderIntegrationTests
             inputPath,
             "-c:a",
             "flac"
-        })
-        {
-            startInfo.ArgumentList.Add(argument);
-        }
+        };
 
         if (oggContainer)
         {
-            startInfo.ArgumentList.Add("-f");
-            startInfo.ArgumentList.Add("ogg");
-            startInfo.ArgumentList.Add("-compression_level");
-            startInfo.ArgumentList.Add("6");
+            arguments.AddRange(["-f", "ogg", "-compression_level", "6"]);
         }
 
-        startInfo.ArgumentList.Add(outputPath);
+        arguments.Add(outputPath);
+        RunFfmpeg(arguments);
+    }
+
+    private static void EncodeAlac(string inputPath, string outputPath)
+        => RunFfmpeg(
+        [
+            "-y",
+            "-hide_banner",
+            "-loglevel", "error",
+            "-i", inputPath,
+            "-c:a", "alac",
+            outputPath
+        ]);
+
+    private static void EncodeMp3(string inputPath, string outputPath)
+        => RunFfmpeg(
+        [
+            "-y",
+            "-hide_banner",
+            "-loglevel", "error",
+            "-i", inputPath,
+            "-c:a", "libmp3lame",
+            "-b:a", "192k",
+            "-f", "mp3",
+            outputPath
+        ]);
+
+    private static void EncodeAac(string inputPath, string outputPath)
+        => RunFfmpeg(
+        [
+            "-y",
+            "-hide_banner",
+            "-loglevel", "error",
+            "-i", inputPath,
+            "-c:a", "aac",
+            "-b:a", "192k",
+            "-f", "adts",
+            outputPath
+        ]);
+
+    private static void EncodeFloatWave(string inputPath, string outputPath)
+        => RunFfmpeg(
+        [
+            "-y",
+            "-hide_banner",
+            "-loglevel", "error",
+            "-i", inputPath,
+            "-c:a", "pcm_f32le",
+            outputPath
+        ]);
+
+    private static void RunFfmpeg(IReadOnlyList<string> arguments)
+    {
+        ProcessStartInfo startInfo = CreateProcessStartInfo("ffmpeg", arguments);
         using Process process = Process.Start(startInfo)
             ?? throw new InvalidOperationException("Failed to start ffmpeg.");
         Task<string> standardOutput = process.StandardOutput.ReadToEndAsync();
@@ -357,6 +645,93 @@ public sealed class RfContainerLoaderIntegrationTests
         Assert.True(
             process.ExitCode == 0,
             $"ffmpeg exited with {process.ExitCode}: {standardError.Result}");
+    }
+
+    private static int[] ProbeAudioFrameLengths(string path)
+    {
+        ProcessStartInfo startInfo = CreateProcessStartInfo(
+            "ffprobe",
+        [
+            "-v", "error",
+            "-select_streams", "a:0",
+            "-show_entries", "frame=nb_samples",
+            "-of", "json",
+            path
+        ]);
+        using Process process = Process.Start(startInfo)
+            ?? throw new InvalidOperationException("Failed to start ffprobe.");
+        Task<string> standardOutput = process.StandardOutput.ReadToEndAsync();
+        Task<string> standardError = process.StandardError.ReadToEndAsync();
+        process.WaitForExit();
+        Task.WhenAll(standardOutput, standardError).GetAwaiter().GetResult();
+        Assert.True(
+            process.ExitCode == 0,
+            $"ffprobe exited with {process.ExitCode}: {standardError.Result}");
+
+        using JsonDocument document = JsonDocument.Parse(standardOutput.Result);
+        return document.RootElement
+            .GetProperty("frames")
+            .EnumerateArray()
+            .Select(frame => frame.GetProperty("nb_samples").GetInt32())
+            .ToArray();
+    }
+
+    private static short[] DecodePcm16(string path)
+    {
+        ProcessStartInfo startInfo = CreateProcessStartInfo(
+            "ffmpeg",
+        [
+            "-hide_banner",
+            "-loglevel", "error",
+            "-nostdin",
+            "-i", path,
+            "-map", "0:a:0",
+            "-af", "aformat=sample_fmts=s16:channel_layouts=mono",
+            "-f", "s16le",
+            "-acodec", "pcm_s16le",
+            "-ac", "1",
+            "-"
+        ]);
+        using Process process = Process.Start(startInfo)
+            ?? throw new InvalidOperationException("Failed to start ffmpeg.");
+        Task<string> standardError = process.StandardError.ReadToEndAsync();
+        using var output = new MemoryStream();
+        process.StandardOutput.BaseStream.CopyTo(output);
+        process.WaitForExit();
+        standardError.GetAwaiter().GetResult();
+        Assert.True(
+            process.ExitCode == 0,
+            $"ffmpeg exited with {process.ExitCode}: {standardError.Result}");
+
+        byte[] bytes = output.ToArray();
+        Assert.Equal(0, bytes.Length % sizeof(short));
+        var samples = new short[bytes.Length / sizeof(short)];
+        for (int i = 0; i < samples.Length; i++)
+        {
+            samples[i] = BinaryPrimitives.ReadInt16LittleEndian(
+                bytes.AsSpan(i * sizeof(short), sizeof(short)));
+        }
+
+        return samples;
+    }
+
+    private static ProcessStartInfo CreateProcessStartInfo(
+        string filename,
+        IReadOnlyList<string> arguments)
+    {
+        var startInfo = new ProcessStartInfo(filename)
+        {
+            UseShellExecute = false,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            CreateNoWindow = true
+        };
+        foreach (string argument in arguments)
+        {
+            startInfo.ArgumentList.Add(argument);
+        }
+
+        return startInfo;
     }
 
     private static bool CommandIsAvailable(string command)

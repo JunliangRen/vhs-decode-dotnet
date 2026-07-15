@@ -1,12 +1,20 @@
 namespace VHSDecode.Core.Rf;
 
-// PyAV exposes each converted plane's aligned capacity, including its zero-filled tail.
+internal readonly record struct PyAvAudioFrameGeometry(
+    int LogicalSamples,
+    long? PresentationRfSample);
+
+// PyAV exposes each converted plane's aligned capacity in addition to its logical samples.
 internal sealed class PyAvAudioPlanePaddingStream : Stream
 {
     private readonly Stream _source;
-    private readonly int _logicalFrameBytes;
-    private readonly byte[] _frame;
-    private int _initialSkipBytes;
+    private readonly int _fixedLogicalFrameSamples;
+    private readonly int _fixedPaddedFrameSamples;
+    private readonly Func<PyAvAudioFrameGeometry?>? _nextFrame;
+    private readonly long _targetSample;
+    private byte[] _frame;
+    private long _remainingInitialSkipSamples;
+    private bool _initialSkipResolved;
     private int _frameOffset;
     private int _frameLength;
     private bool _disposed;
@@ -45,9 +53,34 @@ internal sealed class PyAvAudioPlanePaddingStream : Stream
         }
 
         _source = source;
-        _logicalFrameBytes = checked(logicalFrameSamples * sizeof(short));
+        _fixedLogicalFrameSamples = logicalFrameSamples;
+        _fixedPaddedFrameSamples = paddedFrameSamples;
         _frame = new byte[checked(paddedFrameSamples * sizeof(short))];
-        _initialSkipBytes = checked(initialSkipSamples * sizeof(short));
+        _remainingInitialSkipSamples = initialSkipSamples;
+        _initialSkipResolved = true;
+    }
+
+    public PyAvAudioPlanePaddingStream(
+        Stream source,
+        Func<PyAvAudioFrameGeometry?> nextFrame,
+        long targetSample)
+    {
+        ArgumentNullException.ThrowIfNull(source);
+        ArgumentNullException.ThrowIfNull(nextFrame);
+        if (!source.CanRead)
+        {
+            throw new ArgumentException("Source stream must be readable.", nameof(source));
+        }
+
+        if (targetSample < 0)
+        {
+            throw new ArgumentOutOfRangeException(nameof(targetSample));
+        }
+
+        _source = source;
+        _nextFrame = nextFrame;
+        _targetSample = targetSample;
+        _frame = [];
     }
 
     public override bool CanRead => !_disposed;
@@ -132,31 +165,92 @@ internal sealed class PyAvAudioPlanePaddingStream : Stream
 
     private bool LoadFrame()
     {
-        Array.Clear(_frame);
-        int logicalBytes = 0;
-        while (logicalBytes < _logicalFrameBytes)
+        while (true)
         {
-            int read = _source.Read(_frame.AsSpan(
-                logicalBytes,
-                _logicalFrameBytes - logicalBytes));
-            if (read == 0)
+            PyAvAudioFrameGeometry? geometry = NextFrameGeometry();
+            if (geometry is null)
             {
-                break;
+                _frameOffset = 0;
+                _frameLength = 0;
+                return false;
             }
 
-            logicalBytes += read;
-        }
+            int logicalFrameSamples = geometry.Value.LogicalSamples;
+            if (logicalFrameSamples <= 0)
+            {
+                throw new InvalidDataException("FFmpeg reported an invalid audio frame length.");
+            }
 
-        if (logicalBytes == 0)
+            int paddedFrameSamples = _nextFrame is null
+                ? _fixedPaddedFrameSamples
+                : CalculatePaddedFrameSamples(logicalFrameSamples);
+            int logicalFrameBytes = checked(logicalFrameSamples * sizeof(short));
+            int paddedFrameBytes = checked(paddedFrameSamples * sizeof(short));
+            if (_frame.Length != paddedFrameBytes)
+            {
+                _frame = new byte[paddedFrameBytes];
+            }
+            else
+            {
+                Array.Clear(_frame);
+            }
+
+            int logicalBytes = 0;
+            while (logicalBytes < logicalFrameBytes)
+            {
+                int read = _source.Read(_frame.AsSpan(
+                    logicalBytes,
+                    logicalFrameBytes - logicalBytes));
+                if (read == 0)
+                {
+                    break;
+                }
+
+                logicalBytes += read;
+            }
+
+            if (logicalBytes == 0)
+            {
+                _frameOffset = 0;
+                _frameLength = 0;
+                return false;
+            }
+
+            if (_nextFrame is not null && logicalBytes != logicalFrameBytes)
+            {
+                throw new InvalidDataException(
+                    "FFmpeg ended in the middle of a reported audio frame.");
+            }
+
+            ResolveInitialSkip(geometry.Value);
+            long skippedSamples = Math.Min(_remainingInitialSkipSamples, paddedFrameSamples);
+            _remainingInitialSkipSamples -= skippedSamples;
+            if (skippedSamples == paddedFrameSamples)
+            {
+                continue;
+            }
+
+            _frameOffset = checked((int)skippedSamples * sizeof(short));
+            _frameLength = _frame.Length;
+            return true;
+        }
+    }
+
+    private PyAvAudioFrameGeometry? NextFrameGeometry()
+        => _nextFrame is null
+            ? new PyAvAudioFrameGeometry(_fixedLogicalFrameSamples, null)
+            : _nextFrame();
+
+    private void ResolveInitialSkip(PyAvAudioFrameGeometry geometry)
+    {
+        if (_initialSkipResolved)
         {
-            _frameOffset = 0;
-            _frameLength = 0;
-            return false;
+            return;
         }
 
-        _frameOffset = _initialSkipBytes;
-        _initialSkipBytes = 0;
-        _frameLength = _frame.Length;
-        return true;
+        _remainingInitialSkipSamples = geometry.PresentationRfSample.HasValue
+            ? Math.Max(0, _targetSample - geometry.PresentationRfSample.Value)
+            : 0;
+        _initialSkipResolved = true;
     }
 }

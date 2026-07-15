@@ -102,12 +102,9 @@ internal sealed unsafe partial class WinMmHiFiPreviewSink : IHiFiPreviewSink
             if (_device != 0)
             {
                 _ = NativeMethods.waveOutReset(_device);
-                uint result = NativeMethods.waveOutClose(_device);
+                // Preview shutdown is best-effort and must not mask a decode or cancellation failure.
+                _ = NativeMethods.waveOutClose(_device);
                 _device = 0;
-                if (result != 0)
-                {
-                    throw CreateException(result, "close");
-                }
             }
         }
     }

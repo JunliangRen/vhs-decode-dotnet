@@ -155,11 +155,14 @@ Implemented:
   sample offsets to FFmpeg timestamps from that rate, so `--no_resample`
   captures such as 17.9 MHz FLAC do not silently seek as if they were 40 MHz
 - converted container streams reproduce v0.4.0 PyAV `AudioResampler` plane
-  geometry: `ffprobe` supplies the source frame size, channel count, and sample
-  format, while the loader retains the observable 32-sample aligned plane
-  padding and maps seeks in that padded sample space. Release 4.0 SHA baselines
-  cover 40 kHz and 17.9 kHz mono/stereo WAV, PCM16/PCM24 FLAC, Ogg/FLAC LDF,
-  nonzero restarts beyond the 2 MB rewind window, and EOF frame flushing
+  geometry: `ffprobe` supplies stream rate/channel/format data, while FFmpeg
+  frame metadata supplies every converted frame's sample count and first-frame
+  PTS. The loader retains the observable 32-sample aligned plane padding and
+  maps seeks in that padded sample space. Release 4.0 SHA and reconstructed
+  plane baselines cover 40 kHz and 17.9 kHz mono/stereo WAV, PCM16/PCM24 FLAC,
+  Ogg/FLAC LDF, AAC, MP3, ALAC, and stereo float WAV, including MP3's short
+  initial frame, variable terminal frames, nonzero restarts beyond the 2 MB
+  rewind window, and EOF frame flushing
 - upstream-style FFmpeg stdin fallback for unrecognized RF input containers
 - upstream-style FFmpeg stdin resampling loader for raw RF inputs when
   `--inputfreq`, `-f`, or `--cxadc` requires conversion to 40 MHz, including
@@ -1085,8 +1088,8 @@ Not complete yet:
   video/reference spans, two 239330-sample bit-exact VHS luma/chroma field
   pairs, and 1,428 float32-exact channels across all 357 valid tape
   system/format/speed cases
-- remaining container codec/frame-geometry edge cases outside the verified
-  PCM WAV, native FLAC, and Ogg/FLAC LDF paths
+- remaining rare container codec/timestamp edge cases outside the verified PCM
+  WAV, native FLAC, Ogg/FLAC LDF, AAC, MP3, ALAC, and float WAV paths
 - remaining HiFi real-capture end-to-end output baselines and hosted GUI
   behavior; the command runner, Windows live preview, and GNU Radio path are
   wired
