@@ -235,12 +235,14 @@ public sealed class TbcFieldSequenceDecodeEngine
 
         _cancellationToken.ThrowIfCancellationRequested();
         int readLength = DecodeReadWindowPlanner.EstimateReadSampleCount(session, ExtraReadLines);
+        if (requestedFields.IsZero && !RequiresInitialSeek(session))
+        {
+            long zeroLengthStartSample = session.RunBounds.StartSample;
+            return new SequenceDecodeSummary([], 0, zeroLengthStartSample, zeroLengthStartSample);
+        }
+
         long begin = ResolveInitialDecodeStart(session, input, readLength);
         long startSample = begin;
-        if (requestedFields.IsZero)
-        {
-            return new SequenceDecodeSummary([], 0, startSample, startSample);
-        }
 
         var fields = retainFields ? new List<TbcDecodedField>() : null;
         var writePlanner = new FieldWritePlanner(session, retainWrites: false);
@@ -889,14 +891,15 @@ public sealed class TbcFieldSequenceDecodeEngine
 
         if (session.Spec.Name != "ld" || session.ExecutionOptions.SeekFrame == -BigInteger.One)
         {
-            return session.RunBounds.StartSample;
+            return session.RunBounds.StartPosition.ResolveForRead();
         }
 
         BigInteger targetFrame = session.ExecutionOptions.SeekFrame;
         long nominalFieldSamples = session.TbcFieldDecoder.EstimateNominalFieldSampleCount();
-        long current = session.RunBounds.StartSample > 0
-            ? session.RunBounds.StartSample
-            : ClampSamplePosition(targetFrame * 2 * nominalFieldSamples);
+        DecodeStartPosition seekStart = session.RunBounds.HasExplicitStartFrame
+            ? session.RunBounds.StartFramePosition
+            : DecodeStartPosition.FromInteger(targetFrame * 2 * nominalFieldSamples);
+        long current = seekStart.ResolveForRead();
 
         for (int retry = 0; retry < 3; retry++)
         {
@@ -922,6 +925,10 @@ public sealed class TbcFieldSequenceDecodeEngine
 
         throw new InvalidOperationException("ERROR: Seeking failed");
     }
+
+    private static bool RequiresInitialSeek(DecodeSession session)
+        => session.Spec.Name is "cvbs" or "ld"
+            && session.ExecutionOptions.SeekFrame != -BigInteger.One;
 
     private static long ClampSamplePosition(BigInteger samplePosition)
     {

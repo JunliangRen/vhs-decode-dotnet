@@ -46,7 +46,8 @@ public sealed class TbcFirstFieldDecodeEngine
     public TbcDecodedField DecodeFirstField(DecodeSession session, Stream input)
     {
         int readLength = DecodeReadWindowPlanner.EstimateReadSampleCount(session, ExtraReadLines);
-        DecodeReadWindow window = DecodeReadWindowPlanner.Resolve(session, session.RunBounds.StartSample, readLength);
+        long startSample = session.RunBounds.StartPosition.ResolveForRead();
+        DecodeReadWindow window = DecodeReadWindowPlanner.Resolve(session, startSample, readLength);
         RfDecodedSpan? span = session.StreamDecoder.Read(input, begin: window.StartSample, length: window.SampleCount);
         if (span is null)
         {

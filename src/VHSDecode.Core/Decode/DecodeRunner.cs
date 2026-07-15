@@ -279,7 +279,7 @@ public sealed class DecodeRunner
         error.WriteLine("ERROR - please paste the following into a bug report:");
         error.WriteLine(string.Create(
             CultureInfo.InvariantCulture,
-            $"current sample: {exception.CurrentSample}"));
+            $"current sample: {exception.CurrentSampleText}"));
         error.WriteLine($"arguments: {PythonNamespaceFormatter.Format(command)}");
         error.WriteLine($"Exception: {cause.Message}  Traceback:");
         WritePythonStyleTraceback(exception, cause, error);
