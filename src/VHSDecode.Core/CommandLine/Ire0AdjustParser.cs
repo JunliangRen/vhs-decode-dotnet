@@ -11,8 +11,9 @@ public static class Ire0AdjustParser
     public static bool IsValidRaw(string value)
     {
         return value
-            .Split(',', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries)
-            .All(part => SupportedValues.Contains(part.ToLowerInvariant()));
+            .Split(',')
+            .All(part => SupportedValues.Contains(
+                PythonStringSemantics.TrimWhitespace(part).ToLowerInvariant()));
     }
 
     public static string Normalize(string value)
@@ -22,8 +23,6 @@ public static class Ire0AdjustParser
             throw new ArgumentException("Allowed values: hsync, backporch");
         }
 
-        return string.Join(',', value
-            .Split(',', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries)
-            .Select(part => part.ToLowerInvariant()));
+        return value.ToLowerInvariant();
     }
 }

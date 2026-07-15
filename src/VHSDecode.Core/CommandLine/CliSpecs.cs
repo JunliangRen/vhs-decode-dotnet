@@ -329,6 +329,7 @@ public static class CliSpecs
             PythonDefaultValue = defaultValue,
             PythonConstValue = constValue,
             IsValidOptionalValue = isValidOptionalValue,
+            OptionalValueDisambiguationNames = names,
             NormalizeString = normalize,
             ParseErrorTypeName = "_parse_ire0_adjust"
         };

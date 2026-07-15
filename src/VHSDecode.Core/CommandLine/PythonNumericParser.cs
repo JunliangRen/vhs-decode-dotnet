@@ -13,7 +13,7 @@ internal static class PythonNumericParser
     {
         ArgumentNullException.ThrowIfNull(text);
 
-        (int start, int end) = TrimPythonWhitespace(text);
+        (int start, int end) = PythonStringSemantics.TrimWhitespaceBounds(text);
         var normalized = new StringBuilder(end - start);
         int index = start;
         if (index < end && text[index] is '+' or '-')
@@ -42,7 +42,7 @@ internal static class PythonNumericParser
     {
         ArgumentNullException.ThrowIfNull(text);
 
-        (int start, int end) = TrimPythonWhitespace(text);
+        (int start, int end) = PythonStringSemantics.TrimWhitespaceBounds(text);
         int index = start;
         bool negative = false;
         var normalized = new StringBuilder(end - start);
@@ -182,33 +182,4 @@ internal static class PythonNumericParser
         }
     }
 
-    private static (int Start, int End) TrimPythonWhitespace(string text)
-    {
-        int start = 0;
-        while (start < text.Length && IsPythonWhitespace(text[start]))
-        {
-            start++;
-        }
-
-        int end = text.Length;
-        while (end > start && IsPythonWhitespace(text[end - 1]))
-        {
-            end--;
-        }
-
-        return (start, end);
-    }
-
-    private static bool IsPythonWhitespace(char value)
-        => value is >= '\u0009' and <= '\u000d'
-            or >= '\u001c' and <= '\u0020'
-            or '\u0085'
-            or '\u00a0'
-            or '\u1680'
-            or >= '\u2000' and <= '\u200a'
-            or '\u2028'
-            or '\u2029'
-            or '\u202f'
-            or '\u205f'
-            or '\u3000';
 }

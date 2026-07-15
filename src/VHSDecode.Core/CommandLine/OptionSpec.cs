@@ -22,6 +22,8 @@ public sealed class OptionSpec
 
     public Func<string, bool>? IsValidOptionalValue { get; init; }
 
+    public string[]? OptionalValueDisambiguationNames { get; init; }
+
     public Func<string, string>? NormalizeString { get; init; }
 
     public Func<string, double>? ParseFrequencyMHz { get; init; }
