@@ -139,6 +139,10 @@ Implemented:
   section grouping, descriptions, and normalized upstream program names
 - parser coverage test that verifies current VHS/CVBS/LD specs accept the
   upstream decode-facing argparse option names and aliases
+- Python 3 numeric argument conversion for integer, float, and frequency
+  options, including underscore separators, Unicode decimal digits,
+  arbitrary-precision parsed integers, signed `NaN`/infinity, suffix-adjacent
+  whitespace behavior, and argparse's `-\.?\d` negative-option boundary
 - byte-for-byte regenerated v0.4.0 format parameter catalog covering all 560
   tape system/format/speed combinations, 7 CVBS systems, and 4 LD variants
 - a full decode compatibility matrix constructs filters and demodulates one
@@ -1201,7 +1205,7 @@ dotnet test VHSDecodeDotNet.slnx --no-build
 ```
 
 The current formal solution build completes with zero warnings and errors, and
-the xUnit v3 project exposes 505 independently discoverable compatibility tests
+the xUnit v3 project exposes 510 independently discoverable compatibility tests
 to `dotnet test` and Visual Studio Test Explorer. On the
 same Windows machine and fixtures, Release wall-clock measurements for one
 frame were 2.346 s versus 7.193 s for NTSC VHS and 1.651 s versus 5.865 s for

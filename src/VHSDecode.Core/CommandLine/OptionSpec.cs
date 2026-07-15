@@ -1,5 +1,3 @@
-using System.Globalization;
-
 namespace VHSDecode.Core.CommandLine;
 
 public sealed class OptionSpec
@@ -49,8 +47,8 @@ public sealed class OptionSpec
         {
             OptionValueKind.Boolean => bool.Parse(raw),
             OptionValueKind.String => NormalizeString is null ? raw : NormalizeString(raw),
-            OptionValueKind.Integer => int.Parse(raw, NumberStyles.Integer, CultureInfo.InvariantCulture),
-            OptionValueKind.Double => double.Parse(raw, NumberStyles.Float, CultureInfo.InvariantCulture),
+            OptionValueKind.Integer => PythonNumericParser.ParseInteger(raw),
+            OptionValueKind.Double => PythonNumericParser.ParseFloat(raw),
             OptionValueKind.FrequencyMHz => ParseFrequencyMHz is null
                 ? FrequencyParser.ParseMHz(raw)
                 : ParseFrequencyMHz(raw),

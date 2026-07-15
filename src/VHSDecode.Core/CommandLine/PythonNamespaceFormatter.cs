@@ -1,4 +1,5 @@
 using System.Globalization;
+using System.Numerics;
 using System.Text;
 
 namespace VHSDecode.Core.CommandLine;
@@ -63,6 +64,7 @@ internal static class PythonNamespaceFormatter
             string text => FormatString(text),
             double number => FormatFloat(number),
             float number => FormatFloat(number),
+            BigInteger integer => integer.ToString(CultureInfo.InvariantCulture),
             sbyte or byte or short or ushort or int or uint or long or ulong
                 => Convert.ToString(value, CultureInfo.InvariantCulture)!,
             _ => FormatString(Convert.ToString(value, CultureInfo.InvariantCulture) ?? string.Empty)

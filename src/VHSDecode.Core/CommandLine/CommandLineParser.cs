@@ -349,13 +349,5 @@ public sealed class CommandLineParser
         => IsOptionToken(token) && !LooksLikeNegativeNumber(token);
 
     private static bool LooksLikeNegativeNumber(string token)
-    {
-        return token.Length > 1
-            && token[0] == '-'
-            && double.TryParse(
-                token,
-                System.Globalization.NumberStyles.Float,
-                System.Globalization.CultureInfo.InvariantCulture,
-                out _);
-    }
+        => PythonNumericParser.LooksLikeArgparseNegativeNumber(token);
 }

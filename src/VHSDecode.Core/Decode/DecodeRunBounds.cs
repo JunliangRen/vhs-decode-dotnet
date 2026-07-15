@@ -1,3 +1,4 @@
+using System.Numerics;
 using VHSDecode.Core.CommandLine;
 
 namespace VHSDecode.Core.Decode;
@@ -27,6 +28,7 @@ public readonly record struct DecodeRunBounds(long StartSample, int RequestedFie
         return value switch
         {
             int intValue => intValue,
+            BigInteger integerValue => (double)integerValue,
             double doubleValue => doubleValue,
             null => 0.0,
             _ => Convert.ToDouble(value, System.Globalization.CultureInfo.InvariantCulture)
