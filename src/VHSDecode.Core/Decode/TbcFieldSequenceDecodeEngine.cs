@@ -267,6 +267,7 @@ public sealed class TbcFieldSequenceDecodeEngine
         void CompleteField(TbcDecodedField completedField, int decodedIndex)
         {
             fields?.Add(completedField);
+            int fieldsWrittenBeforeAdd = writePlanner.WrittenFieldCount;
             IReadOnlyList<(TbcDecodedField Field, TbcFieldOrderDecision Decision)> writes =
                 writePlanner.Add(completedField);
             if (writes.Count > 0)
@@ -311,7 +312,7 @@ public sealed class TbcFieldSequenceDecodeEngine
                     DecodeSessionLogWriter.Status(
                         session,
                         FormatLaserDiscFrameStatus(
-                            decodedIndex,
+                            fieldsWrittenBeforeAdd,
                             session.RunBounds.RequestedFieldCount / 2,
                             rawFrame,
                             interpretation,
@@ -319,7 +320,7 @@ public sealed class TbcFieldSequenceDecodeEngine
                             laserDiscLeadOut));
                 }
             }
-            else if (session.Spec.Name == "cvbs" && !isFirstField)
+            else if (session.Spec.Name == "cvbs" && !isFirstField && writes.Count > 0)
             {
                 int rawFrame = checked((int)Math.Floor(
                     ComputeFieldDiskLocation(session, completedField) / 2.0));
@@ -342,7 +343,13 @@ public sealed class TbcFieldSequenceDecodeEngine
             {
                 Task<TbcDecodedField?>? prefetchedField = cvbsPrefetch.Take();
                 field = prefetchedField is null
-                    ? ReadFieldWithContext(session, input, begin, readLength, decodedFieldCount)
+                    ? ReadFieldWithContext(
+                        session,
+                        input,
+                        begin,
+                        readLength,
+                        decodedFieldCount,
+                        writePlanner.WrittenFieldCount)
                     : prefetchedField.GetAwaiter().GetResult();
                 if (field is not null && autoMtf is not null)
                 {
@@ -360,7 +367,8 @@ public sealed class TbcFieldSequenceDecodeEngine
                             input,
                             begin,
                             readLength,
-                            decodedFieldCount);
+                            decodedFieldCount,
+                            writePlanner.WrittenFieldCount);
                     }
                 }
 
@@ -433,7 +441,8 @@ public sealed class TbcFieldSequenceDecodeEngine
                     input,
                     nextBegin,
                     readLength,
-                    fieldNumber: decodedFieldCount));
+                    fieldNumber: decodedFieldCount,
+                    writtenFieldCount: writePlanner.WrittenFieldCount));
             }
 
             if (pendingCvbsField is not null)
@@ -548,7 +557,13 @@ public sealed class TbcFieldSequenceDecodeEngine
             try
             {
                 _cancellationToken.ThrowIfCancellationRequested();
-                _ = ReadFieldWithContext(session, input, begin, readLength, decodedFieldCount);
+                _ = ReadFieldWithContext(
+                    session,
+                    input,
+                    begin,
+                    readLength,
+                    decodedFieldCount,
+                    writePlanner.WrittenFieldCount);
                 _cancellationToken.ThrowIfCancellationRequested();
             }
             catch (TbcFieldDecodeRecoveryException ex)
@@ -575,14 +590,14 @@ public sealed class TbcFieldSequenceDecodeEngine
     }
 
     internal static string FormatLaserDiscFrameStatus(
-        int decodedFieldIndex,
+        int fieldsWritten,
         int estimatedFrames,
         int rawFrame,
         LaserDiscVbiInterpretation interpretation,
         bool leadIn,
         bool leadOut)
     {
-        int frame = (decodedFieldIndex / 2) + 1;
+        int frame = (fieldsWritten / 2) + 1;
         string diskType = interpretation.IsClv ? "CLV" : "CAV";
         string prefix = $"Frame {frame}/{estimatedFrames}: File Frame {rawFrame}: {diskType} ";
         if (interpretation.IsClv
@@ -710,7 +725,8 @@ public sealed class TbcFieldSequenceDecodeEngine
         Stream input,
         long begin,
         int readLength,
-        int fieldNumber)
+        int fieldNumber,
+        int writtenFieldCount)
     {
         return Task.Factory.StartNew(
             () =>
@@ -721,7 +737,8 @@ public sealed class TbcFieldSequenceDecodeEngine
                     input,
                     begin,
                     readLength,
-                    fieldNumber);
+                    fieldNumber,
+                    writtenFieldCount);
                 _cancellationToken.ThrowIfCancellationRequested();
                 return field;
             },
@@ -732,15 +749,14 @@ public sealed class TbcFieldSequenceDecodeEngine
 
     private static void LogRecovery(DecodeSession session, TbcFieldDecodeRecoveryException exception)
     {
-        if (session.Spec.Name != "vhs")
+        string? message = (session.Spec.Name, exception.Kind) switch
         {
-            return;
-        }
-
-        string? message = exception.Kind switch
-        {
-            TbcFieldDecodeRecoveryKind.NoSyncPulses => "Unable to find any sync pulses, jumping 100 ms",
-            TbcFieldDecodeRecoveryKind.NoFirstHSync => "Unable to determine start of field - dropping field",
+            ("vhs", TbcFieldDecodeRecoveryKind.NoSyncPulses) =>
+                "Unable to find any sync pulses, jumping 100 ms",
+            ("vhs", TbcFieldDecodeRecoveryKind.NoFirstHSync) =>
+                "Unable to determine start of field - dropping field",
+            ("cvbs", TbcFieldDecodeRecoveryKind.NoSyncPulses) =>
+                "Unable to find any sync pulses, skipping one second",
             _ => null
         };
         if (message is not null)
@@ -794,11 +810,17 @@ public sealed class TbcFieldSequenceDecodeEngine
         Stream input,
         long begin,
         int readLength,
-        int fieldNumber)
+        int fieldNumber,
+        int? writtenFieldCount = null)
     {
         try
         {
-            return _readField(session, input, begin, readLength, fieldNumber);
+            int effectiveFieldNumber = ResolveReadFieldNumber(
+                _usesSessionReader,
+                session.Spec.Name,
+                fieldNumber,
+                writtenFieldCount);
+            return _readField(session, input, begin, readLength, effectiveFieldNumber);
         }
         catch (TbcFieldDecodeRecoveryException)
         {
@@ -816,6 +838,19 @@ public sealed class TbcFieldSequenceDecodeEngine
         {
             throw new DecodeFieldReadException(begin, ex);
         }
+    }
+
+    internal static int ResolveReadFieldNumber(
+        bool usesSessionReader,
+        string decoderName,
+        int decodedFieldNumber,
+        int? writtenFieldCount)
+    {
+        return usesSessionReader
+            && decoderName is "cvbs" or "ld"
+            && writtenFieldCount.HasValue
+                ? writtenFieldCount.Value
+                : decodedFieldNumber;
     }
 
     internal static bool ShouldDeferCvbsOutputConversion(DecodeSession session)
@@ -1165,7 +1200,15 @@ public sealed class TbcFieldSequenceDecodeEngine
             }
 
             ClosePayloads();
-            _metadata.Complete();
+            if (_session.Spec.Name == "cvbs" && _writtenFieldCount == 0)
+            {
+                _metadata.LeaveIncompleteJson();
+            }
+            else
+            {
+                _metadata.Complete();
+            }
+
             _sqlite?.Complete(_metadata.FieldCount, _metadata.LastOutputConverter);
 
             _completed = true;

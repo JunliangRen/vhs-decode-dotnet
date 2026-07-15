@@ -489,6 +489,46 @@ public void CvbsParserHandlesAgcOptions()
     AssertClose(0.25, command.Get<double>("agc_speed"), 1e-12);
 }
 
+[Fact(DisplayName = "CVBS runner preserves v0.4.0 chroma-trap constructor failure")]
+public void CvbsRunnerPreservesReleaseChromaTrapConstructorFailure()
+{
+    string tempDirectory = Path.Combine(Path.GetTempPath(), "vhsdecode-dotnet-tests-" + Guid.NewGuid().ToString("N"));
+    Directory.CreateDirectory(tempDirectory);
+    try
+    {
+        string inputPath = Path.Combine(tempDirectory, "input.s16");
+        string outputBase = Path.Combine(tempDirectory, "capture");
+        File.WriteAllBytes(inputPath, [0, 0]);
+        var output = new StringWriter();
+        var error = new StringWriter();
+
+        AssertEqual(1, new DecodeRunner().Run(
+            Parse(CliSpecs.Cvbs, [
+                "--pal",
+                "--chroma_trap",
+                inputPath,
+                outputBase
+            ]),
+            output,
+            error,
+            TestContext.Current.CancellationToken));
+
+        AssertEqual(string.Empty, output.ToString());
+        AssertEqual(
+            "ChromaSepClass.__init__() missing 1 required positional argument: 'logger'"
+            + Environment.NewLine,
+            error.ToString());
+        AssertTrue(File.Exists(outputBase + ".log"));
+        AssertEqual(0L, new FileInfo(outputBase + ".log").Length);
+        AssertFalse(File.Exists(outputBase + ".tbc"));
+        AssertFalse(File.Exists(outputBase + ".tbc.json"));
+    }
+    finally
+    {
+        Directory.Delete(tempDirectory, recursive: true);
+    }
+}
+
 [Fact(DisplayName = "ld parser handles audio and filter options")]
 public void LdParserHandlesAudioAndFilterOptions()
 {
@@ -2138,6 +2178,54 @@ public void PortedComplexAngleMatchesExpectedQuadrants()
     AssertClose(Math.PI / 2, result[1], 1e-12);
     AssertClose(Math.PI, result[2], 1e-12);
     AssertClose(-Math.PI / 2, result[3], 1e-12);
+}
+
+[Fact(DisplayName = "TBC field sequence engine omits empty CVBS metadata")]
+public void TbcFieldSequenceEngineOmitsEmptyCvbsMetadata()
+{
+    string tempDirectory = Path.Combine(Path.GetTempPath(), "vhsdecode-dotnet-tests-" + Guid.NewGuid().ToString("N"));
+    Directory.CreateDirectory(tempDirectory);
+    try
+    {
+        using DecodeSession session = DecodeSessionFactory.Create(Parse(CliSpecs.Cvbs, [
+            "--pal",
+            "input.s16",
+            Path.Combine(tempDirectory, "empty-cvbs")
+        ]));
+        var error = new StringWriter();
+        session.RuntimeReporter = new DecodeRuntimeReporter(TextWriter.Null, error);
+        DecodeSessionLogWriter.Write(session);
+        int reads = 0;
+        var engine = new TbcFieldSequenceDecodeEngine(
+            readField: (_, _, _, _, _) => reads++ == 0
+                ? throw new TbcFieldDecodeRecoveryException(
+                    TbcFieldDecodeRecoveryKind.NoSyncPulses,
+                    40_000_000,
+                    "no sync",
+                    stopAfterDecodedFields: true)
+                : null);
+
+        TbcFieldSequenceDecodeResult result = engine.TryDecodeAndWrite(session, Stream.Null);
+
+        AssertTrue(result.Success);
+        AssertEqual(2, reads);
+        AssertEqual(0, result.WrittenFieldCount);
+        AssertEqual(
+            "Unable to find any sync pulses, skipping one second" + Environment.NewLine,
+            error.ToString());
+        AssertContains(
+            File.ReadAllText(session.OutputBase + ".log"),
+            " - lddecode - ERROR - Unable to find any sync pulses, skipping one second");
+        AssertTrue(File.Exists(result.Paths!.TbcPath));
+        AssertEqual(0L, new FileInfo(result.Paths.TbcPath).Length);
+        AssertFalse(File.Exists(result.Paths.JsonPath));
+        AssertEqual("{", File.ReadAllText(result.Paths.JsonPath + ".tmp"));
+        AssertFalse(File.Exists(result.Paths.JsonPath + ".fields.tmp"));
+    }
+    finally
+    {
+        Directory.Delete(tempDirectory, recursive: true);
+    }
 }
 
 [Fact(DisplayName = "FFT round-trips complex samples")]
@@ -7361,6 +7449,21 @@ public void SyncAnalyzerClassifiesPulsesAndBuildsLineLocations()
     AssertSequence([100, 190, 310, 400], upstreamLocations.Locations);
     AssertTrue(upstreamLocations.Filled.All(filled => !filled));
 
+    ClassifiedSyncPulse[] equalDistancePulses =
+    [
+        new(SyncPulseKind.HSync, new Pulse(90, 40), true),
+        new(SyncPulseKind.HSync, new Pulse(110, 40), true),
+        new(SyncPulseKind.HSync, new Pulse(300, 40), true)
+    ];
+    LineLocationResult equalDistanceLocations = analyzer.BuildUpstreamLineLocations(
+        equalDistancePulses,
+        referencePulse: 100.0,
+        referenceLine: 0,
+        meanLineLength: 100.0,
+        processedLines: 1,
+        preferEarlierPulseOnEqualDistance: true);
+    AssertSequence([90], equalDistanceLocations.Locations);
+
     FormatParameterSet palVhs = FormatCatalog.Default.GetTapeParameters("PAL", "VHS", "sp");
     SyncAnalyzer fromParams = SyncAnalyzer.FromParameters(palVhs, sampleRateHz: 40_000_000.0);
     AssertClose(2560.0, fromParams.NominalLineLength, 1e-12);
@@ -7528,6 +7631,150 @@ public void VBlankSyncResolverMatchesUpstreamDistanceConsensus()
         Equalizing2End: 150,
         FollowingHSync: 200);
     AssertFalse(VBlankSyncResolver.HasValidStateMachineTiming(compressed, 100.0, 6));
+}
+
+[Fact(DisplayName = "PAL CVBS initial second field uses Release 4.0 local vblank anchor")]
+public void PalCvbsInitialSecondFieldUsesReleaseFourLocalVblankAnchor()
+{
+    var group = new VBlankPulseGroup(
+        PreviousHSync: 88_577,
+        Equalizing1Start: 89_857,
+        VSyncStart: 96_257,
+        Equalizing2Start: 102_657,
+        Equalizing2End: 107_777,
+        FollowingHSync: 110_337);
+
+    Line0Resolution resolution = TbcFieldDecodePipeline.TryResolveInitialPalCvbsSecondFieldLine0(
+        decodeType: "cvbs",
+        system: "PAL",
+        hasPreviousSync: false,
+        firstVBlank: group,
+        numEqualizingPulses: 5,
+        nominalLineLength: 2_560.0,
+        estimatedFirstField: false)!;
+    AssertClose(87_297.0, resolution.Location, 0.0);
+    AssertClose(110_337.0, resolution.FirstHSyncLocation, 0.0);
+    AssertEqual(90, resolution.InitialSyncConfidence);
+
+    VBlankSyncEstimate firstField = TbcFieldDecodePipeline.TryResolvePalDirectLocalVBlankEstimate(
+        decodeType: "cvbs",
+        system: "PAL",
+        firstVBlank: group with { VSyncStart = 32_256 },
+        numEqualizingPulses: 5,
+        nominalLineLength: 2_560.0,
+        isFirstField: true)!;
+    AssertClose(24_576.0, firstField.Line0Location, 0.0);
+    AssertClose(45_056.0, firstField.FirstHSyncLocation, 0.0);
+    AssertEqual<Line0Resolution?>(
+        null,
+        TbcFieldDecodePipeline.TryResolveInitialPalCvbsSecondFieldLine0(
+            decodeType: "cvbs",
+            system: "PAL",
+            hasPreviousSync: true,
+            firstVBlank: group,
+            numEqualizingPulses: 5,
+            nominalLineLength: 2_560.0,
+            estimatedFirstField: false));
+}
+
+[Fact(DisplayName = "PAL LD initial second field uses Release 4.0 firstFieldH anchor")]
+public void PalLaserDiscInitialSecondFieldUsesReleaseFourFirstFieldHAnchor()
+{
+    var group = new VBlankPulseGroup(
+        PreviousHSync: 88_577,
+        Equalizing1Start: 89_857,
+        VSyncStart: 96_257,
+        Equalizing2Start: 102_657,
+        Equalizing2End: 107_777,
+        FollowingHSync: 110_337);
+
+    Line0Resolution resolution = TbcFieldDecodePipeline.TryResolveInitialPalLaserDiscSecondFieldLine0(
+        decodeType: "ld",
+        system: "PAL",
+        hasPreviousSync: false,
+        firstVBlank: group,
+        numEqualizingPulses: 5,
+        nominalLineLength: 2_560.0,
+        estimatedFirstField: false)!;
+
+    AssertClose(87_297.0, resolution.Location, 0.0);
+    AssertClose(110_337.0, resolution.FirstHSyncLocation, 0.0);
+    AssertEqual(90, resolution.InitialSyncConfidence);
+
+    VBlankSyncEstimate projected = TbcFieldDecodePipeline.TryResolvePalLaserDiscNextVBlankEstimate(
+        decodeType: "ld",
+        system: "PAL",
+        nextVBlank: group with { VSyncStart = 879_662 },
+        numEqualizingPulses: 5,
+        nominalLineLength: 2_560.0,
+        meanLineLength: 2_560.0,
+        isFirstField: true,
+        currentFieldLines: 312)!;
+    AssertClose(71_982.0, projected.Line0Location, 0.0);
+    AssertClose(92_462.0, projected.FirstHSyncLocation, 0.0);
+
+    double? previousProjection = TbcFieldDecodePipeline.TryProjectPalLaserDiscPreviousLine0(
+        decodeType: "ld",
+        system: "PAL",
+        previousEndLineAbsoluteSample: 1_553_888 + 870_718.2733659535,
+        spanStartSample: 2_378_400);
+    AssertClose(46_206.27336595347, previousProjection!.Value, 1e-9);
+
+    AssertEqual<Line0Resolution?>(
+        null,
+        TbcFieldDecodePipeline.TryResolveInitialPalLaserDiscSecondFieldLine0(
+            decodeType: "ld",
+            system: "PAL",
+            hasPreviousSync: true,
+            firstVBlank: group,
+            numEqualizingPulses: 5,
+            nominalLineLength: 2_560.0,
+            estimatedFirstField: false));
+}
+
+[Fact(DisplayName = "LD line-zero consensus matches Release 4.0 three-way median")]
+public void LaserDiscLineZeroConsensusMatchesRelease40ThreeWayMedian()
+{
+    var first = new VBlankSyncEstimate(
+        Line0Location: 100.0,
+        FirstHSyncLocation: 1_100.0,
+        FirstHSyncLine: 10.0,
+        ValidDistanceCount: 6,
+        UnalignedFirstHSyncLocation: 1_099.0);
+    var next = new VBlankSyncEstimate(
+        Line0Location: 300.0,
+        FirstHSyncLocation: 1_300.0,
+        FirstHSyncLine: 10.0,
+        ValidDistanceCount: 6,
+        UnalignedFirstHSyncLocation: 1_299.0);
+    var previous = new Line0Resolution(
+        Location: 305.0,
+        UsedFallback: false,
+        ExpectedFirstField: null,
+        ExpectedFirstFieldConfidence: 0,
+        UsedPreviousEstimate: true,
+        FirstHSyncLocation: 1_305.0,
+        UnalignedFirstHSyncLocation: 1_304.0,
+        InitialSyncConfidence: 90);
+
+    Line0Resolution selected = TbcFieldDecodePipeline.SelectLegacyThreeWayLine0Consensus(
+        first,
+        next,
+        previous);
+
+    AssertClose(300.0, selected.Location, 1e-12);
+    AssertClose(1_300.0, selected.FirstHSyncLocation, 1e-12);
+    AssertClose(1_299.0, selected.UnalignedFirstHSyncLocation, 1e-12);
+    AssertFalse(selected.UsedFallback);
+    AssertFalse(selected.UsedPreviousEstimate);
+    AssertEqual(100, selected.InitialSyncConfidence);
+
+    Line0Resolution tied = TbcFieldDecodePipeline.SelectLegacyThreeWayLine0Consensus(
+        first,
+        next with { Line0Location = first.Line0Location },
+        previous);
+    AssertClose(first.Line0Location, tied.Location, 1e-12);
+    AssertClose(next.FirstHSyncLocation, tied.FirstHSyncLocation, 1e-12);
 }
 
 [Fact(DisplayName = "fallback vsync resolver matches upstream pulse priorities")]
@@ -7822,6 +8069,14 @@ public void CvbsLineLocationRepairPreservesOverriddenDerivativeMask()
     AssertClose(305.0, repaired.Locations[3], 1e-12);
     AssertClose(205.0, repaired.Locations[2], 1e-12);
     AssertClose(405.0, repaired.Locations[4], 1e-12);
+}
+
+[Fact(DisplayName = "PAL CVBS retains Release 4.0 cubic interpolation lookahead")]
+public void PalCvbsRetainsRelease40CubicInterpolationLookahead()
+{
+    AssertEqual(326, TbcFieldDecodePipeline.NonLaserDiscProcessedLineCount("cvbs", "PAL", 313));
+    AssertEqual(323, TbcFieldDecodePipeline.NonLaserDiscProcessedLineCount("vhs", "PAL", 313));
+    AssertEqual(273, TbcFieldDecodePipeline.NonLaserDiscProcessedLineCount("cvbs", "NTSC", 263));
 }
 
 [Fact(DisplayName = "LD line location builder repairs player skips from field end")]
@@ -10233,6 +10488,53 @@ public void TbcFieldDecodePipelineAppliesLdAgc()
         noAgcMedianBurstIre * converter.HzIre / agcOutputConverter.HzIre,
         agcMedianBurstIre,
         1e-12);
+
+    var diagnostics = new List<(string Level, string Message)>();
+    var warningPipeline = new TbcFieldDecodePipeline(
+        analyzer,
+        renderer,
+        converter,
+        "NTSC",
+        TbcDropoutDetectionOptions.Disabled,
+        laserDiscAgcOptions: agcOptions,
+        decodeLaserDiscVbi: true,
+        diagnosticLogger: (level, message) => diagnostics.Add((level, message)));
+    double[] malformedVideo = Enumerable.Repeat(1100.0, 2_400).ToArray();
+    double[] malformedLowPass = Enumerable.Repeat(1100.0, malformedVideo.Length).ToArray();
+    for (int line = 0; line < 23; line++)
+    {
+        PaintPulse(malformedVideo, line * 100, 10, 950.0);
+        PaintPulse(malformedLowPass, line * 100, 10, 950.0);
+    }
+
+    for (int i = 0; i < 8; i++)
+    {
+        malformedVideo[(15 * 100) + 12 + i] = 2050.0;
+    }
+
+    double[] agcLineLocations = Enumerable.Range(0, 24).Select(line => line * 100.0).ToArray();
+    InvokePrivateMethod(
+        warningPipeline,
+        "ResolveLaserDiscAgcConverter",
+        new RfDecodedSpan(
+            0,
+            [],
+            malformedVideo,
+            malformedVideo,
+            VideoLowPass: malformedLowPass),
+        agcLineLocations,
+        100.0,
+        true,
+        100,
+        converter,
+        0);
+
+    AssertEqual(1, diagnostics.Count);
+    AssertEqual("WARNING", diagnostics[0].Level);
+    AssertEqual(
+        "At field #0, Auto-level detection malfunction "
+            + "(vsync IRE computed at -15.79, nominal ~= -40), possible disk skipping",
+        diagnostics[0].Message);
 }
 
 [Fact(DisplayName = "TBC field decode pipeline computes LD RF ratio")]
@@ -10395,6 +10697,48 @@ public void LaserDiscPalPilotSliceUsesNominalInputFrequency()
     AssertEqual(100, start);
     AssertEqual(7, length);
     AssertClose(0.25, lineOffset, 1e-12);
+}
+
+[Fact(DisplayName = "LD line sample rate uses Release 4.0 rounded nominal line length")]
+public void LaserDiscLineSampleRateUsesRelease40RoundedNominalLineLength()
+{
+    var spec = new TbcFrameSpec(
+        "NTSC",
+        OutputLineLength: 4,
+        OutputLineCount: 4,
+        OutputSampleRateHz: 14_318_181.818181818,
+        ColourBurstStart: null,
+        ColourBurstEnd: null,
+        ActiveVideoStart: null,
+        ActiveVideoEnd: null);
+    var converter = new VideoOutputConverter(
+        ire0: 0.0,
+        hzIre: 1.0,
+        outputZero: 256,
+        vsyncIre: -40.0,
+        outputScale: 10.0);
+    var analyzer = new SyncAnalyzer(
+        sampleRateHz: 1_000_000.0,
+        linePeriodUs: 100.4,
+        hsyncPulseUs: 10.0,
+        equalizingPulseUs: 5.0,
+        vsyncPulseUs: 20.0);
+    var pipeline = new TbcFieldDecodePipeline(
+        analyzer,
+        new TbcFieldRenderer(spec, converter),
+        converter,
+        "NTSC",
+        TbcDropoutDetectionOptions.Disabled,
+        decodeLaserDiscVbi: true);
+
+    double samplesPerUsec = (double)InvokePrivateMethod(
+        pipeline,
+        "LaserDiscLineSamplesPerUsec",
+        new double[] { 0.0, 120.0, 240.0 },
+        0,
+        (int?)2)!;
+
+    AssertClose(1.2, samplesPerUsec, 1e-12);
 }
 
 [Fact(DisplayName = "TBC field decode determines PAL eight-field burst phase transactionally")]
@@ -10590,6 +10934,69 @@ public void TbcFieldDecodePipelineRefinesLdNtscBurstLineLocations()
     AssertSequence(
         [10.0 - expectedFscPhaseShift, 20.0 - expectedFscPhaseShift],
         shiftedProbe.Locations);
+}
+
+[Fact(DisplayName = "LD NTSC burst search matches Release 4.0 zero-crossing limit")]
+public void LaserDiscNtscBurstSearchMatchesRelease40ZeroCrossingLimit()
+{
+    const double fscMHz = 0.25;
+    var spec = new TbcFrameSpec(
+        "NTSC",
+        OutputLineLength: 4,
+        OutputLineCount: 2,
+        OutputSampleRateHz: 14_318_180.0,
+        ColourBurstStart: null,
+        ColourBurstEnd: null,
+        ActiveVideoStart: null,
+        ActiveVideoEnd: null);
+    var converter = new VideoOutputConverter(
+        ire0: 0.0,
+        hzIre: 1_000.0,
+        outputZero: 256,
+        vsyncIre: -40.0,
+        outputScale: 10.0);
+    var analyzer = new SyncAnalyzer(
+        sampleRateHz: 1_000_000.0,
+        linePeriodUs: 100.0,
+        hsyncPulseUs: 10.0,
+        equalizingPulseUs: 5.0,
+        vsyncPulseUs: 20.0);
+    var pipeline = new TbcFieldDecodePipeline(
+        analyzer,
+        new TbcFieldRenderer(spec, converter),
+        converter,
+        "NTSC",
+        TbcDropoutDetectionOptions.Disabled,
+        decodeLaserDiscVbi: true,
+        laserDiscNtscBurstRefineOptions: new LaserDiscNtscBurstRefineOptions(fscMHz));
+
+    var burst = new double[300];
+    for (int offset = 0; offset < 28; offset++)
+    {
+        burst[84 + offset] = offset switch
+        {
+            0 => -10.0,
+            >= 20 and <= 24 => 3.0,
+            _ => -1.0
+        };
+    }
+
+    double[] video = burst.ToArray();
+    bool found = pipeline.TryComputeLaserDiscLineBurst(
+        video,
+        burst,
+        [0.0, 100.0, 200.0],
+        line: 0,
+        previousPhaseAdjustment: 0.125,
+        fieldLineBoundary: 2,
+        fscMHz,
+        converter.HzIre,
+        out bool rising,
+        out double phaseAdjustment);
+
+    AssertTrue(found);
+    AssertFalse(rising);
+    AssertClose(0.125, phaseAdjustment, 0.0);
 }
 
 [Fact(DisplayName = "TBC field decode pipeline emits chroma samples")]
@@ -11728,6 +12135,9 @@ public void LaserDiscFrameStatusFormatsClvAndPersistentLeadStates()
     AssertEqual(
         "Frame 1/10: File Frame 4: CLV Timecode 83:xx",
         TbcFieldSequenceDecodeEngine.FormatLaserDiscFrameStatus(1, 10, 4, earlyClv, false, false));
+    AssertEqual(
+        "Frame 1/10: File Frame 4: CLV Timecode 83:xx",
+        TbcFieldSequenceDecodeEngine.FormatLaserDiscFrameStatus(0, 10, 4, earlyClv, false, false));
 
     var clv = earlyClv with
     {
@@ -12074,6 +12484,15 @@ public void TbcFieldSequenceEngineWritesSqliteDebugDb()
     }
 }
 
+[Fact(DisplayName = "TBC SQLite schema is checkout-line-ending independent")]
+public void TbcSqliteSchemaIsCheckoutLineEndingIndependent()
+{
+    const string checkoutSchema = "CREATE TABLE first (id INTEGER);\r\nCREATE TABLE second (id INTEGER);\r\n";
+    const string upstreamSchema = "CREATE TABLE first (id INTEGER);\nCREATE TABLE second (id INTEGER);\n";
+
+    AssertEqual(upstreamSchema, TbcSqliteMetadataWriter.NormalizeSchemaSql(checkoutSchema));
+}
+
 [Fact(DisplayName = "TBC field sequence engine honors decoded next-field offsets")]
 public void TbcFieldSequenceEngineHonorsDecodedNextFieldOffsets()
 {
@@ -12128,6 +12547,43 @@ public void CvbsOutputDeferralCoversSerialAndWorkerAutoSyncPaths()
     AssertTrue(TbcFieldSequenceDecodeEngine.ShouldDeferCvbsOutputConversion(worker));
     AssertFalse(TbcFieldSequenceDecodeEngine.ShouldDeferCvbsOutputConversion(staticLevels));
     AssertFalse(TbcFieldSequenceDecodeEngine.ShouldDeferCvbsOutputConversion(clamp));
+}
+
+[Fact(DisplayName = "CVBS and LD session reads use Release 4.0 fields-written numbering")]
+public void CvbsAndLdSessionReadsUseReleaseFourFieldsWrittenNumbering()
+{
+    int[] writtenFieldCounts = [0, 0, 0, 1];
+    int[] sessionFieldNumbers = writtenFieldCounts
+        .Select((writtenFieldCount, decodedFieldNumber) =>
+            TbcFieldSequenceDecodeEngine.ResolveReadFieldNumber(
+                usesSessionReader: true,
+                decoderName: "cvbs",
+                decodedFieldNumber,
+                writtenFieldCount))
+        .ToArray();
+
+    AssertTrue(sessionFieldNumbers.SequenceEqual([0, 0, 0, 1]));
+    AssertEqual(
+        1,
+        TbcFieldSequenceDecodeEngine.ResolveReadFieldNumber(
+            usesSessionReader: true,
+            decoderName: "ld",
+            decodedFieldNumber: 3,
+            writtenFieldCount: 1));
+    AssertEqual(
+        3,
+        TbcFieldSequenceDecodeEngine.ResolveReadFieldNumber(
+            usesSessionReader: false,
+            decoderName: "cvbs",
+            decodedFieldNumber: 3,
+            writtenFieldCount: 1));
+    AssertEqual(
+        3,
+        TbcFieldSequenceDecodeEngine.ResolveReadFieldNumber(
+            usesSessionReader: true,
+            decoderName: "vhs",
+            decodedFieldNumber: 3,
+            writtenFieldCount: 1));
 }
 
 [Fact(DisplayName = "CVBS worker prefetch exposes next-field levels before current conversion")]
@@ -12306,6 +12762,71 @@ public void CvbsSerialLengthLookaheadIsDecodedButNotWritten()
         AssertTrue(logLines[1].EndsWith(
             "DEBUG - File Frame 0: CAV Pulldown/Telecine Frame",
             StringComparison.Ordinal));
+    }
+    finally
+    {
+        Directory.Delete(tempDirectory, recursive: true);
+    }
+}
+
+[Fact(DisplayName = "CVBS dropped initial second field does not report a file frame")]
+public void CvbsDroppedInitialSecondFieldDoesNotReportAFileFrame()
+{
+    string tempDirectory = Path.Combine(Path.GetTempPath(), "vhsdecode-dotnet-tests-" + Guid.NewGuid().ToString("N"));
+    Directory.CreateDirectory(tempDirectory);
+    try
+    {
+        string outputBase = Path.Combine(tempDirectory, "cvbs-start-fileloc");
+        using DecodeSession session = DecodeSessionFactory.Create(Parse(CliSpecs.Cvbs, [
+            "--pal",
+            "--threads", "0",
+            "--length", "1",
+            "input.s16",
+            outputBase
+        ]));
+        session.RuntimeReporter = new DecodeRuntimeReporter(
+            TextWriter.Null,
+            TextWriter.Null,
+            () => 0.0);
+        int sampleCount = session.TbcFrameSpec.FieldSampleCount;
+        TbcDecodedField[] sourceFields =
+        [
+            BuildSyntheticTbcField(
+                    0,
+                    new ushort[sampleCount],
+                    BuildLineLocationsForAdvance(session, 300.0),
+                    detectedFirstField: false)
+                with { DiskLocation = 1.0, FieldPhaseId = 8 },
+            BuildSyntheticTbcField(
+                    300,
+                    new ushort[sampleCount],
+                    BuildLineLocationsForAdvance(session, 300.0),
+                    detectedFirstField: true)
+                with { DiskLocation = 2.0, FieldPhaseId = 1 },
+            BuildSyntheticTbcField(
+                    600,
+                    new ushort[sampleCount],
+                    BuildLineLocationsForAdvance(session, 300.0),
+                    detectedFirstField: false)
+                with { DiskLocation = 3.0, FieldPhaseId = 8 }
+        ];
+        int reads = 0;
+
+        TbcDecodedField? ReadField(DecodeSession _, Stream __, long ___, int ____, int fieldNumber)
+        {
+            reads++;
+            return fieldNumber < sourceFields.Length ? sourceFields[fieldNumber] : null;
+        }
+
+        TbcFieldSequenceDecodeResult result = new TbcFieldSequenceDecodeEngine(readField: ReadField)
+            .TryDecodeAndWrite(session, Stream.Null);
+
+        AssertTrue(result.Success);
+        AssertEqual(3, reads);
+        AssertEqual(2, result.WrittenFieldCount);
+        string log = File.ReadAllText(outputBase + ".log");
+        AssertFalse(log.Contains("File Frame 0:", StringComparison.Ordinal));
+        AssertTrue(log.Contains("File Frame 1: CAV Pulldown/Telecine Frame", StringComparison.Ordinal));
     }
     finally
     {
@@ -13314,6 +13835,28 @@ public void TbcMetadataWriterEmitsLdUpstreamFields()
             StringComparison.Ordinal));
         AssertTrue(verboseJson.Contains("\"sampleRate\": 0", StringComparison.Ordinal));
 
+        var floatMeanPreTbcVideo = new double[verboseRawInput.Length];
+        PaintPreTbcMetricSlice(
+            floatMeanPreTbcVideo,
+            verboseSession,
+            verboseLineLocations,
+            isFirstField: true,
+            line: verboseBlackLine,
+            startUsec: verboseBlackStart,
+            lengthUsec: verboseBlackLength,
+            delaySamples: 0,
+            sampleAt: i => i == 0
+                ? verboseSession.VideoOutput.Ire0 - 0.5
+                : verboseSession.VideoOutput.Ire0);
+        string floatMeanJsonPath = Path.Combine(tempDirectory, "float-mean.tbc.json");
+        TbcOutputMetadataWriter.WriteJson(
+            verboseSession,
+            [cavFirst with { PreTbcVideoSamples = floatMeanPreTbcVideo }, cavSecond],
+            floatMeanJsonPath);
+        string floatMeanJson = File.ReadAllText(floatMeanJsonPath);
+        AssertTrue(floatMeanJson.Contains("\"blackLinePreTBCIRE\": 0.0", StringComparison.Ordinal));
+        AssertFalse(floatMeanJson.Contains("\"blackLinePreTBCIRE\": -0.0", StringComparison.Ordinal));
+
         string pythonFloatJsonPath = Path.Combine(tempDirectory, "python-float.tbc.json");
         TbcOutputMetadataWriter.WriteJson(
             session,
@@ -13379,7 +13922,7 @@ public void TbcMetadataWriterEmitsLdUpstreamFields()
         JsonElement verboseSecondMetrics = verboseFields[1].GetProperty("vitsMetrics");
         AssertTrue(JsonDouble(verboseSecondMetrics, "ntscLine19Burst70IRE") > 0.0);
         AssertTrue(double.IsFinite(JsonDouble(verboseSecondMetrics, "ntscLine19Color3DRawSNR")));
-        AssertTrue(JsonDouble(verboseSecondMetrics, "ntscLine19Burst0IRE") > 0.0);
+        AssertClose(0.0, JsonDouble(verboseSecondMetrics, "ntscLine19Burst0IRE"), 0.0);
         AssertStringSequence(
             [
                 "ntscLine19ColorPhase",
@@ -13422,7 +13965,49 @@ public void TbcMetadataWriterEmitsLdUpstreamFields()
         AssertTrue(JsonDouble(verbosePalFirstMetrics, "greyPSNR") > 0.0);
         AssertClose(50.0, JsonDouble(verbosePalFirstMetrics, "greyIRE"), 0.2);
         JsonElement verbosePalSecondMetrics = verbosePalFields[1].GetProperty("vitsMetrics");
-        AssertTrue(JsonDouble(verbosePalSecondMetrics, "palVITSBurst50Level") > 0.0);
+        double expectedPalBurst50Level = Math.Round(
+            5.0 / verbosePalSession.VideoOutput.OutputScale,
+            3,
+            MidpointRounding.ToEven);
+        AssertClose(expectedPalBurst50Level, JsonDouble(verbosePalSecondMetrics, "palVITSBurst50Level"), 0.0);
+    }
+    finally
+    {
+        Directory.Delete(tempDirectory, recursive: true);
+    }
+}
+
+[Fact(DisplayName = "TBC metadata writer matches NumPy float64 standard deviation")]
+public void TbcMetadataWriterMatchesNumpyFloat64StandardDeviation()
+{
+    double repeatedValue = BitConverter.UInt64BitsToDouble(0x40605381BDD2B899UL);
+    double[] repeatedValues = Enumerable.Repeat(repeatedValue, 887).ToArray();
+    double standardDeviation = TbcOutputMetadataWriter.StandardDeviationNumpyFloat64(repeatedValues);
+    AssertEqual(0x3D20000000000000UL, BitConverter.DoubleToUInt64Bits(standardDeviation));
+
+    string tempDirectory = Path.Combine(Path.GetTempPath(), "vhsdecode-dotnet-tests-" + Guid.NewGuid().ToString("N"));
+    Directory.CreateDirectory(tempDirectory);
+    try
+    {
+        using DecodeSession session = DecodeSessionFactory.Create(Parse(CliSpecs.Cvbs, [
+            "--pal",
+            "--clamp_agc",
+            "--agc_set_gain",
+            "1.25",
+            "input.s16",
+            Path.Combine(tempDirectory, "clamped")
+        ]));
+        string jsonPath = Path.Combine(tempDirectory, "clamped.tbc.json");
+        TbcOutputMetadataWriter.WriteJson(
+            session,
+            [BuildSyntheticTbcField(
+                startSample: 0,
+                samples: Enumerable.Repeat(ushort.MaxValue, session.TbcFrameSpec.FieldSampleCount).ToArray())],
+            jsonPath);
+
+        using JsonDocument document = JsonDocument.Parse(File.ReadAllText(jsonPath));
+        JsonElement metrics = document.RootElement.GetProperty("fields")[0].GetProperty("vitsMetrics");
+        AssertClose(310.9, JsonDouble(metrics, "bPSNR"), 0.0);
     }
     finally
     {

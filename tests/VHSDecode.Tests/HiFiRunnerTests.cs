@@ -486,6 +486,7 @@ public sealed class HiFiRunnerTests
     [Fact(DisplayName = "HiFi GNU Radio startup failures release their worker resources")]
     public void HiFiGnuRadioStartupFailuresReleaseTheirWorkerResources()
     {
+        CancellationToken cancellationToken = TestContext.Current.CancellationToken;
         int port = GnuRadioRfAfeBridge.FindAvailablePort(5_800, 5_900)
             ?? throw new InvalidOperationException("No test ZMQ port is available.");
         using (var blocker = new ResponseSocket())
@@ -496,7 +497,7 @@ public sealed class HiFiRunnerTests
             InvalidOperationException exception = Assert.Throws<InvalidOperationException>(
                 () => new HiFiGnuRadioSink(
                     TextWriter.Null,
-                    TestContext.Current.CancellationToken,
+                    cancellationToken,
                     port));
 
             Assert.Equal(
@@ -505,10 +506,9 @@ public sealed class HiFiRunnerTests
             Assert.NotNull(exception.InnerException);
         }
 
-        using var recovered = new HiFiGnuRadioSink(
-            TextWriter.Null,
-            TestContext.Current.CancellationToken,
-            port);
+        using HiFiGnuRadioSink recovered = CreateGnuRadioSinkAfterPortRelease(
+            port,
+            cancellationToken);
     }
 
     [Fact(DisplayName = "HiFi carrier bias measurement matches Release 4.0")]
@@ -1026,6 +1026,9 @@ public sealed class HiFiRunnerTests
             Assert.Equal(SampleCount, reader.TotalSamples);
             Assert.Equal(SampleCount, read);
             Assert.Equal(expected, actual);
+            Assert.Equal(
+                0,
+                reader.Read(new float[1], TestContext.Current.CancellationToken));
         }
         finally
         {
@@ -1310,6 +1313,32 @@ public sealed class HiFiRunnerTests
 
     private static string Lines(params string[] lines)
         => string.Join(Environment.NewLine, lines) + Environment.NewLine;
+
+    private static HiFiGnuRadioSink CreateGnuRadioSinkAfterPortRelease(
+        int port,
+        CancellationToken cancellationToken)
+    {
+        var timeout = Stopwatch.StartNew();
+        InvalidOperationException? lastFailure = null;
+        while (timeout.Elapsed < TimeSpan.FromSeconds(5))
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            try
+            {
+                return new HiFiGnuRadioSink(TextWriter.Null, cancellationToken, port);
+            }
+            catch (InvalidOperationException ex) when (
+                ex.InnerException is AddressAlreadyInUseException)
+            {
+                lastFailure = ex;
+                Thread.Sleep(25);
+            }
+        }
+
+        throw new InvalidOperationException(
+            $"ZMQ port {port} was not released within the test timeout.",
+            lastFailure);
+    }
 
     private static void AssertFfmpegFallback(
         HiFiInputProcessOpenCall? openCall,

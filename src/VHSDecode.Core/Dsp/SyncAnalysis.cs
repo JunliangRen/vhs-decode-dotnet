@@ -514,7 +514,8 @@ public sealed class SyncAnalyzer
         double referencePulse,
         int referenceLine,
         double meanLineLength,
-        int processedLines)
+        int processedLines,
+        bool preferEarlierPulseOnEqualDistance = false)
     {
         if (!double.IsFinite(referencePulse))
         {
@@ -562,7 +563,8 @@ public sealed class SyncAnalyzer
                 }
 
                 double nextDistance = Math.Abs(pulseLocations[searchIndex + 1] - expected);
-                if (nextDistance > currentDistance)
+                if (nextDistance > currentDistance
+                    || (preferEarlierPulseOnEqualDistance && nextDistance == currentDistance))
                 {
                     break;
                 }

@@ -102,6 +102,29 @@ public static class TbcOutputMetadataWriter
             }
         }
 
+        public void LeaveIncompleteJson()
+        {
+            if (_completed)
+            {
+                throw new InvalidOperationException("The streaming metadata writer was already completed.");
+            }
+
+            CloseFieldsWriter();
+            try
+            {
+                File.Delete(_jsonPath);
+                File.WriteAllText(
+                    _jsonPath + ".tmp",
+                    "{",
+                    new UTF8Encoding(encoderShouldEmitUTF8Identifier: false));
+                _completed = true;
+            }
+            finally
+            {
+                File.Delete(_fieldsPath);
+            }
+        }
+
         public void Dispose()
         {
             CloseFieldsWriter();
@@ -924,7 +947,10 @@ public static class TbcOutputMetadataWriter
                         source: field.PreTbcVideoSamples,
                         out double[] blackPreTbcValues))
                 {
-                    AddRawMetric(metrics, "blackLinePreTBCIRE", session.VideoOutput.HzToIre(Mean(blackPreTbcValues)));
+                    AddRawMetric(
+                        metrics,
+                        "blackLinePreTBCIRE",
+                        MeanPreTbcIreNumpyFloat32(blackPreTbcValues, session.VideoOutput));
                 }
 
                 AddRawMetric(metrics, "blackLinePostTBCIRE", MeanIre(blackValues, session, quantizedOutput));
@@ -1026,7 +1052,7 @@ public static class TbcOutputMetadataWriter
                     diff[i] = (currentBurst[i] - previousBurst[i]) / 2.0;
                 }
 
-                AddRawMetric(metrics, "ntscLine19Burst0IRE", Math.Sqrt(2.0) * RootMeanSquare(diff) / session.VideoOutput.OutputScale);
+                AddRawMetric(metrics, "ntscLine19Burst0IRE", Math.Sqrt(2.0) * StandardDeviation(diff) / session.VideoOutput.OutputScale);
             }
         }
     }
@@ -1047,7 +1073,7 @@ public static class TbcOutputMetadataWriter
         }
         else if (TryReadTbcSlice(field.Samples, session, line: 13, startUsec: 36.0, lengthUsec: 20.0, out double[] burst50))
         {
-            AddRawMetric(metrics, "palVITSBurst50Level", RootMeanSquare(burst50) / session.VideoOutput.OutputScale);
+            AddRawMetric(metrics, "palVITSBurst50Level", StandardDeviation(burst50) / session.VideoOutput.OutputScale);
         }
     }
 
@@ -1324,6 +1350,71 @@ public static class TbcOutputMetadataWriter
         return sum / values.Length;
     }
 
+    private static double MeanPreTbcIreNumpyFloat32(
+        IReadOnlyList<double> values,
+        VideoOutputConverter converter)
+    {
+        if (values.Count == 0)
+        {
+            return 0.0;
+        }
+
+        float mean = PairwiseSumNumpyFloat32(values, 0, values.Count) / values.Count;
+        return (mean - (float)converter.Ire0) / (float)converter.HzIre;
+    }
+
+    private static float PairwiseSumNumpyFloat32(
+        IReadOnlyList<double> values,
+        int start,
+        int count)
+    {
+        // NumPy reduces float32 means recursively in 128-value blocks with eight accumulators.
+        const int pairwiseBlockSize = 128;
+        if (count < 8)
+        {
+            float sum = -0.0f;
+            for (int i = 0; i < count; i++)
+            {
+                sum += (float)values[start + i];
+            }
+
+            return sum;
+        }
+
+        if (count <= pairwiseBlockSize)
+        {
+            Span<float> lanes = stackalloc float[8];
+            for (int lane = 0; lane < lanes.Length; lane++)
+            {
+                lanes[lane] = (float)values[start + lane];
+            }
+
+            int index = 8;
+            int vectorizedEnd = count - (count % lanes.Length);
+            for (; index < vectorizedEnd; index += lanes.Length)
+            {
+                for (int lane = 0; lane < lanes.Length; lane++)
+                {
+                    lanes[lane] += (float)values[start + index + lane];
+                }
+            }
+
+            float sum = ((lanes[0] + lanes[1]) + (lanes[2] + lanes[3]))
+                + ((lanes[4] + lanes[5]) + (lanes[6] + lanes[7]));
+            for (; index < count; index++)
+            {
+                sum += (float)values[start + index];
+            }
+
+            return sum;
+        }
+
+        int leftCount = count / 2;
+        leftCount -= leftCount % 8;
+        return PairwiseSumNumpyFloat32(values, start, leftCount)
+            + PairwiseSumNumpyFloat32(values, start + leftCount, count - leftCount);
+    }
+
     private static float StandardDeviationFloat32(ReadOnlySpan<float> values)
     {
         float mean = MeanFloat32(values);
@@ -1546,37 +1637,79 @@ public static class TbcOutputMetadataWriter
     }
 
     private static double StandardDeviation(IReadOnlyList<double> values)
+        => StandardDeviationNumpyFloat64(values);
+
+    internal static double StandardDeviationNumpyFloat64(IReadOnlyList<double> values)
     {
         if (values.Count == 0)
         {
             return 0.0;
         }
 
-        double mean = Mean(values);
-        double sumSquares = 0.0;
+        double mean = PairwiseSumNumpyFloat64(values, 0, values.Count) / values.Count;
+        var squaredDistances = new double[values.Count];
         for (int i = 0; i < values.Count; i++)
         {
             double distance = values[i] - mean;
-            sumSquares += distance * distance;
+            squaredDistances[i] = distance * distance;
         }
 
-        return Math.Sqrt(sumSquares / values.Count);
+        double variance = PairwiseSumNumpyFloat64(
+            squaredDistances,
+            0,
+            squaredDistances.Length) / squaredDistances.Length;
+        return Math.Sqrt(variance);
     }
 
-    private static double RootMeanSquare(IReadOnlyList<double> values)
+    private static double PairwiseSumNumpyFloat64(
+        IReadOnlyList<double> values,
+        int start,
+        int count)
     {
-        if (values.Count == 0)
+        const int pairwiseBlockSize = 128;
+        if (count < 8)
         {
-            return 0.0;
+            double sum = -0.0;
+            for (int i = 0; i < count; i++)
+            {
+                sum += values[start + i];
+            }
+
+            return sum;
         }
 
-        double sumSquares = 0.0;
-        for (int i = 0; i < values.Count; i++)
+        if (count <= pairwiseBlockSize)
         {
-            sumSquares += values[i] * values[i];
+            Span<double> lanes = stackalloc double[8];
+            for (int lane = 0; lane < lanes.Length; lane++)
+            {
+                lanes[lane] = values[start + lane];
+            }
+
+            int index = 8;
+            int vectorizedEnd = count - (count % lanes.Length);
+            for (; index < vectorizedEnd; index += lanes.Length)
+            {
+                for (int lane = 0; lane < lanes.Length; lane++)
+                {
+                    lanes[lane] += values[start + index + lane];
+                }
+            }
+
+            double sum = ((lanes[0] + lanes[1]) + (lanes[2] + lanes[3]))
+                + ((lanes[4] + lanes[5]) + (lanes[6] + lanes[7]));
+            for (; index < count; index++)
+            {
+                sum += values[start + index];
+            }
+
+            return sum;
         }
 
-        return Math.Sqrt(sumSquares / values.Count);
+        int leftCount = count / 2;
+        leftCount -= leftCount % 8;
+        return PairwiseSumNumpyFloat64(values, start, leftCount)
+            + PairwiseSumNumpyFloat64(values, start + leftCount, count - leftCount);
     }
 
     private static bool InRange(double value, double minimum, double maximum)
