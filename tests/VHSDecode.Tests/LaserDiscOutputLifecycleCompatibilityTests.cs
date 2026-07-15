@@ -171,10 +171,102 @@ public sealed class LaserDiscOutputLifecycleCompatibilityTests
         }
     }
 
+    [Fact(DisplayName = "LD sidecar creation order matches v0.4.0")]
+    public void LdSidecarCreationOrderMatchesV040()
+    {
+        string tempDirectory = CreateTempDirectory();
+        try
+        {
+            string outputBase = Path.Combine(tempDirectory, "creation-order");
+            using DecodeSession session = CreateNtscSession(
+                outputBase,
+                "--preEFM",
+                "--RF_TBC",
+                "--AC3");
+            var createdPaths = new List<string>();
+            var writer = new LaserDiscEfmOutputWriter(path =>
+            {
+                createdPaths.Add(path);
+                return new TrackingWriteStream();
+            });
+
+            using ILaserDiscFieldOutputSession output = writer.Open(session);
+
+            Assert.Equal(
+                [
+                    outputBase + ".pcm",
+                    outputBase + ".efm",
+                    outputBase + ".prefm",
+                    outputBase + ".tbc.ldf",
+                    outputBase + ".ac3"
+                ],
+                createdPaths);
+        }
+        finally
+        {
+            Directory.Delete(tempDirectory, recursive: true);
+        }
+    }
+
+    [Fact(DisplayName = "LD EFM creation failures retain earlier PCM artifact like v0.4.0")]
+    public void LdEfmCreationFailuresRetainEarlierPcmArtifactLikeV040()
+    {
+        string tempDirectory = CreateTempDirectory();
+        try
+        {
+            string outputBase = Path.Combine(tempDirectory, "efm-open-failure");
+            using DecodeSession session = CreateSession(outputBase);
+            TbcDecodedField field = BuildField(session) with
+            {
+                AudioPcm = [100, -100],
+                Efm = BuildEfmSquareWave(2048)
+            };
+            var engine = new TbcFieldSequenceDecodeEngine(
+                efmOutputWriter: new LaserDiscEfmOutputWriter(path =>
+                {
+                    if (path.EndsWith(".efm", StringComparison.OrdinalIgnoreCase))
+                    {
+                        throw new IOException("synthetic EFM creation failure");
+                    }
+
+                    return File.Create(path);
+                }),
+                readField: OneFieldReader(field));
+
+            TbcFieldSequenceDecodeResult result = engine.TryDecodeAndWrite(
+                session,
+                Stream.Null,
+                maxFields: 1);
+
+            Assert.False(result.Success);
+            Assert.Contains("synthetic EFM creation failure", result.Message, StringComparison.Ordinal);
+            Assert.Equal(0, new FileInfo(outputBase + ".tbc").Length);
+            Assert.Equal(0, new FileInfo(outputBase + ".pcm").Length);
+            Assert.False(File.Exists(outputBase + ".efm"));
+            Assert.False(File.Exists(outputBase + ".tbc.json"));
+            Assert.False(File.Exists(outputBase + ".tbc.json.tmp"));
+            Assert.False(File.Exists(outputBase + ".tbc.json.fields.tmp"));
+            Assert.False(File.Exists(outputBase + ".tbc.db"));
+        }
+        finally
+        {
+            Directory.Delete(tempDirectory, recursive: true);
+        }
+    }
+
     private static DecodeSession CreateSession(string outputBase, params string[] options)
+        => CreateSessionForSystem(outputBase, "--PAL", options);
+
+    private static DecodeSession CreateNtscSession(string outputBase, params string[] options)
+        => CreateSessionForSystem(outputBase, "--NTSC", options);
+
+    private static DecodeSession CreateSessionForSystem(
+        string outputBase,
+        string systemOption,
+        params string[] options)
     {
         string[] arguments = [
-            "--PAL",
+            systemOption,
             "--threads",
             "0",
             .. options,

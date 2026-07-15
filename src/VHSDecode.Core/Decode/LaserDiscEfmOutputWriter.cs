@@ -101,14 +101,14 @@ public sealed class LaserDiscEfmOutputWriter : ILaserDiscEfmOutputWriter
         {
             try
             {
+                _pcmOutput = audioOptions.DecodeAnalogAudio
+                    ? createOutput(session.OutputBase + ".pcm")
+                    : null;
                 _efmOutput = audioOptions.DecodeDigitalAudio
                     ? createOutput(session.OutputBase + ".efm")
                     : null;
                 _preEfmOutput = audioOptions.DecodeDigitalAudio && audioOptions.WritePreEfm
                     ? createOutput(session.OutputBase + ".prefm")
-                    : null;
-                _pcmOutput = audioOptions.DecodeAnalogAudio
-                    ? createOutput(session.OutputBase + ".pcm")
                     : null;
                 _rfTbcOutput = audioOptions.WriteRfTbc
                     ? createOutput(session.OutputBase + ".tbc.ldf")
