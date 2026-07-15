@@ -2106,10 +2106,8 @@ public void DecodeRunnerHandlesEmptyNativeDecodes()
         AssertFalse(nativeError.ToString().Contains("The .NET decode engine is not complete yet", StringComparison.Ordinal));
         AssertEqual(0L, new FileInfo(nativeBase + ".tbc").Length);
         AssertEqual(0L, new FileInfo(nativeBase + "_chroma.tbc").Length);
-        using (JsonDocument nativeDocument = JsonDocument.Parse(File.ReadAllText(nativeBase + ".tbc.json")))
-        {
-            AssertEqual(0, nativeDocument.RootElement.GetProperty("fields").GetArrayLength());
-        }
+        AssertFalse(File.Exists(nativeBase + ".tbc.json"));
+        AssertEqual("{", File.ReadAllText(nativeBase + ".tbc.json.tmp"));
         string nativeLog = File.ReadAllText(nativeBase + ".log");
         AssertFalse(nativeLog.Contains("vhs-decode-dotnet", StringComparison.Ordinal));
         AssertContains(nativeLog, " - lddecode - DEBUG - Sys Parameters:");
@@ -2134,24 +2132,27 @@ public void DecodeRunnerHandlesEmptyNativeDecodes()
 
         string ldInput = Path.Combine(tempDirectory, "input.s16");
         File.WriteAllBytes(ldInput, [0, 0, 1, 0]);
+        string ldBase = Path.Combine(tempDirectory, "ld-pal");
         var ldPalWarning = new StringWriter();
         int ldExit = new DecodeRunner().Run(
-            Parse(CliSpecs.LaserDisc, ["--PAL", "--ntsc_audio_rate", ldInput, Path.Combine(tempDirectory, "ld-pal")]),
+            Parse(CliSpecs.LaserDisc, ["--PAL", "--ntsc_audio_rate", ldInput, ldBase]),
             TextWriter.Null,
             ldPalWarning,
             TestContext.Current.CancellationToken);
         AssertEqual(0, ldExit);
         AssertContains(ldPalWarning.ToString(), "WARNING: --ntsc_audio_rate ignored for PAL (audio is already frame-locked at 44100hz)");
         AssertContains(ldPalWarning.ToString(), "Completed without handling any frames.");
-        AssertEqual(0L, new FileInfo(Path.Combine(tempDirectory, "ld-pal.tbc")).Length);
-        AssertEqual(0L, new FileInfo(Path.Combine(tempDirectory, "ld-pal.efm")).Length);
-        AssertEqual(0L, new FileInfo(Path.Combine(tempDirectory, "ld-pal.pcm")).Length);
-        string ldDbPath = Path.Combine(tempDirectory, "ld-pal.tbc.db");
+        AssertEqual(0L, new FileInfo(ldBase + ".tbc").Length);
+        AssertEqual(0L, new FileInfo(ldBase + ".efm").Length);
+        AssertEqual(0L, new FileInfo(ldBase + ".pcm").Length);
+        AssertFalse(File.Exists(ldBase + ".tbc.json"));
+        AssertEqual("{", File.ReadAllText(ldBase + ".tbc.json.tmp"));
+        string ldDbPath = ldBase + ".tbc.db";
         AssertTrue(File.Exists(ldDbPath));
-        AssertEqual(1L, SqliteLong(ldDbPath, "SELECT COUNT(*) FROM capture"));
+        AssertEqual(0L, SqliteLong(ldDbPath, "SELECT COUNT(*) FROM capture"));
         AssertEqual(0L, SqliteLong(ldDbPath, "SELECT COUNT(*) FROM field_record"));
         AssertContains(
-            File.ReadAllText(Path.Combine(tempDirectory, "ld-pal.log")),
+            File.ReadAllText(ldBase + ".log"),
             " - lddecode - DEBUG - ld-decode version vhs_decode:g4315520");
 
         string resamplingBase = Path.Combine(tempDirectory, "resampling");
@@ -9328,6 +9329,7 @@ public void DecodeCancellationFinalizesPartialOutputAndMatchesUpstreamStreams()
         string partialBase = Path.Combine(tempDirectory, "partial");
         using DecodeSession session = DecodeSessionFactory.Create(Parse(CliSpecs.Vhs, [
             "--pal",
+            "--write_db",
             "input.u8",
             partialBase
         ]));
@@ -9371,6 +9373,10 @@ public void DecodeCancellationFinalizesPartialOutputAndMatchesUpstreamStreams()
 
         AssertFalse(File.Exists(partialBase + ".tbc.json.tmp"));
         AssertFalse(File.Exists(partialBase + ".tbc.json.fields.tmp"));
+        AssertEqual(1L, SqliteLong(partialBase + ".tbc.db", "SELECT COUNT(*) FROM field_record"));
+        AssertEqual(
+            1L,
+            SqliteLong(partialBase + ".tbc.db", "SELECT number_of_sequential_fields FROM capture"));
 
         string inputPath = Path.Combine(tempDirectory, "empty.u8");
         File.WriteAllBytes(inputPath, []);
@@ -9399,10 +9405,8 @@ public void DecodeCancellationFinalizesPartialOutputAndMatchesUpstreamStreams()
         AssertEqual(1, exitCode);
         AssertEqual(termination, output.ToString());
         AssertEqual(string.Empty, error.ToString());
-        using (JsonDocument runnerJson = JsonDocument.Parse(File.ReadAllText(runnerBase + ".tbc.json")))
-        {
-            AssertEqual(0, runnerJson.RootElement.GetProperty("fields").GetArrayLength());
-        }
+        AssertFalse(File.Exists(runnerBase + ".tbc.json"));
+        AssertEqual("{", File.ReadAllText(runnerBase + ".tbc.json.tmp"));
 
         var ldOutput = new StringWriter();
         var ldError = new StringWriter();
@@ -9598,6 +9602,9 @@ public void DecodeReadErrorsReportContextAndFinalizePartialOutput()
         }
 
         AssertEqual(1L, SqliteLong(outputBase + ".tbc.db", "SELECT COUNT(*) FROM field_record"));
+        AssertEqual(
+            1L,
+            SqliteLong(outputBase + ".tbc.db", "SELECT number_of_sequential_fields FROM capture"));
         AssertFalse(File.Exists(outputBase + ".tbc.json.tmp"));
         AssertFalse(File.Exists(outputBase + ".tbc.json.fields.tmp"));
     }
@@ -11909,8 +11916,8 @@ public void TbcFieldSequenceEngineWritesMultipleFields()
         AssertEqual(0, empty.WrittenFieldCount);
         AssertEqual(0L, new FileInfo(empty.Paths!.TbcPath).Length);
         AssertEqual(0L, new FileInfo(empty.Paths.ChromaPath!).Length);
-        using JsonDocument emptyDocument = JsonDocument.Parse(File.ReadAllText(empty.Paths.JsonPath));
-        AssertEqual(0, emptyDocument.RootElement.GetProperty("fields").GetArrayLength());
+        AssertFalse(File.Exists(empty.Paths.JsonPath));
+        AssertEqual("{", File.ReadAllText(empty.Paths.JsonPath + ".tmp"));
     }
     finally
     {
@@ -11941,8 +11948,8 @@ public void TbcFieldSequenceEngineAcceptsStdinStreams()
         AssertEqual(0, result.WrittenFieldCount);
         AssertEqual(0L, new FileInfo(outputBase + ".tbc").Length);
         AssertEqual(0L, new FileInfo(outputBase + "_chroma.tbc").Length);
-        using JsonDocument document = JsonDocument.Parse(File.ReadAllText(outputBase + ".tbc.json"));
-        AssertEqual(0, document.RootElement.GetProperty("fields").GetArrayLength());
+        AssertFalse(File.Exists(outputBase + ".tbc.json"));
+        AssertEqual("{", File.ReadAllText(outputBase + ".tbc.json.tmp"));
         AssertTrue(input.CanRead);
     }
     finally

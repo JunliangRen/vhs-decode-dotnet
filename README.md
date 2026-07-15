@@ -900,11 +900,12 @@ Implemented:
 - LD line-location lookahead lengths now follow the parity-specific v0.4.0
   formulas: NTSC uses `outlinecount + 10`, while PAL includes its 2/3-line
   field offset plus three additional lookahead lines
-- valid inputs that end before one complete field now follow the upstream clean
-  EOF path: empty TBC/JSON and enabled chroma/LD audio sidecars are created,
-  VHS/LD report `Completed without handling any frames.`, and the process exits
-  successfully; non-empty VHS/LD completion uses the exact upstream
-  `Completed: saving JSON and exiting.` stderr text
+- valid inputs that end before one complete field now follow the upstream
+  zero-field path: TBC and enabled chroma/LD audio sidecars are empty, no final
+  JSON is published, `.tbc.json.tmp` contains only `{`, and an enabled SQLite
+  database contains its schema but no capture or field rows; VHS/LD report
+  `Completed without handling any frames.` and exit successfully, while
+  non-empty completion uses the exact upstream completion text
 - runtime reporting now mirrors v0.4.0 across LD, VHS, and CVBS: frame status
   text is logged at DEBUG while stdout receives the same 80-column padded
   carriage-return line, INFO-and-higher diagnostics go to stderr and first
@@ -916,10 +917,11 @@ Implemented:
   at each 500-field boundary; VHS then checks free output-disk space and, below
   10 GiB, emits the exact pause/resume messages and polls once per second until
   space returns, while disk-query errors are ignored and LD/CVBS never query it
-- Ctrl+C now cancels LD, VHS, and CVBS field decoding plus VHS low-disk waits,
-  finalizes any partial TBC/JSON output without temporary metadata files, emits
-  v0.4.0's exact termination line on stderr for LD or stdout for VHS/CVBS, then
-  reports cleanup timing and exits with status 1
+- Ctrl+C now cancels LD, VHS, and CVBS field decoding plus VHS low-disk waits;
+  after at least one committed field it finalizes partial TBC/JSON output
+  without temporary metadata files, while pre-field cancellation preserves the
+  zero-field JSON-dumper artifact; it then emits v0.4.0's exact termination
+  line, reports cleanup timing, and exits with status 1
 - unexpected LD, VHS, and CVBS field-read exceptions now emit v0.4.0's exact
   bug-report header, current sample, argparse `Namespace(...)` value spelling
   and ordering, and exception line on stderr, followed by a Python-shaped
@@ -957,8 +959,13 @@ Implemented:
   sidecars stay open and preserve their cross-field state instead of retaining
   every decoded payload until EOF; VITS/3D metadata is calculated before the
   large RF/video/chroma/audio arrays are released, JSON fields stream through
-  a temporary fragment, and SQLite rows are inserted incrementally in one
-  transaction, bounding sequence memory to the field-order/previous-field state
+  a temporary fragment, and SQLite rows are inserted incrementally, bounding
+  sequence memory to the field-order/previous-field state
+- SQLite capture/PCM rows are created lazily immediately before the first field
+  row and committed first like v0.4.0; each accepted field then refreshes and
+  commits `number_of_sequential_fields`, so recovery databases never retain the
+  previous `0` count, and output-stage failures finalize earlier JSON/DB state
+  while preserving the original error
 - deterministic 32768-sample v0.4.0 block baselines cover all 357 valid
   system/format/speed combinations across PAL, PAL-M, NTSC, MESECAM, 405, 819,
   and NLINHA: all 1,428 `demod`, `demod_05`, `demod_burst`, and `envelope`
@@ -1057,9 +1064,9 @@ Implemented:
   are byte-exact with respective SHA-256 hashes
   `6EDE21D03EF83CEB25231E57A79921023DD146B802BE081C2AA07F59E2DD302C`
   and `8139B8B89EB9516ACD0CA6B2502214A5DF0B2598527B8A76B132E6174BBBD60B`
-- zero-field CVBS runs preserve v0.4.0's JSON-dumper failure artifacts: an
-  empty `.tbc`, no final `.tbc.json`, a one-byte `.tbc.json.tmp` containing
-  `{`, and the `Unable to find any sync pulses, skipping one second` log entry
+- zero-field CVBS runs additionally preserve the
+  `Unable to find any sync pulses, skipping one second` log entry alongside the
+  shared LD/VHS/CVBS zero-field artifacts described above
 - on the same varying-level fixture, default non-clamped CVBS with `--threads 0`
   now reproduces v0.4.0's synchronous speculative-field timing: each requested
   field is rendered with the next decoded field's `ire0`/`hz_ire`, the producer
@@ -1168,7 +1175,7 @@ dotnet test VHSDecodeDotNet.slnx --no-build
 ```
 
 The current formal solution build completes with zero warnings and errors, and
-the xUnit v3 project exposes 475 independently discoverable compatibility tests
+the xUnit v3 project exposes 481 independently discoverable compatibility tests
 to `dotnet test` and Visual Studio Test Explorer. On the
 same Windows machine and fixtures, Release wall-clock measurements for one
 frame were 2.346 s versus 7.193 s for NTSC VHS and 1.651 s versus 5.865 s for

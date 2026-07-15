@@ -178,12 +178,26 @@ public sealed class TbcFieldSequenceDecodeEngine
                 }
                 : result;
         }
-        catch (Exception ex) when (ex is OperationCanceledException or DecodeFieldReadException)
+        catch (Exception ex)
         {
             if (!outputCompleted)
             {
-                output ??= new StreamingOutputSession(session, _efmOutputWriter);
-                _ = output.Complete();
+                if (output is null && ex is OperationCanceledException or DecodeFieldReadException)
+                {
+                    output = new StreamingOutputSession(session, _efmOutputWriter);
+                }
+
+                if (output is not null)
+                {
+                    try
+                    {
+                        _ = output.Complete();
+                    }
+                    catch
+                    {
+                        // Preserve the exception that interrupted decoding.
+                    }
+                }
             }
 
             throw;
@@ -1017,12 +1031,21 @@ public sealed class TbcFieldSequenceDecodeEngine
         }
 
         IReadOnlyList<TbcDecodedField> metadataFields = _efmOutputWriter.Write(session, writtenFields);
-        TbcOutputMetadataWriter.WriteJson(
-            session,
-            metadataFields,
-            paths.JsonPath,
-            writtenOrder,
-            writtenFields);
+        if (metadataFields.Count == 0)
+        {
+            using var metadata = new TbcOutputMetadataWriter.StreamingWriter(session, paths.JsonPath);
+            metadata.LeaveIncompleteJson();
+        }
+        else
+        {
+            TbcOutputMetadataWriter.WriteJson(
+                session,
+                metadataFields,
+                paths.JsonPath,
+                writtenOrder,
+                writtenFields);
+        }
+
         if (session.Spec.Name == "ld" || session.ExecutionOptions.WriteDebugData)
         {
             TbcSqliteMetadataWriter.Write(
@@ -1200,7 +1223,7 @@ public sealed class TbcFieldSequenceDecodeEngine
             }
 
             ClosePayloads();
-            if (_session.Spec.Name == "cvbs" && _writtenFieldCount == 0)
+            if (_writtenFieldCount == 0)
             {
                 _metadata.LeaveIncompleteJson();
             }
@@ -1209,7 +1232,7 @@ public sealed class TbcFieldSequenceDecodeEngine
                 _metadata.Complete();
             }
 
-            _sqlite?.Complete(_metadata.FieldCount, _metadata.LastOutputConverter);
+            _sqlite?.Complete(_metadata.FieldCount);
 
             _completed = true;
             return new TbcFieldSequenceDecodeResult(
@@ -1254,7 +1277,7 @@ public sealed class TbcFieldSequenceDecodeEngine
 
             TbcDecodedField metadataField = _laserDiscOutput.Write(field);
             System.Text.Json.Nodes.JsonObject fieldInfo = _metadata.Add(metadataField, decision, field);
-            _sqlite?.Add(fieldInfo);
+            _sqlite?.Add(fieldInfo, _metadata.FieldCount, _metadata.LastOutputConverter);
             _writtenFieldCount++;
         }
 
