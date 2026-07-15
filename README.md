@@ -260,8 +260,12 @@ Implemented:
 - LD `--AC3` RF audio path, including upstream-style AC3 band-pass FFT filter,
   internal RF_TBC generation when AC3 is enabled, signed 8-bit AC3 demod input
   scaling, and the default `sox | ld-ac3-demodulate | ld-ac3-decode` pipeline
-  for `.ac3` sidecar output; only the decoder's stdout/stderr is copied as raw
-  bytes to `.ac3.log`, matching v0.4.0's subprocess redirection
+  for `.ac3` sidecar output; on Windows, inherited native anonymous-pipe
+  handles connect the three processes directly and the decoder's stdout/stderr
+  share one `.ac3.log` handle, matching v0.4.0's process topology and stream
+  boundaries. A real-tool integration baseline compares output bytes and
+  stable diagnostics with the equivalent direct OS pipeline and covers output
+  paths containing spaces
 - LD AC3 front-end tests now use a deterministic 32768-sample RF_TBC fixture
   generated against SciPy's `butter`/`freqz`/FFT path, checking selected complex
   response bins and the SHA-256 of all 31744 emitted signed-8-bit samples
@@ -1074,8 +1078,8 @@ Not complete yet:
 - remaining HiFi real-capture end-to-end output baselines and hosted GUI
   behavior; the command runner, Windows live preview, and GNU Radio path are
   wired
-- remaining real-capture PAL LD and AC3 end-to-end fixtures, external AC3
-  tool-pipeline parity, and remaining verbose VITS field calibration details
+- remaining real-capture PAL LD and AC3 end-to-end fixtures and remaining
+  verbose VITS field calibration details
 - remaining non-default VHS/CVBS vblank edge cases, real-capture chroma
   track-phase transitions, and uncommon cross-option parity
 - remaining upstream TBC field-writer integration and bit-compat edge handling
@@ -1096,7 +1100,7 @@ dotnet test VHSDecodeDotNet.slnx --no-build
 ```
 
 The current formal solution build completes with zero warnings and errors, and
-the xUnit v3 project exposes 442 independently discoverable compatibility tests
+the xUnit v3 project exposes 443 independently discoverable compatibility tests
 to `dotnet test` and Visual Studio Test Explorer. On the
 same Windows machine and fixtures, Release wall-clock measurements for one
 frame were 2.346 s versus 7.193 s for NTSC VHS and 1.651 s versus 5.865 s for
