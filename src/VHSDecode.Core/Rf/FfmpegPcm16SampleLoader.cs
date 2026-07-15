@@ -3,6 +3,7 @@ using System.ComponentModel;
 using System.Diagnostics;
 using System.Globalization;
 using System.Text;
+using System.Text.Json;
 
 namespace VHSDecode.Core.Rf;
 
@@ -18,7 +19,7 @@ public sealed class FfmpegPcm16SampleLoader : IRfSampleLoader, IDisposable
     private readonly Func<int?>? _exitCodeAfterOutputEnd;
     private readonly Func<string>? _stderrProvider;
     private readonly StringBuilder _stderr = new();
-    private int? _containerAudioSampleRateHz;
+    private ContainerAudioInfo? _containerAudioInfo;
     private Stream? _output;
     private Process? _process;
     private long _positionBytes;
@@ -280,7 +281,19 @@ public sealed class FfmpegPcm16SampleLoader : IRfSampleLoader, IDisposable
     private Stream OpenFfmpegOutput(string filename, long sample)
     {
         _stderr.Clear();
-        int containerAudioSampleRateHz = ResolveContainerAudioSampleRate(filename);
+        ContainerAudioInfo audioInfo = ResolveContainerAudioInfo(filename);
+        long sourceSample = sample;
+        int initialSkipSamples = 0;
+        int paddedFrameSamples = 0;
+        if (audioInfo.RequiresPyAvPlanePadding)
+        {
+            paddedFrameSamples = PyAvAudioPlanePaddingStream.CalculatePaddedFrameSamples(
+                audioInfo.FrameSamples);
+            long frameIndex = Math.DivRem(sample, paddedFrameSamples, out long frameOffset);
+            sourceSample = checked(frameIndex * audioInfo.FrameSamples);
+            initialSkipSamples = checked((int)frameOffset);
+        }
+
         var startInfo = new ProcessStartInfo("ffmpeg")
         {
             UseShellExecute = false,
@@ -289,7 +302,7 @@ public sealed class FfmpegPcm16SampleLoader : IRfSampleLoader, IDisposable
             CreateNoWindow = true
         };
 
-        foreach (string argument in BuildFfmpegArguments(filename, sample, containerAudioSampleRateHz))
+        foreach (string argument in BuildFfmpegArguments(filename, sourceSample, audioInfo.SampleRateHz))
         {
             startInfo.ArgumentList.Add(argument);
         }
@@ -316,22 +329,29 @@ public sealed class FfmpegPcm16SampleLoader : IRfSampleLoader, IDisposable
         }
 
         _process.BeginErrorReadLine();
-        return _process.StandardOutput.BaseStream;
+        Stream output = _process.StandardOutput.BaseStream;
+        return audioInfo.RequiresPyAvPlanePadding
+            ? new PyAvAudioPlanePaddingStream(
+                output,
+                audioInfo.FrameSamples,
+                paddedFrameSamples,
+                initialSkipSamples)
+            : output;
     }
 
-    private int ResolveContainerAudioSampleRate(string filename)
+    private ContainerAudioInfo ResolveContainerAudioInfo(string filename)
     {
-        if (_containerAudioSampleRateHz.HasValue)
+        if (_containerAudioInfo is not null)
         {
-            return _containerAudioSampleRateHz.Value;
+            return _containerAudioInfo;
         }
 
-        _containerAudioSampleRateHz = ProbeContainerAudioSampleRate(filename)
-            ?? ContainerAudioSampleRateHz;
-        return _containerAudioSampleRateHz.Value;
+        _containerAudioInfo = ProbeContainerAudioInfo(filename)
+            ?? ContainerAudioInfo.Default;
+        return _containerAudioInfo;
     }
 
-    private static int? ProbeContainerAudioSampleRate(string filename)
+    private static ContainerAudioInfo? ProbeContainerAudioInfo(string filename)
     {
         var startInfo = new ProcessStartInfo("ffprobe")
         {
@@ -344,8 +364,9 @@ public sealed class FfmpegPcm16SampleLoader : IRfSampleLoader, IDisposable
         {
             "-v", "error",
             "-select_streams", "a:0",
-            "-show_entries", "stream=sample_rate",
-            "-of", "default=noprint_wrappers=1:nokey=1",
+            "-read_intervals", "%+#1",
+            "-show_entries", "stream=sample_rate,channels,sample_fmt:frame=nb_samples",
+            "-of", "json",
             filename
         })
         {
@@ -360,19 +381,72 @@ public sealed class FfmpegPcm16SampleLoader : IRfSampleLoader, IDisposable
                 return null;
             }
 
-            string output = process.StandardOutput.ReadToEnd().Trim();
-            _ = process.StandardError.ReadToEnd();
+            Task<string> standardOutput = process.StandardOutput.ReadToEndAsync();
+            Task<string> standardError = process.StandardError.ReadToEndAsync();
             process.WaitForExit();
+            Task.WhenAll(standardOutput, standardError).GetAwaiter().GetResult();
             return process.ExitCode == 0
-                && int.TryParse(output, NumberStyles.Integer, CultureInfo.InvariantCulture, out int sampleRate)
-                && sampleRate > 0
-                    ? sampleRate
-                    : null;
+                ? ParseContainerAudioInfo(standardOutput.Result)
+                : null;
         }
-        catch (Exception ex) when (ex is Win32Exception or InvalidOperationException)
+        catch (Exception ex) when (ex is Win32Exception
+            or InvalidOperationException
+            or JsonException
+            or FormatException
+            or OverflowException)
         {
             return null;
         }
+    }
+
+    private static ContainerAudioInfo? ParseContainerAudioInfo(string json)
+    {
+        using JsonDocument document = JsonDocument.Parse(json);
+        JsonElement root = document.RootElement;
+        if (!root.TryGetProperty("streams", out JsonElement streams)
+            || streams.ValueKind != JsonValueKind.Array
+            || streams.GetArrayLength() == 0)
+        {
+            return null;
+        }
+
+        JsonElement stream = streams[0];
+        string? sampleRateText = stream.TryGetProperty("sample_rate", out JsonElement sampleRateValue)
+            ? sampleRateValue.GetString()
+            : null;
+        if (!int.TryParse(
+                sampleRateText,
+                NumberStyles.Integer,
+                CultureInfo.InvariantCulture,
+                out int sampleRate)
+            || sampleRate <= 0)
+        {
+            return null;
+        }
+
+        int channels = stream.TryGetProperty("channels", out JsonElement channelValue)
+            ? channelValue.GetInt32()
+            : 1;
+        string sampleFormat = stream.TryGetProperty("sample_fmt", out JsonElement sampleFormatValue)
+            ? sampleFormatValue.GetString() ?? string.Empty
+            : string.Empty;
+        int frameSamples = 0;
+        if (root.TryGetProperty("frames", out JsonElement frames)
+            && frames.ValueKind == JsonValueKind.Array
+            && frames.GetArrayLength() > 0
+            && frames[0].TryGetProperty("nb_samples", out JsonElement frameSamplesValue))
+        {
+            frameSamples = frameSamplesValue.GetInt32();
+        }
+
+        bool requiresPadding = frameSamples > 0
+            && channels > 0
+            && sampleFormat.Length > 0
+            && (channels != 1 || !string.Equals(sampleFormat, "s16", StringComparison.Ordinal));
+        return new ContainerAudioInfo(
+            sampleRate,
+            frameSamples,
+            requiresPadding);
     }
 
     private byte[] ReadData(int count)
@@ -566,5 +640,16 @@ public sealed class FfmpegPcm16SampleLoader : IRfSampleLoader, IDisposable
         catch (InvalidOperationException)
         {
         }
+    }
+
+    private sealed record ContainerAudioInfo(
+        int SampleRateHz,
+        int FrameSamples,
+        bool RequiresPyAvPlanePadding)
+    {
+        public static ContainerAudioInfo Default { get; } = new(
+            ContainerAudioSampleRateHz,
+            0,
+            false);
     }
 }
