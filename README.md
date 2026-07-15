@@ -1091,6 +1091,15 @@ Implemented:
   `36C054543634092C86DC1F1D21CDCBD88586A617E3D9872A86429C7258E179AE`,
   and `1BDF01C859AC0459BD7C1FB870E617B59BA002089A996A2C2160D27A5EA87550`,
   while normalized logs match in order and content
+- PAL LD `--start_fileloc 768000` rough seeks now preserve v0.4.0's dropped
+  initial second field, direct local and next-vblank anchors, previous-field
+  end-line projection, speculative `fields_written` numbering, and pre-metadata
+  AGC confidence. With analog audio and EFM disabled, TBC, JSON, and SQLite are
+  byte-exact with respective SHA-256 hashes
+  `73EF90BC04EB585ACA2448D276992FD94BCF3F1E98137E202D82D6CE9761249D`,
+  `AEEFE8AB9874B5BE76740F34D6E60B0A27B7D8723674FD85B7FDD7D58E11CBEC`,
+  and `450143AAB21235F964342ED1A4A799659927935821E6BB2670F7F9704CF033EE`;
+  normalized logs also match the field-zero auto-level warning and frame status
 - `--verboseVITS` on that PAL LD fixture retains the byte-exact main TBC and
   reproduces v0.4.0's centered burst RMS, including the exact second-field
   `palVITSBurst50Level` value `4.159`; the same centered calculation is used for
@@ -1152,7 +1161,7 @@ dotnet test VHSDecodeDotNet.slnx --no-build
 ```
 
 The current formal solution build completes with zero warnings and errors, and
-the xUnit v3 project exposes 464 independently discoverable compatibility tests
+the xUnit v3 project exposes 465 independently discoverable compatibility tests
 to `dotnet test` and Visual Studio Test Explorer. On the
 same Windows machine and fixtures, Release wall-clock measurements for one
 frame were 2.346 s versus 7.193 s for NTSC VHS and 1.651 s versus 5.865 s for

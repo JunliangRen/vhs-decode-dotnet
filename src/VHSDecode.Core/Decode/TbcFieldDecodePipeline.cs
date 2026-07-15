@@ -145,6 +145,7 @@ internal sealed record TbcFieldDecodeState(
     double? PreviousFirstHSyncLocation,
     long? PreviousFirstHSyncReadLocation,
     int? PreviousSyncConfidence,
+    double? PreviousLaserDiscPalEndLineAbsoluteSample,
     bool? PreviousDetectedFirstField,
     double PreviousHSyncDifference,
     double LaserDiscNtscPhaseAdjustMedian,
@@ -197,6 +198,7 @@ public sealed class TbcFieldDecodePipeline
     private double? _previousFirstHSyncLocation;
     private long? _previousFirstHSyncReadLocation;
     private int? _previousSyncConfidence;
+    private double? _previousLaserDiscPalEndLineAbsoluteSample;
     private bool? _previousDetectedFirstField;
     private double _previousHSyncDifference = -1.0;
     private double _laserDiscNtscPhaseAdjustMedian;
@@ -288,6 +290,7 @@ public sealed class TbcFieldDecodePipeline
             _previousFirstHSyncLocation,
             _previousFirstHSyncReadLocation,
             _previousSyncConfidence,
+            _previousLaserDiscPalEndLineAbsoluteSample,
             _previousDetectedFirstField,
             _previousHSyncDifference,
             _laserDiscNtscPhaseAdjustMedian,
@@ -315,6 +318,7 @@ public sealed class TbcFieldDecodePipeline
         _previousFirstHSyncLocation = state.PreviousFirstHSyncLocation;
         _previousFirstHSyncReadLocation = state.PreviousFirstHSyncReadLocation;
         _previousSyncConfidence = state.PreviousSyncConfidence;
+        _previousLaserDiscPalEndLineAbsoluteSample = state.PreviousLaserDiscPalEndLineAbsoluteSample;
         _previousDetectedFirstField = state.PreviousDetectedFirstField;
         _previousHSyncDifference = state.PreviousHSyncDifference;
         _laserDiscNtscPhaseAdjustMedian = state.LaserDiscNtscPhaseAdjustMedian;
@@ -790,7 +794,7 @@ public sealed class TbcFieldDecodePipeline
             lineLocations.Locations,
             meanLineLength,
             parity.IsFirstField,
-            syncConfidence,
+            line0.InitialSyncConfidence,
             activeVideoOutput,
             fieldNumber);
         VideoOutputConverter? fieldConverter = agcConverter
@@ -872,6 +876,7 @@ public sealed class TbcFieldDecodePipeline
         }
 
         _previousSyncConfidence = syncConfidence;
+        UpdatePalLaserDiscEndLineHistory(span.StartSample, lineLocations, currentFieldLineCount);
 
         return new TbcDecodedField(
             span.StartSample,
@@ -1592,7 +1597,7 @@ public sealed class TbcFieldDecodePipeline
         IReadOnlyList<double> lineLocations,
         double meanLineLength,
         bool isFirstField,
-        int syncConfidence,
+        int initialSyncConfidence,
         VideoOutputConverter baseConverter,
         int fieldNumber)
     {
@@ -1602,7 +1607,7 @@ public sealed class TbcFieldDecodePipeline
         }
 
         VideoOutputConverter current = _laserDiscAgcConverter ?? baseConverter;
-        if (!isFirstField || syncConfidence <= 80)
+        if (!isFirstField || initialSyncConfidence <= 80)
         {
             return (_laserDiscAgcConverter, false);
         }
@@ -1628,8 +1633,16 @@ public sealed class TbcFieldDecodePipeline
         }
 
         double vsyncIre = (syncHz - ire0Hz) / hzIre;
-        if (!double.IsFinite(vsyncIre) || vsyncIre > -20.0)
+        if (!double.IsFinite(vsyncIre))
         {
+            return (current, false);
+        }
+
+        if (vsyncIre > -20.0)
+        {
+            _diagnosticLogger?.Invoke(
+                "WARNING",
+                FormatLaserDiscAgcMalfunctionWarning(fieldNumber, vsyncIre));
             return (current, false);
         }
 
@@ -1640,6 +1653,14 @@ public sealed class TbcFieldDecodePipeline
             vsyncIre,
             current.OutputScale);
         return (_laserDiscAgcConverter, true);
+    }
+
+    internal static string FormatLaserDiscAgcMalfunctionWarning(int fieldNumber, double vsyncIre)
+    {
+        string roundedVsyncIre = Math.Round(vsyncIre, 2, MidpointRounding.ToEven)
+            .ToString("0.0#", System.Globalization.CultureInfo.InvariantCulture);
+        return $"At field #{fieldNumber}, Auto-level detection malfunction "
+            + $"(vsync IRE computed at {roundedVsyncIre}, nominal ~= -40), possible disk skipping";
     }
 
     private (double SyncHz, double Ire0Hz, double Ire100Hz) DetectLaserDiscAgcLevels(
@@ -3573,8 +3594,21 @@ public sealed class TbcFieldDecodePipeline
             firstVBlank = null;
         }
 
-        // With no prevfield, v0.4.0 trusts the local PAL VSync formula before
-        // considering the generic local/next consensus.
+        // With no prevfield, v0.4.0 trusts the decoder-specific PAL VSync
+        // formula before considering the generic local/next consensus.
+        Line0Resolution? initialPalLaserDiscSecondField = TryResolveInitialPalLaserDiscSecondFieldLine0(
+            _decodeType,
+            _system,
+            _previousFirstHSyncLocation.HasValue,
+            firstVBlank,
+            _syncAnalyzer.NumPulses,
+            _syncAnalyzer.NominalLineLength,
+            estimatedFirstField);
+        if (initialPalLaserDiscSecondField is not null)
+        {
+            return initialPalLaserDiscSecondField;
+        }
+
         Line0Resolution? initialPalCvbsSecondField = TryResolveInitialPalCvbsSecondFieldLine0(
             _decodeType,
             _system,
@@ -3621,18 +3655,34 @@ public sealed class TbcFieldDecodePipeline
                 fieldLines[0]);
         }
 
-        VBlankSyncEstimate? palCvbsLocalEstimate = TryResolvePalCvbsLocalVBlankEstimate(
+        VBlankSyncEstimate? palDirectLocalEstimate = TryResolvePalDirectLocalVBlankEstimate(
             _decodeType,
             _system,
             firstVBlank,
             _syncAnalyzer.NumPulses,
             _syncAnalyzer.NominalLineLength,
             estimatedFirstField);
-        if (palCvbsLocalEstimate is not null)
+        if (palDirectLocalEstimate is not null)
         {
             vBlankConsensus = vBlankConsensus is null
-                ? new VBlankSyncConsensus(palCvbsLocalEstimate, null, null)
-                : vBlankConsensus with { First = palCvbsLocalEstimate };
+                ? new VBlankSyncConsensus(palDirectLocalEstimate, null, null)
+                : vBlankConsensus with { First = palDirectLocalEstimate };
+        }
+
+        VBlankSyncEstimate? palLaserDiscNextEstimate = TryResolvePalLaserDiscNextVBlankEstimate(
+            _decodeType,
+            _system,
+            lastVBlank,
+            _syncAnalyzer.NumPulses,
+            _syncAnalyzer.NominalLineLength,
+            meanLineLength,
+            estimatedFirstField,
+            currentFieldLines);
+        if (palLaserDiscNextEstimate is not null)
+        {
+            vBlankConsensus = vBlankConsensus is null
+                ? new VBlankSyncConsensus(null, palLaserDiscNextEstimate, null)
+                : vBlankConsensus with { Last = palLaserDiscNextEstimate, Combined = null };
         }
 
         Line0Resolution? previousEstimate = TryEstimateLine0FromPrevious(
@@ -3727,12 +3777,12 @@ public sealed class TbcFieldDecodePipeline
         double nominalLineLength,
         bool estimatedFirstField)
     {
-        if (hasPreviousSync || estimatedFirstField)
+        if (decodeType != "cvbs" || hasPreviousSync || estimatedFirstField)
         {
             return null;
         }
 
-        VBlankSyncEstimate? local = TryResolvePalCvbsLocalVBlankEstimate(
+        VBlankSyncEstimate? local = TryResolvePalDirectLocalVBlankEstimate(
             decodeType,
             system,
             firstVBlank,
@@ -3754,7 +3804,43 @@ public sealed class TbcFieldDecodePipeline
             InitialSyncConfidence: 90);
     }
 
-    internal static VBlankSyncEstimate? TryResolvePalCvbsLocalVBlankEstimate(
+    internal static Line0Resolution? TryResolveInitialPalLaserDiscSecondFieldLine0(
+        string? decodeType,
+        string system,
+        bool hasPreviousSync,
+        VBlankPulseGroup? firstVBlank,
+        int numEqualizingPulses,
+        double nominalLineLength,
+        bool estimatedFirstField)
+    {
+        if (decodeType != "ld" || hasPreviousSync || estimatedFirstField)
+        {
+            return null;
+        }
+
+        VBlankSyncEstimate? local = TryResolvePalDirectLocalVBlankEstimate(
+            decodeType,
+            system,
+            firstVBlank,
+            numEqualizingPulses,
+            nominalLineLength,
+            isFirstField: false);
+        if (local is null)
+        {
+            return null;
+        }
+
+        return new Line0Resolution(
+            local.Line0Location,
+            UsedFallback: false,
+            ExpectedFirstField: null,
+            ExpectedFirstFieldConfidence: 0,
+            FirstHSyncLocation: local.FirstHSyncLocation,
+            UnalignedFirstHSyncLocation: local.UnalignedFirstHSyncLocation,
+            InitialSyncConfidence: 90);
+    }
+
+    internal static VBlankSyncEstimate? TryResolvePalDirectLocalVBlankEstimate(
         string? decodeType,
         string system,
         VBlankPulseGroup? firstVBlank,
@@ -3762,7 +3848,7 @@ public sealed class TbcFieldDecodePipeline
         double nominalLineLength,
         bool isFirstField)
     {
-        if (decodeType != "cvbs"
+        if (decodeType is not ("cvbs" or "ld")
             || FormatCatalog.ParentSystem(system) != "PAL"
             || firstVBlank?.VSyncStart is not { } vSyncStart)
         {
@@ -3783,6 +3869,54 @@ public sealed class TbcFieldDecodePipeline
             firstHSyncLocation,
             firstHSyncLine,
             ValidDistanceCount: 6,
+            UnalignedFirstHSyncLocation: firstHSyncLocation);
+    }
+
+    internal static VBlankSyncEstimate? TryResolvePalLaserDiscNextVBlankEstimate(
+        string? decodeType,
+        string system,
+        VBlankPulseGroup? nextVBlank,
+        int numEqualizingPulses,
+        double nominalLineLength,
+        double meanLineLength,
+        bool isFirstField,
+        int currentFieldLines)
+    {
+        if (decodeType != "ld"
+            || FormatCatalog.ParentSystem(system) != "PAL"
+            || nextVBlank is null
+            || !double.IsFinite(meanLineLength)
+            || meanLineLength <= 0.0
+            || currentFieldLines <= 0)
+        {
+            return null;
+        }
+
+        VBlankSyncEstimate? nextLocal = TryResolvePalDirectLocalVBlankEstimate(
+            decodeType,
+            system,
+            nextVBlank,
+            numEqualizingPulses,
+            nominalLineLength,
+            !isFirstField);
+        if (nextLocal is null)
+        {
+            return null;
+        }
+
+        double line0Location = Math.Round(
+            nextLocal.Line0Location - (currentFieldLines * meanLineLength),
+            MidpointRounding.ToEven);
+        double firstHSyncLine = VBlankSyncResolver.FirstHSyncLine(
+            system,
+            numEqualizingPulses,
+            isFirstField);
+        double firstHSyncLocation = line0Location + (firstHSyncLine * meanLineLength);
+        return new VBlankSyncEstimate(
+            line0Location,
+            firstHSyncLocation,
+            firstHSyncLine,
+            nextLocal.ValidDistanceCount,
             UnalignedFirstHSyncLocation: firstHSyncLocation);
     }
 
@@ -3884,7 +4018,13 @@ public sealed class TbcFieldDecodePipeline
             (next.Line0Location, 1),
             (previous.Location, 2)
         };
-        Array.Sort(candidates, static (left, right) => left.Location.CompareTo(right.Location));
+        Array.Sort(candidates, static (left, right) =>
+        {
+            int locationOrder = left.Location.CompareTo(right.Location);
+            return locationOrder != 0
+                ? locationOrder
+                : left.Source.CompareTo(right.Source);
+        });
 
         return candidates[1].Source switch
         {
@@ -4107,6 +4247,32 @@ public sealed class TbcFieldDecodePipeline
         int currentFieldLines,
         bool isFirstField)
     {
+        double? palLaserDiscLine0 = TryProjectPalLaserDiscPreviousLine0(
+            _decodeType,
+            _system,
+            _previousLaserDiscPalEndLineAbsoluteSample,
+            spanStartSample);
+        if (palLaserDiscLine0.HasValue)
+        {
+            double projectedFirstHSyncLine = VBlankSyncResolver.FirstHSyncLine(
+                _system,
+                _syncAnalyzer.NumPulses,
+                isFirstField);
+            double projectedFirstHSync =
+                palLaserDiscLine0.Value + (projectedFirstHSyncLine * meanLineLength);
+            return new Line0Resolution(
+                palLaserDiscLine0.Value,
+                UsedFallback: false,
+                ExpectedFirstField: null,
+                ExpectedFirstFieldConfidence: 0,
+                UsedPreviousEstimate: true,
+                FirstHSyncLocation: projectedFirstHSync,
+                UnalignedFirstHSyncLocation: projectedFirstHSync,
+                InitialSyncConfidence: InitialLine0SyncConfidence(
+                    hasStrongLocalEstimate: false,
+                    hasNextEstimate: false));
+        }
+
         double? estimatedFirstHSyncValue = EstimateFirstHSyncFromPrevious(
             spanStartSample,
             meanLineLength,
@@ -4157,6 +4323,45 @@ public sealed class TbcFieldDecodePipeline
             InitialSyncConfidence: InitialLine0SyncConfidence(
                 hasStrongLocalEstimate: false,
                 hasNextEstimate: false));
+    }
+
+    internal static double? TryProjectPalLaserDiscPreviousLine0(
+        string? decodeType,
+        string system,
+        double? previousEndLineAbsoluteSample,
+        long spanStartSample)
+    {
+        if (decodeType != "ld"
+            || FormatCatalog.ParentSystem(system) != "PAL"
+            || previousEndLineAbsoluteSample is not { } previousEnd
+            || !double.IsFinite(previousEnd))
+        {
+            return null;
+        }
+
+        double line0Location = previousEnd - spanStartSample;
+        return double.IsFinite(line0Location) ? line0Location : null;
+    }
+
+    private void UpdatePalLaserDiscEndLineHistory(
+        long spanStartSample,
+        LineLocationResult lineLocations,
+        int currentFieldLineCount)
+    {
+        if (_decodeType != "ld" || FormatCatalog.ParentSystem(_system) != "PAL")
+        {
+            return;
+        }
+
+        if ((uint)currentFieldLineCount >= (uint)lineLocations.Locations.Length
+            || !double.IsFinite(lineLocations.Locations[currentFieldLineCount]))
+        {
+            _previousLaserDiscPalEndLineAbsoluteSample = null;
+            return;
+        }
+
+        _previousLaserDiscPalEndLineAbsoluteSample =
+            spanStartSample + lineLocations.Locations[currentFieldLineCount];
     }
 
     private int InitialLine0SyncConfidence(

@@ -267,6 +267,7 @@ public sealed class TbcFieldSequenceDecodeEngine
         void CompleteField(TbcDecodedField completedField, int decodedIndex)
         {
             fields?.Add(completedField);
+            int fieldsWrittenBeforeAdd = writePlanner.WrittenFieldCount;
             IReadOnlyList<(TbcDecodedField Field, TbcFieldOrderDecision Decision)> writes =
                 writePlanner.Add(completedField);
             if (writes.Count > 0)
@@ -311,7 +312,7 @@ public sealed class TbcFieldSequenceDecodeEngine
                     DecodeSessionLogWriter.Status(
                         session,
                         FormatLaserDiscFrameStatus(
-                            decodedIndex,
+                            fieldsWrittenBeforeAdd,
                             session.RunBounds.RequestedFieldCount / 2,
                             rawFrame,
                             interpretation,
@@ -589,14 +590,14 @@ public sealed class TbcFieldSequenceDecodeEngine
     }
 
     internal static string FormatLaserDiscFrameStatus(
-        int decodedFieldIndex,
+        int fieldsWritten,
         int estimatedFrames,
         int rawFrame,
         LaserDiscVbiInterpretation interpretation,
         bool leadIn,
         bool leadOut)
     {
-        int frame = (decodedFieldIndex / 2) + 1;
+        int frame = (fieldsWritten / 2) + 1;
         string diskType = interpretation.IsClv ? "CLV" : "CAV";
         string prefix = $"Frame {frame}/{estimatedFrames}: File Frame {rawFrame}: {diskType} ";
         if (interpretation.IsClv
@@ -846,7 +847,7 @@ public sealed class TbcFieldSequenceDecodeEngine
         int? writtenFieldCount)
     {
         return usesSessionReader
-            && decoderName == "cvbs"
+            && decoderName is "cvbs" or "ld"
             && writtenFieldCount.HasValue
                 ? writtenFieldCount.Value
                 : decodedFieldNumber;

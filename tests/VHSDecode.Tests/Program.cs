@@ -7656,7 +7656,7 @@ public void PalCvbsInitialSecondFieldUsesReleaseFourLocalVblankAnchor()
     AssertClose(110_337.0, resolution.FirstHSyncLocation, 0.0);
     AssertEqual(90, resolution.InitialSyncConfidence);
 
-    VBlankSyncEstimate firstField = TbcFieldDecodePipeline.TryResolvePalCvbsLocalVBlankEstimate(
+    VBlankSyncEstimate firstField = TbcFieldDecodePipeline.TryResolvePalDirectLocalVBlankEstimate(
         decodeType: "cvbs",
         system: "PAL",
         firstVBlank: group with { VSyncStart = 32_256 },
@@ -7669,6 +7669,61 @@ public void PalCvbsInitialSecondFieldUsesReleaseFourLocalVblankAnchor()
         null,
         TbcFieldDecodePipeline.TryResolveInitialPalCvbsSecondFieldLine0(
             decodeType: "cvbs",
+            system: "PAL",
+            hasPreviousSync: true,
+            firstVBlank: group,
+            numEqualizingPulses: 5,
+            nominalLineLength: 2_560.0,
+            estimatedFirstField: false));
+}
+
+[Fact(DisplayName = "PAL LD initial second field uses Release 4.0 firstFieldH anchor")]
+public void PalLaserDiscInitialSecondFieldUsesReleaseFourFirstFieldHAnchor()
+{
+    var group = new VBlankPulseGroup(
+        PreviousHSync: 88_577,
+        Equalizing1Start: 89_857,
+        VSyncStart: 96_257,
+        Equalizing2Start: 102_657,
+        Equalizing2End: 107_777,
+        FollowingHSync: 110_337);
+
+    Line0Resolution resolution = TbcFieldDecodePipeline.TryResolveInitialPalLaserDiscSecondFieldLine0(
+        decodeType: "ld",
+        system: "PAL",
+        hasPreviousSync: false,
+        firstVBlank: group,
+        numEqualizingPulses: 5,
+        nominalLineLength: 2_560.0,
+        estimatedFirstField: false)!;
+
+    AssertClose(87_297.0, resolution.Location, 0.0);
+    AssertClose(110_337.0, resolution.FirstHSyncLocation, 0.0);
+    AssertEqual(90, resolution.InitialSyncConfidence);
+
+    VBlankSyncEstimate projected = TbcFieldDecodePipeline.TryResolvePalLaserDiscNextVBlankEstimate(
+        decodeType: "ld",
+        system: "PAL",
+        nextVBlank: group with { VSyncStart = 879_662 },
+        numEqualizingPulses: 5,
+        nominalLineLength: 2_560.0,
+        meanLineLength: 2_560.0,
+        isFirstField: true,
+        currentFieldLines: 312)!;
+    AssertClose(71_982.0, projected.Line0Location, 0.0);
+    AssertClose(92_462.0, projected.FirstHSyncLocation, 0.0);
+
+    double? previousProjection = TbcFieldDecodePipeline.TryProjectPalLaserDiscPreviousLine0(
+        decodeType: "ld",
+        system: "PAL",
+        previousEndLineAbsoluteSample: 1_553_888 + 870_718.2733659535,
+        spanStartSample: 2_378_400);
+    AssertClose(46_206.27336595347, previousProjection!.Value, 1e-9);
+
+    AssertEqual<Line0Resolution?>(
+        null,
+        TbcFieldDecodePipeline.TryResolveInitialPalLaserDiscSecondFieldLine0(
+            decodeType: "ld",
             system: "PAL",
             hasPreviousSync: true,
             firstVBlank: group,
@@ -7713,6 +7768,13 @@ public void LaserDiscLineZeroConsensusMatchesRelease40ThreeWayMedian()
     AssertFalse(selected.UsedFallback);
     AssertFalse(selected.UsedPreviousEstimate);
     AssertEqual(100, selected.InitialSyncConfidence);
+
+    Line0Resolution tied = TbcFieldDecodePipeline.SelectLegacyThreeWayLine0Consensus(
+        first,
+        next with { Line0Location = first.Line0Location },
+        previous);
+    AssertClose(first.Line0Location, tied.Location, 1e-12);
+    AssertClose(next.FirstHSyncLocation, tied.FirstHSyncLocation, 1e-12);
 }
 
 [Fact(DisplayName = "fallback vsync resolver matches upstream pulse priorities")]
@@ -10426,6 +10488,53 @@ public void TbcFieldDecodePipelineAppliesLdAgc()
         noAgcMedianBurstIre * converter.HzIre / agcOutputConverter.HzIre,
         agcMedianBurstIre,
         1e-12);
+
+    var diagnostics = new List<(string Level, string Message)>();
+    var warningPipeline = new TbcFieldDecodePipeline(
+        analyzer,
+        renderer,
+        converter,
+        "NTSC",
+        TbcDropoutDetectionOptions.Disabled,
+        laserDiscAgcOptions: agcOptions,
+        decodeLaserDiscVbi: true,
+        diagnosticLogger: (level, message) => diagnostics.Add((level, message)));
+    double[] malformedVideo = Enumerable.Repeat(1100.0, 2_400).ToArray();
+    double[] malformedLowPass = Enumerable.Repeat(1100.0, malformedVideo.Length).ToArray();
+    for (int line = 0; line < 23; line++)
+    {
+        PaintPulse(malformedVideo, line * 100, 10, 950.0);
+        PaintPulse(malformedLowPass, line * 100, 10, 950.0);
+    }
+
+    for (int i = 0; i < 8; i++)
+    {
+        malformedVideo[(15 * 100) + 12 + i] = 2050.0;
+    }
+
+    double[] agcLineLocations = Enumerable.Range(0, 24).Select(line => line * 100.0).ToArray();
+    InvokePrivateMethod(
+        warningPipeline,
+        "ResolveLaserDiscAgcConverter",
+        new RfDecodedSpan(
+            0,
+            [],
+            malformedVideo,
+            malformedVideo,
+            VideoLowPass: malformedLowPass),
+        agcLineLocations,
+        100.0,
+        true,
+        100,
+        converter,
+        0);
+
+    AssertEqual(1, diagnostics.Count);
+    AssertEqual("WARNING", diagnostics[0].Level);
+    AssertEqual(
+        "At field #0, Auto-level detection malfunction "
+            + "(vsync IRE computed at -15.79, nominal ~= -40), possible disk skipping",
+        diagnostics[0].Message);
 }
 
 [Fact(DisplayName = "TBC field decode pipeline computes LD RF ratio")]
@@ -12026,6 +12135,9 @@ public void LaserDiscFrameStatusFormatsClvAndPersistentLeadStates()
     AssertEqual(
         "Frame 1/10: File Frame 4: CLV Timecode 83:xx",
         TbcFieldSequenceDecodeEngine.FormatLaserDiscFrameStatus(1, 10, 4, earlyClv, false, false));
+    AssertEqual(
+        "Frame 1/10: File Frame 4: CLV Timecode 83:xx",
+        TbcFieldSequenceDecodeEngine.FormatLaserDiscFrameStatus(0, 10, 4, earlyClv, false, false));
 
     var clv = earlyClv with
     {
@@ -12437,8 +12549,8 @@ public void CvbsOutputDeferralCoversSerialAndWorkerAutoSyncPaths()
     AssertFalse(TbcFieldSequenceDecodeEngine.ShouldDeferCvbsOutputConversion(clamp));
 }
 
-[Fact(DisplayName = "CVBS session reads use Release 4.0 fields-written numbering")]
-public void CvbsSessionReadsUseReleaseFourFieldsWrittenNumbering()
+[Fact(DisplayName = "CVBS and LD session reads use Release 4.0 fields-written numbering")]
+public void CvbsAndLdSessionReadsUseReleaseFourFieldsWrittenNumbering()
 {
     int[] writtenFieldCounts = [0, 0, 0, 1];
     int[] sessionFieldNumbers = writtenFieldCounts
@@ -12451,6 +12563,13 @@ public void CvbsSessionReadsUseReleaseFourFieldsWrittenNumbering()
         .ToArray();
 
     AssertTrue(sessionFieldNumbers.SequenceEqual([0, 0, 0, 1]));
+    AssertEqual(
+        1,
+        TbcFieldSequenceDecodeEngine.ResolveReadFieldNumber(
+            usesSessionReader: true,
+            decoderName: "ld",
+            decodedFieldNumber: 3,
+            writtenFieldCount: 1));
     AssertEqual(
         3,
         TbcFieldSequenceDecodeEngine.ResolveReadFieldNumber(
