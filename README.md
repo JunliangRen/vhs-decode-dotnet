@@ -940,6 +940,9 @@ Implemented:
 - LD `--write-test-ldf` now reports the upstream start/end range, short-read
   location, sample count, and success line after the completion message; the
   zero-field path also attempts the requested 1,100,000-sample lookahead file
+- LD `--write-test-ldf` freezes its start offset immediately after rough/precise
+  seek and uses the decoder's final offset after recovery skips for its end;
+  `--length 0 --seek` still performs the upstream frame probe before exporting
 - LD lead-out detection now scopes the two required `0x80EEEE` codes to one
   first/second-field pair and only stops after processing the second field,
   preventing sparse codes from accumulating across unrelated frames
@@ -961,11 +964,27 @@ Implemented:
   large RF/video/chroma/audio arrays are released, JSON fields stream through
   a temporary fragment, and SQLite rows are inserted incrementally, bounding
   sequence memory to the field-order/previous-field state
+- recovery JSON checkpoints now run on a single background writer like v0.4.0:
+  checkpoints are skipped while that writer is busy, each accepted snapshot is
+  frozen at its current field boundary, and cleanup always queues and joins the
+  final snapshot before SQLite and payload finalization continue
 - SQLite capture/PCM rows are created lazily immediately before the first field
   row and committed first like v0.4.0; each accepted field then refreshes and
   commits `number_of_sequential_fields`, so recovery databases never retain the
   previous `0` count, and output-stage failures finalize earlier JSON/DB state
   while preserving the original error
+- streaming output handles now open before the first field read like v0.4.0;
+  VHS/CVBS `--write_db` creates the SQLite schema before main video and chroma,
+  while LD creates main video and enabled PCM/EFM/RF/AC3 sidecars before its
+  mandatory database, so startup failures retain exactly the earlier artifacts
+  without starting JSON metadata
+- output cleanup now publishes JSON and completes SQLite before closing payloads,
+  then closes VHS chroma/main video or LD main video/PCM/EFM/RF/AC3 in v0.4.0
+  order; first-field main TBC or chroma write failures retain the field already
+  committed to JSON/SQLite even though `fields_written` has not advanced
+- successful VHS/LD and CVBS completion notices now precede JSON/SQLite and
+  payload finalization; LD test-LDF path/range lines are emitted before encoding,
+  sample totals before the FFmpeg pipe closes, and the success line afterward
 - LD streaming output now preserves v0.4.0's write order across failure points:
   pre-EFM/EFM precede JSON/SQLite metadata, main TBC follows metadata, and
   RF_TBC/AC3 plus analog PCM follow main TBC; a field with no analog payload
@@ -1182,7 +1201,7 @@ dotnet test VHSDecodeDotNet.slnx --no-build
 ```
 
 The current formal solution build completes with zero warnings and errors, and
-the xUnit v3 project exposes 487 independently discoverable compatibility tests
+the xUnit v3 project exposes 505 independently discoverable compatibility tests
 to `dotnet test` and Visual Studio Test Explorer. On the
 same Windows machine and fixtures, Release wall-clock measurements for one
 frame were 2.346 s versus 7.193 s for NTSC VHS and 1.651 s versus 5.865 s for

@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using System.Globalization;
+using VHSDecode.Core.Tbc;
 
 namespace VHSDecode.Core.Decode;
 
@@ -14,6 +15,13 @@ public sealed class DecodeRuntimeReporter
     private double? _postSetupStartSeconds;
     private int _fieldsWritten;
     private bool _statusWritten;
+    private bool _completionMessageWritten;
+    private bool _cvbsCompletionWritten;
+    private bool _testLdfReportStarted;
+    private bool _testLdfNoSamplesWritten;
+    private bool _testLdfShortReadWritten;
+    private bool _testLdfSamplesWritten;
+    private bool _testLdfSuccessWritten;
     private bool _statisticsWritten;
 
     public DecodeRuntimeReporter(
@@ -89,6 +97,139 @@ public sealed class DecodeRuntimeReporter
         lock (_sync)
         {
             _error.WriteLine(message);
+            _error.Flush();
+        }
+    }
+
+    internal void WriteCompletionMessage(int writtenFieldCount)
+    {
+        ArgumentOutOfRangeException.ThrowIfNegative(writtenFieldCount);
+        lock (_sync)
+        {
+            if (_completionMessageWritten)
+            {
+                return;
+            }
+
+            _completionMessageWritten = true;
+            DecodeRunner.WriteCompletionMessage(writtenFieldCount, _error);
+            _error.Flush();
+        }
+    }
+
+    internal void WriteCvbsCompletion(CvbsAgcStatistics? statistics)
+    {
+        lock (_sync)
+        {
+            if (_cvbsCompletionWritten)
+            {
+                return;
+            }
+
+            _cvbsCompletionWritten = true;
+            DecodeRunner.WriteCvbsAgcStatistics(statistics, _error);
+            _output.WriteLine("saving JSON and exiting");
+            _output.Flush();
+            _error.Flush();
+        }
+    }
+
+    internal void BeginTestLdfReport(string outputPath, long startSample, long endSample)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(outputPath);
+        lock (_sync)
+        {
+            if (_testLdfReportStarted)
+            {
+                return;
+            }
+
+            _testLdfReportStarted = true;
+            DecodeRunner.WriteTestLdfReportStart(outputPath, startSample, endSample, _error);
+            _error.Flush();
+        }
+    }
+
+    internal void WriteTestLdfShortRead(long sample)
+    {
+        lock (_sync)
+        {
+            if (_testLdfShortReadWritten)
+            {
+                return;
+            }
+
+            _testLdfShortReadWritten = true;
+            _error.WriteLine($"WARNING: Short read at sample {sample}");
+            _error.Flush();
+        }
+    }
+
+    internal void WriteTestLdfSamplesWritten(long samplesWritten)
+    {
+        ArgumentOutOfRangeException.ThrowIfNegative(samplesWritten);
+        lock (_sync)
+        {
+            if (_testLdfSamplesWritten)
+            {
+                return;
+            }
+
+            _testLdfSamplesWritten = true;
+            _error.WriteLine($"  Samples written: {samplesWritten}");
+            _error.Flush();
+        }
+    }
+
+    internal void CompleteTestLdfReport(LdTestLdfWriteResult result)
+    {
+        if (string.IsNullOrWhiteSpace(result.OutputPath))
+        {
+            return;
+        }
+
+        lock (_sync)
+        {
+            if (!_testLdfReportStarted)
+            {
+                _testLdfReportStarted = true;
+                DecodeRunner.WriteTestLdfReportStart(
+                    result.OutputPath,
+                    result.StartSample,
+                    result.EndSample,
+                    _error);
+            }
+
+            if (result.EndSample <= result.StartSample)
+            {
+                if (!_testLdfNoSamplesWritten)
+                {
+                    _testLdfNoSamplesWritten = true;
+                    _error.WriteLine("WARNING: No samples to write");
+                    _error.Flush();
+                }
+
+                return;
+            }
+
+            if (result.ShortReadSample.HasValue && !_testLdfShortReadWritten)
+            {
+                _testLdfShortReadWritten = true;
+                _error.WriteLine($"WARNING: Short read at sample {result.ShortReadSample.Value}");
+            }
+
+            if (!_testLdfSamplesWritten)
+            {
+                _testLdfSamplesWritten = true;
+                _error.WriteLine($"  Samples written: {result.SamplesWritten}");
+            }
+
+            if (!_testLdfSuccessWritten)
+            {
+                _testLdfSuccessWritten = true;
+                _error.WriteLine($"Successfully wrote {result.OutputPath}");
+            }
+
             _error.Flush();
         }
     }

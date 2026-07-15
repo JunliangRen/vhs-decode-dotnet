@@ -48,16 +48,22 @@ public sealed class FfmpegLdTestLdfWriter(
             throw new ArgumentOutOfRangeException(nameof(startSample), "Invalid LD test LDF sample range.");
         }
 
+        session.RuntimeReporter?.BeginTestLdfReport(
+            session.TestLdfOutputPath,
+            startSample,
+            endSample);
         long sampleCount = endSample - startSample;
         if (sampleCount == 0)
         {
-            return new LdTestLdfWriteResult(
+            var emptyResult = new LdTestLdfWriteResult(
                 false,
                 "No samples were available for LD test LDF output.",
                 0,
                 startSample,
                 endSample,
                 session.TestLdfOutputPath);
+            session.RuntimeReporter?.CompleteTestLdfReport(emptyResult);
+            return emptyResult;
         }
 
         IRfSampleLoader loader = RfLoaderFactory.CreateNative(session.InputFile);
@@ -65,35 +71,40 @@ public sealed class FfmpegLdTestLdfWriter(
         try
         {
             long written = 0;
-            using Stream output = _openOutput(session.TestLdfOutputPath);
-            for (long sample = startSample; sample < endSample;)
+            long? shortReadSample = null;
+            using (Stream output = _openOutput(session.TestLdfOutputPath))
             {
-                int readLength = (int)Math.Min(_chunkSamples, endSample - sample);
-                double[]? values = loader.Read(input, sample, readLength);
-                if (values is null || values.Length != readLength)
+                for (long sample = startSample; sample < endSample;)
                 {
-                    return new LdTestLdfWriteResult(
-                        false,
-                        $"Short read at sample {sample}.",
-                        written,
-                        startSample,
-                        endSample,
-                        session.TestLdfOutputPath,
-                        sample);
+                    int readLength = (int)Math.Min(_chunkSamples, endSample - sample);
+                    double[]? values = loader.Read(input, sample, readLength);
+                    if (values is null || values.Length != readLength)
+                    {
+                        shortReadSample = sample;
+                        session.RuntimeReporter?.WriteTestLdfShortRead(sample);
+                        break;
+                    }
+
+                    WriteInt16Samples(output, values);
+                    sample += readLength;
+                    written += readLength;
                 }
 
-                WriteInt16Samples(output, values);
-                sample += readLength;
-                written += readLength;
+                session.RuntimeReporter?.WriteTestLdfSamplesWritten(written);
             }
 
-            return new LdTestLdfWriteResult(
-                true,
-                $"Wrote {written} input sample(s) to {session.TestLdfOutputPath}",
+            var result = new LdTestLdfWriteResult(
+                !shortReadSample.HasValue,
+                shortReadSample.HasValue
+                    ? $"Short read at sample {shortReadSample.Value}."
+                    : $"Wrote {written} input sample(s) to {session.TestLdfOutputPath}",
                 written,
                 startSample,
                 endSample,
-                session.TestLdfOutputPath);
+                session.TestLdfOutputPath,
+                shortReadSample);
+            session.RuntimeReporter?.CompleteTestLdfReport(result);
+            return result;
         }
         finally
         {

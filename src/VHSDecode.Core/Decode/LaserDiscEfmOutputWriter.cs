@@ -205,11 +205,11 @@ public sealed class LaserDiscEfmOutputWriter : ILaserDiscEfmOutputWriter
             }
 
             _disposed = true;
-            _ac3Output?.Dispose();
-            _rfTbcOutput?.Dispose();
             _pcmOutput?.Dispose();
-            _preEfmOutput?.Dispose();
             _efmOutput?.Dispose();
+            _rfTbcOutput?.Dispose();
+            _ac3Output?.Dispose();
+            _preEfmOutput?.Dispose();
         }
     }
 }

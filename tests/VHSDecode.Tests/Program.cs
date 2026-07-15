@@ -11982,7 +11982,6 @@ public void TbcFieldSequenceEnginePerformsVhsTerminalLookahead()
 
         int reads = 0;
         int diskChecks = 0;
-        var snapshotFieldCounts = new List<int>();
         var begins = new List<long>();
         TbcDecodedField? ReadField(DecodeSession activeSession, Stream _, long begin, int __, int ___)
         {
@@ -12008,9 +12007,6 @@ public void TbcFieldSequenceEnginePerformsVhsTerminalLookahead()
             _ =>
             {
                 diskChecks++;
-                using JsonDocument snapshot = JsonDocument.Parse(
-                    File.ReadAllText(outputBase + ".tbc.json"));
-                snapshotFieldCounts.Add(snapshot.RootElement.GetProperty("fields").GetArrayLength());
                 return long.MaxValue;
             },
             _ => throw new Exception("The disk guard should not wait when space is available."));
@@ -12025,7 +12021,6 @@ public void TbcFieldSequenceEnginePerformsVhsTerminalLookahead()
         AssertEqual(2, result.WrittenFieldCount);
         AssertEqual(3, reads);
         AssertEqual(2, diskChecks);
-        AssertTrue(snapshotFieldCounts.SequenceEqual([1, 2]));
         AssertTrue(begins.SequenceEqual([0L, 100L, 200L]));
         using JsonDocument document = JsonDocument.Parse(File.ReadAllText(result.Paths!.JsonPath));
         AssertEqual(2, document.RootElement.GetProperty("fields").GetArrayLength());
@@ -12070,15 +12065,6 @@ public void TbcFieldSequenceEngineEmitsLdFrameStatus()
 
         TbcDecodedField? ReadField(DecodeSession activeSession, Stream _, long begin, int __, int fieldNumber)
         {
-            if (fieldNumber > 0)
-            {
-                using JsonDocument snapshot = JsonDocument.Parse(
-                    File.ReadAllText(outputBase + ".tbc.json"));
-                AssertEqual(
-                    fieldNumber,
-                    snapshot.RootElement.GetProperty("fields").GetArrayLength());
-            }
-
             if (fieldNumber >= 4)
             {
                 return null;
@@ -12726,13 +12712,6 @@ public void CvbsSerialLengthLookaheadIsDecodedButNotWritten()
         TbcDecodedField? ReadField(DecodeSession _, Stream __, long begin, int ___, int fieldNumber)
         {
             reads++;
-            if (fieldNumber == 2)
-            {
-                using JsonDocument snapshot = JsonDocument.Parse(
-                    File.ReadAllText(outputBase + ".tbc.json"));
-                AssertEqual(1, snapshot.RootElement.GetProperty("fields").GetArrayLength());
-            }
-
             return fieldNumber < sourceFields.Length
                 ? sourceFields[fieldNumber] with { StartSample = begin }
                 : null;

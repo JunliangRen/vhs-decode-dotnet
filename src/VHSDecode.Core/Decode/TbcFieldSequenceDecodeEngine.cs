@@ -74,8 +74,8 @@ public sealed class TbcFieldSequenceDecodeEngine
     private sealed record SequenceDecodeSummary(
         IReadOnlyList<TbcDecodedField> Fields,
         int DecodedFieldCount,
-        long? FirstDecodedSample,
-        long? EndDecodedSample);
+        long StartSample,
+        long EndSample);
 
     public TbcFieldSequenceDecodeEngine(
         int extraReadLines = 3,
@@ -102,6 +102,8 @@ public sealed class TbcFieldSequenceDecodeEngine
     public int ExtraReadLines { get; }
 
     internal bool EnableWorkerPrefetchForCustomReader { get; init; }
+
+    internal Func<string, Stream> CreateTbcOutput { get; init; } = File.Create;
 
     public TbcFieldSequenceDecodeResult TryDecodeAndWrite(DecodeSession session, int? maxFields = null)
     {
@@ -147,7 +149,7 @@ public sealed class TbcFieldSequenceDecodeEngine
         Stream input,
         int? maxFields)
     {
-        StreamingOutputSession? output = null;
+        var output = new StreamingOutputSession(session, _efmOutputWriter, CreateTbcOutput);
         bool outputCompleted = false;
         try
         {
@@ -158,18 +160,24 @@ public sealed class TbcFieldSequenceDecodeEngine
                 retainFields: false,
                 writeFields: writes =>
                 {
-                    output ??= new StreamingOutputSession(session, _efmOutputWriter);
                     output.Write(writes);
                 },
                 writeMetadataSnapshot: () =>
                 {
-                    output ??= new StreamingOutputSession(session, _efmOutputWriter);
                     output.WriteMetadataSnapshot();
                 });
-            output ??= new StreamingOutputSession(session, _efmOutputWriter);
+            if (session.Spec.Name == "cvbs")
+            {
+                session.RuntimeReporter?.WriteCvbsCompletion(session.TbcRenderer.CvbsAgcStatistics);
+            }
+            else
+            {
+                session.RuntimeReporter?.WriteCompletionMessage(output.WrittenFieldCount);
+            }
+
+            LdTestLdfWriteResult? testLdf = WriteOptionalTestLdf(session, input, summary);
             TbcFieldSequenceDecodeResult result = output.Complete();
             outputCompleted = true;
-            LdTestLdfWriteResult? testLdf = WriteOptionalTestLdf(session, input, summary);
             return testLdf.HasValue
                 ? result with
                 {
@@ -178,25 +186,17 @@ public sealed class TbcFieldSequenceDecodeEngine
                 }
                 : result;
         }
-        catch (Exception ex)
+        catch (Exception)
         {
             if (!outputCompleted)
             {
-                if (output is null && ex is OperationCanceledException or DecodeFieldReadException)
+                try
                 {
-                    output = new StreamingOutputSession(session, _efmOutputWriter);
+                    _ = output.Complete();
                 }
-
-                if (output is not null)
+                catch
                 {
-                    try
-                    {
-                        _ = output.Complete();
-                    }
-                    catch
-                    {
-                        // Preserve the exception that interrupted decoding.
-                    }
+                    // Preserve the exception that interrupted decoding.
                 }
             }
 
@@ -204,7 +204,7 @@ public sealed class TbcFieldSequenceDecodeEngine
         }
         finally
         {
-            output?.Dispose();
+            output.Dispose();
         }
     }
 
@@ -232,17 +232,16 @@ public sealed class TbcFieldSequenceDecodeEngine
         }
 
         _cancellationToken.ThrowIfCancellationRequested();
+        int readLength = DecodeReadWindowPlanner.EstimateReadSampleCount(session, ExtraReadLines);
+        long begin = ResolveInitialDecodeStart(session, input, readLength);
+        long startSample = begin;
         if (requestedFields == 0)
         {
-            return new SequenceDecodeSummary([], 0, null, null);
+            return new SequenceDecodeSummary([], 0, startSample, startSample);
         }
 
-        int readLength = DecodeReadWindowPlanner.EstimateReadSampleCount(session, ExtraReadLines);
         var fields = retainFields ? new List<TbcDecodedField>() : null;
         var writePlanner = new FieldWritePlanner(session, retainWrites: false);
-        long begin = ResolveInitialDecodeStart(session, input, readLength);
-        long? firstDecodedSample = null;
-        long? endDecodedSample = null;
         int decodedFieldCount = 0;
         long laserDiscWrittenFieldCount = 0;
         int laserDiscLeadOutCount = 0;
@@ -439,9 +438,7 @@ public sealed class TbcFieldSequenceDecodeEngine
             }
 
             decodedFieldCount++;
-            firstDecodedSample ??= field.StartSample;
-            endDecodedSample = EstimateNextFieldStart(session, field);
-            long nextBegin = endDecodedSample.Value;
+            long nextBegin = EstimateNextFieldStart(session, field);
             if (nextBegin <= begin)
             {
                 throw new InvalidOperationException("Decoded field did not advance the input position.");
@@ -528,6 +525,7 @@ public sealed class TbcFieldSequenceDecodeEngine
                     isFirstField,
                     ref laserDiscLeadOutCount))
             {
+                begin = nextBegin;
                 break;
             }
 
@@ -599,8 +597,8 @@ public sealed class TbcFieldSequenceDecodeEngine
         return new SequenceDecodeSummary(
             fields ?? [],
             decodedFieldCount,
-            firstDecodedSample,
-            endDecodedSample);
+            startSample,
+            begin);
     }
 
     internal static string FormatLaserDiscFrameStatus(
@@ -1088,12 +1086,23 @@ public sealed class TbcFieldSequenceDecodeEngine
             return null;
         }
 
-        long startSample = summary.FirstDecodedSample ?? session.RunBounds.StartSample;
-        long decodedEndSample = summary.EndDecodedSample ?? startSample;
-        long endSample = checked(decodedEndSample + TestLdfLookaheadSamples);
-        return endSample > startSample
-            ? _testLdfWriter.Write(session, startSample, endSample, input)
-            : null;
+        long endSample = checked(summary.EndSample + TestLdfLookaheadSamples);
+        if (endSample <= summary.StartSample)
+        {
+            return null;
+        }
+
+        session.RuntimeReporter?.BeginTestLdfReport(
+            session.TestLdfOutputPath,
+            summary.StartSample,
+            endSample);
+        LdTestLdfWriteResult result = _testLdfWriter.Write(
+            session,
+            summary.StartSample,
+            endSample,
+            input);
+        session.RuntimeReporter?.CompleteTestLdfReport(result);
+        return result;
     }
 
     public static (long StartSample, long EndSample)? ComputeTestLdfSampleRange(
@@ -1154,8 +1163,8 @@ public sealed class TbcFieldSequenceDecodeEngine
     {
         private readonly DecodeSession _session;
         private readonly TbcOutputPaths _paths;
-        private readonly FileStream _tbc;
-        private readonly FileStream? _chroma;
+        private readonly Stream _tbc;
+        private readonly Stream? _chroma;
         private readonly ILaserDiscFieldOutputSession _laserDiscOutput;
         private readonly TbcOutputMetadataWriter.StreamingWriter _metadata;
         private readonly TbcSqliteMetadataWriter.SequenceWriter? _sqlite;
@@ -1163,26 +1172,40 @@ public sealed class TbcFieldSequenceDecodeEngine
         private bool _completed;
         private int _writtenFieldCount;
 
-        public StreamingOutputSession(DecodeSession session, ILaserDiscEfmOutputWriter efmOutputWriter)
+        public int WrittenFieldCount => _writtenFieldCount;
+
+        public StreamingOutputSession(
+            DecodeSession session,
+            ILaserDiscEfmOutputWriter efmOutputWriter,
+            Func<string, Stream> createTbcOutput)
         {
             _session = session;
             _paths = TbcFirstFieldDecodeEngine.BuildOutputPaths(session);
-            FileStream? tbc = null;
-            FileStream? chroma = null;
+            Stream? tbc = null;
+            Stream? chroma = null;
             ILaserDiscFieldOutputSession? laserDiscOutput = null;
             TbcOutputMetadataWriter.StreamingWriter? metadata = null;
             TbcSqliteMetadataWriter.SequenceWriter? sqlite = null;
             try
             {
-                tbc = File.Create(_paths.TbcPath);
+                bool isLaserDisc = session.Spec.Name == "ld";
+                bool writeSqlite = isLaserDisc || session.ExecutionOptions.WriteDebugData;
+                if (writeSqlite && !isLaserDisc)
+                {
+                    sqlite = new TbcSqliteMetadataWriter.SequenceWriter(session, _paths.DbPath!);
+                }
+
+                tbc = createTbcOutput(_paths.TbcPath);
                 chroma = session.ChromaOptions?.WriteChroma == true
-                    ? File.Create(_paths.ChromaPath!)
+                    ? createTbcOutput(_paths.ChromaPath!)
                     : null;
                 laserDiscOutput = efmOutputWriter.Open(session);
+                if (writeSqlite && isLaserDisc)
+                {
+                    sqlite = new TbcSqliteMetadataWriter.SequenceWriter(session, _paths.DbPath!);
+                }
+
                 metadata = new TbcOutputMetadataWriter.StreamingWriter(session, _paths.JsonPath);
-                sqlite = session.Spec.Name == "ld" || session.ExecutionOptions.WriteDebugData
-                    ? new TbcSqliteMetadataWriter.SequenceWriter(session, _paths.DbPath!)
-                    : null;
                 _tbc = tbc;
                 _chroma = chroma;
                 _laserDiscOutput = laserDiscOutput;
@@ -1222,8 +1245,7 @@ public sealed class TbcFieldSequenceDecodeEngine
                 throw new InvalidOperationException("The streaming TBC output session was already completed.");
             }
 
-            ClosePayloads();
-            if (_writtenFieldCount == 0)
+            if (_metadata.FieldCount == 0)
             {
                 _metadata.LeaveIncompleteJson();
             }
@@ -1233,6 +1255,7 @@ public sealed class TbcFieldSequenceDecodeEngine
             }
 
             _sqlite?.Complete(_metadata.FieldCount);
+            ClosePayloads();
 
             _completed = true;
             return new TbcFieldSequenceDecodeResult(
@@ -1291,9 +1314,9 @@ public sealed class TbcFieldSequenceDecodeEngine
             }
 
             _payloadsClosed = true;
-            _laserDiscOutput.Dispose();
             _chroma?.Dispose();
             _tbc.Dispose();
+            _laserDiscOutput.Dispose();
         }
     }
 

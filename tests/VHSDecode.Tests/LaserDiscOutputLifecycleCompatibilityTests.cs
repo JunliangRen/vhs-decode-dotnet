@@ -208,6 +208,53 @@ public sealed class LaserDiscOutputLifecycleCompatibilityTests
         }
     }
 
+    [Fact(DisplayName = "LD zero-field JSON finalizes before payload close in v0.4.0 order")]
+    public void LdZeroFieldJsonFinalizesBeforePayloadCloseInV040Order()
+    {
+        string tempDirectory = CreateTempDirectory();
+        try
+        {
+            string outputBase = Path.Combine(tempDirectory, "close-order");
+            using DecodeSession session = CreateNtscSession(
+                outputBase,
+                "--RF_TBC",
+                "--AC3");
+            var closeOrder = new List<string>();
+            var metadataReady = new List<bool>();
+            void RecordClose(string label)
+            {
+                closeOrder.Add(label);
+                metadataReady.Add(File.Exists(outputBase + ".tbc.json.tmp"));
+            }
+
+            var writer = new LaserDiscEfmOutputWriter(path => new DisposeTrackingStream(
+                path.EndsWith(".tbc.ldf", StringComparison.OrdinalIgnoreCase)
+                    ? "rf"
+                    : Path.GetExtension(path).TrimStart('.'),
+                RecordClose));
+            var engine = new TbcFieldSequenceDecodeEngine(
+                efmOutputWriter: writer,
+                readField: (_, _, _, _, _) => null)
+            {
+                CreateTbcOutput = _ => new DisposeTrackingStream("video", RecordClose)
+            };
+
+            TbcFieldSequenceDecodeResult result = engine.TryDecodeAndWrite(
+                session,
+                Stream.Null,
+                maxFields: 1);
+
+            Assert.True(result.Success);
+            Assert.Equal(["video", "pcm", "efm", "rf", "ac3"], closeOrder);
+            Assert.All(metadataReady, Assert.True);
+            Assert.Equal("{", File.ReadAllText(outputBase + ".tbc.json.tmp"));
+        }
+        finally
+        {
+            Directory.Delete(tempDirectory, recursive: true);
+        }
+    }
+
     [Fact(DisplayName = "LD EFM creation failures retain earlier PCM artifact like v0.4.0")]
     public void LdEfmCreationFailuresRetainEarlierPcmArtifactLikeV040()
     {
@@ -221,6 +268,7 @@ public sealed class LaserDiscOutputLifecycleCompatibilityTests
                 AudioPcm = [100, -100],
                 Efm = BuildEfmSquareWave(2048)
             };
+            int readCalls = 0;
             var engine = new TbcFieldSequenceDecodeEngine(
                 efmOutputWriter: new LaserDiscEfmOutputWriter(path =>
                 {
@@ -231,7 +279,11 @@ public sealed class LaserDiscOutputLifecycleCompatibilityTests
 
                     return File.Create(path);
                 }),
-                readField: OneFieldReader(field));
+                readField: (_, _, _, _, fieldNumber) =>
+                {
+                    readCalls++;
+                    return fieldNumber == 0 ? field : null;
+                });
 
             TbcFieldSequenceDecodeResult result = engine.TryDecodeAndWrite(
                 session,
@@ -240,6 +292,7 @@ public sealed class LaserDiscOutputLifecycleCompatibilityTests
 
             Assert.False(result.Success);
             Assert.Contains("synthetic EFM creation failure", result.Message, StringComparison.Ordinal);
+            Assert.Equal(0, readCalls);
             Assert.Equal(0, new FileInfo(outputBase + ".tbc").Length);
             Assert.Equal(0, new FileInfo(outputBase + ".pcm").Length);
             Assert.False(File.Exists(outputBase + ".efm"));
@@ -247,6 +300,318 @@ public sealed class LaserDiscOutputLifecycleCompatibilityTests
             Assert.False(File.Exists(outputBase + ".tbc.json.tmp"));
             Assert.False(File.Exists(outputBase + ".tbc.json.fields.tmp"));
             Assert.False(File.Exists(outputBase + ".tbc.db"));
+        }
+        finally
+        {
+            Directory.Delete(tempDirectory, recursive: true);
+        }
+    }
+
+    [Fact(DisplayName = "LD test LDF starts at the pre-decode offset after initial recovery like v0.4.0")]
+    public void LdTestLdfStartsBeforeInitialRecoveryLikeV040()
+    {
+        string tempDirectory = CreateTempDirectory();
+        try
+        {
+            string outputBase = Path.Combine(tempDirectory, "ldf-initial-recovery");
+            using DecodeSession session = CreateSession(
+                outputBase,
+                "--disable_analog_audio",
+                "--noEFM",
+                "--start_fileloc",
+                "100",
+                "--write-test-ldf",
+                Path.Combine(tempDirectory, "initial-recovery.ldf"));
+            var testLdfWriter = new RecordingLdTestLdfWriter();
+            int attempts = 0;
+            var engine = new TbcFieldSequenceDecodeEngine(
+                testLdfWriter: testLdfWriter,
+                readField: (activeSession, _, begin, _, _) => ++attempts == 1
+                    ? throw new TbcFieldDecodeRecoveryException(
+                        TbcFieldDecodeRecoveryKind.NoFirstHSync,
+                        50,
+                        "synthetic initial recovery")
+                    : BuildField(activeSession) with { StartSample = begin })
+            {
+                CreateTbcOutput = _ => new MemoryStream()
+            };
+
+            TbcFieldSequenceDecodeResult result = engine.TryDecodeAndWrite(
+                session,
+                Stream.Null,
+                maxFields: 1);
+
+            Assert.True(result.Success);
+            Assert.Equal(2, attempts);
+            (long startSample, long endSample) = Assert.Single(testLdfWriter.Ranges);
+            Assert.Equal(100, startSample);
+            Assert.Equal(1_100_250, endSample);
+        }
+        finally
+        {
+            Directory.Delete(tempDirectory, recursive: true);
+        }
+    }
+
+    [Fact(DisplayName = "LD test LDF ends at the final recovery offset like v0.4.0")]
+    public void LdTestLdfEndsAfterFinalRecoveryLikeV040()
+    {
+        string tempDirectory = CreateTempDirectory();
+        try
+        {
+            string outputBase = Path.Combine(tempDirectory, "ldf-final-recovery");
+            using DecodeSession session = CreateSession(
+                outputBase,
+                "--disable_analog_audio",
+                "--noEFM",
+                "--start_fileloc",
+                "100",
+                "--write-test-ldf",
+                Path.Combine(tempDirectory, "final-recovery.ldf"));
+            var testLdfWriter = new RecordingLdTestLdfWriter();
+            int attempts = 0;
+            var engine = new TbcFieldSequenceDecodeEngine(
+                testLdfWriter: testLdfWriter,
+                readField: (activeSession, _, begin, _, _) => ++attempts switch
+                {
+                    1 => BuildField(activeSession) with { StartSample = begin },
+                    2 => throw new TbcFieldDecodeRecoveryException(
+                        TbcFieldDecodeRecoveryKind.InsufficientData,
+                        25,
+                        "synthetic final recovery"),
+                    _ => null
+                })
+            {
+                CreateTbcOutput = _ => new MemoryStream()
+            };
+
+            TbcFieldSequenceDecodeResult result = engine.TryDecodeAndWrite(session, Stream.Null);
+
+            Assert.True(result.Success);
+            Assert.Equal(3, attempts);
+            (long startSample, long endSample) = Assert.Single(testLdfWriter.Ranges);
+            Assert.Equal(100, startSample);
+            Assert.Equal(1_100_225, endSample);
+        }
+        finally
+        {
+            Directory.Delete(tempDirectory, recursive: true);
+        }
+    }
+
+    [Fact(DisplayName = "LD zero-length test LDF still resolves seek like v0.4.0")]
+    public void LdZeroLengthTestLdfStillResolvesSeekLikeV040()
+    {
+        string tempDirectory = CreateTempDirectory();
+        try
+        {
+            string outputBase = Path.Combine(tempDirectory, "ldf-zero-length-seek");
+            using DecodeSession session = CreateNtscSession(
+                outputBase,
+                "--disable_analog_audio",
+                "--noEFM",
+                "--seek",
+                "12",
+                "--length",
+                "0",
+                "--write-test-ldf",
+                Path.Combine(tempDirectory, "zero-length-seek.ldf"));
+            long nominalFieldSamples = session.TbcFieldDecoder.EstimateNominalFieldSampleCount();
+            long initialProbe = 12L * 2L * nominalFieldSamples;
+            long targetProbe = initialProbe + (3L * nominalFieldSamples);
+            var readBegins = new List<long>();
+            var testLdfWriter = new RecordingLdTestLdfWriter();
+            var engine = new TbcFieldSequenceDecodeEngine(
+                testLdfWriter: testLdfWriter,
+                readField: (activeSession, _, begin, _, fieldNumber) =>
+                {
+                    readBegins.Add(begin);
+                    int frameNumber = begin >= targetProbe ? 12 : 10;
+                    return BuildField(activeSession) with
+                    {
+                        StartSample = begin,
+                        DetectedFirstField = fieldNumber == 0,
+                        NextFieldOffsetSamples = nominalFieldSamples,
+                        VbiData = fieldNumber == 1 ? [EncodeCavFrameCode(frameNumber)] : []
+                    };
+                })
+            {
+                CreateTbcOutput = _ => new MemoryStream()
+            };
+
+            TbcFieldSequenceDecodeResult result = engine.TryDecodeAndWrite(session, Stream.Null);
+
+            Assert.True(result.Success);
+            Assert.Equal(
+                [initialProbe, initialProbe + nominalFieldSamples, targetProbe, targetProbe + nominalFieldSamples],
+                readBegins);
+            (long startSample, long endSample) = Assert.Single(testLdfWriter.Ranges);
+            Assert.Equal(targetProbe, startSample);
+            Assert.Equal(targetProbe + 1_100_000, endSample);
+        }
+        finally
+        {
+            Directory.Delete(tempDirectory, recursive: true);
+        }
+    }
+
+    [Fact(DisplayName = "LD test LDF includes the lead-out field that stops decoding like v0.4.0")]
+    public void LdTestLdfIncludesStoppingLeadOutFieldLikeV040()
+    {
+        string tempDirectory = CreateTempDirectory();
+        try
+        {
+            string outputBase = Path.Combine(tempDirectory, "ldf-lead-out");
+            using DecodeSession session = CreateNtscSession(
+                outputBase,
+                "--disable_analog_audio",
+                "--noEFM",
+                "--start_fileloc",
+                "100",
+                "--write-test-ldf",
+                Path.Combine(tempDirectory, "lead-out.ldf"));
+            var testLdfWriter = new RecordingLdTestLdfWriter();
+            int reads = 0;
+            var engine = new TbcFieldSequenceDecodeEngine(
+                testLdfWriter: testLdfWriter,
+                readField: (activeSession, _, begin, _, fieldNumber) =>
+                {
+                    reads++;
+                    return BuildField(activeSession) with
+                    {
+                        StartSample = begin,
+                        DetectedFirstField = fieldNumber == 0,
+                        VbiData = [0x80EEEE]
+                    };
+                })
+            {
+                CreateTbcOutput = _ => new MemoryStream()
+            };
+
+            TbcFieldSequenceDecodeResult result = engine.TryDecodeAndWrite(session, Stream.Null);
+
+            Assert.True(result.Success);
+            Assert.Equal(2, reads);
+            (long startSample, long endSample) = Assert.Single(testLdfWriter.Ranges);
+            Assert.Equal(100, startSample);
+            Assert.Equal(1_100_300, endSample);
+        }
+        finally
+        {
+            Directory.Delete(tempDirectory, recursive: true);
+        }
+    }
+
+    [Fact(DisplayName = "LD test LDF runs before JSON and payload completion like v0.4.0")]
+    public void LdTestLdfRunsBeforeJsonAndPayloadCompletionLikeV040()
+    {
+        string tempDirectory = CreateTempDirectory();
+        try
+        {
+            string outputBase = Path.Combine(tempDirectory, "ldf-completion-order");
+            string ldfPath = Path.Combine(tempDirectory, "completion-order.ldf");
+            using DecodeSession session = CreateNtscSession(
+                outputBase,
+                "--disable_analog_audio",
+                "--noEFM",
+                "--length",
+                "0",
+                "--write-test-ldf",
+                ldfPath);
+            var output = new StringWriter();
+            var error = new StringWriter();
+            session.RuntimeReporter = new DecodeRuntimeReporter(output, error);
+            bool payloadClosed = false;
+            bool writerCalled = false;
+            var testLdfWriter = new DelegateLdTestLdfWriter((activeSession, startSample, endSample, _) =>
+            {
+                writerCalled = true;
+                Assert.False(payloadClosed);
+                Assert.False(File.Exists(outputBase + ".tbc.json.tmp"));
+                string liveError = error.ToString();
+                Assert.Contains("Completed without handling any frames.", liveError, StringComparison.Ordinal);
+                Assert.Contains($"Writing input samples to {ldfPath}...", liveError, StringComparison.Ordinal);
+                Assert.DoesNotContain("Samples written:", liveError, StringComparison.Ordinal);
+                return new LdTestLdfWriteResult(
+                    true,
+                    "recorded LD test LDF lifecycle",
+                    endSample - startSample,
+                    startSample,
+                    endSample,
+                    activeSession.TestLdfOutputPath);
+            });
+            var engine = new TbcFieldSequenceDecodeEngine(
+                testLdfWriter: testLdfWriter,
+                readField: (_, _, _, _, _) => throw new InvalidOperationException("zero length must not decode"))
+            {
+                CreateTbcOutput = _ => new DisposeTrackingStream("video", _ => payloadClosed = true)
+            };
+
+            TbcFieldSequenceDecodeResult result = engine.TryDecodeAndWrite(session, Stream.Null);
+
+            Assert.True(result.Success);
+            Assert.True(writerCalled);
+            Assert.True(payloadClosed);
+            Assert.Equal("{", File.ReadAllText(outputBase + ".tbc.json.tmp"));
+            string finalError = error.ToString();
+            Assert.True(finalError.IndexOf("Completed without handling any frames.", StringComparison.Ordinal)
+                < finalError.IndexOf("Writing input samples to", StringComparison.Ordinal));
+            Assert.True(finalError.IndexOf("Writing input samples to", StringComparison.Ordinal)
+                < finalError.IndexOf("Samples written:", StringComparison.Ordinal));
+            Assert.True(finalError.IndexOf("Samples written:", StringComparison.Ordinal)
+                < finalError.IndexOf("Successfully wrote", StringComparison.Ordinal));
+
+            session.RuntimeReporter.WriteCompletionMessage(result.WrittenFieldCount);
+            session.RuntimeReporter.CompleteTestLdfReport(Assert.IsType<LdTestLdfWriteResult>(result.TestLdf));
+            Assert.Equal(finalError, error.ToString());
+        }
+        finally
+        {
+            Directory.Delete(tempDirectory, recursive: true);
+        }
+    }
+
+    [Fact(DisplayName = "LD test LDF reports samples before closing its output pipe like v0.4.0")]
+    public void LdTestLdfReportsSamplesBeforeClosingOutputPipeLikeV040()
+    {
+        string tempDirectory = CreateTempDirectory();
+        try
+        {
+            string inputPath = Path.Combine(tempDirectory, "input.s16");
+            string outputBase = Path.Combine(tempDirectory, "ldf-pipe-order");
+            string ldfPath = Path.Combine(tempDirectory, "pipe-order.ldf");
+            File.WriteAllBytes(inputPath, [0, 0, 1, 0, 2, 0, 3, 0]);
+            ParsedCommand command = new CommandLineParser().Parse(CliSpecs.LaserDisc, [
+                "--NTSC",
+                "--threads",
+                "0",
+                "--disable_analog_audio",
+                "--noEFM",
+                "--write-test-ldf",
+                ldfPath,
+                inputPath,
+                outputBase
+            ]);
+            using DecodeSession session = DecodeSessionFactory.Create(command);
+            var output = new StringWriter();
+            var error = new StringWriter();
+            session.RuntimeReporter = new DecodeRuntimeReporter(output, error);
+            bool pipeClosed = false;
+            var writer = new FfmpegLdTestLdfWriter(
+                _ => new DisposeTrackingStream("ldf", _ =>
+                {
+                    pipeClosed = true;
+                    Assert.Contains("  Samples written: 3", error.ToString(), StringComparison.Ordinal);
+                    Assert.DoesNotContain("Successfully wrote", error.ToString(), StringComparison.Ordinal);
+                }),
+                chunkSamples: 2);
+            using FileStream input = File.OpenRead(inputPath);
+
+            LdTestLdfWriteResult result = writer.Write(session, 0, 3, input);
+
+            Assert.True(result.Success);
+            Assert.True(pipeClosed);
+            Assert.Contains($"Successfully wrote {ldfPath}", error.ToString(), StringComparison.Ordinal);
         }
         finally
         {
@@ -316,6 +681,22 @@ public sealed class LaserDiscOutputLifecycleCompatibilityTests
         return samples;
     }
 
+    private static int EncodeCavFrameCode(int frameNumber)
+    {
+        int value = frameNumber;
+        int bcd = 0;
+        int shift = 0;
+        do
+        {
+            bcd |= (value % 10) << shift;
+            value /= 10;
+            shift += 4;
+        }
+        while (value > 0);
+
+        return 0xF00000 | bcd;
+    }
+
     private static JsonObject ReadOnlyMetadataField(string outputBase)
     {
         JsonArray fields = ReadMetadataFields(outputBase);
@@ -367,5 +748,54 @@ public sealed class LaserDiscOutputLifecycleCompatibilityTests
         {
             throw new IOException(message);
         }
+    }
+
+    private sealed class DisposeTrackingStream(string label, Action<string> onDispose) : MemoryStream
+    {
+        private bool _disposed;
+
+        protected override void Dispose(bool disposing)
+        {
+            if (disposing && !_disposed)
+            {
+                _disposed = true;
+                onDispose(label);
+            }
+
+            base.Dispose(disposing);
+        }
+    }
+
+    private sealed class RecordingLdTestLdfWriter : ILdTestLdfWriter
+    {
+        public List<(long StartSample, long EndSample)> Ranges { get; } = [];
+
+        public LdTestLdfWriteResult Write(
+            DecodeSession session,
+            long startSample,
+            long endSample,
+            Stream input)
+        {
+            Ranges.Add((startSample, endSample));
+            return new LdTestLdfWriteResult(
+                true,
+                "recorded LD test LDF range",
+                endSample - startSample,
+                startSample,
+                endSample,
+                session.TestLdfOutputPath);
+        }
+    }
+
+    private sealed class DelegateLdTestLdfWriter(
+        Func<DecodeSession, long, long, Stream, LdTestLdfWriteResult> write)
+        : ILdTestLdfWriter
+    {
+        public LdTestLdfWriteResult Write(
+            DecodeSession session,
+            long startSample,
+            long endSample,
+            Stream input)
+            => write(session, startSample, endSample, input);
     }
 }
