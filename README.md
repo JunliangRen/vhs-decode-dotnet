@@ -1077,6 +1077,12 @@ Implemented:
   NTSC `ntscLine19Burst0IRE`. Release 4.0's PAL verbose JSON dumper itself raises
   on NumPy `float32` metrics, so the differential used an analysis-only scalar
   adapter to expose the intended metric values while this port emits valid JSON
+- a deterministic one-frame 40 MHz NTSC LD cadence fixture now follows
+  v0.4.0's three-way local/next/previous line-zero median and its integer
+  nominal-line-length burst timing; field phases `3`/`4`, sync confidence,
+  dropout coordinates, verbose VITS values, and the absence of a phase-sequence
+  warning match upstream. All active-picture samples match; 1,219 samples on
+  five sharp VBlank boundary lines remain under numerical parity audit
 - a one-frame real NTSC LD/LDF fixture with default EFM and analog audio also
   matches v0.4.0 byte for byte: main TBC
   `7F19286F84D563D58983C50326CE16433ED9DA90459ADA658532EB38A5AF686A`,
@@ -1121,7 +1127,7 @@ dotnet test VHSDecodeDotNet.slnx --no-build
 ```
 
 The current formal solution build completes with zero warnings and errors, and
-the xUnit v3 project exposes 453 independently discoverable compatibility tests
+the xUnit v3 project exposes 455 independently discoverable compatibility tests
 to `dotnet test` and Visual Studio Test Explorer. On the
 same Windows machine and fixtures, Release wall-clock measurements for one
 frame were 2.346 s versus 7.193 s for NTSC VHS and 1.651 s versus 5.865 s for

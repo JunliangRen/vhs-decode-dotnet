@@ -7530,6 +7530,44 @@ public void VBlankSyncResolverMatchesUpstreamDistanceConsensus()
     AssertFalse(VBlankSyncResolver.HasValidStateMachineTiming(compressed, 100.0, 6));
 }
 
+[Fact(DisplayName = "LD line-zero consensus matches Release 4.0 three-way median")]
+public void LaserDiscLineZeroConsensusMatchesRelease40ThreeWayMedian()
+{
+    var first = new VBlankSyncEstimate(
+        Line0Location: 100.0,
+        FirstHSyncLocation: 1_100.0,
+        FirstHSyncLine: 10.0,
+        ValidDistanceCount: 6,
+        UnalignedFirstHSyncLocation: 1_099.0);
+    var next = new VBlankSyncEstimate(
+        Line0Location: 300.0,
+        FirstHSyncLocation: 1_300.0,
+        FirstHSyncLine: 10.0,
+        ValidDistanceCount: 6,
+        UnalignedFirstHSyncLocation: 1_299.0);
+    var previous = new Line0Resolution(
+        Location: 305.0,
+        UsedFallback: false,
+        ExpectedFirstField: null,
+        ExpectedFirstFieldConfidence: 0,
+        UsedPreviousEstimate: true,
+        FirstHSyncLocation: 1_305.0,
+        UnalignedFirstHSyncLocation: 1_304.0,
+        InitialSyncConfidence: 90);
+
+    Line0Resolution selected = TbcFieldDecodePipeline.SelectLegacyThreeWayLine0Consensus(
+        first,
+        next,
+        previous);
+
+    AssertClose(300.0, selected.Location, 1e-12);
+    AssertClose(1_300.0, selected.FirstHSyncLocation, 1e-12);
+    AssertClose(1_299.0, selected.UnalignedFirstHSyncLocation, 1e-12);
+    AssertFalse(selected.UsedFallback);
+    AssertFalse(selected.UsedPreviousEstimate);
+    AssertEqual(100, selected.InitialSyncConfidence);
+}
+
 [Fact(DisplayName = "fallback vsync resolver matches upstream pulse priorities")]
 public void FallbackVSyncResolverMatchesUpstreamPulsePriorities()
 {
@@ -10395,6 +10433,48 @@ public void LaserDiscPalPilotSliceUsesNominalInputFrequency()
     AssertEqual(100, start);
     AssertEqual(7, length);
     AssertClose(0.25, lineOffset, 1e-12);
+}
+
+[Fact(DisplayName = "LD line sample rate uses Release 4.0 rounded nominal line length")]
+public void LaserDiscLineSampleRateUsesRelease40RoundedNominalLineLength()
+{
+    var spec = new TbcFrameSpec(
+        "NTSC",
+        OutputLineLength: 4,
+        OutputLineCount: 4,
+        OutputSampleRateHz: 14_318_181.818181818,
+        ColourBurstStart: null,
+        ColourBurstEnd: null,
+        ActiveVideoStart: null,
+        ActiveVideoEnd: null);
+    var converter = new VideoOutputConverter(
+        ire0: 0.0,
+        hzIre: 1.0,
+        outputZero: 256,
+        vsyncIre: -40.0,
+        outputScale: 10.0);
+    var analyzer = new SyncAnalyzer(
+        sampleRateHz: 1_000_000.0,
+        linePeriodUs: 100.4,
+        hsyncPulseUs: 10.0,
+        equalizingPulseUs: 5.0,
+        vsyncPulseUs: 20.0);
+    var pipeline = new TbcFieldDecodePipeline(
+        analyzer,
+        new TbcFieldRenderer(spec, converter),
+        converter,
+        "NTSC",
+        TbcDropoutDetectionOptions.Disabled,
+        decodeLaserDiscVbi: true);
+
+    double samplesPerUsec = (double)InvokePrivateMethod(
+        pipeline,
+        "LaserDiscLineSamplesPerUsec",
+        new double[] { 0.0, 120.0, 240.0 },
+        0,
+        (int?)2)!;
+
+    AssertClose(1.2, samplesPerUsec, 1e-12);
 }
 
 [Fact(DisplayName = "TBC field decode determines PAL eight-field burst phase transactionally")]

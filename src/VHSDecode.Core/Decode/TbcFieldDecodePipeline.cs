@@ -2635,12 +2635,13 @@ public sealed class TbcFieldDecodePipeline
             lineLength = lineLocations[line + 1] - lineLocations[line];
         }
 
-        if (!double.IsFinite(lineLength) || lineLength <= 0.0 || _syncAnalyzer.NominalLineLength <= 0.0)
+        double nominalLineLength = Math.Round(_syncAnalyzer.NominalLineLength, MidpointRounding.ToEven);
+        if (!double.IsFinite(lineLength) || lineLength <= 0.0 || nominalLineLength <= 0.0)
         {
             return _syncAnalyzer.SampleRateMHz;
         }
 
-        return _syncAnalyzer.SampleRateMHz * lineLength / _syncAnalyzer.NominalLineLength;
+        return _syncAnalyzer.SampleRateMHz * lineLength / nominalLineLength;
     }
 
     private int? DecodeLaserDiscPhillipsCode(ReadOnlySpan<double> video, double lineStart)
@@ -3597,6 +3598,20 @@ public sealed class TbcFieldDecodePipeline
                 currentFieldLines,
                 fieldLines[0]);
         }
+
+        Line0Resolution? previousEstimate = TryEstimateLine0FromPrevious(
+            classified,
+            spanStartSample,
+            meanLineLength,
+            currentFieldLines,
+            estimatedFirstField);
+        if (vBlankConsensus?.First is { } first
+            && vBlankConsensus.Last is { } next
+            && previousEstimate is not null)
+        {
+            return SelectLegacyThreeWayLine0Consensus(first, next, previousEstimate);
+        }
+
         if (vBlankConsensus?.Combined is { } combined)
         {
             return new Line0Resolution(
@@ -3639,12 +3654,6 @@ public sealed class TbcFieldDecodePipeline
                     hasNextEstimate: vBlankConsensus?.Last is not null));
         }
 
-        Line0Resolution? previousEstimate = TryEstimateLine0FromPrevious(
-            classified,
-            spanStartSample,
-            meanLineLength,
-            currentFieldLines,
-            estimatedFirstField);
         if (previousEstimate is not null)
         {
             return previousEstimate;
@@ -3754,6 +3763,48 @@ public sealed class TbcFieldDecodePipeline
         }
 
         return null;
+    }
+
+    internal static Line0Resolution SelectLegacyThreeWayLine0Consensus(
+        VBlankSyncEstimate first,
+        VBlankSyncEstimate next,
+        Line0Resolution previous)
+    {
+        ArgumentNullException.ThrowIfNull(first);
+        ArgumentNullException.ThrowIfNull(next);
+        ArgumentNullException.ThrowIfNull(previous);
+
+        var candidates = new (double Location, int Source)[]
+        {
+            (first.Line0Location, 0),
+            (next.Line0Location, 1),
+            (previous.Location, 2)
+        };
+        Array.Sort(candidates, static (left, right) => left.Location.CompareTo(right.Location));
+
+        return candidates[1].Source switch
+        {
+            0 => FromVBlankEstimate(first),
+            1 => FromVBlankEstimate(next),
+            _ => previous with
+            {
+                UsedFallback = false,
+                ExpectedFirstField = null,
+                ExpectedFirstFieldConfidence = 0,
+                UsedPreviousEstimate = false,
+                InitialSyncConfidence = 100
+            }
+        };
+
+        static Line0Resolution FromVBlankEstimate(VBlankSyncEstimate estimate) => new(
+            estimate.Line0Location,
+            UsedFallback: false,
+            ExpectedFirstField: null,
+            ExpectedFirstFieldConfidence: 0,
+            UsedPreviousEstimate: false,
+            FirstHSyncLocation: estimate.FirstHSyncLocation,
+            UnalignedFirstHSyncLocation: estimate.UnalignedFirstHSyncLocation,
+            InitialSyncConfidence: 100);
     }
 
     private int LaserDiscLineOffset(bool? isFirstField)
