@@ -142,6 +142,9 @@ Implemented:
 - VHS `--ire0_adjust` preserves Release 4.0's exact-name pre-normalization,
   abbreviated-option consumption, comma-part validation, and lowercased value
   shape rather than applying generic optional-argument behavior
+- VHS `--params_file` validates by performing argparse-style read opens,
+  preserving Python errno/path representations for missing, denied, invalid,
+  and directory inputs while accepting standard input and Windows devices
 - Python 3 numeric argument conversion for integer, float, and frequency
   options, including underscore separators, Unicode decimal digits,
   arbitrary-precision parsed integers, signed `NaN`/infinity, suffix-adjacent
@@ -1208,7 +1211,7 @@ dotnet test VHSDecodeDotNet.slnx --no-build
 ```
 
 The current formal solution build completes with zero warnings and errors, and
-the xUnit v3 project exposes 513 independently discoverable compatibility tests
+the xUnit v3 project exposes 515 independently discoverable compatibility tests
 to `dotnet test` and Visual Studio Test Explorer. On the
 same Windows machine and fixtures, Release wall-clock measurements for one
 frame were 2.346 s versus 7.193 s for NTSC VHS and 1.651 s versus 5.865 s for
