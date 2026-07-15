@@ -362,6 +362,13 @@ public sealed class DecodeRunner
         else if (command.Spec == CliSpecs.Cvbs)
         {
             FormatCatalog.Default.GetCvbsParameters(system);
+            if (command.Get<bool>("chroma_trap"))
+            {
+                File.WriteAllText(command.OutputBase + ".log", string.Empty);
+                throw new ArgumentException(
+                    "ChromaSepClass.__init__() missing 1 required positional argument: 'logger'");
+            }
+
             if (system is not ("PAL" or "NTSC"))
             {
                 throw new ArgumentException($"('Unknown video system!', '{system}')");

@@ -102,6 +102,29 @@ public static class TbcOutputMetadataWriter
             }
         }
 
+        public void LeaveIncompleteJson()
+        {
+            if (_completed)
+            {
+                throw new InvalidOperationException("The streaming metadata writer was already completed.");
+            }
+
+            CloseFieldsWriter();
+            try
+            {
+                File.Delete(_jsonPath);
+                File.WriteAllText(
+                    _jsonPath + ".tmp",
+                    "{",
+                    new UTF8Encoding(encoderShouldEmitUTF8Identifier: false));
+                _completed = true;
+            }
+            finally
+            {
+                File.Delete(_fieldsPath);
+            }
+        }
+
         public void Dispose()
         {
             CloseFieldsWriter();
@@ -1614,21 +1637,79 @@ public static class TbcOutputMetadataWriter
     }
 
     private static double StandardDeviation(IReadOnlyList<double> values)
+        => StandardDeviationNumpyFloat64(values);
+
+    internal static double StandardDeviationNumpyFloat64(IReadOnlyList<double> values)
     {
         if (values.Count == 0)
         {
             return 0.0;
         }
 
-        double mean = Mean(values);
-        double sumSquares = 0.0;
+        double mean = PairwiseSumNumpyFloat64(values, 0, values.Count) / values.Count;
+        var squaredDistances = new double[values.Count];
         for (int i = 0; i < values.Count; i++)
         {
             double distance = values[i] - mean;
-            sumSquares += distance * distance;
+            squaredDistances[i] = distance * distance;
         }
 
-        return Math.Sqrt(sumSquares / values.Count);
+        double variance = PairwiseSumNumpyFloat64(
+            squaredDistances,
+            0,
+            squaredDistances.Length) / squaredDistances.Length;
+        return Math.Sqrt(variance);
+    }
+
+    private static double PairwiseSumNumpyFloat64(
+        IReadOnlyList<double> values,
+        int start,
+        int count)
+    {
+        const int pairwiseBlockSize = 128;
+        if (count < 8)
+        {
+            double sum = -0.0;
+            for (int i = 0; i < count; i++)
+            {
+                sum += values[start + i];
+            }
+
+            return sum;
+        }
+
+        if (count <= pairwiseBlockSize)
+        {
+            Span<double> lanes = stackalloc double[8];
+            for (int lane = 0; lane < lanes.Length; lane++)
+            {
+                lanes[lane] = values[start + lane];
+            }
+
+            int index = 8;
+            int vectorizedEnd = count - (count % lanes.Length);
+            for (; index < vectorizedEnd; index += lanes.Length)
+            {
+                for (int lane = 0; lane < lanes.Length; lane++)
+                {
+                    lanes[lane] += values[start + index + lane];
+                }
+            }
+
+            double sum = ((lanes[0] + lanes[1]) + (lanes[2] + lanes[3]))
+                + ((lanes[4] + lanes[5]) + (lanes[6] + lanes[7]));
+            for (; index < count; index++)
+            {
+                sum += values[start + index];
+            }
+
+            return sum;
+        }
+
+        int leftCount = count / 2;
+        leftCount -= leftCount % 8;
+        return PairwiseSumNumpyFloat64(values, start, leftCount)
+            + PairwiseSumNumpyFloat64(values, start + leftCount, count - leftCount);
     }
 
     private static bool InRange(double value, double minimum, double maximum)

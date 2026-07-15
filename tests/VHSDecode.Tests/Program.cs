@@ -489,6 +489,46 @@ public void CvbsParserHandlesAgcOptions()
     AssertClose(0.25, command.Get<double>("agc_speed"), 1e-12);
 }
 
+[Fact(DisplayName = "CVBS runner preserves v0.4.0 chroma-trap constructor failure")]
+public void CvbsRunnerPreservesReleaseChromaTrapConstructorFailure()
+{
+    string tempDirectory = Path.Combine(Path.GetTempPath(), "vhsdecode-dotnet-tests-" + Guid.NewGuid().ToString("N"));
+    Directory.CreateDirectory(tempDirectory);
+    try
+    {
+        string inputPath = Path.Combine(tempDirectory, "input.s16");
+        string outputBase = Path.Combine(tempDirectory, "capture");
+        File.WriteAllBytes(inputPath, [0, 0]);
+        var output = new StringWriter();
+        var error = new StringWriter();
+
+        AssertEqual(1, new DecodeRunner().Run(
+            Parse(CliSpecs.Cvbs, [
+                "--pal",
+                "--chroma_trap",
+                inputPath,
+                outputBase
+            ]),
+            output,
+            error,
+            TestContext.Current.CancellationToken));
+
+        AssertEqual(string.Empty, output.ToString());
+        AssertEqual(
+            "ChromaSepClass.__init__() missing 1 required positional argument: 'logger'"
+            + Environment.NewLine,
+            error.ToString());
+        AssertTrue(File.Exists(outputBase + ".log"));
+        AssertEqual(0L, new FileInfo(outputBase + ".log").Length);
+        AssertFalse(File.Exists(outputBase + ".tbc"));
+        AssertFalse(File.Exists(outputBase + ".tbc.json"));
+    }
+    finally
+    {
+        Directory.Delete(tempDirectory, recursive: true);
+    }
+}
+
 [Fact(DisplayName = "ld parser handles audio and filter options")]
 public void LdParserHandlesAudioAndFilterOptions()
 {
@@ -2138,6 +2178,54 @@ public void PortedComplexAngleMatchesExpectedQuadrants()
     AssertClose(Math.PI / 2, result[1], 1e-12);
     AssertClose(Math.PI, result[2], 1e-12);
     AssertClose(-Math.PI / 2, result[3], 1e-12);
+}
+
+[Fact(DisplayName = "TBC field sequence engine omits empty CVBS metadata")]
+public void TbcFieldSequenceEngineOmitsEmptyCvbsMetadata()
+{
+    string tempDirectory = Path.Combine(Path.GetTempPath(), "vhsdecode-dotnet-tests-" + Guid.NewGuid().ToString("N"));
+    Directory.CreateDirectory(tempDirectory);
+    try
+    {
+        using DecodeSession session = DecodeSessionFactory.Create(Parse(CliSpecs.Cvbs, [
+            "--pal",
+            "input.s16",
+            Path.Combine(tempDirectory, "empty-cvbs")
+        ]));
+        var error = new StringWriter();
+        session.RuntimeReporter = new DecodeRuntimeReporter(TextWriter.Null, error);
+        DecodeSessionLogWriter.Write(session);
+        int reads = 0;
+        var engine = new TbcFieldSequenceDecodeEngine(
+            readField: (_, _, _, _, _) => reads++ == 0
+                ? throw new TbcFieldDecodeRecoveryException(
+                    TbcFieldDecodeRecoveryKind.NoSyncPulses,
+                    40_000_000,
+                    "no sync",
+                    stopAfterDecodedFields: true)
+                : null);
+
+        TbcFieldSequenceDecodeResult result = engine.TryDecodeAndWrite(session, Stream.Null);
+
+        AssertTrue(result.Success);
+        AssertEqual(2, reads);
+        AssertEqual(0, result.WrittenFieldCount);
+        AssertEqual(
+            "Unable to find any sync pulses, skipping one second" + Environment.NewLine,
+            error.ToString());
+        AssertContains(
+            File.ReadAllText(session.OutputBase + ".log"),
+            " - lddecode - ERROR - Unable to find any sync pulses, skipping one second");
+        AssertTrue(File.Exists(result.Paths!.TbcPath));
+        AssertEqual(0L, new FileInfo(result.Paths.TbcPath).Length);
+        AssertFalse(File.Exists(result.Paths.JsonPath));
+        AssertEqual("{", File.ReadAllText(result.Paths.JsonPath + ".tmp"));
+        AssertFalse(File.Exists(result.Paths.JsonPath + ".fields.tmp"));
+    }
+    finally
+    {
+        Directory.Delete(tempDirectory, recursive: true);
+    }
 }
 
 [Fact(DisplayName = "FFT round-trips complex samples")]
@@ -13609,6 +13697,44 @@ public void TbcMetadataWriterEmitsLdUpstreamFields()
             3,
             MidpointRounding.ToEven);
         AssertClose(expectedPalBurst50Level, JsonDouble(verbosePalSecondMetrics, "palVITSBurst50Level"), 0.0);
+    }
+    finally
+    {
+        Directory.Delete(tempDirectory, recursive: true);
+    }
+}
+
+[Fact(DisplayName = "TBC metadata writer matches NumPy float64 standard deviation")]
+public void TbcMetadataWriterMatchesNumpyFloat64StandardDeviation()
+{
+    double repeatedValue = BitConverter.UInt64BitsToDouble(0x40605381BDD2B899UL);
+    double[] repeatedValues = Enumerable.Repeat(repeatedValue, 887).ToArray();
+    double standardDeviation = TbcOutputMetadataWriter.StandardDeviationNumpyFloat64(repeatedValues);
+    AssertEqual(0x3D20000000000000UL, BitConverter.DoubleToUInt64Bits(standardDeviation));
+
+    string tempDirectory = Path.Combine(Path.GetTempPath(), "vhsdecode-dotnet-tests-" + Guid.NewGuid().ToString("N"));
+    Directory.CreateDirectory(tempDirectory);
+    try
+    {
+        using DecodeSession session = DecodeSessionFactory.Create(Parse(CliSpecs.Cvbs, [
+            "--pal",
+            "--clamp_agc",
+            "--agc_set_gain",
+            "1.25",
+            "input.s16",
+            Path.Combine(tempDirectory, "clamped")
+        ]));
+        string jsonPath = Path.Combine(tempDirectory, "clamped.tbc.json");
+        TbcOutputMetadataWriter.WriteJson(
+            session,
+            [BuildSyntheticTbcField(
+                startSample: 0,
+                samples: Enumerable.Repeat(ushort.MaxValue, session.TbcFrameSpec.FieldSampleCount).ToArray())],
+            jsonPath);
+
+        using JsonDocument document = JsonDocument.Parse(File.ReadAllText(jsonPath));
+        JsonElement metrics = document.RootElement.GetProperty("fields")[0].GetProperty("vitsMetrics");
+        AssertClose(310.9, JsonDouble(metrics, "bPSNR"), 0.0);
     }
     finally
     {

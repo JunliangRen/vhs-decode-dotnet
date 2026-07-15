@@ -732,15 +732,14 @@ public sealed class TbcFieldSequenceDecodeEngine
 
     private static void LogRecovery(DecodeSession session, TbcFieldDecodeRecoveryException exception)
     {
-        if (session.Spec.Name != "vhs")
+        string? message = (session.Spec.Name, exception.Kind) switch
         {
-            return;
-        }
-
-        string? message = exception.Kind switch
-        {
-            TbcFieldDecodeRecoveryKind.NoSyncPulses => "Unable to find any sync pulses, jumping 100 ms",
-            TbcFieldDecodeRecoveryKind.NoFirstHSync => "Unable to determine start of field - dropping field",
+            ("vhs", TbcFieldDecodeRecoveryKind.NoSyncPulses) =>
+                "Unable to find any sync pulses, jumping 100 ms",
+            ("vhs", TbcFieldDecodeRecoveryKind.NoFirstHSync) =>
+                "Unable to determine start of field - dropping field",
+            ("cvbs", TbcFieldDecodeRecoveryKind.NoSyncPulses) =>
+                "Unable to find any sync pulses, skipping one second",
             _ => null
         };
         if (message is not null)
@@ -1165,7 +1164,15 @@ public sealed class TbcFieldSequenceDecodeEngine
             }
 
             ClosePayloads();
-            _metadata.Complete();
+            if (_session.Spec.Name == "cvbs" && _writtenFieldCount == 0)
+            {
+                _metadata.LeaveIncompleteJson();
+            }
+            else
+            {
+                _metadata.Complete();
+            }
+
             _sqlite?.Complete(_metadata.FieldCount, _metadata.LastOutputConverter);
 
             _completed = true;

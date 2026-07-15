@@ -421,9 +421,10 @@ Implemented:
 - Betamax/BETAMAX_HIFI automatic `fsc` notch behavior, using upstream SciPy
   Q=2 forward/backward BA filtering after NLD/sub-deemphasis on the main video
   path without applying it to the 0.5 MHz DOD branch
-- VHS/CVBS `--chroma_trap` luma comb trap path, resampling to 8*fsc,
-  applying the upstream-style 4-sample delayed average, then resampling back
-  before post-demod video filtering
+- VHS `--chroma_trap` luma comb trap path, resampling to 8*fsc, applying the
+  upstream-style 4-sample delayed average, then resampling back before
+  post-demod video filtering; CVBS retains the same reusable core path but its
+  CLI preserves v0.4.0's missing-`logger` constructor failure
 - VHS `--sharpness` VideoEQ path, using upstream `video_eq.loband` parameters
   to high-pass the demodulated video and add the scaled high-frequency band
   back before chroma trap and post-demod video filtering
@@ -1034,6 +1035,9 @@ Implemented:
   accepted parser values PAL-M, MESECAM, 405, 819, and NLINHA fail with the
   upstream `Unknown video system!` tuple; their core parameter/filter baselines
   remain covered without exposing behavior the release executable did not have
+- CVBS `--chroma_trap` preserves v0.4.0's
+  `ChromaSepClass.__init__()` missing-`logger` failure, exits with status 1, and
+  leaves only the empty `.log` created before construction
 - on a deterministic varying-level PAL CVBS fixture, `--clamp_agc` now
   reproduces v0.4.0 byte for byte across all 710,510 TBC samples; the TBC and
   JSON SHA-256 hashes are respectively
@@ -1041,6 +1045,14 @@ Implemented:
   and `783A0DAC238A72433523659AC73C6A2D11357684631071A0A8DEE206E323EBDC`,
   while phase, burst, VITS, location metadata, AGC statistics, and normalized
   logs also match
+- fixed-gain CVBS with `--clamp_agc --agc_set_gain 1.25` now uses NumPy's
+  float64 pairwise standard-deviation reduction for VITS metadata; TBC and JSON
+  are byte-exact with respective SHA-256 hashes
+  `6EDE21D03EF83CEB25231E57A79921023DD146B802BE081C2AA07F59E2DD302C`
+  and `8139B8B89EB9516ACD0CA6B2502214A5DF0B2598527B8A76B132E6174BBBD60B`
+- zero-field CVBS runs preserve v0.4.0's JSON-dumper failure artifacts: an
+  empty `.tbc`, no final `.tbc.json`, a one-byte `.tbc.json.tmp` containing
+  `{`, and the `Unable to find any sync pulses, skipping one second` log entry
 - on the same varying-level fixture, default non-clamped CVBS with `--threads 0`
   now reproduces v0.4.0's synchronous speculative-field timing: each requested
   field is rendered with the next decoded field's `ire0`/`hz_ire`, the producer
@@ -1113,7 +1125,8 @@ Not complete yet:
 - remaining real-capture PAL LD and AC3 end-to-end fixtures and verbose VITS
   edge cases beyond the deterministic PAL calibration
 - remaining non-default VHS/CVBS vblank edge cases, real-capture chroma
-  track-phase transitions, and uncommon cross-option parity
+  track-phase transitions, CVBS `--start_fileloc` initial field-state parity,
+  and uncommon cross-option parity
 - remaining upstream TBC field-writer integration and bit-compat edge handling
 - remaining rare real-capture first-HSYNC/vblank edge cases and complete
   upstream JSON/SQLite field metadata
@@ -1132,7 +1145,7 @@ dotnet test VHSDecodeDotNet.slnx --no-build
 ```
 
 The current formal solution build completes with zero warnings and errors, and
-the xUnit v3 project exposes 458 independently discoverable compatibility tests
+the xUnit v3 project exposes 461 independently discoverable compatibility tests
 to `dotnet test` and Visual Studio Test Explorer. On the
 same Windows machine and fixtures, Release wall-clock measurements for one
 frame were 2.346 s versus 7.193 s for NTSC VHS and 1.651 s versus 5.865 s for
