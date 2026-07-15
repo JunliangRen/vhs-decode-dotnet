@@ -679,16 +679,23 @@ public sealed class TbcFieldDecodePipeline
         }
         else
         {
+            // PAL CVBS passes line0 directly to valid_pulses_to_linelocs and
+            // keeps NumPy's earlier pulse when a half-line is exactly tied.
+            bool usePalCvbsLine0Anchor = _decodeType == "cvbs"
+                && FormatCatalog.ParentSystem(_system) == "PAL";
             double firstHSyncLine = VBlankSyncResolver.FirstHSyncLine(
                 _system,
                 _syncAnalyzer.NumPulses,
                 parity.IsFirstField);
             lineLocations = _syncAnalyzer.BuildUpstreamLineLocations(
                 refinedPulses,
-                referencePulse: Math.Truncate(line0.FirstHSyncLocation),
-                referenceLine: checked((int)firstHSyncLine),
+                referencePulse: usePalCvbsLine0Anchor
+                    ? line0.Location
+                    : Math.Truncate(line0.FirstHSyncLocation),
+                referenceLine: usePalCvbsLine0Anchor ? 0 : checked((int)firstHSyncLine),
                 meanLineLength,
-                processedLines);
+                processedLines,
+                preferEarlierPulseOnEqualDistance: usePalCvbsLine0Anchor);
         }
         double nextFieldOffsetSamples = ComputeNextFieldOffsetSamples(
             refinedPulses,
@@ -3566,6 +3573,21 @@ public sealed class TbcFieldDecodePipeline
             firstVBlank = null;
         }
 
+        // With no prevfield, v0.4.0 trusts the local PAL VSync formula before
+        // considering the generic local/next consensus.
+        Line0Resolution? initialPalCvbsSecondField = TryResolveInitialPalCvbsSecondFieldLine0(
+            _decodeType,
+            _system,
+            _previousFirstHSyncLocation.HasValue,
+            firstVBlank,
+            _syncAnalyzer.NumPulses,
+            _syncAnalyzer.NominalLineLength,
+            estimatedFirstField);
+        if (initialPalCvbsSecondField is not null)
+        {
+            return initialPalCvbsSecondField;
+        }
+
         VBlankPulseGroup? lastVBlank = firstVBlank is null
             ? null
             : FindValidVBlankGroup(
@@ -3597,6 +3619,20 @@ public sealed class TbcFieldDecodePipeline
                 estimatedFirstField,
                 currentFieldLines,
                 fieldLines[0]);
+        }
+
+        VBlankSyncEstimate? palCvbsLocalEstimate = TryResolvePalCvbsLocalVBlankEstimate(
+            _decodeType,
+            _system,
+            firstVBlank,
+            _syncAnalyzer.NumPulses,
+            _syncAnalyzer.NominalLineLength,
+            estimatedFirstField);
+        if (palCvbsLocalEstimate is not null)
+        {
+            vBlankConsensus = vBlankConsensus is null
+                ? new VBlankSyncConsensus(palCvbsLocalEstimate, null, null)
+                : vBlankConsensus with { First = palCvbsLocalEstimate };
         }
 
         Line0Resolution? previousEstimate = TryEstimateLine0FromPrevious(
@@ -3680,6 +3716,74 @@ public sealed class TbcFieldDecodePipeline
         throw BuildRecoveryException(
             TbcFieldDecodeRecoveryKind.NoFirstHSync,
             "No HSYNC pulse was detected in the decoded span.");
+    }
+
+    internal static Line0Resolution? TryResolveInitialPalCvbsSecondFieldLine0(
+        string? decodeType,
+        string system,
+        bool hasPreviousSync,
+        VBlankPulseGroup? firstVBlank,
+        int numEqualizingPulses,
+        double nominalLineLength,
+        bool estimatedFirstField)
+    {
+        if (hasPreviousSync || estimatedFirstField)
+        {
+            return null;
+        }
+
+        VBlankSyncEstimate? local = TryResolvePalCvbsLocalVBlankEstimate(
+            decodeType,
+            system,
+            firstVBlank,
+            numEqualizingPulses,
+            nominalLineLength,
+            isFirstField: false);
+        if (local is null)
+        {
+            return null;
+        }
+
+        return new Line0Resolution(
+            local.Line0Location,
+            UsedFallback: false,
+            ExpectedFirstField: null,
+            ExpectedFirstFieldConfidence: 0,
+            FirstHSyncLocation: local.FirstHSyncLocation,
+            UnalignedFirstHSyncLocation: local.UnalignedFirstHSyncLocation,
+            InitialSyncConfidence: 90);
+    }
+
+    internal static VBlankSyncEstimate? TryResolvePalCvbsLocalVBlankEstimate(
+        string? decodeType,
+        string system,
+        VBlankPulseGroup? firstVBlank,
+        int numEqualizingPulses,
+        double nominalLineLength,
+        bool isFirstField)
+    {
+        if (decodeType != "cvbs"
+            || FormatCatalog.ParentSystem(system) != "PAL"
+            || firstVBlank?.VSyncStart is not { } vSyncStart)
+        {
+            return null;
+        }
+
+        double firstBoundaryLines = isFirstField ? 0.5 : 1.0;
+        double line0Location = Math.Truncate(
+            vSyncStart
+            - (((numEqualizingPulses / 2.0) + firstBoundaryLines) * nominalLineLength));
+        double firstHSyncLine = VBlankSyncResolver.FirstHSyncLine(
+            system,
+            numEqualizingPulses,
+            isFirstField);
+        double firstHSyncLocation = line0Location + (firstHSyncLine * nominalLineLength);
+        return new VBlankSyncEstimate(
+            line0Location,
+            firstHSyncLocation,
+            firstHSyncLine,
+            ValidDistanceCount: 6,
+            UnalignedFirstHSyncLocation: firstHSyncLocation);
     }
 
     private InvalidOperationException BuildRecoveryException(
@@ -4030,12 +4134,18 @@ public sealed class TbcFieldDecodePipeline
         double unalignedFirstHSync = Math.Round(
             estimatedFirstHSync,
             MidpointRounding.AwayFromZero);
-        double firstHSync = AlignFirstHSyncToValidPulses(
-            classified,
-            unalignedFirstHSync,
-            meanLineLength,
-            firstHSyncLine,
-            currentFieldLines);
+        // The PAL CVBS prevfield candidate is a direct end-of-field projection;
+        // snapping it again can move it to the neighboring half-line pulse.
+        bool preservePreviousProjection = _decodeType == "cvbs"
+            && FormatCatalog.ParentSystem(_system) == "PAL";
+        double firstHSync = preservePreviousProjection
+            ? unalignedFirstHSync
+            : AlignFirstHSyncToValidPulses(
+                classified,
+                unalignedFirstHSync,
+                meanLineLength,
+                firstHSyncLine,
+                currentFieldLines);
         return new Line0Resolution(
             firstHSync - (firstHSyncLine * meanLineLength),
             UsedFallback: false,

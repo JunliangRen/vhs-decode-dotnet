@@ -1061,6 +1061,14 @@ Implemented:
   `EA2060F1C50E450ECD68E41719F55060733BF1E0CF26DF1F784EF61E3513EF51`
   and `783A0DAC238A72433523659AC73C6A2D11357684631071A0A8DEE206E323EBDC`,
   and normalized logs match in order and content
+- PAL CVBS `--start_fileloc` rough seeks now preserve v0.4.0's initial
+  non-first-field drop, direct local-vblank line-zero anchor, previous-field
+  projection, equal-distance pulse priority, and speculative `fields_written`
+  numbering; at sample 768000 the TBC and JSON are byte-exact with respective
+  SHA-256 hashes
+  `A8F4B43D282FAE92DE2535AEF94215B23292AAA6A10643C553630EE633B3F66B`
+  and `52688B18FC14F2BAA031A16C9BAA566B7BE8C089E62480BA8AABEFEFF841CF4E`,
+  while normalized warnings and frame status also match
 - worker-thread CVBS now reproduces v0.4.0's shared `ire0`/`hz_ire` timing as
   well: the next field starts before current-field resampling, the first
   producer handoff preserves Python's resampler warm-up window, later fields
@@ -1125,8 +1133,7 @@ Not complete yet:
 - remaining real-capture PAL LD and AC3 end-to-end fixtures and verbose VITS
   edge cases beyond the deterministic PAL calibration
 - remaining non-default VHS/CVBS vblank edge cases, real-capture chroma
-  track-phase transitions, CVBS `--start_fileloc` initial field-state parity,
-  and uncommon cross-option parity
+  track-phase transitions, and uncommon cross-option parity
 - remaining upstream TBC field-writer integration and bit-compat edge handling
 - remaining rare real-capture first-HSYNC/vblank edge cases and complete
   upstream JSON/SQLite field metadata
@@ -1145,7 +1152,7 @@ dotnet test VHSDecodeDotNet.slnx --no-build
 ```
 
 The current formal solution build completes with zero warnings and errors, and
-the xUnit v3 project exposes 461 independently discoverable compatibility tests
+the xUnit v3 project exposes 464 independently discoverable compatibility tests
 to `dotnet test` and Visual Studio Test Explorer. On the
 same Windows machine and fixtures, Release wall-clock measurements for one
 frame were 2.346 s versus 7.193 s for NTSC VHS and 1.651 s versus 5.865 s for

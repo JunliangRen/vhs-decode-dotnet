@@ -7449,6 +7449,21 @@ public void SyncAnalyzerClassifiesPulsesAndBuildsLineLocations()
     AssertSequence([100, 190, 310, 400], upstreamLocations.Locations);
     AssertTrue(upstreamLocations.Filled.All(filled => !filled));
 
+    ClassifiedSyncPulse[] equalDistancePulses =
+    [
+        new(SyncPulseKind.HSync, new Pulse(90, 40), true),
+        new(SyncPulseKind.HSync, new Pulse(110, 40), true),
+        new(SyncPulseKind.HSync, new Pulse(300, 40), true)
+    ];
+    LineLocationResult equalDistanceLocations = analyzer.BuildUpstreamLineLocations(
+        equalDistancePulses,
+        referencePulse: 100.0,
+        referenceLine: 0,
+        meanLineLength: 100.0,
+        processedLines: 1,
+        preferEarlierPulseOnEqualDistance: true);
+    AssertSequence([90], equalDistanceLocations.Locations);
+
     FormatParameterSet palVhs = FormatCatalog.Default.GetTapeParameters("PAL", "VHS", "sp");
     SyncAnalyzer fromParams = SyncAnalyzer.FromParameters(palVhs, sampleRateHz: 40_000_000.0);
     AssertClose(2560.0, fromParams.NominalLineLength, 1e-12);
@@ -7616,6 +7631,50 @@ public void VBlankSyncResolverMatchesUpstreamDistanceConsensus()
         Equalizing2End: 150,
         FollowingHSync: 200);
     AssertFalse(VBlankSyncResolver.HasValidStateMachineTiming(compressed, 100.0, 6));
+}
+
+[Fact(DisplayName = "PAL CVBS initial second field uses Release 4.0 local vblank anchor")]
+public void PalCvbsInitialSecondFieldUsesReleaseFourLocalVblankAnchor()
+{
+    var group = new VBlankPulseGroup(
+        PreviousHSync: 88_577,
+        Equalizing1Start: 89_857,
+        VSyncStart: 96_257,
+        Equalizing2Start: 102_657,
+        Equalizing2End: 107_777,
+        FollowingHSync: 110_337);
+
+    Line0Resolution resolution = TbcFieldDecodePipeline.TryResolveInitialPalCvbsSecondFieldLine0(
+        decodeType: "cvbs",
+        system: "PAL",
+        hasPreviousSync: false,
+        firstVBlank: group,
+        numEqualizingPulses: 5,
+        nominalLineLength: 2_560.0,
+        estimatedFirstField: false)!;
+    AssertClose(87_297.0, resolution.Location, 0.0);
+    AssertClose(110_337.0, resolution.FirstHSyncLocation, 0.0);
+    AssertEqual(90, resolution.InitialSyncConfidence);
+
+    VBlankSyncEstimate firstField = TbcFieldDecodePipeline.TryResolvePalCvbsLocalVBlankEstimate(
+        decodeType: "cvbs",
+        system: "PAL",
+        firstVBlank: group with { VSyncStart = 32_256 },
+        numEqualizingPulses: 5,
+        nominalLineLength: 2_560.0,
+        isFirstField: true)!;
+    AssertClose(24_576.0, firstField.Line0Location, 0.0);
+    AssertClose(45_056.0, firstField.FirstHSyncLocation, 0.0);
+    AssertEqual<Line0Resolution?>(
+        null,
+        TbcFieldDecodePipeline.TryResolveInitialPalCvbsSecondFieldLine0(
+            decodeType: "cvbs",
+            system: "PAL",
+            hasPreviousSync: true,
+            firstVBlank: group,
+            numEqualizingPulses: 5,
+            nominalLineLength: 2_560.0,
+            estimatedFirstField: false));
 }
 
 [Fact(DisplayName = "LD line-zero consensus matches Release 4.0 three-way median")]
@@ -12378,6 +12437,36 @@ public void CvbsOutputDeferralCoversSerialAndWorkerAutoSyncPaths()
     AssertFalse(TbcFieldSequenceDecodeEngine.ShouldDeferCvbsOutputConversion(clamp));
 }
 
+[Fact(DisplayName = "CVBS session reads use Release 4.0 fields-written numbering")]
+public void CvbsSessionReadsUseReleaseFourFieldsWrittenNumbering()
+{
+    int[] writtenFieldCounts = [0, 0, 0, 1];
+    int[] sessionFieldNumbers = writtenFieldCounts
+        .Select((writtenFieldCount, decodedFieldNumber) =>
+            TbcFieldSequenceDecodeEngine.ResolveReadFieldNumber(
+                usesSessionReader: true,
+                decoderName: "cvbs",
+                decodedFieldNumber,
+                writtenFieldCount))
+        .ToArray();
+
+    AssertTrue(sessionFieldNumbers.SequenceEqual([0, 0, 0, 1]));
+    AssertEqual(
+        3,
+        TbcFieldSequenceDecodeEngine.ResolveReadFieldNumber(
+            usesSessionReader: false,
+            decoderName: "cvbs",
+            decodedFieldNumber: 3,
+            writtenFieldCount: 1));
+    AssertEqual(
+        3,
+        TbcFieldSequenceDecodeEngine.ResolveReadFieldNumber(
+            usesSessionReader: true,
+            decoderName: "vhs",
+            decodedFieldNumber: 3,
+            writtenFieldCount: 1));
+}
+
 [Fact(DisplayName = "CVBS worker prefetch exposes next-field levels before current conversion")]
 public void CvbsWorkerPrefetchExposesNextFieldLevelsBeforeCurrentConversion()
 {
@@ -12554,6 +12643,71 @@ public void CvbsSerialLengthLookaheadIsDecodedButNotWritten()
         AssertTrue(logLines[1].EndsWith(
             "DEBUG - File Frame 0: CAV Pulldown/Telecine Frame",
             StringComparison.Ordinal));
+    }
+    finally
+    {
+        Directory.Delete(tempDirectory, recursive: true);
+    }
+}
+
+[Fact(DisplayName = "CVBS dropped initial second field does not report a file frame")]
+public void CvbsDroppedInitialSecondFieldDoesNotReportAFileFrame()
+{
+    string tempDirectory = Path.Combine(Path.GetTempPath(), "vhsdecode-dotnet-tests-" + Guid.NewGuid().ToString("N"));
+    Directory.CreateDirectory(tempDirectory);
+    try
+    {
+        string outputBase = Path.Combine(tempDirectory, "cvbs-start-fileloc");
+        using DecodeSession session = DecodeSessionFactory.Create(Parse(CliSpecs.Cvbs, [
+            "--pal",
+            "--threads", "0",
+            "--length", "1",
+            "input.s16",
+            outputBase
+        ]));
+        session.RuntimeReporter = new DecodeRuntimeReporter(
+            TextWriter.Null,
+            TextWriter.Null,
+            () => 0.0);
+        int sampleCount = session.TbcFrameSpec.FieldSampleCount;
+        TbcDecodedField[] sourceFields =
+        [
+            BuildSyntheticTbcField(
+                    0,
+                    new ushort[sampleCount],
+                    BuildLineLocationsForAdvance(session, 300.0),
+                    detectedFirstField: false)
+                with { DiskLocation = 1.0, FieldPhaseId = 8 },
+            BuildSyntheticTbcField(
+                    300,
+                    new ushort[sampleCount],
+                    BuildLineLocationsForAdvance(session, 300.0),
+                    detectedFirstField: true)
+                with { DiskLocation = 2.0, FieldPhaseId = 1 },
+            BuildSyntheticTbcField(
+                    600,
+                    new ushort[sampleCount],
+                    BuildLineLocationsForAdvance(session, 300.0),
+                    detectedFirstField: false)
+                with { DiskLocation = 3.0, FieldPhaseId = 8 }
+        ];
+        int reads = 0;
+
+        TbcDecodedField? ReadField(DecodeSession _, Stream __, long ___, int ____, int fieldNumber)
+        {
+            reads++;
+            return fieldNumber < sourceFields.Length ? sourceFields[fieldNumber] : null;
+        }
+
+        TbcFieldSequenceDecodeResult result = new TbcFieldSequenceDecodeEngine(readField: ReadField)
+            .TryDecodeAndWrite(session, Stream.Null);
+
+        AssertTrue(result.Success);
+        AssertEqual(3, reads);
+        AssertEqual(2, result.WrittenFieldCount);
+        string log = File.ReadAllText(outputBase + ".log");
+        AssertFalse(log.Contains("File Frame 0:", StringComparison.Ordinal));
+        AssertTrue(log.Contains("File Frame 1: CAV Pulldown/Telecine Frame", StringComparison.Ordinal));
     }
     finally
     {

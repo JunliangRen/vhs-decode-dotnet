@@ -319,7 +319,7 @@ public sealed class TbcFieldSequenceDecodeEngine
                             laserDiscLeadOut));
                 }
             }
-            else if (session.Spec.Name == "cvbs" && !isFirstField)
+            else if (session.Spec.Name == "cvbs" && !isFirstField && writes.Count > 0)
             {
                 int rawFrame = checked((int)Math.Floor(
                     ComputeFieldDiskLocation(session, completedField) / 2.0));
@@ -342,7 +342,13 @@ public sealed class TbcFieldSequenceDecodeEngine
             {
                 Task<TbcDecodedField?>? prefetchedField = cvbsPrefetch.Take();
                 field = prefetchedField is null
-                    ? ReadFieldWithContext(session, input, begin, readLength, decodedFieldCount)
+                    ? ReadFieldWithContext(
+                        session,
+                        input,
+                        begin,
+                        readLength,
+                        decodedFieldCount,
+                        writePlanner.WrittenFieldCount)
                     : prefetchedField.GetAwaiter().GetResult();
                 if (field is not null && autoMtf is not null)
                 {
@@ -360,7 +366,8 @@ public sealed class TbcFieldSequenceDecodeEngine
                             input,
                             begin,
                             readLength,
-                            decodedFieldCount);
+                            decodedFieldCount,
+                            writePlanner.WrittenFieldCount);
                     }
                 }
 
@@ -433,7 +440,8 @@ public sealed class TbcFieldSequenceDecodeEngine
                     input,
                     nextBegin,
                     readLength,
-                    fieldNumber: decodedFieldCount));
+                    fieldNumber: decodedFieldCount,
+                    writtenFieldCount: writePlanner.WrittenFieldCount));
             }
 
             if (pendingCvbsField is not null)
@@ -548,7 +556,13 @@ public sealed class TbcFieldSequenceDecodeEngine
             try
             {
                 _cancellationToken.ThrowIfCancellationRequested();
-                _ = ReadFieldWithContext(session, input, begin, readLength, decodedFieldCount);
+                _ = ReadFieldWithContext(
+                    session,
+                    input,
+                    begin,
+                    readLength,
+                    decodedFieldCount,
+                    writePlanner.WrittenFieldCount);
                 _cancellationToken.ThrowIfCancellationRequested();
             }
             catch (TbcFieldDecodeRecoveryException ex)
@@ -710,7 +724,8 @@ public sealed class TbcFieldSequenceDecodeEngine
         Stream input,
         long begin,
         int readLength,
-        int fieldNumber)
+        int fieldNumber,
+        int writtenFieldCount)
     {
         return Task.Factory.StartNew(
             () =>
@@ -721,7 +736,8 @@ public sealed class TbcFieldSequenceDecodeEngine
                     input,
                     begin,
                     readLength,
-                    fieldNumber);
+                    fieldNumber,
+                    writtenFieldCount);
                 _cancellationToken.ThrowIfCancellationRequested();
                 return field;
             },
@@ -793,11 +809,17 @@ public sealed class TbcFieldSequenceDecodeEngine
         Stream input,
         long begin,
         int readLength,
-        int fieldNumber)
+        int fieldNumber,
+        int? writtenFieldCount = null)
     {
         try
         {
-            return _readField(session, input, begin, readLength, fieldNumber);
+            int effectiveFieldNumber = ResolveReadFieldNumber(
+                _usesSessionReader,
+                session.Spec.Name,
+                fieldNumber,
+                writtenFieldCount);
+            return _readField(session, input, begin, readLength, effectiveFieldNumber);
         }
         catch (TbcFieldDecodeRecoveryException)
         {
@@ -815,6 +837,19 @@ public sealed class TbcFieldSequenceDecodeEngine
         {
             throw new DecodeFieldReadException(begin, ex);
         }
+    }
+
+    internal static int ResolveReadFieldNumber(
+        bool usesSessionReader,
+        string decoderName,
+        int decodedFieldNumber,
+        int? writtenFieldCount)
+    {
+        return usesSessionReader
+            && decoderName == "cvbs"
+            && writtenFieldCount.HasValue
+                ? writtenFieldCount.Value
+                : decodedFieldNumber;
     }
 
     internal static bool ShouldDeferCvbsOutputConversion(DecodeSession session)
