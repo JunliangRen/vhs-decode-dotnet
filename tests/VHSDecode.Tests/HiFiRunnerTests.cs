@@ -975,6 +975,128 @@ public sealed class HiFiRunnerTests
         }
     }
 
+    [Fact(DisplayName = "HiFi LDF input prefers the Release 4.0 flac fallback")]
+    public void HiFiLdfInputPrefersRelease40FlacFallback()
+    {
+        string directory = CreateTempDirectory();
+        try
+        {
+            string inputPath = Path.Combine(directory, "capture.ldf");
+            File.WriteAllBytes(inputPath, "fLaC"u8.ToArray());
+            var host = new RecordingInputProcessHost(
+                new Dictionary<string, HiFiToolProbeResult>(StringComparer.Ordinal)
+                {
+                    ["flac"] = new(true, "flac 1.4.3")
+                });
+            var output = new StringWriter();
+
+            using IHiFiSampleReader reader = HiFiInputReader.Open(
+                DefaultOptions() with
+                {
+                    InputFile = inputPath,
+                    InputFormatOverride = "s10le"
+                },
+                output,
+                host);
+
+            Assert.Equal(
+                ["ld-ldf-reader", "ld-ldf-reader-py", "flac"],
+                host.ProbeCalls.Select(call => call.FileName));
+            Assert.Equal(["--help"], host.ProbeCalls[0].Arguments);
+            Assert.Equal(["--help"], host.ProbeCalls[1].Arguments);
+            Assert.Equal(["-version"], host.ProbeCalls[2].Arguments);
+            HiFiInputProcessOpenCall opened = Assert.IsType<HiFiInputProcessOpenCall>(
+                host.OpenCall);
+            Assert.Equal("flac", opened.FileName);
+            Assert.Equal(
+                [
+                    "-d", "-c", "-s", "-F", "--force-raw-format",
+                    "--endian", "little", "--sign", "signed", inputPath
+                ],
+                opened.Arguments);
+            Assert.Equal(HiFiRawSampleFormat.S10Le, opened.Format);
+            Assert.Null(opened.TotalSamples);
+            Assert.Equal(
+                Lines(
+                    "WARN: ld-ldf-reader not installed (or not in PATH)",
+                    "WARN: ld-ldf-reader-py not installed (or not in PATH)",
+                    "WARN: ld-ldf-reader/ld-ldf-reader-py not installed. "
+                        + "LDF file format may not decode correctly",
+                    "Found flac 1.4.3"),
+                output.ToString());
+        }
+        finally
+        {
+            Directory.Delete(directory, recursive: true);
+        }
+    }
+
+    [Fact(DisplayName = "HiFi LDF and unknown inputs retain Release 4.0 FFmpeg fallback flags")]
+    public void HiFiContainerInputsRetainRelease40FfmpegFallbackFlags()
+    {
+        string directory = CreateTempDirectory();
+        try
+        {
+            string ldfPath = Path.Combine(directory, "capture.ldf");
+            string unknownPath = Path.Combine(directory, "capture.oga");
+            File.WriteAllBytes(ldfPath, [0]);
+            File.WriteAllBytes(unknownPath, [0]);
+            var ldfHost = new RecordingInputProcessHost(
+                new Dictionary<string, HiFiToolProbeResult>(StringComparer.Ordinal)
+                {
+                    ["ffmpeg"] = new(true, "ffmpeg version 7.1")
+                });
+            var ldfOutput = new StringWriter();
+
+            using (HiFiInputReader.Open(
+                DefaultOptions() with { InputFile = ldfPath },
+                ldfOutput,
+                ldfHost))
+            {
+            }
+
+            Assert.Equal(
+                ["ld-ldf-reader", "ld-ldf-reader-py", "flac", "ffmpeg"],
+                ldfHost.ProbeCalls.Select(call => call.FileName));
+            Assert.Equal(
+                Lines(
+                    "WARN: ld-ldf-reader not installed (or not in PATH)",
+                    "WARN: ld-ldf-reader-py not installed (or not in PATH)",
+                    "WARN: ld-ldf-reader/ld-ldf-reader-py not installed. "
+                        + "LDF file format may not decode correctly",
+                    "WARN: flac not installed (or not in PATH)",
+                    "Found ffmpeg version 7.1"),
+                ldfOutput.ToString());
+            AssertFfmpegFallback(ldfHost.OpenCall, ldfPath);
+
+            var unknownHost = new RecordingInputProcessHost(
+                new Dictionary<string, HiFiToolProbeResult>(StringComparer.Ordinal)
+                {
+                    ["ffmpeg"] = new(true, "ffmpeg version 7.1")
+                });
+            var unknownOutput = new StringWriter();
+            using (HiFiInputReader.Open(
+                DefaultOptions() with { InputFile = unknownPath },
+                unknownOutput,
+                unknownHost))
+            {
+            }
+
+            Assert.Equal(["ffmpeg"], unknownHost.ProbeCalls.Select(call => call.FileName));
+            Assert.Equal(
+                Lines(
+                    "WARN: Unknown file format.",
+                    "WARN: Attempting to decode with ffmpeg",
+                    "Found ffmpeg version 7.1"),
+                unknownOutput.ToString());
+            AssertFfmpegFallback(unknownHost.OpenCall, unknownPath);
+        }
+        finally
+        {
+            Directory.Delete(directory, recursive: true);
+        }
+    }
+
     private static HiFiDecodePlan SmallFramingPlan()
     {
         HiFiDecodePlan plan = HiFiDecodePlan.FromOptions(DefaultOptions());
@@ -1092,6 +1214,24 @@ public sealed class HiFiRunnerTests
     private static string Lines(params string[] lines)
         => string.Join(Environment.NewLine, lines) + Environment.NewLine;
 
+    private static void AssertFfmpegFallback(
+        HiFiInputProcessOpenCall? openCall,
+        string inputPath)
+    {
+        HiFiInputProcessOpenCall opened = Assert.IsType<HiFiInputProcessOpenCall>(openCall);
+        Assert.Equal("ffmpeg", opened.FileName);
+        Assert.Equal(
+            [
+                "-hide_banner", "-loglevel", "error", "-ignore_unknown",
+                "-fflags", "nobuffer", "-i", inputPath,
+                "-f", "s16le", "-acodec", "pcm_s16le",
+                "-avoid_negative_ts", "disabled", "-"
+            ],
+            opened.Arguments);
+        Assert.Equal(HiFiRawSampleFormat.S16Le, opened.Format);
+        Assert.Null(opened.TotalSamples);
+    }
+
     private static short[] ReadPcm16(byte[] wave)
     {
         Assert.Equal("data", ReadAscii(wave, 36));
@@ -1142,6 +1282,48 @@ public sealed class HiFiRunnerTests
 
         public void Dispose()
         {
+        }
+    }
+
+    private sealed record HiFiInputProcessProbeCall(
+        string FileName,
+        string[] Arguments);
+
+    private sealed record HiFiInputProcessOpenCall(
+        string FileName,
+        string[] Arguments,
+        HiFiRawSampleFormat Format,
+        long? TotalSamples);
+
+    private sealed class RecordingInputProcessHost(
+        IReadOnlyDictionary<string, HiFiToolProbeResult> probes) : IHiFiInputProcessHost
+    {
+        public List<HiFiInputProcessProbeCall> ProbeCalls { get; } = [];
+
+        public HiFiInputProcessOpenCall? OpenCall { get; private set; }
+
+        public HiFiToolProbeResult Probe(
+            string fileName,
+            IReadOnlyList<string> arguments)
+        {
+            ProbeCalls.Add(new HiFiInputProcessProbeCall(fileName, [.. arguments]));
+            return probes.TryGetValue(fileName, out HiFiToolProbeResult result)
+                ? result
+                : default;
+        }
+
+        public IHiFiSampleReader Open(
+            string fileName,
+            IReadOnlyList<string> arguments,
+            HiFiRawSampleFormat format,
+            long? totalSamples)
+        {
+            OpenCall = new HiFiInputProcessOpenCall(
+                fileName,
+                [.. arguments],
+                format,
+                totalSamples);
+            return new ArraySampleReader([]);
         }
     }
 

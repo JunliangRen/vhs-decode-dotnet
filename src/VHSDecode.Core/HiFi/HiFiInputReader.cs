@@ -14,6 +14,84 @@ internal interface IHiFiSampleReader : IDisposable
     int Read(Span<float> destination, CancellationToken cancellationToken = default);
 }
 
+internal readonly record struct HiFiToolProbeResult(
+    bool Found,
+    string? FirstOutputLine);
+
+internal interface IHiFiInputProcessHost
+{
+    HiFiToolProbeResult Probe(
+        string fileName,
+        IReadOnlyList<string> arguments);
+
+    IHiFiSampleReader Open(
+        string fileName,
+        IReadOnlyList<string> arguments,
+        HiFiRawSampleFormat format,
+        long? totalSamples);
+}
+
+internal sealed class SystemHiFiInputProcessHost : IHiFiInputProcessHost
+{
+    public static SystemHiFiInputProcessHost Instance { get; } = new();
+
+    private SystemHiFiInputProcessHost()
+    {
+    }
+
+    public HiFiToolProbeResult Probe(
+        string fileName,
+        IReadOnlyList<string> arguments)
+    {
+        var startInfo = new ProcessStartInfo(fileName)
+        {
+            UseShellExecute = false,
+            RedirectStandardInput = true,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            CreateNoWindow = true
+        };
+        foreach (string argument in arguments)
+        {
+            startInfo.ArgumentList.Add(argument);
+        }
+
+        try
+        {
+            using var process = Process.Start(startInfo);
+            if (process is null)
+            {
+                return default;
+            }
+
+            process.StandardInput.Close();
+            Task<string> standardOutput = process.StandardOutput.ReadToEndAsync();
+            Task<string> standardError = process.StandardError.ReadToEndAsync();
+            process.WaitForExit();
+            Task.WhenAll(standardOutput, standardError).GetAwaiter().GetResult();
+            string firstOutputLine = standardOutput.Result
+                .Split('\n', 2)[0]
+                .TrimEnd('\r');
+            return new HiFiToolProbeResult(true, firstOutputLine);
+        }
+        catch (Win32Exception)
+        {
+            return default;
+        }
+    }
+
+    public IHiFiSampleReader Open(
+        string fileName,
+        IReadOnlyList<string> arguments,
+        HiFiRawSampleFormat format,
+        long? totalSamples)
+        => HiFiInputReader.OpenProcessCore(
+            fileName,
+            arguments,
+            format,
+            totalSamples);
+}
+
 internal static class HiFiInputReader
 {
     private static readonly IReadOnlyDictionary<string, HiFiRawSampleFormat> RawFormats =
@@ -32,9 +110,16 @@ internal static class HiFiInputReader
         };
 
     public static IHiFiSampleReader Open(HiFiDecodeOptions options, TextWriter output)
+        => Open(options, output, SystemHiFiInputProcessHost.Instance);
+
+    internal static IHiFiSampleReader Open(
+        HiFiDecodeOptions options,
+        TextWriter output,
+        IHiFiInputProcessHost processHost)
     {
         ArgumentNullException.ThrowIfNull(options);
         ArgumentNullException.ThrowIfNull(output);
+        ArgumentNullException.ThrowIfNull(processHost);
 
         string inputPath = options.InputFile;
         string extension = Path.GetExtension(inputPath).TrimStart('.').ToLowerInvariant();
@@ -71,7 +156,7 @@ internal static class HiFiInputReader
                 ("ld-lds-converter", "-i")
             })
             {
-                if (CommandExists(tool, output))
+                if (ProbeLdTool(processHost, tool, output))
                 {
                     var arguments = new List<string>();
                     if (inputArgument is not null)
@@ -80,7 +165,11 @@ internal static class HiFiInputReader
                     }
 
                     arguments.Add(inputPath);
-                    return OpenProcess(tool, arguments, overrideFormat ?? HiFiRawSampleFormat.S16Le);
+                    return processHost.Open(
+                        tool,
+                        arguments,
+                        overrideFormat ?? HiFiRawSampleFormat.S16Le,
+                        totalSamples: null);
                 }
             }
 
@@ -91,20 +180,57 @@ internal static class HiFiInputReader
 
         if (extension == "ldf")
         {
-            foreach (string tool in new[] { "ld-ldf-reader", "ld-ldf-reader-py" })
+            try
             {
-                if (CommandExists(tool, output))
+                foreach (string tool in new[] { "ld-ldf-reader", "ld-ldf-reader-py" })
                 {
-                    return OpenProcess(
-                        tool,
-                        [inputPath],
-                        overrideFormat ?? HiFiRawSampleFormat.S16Le);
+                    if (ProbeLdTool(processHost, tool, output))
+                    {
+                        return processHost.Open(
+                            tool,
+                            [inputPath],
+                            overrideFormat ?? HiFiRawSampleFormat.S16Le,
+                            totalSamples: null);
+                    }
                 }
+
+                output.WriteLine(
+                    "WARN: ld-ldf-reader/ld-ldf-reader-py not installed. "
+                    + "LDF file format may not decode correctly");
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                output.WriteLine(
+                    "WARN: Unexpected error opening LDF reader tool, "
+                    + $"LDF file format may not decode correctly {ex.Message}");
             }
 
-            output.WriteLine(
-                "WARN: ld-ldf-reader/ld-ldf-reader-py not installed. "
-                + "LDF file format may not decode correctly");
+            try
+            {
+                if (ProbeVersionedTool(processHost, "flac", "-version", output))
+                {
+                    return OpenFlac(
+                        processHost,
+                        inputPath,
+                        overrideFormat ?? HiFiRawSampleFormat.S16Le);
+                }
+
+                if (ProbeVersionedTool(processHost, "ffmpeg", "-version", output))
+                {
+                    return OpenFfmpeg(
+                        processHost,
+                        inputPath,
+                        overrideFormat ?? HiFiRawSampleFormat.S16Le,
+                        useNoBuffer: true,
+                        totalSamples: null);
+                }
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+            }
+
+            throw new NotSupportedException(
+                "Unable to decode LDF input with the available LD, FLAC, FFmpeg, or SoundFile paths.");
         }
 
         if (extension == "flac")
@@ -112,6 +238,7 @@ internal static class HiFiInputReader
             try
             {
                 return OpenFfmpeg(
+                    processHost,
                     inputPath,
                     overrideFormat ?? HiFiRawSampleFormat.S16Le,
                     useNoBuffer: false,
@@ -125,31 +252,33 @@ internal static class HiFiInputReader
             }
         }
 
-        if (extension != "ldf")
-        {
-            output.WriteLine("WARN: Unknown file format.");
-            output.WriteLine("WARN: Attempting to decode with ffmpeg");
-        }
+        output.WriteLine("WARN: Unknown file format.");
+        output.WriteLine("WARN: Attempting to decode with ffmpeg");
 
         try
         {
-            return OpenFfmpeg(
-                inputPath,
-                overrideFormat ?? HiFiRawSampleFormat.S16Le,
-                useNoBuffer: true,
-                totalSamples: null);
+            if (ProbeVersionedTool(processHost, "ffmpeg", "-version", output))
+            {
+                return OpenFfmpeg(
+                    processHost,
+                    inputPath,
+                    overrideFormat ?? HiFiRawSampleFormat.S16Le,
+                    useNoBuffer: true,
+                    totalSamples: null);
+            }
         }
-        catch (Win32Exception) when (extension == "wav")
+        catch (Exception ex) when (ex is not OperationCanceledException)
         {
-            output.WriteLine("WARN: Attempting to decode with SoundFile");
+        }
+
+        output.WriteLine("WARN: Attempting to decode with SoundFile");
+        if (extension == "wav")
+        {
             return OpenWave(inputPath, overrideFormat ?? HiFiRawSampleFormat.S16Le);
         }
-        catch (Win32Exception ex)
-        {
-            throw new NotSupportedException(
-                "ffmpeg is not installed (or not in PATH), cannot decode this input format.",
-                ex);
-        }
+
+        throw new NotSupportedException(
+            "ffmpeg is not installed (or not in PATH), cannot decode this input format.");
     }
 
     internal static string NormalizeRawExtension(string path)
@@ -219,6 +348,7 @@ internal static class HiFiInputReader
     }
 
     private static IHiFiSampleReader OpenFfmpeg(
+        IHiFiInputProcessHost processHost,
         string path,
         HiFiRawSampleFormat format,
         bool useNoBuffer,
@@ -244,14 +374,33 @@ internal static class HiFiInputReader
             "-avoid_negative_ts", "disabled",
             "-"
         ]);
-        return OpenProcess("ffmpeg", arguments, format, totalSamples);
+        return processHost.Open("ffmpeg", arguments, format, totalSamples);
     }
 
-    private static IHiFiSampleReader OpenProcess(
+    private static IHiFiSampleReader OpenFlac(
+        IHiFiInputProcessHost processHost,
+        string path,
+        HiFiRawSampleFormat format)
+        => processHost.Open(
+            "flac",
+            [
+                "-d",
+                "-c",
+                "-s",
+                "-F",
+                "--force-raw-format",
+                "--endian", "little",
+                "--sign", "signed",
+                path
+            ],
+            format,
+            totalSamples: null);
+
+    internal static IHiFiSampleReader OpenProcessCore(
         string fileName,
         IReadOnlyList<string> arguments,
         HiFiRawSampleFormat format,
-        long? totalSamples = null)
+        long? totalSamples)
     {
         var startInfo = new ProcessStartInfo(fileName)
         {
@@ -275,38 +424,37 @@ internal static class HiFiInputReader
         return new ProcessSampleReader(process, format, totalSamples);
     }
 
-    private static bool CommandExists(string fileName, TextWriter output)
+    private static bool ProbeLdTool(
+        IHiFiInputProcessHost processHost,
+        string fileName,
+        TextWriter output)
     {
-        var startInfo = new ProcessStartInfo(fileName)
+        HiFiToolProbeResult result = processHost.Probe(fileName, ["--help"]);
+        if (result.Found)
         {
-            UseShellExecute = false,
-            RedirectStandardOutput = true,
-            RedirectStandardError = true,
-            CreateNoWindow = true
-        };
-        startInfo.ArgumentList.Add("--help");
-
-        try
-        {
-            using var process = Process.Start(startInfo);
-            if (process is null)
-            {
-                output.WriteLine($"WARN: {fileName} not installed (or not in PATH)");
-                return false;
-            }
-
-            Task<string> standardOutput = process.StandardOutput.ReadToEndAsync();
-            Task<string> standardError = process.StandardError.ReadToEndAsync();
-            process.WaitForExit();
-            Task.WhenAll(standardOutput, standardError).GetAwaiter().GetResult();
             output.WriteLine($"Found {fileName}");
             return true;
         }
-        catch (Win32Exception)
+
+        output.WriteLine($"WARN: {fileName} not installed (or not in PATH)");
+        return false;
+    }
+
+    private static bool ProbeVersionedTool(
+        IHiFiInputProcessHost processHost,
+        string fileName,
+        string versionArgument,
+        TextWriter output)
+    {
+        HiFiToolProbeResult result = processHost.Probe(fileName, [versionArgument]);
+        if (result.Found)
         {
-            output.WriteLine($"WARN: {fileName} not installed (or not in PATH)");
-            return false;
+            output.WriteLine($"Found {result.FirstOutputLine}");
+            return true;
         }
+
+        output.WriteLine($"WARN: {fileName} not installed (or not in PATH)");
+        return false;
     }
 
     private sealed class ProcessSampleReader : IHiFiSampleReader
