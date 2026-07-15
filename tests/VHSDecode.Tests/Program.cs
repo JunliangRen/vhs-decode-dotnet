@@ -6006,25 +6006,29 @@ public async Task GnuRadioRfAfeBridgeMatchesUpstreamZmqProtocol()
     double[] firstResponse = [10.5, 20.25];
     double[] secondResponse = [-30.75, 40.125];
     using var companionReady = new ManualResetEventSlim();
-    Task companion = Task.Run(() =>
-    {
-        using var source = new RequestSocket();
-        using var sink = new ResponseSocket();
-        source.Options.Linger = TimeSpan.Zero;
-        sink.Options.Linger = TimeSpan.Zero;
-        source.Connect($"tcp://localhost:{sendPort}");
-        sink.Bind($"tcp://*:{receivePort}");
-        companionReady.Set();
+    Task companion = Task.Factory.StartNew(
+        () =>
+        {
+            using var source = new RequestSocket();
+            using var sink = new ResponseSocket();
+            source.Options.Linger = TimeSpan.Zero;
+            sink.Options.Linger = TimeSpan.Zero;
+            source.Connect($"tcp://localhost:{sendPort}");
+            sink.Bind($"tcp://*:{receivePort}");
+            companionReady.Set();
 
-        source.SendFrame(Array.Empty<byte>());
-        double[] sentInput = ReadFloat32Samples(source.ReceiveFrameBytes());
-        AssertSequence(input.Select(value => (double)(float)value).ToArray(), sentInput);
+            source.SendFrame(Array.Empty<byte>());
+            double[] sentInput = ReadFloat32Samples(source.ReceiveFrameBytes());
+            AssertSequence(input.Select(value => (double)(float)value).ToArray(), sentInput);
 
-        AssertTrue(sink.ReceiveFrameBytes().SequenceEqual([(byte)'0']));
-        sink.SendFrame(BuildFloat32Bytes(firstResponse));
-        AssertTrue(sink.ReceiveFrameBytes().SequenceEqual([(byte)'0']));
-        sink.SendFrame(BuildFloat32Bytes(secondResponse));
-    }, TestContext.Current.CancellationToken);
+            AssertTrue(sink.ReceiveFrameBytes().SequenceEqual([(byte)'0']));
+            sink.SendFrame(BuildFloat32Bytes(firstResponse));
+            AssertTrue(sink.ReceiveFrameBytes().SequenceEqual([(byte)'0']));
+            sink.SendFrame(BuildFloat32Bytes(secondResponse));
+        },
+        TestContext.Current.CancellationToken,
+        TaskCreationOptions.LongRunning,
+        TaskScheduler.Default);
 
     AssertTrue(companionReady.Wait(
         TimeSpan.FromSeconds(5),
