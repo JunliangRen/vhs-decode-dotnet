@@ -1026,6 +1026,9 @@ public sealed class HiFiRunnerTests
             Assert.Equal(SampleCount, reader.TotalSamples);
             Assert.Equal(SampleCount, read);
             Assert.Equal(expected, actual);
+            Assert.Equal(
+                0,
+                reader.Read(new float[1], TestContext.Current.CancellationToken));
         }
         finally
         {
