@@ -53,6 +53,11 @@ public sealed class ParsedCommand
             return typedValue;
         }
 
+        if (typeof(T) == typeof(BigInteger) && value is int intValue)
+        {
+            return (T)(object)new BigInteger(intValue);
+        }
+
         if (value is BigInteger integer)
         {
             if (typeof(T) == typeof(int))

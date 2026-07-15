@@ -3,7 +3,7 @@ using VHSDecode.Core.CommandLine;
 
 namespace VHSDecode.Core.Decode;
 
-public readonly record struct DecodeRunBounds(long StartSample, int RequestedFieldCount)
+public readonly record struct DecodeRunBounds(long StartSample, BigInteger RequestedFieldCount)
 {
     public static DecodeRunBounds FromCommand(ParsedCommand command, int nominalFieldSampleCount)
     {
@@ -17,8 +17,8 @@ public readonly record struct DecodeRunBounds(long StartSample, int RequestedFie
             ? Math.Max(0L, (long)Math.Floor(startFileLocation))
             : Math.Max(0L, (long)Math.Floor(ReadStartFrame(command) * 2.0 * nominalFieldSampleCount));
 
-        int frames = Math.Max(0, command.Get<int>("length"));
-        int fields = checked(frames * 2);
+        BigInteger frames = BigInteger.Max(BigInteger.Zero, command.Get<BigInteger>("length"));
+        BigInteger fields = frames * 2;
         return new DecodeRunBounds(startSample, fields);
     }
 

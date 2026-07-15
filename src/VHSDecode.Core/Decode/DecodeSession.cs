@@ -70,7 +70,7 @@ public sealed record ChromaDecodeOptions(
 public sealed record DecodeExecutionOptions(
     int RequestedThreads,
     int WorkerThreads,
-    int SeekFrame,
+    BigInteger SeekFrame,
     bool WriteDebugData,
     bool Debug,
     string? DebugPlotPath,
@@ -460,7 +460,7 @@ public static class DecodeSessionFactory
         return new DecodeExecutionOptions(
             RequestedThreads: requestedThreads,
             WorkerThreads: workerThreads,
-            SeekFrame: IntValueOrDefault(command, "seek", -1),
+            SeekFrame: NullableInteger(command, "seek") ?? -BigInteger.One,
             WriteDebugData: BoolValueOrDefault(command, "write_db"),
             Debug: BoolValueOrDefault(command, "debug"),
             DebugPlotPath: debugPlotPath,

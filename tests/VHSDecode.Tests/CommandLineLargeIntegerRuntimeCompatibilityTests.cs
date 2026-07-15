@@ -1,3 +1,4 @@
+using System.Numerics;
 using VHSDecode.Core.CommandLine;
 using VHSDecode.Core.Decode;
 using Xunit;
@@ -63,14 +64,49 @@ public sealed class CommandLineLargeIntegerRuntimeCompatibilityTests
         Assert.Equal(3_000_000_000.0, session.TbcRenderer.WowLevelAdjustSmoothing);
     }
 
+    [Fact(DisplayName = "Large decode lengths retain Python integer field bounds")]
+    public void LargeDecodeLengthsRetainPythonIntegerFieldBounds()
+    {
+        const string framesText = "999999999999999999999999999999";
+        using DecodeSession positive = CreateVhs("--length", framesText);
+        using DecodeSession negative = CreateVhs("--length", "-" + framesText);
+
+        Assert.Equal(BigInteger.Parse(framesText) * 2, positive.RunBounds.RequestedFieldCount);
+        Assert.Equal(BigInteger.Zero, negative.RunBounds.RequestedFieldCount);
+    }
+
+    [Fact(DisplayName = "Decode seek uses only minus one as the disabled sentinel")]
+    public void DecodeSeekUsesOnlyMinusOneAsTheDisabledSentinel()
+    {
+        using DecodeSession negativeCvbs = Create(CliSpecs.Cvbs, "--seek", "-2");
+        Assert.Equal(new BigInteger(-2), negativeCvbs.ExecutionOptions.SeekFrame);
+        InvalidOperationException cvbsException = Assert.Throws<InvalidOperationException>(
+            () => new TbcFieldSequenceDecodeEngine().DecodeFields(
+                negativeCvbs,
+                new MemoryStream()));
+        Assert.Equal("ERROR: Seeking failed", cvbsException.Message);
+
+        const string hugeSeek = "999999999999999999999999999999";
+        using DecodeSession laserDisc = Create(CliSpecs.LaserDisc, "--seek", hugeSeek);
+        Assert.Equal(BigInteger.Parse(hugeSeek), laserDisc.ExecutionOptions.SeekFrame);
+        var engine = new TbcFieldSequenceDecodeEngine(
+            readField: static (_, _, _, _, _) => null);
+        InvalidOperationException ldException = Assert.Throws<InvalidOperationException>(
+            () => engine.DecodeFields(laserDisc, new MemoryStream()));
+        Assert.Equal("ERROR: Seeking failed", ldException.Message);
+    }
+
     private static DecodeSession CreateVhs(params string[] options)
+        => Create(CliSpecs.Vhs, options);
+
+    private static DecodeSession Create(DecodeCommandSpec spec, params string[] options)
     {
         var arguments = new List<string>(options)
         {
             "input.u8",
             "out"
         };
-        ParsedCommand command = new CommandLineParser().Parse(CliSpecs.Vhs, arguments);
+        ParsedCommand command = new CommandLineParser().Parse(spec, arguments);
         return DecodeSessionFactory.Create(command);
     }
 }

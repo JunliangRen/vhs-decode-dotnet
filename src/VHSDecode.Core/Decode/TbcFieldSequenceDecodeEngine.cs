@@ -225,8 +225,10 @@ public sealed class TbcFieldSequenceDecodeEngine
         Action<IReadOnlyList<(TbcDecodedField Field, TbcFieldOrderDecision Decision)>>? writeFields,
         Action? writeMetadataSnapshot)
     {
-        int requestedFields = maxFields ?? session.RunBounds.RequestedFieldCount;
-        if (requestedFields < 0)
+        BigInteger requestedFields = maxFields.HasValue
+            ? new BigInteger(maxFields.Value)
+            : session.RunBounds.RequestedFieldCount;
+        if (requestedFields < BigInteger.Zero)
         {
             throw new ArgumentOutOfRangeException(nameof(maxFields));
         }
@@ -235,7 +237,7 @@ public sealed class TbcFieldSequenceDecodeEngine
         int readLength = DecodeReadWindowPlanner.EstimateReadSampleCount(session, ExtraReadLines);
         long begin = ResolveInitialDecodeStart(session, input, readLength);
         long startSample = begin;
-        if (requestedFields == 0)
+        if (requestedFields.IsZero)
         {
             return new SequenceDecodeSummary([], 0, startSample, startSample);
         }
@@ -603,7 +605,7 @@ public sealed class TbcFieldSequenceDecodeEngine
 
     internal static string FormatLaserDiscFrameStatus(
         int fieldsWritten,
-        int estimatedFrames,
+        BigInteger estimatedFrames,
         int rawFrame,
         LaserDiscVbiInterpretation interpretation,
         bool leadIn,
@@ -880,21 +882,21 @@ public sealed class TbcFieldSequenceDecodeEngine
 
     private long ResolveInitialDecodeStart(DecodeSession session, Stream input, int readLength)
     {
-        if (session.Spec.Name == "cvbs" && session.ExecutionOptions.SeekFrame >= 0)
+        if (session.Spec.Name == "cvbs" && session.ExecutionOptions.SeekFrame != -BigInteger.One)
         {
             throw new InvalidOperationException("ERROR: Seeking failed");
         }
 
-        if (session.Spec.Name != "ld" || session.ExecutionOptions.SeekFrame < 0)
+        if (session.Spec.Name != "ld" || session.ExecutionOptions.SeekFrame == -BigInteger.One)
         {
             return session.RunBounds.StartSample;
         }
 
-        int targetFrame = session.ExecutionOptions.SeekFrame;
+        BigInteger targetFrame = session.ExecutionOptions.SeekFrame;
         long nominalFieldSamples = session.TbcFieldDecoder.EstimateNominalFieldSampleCount();
         long current = session.RunBounds.StartSample > 0
             ? session.RunBounds.StartSample
-            : checked(targetFrame * 2L * nominalFieldSamples);
+            : ClampSamplePosition(targetFrame * 2 * nominalFieldSamples);
 
         for (int retry = 0; retry < 3; retry++)
         {
@@ -909,15 +911,28 @@ public sealed class TbcFieldSequenceDecodeEngine
                 break;
             }
 
-            if (frameNumber == targetFrame)
+            if (targetFrame == frameNumber)
             {
                 return frameStart;
             }
 
-            current = Math.Max(0L, checked(current + (((targetFrame - frameNumber) * 2L - 1L) * nominalFieldSamples)));
+            current = ClampSamplePosition(
+                current + (((targetFrame - frameNumber) * 2 - 1) * nominalFieldSamples));
         }
 
         throw new InvalidOperationException("ERROR: Seeking failed");
+    }
+
+    private static long ClampSamplePosition(BigInteger samplePosition)
+    {
+        if (samplePosition <= BigInteger.Zero)
+        {
+            return 0;
+        }
+
+        return samplePosition >= long.MaxValue
+            ? long.MaxValue
+            : (long)samplePosition;
     }
 
     private bool TryReadLaserDiscFrameNumber(
