@@ -307,6 +307,201 @@ public sealed class LaserDiscOutputLifecycleCompatibilityTests
         }
     }
 
+    [Fact(DisplayName = "LD test LDF starts at the pre-decode offset after initial recovery like v0.4.0")]
+    public void LdTestLdfStartsBeforeInitialRecoveryLikeV040()
+    {
+        string tempDirectory = CreateTempDirectory();
+        try
+        {
+            string outputBase = Path.Combine(tempDirectory, "ldf-initial-recovery");
+            using DecodeSession session = CreateSession(
+                outputBase,
+                "--disable_analog_audio",
+                "--noEFM",
+                "--start_fileloc",
+                "100",
+                "--write-test-ldf",
+                Path.Combine(tempDirectory, "initial-recovery.ldf"));
+            var testLdfWriter = new RecordingLdTestLdfWriter();
+            int attempts = 0;
+            var engine = new TbcFieldSequenceDecodeEngine(
+                testLdfWriter: testLdfWriter,
+                readField: (activeSession, _, begin, _, _) => ++attempts == 1
+                    ? throw new TbcFieldDecodeRecoveryException(
+                        TbcFieldDecodeRecoveryKind.NoFirstHSync,
+                        50,
+                        "synthetic initial recovery")
+                    : BuildField(activeSession) with { StartSample = begin })
+            {
+                CreateTbcOutput = _ => new MemoryStream()
+            };
+
+            TbcFieldSequenceDecodeResult result = engine.TryDecodeAndWrite(
+                session,
+                Stream.Null,
+                maxFields: 1);
+
+            Assert.True(result.Success);
+            Assert.Equal(2, attempts);
+            (long startSample, long endSample) = Assert.Single(testLdfWriter.Ranges);
+            Assert.Equal(100, startSample);
+            Assert.Equal(1_100_250, endSample);
+        }
+        finally
+        {
+            Directory.Delete(tempDirectory, recursive: true);
+        }
+    }
+
+    [Fact(DisplayName = "LD test LDF ends at the final recovery offset like v0.4.0")]
+    public void LdTestLdfEndsAfterFinalRecoveryLikeV040()
+    {
+        string tempDirectory = CreateTempDirectory();
+        try
+        {
+            string outputBase = Path.Combine(tempDirectory, "ldf-final-recovery");
+            using DecodeSession session = CreateSession(
+                outputBase,
+                "--disable_analog_audio",
+                "--noEFM",
+                "--start_fileloc",
+                "100",
+                "--write-test-ldf",
+                Path.Combine(tempDirectory, "final-recovery.ldf"));
+            var testLdfWriter = new RecordingLdTestLdfWriter();
+            int attempts = 0;
+            var engine = new TbcFieldSequenceDecodeEngine(
+                testLdfWriter: testLdfWriter,
+                readField: (activeSession, _, begin, _, _) => ++attempts switch
+                {
+                    1 => BuildField(activeSession) with { StartSample = begin },
+                    2 => throw new TbcFieldDecodeRecoveryException(
+                        TbcFieldDecodeRecoveryKind.InsufficientData,
+                        25,
+                        "synthetic final recovery"),
+                    _ => null
+                })
+            {
+                CreateTbcOutput = _ => new MemoryStream()
+            };
+
+            TbcFieldSequenceDecodeResult result = engine.TryDecodeAndWrite(session, Stream.Null);
+
+            Assert.True(result.Success);
+            Assert.Equal(3, attempts);
+            (long startSample, long endSample) = Assert.Single(testLdfWriter.Ranges);
+            Assert.Equal(100, startSample);
+            Assert.Equal(1_100_225, endSample);
+        }
+        finally
+        {
+            Directory.Delete(tempDirectory, recursive: true);
+        }
+    }
+
+    [Fact(DisplayName = "LD zero-length test LDF still resolves seek like v0.4.0")]
+    public void LdZeroLengthTestLdfStillResolvesSeekLikeV040()
+    {
+        string tempDirectory = CreateTempDirectory();
+        try
+        {
+            string outputBase = Path.Combine(tempDirectory, "ldf-zero-length-seek");
+            using DecodeSession session = CreateNtscSession(
+                outputBase,
+                "--disable_analog_audio",
+                "--noEFM",
+                "--seek",
+                "12",
+                "--length",
+                "0",
+                "--write-test-ldf",
+                Path.Combine(tempDirectory, "zero-length-seek.ldf"));
+            long nominalFieldSamples = session.TbcFieldDecoder.EstimateNominalFieldSampleCount();
+            long initialProbe = 12L * 2L * nominalFieldSamples;
+            long targetProbe = initialProbe + (3L * nominalFieldSamples);
+            var readBegins = new List<long>();
+            var testLdfWriter = new RecordingLdTestLdfWriter();
+            var engine = new TbcFieldSequenceDecodeEngine(
+                testLdfWriter: testLdfWriter,
+                readField: (activeSession, _, begin, _, fieldNumber) =>
+                {
+                    readBegins.Add(begin);
+                    int frameNumber = begin >= targetProbe ? 12 : 10;
+                    return BuildField(activeSession) with
+                    {
+                        StartSample = begin,
+                        DetectedFirstField = fieldNumber == 0,
+                        NextFieldOffsetSamples = nominalFieldSamples,
+                        VbiData = fieldNumber == 1 ? [EncodeCavFrameCode(frameNumber)] : []
+                    };
+                })
+            {
+                CreateTbcOutput = _ => new MemoryStream()
+            };
+
+            TbcFieldSequenceDecodeResult result = engine.TryDecodeAndWrite(session, Stream.Null);
+
+            Assert.True(result.Success);
+            Assert.Equal(
+                [initialProbe, initialProbe + nominalFieldSamples, targetProbe, targetProbe + nominalFieldSamples],
+                readBegins);
+            (long startSample, long endSample) = Assert.Single(testLdfWriter.Ranges);
+            Assert.Equal(targetProbe, startSample);
+            Assert.Equal(targetProbe + 1_100_000, endSample);
+        }
+        finally
+        {
+            Directory.Delete(tempDirectory, recursive: true);
+        }
+    }
+
+    [Fact(DisplayName = "LD test LDF includes the lead-out field that stops decoding like v0.4.0")]
+    public void LdTestLdfIncludesStoppingLeadOutFieldLikeV040()
+    {
+        string tempDirectory = CreateTempDirectory();
+        try
+        {
+            string outputBase = Path.Combine(tempDirectory, "ldf-lead-out");
+            using DecodeSession session = CreateNtscSession(
+                outputBase,
+                "--disable_analog_audio",
+                "--noEFM",
+                "--start_fileloc",
+                "100",
+                "--write-test-ldf",
+                Path.Combine(tempDirectory, "lead-out.ldf"));
+            var testLdfWriter = new RecordingLdTestLdfWriter();
+            int reads = 0;
+            var engine = new TbcFieldSequenceDecodeEngine(
+                testLdfWriter: testLdfWriter,
+                readField: (activeSession, _, begin, _, fieldNumber) =>
+                {
+                    reads++;
+                    return BuildField(activeSession) with
+                    {
+                        StartSample = begin,
+                        DetectedFirstField = fieldNumber == 0,
+                        VbiData = [0x80EEEE]
+                    };
+                })
+            {
+                CreateTbcOutput = _ => new MemoryStream()
+            };
+
+            TbcFieldSequenceDecodeResult result = engine.TryDecodeAndWrite(session, Stream.Null);
+
+            Assert.True(result.Success);
+            Assert.Equal(2, reads);
+            (long startSample, long endSample) = Assert.Single(testLdfWriter.Ranges);
+            Assert.Equal(100, startSample);
+            Assert.Equal(1_100_300, endSample);
+        }
+        finally
+        {
+            Directory.Delete(tempDirectory, recursive: true);
+        }
+    }
+
     private static DecodeSession CreateSession(string outputBase, params string[] options)
         => CreateSessionForSystem(outputBase, "--PAL", options);
 
@@ -367,6 +562,22 @@ public sealed class LaserDiscOutputLifecycleCompatibilityTests
         }
 
         return samples;
+    }
+
+    private static int EncodeCavFrameCode(int frameNumber)
+    {
+        int value = frameNumber;
+        int bcd = 0;
+        int shift = 0;
+        do
+        {
+            bcd |= (value % 10) << shift;
+            value /= 10;
+            shift += 4;
+        }
+        while (value > 0);
+
+        return 0xF00000 | bcd;
     }
 
     private static JsonObject ReadOnlyMetadataField(string outputBase)
@@ -435,6 +646,27 @@ public sealed class LaserDiscOutputLifecycleCompatibilityTests
             }
 
             base.Dispose(disposing);
+        }
+    }
+
+    private sealed class RecordingLdTestLdfWriter : ILdTestLdfWriter
+    {
+        public List<(long StartSample, long EndSample)> Ranges { get; } = [];
+
+        public LdTestLdfWriteResult Write(
+            DecodeSession session,
+            long startSample,
+            long endSample,
+            Stream input)
+        {
+            Ranges.Add((startSample, endSample));
+            return new LdTestLdfWriteResult(
+                true,
+                "recorded LD test LDF range",
+                endSample - startSample,
+                startSample,
+                endSample,
+                session.TestLdfOutputPath);
         }
     }
 }

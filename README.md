@@ -940,6 +940,9 @@ Implemented:
 - LD `--write-test-ldf` now reports the upstream start/end range, short-read
   location, sample count, and success line after the completion message; the
   zero-field path also attempts the requested 1,100,000-sample lookahead file
+- LD `--write-test-ldf` freezes its start offset immediately after rough/precise
+  seek and uses the decoder's final offset after recovery skips for its end;
+  `--length 0 --seek` still performs the upstream frame probe before exporting
 - LD lead-out detection now scopes the two required `0x80EEEE` codes to one
   first/second-field pair and only stops after processing the second field,
   preventing sparse codes from accumulating across unrelated frames
@@ -1191,7 +1194,7 @@ dotnet test VHSDecodeDotNet.slnx --no-build
 ```
 
 The current formal solution build completes with zero warnings and errors, and
-the xUnit v3 project exposes 497 independently discoverable compatibility tests
+the xUnit v3 project exposes 501 independently discoverable compatibility tests
 to `dotnet test` and Visual Studio Test Explorer. On the
 same Windows machine and fixtures, Release wall-clock measurements for one
 frame were 2.346 s versus 7.193 s for NTSC VHS and 1.651 s versus 5.865 s for

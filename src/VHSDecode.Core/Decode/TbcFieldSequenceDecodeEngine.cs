@@ -74,8 +74,8 @@ public sealed class TbcFieldSequenceDecodeEngine
     private sealed record SequenceDecodeSummary(
         IReadOnlyList<TbcDecodedField> Fields,
         int DecodedFieldCount,
-        long? FirstDecodedSample,
-        long? EndDecodedSample);
+        long StartSample,
+        long EndSample);
 
     public TbcFieldSequenceDecodeEngine(
         int extraReadLines = 3,
@@ -223,17 +223,16 @@ public sealed class TbcFieldSequenceDecodeEngine
         }
 
         _cancellationToken.ThrowIfCancellationRequested();
+        int readLength = DecodeReadWindowPlanner.EstimateReadSampleCount(session, ExtraReadLines);
+        long begin = ResolveInitialDecodeStart(session, input, readLength);
+        long startSample = begin;
         if (requestedFields == 0)
         {
-            return new SequenceDecodeSummary([], 0, null, null);
+            return new SequenceDecodeSummary([], 0, startSample, startSample);
         }
 
-        int readLength = DecodeReadWindowPlanner.EstimateReadSampleCount(session, ExtraReadLines);
         var fields = retainFields ? new List<TbcDecodedField>() : null;
         var writePlanner = new FieldWritePlanner(session, retainWrites: false);
-        long begin = ResolveInitialDecodeStart(session, input, readLength);
-        long? firstDecodedSample = null;
-        long? endDecodedSample = null;
         int decodedFieldCount = 0;
         long laserDiscWrittenFieldCount = 0;
         int laserDiscLeadOutCount = 0;
@@ -430,9 +429,7 @@ public sealed class TbcFieldSequenceDecodeEngine
             }
 
             decodedFieldCount++;
-            firstDecodedSample ??= field.StartSample;
-            endDecodedSample = EstimateNextFieldStart(session, field);
-            long nextBegin = endDecodedSample.Value;
+            long nextBegin = EstimateNextFieldStart(session, field);
             if (nextBegin <= begin)
             {
                 throw new InvalidOperationException("Decoded field did not advance the input position.");
@@ -519,6 +516,7 @@ public sealed class TbcFieldSequenceDecodeEngine
                     isFirstField,
                     ref laserDiscLeadOutCount))
             {
+                begin = nextBegin;
                 break;
             }
 
@@ -590,8 +588,8 @@ public sealed class TbcFieldSequenceDecodeEngine
         return new SequenceDecodeSummary(
             fields ?? [],
             decodedFieldCount,
-            firstDecodedSample,
-            endDecodedSample);
+            startSample,
+            begin);
     }
 
     internal static string FormatLaserDiscFrameStatus(
@@ -1079,11 +1077,9 @@ public sealed class TbcFieldSequenceDecodeEngine
             return null;
         }
 
-        long startSample = summary.FirstDecodedSample ?? session.RunBounds.StartSample;
-        long decodedEndSample = summary.EndDecodedSample ?? startSample;
-        long endSample = checked(decodedEndSample + TestLdfLookaheadSamples);
-        return endSample > startSample
-            ? _testLdfWriter.Write(session, startSample, endSample, input)
+        long endSample = checked(summary.EndSample + TestLdfLookaheadSamples);
+        return endSample > summary.StartSample
+            ? _testLdfWriter.Write(session, summary.StartSample, endSample, input)
             : null;
     }
 
