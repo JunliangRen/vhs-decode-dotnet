@@ -658,7 +658,10 @@ public sealed class TbcFieldDecodePipeline
         int currentFieldLineCount = CurrentFieldLineCount(parity.IsFirstField);
         int processedLines = _decodeLaserDiscVbi
             ? LaserDiscProcessedLineCount(parity.IsFirstField)
-            : _renderer.FrameSpec.OutputLineCount + LineLocationLookahead;
+            : NonLaserDiscProcessedLineCount(
+                _decodeType,
+                _system,
+                _renderer.FrameSpec.OutputLineCount);
         ThrowIfInsufficientFieldData(span, rawPulses, line0.Location, meanLineLength, processedLines);
         LineLocationResult lineLocations;
         if (_decodeLaserDiscVbi)
@@ -3822,6 +3825,18 @@ public sealed class TbcFieldDecodePipeline
             + LaserDiscLineOffset(isFirstField)
             + LineLocationLookahead
             + palLookahead);
+    }
+
+    internal static int NonLaserDiscProcessedLineCount(
+        string? decodeType,
+        string system,
+        int outputLineCount)
+    {
+        int palCvbsLookahead = string.Equals(decodeType, "cvbs", StringComparison.Ordinal)
+            && FormatCatalog.ParentSystem(system) == "PAL"
+                ? 3
+                : 0;
+        return checked(outputLineCount + LineLocationLookahead + palCvbsLookahead);
     }
 
     private void UpdateSyncHistory(

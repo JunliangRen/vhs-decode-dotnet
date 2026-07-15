@@ -7862,6 +7862,14 @@ public void CvbsLineLocationRepairPreservesOverriddenDerivativeMask()
     AssertClose(405.0, repaired.Locations[4], 1e-12);
 }
 
+[Fact(DisplayName = "PAL CVBS retains Release 4.0 cubic interpolation lookahead")]
+public void PalCvbsRetainsRelease40CubicInterpolationLookahead()
+{
+    AssertEqual(326, TbcFieldDecodePipeline.NonLaserDiscProcessedLineCount("cvbs", "PAL", 313));
+    AssertEqual(323, TbcFieldDecodePipeline.NonLaserDiscProcessedLineCount("vhs", "PAL", 313));
+    AssertEqual(273, TbcFieldDecodePipeline.NonLaserDiscProcessedLineCount("cvbs", "NTSC", 263));
+}
+
 [Fact(DisplayName = "LD line location builder repairs player skips from field end")]
 public void LaserDiscLineLocationBuilderRepairsPlayerSkipsFromFieldEnd()
 {
