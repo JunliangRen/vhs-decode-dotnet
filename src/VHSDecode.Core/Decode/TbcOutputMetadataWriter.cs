@@ -1026,7 +1026,7 @@ public static class TbcOutputMetadataWriter
                     diff[i] = (currentBurst[i] - previousBurst[i]) / 2.0;
                 }
 
-                AddRawMetric(metrics, "ntscLine19Burst0IRE", Math.Sqrt(2.0) * RootMeanSquare(diff) / session.VideoOutput.OutputScale);
+                AddRawMetric(metrics, "ntscLine19Burst0IRE", Math.Sqrt(2.0) * StandardDeviation(diff) / session.VideoOutput.OutputScale);
             }
         }
     }
@@ -1047,7 +1047,7 @@ public static class TbcOutputMetadataWriter
         }
         else if (TryReadTbcSlice(field.Samples, session, line: 13, startUsec: 36.0, lengthUsec: 20.0, out double[] burst50))
         {
-            AddRawMetric(metrics, "palVITSBurst50Level", RootMeanSquare(burst50) / session.VideoOutput.OutputScale);
+            AddRawMetric(metrics, "palVITSBurst50Level", StandardDeviation(burst50) / session.VideoOutput.OutputScale);
         }
     }
 
@@ -1558,22 +1558,6 @@ public static class TbcOutputMetadataWriter
         {
             double distance = values[i] - mean;
             sumSquares += distance * distance;
-        }
-
-        return Math.Sqrt(sumSquares / values.Count);
-    }
-
-    private static double RootMeanSquare(IReadOnlyList<double> values)
-    {
-        if (values.Count == 0)
-        {
-            return 0.0;
-        }
-
-        double sumSquares = 0.0;
-        for (int i = 0; i < values.Count; i++)
-        {
-            sumSquares += values[i] * values[i];
         }
 
         return Math.Sqrt(sumSquares / values.Count);

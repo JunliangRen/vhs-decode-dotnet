@@ -13379,7 +13379,7 @@ public void TbcMetadataWriterEmitsLdUpstreamFields()
         JsonElement verboseSecondMetrics = verboseFields[1].GetProperty("vitsMetrics");
         AssertTrue(JsonDouble(verboseSecondMetrics, "ntscLine19Burst70IRE") > 0.0);
         AssertTrue(double.IsFinite(JsonDouble(verboseSecondMetrics, "ntscLine19Color3DRawSNR")));
-        AssertTrue(JsonDouble(verboseSecondMetrics, "ntscLine19Burst0IRE") > 0.0);
+        AssertClose(0.0, JsonDouble(verboseSecondMetrics, "ntscLine19Burst0IRE"), 0.0);
         AssertStringSequence(
             [
                 "ntscLine19ColorPhase",
@@ -13422,7 +13422,11 @@ public void TbcMetadataWriterEmitsLdUpstreamFields()
         AssertTrue(JsonDouble(verbosePalFirstMetrics, "greyPSNR") > 0.0);
         AssertClose(50.0, JsonDouble(verbosePalFirstMetrics, "greyIRE"), 0.2);
         JsonElement verbosePalSecondMetrics = verbosePalFields[1].GetProperty("vitsMetrics");
-        AssertTrue(JsonDouble(verbosePalSecondMetrics, "palVITSBurst50Level") > 0.0);
+        double expectedPalBurst50Level = Math.Round(
+            5.0 / verbosePalSession.VideoOutput.OutputScale,
+            3,
+            MidpointRounding.ToEven);
+        AssertClose(expectedPalBurst50Level, JsonDouble(verbosePalSecondMetrics, "palVITSBurst50Level"), 0.0);
     }
     finally
     {

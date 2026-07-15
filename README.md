@@ -1071,6 +1071,12 @@ Implemented:
   `36C054543634092C86DC1F1D21CDCBD88586A617E3D9872A86429C7258E179AE`,
   and `1BDF01C859AC0459BD7C1FB870E617B59BA002089A996A2C2160D27A5EA87550`,
   while normalized logs match in order and content
+- `--verboseVITS` on that PAL LD fixture retains the byte-exact main TBC and
+  reproduces v0.4.0's centered burst RMS, including the exact second-field
+  `palVITSBurst50Level` value `4.159`; the same centered calculation is used for
+  NTSC `ntscLine19Burst0IRE`. Release 4.0's PAL verbose JSON dumper itself raises
+  on NumPy `float32` metrics, so the differential used an analysis-only scalar
+  adapter to expose the intended metric values while this port emits valid JSON
 - a one-frame real NTSC LD/LDF fixture with default EFM and analog audio also
   matches v0.4.0 byte for byte: main TBC
   `7F19286F84D563D58983C50326CE16433ED9DA90459ADA658532EB38A5AF686A`,
@@ -1093,8 +1099,8 @@ Not complete yet:
 - remaining HiFi real-capture end-to-end output baselines and hosted GUI
   behavior; the command runner, Windows live preview, and GNU Radio path are
   wired
-- remaining real-capture PAL LD and AC3 end-to-end fixtures and remaining
-  verbose VITS field calibration details
+- remaining real-capture PAL LD and AC3 end-to-end fixtures and verbose VITS
+  edge cases beyond the deterministic PAL calibration
 - remaining non-default VHS/CVBS vblank edge cases, real-capture chroma
   track-phase transitions, and uncommon cross-option parity
 - remaining upstream TBC field-writer integration and bit-compat edge handling
@@ -1115,7 +1121,7 @@ dotnet test VHSDecodeDotNet.slnx --no-build
 ```
 
 The current formal solution build completes with zero warnings and errors, and
-the xUnit v3 project exposes 447 independently discoverable compatibility tests
+the xUnit v3 project exposes 453 independently discoverable compatibility tests
 to `dotnet test` and Visual Studio Test Explorer. On the
 same Windows machine and fixtures, Release wall-clock measurements for one
 frame were 2.346 s versus 7.193 s for NTSC VHS and 1.651 s versus 5.865 s for
