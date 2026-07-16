@@ -57,6 +57,10 @@ Implemented:
   worker copy behavior; the resulting 22,796-frame PCM16 WAV is byte-for-byte
   identical with SHA-256
   `325A4ABFB4922FE814338BAB377A94E6C2FD96277244813433A72F6ED5723553`
+- a matching 6 MHz NTSC 8mm HiFi baseline covers its asymmetric carrier
+  deviations and the Nyquist-symmetric left AFE edge; its 22,796-frame PCM16
+  WAV is byte-for-byte identical with SHA-256
+  `E1AAF3F68DF1392617BC28D162D2E3DD2AFE6251E91E06D4D3191540C3EFA83F`
 - HiFi bias pre-reading preserves Release 4.0's omission of `--raw_format`:
   raw files are measured according to their extension, while stdin prints the
   measurement heading and then raises the same required-format error even when
@@ -99,7 +103,8 @@ Implemented:
 - HiFi AFE execution reproduces the 22nd-order, 220 dB Chebyshev-II
   forward/backward band-pass path at the actual Rust float32 coefficient
   boundary for every VHS/8mm carrier-width pair, both 40 MHz quadrature and
-  8,388,608 Hz Hilbert IF rates, and arbitrary carrier overrides
+  8,388,608 Hz Hilbert IF rates, the 6 MHz NTSC 8mm Nyquist-symmetric carrier
+  pairing, and arbitrary carrier overrides
 - the HiFi block demodulation stage connects exact IF resampling, independent
   left/right AFE filters, quadrature or Hilbert FM, 192 kHz resampling, and
   Numba-fastmath-compatible DC cancellation/trimming; two deterministic
@@ -1227,7 +1232,7 @@ dotnet test VHSDecodeDotNet.slnx --no-build
 ```
 
 The current formal solution build completes with zero warnings and errors, and
-the xUnit v3 project exposes 559 independently discoverable compatibility tests
+the xUnit v3 project exposes 562 independently discoverable compatibility tests
 to `dotnet test` and Visual Studio Test Explorer. On the
 same Windows machine and fixtures, Release wall-clock measurements for one
 frame were 2.346 s versus 7.193 s for NTSC VHS and 1.651 s versus 5.865 s for

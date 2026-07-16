@@ -1,4 +1,6 @@
 using System.Numerics;
+using System.Runtime.CompilerServices;
+using System.Runtime.InteropServices;
 
 namespace VHSDecode.Core.Dsp;
 
@@ -10,7 +12,7 @@ public enum ShelfKind
     High
 }
 
-public static class IirFilterDesign
+public static partial class IirFilterDesign
 {
     public static SosSection[] ButterworthLowPass(int order, double normalizedCutoff)
     {
@@ -615,6 +617,20 @@ public static class IirFilterDesign
         return new Complex(alternateReal, alternateImaginary);
     }
 
+    private static Complex NumpyComplexSinh(double real, double imaginary)
+    {
+        // NumPy's Windows complex ufunc uses UCRT csinh; its last-bit rounding decides symmetric SOS ties.
+        if (OperatingSystem.IsWindows())
+        {
+            NativeComplex result = NativeMethods.ComplexSinh(new NativeComplex(real, imaginary));
+            return new Complex(result.Real, result.Imaginary);
+        }
+
+        return new Complex(
+            Math.Sinh(real) * Math.Cos(imaginary),
+            Math.Cosh(real) * Math.Sin(imaginary));
+    }
+
     public static TransferFunction ButterworthBandStop(int order, double normalizedLowCutoff, double normalizedHighCutoff)
     {
         (Complex[] digitalZeros, Complex[] digitalPoles, double digitalGain) = DesignButterworthBandStopZpk(
@@ -1114,9 +1130,7 @@ public static class IirFilterDesign
         for (int index = 0, m = -order + 1; index < order; index++, m += 2)
         {
             double theta = Math.PI * m / (2.0 * order);
-            Complex hyperbolicSine = new(
-                Math.Sinh(mu) * Math.Cos(theta),
-                Math.Cosh(mu) * Math.Sin(theta));
+            Complex hyperbolicSine = NumpyComplexSinh(mu, theta);
             poles[index] = NumpyComplexDivide(-Complex.One, hyperbolicSine);
         }
 
@@ -1152,7 +1166,7 @@ public static class IirFilterDesign
         {
             Complex scaled = new(zeros[i].Real * scale, zeros[i].Imaginary * scale);
             Complex squared = NumpySimdComplexMultiply(scaled, scaled);
-            Complex root = Complex.Sqrt(new Complex(squared.Real - centerSquared, squared.Imaginary));
+            Complex root = NumpyComplexSqrt(new Complex(squared.Real - centerSquared, squared.Imaginary));
             positiveZeros[i] = scaled + root;
             negativeZeros[i] = scaled - root;
         }
@@ -1163,7 +1177,7 @@ public static class IirFilterDesign
         {
             Complex scaled = new(poles[i].Real * scale, poles[i].Imaginary * scale);
             Complex squared = NumpySimdComplexMultiply(scaled, scaled);
-            Complex root = Complex.Sqrt(new Complex(squared.Real - centerSquared, squared.Imaginary));
+            Complex root = NumpyComplexSqrt(new Complex(squared.Real - centerSquared, squared.Imaginary));
             positivePoles[i] = scaled + root;
             negativePoles[i] = scaled - root;
         }
@@ -1336,47 +1350,32 @@ public static class IirFilterDesign
             throw new ArgumentException("Digital SOS conversion requires an equal, even number of zeros and poles.");
         }
 
-        var remainingPoles = poles.ToList();
-        var polePairs = new List<(Complex First, Complex Second, double Radius)>();
-        while (remainingPoles.Count > 0)
+        List<Complex> remainingZeros = CombineConjugatePairs(zeros, nameof(zeros));
+        List<Complex> remainingPoles = CombineConjugatePairs(poles, nameof(poles));
+        if (remainingZeros.Count != remainingPoles.Count)
         {
-            int firstIndex = remainingPoles.FindIndex(value => value.Imaginary > 1e-12);
-            if (firstIndex < 0)
-            {
-                throw new ArgumentException("Conjugate SOS conversion requires complex pole pairs.", nameof(poles));
-            }
-
-            Complex first = remainingPoles[firstIndex];
-            remainingPoles.RemoveAt(firstIndex);
-            int secondIndex = IndexOfNearest(remainingPoles, Complex.Conjugate(first));
-            Complex second = remainingPoles[secondIndex];
-            remainingPoles.RemoveAt(secondIndex);
-            polePairs.Add((first, second, Math.Max(first.Magnitude, second.Magnitude)));
+            throw new ArgumentException("Conjugate SOS conversion requires matching complex pairs.");
         }
 
-        var remainingZeros = zeros.ToList();
-        var assigned = new List<(Complex Pole1, Complex Pole2, Complex Zero1, Complex Zero2, double Radius)>();
-        foreach ((Complex first, Complex second, double radius) in polePairs.OrderByDescending(pair => pair.Radius))
+        var sections = new SosSection[remainingPoles.Count];
+        for (int sectionIndex = sections.Length - 1; sectionIndex >= 0; sectionIndex--)
         {
-            int zero1Index = IndexOfNearest(remainingZeros, first);
-            Complex zero1 = remainingZeros[zero1Index];
-            remainingZeros.RemoveAt(zero1Index);
-            int zero2Index = IndexOfNearest(remainingZeros, Complex.Conjugate(zero1));
-            Complex zero2 = remainingZeros[zero2Index];
-            remainingZeros.RemoveAt(zero2Index);
-            assigned.Add((first, second, zero1, zero2, radius));
-        }
+            int poleIndex = IndexOfClosestToUnitCircle(remainingPoles);
+            Complex pole = remainingPoles[poleIndex];
+            remainingPoles.RemoveAt(poleIndex);
 
-        var sections = new List<SosSection>(assigned.Count);
-        foreach (var pair in assigned.OrderBy(pair => pair.Radius))
-        {
-            sections.Add(new SosSection(
+            int zeroIndex = IndexOfNearest(remainingZeros, pole);
+            Complex zero = remainingZeros[zeroIndex];
+            remainingZeros.RemoveAt(zeroIndex);
+            Complex conjugateZero = Complex.Conjugate(zero);
+            Complex conjugatePole = Complex.Conjugate(pole);
+            sections[sectionIndex] = new SosSection(
                 1.0,
-                -(pair.Zero1 + pair.Zero2).Real,
-                (pair.Zero1 * pair.Zero2).Real,
+                -(zero + conjugateZero).Real,
+                NumpyComplexMultiply(zero, conjugateZero).Real,
                 1.0,
-                -(pair.Pole1 + pair.Pole2).Real,
-                (pair.Pole1 * pair.Pole2).Real));
+                -(pole + conjugatePole).Real,
+                NumpyComplexMultiply(pole, conjugatePole).Real);
         }
 
         SosSection firstSection = sections[0];
@@ -1386,16 +1385,75 @@ public static class IirFilterDesign
             B1 = firstSection.B1 * gain,
             B2 = firstSection.B2 * gain
         };
-        return sections.ToArray();
+        return sections;
     }
 
-    private static int IndexOfNearest(IReadOnlyList<Complex> values, Complex target)
+    private static List<Complex> CombineConjugatePairs(
+        IReadOnlyCollection<Complex> values,
+        string parameterName)
+    {
+        const double tolerance = 100.0 * 2.2204460492503131e-16;
+        Complex[] ordered = values
+            .OrderBy(value => value.Real)
+            .ThenBy(value => Math.Abs(value.Imaginary))
+            .ToArray();
+        if (ordered.Any(value => Math.Abs(value.Imaginary) <= tolerance * NumpyComplexAbs(value)))
+        {
+            throw new ArgumentException("Conjugate SOS conversion requires complex pairs.", parameterName);
+        }
+
+        Complex[] positive = ordered.Where(value => value.Imaginary > 0.0).ToArray();
+        Complex[] negative = ordered.Where(value => value.Imaginary < 0.0).ToArray();
+        if (positive.Length != negative.Length)
+        {
+            throw new ArgumentException("Conjugate SOS conversion requires complex pairs.", parameterName);
+        }
+
+        for (int start = 0; start < positive.Length;)
+        {
+            int stop = start + 1;
+            while (stop < positive.Length
+                   && positive[stop].Real - positive[stop - 1].Real
+                   <= tolerance * NumpyComplexAbs(positive[stop - 1]))
+            {
+                stop++;
+            }
+
+            SortByAbsoluteImaginary(positive, start, stop);
+            SortByAbsoluteImaginary(negative, start, stop);
+            start = stop;
+        }
+
+        var combined = new List<Complex>(positive.Length);
+        for (int i = 0; i < positive.Length; i++)
+        {
+            if (NumpyComplexAbs(positive[i] - Complex.Conjugate(negative[i]))
+                > tolerance * NumpyComplexAbs(negative[i]))
+            {
+                throw new ArgumentException("Conjugate SOS conversion requires complex pairs.", parameterName);
+            }
+
+            combined.Add((positive[i] + Complex.Conjugate(negative[i])) / 2.0);
+        }
+
+        return combined;
+    }
+
+    private static void SortByAbsoluteImaginary(Complex[] values, int start, int stop)
+    {
+        Complex[] sorted = values[start..stop]
+            .OrderBy(value => Math.Abs(value.Imaginary))
+            .ToArray();
+        sorted.CopyTo(values, start);
+    }
+
+    private static int IndexOfClosestToUnitCircle(IReadOnlyList<Complex> values)
     {
         int selected = 0;
         double closest = double.PositiveInfinity;
         for (int i = 0; i < values.Count; i++)
         {
-            double distance = Complex.Abs(values[i] - target);
+            double distance = Math.Abs(1.0 - NumpyComplexAbs(values[i]));
             if (distance < closest)
             {
                 closest = distance;
@@ -1404,6 +1462,80 @@ public static class IirFilterDesign
         }
 
         return selected;
+    }
+
+    private static double NumpyComplexAbs(Complex value)
+    {
+        double larger = Math.Abs(value.Real);
+        double smaller = Math.Abs(value.Imaginary);
+        if (larger < smaller)
+        {
+            (larger, smaller) = (smaller, larger);
+        }
+
+        if (larger == 0.0)
+        {
+            return 0.0;
+        }
+
+        double ratio = smaller / larger;
+        return larger * Math.Sqrt(Math.FusedMultiplyAdd(ratio, ratio, 1.0));
+    }
+
+    private static Complex NumpyComplexSqrt(Complex value)
+    {
+        double real = value.Real;
+        double imaginary = value.Imaginary;
+        if (!double.IsFinite(real) || !double.IsFinite(imaginary))
+        {
+            return Complex.Sqrt(value);
+        }
+
+        if (real == 0.0 && imaginary == 0.0)
+        {
+            return new Complex(0.0, imaginary);
+        }
+
+        if (real >= 0.0)
+        {
+            double positive = Math.Sqrt((real + Complex.Abs(value)) * 0.5);
+            return new Complex(positive, imaginary / (2.0 * positive));
+        }
+
+        double magnitude = Math.Sqrt((-real + Complex.Abs(value)) * 0.5);
+        return new Complex(Math.Abs(imaginary) / (2.0 * magnitude), Math.CopySign(magnitude, imaginary));
+    }
+
+    private static int IndexOfNearest(IReadOnlyList<Complex> values, Complex target)
+    {
+        int selected = 0;
+        double closest = double.PositiveInfinity;
+        for (int i = 0; i < values.Count; i++)
+        {
+            double distance = NumpyComplexAbs(values[i] - target);
+            if (distance < closest)
+            {
+                closest = distance;
+                selected = i;
+            }
+        }
+
+        return selected;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    private readonly struct NativeComplex(double real, double imaginary)
+    {
+        public readonly double Real = real;
+
+        public readonly double Imaginary = imaginary;
+    }
+
+    private static partial class NativeMethods
+    {
+        [LibraryImport("ucrtbase.dll", EntryPoint = "csinh")]
+        [UnmanagedCallConv(CallConvs = [typeof(CallConvCdecl)])]
+        internal static partial NativeComplex ComplexSinh(NativeComplex value);
     }
 
     private static TransferFunction BilinearSecondOrder(

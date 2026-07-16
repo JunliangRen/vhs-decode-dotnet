@@ -435,6 +435,51 @@ public sealed class HiFiRunnerTests
         }
     }
 
+    [Fact(DisplayName = "HiFi runner matches Release 4.0 NTSC 8mm synthetic RF WAV")]
+    public void HiFiRunnerMatchesRelease40Ntsc8mmSyntheticRfWave()
+    {
+        string directory = CreateTempDirectory();
+        try
+        {
+            string inputPath = Path.Combine(directory, "ntsc-8mm-hifi.s16");
+            string outputPath = Path.Combine(directory, "ntsc-8mm-hifi.wav");
+            WriteNtsc8mmHiFiRf(inputPath);
+            Assert.Equal(
+                "FCC01A6CDF4304C41011A02AA4F49BC692BF8B84DC99684B7FC6F7D9052D5820",
+                Convert.ToHexString(SHA256.HashData(File.ReadAllBytes(inputPath))));
+            ParsedCommand command = ParseHiFi(
+            [
+                "--ntsc", "--8mm", "--frequency", "6", "--threads", "1",
+                "--raw_format", "s16le", "--audio_mode", "s",
+                "--audio_rate", "48000", "--resampler_quality", "low",
+                "--doc", "off", "--head_switching_interpolation", "off",
+                "--expander", "off", "--deemphasis", "off",
+                "--NR_spectral_amount", "0", "--overwrite",
+                inputPath, outputPath
+            ]);
+            var output = new StringWriter();
+            var error = new StringWriter();
+
+            int exitCode = new DecodeRunner().Run(
+                command,
+                output,
+                error,
+                TestContext.Current.CancellationToken);
+
+            Assert.Equal(0, exitCode);
+            Assert.Equal(string.Empty, error.ToString());
+            byte[] wave = File.ReadAllBytes(outputPath);
+            Assert.Equal(91_228, wave.Length);
+            Assert.Equal(
+                "E1AAF3F68DF1392617BC28D162D2E3DD2AFE6251E91E06D4D3191540C3EFA83F",
+                Convert.ToHexString(SHA256.HashData(wave)));
+        }
+        finally
+        {
+            Directory.Delete(directory, recursive: true);
+        }
+    }
+
     [Fact(DisplayName = "HiFi parallel streaming pipeline completes and preserves block order")]
     public void HiFiParallelStreamingPipelineCompletesAndPreservesBlockOrder()
     {
@@ -1541,13 +1586,21 @@ public sealed class HiFiRunnerTests
     }
 
     private static void WritePalVhsHiFiRf(string path)
+        => WriteHiFiRf(path, 1_400_000.0, 150_000.0, 1_800_000.0, 150_000.0);
+
+    private static void WriteNtsc8mmHiFiRf(string path)
+        => WriteHiFiRf(path, 1_500_000.0, 100_000.0, 1_700_000.0, 50_000.0);
+
+    private static void WriteHiFiRf(
+        string path,
+        double leftCarrier,
+        double leftCarrierDeviation,
+        double rightCarrier,
+        double rightCarrierDeviation)
     {
         const int SampleRate = 6_000_000;
         const int SampleCount = 2_800_000;
         const int ChunkSamples = 262_144;
-        const double LeftCarrier = 1_400_000.0;
-        const double RightCarrier = 1_800_000.0;
-        const double CarrierDeviation = 150_000.0;
         const double LeftModulationHz = 997.0;
         const double RightModulationHz = 1_433.0;
 
@@ -1560,11 +1613,11 @@ public sealed class HiFiRunnerTests
             {
                 int sample = start + offset;
                 double time = (double)sample / SampleRate;
-                double leftPhase = ((2.0 * Math.PI * LeftCarrier) * time)
-                    + (((CarrierDeviation * 0.40) / LeftModulationHz)
+                double leftPhase = ((2.0 * Math.PI * leftCarrier) * time)
+                    + (((leftCarrierDeviation * 0.40) / LeftModulationHz)
                         * (1.0 - Math.Cos((2.0 * Math.PI * LeftModulationHz) * time)));
-                double rightPhase = ((2.0 * Math.PI * RightCarrier) * time)
-                    + (((CarrierDeviation * 0.30) / RightModulationHz)
+                double rightPhase = ((2.0 * Math.PI * rightCarrier) * time)
+                    + (((rightCarrierDeviation * 0.30) / RightModulationHz)
                         * (1.0 - Math.Cos((2.0 * Math.PI * RightModulationHz) * time)));
                 double rf = (0.46 * Math.Sin(leftPhase)) + (0.46 * Math.Sin(rightPhase));
                 short pcm = checked((short)Math.Round(
