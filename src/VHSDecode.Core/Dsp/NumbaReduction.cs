@@ -25,6 +25,18 @@ internal static class NumbaReduction
         return output;
     }
 
+    public static double[] CenterFloat64(ReadOnlySpan<double> values)
+    {
+        double[] output = values.ToArray();
+        double mean = MeanFloat64(output);
+        for (int i = 0; i < output.Length; i++)
+        {
+            output[i] -= mean;
+        }
+
+        return output;
+    }
+
     public static float MeanFloat32(ReadOnlySpan<float> values)
     {
         float sum = 0.0f;
@@ -73,6 +85,19 @@ internal static class NumbaReduction
         return Math.Sqrt(squaredDistanceSum / values.Length);
     }
 
+    public static double StandardDeviationFloat64(ReadOnlySpan<double> values)
+    {
+        double mean = MeanFloat64(values);
+        double squaredDistanceSum = 0.0;
+        for (int i = 0; i < values.Length; i++)
+        {
+            double distance = values[i] - mean;
+            squaredDistanceSum += distance * distance;
+        }
+
+        return Math.Sqrt(squaredDistanceSum / values.Length);
+    }
+
     public static float MaxFloat32(ReadOnlySpan<float> values)
     {
         float maximum = float.NegativeInfinity;
@@ -90,6 +115,28 @@ internal static class NumbaReduction
         for (int i = 0; i < values.Length; i++)
         {
             maximum = MathF.Max(maximum, MathF.Abs(values[i]));
+        }
+
+        return maximum;
+    }
+
+    public static double MaxFloat64(ReadOnlySpan<double> values)
+    {
+        double maximum = double.NegativeInfinity;
+        for (int i = 0; i < values.Length; i++)
+        {
+            maximum = Math.Max(maximum, values[i]);
+        }
+
+        return maximum;
+    }
+
+    public static double MaxAbsFloat64(ReadOnlySpan<double> values)
+    {
+        double maximum = double.NegativeInfinity;
+        for (int i = 0; i < values.Length; i++)
+        {
+            maximum = Math.Max(maximum, Math.Abs(values[i]));
         }
 
         return maximum;

@@ -1273,6 +1273,33 @@ possible capture has already been proven byte-for-byte identical.
   and the same JSON hash
   `783A0DAC238A72433523659AC73C6A2D11357684631071A0A8DEE206E323EBDC`,
   while normalized logs also match in order and content
+- multi-frame PAL CVBS now projects line zero from the exact final line of the
+  previous valid field, matching v0.4.0's `prevfield` state instead of
+  accumulating first-HSYNC approximation error; serial and worker four-field,
+  serial six-field, `--skip_hsync_refine`, and combined AGC/notch/sharpness/wow
+  runs are byte-exact, with default four-field TBC, JSON, and SQLite SHA-256
+  hashes `9230E3BC7AECF8921A9AF1C6D2B045D73CC6768D5E01D2DBC70C0E6D4CDB5FCF`,
+  `9138992DC2262BB0D1C8F01A21A0689B7FE003D0ABBCDD9F75681286B5731F45`,
+  and `BEFE6A50C4962EC355698F91B59AAB999252619C300BCC9BB42D1C543EC57C33`
+- PAL CVBS `--start_fileloc 900000` now rejects the partial leading field
+  without committing its sync history, emits the exact upstream missing-data
+  diagnostic, and resumes with byte-exact TBC, JSON, SQLite, and normalized
+  logs; their hashes are
+  `E18F221C706DE0460CF3FB4904C4129E9B591B28F8368857A3576968EFCC711A`,
+  `8E49196977ABC45ACF283096E0CF6818BA66BC85411EBE1EDCDD9AF8D2604737`,
+  and `2E5EFF842103DD2741AB6DC5796CBD04AA1C2A5EDCE7DAAD29D09F2D25643D56`
+- a PAL CVBS valid-field/gap/valid-field sequence now discards v0.4.0's
+  `prevfield` context after the missing-data recovery, retains CVBS float64
+  demod precision for burst levels, renders a serial pending field with levels
+  published by the failed lookahead, and reproduces the phase warning,
+  `Skipped field`, filler fields, and frame-status ordering; serial and worker
+  TBC hashes are respectively
+  `0EAAFAE79BDD6B527F19C44C22D89B47307F14207191BF56E32FA9D844E81BFD`
+  and `036186D8E0C4D8529452FC7DA7931BE40442D8BF24F79C1A34A08045A8F2E6F4`,
+  their JSON hashes are
+  `D6745F35F2A897328ABDB33352C39491049307181E33BB674D6F26545582A4B3`
+  and `77BF4525761F33E080C9A77B987E4492CFB014858037ACB79B311D2D8310FE8C`,
+  and both normalized logs match in order and content
 
 #### LaserDisc verification
 
@@ -1386,7 +1413,7 @@ dotnet test VHSDecodeDotNet.slnx --no-build
 ```
 
 The current formal solution build completes with zero warnings and errors, and
-the xUnit v3 project exposes 636 independently discoverable compatibility tests
+the xUnit v3 project exposes 643 independently discoverable compatibility tests
 to `dotnet test` and Visual Studio Test Explorer. On the
 same Windows machine and fixtures, Release wall-clock measurements for one
 frame were 2.346 s versus 7.193 s for NTSC VHS and 1.651 s versus 5.865 s for

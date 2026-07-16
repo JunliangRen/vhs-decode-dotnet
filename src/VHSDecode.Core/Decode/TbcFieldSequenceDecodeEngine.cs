@@ -337,7 +337,7 @@ public sealed class TbcFieldSequenceDecodeEngine
                             laserDiscLeadOut));
                 }
             }
-            else if (session.Spec.Name == "cvbs" && !isFirstField && writes.Count > 0)
+            else if (session.Spec.Name == "cvbs" && !isFirstField && writes.Count == 1)
             {
                 int rawFrame = checked((int)Math.Floor(
                     ComputeFieldDiskLocation(session, completedField) / 2.0));
@@ -394,6 +394,22 @@ public sealed class TbcFieldSequenceDecodeEngine
             catch (TbcFieldDecodeRecoveryException ex)
             {
                 LogRecovery(session, ex);
+                if (session.Spec.Name == "cvbs")
+                {
+                    if (pendingCvbsField is not null)
+                    {
+                        CompleteField(FinalizeDeferredCvbsRender(
+                            session,
+                            pendingCvbsField.Value.Field,
+                            session.TbcFieldDecoder.CurrentCvbsOutputConverter),
+                            pendingCvbsField.Value.DecodedIndex);
+                        pendingCvbsField = null;
+                        CheckpointOutput(writePlanner.WrittenFieldCount);
+                    }
+
+                    session.TbcFieldDecoder.DiscardCvbsPreviousFieldContextAfterRecovery();
+                }
+
                 if (ex.StopAfterDecodedFields && decodedFieldCount > 0)
                 {
                     break;
@@ -773,6 +789,8 @@ public sealed class TbcFieldSequenceDecodeEngine
                 "Unable to determine start of field - dropping field",
             ("cvbs", TbcFieldDecodeRecoveryKind.NoSyncPulses) =>
                 "Unable to find any sync pulses, skipping one second",
+            ("cvbs", TbcFieldDecodeRecoveryKind.InsufficientData) =>
+                "Missing data at the end of field, possibly dropped samples skipping a little.",
             _ => null
         };
         if (message is not null)
@@ -1495,6 +1513,7 @@ public sealed class TbcFieldSequenceDecodeEngine
             bool isDuplicateField = false;
             int syncConfidence = 100;
             int decodeFaults = 0;
+            int? previousMismatchedPhase = null;
             if (_writtenFieldCount > 0)
             {
                 (TbcDecodedField Field, TbcFieldOrderDecision Decision) previous = _history[^1];
@@ -1506,6 +1525,7 @@ public sealed class TbcFieldSequenceDecodeEngine
                         LaserDiscFieldPhaseCount(_session)))
                 {
                     decodeFaults |= 2;
+                    previousMismatchedPhase = previous.Field.FieldPhaseId.Value;
                 }
 
                 if (previous.Decision.IsFirstField == isFirstField)
@@ -1540,6 +1560,15 @@ public sealed class TbcFieldSequenceDecodeEngine
 
             if (isDuplicateField)
             {
+                if (previousMismatchedPhase.HasValue && field.FieldPhaseId.HasValue)
+                {
+                    DecodeSessionLogWriter.Append(
+                        _session,
+                        "WARNING",
+                        $"At field #{decision.SeqNo - 1}, Field phaseID sequence mismatch ({previousMismatchedPhase.Value}->{field.FieldPhaseId.Value}) (player may be paused)");
+                }
+
+                DecodeSessionLogWriter.Append(_session, "ERROR", "Skipped field");
                 if (_lastValid.TryGetValue(!detectedFirstField, out var opposite))
                 {
                     Emit(opposite, emitted);
