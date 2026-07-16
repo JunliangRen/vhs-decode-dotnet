@@ -2,6 +2,31 @@ namespace VHSDecode.Core.Dsp;
 
 internal static class NumbaReduction
 {
+    public static double MeanFloat64(ReadOnlySpan<double> values)
+    {
+        double sum = 0.0;
+        for (int i = 0; i < values.Length; i++)
+        {
+            sum += values[i];
+        }
+
+        return sum / values.Length;
+    }
+
+    public static (double Mean, double StandardDeviation) MeanStandardDeviationFloat64(
+        ReadOnlySpan<double> values)
+    {
+        double mean = MeanFloat64(values);
+        double squaredDistanceSum = 0.0;
+        for (int i = 0; i < values.Length; i++)
+        {
+            double distance = values[i] - mean;
+            squaredDistanceSum += distance * distance;
+        }
+
+        return (mean, Math.Sqrt(squaredDistanceSum / values.Length));
+    }
+
     public static double MeanFloat64FastMath(ReadOnlySpan<double> values)
     {
         const int VectorWidth = 4;

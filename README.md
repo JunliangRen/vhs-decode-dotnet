@@ -925,7 +925,13 @@ possible capture has already been proven byte-for-byte identical.
 - verbose LD VITS metadata keeps v0.4.0's raw-then-round calculation order,
   including the unrounded RF-level ratio, upstream metric insertion order,
   and the rule that `ntscLine19Burst0IRE` exists only when the 3D line-19
-  colour measurement succeeds
+  colour measurement succeeds; white and white-flag gates use NumPy pairwise
+  float64 means, while `blackLinePostTBCIRE` averages quantized output codes
+  before performing the single scalar IRE conversion
+- quantized LD VITS IRE conversion preserves the upstream dtype split: direct
+  grey-level arrays retain `uint16` subtraction wrap and Numba's sequential
+  mean, PAL `palVITSBurst50Level` and NTSC `ntscLine19Burst0IRE` retain
+  sequential Numba RMS, and PSNR/RF-level `np.std` paths remain pairwise
 - NTSC line-19 colour statistics preserve the release's literal 40..100
   `uint16` gate (including its rejection of ordinary scaled 70-IRE codes),
   float32 comb arithmetic, zeroed two-sample edges, IQ phase mapping, and
@@ -1361,7 +1367,7 @@ dotnet test VHSDecodeDotNet.slnx --no-build
 ```
 
 The current formal solution build completes with zero warnings and errors, and
-the xUnit v3 project exposes 616 independently discoverable compatibility tests
+the xUnit v3 project exposes 620 independently discoverable compatibility tests
 to `dotnet test` and Visual Studio Test Explorer. On the
 same Windows machine and fixtures, Release wall-clock measurements for one
 frame were 2.346 s versus 7.193 s for NTSC VHS and 1.651 s versus 5.865 s for
