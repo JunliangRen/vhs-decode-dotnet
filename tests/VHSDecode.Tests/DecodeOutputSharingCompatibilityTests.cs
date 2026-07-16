@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Text.Json;
 using VHSDecode.Core.CommandLine;
 using VHSDecode.Core.Decode;
@@ -77,7 +78,10 @@ public sealed class DecodeOutputSharingCompatibilityTests
                 Assert.True(SpinWait.SpinUntil(
                     () => File.Exists(jsonPath),
                     TimeSpan.FromSeconds(10)));
-                using (FileStream jsonPreview = OpenPreview(jsonPath))
+                using (FileStream jsonPreview = OpenPreviewEventually(
+                           jsonPath,
+                           TimeSpan.FromSeconds(10),
+                           cancellationToken))
                 using (JsonDocument document = JsonDocument.Parse(jsonPreview))
                 {
                     Assert.Equal(
@@ -259,6 +263,26 @@ public sealed class DecodeOutputSharingCompatibilityTests
             FileMode.Open,
             FileAccess.Read,
             FileShare.ReadWrite);
+    }
+
+    private static FileStream OpenPreviewEventually(
+        string path,
+        TimeSpan timeout,
+        CancellationToken cancellationToken)
+    {
+        var stopwatch = Stopwatch.StartNew();
+        while (true)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            try
+            {
+                return OpenPreview(path);
+            }
+            catch (IOException) when (stopwatch.Elapsed < timeout)
+            {
+                cancellationToken.WaitHandle.WaitOne(TimeSpan.FromMilliseconds(10));
+            }
+        }
     }
 
     private static string CreateTempDirectory()
