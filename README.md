@@ -948,6 +948,10 @@ possible capture has already been proven byte-for-byte identical.
 - PAL LD/CVBS burst medians now add the parity-specific physical line offset
   (`+2` first field, `+3` second field) just like `Field.lineslice`, instead of
   sampling the earlier logical line number directly
+- LD PAL/NTSC burst-level and burst-median measurements now retain Numba's
+  sequential float32 mean, centering, square, and RMS reductions; PAL's
+  positive 30-IRE rejection gate compares the float32-centered peak, while
+  burst phase detection shares the same reduction helpers
 - LD `computedelays` fake-signal generation now mirrors the upstream
   LPF/burst/pre-emphasis probe before estimating `video_white`, `video_sync`,
   and RF high-pass rotation offsets
@@ -1375,7 +1379,7 @@ dotnet test VHSDecodeDotNet.slnx --no-build
 ```
 
 The current formal solution build completes with zero warnings and errors, and
-the xUnit v3 project exposes 628 independently discoverable compatibility tests
+the xUnit v3 project exposes 630 independently discoverable compatibility tests
 to `dotnet test` and Visual Studio Test Explorer. On the
 same Windows machine and fixtures, Release wall-clock measurements for one
 frame were 2.346 s versus 7.193 s for NTSC VHS and 1.651 s versus 5.865 s for

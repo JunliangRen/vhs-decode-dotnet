@@ -2,6 +2,78 @@ namespace VHSDecode.Core.Dsp;
 
 internal static class NumbaReduction
 {
+    public static float[] ToFloat32(ReadOnlySpan<double> values)
+    {
+        var output = new float[values.Length];
+        for (int i = 0; i < values.Length; i++)
+        {
+            output[i] = (float)values[i];
+        }
+
+        return output;
+    }
+
+    public static float[] CenterFloat32(ReadOnlySpan<double> values)
+    {
+        float[] output = ToFloat32(values);
+        float mean = MeanFloat32(output);
+        for (int i = 0; i < output.Length; i++)
+        {
+            output[i] -= mean;
+        }
+
+        return output;
+    }
+
+    public static float MeanFloat32(ReadOnlySpan<float> values)
+    {
+        float sum = 0.0f;
+        for (int i = 0; i < values.Length; i++)
+        {
+            sum += values[i];
+        }
+
+        return sum / values.Length;
+    }
+
+    public static float StandardDeviationFloat32(ReadOnlySpan<double> values)
+        => StandardDeviationFloat32(ToFloat32(values));
+
+    public static float StandardDeviationFloat32(ReadOnlySpan<float> values)
+    {
+        float mean = MeanFloat32(values);
+        float squaredDistanceSum = 0.0f;
+        for (int i = 0; i < values.Length; i++)
+        {
+            float distance = values[i] - mean;
+            squaredDistanceSum += distance * distance;
+        }
+
+        return MathF.Sqrt(squaredDistanceSum / values.Length);
+    }
+
+    public static float MaxFloat32(ReadOnlySpan<float> values)
+    {
+        float maximum = float.NegativeInfinity;
+        for (int i = 0; i < values.Length; i++)
+        {
+            maximum = MathF.Max(maximum, values[i]);
+        }
+
+        return maximum;
+    }
+
+    public static float MaxAbsFloat32(ReadOnlySpan<float> values)
+    {
+        float maximum = float.NegativeInfinity;
+        for (int i = 0; i < values.Length; i++)
+        {
+            maximum = MathF.Max(maximum, MathF.Abs(values[i]));
+        }
+
+        return maximum;
+    }
+
     public static double MedianFloat32(ReadOnlySpan<double> values)
     {
         if (values.IsEmpty)

@@ -9826,7 +9826,8 @@ public void TbcFieldDecodePipelineDetectsSyncAndRendersField()
         ldVbiVideo));
     AssertEqual(ldVbiSpec.OutputLineCount + 10, ldVbiDecoded.LineLocations.Locations.Length);
     AssertIntSequence([0xAAAAAA], ldVbiDecoded.VbiData!);
-    AssertClose(Math.Sqrt(100.0 / 97.0), ldVbiDecoded.MedianBurstIre!.Value, 1e-12);
+    const double NumbaBurstRms = 1.0153461561907278;
+    AssertClose(NumbaBurstRms, ldVbiDecoded.MedianBurstIre!.Value, 1e-12);
 
     var cvbsVbiPipeline = new TbcFieldDecodePipeline(
         ldVbiAnalyzer,
@@ -9842,7 +9843,7 @@ public void TbcFieldDecodePipelineDetectsSyncAndRendersField()
         ldVbiVideo));
     AssertTrue(cvbsVbiPipeline.DecodesVbiData);
     AssertIntSequence([0xAAAAAA], cvbsVbiDecoded.VbiData!);
-    AssertClose(Math.Sqrt(100.0 / 97.0), cvbsVbiDecoded.MedianBurstIre!.Value, 1e-12);
+    AssertClose(NumbaBurstRms, cvbsVbiDecoded.MedianBurstIre!.Value, 1e-12);
 
     var refineAnalyzer = new SyncAnalyzer(
         sampleRateHz: 1_000_000.0,

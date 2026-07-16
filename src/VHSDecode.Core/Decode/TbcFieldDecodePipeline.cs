@@ -2060,7 +2060,7 @@ public sealed class TbcFieldDecodePipeline
         return Commit(fourFieldPhase + (isFirstFour ? 0 : 4), adjustments);
     }
 
-    private double? ComputeLaserDiscPalBurstLevel(
+    internal double? ComputeLaserDiscPalBurstLevel(
         ReadOnlySpan<double> video,
         IReadOnlyList<double> lineLocations,
         int line,
@@ -2071,14 +2071,13 @@ public sealed class TbcFieldDecodePipeline
             return null;
         }
 
-        ReadOnlySpan<double> burstArea = video.Slice(start, length);
-        double mean = Mean(burstArea);
-        if (MaxCentered(burstArea, mean) > 30.0 * Math.Abs(hzIre))
+        float[] burstArea = NumbaReduction.CenterFloat32(video.Slice(start, length));
+        if (NumbaReduction.MaxFloat32(burstArea) > 30.0 * hzIre)
         {
             return null;
         }
 
-        return StandardDeviation(burstArea) * Math.Sqrt(2.0);
+        return NumbaReduction.StandardDeviationFloat32(burstArea) * Math.Sqrt(2.0);
     }
 
     private (LineLocationResult LineLocations, int? FieldPhaseId) RefineLaserDiscNtscLineLocationsFromBurst(
@@ -2275,8 +2274,8 @@ public sealed class TbcFieldDecodePipeline
             return false;
         }
 
-        float[] burstArea = CenterFloat32(burst.Slice(windowStart, length));
-        float threshold = StandardDeviationFloat32(burstArea);
+        float[] burstArea = NumbaReduction.CenterFloat32(burst.Slice(windowStart, length));
+        float threshold = NumbaReduction.StandardDeviationFloat32(burstArea);
         if (!double.IsFinite(threshold) || threshold <= 0.0)
         {
             return false;
@@ -2287,8 +2286,8 @@ public sealed class TbcFieldDecodePipeline
             int demodLength = Math.Min(length, video.Length - windowStart);
             if (demodLength > 0 && hzIre != 0.0)
             {
-                float[] demodArea = CenterFloat32(video.Slice(windowStart, demodLength));
-                if (MaxAbsFloat32(demodArea) > 30.0 * Math.Abs(hzIre))
+                float[] demodArea = NumbaReduction.CenterFloat32(video.Slice(windowStart, demodLength));
+                if (NumbaReduction.MaxAbsFloat32(demodArea) > 30.0 * hzIre)
                 {
                     return false;
                 }
@@ -2416,55 +2415,6 @@ public sealed class TbcFieldDecodePipeline
         double b = data[location] - (double)target;
         double fraction = b - a != 0.0 ? -a / (-a + b) : 0.0;
         return location - 1 + fraction;
-    }
-
-    private static float[] CenterFloat32(ReadOnlySpan<double> values)
-    {
-        var output = new float[values.Length];
-        float sum = 0.0f;
-        for (int i = 0; i < values.Length; i++)
-        {
-            output[i] = (float)values[i];
-            sum += output[i];
-        }
-
-        float mean = sum / values.Length;
-        for (int i = 0; i < output.Length; i++)
-        {
-            output[i] -= mean;
-        }
-
-        return output;
-    }
-
-    private static float StandardDeviationFloat32(ReadOnlySpan<float> values)
-    {
-        float sum = 0.0f;
-        for (int i = 0; i < values.Length; i++)
-        {
-            sum += values[i];
-        }
-
-        float mean = sum / values.Length;
-        float sumSquares = 0.0f;
-        for (int i = 0; i < values.Length; i++)
-        {
-            float distance = values[i] - mean;
-            sumSquares += distance * distance;
-        }
-
-        return MathF.Sqrt(sumSquares / values.Length);
-    }
-
-    private static float MaxAbsFloat32(ReadOnlySpan<float> values)
-    {
-        float maximum = float.NegativeInfinity;
-        for (int i = 0; i < values.Length; i++)
-        {
-            maximum = MathF.Max(maximum, MathF.Abs(values[i]));
-        }
-
-        return maximum;
     }
 
     private static int LaserDiscNtscFieldPhaseId(bool isFirstField, bool field14)
@@ -2620,7 +2570,7 @@ public sealed class TbcFieldDecodePipeline
         return codes.Count > 0 ? codes.ToArray() : null;
     }
 
-    private double? ComputeLaserDiscMedianBurstIre(
+    internal double? ComputeLaserDiscMedianBurstIre(
         ReadOnlySpan<double> video,
         IReadOnlyList<double> lineLocations,
         bool? isFirstField,
@@ -2650,13 +2600,23 @@ public sealed class TbcFieldDecodePipeline
             }
 
             ReadOnlySpan<double> burstArea = video.Slice(start, length);
-            double mean = Mean(burstArea);
-            if (isPal && MaxCentered(burstArea, mean) > 30.0 * Math.Abs(converter.HzIre))
+            float standardDeviation;
+            if (isPal)
             {
-                continue;
+                float[] centered = NumbaReduction.CenterFloat32(burstArea);
+                if (NumbaReduction.MaxFloat32(centered) > 30.0 * converter.HzIre)
+                {
+                    continue;
+                }
+
+                standardDeviation = NumbaReduction.StandardDeviationFloat32(centered);
+            }
+            else
+            {
+                standardDeviation = NumbaReduction.StandardDeviationFloat32(burstArea);
             }
 
-            burstLevels.Add(StandardDeviation(burstArea) * Math.Sqrt(2.0));
+            burstLevels.Add(standardDeviation * Math.Sqrt(2.0));
         }
 
         return burstLevels.Count == 0
@@ -4783,17 +4743,6 @@ public sealed class TbcFieldDecodePipeline
         }
 
         return Math.Sqrt(sumSquares / values.Length);
-    }
-
-    private static double MaxCentered(ReadOnlySpan<double> values, double mean)
-    {
-        double maximum = double.NegativeInfinity;
-        for (int i = 0; i < values.Length; i++)
-        {
-            maximum = Math.Max(maximum, values[i] - mean);
-        }
-
-        return maximum;
     }
 
     private static double MaxAbsCentered(ReadOnlySpan<double> values, double mean)
