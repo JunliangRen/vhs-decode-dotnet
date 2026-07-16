@@ -72,6 +72,80 @@ public sealed class LaserDiscRfMetricNumericsCompatibilityTests
         Assert.Equal(1.0, decoded.BlackToWhiteRfRatio);
     }
 
+    [Fact(DisplayName = "LD RF ratio white gate uses NumPy float64 pairwise mean")]
+    public void LaserDiscRfRatioWhiteGateUsesNumpyFloat64PairwiseMean()
+    {
+        const int outputLineLength = 200;
+        var spec = new TbcFrameSpec(
+            "NTSC",
+            OutputLineLength: outputLineLength,
+            OutputLineCount: 4,
+            OutputSampleRateHz: 1_000_000.0,
+            ColourBurstStart: null,
+            ColourBurstEnd: null,
+            ActiveVideoStart: null,
+            ActiveVideoEnd: null);
+        var converter = new VideoOutputConverter(
+            ire0: 8_100_000.0,
+            hzIre: 12_142.857142857143,
+            outputZero: 1_024,
+            vsyncIre: -40.0,
+            outputScale: 358.4);
+        var analyzer = new SyncAnalyzer(
+            sampleRateHz: 1_000_000.0,
+            linePeriodUs: 1_000.0,
+            hsyncPulseUs: 10.0,
+            equalizingPulseUs: 5.0,
+            vsyncPulseUs: 20.0);
+        var metricOptions = new LaserDiscRfMetricOptions(
+            WhiteSlices: [new LaserDiscVitsLevelSlice(Line: 2, StartUsec: 0.0, LengthUsec: 114.0, Percentile: 50.0)],
+            BlackSlice: new LaserDiscVitsLevelSlice(Line: 3, StartUsec: 0.0, LengthUsec: 114.0, Percentile: 50.0),
+            VideoWhiteDelaySamples: 0,
+            VideoSyncDelaySamples: 0);
+        var pipeline = new TbcFieldDecodePipeline(
+            analyzer,
+            new TbcFieldRenderer(spec, converter),
+            converter,
+            "NTSC",
+            TbcDropoutDetectionOptions.Disabled,
+            laserDiscRfMetricOptions: metricOptions);
+
+        var output = new ushort[spec.FieldSampleCount];
+        ulong state = 30;
+        long deltaSum = 0;
+        for (int i = 0; i < 113; i++)
+        {
+            state = unchecked(
+                (state * 6_364_136_223_846_793_005UL)
+                + 1_442_695_040_888_963_407UL);
+            int delta = (int)((state >> 32) % 10_001) - 5_000;
+            output[outputLineLength + i] = (ushort)(47_616 + delta);
+            deltaSum += delta;
+        }
+
+        int lastDelta = checked((int)-deltaSum);
+        Assert.InRange(lastDelta, -5_000, 5_000);
+        output[outputLineLength + 113] = (ushort)(47_616 + lastDelta);
+
+        var raw = new double[5_000];
+        for (int i = 0; i < 115; i++)
+        {
+            double value = i & 1;
+            raw[2_000 + i] = value;
+            raw[3_000 + i] = value;
+        }
+
+        double[] lineLocations = [0.0, 1_000.0, 2_000.0, 3_000.0, 4_000.0];
+        double? ratio = pipeline.ComputeLaserDiscBlackToWhiteRfRatio(
+            raw,
+            output,
+            lineLocations,
+            isFirstField: true,
+            converter);
+
+        Assert.Equal(1.0, ratio);
+    }
+
     private static double[] GeneratePattern(ulong seed, int length)
     {
         var values = new double[length];

@@ -914,7 +914,7 @@ public sealed class TbcFieldDecodePipeline
         };
     }
 
-    private double? ComputeLaserDiscBlackToWhiteRfRatio(
+    internal double? ComputeLaserDiscBlackToWhiteRfRatio(
         ReadOnlySpan<double> rawInput,
         ReadOnlySpan<ushort> output,
         IReadOnlyList<double> lineLocations,
@@ -934,13 +934,15 @@ public sealed class TbcFieldDecodePipeline
                 continue;
             }
 
-            double whiteIre = 0.0;
+            Span<double> whiteIreValues = whiteOutput.Length <= 1_024
+                ? stackalloc double[whiteOutput.Length]
+                : new double[whiteOutput.Length];
             for (int i = 0; i < whiteOutput.Length; i++)
             {
-                whiteIre += converter.OutputToIre(whiteOutput[i]);
+                whiteIreValues[i] = converter.OutputToIreWithUInt16Subtraction(whiteOutput[i]);
             }
 
-            whiteIre /= whiteOutput.Length;
+            double whiteIre = NumpyReduction.MeanFloat64(whiteIreValues);
             if (whiteIre < 90.0 || whiteIre > 110.0)
             {
                 continue;

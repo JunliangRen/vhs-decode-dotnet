@@ -921,7 +921,9 @@ possible capture has already been proven byte-for-byte identical.
   `+1` at the stop, while output slices round the two unmodified endpoints
 - LD internally computes the four-decimal `blackToWhiteRFRatio` even without
   `--verboseVITS`; the scalar is retained for automatic MTF without keeping
-  every decoded field's full raw RF arrays in memory
+  every decoded field's full raw RF arrays in memory; its white-slice gate now
+  shares the VITS path's `uint16` subtraction wrap and NumPy pairwise float64
+  mean, including the exact 90-IRE acceptance boundary
 - verbose LD VITS metadata keeps v0.4.0's raw-then-round calculation order,
   including the unrounded RF-level ratio, upstream metric insertion order,
   and the rule that `ntscLine19Burst0IRE` exists only when the 3D line-19
@@ -1367,7 +1369,7 @@ dotnet test VHSDecodeDotNet.slnx --no-build
 ```
 
 The current formal solution build completes with zero warnings and errors, and
-the xUnit v3 project exposes 620 independently discoverable compatibility tests
+the xUnit v3 project exposes 621 independently discoverable compatibility tests
 to `dotnet test` and Visual Studio Test Explorer. On the
 same Windows machine and fixtures, Release wall-clock measurements for one
 frame were 2.346 s versus 7.193 s for NTSC VHS and 1.651 s versus 5.865 s for

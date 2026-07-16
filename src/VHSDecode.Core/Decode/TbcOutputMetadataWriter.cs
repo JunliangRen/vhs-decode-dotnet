@@ -1731,8 +1731,7 @@ public static class TbcOutputMetadataWriter
             ushort output = (ushort)Math.Clamp(outputValues[i], ushort.MinValue, ushort.MaxValue);
             if (wrapQuantizedSubtraction)
             {
-                ushort difference = unchecked((ushort)(output - session.VideoOutput.OutputZero));
-                ire[i] = (difference / session.VideoOutput.OutputScale) + session.VideoOutput.VSyncIre;
+                ire[i] = session.VideoOutput.OutputToIreWithUInt16Subtraction(output);
             }
             else
             {
