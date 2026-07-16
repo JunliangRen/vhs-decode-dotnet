@@ -147,15 +147,7 @@ public static class CvbsPulseDetector
     }
 
     private static double Mean(ReadOnlySpan<double> values)
-    {
-        double sum = 0.0;
-        for (int i = 0; i < values.Length; i++)
-        {
-            sum += values[i];
-        }
-
-        return sum / values.Length;
-    }
+        => NumpyReduction.MeanFloat64(values);
 
     private static double Median(List<double> values)
     {

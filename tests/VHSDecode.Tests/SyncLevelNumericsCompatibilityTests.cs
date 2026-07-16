@@ -1,10 +1,55 @@
 using VHSDecode.Core.Dsp;
+using VHSDecode.Core.Tbc;
 using Xunit;
 
 namespace VHSDecode.Tests;
 
 public sealed class SyncLevelNumericsCompatibilityTests
 {
+    [Theory(DisplayName = "CVBS and LD pulse refinement uses NumPy float64 means")]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void PulseRefinementUsesNumpyFloat64Means(bool laserDisc)
+    {
+        var analyzer = new SyncAnalyzer(
+            sampleRateHz: 40_000_000.0,
+            linePeriodUs: 64.0,
+            hsyncPulseUs: 4.7,
+            equalizingPulseUs: 2.35,
+            vsyncPulseUs: 27.3);
+        const int pulseStart = 100;
+        const int pulseLength = 1_092;
+        double pulseValue = BitConverter.Int64BitsToDouble(0x402CF3CF3CF3CF3B);
+        var syncReference = new double[pulseStart + pulseLength + 100];
+        Array.Fill(syncReference, pulseValue, pulseStart + 40, pulseLength - 80);
+        Pulse[] pulses = [new Pulse(pulseStart, pulseLength)];
+        var converter = new VideoOutputConverter(
+            ire0: BitConverter.Int64BitsToDouble(0x4022F3CF3CF3CF7D),
+            hzIre: 1.0,
+            outputZero: 0,
+            vsyncIre: 0.0,
+            outputScale: 1.0);
+
+        CvbsPulseDetectionResult result = (laserDisc
+            ? CvbsPulseDetector.RefineLaserDisc(
+                syncReference,
+                pulses,
+                initialThreshold: -20.0,
+                analyzer,
+                converter)
+            : CvbsPulseDetector.Refine(
+                syncReference,
+                pulses,
+                initialThreshold: -20.0,
+                analyzer,
+                converter))
+            ?? throw new InvalidOperationException("Expected pulse refinement result.");
+
+        Assert.False(result.Recalibrated);
+        Assert.Equal(-20.0, result.Threshold);
+        Assert.Equal(pulses, result.Pulses);
+    }
+
     [Fact(DisplayName = "VHS serration extraction uses Numba float64 fast-math mean")]
     public void VhsSerrationExtractionUsesNumbaFloat64FastMathMean()
     {

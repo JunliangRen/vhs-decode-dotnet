@@ -889,8 +889,9 @@ possible capture has already been proven byte-for-byte identical.
   burst probing preserves the float64 TBC chroma path, upstream MHz cutoff
   arithmetic, double-FMA I/Q reduction, and platform C-runtime `hypot`
 - RF color-under extraction likewise uses float32 `sci-rs` SOS filtering and
-  reproduces Numba fastmath's vectorized float32 DC-mean reduction; the path
-  promotes to double only when an upstream SciPy BA audio/video notch is active
+  reproduces Numba fastmath's vectorized float32 DC-mean reduction; when an
+  optional SciPy BA audio/video notch promotes the path to double, float64 DC
+  removal retains the corresponding Numba fast-math reduction order
 - automatic chroma gain now mirrors `lddecode.utils.rms`: burst amplitude is
   the standard deviation after removing the burst window's DC mean, not the
   uncentered root-mean-square value
@@ -1066,6 +1067,8 @@ possible capture has already been proven byte-for-byte identical.
   calibrated sync and blank values instead of sequential-sum rounding
 - serration half-amplitude splitting uses the upstream Numba float64 fast-math
   reduction order, preserving peak/valley classification at ULP boundaries
+- CVBS and LaserDisc pulse recalibration uses NumPy-compatible float64 means,
+  preserving the upstream 5-IRE acceptance boundary for long VSync pulses
 - sequence decoding now commits each field as soon as field-order planning
   releases it: main/chroma TBC and LD EFM, pre-EFM, PCM, RF-TBC, and AC3
   sidecars stay open and preserve their cross-field state instead of retaining
@@ -1354,7 +1357,7 @@ dotnet test VHSDecodeDotNet.slnx --no-build
 ```
 
 The current formal solution build completes with zero warnings and errors, and
-the xUnit v3 project exposes 601 independently discoverable compatibility tests
+the xUnit v3 project exposes 604 independently discoverable compatibility tests
 to `dotnet test` and Visual Studio Test Explorer. On the
 same Windows machine and fixtures, Release wall-clock measurements for one
 frame were 2.346 s versus 7.193 s for NTSC VHS and 1.651 s versus 5.865 s for
