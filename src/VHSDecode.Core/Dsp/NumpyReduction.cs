@@ -1,3 +1,5 @@
+using System.Numerics;
+
 namespace VHSDecode.Core.Dsp;
 
 internal static class NumpyReduction
@@ -28,6 +30,13 @@ internal static class NumpyReduction
 
         double variance = MeanFloat64(squaredDistances);
         return (mean, Math.Sqrt(variance));
+    }
+
+    public static Complex MeanComplex128(ReadOnlySpan<Complex> values)
+    {
+        Complex sum = PairwiseSumComplex128(values);
+        double scale = 1.0 / values.Length;
+        return new Complex(sum.Real * scale, sum.Imaginary * scale);
     }
 
     private static float PairwiseSumFloat32(ReadOnlySpan<double> values)
@@ -136,5 +145,62 @@ internal static class NumpyReduction
         }
 
         return combinedSum;
+    }
+
+    private static Complex PairwiseSumComplex128(ReadOnlySpan<Complex> values)
+    {
+        const int pairwiseBlockSize = 64;
+        if (values.Length < 4)
+        {
+            double real = -0.0;
+            double imaginary = -0.0;
+            for (int i = 0; i < values.Length; i++)
+            {
+                real += values[i].Real;
+                imaginary += values[i].Imaginary;
+            }
+
+            return new Complex(real, imaginary);
+        }
+
+        if (values.Length > pairwiseBlockSize)
+        {
+            int split = values.Length / 2;
+            split -= split % 4;
+            Complex left = PairwiseSumComplex128(values[..split]);
+            Complex right = PairwiseSumComplex128(values[split..]);
+            return new Complex(left.Real + right.Real, left.Imaginary + right.Imaginary);
+        }
+
+        Span<double> realAccumulators = stackalloc double[4];
+        Span<double> imaginaryAccumulators = stackalloc double[4];
+        for (int lane = 0; lane < 4; lane++)
+        {
+            realAccumulators[lane] = values[lane].Real;
+            imaginaryAccumulators[lane] = values[lane].Imaginary;
+        }
+
+        int index = 4;
+        int vectorizedEnd = values.Length - (values.Length % 4);
+        for (; index < vectorizedEnd; index += 4)
+        {
+            for (int lane = 0; lane < 4; lane++)
+            {
+                realAccumulators[lane] += values[index + lane].Real;
+                imaginaryAccumulators[lane] += values[index + lane].Imaginary;
+            }
+        }
+
+        double realSum = (realAccumulators[0] + realAccumulators[1])
+            + (realAccumulators[2] + realAccumulators[3]);
+        double imaginarySum = (imaginaryAccumulators[0] + imaginaryAccumulators[1])
+            + (imaginaryAccumulators[2] + imaginaryAccumulators[3]);
+        for (; index < values.Length; index++)
+        {
+            realSum += values[index].Real;
+            imaginarySum += values[index].Imaginary;
+        }
+
+        return new Complex(realSum, imaginarySum);
     }
 }

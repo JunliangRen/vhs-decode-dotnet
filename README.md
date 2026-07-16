@@ -289,6 +289,8 @@ possible capture has already been proven byte-for-byte identical.
   decode
 - LD PAL field decode now uses the `demod_pilot` side channel for upstream-style
   two-pass pilot phase line-location refinement after HSYNC refinement
+- PAL pilot circular averaging reproduces NumPy complex128 pairwise blocks,
+  recursive splitting, and reciprocal mean scaling before phase correction
 - LD NTSC field decode now uses the `demod_burst` side channel for upstream-style
   two-pass burst zero-crossing line-location refinement and LD `fieldPhaseID`
   detection
@@ -1357,7 +1359,7 @@ dotnet test VHSDecodeDotNet.slnx --no-build
 ```
 
 The current formal solution build completes with zero warnings and errors, and
-the xUnit v3 project exposes 604 independently discoverable compatibility tests
+the xUnit v3 project exposes 615 independently discoverable compatibility tests
 to `dotnet test` and Visual Studio Test Explorer. On the
 same Windows machine and fixtures, Release wall-clock measurements for one
 frame were 2.346 s versus 7.193 s for NTSC VHS and 1.651 s versus 5.865 s for

@@ -1,3 +1,4 @@
+using System.Numerics;
 using System.Runtime.InteropServices;
 using System.Security.Cryptography;
 using System.Text.Json;
@@ -1916,19 +1917,20 @@ public sealed class TbcFieldDecodePipeline
         return index;
     }
 
-    private static double CircularAverageUnitPhase(ReadOnlySpan<double> phases)
+    internal static double CircularAverageUnitPhase(ReadOnlySpan<double> phases)
     {
-        double sumSin = 0.0;
-        double sumCos = 0.0;
+        Span<Complex> angles = phases.Length <= 512
+            ? stackalloc Complex[phases.Length]
+            : new Complex[phases.Length];
         for (int i = 0; i < phases.Length; i++)
         {
             double fraction = phases[i] - Math.Truncate(phases[i]);
-            double angle = Math.Tau * fraction;
-            sumCos += Math.Cos(angle);
-            sumSin += Math.Sin(angle);
+            double angle = (fraction * Math.PI) * 2.0;
+            angles[i] = new Complex(Math.Cos(angle), Math.Sin(angle));
         }
 
-        double average = Math.Atan2(sumSin, sumCos) / Math.Tau;
+        Complex mean = NumpyReduction.MeanComplex128(angles);
+        double average = Math.Atan2(mean.Imaginary, mean.Real) / Math.Tau;
         return average < 0.0 ? average + 1.0 : average;
     }
 
