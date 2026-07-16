@@ -982,6 +982,10 @@ Implemented:
   large RF/video/chroma/audio arrays are released, JSON fields stream through
   a temporary fragment, and SQLite rows are inserted incrementally, bounding
   sequence memory to the field-order/previous-field state
+- active main/chroma TBC and raw LD PCM/EFM/pre-EFM handles use CPython's
+  deny-none sharing on Windows, so a viewer can read them while decoding
+  continues; recovery JSON snapshots remain complete, atomically published,
+  and readable between field checkpoints
 - recovery JSON checkpoints now run on a single background writer like v0.4.0:
   checkpoints are skipped while that writer is busy, each accepted snapshot is
   frozen at its current field boundary, and cleanup always queues and joins the
@@ -1219,7 +1223,7 @@ dotnet test VHSDecodeDotNet.slnx --no-build
 ```
 
 The current formal solution build completes with zero warnings and errors, and
-the xUnit v3 project exposes 548 independently discoverable compatibility tests
+the xUnit v3 project exposes 554 independently discoverable compatibility tests
 to `dotnet test` and Visual Studio Test Explorer. On the
 same Windows machine and fixtures, Release wall-clock measurements for one
 frame were 2.346 s versus 7.193 s for NTSC VHS and 1.651 s versus 5.865 s for

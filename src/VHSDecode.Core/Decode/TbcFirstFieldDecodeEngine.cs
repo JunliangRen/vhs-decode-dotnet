@@ -61,7 +61,7 @@ public sealed class TbcFirstFieldDecodeEngine
     public TbcFirstFieldDecodeResult WriteDecodedField(DecodeSession session, TbcDecodedField field)
     {
         TbcOutputPaths paths = BuildOutputPaths(session);
-        using (FileStream tbc = File.Create(paths.TbcPath))
+        using (FileStream tbc = DecodeOutputFile.Create(paths.TbcPath))
         {
             TbcOutputWriter.WriteFrame(tbc, field.Samples, session.TbcFrameSpec, field.OutputPayload);
         }
@@ -105,7 +105,7 @@ public sealed class TbcFirstFieldDecodeEngine
         string? chromaPath)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(chromaPath);
-        using FileStream chroma = File.Create(chromaPath);
+        using FileStream chroma = DecodeOutputFile.Create(chromaPath);
         foreach (TbcDecodedField field in fields)
         {
             if (field.ChromaSamples is null)

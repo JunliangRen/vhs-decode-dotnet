@@ -58,7 +58,7 @@ public sealed class LaserDiscEfmOutputWriter : ILaserDiscEfmOutputWriter
                 terminateBeforeInputClose: true)
             : path.EndsWith(".ac3", StringComparison.OrdinalIgnoreCase)
                 ? LaserDiscAc3Pipe.Open(path)
-            : File.Create(path);
+            : DecodeOutputFile.Create(path);
     }
 
     private static void WriteInt16LittleEndian(Stream destination, ReadOnlySpan<short> samples)

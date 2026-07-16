@@ -103,7 +103,7 @@ public sealed class TbcFieldSequenceDecodeEngine
 
     internal bool EnableWorkerPrefetchForCustomReader { get; init; }
 
-    internal Func<string, Stream> CreateTbcOutput { get; init; } = File.Create;
+    internal Func<string, Stream> CreateTbcOutput { get; init; } = DecodeOutputFile.Create;
 
     public TbcFieldSequenceDecodeResult TryDecodeAndWrite(DecodeSession session, int? maxFields = null)
     {
@@ -1033,7 +1033,7 @@ public sealed class TbcFieldSequenceDecodeEngine
             writtenFields.Add(field);
             writtenOrder.Add(decision);
         }
-        using (FileStream tbc = File.Create(paths.TbcPath))
+        using (FileStream tbc = DecodeOutputFile.Create(paths.TbcPath))
         {
             foreach (TbcDecodedField field in writtenFields)
             {
@@ -1043,7 +1043,7 @@ public sealed class TbcFieldSequenceDecodeEngine
 
         if (writtenFields.Count == 0 && session.ChromaOptions?.WriteChroma == true)
         {
-            File.Create(paths.ChromaPath!).Dispose();
+            DecodeOutputFile.Create(paths.ChromaPath!).Dispose();
         }
         else if (TbcFirstFieldDecodeEngine.ShouldWriteChroma(session, writtenFields))
         {

@@ -56,13 +56,13 @@ public static class TbcOutputMetadataWriter
             _fieldsPath = jsonPath + ".fields.tmp";
             _verbose = session.ExecutionOptions.VerboseVits;
             _fieldBuilder = new FieldObjectBuilder(session);
-            _createSnapshotOutput = createSnapshotOutput ?? (static path => File.Create(path));
+            _createSnapshotOutput = createSnapshotOutput ?? DecodeOutputFile.Create;
             _fieldsWriter = new StreamWriter(
                 new FileStream(
                     _fieldsPath,
                     FileMode.Create,
                     FileAccess.Write,
-                    FileShare.Read),
+                    FileShare.ReadWrite),
                 new UTF8Encoding(encoderShouldEmitUTF8Identifier: false));
             _snapshotThread = new Thread(ConsumeSnapshots)
             {

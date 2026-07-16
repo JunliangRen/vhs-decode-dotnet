@@ -67,7 +67,7 @@ public static class LaserDiscAc3Pipe
 
         public Ac3PipeStream(string outputFilename)
         {
-            _log = File.Create(outputFilename + ".log");
+            _log = DecodeOutputFile.Create(outputFilename + ".log");
             IReadOnlyList<LaserDiscAc3ProcessSpec> specs = BuildProcessSpecs(outputFilename);
             Process? decode = null;
             Process? demodulate = null;
