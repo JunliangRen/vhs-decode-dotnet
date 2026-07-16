@@ -71,7 +71,9 @@ internal static class NumpyReduction
         ReadOnlySpan<double> values)
     {
         double mean = MeanFloat64(values);
-        var squaredDistances = new double[values.Length];
+        Span<double> squaredDistances = values.Length <= 512
+            ? stackalloc double[values.Length]
+            : new double[values.Length];
         for (int i = 0; i < values.Length; i++)
         {
             double distance = values[i] - mean;

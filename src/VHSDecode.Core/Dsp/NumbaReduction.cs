@@ -129,6 +129,7 @@ internal static class NumbaReduction
         const int Interleave = 4;
         const int Stride = VectorWidth * Interleave;
         Span<double> accumulators = stackalloc double[Stride];
+        accumulators.Clear();
         int index = 0;
         int vectorizedEnd = values.Length - (values.Length % Stride);
         for (; index < vectorizedEnd; index += Stride)
