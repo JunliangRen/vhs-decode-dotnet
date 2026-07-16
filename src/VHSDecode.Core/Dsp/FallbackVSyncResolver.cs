@@ -633,21 +633,7 @@ public static class FallbackVSyncResolver
             return (double.NaN, double.NaN);
         }
 
-        double sum = 0.0;
-        for (int i = start; i < endExclusive; i++)
-        {
-            sum += values[i];
-        }
-
-        double mean = sum / (endExclusive - start);
-        double sumSquares = 0.0;
-        for (int i = start; i < endExclusive; i++)
-        {
-            double delta = values[i] - mean;
-            sumSquares += delta * delta;
-        }
-
-        return (mean, Math.Sqrt(sumSquares / (endExclusive - start)));
+        return NumpyReduction.MeanStandardDeviationFloat64(values[start..endExclusive]);
     }
 
     private static int NormalizeNumpySliceIndex(int index, int length)
