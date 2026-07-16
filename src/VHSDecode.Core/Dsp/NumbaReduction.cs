@@ -52,6 +52,27 @@ internal static class NumbaReduction
         return MathF.Sqrt(squaredDistanceSum / values.Length);
     }
 
+    public static double StandardDeviationFloat32InputToFloat64(ReadOnlySpan<double> values)
+    {
+        float mean = 0.0f;
+        for (int i = 0; i < values.Length; i++)
+        {
+            mean += (float)values[i];
+        }
+
+        mean /= values.Length;
+
+        // Numba keeps float32 deltas and products but widens the sum and result.
+        double squaredDistanceSum = 0.0;
+        for (int i = 0; i < values.Length; i++)
+        {
+            float distance = (float)values[i] - mean;
+            squaredDistanceSum += distance * distance;
+        }
+
+        return Math.Sqrt(squaredDistanceSum / values.Length);
+    }
+
     public static float MaxFloat32(ReadOnlySpan<float> values)
     {
         float maximum = float.NegativeInfinity;

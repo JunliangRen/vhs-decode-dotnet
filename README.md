@@ -732,9 +732,11 @@ possible capture has already been proven byte-for-byte identical.
   next-line boundary records
 - LD DOD combines PAL/NTSC IRE validity windows, HSYNC/expected VSYNC minimums,
   raw demod excursions above Nyquist, and RFHPF excursions above
-  `3 * std(rfhpf)` using NumPy NaN comparison semantics; its dynamic range
-  extension, last-range padding quirk, ties-to-even pixel endpoints, multi-line
-  splitting, and JSON `dropOuts` coordinates are preserved separately
+  `3 * std(rfhpf)` using Numba's float32 mean/squared deltas, float64 sum and
+  result, then NumPy's float32 scalar-comparison boundary and NaN semantics;
+  its dynamic range extension, last-range padding quirk, ties-to-even pixel
+  endpoints, multi-line splitting, and JSON `dropOuts` coordinates are
+  preserved separately
 - block and stream decoding now carry a `demod_05`-style 0.5MHz video low-pass
   branch built from the upstream 65-tap FIR shape with the 32-sample output
   offset applied; DOD uses its upstream `-30..115 IRE` / sync-area validity
@@ -1383,7 +1385,7 @@ dotnet test VHSDecodeDotNet.slnx --no-build
 ```
 
 The current formal solution build completes with zero warnings and errors, and
-the xUnit v3 project exposes 632 independently discoverable compatibility tests
+the xUnit v3 project exposes 633 independently discoverable compatibility tests
 to `dotnet test` and Visual Studio Test Explorer. On the
 same Windows machine and fixtures, Release wall-clock measurements for one
 frame were 2.346 s versus 7.193 s for NTSC VHS and 1.651 s versus 5.865 s for

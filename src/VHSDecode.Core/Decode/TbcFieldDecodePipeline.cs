@@ -4598,9 +4598,9 @@ public sealed class TbcFieldDecodePipeline
         bool hasVideoLowPass = span.VideoLowPass?.Length == span.Video.Length;
         bool hasRfHighPass = span.RfHighPass?.Length == span.Video.Length;
         double rawDemodMaximum = _syncAnalyzer.SampleRateHz / 2.0;
-        double rfHighPassMaximum = hasRfHighPass
-            ? StandardDeviation(span.RfHighPass!) * 3.0
-            : double.PositiveInfinity;
+        float rfHighPassMaximum = hasRfHighPass
+            ? (float)(NumbaReduction.StandardDeviationFloat32InputToFloat64(span.RfHighPass!) * 3.0)
+            : float.PositiveInfinity;
 
         for (int i = startSample; i < endSample; i++)
         {
@@ -4623,7 +4623,9 @@ public sealed class TbcFieldDecodePipeline
         {
             for (int i = startSample; i < endSample; i++)
             {
-                double value = span.RfHighPass![i];
+                // Upstream compares a float32 array with a Python scalar, which NumPy
+                // resolves back to a float32 comparison threshold.
+                float value = (float)span.RfHighPass![i];
                 if (!(value < -rfHighPassMaximum || value > rfHighPassMaximum))
                 {
                     continue;
@@ -4714,19 +4716,6 @@ public sealed class TbcFieldDecodePipeline
         }
 
         return sum / values.Length;
-    }
-
-    private static double StandardDeviation(ReadOnlySpan<double> values)
-    {
-        double mean = Mean(values);
-        double sumSquares = 0.0;
-        for (int i = 0; i < values.Length; i++)
-        {
-            double distance = values[i] - mean;
-            sumSquares += distance * distance;
-        }
-
-        return Math.Sqrt(sumSquares / values.Length);
     }
 
     private static double MaxAbsCentered(ReadOnlySpan<double> values, double mean)
