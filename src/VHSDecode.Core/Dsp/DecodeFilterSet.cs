@@ -471,9 +471,14 @@ public static class DecodeFilterSetBuilder
             1_900_000.0
         ];
         double[] amplitudes = [0.0, 0.215, 0.41, 0.73, 0.98, 1.03, 0.99, 0.81, 0.59, 0.42, 0.0];
-        double[] phases = [0.0, -1.15, -1.2875, -1.3875, -1.5, -1.5, -1.5, -1.5, -1.3125, -1.1875, -1.0];
-        double[] amplitudeSecondDerivatives = BuildNaturalCubicSecondDerivatives(controlFrequencies, amplitudes);
-        double[] phaseSecondDerivatives = BuildNaturalCubicSecondDerivatives(controlFrequencies, phases);
+        double[] phases = [0.0, -0.92, -1.03, -1.11, -1.2, -1.2, -1.2, -1.2, -1.05, -0.95, -0.8];
+        for (int i = 0; i < phases.Length; i++)
+        {
+            phases[i] *= 1.25;
+        }
+
+        var amplitudeSpline = new ScipyCubicNotAKnotInterpolator(controlFrequencies, amplitudes);
+        var phaseSpline = new ScipyCubicNotAKnotInterpolator(controlFrequencies, phases);
 
         Complex[] output = new Complex[blockLength];
         double freqPerBin = sampleRateHz / blockLength;
@@ -487,8 +492,8 @@ public static class DecodeFilterSetBuilder
         for (int i = 0; i < nonzeroBins; i++)
         {
             double frequency = i * freqPerBin;
-            double amplitude = InterpolateNaturalCubic(controlFrequencies, amplitudes, amplitudeSecondDerivatives, frequency);
-            double phase = InterpolateNaturalCubic(controlFrequencies, phases, phaseSecondDerivatives, frequency);
+            double amplitude = amplitudeSpline.Evaluate(frequency);
+            double phase = phaseSpline.Evaluate(frequency);
             output[i] = 8.0 * bandPass[i] * Complex.FromPolarCoordinates(amplitude, -phase);
         }
 
@@ -1510,79 +1515,6 @@ public static class DecodeFilterSetBuilder
         }
 
         return output;
-    }
-
-    private static double[] BuildNaturalCubicSecondDerivatives(ReadOnlySpan<double> x, ReadOnlySpan<double> y)
-    {
-        if (x.Length != y.Length || x.Length < 2)
-        {
-            throw new ArgumentException("Cubic interpolation requires matching x/y arrays.");
-        }
-
-        int n = x.Length;
-        var second = new double[n];
-        if (n == 2)
-        {
-            return second;
-        }
-
-        var u = new double[n - 1];
-        for (int i = 1; i < n - 1; i++)
-        {
-            double sig = (x[i] - x[i - 1]) / (x[i + 1] - x[i - 1]);
-            double p = (sig * second[i - 1]) + 2.0;
-            second[i] = (sig - 1.0) / p;
-            double slopeNext = (y[i + 1] - y[i]) / (x[i + 1] - x[i]);
-            double slopePrevious = (y[i] - y[i - 1]) / (x[i] - x[i - 1]);
-            u[i] = ((6.0 * (slopeNext - slopePrevious) / (x[i + 1] - x[i - 1])) - (sig * u[i - 1])) / p;
-        }
-
-        for (int k = n - 2; k >= 0; k--)
-        {
-            second[k] = (second[k] * second[k + 1]) + u[k];
-        }
-
-        return second;
-    }
-
-    private static double InterpolateNaturalCubic(
-        ReadOnlySpan<double> x,
-        ReadOnlySpan<double> y,
-        ReadOnlySpan<double> secondDerivatives,
-        double value)
-    {
-        if (value <= x[0])
-        {
-            return y[0];
-        }
-
-        if (value >= x[^1])
-        {
-            return y[^1];
-        }
-
-        int low = 0;
-        int high = x.Length - 1;
-        while (high - low > 1)
-        {
-            int middle = (high + low) / 2;
-            if (x[middle] > value)
-            {
-                high = middle;
-            }
-            else
-            {
-                low = middle;
-            }
-        }
-
-        double width = x[high] - x[low];
-        double a = (x[high] - value) / width;
-        double b = (value - x[low]) / width;
-        return (a * y[low])
-            + (b * y[high])
-            + ((((a * a * a) - a) * secondDerivatives[low]
-                + (((b * b * b) - b) * secondDerivatives[high])) * width * width / 6.0);
     }
 
     private static double[] InterpolatePiecewiseLinear(

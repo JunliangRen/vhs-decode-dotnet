@@ -252,7 +252,8 @@ public sealed class RfBlockStreamDecoder
             audioSpan = new LaserDiscAnalogAudioBlock(
                 Slice(assembledAudio.Left, audioOffset, audioLength),
                 Slice(assembledAudio.Right, audioOffset, audioLength),
-                audioDecimationFactor);
+                audioDecimationFactor,
+                assembledAudio.UsesFloat32Storage);
         }
 
         return new RfDecodedSpan(

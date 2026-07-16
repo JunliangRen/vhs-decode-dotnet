@@ -3468,8 +3468,18 @@ public sealed class TbcFieldDecodePipeline
                 continue;
             }
 
-            double left = (Mean(audio.Left.AsSpan(start, end - start)) * wowFactors[i]) - _analogAudioOptions.LeftCarrierHz;
-            double right = (Mean(audio.Right.AsSpan(start, end - start)) * wowFactors[i]) - _analogAudioOptions.RightCarrierHz;
+            ReadOnlySpan<double> leftSamples = audio.Left.AsSpan(start, end - start);
+            ReadOnlySpan<double> rightSamples = audio.Right.AsSpan(start, end - start);
+            double leftMean = audio.UsesFloat32Storage
+                ? MeanAudioFloat32(leftSamples)
+                : Mean(leftSamples);
+            double rightMean = audio.UsesFloat32Storage
+                ? MeanAudioFloat32(rightSamples)
+                : Mean(rightSamples);
+            double left = (leftMean * wowFactors[i])
+                - _analogAudioOptions.LeftCarrierHz;
+            double right = (rightMean * wowFactors[i])
+                - _analogAudioOptions.RightCarrierHz;
             output[i * 2] = (short)-RescaleAndClipAudio(left);
             output[(i * 2) + 1] = (short)-RescaleAndClipAudio(right);
         }
@@ -3567,6 +3577,17 @@ public sealed class TbcFieldDecodePipeline
     {
         int scaled = (int)Math.Round(value * 32767.0 / 371081.0, MidpointRounding.ToEven);
         return Math.Clamp(scaled, -32766, 32766);
+    }
+
+    internal static float MeanAudioFloat32(ReadOnlySpan<double> values)
+    {
+        float sum = 0.0f;
+        for (int i = 0; i < values.Length; i++)
+        {
+            sum += (float)values[i];
+        }
+
+        return sum / values.Length;
     }
 
     private Line0Resolution ResolveLine0Location(

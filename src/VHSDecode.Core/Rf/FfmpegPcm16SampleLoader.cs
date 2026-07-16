@@ -331,6 +331,15 @@ public sealed class FfmpegPcm16SampleLoader : IRfSampleLoader, IDisposable
     private Stream OpenFfmpegOutput(string filename, long sample)
     {
         _stderr.Clear();
+        if (ImaWavPcm16Stream.TryOpen(filename, out ImaWavPcm16Stream? imaWav)
+            && imaWav is not null)
+        {
+            return new PyAvAudioPlanePaddingStream(
+                imaWav,
+                imaWav.ReadNextFrameGeometry,
+                sample);
+        }
+
         ContainerAudioInfo audioInfo = ResolveContainerAudioInfo(filename);
         Channel<PyAvAudioFrameGeometry>? frameGeometry = audioInfo.RequiresPyAvPlanePadding
             ? Channel.CreateUnbounded<PyAvAudioFrameGeometry>(new UnboundedChannelOptions
@@ -492,8 +501,7 @@ public sealed class FfmpegPcm16SampleLoader : IRfSampleLoader, IDisposable
         {
             "-v", "error",
             "-select_streams", "a:0",
-            "-read_intervals", "%+#1",
-            "-show_entries", "stream=sample_rate,channels,sample_fmt:frame=nb_samples",
+            "-show_entries", "stream=sample_rate,channels,sample_fmt",
             "-of", "json",
             filename
         })
@@ -558,22 +566,11 @@ public sealed class FfmpegPcm16SampleLoader : IRfSampleLoader, IDisposable
         string sampleFormat = stream.TryGetProperty("sample_fmt", out JsonElement sampleFormatValue)
             ? sampleFormatValue.GetString() ?? string.Empty
             : string.Empty;
-        int frameSamples = 0;
-        if (root.TryGetProperty("frames", out JsonElement frames)
-            && frames.ValueKind == JsonValueKind.Array
-            && frames.GetArrayLength() > 0
-            && frames[0].TryGetProperty("nb_samples", out JsonElement frameSamplesValue))
-        {
-            frameSamples = frameSamplesValue.GetInt32();
-        }
-
-        bool requiresPadding = frameSamples > 0
-            && channels > 0
+        bool requiresPadding = channels > 0
             && sampleFormat.Length > 0
             && (channels != 1 || !string.Equals(sampleFormat, "s16", StringComparison.Ordinal));
         return new ContainerAudioInfo(
             sampleRate,
-            frameSamples,
             requiresPadding);
     }
 
@@ -772,12 +769,10 @@ public sealed class FfmpegPcm16SampleLoader : IRfSampleLoader, IDisposable
 
     private sealed record ContainerAudioInfo(
         int SampleRateHz,
-        int FrameSamples,
         bool RequiresPyAvPlanePadding)
     {
         public static ContainerAudioInfo Default { get; } = new(
             ContainerAudioSampleRateHz,
-            0,
             false);
     }
 }

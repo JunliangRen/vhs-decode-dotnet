@@ -1489,7 +1489,11 @@ public sealed record RfDemodulatedBlock(
     double[]? VideoBurst = null,
     double[]? VideoPilot = null);
 
-public sealed record LaserDiscAnalogAudioBlock(double[] Left, double[] Right, int DecimationFactor);
+public sealed record LaserDiscAnalogAudioBlock(
+    double[] Left,
+    double[] Right,
+    int DecimationFactor,
+    bool UsesFloat32Storage = true);
 
 public sealed record RfVideoReferenceFilterSet(
     Complex[]? VideoBurst,

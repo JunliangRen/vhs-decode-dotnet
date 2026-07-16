@@ -2,10 +2,10 @@
 
 ## pocketfft
 
-`VHSDecode.Core.Dsp.PocketFftReal`, `PocketFftReal32`, and
-`PocketFftComplex` contain C# adaptations of pocketfft's radix-2/radix-4
-real-transform path and radix-2/radix-4/radix-8 complex-transform path, as
-used by NumPy 2.4.6 and SciPy 1.18.0.
+`VHSDecode.Core.Dsp.PocketFftReal`, `PocketFftReal32`,
+`PocketFftComplex`, and `PocketFftComplex32` contain C# adaptations of
+pocketfft's radix-2/radix-4 real-transform path and radix-2/radix-4/radix-8
+complex-transform path, as used by NumPy 2.4.6 and SciPy 1.18.0.
 
 Copyright (C) 2010-2021 Max-Planck-Society
 
@@ -34,9 +34,10 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 ## NumPy
 
-`VHSDecode.Core.Dsp.NumpyComplex64Fft` and the NumPy-compatible magnitude
-path in `VHSDecode.Core.HiFi.HiFiDropoutCompensator` contain modified C#
-adaptations of numerical dispatch and SIMD behavior from NumPy 2.4.6.
+`VHSDecode.Core.Dsp.IirFilterDesign`, `NumpyComplex64Fft`, and the
+NumPy-compatible magnitude path in
+`VHSDecode.Core.HiFi.HiFiDropoutCompensator` contain modified C# adaptations
+of numerical dispatch and SIMD behavior from NumPy 2.4.6.
 
 Copyright (c) 2005-2025, NumPy Developers. All rights reserved.
 
@@ -46,6 +47,7 @@ text is in `third_party/licenses/numpy-LICENSE.txt`.
 ## SciPy
 
 `VHSDecode.Core.Dsp.IirFilterDesign`,
+`VHSDecode.Core.Dsp.ScipyCubicNotAKnotInterpolator`,
 `VHSDecode.Core.HiFi.SciPyPeakFinder`, and the STFT, ISTFT, temporal-filter,
 and mask-convolution paths in `HiFiSpectralNoiseReduction` contain modified
 C# adaptations of filter-design, peak-finding, and signal-processing behavior
@@ -99,3 +101,17 @@ terms of the GNU Lesser General Public License as published by the Free
 Software Foundation; either version 2.1 of the License, or (at your option)
 any later version. See `third_party/libsoxr/COPYING.LGPL` for the complete
 license text.
+
+## FFmpeg
+
+`VHSDecode.Core.Rf.ImaWavPcm16Stream` contains a modified C# adaptation of
+FFmpeg n8.1.2's IMA WAV block decoder, including the 2-, 3-, 4-, and 5-bit
+reference predictor paths and mono downmix behavior.
+
+Copyright (c) 2000-2025 the FFmpeg developers
+
+FFmpeg is free software; you can redistribute it and/or modify it under the
+terms of the GNU Lesser General Public License as published by the Free
+Software Foundation; either version 2.1 of the License, or (at your option)
+any later version. A shared copy of the complete LGPL 2.1 text is available at
+`third_party/libsoxr/COPYING.LGPL`; that file is not an FFmpeg-specific notice.

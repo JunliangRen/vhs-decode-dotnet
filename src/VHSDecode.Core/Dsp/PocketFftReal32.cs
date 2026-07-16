@@ -1,33 +1,34 @@
-// Float32 radix-4 real FFT adapted from pocketfft's BSD-3-Clause implementation.
+// Float32 radix-2/4 real FFT adapted from pocketfft's BSD-3-Clause implementation.
+using System.Collections.Concurrent;
+
 namespace VHSDecode.Core.Dsp;
 
 internal static class PocketFftReal32
 {
-    private const int SupportedLength = 1024;
-    private static readonly Plan SharedPlan = new(SupportedLength);
+    private static readonly ConcurrentDictionary<int, Plan> Plans = new();
 
     internal static Complex32[] Forward(ReadOnlySpan<float> input)
     {
-        if (input.Length != SupportedLength)
-        {
-            throw new ArgumentException(
-                $"This float32 real FFT requires exactly {SupportedLength} samples.",
-                nameof(input));
-        }
+        ValidateLength(input.Length, nameof(input));
 
-        return SharedPlan.Forward(input);
+        return Plans.GetOrAdd(
+            input.Length,
+            static length => new Plan(length)).Forward(input);
+    }
+
+    internal static Complex32[] ForwardDucc(ReadOnlySpan<float> input)
+    {
+        ValidateLength(input.Length, nameof(input));
+        return Plans.GetOrAdd(
+            input.Length,
+            static length => new Plan(length)).ForwardDucc(input);
     }
 
     internal static float[] Inverse(
         ReadOnlySpan<Complex32> input,
         int outputLength)
     {
-        if (outputLength != SupportedLength)
-        {
-            throw new ArgumentException(
-                $"This float32 real FFT requires exactly {SupportedLength} output samples.",
-                nameof(outputLength));
-        }
+        ValidateLength(outputLength, nameof(outputLength));
 
         if (input.Length != (outputLength / 2) + 1)
         {
@@ -36,7 +37,19 @@ internal static class PocketFftReal32
                 nameof(input));
         }
 
-        return SharedPlan.Inverse(input);
+        return Plans.GetOrAdd(
+            outputLength,
+            static length => new Plan(length)).Inverse(input);
+    }
+
+    private static void ValidateLength(int length, string parameterName)
+    {
+        if (length < 2 || (length & (length - 1)) != 0)
+        {
+            throw new ArgumentException(
+                "Real FFT length must be a power of two of at least two.",
+                parameterName);
+        }
     }
 
     private sealed class Plan
@@ -47,7 +60,8 @@ internal static class PocketFftReal32
         internal Plan(int length)
         {
             _length = length;
-            _factors = BuildFactors(length);
+            int[] radices = Factorize(length);
+            _factors = BuildFactors(length, radices);
         }
 
         internal Complex32[] Forward(ReadOnlySpan<float> input)
@@ -64,6 +78,60 @@ internal static class PocketFftReal32
             }
 
             output[^1] = new Complex32(packed[^1], 0.0f);
+            return output;
+        }
+
+        internal Complex32[] ForwardDucc(ReadOnlySpan<float> input)
+            => _length > 1000 ? ForwardComplexified(input) : Forward(input);
+
+        private Complex32[] ForwardComplexified(ReadOnlySpan<float> input)
+        {
+            int complexLength = _length / 2;
+            var complexInput = new Complex32[complexLength];
+            for (int i = 0; i < complexInput.Length; i++)
+            {
+                complexInput[i] = new Complex32(
+                    input[2 * i],
+                    input[(2 * i) + 1]);
+            }
+
+            Complex32[] transformed =
+                PocketFftComplex32.ForwardDucc(complexInput);
+            var output = new Complex32[complexLength + 1];
+            output[0] = new Complex32(
+                transformed[0].Real + transformed[0].Imaginary,
+                0.0f);
+
+            var roots = new UnityRoots(_length);
+            for (int i = 1, inverseIndex = complexLength - 1;
+                i <= inverseIndex;
+                i++, inverseIndex--)
+            {
+                Complex32 current = transformed[i];
+                Complex32 inverse = transformed[inverseIndex];
+                float evenReal = current.Real + inverse.Real;
+                float evenImaginary = current.Imaginary - inverse.Imaginary;
+                float oddReal = current.Imaginary + inverse.Imaginary;
+                float oddImaginary = inverse.Real - current.Real;
+                FloatTwiddle root = roots.Get(i);
+                MultiplyConjugate(
+                    root.Real,
+                    root.Imaginary,
+                    oddReal,
+                    oddImaginary,
+                    out float rotatedReal,
+                    out float rotatedImaginary);
+                output[i] = new Complex32(
+                    0.5f * (evenReal + rotatedReal),
+                    0.5f * (evenImaginary + rotatedImaginary));
+                output[inverseIndex] = new Complex32(
+                    0.5f * (evenReal - rotatedReal),
+                    0.5f * (rotatedImaginary - evenImaginary));
+            }
+
+            output[^1] = new Complex32(
+                transformed[0].Real - transformed[0].Imaginary,
+                0.0f);
             return output;
         }
 
@@ -92,13 +160,26 @@ internal static class PocketFftReal32
             {
                 Factor factor = _factors[_factors.Length - pass - 1];
                 int ido = _length / l1;
-                l1 /= 4;
-                Radix4Forward(
-                    ido,
-                    l1,
-                    source,
-                    destination,
-                    factor.Twiddles);
+                l1 /= factor.Radix;
+                if (factor.Radix == 4)
+                {
+                    Radix4Forward(
+                        ido,
+                        l1,
+                        source,
+                        destination,
+                        factor.Twiddles);
+                }
+                else
+                {
+                    Radix2Forward(
+                        ido,
+                        l1,
+                        source,
+                        destination,
+                        factor.Twiddles);
+                }
+
                 (source, destination) = (destination, source);
             }
 
@@ -116,15 +197,28 @@ internal static class PocketFftReal32
             int l1 = 1;
             foreach (Factor factor in _factors)
             {
-                int ido = _length / (4 * l1);
-                Radix4Backward(
-                    ido,
-                    l1,
-                    source,
-                    destination,
-                    factor.Twiddles);
+                int ido = _length / (factor.Radix * l1);
+                if (factor.Radix == 4)
+                {
+                    Radix4Backward(
+                        ido,
+                        l1,
+                        source,
+                        destination,
+                        factor.Twiddles);
+                }
+                else
+                {
+                    Radix2Backward(
+                        ido,
+                        l1,
+                        source,
+                        destination,
+                        factor.Twiddles);
+                }
+
                 (source, destination) = (destination, source);
-                l1 *= 4;
+                l1 *= factor.Radix;
             }
 
             for (int i = 0; i < data.Length; i++)
@@ -133,33 +227,48 @@ internal static class PocketFftReal32
             }
         }
 
-        private static Factor[] BuildFactors(int length)
+        private static int[] Factorize(int length)
         {
+            var factors = new List<int>();
             int remaining = length;
-            int factorCount = 0;
             while (remaining % 4 == 0)
             {
-                factorCount++;
-                remaining /= 4;
+                factors.Add(4);
+                remaining >>= 2;
+            }
+
+            if (remaining % 2 == 0)
+            {
+                remaining >>= 1;
+                factors.Add(2);
+                (factors[0], factors[^1]) = (factors[^1], factors[0]);
             }
 
             if (remaining != 1)
             {
                 throw new ArgumentException(
-                    "Only power-of-four float32 real FFT lengths are supported.",
+                    "Only power-of-two real FFT lengths are supported.",
                     nameof(length));
             }
 
-            var factors = new Factor[factorCount];
+            return factors.ToArray();
+        }
+
+        private static Factor[] BuildFactors(int length, int[] radices)
+        {
+            var factors = new Factor[radices.Length];
             var roots = new UnityRoots(length);
             int l1 = 1;
             for (int factorIndex = 0;
                 factorIndex < factors.Length;
                 factorIndex++)
             {
-                int ido = length / (4 * l1);
-                var twiddles = new float[3 * (ido - 1)];
-                for (int j = 1; j < 4; j++)
+                int radix = radices[factorIndex];
+                int ido = length / (radix * l1);
+                float[] twiddles = factorIndex == radices.Length - 1
+                    ? []
+                    : new float[(radix - 1) * (ido - 1)];
+                for (int j = 1; j < radix; j++)
                 {
                     for (int i = 1; i <= (ido - 1) / 2; i++)
                     {
@@ -172,11 +281,64 @@ internal static class PocketFftReal32
                     }
                 }
 
-                factors[factorIndex] = new Factor(twiddles);
-                l1 *= 4;
+                factors[factorIndex] = new Factor(radix, twiddles);
+                l1 *= radix;
             }
 
             return factors;
+        }
+
+        private static void Radix2Forward(
+            int ido,
+            int l1,
+            float[] input,
+            float[] output,
+            float[] twiddles)
+        {
+            for (int k = 0; k < l1; k++)
+            {
+                float left = input[ForwardInput(0, k, 0, ido, l1)];
+                float right = input[ForwardInput(0, k, 1, ido, l1)];
+                output[ForwardOutput(0, 0, k, ido, 2)] = left + right;
+                output[ForwardOutput(ido - 1, 1, k, ido, 2)] = left - right;
+            }
+
+            if ((ido & 1) == 0)
+            {
+                for (int k = 0; k < l1; k++)
+                {
+                    output[ForwardOutput(0, 1, k, ido, 2)] =
+                        -input[ForwardInput(ido - 1, k, 1, ido, l1)];
+                    output[ForwardOutput(ido - 1, 0, k, ido, 2)] =
+                        input[ForwardInput(ido - 1, k, 0, ido, l1)];
+                }
+            }
+
+            if (ido <= 2)
+            {
+                return;
+            }
+
+            for (int k = 0; k < l1; k++)
+            {
+                for (int i = 2; i < ido; i += 2)
+                {
+                    int ic = ido - i;
+                    MultiplyConjugate(
+                        twiddles[i - 2],
+                        twiddles[i - 1],
+                        input[ForwardInput(i - 1, k, 1, ido, l1)],
+                        input[ForwardInput(i, k, 1, ido, l1)],
+                        out float tr2,
+                        out float ti2);
+                    float real = input[ForwardInput(i - 1, k, 0, ido, l1)];
+                    output[ForwardOutput(i - 1, 0, k, ido, 2)] = real + tr2;
+                    output[ForwardOutput(ic - 1, 1, k, ido, 2)] = real - tr2;
+                    float imaginary = input[ForwardInput(i, k, 0, ido, l1)];
+                    output[ForwardOutput(i, 0, k, ido, 2)] = ti2 + imaginary;
+                    output[ForwardOutput(ic, 1, k, ido, 2)] = ti2 - imaginary;
+                }
+            }
         }
 
         private static void Radix4Forward(
@@ -270,6 +432,61 @@ internal static class PocketFftReal32
                     output[ForwardOutput(ic - 1, 1, k, ido)] = tr3 - ti4;
                     output[ForwardOutput(i, 2, k, ido)] = tr4 + ti3;
                     output[ForwardOutput(ic, 1, k, ido)] = tr4 - ti3;
+                }
+            }
+        }
+
+        private static void Radix2Backward(
+            int ido,
+            int l1,
+            float[] input,
+            float[] output,
+            float[] twiddles)
+        {
+            for (int k = 0; k < l1; k++)
+            {
+                float left = input[BackwardInput(0, 0, k, ido, 2)];
+                float right = input[BackwardInput(ido - 1, 1, k, ido, 2)];
+                output[BackwardOutput(0, k, 0, ido, l1)] = left + right;
+                output[BackwardOutput(0, k, 1, ido, l1)] = left - right;
+            }
+
+            if ((ido & 1) == 0)
+            {
+                for (int k = 0; k < l1; k++)
+                {
+                    output[BackwardOutput(ido - 1, k, 0, ido, l1)] =
+                        2.0f * input[BackwardInput(ido - 1, 0, k, ido, 2)];
+                    output[BackwardOutput(ido - 1, k, 1, ido, l1)] =
+                        -2.0f * input[BackwardInput(0, 1, k, ido, 2)];
+                }
+            }
+
+            if (ido <= 2)
+            {
+                return;
+            }
+
+            for (int k = 0; k < l1; k++)
+            {
+                for (int i = 2; i < ido; i += 2)
+                {
+                    int ic = ido - i;
+                    float c1 = input[BackwardInput(i - 1, 0, k, ido, 2)];
+                    float c2 = input[BackwardInput(ic - 1, 1, k, ido, 2)];
+                    output[BackwardOutput(i - 1, k, 0, ido, l1)] = c1 + c2;
+                    float tr2 = c1 - c2;
+                    float c3 = input[BackwardInput(i, 0, k, ido, 2)];
+                    float c4 = input[BackwardInput(ic, 1, k, ido, 2)];
+                    float ti2 = c3 + c4;
+                    output[BackwardOutput(i, k, 0, ido, l1)] = c3 - c4;
+                    MultiplyConjugate(
+                        twiddles[i - 2],
+                        twiddles[i - 1],
+                        ti2,
+                        tr2,
+                        out output[BackwardOutput(i, k, 1, ido, l1)],
+                        out output[BackwardOutput(i - 1, k, 1, ido, l1)]);
                 }
             }
         }
@@ -402,8 +619,24 @@ internal static class PocketFftReal32
         private static int ForwardOutput(int a, int b, int c, int ido)
             => a + (ido * (b + (4 * c)));
 
+        private static int ForwardOutput(
+            int a,
+            int b,
+            int c,
+            int ido,
+            int radix)
+            => a + (ido * (b + (radix * c)));
+
         private static int BackwardInput(int a, int b, int c, int ido)
             => a + (ido * (b + (4 * c)));
+
+        private static int BackwardInput(
+            int a,
+            int b,
+            int c,
+            int ido,
+            int radix)
+            => a + (ido * (b + (radix * c)));
 
         private static int BackwardOutput(
             int a,
@@ -414,7 +647,7 @@ internal static class PocketFftReal32
             => a + (ido * (b + (l1 * c)));
     }
 
-    private sealed record Factor(float[] Twiddles);
+    private sealed record Factor(int Radix, float[] Twiddles);
 
     private readonly record struct DoubleTwiddle(double Real, double Imaginary);
 
