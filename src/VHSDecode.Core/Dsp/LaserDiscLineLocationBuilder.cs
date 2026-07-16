@@ -219,7 +219,7 @@ public static class LaserDiscPlayerSkipDetector
                 continue;
             }
 
-            double lineIre = converter.HzToIre(Median(video.Slice(start, end - start)));
+            double lineIre = converter.HzToIre(NumbaReduction.MedianFloat32(video.Slice(start, end - start)));
             if (PulseDetection.InRange(lineIre, converter.VSyncIre - 10.0, converter.VSyncIre / 2.0))
             {
                 vSyncLines++;
@@ -275,13 +275,4 @@ public static class LaserDiscPlayerSkipDetector
         return false;
     }
 
-    private static double Median(ReadOnlySpan<double> values)
-    {
-        double[] sorted = values.ToArray();
-        Array.Sort(sorted);
-        int middle = sorted.Length / 2;
-        return sorted.Length % 2 == 0
-            ? (sorted[middle - 1] + sorted[middle]) / 2.0
-            : sorted[middle];
-    }
 }

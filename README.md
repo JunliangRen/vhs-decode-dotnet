@@ -970,7 +970,8 @@ possible capture has already been proven byte-for-byte identical.
   equalizing-pulse window when rebuilding the threshold; that initial probe
   and the 50/85th-percentile AGC white slices retain NumPy's float64 virtual
   indexes, float32 weak-scalar interpolation, right-weight rounding, and NaN
-  propagation
+  propagation, while each line's sync/blank calibration retains Numba's
+  float32 median and even-midpoint rounding
 - LD NTSC burst-refined line locations now apply the final upstream 117.25
   degree FSC phase shift, including fields where no per-line burst adjustment
   could be measured
@@ -1001,7 +1002,9 @@ possible capture has already been proven byte-for-byte identical.
   v0.4.0, so `--noEFM --preEFM` does not create an empty `.prefm` sidecar
 - LD player-skip handling now mirrors the previous field's eight-line
   `skip_check` score, the 100-valid-pulse first-VBlank limit, shortened-field
-  detection, and end-anchored HSYNC line-number repair after line 23
+  detection, and end-anchored HSYNC line-number repair after line 23; its
+  full-line `nb_median` keeps float32 even-midpoint rounding before the
+  VSync/blank IRE classifications
 - LD line-location lookahead lengths now follow the parity-specific v0.4.0
   formulas: NTSC uses `outlinecount + 10`, while PAL includes its 2/3-line
   field offset plus three additional lookahead lines
@@ -1372,7 +1375,7 @@ dotnet test VHSDecodeDotNet.slnx --no-build
 ```
 
 The current formal solution build completes with zero warnings and errors, and
-the xUnit v3 project exposes 626 independently discoverable compatibility tests
+the xUnit v3 project exposes 628 independently discoverable compatibility tests
 to `dotnet test` and Visual Studio Test Explorer. On the
 same Windows machine and fixtures, Release wall-clock measurements for one
 frame were 2.346 s versus 7.193 s for NTSC VHS and 1.651 s versus 5.865 s for

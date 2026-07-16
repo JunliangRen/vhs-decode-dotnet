@@ -2,6 +2,26 @@ namespace VHSDecode.Core.Dsp;
 
 internal static class NumbaReduction
 {
+    public static double MedianFloat32(ReadOnlySpan<double> values)
+    {
+        if (values.IsEmpty)
+        {
+            return float.NaN;
+        }
+
+        var sorted = new float[values.Length];
+        for (int i = 0; i < values.Length; i++)
+        {
+            sorted[i] = (float)values[i];
+        }
+
+        Array.Sort(sorted);
+        int middle = sorted.Length / 2;
+        return sorted.Length % 2 == 0
+            ? (float)((sorted[middle - 1] + sorted[middle]) / 2.0f)
+            : sorted[middle];
+    }
+
     public static double MeanFloat64(ReadOnlySpan<double> values)
     {
         double sum = 0.0;

@@ -1667,7 +1667,7 @@ public sealed class TbcFieldDecodePipeline
             + $"(vsync IRE computed at {roundedVsyncIre}, nominal ~= -40), possible disk skipping";
     }
 
-    private (double SyncHz, double Ire0Hz, double Ire100Hz) DetectLaserDiscAgcLevels(
+    internal (double SyncHz, double Ire0Hz, double Ire100Hz) DetectLaserDiscAgcLevels(
         RfDecodedSpan span,
         IReadOnlyList<double> lineLocations,
         double meanLineLength,
@@ -1721,8 +1721,8 @@ public sealed class TbcFieldDecodePipeline
                 continue;
             }
 
-            syncLevels.Add(Median(syncReference.Slice(syncStart, syncLength)) / adjustment);
-            blankLevels.Add(Median(syncReference.Slice(blankStart, blankLength)) / adjustment);
+            syncLevels.Add(NumbaReduction.MedianFloat32(syncReference.Slice(syncStart, syncLength)) / adjustment);
+            blankLevels.Add(NumbaReduction.MedianFloat32(syncReference.Slice(blankStart, blankLength)) / adjustment);
         }
 
         double syncHz = syncLevels.Count > 0 ? Median(syncLevels) : current.IreToHz(current.VSyncIre);
@@ -3000,23 +3000,8 @@ public sealed class TbcFieldDecodePipeline
             return false;
         }
 
-        median = MedianFloat32(source[startIndex..endIndex]);
+        median = NumbaReduction.MedianFloat32(source[startIndex..endIndex]);
         return true;
-    }
-
-    private static double MedianFloat32(ReadOnlySpan<double> values)
-    {
-        var sorted = new float[values.Length];
-        for (int i = 0; i < values.Length; i++)
-        {
-            sorted[i] = (float)values[i];
-        }
-
-        Array.Sort(sorted);
-        int middle = sorted.Length / 2;
-        return sorted.Length % 2 == 0
-            ? (float)((sorted[middle - 1] + sorted[middle]) / 2.0f)
-            : sorted[middle];
     }
 
     private bool TryRefineFromRightHSync(
