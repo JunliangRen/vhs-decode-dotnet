@@ -2454,18 +2454,10 @@ public sealed class TbcFieldDecodePipeline
     }
 
     private static double Median(IReadOnlyList<double> values)
-    {
-        double[] sorted = values.ToArray();
-        Array.Sort(sorted);
-        return MedianSorted(sorted);
-    }
+        => NumpyReduction.MedianFloat64(values.ToArray());
 
     private static double Median(ReadOnlySpan<double> values)
-    {
-        double[] sorted = values.ToArray();
-        Array.Sort(sorted);
-        return MedianSorted(sorted);
-    }
+        => NumpyReduction.MedianFloat64(values);
 
     internal static double Percentile(ReadOnlySpan<double> values, double percentile)
     {
@@ -2528,14 +2520,6 @@ public sealed class TbcFieldDecodePipeline
         }
 
         return result;
-    }
-
-    private static double MedianSorted(double[] sorted)
-    {
-        int middle = sorted.Length / 2;
-        return sorted.Length % 2 == 0
-            ? (sorted[middle - 1] + sorted[middle]) / 2.0
-            : sorted[middle];
     }
 
     private int[]? DecodeLaserDiscVbiData(

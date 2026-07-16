@@ -686,11 +686,5 @@ public sealed class SyncAnalyzer
     }
 
     private static double Median(List<double> values)
-    {
-        values.Sort();
-        int middle = values.Count / 2;
-        return values.Count % 2 == 0
-            ? (values[middle - 1] + values[middle]) / 2.0
-            : values[middle];
-    }
+        => NumpyReduction.MedianFloat64(values.ToArray());
 }

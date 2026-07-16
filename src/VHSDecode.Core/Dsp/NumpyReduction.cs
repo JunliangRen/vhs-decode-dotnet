@@ -4,6 +4,29 @@ namespace VHSDecode.Core.Dsp;
 
 internal static class NumpyReduction
 {
+    public static double MedianFloat64(ReadOnlySpan<double> values)
+    {
+        if (values.IsEmpty)
+        {
+            return double.NaN;
+        }
+
+        double[] sorted = values.ToArray();
+        for (int i = 0; i < sorted.Length; i++)
+        {
+            if (double.IsNaN(sorted[i]))
+            {
+                return sorted[i];
+            }
+        }
+
+        Array.Sort(sorted);
+        int middle = sorted.Length / 2;
+        return sorted.Length % 2 == 0
+            ? (sorted[middle - 1] + sorted[middle]) / 2.0
+            : sorted[middle];
+    }
+
     public static float MeanFloat32(ReadOnlySpan<double> values)
     {
         if (values.IsEmpty)

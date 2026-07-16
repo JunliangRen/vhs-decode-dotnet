@@ -78,13 +78,17 @@ internal static class NumbaReduction
     {
         if (values.IsEmpty)
         {
-            return float.NaN;
+            return BitConverter.UInt32BitsToSingle(0x7FC00000);
         }
 
         var sorted = new float[values.Length];
         for (int i = 0; i < values.Length; i++)
         {
             sorted[i] = (float)values[i];
+            if (float.IsNaN(sorted[i]))
+            {
+                return sorted[i];
+            }
         }
 
         Array.Sort(sorted);

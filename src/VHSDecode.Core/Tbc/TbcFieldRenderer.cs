@@ -1,3 +1,5 @@
+using VHSDecode.Core.Dsp;
+
 namespace VHSDecode.Core.Tbc;
 
 public sealed record Ire0AdjustOptions(
@@ -540,9 +542,7 @@ public sealed class TbcFieldRenderer
             return 0.0;
         }
 
-        double[] scratch = values[start..end];
-        Array.Sort(scratch);
-        return MedianSorted(scratch);
+        return NumpyReduction.MedianFloat64(values.AsSpan(start, end - start));
     }
 
     private static void SubtractRange(float[] data, int start, int end, double value)
@@ -591,11 +591,4 @@ public sealed class TbcFieldRenderer
         return (ushort)rounded;
     }
 
-    private static double MedianSorted(double[] sortedValues)
-    {
-        int mid = sortedValues.Length / 2;
-        return sortedValues.Length % 2 == 0
-            ? (sortedValues[mid - 1] + sortedValues[mid]) / 2.0
-            : sortedValues[mid];
-    }
 }

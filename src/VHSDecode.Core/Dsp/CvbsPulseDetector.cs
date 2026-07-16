@@ -150,12 +150,5 @@ public static class CvbsPulseDetector
         => NumpyReduction.MeanFloat64(values);
 
     private static double Median(List<double> values)
-    {
-        double[] sorted = values.ToArray();
-        Array.Sort(sorted);
-        int middle = sorted.Length / 2;
-        return (sorted.Length & 1) == 1
-            ? sorted[middle]
-            : (sorted[middle - 1] + sorted[middle]) / 2.0;
-    }
+        => NumpyReduction.MedianFloat64(values.ToArray());
 }

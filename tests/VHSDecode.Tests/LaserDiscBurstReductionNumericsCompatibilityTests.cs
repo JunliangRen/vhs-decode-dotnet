@@ -50,6 +50,23 @@ public sealed class LaserDiscBurstReductionNumericsCompatibilityTests
         Assert.Equal(0x401526B9C1D89DCDUL, BitConverter.DoubleToUInt64Bits(medianBurstIre.Value));
     }
 
+    [Fact(DisplayName = "LD burst medians propagate NumPy NaN values")]
+    public void LaserDiscBurstMediansPropagateNumpyNanValues()
+    {
+        TbcFieldDecodePipeline pipeline = CreatePipeline("NTSC");
+        double[] video = BuildBurstVideo();
+        video[(100 * LineLength) + 220] = double.NaN;
+
+        double? medianBurstIre = pipeline.ComputeLaserDiscMedianBurstIre(
+            video,
+            BuildLineLocations(),
+            isFirstField: true,
+            CreateConverter());
+
+        Assert.NotNull(medianBurstIre);
+        Assert.True(double.IsNaN(medianBurstIre.Value));
+    }
+
     private static TbcFieldDecodePipeline CreatePipeline(string system)
     {
         VideoOutputConverter converter = CreateConverter();

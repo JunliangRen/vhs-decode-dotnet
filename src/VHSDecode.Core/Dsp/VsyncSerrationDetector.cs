@@ -533,22 +533,10 @@ public sealed class VsyncSerrationDetector
         => value > 0.0 ? 1 : value < 0.0 ? -1 : 0;
 
     private static double Median(IEnumerable<double> values)
-        => Median(values.ToArray());
+        => NumpyReduction.MedianFloat64(values.ToArray());
 
     private static double Median(double[] values)
-    {
-        if (values.Length == 0)
-        {
-            return double.NaN;
-        }
-
-        double[] sorted = values.ToArray();
-        Array.Sort(sorted);
-        int middle = sorted.Length / 2;
-        return (sorted.Length & 1) != 0
-            ? sorted[middle]
-            : (sorted[middle - 1] + sorted[middle]) / 2.0;
-    }
+        => NumpyReduction.MedianFloat64(values);
 
     private sealed class MovingAverageWindow(int window, int minimumWatermark)
     {

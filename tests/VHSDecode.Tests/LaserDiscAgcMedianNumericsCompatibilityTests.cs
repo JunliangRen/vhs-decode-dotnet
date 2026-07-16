@@ -7,6 +7,24 @@ namespace VHSDecode.Tests;
 
 public sealed class LaserDiscAgcMedianNumericsCompatibilityTests
 {
+    [Fact(DisplayName = "LD Numba float32 medians propagate NaN")]
+    public void LaserDiscNumbaFloat32MediansPropagateNan()
+    {
+        double positiveNan = BitConverter.UInt64BitsToDouble(0x7FF8000000000000UL);
+        double median = NumbaReduction.MedianFloat32([1.0, 2.0, positiveNan, 3.0, 4.0]);
+
+        Assert.Equal(0x7FF8000000000000UL, BitConverter.DoubleToUInt64Bits(median));
+        Assert.Equal(
+            0x7FF8000000000000UL,
+            BitConverter.DoubleToUInt64Bits(NumbaReduction.MedianFloat32([])));
+        Assert.Equal(
+            0x7FF8000000000000UL,
+            BitConverter.DoubleToUInt64Bits(NumpyReduction.MedianFloat64([1.0, positiveNan, 2.0])));
+        Assert.Equal(
+            0xFFF8000000000000UL,
+            BitConverter.DoubleToUInt64Bits(NumpyReduction.MedianFloat64([])));
+    }
+
     [Fact(DisplayName = "LD AGC line levels use Numba float32 medians")]
     public void LaserDiscAgcLineLevelsUseNumbaFloat32Medians()
     {
