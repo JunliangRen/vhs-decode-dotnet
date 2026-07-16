@@ -442,7 +442,7 @@ public static class DecodeFilterSetBuilder
         {
             for (int i = 0; i < response.Length; i++)
             {
-                response[i] = Complex.Pow(response[i], effectiveLevel);
+                response[i] = NumpyComplexMath.Pow(response[i], effectiveLevel);
             }
         }
 
@@ -1145,7 +1145,7 @@ public static class DecodeFilterSetBuilder
             {
                 Complex factor = strength == 1.0
                     ? deemphasis[i]
-                    : Complex.Pow(deemphasis[i], strength);
+                    : NumpyComplexMath.Pow(deemphasis[i], strength);
                 video[i] = NumpyVectorComplexMultiply(video[i], factor);
             }
         }

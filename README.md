@@ -264,6 +264,10 @@ possible capture has already been proven byte-for-byte identical.
 - LD post-demod video filtering now applies the upstream IEC 60856/60857
   group-delay all-pass equalizer on the output video path while leaving the
   sync/burst reference paths magnitude-compatible
+- LD `--deemp_low`, `--deemp_high`, and `--deemp_strength` now preserve the
+  v0.4.0 time-constant conversion and NumPy array-power dispatch, including
+  native complex power, small-integer powers, and the scalar `0.5` square-root
+  fast path; a custom PAL block locks all five float32 demod channels bit-exact
 - LD video/reference output now follows upstream's clipped demod FFT source,
   limiting the post-demod video path to 1.5 MHz through 0.75 * sample-rate
   while preserving the unmodified `demod_raw` channel
@@ -291,8 +295,9 @@ possible capture has already been proven byte-for-byte identical.
   refiners into real `ld-decode` sessions
 - LD `--MTF` and `--MTF_offset` RF compensation path, using upstream
   `MTF_freq`, `MTF_poledist`, and `MTF_basemult` format parameters before
-  Hilbert FM demodulation; automatic MTF now tracks the rounded
-  `blackToWhiteRFRatio` over 30 CAV or 900 CLV fields, applies the v0.4.0
+  Hilbert FM demodulation, with bit-exact NumPy power coverage for fractional,
+  positive-integer, and negative-integer levels; automatic MTF now tracks the
+  rounded `blackToWhiteRFRatio` over 30 CAV or 900 CLV fields, applies the v0.4.0
   scaling formula, and transactionally re-decodes a field when the level moves
   by at least 0.05
 - LD EFM digital-audio front-end path, using the upstream 0-1.9 MHz
@@ -1334,7 +1339,7 @@ dotnet test VHSDecodeDotNet.slnx --no-build
 ```
 
 The current formal solution build completes with zero warnings and errors, and
-the xUnit v3 project exposes 585 independently discoverable compatibility tests
+the xUnit v3 project exposes 591 independently discoverable compatibility tests
 to `dotnet test` and Visual Studio Test Explorer. On the
 same Windows machine and fixtures, Release wall-clock measurements for one
 frame were 2.346 s versus 7.193 s for NTSC VHS and 1.651 s versus 5.865 s for
