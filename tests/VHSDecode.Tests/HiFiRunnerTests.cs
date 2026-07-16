@@ -1,5 +1,6 @@
 using System.Buffers.Binary;
 using System.Diagnostics;
+using System.Numerics;
 using System.Runtime.InteropServices;
 using System.Security.Cryptography;
 using NetMQ;
@@ -489,6 +490,209 @@ public sealed class HiFiRunnerTests
         }
         finally
         {
+            Directory.Delete(directory, recursive: true);
+        }
+    }
+
+    [Theory(DisplayName = "HiFi zero-worker queues consume the v0.4.0 idle buffers then wait")]
+    [InlineData("0", 2)]
+    [InlineData("-1", 1)]
+    public async Task HiFiZeroWorkerQueuesConsumeV040IdleBuffersThenWait(
+        string threadsText,
+        int expectedReads)
+    {
+        string directory = CreateTempDirectory();
+        using var stopSource = CancellationTokenSource.CreateLinkedTokenSource(
+            TestContext.Current.CancellationToken);
+        Task<HiFiStreamingDecodeResult>? decodeTask = null;
+        try
+        {
+            string path = Path.Combine(directory, "waiting.wav");
+            HiFiDecodeOptions options = DefaultOptions(path) with
+            {
+                InputRateHz = 1_000_000.0,
+                ThreadsInteger = BigInteger.Parse(threadsText)
+            };
+            using var reader = new FullBlockSampleReader(expectedReads);
+            using (var writer = new HiFiOutputWriter(options))
+            {
+                var decoder = new HiFiStreamingDecoder(_ =>
+                    throw new InvalidOperationException("A zero-worker decode created a worker."));
+                using var diagnostics = new SignalingTextWriter(
+                    $"{expectedReads} blocks enqueued");
+                decodeTask = Task.Factory.StartNew(
+                    () => decoder.Decode(
+                        options,
+                        reader,
+                        writer,
+                        diagnostics,
+                        stopSource.Token,
+                        elapsedProvider: () => TimeSpan.FromSeconds(1)),
+                    CancellationToken.None,
+                    TaskCreationOptions.LongRunning,
+                    TaskScheduler.Default);
+
+                Assert.True(reader.ExpectedReads.Wait(
+                    TimeSpan.FromSeconds(10),
+                    TestContext.Current.CancellationToken));
+                Assert.True(diagnostics.Signal.Wait(
+                    TimeSpan.FromSeconds(10),
+                    TestContext.Current.CancellationToken));
+                Assert.False(decodeTask.IsCompleted);
+                Assert.Equal(expectedReads, reader.ReadCount);
+                Assert.Contains(
+                    $"{expectedReads} blocks enqueued",
+                    diagnostics.ToString(),
+                    StringComparison.Ordinal);
+
+                stopSource.Cancel();
+                await Assert.ThrowsAnyAsync<OperationCanceledException>(async () =>
+                    await decodeTask.WaitAsync(TimeSpan.FromSeconds(10), CancellationToken.None));
+            }
+
+            Assert.Equal(44, new FileInfo(path).Length);
+        }
+        finally
+        {
+            stopSource.Cancel();
+            if (decodeTask is not null)
+            {
+                try
+                {
+                    await decodeTask.WaitAsync(TimeSpan.FromSeconds(10), CancellationToken.None);
+                }
+                catch
+                {
+                    // Preserve the assertion or timeout that ended the test.
+                }
+            }
+
+            Directory.Delete(directory, recursive: true);
+        }
+    }
+
+    [Theory(DisplayName = "HiFi thread counts below minus one wait before reading like v0.4.0")]
+    [InlineData("-2")]
+    [InlineData("-99999999999999999999999999999999999999999999999999")]
+    public void HiFiThreadCountsBelowMinusOneWaitBeforeReadingLikeV040(string threadsText)
+    {
+        string directory = CreateTempDirectory();
+        try
+        {
+            string path = Path.Combine(directory, "no-buffer.wav");
+            HiFiDecodeOptions options = DefaultOptions(path) with
+            {
+                InputRateHz = 1_000_000.0,
+                ThreadsInteger = BigInteger.Parse(threadsText)
+            };
+            using var reader = new FullBlockSampleReader(expectedReads: 1);
+            using (var writer = new HiFiOutputWriter(options))
+            using (var stopSource = new CancellationTokenSource())
+            {
+                stopSource.Cancel();
+                var decoder = new HiFiStreamingDecoder(_ =>
+                    throw new InvalidOperationException("A zero-worker decode created a worker."));
+
+                Assert.ThrowsAny<OperationCanceledException>(() => decoder.Decode(
+                    options,
+                    reader,
+                    writer,
+                    TextWriter.Null,
+                    stopSource.Token,
+                    elapsedProvider: () => TimeSpan.FromSeconds(1)));
+            }
+
+            Assert.Equal(0, reader.ReadCount);
+            Assert.Equal(44, new FileInfo(path).Length);
+        }
+        finally
+        {
+            Directory.Delete(directory, recursive: true);
+        }
+    }
+
+    [Fact(DisplayName = "HiFi zero threads retain v0.4.0 finishing wait and empty WAV artifact")]
+    public async Task HiFiZeroThreadsRetainV040FinishingWaitAndEmptyWaveArtifact()
+    {
+        string directory = CreateTempDirectory();
+        using var stopSource = CancellationTokenSource.CreateLinkedTokenSource(
+            TestContext.Current.CancellationToken);
+        Task<int>? runTask = null;
+        try
+        {
+            string inputPath = Path.Combine(directory, "empty.s16");
+            string outputPath = Path.Combine(directory, "waiting.wav");
+            File.WriteAllBytes(inputPath, []);
+            ParsedCommand command = ParseHiFi([
+                "--pal",
+                "--frequency", "6",
+                "--raw_format", "s16le",
+                "--audio_rate", "48000",
+                "--threads", "0",
+                "--overwrite",
+                inputPath,
+                outputPath
+            ]);
+            using var output = new SignalingTextWriter(
+                "Decode finishing up. Emptying the queue");
+            var error = new StringWriter();
+            runTask = Task.Factory.StartNew(
+                () => new DecodeRunner().Run(
+                    command,
+                    output,
+                    error,
+                    stopSource.Token),
+                CancellationToken.None,
+                TaskCreationOptions.LongRunning,
+                TaskScheduler.Default);
+
+            Assert.True(output.Signal.Wait(
+                TimeSpan.FromSeconds(10),
+                TestContext.Current.CancellationToken));
+            Assert.False(runTask.IsCompleted);
+            stopSource.Cancel();
+
+            Assert.Equal(
+                1,
+                await runTask.WaitAsync(TimeSpan.FromSeconds(10), CancellationToken.None));
+            string transcript = output.Snapshot();
+            Assert.StartsWith(
+                Lines(
+                    "Initializing ...",
+                    "PAL VHS format selected, Audio mode is s",
+                    "Starting decode..."),
+                transcript,
+                StringComparison.Ordinal);
+            Assert.Contains(
+                Environment.NewLine + "Decode finishing up. Emptying the queue" + Environment.NewLine,
+                transcript,
+                StringComparison.Ordinal);
+            Assert.EndsWith(
+                "Ctrl-C was pressed, stopping decode..." + Environment.NewLine,
+                transcript,
+                StringComparison.Ordinal);
+            Assert.DoesNotContain("Decode finished successfully", transcript, StringComparison.Ordinal);
+            Assert.Equal(string.Empty, error.ToString());
+            byte[] wave = File.ReadAllBytes(outputPath);
+            Assert.Equal(44, wave.Length);
+            Assert.Equal("RIFF", ReadAscii(wave, 0));
+            Assert.Equal(0u, BinaryPrimitives.ReadUInt32LittleEndian(wave.AsSpan(40, 4)));
+        }
+        finally
+        {
+            stopSource.Cancel();
+            if (runTask is not null)
+            {
+                try
+                {
+                    await runTask.WaitAsync(TimeSpan.FromSeconds(10), CancellationToken.None);
+                }
+                catch
+                {
+                    // Preserve the assertion or timeout that ended the test.
+                }
+            }
+
             Directory.Delete(directory, recursive: true);
         }
     }
@@ -1475,6 +1679,98 @@ public sealed class HiFiRunnerTests
 
         public void Dispose()
         {
+        }
+    }
+
+    private sealed class FullBlockSampleReader(int expectedReads) : IHiFiSampleReader
+    {
+        private int _readCount;
+
+        public ManualResetEventSlim ExpectedReads { get; } = new();
+
+        public int ReadCount => Volatile.Read(ref _readCount);
+
+        public long? TotalSamples => null;
+
+        public int Read(Span<float> destination, CancellationToken cancellationToken = default)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            int current = Interlocked.Increment(ref _readCount);
+            if (current >= expectedReads)
+            {
+                ExpectedReads.Set();
+            }
+
+            return destination.Length;
+        }
+
+        public void Dispose() => ExpectedReads.Dispose();
+    }
+
+    private sealed class SignalingTextWriter(string signalLine) : StringWriter
+    {
+        private readonly object _gate = new();
+
+        public ManualResetEventSlim Signal { get; } = new();
+
+        public override void Write(char value)
+        {
+            lock (_gate)
+            {
+                base.Write(value);
+            }
+        }
+
+        public override void Write(string? value)
+        {
+            lock (_gate)
+            {
+                base.Write(value);
+                SignalIfMatched(value);
+            }
+        }
+
+        public override void WriteLine()
+        {
+            lock (_gate)
+            {
+                base.WriteLine();
+            }
+        }
+
+        public override void WriteLine(string? value)
+        {
+            lock (_gate)
+            {
+                base.WriteLine(value);
+                SignalIfMatched(value);
+            }
+        }
+
+        private void SignalIfMatched(string? value)
+        {
+            if (value?.Contains(signalLine, StringComparison.Ordinal) == true)
+            {
+                Signal.Set();
+            }
+        }
+
+        public string Snapshot()
+        {
+            lock (_gate)
+            {
+                return ToString();
+            }
+        }
+
+        protected override void Dispose(bool disposing)
+        {
+            if (disposing)
+            {
+                Signal.Dispose();
+            }
+
+            base.Dispose(disposing);
         }
     }
 
