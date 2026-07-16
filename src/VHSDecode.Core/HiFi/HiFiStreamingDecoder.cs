@@ -69,7 +69,7 @@ internal sealed class HiFiStreamingDecoder
         ArgumentNullException.ThrowIfNull(input);
         ArgumentNullException.ThrowIfNull(output);
         ArgumentNullException.ThrowIfNull(diagnostics);
-        if (options.Threads <= 0)
+        if (options.ThreadsInteger <= 0)
         {
             throw new ArgumentOutOfRangeException(
                 nameof(options),

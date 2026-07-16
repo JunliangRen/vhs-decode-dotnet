@@ -202,7 +202,7 @@ public sealed class HiFiPostProcessorTests
         ParsedCommand command = new CommandLineParser().Parse(CliSpecs.HiFi, ["-", "out.flac"]);
         HiFiDecodeOptions options = HiFiDecodeOptions.FromCommand(command) with
         {
-            AudioRateHz = scenario.SampleRateHz,
+            AudioRateInteger = scenario.SampleRateHz,
             TapeFormat = scenario.TapeFormat,
             EnableDeemphasis = scenario.EnableDeemphasis,
             EnableExpander = scenario.EnableExpander,

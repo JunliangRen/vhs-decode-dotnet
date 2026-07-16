@@ -68,7 +68,14 @@ public sealed class HiFiRunnerTests
         {
             string outputPath = Path.Combine(directory, "existing.wav");
             File.WriteAllText(outputPath, "existing");
-            ParsedCommand command = ParseHiFi(["missing.s16", outputPath]);
+            string hugeInteger = "1" + new string('0', 400);
+            ParsedCommand command = ParseHiFi(
+            [
+                "--audio_rate", hugeInteger,
+                "--threads", hugeInteger,
+                "missing.s16",
+                outputPath
+            ]);
             var output = new StringWriter();
             var error = new StringWriter();
 
@@ -85,6 +92,66 @@ public sealed class HiFiRunnerTests
                 + "\t " + outputPath + Environment.NewLine,
                 output.ToString());
             Assert.Equal(string.Empty, error.ToString());
+        }
+        finally
+        {
+            Directory.Delete(directory, recursive: true);
+        }
+    }
+
+    [Theory(DisplayName = "HiFi output-rate CLI failures match v0.4.0 timing and artifacts")]
+    [InlineData("zero", "Sample rate should be over 0")]
+    [InlineData("negative", "Sample rate should be over 0")]
+    [InlineData("three-billion", "division by zero")]
+    [InlineData("float-overflow", "int too large to convert to float")]
+    [InlineData("shared-memory-overflow", "Python int too large to convert to C ssize_t")]
+    public void HiFiOutputRateCliFailuresMatchV040TimingAndArtifacts(
+        string scenario,
+        string expectedError)
+    {
+        string directory = CreateTempDirectory();
+        try
+        {
+            string inputPath = Path.Combine(directory, "input.s16");
+            string outputPath = Path.Combine(directory, "output.wav");
+            File.WriteAllBytes(inputPath, []);
+            string rate = scenario switch
+            {
+                "zero" => "0",
+                "negative" => "-1",
+                "three-billion" => "3000000000",
+                "float-overflow" => "1" + new string('0', 309),
+                "shared-memory-overflow" => new string('9', 50),
+                _ => throw new ArgumentOutOfRangeException(nameof(scenario))
+            };
+            ParsedCommand command = ParseHiFi(
+            [
+                "--pal",
+                "--frequency", "6",
+                "--raw_format", "s16le",
+                "--audio_rate", rate,
+                "--threads", "1",
+                "--overwrite",
+                inputPath,
+                outputPath
+            ]);
+            var output = new StringWriter();
+            var error = new StringWriter();
+
+            int exitCode = new DecodeRunner().Run(
+                command,
+                output,
+                error,
+                TestContext.Current.CancellationToken);
+
+            Assert.Equal(1, exitCode);
+            Assert.Equal(
+                Lines(
+                    "Initializing ...",
+                    "PAL VHS format selected, Audio mode is s"),
+                output.ToString());
+            Assert.Equal(expectedError + Environment.NewLine, error.ToString());
+            Assert.False(File.Exists(outputPath));
         }
         finally
         {
@@ -376,7 +443,7 @@ public sealed class HiFiRunnerTests
             string path = Path.Combine(directory, "stream.wav");
             HiFiDecodeOptions options = DefaultOptions(path) with
             {
-                Threads = 2,
+                ThreadsInteger = 2,
                 EnableDeemphasis = false,
                 EnableExpander = false,
                 HeadSwitchingInterpolation = false,
@@ -433,7 +500,7 @@ public sealed class HiFiRunnerTests
         try
         {
             string path = Path.Combine(directory, "failed.wav");
-            HiFiDecodeOptions options = DefaultOptions(path) with { Threads = 2 };
+            HiFiDecodeOptions options = DefaultOptions(path) with { ThreadsInteger = 2 };
             using var reader = new ArraySampleReader(new float[10]);
             var decoder = new HiFiStreamingDecoder(
                 activeOptions => new ThrowingBlockDecoder(activeOptions));

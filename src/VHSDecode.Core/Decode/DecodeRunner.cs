@@ -66,6 +66,7 @@ public sealed class DecodeRunner
                 return 1;
             }
             catch (Exception ex) when (ex is ArgumentException
+                or DivideByZeroException
                 or FormatException
                 or OverflowException
                 or NotSupportedException
