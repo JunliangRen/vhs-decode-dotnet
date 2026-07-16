@@ -351,6 +351,63 @@ public sealed class TbcSqliteLifecycleCompatibilityTests
         }
     }
 
+    [Fact(DisplayName = "Failure-path SQLite normalization errors do not escape Dispose")]
+    public void FailurePathSqliteNormalizationErrorsDoNotEscapeDispose()
+    {
+        string tempDirectory = CreateTempDirectory();
+        try
+        {
+            string databasePath = Path.Combine(tempDirectory, "cleanup.tbc.db");
+            using DecodeSession session = CreateSession("vhs", Path.Combine(tempDirectory, "cleanup"));
+            int normalizationCalls = 0;
+            var writer = new TbcSqliteMetadataWriter.SequenceWriter(
+                session,
+                databasePath,
+                _ =>
+                {
+                    normalizationCalls++;
+                    throw new IOException("synthetic header normalization failure");
+                });
+
+            writer.Dispose();
+
+            Assert.Equal(1, normalizationCalls);
+        }
+        finally
+        {
+            Directory.Delete(tempDirectory, recursive: true);
+        }
+    }
+
+    [Fact(DisplayName = "SQLite completion surfaces normalization errors directly")]
+    public void SqliteCompletionSurfacesNormalizationErrorsDirectly()
+    {
+        string tempDirectory = CreateTempDirectory();
+        try
+        {
+            string databasePath = Path.Combine(tempDirectory, "completion.tbc.db");
+            using DecodeSession session = CreateSession("vhs", Path.Combine(tempDirectory, "completion"));
+            int normalizationCalls = 0;
+            var writer = new TbcSqliteMetadataWriter.SequenceWriter(
+                session,
+                databasePath,
+                _ =>
+                {
+                    normalizationCalls++;
+                    throw new IOException("synthetic header normalization failure");
+                });
+
+            IOException exception = Assert.Throws<IOException>(() => writer.Complete(fieldCount: 0));
+            Assert.Equal("synthetic header normalization failure", exception.Message);
+            writer.Dispose();
+            Assert.Equal(1, normalizationCalls);
+        }
+        finally
+        {
+            Directory.Delete(tempDirectory, recursive: true);
+        }
+    }
+
     [Fact(DisplayName = "First SQLite capture header commits before its field row like v0.4.0")]
     public void FirstSqliteCaptureHeaderCommitsBeforeFieldRowLikeV040()
     {

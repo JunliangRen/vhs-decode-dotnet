@@ -69,14 +69,24 @@ internal sealed class HiFiStreamingDecoder
         ArgumentNullException.ThrowIfNull(input);
         ArgumentNullException.ThrowIfNull(output);
         ArgumentNullException.ThrowIfNull(diagnostics);
-        if (options.Threads <= 0)
+        HiFiDecodePlan plan = HiFiDecodePlan.FromOptions(options);
+        var progressReporter = new HiFiProgressReporter(
+            diagnostics,
+            plan.InputRateHz,
+            plan.FinalAudioRateHz,
+            input.TotalSamples,
+            elapsedProvider);
+        if (options.ThreadsInteger <= 0)
         {
-            throw new ArgumentOutOfRangeException(
-                nameof(options),
-                "HiFi decoder thread count must be positive.");
+            return await WaitWithoutDecoderWorkers(
+                options,
+                plan,
+                input,
+                diagnostics,
+                progressReporter,
+                cancellationToken);
         }
 
-        HiFiDecodePlan plan = HiFiDecodePlan.FromOptions(options);
         int workerCount = options.GnuRadio ? 1 : options.Threads;
         var jobs = Channel.CreateBounded<HiFiDecodeJob>(new BoundedChannelOptions(workerCount + 2)
         {
@@ -95,12 +105,6 @@ internal sealed class HiFiStreamingDecoder
         CancellationToken stopToken = stopSource.Token;
 
         var framer = new HiFiBlockFramer(plan, input);
-        var progressReporter = new HiFiProgressReporter(
-            diagnostics,
-            plan.InputRateHz,
-            plan.FinalAudioRateHz,
-            input.TotalSamples,
-            elapsedProvider);
         Task producer = ProduceBlocks(
             framer,
             jobs.Writer,
@@ -186,6 +190,43 @@ internal sealed class HiFiStreamingDecoder
             nextBlock,
             postProcessor.PeakLeft,
             postProcessor.PeakRight);
+    }
+
+    private static async Task<HiFiStreamingDecodeResult> WaitWithoutDecoderWorkers(
+        HiFiDecodeOptions options,
+        HiFiDecodePlan plan,
+        IHiFiSampleReader input,
+        TextWriter diagnostics,
+        HiFiProgressReporter progressReporter,
+        CancellationToken cancellationToken)
+    {
+        int idleBufferCount = options.ThreadsInteger == 0
+            ? 2
+            : options.ThreadsInteger == -1
+                ? 1
+                : 0;
+        if (idleBufferCount > 0)
+        {
+            var framer = new HiFiBlockFramer(plan, input);
+            for (int i = 0; i < idleBufferCount; i++)
+            {
+                HiFiDecodeJob job = framer.ReadNext(cancellationToken)
+                    ?? throw new InvalidDataException("HiFi input ended without a terminal block.");
+                progressReporter.ReportInput(
+                    framer.InputSamplesRead,
+                    framer.BlockCount);
+                if (job.IsLastBlock)
+                {
+                    diagnostics.WriteLine();
+                    diagnostics.WriteLine("Decode finishing up. Emptying the queue");
+                    diagnostics.WriteLine();
+                    break;
+                }
+            }
+        }
+
+        await Task.Delay(Timeout.InfiniteTimeSpan, cancellationToken);
+        throw new InvalidOperationException("No HiFi decoder worker became available.");
     }
 
     private static async Task ProduceBlocks(

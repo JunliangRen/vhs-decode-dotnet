@@ -80,7 +80,7 @@ public sealed class CommandLineParser
                 continue;
             }
 
-            if (ApplyOption(args, option, inlineValue, values, optionSources, ref i))
+            if (ApplyOption(args, option, optionName, inlineValue, values, optionSources, ref i))
             {
                 return BuildResult(spec, values, optionSources, positionals, programName);
             }
@@ -235,7 +235,7 @@ public sealed class CommandLineParser
             }
 
             string? inlineValue = offset + 1 < token.Length ? token[(offset + 1)..] : null;
-            help = ApplyOption(args, option, inlineValue, values, optionSources, ref index);
+            help = ApplyOption(args, option, name, inlineValue, values, optionSources, ref index);
             return true;
         }
 
@@ -245,6 +245,7 @@ public sealed class CommandLineParser
     private static bool ApplyOption(
         IReadOnlyList<string> args,
         OptionSpec option,
+        string parsedName,
         string? inlineValue,
         Dictionary<string, object?> values,
         Dictionary<string, ParsedOptionSource> optionSources,
@@ -270,7 +271,8 @@ public sealed class CommandLineParser
                 return false;
 
             case OptionArity.OptionalValue:
-                string? optionalValue = inlineValue ?? TryReadOptionalValue(args, ref index, option);
+                string? optionalValue = inlineValue
+                    ?? TryReadOptionalValue(args, ref index, option, parsedName);
                 values[option.Destination] = optionalValue is null
                     ? option.ConstValue
                     : ConvertOptionValue(option, optionalValue);
@@ -321,7 +323,11 @@ public sealed class CommandLineParser
         return args[index];
     }
 
-    private static string? TryReadOptionalValue(IReadOnlyList<string> args, ref int index, OptionSpec option)
+    private static string? TryReadOptionalValue(
+        IReadOnlyList<string> args,
+        ref int index,
+        OptionSpec option,
+        string parsedName)
     {
         if (index + 1 >= args.Count)
         {
@@ -334,7 +340,9 @@ public sealed class CommandLineParser
             return null;
         }
 
-        if (option.IsValidOptionalValue is not null && !option.IsValidOptionalValue(candidate))
+        if (option.IsValidOptionalValue is not null
+            && option.OptionalValueDisambiguationNames?.Contains(parsedName, StringComparer.Ordinal) == true
+            && !option.IsValidOptionalValue(candidate))
         {
             return null;
         }
@@ -349,13 +357,5 @@ public sealed class CommandLineParser
         => IsOptionToken(token) && !LooksLikeNegativeNumber(token);
 
     private static bool LooksLikeNegativeNumber(string token)
-    {
-        return token.Length > 1
-            && token[0] == '-'
-            && double.TryParse(
-                token,
-                System.Globalization.NumberStyles.Float,
-                System.Globalization.CultureInfo.InvariantCulture,
-                out _);
-    }
+        => PythonNumericParser.LooksLikeArgparseNegativeNumber(token);
 }

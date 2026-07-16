@@ -66,6 +66,7 @@ public sealed class DecodeRunner
                 return 1;
             }
             catch (Exception ex) when (ex is ArgumentException
+                or DivideByZeroException
                 or FormatException
                 or OverflowException
                 or NotSupportedException
@@ -178,6 +179,11 @@ public sealed class DecodeRunner
             or NotSupportedException
             or FormatParameterException)
         {
+            if (ex is DecodeThreadInitializationException)
+            {
+                File.WriteAllText(command.OutputBase + ".log", string.Empty);
+            }
+
             error.WriteLine(ex.Message);
             return 1;
         }
@@ -279,7 +285,7 @@ public sealed class DecodeRunner
         error.WriteLine("ERROR - please paste the following into a bug report:");
         error.WriteLine(string.Create(
             CultureInfo.InvariantCulture,
-            $"current sample: {exception.CurrentSample}"));
+            $"current sample: {exception.CurrentSampleText}"));
         error.WriteLine($"arguments: {PythonNamespaceFormatter.Format(command)}");
         error.WriteLine($"Exception: {cause.Message}  Traceback:");
         WritePythonStyleTraceback(exception, cause, error);

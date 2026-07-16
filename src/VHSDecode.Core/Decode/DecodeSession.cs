@@ -1,3 +1,4 @@
+using System.Numerics;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using VHSDecode.Core.CommandLine;
@@ -69,14 +70,19 @@ public sealed record ChromaDecodeOptions(
 public sealed record DecodeExecutionOptions(
     int RequestedThreads,
     int WorkerThreads,
-    int SeekFrame,
+    BigInteger SeekFrame,
     bool WriteDebugData,
     bool Debug,
     string? DebugPlotPath,
     bool IgnoreLeadOut,
     bool VerboseVits,
     bool UseProfiler,
-    bool CxAdcCompatibilityMode);
+    bool CxAdcCompatibilityMode)
+{
+    public BigInteger RequestedThreadsInteger { get; init; } = new(RequestedThreads);
+}
+
+internal sealed class DecodeThreadInitializationException(string message) : ArgumentException(message);
 
 public sealed record LaserDiscAudioOptions(
     bool DecodeDigitalAudio,
@@ -87,7 +93,10 @@ public sealed record LaserDiscAudioOptions(
     bool Ac3,
     bool WriteRfTbc,
     bool UseAgc,
-    double? AudioFilterWidthHz);
+    double? AudioFilterWidthHz)
+{
+    public BigInteger? AnalogAudioFrequencyInteger { get; init; }
+}
 
 public static class DecodeSessionFactory
 {
@@ -450,23 +459,44 @@ public static class DecodeSessionFactory
 
     private static DecodeExecutionOptions BuildExecutionOptions(ParsedCommand command)
     {
-        int requestedThreads = command.Get<int>("threads");
+        BigInteger requestedThreadsInteger = command.Get<BigInteger>("threads");
         string? debugPlotPath = NullableString(command, "debug_plot");
-        int workerThreads = command.Spec.Name == "vhs" && debugPlotPath is not null
+        bool threadsIgnored = command.Spec.Name == "vhs" && debugPlotPath is not null;
+        if (!threadsIgnored && command.Spec.Name == "vhs" && requestedThreadsInteger < BigInteger.Zero)
+        {
+            throw new DecodeThreadInitializationException("max_workers must be greater than 0");
+        }
+
+        if (!threadsIgnored && requestedThreadsInteger > int.MaxValue)
+        {
+            // v0.4.0 eagerly starts this many DemodCache workers and eventually
+            // surfaces threading.Thread.start()'s platform failure.
+            throw new DecodeThreadInitializationException("can't start new thread");
+        }
+
+        int requestedThreads = requestedThreadsInteger > int.MaxValue
+            ? int.MaxValue
+            : requestedThreadsInteger < int.MinValue
+                ? int.MinValue
+                : (int)requestedThreadsInteger;
+        int workerThreads = threadsIgnored || requestedThreadsInteger < BigInteger.Zero
             ? 0
             : requestedThreads;
 
         return new DecodeExecutionOptions(
             RequestedThreads: requestedThreads,
             WorkerThreads: workerThreads,
-            SeekFrame: IntValueOrDefault(command, "seek", -1),
+            SeekFrame: NullableInteger(command, "seek") ?? -BigInteger.One,
             WriteDebugData: BoolValueOrDefault(command, "write_db"),
             Debug: BoolValueOrDefault(command, "debug"),
             DebugPlotPath: debugPlotPath,
             IgnoreLeadOut: BoolValueOrDefault(command, "ignoreleadout"),
             VerboseVits: BoolValueOrDefault(command, "verboseVITS"),
             UseProfiler: BoolValueOrDefault(command, "use_profiler"),
-            CxAdcCompatibilityMode: command.Spec.Name == "vhs" && command.Get<bool>("cxadc"));
+            CxAdcCompatibilityMode: command.Spec.Name == "vhs" && command.Get<bool>("cxadc"))
+        {
+            RequestedThreadsInteger = requestedThreadsInteger
+        };
     }
 
     private static LaserDiscAudioOptions? BuildLaserDiscAudioOptions(ParsedCommand command, string system)
@@ -476,14 +506,27 @@ public static class DecodeSessionFactory
             return null;
         }
 
-        double analogAudioFrequency = command.Get<int>("analog_audio_freq");
         bool useNtscAudioRate = command.Get<bool>("ntsc_audio_rate");
-        if (useNtscAudioRate && string.Equals(system, "NTSC", StringComparison.OrdinalIgnoreCase))
+        bool decodeAnalogAudio = !command.Get<bool>("daa");
+        double analogAudioFrequency;
+        BigInteger? analogAudioFrequencyInteger;
+        if (!decodeAnalogAudio)
+        {
+            analogAudioFrequency = 0.0;
+            analogAudioFrequencyInteger = BigInteger.Zero;
+        }
+        else if (useNtscAudioRate && string.Equals(system, "NTSC", StringComparison.OrdinalIgnoreCase))
         {
             analogAudioFrequency = -2.8;
+            analogAudioFrequencyInteger = null;
+        }
+        else
+        {
+            BigInteger parsedAudioFrequency = command.Get<BigInteger>("analog_audio_freq");
+            analogAudioFrequency = (double)parsedAudioFrequency;
+            analogAudioFrequencyInteger = parsedAudioFrequency;
         }
 
-        bool decodeAnalogAudio = !command.Get<bool>("daa");
         double? parsedAudioFilterWidth = NullableDouble(command, "audio_filterwidth");
         double? audioFilterWidthHz = parsedAudioFilterWidth.HasValue && parsedAudioFilterWidth.Value > 0.0
             ? parsedAudioFilterWidth.Value
@@ -493,12 +536,15 @@ public static class DecodeSessionFactory
             DecodeDigitalAudio: !command.Get<bool>("noefm"),
             WritePreEfm: command.Get<bool>("prefm"),
             DecodeAnalogAudio: decodeAnalogAudio,
-            AnalogAudioFrequency: decodeAnalogAudio ? analogAudioFrequency : 0.0,
+            AnalogAudioFrequency: analogAudioFrequency,
             UseNtscAudioRate: useNtscAudioRate,
             Ac3: command.Get<bool>("AC3"),
             WriteRfTbc: command.Get<bool>("RF_TBC"),
             UseAgc: !command.Get<bool>("noAGC"),
-            AudioFilterWidthHz: audioFilterWidthHz);
+            AudioFilterWidthHz: audioFilterWidthHz)
+        {
+            AnalogAudioFrequencyInteger = analogAudioFrequencyInteger
+        };
     }
 
     private static CvbsDecodeOptions? BuildCvbsDecodeOptions(ParsedCommand command, VideoOutputConverter videoOutput)
@@ -602,9 +648,13 @@ public static class DecodeSessionFactory
         string system,
         FormatParameterSet parameters)
     {
-        if (command.Spec.Name != "vhs"
-            || !command.Values.TryGetValue("track_phase", out object? value)
-            || value is not int trackPhase)
+        if (command.Spec.Name != "vhs")
+        {
+            return null;
+        }
+
+        BigInteger? trackPhaseValue = NullableInteger(command, "track_phase");
+        if (!trackPhaseValue.HasValue)
         {
             return null;
         }
@@ -615,10 +665,13 @@ public static class DecodeSessionFactory
             return null;
         }
 
-        if (trackPhase is not 0 and not 1)
+        if (trackPhaseValue.Value != BigInteger.Zero
+            && trackPhaseValue.Value != BigInteger.One)
         {
             throw new ArgumentException("Track phase can only be 0, 1 or None");
         }
+
+        int trackPhase = (int)trackPhaseValue.Value;
 
         double offset0 = 0.0;
         double offset1 = 0.0;
@@ -655,6 +708,11 @@ public static class DecodeSessionFactory
                 return Math.Max(0.0, intValue);
             }
 
+            if (value is BigInteger integerValue)
+            {
+                return integerValue.Sign <= 0 ? 0.0 : (double)integerValue;
+            }
+
             if (value is double doubleValue)
             {
                 return Math.Max(0.0, doubleValue);
@@ -675,9 +733,14 @@ public static class DecodeSessionFactory
             action = TbcFieldOrderPlanner.ParseAction(actionText);
         }
 
-        if (command.Values.TryGetValue("field_order_confidence", out object? confidenceValue) && confidenceValue is int parsedConfidence)
+        BigInteger? parsedConfidence = NullableInteger(command, "field_order_confidence");
+        if (parsedConfidence.HasValue)
         {
-            confidence = Math.Clamp(parsedConfidence, 0, 100);
+            confidence = parsedConfidence.Value <= BigInteger.Zero
+                ? 0
+                : parsedConfidence.Value >= new BigInteger(100)
+                    ? 100
+                    : (int)parsedConfidence.Value;
         }
 
         bool allowProgressiveFlip = parameters.TapeFormat != "TYPEC";
@@ -821,9 +884,8 @@ public static class DecodeSessionFactory
 
     private static SharpnessEqOptions? BuildSharpnessEqOptions(ParsedCommand command, FormatParameterSet parameters)
     {
-        if (!command.Values.TryGetValue("sharpness", out object? sharpnessValue)
-            || sharpnessValue is not int sharpness
-            || sharpness == 0)
+        BigInteger? sharpness = NullableInteger(command, "sharpness");
+        if (!sharpness.HasValue || sharpness.Value.IsZero)
         {
             return null;
         }
@@ -835,7 +897,7 @@ public static class DecodeSessionFactory
         }
 
         return new SharpnessEqOptions(
-            sharpness / 100.0,
+            PythonNumericParser.DivideIntegerByPowerOfTen(sharpness.Value, 2),
             JsonRequiredDouble(lowBand, "corner"),
             JsonRequiredDouble(lowBand, "transition"),
             JsonRequiredInt(lowBand, "order_limit"));
@@ -952,10 +1014,10 @@ public static class DecodeSessionFactory
             rfParams["audio_filterwidth"] = parsedAudioFilterWidth.Value;
         }
 
-        int vlpfOrder = command.Get<int>("vlpf_order");
-        if (vlpfOrder >= 1)
+        BigInteger vlpfOrder = command.Get<BigInteger>("vlpf_order");
+        if (vlpfOrder >= BigInteger.One)
         {
-            rfParams["video_lpf_order"] = vlpfOrder;
+            rfParams["video_lpf_order"] = command.Get<int>("vlpf_order");
         }
 
         double deempLow = command.Get<double>("deemp_low");
@@ -1011,6 +1073,21 @@ public static class DecodeSessionFactory
         return command.Values.TryGetValue(name, out object? value) && value is double doubleValue
             ? doubleValue
             : null;
+    }
+
+    private static BigInteger? NullableInteger(ParsedCommand command, string name)
+    {
+        if (!command.Values.TryGetValue(name, out object? value))
+        {
+            return null;
+        }
+
+        return value switch
+        {
+            int intValue => new BigInteger(intValue),
+            BigInteger integerValue => integerValue,
+            _ => null
+        };
     }
 
     private static int IntValueOrDefault(ParsedCommand command, string name, int defaultValue)

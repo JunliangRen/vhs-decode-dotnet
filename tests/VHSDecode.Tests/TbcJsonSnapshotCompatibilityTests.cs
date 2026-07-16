@@ -45,13 +45,21 @@ public sealed class TbcJsonSnapshotCompatibilityTests
             {
                 writer.Add(BuildField(startSample: 0, detectedFirstField: true), BuildDecision(1, true));
 
-                Task checkpoint = Task.Run(writer.WriteSnapshot, cancellationToken);
+                Task checkpoint = Task.Factory.StartNew(
+                    writer.WriteSnapshot,
+                    cancellationToken,
+                    TaskCreationOptions.LongRunning,
+                    TaskScheduler.Default);
                 Assert.True(firstWriteStarted.Wait(TimeSpan.FromSeconds(10), cancellationToken));
                 await checkpoint.WaitAsync(TimeSpan.FromSeconds(10), cancellationToken);
 
                 writer.Add(BuildField(startSample: 100, detectedFirstField: false), BuildDecision(2, false));
                 writer.WriteSnapshot();
-                completion = Task.Run(writer.Complete, cancellationToken);
+                completion = Task.Factory.StartNew(
+                    writer.Complete,
+                    cancellationToken,
+                    TaskCreationOptions.LongRunning,
+                    TaskScheduler.Default);
 
                 releaseFirstWrite.Set();
                 Assert.True(finalWriteStarted.Wait(TimeSpan.FromSeconds(10), cancellationToken));

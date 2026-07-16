@@ -52,6 +52,7 @@ public sealed record HiFiDecodePlan
     public static HiFiDecodePlan FromOptions(HiFiDecodeOptions options)
     {
         ArgumentNullException.ThrowIfNull(options);
+        _ = HiFiDecodePreflight.Build(options);
 
         int inputRateHz = PythonIntRate(options.InputRateHz, nameof(options.InputRateHz));
         int ifRateHz = options.DemodType switch
@@ -62,10 +63,6 @@ public sealed record HiFiDecodePlan
         };
         int audioRateHz = HiFiConstants.IntermediateAudioRate;
         int finalAudioRateHz = options.AudioRateHz;
-        if (finalAudioRateHz <= 0)
-        {
-            throw new ArgumentOutOfRangeException(nameof(options), "HiFi output sample rate must be positive.");
-        }
 
         var ratios = new HiFiResamplingRatios(
             HiFiRateRatio.FromDouble((double)ifRateHz / inputRateHz),

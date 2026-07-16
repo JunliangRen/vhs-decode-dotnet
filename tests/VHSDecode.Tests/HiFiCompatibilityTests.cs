@@ -138,6 +138,130 @@ public sealed class HiFiCompatibilityTests
         Assert.Equal(27e-6, previewOptions.DeemphasisHighTau);
     }
 
+    [Fact(DisplayName = "HiFi integer options retain Python precision and preview overrides")]
+    public void HiFiIntegerOptionsRetainPythonPrecisionAndPreviewOverrides()
+    {
+        string hugeRate = "1" + new string('0', 400);
+        string hugeThreads = "-" + hugeRate;
+        ParsedCommand command = new CommandLineParser().Parse(CliSpecs.HiFi,
+        [
+            "--audio_rate", hugeRate,
+            "--threads", hugeThreads,
+            "in.s16",
+            "out.wav"
+        ]);
+        HiFiDecodeOptions options = HiFiDecodeOptions.FromCommand(command);
+
+        Assert.Equal(BigInteger.Parse(hugeRate), options.RequestedAudioRateInteger);
+        Assert.Equal(BigInteger.Parse(hugeRate), options.AudioRateInteger);
+        Assert.Equal(BigInteger.Parse(hugeThreads), options.ThreadsInteger);
+        Assert.Throws<OverflowException>(() => _ = options.AudioRateHz);
+        Assert.Throws<OverflowException>(() => _ = options.Threads);
+
+        ParsedCommand previewCommand = new CommandLineParser().Parse(CliSpecs.HiFi,
+        [
+            "--preview",
+            "--audio_rate", hugeRate,
+            "--threads", hugeThreads,
+            "in.s16",
+            "out.wav"
+        ]);
+        HiFiDecodeOptions preview = HiFiDecodeOptions.FromCommand(previewCommand);
+
+        Assert.Equal(BigInteger.Parse(hugeRate), preview.RequestedAudioRateInteger);
+        Assert.Equal(new BigInteger(HiFiConstants.PreviewAudioRate), preview.AudioRateInteger);
+        Assert.Equal(HiFiConstants.PreviewAudioRate, preview.AudioRateHz);
+        Assert.Equal(BigInteger.Parse(hugeThreads), preview.ThreadsInteger);
+        HiFiDecodePreflightResult geometry = HiFiDecodePreflight.Build(preview);
+        Assert.Equal(new BigInteger(22_050), geometry.InitialFinalAudioSamples);
+        Assert.Equal(new BigInteger(1_920), geometry.FinalAudioOverlapSamples);
+    }
+
+    [Theory(DisplayName = "HiFi arbitrary output-rate geometry matches v0.4.0")]
+    [InlineData("1", "1", "1", true)]
+    [InlineData("2", "1", "1", true)]
+    [InlineData("2147483648", "1073741824", "11744250", false)]
+    [InlineData(
+        "99999999999999999999999999999999999999999999999999",
+        "50000000000000003814884920545943501647482485473280",
+        "546875000000000122854942233077938745058344828928",
+        false)]
+    public void HiFiArbitraryOutputRateGeometryMatchesV040(
+        string rateText,
+        string expectedInitialSamples,
+        string expectedFinalOverlap,
+        bool expectedWarning)
+    {
+        BigInteger rate = BigInteger.Parse(rateText);
+        HiFiDecodeOptions options = DefaultOptions() with
+        {
+            RequestedAudioRateInteger = rate,
+            AudioRateInteger = rate
+        };
+
+        HiFiDecodePreflightResult geometry = HiFiDecodePreflight.Build(options);
+
+        Assert.Equal(BigInteger.Parse(expectedInitialSamples), geometry.InitialFinalAudioSamples);
+        Assert.Equal(BigInteger.Parse(expectedFinalOverlap), geometry.FinalAudioOverlapSamples);
+        Assert.Equal(expectedWarning, geometry.HasRateSyncWarning);
+    }
+
+    [Theory(DisplayName = "HiFi output-rate construction failures match v0.4.0")]
+    [InlineData("zero", "argument", "Sample rate should be over 0")]
+    [InlineData("negative", "argument", "Sample rate should be over 0")]
+    [InlineData("three-billion", "divide", "division by zero")]
+    [InlineData("float-overflow", "overflow", "int too large to convert to float")]
+    public void HiFiOutputRateConstructionFailuresMatchV040(
+        string scenario,
+        string exceptionKind,
+        string expectedMessage)
+    {
+        BigInteger rate = scenario switch
+        {
+            "zero" => BigInteger.Zero,
+            "negative" => BigInteger.MinusOne,
+            "three-billion" => new BigInteger(3_000_000_000L),
+            "float-overflow" => BigInteger.Pow(10, 309),
+            _ => throw new ArgumentOutOfRangeException(nameof(scenario))
+        };
+        HiFiDecodeOptions options = DefaultOptions() with
+        {
+            RequestedAudioRateInteger = rate,
+            AudioRateInteger = rate
+        };
+
+        Exception exception = Assert.ThrowsAny<Exception>(() => HiFiDecodePreflight.Build(options));
+
+        Assert.Equal(expectedMessage, exception.Message);
+        Assert.Equal(
+            exceptionKind,
+            exception switch
+            {
+                DivideByZeroException => "divide",
+                OverflowException => "overflow",
+                ArgumentException => "argument",
+                _ => exception.GetType().Name
+            });
+    }
+
+    [Fact(DisplayName = "HiFi oversized shared memory fails at the v0.4.0 C ssize boundary")]
+    public void HiFiOversizedSharedMemoryFailsAtV040CSsizeBoundary()
+    {
+        BigInteger rate = BigInteger.Parse(
+            "99999999999999999999999999999999999999999999999999");
+        HiFiDecodeOptions options = DefaultOptions() with
+        {
+            RequestedAudioRateInteger = rate,
+            AudioRateInteger = rate
+        };
+        HiFiDecodePreflightResult geometry = HiFiDecodePreflight.Build(options);
+
+        OverflowException exception = Assert.Throws<OverflowException>(
+            () => HiFiDecodePreflight.ValidateSharedMemorySize(geometry));
+
+        Assert.Equal("Python int too large to convert to C ssize_t", exception.Message);
+    }
+
     [Fact(DisplayName = "HiFi help snapshots match v0.4.0 argparse")]
     public void HiFiHelpSnapshotsMatchV040Argparse()
     {
@@ -287,7 +411,7 @@ public sealed class HiFiCompatibilityTests
     {
         HiFiDecodePlan plan = HiFiDecodePlan.FromOptions(DefaultOptions() with
         {
-            AudioRateHz = 44_100
+            AudioRateInteger = 44_100
         });
 
         AssertRatio(plan.ResamplingRatios.AudioToFinal, "4137682157646643", "18014398509481984");
@@ -302,7 +426,7 @@ public sealed class HiFiCompatibilityTests
         {
             InputRateHz = 28_636_363.636363637,
             DemodType = HiFiConstants.DemodHilbert,
-            AudioRateHz = 96_000
+            AudioRateInteger = 96_000
         });
 
         Assert.Equal(28_636_363, plan.InputRateHz);
@@ -335,7 +459,7 @@ public sealed class HiFiCompatibilityTests
         HiFiDecodePlan plan = HiFiDecodePlan.FromOptions(DefaultOptions() with
         {
             InputRateHz = 40_000_000.75,
-            AudioRateHz = 47_999
+            AudioRateInteger = 47_999
         });
 
         Assert.Equal(40_000_000, plan.InputRateHz);
@@ -625,7 +749,7 @@ public sealed class HiFiCompatibilityTests
         HiFiDecodeOptions options = DefaultOptions() with
         {
             DemodType = HiFiConstants.DemodQuadrature,
-            AudioRateHz = HiFiConstants.IntermediateAudioRate
+            AudioRateInteger = HiFiConstants.IntermediateAudioRate
         };
         using var resamplers = new HiFiBlockResamplers(HiFiDecodePlan.FromOptions(options));
         float[] input = CreateDeterministicFloatInput(257);
@@ -696,7 +820,7 @@ public sealed class HiFiCompatibilityTests
             AudioMode = audioMode,
             DropoutCompensation = dropoutCompensation,
             HeadSwitchingInterpolation = headSwitchingInterpolation,
-            AudioRateHz = audioRateHz,
+            AudioRateInteger = audioRateHz,
             Gain = gain,
             ResamplerQuality = "high"
         };
@@ -721,7 +845,7 @@ public sealed class HiFiCompatibilityTests
             AutoFineTune = true,
             DropoutCompensation = HiFiConstants.DropoutCompensationDisabled,
             HeadSwitchingInterpolation = false,
-            AudioRateHz = HiFiConstants.IntermediateAudioRate,
+            AudioRateInteger = HiFiConstants.IntermediateAudioRate,
             ResamplerQuality = "high"
         };
         using var decoder = new HiFiBlockDecoder(options);

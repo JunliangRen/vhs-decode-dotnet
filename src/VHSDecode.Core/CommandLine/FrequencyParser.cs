@@ -1,5 +1,3 @@
-using System.Globalization;
-
 namespace VHSDecode.Core.CommandLine;
 
 public static class FrequencyParser
@@ -20,7 +18,7 @@ public static class FrequencyParser
 
     public static double ParseMHz(string text)
     {
-        string valueText = text.Trim();
+        string valueText = text;
         double multiplier = 1.0e6;
         foreach ((string suffix, double mult) in Suffixes)
         {
@@ -32,7 +30,7 @@ public static class FrequencyParser
             }
         }
 
-        double value = double.Parse(valueText, NumberStyles.Float, CultureInfo.InvariantCulture);
+        double value = PythonNumericParser.ParseFloat(valueText);
         return (multiplier * value) / 1.0e6;
     }
 }

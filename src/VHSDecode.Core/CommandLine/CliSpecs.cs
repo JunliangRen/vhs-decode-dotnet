@@ -329,6 +329,7 @@ public static class CliSpecs
             PythonDefaultValue = defaultValue,
             PythonConstValue = constValue,
             IsValidOptionalValue = isValidOptionalValue,
+            OptionalValueDisambiguationNames = names,
             NormalizeString = normalize,
             ParseErrorTypeName = "_parse_ire0_adjust"
         };
@@ -406,9 +407,7 @@ public static class CliSpecs
             : FrequencyParser.ParseMHz(value);
 
     private static string? ValidateParamsFile(string value)
-        => value == "-" || File.Exists(value)
-            ? null
-            : $"argument --params_file: can't open '{value}': [Errno 2] No such file or directory: '{value}'";
+        => PythonFileTypeValidator.ValidateReadableTextFile("--params_file", value);
 
     private static string? ValidateFieldOrderAction(string value)
         => value is "detect" or "duplicate" or "drop" or "none"

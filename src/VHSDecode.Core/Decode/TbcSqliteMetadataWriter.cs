@@ -142,6 +142,7 @@ public static class TbcSqliteMetadataWriter
     {
         private readonly DecodeSession _session;
         private readonly string _dbPath;
+        private readonly Action<string> _normalizeSqliteHeader;
         private readonly SqliteConnection _connection;
         private SqliteTransaction? _transaction;
         private long? _captureId;
@@ -149,11 +150,15 @@ public static class TbcSqliteMetadataWriter
         private bool _completed;
         private bool _disposed;
 
-        public SequenceWriter(DecodeSession session, string dbPath)
+        public SequenceWriter(
+            DecodeSession session,
+            string dbPath,
+            Action<string>? normalizeSqliteHeader = null)
         {
             ArgumentException.ThrowIfNullOrWhiteSpace(dbPath);
             _session = session;
             _dbPath = dbPath;
+            _normalizeSqliteHeader = normalizeSqliteHeader ?? NormalizeSqliteHeader;
             if (File.Exists(dbPath))
             {
                 File.Delete(dbPath);
@@ -235,9 +240,9 @@ public static class TbcSqliteMetadataWriter
                     $"SQLite metadata field count {_fieldIndex} did not match JSON field count {fieldCount}.");
             }
 
-            _transaction?.Dispose();
-            _transaction = null;
+            CloseDatabase();
             _completed = true;
+            _normalizeSqliteHeader(_dbPath);
         }
 
         public void Dispose()
@@ -248,11 +253,18 @@ public static class TbcSqliteMetadataWriter
             }
 
             _disposed = true;
-            _transaction?.Dispose();
-            _connection.Dispose();
             if (_completed)
             {
-                NormalizeSqliteHeader(_dbPath);
+                return;
+            }
+
+            try
+            {
+                CloseDatabase();
+            }
+            finally
+            {
+                TryNormalizeSqliteHeader();
             }
         }
 
@@ -266,6 +278,33 @@ public static class TbcSqliteMetadataWriter
             transaction.Dispose();
             _transaction = null;
             _transaction = _connection.BeginTransaction();
+        }
+
+        private void CloseDatabase()
+        {
+            try
+            {
+                _transaction?.Dispose();
+            }
+            finally
+            {
+                _transaction = null;
+                _connection.Dispose();
+            }
+        }
+
+        private void TryNormalizeSqliteHeader()
+        {
+            try
+            {
+                _normalizeSqliteHeader(_dbPath);
+            }
+            catch (IOException)
+            {
+            }
+            catch (UnauthorizedAccessException)
+            {
+            }
         }
     }
 

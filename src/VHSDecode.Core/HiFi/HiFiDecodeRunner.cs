@@ -88,6 +88,14 @@ internal sealed class HiFiDecodeRunner : IHiFiCommandRunner
         string system = options.Standard == "p" ? "PAL" : "NTSC";
         string format = options.TapeFormat == "vhs" ? "VHS" : "8mm";
         output.WriteLine($"{system} {format} format selected, Audio mode is {options.AudioMode}");
+        HiFiDecodePreflightResult preflight = HiFiDecodePreflight.Build(options);
+        if (preflight.HasRateSyncWarning)
+        {
+            output.WriteLine(HiFiDecodePreflight.FormatRateSyncWarning(options));
+        }
+
+        HiFiDecodePreflight.ValidateSharedMemorySize(preflight);
+        _ = options.AudioRateHz;
         if (options.BiasGuess)
         {
             HiFiDecodeOptions biasInputOptions = options with { InputFormatOverride = null };

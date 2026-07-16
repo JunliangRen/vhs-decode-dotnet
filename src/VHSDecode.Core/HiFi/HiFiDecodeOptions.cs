@@ -1,3 +1,4 @@
+using System.Numerics;
 using VHSDecode.Core.CommandLine;
 
 namespace VHSDecode.Core.HiFi;
@@ -38,12 +39,15 @@ public sealed record HiFiDecodeOptions
     public required double DeemphasisLowTau { get; init; }
     public required double DeemphasisHighTau { get; init; }
     public required bool GnuRadio { get; init; }
-    public required int AudioRateHz { get; init; }
+    public required BigInteger RequestedAudioRateInteger { get; init; }
+    public required BigInteger AudioRateInteger { get; init; }
+    public int AudioRateHz => checked((int)AudioRateInteger);
     public required double Gain { get; init; }
     public required string InputFile { get; init; }
     public required string OutputFile { get; init; }
     public required string AudioMode { get; init; }
-    public required int Threads { get; init; }
+    public required BigInteger ThreadsInteger { get; init; }
+    public int Threads => checked((int)ThreadsInteger);
     public required bool Overwrite { get; init; }
     public required bool Gui { get; init; }
 
@@ -56,6 +60,10 @@ public sealed record HiFiDecodeOptions
 
         bool is8Mm = command.Get<bool>("format_8mm");
         bool preview = command.Get<bool>("preview");
+        BigInteger requestedAudioRate = command.Get<BigInteger>("rate");
+        BigInteger audioRate = preview
+            ? new BigInteger(HiFiConstants.PreviewAudioRate)
+            : requestedAudioRate;
         string requestedQuality = command.Get<string>("resampler_quality");
         string resamplerQuality = requestedQuality is "low" or "medium" or "high"
             ? requestedQuality
@@ -150,12 +158,13 @@ public sealed record HiFiDecodeOptions
             DeemphasisLowTau = PythonOr(command.Get<double?>("deemphasis_low_tau"), defaultDeemphasisLowTau),
             DeemphasisHighTau = PythonOr(command.Get<double?>("deemphasis_high_tau"), defaultDeemphasisHighTau),
             GnuRadio = command.Get<bool>("GRC"),
-            AudioRateHz = preview ? HiFiConstants.PreviewAudioRate : command.Get<int>("rate"),
+            RequestedAudioRateInteger = requestedAudioRate,
+            AudioRateInteger = audioRate,
             Gain = command.Get<double>("gain"),
             InputFile = command.InputFile,
             OutputFile = command.OutputBase,
             AudioMode = PythonOr(command.Get<string?>("mode"), defaultMode),
-            Threads = command.Get<int>("threads"),
+            ThreadsInteger = command.Get<BigInteger>("threads"),
             Overwrite = command.Get<bool>("overwrite"),
             Gui = command.Get<bool>("UI")
         };

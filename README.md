@@ -139,6 +139,16 @@ Implemented:
   section grouping, descriptions, and normalized upstream program names
 - parser coverage test that verifies current VHS/CVBS/LD specs accept the
   upstream decode-facing argparse option names and aliases
+- VHS `--ire0_adjust` preserves Release 4.0's exact-name pre-normalization,
+  abbreviated-option consumption, comma-part validation, and lowercased value
+  shape rather than applying generic optional-argument behavior
+- VHS `--params_file` validates by performing argparse-style read opens,
+  preserving Python errno/path representations for missing, denied, invalid,
+  and directory inputs while accepting standard input and Windows devices
+- Python 3 numeric argument conversion for integer, float, and frequency
+  options, including underscore separators, Unicode decimal digits,
+  arbitrary-precision parsed integers, signed `NaN`/infinity, suffix-adjacent
+  whitespace behavior, and argparse's `-\.?\d` negative-option boundary
 - byte-for-byte regenerated v0.4.0 format parameter catalog covering all 560
   tape system/format/speed combinations, 7 CVBS systems, and 4 LD variants
 - a full decode compatibility matrix constructs filters and demodulates one
@@ -932,6 +942,18 @@ Implemented:
   keeping stream/FFmpeg/GNU Radio reads ordered; `-t 1` and debug-plot `0`
   retain the deterministic single-thread path, and parallel blocks are stitched
   in their original overlap-save order
+- Python's arbitrary-precision thread values now survive until their v0.4.0
+  runtime use: VHS debug plots ignore even enormous positive or negative values,
+  CVBS/LD negative values retain the nonzero request with zero demod workers for
+  zero-field completion, active VHS negatives report `max_workers must be greater
+  than 0`, and unrepresentably large active worker counts report `can't start new
+  thread` after creating only the upstream empty log artifact. Differential
+  zero-field VHS/CVBS/LD probes match output sets and sizes, and the LD SQLite and
+  JSON temporary artifacts are byte-identical
+- HiFi non-positive thread counts now retain v0.4.0's zero-worker queue state:
+  `0` and `-1` consume their two or one idle input buffers before waiting,
+  smaller values wait before reading, and an early EOF prints the finishing
+  message but never reports success while preserving the empty audio artifact
 - VHS `--cxadc` now emits v0.4.0's exact deprecation warning to stderr and as a
   timestamped `WARNING` record in `.log` before the Sys/RF debug records
 - command help now uses the actual executable/script name and mirrors argparse's
@@ -964,6 +986,10 @@ Implemented:
   large RF/video/chroma/audio arrays are released, JSON fields stream through
   a temporary fragment, and SQLite rows are inserted incrementally, bounding
   sequence memory to the field-order/previous-field state
+- active main/chroma TBC and raw LD PCM/EFM/pre-EFM handles use CPython's
+  deny-none sharing on Windows, so a viewer can read them while decoding
+  continues; recovery JSON snapshots remain complete, atomically published,
+  and readable between field checkpoints
 - recovery JSON checkpoints now run on a single background writer like v0.4.0:
   checkpoints are skipped while that writer is busy, each accepted snapshot is
   frozen at its current field boundary, and cleanup always queues and joins the
@@ -1201,7 +1227,7 @@ dotnet test VHSDecodeDotNet.slnx --no-build
 ```
 
 The current formal solution build completes with zero warnings and errors, and
-the xUnit v3 project exposes 505 independently discoverable compatibility tests
+the xUnit v3 project exposes 559 independently discoverable compatibility tests
 to `dotnet test` and Visual Studio Test Explorer. On the
 same Windows machine and fixtures, Release wall-clock measurements for one
 frame were 2.346 s versus 7.193 s for NTSC VHS and 1.651 s versus 5.865 s for

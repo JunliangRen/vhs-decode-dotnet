@@ -1,6 +1,7 @@
 using System.Buffers.Binary;
 using System.Collections.Concurrent;
 using System.Globalization;
+using System.Numerics;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
@@ -55,13 +56,13 @@ public static class TbcOutputMetadataWriter
             _fieldsPath = jsonPath + ".fields.tmp";
             _verbose = session.ExecutionOptions.VerboseVits;
             _fieldBuilder = new FieldObjectBuilder(session);
-            _createSnapshotOutput = createSnapshotOutput ?? (static path => File.Create(path));
+            _createSnapshotOutput = createSnapshotOutput ?? DecodeOutputFile.Create;
             _fieldsWriter = new StreamWriter(
                 new FileStream(
                     _fieldsPath,
                     FileMode.Create,
                     FileAccess.Write,
-                    FileShare.Read),
+                    FileShare.ReadWrite),
                 new UTF8Encoding(encoderShouldEmitUTF8Identifier: false));
             _snapshotThread = new Thread(ConsumeSnapshots)
             {
@@ -486,6 +487,11 @@ public static class TbcOutputMetadataWriter
         {
             writer.WriteNumberValue(longValue);
         }
+        else if (scalar.TryGetValue<JsonElement>(out JsonElement jsonElement)
+            && jsonElement.ValueKind == JsonValueKind.Number)
+        {
+            writer.WriteRawValue(jsonElement.GetRawText(), skipInputValidation: false);
+        }
         else if (scalar.TryGetValue<double>(out double doubleValue))
         {
             if (!double.IsFinite(doubleValue))
@@ -575,20 +581,48 @@ public static class TbcOutputMetadataWriter
         return videoParameters;
     }
 
+    internal static void ValidatePcmAudioParameters(DecodeSession session)
+        => _ = BuildPcmAudioParameters(session);
+
     private static JsonObject BuildPcmAudioParameters(DecodeSession session)
     {
-        double sampleRate = session.LaserDiscAudioOptions?.AnalogAudioFrequency ?? 0.0;
-        if (sampleRate < 0.0)
+        LaserDiscAudioOptions? audioOptions = session.LaserDiscAudioOptions;
+        JsonNode sampleRateNode;
+        if (audioOptions?.AnalogAudioFrequencyInteger is BigInteger integerSampleRate)
         {
-            sampleRate = (1_000_000.0 / JsonDouble(session.Parameters.SysParams, "line_period")) * -sampleRate;
-        }
+            if (integerSampleRate.Sign >= 0)
+            {
+                sampleRateNode = JsonNode.Parse(
+                    integerSampleRate.ToString(CultureInfo.InvariantCulture))!;
+            }
+            else
+            {
+                double lineMultiplier = (double)BigInteger.Abs(integerSampleRate);
+                if (!double.IsFinite(lineMultiplier))
+                {
+                    throw new OverflowException("int too large to convert to float");
+                }
 
-        bool isResolvedNtscRate = sampleRate != 0.0
-            && session.LaserDiscAudioOptions?.UseNtscAudioRate == true
-            && FormatCatalog.ParentSystem(session.System) == "NTSC";
-        JsonNode sampleRateNode = isResolvedNtscRate
-            ? JsonValue.Create(sampleRate)
-            : JsonValue.Create(checked((int)sampleRate));
+                double sampleRate = (1_000_000.0 / JsonDouble(session.Parameters.SysParams, "line_period"))
+                    * lineMultiplier;
+                sampleRateNode = JsonValue.Create(sampleRate);
+            }
+        }
+        else
+        {
+            double sampleRate = audioOptions?.AnalogAudioFrequency ?? 0.0;
+            if (sampleRate < 0.0)
+            {
+                sampleRate = (1_000_000.0 / JsonDouble(session.Parameters.SysParams, "line_period")) * -sampleRate;
+            }
+
+            bool isResolvedNtscRate = sampleRate != 0.0
+                && audioOptions?.UseNtscAudioRate == true
+                && FormatCatalog.ParentSystem(session.System) == "NTSC";
+            sampleRateNode = isResolvedNtscRate
+                ? JsonValue.Create(sampleRate)
+                : JsonValue.Create(checked((int)sampleRate));
+        }
 
         return new JsonObject
         {

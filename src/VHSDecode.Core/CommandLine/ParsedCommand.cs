@@ -1,3 +1,5 @@
+using System.Numerics;
+
 namespace VHSDecode.Core.CommandLine;
 
 public sealed class ParsedCommand
@@ -41,7 +43,43 @@ public sealed class ParsedCommand
             throw new KeyNotFoundException($"No parsed value named '{destination}'.");
         }
 
-        return value is null ? default! : (T)value;
+        if (value is null)
+        {
+            return default!;
+        }
+
+        if (value is T typedValue)
+        {
+            return typedValue;
+        }
+
+        if (typeof(T) == typeof(BigInteger) && value is int intValue)
+        {
+            return (T)(object)new BigInteger(intValue);
+        }
+
+        if (value is BigInteger integer)
+        {
+            if (typeof(T) == typeof(int))
+            {
+                return (T)(object)checked((int)integer);
+            }
+
+            if (typeof(T) == typeof(long))
+            {
+                return (T)(object)checked((long)integer);
+            }
+
+            if (typeof(T) == typeof(double))
+            {
+                return (T)(object)(double)integer;
+            }
+
+            throw new InvalidCastException(
+                $"Cannot convert parsed Python integer to {typeof(T).Name}.");
+        }
+
+        return (T)value;
     }
 
     public ParsedOptionSource GetSource(string destination)
