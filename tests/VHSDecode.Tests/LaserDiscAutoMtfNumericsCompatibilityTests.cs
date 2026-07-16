@@ -33,6 +33,29 @@ public sealed class LaserDiscAutoMtfNumericsCompatibilityTests
         Assert.Equal(expectedLevelBits, BitConverter.DoubleToInt64Bits(update.Level));
     }
 
+    [Fact(DisplayName = "LD automatic MTF resets CLV state on an empty VBI pair")]
+    public void AutomaticMtfResetsClvStateOnEmptyVbiPair()
+    {
+        var controller = new LaserDiscAutoMtfController();
+        MarkAsClv(controller);
+
+        controller.ObserveAcceptedField(CreateField(200, true, []), "NTSC");
+        controller.ObserveAcceptedField(CreateField(300, false, []), "NTSC");
+
+        Assert.False(controller.IsClv);
+    }
+
+    [Fact(DisplayName = "LD automatic MTF retains first-field VBI for later second fields")]
+    public void AutomaticMtfRetainsFirstFieldVbiForLaterSecondFields()
+    {
+        var controller = new LaserDiscAutoMtfController();
+        MarkAsClv(controller);
+
+        controller.ObserveAcceptedField(CreateField(200, false, [0xF00001]), "NTSC");
+
+        Assert.False(controller.IsClv);
+    }
+
     private static void MarkAsClv(LaserDiscAutoMtfController controller)
     {
         controller.ObserveAcceptedField(CreateField(0, true, [0x8AE001]), "NTSC");

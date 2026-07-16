@@ -48,11 +48,12 @@ public sealed class LaserDiscAutoMtfController
 
     public void ObserveAcceptedField(TbcDecodedField field, string system)
     {
-        if (field.VbiData is not { Length: > 0 } codes || !field.DetectedFirstField.HasValue)
+        if (!field.DetectedFirstField.HasValue)
         {
             return;
         }
 
+        int[] codes = field.VbiData ?? [];
         if (field.DetectedFirstField.Value)
         {
             _firstFieldVbi = codes.ToArray();
@@ -69,6 +70,5 @@ public sealed class LaserDiscAutoMtfController
             _firstFieldVbi.Concat(codes),
             framesPerSecond);
         IsClv = interpretation.IsClv;
-        _firstFieldVbi = null;
     }
 }
