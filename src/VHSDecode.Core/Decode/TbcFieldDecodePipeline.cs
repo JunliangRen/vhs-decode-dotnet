@@ -2517,25 +2517,67 @@ public sealed class TbcFieldDecodePipeline
         return MedianSorted(sorted);
     }
 
-    private static double Percentile(ReadOnlySpan<double> values, double percentile)
+    internal static double Percentile(ReadOnlySpan<double> values, double percentile)
     {
-        if (values.IsEmpty)
+        if (percentile < 0.0 || percentile > 100.0 || double.IsNaN(percentile))
         {
-            return 0.0;
+            throw new ArgumentOutOfRangeException(nameof(percentile));
         }
 
-        double[] sorted = values.ToArray();
-        Array.Sort(sorted);
-        double position = Math.Clamp(percentile, 0.0, 100.0) / 100.0 * (sorted.Length - 1);
-        int left = (int)Math.Floor(position);
-        int right = (int)Math.Ceiling(position);
-        if (left == right)
+        if (values.IsEmpty)
         {
-            return sorted[left];
+            throw new IndexOutOfRangeException("Cannot compute a percentile of an empty array.");
+        }
+
+        // LD demodulation stores these slices as float32. NumPy keeps the
+        // virtual index in float64 but weak-scalar interpolation in float32.
+        var sorted = new float[values.Length];
+        bool hasNaN = false;
+        for (int i = 0; i < values.Length; i++)
+        {
+            sorted[i] = (float)values[i];
+            hasNaN |= float.IsNaN(sorted[i]);
+        }
+
+        if (hasNaN)
+        {
+            return double.NaN;
+        }
+
+        Array.Sort(sorted);
+        double quantile = percentile / 100.0;
+        double position = (sorted.Length * quantile)
+            + (1.0 + (quantile * -1.0))
+            - 1.0;
+        int left;
+        int right;
+        if (position >= sorted.Length - 1)
+        {
+            left = sorted.Length - 1;
+            right = left;
+        }
+        else if (position < 0.0)
+        {
+            left = 0;
+            right = 0;
+        }
+        else
+        {
+            left = (int)Math.Floor(position);
+            right = left + 1;
         }
 
         double fraction = position - left;
-        return sorted[left] + ((sorted[right] - sorted[left]) * fraction);
+        float difference = sorted[right] - sorted[left];
+        float leftProduct = difference * (float)fraction;
+        float result = sorted[left] + leftProduct;
+        if (fraction >= 0.5)
+        {
+            float rightProduct = difference * (float)(1.0 - fraction);
+            result = sorted[right] - rightProduct;
+        }
+
+        return result;
     }
 
     private static double MedianSorted(double[] sorted)

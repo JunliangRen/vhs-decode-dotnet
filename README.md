@@ -967,7 +967,10 @@ possible capture has already been proven byte-for-byte identical.
   fields without a greater-than-10-us VSYNC pulse, recalibrates the first
   undecoded field's `ire0` from NumPy-style 15th-percentile video when the
   initial pass is empty, and applies the LD-specific 0.75..2.5 us neighboring
-  equalizing-pulse window when rebuilding the threshold
+  equalizing-pulse window when rebuilding the threshold; that initial probe
+  and the 50/85th-percentile AGC white slices retain NumPy's float64 virtual
+  indexes, float32 weak-scalar interpolation, right-weight rounding, and NaN
+  propagation
 - LD NTSC burst-refined line locations now apply the final upstream 117.25
   degree FSC phase shift, including fields where no per-line burst adjustment
   could be measured
@@ -1369,7 +1372,7 @@ dotnet test VHSDecodeDotNet.slnx --no-build
 ```
 
 The current formal solution build completes with zero warnings and errors, and
-the xUnit v3 project exposes 621 independently discoverable compatibility tests
+the xUnit v3 project exposes 626 independently discoverable compatibility tests
 to `dotnet test` and Visual Studio Test Explorer. On the
 same Windows machine and fixtures, Release wall-clock measurements for one
 frame were 2.346 s versus 7.193 s for NTSC VHS and 1.651 s versus 5.865 s for
