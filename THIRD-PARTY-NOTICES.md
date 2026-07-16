@@ -35,7 +35,7 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 ## NumPy
 
 `VHSDecode.Core.Dsp.IirFilterDesign`, `NumpyComplexMath`,
-`NumpyComplex64Fft`, and the
+`NumpyComplex64Fft`, `NumpyReduction`, and the
 NumPy-compatible magnitude path in
 `VHSDecode.Core.HiFi.HiFiDropoutCompensator` contain modified C# adaptations
 of numerical dispatch and SIMD behavior from NumPy 2.4.6.

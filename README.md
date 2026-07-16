@@ -929,7 +929,9 @@ possible capture has already been proven byte-for-byte identical.
 - NTSC line-19 colour statistics preserve the release's literal 40..100
   `uint16` gate (including its rejection of ordinary scaled 70-IRE codes),
   float32 comb arithmetic, zeroed two-sample edges, IQ phase mapping, and
-  110..230 statistics window
+  110..230 statistics window; I/Q and magnitude reductions use NumPy's
+  pairwise float32 order, while phase conversion and SNR retain float32
+  `atan2`/`log10` arithmetic through their final stored values
 - LD MTF and AGC adjustments share a one-retry field transaction: sync history,
   parity, chroma AFC, analog-audio timing, burst phase, and player-skip state
   roll back before the same input location is demodulated again, while the new
@@ -1359,7 +1361,7 @@ dotnet test VHSDecodeDotNet.slnx --no-build
 ```
 
 The current formal solution build completes with zero warnings and errors, and
-the xUnit v3 project exposes 615 independently discoverable compatibility tests
+the xUnit v3 project exposes 616 independently discoverable compatibility tests
 to `dotnet test` and Visual Studio Test Explorer. On the
 same Windows machine and fixtures, Release wall-clock measurements for one
 frame were 2.346 s versus 7.193 s for NTSC VHS and 1.651 s versus 5.865 s for

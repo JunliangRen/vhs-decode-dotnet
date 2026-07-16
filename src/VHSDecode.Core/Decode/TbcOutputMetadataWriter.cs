@@ -5,6 +5,7 @@ using System.Numerics;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
+using VHSDecode.Core.Dsp;
 using VHSDecode.Core.Formats;
 using VHSDecode.Core.Tbc;
 
@@ -12,7 +13,7 @@ namespace VHSDecode.Core.Decode;
 
 public static class TbcOutputMetadataWriter
 {
-    private sealed record LaserDiscNtscLine19ColorInfo(double Level, double PhaseDegrees, double RawSnr);
+    internal sealed record LaserDiscNtscLine19ColorInfo(double Level, double PhaseDegrees, double RawSnr);
 
     internal static bool ShouldWriteRecoverySnapshot(int fieldsWritten)
     {
@@ -1318,7 +1319,7 @@ public static class TbcOutputMetadataWriter
         return samples;
     }
 
-    private static bool TryComputeNtscLine19ColorInfo(
+    internal static bool TryComputeNtscLine19ColorInfo(
         DecodeSession session,
         ushort[] samples,
         int fieldPhaseId,
@@ -1376,27 +1377,24 @@ public static class TbcOutputMetadataWriter
 
         int count = statsEnd - statsStart;
         var chromaMagnitude = new float[count];
-        float siSum = 0.0f;
-        float sqSum = 0.0f;
         for (int i = 0; i < count; i++)
         {
             int sourceIndex = statsStart + i;
             float iValue = si[sourceIndex];
             float qValue = sq[sourceIndex];
-            siSum += iValue;
-            sqSum += qValue;
             chromaMagnitude[i] = MathF.Sqrt((iValue * iValue) + (qValue * qValue));
         }
 
-        float signal = MeanFloat32(chromaMagnitude);
-        float noise = StandardDeviationFloat32(chromaMagnitude);
-        double phase = MathF.Atan2(siSum / count, sqSum / count) * 180.0 / Math.PI;
+        float siMean = NumpyReduction.MeanFloat32(si.AsSpan(statsStart, count));
+        float sqMean = NumpyReduction.MeanFloat32(sq.AsSpan(statsStart, count));
+        (float signal, float noise) = NumpyReduction.MeanStandardDeviationFloat32(chromaMagnitude);
+        float phase = (MathF.Atan2(siMean, sqMean) * 180.0f) / (float)Math.PI;
         if (phase < 0.0)
         {
-            phase += 360.0;
+            phase += 360.0f;
         }
 
-        double rawSnr = 20.0 * Math.Log10((float)(signal / noise));
+        float rawSnr = 20.0f * MathF.Log10(signal / noise);
         info = new LaserDiscNtscLine19ColorInfo(signal / (2.0 * session.VideoOutput.OutputScale), phase, rawSnr);
         return true;
     }
@@ -1474,17 +1472,6 @@ public static class TbcOutputMetadataWriter
         }
     }
 
-    private static float MeanFloat32(ReadOnlySpan<float> values)
-    {
-        float sum = 0.0f;
-        foreach (float value in values)
-        {
-            sum += value;
-        }
-
-        return sum / values.Length;
-    }
-
     private static double MeanPreTbcIreNumpyFloat32(
         IReadOnlyList<double> values,
         VideoOutputConverter converter)
@@ -1548,19 +1535,6 @@ public static class TbcOutputMetadataWriter
         leftCount -= leftCount % 8;
         return PairwiseSumNumpyFloat32(values, start, leftCount)
             + PairwiseSumNumpyFloat32(values, start + leftCount, count - leftCount);
-    }
-
-    private static float StandardDeviationFloat32(ReadOnlySpan<float> values)
-    {
-        float mean = MeanFloat32(values);
-        float sumSquares = 0.0f;
-        foreach (float value in values)
-        {
-            float distance = value - mean;
-            sumSquares += distance * distance;
-        }
-
-        return MathF.Sqrt(sumSquares / values.Length);
     }
 
     private static bool TryGetTbcSliceRange(
