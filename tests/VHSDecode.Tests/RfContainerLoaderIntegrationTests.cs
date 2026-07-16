@@ -217,7 +217,8 @@ public sealed class RfContainerLoaderIntegrationTests
         Assert.Equal(Pcm16Bytes(source.AsSpan(3, 65)), output.AsSpan(64 * sizeof(short), 65 * sizeof(short)).ToArray());
         Assert.Equal(Pcm16Bytes(source.AsSpan(68, 4)), output.AsSpan(192 * sizeof(short), 4 * sizeof(short)).ToArray());
         Assert.Equal(Pcm16Bytes(source.AsSpan(72, 4)), output.AsSpan(320 * sizeof(short), 4 * sizeof(short)).ToArray());
-        Assert.Equal(Pcm16Bytes(source.AsSpan(7, 61)), output.AsSpan(324 * sizeof(short), 61 * sizeof(short)).ToArray());
+        Assert.All(output.AsSpan(324 * sizeof(short), 32 * sizeof(short)).ToArray(), value => Assert.Equal(0, value));
+        Assert.Equal(Pcm16Bytes(source.AsSpan(39, 29)), output.AsSpan(356 * sizeof(short), 29 * sizeof(short)).ToArray());
         Assert.All(output.AsSpan(3 * sizeof(short), (64 - 3) * sizeof(short)).ToArray(), value => Assert.Equal(0, value));
         Assert.All(output.AsSpan(129 * sizeof(short), (192 - 129) * sizeof(short)).ToArray(), value => Assert.Equal(0, value));
         Assert.All(output.AsSpan(196 * sizeof(short), (320 - 196) * sizeof(short)).ToArray(), value => Assert.Equal(0, value));
@@ -275,6 +276,98 @@ public sealed class RfContainerLoaderIntegrationTests
             targetSample: 0);
 
         Assert.Throws<InvalidDataException>(() => ReadToEnd(stream));
+    }
+
+    [Theory(DisplayName = "IMA WAV 2-5 bit mono and stereo decode matches FFmpeg 8.1.2")]
+    [InlineData(2, 1, "1C187B39D2F739A1A9EC7ED422B748D7B4092548F74BE11009B74F24EB787BF2")]
+    [InlineData(2, 2, "743E1496FBE4D95207FA449C9BE397B543B9A34B78954AF004DD7376A39004B7")]
+    [InlineData(3, 1, "435D63C182A1A8F4D4C6F1F6CEBFA196DD68B1465F545DED5FD499E3CC5C0623")]
+    [InlineData(3, 2, "96C9AB78BF22300A19868C66BCDD284807C27E784450F0E64E8510368B8D0C84")]
+    [InlineData(4, 1, "9E25D04FB335E702344CC3519AD533411C0C570880A94C7A6A3A92A5A547C369")]
+    [InlineData(4, 2, "11A5FE1382B7FD2C3DACDEF2366F9D1CD78DCEFB45BA3C797B72751750FE6DF2")]
+    [InlineData(5, 1, "30A3EEF5E40B072E279BE2EBE1361399C02C86B31C7D6616A3082907240CE102")]
+    [InlineData(5, 2, "27015F066F78E1407A339DFC49A217401F51F26C64352E1721C618402FC08896")]
+    public void ImaWavReferenceDecoderMatchesFfmpeg812(
+        int bitsPerSample,
+        int channelCount,
+        string expectedSha256)
+    {
+        string directory = CreateTestDirectory();
+        try
+        {
+            string path = Path.Combine(directory, $"IMA {bitsPerSample} bit {channelCount} channel.wav");
+            WriteImaWave(path, bitsPerSample, channelCount);
+
+            Assert.True(ImaWavPcm16Stream.TryOpen(path, out ImaWavPcm16Stream? opened));
+            using ImaWavPcm16Stream decoder = Assert.IsType<ImaWavPcm16Stream>(opened);
+            using var output = new MemoryStream();
+            var frameSamples = new List<int>();
+            long logicalSamplePosition = 0;
+            while (decoder.ReadNextFrameGeometry() is { } geometry)
+            {
+                Assert.Equal(logicalSamplePosition * 1000, geometry.PresentationRfSample);
+                frameSamples.Add(geometry.LogicalSamples);
+                byte[] frame = new byte[checked(geometry.LogicalSamples * sizeof(short))];
+                decoder.ReadExactly(frame);
+                output.Write(frame);
+                logicalSamplePosition += geometry.LogicalSamples;
+            }
+
+            int fullFrameSamples = bitsPerSample == 4 ? 25 : bitsPerSample == 2 ? 49 : 97;
+            int shortFrameSamples = bitsPerSample == 4 ? 9 : bitsPerSample == 2 ? 17 : 33;
+            Assert.Equal([fullFrameSamples, fullFrameSamples, shortFrameSamples], frameSamples);
+            Assert.Equal(expectedSha256, Convert.ToHexString(SHA256.HashData(output.ToArray())));
+        }
+        finally
+        {
+            Directory.Delete(directory, recursive: true);
+        }
+    }
+
+    [Fact(DisplayName = "IMA WAV non-48 kHz input remains on the FFmpeg resampling path")]
+    public void ImaWavReferenceDecoderDefersNon48KhzInputToFfmpeg()
+    {
+        string directory = CreateTestDirectory();
+        try
+        {
+            string path = Path.Combine(directory, "IMA 44.1 kHz.wav");
+            WriteImaWave(path, bitsPerSample: 4, channelCount: 1, sampleRateHz: 44_100);
+
+            Assert.False(ImaWavPcm16Stream.TryOpen(path, out ImaWavPcm16Stream? opened));
+            Assert.Null(opened);
+        }
+        finally
+        {
+            Directory.Delete(directory, recursive: true);
+        }
+    }
+
+    [Fact(DisplayName = "IMA WAV loader preserves PyAV plane padding and random reads")]
+    public void ImaWavLoaderPreservesPyAvPlanePaddingAndRandomReads()
+    {
+        string directory = CreateTestDirectory();
+        try
+        {
+            string path = Path.Combine(directory, "IMA 4 bit padded.wav");
+            WriteImaWave(path, bitsPerSample: 4, channelCount: 1);
+            using var loader = new FfmpegPcm16SampleLoader(path);
+            using FileStream input = File.OpenRead(path);
+            double[] all = Assert.IsType<double[]>(loader.Read(input, 0, 192));
+            Assert.Equal(
+                "F696382542B2A05CF500F2DBE48BFB7C7AAE72D127290974C4823C66A6790D74",
+                Sha256(all));
+            Assert.Null(loader.Read(input, 184, 16));
+
+            using var offsetLoader = new FfmpegPcm16SampleLoader(path);
+            using FileStream offsetInput = File.OpenRead(path);
+            Assert.Equal(
+                all.AsSpan(130, 32).ToArray(),
+                offsetLoader.Read(offsetInput, 130, 32));
+        }
+        finally
+        {
+            Directory.Delete(directory, recursive: true);
+        }
     }
 
     [Fact(DisplayName = "RF ALAC variable terminal frame and EOF match Release 4.0")]
@@ -484,6 +577,10 @@ public sealed class RfContainerLoaderIntegrationTests
             }
 
             source.AsSpan(sourceOffset, frameLength).CopyTo(recycledFrames[slot]);
+            Array.Clear(
+                recycledFrames[slot],
+                frameLength,
+                Math.Min(32, recycledFrames[slot].Length - frameLength));
             output.AddRange(recycledFrames[slot]);
             sourceOffset += frameLength;
         }
@@ -623,6 +720,105 @@ public sealed class RfContainerLoaderIntegrationTests
                 WritePcmSample(output, samples[rightIndex], bitsPerSample);
             }
         }
+    }
+
+    private static void WriteImaWave(
+        string path,
+        int bitsPerSample,
+        int channelCount,
+        int sampleRateHz = FfmpegPcm16SampleLoader.ContainerAudioSampleRateHz)
+    {
+        int compressedBytesPerChannel = bitsPerSample switch
+        {
+            2 => 4,
+            3 => 12,
+            4 => 4,
+            5 => 20,
+            _ => throw new ArgumentOutOfRangeException(nameof(bitsPerSample))
+        };
+        int samplesPerGroup = bitsPerSample == 2 ? 16 : bitsPerSample == 4 ? 8 : 32;
+        const int fullGroups = 3;
+        int blockAlign = checked((4 * channelCount) + (compressedBytesPerChannel * channelCount * fullGroups));
+        int samplesPerBlock = checked(1 + (samplesPerGroup * fullGroups));
+        byte[][] blocks =
+        [
+            BuildImaBlock(bitsPerSample, channelCount, fullGroups, blockIndex: 0),
+            BuildImaBlock(bitsPerSample, channelCount, fullGroups, blockIndex: 1),
+            BuildImaBlock(bitsPerSample, channelCount, groups: 1, blockIndex: 2)
+        ];
+        int dataLength = blocks.Sum(block => block.Length);
+        int totalSamples = checked((samplesPerBlock * 2) + 1 + samplesPerGroup);
+        int averageBytesPerSecond = checked(sampleRateHz * blockAlign / samplesPerBlock);
+
+        using var body = new MemoryStream();
+        using (var writer = new BinaryWriter(body, Encoding.ASCII, leaveOpen: true))
+        {
+            writer.Write("WAVE"u8);
+            writer.Write("fmt "u8);
+            writer.Write(20);
+            writer.Write((short)0x0011);
+            writer.Write((short)channelCount);
+            writer.Write(sampleRateHz);
+            writer.Write(averageBytesPerSecond);
+            writer.Write((short)blockAlign);
+            writer.Write((short)bitsPerSample);
+            writer.Write((short)2);
+            writer.Write((short)samplesPerBlock);
+            writer.Write("fact"u8);
+            writer.Write(4);
+            writer.Write(totalSamples);
+            writer.Write("data"u8);
+            writer.Write(dataLength);
+            foreach (byte[] block in blocks)
+            {
+                writer.Write(block);
+            }
+        }
+
+        byte[] waveBody = body.ToArray();
+        using var output = new BinaryWriter(File.Create(path), Encoding.ASCII, leaveOpen: false);
+        output.Write("RIFF"u8);
+        output.Write(waveBody.Length);
+        output.Write(waveBody);
+    }
+
+    private static byte[] BuildImaBlock(
+        int bitsPerSample,
+        int channelCount,
+        int groups,
+        int blockIndex)
+    {
+        int compressedBytesPerChannel = bitsPerSample switch
+        {
+            2 => 4,
+            3 => 12,
+            4 => 4,
+            5 => 20,
+            _ => throw new ArgumentOutOfRangeException(nameof(bitsPerSample))
+        };
+        using var output = new MemoryStream();
+        using (var writer = new BinaryWriter(output, Encoding.ASCII, leaveOpen: true))
+        {
+            for (int channel = 0; channel < channelCount; channel++)
+            {
+                writer.Write(checked((short)(-21_000 + (blockIndex * 7_000) + (channel * 1_337))));
+                writer.Write(checked((byte)(17 + (blockIndex * 19) + (channel * 7))));
+                writer.Write((byte)0);
+            }
+
+            int length = checked(compressedBytesPerChannel * channelCount * groups);
+            uint state = 0x9E3779B9U
+                ^ checked((uint)bitsPerSample << 24)
+                ^ checked((uint)channelCount << 16)
+                ^ checked((uint)blockIndex);
+            for (int index = 0; index < length; index++)
+            {
+                state = unchecked((state * 1_664_525U) + 1_013_904_223U);
+                writer.Write((byte)(state >> 24));
+            }
+        }
+
+        return output.ToArray();
     }
 
     private static void WritePcmSample(BinaryWriter output, short sample, int bitsPerSample)

@@ -173,14 +173,20 @@ Implemented:
   geometry: `ffprobe` supplies stream rate/channel/format data, while FFmpeg
   frame metadata supplies every converted frame's sample count and first-frame
   PTS. The loader retains the observable 32-sample aligned plane padding,
-  including `AudioResampler`'s non-shrinking high-water plane capacity and
-  its alternating recycled tail samples, and maps seeks in that padded sample
-  space. Release 4.0 SHA and reconstructed
-  plane baselines cover 40 kHz and 17.9 kHz mono/stereo WAV, PCM16/PCM24 FLAC,
+  including FFmpeg's 64-byte zeroed safety area, `AudioResampler`'s
+  non-shrinking high-water plane capacity, and its alternating recycled tail
+  samples, and maps seeks in that padded sample space. Release 4.0 SHA and
+  reconstructed plane baselines cover 40 kHz and 17.9 kHz mono/stereo WAV,
+  PCM16/PCM24 FLAC,
   Ogg/FLAC LDF, AAC, MP3, ALAC, Vorbis, and stereo float WAV, including MP3's
   short initial frame, Vorbis large-frame-to-small-frame transitions, variable
   terminal frames, nonzero restarts beyond the 2 MB rewind window, and EOF
   frame flushing
+- complete static 48 kHz IMA ADPCM WAV inputs use an internal FFmpeg
+  n8.1.2-compatible 2-, 3-, 4-, and 5-bit mono/stereo block decoder, avoiding
+  host-FFmpeg decoder drift; exact logical-frame, stereo-downmix, plane-padding,
+  and random-read baselines cover all eight bit-depth/channel combinations,
+  while other sample rates retain the FFmpeg resampling path
 - upstream-style FFmpeg stdin fallback for unrecognized RF input containers
 - upstream-style FFmpeg stdin resampling loader for raw RF inputs when
   `--inputfreq`, `-f`, or `--cxadc` requires conversion to 40 MHz, including
@@ -1209,7 +1215,8 @@ Not complete yet:
   pairs, and 1,428 float32-exact channels across all 357 valid tape
   system/format/speed cases
 - remaining rare container codec/timestamp edge cases outside the verified PCM
-  WAV, native FLAC, Ogg/FLAC LDF, AAC, MP3, ALAC, Vorbis, and float WAV paths
+  WAV, IMA ADPCM WAV, native FLAC, Ogg/FLAC LDF, AAC, MP3, ALAC, Vorbis, and
+  float WAV paths
 - remaining HiFi real-capture end-to-end output baselines and hosted GUI
   behavior; the command runner, Windows live preview, and GNU Radio path are
   wired
@@ -1235,7 +1242,7 @@ dotnet test VHSDecodeDotNet.slnx --no-build
 ```
 
 The current formal solution build completes with zero warnings and errors, and
-the xUnit v3 project exposes 564 independently discoverable compatibility tests
+the xUnit v3 project exposes 574 independently discoverable compatibility tests
 to `dotnet test` and Visual Studio Test Explorer. On the
 same Windows machine and fixtures, Release wall-clock measurements for one
 frame were 2.346 s versus 7.193 s for NTSC VHS and 1.651 s versus 5.865 s for

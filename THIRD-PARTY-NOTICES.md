@@ -100,3 +100,17 @@ terms of the GNU Lesser General Public License as published by the Free
 Software Foundation; either version 2.1 of the License, or (at your option)
 any later version. See `third_party/libsoxr/COPYING.LGPL` for the complete
 license text.
+
+## FFmpeg
+
+`VHSDecode.Core.Rf.ImaWavPcm16Stream` contains a modified C# adaptation of
+FFmpeg n8.1.2's IMA WAV block decoder, including the 2-, 3-, 4-, and 5-bit
+reference predictor paths and mono downmix behavior.
+
+Copyright (c) 2000-2025 the FFmpeg developers
+
+FFmpeg is free software; you can redistribute it and/or modify it under the
+terms of the GNU Lesser General Public License as published by the Free
+Software Foundation; either version 2.1 of the License, or (at your option)
+any later version. The complete LGPL 2.1 text is available at
+`third_party/libsoxr/COPYING.LGPL`.

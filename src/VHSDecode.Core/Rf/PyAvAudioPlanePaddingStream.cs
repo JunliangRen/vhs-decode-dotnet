@@ -7,6 +7,8 @@ internal readonly record struct PyAvAudioFrameGeometry(
 // PyAV exposes each converted plane's aligned capacity in addition to its logical samples.
 internal sealed class PyAvAudioPlanePaddingStream : Stream
 {
+    private const int FfmpegPaddingBytes = 64;
+
     private readonly Stream _source;
     private readonly int _fixedLogicalFrameSamples;
     private readonly int _fixedPaddedFrameSamples;
@@ -234,6 +236,14 @@ internal sealed class PyAvAudioPlanePaddingStream : Stream
             {
                 throw new InvalidDataException(
                     "FFmpeg ended in the middle of a reported audio frame.");
+            }
+
+            if (_nextFrame is not null && logicalBytes < _frame.Length)
+            {
+                Array.Clear(
+                    _frame,
+                    logicalBytes,
+                    Math.Min(FfmpegPaddingBytes, _frame.Length - logicalBytes));
             }
 
             ResolveInitialSkip(geometry.Value);

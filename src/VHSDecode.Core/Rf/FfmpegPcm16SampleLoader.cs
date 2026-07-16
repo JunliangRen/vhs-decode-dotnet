@@ -331,6 +331,15 @@ public sealed class FfmpegPcm16SampleLoader : IRfSampleLoader, IDisposable
     private Stream OpenFfmpegOutput(string filename, long sample)
     {
         _stderr.Clear();
+        if (ImaWavPcm16Stream.TryOpen(filename, out ImaWavPcm16Stream? imaWav)
+            && imaWav is not null)
+        {
+            return new PyAvAudioPlanePaddingStream(
+                imaWav,
+                imaWav.ReadNextFrameGeometry,
+                sample);
+        }
+
         ContainerAudioInfo audioInfo = ResolveContainerAudioInfo(filename);
         Channel<PyAvAudioFrameGeometry>? frameGeometry = audioInfo.RequiresPyAvPlanePadding
             ? Channel.CreateUnbounded<PyAvAudioFrameGeometry>(new UnboundedChannelOptions
