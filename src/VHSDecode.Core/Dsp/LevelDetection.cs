@@ -432,15 +432,7 @@ public static class LevelDetection
     }
 
     private static double Mean(ReadOnlySpan<double> data)
-    {
-        double sum = 0.0;
-        for (int i = 0; i < data.Length; i++)
-        {
-            sum += data[i];
-        }
-
-        return sum / data.Length;
-    }
+        => NumpyReduction.MeanFloat64(data);
 
     private static double Median(ReadOnlySpan<double> data)
     {

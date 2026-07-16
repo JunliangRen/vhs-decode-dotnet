@@ -1061,6 +1061,11 @@ possible capture has already been proven byte-for-byte identical.
   the 30-step/5-IRE pulse-count search and finally the legacy level detector;
   `--fallback_vsync` enables the upstream abnormal-long-pulse candidate, while
   405/819-line systems retain the upstream serration bypass
+- long VSync interiors and surrounding EQ back porches use NumPy-compatible
+  float64 pairwise means during serration level refinement, preserving the
+  calibrated sync and blank values instead of sequential-sum rounding
+- serration half-amplitude splitting uses the upstream Numba float64 fast-math
+  reduction order, preserving peak/valley classification at ULP boundaries
 - sequence decoding now commits each field as soon as field-order planning
   releases it: main/chroma TBC and LD EFM, pre-EFM, PCM, RF-TBC, and AC3
   sidecars stay open and preserve their cross-field state instead of retaining
@@ -1349,7 +1354,7 @@ dotnet test VHSDecodeDotNet.slnx --no-build
 ```
 
 The current formal solution build completes with zero warnings and errors, and
-the xUnit v3 project exposes 599 independently discoverable compatibility tests
+the xUnit v3 project exposes 601 independently discoverable compatibility tests
 to `dotnet test` and Visual Studio Test Explorer. On the
 same Windows machine and fixtures, Release wall-clock measurements for one
 frame were 2.346 s versus 7.193 s for NTSC VHS and 1.651 s versus 5.865 s for
