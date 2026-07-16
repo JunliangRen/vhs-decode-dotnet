@@ -178,6 +178,11 @@ public sealed class DecodeRunner
             or NotSupportedException
             or FormatParameterException)
         {
+            if (ex is DecodeThreadInitializationException)
+            {
+                File.WriteAllText(command.OutputBase + ".log", string.Empty);
+            }
+
             error.WriteLine(ex.Message);
             return 1;
         }

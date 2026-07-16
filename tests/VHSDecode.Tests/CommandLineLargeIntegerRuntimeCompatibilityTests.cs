@@ -76,6 +76,134 @@ public sealed class CommandLineLargeIntegerRuntimeCompatibilityTests
         Assert.Equal(BigInteger.Zero, negative.RunBounds.RequestedFieldCount);
     }
 
+    [Fact(DisplayName = "Large thread values retain v0.4.0 override and negative-range semantics")]
+    public void LargeThreadValuesRetainV040OverrideAndNegativeRangeSemantics()
+    {
+        const string positiveText = "99999999999999999999999999999999999999999999999999";
+        const string negativeText = "-99999999999999999999999999999999999999999999999999";
+
+        using DecodeSession debugPlot = CreateVhs(
+            "--threads",
+            positiveText,
+            "--debug_plot",
+            "demodblock");
+        using DecodeSession negativeDebugPlot = CreateVhs(
+            "--threads",
+            negativeText,
+            "--debug_plot",
+            "demodblock");
+        using DecodeSession cvbs = Create(CliSpecs.Cvbs, "--threads", negativeText);
+        using DecodeSession laserDisc = Create(CliSpecs.LaserDisc, "--threads", negativeText);
+
+        Assert.Equal(BigInteger.Parse(positiveText), debugPlot.ExecutionOptions.RequestedThreadsInteger);
+        Assert.Equal(BigInteger.Parse(negativeText), negativeDebugPlot.ExecutionOptions.RequestedThreadsInteger);
+        Assert.Equal(BigInteger.Parse(negativeText), cvbs.ExecutionOptions.RequestedThreadsInteger);
+        Assert.Equal(BigInteger.Parse(negativeText), laserDisc.ExecutionOptions.RequestedThreadsInteger);
+        Assert.Equal(0, debugPlot.ExecutionOptions.WorkerThreads);
+        Assert.Equal(0, negativeDebugPlot.ExecutionOptions.WorkerThreads);
+        Assert.Equal(0, cvbs.ExecutionOptions.WorkerThreads);
+        Assert.Equal(0, laserDisc.ExecutionOptions.WorkerThreads);
+    }
+
+    [Fact(DisplayName = "Invalid VHS thread counts retain Python worker initialization errors")]
+    public void InvalidVhsThreadCountsRetainPythonWorkerInitializationErrors()
+    {
+        ArgumentException negative = Assert.ThrowsAny<ArgumentException>(
+            () => CreateVhs("--threads", "-1"));
+        Assert.Equal("max_workers must be greater than 0", negative.Message);
+
+        const string hugeText = "99999999999999999999999999999999999999999999999999";
+        foreach (DecodeCommandSpec spec in new[] { CliSpecs.Vhs, CliSpecs.Cvbs, CliSpecs.LaserDisc })
+        {
+            ArgumentException huge = Assert.ThrowsAny<ArgumentException>(
+                () => Create(spec, "--threads", hugeText));
+            Assert.Equal("can't start new thread", huge.Message);
+        }
+    }
+
+    [Fact(DisplayName = "Thread initialization failures retain the upstream empty log artifact")]
+    public void ThreadInitializationFailuresRetainUpstreamEmptyLogArtifact()
+    {
+        string tempDirectory = CreateTempDirectory();
+        try
+        {
+            string inputPath = Path.Combine(tempDirectory, "input.s16");
+            string outputBase = Path.Combine(tempDirectory, "failure");
+            File.WriteAllBytes(inputPath, [0, 0]);
+            ParsedCommand command = new CommandLineParser().Parse(
+                CliSpecs.Vhs,
+                ["--pal", "--threads", "-1", inputPath, outputBase]);
+            var output = new StringWriter();
+            var error = new StringWriter();
+
+            int exitCode = new DecodeRunner().Run(
+                command,
+                output,
+                error,
+                TestContext.Current.CancellationToken);
+
+            Assert.Equal(1, exitCode);
+            Assert.Equal(string.Empty, output.ToString());
+            Assert.Equal("max_workers must be greater than 0" + Environment.NewLine, error.ToString());
+            Assert.True(File.Exists(outputBase + ".log"));
+            Assert.Equal(0, new FileInfo(outputBase + ".log").Length);
+            Assert.False(File.Exists(outputBase + ".tbc"));
+        }
+        finally
+        {
+            Directory.Delete(tempDirectory, recursive: true);
+        }
+    }
+
+    [Fact(DisplayName = "Ignored and negative huge thread values survive zero-field completion")]
+    public void IgnoredAndNegativeHugeThreadValuesSurviveZeroFieldCompletion()
+    {
+        const string positiveText = "99999999999999999999999999999999999999999999999999";
+        const string negativeText = "-99999999999999999999999999999999999999999999999999";
+        string tempDirectory = CreateTempDirectory();
+        try
+        {
+            using DecodeSession vhs = CreateWithOutput(
+                CliSpecs.Vhs,
+                Path.Combine(tempDirectory, "vhs"),
+                "--pal",
+                "--length",
+                "0",
+                "--threads",
+                positiveText,
+                "--debug_plot",
+                "demodblock");
+            using DecodeSession cvbs = CreateWithOutput(
+                CliSpecs.Cvbs,
+                Path.Combine(tempDirectory, "cvbs"),
+                "--pal",
+                "--length",
+                "0",
+                "--threads",
+                negativeText);
+            using DecodeSession laserDisc = CreateWithOutput(
+                CliSpecs.LaserDisc,
+                Path.Combine(tempDirectory, "ld"),
+                "--PAL",
+                "--length",
+                "0",
+                "--threads",
+                negativeText);
+
+            var engine = new TbcFieldSequenceDecodeEngine();
+            Assert.True(engine.TryDecodeAndWrite(vhs, new MemoryStream()).Success);
+            Assert.True(engine.TryDecodeAndWrite(cvbs, new MemoryStream()).Success);
+            Assert.True(engine.TryDecodeAndWrite(laserDisc, new MemoryStream()).Success);
+            Assert.Equal("{", File.ReadAllText(vhs.OutputBase + ".tbc.json.tmp"));
+            Assert.Equal("{", File.ReadAllText(cvbs.OutputBase + ".tbc.json.tmp"));
+            Assert.Equal("{", File.ReadAllText(laserDisc.OutputBase + ".tbc.json.tmp"));
+        }
+        finally
+        {
+            Directory.Delete(tempDirectory, recursive: true);
+        }
+    }
+
     [Fact(DisplayName = "Decode seek uses only minus one as the disabled sentinel")]
     public void DecodeSeekUsesOnlyMinusOneAsTheDisabledSentinel()
     {
@@ -214,13 +342,19 @@ public sealed class CommandLineLargeIntegerRuntimeCompatibilityTests
     }
 
     private static DecodeSession CreateLaserDiscWithOutput(string outputBase, params string[] options)
+        => CreateWithOutput(CliSpecs.LaserDisc, outputBase, options);
+
+    private static DecodeSession CreateWithOutput(
+        DecodeCommandSpec spec,
+        string outputBase,
+        params string[] options)
     {
         var arguments = new List<string>(options)
         {
             "input.s16",
             outputBase
         };
-        ParsedCommand command = new CommandLineParser().Parse(CliSpecs.LaserDisc, arguments);
+        ParsedCommand command = new CommandLineParser().Parse(spec, arguments);
         return DecodeSessionFactory.Create(command);
     }
 

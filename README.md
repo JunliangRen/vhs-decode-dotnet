@@ -942,6 +942,14 @@ Implemented:
   keeping stream/FFmpeg/GNU Radio reads ordered; `-t 1` and debug-plot `0`
   retain the deterministic single-thread path, and parallel blocks are stitched
   in their original overlap-save order
+- Python's arbitrary-precision thread values now survive until their v0.4.0
+  runtime use: VHS debug plots ignore even enormous positive or negative values,
+  CVBS/LD negative values retain the nonzero request with zero demod workers for
+  zero-field completion, active VHS negatives report `max_workers must be greater
+  than 0`, and unrepresentably large active worker counts report `can't start new
+  thread` after creating only the upstream empty log artifact. Differential
+  zero-field VHS/CVBS/LD probes match output sets and sizes, and the LD SQLite and
+  JSON temporary artifacts are byte-identical
 - VHS `--cxadc` now emits v0.4.0's exact deprecation warning to stderr and as a
   timestamped `WARNING` record in `.log` before the Sys/RF debug records
 - command help now uses the actual executable/script name and mirrors argparse's
@@ -1211,7 +1219,7 @@ dotnet test VHSDecodeDotNet.slnx --no-build
 ```
 
 The current formal solution build completes with zero warnings and errors, and
-the xUnit v3 project exposes 527 independently discoverable compatibility tests
+the xUnit v3 project exposes 531 independently discoverable compatibility tests
 to `dotnet test` and Visual Studio Test Explorer. On the
 same Windows machine and fixtures, Release wall-clock measurements for one
 frame were 2.346 s versus 7.193 s for NTSC VHS and 1.651 s versus 5.865 s for

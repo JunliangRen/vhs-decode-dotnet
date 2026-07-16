@@ -77,7 +77,12 @@ public sealed record DecodeExecutionOptions(
     bool IgnoreLeadOut,
     bool VerboseVits,
     bool UseProfiler,
-    bool CxAdcCompatibilityMode);
+    bool CxAdcCompatibilityMode)
+{
+    public BigInteger RequestedThreadsInteger { get; init; } = new(RequestedThreads);
+}
+
+internal sealed class DecodeThreadInitializationException(string message) : ArgumentException(message);
 
 public sealed record LaserDiscAudioOptions(
     bool DecodeDigitalAudio,
@@ -454,9 +459,27 @@ public static class DecodeSessionFactory
 
     private static DecodeExecutionOptions BuildExecutionOptions(ParsedCommand command)
     {
-        int requestedThreads = command.Get<int>("threads");
+        BigInteger requestedThreadsInteger = command.Get<BigInteger>("threads");
         string? debugPlotPath = NullableString(command, "debug_plot");
-        int workerThreads = command.Spec.Name == "vhs" && debugPlotPath is not null
+        bool threadsIgnored = command.Spec.Name == "vhs" && debugPlotPath is not null;
+        if (!threadsIgnored && command.Spec.Name == "vhs" && requestedThreadsInteger < BigInteger.Zero)
+        {
+            throw new DecodeThreadInitializationException("max_workers must be greater than 0");
+        }
+
+        if (!threadsIgnored && requestedThreadsInteger > int.MaxValue)
+        {
+            // v0.4.0 eagerly starts this many DemodCache workers and eventually
+            // surfaces threading.Thread.start()'s platform failure.
+            throw new DecodeThreadInitializationException("can't start new thread");
+        }
+
+        int requestedThreads = requestedThreadsInteger > int.MaxValue
+            ? int.MaxValue
+            : requestedThreadsInteger < int.MinValue
+                ? int.MinValue
+                : (int)requestedThreadsInteger;
+        int workerThreads = threadsIgnored || requestedThreadsInteger < BigInteger.Zero
             ? 0
             : requestedThreads;
 
@@ -470,7 +493,10 @@ public static class DecodeSessionFactory
             IgnoreLeadOut: BoolValueOrDefault(command, "ignoreleadout"),
             VerboseVits: BoolValueOrDefault(command, "verboseVITS"),
             UseProfiler: BoolValueOrDefault(command, "use_profiler"),
-            CxAdcCompatibilityMode: command.Spec.Name == "vhs" && command.Get<bool>("cxadc"));
+            CxAdcCompatibilityMode: command.Spec.Name == "vhs" && command.Get<bool>("cxadc"))
+        {
+            RequestedThreadsInteger = requestedThreadsInteger
+        };
     }
 
     private static LaserDiscAudioOptions? BuildLaserDiscAudioOptions(ParsedCommand command, string system)

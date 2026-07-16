@@ -878,7 +878,7 @@ public sealed class TbcFieldSequenceDecodeEngine
     private bool ShouldUseCvbsWorkerPrefetch(DecodeSession session)
     {
         return (_usesSessionReader || EnableWorkerPrefetchForCustomReader)
-            && session.ExecutionOptions.RequestedThreads != 0
+            && session.ExecutionOptions.RequestedThreadsInteger != BigInteger.Zero
             && ShouldDeferCvbsOutputConversion(session);
     }
 
