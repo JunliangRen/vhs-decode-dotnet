@@ -723,9 +723,11 @@ possible capture has already been proven byte-for-byte identical.
 - dropout detection now follows three distinct v0.4.0 paths: VHS/tape formats
   use only the RF envelope, LD uses only its demod/RFHPF error map, and CVBS
   keeps `doDOD=False` and suppresses `dropOuts` metadata
-- VHS/tape DOD uses the whole-read envelope mean or absolute threshold, the
-  parity-specific `lineoffset + 1` field bounds, and preserves v0.4.0's actual
-  hysteresis/merge behavior plus its zero-width next-line boundary records
+- VHS/tape DOD uses the NumPy-compatible float32 pairwise whole-read envelope
+  mean and float32 percentage multiplication, or the supplied absolute
+  threshold; it keeps the parity-specific `lineoffset + 1` field bounds and
+  preserves v0.4.0's actual hysteresis/merge behavior plus its zero-width
+  next-line boundary records
 - LD DOD combines PAL/NTSC IRE validity windows, HSYNC/expected VSYNC minimums,
   raw demod excursions above Nyquist, and RFHPF excursions above
   `3 * std(rfhpf)` using NumPy NaN comparison semantics; its dynamic range
@@ -1343,7 +1345,7 @@ dotnet test VHSDecodeDotNet.slnx --no-build
 ```
 
 The current formal solution build completes with zero warnings and errors, and
-the xUnit v3 project exposes 597 independently discoverable compatibility tests
+the xUnit v3 project exposes 598 independently discoverable compatibility tests
 to `dotnet test` and Visual Studio Test Explorer. On the
 same Windows machine and fixtures, Release wall-clock measurements for one
 frame were 2.346 s versus 7.193 s for NTSC VHS and 1.651 s versus 5.865 s for

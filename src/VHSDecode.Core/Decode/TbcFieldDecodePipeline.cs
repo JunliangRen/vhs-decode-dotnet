@@ -4548,7 +4548,7 @@ public sealed class TbcFieldDecodePipeline
         }
 
         double threshold = _dropoutOptions.AbsoluteThreshold
-            ?? Mean(envelope) * _dropoutOptions.ThresholdFraction;
+            ?? NumpyReduction.MeanFloat32(envelope) * (float)_dropoutOptions.ThresholdFraction;
         IReadOnlyList<RfDropoutRange> ranges = RfDropoutDetector.FindDropouts(
             envelope,
             startSample,
