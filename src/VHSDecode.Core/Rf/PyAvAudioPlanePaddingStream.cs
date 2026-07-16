@@ -12,9 +12,12 @@ internal sealed class PyAvAudioPlanePaddingStream : Stream
     private readonly int _fixedPaddedFrameSamples;
     private readonly Func<PyAvAudioFrameGeometry?>? _nextFrame;
     private readonly long _targetSample;
+    private readonly byte[][]? _recycledFrames;
     private byte[] _frame;
     private long _remainingInitialSkipSamples;
     private bool _initialSkipResolved;
+    private int _recycledFrameIndex;
+    private int _variableFrameBytes;
     private int _frameOffset;
     private int _frameLength;
     private bool _disposed;
@@ -80,6 +83,7 @@ internal sealed class PyAvAudioPlanePaddingStream : Stream
         _source = source;
         _nextFrame = nextFrame;
         _targetSample = targetSample;
+        _recycledFrames = [[], []];
         _frame = [];
     }
 
@@ -181,19 +185,29 @@ internal sealed class PyAvAudioPlanePaddingStream : Stream
                 throw new InvalidDataException("FFmpeg reported an invalid audio frame length.");
             }
 
-            int paddedFrameSamples = _nextFrame is null
-                ? _fixedPaddedFrameSamples
-                : CalculatePaddedFrameSamples(logicalFrameSamples);
             int logicalFrameBytes = checked(logicalFrameSamples * sizeof(short));
-            int paddedFrameBytes = checked(paddedFrameSamples * sizeof(short));
-            if (_frame.Length != paddedFrameBytes)
-            {
-                _frame = new byte[paddedFrameBytes];
-            }
-            else
+            if (_nextFrame is null)
             {
                 Array.Clear(_frame);
             }
+            else
+            {
+                int minimumPaddedFrameBytes = checked(
+                    CalculatePaddedFrameSamples(logicalFrameSamples) * sizeof(short));
+                _variableFrameBytes = Math.Max(_variableFrameBytes, minimumPaddedFrameBytes);
+                // PyAV alternates two output frames, leaving each short frame's old tail observable.
+                byte[][] recycledFrames = _recycledFrames
+                    ?? throw new InvalidOperationException("Variable frame buffers are not configured.");
+                int slot = _recycledFrameIndex++ & 1;
+                if (recycledFrames[slot].Length < _variableFrameBytes)
+                {
+                    recycledFrames[slot] = new byte[_variableFrameBytes];
+                }
+
+                _frame = recycledFrames[slot];
+            }
+
+            int paddedFrameSamples = _frame.Length / sizeof(short);
 
             int logicalBytes = 0;
             while (logicalBytes < logicalFrameBytes)

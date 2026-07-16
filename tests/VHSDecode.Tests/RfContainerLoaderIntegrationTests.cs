@@ -195,6 +195,35 @@ public sealed class RfContainerLoaderIntegrationTests
         Assert.Equal(Pcm16Bytes(expected), ReadToEnd(beforeFirstPts));
     }
 
+    [Fact(DisplayName = "PyAV plane padding retains high-water capacity and recycled tails")]
+    public void PyAvPlanePaddingRetainsHighWaterCapacityAndRecycledTails()
+    {
+        short[] source = Enumerable.Range(1, 76).Select(value => (short)value).ToArray();
+        var geometries = new Queue<PyAvAudioFrameGeometry>(
+        [
+            new PyAvAudioFrameGeometry(3, 0),
+            new PyAvAudioFrameGeometry(65, 3_000),
+            new PyAvAudioFrameGeometry(4, 68_000),
+            new PyAvAudioFrameGeometry(4, 72_000)
+        ]);
+        using var stream = new PyAvAudioPlanePaddingStream(
+            new MemoryStream(Pcm16Bytes(source)),
+            () => geometries.TryDequeue(out PyAvAudioFrameGeometry geometry) ? geometry : null,
+            targetSample: 0);
+
+        byte[] output = ReadToEnd(stream);
+        Assert.Equal((64 + 128 + 128 + 128) * sizeof(short), output.Length);
+        Assert.Equal(Pcm16Bytes(source.AsSpan(0, 3)), output.AsSpan(0, 3 * sizeof(short)).ToArray());
+        Assert.Equal(Pcm16Bytes(source.AsSpan(3, 65)), output.AsSpan(64 * sizeof(short), 65 * sizeof(short)).ToArray());
+        Assert.Equal(Pcm16Bytes(source.AsSpan(68, 4)), output.AsSpan(192 * sizeof(short), 4 * sizeof(short)).ToArray());
+        Assert.Equal(Pcm16Bytes(source.AsSpan(72, 4)), output.AsSpan(320 * sizeof(short), 4 * sizeof(short)).ToArray());
+        Assert.Equal(Pcm16Bytes(source.AsSpan(7, 61)), output.AsSpan(324 * sizeof(short), 61 * sizeof(short)).ToArray());
+        Assert.All(output.AsSpan(3 * sizeof(short), (64 - 3) * sizeof(short)).ToArray(), value => Assert.Equal(0, value));
+        Assert.All(output.AsSpan(129 * sizeof(short), (192 - 129) * sizeof(short)).ToArray(), value => Assert.Equal(0, value));
+        Assert.All(output.AsSpan(196 * sizeof(short), (320 - 196) * sizeof(short)).ToArray(), value => Assert.Equal(0, value));
+        Assert.All(output.AsSpan(385 * sizeof(short)).ToArray(), value => Assert.Equal(0, value));
+    }
+
     [Fact(DisplayName = "PyAV framed FFmpeg metadata and seek arguments match Release 4.0")]
     public void PyAvFramedFfmpegMetadataAndSeekArgumentsMatchRelease40()
     {
@@ -275,6 +304,48 @@ public sealed class RfContainerLoaderIntegrationTests
                 expected.Select(value => (double)value),
                 loader.Read(input, 0, expected.Length));
             Assert.Null(loader.Read(input, expected.Length - 8, 16));
+        }
+        finally
+        {
+            Directory.Delete(directory, recursive: true);
+        }
+    }
+
+    [Fact(DisplayName = "RF Vorbis resampler high-water frames match Release 4.0")]
+    public void RfVorbisResamplerHighWaterFramesMatchRelease40()
+    {
+        Assert.SkipUnless(
+            CommandIsAvailable("ffmpeg") && CommandIsAvailable("ffprobe"),
+            "ffmpeg and ffprobe must be available on PATH.");
+
+        string directory = CreateTestDirectory();
+        try
+        {
+            short[] source = CreateSamples(200_000);
+            string wavePath = Path.Combine(directory, "Vorbis source.wav");
+            string vorbisPath = Path.Combine(directory, "variable Vorbis frames.vhs");
+            WriteWave(wavePath, source);
+            EncodeVorbis(wavePath, vorbisPath);
+
+            int[] frameLengths = ProbeAudioFrameLengths(vorbisPath);
+            int largestFrameIndex = Array.IndexOf(frameLengths, frameLengths.Max());
+            Assert.InRange(largestFrameIndex, 0, frameLengths.Length - 2);
+            Assert.Contains(frameLengths[(largestFrameIndex + 1)..], length => length < frameLengths[largestFrameIndex]);
+            short[] decoded = DecodePcm16(vorbisPath);
+            short[] expected = BuildPaddedSamples(decoded, frameLengths);
+
+            using var loader = new FfmpegPcm16SampleLoader(vorbisPath);
+            using FileStream input = File.OpenRead(vorbisPath);
+            Assert.Equal(
+                expected.Select(value => (double)value),
+                loader.Read(input, 0, expected.Length));
+            Assert.Null(loader.Read(input, expected.Length - 8, 16));
+
+            using var offsetLoader = new FfmpegPcm16SampleLoader(vorbisPath);
+            using FileStream offsetInput = File.OpenRead(vorbisPath);
+            Assert.Equal(
+                expected.AsSpan(50_000, 64).ToArray().Select(value => (double)value),
+                offsetLoader.Read(offsetInput, 50_000, 64));
         }
         finally
         {
@@ -396,13 +467,24 @@ public sealed class RfContainerLoaderIntegrationTests
     private static short[] BuildPaddedSamples(short[] source, IReadOnlyList<int> frameLengths)
     {
         var output = new List<short>();
+        short[][] recycledFrames = [[], []];
         int sourceOffset = 0;
-        foreach (int frameLength in frameLengths)
+        int paddedLength = 0;
+        for (int frameIndex = 0; frameIndex < frameLengths.Count; frameIndex++)
         {
+            int frameLength = frameLengths[frameIndex];
             Assert.InRange(frameLength, 1, source.Length - sourceOffset);
-            output.AddRange(source.AsSpan(sourceOffset, frameLength).ToArray());
-            int paddedLength = PyAvAudioPlanePaddingStream.CalculatePaddedFrameSamples(frameLength);
-            output.AddRange(new short[paddedLength - frameLength]);
+            paddedLength = Math.Max(
+                paddedLength,
+                PyAvAudioPlanePaddingStream.CalculatePaddedFrameSamples(frameLength));
+            int slot = frameIndex & 1;
+            if (recycledFrames[slot].Length < paddedLength)
+            {
+                recycledFrames[slot] = new short[paddedLength];
+            }
+
+            source.AsSpan(sourceOffset, frameLength).CopyTo(recycledFrames[slot]);
+            output.AddRange(recycledFrames[slot]);
             sourceOffset += frameLength;
         }
 
@@ -593,6 +675,19 @@ public sealed class RfContainerLoaderIntegrationTests
             "-loglevel", "error",
             "-i", inputPath,
             "-c:a", "alac",
+            outputPath
+        ]);
+
+    private static void EncodeVorbis(string inputPath, string outputPath)
+        => RunFfmpeg(
+        [
+            "-y",
+            "-hide_banner",
+            "-loglevel", "error",
+            "-i", inputPath,
+            "-c:a", "libvorbis",
+            "-q:a", "4",
+            "-f", "ogg",
             outputPath
         ]);
 
