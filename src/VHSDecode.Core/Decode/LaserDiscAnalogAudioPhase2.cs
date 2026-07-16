@@ -38,19 +38,23 @@ public static class LaserDiscAnalogAudioPhase2
         {
             Array.Copy(firstLeft, left, left.Length);
             Array.Copy(firstRight, right, right.Length);
-            return new LaserDiscAnalogAudioBlock(left, right, fieldAudio.DecimationFactor);
+            return new LaserDiscAnalogAudioBlock(
+                left,
+                right,
+                fieldAudio.DecimationFactor,
+                UsesFloat32Storage: false);
         }
 
-        Array.Copy(firstLeft, left, firstLeft.Length);
-        Array.Copy(firstRight, right, firstRight.Length);
+        CopyAsFloat32(firstLeft, 0, left, 0, firstLeft.Length);
+        CopyAsFloat32(firstRight, 0, right, 0, firstRight.Length);
         int jump = blockLength - OverlapSkip;
         int outputStart = firstLeft.Length;
         for (int sample = jump; sample < fieldAudio.Left.Length - jump; sample += jump)
         {
             (double[] blockLeft, double[] blockRight) = FilterBlock(fieldAudio, filters, sample, blockLength);
             int copyLength = blockLeft.Length - OverlapSkip;
-            Array.Copy(blockLeft, OverlapSkip, left, outputStart, copyLength);
-            Array.Copy(blockRight, OverlapSkip, right, outputStart, copyLength);
+            CopyAsFloat32(blockLeft, OverlapSkip, left, outputStart, copyLength);
+            CopyAsFloat32(blockRight, OverlapSkip, right, outputStart, copyLength);
             outputStart += copyLength;
         }
 
@@ -61,9 +65,26 @@ public static class LaserDiscAnalogAudioPhase2
             blockLength);
         int finalLength = finalLeft.Length - OverlapSkip;
         int finalStart = left.Length - finalLength;
-        Array.Copy(finalLeft, OverlapSkip, left, finalStart, finalLength);
-        Array.Copy(finalRight, OverlapSkip, right, finalStart, finalLength);
-        return new LaserDiscAnalogAudioBlock(left, right, fieldAudio.DecimationFactor);
+        CopyAsFloat32(finalLeft, OverlapSkip, left, finalStart, finalLength);
+        CopyAsFloat32(finalRight, OverlapSkip, right, finalStart, finalLength);
+        return new LaserDiscAnalogAudioBlock(
+            left,
+            right,
+            fieldAudio.DecimationFactor,
+            UsesFloat32Storage: true);
+    }
+
+    private static void CopyAsFloat32(
+        double[] source,
+        int sourceIndex,
+        double[] destination,
+        int destinationIndex,
+        int length)
+    {
+        for (int i = 0; i < length; i++)
+        {
+            destination[destinationIndex + i] = (float)source[sourceIndex + i];
+        }
     }
 
     private static (double[] Left, double[] Right) FilterBlock(
@@ -73,20 +94,32 @@ public static class LaserDiscAnalogAudioPhase2
         int blockLength)
     {
         int count = Math.Min(blockLength, fieldAudio.Left.Length - start);
-        double[] left = PrepareChannel(fieldAudio.Left, start, count, filters.Left.CenterFrequencyHz);
+        float[] left = PrepareChannel(
+            fieldAudio.Left,
+            start,
+            count,
+            filters.Left.CenterFrequencyHz);
         int[] peaks = FindPeaks(left, PeakThresholdHz);
         SuppressPeaks(left, peaks);
 
-        double[] right = PrepareChannel(fieldAudio.Right, start, count, filters.Right.CenterFrequencyHz);
+        float[] right = PrepareChannel(
+            fieldAudio.Right,
+            start,
+            count,
+            filters.Right.CenterFrequencyHz);
         SuppressPeaks(right, peaks);
         return (
             FilterChannel(left, filters.Left.Stage2Filter, filters.Left.CenterFrequencyHz),
             FilterChannel(right, filters.Right.Stage2Filter, filters.Right.CenterFrequencyHz));
     }
 
-    private static double[] PrepareChannel(double[] source, int start, int count, double centerFrequencyHz)
+    private static float[] PrepareChannel(
+        double[] source,
+        int start,
+        int count,
+        double centerFrequencyHz)
     {
-        var raw = new double[count];
+        var raw = new float[count];
         float center = (float)centerFrequencyHz;
         for (int i = 0; i < raw.Length; i++)
         {
@@ -96,7 +129,7 @@ public static class LaserDiscAnalogAudioPhase2
         return raw;
     }
 
-    private static int[] FindPeaks(double[] source, double low)
+    private static int[] FindPeaks(float[] source, double low)
     {
         if (source.Length < 2)
         {
@@ -118,7 +151,7 @@ public static class LaserDiscAnalogAudioPhase2
         return peaks.ToArray();
     }
 
-    private static void SuppressPeaks(double[] source, IReadOnlyList<int> peaks)
+    private static void SuppressPeaks(float[] source, IReadOnlyList<int> peaks)
     {
         foreach (int peak in peaks)
         {
@@ -128,11 +161,38 @@ public static class LaserDiscAnalogAudioPhase2
         }
     }
 
-    private static double[] FilterChannel(double[] raw, Complex[] filter, double centerFrequencyHz)
+    private static double[] FilterChannel(
+        float[] raw,
+        Complex[] filter,
+        double centerFrequencyHz)
     {
-        var padded = new double[filter.Length];
-        Array.Copy(raw, padded, raw.Length);
-        Complex[] spectrum = PocketFftComplex.ForwardDucc(padded);
+        Complex[] spectrum;
+        if (raw.Length == filter.Length)
+        {
+            Complex32[] halfSpectrum = PocketFftReal32.ForwardDucc(raw);
+            spectrum = new Complex[raw.Length];
+            spectrum[0] = new Complex(halfSpectrum[0].Real, -0.0);
+            spectrum[halfSpectrum.Length - 1] = new Complex(
+                halfSpectrum[^1].Real,
+                -0.0);
+            for (int i = 1; i < halfSpectrum.Length - 1; i++)
+            {
+                Complex32 value = halfSpectrum[i];
+                spectrum[i] = new Complex(value.Real, value.Imaginary);
+                spectrum[^i] = new Complex(value.Real, -value.Imaginary);
+            }
+        }
+        else
+        {
+            var padded = new double[filter.Length];
+            for (int i = 0; i < raw.Length; i++)
+            {
+                padded[i] = raw[i];
+            }
+
+            spectrum = PocketFftComplex.ForwardDucc(padded);
+        }
+
         for (int i = 0; i < spectrum.Length; i++)
         {
             Complex left = spectrum[i];

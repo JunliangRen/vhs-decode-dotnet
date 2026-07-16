@@ -1235,6 +1235,19 @@ possible capture has already been proven byte-for-byte identical.
   `36C054543634092C86DC1F1D21CDCBD88586A617E3D9872A86429C7258E179AE`,
   and `1BDF01C859AC0459BD7C1FB870E617B59BA002089A996A2C2160D27A5EA87550`,
   while normalized logs match in order and content
+- on the same PAL fixture, default EFM and analog audio plus `--preEFM` now
+  produce six byte-exact artifacts: main TBC
+  `CEB246557CCEE237A1743D7D6D6CB456F8B9C434C2E32162BB53013B9BBE9E2B`,
+  EFM
+  `C339CC79B347DAAAB3AE91A96BEBA10E219CA88EB88A29FBAABA34AE9615BC28`,
+  pre-EFM
+  `4C6D6FA834D00E6F5252E56F00103CF88A15B9E6F1C8DF9817D298A12444FC43`,
+  PCM
+  `EF7D695A7C64035C468E2B7920463EBE5F8D96FE95CD899CB6886F1D42EFBE66`,
+  JSON
+  `7843C72518D0579736D070AB61B906C8B07B78ADCEC1F5930A82FE96D64EFF93`,
+  and SQLite
+  `F4F32D79CDEEBF99150C4D25FE4DE86D628C1677947DC3A3E17D78ED8A5519A6`
 - PAL LD `--start_fileloc 768000` rough seeks now preserve v0.4.0's dropped
   initial second field, direct local and next-vblank anchors, previous-field
   end-line projection, speculative `fields_written` numbering, and pre-metadata
@@ -1321,7 +1334,7 @@ dotnet test VHSDecodeDotNet.slnx --no-build
 ```
 
 The current formal solution build completes with zero warnings and errors, and
-the xUnit v3 project exposes 574 independently discoverable compatibility tests
+the xUnit v3 project exposes 585 independently discoverable compatibility tests
 to `dotnet test` and Visual Studio Test Explorer. On the
 same Windows machine and fixtures, Release wall-clock measurements for one
 frame were 2.346 s versus 7.193 s for NTSC VHS and 1.651 s versus 5.865 s for
