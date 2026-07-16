@@ -173,6 +173,95 @@ public sealed class CvbsFieldStateCompatibilityTests
         }
     }
 
+    [Fact(DisplayName = "CVBS no-sync after output skips one field and continues")]
+    public void NoSyncAfterOutputSkipsOneFieldAndContinues()
+    {
+        string tempDirectory = CreateTempDirectory();
+        try
+        {
+            string outputBase = Path.Combine(tempDirectory, "cvbs-no-sync-recovery");
+            ParsedCommand command = new CommandLineParser().Parse(CliSpecs.Cvbs, [
+                "--pal",
+                "--frequency",
+                "40",
+                "--threads",
+                "0",
+                "--length",
+                "2",
+                "input.s16",
+                outputBase
+            ]);
+            using DecodeSession session = DecodeSessionFactory.Create(command);
+            Assert.Equal(512_000, TbcFieldSequenceDecodeEngine.CvbsNoSyncAfterOutputOffsetSamples(session));
+
+            var readBegins = new List<long>();
+            int attempts = 0;
+            TbcDecodedField? ReadField(
+                DecodeSession _,
+                Stream __,
+                long begin,
+                int ___,
+                int ____)
+            {
+                readBegins.Add(begin);
+                attempts++;
+                return attempts switch
+                {
+                    1 => BuildOutputCvbsField(session, begin, true, 5, diskLocation: 0.0),
+                    2 => BuildOutputCvbsField(session, begin, false, 6, diskLocation: 1.0),
+                    3 => throw new TbcFieldDecodeRecoveryException(
+                        TbcFieldDecodeRecoveryKind.NoFirstHSync,
+                        suggestedOffsetSamples: 512_000,
+                        message: "no field start"),
+                    4 => throw new TbcFieldDecodeRecoveryException(
+                        TbcFieldDecodeRecoveryKind.NoSyncPulses,
+                        suggestedOffsetSamples: 40_000_000,
+                        message: "no sync",
+                        stopAfterDecodedFields: true),
+                    5 => BuildOutputCvbsField(session, begin, true, 7, diskLocation: 4.0),
+                    6 => BuildOutputCvbsField(session, begin, false, 8, diskLocation: 5.0),
+                    _ => throw new InvalidOperationException("Unexpected CVBS read attempt.")
+                };
+            }
+
+            TbcFieldSequenceDecodeResult result = new TbcFieldSequenceDecodeEngine(readField: ReadField)
+                .TryDecodeAndWrite(session, Stream.Null);
+
+            Assert.True(result.Success);
+            Assert.Equal(6, attempts);
+            Assert.Equal(4, result.WrittenFieldCount);
+            Assert.Equal(
+                [0L, 100L, 200L, 512_200L, 1_024_200L, 1_024_300L],
+                readBegins);
+            Assert.NotNull(result.Paths);
+            Assert.Equal(
+                session.TbcFrameSpec.FieldSampleCount * 4L * sizeof(ushort),
+                new FileInfo(result.Paths.TbcPath).Length);
+
+            string[] logLines = File.ReadAllLines(outputBase + ".log");
+            int noFirstHSyncIndex = Array.FindIndex(
+                logLines,
+                line => line.EndsWith(
+                    "ERROR - Unable to determine start of field - dropping field",
+                    StringComparison.Ordinal));
+            int noSyncIndex = Array.FindIndex(
+                logLines,
+                line => line.EndsWith(
+                    "ERROR - Unable to find any sync pulses, skipping one field",
+                    StringComparison.Ordinal));
+            Assert.True(noFirstHSyncIndex >= 0);
+            Assert.Equal(noFirstHSyncIndex + 1, noSyncIndex);
+            Assert.DoesNotContain(
+                "Unable to find any sync pulses, skipping one second",
+                File.ReadAllText(outputBase + ".log"),
+                StringComparison.Ordinal);
+        }
+        finally
+        {
+            Directory.Delete(tempDirectory, recursive: true);
+        }
+    }
+
     [Fact(DisplayName = "CVBS failed serial lookahead publishes levels before pending-field rendering")]
     public void FailedSerialLookaheadPublishesLevelsBeforePendingFieldRendering()
     {

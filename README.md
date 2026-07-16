@@ -698,7 +698,8 @@ possible capture has already been proven byte-for-byte identical.
 - invalid fields now preserve v0.4.0's recoverable decode advances instead of
   terminating the sequence: VHS no-pulse spans jump 100 ms, LD/CVBS initial
   no-pulse spans jump one second, missing first HSYNC advances 100 tape lines or
-  200 LD/CVBS lines, and short trailing data backs up from line0 by 20 lines
+  200 LD/CVBS lines, CVBS no-pulse spans after output advance 200 lines and
+  continue, and short trailing data backs up from line0 by 20 lines
 - VHS chroma sidecar output contract for decoded chroma fields, writing
   upstream-named `_chroma.tbc` files by default and `.tbcy`/`.tbcc` pairs when
   `--orc` is supplied
@@ -1300,6 +1301,16 @@ possible capture has already been proven byte-for-byte identical.
   `D6745F35F2A897328ABDB33352C39491049307181E33BB674D6F26545582A4B3`
   and `77BF4525761F33E080C9A77B987E4492CFB014858037ACB79B311D2D8310FE8C`,
   and both normalized logs match in order and content
+- when the same PAL CVBS sequence contains a long region with no sync pulses,
+  decoding after existing output now emits the v0.4.0 first-HSYNC and
+  `skipping one field` diagnostics, advances by 200 nominal lines, and resumes
+  at the later valid fields; serial and worker TBC hashes are respectively
+  `AFD2CEE7A1904ACD7204DD06B7FC0B4D60842D80E7520CE7F1F191E04556EA9A`
+  and `0A79CAE640BE95E70EC94222109FDA3052F434F5D7F394DF14FD89C5B205C93B`,
+  their JSON hashes are
+  `657E299D6C473FDEB8A5524BDEAB7442F8D56432948094713DFE0273F91F5F15`
+  and `68E1CF7CE8FCE4E35560B7C90243E4EA672BFCDEBB697EB5C5EA0E9A577AC278`,
+  and all 19 normalized log entries match in both modes
 
 #### LaserDisc verification
 
@@ -1413,7 +1424,7 @@ dotnet test VHSDecodeDotNet.slnx --no-build
 ```
 
 The current formal solution build completes with zero warnings and errors, and
-the xUnit v3 project exposes 643 independently discoverable compatibility tests
+the xUnit v3 project exposes 644 independently discoverable compatibility tests
 to `dotnet test` and Visual Studio Test Explorer. On the
 same Windows machine and fixtures, Release wall-clock measurements for one
 frame were 2.346 s versus 7.193 s for NTSC VHS and 1.651 s versus 5.865 s for
