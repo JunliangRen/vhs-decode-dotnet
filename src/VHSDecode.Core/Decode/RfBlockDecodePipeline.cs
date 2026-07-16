@@ -184,18 +184,7 @@ public sealed class RfBlockDecodePipeline : IDisposable
             return VhsChromaDecoder.ShiftChromaAndRemoveDcFloat32(chroma, filters.ChromaOffsetSamples);
         }
 
-        if (filters.ChromaOffsetSamples != 0)
-        {
-            chroma = FrequencyDomainFilter.Roll(chroma, filters.ChromaOffsetSamples);
-        }
-
-        double mean = chroma.Length == 0 ? 0.0 : chroma.Average();
-        for (int i = 0; i < chroma.Length; i++)
-        {
-            chroma[i] -= mean;
-        }
-
-        return chroma;
+        return VhsChromaDecoder.ShiftChromaAndRemoveDc(chroma, filters.ChromaOffsetSamples);
     }
 
     private RfDemodulatedBlock DecodeCvbsBlock(ReadOnlySpan<double> input)

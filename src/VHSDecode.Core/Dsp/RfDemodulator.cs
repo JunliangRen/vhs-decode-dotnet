@@ -358,27 +358,20 @@ public sealed class RfDemodulator
             return output;
         }
 
-        var squaredMagnitude = new double[count];
-        double sum = 0.0;
-        for (int i = 0; i < squaredMagnitude.Length; i++)
+        var magnitudes = new double[count];
+        for (int i = 0; i < magnitudes.Length; i++)
         {
-            double value = output[start + i].Magnitude;
-            squaredMagnitude[i] = value * value;
-            sum += squaredMagnitude[i];
+            Complex value = output[start + i];
+            double realSquared = value.Real * value.Real;
+            double imaginarySquared = value.Imaginary * value.Imaginary;
+            magnitudes[i] = Math.Sqrt(realSquared + imaginarySquared);
         }
 
-        double mean = sum / squaredMagnitude.Length;
-        double variance = 0.0;
-        for (int i = 0; i < squaredMagnitude.Length; i++)
+        (double mean, double standardDeviation) = NumpyReduction.MeanStandardDeviationFloat64(magnitudes);
+        double threshold = mean + (standardDeviation * 3.0);
+        for (int i = 0; i < magnitudes.Length; i++)
         {
-            double delta = squaredMagnitude[i] - mean;
-            variance += delta * delta;
-        }
-
-        double threshold = mean + (Math.Sqrt(variance / squaredMagnitude.Length) * 3.0);
-        for (int i = 0; i < squaredMagnitude.Length; i++)
-        {
-            if (squaredMagnitude[i] > threshold)
+            if (magnitudes[i] > threshold)
             {
                 int bin = start + i;
                 ZeroMirroredBin(output, bin - 1);
@@ -969,7 +962,7 @@ public sealed class RfDemodulator
             }
         }
 
-        float envelopeMean = MeanFloat32Numpy(envelope);
+        float envelopeMean = NumpyReduction.MeanFloat32(envelope);
         float envelopeNumerator = envelopeMean * 0.9f;
         double[] highBand = SosFilter.ApplyForwardBackward(rfTopFilter, rfFiltered);
         var highPart = new double[highBand.Length];
@@ -980,67 +973,6 @@ public sealed class RfDemodulator
         }
 
         return highPart;
-    }
-
-    private static float MeanFloat32Numpy(ReadOnlySpan<double> values)
-    {
-        if (values.IsEmpty)
-        {
-            return float.NaN;
-        }
-
-        return PairwiseSumFloat32(values) / values.Length;
-    }
-
-    private static float PairwiseSumFloat32(ReadOnlySpan<double> values)
-    {
-        const int blockSize = 128;
-        if (values.Length < 8)
-        {
-            float result = -0.0f;
-            for (int i = 0; i < values.Length; i++)
-            {
-                result += (float)values[i];
-            }
-
-            return result;
-        }
-
-        if (values.Length <= blockSize)
-        {
-            Span<float> accumulators = stackalloc float[8];
-            for (int lane = 0; lane < accumulators.Length; lane++)
-            {
-                accumulators[lane] = (float)values[lane];
-            }
-
-            int index = 8;
-            int vectorEnd = values.Length - (values.Length % 8);
-            for (; index < vectorEnd; index += 8)
-            {
-                for (int lane = 0; lane < accumulators.Length; lane++)
-                {
-                    accumulators[lane] += (float)values[index + lane];
-                }
-            }
-
-            float left = (accumulators[0] + accumulators[1])
-                + (accumulators[2] + accumulators[3]);
-            float right = (accumulators[4] + accumulators[5])
-                + (accumulators[6] + accumulators[7]);
-            float result = left + right;
-            for (; index < values.Length; index++)
-            {
-                result += (float)values[index];
-            }
-
-            return result;
-        }
-
-        int midpoint = values.Length / 2;
-        midpoint -= midpoint % 8;
-        return PairwiseSumFloat32(values[..midpoint])
-            + PairwiseSumFloat32(values[midpoint..]);
     }
 
     private bool ApplyRfHighBoostIfPresent(

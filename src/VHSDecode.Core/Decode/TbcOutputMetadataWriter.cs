@@ -5,6 +5,7 @@ using System.Numerics;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
+using VHSDecode.Core.Dsp;
 using VHSDecode.Core.Formats;
 using VHSDecode.Core.Tbc;
 
@@ -12,7 +13,7 @@ namespace VHSDecode.Core.Decode;
 
 public static class TbcOutputMetadataWriter
 {
-    private sealed record LaserDiscNtscLine19ColorInfo(double Level, double PhaseDegrees, double RawSnr);
+    internal sealed record LaserDiscNtscLine19ColorInfo(double Level, double PhaseDegrees, double RawSnr);
 
     internal static bool ShouldWriteRecoverySnapshot(int fieldsWritten)
     {
@@ -999,7 +1000,7 @@ public static class TbcOutputMetadataWriter
         };
     }
 
-    private static IReadOnlyDictionary<string, double> ComputeBasicVitsMetrics(
+    internal static IReadOnlyDictionary<string, double> ComputeBasicVitsMetrics(
         DecodeSession session,
         TbcDecodedField field,
         bool isFirstField,
@@ -1031,7 +1032,7 @@ public static class TbcOutputMetadataWriter
                 continue;
             }
 
-            double mean = MeanIre(values, session, quantizedOutput);
+            double mean = MeanIreNumpyFloat64(values, session, quantizedOutput);
             if (mean >= 90.0 && mean <= 110.0)
             {
                 AddRawMetric(metrics, "wSNR", CalcPeakSnr(values, session, quantizedOutput));
@@ -1088,7 +1089,10 @@ public static class TbcOutputMetadataWriter
                         MeanPreTbcIreNumpyFloat32(blackPreTbcValues, session.VideoOutput));
                 }
 
-                AddRawMetric(metrics, "blackLinePostTBCIRE", MeanIre(blackValues, session, quantizedOutput));
+                AddRawMetric(
+                    metrics,
+                    "blackLinePostTBCIRE",
+                    MeanPostTbcIreNumpy(blackValues, session, quantizedOutput));
             }
 
             AddRawMetric(metrics, "bPSNR", CalcPeakSnr(blackValues, session, quantizedOutput));
@@ -1134,7 +1138,7 @@ public static class TbcOutputMetadataWriter
         int? previousFieldPhaseId)
     {
         if (TryReadTbcSlice(field.Samples, session, line: 11, startUsec: 15.0, lengthUsec: 40.0, out double[] whiteFlag)
-            && InRange(MeanIre(whiteFlag, session), 92.0, 108.0))
+            && InRange(MeanIreNumpyFloat64(whiteFlag, session), 92.0, 108.0))
         {
             AddRawMetric(metrics, "ntscWhiteFlagSNR", CalcPeakSnr(whiteFlag, session));
         }
@@ -1148,7 +1152,7 @@ public static class TbcOutputMetadataWriter
         if (TryReadTbcSlice(field.Samples, session, line: 19, startUsec: 36.0, lengthUsec: 10.0, out double[] grey))
         {
             AddRawMetric(metrics, "greyPSNR", CalcPeakSnr(grey, session));
-            AddRawMetric(metrics, "greyIRE", MeanIre(grey, session));
+            AddRawMetric(metrics, "greyIRE", MeanIreNumbaFloat64(grey, session));
         }
 
         if (TryReadPreTbcSlice(
@@ -1187,7 +1191,10 @@ public static class TbcOutputMetadataWriter
                     diff[i] = (currentBurst[i] - previousBurst[i]) / 2.0;
                 }
 
-                AddRawMetric(metrics, "ntscLine19Burst0IRE", Math.Sqrt(2.0) * StandardDeviation(diff) / session.VideoOutput.OutputScale);
+                AddRawMetric(
+                    metrics,
+                    "ntscLine19Burst0IRE",
+                    Math.Sqrt(2.0) * StandardDeviationNumbaFloat64(diff) / session.VideoOutput.OutputScale);
             }
         }
     }
@@ -1203,12 +1210,15 @@ public static class TbcOutputMetadataWriter
             if (TryReadTbcSlice(field.Samples, session, line: 13, startUsec: 20.2, lengthUsec: 3.0, out double[] grey))
             {
                 AddRawMetric(metrics, "greyPSNR", CalcPeakSnr(grey, session));
-                AddRawMetric(metrics, "greyIRE", MeanIre(grey, session));
+                AddRawMetric(metrics, "greyIRE", MeanIreNumbaFloat64(grey, session));
             }
         }
         else if (TryReadTbcSlice(field.Samples, session, line: 13, startUsec: 36.0, lengthUsec: 20.0, out double[] burst50))
         {
-            AddRawMetric(metrics, "palVITSBurst50Level", StandardDeviation(burst50) / session.VideoOutput.OutputScale);
+            AddRawMetric(
+                metrics,
+                "palVITSBurst50Level",
+                StandardDeviationNumbaFloat64(burst50) / session.VideoOutput.OutputScale);
         }
     }
 
@@ -1318,7 +1328,7 @@ public static class TbcOutputMetadataWriter
         return samples;
     }
 
-    private static bool TryComputeNtscLine19ColorInfo(
+    internal static bool TryComputeNtscLine19ColorInfo(
         DecodeSession session,
         ushort[] samples,
         int fieldPhaseId,
@@ -1376,27 +1386,24 @@ public static class TbcOutputMetadataWriter
 
         int count = statsEnd - statsStart;
         var chromaMagnitude = new float[count];
-        float siSum = 0.0f;
-        float sqSum = 0.0f;
         for (int i = 0; i < count; i++)
         {
             int sourceIndex = statsStart + i;
             float iValue = si[sourceIndex];
             float qValue = sq[sourceIndex];
-            siSum += iValue;
-            sqSum += qValue;
             chromaMagnitude[i] = MathF.Sqrt((iValue * iValue) + (qValue * qValue));
         }
 
-        float signal = MeanFloat32(chromaMagnitude);
-        float noise = StandardDeviationFloat32(chromaMagnitude);
-        double phase = MathF.Atan2(siSum / count, sqSum / count) * 180.0 / Math.PI;
+        float siMean = NumpyReduction.MeanFloat32(si.AsSpan(statsStart, count));
+        float sqMean = NumpyReduction.MeanFloat32(sq.AsSpan(statsStart, count));
+        (float signal, float noise) = NumpyReduction.MeanStandardDeviationFloat32(chromaMagnitude);
+        float phase = (MathF.Atan2(siMean, sqMean) * 180.0f) / (float)Math.PI;
         if (phase < 0.0)
         {
-            phase += 360.0;
+            phase += 360.0f;
         }
 
-        double rawSnr = 20.0 * Math.Log10((float)(signal / noise));
+        float rawSnr = 20.0f * MathF.Log10(signal / noise);
         info = new LaserDiscNtscLine19ColorInfo(signal / (2.0 * session.VideoOutput.OutputScale), phase, rawSnr);
         return true;
     }
@@ -1474,17 +1481,6 @@ public static class TbcOutputMetadataWriter
         }
     }
 
-    private static float MeanFloat32(ReadOnlySpan<float> values)
-    {
-        float sum = 0.0f;
-        foreach (float value in values)
-        {
-            sum += value;
-        }
-
-        return sum / values.Length;
-    }
-
     private static double MeanPreTbcIreNumpyFloat32(
         IReadOnlyList<double> values,
         VideoOutputConverter converter)
@@ -1548,19 +1544,6 @@ public static class TbcOutputMetadataWriter
         leftCount -= leftCount % 8;
         return PairwiseSumNumpyFloat32(values, start, leftCount)
             + PairwiseSumNumpyFloat32(values, start + leftCount, count - leftCount);
-    }
-
-    private static float StandardDeviationFloat32(ReadOnlySpan<float> values)
-    {
-        float mean = MeanFloat32(values);
-        float sumSquares = 0.0f;
-        foreach (float value in values)
-        {
-            float distance = value - mean;
-            sumSquares += distance * distance;
-        }
-
-        return MathF.Sqrt(sumSquares / values.Length);
     }
 
     private static bool TryGetTbcSliceRange(
@@ -1691,27 +1674,69 @@ public static class TbcOutputMetadataWriter
         return 20.0 * Math.Log10(100.0 / noise);
     }
 
-    private static double MeanIre(
+    private static double MeanIreNumpyFloat64(
         double[] outputValues,
         DecodeSession session,
         bool quantizedOutput = true)
     {
-        double[] ireValues = ToIre(outputValues, session, quantizedOutput);
-        return Mean(ireValues);
+        double[] ireValues = ToIre(
+            outputValues,
+            session,
+            quantizedOutput,
+            wrapQuantizedSubtraction: true);
+        return NumpyReduction.MeanFloat64(ireValues);
+    }
+
+    private static double MeanIreNumbaFloat64(
+        double[] outputValues,
+        DecodeSession session,
+        bool quantizedOutput = true)
+    {
+        double[] ireValues = ToIre(
+            outputValues,
+            session,
+            quantizedOutput,
+            wrapQuantizedSubtraction: true);
+        return NumbaReduction.MeanFloat64(ireValues);
+    }
+
+    private static double MeanPostTbcIreNumpy(
+        double[] outputValues,
+        DecodeSession session,
+        bool quantizedOutput)
+    {
+        double meanOutput = quantizedOutput
+            ? NumpyReduction.MeanFloat64(outputValues)
+            : NumpyReduction.MeanFloat32(outputValues);
+        return ((meanOutput - session.VideoOutput.OutputZero) / session.VideoOutput.OutputScale)
+            + session.VideoOutput.VSyncIre;
     }
 
     private static double[] ToIre(
         double[] outputValues,
         DecodeSession session,
-        bool quantizedOutput = true)
+        bool quantizedOutput = true,
+        bool wrapQuantizedSubtraction = false)
     {
         var ire = new double[outputValues.Length];
         for (int i = 0; i < outputValues.Length; i++)
         {
-            ire[i] = quantizedOutput
-                ? session.VideoOutput.OutputToIre((ushort)Math.Clamp(outputValues[i], ushort.MinValue, ushort.MaxValue))
-                : ((outputValues[i] - session.VideoOutput.OutputZero) / session.VideoOutput.OutputScale)
+            if (!quantizedOutput)
+            {
+                ire[i] = ((outputValues[i] - session.VideoOutput.OutputZero) / session.VideoOutput.OutputScale)
                     + session.VideoOutput.VSyncIre;
+                continue;
+            }
+
+            ushort output = (ushort)Math.Clamp(outputValues[i], ushort.MinValue, ushort.MaxValue);
+            if (wrapQuantizedSubtraction)
+            {
+                ire[i] = session.VideoOutput.OutputToIreWithUInt16Subtraction(output);
+            }
+            else
+            {
+                ire[i] = session.VideoOutput.OutputToIre(output);
+            }
         }
 
         return ire;
@@ -1755,24 +1780,11 @@ public static class TbcOutputMetadataWriter
         return name.Contains("Burst", StringComparison.Ordinal) ? 3 : 1;
     }
 
-    private static double Mean(IReadOnlyList<double> values)
-    {
-        if (values.Count == 0)
-        {
-            return 0.0;
-        }
-
-        double sum = 0.0;
-        for (int i = 0; i < values.Count; i++)
-        {
-            sum += values[i];
-        }
-
-        return sum / values.Count;
-    }
-
     private static double StandardDeviation(IReadOnlyList<double> values)
         => StandardDeviationNumpyFloat64(values);
+
+    private static double StandardDeviationNumbaFloat64(ReadOnlySpan<double> values)
+        => NumbaReduction.MeanStandardDeviationFloat64(values).StandardDeviation;
 
     internal static double StandardDeviationNumpyFloat64(IReadOnlyList<double> values)
     {

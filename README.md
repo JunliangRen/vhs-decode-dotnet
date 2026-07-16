@@ -260,10 +260,15 @@ possible capture has already been proven byte-for-byte identical.
   5 MHz
 - LD PAL `--V4300D_notch_filter`, applying the upstream-style 8.42-8.6 MHz
   RF FFT anomaly snip before RF video filtering without mutating cached input
-  spectra
+  spectra; anomaly detection now uses NumPy-compatible complex magnitudes and
+  pairwise float64 `mean + 3*std` reduction rather than squared magnitudes
 - LD post-demod video filtering now applies the upstream IEC 60856/60857
   group-delay all-pass equalizer on the output video path while leaving the
   sync/burst reference paths magnitude-compatible
+- LD `--deemp_low`, `--deemp_high`, and `--deemp_strength` now preserve the
+  v0.4.0 time-constant conversion and NumPy array-power dispatch, including
+  native complex power, small-integer powers, and the scalar `0.5` square-root
+  fast path; a custom PAL block locks all five float32 demod channels bit-exact
 - LD video/reference output now follows upstream's clipped demod FFT source,
   limiting the post-demod video path to 1.5 MHz through 0.75 * sample-rate
   while preserving the unmodified `demod_raw` channel
@@ -284,6 +289,8 @@ possible capture has already been proven byte-for-byte identical.
   decode
 - LD PAL field decode now uses the `demod_pilot` side channel for upstream-style
   two-pass pilot phase line-location refinement after HSYNC refinement
+- PAL pilot circular averaging reproduces NumPy complex128 pairwise blocks,
+  recursive splitting, and reciprocal mean scaling before phase correction
 - LD NTSC field decode now uses the `demod_burst` side channel for upstream-style
   two-pass burst zero-crossing line-location refinement and LD `fieldPhaseID`
   detection
@@ -291,10 +298,14 @@ possible capture has already been proven byte-for-byte identical.
   refiners into real `ld-decode` sessions
 - LD `--MTF` and `--MTF_offset` RF compensation path, using upstream
   `MTF_freq`, `MTF_poledist`, and `MTF_basemult` format parameters before
-  Hilbert FM demodulation; automatic MTF now tracks the rounded
-  `blackToWhiteRFRatio` over 30 CAV or 900 CLV fields, applies the v0.4.0
-  scaling formula, and transactionally re-decodes a field when the level moves
-  by at least 0.05
+  Hilbert FM demodulation, with bit-exact NumPy power coverage for fractional,
+  positive-integer, and negative-integer levels; automatic MTF now tracks the
+  rounded `blackToWhiteRFRatio` over 30 CAV or 900 CLV fields, applies NumPy's
+  pairwise float64 mean and the v0.4.0 scaling formula, and transactionally
+  re-decodes a field when the level moves by at least 0.05; CAV/CLV state is
+  re-evaluated for every completed VBI field pair, including empty-code pairs;
+  the source black/white RF standard deviations use NumPy float64 pairwise
+  reduction before the upstream four-decimal ratio rounding
 - LD EFM digital-audio front-end path, using the upstream 0-1.9 MHz
   amplitude/phase equalizer curve plus 20 kHz-1.6 MHz super-Gaussian band-pass,
   honoring `--noEFM`, and emitting clipped int16 EFM payloads from RF block and
@@ -714,9 +725,11 @@ possible capture has already been proven byte-for-byte identical.
 - dropout detection now follows three distinct v0.4.0 paths: VHS/tape formats
   use only the RF envelope, LD uses only its demod/RFHPF error map, and CVBS
   keeps `doDOD=False` and suppresses `dropOuts` metadata
-- VHS/tape DOD uses the whole-read envelope mean or absolute threshold, the
-  parity-specific `lineoffset + 1` field bounds, and preserves v0.4.0's actual
-  hysteresis/merge behavior plus its zero-width next-line boundary records
+- VHS/tape DOD uses the NumPy-compatible float32 pairwise whole-read envelope
+  mean and float32 percentage multiplication, or the supplied absolute
+  threshold; it keeps the parity-specific `lineoffset + 1` field bounds and
+  preserves v0.4.0's actual hysteresis/merge behavior plus its zero-width
+  next-line boundary records
 - LD DOD combines PAL/NTSC IRE validity windows, HSYNC/expected VSYNC minimums,
   raw demod excursions above Nyquist, and RFHPF excursions above
   `3 * std(rfhpf)` using NumPy NaN comparison semantics; its dynamic range
@@ -827,6 +840,10 @@ possible capture has already been proven byte-for-byte identical.
   HSYNC/EQ/VSYNC boundary patterns, 0.08H candidate validation, out-of-range
   backup selection, 0.7H prediction snapping, and the long-VSYNC 240p/288p
   fallback are shared by VHS and CVBS decoding
+- ambiguous HSYNC-to-EQ fallback boundaries use NumPy-compatible float64
+  pairwise means and standard deviations for their three content intervals, so
+  a value just outside the 5% decision boundary is not falsely accepted as
+  line0 by sequential-sum rounding
 - when a later field has no usable vblank group, normal decoding now predicts
   first HSYNC from the previous relative first-HSYNC/readloc pair without
   requiring `--fallback_vsync`; NTSC uses the previous field length while PAL
@@ -874,8 +891,9 @@ possible capture has already been proven byte-for-byte identical.
   burst probing preserves the float64 TBC chroma path, upstream MHz cutoff
   arithmetic, double-FMA I/Q reduction, and platform C-runtime `hypot`
 - RF color-under extraction likewise uses float32 `sci-rs` SOS filtering and
-  reproduces Numba fastmath's vectorized float32 DC-mean reduction; the path
-  promotes to double only when an upstream SciPy BA audio/video notch is active
+  reproduces Numba fastmath's vectorized float32 DC-mean reduction; when an
+  optional SciPy BA audio/video notch promotes the path to double, float64 DC
+  removal retains the corresponding Numba fast-math reduction order
 - automatic chroma gain now mirrors `lddecode.utils.rms`: burst amplitude is
   the standard deviation after removing the burst window's DC mean, not the
   uncentered root-mean-square value
@@ -903,15 +921,25 @@ possible capture has already been proven byte-for-byte identical.
   `+1` at the stop, while output slices round the two unmodified endpoints
 - LD internally computes the four-decimal `blackToWhiteRFRatio` even without
   `--verboseVITS`; the scalar is retained for automatic MTF without keeping
-  every decoded field's full raw RF arrays in memory
+  every decoded field's full raw RF arrays in memory; its white-slice gate now
+  shares the VITS path's `uint16` subtraction wrap and NumPy pairwise float64
+  mean, including the exact 90-IRE acceptance boundary
 - verbose LD VITS metadata keeps v0.4.0's raw-then-round calculation order,
   including the unrounded RF-level ratio, upstream metric insertion order,
   and the rule that `ntscLine19Burst0IRE` exists only when the 3D line-19
-  colour measurement succeeds
+  colour measurement succeeds; white and white-flag gates use NumPy pairwise
+  float64 means, while `blackLinePostTBCIRE` averages quantized output codes
+  before performing the single scalar IRE conversion
+- quantized LD VITS IRE conversion preserves the upstream dtype split: direct
+  grey-level arrays retain `uint16` subtraction wrap and Numba's sequential
+  mean, PAL `palVITSBurst50Level` and NTSC `ntscLine19Burst0IRE` retain
+  sequential Numba RMS, and PSNR/RF-level `np.std` paths remain pairwise
 - NTSC line-19 colour statistics preserve the release's literal 40..100
   `uint16` gate (including its rejection of ordinary scaled 70-IRE codes),
   float32 comb arithmetic, zeroed two-sample edges, IQ phase mapping, and
-  110..230 statistics window
+  110..230 statistics window; I/Q and magnitude reductions use NumPy's
+  pairwise float32 order, while phase conversion and SNR retain float32
+  `atan2`/`log10` arithmetic through their final stored values
 - LD MTF and AGC adjustments share a one-retry field transaction: sync history,
   parity, chroma AFC, analog-audio timing, burst phase, and player-skip state
   roll back before the same input location is demodulated again, while the new
@@ -920,6 +948,14 @@ possible capture has already been proven byte-for-byte identical.
 - PAL LD/CVBS burst medians now add the parity-specific physical line offset
   (`+2` first field, `+3` second field) just like `Field.lineslice`, instead of
   sampling the earlier logical line number directly
+- LD PAL/NTSC burst-level and burst-median measurements now retain Numba's
+  sequential float32 mean, centering, square, and RMS reductions; PAL's
+  positive 30-IRE rejection gate compares the float32-centered peak, while
+  burst phase detection shares the same reduction helpers
+- NumPy float64 and Numba float32 median paths now propagate input NaNs instead
+  of sorting them away, including the release's distinct signed quiet-NaN
+  results for empty reductions; LD AGC/burst aggregation and the shared
+  CVBS/VHS sync, TBC AGC, serration, and wow-correction paths use these helpers
 - LD `computedelays` fake-signal generation now mirrors the upstream
   LPF/burst/pre-emphasis probe before estimating `video_white`, `video_sync`,
   and RF high-pass rotation offsets
@@ -939,7 +975,11 @@ possible capture has already been proven byte-for-byte identical.
   fields without a greater-than-10-us VSYNC pulse, recalibrates the first
   undecoded field's `ire0` from NumPy-style 15th-percentile video when the
   initial pass is empty, and applies the LD-specific 0.75..2.5 us neighboring
-  equalizing-pulse window when rebuilding the threshold
+  equalizing-pulse window when rebuilding the threshold; that initial probe
+  and the 50/85th-percentile AGC white slices retain NumPy's float64 virtual
+  indexes, float32 weak-scalar interpolation, right-weight rounding, and NaN
+  propagation, while each line's sync/blank calibration retains Numba's
+  float32 median and even-midpoint rounding
 - LD NTSC burst-refined line locations now apply the final upstream 117.25
   degree FSC phase shift, including fields where no per-line burst adjustment
   could be measured
@@ -970,7 +1010,9 @@ possible capture has already been proven byte-for-byte identical.
   v0.4.0, so `--noEFM --preEFM` does not create an empty `.prefm` sidecar
 - LD player-skip handling now mirrors the previous field's eight-line
   `skip_check` score, the 100-valid-pulse first-VBlank limit, shortened-field
-  detection, and end-anchored HSYNC line-number repair after line 23
+  detection, and end-anchored HSYNC line-number repair after line 23; its
+  full-line `nb_median` keeps float32 even-midpoint rounding before the
+  VSync/blank IRE classifications
 - LD line-location lookahead lengths now follow the parity-specific v0.4.0
   formulas: NTSC uses `outlinecount + 10`, while PAL includes its 2/3-line
   field offset plus three additional lookahead lines
@@ -1046,6 +1088,13 @@ possible capture has already been proven byte-for-byte identical.
   the 30-step/5-IRE pulse-count search and finally the legacy level detector;
   `--fallback_vsync` enables the upstream abnormal-long-pulse candidate, while
   405/819-line systems retain the upstream serration bypass
+- long VSync interiors and surrounding EQ back porches use NumPy-compatible
+  float64 pairwise means during serration level refinement, preserving the
+  calibrated sync and blank values instead of sequential-sum rounding
+- serration half-amplitude splitting uses the upstream Numba float64 fast-math
+  reduction order, preserving peak/valley classification at ULP boundaries
+- CVBS and LaserDisc pulse recalibration uses NumPy-compatible float64 means,
+  preserving the upstream 5-IRE acceptance boundary for long VSync pulses
 - sequence decoding now commits each field as soon as field-order planning
   releases it: main/chroma TBC and LD EFM, pre-EFM, PCM, RF-TBC, and AC3
   sidecars stay open and preserve their cross-field state instead of retaining
@@ -1334,7 +1383,7 @@ dotnet test VHSDecodeDotNet.slnx --no-build
 ```
 
 The current formal solution build completes with zero warnings and errors, and
-the xUnit v3 project exposes 585 independently discoverable compatibility tests
+the xUnit v3 project exposes 632 independently discoverable compatibility tests
 to `dotnet test` and Visual Studio Test Explorer. On the
 same Windows machine and fixtures, Release wall-clock measurements for one
 frame were 2.346 s versus 7.193 s for NTSC VHS and 1.651 s versus 5.865 s for

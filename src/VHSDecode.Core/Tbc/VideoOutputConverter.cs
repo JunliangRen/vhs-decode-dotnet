@@ -85,6 +85,12 @@ public sealed class VideoOutputConverter
 
     public double OutputToIre(ushort output) => ((output - OutputZero) / OutputScale) + VSyncIre;
 
+    internal double OutputToIreWithUInt16Subtraction(ushort output)
+    {
+        ushort difference = unchecked((ushort)(output - OutputZero));
+        return (difference / OutputScale) + VSyncIre;
+    }
+
     public ushort ConvertHz(double hz)
     {
         double output = (hz * Scale) + Offset + 0.5;

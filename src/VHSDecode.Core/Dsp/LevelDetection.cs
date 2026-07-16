@@ -432,25 +432,10 @@ public static class LevelDetection
     }
 
     private static double Mean(ReadOnlySpan<double> data)
-    {
-        double sum = 0.0;
-        for (int i = 0; i < data.Length; i++)
-        {
-            sum += data[i];
-        }
-
-        return sum / data.Length;
-    }
+        => NumpyReduction.MeanFloat64(data);
 
     private static double Median(ReadOnlySpan<double> data)
-    {
-        double[] sorted = data.ToArray();
-        Array.Sort(sorted);
-        int middle = sorted.Length / 2;
-        return (sorted.Length & 1) != 0
-            ? sorted[middle]
-            : (sorted[middle - 1] + sorted[middle]) / 2.0;
-    }
+        => NumpyReduction.MedianFloat64(data);
 
     private static int FindFirst(ReadOnlySpan<double> data, int start, Func<double, bool> predicate)
     {

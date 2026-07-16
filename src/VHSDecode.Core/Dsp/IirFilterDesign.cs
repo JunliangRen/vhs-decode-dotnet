@@ -1166,7 +1166,7 @@ public static partial class IirFilterDesign
         {
             Complex scaled = new(zeros[i].Real * scale, zeros[i].Imaginary * scale);
             Complex squared = NumpySimdComplexMultiply(scaled, scaled);
-            Complex root = NumpyComplexSqrt(new Complex(squared.Real - centerSquared, squared.Imaginary));
+            Complex root = NumpyComplexMath.Sqrt(new Complex(squared.Real - centerSquared, squared.Imaginary));
             positiveZeros[i] = scaled + root;
             negativeZeros[i] = scaled - root;
         }
@@ -1177,7 +1177,7 @@ public static partial class IirFilterDesign
         {
             Complex scaled = new(poles[i].Real * scale, poles[i].Imaginary * scale);
             Complex squared = NumpySimdComplexMultiply(scaled, scaled);
-            Complex root = NumpyComplexSqrt(new Complex(squared.Real - centerSquared, squared.Imaginary));
+            Complex root = NumpyComplexMath.Sqrt(new Complex(squared.Real - centerSquared, squared.Imaginary));
             positivePoles[i] = scaled + root;
             negativePoles[i] = scaled - root;
         }
@@ -1480,30 +1480,6 @@ public static partial class IirFilterDesign
 
         double ratio = smaller / larger;
         return larger * Math.Sqrt(Math.FusedMultiplyAdd(ratio, ratio, 1.0));
-    }
-
-    private static Complex NumpyComplexSqrt(Complex value)
-    {
-        double real = value.Real;
-        double imaginary = value.Imaginary;
-        if (!double.IsFinite(real) || !double.IsFinite(imaginary))
-        {
-            return Complex.Sqrt(value);
-        }
-
-        if (real == 0.0 && imaginary == 0.0)
-        {
-            return new Complex(0.0, imaginary);
-        }
-
-        if (real >= 0.0)
-        {
-            double positive = Math.Sqrt((real + Complex.Abs(value)) * 0.5);
-            return new Complex(positive, imaginary / (2.0 * positive));
-        }
-
-        double magnitude = Math.Sqrt((-real + Complex.Abs(value)) * 0.5);
-        return new Complex(Math.Abs(imaginary) / (2.0 * magnitude), Math.CopySign(magnitude, imaginary));
     }
 
     private static int IndexOfNearest(IReadOnlyList<Complex> values, Complex target)

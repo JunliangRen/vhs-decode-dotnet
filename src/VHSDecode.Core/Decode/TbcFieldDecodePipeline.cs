@@ -1,3 +1,4 @@
+using System.Numerics;
 using System.Runtime.InteropServices;
 using System.Security.Cryptography;
 using System.Text.Json;
@@ -913,7 +914,7 @@ public sealed class TbcFieldDecodePipeline
         };
     }
 
-    private double? ComputeLaserDiscBlackToWhiteRfRatio(
+    internal double? ComputeLaserDiscBlackToWhiteRfRatio(
         ReadOnlySpan<double> rawInput,
         ReadOnlySpan<ushort> output,
         IReadOnlyList<double> lineLocations,
@@ -933,13 +934,15 @@ public sealed class TbcFieldDecodePipeline
                 continue;
             }
 
-            double whiteIre = 0.0;
+            Span<double> whiteIreValues = whiteOutput.Length <= 1_024
+                ? stackalloc double[whiteOutput.Length]
+                : new double[whiteOutput.Length];
             for (int i = 0; i < whiteOutput.Length; i++)
             {
-                whiteIre += converter.OutputToIre(whiteOutput[i]);
+                whiteIreValues[i] = converter.OutputToIreWithUInt16Subtraction(whiteOutput[i]);
             }
 
-            whiteIre /= whiteOutput.Length;
+            double whiteIre = NumpyReduction.MeanFloat64(whiteIreValues);
             if (whiteIre < 90.0 || whiteIre > 110.0)
             {
                 continue;
@@ -953,7 +956,7 @@ public sealed class TbcFieldDecodePipeline
                     _laserDiscRfMetricOptions.VideoWhiteDelaySamples,
                     out ReadOnlySpan<double> whiteRaw))
             {
-                whiteRfLevel = StandardDeviation(whiteRaw);
+                whiteRfLevel = NumpyReduction.MeanStandardDeviationFloat64(whiteRaw).StandardDeviation;
             }
 
             break;
@@ -975,9 +978,10 @@ public sealed class TbcFieldDecodePipeline
             return null;
         }
 
-        double ratio = StandardDeviation(blackRaw) / whiteRfLevel.Value;
+        double blackRfLevel = NumpyReduction.MeanStandardDeviationFloat64(blackRaw).StandardDeviation;
+        double ratio = blackRfLevel / whiteRfLevel.Value;
         return double.IsFinite(ratio)
-            ? Math.Round(ratio, 4, MidpointRounding.ToEven)
+            ? Math.Round(ratio * 10_000.0, MidpointRounding.ToEven) / 10_000.0
             : null;
     }
 
@@ -1663,7 +1667,7 @@ public sealed class TbcFieldDecodePipeline
             + $"(vsync IRE computed at {roundedVsyncIre}, nominal ~= -40), possible disk skipping";
     }
 
-    private (double SyncHz, double Ire0Hz, double Ire100Hz) DetectLaserDiscAgcLevels(
+    internal (double SyncHz, double Ire0Hz, double Ire100Hz) DetectLaserDiscAgcLevels(
         RfDecodedSpan span,
         IReadOnlyList<double> lineLocations,
         double meanLineLength,
@@ -1717,8 +1721,8 @@ public sealed class TbcFieldDecodePipeline
                 continue;
             }
 
-            syncLevels.Add(Median(syncReference.Slice(syncStart, syncLength)) / adjustment);
-            blankLevels.Add(Median(syncReference.Slice(blankStart, blankLength)) / adjustment);
+            syncLevels.Add(NumbaReduction.MedianFloat32(syncReference.Slice(syncStart, syncLength)) / adjustment);
+            blankLevels.Add(NumbaReduction.MedianFloat32(syncReference.Slice(blankStart, blankLength)) / adjustment);
         }
 
         double syncHz = syncLevels.Count > 0 ? Median(syncLevels) : current.IreToHz(current.VSyncIre);
@@ -1915,19 +1919,20 @@ public sealed class TbcFieldDecodePipeline
         return index;
     }
 
-    private static double CircularAverageUnitPhase(ReadOnlySpan<double> phases)
+    internal static double CircularAverageUnitPhase(ReadOnlySpan<double> phases)
     {
-        double sumSin = 0.0;
-        double sumCos = 0.0;
+        Span<Complex> angles = phases.Length <= 512
+            ? stackalloc Complex[phases.Length]
+            : new Complex[phases.Length];
         for (int i = 0; i < phases.Length; i++)
         {
             double fraction = phases[i] - Math.Truncate(phases[i]);
-            double angle = Math.Tau * fraction;
-            sumCos += Math.Cos(angle);
-            sumSin += Math.Sin(angle);
+            double angle = (fraction * Math.PI) * 2.0;
+            angles[i] = new Complex(Math.Cos(angle), Math.Sin(angle));
         }
 
-        double average = Math.Atan2(sumSin, sumCos) / Math.Tau;
+        Complex mean = NumpyReduction.MeanComplex128(angles);
+        double average = Math.Atan2(mean.Imaginary, mean.Real) / Math.Tau;
         return average < 0.0 ? average + 1.0 : average;
     }
 
@@ -2055,7 +2060,7 @@ public sealed class TbcFieldDecodePipeline
         return Commit(fourFieldPhase + (isFirstFour ? 0 : 4), adjustments);
     }
 
-    private double? ComputeLaserDiscPalBurstLevel(
+    internal double? ComputeLaserDiscPalBurstLevel(
         ReadOnlySpan<double> video,
         IReadOnlyList<double> lineLocations,
         int line,
@@ -2066,14 +2071,13 @@ public sealed class TbcFieldDecodePipeline
             return null;
         }
 
-        ReadOnlySpan<double> burstArea = video.Slice(start, length);
-        double mean = Mean(burstArea);
-        if (MaxCentered(burstArea, mean) > 30.0 * Math.Abs(hzIre))
+        float[] burstArea = NumbaReduction.CenterFloat32(video.Slice(start, length));
+        if (NumbaReduction.MaxFloat32(burstArea) > 30.0 * hzIre)
         {
             return null;
         }
 
-        return StandardDeviation(burstArea) * Math.Sqrt(2.0);
+        return NumbaReduction.StandardDeviationFloat32(burstArea) * Math.Sqrt(2.0);
     }
 
     private (LineLocationResult LineLocations, int? FieldPhaseId) RefineLaserDiscNtscLineLocationsFromBurst(
@@ -2270,8 +2274,8 @@ public sealed class TbcFieldDecodePipeline
             return false;
         }
 
-        float[] burstArea = CenterFloat32(burst.Slice(windowStart, length));
-        float threshold = StandardDeviationFloat32(burstArea);
+        float[] burstArea = NumbaReduction.CenterFloat32(burst.Slice(windowStart, length));
+        float threshold = NumbaReduction.StandardDeviationFloat32(burstArea);
         if (!double.IsFinite(threshold) || threshold <= 0.0)
         {
             return false;
@@ -2282,8 +2286,8 @@ public sealed class TbcFieldDecodePipeline
             int demodLength = Math.Min(length, video.Length - windowStart);
             if (demodLength > 0 && hzIre != 0.0)
             {
-                float[] demodArea = CenterFloat32(video.Slice(windowStart, demodLength));
-                if (MaxAbsFloat32(demodArea) > 30.0 * Math.Abs(hzIre))
+                float[] demodArea = NumbaReduction.CenterFloat32(video.Slice(windowStart, demodLength));
+                if (NumbaReduction.MaxAbsFloat32(demodArea) > 30.0 * hzIre)
                 {
                     return false;
                 }
@@ -2413,55 +2417,6 @@ public sealed class TbcFieldDecodePipeline
         return location - 1 + fraction;
     }
 
-    private static float[] CenterFloat32(ReadOnlySpan<double> values)
-    {
-        var output = new float[values.Length];
-        float sum = 0.0f;
-        for (int i = 0; i < values.Length; i++)
-        {
-            output[i] = (float)values[i];
-            sum += output[i];
-        }
-
-        float mean = sum / values.Length;
-        for (int i = 0; i < output.Length; i++)
-        {
-            output[i] -= mean;
-        }
-
-        return output;
-    }
-
-    private static float StandardDeviationFloat32(ReadOnlySpan<float> values)
-    {
-        float sum = 0.0f;
-        for (int i = 0; i < values.Length; i++)
-        {
-            sum += values[i];
-        }
-
-        float mean = sum / values.Length;
-        float sumSquares = 0.0f;
-        for (int i = 0; i < values.Length; i++)
-        {
-            float distance = values[i] - mean;
-            sumSquares += distance * distance;
-        }
-
-        return MathF.Sqrt(sumSquares / values.Length);
-    }
-
-    private static float MaxAbsFloat32(ReadOnlySpan<float> values)
-    {
-        float maximum = float.NegativeInfinity;
-        for (int i = 0; i < values.Length; i++)
-        {
-            maximum = MathF.Max(maximum, MathF.Abs(values[i]));
-        }
-
-        return maximum;
-    }
-
     private static int LaserDiscNtscFieldPhaseId(bool isFirstField, bool field14)
     {
         return (isFirstField, field14) switch
@@ -2499,46 +2454,72 @@ public sealed class TbcFieldDecodePipeline
     }
 
     private static double Median(IReadOnlyList<double> values)
-    {
-        double[] sorted = values.ToArray();
-        Array.Sort(sorted);
-        return MedianSorted(sorted);
-    }
+        => NumpyReduction.MedianFloat64(values.ToArray());
 
     private static double Median(ReadOnlySpan<double> values)
-    {
-        double[] sorted = values.ToArray();
-        Array.Sort(sorted);
-        return MedianSorted(sorted);
-    }
+        => NumpyReduction.MedianFloat64(values);
 
-    private static double Percentile(ReadOnlySpan<double> values, double percentile)
+    internal static double Percentile(ReadOnlySpan<double> values, double percentile)
     {
-        if (values.IsEmpty)
+        if (percentile < 0.0 || percentile > 100.0 || double.IsNaN(percentile))
         {
-            return 0.0;
+            throw new ArgumentOutOfRangeException(nameof(percentile));
         }
 
-        double[] sorted = values.ToArray();
-        Array.Sort(sorted);
-        double position = Math.Clamp(percentile, 0.0, 100.0) / 100.0 * (sorted.Length - 1);
-        int left = (int)Math.Floor(position);
-        int right = (int)Math.Ceiling(position);
-        if (left == right)
+        if (values.IsEmpty)
         {
-            return sorted[left];
+            throw new IndexOutOfRangeException("Cannot compute a percentile of an empty array.");
+        }
+
+        // LD demodulation stores these slices as float32. NumPy keeps the
+        // virtual index in float64 but weak-scalar interpolation in float32.
+        var sorted = new float[values.Length];
+        bool hasNaN = false;
+        for (int i = 0; i < values.Length; i++)
+        {
+            sorted[i] = (float)values[i];
+            hasNaN |= float.IsNaN(sorted[i]);
+        }
+
+        if (hasNaN)
+        {
+            return double.NaN;
+        }
+
+        Array.Sort(sorted);
+        double quantile = percentile / 100.0;
+        double position = (sorted.Length * quantile)
+            + (1.0 + (quantile * -1.0))
+            - 1.0;
+        int left;
+        int right;
+        if (position >= sorted.Length - 1)
+        {
+            left = sorted.Length - 1;
+            right = left;
+        }
+        else if (position < 0.0)
+        {
+            left = 0;
+            right = 0;
+        }
+        else
+        {
+            left = (int)Math.Floor(position);
+            right = left + 1;
         }
 
         double fraction = position - left;
-        return sorted[left] + ((sorted[right] - sorted[left]) * fraction);
-    }
+        float difference = sorted[right] - sorted[left];
+        float leftProduct = difference * (float)fraction;
+        float result = sorted[left] + leftProduct;
+        if (fraction >= 0.5)
+        {
+            float rightProduct = difference * (float)(1.0 - fraction);
+            result = sorted[right] - rightProduct;
+        }
 
-    private static double MedianSorted(double[] sorted)
-    {
-        int middle = sorted.Length / 2;
-        return sorted.Length % 2 == 0
-            ? (sorted[middle - 1] + sorted[middle]) / 2.0
-            : sorted[middle];
+        return result;
     }
 
     private int[]? DecodeLaserDiscVbiData(
@@ -2573,7 +2554,7 @@ public sealed class TbcFieldDecodePipeline
         return codes.Count > 0 ? codes.ToArray() : null;
     }
 
-    private double? ComputeLaserDiscMedianBurstIre(
+    internal double? ComputeLaserDiscMedianBurstIre(
         ReadOnlySpan<double> video,
         IReadOnlyList<double> lineLocations,
         bool? isFirstField,
@@ -2603,13 +2584,23 @@ public sealed class TbcFieldDecodePipeline
             }
 
             ReadOnlySpan<double> burstArea = video.Slice(start, length);
-            double mean = Mean(burstArea);
-            if (isPal && MaxCentered(burstArea, mean) > 30.0 * Math.Abs(converter.HzIre))
+            float standardDeviation;
+            if (isPal)
             {
-                continue;
+                float[] centered = NumbaReduction.CenterFloat32(burstArea);
+                if (NumbaReduction.MaxFloat32(centered) > 30.0 * converter.HzIre)
+                {
+                    continue;
+                }
+
+                standardDeviation = NumbaReduction.StandardDeviationFloat32(centered);
+            }
+            else
+            {
+                standardDeviation = NumbaReduction.StandardDeviationFloat32(burstArea);
             }
 
-            burstLevels.Add(StandardDeviation(burstArea) * Math.Sqrt(2.0));
+            burstLevels.Add(standardDeviation * Math.Sqrt(2.0));
         }
 
         return burstLevels.Count == 0
@@ -2953,23 +2944,8 @@ public sealed class TbcFieldDecodePipeline
             return false;
         }
 
-        median = MedianFloat32(source[startIndex..endIndex]);
+        median = NumbaReduction.MedianFloat32(source[startIndex..endIndex]);
         return true;
-    }
-
-    private static double MedianFloat32(ReadOnlySpan<double> values)
-    {
-        var sorted = new float[values.Length];
-        for (int i = 0; i < values.Length; i++)
-        {
-            sorted[i] = (float)values[i];
-        }
-
-        Array.Sort(sorted);
-        int middle = sorted.Length / 2;
-        return sorted.Length % 2 == 0
-            ? (float)((sorted[middle - 1] + sorted[middle]) / 2.0f)
-            : sorted[middle];
     }
 
     private bool TryRefineFromRightHSync(
@@ -4547,7 +4523,7 @@ public sealed class TbcFieldDecodePipeline
         }
 
         double threshold = _dropoutOptions.AbsoluteThreshold
-            ?? Mean(envelope) * _dropoutOptions.ThresholdFraction;
+            ?? NumpyReduction.MeanFloat32(envelope) * (float)_dropoutOptions.ThresholdFraction;
         IReadOnlyList<RfDropoutRange> ranges = RfDropoutDetector.FindDropouts(
             envelope,
             startSample,
@@ -4751,17 +4727,6 @@ public sealed class TbcFieldDecodePipeline
         }
 
         return Math.Sqrt(sumSquares / values.Length);
-    }
-
-    private static double MaxCentered(ReadOnlySpan<double> values, double mean)
-    {
-        double maximum = double.NegativeInfinity;
-        for (int i = 0; i < values.Length; i++)
-        {
-            maximum = Math.Max(maximum, values[i] - mean);
-        }
-
-        return maximum;
     }
 
     private static double MaxAbsCentered(ReadOnlySpan<double> values, double mean)

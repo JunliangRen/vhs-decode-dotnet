@@ -1,3 +1,6 @@
+using System.Runtime.InteropServices;
+using VHSDecode.Core.Dsp;
+
 namespace VHSDecode.Core.Decode;
 
 public sealed record LaserDiscMtfUpdate(
@@ -34,7 +37,8 @@ public sealed class LaserDiscAutoMtfController
             _blackToWhiteRatios.RemoveRange(0, _blackToWhiteRatios.Count - keep);
         }
 
-        Level = Math.Clamp((_blackToWhiteRatios.Average() - 1.08) / 0.38, 0.0, 1.0);
+        double meanRatio = NumpyReduction.MeanFloat64(CollectionsMarshal.AsSpan(_blackToWhiteRatios));
+        Level = Math.Clamp((meanRatio - 1.08) / 0.38, 0.0, 1.0);
         return new LaserDiscMtfUpdate(
             previous,
             Level,
@@ -44,11 +48,12 @@ public sealed class LaserDiscAutoMtfController
 
     public void ObserveAcceptedField(TbcDecodedField field, string system)
     {
-        if (field.VbiData is not { Length: > 0 } codes || !field.DetectedFirstField.HasValue)
+        if (!field.DetectedFirstField.HasValue)
         {
             return;
         }
 
+        int[] codes = field.VbiData ?? [];
         if (field.DetectedFirstField.Value)
         {
             _firstFieldVbi = codes.ToArray();
@@ -65,6 +70,5 @@ public sealed class LaserDiscAutoMtfController
             _firstFieldVbi.Concat(codes),
             framesPerSecond);
         IsClv = interpretation.IsClv;
-        _firstFieldVbi = null;
     }
 }

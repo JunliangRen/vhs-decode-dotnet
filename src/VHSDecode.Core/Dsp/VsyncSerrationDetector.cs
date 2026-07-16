@@ -338,7 +338,24 @@ public sealed class VsyncSerrationDetector
         }
 
         ReadOnlySpan<double> serration = data[serrationStart..serrationEnd];
-        double halfAmplitude = Mean(serration);
+        (double SyncLevel, double BlankLevel)? levels = GetSerrationSyncLevels(serration);
+        if (!levels.HasValue)
+        {
+            return false;
+        }
+
+        measurement = new VsyncSerrationMeasurement(
+            serrationStart,
+            serrationEnd,
+            levels.Value.SyncLevel,
+            levels.Value.BlankLevel);
+        return true;
+    }
+
+    internal static (double SyncLevel, double BlankLevel)? GetSerrationSyncLevels(
+        ReadOnlySpan<double> serration)
+    {
+        double halfAmplitude = NumbaReduction.MeanFloat64FastMath(serration);
         var peaks = new List<double>();
         var valleys = new List<double>();
         foreach (double value in serration)
@@ -355,15 +372,10 @@ public sealed class VsyncSerrationDetector
 
         if (peaks.Count == 0 || valleys.Count == 0)
         {
-            return false;
+            return null;
         }
 
-        measurement = new VsyncSerrationMeasurement(
-            serrationStart,
-            serrationEnd,
-            Median(valleys),
-            Median(peaks));
-        return true;
+        return (Median(valleys), Median(peaks));
     }
 
     public static bool CheckLevels(
@@ -520,34 +532,11 @@ public sealed class VsyncSerrationDetector
     private static int PythonSign(double value)
         => value > 0.0 ? 1 : value < 0.0 ? -1 : 0;
 
-    private static double Mean(ReadOnlySpan<double> values)
-    {
-        double sum = 0.0;
-        foreach (double value in values)
-        {
-            sum += value;
-        }
-
-        return sum / values.Length;
-    }
-
     private static double Median(IEnumerable<double> values)
-        => Median(values.ToArray());
+        => NumpyReduction.MedianFloat64(values.ToArray());
 
     private static double Median(double[] values)
-    {
-        if (values.Length == 0)
-        {
-            return double.NaN;
-        }
-
-        double[] sorted = values.ToArray();
-        Array.Sort(sorted);
-        int middle = sorted.Length / 2;
-        return (sorted.Length & 1) != 0
-            ? sorted[middle]
-            : (sorted[middle - 1] + sorted[middle]) / 2.0;
-    }
+        => NumpyReduction.MedianFloat64(values);
 
     private sealed class MovingAverageWindow(int window, int minimumWatermark)
     {

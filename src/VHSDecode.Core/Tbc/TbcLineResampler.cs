@@ -2,6 +2,7 @@ using System.Buffers.Binary;
 using System.IO.Compression;
 using System.Reflection;
 using System.Text;
+using VHSDecode.Core.Dsp;
 
 namespace VHSDecode.Core.Tbc;
 
@@ -234,14 +235,7 @@ public sealed class TbcLineResampler
     }
 
     private static double Median(double[] values)
-    {
-        double[] sorted = values.ToArray();
-        Array.Sort(sorted);
-        int mid = sorted.Length / 2;
-        return sorted.Length % 2 == 0
-            ? (sorted[mid - 1] + sorted[mid]) / 2.0
-            : sorted[mid];
-    }
+        => NumpyReduction.MedianFloat64(values);
 
     private static double SampleSinc(ReadOnlySpan<double> source, double position)
     {
