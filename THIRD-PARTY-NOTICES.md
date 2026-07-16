@@ -113,5 +113,5 @@ Copyright (c) 2000-2025 the FFmpeg developers
 FFmpeg is free software; you can redistribute it and/or modify it under the
 terms of the GNU Lesser General Public License as published by the Free
 Software Foundation; either version 2.1 of the License, or (at your option)
-any later version. The complete LGPL 2.1 text is available at
-`third_party/libsoxr/COPYING.LGPL`.
+any later version. A shared copy of the complete LGPL 2.1 text is available at
+`third_party/libsoxr/COPYING.LGPL`; that file is not an FFmpeg-specific notice.
