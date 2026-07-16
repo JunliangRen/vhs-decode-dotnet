@@ -953,7 +953,7 @@ public sealed class TbcFieldDecodePipeline
                     _laserDiscRfMetricOptions.VideoWhiteDelaySamples,
                     out ReadOnlySpan<double> whiteRaw))
             {
-                whiteRfLevel = StandardDeviation(whiteRaw);
+                whiteRfLevel = NumpyReduction.MeanStandardDeviationFloat64(whiteRaw).StandardDeviation;
             }
 
             break;
@@ -975,9 +975,10 @@ public sealed class TbcFieldDecodePipeline
             return null;
         }
 
-        double ratio = StandardDeviation(blackRaw) / whiteRfLevel.Value;
+        double blackRfLevel = NumpyReduction.MeanStandardDeviationFloat64(blackRaw).StandardDeviation;
+        double ratio = blackRfLevel / whiteRfLevel.Value;
         return double.IsFinite(ratio)
-            ? Math.Round(ratio, 4, MidpointRounding.ToEven)
+            ? Math.Round(ratio * 10_000.0, MidpointRounding.ToEven) / 10_000.0
             : null;
     }
 
