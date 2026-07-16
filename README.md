@@ -260,7 +260,8 @@ possible capture has already been proven byte-for-byte identical.
   5 MHz
 - LD PAL `--V4300D_notch_filter`, applying the upstream-style 8.42-8.6 MHz
   RF FFT anomaly snip before RF video filtering without mutating cached input
-  spectra
+  spectra; anomaly detection now uses NumPy-compatible complex magnitudes and
+  pairwise float64 `mean + 3*std` reduction rather than squared magnitudes
 - LD post-demod video filtering now applies the upstream IEC 60856/60857
   group-delay all-pass equalizer on the output video path while leaving the
   sync/burst reference paths magnitude-compatible
@@ -1339,7 +1340,7 @@ dotnet test VHSDecodeDotNet.slnx --no-build
 ```
 
 The current formal solution build completes with zero warnings and errors, and
-the xUnit v3 project exposes 591 independently discoverable compatibility tests
+the xUnit v3 project exposes 592 independently discoverable compatibility tests
 to `dotnet test` and Visual Studio Test Explorer. On the
 same Windows machine and fixtures, Release wall-clock measurements for one
 frame were 2.346 s versus 7.193 s for NTSC VHS and 1.651 s versus 5.865 s for
