@@ -4,7 +4,8 @@ public sealed record FallbackVSyncResolution(
     double Line0Location,
     double? LastLineLocation,
     bool? IsFirstField,
-    int FirstFieldConfidence);
+    int FirstFieldConfidence,
+    string? DiagnosticMessage = null);
 
 public static class FallbackVSyncResolver
 {
@@ -52,6 +53,7 @@ public static class FallbackVSyncResolver
         bool? backupFirstField = null;
         int firstFieldConfidence = -1;
         int backupFirstFieldConfidence = -1;
+        string? diagnosticMessage = null;
 
         // Upstream tries the end of the broad VSYNC pulses first.
         for (int i = 15; !line0.HasValue && i < pulses.Count - 2; i++)
@@ -363,6 +365,8 @@ public static class FallbackVSyncResolver
             && backupLine0.HasValue
             && backupLine0 < line0 - (meanLineLength * (frameLines - 5) / 2.0))
         {
+            diagnosticMessage =
+                "WARNING, line0 hsync not found for current field, but vsync area found, using predicted position, result may be garbled.";
             UseBackup(ref line0, ref firstField, ref firstFieldConfidence, backupLine0, backupFirstField, backupFirstFieldConfidence);
         }
         else if (line0 > limit
@@ -370,11 +374,19 @@ public static class FallbackVSyncResolver
             && backupLine0.HasValue
             && backupLine0 < limit)
         {
+            diagnosticMessage = "Switching to backup line0 estimation as primary is out of range.";
             UseBackup(ref line0, ref firstField, ref firstFieldConfidence, backupLine0, backupFirstField, backupFirstFieldConfidence);
+        }
+        else if (line0 > limit && !expectedLine0.HasValue)
+        {
+            diagnosticMessage =
+                "WARNING, line0 hsync not found for current field, probably skipping one field.";
         }
 
         if (!line0.HasValue && backupLine0.HasValue)
         {
+            diagnosticMessage =
+                "WARNING, line0 hsync not found in entire block, but vsync area found, using predicted position, result may be garbled.";
             UseBackup(ref line0, ref firstField, ref firstFieldConfidence, backupLine0, backupFirstField, backupFirstFieldConfidence);
         }
 
@@ -413,11 +425,21 @@ public static class FallbackVSyncResolver
                     firstFieldConfidence = 40;
                 }
             }
+            else if (line0 > limit)
+            {
+                diagnosticMessage =
+                    "WARNING, line0 hsync not found for current field, probably skipping one field.";
+            }
         }
 
         if (line0.HasValue)
         {
-            return new FallbackVSyncResolution(line0.Value, null, firstField, firstFieldConfidence);
+            return new FallbackVSyncResolution(
+                line0.Value,
+                null,
+                firstField,
+                firstFieldConfidence,
+                diagnosticMessage);
         }
 
         List<Pulse> longPulses = rawPulses
@@ -442,12 +464,23 @@ public static class FallbackVSyncResolver
             }
         }
 
-        line0 ??= firstLongPulse - (3.0 * meanLineLength);
+        if (!line0.HasValue)
+        {
+            diagnosticMessage =
+                "WARNING, line0 hsync not found, guessing something, result may be garbled.";
+            line0 = firstLongPulse - (3.0 * meanLineLength);
+        }
+
         double? lastLineLocation = longPulses.Count == 6
             && longPulses[3].Start - longPulses[2].Start > vSyncRange.Maximum * 10.0
                 ? longPulses[3].Start - (numEqualizingPulses * meanLineLength)
                 : null;
-        return new FallbackVSyncResolution(line0.Value, lastLineLocation, null, -1);
+        return new FallbackVSyncResolution(
+            line0.Value,
+            lastLineLocation,
+            null,
+            -1,
+            diagnosticMessage);
     }
 
     private static IReadOnlyList<Pulse> FilterClosePulses(IReadOnlyList<Pulse> rawPulses, double lineLength)

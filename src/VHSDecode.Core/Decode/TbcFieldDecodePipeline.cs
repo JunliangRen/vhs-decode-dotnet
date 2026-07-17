@@ -4576,6 +4576,11 @@ public sealed class TbcFieldDecodePipeline
             _syncDetectionOptions.RelaxedLine0,
             expectedLine0,
             expectedFirstField);
+        if (resolution?.DiagnosticMessage is { } diagnosticMessage)
+        {
+            _diagnosticLogger?.Invoke("INFO", diagnosticMessage);
+        }
+
         return resolution is null
             ? null
             : new Line0FallbackCandidate(

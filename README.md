@@ -907,7 +907,9 @@ possible capture has already been proven byte-for-byte identical.
   no previous-field state: close duplicate-pulse filtering, four ordered
   HSYNC/EQ/VSYNC boundary patterns, 0.08H candidate validation, out-of-range
   backup selection, 0.7H prediction snapping, and the long-VSYNC 240p/288p
-  fallback are shared by VHS and CVBS decoding
+  fallback are shared by VHS and CVBS decoding; all five line0 backup,
+  out-of-range, whole-block prediction, and long-pulse guess INFO diagnostics
+  retain the exact upstream text and trigger branch
 - ambiguous HSYNC-to-EQ fallback boundaries use NumPy-compatible float64
   pairwise means and standard deviations for their three content intervals, so
   a value just outside the 5% decision boundary is not falsely accepted as
@@ -1512,7 +1514,7 @@ dotnet test VHSDecodeDotNet.slnx --no-build
 ```
 
 The current formal solution build completes with zero warnings and errors, and
-the xUnit v3 project exposes 706 independently discoverable compatibility tests
+the xUnit v3 project exposes 711 independently discoverable compatibility tests
 to `dotnet test` and Visual Studio Test Explorer. On the
 same Windows machine and fixtures, Release wall-clock measurements for one
 frame were 2.346 s versus 7.193 s for NTSC VHS and 1.651 s versus 5.865 s for
