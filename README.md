@@ -1050,8 +1050,10 @@ possible capture has already been proven byte-for-byte identical.
   both demodulated channels cover its end sample
 - 16 kHz-and-higher LD PCM now recomputes each field's fractional sample offset
   from the previous absolute RF read location and field number, including
-  NumPy-compatible ties-to-even gap rounding; lower-rate and HSYNC-locked modes
-  retain the upstream zero-offset-per-field behavior
+  NumPy-compatible ties-to-even gap rounding; normally accepted fields advance
+  that anchor even without current PCM, while skip/filler writes preserve the
+  prior anchor. Lower-rate and HSYNC-locked modes retain the upstream
+  zero-offset-per-field behavior
 - right-edge HSYNC refinement now runs independently of the left edge and can
   clear a derivative-marked `linebad` entry; left and right validation use the
   distinct v0.4.0 IRE windows (`-65..110` and `-65..30`) and the right-derived
@@ -1493,7 +1495,7 @@ dotnet test VHSDecodeDotNet.slnx --no-build
 ```
 
 The current formal solution build completes with zero warnings and errors, and
-the xUnit v3 project exposes 679 independently discoverable compatibility tests
+the xUnit v3 project exposes 680 independently discoverable compatibility tests
 to `dotnet test` and Visual Studio Test Explorer. On the
 same Windows machine and fixtures, Release wall-clock measurements for one
 frame were 2.346 s versus 7.193 s for NTSC VHS and 1.651 s versus 5.865 s for

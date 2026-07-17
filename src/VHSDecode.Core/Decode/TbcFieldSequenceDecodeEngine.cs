@@ -247,7 +247,6 @@ public sealed class TbcFieldSequenceDecodeEngine
         var fields = retainFields ? new List<TbcDecodedField>() : null;
         var writePlanner = new FieldWritePlanner(session, retainWrites: false);
         int decodedFieldCount = 0;
-        long laserDiscWrittenFieldCount = 0;
         int laserDiscSpeculativeWrittenFieldCount = 0;
         TbcDecodedField? firstLaserDiscField = null;
         bool laserDiscLeadIn = false;
@@ -304,14 +303,11 @@ public sealed class TbcFieldSequenceDecodeEngine
                     && !write.Decision.IsDuplicateField);
             if (writes.Count > 0)
             {
-                if (session.Spec.Name == "ld")
+                if (session.Spec.Name == "ld" && acceptedLaserDiscFrameState)
                 {
-                    foreach ((TbcDecodedField writtenField, _) in writes)
-                    {
-                        session.TbcFieldDecoder.CommitLaserDiscAnalogAudioWrite(
-                            writtenField,
-                            laserDiscWrittenFieldCount++);
-                    }
+                    session.TbcFieldDecoder.CommitLaserDiscAnalogAudioWrite(
+                        completedField,
+                        fieldsWrittenBeforeAdd);
                 }
 
                 if (writeFields is not null)

@@ -361,7 +361,7 @@ public sealed class TbcFieldDecodePipeline
 
     internal void CommitLaserDiscAnalogAudioWrite(TbcDecodedField field, long writtenFieldNumber)
     {
-        if (_analogAudioOptions is null || field.AudioPcm is null)
+        if (_analogAudioOptions is null)
         {
             return;
         }
