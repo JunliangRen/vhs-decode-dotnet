@@ -351,6 +351,9 @@ possible capture has already been proven byte-for-byte identical.
   unchanged;
   the source black/white RF standard deviations use NumPy float64 pairwise
   reduction before the upstream four-decimal ratio rounding
+- LD field construction now receives v0.4.0's pre-write `fields_written`
+  count for speculative initial reads, the current count for same-field
+  MTF/AGC retries, and a realigned current count after recovery
 - LD EFM digital-audio front-end path, using the upstream 0-1.9 MHz
   amplitude/phase equalizer curve plus 20 kHz-1.6 MHz super-Gaussian band-pass,
   honoring `--noEFM`, and emitting clipped int16 EFM payloads from RF block and
@@ -1487,7 +1490,7 @@ dotnet test VHSDecodeDotNet.slnx --no-build
 ```
 
 The current formal solution build completes with zero warnings and errors, and
-the xUnit v3 project exposes 667 independently discoverable compatibility tests
+the xUnit v3 project exposes 670 independently discoverable compatibility tests
 to `dotnet test` and Visual Studio Test Explorer. On the
 same Windows machine and fixtures, Release wall-clock measurements for one
 frame were 2.346 s versus 7.193 s for NTSC VHS and 1.651 s versus 5.865 s for

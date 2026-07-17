@@ -101,6 +101,8 @@ public sealed class TbcFieldSequenceDecodeEngine
 
     internal bool EnableWorkerPrefetchForCustomReader { get; init; }
 
+    internal bool UseSessionFieldNumberingForCustomReader { get; init; }
+
     internal Func<string, Stream> CreateTbcOutput { get; init; } = DecodeOutputFile.Create;
 
     public TbcFieldSequenceDecodeResult TryDecodeAndWrite(DecodeSession session, int? maxFields = null)
@@ -246,6 +248,7 @@ public sealed class TbcFieldSequenceDecodeEngine
         var writePlanner = new FieldWritePlanner(session, retainWrites: false);
         int decodedFieldCount = 0;
         long laserDiscWrittenFieldCount = 0;
+        int laserDiscSpeculativeWrittenFieldCount = 0;
         TbcDecodedField? firstLaserDiscField = null;
         bool laserDiscLeadIn = false;
         bool laserDiscLeadOut = false;
@@ -373,6 +376,9 @@ public sealed class TbcFieldSequenceDecodeEngine
             try
             {
                 Task<TbcDecodedField?>? prefetchedField = cvbsPrefetch.Take();
+                int initialReadWrittenFieldCount = session.Spec.Name == "ld"
+                    ? laserDiscSpeculativeWrittenFieldCount
+                    : writePlanner.WrittenFieldCount;
                 field = prefetchedField is null
                     ? ReadFieldWithContext(
                         session,
@@ -380,8 +386,15 @@ public sealed class TbcFieldSequenceDecodeEngine
                         begin,
                         readLength,
                         decodedFieldCount,
-                        writePlanner.WrittenFieldCount)
+                        initialReadWrittenFieldCount)
                     : prefetchedField.GetAwaiter().GetResult();
+                if (session.Spec.Name == "ld")
+                {
+                    // v0.4.0 starts the next LD decode before writing the
+                    // current field, so its Field sees the pre-write count.
+                    laserDiscSpeculativeWrittenFieldCount = writePlanner.WrittenFieldCount;
+                }
+
                 if (autoMtf is not null)
                 {
                     // v0.4.0 has already decoded this field before processing the
@@ -415,6 +428,7 @@ public sealed class TbcFieldSequenceDecodeEngine
                             readLength,
                             decodedFieldCount,
                             writePlanner.WrittenFieldCount);
+                        laserDiscSpeculativeWrittenFieldCount = writePlanner.WrittenFieldCount;
                     }
                 }
 
@@ -445,6 +459,7 @@ public sealed class TbcFieldSequenceDecodeEngine
                 else if (session.Spec.Name == "ld")
                 {
                     session.TbcFieldDecoder.DiscardLaserDiscPreviousFieldContextAfterRecovery();
+                    laserDiscSpeculativeWrittenFieldCount = writePlanner.WrittenFieldCount;
                     ApplyDeferredLaserDiscMtf();
                 }
 
@@ -902,7 +917,7 @@ public sealed class TbcFieldSequenceDecodeEngine
         try
         {
             int effectiveFieldNumber = ResolveReadFieldNumber(
-                _usesSessionReader,
+                _usesSessionReader || UseSessionFieldNumberingForCustomReader,
                 session.Spec.Name,
                 fieldNumber,
                 writtenFieldCount);
