@@ -1128,7 +1128,7 @@ public sealed class TbcFieldSequenceDecodeEngine
         bool isFirstField,
         ref int leadOutCodeCount)
     {
-        if (session.Spec.Name != "ld" || session.ExecutionOptions.IgnoreLeadOut || field.VbiData is null)
+        if (session.Spec.Name != "ld" || session.ExecutionOptions.IgnoreLeadOut)
         {
             return false;
         }
@@ -1136,6 +1136,11 @@ public sealed class TbcFieldSequenceDecodeEngine
         if (isFirstField)
         {
             leadOutCodeCount = 0;
+        }
+
+        if (field.VbiData is null)
+        {
+            return false;
         }
 
         foreach (int code in field.VbiData)

@@ -13428,6 +13428,30 @@ public void TbcFieldSequenceEngineHonorsLdLeadOut()
         ref separatedCount));
     AssertEqual(1, separatedCount);
 
+    int missingFirstFieldCodesCount = 0;
+    AssertFalse(TbcFieldSequenceDecodeEngine.ShouldStopAfterLaserDiscLeadOut(
+        ld,
+        firstLeadOut,
+        isFirstField: true,
+        ref missingFirstFieldCodesCount));
+    AssertFalse(TbcFieldSequenceDecodeEngine.ShouldStopAfterLaserDiscLeadOut(
+        ld,
+        secondLeadOut with { VbiData = [0x12345] },
+        isFirstField: false,
+        ref missingFirstFieldCodesCount));
+    AssertFalse(TbcFieldSequenceDecodeEngine.ShouldStopAfterLaserDiscLeadOut(
+        ld,
+        firstLeadOut with { VbiData = null },
+        isFirstField: true,
+        ref missingFirstFieldCodesCount));
+    AssertEqual(0, missingFirstFieldCodesCount);
+    AssertFalse(TbcFieldSequenceDecodeEngine.ShouldStopAfterLaserDiscLeadOut(
+        ld,
+        secondLeadOut,
+        isFirstField: false,
+        ref missingFirstFieldCodesCount));
+    AssertEqual(1, missingFirstFieldCodesCount);
+
     int firstFieldDoubleCount = 0;
     AssertFalse(TbcFieldSequenceDecodeEngine.ShouldStopAfterLaserDiscLeadOut(
         ld,
