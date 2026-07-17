@@ -296,6 +296,9 @@ public sealed class TbcFieldSequenceDecodeEngine
             int fieldsWrittenBeforeAdd = writePlanner.WrittenFieldCount;
             IReadOnlyList<(TbcDecodedField Field, TbcFieldOrderDecision Decision)> writes =
                 writePlanner.Add(completedField);
+            bool acceptedLaserDiscFrameState = session.Spec.Name == "ld"
+                && writes.Any(write => ReferenceEquals(write.Field, completedField)
+                    && !write.Decision.IsDuplicateField);
             if (writes.Count > 0)
             {
                 if (session.Spec.Name == "ld")
@@ -316,7 +319,7 @@ public sealed class TbcFieldSequenceDecodeEngine
             }
 
             bool isFirstField = completedField.DetectedFirstField ?? ((decodedIndex & 1) == 0);
-            if (session.Spec.Name == "ld")
+            if (acceptedLaserDiscFrameState)
             {
                 if (isFirstField)
                 {
@@ -345,6 +348,8 @@ public sealed class TbcFieldSequenceDecodeEngine
                             laserDiscLeadIn,
                             laserDiscLeadOut));
                 }
+
+                autoMtf?.ObserveAcceptedField(completedField, session.System);
             }
             else if (session.Spec.Name == "cvbs" && !isFirstField && writes.Count == 1)
             {
@@ -550,7 +555,6 @@ public sealed class TbcFieldSequenceDecodeEngine
                 completedCurrentField = true;
             }
 
-            autoMtf?.ObserveAcceptedField(field, session.System);
             bool isFirstField = field.DetectedFirstField ?? ((decodedFieldCount - 1) % 2 == 0);
             if (session.Spec.Name == "vhs")
             {

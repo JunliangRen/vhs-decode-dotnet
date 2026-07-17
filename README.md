@@ -347,7 +347,8 @@ possible capture has already been proven byte-for-byte identical.
   re-decodes a field when the level moves by at least 0.05; smaller updates
   retain the source pipeline's one-field speculative-decode delay; CAV/CLV
   state is re-evaluated for every completed VBI field pair, including
-  empty-code pairs;
+  empty-code pairs, while metadata-rejected skip/filler fields leave it
+  unchanged;
   the source black/white RF standard deviations use NumPy float64 pairwise
   reduction before the upstream four-decimal ratio rounding
 - LD EFM digital-audio front-end path, using the upstream 0-1.9 MHz
@@ -1472,7 +1473,7 @@ dotnet test VHSDecodeDotNet.slnx --no-build
 ```
 
 The current formal solution build completes with zero warnings and errors, and
-the xUnit v3 project exposes 659 independently discoverable compatibility tests
+the xUnit v3 project exposes 660 independently discoverable compatibility tests
 to `dotnet test` and Visual Studio Test Explorer. On the
 same Windows machine and fixtures, Release wall-clock measurements for one
 frame were 2.346 s versus 7.193 s for NTSC VHS and 1.651 s versus 5.865 s for

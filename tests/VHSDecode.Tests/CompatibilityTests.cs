@@ -13513,6 +13513,57 @@ public void TbcFieldSequenceEngineHonorsLdLeadOut()
     }
 }
 
+[Fact(DisplayName = "TBC field sequence engine ignores LD VBI state from skipped fields")]
+public void TbcFieldSequenceEngineIgnoresLdVbiStateFromSkippedFields()
+{
+    const int leadOutCode = 0x80EEEE;
+    double[] diskLocations = [0.0, 1.0, 4.0, 5.0];
+    bool[] firstFields = [true, false, false, true];
+    int reads = 0;
+    var statusOutput = new StringWriter();
+    using DecodeSession session = DecodeSessionFactory.Create(Parse(CliSpecs.LaserDisc, [
+        "--NTSC",
+        "--noEFM",
+        "--disable_analog_audio",
+        "input.s16",
+        "out"
+    ]));
+    session.RuntimeReporter = new DecodeRuntimeReporter(
+        statusOutput,
+        new StringWriter(),
+        () => 0.0);
+
+    TbcDecodedField? ReadField(
+        DecodeSession _,
+        Stream __,
+        long begin,
+        int ___,
+        int fieldNumber)
+    {
+        reads++;
+        return BuildSyntheticTbcField(
+                begin,
+                [],
+                detectedFirstField: firstFields[fieldNumber])
+            with
+            {
+                DiskLocation = diskLocations[fieldNumber],
+                NextFieldOffsetSamples = 100.0,
+                VbiData = fieldNumber == 2 ? [leadOutCode, leadOutCode] : []
+            };
+    }
+
+    IReadOnlyList<TbcDecodedField> fields = new TbcFieldSequenceDecodeEngine(
+        readField: ReadField).DecodeFields(
+            session,
+            Stream.Null,
+            maxFields: diskLocations.Length);
+
+    AssertEqual(diskLocations.Length, reads);
+    AssertEqual(diskLocations.Length, fields.Count);
+    AssertFalse(statusOutput.ToString().Contains("Lead Out", StringComparison.Ordinal));
+}
+
 [Fact(DisplayName = "TBC field sequence engine rejects CVBS seek")]
 public void TbcFieldSequenceEngineRejectsCvbsSeek()
 {
