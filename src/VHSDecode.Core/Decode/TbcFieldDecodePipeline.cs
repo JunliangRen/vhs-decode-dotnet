@@ -147,6 +147,7 @@ internal sealed record TbcFieldDecodeState(
     long? PreviousFirstHSyncReadLocation,
     int? PreviousSyncConfidence,
     double? PreviousLaserDiscPalEndLineAbsoluteSample,
+    double? PreviousCvbsEndLineAbsoluteSample,
     bool? PreviousDetectedFirstField,
     double PreviousHSyncDifference,
     double LaserDiscNtscPhaseAdjustMedian,
@@ -200,6 +201,7 @@ public sealed class TbcFieldDecodePipeline
     private long? _previousFirstHSyncReadLocation;
     private int? _previousSyncConfidence;
     private double? _previousLaserDiscPalEndLineAbsoluteSample;
+    private double? _previousCvbsEndLineAbsoluteSample;
     private bool? _previousDetectedFirstField;
     private double _previousHSyncDifference = -1.0;
     private double _laserDiscNtscPhaseAdjustMedian;
@@ -292,6 +294,7 @@ public sealed class TbcFieldDecodePipeline
             _previousFirstHSyncReadLocation,
             _previousSyncConfidence,
             _previousLaserDiscPalEndLineAbsoluteSample,
+            _previousCvbsEndLineAbsoluteSample,
             _previousDetectedFirstField,
             _previousHSyncDifference,
             _laserDiscNtscPhaseAdjustMedian,
@@ -320,12 +323,26 @@ public sealed class TbcFieldDecodePipeline
         _previousFirstHSyncReadLocation = state.PreviousFirstHSyncReadLocation;
         _previousSyncConfidence = state.PreviousSyncConfidence;
         _previousLaserDiscPalEndLineAbsoluteSample = state.PreviousLaserDiscPalEndLineAbsoluteSample;
+        _previousCvbsEndLineAbsoluteSample = state.PreviousCvbsEndLineAbsoluteSample;
         _previousDetectedFirstField = state.PreviousDetectedFirstField;
         _previousHSyncDifference = state.PreviousHSyncDifference;
         _laserDiscNtscPhaseAdjustMedian = state.LaserDiscNtscPhaseAdjustMedian;
         _previousLaserDiscPalFieldPhaseId = state.PreviousLaserDiscPalFieldPhaseId;
         _previousLaserDiscPalPhaseAdjustments = state.PreviousLaserDiscPalPhaseAdjustments;
         _previousLaserDiscSkipCheckScore = state.PreviousLaserDiscSkipCheckScore;
+    }
+
+    internal void DiscardCvbsPreviousFieldContextAfterRecovery()
+    {
+        _previousFirstHSyncLocation = null;
+        _previousFirstHSyncReadLocation = null;
+        _previousSyncConfidence = null;
+        _previousCvbsEndLineAbsoluteSample = null;
+        _previousHSyncDifference = -1.0;
+        _laserDiscNtscPhaseAdjustMedian = 0.0;
+        _previousLaserDiscPalFieldPhaseId = null;
+        _previousLaserDiscPalPhaseAdjustments = null;
+        _previousLaserDiscSkipCheckScore = 0;
     }
 
     internal void CommitLaserDiscAnalogAudioWrite(TbcDecodedField field, long writtenFieldNumber)
@@ -659,7 +676,6 @@ public sealed class TbcFieldDecodePipeline
             meanLineLength,
             parity.IsFirstField,
             fallback);
-        UpdateSyncHistory(span.StartSample, line0, meanLineLength, parity);
         int currentFieldLineCount = CurrentFieldLineCount(parity.IsFirstField);
         int processedLines = _decodeLaserDiscVbi
             ? LaserDiscProcessedLineCount(parity.IsFirstField)
@@ -881,8 +897,10 @@ public sealed class TbcFieldDecodePipeline
             CommitChromaState(chroma);
         }
 
+        UpdateSyncHistory(span.StartSample, line0, meanLineLength, parity);
         _previousSyncConfidence = syncConfidence;
         UpdatePalLaserDiscEndLineHistory(span.StartSample, lineLocations, currentFieldLineCount);
+        UpdateCvbsEndLineHistory(span.StartSample, lineLocations, currentFieldLineCount);
 
         return new TbcDecodedField(
             span.StartSample,
@@ -2076,13 +2094,24 @@ public sealed class TbcFieldDecodePipeline
             return null;
         }
 
-        float[] burstArea = NumbaReduction.CenterFloat32(video.Slice(start, length));
-        if (NumbaReduction.MaxFloat32(burstArea) > 30.0 * hzIre)
+        if (_decodeType == "cvbs")
+        {
+            double[] burstArea = NumbaReduction.CenterFloat64(video.Slice(start, length));
+            if (NumbaReduction.MaxFloat64(burstArea) > 30.0 * hzIre)
+            {
+                return null;
+            }
+
+            return NumbaReduction.StandardDeviationFloat64(burstArea) * Math.Sqrt(2.0);
+        }
+
+        float[] float32BurstArea = NumbaReduction.CenterFloat32(video.Slice(start, length));
+        if (NumbaReduction.MaxFloat32(float32BurstArea) > 30.0 * hzIre)
         {
             return null;
         }
 
-        return NumbaReduction.StandardDeviationFloat32(burstArea) * Math.Sqrt(2.0);
+        return NumbaReduction.StandardDeviationFloat32(float32BurstArea) * Math.Sqrt(2.0);
     }
 
     private (LineLocationResult LineLocations, int? FieldPhaseId) RefineLaserDiscNtscLineLocationsFromBurst(
@@ -2291,8 +2320,19 @@ public sealed class TbcFieldDecodePipeline
             int demodLength = Math.Min(length, video.Length - windowStart);
             if (demodLength > 0 && hzIre != 0.0)
             {
-                float[] demodArea = NumbaReduction.CenterFloat32(video.Slice(windowStart, demodLength));
-                if (NumbaReduction.MaxAbsFloat32(demodArea) > 30.0 * hzIre)
+                bool hasDemodInterference;
+                if (_decodeType == "cvbs")
+                {
+                    double[] demodArea = NumbaReduction.CenterFloat64(video.Slice(windowStart, demodLength));
+                    hasDemodInterference = NumbaReduction.MaxAbsFloat64(demodArea) > 30.0 * hzIre;
+                }
+                else
+                {
+                    float[] demodArea = NumbaReduction.CenterFloat32(video.Slice(windowStart, demodLength));
+                    hasDemodInterference = NumbaReduction.MaxAbsFloat32(demodArea) > 30.0 * hzIre;
+                }
+
+                if (hasDemodInterference)
                 {
                     return false;
                 }
@@ -2589,20 +2629,35 @@ public sealed class TbcFieldDecodePipeline
             }
 
             ReadOnlySpan<double> burstArea = video.Slice(start, length);
-            float standardDeviation;
+            double standardDeviation;
             if (isPal)
             {
-                float[] centered = NumbaReduction.CenterFloat32(burstArea);
-                if (NumbaReduction.MaxFloat32(centered) > 30.0 * converter.HzIre)
+                if (_decodeType == "cvbs")
                 {
-                    continue;
-                }
+                    double[] centered = NumbaReduction.CenterFloat64(burstArea);
+                    if (NumbaReduction.MaxFloat64(centered) > 30.0 * converter.HzIre)
+                    {
+                        continue;
+                    }
 
-                standardDeviation = NumbaReduction.StandardDeviationFloat32(centered);
+                    standardDeviation = NumbaReduction.StandardDeviationFloat64(centered);
+                }
+                else
+                {
+                    float[] centered = NumbaReduction.CenterFloat32(burstArea);
+                    if (NumbaReduction.MaxFloat32(centered) > 30.0 * converter.HzIre)
+                    {
+                        continue;
+                    }
+
+                    standardDeviation = NumbaReduction.StandardDeviationFloat32(centered);
+                }
             }
             else
             {
-                standardDeviation = NumbaReduction.StandardDeviationFloat32(burstArea);
+                standardDeviation = _decodeType == "cvbs"
+                    ? NumbaReduction.StandardDeviationFloat64(burstArea)
+                    : NumbaReduction.StandardDeviationFloat32(burstArea);
             }
 
             burstLevels.Add(standardDeviation * Math.Sqrt(2.0));
@@ -4249,21 +4304,25 @@ public sealed class TbcFieldDecodePipeline
         int currentFieldLines,
         bool isFirstField)
     {
-        double? palLaserDiscLine0 = TryProjectPalLaserDiscPreviousLine0(
-            _decodeType,
-            _system,
-            _previousLaserDiscPalEndLineAbsoluteSample,
-            spanStartSample);
-        if (palLaserDiscLine0.HasValue)
+        double? directPreviousLine0 = TryProjectCvbsPreviousLine0(
+                _decodeType,
+                _previousCvbsEndLineAbsoluteSample,
+                spanStartSample)
+            ?? TryProjectPalLaserDiscPreviousLine0(
+                _decodeType,
+                _system,
+                _previousLaserDiscPalEndLineAbsoluteSample,
+                spanStartSample);
+        if (directPreviousLine0.HasValue)
         {
             double projectedFirstHSyncLine = VBlankSyncResolver.FirstHSyncLine(
                 _system,
                 _syncAnalyzer.NumPulses,
                 isFirstField);
             double projectedFirstHSync =
-                palLaserDiscLine0.Value + (projectedFirstHSyncLine * meanLineLength);
+                directPreviousLine0.Value + (projectedFirstHSyncLine * meanLineLength);
             return new Line0Resolution(
-                palLaserDiscLine0.Value,
+                directPreviousLine0.Value,
                 UsedFallback: false,
                 ExpectedFirstField: null,
                 ExpectedFirstFieldConfidence: 0,
@@ -4327,6 +4386,22 @@ public sealed class TbcFieldDecodePipeline
                 hasNextEstimate: false));
     }
 
+    internal static double? TryProjectCvbsPreviousLine0(
+        string? decodeType,
+        double? previousEndLineAbsoluteSample,
+        long spanStartSample)
+    {
+        if (decodeType != "cvbs"
+            || previousEndLineAbsoluteSample is not { } previousEnd
+            || !double.IsFinite(previousEnd))
+        {
+            return null;
+        }
+
+        double line0Location = previousEnd - spanStartSample;
+        return double.IsFinite(line0Location) ? line0Location : null;
+    }
+
     internal static double? TryProjectPalLaserDiscPreviousLine0(
         string? decodeType,
         string system,
@@ -4363,6 +4438,27 @@ public sealed class TbcFieldDecodePipeline
         }
 
         _previousLaserDiscPalEndLineAbsoluteSample =
+            spanStartSample + lineLocations.Locations[currentFieldLineCount];
+    }
+
+    private void UpdateCvbsEndLineHistory(
+        long spanStartSample,
+        LineLocationResult lineLocations,
+        int currentFieldLineCount)
+    {
+        if (_decodeType != "cvbs")
+        {
+            return;
+        }
+
+        if ((uint)currentFieldLineCount >= (uint)lineLocations.Locations.Length
+            || !double.IsFinite(lineLocations.Locations[currentFieldLineCount]))
+        {
+            _previousCvbsEndLineAbsoluteSample = null;
+            return;
+        }
+
+        _previousCvbsEndLineAbsoluteSample =
             spanStartSample + lineLocations.Locations[currentFieldLineCount];
     }
 

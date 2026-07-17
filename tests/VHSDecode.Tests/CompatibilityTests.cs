@@ -12945,17 +12945,22 @@ public void TbcFieldSequenceEngineRecoversWithUpstreamFieldAdvances()
                 with { NextFieldOffsetSamples = 100.0 };
         }
 
-        throw new TbcFieldDecodeRecoveryException(
-            TbcFieldDecodeRecoveryKind.NoSyncPulses,
-            40_000_000,
-            "stop after decoded fields",
-            stopAfterDecodedFields: true);
+        if (cvbsAttempts == 2)
+        {
+            throw new TbcFieldDecodeRecoveryException(
+                TbcFieldDecodeRecoveryKind.NoSyncPulses,
+                40_000_000,
+                "recover after written fields",
+                stopAfterDecodedFields: true);
+        }
+
+        return null;
     }
 
     IReadOnlyList<TbcDecodedField> cvbsFields = new TbcFieldSequenceDecodeEngine(
         readField: ReadCvbsField).DecodeFields(cvbs, Stream.Null, maxFields: 2);
     AssertEqual(1, cvbsFields.Count);
-    AssertEqual(2, cvbsAttempts);
+    AssertEqual(3, cvbsAttempts);
 
     TbcFieldDecodeRecoveryException noPulses = CaptureException<TbcFieldDecodeRecoveryException>(() =>
         session.TbcFieldDecoder.Decode(new RfDecodedSpan(0, [], [0.0, 0.0, 0.0], [])));
