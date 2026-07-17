@@ -835,7 +835,12 @@ public sealed class TbcFieldDecodePipeline
             lineLocations.Locations,
             parity.IsFirstField == true,
             fieldConverter ?? _videoOutput);
-        TbcDropoutMap? dropouts = DetectDropouts(span, lineLocations, timing, parity.IsFirstField);
+        TbcDropoutMap? dropouts = DetectDropouts(
+            span,
+            lineLocations,
+            timing,
+            parity.IsFirstField,
+            fieldConverter ?? _videoOutput);
         short[]? efm = SliceFieldEfm(span.Efm, lineLocations.Locations, currentFieldLineCount);
         short[]? audioPcm = DownscaleAnalogAudio(
             span.AnalogAudio,
@@ -4478,7 +4483,8 @@ public sealed class TbcFieldDecodePipeline
         RfDecodedSpan span,
         LineLocationResult lineLocations,
         SyncTiming timing,
-        bool? isFirstField)
+        bool? isFirstField,
+        VideoOutputConverter videoOutput)
     {
         if (!_dropoutOptions.Enabled)
         {
@@ -4491,7 +4497,7 @@ public sealed class TbcFieldDecodePipeline
         }
 
         return _dropoutOptions.Mode == TbcDropoutDetectionMode.LaserDiscDemod
-            ? DetectLaserDiscDropouts(span, lineLocations, timing, isFirstField)
+            ? DetectLaserDiscDropouts(span, lineLocations, timing, isFirstField, videoOutput)
             : DetectTapeDropouts(span, lineLocations, isFirstField);
     }
 
@@ -4543,7 +4549,8 @@ public sealed class TbcFieldDecodePipeline
         RfDecodedSpan span,
         LineLocationResult lineLocations,
         SyncTiming timing,
-        bool? isFirstField)
+        bool? isFirstField,
+        VideoOutputConverter videoOutput)
     {
         int lineOffset = LaserDiscLineOffset(isFirstField);
         int startLine = lineOffset + 1;
@@ -4555,8 +4562,11 @@ public sealed class TbcFieldDecodePipeline
             return TbcDropoutMap.Empty;
         }
 
-        int startSample = Math.Clamp((int)Math.Floor(lineLocations.Locations[startLine]), 0, span.Video.Length);
-        int endSample = Math.Clamp((int)Math.Ceiling(lineLocations.Locations[endLine]), startSample, span.Video.Length);
+        (int startSample, int endSample) = GetLaserDiscDropoutSampleRange(
+            lineLocations.Locations,
+            startLine,
+            endLine,
+            span.Video.Length);
         if (endSample <= startSample)
         {
             return TbcDropoutMap.Empty;
@@ -4568,7 +4578,8 @@ public sealed class TbcFieldDecodePipeline
             timing,
             isFirstField,
             startSample,
-            endSample);
+            endSample,
+            videoOutput);
         return TbcDropoutMapper.MapLaserDiscRfToTbc(
             ranges,
             lineLocations.Locations,
@@ -4577,42 +4588,54 @@ public sealed class TbcFieldDecodePipeline
             CurrentFieldLineCount(isFirstField));
     }
 
+    internal static (int Start, int End) GetLaserDiscDropoutSampleRange(
+        IReadOnlyList<double> lineLocations,
+        int startLine,
+        int endLine,
+        int sampleCount)
+    {
+        int start = Math.Clamp((int)lineLocations[startLine], 0, sampleCount);
+        int end = Math.Clamp((int)lineLocations[endLine], start, sampleCount);
+        return (start, end);
+    }
+
     private IReadOnlyList<RfDropoutRange> DetectDemodDropoutRanges(
         RfDecodedSpan span,
         LineLocationResult lineLocations,
         SyncTiming timing,
         bool? isFirstField,
         int startSample,
-        int endSample)
+        int endSample,
+        VideoOutputConverter videoOutput)
     {
         bool isPal = FormatCatalog.ParentSystem(_system) == "PAL";
-        double validMin = _videoOutput.IreToHz(isPal ? -70.0 : -50.0);
-        double validMax = _videoOutput.IreToHz(isPal ? 150.0 : 160.0);
-        double syncMin = _videoOutput.IreToHz(_videoOutput.VSyncIre - (isPal ? 60.0 : 35.0));
-        double validMin05 = _videoOutput.IreToHz(-30.0);
-        double validMax05 = _videoOutput.IreToHz(115.0);
-        double syncMin05 = _videoOutput.IreToHz(_videoOutput.VSyncIre - 10.0);
+        float validMin = (float)videoOutput.IreToHz(isPal ? -70.0 : -50.0);
+        float validMax = (float)videoOutput.IreToHz(isPal ? 150.0 : 160.0);
+        float syncMin = (float)videoOutput.IreToHz(videoOutput.VSyncIre - (isPal ? 60.0 : 35.0));
+        float validMin05 = (float)videoOutput.IreToHz(-30.0);
+        float validMax05 = (float)videoOutput.IreToHz(115.0);
+        float syncMin05 = (float)videoOutput.IreToHz(videoOutput.VSyncIre - 10.0);
         bool[] syncArea = BuildSyncAreaMask(span.Video.Length, lineLocations, timing, isFirstField);
         bool[] errorMap = new bool[span.Video.Length];
         bool hasRawDemod = span.DemodRaw.Length == span.Video.Length;
         bool hasVideoLowPass = span.VideoLowPass?.Length == span.Video.Length;
         bool hasRfHighPass = span.RfHighPass?.Length == span.Video.Length;
         double rawDemodMaximum = _syncAnalyzer.SampleRateHz / 2.0;
-        double rfHighPassMaximum = hasRfHighPass
-            ? StandardDeviation(span.RfHighPass!) * 3.0
-            : double.PositiveInfinity;
+        float rfHighPassMaximum = hasRfHighPass
+            ? (float)(NumbaReduction.StandardDeviationFloat32InputToFloat64(span.RfHighPass!) * 3.0)
+            : float.PositiveInfinity;
 
         for (int i = startSample; i < endSample; i++)
         {
-            double minimum = syncArea[i] ? syncMin : validMin;
-            double video = span.Video[i];
+            float minimum = syncArea[i] ? syncMin : validMin;
+            float video = (float)span.Video[i];
             bool videoOutOfRange = video < minimum || video > validMax;
-            bool rawDemodOutOfRange = hasRawDemod && span.DemodRaw[i] > rawDemodMaximum;
+            bool rawDemodOutOfRange = hasRawDemod && (float)span.DemodRaw[i] > rawDemodMaximum;
             bool videoLowPassOutOfRange = false;
             if (hasVideoLowPass)
             {
-                double lowPassMinimum = syncArea[i] ? syncMin05 : validMin05;
-                double lowPassVideo = span.VideoLowPass![i];
+                float lowPassMinimum = syncArea[i] ? syncMin05 : validMin05;
+                float lowPassVideo = (float)span.VideoLowPass![i];
                 videoLowPassOutOfRange = lowPassVideo < lowPassMinimum || lowPassVideo > validMax05;
             }
 
@@ -4623,7 +4646,9 @@ public sealed class TbcFieldDecodePipeline
         {
             for (int i = startSample; i < endSample; i++)
             {
-                double value = span.RfHighPass![i];
+                // Upstream compares a float32 array with a Python scalar, which NumPy
+                // resolves back to a float32 comparison threshold.
+                float value = (float)span.RfHighPass![i];
                 if (!(value < -rfHighPassMaximum || value > rfHighPassMaximum))
                 {
                     continue;
@@ -4652,12 +4677,12 @@ public sealed class TbcFieldDecodePipeline
     {
         bool[] syncArea = new bool[length];
         int endLine = lineLocations.Locations.Length - 1;
-        int hsyncLength = Math.Max(1, (int)timing.HSync.Maximum);
+        int hsyncLength = (int)timing.HSync.Maximum;
 
         for (int line = 1; line < endLine; line++)
         {
-            int lineStart = (int)Math.Floor(lineLocations.Locations[line]);
-            int lineEnd = (int)Math.Ceiling(lineLocations.Locations[line + 1]);
+            int lineStart = (int)lineLocations.Locations[line];
+            int lineEnd = (int)lineLocations.Locations[line + 1];
             MarkRange(syncArea, lineStart, Math.Min(lineEnd, lineStart + hsyncLength));
         }
 
@@ -4691,8 +4716,8 @@ public sealed class TbcFieldDecodePipeline
     {
         MarkRange(
             target,
-            (int)Math.Floor(lineLocations[line]),
-            (int)Math.Ceiling(lineLocations[line + 1]));
+            (int)lineLocations[line],
+            (int)lineLocations[line + 1]);
     }
 
     private static void MarkRange(bool[] target, int start, int end)
@@ -4714,19 +4739,6 @@ public sealed class TbcFieldDecodePipeline
         }
 
         return sum / values.Length;
-    }
-
-    private static double StandardDeviation(ReadOnlySpan<double> values)
-    {
-        double mean = Mean(values);
-        double sumSquares = 0.0;
-        for (int i = 0; i < values.Length; i++)
-        {
-            double distance = values[i] - mean;
-            sumSquares += distance * distance;
-        }
-
-        return Math.Sqrt(sumSquares / values.Length);
     }
 
     private static double MaxAbsCentered(ReadOnlySpan<double> values, double mean)
