@@ -4,6 +4,7 @@ using System.Security.Cryptography;
 using VHSDecode.Core.Decode;
 using VHSDecode.Core.Dsp;
 using VHSDecode.Core.Formats;
+using VHSDecode.Core.Tbc;
 using Xunit;
 
 namespace VHSDecode.Tests;
@@ -141,6 +142,62 @@ public sealed class LaserDiscAudioNumericsCompatibilityTests
         float mean = TbcFieldDecodePipeline.MeanAudioFloat32(values);
 
         Assert.Equal(expectedBits, BitConverter.SingleToInt32Bits(mean));
+    }
+
+    [Fact(DisplayName = "LD analog audio reports muted TBC failures like v0.4.0")]
+    public void LdAnalogAudioReportsMutedTbcFailures()
+    {
+        var diagnostics = new List<(string Level, string Message)>();
+        var spec = new TbcFrameSpec(
+            "NTSC",
+            OutputLineLength: 4,
+            OutputLineCount: 2,
+            OutputSampleRateHz: 14_318_180.0,
+            ColourBurstStart: null,
+            ColourBurstEnd: null,
+            ActiveVideoStart: null,
+            ActiveVideoEnd: null);
+        var converter = new VideoOutputConverter(
+            ire0: 0.0,
+            hzIre: 1.0,
+            outputZero: 256,
+            vsyncIre: -40.0,
+            outputScale: 10.0);
+        var pipeline = new TbcFieldDecodePipeline(
+            new SyncAnalyzer(
+                sampleRateHz: 1_000_000.0,
+                linePeriodUs: 100.0,
+                hsyncPulseUs: 10.0,
+                equalizingPulseUs: 5.0,
+                vsyncPulseUs: 20.0),
+            new TbcFieldRenderer(spec, converter),
+            converter,
+            "NTSC",
+            TbcDropoutDetectionOptions.Disabled,
+            analogAudioOptions: new LaserDiscAnalogAudioOutputOptions(
+                LinePeriodUs: 100.0,
+                LineCount: 2,
+                OutputFrequency: 10_000.0,
+                LeftCarrierHz: 1_000.0,
+                RightCarrierHz: 2_000.0),
+            diagnosticLogger: (level, message) => diagnostics.Add((level, message)));
+        var audio = new LaserDiscAnalogAudioBlock(
+            Left: [1_000.0],
+            Right: [2_000.0],
+            DecimationFactor: 1);
+
+        short[] output = Assert.IsType<short[]>(pipeline.DownscaleAnalogAudio(
+            audio,
+            lineLocations: [0.0, 100.0, 200.0],
+            fieldLineCount: 2,
+            fieldStartSample: 0,
+            decodedFieldNumber: 0,
+            isFirstField: true));
+
+        Assert.Equal([0, 0, 0, 0], output);
+        Assert.Equal(
+            [("WARNING", "Analog audio processing error, muting samples")],
+            diagnostics);
     }
 
     private static double[] BuildChannel(

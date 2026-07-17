@@ -1047,7 +1047,8 @@ possible capture has already been proven byte-for-byte identical.
 - LD analog audio tick generation now uses the parity-specific field line
   count (NTSC 263/262 and PAL 312/313) instead of the maximum TBC field height,
   generates ticks by index like `numpy.arange`, and mutes an interval unless
-  both demodulated channels cover its end sample
+  both demodulated channels cover its end sample; any such TBC failure emits
+  v0.4.0's analog-audio muting warning once for the affected field
 - 16 kHz-and-higher LD PCM now recomputes each field's fractional sample offset
   from the previous absolute RF read location and field number, including
   NumPy-compatible ties-to-even gap rounding; normally accepted fields advance
@@ -1495,7 +1496,7 @@ dotnet test VHSDecodeDotNet.slnx --no-build
 ```
 
 The current formal solution build completes with zero warnings and errors, and
-the xUnit v3 project exposes 680 independently discoverable compatibility tests
+the xUnit v3 project exposes 681 independently discoverable compatibility tests
 to `dotnet test` and Visual Studio Test Explorer. On the
 same Windows machine and fixtures, Release wall-clock measurements for one
 frame were 2.346 s versus 7.193 s for NTSC VHS and 1.651 s versus 5.865 s for

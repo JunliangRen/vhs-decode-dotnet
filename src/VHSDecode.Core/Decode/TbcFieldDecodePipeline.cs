@@ -3412,7 +3412,7 @@ public sealed class TbcFieldDecodePipeline
         return output;
     }
 
-    private short[]? DownscaleAnalogAudio(
+    internal short[]? DownscaleAnalogAudio(
         LaserDiscAnalogAudioBlock? audio,
         IReadOnlyList<double> lineLocations,
         int fieldLineCount,
@@ -3509,12 +3509,14 @@ public sealed class TbcFieldDecodePipeline
         }
 
         var output = new short[(ticks.Length - 1) * 2];
+        bool failed = false;
         for (int i = 0; i < ticks.Length - 1; i++)
         {
             int start = (int)locations[i];
             int end = (int)locations[i + 1];
             if (end <= start || end >= audio.Left.Length || end >= audio.Right.Length)
             {
+                failed = true;
                 continue;
             }
 
@@ -3532,6 +3534,13 @@ public sealed class TbcFieldDecodePipeline
                 - _analogAudioOptions.RightCarrierHz;
             output[i * 2] = (short)-RescaleAndClipAudio(left);
             output[(i * 2) + 1] = (short)-RescaleAndClipAudio(right);
+        }
+
+        if (failed)
+        {
+            _diagnosticLogger?.Invoke(
+                "WARNING",
+                "Analog audio processing error, muting samples");
         }
 
         return output;
