@@ -103,6 +103,17 @@ public static class DecodeSessionFactory
     public const int DefaultBlockLength = 32 * 1024;
 
     public static DecodeSession Create(ParsedCommand command, int blockLength = DefaultBlockLength)
+        => Create(command, blockLength, enforceVhsFieldClass: true);
+
+    internal static DecodeSession CreateForRfParameterProbe(
+        ParsedCommand command,
+        int blockLength = DefaultBlockLength)
+        => Create(command, blockLength, enforceVhsFieldClass: false);
+
+    private static DecodeSession Create(
+        ParsedCommand command,
+        int blockLength,
+        bool enforceVhsFieldClass)
     {
         if (command.Positionals.Count < 2)
         {
@@ -116,14 +127,17 @@ public static class DecodeSessionFactory
 
         return command.Spec.Name switch
         {
-            "vhs" => CreateVhs(command, blockLength),
+            "vhs" => CreateVhs(command, blockLength, enforceVhsFieldClass),
             "cvbs" => CreateCvbs(command, blockLength),
             "ld" => CreateLaserDisc(command, blockLength),
             _ => throw new NotSupportedException($"Unsupported decode command '{command.Spec.Name}'.")
         };
     }
 
-    private static DecodeSession CreateVhs(ParsedCommand command, int blockLength)
+    private static DecodeSession CreateVhs(
+        ParsedCommand command,
+        int blockLength,
+        bool enforceFieldClass)
     {
         string system = VideoSystemSelector.Select(command);
         double selectedSampleRateMHz = SelectCommonSampleFrequencyMHz(command);
@@ -139,7 +153,25 @@ public static class DecodeSessionFactory
             command.Get<string>("tape_format"),
             command.Get<string>("tape_speed"));
         parameters = VhsParamsFileOverride.Apply(parameters, NullableString(command, "params_file"));
-        return Build(command, system, parameters, decodeSampleRateMHz, blockLength, blockCut: 1024, blockCutEnd: 1024, loader);
+        DecodeSession session = Build(
+            command,
+            system,
+            parameters,
+            decodeSampleRateMHz,
+            blockLength,
+            blockCut: 1024,
+            blockCutEnd: 1024,
+            loader);
+        if (!enforceFieldClass
+            || !VhsInitializationDiagnostics.IsUnsupportedFieldClassCombination(system, parameters.TapeFormat))
+        {
+            return session;
+        }
+
+        IReadOnlyList<DecodeInitializationDiagnostic> diagnostics =
+            VhsInitializationDiagnostics.Build(command, session);
+        session.Dispose();
+        throw new VhsFieldClassSelectionException(system, diagnostics);
     }
 
     private static DecodeSession CreateCvbs(ParsedCommand command, int blockLength)

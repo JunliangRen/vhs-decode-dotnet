@@ -121,7 +121,65 @@ public sealed class VhsInitializationWarningCompatibilityTests : IDisposable
         string tapeFormat,
         string? expected)
     {
-        Assert.Equal(expected, DecodeRunner.GetVhsFieldClassFallbackMessage(system, tapeFormat));
+        Assert.Equal(expected, VhsInitializationDiagnostics.GetFieldClassFallbackMessage(system, tapeFormat));
+    }
+
+    [Theory(DisplayName = "VHS special systems reject non-VHS field classes like v0.4.0")]
+    [InlineData("PAL_M", "BETAMAX", "Tape format \"BETAMAX\" not supported for PAL-M yet")]
+    [InlineData("NLINHA", "SVHS", "Tape format \"SVHS\" not supported for NLINHA yet")]
+    [InlineData("MESECAM", "VHSHQ", "Tape format \"VHSHQ\" not supported for MESECAM yet")]
+    public void SpecialSystemsRejectNonVhsFieldClasses(
+        string system,
+        string tapeFormat,
+        string expectedWarning)
+    {
+        RunFailedDecode(
+            system,
+            tapeFormat,
+            out string output,
+            out string error,
+            out string log,
+            out string outputBase);
+
+        Assert.Equal(string.Empty, output);
+        Assert.Equal(
+            expectedWarning + Environment.NewLine
+            + $"('Unknown video system and/or tape format combination!', '{system}')"
+            + Environment.NewLine,
+            error);
+        Assert.Contains("WARNING - " + expectedWarning, log, StringComparison.Ordinal);
+        Assert.DoesNotContain("DEBUG - Sys Parameters:", log, StringComparison.Ordinal);
+        Assert.False(File.Exists(outputBase + ".tbc"));
+        Assert.False(File.Exists(outputBase + "_chroma.tbc"));
+        Assert.False(File.Exists(outputBase + ".tbc.json.tmp"));
+    }
+
+    [Fact(DisplayName = "VHS failed field-class construction preserves earlier diagnostic order")]
+    public void FailedFieldClassConstructionPreservesEarlierDiagnostics()
+    {
+        RunFailedDecode(
+            "PAL_M",
+            "EIAJ",
+            out _,
+            out string error,
+            out string log,
+            out _,
+            "--cxadc",
+            "--level_detect_divisor",
+            "11");
+
+        AssertOrdered(
+            error,
+            "--cxadc is deprecated! use -f 8fsc instead!",
+            "Tape format \"EIAJ\" not supported for PAL-M yet",
+            "Invalid level detect divisor value 11, using default.",
+            "('Unknown video system and/or tape format combination!', 'PAL_M')");
+        AssertOrdered(
+            log,
+            "WARNING - --cxadc is deprecated! use -f 8fsc instead!",
+            "WARNING - Tape format \"EIAJ\" not supported for PAL-M yet",
+            "WARNING - Invalid level detect divisor value 11, using default.");
+        Assert.DoesNotContain("DEBUG - Sys Parameters:", log, StringComparison.Ordinal);
     }
 
     public void Dispose()
@@ -162,6 +220,50 @@ public sealed class VhsInitializationWarningCompatibilityTests : IDisposable
         int exitCode = new DecodeRunner().Run(command, output, error);
 
         Assert.Equal(0, exitCode);
+        errorText = error.ToString();
+        logText = File.ReadAllText(outputBase + ".log");
+    }
+
+    private void RunFailedDecode(
+        string system,
+        string tapeFormat,
+        out string outputText,
+        out string errorText,
+        out string logText,
+        out string outputBase,
+        params string[] options)
+    {
+        string inputPath = Path.Combine(
+            _tempDirectory,
+            "input-" + Guid.NewGuid().ToString("N") + ".s16");
+        outputBase = Path.Combine(
+            _tempDirectory,
+            "output-" + Guid.NewGuid().ToString("N"));
+        File.WriteAllBytes(inputPath, []);
+        ParsedCommand command = new CommandLineParser().Parse(CliSpecs.Vhs, [
+            .. options,
+            "--system",
+            system,
+            "--tape_format",
+            tapeFormat,
+            "-f",
+            "40",
+            "--no_resample",
+            "--length",
+            "0",
+            "--threads",
+            "0",
+            "--overwrite",
+            inputPath,
+            outputBase
+        ]);
+        var output = new StringWriter();
+        var error = new StringWriter();
+
+        int exitCode = new DecodeRunner().Run(command, output, error);
+
+        Assert.Equal(1, exitCode);
+        outputText = output.ToString();
         errorText = error.ToString();
         logText = File.ReadAllText(outputBase + ".log");
     }

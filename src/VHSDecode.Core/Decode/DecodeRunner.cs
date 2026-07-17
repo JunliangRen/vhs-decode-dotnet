@@ -131,7 +131,7 @@ public sealed class DecodeRunner
             {
                 DecodeSessionLogWriter.Write(
                     session,
-                    BuildSessionCompatibilityDiagnostics(command, session));
+                    VhsInitializationDiagnostics.Build(command, session));
                 TbcFieldSequenceDecodeResult result = _engineFactory(cancellationToken)
                     .TryDecodeAndWrite(session);
                 if (result.Success && command.Spec == CliSpecs.Cvbs)
@@ -180,7 +180,20 @@ public sealed class DecodeRunner
             or NotSupportedException
             or FormatParameterException)
         {
-            if (ex is DecodeThreadInitializationException)
+            if (ex is VhsFieldClassSelectionException fieldClassException)
+            {
+                string logPath = command.OutputBase + ".log";
+                File.WriteAllText(logPath, string.Empty);
+                foreach (DecodeInitializationDiagnostic diagnostic in fieldClassException.Diagnostics)
+                {
+                    DecodeSessionLogWriter.Append(logPath, diagnostic.Level, diagnostic.Message);
+                    if (!string.Equals(diagnostic.Level, "DEBUG", StringComparison.OrdinalIgnoreCase))
+                    {
+                        error.WriteLine(diagnostic.Message);
+                    }
+                }
+            }
+            else if (ex is DecodeThreadInitializationException)
             {
                 File.WriteAllText(command.OutputBase + ".log", string.Empty);
             }
@@ -225,79 +238,6 @@ public sealed class DecodeRunner
         {
             error.WriteLine("WARNING: --ntsc_audio_rate ignored for PAL (audio is already frame-locked at 44100hz)");
         }
-    }
-
-    private static IReadOnlyList<DecodeInitializationDiagnostic> BuildSessionCompatibilityDiagnostics(
-        ParsedCommand command,
-        DecodeSession session)
-    {
-        var diagnostics = new List<DecodeInitializationDiagnostic>();
-        if (session.ExecutionOptions.CxAdcCompatibilityMode)
-        {
-            diagnostics.Add(new DecodeInitializationDiagnostic(
-                "WARNING",
-                "--cxadc is deprecated! use -f 8fsc instead!"));
-        }
-
-        if (command.Spec != CliSpecs.Vhs)
-        {
-            return diagnostics;
-        }
-
-        foreach (string warning in session.Parameters.Warnings)
-        {
-            diagnostics.Add(new DecodeInitializationDiagnostic("WARNING", warning));
-        }
-
-        if (Math.Truncate(session.FilterOptions.FmAudioNotchQ) > 0.0
-            && (!session.Parameters.RfParams.TryGetProperty("fm_audio_channel_0_freq", out _)
-                || !session.Parameters.RfParams.TryGetProperty("fm_audio_channel_1_freq", out _)))
-        {
-            diagnostics.Add(new DecodeInitializationDiagnostic(
-                "WARNING",
-                "Audio frequencies are not specified for this format, audio fm notch filters not enabled!"));
-        }
-
-        int configuredDivisor = command.Get<int>("level_detect_divisor");
-        double sampleRateMHz = session.DecodeSampleRateHz / 1_000_000.0;
-        if (configuredDivisor < 1 || configuredDivisor > 10)
-        {
-            diagnostics.Add(new DecodeInitializationDiagnostic(
-                "WARNING",
-                $"Invalid level detect divisor value {configuredDivisor}, using default."));
-        }
-        else if (sampleRateMHz / configuredDivisor < 4.0)
-        {
-            diagnostics.Add(new DecodeInitializationDiagnostic(
-                "WARNING",
-                "Level detect divisor too high "
-                + $"({configuredDivisor}) for input frequency "
-                + $"({PythonNamespaceFormatter.FormatValue(sampleRateMHz)}) mhz. "
-                + $"Limiting to {session.SyncDetectionOptions.LevelDetectDivisor}"));
-        }
-
-        if (GetVhsFieldClassFallbackMessage(session.System, session.Parameters.TapeFormat) is { } fallbackMessage)
-        {
-            diagnostics.Add(new DecodeInitializationDiagnostic("INFO", fallbackMessage));
-        }
-
-        return diagnostics;
-    }
-
-    internal static string? GetVhsFieldClassFallbackMessage(string system, string tapeFormat)
-    {
-        return (FormatCatalog.NormalizeSystem(system), tapeFormat.ToUpperInvariant()) switch
-        {
-            ("PAL", not ("UMATIC" or "UMATIC_HI" or "UMATIC_SP" or "EIAJ" or "VCR" or "VCR_LP"
-                or "TYPEC" or "TYPEB" or "QUADRUPLEX" or "SVHS" or "SVHS_ET" or "BETAMAX"
-                or "VIDEO8" or "HI8" or "VHS" or "VHSHQ" or "VIDEO2000")) =>
-                "Tape format unimplemented for PAL, using VHS field class.",
-            ("NTSC", not ("UMATIC" or "UMATIC_HI" or "UMATIC_SP" or "EIAJ" or "TYPEC" or "TYPEB"
-                or "VHD" or "SVHS" or "SVHS_ET" or "BETAMAX" or "BETAMAX_HIFI" or "SUPERBETA"
-                or "VIDEO8" or "HI8" or "VHS" or "VHSHQ")) =>
-                "Tape format unimplemented for NTSC, using VHS field class.",
-            _ => null
-        };
     }
 
     public static void WriteCvbsAgcStatistics(CvbsAgcStatistics? statistics, TextWriter error)

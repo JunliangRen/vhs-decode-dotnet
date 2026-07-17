@@ -15192,7 +15192,7 @@ public void TapeFamilyBlocksMatchUpstreamChannels()
             "input.u8",
             "out"
         ]);
-        using DecodeSession session = DecodeSessionFactory.Create(command, blockLength);
+        using DecodeSession session = DecodeSessionFactory.CreateForRfParameterProbe(command, blockLength);
         using var input = new MemoryStream(inputBytes, writable: false);
         RfDemodulatedBlock block = session.Pipeline.DecodeBlock(input, 0, blockLength)
             ?? throw new Exception($"{label}: no RF block was decoded.");
