@@ -413,6 +413,10 @@ public sealed class TbcFieldSequenceDecodeEngine
 
                     session.TbcFieldDecoder.DiscardCvbsPreviousFieldContextAfterRecovery();
                 }
+                else if (session.Spec.Name == "ld")
+                {
+                    session.TbcFieldDecoder.DiscardLaserDiscPreviousFieldContextAfterRecovery();
+                }
 
                 if (ex.StopAfterDecodedFields && decodedFieldCount > 0 && !directVideoNoSync)
                 {

@@ -345,6 +345,20 @@ public sealed class TbcFieldDecodePipeline
         _previousLaserDiscSkipCheckScore = 0;
     }
 
+    internal void DiscardLaserDiscPreviousFieldContextAfterRecovery()
+    {
+        _previousFirstHSyncLocation = null;
+        _previousFirstHSyncReadLocation = null;
+        _previousSyncConfidence = null;
+        _previousLaserDiscPalEndLineAbsoluteSample = null;
+        _previousDetectedFirstField = null;
+        _previousHSyncDifference = -1.0;
+        _laserDiscNtscPhaseAdjustMedian = 0.0;
+        _previousLaserDiscPalFieldPhaseId = null;
+        _previousLaserDiscPalPhaseAdjustments = null;
+        _previousLaserDiscSkipCheckScore = 0;
+    }
+
     internal void CommitLaserDiscAnalogAudioWrite(TbcDecodedField field, long writtenFieldNumber)
     {
         if (_analogAudioOptions is null || field.AudioPcm is null)

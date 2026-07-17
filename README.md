@@ -326,7 +326,9 @@ possible capture has already been proven byte-for-byte identical.
   and worker configurations: an initial no-sync span skips one second, while a
   no-sync span after output logs `skipping one field`, advances by 200 nominal
   lines, and continues decoding; missing field starts log the upstream
-  `dropping field` diagnostic and use the same 200-line advance
+  `dropping field` diagnostic and use the same 200-line advance. Every invalid
+  LD field also clears the previous line-zero, parity, PAL/NTSC phase, and
+  player-skip context before retrying, matching upstream's `prevfield=None`
 - LD `--MTF` and `--MTF_offset` RF compensation path, using upstream
   `MTF_freq`, `MTF_poledist`, and `MTF_basemult` format parameters before
   Hilbert FM demodulation, with bit-exact NumPy power coverage for fractional,
