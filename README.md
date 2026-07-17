@@ -1041,6 +1041,9 @@ possible capture has already been proven byte-for-byte identical.
   greater-than-4-sample second-derivative test; PAL pilot and NTSC burst paths
   linearly repair marked runs between surrounding good lines, with NTSC's
   line-zero anchor restriction and burst-missing lines preserved
+- LD and CVBS now emit v0.4.0's exact possible-player-skip warning when field
+  sync confidence is below 50 and normalized field length falls outside the
+  inclusive `output_lines +/- 2` range, including NumPy NaN comparison behavior
 - LD analog audio tick generation now uses the parity-specific field line
   count (NTSC 263/262 and PAL 312/313) instead of the maximum TBC field height,
   generates ticks by index like `numpy.arange`, and mutes an interval unless
@@ -1490,7 +1493,7 @@ dotnet test VHSDecodeDotNet.slnx --no-build
 ```
 
 The current formal solution build completes with zero warnings and errors, and
-the xUnit v3 project exposes 670 independently discoverable compatibility tests
+the xUnit v3 project exposes 679 independently discoverable compatibility tests
 to `dotnet test` and Visual Studio Test Explorer. On the
 same Windows machine and fixtures, Release wall-clock measurements for one
 frame were 2.346 s versus 7.193 s for NTSC VHS and 1.651 s versus 5.865 s for

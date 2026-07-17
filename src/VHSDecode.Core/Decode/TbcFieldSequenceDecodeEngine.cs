@@ -513,6 +513,14 @@ public sealed class TbcFieldSequenceDecodeEngine
                 break;
             }
 
+            if (ShouldWarnDirectVideoPlayerSkip(session, field))
+            {
+                DecodeSessionLogWriter.Append(
+                    session,
+                    "WARNING",
+                    "WARNING: Possible player skip detected - check output");
+            }
+
             decodedFieldCount++;
             long nextBegin = EstimateNextFieldStart(session, field);
             if (nextBegin <= begin)
@@ -837,6 +845,26 @@ public sealed class TbcFieldSequenceDecodeEngine
         double linePeriodUs = session.Parameters.SysParams.GetProperty("line_period").GetDouble();
         double nominalLineLength = linePeriodUs * (session.DecodeSampleRateHz / 1_000_000.0);
         return checked((long)(nominalLineLength * 200.0));
+    }
+
+    internal static bool ShouldWarnDirectVideoPlayerSkip(
+        DecodeSession session,
+        TbcDecodedField field)
+    {
+        if (session.Spec.Name is not ("cvbs" or "ld") || field.SyncConfidence >= 50)
+        {
+            return false;
+        }
+
+        int outputLines = session.TbcFrameSpec.OutputLineCount;
+        double[] locations = field.LineLocations.Locations;
+        if (locations.Length <= outputLines)
+        {
+            return false;
+        }
+
+        double fieldLength = (locations[outputLines] - locations[0]) / field.MeanLineLength;
+        return !(fieldLength >= outputLines - 2 && fieldLength <= outputLines + 2);
     }
 
     private static void LogRecovery(
