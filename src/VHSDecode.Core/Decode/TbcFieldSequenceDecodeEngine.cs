@@ -393,10 +393,11 @@ public sealed class TbcFieldSequenceDecodeEngine
             }
             catch (TbcFieldDecodeRecoveryException ex)
             {
-                bool cvbsNoSyncAfterOutput = session.Spec.Name == "cvbs"
-                    && ex.Kind == TbcFieldDecodeRecoveryKind.NoSyncPulses
+                bool directVideoNoSync = session.Spec.Name is "cvbs" or "ld"
+                    && ex.Kind == TbcFieldDecodeRecoveryKind.NoSyncPulses;
+                bool directVideoNoSyncAfterOutput = directVideoNoSync
                     && writePlanner.WrittenFieldCount > 0;
-                LogRecovery(session, ex, cvbsNoSyncAfterOutput);
+                LogRecovery(session, ex, directVideoNoSyncAfterOutput);
                 if (session.Spec.Name == "cvbs")
                 {
                     if (pendingCvbsField is not null)
@@ -413,13 +414,13 @@ public sealed class TbcFieldSequenceDecodeEngine
                     session.TbcFieldDecoder.DiscardCvbsPreviousFieldContextAfterRecovery();
                 }
 
-                if (ex.StopAfterDecodedFields && decodedFieldCount > 0 && !cvbsNoSyncAfterOutput)
+                if (ex.StopAfterDecodedFields && decodedFieldCount > 0 && !directVideoNoSync)
                 {
                     break;
                 }
 
-                long recoveryOffset = cvbsNoSyncAfterOutput
-                    ? CvbsNoSyncAfterOutputOffsetSamples(session)
+                long recoveryOffset = directVideoNoSyncAfterOutput
+                    ? DirectVideoNoSyncAfterOutputOffsetSamples(session)
                     : ex.SuggestedOffsetSamples;
                 begin = Math.Max(0L, checked(begin + recoveryOffset));
                 continue;
@@ -785,7 +786,7 @@ public sealed class TbcFieldSequenceDecodeEngine
             TaskScheduler.Default);
     }
 
-    internal static long CvbsNoSyncAfterOutputOffsetSamples(DecodeSession session)
+    internal static long DirectVideoNoSyncAfterOutputOffsetSamples(DecodeSession session)
     {
         double linePeriodUs = session.Parameters.SysParams.GetProperty("line_period").GetDouble();
         double nominalLineLength = linePeriodUs * (session.DecodeSampleRateHz / 1_000_000.0);
@@ -795,17 +796,17 @@ public sealed class TbcFieldSequenceDecodeEngine
     private static void LogRecovery(
         DecodeSession session,
         TbcFieldDecodeRecoveryException exception,
-        bool cvbsNoSyncAfterOutput = false)
+        bool directVideoNoSyncAfterOutput = false)
     {
         string? message = (session.Spec.Name, exception.Kind) switch
         {
             ("vhs", TbcFieldDecodeRecoveryKind.NoSyncPulses) =>
                 "Unable to find any sync pulses, jumping 100 ms",
-            ("vhs" or "cvbs", TbcFieldDecodeRecoveryKind.NoFirstHSync) =>
+            ("vhs" or "cvbs" or "ld", TbcFieldDecodeRecoveryKind.NoFirstHSync) =>
                 "Unable to determine start of field - dropping field",
-            ("cvbs", TbcFieldDecodeRecoveryKind.NoSyncPulses) when cvbsNoSyncAfterOutput =>
+            ("cvbs" or "ld", TbcFieldDecodeRecoveryKind.NoSyncPulses) when directVideoNoSyncAfterOutput =>
                 "Unable to find any sync pulses, skipping one field",
-            ("cvbs", TbcFieldDecodeRecoveryKind.NoSyncPulses) =>
+            ("cvbs" or "ld", TbcFieldDecodeRecoveryKind.NoSyncPulses) =>
                 "Unable to find any sync pulses, skipping one second",
             ("cvbs", TbcFieldDecodeRecoveryKind.InsufficientData) =>
                 "Missing data at the end of field, possibly dropped samples skipping a little.",

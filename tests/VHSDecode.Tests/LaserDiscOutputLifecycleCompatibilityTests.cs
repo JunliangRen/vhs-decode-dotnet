@@ -619,11 +619,222 @@ public sealed class LaserDiscOutputLifecycleCompatibilityTests
         }
     }
 
+    [Theory(DisplayName = "LD no-sync after output skips 200 lines and resumes for serial and worker settings like v0.4.0")]
+    [InlineData(0)]
+    [InlineData(1)]
+    public void LdNoSyncAfterOutputSkipsOneFieldAndResumesLikeV040(int threads)
+    {
+        string tempDirectory = CreateTempDirectory();
+        try
+        {
+            string outputBase = Path.Combine(tempDirectory, $"post-output-nosync-{threads}");
+            using DecodeSession session = CreateSessionWithThreads(
+                outputBase,
+                threads,
+                "--disable_analog_audio",
+                "--noEFM");
+            var error = new StringWriter();
+            session.RuntimeReporter = new DecodeRuntimeReporter(TextWriter.Null, error);
+            DecodeSessionLogWriter.Write(session);
+            var readBegins = new List<long>();
+            int attempts = 0;
+            var engine = new TbcFieldSequenceDecodeEngine(
+                readField: (activeSession, _, begin, _, _) =>
+                {
+                    readBegins.Add(begin);
+                    return ++attempts switch
+                    {
+                        1 => BuildField(activeSession) with
+                        {
+                            StartSample = begin,
+                            DetectedFirstField = true,
+                            DiskLocation = 0.0
+                        },
+                        2 => throw new TbcFieldDecodeRecoveryException(
+                            TbcFieldDecodeRecoveryKind.NoSyncPulses,
+                            40_000_000,
+                            "synthetic no sync",
+                            stopAfterDecodedFields: true),
+                        3 => BuildField(activeSession) with
+                        {
+                            StartSample = begin,
+                            DetectedFirstField = false,
+                            DiskLocation = 1.0
+                        },
+                        _ => throw new InvalidOperationException("Unexpected LD read attempt.")
+                    };
+                })
+            {
+                CreateTbcOutput = _ => new MemoryStream()
+            };
+
+            TbcFieldSequenceDecodeResult result = engine.TryDecodeAndWrite(
+                session,
+                Stream.Null,
+                maxFields: 2);
+
+            Assert.True(result.Success);
+            Assert.Equal(2, result.WrittenFieldCount);
+            Assert.Equal([0, 100, 512_100], readBegins);
+            Assert.Equal(512_000, TbcFieldSequenceDecodeEngine.DirectVideoNoSyncAfterOutputOffsetSamples(session));
+            Assert.Contains(
+                "Unable to find any sync pulses, skipping one field",
+                error.ToString(),
+                StringComparison.Ordinal);
+            Assert.DoesNotContain(
+                "Unable to find any sync pulses, skipping one second",
+                error.ToString(),
+                StringComparison.Ordinal);
+        }
+        finally
+        {
+            Directory.Delete(tempDirectory, recursive: true);
+        }
+    }
+
+    [Fact(DisplayName = "LD no-sync state follows written fields rather than decoded attempts like v0.4.0")]
+    public void LdNoSyncStateFollowsWrittenFieldsLikeV040()
+    {
+        string tempDirectory = CreateTempDirectory();
+        try
+        {
+            string outputBase = Path.Combine(tempDirectory, "unwritten-nosync");
+            using DecodeSession session = CreateSession(
+                outputBase,
+                "--disable_analog_audio",
+                "--noEFM");
+            var error = new StringWriter();
+            session.RuntimeReporter = new DecodeRuntimeReporter(TextWriter.Null, error);
+            DecodeSessionLogWriter.Write(session);
+            var readBegins = new List<long>();
+            int attempts = 0;
+            var engine = new TbcFieldSequenceDecodeEngine(
+                readField: (activeSession, _, begin, _, _) =>
+                {
+                    readBegins.Add(begin);
+                    return ++attempts switch
+                    {
+                        1 => BuildField(activeSession) with
+                        {
+                            StartSample = begin,
+                            DetectedFirstField = false,
+                            DiskLocation = 0.0
+                        },
+                        2 => throw new TbcFieldDecodeRecoveryException(
+                            TbcFieldDecodeRecoveryKind.NoSyncPulses,
+                            40_000_000,
+                            "synthetic no sync",
+                            stopAfterDecodedFields: true),
+                        3 => BuildField(activeSession) with
+                        {
+                            StartSample = begin,
+                            DetectedFirstField = true,
+                            DiskLocation = 1.0
+                        },
+                        _ => throw new InvalidOperationException("Unexpected LD read attempt.")
+                    };
+                })
+            {
+                CreateTbcOutput = _ => new MemoryStream()
+            };
+
+            TbcFieldSequenceDecodeResult result = engine.TryDecodeAndWrite(
+                session,
+                Stream.Null,
+                maxFields: 2);
+
+            Assert.True(result.Success);
+            Assert.Equal(1, result.WrittenFieldCount);
+            Assert.Equal([0, 100, 40_000_100], readBegins);
+            Assert.Contains(
+                "Unable to find any sync pulses, skipping one second",
+                error.ToString(),
+                StringComparison.Ordinal);
+            Assert.DoesNotContain(
+                "Unable to find any sync pulses, skipping one field",
+                error.ToString(),
+                StringComparison.Ordinal);
+        }
+        finally
+        {
+            Directory.Delete(tempDirectory, recursive: true);
+        }
+    }
+
+    [Fact(DisplayName = "LD missing first HSYNC logs and advances 200 lines like v0.4.0")]
+    public void LdNoFirstHSyncLogsAndAdvancesLikeV040()
+    {
+        string tempDirectory = CreateTempDirectory();
+        try
+        {
+            string outputBase = Path.Combine(tempDirectory, "no-first-hsync");
+            using DecodeSession session = CreateSession(
+                outputBase,
+                "--disable_analog_audio",
+                "--noEFM");
+            var error = new StringWriter();
+            session.RuntimeReporter = new DecodeRuntimeReporter(TextWriter.Null, error);
+            DecodeSessionLogWriter.Write(session);
+            var readBegins = new List<long>();
+            int attempts = 0;
+            var engine = new TbcFieldSequenceDecodeEngine(
+                readField: (activeSession, _, begin, _, _) =>
+                {
+                    readBegins.Add(begin);
+                    return ++attempts switch
+                    {
+                        1 => throw new TbcFieldDecodeRecoveryException(
+                            TbcFieldDecodeRecoveryKind.NoFirstHSync,
+                            512_000,
+                            "synthetic missing field start"),
+                        2 => BuildField(activeSession) with { StartSample = begin },
+                        _ => throw new InvalidOperationException("Unexpected LD read attempt.")
+                    };
+                })
+            {
+                CreateTbcOutput = _ => new MemoryStream()
+            };
+
+            TbcFieldSequenceDecodeResult result = engine.TryDecodeAndWrite(
+                session,
+                Stream.Null,
+                maxFields: 1);
+
+            Assert.True(result.Success);
+            Assert.Equal([0, 512_000], readBegins);
+            Assert.Contains(
+                "Unable to determine start of field - dropping field",
+                error.ToString(),
+                StringComparison.Ordinal);
+        }
+        finally
+        {
+            Directory.Delete(tempDirectory, recursive: true);
+        }
+    }
+
     private static DecodeSession CreateSession(string outputBase, params string[] options)
         => CreateSessionForSystem(outputBase, "--PAL", options);
 
     private static DecodeSession CreateNtscSession(string outputBase, params string[] options)
         => CreateSessionForSystem(outputBase, "--NTSC", options);
+
+    private static DecodeSession CreateSessionWithThreads(
+        string outputBase,
+        int threads,
+        params string[] options)
+    {
+        string[] arguments = [
+            "--PAL",
+            "--threads",
+            threads.ToString(),
+            .. options,
+            "input.s16",
+            outputBase
+        ];
+        ParsedCommand command = new CommandLineParser().Parse(CliSpecs.LaserDisc, arguments);
+        return DecodeSessionFactory.Create(command);
+    }
 
     private static DecodeSession CreateSessionForSystem(
         string outputBase,
