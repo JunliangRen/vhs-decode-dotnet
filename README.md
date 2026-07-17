@@ -666,7 +666,9 @@ possible capture has already been proven byte-for-byte identical.
   handling, including TYPEC's upstream forced `none` action, disabled
   progressive flip, duplicate/drop compensation in TBC field writes, and JSON
   metadata; progressive correction forces `syncConf: 10` even when the raw
-  field confidence is lower, while ordinary fields retain that raw lower value
+  field confidence is lower, while ordinary fields retain that raw lower value;
+  progressive/manual flips and duplicate/drop repairs emit the exact v0.4.0
+  error diagnostics, including TYPEC's intentional silent manual correction
 - SVHS custom luma filter support for embedded upstream response files plus
   high/low shelf entries
 
@@ -1508,7 +1510,7 @@ dotnet test VHSDecodeDotNet.slnx --no-build
 ```
 
 The current formal solution build completes with zero warnings and errors, and
-the xUnit v3 project exposes 699 independently discoverable compatibility tests
+the xUnit v3 project exposes 704 independently discoverable compatibility tests
 to `dotnet test` and Visual Studio Test Explorer. On the
 same Windows machine and fixtures, Release wall-clock measurements for one
 frame were 2.346 s versus 7.193 s for NTSC VHS and 1.651 s versus 5.865 s for

@@ -1582,6 +1582,10 @@ public sealed class TbcFieldSequenceDecodeEngine
                     && distance <= 1.1;
                 if (progressive)
                 {
+                    DecodeSessionLogWriter.Append(
+                        _session,
+                        "ERROR",
+                        "Detected progressive video content..., manually flipping the field order to compensate");
                     decodeFaults |= 1;
                     syncConfidence = 10;
                     isFirstField = !_history[^1].Decision.IsFirstField;
@@ -1609,14 +1613,30 @@ public sealed class TbcFieldSequenceDecodeEngine
                     syncConfidence = 0;
                     if (_session.FieldOrderOptions.Action == TbcFieldOrderAction.None)
                     {
+                        if (_session.Parameters.TapeFormat != "TYPEC")
+                        {
+                            DecodeSessionLogWriter.Append(
+                                _session,
+                                "ERROR",
+                                "Possibly skipped field (Two fields with same isFirstField in a row), manually flipping the field order to compensate");
+                        }
+
                         isFirstField = !_history[^1].Decision.IsFirstField;
                     }
                     else if (_duplicatePreviousField)
                     {
+                        DecodeSessionLogWriter.Append(
+                            _session,
+                            "ERROR",
+                            "Possibly skipped field (Two fields with same isFirstField in a row), duplicating the last field to compensate...");
                         isDuplicateField = true;
                     }
                     else
                     {
+                        DecodeSessionLogWriter.Append(
+                            _session,
+                            "ERROR",
+                            "Possibly skipped field (Two fields with same isFirstField in a row), dropping the last field to compensate...");
                         writeField = false;
                     }
                 }
