@@ -2,6 +2,7 @@ using System.Buffers.Binary;
 using System.Collections.Concurrent;
 using System.Globalization;
 using System.Numerics;
+using System.Runtime.CompilerServices;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
@@ -589,7 +590,7 @@ public static class TbcOutputMetadataWriter
     {
         LaserDiscAudioOptions? audioOptions = session.LaserDiscAudioOptions;
         JsonNode sampleRateNode;
-        if (audioOptions?.AnalogAudioFrequencyInteger is BigInteger integerSampleRate)
+        if (audioOptions?.AnalogAudioFrequencyInteger is { } integerSampleRate)
         {
             if (integerSampleRate.Sign >= 0)
             {
@@ -682,19 +683,13 @@ public static class TbcOutputMetadataWriter
         return array;
     }
 
-    internal sealed class FieldObjectBuilder
+    internal sealed class FieldObjectBuilder(DecodeSession session)
     {
-        private readonly DecodeSession _session;
-        private readonly Dictionary<TbcDecodedField, (int SeqNo, JsonObject Metadata)> _writtenMetadata =
-            new(ReferenceEqualityComparer.Instance);
+        private readonly ConditionalWeakTable<TbcDecodedField, WrittenMetadata> _writtenMetadata = new();
+        private sealed record WrittenMetadata(int SeqNo, JsonObject Metadata);
         private TbcDecodedField? _previousLaserDiscFirstField;
         private int? _previousLaserDiscFirstFieldPhaseId;
         private int? _previousLaserDiscFieldPhaseId;
-
-        public FieldObjectBuilder(DecodeSession session)
-        {
-            _session = session;
-        }
 
         public JsonObject Add(
             TbcDecodedField field,
@@ -702,11 +697,12 @@ public static class TbcOutputMetadataWriter
             TbcDecodedField? fieldIdentity = null)
         {
             TbcDecodedField identity = fieldIdentity ?? field;
-            if (_writtenMetadata.TryGetValue(identity, out var previous)
+            if (_writtenMetadata.TryGetValue(identity, out WrittenMetadata? previous)
+                && previous is not null
                 && previous.SeqNo == decision.SeqNo)
             {
                 JsonObject duplicate = previous.Metadata.DeepClone().AsObject();
-                if (_session.Spec.Name == "ld")
+                if (session.Spec.Name == "ld")
                 {
                     duplicate["audioSamples"] = field.AudioSampleCount;
                     duplicate["efmTValues"] = field.EfmTValueCount;
@@ -721,19 +717,19 @@ public static class TbcOutputMetadataWriter
                 : Math.Min(decision.SyncConfidence, field.SyncConfidence);
             JsonObject fieldInfo;
 
-            if (_session.Spec.Name == "ld")
+            if (session.Spec.Name == "ld")
             {
-                int fieldPhaseId = field.FieldPhaseId ?? EstimateLaserDiscFieldPhase(_session, decision);
+                int fieldPhaseId = field.FieldPhaseId ?? EstimateLaserDiscFieldPhase(session, decision);
                 fieldInfo = new JsonObject
                 {
                     ["isFirstField"] = decision.IsFirstField,
                     ["syncConf"] = syncConfidence,
                     ["seqNo"] = decision.SeqNo,
-                    ["diskLoc"] = field.DiskLocation ?? ComputeLaserDiscDiskLocation(_session, field),
+                    ["diskLoc"] = field.DiskLocation ?? ComputeLaserDiscDiskLocation(session, field),
                     ["fileLoc"] = field.StartSample,
                     ["medianBurstIRE"] = RoundMetadataFloat(field.MedianBurstIre ?? 0.0, 3)
                 };
-                AddDropouts(_session, field, fieldInfo);
+                AddDropouts(session, field, fieldInfo);
                 fieldInfo["fieldPhaseID"] = fieldPhaseId;
 
                 if (!decision.IsDuplicateField
@@ -741,7 +737,7 @@ public static class TbcOutputMetadataWriter
                     && !IsExpectedLaserDiscFieldPhase(
                         _previousLaserDiscFieldPhaseId.Value,
                         fieldPhaseId,
-                        LaserDiscFieldPhaseCount(_session)))
+                        LaserDiscFieldPhaseCount(session)))
                 {
                     decodeFaults |= 2;
                     LogFieldPhaseMismatch(decision, _previousLaserDiscFieldPhaseId.Value, fieldPhaseId);
@@ -752,7 +748,7 @@ public static class TbcOutputMetadataWriter
                     IReadOnlyDictionary<string, double>? metrics = field.VitsMetrics is { Count: > 0 }
                         ? field.VitsMetrics
                         : ComputeBasicVitsMetrics(
-                            _session,
+                            session,
                             field,
                             decision.IsFirstField,
                             _previousLaserDiscFirstField,
@@ -765,7 +761,7 @@ public static class TbcOutputMetadataWriter
                     };
 
                     LaserDiscVbiInterpretation? vbiInterpretation = InterpretLaserDiscVbi(
-                        _session,
+                        session,
                         decision,
                         _previousLaserDiscFirstField,
                         field);
@@ -785,7 +781,7 @@ public static class TbcOutputMetadataWriter
                 fieldInfo["audioSamples"] = field.AudioSampleCount;
                 fieldInfo["efmTValues"] = field.EfmTValueCount;
             }
-            else if (_session.Spec.Name == "vhs")
+            else if (session.Spec.Name == "vhs")
             {
                 fieldInfo = new JsonObject
                 {
@@ -795,40 +791,40 @@ public static class TbcOutputMetadataWriter
                     ["burstStartLine"] = field.BurstStartLine ?? 0,
                     ["syncConf"] = syncConfidence,
                     ["seqNo"] = decision.SeqNo,
-                    ["diskLoc"] = field.DiskLocation ?? ComputeTapeDiskLocation(_session, field),
+                    ["diskLoc"] = field.DiskLocation ?? ComputeTapeDiskLocation(session, field),
                     ["fileLoc"] = field.StartSample,
-                    ["fieldPhaseID"] = field.FieldPhaseId ?? EstimateTapeFieldPhase(_session, decision)
+                    ["fieldPhaseID"] = field.FieldPhaseId ?? EstimateTapeFieldPhase(session, decision)
                 };
-                AddDropouts(_session, field, fieldInfo);
+                AddDropouts(session, field, fieldInfo);
                 IReadOnlyDictionary<string, double>? metrics = field.VitsMetrics is { Count: > 0 }
                     ? field.VitsMetrics
-                    : ComputeBasicVitsMetrics(_session, field, decision.IsFirstField);
+                    : ComputeBasicVitsMetrics(session, field, decision.IsFirstField);
                 fieldInfo["vitsMetrics"] = ToJsonObject(metrics);
                 if (decodeFaults != 0)
                 {
                     fieldInfo["decodeFaults"] = decodeFaults;
                 }
             }
-            else if (_session.Spec.Name == "cvbs")
+            else if (session.Spec.Name == "cvbs")
             {
-                int fieldPhaseId = field.FieldPhaseId ?? EstimateCvbsFieldPhase(_session, decision);
+                int fieldPhaseId = field.FieldPhaseId ?? EstimateCvbsFieldPhase(session, decision);
                 fieldInfo = new JsonObject
                 {
                     ["isFirstField"] = decision.IsFirstField,
                     ["syncConf"] = syncConfidence,
                     ["seqNo"] = decision.SeqNo,
-                    ["diskLoc"] = field.DiskLocation ?? ComputeLaserDiscDiskLocation(_session, field),
+                    ["diskLoc"] = field.DiskLocation ?? ComputeLaserDiscDiskLocation(session, field),
                     ["fileLoc"] = field.StartSample,
                     ["medianBurstIRE"] = RoundMetadataFloat(CvbsMedianBurstIre(field.MedianBurstIre), 3)
                 };
-                AddDropouts(_session, field, fieldInfo);
+                AddDropouts(session, field, fieldInfo);
                 fieldInfo["fieldPhaseID"] = fieldPhaseId;
                 if (!decision.IsDuplicateField
                     && _previousLaserDiscFieldPhaseId.HasValue
                     && !IsExpectedLaserDiscFieldPhase(
                         _previousLaserDiscFieldPhaseId.Value,
                         fieldPhaseId,
-                        LaserDiscFieldPhaseCount(_session)))
+                        LaserDiscFieldPhaseCount(session)))
                 {
                     decodeFaults |= 2;
                     LogFieldPhaseMismatch(decision, _previousLaserDiscFieldPhaseId.Value, fieldPhaseId);
@@ -838,7 +834,7 @@ public static class TbcOutputMetadataWriter
                     fieldInfo["decodeFaults"] = decodeFaults;
                     IReadOnlyDictionary<string, double>? metrics = field.VitsMetrics is { Count: > 0 }
                         ? field.VitsMetrics
-                        : ComputeBasicVitsMetrics(_session, field, decision.IsFirstField);
+                        : ComputeBasicVitsMetrics(session, field, decision.IsFirstField);
                     fieldInfo["vitsMetrics"] = ToJsonObject(metrics);
                     fieldInfo["vbi"] = new JsonObject
                     {
@@ -849,17 +845,18 @@ public static class TbcOutputMetadataWriter
             }
             else
             {
-                throw new InvalidOperationException($"Unsupported metadata decoder '{_session.Spec.Name}'.");
+                throw new InvalidOperationException($"Unsupported metadata decoder '{session.Spec.Name}'.");
             }
 
-            _writtenMetadata[identity] = (decision.SeqNo, fieldInfo);
+            _writtenMetadata.Remove(identity);
+            _writtenMetadata.Add(identity, new WrittenMetadata(decision.SeqNo, fieldInfo));
             return fieldInfo;
         }
 
         private void LogFieldPhaseMismatch(TbcFieldOrderDecision decision, int previous, int current)
         {
             DecodeSessionLogWriter.Append(
-                _session,
+                session,
                 "WARNING",
                 $"At field #{decision.SeqNo - 1}, Field phaseID sequence mismatch ({previous}->{current}) (player may be paused)");
         }
@@ -1033,7 +1030,7 @@ public static class TbcOutputMetadataWriter
             }
 
             double mean = MeanIreNumpyFloat64(values, session, quantizedOutput);
-            if (mean >= 90.0 && mean <= 110.0)
+            if (mean is >= 90.0 and <= 110.0)
             {
                 AddRawMetric(metrics, "wSNR", CalcPeakSnr(values, session, quantizedOutput));
                 if (verboseLaserDisc)
