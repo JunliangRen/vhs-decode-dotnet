@@ -18,8 +18,12 @@ public sealed record RfDecodedSpan(
 
 public sealed class RfBlockStreamDecoder
 {
+    private const int DecodedBlockCacheCapacity = 16;
     private readonly RfBlockDecodePipeline _pipeline;
+    private readonly Dictionary<long, RfPipelineBlock> _decodedBlockCache = [];
     private readonly Dictionary<long, RfPipelineBlock> _sequentialBlockCache = [];
+    private Stream? _decodedBlockCacheStream;
+    private long? _lastReadFirstBlock;
     private long? _lastSequentialDecodedBlock;
 
     public RfBlockStreamDecoder(
@@ -62,6 +66,17 @@ public sealed class RfBlockStreamDecoder
 
     public int WorkerThreads { get; }
 
+    internal int CachedDecodedBlockCount => _decodedBlockCache.Count;
+
+    internal void InvalidateCachedBlocks()
+    {
+        _decodedBlockCache.Clear();
+        _sequentialBlockCache.Clear();
+        _decodedBlockCacheStream = null;
+        _lastReadFirstBlock = null;
+        _lastSequentialDecodedBlock = null;
+    }
+
     public RfDecodedSpan? Read(Stream stream, long begin, int length)
     {
         if (begin < 0)
@@ -82,6 +97,7 @@ public sealed class RfBlockStreamDecoder
         long endExclusive = checked(begin + length);
         long firstBlock = begin / BlockStride;
         long lastBlock = (endExclusive - 1) / BlockStride;
+        PrepareDecodedBlockCache(stream, firstBlock);
         int totalDecoded = checked((int)((lastBlock - firstBlock + 1) * BlockStride));
         var input = new double[totalDecoded];
         var video = new double[totalDecoded];
@@ -189,6 +205,11 @@ public sealed class RfBlockStreamDecoder
                 {
                     pipelineBlock = cachedBlock;
                 }
+                else if (!_pipeline.RequiresSequentialBlockDecode
+                    && _decodedBlockCache.TryGetValue(block, out cachedBlock))
+                {
+                    pipelineBlock = cachedBlock;
+                }
                 else
                 {
                     long sample = checked(block * BlockStride);
@@ -200,6 +221,10 @@ public sealed class RfBlockStreamDecoder
                         {
                             _lastSequentialDecodedBlock = block;
                         }
+                    }
+                    else if (pipelineBlock is not null)
+                    {
+                        CacheDecodedBlock(block, pipelineBlock);
                     }
                 }
 
@@ -215,8 +240,18 @@ public sealed class RfBlockStreamDecoder
         {
             int blockCount = checked((int)(lastBlock - firstBlock + 1));
             var preparedInputs = new double[blockCount][];
+            var missingBlocks = new int[blockCount];
+            int missingBlockCount = 0;
+            var decodedBlocks = new RfPipelineBlock[blockCount];
             for (int i = 0; i < blockCount; i++)
             {
+                long block = firstBlock + i;
+                if (_decodedBlockCache.TryGetValue(block, out RfPipelineBlock? cachedBlock))
+                {
+                    decodedBlocks[i] = cachedBlock;
+                    continue;
+                }
+
                 long sample = checked((firstBlock + i) * BlockStride);
                 double[]? preparedInput = _pipeline.LoadBlockInput(stream, sample, BlockLength);
                 if (preparedInput is null)
@@ -225,14 +260,24 @@ public sealed class RfBlockStreamDecoder
                 }
 
                 preparedInputs[i] = preparedInput;
+                missingBlocks[missingBlockCount++] = i;
             }
 
-            var decodedBlocks = new RfPipelineBlock[blockCount];
             Parallel.For(
                 0,
-                blockCount,
+                missingBlockCount,
                 new ParallelOptions { MaxDegreeOfParallelism = WorkerThreads },
-                i => decodedBlocks[i] = _pipeline.DecodePreparedBlock(preparedInputs[i]));
+                missingIndex =>
+                {
+                    int blockIndex = missingBlocks[missingIndex];
+                    decodedBlocks[blockIndex] = _pipeline.DecodePreparedBlock(preparedInputs[blockIndex]);
+                });
+            for (int i = 0; i < missingBlockCount; i++)
+            {
+                int blockIndex = missingBlocks[i];
+                CacheDecodedBlock(firstBlock + blockIndex, decodedBlocks[blockIndex]);
+            }
+
             foreach (RfPipelineBlock pipelineBlock in decodedBlocks)
             {
                 AppendBlock(pipelineBlock);
@@ -269,6 +314,39 @@ public sealed class RfBlockStreamDecoder
             chroma is null ? null : Slice(chroma, offset, length),
             videoBurst is null ? null : Slice(videoBurst, offset, length),
             videoPilot is null ? null : Slice(videoPilot, offset, length));
+    }
+
+    private void PrepareDecodedBlockCache(Stream stream, long firstBlock)
+    {
+        if (_pipeline.RequiresSequentialBlockDecode)
+        {
+            return;
+        }
+
+        if (!ReferenceEquals(_decodedBlockCacheStream, stream)
+            || (_lastReadFirstBlock.HasValue && firstBlock < _lastReadFirstBlock.Value))
+        {
+            _decodedBlockCache.Clear();
+        }
+        else if (_decodedBlockCache.Count > 0)
+        {
+            foreach (long staleBlock in _decodedBlockCache.Keys.Where(block => block < firstBlock).ToArray())
+            {
+                _decodedBlockCache.Remove(staleBlock);
+            }
+        }
+
+        _decodedBlockCacheStream = stream;
+        _lastReadFirstBlock = firstBlock;
+    }
+
+    private void CacheDecodedBlock(long block, RfPipelineBlock decoded)
+    {
+        _decodedBlockCache[block] = decoded;
+        while (_decodedBlockCache.Count > DecodedBlockCacheCapacity)
+        {
+            _decodedBlockCache.Remove(_decodedBlockCache.Keys.Min());
+        }
     }
 
     private void CopyTrimmed(
@@ -336,6 +414,11 @@ public sealed class RfBlockStreamDecoder
 
     private static double[] Slice(double[] source, int offset, int length)
     {
+        if (offset == 0 && length == source.Length)
+        {
+            return source;
+        }
+
         var output = new double[length];
         Array.Copy(source, offset, output, 0, length);
         return output;
@@ -343,6 +426,11 @@ public sealed class RfBlockStreamDecoder
 
     private static short[] Slice(short[] source, int offset, int length)
     {
+        if (offset == 0 && length == source.Length)
+        {
+            return source;
+        }
+
         var output = new short[length];
         Array.Copy(source, offset, output, 0, length);
         return output;

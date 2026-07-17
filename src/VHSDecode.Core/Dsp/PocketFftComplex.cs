@@ -8,23 +8,43 @@ public static class PocketFftComplex
 {
     private static readonly ConcurrentDictionary<int, Plan> Plans = new();
     private static readonly ConcurrentDictionary<(int Length, int RootLength), Plan> RootedPlans = new();
+    private static readonly ConcurrentDictionary<int, SinCos2PiByN> Roots = new();
+    [ThreadStatic]
+    private static Complex[]? _packetStage;
+    [ThreadStatic]
+    private static Complex[]? _realInput;
+    [ThreadStatic]
+    private static Value[]? _planValues;
+    [ThreadStatic]
+    private static Value[]? _planScratch;
 
     public static Complex[] Forward(ReadOnlySpan<Complex> input)
         => Transform(input, forward: true);
 
-    private static Complex[] TransformWithRootLength(
+    private static void TransformWithRootLength(
         ReadOnlySpan<Complex> input,
         int rootLength,
-        bool forward)
+        bool forward,
+        Span<Complex> output)
     {
         ValidateLength(input.Length, nameof(input));
-        return RootedPlans.GetOrAdd(
+        RootedPlans.GetOrAdd(
                 (input.Length, rootLength),
                 static key => new Plan(key.Length, key.RootLength))
-            .Transform(input, forward);
+            .Transform(input, output, forward);
     }
 
     private static Complex[] TransformDuccPacketized(ReadOnlySpan<Complex> input, bool forward)
+    {
+        var output = new Complex[input.Length];
+        TransformDuccPacketized(input, forward, output);
+        return output;
+    }
+
+    private static void TransformDuccPacketized(
+        ReadOnlySpan<Complex> input,
+        bool forward,
+        Span<Complex> output)
     {
         ValidateLength(input.Length, nameof(input));
         if (input.Length <= 10_000)
@@ -32,6 +52,11 @@ public static class PocketFftComplex
             throw new ArgumentException(
                 "DUCC packetization is only used for transforms longer than 10000 samples.",
                 nameof(input));
+        }
+
+        if (output.Length != input.Length)
+        {
+            throw new ArgumentException("FFT output length must match the input length.", nameof(output));
         }
 
         int firstPacketLength = 1;
@@ -49,8 +74,8 @@ public static class PocketFftComplex
         }
 
         int length = input.Length;
-        var roots = new SinCos2PiByN(length);
-        var stage = new Complex[length];
+        SinCos2PiByN roots = Roots.GetOrAdd(length, static value => new SinCos2PiByN(value));
+        Complex[] stage = EnsureCapacity(ref _packetStage, length);
         var firstPacket = new Complex[firstPacketLength];
         for (int i = 0; i < secondPacketLength; i++)
         {
@@ -59,10 +84,10 @@ public static class PocketFftComplex
                 firstPacket[m] = input[i + (secondPacketLength * m)];
             }
 
-            Complex[] transformed = TransformWithRootLength(firstPacket, length, forward);
+            TransformWithRootLength(firstPacket, length, forward, firstPacket);
             for (int m = 0; m < firstPacketLength; m++)
             {
-                Complex value = transformed[m];
+                Complex value = firstPacket[m];
                 if (i != 0 && m != 0)
                 {
                     Value root = roots.Get(m * i);
@@ -77,20 +102,18 @@ public static class PocketFftComplex
             }
         }
 
-        var output = new Complex[length];
         var secondPacket = new Complex[secondPacketLength];
         for (int k = 0; k < firstPacketLength; k++)
         {
             int offset = secondPacketLength * k;
             stage.AsSpan(offset, secondPacketLength).CopyTo(secondPacket);
-            Complex[] transformed = TransformWithRootLength(secondPacket, length, forward);
+            TransformWithRootLength(secondPacket, length, forward, secondPacket);
             for (int m = 0; m < secondPacketLength; m++)
             {
-                output[k + (firstPacketLength * m)] = transformed[m];
+                output[k + (firstPacketLength * m)] = secondPacket[m];
             }
         }
 
-        return output;
     }
 
     internal static Complex[] ForwardDucc(ReadOnlySpan<Complex> input)
@@ -123,23 +146,38 @@ public static class PocketFftComplex
             : Inverse(input);
     }
 
+    internal static void InverseDuccInPlace(Complex[] values)
+    {
+        ArgumentNullException.ThrowIfNull(values);
+        ValidateLength(values.Length, nameof(values));
+        if (values.Length > 10_000)
+        {
+            TransformDuccPacketized(values, forward: false, values);
+        }
+        else
+        {
+            Plans.GetOrAdd(values.Length, static length => new Plan(length))
+                .Transform(values, values, forward: false);
+        }
+    }
+
     internal static Complex[] ForwardDuccReal(ReadOnlySpan<double> input)
     {
         ValidateLength(input.Length, nameof(input));
         int length = input.Length;
         int complexLength = length / 2;
-        var complexInput = new Complex[complexLength];
+        Complex[] complexInput = EnsureCapacity(ref _realInput, complexLength);
         for (int i = 0; i < complexLength; i++)
         {
             complexInput[i] = new Complex(input[2 * i], input[(2 * i) + 1]);
         }
 
         Complex[] transformed = complexLength > 10_000
-            ? TransformDuccPacketized(complexInput, forward: true)
-            : Forward(complexInput);
-        var roots = new SinCos2PiByN(length);
-        var packed = new double[length];
-        packed[0] = transformed[0].Real + transformed[0].Imaginary;
+            ? TransformDuccPacketized(complexInput.AsSpan(0, complexLength), forward: true)
+            : Forward(complexInput.AsSpan(0, complexLength));
+        SinCos2PiByN roots = Roots.GetOrAdd(length, static value => new SinCos2PiByN(value));
+        var output = new Complex[complexLength + 1];
+        output[0] = new Complex(transformed[0].Real + transformed[0].Imaginary, 0.0);
         for (int i = 1, xi = complexLength - 1; i <= xi; i++, xi--)
         {
             Complex left = transformed[i];
@@ -152,21 +190,15 @@ public static class PocketFftComplex
                 right.Real - left.Real);
             Value root = roots.Get(i);
             Value rotated = SpecialMultiply(odd, root, forward: true);
-            packed[(2 * i) - 1] = 0.5 * (even.Real + rotated.Real);
-            packed[2 * i] = 0.5 * (even.Imaginary + rotated.Imaginary);
-            packed[(2 * xi) - 1] = 0.5 * (even.Real - rotated.Real);
-            packed[2 * xi] = 0.5 * (rotated.Imaginary - even.Imaginary);
+            output[i] = new Complex(
+                0.5 * (even.Real + rotated.Real),
+                0.5 * (even.Imaginary + rotated.Imaginary));
+            output[xi] = new Complex(
+                0.5 * (even.Real - rotated.Real),
+                0.5 * (rotated.Imaginary - even.Imaginary));
         }
 
-        packed[^1] = transformed[0].Real - transformed[0].Imaginary;
-        var output = new Complex[complexLength + 1];
-        output[0] = new Complex(packed[0], 0.0);
-        for (int i = 1; i < output.Length - 1; i++)
-        {
-            output[i] = new Complex(packed[(2 * i) - 1], packed[2 * i]);
-        }
-
-        output[^1] = new Complex(packed[^1], 0.0);
+        output[^1] = new Complex(transformed[0].Real - transformed[0].Imaginary, 0.0);
         return output;
     }
 
@@ -201,7 +233,7 @@ public static class PocketFftComplex
         packedSpectrum[0] = new Complex(
             0.5 * (input[0].Real + input[^1].Real),
             0.5 * (input[0].Real - input[^1].Real));
-        var roots = new SinCos2PiByN(outputLength);
+        SinCos2PiByN roots = Roots.GetOrAdd(outputLength, static value => new SinCos2PiByN(value));
         for (int i = 1, xi = complexLength - 1; i <= xi; i++, xi--)
         {
             Complex left = input[i];
@@ -267,6 +299,16 @@ public static class PocketFftComplex
         }
     }
 
+    private static T[] EnsureCapacity<T>(ref T[]? buffer, int length)
+    {
+        if (buffer is null || buffer.Length < length)
+        {
+            buffer = new T[length];
+        }
+
+        return buffer;
+    }
+
     private sealed class Plan
     {
         private readonly int _length;
@@ -294,25 +336,39 @@ public static class PocketFftComplex
 
         public Complex[] Transform(ReadOnlySpan<Complex> input, bool forward)
         {
-            var values = new Value[_length];
-            for (int i = 0; i < values.Length; i++)
+            var output = new Complex[_length];
+            Transform(input, output, forward);
+            return output;
+        }
+
+        public void Transform(ReadOnlySpan<Complex> input, Span<Complex> output, bool forward)
+        {
+            if (input.Length != _length)
+            {
+                throw new ArgumentException("FFT input length does not match the plan length.", nameof(input));
+            }
+
+            if (output.Length != _length)
+            {
+                throw new ArgumentException("FFT output length does not match the plan length.", nameof(output));
+            }
+
+            Value[] values = EnsureCapacity(ref _planValues, _length);
+            Value[] scratch = EnsureCapacity(ref _planScratch, _length);
+            for (int i = 0; i < _length; i++)
             {
                 values[i] = new Value(input[i].Real, input[i].Imaginary);
             }
 
-            Execute(values, forward, forward ? 1.0 : 1.0 / _length);
-            var output = new Complex[_length];
+            Execute(values, scratch, forward, forward ? 1.0 : 1.0 / _length);
             for (int i = 0; i < output.Length; i++)
             {
                 output[i] = new Complex(values[i].Real, values[i].Imaginary);
             }
-
-            return output;
         }
 
-        private void Execute(Value[] data, bool forward, double normalization)
+        private void Execute(Value[] data, Value[] scratch, bool forward, double normalization)
         {
-            var scratch = new Value[_length];
             Value[] source = data;
             Value[] destination = scratch;
             int l1 = 1;
@@ -342,11 +398,11 @@ public static class PocketFftComplex
             {
                 if (normalization == 1.0)
                 {
-                    source.CopyTo(data, 0);
+                    Array.Copy(source, data, _length);
                 }
                 else
                 {
-                    for (int i = 0; i < data.Length; i++)
+                    for (int i = 0; i < _length; i++)
                     {
                         data[i] = Scale(source[i], normalization);
                     }
@@ -354,7 +410,7 @@ public static class PocketFftComplex
             }
             else if (normalization != 1.0)
             {
-                for (int i = 0; i < data.Length; i++)
+                for (int i = 0; i < _length; i++)
                 {
                     data[i] = Scale(data[i], normalization);
                 }

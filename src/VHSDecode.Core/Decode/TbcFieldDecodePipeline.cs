@@ -2,6 +2,7 @@ using System.Numerics;
 using System.Runtime.InteropServices;
 using System.Security.Cryptography;
 using System.Text.Json;
+using VHSDecode.Core.CommandLine;
 using VHSDecode.Core.Dsp;
 using VHSDecode.Core.Formats;
 using VHSDecode.Core.Tbc;
@@ -345,9 +346,23 @@ public sealed class TbcFieldDecodePipeline
         _previousLaserDiscSkipCheckScore = 0;
     }
 
+    internal void DiscardLaserDiscPreviousFieldContextAfterRecovery()
+    {
+        _previousFirstHSyncLocation = null;
+        _previousFirstHSyncReadLocation = null;
+        _previousSyncConfidence = null;
+        _previousLaserDiscPalEndLineAbsoluteSample = null;
+        _previousDetectedFirstField = null;
+        _previousHSyncDifference = -1.0;
+        _laserDiscNtscPhaseAdjustMedian = 0.0;
+        _previousLaserDiscPalFieldPhaseId = null;
+        _previousLaserDiscPalPhaseAdjustments = null;
+        _previousLaserDiscSkipCheckScore = 0;
+    }
+
     internal void CommitLaserDiscAnalogAudioWrite(TbcDecodedField field, long writtenFieldNumber)
     {
-        if (_analogAudioOptions is null || field.AudioPcm is null)
+        if (_analogAudioOptions is null)
         {
             return;
         }
@@ -3398,7 +3413,7 @@ public sealed class TbcFieldDecodePipeline
         return output;
     }
 
-    private short[]? DownscaleAnalogAudio(
+    internal short[]? DownscaleAnalogAudio(
         LaserDiscAnalogAudioBlock? audio,
         IReadOnlyList<double> lineLocations,
         int fieldLineCount,
@@ -3495,12 +3510,14 @@ public sealed class TbcFieldDecodePipeline
         }
 
         var output = new short[(ticks.Length - 1) * 2];
+        bool failed = false;
         for (int i = 0; i < ticks.Length - 1; i++)
         {
             int start = (int)locations[i];
             int end = (int)locations[i + 1];
             if (end <= start || end >= audio.Left.Length || end >= audio.Right.Length)
             {
+                failed = true;
                 continue;
             }
 
@@ -3518,6 +3535,13 @@ public sealed class TbcFieldDecodePipeline
                 - _analogAudioOptions.RightCarrierHz;
             output[i * 2] = (short)-RescaleAndClipAudio(left);
             output[(i * 2) + 1] = (short)-RescaleAndClipAudio(right);
+        }
+
+        if (failed)
+        {
+            _diagnosticLogger?.Invoke(
+                "WARNING",
+                "Analog audio processing error, muting samples");
         }
 
         return output;
@@ -4024,6 +4048,22 @@ public sealed class TbcFieldDecodePipeline
         if (lastLine >= processedLines)
         {
             return;
+        }
+
+        if (tape
+            && _previousFirstHSyncLocation.HasValue
+            && _previousFirstHSyncReadLocation.HasValue)
+        {
+            _diagnosticLogger?.Invoke(
+                "INFO",
+                "lastline = " + PythonNamespaceFormatter.FormatValue(lastLine)
+                + ", proclines = " + processedLines
+                + ", meanlinelen = " + PythonNamespaceFormatter.FormatValue(meanLineLength)
+                + ", line0loc = " + PythonNamespaceFormatter.FormatValue(line0Location)
+                + ")");
+            _diagnosticLogger?.Invoke(
+                "INFO",
+                "Did not find the expected number of lines (lastline < proclines) , skipping a tiny bit");
         }
 
         double suggested = line0Location - (meanLineLength * 20.0);
@@ -4553,6 +4593,11 @@ public sealed class TbcFieldDecodePipeline
             _syncDetectionOptions.RelaxedLine0,
             expectedLine0,
             expectedFirstField);
+        if (resolution?.DiagnosticMessage is { } diagnosticMessage)
+        {
+            _diagnosticLogger?.Invoke("INFO", diagnosticMessage);
+        }
+
         return resolution is null
             ? null
             : new Line0FallbackCandidate(

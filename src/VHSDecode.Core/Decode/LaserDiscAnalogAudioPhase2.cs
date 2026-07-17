@@ -208,11 +208,11 @@ public static class LaserDiscAnalogAudioPhase2
                     left.Imaginary * right.Real));
         }
 
-        Complex[] filtered = PocketFftComplex.InverseDucc(spectrum);
+        PocketFftComplex.InverseDuccInPlace(spectrum);
         var output = new double[raw.Length];
         for (int i = 0; i < output.Length; i++)
         {
-            output[i] = filtered[i].Real + centerFrequencyHz;
+            output[i] = spectrum[i].Real + centerFrequencyHz;
         }
 
         return output;

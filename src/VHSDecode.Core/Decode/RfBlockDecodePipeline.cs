@@ -16,6 +16,7 @@ public sealed class RfBlockDecodePipeline : IDisposable
     private readonly RfVideoReferenceFilterSet? _referenceFilters;
     private readonly CvbsDecodeOptions? _cvbsOptions;
     private readonly IRfInputProcessor? _inputProcessor;
+    private readonly Action<string, string>? _diagnosticLogger;
 
     public RfBlockDecodePipeline(
         IRfSampleLoader loader,
@@ -23,7 +24,8 @@ public sealed class RfBlockDecodePipeline : IDisposable
         double sampleRateHz,
         DecodeFilterOptions? filterOptions = null,
         CvbsDecodeOptions? cvbsOptions = null,
-        IRfInputProcessor? inputProcessor = null)
+        IRfInputProcessor? inputProcessor = null,
+        Action<string, string>? diagnosticLogger = null)
     {
         _loader = loader;
         _filters = filters;
@@ -38,6 +40,7 @@ public sealed class RfBlockDecodePipeline : IDisposable
                 _filterOptions.LdClipDemodForVideo);
         _cvbsOptions = cvbsOptions;
         _inputProcessor = inputProcessor;
+        _diagnosticLogger = diagnosticLogger;
     }
 
     public IRfInputProcessor? InputProcessor => _inputProcessor;
@@ -110,6 +113,13 @@ public sealed class RfBlockDecodePipeline : IDisposable
             _filters.VhsEnvelopeSos,
             _filters.VhsRfTopSos,
             inputSpectrum);
+        if (demodulated.VhsWeakRfSignal)
+        {
+            _diagnosticLogger?.Invoke(
+                "WARNING",
+                "RF signal is weak. Is your deck tracking properly?");
+        }
+
         if (_filterOptions.LdClipDemodForVideo)
         {
             QuantizeLaserDiscVideoChannels(demodulated);

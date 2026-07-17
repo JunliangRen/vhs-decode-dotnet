@@ -129,8 +129,9 @@ public sealed class DecodeRunner
             session.RuntimeReporter = runtimeReporter;
             try
             {
-                DecodeSessionLogWriter.Write(session);
-                WriteSessionCompatibilityWarnings(session, error);
+                DecodeSessionLogWriter.Write(
+                    session,
+                    VhsInitializationDiagnostics.Build(command, session));
                 TbcFieldSequenceDecodeResult result = _engineFactory(cancellationToken)
                     .TryDecodeAndWrite(session);
                 if (result.Success && command.Spec == CliSpecs.Cvbs)
@@ -179,7 +180,20 @@ public sealed class DecodeRunner
             or NotSupportedException
             or FormatParameterException)
         {
-            if (ex is DecodeThreadInitializationException)
+            if (ex is VhsFieldClassSelectionException fieldClassException)
+            {
+                string logPath = command.OutputBase + ".log";
+                File.WriteAllText(logPath, string.Empty);
+                foreach (DecodeInitializationDiagnostic diagnostic in fieldClassException.Diagnostics)
+                {
+                    DecodeSessionLogWriter.Append(logPath, diagnostic.Level, diagnostic.Message);
+                    if (!string.Equals(diagnostic.Level, "DEBUG", StringComparison.OrdinalIgnoreCase))
+                    {
+                        error.WriteLine(diagnostic.Message);
+                    }
+                }
+            }
+            else if (ex is DecodeThreadInitializationException)
             {
                 File.WriteAllText(command.OutputBase + ".log", string.Empty);
             }
@@ -223,14 +237,6 @@ public sealed class DecodeRunner
             && command.Get<bool>("ntsc_audio_rate"))
         {
             error.WriteLine("WARNING: --ntsc_audio_rate ignored for PAL (audio is already frame-locked at 44100hz)");
-        }
-    }
-
-    private static void WriteSessionCompatibilityWarnings(DecodeSession session, TextWriter error)
-    {
-        if (session.ExecutionOptions.CxAdcCompatibilityMode)
-        {
-            error.WriteLine("--cxadc is deprecated! use -f 8fsc instead!");
         }
     }
 

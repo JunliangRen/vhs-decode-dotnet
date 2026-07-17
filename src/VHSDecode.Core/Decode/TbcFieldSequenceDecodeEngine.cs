@@ -22,8 +22,6 @@ public delegate TbcDecodedField? TbcFieldSequenceReadField(
 public sealed class TbcFieldSequenceDecodeEngine
 {
     private const int TestLdfLookaheadSamples = 1_100_000;
-    private const int LaserDiscLeadOutCode = 0x80EEEE;
-    private const int LaserDiscLeadOutRequiredCount = 2;
     private readonly ILdTestLdfWriter _testLdfWriter;
     private readonly ILaserDiscEfmOutputWriter _efmOutputWriter;
     private readonly TbcFieldSequenceReadField _readField;
@@ -102,6 +100,8 @@ public sealed class TbcFieldSequenceDecodeEngine
     public int ExtraReadLines { get; }
 
     internal bool EnableWorkerPrefetchForCustomReader { get; init; }
+
+    internal bool UseSessionFieldNumberingForCustomReader { get; init; }
 
     internal Func<string, Stream> CreateTbcOutput { get; init; } = DecodeOutputFile.Create;
 
@@ -247,8 +247,7 @@ public sealed class TbcFieldSequenceDecodeEngine
         var fields = retainFields ? new List<TbcDecodedField>() : null;
         var writePlanner = new FieldWritePlanner(session, retainWrites: false);
         int decodedFieldCount = 0;
-        long laserDiscWrittenFieldCount = 0;
-        int laserDiscLeadOutCount = 0;
+        int laserDiscSpeculativeWrittenFieldCount = 0;
         TbcDecodedField? firstLaserDiscField = null;
         bool laserDiscLeadIn = false;
         bool laserDiscLeadOut = false;
@@ -262,6 +261,18 @@ public sealed class TbcFieldSequenceDecodeEngine
         LaserDiscAutoMtfController? autoMtf = session.Spec.Name == "ld"
             ? new LaserDiscAutoMtfController()
             : null;
+        double? deferredLaserDiscMtf = null;
+
+        void ApplyDeferredLaserDiscMtf()
+        {
+            if (!deferredLaserDiscMtf.HasValue)
+            {
+                return;
+            }
+
+            ApplyLaserDiscMtf(session, deferredLaserDiscMtf.Value);
+            deferredLaserDiscMtf = null;
+        }
 
         void CheckpointOutput(int fieldsWritten)
         {
@@ -287,16 +298,16 @@ public sealed class TbcFieldSequenceDecodeEngine
             int fieldsWrittenBeforeAdd = writePlanner.WrittenFieldCount;
             IReadOnlyList<(TbcDecodedField Field, TbcFieldOrderDecision Decision)> writes =
                 writePlanner.Add(completedField);
+            bool acceptedLaserDiscFrameState = session.Spec.Name == "ld"
+                && writes.Any(write => ReferenceEquals(write.Field, completedField)
+                    && !write.Decision.IsDuplicateField);
             if (writes.Count > 0)
             {
-                if (session.Spec.Name == "ld")
+                if (session.Spec.Name == "ld" && acceptedLaserDiscFrameState)
                 {
-                    foreach ((TbcDecodedField writtenField, _) in writes)
-                    {
-                        session.TbcFieldDecoder.CommitLaserDiscAnalogAudioWrite(
-                            writtenField,
-                            laserDiscWrittenFieldCount++);
-                    }
+                    session.TbcFieldDecoder.CommitLaserDiscAnalogAudioWrite(
+                        completedField,
+                        fieldsWrittenBeforeAdd);
                 }
 
                 if (writeFields is not null)
@@ -307,7 +318,7 @@ public sealed class TbcFieldSequenceDecodeEngine
             }
 
             bool isFirstField = completedField.DetectedFirstField ?? ((decodedIndex & 1) == 0);
-            if (session.Spec.Name == "ld")
+            if (acceptedLaserDiscFrameState)
             {
                 if (isFirstField)
                 {
@@ -336,6 +347,8 @@ public sealed class TbcFieldSequenceDecodeEngine
                             laserDiscLeadIn,
                             laserDiscLeadOut));
                 }
+
+                autoMtf?.ObserveAcceptedField(completedField, session.System);
             }
             else if (session.Spec.Name == "cvbs" && !isFirstField && writes.Count == 1)
             {
@@ -359,6 +372,9 @@ public sealed class TbcFieldSequenceDecodeEngine
             try
             {
                 Task<TbcDecodedField?>? prefetchedField = cvbsPrefetch.Take();
+                int initialReadWrittenFieldCount = session.Spec.Name == "ld"
+                    ? laserDiscSpeculativeWrittenFieldCount
+                    : writePlanner.WrittenFieldCount;
                 field = prefetchedField is null
                     ? ReadFieldWithContext(
                         session,
@@ -366,17 +382,39 @@ public sealed class TbcFieldSequenceDecodeEngine
                         begin,
                         readLength,
                         decodedFieldCount,
-                        writePlanner.WrittenFieldCount)
+                        initialReadWrittenFieldCount)
                     : prefetchedField.GetAwaiter().GetResult();
+                if (session.Spec.Name == "ld")
+                {
+                    // v0.4.0 starts the next LD decode before writing the
+                    // current field, so its Field sees the pre-write count.
+                    laserDiscSpeculativeWrittenFieldCount = writePlanner.WrittenFieldCount;
+                }
+
+                if (autoMtf is not null)
+                {
+                    // v0.4.0 has already decoded this field before processing the
+                    // previous field's non-retry MTF update.
+                    ApplyDeferredLaserDiscMtf();
+                }
+
                 if (field is not null && autoMtf is not null)
                 {
                     LaserDiscMtfUpdate mtfUpdate = autoMtf.Observe(field.BlackToWhiteRfRatio);
-                    if (field.BlackToWhiteRfRatio.HasValue && mtfUpdate.Level != mtfUpdate.PreviousLevel)
+                    bool requiresRetry = mtfUpdate.RequiresRetry || field.LaserDiscAgcAdjusted;
+                    if (mtfUpdate.Level != mtfUpdate.PreviousLevel)
                     {
-                        ApplyLaserDiscMtf(session, mtfUpdate.Level);
+                        if (requiresRetry)
+                        {
+                            ApplyLaserDiscMtf(session, mtfUpdate.Level);
+                        }
+                        else
+                        {
+                            deferredLaserDiscMtf = mtfUpdate.Level;
+                        }
                     }
 
-                    if (mtfUpdate.RequiresRetry || field.LaserDiscAgcAdjusted)
+                    if (requiresRetry)
                     {
                         session.TbcFieldDecoder.RestoreStateForRetry(fieldState!);
                         field = ReadFieldWithContext(
@@ -386,6 +424,7 @@ public sealed class TbcFieldSequenceDecodeEngine
                             readLength,
                             decodedFieldCount,
                             writePlanner.WrittenFieldCount);
+                        laserDiscSpeculativeWrittenFieldCount = writePlanner.WrittenFieldCount;
                     }
                 }
 
@@ -393,10 +432,11 @@ public sealed class TbcFieldSequenceDecodeEngine
             }
             catch (TbcFieldDecodeRecoveryException ex)
             {
-                bool cvbsNoSyncAfterOutput = session.Spec.Name == "cvbs"
-                    && ex.Kind == TbcFieldDecodeRecoveryKind.NoSyncPulses
+                bool directVideoNoSync = session.Spec.Name is "cvbs" or "ld"
+                    && ex.Kind == TbcFieldDecodeRecoveryKind.NoSyncPulses;
+                bool directVideoNoSyncAfterOutput = directVideoNoSync
                     && writePlanner.WrittenFieldCount > 0;
-                LogRecovery(session, ex, cvbsNoSyncAfterOutput);
+                LogRecovery(session, ex, directVideoNoSyncAfterOutput);
                 if (session.Spec.Name == "cvbs")
                 {
                     if (pendingCvbsField is not null)
@@ -412,14 +452,20 @@ public sealed class TbcFieldSequenceDecodeEngine
 
                     session.TbcFieldDecoder.DiscardCvbsPreviousFieldContextAfterRecovery();
                 }
+                else if (session.Spec.Name == "ld")
+                {
+                    session.TbcFieldDecoder.DiscardLaserDiscPreviousFieldContextAfterRecovery();
+                    laserDiscSpeculativeWrittenFieldCount = writePlanner.WrittenFieldCount;
+                    ApplyDeferredLaserDiscMtf();
+                }
 
-                if (ex.StopAfterDecodedFields && decodedFieldCount > 0 && !cvbsNoSyncAfterOutput)
+                if (ex.StopAfterDecodedFields && decodedFieldCount > 0 && !directVideoNoSync)
                 {
                     break;
                 }
 
-                long recoveryOffset = cvbsNoSyncAfterOutput
-                    ? CvbsNoSyncAfterOutputOffsetSamples(session)
+                long recoveryOffset = directVideoNoSyncAfterOutput
+                    ? DirectVideoNoSyncAfterOutputOffsetSamples(session)
                     : ex.SuggestedOffsetSamples;
                 begin = Math.Max(0L, checked(begin + recoveryOffset));
                 continue;
@@ -461,6 +507,14 @@ public sealed class TbcFieldSequenceDecodeEngine
                 }
 
                 break;
+            }
+
+            if (ShouldWarnDirectVideoPlayerSkip(session, field))
+            {
+                DecodeSessionLogWriter.Append(
+                    session,
+                    "WARNING",
+                    "WARNING: Possible player skip detected - check output");
             }
 
             decodedFieldCount++;
@@ -520,7 +574,6 @@ public sealed class TbcFieldSequenceDecodeEngine
                 completedCurrentField = true;
             }
 
-            autoMtf?.ObserveAcceptedField(field, session.System);
             bool isFirstField = field.DetectedFirstField ?? ((decodedFieldCount - 1) % 2 == 0);
             if (session.Spec.Name == "vhs")
             {
@@ -545,11 +598,9 @@ public sealed class TbcFieldSequenceDecodeEngine
                 CheckpointOutput(writePlanner.WrittenFieldCount);
             }
 
-            if (ShouldStopAfterLaserDiscLeadOut(
-                    session,
-                    field,
-                    isFirstField,
-                    ref laserDiscLeadOutCount))
+            if (session.Spec.Name == "ld"
+                && !session.ExecutionOptions.IgnoreLeadOut
+                && laserDiscLeadOut)
             {
                 begin = nextBegin;
                 break;
@@ -642,7 +693,7 @@ public sealed class TbcFieldSequenceDecodeEngine
             && interpretation.IsEarlyClv
             && interpretation.ClvMinutes.HasValue)
         {
-            return prefix + $"Timecode {interpretation.ClvMinutes.Value}:xx";
+            return prefix + $"Timecode {interpretation.ClvMinutes.Value}:xx ";
         }
 
         if (interpretation.IsClv
@@ -655,12 +706,12 @@ public sealed class TbcFieldSequenceDecodeEngine
                 + $"Timecode {interpretation.ClvMinutes.Value}:"
                 + $"{interpretation.ClvSeconds.Value:00}."
                 + $"{interpretation.ClvFrameNumber.Value:00} "
-                + $"Frame #{interpretation.FrameNumber.Value}";
+                + $"Frame #{interpretation.FrameNumber.Value} ";
         }
 
         if (interpretation.FrameNumber is > 0)
         {
-            return prefix + $"Frame #{interpretation.FrameNumber.Value}";
+            return prefix + $"Frame #{interpretation.FrameNumber.Value} ";
         }
 
         if (leadIn)
@@ -785,27 +836,47 @@ public sealed class TbcFieldSequenceDecodeEngine
             TaskScheduler.Default);
     }
 
-    internal static long CvbsNoSyncAfterOutputOffsetSamples(DecodeSession session)
+    internal static long DirectVideoNoSyncAfterOutputOffsetSamples(DecodeSession session)
     {
         double linePeriodUs = session.Parameters.SysParams.GetProperty("line_period").GetDouble();
         double nominalLineLength = linePeriodUs * (session.DecodeSampleRateHz / 1_000_000.0);
         return checked((long)(nominalLineLength * 200.0));
     }
 
+    internal static bool ShouldWarnDirectVideoPlayerSkip(
+        DecodeSession session,
+        TbcDecodedField field)
+    {
+        if (session.Spec.Name is not ("cvbs" or "ld") || field.SyncConfidence >= 50)
+        {
+            return false;
+        }
+
+        int outputLines = session.TbcFrameSpec.OutputLineCount;
+        double[] locations = field.LineLocations.Locations;
+        if (locations.Length <= outputLines)
+        {
+            return false;
+        }
+
+        double fieldLength = (locations[outputLines] - locations[0]) / field.MeanLineLength;
+        return !(fieldLength >= outputLines - 2 && fieldLength <= outputLines + 2);
+    }
+
     private static void LogRecovery(
         DecodeSession session,
         TbcFieldDecodeRecoveryException exception,
-        bool cvbsNoSyncAfterOutput = false)
+        bool directVideoNoSyncAfterOutput = false)
     {
         string? message = (session.Spec.Name, exception.Kind) switch
         {
             ("vhs", TbcFieldDecodeRecoveryKind.NoSyncPulses) =>
                 "Unable to find any sync pulses, jumping 100 ms",
-            ("vhs" or "cvbs", TbcFieldDecodeRecoveryKind.NoFirstHSync) =>
+            ("vhs" or "cvbs" or "ld", TbcFieldDecodeRecoveryKind.NoFirstHSync) =>
                 "Unable to determine start of field - dropping field",
-            ("cvbs", TbcFieldDecodeRecoveryKind.NoSyncPulses) when cvbsNoSyncAfterOutput =>
+            ("cvbs" or "ld", TbcFieldDecodeRecoveryKind.NoSyncPulses) when directVideoNoSyncAfterOutput =>
                 "Unable to find any sync pulses, skipping one field",
-            ("cvbs", TbcFieldDecodeRecoveryKind.NoSyncPulses) =>
+            ("cvbs" or "ld", TbcFieldDecodeRecoveryKind.NoSyncPulses) =>
                 "Unable to find any sync pulses, skipping one second",
             ("cvbs", TbcFieldDecodeRecoveryKind.InsufficientData) =>
                 "Missing data at the end of field, possibly dropped samples skipping a little.",
@@ -836,6 +907,8 @@ public sealed class TbcFieldSequenceDecodeEngine
             session.Filters.RfMtf[i] = response[i];
             session.Filters.RfMtfMagnitude[i] = response[i].Magnitude;
         }
+
+        session.StreamDecoder.InvalidateCachedBlocks();
     }
 
     private static TbcDecodedField? ReadFieldFromSession(
@@ -868,7 +941,7 @@ public sealed class TbcFieldSequenceDecodeEngine
         try
         {
             int effectiveFieldNumber = ResolveReadFieldNumber(
-                _usesSessionReader,
+                _usesSessionReader || UseSessionFieldNumberingForCustomReader,
                 session.Spec.Name,
                 fieldNumber,
                 writtenFieldCount);
@@ -931,27 +1004,58 @@ public sealed class TbcFieldSequenceDecodeEngine
         }
 
         BigInteger targetFrame = session.ExecutionOptions.SeekFrame;
+        DecodeSessionLogWriter.Append(session, "INFO", "Beginning seek");
         long nominalFieldSamples = session.TbcFieldDecoder.EstimateNominalFieldSampleCount();
         DecodeStartPosition seekStart = session.RunBounds.HasExplicitStartFrame
             ? session.RunBounds.StartFramePosition
             : DecodeStartPosition.FromInteger(targetFrame * 2 * nominalFieldSamples);
         long current = seekStart.ResolveForRead();
 
+        ApplyLaserDiscMtf(session, 0.0);
+        try
+        {
+            return ResolveLaserDiscSeekStart(
+                session,
+                input,
+                readLength,
+                targetFrame,
+                nominalFieldSamples,
+                current);
+        }
+        finally
+        {
+            ApplyLaserDiscMtf(session, 1.0);
+        }
+    }
+
+    private long ResolveLaserDiscSeekStart(
+        DecodeSession session,
+        Stream input,
+        int readLength,
+        BigInteger targetFrame,
+        long nominalFieldSamples,
+        long current)
+    {
         for (int retry = 0; retry < 3; retry++)
         {
-            if (!TryReadLaserDiscFrameNumber(session, input, readLength, current, out int frameNumber, out long frameStart))
+            if (!TryReadLaserDiscFrameNumber(
+                    session,
+                    input,
+                    readLength,
+                    current,
+                    out int frameNumber,
+                    out long frameStart,
+                    out long probeStart))
             {
-                if (current != 0)
-                {
-                    current = 0;
-                    continue;
-                }
-
                 break;
             }
 
+            current = probeStart;
             if (targetFrame == frameNumber)
             {
+                DecodeSessionLogWriter.Append(session, "INFO", "Finished seek");
+                session.RuntimeReporter?.WriteDirectErrorLine(
+                    $"Finished seeking, starting at frame {frameNumber}");
                 return frameStart;
             }
 
@@ -984,72 +1088,106 @@ public sealed class TbcFieldSequenceDecodeEngine
         int readLength,
         long begin,
         out int frameNumber,
-        out long frameStart)
+        out long frameStart,
+        out long probeStart)
     {
         frameNumber = 0;
         frameStart = begin;
-        TbcDecodedField? first = ReadFieldWithContext(
-            session,
-            input,
-            begin,
-            readLength,
-            fieldNumber: 0);
-        if (first is null)
-        {
-            return false;
-        }
-
-        long secondBegin = EstimateNextFieldStart(session, first);
-        TbcDecodedField? second = ReadFieldWithContext(
-            session,
-            input,
-            secondBegin,
-            readLength,
-            fieldNumber: 1);
-        if (second is null)
-        {
-            return false;
-        }
-
+        probeStart = begin;
+        long current = begin;
+        int validFieldCount = 0;
+        TbcDecodedField? previous = null;
         int framesPerSecond = string.Equals(session.System, "PAL", StringComparison.OrdinalIgnoreCase) ? 25 : 30;
-        LaserDiscVbiInterpretation interpretation = LaserDiscVbiInterpreter.Interpret(
-            (first.VbiData ?? []).Concat(second.VbiData ?? []),
-            framesPerSecond);
-        if (!interpretation.FrameNumber.HasValue || interpretation.IsEarlyClv)
+        session.TbcFieldDecoder.DiscardLaserDiscPreviousFieldContextAfterRecovery();
+        for (int attempt = 0; attempt < 10; attempt++)
         {
-            return false;
+            TbcDecodedField? field;
+            try
+            {
+                field = ReadFieldWithContext(
+                    session,
+                    input,
+                    current,
+                    readLength,
+                    fieldNumber: validFieldCount,
+                    writtenFieldCount: 0);
+            }
+            catch (TbcFieldDecodeRecoveryException ex)
+            {
+                LogRecovery(session, ex);
+                session.TbcFieldDecoder.DiscardLaserDiscPreviousFieldContextAfterRecovery();
+                current = Math.Max(0L, checked(current + ex.SuggestedOffsetSamples));
+                continue;
+            }
+
+            if (field is null)
+            {
+                if (probeStart != 0)
+                {
+                    probeStart = 0;
+                    current = 0;
+                    session.TbcFieldDecoder.DiscardLaserDiscPreviousFieldContextAfterRecovery();
+                    continue;
+                }
+
+                return false;
+            }
+
+            long next = EstimateNextFieldStart(session, field);
+            if (next <= current)
+            {
+                throw new InvalidOperationException("Decoded field did not advance the input position.");
+            }
+
+            if (previous is not null)
+            {
+                LaserDiscVbiInterpretation interpretation = LaserDiscVbiInterpreter.Interpret(
+                    (previous.VbiData ?? []).Concat(field.VbiData ?? []),
+                    framesPerSecond);
+                if (interpretation.IsEarlyClv)
+                {
+                    DecodeSessionLogWriter.Append(
+                        session,
+                        "ERROR",
+                        "Cannot seek in early CLV disks w/o timecode");
+                    session.TbcFieldDecoder.DiscardLaserDiscPreviousFieldContextAfterRecovery();
+                    return false;
+                }
+
+                if (interpretation.FrameNumber.HasValue)
+                {
+                    frameNumber = interpretation.FrameNumber.Value;
+                    frameStart = LaserDiscSeekDecodeStart(session, field);
+                    DecodeSessionLogWriter.Append(
+                        session,
+                        "INFO",
+                        $"seeking: file loc {LaserDiscSeekFileFrame(session, field)} frame # {frameNumber}");
+                    session.TbcFieldDecoder.DiscardLaserDiscPreviousFieldContextAfterRecovery();
+                    return true;
+                }
+            }
+
+            previous = field;
+            validFieldCount++;
+            current = next;
+            session.TbcFieldDecoder.DiscardLaserDiscPreviousFieldContextAfterRecovery();
         }
 
-        frameNumber = interpretation.FrameNumber.Value;
-        frameStart = first.StartSample;
-        return true;
+        return false;
     }
 
-    public static bool ShouldStopAfterLaserDiscLeadOut(
-        DecodeSession session,
-        TbcDecodedField field,
-        bool isFirstField,
-        ref int leadOutCodeCount)
+    private static long LaserDiscSeekFileFrame(DecodeSession session, TbcDecodedField field)
     {
-        if (session.Spec.Name != "ld" || session.ExecutionOptions.IgnoreLeadOut || field.VbiData is null)
-        {
-            return false;
-        }
+        double framesPerSecond = session.Parameters.SysParams.GetProperty("FPS").GetDouble();
+        double samplesPerField = ((int)(session.DecodeSampleRateHz / (framesPerSecond * 2.0))) + 1;
+        return checked((long)Math.Floor((field.StartSample / samplesPerField) / 2.0));
+    }
 
-        if (isFirstField)
-        {
-            leadOutCodeCount = 0;
-        }
-
-        foreach (int code in field.VbiData)
-        {
-            if (code == LaserDiscLeadOutCode)
-            {
-                leadOutCodeCount++;
-            }
-        }
-
-        return !isFirstField && leadOutCodeCount >= LaserDiscLeadOutRequiredCount;
+    private static long LaserDiscSeekDecodeStart(DecodeSession session, TbcDecodedField field)
+    {
+        long samplesPerField = session.TbcFieldDecoder.EstimateNominalFieldSampleCount();
+        long fieldIndex = checked((long)(field.StartSample / (double)samplesPerField));
+        return checked(fieldIndex * samplesPerField);
     }
 
     public TbcFieldSequenceDecodeResult WriteDecodedFields(DecodeSession session, IReadOnlyList<TbcDecodedField> fields)
@@ -1444,6 +1582,10 @@ public sealed class TbcFieldSequenceDecodeEngine
                     && distance <= 1.1;
                 if (progressive)
                 {
+                    DecodeSessionLogWriter.Append(
+                        _session,
+                        "ERROR",
+                        "Detected progressive video content..., manually flipping the field order to compensate");
                     decodeFaults |= 1;
                     syncConfidence = 10;
                     isFirstField = !_history[^1].Decision.IsFirstField;
@@ -1471,14 +1613,30 @@ public sealed class TbcFieldSequenceDecodeEngine
                     syncConfidence = 0;
                     if (_session.FieldOrderOptions.Action == TbcFieldOrderAction.None)
                     {
+                        if (_session.Parameters.TapeFormat != "TYPEC")
+                        {
+                            DecodeSessionLogWriter.Append(
+                                _session,
+                                "ERROR",
+                                "Possibly skipped field (Two fields with same isFirstField in a row), manually flipping the field order to compensate");
+                        }
+
                         isFirstField = !_history[^1].Decision.IsFirstField;
                     }
                     else if (_duplicatePreviousField)
                     {
+                        DecodeSessionLogWriter.Append(
+                            _session,
+                            "ERROR",
+                            "Possibly skipped field (Two fields with same isFirstField in a row), duplicating the last field to compensate...");
                         isDuplicateField = true;
                     }
                     else
                     {
+                        DecodeSessionLogWriter.Append(
+                            _session,
+                            "ERROR",
+                            "Possibly skipped field (Two fields with same isFirstField in a row), dropping the last field to compensate...");
                         writeField = false;
                     }
                 }

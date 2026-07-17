@@ -1,4 +1,5 @@
 using System.Buffers.Binary;
+using System.Collections.Concurrent;
 using System.IO.Compression;
 using System.Reflection;
 using System.Text;
@@ -15,18 +16,21 @@ public enum TbcLineInterpolationMethod
 
 public sealed class TbcLineResampler
 {
+    private const int ParallelSampleThreshold = 64 * 1024;
     private const int SincTapCount = 16;
     private const int SincPhaseCount = 65536;
     private const double KaiserBeta = 5.0;
     private const string SincLookupResourceName = "VHSDecode.Core.Tbc.Resources.sinc_lut.npz";
     private static readonly Lazy<float[]> SincLookup = new(LoadSincLookup);
     private readonly double? _nominalInputLineLength;
+    private readonly int _workerThreads;
 
     public TbcLineResampler(
         int outputLineLength,
         TbcLineInterpolationMethod interpolationMethod = TbcLineInterpolationMethod.Linear,
         double wowLevelAdjustSmoothing = 0.0,
-        double? nominalInputLineLength = null)
+        double? nominalInputLineLength = null,
+        int workerThreads = 1)
     {
         if (outputLineLength <= 0)
         {
@@ -43,6 +47,7 @@ public sealed class TbcLineResampler
         }
 
         _nominalInputLineLength = nominalInputLineLength;
+        _workerThreads = Math.Max(0, workerThreads);
     }
 
     public int OutputLineLength { get; }
@@ -163,9 +168,63 @@ public sealed class TbcLineResampler
         int firstLine,
         Span<double> destination)
     {
+        (double[] sourcePositions, double[] levelAdjusts, int prefixSamples) =
+            PrepareResampling(interpolator, firstLine, destination.Length);
+        float[] sincLookup = SincLookup.Value;
+        for (int i = 0; i < destination.Length; i++)
+        {
+            destination[i] = (float)(SampleSinc(source, sourcePositions[i], sincLookup)
+                * levelAdjusts[prefixSamples + i]);
+        }
+    }
+
+    private unsafe void ResampleSamples(
+        ReadOnlySpan<double> source,
+        ILineLocationInterpolator interpolator,
+        int firstLine,
+        double[] destination)
+    {
+        (double[] sourcePositions, double[] levelAdjusts, int prefixSamples) =
+            PrepareResampling(interpolator, firstLine, destination.Length);
+        float[] sincLookup = SincLookup.Value;
+        if (_workerThreads <= 1 || destination.Length < ParallelSampleThreshold)
+        {
+            for (int i = 0; i < destination.Length; i++)
+            {
+                destination[i] = (float)(SampleSinc(source, sourcePositions[i], sincLookup)
+                    * levelAdjusts[prefixSamples + i]);
+            }
+
+            return;
+        }
+
+        fixed (double* sourcePointer = source)
+        {
+            nint sourceAddress = (nint)sourcePointer;
+            int sourceLength = source.Length;
+            Parallel.ForEach(
+                Partitioner.Create(0, destination.Length),
+                new ParallelOptions { MaxDegreeOfParallelism = _workerThreads },
+                range =>
+                {
+                    var parallelSource = new ReadOnlySpan<double>((void*)sourceAddress, sourceLength);
+                    for (int i = range.Item1; i < range.Item2; i++)
+                    {
+                        destination[i] = (float)(SampleSinc(parallelSource, sourcePositions[i], sincLookup)
+                            * levelAdjusts[prefixSamples + i]);
+                    }
+                });
+        }
+    }
+
+    private (double[] SourcePositions, double[] LevelAdjusts, int PrefixSamples) PrepareResampling(
+        ILineLocationInterpolator interpolator,
+        int firstLine,
+        int destinationLength)
+    {
         int prefixSamples = checked(firstLine * OutputLineLength);
-        int scaledSampleCount = checked(prefixSamples + destination.Length);
-        var sourcePositions = new double[destination.Length];
+        int scaledSampleCount = checked(prefixSamples + destinationLength);
+        var sourcePositions = new double[destinationLength];
         var wowFactors = new double[scaledSampleCount];
 
         for (int i = 0; i < scaledSampleCount; i++)
@@ -179,10 +238,7 @@ public sealed class TbcLineResampler
         }
 
         double[] levelAdjusts = BuildLevelAdjusts(wowFactors);
-        for (int i = 0; i < destination.Length; i++)
-        {
-            destination[i] = (float)(SampleSinc(source, sourcePositions[i]) * levelAdjusts[prefixSamples + i]);
-        }
+        return (sourcePositions, levelAdjusts, prefixSamples);
     }
 
     private double[] BuildLevelAdjusts(double[] wowFactors)
@@ -237,7 +293,10 @@ public sealed class TbcLineResampler
     private static double Median(double[] values)
         => NumpyReduction.MedianFloat64(values);
 
-    private static double SampleSinc(ReadOnlySpan<double> source, double position)
+    private static double SampleSinc(
+        ReadOnlySpan<double> source,
+        double position,
+        ReadOnlySpan<float> weights)
     {
         if (!double.IsFinite(position))
         {
@@ -260,7 +319,6 @@ public sealed class TbcLineResampler
         int weightStart = phaseStart * SincTapCount;
         int weightEnd = phaseEnd * SincTapCount;
         int sampleStart = coordInt - ((SincTapCount / 2) - 1);
-        float[] weights = SincLookup.Value;
         double result = 0.0;
         for (int tap = 0; tap < SincTapCount; tap++)
         {

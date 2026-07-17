@@ -192,7 +192,7 @@ public sealed class CvbsFieldStateCompatibilityTests
                 outputBase
             ]);
             using DecodeSession session = DecodeSessionFactory.Create(command);
-            Assert.Equal(512_000, TbcFieldSequenceDecodeEngine.CvbsNoSyncAfterOutputOffsetSamples(session));
+            Assert.Equal(512_000, TbcFieldSequenceDecodeEngine.DirectVideoNoSyncAfterOutputOffsetSamples(session));
 
             var readBegins = new List<long>();
             int attempts = 0;

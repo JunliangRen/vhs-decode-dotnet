@@ -322,16 +322,38 @@ possible capture has already been proven byte-for-byte identical.
   detection
 - LD decode session construction now wires the PAL pilot and NTSC burst field
   refiners into real `ld-decode` sessions
+- LD sync-loss recovery now follows the v0.4.0 written-field state in serial
+  and worker configurations: an initial no-sync span skips one second, while a
+  no-sync span after output logs `skipping one field`, advances by 200 nominal
+  lines, and continues decoding; missing field starts log the upstream
+  `dropping field` diagnostic and use the same 200-line advance. Every invalid
+  LD field also clears the previous line-zero, parity, PAL/NTSC phase, and
+  player-skip context before retrying, matching upstream's `prevfield=None`
+- LD `--seek` now uses v0.4.0's ten-attempt field probe, advances through
+  recoverable fields without consuming valid-field sequence state, scans later
+  VBI pairs when the first pair has no frame code, and falls back to file start
+  only after EOF at a nonzero probe location; seek progress, completion, and
+  early-CLV diagnostics match the upstream messages. A successful match lands
+  on the nominal field boundary containing the paired second field, including
+  upstream's block-aligned `readloc` truncation. Probe demodulation uses upstream
+  target MTF 0 (including `--MTF_offset`) and restores normal target MTF 1 on
+  both success and failure
 - LD `--MTF` and `--MTF_offset` RF compensation path, using upstream
   `MTF_freq`, `MTF_poledist`, and `MTF_basemult` format parameters before
   Hilbert FM demodulation, with bit-exact NumPy power coverage for fractional,
   positive-integer, and negative-integer levels; automatic MTF now tracks the
   rounded `blackToWhiteRFRatio` over 30 CAV or 900 CLV fields, applies NumPy's
   pairwise float64 mean and the v0.4.0 scaling formula, and transactionally
-  re-decodes a field when the level moves by at least 0.05; CAV/CLV state is
-  re-evaluated for every completed VBI field pair, including empty-code pairs;
+  re-decodes a field when the level moves by at least 0.05; smaller updates
+  retain the source pipeline's one-field speculative-decode delay; CAV/CLV
+  state is re-evaluated for every completed VBI field pair, including
+  empty-code pairs, while metadata-rejected skip/filler fields leave it
+  unchanged;
   the source black/white RF standard deviations use NumPy float64 pairwise
   reduction before the upstream four-decimal ratio rounding
+- LD field construction now receives v0.4.0's pre-write `fields_written`
+  count for speculative initial reads, the current count for same-field
+  MTF/AGC retries, and a realigned current count after recovery
 - LD EFM digital-audio front-end path, using the upstream 0-1.9 MHz
   amplitude/phase equalizer curve plus 20 kHz-1.6 MHz super-Gaussian band-pass,
   honoring `--noEFM`, and emitting clipped int16 EFM payloads from RF block and
@@ -412,7 +434,9 @@ possible capture has already been proven byte-for-byte identical.
   `vbi.vbiData` and feeding the lead-out detector
 - LD verbose VITS metadata now interprets CAV frame codes and CLV
   minute/second/frame codes from paired field VBI data, emitting
-  `cavFrameNr`, `clvMinutes`, `clvSeconds`, and `clvFrameNr`
+  `cavFrameNr`, `clvMinutes`, `clvSeconds`, and `clvFrameNr`; CAV/CLV frame
+  status log records retain v0.4.0's trailing space while special lead and
+  pulldown statuses remain unpadded in the log message
 - LD/CVBS `.tbc.json` `decodeFaults` now follows the upstream field metadata
   shape, including zero-valued LD/CVBS entries and LD's field-phase sequence
   mismatch bit when `fieldPhaseID` does not advance through the configured
@@ -510,10 +534,19 @@ possible capture has already been proven byte-for-byte identical.
   after the optional chroma trap and derives its 0.5 MHz branch from that luma
 - VHS `--fm_audio_notch` RFVideo dual-notch support at the upstream
   `fm_audio_channel_0_freq`/`fm_audio_channel_1_freq` carriers, including
-  flag-only Q=10 parsing and HI8's upstream default auto-enable behavior
+  flag-only Q=10 parsing and HI8's upstream default auto-enable behavior;
+  enabled formats without both carrier parameters emit the exact v0.4.0
+  disabled-filter warning
+- VHS format-parameter fallback warnings and PAL/NTSC VHS-field-class fallback
+  diagnostics are emitted with the exact v0.4.0 text and initialization order;
+  all constructor-time warnings precede the Sys/RF DEBUG records in `.log`
+- `PAL_M`, `NLINHA`, and `MESECAM` retain v0.4.0's VHS-only field-class
+  restriction: other tape formats preserve earlier initialization diagnostics,
+  then fail before creating TBC or JSON output artifacts
 - VHS `--high_boost` RF residual boost path, using command-line overrides or
   upstream `boost_bpf_mult` defaults and applying the RF top-band boost during
-  Hilbert demodulation
+  Hilbert demodulation; a zero-valued RF envelope skips the boost and emits
+  v0.4.0's exact weak-signal warning once for that block
 - VHS diff-demod spike repair path, honoring `--no_diff_demod` and replacing
   out-of-range FM demod spikes with upstream-style diffed-Hilbert windows;
   replacement candidates are snapshotted before mutation like Numba's
@@ -633,7 +666,9 @@ possible capture has already been proven byte-for-byte identical.
   handling, including TYPEC's upstream forced `none` action, disabled
   progressive flip, duplicate/drop compensation in TBC field writes, and JSON
   metadata; progressive correction forces `syncConf: 10` even when the raw
-  field confidence is lower, while ordinary fields retain that raw lower value
+  field confidence is lower, while ordinary fields retain that raw lower value;
+  progressive/manual flips and duplicate/drop repairs emit the exact v0.4.0
+  error diagnostics, including TYPEC's intentional silent manual correction
 - SVHS custom luma filter support for embedded upstream response files plus
   high/low shelf entries
 
@@ -667,7 +702,9 @@ possible capture has already been proven byte-for-byte identical.
   `ERROR: Seeking failed`, since CVBS frame-number decoding returns no target
 - VHS `--params_file` JSON overrides for existing `sys_params`/`rf_params`
   keys, including upstream-style decoder level key synchronization from system
-  parameters into RF decoder parameters
+  parameters into RF decoder parameters; unknown keys emit the exact v0.4.0
+  INFO diagnostics, while changed dictionaries use Python `repr` in DEBUG log
+  records and retain the original per-group construction order
 - upstream-style decode run bounds for `--start`, `--start_fileloc`, and
   `--length`, converting frame requests into field/sample positions with
   v0.4.0's exact `int(sampleRate / (FPS * 2)) + 1` coarse field length for
@@ -725,7 +762,9 @@ possible capture has already been proven byte-for-byte identical.
   terminating the sequence: VHS no-pulse spans jump 100 ms, LD/CVBS initial
   no-pulse spans jump one second, missing first HSYNC advances 100 tape lines or
   200 LD/CVBS lines, CVBS no-pulse spans after output advance 200 lines and
-  continue, and short trailing data backs up from line0 by 20 lines
+  continue, and short trailing data backs up from line0 by 20 lines; after a
+  valid VHS field, short spans also emit the exact two upstream INFO records
+  with Python-formatted line counts and timing values
 - VHS chroma sidecar output contract for decoded chroma fields, writing
   upstream-named `_chroma.tbc` files by default and `.tbcy`/`.tbcc` pairs when
   `--orc` is supplied
@@ -793,7 +832,8 @@ possible capture has already been proven byte-for-byte identical.
 - ports of fallback v-sync location means and crude sync/blank level detection
 - VHS sync threshold selection now estimates sync/blank levels from the 0.5 MHz
   branch when available, and honors upstream-style `--level_detect_divisor`
-  bounds/capping before using `(sync + blank) / 2` for pulse detection;
+  bounds/capping and exact correction warnings before using
+  `(sync + blank) / 2` for pulse detection;
   `--use_saved_levels` reuses the previous field's detected sync/blank levels
   when available, but retries fresh level detection if the saved levels fail to
   produce usable sync/line locations
@@ -869,7 +909,9 @@ possible capture has already been proven byte-for-byte identical.
   no previous-field state: close duplicate-pulse filtering, four ordered
   HSYNC/EQ/VSYNC boundary patterns, 0.08H candidate validation, out-of-range
   backup selection, 0.7H prediction snapping, and the long-VSYNC 240p/288p
-  fallback are shared by VHS and CVBS decoding
+  fallback are shared by VHS and CVBS decoding; all five line0 backup,
+  out-of-range, whole-block prediction, and long-pulse guess INFO diagnostics
+  retain the exact upstream text and trigger branch
 - ambiguous HSYNC-to-EQ fallback boundaries use NumPy-compatible float64
   pairwise means and standard deviations for their three content intervals, so
   a value just outside the 5% decision boundary is not falsely accepted as
@@ -1017,14 +1059,20 @@ possible capture has already been proven byte-for-byte identical.
   greater-than-4-sample second-derivative test; PAL pilot and NTSC burst paths
   linearly repair marked runs between surrounding good lines, with NTSC's
   line-zero anchor restriction and burst-missing lines preserved
+- LD and CVBS now emit v0.4.0's exact possible-player-skip warning when field
+  sync confidence is below 50 and normalized field length falls outside the
+  inclusive `output_lines +/- 2` range, including NumPy NaN comparison behavior
 - LD analog audio tick generation now uses the parity-specific field line
   count (NTSC 263/262 and PAL 312/313) instead of the maximum TBC field height,
   generates ticks by index like `numpy.arange`, and mutes an interval unless
-  both demodulated channels cover its end sample
+  both demodulated channels cover its end sample; any such TBC failure emits
+  v0.4.0's analog-audio muting warning once for the affected field
 - 16 kHz-and-higher LD PCM now recomputes each field's fractional sample offset
   from the previous absolute RF read location and field number, including
-  NumPy-compatible ties-to-even gap rounding; lower-rate and HSYNC-locked modes
-  retain the upstream zero-offset-per-field behavior
+  NumPy-compatible ties-to-even gap rounding; normally accepted fields advance
+  that anchor even without current PCM, while skip/filler writes preserve the
+  prior anchor. Lower-rate and HSYNC-locked modes retain the upstream
+  zero-offset-per-field behavior
 - right-edge HSYNC refinement now runs independently of the left edge and can
   clear a derivative-marked `linebad` entry; left and right validation use the
   distinct v0.4.0 IRE windows (`-65..110` and `-65..30`) and the right-derived
@@ -1061,6 +1109,8 @@ possible capture has already been proven byte-for-byte identical.
   clear an active status line, and cleanup reports total decode time plus
   post-setup FPS; a one-frame PAL CVBS transcript is byte-exact on stdout, has
   the exact phase warning on stderr, and matches the upstream timing-line shape
+- session-internal RF, sync, AGC, and audio diagnostics now use that same
+  `.log` plus runtime-reporter route instead of being hidden from stderr
 - LD, VHS, and CVBS streaming output now take the same periodic recovery JSON
   snapshots: every read while fewer than 100 fields have been written and again
   at each 500-field boundary; VHS then checks free output-disk space and, below
@@ -1081,6 +1131,20 @@ possible capture has already been proven byte-for-byte identical.
   keeping stream/FFmpeg/GNU Radio reads ordered; `-t 1` and debug-plot `0`
   retain the deterministic single-thread path, and parallel blocks are stitched
   in their original overlap-save order
+- adjacent field reads now reuse a stream-scoped, 16-block decoded RF cache,
+  avoiding duplicate FFT work across overlap windows while keeping memory
+  bounded; backward seeks, input-stream changes, and dynamic LD MTF changes
+  invalidate the cache before further decoding
+- the managed DUCC FFT path now reuses per-worker scratch buffers, shares
+  immutable root tables, writes packet transforms back in place, and performs
+  discardable inverse transforms in place. On the deterministic PAL LD fixture
+  with `--length 1 --threads 5 --disable_analog_audio --noEFM`, the three-run
+  median fell from 1.307 s to 1.163 s; a four-field Core probe reduced managed
+  allocation from 5.12 GiB to 1.96 GiB while preserving bit-exact output
+- stride-aligned RF windows now return their assembled channel arrays without
+  cloning every full field, and long TBC sinc resampling jobs share the decode
+  worker budget while `--threads 0/1` retain the serial path; serial and
+  parallel linear, quadratic, and cubic interpolation remain bit-exact
 - Python's arbitrary-precision thread values now survive until their v0.4.0
   runtime use: VHS debug plots ignore even enormous positive or negative values,
   CVBS/LD negative values retain the nonzero request with zero demod workers for
@@ -1105,8 +1169,10 @@ possible capture has already been proven byte-for-byte identical.
   seek and uses the decoder's final offset after recovery skips for its end;
   `--length 0 --seek` still performs the upstream frame probe before exporting
 - LD lead-out detection now scopes the two required `0x80EEEE` codes to one
-  first/second-field pair and only stops after processing the second field,
-  preventing sparse codes from accumulating across unrelated frames
+  first/second-field pair, resets that scope even when a new first field has no
+  decodable VBI code, preserves the ordered CAV/CLV early-return rules, and only
+  stops after processing a paired second field, preventing sparse or later line
+  codes from triggering termination across unrelated frames
 - native `.wav` dispatch now follows v0.4.0's container-loader path alongside
   `.ldf`, `.flac`, `.vhs`, and `raw.oga`, retaining timed seek/rewind behavior
   and accepting WAV encodings beyond the low-level mono PCM16 helper
@@ -1450,7 +1516,7 @@ dotnet test VHSDecodeDotNet.slnx --no-build
 ```
 
 The current formal solution build completes with zero warnings and errors, and
-the xUnit v3 project exposes 644 independently discoverable compatibility tests
+the xUnit v3 project exposes 713 independently discoverable compatibility tests
 to `dotnet test` and Visual Studio Test Explorer. On the
 same Windows machine and fixtures, Release wall-clock measurements for one
 frame were 2.346 s versus 7.193 s for NTSC VHS and 1.651 s versus 5.865 s for

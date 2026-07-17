@@ -41,6 +41,7 @@ public sealed record DecodeSession(
     string? TestLdfOutputPath) : IDisposable
 {
     internal DecodeRuntimeReporter? RuntimeReporter { get; set; }
+    internal IReadOnlyList<DecodeInitializationDiagnostic> VhsParamsFileDiagnostics { get; set; } = [];
 
     public void Dispose()
     {
@@ -103,6 +104,17 @@ public static class DecodeSessionFactory
     public const int DefaultBlockLength = 32 * 1024;
 
     public static DecodeSession Create(ParsedCommand command, int blockLength = DefaultBlockLength)
+        => Create(command, blockLength, enforceVhsFieldClass: true);
+
+    internal static DecodeSession CreateForRfParameterProbe(
+        ParsedCommand command,
+        int blockLength = DefaultBlockLength)
+        => Create(command, blockLength, enforceVhsFieldClass: false);
+
+    private static DecodeSession Create(
+        ParsedCommand command,
+        int blockLength,
+        bool enforceVhsFieldClass)
     {
         if (command.Positionals.Count < 2)
         {
@@ -116,14 +128,17 @@ public static class DecodeSessionFactory
 
         return command.Spec.Name switch
         {
-            "vhs" => CreateVhs(command, blockLength),
+            "vhs" => CreateVhs(command, blockLength, enforceVhsFieldClass),
             "cvbs" => CreateCvbs(command, blockLength),
             "ld" => CreateLaserDisc(command, blockLength),
             _ => throw new NotSupportedException($"Unsupported decode command '{command.Spec.Name}'.")
         };
     }
 
-    private static DecodeSession CreateVhs(ParsedCommand command, int blockLength)
+    private static DecodeSession CreateVhs(
+        ParsedCommand command,
+        int blockLength,
+        bool enforceFieldClass)
     {
         string system = VideoSystemSelector.Select(command);
         double selectedSampleRateMHz = SelectCommonSampleFrequencyMHz(command);
@@ -138,8 +153,30 @@ public static class DecodeSessionFactory
             system,
             command.Get<string>("tape_format"),
             command.Get<string>("tape_speed"));
-        parameters = VhsParamsFileOverride.Apply(parameters, NullableString(command, "params_file"));
-        return Build(command, system, parameters, decodeSampleRateMHz, blockLength, blockCut: 1024, blockCutEnd: 1024, loader);
+        VhsParamsFileOverrideResult paramsOverride = VhsParamsFileOverride.ApplyWithDiagnostics(
+            parameters,
+            NullableString(command, "params_file"));
+        parameters = paramsOverride.Parameters;
+        DecodeSession session = Build(
+            command,
+            system,
+            parameters,
+            decodeSampleRateMHz,
+            blockLength,
+            blockCut: 1024,
+            blockCutEnd: 1024,
+            loader);
+        session.VhsParamsFileDiagnostics = paramsOverride.Diagnostics;
+        if (!enforceFieldClass
+            || !VhsInitializationDiagnostics.IsUnsupportedFieldClassCombination(system, parameters.TapeFormat))
+        {
+            return session;
+        }
+
+        IReadOnlyList<DecodeInitializationDiagnostic> diagnostics =
+            VhsInitializationDiagnostics.Build(command, session);
+        session.Dispose();
+        throw new VhsFieldClassSelectionException(system, diagnostics);
     }
 
     private static DecodeSession CreateCvbs(ParsedCommand command, int blockLength)
@@ -185,6 +222,18 @@ public static class DecodeSessionFactory
         IRfSampleLoader loader)
     {
         double sampleRateHz = sampleRateMHz * 1_000_000.0;
+        DecodeSession? activeSession = null;
+        void WriteDiagnostic(string level, string message)
+        {
+            if (activeSession is null)
+            {
+                DecodeSessionLogWriter.Append(command.OutputBase + ".log", level, message);
+                return;
+            }
+
+            DecodeSessionLogWriter.Append(activeSession, level, message);
+        }
+
         ChromaDecodeOptions? chromaOptions = BuildChromaOptions(command, system, parameters, sampleRateMHz);
         DecodeFilterOptions filterOptions = BuildFilterOptions(command, system, parameters, chromaOptions);
         DecodeFilterSet filters = DecodeFilterSetBuilder.BuildBasic(parameters, sampleRateHz, blockLength, filterOptions);
@@ -196,7 +245,8 @@ public static class DecodeSessionFactory
             sampleRateHz,
             filterOptions,
             BuildCvbsDecodeOptions(command, videoOutput),
-            BuildRfInputProcessor(command));
+            BuildRfInputProcessor(command),
+            WriteDiagnostic);
         var streamDecoder = new RfBlockStreamDecoder(
             pipeline,
             blockLength,
@@ -216,7 +266,8 @@ public static class DecodeSessionFactory
             BuildWowLevelAdjustSmoothing(command, parameters),
             nominalInputLineLength: Math.Round(
                 JsonRequiredDouble(parameters.SysParams, "line_period") * sampleRateMHz,
-                MidpointRounding.ToEven));
+                MidpointRounding.ToEven),
+            workerThreads: executionOptions.WorkerThreads);
         TbcDropoutDetectionOptions dropoutOptions = BuildDropoutOptions(command, sampleRateMHz);
         TbcFieldOrderOptions fieldOrderOptions = BuildFieldOrderOptions(command, parameters);
         LaserDiscAudioOptions? laserDiscAudioOptions = BuildLaserDiscAudioOptions(command, system);
@@ -268,16 +319,13 @@ public static class DecodeSessionFactory
                 sampleRateHz,
                 syncDetectionOptions),
             framesPerSecond: JsonRequiredDouble(parameters.SysParams, "FPS"),
-            diagnosticLogger: (level, message) => DecodeSessionLogWriter.Append(
-                command.OutputBase + ".log",
-                level,
-                message),
+            diagnosticLogger: WriteDiagnostic,
             debug: executionOptions.Debug,
             inputBlockCutSamples: blockCut);
         DecodeRunBounds runBounds = DecodeRunBounds.FromCommand(
             command,
             tbcFieldDecoder.EstimateNominalFieldSampleCount());
-        return new DecodeSession(
+        activeSession = new DecodeSession(
             command.Spec,
             command.InputFile,
             command.OutputBase,
@@ -307,6 +355,7 @@ public static class DecodeSessionFactory
             chromaOptions,
             laserDiscAudioOptions,
             NullableString(command, "write_test_ldf"));
+        return activeSession;
     }
 
     private static double BuildLevelAdjust(ParsedCommand command)
