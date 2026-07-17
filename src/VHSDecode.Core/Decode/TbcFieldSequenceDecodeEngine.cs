@@ -259,6 +259,18 @@ public sealed class TbcFieldSequenceDecodeEngine
         LaserDiscAutoMtfController? autoMtf = session.Spec.Name == "ld"
             ? new LaserDiscAutoMtfController()
             : null;
+        double? deferredLaserDiscMtf = null;
+
+        void ApplyDeferredLaserDiscMtf()
+        {
+            if (!deferredLaserDiscMtf.HasValue)
+            {
+                return;
+            }
+
+            ApplyLaserDiscMtf(session, deferredLaserDiscMtf.Value);
+            deferredLaserDiscMtf = null;
+        }
 
         void CheckpointOutput(int fieldsWritten)
         {
@@ -365,15 +377,30 @@ public sealed class TbcFieldSequenceDecodeEngine
                         decodedFieldCount,
                         writePlanner.WrittenFieldCount)
                     : prefetchedField.GetAwaiter().GetResult();
+                if (autoMtf is not null)
+                {
+                    // v0.4.0 has already decoded this field before processing the
+                    // previous field's non-retry MTF update.
+                    ApplyDeferredLaserDiscMtf();
+                }
+
                 if (field is not null && autoMtf is not null)
                 {
                     LaserDiscMtfUpdate mtfUpdate = autoMtf.Observe(field.BlackToWhiteRfRatio);
-                    if (field.BlackToWhiteRfRatio.HasValue && mtfUpdate.Level != mtfUpdate.PreviousLevel)
+                    bool requiresRetry = mtfUpdate.RequiresRetry || field.LaserDiscAgcAdjusted;
+                    if (mtfUpdate.Level != mtfUpdate.PreviousLevel)
                     {
-                        ApplyLaserDiscMtf(session, mtfUpdate.Level);
+                        if (requiresRetry)
+                        {
+                            ApplyLaserDiscMtf(session, mtfUpdate.Level);
+                        }
+                        else
+                        {
+                            deferredLaserDiscMtf = mtfUpdate.Level;
+                        }
                     }
 
-                    if (mtfUpdate.RequiresRetry || field.LaserDiscAgcAdjusted)
+                    if (requiresRetry)
                     {
                         session.TbcFieldDecoder.RestoreStateForRetry(fieldState!);
                         field = ReadFieldWithContext(
@@ -413,6 +440,7 @@ public sealed class TbcFieldSequenceDecodeEngine
                 else if (session.Spec.Name == "ld")
                 {
                     session.TbcFieldDecoder.DiscardLaserDiscPreviousFieldContextAfterRecovery();
+                    ApplyDeferredLaserDiscMtf();
                 }
 
                 if (ex.StopAfterDecodedFields && decodedFieldCount > 0 && !directVideoNoSync)

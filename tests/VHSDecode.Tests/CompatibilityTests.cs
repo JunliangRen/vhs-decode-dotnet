@@ -12288,6 +12288,64 @@ public void LaserDiscAutoMtfControllerMatchesUpstreamScaling()
     AssertEqual(35, clv.BlackToWhiteRatios.Count);
 }
 
+[Fact(DisplayName = "TBC field sequence engine delays gentle LD MTF by one speculative field")]
+public void TbcFieldSequenceEngineDelaysGentleLdMtfByOneSpeculativeField()
+{
+    using DecodeSession session = DecodeSessionFactory.Create(Parse(CliSpecs.LaserDisc, [
+        "--NTSC",
+        "--noEFM",
+        "--disable_analog_audio",
+        "input.s16",
+        "out"
+    ]), blockLength: 4096);
+    int mtfBin = FrequencyBin(
+        JsonDouble(session.Parameters.RfParams, "MTF_freq") * 1_000_000.0,
+        session.DecodeSampleRateHz,
+        session.BlockLength);
+    Complex[] initialMtf = DecodeFilterSetBuilder.BuildLaserDiscMtf(
+        session.Parameters,
+        session.FilterOptions,
+        targetMtf: 1.0,
+        session.DecodeSampleRateHz,
+        session.BlockLength);
+    Complex[] gentleMtf = DecodeFilterSetBuilder.BuildLaserDiscMtf(
+        session.Parameters,
+        session.FilterOptions,
+        targetMtf: 0.97,
+        session.DecodeSampleRateHz,
+        session.BlockLength);
+    var observedMtf = new List<double>();
+
+    TbcDecodedField? ReadField(
+        DecodeSession activeSession,
+        Stream _,
+        long begin,
+        int __,
+        int fieldNumber)
+    {
+        observedMtf.Add(activeSession.Filters.RfMtfMagnitude[mtfBin]);
+        return BuildSyntheticTbcField(
+                begin,
+                new ushort[activeSession.TbcFrameSpec.FieldSampleCount],
+                detectedFirstField: (fieldNumber & 1) == 0)
+            with
+            {
+                BlackToWhiteRfRatio = 1.4486,
+                NextFieldOffsetSamples = 100.0,
+                NominalFieldLengthSamples = 100.0
+            };
+    }
+
+    IReadOnlyList<TbcDecodedField> fields = new TbcFieldSequenceDecodeEngine(
+        readField: ReadField).DecodeFields(session, Stream.Null, maxFields: 3);
+
+    AssertEqual(3, fields.Count);
+    AssertEqual(3, observedMtf.Count);
+    AssertClose(initialMtf[mtfBin].Magnitude, observedMtf[0], 1e-12);
+    AssertClose(initialMtf[mtfBin].Magnitude, observedMtf[1], 1e-12);
+    AssertClose(gentleMtf[mtfBin].Magnitude, observedMtf[2], 1e-12);
+}
+
 [Fact(DisplayName = "TBC field sequence engine retries dynamic LD MTF")]
 public void TbcFieldSequenceEngineRetriesDynamicLdMtf()
 {
