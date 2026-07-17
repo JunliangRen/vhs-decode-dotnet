@@ -14,6 +14,32 @@ Current upstream snapshot used for analysis:
 > for every upstream format, option, and real-world capture. The verified scope
 > and known gaps are documented below.
 
+## Table of contents
+
+- [Scope](#scope)
+- [Compatibility status](#compatibility-status)
+  - [At a glance](#at-a-glance)
+  - [Implemented and verified](#implemented-and-verified)
+    - [Solution and command entry points](#solution-and-command-entry-points)
+    - [HiFi decode](#hifi-decode)
+    - [CLI parsing and format catalog](#cli-parsing-and-format-catalog)
+    - [Input and container loading](#input-and-container-loading)
+    - [DSP and filter foundations](#dsp-and-filter-foundations)
+    - [LaserDisc video and audio](#laserdisc-video-and-audio)
+    - [Metadata, databases, and sidecars](#metadata-databases-and-sidecars)
+    - [VHS luma and RF processing](#vhs-luma-and-rf-processing)
+    - [VHS chroma processing](#vhs-chroma-processing)
+    - [Decode engine and field rendering](#decode-engine-and-field-rendering)
+    - [Signal processing, sync, and recovery parity](#signal-processing-sync-and-recovery-parity)
+    - [Runtime behavior and streaming output](#runtime-behavior-and-streaming-output)
+  - [Differential verification](#differential-verification)
+    - [VHS verification](#vhs-verification)
+    - [CVBS verification](#cvbs-verification)
+    - [LaserDisc verification](#laserdisc-verification)
+  - [Remaining compatibility work](#remaining-compatibility-work)
+- [Build and test](#build-and-test)
+- [License](#license)
+
 ## Scope
 
 This port targets the decode CLIs only:
