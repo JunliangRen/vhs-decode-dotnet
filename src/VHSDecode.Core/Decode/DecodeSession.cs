@@ -41,6 +41,7 @@ public sealed record DecodeSession(
     string? TestLdfOutputPath) : IDisposable
 {
     internal DecodeRuntimeReporter? RuntimeReporter { get; set; }
+    internal IReadOnlyList<DecodeInitializationDiagnostic> VhsParamsFileDiagnostics { get; set; } = [];
 
     public void Dispose()
     {
@@ -152,7 +153,10 @@ public static class DecodeSessionFactory
             system,
             command.Get<string>("tape_format"),
             command.Get<string>("tape_speed"));
-        parameters = VhsParamsFileOverride.Apply(parameters, NullableString(command, "params_file"));
+        VhsParamsFileOverrideResult paramsOverride = VhsParamsFileOverride.ApplyWithDiagnostics(
+            parameters,
+            NullableString(command, "params_file"));
+        parameters = paramsOverride.Parameters;
         DecodeSession session = Build(
             command,
             system,
@@ -162,6 +166,7 @@ public static class DecodeSessionFactory
             blockCut: 1024,
             blockCutEnd: 1024,
             loader);
+        session.VhsParamsFileDiagnostics = paramsOverride.Diagnostics;
         if (!enforceFieldClass
             || !VhsInitializationDiagnostics.IsUnsupportedFieldClassCombination(system, parameters.TapeFormat))
         {

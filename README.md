@@ -702,7 +702,9 @@ possible capture has already been proven byte-for-byte identical.
   `ERROR: Seeking failed`, since CVBS frame-number decoding returns no target
 - VHS `--params_file` JSON overrides for existing `sys_params`/`rf_params`
   keys, including upstream-style decoder level key synchronization from system
-  parameters into RF decoder parameters
+  parameters into RF decoder parameters; unknown keys emit the exact v0.4.0
+  INFO diagnostics, while changed dictionaries use Python `repr` in DEBUG log
+  records and retain the original per-group construction order
 - upstream-style decode run bounds for `--start`, `--start_fileloc`, and
   `--length`, converting frame requests into field/sample positions with
   v0.4.0's exact `int(sampleRate / (FPS * 2)) + 1` coarse field length for
@@ -1510,7 +1512,7 @@ dotnet test VHSDecodeDotNet.slnx --no-build
 ```
 
 The current formal solution build completes with zero warnings and errors, and
-the xUnit v3 project exposes 704 independently discoverable compatibility tests
+the xUnit v3 project exposes 706 independently discoverable compatibility tests
 to `dotnet test` and Visual Studio Test Explorer. On the
 same Windows machine and fixtures, Release wall-clock measurements for one
 frame were 2.346 s versus 7.193 s for NTSC VHS and 1.651 s versus 5.865 s for

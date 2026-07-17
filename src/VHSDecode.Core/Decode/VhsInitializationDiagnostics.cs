@@ -27,6 +27,8 @@ internal static class VhsInitializationDiagnostics
             diagnostics.Add(new DecodeInitializationDiagnostic("WARNING", warning));
         }
 
+        diagnostics.AddRange(session.VhsParamsFileDiagnostics);
+
         if (Math.Truncate(session.FilterOptions.FmAudioNotchQ) > 0.0
             && (!session.Parameters.RfParams.TryGetProperty("fm_audio_channel_0_freq", out _)
                 || !session.Parameters.RfParams.TryGetProperty("fm_audio_channel_1_freq", out _)))
