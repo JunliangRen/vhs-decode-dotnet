@@ -419,6 +419,7 @@ public sealed class LaserDiscOutputLifecycleCompatibilityTests
             long nominalFieldSamples = session.TbcFieldDecoder.EstimateNominalFieldSampleCount();
             long initialProbe = 12L * 2L * nominalFieldSamples;
             long targetProbe = initialProbe + (3L * nominalFieldSamples);
+            long targetDecodeStart = targetProbe + nominalFieldSamples;
             var readBegins = new List<long>();
             var testLdfWriter = new RecordingLdTestLdfWriter();
             var engine = new TbcFieldSequenceDecodeEngine(
@@ -443,11 +444,11 @@ public sealed class LaserDiscOutputLifecycleCompatibilityTests
 
             Assert.True(result.Success);
             Assert.Equal(
-                [initialProbe, initialProbe + nominalFieldSamples, targetProbe, targetProbe + nominalFieldSamples],
+                [initialProbe, initialProbe + nominalFieldSamples, targetProbe, targetDecodeStart],
                 readBegins);
             (long startSample, long endSample) = Assert.Single(testLdfWriter.Ranges);
-            Assert.Equal(targetProbe, startSample);
-            Assert.Equal(targetProbe + 1_100_000, endSample);
+            Assert.Equal(targetDecodeStart, startSample);
+            Assert.Equal(targetDecodeStart + 1_100_000, endSample);
         }
         finally
         {

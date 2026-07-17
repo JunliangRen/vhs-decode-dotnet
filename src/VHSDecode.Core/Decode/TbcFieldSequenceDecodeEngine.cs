@@ -1089,7 +1089,7 @@ public sealed class TbcFieldSequenceDecodeEngine
                 if (interpretation.FrameNumber.HasValue)
                 {
                     frameNumber = interpretation.FrameNumber.Value;
-                    frameStart = previous.StartSample;
+                    frameStart = LaserDiscSeekDecodeStart(session, field);
                     DecodeSessionLogWriter.Append(
                         session,
                         "INFO",
@@ -1113,6 +1113,13 @@ public sealed class TbcFieldSequenceDecodeEngine
         double framesPerSecond = session.Parameters.SysParams.GetProperty("FPS").GetDouble();
         double samplesPerField = ((int)(session.DecodeSampleRateHz / (framesPerSecond * 2.0))) + 1;
         return checked((long)Math.Floor((field.StartSample / samplesPerField) / 2.0));
+    }
+
+    private static long LaserDiscSeekDecodeStart(DecodeSession session, TbcDecodedField field)
+    {
+        long samplesPerField = session.TbcFieldDecoder.EstimateNominalFieldSampleCount();
+        long fieldIndex = checked((long)(field.StartSample / (double)samplesPerField));
+        return checked(fieldIndex * samplesPerField);
     }
 
     public static bool ShouldStopAfterLaserDiscLeadOut(

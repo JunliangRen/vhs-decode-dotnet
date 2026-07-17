@@ -13512,6 +13512,7 @@ public void TbcFieldSequenceEngineAppliesLdSeek()
     long nominalFieldSamples = session.TbcFieldDecoder.EstimateNominalFieldSampleCount();
     long initialProbe = 12L * 2L * nominalFieldSamples;
     long targetProbe = initialProbe + (3L * nominalFieldSamples);
+    long targetDecodeStart = targetProbe + nominalFieldSamples;
     var readBegins = new List<long>();
     TbcDecodedField? ReadSyntheticField(DecodeSession activeSession, Stream _, long begin, int __, int fieldNumber)
     {
@@ -13519,7 +13520,7 @@ public void TbcFieldSequenceEngineAppliesLdSeek()
         int frameNumber = begin >= targetProbe ? 12 : 10;
         int[] vbi = fieldNumber == 1 ? [EncodeLaserDiscCavFrameCode(frameNumber)] : [];
         ushort[] samples = new ushort[activeSession.TbcFrameSpec.FieldSampleCount];
-        samples[0] = (ushort)(begin == targetProbe ? 0x2222 : 0x1111);
+        samples[0] = (ushort)(begin == targetDecodeStart ? 0x2222 : 0x1111);
         return BuildSyntheticTbcField(
                 begin,
                 samples,
@@ -13535,10 +13536,10 @@ public void TbcFieldSequenceEngineAppliesLdSeek()
     IReadOnlyList<TbcDecodedField> fields = engine.DecodeFields(session, Stream.Null, maxFields: 1);
 
     AssertEqual(1, fields.Count);
-    AssertEqual(targetProbe, fields[0].StartSample);
+    AssertEqual(targetDecodeStart, fields[0].StartSample);
     AssertEqual((ushort)0x2222, fields[0].Samples[0]);
     AssertSequence(
-        [initialProbe, initialProbe + nominalFieldSamples, targetProbe, targetProbe + nominalFieldSamples, targetProbe],
+        [initialProbe, initialProbe + nominalFieldSamples, targetProbe, targetDecodeStart, targetDecodeStart],
         readBegins.Select(value => (double)value).ToArray());
 }
 

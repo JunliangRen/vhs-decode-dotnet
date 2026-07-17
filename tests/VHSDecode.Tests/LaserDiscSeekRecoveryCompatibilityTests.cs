@@ -296,6 +296,70 @@ public sealed class LaserDiscSeekRecoveryCompatibilityTests
         }
     }
 
+    [Fact(DisplayName = "LD seek lands on the nominal field boundary containing the matched second field like v0.4.0")]
+    public void LdSeekLandsOnMatchedFieldBoundaryLikeV040()
+    {
+        string tempDirectory = CreateTempDirectory();
+        try
+        {
+            using DecodeSession session = CreateSession(tempDirectory);
+            long nominalFieldSamples = session.TbcFieldDecoder.EstimateNominalFieldSampleCount();
+            long initialProbe = 12L * 2L * nominalFieldSamples;
+            const long blockAlignmentOffset = 20_000;
+            var readBegins = new List<long>();
+            int reads = 0;
+            var engine = new TbcFieldSequenceDecodeEngine(
+                readField: (activeSession, _, begin, _, fieldNumber) =>
+                {
+                    readBegins.Add(begin);
+                    reads++;
+                    if (reads == 1)
+                    {
+                        return BuildField(
+                            activeSession,
+                            begin - blockAlignmentOffset,
+                            fieldNumber,
+                            nominalFieldSamples);
+                    }
+
+                    if (reads == 2)
+                    {
+                        return BuildField(
+                            activeSession,
+                            begin,
+                            fieldNumber,
+                            nominalFieldSamples,
+                            EncodeCavFrameCode(12));
+                    }
+
+                    return BuildField(
+                        activeSession,
+                        begin,
+                        fieldNumber,
+                        nominalFieldSamples);
+                });
+
+            IReadOnlyList<TbcDecodedField> fields = engine.DecodeFields(
+                session,
+                Stream.Null,
+                maxFields: 1);
+
+            Assert.Single(fields);
+            Assert.Equal(initialProbe, fields[0].StartSample);
+            Assert.Equal(
+                [
+                    initialProbe,
+                    initialProbe - blockAlignmentOffset + nominalFieldSamples,
+                    initialProbe
+                ],
+                readBegins);
+        }
+        finally
+        {
+            Directory.Delete(tempDirectory, recursive: true);
+        }
+    }
+
     private static DecodeSession CreateSession(
         string tempDirectory,
         params string[] options)
