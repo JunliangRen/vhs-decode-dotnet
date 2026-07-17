@@ -12131,10 +12131,10 @@ public void LaserDiscFrameStatusFormatsClvAndPersistentLeadStates()
         LeadIn: false,
         LeadOut: false);
     AssertEqual(
-        "Frame 1/10: File Frame 4: CLV Timecode 83:xx",
+        "Frame 1/10: File Frame 4: CLV Timecode 83:xx ",
         TbcFieldSequenceDecodeEngine.FormatLaserDiscFrameStatus(1, 10, 4, earlyClv, false, false));
     AssertEqual(
-        "Frame 1/10: File Frame 4: CLV Timecode 83:xx",
+        "Frame 1/10: File Frame 4: CLV Timecode 83:xx ",
         TbcFieldSequenceDecodeEngine.FormatLaserDiscFrameStatus(0, 10, 4, earlyClv, false, false));
 
     var clv = earlyClv with
@@ -12145,10 +12145,19 @@ public void LaserDiscFrameStatusFormatsClvAndPersistentLeadStates()
         ClvFrameNumber = 12
     };
     AssertEqual(
-        "Frame 2/10: File Frame 5: CLV Timecode 83:15.12 Frame #149862",
+        "Frame 2/10: File Frame 5: CLV Timecode 83:15.12 Frame #149862 ",
         TbcFieldSequenceDecodeEngine.FormatLaserDiscFrameStatus(3, 10, 5, clv, false, false));
 
     var noCode = new LaserDiscVbiInterpretation(null, false, false, null, null, null, false, false);
+    AssertEqual(
+        "Frame 3/10: File Frame 6: CAV Frame #123 ",
+        TbcFieldSequenceDecodeEngine.FormatLaserDiscFrameStatus(
+            5,
+            10,
+            6,
+            noCode with { FrameNumber = 123 },
+            false,
+            false));
     AssertEqual(
         "Frame 3/10: File Frame 6: CAV Lead In",
         TbcFieldSequenceDecodeEngine.FormatLaserDiscFrameStatus(5, 10, 6, noCode, true, true));

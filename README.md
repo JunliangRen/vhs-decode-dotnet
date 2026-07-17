@@ -428,7 +428,9 @@ possible capture has already been proven byte-for-byte identical.
   `vbi.vbiData` and feeding the lead-out detector
 - LD verbose VITS metadata now interprets CAV frame codes and CLV
   minute/second/frame codes from paired field VBI data, emitting
-  `cavFrameNr`, `clvMinutes`, `clvSeconds`, and `clvFrameNr`
+  `cavFrameNr`, `clvMinutes`, `clvSeconds`, and `clvFrameNr`; CAV/CLV frame
+  status log records retain v0.4.0's trailing space while special lead and
+  pulldown statuses remain unpadded in the log message
 - LD/CVBS `.tbc.json` `decodeFaults` now follows the upstream field metadata
   shape, including zero-valued LD/CVBS entries and LD's field-phase sequence
   mismatch bit when `fieldPhaseID` does not advance through the configured

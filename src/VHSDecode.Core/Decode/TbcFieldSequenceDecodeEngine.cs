@@ -642,7 +642,7 @@ public sealed class TbcFieldSequenceDecodeEngine
             && interpretation.IsEarlyClv
             && interpretation.ClvMinutes.HasValue)
         {
-            return prefix + $"Timecode {interpretation.ClvMinutes.Value}:xx";
+            return prefix + $"Timecode {interpretation.ClvMinutes.Value}:xx ";
         }
 
         if (interpretation.IsClv
@@ -655,12 +655,12 @@ public sealed class TbcFieldSequenceDecodeEngine
                 + $"Timecode {interpretation.ClvMinutes.Value}:"
                 + $"{interpretation.ClvSeconds.Value:00}."
                 + $"{interpretation.ClvFrameNumber.Value:00} "
-                + $"Frame #{interpretation.FrameNumber.Value}";
+                + $"Frame #{interpretation.FrameNumber.Value} ";
         }
 
         if (interpretation.FrameNumber is > 0)
         {
-            return prefix + $"Frame #{interpretation.FrameNumber.Value}";
+            return prefix + $"Frame #{interpretation.FrameNumber.Value} ";
         }
 
         if (leadIn)
