@@ -329,6 +329,11 @@ possible capture has already been proven byte-for-byte identical.
   `dropping field` diagnostic and use the same 200-line advance. Every invalid
   LD field also clears the previous line-zero, parity, PAL/NTSC phase, and
   player-skip context before retrying, matching upstream's `prevfield=None`
+- LD `--seek` now uses v0.4.0's ten-attempt field probe, advances through
+  recoverable fields without consuming valid-field sequence state, scans later
+  VBI pairs when the first pair has no frame code, and falls back to file start
+  only after EOF at a nonzero probe location; seek progress, completion, and
+  early-CLV diagnostics match the upstream messages
 - LD `--MTF` and `--MTF_offset` RF compensation path, using upstream
   `MTF_freq`, `MTF_poledist`, and `MTF_basemult` format parameters before
   Hilbert FM demodulation, with bit-exact NumPy power coverage for fractional,
