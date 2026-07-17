@@ -185,6 +185,18 @@ public static class DecodeSessionFactory
         IRfSampleLoader loader)
     {
         double sampleRateHz = sampleRateMHz * 1_000_000.0;
+        DecodeSession? activeSession = null;
+        void WriteDiagnostic(string level, string message)
+        {
+            if (activeSession is null)
+            {
+                DecodeSessionLogWriter.Append(command.OutputBase + ".log", level, message);
+                return;
+            }
+
+            DecodeSessionLogWriter.Append(activeSession, level, message);
+        }
+
         ChromaDecodeOptions? chromaOptions = BuildChromaOptions(command, system, parameters, sampleRateMHz);
         DecodeFilterOptions filterOptions = BuildFilterOptions(command, system, parameters, chromaOptions);
         DecodeFilterSet filters = DecodeFilterSetBuilder.BuildBasic(parameters, sampleRateHz, blockLength, filterOptions);
@@ -196,7 +208,8 @@ public static class DecodeSessionFactory
             sampleRateHz,
             filterOptions,
             BuildCvbsDecodeOptions(command, videoOutput),
-            BuildRfInputProcessor(command));
+            BuildRfInputProcessor(command),
+            WriteDiagnostic);
         var streamDecoder = new RfBlockStreamDecoder(
             pipeline,
             blockLength,
@@ -269,16 +282,13 @@ public static class DecodeSessionFactory
                 sampleRateHz,
                 syncDetectionOptions),
             framesPerSecond: JsonRequiredDouble(parameters.SysParams, "FPS"),
-            diagnosticLogger: (level, message) => DecodeSessionLogWriter.Append(
-                command.OutputBase + ".log",
-                level,
-                message),
+            diagnosticLogger: WriteDiagnostic,
             debug: executionOptions.Debug,
             inputBlockCutSamples: blockCut);
         DecodeRunBounds runBounds = DecodeRunBounds.FromCommand(
             command,
             tbcFieldDecoder.EstimateNominalFieldSampleCount());
-        return new DecodeSession(
+        activeSession = new DecodeSession(
             command.Spec,
             command.InputFile,
             command.OutputBase,
@@ -308,6 +318,7 @@ public static class DecodeSessionFactory
             chromaOptions,
             laserDiscAudioOptions,
             NullableString(command, "write_test_ldf"));
+        return activeSession;
     }
 
     private static double BuildLevelAdjust(ParsedCommand command)

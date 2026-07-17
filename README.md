@@ -539,7 +539,8 @@ possible capture has already been proven byte-for-byte identical.
   disabled-filter warning
 - VHS `--high_boost` RF residual boost path, using command-line overrides or
   upstream `boost_bpf_mult` defaults and applying the RF top-band boost during
-  Hilbert demodulation
+  Hilbert demodulation; a zero-valued RF envelope skips the boost and emits
+  v0.4.0's exact weak-signal warning once for that block
 - VHS diff-demod spike repair path, honoring `--no_diff_demod` and replacing
   out-of-range FM demod spikes with upstream-style diffed-Hilbert windows;
   replacement candidates are snapshotted before mutation like Numba's
@@ -1094,6 +1095,8 @@ possible capture has already been proven byte-for-byte identical.
   clear an active status line, and cleanup reports total decode time plus
   post-setup FPS; a one-frame PAL CVBS transcript is byte-exact on stdout, has
   the exact phase warning on stderr, and matches the upstream timing-line shape
+- session-internal RF, sync, AGC, and audio diagnostics now use that same
+  `.log` plus runtime-reporter route instead of being hidden from stderr
 - LD, VHS, and CVBS streaming output now take the same periodic recovery JSON
   snapshots: every read while fewer than 100 fields have been written and again
   at each 500-field boundary; VHS then checks free output-disk space and, below
@@ -1499,7 +1502,7 @@ dotnet test VHSDecodeDotNet.slnx --no-build
 ```
 
 The current formal solution build completes with zero warnings and errors, and
-the xUnit v3 project exposes 684 independently discoverable compatibility tests
+the xUnit v3 project exposes 685 independently discoverable compatibility tests
 to `dotnet test` and Visual Studio Test Explorer. On the
 same Windows machine and fixtures, Release wall-clock measurements for one
 frame were 2.346 s versus 7.193 s for NTSC VHS and 1.651 s versus 5.865 s for

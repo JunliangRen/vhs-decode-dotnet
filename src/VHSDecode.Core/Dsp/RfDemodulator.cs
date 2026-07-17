@@ -192,6 +192,18 @@ public sealed class RfDemodulator
         double[] envelope = vhsEnvelopeSource is not null && vhsEnvelopeFilter is not null
             ? BuildVhsEnvelope(vhsEnvelopeSource, vhsEnvelopeFilter)
             : BuildAnalyticMagnitudeEnvelope(analytic);
+        bool vhsWeakRfSignal = false;
+        if (vhsEnvelopeSource is not null)
+        {
+            for (int i = 0; i < envelope.Length; i++)
+            {
+                if (envelope[i] == 0.0)
+                {
+                    vhsWeakRfSignal = true;
+                    break;
+                }
+            }
+        }
 
         if (useVhsComplexRfHighBoostPath)
         {
@@ -346,7 +358,8 @@ public sealed class RfDemodulator
             videoLowPass,
             rfHighPass,
             VideoBurst: videoBurst,
-            VideoPilot: videoPilot);
+            VideoPilot: videoPilot,
+            VhsWeakRfSignal: vhsWeakRfSignal);
     }
 
     public static Complex[] RemoveLdPalV4300DSpur(ReadOnlySpan<Complex> spectrum, double sampleRateHz)
@@ -1431,7 +1444,8 @@ public sealed record RfDemodulatedBlock(
     LaserDiscAnalogAudioBlock? AnalogAudio = null,
     double[]? Chroma = null,
     double[]? VideoBurst = null,
-    double[]? VideoPilot = null);
+    double[]? VideoPilot = null,
+    bool VhsWeakRfSignal = false);
 
 public sealed record LaserDiscAnalogAudioBlock(
     double[] Left,
