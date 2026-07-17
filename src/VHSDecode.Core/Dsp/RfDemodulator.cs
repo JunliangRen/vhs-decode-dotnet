@@ -164,11 +164,11 @@ public sealed class RfDemodulator
             }
 
             Complex[] rfHighPassSpectrum = ApplyFrequencyFilter(spectrum, rfHighPassFilter);
-            Complex[] rfHighPassComplex = PocketFftComplex.InverseDucc(rfHighPassSpectrum);
-            rfHighPass = new double[rfHighPassComplex.Length];
+            PocketFftComplex.InverseDuccInPlace(rfHighPassSpectrum);
+            rfHighPass = new double[rfHighPassSpectrum.Length];
             for (int i = 0; i < rfHighPass.Length; i++)
             {
-                rfHighPass[i] = rfHighPassComplex[i].Real;
+                rfHighPass[i] = rfHighPassSpectrum[i].Real;
             }
 
             if (removeLdPalV4300DSpur)
@@ -185,7 +185,8 @@ public sealed class RfDemodulator
             hilbertMultiplier = PortedMath.BuildHilbertMultiplier(rfFilteredSpectrum.Length);
             Complex[] analyticSpectrum = rfFilteredSpectrum.ToArray();
             ApplyHilbertMultiplierInPlace(analyticSpectrum, hilbertMultiplier);
-            analytic = PocketFftComplex.InverseDucc(analyticSpectrum);
+            PocketFftComplex.InverseDuccInPlace(analyticSpectrum);
+            analytic = analyticSpectrum;
         }
 
         double[] envelope = vhsEnvelopeSource is not null && vhsEnvelopeFilter is not null
@@ -226,7 +227,8 @@ public sealed class RfDemodulator
         {
             Complex[] analyticSpectrum = rfFilteredSpectrum.ToArray();
             ApplyHilbertMultiplierInPlace(analyticSpectrum, hilbertMultiplier!);
-            analytic = PocketFftComplex.InverseDucc(analyticSpectrum);
+            PocketFftComplex.InverseDuccInPlace(analyticSpectrum);
+            analytic = analyticSpectrum;
         }
 
         double[] demodRaw = DemodulateAnalytic(analytic, fmDemodulatorMode);
@@ -265,7 +267,17 @@ public sealed class RfDemodulator
         {
             demodSpectrum = PocketFftComplex.ForwardDuccRealFull(demodVideoSource);
             videoSpectrum = ApplyFrequencyFilter(demodSpectrum, videoFilter);
-            Complex[] videoComplex = PocketFftComplex.InverseDucc(videoSpectrum);
+            Complex[] videoComplex;
+            if (nonlinearDeemphasis is null && subDeemphasis is null)
+            {
+                PocketFftComplex.InverseDuccInPlace(videoSpectrum);
+                videoComplex = videoSpectrum;
+            }
+            else
+            {
+                videoComplex = PocketFftComplex.InverseDucc(videoSpectrum);
+            }
+
             video = new double[videoComplex.Length];
             for (int i = 0; i < video.Length; i++)
             {
@@ -292,11 +304,11 @@ public sealed class RfDemodulator
         else
         {
             Complex[] videoLowPassSpectrum = ApplyFrequencyFilter(demodSpectrum, videoLowPassFilter);
-            Complex[] videoLowPassComplex = PocketFftComplex.InverseDucc(videoLowPassSpectrum);
-            videoLowPass = new double[videoLowPassComplex.Length];
+            PocketFftComplex.InverseDuccInPlace(videoLowPassSpectrum);
+            videoLowPass = new double[videoLowPassSpectrum.Length];
             for (int i = 0; i < videoLowPass.Length; i++)
             {
-                videoLowPass[i] = videoLowPassComplex[i].Real;
+                videoLowPass[i] = videoLowPassSpectrum[i].Real;
             }
         }
 
@@ -812,11 +824,11 @@ public sealed class RfDemodulator
         }
 
         Complex[] filteredSpectrum = ApplyFrequencyFilter(spectrum, filter);
-        Complex[] filtered = PocketFftComplex.InverseDucc(filteredSpectrum);
-        var output = new double[filtered.Length];
+        PocketFftComplex.InverseDuccInPlace(filteredSpectrum);
+        var output = new double[filteredSpectrum.Length];
         for (int i = 0; i < output.Length; i++)
         {
-            output[i] = filtered[i].Real;
+            output[i] = filteredSpectrum[i].Real;
         }
 
         return offset == 0
@@ -1294,11 +1306,11 @@ public sealed class RfDemodulator
             spectrum[i] = Complex.Zero;
         }
 
-        Complex[] analytic = PocketFftComplex.InverseDucc(spectrum);
-        var magnitude = new double[analytic.Length];
+        PocketFftComplex.InverseDuccInPlace(spectrum);
+        var magnitude = new double[spectrum.Length];
         for (int i = 0; i < magnitude.Length; i++)
         {
-            magnitude[i] = NumpyComplexMagnitude(analytic[i]);
+            magnitude[i] = NumpyComplexMagnitude(spectrum[i]);
         }
 
         return magnitude;

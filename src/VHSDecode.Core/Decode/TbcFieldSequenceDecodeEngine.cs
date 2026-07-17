@@ -868,6 +868,8 @@ public sealed class TbcFieldSequenceDecodeEngine
             session.Filters.RfMtf[i] = response[i];
             session.Filters.RfMtfMagnitude[i] = response[i].Magnitude;
         }
+
+        session.StreamDecoder.InvalidateCachedBlocks();
     }
 
     private static TbcDecodedField? ReadFieldFromSession(

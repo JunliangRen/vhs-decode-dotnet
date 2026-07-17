@@ -1102,6 +1102,16 @@ possible capture has already been proven byte-for-byte identical.
   keeping stream/FFmpeg/GNU Radio reads ordered; `-t 1` and debug-plot `0`
   retain the deterministic single-thread path, and parallel blocks are stitched
   in their original overlap-save order
+- adjacent field reads now reuse a stream-scoped, 16-block decoded RF cache,
+  avoiding duplicate FFT work across overlap windows while keeping memory
+  bounded; backward seeks, input-stream changes, and dynamic LD MTF changes
+  invalidate the cache before further decoding
+- the managed DUCC FFT path now reuses per-worker scratch buffers, shares
+  immutable root tables, writes packet transforms back in place, and performs
+  discardable inverse transforms in place. On the deterministic PAL LD fixture
+  with `--length 1 --threads 5 --disable_analog_audio --noEFM`, the three-run
+  median fell from 1.307 s to 1.174 s; a four-field Core probe reduced managed
+  allocation from 5.12 GiB to 1.96 GiB while preserving bit-exact output
 - Python's arbitrary-precision thread values now survive until their v0.4.0
   runtime use: VHS debug plots ignore even enormous positive or negative values,
   CVBS/LD negative values retain the nonzero request with zero demod workers for
@@ -1473,7 +1483,7 @@ dotnet test VHSDecodeDotNet.slnx --no-build
 ```
 
 The current formal solution build completes with zero warnings and errors, and
-the xUnit v3 project exposes 660 independently discoverable compatibility tests
+the xUnit v3 project exposes 664 independently discoverable compatibility tests
 to `dotnet test` and Visual Studio Test Explorer. On the
 same Windows machine and fixtures, Release wall-clock measurements for one
 frame were 2.346 s versus 7.193 s for NTSC VHS and 1.651 s versus 5.865 s for
