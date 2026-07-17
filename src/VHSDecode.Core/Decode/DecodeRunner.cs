@@ -129,8 +129,9 @@ public sealed class DecodeRunner
             session.RuntimeReporter = runtimeReporter;
             try
             {
-                DecodeSessionLogWriter.Write(session);
-                WriteSessionCompatibilityWarnings(command, session, error);
+                DecodeSessionLogWriter.Write(
+                    session,
+                    BuildSessionCompatibilityDiagnostics(command, session));
                 TbcFieldSequenceDecodeResult result = _engineFactory(cancellationToken)
                     .TryDecodeAndWrite(session);
                 if (result.Success && command.Spec == CliSpecs.Cvbs)
@@ -226,50 +227,77 @@ public sealed class DecodeRunner
         }
     }
 
-    private static void WriteSessionCompatibilityWarnings(
+    private static IReadOnlyList<DecodeInitializationDiagnostic> BuildSessionCompatibilityDiagnostics(
         ParsedCommand command,
-        DecodeSession session,
-        TextWriter error)
+        DecodeSession session)
     {
+        var diagnostics = new List<DecodeInitializationDiagnostic>();
         if (session.ExecutionOptions.CxAdcCompatibilityMode)
         {
-            error.WriteLine("--cxadc is deprecated! use -f 8fsc instead!");
+            diagnostics.Add(new DecodeInitializationDiagnostic(
+                "WARNING",
+                "--cxadc is deprecated! use -f 8fsc instead!"));
         }
 
         if (command.Spec != CliSpecs.Vhs)
         {
-            return;
+            return diagnostics;
         }
 
-        int configuredDivisor = command.Get<int>("level_detect_divisor");
-        double sampleRateMHz = session.DecodeSampleRateHz / 1_000_000.0;
-        if (configuredDivisor < 1 || configuredDivisor > 10)
+        foreach (string warning in session.Parameters.Warnings)
         {
-            DecodeSessionLogWriter.Append(
-                session,
-                "WARNING",
-                $"Invalid level detect divisor value {configuredDivisor}, using default.");
-        }
-        else if (sampleRateMHz / configuredDivisor < 4.0)
-        {
-            DecodeSessionLogWriter.Append(
-                session,
-                "WARNING",
-                "Level detect divisor too high "
-                + $"({configuredDivisor}) for input frequency "
-                + $"({PythonNamespaceFormatter.FormatValue(sampleRateMHz)}) mhz. "
-                + $"Limiting to {session.SyncDetectionOptions.LevelDetectDivisor}");
+            diagnostics.Add(new DecodeInitializationDiagnostic("WARNING", warning));
         }
 
         if (Math.Truncate(session.FilterOptions.FmAudioNotchQ) > 0.0
             && (!session.Parameters.RfParams.TryGetProperty("fm_audio_channel_0_freq", out _)
                 || !session.Parameters.RfParams.TryGetProperty("fm_audio_channel_1_freq", out _)))
         {
-            DecodeSessionLogWriter.Append(
-                session,
+            diagnostics.Add(new DecodeInitializationDiagnostic(
                 "WARNING",
-                "Audio frequencies are not specified for this format, audio fm notch filters not enabled!");
+                "Audio frequencies are not specified for this format, audio fm notch filters not enabled!"));
         }
+
+        int configuredDivisor = command.Get<int>("level_detect_divisor");
+        double sampleRateMHz = session.DecodeSampleRateHz / 1_000_000.0;
+        if (configuredDivisor < 1 || configuredDivisor > 10)
+        {
+            diagnostics.Add(new DecodeInitializationDiagnostic(
+                "WARNING",
+                $"Invalid level detect divisor value {configuredDivisor}, using default."));
+        }
+        else if (sampleRateMHz / configuredDivisor < 4.0)
+        {
+            diagnostics.Add(new DecodeInitializationDiagnostic(
+                "WARNING",
+                "Level detect divisor too high "
+                + $"({configuredDivisor}) for input frequency "
+                + $"({PythonNamespaceFormatter.FormatValue(sampleRateMHz)}) mhz. "
+                + $"Limiting to {session.SyncDetectionOptions.LevelDetectDivisor}"));
+        }
+
+        if (GetVhsFieldClassFallbackMessage(session.System, session.Parameters.TapeFormat) is { } fallbackMessage)
+        {
+            diagnostics.Add(new DecodeInitializationDiagnostic("INFO", fallbackMessage));
+        }
+
+        return diagnostics;
+    }
+
+    internal static string? GetVhsFieldClassFallbackMessage(string system, string tapeFormat)
+    {
+        return (FormatCatalog.NormalizeSystem(system), tapeFormat.ToUpperInvariant()) switch
+        {
+            ("PAL", not ("UMATIC" or "UMATIC_HI" or "UMATIC_SP" or "EIAJ" or "VCR" or "VCR_LP"
+                or "TYPEC" or "TYPEB" or "QUADRUPLEX" or "SVHS" or "SVHS_ET" or "BETAMAX"
+                or "VIDEO8" or "HI8" or "VHS" or "VHSHQ" or "VIDEO2000")) =>
+                "Tape format unimplemented for PAL, using VHS field class.",
+            ("NTSC", not ("UMATIC" or "UMATIC_HI" or "UMATIC_SP" or "EIAJ" or "TYPEC" or "TYPEB"
+                or "VHD" or "SVHS" or "SVHS_ET" or "BETAMAX" or "BETAMAX_HIFI" or "SUPERBETA"
+                or "VIDEO8" or "HI8" or "VHS" or "VHSHQ")) =>
+                "Tape format unimplemented for NTSC, using VHS field class.",
+            _ => null
+        };
     }
 
     public static void WriteCvbsAgcStatistics(CvbsAgcStatistics? statistics, TextWriter error)

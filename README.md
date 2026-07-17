@@ -537,6 +537,9 @@ possible capture has already been proven byte-for-byte identical.
   flag-only Q=10 parsing and HI8's upstream default auto-enable behavior;
   enabled formats without both carrier parameters emit the exact v0.4.0
   disabled-filter warning
+- VHS format-parameter fallback warnings and PAL/NTSC VHS-field-class fallback
+  diagnostics are emitted with the exact v0.4.0 text and initialization order;
+  all constructor-time warnings precede the Sys/RF DEBUG records in `.log`
 - VHS `--high_boost` RF residual boost path, using command-line overrides or
   upstream `boost_bpf_mult` defaults and applying the RF top-band boost during
   Hilbert demodulation; a zero-valued RF envelope skips the boost and emits
@@ -1502,7 +1505,7 @@ dotnet test VHSDecodeDotNet.slnx --no-build
 ```
 
 The current formal solution build completes with zero warnings and errors, and
-the xUnit v3 project exposes 685 independently discoverable compatibility tests
+the xUnit v3 project exposes 695 independently discoverable compatibility tests
 to `dotnet test` and Visual Studio Test Explorer. On the
 same Windows machine and fixtures, Release wall-clock measurements for one
 frame were 2.346 s versus 7.193 s for NTSC VHS and 1.651 s versus 5.865 s for

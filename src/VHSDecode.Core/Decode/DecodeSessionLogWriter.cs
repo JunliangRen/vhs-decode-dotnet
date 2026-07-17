@@ -16,19 +16,35 @@ public static class DecodeSessionLogWriter
 
     public static string Write(DecodeSession session, string version = DecodeVersionInfo.Version)
     {
+        IReadOnlyList<DecodeInitializationDiagnostic> diagnostics = session.Spec.Name == "vhs"
+            && session.ExecutionOptions.CxAdcCompatibilityMode
+                ? [new DecodeInitializationDiagnostic(
+                    "WARNING",
+                    "--cxadc is deprecated! use -f 8fsc instead!")]
+                : [];
+        return Write(session, diagnostics, version);
+    }
+
+    internal static string Write(
+        DecodeSession session,
+        IReadOnlyList<DecodeInitializationDiagnostic> diagnostics,
+        string version = DecodeVersionInfo.Version)
+    {
+        ArgumentNullException.ThrowIfNull(session);
+        ArgumentNullException.ThrowIfNull(diagnostics);
         string path = session.OutputBase + ".log";
         var builder = new StringBuilder();
+        foreach (DecodeInitializationDiagnostic diagnostic in diagnostics)
+        {
+            AppendRecord(builder, diagnostic.Level, diagnostic.Message);
+        }
+
         if (session.Spec.Name == "ld")
         {
             AppendRecord(builder, "DEBUG", $"ld-decode version {version}");
         }
         else if (session.Spec.Name == "vhs")
         {
-            if (session.ExecutionOptions.CxAdcCompatibilityMode)
-            {
-                AppendRecord(builder, "WARNING", "--cxadc is deprecated! use -f 8fsc instead!");
-            }
-
             AppendRecord(
                 builder,
                 "DEBUG",
@@ -44,6 +60,10 @@ public static class DecodeSessionLogWriter
         lock (WriteLock)
         {
             File.WriteAllText(path, builder.ToString());
+            foreach (DecodeInitializationDiagnostic diagnostic in diagnostics)
+            {
+                session.RuntimeReporter?.Log(diagnostic.Level, diagnostic.Message);
+            }
         }
 
         return path;
@@ -161,3 +181,5 @@ public static class DecodeSessionLogWriter
         builder.AppendLine(message);
     }
 }
+
+internal readonly record struct DecodeInitializationDiagnostic(string Level, string Message);
