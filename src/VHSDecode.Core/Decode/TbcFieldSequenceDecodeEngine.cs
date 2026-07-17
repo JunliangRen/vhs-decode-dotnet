@@ -22,8 +22,6 @@ public delegate TbcDecodedField? TbcFieldSequenceReadField(
 public sealed class TbcFieldSequenceDecodeEngine
 {
     private const int TestLdfLookaheadSamples = 1_100_000;
-    private const int LaserDiscLeadOutCode = 0x80EEEE;
-    private const int LaserDiscLeadOutRequiredCount = 2;
     private readonly ILdTestLdfWriter _testLdfWriter;
     private readonly ILaserDiscEfmOutputWriter _efmOutputWriter;
     private readonly TbcFieldSequenceReadField _readField;
@@ -248,7 +246,6 @@ public sealed class TbcFieldSequenceDecodeEngine
         var writePlanner = new FieldWritePlanner(session, retainWrites: false);
         int decodedFieldCount = 0;
         long laserDiscWrittenFieldCount = 0;
-        int laserDiscLeadOutCount = 0;
         TbcDecodedField? firstLaserDiscField = null;
         bool laserDiscLeadIn = false;
         bool laserDiscLeadOut = false;
@@ -550,11 +547,9 @@ public sealed class TbcFieldSequenceDecodeEngine
                 CheckpointOutput(writePlanner.WrittenFieldCount);
             }
 
-            if (ShouldStopAfterLaserDiscLeadOut(
-                    session,
-                    field,
-                    isFirstField,
-                    ref laserDiscLeadOutCount))
+            if (session.Spec.Name == "ld"
+                && !session.ExecutionOptions.IgnoreLeadOut
+                && laserDiscLeadOut)
             {
                 begin = nextBegin;
                 break;
@@ -1120,38 +1115,6 @@ public sealed class TbcFieldSequenceDecodeEngine
         long samplesPerField = session.TbcFieldDecoder.EstimateNominalFieldSampleCount();
         long fieldIndex = checked((long)(field.StartSample / (double)samplesPerField));
         return checked(fieldIndex * samplesPerField);
-    }
-
-    public static bool ShouldStopAfterLaserDiscLeadOut(
-        DecodeSession session,
-        TbcDecodedField field,
-        bool isFirstField,
-        ref int leadOutCodeCount)
-    {
-        if (session.Spec.Name != "ld" || session.ExecutionOptions.IgnoreLeadOut)
-        {
-            return false;
-        }
-
-        if (isFirstField)
-        {
-            leadOutCodeCount = 0;
-        }
-
-        if (field.VbiData is null)
-        {
-            return false;
-        }
-
-        foreach (int code in field.VbiData)
-        {
-            if (code == LaserDiscLeadOutCode)
-            {
-                leadOutCodeCount++;
-            }
-        }
-
-        return !isFirstField && leadOutCodeCount >= LaserDiscLeadOutRequiredCount;
     }
 
     public TbcFieldSequenceDecodeResult WriteDecodedFields(DecodeSession session, IReadOnlyList<TbcDecodedField> fields)

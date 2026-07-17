@@ -13375,96 +13375,40 @@ public void TbcFieldSequenceEngineWritesLdAc3Sidecars()
 [Fact(DisplayName = "TBC field sequence engine honors LD lead-out")]
 public void TbcFieldSequenceEngineHonorsLdLeadOut()
 {
-    DecodeSession ld = DecodeSessionFactory.Create(Parse(CliSpecs.LaserDisc, [
+    const int leadOutCode = 0x80EEEE;
+    int cavCode = EncodeLaserDiscCavFrameCode(12);
+    LaserDiscVbiInterpretation cavBeforeLeadOut = LaserDiscVbiInterpreter.Interpret(
+        [cavCode, leadOutCode, leadOutCode],
+        30);
+    AssertEqual<int?>(12, cavBeforeLeadOut.FrameNumber);
+    AssertFalse(cavBeforeLeadOut.LeadOut);
+    AssertTrue(LaserDiscVbiInterpreter.Interpret([leadOutCode, leadOutCode], 30).LeadOut);
+
+    int[]?[] vbiByField =
+    [
+        [cavCode, leadOutCode, leadOutCode],
+        [],
+        null,
+        [leadOutCode],
+        [leadOutCode],
+        [leadOutCode],
+        [],
+        []
+    ];
+
+    using DecodeSession ld = DecodeSessionFactory.Create(Parse(CliSpecs.LaserDisc, [
         "--NTSC",
         "--noEFM",
         "--disable_analog_audio",
         "input.s16",
         "out"
     ]));
-    TbcDecodedField firstLeadOut = BuildSyntheticTbcField(
-            startSample: 0,
-            samples: new ushort[ld.TbcFrameSpec.FieldSampleCount])
-        with
-        {
-            VbiData = [0x80EEEE]
-        };
-    TbcDecodedField secondLeadOut = BuildSyntheticTbcField(
-            startSample: 1,
-            samples: new ushort[ld.TbcFrameSpec.FieldSampleCount])
-        with
-        {
-            VbiData = [0x12345, 0x80EEEE]
-        };
-    int leadOutCount = 0;
-    AssertFalse(TbcFieldSequenceDecodeEngine.ShouldStopAfterLaserDiscLeadOut(
-        ld,
-        firstLeadOut,
-        isFirstField: true,
-        ref leadOutCount));
-    AssertEqual(1, leadOutCount);
-    AssertTrue(TbcFieldSequenceDecodeEngine.ShouldStopAfterLaserDiscLeadOut(
-        ld,
-        secondLeadOut,
-        isFirstField: false,
-        ref leadOutCount));
-    AssertEqual(2, leadOutCount);
 
-    int separatedCount = 0;
-    AssertFalse(TbcFieldSequenceDecodeEngine.ShouldStopAfterLaserDiscLeadOut(
-        ld,
-        firstLeadOut,
-        isFirstField: true,
-        ref separatedCount));
-    AssertFalse(TbcFieldSequenceDecodeEngine.ShouldStopAfterLaserDiscLeadOut(
-        ld,
-        firstLeadOut with { VbiData = [0x12345] },
-        isFirstField: false,
-        ref separatedCount));
-    AssertFalse(TbcFieldSequenceDecodeEngine.ShouldStopAfterLaserDiscLeadOut(
-        ld,
-        firstLeadOut,
-        isFirstField: true,
-        ref separatedCount));
-    AssertEqual(1, separatedCount);
+    (IReadOnlyList<TbcDecodedField> stoppedFields, int stoppedReads) = Decode(ld);
+    AssertEqual(6, stoppedReads);
+    AssertEqual(6, stoppedFields.Count);
 
-    int missingFirstFieldCodesCount = 0;
-    AssertFalse(TbcFieldSequenceDecodeEngine.ShouldStopAfterLaserDiscLeadOut(
-        ld,
-        firstLeadOut,
-        isFirstField: true,
-        ref missingFirstFieldCodesCount));
-    AssertFalse(TbcFieldSequenceDecodeEngine.ShouldStopAfterLaserDiscLeadOut(
-        ld,
-        secondLeadOut with { VbiData = [0x12345] },
-        isFirstField: false,
-        ref missingFirstFieldCodesCount));
-    AssertFalse(TbcFieldSequenceDecodeEngine.ShouldStopAfterLaserDiscLeadOut(
-        ld,
-        firstLeadOut with { VbiData = null },
-        isFirstField: true,
-        ref missingFirstFieldCodesCount));
-    AssertEqual(0, missingFirstFieldCodesCount);
-    AssertFalse(TbcFieldSequenceDecodeEngine.ShouldStopAfterLaserDiscLeadOut(
-        ld,
-        secondLeadOut,
-        isFirstField: false,
-        ref missingFirstFieldCodesCount));
-    AssertEqual(1, missingFirstFieldCodesCount);
-
-    int firstFieldDoubleCount = 0;
-    AssertFalse(TbcFieldSequenceDecodeEngine.ShouldStopAfterLaserDiscLeadOut(
-        ld,
-        firstLeadOut with { VbiData = [0x80EEEE, 0x80EEEE] },
-        isFirstField: true,
-        ref firstFieldDoubleCount));
-    AssertTrue(TbcFieldSequenceDecodeEngine.ShouldStopAfterLaserDiscLeadOut(
-        ld,
-        secondLeadOut with { VbiData = [0x12345] },
-        isFirstField: false,
-        ref firstFieldDoubleCount));
-
-    DecodeSession ignoreLeadOut = DecodeSessionFactory.Create(Parse(CliSpecs.LaserDisc, [
+    using DecodeSession ignoreLeadOut = DecodeSessionFactory.Create(Parse(CliSpecs.LaserDisc, [
         "--NTSC",
         "--ignoreleadout",
         "--noEFM",
@@ -13472,22 +13416,34 @@ public void TbcFieldSequenceEngineHonorsLdLeadOut()
         "input.s16",
         "out"
     ]));
-    int ignoredCount = 0;
-    AssertFalse(TbcFieldSequenceDecodeEngine.ShouldStopAfterLaserDiscLeadOut(
-        ignoreLeadOut,
-        secondLeadOut,
-        isFirstField: false,
-        ref ignoredCount));
-    AssertEqual(0, ignoredCount);
+    (IReadOnlyList<TbcDecodedField> ignoredFields, int ignoredReads) = Decode(ignoreLeadOut);
+    AssertEqual(vbiByField.Length, ignoredReads);
+    AssertEqual(vbiByField.Length, ignoredFields.Count);
 
-    DecodeSession vhs = DecodeSessionFactory.Create(Parse(CliSpecs.Vhs, ["input.u8", "out"]));
-    int vhsCount = 0;
-    AssertFalse(TbcFieldSequenceDecodeEngine.ShouldStopAfterLaserDiscLeadOut(
-        vhs,
-        secondLeadOut,
-        isFirstField: false,
-        ref vhsCount));
-    AssertEqual(0, vhsCount);
+    (IReadOnlyList<TbcDecodedField> Fields, int Reads) Decode(DecodeSession session)
+    {
+        int reads = 0;
+        TbcDecodedField? ReadField(DecodeSession _, Stream __, long begin, int ___, int fieldNumber)
+        {
+            reads++;
+            return BuildSyntheticTbcField(
+                    startSample: begin,
+                    samples: [],
+                    detectedFirstField: (fieldNumber & 1) == 0)
+                with
+                {
+                    NextFieldOffsetSamples = 100.0,
+                    VbiData = vbiByField[fieldNumber]
+                };
+        }
+
+        IReadOnlyList<TbcDecodedField> fields = new TbcFieldSequenceDecodeEngine(
+            readField: ReadField).DecodeFields(
+                session,
+                Stream.Null,
+                maxFields: vbiByField.Length);
+        return (fields, reads);
+    }
 }
 
 [Fact(DisplayName = "TBC field sequence engine rejects CVBS seek")]

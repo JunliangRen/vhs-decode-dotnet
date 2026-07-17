@@ -1122,8 +1122,9 @@ possible capture has already been proven byte-for-byte identical.
   `--length 0 --seek` still performs the upstream frame probe before exporting
 - LD lead-out detection now scopes the two required `0x80EEEE` codes to one
   first/second-field pair, resets that scope even when a new first field has no
-  decodable VBI code, and only stops after processing the second field,
-  preventing sparse codes from accumulating across unrelated frames
+  decodable VBI code, preserves the ordered CAV/CLV early-return rules, and only
+  stops after processing a paired second field, preventing sparse or later line
+  codes from triggering termination across unrelated frames
 - native `.wav` dispatch now follows v0.4.0's container-loader path alongside
   `.ldf`, `.flac`, `.vhs`, and `raw.oga`, retaining timed seek/rewind behavior
   and accepting WAV encodings beyond the low-level mono PCM16 helper
