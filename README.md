@@ -534,7 +534,9 @@ possible capture has already been proven byte-for-byte identical.
   after the optional chroma trap and derives its 0.5 MHz branch from that luma
 - VHS `--fm_audio_notch` RFVideo dual-notch support at the upstream
   `fm_audio_channel_0_freq`/`fm_audio_channel_1_freq` carriers, including
-  flag-only Q=10 parsing and HI8's upstream default auto-enable behavior
+  flag-only Q=10 parsing and HI8's upstream default auto-enable behavior;
+  enabled formats without both carrier parameters emit the exact v0.4.0
+  disabled-filter warning
 - VHS `--high_boost` RF residual boost path, using command-line overrides or
   upstream `boost_bpf_mult` defaults and applying the RF top-band boost during
   Hilbert demodulation
@@ -817,7 +819,8 @@ possible capture has already been proven byte-for-byte identical.
 - ports of fallback v-sync location means and crude sync/blank level detection
 - VHS sync threshold selection now estimates sync/blank levels from the 0.5 MHz
   branch when available, and honors upstream-style `--level_detect_divisor`
-  bounds/capping before using `(sync + blank) / 2` for pulse detection;
+  bounds/capping and exact correction warnings before using
+  `(sync + blank) / 2` for pulse detection;
   `--use_saved_levels` reuses the previous field's detected sync/blank levels
   when available, but retries fresh level detection if the saved levels fail to
   produce usable sync/line locations
@@ -1496,7 +1499,7 @@ dotnet test VHSDecodeDotNet.slnx --no-build
 ```
 
 The current formal solution build completes with zero warnings and errors, and
-the xUnit v3 project exposes 681 independently discoverable compatibility tests
+the xUnit v3 project exposes 684 independently discoverable compatibility tests
 to `dotnet test` and Visual Studio Test Explorer. On the
 same Windows machine and fixtures, Release wall-clock measurements for one
 frame were 2.346 s versus 7.193 s for NTSC VHS and 1.651 s versus 5.865 s for

@@ -130,7 +130,7 @@ public sealed class DecodeRunner
             try
             {
                 DecodeSessionLogWriter.Write(session);
-                WriteSessionCompatibilityWarnings(session, error);
+                WriteSessionCompatibilityWarnings(command, session, error);
                 TbcFieldSequenceDecodeResult result = _engineFactory(cancellationToken)
                     .TryDecodeAndWrite(session);
                 if (result.Success && command.Spec == CliSpecs.Cvbs)
@@ -226,11 +226,49 @@ public sealed class DecodeRunner
         }
     }
 
-    private static void WriteSessionCompatibilityWarnings(DecodeSession session, TextWriter error)
+    private static void WriteSessionCompatibilityWarnings(
+        ParsedCommand command,
+        DecodeSession session,
+        TextWriter error)
     {
         if (session.ExecutionOptions.CxAdcCompatibilityMode)
         {
             error.WriteLine("--cxadc is deprecated! use -f 8fsc instead!");
+        }
+
+        if (command.Spec != CliSpecs.Vhs)
+        {
+            return;
+        }
+
+        int configuredDivisor = command.Get<int>("level_detect_divisor");
+        double sampleRateMHz = session.DecodeSampleRateHz / 1_000_000.0;
+        if (configuredDivisor < 1 || configuredDivisor > 10)
+        {
+            DecodeSessionLogWriter.Append(
+                session,
+                "WARNING",
+                $"Invalid level detect divisor value {configuredDivisor}, using default.");
+        }
+        else if (sampleRateMHz / configuredDivisor < 4.0)
+        {
+            DecodeSessionLogWriter.Append(
+                session,
+                "WARNING",
+                "Level detect divisor too high "
+                + $"({configuredDivisor}) for input frequency "
+                + $"({PythonNamespaceFormatter.FormatValue(sampleRateMHz)}) mhz. "
+                + $"Limiting to {session.SyncDetectionOptions.LevelDetectDivisor}");
+        }
+
+        if (Math.Truncate(session.FilterOptions.FmAudioNotchQ) > 0.0
+            && (!session.Parameters.RfParams.TryGetProperty("fm_audio_channel_0_freq", out _)
+                || !session.Parameters.RfParams.TryGetProperty("fm_audio_channel_1_freq", out _)))
+        {
+            DecodeSessionLogWriter.Append(
+                session,
+                "WARNING",
+                "Audio frequencies are not specified for this format, audio fm notch filters not enabled!");
         }
     }
 
