@@ -53,7 +53,8 @@ public sealed class TbcFieldRenderer
         TrackPhaseIre0OffsetOptions? trackPhaseIre0Offset = null,
         TbcLineInterpolationMethod interpolationMethod = TbcLineInterpolationMethod.Linear,
         double wowLevelAdjustSmoothing = 0.0,
-        double? nominalInputLineLength = null)
+        double? nominalInputLineLength = null,
+        int workerThreads = 1)
     {
         FrameSpec = frameSpec;
         _converter = converter;
@@ -61,7 +62,8 @@ public sealed class TbcFieldRenderer
             frameSpec.OutputLineLength,
             interpolationMethod,
             wowLevelAdjustSmoothing,
-            nominalInputLineLength);
+            nominalInputLineLength,
+            workerThreads);
         YCombLimitHz = yCombLimitHz;
         Ire0Adjust = ire0Adjust;
         CvbsClampAgc = cvbsClampAgc;

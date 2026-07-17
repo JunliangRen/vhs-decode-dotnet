@@ -216,7 +216,8 @@ public static class DecodeSessionFactory
             BuildWowLevelAdjustSmoothing(command, parameters),
             nominalInputLineLength: Math.Round(
                 JsonRequiredDouble(parameters.SysParams, "line_period") * sampleRateMHz,
-                MidpointRounding.ToEven));
+                MidpointRounding.ToEven),
+            workerThreads: executionOptions.WorkerThreads);
         TbcDropoutDetectionOptions dropoutOptions = BuildDropoutOptions(command, sampleRateMHz);
         TbcFieldOrderOptions fieldOrderOptions = BuildFieldOrderOptions(command, parameters);
         LaserDiscAudioOptions? laserDiscAudioOptions = BuildLaserDiscAudioOptions(command, system);

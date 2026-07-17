@@ -414,6 +414,11 @@ public sealed class RfBlockStreamDecoder
 
     private static double[] Slice(double[] source, int offset, int length)
     {
+        if (offset == 0 && length == source.Length)
+        {
+            return source;
+        }
+
         var output = new double[length];
         Array.Copy(source, offset, output, 0, length);
         return output;
@@ -421,6 +426,11 @@ public sealed class RfBlockStreamDecoder
 
     private static short[] Slice(short[] source, int offset, int length)
     {
+        if (offset == 0 && length == source.Length)
+        {
+            return source;
+        }
+
         var output = new short[length];
         Array.Copy(source, offset, output, 0, length);
         return output;
