@@ -1,3 +1,4 @@
+using System.Numerics;
 using VHSDecode.Core.CommandLine;
 using VHSDecode.Core.Decode;
 using VHSDecode.Core.Dsp;
@@ -164,11 +165,19 @@ public sealed class LaserDiscSeekRecoveryCompatibilityTests
             using DecodeSession session = CreateSession(tempDirectory);
             long nominalFieldSamples = session.TbcFieldDecoder.EstimateNominalFieldSampleCount();
             long initialProbe = 12L * 2L * nominalFieldSamples;
+            Complex[] normalMtf = session.Filters.RfMtf.ToArray();
+            Complex[] seekMtf = DecodeFilterSetBuilder.BuildLaserDiscMtf(
+                session.Parameters,
+                session.FilterOptions,
+                targetMtf: 0.0,
+                session.DecodeSampleRateHz,
+                session.BlockLength);
             var readBegins = new List<long>();
             var fieldNumbers = new List<int>();
             var engine = new TbcFieldSequenceDecodeEngine(
-                readField: (_, _, begin, _, fieldNumber) =>
+                readField: (activeSession, _, begin, _, fieldNumber) =>
                 {
+                    Assert.True(seekMtf.SequenceEqual(activeSession.Filters.RfMtf));
                     readBegins.Add(begin);
                     fieldNumbers.Add(fieldNumber);
                     throw new TbcFieldDecodeRecoveryException(
@@ -186,6 +195,7 @@ public sealed class LaserDiscSeekRecoveryCompatibilityTests
                 Enumerable.Range(0, 10).Select(offset => initialProbe + offset),
                 readBegins);
             Assert.All(fieldNumbers, fieldNumber => Assert.Equal(0, fieldNumber));
+            Assert.True(normalMtf.SequenceEqual(session.Filters.RfMtf));
         }
         finally
         {
@@ -231,7 +241,64 @@ public sealed class LaserDiscSeekRecoveryCompatibilityTests
         }
     }
 
-    private static DecodeSession CreateSession(string tempDirectory)
+    [Fact(DisplayName = "LD seek uses MTF level zero and restores normal MTF like v0.4.0")]
+    public void LdSeekUsesTemporaryZeroMtfLikeV040()
+    {
+        string tempDirectory = CreateTempDirectory();
+        try
+        {
+            using DecodeSession session = CreateSession(
+                tempDirectory,
+                "--MTF",
+                "1.75",
+                "--MTF_offset",
+                "0.25");
+            Complex[] seekMtf = DecodeFilterSetBuilder.BuildLaserDiscMtf(
+                session.Parameters,
+                session.FilterOptions,
+                targetMtf: 0.0,
+                session.DecodeSampleRateHz,
+                session.BlockLength);
+            Complex[] normalMtf = DecodeFilterSetBuilder.BuildLaserDiscMtf(
+                session.Parameters,
+                session.FilterOptions,
+                targetMtf: 1.0,
+                session.DecodeSampleRateHz,
+                session.BlockLength);
+            Assert.True(normalMtf.SequenceEqual(session.Filters.RfMtf));
+            long nominalFieldSamples = session.TbcFieldDecoder.EstimateNominalFieldSampleCount();
+            int reads = 0;
+            var engine = new TbcFieldSequenceDecodeEngine(
+                readField: (activeSession, _, begin, _, fieldNumber) =>
+                {
+                    Assert.True(seekMtf.SequenceEqual(activeSession.Filters.RfMtf));
+                    reads++;
+                    return BuildField(
+                        activeSession,
+                        begin,
+                        fieldNumber,
+                        nominalFieldSamples,
+                        fieldNumber == 1 ? EncodeCavFrameCode(12) : null);
+                });
+
+            IReadOnlyList<TbcDecodedField> fields = engine.DecodeFields(
+                session,
+                Stream.Null,
+                maxFields: 0);
+
+            Assert.Empty(fields);
+            Assert.Equal(2, reads);
+            Assert.True(normalMtf.SequenceEqual(session.Filters.RfMtf));
+        }
+        finally
+        {
+            Directory.Delete(tempDirectory, recursive: true);
+        }
+    }
+
+    private static DecodeSession CreateSession(
+        string tempDirectory,
+        params string[] options)
     {
         ParsedCommand command = new CommandLineParser().Parse(CliSpecs.LaserDisc, [
             "--NTSC",
@@ -243,6 +310,7 @@ public sealed class LaserDiscSeekRecoveryCompatibilityTests
             "0",
             "--disable_analog_audio",
             "--noEFM",
+            .. options,
             "input.s16",
             Path.Combine(tempDirectory, "seek")
         ]);

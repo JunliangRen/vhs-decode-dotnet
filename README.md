@@ -333,7 +333,9 @@ possible capture has already been proven byte-for-byte identical.
   recoverable fields without consuming valid-field sequence state, scans later
   VBI pairs when the first pair has no frame code, and falls back to file start
   only after EOF at a nonzero probe location; seek progress, completion, and
-  early-CLV diagnostics match the upstream messages
+  early-CLV diagnostics match the upstream messages. Probe demodulation uses
+  upstream target MTF 0 (including `--MTF_offset`) and restores normal target
+  MTF 1 on both success and failure
 - LD `--MTF` and `--MTF_offset` RF compensation path, using upstream
   `MTF_freq`, `MTF_poledist`, and `MTF_basemult` format parameters before
   Hilbert FM demodulation, with bit-exact NumPy power coverage for fractional,

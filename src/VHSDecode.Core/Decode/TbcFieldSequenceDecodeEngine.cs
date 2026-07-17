@@ -943,6 +943,31 @@ public sealed class TbcFieldSequenceDecodeEngine
             : DecodeStartPosition.FromInteger(targetFrame * 2 * nominalFieldSamples);
         long current = seekStart.ResolveForRead();
 
+        ApplyLaserDiscMtf(session, 0.0);
+        try
+        {
+            return ResolveLaserDiscSeekStart(
+                session,
+                input,
+                readLength,
+                targetFrame,
+                nominalFieldSamples,
+                current);
+        }
+        finally
+        {
+            ApplyLaserDiscMtf(session, 1.0);
+        }
+    }
+
+    private long ResolveLaserDiscSeekStart(
+        DecodeSession session,
+        Stream input,
+        int readLength,
+        BigInteger targetFrame,
+        long nominalFieldSamples,
+        long current)
+    {
         for (int retry = 0; retry < 3; retry++)
         {
             if (!TryReadLaserDiscFrameNumber(
