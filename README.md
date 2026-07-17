@@ -762,7 +762,9 @@ possible capture has already been proven byte-for-byte identical.
   terminating the sequence: VHS no-pulse spans jump 100 ms, LD/CVBS initial
   no-pulse spans jump one second, missing first HSYNC advances 100 tape lines or
   200 LD/CVBS lines, CVBS no-pulse spans after output advance 200 lines and
-  continue, and short trailing data backs up from line0 by 20 lines
+  continue, and short trailing data backs up from line0 by 20 lines; after a
+  valid VHS field, short spans also emit the exact two upstream INFO records
+  with Python-formatted line counts and timing values
 - VHS chroma sidecar output contract for decoded chroma fields, writing
   upstream-named `_chroma.tbc` files by default and `.tbcy`/`.tbcc` pairs when
   `--orc` is supplied
@@ -1514,7 +1516,7 @@ dotnet test VHSDecodeDotNet.slnx --no-build
 ```
 
 The current formal solution build completes with zero warnings and errors, and
-the xUnit v3 project exposes 711 independently discoverable compatibility tests
+the xUnit v3 project exposes 713 independently discoverable compatibility tests
 to `dotnet test` and Visual Studio Test Explorer. On the
 same Windows machine and fixtures, Release wall-clock measurements for one
 frame were 2.346 s versus 7.193 s for NTSC VHS and 1.651 s versus 5.865 s for

@@ -2,6 +2,7 @@ using System.Numerics;
 using System.Runtime.InteropServices;
 using System.Security.Cryptography;
 using System.Text.Json;
+using VHSDecode.Core.CommandLine;
 using VHSDecode.Core.Dsp;
 using VHSDecode.Core.Formats;
 using VHSDecode.Core.Tbc;
@@ -4047,6 +4048,22 @@ public sealed class TbcFieldDecodePipeline
         if (lastLine >= processedLines)
         {
             return;
+        }
+
+        if (tape
+            && _previousFirstHSyncLocation.HasValue
+            && _previousFirstHSyncReadLocation.HasValue)
+        {
+            _diagnosticLogger?.Invoke(
+                "INFO",
+                "lastline = " + PythonNamespaceFormatter.FormatValue(lastLine)
+                + ", proclines = " + processedLines
+                + ", meanlinelen = " + PythonNamespaceFormatter.FormatValue(meanLineLength)
+                + ", line0loc = " + PythonNamespaceFormatter.FormatValue(line0Location)
+                + ")");
+            _diagnosticLogger?.Invoke(
+                "INFO",
+                "Did not find the expected number of lines (lastline < proclines) , skipping a tiny bit");
         }
 
         double suggested = line0Location - (meanLineLength * 20.0);
