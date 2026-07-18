@@ -21,7 +21,7 @@ public sealed class RfBlockStreamDecoder : IDisposable
     private const int DecodedBlockCacheCapacity = 16;
     private const int ReusableSpanBufferSetCapacity = 2;
     internal const int MaximumConcurrentPrefetchBlocks = 8;
-    internal const int MaximumPrefetchBlocks = 20;
+    internal const int MaximumPrefetchBlocks = 32;
     private readonly RfBlockDecodePipeline _pipeline;
     private readonly Dictionary<long, RfPipelineBlock> _decodedBlockCache = [];
     private readonly Dictionary<long, RfPipelineBlock> _prefetchedBlockCache = [];
@@ -70,9 +70,11 @@ public sealed class RfBlockStreamDecoder : IDisposable
         BlockStride = blockLength - blockCut - blockCutEnd;
         WorkerThreads = workerThreads;
         PrefetchBlocks = workerThreads > 1 && !_pipeline.RequiresSequentialBlockDecode
-            ? Math.Min(prefetchBlocks, Math.Min(workerThreads, MaximumPrefetchBlocks))
+            ? Math.Min(prefetchBlocks, MaximumPrefetchBlocks)
             : 0;
-        PrefetchWorkerThreads = Math.Min(PrefetchBlocks, MaximumConcurrentPrefetchBlocks);
+        PrefetchWorkerThreads = Math.Min(
+            Math.Min(WorkerThreads, PrefetchBlocks),
+            MaximumConcurrentPrefetchBlocks);
         _decodedBlockCacheCapacity = checked(DecodedBlockCacheCapacity + PrefetchBlocks);
     }
 
@@ -93,6 +95,21 @@ public sealed class RfBlockStreamDecoder : IDisposable
     internal int CachedDecodedBlockCount => _decodedBlockCache.Count;
 
     internal int CachedPrefetchedBlockCount => _prefetchedBlockCache.Count;
+
+    internal static int RecommendedPrefetchBlocks(int workerThreads, int processorCount)
+    {
+        ArgumentOutOfRangeException.ThrowIfNegative(workerThreads);
+        ArgumentOutOfRangeException.ThrowIfNegativeOrZero(processorCount);
+        int effectiveWorkers = Math.Min(workerThreads, processorCount);
+        if (effectiveWorkers <= 1)
+        {
+            return 0;
+        }
+
+        long oneAdditionalWave = (long)effectiveWorkers
+            + Math.Min(effectiveWorkers, MaximumConcurrentPrefetchBlocks);
+        return (int)Math.Min(oneAdditionalWave, MaximumPrefetchBlocks);
+    }
 
     internal int CachedReusableSpanBufferSetCount
     {

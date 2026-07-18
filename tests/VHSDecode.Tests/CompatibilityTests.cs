@@ -1496,7 +1496,7 @@ public void DecodeSessionFactoryAppliesExecutionOptions()
         "outbase"
     ]));
     AssertEqual(
-        Math.Min(7, Math.Min(Environment.ProcessorCount, RfBlockStreamDecoder.MaximumPrefetchBlocks)),
+        RfBlockStreamDecoder.RecommendedPrefetchBlocks(7, Environment.ProcessorCount),
         parallelVhs.StreamDecoder.PrefetchBlocks);
 }
 

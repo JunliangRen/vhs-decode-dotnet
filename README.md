@@ -2,9 +2,9 @@
 
 **[English](README.md)** | [简体中文](README.zh-CN.md) | [日本語](README.ja.md)
 
-<!-- README_SYNC: 2026-07-18.4 -->
+<!-- README_SYNC: 2026-07-18.6 -->
 
-.NET 10 rewrite of the decode-facing parts of
+.NET 11 rewrite of the decode-facing parts of
 [`oyvindln/vhs-decode`](https://github.com/oyvindln/vhs-decode), focused on
 release `v0.4.0` at commit
 `43155200da87c0d49eb37d8ec09b1372075ee8e4`.
@@ -57,7 +57,7 @@ CLI compatibility requires it.
 
 | Area | Status | Current boundary |
 | --- | --- | --- |
-| Solution and tests | Implemented | .NET 10 `.slnx`; standard xUnit v3 tests work in Visual Studio Test Explorer and with `dotnet test`. |
+| Solution and tests | Implemented | .NET 11 `.slnx`; standard xUnit v3 tests work in Visual Studio Test Explorer and with `dotnet test`. |
 | CLI and arguments | Implemented and snapshot-tested | Facade and standalone help, aliases, defaults, validation, diagnostics, and exit behavior target v0.4.0. |
 | VHS and tape families | Implemented; rare capture gaps remain | VHS, S-VHS, Betamax, Video8/Hi8, U-matic, Type C, EIAJ, and supported PAL/NTSC variants share the release-compatible decode path. |
 | CVBS | Implemented for release-supported systems | PAL and NTSC paths run; uncommon vblank and cross-option cases need more real-capture fixtures. |
@@ -123,10 +123,16 @@ release compatibility remain the first constraint.
   stream, FFmpeg, and GNU Radio reads stay ordered.
 - A stream-scoped decoded RF cache avoids duplicate FFT work across overlapping
   field reads while keeping memory bounded.
-- VHS sessions retain at most 20 compute-only lookahead RF blocks and decode at
-  most eight of them concurrently. This overlaps the next field with current
-  TBC work without allowing FFT allocation bursts to grow with `--threads`.
-  Input reads remain ordered, and pending work is cancelled on seek or disposal.
+- VHS sessions schedule one extra bounded wave beyond the effective worker
+  count and retain at most 32 compute-only lookahead RF blocks. Concurrent RF
+  decodes remain capped by both `--threads` and an internal limit of eight; the
+  effective count also cannot exceed the logical processor count. This overlaps
+  the next field with current TBC work without allowing FFT allocation bursts
+  to grow with `--threads`; input reads remain ordered,
+  and pending work is cancelled on seek or disposal.
+- VSync envelope/minima work and harmonic power-ratio search run concurrently
+  over one shared read-only padded input. Candidate arbitration and detector
+  state updates remain ordered after both branches complete.
 - Long TBC sinc-resampling jobs share the worker budget and preserve output
   order; `--threads 0` and `--threads 1` retain deterministic serial paths.
 - HiFi uses bounded parallel block decoding followed by ordered
@@ -159,20 +165,25 @@ On one Windows fixture machine, one-frame Release measurements were:
 | NTSC VHS | 2.346 s | 7.193 s |
 | NTSC LaserDisc | 1.651 s | 5.865 s |
 
-These numbers are fixture-specific, not universal benchmarks. A PAL LD
-four-field Core probe reduced managed allocation from 5.12 GiB to 1.96 GiB
-while preserving verified output. On a reproducible 40-frame PAL VHS probe,
-the DSP and field-buffer passes changed a fresh `--threads 1/5/20` baseline of
-16.17/8.74/7.57 s to repeated-run medians of 13.69/7.94/6.60 s. TBC and JSON
-hashes remained identical; the 20-thread median peak was about 1.39 GiB. An
-80-frame allocation trace estimated that `double[]` plus `float[]` churn fell
-from 54.0 GiB to 26.1 GiB. Exact-length field-buffer warm-up accounted for only
-102.7 MiB, and pooled FFT scratch stopped scaling with decode duration.
+These numbers are fixture-specific, not universal benchmarks. All VHS A/B runs
+below used .NET SDK/runtime `11.0.100-preview.6.26359.118`. On a reproducible
+40-frame PAL probe with `--skip_chroma --no_resample`, this concurrency pass
+changed commit `6441d10` medians at `--threads 1/20` from 14.64/6.87 s to
+13.88/5.90 s: gains of 5.2%/14.2%. At 20 threads, median active
+cores rose from 2.72 to 3.38 while median peak working set rose from 1.39 to
+1.48 GiB. All paired TBC/JSON outputs were byte-identical. Earlier allocation
+work reduced a PAL LD four-field probe from 5.12 GiB to 1.96 GiB and estimated
+VHS `double[]` plus `float[]` churn from 54.0 GiB to 25.6 GiB.
 
-A separate 1.31 GB, 320-frame sustained probe completed in 43.19 seconds.
-Post-warmup five-second windows produced 10.06-10.39 MiB/s, average working set
-stayed between 1.16 and 1.33 GiB, and the observed peak was 1.47 GiB. Later
-windows did not slow down or show monotonic memory growth.
+On the 1.31 GB, 320-frame sustained probe, commit `6441d10` and the current code
+completed in 47.61 and 39.80 seconds respectively, a 16.4% gain, with average
+active cores rising from 2.56 to 3.06 and byte-identical outputs. Current peak
+working set was 1.70 GiB; quarter-run private-memory peaks were
+1.67/1.45/1.45/1.55 GiB, with no monotonic growth. With default chroma and
+resampling, the 20-frame median improved from 8.61 to 7.30 seconds at 20 threads
+(15.2%); TBC, JSON, and chroma hashes matched.
+A 160-frame default-path run completed in 53.23 seconds with a 1.70 GiB peak and
+no monotonic quarter-to-quarter memory growth.
 
 <!-- SECTION: build -->
 
@@ -180,7 +191,7 @@ windows did not slow down or show monotonic memory growth.
 
 Requirements:
 
-- .NET 10 SDK
+- .NET SDK `11.0.100-preview.6.26359.118` (pinned by `global.json`)
 - Visual Studio 2026 for IDE use
 - `ffmpeg` and `ffprobe` on `PATH` for FFmpeg-backed container inputs
 - `ffmpeg` for default HiFi FLAC output
@@ -192,7 +203,7 @@ dotnet test VHSDecodeDotNet.slnx -c Release --no-build --no-restore
 ```
 
 The current formal Release build has zero warnings and errors. The xUnit v3
-project exposes **745** independently discoverable tests to both
+project exposes **746** independently discoverable tests to both
 `dotnet test` and Visual Studio Test Explorer.
 
 <!-- SECTION: usage -->
@@ -211,8 +222,8 @@ dotnet run --project src/VHSDecode.Cli -- hifi --help
 After a Release build, use either facade dispatch or an apphost alias:
 
 ```powershell
-src\VHSDecode.Cli\bin\Release\net10.0\decode.exe vhs [upstream options] input output
-src\VHSDecode.Cli\bin\Release\net10.0\vhs-decode.exe [upstream options] input output
+src\VHSDecode.Cli\bin\Release\net11.0\decode.exe vhs [upstream options] input output
+src\VHSDecode.Cli\bin\Release\net11.0\vhs-decode.exe [upstream options] input output
 ```
 
 Use the matching `cvbs`, `ld`, or `hifi` command and its upstream v0.4.0

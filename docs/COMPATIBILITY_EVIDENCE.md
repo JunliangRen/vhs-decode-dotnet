@@ -10,7 +10,7 @@ link here for language-neutral technical evidence.
 
 ## Project baseline
 
-.NET 10 rewrite of the decode-facing parts of
+.NET 11 rewrite of the decode-facing parts of
 [`oyvindln/vhs-decode`](https://github.com/oyvindln/vhs-decode).
 
 Current upstream snapshot used for analysis:
@@ -71,7 +71,7 @@ required by the decode pipeline itself.
 
 | Area | Status | Current boundary |
 | --- | --- | --- |
-| Solution and tests | Implemented | .NET 10, `.slnx`, and xUnit v3 work with Visual Studio Test Explorer and `dotnet test`. |
+| Solution and tests | Implemented | .NET 11, `.slnx`, and xUnit v3 work with Visual Studio Test Explorer and `dotnet test`. |
 | CLI and arguments | Implemented and snapshot-tested | `decode`, `vhs-decode`, `cvbs-decode`, `ld-decode`, and `hifi-decode` expose the v0.4.0 decode-facing command surface. |
 | HiFi decode | Implemented; more real-capture verification remains | PAL VHS and NTSC 8mm synthetic RF baselines are byte-exact. |
 | VHS decode | Implemented; rare parity gaps remain | All valid format/filter combinations and extensive NTSC field/output fixtures are covered. |
@@ -90,7 +90,7 @@ possible capture has already been proven byte-for-byte identical.
 #### Solution and command entry points
 
 - Visual Studio compatible `VHSDecodeDotNet.slnx`
-- `net10.0` CLI and core library plus a standard
+- `net11.0` CLI and core library plus a standard
   `Microsoft.NET.Test.Sdk`/xUnit v3 test project discoverable in Visual Studio
   Test Explorer
 - `decode.py`-style top-level dispatch for `vhs`, `cvbs`, `ld`, and `hifi`
@@ -1150,6 +1150,16 @@ possible capture has already been proven byte-for-byte identical.
   avoiding duplicate FFT work across overlap windows while keeping memory
   bounded; backward seeks, input-stream changes, and dynamic LD MTF changes
   invalidate the cache before further decoding
+- VHS RF production now schedules one additional bounded worker wave, capped
+  at 32 retained lookahead blocks; concurrent block decodes remain capped by
+  both `--threads` and an internal limit of eight, effective workers never
+  exceed the logical processor count, reads remain ordered, and seek/disposal
+  cancels pending work before cache state changes
+- on a 20-core .NET `11.0.100-preview.6.26359.118` fixture, a paired 40-frame
+  PAL VHS probe improved `--threads 1/20` medians from 14.64/6.87 s at commit
+  `6441d10` to 13.88/5.90 s with byte-identical TBC/JSON output;
+  a 320-frame run improved from 47.61 to 39.80 s while quarter-run private
+  memory peaks stayed bounded without monotonic growth
 - the managed DUCC FFT path now reuses per-worker scratch buffers, shares
   immutable root tables, writes packet transforms back in place, and performs
   discardable inverse transforms in place. On the deterministic PAL LD fixture
@@ -1199,6 +1209,9 @@ possible capture has already been proven byte-for-byte identical.
   the 30-step/5-IRE pulse-count search and finally the legacy level detector;
   `--fallback_vsync` enables the upstream abnormal-long-pulse candidate, while
   405/819-line systems retain the upstream serration bypass
+- VSync envelope/minima work and harmonic power-ratio search now overlap over
+  one shared read-only padded input; candidate arbitration, moving levels, and
+  detector state updates remain ordered after both branches finish
 - long VSync interiors and surrounding EQ back porches use NumPy-compatible
   float64 pairwise means during serration level refinement, preserving the
   calibrated sync and blank values instead of sequential-sum rounding

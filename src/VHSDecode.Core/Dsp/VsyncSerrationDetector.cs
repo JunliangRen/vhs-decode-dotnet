@@ -169,10 +169,22 @@ public sealed class VsyncSerrationDetector
                 []);
         }
 
-        (double[] envelope, double bias) = BuildVsyncEnvelope(reduced);
-        int[] envelopeMinima = LocalMinimaIndices(envelope);
-        int[] harmonicMinima = PowerRatioSearch(BuildPaddedInput(reduced));
-        int[] candidates = ArbitrateVsync(VsyncLength, envelopeMinima, harmonicMinima, reduced.Length + Math.Min(EnvelopePadding, reduced.Length));
+        double[] padded = BuildPaddedInput(reduced);
+        int[] envelopeMinima = [];
+        int[] harmonicMinima = [];
+        double bias = 0.0;
+        Parallel.Invoke(
+            () =>
+            {
+                (double[] envelope, bias) = BuildVsyncEnvelope(reduced, padded);
+                envelopeMinima = LocalMinimaIndices(envelope);
+            },
+            () => harmonicMinima = PowerRatioSearch(padded));
+        int[] candidates = ArbitrateVsync(
+            VsyncLength,
+            envelopeMinima,
+            harmonicMinima,
+            reduced.Length + Math.Min(EnvelopePadding, reduced.Length));
         var measurements = new List<VsyncSerrationMeasurement>();
         foreach (int candidate in candidates)
         {
@@ -431,9 +443,10 @@ public sealed class VsyncSerrationDetector
         return true;
     }
 
-    private (double[] Envelope, double Bias) BuildVsyncEnvelope(ReadOnlySpan<double> data)
+    private (double[] Envelope, double Bias) BuildVsyncEnvelope(
+        ReadOnlySpan<double> data,
+        ReadOnlySpan<double> padded)
     {
-        double[] padded = BuildPaddedInput(data);
         var clipped = new double[padded.Length];
         for (int i = 0; i < clipped.Length; i++)
         {

@@ -8,6 +8,28 @@ namespace VHSDecode.Tests;
 
 public sealed class RfBlockCacheConcurrencyTests
 {
+    [Fact(DisplayName = "RF prefetch recommendation adds one bounded worker wave")]
+    public void RfPrefetchRecommendationAddsOneBoundedWorkerWave()
+    {
+        Assert.Equal(0, RfBlockStreamDecoder.RecommendedPrefetchBlocks(0, 20));
+        Assert.Equal(0, RfBlockStreamDecoder.RecommendedPrefetchBlocks(1, 20));
+        Assert.Equal(4, RfBlockStreamDecoder.RecommendedPrefetchBlocks(2, 20));
+        Assert.Equal(10, RfBlockStreamDecoder.RecommendedPrefetchBlocks(5, 20));
+        Assert.Equal(28, RfBlockStreamDecoder.RecommendedPrefetchBlocks(20, 20));
+        Assert.Equal(8, RfBlockStreamDecoder.RecommendedPrefetchBlocks(100, 4));
+        Assert.Equal(RfBlockStreamDecoder.MaximumPrefetchBlocks, RfBlockStreamDecoder.RecommendedPrefetchBlocks(100, 64));
+        Assert.Equal(RfBlockStreamDecoder.MaximumPrefetchBlocks, RfBlockStreamDecoder.RecommendedPrefetchBlocks(int.MaxValue, int.MaxValue));
+        Assert.Throws<ArgumentOutOfRangeException>(() => RfBlockStreamDecoder.RecommendedPrefetchBlocks(-1, 20));
+        Assert.Throws<ArgumentOutOfRangeException>(() => RfBlockStreamDecoder.RecommendedPrefetchBlocks(20, 0));
+
+        using var constrainedDecoder = BuildDecoder(
+            new CountingSampleLoader(),
+            workerThreads: 2,
+            prefetchBlocks: int.MaxValue);
+        Assert.Equal(RfBlockStreamDecoder.MaximumPrefetchBlocks, constrainedDecoder.PrefetchBlocks);
+        Assert.Equal(2, constrainedDecoder.PrefetchWorkerThreads);
+    }
+
     [Fact(DisplayName = "Parallel RF reads reuse overlapping decoded blocks in order")]
     public void ParallelRfReadsReuseOverlappingDecodedBlocksInOrder()
     {
@@ -240,7 +262,7 @@ public sealed class RfBlockCacheConcurrencyTests
         Assert.Equal(
             RfBlockStreamDecoder.MaximumConcurrentPrefetchBlocks,
             decoder.PrefetchWorkerThreads);
-        Assert.Equal(277, loader.ReadCount);
+        Assert.Equal(289, loader.ReadCount);
     }
 
     private static RfBlockStreamDecoder BuildDecoder(

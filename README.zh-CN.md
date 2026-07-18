@@ -2,10 +2,10 @@
 
 [English](README.md) | **[简体中文](README.zh-CN.md)** | [日本語](README.ja.md)
 
-<!-- README_SYNC: 2026-07-18.4 -->
+<!-- README_SYNC: 2026-07-18.6 -->
 
 这是 [`oyvindln/vhs-decode`](https://github.com/oyvindln/vhs-decode)
-中解码相关部分的 .NET 10 重写，当前以 release `v0.4.0`、commit
+中解码相关部分的 .NET 11 重写，当前以 release `v0.4.0`、commit
 `43155200da87c0d49eb37d8ec09b1372075ee8e4` 为兼容基线。
 
 > [!IMPORTANT]
@@ -54,7 +54,7 @@
 
 | 区域 | 状态 | 当前边界 |
 | --- | --- | --- |
-| 解决方案和测试 | 已实现 | .NET 10 `.slnx`；标准 xUnit v3 测试可在 Visual Studio Test Explorer 和 `dotnet test` 中使用。 |
+| 解决方案和测试 | 已实现 | .NET 11 `.slnx`；标准 xUnit v3 测试可在 Visual Studio Test Explorer 和 `dotnet test` 中使用。 |
 | CLI 和参数 | 已实现并做快照测试 | facade 与独立命令的帮助、别名、默认值、校验、诊断和退出行为以 v0.4.0 为目标。 |
 | VHS 与磁带格式 | 已实现；仍有罕见采集差距 | VHS、S-VHS、Betamax、Video8/Hi8、U-matic、Type C、EIAJ 及支持的 PAL/NTSC 变体共用 release 兼容解码路径。 |
 | CVBS | 已实现 release 支持的系统 | PAL 和 NTSC 路径可运行；少见的 vblank 与跨参数组合仍需更多真实采集夹具。 |
@@ -116,9 +116,13 @@
   与 GNU Radio 读取保持有序。
 - 以 stream 为作用域的已解码 RF 缓存避免在重叠场读取之间重复 FFT，
   同时限制内存占用。
-- VHS 会话最多保留 20 个纯计算预读 RF block，同时最多解码其中 8 个；这样可在
+- VHS 会话会在有效 worker 数之外安排一波额外的有界任务，最多保留 32 个纯计算
+  预读 RF block；并发 RF 解码数同时受 `--threads` 与内部 8-worker 上限约束，有效
+  worker 数也不超过逻辑处理器数。这样可在
   当前场进行 TBC 时准备下一场，又不会让 FFT 分配峰值随 `--threads` 无限放大。
   输入读取仍然有序，seek 或释放时会取消待处理工作。
+- VSync 包络/极小值计算与谐波功率比搜索会在同一个只读 padded 输入上并发执行；
+  两个分支完成后，候选仲裁和 detector 状态更新仍按顺序进行。
 - 较长的 TBC sinc 重采样任务共享 worker 配额并保持输出顺序；
   `--threads 0` 和 `--threads 1` 保留确定性的串行路径。
 - HiFi 使用有界并行 block 解码，之后按顺序进行后处理和写入。
@@ -143,18 +147,22 @@
 | NTSC VHS | 2.346 s | 7.193 s |
 | NTSC LaserDisc | 1.651 s | 5.865 s |
 
-这些数字只对应特定夹具，不是通用 benchmark。一个 PAL LD 四场 Core
-probe 在保持已验证输出的同时，将托管分配量从 5.12 GiB 降至 1.96 GiB。
-在一个可重复的 40-frame PAL VHS probe 上，DSP 与场缓冲优化使一轮新的
-`--threads 1/5/20` 基线 16.17/8.74/7.57 秒变为多次运行中位数
-13.69/7.94/6.60 秒。TBC 与 JSON hash 保持一致，20 线程峰值中位数约
-1.39 GiB。80-frame allocation trace 估算 `double[]` 与 `float[]` 周转量
-从 54.0 GiB 降至 26.1 GiB；精确长度场缓冲预热只占 102.7 MiB，池化 FFT
-scratch 不再随解码时长增长。
+这些数字只对应特定夹具，不是通用 benchmark。以下 VHS A/B 均使用 .NET SDK/runtime
+`11.0.100-preview.6.26359.118`。在可重复的 40-frame PAL probe 上使用
+`--skip_chroma --no_resample` 时，本轮并发优化将 commit `6441d10` 在
+`--threads 1/20` 下的中位数从 14.64/6.87 秒降到 13.88/5.90 秒，
+分别提升 5.2%/14.2%。20 线程下活跃核心数中位数从 2.72 升到 3.38，
+工作集峰值中位数从 1.39 GiB 升到 1.48 GiB；配对 TBC/JSON 输出均逐字节一致。
+此前的分配优化已将 PAL LD 四场 probe 从 5.12 GiB 降至 1.96 GiB，并将 VHS
+`double[]` 与 `float[]` 周转量估算值从 54.0 GiB 降至 25.6 GiB。
 
-另一轮 1.31 GB、320-frame 持续 probe 在 43.19 秒内完成。预热后的五秒窗口为
-10.06-10.39 MiB/s，平均工作集保持在 1.16-1.33 GiB，观察到的峰值为
-1.47 GiB；后段没有变慢，也没有单调增长的内存趋势。
+在 1.31 GB、320-frame 持续 probe 上，commit `6441d10` 与当前代码分别用时
+47.61 和 39.80 秒，提升 16.4%；平均活跃核心从 2.56 升到 3.06，输出逐字节一致。
+当前工作集峰值为 1.70 GiB，四等分时段的私有内存峰值为
+1.67/1.45/1.45/1.55 GiB，没有单调增长。启用默认色度和重采样后，20 线程的
+20-frame 中位数从 8.61 降到 7.30 秒（提升 15.2%），
+TBC、JSON 和 chroma hash 全部一致。160-frame 默认路径用时 53.23 秒，峰值
+1.70 GiB，各时段内存同样没有单调增长。
 
 <!-- SECTION: build -->
 
@@ -162,7 +170,7 @@ scratch 不再随解码时长增长。
 
 要求：
 
-- .NET 10 SDK
+- `.NET SDK 11.0.100-preview.6.26359.118`（由 `global.json` 锁定）
 - 使用 IDE 时需要 Visual Studio 2026
 - 对 FFmpeg 支持的容器输入，需要 `ffmpeg` 和 `ffprobe` 位于 `PATH`
 - 默认 HiFi FLAC 输出需要 `ffmpeg`
@@ -174,7 +182,7 @@ dotnet test VHSDecodeDotNet.slnx -c Release --no-build --no-restore
 ```
 
 当前正式 Release 构建为零警告、零错误。xUnit v3 项目向
-`dotnet test` 和 Visual Studio Test Explorer 暴露 **745** 个可独立发现的测试。
+`dotnet test` 和 Visual Studio Test Explorer 暴露 **746** 个可独立发现的测试。
 
 <!-- SECTION: usage -->
 
@@ -192,8 +200,8 @@ dotnet run --project src/VHSDecode.Cli -- hifi --help
 Release 构建后，可以使用 facade 分发或 apphost 别名：
 
 ```powershell
-src\VHSDecode.Cli\bin\Release\net10.0\decode.exe vhs [upstream options] input output
-src\VHSDecode.Cli\bin\Release\net10.0\vhs-decode.exe [upstream options] input output
+src\VHSDecode.Cli\bin\Release\net11.0\decode.exe vhs [upstream options] input output
+src\VHSDecode.Cli\bin\Release\net11.0\vhs-decode.exe [upstream options] input output
 ```
 
 将命令替换为对应的 `cvbs`、`ld` 或 `hifi`，并使用上游 v0.4.0
