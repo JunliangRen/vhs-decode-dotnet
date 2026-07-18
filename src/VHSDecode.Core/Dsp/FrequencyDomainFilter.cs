@@ -127,6 +127,24 @@ public static class FrequencyDomainFilter
         return output;
     }
 
+    internal static void RollInPlace(Span<double> values, int shift)
+    {
+        if (values.IsEmpty)
+        {
+            return;
+        }
+
+        int normalized = ((shift % values.Length) + values.Length) % values.Length;
+        if (normalized == 0)
+        {
+            return;
+        }
+
+        values.Reverse();
+        values[..normalized].Reverse();
+        values[normalized..].Reverse();
+    }
+
     private static void ValidateEvenBlockLength(int blockLength)
     {
         if (blockLength <= 0 || blockLength % 2 != 0)

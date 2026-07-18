@@ -494,6 +494,11 @@ possible capture has already been proven byte-for-byte identical.
 - VHS `diskLoc` now uses v0.4.0's exact
   `int(inputHz / (FPS * 2)) + 1` samples-per-field denominator, avoiding drift
   from output-line-count approximations on long captures
+- VHS `File Frame N` deliberately reports the source RF timeline as
+  `floor(diskLoc / 2)`, not the number of frames already emitted to TBC. A
+  no-sync 100 ms jump advances this source position without writing a field,
+  while completion progress continues to use `fieldsWritten / 2`, matching
+  v0.4.0 when bad pre-roll makes the displayed file frame exceed TBC length
 - VHS output `seqNo` is assigned from the number of fields already written, so
   initial second-field skips and later duplicate/drop repairs preserve the same
   repeated or non-contiguous sequence numbers as v0.4.0
@@ -1150,16 +1155,30 @@ possible capture has already been proven byte-for-byte identical.
   avoiding duplicate FFT work across overlap windows while keeping memory
   bounded; backward seeks, input-stream changes, and dynamic LD MTF changes
   invalidate the cache before further decoding
-- VHS RF production now schedules one additional bounded worker wave, capped
-  at 32 retained lookahead blocks; concurrent block decodes remain capped by
-  both `--threads` and an internal limit of eight, effective workers never
-  exceed the logical processor count, reads remain ordered, and seek/disposal
-  cancels pending work before cache state changes
-- on a 20-core .NET `11.0.100-preview.6.26359.118` fixture, a paired 40-frame
-  PAL VHS probe improved `--threads 1/20` medians from 14.64/6.87 s at commit
-  `6441d10` to 13.88/5.90 s with byte-identical TBC/JSON output;
-  a 320-frame run improved from 47.61 to 39.80 s while quarter-run private
-  memory peaks stayed bounded without monotonic growth
+- VHS RF production now uses one continuous ordered input producer with at
+  most 32 lookahead slots and eight concurrent block decodes. Blocks publish
+  independently, so the caller waits only for a requested block rather than
+  draining the full lookahead batch. Stream changes, backward reads, cache
+  invalidation, and disposal cancel and join the producer before direct input
+  access, preserving the single-reader FFmpeg/GNU Radio contract
+- a gate-controlled concurrency test blocks a later speculative input while a
+  required earlier block completes; the next field returns before the gate is
+  released, loader concurrency remains exactly one, diagnostics are still
+  emitted only when ordered blocks are consumed, and 256-read stress tests keep
+  decoded plus prefetched caches within their hard capacities
+- on a 20-core .NET `11.0.100-preview.6.26359.118` fixture, a paired default
+  chroma/resampling 40-frame PAL VHS probe at `--threads 20` improved from an
+  11.60 s saved pre-continuous-pipeline median to 7.71 s, a 33.5% gain; average
+  active cores increased from roughly 2.2-2.5 to 3.3-3.7, while TBC, JSON, and
+  chroma SHA-256 remained byte-identical
+- the current default-path 40/160/320-frame runs completed in
+  7.65/26.58/52.51 s with 1.76/1.88/1.67 GiB peak working sets and
+  1.42/1.30/1.28 GiB second-half medians; all 320 requested frames were written,
+  showing a bounded working set rather than decode-length growth
+- the verified 40-frame output hashes are TBC
+  `2F540BF1F9A132281A8D26C0EEADEBC7617A366E296EEB5FF69FF9346836CD05`, JSON
+  `FCDCDEAA9D3BAD8949AAEFACBFDE2E8688A13568FF71836EBB37E758780CB67F`, and
+  chroma `7811643DBFBEDC95E8401C1F8062B9D74630F7B15AE98DF1D2C0BD81DC5BE296`
 - the managed DUCC FFT path now reuses per-worker scratch buffers, shares
   immutable root tables, writes packet transforms back in place, and performs
   discardable inverse transforms in place. On the deterministic PAL LD fixture
@@ -1170,6 +1189,42 @@ possible capture has already been proven byte-for-byte identical.
   cloning every full field, and long TBC sinc resampling jobs share the decode
   worker budget while `--threads 0/1` retain the serial path; serial and
   parallel linear, quadratic, and cubic interpolation remain bit-exact
+- linear TBC resampling now evaluates its constant derivative once per line,
+  performs the same median/MAD outlier repair before expansion, and overlaps
+  source-position generation with level preparation through a fixed two-way
+  task; an isolated default-chroma probe improved from 9.46 to 7.88 s with all
+  three output hashes unchanged
+- VHS heterodyne/carrier tables use bounded parallel construction, and the
+  phase-analysis heterodyne workspace is reused only when decode carrier and
+  phase values still match; AFC changes rebuild the table. Dedicated xUnit v3
+  tests compare serial/parallel table hashes and prepared/fallback decode output
+- the managed real forward and inverse FFT radix-4 kernels use pinned pointer
+  indexing while preserving arithmetic order. A 32768-point isolated inverse
+  benchmark improved median throughput by about 6.5%; the forward median moved
+  from 204.7 us to 195.9 us (4.3%) with the exact same hash. A 384-block PAL VHS
+  composite was neutral at 841.96/841.19 ms, so no whole-block gain is claimed
+- the 16-tap TBC sinc kernel now pins its source and lookup table for pointer
+  indexing while preserving clamp, FMA, float-conversion, and accumulation order;
+  an isolated PAL-sized field median improved from 3.929 ms to 3.727 ms (5.1%),
+  then an interior-window path removed redundant per-tap clamps while retaining
+  the clamped path for edges and inputs shorter than 16 samples, improving its
+  serial probe by another 1.6%. All three 40-frame hashes remained exact; a fresh
+  160-frame run also matched TBC, JSON, and chroma hashes with 0.78/1.18/1.20/1.41
+  GiB quarter private-memory medians and a 1.68 GiB peak
+- VHS RF-envelope preparation now converts four doubles to float32, clears the
+  sign bits, and writes the rotated float64 values through AVX while preserving
+  the scalar tail and wrap path. A 32K-block isolated median improved from
+  57.5 us to 13.3 us (76.9%); 40-frame median time moved from 7.55 s to 7.39 s,
+  a 160-frame run moved from 26.95 s to 25.70 s, all three hashes remained exact,
+  and quarter private-memory medians stayed bounded at 1.34/1.48/1.50/1.45 GiB
+- VHS Rust-style FM unwrap now computes four independent atan approximations
+  through AVX/SSE, then commits the phase differences in original sample order;
+  non-finite groups and unsupported hardware retain the scalar path. The
+  isolated 32K-block median moved from 610.1 us to 130.7 us (78.6%). In five
+  interleaved 40-frame full-path pairs, median wall time moved from 7.43 s to
+  7.41 s and median CPU time from 27.88 s to 26.36 s (5.5% less CPU), while TBC,
+  JSON, and chroma hashes remained exact. A 160-frame run completed in 26.48 s
+  with 1.45/1.47/1.40/1.23 GiB quarter private-memory medians and a 1.79 GiB peak
 - Python's arbitrary-precision thread values now survive until their v0.4.0
   runtime use: VHS debug plots ignore even enormous positive or negative values,
   CVBS/LD negative values retain the nonzero request with zero demod workers for
@@ -1537,7 +1592,7 @@ dotnet test VHSDecodeDotNet.slnx --no-build
 ```
 
 The current formal solution build completes with zero warnings and errors, and
-the xUnit v3 project exposes 736 independently discoverable compatibility tests
+the xUnit v3 project exposes 781 independently discoverable compatibility tests
 to `dotnet test` and Visual Studio Test Explorer. On the
 same Windows machine and fixtures, Release wall-clock measurements for one
 frame were 2.346 s versus 7.193 s for NTSC VHS and 1.651 s versus 5.865 s for

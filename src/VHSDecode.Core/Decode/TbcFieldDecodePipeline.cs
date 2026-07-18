@@ -404,7 +404,8 @@ public sealed class TbcFieldDecodePipeline
                 session.ChromaOptions,
                 session.FilterOptions,
                 session.DecodeSampleRateHz,
-                session.TbcRenderer.TrackPhaseIre0Offset?.TrackPhase),
+                session.TbcRenderer.TrackPhaseIre0Offset?.TrackPhase,
+                workerThreads: session.ExecutionOptions.WorkerThreads),
             BuildLaserDiscPilotRefineOptions(session.Spec.Name, session.System, session.Parameters),
             BuildLaserDiscNtscBurstRefineOptions(session.Spec.Name, session.System, session.Parameters),
             session.Spec.Name,
@@ -782,11 +783,12 @@ public sealed class TbcFieldDecodePipeline
         int outputFirstLine = OutputFirstLine(parity.IsFirstField);
         double[] renderLineLocations = RenderLineLocations(lineLocations, outputFirstLine);
         double[]? chromaBurstSamples = ResampleChromaBurst(span.Chroma, renderLineLocations, outputFirstLine);
-        ChromaPhaseSequenceResult? chromaPhase = AnalyzeChromaPhase(
+        VhsChromaPhaseAnalysis? chromaAnalysis = AnalyzeChromaPhase(
             chromaBurstSamples,
             lineLocations.Locations,
             _syncAnalyzer.NominalLineLength,
             outputFirstLine);
+        ChromaPhaseSequenceResult? chromaPhase = chromaAnalysis?.Phase;
         if (CanRefineLineLocationsFromBurst(chromaPhase))
         {
             double[] refinedLocations = VhsChromaDecoder.RefineLineLocationsFromBurst(
@@ -920,7 +922,7 @@ public sealed class TbcFieldDecodePipeline
         laserDiscFieldPhaseId ??= CvbsFallbackFieldPhaseId(_decodeType, _system, fieldNumber);
         VhsChromaFieldResult? chroma = DecodeChromaField(
             chromaBurstSamples,
-            chromaPhase,
+            chromaAnalysis,
             parity.IsFirstField,
             fieldNumber,
             outputFirstLine);
@@ -1260,7 +1262,7 @@ public sealed class TbcFieldDecodePipeline
         return _renderer.ResampleField(chroma, lineLocations, firstLine: outputFirstLine);
     }
 
-    private ChromaPhaseSequenceResult? AnalyzeChromaPhase(
+    private VhsChromaPhaseAnalysis? AnalyzeChromaPhase(
         double[]? chromaBurstSamples,
         IReadOnlyList<double> lineLocations,
         double meanLineLength,
@@ -1271,7 +1273,7 @@ public sealed class TbcFieldDecodePipeline
             return null;
         }
 
-        return VhsChromaDecoder.AnalyzeFieldPhase(
+        return VhsChromaDecoder.AnalyzeFieldPhaseWithWorkspace(
             chromaBurstSamples,
             _chromaFieldOptions,
             lineLocations,
@@ -1285,12 +1287,12 @@ public sealed class TbcFieldDecodePipeline
 
     private VhsChromaFieldResult? DecodeChromaField(
         double[]? chromaBurstSamples,
-        ChromaPhaseSequenceResult? phase,
+        VhsChromaPhaseAnalysis? analysis,
         bool? isFirstField,
         int fieldNumber,
         int outputFirstLine)
     {
-        if (_chromaFieldOptions is null || chromaBurstSamples is null || phase is null)
+        if (_chromaFieldOptions is null || chromaBurstSamples is null || analysis is null)
         {
             return null;
         }
@@ -1298,7 +1300,7 @@ public sealed class TbcFieldDecodePipeline
         return VhsChromaDecoder.DecodeFieldWithPhase(
             chromaBurstSamples,
             _chromaFieldOptions,
-            phase,
+            analysis,
             isFirstField,
             fieldNumber,
             lineOffset: outputFirstLine,
@@ -1326,7 +1328,8 @@ public sealed class TbcFieldDecodePipeline
         ChromaDecodeOptions? chromaOptions,
         DecodeFilterOptions? filterOptions = null,
         double decodeSampleRateHz = 40_000_000.0,
-        int? initialChromaRotationIndex = null)
+        int? initialChromaRotationIndex = null,
+        int workerThreads = 1)
     {
         if (chromaOptions?.WriteChroma != true
             || !parameters.SysParams.TryGetProperty("colorBurstUS", out JsonElement colorBurstRange)
@@ -1404,7 +1407,8 @@ public sealed class TbcFieldDecodePipeline
                 : 0,
             ChromaAfcDecodeSampleRateHz = chromaOptions.UseChromaAfc ? decodeSampleRateHz : 0.0,
             DisableBurstHsync = chromaOptions.DisableBurstHsync,
-            InitialChromaRotationIndex = initialChromaRotationIndex
+            InitialChromaRotationIndex = initialChromaRotationIndex,
+            WorkerThreads = Math.Max(0, workerThreads)
         };
     }
 

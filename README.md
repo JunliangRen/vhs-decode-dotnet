@@ -2,7 +2,7 @@
 
 **[English](README.md)** | [简体中文](README.zh-CN.md) | [日本語](README.ja.md)
 
-<!-- README_SYNC: 2026-07-18.6 -->
+<!-- README_SYNC: 2026-07-19.7 -->
 
 .NET 11 rewrite of the decode-facing parts of
 [`oyvindln/vhs-decode`](https://github.com/oyvindln/vhs-decode), focused on
@@ -123,18 +123,23 @@ release compatibility remain the first constraint.
   stream, FFmpeg, and GNU Radio reads stay ordered.
 - A stream-scoped decoded RF cache avoids duplicate FFT work across overlapping
   field reads while keeping memory bounded.
-- VHS sessions schedule one extra bounded wave beyond the effective worker
-  count and retain at most 32 compute-only lookahead RF blocks. Concurrent RF
-  decodes remain capped by both `--threads` and an internal limit of eight; the
-  effective count also cannot exceed the logical processor count. This overlaps
-  the next field with current TBC work without allowing FFT allocation bursts
-  to grow with `--threads`; input reads remain ordered,
-  and pending work is cancelled on seek or disposal.
+- VHS uses a bounded continuous RF pipeline. One producer owns ordered input
+  reads, at most 32 lookahead slots are retained, and no more than eight blocks
+  decode concurrently. Each completed block is published independently, so a
+  field waits only for the blocks it needs instead of an entire batch. Seek,
+  stream changes, and disposal cancel and drain the producer before another
+  reader can touch the FFmpeg/GNU Radio stream.
 - VSync envelope/minima work and harmonic power-ratio search run concurrently
   over one shared read-only padded input. Candidate arbitration and detector
   state updates remain ordered after both branches complete.
 - Long TBC sinc-resampling jobs share the worker budget and preserve output
   order; `--threads 0` and `--threads 1` retain deterministic serial paths.
+- Linear wow adjustment evaluates the constant derivative once per line,
+  expands it only after median/MAD repair, and overlaps source-position and
+  level preparation with a fixed two-way task when workers are enabled.
+- VHS heterodyne and carrier tables use bounded parallel construction. The
+  phase-analysis table is reused by field decode only while carrier and phase
+  parameters match; AFC changes force the original rebuild path.
 - HiFi uses bounded parallel block decoding followed by ordered
   post-processing and writing.
 - Managed real FFTs reuse pooled packing and scratch buffers, and float32 SOS
@@ -147,10 +152,12 @@ release compatibility remain the first constraint.
   matching the only two block counts a fixed read window can cover. Buffers are
   returned after synchronous field decode; public `Read` results, deferred CVBS
   rendering, and retained LD VITS sources keep independent ownership.
-- AVX/FMA kernels accelerate exact float32 conversion, LD quantization, VHS
-  chroma rotation, and complex frequency filtering. VHS phase demodulation also
-  evaluates each sample angle once, with verified scalar fallbacks and unchanged
-  TBC/JSON hashes.
+- AVX/FMA kernels accelerate exact float32 conversion, VHS RF-envelope
+  preparation, VHS Rust-style FM angle approximation, LD quantization, VHS
+  chroma rotation, and complex frequency filtering. The forward/inverse radix-4 FFT
+  and 16-tap TBC sinc kernels use pinned pointer indexing to remove bounds
+  checks without changing arithmetic order; differential tests preserve exact
+  transform bits and output hashes.
 - Recovery metadata is disk-streamed; its snapshot queue has capacity one, and
   field-order history and RF caches have hard limits. Long decodes therefore do
   not retain every decoded field or enqueue an unbounded amount of future work.
@@ -165,25 +172,69 @@ On one Windows fixture machine, one-frame Release measurements were:
 | NTSC VHS | 2.346 s | 7.193 s |
 | NTSC LaserDisc | 1.651 s | 5.865 s |
 
-These numbers are fixture-specific, not universal benchmarks. All VHS A/B runs
-below used .NET SDK/runtime `11.0.100-preview.6.26359.118`. On a reproducible
-40-frame PAL probe with `--skip_chroma --no_resample`, this concurrency pass
-changed commit `6441d10` medians at `--threads 1/20` from 14.64/6.87 s to
-13.88/5.90 s: gains of 5.2%/14.2%. At 20 threads, median active
-cores rose from 2.72 to 3.38 while median peak working set rose from 1.39 to
-1.48 GiB. All paired TBC/JSON outputs were byte-identical. Earlier allocation
-work reduced a PAL LD four-field probe from 5.12 GiB to 1.96 GiB and estimated
-VHS `double[]` plus `float[]` churn from 54.0 GiB to 25.6 GiB.
+These numbers are fixture-specific, not universal benchmarks. All current VHS
+A/B runs used .NET SDK/runtime `11.0.100-preview.6.26359.118`, `--threads 20`,
+default chroma, and default resampling. On a reproducible 40-frame PAL probe,
+the saved pre-continuous-pipeline baseline median was 11.60 s and the current
+median was 7.71 s, a 33.5% gain. Average active cores rose from roughly
+2.2-2.5 to 3.3-3.7. Paired TBC, JSON, and chroma SHA-256 values were identical.
 
-On the 1.31 GB, 320-frame sustained probe, commit `6441d10` and the current code
-completed in 47.61 and 39.80 seconds respectively, a 16.4% gain, with average
-active cores rising from 2.56 to 3.06 and byte-identical outputs. Current peak
-working set was 1.70 GiB; quarter-run private-memory peaks were
-1.67/1.45/1.45/1.55 GiB, with no monotonic growth. With default chroma and
-resampling, the 20-frame median improved from 8.61 to 7.30 seconds at 20 threads
-(15.2%); TBC, JSON, and chroma hashes matched.
-A 160-frame default-path run completed in 53.23 seconds with a 1.70 GiB peak and
-no monotonic quarter-to-quarter memory growth.
+Current 40/160/320-frame sustained runs completed in 7.65/26.58/52.51 s. Peak
+working sets were 1.76/1.88/1.67 GiB, while second-half medians were
+1.42/1.30/1.28 GiB. The full 320 frames were written, and memory showed no
+growth with decode length. Earlier allocation work also reduced a PAL LD
+four-field probe from 5.12 GiB to 1.96 GiB.
+
+The pinned PAL-sized TBC sinc A/B reduced the median from 3.929 ms to 3.727 ms
+per field, a 5.1% kernel gain. A follow-up interior-window path retained clamped
+edges and short inputs while improving its serial probe by another 1.6%. A fresh
+160-frame run finished in 21.31 s with 0.78/1.18/1.20/1.41 GiB quarter medians
+and a 1.68 GiB peak; TBC, JSON, and chroma SHA-256 remained identical.
+
+AVX RF-envelope preparation reduced the isolated 32K-block median from 57.5 us
+to 13.3 us, a 76.9% kernel gain. The 40-frame median moved from 7.55 s to 7.39 s,
+and the 160-frame run from 26.95 s to 25.70 s. Its private-memory quarter medians
+were 1.34/1.48/1.50/1.45 GiB with a 1.72 GiB peak; all three hashes stayed exact.
+
+The four-lane AVX/SSE VHS Rust-style FM unwrap reduced its isolated 32K-block
+median from 610.1 us to 130.7 us, a 78.6% kernel gain. In a five-pair interleaved
+40-frame full-path A/B, median wall time moved from 7.43 s to 7.41 s while median
+CPU time fell from 27.88 s to 26.36 s, a 5.5% reduction. TBC, JSON, and chroma
+hashes remained exact. A 160-frame run completed in 26.48 s with private-memory
+quarter medians of 1.45/1.47/1.40/1.23 GiB and a 1.79 GiB peak.
+
+The latest FFmpeg stream pass replaced per-read 16 MiB rewind reconstruction with
+one bounded circular buffer. The isolated 384-read median fell from 695.4 ms to
+48.7 ms, while allocations fell from 4.31 GB to 142.6 MB. In a three-run
+40-frame A/B, median wall/CPU time moved from 8.98/28.47 s to 7.40/22.33 s;
+all three output hashes remained exact. Sampled `byte[]` allocation fell from
+36.3 GB to 209 MB. A 160-frame run finished in 25.86 s with private-memory
+quarter medians of 0.76/1.15/1.42/1.14 GiB and a 1.67 GiB peak.
+
+The latest VHS real-FFT pass reuses exact-length half spectra, Hilbert buffers,
+the raw envelope, and rotation inputs through a decoder-owned pool capped at 16
+workspaces. In five isolated 384-block A/B runs, median time fell from 1,140.6 ms
+to 1,054.0 ms (7.6%), allocation fell from 2.216 GB to 906.8 MB (59.1%), and
+median Gen2 collections fell from 168 to 56. A 160-frame full-path A/B remained
+wall-time neutral at 24.54/24.57 s while CPU time fell from 78.03 s to 70.13 s
+(10.1%). The current run peaked at 1.68 GiB; its private-memory quarter medians
+were 0.88/1.55/0.78/1.51 GiB rather than a monotonic rise. TBC, JSON, chroma, and
+isolated block hashes remained exact.
+
+The forward radix-4 kernel now uses the same pinned indexing as the inverse;
+its isolated 32768-point median fell from 204.7 us to 195.9 us (4.3%) with exact
+bits. The 384-block RF composite was neutral at 841.96/841.19 ms, so no
+whole-block speedup is claimed for this change.
+
+The subsequent float32 SOS pass preserves sample-major arithmetic order while
+keeping one-, two-, and four-section cascade states in locals. Other cascade
+sizes use flat bounded state: stack storage through 32 sections and a heap
+fallback above that limit. Five-run isolated 32K medians for two/four sections
+fell from 110.2/155.4 ms to 75.3/83.3 ms (31.7%/46.4%); five/eight/ten-section
+medians fell by 38.8%/40.2%/42.7%. Across two 160-frame A/B pairs, median wall
+time fell from 21.22 to 20.57 s (3.1%) and CPU time from 73.31 to 68.73 s
+(6.3%). TBC, JSON, and chroma hashes remained exact. The current pair's median
+private-memory peak was 1.71 GiB, and quarter-run memory was not monotonic.
 
 <!-- SECTION: build -->
 
@@ -203,7 +254,7 @@ dotnet test VHSDecodeDotNet.slnx -c Release --no-build --no-restore
 ```
 
 The current formal Release build has zero warnings and errors. The xUnit v3
-project exposes **746** independently discoverable tests to both
+project exposes **781** independently discoverable tests to both
 `dotnet test` and Visual Studio Test Explorer.
 
 <!-- SECTION: usage -->

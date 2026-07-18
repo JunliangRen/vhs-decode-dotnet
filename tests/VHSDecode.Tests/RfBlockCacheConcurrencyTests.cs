@@ -151,12 +151,13 @@ public sealed class RfBlockCacheConcurrencyTests
             diagnosticLogger: (_, _) => Interlocked.Increment(ref warningCount));
 
         RfDecodedSpan first = decoder.Read(stream, begin: 0, length: 24)!;
+        WaitForReadCount(loader, 4);
         Assert.Equal(4, loader.ReadCount);
         Assert.Equal(2, warningCount);
 
         RfDecodedSpan second = decoder.Read(stream, begin: 12, length: 24)!;
 
-        Assert.Equal(5, loader.ReadCount);
+        Assert.InRange(loader.ReadCount, 4, 5);
         Assert.Equal(3, warningCount);
         Assert.Equal(first.Input[12..], second.Input[..12]);
         Assert.Equal(first.Video[12..], second.Video[..12]);
@@ -174,7 +175,9 @@ public sealed class RfBlockCacheConcurrencyTests
         using var decoder = BuildDecoder(loader, workerThreads: 4, prefetchBlocks: 2);
 
         _ = decoder.Read(firstStream, begin: 0, length: 24);
+        WaitForReadCount(loader, 4);
         RfDecodedSpan second = decoder.Read(secondStream, begin: 0, length: 24)!;
+        WaitForReadCount(loader, 8);
 
         Assert.Equal(8, loader.ReadCount);
         Assert.Equal(Enumerable.Range(2, 24).Select(value => (double)value), second.Input);
@@ -184,6 +187,7 @@ public sealed class RfBlockCacheConcurrencyTests
         var failingLoader = new FailsAfterReadCountLoader(successfulReads: 2);
         using var failingDecoder = BuildDecoder(failingLoader, workerThreads: 4, prefetchBlocks: 2);
         RfDecodedSpan completed = failingDecoder.Read(firstStream, begin: 0, length: 24)!;
+        WaitForReadCount(failingLoader, 3);
         Assert.Equal(24, completed.Input.Length);
         Assert.Equal(3, failingLoader.ReadCount);
         Assert.Throws<IOException>(() => failingDecoder.Read(firstStream, begin: 12, length: 24));
@@ -231,7 +235,7 @@ public sealed class RfBlockCacheConcurrencyTests
             Assert.InRange(decoder.CachedPrefetchedBlockCount, 0, decoder.PrefetchBlocks);
         }
 
-        Assert.InRange(loader.ReadCount, 258, 260);
+        Assert.InRange(loader.ReadCount, 257, 257 + decoder.PrefetchBlocks);
     }
 
     [Fact(DisplayName = "Maximum RF prefetch remains bounded across a sustained forward decode")]
@@ -262,7 +266,40 @@ public sealed class RfBlockCacheConcurrencyTests
         Assert.Equal(
             RfBlockStreamDecoder.MaximumConcurrentPrefetchBlocks,
             decoder.PrefetchWorkerThreads);
-        Assert.Equal(289, loader.ReadCount);
+        Assert.InRange(
+            loader.ReadCount,
+            257,
+            257 + RfBlockStreamDecoder.MaximumPrefetchBlocks);
+    }
+
+    [Fact(DisplayName = "RF prefetch publishes required blocks before a later read completes")]
+    public async Task RfPrefetchPublishesRequiredBlocksBeforeALaterReadCompletes()
+    {
+        using var loader = new BlockingFutureSampleLoader(blockedSample: 36);
+        using var stream = new MemoryStream();
+        using var decoder = BuildDecoder(loader, workerThreads: 4, prefetchBlocks: 2);
+
+        try
+        {
+            RfDecodedSpan first = decoder.Read(stream, begin: 0, length: 24)!;
+            await loader.Blocked.WaitAsync(
+                TimeSpan.FromSeconds(5),
+                TestContext.Current.CancellationToken);
+
+            Task<RfDecodedSpan?> secondRead = Task.Run(
+                () => decoder.Read(stream, begin: 12, length: 24),
+                TestContext.Current.CancellationToken);
+            RfDecodedSpan second = (await secondRead.WaitAsync(
+                TimeSpan.FromSeconds(5),
+                TestContext.Current.CancellationToken))!;
+
+            Assert.Equal(first.Input[12..], second.Input[..12]);
+            Assert.Equal(1, loader.MaximumConcurrentReads);
+        }
+        finally
+        {
+            loader.Release();
+        }
     }
 
     private static RfBlockStreamDecoder BuildDecoder(
@@ -315,20 +352,31 @@ public sealed class RfBlockCacheConcurrencyTests
             prefetchBlocks);
     }
 
+    private static void WaitForReadCount(CountingSampleLoader loader, int expected)
+        => Assert.True(SpinWait.SpinUntil(
+            () => loader.ReadCount >= expected,
+            TimeSpan.FromSeconds(5)));
+
+    private static void WaitForReadCount(FailsAfterReadCountLoader loader, int expected)
+        => Assert.True(SpinWait.SpinUntil(
+            () => loader.ReadCount >= expected,
+            TimeSpan.FromSeconds(5)));
+
     private sealed class CountingSampleLoader : IRfSampleLoader
     {
         private readonly bool _returnZeros;
+        private int _readCount;
 
         public CountingSampleLoader(bool returnZeros = false)
         {
             _returnZeros = returnZeros;
         }
 
-        public int ReadCount { get; private set; }
+        public int ReadCount => Volatile.Read(ref _readCount);
 
         public double[] Read(Stream stream, long sample, int readLength)
         {
-            ReadCount++;
+            Interlocked.Increment(ref _readCount);
             if (_returnZeros)
             {
                 return new double[readLength];
@@ -342,12 +390,14 @@ public sealed class RfBlockCacheConcurrencyTests
 
     private sealed class FailsAfterReadCountLoader(int successfulReads) : IRfSampleLoader
     {
-        public int ReadCount { get; private set; }
+        private int _readCount;
+
+        public int ReadCount => Volatile.Read(ref _readCount);
 
         public double[] Read(Stream stream, long sample, int readLength)
         {
-            ReadCount++;
-            if (ReadCount > successfulReads)
+            int readCount = Interlocked.Increment(ref _readCount);
+            if (readCount > successfulReads)
             {
                 throw new IOException("Synthetic loader failure.");
             }
@@ -355,6 +405,58 @@ public sealed class RfBlockCacheConcurrencyTests
             return Enumerable.Range(0, readLength)
                 .Select(index => (double)(sample + index))
                 .ToArray();
+        }
+    }
+
+    private sealed class BlockingFutureSampleLoader(long blockedSample) : IRfSampleLoader, IDisposable
+    {
+        private readonly TaskCompletionSource<bool> _blocked = new(
+            TaskCreationOptions.RunContinuationsAsynchronously);
+        private readonly ManualResetEventSlim _release = new(initialState: false);
+        private int _activeReads;
+        private int _maximumConcurrentReads;
+
+        internal Task Blocked => _blocked.Task;
+
+        internal int MaximumConcurrentReads => Volatile.Read(ref _maximumConcurrentReads);
+
+        public double[] Read(Stream stream, long sample, int readLength)
+        {
+            int activeReads = Interlocked.Increment(ref _activeReads);
+            UpdateMaximum(activeReads);
+            try
+            {
+                if (sample == blockedSample)
+                {
+                    _blocked.TrySetResult(true);
+                    _release.Wait(TimeSpan.FromSeconds(10));
+                }
+
+                return Enumerable.Range(0, readLength)
+                    .Select(index => (double)(sample + index))
+                    .ToArray();
+            }
+            finally
+            {
+                Interlocked.Decrement(ref _activeReads);
+            }
+        }
+
+        internal void Release() => _release.Set();
+
+        public void Dispose()
+        {
+            _release.Set();
+            _release.Dispose();
+        }
+
+        private void UpdateMaximum(int candidate)
+        {
+            int current;
+            while (candidate > (current = Volatile.Read(ref _maximumConcurrentReads))
+                && Interlocked.CompareExchange(ref _maximumConcurrentReads, candidate, current) != current)
+            {
+            }
         }
     }
 }
