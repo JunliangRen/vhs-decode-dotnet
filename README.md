@@ -2,7 +2,7 @@
 
 **[English](README.md)** | [简体中文](README.zh-CN.md) | [日本語](README.ja.md)
 
-<!-- README_SYNC: 2026-07-19.5 -->
+<!-- README_SYNC: 2026-07-19.6 -->
 
 .NET 11 rewrite of the decode-facing parts of
 [`oyvindln/vhs-decode`](https://github.com/oyvindln/vhs-decode), focused on
@@ -220,6 +220,16 @@ wall-time neutral at 24.54/24.57 s while CPU time fell from 78.03 s to 70.13 s
 were 0.88/1.55/0.78/1.51 GiB rather than a monotonic rise. TBC, JSON, chroma, and
 isolated block hashes remained exact.
 
+The subsequent float32 SOS pass preserves sample-major arithmetic order while
+keeping one-, two-, and four-section cascade states in locals. Other cascade
+sizes use flat bounded state: stack storage through 32 sections and a heap
+fallback above that limit. Five-run isolated 32K medians for two/four sections
+fell from 110.2/155.4 ms to 75.3/83.3 ms (31.7%/46.4%); five/eight/ten-section
+medians fell by 38.8%/40.2%/42.7%. Across two 160-frame A/B pairs, median wall
+time fell from 21.22 to 20.57 s (3.1%) and CPU time from 73.31 to 68.73 s
+(6.3%). TBC, JSON, and chroma hashes remained exact. The current pair's median
+private-memory peak was 1.71 GiB, and quarter-run memory was not monotonic.
+
 <!-- SECTION: build -->
 
 ## Build and test
@@ -238,7 +248,7 @@ dotnet test VHSDecodeDotNet.slnx -c Release --no-build --no-restore
 ```
 
 The current formal Release build has zero warnings and errors. The xUnit v3
-project exposes **778** independently discoverable tests to both
+project exposes **779** independently discoverable tests to both
 `dotnet test` and Visual Studio Test Explorer.
 
 <!-- SECTION: usage -->

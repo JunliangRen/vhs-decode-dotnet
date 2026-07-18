@@ -193,6 +193,53 @@ public sealed class DspWorkingBufferTests
             $"Warm float32 SOS forward/backward allocated {sosBytes:N0} bytes.");
     }
 
+    [Fact(DisplayName = "Float32 SOS common-section kernels remain bit-exact")]
+    public void Float32SosCommonSectionKernelsRemainBitExact()
+    {
+        const int length = 32_768;
+        double[] input = Enumerable.Range(0, length)
+            .Select(index => Math.Sin(index * 0.013) + (0.125 * Math.Cos(index * 0.029)))
+            .ToArray();
+        SosSection[] sections =
+        [
+            new SosSection(0.06745527, 0.13491055, 0.06745527, 1.0, -1.1429805, 0.4128016),
+            new SosSection(1.0, 2.0, 1.0, 1.0, -1.4043849, 0.7359152)
+        ];
+
+        double[] output = SosFilter.ApplyForwardBackwardFloat32(sections, input);
+
+        Assert.Equal(
+            "0FCE85E5CEB0155E93B8C49D41679A5D40D76D931138D2469D3F7E5EBABAF7D5",
+            Convert.ToHexString(SHA256.HashData(MemoryMarshal.AsBytes(output.AsSpan()))));
+
+        SosSection[] fourSections = IirFilterDesign.ButterworthBandPassSos(
+            order: 4,
+            normalizedLowCutoff: 0.1,
+            normalizedHighCutoff: 0.4);
+        output = SosFilter.ApplyForwardBackwardFloat32(fourSections, input);
+        Assert.Equal(
+            "A8BE7ABAF7A46FC3F7674726B0295133EA5329679EBAFB06E94E253302ECD228",
+            Convert.ToHexString(SHA256.HashData(MemoryMarshal.AsBytes(output.AsSpan()))));
+
+        (int Order, string Hash)[] genericCases =
+        [
+            (5, "621A5D26038D8CEF52EA92BEEA4BCF06083246C28316617CC6FCA99E180A9DDE"),
+            (8, "D8DA7CDBC6147027D7CD040B337083890D19895DA284E6AD8BC34693AED9F6BE"),
+            (10, "0BE5EFFF1ABF73E14AE2B8F6F60AFFF71C5BFD9EC2A27CE492C9EA9C0CC11E2C")
+        ];
+        foreach ((int order, string hash) in genericCases)
+        {
+            SosSection[] genericSections = IirFilterDesign.ButterworthBandPassSos(
+                order,
+                normalizedLowCutoff: 0.1,
+                normalizedHighCutoff: 0.4);
+            output = SosFilter.ApplyForwardBackwardFloat32(genericSections, input);
+            Assert.Equal(
+                hash,
+                Convert.ToHexString(SHA256.HashData(MemoryMarshal.AsBytes(output.AsSpan()))));
+        }
+    }
+
     private static double[] BuildPalVhsProbe(int length, double sampleRateHz)
     {
         var input = new double[length];
