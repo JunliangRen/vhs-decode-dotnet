@@ -1207,6 +1207,14 @@ possible capture has already been proven byte-for-byte identical.
   57.5 us to 13.3 us (76.9%); 40-frame median time moved from 7.55 s to 7.39 s,
   a 160-frame run moved from 26.95 s to 25.70 s, all three hashes remained exact,
   and quarter private-memory medians stayed bounded at 1.34/1.48/1.50/1.45 GiB
+- VHS Rust-style FM unwrap now computes four independent atan approximations
+  through AVX/SSE, then commits the phase differences in original sample order;
+  non-finite groups and unsupported hardware retain the scalar path. The
+  isolated 32K-block median moved from 610.1 us to 130.7 us (78.6%). In five
+  interleaved 40-frame full-path pairs, median wall time moved from 7.43 s to
+  7.41 s and median CPU time from 27.88 s to 26.36 s (5.5% less CPU), while TBC,
+  JSON, and chroma hashes remained exact. A 160-frame run completed in 26.48 s
+  with 1.45/1.47/1.40/1.23 GiB quarter private-memory medians and a 1.79 GiB peak
 - Python's arbitrary-precision thread values now survive until their v0.4.0
   runtime use: VHS debug plots ignore even enormous positive or negative values,
   CVBS/LD negative values retain the nonzero request with zero demod workers for

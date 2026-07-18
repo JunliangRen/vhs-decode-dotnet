@@ -2,7 +2,7 @@
 
 [English](README.md) | [简体中文](README.zh-CN.md) | **[日本語](README.ja.md)**
 
-<!-- README_SYNC: 2026-07-19.2 -->
+<!-- README_SYNC: 2026-07-19.3 -->
 
 [`oyvindln/vhs-decode`](https://github.com/oyvindln/vhs-decode) の
 デコード関連部分を .NET 11 で再実装するプロジェクトです。現在は release
@@ -148,10 +148,10 @@
   buffer を返却し、public `Read` result、deferred CVBS render、保持される LD VITS source
   はそれぞれ独立した array ownership を維持します。
 - AVX/FMA kernel は正確な float32 conversion、VHS RF-envelope preparation、
-  LD quantization、VHS chroma rotation、complex frequency filtering を高速化します。
-  inverse radix-4 FFT と 16-tap TBC sinc kernel は算術順序を変えずに pinned pointer
-  indexing で bounds check を除去し、differential test で transform bit と output hash
-  の一致を維持します。
+  VHS Rust-style FM angle approximation、LD quantization、VHS chroma rotation、
+  complex frequency filtering を高速化します。inverse radix-4 FFT と 16-tap TBC
+  sinc kernel は算術順序を変えずに pinned pointer indexing で bounds check を除去し、
+  differential test で transform bit と output hash の一致を維持します。
 - Recovery metadata は disk streaming され、snapshot queue の容量は 1、field-order
   history と RF cache にも hard limit があります。長時間 decode でも全 field を
   保持したり、将来の work を無制限に enqueue したりしません。
@@ -189,6 +189,13 @@ AVX RF-envelope preparation は、単体 32K-block 中央値を 57.5 us から 1
 160-frame run は 26.95 秒から 25.70 秒になりました。private-memory の四分位中央値は
 1.34/1.48/1.50/1.45 GiB、peak は 1.72 GiB で、3 種類の hash は完全に一致しました。
 
+4-lane AVX/SSE VHS Rust-style FM unwrap は、単体 32K-block 中央値を 610.1 us から
+130.7 us へ短縮し、kernel は 78.6% 改善しました。5 組を交互に実行した 40-frame
+full-path A/B では、wall-time 中央値が 7.43 秒から 7.41 秒、CPU-time 中央値が
+27.88 秒から 26.36 秒となり、CPU time は 5.5% 減少しました。TBC、JSON、chroma
+hash は完全に一致しました。160-frame run は 26.48 秒で完了し、private-memory の
+四分位中央値は 1.45/1.47/1.40/1.23 GiB、peak は 1.79 GiB でした。
+
 <!-- SECTION: build -->
 
 ## ビルドとテスト
@@ -208,7 +215,7 @@ dotnet test VHSDecodeDotNet.slnx -c Release --no-build --no-restore
 
 現在の正式な Release build は warning 0、error 0 です。xUnit v3 project は
 `dotnet test` と Visual Studio Test Explorer の両方で個別に検出できる
-**759** tests を公開します。
+**768** tests を公開します。
 
 <!-- SECTION: usage -->
 

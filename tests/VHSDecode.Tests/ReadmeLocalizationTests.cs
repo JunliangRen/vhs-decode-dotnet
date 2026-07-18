@@ -64,7 +64,7 @@ public sealed partial class ReadmeLocalizationTests
         [
             "43155200da87c0d49eb37d8ec09b1372075ee8e4",
             "11.0.100-preview.6.26359.118",
-            "**750**",
+            "**768**",
             "2.346 s",
             "7.193 s",
             "1.651 s",
@@ -97,6 +97,8 @@ public sealed partial class ReadmeLocalizationTests
             Assert.DoesNotContain("**744**", content, StringComparison.Ordinal);
             Assert.DoesNotContain("**745**", content, StringComparison.Ordinal);
             Assert.DoesNotContain("**746**", content, StringComparison.Ordinal);
+            Assert.DoesNotContain("**750**", content, StringComparison.Ordinal);
+            Assert.DoesNotContain("**759**", content, StringComparison.Ordinal);
             Assert.DoesNotContain("13.88", content, StringComparison.Ordinal);
             Assert.DoesNotContain("39.80", content, StringComparison.Ordinal);
             Assert.DoesNotContain("53.23", content, StringComparison.Ordinal);
