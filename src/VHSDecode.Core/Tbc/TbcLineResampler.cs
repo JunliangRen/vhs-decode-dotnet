@@ -408,6 +408,22 @@ public sealed class TbcLineResampler
         int weightEnd = phaseEnd * SincTapCount;
         int sampleStart = coordInt - ((SincTapCount / 2) - 1);
         double result = 0.0;
+        if (sourceLength >= SincTapCount
+            && (uint)sampleStart <= (uint)(sourceLength - SincTapCount))
+        {
+            for (int tap = 0; tap < SincTapCount; tap++)
+            {
+                float startWeight = weights[weightStart + tap];
+                float weight = MathF.FusedMultiplyAdd(
+                    alpha,
+                    weights[weightEnd + tap] - startWeight,
+                    startWeight);
+                result += (float)source[sampleStart + tap] * weight;
+            }
+
+            return result;
+        }
+
         for (int tap = 0; tap < SincTapCount; tap++)
         {
             float startWeight = weights[weightStart + tap];

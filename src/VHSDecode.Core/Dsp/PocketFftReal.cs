@@ -305,7 +305,7 @@ public static class PocketFftReal
             }
         }
 
-        private static void Radix4Forward(
+        private static unsafe void Radix4Forward(
             int ido,
             int l1,
             double[] input,
@@ -313,77 +313,90 @@ public static class PocketFftReal
             double[] twiddles)
         {
             const double HalfSqrt2 = 0.707106781186547524400844362104849;
-            for (int k = 0; k < l1; k++)
+            fixed (double* inputPointer = input)
+            fixed (double* outputPointer = output)
+            fixed (double* twiddlePointer = twiddles)
             {
-                double c3 = input[ForwardInput(0, k, 3, ido, l1)];
-                double c1 = input[ForwardInput(0, k, 1, ido, l1)];
-                double tr1 = c3 + c1;
-                output[ForwardOutput(0, 2, k, ido, 4)] = c3 - c1;
-                double c0 = input[ForwardInput(0, k, 0, ido, l1)];
-                double c2 = input[ForwardInput(0, k, 2, ido, l1)];
-                double tr2 = c0 + c2;
-                output[ForwardOutput(ido - 1, 1, k, ido, 4)] = c0 - c2;
-                output[ForwardOutput(0, 0, k, ido, 4)] = tr2 + tr1;
-                output[ForwardOutput(ido - 1, 3, k, ido, 4)] = tr2 - tr1;
-            }
-
-            if ((ido & 1) == 0)
-            {
+                int inputGroupStride = ido * l1;
+                int outputBatchStride = 4 * ido;
                 for (int k = 0; k < l1; k++)
                 {
-                    double c1 = input[ForwardInput(ido - 1, k, 1, ido, l1)];
-                    double c3 = input[ForwardInput(ido - 1, k, 3, ido, l1)];
-                    double ti1 = -HalfSqrt2 * (c1 + c3);
-                    double tr1 = HalfSqrt2 * (c1 - c3);
-                    double c0 = input[ForwardInput(ido - 1, k, 0, ido, l1)];
-                    output[ForwardOutput(ido - 1, 0, k, ido, 4)] = c0 + tr1;
-                    output[ForwardOutput(ido - 1, 2, k, ido, 4)] = c0 - tr1;
-                    double c2 = input[ForwardInput(ido - 1, k, 2, ido, l1)];
-                    output[ForwardOutput(0, 3, k, ido, 4)] = ti1 + c2;
-                    output[ForwardOutput(0, 1, k, ido, 4)] = ti1 - c2;
+                    double* inputGroup = inputPointer + (ido * k);
+                    double* outputGroup = outputPointer + (outputBatchStride * k);
+                    double c3 = inputGroup[3 * inputGroupStride];
+                    double c1 = inputGroup[inputGroupStride];
+                    double tr1 = c3 + c1;
+                    outputGroup[2 * ido] = c3 - c1;
+                    double c0 = inputGroup[0];
+                    double c2 = inputGroup[2 * inputGroupStride];
+                    double tr2 = c0 + c2;
+                    outputGroup[(2 * ido) - 1] = c0 - c2;
+                    outputGroup[0] = tr2 + tr1;
+                    outputGroup[outputBatchStride - 1] = tr2 - tr1;
                 }
-            }
 
-            if (ido <= 2)
-            {
-                return;
-            }
-
-            int stride = ido - 1;
-            for (int k = 0; k < l1; k++)
-            {
-                for (int i = 2; i < ido; i += 2)
+                if ((ido & 1) == 0)
                 {
-                    int ic = ido - i;
-                    MultiplyConjugate(twiddles[i - 2], twiddles[i - 1],
-                        input[ForwardInput(i - 1, k, 1, ido, l1)], input[ForwardInput(i, k, 1, ido, l1)],
-                        out double cr2, out double ci2);
-                    MultiplyConjugate(twiddles[stride + i - 2], twiddles[stride + i - 1],
-                        input[ForwardInput(i - 1, k, 2, ido, l1)], input[ForwardInput(i, k, 2, ido, l1)],
-                        out double cr3, out double ci3);
-                    MultiplyConjugate(twiddles[(2 * stride) + i - 2], twiddles[(2 * stride) + i - 1],
-                        input[ForwardInput(i - 1, k, 3, ido, l1)], input[ForwardInput(i, k, 3, ido, l1)],
-                        out double cr4, out double ci4);
+                    for (int k = 0; k < l1; k++)
+                    {
+                        double* inputGroup = inputPointer + (ido * k) + ido - 1;
+                        double* outputGroup = outputPointer + (outputBatchStride * k);
+                        double c1 = inputGroup[inputGroupStride];
+                        double c3 = inputGroup[3 * inputGroupStride];
+                        double ti1 = -HalfSqrt2 * (c1 + c3);
+                        double tr1 = HalfSqrt2 * (c1 - c3);
+                        double c0 = inputGroup[0];
+                        outputGroup[ido - 1] = c0 + tr1;
+                        outputGroup[(3 * ido) - 1] = c0 - tr1;
+                        double c2 = inputGroup[2 * inputGroupStride];
+                        outputGroup[3 * ido] = ti1 + c2;
+                        outputGroup[ido] = ti1 - c2;
+                    }
+                }
 
-                    double tr1 = cr4 + cr2;
-                    double tr4 = cr4 - cr2;
-                    double ti1 = ci2 + ci4;
-                    double ti4 = ci2 - ci4;
-                    double c0r = input[ForwardInput(i - 1, k, 0, ido, l1)];
-                    double tr2 = c0r + cr3;
-                    double tr3 = c0r - cr3;
-                    double c0i = input[ForwardInput(i, k, 0, ido, l1)];
-                    double ti2 = c0i + ci3;
-                    double ti3 = c0i - ci3;
+                if (ido <= 2)
+                {
+                    return;
+                }
 
-                    output[ForwardOutput(i - 1, 0, k, ido, 4)] = tr2 + tr1;
-                    output[ForwardOutput(ic - 1, 3, k, ido, 4)] = tr2 - tr1;
-                    output[ForwardOutput(i, 0, k, ido, 4)] = ti1 + ti2;
-                    output[ForwardOutput(ic, 3, k, ido, 4)] = ti1 - ti2;
-                    output[ForwardOutput(i - 1, 2, k, ido, 4)] = tr3 + ti4;
-                    output[ForwardOutput(ic - 1, 1, k, ido, 4)] = tr3 - ti4;
-                    output[ForwardOutput(i, 2, k, ido, 4)] = tr4 + ti3;
-                    output[ForwardOutput(ic, 1, k, ido, 4)] = tr4 - ti3;
+                int stride = ido - 1;
+                for (int k = 0; k < l1; k++)
+                {
+                    double* inputGroup = inputPointer + (ido * k);
+                    double* outputGroup = outputPointer + (outputBatchStride * k);
+                    for (int i = 2; i < ido; i += 2)
+                    {
+                        int ic = ido - i;
+                        MultiplyConjugate(twiddlePointer[i - 2], twiddlePointer[i - 1],
+                            inputGroup[inputGroupStride + i - 1], inputGroup[inputGroupStride + i],
+                            out double cr2, out double ci2);
+                        MultiplyConjugate(twiddlePointer[stride + i - 2], twiddlePointer[stride + i - 1],
+                            inputGroup[(2 * inputGroupStride) + i - 1], inputGroup[(2 * inputGroupStride) + i],
+                            out double cr3, out double ci3);
+                        MultiplyConjugate(twiddlePointer[(2 * stride) + i - 2], twiddlePointer[(2 * stride) + i - 1],
+                            inputGroup[(3 * inputGroupStride) + i - 1], inputGroup[(3 * inputGroupStride) + i],
+                            out double cr4, out double ci4);
+
+                        double tr1 = cr4 + cr2;
+                        double tr4 = cr4 - cr2;
+                        double ti1 = ci2 + ci4;
+                        double ti4 = ci2 - ci4;
+                        double c0r = inputGroup[i - 1];
+                        double tr2 = c0r + cr3;
+                        double tr3 = c0r - cr3;
+                        double c0i = inputGroup[i];
+                        double ti2 = c0i + ci3;
+                        double ti3 = c0i - ci3;
+
+                        outputGroup[i - 1] = tr2 + tr1;
+                        outputGroup[(3 * ido) + ic - 1] = tr2 - tr1;
+                        outputGroup[i] = ti1 + ti2;
+                        outputGroup[(3 * ido) + ic] = ti1 - ti2;
+                        outputGroup[(2 * ido) + i - 1] = tr3 + ti4;
+                        outputGroup[ido + ic - 1] = tr3 - ti4;
+                        outputGroup[(2 * ido) + i] = tr4 + ti3;
+                        outputGroup[ido + ic] = tr4 - ti3;
+                    }
                 }
             }
         }

@@ -494,6 +494,11 @@ possible capture has already been proven byte-for-byte identical.
 - VHS `diskLoc` now uses v0.4.0's exact
   `int(inputHz / (FPS * 2)) + 1` samples-per-field denominator, avoiding drift
   from output-line-count approximations on long captures
+- VHS `File Frame N` deliberately reports the source RF timeline as
+  `floor(diskLoc / 2)`, not the number of frames already emitted to TBC. A
+  no-sync 100 ms jump advances this source position without writing a field,
+  while completion progress continues to use `fieldsWritten / 2`, matching
+  v0.4.0 when bad pre-roll makes the displayed file frame exceed TBC length
 - VHS output `seqNo` is assigned from the number of fields already written, so
   initial second-field skips and later duplicate/drop repairs preserve the same
   repeated or non-contiguous sequence numbers as v0.4.0
@@ -1193,14 +1198,19 @@ possible capture has already been proven byte-for-byte identical.
   phase-analysis heterodyne workspace is reused only when decode carrier and
   phase values still match; AFC changes rebuild the table. Dedicated xUnit v3
   tests compare serial/parallel table hashes and prepared/fallback decode output
-- the managed real inverse FFT radix-4 kernel uses pinned pointer indexing while
-  preserving arithmetic order; a 32768-point isolated inverse benchmark
-  improved median throughput by about 6.5%, and exact-bit FFT tests remain green
+- the managed real forward and inverse FFT radix-4 kernels use pinned pointer
+  indexing while preserving arithmetic order. A 32768-point isolated inverse
+  benchmark improved median throughput by about 6.5%; the forward median moved
+  from 204.7 us to 195.9 us (4.3%) with the exact same hash. A 384-block PAL VHS
+  composite was neutral at 841.96/841.19 ms, so no whole-block gain is claimed
 - the 16-tap TBC sinc kernel now pins its source and lookup table for pointer
   indexing while preserving clamp, FMA, float-conversion, and accumulation order;
   an isolated PAL-sized field median improved from 3.929 ms to 3.727 ms (5.1%),
-  all three 40-frame output hashes remained identical, and a 160-frame run held
-  quarter private-memory medians at 1.45/1.34/1.29/1.35 GiB with a 1.71 GiB peak
+  then an interior-window path removed redundant per-tap clamps while retaining
+  the clamped path for edges and inputs shorter than 16 samples, improving its
+  serial probe by another 1.6%. All three 40-frame hashes remained exact; a fresh
+  160-frame run also matched TBC, JSON, and chroma hashes with 0.78/1.18/1.20/1.41
+  GiB quarter private-memory medians and a 1.68 GiB peak
 - VHS RF-envelope preparation now converts four doubles to float32, clears the
   sign bits, and writes the rotated float64 values through AVX while preserving
   the scalar tail and wrap path. A 32K-block isolated median improved from
@@ -1582,7 +1592,7 @@ dotnet test VHSDecodeDotNet.slnx --no-build
 ```
 
 The current formal solution build completes with zero warnings and errors, and
-the xUnit v3 project exposes 750 independently discoverable compatibility tests
+the xUnit v3 project exposes 781 independently discoverable compatibility tests
 to `dotnet test` and Visual Studio Test Explorer. On the
 same Windows machine and fixtures, Release wall-clock measurements for one
 frame were 2.346 s versus 7.193 s for NTSC VHS and 1.651 s versus 5.865 s for

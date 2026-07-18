@@ -2,7 +2,7 @@
 
 [English](README.md) | [简体中文](README.zh-CN.md) | **[日本語](README.ja.md)**
 
-<!-- README_SYNC: 2026-07-19.6 -->
+<!-- README_SYNC: 2026-07-19.7 -->
 
 [`oyvindln/vhs-decode`](https://github.com/oyvindln/vhs-decode) の
 デコード関連部分を .NET 11 で再実装するプロジェクトです。現在は release
@@ -149,7 +149,7 @@
   はそれぞれ独立した array ownership を維持します。
 - AVX/FMA kernel は正確な float32 conversion、VHS RF-envelope preparation、
   VHS Rust-style FM angle approximation、LD quantization、VHS chroma rotation、
-  complex frequency filtering を高速化します。inverse radix-4 FFT と 16-tap TBC
+  complex frequency filtering を高速化します。forward/inverse radix-4 FFT と 16-tap TBC
   sinc kernel は算術順序を変えずに pinned pointer indexing で bounds check を除去し、
   differential test で transform bit と output hash の一致を維持します。
 - Recovery metadata は disk streaming され、snapshot queue の容量は 1、field-order
@@ -178,11 +178,11 @@ peak working set は 1.76/1.88/1.67 GiB、後半中央値は 1.42/1.30/1.28 GiB 
 320 frame はすべて書き込まれ、decode length に伴う memory 増加はありません。
 以前の allocation pass では PAL LD 4-field probe も 5.12 GiB から 1.96 GiB に減少しました。
 
-最新の PAL サイズ TBC sinc 単体 A/B では、field あたりの中央値が 3.929 ms から
-3.727 ms へ下がり、kernel は 5.1% 改善しました。新しい 160-frame full-path run は
-26.95 秒で完了し、実行時間を 4 分割した private-memory 中央値は
-1.45/1.34/1.29/1.35 GiB、peak は 1.71 GiB でした。TBC、JSON、chroma の
-SHA-256 は完全に一致しました。
+pinned pointer を使う PAL サイズ TBC sinc 単体 A/B では、field あたりの中央値が
+3.929 ms から 3.727 ms へ下がり、kernel は 5.1% 改善しました。続く interior-window
+path は edge と短い input の clamp を維持し、serial probe をさらに 1.6% 改善しました。
+新しい 160-frame run は 21.31 秒、private-memory の 4 分割中央値は
+0.78/1.18/1.20/1.41 GiB、peak は 1.68 GiB で、TBC、JSON、chroma SHA-256 は一致しました。
 
 AVX RF-envelope preparation は、単体 32K-block 中央値を 57.5 us から 13.3 us へ
 短縮し、kernel は 76.9% 改善しました。40-frame 中央値は 7.55 秒から 7.39 秒、
@@ -213,6 +213,11 @@ output hash は完全に一致しました。sampled `byte[]` allocation は 36.
 run の peak は 1.68 GiB、private-memory 四分位中央値は 0.88/1.55/0.78/1.51 GiB で、
 単調増加ではありません。TBC、JSON、chroma、単体 block の hash は完全に一致しました。
 
+forward radix-4 kernel も inverse と同じ pinned indexing を使用するようになりました。
+32768-point 単体中央値は 204.7 us から 195.9 us（4.3%）へ下がり、bit は完全一致です。
+384-block RF composite は 841.96/841.19 ms で実質同等のため、block 全体の高速化は
+主張しません。
+
 続く float32 SOS 最適化では sample-major の演算順序を維持し、1、2、4-section cascade
 の state をローカル変数に保持します。それ以外の section 数では flat で bounded な
 state を使用し、32 section までは stack、それを超える場合は heap へ fallback します。
@@ -242,7 +247,7 @@ dotnet test VHSDecodeDotNet.slnx -c Release --no-build --no-restore
 
 現在の正式な Release build は warning 0、error 0 です。xUnit v3 project は
 `dotnet test` と Visual Studio Test Explorer の両方で個別に検出できる
-**779** tests を公開します。
+**781** tests を公開します。
 
 <!-- SECTION: usage -->
 

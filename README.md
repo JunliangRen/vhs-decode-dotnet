@@ -2,7 +2,7 @@
 
 **[English](README.md)** | [简体中文](README.zh-CN.md) | [日本語](README.ja.md)
 
-<!-- README_SYNC: 2026-07-19.6 -->
+<!-- README_SYNC: 2026-07-19.7 -->
 
 .NET 11 rewrite of the decode-facing parts of
 [`oyvindln/vhs-decode`](https://github.com/oyvindln/vhs-decode), focused on
@@ -154,7 +154,7 @@ release compatibility remain the first constraint.
   rendering, and retained LD VITS sources keep independent ownership.
 - AVX/FMA kernels accelerate exact float32 conversion, VHS RF-envelope
   preparation, VHS Rust-style FM angle approximation, LD quantization, VHS
-  chroma rotation, and complex frequency filtering. The inverse radix-4 FFT
+  chroma rotation, and complex frequency filtering. The forward/inverse radix-4 FFT
   and 16-tap TBC sinc kernels use pinned pointer indexing to remove bounds
   checks without changing arithmetic order; differential tests preserve exact
   transform bits and output hashes.
@@ -185,10 +185,11 @@ working sets were 1.76/1.88/1.67 GiB, while second-half medians were
 growth with decode length. Earlier allocation work also reduced a PAL LD
 four-field probe from 5.12 GiB to 1.96 GiB.
 
-The latest isolated PAL-sized TBC sinc A/B reduced the median from 3.929 ms to
-3.727 ms per field, a 5.1% kernel gain. A fresh 160-frame full-path run finished
-in 26.95 s; private-memory medians by quarter were 1.45/1.34/1.29/1.35 GiB with
-a 1.71 GiB peak. TBC, JSON, and chroma SHA-256 values remained identical.
+The pinned PAL-sized TBC sinc A/B reduced the median from 3.929 ms to 3.727 ms
+per field, a 5.1% kernel gain. A follow-up interior-window path retained clamped
+edges and short inputs while improving its serial probe by another 1.6%. A fresh
+160-frame run finished in 21.31 s with 0.78/1.18/1.20/1.41 GiB quarter medians
+and a 1.68 GiB peak; TBC, JSON, and chroma SHA-256 remained identical.
 
 AVX RF-envelope preparation reduced the isolated 32K-block median from 57.5 us
 to 13.3 us, a 76.9% kernel gain. The 40-frame median moved from 7.55 s to 7.39 s,
@@ -220,6 +221,11 @@ wall-time neutral at 24.54/24.57 s while CPU time fell from 78.03 s to 70.13 s
 were 0.88/1.55/0.78/1.51 GiB rather than a monotonic rise. TBC, JSON, chroma, and
 isolated block hashes remained exact.
 
+The forward radix-4 kernel now uses the same pinned indexing as the inverse;
+its isolated 32768-point median fell from 204.7 us to 195.9 us (4.3%) with exact
+bits. The 384-block RF composite was neutral at 841.96/841.19 ms, so no
+whole-block speedup is claimed for this change.
+
 The subsequent float32 SOS pass preserves sample-major arithmetic order while
 keeping one-, two-, and four-section cascade states in locals. Other cascade
 sizes use flat bounded state: stack storage through 32 sections and a heap
@@ -248,7 +254,7 @@ dotnet test VHSDecodeDotNet.slnx -c Release --no-build --no-restore
 ```
 
 The current formal Release build has zero warnings and errors. The xUnit v3
-project exposes **779** independently discoverable tests to both
+project exposes **781** independently discoverable tests to both
 `dotnet test` and Visual Studio Test Explorer.
 
 <!-- SECTION: usage -->
