@@ -51,8 +51,9 @@ This port targets the decode CLIs only:
 - standalone aliases equivalent to `vhs-decode`, `cvbs-decode`, `ld-decode`,
   and `hifi-decode`
 
-GUI launcher, filter tuning, and TBC utility tools are intentionally outside the
-port scope unless they are required by the decode pipeline itself.
+The double-click GUI launcher and other user-operation UI, filter tuning, and
+TBC utility tools are intentionally outside the port scope unless they are
+required by the decode pipeline itself.
 
 ## Compatibility status
 
@@ -68,7 +69,7 @@ port scope unless they are required by the decode pipeline itself.
 | LaserDisc decode | Implemented; rare parity gaps remain | Video, EFM, analog audio, AC3, RF-TBC, metadata, and sidecars are wired with PAL/NTSC differential coverage. |
 | Input containers | Broadly implemented | Raw input and common FFmpeg/PyAV container paths are covered; rare codec/timestamp cases remain. |
 | Output and recovery | Implemented; edge cases remain | Streaming TBC/audio writes, JSON recovery, SQLite, logs, and failure ordering are covered. |
-| Developer-only UI | Not implemented | Matplotlib `--debug_plot` windows and the line-profiler report are parsed but not rendered. |
+| Interactive UI and developer tooling | Out of scope | The double-click GUI launcher, Matplotlib `--debug_plot` windows, and line-profiler report are intentionally not rendered. |
 
 The status table is intentionally conservative. "Implemented" means the decode
 path exists and has focused compatibility tests; it does not claim that every
@@ -835,8 +836,10 @@ possible capture has already been proven byte-for-byte identical.
   bounds/capping and exact correction warnings before using
   `(sync + blank) / 2` for pulse detection;
   `--use_saved_levels` reuses the previous field's detected sync/blank levels
-  when available, but retries fresh level detection if the saved levels fail to
-  produce usable sync/line locations
+  when available, retries fresh level detection if the saved levels fail to
+  produce usable sync/line locations, and proactively reruns full detection on
+  the next field when the current field has at least 30 line-location errors;
+  the cross-field decision is preserved by speculative/retry state snapshots
 - VHS pulse classification now uses the wider v0.4.0 HSYNC +/-0.7 us and
   equalizing +/-0.9 us tolerances; LD/CVBS retain +/-0.5 us
 - CVBS automatic sync now derives per-field sync/blank levels from the 0.5 MHz
@@ -1479,9 +1482,8 @@ decode commands.
 
 #### HiFi
 
-- remaining HiFi real-capture end-to-end output baselines and hosted GUI
-  behavior; the command runner, Windows live preview, and GNU Radio path are
-  wired
+- remaining HiFi real-capture end-to-end output baselines; the command runner,
+  Windows live preview, and GNU Radio path are wired
 
 #### LaserDisc
 
@@ -1502,12 +1504,6 @@ decode commands.
   and optional test `.ldf` outputs across the remaining formats, options, and
   real-capture edge cases
 
-#### Developer-only tooling
-
-- the VHS `--debug_plot` Matplotlib windows and LD `--use_profiler`
-  line-profiler report are parsed with their decode-side thread behavior, but
-  their interactive developer UI/reporting is not yet reimplemented
-
 ## Build and test
 
 ```powershell
@@ -1516,7 +1512,7 @@ dotnet test VHSDecodeDotNet.slnx --no-build
 ```
 
 The current formal solution build completes with zero warnings and errors, and
-the xUnit v3 project exposes 713 independently discoverable compatibility tests
+the xUnit v3 project exposes 717 independently discoverable compatibility tests
 to `dotnet test` and Visual Studio Test Explorer. On the
 same Windows machine and fixtures, Release wall-clock measurements for one
 frame were 2.346 s versus 7.193 s for NTSC VHS and 1.651 s versus 5.865 s for
