@@ -116,6 +116,8 @@
   与 GNU Radio 读取保持有序。
 - 以 stream 为作用域的已解码 RF 缓存避免在重叠场读取之间重复 FFT，
   同时限制内存占用。
+- VHS 会话使用最多八个 RF block 的纯计算预读，使当前场进入 TBC 阶段时
+  worker 可以准备下一场。输入读取仍然有序，seek 或释放时会取消待处理工作。
 - 较长的 TBC sinc 重采样任务共享 worker 配额并保持输出顺序；
   `--threads 0` 和 `--threads 1` 保留确定性的串行路径。
 - HiFi 使用有界并行 block 解码，之后按顺序进行后处理和写入。
@@ -133,6 +135,9 @@
 
 这些数字只对应特定夹具，不是通用 benchmark。一个 PAL LD 四场 Core
 probe 在保持已验证输出的同时，将托管分配量从 5.12 GiB 降至 1.96 GiB。
+在一个合成的 160-frame PAL VHS probe 上，`--threads 20` 的有界预读将
+Release 用时从 29.03 s 降至 27.15 s（6.5%），TBC 与 JSON 输出逐字节一致，
+且内存曲线没有持续增长。
 
 <!-- SECTION: build -->
 
@@ -152,7 +157,7 @@ dotnet test VHSDecodeDotNet.slnx -c Release --no-build --no-restore
 ```
 
 当前正式 Release 构建为零警告、零错误。xUnit v3 项目向
-`dotnet test` 和 Visual Studio Test Explorer 暴露 **736** 个可独立发现的测试。
+`dotnet test` 和 Visual Studio Test Explorer 暴露 **740** 个可独立发现的测试。
 
 <!-- SECTION: usage -->
 

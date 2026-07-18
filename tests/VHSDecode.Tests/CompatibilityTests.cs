@@ -1434,6 +1434,7 @@ public void DecodeSessionFactoryAppliesExecutionOptions()
     AssertEqual(7, vhs.ExecutionOptions.RequestedThreads);
     AssertEqual(0, vhs.ExecutionOptions.WorkerThreads);
     AssertEqual(0, vhs.StreamDecoder.WorkerThreads);
+    AssertEqual(0, vhs.StreamDecoder.PrefetchBlocks);
     AssertEqual(-1, vhs.ExecutionOptions.SeekFrame);
     AssertTrue(vhs.ExecutionOptions.WriteDebugData);
     AssertTrue(vhs.ExecutionOptions.Debug);
@@ -1455,6 +1456,7 @@ public void DecodeSessionFactoryAppliesExecutionOptions()
     AssertEqual(3, cvbs.ExecutionOptions.RequestedThreads);
     AssertEqual(3, cvbs.ExecutionOptions.WorkerThreads);
     AssertEqual(3, cvbs.StreamDecoder.WorkerThreads);
+    AssertEqual(0, cvbs.StreamDecoder.PrefetchBlocks);
     AssertEqual(42, cvbs.ExecutionOptions.SeekFrame);
 
     DecodeSession ld = DecodeSessionFactory.Create(Parse(CliSpecs.LaserDisc, [
@@ -1472,6 +1474,7 @@ public void DecodeSessionFactoryAppliesExecutionOptions()
     AssertEqual(2, ld.ExecutionOptions.RequestedThreads);
     AssertEqual(2, ld.ExecutionOptions.WorkerThreads);
     AssertEqual(2, ld.StreamDecoder.WorkerThreads);
+    AssertEqual(0, ld.StreamDecoder.PrefetchBlocks);
     AssertEqual(123, ld.ExecutionOptions.SeekFrame);
     AssertTrue(ld.ExecutionOptions.IgnoreLeadOut);
     AssertTrue(ld.ExecutionOptions.VerboseVits);
@@ -1484,6 +1487,15 @@ public void DecodeSessionFactoryAppliesExecutionOptions()
         "outbase"
     ]));
     AssertTrue(cxadc.ExecutionOptions.CxAdcCompatibilityMode);
+
+    DecodeSession parallelVhs = DecodeSessionFactory.Create(Parse(CliSpecs.Vhs, [
+        "--threads",
+        "7",
+        "--no_resample",
+        "input.s16",
+        "outbase"
+    ]));
+    AssertEqual(7, parallelVhs.StreamDecoder.PrefetchBlocks);
 }
 
 [Fact(DisplayName = "decode session applies VHS params file overrides")]
@@ -6489,6 +6501,7 @@ public void RfBlockStreamDecoderStitchesOverlapSaveBlocks()
     AssertEqual(null, streamDecoder.Read(new MemoryStream(shortBytes), begin: 20, length: 10));
     AssertThrows<ArgumentException>(() => new RfBlockStreamDecoder(pipeline, blockLength: 8, blockCut: 4, blockCutEnd: 4));
     AssertThrows<ArgumentOutOfRangeException>(() => new RfBlockStreamDecoder(pipeline, blockLength, blockCut, blockCutEnd, workerThreads: -1));
+    AssertThrows<ArgumentOutOfRangeException>(() => new RfBlockStreamDecoder(pipeline, blockLength, blockCut, blockCutEnd, prefetchBlocks: -1));
 }
 
 [Fact(DisplayName = "SOS filter applies forward and forward-backward filtering")]

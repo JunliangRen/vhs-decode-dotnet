@@ -16,22 +16,29 @@ public sealed record RfDecodedSpan(
     double[]? VideoBurst = null,
     double[]? VideoPilot = null);
 
-public sealed class RfBlockStreamDecoder
+public sealed class RfBlockStreamDecoder : IDisposable
 {
     private const int DecodedBlockCacheCapacity = 16;
+    internal const int MaximumPrefetchBlocks = 8;
     private readonly RfBlockDecodePipeline _pipeline;
     private readonly Dictionary<long, RfPipelineBlock> _decodedBlockCache = [];
+    private readonly Dictionary<long, RfPipelineBlock> _prefetchedBlockCache = [];
     private readonly Dictionary<long, RfPipelineBlock> _sequentialBlockCache = [];
+    private readonly int _decodedBlockCacheCapacity;
     private Stream? _decodedBlockCacheStream;
     private long? _lastReadFirstBlock;
     private long? _lastSequentialDecodedBlock;
+    private Task<PrefetchedBlockBatch>? _prefetchTask;
+    private CancellationTokenSource? _prefetchCancellation;
+    private bool _disposed;
 
     public RfBlockStreamDecoder(
         RfBlockDecodePipeline pipeline,
         int blockLength,
         int blockCut,
         int blockCutEnd,
-        int workerThreads = 1)
+        int workerThreads = 1,
+        int prefetchBlocks = 0)
     {
         if (blockLength <= 0)
         {
@@ -48,12 +55,21 @@ public sealed class RfBlockStreamDecoder
             throw new ArgumentOutOfRangeException(nameof(workerThreads));
         }
 
+        if (prefetchBlocks < 0)
+        {
+            throw new ArgumentOutOfRangeException(nameof(prefetchBlocks));
+        }
+
         _pipeline = pipeline;
         BlockLength = blockLength;
         BlockCut = blockCut;
         BlockCutEnd = blockCutEnd;
         BlockStride = blockLength - blockCut - blockCutEnd;
         WorkerThreads = workerThreads;
+        PrefetchBlocks = workerThreads > 1 && !_pipeline.RequiresSequentialBlockDecode
+            ? Math.Min(prefetchBlocks, Math.Min(workerThreads, MaximumPrefetchBlocks))
+            : 0;
+        _decodedBlockCacheCapacity = checked(DecodedBlockCacheCapacity + PrefetchBlocks);
     }
 
     public int BlockLength { get; }
@@ -66,11 +82,18 @@ public sealed class RfBlockStreamDecoder
 
     public int WorkerThreads { get; }
 
+    public int PrefetchBlocks { get; }
+
     internal int CachedDecodedBlockCount => _decodedBlockCache.Count;
+
+    internal int CachedPrefetchedBlockCount => _prefetchedBlockCache.Count;
 
     internal void InvalidateCachedBlocks()
     {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+        _ = TakePendingPrefetch(cancel: true);
         _decodedBlockCache.Clear();
+        _prefetchedBlockCache.Clear();
         _sequentialBlockCache.Clear();
         _decodedBlockCacheStream = null;
         _lastReadFirstBlock = null;
@@ -79,6 +102,7 @@ public sealed class RfBlockStreamDecoder
 
     public RfDecodedSpan? Read(Stream stream, long begin, int length)
     {
+        ObjectDisposedException.ThrowIf(_disposed, this);
         if (begin < 0)
         {
             throw new ArgumentOutOfRangeException(nameof(begin));
@@ -206,7 +230,7 @@ public sealed class RfBlockStreamDecoder
                     pipelineBlock = cachedBlock;
                 }
                 else if (!_pipeline.RequiresSequentialBlockDecode
-                    && _decodedBlockCache.TryGetValue(block, out cachedBlock))
+                    && TryTakeDecodedBlock(block, out cachedBlock))
                 {
                     pipelineBlock = cachedBlock;
                 }
@@ -246,7 +270,7 @@ public sealed class RfBlockStreamDecoder
             for (int i = 0; i < blockCount; i++)
             {
                 long block = firstBlock + i;
-                if (_decodedBlockCache.TryGetValue(block, out RfPipelineBlock? cachedBlock))
+                if (TryTakeDecodedBlock(block, out RfPipelineBlock cachedBlock))
                 {
                     decodedBlocks[i] = cachedBlock;
                     continue;
@@ -284,6 +308,8 @@ public sealed class RfBlockStreamDecoder
             }
         }
 
+        StartPrefetch(stream, lastBlock);
+
         int offset = checked((int)(begin - (firstBlock * BlockStride)));
         LaserDiscAnalogAudioBlock? audioSpan = null;
         if (audioLeft is not null && audioRight is not null)
@@ -316,6 +342,26 @@ public sealed class RfBlockStreamDecoder
             videoPilot is null ? null : Slice(videoPilot, offset, length));
     }
 
+    public void Dispose()
+    {
+        if (_disposed)
+        {
+            return;
+        }
+
+        _disposed = true;
+        try
+        {
+            _ = TakePendingPrefetch(cancel: true);
+        }
+        finally
+        {
+            _decodedBlockCache.Clear();
+            _prefetchedBlockCache.Clear();
+            _sequentialBlockCache.Clear();
+        }
+    }
+
     private void PrepareDecodedBlockCache(Stream stream, long firstBlock)
     {
         if (_pipeline.RequiresSequentialBlockDecode)
@@ -323,16 +369,42 @@ public sealed class RfBlockStreamDecoder
             return;
         }
 
-        if (!ReferenceEquals(_decodedBlockCacheStream, stream)
-            || (_lastReadFirstBlock.HasValue && firstBlock < _lastReadFirstBlock.Value))
+        bool resetCache = !ReferenceEquals(_decodedBlockCacheStream, stream)
+            || (_lastReadFirstBlock.HasValue && firstBlock < _lastReadFirstBlock.Value);
+        PrefetchedBlockBatch? completedPrefetch = TakePendingPrefetch(cancel: resetCache);
+        if (resetCache)
         {
             _decodedBlockCache.Clear();
+            _prefetchedBlockCache.Clear();
         }
-        else if (_decodedBlockCache.Count > 0)
+        else
         {
-            foreach (long staleBlock in _decodedBlockCache.Keys.Where(block => block < firstBlock).ToArray())
+            if (completedPrefetch is not null && ReferenceEquals(completedPrefetch.Stream, stream))
             {
-                _decodedBlockCache.Remove(staleBlock);
+                for (int i = 0; i < completedPrefetch.BlockNumbers.Length; i++)
+                {
+                    long block = completedPrefetch.BlockNumbers[i];
+                    if (block >= firstBlock && !_decodedBlockCache.ContainsKey(block))
+                    {
+                        _prefetchedBlockCache[block] = completedPrefetch.Blocks[i];
+                    }
+                }
+            }
+
+            if (_decodedBlockCache.Count > 0)
+            {
+                foreach (long staleBlock in _decodedBlockCache.Keys.Where(block => block < firstBlock).ToArray())
+                {
+                    _decodedBlockCache.Remove(staleBlock);
+                }
+            }
+
+            if (_prefetchedBlockCache.Count > 0)
+            {
+                foreach (long staleBlock in _prefetchedBlockCache.Keys.Where(block => block < firstBlock).ToArray())
+                {
+                    _prefetchedBlockCache.Remove(staleBlock);
+                }
             }
         }
 
@@ -343,9 +415,166 @@ public sealed class RfBlockStreamDecoder
     private void CacheDecodedBlock(long block, RfPipelineBlock decoded)
     {
         _decodedBlockCache[block] = decoded;
-        while (_decodedBlockCache.Count > DecodedBlockCacheCapacity)
+        while (_decodedBlockCache.Count > _decodedBlockCacheCapacity)
         {
             _decodedBlockCache.Remove(_decodedBlockCache.Keys.Min());
+        }
+    }
+
+    private bool TryTakeDecodedBlock(long block, out RfPipelineBlock decoded)
+    {
+        if (_decodedBlockCache.TryGetValue(block, out RfPipelineBlock? cached))
+        {
+            decoded = cached;
+            return true;
+        }
+
+        if (_prefetchedBlockCache.Remove(block, out cached))
+        {
+            decoded = cached;
+            _pipeline.ReportDeferredDiagnostics(decoded);
+            CacheDecodedBlock(block, decoded);
+            return true;
+        }
+
+        decoded = null!;
+        return false;
+    }
+
+    private void StartPrefetch(Stream stream, long lastBlock)
+    {
+        if (PrefetchBlocks == 0 || _prefetchTask is not null || lastBlock == long.MaxValue)
+        {
+            return;
+        }
+
+        int availableSlots = PrefetchBlocks - _prefetchedBlockCache.Count;
+        if (availableSlots <= 0)
+        {
+            return;
+        }
+
+        var blockNumbers = new long[availableSlots];
+        var preparedInputs = new double[availableSlots][];
+        int preparedCount = 0;
+        long candidate = lastBlock + 1;
+        while (preparedCount < availableSlots)
+        {
+            if (!_decodedBlockCache.ContainsKey(candidate)
+                && !_prefetchedBlockCache.ContainsKey(candidate))
+            {
+                double[]? preparedInput;
+                try
+                {
+                    long sample = checked(candidate * BlockStride);
+                    preparedInput = _pipeline.LoadBlockInput(stream, sample, BlockLength);
+                }
+                catch (Exception exception) when (exception is not OutOfMemoryException and not AccessViolationException)
+                {
+                    // Speculative I/O must not fail a field that has already decoded successfully.
+                    break;
+                }
+
+                if (preparedInput is null)
+                {
+                    break;
+                }
+
+                blockNumbers[preparedCount] = candidate;
+                preparedInputs[preparedCount] = preparedInput;
+                preparedCount++;
+            }
+
+            if (candidate == long.MaxValue)
+            {
+                break;
+            }
+
+            candidate++;
+        }
+
+        if (preparedCount == 0)
+        {
+            return;
+        }
+
+        if (preparedCount != availableSlots)
+        {
+            Array.Resize(ref blockNumbers, preparedCount);
+            Array.Resize(ref preparedInputs, preparedCount);
+        }
+
+        var cancellation = new CancellationTokenSource();
+        _prefetchCancellation = cancellation;
+        // The stream was read above on the caller thread; background work is compute-only.
+        _prefetchTask = Task.Run(
+            () => DecodePrefetchedBlocks(stream, blockNumbers, preparedInputs, cancellation.Token),
+            cancellation.Token);
+    }
+
+    private PrefetchedBlockBatch DecodePrefetchedBlocks(
+        Stream stream,
+        long[] blockNumbers,
+        double[][] preparedInputs,
+        CancellationToken cancellationToken)
+    {
+        var decodedBlocks = new RfPipelineBlock[preparedInputs.Length];
+        if (preparedInputs.Length == 1)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            decodedBlocks[0] = _pipeline.DecodePreparedBlock(preparedInputs[0], reportDiagnostics: false);
+        }
+        else
+        {
+            Parallel.For(
+                0,
+                preparedInputs.Length,
+                new ParallelOptions
+                {
+                    CancellationToken = cancellationToken,
+                    MaxDegreeOfParallelism = Math.Min(WorkerThreads, preparedInputs.Length)
+                },
+                index => decodedBlocks[index] = _pipeline.DecodePreparedBlock(
+                    preparedInputs[index],
+                    reportDiagnostics: false));
+        }
+
+        return new PrefetchedBlockBatch(stream, blockNumbers, decodedBlocks);
+    }
+
+    private PrefetchedBlockBatch? TakePendingPrefetch(bool cancel)
+    {
+        Task<PrefetchedBlockBatch>? task = _prefetchTask;
+        if (task is null)
+        {
+            return null;
+        }
+
+        CancellationTokenSource cancellation = _prefetchCancellation
+            ?? throw new InvalidOperationException("RF prefetch cancellation state was not initialized.");
+        _prefetchTask = null;
+        _prefetchCancellation = null;
+        if (cancel)
+        {
+            cancellation.Cancel();
+        }
+
+        try
+        {
+            return task.GetAwaiter().GetResult();
+        }
+        catch (OperationCanceledException) when (cancel)
+        {
+            return null;
+        }
+        catch (Exception exception) when (
+            cancel && exception is not OutOfMemoryException and not AccessViolationException)
+        {
+            return null;
+        }
+        finally
+        {
+            cancellation.Dispose();
         }
     }
 
@@ -435,4 +664,9 @@ public sealed class RfBlockStreamDecoder
         Array.Copy(source, offset, output, 0, length);
         return output;
     }
+
+    private sealed record PrefetchedBlockBatch(
+        Stream Stream,
+        long[] BlockNumbers,
+        RfPipelineBlock[] Blocks);
 }

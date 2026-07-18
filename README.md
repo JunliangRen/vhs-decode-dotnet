@@ -123,6 +123,9 @@ release compatibility remain the first constraint.
   stream, FFmpeg, and GNU Radio reads stay ordered.
 - A stream-scoped decoded RF cache avoids duplicate FFT work across overlapping
   field reads while keeping memory bounded.
+- VHS sessions use compute-only lookahead capped at eight RF blocks so workers
+  can prepare the next field while current-field TBC work continues. Input
+  reads remain ordered, and pending work is cancelled on seek or disposal.
 - Long TBC sinc-resampling jobs share the worker budget and preserve output
   order; `--threads 0` and `--threads 1` retain deterministic serial paths.
 - HiFi uses bounded parallel block decoding followed by ordered
@@ -141,7 +144,9 @@ On one Windows fixture machine, one-frame Release measurements were:
 
 These numbers are fixture-specific, not universal benchmarks. A PAL LD
 four-field Core probe reduced managed allocation from 5.12 GiB to 1.96 GiB
-while preserving verified output.
+while preserving verified output. On a synthetic 160-frame PAL VHS probe at
+`--threads 20`, bounded lookahead reduced Release time from 29.03 s to 27.15 s
+(6.5%) with byte-identical TBC and JSON output and a non-growing memory curve.
 
 <!-- SECTION: build -->
 
@@ -161,7 +166,7 @@ dotnet test VHSDecodeDotNet.slnx -c Release --no-build --no-restore
 ```
 
 The current formal Release build has zero warnings and errors. The xUnit v3
-project exposes **736** independently discoverable tests to both
+project exposes **740** independently discoverable tests to both
 `dotnet test` and Visual Studio Test Explorer.
 
 <!-- SECTION: usage -->

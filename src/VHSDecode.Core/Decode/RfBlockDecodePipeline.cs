@@ -81,7 +81,7 @@ public sealed class RfBlockDecodePipeline : IDisposable
             : _inputProcessor?.Process(loadedInput) ?? loadedInput;
     }
 
-    internal RfPipelineBlock DecodePreparedBlock(double[] input)
+    internal RfPipelineBlock DecodePreparedBlock(double[] input, bool reportDiagnostics = true)
     {
         ArgumentNullException.ThrowIfNull(input);
 
@@ -114,11 +114,9 @@ public sealed class RfBlockDecodePipeline : IDisposable
             _filters.VhsEnvelopeSos,
             _filters.VhsRfTopSos,
             inputSpectrum);
-        if (demodulated.VhsWeakRfSignal)
+        if (reportDiagnostics)
         {
-            _diagnosticLogger?.Invoke(
-                "WARNING",
-                "RF signal is weak. Is your deck tracking properly?");
+            ReportDiagnostics(demodulated);
         }
 
         if (_filterOptions.LdClipDemodForVideo)
@@ -160,9 +158,25 @@ public sealed class RfBlockDecodePipeline : IDisposable
         return new RfPipelineBlock(input, demodulated);
     }
 
+    internal void ReportDeferredDiagnostics(RfPipelineBlock block)
+    {
+        ArgumentNullException.ThrowIfNull(block);
+        ReportDiagnostics(block.Demodulated);
+    }
+
     public void Dispose()
     {
         _inputProcessor?.Dispose();
+    }
+
+    private void ReportDiagnostics(RfDemodulatedBlock demodulated)
+    {
+        if (demodulated.VhsWeakRfSignal)
+        {
+            _diagnosticLogger?.Invoke(
+                "WARNING",
+                "RF signal is weak. Is your deck tracking properly?");
+        }
     }
 
     private static double[] DecodeChromaBurst(

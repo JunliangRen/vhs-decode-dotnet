@@ -45,10 +45,23 @@ public sealed record DecodeSession(
 
     public void Dispose()
     {
-        Pipeline.Dispose();
-        if (Loader is IDisposable disposable)
+        try
         {
-            disposable.Dispose();
+            StreamDecoder.Dispose();
+        }
+        finally
+        {
+            try
+            {
+                Pipeline.Dispose();
+            }
+            finally
+            {
+                if (Loader is IDisposable disposable)
+                {
+                    disposable.Dispose();
+                }
+            }
         }
     }
 }
@@ -252,7 +265,12 @@ public static class DecodeSessionFactory
             blockLength,
             blockCut,
             blockCutEnd,
-            executionOptions.WorkerThreads);
+            executionOptions.WorkerThreads,
+            prefetchBlocks: command.Spec.Name == "vhs" && pipeline.InputProcessor is null
+                ? Math.Min(
+                    executionOptions.WorkerThreads,
+                    Math.Min(Environment.ProcessorCount, RfBlockStreamDecoder.MaximumPrefetchBlocks))
+                : 0);
         TbcFrameSpec tbcFrameSpec = TbcFrameSpec.FromParameters(parameters);
         var tbcRenderer = new TbcFieldRenderer(
             tbcFrameSpec,

@@ -63,7 +63,7 @@ public sealed partial class ReadmeLocalizationTests
         string[] synchronizedFacts =
         [
             "43155200da87c0d49eb37d8ec09b1372075ee8e4",
-            "**736**",
+            "**740**",
             "2.346 s",
             "7.193 s",
             "1.651 s",
@@ -85,6 +85,7 @@ public sealed partial class ReadmeLocalizationTests
             }
 
             Assert.DoesNotContain("**719**", content, StringComparison.Ordinal);
+            Assert.DoesNotContain("**736**", content, StringComparison.Ordinal);
         }
 
         Assert.True(
