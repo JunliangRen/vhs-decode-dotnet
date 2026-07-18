@@ -110,6 +110,40 @@ public sealed class TbcJsonSnapshotCompatibilityTests
         }
     }
 
+    [Fact(DisplayName = "JSON snapshot worker failure does not deadlock finalization")]
+    public async Task JsonSnapshotWorkerFailureDoesNotDeadlockFinalization()
+    {
+        CancellationToken cancellationToken = TestContext.Current.CancellationToken;
+        string tempDirectory = CreateTempDirectory();
+        using var writeStarted = new ManualResetEventSlim();
+        try
+        {
+            string jsonPath = Path.Combine(tempDirectory, "failure.tbc.json");
+            using DecodeSession session = CreateSession(Path.Combine(tempDirectory, "failure"));
+            using var writer = new TbcOutputMetadataWriter.StreamingWriter(
+                session,
+                jsonPath,
+                _ =>
+                {
+                    writeStarted.Set();
+                    throw new IOException("Synthetic snapshot failure.");
+                });
+
+            writer.Add(BuildField(startSample: 0, detectedFirstField: true), BuildDecision(1, true));
+            writer.WriteSnapshot();
+            Assert.True(writeStarted.Wait(TimeSpan.FromSeconds(10), cancellationToken));
+
+            await Task.Run(writer.Complete, cancellationToken)
+                .WaitAsync(TimeSpan.FromSeconds(10), cancellationToken);
+
+            Assert.False(File.Exists(jsonPath + ".fields.tmp"));
+        }
+        finally
+        {
+            Directory.Delete(tempDirectory, recursive: true);
+        }
+    }
+
     private static DecodeSession CreateSession(string outputBase)
     {
         ParsedCommand command = new CommandLineParser().Parse(CliSpecs.Vhs, [

@@ -38,7 +38,7 @@ public static class TbcOutputMetadataWriter
         private readonly bool _verbose;
         private readonly FieldObjectBuilder _fieldBuilder;
         private readonly Func<string, Stream> _createSnapshotOutput;
-        private readonly BlockingCollection<SnapshotWorkItem> _snapshotQueue = [];
+        private readonly BlockingCollection<SnapshotWorkItem> _snapshotQueue = new(boundedCapacity: 1);
         private readonly ManualResetEventSlim _snapshotWriting = new();
         private readonly Thread _snapshotThread;
         private StreamWriter? _fieldsWriter;
@@ -109,7 +109,7 @@ public static class TbcOutputMetadataWriter
             ObjectDisposedException.ThrowIf(_fieldsWriter is null, this);
             if (!_snapshotWriting.IsSet)
             {
-                _snapshotQueue.Add(CaptureSnapshot());
+                _snapshotQueue.TryAdd(CaptureSnapshot());
             }
         }
 
@@ -229,12 +229,25 @@ public static class TbcOutputMetadataWriter
 
             if (finalSnapshot is not null)
             {
-                _snapshotQueue.Add(finalSnapshot);
+                _ = EnqueueWhileSnapshotWorkerIsRunning(finalSnapshot);
             }
 
-            _snapshotQueue.Add(SnapshotSentinel);
+            _ = EnqueueWhileSnapshotWorkerIsRunning(SnapshotSentinel);
             _snapshotThread.Join();
             _snapshotWorkerStopped = true;
+        }
+
+        private bool EnqueueWhileSnapshotWorkerIsRunning(SnapshotWorkItem snapshot)
+        {
+            while (_snapshotThread.IsAlive)
+            {
+                if (_snapshotQueue.TryAdd(snapshot, millisecondsTimeout: 50))
+                {
+                    return true;
+                }
+            }
+
+            return false;
         }
 
         private void WriteCurrentJson(SnapshotWorkItem snapshot)

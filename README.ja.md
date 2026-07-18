@@ -2,7 +2,7 @@
 
 [English](README.md) | [简体中文](README.zh-CN.md) | **[日本語](README.ja.md)**
 
-<!-- README_SYNC: 2026-07-18.1 -->
+<!-- README_SYNC: 2026-07-18.2 -->
 
 [`oyvindln/vhs-decode`](https://github.com/oyvindln/vhs-decode) の
 デコード関連部分を .NET 10 で再実装するプロジェクトです。現在は release
@@ -121,16 +121,22 @@
   stream、FFmpeg、GNU Radio の読み取り順序を維持します。
 - stream 単位の decoded RF cache により、重複する field read 間の FFT 再計算を
   避けつつメモリ使用量を制限します。
-- VHS session は最大 8 RF block の compute-only lookahead を使用し、現在の field の
-  TBC 処理中に worker が次の field を準備します。入力の読み取り順序は維持され、
-  seek または dispose 時には保留中の処理をキャンセルします。
+- VHS session は compute-only lookahead RF block を最大 20 個保持し、そのうち
+  最大 8 個だけを同時 decode します。現在の field の TBC 処理中に次の field を
+  準備しつつ、FFT allocation burst が `--threads` とともに無制限に増えない構成です。
+  入力順序は維持され、seek または dispose 時には保留中の処理をキャンセルします。
 - 長い TBC sinc-resampling job は worker budget を共有し、出力順序を維持します。
   `--threads 0` と `--threads 1` は決定的な serial path を保持します。
 - HiFi は境界付き並列 block decode の後、順序どおりに後処理と書き込みを行います。
 - Managed FFT worker は scratch buffer と immutable root table を再利用し、
   安全な箇所で in-place transform を使い、aligned path の field 全体コピーを避けます。
-- AVX/FMA kernel は LD の float32 quantization と complex frequency filtering を
-  高速化し、検証済みの NumPy rounding と scalar fallback を保持します。
+- RF span assembly は block 境界の field array を作って再度 slice せず、要求された
+  最終 output window へ直接書き込みます。
+- AVX/FMA kernel は LD float32 quantization、VHS chroma rotation、complex frequency
+  filtering を高速化し、検証済みの NumPy rounding と scalar fallback を保持します。
+- Recovery metadata は disk streaming され、snapshot queue の容量は 1、field-order
+  history と RF cache にも hard limit があります。長時間 decode でも全 field を
+  保持したり、将来の work を無制限に enqueue したりしません。
 
 ある Windows fixture 環境での Release 1 frame 計測値は次のとおりです。
 
@@ -141,10 +147,14 @@
 
 これは特定 fixture の値であり、一般的な benchmark ではありません。
 PAL LD 4-field Core probe では、検証済み出力を維持しながら managed allocation を
-5.12 GiB から 1.96 GiB に削減しました。合成 160-frame PAL VHS probe の
-`--threads 20` では、境界付き lookahead により Release 時間が 29.03 s から
-27.15 s（6.5%）に短縮され、TBC/JSON 出力は byte-identical のまま、メモリ曲線も
-継続的に増加しませんでした。
+5.12 GiB から 1.96 GiB に削減しました。再現可能な 40-frame PAL VHS probe では、
+現在の境界付き pipeline により `--threads 1/5/20` が 16.48/9.06/8.07 秒から
+15.83/8.81/7.48 秒になりました。TBC/JSON hash は同一で、20-thread peak は
+固定 performance budget として約 1.08 GiB でした。
+
+別の 1.31 GB、68 秒 sustained probe では、warm-up 後の連続する 10 秒 window が
+8.94、9.11、8.96、9.11、8.98、9.08 MiB/s を記録しました。後半の slowdown はなく、
+平均 working set は decode 時間とともに増えず、約 0.90-0.92 GiB を維持しました。
 
 <!-- SECTION: build -->
 
@@ -165,7 +175,7 @@ dotnet test VHSDecodeDotNet.slnx -c Release --no-build --no-restore
 
 現在の正式な Release build は warning 0、error 0 です。xUnit v3 project は
 `dotnet test` と Visual Studio Test Explorer の両方で個別に検出できる
-**740** tests を公開します。
+**742** tests を公開します。
 
 <!-- SECTION: usage -->
 

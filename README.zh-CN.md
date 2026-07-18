@@ -2,7 +2,7 @@
 
 [English](README.md) | **[简体中文](README.zh-CN.md)** | [日本語](README.ja.md)
 
-<!-- README_SYNC: 2026-07-18.1 -->
+<!-- README_SYNC: 2026-07-18.2 -->
 
 这是 [`oyvindln/vhs-decode`](https://github.com/oyvindln/vhs-decode)
 中解码相关部分的 .NET 10 重写，当前以 release `v0.4.0`、commit
@@ -116,15 +116,19 @@
   与 GNU Radio 读取保持有序。
 - 以 stream 为作用域的已解码 RF 缓存避免在重叠场读取之间重复 FFT，
   同时限制内存占用。
-- VHS 会话使用最多八个 RF block 的纯计算预读，使当前场进入 TBC 阶段时
-  worker 可以准备下一场。输入读取仍然有序，seek 或释放时会取消待处理工作。
+- VHS 会话最多保留 20 个纯计算预读 RF block，同时最多解码其中 8 个；这样可在
+  当前场进行 TBC 时准备下一场，又不会让 FFT 分配峰值随 `--threads` 无限放大。
+  输入读取仍然有序，seek 或释放时会取消待处理工作。
 - 较长的 TBC sinc 重采样任务共享 worker 配额并保持输出顺序；
   `--threads 0` 和 `--threads 1` 保留确定性的串行路径。
 - HiFi 使用有界并行 block 解码，之后按顺序进行后处理和写入。
 - 托管 FFT worker 复用临时缓冲区和不可变 root table，在安全位置使用
   原地变换，并在对齐路径上避免完整场复制。
-- AVX/FMA 内核加速 LD float32 量化和复数频域滤波，同时保留已验证的
-  NumPy 舍入行为与标量回退路径。
+- RF span 直接写入请求的最终输出窗口，不再先分配整块边界场数组再做第二次切片复制。
+- AVX/FMA 内核加速 LD float32 量化、VHS 色度移位和复数频域滤波，同时保留
+  已验证的 NumPy 舍入行为与标量回退路径。
+- 恢复元数据以磁盘流式写入，snapshot 队列容量为 1，场顺序历史和 RF 缓存均有
+  硬上限；长时间解码不会保留所有已解码场，也不会无限排入未来工作。
 
 在一台 Windows 夹具机器上，Release 单帧测量为：
 
@@ -135,9 +139,13 @@
 
 这些数字只对应特定夹具，不是通用 benchmark。一个 PAL LD 四场 Core
 probe 在保持已验证输出的同时，将托管分配量从 5.12 GiB 降至 1.96 GiB。
-在一个合成的 160-frame PAL VHS probe 上，`--threads 20` 的有界预读将
-Release 用时从 29.03 s 降至 27.15 s（6.5%），TBC 与 JSON 输出逐字节一致，
-且内存曲线没有持续增长。
+在一个可重复的 40-frame PAL VHS probe 上，当前有界流水线使
+`--threads 1/5/20` 从 16.48/9.06/8.07 秒变为 15.83/8.81/7.48 秒。
+TBC 与 JSON 哈希保持一致；20 线程峰值约 1.08 GiB，属于固定性能预算。
+
+另一轮 1.31 GB、68 秒持续 probe 的六个预热后连续十秒窗口分别写出
+8.94、9.11、8.96、9.11、8.98 和 9.08 MiB/s。后段没有变慢，后续窗口的
+平均工作集维持在约 0.90-0.92 GiB，而不是随解码时长增长。
 
 <!-- SECTION: build -->
 
@@ -157,7 +165,7 @@ dotnet test VHSDecodeDotNet.slnx -c Release --no-build --no-restore
 ```
 
 当前正式 Release 构建为零警告、零错误。xUnit v3 项目向
-`dotnet test` 和 Visual Studio Test Explorer 暴露 **740** 个可独立发现的测试。
+`dotnet test` 和 Visual Studio Test Explorer 暴露 **742** 个可独立发现的测试。
 
 <!-- SECTION: usage -->
 

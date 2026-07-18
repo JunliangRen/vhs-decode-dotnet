@@ -19,7 +19,8 @@ public sealed record RfDecodedSpan(
 public sealed class RfBlockStreamDecoder : IDisposable
 {
     private const int DecodedBlockCacheCapacity = 16;
-    internal const int MaximumPrefetchBlocks = 8;
+    internal const int MaximumConcurrentPrefetchBlocks = 8;
+    internal const int MaximumPrefetchBlocks = 20;
     private readonly RfBlockDecodePipeline _pipeline;
     private readonly Dictionary<long, RfPipelineBlock> _decodedBlockCache = [];
     private readonly Dictionary<long, RfPipelineBlock> _prefetchedBlockCache = [];
@@ -69,6 +70,7 @@ public sealed class RfBlockStreamDecoder : IDisposable
         PrefetchBlocks = workerThreads > 1 && !_pipeline.RequiresSequentialBlockDecode
             ? Math.Min(prefetchBlocks, Math.Min(workerThreads, MaximumPrefetchBlocks))
             : 0;
+        PrefetchWorkerThreads = Math.Min(PrefetchBlocks, MaximumConcurrentPrefetchBlocks);
         _decodedBlockCacheCapacity = checked(DecodedBlockCacheCapacity + PrefetchBlocks);
     }
 
@@ -83,6 +85,8 @@ public sealed class RfBlockStreamDecoder : IDisposable
     public int WorkerThreads { get; }
 
     public int PrefetchBlocks { get; }
+
+    internal int PrefetchWorkerThreads { get; }
 
     internal int CachedDecodedBlockCount => _decodedBlockCache.Count;
 
@@ -123,12 +127,13 @@ public sealed class RfBlockStreamDecoder : IDisposable
         long lastBlock = (endExclusive - 1) / BlockStride;
         PrepareDecodedBlockCache(stream, firstBlock);
         int totalDecoded = checked((int)((lastBlock - firstBlock + 1) * BlockStride));
-        var input = new double[totalDecoded];
-        var video = new double[totalDecoded];
-        var demodRaw = new double[totalDecoded];
-        var envelope = new double[totalDecoded];
-        var videoLowPass = new double[totalDecoded];
-        var rfHighPass = new double[totalDecoded];
+        int offset = checked((int)(begin - (firstBlock * BlockStride)));
+        var input = new double[length];
+        var video = new double[length];
+        var demodRaw = new double[length];
+        var envelope = new double[length];
+        var videoLowPass = new double[length];
+        var rfHighPass = new double[length];
         double[]? chroma = null;
         short[]? efm = null;
         double[]? audioLeft = null;
@@ -141,38 +146,39 @@ public sealed class RfBlockStreamDecoder : IDisposable
 
         void AppendBlock(RfPipelineBlock pipelineBlock)
         {
-            CopyTrimmed(pipelineBlock.Input, input, destination);
-            CopyTrimmed(pipelineBlock.Demodulated.Video, video, destination);
-            CopyTrimmed(pipelineBlock.Demodulated.DemodRaw, demodRaw, destination);
-            CopyTrimmed(pipelineBlock.Demodulated.Envelope, envelope, destination);
-            CopyTrimmed(pipelineBlock.Demodulated.VideoLowPass, videoLowPass, destination);
-            CopyTrimmed(
+            CopyTrimmedWindow(pipelineBlock.Input, input, destination, offset);
+            CopyTrimmedWindow(pipelineBlock.Demodulated.Video, video, destination, offset);
+            CopyTrimmedWindow(pipelineBlock.Demodulated.DemodRaw, demodRaw, destination, offset);
+            CopyTrimmedWindow(pipelineBlock.Demodulated.Envelope, envelope, destination, offset);
+            CopyTrimmedWindow(pipelineBlock.Demodulated.VideoLowPass, videoLowPass, destination, offset);
+            CopyTrimmedWindow(
                 pipelineBlock.Demodulated.RfHighPass,
                 rfHighPass,
                 destination,
+                offset,
                 BlockCut - _pipeline.RfHighPassOffset);
             if (pipelineBlock.Demodulated.Chroma is not null)
             {
-                chroma ??= new double[totalDecoded];
-                CopyTrimmed(pipelineBlock.Demodulated.Chroma, chroma, destination);
+                chroma ??= new double[length];
+                CopyTrimmedWindow(pipelineBlock.Demodulated.Chroma, chroma, destination, offset);
             }
 
             if (pipelineBlock.Demodulated.VideoBurst is not null)
             {
-                videoBurst ??= new double[totalDecoded];
-                CopyTrimmed(pipelineBlock.Demodulated.VideoBurst, videoBurst, destination);
+                videoBurst ??= new double[length];
+                CopyTrimmedWindow(pipelineBlock.Demodulated.VideoBurst, videoBurst, destination, offset);
             }
 
             if (pipelineBlock.Demodulated.VideoPilot is not null)
             {
-                videoPilot ??= new double[totalDecoded];
-                CopyTrimmed(pipelineBlock.Demodulated.VideoPilot, videoPilot, destination);
+                videoPilot ??= new double[length];
+                CopyTrimmedWindow(pipelineBlock.Demodulated.VideoPilot, videoPilot, destination, offset);
             }
 
             if (pipelineBlock.Demodulated.Efm is not null)
             {
-                efm ??= new short[totalDecoded];
-                CopyTrimmed(pipelineBlock.Demodulated.Efm, efm, destination);
+                efm ??= new short[length];
+                CopyTrimmedWindow(pipelineBlock.Demodulated.Efm, efm, destination, offset);
             }
 
             if (pipelineBlock.Demodulated.AnalogAudio is not null)
@@ -310,7 +316,6 @@ public sealed class RfBlockStreamDecoder : IDisposable
 
         StartPrefetch(stream, lastBlock);
 
-        int offset = checked((int)(begin - (firstBlock * BlockStride)));
         LaserDiscAnalogAudioBlock? audioSpan = null;
         if (audioLeft is not null && audioRight is not null)
         {
@@ -329,17 +334,17 @@ public sealed class RfBlockStreamDecoder : IDisposable
 
         return new RfDecodedSpan(
             begin,
-            Slice(input, offset, length),
-            Slice(video, offset, length),
-            Slice(demodRaw, offset, length),
-            Slice(envelope, offset, length),
-            Slice(videoLowPass, offset, length),
-            Slice(rfHighPass, offset, length),
-            efm is null ? null : Slice(efm, offset, length),
+            input,
+            video,
+            demodRaw,
+            envelope,
+            videoLowPass,
+            rfHighPass,
+            efm,
             audioSpan,
-            chroma is null ? null : Slice(chroma, offset, length),
-            videoBurst is null ? null : Slice(videoBurst, offset, length),
-            videoPilot is null ? null : Slice(videoPilot, offset, length));
+            chroma,
+            videoBurst,
+            videoPilot);
     }
 
     public void Dispose()
@@ -532,7 +537,7 @@ public sealed class RfBlockStreamDecoder : IDisposable
                 new ParallelOptions
                 {
                     CancellationToken = cancellationToken,
-                    MaxDegreeOfParallelism = Math.Min(WorkerThreads, preparedInputs.Length)
+                    MaxDegreeOfParallelism = Math.Min(PrefetchWorkerThreads, preparedInputs.Length)
                 },
                 index => decodedBlocks[index] = _pipeline.DecodePreparedBlock(
                     preparedInputs[index],
@@ -578,10 +583,11 @@ public sealed class RfBlockStreamDecoder : IDisposable
         }
     }
 
-    private void CopyTrimmed(
+    private void CopyTrimmedWindow(
         double[] source,
         double[] destination,
-        int destinationOffset,
+        int blockDestinationOffset,
+        int windowOffset,
         int? sourceOffset = null)
     {
         if (source.Length != BlockLength)
@@ -595,17 +601,49 @@ public sealed class RfBlockStreamDecoder : IDisposable
             throw new InvalidOperationException("RF high-pass delay exceeds the overlap-save block cuts.");
         }
 
-        Array.Copy(source, actualSourceOffset, destination, destinationOffset, BlockStride);
+        int copyStart = Math.Max(blockDestinationOffset, windowOffset);
+        int copyEnd = Math.Min(
+            checked(blockDestinationOffset + BlockStride),
+            checked(windowOffset + destination.Length));
+        if (copyStart >= copyEnd)
+        {
+            return;
+        }
+
+        Array.Copy(
+            source,
+            actualSourceOffset + (copyStart - blockDestinationOffset),
+            destination,
+            copyStart - windowOffset,
+            copyEnd - copyStart);
     }
 
-    private void CopyTrimmed(short[] source, short[] destination, int destinationOffset)
+    private void CopyTrimmedWindow(
+        short[] source,
+        short[] destination,
+        int blockDestinationOffset,
+        int windowOffset)
     {
         if (source.Length != BlockLength)
         {
             throw new ArgumentException("Decoded block length did not match the configured block length.", nameof(source));
         }
 
-        Array.Copy(source, BlockCut, destination, destinationOffset, BlockStride);
+        int copyStart = Math.Max(blockDestinationOffset, windowOffset);
+        int copyEnd = Math.Min(
+            checked(blockDestinationOffset + BlockStride),
+            checked(windowOffset + destination.Length));
+        if (copyStart >= copyEnd)
+        {
+            return;
+        }
+
+        Array.Copy(
+            source,
+            BlockCut + (copyStart - blockDestinationOffset),
+            destination,
+            copyStart - windowOffset,
+            copyEnd - copyStart);
     }
 
     private void CopyTrimmed(
@@ -649,18 +687,6 @@ public sealed class RfBlockStreamDecoder : IDisposable
         }
 
         var output = new double[length];
-        Array.Copy(source, offset, output, 0, length);
-        return output;
-    }
-
-    private static short[] Slice(short[] source, int offset, int length)
-    {
-        if (offset == 0 && length == source.Length)
-        {
-            return source;
-        }
-
-        var output = new short[length];
         Array.Copy(source, offset, output, 0, length);
         return output;
     }

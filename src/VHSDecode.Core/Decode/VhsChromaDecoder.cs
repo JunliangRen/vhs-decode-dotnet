@@ -938,10 +938,15 @@ public static class VhsChromaDecoder
         }
 
         var rolled = new double[chroma.Length];
-        for (int i = 0; i < chroma.Length; i++)
+        int destinationOffset = PositiveModulo(move, chroma.Length);
+        int firstCopyLength = chroma.Length - destinationOffset;
+        chroma[..firstCopyLength].CopyTo(rolled.AsSpan(destinationOffset));
+        if (destinationOffset != 0)
         {
-            rolled[PositiveModulo(i + move, chroma.Length)] = (float)chroma[i];
+            chroma[firstCopyLength..].CopyTo(rolled.AsSpan(0, destinationOffset));
         }
+
+        RfBlockDecodePipeline.QuantizeToFloat32InPlace(rolled);
 
         float mean = MeanFloat32FastMath(rolled);
         for (int i = 0; i < rolled.Length; i++)

@@ -2,7 +2,7 @@
 
 **[English](README.md)** | [简体中文](README.zh-CN.md) | [日本語](README.ja.md)
 
-<!-- README_SYNC: 2026-07-18.1 -->
+<!-- README_SYNC: 2026-07-18.2 -->
 
 .NET 10 rewrite of the decode-facing parts of
 [`oyvindln/vhs-decode`](https://github.com/oyvindln/vhs-decode), focused on
@@ -123,17 +123,24 @@ release compatibility remain the first constraint.
   stream, FFmpeg, and GNU Radio reads stay ordered.
 - A stream-scoped decoded RF cache avoids duplicate FFT work across overlapping
   field reads while keeping memory bounded.
-- VHS sessions use compute-only lookahead capped at eight RF blocks so workers
-  can prepare the next field while current-field TBC work continues. Input
-  reads remain ordered, and pending work is cancelled on seek or disposal.
+- VHS sessions retain at most 20 compute-only lookahead RF blocks and decode at
+  most eight of them concurrently. This overlaps the next field with current
+  TBC work without allowing FFT allocation bursts to grow with `--threads`.
+  Input reads remain ordered, and pending work is cancelled on seek or disposal.
 - Long TBC sinc-resampling jobs share the worker budget and preserve output
   order; `--threads 0` and `--threads 1` retain deterministic serial paths.
 - HiFi uses bounded parallel block decoding followed by ordered
   post-processing and writing.
 - Managed FFT workers reuse scratch buffers and immutable root tables, use
   in-place transforms where safe, and avoid full-field clones on aligned paths.
-- AVX/FMA kernels accelerate LD float32 quantization and complex frequency
-  filtering while preserving verified NumPy rounding and scalar fallbacks.
+- RF span assembly writes directly into the requested output window instead of
+  allocating whole-block field arrays and slicing a second copy.
+- AVX/FMA kernels accelerate LD float32 quantization, VHS chroma rotation, and
+  complex frequency filtering while preserving verified NumPy rounding and
+  scalar fallbacks.
+- Recovery metadata is disk-streamed; its snapshot queue has capacity one, and
+  field-order history and RF caches have hard limits. Long decodes therefore do
+  not retain every decoded field or enqueue an unbounded amount of future work.
 
 On one Windows fixture machine, one-frame Release measurements were:
 
@@ -144,9 +151,15 @@ On one Windows fixture machine, one-frame Release measurements were:
 
 These numbers are fixture-specific, not universal benchmarks. A PAL LD
 four-field Core probe reduced managed allocation from 5.12 GiB to 1.96 GiB
-while preserving verified output. On a synthetic 160-frame PAL VHS probe at
-`--threads 20`, bounded lookahead reduced Release time from 29.03 s to 27.15 s
-(6.5%) with byte-identical TBC and JSON output and a non-growing memory curve.
+while preserving verified output. On a reproducible 40-frame PAL VHS probe,
+the current bounded pipeline changed `--threads 1/5/20` from
+16.48/9.06/8.07 s to 15.83/8.81/7.48 s. TBC and JSON hashes remained identical;
+the 20-thread peak was about 1.08 GiB, a fixed performance budget.
+
+A separate 1.31 GB, 68-second sustained probe produced 8.94, 9.11, 8.96,
+9.11, 8.98, and 9.08 MiB/s in consecutive post-warmup ten-second windows.
+Later windows did not slow down, and their average working set stayed around
+0.90-0.92 GiB instead of growing with decoded duration.
 
 <!-- SECTION: build -->
 
@@ -166,7 +179,7 @@ dotnet test VHSDecodeDotNet.slnx -c Release --no-build --no-restore
 ```
 
 The current formal Release build has zero warnings and errors. The xUnit v3
-project exposes **740** independently discoverable tests to both
+project exposes **742** independently discoverable tests to both
 `dotnet test` and Visual Studio Test Explorer.
 
 <!-- SECTION: usage -->

@@ -118,6 +118,8 @@ public sealed class RfBlockCacheConcurrencyTests
         var decoder = BuildDecoder(loader, workerThreads: 100, prefetchBlocks: int.MaxValue);
 
         Assert.Equal(RfBlockStreamDecoder.MaximumPrefetchBlocks, decoder.PrefetchBlocks);
+        Assert.Equal(RfBlockStreamDecoder.MaximumConcurrentPrefetchBlocks, decoder.PrefetchWorkerThreads);
+        Assert.True(decoder.PrefetchWorkerThreads < decoder.PrefetchBlocks);
         _ = decoder.Read(stream, begin: 0, length: 24);
         Assert.InRange(
             decoder.CachedDecodedBlockCount,
@@ -145,6 +147,37 @@ public sealed class RfBlockCacheConcurrencyTests
         }
 
         Assert.InRange(loader.ReadCount, 258, 260);
+    }
+
+    [Fact(DisplayName = "Maximum RF prefetch remains bounded across a sustained forward decode")]
+    public void MaximumRfBlockPrefetchRemainsBoundedAcrossSustainedForwardDecode()
+    {
+        var loader = new CountingSampleLoader();
+        using var stream = new MemoryStream();
+        using var decoder = BuildDecoder(
+            loader,
+            workerThreads: 100,
+            prefetchBlocks: int.MaxValue);
+
+        for (int field = 0; field < 256; field++)
+        {
+            RfDecodedSpan span = decoder.Read(stream, begin: field * 12L, length: 24)!;
+            Assert.Equal(24, span.Input.Length);
+            Assert.InRange(
+                decoder.CachedDecodedBlockCount,
+                1,
+                16 + RfBlockStreamDecoder.MaximumPrefetchBlocks);
+            Assert.InRange(
+                decoder.CachedPrefetchedBlockCount,
+                0,
+                RfBlockStreamDecoder.MaximumPrefetchBlocks);
+        }
+
+        Assert.Equal(RfBlockStreamDecoder.MaximumPrefetchBlocks, decoder.PrefetchBlocks);
+        Assert.Equal(
+            RfBlockStreamDecoder.MaximumConcurrentPrefetchBlocks,
+            decoder.PrefetchWorkerThreads);
+        Assert.Equal(277, loader.ReadCount);
     }
 
     private static RfBlockStreamDecoder BuildDecoder(
