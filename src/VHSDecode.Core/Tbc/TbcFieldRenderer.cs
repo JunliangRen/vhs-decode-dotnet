@@ -93,6 +93,8 @@ public sealed class TbcFieldRenderer
 
     public CvbsAgcStatistics? CvbsAgcStatistics { get; private set; }
 
+    internal Action<string, string>? DiagnosticLogger { get; set; }
+
     public ushort[] RenderField(
         ReadOnlySpan<double> videoHz,
         IReadOnlyList<double> lineLocations,
@@ -285,6 +287,12 @@ public sealed class TbcFieldRenderer
             if (Ire0Adjust.BackPorch && IsValidLineRange(backPorchStart, backPorchEnd))
             {
                 ire0 = MeanMiddleThirdFloat32(LineMediansFloat32(resampled, backPorchStart, backPorchEnd));
+                if (!ExportRawTbc)
+                {
+                    DiagnosticLogger?.Invoke(
+                        "DEBUG",
+                        FormattableString.Invariant($"calculated ire0: {ire0:F2}"));
+                }
             }
 
             int hsyncStart = Ire0Adjust.Padding;
@@ -294,6 +302,13 @@ public sealed class TbcFieldRenderer
                 double hsyncLevel = MeanMiddleThirdFloat32(LineMediansFloat32(resampled, hsyncStart, hsyncEnd));
                 double measuredHzIre = (float)(
                     ((float)ire0 - (float)hsyncLevel) / (float)-baseConverter.VSyncIre);
+                if (!ExportRawTbc)
+                {
+                    DiagnosticLogger?.Invoke(
+                        "DEBUG",
+                        FormattableString.Invariant($"calculated hz_ire: {measuredHzIre:F2}"));
+                }
+
                 if (double.IsFinite(measuredHzIre) && measuredHzIre != 0.0)
                 {
                     hzIre = measuredHzIre;

@@ -132,6 +132,7 @@ internal sealed record Line0FallbackCandidate(
 
 internal sealed record TbcFieldDecodeState(
     (double SyncLevel, double BlankLevel)? LastDetectedSyncLevels,
+    bool VhsLineLocationIssues,
     (double SyncLevel, double BlankLevel)? DelayedCvbsSyncLevels,
     VideoOutputConverter CurrentCvbsOutputConverter,
     long? PreviousAnalogAudioStartSample,
@@ -186,6 +187,7 @@ public sealed class TbcFieldDecodePipeline
     private readonly bool _debug;
     private readonly int _inputBlockCutSamples;
     private (double SyncLevel, double BlankLevel)? _lastDetectedSyncLevels;
+    private bool _vhsLineLocationIssues;
     private (double SyncLevel, double BlankLevel)? _delayedCvbsSyncLevels;
     private VideoOutputConverter _currentCvbsOutputConverter;
     private long? _previousAnalogAudioStartSample;
@@ -263,6 +265,7 @@ public sealed class TbcFieldDecodePipeline
         _decodeType = decodeType;
         _framesPerSecond = framesPerSecond is > 0.0 ? framesPerSecond : null;
         _diagnosticLogger = diagnosticLogger;
+        _renderer.DiagnosticLogger = diagnosticLogger;
         _debug = debug;
         _inputBlockCutSamples = inputBlockCutSamples >= 0
             ? inputBlockCutSamples
@@ -279,6 +282,7 @@ public sealed class TbcFieldDecodePipeline
     {
         return new TbcFieldDecodeState(
             _lastDetectedSyncLevels,
+            _vhsLineLocationIssues,
             _delayedCvbsSyncLevels,
             Volatile.Read(ref _currentCvbsOutputConverter),
             _previousAnalogAudioStartSample,
@@ -308,6 +312,7 @@ public sealed class TbcFieldDecodePipeline
     {
         VideoOutputConverter? adjustedAgcConverter = _laserDiscAgcConverter;
         _lastDetectedSyncLevels = state.LastDetectedSyncLevels;
+        _vhsLineLocationIssues = state.VhsLineLocationIssues;
         _delayedCvbsSyncLevels = state.DelayedCvbsSyncLevels;
         Volatile.Write(ref _currentCvbsOutputConverter, state.CurrentCvbsOutputConverter);
         _previousAnalogAudioStartSample = state.PreviousAnalogAudioStartSample;
@@ -589,6 +594,13 @@ public sealed class TbcFieldDecodePipeline
         bool deferCvbsOutputConversion)
     {
         RfDecodedSpan span = prepared.Span;
+        if (string.Equals(_decodeType, "vhs", StringComparison.Ordinal))
+        {
+            // Upstream leaves this set when field processing exits before a
+            // trustworthy line-location result is produced.
+            _vhsLineLocationIssues = true;
+        }
+
         double threshold = prepared.Threshold;
         VideoOutputConverter activeVideoOutput = prepared.ConverterOverride
             ?? _laserDiscAgcConverter
@@ -733,6 +745,11 @@ public sealed class TbcFieldDecodePipeline
                 processedLines,
                 preferEarlierPulseOnEqualDistance: usePalCvbsLine0Anchor);
         }
+        if (string.Equals(_decodeType, "vhs", StringComparison.Ordinal))
+        {
+            CompleteVhsLineLocationComputation(lineLocations.Filled);
+        }
+
         double nextFieldOffsetSamples = ComputeNextFieldOffsetSamples(
             refinedPulses,
             lineLocations.Locations,
@@ -1464,7 +1481,10 @@ public sealed class TbcFieldDecodePipeline
             _diagnosticLogger?.Invoke("DEBUG", "Hashed field sync reference " + hash);
         }
 
-        if (allowSavedLevels && _syncDetectionOptions.UseSavedLevels && _lastDetectedSyncLevels.HasValue)
+        if (allowSavedLevels
+            && _syncDetectionOptions.UseSavedLevels
+            && _lastDetectedSyncLevels.HasValue
+            && !_vhsLineLocationIssues)
         {
             return PrepareSyncSpanFromLevels(span, _lastDetectedSyncLevels.Value, usedSavedLevels: true);
         }
@@ -1618,6 +1638,26 @@ public sealed class TbcFieldDecodePipeline
             },
             SyncThresholdFromLevels(adjustedLevels),
             usedSavedLevels);
+    }
+
+    internal void CompleteVhsLineLocationComputation(ReadOnlySpan<bool> lineLocationErrors)
+    {
+        int errorCount = 0;
+        foreach (bool error in lineLocationErrors)
+        {
+            if (error)
+            {
+                errorCount++;
+            }
+        }
+
+        _vhsLineLocationIssues = errorCount >= 30;
+        if (_vhsLineLocationIssues && _syncDetectionOptions.UseSavedLevels)
+        {
+            _diagnosticLogger?.Invoke(
+                "DEBUG",
+                "Possible sync issues, re-running level detection on next field!");
+        }
     }
 
     private static double[] AddDcOffset(double[] input, double offset)
