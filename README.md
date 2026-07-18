@@ -2,7 +2,7 @@
 
 **[English](README.md)** | [简体中文](README.zh-CN.md) | [日本語](README.ja.md)
 
-<!-- README_SYNC: 2026-07-19.3 -->
+<!-- README_SYNC: 2026-07-19.4 -->
 
 .NET 11 rewrite of the decode-facing parts of
 [`oyvindln/vhs-decode`](https://github.com/oyvindln/vhs-decode), focused on
@@ -202,6 +202,14 @@ CPU time fell from 27.88 s to 26.36 s, a 5.5% reduction. TBC, JSON, and chroma
 hashes remained exact. A 160-frame run completed in 26.48 s with private-memory
 quarter medians of 1.45/1.47/1.40/1.23 GiB and a 1.79 GiB peak.
 
+The latest FFmpeg stream pass replaced per-read 16 MiB rewind reconstruction with
+one bounded circular buffer. The isolated 384-read median fell from 695.4 ms to
+48.7 ms, while allocations fell from 4.31 GB to 142.6 MB. In a three-run
+40-frame A/B, median wall/CPU time moved from 8.98/28.47 s to 7.40/22.33 s;
+all three output hashes remained exact. Sampled `byte[]` allocation fell from
+36.3 GB to 209 MB. A 160-frame run finished in 25.86 s with private-memory
+quarter medians of 0.76/1.15/1.42/1.14 GiB and a 1.67 GiB peak.
+
 <!-- SECTION: build -->
 
 ## Build and test
@@ -220,7 +228,7 @@ dotnet test VHSDecodeDotNet.slnx -c Release --no-build --no-restore
 ```
 
 The current formal Release build has zero warnings and errors. The xUnit v3
-project exposes **768** independently discoverable tests to both
+project exposes **774** independently discoverable tests to both
 `dotnet test` and Visual Studio Test Explorer.
 
 <!-- SECTION: usage -->
