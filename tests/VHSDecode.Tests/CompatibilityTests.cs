@@ -1495,7 +1495,9 @@ public void DecodeSessionFactoryAppliesExecutionOptions()
         "input.s16",
         "outbase"
     ]));
-    AssertEqual(7, parallelVhs.StreamDecoder.PrefetchBlocks);
+    AssertEqual(
+        Math.Min(7, Math.Min(Environment.ProcessorCount, RfBlockStreamDecoder.MaximumPrefetchBlocks)),
+        parallelVhs.StreamDecoder.PrefetchBlocks);
 }
 
 [Fact(DisplayName = "decode session applies VHS params file overrides")]
