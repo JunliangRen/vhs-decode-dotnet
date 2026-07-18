@@ -1051,6 +1051,24 @@ public static class VhsChromaDecoder
         return output;
     }
 
+    internal static double[] ShiftChromaAndRemoveDcInPlace(double[] chroma, int move)
+    {
+        ArgumentNullException.ThrowIfNull(chroma);
+        if (chroma.Length == 0)
+        {
+            return chroma;
+        }
+
+        FrequencyDomainFilter.RollInPlace(chroma, move);
+        double mean = NumbaReduction.MeanFloat64FastMath(chroma);
+        for (int i = 0; i < chroma.Length; i++)
+        {
+            chroma[i] -= mean;
+        }
+
+        return chroma;
+    }
+
     public static double[] ShiftChromaAndRemoveDcFloat32(ReadOnlySpan<double> chroma, int move)
     {
         if (chroma.IsEmpty)
@@ -1076,6 +1094,26 @@ public static class VhsChromaDecoder
         }
 
         return rolled;
+    }
+
+    internal static double[] ShiftChromaAndRemoveDcFloat32InPlace(double[] chroma, int move)
+    {
+        ArgumentNullException.ThrowIfNull(chroma);
+        if (chroma.Length == 0)
+        {
+            return chroma;
+        }
+
+        FrequencyDomainFilter.RollInPlace(chroma, move);
+        RfBlockDecodePipeline.QuantizeToFloat32InPlace(chroma);
+
+        float mean = MeanFloat32FastMath(chroma);
+        for (int i = 0; i < chroma.Length; i++)
+        {
+            chroma[i] = (float)((float)chroma[i] - mean);
+        }
+
+        return chroma;
     }
 
     public static double[] ApplyNtscComb(

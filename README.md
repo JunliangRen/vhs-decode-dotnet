@@ -2,7 +2,7 @@
 
 **[English](README.md)** | [简体中文](README.zh-CN.md) | [日本語](README.ja.md)
 
-<!-- README_SYNC: 2026-07-19.4 -->
+<!-- README_SYNC: 2026-07-19.5 -->
 
 .NET 11 rewrite of the decode-facing parts of
 [`oyvindln/vhs-decode`](https://github.com/oyvindln/vhs-decode), focused on
@@ -210,6 +210,16 @@ all three output hashes remained exact. Sampled `byte[]` allocation fell from
 36.3 GB to 209 MB. A 160-frame run finished in 25.86 s with private-memory
 quarter medians of 0.76/1.15/1.42/1.14 GiB and a 1.67 GiB peak.
 
+The latest VHS real-FFT pass reuses exact-length half spectra, Hilbert buffers,
+the raw envelope, and rotation inputs through a decoder-owned pool capped at 16
+workspaces. In five isolated 384-block A/B runs, median time fell from 1,140.6 ms
+to 1,054.0 ms (7.6%), allocation fell from 2.216 GB to 906.8 MB (59.1%), and
+median Gen2 collections fell from 168 to 56. A 160-frame full-path A/B remained
+wall-time neutral at 24.54/24.57 s while CPU time fell from 78.03 s to 70.13 s
+(10.1%). The current run peaked at 1.68 GiB; its private-memory quarter medians
+were 0.88/1.55/0.78/1.51 GiB rather than a monotonic rise. TBC, JSON, chroma, and
+isolated block hashes remained exact.
+
 <!-- SECTION: build -->
 
 ## Build and test
@@ -228,7 +238,7 @@ dotnet test VHSDecodeDotNet.slnx -c Release --no-build --no-restore
 ```
 
 The current formal Release build has zero warnings and errors. The xUnit v3
-project exposes **774** independently discoverable tests to both
+project exposes **778** independently discoverable tests to both
 `dotnet test` and Visual Studio Test Explorer.
 
 <!-- SECTION: usage -->

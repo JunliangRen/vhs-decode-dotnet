@@ -16,7 +16,26 @@ public static class PocketFftReal
             throw new ArgumentException("Real FFT length must be a power of two of at least two.", nameof(input));
         }
 
-        return Plans.GetOrAdd(input.Length, static length => new Plan(length)).Forward(input);
+        var output = new Complex[(input.Length / 2) + 1];
+        Plans.GetOrAdd(input.Length, static length => new Plan(length)).Forward(input, output);
+        return output;
+    }
+
+    internal static void Forward(ReadOnlySpan<double> input, Complex[] output)
+    {
+        if (input.Length < 2 || (input.Length & (input.Length - 1)) != 0)
+        {
+            throw new ArgumentException("Real FFT length must be a power of two of at least two.", nameof(input));
+        }
+
+        ArgumentNullException.ThrowIfNull(output);
+        int outputLength = (input.Length / 2) + 1;
+        if (output.Length < outputLength)
+        {
+            throw new ArgumentException("Output buffer is shorter than the real half-spectrum.", nameof(output));
+        }
+
+        Plans.GetOrAdd(input.Length, static length => new Plan(length)).Forward(input, output);
     }
 
     public static double[] Inverse(ReadOnlySpan<Complex> input, int outputLength)
@@ -31,7 +50,33 @@ public static class PocketFftReal
             throw new ArgumentException("Half-spectrum length does not match the requested real output length.", nameof(input));
         }
 
-        return Plans.GetOrAdd(outputLength, static length => new Plan(length)).Inverse(input);
+        var output = new double[outputLength];
+        Plans.GetOrAdd(outputLength, static length => new Plan(length)).Inverse(input, output);
+        return output;
+    }
+
+    internal static void Inverse(
+        ReadOnlySpan<Complex> input,
+        int outputLength,
+        double[] output)
+    {
+        if (outputLength < 2 || (outputLength & (outputLength - 1)) != 0)
+        {
+            throw new ArgumentException("Real FFT length must be a power of two of at least two.", nameof(outputLength));
+        }
+
+        if (input.Length != (outputLength / 2) + 1)
+        {
+            throw new ArgumentException("Half-spectrum length does not match the requested real output length.", nameof(input));
+        }
+
+        ArgumentNullException.ThrowIfNull(output);
+        if (output.Length < outputLength)
+        {
+            throw new ArgumentException("Output buffer is shorter than the requested real transform length.", nameof(output));
+        }
+
+        Plans.GetOrAdd(outputLength, static length => new Plan(length)).Inverse(input, output);
     }
 
     private sealed class Plan
@@ -46,22 +91,21 @@ public static class PocketFftReal
             _factors = BuildFactors(length, radices);
         }
 
-        public Complex[] Forward(ReadOnlySpan<double> input)
+        public void Forward(ReadOnlySpan<double> input, Complex[] output)
         {
             double[] packed = ArrayPool<double>.Shared.Rent(_length);
             try
             {
                 input.CopyTo(packed);
                 ExecuteForward(packed);
-                var output = new Complex[(_length / 2) + 1];
                 output[0] = new Complex(packed[0], 0.0);
-                for (int i = 1; i < output.Length - 1; i++)
+                int outputLength = (_length / 2) + 1;
+                for (int i = 1; i < outputLength - 1; i++)
                 {
                     output[i] = new Complex(packed[(2 * i) - 1], packed[2 * i]);
                 }
 
-                output[^1] = new Complex(packed[_length - 1], 0.0);
-                return output;
+                output[outputLength - 1] = new Complex(packed[_length - 1], 0.0);
             }
             finally
             {
@@ -69,19 +113,17 @@ public static class PocketFftReal
             }
         }
 
-        public double[] Inverse(ReadOnlySpan<Complex> input)
+        public void Inverse(ReadOnlySpan<Complex> input, double[] output)
         {
-            var packed = new double[_length];
-            packed[0] = input[0].Real;
+            output[0] = input[0].Real;
             for (int i = 1; i < input.Length - 1; i++)
             {
-                packed[(2 * i) - 1] = input[i].Real;
-                packed[2 * i] = input[i].Imaginary;
+                output[(2 * i) - 1] = input[i].Real;
+                output[2 * i] = input[i].Imaginary;
             }
 
-            packed[^1] = input[^1].Real;
-            ExecuteBackward(packed, 1.0 / _length);
-            return packed;
+            output[_length - 1] = input[^1].Real;
+            ExecuteBackward(output, 1.0 / _length);
         }
 
         private void ExecuteForward(double[] data)

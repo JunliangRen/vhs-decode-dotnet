@@ -1,4 +1,8 @@
 using System.Numerics;
+using System.Runtime.InteropServices;
+using System.Security.Cryptography;
+using VHSDecode.Core.CommandLine;
+using VHSDecode.Core.Decode;
 using VHSDecode.Core.Dsp;
 using Xunit;
 
@@ -33,6 +37,119 @@ public sealed class DspWorkingBufferTests
                 Assert.Equal(expectedSpectrum, actualSpectrum);
                 Assert.Equal(expectedInverse, actualInverse);
             });
+    }
+
+    [Fact(DisplayName = "Caller-provided real FFT buffers match allocating APIs exactly")]
+    public void CallerProvidedRealFftBuffersMatchAllocatingApisExactly()
+    {
+        const int length = 4_096;
+        double[] input = Enumerable.Range(0, length)
+            .Select(index => Math.Sin(index * 0.019) + (0.375 * Math.Cos(index * 0.037)))
+            .ToArray();
+        Complex[] expectedSpectrum = PocketFftReal.Forward(input);
+        double[] expectedInverse = PocketFftReal.Inverse(expectedSpectrum, length);
+
+        var spectrumBuffer = Enumerable.Repeat(
+            new Complex(double.NaN, double.NaN),
+            expectedSpectrum.Length + 19).ToArray();
+        PocketFftReal.Forward(input, spectrumBuffer);
+        Assert.Equal(expectedSpectrum, spectrumBuffer.AsSpan(0, expectedSpectrum.Length).ToArray());
+        Assert.All(spectrumBuffer[expectedSpectrum.Length..], value =>
+        {
+            Assert.True(double.IsNaN(value.Real));
+            Assert.True(double.IsNaN(value.Imaginary));
+        });
+
+        var inverseBuffer = Enumerable.Repeat(double.NaN, length + 23).ToArray();
+        PocketFftReal.Inverse(expectedSpectrum, length, inverseBuffer);
+        Assert.Equal(expectedInverse, inverseBuffer.AsSpan(0, length).ToArray());
+        Assert.All(inverseBuffer[length..], value => Assert.True(double.IsNaN(value)));
+    }
+
+    [Fact(DisplayName = "In-place RF rotations match allocating compatibility paths exactly")]
+    public void InPlaceRfRotationsMatchAllocatingCompatibilityPathsExactly()
+    {
+        foreach (int length in new[] { 1, 2, 7, 32, 257 })
+        {
+            double[] values = Enumerable.Range(0, length)
+                .Select(index => Math.Sin(index * 0.17) + (index * 0.03125))
+                .ToArray();
+            for (int shift = -(length * 2) - 3; shift <= (length * 2) + 3; shift++)
+            {
+                double[] expected = FrequencyDomainFilter.Roll(values, shift);
+                double[] actual = values.ToArray();
+                FrequencyDomainFilter.RollInPlace(actual, shift);
+                Assert.Equal(expected, actual);
+            }
+        }
+
+        double[] chroma = Enumerable.Range(0, 257)
+            .Select(index => Math.Sin(index * 0.071) * 12_000.0)
+            .ToArray();
+        double[] expectedDouble = VhsChromaDecoder.ShiftChromaAndRemoveDc(chroma, -19);
+        double[] actualDouble = chroma.ToArray();
+        VhsChromaDecoder.ShiftChromaAndRemoveDcInPlace(actualDouble, -19);
+        Assert.Equal(expectedDouble, actualDouble);
+
+        double[] expectedFloat = VhsChromaDecoder.ShiftChromaAndRemoveDcFloat32(chroma, 23);
+        double[] actualFloat = chroma.ToArray();
+        VhsChromaDecoder.ShiftChromaAndRemoveDcFloat32InPlace(actualFloat, 23);
+        Assert.Equal(expectedFloat, actualFloat);
+    }
+
+    [Fact(DisplayName = "PAL VHS RF block reuses temporary spectra after warm-up")]
+    public void PalVhsRfBlockReusesTemporarySpectraAfterWarmUp()
+    {
+        const int length = DecodeSessionFactory.DefaultBlockLength;
+        ParsedCommand command = new CommandLineParser().Parse(
+            CliSpecs.Vhs,
+            ["--pal", "--no_resample", "probe.s16", "probe-output"]);
+        using DecodeSession session = DecodeSessionFactory.Create(command, length);
+        double[] input = BuildPalVhsProbe(length, session.DecodeSampleRateHz);
+
+        for (int i = 0; i < 4; i++)
+        {
+            _ = session.Pipeline.DecodePreparedBlock(input, reportDiagnostics: false);
+        }
+
+        long before = GC.GetAllocatedBytesForCurrentThread();
+        RfPipelineBlock block = session.Pipeline.DecodePreparedBlock(input, reportDiagnostics: false);
+        long allocated = GC.GetAllocatedBytesForCurrentThread() - before;
+
+        Assert.Equal(
+            "AEC0D4FFFF58D5A35771AE7374C0A62C1DA955125249B91C6AD9946D7BBBFEF4",
+            Hash(block));
+        Assert.True(
+            allocated < 3_000_000,
+            $"Warm PAL VHS RF block allocated {allocated:N0} bytes.");
+    }
+
+    [Fact(DisplayName = "PAL VHS RF workspaces remain bit-exact under parallel load")]
+    public void PalVhsRfWorkspacesRemainBitExactUnderParallelLoad()
+    {
+        const int length = DecodeSessionFactory.DefaultBlockLength;
+        const string expectedHash =
+            "AEC0D4FFFF58D5A35771AE7374C0A62C1DA955125249B91C6AD9946D7BBBFEF4";
+        ParsedCommand command = new CommandLineParser().Parse(
+            CliSpecs.Vhs,
+            ["--pal", "--no_resample", "probe.s16", "probe-output"]);
+        using DecodeSession session = DecodeSessionFactory.Create(command, length);
+        double[] input = BuildPalVhsProbe(length, session.DecodeSampleRateHz);
+        var hashes = new string[32];
+
+        Parallel.For(
+            0,
+            hashes.Length,
+            new ParallelOptions { MaxDegreeOfParallelism = 8 },
+            index =>
+            {
+                RfPipelineBlock block = session.Pipeline.DecodePreparedBlock(
+                    input,
+                    reportDiagnostics: false);
+                hashes[index] = Hash(block);
+            });
+
+        Assert.All(hashes, hash => Assert.Equal(expectedHash, hash));
     }
 
     [Fact(DisplayName = "Hot DSP paths retain bounded managed allocation after warm-up")]
@@ -74,5 +191,44 @@ public sealed class DspWorkingBufferTests
         Assert.True(
             sosBytes < 500_000,
             $"Warm float32 SOS forward/backward allocated {sosBytes:N0} bytes.");
+    }
+
+    private static double[] BuildPalVhsProbe(int length, double sampleRateHz)
+    {
+        var input = new double[length];
+        double phase = 0.0;
+        for (int i = 0; i < input.Length; i++)
+        {
+            double linePhase = (i % 2560) / 2560.0;
+            double video = 0.45 * Math.Sin(Math.Tau * linePhase)
+                + (linePhase < 0.075 ? -0.75 : 0.0);
+            double frequencyHz = 3_800_000.0 + (650_000.0 * video);
+            phase += Math.Tau * frequencyHz / sampleRateHz;
+            input[i] = 12_000.0 * Math.Cos(phase)
+                + 1_300.0 * Math.Cos(Math.Tau * 627_000.0 * i / sampleRateHz);
+        }
+
+        return input;
+    }
+
+    private static string Hash(RfPipelineBlock block)
+    {
+        using var hash = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
+        Append(hash, block.Demodulated.Video);
+        Append(hash, block.Demodulated.DemodRaw);
+        Append(hash, block.Demodulated.Envelope);
+        Append(hash, block.Demodulated.VideoLowPass);
+        Append(hash, block.Demodulated.RfHighPass);
+        if (block.Demodulated.Chroma is not null)
+        {
+            Append(hash, block.Demodulated.Chroma);
+        }
+
+        return Convert.ToHexString(hash.GetHashAndReset());
+    }
+
+    private static void Append(IncrementalHash hash, double[] values)
+    {
+        hash.AppendData(MemoryMarshal.AsBytes(values.AsSpan()));
     }
 }

@@ -2,7 +2,7 @@
 
 [English](README.md) | **[简体中文](README.zh-CN.md)** | [日本語](README.ja.md)
 
-<!-- README_SYNC: 2026-07-19.4 -->
+<!-- README_SYNC: 2026-07-19.5 -->
 
 这是 [`oyvindln/vhs-decode`](https://github.com/oyvindln/vhs-decode)
 中解码相关部分的 .NET 11 重写，当前以 release `v0.4.0`、commit
@@ -185,6 +185,14 @@ AVX RF envelope 准备将隔离的 32K-block 中位数从 57.5 us 降到 13.3 us
 降到 209 MB。一次 160-frame 运行用时 25.86 秒，私有内存四分段中位数为
 0.76/1.15/1.42/1.14 GiB，峰值 1.67 GiB。
 
+最新的 VHS real-FFT 优化通过解码器自有、最多保留 16 份的 workspace 池，复用精确
+长度的半频谱、Hilbert 缓冲、raw envelope 和旋转输入。五次隔离的 384-block A/B 中，
+中位耗时从 1140.6 ms 降到 1054.0 ms（7.6%），分配量从 2.216 GB 降到 906.8 MB
+（59.1%），Gen2 次数中位数从 168 降到 56。160-frame 完整路径 A/B 的墙钟时间基本
+持平于 24.54/24.57 秒，CPU 时间从 78.03 秒降到 70.13 秒（10.1%）。当前运行峰值
+为 1.68 GiB，私有内存四分段中位数为 0.88/1.55/0.78/1.51 GiB，并非单调增长；
+TBC、JSON、chroma 和隔离 block 的 hash 均保持完全一致。
+
 <!-- SECTION: build -->
 
 ## 构建和测试
@@ -203,7 +211,7 @@ dotnet test VHSDecodeDotNet.slnx -c Release --no-build --no-restore
 ```
 
 当前正式 Release 构建为零警告、零错误。xUnit v3 项目向
-`dotnet test` 和 Visual Studio Test Explorer 暴露 **774** 个可独立发现的测试。
+`dotnet test` 和 Visual Studio Test Explorer 暴露 **778** 个可独立发现的测试。
 
 <!-- SECTION: usage -->
 

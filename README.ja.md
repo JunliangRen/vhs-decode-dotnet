@@ -2,7 +2,7 @@
 
 [English](README.md) | [简体中文](README.zh-CN.md) | **[日本語](README.ja.md)**
 
-<!-- README_SYNC: 2026-07-19.4 -->
+<!-- README_SYNC: 2026-07-19.5 -->
 
 [`oyvindln/vhs-decode`](https://github.com/oyvindln/vhs-decode) の
 デコード関連部分を .NET 11 で再実装するプロジェクトです。現在は release
@@ -204,6 +204,15 @@ output hash は完全に一致しました。sampled `byte[]` allocation は 36.
 209 MB へ減少しました。160-frame run は 25.86 秒、private-memory 四分位中央値は
 0.76/1.15/1.42/1.14 GiB、peak は 1.67 GiB でした。
 
+最新の VHS real-FFT 最適化では、decoder 所有で最大 16 個を保持する workspace pool
+により、正確な長さの half-spectrum、Hilbert buffer、raw envelope、rotation input を
+再利用します。5 回の単体 384-block A/B では、中央値が 1,140.6 ms から 1,054.0 ms
+（7.6%）、allocation が 2.216 GB から 906.8 MB（59.1%）、Gen2 中央値が 168 回から
+56 回へ減少しました。160-frame full-path A/B の wall time は 24.54/24.57 秒で実質
+同等でしたが、CPU time は 78.03 秒から 70.13 秒（10.1%）へ減少しました。current
+run の peak は 1.68 GiB、private-memory 四分位中央値は 0.88/1.55/0.78/1.51 GiB で、
+単調増加ではありません。TBC、JSON、chroma、単体 block の hash は完全に一致しました。
+
 <!-- SECTION: build -->
 
 ## ビルドとテスト
@@ -223,7 +232,7 @@ dotnet test VHSDecodeDotNet.slnx -c Release --no-build --no-restore
 
 現在の正式な Release build は warning 0、error 0 です。xUnit v3 project は
 `dotnet test` と Visual Studio Test Explorer の両方で個別に検出できる
-**774** tests を公開します。
+**778** tests を公開します。
 
 <!-- SECTION: usage -->
 

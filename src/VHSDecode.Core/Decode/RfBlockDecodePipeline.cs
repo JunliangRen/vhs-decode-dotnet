@@ -206,10 +206,14 @@ public sealed class RfBlockDecodePipeline : IDisposable
 
         if (retainFloat32)
         {
-            return VhsChromaDecoder.ShiftChromaAndRemoveDcFloat32(chroma, filters.ChromaOffsetSamples);
+            return VhsChromaDecoder.ShiftChromaAndRemoveDcFloat32InPlace(
+                chroma,
+                filters.ChromaOffsetSamples);
         }
 
-        return VhsChromaDecoder.ShiftChromaAndRemoveDc(chroma, filters.ChromaOffsetSamples);
+        return VhsChromaDecoder.ShiftChromaAndRemoveDcInPlace(
+            chroma,
+            filters.ChromaOffsetSamples);
     }
 
     private RfDemodulatedBlock DecodeCvbsBlock(ReadOnlySpan<double> input)
