@@ -2,7 +2,7 @@
 
 [English](README.md) | **[简体中文](README.zh-CN.md)** | [日本語](README.ja.md)
 
-<!-- README_SYNC: 2026-07-18.2 -->
+<!-- README_SYNC: 2026-07-18.3 -->
 
 这是 [`oyvindln/vhs-decode`](https://github.com/oyvindln/vhs-decode)
 中解码相关部分的 .NET 10 重写，当前以 release `v0.4.0`、commit
@@ -122,13 +122,16 @@
 - 较长的 TBC sinc 重采样任务共享 worker 配额并保持输出顺序；
   `--threads 0` 和 `--threads 1` 保留确定性的串行路径。
 - HiFi 使用有界并行 block 解码，之后按顺序进行后处理和写入。
-- 托管 FFT worker 复用临时缓冲区和不可变 root table，在安全位置使用
-  原地变换，并在对齐路径上避免完整场复制。
+- 托管 real FFT 复用池化的 packing 与 scratch 缓冲区，float32 SOS 前后向滤波
+  在同一个扩展缓冲区内原地完成；每次变换结束都会归还租用项，避免反复冲击 LOH。
 - RF span 直接写入请求的最终输出窗口，不再先分配整块边界场数组再做第二次切片复制。
-- AVX/FMA 内核加速 LD float32 量化、VHS 色度移位和复数频域滤波，同时保留
-  已验证的 NumPy 舍入行为与标量回退路径。
+- AVX/FMA 内核加速精确 float32 转换、LD 量化、VHS 色度移位和复数频域滤波。
+  VHS 相位解调也只计算每个样本一次角度，并保留已验证的标量回退；TBC/JSON
+  hash 不变。
 - 恢复元数据以磁盘流式写入，snapshot 队列容量为 1，场顺序历史和 RF 缓存均有
   硬上限；长时间解码不会保留所有已解码场，也不会无限排入未来工作。
+- CUDA/OpenCL 不是运行时依赖。当前 trace 不支持把孤立的 32K FFT 在主机与设备间
+  往返；未来可选 GPU 后端必须批量处理常驻显存的 DSP 阶段，并保留精确 CPU 回退。
 
 在一台 Windows 夹具机器上，Release 单帧测量为：
 
@@ -139,13 +142,15 @@
 
 这些数字只对应特定夹具，不是通用 benchmark。一个 PAL LD 四场 Core
 probe 在保持已验证输出的同时，将托管分配量从 5.12 GiB 降至 1.96 GiB。
-在一个可重复的 40-frame PAL VHS probe 上，当前有界流水线使
-`--threads 1/5/20` 从 16.48/9.06/8.07 秒变为 15.83/8.81/7.48 秒。
-TBC 与 JSON 哈希保持一致；20 线程峰值约 1.08 GiB，属于固定性能预算。
+在一个可重复的 40-frame PAL VHS probe 上，最新 DSP 优化使一轮新的
+`--threads 1/5/20` 基线 16.17/8.74/7.57 秒变为多次运行中位数
+14.65/8.26/6.94 秒。TBC 与 JSON hash 保持一致，20 线程峰值中位数约
+1.10 GiB。80-frame allocation trace 估算 `double[]` 与 `float[]` 周转量
+从 54.0 GiB 降至 35.6 GiB，池化 FFT scratch 不再随解码时长增长。
 
-另一轮 1.31 GB、68 秒持续 probe 的六个预热后连续十秒窗口分别写出
-8.94、9.11、8.96、9.11、8.98 和 9.08 MiB/s。后段没有变慢，后续窗口的
-平均工作集维持在约 0.90-0.92 GiB，而不是随解码时长增长。
+另一轮 1.31 GB、320-frame 持续 probe 在 45.0 秒内完成。预热后的五秒窗口为
+9.62-10.13 MiB/s，平均工作集保持在 986-1,021 MiB，观察到的峰值为
+1,206 MiB；后段没有变慢，也没有单调增长的内存趋势。
 
 <!-- SECTION: build -->
 
@@ -165,7 +170,7 @@ dotnet test VHSDecodeDotNet.slnx -c Release --no-build --no-restore
 ```
 
 当前正式 Release 构建为零警告、零错误。xUnit v3 项目向
-`dotnet test` 和 Visual Studio Test Explorer 暴露 **742** 个可独立发现的测试。
+`dotnet test` 和 Visual Studio Test Explorer 暴露 **744** 个可独立发现的测试。
 
 <!-- SECTION: usage -->
 

@@ -800,13 +800,24 @@ public sealed class RfDemodulator
         ReadOnlySpan<double> filteredReal,
         IReadOnlyList<SosSection> envelopeFilter)
     {
-        var rawEnvelope = new double[filteredReal.Length];
-        for (int i = 0; i < rawEnvelope.Length; i++)
+        if (filteredReal.IsEmpty)
         {
-            rawEnvelope[i] = MathF.Abs((float)filteredReal[i]);
+            return [];
         }
 
-        rawEnvelope = FrequencyDomainFilter.Roll(rawEnvelope, 4);
+        var rawEnvelope = new double[filteredReal.Length];
+        int shift = 4 % rawEnvelope.Length;
+        int split = rawEnvelope.Length - shift;
+        for (int i = 0; i < split; i++)
+        {
+            rawEnvelope[i + shift] = MathF.Abs((float)filteredReal[i]);
+        }
+
+        for (int i = split; i < rawEnvelope.Length; i++)
+        {
+            rawEnvelope[i - split] = MathF.Abs((float)filteredReal[i]);
+        }
+
         return SosFilter.ApplyForwardBackwardFloat32(envelopeFilter, rawEnvelope);
     }
 

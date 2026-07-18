@@ -2,7 +2,7 @@
 
 **[English](README.md)** | [简体中文](README.zh-CN.md) | [日本語](README.ja.md)
 
-<!-- README_SYNC: 2026-07-18.2 -->
+<!-- README_SYNC: 2026-07-18.3 -->
 
 .NET 10 rewrite of the decode-facing parts of
 [`oyvindln/vhs-decode`](https://github.com/oyvindln/vhs-decode), focused on
@@ -131,16 +131,22 @@ release compatibility remain the first constraint.
   order; `--threads 0` and `--threads 1` retain deterministic serial paths.
 - HiFi uses bounded parallel block decoding followed by ordered
   post-processing and writing.
-- Managed FFT workers reuse scratch buffers and immutable root tables, use
-  in-place transforms where safe, and avoid full-field clones on aligned paths.
+- Managed real FFTs reuse pooled packing and scratch buffers, and float32 SOS
+  forward/backward filtering operates in place over one extended buffer. This
+  removes repeated large-object-heap churn while returning every rental after
+  each transform.
 - RF span assembly writes directly into the requested output window instead of
   allocating whole-block field arrays and slicing a second copy.
-- AVX/FMA kernels accelerate LD float32 quantization, VHS chroma rotation, and
-  complex frequency filtering while preserving verified NumPy rounding and
-  scalar fallbacks.
+- AVX/FMA kernels accelerate exact float32 conversion, LD quantization, VHS
+  chroma rotation, and complex frequency filtering. VHS phase demodulation also
+  evaluates each sample angle once, with verified scalar fallbacks and unchanged
+  TBC/JSON hashes.
 - Recovery metadata is disk-streamed; its snapshot queue has capacity one, and
   field-order history and RF caches have hard limits. Long decodes therefore do
   not retain every decoded field or enqueue an unbounded amount of future work.
+- CUDA/OpenCL is not a runtime dependency. Current traces do not justify moving
+  isolated 32K FFTs across the host/device boundary; any future optional GPU
+  backend must batch a device-resident DSP stage and retain an exact CPU fallback.
 
 On one Windows fixture machine, one-frame Release measurements were:
 
@@ -152,14 +158,17 @@ On one Windows fixture machine, one-frame Release measurements were:
 These numbers are fixture-specific, not universal benchmarks. A PAL LD
 four-field Core probe reduced managed allocation from 5.12 GiB to 1.96 GiB
 while preserving verified output. On a reproducible 40-frame PAL VHS probe,
-the current bounded pipeline changed `--threads 1/5/20` from
-16.48/9.06/8.07 s to 15.83/8.81/7.48 s. TBC and JSON hashes remained identical;
-the 20-thread peak was about 1.08 GiB, a fixed performance budget.
+the latest DSP pass changed a fresh `--threads 1/5/20` baseline of
+16.17/8.74/7.57 s to repeated-run medians of 14.65/8.26/6.94 s. TBC and JSON
+hashes remained identical; the 20-thread median peak was about 1.10 GiB. An
+80-frame allocation trace estimated that `double[]` plus `float[]` churn fell
+from 54.0 GiB to 35.6 GiB, while pooled FFT scratch stopped scaling with decode
+duration.
 
-A separate 1.31 GB, 68-second sustained probe produced 8.94, 9.11, 8.96,
-9.11, 8.98, and 9.08 MiB/s in consecutive post-warmup ten-second windows.
-Later windows did not slow down, and their average working set stayed around
-0.90-0.92 GiB instead of growing with decoded duration.
+A separate 1.31 GB, 320-frame sustained probe completed in 45.0 seconds.
+Post-warmup five-second windows produced 9.62-10.13 MiB/s, average working set
+stayed between 986 and 1,021 MiB, and the observed peak was 1,206 MiB. Later
+windows did not slow down or show monotonic memory growth.
 
 <!-- SECTION: build -->
 
@@ -179,7 +188,7 @@ dotnet test VHSDecodeDotNet.slnx -c Release --no-build --no-restore
 ```
 
 The current formal Release build has zero warnings and errors. The xUnit v3
-project exposes **742** independently discoverable tests to both
+project exposes **744** independently discoverable tests to both
 `dotnet test` and Visual Studio Test Explorer.
 
 <!-- SECTION: usage -->
