@@ -401,7 +401,7 @@ public static class PocketFftReal
             }
         }
 
-        private static void Radix4Backward(
+        private static unsafe void Radix4Backward(
             int ido,
             int l1,
             double[] input,
@@ -409,85 +409,102 @@ public static class PocketFftReal
             double[] twiddles)
         {
             const double Sqrt2 = 1.414213562373095048801688724209698;
-            for (int k = 0; k < l1; k++)
+            fixed (double* inputPointer = input)
+            fixed (double* outputPointer = output)
+            fixed (double* twiddlePointer = twiddles)
             {
-                double c0 = input[BackwardInput(0, 0, k, ido, 4)];
-                double c3 = input[BackwardInput(ido - 1, 3, k, ido, 4)];
-                double tr2 = c0 + c3;
-                double tr1 = c0 - c3;
-                double tr3 = 2.0 * input[BackwardInput(ido - 1, 1, k, ido, 4)];
-                double tr4 = 2.0 * input[BackwardInput(0, 2, k, ido, 4)];
-                output[BackwardOutput(0, k, 0, ido, l1)] = tr2 + tr3;
-                output[BackwardOutput(0, k, 2, ido, l1)] = tr2 - tr3;
-                output[BackwardOutput(0, k, 3, ido, l1)] = tr1 + tr4;
-                output[BackwardOutput(0, k, 1, ido, l1)] = tr1 - tr4;
-            }
-
-            if ((ido & 1) == 0)
-            {
+                int inputGroupStride = 4 * ido;
+                int outputGroupStride = ido * l1;
                 for (int k = 0; k < l1; k++)
                 {
-                    double c3 = input[BackwardInput(0, 3, k, ido, 4)];
-                    double c1 = input[BackwardInput(0, 1, k, ido, 4)];
-                    double ti1 = c3 + c1;
-                    double ti2 = c3 - c1;
-                    double c0 = input[BackwardInput(ido - 1, 0, k, ido, 4)];
-                    double c2 = input[BackwardInput(ido - 1, 2, k, ido, 4)];
-                    double tr2 = c0 + c2;
-                    double tr1 = c0 - c2;
-                    output[BackwardOutput(ido - 1, k, 0, ido, l1)] = tr2 + tr2;
-                    output[BackwardOutput(ido - 1, k, 1, ido, l1)] = Sqrt2 * (tr1 - ti1);
-                    output[BackwardOutput(ido - 1, k, 2, ido, l1)] = ti2 + ti2;
-                    output[BackwardOutput(ido - 1, k, 3, ido, l1)] = -Sqrt2 * (tr1 + ti1);
+                    double* inputGroup = inputPointer + (inputGroupStride * k);
+                    double* outputGroup = outputPointer + (ido * k);
+                    double c0 = inputGroup[0];
+                    double c3 = inputGroup[inputGroupStride - 1];
+                    double tr2 = c0 + c3;
+                    double tr1 = c0 - c3;
+                    double tr3 = 2.0 * inputGroup[(2 * ido) - 1];
+                    double tr4 = 2.0 * inputGroup[2 * ido];
+                    outputGroup[0] = tr2 + tr3;
+                    outputGroup[2 * outputGroupStride] = tr2 - tr3;
+                    outputGroup[3 * outputGroupStride] = tr1 + tr4;
+                    outputGroup[outputGroupStride] = tr1 - tr4;
                 }
-            }
 
-            if (ido <= 2)
-            {
-                return;
-            }
-
-            int stride = ido - 1;
-            for (int k = 0; k < l1; k++)
-            {
-                for (int i = 2; i < ido; i += 2)
+                if ((ido & 1) == 0)
                 {
-                    int ic = ido - i;
-                    double c10 = input[BackwardInput(i - 1, 0, k, ido, 4)];
-                    double c43 = input[BackwardInput(ic - 1, 3, k, ido, 4)];
-                    double tr2 = c10 + c43;
-                    double tr1 = c10 - c43;
-                    double c20 = input[BackwardInput(i, 0, k, ido, 4)];
-                    double c53 = input[BackwardInput(ic, 3, k, ido, 4)];
-                    double ti1 = c20 + c53;
-                    double ti2 = c20 - c53;
-                    double c32 = input[BackwardInput(i, 2, k, ido, 4)];
-                    double c61 = input[BackwardInput(ic, 1, k, ido, 4)];
-                    double tr4 = c32 + c61;
-                    double ti3 = c32 - c61;
-                    double c42 = input[BackwardInput(i - 1, 2, k, ido, 4)];
-                    double c71 = input[BackwardInput(ic - 1, 1, k, ido, 4)];
-                    double tr3 = c42 + c71;
-                    double ti4 = c42 - c71;
+                    for (int k = 0; k < l1; k++)
+                    {
+                        double* inputGroup = inputPointer + (inputGroupStride * k);
+                        double* outputGroup = outputPointer + (ido * k) + ido - 1;
+                        double c3 = inputGroup[3 * ido];
+                        double c1 = inputGroup[ido];
+                        double ti1 = c3 + c1;
+                        double ti2 = c3 - c1;
+                        double c0 = inputGroup[ido - 1];
+                        double c2 = inputGroup[(3 * ido) - 1];
+                        double tr2 = c0 + c2;
+                        double tr1 = c0 - c2;
+                        outputGroup[0] = tr2 + tr2;
+                        outputGroup[outputGroupStride] = Sqrt2 * (tr1 - ti1);
+                        outputGroup[2 * outputGroupStride] = ti2 + ti2;
+                        outputGroup[3 * outputGroupStride] = -Sqrt2 * (tr1 + ti1);
+                    }
+                }
 
-                    output[BackwardOutput(i - 1, k, 0, ido, l1)] = tr2 + tr3;
-                    double cr3 = tr2 - tr3;
-                    output[BackwardOutput(i, k, 0, ido, l1)] = ti2 + ti3;
-                    double ci3 = ti2 - ti3;
-                    double cr4 = tr1 + tr4;
-                    double cr2 = tr1 - tr4;
-                    double ci2 = ti1 + ti4;
-                    double ci4 = ti1 - ti4;
+                if (ido <= 2)
+                {
+                    return;
+                }
 
-                    MultiplyConjugate(twiddles[i - 2], twiddles[i - 1], ci2, cr2,
-                        out output[BackwardOutput(i, k, 1, ido, l1)],
-                        out output[BackwardOutput(i - 1, k, 1, ido, l1)]);
-                    MultiplyConjugate(twiddles[stride + i - 2], twiddles[stride + i - 1], ci3, cr3,
-                        out output[BackwardOutput(i, k, 2, ido, l1)],
-                        out output[BackwardOutput(i - 1, k, 2, ido, l1)]);
-                    MultiplyConjugate(twiddles[(2 * stride) + i - 2], twiddles[(2 * stride) + i - 1], ci4, cr4,
-                        out output[BackwardOutput(i, k, 3, ido, l1)],
-                        out output[BackwardOutput(i - 1, k, 3, ido, l1)]);
+                int stride = ido - 1;
+                for (int k = 0; k < l1; k++)
+                {
+                    double* inputGroup = inputPointer + (inputGroupStride * k);
+                    double* outputGroup = outputPointer + (ido * k);
+                    for (int i = 2; i < ido; i += 2)
+                    {
+                        int ic = ido - i;
+                        double c10 = inputGroup[i - 1];
+                        double c43 = inputGroup[(3 * ido) + ic - 1];
+                        double tr2 = c10 + c43;
+                        double tr1 = c10 - c43;
+                        double c20 = inputGroup[i];
+                        double c53 = inputGroup[(3 * ido) + ic];
+                        double ti1 = c20 + c53;
+                        double ti2 = c20 - c53;
+                        double c32 = inputGroup[(2 * ido) + i];
+                        double c61 = inputGroup[ido + ic];
+                        double tr4 = c32 + c61;
+                        double ti3 = c32 - c61;
+                        double c42 = inputGroup[(2 * ido) + i - 1];
+                        double c71 = inputGroup[ido + ic - 1];
+                        double tr3 = c42 + c71;
+                        double ti4 = c42 - c71;
+
+                        outputGroup[i - 1] = tr2 + tr3;
+                        double cr3 = tr2 - tr3;
+                        outputGroup[i] = ti2 + ti3;
+                        double ci3 = ti2 - ti3;
+                        double cr4 = tr1 + tr4;
+                        double cr2 = tr1 - tr4;
+                        double ci2 = ti1 + ti4;
+                        double ci4 = ti1 - ti4;
+
+                        MultiplyConjugate(twiddlePointer[i - 2], twiddlePointer[i - 1], ci2, cr2,
+                            out outputGroup[outputGroupStride + i],
+                            out outputGroup[outputGroupStride + i - 1]);
+                        MultiplyConjugate(twiddlePointer[stride + i - 2], twiddlePointer[stride + i - 1], ci3, cr3,
+                            out outputGroup[(2 * outputGroupStride) + i],
+                            out outputGroup[(2 * outputGroupStride) + i - 1]);
+                        MultiplyConjugate(
+                            twiddlePointer[(2 * stride) + i - 2],
+                            twiddlePointer[(2 * stride) + i - 1],
+                            ci4,
+                            cr4,
+                            out outputGroup[(3 * outputGroupStride) + i],
+                            out outputGroup[(3 * outputGroupStride) + i - 1]);
+                    }
                 }
             }
         }

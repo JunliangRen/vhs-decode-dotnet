@@ -2859,6 +2859,31 @@ public void VhsChromaDecoderUpconvertsLinePhases()
         [phase0]));
 }
 
+[Fact(DisplayName = "VHS chroma heterodyne table is bit exact across worker counts")]
+public void VhsChromaHeterodyneTableIsBitExactAcrossWorkerCounts()
+{
+    const int sampleCount = 65_537;
+    double[][] serial = VhsChromaDecoder.BuildHeterodyneTable(
+        sampleCount,
+        fscMHz: 315.0 / 88.0,
+        colorUnderCarrierMHz: 0.62937,
+        outputSampleRateMHz: 28.63636,
+        phaseDriftRadians: 0.123456789,
+        workerThreads: 1);
+    double[][] parallel = VhsChromaDecoder.BuildHeterodyneTable(
+        sampleCount,
+        fscMHz: 315.0 / 88.0,
+        colorUnderCarrierMHz: 0.62937,
+        outputSampleRateMHz: 28.63636,
+        phaseDriftRadians: 0.123456789,
+        workerThreads: 8);
+
+    for (int phase = 0; phase < serial.Length; phase++)
+    {
+        AssertEqual(DoubleBitsSha256(serial[phase]), DoubleBitsSha256(parallel[phase]));
+    }
+}
+
 [Fact(DisplayName = "VHS chroma decoder detects burst phase sequence")]
 public void VhsChromaDecoderDetectsBurstPhaseSequence()
 {
@@ -3347,6 +3372,81 @@ public void VhsChromaCarrierMatchesNumpyFloat32Trigonometry()
         AssertEqual(sinBits, BitConverter.SingleToUInt32Bits((float)sine[index]));
         AssertEqual(cosBits, BitConverter.SingleToUInt32Bits((float)cosine[index]));
     }
+}
+
+[Fact(DisplayName = "VHS chroma carrier table is bit exact across worker counts")]
+public void VhsChromaCarrierTableIsBitExactAcrossWorkerCounts()
+{
+    const int sampleCount = 65_537;
+    (double[] serialSin, double[] serialCos) = VhsChromaDecoder.BuildCarrierTables(
+        sampleCount,
+        carrierMHz: 315.0 / 88.0,
+        outputSampleRateMHz: 28.63636,
+        workerThreads: 1);
+    (double[] parallelSin, double[] parallelCos) = VhsChromaDecoder.BuildCarrierTables(
+        sampleCount,
+        carrierMHz: 315.0 / 88.0,
+        outputSampleRateMHz: 28.63636,
+        workerThreads: 8);
+
+    AssertEqual(DoubleBitsSha256(serialSin), DoubleBitsSha256(parallelSin));
+    AssertEqual(DoubleBitsSha256(serialCos), DoubleBitsSha256(parallelCos));
+}
+
+[Fact(DisplayName = "VHS chroma phase workspace preserves decode results and carrier fallback")]
+public void VhsChromaPhaseWorkspacePreservesDecodeResultsAndCarrierFallback()
+{
+    var options = new VhsChromaFieldOptions(
+        ColorSystem: "PAL",
+        OutputLineLength: 20,
+        OutputLineCount: 40,
+        OutputSampleRateHz: 4_000_000.0,
+        FscMHz: 1.0,
+        ColorUnderCarrierHz: 0.0,
+        BurstStart: 5,
+        BurstEnd: 10,
+        BurstAbsRef: 10.0,
+        ChromaRotation: null,
+        DisableComb: true,
+        DisablePhaseCorrection: true,
+        EnableColorKiller: false,
+        DetectChromaTrackPhase: false);
+    double[] chroma = BuildOutputChromaCarrier(
+        options.OutputLineLength,
+        options.OutputLineCount,
+        options.FscMHz,
+        options.OutputSampleRateHz);
+    double[] lineLocations = Enumerable.Range(0, options.OutputLineCount + 1)
+        .Select(line => line * 100.0)
+        .ToArray();
+    VhsChromaPhaseAnalysis analysis = VhsChromaDecoder.AnalyzeFieldPhaseWithWorkspace(
+        chroma,
+        options,
+        lineLocations,
+        inputLineLength: 100);
+
+    VhsChromaFieldResult prepared = VhsChromaDecoder.DecodeFieldWithPhase(
+        chroma,
+        options,
+        analysis);
+    VhsChromaFieldResult independent = VhsChromaDecoder.DecodeFieldWithPhase(
+        chroma,
+        options,
+        analysis.Phase);
+    AssertTrue(prepared.Samples.SequenceEqual(independent.Samples));
+
+    const double changedCarrierHz = 1_000_000.0;
+    VhsChromaFieldResult preparedFallback = VhsChromaDecoder.DecodeFieldWithPhase(
+        chroma,
+        options,
+        analysis,
+        previousChromaAfcCarrierHz: changedCarrierHz);
+    VhsChromaFieldResult independentFallback = VhsChromaDecoder.DecodeFieldWithPhase(
+        chroma,
+        options,
+        analysis.Phase,
+        previousChromaAfcCarrierHz: changedCarrierHz);
+    AssertTrue(preparedFallback.Samples.SequenceEqual(independentFallback.Samples));
 }
 
 [Fact(DisplayName = "VHS chroma decoder emits field samples")]

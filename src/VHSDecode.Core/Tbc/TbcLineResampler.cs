@@ -225,19 +225,49 @@ public sealed class TbcLineResampler
         int prefixSamples = checked(firstLine * OutputLineLength);
         int scaledSampleCount = checked(prefixSamples + destinationLength);
         var sourcePositions = new double[destinationLength];
-        var wowFactors = new double[scaledSampleCount];
-
-        for (int i = 0; i < scaledSampleCount; i++)
+        double[] levelAdjusts;
+        if (interpolator is LinearLineLocationInterpolator linear
+            && scaledSampleCount % OutputLineLength == 0)
         {
-            double factor = interpolator.EvaluateOutputDerivative(i, OutputLineLength);
-            wowFactors[i] = factor;
-            if (i >= prefixSamples)
+            void BuildSourcePositions()
             {
-                sourcePositions[i - prefixSamples] = interpolator.EvaluateOutputPosition(i, OutputLineLength);
+                for (int i = 0; i < destinationLength; i++)
+                {
+                    sourcePositions[i] = interpolator.EvaluateOutputPosition(prefixSamples + i, OutputLineLength);
+                }
+            }
+
+            if (_workerThreads > 1 && destinationLength >= ParallelSampleThreshold)
+            {
+                double[]? parallelLevelAdjusts = null;
+                Parallel.Invoke(
+                    new ParallelOptions { MaxDegreeOfParallelism = 2 },
+                    BuildSourcePositions,
+                    () => parallelLevelAdjusts = BuildLinearLevelAdjusts(linear, scaledSampleCount));
+                levelAdjusts = parallelLevelAdjusts!;
+            }
+            else
+            {
+                BuildSourcePositions();
+                levelAdjusts = BuildLinearLevelAdjusts(linear, scaledSampleCount);
             }
         }
+        else
+        {
+            var wowFactors = new double[scaledSampleCount];
+            for (int i = 0; i < scaledSampleCount; i++)
+            {
+                double factor = interpolator.EvaluateOutputDerivative(i, OutputLineLength);
+                wowFactors[i] = factor;
+                if (i >= prefixSamples)
+                {
+                    sourcePositions[i - prefixSamples] = interpolator.EvaluateOutputPosition(i, OutputLineLength);
+                }
+            }
 
-        double[] levelAdjusts = BuildLevelAdjusts(wowFactors);
+            levelAdjusts = BuildLevelAdjusts(wowFactors);
+        }
+
         return (sourcePositions, levelAdjusts, prefixSamples);
     }
 
@@ -248,6 +278,41 @@ public sealed class TbcLineResampler
             return [];
         }
 
+        double[] levelAdjusts = ReplaceWowFactorOutliers(wowFactors);
+        SmoothLevelAdjusts(levelAdjusts);
+        return levelAdjusts;
+    }
+
+    private double[] BuildLinearLevelAdjusts(
+        ILineLocationInterpolator interpolator,
+        int sampleCount)
+    {
+        int lineCount = sampleCount / OutputLineLength;
+        var lineFactors = new double[lineCount];
+        for (int line = 0; line < lineCount; line++)
+        {
+            lineFactors[line] = interpolator.EvaluateOutputDerivative(
+                line * OutputLineLength,
+                OutputLineLength);
+        }
+
+        double[] adjustedLineFactors = ReplaceWowFactorOutliers(lineFactors);
+        var levelAdjusts = new double[sampleCount];
+        for (int line = 0; line < lineCount; line++)
+        {
+            Array.Fill(
+                levelAdjusts,
+                adjustedLineFactors[line],
+                line * OutputLineLength,
+                OutputLineLength);
+        }
+
+        SmoothLevelAdjusts(levelAdjusts);
+        return levelAdjusts;
+    }
+
+    private static double[] ReplaceWowFactorOutliers(double[] wowFactors)
+    {
         double median = Median(wowFactors);
         var deviations = new double[wowFactors.Length];
         for (int i = 0; i < wowFactors.Length; i++)
@@ -263,6 +328,11 @@ public sealed class TbcLineResampler
             levelAdjusts[i] = Math.Abs(wowFactors[i] - median) > threshold ? median : wowFactors[i];
         }
 
+        return levelAdjusts;
+    }
+
+    private void SmoothLevelAdjusts(double[] levelAdjusts)
+    {
         if (WowLevelAdjustSmoothing > 0.0)
         {
             double alpha = 1.0 / (WowLevelAdjustSmoothing * OutputLineLength);
@@ -275,8 +345,6 @@ public sealed class TbcLineResampler
                     previous);
             }
         }
-
-        return levelAdjusts;
     }
 
     private static double MedianLineLength(IReadOnlyList<double> lineLocations)

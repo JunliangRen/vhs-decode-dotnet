@@ -2,7 +2,7 @@
 
 [English](README.md) | **[简体中文](README.zh-CN.md)** | [日本語](README.ja.md)
 
-<!-- README_SYNC: 2026-07-18.6 -->
+<!-- README_SYNC: 2026-07-18.7 -->
 
 这是 [`oyvindln/vhs-decode`](https://github.com/oyvindln/vhs-decode)
 中解码相关部分的 .NET 11 重写，当前以 release `v0.4.0`、commit
@@ -116,15 +116,18 @@
   与 GNU Radio 读取保持有序。
 - 以 stream 为作用域的已解码 RF 缓存避免在重叠场读取之间重复 FFT，
   同时限制内存占用。
-- VHS 会话会在有效 worker 数之外安排一波额外的有界任务，最多保留 32 个纯计算
-  预读 RF block；并发 RF 解码数同时受 `--threads` 与内部 8-worker 上限约束，有效
-  worker 数也不超过逻辑处理器数。这样可在
-  当前场进行 TBC 时准备下一场，又不会让 FFT 分配峰值随 `--threads` 无限放大。
-  输入读取仍然有序，seek 或释放时会取消待处理工作。
+- VHS 使用有界连续 RF 流水线：一个 producer 独占有序输入读取，最多保留 32 个
+  前瞻槽位，同时最多解调 8 个 block。每个完成的 block 会独立发布，因此当前场只等待
+  自己需要的 block，不再等待整批任务。seek、输入流切换或释放会先取消并收拢 producer，
+  再允许其他读取者接触 FFmpeg/GNU Radio stream。
 - VSync 包络/极小值计算与谐波功率比搜索会在同一个只读 padded 输入上并发执行；
   两个分支完成后，候选仲裁和 detector 状态更新仍按顺序进行。
 - 较长的 TBC sinc 重采样任务共享 worker 配额并保持输出顺序；
   `--threads 0` 和 `--threads 1` 保留确定性的串行路径。
+- 线性 wow 调整每行只计算一次恒定导数，在 median/MAD 修复后再展开；启用 worker 时，
+  源位置与电平准备仅以固定两路并发执行。
+- VHS heterodyne 与 carrier 表使用有界并行构造。只有载波和相位参数一致时，场解码才
+  复用相位分析工作区；AFC 参数变化会回到原始重建路径。
 - HiFi 使用有界并行 block 解码，之后按顺序进行后处理和写入。
 - 托管 real FFT 复用池化的 packing 与 scratch 缓冲区，float32 SOS 前后向滤波
   在同一个扩展缓冲区内原地完成；每次变换结束都会归还租用项，避免反复冲击 LOH。
@@ -133,8 +136,8 @@
   两种 block 数。同步场解码结束后立即归还缓冲；公开 `Read` 结果、CVBS 延迟渲染和
   LD VITS 保留源仍拥有独立数组。
 - AVX/FMA 内核加速精确 float32 转换、LD 量化、VHS 色度移位和复数频域滤波。
-  VHS 相位解调也只计算每个样本一次角度，并保留已验证的标量回退；TBC/JSON
-  hash 不变。
+  inverse radix-4 FFT 使用固定指针索引消除边界检查，同时由差分测试保证变换位模式与
+  输出 hash 不变。
 - 恢复元数据以磁盘流式写入，snapshot 队列容量为 1，场顺序历史和 RF 缓存均有
   硬上限；长时间解码不会保留所有已解码场，也不会无限排入未来工作。
 - CUDA/OpenCL 不是运行时依赖。当前 trace 不支持把孤立的 32K FFT 在主机与设备间
@@ -147,22 +150,16 @@
 | NTSC VHS | 2.346 s | 7.193 s |
 | NTSC LaserDisc | 1.651 s | 5.865 s |
 
-这些数字只对应特定夹具，不是通用 benchmark。以下 VHS A/B 均使用 .NET SDK/runtime
-`11.0.100-preview.6.26359.118`。在可重复的 40-frame PAL probe 上使用
-`--skip_chroma --no_resample` 时，本轮并发优化将 commit `6441d10` 在
-`--threads 1/20` 下的中位数从 14.64/6.87 秒降到 13.88/5.90 秒，
-分别提升 5.2%/14.2%。20 线程下活跃核心数中位数从 2.72 升到 3.38，
-工作集峰值中位数从 1.39 GiB 升到 1.48 GiB；配对 TBC/JSON 输出均逐字节一致。
-此前的分配优化已将 PAL LD 四场 probe 从 5.12 GiB 降至 1.96 GiB，并将 VHS
-`double[]` 与 `float[]` 周转量估算值从 54.0 GiB 降至 25.6 GiB。
+这些数字只对应特定夹具，不是通用 benchmark。当前 VHS A/B 均使用 .NET SDK/runtime
+`11.0.100-preview.6.26359.118`、`--threads 20`、默认色度和默认重采样。
+在可重复的 40-frame PAL probe 上，保存的连续流水线改造前基线中位数为 11.60 秒，
+当前中位数为 7.71 秒，提升 33.5%。平均活跃核心从约 2.2-2.5 升至 3.3-3.7；
+配对 TBC、JSON 和 chroma SHA-256 全部一致。
 
-在 1.31 GB、320-frame 持续 probe 上，commit `6441d10` 与当前代码分别用时
-47.61 和 39.80 秒，提升 16.4%；平均活跃核心从 2.56 升到 3.06，输出逐字节一致。
-当前工作集峰值为 1.70 GiB，四等分时段的私有内存峰值为
-1.67/1.45/1.45/1.55 GiB，没有单调增长。启用默认色度和重采样后，20 线程的
-20-frame 中位数从 8.61 降到 7.30 秒（提升 15.2%），
-TBC、JSON 和 chroma hash 全部一致。160-frame 默认路径用时 53.23 秒，峰值
-1.70 GiB，各时段内存同样没有单调增长。
+当前 40/160/320-frame 持续运行分别用时 7.65/26.58/52.51 秒，工作集峰值为
+1.76/1.88/1.67 GiB，后半程中位数为 1.42/1.30/1.28 GiB。320 帧全部写完，
+内存没有随解码长度增长。此前的分配优化还将 PAL LD 四场 probe 从 5.12 GiB
+降至 1.96 GiB。
 
 <!-- SECTION: build -->
 
@@ -182,7 +179,7 @@ dotnet test VHSDecodeDotNet.slnx -c Release --no-build --no-restore
 ```
 
 当前正式 Release 构建为零警告、零错误。xUnit v3 项目向
-`dotnet test` 和 Visual Studio Test Explorer 暴露 **746** 个可独立发现的测试。
+`dotnet test` 和 Visual Studio Test Explorer 暴露 **750** 个可独立发现的测试。
 
 <!-- SECTION: usage -->
 

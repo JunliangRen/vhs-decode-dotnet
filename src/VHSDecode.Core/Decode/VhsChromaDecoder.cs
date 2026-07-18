@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using System.Numerics;
 using System.Runtime.InteropServices;
 using VHSDecode.Core.Dsp;
@@ -54,6 +55,8 @@ public sealed record VhsChromaFieldOptions(
     bool EnableColorKiller,
     bool DetectChromaTrackPhase)
 {
+    public int WorkerThreads { get; init; } = 1;
+
     public TransferFunction? FinalFilter { get; init; }
 
     public IReadOnlyList<SosSection>? FinalSosFilter { get; init; }
@@ -101,6 +104,12 @@ public sealed record VhsChromaFieldResult(
     public ChromaCarrierEstimate? CarrierEstimate { get; init; }
 }
 
+internal sealed record VhsChromaPhaseAnalysis(
+    ChromaPhaseSequenceResult Phase,
+    double[][] Heterodyne,
+    double HeterodyneCarrierHz,
+    double HeterodynePhaseRadians);
+
 public delegate ChromaBurstDemodulationResult ChromaBurstProbe(
     int lineNumber,
     int phaseRotation,
@@ -108,6 +117,7 @@ public delegate ChromaBurstDemodulationResult ChromaBurstProbe(
 
 public static class VhsChromaDecoder
 {
+    private const int ParallelSampleThreshold = 64 * 1024;
     private const int StartingLine = 16;
     private const double BurstMagnitudeThreshold = 2.5e4;
     private const int BurstCheckSkipLines = 16;
@@ -154,7 +164,7 @@ public static class VhsChromaDecoder
         double? previousChromaAfcCarrierHz = null,
         double previousChromaAfcPhaseRadians = 0.0)
     {
-        ChromaPhaseSequenceResult phase = AnalyzeFieldPhase(
+        VhsChromaPhaseAnalysis analysis = AnalyzeFieldPhaseWithWorkspace(
             chroma,
             options,
             lineLocations,
@@ -165,19 +175,43 @@ public static class VhsChromaDecoder
             lineOffset,
             previousChromaAfcCarrierHz,
             previousChromaAfcPhaseRadians);
-        return DecodeFieldWithPhase(
+        return DecodeFieldWithPhaseCore(
             chroma,
             options,
-            phase,
+            analysis.Phase,
             isFirstField,
             fieldNumber,
             finalFilter,
             lineOffset,
             previousChromaAfcCarrierHz,
-            previousChromaAfcPhaseRadians);
+            previousChromaAfcPhaseRadians,
+            analysis);
     }
 
     public static ChromaPhaseSequenceResult AnalyzeFieldPhase(
+        ReadOnlySpan<double> chroma,
+        VhsChromaFieldOptions options,
+        IReadOnlyList<double> lineLocations,
+        int inputLineLength,
+        int? chromaRotationIndex = null,
+        int previousBurstDetectedLine = 0,
+        Func<double[], double[]>? burstFilter = null,
+        int lineOffset = 0,
+        double? previousChromaAfcCarrierHz = null,
+        double previousChromaAfcPhaseRadians = 0.0)
+        => AnalyzeFieldPhaseWithWorkspace(
+            chroma,
+            options,
+            lineLocations,
+            inputLineLength,
+            chromaRotationIndex,
+            previousBurstDetectedLine,
+            burstFilter,
+            lineOffset,
+            previousChromaAfcCarrierHz,
+            previousChromaAfcPhaseRadians).Phase;
+
+    internal static VhsChromaPhaseAnalysis AnalyzeFieldPhaseWithWorkspace(
         ReadOnlySpan<double> chroma,
         VhsChromaFieldOptions options,
         IReadOnlyList<double> lineLocations,
@@ -216,8 +250,13 @@ public static class VhsChromaDecoder
             options.FscMHz,
             phaseCarrierHz / 1_000_000.0,
             outputSampleRateMHz,
-            phaseDriftRadians);
-        (double[] burstSin, double[] burstCos) = BuildCarrierTables(chromaField.Length, options.FscMHz, outputSampleRateMHz);
+            phaseDriftRadians,
+            options.WorkerThreads);
+        (double[] burstSin, double[] burstCos) = BuildCarrierTables(
+            chromaField.Length,
+            options.FscMHz,
+            outputSampleRateMHz,
+            options.WorkerThreads);
         ChromaPhaseSequenceResult result = GetPhaseRotationSequence(
             options.ChromaRotation,
             chromaRotationIndex,
@@ -243,7 +282,11 @@ public static class VhsChromaDecoder
             options.EnableColorKiller,
             previousBurstDetectedLine,
             options.ColorSystem);
-        return result;
+        return new VhsChromaPhaseAnalysis(
+            result,
+            heterodyne,
+            phaseCarrierHz,
+            phaseDriftRadians);
     }
 
     public static VhsChromaFieldResult DecodeFieldWithPhase(
@@ -256,6 +299,51 @@ public static class VhsChromaDecoder
         int lineOffset = 0,
         double? previousChromaAfcCarrierHz = null,
         double previousChromaAfcPhaseRadians = 0.0)
+        => DecodeFieldWithPhaseCore(
+            chroma,
+            options,
+            phase,
+            isFirstField,
+            fieldNumber,
+            finalFilter,
+            lineOffset,
+            previousChromaAfcCarrierHz,
+            previousChromaAfcPhaseRadians,
+            preparedAnalysis: null);
+
+    internal static VhsChromaFieldResult DecodeFieldWithPhase(
+        ReadOnlySpan<double> chroma,
+        VhsChromaFieldOptions options,
+        VhsChromaPhaseAnalysis analysis,
+        bool? isFirstField = null,
+        int fieldNumber = 0,
+        Func<double[], double[]>? finalFilter = null,
+        int lineOffset = 0,
+        double? previousChromaAfcCarrierHz = null,
+        double previousChromaAfcPhaseRadians = 0.0)
+        => DecodeFieldWithPhaseCore(
+            chroma,
+            options,
+            analysis.Phase,
+            isFirstField,
+            fieldNumber,
+            finalFilter,
+            lineOffset,
+            previousChromaAfcCarrierHz,
+            previousChromaAfcPhaseRadians,
+            analysis);
+
+    private static VhsChromaFieldResult DecodeFieldWithPhaseCore(
+        ReadOnlySpan<double> chroma,
+        VhsChromaFieldOptions options,
+        ChromaPhaseSequenceResult phase,
+        bool? isFirstField,
+        int fieldNumber,
+        Func<double[], double[]>? finalFilter,
+        int lineOffset,
+        double? previousChromaAfcCarrierHz,
+        double previousChromaAfcPhaseRadians,
+        VhsChromaPhaseAnalysis? preparedAnalysis)
     {
         ArgumentNullException.ThrowIfNull(options);
         ArgumentNullException.ThrowIfNull(phase);
@@ -295,12 +383,26 @@ public static class VhsChromaDecoder
             ?? options.ColorUnderCarrierHz;
         double phaseDriftRadians = carrierEstimate?.PhaseRadians
             ?? previousChromaAfcPhaseRadians;
-        double[][] heterodyne = BuildHeterodyneTable(
-            chromaField.Length,
-            options.FscMHz,
-            trackedCarrierHz / 1_000_000.0,
-            outputSampleRateMHz,
-            phaseDriftRadians);
+        bool usePhaseCompensation = IsNtsc(options.ColorSystem)
+            && !options.DisablePhaseCorrection
+            && isFirstField.HasValue;
+        double[][]? heterodyne = null;
+        if (!usePhaseCompensation)
+        {
+            heterodyne = preparedAnalysis is not null
+                && preparedAnalysis.HeterodyneCarrierHz == trackedCarrierHz
+                && preparedAnalysis.HeterodynePhaseRadians == phaseDriftRadians
+                && preparedAnalysis.Heterodyne.Length == 4
+                && preparedAnalysis.Heterodyne[0].Length == chromaField.Length
+                    ? preparedAnalysis.Heterodyne
+                    : BuildHeterodyneTable(
+                        chromaField.Length,
+                        options.FscMHz,
+                        trackedCarrierHz / 1_000_000.0,
+                        outputSampleRateMHz,
+                        phaseDriftRadians,
+                        options.WorkerThreads);
+        }
 
         if (IsNtsc(options.ColorSystem))
         {
@@ -315,9 +417,11 @@ public static class VhsChromaDecoder
 
         double[] upconverted;
         int? fieldPhaseId = null;
-        if (IsNtsc(options.ColorSystem) && !options.DisablePhaseCorrection && isFirstField.HasValue)
+        if (usePhaseCompensation)
         {
-            (fieldPhaseId, double targetPhase) = NtscFieldPhaseTarget(isFirstField.Value, fieldNumber);
+            (fieldPhaseId, double targetPhase) = NtscFieldPhaseTarget(
+                isFirstField.GetValueOrDefault(),
+                fieldNumber);
             upconverted = UpconvertChromaPhaseCompensated(
                 chromaField,
                 lineOffset,
@@ -335,7 +439,7 @@ public static class VhsChromaDecoder
                 lineOffset,
                 options.OutputLineLength,
                 phase.PhaseSequence,
-                heterodyne);
+                heterodyne!);
         }
 
         if (finalFilter is not null)
@@ -733,20 +837,37 @@ public static class VhsChromaDecoder
         double fscMHz,
         double colorUnderCarrierMHz,
         double outputSampleRateMHz,
-        double phaseDriftRadians = 0.0)
+        double phaseDriftRadians = 0.0,
+        int workerThreads = 1)
     {
         ArgumentOutOfRangeException.ThrowIfNegative(sampleCount);
         ArgumentOutOfRangeException.ThrowIfNegativeOrZero(outputSampleRateMHz);
 
         double hetWaveScale = (fscMHz + colorUnderCarrierMHz) / outputSampleRateMHz;
         var table = new double[4][];
-        for (int phase = 0; phase < table.Length; phase++)
+        void BuildPhase(int phase)
         {
             double phaseOffset = (Math.PI / 2.0 * phase) + phaseDriftRadians;
             table[phase] = new double[sampleCount];
             for (int i = 0; i < sampleCount; i++)
             {
                 table[phase][i] = (double)(float)-Math.Cos((Math.Tau * hetWaveScale * i) + phaseOffset);
+            }
+        }
+
+        if (workerThreads > 1 && sampleCount >= ParallelSampleThreshold)
+        {
+            Parallel.For(
+                0,
+                table.Length,
+                new ParallelOptions { MaxDegreeOfParallelism = Math.Min(workerThreads, table.Length) },
+                BuildPhase);
+        }
+        else
+        {
+            for (int phase = 0; phase < table.Length; phase++)
+            {
+                BuildPhase(phase);
             }
         }
 
@@ -1122,7 +1243,8 @@ public static class VhsChromaDecoder
     internal static (double[] Sin, double[] Cos) BuildCarrierTables(
         int sampleCount,
         double carrierMHz,
-        double outputSampleRateMHz)
+        double outputSampleRateMHz,
+        int workerThreads = 1)
     {
         ArgumentOutOfRangeException.ThrowIfNegative(sampleCount);
         ArgumentOutOfRangeException.ThrowIfNegativeOrZero(outputSampleRateMHz);
@@ -1130,11 +1252,26 @@ public static class VhsChromaDecoder
         double waveScale = carrierMHz / outputSampleRateMHz;
         var sine = new double[sampleCount];
         var cosine = new double[sampleCount];
-        for (int i = 0; i < sampleCount; i++)
+        void BuildRange(int start, int end)
         {
-            float theta = (float)(Math.Tau * waveScale * i);
-            sine[i] = NumpyTrigFloat32(theta, cosine: false);
-            cosine[i] = NumpyTrigFloat32(theta, cosine: true);
+            for (int i = start; i < end; i++)
+            {
+                float theta = (float)(Math.Tau * waveScale * i);
+                sine[i] = NumpyTrigFloat32(theta, cosine: false);
+                cosine[i] = NumpyTrigFloat32(theta, cosine: true);
+            }
+        }
+
+        if (workerThreads > 1 && sampleCount >= ParallelSampleThreshold)
+        {
+            Parallel.ForEach(
+                Partitioner.Create(0, sampleCount),
+                new ParallelOptions { MaxDegreeOfParallelism = workerThreads },
+                range => BuildRange(range.Item1, range.Item2));
+        }
+        else
+        {
+            BuildRange(0, sampleCount);
         }
 
         return (sine, cosine);
