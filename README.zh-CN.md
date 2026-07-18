@@ -2,7 +2,7 @@
 
 [English](README.md) | **[简体中文](README.zh-CN.md)** | [日本語](README.ja.md)
 
-<!-- README_SYNC: 2026-07-19.1 -->
+<!-- README_SYNC: 2026-07-19.2 -->
 
 这是 [`oyvindln/vhs-decode`](https://github.com/oyvindln/vhs-decode)
 中解码相关部分的 .NET 11 重写，当前以 release `v0.4.0`、commit
@@ -135,9 +135,10 @@
 - 标准 VHS 场解码最多复用两套精确长度的 RF span 缓冲，对应固定读取窗口只可能覆盖的
   两种 block 数。同步场解码结束后立即归还缓冲；公开 `Read` 结果、CVBS 延迟渲染和
   LD VITS 保留源仍拥有独立数组。
-- AVX/FMA 内核加速精确 float32 转换、LD 量化、VHS 色度移位和复数频域滤波。
-  inverse radix-4 FFT 与 16-tap TBC sinc 内核使用固定指针索引消除边界检查，
-  不改变算术顺序；差分测试保证变换位模式与输出 hash 不变。
+- AVX/FMA 内核加速精确 float32 转换、VHS RF envelope 准备、LD 量化、
+  VHS 色度移位和复数频域滤波。inverse radix-4 FFT 与 16-tap TBC sinc 内核
+  使用固定指针索引消除边界检查，不改变算术顺序；差分测试保证变换位模式与
+  输出 hash 不变。
 - 恢复元数据以磁盘流式写入，snapshot 队列容量为 1，场顺序历史和 RF 缓存均有
   硬上限；长时间解码不会保留所有已解码场，也不会无限排入未来工作。
 - CUDA/OpenCL 不是运行时依赖。当前 trace 不支持把孤立的 32K FFT 在主机与设备间
@@ -166,6 +167,11 @@
 私有内存中位数为 1.45/1.34/1.29/1.35 GiB，峰值为 1.71 GiB。TBC、JSON 与
 chroma SHA-256 保持完全一致。
 
+AVX RF envelope 准备将隔离的 32K-block 中位数从 57.5 us 降到 13.3 us，
+内核提升 76.9%。40-frame 中位数从 7.55 秒降到 7.39 秒，160-frame 运行从
+26.95 秒降到 25.70 秒；私有内存四分位中位数为 1.34/1.48/1.50/1.45 GiB，
+峰值为 1.72 GiB，三项 hash 仍完全一致。
+
 <!-- SECTION: build -->
 
 ## 构建和测试
@@ -184,7 +190,7 @@ dotnet test VHSDecodeDotNet.slnx -c Release --no-build --no-restore
 ```
 
 当前正式 Release 构建为零警告、零错误。xUnit v3 项目向
-`dotnet test` 和 Visual Studio Test Explorer 暴露 **750** 个可独立发现的测试。
+`dotnet test` 和 Visual Studio Test Explorer 暴露 **759** 个可独立发现的测试。
 
 <!-- SECTION: usage -->
 

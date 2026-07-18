@@ -2,7 +2,7 @@
 
 [English](README.md) | [简体中文](README.zh-CN.md) | **[日本語](README.ja.md)**
 
-<!-- README_SYNC: 2026-07-19.1 -->
+<!-- README_SYNC: 2026-07-19.2 -->
 
 [`oyvindln/vhs-decode`](https://github.com/oyvindln/vhs-decode) の
 デコード関連部分を .NET 11 で再実装するプロジェクトです。現在は release
@@ -147,10 +147,11 @@
   exact-length RF span buffer set を最大 2 組だけ再利用します。同期 field decode 後に
   buffer を返却し、public `Read` result、deferred CVBS render、保持される LD VITS source
   はそれぞれ独立した array ownership を維持します。
-- AVX/FMA kernel は正確な float32 conversion、LD quantization、VHS chroma rotation、
-  complex frequency filtering を高速化します。inverse radix-4 FFT と 16-tap TBC sinc
-  kernel は算術順序を変えずに pinned pointer indexing で bounds check を除去し、
-  differential test で transform bit と output hash の一致を維持します。
+- AVX/FMA kernel は正確な float32 conversion、VHS RF-envelope preparation、
+  LD quantization、VHS chroma rotation、complex frequency filtering を高速化します。
+  inverse radix-4 FFT と 16-tap TBC sinc kernel は算術順序を変えずに pinned pointer
+  indexing で bounds check を除去し、differential test で transform bit と output hash
+  の一致を維持します。
 - Recovery metadata は disk streaming され、snapshot queue の容量は 1、field-order
   history と RF cache にも hard limit があります。長時間 decode でも全 field を
   保持したり、将来の work を無制限に enqueue したりしません。
@@ -183,6 +184,11 @@ peak working set は 1.76/1.88/1.67 GiB、後半中央値は 1.42/1.30/1.28 GiB 
 1.45/1.34/1.29/1.35 GiB、peak は 1.71 GiB でした。TBC、JSON、chroma の
 SHA-256 は完全に一致しました。
 
+AVX RF-envelope preparation は、単体 32K-block 中央値を 57.5 us から 13.3 us へ
+短縮し、kernel は 76.9% 改善しました。40-frame 中央値は 7.55 秒から 7.39 秒、
+160-frame run は 26.95 秒から 25.70 秒になりました。private-memory の四分位中央値は
+1.34/1.48/1.50/1.45 GiB、peak は 1.72 GiB で、3 種類の hash は完全に一致しました。
+
 <!-- SECTION: build -->
 
 ## ビルドとテスト
@@ -202,7 +208,7 @@ dotnet test VHSDecodeDotNet.slnx -c Release --no-build --no-restore
 
 現在の正式な Release build は warning 0、error 0 です。xUnit v3 project は
 `dotnet test` と Visual Studio Test Explorer の両方で個別に検出できる
-**750** tests を公開します。
+**759** tests を公開します。
 
 <!-- SECTION: usage -->
 

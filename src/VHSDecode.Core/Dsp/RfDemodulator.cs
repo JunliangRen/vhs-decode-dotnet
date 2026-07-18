@@ -1,9 +1,13 @@
 using System.Numerics;
+using System.Runtime.Intrinsics;
+using System.Runtime.Intrinsics.X86;
 
 namespace VHSDecode.Core.Dsp;
 
 public sealed class RfDemodulator
 {
+    private static readonly Vector128<float> FloatAbsoluteValueMask =
+        Vector128.Create(BitConverter.UInt32BitsToSingle(0x7FFFFFFFU));
     private SharpnessEqOptions? _sharpnessLeadingOptions;
     private TransferFunction? _sharpnessLeadingFilter;
     private double[]? _sharpnessLeadingState;
@@ -805,20 +809,49 @@ public sealed class RfDemodulator
             return [];
         }
 
+        double[] rawEnvelope = BuildVhsRawEnvelope(filteredReal);
+        return SosFilter.ApplyForwardBackwardFloat32(envelopeFilter, rawEnvelope);
+    }
+
+    internal static unsafe double[] BuildVhsRawEnvelope(ReadOnlySpan<double> filteredReal)
+    {
+        if (filteredReal.IsEmpty)
+        {
+            return [];
+        }
+
         var rawEnvelope = new double[filteredReal.Length];
         int shift = 4 % rawEnvelope.Length;
         int split = rawEnvelope.Length - shift;
-        for (int i = 0; i < split; i++)
+        int i = 0;
+        if (Avx.IsSupported)
+        {
+            fixed (double* inputPointer = filteredReal)
+            fixed (double* outputPointer = rawEnvelope)
+            {
+                int vectorizedEnd = split - (split % 4);
+                for (; i < vectorizedEnd; i += 4)
+                {
+                    Vector128<float> values = Avx.ConvertToVector128Single(
+                        Avx.LoadVector256(inputPointer + i));
+                    Avx.Store(
+                        outputPointer + i + shift,
+                        Avx.ConvertToVector256Double(Sse.And(values, FloatAbsoluteValueMask)));
+                }
+            }
+        }
+
+        for (; i < split; i++)
         {
             rawEnvelope[i + shift] = MathF.Abs((float)filteredReal[i]);
         }
 
-        for (int i = split; i < rawEnvelope.Length; i++)
+        for (int wrapIndex = split; wrapIndex < rawEnvelope.Length; wrapIndex++)
         {
-            rawEnvelope[i - split] = MathF.Abs((float)filteredReal[i]);
+            rawEnvelope[wrapIndex - split] = MathF.Abs((float)filteredReal[wrapIndex]);
         }
 
-        return SosFilter.ApplyForwardBackwardFloat32(envelopeFilter, rawEnvelope);
+        return rawEnvelope;
     }
 
     private static double[]? DecodeReferenceIfPresent(

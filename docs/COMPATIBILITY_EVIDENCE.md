@@ -1201,6 +1201,12 @@ possible capture has already been proven byte-for-byte identical.
   an isolated PAL-sized field median improved from 3.929 ms to 3.727 ms (5.1%),
   all three 40-frame output hashes remained identical, and a 160-frame run held
   quarter private-memory medians at 1.45/1.34/1.29/1.35 GiB with a 1.71 GiB peak
+- VHS RF-envelope preparation now converts four doubles to float32, clears the
+  sign bits, and writes the rotated float64 values through AVX while preserving
+  the scalar tail and wrap path. A 32K-block isolated median improved from
+  57.5 us to 13.3 us (76.9%); 40-frame median time moved from 7.55 s to 7.39 s,
+  a 160-frame run moved from 26.95 s to 25.70 s, all three hashes remained exact,
+  and quarter private-memory medians stayed bounded at 1.34/1.48/1.50/1.45 GiB
 - Python's arbitrary-precision thread values now survive until their v0.4.0
   runtime use: VHS debug plots ignore even enormous positive or negative values,
   CVBS/LD negative values retain the nonzero request with zero demod workers for

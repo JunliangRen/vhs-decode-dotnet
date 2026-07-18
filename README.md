@@ -2,7 +2,7 @@
 
 **[English](README.md)** | [简体中文](README.zh-CN.md) | [日本語](README.ja.md)
 
-<!-- README_SYNC: 2026-07-19.1 -->
+<!-- README_SYNC: 2026-07-19.2 -->
 
 .NET 11 rewrite of the decode-facing parts of
 [`oyvindln/vhs-decode`](https://github.com/oyvindln/vhs-decode), focused on
@@ -152,11 +152,11 @@ release compatibility remain the first constraint.
   matching the only two block counts a fixed read window can cover. Buffers are
   returned after synchronous field decode; public `Read` results, deferred CVBS
   rendering, and retained LD VITS sources keep independent ownership.
-- AVX/FMA kernels accelerate exact float32 conversion, LD quantization, VHS
-  chroma rotation, and complex frequency filtering. The inverse radix-4 FFT
-  and 16-tap TBC sinc kernels use pinned pointer indexing to remove bounds
-  checks without changing arithmetic order; differential tests preserve exact
-  transform bits and output hashes.
+- AVX/FMA kernels accelerate exact float32 conversion, VHS RF-envelope
+  preparation, LD quantization, VHS chroma rotation, and complex frequency
+  filtering. The inverse radix-4 FFT and 16-tap TBC sinc kernels use pinned
+  pointer indexing to remove bounds checks without changing arithmetic order;
+  differential tests preserve exact transform bits and output hashes.
 - Recovery metadata is disk-streamed; its snapshot queue has capacity one, and
   field-order history and RF caches have hard limits. Long decodes therefore do
   not retain every decoded field or enqueue an unbounded amount of future work.
@@ -189,6 +189,11 @@ The latest isolated PAL-sized TBC sinc A/B reduced the median from 3.929 ms to
 in 26.95 s; private-memory medians by quarter were 1.45/1.34/1.29/1.35 GiB with
 a 1.71 GiB peak. TBC, JSON, and chroma SHA-256 values remained identical.
 
+AVX RF-envelope preparation reduced the isolated 32K-block median from 57.5 us
+to 13.3 us, a 76.9% kernel gain. The 40-frame median moved from 7.55 s to 7.39 s,
+and the 160-frame run from 26.95 s to 25.70 s. Its private-memory quarter medians
+were 1.34/1.48/1.50/1.45 GiB with a 1.72 GiB peak; all three hashes stayed exact.
+
 <!-- SECTION: build -->
 
 ## Build and test
@@ -207,7 +212,7 @@ dotnet test VHSDecodeDotNet.slnx -c Release --no-build --no-restore
 ```
 
 The current formal Release build has zero warnings and errors. The xUnit v3
-project exposes **750** independently discoverable tests to both
+project exposes **759** independently discoverable tests to both
 `dotnet test` and Visual Studio Test Explorer.
 
 <!-- SECTION: usage -->
