@@ -121,13 +121,16 @@
   stream、FFmpeg、GNU Radio の読み取り順序を維持します。
 - stream 単位の decoded RF cache により、重複する field read 間の FFT 再計算を
   避けつつメモリ使用量を制限します。
+- VHS session は最大 8 RF block の compute-only lookahead を使用し、現在の field の
+  TBC 処理中に worker が次の field を準備します。入力の読み取り順序は維持され、
+  seek または dispose 時には保留中の処理をキャンセルします。
 - 長い TBC sinc-resampling job は worker budget を共有し、出力順序を維持します。
   `--threads 0` と `--threads 1` は決定的な serial path を保持します。
 - HiFi は境界付き並列 block decode の後、順序どおりに後処理と書き込みを行います。
 - Managed FFT worker は scratch buffer と immutable root table を再利用し、
   安全な箇所で in-place transform を使い、aligned path の field 全体コピーを避けます。
-- SIMD 互換の数値 kernel は、検証 fixture が必要とする NumPy/Numba の
-  reduction と float cast の境界を保持します。
+- AVX/FMA kernel は LD の float32 quantization と complex frequency filtering を
+  高速化し、検証済みの NumPy rounding と scalar fallback を保持します。
 
 ある Windows fixture 環境での Release 1 frame 計測値は次のとおりです。
 
@@ -138,7 +141,10 @@
 
 これは特定 fixture の値であり、一般的な benchmark ではありません。
 PAL LD 4-field Core probe では、検証済み出力を維持しながら managed allocation を
-5.12 GiB から 1.96 GiB に削減しました。
+5.12 GiB から 1.96 GiB に削減しました。合成 160-frame PAL VHS probe の
+`--threads 20` では、境界付き lookahead により Release 時間が 29.03 s から
+27.15 s（6.5%）に短縮され、TBC/JSON 出力は byte-identical のまま、メモリ曲線も
+継続的に増加しませんでした。
 
 <!-- SECTION: build -->
 
@@ -159,7 +165,7 @@ dotnet test VHSDecodeDotNet.slnx -c Release --no-build --no-restore
 
 現在の正式な Release build は warning 0、error 0 です。xUnit v3 project は
 `dotnet test` と Visual Studio Test Explorer の両方で個別に検出できる
-**720** tests を公開します。
+**740** tests を公開します。
 
 <!-- SECTION: usage -->
 

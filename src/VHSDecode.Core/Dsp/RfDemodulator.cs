@@ -706,10 +706,7 @@ public sealed class RfDemodulator
         }
 
         var output = new Complex[spectrum.Length];
-        for (int i = 0; i < output.Length; i++)
-        {
-            output[i] = NumpyVectorComplexMultiply(spectrum[i], filter[i]);
-        }
+        NumpyComplexMultiply.Apply(spectrum, filter, output);
 
         return output;
     }
@@ -732,20 +729,7 @@ public sealed class RfDemodulator
         }
 
         var output = new Complex[spectrum.Length];
-        for (int i = 0; i < output.Length; i++)
-        {
-            Complex left = spectrum[i];
-            Complex right = filter[i];
-            output[i] = new Complex(
-                Math.FusedMultiplyAdd(
-                    left.Real,
-                    right.Real,
-                    -(left.Imaginary * right.Imaginary)),
-                Math.FusedMultiplyAdd(
-                    left.Real,
-                    right.Imaginary,
-                    left.Imaginary * right.Real));
-        }
+        NumpyComplexMultiply.Apply(spectrum, filter[..spectrum.Length], output);
 
         return output;
     }
@@ -889,23 +873,7 @@ public sealed class RfDemodulator
             throw new ArgumentException("Frequency filter length must match input block length.", nameof(filter));
         }
 
-        for (int i = 0; i < spectrum.Length; i++)
-        {
-            spectrum[i] = NumpyVectorComplexMultiply(spectrum[i], filter[i]);
-        }
-    }
-
-    private static Complex NumpyVectorComplexMultiply(Complex left, Complex right)
-    {
-        return new Complex(
-            Math.FusedMultiplyAdd(
-                left.Real,
-                right.Real,
-                -(left.Imaginary * right.Imaginary)),
-            Math.FusedMultiplyAdd(
-                left.Real,
-                right.Imaginary,
-                left.Imaginary * right.Real));
+        NumpyComplexMultiply.ApplyInPlace(spectrum, filter);
     }
 
     private static bool ApplyVhsRfHighBoostIfPresent(

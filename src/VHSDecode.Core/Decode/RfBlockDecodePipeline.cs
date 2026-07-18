@@ -1,4 +1,5 @@
 using System.Numerics;
+using System.Runtime.Intrinsics.X86;
 using VHSDecode.Core.Dsp;
 using VHSDecode.Core.Rf;
 using VHSDecode.Core.Tbc;
@@ -80,7 +81,7 @@ public sealed class RfBlockDecodePipeline : IDisposable
             : _inputProcessor?.Process(loadedInput) ?? loadedInput;
     }
 
-    internal RfPipelineBlock DecodePreparedBlock(double[] input)
+    internal RfPipelineBlock DecodePreparedBlock(double[] input, bool reportDiagnostics = true)
     {
         ArgumentNullException.ThrowIfNull(input);
 
@@ -113,11 +114,9 @@ public sealed class RfBlockDecodePipeline : IDisposable
             _filters.VhsEnvelopeSos,
             _filters.VhsRfTopSos,
             inputSpectrum);
-        if (demodulated.VhsWeakRfSignal)
+        if (reportDiagnostics)
         {
-            _diagnosticLogger?.Invoke(
-                "WARNING",
-                "RF signal is weak. Is your deck tracking properly?");
+            ReportDiagnostics(demodulated);
         }
 
         if (_filterOptions.LdClipDemodForVideo)
@@ -159,9 +158,25 @@ public sealed class RfBlockDecodePipeline : IDisposable
         return new RfPipelineBlock(input, demodulated);
     }
 
+    internal void ReportDeferredDiagnostics(RfPipelineBlock block)
+    {
+        ArgumentNullException.ThrowIfNull(block);
+        ReportDiagnostics(block.Demodulated);
+    }
+
     public void Dispose()
     {
         _inputProcessor?.Dispose();
+    }
+
+    private void ReportDiagnostics(RfDemodulatedBlock demodulated)
+    {
+        if (demodulated.VhsWeakRfSignal)
+        {
+            _diagnosticLogger?.Invoke(
+                "WARNING",
+                "RF signal is weak. Is your deck tracking properly?");
+        }
     }
 
     private static double[] DecodeChromaBurst(
@@ -313,20 +328,7 @@ public sealed class RfBlockDecodePipeline : IDisposable
         }
 
         var filtered = new Complex[expectedHalfLength];
-        for (int i = 0; i < filtered.Length; i++)
-        {
-            Complex value = halfSpectrum[i];
-            Complex coefficient = fullFilter[i];
-            filtered[i] = new Complex(
-                Math.FusedMultiplyAdd(
-                    value.Real,
-                    coefficient.Real,
-                    -(value.Imaginary * coefficient.Imaginary)),
-                Math.FusedMultiplyAdd(
-                    value.Real,
-                    coefficient.Imaginary,
-                    value.Imaginary * coefficient.Real));
-        }
+        NumpyComplexMultiply.Apply(halfSpectrum, fullFilter[..expectedHalfLength], filtered);
 
         return PocketFftComplex.InverseDuccReal(filtered, realLength);
     }
@@ -390,11 +392,28 @@ public sealed class RfBlockDecodePipeline : IDisposable
         }
     }
 
-    private static void QuantizeToFloat32InPlace(Span<double> values)
+    internal static unsafe void QuantizeToFloat32InPlace(Span<double> values)
     {
-        for (int i = 0; i < values.Length; i++)
+        int index = 0;
+        if (Avx.IsSupported)
         {
-            values[i] = (float)values[i];
+            fixed (double* valuesPointer = values)
+            {
+                int vectorizedEnd = values.Length - (values.Length % 4);
+                for (; index < vectorizedEnd; index += 4)
+                {
+                    Avx.Store(
+                        valuesPointer + index,
+                        Avx.ConvertToVector256Double(
+                            Avx.ConvertToVector128Single(
+                                Avx.LoadVector256(valuesPointer + index))));
+                }
+            }
+        }
+
+        for (; index < values.Length; index++)
+        {
+            values[index] = (float)values[index];
         }
     }
 }

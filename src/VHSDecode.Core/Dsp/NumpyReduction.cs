@@ -4,6 +4,9 @@ namespace VHSDecode.Core.Dsp;
 
 internal static class NumpyReduction
 {
+    private const int IntroselectThreshold = 128 * 1024;
+    private const int PartitionSortThreshold = 32;
+
     public static double MedianFloat64(ReadOnlySpan<double> values)
     {
         if (values.IsEmpty)
@@ -11,20 +14,139 @@ internal static class NumpyReduction
             return double.NaN;
         }
 
-        double[] sorted = values.ToArray();
-        for (int i = 0; i < sorted.Length; i++)
+        double[] working = values.ToArray();
+        bool hasPositiveZero = false;
+        bool hasNegativeZero = false;
+        for (int i = 0; i < working.Length; i++)
         {
-            if (double.IsNaN(sorted[i]))
+            double value = working[i];
+            if (double.IsNaN(value))
             {
-                return sorted[i];
+                return value;
+            }
+
+            if (value == 0.0)
+            {
+                if (BitConverter.DoubleToInt64Bits(value) < 0)
+                {
+                    hasNegativeZero = true;
+                }
+                else
+                {
+                    hasPositiveZero = true;
+                }
             }
         }
 
-        Array.Sort(sorted);
+        if (working.Length < IntroselectThreshold || (hasPositiveZero && hasNegativeZero))
+        {
+            Array.Sort(working);
+            return SortedMedian(working);
+        }
+
+        int middle = working.Length / 2;
+        double upper = SelectKth(working, middle);
+        if ((working.Length & 1) != 0)
+        {
+            return upper;
+        }
+
+        double lower = working[0];
+        for (int i = 1; i < middle; i++)
+        {
+            if (working[i].CompareTo(lower) > 0)
+            {
+                lower = working[i];
+            }
+        }
+
+        return (lower + upper) / 2.0;
+    }
+
+    private static double SortedMedian(double[] sorted)
+    {
         int middle = sorted.Length / 2;
-        return sorted.Length % 2 == 0
+        return (sorted.Length & 1) == 0
             ? (sorted[middle - 1] + sorted[middle]) / 2.0
             : sorted[middle];
+    }
+
+    private static double SelectKth(double[] values, int target)
+    {
+        int left = 0;
+        int right = values.Length - 1;
+        int depthLimit = 2 * (BitOperations.Log2((uint)values.Length) + 1);
+        while (left < right)
+        {
+            int length = right - left + 1;
+            if (length <= PartitionSortThreshold || depthLimit-- == 0)
+            {
+                Array.Sort(values, left, length);
+                return values[target];
+            }
+
+            double pivot = MedianOfThree(
+                values[left],
+                values[left + (length / 2)],
+                values[right]);
+            int lower = left;
+            int index = left;
+            int upper = right;
+            while (index <= upper)
+            {
+                int comparison = values[index].CompareTo(pivot);
+                if (comparison < 0)
+                {
+                    (values[lower], values[index]) = (values[index], values[lower]);
+                    lower++;
+                    index++;
+                }
+                else if (comparison > 0)
+                {
+                    (values[index], values[upper]) = (values[upper], values[index]);
+                    upper--;
+                }
+                else
+                {
+                    index++;
+                }
+            }
+
+            if (target < lower)
+            {
+                right = lower - 1;
+            }
+            else if (target > upper)
+            {
+                left = upper + 1;
+            }
+            else
+            {
+                return values[target];
+            }
+        }
+
+        return values[target];
+    }
+
+    private static double MedianOfThree(double first, double second, double third)
+    {
+        if (first.CompareTo(second) > 0)
+        {
+            (first, second) = (second, first);
+        }
+
+        if (second.CompareTo(third) > 0)
+        {
+            (second, third) = (third, second);
+        }
+
+        if (first.CompareTo(second) > 0)
+        {
+            (first, second) = (second, first);
+        }
+
+        return second;
     }
 
     public static float MeanFloat32(ReadOnlySpan<double> values)
