@@ -126,8 +126,8 @@
 - HiFi は境界付き並列 block decode の後、順序どおりに後処理と書き込みを行います。
 - Managed FFT worker は scratch buffer と immutable root table を再利用し、
   安全な箇所で in-place transform を使い、aligned path の field 全体コピーを避けます。
-- SIMD 互換の数値 kernel は、検証 fixture が必要とする NumPy/Numba の
-  reduction と float cast の境界を保持します。
+- AVX/FMA kernel は LD の float32 quantization と complex frequency filtering を
+  高速化し、検証済みの NumPy rounding と scalar fallback を保持します。
 
 ある Windows fixture 環境での Release 1 frame 計測値は次のとおりです。
 
@@ -159,7 +159,7 @@ dotnet test VHSDecodeDotNet.slnx -c Release --no-build --no-restore
 
 現在の正式な Release build は warning 0、error 0 です。xUnit v3 project は
 `dotnet test` と Visual Studio Test Explorer の両方で個別に検出できる
-**728** tests を公開します。
+**736** tests を公開します。
 
 <!-- SECTION: usage -->
 

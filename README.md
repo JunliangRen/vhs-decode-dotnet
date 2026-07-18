@@ -129,8 +129,8 @@ release compatibility remain the first constraint.
   post-processing and writing.
 - Managed FFT workers reuse scratch buffers and immutable root tables, use
   in-place transforms where safe, and avoid full-field clones on aligned paths.
-- SIMD-compatible numerical kernels preserve the NumPy/Numba reduction and
-  float-cast boundaries required by verified fixtures.
+- AVX/FMA kernels accelerate LD float32 quantization and complex frequency
+  filtering while preserving verified NumPy rounding and scalar fallbacks.
 
 On one Windows fixture machine, one-frame Release measurements were:
 
@@ -161,7 +161,7 @@ dotnet test VHSDecodeDotNet.slnx -c Release --no-build --no-restore
 ```
 
 The current formal Release build has zero warnings and errors. The xUnit v3
-project exposes **728** independently discoverable tests to both
+project exposes **736** independently discoverable tests to both
 `dotnet test` and Visual Studio Test Explorer.
 
 <!-- SECTION: usage -->

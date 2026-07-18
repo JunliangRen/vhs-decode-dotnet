@@ -121,8 +121,8 @@
 - HiFi 使用有界并行 block 解码，之后按顺序进行后处理和写入。
 - 托管 FFT worker 复用临时缓冲区和不可变 root table，在安全位置使用
   原地变换，并在对齐路径上避免完整场复制。
-- 与 SIMD 兼容的数值内核保留已验证夹具所要求的 NumPy/Numba
-  reduction 和浮点转换边界。
+- AVX/FMA 内核加速 LD float32 量化和复数频域滤波，同时保留已验证的
+  NumPy 舍入行为与标量回退路径。
 
 在一台 Windows 夹具机器上，Release 单帧测量为：
 
@@ -152,7 +152,7 @@ dotnet test VHSDecodeDotNet.slnx -c Release --no-build --no-restore
 ```
 
 当前正式 Release 构建为零警告、零错误。xUnit v3 项目向
-`dotnet test` 和 Visual Studio Test Explorer 暴露 **728** 个可独立发现的测试。
+`dotnet test` 和 Visual Studio Test Explorer 暴露 **736** 个可独立发现的测试。
 
 <!-- SECTION: usage -->
 

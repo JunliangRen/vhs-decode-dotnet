@@ -314,20 +314,7 @@ public sealed class RfBlockDecodePipeline : IDisposable
         }
 
         var filtered = new Complex[expectedHalfLength];
-        for (int i = 0; i < filtered.Length; i++)
-        {
-            Complex value = halfSpectrum[i];
-            Complex coefficient = fullFilter[i];
-            filtered[i] = new Complex(
-                Math.FusedMultiplyAdd(
-                    value.Real,
-                    coefficient.Real,
-                    -(value.Imaginary * coefficient.Imaginary)),
-                Math.FusedMultiplyAdd(
-                    value.Real,
-                    coefficient.Imaginary,
-                    value.Imaginary * coefficient.Real));
-        }
+        NumpyComplexMultiply.Apply(halfSpectrum, fullFilter[..expectedHalfLength], filtered);
 
         return PocketFftComplex.InverseDuccReal(filtered, realLength);
     }
