@@ -63,7 +63,7 @@ public sealed partial class ReadmeLocalizationTests
         string[] synchronizedFacts =
         [
             "43155200da87c0d49eb37d8ec09b1372075ee8e4",
-            "**726**",
+            "**728**",
             "2.346 s",
             "7.193 s",
             "1.651 s",

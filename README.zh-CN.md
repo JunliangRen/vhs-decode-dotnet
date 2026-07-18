@@ -152,7 +152,7 @@ dotnet test VHSDecodeDotNet.slnx -c Release --no-build --no-restore
 ```
 
 当前正式 Release 构建为零警告、零错误。xUnit v3 项目向
-`dotnet test` 和 Visual Studio Test Explorer 暴露 **726** 个可独立发现的测试。
+`dotnet test` 和 Visual Studio Test Explorer 暴露 **728** 个可独立发现的测试。
 
 <!-- SECTION: usage -->
 

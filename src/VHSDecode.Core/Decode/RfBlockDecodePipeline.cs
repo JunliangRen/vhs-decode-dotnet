@@ -1,4 +1,5 @@
 using System.Numerics;
+using System.Runtime.Intrinsics.X86;
 using VHSDecode.Core.Dsp;
 using VHSDecode.Core.Rf;
 using VHSDecode.Core.Tbc;
@@ -390,11 +391,28 @@ public sealed class RfBlockDecodePipeline : IDisposable
         }
     }
 
-    private static void QuantizeToFloat32InPlace(Span<double> values)
+    internal static unsafe void QuantizeToFloat32InPlace(Span<double> values)
     {
-        for (int i = 0; i < values.Length; i++)
+        int index = 0;
+        if (Avx.IsSupported)
         {
-            values[i] = (float)values[i];
+            fixed (double* valuesPointer = values)
+            {
+                int vectorizedEnd = values.Length - (values.Length % 4);
+                for (; index < vectorizedEnd; index += 4)
+                {
+                    Avx.Store(
+                        valuesPointer + index,
+                        Avx.ConvertToVector256Double(
+                            Avx.ConvertToVector128Single(
+                                Avx.LoadVector256(valuesPointer + index))));
+                }
+            }
+        }
+
+        for (; index < values.Length; index++)
+        {
+            values[index] = (float)values[index];
         }
     }
 }
