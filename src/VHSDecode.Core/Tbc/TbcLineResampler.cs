@@ -162,7 +162,7 @@ public sealed class TbcLineResampler
         };
     }
 
-    private void ResampleSamples(
+    private unsafe void ResampleSamples(
         ReadOnlySpan<double> source,
         ILineLocationInterpolator interpolator,
         int firstLine,
@@ -171,10 +171,18 @@ public sealed class TbcLineResampler
         (double[] sourcePositions, double[] levelAdjusts, int prefixSamples) =
             PrepareResampling(interpolator, firstLine, destination.Length);
         float[] sincLookup = SincLookup.Value;
-        for (int i = 0; i < destination.Length; i++)
+        fixed (double* sourcePointer = source)
+        fixed (float* sincLookupPointer = sincLookup)
         {
-            destination[i] = (float)(SampleSinc(source, sourcePositions[i], sincLookup)
-                * levelAdjusts[prefixSamples + i]);
+            for (int i = 0; i < destination.Length; i++)
+            {
+                destination[i] = (float)(SampleSinc(
+                        sourcePointer,
+                        source.Length,
+                        sourcePositions[i],
+                        sincLookupPointer)
+                    * levelAdjusts[prefixSamples + i]);
+            }
         }
     }
 
@@ -187,30 +195,41 @@ public sealed class TbcLineResampler
         (double[] sourcePositions, double[] levelAdjusts, int prefixSamples) =
             PrepareResampling(interpolator, firstLine, destination.Length);
         float[] sincLookup = SincLookup.Value;
-        if (_workerThreads <= 1 || destination.Length < ParallelSampleThreshold)
+        fixed (double* sourcePointer = source)
+        fixed (float* sincLookupPointer = sincLookup)
         {
-            for (int i = 0; i < destination.Length; i++)
+            if (_workerThreads <= 1 || destination.Length < ParallelSampleThreshold)
             {
-                destination[i] = (float)(SampleSinc(source, sourcePositions[i], sincLookup)
-                    * levelAdjusts[prefixSamples + i]);
+                for (int i = 0; i < destination.Length; i++)
+                {
+                    destination[i] = (float)(SampleSinc(
+                            sourcePointer,
+                            source.Length,
+                            sourcePositions[i],
+                            sincLookupPointer)
+                        * levelAdjusts[prefixSamples + i]);
+                }
+
+                return;
             }
 
-            return;
-        }
-
-        fixed (double* sourcePointer = source)
-        {
             nint sourceAddress = (nint)sourcePointer;
+            nint sincLookupAddress = (nint)sincLookupPointer;
             int sourceLength = source.Length;
             Parallel.ForEach(
                 Partitioner.Create(0, destination.Length),
                 new ParallelOptions { MaxDegreeOfParallelism = _workerThreads },
                 range =>
                 {
-                    var parallelSource = new ReadOnlySpan<double>((void*)sourceAddress, sourceLength);
+                    var parallelSource = (double*)sourceAddress;
+                    var parallelSincLookup = (float*)sincLookupAddress;
                     for (int i = range.Item1; i < range.Item2; i++)
                     {
-                        destination[i] = (float)(SampleSinc(parallelSource, sourcePositions[i], sincLookup)
+                        destination[i] = (float)(SampleSinc(
+                                parallelSource,
+                                sourceLength,
+                                sourcePositions[i],
+                                parallelSincLookup)
                             * levelAdjusts[prefixSamples + i]);
                     }
                 });
@@ -361,10 +380,11 @@ public sealed class TbcLineResampler
     private static double Median(double[] values)
         => NumpyReduction.MedianFloat64(values);
 
-    private static double SampleSinc(
-        ReadOnlySpan<double> source,
+    private static unsafe double SampleSinc(
+        double* source,
+        int sourceLength,
         double position,
-        ReadOnlySpan<float> weights)
+        float* weights)
     {
         if (!double.IsFinite(position))
         {
@@ -395,7 +415,7 @@ public sealed class TbcLineResampler
                 alpha,
                 weights[weightEnd + tap] - startWeight,
                 startWeight);
-            int sampleIndex = Math.Clamp(sampleStart + tap, 0, source.Length - 1);
+            int sampleIndex = Math.Clamp(sampleStart + tap, 0, sourceLength - 1);
             result += (float)source[sampleIndex] * weight;
         }
 

@@ -2,7 +2,7 @@
 
 [English](README.md) | **[简体中文](README.zh-CN.md)** | [日本語](README.ja.md)
 
-<!-- README_SYNC: 2026-07-18.7 -->
+<!-- README_SYNC: 2026-07-19.1 -->
 
 这是 [`oyvindln/vhs-decode`](https://github.com/oyvindln/vhs-decode)
 中解码相关部分的 .NET 11 重写，当前以 release `v0.4.0`、commit
@@ -136,8 +136,8 @@
   两种 block 数。同步场解码结束后立即归还缓冲；公开 `Read` 结果、CVBS 延迟渲染和
   LD VITS 保留源仍拥有独立数组。
 - AVX/FMA 内核加速精确 float32 转换、LD 量化、VHS 色度移位和复数频域滤波。
-  inverse radix-4 FFT 使用固定指针索引消除边界检查，同时由差分测试保证变换位模式与
-  输出 hash 不变。
+  inverse radix-4 FFT 与 16-tap TBC sinc 内核使用固定指针索引消除边界检查，
+  不改变算术顺序；差分测试保证变换位模式与输出 hash 不变。
 - 恢复元数据以磁盘流式写入，snapshot 队列容量为 1，场顺序历史和 RF 缓存均有
   硬上限；长时间解码不会保留所有已解码场，也不会无限排入未来工作。
 - CUDA/OpenCL 不是运行时依赖。当前 trace 不支持把孤立的 32K FFT 在主机与设备间
@@ -160,6 +160,11 @@
 1.76/1.88/1.67 GiB，后半程中位数为 1.42/1.30/1.28 GiB。320 帧全部写完，
 内存没有随解码长度增长。此前的分配优化还将 PAL LD 四场 probe 从 5.12 GiB
 降至 1.96 GiB。
+
+最新的 PAL 尺寸 TBC sinc 隔离 A/B 将每场中位数从 3.929 ms 降到 3.727 ms，
+内核提升 5.1%。一次新的 160-frame 完整路径运行用时 26.95 秒；按运行时间四等分，
+私有内存中位数为 1.45/1.34/1.29/1.35 GiB，峰值为 1.71 GiB。TBC、JSON 与
+chroma SHA-256 保持完全一致。
 
 <!-- SECTION: build -->
 

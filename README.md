@@ -2,7 +2,7 @@
 
 **[English](README.md)** | [简体中文](README.zh-CN.md) | [日本語](README.ja.md)
 
-<!-- README_SYNC: 2026-07-18.7 -->
+<!-- README_SYNC: 2026-07-19.1 -->
 
 .NET 11 rewrite of the decode-facing parts of
 [`oyvindln/vhs-decode`](https://github.com/oyvindln/vhs-decode), focused on
@@ -154,8 +154,9 @@ release compatibility remain the first constraint.
   rendering, and retained LD VITS sources keep independent ownership.
 - AVX/FMA kernels accelerate exact float32 conversion, LD quantization, VHS
   chroma rotation, and complex frequency filtering. The inverse radix-4 FFT
-  kernel uses pinned pointer indexing to remove bounds-check overhead, while
-  differential tests preserve exact transform bits and output hashes.
+  and 16-tap TBC sinc kernels use pinned pointer indexing to remove bounds
+  checks without changing arithmetic order; differential tests preserve exact
+  transform bits and output hashes.
 - Recovery metadata is disk-streamed; its snapshot queue has capacity one, and
   field-order history and RF caches have hard limits. Long decodes therefore do
   not retain every decoded field or enqueue an unbounded amount of future work.
@@ -182,6 +183,11 @@ working sets were 1.76/1.88/1.67 GiB, while second-half medians were
 1.42/1.30/1.28 GiB. The full 320 frames were written, and memory showed no
 growth with decode length. Earlier allocation work also reduced a PAL LD
 four-field probe from 5.12 GiB to 1.96 GiB.
+
+The latest isolated PAL-sized TBC sinc A/B reduced the median from 3.929 ms to
+3.727 ms per field, a 5.1% kernel gain. A fresh 160-frame full-path run finished
+in 26.95 s; private-memory medians by quarter were 1.45/1.34/1.29/1.35 GiB with
+a 1.71 GiB peak. TBC, JSON, and chroma SHA-256 values remained identical.
 
 <!-- SECTION: build -->
 
