@@ -2,7 +2,7 @@
 
 **[English](README.md)** | [简体中文](README.zh-CN.md) | [日本語](README.ja.md)
 
-<!-- README_SYNC: 2026-07-18.3 -->
+<!-- README_SYNC: 2026-07-18.4 -->
 
 .NET 10 rewrite of the decode-facing parts of
 [`oyvindln/vhs-decode`](https://github.com/oyvindln/vhs-decode), focused on
@@ -137,6 +137,10 @@ release compatibility remain the first constraint.
   each transform.
 - RF span assembly writes directly into the requested output window instead of
   allocating whole-block field arrays and slicing a second copy.
+- Standard VHS field decode reuses at most two exact-length RF span buffer sets,
+  matching the only two block counts a fixed read window can cover. Buffers are
+  returned after synchronous field decode; public `Read` results, deferred CVBS
+  rendering, and retained LD VITS sources keep independent ownership.
 - AVX/FMA kernels accelerate exact float32 conversion, LD quantization, VHS
   chroma rotation, and complex frequency filtering. VHS phase demodulation also
   evaluates each sample angle once, with verified scalar fallbacks and unchanged
@@ -158,16 +162,16 @@ On one Windows fixture machine, one-frame Release measurements were:
 These numbers are fixture-specific, not universal benchmarks. A PAL LD
 four-field Core probe reduced managed allocation from 5.12 GiB to 1.96 GiB
 while preserving verified output. On a reproducible 40-frame PAL VHS probe,
-the latest DSP pass changed a fresh `--threads 1/5/20` baseline of
-16.17/8.74/7.57 s to repeated-run medians of 14.65/8.26/6.94 s. TBC and JSON
-hashes remained identical; the 20-thread median peak was about 1.10 GiB. An
+the DSP and field-buffer passes changed a fresh `--threads 1/5/20` baseline of
+16.17/8.74/7.57 s to repeated-run medians of 13.69/7.94/6.60 s. TBC and JSON
+hashes remained identical; the 20-thread median peak was about 1.39 GiB. An
 80-frame allocation trace estimated that `double[]` plus `float[]` churn fell
-from 54.0 GiB to 35.6 GiB, while pooled FFT scratch stopped scaling with decode
-duration.
+from 54.0 GiB to 26.1 GiB. Exact-length field-buffer warm-up accounted for only
+102.7 MiB, and pooled FFT scratch stopped scaling with decode duration.
 
-A separate 1.31 GB, 320-frame sustained probe completed in 45.0 seconds.
-Post-warmup five-second windows produced 9.62-10.13 MiB/s, average working set
-stayed between 986 and 1,021 MiB, and the observed peak was 1,206 MiB. Later
+A separate 1.31 GB, 320-frame sustained probe completed in 43.19 seconds.
+Post-warmup five-second windows produced 10.06-10.39 MiB/s, average working set
+stayed between 1.16 and 1.33 GiB, and the observed peak was 1.47 GiB. Later
 windows did not slow down or show monotonic memory growth.
 
 <!-- SECTION: build -->
@@ -188,7 +192,7 @@ dotnet test VHSDecodeDotNet.slnx -c Release --no-build --no-restore
 ```
 
 The current formal Release build has zero warnings and errors. The xUnit v3
-project exposes **744** independently discoverable tests to both
+project exposes **745** independently discoverable tests to both
 `dotnet test` and Visual Studio Test Explorer.
 
 <!-- SECTION: usage -->

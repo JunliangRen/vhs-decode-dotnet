@@ -2,7 +2,7 @@
 
 [English](README.md) | [简体中文](README.zh-CN.md) | **[日本語](README.ja.md)**
 
-<!-- README_SYNC: 2026-07-18.3 -->
+<!-- README_SYNC: 2026-07-18.4 -->
 
 [`oyvindln/vhs-decode`](https://github.com/oyvindln/vhs-decode) の
 デコード関連部分を .NET 10 で再実装するプロジェクトです。現在は release
@@ -133,6 +133,10 @@
   各 transform 後に rental を返却し、LOH への反復負荷を避けます。
 - RF span assembly は block 境界の field array を作って再度 slice せず、要求された
   最終 output window へ直接書き込みます。
+- 標準 VHS field decode は、固定 read window が取り得る 2 種類の block 数に対応する
+  exact-length RF span buffer set を最大 2 組だけ再利用します。同期 field decode 後に
+  buffer を返却し、public `Read` result、deferred CVBS render、保持される LD VITS source
+  はそれぞれ独立した array ownership を維持します。
 - AVX/FMA kernel は正確な float32 conversion、LD quantization、VHS chroma rotation、
   complex frequency filtering を高速化します。VHS phase demodulation も各 sample の
   angle を 1 回だけ評価し、検証済み scalar fallback と同一 TBC/JSON hash を維持します。
@@ -153,15 +157,16 @@
 これは特定 fixture の値であり、一般的な benchmark ではありません。
 PAL LD 4-field Core probe では、検証済み出力を維持しながら managed allocation を
 5.12 GiB から 1.96 GiB に削減しました。再現可能な 40-frame PAL VHS probe では、
-最新 DSP pass により、新しい `--threads 1/5/20` baseline 16.17/8.74/7.57 秒が
-複数回実行の中央値 14.65/8.26/6.94 秒になりました。TBC/JSON hash は同一で、
-20-thread peak の中央値は約 1.10 GiB です。80-frame allocation trace では
-`double[]` と `float[]` の churn が 54.0 GiB から 35.6 GiB に減少し、pool 化した
-FFT scratch は decode 時間に比例して増加しなくなりました。
+DSP と field-buffer pass により、新しい `--threads 1/5/20` baseline
+16.17/8.74/7.57 秒が複数回実行の中央値 13.69/7.94/6.60 秒になりました。
+TBC/JSON hash は同一で、20-thread peak の中央値は約 1.39 GiB です。80-frame
+allocation trace では `double[]` と `float[]` の churn が 54.0 GiB から
+26.1 GiB に減少しました。exact-length field-buffer warm-up は 102.7 MiB のみで、
+pool 化した FFT scratch は decode 時間に比例して増加しなくなりました。
 
-別の 1.31 GB、320-frame sustained probe は 45.0 秒で完了しました。warm-up 後の
-5 秒 window は 9.62-10.13 MiB/s、平均 working set は 986-1,021 MiB、観測 peak は
-1,206 MiB でした。後半の slowdown も、単調な memory growth もありませんでした。
+別の 1.31 GB、320-frame sustained probe は 43.19 秒で完了しました。warm-up 後の
+5 秒 window は 10.06-10.39 MiB/s、平均 working set は 1.16-1.33 GiB、観測 peak は
+1.47 GiB でした。後半の slowdown も、単調な memory growth もありませんでした。
 
 <!-- SECTION: build -->
 
@@ -182,7 +187,7 @@ dotnet test VHSDecodeDotNet.slnx -c Release --no-build --no-restore
 
 現在の正式な Release build は warning 0、error 0 です。xUnit v3 project は
 `dotnet test` と Visual Studio Test Explorer の両方で個別に検出できる
-**744** tests を公開します。
+**745** tests を公開します。
 
 <!-- SECTION: usage -->
 

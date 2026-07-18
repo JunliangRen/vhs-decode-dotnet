@@ -19,9 +19,66 @@ public sealed class RfBlockCacheConcurrencyTests
         RfDecodedSpan second = decoder.Read(stream, begin: 12, length: 24)!;
 
         Assert.Equal(3, loader.ReadCount);
+        Assert.NotSame(first.Input, second.Input);
+        Assert.NotSame(first.Video, second.Video);
+        Assert.NotSame(first.DemodRaw, second.DemodRaw);
         Assert.Equal(first.Input[12..], second.Input[..12]);
         Assert.Equal(first.Video[12..], second.Video[..12]);
         Assert.InRange(decoder.CachedDecodedBlockCount, 1, 16);
+    }
+
+    [Fact(DisplayName = "Leased RF spans reuse two exact-size buffer sets only after disposal")]
+    public void LeasedRfSpansReuseTwoExactSizeBufferSetsOnlyAfterDisposal()
+    {
+        var loader = new CountingSampleLoader();
+        using var stream = new MemoryStream();
+        using var decoder = BuildDecoder(loader, workerThreads: 4);
+
+        RfBlockStreamDecoder.RfDecodedSpanLease firstLease = decoder.ReadLeased(
+            stream,
+            begin: 0,
+            length: 24)!;
+        RfDecodedSpan first = firstLease.Span;
+        double[] firstInputSnapshot = first.Input.ToArray();
+        firstLease.Dispose();
+        firstLease.Dispose();
+
+        using RfBlockStreamDecoder.RfDecodedSpanLease alternateLease = decoder.ReadLeased(
+            stream,
+            begin: 6,
+            length: 36)!;
+        RfDecodedSpan alternate = alternateLease.Span;
+        double[] alternateInputSnapshot = alternate.Input.ToArray();
+        alternateLease.Dispose();
+
+        using RfBlockStreamDecoder.RfDecodedSpanLease secondLease = decoder.ReadLeased(
+            stream,
+            begin: 12,
+            length: 24)!;
+        RfDecodedSpan second = secondLease.Span;
+        Assert.Same(first.Input, second.Input);
+        Assert.Same(first.Video, second.Video);
+        Assert.Same(first.DemodRaw, second.DemodRaw);
+        Assert.Same(first.Envelope, second.Envelope);
+        Assert.Same(first.VideoLowPass, second.VideoLowPass);
+        Assert.Same(first.RfHighPass, second.RfHighPass);
+        Assert.Equal(firstInputSnapshot[12..], second.Input[..12]);
+
+        secondLease.Dispose();
+        using RfBlockStreamDecoder.RfDecodedSpanLease secondAlternateLease = decoder.ReadLeased(
+            stream,
+            begin: 18,
+            length: 36)!;
+        Assert.Same(alternate.Input, secondAlternateLease.Span.Input);
+        Assert.Same(alternate.Video, secondAlternateLease.Span.Video);
+        Assert.Equal(alternateInputSnapshot[12..], secondAlternateLease.Span.Input[..24]);
+
+        using RfBlockStreamDecoder.RfDecodedSpanLease concurrentLease = decoder.ReadLeased(
+            stream,
+            begin: 24,
+            length: 36)!;
+        Assert.NotSame(secondAlternateLease.Span.Input, concurrentLease.Span.Input);
+        Assert.NotSame(secondAlternateLease.Span.Video, concurrentLease.Span.Video);
     }
 
     [Fact(DisplayName = "RF decoded-block cache invalidation forces fresh parallel work")]
@@ -121,13 +178,19 @@ public sealed class RfBlockCacheConcurrencyTests
         Assert.Equal(RfBlockStreamDecoder.MaximumConcurrentPrefetchBlocks, decoder.PrefetchWorkerThreads);
         Assert.True(decoder.PrefetchWorkerThreads < decoder.PrefetchBlocks);
         _ = decoder.Read(stream, begin: 0, length: 24);
+        RfBlockStreamDecoder.RfDecodedSpanLease lease = decoder.ReadLeased(
+            stream,
+            begin: 12,
+            length: 24)!;
         Assert.InRange(
             decoder.CachedDecodedBlockCount,
             1,
             16 + RfBlockStreamDecoder.MaximumPrefetchBlocks);
         decoder.Dispose();
+        lease.Dispose();
         decoder.Dispose();
 
+        Assert.Equal(0, decoder.CachedReusableSpanBufferSetCount);
         Assert.Throws<ObjectDisposedException>(() => decoder.Read(stream, begin: 0, length: 12));
     }
 

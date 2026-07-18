@@ -63,13 +63,15 @@ public sealed partial class ReadmeLocalizationTests
         string[] synchronizedFacts =
         [
             "43155200da87c0d49eb37d8ec09b1372075ee8e4",
-            "**744**",
+            "**745**",
             "2.346 s",
             "7.193 s",
             "1.651 s",
             "5.865 s",
             "5.12 GiB",
             "1.96 GiB",
+            "26.1 GiB",
+            "43.19",
             "--use_saved_levels",
             "docs/COMPATIBILITY_EVIDENCE.md"
         ];
@@ -89,6 +91,7 @@ public sealed partial class ReadmeLocalizationTests
             Assert.DoesNotContain("**740**", content, StringComparison.Ordinal);
             Assert.DoesNotContain("**741**", content, StringComparison.Ordinal);
             Assert.DoesNotContain("**742**", content, StringComparison.Ordinal);
+            Assert.DoesNotContain("**744**", content, StringComparison.Ordinal);
         }
 
         Assert.True(

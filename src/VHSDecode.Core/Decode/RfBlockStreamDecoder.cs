@@ -19,6 +19,7 @@ public sealed record RfDecodedSpan(
 public sealed class RfBlockStreamDecoder : IDisposable
 {
     private const int DecodedBlockCacheCapacity = 16;
+    private const int ReusableSpanBufferSetCapacity = 2;
     internal const int MaximumConcurrentPrefetchBlocks = 8;
     internal const int MaximumPrefetchBlocks = 20;
     private readonly RfBlockDecodePipeline _pipeline;
@@ -31,6 +32,7 @@ public sealed class RfBlockStreamDecoder : IDisposable
     private long? _lastSequentialDecodedBlock;
     private Task<PrefetchedBlockBatch>? _prefetchTask;
     private CancellationTokenSource? _prefetchCancellation;
+    private readonly ReusableSpanBuffers?[] _reusableSpanBuffers = new ReusableSpanBuffers?[ReusableSpanBufferSetCapacity];
     private bool _disposed;
 
     public RfBlockStreamDecoder(
@@ -92,6 +94,23 @@ public sealed class RfBlockStreamDecoder : IDisposable
 
     internal int CachedPrefetchedBlockCount => _prefetchedBlockCache.Count;
 
+    internal int CachedReusableSpanBufferSetCount
+    {
+        get
+        {
+            int count = 0;
+            for (int i = 0; i < _reusableSpanBuffers.Length; i++)
+            {
+                if (Volatile.Read(ref _reusableSpanBuffers[i]) is not null)
+                {
+                    count++;
+                }
+            }
+
+            return count;
+        }
+    }
+
     internal void InvalidateCachedBlocks()
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
@@ -105,6 +124,53 @@ public sealed class RfBlockStreamDecoder : IDisposable
     }
 
     public RfDecodedSpan? Read(Stream stream, long begin, int length)
+        => ReadCore(stream, begin, length, reusableBuffers: null);
+
+    internal RfDecodedSpanLease? ReadLeased(Stream stream, long begin, int length)
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+        if (begin < 0)
+        {
+            throw new ArgumentOutOfRangeException(nameof(begin));
+        }
+
+        if (length < 0)
+        {
+            throw new ArgumentOutOfRangeException(nameof(length));
+        }
+
+        if (length == 0)
+        {
+            return new RfDecodedSpanLease(
+                owner: null,
+                buffers: null,
+                span: new RfDecodedSpan(begin, [], [], []));
+        }
+
+        ReusableSpanBuffers buffers = TakeReusableSpanBuffers(length);
+        try
+        {
+            RfDecodedSpan? span = ReadCore(stream, begin, length, buffers);
+            if (span is null)
+            {
+                ReturnReusableSpanBuffers(buffers);
+                return null;
+            }
+
+            return new RfDecodedSpanLease(this, buffers, span);
+        }
+        catch
+        {
+            ReturnReusableSpanBuffers(buffers);
+            throw;
+        }
+    }
+
+    private RfDecodedSpan? ReadCore(
+        Stream stream,
+        long begin,
+        int length,
+        ReusableSpanBuffers? reusableBuffers)
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
         if (begin < 0)
@@ -128,12 +194,12 @@ public sealed class RfBlockStreamDecoder : IDisposable
         PrepareDecodedBlockCache(stream, firstBlock);
         int totalDecoded = checked((int)((lastBlock - firstBlock + 1) * BlockStride));
         int offset = checked((int)(begin - (firstBlock * BlockStride)));
-        var input = new double[length];
-        var video = new double[length];
-        var demodRaw = new double[length];
-        var envelope = new double[length];
-        var videoLowPass = new double[length];
-        var rfHighPass = new double[length];
+        double[] input = reusableBuffers?.Input ?? new double[length];
+        double[] video = reusableBuffers?.Video ?? new double[length];
+        double[] demodRaw = reusableBuffers?.DemodRaw ?? new double[length];
+        double[] envelope = reusableBuffers?.Envelope ?? new double[length];
+        double[] videoLowPass = reusableBuffers?.VideoLowPass ?? new double[length];
+        double[] rfHighPass = reusableBuffers?.RfHighPass ?? new double[length];
         double[]? chroma = null;
         short[]? efm = null;
         double[]? audioLeft = null;
@@ -159,25 +225,25 @@ public sealed class RfBlockStreamDecoder : IDisposable
                 BlockCut - _pipeline.RfHighPassOffset);
             if (pipelineBlock.Demodulated.Chroma is not null)
             {
-                chroma ??= new double[length];
+                chroma ??= reusableBuffers?.GetChroma() ?? new double[length];
                 CopyTrimmedWindow(pipelineBlock.Demodulated.Chroma, chroma, destination, offset);
             }
 
             if (pipelineBlock.Demodulated.VideoBurst is not null)
             {
-                videoBurst ??= new double[length];
+                videoBurst ??= reusableBuffers?.GetVideoBurst() ?? new double[length];
                 CopyTrimmedWindow(pipelineBlock.Demodulated.VideoBurst, videoBurst, destination, offset);
             }
 
             if (pipelineBlock.Demodulated.VideoPilot is not null)
             {
-                videoPilot ??= new double[length];
+                videoPilot ??= reusableBuffers?.GetVideoPilot() ?? new double[length];
                 CopyTrimmedWindow(pipelineBlock.Demodulated.VideoPilot, videoPilot, destination, offset);
             }
 
             if (pipelineBlock.Demodulated.Efm is not null)
             {
-                efm ??= new short[length];
+                efm ??= reusableBuffers?.GetEfm() ?? new short[length];
                 CopyTrimmedWindow(pipelineBlock.Demodulated.Efm, efm, destination, offset);
             }
 
@@ -188,8 +254,15 @@ public sealed class RfBlockStreamDecoder : IDisposable
                 {
                     audioDecimationFactor = audio.DecimationFactor;
                     int totalAudioDecoded = checked(totalDecoded / audioDecimationFactor);
-                    audioLeft = new double[totalAudioDecoded];
-                    audioRight = new double[totalAudioDecoded];
+                    if (reusableBuffers is null)
+                    {
+                        audioLeft = new double[totalAudioDecoded];
+                        audioRight = new double[totalAudioDecoded];
+                    }
+                    else
+                    {
+                        (audioLeft, audioRight) = reusableBuffers.GetAudio(totalAudioDecoded);
+                    }
                 }
 
                 CopyTrimmed(audio, audioLeft!, audioRight!, audioDestination);
@@ -349,12 +422,12 @@ public sealed class RfBlockStreamDecoder : IDisposable
 
     public void Dispose()
     {
-        if (_disposed)
+        if (Volatile.Read(ref _disposed))
         {
             return;
         }
 
-        _disposed = true;
+        Volatile.Write(ref _disposed, true);
         try
         {
             _ = TakePendingPrefetch(cancel: true);
@@ -364,6 +437,56 @@ public sealed class RfBlockStreamDecoder : IDisposable
             _decodedBlockCache.Clear();
             _prefetchedBlockCache.Clear();
             _sequentialBlockCache.Clear();
+            for (int i = 0; i < _reusableSpanBuffers.Length; i++)
+            {
+                _ = Interlocked.Exchange(ref _reusableSpanBuffers[i], null);
+            }
+        }
+    }
+
+    private ReusableSpanBuffers TakeReusableSpanBuffers(int length)
+    {
+        for (int i = 0; i < _reusableSpanBuffers.Length; i++)
+        {
+            ReusableSpanBuffers? candidate = Volatile.Read(ref _reusableSpanBuffers[i]);
+            if (candidate?.Length == length
+                && ReferenceEquals(
+                    Interlocked.CompareExchange(ref _reusableSpanBuffers[i], null, candidate),
+                    candidate))
+            {
+                return candidate;
+            }
+        }
+
+        return new ReusableSpanBuffers(length);
+    }
+
+    private void ReturnReusableSpanBuffers(ReusableSpanBuffers buffers)
+    {
+        if (Volatile.Read(ref _disposed))
+        {
+            return;
+        }
+
+        for (int i = 0; i < _reusableSpanBuffers.Length; i++)
+        {
+            if (Volatile.Read(ref _reusableSpanBuffers[i])?.Length == buffers.Length)
+            {
+                return;
+            }
+        }
+
+        for (int i = 0; i < _reusableSpanBuffers.Length; i++)
+        {
+            if (Interlocked.CompareExchange(ref _reusableSpanBuffers[i], buffers, null) is null)
+            {
+                if (Volatile.Read(ref _disposed))
+                {
+                    _ = Interlocked.CompareExchange(ref _reusableSpanBuffers[i], null, buffers);
+                }
+
+                return;
+            }
         }
     }
 
@@ -689,6 +812,88 @@ public sealed class RfBlockStreamDecoder : IDisposable
         var output = new double[length];
         Array.Copy(source, offset, output, 0, length);
         return output;
+    }
+
+    internal sealed class RfDecodedSpanLease : IDisposable
+    {
+        private RfBlockStreamDecoder? _owner;
+        private ReusableSpanBuffers? _buffers;
+
+        internal RfDecodedSpanLease(
+            RfBlockStreamDecoder? owner,
+            ReusableSpanBuffers? buffers,
+            RfDecodedSpan span)
+        {
+            _owner = owner;
+            _buffers = buffers;
+            Span = span;
+        }
+
+        internal RfDecodedSpan Span { get; }
+
+        public void Dispose()
+        {
+            RfBlockStreamDecoder? owner = Interlocked.Exchange(ref _owner, null);
+            ReusableSpanBuffers? buffers = Interlocked.Exchange(ref _buffers, null);
+            if (owner is not null && buffers is not null)
+            {
+                owner.ReturnReusableSpanBuffers(buffers);
+            }
+        }
+    }
+
+    internal sealed class ReusableSpanBuffers
+    {
+        private double[]? _chroma;
+        private short[]? _efm;
+        private double[]? _audioLeft;
+        private double[]? _audioRight;
+        private double[]? _videoBurst;
+        private double[]? _videoPilot;
+
+        internal ReusableSpanBuffers(int length)
+        {
+            Length = length;
+            Input = new double[length];
+            Video = new double[length];
+            DemodRaw = new double[length];
+            Envelope = new double[length];
+            VideoLowPass = new double[length];
+            RfHighPass = new double[length];
+        }
+
+        internal int Length { get; }
+
+        internal double[] Input { get; }
+
+        internal double[] Video { get; }
+
+        internal double[] DemodRaw { get; }
+
+        internal double[] Envelope { get; }
+
+        internal double[] VideoLowPass { get; }
+
+        internal double[] RfHighPass { get; }
+
+        internal double[] GetChroma() => _chroma ??= new double[Length];
+
+        internal short[] GetEfm() => _efm ??= new short[Length];
+
+        internal double[] GetVideoBurst() => _videoBurst ??= new double[Length];
+
+        internal double[] GetVideoPilot() => _videoPilot ??= new double[Length];
+
+        internal (double[] Left, double[] Right) GetAudio(int length)
+        {
+            if (_audioLeft?.Length != length || _audioRight?.Length != length)
+            {
+                _audioLeft = new double[length];
+                _audioRight = new double[length];
+            }
+
+            return (_audioLeft!, _audioRight!);
+        }
     }
 
     private sealed record PrefetchedBlockBatch(
