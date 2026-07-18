@@ -159,7 +159,7 @@ dotnet test VHSDecodeDotNet.slnx -c Release --no-build --no-restore
 
 現在の正式な Release build は warning 0、error 0 です。xUnit v3 project は
 `dotnet test` と Visual Studio Test Explorer の両方で個別に検出できる
-**719** tests を公開します。
+**720** tests を公開します。
 
 <!-- SECTION: usage -->
 

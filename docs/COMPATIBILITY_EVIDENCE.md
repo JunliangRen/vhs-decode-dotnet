@@ -595,7 +595,9 @@ possible capture has already been proven byte-for-byte identical.
   runtime-generated approximation or linear sample interpolation
 - VHS `--ire0_adjust` field-output level correction, recalculating field
   black/blanking from the middle-third backporch medians and optionally
-  rescaling Hz/IRE from the hsync-to-backporch difference
+  rescaling Hz/IRE from the hsync-to-backporch difference; successful
+  measurements emit the exact ordered `calculated ire0: %.02f` and
+  `calculated hz_ire: %.02f` DEBUG diagnostics
 - VHS `--track_phase` field-output IRE0 compensation, applying
   `track_ire0_offset[next_track_phase ^ field_number]` after burst phase lock,
   falling back to the CLI-seeded phase when chroma analysis is skipped, and
@@ -1522,7 +1524,7 @@ dotnet test VHSDecodeDotNet.slnx --no-build
 ```
 
 The current formal solution build completes with zero warnings and errors, and
-the xUnit v3 project exposes 719 independently discoverable compatibility tests
+the xUnit v3 project exposes 720 independently discoverable compatibility tests
 to `dotnet test` and Visual Studio Test Explorer. On the
 same Windows machine and fixtures, Release wall-clock measurements for one
 frame were 2.346 s versus 7.193 s for NTSC VHS and 1.651 s versus 5.865 s for

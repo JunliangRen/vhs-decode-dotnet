@@ -265,6 +265,7 @@ public sealed class TbcFieldDecodePipeline
         _decodeType = decodeType;
         _framesPerSecond = framesPerSecond is > 0.0 ? framesPerSecond : null;
         _diagnosticLogger = diagnosticLogger;
+        _renderer.DiagnosticLogger = diagnosticLogger;
         _debug = debug;
         _inputBlockCutSamples = inputBlockCutSamples >= 0
             ? inputBlockCutSamples
