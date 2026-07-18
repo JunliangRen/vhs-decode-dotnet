@@ -62,17 +62,18 @@ public static class PortedMath
 
         var output = new double[input.Length];
         float frequency = (float)frequencyHz;
+        float previous = VhsRustAtan2Approximation(
+            (float)input[0].Imaginary,
+            (float)input[0].Real);
         for (int i = 1; i < input.Length; i++)
         {
-            float previous = VhsRustAtan2Approximation(
-                (float)input[i - 1].Imaginary,
-                (float)input[i - 1].Real);
             float current = VhsRustAtan2Approximation(
                 (float)input[i].Imaginary,
                 (float)input[i].Real);
             float difference = current - previous;
             difference -= MathF.Floor(difference / MathF.Tau) * MathF.Tau;
             output[i] = (float)((difference * frequency) / MathF.Tau);
+            previous = current;
         }
 
         return output;

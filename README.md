@@ -2,9 +2,9 @@
 
 **[English](README.md)** | [简体中文](README.zh-CN.md) | [日本語](README.ja.md)
 
-<!-- README_SYNC: 2026-07-18.1 -->
+<!-- README_SYNC: 2026-07-18.6 -->
 
-.NET 10 rewrite of the decode-facing parts of
+.NET 11 rewrite of the decode-facing parts of
 [`oyvindln/vhs-decode`](https://github.com/oyvindln/vhs-decode), focused on
 release `v0.4.0` at commit
 `43155200da87c0d49eb37d8ec09b1372075ee8e4`.
@@ -57,7 +57,7 @@ CLI compatibility requires it.
 
 | Area | Status | Current boundary |
 | --- | --- | --- |
-| Solution and tests | Implemented | .NET 10 `.slnx`; standard xUnit v3 tests work in Visual Studio Test Explorer and with `dotnet test`. |
+| Solution and tests | Implemented | .NET 11 `.slnx`; standard xUnit v3 tests work in Visual Studio Test Explorer and with `dotnet test`. |
 | CLI and arguments | Implemented and snapshot-tested | Facade and standalone help, aliases, defaults, validation, diagnostics, and exit behavior target v0.4.0. |
 | VHS and tape families | Implemented; rare capture gaps remain | VHS, S-VHS, Betamax, Video8/Hi8, U-matic, Type C, EIAJ, and supported PAL/NTSC variants share the release-compatible decode path. |
 | CVBS | Implemented for release-supported systems | PAL and NTSC paths run; uncommon vblank and cross-option cases need more real-capture fixtures. |
@@ -123,17 +123,40 @@ release compatibility remain the first constraint.
   stream, FFmpeg, and GNU Radio reads stay ordered.
 - A stream-scoped decoded RF cache avoids duplicate FFT work across overlapping
   field reads while keeping memory bounded.
-- VHS sessions use compute-only lookahead capped at eight RF blocks so workers
-  can prepare the next field while current-field TBC work continues. Input
-  reads remain ordered, and pending work is cancelled on seek or disposal.
+- VHS sessions schedule one extra bounded wave beyond the effective worker
+  count and retain at most 32 compute-only lookahead RF blocks. Concurrent RF
+  decodes remain capped by both `--threads` and an internal limit of eight; the
+  effective count also cannot exceed the logical processor count. This overlaps
+  the next field with current TBC work without allowing FFT allocation bursts
+  to grow with `--threads`; input reads remain ordered,
+  and pending work is cancelled on seek or disposal.
+- VSync envelope/minima work and harmonic power-ratio search run concurrently
+  over one shared read-only padded input. Candidate arbitration and detector
+  state updates remain ordered after both branches complete.
 - Long TBC sinc-resampling jobs share the worker budget and preserve output
   order; `--threads 0` and `--threads 1` retain deterministic serial paths.
 - HiFi uses bounded parallel block decoding followed by ordered
   post-processing and writing.
-- Managed FFT workers reuse scratch buffers and immutable root tables, use
-  in-place transforms where safe, and avoid full-field clones on aligned paths.
-- AVX/FMA kernels accelerate LD float32 quantization and complex frequency
-  filtering while preserving verified NumPy rounding and scalar fallbacks.
+- Managed real FFTs reuse pooled packing and scratch buffers, and float32 SOS
+  forward/backward filtering operates in place over one extended buffer. This
+  removes repeated large-object-heap churn while returning every rental after
+  each transform.
+- RF span assembly writes directly into the requested output window instead of
+  allocating whole-block field arrays and slicing a second copy.
+- Standard VHS field decode reuses at most two exact-length RF span buffer sets,
+  matching the only two block counts a fixed read window can cover. Buffers are
+  returned after synchronous field decode; public `Read` results, deferred CVBS
+  rendering, and retained LD VITS sources keep independent ownership.
+- AVX/FMA kernels accelerate exact float32 conversion, LD quantization, VHS
+  chroma rotation, and complex frequency filtering. VHS phase demodulation also
+  evaluates each sample angle once, with verified scalar fallbacks and unchanged
+  TBC/JSON hashes.
+- Recovery metadata is disk-streamed; its snapshot queue has capacity one, and
+  field-order history and RF caches have hard limits. Long decodes therefore do
+  not retain every decoded field or enqueue an unbounded amount of future work.
+- CUDA/OpenCL is not a runtime dependency. Current traces do not justify moving
+  isolated 32K FFTs across the host/device boundary; any future optional GPU
+  backend must batch a device-resident DSP stage and retain an exact CPU fallback.
 
 On one Windows fixture machine, one-frame Release measurements were:
 
@@ -142,11 +165,25 @@ On one Windows fixture machine, one-frame Release measurements were:
 | NTSC VHS | 2.346 s | 7.193 s |
 | NTSC LaserDisc | 1.651 s | 5.865 s |
 
-These numbers are fixture-specific, not universal benchmarks. A PAL LD
-four-field Core probe reduced managed allocation from 5.12 GiB to 1.96 GiB
-while preserving verified output. On a synthetic 160-frame PAL VHS probe at
-`--threads 20`, bounded lookahead reduced Release time from 29.03 s to 27.15 s
-(6.5%) with byte-identical TBC and JSON output and a non-growing memory curve.
+These numbers are fixture-specific, not universal benchmarks. All VHS A/B runs
+below used .NET SDK/runtime `11.0.100-preview.6.26359.118`. On a reproducible
+40-frame PAL probe with `--skip_chroma --no_resample`, this concurrency pass
+changed commit `6441d10` medians at `--threads 1/20` from 14.64/6.87 s to
+13.88/5.90 s: gains of 5.2%/14.2%. At 20 threads, median active
+cores rose from 2.72 to 3.38 while median peak working set rose from 1.39 to
+1.48 GiB. All paired TBC/JSON outputs were byte-identical. Earlier allocation
+work reduced a PAL LD four-field probe from 5.12 GiB to 1.96 GiB and estimated
+VHS `double[]` plus `float[]` churn from 54.0 GiB to 25.6 GiB.
+
+On the 1.31 GB, 320-frame sustained probe, commit `6441d10` and the current code
+completed in 47.61 and 39.80 seconds respectively, a 16.4% gain, with average
+active cores rising from 2.56 to 3.06 and byte-identical outputs. Current peak
+working set was 1.70 GiB; quarter-run private-memory peaks were
+1.67/1.45/1.45/1.55 GiB, with no monotonic growth. With default chroma and
+resampling, the 20-frame median improved from 8.61 to 7.30 seconds at 20 threads
+(15.2%); TBC, JSON, and chroma hashes matched.
+A 160-frame default-path run completed in 53.23 seconds with a 1.70 GiB peak and
+no monotonic quarter-to-quarter memory growth.
 
 <!-- SECTION: build -->
 
@@ -154,7 +191,7 @@ while preserving verified output. On a synthetic 160-frame PAL VHS probe at
 
 Requirements:
 
-- .NET 10 SDK
+- .NET SDK `11.0.100-preview.6.26359.118` (pinned by `global.json`)
 - Visual Studio 2026 for IDE use
 - `ffmpeg` and `ffprobe` on `PATH` for FFmpeg-backed container inputs
 - `ffmpeg` for default HiFi FLAC output
@@ -166,7 +203,7 @@ dotnet test VHSDecodeDotNet.slnx -c Release --no-build --no-restore
 ```
 
 The current formal Release build has zero warnings and errors. The xUnit v3
-project exposes **740** independently discoverable tests to both
+project exposes **746** independently discoverable tests to both
 `dotnet test` and Visual Studio Test Explorer.
 
 <!-- SECTION: usage -->
@@ -185,8 +222,8 @@ dotnet run --project src/VHSDecode.Cli -- hifi --help
 After a Release build, use either facade dispatch or an apphost alias:
 
 ```powershell
-src\VHSDecode.Cli\bin\Release\net10.0\decode.exe vhs [upstream options] input output
-src\VHSDecode.Cli\bin\Release\net10.0\vhs-decode.exe [upstream options] input output
+src\VHSDecode.Cli\bin\Release\net11.0\decode.exe vhs [upstream options] input output
+src\VHSDecode.Cli\bin\Release\net11.0\vhs-decode.exe [upstream options] input output
 ```
 
 Use the matching `cvbs`, `ld`, or `hifi` command and its upstream v0.4.0

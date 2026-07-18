@@ -1,3 +1,5 @@
+using System.Runtime.Intrinsics.X86;
+
 namespace VHSDecode.Core.Dsp;
 
 public readonly record struct SosSection(
@@ -77,7 +79,16 @@ public static class SosFilter
             throw new ArgumentException("Initial condition array must have shape [sections, 2].", nameof(initialConditions));
         }
 
-        var output = input.ToArray();
+        double[] output = input.ToArray();
+        ApplyForwardInPlace(sections, output, initialConditions);
+        return output;
+    }
+
+    private static void ApplyForwardInPlace(
+        IReadOnlyList<SosSection> sections,
+        Span<double> output,
+        double[,] initialConditions)
+    {
         for (int sectionIndex = 0; sectionIndex < sections.Count; sectionIndex++)
         {
             SosSection section = sections[sectionIndex].Normalize();
@@ -93,8 +104,6 @@ public static class SosFilter
                 output[i] = y;
             }
         }
-
-        return output;
     }
 
     public static double[] ApplyForwardBackward(
@@ -116,19 +125,19 @@ public static class SosFilter
         double[] extended = edge == 0 ? input.ToArray() : OddExtension(input, edge);
         double[,] zi = SteadyStateInitialConditions(sections);
         double[,] firstZi = ScaleInitialConditions(zi, extended[0]);
-        double[] forward = ApplyForward(sections, extended, firstZi);
-        Array.Reverse(forward);
-        double[,] secondZi = ScaleInitialConditions(zi, forward[0]);
-        double[] backward = ApplyForward(sections, forward, secondZi);
-        Array.Reverse(backward);
+        ApplyForwardInPlace(sections, extended, firstZi);
+        Array.Reverse(extended);
+        double[,] secondZi = ScaleInitialConditions(zi, extended[0]);
+        ApplyForwardInPlace(sections, extended, secondZi);
+        Array.Reverse(extended);
 
         if (edge == 0)
         {
-            return backward;
+            return extended;
         }
 
         var trimmed = new double[input.Length];
-        Array.Copy(backward, edge, trimmed, 0, trimmed.Length);
+        Array.Copy(extended, edge, trimmed, 0, trimmed.Length);
         return trimmed;
     }
 
@@ -142,18 +151,20 @@ public static class SosFilter
             return [];
         }
 
-        var values = new float[input.Length];
-        for (int i = 0; i < values.Length; i++)
+        int edge = padLength ?? DefaultPadLength(sections);
+        if (edge < 0)
         {
-            values[i] = (float)input[i];
+            throw new ArgumentOutOfRangeException(nameof(padLength));
         }
 
-        float[] filtered = ApplyForwardBackwardFloat32(sections, values, padLength);
-        var output = new double[filtered.Length];
-        for (int i = 0; i < output.Length; i++)
-        {
-            output[i] = filtered[i];
-        }
+        FloatSosSection[] floatSections = ConvertToFloat32(sections);
+        float[] extended = edge == 0
+            ? ConvertToFloat32(input)
+            : OddExtensionFloat32(input, edge);
+        ApplyForwardBackwardFloat32InPlace(floatSections, extended);
+
+        var output = new double[input.Length];
+        ConvertToFloat64(extended.AsSpan(edge, input.Length), output);
 
         return output;
     }
@@ -174,30 +185,26 @@ public static class SosFilter
             throw new ArgumentOutOfRangeException(nameof(padLength));
         }
 
-        var floatSections = new FloatSosSection[sections.Count];
-        for (int i = 0; i < floatSections.Length; i++)
-        {
-            SosSection section = sections[i];
-            floatSections[i] = new FloatSosSection(
-                (float)section.B0,
-                (float)section.B1,
-                (float)section.B2,
-                (float)section.A0,
-                (float)section.A1,
-                (float)section.A2);
-        }
-
+        FloatSosSection[] floatSections = ConvertToFloat32(sections);
         float[] extended = edge == 0 ? input.ToArray() : OddExtensionFloat32(input, edge);
-        float[,] zi = SteadyStateInitialConditionsFloat32(floatSections);
-        float[,] firstZi = ScaleInitialConditionsFloat32(zi, extended[0]);
-        float[] forward = ApplyForwardFloat32(floatSections, extended, firstZi);
-        Array.Reverse(forward);
-        float[,] secondZi = ScaleInitialConditionsFloat32(zi, forward[0]);
-        float[] backward = ApplyForwardFloat32(floatSections, forward, secondZi);
-        Array.Reverse(backward);
+        ApplyForwardBackwardFloat32InPlace(floatSections, extended);
 
-        int outputStart = edge == 0 ? 0 : edge;
-        return backward.AsSpan(outputStart, input.Length).ToArray();
+        return edge == 0
+            ? extended
+            : extended.AsSpan(edge, input.Length).ToArray();
+    }
+
+    private static void ApplyForwardBackwardFloat32InPlace(
+        FloatSosSection[] floatSections,
+        float[] values)
+    {
+        float[,] zi = SteadyStateInitialConditionsFloat32(floatSections);
+        float[,] firstZi = ScaleInitialConditionsFloat32(zi, values[0]);
+        ApplyForwardFloat32InPlace(floatSections, values, firstZi);
+        Array.Reverse(values);
+        float[,] secondZi = ScaleInitialConditionsFloat32(zi, values[0]);
+        ApplyForwardFloat32InPlace(floatSections, values, secondZi);
+        Array.Reverse(values);
     }
 
     public static int DefaultPadLength(IReadOnlyList<SosSection> sections)
@@ -243,9 +250,9 @@ public static class SosFilter
         return output;
     }
 
-    private static float[] ApplyForwardFloat32(
+    private static void ApplyForwardFloat32InPlace(
         IReadOnlyList<FloatSosSection> sections,
-        ReadOnlySpan<float> input,
+        Span<float> values,
         float[,] initialConditions)
     {
         if (initialConditions.GetLength(0) != sections.Count || initialConditions.GetLength(1) != 2)
@@ -254,10 +261,9 @@ public static class SosFilter
         }
 
         var states = (float[,])initialConditions.Clone();
-        var output = new float[input.Length];
-        for (int sample = 0; sample < input.Length; sample++)
+        for (int sample = 0; sample < values.Length; sample++)
         {
-            float value = input[sample];
+            float value = values[sample];
             for (int sectionIndex = 0; sectionIndex < sections.Count; sectionIndex++)
             {
                 FloatSosSection section = sections[sectionIndex];
@@ -268,10 +274,91 @@ public static class SosFilter
                 value = filtered;
             }
 
-            output[sample] = value;
+            values[sample] = value;
+        }
+    }
+
+    private static FloatSosSection[] ConvertToFloat32(IReadOnlyList<SosSection> sections)
+    {
+        var output = new FloatSosSection[sections.Count];
+        for (int i = 0; i < output.Length; i++)
+        {
+            SosSection section = sections[i];
+            output[i] = new FloatSosSection(
+                (float)section.B0,
+                (float)section.B1,
+                (float)section.B2,
+                (float)section.A0,
+                (float)section.A1,
+                (float)section.A2);
         }
 
         return output;
+    }
+
+    private static float[] ConvertToFloat32(ReadOnlySpan<double> input)
+    {
+        var output = new float[input.Length];
+        ConvertToFloat32(input, output);
+        return output;
+    }
+
+    private static unsafe void ConvertToFloat32(ReadOnlySpan<double> input, Span<float> output)
+    {
+        if (output.Length < input.Length)
+        {
+            throw new ArgumentException("Output span is shorter than the input span.", nameof(output));
+        }
+
+        int index = 0;
+        if (Avx.IsSupported)
+        {
+            fixed (double* inputPointer = input)
+            fixed (float* outputPointer = output)
+            {
+                int vectorizedEnd = input.Length - (input.Length % 4);
+                for (; index < vectorizedEnd; index += 4)
+                {
+                    Sse.Store(
+                        outputPointer + index,
+                        Avx.ConvertToVector128Single(Avx.LoadVector256(inputPointer + index)));
+                }
+            }
+        }
+
+        for (; index < input.Length; index++)
+        {
+            output[index] = (float)input[index];
+        }
+    }
+
+    private static unsafe void ConvertToFloat64(ReadOnlySpan<float> input, Span<double> output)
+    {
+        if (output.Length < input.Length)
+        {
+            throw new ArgumentException("Output span is shorter than the input span.", nameof(output));
+        }
+
+        int index = 0;
+        if (Avx.IsSupported)
+        {
+            fixed (float* inputPointer = input)
+            fixed (double* outputPointer = output)
+            {
+                int vectorizedEnd = input.Length - (input.Length % 4);
+                for (; index < vectorizedEnd; index += 4)
+                {
+                    Avx.Store(
+                        outputPointer + index,
+                        Avx.ConvertToVector256Double(Sse.LoadVector128(inputPointer + index)));
+                }
+            }
+        }
+
+        for (; index < input.Length; index++)
+        {
+            output[index] = input[index];
+        }
     }
 
     private static float[,] SteadyStateInitialConditionsFloat32(IReadOnlyList<FloatSosSection> sections)
@@ -355,6 +442,31 @@ public static class SosFilter
         for (int i = 0; i < edge; i++)
         {
             output[edge + input.Length + i] = (2.0f * last) - input[input.Length - 2 - i];
+        }
+
+        return output;
+    }
+
+    private static float[] OddExtensionFloat32(ReadOnlySpan<double> input, int edge)
+    {
+        if (input.Length <= edge)
+        {
+            throw new ArgumentException("Input length must be greater than pad length.");
+        }
+
+        var output = new float[input.Length + (edge * 2)];
+        float first = (float)input[0];
+        for (int i = 0; i < edge; i++)
+        {
+            output[i] = (2.0f * first) - (float)input[edge - i];
+        }
+
+        ConvertToFloat32(input, output.AsSpan(edge, input.Length));
+
+        float last = (float)input[^1];
+        for (int i = 0; i < edge; i++)
+        {
+            output[edge + input.Length + i] = (2.0f * last) - (float)input[input.Length - 2 - i];
         }
 
         return output;

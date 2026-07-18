@@ -2,10 +2,10 @@
 
 [English](README.md) | [简体中文](README.zh-CN.md) | **[日本語](README.ja.md)**
 
-<!-- README_SYNC: 2026-07-18.1 -->
+<!-- README_SYNC: 2026-07-18.6 -->
 
 [`oyvindln/vhs-decode`](https://github.com/oyvindln/vhs-decode) の
-デコード関連部分を .NET 10 で再実装するプロジェクトです。現在は release
+デコード関連部分を .NET 11 で再実装するプロジェクトです。現在は release
 `v0.4.0`、commit `43155200da87c0d49eb37d8ec09b1372075ee8e4`
 を互換性の基準としています。
 
@@ -58,7 +58,7 @@
 
 | 領域 | 状態 | 現在の境界 |
 | --- | --- | --- |
-| ソリューションとテスト | 実装済み | .NET 10 `.slnx`。標準 xUnit v3 テストは Visual Studio Test Explorer と `dotnet test` で利用できます。 |
+| ソリューションとテスト | 実装済み | .NET 11 `.slnx`。標準 xUnit v3 テストは Visual Studio Test Explorer と `dotnet test` で利用できます。 |
 | CLI と引数 | 実装済み、スナップショットテストあり | facade とスタンドアロンの help、alias、default、validation、diagnostic、exit 動作は v0.4.0 を対象とします。 |
 | VHS とテープ形式 | 実装済み。まれなキャプチャ差分あり | VHS、S-VHS、Betamax、Video8/Hi8、U-matic、Type C、EIAJ、および対応 PAL/NTSC 形式は release 互換経路を共有します。 |
 | CVBS | release 対応システムを実装済み | PAL/NTSC 経路は動作します。まれな vblank とオプション間のケースには実キャプチャ fixture の追加が必要です。 |
@@ -121,16 +121,36 @@
   stream、FFmpeg、GNU Radio の読み取り順序を維持します。
 - stream 単位の decoded RF cache により、重複する field read 間の FFT 再計算を
   避けつつメモリ使用量を制限します。
-- VHS session は最大 8 RF block の compute-only lookahead を使用し、現在の field の
-  TBC 処理中に worker が次の field を準備します。入力の読み取り順序は維持され、
-  seek または dispose 時には保留中の処理をキャンセルします。
+- VHS session は effective worker 数の先に追加の 1 wave を境界付きで schedule し、
+  compute-only lookahead RF block を最大 32 個保持します。同時 RF decode 数は
+  `--threads` と内部上限 8 の両方で制限され、effective worker 数も logical processor
+  数以下です。現在の field の
+  TBC 処理中に次の field を準備しつつ、FFT allocation burst が `--threads` とともに
+  無制限に増えない構成で、入力順序を維持し、seek/dispose 時に保留処理をキャンセルします。
+- VSync envelope/minima 処理と harmonic power-ratio search は 1 つの read-only padded
+  input 上で並行実行します。両 branch の完了後、candidate arbitration と detector
+  state update は引き続き順序どおりに行います。
 - 長い TBC sinc-resampling job は worker budget を共有し、出力順序を維持します。
   `--threads 0` と `--threads 1` は決定的な serial path を保持します。
 - HiFi は境界付き並列 block decode の後、順序どおりに後処理と書き込みを行います。
-- Managed FFT worker は scratch buffer と immutable root table を再利用し、
-  安全な箇所で in-place transform を使い、aligned path の field 全体コピーを避けます。
-- AVX/FMA kernel は LD の float32 quantization と complex frequency filtering を
-  高速化し、検証済みの NumPy rounding と scalar fallback を保持します。
+- Managed real FFT は pool 化した packing/scratch buffer を再利用し、float32 SOS の
+  forward/backward filtering は 1 つの拡張 buffer 上で in-place 実行します。
+  各 transform 後に rental を返却し、LOH への反復負荷を避けます。
+- RF span assembly は block 境界の field array を作って再度 slice せず、要求された
+  最終 output window へ直接書き込みます。
+- 標準 VHS field decode は、固定 read window が取り得る 2 種類の block 数に対応する
+  exact-length RF span buffer set を最大 2 組だけ再利用します。同期 field decode 後に
+  buffer を返却し、public `Read` result、deferred CVBS render、保持される LD VITS source
+  はそれぞれ独立した array ownership を維持します。
+- AVX/FMA kernel は正確な float32 conversion、LD quantization、VHS chroma rotation、
+  complex frequency filtering を高速化します。VHS phase demodulation も各 sample の
+  angle を 1 回だけ評価し、検証済み scalar fallback と同一 TBC/JSON hash を維持します。
+- Recovery metadata は disk streaming され、snapshot queue の容量は 1、field-order
+  history と RF cache にも hard limit があります。長時間 decode でも全 field を
+  保持したり、将来の work を無制限に enqueue したりしません。
+- CUDA/OpenCL は runtime dependency ではありません。現在の trace では、独立した
+  32K FFT を host/device 間で往復させる根拠がありません。将来の任意 GPU backend は
+  device-resident DSP stage を batch 化し、正確な CPU fallback を維持する必要があります。
 
 ある Windows fixture 環境での Release 1 frame 計測値は次のとおりです。
 
@@ -139,12 +159,24 @@
 | NTSC VHS | 2.346 s | 7.193 s |
 | NTSC LaserDisc | 1.651 s | 5.865 s |
 
-これは特定 fixture の値であり、一般的な benchmark ではありません。
-PAL LD 4-field Core probe では、検証済み出力を維持しながら managed allocation を
-5.12 GiB から 1.96 GiB に削減しました。合成 160-frame PAL VHS probe の
-`--threads 20` では、境界付き lookahead により Release 時間が 29.03 s から
-27.15 s（6.5%）に短縮され、TBC/JSON 出力は byte-identical のまま、メモリ曲線も
-継続的に増加しませんでした。
+これは特定 fixture の値であり、一般的な benchmark ではありません。以下の VHS A/B
+はすべて .NET SDK/runtime `11.0.100-preview.6.26359.118` を使用しました。
+再現可能な 40-frame PAL probe で `--skip_chroma --no_resample` を指定すると、今回の
+concurrency pass は commit `6441d10` の `--threads 1/20` 中央値
+14.64/6.87 秒を 13.88/5.90 秒へ短縮し、5.2%/14.2% 改善しました。
+20-thread では active core 中央値が 2.72 から 3.38、peak working set 中央値が
+1.39 GiB から 1.48 GiB になり、paired TBC/JSON output はすべて byte-identical でした。
+以前の allocation pass では PAL LD 4-field probe が 5.12 GiB から 1.96 GiB、VHS の
+`double[]` と `float[]` の推定 churn が 54.0 GiB から 25.6 GiB になりました。
+
+1.31 GB、320-frame sustained probe では commit `6441d10` と現在のコードがそれぞれ
+47.61 秒と 39.80 秒で完了し、16.4% 改善しました。平均 active core は 2.56 から
+3.06 となり、output は byte-identical でした。現在の peak working set は 1.70 GiB、
+4 区間の private-memory peak は 1.67/1.45/1.45/1.55 GiB で、単調増加はありません。
+default chroma/resampling の 20-thread では、20-frame 中央値が 8.61 秒から
+7.30 秒へ 15.2% 改善し、TBC/JSON/chroma hash は一致しました。
+160-frame default-path run は 53.23 秒、peak 1.70 GiB で、区間ごとの memory にも
+単調増加はありませんでした。
 
 <!-- SECTION: build -->
 
@@ -152,7 +184,7 @@ PAL LD 4-field Core probe では、検証済み出力を維持しながら manag
 
 必要条件：
 
-- .NET 10 SDK
+- `.NET SDK 11.0.100-preview.6.26359.118`（`global.json` で固定）
 - IDE として使用する場合は Visual Studio 2026
 - FFmpeg 対応 container input では `ffmpeg` と `ffprobe` が `PATH` 上に必要
 - デフォルトの HiFi FLAC 出力には `ffmpeg` が必要
@@ -165,7 +197,7 @@ dotnet test VHSDecodeDotNet.slnx -c Release --no-build --no-restore
 
 現在の正式な Release build は warning 0、error 0 です。xUnit v3 project は
 `dotnet test` と Visual Studio Test Explorer の両方で個別に検出できる
-**740** tests を公開します。
+**746** tests を公開します。
 
 <!-- SECTION: usage -->
 
@@ -183,8 +215,8 @@ dotnet run --project src/VHSDecode.Cli -- hifi --help
 Release build 後は facade dispatch または apphost alias を使用できます。
 
 ```powershell
-src\VHSDecode.Cli\bin\Release\net10.0\decode.exe vhs [upstream options] input output
-src\VHSDecode.Cli\bin\Release\net10.0\vhs-decode.exe [upstream options] input output
+src\VHSDecode.Cli\bin\Release\net11.0\decode.exe vhs [upstream options] input output
+src\VHSDecode.Cli\bin\Release\net11.0\vhs-decode.exe [upstream options] input output
 ```
 
 対応する `cvbs`、`ld`、`hifi` command と上流 v0.4.0 の引数を使用します。

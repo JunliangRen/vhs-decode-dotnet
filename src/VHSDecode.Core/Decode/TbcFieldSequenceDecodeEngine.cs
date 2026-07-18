@@ -919,6 +919,17 @@ public sealed class TbcFieldSequenceDecodeEngine
         int fieldNumber)
     {
         DecodeReadWindow window = DecodeReadWindowPlanner.Resolve(session, begin, readLength);
+        if (session.Spec.Name == "vhs")
+        {
+            using RfBlockStreamDecoder.RfDecodedSpanLease? lease = session.StreamDecoder.ReadLeased(
+                input,
+                window.StartSample,
+                window.SampleCount);
+            return lease is null
+                ? null
+                : session.TbcFieldDecoder.Decode(lease.Span, fieldNumber: fieldNumber);
+        }
+
         RfDecodedSpan? span = session.StreamDecoder.Read(input, window.StartSample, window.SampleCount);
         if (span is null)
         {

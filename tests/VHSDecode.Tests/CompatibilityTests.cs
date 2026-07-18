@@ -1496,7 +1496,7 @@ public void DecodeSessionFactoryAppliesExecutionOptions()
         "outbase"
     ]));
     AssertEqual(
-        Math.Min(7, Math.Min(Environment.ProcessorCount, RfBlockStreamDecoder.MaximumPrefetchBlocks)),
+        RfBlockStreamDecoder.RecommendedPrefetchBlocks(7, Environment.ProcessorCount),
         parallelVhs.StreamDecoder.PrefetchBlocks);
 }
 
@@ -2660,6 +2660,12 @@ public void VhsChromaDecoderAppliesUpstreamOutputHelpers()
 
     AssertSequence([1.5, -1.5, -0.5, 0.5], VhsChromaDecoder.ShiftChromaAndRemoveDc([1.0, 2.0, 3.0, 4.0], move: 1));
     AssertSequence([-0.5, 0.5, 1.5, -1.5], VhsChromaDecoder.ShiftChromaAndRemoveDc([1.0, 2.0, 3.0, 4.0], move: -1));
+    AssertSequence(
+        [1.5, -1.5, -0.5, 0.5],
+        VhsChromaDecoder.ShiftChromaAndRemoveDcFloat32([1.0, 2.0, 3.0, 4.0], move: 5));
+    AssertSequence(
+        [-0.5, 0.5, 1.5, -1.5],
+        VhsChromaDecoder.ShiftChromaAndRemoveDcFloat32([1.0, 2.0, 3.0, 4.0], move: -1));
     var fastMeanProbe = new double[32];
     fastMeanProbe[0] = 1e20;
     fastMeanProbe[8] = 1.0;

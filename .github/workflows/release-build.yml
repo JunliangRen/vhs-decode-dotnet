@@ -25,10 +25,10 @@ jobs:
       - name: Check out repository
         uses: actions/checkout@v6
 
-      - name: Set up .NET 10
+      - name: Set up .NET 11 Preview 6
         uses: actions/setup-dotnet@v5
         with:
-          dotnet-version: 10.0.x
+          global-json-file: global.json
 
       - name: Install FFmpeg test dependency
         run: choco install ffmpeg --yes --no-progress --limit-output
@@ -47,6 +47,6 @@ jobs:
         uses: actions/upload-artifact@v7
         with:
           name: vhs-decode-dotnet-windows-${{ github.sha }}
-          path: src/VHSDecode.Cli/bin/Release/net10.0/
+          path: src/VHSDecode.Cli/bin/Release/net11.0/
           if-no-files-found: error
           retention-days: 30

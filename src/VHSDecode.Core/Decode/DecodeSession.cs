@@ -267,9 +267,9 @@ public static class DecodeSessionFactory
             blockCutEnd,
             executionOptions.WorkerThreads,
             prefetchBlocks: command.Spec.Name == "vhs" && pipeline.InputProcessor is null
-                ? Math.Min(
+                ? RfBlockStreamDecoder.RecommendedPrefetchBlocks(
                     executionOptions.WorkerThreads,
-                    Math.Min(Environment.ProcessorCount, RfBlockStreamDecoder.MaximumPrefetchBlocks))
+                    Environment.ProcessorCount)
                 : 0);
         TbcFrameSpec tbcFrameSpec = TbcFrameSpec.FromParameters(parameters);
         var tbcRenderer = new TbcFieldRenderer(

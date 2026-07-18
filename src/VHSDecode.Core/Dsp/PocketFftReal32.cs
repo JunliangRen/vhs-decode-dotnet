@@ -1,4 +1,5 @@
 // Float32 radix-2/4 real FFT adapted from pocketfft's BSD-3-Clause implementation.
+using System.Buffers;
 using System.Collections.Concurrent;
 
 namespace VHSDecode.Core.Dsp;
@@ -66,19 +67,27 @@ internal static class PocketFftReal32
 
         internal Complex32[] Forward(ReadOnlySpan<float> input)
         {
-            float[] packed = input.ToArray();
-            ExecuteForward(packed);
-            var output = new Complex32[(_length / 2) + 1];
-            output[0] = new Complex32(packed[0], 0.0f);
-            for (int i = 1; i < output.Length - 1; i++)
+            float[] packed = ArrayPool<float>.Shared.Rent(_length);
+            try
             {
-                output[i] = new Complex32(
-                    packed[(2 * i) - 1],
-                    packed[2 * i]);
-            }
+                input.CopyTo(packed);
+                ExecuteForward(packed);
+                var output = new Complex32[(_length / 2) + 1];
+                output[0] = new Complex32(packed[0], 0.0f);
+                for (int i = 1; i < output.Length - 1; i++)
+                {
+                    output[i] = new Complex32(
+                        packed[(2 * i) - 1],
+                        packed[2 * i]);
+                }
 
-            output[^1] = new Complex32(packed[^1], 0.0f);
-            return output;
+                output[^1] = new Complex32(packed[_length - 1], 0.0f);
+                return output;
+            }
+            finally
+            {
+                ArrayPool<float>.Shared.Return(packed);
+            }
         }
 
         internal Complex32[] ForwardDucc(ReadOnlySpan<float> input)
@@ -152,78 +161,92 @@ internal static class PocketFftReal32
 
         private void ExecuteForward(float[] data)
         {
-            var scratch = new float[_length];
-            float[] source = data;
-            float[] destination = scratch;
-            int l1 = _length;
-            for (int pass = 0; pass < _factors.Length; pass++)
+            float[] scratch = ArrayPool<float>.Shared.Rent(_length);
+            try
             {
-                Factor factor = _factors[_factors.Length - pass - 1];
-                int ido = _length / l1;
-                l1 /= factor.Radix;
-                if (factor.Radix == 4)
+                float[] source = data;
+                float[] destination = scratch;
+                int l1 = _length;
+                for (int pass = 0; pass < _factors.Length; pass++)
                 {
-                    Radix4Forward(
-                        ido,
-                        l1,
-                        source,
-                        destination,
-                        factor.Twiddles);
-                }
-                else
-                {
-                    Radix2Forward(
-                        ido,
-                        l1,
-                        source,
-                        destination,
-                        factor.Twiddles);
+                    Factor factor = _factors[_factors.Length - pass - 1];
+                    int ido = _length / l1;
+                    l1 /= factor.Radix;
+                    if (factor.Radix == 4)
+                    {
+                        Radix4Forward(
+                            ido,
+                            l1,
+                            source,
+                            destination,
+                            factor.Twiddles);
+                    }
+                    else
+                    {
+                        Radix2Forward(
+                            ido,
+                            l1,
+                            source,
+                            destination,
+                            factor.Twiddles);
+                    }
+
+                    (source, destination) = (destination, source);
                 }
 
-                (source, destination) = (destination, source);
+                if (!ReferenceEquals(source, data))
+                {
+                    source.AsSpan(0, _length).CopyTo(data);
+                }
             }
-
-            if (!ReferenceEquals(source, data))
+            finally
             {
-                source.CopyTo(data, 0);
+                ArrayPool<float>.Shared.Return(scratch);
             }
         }
 
         private void ExecuteBackward(float[] data, float normalization)
         {
-            var scratch = new float[_length];
-            float[] source = data;
-            float[] destination = scratch;
-            int l1 = 1;
-            foreach (Factor factor in _factors)
+            float[] scratch = ArrayPool<float>.Shared.Rent(_length);
+            try
             {
-                int ido = _length / (factor.Radix * l1);
-                if (factor.Radix == 4)
+                float[] source = data;
+                float[] destination = scratch;
+                int l1 = 1;
+                foreach (Factor factor in _factors)
                 {
-                    Radix4Backward(
-                        ido,
-                        l1,
-                        source,
-                        destination,
-                        factor.Twiddles);
-                }
-                else
-                {
-                    Radix2Backward(
-                        ido,
-                        l1,
-                        source,
-                        destination,
-                        factor.Twiddles);
+                    int ido = _length / (factor.Radix * l1);
+                    if (factor.Radix == 4)
+                    {
+                        Radix4Backward(
+                            ido,
+                            l1,
+                            source,
+                            destination,
+                            factor.Twiddles);
+                    }
+                    else
+                    {
+                        Radix2Backward(
+                            ido,
+                            l1,
+                            source,
+                            destination,
+                            factor.Twiddles);
+                    }
+
+                    (source, destination) = (destination, source);
+                    l1 *= factor.Radix;
                 }
 
-                (source, destination) = (destination, source);
-                l1 *= factor.Radix;
+                for (int i = 0; i < _length; i++)
+                {
+                    data[i] = normalization * source[i];
+                }
             }
-
-            for (int i = 0; i < data.Length; i++)
+            finally
             {
-                data[i] = normalization * source[i];
+                ArrayPool<float>.Shared.Return(scratch);
             }
         }
 

@@ -1,4 +1,5 @@
 // Radix-2/4 real FFT adapted from pocketfft's BSD-3-Clause implementation.
+using System.Buffers;
 using System.Collections.Concurrent;
 using System.Numerics;
 
@@ -47,17 +48,25 @@ public static class PocketFftReal
 
         public Complex[] Forward(ReadOnlySpan<double> input)
         {
-            double[] packed = input.ToArray();
-            ExecuteForward(packed);
-            var output = new Complex[(_length / 2) + 1];
-            output[0] = new Complex(packed[0], 0.0);
-            for (int i = 1; i < output.Length - 1; i++)
+            double[] packed = ArrayPool<double>.Shared.Rent(_length);
+            try
             {
-                output[i] = new Complex(packed[(2 * i) - 1], packed[2 * i]);
-            }
+                input.CopyTo(packed);
+                ExecuteForward(packed);
+                var output = new Complex[(_length / 2) + 1];
+                output[0] = new Complex(packed[0], 0.0);
+                for (int i = 1; i < output.Length - 1; i++)
+                {
+                    output[i] = new Complex(packed[(2 * i) - 1], packed[2 * i]);
+                }
 
-            output[^1] = new Complex(packed[^1], 0.0);
-            return output;
+                output[^1] = new Complex(packed[_length - 1], 0.0);
+                return output;
+            }
+            finally
+            {
+                ArrayPool<double>.Shared.Return(packed);
+            }
         }
 
         public double[] Inverse(ReadOnlySpan<Complex> input)
@@ -77,58 +86,72 @@ public static class PocketFftReal
 
         private void ExecuteForward(double[] data)
         {
-            var scratch = new double[_length];
-            double[] source = data;
-            double[] destination = scratch;
-            int l1 = _length;
-            for (int pass = 0; pass < _factors.Length; pass++)
+            double[] scratch = ArrayPool<double>.Shared.Rent(_length);
+            try
             {
-                Factor factor = _factors[_factors.Length - pass - 1];
-                int ido = _length / l1;
-                l1 /= factor.Radix;
-                if (factor.Radix == 4)
+                double[] source = data;
+                double[] destination = scratch;
+                int l1 = _length;
+                for (int pass = 0; pass < _factors.Length; pass++)
                 {
-                    Radix4Forward(ido, l1, source, destination, factor.Twiddles);
-                }
-                else
-                {
-                    Radix2Forward(ido, l1, source, destination, factor.Twiddles);
+                    Factor factor = _factors[_factors.Length - pass - 1];
+                    int ido = _length / l1;
+                    l1 /= factor.Radix;
+                    if (factor.Radix == 4)
+                    {
+                        Radix4Forward(ido, l1, source, destination, factor.Twiddles);
+                    }
+                    else
+                    {
+                        Radix2Forward(ido, l1, source, destination, factor.Twiddles);
+                    }
+
+                    (source, destination) = (destination, source);
                 }
 
-                (source, destination) = (destination, source);
+                if (!ReferenceEquals(source, data))
+                {
+                    source.AsSpan(0, _length).CopyTo(data);
+                }
             }
-
-            if (!ReferenceEquals(source, data))
+            finally
             {
-                source.CopyTo(data, 0);
+                ArrayPool<double>.Shared.Return(scratch);
             }
         }
 
         private void ExecuteBackward(double[] data, double normalization)
         {
-            var scratch = new double[_length];
-            double[] source = data;
-            double[] destination = scratch;
-            int l1 = 1;
-            foreach (Factor factor in _factors)
+            double[] scratch = ArrayPool<double>.Shared.Rent(_length);
+            try
             {
-                int ido = _length / (factor.Radix * l1);
-                if (factor.Radix == 4)
+                double[] source = data;
+                double[] destination = scratch;
+                int l1 = 1;
+                foreach (Factor factor in _factors)
                 {
-                    Radix4Backward(ido, l1, source, destination, factor.Twiddles);
-                }
-                else
-                {
-                    Radix2Backward(ido, l1, source, destination, factor.Twiddles);
+                    int ido = _length / (factor.Radix * l1);
+                    if (factor.Radix == 4)
+                    {
+                        Radix4Backward(ido, l1, source, destination, factor.Twiddles);
+                    }
+                    else
+                    {
+                        Radix2Backward(ido, l1, source, destination, factor.Twiddles);
+                    }
+
+                    (source, destination) = (destination, source);
+                    l1 *= factor.Radix;
                 }
 
-                (source, destination) = (destination, source);
-                l1 *= factor.Radix;
+                for (int i = 0; i < _length; i++)
+                {
+                    data[i] = normalization * source[i];
+                }
             }
-
-            for (int i = 0; i < data.Length; i++)
+            finally
             {
-                data[i] = normalization * source[i];
+                ArrayPool<double>.Shared.Return(scratch);
             }
         }
 
