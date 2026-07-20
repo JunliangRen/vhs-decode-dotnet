@@ -15,4 +15,5 @@ upstream-vhs-decode/
 .codex/
 .tools/
 scratch/
+/artifacts/
 /out.log
