@@ -7095,6 +7095,65 @@ public void VsyncSerrationDetectorMatchesV04Rules()
     AssertClose(80.0, Convert.ToDouble(PrivatePropertyValue(prepared, "Threshold")), 1e-12);
 }
 
+[Fact(DisplayName = "VHS sync DC offset reuses an exact low-pass workspace")]
+public void VhsSyncDcOffsetReusesExactLowPassWorkspace()
+{
+    var analyzer = new SyncAnalyzer(
+        sampleRateHz: 4_000_000.0,
+        linePeriodUs: 64.0,
+        hsyncPulseUs: 4.7,
+        equalizingPulseUs: 2.35,
+        vsyncPulseUs: 27.3);
+    var frameSpec = new TbcFrameSpec(
+        "PAL",
+        OutputLineLength: 4,
+        OutputLineCount: 2,
+        OutputSampleRateHz: 4_000_000.0,
+        ColourBurstStart: null,
+        ColourBurstEnd: null,
+        ActiveVideoStart: null,
+        ActiveVideoEnd: null);
+    var converter = new VideoOutputConverter(
+        ire0: 100.0,
+        hzIre: 1.0,
+        outputZero: 256,
+        vsyncIre: -40.0,
+        outputScale: 10.0);
+    var pipeline = new TbcFieldDecodePipeline(
+        analyzer,
+        new TbcFieldRenderer(frameSpec, converter),
+        converter,
+        "PAL",
+        TbcDropoutDetectionOptions.Disabled,
+        syncDetectionOptions: new SyncDetectionOptions(DetectLevels: true, LevelDetectDivisor: 1),
+        decodeType: "vhs");
+
+    double[] firstLowPass = [90.0, 130.0, 150.0];
+    object firstPrepared = InvokePrivateMethod(
+        pipeline,
+        "PrepareSyncSpanFromLevels",
+        new RfDecodedSpan(0, [], firstLowPass, firstLowPass, VideoLowPass: firstLowPass),
+        (90.0, 130.0),
+        false)!;
+    var firstSpan = (RfDecodedSpan)PrivatePropertyValue(firstPrepared, "Span")!;
+    AssertSequence([60.0, 100.0, 120.0], firstSpan.VideoLowPass!);
+    AssertSequence([90.0, 130.0, 150.0], firstLowPass);
+    AssertTrue(ReferenceEquals(firstLowPass, firstSpan.Video));
+    double[] workspace = firstSpan.VideoLowPass!;
+
+    double[] secondLowPass = [80.0, 120.0, 160.0];
+    object secondPrepared = InvokePrivateMethod(
+        pipeline,
+        "PrepareSyncSpanFromLevels",
+        new RfDecodedSpan(0, [], secondLowPass, secondLowPass, VideoLowPass: secondLowPass),
+        (80.0, 120.0),
+        false)!;
+    var secondSpan = (RfDecodedSpan)PrivatePropertyValue(secondPrepared, "Span")!;
+    AssertTrue(ReferenceEquals(workspace, secondSpan.VideoLowPass));
+    AssertSequence([60.0, 100.0, 140.0], secondSpan.VideoLowPass!);
+    AssertSequence([80.0, 120.0, 160.0], secondLowPass);
+}
+
 [Fact(DisplayName = "VHS debug mode hashes sync references")]
 public void VhsDebugModeHashesSyncReferences()
 {

@@ -184,6 +184,10 @@ release compatibility remain the first constraint.
   matching the only two block counts a fixed read window can cover. Buffers are
   returned after synchronous field decode; public `Read` results, deferred CVBS
   rendering, and retained LD VITS sources keep independent ownership.
+- VHS sync-level DC adjustment reuses at most two exact-length low-pass
+  workspaces. The stateful pipeline owns those private buffers; original video,
+  public results, and deferred-render inputs remain untouched and independently
+  owned.
 - VHS drops block-local raw input, raw demodulation, analytic, and RF high-pass
   results after their last block-local consumer. Compact real-FFT blocks feed
   their split real/imaginary workspaces directly into the FM unwrap. This omits
@@ -483,6 +487,19 @@ output and preserves Python's partial-tail-group behavior. Five interleaved
 1.198 GiB. All 42 recorded real-capture runs produced one exact luma, chroma,
 and JSON hash set per fixture.
 
+The VHS sync-reference DC-offset pass now reuses at most two exact-length
+low-pass workspaces. A matched 10-field GC trace reduced sampled managed
+allocation from 2.639 to 2.466 GiB, `Double[]` allocation from 2,469.42 to
+2,291.86 MiB, and Gen2 collections from 17 to 15. Five interleaved 40-field
+pairs were wall-time neutral within run noise (default 4.473/4.522 s;
+20-worker 3.736/3.778 s), while CPU medians moved from 12.719 to 11.969 s and
+14.375 to 13.859 s. Three 160-field pairs moved default/20-worker wall medians
+from 15.272/12.560 to 15.113/12.378 s. A 400-field 20-worker A/B moved
+wall/CPU from 28.937/106.984 to 28.296/105.344 s; candidate private-memory
+quarter medians were 1.076/0.766/1.025/0.726 GiB with a 1.463 GiB peak, showing
+no monotonic growth. Every recorded luma, chroma, and JSON A/B hash remained
+exact.
+
 </details>
 
 <!-- SECTION: build -->
@@ -503,7 +520,7 @@ dotnet test --solution VHSDecodeDotNet.slnx -c Release --no-build --no-restore
 ```
 
 The current formal Release build has zero warnings and errors. The xUnit v3
-project exposes **808** independently discoverable tests to both
+project exposes **809** independently discoverable tests to both
 `dotnet test` and Visual Studio Test Explorer.
 
 <!-- SECTION: usage -->

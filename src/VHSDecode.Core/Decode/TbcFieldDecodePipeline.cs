@@ -163,6 +163,7 @@ public sealed class TbcFieldDecodePipeline
     private const int MaximumOutputFirstLine = 4;
     private const int LineLocationLookahead = 10;
     private const int VhsChromaPhaseAnalysisFirstLine = 1;
+    private const int DcOffsetLowPassWorkspaceCapacity = 2;
     private readonly SyncAnalyzer _syncAnalyzer;
     private readonly TbcFieldRenderer _renderer;
     private readonly VideoOutputConverter _videoOutput;
@@ -185,6 +186,8 @@ public sealed class TbcFieldDecodePipeline
     private readonly VhsChromaCarrierTableCache? _chromaCarrierTableCache;
     private readonly VsyncSerrationDetector? _vsyncSerrationDetector;
     private readonly VhsFieldLevelState? _vhsFieldLevelState;
+    private readonly ExactLengthDoubleWorkspaceCache _dcOffsetLowPassWorkspaces =
+        new(DcOffsetLowPassWorkspaceCapacity);
     private readonly string? _decodeType;
     private readonly double? _framesPerSecond;
     private readonly Action<string, string>? _diagnosticLogger;
@@ -1917,10 +1920,10 @@ public sealed class TbcFieldDecodePipeline
                     ? AddDcOffset(span.Video, dcOffset)
                     : span.Video,
                 VideoLowPass = normalizeTapeSyncReference
-                    ? AddDcOffset(span.VideoLowPass ?? span.Video, dcOffset)
+                    ? AddDcOffsetToLowPass(span.VideoLowPass ?? span.Video, dcOffset)
                     : span.VideoLowPass is null
                         ? null
-                        : AddDcOffset(span.VideoLowPass, dcOffset)
+                        : AddDcOffsetToLowPass(span.VideoLowPass, dcOffset)
             },
             SyncThresholdFromLevels(adjustedLevels),
             usedSavedLevels);
@@ -1955,6 +1958,56 @@ public sealed class TbcFieldDecodePipeline
         }
 
         return output;
+    }
+
+    private double[] AddDcOffsetToLowPass(double[] input, double offset)
+    {
+        double[] output = _dcOffsetLowPassWorkspaces.Get(input.Length);
+        for (int i = 0; i < output.Length; i++)
+        {
+            output[i] = input[i] + offset;
+        }
+
+        return output;
+    }
+
+    private sealed class ExactLengthDoubleWorkspaceCache
+    {
+        private readonly double[]?[] _buffers;
+        private int _nextReplacement;
+
+        internal ExactLengthDoubleWorkspaceCache(int capacity)
+        {
+            if (capacity <= 0)
+            {
+                throw new ArgumentOutOfRangeException(nameof(capacity));
+            }
+
+            _buffers = new double[]?[capacity];
+        }
+
+        internal double[] Get(int length)
+        {
+            for (int i = 0; i < _buffers.Length; i++)
+            {
+                if (_buffers[i]?.Length == length)
+                {
+                    return _buffers[i]!;
+                }
+            }
+
+            for (int i = 0; i < _buffers.Length; i++)
+            {
+                if (_buffers[i] is null)
+                {
+                    return _buffers[i] = new double[length];
+                }
+            }
+
+            int replacement = _nextReplacement;
+            _nextReplacement = (_nextReplacement + 1) % _buffers.Length;
+            return _buffers[replacement] = new double[length];
+        }
     }
 
     private static double SyncThresholdFromLevels((double SyncLevel, double BlankLevel) levels)
