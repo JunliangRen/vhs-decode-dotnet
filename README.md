@@ -155,6 +155,10 @@ release compatibility remain the first constraint.
 - Managed real FFTs reuse pooled packing and scratch buffers. Float32 SOS
   forward/backward filtering rents one extended buffer, operates in place, and
   returns it synchronously; returned output arrays retain normal ownership.
+- Double-precision BA IIR forward/backward filtering also operates on one
+  in-place padded workspace. Its private pool retains at most three arrays per
+  bucket through 4M samples, returns them synchronously, and keeps every result
+  in an independently owned exact-length array.
 - RF span assembly writes directly into the requested output window instead of
   allocating whole-block field arrays and slicing a second copy.
 - Default linear TBC resampling rents its per-field source-position and
@@ -268,11 +272,12 @@ tuning A/B runs below used .NET SDK/runtime `11.0.100-preview.6.26359.118`,
 `--threads 20`, default chroma, and default resampling. On a reproducible
 40-frame PAL probe,
 the saved pre-continuous-pipeline baseline median was 11.60 s and the latest
-median was 4.97 s, a 57.2% cumulative gain. The newest direct-`.s16` checkpoint
-alone moved matched wall/CPU medians from 5.33/17.11 s to 4.97/15.94 s
-(6.8%/6.8%). Process CPU divided by wall time remains about 3.2 active cores,
-so further work still targets state-safe field-stage parallelism. Paired TBC,
-JSON, and chroma SHA-256 values were identical.
+median was 4.228 s, a 63.6% cumulative gain. The newest exact-kernel checkpoint
+alone moved matched wall/CPU/peak-working-set medians from
+4.434 s/16.516 s/1.314 GiB to 4.228 s/15.328 s/1.069 GiB
+(4.6%/7.2%/18.6%). Process CPU divided by wall time is about 3.63 active cores,
+so further work still targets state-safe field-stage parallelism. All 14 runs
+produced identical paired TBC, JSON, and chroma SHA-256 values.
 
 Earlier 40/160/320-frame sustained runs completed in 7.65/26.58/52.51 s. Peak
 working sets were 1.76/1.88/1.67 GiB, while second-half medians were
@@ -446,6 +451,18 @@ sampled allocation from 4.134 to 3.861 GiB and `Complex[]` allocation from
 pairs were wall-time neutral within run noise, so no speedup is claimed;
 long-run memory remained bounded and all 409-field hashes stayed exact.
 
+The current double-SOS and BA-IIR pass fuses the common two- and four-section
+double cascades and reuses the BA filter's padded workspace through a private
+bounded pool. Isolated two/four-section SOS medians improved by 37.5%/58.9%.
+Across 32K-sample high-pass orders 4/9/20, the current IIR path was
+23.7%/30.3%/26.6% faster than the old allocating reference and reduced warm
+thread allocation from about 1.05 MB to 262 KB. Seven interleaved 40-frame
+full-path pairs produced the 4.6% wall, 7.2% CPU, and 18.6% peak-working-set
+improvements above. A fixture-limited 409-field run completed in 17.431 s;
+25-50%, 50-75%, and 75-100% output intervals were 4.06/4.02/4.27 s, while
+second-half median working/private memory rose by only 10.8/7.4 MiB. Every
+recorded luma, chroma, and JSON hash remained exact.
+
 </details>
 
 <!-- SECTION: build -->
@@ -466,7 +483,7 @@ dotnet test --solution VHSDecodeDotNet.slnx -c Release --no-build --no-restore
 ```
 
 The current formal Release build has zero warnings and errors. The xUnit v3
-project exposes **793** independently discoverable tests to both
+project exposes **797** independently discoverable tests to both
 `dotnet test` and Visual Studio Test Explorer.
 
 <!-- SECTION: usage -->

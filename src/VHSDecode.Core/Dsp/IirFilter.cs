@@ -1,7 +1,15 @@
+using System.Buffers;
+
 namespace VHSDecode.Core.Dsp;
 
 public static class IirFilter
 {
+    private const int MaximumPooledSampleCount = 4 * 1024 * 1024;
+    private const int MaximumArraysPerBucket = 3;
+    private static readonly ArrayPool<double> WorkingBufferPool = ArrayPool<double>.Create(
+        MaximumPooledSampleCount,
+        MaximumArraysPerBucket);
+
     public static double[] ApplyForward(TransferFunction filter, ReadOnlySpan<double> input)
     {
         (double[] numerator, double[] denominator) = Normalize(filter);
@@ -40,24 +48,31 @@ public static class IirFilter
             throw new ArgumentOutOfRangeException(nameof(padLength));
         }
 
-        double[] extended = edge == 0 ? input.ToArray() : OddExtension(input, Math.Min(edge, input.Length - 1));
+        int actualEdge = Math.Min(edge, input.Length - 1);
         double[] zi = SteadyStateInitialConditions(numerator, denominator);
-        double[] firstZi = Scale(zi, extended[0]);
-        ApplyForwardInPlace(numerator, denominator, extended, firstZi);
-        Array.Reverse(extended);
-        double[] secondZi = Scale(zi, extended[0]);
-        ApplyForwardInPlace(numerator, denominator, extended, secondZi);
-        Array.Reverse(extended);
-
-        if (edge == 0)
+        if (actualEdge == 0)
         {
-            return extended;
+            double[] output = input.ToArray();
+            ApplyForwardBackwardInPlace(numerator, denominator, zi, output);
+            return output;
         }
 
-        int actualEdge = (extended.Length - input.Length) / 2;
-        var trimmed = new double[input.Length];
-        Array.Copy(extended, actualEdge, trimmed, 0, trimmed.Length);
-        return trimmed;
+        int extendedLength = checked(input.Length + (actualEdge * 2));
+        double[] rented = WorkingBufferPool.Rent(extendedLength);
+        try
+        {
+            Span<double> extended = rented.AsSpan(0, extendedLength);
+            WriteOddExtension(input, actualEdge, extended);
+            ApplyForwardBackwardInPlace(numerator, denominator, zi, extended);
+
+            var output = new double[input.Length];
+            extended.Slice(actualEdge, output.Length).CopyTo(output);
+            return output;
+        }
+        finally
+        {
+            WorkingBufferPool.Return(rented);
+        }
     }
 
     public static int DefaultPadLength(TransferFunction filter)
@@ -182,6 +197,20 @@ public static class IirFilter
         }
     }
 
+    private static void ApplyForwardBackwardInPlace(
+        double[] numerator,
+        double[] denominator,
+        double[] steadyState,
+        Span<double> samples)
+    {
+        double[] firstState = Scale(steadyState, samples[0]);
+        ApplyForwardInPlace(numerator, denominator, samples, firstState);
+        samples.Reverse();
+        double[] secondState = Scale(steadyState, samples[0]);
+        ApplyForwardInPlace(numerator, denominator, samples, secondState);
+        samples.Reverse();
+    }
+
     private static double[] SteadyStateInitialConditions(double[] numerator, double[] denominator)
     {
         int stateLength = Math.Max(numerator.Length, denominator.Length) - 1;
@@ -283,28 +312,28 @@ public static class IirFilter
         return output;
     }
 
-    private static double[] OddExtension(ReadOnlySpan<double> input, int edge)
+    private static void WriteOddExtension(
+        ReadOnlySpan<double> input,
+        int edge,
+        Span<double> output)
     {
-        if (edge <= 0)
+        if (edge <= 0 || output.Length != input.Length + (edge * 2))
         {
-            return input.ToArray();
+            throw new ArgumentException("Odd-extension output length did not match the requested edge.", nameof(output));
         }
 
-        var output = new double[input.Length + (edge * 2)];
         double first = input[0];
         for (int i = 0; i < edge; i++)
         {
             output[i] = (2.0 * first) - input[edge - i];
         }
 
-        input.CopyTo(output.AsSpan(edge, input.Length));
+        input.CopyTo(output.Slice(edge, input.Length));
 
         double last = input[^1];
         for (int i = 0; i < edge; i++)
         {
             output[edge + input.Length + i] = (2.0 * last) - input[input.Length - 2 - i];
         }
-
-        return output;
     }
 }

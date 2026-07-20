@@ -278,7 +278,7 @@ public sealed class DspWorkingBufferTests
         long iirBytes = GC.GetAllocatedBytesForCurrentThread() - beforeIir;
         GC.KeepAlive(iirFiltered);
         Assert.True(
-            iirBytes < 600_000,
+            iirBytes < 350_000,
             $"Warm IIR forward/backward allocated {iirBytes:N0} bytes.");
 
         const int outputLineLength = 512;
