@@ -1831,7 +1831,10 @@ public sealed record RfDemodulatedBlock(
     double[]? Chroma = null,
     double[]? VideoBurst = null,
     double[]? VideoPilot = null,
-    bool VhsWeakRfSignal = false);
+    bool VhsWeakRfSignal = false)
+{
+    internal float[]? ChromaFloat32 { get; init; }
+}
 
 public sealed record LaserDiscAnalogAudioBlock(
     double[] Left,

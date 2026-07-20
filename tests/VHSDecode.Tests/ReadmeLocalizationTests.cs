@@ -64,7 +64,7 @@ public sealed partial class ReadmeLocalizationTests
         [
             "43155200da87c0d49eb37d8ec09b1372075ee8e4",
             "11.0.100-preview.6.26359.118",
-            "**787**",
+            "**788**",
             "2.346 s",
             "7.193 s",
             "1.651 s",
@@ -153,6 +153,12 @@ public sealed partial class ReadmeLocalizationTests
             "72.44",
             "2.05-2.08 GiB",
             "1.58-1.67 GiB",
+            "2.95",
+            "2.89",
+            "4.831",
+            "4.769",
+            "19.83",
+            "19.87",
             "--use_saved_levels",
             "docs/COMPATIBILITY_EVIDENCE.md"
         ];

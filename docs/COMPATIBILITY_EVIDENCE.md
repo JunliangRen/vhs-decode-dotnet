@@ -1439,6 +1439,21 @@ possible capture has already been proven byte-for-byte identical.
   `7C732FDB97CA95900ED353ABF1DBD0A37BBE3D8609886E16A7B55CCAE1D5B236`,
   `82F1D3A9E3A3BD73A5AA07A63C930892CBB7125D857725D736C721CCBED18494`,
   and `DDEFFB4DC96F4DAB031BDAF6BA385C1DD6C2EAEE31E53ECD244826C12F21D081`
+- Compact VHS stream blocks now retain eligible float32 SOS chroma as
+  `float[]` until RF span assembly, where AVX or the exact scalar fallback
+  widens it once into the reusable field buffer. Full/direct RF blocks retain
+  the public `double[] Chroma` contract. Standard xUnit v3 coverage compares
+  full and compact block values before assembly and full/compact RF spans after
+  assembly. Matched 10-frame traces reduced sampled managed allocation from
+  2.95 to 2.89 GiB and `Double[]` allocation from 2.75 to 2.60 GiB, while
+  `Single[]` rose from 0.03 to 0.11 GiB. Five interleaved 40-frame pairs reduced
+  median wall/CPU time from 4.831/16.50 to 4.769/15.75 s (1.3%/4.5%). Two
+  reversed 204-frame pairs were wall-time neutral at baseline/current
+  19.73/19.83 and 19.87/19.73 s; current peak working sets were 1.46/1.39 GiB.
+  All long variants retained exact luma, chroma, and JSON hashes
+  `7C732FDB97CA95900ED353ABF1DBD0A37BBE3D8609886E16A7B55CCAE1D5B236`,
+  `82F1D3A9E3A3BD73A5AA07A63C930892CBB7125D857725D736C721CCBED18494`,
+  and `DDEFFB4DC96F4DAB031BDAF6BA385C1DD6C2EAEE31E53ECD244826C12F21D081`
 - VHS RF-envelope preparation now converts four doubles to float32, clears the
   sign bits, and writes the rotated float64 values through AVX while preserving
   the scalar tail and wrap path. A 32K-block isolated median improved from
@@ -1820,7 +1835,7 @@ dotnet test --solution VHSDecodeDotNet.slnx --no-build
 ```
 
 The current formal solution build completes with zero warnings and errors, and
-the xUnit v3 project exposes 787 independently discoverable compatibility tests
+the xUnit v3 project exposes 788 independently discoverable compatibility tests
 to `dotnet test` and Visual Studio Test Explorer. On the
 same Windows machine and fixtures, Release wall-clock measurements for one
 frame were 2.346 s versus 7.193 s for NTSC VHS and 1.651 s versus 5.865 s for

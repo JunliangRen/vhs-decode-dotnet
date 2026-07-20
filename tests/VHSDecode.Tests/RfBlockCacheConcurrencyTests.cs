@@ -149,6 +149,28 @@ public sealed class RfBlockCacheConcurrencyTests
         Assert.Equal(24, compact.AvailableSampleCountOverride);
     }
 
+    [Fact(DisplayName = "Compact VHS RF spans widen float32 chroma exactly once during assembly")]
+    public void CompactVhsRfSpansWidenFloat32ChromaDuringAssembly()
+    {
+        using var stream = new MemoryStream();
+        using var fullDecoder = BuildDecoder(
+            new CountingSampleLoader(),
+            workerThreads: 4,
+            float32Chroma: true);
+        using var compactDecoder = BuildDecoder(
+            new CountingSampleLoader(),
+            workerThreads: 4,
+            retainRfDiagnosticChannels: false,
+            float32Chroma: true);
+
+        RfDecodedSpan full = fullDecoder.Read(stream, begin: 0, length: 24)!;
+        RfDecodedSpan compact = compactDecoder.Read(stream, begin: 0, length: 24)!;
+
+        Assert.NotNull(full.Chroma);
+        Assert.NotNull(compact.Chroma);
+        Assert.Equal(full.Chroma, compact.Chroma);
+    }
+
     [Fact(DisplayName = "RF decoded-block cache invalidation forces fresh parallel work")]
     public void RfDecodedBlockCacheInvalidationForcesFreshParallelWork()
     {
@@ -355,7 +377,8 @@ public sealed class RfBlockCacheConcurrencyTests
         bool weakRfDiagnostics = false,
         bool optionalOutputs = false,
         Action<string, string>? diagnosticLogger = null,
-        bool retainRfDiagnosticChannels = true)
+        bool retainRfDiagnosticChannels = true,
+        bool float32Chroma = false)
     {
         const int blockLength = 16;
         Complex[] identity = RfDemodulator.IdentityFilter(blockLength);
@@ -395,6 +418,14 @@ public sealed class RfBlockCacheConcurrencyTests
             filters = filters with
             {
                 VhsEnvelopeSos = [new SosSection(1.0, 0.0, 0.0, 1.0, 0.0, 0.0)]
+            };
+        }
+
+        if (float32Chroma)
+        {
+            filters = filters with
+            {
+                ChromaBurstSos = [new SosSection(1.0, 0.0, 0.0, 1.0, 0.0, 0.0)]
             };
         }
 

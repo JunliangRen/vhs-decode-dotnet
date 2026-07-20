@@ -147,6 +147,14 @@ public sealed class DspWorkingBufferTests
         Assert.Equal(full.Demodulated.Envelope, compact.Demodulated.Envelope);
         Assert.Equal(full.Demodulated.VideoLowPass, compact.Demodulated.VideoLowPass);
         Assert.Equal(full.Demodulated.VhsWeakRfSignal, compact.Demodulated.VhsWeakRfSignal);
+        Assert.NotNull(full.Demodulated.Chroma);
+        Assert.Null(compact.Demodulated.Chroma);
+        float[] compactChroma = Assert.IsType<float[]>(compact.Demodulated.ChromaFloat32);
+        Assert.Equal(full.Demodulated.Chroma.Length, compactChroma.Length);
+        for (int i = 0; i < compactChroma.Length; i++)
+        {
+            Assert.Equal(full.Demodulated.Chroma[i], (double)compactChroma[i]);
+        }
     }
 
     [Fact(DisplayName = "VHS diff-demod repair reuses its analytic workspace after warm-up")]
@@ -252,6 +260,15 @@ public sealed class DspWorkingBufferTests
             sosBytes < 300_000,
             $"Warm float32 SOS forward/backward allocated {sosBytes:N0} bytes.");
 
+        _ = SosFilter.ApplyForwardBackwardFloat32ToSingle(sections, input);
+        long beforeCompactSos = GC.GetAllocatedBytesForCurrentThread();
+        float[] compactFiltered = SosFilter.ApplyForwardBackwardFloat32ToSingle(sections, input);
+        long compactSosBytes = GC.GetAllocatedBytesForCurrentThread() - beforeCompactSos;
+        GC.KeepAlive(compactFiltered);
+        Assert.True(
+            compactSosBytes < 170_000,
+            $"Warm compact float32 SOS forward/backward allocated {compactSosBytes:N0} bytes.");
+
         const int outputLineLength = 512;
         const int lineCount = 64;
         double[] resampleSource = Enumerable.Range(0, (lineCount + 1) * 1_024 + 16)
@@ -292,6 +309,13 @@ public sealed class DspWorkingBufferTests
         ];
 
         double[] output = SosFilter.ApplyForwardBackwardFloat32(sections, input);
+        float[] compactOutput = SosFilter.ApplyForwardBackwardFloat32ToSingle(sections, input);
+
+        Assert.Equal(output.Length, compactOutput.Length);
+        for (int i = 0; i < output.Length; i++)
+        {
+            Assert.Equal(output[i], (double)compactOutput[i]);
+        }
 
         Assert.Equal(
             "0FCE85E5CEB0155E93B8C49D41679A5D40D76D931138D2469D3F7E5EBABAF7D5",

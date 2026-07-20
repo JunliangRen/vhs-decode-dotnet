@@ -128,6 +128,12 @@ public static class FrequencyDomainFilter
     }
 
     internal static void RollInPlace(Span<double> values, int shift)
+        => RollInPlaceCore(values, shift);
+
+    internal static void RollInPlace(Span<float> values, int shift)
+        => RollInPlaceCore(values, shift);
+
+    private static void RollInPlaceCore<T>(Span<T> values, int shift)
     {
         if (values.IsEmpty)
         {

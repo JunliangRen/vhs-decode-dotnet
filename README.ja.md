@@ -2,7 +2,7 @@
 
 [English](README.md) | [简体中文](README.zh-CN.md) | **[日本語](README.ja.md)**
 
-<!-- README_SYNC: 2026-07-20.13 -->
+<!-- README_SYNC: 2026-07-20.14 -->
 
 [`oyvindln/vhs-decode`](https://github.com/oyvindln/vhs-decode) の
 デコード関連部分を .NET 11 で再実装するプロジェクトです。現在は release
@@ -171,6 +171,9 @@
   workspace を FM unwrap に直接渡し、未使用の RF high-pass inverse FFT、3 本の
   RF-span copy、全長 `Complex[]` 1 本を省きます。LD、CVBS、直接構築した decoder は
   従来の full-channel behavior を維持します。
+- compact VHS stream block は、quantize 済みの SOS chroma も `float[]` のまま保持します。
+  RF span assembly で AVX または exact scalar fallback により reusable field buffer へ
+  一度だけ widen し、full/direct block は public `double[] Chroma` contract を維持します。
 - AVX/FMA kernel は正確な float32 conversion、VHS RF-envelope preparation、
   VHS Rust-style FM angle approximation、LD quantization、VHS chroma rotation、
   complex frequency filtering を高速化します。forward/inverse radix-4 FFT は pinned
@@ -267,6 +270,15 @@ compact analytic の follow-up は pooled real/imaginary array を VHS FM unwrap
 neutral、CPU 中央値は 17.73 秒から 17.28 秒、peak working-set 中央値は 1.47 GiB から
 1.26 GiB へ低下しました。順序を反転した 2 組の 204-frame pair も wall-time noise 内で、
 current peak は 1.32-1.41 GiB、quarter sample は非単調、3 種の hash は完全一致です。
+
+compact chroma の follow-up は float32 SOS output を RF field assembly まで narrow のまま
+保持します。対応する 10-frame allocation trace では sampled managed allocation が
+2.95 GiB から 2.89 GiB、`Double[]` が 2.75 GiB から 2.60 GiBへ減少し、`Single[]` は
+0.03 GiB から 0.11 GiBへ増加しました。5 組の交互 40-frame pair で wall/CPU 中央値は
+4.831/16.50 秒から 4.769/15.75 秒（1.3%/4.5% 改善）でした。順序を反転した 2 組の
+204-frame pair は baseline/current 19.73/19.83 秒と 19.87/19.73 秒で wall-time neutral、
+current peak は 1.46/1.39 GiB で既存の bounded working-set envelope 内に収まり、luma、
+chroma、JSON hash は完全一致です。
 
 bounded payload-writer の follow-up は capacity-one queue を通じて、次の VHS field decode と
 現在 field の luma/chroma write を重ねます。payload は対応する recovery JSON snapshot より
@@ -365,7 +377,7 @@ dotnet test --solution VHSDecodeDotNet.slnx -c Release --no-build --no-restore
 
 現在の正式な Release build は warning 0、error 0 です。xUnit v3 project は
 `dotnet test` と Visual Studio Test Explorer の両方で個別に検出できる
-**787** tests を公開します。
+**788** tests を公開します。
 
 <!-- SECTION: usage -->
 

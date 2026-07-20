@@ -1220,6 +1220,24 @@ public static class VhsChromaDecoder
         return chroma;
     }
 
+    internal static float[] ShiftChromaAndRemoveDcFloat32InPlace(float[] chroma, int move)
+    {
+        ArgumentNullException.ThrowIfNull(chroma);
+        if (chroma.Length == 0)
+        {
+            return chroma;
+        }
+
+        FrequencyDomainFilter.RollInPlace(chroma, move);
+        float mean = MeanFloat32FastMath(chroma);
+        for (int i = 0; i < chroma.Length; i++)
+        {
+            chroma[i] = (float)(chroma[i] - mean);
+        }
+
+        return chroma;
+    }
+
     public static double[] ApplyNtscComb(
         ReadOnlySpan<double> chroma,
         int lineLength,
@@ -1357,6 +1375,48 @@ public static class VhsChromaDecoder
                     {
                         int accumulator = (group * vectorWidth) + lane;
                         accumulators[accumulator] += (float)values[index];
+                    }
+                }
+            }
+        }
+
+        Span<float> lanes = stackalloc float[vectorWidth];
+        for (int lane = 0; lane < vectorWidth; lane++)
+        {
+            float left = accumulators[lane] + accumulators[vectorWidth + lane];
+            float right = accumulators[(2 * vectorWidth) + lane]
+                + accumulators[(3 * vectorWidth) + lane];
+            lanes[lane] = left + right;
+        }
+
+        for (int count = vectorWidth; count > 1; count /= 2)
+        {
+            for (int lane = 0; lane < count / 2; lane++)
+            {
+                lanes[lane] += lanes[lane + (count / 2)];
+            }
+        }
+
+        return lanes[0] / values.Length;
+    }
+
+    private static float MeanFloat32FastMath(ReadOnlySpan<float> values)
+    {
+        const int vectorWidth = 8;
+        const int interleave = 4;
+        const int stride = vectorWidth * interleave;
+        Span<float> accumulators = stackalloc float[stride];
+        for (int block = 0; block < values.Length; block += stride)
+        {
+            for (int group = 0; group < interleave; group++)
+            {
+                for (int lane = 0; lane < vectorWidth; lane++)
+                {
+                    int index = block + (group * vectorWidth) + lane;
+                    if (index < values.Length)
+                    {
+                        int accumulator = (group * vectorWidth) + lane;
+                        accumulators[accumulator] += values[index];
                     }
                 }
             }

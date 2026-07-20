@@ -2,7 +2,7 @@
 
 [English](README.md) | **[简体中文](README.zh-CN.md)** | [日本語](README.ja.md)
 
-<!-- README_SYNC: 2026-07-20.13 -->
+<!-- README_SYNC: 2026-07-20.14 -->
 
 这是 [`oyvindln/vhs-decode`](https://github.com/oyvindln/vhs-decode)
 中解码相关部分的 .NET 11 重写，当前以 release `v0.4.0`、commit
@@ -152,6 +152,9 @@
   结果。紧凑 real-FFT block 会把分离的实部/虚部 workspace 直接送入 FM unwrap，从而省去
   未使用的 RF 高通逆 FFT、三条 RF-span 复制和一个全长 `Complex[]`；LD、CVBS 与直接构造
   的 decoder 仍保留完整通道行为。
+- 紧凑 VHS stream block 还会把已经量化的 SOS 色度保持为 `float[]`。RF span 组装时仅用
+  AVX 或精确标量回退扩宽一次并写入复用的场缓冲；完整/直接 block 仍保留公开的
+  `double[] Chroma` 契约。
 - AVX/FMA 内核加速精确 float32 转换、VHS RF envelope 准备、VHS Rust 风格
   FM 角度近似、LD 量化、VHS 色度移位和复数频域滤波。forward/inverse radix-4 FFT
   使用固定指针索引。16-tap TBC sinc 内部窗口以 AVX/FMA 并行计算独立的 float 权重与
@@ -236,6 +239,13 @@ hash 均精确一致。
 在 5.02/5.03 秒范围内持平；CPU 中位数从 17.73 秒降到 17.28 秒，工作集峰值中位数从
 1.47 GiB 降到 1.26 GiB。两组反向顺序的 204-frame 配对仍处于墙钟噪声范围；当前峰值为
 1.32-1.41 GiB，四分段采样非单调，三份 hash 全部精确一致。
+
+后续紧凑色度优化会把 float32 SOS 输出保持到 RF 场组装阶段。配对的 10-frame 分配 trace
+中，采样托管分配从 2.95 GiB 降到 2.89 GiB，`Double[]` 从 2.75 GiB 降到 2.60 GiB，
+`Single[]` 从 0.03 GiB 增到 0.11 GiB。五组交错 40-frame 配对的墙钟/CPU 中位数从
+4.831/16.50 秒降到 4.769/15.75 秒（快 1.3%/4.5%）。两组反向顺序的 204-frame 配对
+在 baseline/current 19.73/19.83 秒和 19.87/19.73 秒范围内墙钟持平；当前峰值为
+1.46/1.39 GiB，仍处于既有的有界工作集范围内；亮度、色度与 JSON hash 全部精确一致。
 
 后续有界 payload-writer 优化通过容量为一的队列，让下一 VHS 场解码与当前场的亮度/色度
 写入重叠。payload 始终先于对应的 recovery JSON snapshot，完成阶段会 drain writer，
@@ -324,7 +334,7 @@ dotnet test --solution VHSDecodeDotNet.slnx -c Release --no-build --no-restore
 ```
 
 当前正式 Release 构建为零警告、零错误。xUnit v3 项目向
-`dotnet test` 和 Visual Studio Test Explorer 暴露 **787** 个可独立发现的测试。
+`dotnet test` 和 Visual Studio Test Explorer 暴露 **788** 个可独立发现的测试。
 
 <!-- SECTION: usage -->
 

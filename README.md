@@ -2,7 +2,7 @@
 
 **[English](README.md)** | [简体中文](README.zh-CN.md) | [日本語](README.ja.md)
 
-<!-- README_SYNC: 2026-07-20.13 -->
+<!-- README_SYNC: 2026-07-20.14 -->
 
 .NET 11 rewrite of the decode-facing parts of
 [`oyvindln/vhs-decode`](https://github.com/oyvindln/vhs-decode), focused on
@@ -178,6 +178,10 @@ release compatibility remain the first constraint.
   the unused RF high-pass inverse FFT, three RF-span copies, and one full-length
   `Complex[]`; LD, CVBS, and direct decoder construction retain full-channel
   behavior.
+- Compact VHS stream blocks also retain their already-quantized SOS chroma in
+  `float[]` form. RF span assembly widens it once into the reusable field buffer
+  with AVX or an exact scalar fallback; full/direct blocks keep the public
+  `double[] Chroma` contract.
 - AVX/FMA kernels accelerate exact float32 conversion, VHS RF-envelope
   preparation, VHS Rust-style FM angle approximation, LD quantization, VHS
   chroma rotation, and complex frequency filtering. The forward/inverse radix-4
@@ -283,6 +287,15 @@ reversed 204-frame pairs remained within wall-time noise; current peaks were
 1.32-1.41 GiB with non-monotonic quarter samples, and all three hashes remained
 exact.
 
+The compact chroma follow-up keeps float32 SOS output narrow until RF field
+assembly. Matched 10-frame allocation traces reduced sampled managed allocation
+from 2.95 to 2.89 GiB and `Double[]` allocation from 2.75 to 2.60 GiB, while
+`Single[]` rose from 0.03 to 0.11 GiB. Five interleaved 40-frame pairs reduced
+median wall/CPU time from 4.831/16.50 to 4.769/15.75 s (1.3%/4.5%). Two reversed
+204-frame pairs were wall-time neutral at baseline/current 19.73/19.83 and
+19.87/19.73 s; current peaks were 1.46/1.39 GiB and remained within the existing
+bounded working-set envelope. All luma, chroma, and JSON hashes remained exact.
+
 The bounded payload-writer follow-up overlaps the next VHS field decode with the
 current field's luma/chroma write through a capacity-one queue. Payloads remain
 ordered before their recovery JSON snapshot, completion drains the writer, and
@@ -381,7 +394,7 @@ dotnet test --solution VHSDecodeDotNet.slnx -c Release --no-build --no-restore
 ```
 
 The current formal Release build has zero warnings and errors. The xUnit v3
-project exposes **787** independently discoverable tests to both
+project exposes **788** independently discoverable tests to both
 `dotnet test` and Visual Studio Test Explorer.
 
 <!-- SECTION: usage -->

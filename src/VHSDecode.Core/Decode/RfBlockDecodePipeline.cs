@@ -150,16 +150,27 @@ public sealed class RfBlockDecodePipeline : IDisposable
 
         if (_filters.ChromaBurst is not null || _filters.ChromaBurstSos is not null)
         {
-            demodulated = demodulated with
-            {
-                Chroma = _filterOptions.UseChromaAfc
+            bool keepCompactFloat32 = !retainRfDiagnosticChannels
+                && !_filterOptions.UseChromaAfc
+                && _filters.ChromaBurstSos is not null
+                && !_filters.ChromaBurstUsesDemodulatedVideo
+                && _filters.ChromaBurstAudioNotch is null
+                && _filters.ChromaBurstVideoNotch is null;
+            demodulated = keepCompactFloat32
+                ? demodulated with
+                {
+                    ChromaFloat32 = DecodeChromaBurstFloat32(input, _filters)
+                }
+                : demodulated with
+                {
+                    Chroma = _filterOptions.UseChromaAfc
                     ? input.ToArray()
                     : DecodeChromaBurst(
                         _filters.ChromaBurstUsesDemodulatedVideo
                             ? demodulated.Video
                             : input,
                         _filters)
-            };
+                };
         }
 
         if (_filters.LdEfm is not null)
@@ -244,6 +255,19 @@ public sealed class RfBlockDecodePipeline : IDisposable
         }
 
         return VhsChromaDecoder.ShiftChromaAndRemoveDcInPlace(
+            chroma,
+            filters.ChromaOffsetSamples);
+    }
+
+    private static float[] DecodeChromaBurstFloat32(
+        ReadOnlySpan<double> input,
+        DecodeFilterSet filters)
+    {
+        float[] chroma = SosFilter.ApplyForwardBackwardFloat32ToSingle(
+            filters.ChromaBurstSos
+                ?? throw new InvalidOperationException("A float32 chroma burst SOS filter is required."),
+            input);
+        return VhsChromaDecoder.ShiftChromaAndRemoveDcFloat32InPlace(
             chroma,
             filters.ChromaOffsetSamples);
     }

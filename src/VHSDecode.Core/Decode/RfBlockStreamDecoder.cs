@@ -1,3 +1,4 @@
+using System.Runtime.Intrinsics.X86;
 using VHSDecode.Core.Dsp;
 
 namespace VHSDecode.Core.Decode;
@@ -300,6 +301,11 @@ public sealed class RfBlockStreamDecoder : IDisposable
                 chroma ??= reusableBuffers?.GetChroma() ?? new double[length];
                 CopyTrimmedWindow(pipelineBlock.Demodulated.Chroma, chroma, destination, offset);
             }
+            else if (pipelineBlock.Demodulated.ChromaFloat32 is not null)
+            {
+                chroma ??= reusableBuffers?.GetChroma() ?? new double[length];
+                CopyTrimmedWindow(pipelineBlock.Demodulated.ChromaFloat32, chroma, destination, offset);
+            }
 
             if (pipelineBlock.Demodulated.VideoBurst is not null)
             {
@@ -336,7 +342,7 @@ public sealed class RfBlockStreamDecoder : IDisposable
             for (int i = 0; i < pipelineBlocks.Length; i++)
             {
                 RfDemodulatedBlock demodulated = pipelineBlocks[i].Demodulated;
-                hasChroma |= demodulated.Chroma is not null;
+                hasChroma |= demodulated.Chroma is not null || demodulated.ChromaFloat32 is not null;
                 hasEfm |= demodulated.Efm is not null;
                 hasVideoBurst |= demodulated.VideoBurst is not null;
                 hasVideoPilot |= demodulated.VideoPilot is not null;
@@ -378,6 +384,10 @@ public sealed class RfBlockStreamDecoder : IDisposable
                 if (chroma is not null && demodulated.Chroma is { } blockChroma)
                 {
                     CopyTrimmedWindow(blockChroma, chroma, blockDestination, offset);
+                }
+                else if (chroma is not null && demodulated.ChromaFloat32 is { } blockChromaFloat32)
+                {
+                    CopyTrimmedWindow(blockChromaFloat32, chroma, blockDestination, offset);
                 }
 
                 if (efm is not null && demodulated.Efm is { } blockEfm)
@@ -995,6 +1005,52 @@ public sealed class RfBlockStreamDecoder : IDisposable
             destination,
             copyStart - windowOffset,
             copyEnd - copyStart);
+    }
+
+    private unsafe void CopyTrimmedWindow(
+        float[] source,
+        double[] destination,
+        int blockDestinationOffset,
+        int windowOffset)
+    {
+        if (source.Length != BlockLength)
+        {
+            throw new ArgumentException("Decoded block length did not match the configured block length.", nameof(source));
+        }
+
+        int copyStart = Math.Max(blockDestinationOffset, windowOffset);
+        int copyEnd = Math.Min(
+            checked(blockDestinationOffset + BlockStride),
+            checked(windowOffset + destination.Length));
+        if (copyStart >= copyEnd)
+        {
+            return;
+        }
+
+        int sourceStart = BlockCut + (copyStart - blockDestinationOffset);
+        int destinationStart = copyStart - windowOffset;
+        int count = copyEnd - copyStart;
+        int index = 0;
+        if (Avx.IsSupported)
+        {
+            fixed (float* sourcePointer = source)
+            fixed (double* destinationPointer = destination)
+            {
+                int vectorizedEnd = count - (count % 4);
+                for (; index < vectorizedEnd; index += 4)
+                {
+                    Avx.Store(
+                        destinationPointer + destinationStart + index,
+                        Avx.ConvertToVector256Double(
+                            Sse.LoadVector128(sourcePointer + sourceStart + index)));
+                }
+            }
+        }
+
+        for (; index < count; index++)
+        {
+            destination[destinationStart + index] = source[sourceStart + index];
+        }
     }
 
     private void CopyTrimmedWindow(

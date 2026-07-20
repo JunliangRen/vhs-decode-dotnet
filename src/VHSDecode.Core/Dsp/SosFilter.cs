@@ -185,6 +185,46 @@ public static class SosFilter
         }
     }
 
+    internal static float[] ApplyForwardBackwardFloat32ToSingle(
+        IReadOnlyList<SosSection> sections,
+        ReadOnlySpan<double> input,
+        int? padLength = null)
+    {
+        if (input.IsEmpty)
+        {
+            return [];
+        }
+
+        int edge = padLength ?? DefaultPadLength(sections);
+        if (edge < 0)
+        {
+            throw new ArgumentOutOfRangeException(nameof(padLength));
+        }
+
+        FloatSosSection[] floatSections = ConvertToFloat32(sections);
+        int extendedLength = checked(input.Length + (edge * 2));
+        float[] rented = ArrayPool<float>.Shared.Rent(extendedLength);
+        try
+        {
+            Span<float> extended = rented.AsSpan(0, extendedLength);
+            if (edge == 0)
+            {
+                ConvertToFloat32(input, extended);
+            }
+            else
+            {
+                WriteOddExtensionFloat32(input, edge, extended);
+            }
+
+            ApplyForwardBackwardFloat32InPlace(floatSections, extended);
+            return extended.Slice(edge, input.Length).ToArray();
+        }
+        finally
+        {
+            ArrayPool<float>.Shared.Return(rented);
+        }
+    }
+
     public static float[] ApplyForwardBackwardFloat32(
         IReadOnlyList<SosSection> sections,
         ReadOnlySpan<float> input,
