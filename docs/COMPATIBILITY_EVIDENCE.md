@@ -1227,6 +1227,15 @@ possible capture has already been proven byte-for-byte identical.
   benchmark improved median throughput by about 6.5%; the forward median moved
   from 204.7 us to 195.9 us (4.3%) with the exact same hash. A 384-block PAL VHS
   composite was neutral at 841.96/841.19 ms, so no whole-block gain is claimed
+- float32 SOS forward/backward filtering now rents its padded working array,
+  processes only the exact requested span, and returns the rental synchronously.
+  Matched 40-frame GC traces reduced sampled managed allocation from 16.772 to
+  16.178 GiB and `Single[]` allocation from 651.68 to 47.25 MiB. Five interleaved
+  full-path A/B runs were wall-time neutral at 5.541/5.537 s, while median CPU
+  time moved from 20.000 to 19.438 s. TBC, chroma, and JSON hashes matched
+  exactly. A fixture-limited 204-frame run completed in 23.39 s with
+  1.147/0.886/0.888/0.917 GiB private-memory quarter medians and a 1.755 GiB
+  peak; all 409-field outputs matched the previously recorded SHA-256 values
 - the 16-tap TBC sinc kernel now pins its source and lookup table for pointer
   indexing while preserving clamp, FMA, float-conversion, and accumulation order;
   an isolated PAL-sized field median improved from 3.929 ms to 3.727 ms (5.1%),

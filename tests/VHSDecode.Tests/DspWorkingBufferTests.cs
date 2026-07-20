@@ -189,7 +189,7 @@ public sealed class DspWorkingBufferTests
         long sosBytes = GC.GetAllocatedBytesForCurrentThread() - beforeSos;
         GC.KeepAlive(filtered);
         Assert.True(
-            sosBytes < 500_000,
+            sosBytes < 300_000,
             $"Warm float32 SOS forward/backward allocated {sosBytes:N0} bytes.");
     }
 

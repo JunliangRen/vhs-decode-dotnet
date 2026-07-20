@@ -2,7 +2,7 @@
 
 [English](README.md) | [简体中文](README.zh-CN.md) | **[日本語](README.ja.md)**
 
-<!-- README_SYNC: 2026-07-20.2 -->
+<!-- README_SYNC: 2026-07-20.3 -->
 
 [`oyvindln/vhs-decode`](https://github.com/oyvindln/vhs-decode) の
 デコード関連部分を .NET 11 で再実装するプロジェクトです。現在は release
@@ -141,9 +141,9 @@
   一致する場合だけ phase-analysis workspace を field decode で再利用し、AFC 変更時は
   元の rebuild path に戻ります。
 - HiFi は境界付き並列 block decode の後、順序どおりに後処理と書き込みを行います。
-- Managed real FFT は pool 化した packing/scratch buffer を再利用し、float32 SOS の
-  forward/backward filtering は 1 つの拡張 buffer 上で in-place 実行します。
-  各 transform 後に rental を返却し、LOH への反復負荷を避けます。
+- Managed real FFT は pool 化した packing/scratch buffer を再利用します。float32 SOS の
+  forward/backward filtering は拡張 buffer を 1 つ rent して in-place 実行し、呼び出し
+  終了時に同期的に返却します。返される output array の通常の ownership は維持します。
 - RF span assembly は block 境界の field array を作って再度 slice せず、要求された
   最終 output window へ直接書き込みます。
 - little-endian host では、TBC/chroma sample を full-field byte copy を作らず `ushort`
@@ -246,6 +246,14 @@ state を使用し、32 section までは stack、それを超える場合は he
 time が 73.31 秒から 68.73 秒（6.3%）へ減少し、TBC、JSON、chroma hash は完全に
 一致しました。current 2 run の private-memory peak 中央値は 1.71 GiB で、四分位
 ごとの memory は単調増加ではありませんでした。
+
+続く最適化では float32 SOS の padded workspace を pool 化しました。同一条件の
+40-frame GC trace で sampled allocation 全体は 16.772 GiB から 16.178 GiB、
+`Single[]` allocation は 651.68 MiB から 47.25 MiB へ減少しました。5 組の交互
+full-path A/B は wall-time 中央値 5.541/5.537 秒で実質同等、CPU-time 中央値は
+20.000 秒から 19.438 秒になり、3 種類の output hash は完全に一致しました。現在の
+fixture-limited 204-frame run は 23.39 秒で完了し、private-memory 四分位中央値は
+1.147/0.886/0.888/0.917 GiB、peak は 1.755 GiB でした。
 
 </details>
 

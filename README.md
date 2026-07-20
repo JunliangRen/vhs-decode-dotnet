@@ -2,7 +2,7 @@
 
 **[English](README.md)** | [简体中文](README.zh-CN.md) | [日本語](README.ja.md)
 
-<!-- README_SYNC: 2026-07-20.2 -->
+<!-- README_SYNC: 2026-07-20.3 -->
 
 .NET 11 rewrite of the decode-facing parts of
 [`oyvindln/vhs-decode`](https://github.com/oyvindln/vhs-decode), focused on
@@ -145,10 +145,9 @@ release compatibility remain the first constraint.
   parameters match; AFC changes force the original rebuild path.
 - HiFi uses bounded parallel block decoding followed by ordered
   post-processing and writing.
-- Managed real FFTs reuse pooled packing and scratch buffers, and float32 SOS
-  forward/backward filtering operates in place over one extended buffer. This
-  removes repeated large-object-heap churn while returning every rental after
-  each transform.
+- Managed real FFTs reuse pooled packing and scratch buffers. Float32 SOS
+  forward/backward filtering rents one extended buffer, operates in place, and
+  returns it synchronously; returned output arrays retain normal ownership.
 - RF span assembly writes directly into the requested output window instead of
   allocating whole-block field arrays and slicing a second copy.
 - On little-endian hosts, TBC and chroma samples stream directly from their
@@ -254,6 +253,14 @@ medians fell by 38.8%/40.2%/42.7%. Across two 160-frame A/B pairs, median wall
 time fell from 21.22 to 20.57 s (3.1%) and CPU time from 73.31 to 68.73 s
 (6.3%). TBC, JSON, and chroma hashes remained exact. The current pair's median
 private-memory peak was 1.71 GiB, and quarter-run memory was not monotonic.
+
+A follow-up pass pooled the float32 SOS padded workspace. Matched 40-frame GC
+traces reduced total sampled allocation from 16.772 to 16.178 GiB and
+`Single[]` allocation from 651.68 to 47.25 MiB. Five interleaved full-path A/B
+runs were wall-time neutral at 5.541/5.537 s, while median CPU time moved from
+20.000 to 19.438 s; all three output hashes remained exact. The current
+fixture-limited 204-frame run completed in 23.39 s with 1.147/0.886/0.888/0.917
+GiB private-memory quarter medians and a 1.755 GiB peak.
 
 </details>
 

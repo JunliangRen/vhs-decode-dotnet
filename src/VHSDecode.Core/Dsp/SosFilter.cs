@@ -1,3 +1,4 @@
+using System.Buffers;
 using System.Runtime.Intrinsics.X86;
 
 namespace VHSDecode.Core.Dsp;
@@ -158,15 +159,30 @@ public static class SosFilter
         }
 
         FloatSosSection[] floatSections = ConvertToFloat32(sections);
-        float[] extended = edge == 0
-            ? ConvertToFloat32(input)
-            : OddExtensionFloat32(input, edge);
-        ApplyForwardBackwardFloat32InPlace(floatSections, extended);
+        int extendedLength = checked(input.Length + (edge * 2));
+        float[] rented = ArrayPool<float>.Shared.Rent(extendedLength);
+        try
+        {
+            Span<float> extended = rented.AsSpan(0, extendedLength);
+            if (edge == 0)
+            {
+                ConvertToFloat32(input, extended);
+            }
+            else
+            {
+                WriteOddExtensionFloat32(input, edge, extended);
+            }
 
-        var output = new double[input.Length];
-        ConvertToFloat64(extended.AsSpan(edge, input.Length), output);
+            ApplyForwardBackwardFloat32InPlace(floatSections, extended);
 
-        return output;
+            var output = new double[input.Length];
+            ConvertToFloat64(extended.Slice(edge, input.Length), output);
+            return output;
+        }
+        finally
+        {
+            ArrayPool<float>.Shared.Return(rented);
+        }
     }
 
     public static float[] ApplyForwardBackwardFloat32(
@@ -186,25 +202,39 @@ public static class SosFilter
         }
 
         FloatSosSection[] floatSections = ConvertToFloat32(sections);
-        float[] extended = edge == 0 ? input.ToArray() : OddExtensionFloat32(input, edge);
-        ApplyForwardBackwardFloat32InPlace(floatSections, extended);
+        if (edge == 0)
+        {
+            float[] output = input.ToArray();
+            ApplyForwardBackwardFloat32InPlace(floatSections, output);
+            return output;
+        }
 
-        return edge == 0
-            ? extended
-            : extended.AsSpan(edge, input.Length).ToArray();
+        int extendedLength = checked(input.Length + (edge * 2));
+        float[] rented = ArrayPool<float>.Shared.Rent(extendedLength);
+        try
+        {
+            Span<float> extended = rented.AsSpan(0, extendedLength);
+            WriteOddExtensionFloat32(input, edge, extended);
+            ApplyForwardBackwardFloat32InPlace(floatSections, extended);
+            return extended.Slice(edge, input.Length).ToArray();
+        }
+        finally
+        {
+            ArrayPool<float>.Shared.Return(rented);
+        }
     }
 
     private static void ApplyForwardBackwardFloat32InPlace(
         FloatSosSection[] floatSections,
-        float[] values)
+        Span<float> values)
     {
         float[,] zi = SteadyStateInitialConditionsFloat32(floatSections);
         float[,] firstZi = ScaleInitialConditionsFloat32(zi, values[0]);
         ApplyForwardFloat32InPlace(floatSections, values, firstZi);
-        Array.Reverse(values);
+        values.Reverse();
         float[,] secondZi = ScaleInitialConditionsFloat32(zi, values[0]);
         ApplyForwardFloat32InPlace(floatSections, values, secondZi);
-        Array.Reverse(values);
+        values.Reverse();
     }
 
     public static int DefaultPadLength(IReadOnlyList<SosSection> sections)
@@ -517,53 +547,65 @@ public static class SosFilter
         return output;
     }
 
-    private static float[] OddExtensionFloat32(ReadOnlySpan<float> input, int edge)
+    private static void WriteOddExtensionFloat32(
+        ReadOnlySpan<float> input,
+        int edge,
+        Span<float> output)
     {
         if (input.Length <= edge)
         {
             throw new ArgumentException("Input length must be greater than pad length.");
         }
 
-        var output = new float[input.Length + (edge * 2)];
+        int outputLength = checked(input.Length + (edge * 2));
+        if (output.Length < outputLength)
+        {
+            throw new ArgumentException("Output span is shorter than the extended input.", nameof(output));
+        }
+
         float first = input[0];
         for (int i = 0; i < edge; i++)
         {
             output[i] = (2.0f * first) - input[edge - i];
         }
 
-        input.CopyTo(output.AsSpan(edge, input.Length));
+        input.CopyTo(output.Slice(edge, input.Length));
 
         float last = input[^1];
         for (int i = 0; i < edge; i++)
         {
             output[edge + input.Length + i] = (2.0f * last) - input[input.Length - 2 - i];
         }
-
-        return output;
     }
 
-    private static float[] OddExtensionFloat32(ReadOnlySpan<double> input, int edge)
+    private static void WriteOddExtensionFloat32(
+        ReadOnlySpan<double> input,
+        int edge,
+        Span<float> output)
     {
         if (input.Length <= edge)
         {
             throw new ArgumentException("Input length must be greater than pad length.");
         }
 
-        var output = new float[input.Length + (edge * 2)];
+        int outputLength = checked(input.Length + (edge * 2));
+        if (output.Length < outputLength)
+        {
+            throw new ArgumentException("Output span is shorter than the extended input.", nameof(output));
+        }
+
         float first = (float)input[0];
         for (int i = 0; i < edge; i++)
         {
             output[i] = (2.0f * first) - (float)input[edge - i];
         }
 
-        ConvertToFloat32(input, output.AsSpan(edge, input.Length));
+        ConvertToFloat32(input, output.Slice(edge, input.Length));
 
         float last = (float)input[^1];
         for (int i = 0; i < edge; i++)
         {
             output[edge + input.Length + i] = (2.0f * last) - (float)input[input.Length - 2 - i];
         }
-
-        return output;
     }
 }
