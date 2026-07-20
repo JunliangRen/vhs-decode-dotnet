@@ -122,6 +122,9 @@
 - 周波数が厳密に 40.0 MHz の `.s16` input は native signed-16 loader を使い、
   実質的な変換を行わない FFmpeg pass-through を省きます。他形式と実際の
   resampling は従来の FFmpeg path を維持します。
+- packed `.lds` input は Python-compatible な partial tail group を含め、要求された
+  result array へ直接 decode します。完全な unpacked array の追加 allocation と copy は
+  行いません。
 - stream 単位の decoded RF cache により、重複する field read 間の FFT 再計算を
   避けつつメモリ使用量を制限します。
 - VHS は境界付き連続 RF pipeline を使用します。1 つの producer が順序付き input read
@@ -443,6 +446,15 @@ fixture-limited 409-field run は 17.431 秒で完了し、25-50%、50-75%、75-
 interval は 4.06/4.02/4.27 秒、後半の working/private memory 中央値は前半より
 10.8/7.4 MiB 高いだけでした。記録した luma、chroma、JSON hash はすべて exact です。
 
+packed `.lds` loader は decoded sample を要求された output へ直接書き込み、Python の
+partial-tail-group behavior を維持します。交互に実行した 5 組の 40-frame real-capture
+pair では、default の wall/CPU median が 4.687/12.422 秒から 4.610/12.188 秒へ、
+20-worker は 3.813/14.469 秒から 3.743/13.109 秒へ低下しました。3 組の 160-frame
+default pair は wall time が 15.281 秒から 14.993 秒へ低下しました。別の 5 組の
+20-worker repeat では wall/CPU median が 12.655/46.297 秒から 12.601/46.156 秒へ、
+peak working set が 1.319 GiB から 1.198 GiB へ低下しました。42 回の real-capture run は、
+fixture ごとに exact な luma、chroma、JSON hash set を 1 組だけ生成しました。
+
 </details>
 
 <!-- SECTION: build -->
@@ -464,7 +476,7 @@ dotnet test --solution VHSDecodeDotNet.slnx -c Release --no-build --no-restore
 
 現在の正式な Release build は warning 0、error 0 です。xUnit v3 project は
 `dotnet test` と Visual Studio Test Explorer の両方で個別に検出できる
-**800** tests を公開します。
+**808** tests を公開します。
 
 <!-- SECTION: usage -->
 

@@ -124,6 +124,9 @@ release compatibility remain the first constraint.
 - Exact 40.0 MHz `.s16` inputs use the native signed-16 loader instead of a
   no-op FFmpeg pass-through. Other formats and actual resampling keep their
   existing FFmpeg paths.
+- Packed `.lds` input decodes directly into the requested result array,
+  including Python-compatible partial tail groups, instead of allocating and
+  copying a second fully unpacked array.
 - A stream-scoped decoded RF cache avoids duplicate FFT work across overlapping
   field reads while keeping memory bounded.
 - VHS uses a bounded continuous RF pipeline. One producer owns ordered input
@@ -470,6 +473,16 @@ improvements above. A fixture-limited 409-field run completed in 17.431 s;
 second-half median working/private memory rose by only 10.8/7.4 MiB. Every
 recorded luma, chroma, and JSON hash remained exact.
 
+The packed `.lds` loader now writes decoded samples directly into its requested
+output and preserves Python's partial-tail-group behavior. Five interleaved
+40-frame real-capture pairs moved default wall/CPU medians from
+4.687/12.422 s to 4.610/12.188 s and 20-worker medians from 3.813/14.469 s to
+3.743/13.109 s. Three 160-frame default pairs moved wall time from 15.281 to
+14.993 s; a separate five-pair 20-worker repeat moved wall/CPU medians from
+12.655/46.297 s to 12.601/46.156 s and peak working set from 1.319 GiB to
+1.198 GiB. All 42 recorded real-capture runs produced one exact luma, chroma,
+and JSON hash set per fixture.
+
 </details>
 
 <!-- SECTION: build -->
@@ -490,7 +503,7 @@ dotnet test --solution VHSDecodeDotNet.slnx -c Release --no-build --no-restore
 ```
 
 The current formal Release build has zero warnings and errors. The xUnit v3
-project exposes **800** independently discoverable tests to both
+project exposes **808** independently discoverable tests to both
 `dotnet test` and Visual Studio Test Explorer.
 
 <!-- SECTION: usage -->

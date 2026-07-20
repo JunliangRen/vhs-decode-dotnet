@@ -16037,6 +16037,35 @@ public void PackedLdsLoaderUnpacksSamples()
     AssertSequence([0, 32704, 64, -32704, -32640], actual!);
 }
 
+[Theory(DisplayName = "packed LDS loader handles every group alignment")]
+[InlineData(0, 1)]
+[InlineData(1, 1)]
+[InlineData(2, 2)]
+[InlineData(3, 1)]
+[InlineData(4, 8)]
+[InlineData(5, 7)]
+[InlineData(6, 9)]
+[InlineData(7, 10)]
+public void PackedLdsLoaderHandlesEveryGroupAlignment(int start, int length)
+{
+    int[] samples = Enumerable.Range(0, 32)
+        .Select(index => (index * 73) % 1024)
+        .ToArray();
+    byte[] packed = Pack4x10(samples);
+
+    double[] expected = samples
+        .Skip(start)
+        .Take(length)
+        .Select(value => (double)(short)((value - 512) << 6))
+        .ToArray();
+    double[]? actual = new PackedDdD4To40SampleLoader().Read(
+        new MemoryStream(packed),
+        start,
+        length);
+
+    AssertSequence(expected, actual!);
+}
+
 [Fact(DisplayName = "packed r30 loader unpacks 3x10 bit samples")]
 public void PackedR30LoaderUnpacksSamples()
 {
