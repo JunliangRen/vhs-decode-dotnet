@@ -124,7 +124,8 @@
   再允许其他读取者接触 FFmpeg/GNU Radio stream。完成的 block 会在同一 worker 上限内，
   并行写入最终 RF span 中互不重叠的裁剪区间；串行与有状态 block 路径仍按顺序组装。
 - VSync 包络/极小值计算与谐波功率比搜索会在同一个只读 padded 输入上并发执行；
-  两个分支完成后，候选仲裁和 detector 状态更新仍按顺序进行。
+  两个分支完成后，候选仲裁和 detector 状态更新仍按顺序进行。兼容 NumPy 的 float64
+  median 对小输入保留完整排序，从 32K 样本起使用位精确 introselect。
 - 启用 worker 时，VHS 场解码会并发执行亮度 TBC 渲染与色度场解码。任何时刻最多只有
   一个色度任务在运行，并且会在推进下一场前回到调用线程按顺序提交状态。
 - 较长的 TBC sinc 重采样任务共享 worker 配额并保持输出顺序；
@@ -171,18 +172,18 @@
   往返；未来可选 GPU 后端必须批量处理常驻显存的 DSP 阶段，并保留精确 CPU 回退。
 
 当前线程矩阵使用 Intel Core Ultra 7 265K（20 个逻辑处理器）、Windows 11 build
-26220、.NET SDK/runtime `11.0.100-preview.6.26359.118`、本项目检查点 `c5f9783`，以及
+26220、.NET SDK/runtime `11.0.100-preview.6.26359.118`、本项目检查点 `a45d433`，以及
 Python v0.4.0 commit `43155200da87c0d49eb37d8ec09b1372075ee8e4`（程序报告为
 `g4315520`）。隔离的 Python 环境使用 NumPy 2.4.6、SciPy 1.18.0、Numba 0.66.0 和
 python-soxr 1.1.0。每项都是三次交错 Release 运行的中位数：
 
 | CLI 模式 | 实际 worker | 本项目 | Python | 加速倍数 | 墙钟降幅 |
 | --- | ---: | ---: | ---: | ---: | ---: |
-| 默认 | 5 | 5.001 s | 12.935 s | 2.59x | 61.3% |
-| `--threads 1` | 1 | 9.364 s | 14.026 s | 1.50x | 33.2% |
-| `--threads 5` | 5 | 4.944 s | 12.980 s | 2.63x | 61.9% |
-| `--threads 10` | 10 | 4.400 s | 13.165 s | 2.99x | 66.6% |
-| `--threads 20` | 20 | 4.266 s | 13.616 s | 3.19x | 68.7% |
+| 默认 | 5 | 4.646 s | 13.112 s | 2.82x | 64.6% |
+| `--threads 1` | 1 | 9.203 s | 14.111 s | 1.53x | 34.8% |
+| `--threads 5` | 5 | 4.544 s | 12.799 s | 2.82x | 64.5% |
+| `--threads 10` | 10 | 4.074 s | 13.560 s | 3.33x | 70.0% |
+| `--threads 20` | 20 | 3.779 s | 14.046 s | 3.72x | 73.1% |
 
 默认值最终保持为 **5 个 worker**，与 Release 4.0 CLI 语义一致；在这台 20 逻辑处理器
 机器上，显式 20 worker 最快。矩阵使用 `RF-Sample_2026-07-19_23-58-20.lds`，
@@ -192,9 +193,8 @@ python-soxr 1.1.0。每项都是三次交错 Release 运行的中位数：
 本项目 15 次运行在所有 worker 数下都得到同一组亮度 TBC、色度 TBC 和 JSON hash。
 另加的三次 Python `--threads 0` 控制组彼此完全一致，并精确匹配本项目全部运行。
 上游 Python 的默认/非零线程模式不能作为可靠的逐字节基准：矩阵中的 15 次运行得到
-两组亮度/色度配对，其中 5 次匹配串行基准，另外 10 次得到另一组；`--threads 5` 和
-`--threads 10` 在重复运行间发生了变化。因此线程矩阵比较的是实测吞吐，严格兼容性
-以 Python `--threads 0` 为基准。
+两组亮度/色度配对，其中 12 次匹配串行基准，三次 `--threads 5` 得到另一组。因此线程
+矩阵比较的是实测吞吐，严格兼容性以 Python `--threads 0` 为基准。
 
 这份 40 帧夹具的兼容性基准是 Python v0.4.0 `g4315520` 的 `--threads 0` 输出：
 
@@ -410,7 +410,7 @@ dotnet test --solution VHSDecodeDotNet.slnx -c Release --no-build --no-restore
 ```
 
 当前正式 Release 构建为零警告、零错误。xUnit v3 项目向
-`dotnet test` 和 Visual Studio Test Explorer 暴露 **797** 个可独立发现的测试。
+`dotnet test` 和 Visual Studio Test Explorer 暴露 **800** 个可独立发现的测试。
 
 <!-- SECTION: usage -->
 

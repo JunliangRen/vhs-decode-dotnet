@@ -133,7 +133,8 @@
   path は順序付き assembly を維持します。
 - VSync envelope/minima 処理と harmonic power-ratio search は 1 つの read-only padded
   input 上で並行実行します。両 branch の完了後、candidate arbitration と detector
-  state update は引き続き順序どおりに行います。
+  state update は引き続き順序どおりに行います。NumPy-compatible float64 median は
+  small input で full sort を維持し、32K sample 以上で bit-exact introselect を使います。
 - worker 有効時、VHS field decode は luma TBC render と chroma field decode を
   並行実行します。同時に存在する chroma task は最大 1 つで、次の field へ進む前に
   calling thread 上で順序どおり state を commit します。
@@ -195,18 +196,18 @@
 
 現在の thread matrix は Intel Core Ultra 7 265K（20 logical processor）、
 Windows 11 build 26220、.NET SDK/runtime `11.0.100-preview.6.26359.118`、
-この移植の checkpoint `c5f9783`、Python v0.4.0 commit
+この移植の checkpoint `a45d433`、Python v0.4.0 commit
 `43155200da87c0d49eb37d8ec09b1372075ee8e4`（表示は `g4315520`）で実行しました。
 分離した Python 環境は NumPy 2.4.6、SciPy 1.18.0、Numba 0.66.0、
 python-soxr 1.1.0 を使用しています。各値は 3 回の交互 Release run の median です。
 
 | CLI mode | Effective worker | この移植 | Python | Speedup | Wall-time reduction |
 | --- | ---: | ---: | ---: | ---: | ---: |
-| default | 5 | 5.001 s | 12.935 s | 2.59x | 61.3% |
-| `--threads 1` | 1 | 9.364 s | 14.026 s | 1.50x | 33.2% |
-| `--threads 5` | 5 | 4.944 s | 12.980 s | 2.63x | 61.9% |
-| `--threads 10` | 10 | 4.400 s | 13.165 s | 2.99x | 66.6% |
-| `--threads 20` | 20 | 4.266 s | 13.616 s | 3.19x | 68.7% |
+| default | 5 | 4.646 s | 13.112 s | 2.82x | 64.6% |
+| `--threads 1` | 1 | 9.203 s | 14.111 s | 1.53x | 34.8% |
+| `--threads 5` | 5 | 4.544 s | 12.799 s | 2.82x | 64.5% |
+| `--threads 10` | 10 | 4.074 s | 13.560 s | 3.33x | 70.0% |
+| `--threads 20` | 20 | 3.779 s | 14.046 s | 3.72x | 73.1% |
 
 default は Release 4.0 CLI semantics に合わせて最終的に **5 worker** のままです。
 この 20 logical processor fixture では、明示的な 20-worker mode が最速でした。
@@ -218,9 +219,9 @@ matrix は `RF-Sample_2026-07-19_23-58-20.lds` と `--system pal
 set を生成しました。追加した 3 回の Python `--threads 0` control は互いに一致し、
 この移植の全 run とも完全一致しました。上流 Python の default/nonzero thread mode は
 byte-exact baseline として安定せず、15 回の matrix run は 2 種類の luma/chroma pair
-になりました。5 run は serial reference と一致し、10 run は別の pair で、
-`--threads 5` と `--threads 10` は反復間でも変化しました。そのため matrix は observed
-throughput の比較であり、strict compatibility baseline は Python `--threads 0` です。
+になりました。12 run は serial reference と一致し、3 回の `--threads 5` run は別の
+pair でした。そのため matrix は observed throughput の比較であり、strict compatibility
+baseline は Python `--threads 0` です。
 
 この 40-frame fixture の compatibility baseline は Python v0.4.0 `g4315520` の
 `--threads 0` output です。
@@ -463,7 +464,7 @@ dotnet test --solution VHSDecodeDotNet.slnx -c Release --no-build --no-restore
 
 現在の正式な Release build は warning 0、error 0 です。xUnit v3 project は
 `dotnet test` と Visual Studio Test Explorer の両方で個別に検出できる
-**797** tests を公開します。
+**800** tests を公開します。
 
 <!-- SECTION: usage -->
 

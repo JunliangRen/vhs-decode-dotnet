@@ -136,7 +136,9 @@ release compatibility remain the first constraint.
   worker bound; serial and stateful block paths retain ordered assembly.
 - VSync envelope/minima work and harmonic power-ratio search run concurrently
   over one shared read-only padded input. Candidate arbitration and detector
-  state updates remain ordered after both branches complete.
+  state updates remain ordered after both branches complete. NumPy-compatible
+  float64 medians retain full sorting for small inputs and use bit-exact
+  introselect from 32K samples.
 - VHS field decode overlaps luma TBC rendering with chroma field decoding when
   workers are enabled. Only one chroma task can be in flight, and its state is
   committed on the calling thread before the next field advances.
@@ -205,7 +207,7 @@ release compatibility remain the first constraint.
 
 The current thread matrix used an Intel Core Ultra 7 265K (20 logical
 processors), Windows 11 build 26220, .NET SDK/runtime
-`11.0.100-preview.6.26359.118`, port checkpoint `c5f9783`, and Python v0.4.0
+`11.0.100-preview.6.26359.118`, port checkpoint `a45d433`, and Python v0.4.0
 commit `43155200da87c0d49eb37d8ec09b1372075ee8e4` (reported as `g4315520`).
 The isolated Python environment used NumPy 2.4.6, SciPy 1.18.0, Numba 0.66.0,
 and python-soxr 1.1.0. Each value is the median of three interleaved Release
@@ -213,11 +215,11 @@ runs:
 
 | CLI mode | Effective workers | This port | Python | Speedup | Wall-time reduction |
 | --- | ---: | ---: | ---: | ---: | ---: |
-| default | 5 | 5.001 s | 12.935 s | 2.59x | 61.3% |
-| `--threads 1` | 1 | 9.364 s | 14.026 s | 1.50x | 33.2% |
-| `--threads 5` | 5 | 4.944 s | 12.980 s | 2.63x | 61.9% |
-| `--threads 10` | 10 | 4.400 s | 13.165 s | 2.99x | 66.6% |
-| `--threads 20` | 20 | 4.266 s | 13.616 s | 3.19x | 68.7% |
+| default | 5 | 4.646 s | 13.112 s | 2.82x | 64.6% |
+| `--threads 1` | 1 | 9.203 s | 14.111 s | 1.53x | 34.8% |
+| `--threads 5` | 5 | 4.544 s | 12.799 s | 2.82x | 64.5% |
+| `--threads 10` | 10 | 4.074 s | 13.560 s | 3.33x | 70.0% |
+| `--threads 20` | 20 | 3.779 s | 14.046 s | 3.72x | 73.1% |
 
 The default remains **5 workers**, matching Release 4.0 CLI semantics; explicit
 20-worker mode was fastest on this 20-logical-processor fixture. The matrix used
@@ -229,10 +231,10 @@ All 15 port runs produced one identical luma TBC, chroma TBC, and JSON hash set
 across every worker count. Three additional Python `--threads 0` controls were
 mutually identical and exactly matched every port run. Upstream Python's
 default/nonzero matrix modes were not a reliable byte-exact baseline: its 15
-runs produced two luma/chroma pairs, with five runs matching the serial reference
-and ten producing the alternate pair; `--threads 5` and `--threads 10` changed
-between repetitions. The matrix therefore compares observed throughput, while
-Python `--threads 0` is the strict compatibility baseline.
+runs produced two luma/chroma pairs. Twelve runs matched the serial reference;
+all three `--threads 5` runs produced the alternate pair. The matrix therefore
+compares observed throughput, while Python `--threads 0` is the strict
+compatibility baseline.
 
 The compatibility baseline for this 40-frame fixture is Python v0.4.0
 `g4315520` with `--threads 0`:
@@ -488,7 +490,7 @@ dotnet test --solution VHSDecodeDotNet.slnx -c Release --no-build --no-restore
 ```
 
 The current formal Release build has zero warnings and errors. The xUnit v3
-project exposes **797** independently discoverable tests to both
+project exposes **800** independently discoverable tests to both
 `dotnet test` and Visual Studio Test Explorer.
 
 <!-- SECTION: usage -->
