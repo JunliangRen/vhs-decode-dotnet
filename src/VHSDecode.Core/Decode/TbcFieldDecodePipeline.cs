@@ -4132,7 +4132,7 @@ public sealed class TbcFieldDecodePipeline
 
         bool tape = string.Equals(_decodeType, "vhs", StringComparison.Ordinal);
         double availableEnd = tape
-            ? span.Input.Length
+            ? span.AvailableSampleCountOverride ?? span.Input.Length
             : rawPulses[^1].Start;
         double lastLine = tape
             ? ((availableEnd - line0Location) / meanLineLength) - 1.0

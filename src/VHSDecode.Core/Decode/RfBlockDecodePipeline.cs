@@ -18,6 +18,7 @@ public sealed class RfBlockDecodePipeline : IDisposable
     private readonly CvbsDecodeOptions? _cvbsOptions;
     private readonly IRfInputProcessor? _inputProcessor;
     private readonly Action<string, string>? _diagnosticLogger;
+    private readonly bool _retainRfDiagnosticChannels;
 
     public RfBlockDecodePipeline(
         IRfSampleLoader loader,
@@ -26,7 +27,8 @@ public sealed class RfBlockDecodePipeline : IDisposable
         DecodeFilterOptions? filterOptions = null,
         CvbsDecodeOptions? cvbsOptions = null,
         IRfInputProcessor? inputProcessor = null,
-        Action<string, string>? diagnosticLogger = null)
+        Action<string, string>? diagnosticLogger = null,
+        bool retainRfDiagnosticChannels = true)
     {
         _loader = loader;
         _filters = filters;
@@ -42,11 +44,14 @@ public sealed class RfBlockDecodePipeline : IDisposable
         _cvbsOptions = cvbsOptions;
         _inputProcessor = inputProcessor;
         _diagnosticLogger = diagnosticLogger;
+        _retainRfDiagnosticChannels = retainRfDiagnosticChannels;
     }
 
     public IRfInputProcessor? InputProcessor => _inputProcessor;
 
     internal int RfHighPassOffset => _filters.RfHighPassOffset;
+
+    internal bool RetainsRfDiagnosticChannels => _retainRfDiagnosticChannels;
 
     internal bool RequiresSequentialBlockDecode => _filterOptions.SharpnessEq is not null;
 
@@ -73,6 +78,14 @@ public sealed class RfBlockDecodePipeline : IDisposable
         return DecodePreparedBlock(input);
     }
 
+    internal RfPipelineBlock? DecodeStreamBlockWithInput(Stream stream, long sample, int blockLength)
+    {
+        double[]? input = LoadBlockInput(stream, sample, blockLength);
+        return input is null
+            ? null
+            : DecodePreparedStreamBlock(input);
+    }
+
     internal double[]? LoadBlockInput(Stream stream, long sample, int blockLength)
     {
         double[]? loadedInput = _loader.Read(stream, sample, blockLength);
@@ -82,6 +95,15 @@ public sealed class RfBlockDecodePipeline : IDisposable
     }
 
     internal RfPipelineBlock DecodePreparedBlock(double[] input, bool reportDiagnostics = true)
+        => DecodePreparedBlockCore(input, reportDiagnostics, retainRfDiagnosticChannels: true);
+
+    internal RfPipelineBlock DecodePreparedStreamBlock(double[] input, bool reportDiagnostics = true)
+        => DecodePreparedBlockCore(input, reportDiagnostics, _retainRfDiagnosticChannels);
+
+    private RfPipelineBlock DecodePreparedBlockCore(
+        double[] input,
+        bool reportDiagnostics,
+        bool retainRfDiagnosticChannels)
     {
         ArgumentNullException.ThrowIfNull(input);
 
@@ -113,7 +135,8 @@ public sealed class RfBlockDecodePipeline : IDisposable
             _filterOptions.FmDemodulatorMode,
             _filters.VhsEnvelopeSos,
             _filters.VhsRfTopSos,
-            inputSpectrum);
+            inputSpectrum,
+            includeRfHighPassOutput: retainRfDiagnosticChannels);
         if (reportDiagnostics)
         {
             ReportDiagnostics(demodulated);
@@ -155,7 +178,15 @@ public sealed class RfBlockDecodePipeline : IDisposable
             demodulated = demodulated with { Video = demodulated.DemodRaw };
         }
 
-        return new RfPipelineBlock(input, demodulated);
+        if (!retainRfDiagnosticChannels)
+        {
+            // VHS consumes these arrays only while decoding this block; field assembly needs the retained channels below.
+            demodulated = demodulated with { DemodRaw = [], RfHighPass = [] };
+        }
+
+        return new RfPipelineBlock(
+            retainRfDiagnosticChannels ? input : [],
+            demodulated);
     }
 
     internal void ReportDeferredDiagnostics(RfPipelineBlock block)

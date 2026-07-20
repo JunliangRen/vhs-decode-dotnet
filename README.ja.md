@@ -2,7 +2,7 @@
 
 [English](README.md) | [简体中文](README.zh-CN.md) | **[日本語](README.ja.md)**
 
-<!-- README_SYNC: 2026-07-20.10 -->
+<!-- README_SYNC: 2026-07-20.11 -->
 
 [`oyvindln/vhs-decode`](https://github.com/oyvindln/vhs-decode) の
 デコード関連部分を .NET 11 で再実装するプロジェクトです。現在は release
@@ -165,6 +165,9 @@
   exact-length RF span buffer set を最大 2 組だけ再利用します。同期 field decode 後に
   buffer を返却し、public `Read` result、deferred CVBS render、保持される LD VITS source
   はそれぞれ独立した array ownership を維持します。
+- VHS は最後の block-local consumer の後に raw input、raw demodulation、RF high-pass
+  result を破棄します。未使用の RF high-pass inverse FFT と 3 本の RF-span copy を省き、
+  LD、CVBS、直接構築した decoder は従来の full-channel behavior を維持します。
 - AVX/FMA kernel は正確な float32 conversion、VHS RF-envelope preparation、
   VHS Rust-style FM angle approximation、LD quantization、VHS chroma rotation、
   complex frequency filtering を高速化します。forward/inverse radix-4 FFT は pinned
@@ -245,6 +248,15 @@ parallel VHS payload output は、各 field の独立した luma/chroma stream w
 未使用 capacity を利用しました。順序を反転した 2 組の `--length 204` pair は
 20.451/20.181 秒と 20.483/20.353 秒（1.3%/0.6% 高速）でした。current memory は
 非単調で peak は 2.03/2.06 GiB、408 field と全 hash は完全一致です。
+
+compact VHS RF-channel path は cache 前に raw input、raw demodulation、RF high-pass の
+block array を解放し、対応する field assembly と未使用の RF high-pass inverse FFT を
+省きます。5 組の交互 40-frame A/B で wall/CPU 中央値は 6.01/18.86 秒から
+5.02/17.45 秒（16.5%/7.5% 高速）へ短縮しました。順序を反転した 2 組の 204-frame
+pair は baseline/current 20.48/20.28 秒と 20.61/19.87 秒、CPU は
+79.88/68.91 秒と 77.17/72.44 秒でした。peak working set は 2.05-2.08 GiB から
+1.58-1.67 GiB へ減少し、quarter sample は非単調でした。408 field と luma、chroma、
+JSON hash は完全一致です。
 
 AVX RF-envelope preparation は、単体 32K-block 中央値を 57.5 us から 13.3 us へ
 短縮し、kernel は 76.9% 改善しました。40-frame 中央値は 7.55 秒から 7.39 秒、
@@ -334,7 +346,7 @@ dotnet test --solution VHSDecodeDotNet.slnx -c Release --no-build --no-restore
 
 現在の正式な Release build は warning 0、error 0 です。xUnit v3 project は
 `dotnet test` と Visual Studio Test Explorer の両方で個別に検出できる
-**784** tests を公開します。
+**785** tests を公開します。
 
 <!-- SECTION: usage -->
 

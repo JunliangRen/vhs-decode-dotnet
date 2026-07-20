@@ -84,7 +84,8 @@ public sealed class RfDemodulator
         RfFmDemodulatorMode fmDemodulatorMode = RfFmDemodulatorMode.ConjugateProduct,
         IReadOnlyList<SosSection>? vhsEnvelopeFilter = null,
         IReadOnlyList<SosSection>? vhsRfTopFilter = null,
-        Complex[]? precomputedInputSpectrum = null)
+        Complex[]? precomputedInputSpectrum = null,
+        bool includeRfHighPassOutput = true)
     {
         if (input.IsEmpty)
         {
@@ -116,11 +117,12 @@ public sealed class RfDemodulator
         if (useVhsComplexRfHighBoostPath)
         {
             Complex[] inputSpectrum = PocketFftComplex.ForwardReal(input);
-            Complex[] rfHighPassSpectrum = ApplyNumpyRealFrequencyFilter(
-                inputSpectrum,
-                rfHighPassFilter,
-                input.Length);
-            rfHighPass = ExtractReal(PocketFftComplex.Inverse(rfHighPassSpectrum));
+            rfHighPass = includeRfHighPassOutput
+                ? ExtractReal(PocketFftComplex.Inverse(ApplyNumpyRealFrequencyFilter(
+                    inputSpectrum,
+                    rfHighPassFilter,
+                    input.Length)))
+                : [];
             rfFilteredSpectrum = ApplyNumpyRealFrequencyFilter(
                 inputSpectrum,
                 rfVideoFilter,
@@ -143,14 +145,22 @@ public sealed class RfDemodulator
             VhsRealFftWorkspace workspace = vhsRealFftWorkspace!;
             PocketFftReal.Forward(input, workspace.First);
             Span<Complex> inputSpectrum = workspace.First.AsSpan(0, vhsRealSpectrumLength);
-            Span<Complex> rfHighPassSpectrum = workspace.Second.AsSpan(0, vhsRealSpectrumLength);
-            ApplyNumpyRealFrequencyFilter(
-                inputSpectrum,
-                rfHighPassFilter,
-                input.Length,
-                rfHighPassSpectrum);
-            rfHighPass = new double[input.Length];
-            PocketFftReal.Inverse(rfHighPassSpectrum, input.Length, rfHighPass);
+            if (includeRfHighPassOutput)
+            {
+                Span<Complex> rfHighPassSpectrum = workspace.Second.AsSpan(0, vhsRealSpectrumLength);
+                ApplyNumpyRealFrequencyFilter(
+                    inputSpectrum,
+                    rfHighPassFilter,
+                    input.Length,
+                    rfHighPassSpectrum);
+                rfHighPass = new double[input.Length];
+                PocketFftReal.Inverse(rfHighPassSpectrum, input.Length, rfHighPass);
+            }
+            else
+            {
+                rfHighPass = [];
+            }
+
             vhsRfFilteredHalf = workspace.Third;
             Span<Complex> rfFilteredHalf = vhsRfFilteredHalf.AsSpan(0, vhsRealSpectrumLength);
             ApplyNumpyRealFrequencyFilter(
@@ -179,12 +189,19 @@ public sealed class RfDemodulator
                     nameof(precomputedInputSpectrum));
             }
 
-            Complex[] rfHighPassSpectrum = ApplyFrequencyFilter(spectrum, rfHighPassFilter);
-            PocketFftComplex.InverseDuccInPlace(rfHighPassSpectrum);
-            rfHighPass = new double[rfHighPassSpectrum.Length];
-            for (int i = 0; i < rfHighPass.Length; i++)
+            if (includeRfHighPassOutput)
             {
-                rfHighPass[i] = rfHighPassSpectrum[i].Real;
+                Complex[] rfHighPassSpectrum = ApplyFrequencyFilter(spectrum, rfHighPassFilter);
+                PocketFftComplex.InverseDuccInPlace(rfHighPassSpectrum);
+                rfHighPass = new double[rfHighPassSpectrum.Length];
+                for (int i = 0; i < rfHighPass.Length; i++)
+                {
+                    rfHighPass[i] = rfHighPassSpectrum[i].Real;
+                }
+            }
+            else
+            {
+                rfHighPass = [];
             }
 
             if (removeLdPalV4300DSpur)

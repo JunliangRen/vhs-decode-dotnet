@@ -14,7 +14,10 @@ public sealed record RfDecodedSpan(
     LaserDiscAnalogAudioBlock? AnalogAudio = null,
     double[]? Chroma = null,
     double[]? VideoBurst = null,
-    double[]? VideoPilot = null);
+    double[]? VideoPilot = null)
+{
+    internal int? AvailableSampleCountOverride { get; init; }
+}
 
 public sealed class RfBlockStreamDecoder : IDisposable
 {
@@ -231,12 +234,19 @@ public sealed class RfBlockStreamDecoder : IDisposable
         PrepareDecodedBlockCache(stream, firstBlock);
         int totalDecoded = checked((int)((lastBlock - firstBlock + 1) * BlockStride));
         int offset = checked((int)(begin - (firstBlock * BlockStride)));
-        double[] input = reusableBuffers?.Input ?? new double[length];
+        bool retainRfDiagnosticChannels = _pipeline.RetainsRfDiagnosticChannels;
+        double[] input = retainRfDiagnosticChannels
+            ? reusableBuffers?.Input ?? new double[length]
+            : [];
         double[] video = reusableBuffers?.Video ?? new double[length];
-        double[] demodRaw = reusableBuffers?.DemodRaw ?? new double[length];
+        double[] demodRaw = retainRfDiagnosticChannels
+            ? reusableBuffers?.DemodRaw ?? new double[length]
+            : [];
         double[] envelope = reusableBuffers?.Envelope ?? new double[length];
         double[] videoLowPass = reusableBuffers?.VideoLowPass ?? new double[length];
-        double[] rfHighPass = reusableBuffers?.RfHighPass ?? new double[length];
+        double[] rfHighPass = retainRfDiagnosticChannels
+            ? reusableBuffers?.RfHighPass ?? new double[length]
+            : [];
         double[]? chroma = null;
         short[]? efm = null;
         double[]? audioLeft = null;
@@ -270,17 +280,21 @@ public sealed class RfBlockStreamDecoder : IDisposable
 
         void AppendBlock(RfPipelineBlock pipelineBlock)
         {
-            CopyTrimmedWindow(pipelineBlock.Input, input, destination, offset);
+            if (retainRfDiagnosticChannels)
+            {
+                CopyTrimmedWindow(pipelineBlock.Input, input, destination, offset);
+                CopyTrimmedWindow(pipelineBlock.Demodulated.DemodRaw, demodRaw, destination, offset);
+                CopyTrimmedWindow(
+                    pipelineBlock.Demodulated.RfHighPass,
+                    rfHighPass,
+                    destination,
+                    offset,
+                    BlockCut - _pipeline.RfHighPassOffset);
+            }
+
             CopyTrimmedWindow(pipelineBlock.Demodulated.Video, video, destination, offset);
-            CopyTrimmedWindow(pipelineBlock.Demodulated.DemodRaw, demodRaw, destination, offset);
             CopyTrimmedWindow(pipelineBlock.Demodulated.Envelope, envelope, destination, offset);
             CopyTrimmedWindow(pipelineBlock.Demodulated.VideoLowPass, videoLowPass, destination, offset);
-            CopyTrimmedWindow(
-                pipelineBlock.Demodulated.RfHighPass,
-                rfHighPass,
-                destination,
-                offset,
-                BlockCut - _pipeline.RfHighPassOffset);
             if (pipelineBlock.Demodulated.Chroma is not null)
             {
                 chroma ??= reusableBuffers?.GetChroma() ?? new double[length];
@@ -346,17 +360,21 @@ public sealed class RfBlockStreamDecoder : IDisposable
                 int blockDestination = checked(blockIndex * BlockStride);
                 RfPipelineBlock pipelineBlock = pipelineBlocks[blockIndex];
                 RfDemodulatedBlock demodulated = pipelineBlock.Demodulated;
-                CopyTrimmedWindow(pipelineBlock.Input, input, blockDestination, offset);
+                if (retainRfDiagnosticChannels)
+                {
+                    CopyTrimmedWindow(pipelineBlock.Input, input, blockDestination, offset);
+                    CopyTrimmedWindow(demodulated.DemodRaw, demodRaw, blockDestination, offset);
+                    CopyTrimmedWindow(
+                        demodulated.RfHighPass,
+                        rfHighPass,
+                        blockDestination,
+                        offset,
+                        BlockCut - _pipeline.RfHighPassOffset);
+                }
+
                 CopyTrimmedWindow(demodulated.Video, video, blockDestination, offset);
-                CopyTrimmedWindow(demodulated.DemodRaw, demodRaw, blockDestination, offset);
                 CopyTrimmedWindow(demodulated.Envelope, envelope, blockDestination, offset);
                 CopyTrimmedWindow(demodulated.VideoLowPass, videoLowPass, blockDestination, offset);
-                CopyTrimmedWindow(
-                    demodulated.RfHighPass,
-                    rfHighPass,
-                    blockDestination,
-                    offset,
-                    BlockCut - _pipeline.RfHighPassOffset);
                 if (chroma is not null && demodulated.Chroma is { } blockChroma)
                 {
                     CopyTrimmedWindow(blockChroma, chroma, blockDestination, offset);
@@ -406,7 +424,10 @@ public sealed class RfBlockStreamDecoder : IDisposable
                     for (long warmBlock = lastDecoded + 1; warmBlock < block; warmBlock++)
                     {
                         long warmSample = checked(warmBlock * BlockStride);
-                        RfPipelineBlock? warmed = _pipeline.DecodeBlockWithInput(stream, warmSample, BlockLength);
+                        RfPipelineBlock? warmed = _pipeline.DecodeStreamBlockWithInput(
+                            stream,
+                            warmSample,
+                            BlockLength);
                         if (warmed is null)
                         {
                             return null;
@@ -432,7 +453,7 @@ public sealed class RfBlockStreamDecoder : IDisposable
                 {
                     StopPrefetchBeforeDirectRead();
                     long sample = checked(block * BlockStride);
-                    pipelineBlock = _pipeline.DecodeBlockWithInput(stream, sample, BlockLength);
+                    pipelineBlock = _pipeline.DecodeStreamBlockWithInput(stream, sample, BlockLength);
                     if (pipelineBlock is not null && _pipeline.RequiresSequentialBlockDecode)
                     {
                         _sequentialBlockCache[block] = pipelineBlock;
@@ -494,7 +515,7 @@ public sealed class RfBlockStreamDecoder : IDisposable
                 missingIndex =>
                 {
                     int blockIndex = missingBlocks[missingIndex];
-                    decodedBlocks[blockIndex] = _pipeline.DecodePreparedBlock(preparedInputs[blockIndex]);
+                    decodedBlocks[blockIndex] = _pipeline.DecodePreparedStreamBlock(preparedInputs[blockIndex]);
                 });
             for (int i = 0; i < missingBlockCount; i++)
             {
@@ -535,7 +556,10 @@ public sealed class RfBlockStreamDecoder : IDisposable
             audioSpan,
             chroma,
             videoBurst,
-            videoPilot);
+            videoPilot)
+        {
+            AvailableSampleCountOverride = length
+        };
     }
 
     public void Dispose()
@@ -576,7 +600,7 @@ public sealed class RfBlockStreamDecoder : IDisposable
             }
         }
 
-        return new ReusableSpanBuffers(length);
+        return new ReusableSpanBuffers(length, _pipeline.RetainsRfDiagnosticChannels);
     }
 
     private void ReturnReusableSpanBuffers(ReusableSpanBuffers buffers)
@@ -808,7 +832,7 @@ public sealed class RfBlockStreamDecoder : IDisposable
                     try
                     {
                         cancellationToken.ThrowIfCancellationRequested();
-                        RfPipelineBlock decoded = _pipeline.DecodePreparedBlock(
+                        RfPipelineBlock decoded = _pipeline.DecodePreparedStreamBlock(
                             preparedInput,
                             reportDiagnostics: false);
                         slot.Completion.TrySetResult(decoded);
@@ -1083,15 +1107,15 @@ public sealed class RfBlockStreamDecoder : IDisposable
         private double[]? _videoBurst;
         private double[]? _videoPilot;
 
-        internal ReusableSpanBuffers(int length)
+        internal ReusableSpanBuffers(int length, bool retainRfDiagnosticChannels)
         {
             Length = length;
-            Input = new double[length];
+            Input = retainRfDiagnosticChannels ? new double[length] : [];
             Video = new double[length];
-            DemodRaw = new double[length];
+            DemodRaw = retainRfDiagnosticChannels ? new double[length] : [];
             Envelope = new double[length];
             VideoLowPass = new double[length];
-            RfHighPass = new double[length];
+            RfHighPass = retainRfDiagnosticChannels ? new double[length] : [];
         }
 
         internal int Length { get; }

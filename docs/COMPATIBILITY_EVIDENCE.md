@@ -1382,6 +1382,23 @@ possible capture has already been proven byte-for-byte identical.
   `7C732FDB97CA95900ED353ABF1DBD0A37BBE3D8609886E16A7B55CCAE1D5B236`,
   `82F1D3A9E3A3BD73A5AA07A63C930892CBB7125D857725D736C721CCBED18494`,
   and `DDEFFB4DC96F4DAB031BDAF6BA385C1DD6C2EAEE31E53ECD244826C12F21D081`
+- Production VHS sessions now discard raw input, raw demodulation, and RF
+  high-pass block arrays after all block-local consumers finish. Field assembly
+  retains only video, low-pass video, envelope, and requested optional channels;
+  the unused RF high-pass filter/inverse transform is not run. LD, CVBS, and the
+  default direct pipeline API retain all prior channels. A standard xUnit v3
+  comparison verifies exact required-channel samples and the compact span's
+  independent available-sample count. Five interleaved 40-frame A/B runs reduced
+  median wall/CPU time from 6.01/18.86 to 5.02/17.45 s (16.5%/7.5%). Two
+  reversed 204-frame pairs completed baseline/current in 20.48/20.28 and
+  20.61/19.87 s; CPU time was 79.88/68.91 and 77.17/72.44 s. Baseline working-set
+  quarter peaks were 1.98/1.95/2.01/2.08 and 1.96/2.01/2.05/1.95 GiB; current
+  quarters were 1.41/1.20/1.47/1.67 and 1.58/1.42/1.13/1.51 GiB. Peak memory
+  therefore moved from 2.05-2.08 GiB to 1.58-1.67 GiB without monotonic growth.
+  Both variants emitted fields 1 through 408 with exact luma/chroma/JSON hashes
+  `7C732FDB97CA95900ED353ABF1DBD0A37BBE3D8609886E16A7B55CCAE1D5B236`,
+  `82F1D3A9E3A3BD73A5AA07A63C930892CBB7125D857725D736C721CCBED18494`,
+  and `DDEFFB4DC96F4DAB031BDAF6BA385C1DD6C2EAEE31E53ECD244826C12F21D081`
 - VHS RF-envelope preparation now converts four doubles to float32, clears the
   sign bits, and writes the rotated float64 values through AVX while preserving
   the scalar tail and wrap path. A 32K-block isolated median improved from
@@ -1763,7 +1780,7 @@ dotnet test --solution VHSDecodeDotNet.slnx --no-build
 ```
 
 The current formal solution build completes with zero warnings and errors, and
-the xUnit v3 project exposes 784 independently discoverable compatibility tests
+the xUnit v3 project exposes 785 independently discoverable compatibility tests
 to `dotnet test` and Visual Studio Test Explorer. On the
 same Windows machine and fixtures, Release wall-clock measurements for one
 frame were 2.346 s versus 7.193 s for NTSC VHS and 1.651 s versus 5.865 s for

@@ -2,7 +2,7 @@
 
 **[English](README.md)** | [简体中文](README.zh-CN.md) | [日本語](README.ja.md)
 
-<!-- README_SYNC: 2026-07-20.10 -->
+<!-- README_SYNC: 2026-07-20.11 -->
 
 .NET 11 rewrite of the decode-facing parts of
 [`oyvindln/vhs-decode`](https://github.com/oyvindln/vhs-decode), focused on
@@ -171,6 +171,10 @@ release compatibility remain the first constraint.
   matching the only two block counts a fixed read window can cover. Buffers are
   returned after synchronous field decode; public `Read` results, deferred CVBS
   rendering, and retained LD VITS sources keep independent ownership.
+- VHS drops block-local raw input, raw demodulation, and RF high-pass results
+  after their last block-local consumer. This omits the unused RF high-pass
+  inverse FFT and three RF-span copies; LD, CVBS, and direct decoder construction
+  retain full-channel behavior.
 - AVX/FMA kernels accelerate exact float32 conversion, VHS RF-envelope
   preparation, VHS Rust-style FM angle approximation, LD quantization, VHS
   chroma rotation, and complex frequency filtering. The forward/inverse radix-4
@@ -257,6 +261,15 @@ time rose from 18.20 to 19.50 s as both writes used otherwise idle capacity.
 Two reversed `--length 204` pairs completed baseline/current in 20.451/20.181 s
 and 20.483/20.353 s (1.3% and 0.6% faster). Current memory was non-monotonic
 with 2.03/2.06 GiB peaks, and all 408 fields and hashes remained exact.
+
+The compact VHS RF-channel path releases raw input, raw demodulation, and RF
+high-pass block arrays before caching, skips their field assembly, and does not
+run the unused RF high-pass inverse FFT. Five interleaved 40-frame A/B runs
+reduced median wall/CPU time from 6.01/18.86 to 5.02/17.45 s (16.5%/7.5%). Two
+reversed 204-frame pairs completed baseline/current in 20.48/20.28 s and
+20.61/19.87 s; CPU time was 79.88/68.91 s and 77.17/72.44 s. Peak working set
+moved from 2.05-2.08 GiB to 1.58-1.67 GiB, with non-monotonic quarter samples;
+all 408 fields and luma, chroma, and JSON hashes remained exact.
 
 AVX RF-envelope preparation reduced the isolated 32K-block median from 57.5 us
 to 13.3 us, a 76.9% kernel gain. The 40-frame median moved from 7.55 s to 7.39 s,
@@ -346,7 +359,7 @@ dotnet test --solution VHSDecodeDotNet.slnx -c Release --no-build --no-restore
 ```
 
 The current formal Release build has zero warnings and errors. The xUnit v3
-project exposes **784** independently discoverable tests to both
+project exposes **785** independently discoverable tests to both
 `dotnet test` and Visual Studio Test Explorer.
 
 <!-- SECTION: usage -->

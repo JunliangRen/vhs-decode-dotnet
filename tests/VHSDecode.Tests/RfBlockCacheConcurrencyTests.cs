@@ -123,6 +123,32 @@ public sealed class RfBlockCacheConcurrencyTests
         Assert.NotSame(secondAlternateLease.Span.Video, concurrentLease.Span.Video);
     }
 
+    [Fact(DisplayName = "Compact VHS RF spans retain only field-consumed channels")]
+    public void CompactVhsRfSpansRetainOnlyFieldConsumedChannels()
+    {
+        using var stream = new MemoryStream();
+        using var fullDecoder = BuildDecoder(
+            new CountingSampleLoader(),
+            workerThreads: 4,
+            weakRfDiagnostics: true);
+        using var compactDecoder = BuildDecoder(
+            new CountingSampleLoader(),
+            workerThreads: 4,
+            weakRfDiagnostics: true,
+            retainRfDiagnosticChannels: false);
+
+        RfDecodedSpan full = fullDecoder.Read(stream, begin: 0, length: 24)!;
+        RfDecodedSpan compact = compactDecoder.Read(stream, begin: 0, length: 24)!;
+
+        Assert.Equal(full.Video, compact.Video);
+        Assert.Equal(full.Envelope, compact.Envelope);
+        Assert.Equal(full.VideoLowPass, compact.VideoLowPass);
+        Assert.Empty(compact.Input);
+        Assert.Empty(compact.DemodRaw);
+        Assert.Empty(compact.RfHighPass!);
+        Assert.Equal(24, compact.AvailableSampleCountOverride);
+    }
+
     [Fact(DisplayName = "RF decoded-block cache invalidation forces fresh parallel work")]
     public void RfDecodedBlockCacheInvalidationForcesFreshParallelWork()
     {
@@ -328,7 +354,8 @@ public sealed class RfBlockCacheConcurrencyTests
         int prefetchBlocks = 0,
         bool weakRfDiagnostics = false,
         bool optionalOutputs = false,
-        Action<string, string>? diagnosticLogger = null)
+        Action<string, string>? diagnosticLogger = null,
+        bool retainRfDiagnosticChannels = true)
     {
         const int blockLength = 16;
         Complex[] identity = RfDemodulator.IdentityFilter(blockLength);
@@ -378,7 +405,8 @@ public sealed class RfBlockCacheConcurrencyTests
             filterOptions: weakRfDiagnostics
                 ? new DecodeFilterOptions(FmDemodulatorMode: RfFmDemodulatorMode.VhsRustApproximation)
                 : null,
-            diagnosticLogger: diagnosticLogger);
+            diagnosticLogger: diagnosticLogger,
+            retainRfDiagnosticChannels: retainRfDiagnosticChannels);
         return new RfBlockStreamDecoder(
             pipeline,
             blockLength,
