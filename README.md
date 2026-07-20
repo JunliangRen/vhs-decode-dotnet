@@ -2,7 +2,7 @@
 
 **[English](README.md)** | [简体中文](README.zh-CN.md) | [日本語](README.ja.md)
 
-<!-- README_SYNC: 2026-07-20.5 -->
+<!-- README_SYNC: 2026-07-20.6 -->
 
 .NET 11 rewrite of the decode-facing parts of
 [`oyvindln/vhs-decode`](https://github.com/oyvindln/vhs-decode), focused on
@@ -165,10 +165,11 @@ release compatibility remain the first constraint.
   rendering, and retained LD VITS sources keep independent ownership.
 - AVX/FMA kernels accelerate exact float32 conversion, VHS RF-envelope
   preparation, VHS Rust-style FM angle approximation, LD quantization, VHS
-  chroma rotation, and complex frequency filtering. The forward/inverse radix-4 FFT
-  and 16-tap TBC sinc kernels use pinned pointer indexing to remove bounds
-  checks without changing arithmetic order; differential tests preserve exact
-  transform bits and output hashes.
+  chroma rotation, and complex frequency filtering. The forward/inverse radix-4
+  FFT kernels use pinned pointer indexing. The 16-tap TBC sinc interior computes
+  independent float weights and products with AVX/FMA, then accumulates them in
+  original tap order; clamped edges, short inputs, and unsupported hardware keep
+  the scalar path. Differential tests preserve exact transform bits and hashes.
 - Recovery metadata is disk-streamed; its snapshot queue has capacity one, and
   field-order history and RF caches have hard limits. Long decodes therefore do
   not retain every decoded field or enqueue an unbounded amount of future work.
@@ -210,10 +211,13 @@ chroma SHA-256 values; wall time remained within run-to-run noise.
 <summary>Kernel and allocation benchmark history</summary>
 
 The pinned PAL-sized TBC sinc A/B reduced the median from 3.929 ms to 3.727 ms
-per field, a 5.1% kernel gain. A follow-up interior-window path retained clamped
-edges and short inputs while improving its serial probe by another 1.6%. A fresh
-160-frame run finished in 21.31 s with 0.78/1.18/1.20/1.41 GiB quarter medians
-and a 1.68 GiB peak; TBC, JSON, and chroma SHA-256 remained identical.
+per field, a 5.1% kernel gain, and the interior-window path added 1.6%. An
+AVX/FMA follow-up retained scalar clamps and ordered double accumulation. Five
+interleaved PAL-field A/B runs reduced serial/20-worker medians from
+21.588/5.579 to 18.741/5.330 ms (13.2%/4.5%). Five 40-frame full-path pairs
+reduced median wall/CPU time from 5.511/19.297 to 5.478/17.922 s (0.6%/7.1%).
+Two reversed 204-frame pairs were 1.1-1.3% faster with bounded memory; TBC,
+chroma, JSON, and the isolated field hash remained exact.
 
 AVX RF-envelope preparation reduced the isolated 32K-block median from 57.5 us
 to 13.3 us, a 76.9% kernel gain. The 40-frame median moved from 7.55 s to 7.39 s,

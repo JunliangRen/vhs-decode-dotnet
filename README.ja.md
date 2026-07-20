@@ -2,7 +2,7 @@
 
 [English](README.md) | [简体中文](README.zh-CN.md) | **[日本語](README.ja.md)**
 
-<!-- README_SYNC: 2026-07-20.5 -->
+<!-- README_SYNC: 2026-07-20.6 -->
 
 [`oyvindln/vhs-decode`](https://github.com/oyvindln/vhs-decode) の
 デコード関連部分を .NET 11 で再実装するプロジェクトです。現在は release
@@ -160,9 +160,10 @@
   はそれぞれ独立した array ownership を維持します。
 - AVX/FMA kernel は正確な float32 conversion、VHS RF-envelope preparation、
   VHS Rust-style FM angle approximation、LD quantization、VHS chroma rotation、
-  complex frequency filtering を高速化します。forward/inverse radix-4 FFT と 16-tap TBC
-  sinc kernel は算術順序を変えずに pinned pointer indexing で bounds check を除去し、
-  differential test で transform bit と output hash の一致を維持します。
+  complex frequency filtering を高速化します。forward/inverse radix-4 FFT は pinned
+  pointer indexing を使用します。16-tap TBC sinc の interior window は独立した float
+  weight/product を AVX/FMA で計算し、元の tap 順で加算します。clamped edge、短い input、
+  非対応 hardware は scalar path を維持し、differential test で bit/hash を保ちます。
 - Recovery metadata は disk streaming され、snapshot queue の容量は 1、field-order
   history と RF cache にも hard limit があります。長時間 decode でも全 field を
   保持したり、将来の work を無制限に enqueue したりしません。
@@ -202,11 +203,13 @@ run-to-run noise の範囲内でした。
 <details>
 <summary>Kernel と allocation の benchmark 履歴</summary>
 
-pinned pointer を使う PAL サイズ TBC sinc 単体 A/B では、field あたりの中央値が
-3.929 ms から 3.727 ms へ下がり、kernel は 5.1% 改善しました。続く interior-window
-path は edge と短い input の clamp を維持し、serial probe をさらに 1.6% 改善しました。
-新しい 160-frame run は 21.31 秒、private-memory の 4 分割中央値は
-0.78/1.18/1.20/1.41 GiB、peak は 1.68 GiB で、TBC、JSON、chroma SHA-256 は一致しました。
+pinned pointer を使う PAL サイズ TBC sinc 単体 A/B は 3.929 ms から 3.727 ms へ
+5.1% 改善し、続く interior-window path でさらに 1.6% 改善しました。AVX/FMA pass も
+scalar clamp と順序付き double accumulation を維持します。5 組の交互 PAL-field A/B で
+serial/20-worker 中央値は 21.588/5.579 ms から 18.741/5.330 ms（13.2%/4.5%）へ、
+5 組の 40-frame full-path wall/CPU 中央値は 5.511/19.297 秒から 5.478/17.922 秒
+（0.6%/7.1%）へ減少しました。実行順を反転した 2 組の 204-frame pair は 1.1-1.3%
+高速で memory は境界内に保たれ、TBC、chroma、JSON、単体 field hash は完全一致です。
 
 AVX RF-envelope preparation は、単体 32K-block 中央値を 57.5 us から 13.3 us へ
 短縮し、kernel は 76.9% 改善しました。40-frame 中央値は 7.55 秒から 7.39 秒、

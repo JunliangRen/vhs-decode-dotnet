@@ -1268,14 +1268,30 @@ possible capture has already been proven byte-for-byte identical.
   for chroma TBC, and
   `EAACE43594DEC574360B664D932E23F10E1B428BA4268A91BA6A1858BFEDD4AD`
   for JSON
-- the 16-tap TBC sinc kernel now pins its source and lookup table for pointer
-  indexing while preserving clamp, FMA, float-conversion, and accumulation order;
-  an isolated PAL-sized field median improved from 3.929 ms to 3.727 ms (5.1%),
-  then an interior-window path removed redundant per-tap clamps while retaining
-  the clamped path for edges and inputs shorter than 16 samples, improving its
-  serial probe by another 1.6%. All three 40-frame hashes remained exact; a fresh
-  160-frame run also matched TBC, JSON, and chroma hashes with 0.78/1.18/1.20/1.41
-  GiB quarter private-memory medians and a 1.68 GiB peak
+- the 16-tap TBC sinc kernel pins its source and lookup table for pointer
+  indexing while preserving clamp, FMA, float-conversion, and accumulation
+  order. The first PAL-sized field pass improved from 3.929 to 3.727 ms (5.1%),
+  and its interior-window path added 1.6%. The current AVX/FMA path converts and
+  multiplies all 16 independent interior taps in vector lanes, stores the float
+  products, then adds them to the double result in original tap order. Edges,
+  sources shorter than 16 samples, and hardware without AVX/FMA retain the
+  scalar implementation. Five interleaved PAL-field A/B runs reduced the
+  serial median from 21.588 to 18.741 ms (13.2%) and the 20-worker median from
+  5.579 to 5.330 ms (4.5%); both produced
+  `22872784886D616621B77044BBF7B3E5DB56A88313C741D779A6187B3F9AF4CB`.
+  Five interleaved 40-frame full-path pairs reduced median wall time from 5.511
+  to 5.478 s (0.6%) and CPU time from 19.297 to 17.922 s (7.1%). TBC, chroma,
+  and JSON hashes remained `E42AB3A9F480610A032B0D4813BF4BAD1BF7A5CBEC00CF56EEEC359C2DD9D7CB`,
+  `7269E13798026A9FBDB199594A1AB46EE4BDD0EE800A8387CB3807A2EB8946AB`,
+  and `06AB7E6C28D6DE2C70C7902D6FB296BE664153CFA73C254F2F305C5729FBFC6E`.
+  In two reversed 204-frame pairs, baseline/current wall time was 23.79/23.53 s
+  and current/baseline was 23.40/23.70 s. Current private-memory quarter medians
+  were 1.015/0.964/1.319/1.169 and 1.144/1.196/1.343/1.552 GiB with 1.61 and
+  1.96 GiB peaks, not a monotonic rise. Both variants emitted 408 sequential
+  metadata fields and complete payloads; exact luma/chroma/JSON hashes were
+  `7C732FDB97CA95900ED353ABF1DBD0A37BBE3D8609886E16A7B55CCAE1D5B236`,
+  `82F1D3A9E3A3BD73A5AA07A63C930892CBB7125D857725D736C721CCBED18494`,
+  and `DDEFFB4DC96F4DAB031BDAF6BA385C1DD6C2EAEE31E53ECD244826C12F21D081`
 - VHS RF-envelope preparation now converts four doubles to float32, clears the
   sign bits, and writes the rotated float64 values through AVX while preserving
   the scalar tail and wrap path. A 32K-block isolated median improved from

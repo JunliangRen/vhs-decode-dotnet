@@ -777,11 +777,13 @@ public sealed class HiFiRunnerTests
     [Fact(DisplayName = "HiFi GNU Radio sink matches Release 4.0 REP float32 protocol")]
     public async Task HiFiGnuRadioSinkMatchesRelease40RepFloat32Protocol()
     {
-        int port = GnuRadioRfAfeBridge.FindAvailablePort(5_700, 5_800)
-            ?? throw new InvalidOperationException("No test ZMQ port is available.");
+        int port = ReserveRandomNetMqPort();
         CancellationToken cancellationToken = TestContext.Current.CancellationToken;
         var diagnostics = new StringWriter();
-        using var sink = new HiFiGnuRadioSink(diagnostics, cancellationToken, port);
+        using var sink = CreateGnuRadioSinkAfterPortRelease(
+            port,
+            cancellationToken,
+            diagnostics);
         using var requester = new RequestSocket();
         requester.Options.Linger = TimeSpan.Zero;
         requester.Connect($"tcp://localhost:{port}");
@@ -1639,7 +1641,8 @@ public sealed class HiFiRunnerTests
 
     private static HiFiGnuRadioSink CreateGnuRadioSinkAfterPortRelease(
         int port,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        TextWriter? output = null)
     {
         var timeout = Stopwatch.StartNew();
         InvalidOperationException? lastFailure = null;
@@ -1648,7 +1651,7 @@ public sealed class HiFiRunnerTests
             cancellationToken.ThrowIfCancellationRequested();
             try
             {
-                return new HiFiGnuRadioSink(TextWriter.Null, cancellationToken, port);
+                return new HiFiGnuRadioSink(output ?? TextWriter.Null, cancellationToken, port);
             }
             catch (InvalidOperationException ex) when (
                 ex.InnerException is AddressAlreadyInUseException)
@@ -1661,6 +1664,13 @@ public sealed class HiFiRunnerTests
         throw new InvalidOperationException(
             $"ZMQ port {port} was not released within the test timeout.",
             lastFailure);
+    }
+
+    private static int ReserveRandomNetMqPort()
+    {
+        using var reservation = new ResponseSocket();
+        reservation.Options.Linger = TimeSpan.Zero;
+        return reservation.BindRandomPort("tcp://*");
     }
 
     private static void AssertFfmpegFallback(

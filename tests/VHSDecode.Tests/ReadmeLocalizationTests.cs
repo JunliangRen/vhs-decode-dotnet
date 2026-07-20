@@ -100,6 +100,13 @@ public sealed partial class ReadmeLocalizationTests
             "3.861",
             "622.63",
             "340.02",
+            "21.588",
+            "18.741",
+            "5.579",
+            "5.330",
+            "19.297",
+            "17.922",
+            "7.1%",
             "--use_saved_levels",
             "docs/COMPATIBILITY_EVIDENCE.md"
         ];

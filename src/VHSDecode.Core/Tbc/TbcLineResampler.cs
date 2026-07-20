@@ -3,6 +3,8 @@ using System.Buffers.Binary;
 using System.Collections.Concurrent;
 using System.IO.Compression;
 using System.Reflection;
+using System.Runtime.Intrinsics;
+using System.Runtime.Intrinsics.X86;
 using System.Text;
 using VHSDecode.Core.Dsp;
 
@@ -474,6 +476,15 @@ public sealed class TbcLineResampler
         if (sourceLength >= SincTapCount
             && (uint)sampleStart <= (uint)(sourceLength - SincTapCount))
         {
+            if (Avx.IsSupported && Fma.IsSupported)
+            {
+                return SampleSincInteriorAvxFma(
+                    source + sampleStart,
+                    weights + weightStart,
+                    weights + weightEnd,
+                    alpha);
+            }
+
             for (int tap = 0; tap < SincTapCount; tap++)
             {
                 float startWeight = weights[weightStart + tap];
@@ -496,6 +507,42 @@ public sealed class TbcLineResampler
                 startWeight);
             int sampleIndex = Math.Clamp(sampleStart + tap, 0, sourceLength - 1);
             result += (float)source[sampleIndex] * weight;
+        }
+
+        return result;
+    }
+
+    private static unsafe double SampleSincInteriorAvxFma(
+        double* source,
+        float* startWeights,
+        float* endWeights,
+        float alpha)
+    {
+        Vector256<float> alphaVector = Vector256.Create(alpha);
+        Vector256<float> start0 = Avx.LoadVector256(startWeights);
+        Vector256<float> start1 = Avx.LoadVector256(startWeights + 8);
+        Vector256<float> weight0 = Fma.MultiplyAdd(
+            alphaVector,
+            Avx.Subtract(Avx.LoadVector256(endWeights), start0),
+            start0);
+        Vector256<float> weight1 = Fma.MultiplyAdd(
+            alphaVector,
+            Avx.Subtract(Avx.LoadVector256(endWeights + 8), start1),
+            start1);
+        Vector256<float> source0 = Vector256.Create(
+            Avx.ConvertToVector128Single(Avx.LoadVector256(source)),
+            Avx.ConvertToVector128Single(Avx.LoadVector256(source + 4)));
+        Vector256<float> source1 = Vector256.Create(
+            Avx.ConvertToVector128Single(Avx.LoadVector256(source + 8)),
+            Avx.ConvertToVector128Single(Avx.LoadVector256(source + 12)));
+        float* products = stackalloc float[SincTapCount];
+        Avx.Store(products, Avx.Multiply(source0, weight0));
+        Avx.Store(products + 8, Avx.Multiply(source1, weight1));
+
+        double result = 0.0;
+        for (int tap = 0; tap < SincTapCount; tap++)
+        {
+            result += products[tap];
         }
 
         return result;
