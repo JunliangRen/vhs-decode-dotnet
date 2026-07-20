@@ -199,16 +199,61 @@ release compatibility remain the first constraint.
   isolated 32K FFTs across the host/device boundary; any future optional GPU
   backend must batch a device-resident DSP stage and retain an exact CPU fallback.
 
-On one Windows fixture machine, one-frame Release measurements were:
+The current thread matrix used an Intel Core Ultra 7 265K (20 logical
+processors), Windows 11 build 26220, .NET SDK/runtime
+`11.0.100-preview.6.26359.118`, and Python v0.4.0 (`g4315520`). Each value is
+the median of three interleaved Release runs:
 
-| Decode | This port | Python v0.4.0 |
-| --- | ---: | ---: |
-| NTSC VHS | 2.346 s | 7.193 s |
-| NTSC LaserDisc | 1.651 s | 5.865 s |
+| CLI mode | Effective workers | This port | Python | Speedup | Wall-time reduction |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| default | 5 | 4.908 s | 11.788 s | 2.40x | 58.4% |
+| `--threads 1` | 1 | 9.605 s | 12.729 s | 1.33x | 24.5% |
+| `--threads 5` | 5 | 4.936 s | 11.432 s | 2.32x | 56.8% |
+| `--threads 10` | 10 | 4.682 s | 11.797 s | 2.52x | 60.3% |
+| `--threads 20` | 20 | 4.159 s | 12.011 s | 2.89x | 65.4% |
 
-These numbers are fixture-specific, not universal benchmarks. All current VHS
-A/B runs used .NET SDK/runtime `11.0.100-preview.6.26359.118`, `--threads 20`,
-default chroma, and default resampling. On a reproducible 40-frame PAL probe,
+The default remains **5 workers**, matching Release 4.0 CLI semantics; explicit
+20-worker mode was fastest on this 20-logical-processor fixture. The matrix used
+`RF-Sample_2026-07-19_09-12-03.lds` with `--system pal
+--detect_chroma_track_phase --ire0_adjust --tape_format VHS --frequency 40
+--start_fileloc 281303040 -l 40 --overwrite`, plus the row's thread option.
+
+All 15 port runs produced one identical luma TBC, chroma TBC, and JSON hash set
+across every worker count. Upstream Python's requested nonzero thread modes were
+not byte-deterministic on this fixture: its 15 matrix runs produced 15 distinct
+luma/chroma pairs. Three additional Python `--threads 0` controls were mutually
+identical and exactly matched every port run. The matrix therefore compares
+observed throughput; the serial checkpoint below is the strict exact-output A/B.
+
+The compatibility baseline for this 40-frame fixture is Python v0.4.0
+`g4315520` with `--threads 0`:
+
+| Baseline artifact | SHA-256 |
+| --- | --- |
+| Luma TBC | `857315FEC19C3F8D364896CDB4FC3AA26769D86D6E825DE095845EF6647C44A9` |
+| Chroma TBC | `CE54E7F6050E1445E0E205867CD8C3B912B4BB16708D31C303FABC8B04C3AA3B` |
+| JSON | `D0BFA50DD75ABACAE1BAD7E275BB2FD2159230F6FDF98461F045F3784BDF6DD8` |
+
+A longer exact-output checkpoint used an Intel Core Ultra 7 265K (20 logical
+processors), Windows 11 build 26220, and .NET SDK/runtime
+`11.0.100-preview.6.26359.118`:
+
+| PAL VHS, 1,000 frames / 2,000 fields | Wall time | CPU time | Peak working set |
+| --- | ---: | ---: | ---: |
+| This port, Release (two runs) | 218.00 / 218.63 s | 238.72 / 239.50 s | 829.6-838.2 MiB |
+| Python v0.4.0 (`g4315520`) | 417.37 s | not captured | not captured |
+
+Both runs used `RF-Sample_2026-07-19_09-12-03.lds` and
+`--system pal --detect_chroma_track_phase --ire0_adjust --tape_format VHS
+--frequency 40 --start_fileloc 281303040 --threads 0 -l 1000 --overwrite`.
+Both port runs were about 1.91x as fast (47.7-47.8% lower wall time), and all
+three paired SHA-256 values were byte-identical across Python and both port
+runs. `--threads 0` selected deterministic serial mode in both implementations.
+
+These numbers are fixture-specific, not universal benchmarks. The 40-frame
+tuning A/B runs below used .NET SDK/runtime `11.0.100-preview.6.26359.118`,
+`--threads 20`, default chroma, and default resampling. On a reproducible
+40-frame PAL probe,
 the saved pre-continuous-pipeline baseline median was 11.60 s and the latest
 median was 4.97 s, a 57.2% cumulative gain. The newest direct-`.s16` checkpoint
 alone moved matched wall/CPU medians from 5.33/17.11 s to 4.97/15.94 s
@@ -408,7 +453,7 @@ dotnet test --solution VHSDecodeDotNet.slnx -c Release --no-build --no-restore
 ```
 
 The current formal Release build has zero warnings and errors. The xUnit v3
-project exposes **788** independently discoverable tests to both
+project exposes **793** independently discoverable tests to both
 `dotnet test` and Visual Studio Test Explorer.
 
 <!-- SECTION: usage -->

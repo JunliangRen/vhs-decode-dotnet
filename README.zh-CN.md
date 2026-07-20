@@ -167,15 +167,55 @@
 - CUDA/OpenCL 不是运行时依赖。当前 trace 不支持把孤立的 32K FFT 在主机与设备间
   往返；未来可选 GPU 后端必须批量处理常驻显存的 DSP 阶段，并保留精确 CPU 回退。
 
-在一台 Windows 夹具机器上，Release 单帧测量为：
+当前线程矩阵使用 Intel Core Ultra 7 265K（20 个逻辑处理器）、Windows 11 build
+26220、.NET SDK/runtime `11.0.100-preview.6.26359.118` 和 Python v0.4.0
+（`g4315520`）。每项都是三次交错 Release 运行的中位数：
 
-| 解码 | 本项目 | Python v0.4.0 |
-| --- | ---: | ---: |
-| NTSC VHS | 2.346 s | 7.193 s |
-| NTSC LaserDisc | 1.651 s | 5.865 s |
+| CLI 模式 | 实际 worker | 本项目 | Python | 加速倍数 | 墙钟降幅 |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| 默认 | 5 | 4.908 s | 11.788 s | 2.40x | 58.4% |
+| `--threads 1` | 1 | 9.605 s | 12.729 s | 1.33x | 24.5% |
+| `--threads 5` | 5 | 4.936 s | 11.432 s | 2.32x | 56.8% |
+| `--threads 10` | 10 | 4.682 s | 11.797 s | 2.52x | 60.3% |
+| `--threads 20` | 20 | 4.159 s | 12.011 s | 2.89x | 65.4% |
 
-这些数字只对应特定夹具，不是通用 benchmark。当前 VHS A/B 均使用 .NET SDK/runtime
-`11.0.100-preview.6.26359.118`、`--threads 20`、默认色度和默认重采样。
+默认值最终保持为 **5 个 worker**，与 Release 4.0 CLI 语义一致；在这台 20 逻辑处理器
+机器上，显式 20 worker 最快。矩阵使用 `RF-Sample_2026-07-19_09-12-03.lds`，
+公共参数为 `--system pal --detect_chroma_track_phase --ire0_adjust --tape_format VHS
+--frequency 40 --start_fileloc 281303040 -l 40 --overwrite`，再附加表中线程选项。
+
+本项目 15 次运行在所有 worker 数下都得到同一组亮度 TBC、色度 TBC 和 JSON hash。
+上游 Python 的非零线程模式在这份夹具上不是逐字节确定的：矩阵中的 15 次 Python
+运行产生了 15 组不同的亮度/色度配对。另加的三次 Python `--threads 0` 控制组彼此
+完全一致，并精确匹配本项目全部运行。因此线程矩阵比较的是实测吞吐；下方串行检查点
+才是严格的精确输出 A/B。
+
+这份 40 帧夹具的兼容性基准是 Python v0.4.0 `g4315520` 的 `--threads 0` 输出：
+
+| 基准产物 | SHA-256 |
+| --- | --- |
+| 亮度 TBC | `857315FEC19C3F8D364896CDB4FC3AA26769D86D6E825DE095845EF6647C44A9` |
+| 色度 TBC | `CE54E7F6050E1445E0E205867CD8C3B912B4BB16708D31C303FABC8B04C3AA3B` |
+| JSON | `D0BFA50DD75ABACAE1BAD7E275BB2FD2159230F6FDF98461F045F3784BDF6DD8` |
+
+一次更长的精确输出检查使用 Intel Core Ultra 7 265K（20 个逻辑处理器）、
+Windows 11 build 26220 和 .NET SDK/runtime
+`11.0.100-preview.6.26359.118`：
+
+| PAL VHS，1,000 帧 / 2,000 场 | 墙钟时间 | CPU 时间 | 工作集峰值 |
+| --- | ---: | ---: | ---: |
+| 本项目，Release（两次） | 218.00 / 218.63 s | 238.72 / 239.50 s | 829.6-838.2 MiB |
+| Python v0.4.0（`g4315520`） | 417.37 s | 未采集 | 未采集 |
+
+两次运行都使用 `RF-Sample_2026-07-19_09-12-03.lds`，参数为
+`--system pal --detect_chroma_track_phase --ire0_adjust --tape_format VHS
+--frequency 40 --start_fileloc 281303040 --threads 0 -l 1000 --overwrite`。
+本项目两次运行的墙钟速度均约为 Python 的 1.91 倍（墙钟降低 47.7-47.8%），三项
+SHA-256 在 Python 与两次本项目运行之间都逐字节一致；两边的 `--threads 0` 都选择
+确定性串行模式。
+
+这些数字只对应特定夹具，不是通用 benchmark。下述 40-frame 调优 A/B 使用 .NET
+SDK/runtime `11.0.100-preview.6.26359.118`、`--threads 20`、默认色度和默认重采样。
 在可重复的 40-frame PAL probe 上，保存的连续流水线改造前基线中位数为 11.60 秒，
 最新中位数为 4.97 秒，累计提升 57.2%。最新的 `.s16` 直接读取检查点本身将配对的
 墙钟/CPU 中位数从 5.33/17.11 秒降至 4.97/15.94 秒（6.8%/6.8%）。进程 CPU 时间除以
@@ -344,7 +384,7 @@ dotnet test --solution VHSDecodeDotNet.slnx -c Release --no-build --no-restore
 ```
 
 当前正式 Release 构建为零警告、零错误。xUnit v3 项目向
-`dotnet test` 和 Visual Studio Test Explorer 暴露 **788** 个可独立发现的测试。
+`dotnet test` 和 Visual Studio Test Explorer 暴露 **793** 个可独立发现的测试。
 
 <!-- SECTION: usage -->
 

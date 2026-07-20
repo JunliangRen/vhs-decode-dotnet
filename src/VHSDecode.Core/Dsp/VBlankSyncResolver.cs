@@ -464,6 +464,38 @@ public static class VBlankSyncResolver
             + boundaries.FirstEqualizing2;
     }
 
+    public static double NextFieldLocation(
+        string system,
+        int numEqualizingPulses,
+        bool isFirstField,
+        int currentFieldLines,
+        double meanLineLength,
+        double firstHSyncLocation)
+    {
+        if (currentFieldLines <= 0)
+        {
+            throw new ArgumentOutOfRangeException(nameof(currentFieldLines));
+        }
+
+        if (!double.IsFinite(meanLineLength) || meanLineLength <= 0.0)
+        {
+            throw new ArgumentOutOfRangeException(nameof(meanLineLength));
+        }
+
+        if (!double.IsFinite(firstHSyncLocation))
+        {
+            throw new ArgumentOutOfRangeException(nameof(firstHSyncLocation));
+        }
+
+        FieldBoundaryLengths boundaries = ExpectedFieldBoundaryLengths(
+            FormatCatalog.ParentSystem(system),
+            isFirstField);
+        double firstHSyncLine = FirstHSyncLine(system, numEqualizingPulses, isFirstField);
+        double nextVBlankEqualizing1Line = currentFieldLines + boundaries.LastHSync;
+        return firstHSyncLocation
+            + (meanLineLength * (nextVBlankEqualizing1Line - firstHSyncLine));
+    }
+
     public static bool HasValidStateMachineTiming(
         VBlankPulseGroup group,
         double meanLineLength,

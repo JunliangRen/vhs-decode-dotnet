@@ -34,7 +34,8 @@ public sealed class VhsInsufficientDataDiagnosticCompatibilityTests : IDisposabl
             session.TbcFieldDecoder.RestoreStateForRetry(state with
             {
                 PreviousFirstHSyncLocation = 100.0,
-                PreviousFirstHSyncReadLocation = 0
+                PreviousFirstHSyncReadLocation = 0,
+                PreviousSyncConfidence = 100
             });
         }
 

@@ -190,16 +190,60 @@
   32K FFT を host/device 間で往復させる根拠がありません。将来の任意 GPU backend は
   device-resident DSP stage を batch 化し、正確な CPU fallback を維持する必要があります。
 
-ある Windows fixture 環境での Release 1 frame 計測値は次のとおりです。
+現在の thread matrix は Intel Core Ultra 7 265K（20 logical processor）、
+Windows 11 build 26220、.NET SDK/runtime `11.0.100-preview.6.26359.118`、
+Python v0.4.0（`g4315520`）で実行しました。各値は 3 回の交互 Release run の
+median です。
 
-| デコード | この移植 | Python v0.4.0 |
-| --- | ---: | ---: |
-| NTSC VHS | 2.346 s | 7.193 s |
-| NTSC LaserDisc | 1.651 s | 5.865 s |
+| CLI mode | Effective worker | この移植 | Python | Speedup | Wall-time reduction |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| default | 5 | 4.908 s | 11.788 s | 2.40x | 58.4% |
+| `--threads 1` | 1 | 9.605 s | 12.729 s | 1.33x | 24.5% |
+| `--threads 5` | 5 | 4.936 s | 11.432 s | 2.32x | 56.8% |
+| `--threads 10` | 10 | 4.682 s | 11.797 s | 2.52x | 60.3% |
+| `--threads 20` | 20 | 4.159 s | 12.011 s | 2.89x | 65.4% |
 
-これは特定 fixture の値であり、一般的な benchmark ではありません。現在の VHS A/B は
-すべて .NET SDK/runtime `11.0.100-preview.6.26359.118`、`--threads 20`、default chroma、
-default resampling を使用しました。再現可能な 40-frame PAL probe では、保存した
+default は Release 4.0 CLI semantics に合わせて最終的に **5 worker** のままです。
+この 20 logical processor fixture では、明示的な 20-worker mode が最速でした。
+matrix は `RF-Sample_2026-07-19_09-12-03.lds` と `--system pal
+--detect_chroma_track_phase --ire0_adjust --tape_format VHS --frequency 40
+--start_fileloc 281303040 -l 40 --overwrite` に各行の thread option を加えています。
+
+この移植の 15 run は、すべての worker 数で同じ luma TBC、chroma TBC、JSON hash
+set を生成しました。上流 Python の非ゼロ thread mode はこの fixture で byte 単位の
+determinism がなく、15 回の matrix run は 15 種類の luma/chroma pair になりました。
+追加した 3 回の Python `--threads 0` control は互いに一致し、この移植の全 run とも
+完全一致しました。そのため matrix は observed throughput の比較であり、下の serial
+checkpoint が strict exact-output A/B です。
+
+この 40-frame fixture の compatibility baseline は Python v0.4.0 `g4315520` の
+`--threads 0` output です。
+
+| Baseline artifact | SHA-256 |
+| --- | --- |
+| Luma TBC | `857315FEC19C3F8D364896CDB4FC3AA26769D86D6E825DE095845EF6647C44A9` |
+| Chroma TBC | `CE54E7F6050E1445E0E205867CD8C3B912B4BB16708D31C303FABC8B04C3AA3B` |
+| JSON | `D0BFA50DD75ABACAE1BAD7E275BB2FD2159230F6FDF98461F045F3784BDF6DD8` |
+
+より長い exact-output checkpoint は Intel Core Ultra 7 265K（20 logical
+processor）、Windows 11 build 26220、.NET SDK/runtime
+`11.0.100-preview.6.26359.118` で実行しました。
+
+| PAL VHS、1,000 frame / 2,000 field | Wall time | CPU time | Peak working set |
+| --- | ---: | ---: | ---: |
+| この移植、Release（2 run） | 218.00 / 218.63 s | 238.72 / 239.50 s | 829.6-838.2 MiB |
+| Python v0.4.0（`g4315520`） | 417.37 s | 未取得 | 未取得 |
+
+両方とも `RF-Sample_2026-07-19_09-12-03.lds` と
+`--system pal --detect_chroma_track_phase --ire0_adjust --tape_format VHS
+--frequency 40 --start_fileloc 281303040 --threads 0 -l 1000 --overwrite`
+を使用しました。この移植の 2 run はどちらも約 1.91 倍高速（wall time は
+47.7-47.8% 減）で、3 種類の SHA-256 は Python と両方の run の間で byte 単位に
+一致しました。両実装とも `--threads 0` は deterministic serial mode です。
+
+これは特定 fixture の値であり、一般的な benchmark ではありません。以下の 40-frame
+tuning A/B は .NET SDK/runtime `11.0.100-preview.6.26359.118`、`--threads 20`、
+default chroma、default resampling を使用しました。再現可能な 40-frame PAL probe では、保存した
 continuous-pipeline 導入前 baseline の中央値が 11.60 秒、最新値が 4.97 秒で、累積
 57.2% の改善です。最新の direct `.s16` checkpoint 単体では、paired wall/CPU 中央値が
 5.33/17.11 秒から 4.97/15.94 秒（6.8%/6.8%）へ低下しました。process CPU/wall は
@@ -390,7 +434,7 @@ dotnet test --solution VHSDecodeDotNet.slnx -c Release --no-build --no-restore
 
 現在の正式な Release build は warning 0、error 0 です。xUnit v3 project は
 `dotnet test` と Visual Studio Test Explorer の両方で個別に検出できる
-**788** tests を公開します。
+**793** tests を公開します。
 
 <!-- SECTION: usage -->
 

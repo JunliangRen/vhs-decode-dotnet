@@ -2853,12 +2853,34 @@ public void VhsChromaDecoderUpconvertsLinePhases()
             unchecked((uint)BitConverter.SingleToInt32Bits((float)numbaFastMathCompensated[i])));
     }
 
-    AssertThrows<ArgumentOutOfRangeException>(() => VhsChromaDecoder.UpconvertChroma(
-        chroma,
-        lineOffset: 1,
+    double[] slicedChroma = [10.0, 20.0, 30.0, 40.0, 50.0, 60.0, 70.0, 80.0, 90.0];
+    double[] slicedPhase0 = Enumerable.Repeat(2.0, slicedChroma.Length).ToArray();
+    double[] slicedPhase1 = Enumerable.Repeat(-1.0, slicedChroma.Length).ToArray();
+    double[] numpySliced = VhsChromaDecoder.UpconvertChroma(
+        slicedChroma,
+        lineOffset: 3,
         lineLength: 3,
-        [new ChromaPhaseLine(LineNumber: 0, PhaseRotation: 0)],
-        [phase0]));
+        [
+            new ChromaPhaseLine(LineNumber: 1, PhaseRotation: 0),
+            new ChromaPhaseLine(LineNumber: 2, PhaseRotation: 1),
+            new ChromaPhaseLine(LineNumber: 3, PhaseRotation: 1)
+        ],
+        [slicedPhase0, slicedPhase1]);
+    AssertSequence([-10.0, -20.0, -30.0, 80.0, 100.0, 120.0, 0.0, 0.0, 0.0], numpySliced);
+
+    double[] negativeIndexed = VhsChromaDecoder.UpconvertChromaPhaseCompensated(
+        [1.0, 2.0, 3.0, 4.0],
+        lineOffset: 1,
+        lineLength: 2,
+        [new ChromaPhaseLine(LineNumber: 0, PhaseRotation: 0, BurstPhaseDegrees: 0.0)],
+        colorUnderCarrierHz: 0.0,
+        fscMHz: 1.0,
+        targetPhaseEvenDegrees: 0.0,
+        targetPhaseOddDegrees: 0.0);
+    AssertClose(0.0, negativeIndexed[0], 1e-12);
+    AssertClose(0.0, negativeIndexed[1], 1e-12);
+    AssertClose(3.0, negativeIndexed[2], 1e-12);
+    AssertClose(0.0, negativeIndexed[3], 1e-12);
 }
 
 [Fact(DisplayName = "VHS chroma heterodyne table is bit exact across worker counts")]
@@ -2923,6 +2945,20 @@ public void VhsChromaDecoderDetectsBurstPhaseSequence()
     AssertEqual(0x4038FD155992DCC5UL, BitConverter.DoubleToUInt64Bits(numbaBurstResult.Magnitude));
     AssertEqual(0x4065763E428A68F1UL, BitConverter.DoubleToUInt64Bits(numbaBurstResult.PhaseDegrees));
     AssertEqual(0x3FE4A28575E4BBDAUL, BitConverter.DoubleToUInt64Bits(numbaBurstResult.PhaseOffsetDegrees));
+
+    ChromaBurstDemodulationResult float32BurstResult = VhsChromaDecoder.DemodBurst(
+        numbaBurst,
+        lineScale: 0.9989764459848242,
+        lineStart: 0,
+        burstStart: 7,
+        numbaSin,
+        numbaCos,
+        useFloat32Samples: true);
+    AssertEqual(0xC038B9FFFFFFC000UL, BitConverter.DoubleToUInt64Bits(float32BurstResult.I));
+    AssertEqual(0x400CDFFFFFE90000UL, BitConverter.DoubleToUInt64Bits(float32BurstResult.Q));
+    AssertEqual(0x4038FD1559905438UL, BitConverter.DoubleToUInt64Bits(float32BurstResult.Magnitude));
+    AssertEqual(0x4065763E42874AC4UL, BitConverter.DoubleToUInt64Bits(float32BurstResult.PhaseDegrees));
+    AssertEqual(0x3FE4A28575E4BBDAUL, BitConverter.DoubleToUInt64Bits(float32BurstResult.PhaseOffsetDegrees));
 
     double[] chroma = Enumerable.Range(0, 12).Select(value => (double)value).ToArray();
     double[] carrierSin = new double[12];
@@ -6855,6 +6891,7 @@ public void VsyncSerrationDetectorMatchesV04Rules()
             + $"harmonic=[{string.Join(',', automaticResult.HarmonicMinima.Take(40))}].");
     }
     AssertTrue(automaticResult.Measurements.Count > 0);
+    AssertEqual(automaticResult.Measurements.Count, automaticResult.LevelCountBeforePull);
     AssertClose(60.0, automaticResult.Measurements[0].SyncLevel, 1e-12);
     AssertClose(100.0, automaticResult.Measurements[0].BlankLevel, 1e-12);
     VsyncSerrationResult tooShort = new VsyncSerrationDetector(
@@ -6942,8 +6979,10 @@ public void VsyncSerrationDetectorMatchesV04Rules()
         fortyMegahertzAnalyzer,
         referenceSyncLevel: 60.0,
         hzIre: 1.0,
-        out SerrationLevelFailureKind nonFiniteFailure));
+        out SerrationLevelFailureKind nonFiniteFailure,
+        out double? nonFiniteMeasuredSync));
     AssertEqual(SerrationLevelFailureKind.NonFiniteLevels, nonFiniteFailure);
+    AssertEqual(60.0, nonFiniteMeasuredSync);
 
     AssertEqual<SerrationLevelRefinement?>(null, LevelDetection.RefineSerrationLevels(
         refinementField,
@@ -7525,7 +7564,8 @@ public void LaserDiscHSyncRefinementMatchesLegacyFieldPath()
         "RefineLineLocationsFromHSync",
         span,
         locations,
-        converter)!;
+        converter,
+        -20.0)!;
 
     AssertClose(19.5, refined.Locations[0], 1e-12);
     AssertClose(119.5, refined.Locations[1], 1e-12);
@@ -7538,6 +7578,121 @@ public void LaserDiscHSyncRefinementMatchesLegacyFieldPath()
     }
 
     AssertClose(719.5, refined.Locations[7], 1e-12);
+}
+
+[Fact(DisplayName = "VHS right HSync refinement validates dynamically but preserves the initial crossing")]
+public void VhsRightHSyncRefinementPreservesInitialCrossing()
+{
+    var analyzer = new SyncAnalyzer(
+        sampleRateHz: 10_000_000.0,
+        linePeriodUs: 10.0,
+        hsyncPulseUs: 5.0,
+        equalizingPulseUs: 2.5,
+        vsyncPulseUs: 8.0);
+    var converter = new VideoOutputConverter(
+        ire0: 0.0,
+        hzIre: 1.0,
+        outputZero: 256,
+        vsyncIre: -40.0,
+        outputScale: 10.0);
+    var spec = new TbcFrameSpec(
+        "NTSC",
+        OutputLineLength: 4,
+        OutputLineCount: 7,
+        OutputSampleRateHz: 4_000_000.0,
+        ColourBurstStart: null,
+        ColourBurstEnd: null,
+        ActiveVideoStart: null,
+        ActiveVideoEnd: null);
+    var pipeline = new TbcFieldDecodePipeline(
+        analyzer,
+        new TbcFieldRenderer(spec, converter),
+        converter,
+        "NTSC",
+        TbcDropoutDetectionOptions.Disabled,
+        hSyncRefineOptions: HSyncRefineOptions.Default,
+        decodeType: "vhs");
+
+    double[] lowPass = Enumerable.Repeat(20.0, 900).ToArray();
+    for (int line = 0; line < 8; line++)
+    {
+        PaintPulse(lowPass, 101 + (line * 100), 50, -40.0);
+    }
+
+    var locations = new LineLocationResult(
+        Enumerable.Range(0, 8).Select(line => 101.0 + (line * 100.0)).ToArray(),
+        new bool[8]);
+    var span = new RfDecodedSpan(0, [], lowPass, lowPass, VideoLowPass: lowPass);
+    var refined = (LineLocationResult)InvokePrivateMethod(
+        pipeline,
+        "RefineLineLocationsFromHSync",
+        span,
+        locations,
+        converter,
+        -20.0)!;
+
+    // Release 4.0 validates against the measured -10 midpoint crossing at 150.5,
+    // but computes the recovered line from the initial -20 crossing at 150 1/3.
+    AssertClose(100.89583333333333, refined.Locations[0], 1e-12);
+}
+
+[Fact(DisplayName = "VHS right HSync validates against a failed provisional left crossing")]
+public void VhsRightHSyncUsesFailedProvisionalLeftCrossingAsReference()
+{
+    var analyzer = new SyncAnalyzer(
+        sampleRateHz: 10_000_000.0,
+        linePeriodUs: 10.0,
+        hsyncPulseUs: 5.0,
+        equalizingPulseUs: 2.5,
+        vsyncPulseUs: 8.0);
+    var converter = new VideoOutputConverter(
+        ire0: 0.0,
+        hzIre: 1.0,
+        outputZero: 256,
+        vsyncIre: -40.0,
+        outputScale: 10.0);
+    var spec = new TbcFrameSpec(
+        "NTSC",
+        OutputLineLength: 4,
+        OutputLineCount: 7,
+        OutputSampleRateHz: 4_000_000.0,
+        ColourBurstStart: null,
+        ColourBurstEnd: null,
+        ActiveVideoStart: null,
+        ActiveVideoEnd: null);
+    var pipeline = new TbcFieldDecodePipeline(
+        analyzer,
+        new TbcFieldRenderer(spec, converter),
+        converter,
+        "NTSC",
+        TbcDropoutDetectionOptions.Disabled,
+        hSyncRefineOptions: HSyncRefineOptions.Default,
+        decodeType: "vhs");
+
+    double[] lowPass = Enumerable.Repeat(20.0, 900).ToArray();
+    for (int line = 0; line < 8; line++)
+    {
+        int lineOffset = line * 100;
+        Array.Fill(lowPass, -40.0, 91 + lineOffset, 34);
+        Array.Fill(lowPass, -10.0, 125 + lineOffset, 6);
+        Array.Fill(lowPass, -40.0, 131 + lineOffset, 3);
+        Array.Fill(lowPass, 40.0, 134 + lineOffset, 16);
+    }
+
+    var locations = new LineLocationResult(
+        Enumerable.Range(0, 8).Select(line => 101.0 + (line * 100.0)).ToArray(),
+        new bool[8]);
+    var span = new RfDecodedSpan(0, [], lowPass, lowPass, VideoLowPass: lowPass);
+    var refined = (LineLocationResult)InvokePrivateMethod(
+        pipeline,
+        "RefineLineLocationsFromHSync",
+        span,
+        locations,
+        converter,
+        -20.0)!;
+
+    AssertClose(locations.Locations[0], refined.Locations[0], 1e-12);
+    AssertTrue(refined.Filled[0]);
 }
 
 [Fact(DisplayName = "sync analyzer classifies pulses and builds line locations")]
@@ -7708,6 +7863,69 @@ public void VBlankSyncResolverMatchesUpstreamDistanceConsensus()
     AssertClose(10.0, estimate.FirstHSyncLine, 1e-12);
     AssertEqual(6, estimate.ValidDistanceCount);
 
+    AssertClose(
+        26_450.0,
+        VBlankSyncResolver.NextFieldLocation(
+            system: "NTSC",
+            numEqualizingPulses: 6,
+            isFirstField: true,
+            currentFieldLines: 263,
+            meanLineLength: 100.0,
+            firstHSyncLocation: 1_100.0),
+        1e-12);
+    AssertClose(
+        26_500.0,
+        VBlankSyncResolver.NextFieldLocation(
+            system: "NTSC",
+            numEqualizingPulses: 6,
+            isFirstField: false,
+            currentFieldLines: 263,
+            meanLineLength: 100.0,
+            firstHSyncLocation: 1_100.0),
+        1e-12);
+    AssertClose(
+        31_400.0,
+        VBlankSyncResolver.NextFieldLocation(
+            system: "PAL",
+            numEqualizingPulses: 5,
+            isFirstField: true,
+            currentFieldLines: 312,
+            meanLineLength: 100.0,
+            firstHSyncLocation: 900.0),
+        1e-12);
+    AssertClose(
+        31_350.0,
+        VBlankSyncResolver.NextFieldLocation(
+            system: "PAL",
+            numEqualizingPulses: 5,
+            isFirstField: false,
+            currentFieldLines: 313,
+            meanLineLength: 100.0,
+            firstHSyncLocation: 900.0),
+        1e-12);
+
+    double criticalOffset = TbcFieldDecodePipeline.ComputeVhsNextFieldOffsetSamples(
+        system: "PAL",
+        numEqualizingPulses: 5,
+        isFirstField: true,
+        currentFieldLines: 312,
+        meanLineLength: 2555.079207920792,
+        firstHSyncLocation: 83716.87187144942,
+        nominalLineLength: 2560.0,
+        inputBlockCutSamples: 1024);
+    AssertClose(843560.030287291, criticalOffset, 1e-9);
+    long criticalNextStart = 290_826_240
+        + (long)Math.Round(criticalOffset, MidpointRounding.AwayFromZero);
+    AssertEqual(291_669_800L, criticalNextStart);
+    DecodeSession criticalSession = DecodeSessionFactory.Create(Parse(
+        CliSpecs.Vhs,
+        ["--system", "pal", "--frequency", "40", "input.lds", "out"]));
+    DecodeReadWindow criticalWindow = DecodeReadWindowPlanner.Resolve(
+        criticalSession,
+        criticalNextStart,
+        criticalSession.BlockLength);
+    AssertEqual(291_655_680L, criticalWindow.StartSample);
+
     VBlankPulseGroup lastGroup = new(
         PreviousHSync: 26_400,
         Equalizing1Start: 26_450,
@@ -7785,6 +8003,37 @@ public void VBlankSyncResolverMatchesUpstreamDistanceConsensus()
     ];
     AssertEqual<VBlankPulseGroup?>(null, VBlankSyncResolver.FindFirstGroup(incomplete));
 
+    ClassifiedSyncPulse[] partialFirstCompleteLast =
+    [
+        Sync(SyncPulseKind.HSync, 50_000),
+        Sync(SyncPulseKind.Equalizing, 60_394, inOrder: false),
+        Sync(SyncPulseKind.VSync, 61_673),
+        Sync(SyncPulseKind.EqualizingSecond, 68_067),
+        Sync(SyncPulseKind.EqualizingSecond, 73_182),
+        Sync(SyncPulseKind.HSync, 75_725),
+        Sync(SyncPulseKind.HSync, 853_847),
+        Sync(SyncPulseKind.Equalizing, 855_126),
+        Sync(SyncPulseKind.VSync, 861_522),
+        Sync(SyncPulseKind.EqualizingSecond, 867_915),
+        Sync(SyncPulseKind.EqualizingSecond, 873_032),
+        Sync(SyncPulseKind.HSync, 874_310)
+    ];
+    VBlankSyncConsensus partialFirstConsensus = VBlankSyncResolver.EstimateLine0FromTransitions(
+        partialFirstCompleteLast,
+        meanLineLength: 2_558.3311258278145,
+        system: "PAL",
+        numEqualizingPulses: 5,
+        isFirstField: false,
+        currentFieldLines: 313,
+        firstFieldLines: 312);
+    AssertTrue(TbcFieldDecodePipeline.UsesTransitionVBlankConsensus("vhs"));
+    AssertFalse(TbcFieldDecodePipeline.UsesTransitionVBlankConsensus("cvbs"));
+    AssertFalse(TbcFieldDecodePipeline.UsesTransitionVBlankConsensus("ld"));
+    AssertEqual(3, partialFirstConsensus.First!.ValidDistanceCount);
+    AssertEqual(6, partialFirstConsensus.Last!.ValidDistanceCount);
+    AssertTrue(partialFirstConsensus.Combined is not null);
+    AssertTrue(partialFirstConsensus.Combined!.Line0Location < 100_000.0);
+
     var shortTapeBlank = new List<ClassifiedSyncPulse> { Sync(SyncPulseKind.HSync, 0) };
     for (int pulse = 0; pulse < 5; pulse++)
     {
@@ -7810,6 +8059,9 @@ public void VBlankSyncResolverMatchesUpstreamDistanceConsensus()
         Equalizing2End: 150,
         FollowingHSync: 200);
     AssertFalse(VBlankSyncResolver.HasValidStateMachineTiming(compressed, 100.0, 6));
+    AssertTrue(TbcFieldDecodePipeline.ShouldRetainVBlankGroup("vhs", compressed, 100.0, 6));
+    AssertFalse(TbcFieldDecodePipeline.ShouldRetainVBlankGroup("cvbs", compressed, 100.0, 6));
+    AssertFalse(TbcFieldDecodePipeline.ShouldRetainVBlankGroup("ld", compressed, 100.0, 6));
 }
 
 [Fact(DisplayName = "PAL CVBS initial second field uses Release 4.0 local vblank anchor")]
@@ -7914,6 +8166,10 @@ public void PalLaserDiscInitialSecondFieldUsesReleaseFourFirstFieldHAnchor()
 [Fact(DisplayName = "LD line-zero consensus matches Release 4.0 three-way median")]
 public void LaserDiscLineZeroConsensusMatchesRelease40ThreeWayMedian()
 {
+    AssertTrue(TbcFieldDecodePipeline.UsesLegacyThreeWayLine0Consensus("ld"));
+    AssertTrue(TbcFieldDecodePipeline.UsesLegacyThreeWayLine0Consensus("cvbs"));
+    AssertFalse(TbcFieldDecodePipeline.UsesLegacyThreeWayLine0Consensus("vhs"));
+
     var first = new VBlankSyncEstimate(
         Line0Location: 100.0,
         FirstHSyncLocation: 1_100.0,

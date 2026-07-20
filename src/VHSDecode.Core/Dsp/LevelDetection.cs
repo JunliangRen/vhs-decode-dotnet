@@ -102,8 +102,28 @@ public static class LevelDetection
         double referenceSyncLevel,
         double hzIre,
         out SerrationLevelFailureKind failureKind)
+        => RefineSerrationLevels(
+            demodulatedLowPass,
+            initialSyncLevel,
+            initialBlankLevel,
+            analyzer,
+            referenceSyncLevel,
+            hzIre,
+            out failureKind,
+            out _);
+
+    public static SerrationLevelRefinement? RefineSerrationLevels(
+        ReadOnlySpan<double> demodulatedLowPass,
+        double initialSyncLevel,
+        double initialBlankLevel,
+        SyncAnalyzer analyzer,
+        double referenceSyncLevel,
+        double hzIre,
+        out SerrationLevelFailureKind failureKind,
+        out double? measuredSyncLevel)
     {
         failureKind = SerrationLevelFailureKind.MissingLevels;
+        measuredSyncLevel = null;
         if (demodulatedLowPass.IsEmpty)
         {
             return null;
@@ -131,6 +151,7 @@ public static class LevelDetection
         }
 
         double syncLevel = Median(means);
+        measuredSyncLevel = syncLevel;
         double[] blackMeans = PulsesBlackLevelMeans(
             demodulatedLowPass,
             pulses,
@@ -195,8 +216,30 @@ public static class LevelDetection
         double hzIre,
         bool checkLongPulses,
         out SerrationLevelFailureKind failureKind)
+        => SearchFallbackSerrationLevels(
+            demodulatedLowPass,
+            analyzer,
+            divisor,
+            blankLevel,
+            referenceSyncLevel,
+            hzIre,
+            checkLongPulses,
+            out failureKind,
+            out _);
+
+    public static SerrationLevelRefinement? SearchFallbackSerrationLevels(
+        ReadOnlySpan<double> demodulatedLowPass,
+        SyncAnalyzer analyzer,
+        int divisor,
+        double blankLevel,
+        double referenceSyncLevel,
+        double hzIre,
+        bool checkLongPulses,
+        out SerrationLevelFailureKind failureKind,
+        out double? measuredSyncLevel)
     {
         failureKind = SerrationLevelFailureKind.MissingLevels;
+        measuredSyncLevel = null;
         if (demodulatedLowPass.IsEmpty || divisor <= 0 || hzIre == 0.0)
         {
             return null;
@@ -280,7 +323,8 @@ public static class LevelDetection
             analyzer,
             referenceSyncLevel,
             hzIre,
-            out failureKind);
+            out failureKind,
+            out measuredSyncLevel);
     }
 
     public static double[] PulsesBlackLevelMeans(
