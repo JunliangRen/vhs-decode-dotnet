@@ -205,38 +205,43 @@ release compatibility remain the first constraint.
 
 The current thread matrix used an Intel Core Ultra 7 265K (20 logical
 processors), Windows 11 build 26220, .NET SDK/runtime
-`11.0.100-preview.6.26359.118`, and Python v0.4.0 (`g4315520`). Each value is
-the median of three interleaved Release runs:
+`11.0.100-preview.6.26359.118`, port checkpoint `c5f9783`, and Python v0.4.0
+commit `43155200da87c0d49eb37d8ec09b1372075ee8e4` (reported as `g4315520`).
+The isolated Python environment used NumPy 2.4.6, SciPy 1.18.0, Numba 0.66.0,
+and python-soxr 1.1.0. Each value is the median of three interleaved Release
+runs:
 
 | CLI mode | Effective workers | This port | Python | Speedup | Wall-time reduction |
 | --- | ---: | ---: | ---: | ---: | ---: |
-| default | 5 | 4.908 s | 11.788 s | 2.40x | 58.4% |
-| `--threads 1` | 1 | 9.605 s | 12.729 s | 1.33x | 24.5% |
-| `--threads 5` | 5 | 4.936 s | 11.432 s | 2.32x | 56.8% |
-| `--threads 10` | 10 | 4.682 s | 11.797 s | 2.52x | 60.3% |
-| `--threads 20` | 20 | 4.159 s | 12.011 s | 2.89x | 65.4% |
+| default | 5 | 5.001 s | 12.935 s | 2.59x | 61.3% |
+| `--threads 1` | 1 | 9.364 s | 14.026 s | 1.50x | 33.2% |
+| `--threads 5` | 5 | 4.944 s | 12.980 s | 2.63x | 61.9% |
+| `--threads 10` | 10 | 4.400 s | 13.165 s | 2.99x | 66.6% |
+| `--threads 20` | 20 | 4.266 s | 13.616 s | 3.19x | 68.7% |
 
 The default remains **5 workers**, matching Release 4.0 CLI semantics; explicit
 20-worker mode was fastest on this 20-logical-processor fixture. The matrix used
-`RF-Sample_2026-07-19_09-12-03.lds` with `--system pal
+`RF-Sample_2026-07-19_23-58-20.lds` with `--system pal
 --detect_chroma_track_phase --ire0_adjust --tape_format VHS --frequency 40
---start_fileloc 281303040 -l 40 --overwrite`, plus the row's thread option.
+--start_fileloc 620000000 -l 40 --overwrite`, plus the row's thread option.
 
 All 15 port runs produced one identical luma TBC, chroma TBC, and JSON hash set
-across every worker count. Upstream Python's requested nonzero thread modes were
-not byte-deterministic on this fixture: its 15 matrix runs produced 15 distinct
-luma/chroma pairs. Three additional Python `--threads 0` controls were mutually
-identical and exactly matched every port run. The matrix therefore compares
-observed throughput; the serial checkpoint below is the strict exact-output A/B.
+across every worker count. Three additional Python `--threads 0` controls were
+mutually identical and exactly matched every port run. Upstream Python's
+default/nonzero matrix modes were not a reliable byte-exact baseline: its 15
+runs produced two luma/chroma pairs, with five runs matching the serial reference
+and ten producing the alternate pair; `--threads 5` and `--threads 10` changed
+between repetitions. The matrix therefore compares observed throughput, while
+Python `--threads 0` is the strict compatibility baseline.
 
 The compatibility baseline for this 40-frame fixture is Python v0.4.0
 `g4315520` with `--threads 0`:
 
 | Baseline artifact | SHA-256 |
 | --- | --- |
-| Luma TBC | `857315FEC19C3F8D364896CDB4FC3AA26769D86D6E825DE095845EF6647C44A9` |
-| Chroma TBC | `CE54E7F6050E1445E0E205867CD8C3B912B4BB16708D31C303FABC8B04C3AA3B` |
-| JSON | `D0BFA50DD75ABACAE1BAD7E275BB2FD2159230F6FDF98461F045F3784BDF6DD8` |
+| Luma TBC | `64C518A03B208F7CF950916BC01A997021CB0F76B3D6F131FBEE74E9035FD30C` |
+| Chroma TBC | `70112719879FB64FA95DC8F3ED6E5FA335D4F8B62C50FC2AF3C26D2C2098F26F` |
+| JSON | `C223671830D0105271F24172923B280A96C8D0D427567C49E9C0E562D38FA881` |
 
 A longer exact-output checkpoint used an Intel Core Ultra 7 265K (20 logical
 processors), Windows 11 build 26220, and .NET SDK/runtime

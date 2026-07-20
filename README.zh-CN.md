@@ -171,35 +171,38 @@
   往返；未来可选 GPU 后端必须批量处理常驻显存的 DSP 阶段，并保留精确 CPU 回退。
 
 当前线程矩阵使用 Intel Core Ultra 7 265K（20 个逻辑处理器）、Windows 11 build
-26220、.NET SDK/runtime `11.0.100-preview.6.26359.118` 和 Python v0.4.0
-（`g4315520`）。每项都是三次交错 Release 运行的中位数：
+26220、.NET SDK/runtime `11.0.100-preview.6.26359.118`、本项目检查点 `c5f9783`，以及
+Python v0.4.0 commit `43155200da87c0d49eb37d8ec09b1372075ee8e4`（程序报告为
+`g4315520`）。隔离的 Python 环境使用 NumPy 2.4.6、SciPy 1.18.0、Numba 0.66.0 和
+python-soxr 1.1.0。每项都是三次交错 Release 运行的中位数：
 
 | CLI 模式 | 实际 worker | 本项目 | Python | 加速倍数 | 墙钟降幅 |
 | --- | ---: | ---: | ---: | ---: | ---: |
-| 默认 | 5 | 4.908 s | 11.788 s | 2.40x | 58.4% |
-| `--threads 1` | 1 | 9.605 s | 12.729 s | 1.33x | 24.5% |
-| `--threads 5` | 5 | 4.936 s | 11.432 s | 2.32x | 56.8% |
-| `--threads 10` | 10 | 4.682 s | 11.797 s | 2.52x | 60.3% |
-| `--threads 20` | 20 | 4.159 s | 12.011 s | 2.89x | 65.4% |
+| 默认 | 5 | 5.001 s | 12.935 s | 2.59x | 61.3% |
+| `--threads 1` | 1 | 9.364 s | 14.026 s | 1.50x | 33.2% |
+| `--threads 5` | 5 | 4.944 s | 12.980 s | 2.63x | 61.9% |
+| `--threads 10` | 10 | 4.400 s | 13.165 s | 2.99x | 66.6% |
+| `--threads 20` | 20 | 4.266 s | 13.616 s | 3.19x | 68.7% |
 
 默认值最终保持为 **5 个 worker**，与 Release 4.0 CLI 语义一致；在这台 20 逻辑处理器
-机器上，显式 20 worker 最快。矩阵使用 `RF-Sample_2026-07-19_09-12-03.lds`，
+机器上，显式 20 worker 最快。矩阵使用 `RF-Sample_2026-07-19_23-58-20.lds`，
 公共参数为 `--system pal --detect_chroma_track_phase --ire0_adjust --tape_format VHS
---frequency 40 --start_fileloc 281303040 -l 40 --overwrite`，再附加表中线程选项。
+--frequency 40 --start_fileloc 620000000 -l 40 --overwrite`，再附加表中线程选项。
 
 本项目 15 次运行在所有 worker 数下都得到同一组亮度 TBC、色度 TBC 和 JSON hash。
-上游 Python 的非零线程模式在这份夹具上不是逐字节确定的：矩阵中的 15 次 Python
-运行产生了 15 组不同的亮度/色度配对。另加的三次 Python `--threads 0` 控制组彼此
-完全一致，并精确匹配本项目全部运行。因此线程矩阵比较的是实测吞吐；下方串行检查点
-才是严格的精确输出 A/B。
+另加的三次 Python `--threads 0` 控制组彼此完全一致，并精确匹配本项目全部运行。
+上游 Python 的默认/非零线程模式不能作为可靠的逐字节基准：矩阵中的 15 次运行得到
+两组亮度/色度配对，其中 5 次匹配串行基准，另外 10 次得到另一组；`--threads 5` 和
+`--threads 10` 在重复运行间发生了变化。因此线程矩阵比较的是实测吞吐，严格兼容性
+以 Python `--threads 0` 为基准。
 
 这份 40 帧夹具的兼容性基准是 Python v0.4.0 `g4315520` 的 `--threads 0` 输出：
 
 | 基准产物 | SHA-256 |
 | --- | --- |
-| 亮度 TBC | `857315FEC19C3F8D364896CDB4FC3AA26769D86D6E825DE095845EF6647C44A9` |
-| 色度 TBC | `CE54E7F6050E1445E0E205867CD8C3B912B4BB16708D31C303FABC8B04C3AA3B` |
-| JSON | `D0BFA50DD75ABACAE1BAD7E275BB2FD2159230F6FDF98461F045F3784BDF6DD8` |
+| 亮度 TBC | `64C518A03B208F7CF950916BC01A997021CB0F76B3D6F131FBEE74E9035FD30C` |
+| 色度 TBC | `70112719879FB64FA95DC8F3ED6E5FA335D4F8B62C50FC2AF3C26D2C2098F26F` |
+| JSON | `C223671830D0105271F24172923B280A96C8D0D427567C49E9C0E562D38FA881` |
 
 一次更长的精确输出检查使用 Intel Core Ultra 7 265K（20 个逻辑处理器）、
 Windows 11 build 26220 和 .NET SDK/runtime

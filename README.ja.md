@@ -195,38 +195,41 @@
 
 現在の thread matrix は Intel Core Ultra 7 265K（20 logical processor）、
 Windows 11 build 26220、.NET SDK/runtime `11.0.100-preview.6.26359.118`、
-Python v0.4.0（`g4315520`）で実行しました。各値は 3 回の交互 Release run の
-median です。
+この移植の checkpoint `c5f9783`、Python v0.4.0 commit
+`43155200da87c0d49eb37d8ec09b1372075ee8e4`（表示は `g4315520`）で実行しました。
+分離した Python 環境は NumPy 2.4.6、SciPy 1.18.0、Numba 0.66.0、
+python-soxr 1.1.0 を使用しています。各値は 3 回の交互 Release run の median です。
 
 | CLI mode | Effective worker | この移植 | Python | Speedup | Wall-time reduction |
 | --- | ---: | ---: | ---: | ---: | ---: |
-| default | 5 | 4.908 s | 11.788 s | 2.40x | 58.4% |
-| `--threads 1` | 1 | 9.605 s | 12.729 s | 1.33x | 24.5% |
-| `--threads 5` | 5 | 4.936 s | 11.432 s | 2.32x | 56.8% |
-| `--threads 10` | 10 | 4.682 s | 11.797 s | 2.52x | 60.3% |
-| `--threads 20` | 20 | 4.159 s | 12.011 s | 2.89x | 65.4% |
+| default | 5 | 5.001 s | 12.935 s | 2.59x | 61.3% |
+| `--threads 1` | 1 | 9.364 s | 14.026 s | 1.50x | 33.2% |
+| `--threads 5` | 5 | 4.944 s | 12.980 s | 2.63x | 61.9% |
+| `--threads 10` | 10 | 4.400 s | 13.165 s | 2.99x | 66.6% |
+| `--threads 20` | 20 | 4.266 s | 13.616 s | 3.19x | 68.7% |
 
 default は Release 4.0 CLI semantics に合わせて最終的に **5 worker** のままです。
 この 20 logical processor fixture では、明示的な 20-worker mode が最速でした。
-matrix は `RF-Sample_2026-07-19_09-12-03.lds` と `--system pal
+matrix は `RF-Sample_2026-07-19_23-58-20.lds` と `--system pal
 --detect_chroma_track_phase --ire0_adjust --tape_format VHS --frequency 40
---start_fileloc 281303040 -l 40 --overwrite` に各行の thread option を加えています。
+--start_fileloc 620000000 -l 40 --overwrite` に各行の thread option を加えています。
 
 この移植の 15 run は、すべての worker 数で同じ luma TBC、chroma TBC、JSON hash
-set を生成しました。上流 Python の非ゼロ thread mode はこの fixture で byte 単位の
-determinism がなく、15 回の matrix run は 15 種類の luma/chroma pair になりました。
-追加した 3 回の Python `--threads 0` control は互いに一致し、この移植の全 run とも
-完全一致しました。そのため matrix は observed throughput の比較であり、下の serial
-checkpoint が strict exact-output A/B です。
+set を生成しました。追加した 3 回の Python `--threads 0` control は互いに一致し、
+この移植の全 run とも完全一致しました。上流 Python の default/nonzero thread mode は
+byte-exact baseline として安定せず、15 回の matrix run は 2 種類の luma/chroma pair
+になりました。5 run は serial reference と一致し、10 run は別の pair で、
+`--threads 5` と `--threads 10` は反復間でも変化しました。そのため matrix は observed
+throughput の比較であり、strict compatibility baseline は Python `--threads 0` です。
 
 この 40-frame fixture の compatibility baseline は Python v0.4.0 `g4315520` の
 `--threads 0` output です。
 
 | Baseline artifact | SHA-256 |
 | --- | --- |
-| Luma TBC | `857315FEC19C3F8D364896CDB4FC3AA26769D86D6E825DE095845EF6647C44A9` |
-| Chroma TBC | `CE54E7F6050E1445E0E205867CD8C3B912B4BB16708D31C303FABC8B04C3AA3B` |
-| JSON | `D0BFA50DD75ABACAE1BAD7E275BB2FD2159230F6FDF98461F045F3784BDF6DD8` |
+| Luma TBC | `64C518A03B208F7CF950916BC01A997021CB0F76B3D6F131FBEE74E9035FD30C` |
+| Chroma TBC | `70112719879FB64FA95DC8F3ED6E5FA335D4F8B62C50FC2AF3C26D2C2098F26F` |
+| JSON | `C223671830D0105271F24172923B280A96C8D0D427567C49E9C0E562D38FA881` |
 
 より長い exact-output checkpoint は Intel Core Ultra 7 265K（20 logical
 processor）、Windows 11 build 26220、.NET SDK/runtime
