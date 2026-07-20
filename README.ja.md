@@ -152,8 +152,9 @@
 - VHS heterodyne/carrier table は境界付き並行構築と session-owned one-entry cache を
   使用します。exact-key hit は元の array を再利用し、sample shape、carrier、phase、
   AFC の変更時は旧 entry を置き換えるため、保持 state は増加しません。phase analysis は
-  field-owned resampled array を直接 read-only で使い、decode は prefilter 開始時にだけ
-  writable copy を 1 つ作成します。
+  field-owned resampled array を直接 read-only で使います。chroma prefilter が未設定なら
+  decode も同じ read-only array を借用します。filter 設定時は owned result を返し、public
+  prefilter API も independent-copy contract を維持します。
 - HiFi は境界付き並列 block decode の後、順序どおりに後処理と書き込みを行います。
 - Managed real FFT は pool 化した packing/scratch buffer を再利用します。float32 SOS の
   forward/backward filtering は拡張 buffer を 1 つ rent して in-place 実行し、呼び出し
@@ -488,6 +489,21 @@ wall/CPU が 28.015/107.828 秒から 27.865/108.547 秒、peak working set が
 長時間 run の allocation pressure 低減のために保持します。記録した luma、chroma、
 JSON hash はすべて exact です。
 
+VHS chroma-prefilter ownership pass は prefilter 未設定時に immutable field input を
+借用し、設定済み filter と public `ApplyChromaPreFilter` API は引き続き independently
+owned array を返します。同一条件の 10-field GC trace で sampled managed allocation は
+2.440 GiB から 2.384 GiB、`Double[]` allocation は 2,267.10 MiB から
+2,207.39 MiB へ減少し、59.629 MiB の `ApplyChromaPreFilter` allocation stack が
+完全に消えました。Gen2 collection は両 run とも 15 回です。交互に実行した 5 組の
+40-field pair では default wall/CPU median が 4.475/12.312 秒から
+4.433/12.219 秒、20-worker は 3.694/14.531 秒から 3.638/14.531 秒になりました。
+3 組の 160-field pair では default が 15.104/41.297 秒から 14.732/40.344 秒へ、
+20-worker wall time は 12.179/12.206 秒で実質同等、CPU time は 49.312 秒から
+46.094 秒へ低下しました。実行順を反転した 2 組の 400-field pair は
+candidate/baseline が 28.039/28.553 秒、baseline/candidate が
+28.224/28.308 秒で、candidate peak は 1.474/1.475 GiB でした。記録した luma、
+chroma、JSON hash はすべて exact です。
+
 </details>
 
 <!-- SECTION: build -->
@@ -509,7 +525,7 @@ dotnet test --solution VHSDecodeDotNet.slnx -c Release --no-build --no-restore
 
 現在の正式な Release build は warning 0、error 0 です。xUnit v3 project は
 `dotnet test` と Visual Studio Test Explorer の両方で個別に検出できる
-**810** tests を公開します。
+**811** tests を公開します。
 
 <!-- SECTION: usage -->
 

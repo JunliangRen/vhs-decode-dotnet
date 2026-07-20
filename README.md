@@ -158,7 +158,9 @@ release compatibility remain the first constraint.
   session-owned one-entry cache. Exact-key hits reuse the original arrays;
   sample-shape, carrier, phase, or AFC changes replace the prior entry instead
   of growing retained state. Phase analysis reads the field-owned resampled
-  array directly, while decode creates its only writable copy at prefiltering.
+  array directly. Decode borrows that same read-only array when no chroma
+  prefilter is configured; configured filtering still returns owned output,
+  and the public prefilter API retains its independent-copy contract.
 - HiFi uses bounded parallel block decoding followed by ordered
   post-processing and writing.
 - Managed real FFTs reuse pooled packing and scratch buffers. Float32 SOS
@@ -518,6 +520,21 @@ from 1.481 GiB to 1.465 GiB. The change is retained for lower long-run allocatio
 pressure rather than a claimed CPU-speed gain; every recorded luma, chroma,
 and JSON hash remained exact.
 
+The VHS chroma-prefilter ownership pass borrows the immutable field input when
+no prefilter is configured, while configured filters and the public
+`ApplyChromaPreFilter` API continue to return independently owned arrays. A
+matched 10-field GC trace reduced sampled managed allocation from 2.440 to
+2.384 GiB and `Double[]` allocation from 2,267.10 to 2,207.39 MiB, removing the
+59.629 MiB `ApplyChromaPreFilter` allocation stack; both runs performed 15 Gen2
+collections. Five interleaved 40-field pairs moved default wall/CPU medians
+from 4.475/12.312 to 4.433/12.219 s and 20-worker medians from
+3.694/14.531 to 3.638/14.531 s. Three 160-field pairs moved default medians
+from 15.104/41.297 to 14.732/40.344 s; 20-worker wall time remained neutral at
+12.179/12.206 s while CPU time moved from 49.312 to 46.094 s. Two reversed-order
+400-field pairs completed candidate/baseline in 28.039/28.553 s and
+baseline/candidate in 28.224/28.308 s; candidate peaks were
+1.474/1.475 GiB. Every recorded luma, chroma, and JSON hash remained exact.
+
 </details>
 
 <!-- SECTION: build -->
@@ -538,7 +555,7 @@ dotnet test --solution VHSDecodeDotNet.slnx -c Release --no-build --no-restore
 ```
 
 The current formal Release build has zero warnings and errors. The xUnit v3
-project exposes **810** independently discoverable tests to both
+project exposes **811** independently discoverable tests to both
 `dotnet test` and Visual Studio Test Explorer.
 
 <!-- SECTION: usage -->

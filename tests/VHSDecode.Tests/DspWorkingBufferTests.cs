@@ -98,6 +98,47 @@ public sealed class DspWorkingBufferTests
         Assert.Equal(expectedFloat, actualFloat);
     }
 
+    [Fact(DisplayName = "Unconfigured VHS chroma prefilter borrows input without changing public ownership")]
+    public void UnconfiguredVhsChromaPrefilterBorrowsInputWithoutChangingPublicOwnership()
+    {
+        var options = new VhsChromaFieldOptions(
+            ColorSystem: "PAL",
+            OutputLineLength: 64,
+            OutputLineCount: 64,
+            OutputSampleRateHz: 4_000_000.0,
+            FscMHz: 1.0,
+            ColorUnderCarrierHz: 0.0,
+            BurstStart: 8,
+            BurstEnd: 16,
+            BurstAbsRef: 10.0,
+            ChromaRotation: null,
+            DisableComb: true,
+            DisablePhaseCorrection: true,
+            EnableColorKiller: false,
+            DetectChromaTrackPhase: false);
+        double[] chroma = Enumerable.Range(0, options.OutputLineLength * options.OutputLineCount)
+            .Select(index => Math.Sin(index * 0.03125) + (index * 0.0001))
+            .ToArray();
+        double[] original = chroma.ToArray();
+
+        _ = VhsChromaDecoder.ApplyConfiguredChromaPreFilter(chroma, options);
+        long before = GC.GetAllocatedBytesForCurrentThread();
+        double[]? borrowed = VhsChromaDecoder.ApplyConfiguredChromaPreFilter(chroma, options);
+        long allocated = GC.GetAllocatedBytesForCurrentThread() - before;
+
+        Assert.Null(borrowed);
+        Assert.True(
+            allocated < 256,
+            $"Unconfigured VHS chroma prefilter allocated {allocated:N0} bytes.");
+        Assert.Equal(original, chroma);
+
+        double[] publicResult = VhsChromaDecoder.ApplyChromaPreFilter(chroma, options);
+        Assert.NotSame(chroma, publicResult);
+        Assert.Equal(original, publicResult);
+        publicResult[0] += 1.0;
+        Assert.Equal(original, chroma);
+    }
+
     [Fact(DisplayName = "PAL VHS RF block reuses temporary spectra after warm-up")]
     public void PalVhsRfBlockReusesTemporarySpectraAfterWarmUp()
     {

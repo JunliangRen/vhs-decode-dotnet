@@ -469,13 +469,24 @@ public static class VhsChromaDecoder
                 phase);
         }
 
-        double[] chromaField = ApplyChromaPreFilter(chroma, options, previousChromaAfcCarrierHz);
+        double[]? ownedChromaField = ApplyConfiguredChromaPreFilter(
+            chroma,
+            options,
+            previousChromaAfcCarrierHz);
+        ReadOnlySpan<double> chromaField = ownedChromaField is null
+            ? chroma
+            : ownedChromaField;
         double outputSampleRateMHz = options.FscMHz * 4.0;
-        double[] carrierProbe = chromaField;
+        ReadOnlySpan<double> carrierProbe = chromaField;
         if (options.ChromaAfcTrackCarrier && options.ChromaAfcMeasurementFilters is { } measurementFilters)
         {
-            carrierProbe = SosFilter.ApplyForwardBackwardFloat32(measurementFilters.HighPass, carrierProbe);
-            carrierProbe = SosFilter.ApplyForwardBackwardFloat32(measurementFilters.LowPass, carrierProbe);
+            double[] filteredCarrierProbe = SosFilter.ApplyForwardBackwardFloat32(
+                measurementFilters.HighPass,
+                carrierProbe);
+            filteredCarrierProbe = SosFilter.ApplyForwardBackwardFloat32(
+                measurementFilters.LowPass,
+                filteredCarrierProbe);
+            carrierProbe = filteredCarrierProbe;
         }
 
         ChromaCarrierEstimate? carrierEstimate = options.ChromaAfcTrackCarrier
@@ -606,6 +617,16 @@ public static class VhsChromaDecoder
     {
         ArgumentNullException.ThrowIfNull(options);
         double[] output = chroma.ToArray();
+        return ApplyConfiguredChromaPreFilter(output, options, previousChromaAfcCarrierHz)
+            ?? output;
+    }
+
+    internal static double[]? ApplyConfiguredChromaPreFilter(
+        ReadOnlySpan<double> chroma,
+        VhsChromaFieldOptions options,
+        double? previousChromaAfcCarrierHz = null)
+    {
+        ArgumentNullException.ThrowIfNull(options);
         TransferFunction? preFilter = options.ChromaPreFilter;
         IReadOnlyList<SosSection>? preSosFilter = options.ChromaPreSosFilter;
         if (options.ChromaAfcTrackCarrier
@@ -622,17 +643,18 @@ public static class VhsChromaDecoder
                 options.ChromaAfcDecodeSampleRateHz);
         }
 
+        double[] output;
         if (preSosFilter is not null)
         {
-            output = SosFilter.ApplyForwardBackward(preSosFilter, output);
+            output = SosFilter.ApplyForwardBackward(preSosFilter, chroma);
         }
         else if (preFilter is not null)
         {
-            output = IirFilter.ApplyForwardBackward(preFilter, output);
+            output = IirFilter.ApplyForwardBackward(preFilter, chroma);
         }
         else
         {
-            return output;
+            return null;
         }
         if (options.ChromaAudioNotchFilter is not null)
         {
