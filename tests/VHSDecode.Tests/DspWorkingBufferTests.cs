@@ -349,6 +349,142 @@ public sealed class DspWorkingBufferTests
         }
     }
 
+    [Fact(DisplayName = "Double SOS common-section kernels remain section-major bit-exact")]
+    public void DoubleSosCommonSectionKernelsRemainSectionMajorBitExact()
+    {
+        const int length = 4_096;
+        double[] input = Enumerable.Range(0, length)
+            .Select(index => Math.Sin(index * 0.013) + (0.125 * Math.Cos(index * 0.029)))
+            .ToArray();
+        SosSection[][] cases =
+        [
+            IirFilterDesign.ButterworthBandPassSos(
+                order: 2,
+                normalizedLowCutoff: 0.1,
+                normalizedHighCutoff: 0.4),
+            IirFilterDesign.ButterworthBandPassSos(
+                order: 4,
+                normalizedLowCutoff: 0.1,
+                normalizedHighCutoff: 0.4)
+        ];
+
+        foreach (SosSection[] sections in cases)
+        {
+            var initialConditions = new double[sections.Length, 2];
+            for (int section = 0; section < sections.Length; section++)
+            {
+                initialConditions[section, 0] = (section + 1) * 0.03125;
+                initialConditions[section, 1] = -(section + 1) * 0.015625;
+            }
+
+            AssertDoubleBitsEqual(
+                ApplyForwardSectionMajorReference(sections, input, initialConditions),
+                SosFilter.ApplyForward(sections, input, initialConditions));
+            AssertDoubleBitsEqual(
+                ApplyForwardBackwardSectionMajorReference(sections, input, padLength: 0),
+                SosFilter.ApplyForwardBackward(sections, input, padLength: 0));
+            AssertDoubleBitsEqual(
+                ApplyForwardBackwardSectionMajorReference(sections, input),
+                SosFilter.ApplyForwardBackward(sections, input));
+        }
+    }
+
+    private static double[] ApplyForwardBackwardSectionMajorReference(
+        IReadOnlyList<SosSection> sections,
+        ReadOnlySpan<double> input,
+        int? padLength = null)
+    {
+        int edge = padLength ?? SosFilter.DefaultPadLength(sections);
+        double[] extended = edge == 0
+            ? input.ToArray()
+            : OddExtensionReference(input, edge);
+        double[,] zi = SosFilter.SteadyStateInitialConditions(sections);
+        ApplyForwardSectionMajorReferenceInPlace(
+            sections,
+            extended,
+            ScaleInitialConditionsReference(zi, extended[0]));
+        Array.Reverse(extended);
+        ApplyForwardSectionMajorReferenceInPlace(
+            sections,
+            extended,
+            ScaleInitialConditionsReference(zi, extended[0]));
+        Array.Reverse(extended);
+        return edge == 0
+            ? extended
+            : extended.AsSpan(edge, input.Length).ToArray();
+    }
+
+    private static double[] ApplyForwardSectionMajorReference(
+        IReadOnlyList<SosSection> sections,
+        ReadOnlySpan<double> input,
+        double[,] initialConditions)
+    {
+        double[] output = input.ToArray();
+        ApplyForwardSectionMajorReferenceInPlace(sections, output, initialConditions);
+        return output;
+    }
+
+    private static void ApplyForwardSectionMajorReferenceInPlace(
+        IReadOnlyList<SosSection> sections,
+        Span<double> output,
+        double[,] initialConditions)
+    {
+        for (int sectionIndex = 0; sectionIndex < sections.Count; sectionIndex++)
+        {
+            SosSection section = sections[sectionIndex].Normalize();
+            double z1 = initialConditions[sectionIndex, 0];
+            double z2 = initialConditions[sectionIndex, 1];
+            for (int sample = 0; sample < output.Length; sample++)
+            {
+                double value = output[sample];
+                double filtered = (section.B0 * value) + z1;
+                z1 = (section.B1 * value) - (section.A1 * filtered) + z2;
+                z2 = (section.B2 * value) - (section.A2 * filtered);
+                output[sample] = filtered;
+            }
+        }
+    }
+
+    private static double[,] ScaleInitialConditionsReference(double[,] initialConditions, double scale)
+    {
+        var output = new double[initialConditions.GetLength(0), 2];
+        for (int section = 0; section < output.GetLength(0); section++)
+        {
+            output[section, 0] = initialConditions[section, 0] * scale;
+            output[section, 1] = initialConditions[section, 1] * scale;
+        }
+
+        return output;
+    }
+
+    private static double[] OddExtensionReference(ReadOnlySpan<double> input, int edge)
+    {
+        var output = new double[input.Length + (edge * 2)];
+        double first = input[0];
+        for (int index = 0; index < edge; index++)
+        {
+            output[index] = (2.0 * first) - input[edge - index];
+        }
+
+        input.CopyTo(output.AsSpan(edge, input.Length));
+        double last = input[^1];
+        for (int index = 0; index < edge; index++)
+        {
+            output[edge + input.Length + index] =
+                (2.0 * last) - input[input.Length - 2 - index];
+        }
+
+        return output;
+    }
+
+    private static void AssertDoubleBitsEqual(ReadOnlySpan<double> expected, ReadOnlySpan<double> actual)
+    {
+        Assert.Equal(expected.Length, actual.Length);
+        Assert.True(
+            MemoryMarshal.AsBytes(expected).SequenceEqual(MemoryMarshal.AsBytes(actual)),
+            "Double sequences differ at the bit level.");
+    }
+
     private static double[] BuildPalVhsProbe(int length, double sampleRateHz)
     {
         var input = new double[length];

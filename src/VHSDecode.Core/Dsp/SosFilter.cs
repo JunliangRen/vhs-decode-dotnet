@@ -90,6 +90,72 @@ public static class SosFilter
         Span<double> output,
         double[,] initialConditions)
     {
+        if (sections.Count == 2)
+        {
+            SosSection first = sections[0].Normalize();
+            SosSection second = sections[1].Normalize();
+            double firstZ1 = initialConditions[0, 0];
+            double firstZ2 = initialConditions[0, 1];
+            double secondZ1 = initialConditions[1, 0];
+            double secondZ2 = initialConditions[1, 1];
+            for (int sample = 0; sample < output.Length; sample++)
+            {
+                double value = output[sample];
+                double filtered = (first.B0 * value) + firstZ1;
+                firstZ1 = (first.B1 * value) - (first.A1 * filtered) + firstZ2;
+                firstZ2 = (first.B2 * value) - (first.A2 * filtered);
+
+                value = filtered;
+                filtered = (second.B0 * value) + secondZ1;
+                secondZ1 = (second.B1 * value) - (second.A1 * filtered) + secondZ2;
+                secondZ2 = (second.B2 * value) - (second.A2 * filtered);
+                output[sample] = filtered;
+            }
+
+            return;
+        }
+
+        if (sections.Count == 4)
+        {
+            SosSection first = sections[0].Normalize();
+            SosSection second = sections[1].Normalize();
+            SosSection third = sections[2].Normalize();
+            SosSection fourth = sections[3].Normalize();
+            double firstZ1 = initialConditions[0, 0];
+            double firstZ2 = initialConditions[0, 1];
+            double secondZ1 = initialConditions[1, 0];
+            double secondZ2 = initialConditions[1, 1];
+            double thirdZ1 = initialConditions[2, 0];
+            double thirdZ2 = initialConditions[2, 1];
+            double fourthZ1 = initialConditions[3, 0];
+            double fourthZ2 = initialConditions[3, 1];
+            for (int sample = 0; sample < output.Length; sample++)
+            {
+                double value = output[sample];
+                double filtered = (first.B0 * value) + firstZ1;
+                firstZ1 = (first.B1 * value) - (first.A1 * filtered) + firstZ2;
+                firstZ2 = (first.B2 * value) - (first.A2 * filtered);
+
+                value = filtered;
+                filtered = (second.B0 * value) + secondZ1;
+                secondZ1 = (second.B1 * value) - (second.A1 * filtered) + secondZ2;
+                secondZ2 = (second.B2 * value) - (second.A2 * filtered);
+
+                value = filtered;
+                filtered = (third.B0 * value) + thirdZ1;
+                thirdZ1 = (third.B1 * value) - (third.A1 * filtered) + thirdZ2;
+                thirdZ2 = (third.B2 * value) - (third.A2 * filtered);
+
+                value = filtered;
+                filtered = (fourth.B0 * value) + fourthZ1;
+                fourthZ1 = (fourth.B1 * value) - (fourth.A1 * filtered) + fourthZ2;
+                fourthZ2 = (fourth.B2 * value) - (fourth.A2 * filtered);
+                output[sample] = filtered;
+            }
+
+            return;
+        }
+
         for (int sectionIndex = 0; sectionIndex < sections.Count; sectionIndex++)
         {
             SosSection section = sections[sectionIndex].Normalize();
