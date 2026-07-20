@@ -6891,6 +6891,13 @@ public void VsyncSerrationDetectorMatchesV04Rules()
             + $"harmonic=[{string.Join(',', automaticResult.HarmonicMinima.Take(40))}].");
     }
     AssertTrue(automaticResult.Measurements.Count > 0);
+    AssertEqual(
+        "CC6947AF46193D608AC14F4492D501D9A5BE483B6AABECD1565DDBF413978565",
+        DoubleBitsSha256(automaticResult.EnvelopeMinima.Select(value => (double)value).ToArray()));
+    AssertEqual(
+        "D401171B6B66B19EF53CBFC26ECABE3243E43FA67F7DBADD197FDC7A04CD0291",
+        DoubleBitsSha256(automaticResult.HarmonicMinima.Select(value => (double)value).ToArray()));
+    AssertIntSequence([2993, 89773], automaticResult.Candidates.ToArray());
     AssertEqual(automaticResult.Measurements.Count, automaticResult.LevelCountBeforePull);
     AssertClose(60.0, automaticResult.Measurements[0].SyncLevel, 1e-12);
     AssertClose(100.0, automaticResult.Measurements[0].BlankLevel, 1e-12);
@@ -7022,6 +7029,27 @@ public void VsyncSerrationDetectorMatchesV04Rules()
     AssertClose(100.0, fallbackRefinement.BlankLevel, 1e-12);
     AssertEqual(6, fallbackRefinement.VsyncPulseCount);
     AssertTrue(fallbackRefinement.PulseCount > 200);
+
+    double[] exhaustedFallbackField = Enumerable.Repeat(100.0, 30 * halfLine).ToArray();
+    exhaustedFallbackField[0] = -100.0;
+    for (int pulse = 0; pulse < 18; pulse++)
+    {
+        int length = pulse is >= 6 and < 12 ? vsyncLength : eqLength;
+        Array.Fill(exhaustedFallbackField, 74.0, 1000 + (pulse * halfLine), length);
+    }
+
+    AssertEqual<SerrationLevelRefinement?>(null, LevelDetection.SearchFallbackSerrationLevels(
+        exhaustedFallbackField,
+        fortyMegahertzAnalyzer,
+        divisor: 3,
+        blankLevel: 100.0,
+        referenceSyncLevel: 60.0,
+        hzIre: 1.0,
+        checkLongPulses: false,
+        out SerrationLevelFailureKind exhaustedFallbackFailure,
+        out double? exhaustedFallbackMeasuredSync));
+    AssertEqual(SerrationLevelFailureKind.MissingLevels, exhaustedFallbackFailure);
+    AssertEqual<double?>(null, exhaustedFallbackMeasuredSync);
 
     var syncAnalyzer = new SyncAnalyzer(
         sampleRateHz: 4_000_000.0,
@@ -13498,6 +13526,25 @@ public void TbcFieldSequenceEngineRecoversWithUpstreamFieldAdvances()
             syncThresholdHz: -20.0));
     AssertEqual(TbcFieldDecodeRecoveryKind.NoFirstHSync, noFirstHSync.Kind);
     AssertEqual((long)(analyzer.NominalLineLength * 100.0), noFirstHSync.SuggestedOffsetSamples);
+
+    TbcFieldDecodeRecoveryException noPulsesAfterPulseSearch = CaptureException<TbcFieldDecodeRecoveryException>(() =>
+        session.TbcFieldDecoder.Decode(new RfDecodedSpan(0, [], [0.0, 0.0, 0.0], [])));
+    AssertEqual(TbcFieldDecodeRecoveryKind.NoFirstHSync, noPulsesAfterPulseSearch.Kind);
+    AssertEqual(
+        (long)(analyzer.NominalLineLength * 100.0),
+        noPulsesAfterPulseSearch.SuggestedOffsetSamples);
+
+    DecodeSession fallbackVsyncSession = DecodeSessionFactory.Create(Parse(
+        CliSpecs.Vhs,
+        ["--fallback_vsync", "input.u8", "out"]));
+    SetPrivateFieldValue(
+        fallbackVsyncSession.TbcFieldDecoder,
+        "_vhsPulseSearchInitialized",
+        true);
+    TbcFieldDecodeRecoveryException fallbackNoPulses = CaptureException<TbcFieldDecodeRecoveryException>(() =>
+        fallbackVsyncSession.TbcFieldDecoder.Decode(new RfDecodedSpan(0, [], [0.0, 0.0, 0.0], [])));
+    AssertEqual(TbcFieldDecodeRecoveryKind.NoSyncPulses, fallbackNoPulses.Kind);
+    AssertEqual(4_000_000L, fallbackNoPulses.SuggestedOffsetSamples);
 
     int lineLength = (int)Math.Round(analyzer.NominalLineLength);
     int hsyncLength = (int)Math.Round(analyzer.UsecToSamples(analyzer.HSyncPulseUs));

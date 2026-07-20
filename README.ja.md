@@ -241,6 +241,18 @@ processor）、Windows 11 build 26220、.NET SDK/runtime
 47.7-47.8% 減）で、3 種類の SHA-256 は Python と両方の run の間で byte 単位に
 一致しました。両実装とも `--threads 0` は deterministic serial mode です。
 
+独立した no-seek startup checkpoint では
+`RF-Sample_2026-07-19_23-58-20.lds` に同じ PAL VHS option と
+`--threads 0 -l 1000` を使用しました。Python とこの移植の luma SHA-256
+`E6616B63BD7DD1DB6C093FC6D1DCA7D23AABEF34EFD52089338D992F2DDCD0CD`
+および chroma SHA-256
+`A292BD77A8EB3373B6C631CE4552F77B6D4E5AF2228A85F01C63EDBBBFB4C0EF`
+は byte 単位で一致しました。2,000 field record、135 startup recovery step、
+1,000 entry の file-frame sequence（`22..1021`）も一致しています。packaged Python
+baseline は 8 文字の identity `g43155200`、この移植は `g4315520` を書くため、対応する
+`gitCommit`/`version` identity string だけが JSON の差分です。この correctness run は
+別の decode process と重なったため、その時間は benchmark result として扱いません。
+
 これは特定 fixture の値であり、一般的な benchmark ではありません。以下の 40-frame
 tuning A/B は .NET SDK/runtime `11.0.100-preview.6.26359.118`、`--threads 20`、
 default chroma、default resampling を使用しました。再現可能な 40-frame PAL probe では、保存した

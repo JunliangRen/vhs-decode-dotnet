@@ -250,6 +250,19 @@ Both port runs were about 1.91x as fast (47.7-47.8% lower wall time), and all
 three paired SHA-256 values were byte-identical across Python and both port
 runs. `--threads 0` selected deterministic serial mode in both implementations.
 
+An independent no-seek startup checkpoint used
+`RF-Sample_2026-07-19_23-58-20.lds` with the same PAL VHS options,
+`--threads 0`, and `-l 1000`. Python and this port produced byte-identical luma
+SHA-256 `E6616B63BD7DD1DB6C093FC6D1DCA7D23AABEF34EFD52089338D992F2DDCD0CD`
+and chroma SHA-256
+`A292BD77A8EB3373B6C631CE4552F77B6D4E5AF2228A85F01C63EDBBBFB4C0EF`.
+All 2,000 field records, 135 startup recovery steps, and the 1,000-entry file
+frame sequence (`22..1021`) also matched. The packaged Python baseline wrote
+the eight-character identity `g43155200`, while this port uses `g4315520`;
+those `gitCommit`/`version` identity strings were the only JSON differences.
+This correctness run overlapped another decode process, so its timing is not a
+benchmark result.
+
 These numbers are fixture-specific, not universal benchmarks. The 40-frame
 tuning A/B runs below used .NET SDK/runtime `11.0.100-preview.6.26359.118`,
 `--threads 20`, default chroma, and default resampling. On a reproducible
