@@ -2,7 +2,7 @@
 
 [English](README.md) | **[简体中文](README.zh-CN.md)** | [日本語](README.ja.md)
 
-<!-- README_SYNC: 2026-07-20.6 -->
+<!-- README_SYNC: 2026-07-20.7 -->
 
 这是 [`oyvindln/vhs-decode`](https://github.com/oyvindln/vhs-decode)
 中解码相关部分的 .NET 11 重写，当前以 release `v0.4.0`、commit
@@ -128,8 +128,8 @@
   `--threads 0` 和 `--threads 1` 保留确定性的串行路径。
 - 线性 wow 调整每行只计算一次恒定导数，在 median/MAD 修复后再展开；启用 worker 时，
   源位置与电平准备仅以固定两路并发执行。
-- VHS heterodyne 与 carrier 表使用有界并行构造。只有载波和相位参数一致时，场解码才
-  复用相位分析工作区；AFC 参数变化会回到原始重建路径。
+- VHS heterodyne 与 carrier 表使用有界并行构造和 session 自有的单条目缓存。key 完全
+  一致时复用原数组；样本形状、载波、相位或 AFC 变化时替换旧条目，不会累积保留状态。
 - HiFi 使用有界并行 block 解码，之后按顺序进行后处理和写入。
 - 托管 real FFT 复用池化的 packing 与 scratch 缓冲区。float32 SOS 前后向滤波租用
   一块扩展缓冲并原地运行，调用结束时同步归还；返回的输出数组仍保持正常所有权。
@@ -189,6 +189,13 @@ double 累加。五组交错 PAL-field A/B 中，串行/20-worker 中位数从 2
 降到 18.741/5.330 ms（13.2%/4.5%）。五组 40-frame 完整路径的墙钟/CPU 中位数从
 5.511/19.297 秒降到 5.478/17.922 秒（0.6%/7.1%）。两组反向顺序的 204-frame 配对
 快 1.1-1.3%，内存保持有界；TBC、chroma、JSON 和隔离场 hash 均完全一致。
+
+session 自有的 VHS chroma 表缓存只保留一组精确 key 的 heterodyne 和一组 burst-carrier
+表。相同的 40-frame GC trace 将总采样分配量从 13.854 GiB 降到 12.579 GiB，`Double[]`
+从 12,611.83 MiB 降到 11,311.73 MiB，Gen2 从 38 次降到 31 次。五组交错 A/B 的墙钟/CPU
+中位数从 5.49/19.23 秒降到 5.30/18.05 秒（3.5%/6.1%）。两组反向顺序的 204-frame
+配对分别快 4.4% 和 4.8%；内存非单调且峰值不超过 2.0 GiB，409 个字段和全部输出 hash
+均完全一致。
 
 AVX RF envelope 准备将隔离的 32K-block 中位数从 57.5 us 降到 13.3 us，
 内核提升 76.9%。40-frame 中位数从 7.55 秒降到 7.39 秒，160-frame 运行从

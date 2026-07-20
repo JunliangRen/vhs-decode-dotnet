@@ -1292,6 +1292,29 @@ possible capture has already been proven byte-for-byte identical.
   `7C732FDB97CA95900ED353ABF1DBD0A37BBE3D8609886E16A7B55CCAE1D5B236`,
   `82F1D3A9E3A3BD73A5AA07A63C930892CBB7125D857725D736C721CCBED18494`,
   and `DDEFFB4DC96F4DAB031BDAF6BA385C1DD6C2EAEE31E53ECD244826C12F21D081`
+- VHS chroma phase analysis now uses one carrier-table cache owned by the
+  decode pipeline. It retains at most one four-phase heterodyne set and one
+  burst sine/cosine set. Exact sample-count, frequency, carrier, and phase keys
+  return the original arrays; a changed key atomically replaces the previous
+  entry, so AFC and shape changes remain compatible without an unbounded cache.
+  Cache misses call the unchanged bounded-parallel builders, and all consumers
+  treat the retained arrays as read-only. Matched 40-frame GC traces reduced
+  sampled allocation from 13.854 to 12.579 GiB, `Double[]` allocation from
+  12,611.83 to 11,311.73 MiB, and Gen2 collections from 38 to 31. In five
+  interleaved full-path A/B pairs, median wall time fell from 5.49 to 5.30 s
+  (3.5%) and CPU time from 19.23 to 18.05 s (6.1%). Exact TBC, chroma, and JSON
+  hashes remained `E42AB3A9F480610A032B0D4813BF4BAD1BF7A5CBEC00CF56EEEC359C2DD9D7CB`,
+  `7269E13798026A9FBDB199594A1AB46EE4BDD0EE800A8387CB3807A2EB8946AB`,
+  and `06AB7E6C28D6DE2C70C7902D6FB296BE664153CFA73C254F2F305C5729FBFC6E`.
+  Two reversed fixture-limited 204-frame pairs completed baseline/current in
+  23.20/22.19 s and 23.68/22.53 s (4.4% and 4.8% faster). Current private-memory
+  quarter medians were 1.168/1.300/1.505/1.446 and
+  1.062/1.832/1.515/1.739 GiB, with 1.93 and 2.00 GiB peaks and intervening
+  declines rather than monotonic growth. Both variants emitted fields 1 through
+  409 and exact luma/chroma/JSON hashes
+  `FCD83E68BDF6EFB3C2583349519B24E750155DE6B4C256D0B5F9CE4E76BE94E9`,
+  `B7CE0EF8768B7731FFAD9E7B8FE4162A24D0CC02620FC32F639A7ED078BF065B`,
+  and `EAACE43594DEC574360B664D932E23F10E1B428BA4268A91BA6A1858BFEDD4AD`
 - VHS RF-envelope preparation now converts four doubles to float32, clears the
   sign bits, and writes the rotated float64 values through AVX while preserving
   the scalar tail and wrap path. A 32K-block isolated median improved from

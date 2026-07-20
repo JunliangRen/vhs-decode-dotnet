@@ -3419,11 +3419,55 @@ public void VhsChromaPhaseWorkspacePreservesDecodeResultsAndCarrierFallback()
     double[] lineLocations = Enumerable.Range(0, options.OutputLineCount + 1)
         .Select(line => line * 100.0)
         .ToArray();
+    var carrierTableCache = new VhsChromaCarrierTableCache();
     VhsChromaPhaseAnalysis analysis = VhsChromaDecoder.AnalyzeFieldPhaseWithWorkspace(
         chroma,
         options,
         lineLocations,
-        inputLineLength: 100);
+        inputLineLength: 100,
+        carrierTableCache: carrierTableCache);
+    VhsChromaPhaseAnalysis cachedAnalysis = VhsChromaDecoder.AnalyzeFieldPhaseWithWorkspace(
+        chroma,
+        options,
+        lineLocations,
+        inputLineLength: 100,
+        carrierTableCache: carrierTableCache);
+
+    Assert.Same(analysis.Heterodyne, cachedAnalysis.Heterodyne);
+    for (int phase = 0; phase < analysis.Heterodyne.Length; phase++)
+    {
+        Assert.Same(analysis.Heterodyne[phase], cachedAnalysis.Heterodyne[phase]);
+    }
+
+    (double[] carrierSin, double[] carrierCos) = carrierTableCache.GetCarrierTables(
+        chroma.Length,
+        options.FscMHz,
+        options.FscMHz * 4.0,
+        options.WorkerThreads);
+    (double[] cachedCarrierSin, double[] cachedCarrierCos) = carrierTableCache.GetCarrierTables(
+        chroma.Length,
+        options.FscMHz,
+        options.FscMHz * 4.0,
+        options.WorkerThreads);
+    Assert.Same(carrierSin, cachedCarrierSin);
+    Assert.Same(carrierCos, cachedCarrierCos);
+
+    double[][] changedHeterodyne = carrierTableCache.GetHeterodyne(
+        chroma.Length,
+        options.FscMHz,
+        options.ColorUnderCarrierHz / 1_000_000.0,
+        options.FscMHz * 4.0,
+        phaseDriftRadians: 0.25,
+        options.WorkerThreads);
+    double[][] cachedChangedHeterodyne = carrierTableCache.GetHeterodyne(
+        chroma.Length,
+        options.FscMHz,
+        options.ColorUnderCarrierHz / 1_000_000.0,
+        options.FscMHz * 4.0,
+        phaseDriftRadians: 0.25,
+        options.WorkerThreads);
+    Assert.NotSame(analysis.Heterodyne, changedHeterodyne);
+    Assert.Same(changedHeterodyne, cachedChangedHeterodyne);
 
     VhsChromaFieldResult prepared = VhsChromaDecoder.DecodeFieldWithPhase(
         chroma,
@@ -3434,6 +3478,11 @@ public void VhsChromaPhaseWorkspacePreservesDecodeResultsAndCarrierFallback()
         options,
         analysis.Phase);
     AssertTrue(prepared.Samples.SequenceEqual(independent.Samples));
+    VhsChromaFieldResult cached = VhsChromaDecoder.DecodeFieldWithPhase(
+        chroma,
+        options,
+        cachedAnalysis);
+    AssertTrue(prepared.Samples.SequenceEqual(cached.Samples));
 
     const double changedCarrierHz = 1_000_000.0;
     VhsChromaFieldResult preparedFallback = VhsChromaDecoder.DecodeFieldWithPhase(

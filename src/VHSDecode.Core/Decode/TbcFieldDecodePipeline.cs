@@ -180,6 +180,7 @@ public sealed class TbcFieldDecodePipeline
     private readonly bool _decodeVbiData;
     private readonly bool _preserveRawMetricSources;
     private readonly VhsChromaFieldOptions? _chromaFieldOptions;
+    private readonly VhsChromaCarrierTableCache? _chromaCarrierTableCache;
     private readonly VsyncSerrationDetector? _vsyncSerrationDetector;
     private readonly string? _decodeType;
     private readonly double? _framesPerSecond;
@@ -259,6 +260,9 @@ public sealed class TbcFieldDecodePipeline
         _decodeVbiData = decodeLaserDiscVbi || decodeVbiData;
         _preserveRawMetricSources = preserveRawMetricSources;
         _chromaFieldOptions = chromaFieldOptions;
+        _chromaCarrierTableCache = chromaFieldOptions is null
+            ? null
+            : new VhsChromaCarrierTableCache();
         _chromaRotationIndex = chromaFieldOptions?.InitialChromaRotationIndex;
         _laserDiscNtscBurstRefineOptions = laserDiscNtscBurstRefineOptions;
         _vsyncSerrationDetector = vsyncSerrationDetector;
@@ -1325,7 +1329,8 @@ public sealed class TbcFieldDecodePipeline
             _previousBurstDetectedLine,
             lineOffset: outputFirstLine,
             previousChromaAfcCarrierHz: _chromaAfcPhaseCarrierHz,
-            previousChromaAfcPhaseRadians: _chromaAfcPhaseCarrierRadians);
+            previousChromaAfcPhaseRadians: _chromaAfcPhaseCarrierRadians,
+            carrierTableCache: _chromaCarrierTableCache);
     }
 
     private VhsChromaFieldResult? DecodeChromaField(

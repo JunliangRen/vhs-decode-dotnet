@@ -110,6 +110,97 @@ internal sealed record VhsChromaPhaseAnalysis(
     double HeterodyneCarrierHz,
     double HeterodynePhaseRadians);
 
+internal sealed class VhsChromaCarrierTableCache
+{
+    private readonly object _gate = new();
+    private HeterodyneEntry? _heterodyne;
+    private CarrierEntry? _carrier;
+
+    internal double[][] GetHeterodyne(
+        int sampleCount,
+        double fscMHz,
+        double colorUnderCarrierMHz,
+        double outputSampleRateMHz,
+        double phaseDriftRadians,
+        int workerThreads)
+    {
+        lock (_gate)
+        {
+            if (_heterodyne is { } cached
+                && cached.SampleCount == sampleCount
+                && cached.FscMHz == fscMHz
+                && cached.ColorUnderCarrierMHz == colorUnderCarrierMHz
+                && cached.OutputSampleRateMHz == outputSampleRateMHz
+                && cached.PhaseDriftRadians == phaseDriftRadians)
+            {
+                return cached.Table;
+            }
+
+            double[][] table = VhsChromaDecoder.BuildHeterodyneTable(
+                sampleCount,
+                fscMHz,
+                colorUnderCarrierMHz,
+                outputSampleRateMHz,
+                phaseDriftRadians,
+                workerThreads);
+            _heterodyne = new HeterodyneEntry(
+                sampleCount,
+                fscMHz,
+                colorUnderCarrierMHz,
+                outputSampleRateMHz,
+                phaseDriftRadians,
+                table);
+            return table;
+        }
+    }
+
+    internal (double[] Sin, double[] Cos) GetCarrierTables(
+        int sampleCount,
+        double carrierMHz,
+        double outputSampleRateMHz,
+        int workerThreads)
+    {
+        lock (_gate)
+        {
+            if (_carrier is { } cached
+                && cached.SampleCount == sampleCount
+                && cached.CarrierMHz == carrierMHz
+                && cached.OutputSampleRateMHz == outputSampleRateMHz)
+            {
+                return (cached.Sin, cached.Cos);
+            }
+
+            (double[] sin, double[] cos) = VhsChromaDecoder.BuildCarrierTables(
+                sampleCount,
+                carrierMHz,
+                outputSampleRateMHz,
+                workerThreads);
+            _carrier = new CarrierEntry(
+                sampleCount,
+                carrierMHz,
+                outputSampleRateMHz,
+                sin,
+                cos);
+            return (sin, cos);
+        }
+    }
+
+    private sealed record HeterodyneEntry(
+        int SampleCount,
+        double FscMHz,
+        double ColorUnderCarrierMHz,
+        double OutputSampleRateMHz,
+        double PhaseDriftRadians,
+        double[][] Table);
+
+    private sealed record CarrierEntry(
+        int SampleCount,
+        double CarrierMHz,
+        double OutputSampleRateMHz,
+        double[] Sin,
+        double[] Cos);
+}
+
 public delegate ChromaBurstDemodulationResult ChromaBurstProbe(
     int lineNumber,
     int phaseRotation,
@@ -221,7 +312,8 @@ public static class VhsChromaDecoder
         Func<double[], double[]>? burstFilter = null,
         int lineOffset = 0,
         double? previousChromaAfcCarrierHz = null,
-        double previousChromaAfcPhaseRadians = 0.0)
+        double previousChromaAfcPhaseRadians = 0.0,
+        VhsChromaCarrierTableCache? carrierTableCache = null)
     {
         ArgumentNullException.ThrowIfNull(options);
         double[] chromaField = chroma.ToArray();
@@ -245,18 +337,30 @@ public static class VhsChromaDecoder
             effectiveBurstFilter = values => IirFilter.ApplyForwardBackward(options.FinalFilter, values);
         }
 
-        double[][] heterodyne = BuildHeterodyneTable(
-            chromaField.Length,
-            options.FscMHz,
-            phaseCarrierHz / 1_000_000.0,
-            outputSampleRateMHz,
-            phaseDriftRadians,
-            options.WorkerThreads);
-        (double[] burstSin, double[] burstCos) = BuildCarrierTables(
-            chromaField.Length,
-            options.FscMHz,
-            outputSampleRateMHz,
-            options.WorkerThreads);
+        double[][] heterodyne = carrierTableCache?.GetHeterodyne(
+                chromaField.Length,
+                options.FscMHz,
+                phaseCarrierHz / 1_000_000.0,
+                outputSampleRateMHz,
+                phaseDriftRadians,
+                options.WorkerThreads)
+            ?? BuildHeterodyneTable(
+                chromaField.Length,
+                options.FscMHz,
+                phaseCarrierHz / 1_000_000.0,
+                outputSampleRateMHz,
+                phaseDriftRadians,
+                options.WorkerThreads);
+        (double[] burstSin, double[] burstCos) = carrierTableCache?.GetCarrierTables(
+                chromaField.Length,
+                options.FscMHz,
+                outputSampleRateMHz,
+                options.WorkerThreads)
+            ?? BuildCarrierTables(
+                chromaField.Length,
+                options.FscMHz,
+                outputSampleRateMHz,
+                options.WorkerThreads);
         ChromaPhaseSequenceResult result = GetPhaseRotationSequence(
             options.ChromaRotation,
             chromaRotationIndex,
