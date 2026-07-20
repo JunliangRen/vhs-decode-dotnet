@@ -1454,6 +1454,20 @@ possible capture has already been proven byte-for-byte identical.
   `7C732FDB97CA95900ED353ABF1DBD0A37BBE3D8609886E16A7B55CCAE1D5B236`,
   `82F1D3A9E3A3BD73A5AA07A63C930892CBB7125D857725D736C721CCBED18494`,
   and `DDEFFB4DC96F4DAB031BDAF6BA385C1DD6C2EAEE31E53ECD244826C12F21D081`
+- Resampling-loader selection now recognizes the exact no-op case for lowercase
+  `.s16` input declared at exactly 40.0 MHz and uses `Int16SampleLoader` instead
+  of launching an FFmpeg PCM pass-through. Other extensions, case variants, and
+  rates such as 40.000001 MHz retain the prior FFmpeg path. Session/factory
+  xUnit v3 assertions lock the boundary. A fresh 40-frame trace contained no
+  `FfmpegStreamSampleLoader`, `OpenFfmpegOutput`, or input-pump `Stream.CopyTo`
+  frame among its top 300 inclusive methods. Five interleaved 40-frame pairs
+  reduced median wall/CPU time from 5.33/17.11 to 4.97/15.94 s (6.8%/6.8%) and
+  median peak working set from 1.23 to 1.13 GiB. Two reversed 204-frame pairs
+  completed baseline/current in 21.50/20.86 and 21.67/21.54 s; candidate peaks
+  were 1.39/1.35 GiB. All variants retained exact luma/chroma/JSON hashes
+  `7C732FDB97CA95900ED353ABF1DBD0A37BBE3D8609886E16A7B55CCAE1D5B236`,
+  `82F1D3A9E3A3BD73A5AA07A63C930892CBB7125D857725D736C721CCBED18494`,
+  and `DDEFFB4DC96F4DAB031BDAF6BA385C1DD6C2EAEE31E53ECD244826C12F21D081`
 - VHS RF-envelope preparation now converts four doubles to float32, clears the
   sign bits, and writes the rotated float64 values through AVX while preserving
   the scalar tail and wrap path. A 32K-block isolated median improved from

@@ -161,6 +161,7 @@ public sealed class TbcFieldDecodePipeline
 {
     private const int MaximumOutputFirstLine = 4;
     private const int LineLocationLookahead = 10;
+    private const int VhsChromaPhaseAnalysisFirstLine = 1;
     private readonly SyncAnalyzer _syncAnalyzer;
     private readonly TbcFieldRenderer _renderer;
     private readonly VideoOutputConverter _videoOutput;
@@ -182,6 +183,7 @@ public sealed class TbcFieldDecodePipeline
     private readonly VhsChromaFieldOptions? _chromaFieldOptions;
     private readonly VhsChromaCarrierTableCache? _chromaCarrierTableCache;
     private readonly VsyncSerrationDetector? _vsyncSerrationDetector;
+    private readonly VhsFieldLevelState? _vhsFieldLevelState;
     private readonly string? _decodeType;
     private readonly double? _framesPerSecond;
     private readonly Action<string, string>? _diagnosticLogger;
@@ -268,6 +270,9 @@ public sealed class TbcFieldDecodePipeline
         _vsyncSerrationDetector = vsyncSerrationDetector;
         _decodeType = decodeType;
         _framesPerSecond = framesPerSecond is > 0.0 ? framesPerSecond : null;
+        _vhsFieldLevelState = string.Equals(decodeType, "vhs", StringComparison.Ordinal)
+            ? new VhsFieldLevelState(_framesPerSecond ?? 25.0)
+            : null;
         _diagnosticLogger = diagnosticLogger;
         _renderer.DiagnosticLogger = diagnosticLogger;
         _debug = debug;
@@ -708,6 +713,13 @@ public sealed class TbcFieldDecodePipeline
             meanLineLength,
             parity.IsFirstField,
             fallback);
+        bool isTape = string.Equals(_decodeType, "vhs", StringComparison.Ordinal);
+        if (isTape)
+        {
+            // v0.4.0 retains VHS sync history even when the span is later rejected as too short.
+            UpdateSyncHistory(span.StartSample, line0, meanLineLength, parity);
+        }
+
         int currentFieldLineCount = CurrentFieldLineCount(parity.IsFirstField);
         int processedLines = _decodeLaserDiscVbi
             ? LaserDiscProcessedLineCount(parity.IsFirstField)
@@ -758,14 +770,17 @@ public sealed class TbcFieldDecodePipeline
         double nextFieldOffsetSamples = ComputeNextFieldOffsetSamples(
             refinedPulses,
             lineLocations.Locations,
+            line0.FirstHSyncLocation,
             line0.Location,
-            meanLineLength);
+            meanLineLength,
+            currentFieldLineCount,
+            parity.IsFirstField);
         if (_decodeLaserDiscVbi)
         {
             lineLocations = LaserDiscLineLocationRepair.MarkDerivativeErrors(lineLocations);
         }
 
-        lineLocations = RefineLineLocationsFromHSync(span, lineLocations, activeVideoOutput);
+        lineLocations = RefineLineLocationsFromHSync(span, lineLocations, activeVideoOutput, threshold);
         if (_decodeLaserDiscVbi)
         {
             lineLocations = LaserDiscLineLocationRepair.MarkDerivativeErrors(lineLocations);
@@ -786,12 +801,15 @@ public sealed class TbcFieldDecodePipeline
 
         int outputFirstLine = OutputFirstLine(parity.IsFirstField);
         double[] renderLineLocations = RenderLineLocations(lineLocations, outputFirstLine);
-        double[]? chromaBurstSamples = ResampleChromaBurst(span.Chroma, renderLineLocations, outputFirstLine);
+        double[]? phaseAnalysisChroma = ResampleChromaBurst(
+            span.Chroma,
+            renderLineLocations,
+            VhsChromaPhaseAnalysisFirstLine);
         VhsChromaPhaseAnalysis? chromaAnalysis = AnalyzeChromaPhase(
-            chromaBurstSamples,
+            phaseAnalysisChroma,
             lineLocations.Locations,
             _syncAnalyzer.NominalLineLength,
-            outputFirstLine);
+            VhsChromaPhaseAnalysisFirstLine);
         ChromaPhaseSequenceResult? chromaPhase = chromaAnalysis?.Phase;
         if (CanRefineLineLocationsFromBurst(chromaPhase))
         {
@@ -803,8 +821,12 @@ public sealed class TbcFieldDecodePipeline
                 _chromaFieldOptions.ColorSystem);
             lineLocations = lineLocations with { Locations = refinedLocations };
             renderLineLocations = RenderLineLocations(lineLocations, outputFirstLine);
-            chromaBurstSamples = ResampleChromaBurst(span.Chroma, renderLineLocations, outputFirstLine);
         }
+
+        double[]? chromaBurstSamples = ResampleChromaBurst(
+            span.Chroma,
+            renderLineLocations,
+            outputFirstLine);
 
         if (string.Equals(_decodeType, "vhs", StringComparison.Ordinal)
             && FormatCatalog.ParentSystem(_system) == "NTSC")
@@ -978,7 +1000,11 @@ public sealed class TbcFieldDecodePipeline
             CommitChromaState(chroma);
         }
 
-        UpdateSyncHistory(span.StartSample, line0, meanLineLength, parity);
+        if (!isTape)
+        {
+            UpdateSyncHistory(span.StartSample, line0, meanLineLength, parity);
+        }
+
         _previousSyncConfidence = syncConfidence;
         UpdatePalLaserDiscEndLineHistory(span.StartSample, lineLocations, currentFieldLineCount);
         UpdateCvbsEndLineHistory(span.StartSample, lineLocations, currentFieldLineCount);
@@ -1142,9 +1168,30 @@ public sealed class TbcFieldDecodePipeline
     private double ComputeNextFieldOffsetSamples(
         IReadOnlyList<ClassifiedSyncPulse> classified,
         IReadOnlyList<double> lineLocations,
+        double firstHSyncLocation,
         double line0Location,
-        double meanLineLength)
+        double meanLineLength,
+        int currentFieldLines,
+        bool isFirstField)
     {
+        if (string.Equals(_decodeType, "vhs", StringComparison.Ordinal)
+            && double.IsFinite(firstHSyncLocation))
+        {
+            double fromResolvedVBlank = ComputeVhsNextFieldOffsetSamples(
+                _system,
+                _syncAnalyzer.NumPulses,
+                isFirstField,
+                currentFieldLines,
+                meanLineLength,
+                firstHSyncLocation,
+                _syncAnalyzer.NominalLineLength,
+                _inputBlockCutSamples);
+            if (double.IsFinite(fromResolvedVBlank) && fromResolvedVBlank > 0.0)
+            {
+                return fromResolvedVBlank;
+            }
+        }
+
         double? nextVBlankLine0 = FindNextVBlankLine0(classified, line0Location, meanLineLength);
         if (nextVBlankLine0.HasValue)
         {
@@ -1170,6 +1217,34 @@ public sealed class TbcFieldDecodePipeline
         return Math.Max(
             1.0,
             line0Location + (fallbackLine * meanLineLength) + _inputBlockCutSamples);
+    }
+
+    internal static double ComputeVhsNextFieldOffsetSamples(
+        string system,
+        int numEqualizingPulses,
+        bool isFirstField,
+        int currentFieldLines,
+        double meanLineLength,
+        double firstHSyncLocation,
+        double nominalLineLength,
+        int inputBlockCutSamples)
+    {
+        if (!double.IsFinite(nominalLineLength) || nominalLineLength <= 0.0)
+        {
+            throw new ArgumentOutOfRangeException(nameof(nominalLineLength));
+        }
+
+        ArgumentOutOfRangeException.ThrowIfNegative(inputBlockCutSamples);
+        double nextFieldLocation = VBlankSyncResolver.NextFieldLocation(
+            system,
+            numEqualizingPulses,
+            isFirstField,
+            currentFieldLines,
+            meanLineLength,
+            firstHSyncLocation);
+        return nextFieldLocation
+            - (8.0 * nominalLineLength)
+            + inputBlockCutSamples;
     }
 
     private double? FindNextVBlankLine0(
@@ -1330,7 +1405,8 @@ public sealed class TbcFieldDecodePipeline
             lineOffset: outputFirstLine,
             previousChromaAfcCarrierHz: _chromaAfcPhaseCarrierHz,
             previousChromaAfcPhaseRadians: _chromaAfcPhaseCarrierRadians,
-            carrierTableCache: _chromaCarrierTableCache);
+            carrierTableCache: _chromaCarrierTableCache,
+            useFloat32Samples: true);
     }
 
     private VhsChromaFieldResult? DecodeChromaField(
@@ -1555,7 +1631,7 @@ public sealed class TbcFieldDecodePipeline
                 _diagnosticLogger?.Invoke(
                     "DEBUG",
                     FormattableString.Invariant(
-                        $"VBI serration levels {_vsyncSerrationDetector.LevelCount} - Sync tip: {serration.SyncLevel.Value / 1e3:F2} kHz, Blanking (ire0): {serration.BlankLevel.Value / 1e3:F2} kHz"));
+                        $"VBI serration levels {serration.LevelCountBeforePull} - Sync tip: {serration.SyncLevel.Value / 1e3:F2} kHz, Blanking (ire0): {serration.BlankLevel.Value / 1e3:F2} kHz"));
             }
             else if (serrationFieldNumber % 10 == 0)
             {
@@ -1576,29 +1652,66 @@ public sealed class TbcFieldDecodePipeline
                     serrationBlankLevel.Value,
                     _syncAnalyzer,
                     referenceSyncLevel,
-                    _videoOutput.HzIre);
+                    _videoOutput.HzIre,
+                    out SerrationLevelFailureKind refinementFailure,
+                    out double? measuredSyncLevel);
+                if (measuredSyncLevel.HasValue)
+                {
+                    _vhsFieldLevelState?.PushSyncLevel(measuredSyncLevel.Value);
+                }
+
                 if (refined is not null)
                 {
+                    _vhsFieldLevelState?.PushLevels(refined.SyncLevel, refined.BlankLevel);
                     _vsyncSerrationDetector.PushLevels(refined.SyncLevel, refined.BlankLevel);
-                    (double SyncLevel, double BlankLevel)? averaged = _vsyncSerrationDetector.PullLevels();
-                    serrationSyncLevel = averaged?.SyncLevel;
-                    serrationBlankLevel = averaged?.BlankLevel;
                 }
+                else if (!ApplyVhsSerrationRefinementFallback(
+                             refinementFailure,
+                             _vhsFieldLevelState,
+                             _vsyncSerrationDetector,
+                             _diagnosticLogger)
+                         && refinementFailure == SerrationLevelFailureKind.LevelCheckFailed)
+                {
+                    _diagnosticLogger?.Invoke("DEBUG", "level check failed in pulses_levels!");
+                }
+
+                (double SyncLevel, double BlankLevel)? averaged = _vsyncSerrationDetector.PullLevels();
+                serrationSyncLevel = averaged?.SyncLevel;
+                serrationBlankLevel = averaged?.BlankLevel;
             }
 
             if ((serration.FoundSerration || serration.HasLevels)
                 && serrationSyncLevel.HasValue
-                && serrationBlankLevel.HasValue
-                && VsyncSerrationDetector.CheckLevels(
+                && serrationBlankLevel.HasValue)
+            {
+                bool levelsAreUsable = VsyncSerrationDetector.CheckLevels(
                     syncReference,
                     referenceSyncLevel,
                     serrationSyncLevel.Value,
                     serrationBlankLevel.Value,
                     referenceSyncLevel,
-                    _videoOutput.HzIre))
-            {
-                savedSerrationLevels = (serrationSyncLevel.Value, serrationBlankLevel.Value);
-                if (serration.FoundSerration)
+                    _videoOutput.HzIre);
+                if (levelsAreUsable)
+                {
+                    savedSerrationLevels = (serrationSyncLevel.Value, serrationBlankLevel.Value);
+                }
+                else if (_vhsFieldLevelState?.PullLevels() is { } fieldStateLevels)
+                {
+                    savedSerrationLevels = fieldStateLevels;
+                    _diagnosticLogger?.Invoke(
+                        "DEBUG",
+                        "Level check failed on serration measured levels [new_sync: "
+                        + PythonNamespaceFormatter.FormatValue(serrationSyncLevel.Value)
+                        + ", new_blank: "
+                        + PythonNamespaceFormatter.FormatValue(serrationBlankLevel.Value)
+                        + "], falling back to levels from FieldState [sync "
+                        + PythonNamespaceFormatter.FormatValue(fieldStateLevels.SyncLevel)
+                        + ", blank "
+                        + PythonNamespaceFormatter.FormatValue(fieldStateLevels.BlankLevel)
+                        + "].");
+                }
+
+                if (savedSerrationLevels.HasValue && serration.FoundSerration)
                 {
                     _lastDetectedSyncLevels = savedSerrationLevels;
                     return PrepareSyncSpanFromLevels(span, _lastDetectedSyncLevels.Value, usedSavedLevels: false);
@@ -1619,13 +1732,24 @@ public sealed class TbcFieldDecodePipeline
                 out SerrationLevelFailureKind failureKind);
             if (fallbackRefinement is not null)
             {
-                _vsyncSerrationDetector?.PushLevels(
+                _vhsFieldLevelState?.PushSyncLevel(fallbackRefinement.SyncLevel);
+                SerrationLevelRefinement? selectedRefinement = LevelDetection.RefineSerrationLevels(
+                    syncReference,
                     fallbackRefinement.SyncLevel,
-                    fallbackRefinement.BlankLevel);
-                _lastDetectedSyncLevels = (
-                    fallbackRefinement.SyncLevel,
-                    fallbackRefinement.BlankLevel);
-                return PrepareSyncSpanFromLevels(span, _lastDetectedSyncLevels.Value, usedSavedLevels: false);
+                    fallbackRefinement.BlankLevel,
+                    _syncAnalyzer,
+                    referenceSyncLevel,
+                    _videoOutput.HzIre);
+                if (selectedRefinement is not null)
+                {
+                    PushRefinedVhsFieldLevels(selectedRefinement);
+                    _vsyncSerrationDetector?.PushLevels(
+                        selectedRefinement.SyncLevel,
+                        selectedRefinement.BlankLevel);
+                    _lastDetectedSyncLevels = PullPreferredVhsLevels()
+                        ?? (selectedRefinement.SyncLevel, selectedRefinement.BlankLevel);
+                    return PrepareSyncSpanFromLevels(span, _lastDetectedSyncLevels.Value, usedSavedLevels: false);
+                }
             }
 
             if (failureKind == SerrationLevelFailureKind.NonFiniteLevels)
@@ -1670,7 +1794,8 @@ public sealed class TbcFieldDecodePipeline
         (double SyncLevel, double BlankLevel) levels,
         bool usedSavedLevels)
     {
-        if (!_syncDetectionOptions.ClampDcOffset)
+        bool normalizeTapeSyncReference = string.Equals(_decodeType, "vhs", StringComparison.Ordinal);
+        if (!_syncDetectionOptions.ClampDcOffset && !normalizeTapeSyncReference)
         {
             return new SyncPreparedSpan(span, SyncThresholdFromLevels(levels), usedSavedLevels);
         }
@@ -1685,8 +1810,14 @@ public sealed class TbcFieldDecodePipeline
         return new SyncPreparedSpan(
             span with
             {
-                Video = AddDcOffset(span.Video, dcOffset),
-                VideoLowPass = span.VideoLowPass is null ? null : AddDcOffset(span.VideoLowPass, dcOffset)
+                Video = _syncDetectionOptions.ClampDcOffset
+                    ? AddDcOffset(span.Video, dcOffset)
+                    : span.Video,
+                VideoLowPass = normalizeTapeSyncReference
+                    ? AddDcOffset(span.VideoLowPass ?? span.Video, dcOffset)
+                    : span.VideoLowPass is null
+                        ? null
+                        : AddDcOffset(span.VideoLowPass, dcOffset)
             },
             SyncThresholdFromLevels(adjustedLevels),
             usedSavedLevels);
@@ -2898,7 +3029,8 @@ public sealed class TbcFieldDecodePipeline
     private LineLocationResult RefineLineLocationsFromHSync(
         RfDecodedSpan span,
         LineLocationResult lineLocations,
-        VideoOutputConverter converter)
+        VideoOutputConverter converter,
+        double detectedSyncThreshold)
     {
         if (string.Equals(_decodeType, "ld", StringComparison.Ordinal))
         {
@@ -2912,7 +3044,9 @@ public sealed class TbcFieldDecodePipeline
             return lineLocations;
         }
 
-        double threshold = converter.IreToHz(converter.VSyncIre / 2.0);
+        double threshold = string.Equals(_decodeType, "vhs", StringComparison.Ordinal)
+            ? detectedSyncThreshold
+            : converter.IreToHz(converter.VSyncIre / 2.0);
         int oneMicrosecond = Math.Max(1, (int)_syncAnalyzer.SampleRateMHz);
         int normalHSyncLength = Math.Max(1, (int)_syncAnalyzer.UsecToSamples(_syncAnalyzer.HSyncPulseUs));
         int searchCount = Math.Max(1, oneMicrosecond * 2);
@@ -2945,9 +3079,10 @@ public sealed class TbcFieldDecodePipeline
                 threshold,
                 count: Math.Min(searchCount, syncReference.Length - searchStart - 1));
             double originalLocation = refined[line];
-            if (crossing.HasValue
-                && !filled[line]
-                && TryRefineLeftHSync(
+            double rightReferenceLocation = originalLocation;
+            if (crossing.HasValue && !filled[line])
+            {
+                bool leftRefined = TryRefineLeftHSync(
                     syncReference,
                     searchStart,
                     crossing.Value,
@@ -2955,13 +3090,26 @@ public sealed class TbcFieldDecodePipeline
                     previousPorchLevel,
                     converter,
                     out double refinedLocation,
-                    out double porchLevel))
-            {
-                refined[line] = refinedLocation;
-                filled[line] = lineLocations.Filled[line];
-                if (porchLevel > 0.0)
+                    out double porchLevel,
+                    out bool preserveProvisionalLocation);
+                if (leftRefined)
                 {
-                    previousPorchLevel = porchLevel;
+                    refined[line] = refinedLocation;
+                    rightReferenceLocation = refinedLocation;
+                    filled[line] = lineLocations.Filled[line];
+                    if (porchLevel > 0.0)
+                    {
+                        previousPorchLevel = porchLevel;
+                    }
+                }
+                else
+                {
+                    filled[line] = true;
+                    refined[line] = originalLocation;
+                    if (preserveProvisionalLocation)
+                    {
+                        rightReferenceLocation = refinedLocation;
+                    }
                 }
             }
             else
@@ -2976,10 +3124,10 @@ public sealed class TbcFieldDecodePipeline
                     searchStart,
                     threshold,
                     normalHSyncLength,
-                oneMicrosecond,
-                refined[line],
-                converter,
-                out double rightRefinedLocation,
+                    oneMicrosecond,
+                    rightReferenceLocation,
+                    converter,
+                    out double rightRefinedLocation,
                     out double rightPorchLevel))
             {
                 refined[line] = rightRefinedLocation;
@@ -3134,6 +3282,13 @@ public sealed class TbcFieldDecodePipeline
             return false;
         }
 
+        // v0.4.0's VHS Cython path rejects a forced rising-edge search when
+        // the search already starts above the threshold.
+        if (syncReference[rightSearchStart] > threshold)
+        {
+            return false;
+        }
+
         int rightSearchCount = Math.Max(1, normalHSyncLength * 2);
         double? rightCrossing = PulseDetection.CalculateZeroCrossing(
             syncReference,
@@ -3146,8 +3301,6 @@ public sealed class TbcFieldDecodePipeline
             return false;
         }
 
-        double sampleRateMHz = (float)_syncAnalyzer.SampleRateMHz;
-        double candidate = rightCrossing.Value - normalHSyncLength + (2.25 * (sampleRateMHz / 40.0));
         if (!TryConfirmRightHSync(
                 syncReference,
                 rightSearchStart,
@@ -3155,8 +3308,16 @@ public sealed class TbcFieldDecodePipeline
                 normalHSyncLength,
                 oneMicrosecond,
                 converter,
-                out porchLevel)
-            || Math.Abs(candidate - referenceLocation) >= oneMicrosecond * 2.0)
+                out porchLevel))
+        {
+            return false;
+        }
+
+        double sampleRateMHz = (float)_syncAnalyzer.SampleRateMHz;
+        double candidate = rightCrossing.Value
+            - normalHSyncLength
+            + (2.25 * (sampleRateMHz / 40.0));
+        if (Math.Abs(candidate - referenceLocation) >= oneMicrosecond * 2.0)
         {
             return false;
         }
@@ -3173,10 +3334,12 @@ public sealed class TbcFieldDecodePipeline
         double previousPorchLevel,
         VideoOutputConverter converter,
         out double refinedLocation,
-        out double porchLevel)
+        out double porchLevel,
+        out bool preserveProvisionalLocation)
     {
         refinedLocation = crossing;
         porchLevel = 0.0;
+        preserveProvisionalLocation = false;
         if (!HSyncAreaLooksValid(
                 syncReference,
                 crossing,
@@ -3193,6 +3356,10 @@ public sealed class TbcFieldDecodePipeline
         {
             return false;
         }
+
+        // Release 4.0 leaves the initial crossing in the working array while a
+        // failed midpoint refinement is evaluated against the right-edge candidate.
+        preserveProvisionalLocation = true;
 
         // v0.4.0's Cython c_max starts at NaN, so its back-porch branch is unreachable.
         if (previousPorchLevel > 0.0)
@@ -3273,7 +3440,6 @@ public sealed class TbcFieldDecodePipeline
             syncReference,
             rightSearchStart,
             midpoint,
-            edge: 1,
             count: Math.Min(400, syncReference.Length - rightSearchStart - 1));
         return refinedRightCrossing.HasValue
             && Math.Abs(refinedRightCrossing.Value - rightCrossing) < oneMicrosecond / 2.0;
@@ -3812,7 +3978,8 @@ public sealed class TbcFieldDecodePipeline
                 _syncAnalyzer.NumPulses,
                 estimatedFirstField,
                 currentFieldLines);
-        if (vBlankConsensus is null
+        if (UsesTransitionVBlankConsensus(_decodeType)
+            || vBlankConsensus is null
             || (vBlankConsensus.First is null
                 && vBlankConsensus.Last is null
                 && vBlankConsensus.Combined is null))
@@ -3864,7 +4031,8 @@ public sealed class TbcFieldDecodePipeline
             meanLineLength,
             currentFieldLines,
             estimatedFirstField);
-        if (vBlankConsensus?.First is { } first
+        if (UsesLegacyThreeWayLine0Consensus(_decodeType)
+            && vBlankConsensus?.First is { } first
             && vBlankConsensus.Last is { } next
             && previousEstimate is not null)
         {
@@ -3940,6 +4108,47 @@ public sealed class TbcFieldDecodePipeline
             TbcFieldDecodeRecoveryKind.NoFirstHSync,
             "No HSYNC pulse was detected in the decoded span.");
     }
+
+    private void PushRefinedVhsFieldLevels(SerrationLevelRefinement refinement)
+    {
+        _vhsFieldLevelState?.PushSyncLevel(refinement.SyncLevel);
+        _vhsFieldLevelState?.PushLevels(refinement.SyncLevel, refinement.BlankLevel);
+    }
+
+    internal static bool ApplyVhsSerrationRefinementFallback(
+        SerrationLevelFailureKind failureKind,
+        VhsFieldLevelState? fieldState,
+        VsyncSerrationDetector detector,
+        Action<string, string>? diagnosticLogger)
+    {
+        ArgumentNullException.ThrowIfNull(detector);
+        if (failureKind is not (SerrationLevelFailureKind.NonFiniteLevels
+            or SerrationLevelFailureKind.MissingLevels))
+        {
+            return false;
+        }
+
+        (double SyncLevel, double BlankLevel)? fieldStateLevels = fieldState?.PullLevels();
+        if (failureKind == SerrationLevelFailureKind.MissingLevels && !fieldStateLevels.HasValue)
+        {
+            return false;
+        }
+
+        diagnosticLogger?.Invoke("DEBUG", "blacklevel or synclevel had a NaN!");
+        if (fieldStateLevels.HasValue)
+        {
+            detector.PushLevels(
+                fieldStateLevels.Value.SyncLevel,
+                fieldStateLevels.Value.BlankLevel);
+        }
+
+        return true;
+    }
+
+    private (double SyncLevel, double BlankLevel)? PullPreferredVhsLevels()
+        => _vsyncSerrationDetector is { HasLevels: true }
+            ? _vsyncSerrationDetector.PullLevels()
+            : _vhsFieldLevelState?.PullLevels();
 
     internal static Line0Resolution? TryResolveInitialPalCvbsSecondFieldLine0(
         string? decodeType,
@@ -4142,9 +4351,7 @@ public sealed class TbcFieldDecodePipeline
             return;
         }
 
-        if (tape
-            && _previousFirstHSyncLocation.HasValue
-            && _previousFirstHSyncReadLocation.HasValue)
+        if (tape && _previousSyncConfidence.HasValue)
         {
             _diagnosticLogger?.Invoke(
                 "INFO",
@@ -4191,6 +4398,12 @@ public sealed class TbcFieldDecodePipeline
 
         return null;
     }
+
+    internal static bool UsesLegacyThreeWayLine0Consensus(string? decodeType)
+        => !string.Equals(decodeType, "vhs", StringComparison.Ordinal);
+
+    internal static bool UsesTransitionVBlankConsensus(string? decodeType)
+        => string.Equals(decodeType, "vhs", StringComparison.Ordinal);
 
     internal static Line0Resolution SelectLegacyThreeWayLine0Consensus(
         VBlankSyncEstimate first,
@@ -4417,7 +4630,8 @@ public sealed class TbcFieldDecodePipeline
                 return null;
             }
 
-            if (VBlankSyncResolver.HasValidStateMachineTiming(
+            if (ShouldRetainVBlankGroup(
+                _decodeType,
                 group,
                 meanLineLength,
                 _syncAnalyzer.NumPulses))
@@ -4428,6 +4642,17 @@ public sealed class TbcFieldDecodePipeline
             minimum = group.Equalizing1Start;
         }
     }
+
+    internal static bool ShouldRetainVBlankGroup(
+        string? decodeType,
+        VBlankPulseGroup group,
+        double meanLineLength,
+        int numEqualizingPulses)
+        => string.Equals(decodeType, "vhs", StringComparison.Ordinal)
+            || VBlankSyncResolver.HasValidStateMachineTiming(
+                group,
+                meanLineLength,
+                numEqualizingPulses);
 
     private Line0Resolution? TryEstimateLine0FromPrevious(
         IReadOnlyList<ClassifiedSyncPulse> classified,

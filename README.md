@@ -2,7 +2,7 @@
 
 **[English](README.md)** | [简体中文](README.zh-CN.md) | [日本語](README.ja.md)
 
-<!-- README_SYNC: 2026-07-20.14 -->
+<!-- README_SYNC: 2026-07-20.15 -->
 
 .NET 11 rewrite of the decode-facing parts of
 [`oyvindln/vhs-decode`](https://github.com/oyvindln/vhs-decode), focused on
@@ -121,6 +121,9 @@ release compatibility remain the first constraint.
 
 - `-t` / `--threads` drives bounded parallel RF demodulation and filtering;
   stream, FFmpeg, and GNU Radio reads stay ordered.
+- Exact 40.0 MHz `.s16` inputs use the native signed-16 loader instead of a
+  no-op FFmpeg pass-through. Other formats and actual resampling keep their
+  existing FFmpeg paths.
 - A stream-scoped decoded RF cache avoids duplicate FFT work across overlapping
   field reads while keeping memory bounded.
 - VHS uses a bounded continuous RF pipeline. One producer owns ordered input
@@ -196,21 +199,69 @@ release compatibility remain the first constraint.
   isolated 32K FFTs across the host/device boundary; any future optional GPU
   backend must batch a device-resident DSP stage and retain an exact CPU fallback.
 
-On one Windows fixture machine, one-frame Release measurements were:
+The current thread matrix used an Intel Core Ultra 7 265K (20 logical
+processors), Windows 11 build 26220, .NET SDK/runtime
+`11.0.100-preview.6.26359.118`, and Python v0.4.0 (`g4315520`). Each value is
+the median of three interleaved Release runs:
 
-| Decode | This port | Python v0.4.0 |
-| --- | ---: | ---: |
-| NTSC VHS | 2.346 s | 7.193 s |
-| NTSC LaserDisc | 1.651 s | 5.865 s |
+| CLI mode | Effective workers | This port | Python | Speedup | Wall-time reduction |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| default | 5 | 4.908 s | 11.788 s | 2.40x | 58.4% |
+| `--threads 1` | 1 | 9.605 s | 12.729 s | 1.33x | 24.5% |
+| `--threads 5` | 5 | 4.936 s | 11.432 s | 2.32x | 56.8% |
+| `--threads 10` | 10 | 4.682 s | 11.797 s | 2.52x | 60.3% |
+| `--threads 20` | 20 | 4.159 s | 12.011 s | 2.89x | 65.4% |
 
-These numbers are fixture-specific, not universal benchmarks. All current VHS
-A/B runs used .NET SDK/runtime `11.0.100-preview.6.26359.118`, `--threads 20`,
-default chroma, and default resampling. On a reproducible 40-frame PAL probe,
-the saved pre-continuous-pipeline baseline median was 11.60 s and the current
-median was 7.71 s, a 33.5% gain. Average active cores rose from roughly
-2.2-2.5 to 3.3-3.7. Paired TBC, JSON, and chroma SHA-256 values were identical.
+The default remains **5 workers**, matching Release 4.0 CLI semantics; explicit
+20-worker mode was fastest on this 20-logical-processor fixture. The matrix used
+`RF-Sample_2026-07-19_09-12-03.lds` with `--system pal
+--detect_chroma_track_phase --ire0_adjust --tape_format VHS --frequency 40
+--start_fileloc 281303040 -l 40 --overwrite`, plus the row's thread option.
 
-Current 40/160/320-frame sustained runs completed in 7.65/26.58/52.51 s. Peak
+All 15 port runs produced one identical luma TBC, chroma TBC, and JSON hash set
+across every worker count. Upstream Python's requested nonzero thread modes were
+not byte-deterministic on this fixture: its 15 matrix runs produced 15 distinct
+luma/chroma pairs. Three additional Python `--threads 0` controls were mutually
+identical and exactly matched every port run. The matrix therefore compares
+observed throughput; the serial checkpoint below is the strict exact-output A/B.
+
+The compatibility baseline for this 40-frame fixture is Python v0.4.0
+`g4315520` with `--threads 0`:
+
+| Baseline artifact | SHA-256 |
+| --- | --- |
+| Luma TBC | `857315FEC19C3F8D364896CDB4FC3AA26769D86D6E825DE095845EF6647C44A9` |
+| Chroma TBC | `CE54E7F6050E1445E0E205867CD8C3B912B4BB16708D31C303FABC8B04C3AA3B` |
+| JSON | `D0BFA50DD75ABACAE1BAD7E275BB2FD2159230F6FDF98461F045F3784BDF6DD8` |
+
+A longer exact-output checkpoint used an Intel Core Ultra 7 265K (20 logical
+processors), Windows 11 build 26220, and .NET SDK/runtime
+`11.0.100-preview.6.26359.118`:
+
+| PAL VHS, 1,000 frames / 2,000 fields | Wall time | CPU time | Peak working set |
+| --- | ---: | ---: | ---: |
+| This port, Release (two runs) | 218.00 / 218.63 s | 238.72 / 239.50 s | 829.6-838.2 MiB |
+| Python v0.4.0 (`g4315520`) | 417.37 s | not captured | not captured |
+
+Both runs used `RF-Sample_2026-07-19_09-12-03.lds` and
+`--system pal --detect_chroma_track_phase --ire0_adjust --tape_format VHS
+--frequency 40 --start_fileloc 281303040 --threads 0 -l 1000 --overwrite`.
+Both port runs were about 1.91x as fast (47.7-47.8% lower wall time), and all
+three paired SHA-256 values were byte-identical across Python and both port
+runs. `--threads 0` selected deterministic serial mode in both implementations.
+
+These numbers are fixture-specific, not universal benchmarks. The 40-frame
+tuning A/B runs below used .NET SDK/runtime `11.0.100-preview.6.26359.118`,
+`--threads 20`, default chroma, and default resampling. On a reproducible
+40-frame PAL probe,
+the saved pre-continuous-pipeline baseline median was 11.60 s and the latest
+median was 4.97 s, a 57.2% cumulative gain. The newest direct-`.s16` checkpoint
+alone moved matched wall/CPU medians from 5.33/17.11 s to 4.97/15.94 s
+(6.8%/6.8%). Process CPU divided by wall time remains about 3.2 active cores,
+so further work still targets state-safe field-stage parallelism. Paired TBC,
+JSON, and chroma SHA-256 values were identical.
+
+Earlier 40/160/320-frame sustained runs completed in 7.65/26.58/52.51 s. Peak
 working sets were 1.76/1.88/1.67 GiB, while second-half medians were
 1.42/1.30/1.28 GiB. The full 320 frames were written, and memory showed no
 growth with decode length. Earlier allocation work also reduced a PAL LD
@@ -306,6 +357,14 @@ reversed 204-frame pairs completed baseline/current in 20.23/19.54 s and
 1.35/0.74/0.96/1.14 and 1.27/0.95/0.97/1.09 GiB, with no monotonic growth; all
 408 fields and luma, chroma, and JSON hashes remained exact.
 
+The native-rate `.s16` input path now bypasses FFmpeg only when the declared
+rate is exactly 40.0 MHz. A fresh trace contained no FFmpeg pass-through or
+input-pump frame in its top 300 inclusive methods. Five interleaved 40-frame
+pairs reduced median wall/CPU time from 5.33/17.11 to 4.97/15.94 s
+(6.8%/6.8%), and median peak working set from 1.23 to 1.13 GiB. Two reversed
+204-frame pairs completed baseline/current in 21.50/20.86 and 21.67/21.54 s;
+candidate peaks were 1.39/1.35 GiB, and all output hashes remained exact.
+
 AVX RF-envelope preparation reduced the isolated 32K-block median from 57.5 us
 to 13.3 us, a 76.9% kernel gain. The 40-frame median moved from 7.55 s to 7.39 s,
 and the 160-frame run from 26.95 s to 25.70 s. Its private-memory quarter medians
@@ -394,7 +453,7 @@ dotnet test --solution VHSDecodeDotNet.slnx -c Release --no-build --no-restore
 ```
 
 The current formal Release build has zero warnings and errors. The xUnit v3
-project exposes **788** independently discoverable tests to both
+project exposes **793** independently discoverable tests to both
 `dotnet test` and Visual Studio Test Explorer.
 
 <!-- SECTION: usage -->

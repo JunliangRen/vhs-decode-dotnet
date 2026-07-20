@@ -314,7 +314,8 @@ public static class VhsChromaDecoder
         int lineOffset = 0,
         double? previousChromaAfcCarrierHz = null,
         double previousChromaAfcPhaseRadians = 0.0,
-        VhsChromaCarrierTableCache? carrierTableCache = null)
+        VhsChromaCarrierTableCache? carrierTableCache = null,
+        bool useFloat32Samples = false)
     {
         ArgumentNullException.ThrowIfNull(options);
         ArgumentNullException.ThrowIfNull(chromaField);
@@ -331,7 +332,9 @@ public static class VhsChromaDecoder
         Func<double[], double[]>? effectiveBurstFilter = burstFilter;
         if (effectiveBurstFilter is null && options.FinalSosFilter is not null)
         {
-            effectiveBurstFilter = values => SosFilter.ApplyForwardBackward(options.FinalSosFilter, values);
+            effectiveBurstFilter = useFloat32Samples
+                ? values => SosFilter.ApplyForwardBackwardFloat32(options.FinalSosFilter, values)
+                : values => SosFilter.ApplyForwardBackward(options.FinalSosFilter, values);
         }
         else if (effectiveBurstFilter is null && options.FinalFilter is not null)
         {
@@ -381,7 +384,8 @@ public static class VhsChromaDecoder
                 lineNumber,
                 lineOffset,
                 options.OutputLineLength,
-                effectiveBurstFilter),
+                effectiveBurstFilter,
+                useFloat32Samples),
             options.DetectChromaTrackPhase,
             rotationCheckStartLine: Math.Max(lineOffset, lineOffset + options.OutputLineCount - BurstCheckSkipLines),
             options.EnableColorKiller,
@@ -758,11 +762,23 @@ public static class VhsChromaDecoder
         int lineStart,
         int burstStart,
         ReadOnlySpan<double> burstSin,
-        ReadOnlySpan<double> burstCos)
+        ReadOnlySpan<double> burstCos,
+        bool useFloat32Samples = false)
     {
         if (burstStart < 0 || burstStart + burst.Length > burstSin.Length || burstStart + burst.Length > burstCos.Length)
         {
             throw new ArgumentOutOfRangeException(nameof(burstStart), "Burst carrier tables must cover the requested burst range.");
+        }
+
+        if (useFloat32Samples)
+        {
+            return DemodBurstFloat32(
+                burst,
+                lineScale,
+                lineStart,
+                burstStart,
+                burstSin,
+                burstCos);
         }
 
         Span<double> iFirst = stackalloc double[4];
@@ -825,6 +841,114 @@ public static class VhsChromaDecoder
             qComponent);
     }
 
+    private static ChromaBurstDemodulationResult DemodBurstFloat32(
+        ReadOnlySpan<double> burst,
+        double lineScale,
+        int lineStart,
+        int burstStart,
+        ReadOnlySpan<double> burstSin,
+        ReadOnlySpan<double> burstCos)
+    {
+        Span<double> i0 = stackalloc double[4];
+        Span<double> i1 = stackalloc double[4];
+        Span<double> i2 = stackalloc double[4];
+        Span<double> i3 = stackalloc double[4];
+        Span<double> q0 = stackalloc double[4];
+        Span<double> q1 = stackalloc double[4];
+        Span<double> q2 = stackalloc double[4];
+        Span<double> q3 = stackalloc double[4];
+        int mainEnd = burst.Length & ~15;
+        for (int index = 0; index < mainEnd; index += 16)
+        {
+            for (int lane = 0; lane < 4; lane++)
+            {
+                AccumulateFloat32Burst(burst, burstSin, burstCos, burstStart, index + lane, ref i0[lane], ref q0[lane]);
+                AccumulateFloat32Burst(burst, burstSin, burstCos, burstStart, index + lane + 4, ref i1[lane], ref q1[lane]);
+                AccumulateFloat32Burst(burst, burstSin, burstCos, burstStart, index + lane + 8, ref i2[lane], ref q2[lane]);
+                AccumulateFloat32Burst(burst, burstSin, burstCos, burstStart, index + lane + 12, ref i3[lane], ref q3[lane]);
+            }
+        }
+
+        double iComponent = HorizontalSum(i0, i1, i2, i3);
+        double qComponent = HorizontalSum(q0, q1, q2, q3);
+        int epilogueEnd = burst.Length & ~3;
+        if (epilogueEnd > mainEnd)
+        {
+            Span<double> epilogueI = stackalloc double[4];
+            Span<double> epilogueQ = stackalloc double[4];
+            epilogueI[0] = iComponent;
+            epilogueQ[0] = qComponent;
+            for (int index = mainEnd; index < epilogueEnd; index += 4)
+            {
+                for (int lane = 0; lane < 4; lane++)
+                {
+                    AccumulateFloat32Burst(
+                        burst,
+                        burstSin,
+                        burstCos,
+                        burstStart,
+                        index + lane,
+                        ref epilogueI[lane],
+                        ref epilogueQ[lane]);
+                }
+            }
+
+            iComponent = (epilogueI[0] + epilogueI[2]) + (epilogueI[1] + epilogueI[3]);
+            qComponent = (epilogueQ[0] + epilogueQ[2]) + (epilogueQ[1] + epilogueQ[3]);
+        }
+
+        for (int index = epilogueEnd; index < burst.Length; index++)
+        {
+            AccumulateFloat32Burst(
+                burst,
+                burstSin,
+                burstCos,
+                burstStart,
+                index,
+                ref iComponent,
+                ref qComponent);
+        }
+
+        double phaseDegrees = PositiveDegrees(Math.Atan2(qComponent, iComponent) * (180.0 / Math.PI));
+        double phaseOffsetDegrees = PositiveDegrees(
+            (burstStart - lineStart) * Math.FusedMultiplyAdd(-lineScale, 90.0, 90.0));
+        return new ChromaBurstDemodulationResult(
+            phaseDegrees,
+            phaseOffsetDegrees,
+            NumpyHypot(iComponent, qComponent),
+            iComponent,
+            qComponent);
+
+        static double HorizontalSum(
+            ReadOnlySpan<double> group0,
+            ReadOnlySpan<double> group1,
+            ReadOnlySpan<double> group2,
+            ReadOnlySpan<double> group3)
+        {
+            double lane0 = ((group1[0] + group0[0]) + group2[0]) + group3[0];
+            double lane1 = ((group1[1] + group0[1]) + group2[1]) + group3[1];
+            double lane2 = ((group1[2] + group0[2]) + group2[2]) + group3[2];
+            double lane3 = ((group1[3] + group0[3]) + group2[3]) + group3[3];
+            return (lane0 + lane2) + (lane1 + lane3);
+        }
+    }
+
+    private static void AccumulateFloat32Burst(
+        ReadOnlySpan<double> burst,
+        ReadOnlySpan<double> burstSin,
+        ReadOnlySpan<double> burstCos,
+        int burstStart,
+        int index,
+        ref double iAccumulator,
+        ref double qAccumulator)
+    {
+        float sample = (float)burst[index];
+        float iProduct = sample * (float)burstCos[burstStart + index];
+        float qProduct = sample * (float)burstSin[burstStart + index];
+        iAccumulator += iProduct;
+        qAccumulator += qProduct;
+    }
+
     public static ChromaBurstDemodulationResult ProbeUpconvertedBurst(
         ReadOnlySpan<double> chroma,
         IReadOnlyList<double[]> chromaHeterodyne,
@@ -837,7 +961,8 @@ public static class VhsChromaDecoder
         int lineNumber,
         int lineOffset,
         int lineLength,
-        Func<double[], double[]>? burstFilter = null)
+        Func<double[], double[]>? burstFilter = null,
+        bool useFloat32Samples = false)
     {
         ArgumentOutOfRangeException.ThrowIfNegative(lineOffset);
         ValidateBurstRange(burstStart, burstEnd, lineLength);
@@ -861,7 +986,9 @@ public static class VhsChromaDecoder
         {
             int sourceIndex = paddedStart + i;
             float heterodyneSample = (float)heterodyne[sourceIndex];
-            paddedBurst[i] = heterodyneSample * chroma[sourceIndex];
+            paddedBurst[i] = useFloat32Samples
+                ? (float)(heterodyneSample * (float)chroma[sourceIndex])
+                : heterodyneSample * chroma[sourceIndex];
         }
 
         double[] filteredPadded = burstFilter?.Invoke(paddedBurst) ?? paddedBurst;
@@ -873,7 +1000,8 @@ public static class VhsChromaDecoder
             lineStart,
             paddedStart + burstPadding,
             burstSin,
-            burstCos);
+            burstCos,
+            useFloat32Samples);
     }
 
     public static ChromaPhaseSequenceResult GetPhaseRotationSequence(
@@ -991,7 +1119,11 @@ public static class VhsChromaDecoder
         double[] output = new double[chroma.Length];
         foreach (ChromaPhaseLine phaseLine in phaseRotationSequence)
         {
-            (int lineStart, int lineEnd) = GetLineRange(chroma.Length, lineOffset, lineLength, phaseLine.LineNumber);
+            (int lineStart, int lineEnd) = GetNumpySliceRange(
+                chroma.Length,
+                lineOffset,
+                lineLength,
+                phaseLine.LineNumber);
             if (phaseLine.PhaseRotation < 0 || phaseLine.PhaseRotation >= chromaHeterodyne.Count)
             {
                 throw new ArgumentOutOfRangeException(nameof(phaseRotationSequence), "Chroma phase rotation index has no heterodyne table.");
@@ -1040,7 +1172,8 @@ public static class VhsChromaDecoder
 
         foreach (ChromaPhaseLine phaseLine in phaseRotationSequence)
         {
-            (int lineStart, int lineEnd) = GetLineRange(chroma.Length, lineOffset, lineLength, phaseLine.LineNumber);
+            int lineStart = checked((phaseLine.LineNumber - lineOffset) * lineLength);
+            int lineEnd = checked(lineStart + lineLength);
             double targetPhaseDegrees = phaseLine.LineNumber % 2 == 0
                 ? targetPhaseEvenDegrees
                 : targetPhaseOddDegrees;
@@ -1050,6 +1183,18 @@ public static class VhsChromaDecoder
                 targetPhaseDegrees + phaseLine.BurstPhaseDegrees,
                 DegreesToRadians,
                 theta);
+
+            if (lineStart < 0 || lineEnd > chroma.Length)
+            {
+                for (int edgeIndex = lineStart; edgeIndex < lineEnd; edgeIndex++)
+                {
+                    int sampleIndex = NormalizeNumpyIndex(edgeIndex, chroma.Length);
+                    output[sampleIndex] = (double)(float)(chroma[sampleIndex] * -Math.Cos(theta));
+                    theta += hetCoefficient;
+                }
+
+                continue;
+            }
 
             // Numba/LLVM vectorizes the reflected phase-list specialization in four lanes.
             int vectorCount = (lineEnd - lineStart) & ~3;
@@ -1821,6 +1966,44 @@ public static class VhsChromaDecoder
         }
 
         return (lineStart, lineEnd);
+    }
+
+    private static (int Start, int End) GetNumpySliceRange(
+        int sampleCount,
+        int lineOffset,
+        int lineLength,
+        int lineNumber)
+    {
+        int start = checked((lineNumber - lineOffset) * lineLength);
+        int end = checked(start + lineLength);
+        start = NormalizeNumpySliceBoundary(start, sampleCount);
+        end = NormalizeNumpySliceBoundary(end, sampleCount);
+        return end > start ? (start, end) : (start, start);
+    }
+
+    private static int NormalizeNumpySliceBoundary(int index, int length)
+    {
+        if (index < 0)
+        {
+            index += length;
+        }
+
+        return Math.Clamp(index, 0, length);
+    }
+
+    private static int NormalizeNumpyIndex(int index, int length)
+    {
+        if (index < 0)
+        {
+            index += length;
+        }
+
+        if ((uint)index >= (uint)length)
+        {
+            throw new IndexOutOfRangeException("Chroma phase index is outside the output field.");
+        }
+
+        return index;
     }
 
     private static void ValidateLineShape(int sampleCount, int lines, int lineLength)

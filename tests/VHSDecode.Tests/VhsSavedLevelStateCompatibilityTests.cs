@@ -36,6 +36,61 @@ public sealed class VhsSavedLevelStateCompatibilityTests
         }
     }
 
+    [Fact(DisplayName = "VHS FieldState moving averages match v0.4.0 windows")]
+    public void FieldStateMovingAveragesMatchReleaseFourWindows()
+    {
+        var pal = new VhsFieldLevelState(framesPerSecond: 25.0);
+        Assert.False(pal.HasLevels);
+        Assert.Null(pal.PullSyncLevel());
+        Assert.Null(pal.PullLevels());
+
+        pal.PushSyncLevel(-40.0);
+        pal.PushLevels(-30.0, 10.0);
+        Assert.True(pal.HasLevels);
+        Assert.Equal(-35.0, pal.PullSyncLevel());
+        Assert.Equal((-35.0, 10.0), pal.PullLevels());
+
+        var ntsc = new VhsFieldLevelState(framesPerSecond: 30_000.0 / 1_001.0);
+        for (int value = 1; value <= 14; value++)
+        {
+            ntsc.PushLevels(value, value * 10.0);
+        }
+
+        Assert.Equal((8.5, 85.0), ntsc.PullLevels());
+    }
+
+    [Fact(DisplayName = "VHS missing serration means reuse FieldState like v0.4.0")]
+    public void MissingSerrationMeansReuseFieldState()
+    {
+        var fieldState = new VhsFieldLevelState(framesPerSecond: 25.0);
+        fieldState.PushLevels(60.0, 100.0);
+        var detector = new VsyncSerrationDetector(
+            sampleRateHz: 4_000_000.0,
+            framesPerSecond: 25.0,
+            frameLines: 625.0,
+            equalizingPulseUs: 2.35);
+        detector.PushLevels(180.0, 280.0);
+        detector.PushLevels(200.0, 300.0);
+        _ = detector.PullLevels();
+        var diagnostics = new List<(string Level, string Message)>();
+
+        Assert.True(TbcFieldDecodePipeline.ApplyVhsSerrationRefinementFallback(
+            SerrationLevelFailureKind.MissingLevels,
+            fieldState,
+            detector,
+            (level, message) => diagnostics.Add((level, message))));
+
+        Assert.Equal((130.0, 200.0), detector.PullLevels());
+        Assert.Equal(
+            [("DEBUG", "blacklevel or synclevel had a NaN!")],
+            diagnostics);
+        Assert.False(TbcFieldDecodePipeline.ApplyVhsSerrationRefinementFallback(
+            SerrationLevelFailureKind.MissingLevels,
+            fieldState: null,
+            detector,
+            diagnosticLogger: null));
+    }
+
     [Fact(DisplayName = "VHS line-location issue state forces fresh level detection")]
     public void LineLocationIssueStateForcesFreshLevelDetection()
     {
@@ -89,6 +144,29 @@ public sealed class VhsSavedLevelStateCompatibilityTests
         Assert.True(decoded.LineLocations.Filled.Count(error => error) < 30);
         Assert.False(pipeline.CaptureState().VhsLineLocationIssues);
         Assert.DoesNotContain(diagnostics, entry => entry.Message == SyncIssueDiagnostic);
+    }
+
+    [Fact(DisplayName = "Rejected short VHS fields retain sync history like v0.4.0")]
+    public void RejectedShortFieldsRetainSyncHistory()
+    {
+        TbcFieldDecodePipeline pipeline = CreatePipeline([], decodeType: "vhs");
+        double[] video = new double[1_400];
+        PaintPulse(video, 10, 10, -40.0);
+        PaintPulse(video, 110, 10, -40.0);
+        PaintNtscFirstFieldVBlank(video, line0: 210);
+        PaintPulse(video, 1_310, 10, -40.0);
+
+        TbcFieldDecodeRecoveryException exception = Assert.Throws<TbcFieldDecodeRecoveryException>(() =>
+            pipeline.Decode(
+                new RfDecodedSpan(500_000, video, video, video),
+                syncThresholdHz: -20.0));
+
+        Assert.Equal(TbcFieldDecodeRecoveryKind.InsufficientData, exception.Kind);
+        TbcFieldDecodeState state = pipeline.CaptureState();
+        Assert.NotNull(state.PreviousFirstHSyncLocation);
+        Assert.Equal(500_000, state.PreviousFirstHSyncReadLocation);
+        Assert.NotNull(state.PreviousDetectedFirstField);
+        Assert.Null(state.PreviousSyncConfidence);
     }
 
     private static TbcFieldDecodePipeline CreatePipeline(

@@ -15,7 +15,8 @@ public sealed record VsyncSerrationResult(
     IReadOnlyList<VsyncSerrationMeasurement> Measurements,
     IReadOnlyList<int> EnvelopeMinima,
     IReadOnlyList<int> HarmonicMinima,
-    IReadOnlyList<int> Candidates);
+    IReadOnlyList<int> Candidates,
+    int LevelCountBeforePull = 0);
 
 public sealed class VsyncSerrationDetector
 {
@@ -203,6 +204,7 @@ public sealed class VsyncSerrationDetector
         }
 
         FieldCount++;
+        int levelCountBeforePull = LevelCount;
         (double SyncLevel, double BlankLevel)? levels = PullLevels();
         return new VsyncSerrationResult(
             measurements.Count > 0,
@@ -213,7 +215,8 @@ public sealed class VsyncSerrationDetector
             measurements,
             envelopeMinima,
             harmonicMinima,
-            candidates);
+            candidates,
+            levelCountBeforePull);
     }
 
     public static int[] LocalMinimaIndices(ReadOnlySpan<double> data)
