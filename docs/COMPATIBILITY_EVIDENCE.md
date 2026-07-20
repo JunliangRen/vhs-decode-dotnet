@@ -1236,6 +1236,15 @@ possible capture has already been proven byte-for-byte identical.
   exactly. A fixture-limited 204-frame run completed in 23.39 s with
   1.147/0.886/0.888/0.917 GiB private-memory quarter medians and a 1.755 GiB
   peak; all 409-field outputs matched the previously recorded SHA-256 values
+- default linear TBC resampling now rents its exact-used source-position and
+  level-adjust arrays, then returns them only after synchronous serial or
+  parallel resampling completes. Matched 40-frame GC traces reduced sampled
+  managed allocation from 16.178 to 14.892 GiB and `Double[]` allocation from
+  13.601 to 12.316 GiB. Five interleaved full-path A/B runs reduced median wall
+  time from 5.684 to 5.571 s (2.0%) and CPU time from 19.031 to 18.891 s; TBC,
+  chroma, and JSON hashes matched exactly. A repeated fixture-limited 204-frame
+  run had flat 1.025/1.047/1.007/1.042 GiB private-memory quarter medians and a
+  1.869 GiB peak, while all 409-field hashes remained exact
 - the 16-tap TBC sinc kernel now pins its source and lookup table for pointer
   indexing while preserving clamp, FMA, float-conversion, and accumulation order;
   an isolated PAL-sized field median improved from 3.929 ms to 3.727 ms (5.1%),

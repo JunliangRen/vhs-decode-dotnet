@@ -4,6 +4,7 @@ using System.Security.Cryptography;
 using VHSDecode.Core.CommandLine;
 using VHSDecode.Core.Decode;
 using VHSDecode.Core.Dsp;
+using VHSDecode.Core.Tbc;
 using Xunit;
 
 namespace VHSDecode.Tests;
@@ -191,6 +192,31 @@ public sealed class DspWorkingBufferTests
         Assert.True(
             sosBytes < 300_000,
             $"Warm float32 SOS forward/backward allocated {sosBytes:N0} bytes.");
+
+        const int outputLineLength = 512;
+        const int lineCount = 64;
+        double[] resampleSource = Enumerable.Range(0, (lineCount + 1) * 1_024 + 16)
+            .Select(index => Math.Sin(index * 0.007) + (0.2 * Math.Cos(index * 0.011)))
+            .ToArray();
+        double[] lineLocations = Enumerable.Range(0, lineCount + 1)
+            .Select(line => line * 1_024.0)
+            .ToArray();
+        var resampler = new TbcLineResampler(
+            outputLineLength,
+            nominalInputLineLength: 1_024.0,
+            workerThreads: 1);
+        _ = resampler.ResampleLines(resampleSource, lineLocations, firstLine: 0, lineCount);
+        long beforeResample = GC.GetAllocatedBytesForCurrentThread();
+        double[] resampled = resampler.ResampleLines(
+            resampleSource,
+            lineLocations,
+            firstLine: 0,
+            lineCount);
+        long resampleBytes = GC.GetAllocatedBytesForCurrentThread() - beforeResample;
+        GC.KeepAlive(resampled);
+        Assert.True(
+            resampleBytes < 350_000,
+            $"Warm linear TBC resampling allocated {resampleBytes:N0} bytes.");
     }
 
     [Fact(DisplayName = "Float32 SOS common-section kernels remain bit-exact")]

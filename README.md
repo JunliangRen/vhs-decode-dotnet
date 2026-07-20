@@ -2,7 +2,7 @@
 
 **[English](README.md)** | [简体中文](README.zh-CN.md) | [日本語](README.ja.md)
 
-<!-- README_SYNC: 2026-07-20.3 -->
+<!-- README_SYNC: 2026-07-20.4 -->
 
 .NET 11 rewrite of the decode-facing parts of
 [`oyvindln/vhs-decode`](https://github.com/oyvindln/vhs-decode), focused on
@@ -150,6 +150,9 @@ release compatibility remain the first constraint.
   returns it synchronously; returned output arrays retain normal ownership.
 - RF span assembly writes directly into the requested output window instead of
   allocating whole-block field arrays and slicing a second copy.
+- Default linear TBC resampling rents its per-field source-position and
+  level-adjust workspaces, uses exact spans, and returns both after every
+  synchronous serial or parallel resample.
 - On little-endian hosts, TBC and chroma samples stream directly from their
   `ushort` spans without allocating a full-field byte copy. The big-endian
   fallback uses one returned pooled buffer, so repeated writes remain bounded.
@@ -261,6 +264,14 @@ runs were wall-time neutral at 5.541/5.537 s, while median CPU time moved from
 20.000 to 19.438 s; all three output hashes remained exact. The current
 fixture-limited 204-frame run completed in 23.39 s with 1.147/0.886/0.888/0.917
 GiB private-memory quarter medians and a 1.755 GiB peak.
+
+The next pass pooled the default linear TBC resampler's two per-field double
+workspaces. Matched 40-frame GC traces reduced total sampled allocation from
+16.178 to 14.892 GiB and `Double[]` allocation from 13.601 to 12.316 GiB. Five
+interleaved A/B runs reduced median wall time from 5.684 to 5.571 s (2.0%) and
+CPU time from 19.031 to 18.891 s; all three hashes remained exact. A repeated
+204-frame run had flat 1.025/1.047/1.007/1.042 GiB private-memory quarter
+medians and a 1.869 GiB peak.
 
 </details>
 

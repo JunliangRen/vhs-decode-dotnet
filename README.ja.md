@@ -2,7 +2,7 @@
 
 [English](README.md) | [简体中文](README.zh-CN.md) | **[日本語](README.ja.md)**
 
-<!-- README_SYNC: 2026-07-20.3 -->
+<!-- README_SYNC: 2026-07-20.4 -->
 
 [`oyvindln/vhs-decode`](https://github.com/oyvindln/vhs-decode) の
 デコード関連部分を .NET 11 で再実装するプロジェクトです。現在は release
@@ -146,6 +146,8 @@
   終了時に同期的に返却します。返される output array の通常の ownership は維持します。
 - RF span assembly は block 境界の field array を作って再度 slice せず、要求された
   最終 output window へ直接書き込みます。
+- default linear TBC resampling は field ごとの source-position/level-adjust workspace を
+  rent し、正確な span だけを使用して、同期 serial/parallel resample の完了後に返却します。
 - little-endian host では、TBC/chroma sample を full-field byte copy を作らず `ushort`
   span から直接 stream へ書き込みます。big-endian fallback は返却される pooled buffer
   を 1 つ使うため、反復 write の memory 使用量も境界付きです。
@@ -254,6 +256,14 @@ full-path A/B は wall-time 中央値 5.541/5.537 秒で実質同等、CPU-time 
 20.000 秒から 19.438 秒になり、3 種類の output hash は完全に一致しました。現在の
 fixture-limited 204-frame run は 23.39 秒で完了し、private-memory 四分位中央値は
 1.147/0.886/0.888/0.917 GiB、peak は 1.755 GiB でした。
+
+次の最適化では default linear TBC resampler の field ごとの 2 つの double workspace を
+pool 化しました。同一条件の 40-frame GC trace で sampled allocation 全体は
+16.178 GiB から 14.892 GiB、`Double[]` allocation は 13.601 GiB から 12.316 GiB へ
+減少しました。5 組の交互 A/B で wall-time 中央値は 5.684 秒から 5.571 秒（2.0%）、
+CPU-time は 19.031 秒から 18.891 秒になり、3 種類の hash は完全に一致しました。
+反復した 204-frame run の private-memory 四分位中央値は
+1.025/1.047/1.007/1.042 GiB で平坦、peak は 1.869 GiB でした。
 
 </details>
 
