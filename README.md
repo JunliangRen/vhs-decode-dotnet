@@ -2,7 +2,7 @@
 
 **[English](README.md)** | [简体中文](README.zh-CN.md) | [日本語](README.ja.md)
 
-<!-- README_SYNC: 2026-07-20.4 -->
+<!-- README_SYNC: 2026-07-20.5 -->
 
 .NET 11 rewrite of the decode-facing parts of
 [`oyvindln/vhs-decode`](https://github.com/oyvindln/vhs-decode), focused on
@@ -153,6 +153,9 @@ release compatibility remain the first constraint.
 - Default linear TBC resampling rents its per-field source-position and
   level-adjust workspaces, uses exact spans, and returns both after every
   synchronous serial or parallel resample.
+- VHS diff-demod spike repair reuses one full-length complex scratch array
+  inside the existing 16-slot real-FFT workspace pool. Returned analytic arrays
+  retain independent ownership; non-VHS paths keep their allocating fallback.
 - On little-endian hosts, TBC and chroma samples stream directly from their
   `ushort` spans without allocating a full-field byte copy. The big-endian
   fallback uses one returned pooled buffer, so repeated writes remain bounded.
@@ -273,6 +276,13 @@ CPU time from 19.031 to 18.891 s; all three hashes remained exact. A repeated
 204-frame run had flat 1.025/1.047/1.007/1.042 GiB private-memory quarter
 medians and a 1.869 GiB peak.
 
+The VHS diff-demod repair pass now keeps its transient full-length `Complex[]`
+in the existing capped FFT workspace. Matched 10-frame GC traces reduced total
+sampled allocation from 4.134 to 3.861 GiB and `Complex[]` allocation from
+622.63 to 340.02 MiB. Ten interleaved 40-frame pairs and two reversed 204-frame
+pairs were wall-time neutral within run noise, so no speedup is claimed;
+long-run memory remained bounded and all 409-field hashes stayed exact.
+
 </details>
 
 <!-- SECTION: build -->
@@ -289,11 +299,11 @@ Requirements:
 ```powershell
 dotnet restore VHSDecodeDotNet.slnx
 dotnet build VHSDecodeDotNet.slnx -c Release --no-restore
-dotnet test VHSDecodeDotNet.slnx -c Release --no-build --no-restore
+dotnet test --solution VHSDecodeDotNet.slnx -c Release --no-build --no-restore
 ```
 
 The current formal Release build has zero warnings and errors. The xUnit v3
-project exposes **782** independently discoverable tests to both
+project exposes **783** independently discoverable tests to both
 `dotnet test` and Visual Studio Test Explorer.
 
 <!-- SECTION: usage -->

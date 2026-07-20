@@ -295,7 +295,12 @@ public sealed class RfDemodulator
         }
 
         double[] demodRaw = DemodulateAnalytic(analytic, fmDemodulatorMode);
-        ApplyDiffDemodRepairIfPresent(demodRaw, analytic, diffDemodRepair, fmDemodulatorMode);
+        ApplyDiffDemodRepairIfPresent(
+            demodRaw,
+            analytic,
+            diffDemodRepair,
+            fmDemodulatorMode,
+            vhsRealFftWorkspace?.DiffedAnalytic);
         if (sharpnessEq is not null)
         {
             demodRaw = ApplySharpnessEqStateful(demodRaw, sharpnessEq);
@@ -1085,6 +1090,7 @@ public sealed class RfDemodulator
             Second = new Complex[spectrumLength];
             Third = new Complex[spectrumLength];
             HilbertHalf = new Complex[spectrumLength];
+            DiffedAnalytic = new Complex[realLength];
             Real = new double[realLength];
             Imaginary = new double[realLength];
             RawEnvelope = new double[realLength];
@@ -1099,6 +1105,8 @@ public sealed class RfDemodulator
         public Complex[] Third { get; }
 
         public Complex[] HilbertHalf { get; }
+
+        public Complex[] DiffedAnalytic { get; }
 
         public double[] Real { get; }
 
@@ -1320,7 +1328,8 @@ public sealed class RfDemodulator
         double[] demod,
         ReadOnlySpan<Complex> analytic,
         DiffDemodRepairOptions? options,
-        RfFmDemodulatorMode fmDemodulatorMode)
+        RfFmDemodulatorMode fmDemodulatorMode,
+        Complex[]? diffedWorkspace)
     {
         if (options is null || demod.Length <= 40)
         {
@@ -1342,14 +1351,18 @@ public sealed class RfDemodulator
             return;
         }
 
-        Complex[] diffed = analytic.ToArray();
-        for (int i = diffed.Length - 1; i >= 1; i--)
+        Complex[] diffed = diffedWorkspace is not null && diffedWorkspace.Length >= analytic.Length
+            ? diffedWorkspace
+            : new Complex[analytic.Length];
+        Span<Complex> activeDiffed = diffed.AsSpan(0, analytic.Length);
+        analytic.CopyTo(activeDiffed);
+        for (int i = activeDiffed.Length - 1; i >= 1; i--)
         {
-            diffed[i] -= diffed[i - 1];
+            activeDiffed[i] -= activeDiffed[i - 1];
         }
 
-        diffed[0] = Complex.Zero;
-        double[] demodDiffed = DemodulateAnalytic(diffed, fmDemodulatorMode);
+        activeDiffed[0] = Complex.Zero;
+        double[] demodDiffed = DemodulateAnalytic(activeDiffed, fmDemodulatorMode);
         ReplaceSpikes(demod, demodDiffed, options.MaxValue);
     }
 

@@ -1245,6 +1245,29 @@ possible capture has already been proven byte-for-byte identical.
   chroma, and JSON hashes matched exactly. A repeated fixture-limited 204-frame
   run had flat 1.025/1.047/1.007/1.042 GiB private-memory quarter medians and a
   1.869 GiB peak, while all 409-field hashes remained exact
+- VHS diff-demod spike repair now copies the analytic signal into the exact
+  active span of a full-length `Complex[]` retained by the existing
+  decoder-owned real-FFT workspace pool, differences it in place, and never
+  exposes that scratch array. Returned analytic data retains independent
+  ownership, while paths without a VHS workspace retain the allocating
+  fallback. A standard 32,768-sample workspace grows by 512 KiB; the existing
+  16-slot cap therefore limits additional retained memory to 8 MiB. The xUnit
+  v3 warm-block probe reduced thread-local allocation from 2,892,520 to
+  2,360,208 bytes and enforces a 2,600,000-byte ceiling. Matched 10-frame GC
+  traces reduced total sampled allocation from 4.134 to 3.861 GiB and
+  `Complex[]` allocation from 622.63 to 340.02 MiB. Across two rounds of five
+  interleaved 40-frame pairs, combined wall-time medians were approximately
+  5.54/5.57 s (baseline/current), so no speedup is claimed. Two reversed
+  204-frame pairs were likewise neutral: current/baseline completed in
+  23.38/23.28 s, then baseline/current in 23.75/23.64 s. Current private-memory
+  quarter medians were 1.22/1.29/1.50/1.05 and 1.11/1.38/1.10/1.32 GiB, with
+  1.87 and 1.96 GiB peaks and no monotonic rise. Both variants emitted 409
+  sequential fields with zero remainder. Exact current/baseline SHA-256 values
+  were `FCD83E68BDF6EFB3C2583349519B24E750155DE6B4C256D0B5F9CE4E76BE94E9`
+  for luma TBC, `B7CE0EF8768B7731FFAD9E7B8FE4162A24D0CC02620FC32F639A7ED078BF065B`
+  for chroma TBC, and
+  `EAACE43594DEC574360B664D932E23F10E1B428BA4268A91BA6A1858BFEDD4AD`
+  for JSON
 - the 16-tap TBC sinc kernel now pins its source and lookup table for pointer
   indexing while preserving clamp, FMA, float-conversion, and accumulation order;
   an isolated PAL-sized field median improved from 3.929 ms to 3.727 ms (5.1%),
@@ -1630,11 +1653,11 @@ decode commands.
 
 ```powershell
 dotnet build VHSDecodeDotNet.slnx
-dotnet test VHSDecodeDotNet.slnx --no-build
+dotnet test --solution VHSDecodeDotNet.slnx --no-build
 ```
 
 The current formal solution build completes with zero warnings and errors, and
-the xUnit v3 project exposes 782 independently discoverable compatibility tests
+the xUnit v3 project exposes 783 independently discoverable compatibility tests
 to `dotnet test` and Visual Studio Test Explorer. On the
 same Windows machine and fixtures, Release wall-clock measurements for one
 frame were 2.346 s versus 7.193 s for NTSC VHS and 1.651 s versus 5.865 s for

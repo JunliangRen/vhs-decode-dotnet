@@ -803,12 +803,11 @@ public sealed class HiFiRunnerTests
     public void HiFiGnuRadioStartupFailuresReleaseTheirWorkerResources()
     {
         CancellationToken cancellationToken = TestContext.Current.CancellationToken;
-        int port = GnuRadioRfAfeBridge.FindAvailablePort(5_800, 5_900)
-            ?? throw new InvalidOperationException("No test ZMQ port is available.");
+        int port;
         using (var blocker = new ResponseSocket())
         {
             blocker.Options.Linger = TimeSpan.Zero;
-            blocker.Bind($"tcp://*:{port}");
+            port = blocker.BindRandomPort("tcp://*");
 
             InvalidOperationException exception = Assert.Throws<InvalidOperationException>(
                 () => new HiFiGnuRadioSink(

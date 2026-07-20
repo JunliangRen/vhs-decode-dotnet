@@ -125,6 +125,41 @@ public sealed class DspWorkingBufferTests
             $"Warm PAL VHS RF block allocated {allocated:N0} bytes.");
     }
 
+    [Fact(DisplayName = "VHS diff-demod repair reuses its analytic workspace after warm-up")]
+    public void VhsDiffDemodRepairReusesAnalyticWorkspaceAfterWarmUp()
+    {
+        const int length = DecodeSessionFactory.DefaultBlockLength;
+        const double sampleRateHz = 40_000_000.0;
+        double[] input = BuildPalVhsProbe(length, sampleRateHz);
+        Complex[] identity = RfDemodulator.IdentityFilter(length);
+        SosSection[] identitySos = [new SosSection(1.0, 0.0, 0.0, 1.0, 0.0, 0.0)];
+        var demodulator = new RfDemodulator(sampleRateHz);
+
+        RfDemodulatedBlock expected = DecodeDiffRepairProbe(
+            demodulator,
+            input,
+            identity,
+            identitySos);
+        for (int i = 0; i < 3; i++)
+        {
+            _ = DecodeDiffRepairProbe(demodulator, input, identity, identitySos);
+        }
+
+        long before = GC.GetAllocatedBytesForCurrentThread();
+        RfDemodulatedBlock actual = DecodeDiffRepairProbe(
+            demodulator,
+            input,
+            identity,
+            identitySos);
+        long allocated = GC.GetAllocatedBytesForCurrentThread() - before;
+
+        Assert.Equal(expected.Analytic, actual.Analytic);
+        Assert.Equal(Hash(expected), Hash(actual));
+        Assert.True(
+            allocated < 2_600_000,
+            $"Warm VHS diff-demod RF block allocated {allocated:N0} bytes.");
+    }
+
     [Fact(DisplayName = "PAL VHS RF workspaces remain bit-exact under parallel load")]
     public void PalVhsRfWorkspacesRemainBitExactUnderParallelLoad()
     {
@@ -284,17 +319,38 @@ public sealed class DspWorkingBufferTests
         return input;
     }
 
+    private static RfDemodulatedBlock DecodeDiffRepairProbe(
+        RfDemodulator demodulator,
+        double[] input,
+        Complex[] identity,
+        SosSection[] identitySos)
+    {
+        return demodulator.Demodulate(
+            input,
+            identity,
+            identity,
+            ReadOnlySpan<Complex>.Empty,
+            identity,
+            identity,
+            diffDemodRepair: new DiffDemodRepairOptions(double.NegativeInfinity),
+            fmDemodulatorMode: RfFmDemodulatorMode.VhsRustApproximation,
+            vhsEnvelopeFilter: identitySos);
+    }
+
     private static string Hash(RfPipelineBlock block)
+        => Hash(block.Demodulated);
+
+    private static string Hash(RfDemodulatedBlock demodulated)
     {
         using var hash = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
-        Append(hash, block.Demodulated.Video);
-        Append(hash, block.Demodulated.DemodRaw);
-        Append(hash, block.Demodulated.Envelope);
-        Append(hash, block.Demodulated.VideoLowPass);
-        Append(hash, block.Demodulated.RfHighPass);
-        if (block.Demodulated.Chroma is not null)
+        Append(hash, demodulated.Video);
+        Append(hash, demodulated.DemodRaw);
+        Append(hash, demodulated.Envelope);
+        Append(hash, demodulated.VideoLowPass);
+        Append(hash, demodulated.RfHighPass);
+        if (demodulated.Chroma is not null)
         {
-            Append(hash, block.Demodulated.Chroma);
+            Append(hash, demodulated.Chroma);
         }
 
         return Convert.ToHexString(hash.GetHashAndReset());
