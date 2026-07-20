@@ -1338,6 +1338,29 @@ possible capture has already been proven byte-for-byte identical.
   `7C732FDB97CA95900ED353ABF1DBD0A37BBE3D8609886E16A7B55CCAE1D5B236`,
   `82F1D3A9E3A3BD73A5AA07A63C930892CBB7125D857725D736C721CCBED18494`,
   and `DDEFFB4DC96F4DAB031BDAF6BA385C1DD6C2EAEE31E53ECD244826C12F21D081`
+- Multi-block RF reads now assemble completed immutable blocks into disjoint
+  final-window ranges with a second bounded `Parallel.For`. The operation uses
+  the existing `WorkerThreads` limit and decoded-block array; it adds no output
+  buffers or retained queue. Six required channels and optional chroma, burst,
+  pilot, and EFM channels copy in parallel. Analog-audio phase-two work remains
+  ordered, while single-thread, one-block, and stateful sequential decoders keep
+  the prior path. Unit coverage compares all six required and four optional
+  serial/parallel channels exactly. Five interleaved 40-frame A/B runs
+  reduced median wall time from 5.165 to 4.878 s (5.6%), while CPU time rose
+  from 18.172 to 18.875 s
+  (3.9%), demonstrating increased core use rather than reduced work. TBC,
+  chroma, and JSON hashes remained
+  `E42AB3A9F480610A032B0D4813BF4BAD1BF7A5CBEC00CF56EEEC359C2DD9D7CB`,
+  `7269E13798026A9FBDB199594A1AB46EE4BDD0EE800A8387CB3807A2EB8946AB`,
+  and `06AB7E6C28D6DE2C70C7902D6FB296BE664153CFA73C254F2F305C5729FBFC6E`.
+  Two reversed `--length 204` pairs completed baseline/current in 21.31/20.35
+  and 21.84/20.18 s (4.5% and 7.6% faster). Current private-memory quarter
+  medians were 1.438/1.025/1.467/1.042 and 1.221/1.692/1.724/1.861 GiB, with
+  1.93 and 2.06 GiB peaks and intervening declines. Both variants emitted
+  fields 1 through 408 with exact luma/chroma/JSON hashes
+  `7C732FDB97CA95900ED353ABF1DBD0A37BBE3D8609886E16A7B55CCAE1D5B236`,
+  `82F1D3A9E3A3BD73A5AA07A63C930892CBB7125D857725D736C721CCBED18494`,
+  and `DDEFFB4DC96F4DAB031BDAF6BA385C1DD6C2EAEE31E53ECD244826C12F21D081`
 - VHS RF-envelope preparation now converts four doubles to float32, clears the
   sign bits, and writes the rotated float64 values through AVX while preserving
   the scalar tail and wrap path. A 32K-block isolated median improved from

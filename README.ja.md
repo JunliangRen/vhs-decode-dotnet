@@ -2,7 +2,7 @@
 
 [English](README.md) | [简体中文](README.zh-CN.md) | **[日本語](README.ja.md)**
 
-<!-- README_SYNC: 2026-07-20.8 -->
+<!-- README_SYNC: 2026-07-20.9 -->
 
 [`oyvindln/vhs-decode`](https://github.com/oyvindln/vhs-decode) の
 デコード関連部分を .NET 11 で再実装するプロジェクトです。現在は release
@@ -125,7 +125,9 @@
   を所有し、lookahead slot は最大 32、同時 block decode は最大 8 です。完了した block は
   個別に公開されるため、field は batch 全体ではなく必要な block だけを待ちます。
   seek、stream 変更、dispose では producer を cancel/drain してから別 reader が
-  FFmpeg/GNU Radio stream に触れます。
+  FFmpeg/GNU Radio stream に触れます。完了した block は同じ worker 上限の下で、final
+  RF span の重複しない trimmed range へ並行 copy します。serial path と stateful block
+  path は順序付き assembly を維持します。
 - VSync envelope/minima 処理と harmonic power-ratio search は 1 つの read-only padded
   input 上で並行実行します。両 branch の完了後、candidate arbitration と detector
   state update は引き続き順序どおりに行います。
@@ -225,6 +227,14 @@ sampled allocation/`Double[]` は 12.580 GiB/11,309.71 MiB から
 5.209/18.188 秒から 5.175/17.094 秒（0.7%/6.0%）へ短縮しました。順序を反転した
 2 組の 204-frame pair は 1.8% と 1.9% 高速で、memory は非単調、peak は 2.05 GiB 以下、
 `--length 204` の 408-field output は完全一致です。
+
+parallel RF span assembly は完了済みの immutable block だけを読み、final window の
+重複しない range へ書き込みます。analog-audio phase 処理は順序どおりのままです。
+5 組の交互 40-frame run で wall-time 中央値は 5.165 秒から 4.878 秒（5.6%）へ短縮し、
+CPU time は 18.172 秒から 18.875 秒（3.9%）へ増え、core 使用率を throughput に
+変換しました。順序を反転した 2 組の `--length 204` pair は 21.31/20.35 秒と
+21.84/20.18 秒（4.5%/7.6% 高速）でした。current memory は非単調で peak は
+1.93/2.06 GiB、408 field と全 hash は完全一致です。
 
 AVX RF-envelope preparation は、単体 32K-block 中央値を 57.5 us から 13.3 us へ
 短縮し、kernel は 76.9% 改善しました。40-frame 中央値は 7.55 秒から 7.39 秒、

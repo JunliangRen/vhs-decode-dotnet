@@ -2,7 +2,7 @@
 
 **[English](README.md)** | [简体中文](README.zh-CN.md) | [日本語](README.ja.md)
 
-<!-- README_SYNC: 2026-07-20.8 -->
+<!-- README_SYNC: 2026-07-20.9 -->
 
 .NET 11 rewrite of the decode-facing parts of
 [`oyvindln/vhs-decode`](https://github.com/oyvindln/vhs-decode), focused on
@@ -128,7 +128,9 @@ release compatibility remain the first constraint.
   decode concurrently. Each completed block is published independently, so a
   field waits only for the blocks it needs instead of an entire batch. Seek,
   stream changes, and disposal cancel and drain the producer before another
-  reader can touch the FFmpeg/GNU Radio stream.
+  reader can touch the FFmpeg/GNU Radio stream. Completed blocks copy their
+  disjoint trimmed ranges into the final RF span in parallel under the same
+  worker bound; serial and stateful block paths retain ordered assembly.
 - VSync envelope/minima work and harmonic power-ratio search run concurrently
   over one shared read-only padded input. Candidate arbitration and detector
   state updates remain ordered after both branches complete.
@@ -234,6 +236,15 @@ MiB. Five interleaved runs reduced median wall/CPU time from 5.209/18.188 to
 5.175/17.094 s (0.7%/6.0%); two reversed 204-frame pairs were 1.8% and 1.9%
 faster with non-monotonic memory at or below 2.05 GiB and exact 408-field
 `--length 204` outputs.
+
+Parallel RF span assembly uses completed immutable blocks and disjoint final
+window ranges, with analog-audio phase work left ordered. Five interleaved
+40-frame runs reduced median wall time from 5.165 to 4.878 s (5.6%) while CPU
+time rose from 18.172 to 18.875 s (3.9%), converting more core use into
+throughput. Two reversed `--length 204` pairs completed baseline/current in
+21.31/20.35 s and 21.84/20.18 s (4.5% and 7.6% faster). Current memory was
+non-monotonic with 1.93/2.06 GiB peaks, and all 408 fields and hashes remained
+exact.
 
 AVX RF-envelope preparation reduced the isolated 32K-block median from 57.5 us
 to 13.3 us, a 76.9% kernel gain. The 40-frame median moved from 7.55 s to 7.39 s,

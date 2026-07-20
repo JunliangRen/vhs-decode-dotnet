@@ -35,10 +35,16 @@ public sealed class RfBlockCacheConcurrencyTests
     {
         var loader = new CountingSampleLoader();
         using var stream = new MemoryStream();
-        using var decoder = BuildDecoder(loader, workerThreads: 4);
+        using var decoder = BuildDecoder(loader, workerThreads: 4, optionalOutputs: true);
+        using var serialStream = new MemoryStream();
+        using var serialDecoder = BuildDecoder(
+            new CountingSampleLoader(),
+            workerThreads: 1,
+            optionalOutputs: true);
 
         RfDecodedSpan first = decoder.Read(stream, begin: 0, length: 24)!;
         RfDecodedSpan second = decoder.Read(stream, begin: 12, length: 24)!;
+        RfDecodedSpan serial = serialDecoder.Read(serialStream, begin: 0, length: 24)!;
 
         Assert.Equal(3, loader.ReadCount);
         Assert.NotSame(first.Input, second.Input);
@@ -46,6 +52,20 @@ public sealed class RfBlockCacheConcurrencyTests
         Assert.NotSame(first.DemodRaw, second.DemodRaw);
         Assert.Equal(first.Input[12..], second.Input[..12]);
         Assert.Equal(first.Video[12..], second.Video[..12]);
+        Assert.Equal(serial.Input, first.Input);
+        Assert.Equal(serial.Video, first.Video);
+        Assert.Equal(serial.DemodRaw, first.DemodRaw);
+        Assert.Equal(serial.Envelope, first.Envelope);
+        Assert.Equal(serial.VideoLowPass, first.VideoLowPass);
+        Assert.Equal(serial.RfHighPass, first.RfHighPass);
+        Assert.Equal(serial.Chroma, first.Chroma);
+        Assert.Equal(serial.Efm, first.Efm);
+        Assert.Equal(serial.VideoBurst, first.VideoBurst);
+        Assert.Equal(serial.VideoPilot, first.VideoPilot);
+        Assert.NotNull(first.Chroma);
+        Assert.NotNull(first.Efm);
+        Assert.NotNull(first.VideoBurst);
+        Assert.NotNull(first.VideoPilot);
         Assert.InRange(decoder.CachedDecodedBlockCount, 1, 16);
     }
 
@@ -307,6 +327,7 @@ public sealed class RfBlockCacheConcurrencyTests
         int workerThreads,
         int prefetchBlocks = 0,
         bool weakRfDiagnostics = false,
+        bool optionalOutputs = false,
         Action<string, string>? diagnosticLogger = null)
     {
         const int blockLength = 16;
@@ -327,6 +348,21 @@ public sealed class RfBlockCacheConcurrencyTests
             ones,
             ones,
             null);
+        if (optionalOutputs)
+        {
+            filters = filters with
+            {
+                LdEfm = identity,
+                LdEfmMagnitude = ones,
+                ChromaBurst = identity,
+                ChromaBurstMagnitude = ones,
+                LdVideoBurst = identity,
+                LdVideoBurstMagnitude = ones,
+                LdVideoPilot = identity,
+                LdVideoPilotMagnitude = ones
+            };
+        }
+
         if (weakRfDiagnostics)
         {
             filters = filters with

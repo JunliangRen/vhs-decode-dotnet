@@ -247,6 +247,27 @@ public sealed class RfBlockStreamDecoder : IDisposable
         int audioDestination = 0;
         int destination = 0;
 
+        void AppendAnalogAudio(LaserDiscAnalogAudioBlock audio)
+        {
+            if (audioDecimationFactor == 0)
+            {
+                audioDecimationFactor = audio.DecimationFactor;
+                int totalAudioDecoded = checked(totalDecoded / audioDecimationFactor);
+                if (reusableBuffers is null)
+                {
+                    audioLeft = new double[totalAudioDecoded];
+                    audioRight = new double[totalAudioDecoded];
+                }
+                else
+                {
+                    (audioLeft, audioRight) = reusableBuffers.GetAudio(totalAudioDecoded);
+                }
+            }
+
+            CopyTrimmed(audio, audioLeft!, audioRight!, audioDestination);
+            audioDestination += AudioBlockStride(audioDecimationFactor);
+        }
+
         void AppendBlock(RfPipelineBlock pipelineBlock)
         {
             CopyTrimmedWindow(pipelineBlock.Input, input, destination, offset);
@@ -286,27 +307,84 @@ public sealed class RfBlockStreamDecoder : IDisposable
 
             if (pipelineBlock.Demodulated.AnalogAudio is not null)
             {
-                LaserDiscAnalogAudioBlock audio = pipelineBlock.Demodulated.AnalogAudio;
-                if (audioDecimationFactor == 0)
-                {
-                    audioDecimationFactor = audio.DecimationFactor;
-                    int totalAudioDecoded = checked(totalDecoded / audioDecimationFactor);
-                    if (reusableBuffers is null)
-                    {
-                        audioLeft = new double[totalAudioDecoded];
-                        audioRight = new double[totalAudioDecoded];
-                    }
-                    else
-                    {
-                        (audioLeft, audioRight) = reusableBuffers.GetAudio(totalAudioDecoded);
-                    }
-                }
-
-                CopyTrimmed(audio, audioLeft!, audioRight!, audioDestination);
-                audioDestination += AudioBlockStride(audioDecimationFactor);
+                AppendAnalogAudio(pipelineBlock.Demodulated.AnalogAudio);
             }
 
             destination += BlockStride;
+        }
+
+        void AppendBlocksParallel(RfPipelineBlock[] pipelineBlocks, ParallelOptions parallelOptions)
+        {
+            bool hasChroma = false;
+            bool hasEfm = false;
+            bool hasVideoBurst = false;
+            bool hasVideoPilot = false;
+            for (int i = 0; i < pipelineBlocks.Length; i++)
+            {
+                RfDemodulatedBlock demodulated = pipelineBlocks[i].Demodulated;
+                hasChroma |= demodulated.Chroma is not null;
+                hasEfm |= demodulated.Efm is not null;
+                hasVideoBurst |= demodulated.VideoBurst is not null;
+                hasVideoPilot |= demodulated.VideoPilot is not null;
+            }
+
+            chroma = hasChroma
+                ? reusableBuffers?.GetChroma() ?? new double[length]
+                : null;
+            efm = hasEfm
+                ? reusableBuffers?.GetEfm() ?? new short[length]
+                : null;
+            videoBurst = hasVideoBurst
+                ? reusableBuffers?.GetVideoBurst() ?? new double[length]
+                : null;
+            videoPilot = hasVideoPilot
+                ? reusableBuffers?.GetVideoPilot() ?? new double[length]
+                : null;
+
+            Parallel.For(0, pipelineBlocks.Length, parallelOptions, blockIndex =>
+            {
+                int blockDestination = checked(blockIndex * BlockStride);
+                RfPipelineBlock pipelineBlock = pipelineBlocks[blockIndex];
+                RfDemodulatedBlock demodulated = pipelineBlock.Demodulated;
+                CopyTrimmedWindow(pipelineBlock.Input, input, blockDestination, offset);
+                CopyTrimmedWindow(demodulated.Video, video, blockDestination, offset);
+                CopyTrimmedWindow(demodulated.DemodRaw, demodRaw, blockDestination, offset);
+                CopyTrimmedWindow(demodulated.Envelope, envelope, blockDestination, offset);
+                CopyTrimmedWindow(demodulated.VideoLowPass, videoLowPass, blockDestination, offset);
+                CopyTrimmedWindow(
+                    demodulated.RfHighPass,
+                    rfHighPass,
+                    blockDestination,
+                    offset,
+                    BlockCut - _pipeline.RfHighPassOffset);
+                if (chroma is not null && demodulated.Chroma is { } blockChroma)
+                {
+                    CopyTrimmedWindow(blockChroma, chroma, blockDestination, offset);
+                }
+
+                if (efm is not null && demodulated.Efm is { } blockEfm)
+                {
+                    CopyTrimmedWindow(blockEfm, efm, blockDestination, offset);
+                }
+
+                if (videoBurst is not null && demodulated.VideoBurst is { } blockVideoBurst)
+                {
+                    CopyTrimmedWindow(blockVideoBurst, videoBurst, blockDestination, offset);
+                }
+
+                if (videoPilot is not null && demodulated.VideoPilot is { } blockVideoPilot)
+                {
+                    CopyTrimmedWindow(blockVideoPilot, videoPilot, blockDestination, offset);
+                }
+            });
+
+            foreach (RfPipelineBlock pipelineBlock in pipelineBlocks)
+            {
+                if (pipelineBlock.Demodulated.AnalogAudio is { } audio)
+                {
+                    AppendAnalogAudio(audio);
+                }
+            }
         }
 
         if (WorkerThreads <= 1 || firstBlock == lastBlock || _pipeline.RequiresSequentialBlockDecode)
@@ -405,10 +483,14 @@ public sealed class RfBlockStreamDecoder : IDisposable
                 missingBlocks[missingBlockCount++] = i;
             }
 
+            var parallelOptions = new ParallelOptions
+            {
+                MaxDegreeOfParallelism = Math.Min(WorkerThreads, blockCount)
+            };
             Parallel.For(
                 0,
                 missingBlockCount,
-                new ParallelOptions { MaxDegreeOfParallelism = WorkerThreads },
+                parallelOptions,
                 missingIndex =>
                 {
                     int blockIndex = missingBlocks[missingIndex];
@@ -420,10 +502,7 @@ public sealed class RfBlockStreamDecoder : IDisposable
                 CacheDecodedBlock(firstBlock + blockIndex, decodedBlocks[blockIndex]);
             }
 
-            foreach (RfPipelineBlock pipelineBlock in decodedBlocks)
-            {
-                AppendBlock(pipelineBlock);
-            }
+            AppendBlocksParallel(decodedBlocks, parallelOptions);
         }
 
         StartPrefetch(stream, lastBlock);
