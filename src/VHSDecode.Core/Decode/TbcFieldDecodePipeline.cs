@@ -870,15 +870,54 @@ public sealed class TbcFieldDecodePipeline
                 outputFirstLine,
                 fieldNumber)
             : null;
-        TbcRenderedField rendered = deferredRenderSource is null
-            ? _renderer.RenderFieldPayload(
-                span.Video,
-                renderLineLocations,
-                firstLine: outputFirstLine,
-                fieldNumber: fieldNumber,
-                converterOverride: fieldConverter,
-                trackPhaseOverride: chromaPhase?.NextChromaRotationIndex)
-            : new TbcRenderedField([]);
+        bool parallelizeVhsChroma = string.Equals(_decodeType, "vhs", StringComparison.Ordinal)
+            && deferredRenderSource is null
+            && _chromaFieldOptions is { WorkerThreads: > 1 }
+            && chromaBurstSamples is not null
+            && chromaAnalysis is not null;
+        Task<VhsChromaFieldResult?>? chromaDecodeTask = parallelizeVhsChroma
+            ? Task.Run(() => DecodeChromaField(
+                chromaBurstSamples!,
+                chromaAnalysis!,
+                parity.IsFirstField,
+                fieldNumber,
+                outputFirstLine))
+            : null;
+        VhsChromaFieldResult? chroma = null;
+        TbcRenderedField rendered;
+        try
+        {
+            rendered = deferredRenderSource is null
+                ? _renderer.RenderFieldPayload(
+                    span.Video,
+                    renderLineLocations,
+                    firstLine: outputFirstLine,
+                    fieldNumber: fieldNumber,
+                    converterOverride: fieldConverter,
+                    trackPhaseOverride: chromaPhase?.NextChromaRotationIndex)
+                : new TbcRenderedField([]);
+            if (chromaDecodeTask is not null)
+            {
+                chroma = chromaDecodeTask.GetAwaiter().GetResult();
+            }
+        }
+        catch
+        {
+            if (chromaDecodeTask is not null)
+            {
+                try
+                {
+                    _ = chromaDecodeTask.GetAwaiter().GetResult();
+                }
+                catch
+                {
+                    // Preserve the earlier render failure, matching the serial path.
+                }
+            }
+
+            throw;
+        }
+
         double? blackToWhiteRfRatio = ComputeLaserDiscBlackToWhiteRfRatio(
             span.Input,
             rendered.Samples,
@@ -920,12 +959,16 @@ public sealed class TbcFieldDecodePipeline
             medianBurstIre,
             fieldConverter ?? _videoOutput);
         laserDiscFieldPhaseId ??= CvbsFallbackFieldPhaseId(_decodeType, _system, fieldNumber);
-        VhsChromaFieldResult? chroma = DecodeChromaField(
-            chromaBurstSamples,
-            chromaAnalysis,
-            parity.IsFirstField,
-            fieldNumber,
-            outputFirstLine);
+        if (chromaDecodeTask is null)
+        {
+            chroma = DecodeChromaField(
+                chromaBurstSamples,
+                chromaAnalysis,
+                parity.IsFirstField,
+                fieldNumber,
+                outputFirstLine);
+        }
+
         if (chroma is not null)
         {
             CommitChromaState(chroma);

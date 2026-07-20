@@ -1175,6 +1175,12 @@ possible capture has already been proven byte-for-byte identical.
   7.65/26.58/52.51 s with 1.76/1.88/1.67 GiB peak working sets and
   1.42/1.30/1.28 GiB second-half medians; all 320 requested frames were written,
   showing a bounded working set rather than decode-length growth
+- worker-enabled VHS field decode overlaps luma TBC rendering with chroma field
+  decode, permits only one in-flight chroma task, then commits chroma state in
+  field order before advancing. A 160-frame full-path A/B moved from 20.13 s to
+  18.55 s (7.8%); TBC, chroma, and JSON SHA-256 remained byte-identical. The
+  xUnit v3 field test also compares every serial and four-worker luma/chroma
+  sample across two consecutive stateful fields
 - the verified 40-frame output hashes are TBC
   `2F540BF1F9A132281A8D26C0EEADEBC7617A366E296EEB5FF69FF9346836CD05`, JSON
   `FCDCDEAA9D3BAD8949AAEFACBFDE2E8688A13568FF71836EBB37E758780CB67F`, and

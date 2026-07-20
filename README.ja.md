@@ -2,7 +2,7 @@
 
 [English](README.md) | [简体中文](README.zh-CN.md) | **[日本語](README.ja.md)**
 
-<!-- README_SYNC: 2026-07-19.7 -->
+<!-- README_SYNC: 2026-07-20.1 -->
 
 [`oyvindln/vhs-decode`](https://github.com/oyvindln/vhs-decode) の
 デコード関連部分を .NET 11 で再実装するプロジェクトです。現在は release
@@ -129,6 +129,9 @@
 - VSync envelope/minima 処理と harmonic power-ratio search は 1 つの read-only padded
   input 上で並行実行します。両 branch の完了後、candidate arbitration と detector
   state update は引き続き順序どおりに行います。
+- worker 有効時、VHS field decode は luma TBC render と chroma field decode を
+  並行実行します。同時に存在する chroma task は最大 1 つで、次の field へ進む前に
+  calling thread 上で順序どおり state を commit します。
 - 長い TBC sinc-resampling job は worker budget を共有し、出力順序を維持します。
   `--threads 0` と `--threads 1` は決定的な serial path を保持します。
 - linear wow adjustment は一定の derivative を line ごとに 1 回だけ計算し、median/MAD
@@ -177,6 +180,13 @@ chroma SHA-256 は一致しました。
 peak working set は 1.76/1.88/1.67 GiB、後半中央値は 1.42/1.30/1.28 GiB です。
 320 frame はすべて書き込まれ、decode length に伴う memory 増加はありません。
 以前の allocation pass では PAL LD 4-field probe も 5.12 GiB から 1.96 GiB に減少しました。
+
+境界付き VHS field-stage overlap により、160-frame run は 20.13 秒から 18.55 秒
+（7.8%）へ短縮しました。TBC、chroma、JSON の SHA-256 は完全に一致し、task は
+current field 内で await されるため、memory は decode length とともに増加しません。
+
+<details>
+<summary>Kernel と allocation の benchmark 履歴</summary>
 
 pinned pointer を使う PAL サイズ TBC sinc 単体 A/B では、field あたりの中央値が
 3.929 ms から 3.727 ms へ下がり、kernel は 5.1% 改善しました。続く interior-window
@@ -227,6 +237,8 @@ state を使用し、32 section までは stack、それを超える場合は he
 time が 73.31 秒から 68.73 秒（6.3%）へ減少し、TBC、JSON、chroma hash は完全に
 一致しました。current 2 run の private-memory peak 中央値は 1.71 GiB で、四分位
 ごとの memory は単調増加ではありませんでした。
+
+</details>
 
 <!-- SECTION: build -->
 

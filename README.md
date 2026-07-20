@@ -2,7 +2,7 @@
 
 **[English](README.md)** | [简体中文](README.zh-CN.md) | [日本語](README.ja.md)
 
-<!-- README_SYNC: 2026-07-19.7 -->
+<!-- README_SYNC: 2026-07-20.1 -->
 
 .NET 11 rewrite of the decode-facing parts of
 [`oyvindln/vhs-decode`](https://github.com/oyvindln/vhs-decode), focused on
@@ -132,6 +132,9 @@ release compatibility remain the first constraint.
 - VSync envelope/minima work and harmonic power-ratio search run concurrently
   over one shared read-only padded input. Candidate arbitration and detector
   state updates remain ordered after both branches complete.
+- VHS field decode overlaps luma TBC rendering with chroma field decoding when
+  workers are enabled. Only one chroma task can be in flight, and its state is
+  committed on the calling thread before the next field advances.
 - Long TBC sinc-resampling jobs share the worker budget and preserve output
   order; `--threads 0` and `--threads 1` retain deterministic serial paths.
 - Linear wow adjustment evaluates the constant derivative once per line,
@@ -185,6 +188,13 @@ working sets were 1.76/1.88/1.67 GiB, while second-half medians were
 growth with decode length. Earlier allocation work also reduced a PAL LD
 four-field probe from 5.12 GiB to 1.96 GiB.
 
+The bounded VHS field-stage overlap reduced a 160-frame run from 20.13 s to
+18.55 s (7.8%). TBC, chroma, and JSON SHA-256 values matched exactly; the task
+is awaited within the current field, so memory cannot grow with decode length.
+
+<details>
+<summary>Kernel and allocation benchmark history</summary>
+
 The pinned PAL-sized TBC sinc A/B reduced the median from 3.929 ms to 3.727 ms
 per field, a 5.1% kernel gain. A follow-up interior-window path retained clamped
 edges and short inputs while improving its serial probe by another 1.6%. A fresh
@@ -235,6 +245,8 @@ medians fell by 38.8%/40.2%/42.7%. Across two 160-frame A/B pairs, median wall
 time fell from 21.22 to 20.57 s (3.1%) and CPU time from 73.31 to 68.73 s
 (6.3%). TBC, JSON, and chroma hashes remained exact. The current pair's median
 private-memory peak was 1.71 GiB, and quarter-run memory was not monotonic.
+
+</details>
 
 <!-- SECTION: build -->
 
