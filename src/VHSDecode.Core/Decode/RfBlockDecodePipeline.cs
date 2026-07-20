@@ -136,7 +136,8 @@ public sealed class RfBlockDecodePipeline : IDisposable
             _filters.VhsEnvelopeSos,
             _filters.VhsRfTopSos,
             inputSpectrum,
-            includeRfHighPassOutput: retainRfDiagnosticChannels);
+            includeRfHighPassOutput: retainRfDiagnosticChannels,
+            includeAnalyticOutput: retainRfDiagnosticChannels);
         if (reportDiagnostics)
         {
             ReportDiagnostics(demodulated);
@@ -181,7 +182,7 @@ public sealed class RfBlockDecodePipeline : IDisposable
         if (!retainRfDiagnosticChannels)
         {
             // VHS consumes these arrays only while decoding this block; field assembly needs the retained channels below.
-            demodulated = demodulated with { DemodRaw = [], RfHighPass = [] };
+            demodulated = demodulated with { DemodRaw = [], Analytic = [], RfHighPass = [] };
         }
 
         return new RfPipelineBlock(

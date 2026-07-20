@@ -2,7 +2,7 @@
 
 **[English](README.md)** | [简体中文](README.zh-CN.md) | [日本語](README.ja.md)
 
-<!-- README_SYNC: 2026-07-20.11 -->
+<!-- README_SYNC: 2026-07-20.12 -->
 
 .NET 11 rewrite of the decode-facing parts of
 [`oyvindln/vhs-decode`](https://github.com/oyvindln/vhs-decode), focused on
@@ -171,10 +171,12 @@ release compatibility remain the first constraint.
   matching the only two block counts a fixed read window can cover. Buffers are
   returned after synchronous field decode; public `Read` results, deferred CVBS
   rendering, and retained LD VITS sources keep independent ownership.
-- VHS drops block-local raw input, raw demodulation, and RF high-pass results
-  after their last block-local consumer. This omits the unused RF high-pass
-  inverse FFT and three RF-span copies; LD, CVBS, and direct decoder construction
-  retain full-channel behavior.
+- VHS drops block-local raw input, raw demodulation, analytic, and RF high-pass
+  results after their last block-local consumer. Compact real-FFT blocks feed
+  their split real/imaginary workspaces directly into the FM unwrap. This omits
+  the unused RF high-pass inverse FFT, three RF-span copies, and one full-length
+  `Complex[]`; LD, CVBS, and direct decoder construction retain full-channel
+  behavior.
 - AVX/FMA kernels accelerate exact float32 conversion, VHS RF-envelope
   preparation, VHS Rust-style FM angle approximation, LD quantization, VHS
   chroma rotation, and complex frequency filtering. The forward/inverse radix-4
@@ -271,6 +273,15 @@ reversed 204-frame pairs completed baseline/current in 20.48/20.28 s and
 moved from 2.05-2.08 GiB to 1.58-1.67 GiB, with non-monotonic quarter samples;
 all 408 fields and luma, chroma, and JSON hashes remained exact.
 
+The compact analytic follow-up feeds the pooled real and imaginary arrays
+directly into VHS FM unwrap, SIMD-normalizes four frequency differences at a
+time, and materializes `Analytic` only for the full direct API. Five interleaved
+40-frame pairs were wall-time neutral at 5.02/5.03 s, while median CPU time fell
+from 17.73 to 17.28 s and median peak working set from 1.47 to 1.26 GiB. Two
+reversed 204-frame pairs remained within wall-time noise; current peaks were
+1.32-1.41 GiB with non-monotonic quarter samples, and all three hashes remained
+exact.
+
 AVX RF-envelope preparation reduced the isolated 32K-block median from 57.5 us
 to 13.3 us, a 76.9% kernel gain. The 40-frame median moved from 7.55 s to 7.39 s,
 and the 160-frame run from 26.95 s to 25.70 s. Its private-memory quarter medians
@@ -359,7 +370,7 @@ dotnet test --solution VHSDecodeDotNet.slnx -c Release --no-build --no-restore
 ```
 
 The current formal Release build has zero warnings and errors. The xUnit v3
-project exposes **785** independently discoverable tests to both
+project exposes **786** independently discoverable tests to both
 `dotnet test` and Visual Studio Test Explorer.
 
 <!-- SECTION: usage -->

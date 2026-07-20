@@ -85,7 +85,8 @@ public sealed class RfDemodulator
         IReadOnlyList<SosSection>? vhsEnvelopeFilter = null,
         IReadOnlyList<SosSection>? vhsRfTopFilter = null,
         Complex[]? precomputedInputSpectrum = null,
-        bool includeRfHighPassOutput = true)
+        bool includeRfHighPassOutput = true,
+        bool includeAnalyticOutput = true)
     {
         if (input.IsEmpty)
         {
@@ -108,6 +109,7 @@ public sealed class RfDemodulator
         VhsRealFftWorkspace? vhsRealFftWorkspace = vhsRealFftWorkspaceLease?.Workspace;
         int vhsRealSpectrumLength = (input.Length / 2) + 1;
         Complex[]? analytic = null;
+        bool vhsAnalyticComponentsReady = false;
         double[] rfHighPass;
         Complex[]? rfFilteredSpectrum = null;
         double[]? hilbertMultiplier = null;
@@ -227,11 +229,11 @@ public sealed class RfDemodulator
             && vhsRfFilteredHalf is not null
             && vhsRfFilteredReal is not null)
         {
-            analytic = BuildVhsAnalyticSignal(
+            BuildVhsAnalyticImaginary(
                 vhsRfFilteredHalf.AsSpan(0, vhsRealSpectrumLength),
                 input.Length,
-                vhsRfFilteredReal.AsSpan(0, input.Length),
                 vhsRealFftWorkspace!);
+            vhsAnalyticComponentsReady = true;
         }
 
         double[] envelope = vhsEnvelopeSource is not null && vhsEnvelopeFilter is not null
@@ -239,8 +241,12 @@ public sealed class RfDemodulator
                 vhsEnvelopeSource.AsSpan(0, input.Length),
                 vhsEnvelopeFilter,
                 vhsRealFftWorkspace!.RawEnvelope.AsSpan(0, input.Length))
-            : BuildAnalyticMagnitudeEnvelope(
-                analytic ?? throw new InvalidOperationException("The analytic RF signal was not initialized."));
+            : vhsAnalyticComponentsReady
+                ? BuildAnalyticMagnitudeEnvelope(
+                    vhsRfFilteredReal!.AsSpan(0, input.Length),
+                    vhsRealFftWorkspace!.Imaginary.AsSpan(0, input.Length))
+                : BuildAnalyticMagnitudeEnvelope(
+                    analytic ?? throw new InvalidOperationException("The analytic RF signal was not initialized."));
         bool vhsWeakRfSignal = false;
         if (vhsEnvelopeSource is not null)
         {
@@ -282,11 +288,11 @@ public sealed class RfDemodulator
             ReadOnlySpan<Complex> boostedHalf = vhsRfFilteredHalf.AsSpan(0, vhsRealSpectrumLength);
             double[] boostedReal = vhsRealFftWorkspace!.Real;
             PocketFftReal.Inverse(boostedHalf, input.Length, boostedReal);
-            analytic = BuildVhsAnalyticSignal(
+            BuildVhsAnalyticImaginary(
                 boostedHalf,
                 input.Length,
-                boostedReal.AsSpan(0, input.Length),
                 vhsRealFftWorkspace!);
+            vhsAnalyticComponentsReady = true;
         }
         else if (rfFilteredSpectrum is not null
             && ApplyRfHighBoostIfPresent(rfFilteredSpectrum, envelope, rfHighBoost))
@@ -297,27 +303,52 @@ public sealed class RfDemodulator
             analytic = analyticSpectrum;
         }
 
-        if (analytic is null && vhsRfFilteredHalf is not null && vhsRfFilteredReal is not null)
+        if (analytic is null
+            && !vhsAnalyticComponentsReady
+            && vhsRfFilteredHalf is not null
+            && vhsRfFilteredReal is not null)
         {
-            analytic = BuildVhsAnalyticSignal(
+            BuildVhsAnalyticImaginary(
                 vhsRfFilteredHalf.AsSpan(0, vhsRealSpectrumLength),
                 input.Length,
-                vhsRfFilteredReal.AsSpan(0, input.Length),
                 vhsRealFftWorkspace!);
+            vhsAnalyticComponentsReady = true;
         }
 
-        if (analytic is null)
+        if (analytic is null && !vhsAnalyticComponentsReady)
         {
             throw new InvalidOperationException("The analytic RF signal was not initialized.");
         }
 
-        double[] demodRaw = DemodulateAnalytic(analytic, fmDemodulatorMode);
-        ApplyDiffDemodRepairIfPresent(
-            demodRaw,
-            analytic,
-            diffDemodRepair,
-            fmDemodulatorMode,
-            vhsRealFftWorkspace?.DiffedAnalytic);
+        double[] demodRaw;
+        Complex[] analyticOutput;
+        if (vhsAnalyticComponentsReady)
+        {
+            ReadOnlySpan<double> real = vhsRfFilteredReal!.AsSpan(0, input.Length);
+            ReadOnlySpan<double> imaginary = vhsRealFftWorkspace!.Imaginary.AsSpan(0, input.Length);
+            demodRaw = DemodulateAnalytic(real, imaginary, fmDemodulatorMode);
+            ApplyDiffDemodRepairIfPresent(
+                demodRaw,
+                real,
+                imaginary,
+                diffDemodRepair,
+                fmDemodulatorMode,
+                vhsRealFftWorkspace.DiffedAnalytic);
+            analyticOutput = includeAnalyticOutput
+                ? MaterializeVhsAnalyticSignal(real, imaginary)
+                : [];
+        }
+        else
+        {
+            demodRaw = DemodulateAnalytic(analytic!, fmDemodulatorMode);
+            ApplyDiffDemodRepairIfPresent(
+                demodRaw,
+                analytic!,
+                diffDemodRepair,
+                fmDemodulatorMode,
+                vhsRealFftWorkspace?.DiffedAnalytic);
+            analyticOutput = includeAnalyticOutput ? analytic! : [];
+        }
         if (sharpnessEq is not null)
         {
             demodRaw = ApplySharpnessEqStateful(demodRaw, sharpnessEq);
@@ -444,7 +475,7 @@ public sealed class RfDemodulator
         return new RfDemodulatedBlock(
             video,
             demodRaw,
-            analytic,
+            analyticOutput,
             envelope,
             videoLowPass,
             rfHighPass,
@@ -841,10 +872,9 @@ public sealed class RfDemodulator
         NumpyComplexMultiply.Apply(spectrum, filter[..spectrum.Length], output);
     }
 
-    private static Complex[] BuildVhsAnalyticSignal(
+    private static void BuildVhsAnalyticImaginary(
         ReadOnlySpan<Complex> filteredHalfSpectrum,
         int realLength,
-        ReadOnlySpan<double> real,
         VhsRealFftWorkspace workspace)
     {
         if (filteredHalfSpectrum.Length != (realLength / 2) + 1)
@@ -852,13 +882,6 @@ public sealed class RfDemodulator
             throw new ArgumentException(
                 "Filtered half-spectrum length does not match the real block length.",
                 nameof(filteredHalfSpectrum));
-        }
-
-        if (real.Length != realLength)
-        {
-            throw new ArgumentException(
-                "Precomputed real signal length does not match the RF block length.",
-                nameof(real));
         }
 
         if (workspace.RealLength != realLength)
@@ -877,10 +900,23 @@ public sealed class RfDemodulator
 
         hilbertHalfSpectrum[^1] = Complex.Zero;
         PocketFftReal.Inverse(hilbertHalfSpectrum, realLength, workspace.Imaginary);
-        var output = new Complex[realLength];
+    }
+
+    private static Complex[] MaterializeVhsAnalyticSignal(
+        ReadOnlySpan<double> real,
+        ReadOnlySpan<double> imaginary)
+    {
+        if (imaginary.Length != real.Length)
+        {
+            throw new ArgumentException(
+                "Precomputed real and imaginary signals must have matching lengths.",
+                nameof(imaginary));
+        }
+
+        var output = new Complex[real.Length];
         for (int i = 0; i < output.Length; i++)
         {
-            output[i] = new Complex(real[i], workspace.Imaginary[i]);
+            output[i] = new Complex(real[i], imaginary[i]);
         }
 
         return output;
@@ -912,6 +948,24 @@ public sealed class RfDemodulator
         for (int i = 0; i < envelope.Length; i++)
         {
             envelope[i] = analytic[i].Magnitude;
+        }
+
+        return envelope;
+    }
+
+    private static double[] BuildAnalyticMagnitudeEnvelope(
+        ReadOnlySpan<double> real,
+        ReadOnlySpan<double> imaginary)
+    {
+        if (imaginary.Length != real.Length)
+        {
+            throw new ArgumentException("Real and imaginary signals must have matching lengths.", nameof(imaginary));
+        }
+
+        var envelope = new double[real.Length];
+        for (int i = 0; i < envelope.Length; i++)
+        {
+            envelope[i] = new Complex(real[i], imaginary[i]).Magnitude;
         }
 
         return envelope;
@@ -1383,6 +1437,55 @@ public sealed class RfDemodulator
         ReplaceSpikes(demod, demodDiffed, options.MaxValue);
     }
 
+    private void ApplyDiffDemodRepairIfPresent(
+        double[] demod,
+        ReadOnlySpan<double> real,
+        ReadOnlySpan<double> imaginary,
+        DiffDemodRepairOptions? options,
+        RfFmDemodulatorMode fmDemodulatorMode,
+        Complex[]? diffedWorkspace)
+    {
+        if (options is null || demod.Length <= 40)
+        {
+            return;
+        }
+
+        if (imaginary.Length != real.Length)
+        {
+            throw new ArgumentException("Real and imaginary signals must have matching lengths.", nameof(imaginary));
+        }
+
+        bool hasSpike = false;
+        for (int i = 20; i < demod.Length - 20; i++)
+        {
+            if (demod[i] > options.MaxValue)
+            {
+                hasSpike = true;
+                break;
+            }
+        }
+
+        if (!hasSpike)
+        {
+            return;
+        }
+
+        Complex[] diffed = diffedWorkspace is not null && diffedWorkspace.Length >= real.Length
+            ? diffedWorkspace
+            : new Complex[real.Length];
+        Span<Complex> activeDiffed = diffed.AsSpan(0, real.Length);
+        for (int i = activeDiffed.Length - 1; i >= 1; i--)
+        {
+            activeDiffed[i] = new Complex(
+                real[i] - real[i - 1],
+                imaginary[i] - imaginary[i - 1]);
+        }
+
+        activeDiffed[0] = Complex.Zero;
+        double[] demodDiffed = DemodulateAnalytic(activeDiffed, fmDemodulatorMode);
+        ReplaceSpikes(demod, demodDiffed, options.MaxValue);
+    }
+
     private double[] DemodulateAnalytic(
         ReadOnlySpan<Complex> analytic,
         RfFmDemodulatorMode mode)
@@ -1393,6 +1496,19 @@ public sealed class RfDemodulator
                 PortedMath.UnwrapHilbertConjugateProduct(analytic, SampleRateHz),
             RfFmDemodulatorMode.VhsRustApproximation =>
                 PortedMath.UnwrapHilbertVhsRustApproximation(analytic, SampleRateHz),
+            _ => throw new ArgumentOutOfRangeException(nameof(mode), mode, null)
+        };
+    }
+
+    private double[] DemodulateAnalytic(
+        ReadOnlySpan<double> real,
+        ReadOnlySpan<double> imaginary,
+        RfFmDemodulatorMode mode)
+    {
+        return mode switch
+        {
+            RfFmDemodulatorMode.VhsRustApproximation =>
+                PortedMath.UnwrapHilbertVhsRustApproximation(real, imaginary, SampleRateHz),
             _ => throw new ArgumentOutOfRangeException(nameof(mode), mode, null)
         };
     }

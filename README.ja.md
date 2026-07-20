@@ -2,7 +2,7 @@
 
 [English](README.md) | [简体中文](README.zh-CN.md) | **[日本語](README.ja.md)**
 
-<!-- README_SYNC: 2026-07-20.11 -->
+<!-- README_SYNC: 2026-07-20.12 -->
 
 [`oyvindln/vhs-decode`](https://github.com/oyvindln/vhs-decode) の
 デコード関連部分を .NET 11 で再実装するプロジェクトです。現在は release
@@ -165,9 +165,11 @@
   exact-length RF span buffer set を最大 2 組だけ再利用します。同期 field decode 後に
   buffer を返却し、public `Read` result、deferred CVBS render、保持される LD VITS source
   はそれぞれ独立した array ownership を維持します。
-- VHS は最後の block-local consumer の後に raw input、raw demodulation、RF high-pass
-  result を破棄します。未使用の RF high-pass inverse FFT と 3 本の RF-span copy を省き、
-  LD、CVBS、直接構築した decoder は従来の full-channel behavior を維持します。
+- VHS は最後の block-local consumer の後に raw input、raw demodulation、analytic、
+  RF high-pass result を破棄します。compact real-FFT block は分離した real/imaginary
+  workspace を FM unwrap に直接渡し、未使用の RF high-pass inverse FFT、3 本の
+  RF-span copy、全長 `Complex[]` 1 本を省きます。LD、CVBS、直接構築した decoder は
+  従来の full-channel behavior を維持します。
 - AVX/FMA kernel は正確な float32 conversion、VHS RF-envelope preparation、
   VHS Rust-style FM angle approximation、LD quantization、VHS chroma rotation、
   complex frequency filtering を高速化します。forward/inverse radix-4 FFT は pinned
@@ -258,6 +260,13 @@ pair は baseline/current 20.48/20.28 秒と 20.61/19.87 秒、CPU は
 1.58-1.67 GiB へ減少し、quarter sample は非単調でした。408 field と luma、chroma、
 JSON hash は完全一致です。
 
+compact analytic の follow-up は pooled real/imaginary array を VHS FM unwrap に直接渡し、
+4 個の frequency difference を SIMD で同時に正規化し、完全な direct API の場合だけ
+`Analytic` を materialize します。5 組の交互 40-frame pair は 5.02/5.03 秒で wall-time
+neutral、CPU 中央値は 17.73 秒から 17.28 秒、peak working-set 中央値は 1.47 GiB から
+1.26 GiB へ低下しました。順序を反転した 2 組の 204-frame pair も wall-time noise 内で、
+current peak は 1.32-1.41 GiB、quarter sample は非単調、3 種の hash は完全一致です。
+
 AVX RF-envelope preparation は、単体 32K-block 中央値を 57.5 us から 13.3 us へ
 短縮し、kernel は 76.9% 改善しました。40-frame 中央値は 7.55 秒から 7.39 秒、
 160-frame run は 26.95 秒から 25.70 秒になりました。private-memory の四分位中央値は
@@ -346,7 +355,7 @@ dotnet test --solution VHSDecodeDotNet.slnx -c Release --no-build --no-restore
 
 現在の正式な Release build は warning 0、error 0 です。xUnit v3 project は
 `dotnet test` と Visual Studio Test Explorer の両方で個別に検出できる
-**785** tests を公開します。
+**786** tests を公開します。
 
 <!-- SECTION: usage -->
 

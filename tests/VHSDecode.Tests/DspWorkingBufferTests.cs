@@ -125,6 +125,30 @@ public sealed class DspWorkingBufferTests
             $"Warm PAL VHS RF block allocated {allocated:N0} bytes.");
     }
 
+    [Fact(DisplayName = "Compact PAL VHS RF blocks omit the unconsumed analytic channel")]
+    public void CompactPalVhsRfBlocksOmitTheUnconsumedAnalyticChannel()
+    {
+        const int length = DecodeSessionFactory.DefaultBlockLength;
+        ParsedCommand command = new CommandLineParser().Parse(
+            CliSpecs.Vhs,
+            ["--pal", "--no_resample", "probe.s16", "probe-output"]);
+        using DecodeSession session = DecodeSessionFactory.Create(command, length);
+        double[] input = BuildPalVhsProbe(length, session.DecodeSampleRateHz);
+
+        RfPipelineBlock full = session.Pipeline.DecodePreparedBlock(input, reportDiagnostics: false);
+        RfPipelineBlock compact = session.Pipeline.DecodePreparedStreamBlock(input, reportDiagnostics: false);
+
+        Assert.Equal(length, full.Demodulated.Analytic.Length);
+        Assert.Empty(compact.Input);
+        Assert.Empty(compact.Demodulated.DemodRaw);
+        Assert.Empty(compact.Demodulated.Analytic);
+        Assert.Empty(compact.Demodulated.RfHighPass);
+        Assert.Equal(full.Demodulated.Video, compact.Demodulated.Video);
+        Assert.Equal(full.Demodulated.Envelope, compact.Demodulated.Envelope);
+        Assert.Equal(full.Demodulated.VideoLowPass, compact.Demodulated.VideoLowPass);
+        Assert.Equal(full.Demodulated.VhsWeakRfSignal, compact.Demodulated.VhsWeakRfSignal);
+    }
+
     [Fact(DisplayName = "VHS diff-demod repair reuses its analytic workspace after warm-up")]
     public void VhsDiffDemodRepairReusesAnalyticWorkspaceAfterWarmUp()
     {

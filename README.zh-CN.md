@@ -2,7 +2,7 @@
 
 [English](README.md) | **[简体中文](README.zh-CN.md)** | [日本語](README.ja.md)
 
-<!-- README_SYNC: 2026-07-20.11 -->
+<!-- README_SYNC: 2026-07-20.12 -->
 
 这是 [`oyvindln/vhs-decode`](https://github.com/oyvindln/vhs-decode)
 中解码相关部分的 .NET 11 重写，当前以 release `v0.4.0`、commit
@@ -148,9 +148,10 @@
 - 标准 VHS 场解码最多复用两套精确长度的 RF span 缓冲，对应固定读取窗口只可能覆盖的
   两种 block 数。同步场解码结束后立即归还缓冲；公开 `Read` 结果、CVBS 延迟渲染和
   LD VITS 保留源仍拥有独立数组。
-- VHS 会在最后一个 block 内消费者完成后丢弃原始输入、原始解调和 RF 高通结果，省去
-  未使用的 RF 高通逆 FFT 及三条 RF-span 复制；LD、CVBS 与直接构造的 decoder 仍保留
-  完整通道行为。
+- VHS 会在最后一个 block 内消费者完成后丢弃原始输入、原始解调、analytic 和 RF 高通
+  结果。紧凑 real-FFT block 会把分离的实部/虚部 workspace 直接送入 FM unwrap，从而省去
+  未使用的 RF 高通逆 FFT、三条 RF-span 复制和一个全长 `Complex[]`；LD、CVBS 与直接构造
+  的 decoder 仍保留完整通道行为。
 - AVX/FMA 内核加速精确 float32 转换、VHS RF envelope 准备、VHS Rust 风格
   FM 角度近似、LD 量化、VHS 色度移位和复数频域滤波。forward/inverse radix-4 FFT
   使用固定指针索引。16-tap TBC sinc 内部窗口以 AVX/FMA 并行计算独立的 float 权重与
@@ -229,6 +230,12 @@ hash 均精确一致。
 配对分别以 baseline/current 20.48/20.28 秒和 20.61/19.87 秒完成；CPU 时间为
 79.88/68.91 秒和 77.17/72.44 秒。工作集峰值从 2.05-2.08 GiB 降到
 1.58-1.67 GiB，四分段采样非单调；408 场以及亮度、色度、JSON hash 均精确一致。
+
+后续紧凑 analytic 优化会把池化的实部和虚部数组直接送入 VHS FM unwrap，每次用 SIMD
+归一化四个频差，并且只为完整直接 API 实体化 `Analytic`。五组交错 40-frame 配对的墙钟
+在 5.02/5.03 秒范围内持平；CPU 中位数从 17.73 秒降到 17.28 秒，工作集峰值中位数从
+1.47 GiB 降到 1.26 GiB。两组反向顺序的 204-frame 配对仍处于墙钟噪声范围；当前峰值为
+1.32-1.41 GiB，四分段采样非单调，三份 hash 全部精确一致。
 
 AVX RF envelope 准备将隔离的 32K-block 中位数从 57.5 us 降到 13.3 us，
 内核提升 76.9%。40-frame 中位数从 7.55 秒降到 7.39 秒，160-frame 运行从
@@ -309,7 +316,7 @@ dotnet test --solution VHSDecodeDotNet.slnx -c Release --no-build --no-restore
 ```
 
 当前正式 Release 构建为零警告、零错误。xUnit v3 项目向
-`dotnet test` 和 Visual Studio Test Explorer 暴露 **785** 个可独立发现的测试。
+`dotnet test` 和 Visual Studio Test Explorer 暴露 **786** 个可独立发现的测试。
 
 <!-- SECTION: usage -->
 

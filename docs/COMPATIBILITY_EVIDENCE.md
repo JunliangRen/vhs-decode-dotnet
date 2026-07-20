@@ -1399,6 +1399,25 @@ possible capture has already been proven byte-for-byte identical.
   `7C732FDB97CA95900ED353ABF1DBD0A37BBE3D8609886E16A7B55CCAE1D5B236`,
   `82F1D3A9E3A3BD73A5AA07A63C930892CBB7125D857725D736C721CCBED18494`,
   and `DDEFFB4DC96F4DAB031BDAF6BA385C1DD6C2EAEE31E53ECD244826C12F21D081`
+- Compact VHS stream blocks now keep the pooled real and imaginary analytic
+  components split through FM demodulation and diff-demod repair. Four finite
+  angles also normalize and widen their frequency differences with SSE4.1/AVX;
+  non-finite lanes and unsupported hardware retain scalar behavior. Only the
+  full direct API materializes the returned full-length `Complex[] Analytic`.
+  xUnit v3 compares split, interleaved SIMD, and scalar results bit for bit over
+  nine lengths including NaN and infinity inputs, while a compact/full RF block
+  comparison proves exact retained channels and the omitted analytic output.
+  Candidate trace samples reduced split unwrap exclusive time from 1.28% to
+  0.26%, RF demodulation inclusive time from 7.02% to 5.43%, and native memmove
+  from 1.52% to 1.26%. Five interleaved 40-frame pairs were wall-time neutral at
+  5.02/5.03 s; median CPU time fell from 17.73 to 17.28 s and median peak working
+  set from 1.47 to 1.26 GiB. Two reversed 204-frame pairs remained within wall
+  noise; current quarter peaks were 1.31/1.04/1.34/1.41 and
+  1.30/1.08/1.32/1.17 GiB, with 1.41/1.32 GiB maxima and no monotonic growth.
+  All four long runs emitted exact luma, chroma, and JSON hashes
+  `7C732FDB97CA95900ED353ABF1DBD0A37BBE3D8609886E16A7B55CCAE1D5B236`,
+  `82F1D3A9E3A3BD73A5AA07A63C930892CBB7125D857725D736C721CCBED18494`,
+  and `DDEFFB4DC96F4DAB031BDAF6BA385C1DD6C2EAEE31E53ECD244826C12F21D081`
 - VHS RF-envelope preparation now converts four doubles to float32, clears the
   sign bits, and writes the rotated float64 values through AVX while preserving
   the scalar tail and wrap path. A 32K-block isolated median improved from
@@ -1780,7 +1799,7 @@ dotnet test --solution VHSDecodeDotNet.slnx --no-build
 ```
 
 The current formal solution build completes with zero warnings and errors, and
-the xUnit v3 project exposes 785 independently discoverable compatibility tests
+the xUnit v3 project exposes 786 independently discoverable compatibility tests
 to `dotnet test` and Visual Studio Test Explorer. On the
 same Windows machine and fixtures, Release wall-clock measurements for one
 frame were 2.346 s versus 7.193 s for NTSC VHS and 1.651 s versus 5.865 s for
