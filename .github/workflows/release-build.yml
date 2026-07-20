@@ -40,7 +40,7 @@ jobs:
         run: dotnet build VHSDecodeDotNet.slnx --configuration Release --no-restore
 
       - name: Run tests
-        run: dotnet test VHSDecodeDotNet.slnx --configuration Release --no-build
+        run: dotnet test --solution VHSDecodeDotNet.slnx --configuration Release --no-build --no-restore --minimum-expected-tests 788
 
       - name: Upload release build artifact
         if: github.event_name == 'push'

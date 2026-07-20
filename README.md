@@ -2,7 +2,7 @@
 
 **[English](README.md)** | [简体中文](README.zh-CN.md) | [日本語](README.ja.md)
 
-<!-- README_SYNC: 2026-07-19.7 -->
+<!-- README_SYNC: 2026-07-20.14 -->
 
 .NET 11 rewrite of the decode-facing parts of
 [`oyvindln/vhs-decode`](https://github.com/oyvindln/vhs-decode), focused on
@@ -128,36 +128,67 @@ release compatibility remain the first constraint.
   decode concurrently. Each completed block is published independently, so a
   field waits only for the blocks it needs instead of an entire batch. Seek,
   stream changes, and disposal cancel and drain the producer before another
-  reader can touch the FFmpeg/GNU Radio stream.
+  reader can touch the FFmpeg/GNU Radio stream. Completed blocks copy their
+  disjoint trimmed ranges into the final RF span in parallel under the same
+  worker bound; serial and stateful block paths retain ordered assembly.
 - VSync envelope/minima work and harmonic power-ratio search run concurrently
   over one shared read-only padded input. Candidate arbitration and detector
   state updates remain ordered after both branches complete.
+- VHS field decode overlaps luma TBC rendering with chroma field decoding when
+  workers are enabled. Only one chroma task can be in flight, and its state is
+  committed on the calling thread before the next field advances.
 - Long TBC sinc-resampling jobs share the worker budget and preserve output
   order; `--threads 0` and `--threads 1` retain deterministic serial paths.
 - Linear wow adjustment evaluates the constant derivative once per line,
   expands it only after median/MAD repair, and overlaps source-position and
   level preparation with a fixed two-way task when workers are enabled.
-- VHS heterodyne and carrier tables use bounded parallel construction. The
-  phase-analysis table is reused by field decode only while carrier and phase
-  parameters match; AFC changes force the original rebuild path.
+- VHS heterodyne and carrier tables use bounded parallel construction and a
+  session-owned one-entry cache. Exact-key hits reuse the original arrays;
+  sample-shape, carrier, phase, or AFC changes replace the prior entry instead
+  of growing retained state. Phase analysis reads the field-owned resampled
+  array directly, while decode creates its only writable copy at prefiltering.
 - HiFi uses bounded parallel block decoding followed by ordered
   post-processing and writing.
-- Managed real FFTs reuse pooled packing and scratch buffers, and float32 SOS
-  forward/backward filtering operates in place over one extended buffer. This
-  removes repeated large-object-heap churn while returning every rental after
-  each transform.
+- Managed real FFTs reuse pooled packing and scratch buffers. Float32 SOS
+  forward/backward filtering rents one extended buffer, operates in place, and
+  returns it synchronously; returned output arrays retain normal ownership.
 - RF span assembly writes directly into the requested output window instead of
   allocating whole-block field arrays and slicing a second copy.
+- Default linear TBC resampling rents its per-field source-position and
+  level-adjust workspaces, uses exact spans, and returns both after every
+  synchronous serial or parallel resample.
+- VHS diff-demod spike repair reuses one full-length complex scratch array
+  inside the existing 16-slot real-FFT workspace pool. Returned analytic arrays
+  retain independent ownership; non-VHS paths keep their allocating fallback.
+- On little-endian hosts, TBC and chroma samples stream directly from their
+  `ushort` spans without allocating a full-field byte copy. The big-endian
+  fallback uses one returned pooled buffer, so repeated writes remain bounded.
+- Real multi-worker VHS sessions use a dedicated capacity-one payload writer.
+  It writes luma and chroma concurrently while the producer decodes the next
+  field, and owns payload, metadata-snapshot, and completion ordering. Shutdown
+  drains the queue; serial and public custom-reader paths retain synchronous
+  ordered writes.
 - Standard VHS field decode reuses at most two exact-length RF span buffer sets,
   matching the only two block counts a fixed read window can cover. Buffers are
   returned after synchronous field decode; public `Read` results, deferred CVBS
   rendering, and retained LD VITS sources keep independent ownership.
+- VHS drops block-local raw input, raw demodulation, analytic, and RF high-pass
+  results after their last block-local consumer. Compact real-FFT blocks feed
+  their split real/imaginary workspaces directly into the FM unwrap. This omits
+  the unused RF high-pass inverse FFT, three RF-span copies, and one full-length
+  `Complex[]`; LD, CVBS, and direct decoder construction retain full-channel
+  behavior.
+- Compact VHS stream blocks also retain their already-quantized SOS chroma in
+  `float[]` form. RF span assembly widens it once into the reusable field buffer
+  with AVX or an exact scalar fallback; full/direct blocks keep the public
+  `double[] Chroma` contract.
 - AVX/FMA kernels accelerate exact float32 conversion, VHS RF-envelope
   preparation, VHS Rust-style FM angle approximation, LD quantization, VHS
-  chroma rotation, and complex frequency filtering. The forward/inverse radix-4 FFT
-  and 16-tap TBC sinc kernels use pinned pointer indexing to remove bounds
-  checks without changing arithmetic order; differential tests preserve exact
-  transform bits and output hashes.
+  chroma rotation, and complex frequency filtering. The forward/inverse radix-4
+  FFT kernels use pinned pointer indexing. The 16-tap TBC sinc interior computes
+  independent float weights and products with AVX/FMA, then accumulates them in
+  original tap order; clamped edges, short inputs, and unsupported hardware keep
+  the scalar path. Differential tests preserve exact transform bits and hashes.
 - Recovery metadata is disk-streamed; its snapshot queue has capacity one, and
   field-order history and RF caches have hard limits. Long decodes therefore do
   not retain every decoded field or enqueue an unbounded amount of future work.
@@ -185,11 +216,95 @@ working sets were 1.76/1.88/1.67 GiB, while second-half medians were
 growth with decode length. Earlier allocation work also reduced a PAL LD
 four-field probe from 5.12 GiB to 1.96 GiB.
 
+The bounded VHS field-stage overlap reduced a 160-frame run from 20.13 s to
+18.55 s (7.8%). TBC, chroma, and JSON SHA-256 values matched exactly; the task
+is awaited within the current field, so memory cannot grow with decode length.
+
+The zero-copy little-endian TBC writer removed about 455 MB of full-field
+temporary byte-array payload across the same 160-frame output. Its xUnit v3
+allocation probe writes 400,000 samples with less than 1 KiB of thread-local
+allocation after warm-up. A fresh 160-frame run retained the exact luma and
+chroma SHA-256 values; wall time remained within run-to-run noise.
+
+<details>
+<summary>Kernel and allocation benchmark history</summary>
+
 The pinned PAL-sized TBC sinc A/B reduced the median from 3.929 ms to 3.727 ms
-per field, a 5.1% kernel gain. A follow-up interior-window path retained clamped
-edges and short inputs while improving its serial probe by another 1.6%. A fresh
-160-frame run finished in 21.31 s with 0.78/1.18/1.20/1.41 GiB quarter medians
-and a 1.68 GiB peak; TBC, JSON, and chroma SHA-256 remained identical.
+per field, a 5.1% kernel gain, and the interior-window path added 1.6%. An
+AVX/FMA follow-up retained scalar clamps and ordered double accumulation. Five
+interleaved PAL-field A/B runs reduced serial/20-worker medians from
+21.588/5.579 to 18.741/5.330 ms (13.2%/4.5%). Five 40-frame full-path pairs
+reduced median wall/CPU time from 5.511/19.297 to 5.478/17.922 s (0.6%/7.1%).
+Two reversed 204-frame pairs were 1.1-1.3% faster with bounded memory; TBC,
+chroma, JSON, and the isolated field hash remained exact.
+
+A session-owned VHS chroma-table cache retains one exact-key heterodyne set and
+one burst-carrier set. Matched 40-frame GC traces reduced sampled allocation
+from 13.854 to 12.579 GiB, `Double[]` allocation from 12,611.83 to 11,311.73
+MiB, and Gen2 collections from 38 to 31. Five interleaved A/B pairs reduced
+median wall/CPU time from 5.49/19.23 to 5.30/18.05 s (3.5%/6.1%). Two reversed
+204-frame pairs were 4.4% and 4.8% faster; memory was non-monotonic with a
+2.0 GiB maximum, and all 409 fields and output hashes remained exact. Removing
+the two remaining read-only field copies further reduced matched sampled/
+`Double[]` allocation from 12.580 GiB/11,309.71 MiB to 12.147 GiB/10,871.59
+MiB. Five interleaved runs reduced median wall/CPU time from 5.209/18.188 to
+5.175/17.094 s (0.7%/6.0%); two reversed 204-frame pairs were 1.8% and 1.9%
+faster with non-monotonic memory at or below 2.05 GiB and exact 408-field
+`--length 204` outputs.
+
+Parallel RF span assembly uses completed immutable blocks and disjoint final
+window ranges, with analog-audio phase work left ordered. Five interleaved
+40-frame runs reduced median wall time from 5.165 to 4.878 s (5.6%) while CPU
+time rose from 18.172 to 18.875 s (3.9%), converting more core use into
+throughput. Two reversed `--length 204` pairs completed baseline/current in
+21.31/20.35 s and 21.84/20.18 s (4.5% and 7.6% faster). Current memory was
+non-monotonic with 1.93/2.06 GiB peaks, and all 408 fields and hashes remained
+exact.
+
+Parallel VHS payload output overlaps each field's independent luma and chroma
+stream writes, while joining both before the next field. Five interleaved
+40-frame runs reduced median wall time from 4.98 to 4.87 s (2.2%); median CPU
+time rose from 18.20 to 19.50 s as both writes used otherwise idle capacity.
+Two reversed `--length 204` pairs completed baseline/current in 20.451/20.181 s
+and 20.483/20.353 s (1.3% and 0.6% faster). Current memory was non-monotonic
+with 2.03/2.06 GiB peaks, and all 408 fields and hashes remained exact.
+
+The compact VHS RF-channel path releases raw input, raw demodulation, and RF
+high-pass block arrays before caching, skips their field assembly, and does not
+run the unused RF high-pass inverse FFT. Five interleaved 40-frame A/B runs
+reduced median wall/CPU time from 6.01/18.86 to 5.02/17.45 s (16.5%/7.5%). Two
+reversed 204-frame pairs completed baseline/current in 20.48/20.28 s and
+20.61/19.87 s; CPU time was 79.88/68.91 s and 77.17/72.44 s. Peak working set
+moved from 2.05-2.08 GiB to 1.58-1.67 GiB, with non-monotonic quarter samples;
+all 408 fields and luma, chroma, and JSON hashes remained exact.
+
+The compact analytic follow-up feeds the pooled real and imaginary arrays
+directly into VHS FM unwrap, SIMD-normalizes four frequency differences at a
+time, and materializes `Analytic` only for the full direct API. Five interleaved
+40-frame pairs were wall-time neutral at 5.02/5.03 s, while median CPU time fell
+from 17.73 to 17.28 s and median peak working set from 1.47 to 1.26 GiB. Two
+reversed 204-frame pairs remained within wall-time noise; current peaks were
+1.32-1.41 GiB with non-monotonic quarter samples, and all three hashes remained
+exact.
+
+The compact chroma follow-up keeps float32 SOS output narrow until RF field
+assembly. Matched 10-frame allocation traces reduced sampled managed allocation
+from 2.95 to 2.89 GiB and `Double[]` allocation from 2.75 to 2.60 GiB, while
+`Single[]` rose from 0.03 to 0.11 GiB. Five interleaved 40-frame pairs reduced
+median wall/CPU time from 4.831/16.50 to 4.769/15.75 s (1.3%/4.5%). Two reversed
+204-frame pairs were wall-time neutral at baseline/current 19.73/19.83 and
+19.87/19.73 s; current peaks were 1.46/1.39 GiB and remained within the existing
+bounded working-set envelope. All luma, chroma, and JSON hashes remained exact.
+
+The bounded payload-writer follow-up overlaps the next VHS field decode with the
+current field's luma/chroma write through a capacity-one queue. Payloads remain
+ordered before their recovery JSON snapshot, completion drains the writer, and
+worker failures return to the decode thread. Five interleaved 40-frame pairs
+reduced median wall/CPU time from 4.90/16.09 to 4.79/15.47 s (2.2%/3.9%). Two
+reversed 204-frame pairs completed baseline/current in 20.23/19.54 s and
+20.05/19.19 s (3.4%/4.3% faster). Current quarter peaks were
+1.35/0.74/0.96/1.14 and 1.27/0.95/0.97/1.09 GiB, with no monotonic growth; all
+408 fields and luma, chroma, and JSON hashes remained exact.
 
 AVX RF-envelope preparation reduced the isolated 32K-block median from 57.5 us
 to 13.3 us, a 76.9% kernel gain. The 40-frame median moved from 7.55 s to 7.39 s,
@@ -236,6 +351,31 @@ time fell from 21.22 to 20.57 s (3.1%) and CPU time from 73.31 to 68.73 s
 (6.3%). TBC, JSON, and chroma hashes remained exact. The current pair's median
 private-memory peak was 1.71 GiB, and quarter-run memory was not monotonic.
 
+A follow-up pass pooled the float32 SOS padded workspace. Matched 40-frame GC
+traces reduced total sampled allocation from 16.772 to 16.178 GiB and
+`Single[]` allocation from 651.68 to 47.25 MiB. Five interleaved full-path A/B
+runs were wall-time neutral at 5.541/5.537 s, while median CPU time moved from
+20.000 to 19.438 s; all three output hashes remained exact. The current
+fixture-limited 204-frame run completed in 23.39 s with 1.147/0.886/0.888/0.917
+GiB private-memory quarter medians and a 1.755 GiB peak.
+
+The next pass pooled the default linear TBC resampler's two per-field double
+workspaces. Matched 40-frame GC traces reduced total sampled allocation from
+16.178 to 14.892 GiB and `Double[]` allocation from 13.601 to 12.316 GiB. Five
+interleaved A/B runs reduced median wall time from 5.684 to 5.571 s (2.0%) and
+CPU time from 19.031 to 18.891 s; all three hashes remained exact. A repeated
+204-frame run had flat 1.025/1.047/1.007/1.042 GiB private-memory quarter
+medians and a 1.869 GiB peak.
+
+The VHS diff-demod repair pass now keeps its transient full-length `Complex[]`
+in the existing capped FFT workspace. Matched 10-frame GC traces reduced total
+sampled allocation from 4.134 to 3.861 GiB and `Complex[]` allocation from
+622.63 to 340.02 MiB. Ten interleaved 40-frame pairs and two reversed 204-frame
+pairs were wall-time neutral within run noise, so no speedup is claimed;
+long-run memory remained bounded and all 409-field hashes stayed exact.
+
+</details>
+
 <!-- SECTION: build -->
 
 ## Build and test
@@ -250,11 +390,11 @@ Requirements:
 ```powershell
 dotnet restore VHSDecodeDotNet.slnx
 dotnet build VHSDecodeDotNet.slnx -c Release --no-restore
-dotnet test VHSDecodeDotNet.slnx -c Release --no-build --no-restore
+dotnet test --solution VHSDecodeDotNet.slnx -c Release --no-build --no-restore
 ```
 
 The current formal Release build has zero warnings and errors. The xUnit v3
-project exposes **781** independently discoverable tests to both
+project exposes **788** independently discoverable tests to both
 `dotnet test` and Visual Studio Test Explorer.
 
 <!-- SECTION: usage -->

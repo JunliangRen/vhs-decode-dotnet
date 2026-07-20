@@ -3416,14 +3416,59 @@ public void VhsChromaPhaseWorkspacePreservesDecodeResultsAndCarrierFallback()
         options.OutputLineCount,
         options.FscMHz,
         options.OutputSampleRateHz);
+    double[] originalChroma = chroma.ToArray();
     double[] lineLocations = Enumerable.Range(0, options.OutputLineCount + 1)
         .Select(line => line * 100.0)
         .ToArray();
+    var carrierTableCache = new VhsChromaCarrierTableCache();
     VhsChromaPhaseAnalysis analysis = VhsChromaDecoder.AnalyzeFieldPhaseWithWorkspace(
         chroma,
         options,
         lineLocations,
-        inputLineLength: 100);
+        inputLineLength: 100,
+        carrierTableCache: carrierTableCache);
+    VhsChromaPhaseAnalysis cachedAnalysis = VhsChromaDecoder.AnalyzeFieldPhaseWithWorkspace(
+        chroma,
+        options,
+        lineLocations,
+        inputLineLength: 100,
+        carrierTableCache: carrierTableCache);
+
+    Assert.Same(analysis.Heterodyne, cachedAnalysis.Heterodyne);
+    for (int phase = 0; phase < analysis.Heterodyne.Length; phase++)
+    {
+        Assert.Same(analysis.Heterodyne[phase], cachedAnalysis.Heterodyne[phase]);
+    }
+
+    (double[] carrierSin, double[] carrierCos) = carrierTableCache.GetCarrierTables(
+        chroma.Length,
+        options.FscMHz,
+        options.FscMHz * 4.0,
+        options.WorkerThreads);
+    (double[] cachedCarrierSin, double[] cachedCarrierCos) = carrierTableCache.GetCarrierTables(
+        chroma.Length,
+        options.FscMHz,
+        options.FscMHz * 4.0,
+        options.WorkerThreads);
+    Assert.Same(carrierSin, cachedCarrierSin);
+    Assert.Same(carrierCos, cachedCarrierCos);
+
+    double[][] changedHeterodyne = carrierTableCache.GetHeterodyne(
+        chroma.Length,
+        options.FscMHz,
+        options.ColorUnderCarrierHz / 1_000_000.0,
+        options.FscMHz * 4.0,
+        phaseDriftRadians: 0.25,
+        options.WorkerThreads);
+    double[][] cachedChangedHeterodyne = carrierTableCache.GetHeterodyne(
+        chroma.Length,
+        options.FscMHz,
+        options.ColorUnderCarrierHz / 1_000_000.0,
+        options.FscMHz * 4.0,
+        phaseDriftRadians: 0.25,
+        options.WorkerThreads);
+    Assert.NotSame(analysis.Heterodyne, changedHeterodyne);
+    Assert.Same(changedHeterodyne, cachedChangedHeterodyne);
 
     VhsChromaFieldResult prepared = VhsChromaDecoder.DecodeFieldWithPhase(
         chroma,
@@ -3434,6 +3479,11 @@ public void VhsChromaPhaseWorkspacePreservesDecodeResultsAndCarrierFallback()
         options,
         analysis.Phase);
     AssertTrue(prepared.Samples.SequenceEqual(independent.Samples));
+    VhsChromaFieldResult cached = VhsChromaDecoder.DecodeFieldWithPhase(
+        chroma,
+        options,
+        cachedAnalysis);
+    AssertTrue(prepared.Samples.SequenceEqual(cached.Samples));
 
     const double changedCarrierHz = 1_000_000.0;
     VhsChromaFieldResult preparedFallback = VhsChromaDecoder.DecodeFieldWithPhase(
@@ -3447,6 +3497,7 @@ public void VhsChromaPhaseWorkspacePreservesDecodeResultsAndCarrierFallback()
         analysis.Phase,
         previousChromaAfcCarrierHz: changedCarrierHz);
     AssertTrue(preparedFallback.Samples.SequenceEqual(independentFallback.Samples));
+    AssertTrue(chroma.SequenceEqual(originalChroma));
 }
 
 [Fact(DisplayName = "VHS chroma decoder emits field samples")]
@@ -11228,13 +11279,6 @@ public void TbcFieldDecodePipelineAppliesAnalyzedVhsTrackPhaseToLuma(
         outputZero: 256,
         vsyncIre: -40.0,
         outputScale: 10.0);
-    var analyzer = new SyncAnalyzer(
-        sampleRateHz: 1_000_000.0,
-        linePeriodUs: 100.0,
-        hsyncPulseUs: 10.0,
-        equalizingPulseUs: 5.0,
-        vsyncPulseUs: 20.0,
-        numPulses: 5);
     var chromaOptions = new VhsChromaFieldOptions(
         ColorSystem: "PAL",
         OutputLineLength: spec.OutputLineLength,
@@ -11254,21 +11298,36 @@ public void TbcFieldDecodePipelineAppliesAnalyzedVhsTrackPhaseToLuma(
         DisableBurstHsync = true,
         InitialChromaRotationIndex = initialTrackPhase
     };
-    var renderer = new TbcFieldRenderer(
-        spec,
-        converter,
-        trackPhaseIre0Offset: new TrackPhaseIre0OffsetOptions(
-            initialTrackPhase,
-            Offset0Hz: 20.0,
-            Offset1Hz: 0.0));
-    var pipeline = new TbcFieldDecodePipeline(
-        analyzer,
-        renderer,
-        converter,
-        "PAL",
-        TbcDropoutDetectionOptions.Disabled,
-        chromaFieldOptions: chromaOptions,
-        decodeType: "vhs");
+
+    TbcFieldDecodePipeline CreatePipeline(int workerThreads)
+    {
+        var analyzer = new SyncAnalyzer(
+            sampleRateHz: 1_000_000.0,
+            linePeriodUs: 100.0,
+            hsyncPulseUs: 10.0,
+            equalizingPulseUs: 5.0,
+            vsyncPulseUs: 20.0,
+            numPulses: 5);
+        var renderer = new TbcFieldRenderer(
+            spec,
+            converter,
+            trackPhaseIre0Offset: new TrackPhaseIre0OffsetOptions(
+                initialTrackPhase,
+                Offset0Hz: 20.0,
+                Offset1Hz: 0.0),
+            workerThreads: workerThreads);
+        return new TbcFieldDecodePipeline(
+            analyzer,
+            renderer,
+            converter,
+            "PAL",
+            TbcDropoutDetectionOptions.Disabled,
+            chromaFieldOptions: chromaOptions with { WorkerThreads = workerThreads },
+            decodeType: "vhs");
+    }
+
+    TbcFieldDecodePipeline serialPipeline = CreatePipeline(workerThreads: 1);
+    TbcFieldDecodePipeline pipeline = CreatePipeline(workerThreads: 4);
 
     double[] video = Enumerable.Repeat(0.0, 6_500).ToArray();
     PaintPulse(video, 10, 10, -40.0);
@@ -11291,6 +11350,8 @@ public void TbcFieldDecodePipelineAppliesAnalyzedVhsTrackPhaseToLuma(
     var secondSpan = firstSpan with { StartSample = video.Length };
     int stableLumaSample = (16 * spec.OutputLineLength) + 5;
 
+    TbcDecodedField serialFirst = serialPipeline.Decode(firstSpan, fieldNumber: 0);
+    TbcDecodedField serialSecond = serialPipeline.Decode(secondSpan, fieldNumber: 1);
     TbcDecodedField first = pipeline.Decode(firstSpan, fieldNumber: 0);
     AssertEqual<int?>(firstNextTrackPhase, pipeline.CaptureState().ChromaRotationIndex);
     AssertEqual(firstExpectedSample, first.Samples[stableLumaSample]);
@@ -11298,6 +11359,10 @@ public void TbcFieldDecodePipelineAppliesAnalyzedVhsTrackPhaseToLuma(
     TbcDecodedField second = pipeline.Decode(secondSpan, fieldNumber: 1);
     AssertEqual<int?>(secondNextTrackPhase, pipeline.CaptureState().ChromaRotationIndex);
     AssertEqual(secondExpectedSample, second.Samples[stableLumaSample]);
+    Assert.Equal<ushort>(serialFirst.Samples, first.Samples);
+    Assert.Equal<ushort>(serialFirst.ChromaSamples!, first.ChromaSamples!);
+    Assert.Equal<ushort>(serialSecond.Samples, second.Samples);
+    Assert.Equal<ushort>(serialSecond.ChromaSamples!, second.ChromaSamples!);
 }
 
 static double[] BuildOutputChromaCarrier(int lineLength, int lineCount, double fscMHz, double outputSampleRateHz)

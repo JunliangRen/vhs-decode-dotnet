@@ -22,10 +22,17 @@ public sealed class VhsRustUnwrapSimdTests
         double[] expected = PortedMath.UnwrapHilbertVhsRustApproximationScalar(input, 40_000_000.0);
 
         double[] actual = PortedMath.UnwrapHilbertVhsRustApproximation(input, 40_000_000.0);
+        double[] split = PortedMath.UnwrapHilbertVhsRustApproximation(
+            input.Select(value => value.Real).ToArray(),
+            input.Select(value => value.Imaginary).ToArray(),
+            40_000_000.0);
 
         Assert.Equal(
             expected.Select(BitConverter.DoubleToUInt64Bits),
             actual.Select(BitConverter.DoubleToUInt64Bits));
+        Assert.Equal(
+            expected.Select(BitConverter.DoubleToUInt64Bits),
+            split.Select(BitConverter.DoubleToUInt64Bits));
     }
 
     private static Complex[] BuildInput(int length)

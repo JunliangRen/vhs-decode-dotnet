@@ -126,6 +126,159 @@ public sealed class DecodeOutputSharingCompatibilityTests
         }
     }
 
+    [Fact(DisplayName = "Parallel VHS payload output writes luma and chroma concurrently")]
+    public void ParallelVhsPayloadOutputWritesLumaAndChromaConcurrently()
+    {
+        string tempDirectory = CreateTempDirectory();
+        try
+        {
+            string outputBase = Path.Combine(tempDirectory, "parallel-payload");
+            ParsedCommand command = new CommandLineParser().Parse(CliSpecs.Vhs, [
+                "--pal",
+                "--threads", "2",
+                "input.u8",
+                outputBase
+            ]);
+            using DecodeSession session = DecodeSessionFactory.Create(command);
+            Assert.True(session.StreamDecoder.WorkerThreads > 1);
+
+            using var writeBarrier = new Barrier(2);
+            using var luma = new CoordinatedWriteStream(writeBarrier);
+            using var chroma = new CoordinatedWriteStream(writeBarrier);
+            var engine = new TbcFieldSequenceDecodeEngine(
+                readField: (activeSession, _, begin, _, _) =>
+                    BuildField(activeSession, begin, detectedFirstField: true, 0x1234))
+            {
+                EnableParallelPayloadWritesForCustomReader = true,
+                CreateTbcOutput = path => path.EndsWith("_chroma.tbc", StringComparison.Ordinal)
+                    ? chroma
+                    : luma
+            };
+
+            TbcFieldSequenceDecodeResult result = engine.TryDecodeAndWrite(
+                session,
+                Stream.Null,
+                maxFields: 1);
+
+            Assert.True(result.Success, result.Message);
+            Assert.Equal(1, result.WrittenFieldCount);
+            Assert.True(luma.Coordinated);
+            Assert.True(chroma.Coordinated);
+            Assert.Equal(0x34, luma.ToArray()[0]);
+            Assert.Equal(0x12, luma.ToArray()[1]);
+            Assert.Equal(0x35, chroma.ToArray()[0]);
+            Assert.Equal(0x12, chroma.ToArray()[1]);
+        }
+        finally
+        {
+            Directory.Delete(tempDirectory, recursive: true);
+        }
+    }
+
+    [Fact(DisplayName = "VHS payload output overlaps the next field read without publishing metadata early")]
+    public async Task VhsPayloadOutputOverlapsTheNextFieldReadWithoutPublishingMetadataEarly()
+    {
+        CancellationToken cancellationToken = TestContext.Current.CancellationToken;
+        string tempDirectory = CreateTempDirectory();
+        using var writeStarted = new ManualResetEventSlim();
+        using var releaseWrite = new ManualResetEventSlim();
+        using var writeCompleted = new ManualResetEventSlim();
+        using var secondReadStarted = new ManualResetEventSlim();
+        using var releaseSecondRead = new ManualResetEventSlim();
+        Task<TbcFieldSequenceDecodeResult>? decodeTask = null;
+        try
+        {
+            string outputBase = Path.Combine(tempDirectory, "overlapped-payload");
+            ParsedCommand command = new CommandLineParser().Parse(CliSpecs.Vhs, [
+                "--pal",
+                "--threads", "2",
+                "input.u8",
+                outputBase
+            ]);
+            using DecodeSession session = DecodeSessionFactory.Create(command);
+            using var luma = new BlockingFirstWriteStream(
+                writeStarted,
+                releaseWrite,
+                writeCompleted,
+                cancellationToken);
+            using var chroma = new MemoryStream();
+            int readCount = 0;
+            TbcDecodedField? ReadField(DecodeSession activeSession, Stream _, long begin, int __, int ___)
+            {
+                if (Interlocked.Increment(ref readCount) == 1)
+                {
+                    return BuildField(activeSession, begin, detectedFirstField: true, 0x1234);
+                }
+
+                secondReadStarted.Set();
+                if (!releaseSecondRead.Wait(TimeSpan.FromSeconds(10), cancellationToken))
+                {
+                    throw new TimeoutException("The payload-overlap test did not release the second field read.");
+                }
+
+                return null;
+            }
+
+            var engine = new TbcFieldSequenceDecodeEngine(readField: ReadField)
+            {
+                EnableParallelPayloadWritesForCustomReader = true,
+                EnablePayloadWriteOverlapForCustomReader = true,
+                CreateTbcOutput = path => path.EndsWith("_chroma.tbc", StringComparison.Ordinal)
+                    ? chroma
+                    : luma
+            };
+            decodeTask = Task.Factory.StartNew(
+                () => engine.TryDecodeAndWrite(session, Stream.Null, maxFields: 2),
+                cancellationToken,
+                TaskCreationOptions.LongRunning,
+                TaskScheduler.Default);
+
+            Assert.True(writeStarted.Wait(TimeSpan.FromSeconds(10), cancellationToken));
+            Assert.True(secondReadStarted.Wait(TimeSpan.FromSeconds(10), cancellationToken));
+            Assert.False(writeCompleted.IsSet);
+            Assert.False(File.Exists(outputBase + ".tbc.json"));
+
+            releaseWrite.Set();
+            Assert.True(writeCompleted.Wait(TimeSpan.FromSeconds(10), cancellationToken));
+            Assert.True(SpinWait.SpinUntil(
+                () => File.Exists(outputBase + ".tbc.json"),
+                TimeSpan.FromSeconds(10)));
+            using (JsonDocument document = JsonDocument.Parse(File.ReadAllBytes(outputBase + ".tbc.json")))
+            {
+                Assert.Equal(1, document.RootElement.GetProperty("fields").GetArrayLength());
+            }
+
+            releaseSecondRead.Set();
+            TbcFieldSequenceDecodeResult result = await decodeTask.WaitAsync(
+                TimeSpan.FromSeconds(10),
+                cancellationToken);
+
+            Assert.True(result.Success, result.Message);
+            Assert.Equal(1, result.WrittenFieldCount);
+            Assert.Equal(
+                session.TbcFrameSpec.FieldSampleCount * sizeof(ushort),
+                luma.ToArray().Length);
+        }
+        finally
+        {
+            releaseWrite.Set();
+            releaseSecondRead.Set();
+            if (decodeTask is not null)
+            {
+                try
+                {
+                    await decodeTask.WaitAsync(TimeSpan.FromSeconds(10), CancellationToken.None);
+                }
+                catch
+                {
+                    // Preserve the assertion or timeout that ended the test.
+                }
+            }
+
+            Directory.Delete(tempDirectory, recursive: true);
+        }
+    }
+
     [Fact(DisplayName = "Raw decode output sharing matches Python deny-none behavior")]
     public void RawDecodeOutputSharingMatchesPythonDenyNoneBehavior()
     {
@@ -292,5 +445,75 @@ public sealed class DecodeOutputSharingCompatibilityTests
             "vhsdecode-dotnet-tests-" + Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(path);
         return path;
+    }
+
+    private sealed class CoordinatedWriteStream(Barrier barrier) : MemoryStream
+    {
+        private int _firstWriteEntered;
+
+        public bool Coordinated { get; private set; }
+
+        public override void Write(byte[] buffer, int offset, int count)
+        {
+            CoordinateFirstWrite();
+            base.Write(buffer, offset, count);
+        }
+
+        public override void Write(ReadOnlySpan<byte> buffer)
+        {
+            CoordinateFirstWrite();
+            base.Write(buffer);
+        }
+
+        private void CoordinateFirstWrite()
+        {
+            if (Interlocked.Exchange(ref _firstWriteEntered, 1) != 0)
+            {
+                return;
+            }
+
+            Coordinated = barrier.SignalAndWait(TimeSpan.FromSeconds(10));
+            if (!Coordinated)
+            {
+                throw new TimeoutException("The luma and chroma payload writes did not overlap.");
+            }
+        }
+    }
+
+    private sealed class BlockingFirstWriteStream(
+        ManualResetEventSlim started,
+        ManualResetEventSlim release,
+        ManualResetEventSlim completed,
+        CancellationToken cancellationToken) : MemoryStream
+    {
+        private int _firstWriteEntered;
+
+        public override void Write(byte[] buffer, int offset, int count)
+        {
+            BlockFirstWrite();
+            base.Write(buffer, offset, count);
+            completed.Set();
+        }
+
+        public override void Write(ReadOnlySpan<byte> buffer)
+        {
+            BlockFirstWrite();
+            base.Write(buffer);
+            completed.Set();
+        }
+
+        private void BlockFirstWrite()
+        {
+            if (Interlocked.Exchange(ref _firstWriteEntered, 1) != 0)
+            {
+                return;
+            }
+
+            started.Set();
+            if (!release.Wait(TimeSpan.FromSeconds(10), cancellationToken))
+            {
+                throw new TimeoutException("The payload-overlap test did not release the first payload write.");
+            }
+        }
     }
 }

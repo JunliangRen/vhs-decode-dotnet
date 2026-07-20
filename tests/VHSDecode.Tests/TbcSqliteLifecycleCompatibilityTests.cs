@@ -221,6 +221,7 @@ public sealed class TbcSqliteLifecycleCompatibilityTests
             var engine = new TbcFieldSequenceDecodeEngine(
                 readField: (_, _, _, _, fieldNumber) => fieldNumber == 0 ? field : null)
             {
+                EnablePayloadWriteOverlapForCustomReader = true,
                 CreateTbcOutput = path => path.EndsWith("_chroma.tbc", StringComparison.OrdinalIgnoreCase)
                     ? new ThrowingWriteStream("synthetic chroma TBC failure")
                     : video = new TrackingWriteStream()
@@ -611,7 +612,8 @@ public sealed class TbcSqliteLifecycleCompatibilityTests
         public override void Write(ReadOnlySpan<byte> buffer)
         {
             BytesWritten += buffer.Length;
-            base.Write(buffer);
+            byte[] copy = buffer.ToArray();
+            base.Write(copy, 0, copy.Length);
         }
     }
 

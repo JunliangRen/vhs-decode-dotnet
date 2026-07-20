@@ -35,10 +35,16 @@ public sealed class RfBlockCacheConcurrencyTests
     {
         var loader = new CountingSampleLoader();
         using var stream = new MemoryStream();
-        using var decoder = BuildDecoder(loader, workerThreads: 4);
+        using var decoder = BuildDecoder(loader, workerThreads: 4, optionalOutputs: true);
+        using var serialStream = new MemoryStream();
+        using var serialDecoder = BuildDecoder(
+            new CountingSampleLoader(),
+            workerThreads: 1,
+            optionalOutputs: true);
 
         RfDecodedSpan first = decoder.Read(stream, begin: 0, length: 24)!;
         RfDecodedSpan second = decoder.Read(stream, begin: 12, length: 24)!;
+        RfDecodedSpan serial = serialDecoder.Read(serialStream, begin: 0, length: 24)!;
 
         Assert.Equal(3, loader.ReadCount);
         Assert.NotSame(first.Input, second.Input);
@@ -46,6 +52,20 @@ public sealed class RfBlockCacheConcurrencyTests
         Assert.NotSame(first.DemodRaw, second.DemodRaw);
         Assert.Equal(first.Input[12..], second.Input[..12]);
         Assert.Equal(first.Video[12..], second.Video[..12]);
+        Assert.Equal(serial.Input, first.Input);
+        Assert.Equal(serial.Video, first.Video);
+        Assert.Equal(serial.DemodRaw, first.DemodRaw);
+        Assert.Equal(serial.Envelope, first.Envelope);
+        Assert.Equal(serial.VideoLowPass, first.VideoLowPass);
+        Assert.Equal(serial.RfHighPass, first.RfHighPass);
+        Assert.Equal(serial.Chroma, first.Chroma);
+        Assert.Equal(serial.Efm, first.Efm);
+        Assert.Equal(serial.VideoBurst, first.VideoBurst);
+        Assert.Equal(serial.VideoPilot, first.VideoPilot);
+        Assert.NotNull(first.Chroma);
+        Assert.NotNull(first.Efm);
+        Assert.NotNull(first.VideoBurst);
+        Assert.NotNull(first.VideoPilot);
         Assert.InRange(decoder.CachedDecodedBlockCount, 1, 16);
     }
 
@@ -101,6 +121,54 @@ public sealed class RfBlockCacheConcurrencyTests
             length: 36)!;
         Assert.NotSame(secondAlternateLease.Span.Input, concurrentLease.Span.Input);
         Assert.NotSame(secondAlternateLease.Span.Video, concurrentLease.Span.Video);
+    }
+
+    [Fact(DisplayName = "Compact VHS RF spans retain only field-consumed channels")]
+    public void CompactVhsRfSpansRetainOnlyFieldConsumedChannels()
+    {
+        using var stream = new MemoryStream();
+        using var fullDecoder = BuildDecoder(
+            new CountingSampleLoader(),
+            workerThreads: 4,
+            weakRfDiagnostics: true);
+        using var compactDecoder = BuildDecoder(
+            new CountingSampleLoader(),
+            workerThreads: 4,
+            weakRfDiagnostics: true,
+            retainRfDiagnosticChannels: false);
+
+        RfDecodedSpan full = fullDecoder.Read(stream, begin: 0, length: 24)!;
+        RfDecodedSpan compact = compactDecoder.Read(stream, begin: 0, length: 24)!;
+
+        Assert.Equal(full.Video, compact.Video);
+        Assert.Equal(full.Envelope, compact.Envelope);
+        Assert.Equal(full.VideoLowPass, compact.VideoLowPass);
+        Assert.Empty(compact.Input);
+        Assert.Empty(compact.DemodRaw);
+        Assert.Empty(compact.RfHighPass!);
+        Assert.Equal(24, compact.AvailableSampleCountOverride);
+    }
+
+    [Fact(DisplayName = "Compact VHS RF spans widen float32 chroma exactly once during assembly")]
+    public void CompactVhsRfSpansWidenFloat32ChromaDuringAssembly()
+    {
+        using var stream = new MemoryStream();
+        using var fullDecoder = BuildDecoder(
+            new CountingSampleLoader(),
+            workerThreads: 4,
+            float32Chroma: true);
+        using var compactDecoder = BuildDecoder(
+            new CountingSampleLoader(),
+            workerThreads: 4,
+            retainRfDiagnosticChannels: false,
+            float32Chroma: true);
+
+        RfDecodedSpan full = fullDecoder.Read(stream, begin: 0, length: 24)!;
+        RfDecodedSpan compact = compactDecoder.Read(stream, begin: 0, length: 24)!;
+
+        Assert.NotNull(full.Chroma);
+        Assert.NotNull(compact.Chroma);
+        Assert.Equal(full.Chroma, compact.Chroma);
     }
 
     [Fact(DisplayName = "RF decoded-block cache invalidation forces fresh parallel work")]
@@ -307,7 +375,10 @@ public sealed class RfBlockCacheConcurrencyTests
         int workerThreads,
         int prefetchBlocks = 0,
         bool weakRfDiagnostics = false,
-        Action<string, string>? diagnosticLogger = null)
+        bool optionalOutputs = false,
+        Action<string, string>? diagnosticLogger = null,
+        bool retainRfDiagnosticChannels = true,
+        bool float32Chroma = false)
     {
         const int blockLength = 16;
         Complex[] identity = RfDemodulator.IdentityFilter(blockLength);
@@ -327,11 +398,34 @@ public sealed class RfBlockCacheConcurrencyTests
             ones,
             ones,
             null);
+        if (optionalOutputs)
+        {
+            filters = filters with
+            {
+                LdEfm = identity,
+                LdEfmMagnitude = ones,
+                ChromaBurst = identity,
+                ChromaBurstMagnitude = ones,
+                LdVideoBurst = identity,
+                LdVideoBurstMagnitude = ones,
+                LdVideoPilot = identity,
+                LdVideoPilotMagnitude = ones
+            };
+        }
+
         if (weakRfDiagnostics)
         {
             filters = filters with
             {
                 VhsEnvelopeSos = [new SosSection(1.0, 0.0, 0.0, 1.0, 0.0, 0.0)]
+            };
+        }
+
+        if (float32Chroma)
+        {
+            filters = filters with
+            {
+                ChromaBurstSos = [new SosSection(1.0, 0.0, 0.0, 1.0, 0.0, 0.0)]
             };
         }
 
@@ -342,7 +436,8 @@ public sealed class RfBlockCacheConcurrencyTests
             filterOptions: weakRfDiagnostics
                 ? new DecodeFilterOptions(FmDemodulatorMode: RfFmDemodulatorMode.VhsRustApproximation)
                 : null,
-            diagnosticLogger: diagnosticLogger);
+            diagnosticLogger: diagnosticLogger,
+            retainRfDiagnosticChannels: retainRfDiagnosticChannels);
         return new RfBlockStreamDecoder(
             pipeline,
             blockLength,

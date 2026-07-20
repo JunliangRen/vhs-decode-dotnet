@@ -110,6 +110,97 @@ internal sealed record VhsChromaPhaseAnalysis(
     double HeterodyneCarrierHz,
     double HeterodynePhaseRadians);
 
+internal sealed class VhsChromaCarrierTableCache
+{
+    private readonly object _gate = new();
+    private HeterodyneEntry? _heterodyne;
+    private CarrierEntry? _carrier;
+
+    internal double[][] GetHeterodyne(
+        int sampleCount,
+        double fscMHz,
+        double colorUnderCarrierMHz,
+        double outputSampleRateMHz,
+        double phaseDriftRadians,
+        int workerThreads)
+    {
+        lock (_gate)
+        {
+            if (_heterodyne is { } cached
+                && cached.SampleCount == sampleCount
+                && cached.FscMHz == fscMHz
+                && cached.ColorUnderCarrierMHz == colorUnderCarrierMHz
+                && cached.OutputSampleRateMHz == outputSampleRateMHz
+                && cached.PhaseDriftRadians == phaseDriftRadians)
+            {
+                return cached.Table;
+            }
+
+            double[][] table = VhsChromaDecoder.BuildHeterodyneTable(
+                sampleCount,
+                fscMHz,
+                colorUnderCarrierMHz,
+                outputSampleRateMHz,
+                phaseDriftRadians,
+                workerThreads);
+            _heterodyne = new HeterodyneEntry(
+                sampleCount,
+                fscMHz,
+                colorUnderCarrierMHz,
+                outputSampleRateMHz,
+                phaseDriftRadians,
+                table);
+            return table;
+        }
+    }
+
+    internal (double[] Sin, double[] Cos) GetCarrierTables(
+        int sampleCount,
+        double carrierMHz,
+        double outputSampleRateMHz,
+        int workerThreads)
+    {
+        lock (_gate)
+        {
+            if (_carrier is { } cached
+                && cached.SampleCount == sampleCount
+                && cached.CarrierMHz == carrierMHz
+                && cached.OutputSampleRateMHz == outputSampleRateMHz)
+            {
+                return (cached.Sin, cached.Cos);
+            }
+
+            (double[] sin, double[] cos) = VhsChromaDecoder.BuildCarrierTables(
+                sampleCount,
+                carrierMHz,
+                outputSampleRateMHz,
+                workerThreads);
+            _carrier = new CarrierEntry(
+                sampleCount,
+                carrierMHz,
+                outputSampleRateMHz,
+                sin,
+                cos);
+            return (sin, cos);
+        }
+    }
+
+    private sealed record HeterodyneEntry(
+        int SampleCount,
+        double FscMHz,
+        double ColorUnderCarrierMHz,
+        double OutputSampleRateMHz,
+        double PhaseDriftRadians,
+        double[][] Table);
+
+    private sealed record CarrierEntry(
+        int SampleCount,
+        double CarrierMHz,
+        double OutputSampleRateMHz,
+        double[] Sin,
+        double[] Cos);
+}
+
 public delegate ChromaBurstDemodulationResult ChromaBurstProbe(
     int lineNumber,
     int phaseRotation,
@@ -164,8 +255,9 @@ public static class VhsChromaDecoder
         double? previousChromaAfcCarrierHz = null,
         double previousChromaAfcPhaseRadians = 0.0)
     {
+        double[] chromaField = chroma.ToArray();
         VhsChromaPhaseAnalysis analysis = AnalyzeFieldPhaseWithWorkspace(
-            chroma,
+            chromaField,
             options,
             lineLocations,
             inputLineLength,
@@ -176,7 +268,7 @@ public static class VhsChromaDecoder
             previousChromaAfcCarrierHz,
             previousChromaAfcPhaseRadians);
         return DecodeFieldWithPhaseCore(
-            chroma,
+            chromaField,
             options,
             analysis.Phase,
             isFirstField,
@@ -200,7 +292,7 @@ public static class VhsChromaDecoder
         double? previousChromaAfcCarrierHz = null,
         double previousChromaAfcPhaseRadians = 0.0)
         => AnalyzeFieldPhaseWithWorkspace(
-            chroma,
+            chroma.ToArray(),
             options,
             lineLocations,
             inputLineLength,
@@ -212,7 +304,7 @@ public static class VhsChromaDecoder
             previousChromaAfcPhaseRadians).Phase;
 
     internal static VhsChromaPhaseAnalysis AnalyzeFieldPhaseWithWorkspace(
-        ReadOnlySpan<double> chroma,
+        double[] chromaField,
         VhsChromaFieldOptions options,
         IReadOnlyList<double> lineLocations,
         int inputLineLength,
@@ -221,10 +313,11 @@ public static class VhsChromaDecoder
         Func<double[], double[]>? burstFilter = null,
         int lineOffset = 0,
         double? previousChromaAfcCarrierHz = null,
-        double previousChromaAfcPhaseRadians = 0.0)
+        double previousChromaAfcPhaseRadians = 0.0,
+        VhsChromaCarrierTableCache? carrierTableCache = null)
     {
         ArgumentNullException.ThrowIfNull(options);
-        double[] chromaField = chroma.ToArray();
+        ArgumentNullException.ThrowIfNull(chromaField);
         ValidateLineShape(chromaField.Length, options.OutputLineCount, options.OutputLineLength);
         ValidateBurstRange(options.BurstStart, options.BurstEnd, options.OutputLineLength);
 
@@ -245,18 +338,30 @@ public static class VhsChromaDecoder
             effectiveBurstFilter = values => IirFilter.ApplyForwardBackward(options.FinalFilter, values);
         }
 
-        double[][] heterodyne = BuildHeterodyneTable(
-            chromaField.Length,
-            options.FscMHz,
-            phaseCarrierHz / 1_000_000.0,
-            outputSampleRateMHz,
-            phaseDriftRadians,
-            options.WorkerThreads);
-        (double[] burstSin, double[] burstCos) = BuildCarrierTables(
-            chromaField.Length,
-            options.FscMHz,
-            outputSampleRateMHz,
-            options.WorkerThreads);
+        double[][] heterodyne = carrierTableCache?.GetHeterodyne(
+                chromaField.Length,
+                options.FscMHz,
+                phaseCarrierHz / 1_000_000.0,
+                outputSampleRateMHz,
+                phaseDriftRadians,
+                options.WorkerThreads)
+            ?? BuildHeterodyneTable(
+                chromaField.Length,
+                options.FscMHz,
+                phaseCarrierHz / 1_000_000.0,
+                outputSampleRateMHz,
+                phaseDriftRadians,
+                options.WorkerThreads);
+        (double[] burstSin, double[] burstCos) = carrierTableCache?.GetCarrierTables(
+                chromaField.Length,
+                options.FscMHz,
+                outputSampleRateMHz,
+                options.WorkerThreads)
+            ?? BuildCarrierTables(
+                chromaField.Length,
+                options.FscMHz,
+                outputSampleRateMHz,
+                options.WorkerThreads);
         ChromaPhaseSequenceResult result = GetPhaseRotationSequence(
             options.ChromaRotation,
             chromaRotationIndex,
@@ -347,21 +452,20 @@ public static class VhsChromaDecoder
     {
         ArgumentNullException.ThrowIfNull(options);
         ArgumentNullException.ThrowIfNull(phase);
-        double[] chromaField = chroma.ToArray();
-        ValidateLineShape(chromaField.Length, options.OutputLineCount, options.OutputLineLength);
+        ValidateLineShape(chroma.Length, options.OutputLineCount, options.OutputLineLength);
         ValidateBurstRange(options.BurstStart, options.BurstEnd, options.OutputLineLength);
 
         if (phase.BurstDetectedLine == -1)
         {
             return new VhsChromaFieldResult(
-                ChromaToU16(new double[chromaField.Length]),
+                ChromaToU16(new double[chroma.Length]),
                 phase.BurstDetectedLine,
                 null,
                 phase.NextChromaRotationIndex,
                 phase);
         }
 
-        chromaField = ApplyChromaPreFilter(chromaField, options, previousChromaAfcCarrierHz);
+        double[] chromaField = ApplyChromaPreFilter(chroma, options, previousChromaAfcCarrierHz);
         double outputSampleRateMHz = options.FscMHz * 4.0;
         double[] carrierProbe = chromaField;
         if (options.ChromaAfcTrackCarrier && options.ChromaAfcMeasurementFilters is { } measurementFilters)
@@ -1116,6 +1220,24 @@ public static class VhsChromaDecoder
         return chroma;
     }
 
+    internal static float[] ShiftChromaAndRemoveDcFloat32InPlace(float[] chroma, int move)
+    {
+        ArgumentNullException.ThrowIfNull(chroma);
+        if (chroma.Length == 0)
+        {
+            return chroma;
+        }
+
+        FrequencyDomainFilter.RollInPlace(chroma, move);
+        float mean = MeanFloat32FastMath(chroma);
+        for (int i = 0; i < chroma.Length; i++)
+        {
+            chroma[i] = (float)(chroma[i] - mean);
+        }
+
+        return chroma;
+    }
+
     public static double[] ApplyNtscComb(
         ReadOnlySpan<double> chroma,
         int lineLength,
@@ -1253,6 +1375,48 @@ public static class VhsChromaDecoder
                     {
                         int accumulator = (group * vectorWidth) + lane;
                         accumulators[accumulator] += (float)values[index];
+                    }
+                }
+            }
+        }
+
+        Span<float> lanes = stackalloc float[vectorWidth];
+        for (int lane = 0; lane < vectorWidth; lane++)
+        {
+            float left = accumulators[lane] + accumulators[vectorWidth + lane];
+            float right = accumulators[(2 * vectorWidth) + lane]
+                + accumulators[(3 * vectorWidth) + lane];
+            lanes[lane] = left + right;
+        }
+
+        for (int count = vectorWidth; count > 1; count /= 2)
+        {
+            for (int lane = 0; lane < count / 2; lane++)
+            {
+                lanes[lane] += lanes[lane + (count / 2)];
+            }
+        }
+
+        return lanes[0] / values.Length;
+    }
+
+    private static float MeanFloat32FastMath(ReadOnlySpan<float> values)
+    {
+        const int vectorWidth = 8;
+        const int interleave = 4;
+        const int stride = vectorWidth * interleave;
+        Span<float> accumulators = stackalloc float[stride];
+        for (int block = 0; block < values.Length; block += stride)
+        {
+            for (int group = 0; group < interleave; group++)
+            {
+                for (int lane = 0; lane < vectorWidth; lane++)
+                {
+                    int index = block + (group * vectorWidth) + lane;
+                    if (index < values.Length)
+                    {
+                        int accumulator = (group * vectorWidth) + lane;
+                        accumulators[accumulator] += values[index];
                     }
                 }
             }

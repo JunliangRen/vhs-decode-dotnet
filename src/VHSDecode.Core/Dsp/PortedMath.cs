@@ -1,4 +1,5 @@
 using System.Numerics;
+using System.Runtime.CompilerServices;
 using System.Runtime.Intrinsics;
 using System.Runtime.Intrinsics.X86;
 
@@ -11,6 +12,7 @@ public static class PortedMath
     private static readonly Vector128<float> VhsRustSignMask = Vector128.Create(-0.0f);
     private static readonly Vector128<float> VhsRustMinPositiveNormal = Vector128.Create(1.17549435E-38f);
     private static readonly Vector128<float> VhsRustMaximumFinite = Vector128.Create(float.MaxValue);
+    private static readonly Vector128<float> VhsRustTau = Vector128.Create(MathF.Tau);
 
     public static double[] ComplexAngle(ReadOnlySpan<Complex> input)
     {
@@ -69,6 +71,84 @@ public static class PortedMath
         double frequencyHz)
         => UnwrapHilbertVhsRustApproximationCore(input, frequencyHz, allowSimd: false);
 
+    internal static unsafe double[] UnwrapHilbertVhsRustApproximation(
+        ReadOnlySpan<double> real,
+        ReadOnlySpan<double> imaginary,
+        double frequencyHz)
+    {
+        if (real.IsEmpty)
+        {
+            throw new ArgumentException("Input must not be empty.", nameof(real));
+        }
+
+        if (imaginary.Length != real.Length)
+        {
+            throw new ArgumentException("Real and imaginary inputs must have matching lengths.", nameof(imaginary));
+        }
+
+        var output = new double[real.Length];
+        float frequency = (float)frequencyHz;
+        float previous = VhsRustAtan2Approximation((float)imaginary[0], (float)real[0]);
+        int i = 1;
+        if (Avx.IsSupported && Sse.IsSupported)
+        {
+            fixed (double* realPointer = real)
+            fixed (double* imaginaryPointer = imaginary)
+            fixed (double* outputPointer = output)
+            {
+                float* angles = stackalloc float[4];
+                int vectorizedEnd = real.Length - ((real.Length - i) % 4);
+                for (; i < vectorizedEnd; i += 4)
+                {
+                    if (TryVhsRustAtan2Approximation4(
+                        realPointer + i,
+                        imaginaryPointer + i,
+                        out Vector128<float> currentAngles))
+                    {
+                        if (Sse41.IsSupported)
+                        {
+                            previous = StoreVhsRustFrequencyDifferences4(
+                                currentAngles,
+                                previous,
+                                frequency,
+                                outputPointer + i);
+                        }
+                        else
+                        {
+                            Sse.Store(angles, currentAngles);
+                            for (int lane = 0; lane < 4; lane++)
+                            {
+                                float current = angles[lane];
+                                outputPointer[i + lane] = VhsRustFrequencyDifference(current, previous, frequency);
+                                previous = current;
+                            }
+                        }
+                    }
+                    else
+                    {
+                        for (int lane = 0; lane < 4; lane++)
+                        {
+                            float current = VhsRustAtan2Approximation(
+                                (float)imaginaryPointer[i + lane],
+                                (float)realPointer[i + lane]);
+                            outputPointer[i + lane] = VhsRustFrequencyDifference(current, previous, frequency);
+                            previous = current;
+                        }
+                    }
+                }
+            }
+        }
+
+        for (; i < real.Length; i++)
+        {
+            float current = VhsRustAtan2Approximation((float)imaginary[i], (float)real[i]);
+            output[i] = VhsRustFrequencyDifference(current, previous, frequency);
+            previous = current;
+        }
+
+        return output;
+    }
+
     private static unsafe double[] UnwrapHilbertVhsRustApproximationCore(
         ReadOnlySpan<Complex> input,
         double frequencyHz,
@@ -97,12 +177,23 @@ public static class PortedMath
                 {
                     if (TryVhsRustAtan2Approximation4(inputValues + (i * 2), out Vector128<float> currentAngles))
                     {
-                        Sse.Store(angles, currentAngles);
-                        for (int lane = 0; lane < 4; lane++)
+                        if (Sse41.IsSupported)
                         {
-                            float current = angles[lane];
-                            outputPointer[i + lane] = VhsRustFrequencyDifference(current, previous, frequency);
-                            previous = current;
+                            previous = StoreVhsRustFrequencyDifferences4(
+                                currentAngles,
+                                previous,
+                                frequency,
+                                outputPointer + i);
+                        }
+                        else
+                        {
+                            Sse.Store(angles, currentAngles);
+                            for (int lane = 0; lane < 4; lane++)
+                            {
+                                float current = angles[lane];
+                                outputPointer[i + lane] = VhsRustFrequencyDifference(current, previous, frequency);
+                                previous = current;
+                            }
                         }
                     }
                     else
@@ -294,6 +385,25 @@ public static class PortedMath
         return (float)((difference * frequency) / MathF.Tau);
     }
 
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private static unsafe float StoreVhsRustFrequencyDifferences4(
+        Vector128<float> current,
+        float previous,
+        float frequency,
+        double* output)
+    {
+        Vector128<float> previousAngles = Sse2.ShiftLeftLogical128BitLane(current.AsByte(), 4).AsSingle();
+        previousAngles = Sse.MoveScalar(previousAngles, Vector128.CreateScalar(previous));
+        Vector128<float> difference = Sse.Subtract(current, previousAngles);
+        Vector128<float> periods = Sse41.Floor(Sse.Divide(difference, VhsRustTau));
+        difference = Sse.Subtract(difference, Sse.Multiply(periods, VhsRustTau));
+        Vector128<float> frequencies = Sse.Divide(
+            Sse.Multiply(difference, Vector128.Create(frequency)),
+            VhsRustTau);
+        Avx.Store(output, Avx.ConvertToVector256Double(frequencies));
+        return current.GetElement(3);
+    }
+
     private static unsafe bool TryVhsRustAtan2Approximation4(
         double* input,
         out Vector128<float> result)
@@ -302,6 +412,25 @@ public static class PortedMath
         Vector128<float> second = Avx.ConvertToVector128Single(Avx.LoadVector256(input + 4));
         Vector128<float> x = Sse.Shuffle(first, second, 0x88);
         Vector128<float> y = Sse.Shuffle(first, second, 0xDD);
+        return TryVhsRustAtan2Approximation4(x, y, out result);
+    }
+
+    private static unsafe bool TryVhsRustAtan2Approximation4(
+        double* real,
+        double* imaginary,
+        out Vector128<float> result)
+    {
+        Vector128<float> x = Avx.ConvertToVector128Single(Avx.LoadVector256(real));
+        Vector128<float> y = Avx.ConvertToVector128Single(Avx.LoadVector256(imaginary));
+        return TryVhsRustAtan2Approximation4(x, y, out result);
+    }
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private static bool TryVhsRustAtan2Approximation4(
+        Vector128<float> x,
+        Vector128<float> y,
+        out Vector128<float> result)
+    {
         Vector128<float> absoluteX = Sse.And(x, VhsRustAbsoluteValueMask);
         Vector128<float> absoluteY = Sse.And(y, VhsRustAbsoluteValueMask);
         Vector128<float> finite = Sse.And(

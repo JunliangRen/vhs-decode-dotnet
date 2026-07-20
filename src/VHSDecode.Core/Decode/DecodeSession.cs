@@ -259,7 +259,8 @@ public static class DecodeSessionFactory
             filterOptions,
             BuildCvbsDecodeOptions(command, videoOutput),
             BuildRfInputProcessor(command),
-            WriteDiagnostic);
+            WriteDiagnostic,
+            retainRfDiagnosticChannels: command.Spec.Name != "vhs");
         var streamDecoder = new RfBlockStreamDecoder(
             pipeline,
             blockLength,

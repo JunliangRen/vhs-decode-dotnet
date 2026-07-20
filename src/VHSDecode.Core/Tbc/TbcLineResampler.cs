@@ -1,7 +1,10 @@
+using System.Buffers;
 using System.Buffers.Binary;
 using System.Collections.Concurrent;
 using System.IO.Compression;
 using System.Reflection;
+using System.Runtime.Intrinsics;
+using System.Runtime.Intrinsics.X86;
 using System.Text;
 using VHSDecode.Core.Dsp;
 
@@ -24,6 +27,40 @@ public sealed class TbcLineResampler
     private static readonly Lazy<float[]> SincLookup = new(LoadSincLookup);
     private readonly double? _nominalInputLineLength;
     private readonly int _workerThreads;
+
+    private readonly struct ResamplingPreparation : IDisposable
+    {
+        private readonly bool _pooled;
+
+        public ResamplingPreparation(
+            double[] sourcePositions,
+            double[] levelAdjusts,
+            int prefixSamples,
+            bool pooled)
+        {
+            SourcePositions = sourcePositions;
+            LevelAdjusts = levelAdjusts;
+            PrefixSamples = prefixSamples;
+            _pooled = pooled;
+        }
+
+        public double[] SourcePositions { get; }
+
+        public double[] LevelAdjusts { get; }
+
+        public int PrefixSamples { get; }
+
+        public void Dispose()
+        {
+            if (!_pooled)
+            {
+                return;
+            }
+
+            ArrayPool<double>.Shared.Return(SourcePositions);
+            ArrayPool<double>.Shared.Return(LevelAdjusts);
+        }
+    }
 
     public TbcLineResampler(
         int outputLineLength,
@@ -168,8 +205,11 @@ public sealed class TbcLineResampler
         int firstLine,
         Span<double> destination)
     {
-        (double[] sourcePositions, double[] levelAdjusts, int prefixSamples) =
+        using ResamplingPreparation preparation =
             PrepareResampling(interpolator, firstLine, destination.Length);
+        double[] sourcePositions = preparation.SourcePositions;
+        double[] levelAdjusts = preparation.LevelAdjusts;
+        int prefixSamples = preparation.PrefixSamples;
         float[] sincLookup = SincLookup.Value;
         fixed (double* sourcePointer = source)
         fixed (float* sincLookupPointer = sincLookup)
@@ -192,8 +232,11 @@ public sealed class TbcLineResampler
         int firstLine,
         double[] destination)
     {
-        (double[] sourcePositions, double[] levelAdjusts, int prefixSamples) =
+        using ResamplingPreparation preparation =
             PrepareResampling(interpolator, firstLine, destination.Length);
+        double[] sourcePositions = preparation.SourcePositions;
+        double[] levelAdjusts = preparation.LevelAdjusts;
+        int prefixSamples = preparation.PrefixSamples;
         float[] sincLookup = SincLookup.Value;
         fixed (double* sourcePointer = source)
         fixed (float* sincLookupPointer = sincLookup)
@@ -236,58 +279,76 @@ public sealed class TbcLineResampler
         }
     }
 
-    private (double[] SourcePositions, double[] LevelAdjusts, int PrefixSamples) PrepareResampling(
+    private ResamplingPreparation PrepareResampling(
         ILineLocationInterpolator interpolator,
         int firstLine,
         int destinationLength)
     {
         int prefixSamples = checked(firstLine * OutputLineLength);
         int scaledSampleCount = checked(prefixSamples + destinationLength);
-        var sourcePositions = new double[destinationLength];
-        double[] levelAdjusts;
         if (interpolator is LinearLineLocationInterpolator linear
             && scaledSampleCount % OutputLineLength == 0)
         {
-            void BuildSourcePositions()
+            double[] sourcePositions = ArrayPool<double>.Shared.Rent(destinationLength);
+            double[] levelAdjusts = ArrayPool<double>.Shared.Rent(scaledSampleCount);
+            try
             {
-                for (int i = 0; i < destinationLength; i++)
+                void BuildSourcePositions()
                 {
-                    sourcePositions[i] = interpolator.EvaluateOutputPosition(prefixSamples + i, OutputLineLength);
+                    for (int i = 0; i < destinationLength; i++)
+                    {
+                        sourcePositions[i] = interpolator.EvaluateOutputPosition(
+                            prefixSamples + i,
+                            OutputLineLength);
+                    }
                 }
-            }
 
-            if (_workerThreads > 1 && destinationLength >= ParallelSampleThreshold)
-            {
-                double[]? parallelLevelAdjusts = null;
-                Parallel.Invoke(
-                    new ParallelOptions { MaxDegreeOfParallelism = 2 },
-                    BuildSourcePositions,
-                    () => parallelLevelAdjusts = BuildLinearLevelAdjusts(linear, scaledSampleCount));
-                levelAdjusts = parallelLevelAdjusts!;
+                if (_workerThreads > 1 && destinationLength >= ParallelSampleThreshold)
+                {
+                    Parallel.Invoke(
+                        new ParallelOptions { MaxDegreeOfParallelism = 2 },
+                        BuildSourcePositions,
+                        () => BuildLinearLevelAdjusts(linear, scaledSampleCount, levelAdjusts));
+                }
+                else
+                {
+                    BuildSourcePositions();
+                    BuildLinearLevelAdjusts(linear, scaledSampleCount, levelAdjusts);
+                }
+
+                return new ResamplingPreparation(
+                    sourcePositions,
+                    levelAdjusts,
+                    prefixSamples,
+                    pooled: true);
             }
-            else
+            catch
             {
-                BuildSourcePositions();
-                levelAdjusts = BuildLinearLevelAdjusts(linear, scaledSampleCount);
+                ArrayPool<double>.Shared.Return(sourcePositions);
+                ArrayPool<double>.Shared.Return(levelAdjusts);
+                throw;
             }
         }
-        else
+
+        var allocatedSourcePositions = new double[destinationLength];
+        var wowFactors = new double[scaledSampleCount];
+        for (int i = 0; i < scaledSampleCount; i++)
         {
-            var wowFactors = new double[scaledSampleCount];
-            for (int i = 0; i < scaledSampleCount; i++)
+            double factor = interpolator.EvaluateOutputDerivative(i, OutputLineLength);
+            wowFactors[i] = factor;
+            if (i >= prefixSamples)
             {
-                double factor = interpolator.EvaluateOutputDerivative(i, OutputLineLength);
-                wowFactors[i] = factor;
-                if (i >= prefixSamples)
-                {
-                    sourcePositions[i - prefixSamples] = interpolator.EvaluateOutputPosition(i, OutputLineLength);
-                }
+                allocatedSourcePositions[i - prefixSamples] = interpolator.EvaluateOutputPosition(
+                    i,
+                    OutputLineLength);
             }
-
-            levelAdjusts = BuildLevelAdjusts(wowFactors);
         }
 
-        return (sourcePositions, levelAdjusts, prefixSamples);
+        return new ResamplingPreparation(
+            allocatedSourcePositions,
+            BuildLevelAdjusts(wowFactors),
+            prefixSamples,
+            pooled: false);
     }
 
     private double[] BuildLevelAdjusts(double[] wowFactors)
@@ -302,10 +363,16 @@ public sealed class TbcLineResampler
         return levelAdjusts;
     }
 
-    private double[] BuildLinearLevelAdjusts(
+    private void BuildLinearLevelAdjusts(
         ILineLocationInterpolator interpolator,
-        int sampleCount)
+        int sampleCount,
+        double[] levelAdjusts)
     {
+        if (levelAdjusts.Length < sampleCount)
+        {
+            throw new ArgumentException("Level-adjust buffer is shorter than the sample count.", nameof(levelAdjusts));
+        }
+
         int lineCount = sampleCount / OutputLineLength;
         var lineFactors = new double[lineCount];
         for (int line = 0; line < lineCount; line++)
@@ -316,7 +383,6 @@ public sealed class TbcLineResampler
         }
 
         double[] adjustedLineFactors = ReplaceWowFactorOutliers(lineFactors);
-        var levelAdjusts = new double[sampleCount];
         for (int line = 0; line < lineCount; line++)
         {
             Array.Fill(
@@ -326,8 +392,7 @@ public sealed class TbcLineResampler
                 OutputLineLength);
         }
 
-        SmoothLevelAdjusts(levelAdjusts);
-        return levelAdjusts;
+        SmoothLevelAdjusts(levelAdjusts.AsSpan(0, sampleCount));
     }
 
     private static double[] ReplaceWowFactorOutliers(double[] wowFactors)
@@ -350,7 +415,7 @@ public sealed class TbcLineResampler
         return levelAdjusts;
     }
 
-    private void SmoothLevelAdjusts(double[] levelAdjusts)
+    private void SmoothLevelAdjusts(Span<double> levelAdjusts)
     {
         if (WowLevelAdjustSmoothing > 0.0)
         {
@@ -411,6 +476,15 @@ public sealed class TbcLineResampler
         if (sourceLength >= SincTapCount
             && (uint)sampleStart <= (uint)(sourceLength - SincTapCount))
         {
+            if (Avx.IsSupported && Fma.IsSupported)
+            {
+                return SampleSincInteriorAvxFma(
+                    source + sampleStart,
+                    weights + weightStart,
+                    weights + weightEnd,
+                    alpha);
+            }
+
             for (int tap = 0; tap < SincTapCount; tap++)
             {
                 float startWeight = weights[weightStart + tap];
@@ -433,6 +507,42 @@ public sealed class TbcLineResampler
                 startWeight);
             int sampleIndex = Math.Clamp(sampleStart + tap, 0, sourceLength - 1);
             result += (float)source[sampleIndex] * weight;
+        }
+
+        return result;
+    }
+
+    private static unsafe double SampleSincInteriorAvxFma(
+        double* source,
+        float* startWeights,
+        float* endWeights,
+        float alpha)
+    {
+        Vector256<float> alphaVector = Vector256.Create(alpha);
+        Vector256<float> start0 = Avx.LoadVector256(startWeights);
+        Vector256<float> start1 = Avx.LoadVector256(startWeights + 8);
+        Vector256<float> weight0 = Fma.MultiplyAdd(
+            alphaVector,
+            Avx.Subtract(Avx.LoadVector256(endWeights), start0),
+            start0);
+        Vector256<float> weight1 = Fma.MultiplyAdd(
+            alphaVector,
+            Avx.Subtract(Avx.LoadVector256(endWeights + 8), start1),
+            start1);
+        Vector256<float> source0 = Vector256.Create(
+            Avx.ConvertToVector128Single(Avx.LoadVector256(source)),
+            Avx.ConvertToVector128Single(Avx.LoadVector256(source + 4)));
+        Vector256<float> source1 = Vector256.Create(
+            Avx.ConvertToVector128Single(Avx.LoadVector256(source + 8)),
+            Avx.ConvertToVector128Single(Avx.LoadVector256(source + 12)));
+        float* products = stackalloc float[SincTapCount];
+        Avx.Store(products, Avx.Multiply(source0, weight0));
+        Avx.Store(products + 8, Avx.Multiply(source1, weight1));
+
+        double result = 0.0;
+        for (int tap = 0; tap < SincTapCount; tap++)
+        {
+            result += products[tap];
         }
 
         return result;

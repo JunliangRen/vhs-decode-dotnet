@@ -1,4 +1,6 @@
+using System.Buffers;
 using System.Buffers.Binary;
+using System.Runtime.InteropServices;
 
 namespace VHSDecode.Core.Tbc;
 
@@ -63,8 +65,23 @@ public static class TbcOutputWriter
 
     public static void WriteSamples(Stream destination, ReadOnlySpan<ushort> samples)
     {
-        byte[] bytes = ToLittleEndianBytes(samples);
-        destination.Write(bytes, 0, bytes.Length);
+        if (BitConverter.IsLittleEndian)
+        {
+            destination.Write(MemoryMarshal.AsBytes(samples));
+            return;
+        }
+
+        int byteCount = checked(samples.Length * sizeof(ushort));
+        byte[] bytes = ArrayPool<byte>.Shared.Rent(byteCount);
+        try
+        {
+            WriteSamples(bytes.AsSpan(0, byteCount), samples);
+            destination.Write(bytes, 0, byteCount);
+        }
+        finally
+        {
+            ArrayPool<byte>.Shared.Return(bytes);
+        }
     }
 
     private static void WriteSamples(Span<byte> destination, ReadOnlySpan<ushort> samples)

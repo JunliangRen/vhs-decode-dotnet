@@ -1175,6 +1175,30 @@ possible capture has already been proven byte-for-byte identical.
   7.65/26.58/52.51 s with 1.76/1.88/1.67 GiB peak working sets and
   1.42/1.30/1.28 GiB second-half medians; all 320 requested frames were written,
   showing a bounded working set rather than decode-length growth
+- worker-enabled VHS field decode overlaps luma TBC rendering with chroma field
+  decode, permits only one in-flight chroma task, then commits chroma state in
+  field order before advancing. A 160-frame full-path A/B moved from 20.13 s to
+  18.55 s (7.8%); TBC, chroma, and JSON SHA-256 remained byte-identical. The
+  xUnit v3 field test also compares every serial and four-worker luma/chroma
+  sample across two consecutive stateful fields
+- little-endian TBC/chroma output now writes directly from `ushort` spans,
+  eliminating about 455 MB of full-field temporary byte-array payload over a
+  160-frame run; the big-endian fallback rents and returns one bounded buffer.
+  The xUnit v3 allocation probe writes 400,000 samples with less than 1 KiB of
+  thread-local allocation after warm-up. The fresh 160-frame outputs retained
+  luma SHA-256
+  `8AF14AEB2C40D65963DFBBC33947557CFB29154AD0011FF90DCD4C75EE12D6E5`
+  and chroma SHA-256
+  `3C53B4F22CB0E14BA3B86B4B39770E18A17C6E8BEE6A56E843A73AC27ECA3102`;
+  the measured wall time remained within run-to-run noise
+- a zero-copy `--length 320` longevity run reached fixture EOF after 204 frames
+  in 24.26 s (8.54 FPS post-setup). Private-memory quarter medians were
+  1.495/1.563/1.601/1.543 GiB with a 1.73 GiB peak, showing no monotonic
+  late-run growth. Luma and chroma each contained 409 complete fields with no
+  trailing bytes, and JSON contained the same 409 fields. SHA-256 values were
+  luma `FCD83E68BDF6EFB3C2583349519B24E750155DE6B4C256D0B5F9CE4E76BE94E9`,
+  chroma `B7CE0EF8768B7731FFAD9E7B8FE4162A24D0CC02620FC32F639A7ED078BF065B`,
+  and JSON `EAACE43594DEC574360B664D932E23F10E1B428BA4268A91BA6A1858BFEDD4AD`
 - the verified 40-frame output hashes are TBC
   `2F540BF1F9A132281A8D26C0EEADEBC7617A366E296EEB5FF69FF9346836CD05`, JSON
   `FCDCDEAA9D3BAD8949AAEFACBFDE2E8688A13568FF71836EBB37E758780CB67F`, and
@@ -1203,14 +1227,233 @@ possible capture has already been proven byte-for-byte identical.
   benchmark improved median throughput by about 6.5%; the forward median moved
   from 204.7 us to 195.9 us (4.3%) with the exact same hash. A 384-block PAL VHS
   composite was neutral at 841.96/841.19 ms, so no whole-block gain is claimed
-- the 16-tap TBC sinc kernel now pins its source and lookup table for pointer
-  indexing while preserving clamp, FMA, float-conversion, and accumulation order;
-  an isolated PAL-sized field median improved from 3.929 ms to 3.727 ms (5.1%),
-  then an interior-window path removed redundant per-tap clamps while retaining
-  the clamped path for edges and inputs shorter than 16 samples, improving its
-  serial probe by another 1.6%. All three 40-frame hashes remained exact; a fresh
-  160-frame run also matched TBC, JSON, and chroma hashes with 0.78/1.18/1.20/1.41
-  GiB quarter private-memory medians and a 1.68 GiB peak
+- float32 SOS forward/backward filtering now rents its padded working array,
+  processes only the exact requested span, and returns the rental synchronously.
+  Matched 40-frame GC traces reduced sampled managed allocation from 16.772 to
+  16.178 GiB and `Single[]` allocation from 651.68 to 47.25 MiB. Five interleaved
+  full-path A/B runs were wall-time neutral at 5.541/5.537 s, while median CPU
+  time moved from 20.000 to 19.438 s. TBC, chroma, and JSON hashes matched
+  exactly. A fixture-limited 204-frame run completed in 23.39 s with
+  1.147/0.886/0.888/0.917 GiB private-memory quarter medians and a 1.755 GiB
+  peak; all 409-field outputs matched the previously recorded SHA-256 values
+- default linear TBC resampling now rents its exact-used source-position and
+  level-adjust arrays, then returns them only after synchronous serial or
+  parallel resampling completes. Matched 40-frame GC traces reduced sampled
+  managed allocation from 16.178 to 14.892 GiB and `Double[]` allocation from
+  13.601 to 12.316 GiB. Five interleaved full-path A/B runs reduced median wall
+  time from 5.684 to 5.571 s (2.0%) and CPU time from 19.031 to 18.891 s; TBC,
+  chroma, and JSON hashes matched exactly. A repeated fixture-limited 204-frame
+  run had flat 1.025/1.047/1.007/1.042 GiB private-memory quarter medians and a
+  1.869 GiB peak, while all 409-field hashes remained exact
+- VHS diff-demod spike repair now copies the analytic signal into the exact
+  active span of a full-length `Complex[]` retained by the existing
+  decoder-owned real-FFT workspace pool, differences it in place, and never
+  exposes that scratch array. Returned analytic data retains independent
+  ownership, while paths without a VHS workspace retain the allocating
+  fallback. A standard 32,768-sample workspace grows by 512 KiB; the existing
+  16-slot cap therefore limits additional retained memory to 8 MiB. The xUnit
+  v3 warm-block probe reduced thread-local allocation from 2,892,520 to
+  2,360,208 bytes and enforces a 2,600,000-byte ceiling. Matched 10-frame GC
+  traces reduced total sampled allocation from 4.134 to 3.861 GiB and
+  `Complex[]` allocation from 622.63 to 340.02 MiB. Across two rounds of five
+  interleaved 40-frame pairs, combined wall-time medians were approximately
+  5.54/5.57 s (baseline/current), so no speedup is claimed. Two reversed
+  204-frame pairs were likewise neutral: current/baseline completed in
+  23.38/23.28 s, then baseline/current in 23.75/23.64 s. Current private-memory
+  quarter medians were 1.22/1.29/1.50/1.05 and 1.11/1.38/1.10/1.32 GiB, with
+  1.87 and 1.96 GiB peaks and no monotonic rise. Both variants emitted 409
+  sequential fields with zero remainder. Exact current/baseline SHA-256 values
+  were `FCD83E68BDF6EFB3C2583349519B24E750155DE6B4C256D0B5F9CE4E76BE94E9`
+  for luma TBC, `B7CE0EF8768B7731FFAD9E7B8FE4162A24D0CC02620FC32F639A7ED078BF065B`
+  for chroma TBC, and
+  `EAACE43594DEC574360B664D932E23F10E1B428BA4268A91BA6A1858BFEDD4AD`
+  for JSON
+- the 16-tap TBC sinc kernel pins its source and lookup table for pointer
+  indexing while preserving clamp, FMA, float-conversion, and accumulation
+  order. The first PAL-sized field pass improved from 3.929 to 3.727 ms (5.1%),
+  and its interior-window path added 1.6%. The current AVX/FMA path converts and
+  multiplies all 16 independent interior taps in vector lanes, stores the float
+  products, then adds them to the double result in original tap order. Edges,
+  sources shorter than 16 samples, and hardware without AVX/FMA retain the
+  scalar implementation. Five interleaved PAL-field A/B runs reduced the
+  serial median from 21.588 to 18.741 ms (13.2%) and the 20-worker median from
+  5.579 to 5.330 ms (4.5%); both produced
+  `22872784886D616621B77044BBF7B3E5DB56A88313C741D779A6187B3F9AF4CB`.
+  Five interleaved 40-frame full-path pairs reduced median wall time from 5.511
+  to 5.478 s (0.6%) and CPU time from 19.297 to 17.922 s (7.1%). TBC, chroma,
+  and JSON hashes remained `E42AB3A9F480610A032B0D4813BF4BAD1BF7A5CBEC00CF56EEEC359C2DD9D7CB`,
+  `7269E13798026A9FBDB199594A1AB46EE4BDD0EE800A8387CB3807A2EB8946AB`,
+  and `06AB7E6C28D6DE2C70C7902D6FB296BE664153CFA73C254F2F305C5729FBFC6E`.
+  In two reversed 204-frame pairs, baseline/current wall time was 23.79/23.53 s
+  and current/baseline was 23.40/23.70 s. Current private-memory quarter medians
+  were 1.015/0.964/1.319/1.169 and 1.144/1.196/1.343/1.552 GiB with 1.61 and
+  1.96 GiB peaks, not a monotonic rise. Both variants emitted 408 sequential
+  metadata fields and complete payloads; exact luma/chroma/JSON hashes were
+  `7C732FDB97CA95900ED353ABF1DBD0A37BBE3D8609886E16A7B55CCAE1D5B236`,
+  `82F1D3A9E3A3BD73A5AA07A63C930892CBB7125D857725D736C721CCBED18494`,
+  and `DDEFFB4DC96F4DAB031BDAF6BA385C1DD6C2EAEE31E53ECD244826C12F21D081`
+- VHS chroma phase analysis now uses one carrier-table cache owned by the
+  decode pipeline. It retains at most one four-phase heterodyne set and one
+  burst sine/cosine set. Exact sample-count, frequency, carrier, and phase keys
+  return the original arrays; a changed key atomically replaces the previous
+  entry, so AFC and shape changes remain compatible without an unbounded cache.
+  Cache misses call the unchanged bounded-parallel builders, and all consumers
+  treat the retained arrays as read-only. Matched 40-frame GC traces reduced
+  sampled allocation from 13.854 to 12.579 GiB, `Double[]` allocation from
+  12,611.83 to 11,311.73 MiB, and Gen2 collections from 38 to 31. In five
+  interleaved full-path A/B pairs, median wall time fell from 5.49 to 5.30 s
+  (3.5%) and CPU time from 19.23 to 18.05 s (6.1%). Exact TBC, chroma, and JSON
+  hashes remained `E42AB3A9F480610A032B0D4813BF4BAD1BF7A5CBEC00CF56EEEC359C2DD9D7CB`,
+  `7269E13798026A9FBDB199594A1AB46EE4BDD0EE800A8387CB3807A2EB8946AB`,
+  and `06AB7E6C28D6DE2C70C7902D6FB296BE664153CFA73C254F2F305C5729FBFC6E`.
+  Two reversed fixture-limited 204-frame pairs completed baseline/current in
+  23.20/22.19 s and 23.68/22.53 s (4.4% and 4.8% faster). Current private-memory
+  quarter medians were 1.168/1.300/1.505/1.446 and
+  1.062/1.832/1.515/1.739 GiB, with 1.93 and 2.00 GiB peaks and intervening
+  declines rather than monotonic growth. Both variants emitted fields 1 through
+  409 and exact luma/chroma/JSON hashes
+  `FCD83E68BDF6EFB3C2583349519B24E750155DE6B4C256D0B5F9CE4E76BE94E9`,
+  `B7CE0EF8768B7731FFAD9E7B8FE4162A24D0CC02620FC32F639A7ED078BF065B`,
+  and `EAACE43594DEC574360B664D932E23F10E1B428BA4268A91BA6A1858BFEDD4AD`
+- VHS chroma phase analysis now reads the pipeline's field-owned resampled
+  array instead of cloning it. The decode entry also passes its read-only span
+  directly to `ApplyChromaPreFilter`, which creates the sole writable field
+  copy before filtering. Public span-based analysis still creates an owned
+  array, and a regression assertion verifies that prepared and independent
+  decode paths leave caller input unchanged. Relative to the carrier-cache
+  checkpoint, matched 40-frame traces reduced sampled allocation from 12.580
+  to 12.147 GiB and `Double[]` allocation from 11,309.71 to 10,871.59 MiB.
+  Gen2 counts moved from 32 to 37 in this pair, so no collection-count gain is
+  claimed. Five interleaved A/B runs reduced median wall time from 5.209 to
+  5.175 s (0.7%) and CPU time from 18.188 to 17.094 s (6.0%). TBC, chroma, and
+  JSON hashes remained
+  `E42AB3A9F480610A032B0D4813BF4BAD1BF7A5CBEC00CF56EEEC359C2DD9D7CB`,
+  `7269E13798026A9FBDB199594A1AB46EE4BDD0EE800A8387CB3807A2EB8946AB`,
+  and `06AB7E6C28D6DE2C70C7902D6FB296BE664153CFA73C254F2F305C5729FBFC6E`.
+  Two reversed 204-frame pairs completed baseline/current in 22.07/21.68 s
+  and 22.10/21.69 s (1.8% and 1.9% faster). Current private-memory quarter
+  medians were 1.552/1.662/1.773/1.368 and 1.738/1.708/1.798/1.793 GiB, with
+  2.05 and 2.02 GiB peaks and intervening declines. Both variants emitted
+  fields 1 through 408 with exact luma/chroma/JSON hashes
+  `7C732FDB97CA95900ED353ABF1DBD0A37BBE3D8609886E16A7B55CCAE1D5B236`,
+  `82F1D3A9E3A3BD73A5AA07A63C930892CBB7125D857725D736C721CCBED18494`,
+  and `DDEFFB4DC96F4DAB031BDAF6BA385C1DD6C2EAEE31E53ECD244826C12F21D081`
+- Multi-block RF reads now assemble completed immutable blocks into disjoint
+  final-window ranges with a second bounded `Parallel.For`. The operation uses
+  the existing `WorkerThreads` limit and decoded-block array; it adds no output
+  buffers or retained queue. Six required channels and optional chroma, burst,
+  pilot, and EFM channels copy in parallel. Analog-audio phase-two work remains
+  ordered, while single-thread, one-block, and stateful sequential decoders keep
+  the prior path. Unit coverage compares all six required and four optional
+  serial/parallel channels exactly. Five interleaved 40-frame A/B runs
+  reduced median wall time from 5.165 to 4.878 s (5.6%), while CPU time rose
+  from 18.172 to 18.875 s
+  (3.9%), demonstrating increased core use rather than reduced work. TBC,
+  chroma, and JSON hashes remained
+  `E42AB3A9F480610A032B0D4813BF4BAD1BF7A5CBEC00CF56EEEC359C2DD9D7CB`,
+  `7269E13798026A9FBDB199594A1AB46EE4BDD0EE800A8387CB3807A2EB8946AB`,
+  and `06AB7E6C28D6DE2C70C7902D6FB296BE664153CFA73C254F2F305C5729FBFC6E`.
+  Two reversed `--length 204` pairs completed baseline/current in 21.31/20.35
+  and 21.84/20.18 s (4.5% and 7.6% faster). Current private-memory quarter
+  medians were 1.438/1.025/1.467/1.042 and 1.221/1.692/1.724/1.861 GiB, with
+  1.93 and 2.06 GiB peaks and intervening declines. Both variants emitted
+  fields 1 through 408 with exact luma/chroma/JSON hashes
+  `7C732FDB97CA95900ED353ABF1DBD0A37BBE3D8609886E16A7B55CCAE1D5B236`,
+  `82F1D3A9E3A3BD73A5AA07A63C930892CBB7125D857725D736C721CCBED18494`,
+  and `DDEFFB4DC96F4DAB031BDAF6BA385C1DD6C2EAEE31E53ECD244826C12F21D081`
+- Real-session multi-worker VHS output now writes each field's luma and chroma
+  payloads concurrently to their independent streams. Both writes are joined
+  before the written count advances or the next field is read, so active-file
+  preview boundaries and field ordering retain the synchronous behavior. The
+  serial and custom-reader paths keep their prior ordered writes, while a
+  coordinated-stream xUnit test proves that the production branch enters both
+  payload writes concurrently. Five interleaved 40-frame A/B runs reduced
+  median wall time from 4.98 to 4.87 s (2.2%), while median CPU time rose from
+  18.20 to 19.50 s as both writes consumed otherwise idle capacity. TBC,
+  chroma, and JSON hashes remained
+  `E42AB3A9F480610A032B0D4813BF4BAD1BF7A5CBEC00CF56EEEC359C2DD9D7CB`,
+  `7269E13798026A9FBDB199594A1AB46EE4BDD0EE800A8387CB3807A2EB8946AB`,
+  and `06AB7E6C28D6DE2C70C7902D6FB296BE664153CFA73C254F2F305C5729FBFC6E`.
+  Two reversed `--length 204` pairs completed baseline/current in
+  20.451/20.181 and 20.483/20.353 s (1.3% and 0.6% faster). Current
+  private-memory quarter medians were 1.717/1.782/1.177/1.624 and
+  1.307/1.533/0.929/1.700 GiB, with 2.033 and 2.059 GiB peaks and intervening
+  declines. Both variants emitted fields 1 through 408 with exact hashes
+  `7C732FDB97CA95900ED353ABF1DBD0A37BBE3D8609886E16A7B55CCAE1D5B236`,
+  `82F1D3A9E3A3BD73A5AA07A63C930892CBB7125D857725D736C721CCBED18494`,
+  and `DDEFFB4DC96F4DAB031BDAF6BA385C1DD6C2EAEE31E53ECD244826C12F21D081`
+- Multi-worker production VHS output now extends that same-field parallelism
+  with a dedicated payload worker and a `BlockingCollection` capacity of one.
+  The producer can decode the next field while the current luma/chroma payloads
+  drain, but the single consumer still orders field metadata, both payloads,
+  and the corresponding recovery snapshot. Completion first drains and joins
+  the worker; background write failures are rethrown on the decode thread, and
+  serial/public custom-reader paths remain synchronous. A standard xUnit v3
+  test blocks the first luma write, proves the second field read has started,
+  proves JSON is not published early, then verifies preview-visible one-field
+  JSON after releasing the payload. The existing chroma-failure lifecycle test
+  also runs through the worker and retains v0.4.0's first-field metadata while
+  returning the original write error. Five interleaved 40-frame pairs reduced
+  median wall/CPU time from 4.90/16.09 to 4.79/15.47 s (2.2%/3.9%). Two reversed
+  204-frame pairs completed baseline/current in 20.23/19.54 and 20.05/19.19 s
+  (3.4% and 4.3% faster). Current working-set quarter peaks were
+  1.355/0.738/0.955/1.143 and 1.272/0.952/0.974/1.091 GiB, with 1.35/1.27 GiB
+  maxima and intervening declines. All variants emitted fields 1 through 408
+  with exact luma/chroma/JSON hashes
+  `7C732FDB97CA95900ED353ABF1DBD0A37BBE3D8609886E16A7B55CCAE1D5B236`,
+  `82F1D3A9E3A3BD73A5AA07A63C930892CBB7125D857725D736C721CCBED18494`,
+  and `DDEFFB4DC96F4DAB031BDAF6BA385C1DD6C2EAEE31E53ECD244826C12F21D081`
+- Production VHS sessions now discard raw input, raw demodulation, and RF
+  high-pass block arrays after all block-local consumers finish. Field assembly
+  retains only video, low-pass video, envelope, and requested optional channels;
+  the unused RF high-pass filter/inverse transform is not run. LD, CVBS, and the
+  default direct pipeline API retain all prior channels. A standard xUnit v3
+  comparison verifies exact required-channel samples and the compact span's
+  independent available-sample count. Five interleaved 40-frame A/B runs reduced
+  median wall/CPU time from 6.01/18.86 to 5.02/17.45 s (16.5%/7.5%). Two
+  reversed 204-frame pairs completed baseline/current in 20.48/20.28 and
+  20.61/19.87 s; CPU time was 79.88/68.91 and 77.17/72.44 s. Baseline working-set
+  quarter peaks were 1.98/1.95/2.01/2.08 and 1.96/2.01/2.05/1.95 GiB; current
+  quarters were 1.41/1.20/1.47/1.67 and 1.58/1.42/1.13/1.51 GiB. Peak memory
+  therefore moved from 2.05-2.08 GiB to 1.58-1.67 GiB without monotonic growth.
+  Both variants emitted fields 1 through 408 with exact luma/chroma/JSON hashes
+  `7C732FDB97CA95900ED353ABF1DBD0A37BBE3D8609886E16A7B55CCAE1D5B236`,
+  `82F1D3A9E3A3BD73A5AA07A63C930892CBB7125D857725D736C721CCBED18494`,
+  and `DDEFFB4DC96F4DAB031BDAF6BA385C1DD6C2EAEE31E53ECD244826C12F21D081`
+- Compact VHS stream blocks now keep the pooled real and imaginary analytic
+  components split through FM demodulation and diff-demod repair. Four finite
+  angles also normalize and widen their frequency differences with SSE4.1/AVX;
+  non-finite lanes and unsupported hardware retain scalar behavior. Only the
+  full direct API materializes the returned full-length `Complex[] Analytic`.
+  xUnit v3 compares split, interleaved SIMD, and scalar results bit for bit over
+  nine lengths including NaN and infinity inputs, while a compact/full RF block
+  comparison proves exact retained channels and the omitted analytic output.
+  Candidate trace samples reduced split unwrap exclusive time from 1.28% to
+  0.26%, RF demodulation inclusive time from 7.02% to 5.43%, and native memmove
+  from 1.52% to 1.26%. Five interleaved 40-frame pairs were wall-time neutral at
+  5.02/5.03 s; median CPU time fell from 17.73 to 17.28 s and median peak working
+  set from 1.47 to 1.26 GiB. Two reversed 204-frame pairs remained within wall
+  noise; current quarter peaks were 1.31/1.04/1.34/1.41 and
+  1.30/1.08/1.32/1.17 GiB, with 1.41/1.32 GiB maxima and no monotonic growth.
+  All four long runs emitted exact luma, chroma, and JSON hashes
+  `7C732FDB97CA95900ED353ABF1DBD0A37BBE3D8609886E16A7B55CCAE1D5B236`,
+  `82F1D3A9E3A3BD73A5AA07A63C930892CBB7125D857725D736C721CCBED18494`,
+  and `DDEFFB4DC96F4DAB031BDAF6BA385C1DD6C2EAEE31E53ECD244826C12F21D081`
+- Compact VHS stream blocks now retain eligible float32 SOS chroma as
+  `float[]` until RF span assembly, where AVX or the exact scalar fallback
+  widens it once into the reusable field buffer. Full/direct RF blocks retain
+  the public `double[] Chroma` contract. Standard xUnit v3 coverage compares
+  full and compact block values before assembly and full/compact RF spans after
+  assembly. Matched 10-frame traces reduced sampled managed allocation from
+  2.95 to 2.89 GiB and `Double[]` allocation from 2.75 to 2.60 GiB, while
+  `Single[]` rose from 0.03 to 0.11 GiB. Five interleaved 40-frame pairs reduced
+  median wall/CPU time from 4.831/16.50 to 4.769/15.75 s (1.3%/4.5%). Two
+  reversed 204-frame pairs were wall-time neutral at baseline/current
+  19.73/19.83 and 19.87/19.73 s; current peak working sets were 1.46/1.39 GiB.
+  All long variants retained exact luma, chroma, and JSON hashes
+  `7C732FDB97CA95900ED353ABF1DBD0A37BBE3D8609886E16A7B55CCAE1D5B236`,
+  `82F1D3A9E3A3BD73A5AA07A63C930892CBB7125D857725D736C721CCBED18494`,
+  and `DDEFFB4DC96F4DAB031BDAF6BA385C1DD6C2EAEE31E53ECD244826C12F21D081`
 - VHS RF-envelope preparation now converts four doubles to float32, clears the
   sign bits, and writes the rotated float64 values through AVX while preserving
   the scalar tail and wrap path. A 32K-block isolated median improved from
@@ -1588,11 +1831,11 @@ decode commands.
 
 ```powershell
 dotnet build VHSDecodeDotNet.slnx
-dotnet test VHSDecodeDotNet.slnx --no-build
+dotnet test --solution VHSDecodeDotNet.slnx --no-build
 ```
 
 The current formal solution build completes with zero warnings and errors, and
-the xUnit v3 project exposes 781 independently discoverable compatibility tests
+the xUnit v3 project exposes 788 independently discoverable compatibility tests
 to `dotnet test` and Visual Studio Test Explorer. On the
 same Windows machine and fixtures, Release wall-clock measurements for one
 frame were 2.346 s versus 7.193 s for NTSC VHS and 1.651 s versus 5.865 s for

@@ -4,6 +4,7 @@ using System.Security.Cryptography;
 using VHSDecode.Core.CommandLine;
 using VHSDecode.Core.Decode;
 using VHSDecode.Core.Dsp;
+using VHSDecode.Core.Tbc;
 using Xunit;
 
 namespace VHSDecode.Tests;
@@ -124,6 +125,73 @@ public sealed class DspWorkingBufferTests
             $"Warm PAL VHS RF block allocated {allocated:N0} bytes.");
     }
 
+    [Fact(DisplayName = "Compact PAL VHS RF blocks omit the unconsumed analytic channel")]
+    public void CompactPalVhsRfBlocksOmitTheUnconsumedAnalyticChannel()
+    {
+        const int length = DecodeSessionFactory.DefaultBlockLength;
+        ParsedCommand command = new CommandLineParser().Parse(
+            CliSpecs.Vhs,
+            ["--pal", "--no_resample", "probe.s16", "probe-output"]);
+        using DecodeSession session = DecodeSessionFactory.Create(command, length);
+        double[] input = BuildPalVhsProbe(length, session.DecodeSampleRateHz);
+
+        RfPipelineBlock full = session.Pipeline.DecodePreparedBlock(input, reportDiagnostics: false);
+        RfPipelineBlock compact = session.Pipeline.DecodePreparedStreamBlock(input, reportDiagnostics: false);
+
+        Assert.Equal(length, full.Demodulated.Analytic.Length);
+        Assert.Empty(compact.Input);
+        Assert.Empty(compact.Demodulated.DemodRaw);
+        Assert.Empty(compact.Demodulated.Analytic);
+        Assert.Empty(compact.Demodulated.RfHighPass);
+        Assert.Equal(full.Demodulated.Video, compact.Demodulated.Video);
+        Assert.Equal(full.Demodulated.Envelope, compact.Demodulated.Envelope);
+        Assert.Equal(full.Demodulated.VideoLowPass, compact.Demodulated.VideoLowPass);
+        Assert.Equal(full.Demodulated.VhsWeakRfSignal, compact.Demodulated.VhsWeakRfSignal);
+        Assert.NotNull(full.Demodulated.Chroma);
+        Assert.Null(compact.Demodulated.Chroma);
+        float[] compactChroma = Assert.IsType<float[]>(compact.Demodulated.ChromaFloat32);
+        Assert.Equal(full.Demodulated.Chroma.Length, compactChroma.Length);
+        for (int i = 0; i < compactChroma.Length; i++)
+        {
+            Assert.Equal(full.Demodulated.Chroma[i], (double)compactChroma[i]);
+        }
+    }
+
+    [Fact(DisplayName = "VHS diff-demod repair reuses its analytic workspace after warm-up")]
+    public void VhsDiffDemodRepairReusesAnalyticWorkspaceAfterWarmUp()
+    {
+        const int length = DecodeSessionFactory.DefaultBlockLength;
+        const double sampleRateHz = 40_000_000.0;
+        double[] input = BuildPalVhsProbe(length, sampleRateHz);
+        Complex[] identity = RfDemodulator.IdentityFilter(length);
+        SosSection[] identitySos = [new SosSection(1.0, 0.0, 0.0, 1.0, 0.0, 0.0)];
+        var demodulator = new RfDemodulator(sampleRateHz);
+
+        RfDemodulatedBlock expected = DecodeDiffRepairProbe(
+            demodulator,
+            input,
+            identity,
+            identitySos);
+        for (int i = 0; i < 3; i++)
+        {
+            _ = DecodeDiffRepairProbe(demodulator, input, identity, identitySos);
+        }
+
+        long before = GC.GetAllocatedBytesForCurrentThread();
+        RfDemodulatedBlock actual = DecodeDiffRepairProbe(
+            demodulator,
+            input,
+            identity,
+            identitySos);
+        long allocated = GC.GetAllocatedBytesForCurrentThread() - before;
+
+        Assert.Equal(expected.Analytic, actual.Analytic);
+        Assert.Equal(Hash(expected), Hash(actual));
+        Assert.True(
+            allocated < 2_600_000,
+            $"Warm VHS diff-demod RF block allocated {allocated:N0} bytes.");
+    }
+
     [Fact(DisplayName = "PAL VHS RF workspaces remain bit-exact under parallel load")]
     public void PalVhsRfWorkspacesRemainBitExactUnderParallelLoad()
     {
@@ -189,8 +257,42 @@ public sealed class DspWorkingBufferTests
         long sosBytes = GC.GetAllocatedBytesForCurrentThread() - beforeSos;
         GC.KeepAlive(filtered);
         Assert.True(
-            sosBytes < 500_000,
+            sosBytes < 300_000,
             $"Warm float32 SOS forward/backward allocated {sosBytes:N0} bytes.");
+
+        _ = SosFilter.ApplyForwardBackwardFloat32ToSingle(sections, input);
+        long beforeCompactSos = GC.GetAllocatedBytesForCurrentThread();
+        float[] compactFiltered = SosFilter.ApplyForwardBackwardFloat32ToSingle(sections, input);
+        long compactSosBytes = GC.GetAllocatedBytesForCurrentThread() - beforeCompactSos;
+        GC.KeepAlive(compactFiltered);
+        Assert.True(
+            compactSosBytes < 170_000,
+            $"Warm compact float32 SOS forward/backward allocated {compactSosBytes:N0} bytes.");
+
+        const int outputLineLength = 512;
+        const int lineCount = 64;
+        double[] resampleSource = Enumerable.Range(0, (lineCount + 1) * 1_024 + 16)
+            .Select(index => Math.Sin(index * 0.007) + (0.2 * Math.Cos(index * 0.011)))
+            .ToArray();
+        double[] lineLocations = Enumerable.Range(0, lineCount + 1)
+            .Select(line => line * 1_024.0)
+            .ToArray();
+        var resampler = new TbcLineResampler(
+            outputLineLength,
+            nominalInputLineLength: 1_024.0,
+            workerThreads: 1);
+        _ = resampler.ResampleLines(resampleSource, lineLocations, firstLine: 0, lineCount);
+        long beforeResample = GC.GetAllocatedBytesForCurrentThread();
+        double[] resampled = resampler.ResampleLines(
+            resampleSource,
+            lineLocations,
+            firstLine: 0,
+            lineCount);
+        long resampleBytes = GC.GetAllocatedBytesForCurrentThread() - beforeResample;
+        GC.KeepAlive(resampled);
+        Assert.True(
+            resampleBytes < 350_000,
+            $"Warm linear TBC resampling allocated {resampleBytes:N0} bytes.");
     }
 
     [Fact(DisplayName = "Float32 SOS common-section kernels remain bit-exact")]
@@ -207,6 +309,13 @@ public sealed class DspWorkingBufferTests
         ];
 
         double[] output = SosFilter.ApplyForwardBackwardFloat32(sections, input);
+        float[] compactOutput = SosFilter.ApplyForwardBackwardFloat32ToSingle(sections, input);
+
+        Assert.Equal(output.Length, compactOutput.Length);
+        for (int i = 0; i < output.Length; i++)
+        {
+            Assert.Equal(output[i], (double)compactOutput[i]);
+        }
 
         Assert.Equal(
             "0FCE85E5CEB0155E93B8C49D41679A5D40D76D931138D2469D3F7E5EBABAF7D5",
@@ -258,17 +367,38 @@ public sealed class DspWorkingBufferTests
         return input;
     }
 
+    private static RfDemodulatedBlock DecodeDiffRepairProbe(
+        RfDemodulator demodulator,
+        double[] input,
+        Complex[] identity,
+        SosSection[] identitySos)
+    {
+        return demodulator.Demodulate(
+            input,
+            identity,
+            identity,
+            ReadOnlySpan<Complex>.Empty,
+            identity,
+            identity,
+            diffDemodRepair: new DiffDemodRepairOptions(double.NegativeInfinity),
+            fmDemodulatorMode: RfFmDemodulatorMode.VhsRustApproximation,
+            vhsEnvelopeFilter: identitySos);
+    }
+
     private static string Hash(RfPipelineBlock block)
+        => Hash(block.Demodulated);
+
+    private static string Hash(RfDemodulatedBlock demodulated)
     {
         using var hash = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
-        Append(hash, block.Demodulated.Video);
-        Append(hash, block.Demodulated.DemodRaw);
-        Append(hash, block.Demodulated.Envelope);
-        Append(hash, block.Demodulated.VideoLowPass);
-        Append(hash, block.Demodulated.RfHighPass);
-        if (block.Demodulated.Chroma is not null)
+        Append(hash, demodulated.Video);
+        Append(hash, demodulated.DemodRaw);
+        Append(hash, demodulated.Envelope);
+        Append(hash, demodulated.VideoLowPass);
+        Append(hash, demodulated.RfHighPass);
+        if (demodulated.Chroma is not null)
         {
-            Append(hash, block.Demodulated.Chroma);
+            Append(hash, demodulated.Chroma);
         }
 
         return Convert.ToHexString(hash.GetHashAndReset());
