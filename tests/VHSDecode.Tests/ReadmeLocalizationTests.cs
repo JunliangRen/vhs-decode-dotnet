@@ -64,7 +64,7 @@ public sealed partial class ReadmeLocalizationTests
         [
             "43155200da87c0d49eb37d8ec09b1372075ee8e4",
             "11.0.100-preview.6.26359.118",
-            "**783**",
+            "**784**",
             "2.346 s",
             "7.193 s",
             "1.651 s",
@@ -131,6 +131,14 @@ public sealed partial class ReadmeLocalizationTests
             "20.35",
             "21.84",
             "20.18",
+            "4.98",
+            "4.87",
+            "18.20",
+            "19.50",
+            "20.451",
+            "20.181",
+            "20.483",
+            "20.353",
             "--use_saved_levels",
             "docs/COMPATIBILITY_EVIDENCE.md"
         ];
@@ -160,6 +168,7 @@ public sealed partial class ReadmeLocalizationTests
             Assert.DoesNotContain("**779**", content, StringComparison.Ordinal);
             Assert.DoesNotContain("**781**", content, StringComparison.Ordinal);
             Assert.DoesNotContain("**782**", content, StringComparison.Ordinal);
+            Assert.DoesNotContain("**783**", content, StringComparison.Ordinal);
             Assert.DoesNotContain("13.88", content, StringComparison.Ordinal);
             Assert.DoesNotContain("39.80", content, StringComparison.Ordinal);
             Assert.DoesNotContain("53.23", content, StringComparison.Ordinal);

@@ -2,7 +2,7 @@
 
 [English](README.md) | [简体中文](README.zh-CN.md) | **[日本語](README.ja.md)**
 
-<!-- README_SYNC: 2026-07-20.9 -->
+<!-- README_SYNC: 2026-07-20.10 -->
 
 [`oyvindln/vhs-decode`](https://github.com/oyvindln/vhs-decode) の
 デコード関連部分を .NET 11 で再実装するプロジェクトです。現在は release
@@ -158,6 +158,9 @@
 - little-endian host では、TBC/chroma sample を full-field byte copy を作らず `ushort`
   span から直接 stream へ書き込みます。big-endian fallback は返却される pooled buffer
   を 1 つ使うため、反復 write の memory 使用量も境界付きです。
+- 実際の multi-worker VHS session は luma/chroma payload を独立した stream へ並行 write
+  し、次の field へ進む前に両方を join します。serial/custom-reader path は順序付き write
+  を維持し、preview 可能な field 境界が decode 進行より遅れることはありません。
 - 標準 VHS field decode は、固定 read window が取り得る 2 種類の block 数に対応する
   exact-length RF span buffer set を最大 2 組だけ再利用します。同期 field decode 後に
   buffer を返却し、public `Read` result、deferred CVBS render、保持される LD VITS source
@@ -235,6 +238,13 @@ CPU time は 18.172 秒から 18.875 秒（3.9%）へ増え、core 使用率を 
 変換しました。順序を反転した 2 組の `--length 204` pair は 21.31/20.35 秒と
 21.84/20.18 秒（4.5%/7.6% 高速）でした。current memory は非単調で peak は
 1.93/2.06 GiB、408 field と全 hash は完全一致です。
+
+parallel VHS payload output は、各 field の独立した luma/chroma stream write を重ね、
+次の field の前に両方を join します。5 組の交互 40-frame run で wall-time 中央値は
+4.98 秒から 4.87 秒（2.2%）へ短縮し、CPU 中央値は 18.20 秒から 19.50 秒へ増えて
+未使用 capacity を利用しました。順序を反転した 2 組の `--length 204` pair は
+20.451/20.181 秒と 20.483/20.353 秒（1.3%/0.6% 高速）でした。current memory は
+非単調で peak は 2.03/2.06 GiB、408 field と全 hash は完全一致です。
 
 AVX RF-envelope preparation は、単体 32K-block 中央値を 57.5 us から 13.3 us へ
 短縮し、kernel は 76.9% 改善しました。40-frame 中央値は 7.55 秒から 7.39 秒、
@@ -324,7 +334,7 @@ dotnet test --solution VHSDecodeDotNet.slnx -c Release --no-build --no-restore
 
 現在の正式な Release build は warning 0、error 0 です。xUnit v3 project は
 `dotnet test` と Visual Studio Test Explorer の両方で個別に検出できる
-**783** tests を公開します。
+**784** tests を公開します。
 
 <!-- SECTION: usage -->
 

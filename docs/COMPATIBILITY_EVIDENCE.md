@@ -1361,6 +1361,27 @@ possible capture has already been proven byte-for-byte identical.
   `7C732FDB97CA95900ED353ABF1DBD0A37BBE3D8609886E16A7B55CCAE1D5B236`,
   `82F1D3A9E3A3BD73A5AA07A63C930892CBB7125D857725D736C721CCBED18494`,
   and `DDEFFB4DC96F4DAB031BDAF6BA385C1DD6C2EAEE31E53ECD244826C12F21D081`
+- Real-session multi-worker VHS output now writes each field's luma and chroma
+  payloads concurrently to their independent streams. Both writes are joined
+  before the written count advances or the next field is read, so active-file
+  preview boundaries and field ordering retain the synchronous behavior. The
+  serial and custom-reader paths keep their prior ordered writes, while a
+  coordinated-stream xUnit test proves that the production branch enters both
+  payload writes concurrently. Five interleaved 40-frame A/B runs reduced
+  median wall time from 4.98 to 4.87 s (2.2%), while median CPU time rose from
+  18.20 to 19.50 s as both writes consumed otherwise idle capacity. TBC,
+  chroma, and JSON hashes remained
+  `E42AB3A9F480610A032B0D4813BF4BAD1BF7A5CBEC00CF56EEEC359C2DD9D7CB`,
+  `7269E13798026A9FBDB199594A1AB46EE4BDD0EE800A8387CB3807A2EB8946AB`,
+  and `06AB7E6C28D6DE2C70C7902D6FB296BE664153CFA73C254F2F305C5729FBFC6E`.
+  Two reversed `--length 204` pairs completed baseline/current in
+  20.451/20.181 and 20.483/20.353 s (1.3% and 0.6% faster). Current
+  private-memory quarter medians were 1.717/1.782/1.177/1.624 and
+  1.307/1.533/0.929/1.700 GiB, with 2.033 and 2.059 GiB peaks and intervening
+  declines. Both variants emitted fields 1 through 408 with exact hashes
+  `7C732FDB97CA95900ED353ABF1DBD0A37BBE3D8609886E16A7B55CCAE1D5B236`,
+  `82F1D3A9E3A3BD73A5AA07A63C930892CBB7125D857725D736C721CCBED18494`,
+  and `DDEFFB4DC96F4DAB031BDAF6BA385C1DD6C2EAEE31E53ECD244826C12F21D081`
 - VHS RF-envelope preparation now converts four doubles to float32, clears the
   sign bits, and writes the rotated float64 values through AVX while preserving
   the scalar tail and wrap path. A 32K-block isolated median improved from
@@ -1742,7 +1763,7 @@ dotnet test --solution VHSDecodeDotNet.slnx --no-build
 ```
 
 The current formal solution build completes with zero warnings and errors, and
-the xUnit v3 project exposes 783 independently discoverable compatibility tests
+the xUnit v3 project exposes 784 independently discoverable compatibility tests
 to `dotnet test` and Visual Studio Test Explorer. On the
 same Windows machine and fixtures, Release wall-clock measurements for one
 frame were 2.346 s versus 7.193 s for NTSC VHS and 1.651 s versus 5.865 s for

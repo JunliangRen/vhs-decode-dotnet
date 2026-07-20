@@ -101,6 +101,8 @@ public sealed class TbcFieldSequenceDecodeEngine
 
     internal bool EnableWorkerPrefetchForCustomReader { get; init; }
 
+    internal bool EnableParallelPayloadWritesForCustomReader { get; init; }
+
     internal bool UseSessionFieldNumberingForCustomReader { get; init; }
 
     internal Func<string, Stream> CreateTbcOutput { get; init; } = DecodeOutputFile.Create;
@@ -149,7 +151,12 @@ public sealed class TbcFieldSequenceDecodeEngine
         Stream input,
         int? maxFields)
     {
-        var output = new StreamingOutputSession(session, _efmOutputWriter, CreateTbcOutput);
+        var output = new StreamingOutputSession(
+            session,
+            _efmOutputWriter,
+            CreateTbcOutput,
+            parallelPayloadWrites: (_usesSessionReader || EnableParallelPayloadWritesForCustomReader)
+                && session.StreamDecoder.WorkerThreads > 1);
         bool outputCompleted = false;
         try
         {
@@ -1375,6 +1382,7 @@ public sealed class TbcFieldSequenceDecodeEngine
         private readonly ILaserDiscFieldOutputSession _laserDiscOutput;
         private readonly TbcOutputMetadataWriter.StreamingWriter _metadata;
         private readonly TbcSqliteMetadataWriter.SequenceWriter? _sqlite;
+        private readonly bool _parallelPayloadWrites;
         private bool _payloadsClosed;
         private bool _completed;
         private int _writtenFieldCount;
@@ -1384,7 +1392,8 @@ public sealed class TbcFieldSequenceDecodeEngine
         public StreamingOutputSession(
             DecodeSession session,
             ILaserDiscEfmOutputWriter efmOutputWriter,
-            Func<string, Stream> createTbcOutput)
+            Func<string, Stream> createTbcOutput,
+            bool parallelPayloadWrites)
         {
             _session = session;
             _paths = TbcFirstFieldDecodeEngine.BuildOutputPaths(session);
@@ -1418,6 +1427,7 @@ public sealed class TbcFieldSequenceDecodeEngine
                 _laserDiscOutput = laserDiscOutput;
                 _metadata = metadata;
                 _sqlite = sqlite;
+                _parallelPayloadWrites = parallelPayloadWrites;
             }
             catch
             {
@@ -1493,25 +1503,68 @@ public sealed class TbcFieldSequenceDecodeEngine
             System.Text.Json.Nodes.JsonObject fieldInfo = _metadata.Add(metadataField, decision, field);
             _sqlite?.Add(fieldInfo, _metadata.FieldCount, _metadata.LastOutputConverter);
 
-            TbcOutputWriter.WriteFrame(_tbc, field.Samples, _session.TbcFrameSpec, field.OutputPayload);
-            if (_chroma is not null)
+            if (_parallelPayloadWrites && _chroma is not null)
             {
-                if (field.ChromaSamples is null)
+                Task chromaWrite = Task.Run(() => WriteChromaFrame(field));
+                Exception? tbcFailure = null;
+                try
                 {
-                    throw new InvalidOperationException("VHS chroma output was enabled but a decoded field did not contain chroma samples.");
+                    TbcOutputWriter.WriteFrame(
+                        _tbc,
+                        field.Samples,
+                        _session.TbcFrameSpec,
+                        field.OutputPayload);
+                }
+                catch (Exception exception)
+                {
+                    tbcFailure = exception;
                 }
 
-                if (field.ChromaSamples.Length != _session.TbcFrameSpec.FieldSampleCount)
+                try
                 {
-                    throw new ArgumentException(
-                        $"Decoded chroma field sample count {field.ChromaSamples.Length} does not match TBC frame spec {_session.TbcFrameSpec.FieldSampleCount} for {_paths.ChromaPath}.");
+                    chromaWrite.GetAwaiter().GetResult();
+                }
+                catch when (tbcFailure is not null)
+                {
+                    // The serial path reports the luma write failure first.
                 }
 
-                TbcOutputWriter.WriteFrame(_chroma, field.ChromaSamples, _session.TbcFrameSpec);
+                if (tbcFailure is not null)
+                {
+                    System.Runtime.ExceptionServices.ExceptionDispatchInfo.Capture(tbcFailure).Throw();
+                }
+            }
+            else
+            {
+                TbcOutputWriter.WriteFrame(
+                    _tbc,
+                    field.Samples,
+                    _session.TbcFrameSpec,
+                    field.OutputPayload);
+                if (_chroma is not null)
+                {
+                    WriteChromaFrame(field);
+                }
             }
 
             _writtenFieldCount++;
             _laserDiscOutput.WriteAfterVideo(metadataField);
+        }
+
+        private void WriteChromaFrame(TbcDecodedField field)
+        {
+            if (field.ChromaSamples is null)
+            {
+                throw new InvalidOperationException("VHS chroma output was enabled but a decoded field did not contain chroma samples.");
+            }
+
+            if (field.ChromaSamples.Length != _session.TbcFrameSpec.FieldSampleCount)
+            {
+                throw new ArgumentException(
+                    $"Decoded chroma field sample count {field.ChromaSamples.Length} does not match TBC frame spec {_session.TbcFrameSpec.FieldSampleCount} for {_paths.ChromaPath}.");
+            }
+
+            TbcOutputWriter.WriteFrame(_chroma!, field.ChromaSamples, _session.TbcFrameSpec);
         }
 
         private void ClosePayloads()

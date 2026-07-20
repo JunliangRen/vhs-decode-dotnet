@@ -2,7 +2,7 @@
 
 **[English](README.md)** | [简体中文](README.zh-CN.md) | [日本語](README.ja.md)
 
-<!-- README_SYNC: 2026-07-20.9 -->
+<!-- README_SYNC: 2026-07-20.10 -->
 
 .NET 11 rewrite of the decode-facing parts of
 [`oyvindln/vhs-decode`](https://github.com/oyvindln/vhs-decode), focused on
@@ -163,6 +163,10 @@ release compatibility remain the first constraint.
 - On little-endian hosts, TBC and chroma samples stream directly from their
   `ushort` spans without allocating a full-field byte copy. The big-endian
   fallback uses one returned pooled buffer, so repeated writes remain bounded.
+- Real multi-worker VHS sessions write luma and chroma payloads concurrently to
+  their independent streams, then join both writes before advancing the field.
+  Serial/custom-reader paths retain ordered writes, and preview-visible field
+  boundaries cannot lag behind decode progress.
 - Standard VHS field decode reuses at most two exact-length RF span buffer sets,
   matching the only two block counts a fixed read window can cover. Buffers are
   returned after synchronous field decode; public `Read` results, deferred CVBS
@@ -245,6 +249,14 @@ throughput. Two reversed `--length 204` pairs completed baseline/current in
 21.31/20.35 s and 21.84/20.18 s (4.5% and 7.6% faster). Current memory was
 non-monotonic with 1.93/2.06 GiB peaks, and all 408 fields and hashes remained
 exact.
+
+Parallel VHS payload output overlaps each field's independent luma and chroma
+stream writes, while joining both before the next field. Five interleaved
+40-frame runs reduced median wall time from 4.98 to 4.87 s (2.2%); median CPU
+time rose from 18.20 to 19.50 s as both writes used otherwise idle capacity.
+Two reversed `--length 204` pairs completed baseline/current in 20.451/20.181 s
+and 20.483/20.353 s (1.3% and 0.6% faster). Current memory was non-monotonic
+with 2.03/2.06 GiB peaks, and all 408 fields and hashes remained exact.
 
 AVX RF-envelope preparation reduced the isolated 32K-block median from 57.5 us
 to 13.3 us, a 76.9% kernel gain. The 40-frame median moved from 7.55 s to 7.39 s,
@@ -334,7 +346,7 @@ dotnet test --solution VHSDecodeDotNet.slnx -c Release --no-build --no-restore
 ```
 
 The current formal Release build has zero warnings and errors. The xUnit v3
-project exposes **783** independently discoverable tests to both
+project exposes **784** independently discoverable tests to both
 `dotnet test` and Visual Studio Test Explorer.
 
 <!-- SECTION: usage -->
