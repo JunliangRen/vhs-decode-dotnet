@@ -155,7 +155,8 @@ internal sealed record TbcFieldDecodeState(
     double LaserDiscNtscPhaseAdjustMedian,
     int? PreviousLaserDiscPalFieldPhaseId,
     IReadOnlyDictionary<int, double>? PreviousLaserDiscPalPhaseAdjustments,
-    int PreviousLaserDiscSkipCheckScore);
+    int PreviousLaserDiscSkipCheckScore,
+    bool VhsPulseSearchInitialized = false);
 
 public sealed class TbcFieldDecodePipeline
 {
@@ -214,6 +215,7 @@ public sealed class TbcFieldDecodePipeline
     private int? _previousLaserDiscPalFieldPhaseId;
     private IReadOnlyDictionary<int, double>? _previousLaserDiscPalPhaseAdjustments;
     private int _previousLaserDiscSkipCheckScore;
+    private bool _vhsPulseSearchInitialized;
 
     public TbcFieldDecodePipeline(
         SyncAnalyzer syncAnalyzer,
@@ -314,7 +316,8 @@ public sealed class TbcFieldDecodePipeline
             _laserDiscNtscPhaseAdjustMedian,
             _previousLaserDiscPalFieldPhaseId,
             _previousLaserDiscPalPhaseAdjustments,
-            _previousLaserDiscSkipCheckScore);
+            _previousLaserDiscSkipCheckScore,
+            _vhsPulseSearchInitialized);
     }
 
     internal void RestoreStateForRetry(TbcFieldDecodeState state)
@@ -345,6 +348,7 @@ public sealed class TbcFieldDecodePipeline
         _previousLaserDiscPalFieldPhaseId = state.PreviousLaserDiscPalFieldPhaseId;
         _previousLaserDiscPalPhaseAdjustments = state.PreviousLaserDiscPalPhaseAdjustments;
         _previousLaserDiscSkipCheckScore = state.PreviousLaserDiscSkipCheckScore;
+        _vhsPulseSearchInitialized = state.VhsPulseSearchInitialized;
     }
 
     internal void DiscardCvbsPreviousFieldContextAfterRecovery()
@@ -660,9 +664,24 @@ public sealed class TbcFieldDecodePipeline
 
         if (rawPulses.Count == 0)
         {
+            bool recoverAsMissingFieldStart = string.Equals(
+                    _decodeType,
+                    "vhs",
+                    StringComparison.Ordinal)
+                && _vhsPulseSearchInitialized
+                && !_syncDetectionOptions.UseFallbackVSync;
             throw BuildRecoveryException(
-                TbcFieldDecodeRecoveryKind.NoSyncPulses,
-                "No sync pulses were detected in the decoded span.");
+                recoverAsMissingFieldStart
+                    ? TbcFieldDecodeRecoveryKind.NoFirstHSync
+                    : TbcFieldDecodeRecoveryKind.NoSyncPulses,
+                recoverAsMissingFieldStart
+                    ? "No field start was detected after VHS pulse search initialization."
+                    : "No sync pulses were detected in the decoded span.");
+        }
+
+        if (string.Equals(_decodeType, "vhs", StringComparison.Ordinal))
+        {
+            _vhsPulseSearchInitialized = true;
         }
 
         SyncTiming timing = _syncAnalyzer.EstimateTiming(rawPulses);
@@ -1618,7 +1637,7 @@ public sealed class TbcFieldDecodePipeline
         }
 
         double referenceSyncLevel = _videoOutput.IreToHz(_videoOutput.VSyncIre);
-        (double SyncLevel, double BlankLevel)? savedSerrationLevels = null;
+        (double SyncLevel, double BlankLevel)? pendingSerrationLevels = null;
         if (_vsyncSerrationDetector is not null)
         {
             int serrationFieldNumber = _vsyncSerrationDetector.FieldCount;
@@ -1684,37 +1703,26 @@ public sealed class TbcFieldDecodePipeline
                 && serrationSyncLevel.HasValue
                 && serrationBlankLevel.HasValue)
             {
-                bool levelsAreUsable = VsyncSerrationDetector.CheckLevels(
-                    syncReference,
-                    referenceSyncLevel,
-                    serrationSyncLevel.Value,
-                    serrationBlankLevel.Value,
-                    referenceSyncLevel,
-                    _videoOutput.HzIre);
-                if (levelsAreUsable)
-                {
-                    savedSerrationLevels = (serrationSyncLevel.Value, serrationBlankLevel.Value);
-                }
-                else if (_vhsFieldLevelState?.PullLevels() is { } fieldStateLevels)
-                {
-                    savedSerrationLevels = fieldStateLevels;
-                    _diagnosticLogger?.Invoke(
-                        "DEBUG",
-                        "Level check failed on serration measured levels [new_sync: "
-                        + PythonNamespaceFormatter.FormatValue(serrationSyncLevel.Value)
-                        + ", new_blank: "
-                        + PythonNamespaceFormatter.FormatValue(serrationBlankLevel.Value)
-                        + "], falling back to levels from FieldState [sync "
-                        + PythonNamespaceFormatter.FormatValue(fieldStateLevels.SyncLevel)
-                        + ", blank "
-                        + PythonNamespaceFormatter.FormatValue(fieldStateLevels.BlankLevel)
-                        + "].");
-                }
+                pendingSerrationLevels = (serrationSyncLevel.Value, serrationBlankLevel.Value);
 
-                if (savedSerrationLevels.HasValue && serration.FoundSerration)
+                if (serration.FoundSerration)
                 {
-                    _lastDetectedSyncLevels = savedSerrationLevels;
-                    return PrepareSyncSpanFromLevels(span, _lastDetectedSyncLevels.Value, usedSavedLevels: false);
+                    (double SyncLevel, double BlankLevel)? selectedSerrationLevels =
+                        SelectUsableVhsLevels(
+                            syncReference,
+                            referenceSyncLevel,
+                            pendingSerrationLevels,
+                            _videoOutput.HzIre,
+                            _vhsFieldLevelState,
+                            _diagnosticLogger);
+                    if (selectedSerrationLevels.HasValue)
+                    {
+                        _lastDetectedSyncLevels = selectedSerrationLevels;
+                        return PrepareSyncSpanFromLevels(
+                            span,
+                            _lastDetectedSyncLevels.Value,
+                            usedSavedLevels: false);
+                    }
                 }
             }
         }
@@ -1729,44 +1737,139 @@ public sealed class TbcFieldDecodePipeline
                 referenceSyncLevel,
                 _videoOutput.HzIre,
                 _syncDetectionOptions.UseFallbackVSync,
-                out SerrationLevelFailureKind failureKind);
-            if (fallbackRefinement is not null)
+                out SerrationLevelFailureKind failureKind,
+                out double? fallbackMeasuredSyncLevel);
+            if (fallbackMeasuredSyncLevel.HasValue)
             {
-                _vhsFieldLevelState?.PushSyncLevel(fallbackRefinement.SyncLevel);
-                SerrationLevelRefinement? selectedRefinement = LevelDetection.RefineSerrationLevels(
-                    syncReference,
-                    fallbackRefinement.SyncLevel,
-                    fallbackRefinement.BlankLevel,
-                    _syncAnalyzer,
-                    referenceSyncLevel,
-                    _videoOutput.HzIre);
-                if (selectedRefinement is not null)
+                _vhsFieldLevelState?.PushSyncLevel(fallbackMeasuredSyncLevel.Value);
+            }
+
+            (double SyncLevel, double BlankLevel)? firstPassLevels = fallbackRefinement is null
+                ? null
+                : (fallbackRefinement.SyncLevel, fallbackRefinement.BlankLevel);
+            bool firstPassFallbackHandled = false;
+            if (!firstPassLevels.HasValue)
+            {
+                firstPassFallbackHandled = TryResolveVhsSerrationRefinementFallback(
+                    failureKind,
+                    _vhsFieldLevelState,
+                    _diagnosticLogger,
+                    out (double SyncLevel, double BlankLevel)? fieldStateLevels);
+                if (firstPassFallbackHandled)
                 {
-                    PushRefinedVhsFieldLevels(selectedRefinement);
-                    _vsyncSerrationDetector?.PushLevels(
-                        selectedRefinement.SyncLevel,
-                        selectedRefinement.BlankLevel);
-                    _lastDetectedSyncLevels = PullPreferredVhsLevels()
-                        ?? (selectedRefinement.SyncLevel, selectedRefinement.BlankLevel);
-                    return PrepareSyncSpanFromLevels(span, _lastDetectedSyncLevels.Value, usedSavedLevels: false);
+                    firstPassLevels = fieldStateLevels;
                 }
             }
 
-            if (failureKind == SerrationLevelFailureKind.NonFiniteLevels)
+            bool pushedSecondPassLevels = false;
+            if (firstPassLevels.HasValue)
+            {
+                SerrationLevelRefinement? selectedRefinement = LevelDetection.RefineSerrationLevels(
+                    syncReference,
+                    firstPassLevels.Value.SyncLevel,
+                    firstPassLevels.Value.BlankLevel,
+                    _syncAnalyzer,
+                    referenceSyncLevel,
+                    _videoOutput.HzIre,
+                    out SerrationLevelFailureKind selectedFailureKind,
+                    out double? selectedMeasuredSyncLevel);
+                if (selectedMeasuredSyncLevel.HasValue)
+                {
+                    _vhsFieldLevelState?.PushSyncLevel(selectedMeasuredSyncLevel.Value);
+                }
+
+                if (selectedRefinement is not null)
+                {
+                    _vhsFieldLevelState?.PushLevels(
+                        selectedRefinement.SyncLevel,
+                        selectedRefinement.BlankLevel);
+                    _vsyncSerrationDetector?.PushLevels(
+                        selectedRefinement.SyncLevel,
+                        selectedRefinement.BlankLevel);
+                    pushedSecondPassLevels = true;
+                }
+                else if (TryResolveVhsSerrationRefinementFallback(
+                             selectedFailureKind,
+                             _vhsFieldLevelState,
+                             _diagnosticLogger,
+                             out (double SyncLevel, double BlankLevel)? selectedFieldStateLevels))
+                {
+                    if (selectedFieldStateLevels.HasValue)
+                    {
+                        _vsyncSerrationDetector?.PushLevels(
+                            selectedFieldStateLevels.Value.SyncLevel,
+                            selectedFieldStateLevels.Value.BlankLevel);
+                        pushedSecondPassLevels = true;
+                    }
+                }
+                else if (selectedFailureKind == SerrationLevelFailureKind.LevelCheckFailed)
+                {
+                    _diagnosticLogger?.Invoke("DEBUG", "level check failed in pulses_levels!");
+                }
+
+                if (!pushedSecondPassLevels)
+                {
+                    _diagnosticLogger?.Invoke(
+                        "DEBUG",
+                        "Level detection had issues, so don't store anything in VsyncSerration.");
+                }
+            }
+
+            if (pushedSecondPassLevels)
+            {
+                (double SyncLevel, double BlankLevel)? currentLevels = PullPreferredVhsLevels();
+                (double SyncLevel, double BlankLevel)? selectedLevels = SelectUsableVhsLevels(
+                    syncReference,
+                    referenceSyncLevel,
+                    currentLevels,
+                    _videoOutput.HzIre,
+                    _vhsFieldLevelState,
+                    _diagnosticLogger);
+                if (selectedLevels.HasValue)
+                {
+                    _lastDetectedSyncLevels = selectedLevels.Value;
+                    return PrepareSyncSpanFromLevels(
+                        span,
+                        selectedLevels.Value,
+                        usedSavedLevels: false);
+                }
+            }
+
+            if (!firstPassLevels.HasValue
+                && failureKind == SerrationLevelFailureKind.NonFiniteLevels
+                && !firstPassFallbackHandled)
             {
                 _diagnosticLogger?.Invoke("DEBUG", "blacklevel or synclevel had a NaN!");
             }
-            else if (failureKind == SerrationLevelFailureKind.LevelCheckFailed)
+            else if (!firstPassLevels.HasValue
+                     && failureKind == SerrationLevelFailureKind.LevelCheckFailed)
             {
                 _diagnosticLogger?.Invoke("DEBUG", "level check failed in pulses_levels!");
             }
 
-            _diagnosticLogger?.Invoke("DEBUG", "Level detection failed - sync or blank is None");
-
-            if (savedSerrationLevels.HasValue)
+            if (!firstPassLevels.HasValue)
             {
-                _lastDetectedSyncLevels = savedSerrationLevels.Value;
-                return PrepareSyncSpanFromLevels(span, savedSerrationLevels.Value, usedSavedLevels: false);
+                _diagnosticLogger?.Invoke("DEBUG", "Level detection failed - sync or blank is None");
+            }
+
+            if (pendingSerrationLevels.HasValue)
+            {
+                (double SyncLevel, double BlankLevel)? selectedSerrationLevels =
+                    SelectUsableVhsLevels(
+                        syncReference,
+                        referenceSyncLevel,
+                        pendingSerrationLevels,
+                        _videoOutput.HzIre,
+                        _vhsFieldLevelState,
+                        _diagnosticLogger);
+                if (selectedSerrationLevels.HasValue)
+                {
+                    _lastDetectedSyncLevels = selectedSerrationLevels.Value;
+                    return PrepareSyncSpanFromLevels(
+                        span,
+                        selectedSerrationLevels.Value,
+                        usedSavedLevels: false);
+                }
             }
 
             return fallbackToSavedLevels && _lastDetectedSyncLevels.HasValue
@@ -4109,12 +4212,6 @@ public sealed class TbcFieldDecodePipeline
             "No HSYNC pulse was detected in the decoded span.");
     }
 
-    private void PushRefinedVhsFieldLevels(SerrationLevelRefinement refinement)
-    {
-        _vhsFieldLevelState?.PushSyncLevel(refinement.SyncLevel);
-        _vhsFieldLevelState?.PushLevels(refinement.SyncLevel, refinement.BlankLevel);
-    }
-
     internal static bool ApplyVhsSerrationRefinementFallback(
         SerrationLevelFailureKind failureKind,
         VhsFieldLevelState? fieldState,
@@ -4122,19 +4219,15 @@ public sealed class TbcFieldDecodePipeline
         Action<string, string>? diagnosticLogger)
     {
         ArgumentNullException.ThrowIfNull(detector);
-        if (failureKind is not (SerrationLevelFailureKind.NonFiniteLevels
-            or SerrationLevelFailureKind.MissingLevels))
+        if (!TryResolveVhsSerrationRefinementFallback(
+                failureKind,
+                fieldState,
+                diagnosticLogger,
+                out (double SyncLevel, double BlankLevel)? fieldStateLevels))
         {
             return false;
         }
 
-        (double SyncLevel, double BlankLevel)? fieldStateLevels = fieldState?.PullLevels();
-        if (failureKind == SerrationLevelFailureKind.MissingLevels && !fieldStateLevels.HasValue)
-        {
-            return false;
-        }
-
-        diagnosticLogger?.Invoke("DEBUG", "blacklevel or synclevel had a NaN!");
         if (fieldStateLevels.HasValue)
         {
             detector.PushLevels(
@@ -4143,6 +4236,72 @@ public sealed class TbcFieldDecodePipeline
         }
 
         return true;
+    }
+
+    internal static bool TryResolveVhsSerrationRefinementFallback(
+        SerrationLevelFailureKind failureKind,
+        VhsFieldLevelState? fieldState,
+        Action<string, string>? diagnosticLogger,
+        out (double SyncLevel, double BlankLevel)? fieldStateLevels)
+    {
+        fieldStateLevels = null;
+        if (failureKind is not (SerrationLevelFailureKind.NonFiniteLevels
+            or SerrationLevelFailureKind.MissingLevels))
+        {
+            return false;
+        }
+
+        fieldStateLevels = fieldState?.PullLevels();
+        if (failureKind == SerrationLevelFailureKind.MissingLevels && !fieldStateLevels.HasValue)
+        {
+            return false;
+        }
+
+        diagnosticLogger?.Invoke("DEBUG", "blacklevel or synclevel had a NaN!");
+        return true;
+    }
+
+    internal static (double SyncLevel, double BlankLevel)? SelectUsableVhsLevels(
+        ReadOnlySpan<double> syncReference,
+        double referenceSyncLevel,
+        (double SyncLevel, double BlankLevel)? levels,
+        double hzIre,
+        VhsFieldLevelState? fieldState,
+        Action<string, string>? diagnosticLogger)
+    {
+        if (!levels.HasValue)
+        {
+            return null;
+        }
+
+        if (VsyncSerrationDetector.CheckLevels(
+                syncReference,
+                referenceSyncLevel,
+                levels.Value.SyncLevel,
+                levels.Value.BlankLevel,
+                referenceSyncLevel,
+                hzIre))
+        {
+            return levels;
+        }
+
+        if (fieldState?.PullLevels() is not { } fieldStateLevels)
+        {
+            return null;
+        }
+
+        diagnosticLogger?.Invoke(
+            "DEBUG",
+            "Level check failed on serration measured levels [new_sync: "
+            + PythonNamespaceFormatter.FormatValue(levels.Value.SyncLevel)
+            + ", new_blank: "
+            + PythonNamespaceFormatter.FormatValue(levels.Value.BlankLevel)
+            + "], falling back to levels from FieldState [sync "
+            + PythonNamespaceFormatter.FormatValue(fieldStateLevels.SyncLevel)
+            + ", blank "
+            + PythonNamespaceFormatter.FormatValue(fieldStateLevels.BlankLevel)
+            + "].");
+        return fieldStateLevels;
     }
 
     private (double SyncLevel, double BlankLevel)? PullPreferredVhsLevels()

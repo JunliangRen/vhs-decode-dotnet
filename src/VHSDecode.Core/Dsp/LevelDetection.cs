@@ -138,6 +138,28 @@ public static class LevelDetection
             minimumPulseLength,
             maximumPulseLength);
 
+        return RefineSerrationLevelsFromPulses(
+            demodulatedLowPass,
+            pulses,
+            analyzer,
+            referenceSyncLevel,
+            hzIre,
+            out failureKind,
+            out measuredSyncLevel);
+    }
+
+    private static SerrationLevelRefinement? RefineSerrationLevelsFromPulses(
+        ReadOnlySpan<double> demodulatedLowPass,
+        IReadOnlyList<Pulse> pulses,
+        SyncAnalyzer analyzer,
+        double referenceSyncLevel,
+        double hzIre,
+        out SerrationLevelFailureKind failureKind,
+        out double? measuredSyncLevel)
+    {
+        failureKind = SerrationLevelFailureKind.MissingLevels;
+        measuredSyncLevel = null;
+
         double vsyncLength = analyzer.UsecToSamples(analyzer.VSyncPulseUs);
         (int[] locations, double[] means) = FallbackVsyncLocationMeans(
             demodulatedLowPass,
@@ -259,11 +281,12 @@ public static class LevelDetection
         double previousMinimumSync = minimumSync;
         bool foundCandidate = false;
         bool checkNext = true;
+        IReadOnlyList<Pulse> pulses = [];
 
         for (int retry = 0; retry < 30; retry++)
         {
             double threshold = (minimumSync + blankLevel) / 2.0;
-            IReadOnlyList<Pulse> pulses = FindReducedPulses(
+            pulses = FindReducedPulses(
                 demodulatedLowPass,
                 threshold,
                 analyzer,
@@ -299,6 +322,11 @@ public static class LevelDetection
                         || !checkNext)
                     {
                         minimumSync = previousMinimumSync;
+                        pulses = FindReducedPulses(
+                            demodulatedLowPass,
+                            (minimumSync + blankLevel) / 2.0,
+                            analyzer,
+                            divisor: 1);
                         break;
                     }
                     else
@@ -311,15 +339,9 @@ public static class LevelDetection
             minimumSync += hzIre * 5.0;
         }
 
-        if (!foundCandidate)
-        {
-            return null;
-        }
-
-        return RefineSerrationLevels(
+        return RefineSerrationLevelsFromPulses(
             demodulatedLowPass,
-            minimumSync,
-            blankLevel,
+            pulses,
             analyzer,
             referenceSyncLevel,
             hzIre,
