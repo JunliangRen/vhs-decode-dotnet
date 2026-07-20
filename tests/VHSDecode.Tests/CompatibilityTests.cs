@@ -6876,6 +6876,18 @@ public void VsyncSerrationDetectorMatchesV04Rules()
     AssertTrue(measurement.End - measurement.Start > detector.MinimumVbiLength);
     AssertTrue(measurement.End - measurement.Start < detector.MaximumVbiLength);
 
+    long allocationBefore = GC.GetAllocatedBytesForCurrentThread();
+    AssertTrue(VsyncSerrationDetector.TryMeasureSerration(
+        field,
+        firstPulse + (detector.LineLength * 2),
+        detector.LineLength,
+        detector.EqualizingPulseLength,
+        detector.MinimumVbiLength,
+        detector.MaximumVbiLength,
+        out _));
+    long allocated = GC.GetAllocatedBytesForCurrentThread() - allocationBefore;
+    AssertTrue(allocated < 200_000);
+
     var automatic = new VsyncSerrationDetector(
         sampleRateHz: 4_000_000.0,
         framesPerSecond: 25.0,
@@ -7093,6 +7105,28 @@ public void VsyncSerrationDetectorMatchesV04Rules()
         true,
         true)!;
     AssertClose(80.0, Convert.ToDouble(PrivatePropertyValue(prepared, "Threshold")), 1e-12);
+}
+
+[Fact(DisplayName = "VBI serration span minimum preserves float64 bit semantics")]
+public void VsyncSerrationSpanMinimumPreservesFloat64BitSemantics()
+{
+    double firstNan = BitConverter.UInt64BitsToDouble(0x7FF8000000000123UL);
+    double secondNan = BitConverter.UInt64BitsToDouble(0xFFF8000000000456UL);
+    double[][] inputs =
+    [
+        [3.0, 1.0, 2.0],
+        [-0.0, 0.0],
+        [0.0, -0.0],
+        [1.0, firstNan, secondNan],
+        [secondNan, firstNan]
+    ];
+
+    foreach (double[] values in inputs)
+    {
+        AssertEqual(
+            BitConverter.DoubleToUInt64Bits(values.Min()),
+            BitConverter.DoubleToUInt64Bits(VsyncSerrationDetector.MinimumFloat64(values)));
+    }
 }
 
 [Fact(DisplayName = "VHS sync DC offset reuses an exact low-pass workspace")]

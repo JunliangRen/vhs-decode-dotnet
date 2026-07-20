@@ -310,8 +310,8 @@ public sealed class VsyncSerrationDetector
             return false;
         }
 
-        double[] block = data[start..end].ToArray();
-        double minimum = block.Min();
+        ReadOnlySpan<double> block = data[start..end];
+        double minimum = MinimumFloat64(block);
         double level = ((Median(block) - minimum) / 2.0) + minimum;
         var crossings = new List<int>();
         int previousSign = PythonSign(block[0] - level);
@@ -548,10 +548,46 @@ public sealed class VsyncSerrationDetector
     private static int PythonSign(double value)
         => value > 0.0 ? 1 : value < 0.0 ? -1 : 0;
 
+    internal static double MinimumFloat64(ReadOnlySpan<double> values)
+    {
+        if (values.IsEmpty)
+        {
+            throw new InvalidOperationException("Sequence contains no elements");
+        }
+
+        int index = 0;
+        double minimum = values[index++];
+        while (double.IsNaN(minimum))
+        {
+            if (index >= values.Length)
+            {
+                return minimum;
+            }
+
+            minimum = values[index++];
+        }
+
+        for (; index < values.Length; index++)
+        {
+            double value = values[index];
+            if (double.IsNaN(value))
+            {
+                return value;
+            }
+
+            if (value < minimum)
+            {
+                minimum = value;
+            }
+        }
+
+        return minimum;
+    }
+
     private static double Median(IEnumerable<double> values)
         => NumpyReduction.MedianFloat64(values.ToArray());
 
-    private static double Median(double[] values)
+    private static double Median(ReadOnlySpan<double> values)
         => NumpyReduction.MedianFloat64(values);
 
     private sealed class MovingAverageWindow(int window, int minimumWatermark)

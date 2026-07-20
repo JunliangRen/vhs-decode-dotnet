@@ -142,6 +142,10 @@ release compatibility remain the first constraint.
   state updates remain ordered after both branches complete. NumPy-compatible
   float64 medians retain full sorting for small inputs and use bit-exact
   introselect from 32K samples.
+- VSync serration measurement reads its candidate window through a read-only
+  span and applies an `Enumerable.Min`-compatible float64 scan, avoiding an
+  extra full-window copy. Median scratch ownership and NaN/signed-zero bit
+  semantics remain unchanged.
 - VHS field decode overlaps luma TBC rendering with chroma field decoding when
   workers are enabled. Only one chroma task can be in flight, and its state is
   committed on the calling thread before the next field advances.
@@ -500,6 +504,20 @@ quarter medians were 1.076/0.766/1.025/0.726 GiB with a 1.463 GiB peak, showing
 no monotonic growth. Every recorded luma, chroma, and JSON A/B hash remained
 exact.
 
+The VSync serration-window pass removes the full-window copy made before level
+measurement. A matched 10-field GC trace reduced sampled managed allocation
+from 2.465 to 2.434 GiB and `Double[]` allocation from 2,291.20 to 2,266.54
+MiB, a 24.7 MiB reduction, without adding retained buffers. Five interleaved
+40-field pairs were wall/CPU neutral within run noise (default
+4.508/12.188 to 4.556/12.422 s; 20-worker 3.719/14.203 to
+3.696/14.531 s). Three 160-field pairs were also neutral (default
+14.847/40.484 to 14.904/40.406 s; 20-worker 12.319/45.172 to
+12.361/45.391 s). A conservative candidate-first 400-field 20-worker A/B
+moved wall/CPU from 28.015/107.828 to 27.865/108.547 s and peak working set
+from 1.481 GiB to 1.465 GiB. The change is retained for lower long-run allocation
+pressure rather than a claimed CPU-speed gain; every recorded luma, chroma,
+and JSON hash remained exact.
+
 </details>
 
 <!-- SECTION: build -->
@@ -520,7 +538,7 @@ dotnet test --solution VHSDecodeDotNet.slnx -c Release --no-build --no-restore
 ```
 
 The current formal Release build has zero warnings and errors. The xUnit v3
-project exposes **809** independently discoverable tests to both
+project exposes **810** independently discoverable tests to both
 `dotnet test` and Visual Studio Test Explorer.
 
 <!-- SECTION: usage -->

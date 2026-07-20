@@ -138,6 +138,9 @@
   input 上で並行実行します。両 branch の完了後、candidate arbitration と detector
   state update は引き続き順序どおりに行います。NumPy-compatible float64 median は
   small input で full sort を維持し、32K sample 以上で bit-exact introselect を使います。
+- VSync serration measurement は candidate window を read-only span で参照し、
+  `Enumerable.Min`-compatible な float64 scan を使うため、full-window copy を 1 つ
+  省きます。median scratch の ownership と NaN/signed-zero の bit semantics は不変です。
 - worker 有効時、VHS field decode は luma TBC render と chroma field decode を
   並行実行します。同時に存在する chroma task は最大 1 つで、次の field へ進む前に
   calling thread 上で順序どおり state を commit します。
@@ -471,6 +474,20 @@ allocation は 2.639 GiB から 2.466 GiB、`Double[]` allocation は 2,469.42 M
 quarter median は 1.076/0.766/1.025/0.726 GiB、peak は 1.463 GiB で、単調な増加は
 ありませんでした。記録した luma、chroma、JSON の全 A/B hash は exact です。
 
+VSync serration-window pass は level measurement 前の full-window copy を除去しました。
+同一条件の 10-field GC trace で sampled managed allocation は 2.465 GiB から
+2.434 GiB、`Double[]` allocation は 2,291.20 MiB から 2,266.54 MiB へ減少し、
+24.7 MiB を削減しました。retained buffer は追加していません。交互に実行した 5 組の
+40-field pair は wall/CPU が run noise の範囲内で同等でした（default は
+4.508/12.188 秒から 4.556/12.422 秒、20-worker は 3.719/14.203 秒から
+3.696/14.531 秒）。3 組の 160-field pair も同等でした（default は
+14.847/40.484 秒から 14.904/40.406 秒、20-worker は 12.319/45.172 秒から
+12.361/45.391 秒）。candidate を先に実行した保守的な 400-field、20-worker A/B では
+wall/CPU が 28.015/107.828 秒から 27.865/108.547 秒、peak working set が
+1.481 GiB から 1.465 GiB へ変化しました。この変更は CPU speedup の主張ではなく、
+長時間 run の allocation pressure 低減のために保持します。記録した luma、chroma、
+JSON hash はすべて exact です。
+
 </details>
 
 <!-- SECTION: build -->
@@ -492,7 +509,7 @@ dotnet test --solution VHSDecodeDotNet.slnx -c Release --no-build --no-restore
 
 現在の正式な Release build は warning 0、error 0 です。xUnit v3 project は
 `dotnet test` と Visual Studio Test Explorer の両方で個別に検出できる
-**809** tests を公開します。
+**810** tests を公開します。
 
 <!-- SECTION: usage -->
 
