@@ -1382,6 +1382,27 @@ possible capture has already been proven byte-for-byte identical.
   `7C732FDB97CA95900ED353ABF1DBD0A37BBE3D8609886E16A7B55CCAE1D5B236`,
   `82F1D3A9E3A3BD73A5AA07A63C930892CBB7125D857725D736C721CCBED18494`,
   and `DDEFFB4DC96F4DAB031BDAF6BA385C1DD6C2EAEE31E53ECD244826C12F21D081`
+- Multi-worker production VHS output now extends that same-field parallelism
+  with a dedicated payload worker and a `BlockingCollection` capacity of one.
+  The producer can decode the next field while the current luma/chroma payloads
+  drain, but the single consumer still orders field metadata, both payloads,
+  and the corresponding recovery snapshot. Completion first drains and joins
+  the worker; background write failures are rethrown on the decode thread, and
+  serial/public custom-reader paths remain synchronous. A standard xUnit v3
+  test blocks the first luma write, proves the second field read has started,
+  proves JSON is not published early, then verifies preview-visible one-field
+  JSON after releasing the payload. The existing chroma-failure lifecycle test
+  also runs through the worker and retains v0.4.0's first-field metadata while
+  returning the original write error. Five interleaved 40-frame pairs reduced
+  median wall/CPU time from 4.90/16.09 to 4.79/15.47 s (2.2%/3.9%). Two reversed
+  204-frame pairs completed baseline/current in 20.23/19.54 and 20.05/19.19 s
+  (3.4% and 4.3% faster). Current working-set quarter peaks were
+  1.355/0.738/0.955/1.143 and 1.272/0.952/0.974/1.091 GiB, with 1.35/1.27 GiB
+  maxima and intervening declines. All variants emitted fields 1 through 408
+  with exact luma/chroma/JSON hashes
+  `7C732FDB97CA95900ED353ABF1DBD0A37BBE3D8609886E16A7B55CCAE1D5B236`,
+  `82F1D3A9E3A3BD73A5AA07A63C930892CBB7125D857725D736C721CCBED18494`,
+  and `DDEFFB4DC96F4DAB031BDAF6BA385C1DD6C2EAEE31E53ECD244826C12F21D081`
 - Production VHS sessions now discard raw input, raw demodulation, and RF
   high-pass block arrays after all block-local consumers finish. Field assembly
   retains only video, low-pass video, envelope, and requested optional channels;
@@ -1799,7 +1820,7 @@ dotnet test --solution VHSDecodeDotNet.slnx --no-build
 ```
 
 The current formal solution build completes with zero warnings and errors, and
-the xUnit v3 project exposes 786 independently discoverable compatibility tests
+the xUnit v3 project exposes 787 independently discoverable compatibility tests
 to `dotnet test` and Visual Studio Test Explorer. On the
 same Windows machine and fixtures, Release wall-clock measurements for one
 frame were 2.346 s versus 7.193 s for NTSC VHS and 1.651 s versus 5.865 s for

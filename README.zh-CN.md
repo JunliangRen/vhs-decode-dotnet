@@ -2,7 +2,7 @@
 
 [English](README.md) | **[简体中文](README.zh-CN.md)** | [日本語](README.ja.md)
 
-<!-- README_SYNC: 2026-07-20.12 -->
+<!-- README_SYNC: 2026-07-20.13 -->
 
 这是 [`oyvindln/vhs-decode`](https://github.com/oyvindln/vhs-decode)
 中解码相关部分的 .NET 11 重写，当前以 release `v0.4.0`、commit
@@ -142,9 +142,9 @@
   返回的 analytic 数组仍保持独立所有权，非 VHS 路径保留原有的分配回退。
 - 在小端主机上，TBC 与 chroma 样本直接从 `ushort` span 写入，不再分配整场 byte 副本；
   大端回退路径使用一块会归还的池化缓冲，因此重复写入的内存占用仍然有界。
-- 真实的多 worker VHS session 会将亮度与色度 payload 并发写入两个独立 stream，并在推进
-  下一场前等待两路完成。串行与自定义 reader 保留有序写入，预览可见的场边界不会落后于
-  解码进度。
+- 真实的多 worker VHS session 使用容量为一的专用 payload writer。它会并发写入亮度与
+  色度，同时让 producer 解码下一场，并独占 payload、metadata snapshot 与完成顺序。
+  关闭时会 drain 队列；串行路径和公开自定义 reader 仍保留同步有序写入。
 - 标准 VHS 场解码最多复用两套精确长度的 RF span 缓冲，对应固定读取窗口只可能覆盖的
   两种 block 数。同步场解码结束后立即归还缓冲；公开 `Read` 结果、CVBS 延迟渲染和
   LD VITS 保留源仍拥有独立数组。
@@ -237,6 +237,14 @@ hash 均精确一致。
 1.47 GiB 降到 1.26 GiB。两组反向顺序的 204-frame 配对仍处于墙钟噪声范围；当前峰值为
 1.32-1.41 GiB，四分段采样非单调，三份 hash 全部精确一致。
 
+后续有界 payload-writer 优化通过容量为一的队列，让下一 VHS 场解码与当前场的亮度/色度
+写入重叠。payload 始终先于对应的 recovery JSON snapshot，完成阶段会 drain writer，
+worker 异常也会返回解码线程。五组交错 40-frame 配对的墙钟/CPU 中位数从 4.90/16.09 秒
+降到 4.79/15.47 秒（快 2.2%/3.9%）。两组反向顺序的 204-frame 配对分别以
+baseline/current 20.23/19.54 秒和 20.05/19.19 秒完成（快 3.4%/4.3%）。当前四分段峰值为
+1.35/0.74/0.96/1.14 和 1.27/0.95/0.97/1.09 GiB，没有单调增长；408 场及亮度、色度、
+JSON hash 均精确一致。
+
 AVX RF envelope 准备将隔离的 32K-block 中位数从 57.5 us 降到 13.3 us，
 内核提升 76.9%。40-frame 中位数从 7.55 秒降到 7.39 秒，160-frame 运行从
 26.95 秒降到 25.70 秒；私有内存四分位中位数为 1.34/1.48/1.50/1.45 GiB，
@@ -316,7 +324,7 @@ dotnet test --solution VHSDecodeDotNet.slnx -c Release --no-build --no-restore
 ```
 
 当前正式 Release 构建为零警告、零错误。xUnit v3 项目向
-`dotnet test` 和 Visual Studio Test Explorer 暴露 **786** 个可独立发现的测试。
+`dotnet test` 和 Visual Studio Test Explorer 暴露 **787** 个可独立发现的测试。
 
 <!-- SECTION: usage -->
 

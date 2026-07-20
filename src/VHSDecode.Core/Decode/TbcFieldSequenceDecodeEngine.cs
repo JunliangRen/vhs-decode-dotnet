@@ -1,4 +1,6 @@
+using System.Collections.Concurrent;
 using System.Numerics;
+using System.Runtime.ExceptionServices;
 using VHSDecode.Core.Dsp;
 using VHSDecode.Core.Tbc;
 
@@ -103,6 +105,8 @@ public sealed class TbcFieldSequenceDecodeEngine
 
     internal bool EnableParallelPayloadWritesForCustomReader { get; init; }
 
+    internal bool EnablePayloadWriteOverlapForCustomReader { get; init; }
+
     internal bool UseSessionFieldNumberingForCustomReader { get; init; }
 
     internal Func<string, Stream> CreateTbcOutput { get; init; } = DecodeOutputFile.Create;
@@ -156,7 +160,10 @@ public sealed class TbcFieldSequenceDecodeEngine
             _efmOutputWriter,
             CreateTbcOutput,
             parallelPayloadWrites: (_usesSessionReader || EnableParallelPayloadWritesForCustomReader)
-                && session.StreamDecoder.WorkerThreads > 1);
+                && session.StreamDecoder.WorkerThreads > 1,
+            overlapPayloadWrites: session.Spec.Name == "vhs"
+                && session.StreamDecoder.WorkerThreads > 1
+                && (_usesSessionReader || EnablePayloadWriteOverlapForCustomReader));
         bool outputCompleted = false;
         try
         {
@@ -173,6 +180,7 @@ public sealed class TbcFieldSequenceDecodeEngine
                 {
                     output.WriteMetadataSnapshot();
                 });
+            output.DrainPendingWrites();
             if (session.Spec.Name == "cvbs")
             {
                 session.RuntimeReporter?.WriteCvbsCompletion(session.TbcRenderer.CvbsAgcStatistics);
@@ -1375,6 +1383,19 @@ public sealed class TbcFieldSequenceDecodeEngine
 
     private sealed class StreamingOutputSession : IDisposable
     {
+        private enum OutputWorkKind
+        {
+            Field,
+            MetadataSnapshot
+        }
+
+        private sealed record OutputWorkItem(
+            OutputWorkKind Kind,
+            TbcDecodedField? Field = null,
+            TbcFieldOrderDecision? Decision = null);
+
+        private static readonly OutputWorkItem MetadataSnapshotWork = new(OutputWorkKind.MetadataSnapshot);
+
         private readonly DecodeSession _session;
         private readonly TbcOutputPaths _paths;
         private readonly Stream _tbc;
@@ -1383,6 +1404,10 @@ public sealed class TbcFieldSequenceDecodeEngine
         private readonly TbcOutputMetadataWriter.StreamingWriter _metadata;
         private readonly TbcSqliteMetadataWriter.SequenceWriter? _sqlite;
         private readonly bool _parallelPayloadWrites;
+        private BlockingCollection<OutputWorkItem>? _outputQueue;
+        private Thread? _outputThread;
+        private ExceptionDispatchInfo? _outputFailure;
+        private bool _outputWorkerStopped;
         private bool _payloadsClosed;
         private bool _completed;
         private int _writtenFieldCount;
@@ -1393,7 +1418,8 @@ public sealed class TbcFieldSequenceDecodeEngine
             DecodeSession session,
             ILaserDiscEfmOutputWriter efmOutputWriter,
             Func<string, Stream> createTbcOutput,
-            bool parallelPayloadWrites)
+            bool parallelPayloadWrites,
+            bool overlapPayloadWrites)
         {
             _session = session;
             _paths = TbcFirstFieldDecodeEngine.BuildOutputPaths(session);
@@ -1428,9 +1454,20 @@ public sealed class TbcFieldSequenceDecodeEngine
                 _metadata = metadata;
                 _sqlite = sqlite;
                 _parallelPayloadWrites = parallelPayloadWrites;
+                if (overlapPayloadWrites)
+                {
+                    _outputQueue = new BlockingCollection<OutputWorkItem>(boundedCapacity: 1);
+                    _outputThread = new Thread(ConsumeOutputWork)
+                    {
+                        IsBackground = true,
+                        Name = "vhs-decode-payload-writer"
+                    };
+                    _outputThread.Start();
+                }
             }
             catch
             {
+                _outputQueue?.Dispose();
                 sqlite?.Dispose();
                 metadata?.Dispose();
                 laserDiscOutput?.Dispose();
@@ -1445,14 +1482,33 @@ public sealed class TbcFieldSequenceDecodeEngine
             ObjectDisposedException.ThrowIf(_payloadsClosed, this);
             foreach ((TbcDecodedField field, TbcFieldOrderDecision decision) in writes)
             {
-                Write(field, decision);
+                if (_outputQueue is null)
+                {
+                    WriteSynchronously(field, decision);
+                }
+                else
+                {
+                    EnqueueOutput(new OutputWorkItem(OutputWorkKind.Field, field, decision));
+                }
             }
         }
 
         public void WriteMetadataSnapshot()
         {
             ObjectDisposedException.ThrowIf(_payloadsClosed, this);
-            _metadata.WriteSnapshot();
+            if (_outputQueue is null)
+            {
+                _metadata.WriteSnapshot();
+            }
+            else
+            {
+                EnqueueOutput(MetadataSnapshotWork);
+            }
+        }
+
+        public void DrainPendingWrites()
+        {
+            StopOutputWorker()?.Throw();
         }
 
         public TbcFieldSequenceDecodeResult Complete()
@@ -1462,20 +1518,40 @@ public sealed class TbcFieldSequenceDecodeEngine
                 throw new InvalidOperationException("The streaming TBC output session was already completed.");
             }
 
-            if (_metadata.FieldCount == 0)
+            ExceptionDispatchInfo? outputFailure = StopOutputWorker();
+            if (outputFailure is null)
             {
-                TbcOutputMetadataWriter.ValidatePcmAudioParameters(_session);
-                _metadata.LeaveIncompleteJson();
-            }
-            else
-            {
-                _metadata.Complete();
+                CompleteMetadata();
+                ClosePayloads();
+                _completed = true;
+                return BuildResult();
             }
 
-            _sqlite?.Complete(_metadata.FieldCount);
-            ClosePayloads();
+            try
+            {
+                CompleteMetadata();
+            }
+            catch
+            {
+                // Preserve the payload failure that interrupted output.
+            }
+
+            try
+            {
+                ClosePayloads();
+            }
+            catch
+            {
+                // Preserve the payload failure that interrupted output.
+            }
 
             _completed = true;
+            outputFailure.Throw();
+            throw new InvalidOperationException("Payload output failure was not rethrown.");
+        }
+
+        private TbcFieldSequenceDecodeResult BuildResult()
+        {
             return new TbcFieldSequenceDecodeResult(
                 true,
                 $"Wrote {_writtenFieldCount} TBC field(s) to {_paths.TbcPath}",
@@ -1489,9 +1565,88 @@ public sealed class TbcFieldSequenceDecodeEngine
             ClosePayloads();
             _sqlite?.Dispose();
             _metadata.Dispose();
+            _outputQueue?.Dispose();
         }
 
-        private void Write(TbcDecodedField field, TbcFieldOrderDecision decision)
+        private void ConsumeOutputWork()
+        {
+            try
+            {
+                foreach (OutputWorkItem work in _outputQueue!.GetConsumingEnumerable())
+                {
+                    if (work.Kind == OutputWorkKind.MetadataSnapshot)
+                    {
+                        _metadata.WriteSnapshot();
+                        continue;
+                    }
+
+                    WriteSynchronously(
+                        work.Field ?? throw new InvalidOperationException("Field output work was missing its field."),
+                        work.Decision ?? throw new InvalidOperationException("Field output work was missing its decision."));
+                }
+            }
+            catch (Exception exception)
+            {
+                Volatile.Write(ref _outputFailure, ExceptionDispatchInfo.Capture(exception));
+            }
+        }
+
+        private void EnqueueOutput(OutputWorkItem work)
+        {
+            while (true)
+            {
+                ThrowIfOutputFailed();
+                try
+                {
+                    if (_outputQueue!.TryAdd(work, millisecondsTimeout: 50))
+                    {
+                        break;
+                    }
+                }
+                catch (InvalidOperationException) when (Volatile.Read(ref _outputFailure) is { } failure)
+                {
+                    failure.Throw();
+                    throw;
+                }
+            }
+
+            ThrowIfOutputFailed();
+        }
+
+        private ExceptionDispatchInfo? StopOutputWorker()
+        {
+            if (_outputQueue is null || _outputWorkerStopped)
+            {
+                return Volatile.Read(ref _outputFailure);
+            }
+
+            _outputQueue.CompleteAdding();
+            _outputThread!.Join();
+            _outputWorkerStopped = true;
+            return Volatile.Read(ref _outputFailure);
+        }
+
+        private void ThrowIfOutputFailed()
+        {
+            Volatile.Read(ref _outputFailure)?.Throw();
+        }
+
+        private void CompleteMetadata()
+        {
+            if (_metadata.FieldCount == 0)
+            {
+                TbcOutputMetadataWriter.ValidatePcmAudioParameters(_session);
+                _metadata.LeaveIncompleteJson();
+            }
+            else
+            {
+                _metadata.Complete();
+            }
+
+            _sqlite?.Complete(_metadata.FieldCount);
+        }
+
+        private void WriteSynchronously(TbcDecodedField field, TbcFieldOrderDecision decision)
         {
             if (field.Samples.Length != _session.TbcFrameSpec.FieldSampleCount)
             {
@@ -1574,6 +1729,7 @@ public sealed class TbcFieldSequenceDecodeEngine
                 return;
             }
 
+            _ = StopOutputWorker();
             _payloadsClosed = true;
             _chroma?.Dispose();
             _tbc.Dispose();

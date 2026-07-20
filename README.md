@@ -2,7 +2,7 @@
 
 **[English](README.md)** | [简体中文](README.zh-CN.md) | [日本語](README.ja.md)
 
-<!-- README_SYNC: 2026-07-20.12 -->
+<!-- README_SYNC: 2026-07-20.13 -->
 
 .NET 11 rewrite of the decode-facing parts of
 [`oyvindln/vhs-decode`](https://github.com/oyvindln/vhs-decode), focused on
@@ -163,10 +163,11 @@ release compatibility remain the first constraint.
 - On little-endian hosts, TBC and chroma samples stream directly from their
   `ushort` spans without allocating a full-field byte copy. The big-endian
   fallback uses one returned pooled buffer, so repeated writes remain bounded.
-- Real multi-worker VHS sessions write luma and chroma payloads concurrently to
-  their independent streams, then join both writes before advancing the field.
-  Serial/custom-reader paths retain ordered writes, and preview-visible field
-  boundaries cannot lag behind decode progress.
+- Real multi-worker VHS sessions use a dedicated capacity-one payload writer.
+  It writes luma and chroma concurrently while the producer decodes the next
+  field, and owns payload, metadata-snapshot, and completion ordering. Shutdown
+  drains the queue; serial and public custom-reader paths retain synchronous
+  ordered writes.
 - Standard VHS field decode reuses at most two exact-length RF span buffer sets,
   matching the only two block counts a fixed read window can cover. Buffers are
   returned after synchronous field decode; public `Read` results, deferred CVBS
@@ -282,6 +283,16 @@ reversed 204-frame pairs remained within wall-time noise; current peaks were
 1.32-1.41 GiB with non-monotonic quarter samples, and all three hashes remained
 exact.
 
+The bounded payload-writer follow-up overlaps the next VHS field decode with the
+current field's luma/chroma write through a capacity-one queue. Payloads remain
+ordered before their recovery JSON snapshot, completion drains the writer, and
+worker failures return to the decode thread. Five interleaved 40-frame pairs
+reduced median wall/CPU time from 4.90/16.09 to 4.79/15.47 s (2.2%/3.9%). Two
+reversed 204-frame pairs completed baseline/current in 20.23/19.54 s and
+20.05/19.19 s (3.4%/4.3% faster). Current quarter peaks were
+1.35/0.74/0.96/1.14 and 1.27/0.95/0.97/1.09 GiB, with no monotonic growth; all
+408 fields and luma, chroma, and JSON hashes remained exact.
+
 AVX RF-envelope preparation reduced the isolated 32K-block median from 57.5 us
 to 13.3 us, a 76.9% kernel gain. The 40-frame median moved from 7.55 s to 7.39 s,
 and the 160-frame run from 26.95 s to 25.70 s. Its private-memory quarter medians
@@ -370,7 +381,7 @@ dotnet test --solution VHSDecodeDotNet.slnx -c Release --no-build --no-restore
 ```
 
 The current formal Release build has zero warnings and errors. The xUnit v3
-project exposes **786** independently discoverable tests to both
+project exposes **787** independently discoverable tests to both
 `dotnet test` and Visual Studio Test Explorer.
 
 <!-- SECTION: usage -->
