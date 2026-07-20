@@ -2,7 +2,7 @@
 
 **[English](README.md)** | [简体中文](README.zh-CN.md) | [日本語](README.ja.md)
 
-<!-- README_SYNC: 2026-07-20.14 -->
+<!-- README_SYNC: 2026-07-20.15 -->
 
 .NET 11 rewrite of the decode-facing parts of
 [`oyvindln/vhs-decode`](https://github.com/oyvindln/vhs-decode), focused on
@@ -121,6 +121,9 @@ release compatibility remain the first constraint.
 
 - `-t` / `--threads` drives bounded parallel RF demodulation and filtering;
   stream, FFmpeg, and GNU Radio reads stay ordered.
+- Exact 40.0 MHz `.s16` inputs use the native signed-16 loader instead of a
+  no-op FFmpeg pass-through. Other formats and actual resampling keep their
+  existing FFmpeg paths.
 - A stream-scoped decoded RF cache avoids duplicate FFT work across overlapping
   field reads while keeping memory bounded.
 - VHS uses a bounded continuous RF pipeline. One producer owns ordered input
@@ -206,11 +209,14 @@ On one Windows fixture machine, one-frame Release measurements were:
 These numbers are fixture-specific, not universal benchmarks. All current VHS
 A/B runs used .NET SDK/runtime `11.0.100-preview.6.26359.118`, `--threads 20`,
 default chroma, and default resampling. On a reproducible 40-frame PAL probe,
-the saved pre-continuous-pipeline baseline median was 11.60 s and the current
-median was 7.71 s, a 33.5% gain. Average active cores rose from roughly
-2.2-2.5 to 3.3-3.7. Paired TBC, JSON, and chroma SHA-256 values were identical.
+the saved pre-continuous-pipeline baseline median was 11.60 s and the latest
+median was 4.97 s, a 57.2% cumulative gain. The newest direct-`.s16` checkpoint
+alone moved matched wall/CPU medians from 5.33/17.11 s to 4.97/15.94 s
+(6.8%/6.8%). Process CPU divided by wall time remains about 3.2 active cores,
+so further work still targets state-safe field-stage parallelism. Paired TBC,
+JSON, and chroma SHA-256 values were identical.
 
-Current 40/160/320-frame sustained runs completed in 7.65/26.58/52.51 s. Peak
+Earlier 40/160/320-frame sustained runs completed in 7.65/26.58/52.51 s. Peak
 working sets were 1.76/1.88/1.67 GiB, while second-half medians were
 1.42/1.30/1.28 GiB. The full 320 frames were written, and memory showed no
 growth with decode length. Earlier allocation work also reduced a PAL LD
@@ -305,6 +311,14 @@ reversed 204-frame pairs completed baseline/current in 20.23/19.54 s and
 20.05/19.19 s (3.4%/4.3% faster). Current quarter peaks were
 1.35/0.74/0.96/1.14 and 1.27/0.95/0.97/1.09 GiB, with no monotonic growth; all
 408 fields and luma, chroma, and JSON hashes remained exact.
+
+The native-rate `.s16` input path now bypasses FFmpeg only when the declared
+rate is exactly 40.0 MHz. A fresh trace contained no FFmpeg pass-through or
+input-pump frame in its top 300 inclusive methods. Five interleaved 40-frame
+pairs reduced median wall/CPU time from 5.33/17.11 to 4.97/15.94 s
+(6.8%/6.8%), and median peak working set from 1.23 to 1.13 GiB. Two reversed
+204-frame pairs completed baseline/current in 21.50/20.86 and 21.67/21.54 s;
+candidate peaks were 1.39/1.35 GiB, and all output hashes remained exact.
 
 AVX RF-envelope preparation reduced the isolated 32K-block median from 57.5 us
 to 13.3 us, a 76.9% kernel gain. The 40-frame median moved from 7.55 s to 7.39 s,

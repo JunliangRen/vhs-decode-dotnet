@@ -709,6 +709,8 @@ public void DecodeSessionFactoryCreatesVhsRawSessions()
 
     DecodeSession nativeLds = DecodeSessionFactory.Create(Parse(CliSpecs.Vhs, ["capture.lds", "outbase"]));
     AssertType<PackedDdD4To40SampleLoader>(nativeLds.Loader);
+    DecodeSession directS16 = DecodeSessionFactory.Create(Parse(CliSpecs.Vhs, ["capture.s16", "outbase"]));
+    AssertType<Int16SampleLoader>(directS16.Loader);
     DecodeSession nativeLdf = DecodeSessionFactory.Create(Parse(CliSpecs.Vhs, ["capture.ldf", "outbase"]));
     AssertType<FfmpegPcm16SampleLoader>(nativeLdf.Loader);
     DecodeSession streamedWave = DecodeSessionFactory.Create(Parse(CliSpecs.Vhs, ["capture.wav", "outbase"]));
@@ -15717,6 +15719,8 @@ public void RfLoaderFactoryMapsResamplingExtensions()
         ["-filter:a", "asetrate=nan,aresample=40000000.0"],
         RfLoaderFactory.BuildResamplingOutputArguments(double.NaN).ToArray());
 
+    AssertType<Int16SampleLoader>(RfLoaderFactory.CreateResampling("capture.s16", 40.0));
+    AssertType<FfmpegStreamSampleLoader>(RfLoaderFactory.CreateResampling("capture.s16", 40.000001));
     var loader = (FfmpegStreamSampleLoader)RfLoaderFactory.CreateResampling("capture.r8", FrequencyParser.CxAdcMHz);
     AssertStringSequence(["-f", "u8"], loader.InputArguments.ToArray());
     AssertThrows<NotSupportedException>(() => RfLoaderFactory.CreateResampling("capture.lds", 28.0));

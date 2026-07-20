@@ -55,6 +55,12 @@ public static class RfLoaderFactory
             throw new NotSupportedException("File format not supported when resampling: " + filename);
         }
 
+        // FFmpeg's s16le-to-s16le path is bit-preserving when no rate conversion is requested.
+        if (inputFrequencyMHz == 40.0 && filename.EndsWith(".s16", StringComparison.Ordinal))
+        {
+            return new Int16SampleLoader();
+        }
+
         return new FfmpegStreamSampleLoader(
             BuildResamplingInputArguments(filename),
             BuildResamplingOutputArguments(inputFrequencyMHz));
