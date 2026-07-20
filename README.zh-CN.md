@@ -2,7 +2,7 @@
 
 [English](README.md) | **[简体中文](README.zh-CN.md)** | [日本語](README.ja.md)
 
-<!-- README_SYNC: 2026-07-20.1 -->
+<!-- README_SYNC: 2026-07-20.2 -->
 
 这是 [`oyvindln/vhs-decode`](https://github.com/oyvindln/vhs-decode)
 中解码相关部分的 .NET 11 重写，当前以 release `v0.4.0`、commit
@@ -134,6 +134,8 @@
 - 托管 real FFT 复用池化的 packing 与 scratch 缓冲区，float32 SOS 前后向滤波
   在同一个扩展缓冲区内原地完成；每次变换结束都会归还租用项，避免反复冲击 LOH。
 - RF span 直接写入请求的最终输出窗口，不再先分配整块边界场数组再做第二次切片复制。
+- 在小端主机上，TBC 与 chroma 样本直接从 `ushort` span 写入，不再分配整场 byte 副本；
+  大端回退路径使用一块会归还的池化缓冲，因此重复写入的内存占用仍然有界。
 - 标准 VHS 场解码最多复用两套精确长度的 RF span 缓冲，对应固定读取窗口只可能覆盖的
   两种 block 数。同步场解码结束后立即归还缓冲；公开 `Read` 结果、CVBS 延迟渲染和
   LD VITS 保留源仍拥有独立数组。
@@ -167,6 +169,11 @@
 有界 VHS 场内重叠把一次 160-frame 运行从 20.13 秒降到 18.55 秒（7.8%）。
 TBC、chroma 与 JSON SHA-256 完全一致；任务会在当前场内等待完成，因此内存不会随
 解码长度增长。
+
+小端 TBC writer 的零拷贝写入在同一份 160-frame 输出中消除了约 455 MB 的整场临时
+byte-array payload。xUnit v3 分配 probe 在预热后写入 400,000 个样本时，线程本地分配量
+低于 1 KiB。新的 160-frame 运行仍保持完全一致的 luma/chroma SHA-256；墙钟时间处于
+多次运行的正常波动范围内。
 
 <details>
 <summary>内核与分配 benchmark 历史</summary>
@@ -235,7 +242,7 @@ dotnet test VHSDecodeDotNet.slnx -c Release --no-build --no-restore
 ```
 
 当前正式 Release 构建为零警告、零错误。xUnit v3 项目向
-`dotnet test` 和 Visual Studio Test Explorer 暴露 **781** 个可独立发现的测试。
+`dotnet test` 和 Visual Studio Test Explorer 暴露 **782** 个可独立发现的测试。
 
 <!-- SECTION: usage -->
 

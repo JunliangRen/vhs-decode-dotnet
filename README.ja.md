@@ -2,7 +2,7 @@
 
 [English](README.md) | [简体中文](README.zh-CN.md) | **[日本語](README.ja.md)**
 
-<!-- README_SYNC: 2026-07-20.1 -->
+<!-- README_SYNC: 2026-07-20.2 -->
 
 [`oyvindln/vhs-decode`](https://github.com/oyvindln/vhs-decode) の
 デコード関連部分を .NET 11 で再実装するプロジェクトです。現在は release
@@ -146,6 +146,9 @@
   各 transform 後に rental を返却し、LOH への反復負荷を避けます。
 - RF span assembly は block 境界の field array を作って再度 slice せず、要求された
   最終 output window へ直接書き込みます。
+- little-endian host では、TBC/chroma sample を full-field byte copy を作らず `ushort`
+  span から直接 stream へ書き込みます。big-endian fallback は返却される pooled buffer
+  を 1 つ使うため、反復 write の memory 使用量も境界付きです。
 - 標準 VHS field decode は、固定 read window が取り得る 2 種類の block 数に対応する
   exact-length RF span buffer set を最大 2 組だけ再利用します。同期 field decode 後に
   buffer を返却し、public `Read` result、deferred CVBS render、保持される LD VITS source
@@ -184,6 +187,12 @@ peak working set は 1.76/1.88/1.67 GiB、後半中央値は 1.42/1.30/1.28 GiB 
 境界付き VHS field-stage overlap により、160-frame run は 20.13 秒から 18.55 秒
 （7.8%）へ短縮しました。TBC、chroma、JSON の SHA-256 は完全に一致し、task は
 current field 内で await されるため、memory は decode length とともに増加しません。
+
+little-endian TBC writer の zero-copy write により、同じ 160-frame output 全体で約
+455 MB の full-field temporary byte-array payload を除去しました。xUnit v3 allocation
+probe は warm-up 後に 400,000 sample を thread-local allocation 1 KiB 未満で書き込みます。
+新しい 160-frame run でも luma/chroma SHA-256 は完全に一致し、wall time は通常の
+run-to-run noise の範囲内でした。
 
 <details>
 <summary>Kernel と allocation の benchmark 履歴</summary>
@@ -259,7 +268,7 @@ dotnet test VHSDecodeDotNet.slnx -c Release --no-build --no-restore
 
 現在の正式な Release build は warning 0、error 0 です。xUnit v3 project は
 `dotnet test` と Visual Studio Test Explorer の両方で個別に検出できる
-**781** tests を公開します。
+**782** tests を公開します。
 
 <!-- SECTION: usage -->
 

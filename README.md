@@ -2,7 +2,7 @@
 
 **[English](README.md)** | [简体中文](README.zh-CN.md) | [日本語](README.ja.md)
 
-<!-- README_SYNC: 2026-07-20.1 -->
+<!-- README_SYNC: 2026-07-20.2 -->
 
 .NET 11 rewrite of the decode-facing parts of
 [`oyvindln/vhs-decode`](https://github.com/oyvindln/vhs-decode), focused on
@@ -151,6 +151,9 @@ release compatibility remain the first constraint.
   each transform.
 - RF span assembly writes directly into the requested output window instead of
   allocating whole-block field arrays and slicing a second copy.
+- On little-endian hosts, TBC and chroma samples stream directly from their
+  `ushort` spans without allocating a full-field byte copy. The big-endian
+  fallback uses one returned pooled buffer, so repeated writes remain bounded.
 - Standard VHS field decode reuses at most two exact-length RF span buffer sets,
   matching the only two block counts a fixed read window can cover. Buffers are
   returned after synchronous field decode; public `Read` results, deferred CVBS
@@ -191,6 +194,12 @@ four-field probe from 5.12 GiB to 1.96 GiB.
 The bounded VHS field-stage overlap reduced a 160-frame run from 20.13 s to
 18.55 s (7.8%). TBC, chroma, and JSON SHA-256 values matched exactly; the task
 is awaited within the current field, so memory cannot grow with decode length.
+
+The zero-copy little-endian TBC writer removed about 455 MB of full-field
+temporary byte-array payload across the same 160-frame output. Its xUnit v3
+allocation probe writes 400,000 samples with less than 1 KiB of thread-local
+allocation after warm-up. A fresh 160-frame run retained the exact luma and
+chroma SHA-256 values; wall time remained within run-to-run noise.
 
 <details>
 <summary>Kernel and allocation benchmark history</summary>
@@ -266,7 +275,7 @@ dotnet test VHSDecodeDotNet.slnx -c Release --no-build --no-restore
 ```
 
 The current formal Release build has zero warnings and errors. The xUnit v3
-project exposes **781** independently discoverable tests to both
+project exposes **782** independently discoverable tests to both
 `dotnet test` and Visual Studio Test Explorer.
 
 <!-- SECTION: usage -->

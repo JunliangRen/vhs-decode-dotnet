@@ -611,7 +611,8 @@ public sealed class TbcSqliteLifecycleCompatibilityTests
         public override void Write(ReadOnlySpan<byte> buffer)
         {
             BytesWritten += buffer.Length;
-            base.Write(buffer);
+            byte[] copy = buffer.ToArray();
+            base.Write(copy, 0, copy.Length);
         }
     }
 

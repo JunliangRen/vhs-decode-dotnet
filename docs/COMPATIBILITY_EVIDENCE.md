@@ -1181,6 +1181,24 @@ possible capture has already been proven byte-for-byte identical.
   18.55 s (7.8%); TBC, chroma, and JSON SHA-256 remained byte-identical. The
   xUnit v3 field test also compares every serial and four-worker luma/chroma
   sample across two consecutive stateful fields
+- little-endian TBC/chroma output now writes directly from `ushort` spans,
+  eliminating about 455 MB of full-field temporary byte-array payload over a
+  160-frame run; the big-endian fallback rents and returns one bounded buffer.
+  The xUnit v3 allocation probe writes 400,000 samples with less than 1 KiB of
+  thread-local allocation after warm-up. The fresh 160-frame outputs retained
+  luma SHA-256
+  `8AF14AEB2C40D65963DFBBC33947557CFB29154AD0011FF90DCD4C75EE12D6E5`
+  and chroma SHA-256
+  `3C53B4F22CB0E14BA3B86B4B39770E18A17C6E8BEE6A56E843A73AC27ECA3102`;
+  the measured wall time remained within run-to-run noise
+- a zero-copy `--length 320` longevity run reached fixture EOF after 204 frames
+  in 24.26 s (8.54 FPS post-setup). Private-memory quarter medians were
+  1.495/1.563/1.601/1.543 GiB with a 1.73 GiB peak, showing no monotonic
+  late-run growth. Luma and chroma each contained 409 complete fields with no
+  trailing bytes, and JSON contained the same 409 fields. SHA-256 values were
+  luma `FCD83E68BDF6EFB3C2583349519B24E750155DE6B4C256D0B5F9CE4E76BE94E9`,
+  chroma `B7CE0EF8768B7731FFAD9E7B8FE4162A24D0CC02620FC32F639A7ED078BF065B`,
+  and JSON `EAACE43594DEC574360B664D932E23F10E1B428BA4268A91BA6A1858BFEDD4AD`
 - the verified 40-frame output hashes are TBC
   `2F540BF1F9A132281A8D26C0EEADEBC7617A366E296EEB5FF69FF9346836CD05`, JSON
   `FCDCDEAA9D3BAD8949AAEFACBFDE2E8688A13568FF71836EBB37E758780CB67F`, and
@@ -1598,7 +1616,7 @@ dotnet test VHSDecodeDotNet.slnx --no-build
 ```
 
 The current formal solution build completes with zero warnings and errors, and
-the xUnit v3 project exposes 781 independently discoverable compatibility tests
+the xUnit v3 project exposes 782 independently discoverable compatibility tests
 to `dotnet test` and Visual Studio Test Explorer. On the
 same Windows machine and fixtures, Release wall-clock measurements for one
 frame were 2.346 s versus 7.193 s for NTSC VHS and 1.651 s versus 5.865 s for
