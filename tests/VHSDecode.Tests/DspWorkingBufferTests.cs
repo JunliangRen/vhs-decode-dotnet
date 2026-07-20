@@ -269,6 +269,18 @@ public sealed class DspWorkingBufferTests
             compactSosBytes < 170_000,
             $"Warm compact float32 SOS forward/backward allocated {compactSosBytes:N0} bytes.");
 
+        TransferFunction iir = IirFilterDesign.ButterworthLowPassTransferFunction(
+            order: 4,
+            normalizedCutoff: 0.2);
+        _ = IirFilter.ApplyForwardBackward(iir, input);
+        long beforeIir = GC.GetAllocatedBytesForCurrentThread();
+        double[] iirFiltered = IirFilter.ApplyForwardBackward(iir, input);
+        long iirBytes = GC.GetAllocatedBytesForCurrentThread() - beforeIir;
+        GC.KeepAlive(iirFiltered);
+        Assert.True(
+            iirBytes < 600_000,
+            $"Warm IIR forward/backward allocated {iirBytes:N0} bytes.");
+
         const int outputLineLength = 512;
         const int lineCount = 64;
         double[] resampleSource = Enumerable.Range(0, (lineCount + 1) * 1_024 + 16)
@@ -387,6 +399,223 @@ public sealed class DspWorkingBufferTests
                 ApplyForwardBackwardSectionMajorReference(sections, input),
                 SosFilter.ApplyForwardBackward(sections, input));
         }
+    }
+
+    [Fact(DisplayName = "In-place IIR filtering remains allocating-reference bit-exact")]
+    public void InPlaceIirFilteringRemainsAllocatingReferenceBitExact()
+    {
+        const int length = 4_096;
+        double[] input = Enumerable.Range(0, length)
+            .Select(index => Math.Sin(index * 0.013) + (0.125 * Math.Cos(index * 0.029)))
+            .ToArray();
+        TransferFunction[] filters =
+        [
+            new TransferFunction([1.0], [1.0]),
+            IirFilterDesign.ButterworthLowPassTransferFunction(order: 4, normalizedCutoff: 0.2),
+            IirFilterDesign.ButterworthHighPassTransferFunction(order: 9, normalizedCutoff: 0.35),
+            new TransferFunction([0.25, 0.1], [2.0, -0.3, 0.1]),
+            new TransferFunction([0.2, 0.1, 0.05], [1.0, -0.25])
+        ];
+
+        foreach (TransferFunction filter in filters)
+        {
+            foreach (int? padLength in new int?[] { null, 0, 7 })
+            {
+                AssertDoubleBitsEqual(
+                    ApplyForwardBackwardIirReference(filter, input, padLength),
+                    IirFilter.ApplyForwardBackward(filter, input, padLength));
+            }
+
+            int stateLength = Math.Max(filter.Numerator.Length, filter.Denominator.Length) - 1;
+            double[] initialState = Enumerable.Range(0, stateLength)
+                .Select(index => (index + 1) * 0.03125)
+                .ToArray();
+            double[] expectedFinalState = initialState.ToArray();
+            double[] expected = ApplyForwardIirReference(filter, input, expectedFinalState);
+            double[] actual = IirFilter.ApplyForward(filter, input, initialState, out double[] actualFinalState);
+            AssertDoubleBitsEqual(expected, actual);
+            AssertDoubleBitsEqual(expectedFinalState, actualFinalState);
+            AssertDoubleBitsEqual(
+                initialState,
+                Enumerable.Range(0, stateLength).Select(index => (index + 1) * 0.03125).ToArray());
+        }
+    }
+
+    private static double[] ApplyForwardBackwardIirReference(
+        TransferFunction filter,
+        ReadOnlySpan<double> input,
+        int? padLength)
+    {
+        (double[] numerator, double[] denominator) = NormalizeIirReference(filter);
+        int edge = padLength ?? (3 * Math.Max(numerator.Length, denominator.Length));
+        double[] extended = edge == 0
+            ? input.ToArray()
+            : OddExtensionReference(input, Math.Min(edge, input.Length - 1));
+        double[] zi = SteadyStateIirReference(numerator, denominator);
+        double[] forward = ApplyForwardIirReference(
+            numerator,
+            denominator,
+            extended,
+            ScaleIirReference(zi, extended[0]));
+        Array.Reverse(forward);
+        double[] backward = ApplyForwardIirReference(
+            numerator,
+            denominator,
+            forward,
+            ScaleIirReference(zi, forward[0]));
+        Array.Reverse(backward);
+        if (edge == 0)
+        {
+            return backward;
+        }
+
+        int actualEdge = (extended.Length - input.Length) / 2;
+        return backward.AsSpan(actualEdge, input.Length).ToArray();
+    }
+
+    private static double[] ApplyForwardIirReference(
+        TransferFunction filter,
+        ReadOnlySpan<double> input,
+        double[] state)
+    {
+        (double[] numerator, double[] denominator) = NormalizeIirReference(filter);
+        return ApplyForwardIirReference(numerator, denominator, input, state);
+    }
+
+    private static double[] ApplyForwardIirReference(
+        double[] numerator,
+        double[] denominator,
+        ReadOnlySpan<double> input,
+        double[] state)
+    {
+        int stateLength = Math.Max(numerator.Length, denominator.Length) - 1;
+        var output = new double[input.Length];
+        for (int sample = 0; sample < input.Length; sample++)
+        {
+            double x = input[sample];
+            double y = (numerator[0] * x) + (stateLength > 0 ? state[0] : 0.0);
+            for (int i = 1; i < stateLength; i++)
+            {
+                double b = i < numerator.Length ? numerator[i] : 0.0;
+                double a = i < denominator.Length ? denominator[i] : 0.0;
+                state[i - 1] = (b * x) + state[i] - (a * y);
+            }
+
+            if (stateLength > 0)
+            {
+                int i = stateLength;
+                double b = i < numerator.Length ? numerator[i] : 0.0;
+                double a = i < denominator.Length ? denominator[i] : 0.0;
+                state[stateLength - 1] = (b * x) - (a * y);
+            }
+
+            output[sample] = y;
+        }
+
+        return output;
+    }
+
+    private static (double[] Numerator, double[] Denominator) NormalizeIirReference(
+        TransferFunction filter)
+    {
+        double[] numerator = filter.Numerator.ToArray();
+        double[] denominator = filter.Denominator.ToArray();
+        double a0 = denominator[0];
+        if (a0 != 1.0)
+        {
+            for (int i = 0; i < numerator.Length; i++)
+            {
+                numerator[i] /= a0;
+            }
+
+            for (int i = 0; i < denominator.Length; i++)
+            {
+                denominator[i] /= a0;
+            }
+        }
+
+        return (numerator, denominator);
+    }
+
+    private static double[] SteadyStateIirReference(double[] numerator, double[] denominator)
+    {
+        int stateLength = Math.Max(numerator.Length, denominator.Length) - 1;
+        if (stateLength == 0)
+        {
+            return [];
+        }
+
+        int coefficientCount = stateLength + 1;
+        var paddedNumerator = new double[coefficientCount];
+        var paddedDenominator = new double[coefficientCount];
+        numerator.CopyTo(paddedNumerator, 0);
+        denominator.CopyTo(paddedDenominator, 0);
+        double steadyOutput = SumNumpyIirReference(paddedNumerator)
+            / SumNumpyIirReference(paddedDenominator);
+        var state = new double[stateLength];
+        double cumulative = 0.0;
+        for (int i = coefficientCount - 1; i >= 1; i--)
+        {
+            cumulative += paddedNumerator[i] - (steadyOutput * paddedDenominator[i]);
+            state[i - 1] = cumulative;
+        }
+
+        return state;
+    }
+
+    private static double SumNumpyIirReference(ReadOnlySpan<double> values)
+    {
+        if (values.Length < 8)
+        {
+            double shortSum = -0.0;
+            foreach (double value in values)
+            {
+                shortSum += value;
+            }
+
+            return shortSum;
+        }
+
+        double r0 = values[0];
+        double r1 = values[1];
+        double r2 = values[2];
+        double r3 = values[3];
+        double r4 = values[4];
+        double r5 = values[5];
+        double r6 = values[6];
+        double r7 = values[7];
+        int index = 8;
+        int blockEnd = values.Length - (values.Length % 8);
+        for (; index < blockEnd; index += 8)
+        {
+            r0 += values[index];
+            r1 += values[index + 1];
+            r2 += values[index + 2];
+            r3 += values[index + 3];
+            r4 += values[index + 4];
+            r5 += values[index + 5];
+            r6 += values[index + 6];
+            r7 += values[index + 7];
+        }
+
+        double sum = ((r0 + r1) + (r2 + r3)) + ((r4 + r5) + (r6 + r7));
+        for (; index < values.Length; index++)
+        {
+            sum += values[index];
+        }
+
+        return sum;
+    }
+
+    private static double[] ScaleIirReference(ReadOnlySpan<double> values, double scale)
+    {
+        var output = new double[values.Length];
+        for (int i = 0; i < output.Length; i++)
+        {
+            output[i] = values[i] * scale;
+        }
+
+        return output;
     }
 
     private static double[] ApplyForwardBackwardSectionMajorReference(

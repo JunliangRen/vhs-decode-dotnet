@@ -43,20 +43,20 @@ public static class IirFilter
         double[] extended = edge == 0 ? input.ToArray() : OddExtension(input, Math.Min(edge, input.Length - 1));
         double[] zi = SteadyStateInitialConditions(numerator, denominator);
         double[] firstZi = Scale(zi, extended[0]);
-        double[] forward = ApplyForward(numerator, denominator, extended, firstZi);
-        Array.Reverse(forward);
-        double[] secondZi = Scale(zi, forward[0]);
-        double[] backward = ApplyForward(numerator, denominator, forward, secondZi);
-        Array.Reverse(backward);
+        ApplyForwardInPlace(numerator, denominator, extended, firstZi);
+        Array.Reverse(extended);
+        double[] secondZi = Scale(zi, extended[0]);
+        ApplyForwardInPlace(numerator, denominator, extended, secondZi);
+        Array.Reverse(extended);
 
         if (edge == 0)
         {
-            return backward;
+            return extended;
         }
 
         int actualEdge = (extended.Length - input.Length) / 2;
         var trimmed = new double[input.Length];
-        Array.Copy(backward, actualEdge, trimmed, 0, trimmed.Length);
+        Array.Copy(extended, actualEdge, trimmed, 0, trimmed.Length);
         return trimmed;
     }
 
@@ -83,19 +83,21 @@ public static class IirFilter
             throw new ArgumentException("IIR denominator a0 must not be zero.", nameof(filter));
         }
 
+        if (a0 == 1.0)
+        {
+            return (filter.Numerator, filter.Denominator);
+        }
+
         double[] numerator = filter.Numerator.ToArray();
         double[] denominator = filter.Denominator.ToArray();
-        if (a0 != 1.0)
+        for (int i = 0; i < numerator.Length; i++)
         {
-            for (int i = 0; i < numerator.Length; i++)
-            {
-                numerator[i] /= a0;
-            }
+            numerator[i] /= a0;
+        }
 
-            for (int i = 0; i < denominator.Length; i++)
-            {
-                denominator[i] /= a0;
-            }
+        for (int i = 0; i < denominator.Length; i++)
+        {
+            denominator[i] /= a0;
         }
 
         return (numerator, denominator);
@@ -122,16 +124,50 @@ public static class IirFilter
         }
 
         double[] workingState = retainFinalState ? state : state.ToArray();
-        var output = new double[input.Length];
-        for (int sample = 0; sample < input.Length; sample++)
+        double[] output = input.ToArray();
+        ApplyForwardInPlace(numerator, denominator, output, workingState);
+        return output;
+    }
+
+    private static void ApplyForwardInPlace(
+        double[] numerator,
+        double[] denominator,
+        Span<double> samples,
+        double[] state)
+    {
+        int stateLength = state.Length;
+        if (numerator.Length == stateLength + 1 && denominator.Length == stateLength + 1)
         {
-            double x = input[sample];
-            double y = (numerator[0] * x) + (stateLength > 0 ? workingState[0] : 0.0);
+            for (int sample = 0; sample < samples.Length; sample++)
+            {
+                double x = samples[sample];
+                double y = (numerator[0] * x) + (stateLength > 0 ? state[0] : 0.0);
+                for (int i = 1; i < stateLength; i++)
+                {
+                    state[i - 1] = (numerator[i] * x) + state[i] - (denominator[i] * y);
+                }
+
+                if (stateLength > 0)
+                {
+                    state[stateLength - 1] =
+                        (numerator[stateLength] * x) - (denominator[stateLength] * y);
+                }
+
+                samples[sample] = y;
+            }
+
+            return;
+        }
+
+        for (int sample = 0; sample < samples.Length; sample++)
+        {
+            double x = samples[sample];
+            double y = (numerator[0] * x) + (stateLength > 0 ? state[0] : 0.0);
             for (int i = 1; i < stateLength; i++)
             {
                 double b = i < numerator.Length ? numerator[i] : 0.0;
                 double a = i < denominator.Length ? denominator[i] : 0.0;
-                workingState[i - 1] = (b * x) + workingState[i] - (a * y);
+                state[i - 1] = (b * x) + state[i] - (a * y);
             }
 
             if (stateLength > 0)
@@ -139,13 +175,11 @@ public static class IirFilter
                 int i = stateLength;
                 double b = i < numerator.Length ? numerator[i] : 0.0;
                 double a = i < denominator.Length ? denominator[i] : 0.0;
-                workingState[stateLength - 1] = (b * x) - (a * y);
+                state[stateLength - 1] = (b * x) - (a * y);
             }
 
-            output[sample] = y;
+            samples[sample] = y;
         }
-
-        return output;
     }
 
     private static double[] SteadyStateInitialConditions(double[] numerator, double[] denominator)
@@ -157,13 +191,26 @@ public static class IirFilter
         }
 
         int coefficientCount = stateLength + 1;
-        var paddedNumerator = new double[coefficientCount];
-        var paddedDenominator = new double[coefficientCount];
-        numerator.CopyTo(paddedNumerator, 0);
-        denominator.CopyTo(paddedDenominator, 0);
+        double[]? paddedNumerator = null;
+        double[]? paddedDenominator = null;
+        ReadOnlySpan<double> effectiveNumerator = numerator;
+        ReadOnlySpan<double> effectiveDenominator = denominator;
+        if (numerator.Length != coefficientCount)
+        {
+            paddedNumerator = new double[coefficientCount];
+            numerator.CopyTo(paddedNumerator, 0);
+            effectiveNumerator = paddedNumerator;
+        }
 
-        double numeratorSum = SumNumpy(paddedNumerator);
-        double denominatorSum = SumNumpy(paddedDenominator);
+        if (denominator.Length != coefficientCount)
+        {
+            paddedDenominator = new double[coefficientCount];
+            denominator.CopyTo(paddedDenominator, 0);
+            effectiveDenominator = paddedDenominator;
+        }
+
+        double numeratorSum = SumNumpy(effectiveNumerator);
+        double denominatorSum = SumNumpy(effectiveDenominator);
         if (denominatorSum == 0.0)
         {
             throw new ArgumentException("IIR filter has a pole at z = 1.", nameof(denominator));
@@ -174,7 +221,7 @@ public static class IirFilter
         double cumulative = 0.0;
         for (int i = coefficientCount - 1; i >= 1; i--)
         {
-            cumulative += paddedNumerator[i] - (steadyOutput * paddedDenominator[i]);
+            cumulative += effectiveNumerator[i] - (steadyOutput * effectiveDenominator[i]);
             state[i - 1] = cumulative;
         }
 
