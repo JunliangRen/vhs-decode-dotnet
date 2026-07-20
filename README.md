@@ -2,7 +2,7 @@
 
 **[English](README.md)** | [简体中文](README.zh-CN.md) | [日本語](README.ja.md)
 
-<!-- README_SYNC: 2026-07-20.7 -->
+<!-- README_SYNC: 2026-07-20.8 -->
 
 .NET 11 rewrite of the decode-facing parts of
 [`oyvindln/vhs-decode`](https://github.com/oyvindln/vhs-decode), focused on
@@ -143,7 +143,8 @@ release compatibility remain the first constraint.
 - VHS heterodyne and carrier tables use bounded parallel construction and a
   session-owned one-entry cache. Exact-key hits reuse the original arrays;
   sample-shape, carrier, phase, or AFC changes replace the prior entry instead
-  of growing retained state.
+  of growing retained state. Phase analysis reads the field-owned resampled
+  array directly, while decode creates its only writable copy at prefiltering.
 - HiFi uses bounded parallel block decoding followed by ordered
   post-processing and writing.
 - Managed real FFTs reuse pooled packing and scratch buffers. Float32 SOS
@@ -226,7 +227,13 @@ from 13.854 to 12.579 GiB, `Double[]` allocation from 12,611.83 to 11,311.73
 MiB, and Gen2 collections from 38 to 31. Five interleaved A/B pairs reduced
 median wall/CPU time from 5.49/19.23 to 5.30/18.05 s (3.5%/6.1%). Two reversed
 204-frame pairs were 4.4% and 4.8% faster; memory was non-monotonic with a
-2.0 GiB maximum, and all 409 fields and output hashes remained exact.
+2.0 GiB maximum, and all 409 fields and output hashes remained exact. Removing
+the two remaining read-only field copies further reduced matched sampled/
+`Double[]` allocation from 12.580 GiB/11,309.71 MiB to 12.147 GiB/10,871.59
+MiB. Five interleaved runs reduced median wall/CPU time from 5.209/18.188 to
+5.175/17.094 s (0.7%/6.0%); two reversed 204-frame pairs were 1.8% and 1.9%
+faster with non-monotonic memory at or below 2.05 GiB and exact 408-field
+`--length 204` outputs.
 
 AVX RF-envelope preparation reduced the isolated 32K-block median from 57.5 us
 to 13.3 us, a 76.9% kernel gain. The 40-frame median moved from 7.55 s to 7.39 s,

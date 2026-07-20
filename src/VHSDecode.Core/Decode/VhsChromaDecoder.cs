@@ -255,8 +255,9 @@ public static class VhsChromaDecoder
         double? previousChromaAfcCarrierHz = null,
         double previousChromaAfcPhaseRadians = 0.0)
     {
+        double[] chromaField = chroma.ToArray();
         VhsChromaPhaseAnalysis analysis = AnalyzeFieldPhaseWithWorkspace(
-            chroma,
+            chromaField,
             options,
             lineLocations,
             inputLineLength,
@@ -267,7 +268,7 @@ public static class VhsChromaDecoder
             previousChromaAfcCarrierHz,
             previousChromaAfcPhaseRadians);
         return DecodeFieldWithPhaseCore(
-            chroma,
+            chromaField,
             options,
             analysis.Phase,
             isFirstField,
@@ -291,7 +292,7 @@ public static class VhsChromaDecoder
         double? previousChromaAfcCarrierHz = null,
         double previousChromaAfcPhaseRadians = 0.0)
         => AnalyzeFieldPhaseWithWorkspace(
-            chroma,
+            chroma.ToArray(),
             options,
             lineLocations,
             inputLineLength,
@@ -303,7 +304,7 @@ public static class VhsChromaDecoder
             previousChromaAfcPhaseRadians).Phase;
 
     internal static VhsChromaPhaseAnalysis AnalyzeFieldPhaseWithWorkspace(
-        ReadOnlySpan<double> chroma,
+        double[] chromaField,
         VhsChromaFieldOptions options,
         IReadOnlyList<double> lineLocations,
         int inputLineLength,
@@ -316,7 +317,7 @@ public static class VhsChromaDecoder
         VhsChromaCarrierTableCache? carrierTableCache = null)
     {
         ArgumentNullException.ThrowIfNull(options);
-        double[] chromaField = chroma.ToArray();
+        ArgumentNullException.ThrowIfNull(chromaField);
         ValidateLineShape(chromaField.Length, options.OutputLineCount, options.OutputLineLength);
         ValidateBurstRange(options.BurstStart, options.BurstEnd, options.OutputLineLength);
 
@@ -451,21 +452,20 @@ public static class VhsChromaDecoder
     {
         ArgumentNullException.ThrowIfNull(options);
         ArgumentNullException.ThrowIfNull(phase);
-        double[] chromaField = chroma.ToArray();
-        ValidateLineShape(chromaField.Length, options.OutputLineCount, options.OutputLineLength);
+        ValidateLineShape(chroma.Length, options.OutputLineCount, options.OutputLineLength);
         ValidateBurstRange(options.BurstStart, options.BurstEnd, options.OutputLineLength);
 
         if (phase.BurstDetectedLine == -1)
         {
             return new VhsChromaFieldResult(
-                ChromaToU16(new double[chromaField.Length]),
+                ChromaToU16(new double[chroma.Length]),
                 phase.BurstDetectedLine,
                 null,
                 phase.NextChromaRotationIndex,
                 phase);
         }
 
-        chromaField = ApplyChromaPreFilter(chromaField, options, previousChromaAfcCarrierHz);
+        double[] chromaField = ApplyChromaPreFilter(chroma, options, previousChromaAfcCarrierHz);
         double outputSampleRateMHz = options.FscMHz * 4.0;
         double[] carrierProbe = chromaField;
         if (options.ChromaAfcTrackCarrier && options.ChromaAfcMeasurementFilters is { } measurementFilters)

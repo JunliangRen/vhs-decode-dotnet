@@ -2,7 +2,7 @@
 
 [English](README.md) | [简体中文](README.zh-CN.md) | **[日本語](README.ja.md)**
 
-<!-- README_SYNC: 2026-07-20.7 -->
+<!-- README_SYNC: 2026-07-20.8 -->
 
 [`oyvindln/vhs-decode`](https://github.com/oyvindln/vhs-decode) の
 デコード関連部分を .NET 11 で再実装するプロジェクトです。現在は release
@@ -139,7 +139,9 @@
   のみで並行実行します。
 - VHS heterodyne/carrier table は境界付き並行構築と session-owned one-entry cache を
   使用します。exact-key hit は元の array を再利用し、sample shape、carrier、phase、
-  AFC の変更時は旧 entry を置き換えるため、保持 state は増加しません。
+  AFC の変更時は旧 entry を置き換えるため、保持 state は増加しません。phase analysis は
+  field-owned resampled array を直接 read-only で使い、decode は prefilter 開始時にだけ
+  writable copy を 1 つ作成します。
 - HiFi は境界付き並列 block decode の後、順序どおりに後処理と書き込みを行います。
 - Managed real FFT は pool 化した packing/scratch buffer を再利用します。float32 SOS の
   forward/backward filtering は拡張 buffer を 1 つ rent して in-place 実行し、呼び出し
@@ -217,7 +219,12 @@ session-owned VHS chroma-table cache は exact-key の heterodyne set と burst-
 減少しました。5 組の交互 A/B で wall/CPU 中央値は 5.49/19.23 秒から
 5.30/18.05 秒（3.5%/6.1%）へ短縮しました。実行順を反転した 2 組の 204-frame pair は
 4.4% と 4.8% 高速で、memory は非単調、peak は 2.0 GiB 以下でした。409 field と全 output
-hash は完全一致です。
+hash は完全一致です。残る 2 回の read-only field copy も除去した結果、matched trace の
+sampled allocation/`Double[]` は 12.580 GiB/11,309.71 MiB から
+12.147 GiB/10,871.59 MiB へ減少しました。5 組の交互実行で wall/CPU 中央値は
+5.209/18.188 秒から 5.175/17.094 秒（0.7%/6.0%）へ短縮しました。順序を反転した
+2 組の 204-frame pair は 1.8% と 1.9% 高速で、memory は非単調、peak は 2.05 GiB 以下、
+`--length 204` の 408-field output は完全一致です。
 
 AVX RF-envelope preparation は、単体 32K-block 中央値を 57.5 us から 13.3 us へ
 短縮し、kernel は 76.9% 改善しました。40-frame 中央値は 7.55 秒から 7.39 秒、

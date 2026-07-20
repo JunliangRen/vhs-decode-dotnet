@@ -3416,6 +3416,7 @@ public void VhsChromaPhaseWorkspacePreservesDecodeResultsAndCarrierFallback()
         options.OutputLineCount,
         options.FscMHz,
         options.OutputSampleRateHz);
+    double[] originalChroma = chroma.ToArray();
     double[] lineLocations = Enumerable.Range(0, options.OutputLineCount + 1)
         .Select(line => line * 100.0)
         .ToArray();
@@ -3496,6 +3497,7 @@ public void VhsChromaPhaseWorkspacePreservesDecodeResultsAndCarrierFallback()
         analysis.Phase,
         previousChromaAfcCarrierHz: changedCarrierHz);
     AssertTrue(preparedFallback.Samples.SequenceEqual(independentFallback.Samples));
+    AssertTrue(chroma.SequenceEqual(originalChroma));
 }
 
 [Fact(DisplayName = "VHS chroma decoder emits field samples")]
