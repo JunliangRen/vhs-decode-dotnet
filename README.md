@@ -126,7 +126,9 @@ release compatibility remain the first constraint.
   existing FFmpeg paths.
 - Packed `.lds` input decodes directly into the requested result array,
   including Python-compatible partial tail groups, instead of allocating and
-  copying a second fully unpacked array.
+  copying a second fully unpacked array. Its loader reuses one private packed
+  byte buffer up to 1,048,576 bytes; concurrent callers never share a borrowed
+  buffer, and larger reads are not retained.
 - A stream-scoped decoded RF cache avoids duplicate FFT work across overlapping
   field reads while keeping memory bounded.
 - VHS uses a bounded continuous RF pipeline. One producer owns ordered input
@@ -505,6 +507,19 @@ output and preserves Python's partial-tail-group behavior. Five interleaved
 1.198 GiB. All 42 recorded real-capture runs produced one exact luma, chroma,
 and JSON hash set per fixture.
 
+A follow-up packed-input pass reuses one loader-owned read buffer. In a
+1,024-block 32K probe, median time moved from 68.20 to 65.17 us per block
+(4.4% faster) and managed allocation from 310.49 to 268.52 MB (13.5% lower).
+Matched 160-frame runtime counters reduced total allocation from 22.248 to
+22.113 GiB, about 139 MiB (0.61%). Five 40-frame pairs moved default wall/CPU
+medians from 4.380/12.016 to 4.325/11.594 s and 20-worker medians from
+3.645/14.813 to 3.586/14.188 s. Three 160-frame pairs were wall-neutral at
+14.173/11.692 versus 14.231/11.701 s for default/20-worker. Two reversed-order
+400-frame pairs completed candidate/baseline in 26.229/26.403 s and
+baseline/candidate in 26.395/26.540 s. The pass is retained for lower long-run
+allocation; the 160/400-frame results do not establish a stable full-path CPU
+speedup. Every luma, chroma, and JSON hash remained exact.
+
 The VHS sync-reference DC-offset pass now reuses at most two exact-length
 low-pass workspaces. A matched 10-field GC trace reduced sampled managed
 allocation from 2.639 to 2.466 GiB, `Double[]` allocation from 2,469.42 to
@@ -634,7 +649,7 @@ dotnet test --solution VHSDecodeDotNet.slnx -c Release --no-build --no-restore
 ```
 
 The current formal Release build has zero warnings and errors. The xUnit v3
-project exposes **814** independently discoverable tests to both
+project exposes **817** independently discoverable tests to both
 `dotnet test` and Visual Studio Test Explorer.
 
 <!-- SECTION: usage -->

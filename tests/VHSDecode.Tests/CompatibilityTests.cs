@@ -16163,6 +16163,60 @@ public void PackedLdsLoaderHandlesEveryGroupAlignment(int start, int length)
     AssertSequence(expected, actual!);
 }
 
+[Fact(DisplayName = "packed LDS loader reuses its byte input buffer")]
+public void PackedLdsLoaderReusesItsByteInputBuffer()
+{
+    const int readLength = 32_768;
+    int[] samples = Enumerable.Range(0, readLength + 4)
+        .Select(index => (index * 73) % 1024)
+        .ToArray();
+    byte[] packed = Pack4x10(samples);
+    using var stream = new MemoryStream(packed, writable: false);
+    var loader = new PackedDdD4To40SampleLoader();
+    _ = loader.Read(stream, 0, readLength);
+
+    long before = GC.GetAllocatedBytesForCurrentThread();
+    double[]? actual = loader.Read(stream, 0, readLength);
+    long allocated = GC.GetAllocatedBytesForCurrentThread() - before;
+
+    Assert.NotNull(actual);
+    Assert.Equal(readLength, actual.Length);
+    Assert.Equal((double)(short)((samples[0] - 512) << 6), actual[0]);
+    Assert.Equal((double)(short)((samples[readLength - 1] - 512) << 6), actual[^1]);
+    Assert.True(
+        allocated < 270_000,
+        $"Warm 32K packed LDS read allocated {allocated:N0} bytes.");
+}
+
+[Fact(DisplayName = "packed LDS loader buffer cache remains safe under concurrent reads")]
+public void PackedLdsLoaderBufferCacheRemainsSafeUnderConcurrentReads()
+{
+    int[] samples = Enumerable.Range(0, 4_100)
+        .Select(index => (index * 73) % 1024)
+        .ToArray();
+    byte[] packed = Pack4x10(samples);
+    var loader = new PackedDdD4To40SampleLoader();
+
+    Parallel.For(
+        0,
+        32,
+        new ParallelOptions { MaxDegreeOfParallelism = 8 },
+        iteration =>
+        {
+            int start = iteration % 8;
+            const int length = 2_048;
+            using var stream = new MemoryStream(packed, writable: false);
+            double[] expected = samples
+                .Skip(start)
+                .Take(length)
+                .Select(value => (double)(short)((value - 512) << 6))
+                .ToArray();
+            double[]? actual = loader.Read(stream, start, length);
+
+            Assert.Equal(expected, actual);
+        });
+}
+
 [Fact(DisplayName = "packed r30 loader unpacks 3x10 bit samples")]
 public void PackedR30LoaderUnpacksSamples()
 {

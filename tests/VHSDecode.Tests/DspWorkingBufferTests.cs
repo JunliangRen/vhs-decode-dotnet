@@ -67,6 +67,29 @@ public sealed class DspWorkingBufferTests
         Assert.All(inverseBuffer[length..], value => Assert.True(double.IsNaN(value)));
     }
 
+    [Fact(DisplayName = "32K real FFT radix stages remain bit-exact")]
+    public void ThirtyTwoKilobyteRealFftRadixStagesRemainBitExact()
+    {
+        const int length = 32_768;
+        var input = new double[length];
+        uint state = 0x12345678;
+        for (int index = 0; index < input.Length; index++)
+        {
+            state = (1_664_525 * state) + 1_013_904_223;
+            input[index] = ((state >> 8) / 16_777_216.0) - 0.5;
+        }
+
+        Complex[] spectrum = PocketFftReal.Forward(input);
+        double[] inverse = PocketFftReal.Inverse(spectrum, length);
+
+        Assert.Equal(
+            "2109467E306D566CF2E101D16D0DEB464BB235BD1D896847980A956EC4E0FF32",
+            Convert.ToHexString(SHA256.HashData(MemoryMarshal.AsBytes(spectrum.AsSpan()))));
+        Assert.Equal(
+            "252170F26D392BD773B180ABAFF095B2DE32361B70531C65AAEA666DA5C5D4D4",
+            Convert.ToHexString(SHA256.HashData(MemoryMarshal.AsBytes(inverse.AsSpan()))));
+    }
+
     [Fact(DisplayName = "In-place RF rotations match allocating compatibility paths exactly")]
     public void InPlaceRfRotationsMatchAllocatingCompatibilityPathsExactly()
     {

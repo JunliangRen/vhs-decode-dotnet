@@ -4,6 +4,9 @@ namespace VHSDecode.Core.Rf;
 
 public sealed class PackedDdD4To40SampleLoader : IRfSampleLoader
 {
+    private const int MaximumRetainedBufferLength = 1024 * 1024;
+    private byte[]? _readBuffer;
+
     public double[]? Read(Stream stream, long sample, int readLength)
     {
         long start = (sample / 4) * 5;
@@ -11,52 +14,83 @@ public sealed class PackedDdD4To40SampleLoader : IRfSampleLoader
         int needed = checked(((readLength * 5) / 4) + 5);
 
         stream.Seek(start, SeekOrigin.Begin);
-        byte[] buffer = new byte[needed];
-        int read = stream.ReadAtLeast(buffer, needed, throwOnEndOfStream: false);
-        if (read != needed)
+        byte[] buffer = TakeReadBuffer(needed);
+        try
         {
-            return null;
+            int read = stream.ReadAtLeast(
+                buffer.AsSpan(0, needed),
+                needed,
+                throwOnEndOfStream: false);
+            if (read != needed)
+            {
+                return null;
+            }
+
+            int fullGroups = needed / 5;
+            int partialGroupSamples = Math.Max(0, (needed % 5) - 1);
+            int availableSamples = checked((fullGroups * 4) + partialGroupSamples);
+            if (offset + readLength > availableSamples)
+            {
+                return null;
+            }
+
+            var output = new double[readLength];
+            int outputIndex = 0;
+            int firstCount = Math.Min(4 - offset, readLength);
+            for (int sampleIndex = offset; sampleIndex < offset + firstCount; sampleIndex++)
+            {
+                output[outputIndex++] = DecodeSample(buffer, 0, sampleIndex);
+            }
+
+            int group = 1;
+            while (outputIndex <= readLength - 4)
+            {
+                int i = group * 5;
+                int s0 = (buffer[i] << 2) | ((buffer[i + 1] >> 6) & 0x03);
+                int s1 = ((buffer[i + 1] & 0x3F) << 4) | ((buffer[i + 2] >> 4) & 0x0F);
+                int s2 = ((buffer[i + 2] & 0x0F) << 6) | ((buffer[i + 3] >> 2) & 0x3F);
+                int s3 = ((buffer[i + 3] & 0x03) << 8) | buffer[i + 4];
+                output[outputIndex] = ToSignedDdD16(s0);
+                output[outputIndex + 1] = ToSignedDdD16(s1);
+                output[outputIndex + 2] = ToSignedDdD16(s2);
+                output[outputIndex + 3] = ToSignedDdD16(s3);
+                outputIndex += 4;
+                group++;
+            }
+
+            int remaining = readLength - outputIndex;
+            for (int sampleIndex = 0; sampleIndex < remaining; sampleIndex++)
+            {
+                output[outputIndex++] = DecodeSample(buffer, group * 5, sampleIndex);
+            }
+
+            return output;
+        }
+        finally
+        {
+            ReturnReadBuffer(buffer);
+        }
+    }
+
+    private byte[] TakeReadBuffer(int needed)
+    {
+        if (needed > MaximumRetainedBufferLength)
+        {
+            return new byte[needed];
         }
 
-        int fullGroups = buffer.Length / 5;
-        int partialGroupSamples = Math.Max(0, (buffer.Length % 5) - 1);
-        int availableSamples = checked((fullGroups * 4) + partialGroupSamples);
-        if (offset + readLength > availableSamples)
-        {
-            return null;
-        }
+        byte[]? cached = Interlocked.Exchange(ref _readBuffer, null);
+        return cached is not null && cached.Length >= needed
+            ? cached
+            : new byte[needed];
+    }
 
-        var output = new double[readLength];
-        int outputIndex = 0;
-        int firstCount = Math.Min(4 - offset, readLength);
-        for (int sampleIndex = offset; sampleIndex < offset + firstCount; sampleIndex++)
+    private void ReturnReadBuffer(byte[] buffer)
+    {
+        if (buffer.Length <= MaximumRetainedBufferLength)
         {
-            output[outputIndex++] = DecodeSample(buffer, 0, sampleIndex);
+            _ = Interlocked.CompareExchange(ref _readBuffer, buffer, null);
         }
-
-        int group = 1;
-        while (outputIndex <= readLength - 4)
-        {
-            int i = group * 5;
-            int s0 = (buffer[i] << 2) | ((buffer[i + 1] >> 6) & 0x03);
-            int s1 = ((buffer[i + 1] & 0x3F) << 4) | ((buffer[i + 2] >> 4) & 0x0F);
-            int s2 = ((buffer[i + 2] & 0x0F) << 6) | ((buffer[i + 3] >> 2) & 0x3F);
-            int s3 = ((buffer[i + 3] & 0x03) << 8) | buffer[i + 4];
-            output[outputIndex] = ToSignedDdD16(s0);
-            output[outputIndex + 1] = ToSignedDdD16(s1);
-            output[outputIndex + 2] = ToSignedDdD16(s2);
-            output[outputIndex + 3] = ToSignedDdD16(s3);
-            outputIndex += 4;
-            group++;
-        }
-
-        int remaining = readLength - outputIndex;
-        for (int sampleIndex = 0; sampleIndex < remaining; sampleIndex++)
-        {
-            output[outputIndex++] = DecodeSample(buffer, group * 5, sampleIndex);
-        }
-
-        return output;
     }
 
     private static short DecodeSample(byte[] buffer, int index, int sampleIndex)
