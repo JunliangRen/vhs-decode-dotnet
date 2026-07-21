@@ -1018,7 +1018,7 @@ public static class TbcOutputMetadataWriter
         int? fieldPhaseId = null,
         int? previousFieldPhaseId = null)
     {
-        var metrics = new Dictionary<string, double>();
+        Dictionary<string, double> metrics = [];
         if (field.Samples.Length == 0)
         {
             return metrics;
@@ -1906,12 +1906,7 @@ public static class TbcOutputMetadataWriter
 
     private static JsonArray ToJsonArray(int[] values)
     {
-        var array = new JsonArray();
-        foreach (int value in values)
-        {
-            array.Add(value);
-        }
-
+        JsonArray array = [.. values];
         return array;
     }
 

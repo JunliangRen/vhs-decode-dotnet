@@ -250,7 +250,7 @@ runs:
 
 The default remains **5 workers**, matching Release 4.0 CLI semantics; explicit
 20-worker mode was fastest on this 20-logical-processor fixture. The matrix used
-`RF-Sample_2026-07-19_23-58-20.lds` with `--system pal
+a local PAL `.lds` capture with `--system pal
 --detect_chroma_track_phase --ire0_adjust --tape_format VHS --frequency 40
 --start_fileloc 620000000 -l 40 --overwrite`, plus the row's thread option.
 
@@ -281,15 +281,15 @@ processors), Windows 11 build 26220, and .NET SDK/runtime
 | This port, Release (two runs) | 218.00 / 218.63 s | 238.72 / 239.50 s | 829.6-838.2 MiB |
 | Python v0.4.0 (`g4315520`) | 417.37 s | not captured | not captured |
 
-Both runs used `RF-Sample_2026-07-19_09-12-03.lds` and
+Both runs used the same local PAL `.lds` capture and
 `--system pal --detect_chroma_track_phase --ire0_adjust --tape_format VHS
 --frequency 40 --start_fileloc 281303040 --threads 0 -l 1000 --overwrite`.
 Both port runs were about 1.91x as fast (47.7-47.8% lower wall time), and all
 three paired SHA-256 values were byte-identical across Python and both port
 runs. `--threads 0` selected deterministic serial mode in both implementations.
 
-An independent no-seek startup checkpoint used
-`RF-Sample_2026-07-19_23-58-20.lds` with the same PAL VHS options,
+An independent no-seek startup checkpoint used a second local PAL `.lds`
+capture with the same PAL VHS options,
 `--threads 0`, and `-l 1000`. Python and this port produced byte-identical luma
 SHA-256 `E6616B63BD7DD1DB6C093FC6D1DCA7D23AABEF34EFD52089338D992F2DDCD0CD`
 and chroma SHA-256
@@ -642,8 +642,9 @@ The fallback serration-level search now decimates each field once into one
 bounded `ArrayPool` buffer and reuses one pulse list across the ordered 30-step,
 5-IRE search. Its final full-resolution retry, threshold sequence, scalar
 comparisons, and pulse ordering remain unchanged. Against main `4a67ae9` on
-`xxf.lds` (`--start_fileloc 620000000 -l 160`), two interleaved default-worker
-pairs moved average wall/CPU time from 13.991/41.492 s to 13.595/39.773 s
+the same local PAL `.lds` capture (`--start_fileloc 620000000 -l 160`), two
+interleaved default-worker pairs moved average wall/CPU time from
+13.991/41.492 s to 13.595/39.773 s
 (2.8%/4.1% lower); two 20-worker pairs moved from 11.152/48.508 s to
 10.838/47.180 s (2.8%/2.7% lower). Across those pairs and the final clean-source
 replay, candidate peak working sets stayed bounded at or below 1.14 GiB, and
@@ -654,11 +655,11 @@ Default linear TBC source positions are now filled one output line at a time.
 The implementation caches each line's two location values while retaining the
 original per-sample division, subtraction, multiplication, and addition order.
 Randomized tests compare every generated double bit-for-bit with the previous
-scalar interpolation. Against baseline `c51f059` on the same `xxf.lds`
-160-frame window, two interleaved default-worker pairs moved average wall/CPU
-time from 14.060/40.164 s to 13.598/40.438 s (3.3% less wall time; CPU was 0.7%
-higher within run noise). Two 20-worker pairs moved from 10.907/45.039 s to
-10.771/43.414 s (1.2% less wall time and 3.6% less CPU). The matching default
+scalar interpolation. Against baseline `c51f059` on that same local PAL `.lds`
+capture's 160-frame window, two interleaved default-worker pairs moved average
+wall/CPU time from 14.060/40.164 s to 13.598/40.438 s (3.3% less wall time;
+CPU was 0.7% higher within run noise). Two 20-worker pairs moved from
+10.907/45.039 s to 10.771/43.414 s (1.2% less wall time and 3.6% less CPU). The matching default
 trace reduced sampled `BuildSourcePositions` self time from 711.35 to 257.61 ms
 (63.8%). Candidate peak working sets stayed at or below 1.13 GiB, and all eight
 runs produced one exact luma, chroma, and JSON hash set.
