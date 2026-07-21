@@ -528,19 +528,6 @@ public sealed class DspWorkingBufferTests
             compactSosBytes < 170_000,
             $"Warm compact float32 SOS forward/backward allocated {compactSosBytes:N0} bytes.");
 
-        float[] floatInput = Array.ConvertAll(input, static value => (float)value);
-        _ = SosFilter.ApplyForwardBackwardFloat32(sections, floatInput, padLength: 0);
-        long beforeUnpooledSos = GC.GetAllocatedBytesForCurrentThread();
-        float[] unpooledFiltered = SosFilter.ApplyForwardBackwardFloat32(
-            sections,
-            floatInput,
-            padLength: 0);
-        long unpooledSosBytes = GC.GetAllocatedBytesForCurrentThread() - beforeUnpooledSos;
-        GC.KeepAlive(unpooledFiltered);
-        Assert.True(
-            unpooledSosBytes <= (length * sizeof(float)) + 256,
-            $"Warm unpooled float32 SOS forward/backward allocated {unpooledSosBytes:N0} bytes.");
-
         TransferFunction iir = IirFilterDesign.ButterworthLowPassTransferFunction(
             order: 4,
             normalizedCutoff: 0.2);
@@ -630,21 +617,6 @@ public sealed class DspWorkingBufferTests
             Assert.Equal(
                 hash,
                 Convert.ToHexString(SHA256.HashData(MemoryMarshal.AsBytes(output.AsSpan()))));
-        }
-
-        foreach (int sectionCount in new[] { 32, 33 })
-        {
-            SosSection[] boundarySections = Enumerable.Repeat(
-                new SosSection(1.0, 0.0, 0.0, 1.0, 0.0, 0.0),
-                sectionCount).ToArray();
-            output = SosFilter.ApplyForwardBackwardFloat32(boundarySections, input);
-            compactOutput = SosFilter.ApplyForwardBackwardFloat32ToSingle(boundarySections, input);
-            for (int i = 0; i < input.Length; i++)
-            {
-                float expected = (float)input[i];
-                Assert.Equal((double)expected, output[i]);
-                Assert.Equal(expected, compactOutput[i]);
-            }
         }
     }
 

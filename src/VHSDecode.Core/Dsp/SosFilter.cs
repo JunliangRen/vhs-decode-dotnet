@@ -28,8 +28,6 @@ public readonly record struct SosSection(
 
 public static class SosFilter
 {
-    private const int StackSectionLimit = 32;
-
     private readonly record struct FloatSosSection(
         float B0,
         float B1,
@@ -226,10 +224,7 @@ public static class SosFilter
             throw new ArgumentOutOfRangeException(nameof(padLength));
         }
 
-        Span<FloatSosSection> floatSections = sections.Count <= StackSectionLimit
-            ? stackalloc FloatSosSection[sections.Count]
-            : new FloatSosSection[sections.Count];
-        ConvertToFloat32(sections, floatSections);
+        FloatSosSection[] floatSections = ConvertToFloat32(sections);
         int extendedLength = checked(input.Length + (edge * 2));
         float[] rented = ArrayPool<float>.Shared.Rent(extendedLength);
         try
@@ -272,10 +267,7 @@ public static class SosFilter
             throw new ArgumentOutOfRangeException(nameof(padLength));
         }
 
-        Span<FloatSosSection> floatSections = sections.Count <= StackSectionLimit
-            ? stackalloc FloatSosSection[sections.Count]
-            : new FloatSosSection[sections.Count];
-        ConvertToFloat32(sections, floatSections);
+        FloatSosSection[] floatSections = ConvertToFloat32(sections);
         int extendedLength = checked(input.Length + (edge * 2));
         float[] rented = ArrayPool<float>.Shared.Rent(extendedLength);
         try
@@ -315,10 +307,7 @@ public static class SosFilter
             throw new ArgumentOutOfRangeException(nameof(padLength));
         }
 
-        Span<FloatSosSection> floatSections = sections.Count <= StackSectionLimit
-            ? stackalloc FloatSosSection[sections.Count]
-            : new FloatSosSection[sections.Count];
-        ConvertToFloat32(sections, floatSections);
+        FloatSosSection[] floatSections = ConvertToFloat32(sections);
         if (edge == 0)
         {
             float[] output = input.ToArray();
@@ -342,22 +331,15 @@ public static class SosFilter
     }
 
     private static void ApplyForwardBackwardFloat32InPlace(
-        ReadOnlySpan<FloatSosSection> floatSections,
+        FloatSosSection[] floatSections,
         Span<float> values)
     {
-        int stateLength = checked(floatSections.Length * 2);
-        Span<float> zi = floatSections.Length <= StackSectionLimit
-            ? stackalloc float[stateLength]
-            : new float[stateLength];
-        Span<float> scaledZi = floatSections.Length <= StackSectionLimit
-            ? stackalloc float[stateLength]
-            : new float[stateLength];
-        SteadyStateInitialConditionsFloat32(floatSections, zi);
-        ScaleInitialConditionsFloat32(zi, values[0], scaledZi);
-        ApplyForwardFloat32InPlace(floatSections, values, scaledZi);
+        float[,] zi = SteadyStateInitialConditionsFloat32(floatSections);
+        float[,] firstZi = ScaleInitialConditionsFloat32(zi, values[0]);
+        ApplyForwardFloat32InPlace(floatSections, values, firstZi);
         values.Reverse();
-        ScaleInitialConditionsFloat32(zi, values[0], scaledZi);
-        ApplyForwardFloat32InPlace(floatSections, values, scaledZi);
+        float[,] secondZi = ScaleInitialConditionsFloat32(zi, values[0]);
+        ApplyForwardFloat32InPlace(floatSections, values, secondZi);
         values.Reverse();
     }
 
@@ -405,11 +387,11 @@ public static class SosFilter
     }
 
     private static void ApplyForwardFloat32InPlace(
-        ReadOnlySpan<FloatSosSection> sections,
+        FloatSosSection[] sections,
         Span<float> values,
-        ReadOnlySpan<float> initialConditions)
+        float[,] initialConditions)
     {
-        if (initialConditions.Length != sections.Length * 2)
+        if (initialConditions.GetLength(0) != sections.Length || initialConditions.GetLength(1) != 2)
         {
             throw new ArgumentException("Initial condition array must have shape [sections, 2].", nameof(initialConditions));
         }
@@ -418,8 +400,8 @@ public static class SosFilter
         if (sections.Length == 1)
         {
             FloatSosSection section = sections[0];
-            float z1 = initialConditions[0];
-            float z2 = initialConditions[1];
+            float z1 = initialConditions[0, 0];
+            float z2 = initialConditions[0, 1];
             for (int sample = 0; sample < values.Length; sample++)
             {
                 float value = values[sample];
@@ -436,10 +418,10 @@ public static class SosFilter
         {
             FloatSosSection first = sections[0];
             FloatSosSection second = sections[1];
-            float firstZ1 = initialConditions[0];
-            float firstZ2 = initialConditions[1];
-            float secondZ1 = initialConditions[2];
-            float secondZ2 = initialConditions[3];
+            float firstZ1 = initialConditions[0, 0];
+            float firstZ2 = initialConditions[0, 1];
+            float secondZ1 = initialConditions[1, 0];
+            float secondZ2 = initialConditions[1, 1];
             for (int sample = 0; sample < values.Length; sample++)
             {
                 float value = values[sample];
@@ -463,14 +445,14 @@ public static class SosFilter
             FloatSosSection second = sections[1];
             FloatSosSection third = sections[2];
             FloatSosSection fourth = sections[3];
-            float firstZ1 = initialConditions[0];
-            float firstZ2 = initialConditions[1];
-            float secondZ1 = initialConditions[2];
-            float secondZ2 = initialConditions[3];
-            float thirdZ1 = initialConditions[4];
-            float thirdZ2 = initialConditions[5];
-            float fourthZ1 = initialConditions[6];
-            float fourthZ2 = initialConditions[7];
+            float firstZ1 = initialConditions[0, 0];
+            float firstZ2 = initialConditions[0, 1];
+            float secondZ1 = initialConditions[1, 0];
+            float secondZ2 = initialConditions[1, 1];
+            float thirdZ1 = initialConditions[2, 0];
+            float thirdZ2 = initialConditions[2, 1];
+            float fourthZ1 = initialConditions[3, 0];
+            float fourthZ2 = initialConditions[3, 1];
             for (int sample = 0; sample < values.Length; sample++)
             {
                 float value = values[sample];
@@ -499,14 +481,14 @@ public static class SosFilter
         }
 
         // Two floats per section keep the stack branch bounded to 256 bytes.
-        Span<float> states = sections.Length <= StackSectionLimit
+        Span<float> states = sections.Length <= 32
             ? stackalloc float[sections.Length * 2]
             : new float[sections.Length * 2];
         for (int sectionIndex = 0; sectionIndex < sections.Length; sectionIndex++)
         {
             int stateOffset = sectionIndex * 2;
-            states[stateOffset] = initialConditions[stateOffset];
-            states[stateOffset + 1] = initialConditions[stateOffset + 1];
+            states[stateOffset] = initialConditions[sectionIndex, 0];
+            states[stateOffset + 1] = initialConditions[sectionIndex, 1];
         }
 
         for (int sample = 0; sample < values.Length; sample++)
@@ -527,16 +509,10 @@ public static class SosFilter
         }
     }
 
-    private static void ConvertToFloat32(
-        IReadOnlyList<SosSection> sections,
-        Span<FloatSosSection> output)
+    private static FloatSosSection[] ConvertToFloat32(IReadOnlyList<SosSection> sections)
     {
-        if (output.Length < sections.Count)
-        {
-            throw new ArgumentException("Output span is shorter than the section list.", nameof(output));
-        }
-
-        for (int i = 0; i < sections.Count; i++)
+        var output = new FloatSosSection[sections.Count];
+        for (int i = 0; i < output.Length; i++)
         {
             SosSection section = sections[i];
             output[i] = new FloatSosSection(
@@ -547,6 +523,8 @@ public static class SosFilter
                 (float)section.A1,
                 (float)section.A2);
         }
+
+        return output;
     }
 
     private static float[] ConvertToFloat32(ReadOnlySpan<double> input)
@@ -614,17 +592,11 @@ public static class SosFilter
         }
     }
 
-    private static void SteadyStateInitialConditionsFloat32(
-        ReadOnlySpan<FloatSosSection> sections,
-        Span<float> output)
+    private static float[,] SteadyStateInitialConditionsFloat32(IReadOnlyList<FloatSosSection> sections)
     {
-        if (output.Length < sections.Length * 2)
-        {
-            throw new ArgumentException("Output span is shorter than the initial-condition state.", nameof(output));
-        }
-
+        var zi = new float[sections.Count, 2];
         float scale = 1.0f;
-        for (int i = 0; i < sections.Length; i++)
+        for (int i = 0; i < sections.Count; i++)
         {
             FloatSosSection section = sections[i];
             float firstTerm = section.B1 - (section.A1 * section.B0);
@@ -633,30 +605,27 @@ public static class SosFilter
             float denominatorSum = (1.0f + section.A1) + section.A2;
             float z0 = numeratorSum / denominatorSum;
             float z1 = ((1.0f + section.A1) * z0) - firstTerm;
-            int stateOffset = i * 2;
-            output[stateOffset] = scale * z0;
-            output[stateOffset + 1] = scale * z1;
+            zi[i, 0] = scale * z0;
+            zi[i, 1] = scale * z1;
 
             float numeratorDc = ((0.0f + section.B0) + section.B1) + section.B2;
             float denominatorDc = ((0.0f + section.A0) + section.A1) + section.A2;
             scale *= numeratorDc / denominatorDc;
         }
+
+        return zi;
     }
 
-    private static void ScaleInitialConditionsFloat32(
-        ReadOnlySpan<float> initialConditions,
-        float scale,
-        Span<float> output)
+    private static float[,] ScaleInitialConditionsFloat32(float[,] zi, float scale)
     {
-        if (output.Length < initialConditions.Length)
+        var output = new float[zi.GetLength(0), zi.GetLength(1)];
+        for (int i = 0; i < zi.GetLength(0); i++)
         {
-            throw new ArgumentException("Output span is shorter than the initial-condition state.", nameof(output));
+            output[i, 0] = zi[i, 0] * scale;
+            output[i, 1] = zi[i, 1] * scale;
         }
 
-        for (int i = 0; i < initialConditions.Length; i++)
-        {
-            output[i] = initialConditions[i] * scale;
-        }
+        return output;
     }
 
     private static double[] OddExtension(ReadOnlySpan<double> input, int edge)
