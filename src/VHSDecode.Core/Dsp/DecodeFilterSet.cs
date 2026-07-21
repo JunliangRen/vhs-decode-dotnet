@@ -1809,7 +1809,7 @@ public static class DecodeFilterSetBuilder
 
         int order = JsonInt(rfParams, "video_hpf_extra_order", defaultValue: 1) ?? 1;
         return IirFilterDesign.FrequencyResponse(
-            IirFilterDesign.ButterworthHighPass(order, cornerElement.GetDouble() / nyquistHz),
+            IirFilterDesign.ButterworthHighPassScipySos(order, cornerElement.GetDouble() / nyquistHz),
             blockLength);
     }
 

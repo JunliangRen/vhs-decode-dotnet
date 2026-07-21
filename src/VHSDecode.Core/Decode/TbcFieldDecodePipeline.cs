@@ -190,7 +190,7 @@ public sealed class TbcFieldDecodePipeline
         new(DcOffsetLowPassWorkspaceCapacity);
     private readonly string? _decodeType;
     private readonly double? _framesPerSecond;
-    private readonly Action<string, string>? _diagnosticLogger;
+    private Action<string, string>? _diagnosticLogger;
     private readonly bool _debug;
     private readonly int _inputBlockCutSamples;
     private (double SyncLevel, double BlankLevel)? _lastDetectedSyncLevels;
@@ -219,6 +219,7 @@ public sealed class TbcFieldDecodePipeline
     private IReadOnlyDictionary<int, double>? _previousLaserDiscPalPhaseAdjustments;
     private int _previousLaserDiscSkipCheckScore;
     private bool _vhsPulseSearchInitialized;
+    private bool _vhsSerrationLogLookaheadPhase;
 
     public TbcFieldDecodePipeline(
         SyncAnalyzer syncAnalyzer,
@@ -278,8 +279,7 @@ public sealed class TbcFieldDecodePipeline
         _vhsFieldLevelState = string.Equals(decodeType, "vhs", StringComparison.Ordinal)
             ? new VhsFieldLevelState(_framesPerSecond ?? 25.0)
             : null;
-        _diagnosticLogger = diagnosticLogger;
-        _renderer.DiagnosticLogger = diagnosticLogger;
+        DiagnosticLogger = diagnosticLogger;
         _debug = debug;
         _inputBlockCutSamples = inputBlockCutSamples >= 0
             ? inputBlockCutSamples
@@ -291,6 +291,16 @@ public sealed class TbcFieldDecodePipeline
     public VhsChromaFieldOptions? ChromaFieldOptions => _chromaFieldOptions;
 
     public bool DecodesVbiData => _decodeVbiData;
+
+    internal Action<string, string>? DiagnosticLogger
+    {
+        get => _diagnosticLogger;
+        set
+        {
+            _diagnosticLogger = value;
+            _renderer.DiagnosticLogger = value;
+        }
+    }
 
     internal TbcFieldDecodeState CaptureState()
     {
@@ -600,6 +610,11 @@ public sealed class TbcFieldDecodePipeline
             // Upstream starts the next field before downscaling the current one,
             // so a clamp measurement is first visible to the following decode.
             _delayedCvbsSyncLevels = previouslyRenderedCvbsLevels;
+        }
+
+        if (string.Equals(_decodeType, "vhs", StringComparison.Ordinal))
+        {
+            _vhsSerrationLogLookaheadPhase = true;
         }
 
         return decoded;
@@ -1675,7 +1690,9 @@ public sealed class TbcFieldDecodePipeline
                     FormattableString.Invariant(
                         $"VBI serration levels {serration.LevelCountBeforePull} - Sync tip: {serration.SyncLevel.Value / 1e3:F2} kHz, Blanking (ire0): {serration.BlankLevel.Value / 1e3:F2} kHz"));
             }
-            else if (serrationFieldNumber % 10 == 0)
+            else if (ShouldLogVhsSerrationFallback(
+                         serrationFieldNumber,
+                         _vhsSerrationLogLookaheadPhase))
             {
                 _diagnosticLogger?.Invoke(
                     "DEBUG",
@@ -1913,6 +1930,17 @@ public sealed class TbcFieldDecodePipeline
         return fallbackToSavedLevels && _lastDetectedSyncLevels.HasValue
             ? PrepareSyncSpanFromLevels(span, _lastDetectedSyncLevels.Value, usedSavedLevels: true)
             : new SyncPreparedSpan(span, defaultThreshold);
+    }
+
+    internal static bool ShouldLogVhsSerrationFallback(
+        int detectorFieldCount,
+        bool lookaheadPhase)
+    {
+        ArgumentOutOfRangeException.ThrowIfNegative(detectorFieldCount);
+
+        // Once the first field succeeds, v0.4.0's producer remains one field
+        // ahead of output processing and its periodic diagnostic arrives early.
+        return detectorFieldCount % 10 == (lookaheadPhase ? 9 : 0);
     }
 
     private SyncPreparedSpan PrepareSyncSpanFromLevels(

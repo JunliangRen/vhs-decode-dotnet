@@ -4996,6 +4996,42 @@ public void VhsVideoLowPassMatchesScipySosResponseBits()
         DoubleBitsSha256(magnitude));
 }
 
+[Theory(DisplayName = "VHS RF high-pass SOS matches SciPy section bits")]
+[InlineData(1, "38514F5E186DB41B0A41D6CDEF92EE179A129526D3ECF3484546B08810B8D9BA")]
+[InlineData(3, "D4C3ECF7ED506F25FAF4528C1D7401ABFDC113403A9407D4606381240A0F96AB")]
+[InlineData(17, "B2D46E35F933A3BECB41342AA1B4424B3D5350A63A8760F4934E8AC9A903D652")]
+[InlineData(20, "E041CBB92B98027E081A934E989DC6A1045B2CB4D892ADFC27BD53EE5E2F3E30")]
+public void VhsRfHighPassSosMatchesScipySectionBits(int order, string expectedHash)
+{
+    SosSection[] sections = IirFilterDesign.ButterworthHighPassScipySos(
+        order,
+        normalizedCutoff: 1_200_000.0 / 20_000_000.0);
+    AssertEqual(
+        expectedHash,
+        DoubleBitsSha256(sections.SelectMany(section => new[]
+        {
+            section.B0,
+            section.B1,
+            section.B2,
+            section.A0,
+            section.A1,
+            section.A2
+        }).ToArray()));
+}
+
+[Fact(DisplayName = "NTSC VHS RF high-pass matches SciPy SOS response bits")]
+public void NtscVhsRfHighPassMatchesScipySosResponseBits()
+{
+    const int blockLength = 32_768;
+    SosSection[] sections = IirFilterDesign.ButterworthHighPassScipySos(
+        order: 20,
+        normalizedCutoff: 1_200_000.0 / 20_000_000.0);
+    Complex[] response = IirFilterDesign.FrequencyResponse(sections, blockLength);
+    AssertEqual(
+        "E58DCE1B2AAE2930E90C2CAE371BBD46DAE97D9BD550A74D6238D25E5079CEAE",
+        ComplexBitsSha256(response));
+}
+
 [Fact(DisplayName = "sub-deemphasis analytic magnitude matches SciPy hilbert bits")]
 public void SubDeemphasisAnalyticMagnitudeMatchesScipyHilbertBits()
 {
@@ -7109,6 +7145,27 @@ public void VsyncSerrationDetectorMatchesV04Rules()
         true,
         true)!;
     AssertClose(80.0, Convert.ToDouble(PrivatePropertyValue(prepared, "Threshold")), 1e-12);
+}
+
+[Theory(DisplayName = "VHS serration fallback diagnostics follow v0.4.0 lookahead phase")]
+[InlineData(0, false, true)]
+[InlineData(9, false, false)]
+[InlineData(10, false, true)]
+[InlineData(0, true, false)]
+[InlineData(8, true, false)]
+[InlineData(9, true, true)]
+[InlineData(10, true, false)]
+[InlineData(19, true, true)]
+public void VhsSerrationFallbackDiagnosticMatchesLookaheadPhase(
+    int detectorFieldCount,
+    bool lookaheadPhase,
+    bool expected)
+{
+    AssertEqual(
+        expected,
+        TbcFieldDecodePipeline.ShouldLogVhsSerrationFallback(
+            detectorFieldCount,
+            lookaheadPhase));
 }
 
 [Fact(DisplayName = "VBI serration span minimum preserves float64 bit semantics")]
@@ -12543,7 +12600,7 @@ public void TbcFieldSequenceEnginePerformsVhsTerminalLookahead()
         using DecodeSession session = DecodeSessionFactory.Create(Parse(CliSpecs.Vhs, [
             "--pal",
             "--length",
-            "1",
+            "2",
             "input.u8",
             outputBase
         ]));
@@ -12561,7 +12618,14 @@ public void TbcFieldSequenceEnginePerformsVhsTerminalLookahead()
         {
             reads++;
             begins.Add(begin);
-            if (reads == 3)
+            DecodeSessionLogWriter.Append(activeSession, "DEBUG", $"decode marker {reads}");
+            activeSession.TbcFieldDecoder.DiagnosticLogger?.Invoke(
+                "DEBUG",
+                $"field diagnostic {reads}");
+            activeSession.TbcRenderer.DiagnosticLogger?.Invoke(
+                "DEBUG",
+                $"render diagnostic {reads}");
+            if (reads == 5)
             {
                 DecodeSessionLogWriter.Append(activeSession, "DEBUG", "terminal lookahead marker");
             }
@@ -12573,6 +12637,7 @@ public void TbcFieldSequenceEnginePerformsVhsTerminalLookahead()
                 with
                 {
                     NextFieldOffsetSamples = 100.0,
+                    DiskLocation = reads - 1,
                     ChromaSamples = new ushort[activeSession.TbcFrameSpec.FieldSampleCount]
                 };
         }
@@ -12592,21 +12657,32 @@ public void TbcFieldSequenceEnginePerformsVhsTerminalLookahead()
         {
             throw new Exception(result.Message);
         }
-        AssertEqual(2, result.WrittenFieldCount);
-        AssertEqual(3, reads);
-        AssertEqual(2, diskChecks);
-        AssertTrue(begins.SequenceEqual([0L, 100L, 200L]));
+        AssertEqual(4, result.WrittenFieldCount);
+        AssertEqual(5, reads);
+        AssertEqual(4, diskChecks);
+        AssertTrue(begins.SequenceEqual([0L, 100L, 200L, 300L, 400L]));
         using JsonDocument document = JsonDocument.Parse(File.ReadAllText(result.Paths!.JsonPath));
-        AssertEqual(2, document.RootElement.GetProperty("fields").GetArrayLength());
+        AssertEqual(4, document.RootElement.GetProperty("fields").GetArrayLength());
 
         string log = File.ReadAllText(outputBase + ".log");
         int lookaheadIndex = log.IndexOf("terminal lookahead marker", StringComparison.Ordinal);
-        int statusIndex = log.IndexOf("File Frame 0: VHS ", StringComparison.Ordinal);
+        int firstStatusIndex = log.IndexOf("File Frame 0: VHS ", StringComparison.Ordinal);
+        int secondStatusIndex = log.IndexOf("File Frame 1: VHS ", StringComparison.Ordinal);
+        int thirdDecodeIndex = log.IndexOf("decode marker 3", StringComparison.Ordinal);
+        int thirdFieldDiagnosticIndex = log.IndexOf("field diagnostic 3", StringComparison.Ordinal);
+        int thirdRenderIndex = log.IndexOf("render diagnostic 3", StringComparison.Ordinal);
         AssertTrue(lookaheadIndex >= 0);
-        AssertTrue(statusIndex > lookaheadIndex);
-        string status = "File Frame 0: VHS ";
+        AssertTrue(thirdDecodeIndex < firstStatusIndex);
+        AssertTrue(firstStatusIndex < thirdFieldDiagnosticIndex);
+        AssertTrue(firstStatusIndex < thirdRenderIndex);
+        AssertTrue(lookaheadIndex < secondStatusIndex);
+        Assert.DoesNotContain("field diagnostic 5", log, StringComparison.Ordinal);
+        Assert.DoesNotContain("render diagnostic 5", log, StringComparison.Ordinal);
+        string firstStatus = "File Frame 0: VHS ";
+        string secondStatus = "File Frame 1: VHS ";
         AssertEqual(
-            status + new string(' ', 80 - status.Length) + '\r',
+            firstStatus + new string(' ', 80 - firstStatus.Length) + '\r'
+                + secondStatus + new string(' ', 80 - secondStatus.Length) + '\r',
             statusOutput.ToString());
     }
     finally
