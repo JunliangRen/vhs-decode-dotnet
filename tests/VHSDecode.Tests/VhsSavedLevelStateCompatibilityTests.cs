@@ -59,6 +59,92 @@ public sealed class VhsSavedLevelStateCompatibilityTests
         Assert.Equal((8.5, 85.0), ntsc.PullLevels());
     }
 
+    [Fact(DisplayName = "VHS FieldState retains only the v0.4.0 moving-average window")]
+    public void FieldStateRetainsOnlyReleaseFourMovingAverageWindow()
+    {
+        const int sampleCount = 100_000;
+        var fieldState = new VhsFieldLevelState(framesPerSecond: 25.0);
+        var expectedSync = new List<double>(sampleCount * 2);
+        var expectedBlank = new List<double>(sampleCount);
+
+        for (int index = 0; index < sampleCount; index++)
+        {
+            double measuredSync = (index * 0.125) - 10_000.0;
+            double refinedSync = measuredSync + 0.03125;
+            double refinedBlank = (index * -0.0625) + 2_000.0;
+            fieldState.PushSyncLevel(measuredSync);
+            fieldState.PushLevels(refinedSync, refinedBlank);
+            expectedSync.Add(measuredSync);
+            expectedSync.Add(refinedSync);
+            expectedBlank.Add(refinedBlank);
+        }
+
+        Assert.Equal((10, 10), fieldState.RetainedSampleCounts);
+        Assert.Equal(
+            (
+                expectedSync.GetRange(expectedSync.Count - 10, 10).Average(),
+                expectedBlank.GetRange(expectedBlank.Count - 10, 10).Average()),
+            fieldState.PullLevels());
+        Assert.Equal((10, 10), fieldState.RetainedSampleCounts);
+    }
+
+    [Fact(DisplayName = "Bounded VHS FieldState matches delayed v0.4.0 trimming")]
+    public void BoundedFieldStateMatchesReleaseFourDelayedTrimming()
+    {
+        const int window = 10;
+        var fieldState = new VhsFieldLevelState(framesPerSecond: 25.0);
+        var expectedSync = new List<double>();
+        var expectedBlank = new List<double>();
+        var random = new Random(0x5A17);
+
+        static double? Pull(List<double> values)
+        {
+            if (values.Count == 0)
+            {
+                return null;
+            }
+
+            if (values.Count >= window)
+            {
+                values.RemoveRange(0, values.Count - window);
+            }
+
+            return values.Average();
+        }
+
+        for (int iteration = 0; iteration < 20_000; iteration++)
+        {
+            double sync = (random.NextDouble() - 0.5) * 1e8;
+            double blank = (random.NextDouble() - 0.5) * 1e8;
+            switch (random.Next(4))
+            {
+                case 0:
+                    fieldState.PushSyncLevel(sync);
+                    expectedSync.Add(sync);
+                    break;
+                case 1:
+                    fieldState.PushLevels(sync, blank);
+                    expectedSync.Add(sync);
+                    expectedBlank.Add(blank);
+                    break;
+                case 2:
+                    Assert.Equal(Pull(expectedSync), fieldState.PullSyncLevel());
+                    break;
+                default:
+                    double? expectedBlankLevel = Pull(expectedBlank);
+                    (double SyncLevel, double BlankLevel)? expected = expectedBlankLevel.HasValue
+                        ? (Pull(expectedSync)!.Value, expectedBlankLevel.Value)
+                        : null;
+                    Assert.Equal(expected, fieldState.PullLevels());
+                    break;
+            }
+
+            (int retainedSync, int retainedBlank) = fieldState.RetainedSampleCounts;
+            Assert.InRange(retainedSync, 0, window);
+            Assert.InRange(retainedBlank, 0, window);
+        }
+    }
+
     [Fact(DisplayName = "VHS missing serration means reuse FieldState like v0.4.0")]
     public void MissingSerrationMeansReuseFieldState()
     {

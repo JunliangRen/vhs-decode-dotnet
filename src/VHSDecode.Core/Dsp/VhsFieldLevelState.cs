@@ -22,6 +22,9 @@ internal sealed class VhsFieldLevelState
 
     public bool HasLevels => _syncLevels.HasValues && _blankLevels.HasValues;
 
+    internal (int Sync, int Blank) RetainedSampleCounts
+        => (_syncLevels.Count, _blankLevels.Count);
+
     public void PushSyncLevel(double syncLevel) => _syncLevels.Push(syncLevel);
 
     public void PushLevels(double syncLevel, double blankLevel)
@@ -46,11 +49,21 @@ internal sealed class VhsFieldLevelState
 
     private sealed class MovingAverageWindow(int window)
     {
-        private readonly List<double> _values = [];
+        private readonly List<double> _values = new(window);
 
         public bool HasValues => _values.Count > 0;
 
-        public void Push(double value) => _values.Add(value);
+        public int Count => _values.Count;
+
+        public void Push(double value)
+        {
+            if (_values.Count == window)
+            {
+                _values.RemoveAt(0);
+            }
+
+            _values.Add(value);
+        }
 
         public double? Pull()
         {
