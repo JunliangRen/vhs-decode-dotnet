@@ -37,6 +37,43 @@ public sealed class TbcParallelResamplerTests
             Convert.ToHexString(SHA256.HashData(MemoryMarshal.AsBytes(output.AsSpan()))));
     }
 
+    [Fact(DisplayName = "Prepared TBC resampling plans are reusable and bit-exact")]
+    public async Task PreparedTbcResamplingPlansAreReusableAndBitExact()
+    {
+        const int outputLineLength = 1_024;
+        const int lineCount = 100;
+        double[] firstSource = Enumerable.Range(0, 220_000)
+            .Select(index => Math.Sin(index * 0.0031) + Math.Cos(index * 0.0007))
+            .ToArray();
+        double[] secondSource = firstSource
+            .Select((value, index) => value + (0.125 * Math.Sin(index * 0.0013)))
+            .ToArray();
+        double[] lineLocations = Enumerable.Range(0, lineCount + 1)
+            .Select(line => 1_000.25 + (line * 2_000.125) + (0.01 * line * line))
+            .ToArray();
+        var resampler = new TbcLineResampler(
+            outputLineLength,
+            TbcLineInterpolationMethod.Linear,
+            wowLevelAdjustSmoothing: 1.5,
+            nominalInputLineLength: 2_000.125,
+            workerThreads: 5);
+        double[] expectedFirst = resampler.ResampleLines(firstSource, lineLocations, 0, lineCount);
+        double[] expectedSecond = resampler.ResampleLines(secondSource, lineLocations, 0, lineCount);
+
+        TbcLineResampler.ResamplingPlan plan = resampler.PrepareLineResampling(
+            lineLocations,
+            firstLine: 0,
+            lineCount);
+        Task<double[]> first = Task.Run(() => resampler.ResamplePrepared(firstSource, plan));
+        Task<double[]> second = Task.Run(() => resampler.ResamplePrepared(secondSource, plan));
+        await Task.WhenAll(first, second);
+
+        Assert.Equal(expectedFirst, first.Result);
+        Assert.Equal(expectedSecond, second.Result);
+        plan.Dispose();
+        Assert.Throws<ObjectDisposedException>(() => resampler.ResamplePrepared(firstSource, plan));
+    }
+
     [Theory(DisplayName = "Parallel TBC sinc resampling remains bit-exact")]
     [InlineData(TbcLineInterpolationMethod.Linear)]
     [InlineData(TbcLineInterpolationMethod.Quadratic)]

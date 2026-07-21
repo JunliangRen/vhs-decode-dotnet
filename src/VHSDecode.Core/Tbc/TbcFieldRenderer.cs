@@ -129,6 +129,25 @@ public sealed class TbcFieldRenderer
         return _resampler.ResampleLines(videoHz, lineLocations, firstLine, lines);
     }
 
+    internal TbcLineResampler.ResamplingPlan PrepareFieldResampling(
+        IReadOnlyList<double> lineLocations,
+        int firstLine = 0,
+        int? lineCount = null)
+    {
+        int lines = lineCount ?? FrameSpec.OutputLineCount;
+        if (lines != FrameSpec.OutputLineCount)
+        {
+            throw new ArgumentException("Rendered line count must match the configured TBC field height.", nameof(lineCount));
+        }
+
+        return _resampler.PrepareLineResampling(lineLocations, firstLine, lines);
+    }
+
+    internal double[] ResamplePreparedField(
+        ReadOnlySpan<double> videoHz,
+        TbcLineResampler.ResamplingPlan plan)
+        => _resampler.ResamplePrepared(videoHz, plan);
+
     public TbcRenderedField RenderFieldPayload(
         ReadOnlySpan<double> videoHz,
         IReadOnlyList<double> lineLocations,
@@ -180,6 +199,37 @@ public sealed class TbcFieldRenderer
         int? trackPhaseOverride)
     {
         double[] resampled = ResampleField(videoHz, lineLocations, firstLine, lineCount);
+        return RenderResampledFieldPayload(
+            resampled,
+            fieldNumber,
+            converterOverride,
+            converterProvider,
+            trackPhaseOverride);
+    }
+
+    internal TbcRenderedField RenderPreparedFieldPayload(
+        ReadOnlySpan<double> videoHz,
+        TbcLineResampler.ResamplingPlan plan,
+        int fieldNumber = 0,
+        VideoOutputConverter? converterOverride = null,
+        int? trackPhaseOverride = null)
+    {
+        double[] resampled = ResamplePreparedField(videoHz, plan);
+        return RenderResampledFieldPayload(
+            resampled,
+            fieldNumber,
+            converterOverride,
+            converterProvider: null,
+            trackPhaseOverride);
+    }
+
+    private TbcRenderedField RenderResampledFieldPayload(
+        double[] resampled,
+        int fieldNumber,
+        VideoOutputConverter? converterOverride,
+        Func<VideoOutputConverter?>? converterProvider,
+        int? trackPhaseOverride)
+    {
         if (YCombLimitHz != 0.0)
         {
             ApplyYCombInPlace(resampled, FrameSpec.OutputLineLength, YCombLimitHz);

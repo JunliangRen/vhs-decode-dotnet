@@ -845,18 +845,12 @@ public sealed class TbcFieldDecodePipeline
             renderLineLocations = RenderLineLocations(lineLocations, outputFirstLine);
         }
 
-        double[]? chromaBurstSamples = ResampleChromaBurst(
-            span.Chroma,
-            renderLineLocations,
-            outputFirstLine);
-
         if (string.Equals(_decodeType, "vhs", StringComparison.Ordinal)
             && FormatCatalog.ParentSystem(_system) == "NTSC")
         {
             double fscMHz = _renderer.FrameSpec.OutputSampleRateHz / 4_000_000.0;
             lineLocations = ApplyNtscFscPhaseShiftCore(lineLocations, fscMHz);
             renderLineLocations = RenderLineLocations(lineLocations, outputFirstLine);
-            chromaBurstSamples = ResampleChromaBurst(span.Chroma, renderLineLocations, outputFirstLine);
         }
 
         int? laserDiscFieldPhaseId = null;
@@ -880,8 +874,15 @@ public sealed class TbcFieldDecodePipeline
         {
             lineLocations = ntscBurstLineLocations;
             renderLineLocations = RenderLineLocations(lineLocations, outputFirstLine);
-            chromaBurstSamples = ResampleChromaBurst(span.Chroma, renderLineLocations, outputFirstLine);
         }
+
+        using TbcLineResampler.ResamplingPlan? renderResamplingPlan =
+            span.Chroma is { Length: > 0 }
+                ? _renderer.PrepareFieldResampling(renderLineLocations, outputFirstLine)
+                : null;
+        double[]? chromaBurstSamples = renderResamplingPlan is null
+            ? null
+            : _renderer.ResamplePreparedField(span.Chroma!, renderResamplingPlan);
 
         int syncConfidence = SyncConfidenceCalculator.Compute(
             lineLocations.Locations,
@@ -935,15 +936,30 @@ public sealed class TbcFieldDecodePipeline
         TbcRenderedField rendered;
         try
         {
-            rendered = deferredRenderSource is null
-                ? _renderer.RenderFieldPayload(
+            if (deferredRenderSource is not null)
+            {
+                rendered = new TbcRenderedField([]);
+            }
+            else if (renderResamplingPlan is not null)
+            {
+                rendered = _renderer.RenderPreparedFieldPayload(
+                    span.Video,
+                    renderResamplingPlan,
+                    fieldNumber,
+                    fieldConverter,
+                    chromaPhase?.NextChromaRotationIndex);
+            }
+            else
+            {
+                rendered = _renderer.RenderFieldPayload(
                     span.Video,
                     renderLineLocations,
                     firstLine: outputFirstLine,
                     fieldNumber: fieldNumber,
                     converterOverride: fieldConverter,
-                    trackPhaseOverride: chromaPhase?.NextChromaRotationIndex)
-                : new TbcRenderedField([]);
+                    trackPhaseOverride: chromaPhase?.NextChromaRotationIndex);
+            }
+
             if (chromaDecodeTask is not null)
             {
                 chroma = chromaDecodeTask.GetAwaiter().GetResult();
@@ -964,6 +980,10 @@ public sealed class TbcFieldDecodePipeline
             }
 
             throw;
+        }
+        finally
+        {
+            renderResamplingPlan?.Dispose();
         }
 
         double? blackToWhiteRfRatio = ComputeLaserDiscBlackToWhiteRfRatio(

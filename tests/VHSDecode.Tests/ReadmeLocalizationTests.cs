@@ -64,7 +64,7 @@ public sealed partial class ReadmeLocalizationTests
         [
             "43155200da87c0d49eb37d8ec09b1372075ee8e4",
             "11.0.100-preview.6.26359.118",
-            "**817**",
+            "**818**",
             "65.17",
             "310.49",
             "268.52",
@@ -315,6 +315,13 @@ public sealed partial class ReadmeLocalizationTests
             "12.26",
             "28.353/27.647",
             "AVX2/SSE4.1",
+            "33.690/97.734",
+            "32.805/93.609",
+            "26.713",
+            "26.760",
+            "106.563",
+            "105.266",
+            "1.411/1.445 GiB",
             "--use_saved_levels",
             "docs/COMPATIBILITY_EVIDENCE.md"
         ];
@@ -332,6 +339,7 @@ public sealed partial class ReadmeLocalizationTests
             Assert.DoesNotContain("**719**", content, StringComparison.Ordinal);
             Assert.DoesNotContain("**736**", content, StringComparison.Ordinal);
             Assert.DoesNotContain("**793**", content, StringComparison.Ordinal);
+            Assert.DoesNotContain("**817**", content, StringComparison.Ordinal);
             Assert.DoesNotContain("**740**", content, StringComparison.Ordinal);
             Assert.DoesNotContain("**741**", content, StringComparison.Ordinal);
             Assert.DoesNotContain("**742**", content, StringComparison.Ordinal);

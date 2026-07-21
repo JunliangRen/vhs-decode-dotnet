@@ -629,6 +629,15 @@ wall/CPU/peak medians from 14.44 s/40.94 s/1.03 GiB to
 peaks versus 1.451/1.404 GiB baselines. Every luma, chroma, and JSON hash was
 exact.
 
+The shared final-field TBC resampling plan now computes source positions and
+wow level adjustments once, uses the same read-only plan for chroma and luma,
+and returns its bounded buffers to `ArrayPool` immediately after rendering.
+Two reversed-order 400-frame default-worker pairs moved median wall/CPU time
+from 33.690/97.734 s to 32.805/93.609 s (2.6% less wall time and 4.2% less CPU).
+Two 20-worker pairs were wall-neutral at 26.713 versus 26.760 s while reducing
+median CPU time from 106.563 to 105.266 s; candidate peaks were bounded at
+1.411/1.445 GiB. All recorded luma, chroma, and JSON hashes remained exact.
+
 </details>
 
 <!-- SECTION: build -->
@@ -649,7 +658,7 @@ dotnet test --solution VHSDecodeDotNet.slnx -c Release --no-build --no-restore
 ```
 
 The current formal Release build has zero warnings and errors. The xUnit v3
-project exposes **817** independently discoverable tests to both
+project exposes **818** independently discoverable tests to both
 `dotnet test` and Visual Studio Test Explorer.
 
 <!-- SECTION: usage -->
