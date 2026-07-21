@@ -141,7 +141,10 @@
 - VSync の private forward/reverse envelope と harmonic BA-IIR chain は、それぞれが
   ownership を持つ array を in-place filter します。envelope branch は combined padded
   array を生成せず、reduced final result へ直接書き込みます。public IIR result の独立した
-  ownership と bit-exact output は維持します。
+  ownership と bit-exact output は維持します。stateful detector は padded input が
+  1,048,576 sample 以下のとき、exact-size の 6-array analysis workspace を 1 つ再利用
+  します（上限時の保持量は約 48 MiB）。size 変更時はこの 1 entry を置き換え、それを
+  超える input には保持しない temporary workspace を使います。
 - VSync serration measurement は candidate window を read-only span で参照し、
   `Enumerable.Min`-compatible な float64 scan を使うため、full-window copy を 1 つ
   省きます。median scratch の ownership と NaN/signed-zero の bit semantics は不変です。
@@ -563,6 +566,18 @@ candidate peak は 1.448/1.439 GiB でした。400-frame candidate は CPU を 1
 多く使う一方で 1.6-2.4% 早く完了し、記録した luma、chroma、JSON hash はすべて
 exact です。
 
+続く detector-owned VSync workspace pass は、6 個の exact-size analysis array を field
+間で再利用します。同じ isolated fixture の median は field あたり 5.080 ms から
+4.325 ms（14.9% 高速）へ、warm-call allocation は 8.50 MiB から約 3.8 KiB へ
+減少しました。同じ 10-frame trace では sampled allocation が 1.947 GiB から
+1.720 GiB、sampled `Double[]` allocation が 1,760.85 MiB から 1,524.33 MiB へ
+減少しました。3 組の 160-frame default-worker pair は wall/CPU/peak median が
+14.44 秒/40.94 秒/1.03 GiB から 14.21 秒/39.56 秒/0.77 GiB へ変化し、5 組の
+20-worker pair は 11.63 秒/45.17 秒/1.19 GiB 対 11.67 秒/44.77 秒/1.21 GiB で
+neutral でした。2 組の 400-frame 20-worker pair は 0.8-1.7% 早く完了し、candidate
+peak 1.508/1.534 GiB、baseline 1.451/1.404 GiB の bounded range に収まりました。
+luma、chroma、JSON hash はすべて exact です。
+
 </details>
 
 <!-- SECTION: build -->
@@ -584,7 +599,7 @@ dotnet test --solution VHSDecodeDotNet.slnx -c Release --no-build --no-restore
 
 現在の正式な Release build は warning 0、error 0 です。xUnit v3 project は
 `dotnet test` と Visual Studio Test Explorer の両方で個別に検出できる
-**813** tests を公開します。
+**814** tests を公開します。
 
 <!-- SECTION: usage -->
 

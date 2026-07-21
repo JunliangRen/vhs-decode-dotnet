@@ -130,7 +130,9 @@
   median 对小输入保留完整排序，从 32K 样本起使用位精确 introselect。
 - VSync 私有的正向/反向包络与谐波 BA-IIR 链会在各自拥有的数组上原地滤波；包络分支
   会直接写入降采样后的最终结果，不再生成组合 padded 数组。公开 IIR 结果仍独立拥有，
-  并保持位精确一致。
+  并保持位精确一致。有状态 detector 会在 padded 输入不超过 1,048,576 个样本时复用
+  一份精确尺寸的六数组分析工作区（达到上限时约保留 48 MiB）；尺寸变化只替换这一项，
+  更大的输入则使用不保留的临时工作区。
 - VSync 锯齿脉冲测量通过只读 span 访问候选窗口，并使用兼容 `Enumerable.Min` 的
   float64 扫描，不再额外复制整个窗口；median 暂存所有权以及 NaN/正负零位语义不变。
 - 启用 worker 时，VHS 场解码会并发执行亮度 TBC 渲染与色度场解码。任何时刻最多只有
@@ -487,6 +489,16 @@ VSync 原地 BA-IIR 优化保持滤波运算顺序不变，在每条私有链拥
 1.448/1.439 GiB。400-frame 候选多使用 1.4-5.0% CPU，但提前 1.6-2.4% 完成；
 记录的所有亮度、色度和 JSON hash 均保持精确一致。
 
+后续的 detector 自有 VSync 工作区优化会跨场复用六个精确尺寸的分析数组。相同独立
+fixture 的每场中位耗时从 5.080 ms 降至 4.325 ms（快 14.9%），预热后的每场分配量
+从 8.50 MiB 降至约 3.8 KiB。相同的 10-frame trace 将采样分配量从 1.947 GiB 降至
+1.720 GiB，采样 `Double[]` 分配量从 1,760.85 MiB 降至 1,524.33 MiB。三组
+160-frame 默认 worker 配对的墙钟/CPU/峰值中位数从 14.44 秒/40.94 秒/1.03 GiB
+变为 14.21 秒/39.56 秒/0.77 GiB；五组 20-worker 配对基本中性，分别为
+11.63 秒/45.17 秒/1.19 GiB 与 11.67 秒/44.77 秒/1.21 GiB。两组 400-frame、
+20-worker 配对提前 0.8-1.7% 完成，候选峰值为 1.508/1.534 GiB，基线为
+1.451/1.404 GiB，均保持有界；所有亮度、色度和 JSON hash 均精确一致。
+
 </details>
 
 <!-- SECTION: build -->
@@ -507,7 +519,7 @@ dotnet test --solution VHSDecodeDotNet.slnx -c Release --no-build --no-restore
 ```
 
 当前正式 Release 构建为零警告、零错误。xUnit v3 项目向
-`dotnet test` 和 Visual Studio Test Explorer 暴露 **813** 个可独立发现的测试。
+`dotnet test` 和 Visual Studio Test Explorer 暴露 **814** 个可独立发现的测试。
 
 <!-- SECTION: usage -->
 

@@ -145,7 +145,10 @@ release compatibility remain the first constraint.
 - VSync's private forward/reverse envelope and harmonic BA-IIR chains filter
   their owned arrays in place. The envelope branches write directly into the
   reduced result instead of materializing a combined padded array; public IIR
-  results retain independent ownership and identical bits.
+  results retain independent ownership and identical bits. The stateful
+  detector reuses one exact-sized six-array analysis workspace when the padded
+  input is at most 1,048,576 samples (about 48 MiB retained at the cap). A size
+  change replaces that one entry, while larger inputs use an unretained workspace.
 - VSync serration measurement reads its candidate window through a read-only
   span and applies an `Enumerable.Min`-compatible float64 scan, avoiding an
   extra full-window copy. Median scratch ownership and NaN/signed-zero bit
@@ -598,6 +601,19 @@ were 1.448/1.439 GiB. The 400-frame candidate used 1.4-5.0% more CPU while
 finishing 1.6-2.4% sooner. Every recorded luma, chroma, and JSON hash remained
 exact.
 
+A follow-up detector-owned VSync workspace pass reuses the six exact-sized
+analysis arrays across fields. On the same isolated fixture, median time moved
+from 5.080 to 4.325 ms per field (14.9% faster), while warm-call allocation fell
+from 8.50 MiB to about 3.8 KiB per field. A matched 10-frame trace reduced
+sampled allocation from 1.947 to 1.720 GiB and sampled `Double[]` allocation
+from 1,760.85 to 1,524.33 MiB. Three 160-frame default-worker pairs moved
+wall/CPU/peak medians from 14.44 s/40.94 s/1.03 GiB to
+14.21 s/39.56 s/0.77 GiB; five 20-worker pairs were neutral at
+11.63 s/45.17 s/1.19 GiB versus 11.67 s/44.77 s/1.21 GiB. Two 400-frame
+20-worker pairs finished 0.8-1.7% sooner with bounded 1.508/1.534 GiB candidate
+peaks versus 1.451/1.404 GiB baselines. Every luma, chroma, and JSON hash was
+exact.
+
 </details>
 
 <!-- SECTION: build -->
@@ -618,7 +634,7 @@ dotnet test --solution VHSDecodeDotNet.slnx -c Release --no-build --no-restore
 ```
 
 The current formal Release build has zero warnings and errors. The xUnit v3
-project exposes **813** independently discoverable tests to both
+project exposes **814** independently discoverable tests to both
 `dotnet test` and Visual Studio Test Explorer.
 
 <!-- SECTION: usage -->
