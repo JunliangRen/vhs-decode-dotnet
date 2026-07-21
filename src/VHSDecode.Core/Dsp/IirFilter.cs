@@ -75,6 +75,46 @@ public static class IirFilter
         }
     }
 
+    internal static void ApplyForwardBackwardInPlace(
+        TransferFunction filter,
+        Span<double> samples,
+        int? padLength = null)
+    {
+        if (samples.IsEmpty)
+        {
+            return;
+        }
+
+        (double[] numerator, double[] denominator) = Normalize(filter);
+        int edge = padLength ?? DefaultPadLength(numerator, denominator);
+        if (edge < 0)
+        {
+            throw new ArgumentOutOfRangeException(nameof(padLength));
+        }
+
+        int actualEdge = Math.Min(edge, samples.Length - 1);
+        double[] zi = SteadyStateInitialConditions(numerator, denominator);
+        if (actualEdge == 0)
+        {
+            ApplyForwardBackwardInPlace(numerator, denominator, zi, samples);
+            return;
+        }
+
+        int extendedLength = checked(samples.Length + (actualEdge * 2));
+        double[] rented = WorkingBufferPool.Rent(extendedLength);
+        try
+        {
+            Span<double> extended = rented.AsSpan(0, extendedLength);
+            WriteOddExtension(samples, actualEdge, extended);
+            ApplyForwardBackwardInPlace(numerator, denominator, zi, extended);
+            extended.Slice(actualEdge, samples.Length).CopyTo(samples);
+        }
+        finally
+        {
+            WorkingBufferPool.Return(rented);
+        }
+    }
+
     public static int DefaultPadLength(TransferFunction filter)
     {
         (double[] numerator, double[] denominator) = Normalize(filter);

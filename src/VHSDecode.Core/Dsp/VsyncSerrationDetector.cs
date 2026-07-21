@@ -450,34 +450,30 @@ public sealed class VsyncSerrationDetector
         ReadOnlySpan<double> data,
         ReadOnlySpan<double> padded)
     {
-        var clipped = new double[padded.Length];
-        for (int i = 0; i < clipped.Length; i++)
+        var forward = new double[padded.Length];
+        for (int i = 0; i < forward.Length; i++)
         {
-            clipped[i] = Math.Max(0.0, padded[i]);
+            forward[i] = Math.Max(0.0, padded[i]);
         }
 
-        double[]? forward = null;
-        double[]? reverse = null;
+        double bias = forward.Min();
+        double[] reverse = forward.ToArray();
         Parallel.Invoke(
-            () => forward = IirFilter.ApplyForwardBackward(_vsyncEnvelopeFilter, clipped),
+            () => IirFilter.ApplyForwardBackwardInPlace(_vsyncEnvelopeFilter, forward),
             () =>
             {
-                double[] reversed = clipped.ToArray();
-                Array.Reverse(reversed);
-                reverse = IirFilter.ApplyForwardBackward(_vsyncEnvelopeFilter, reversed);
+                Array.Reverse(reverse);
+                IirFilter.ApplyForwardBackwardInPlace(_vsyncEnvelopeFilter, reverse);
                 Array.Reverse(reverse);
             });
 
-        int half = clipped.Length / 2;
-        var combined = new double[clipped.Length];
-        Array.Copy(reverse!, 0, combined, 0, half);
-        Array.Copy(forward!, half, combined, half, combined.Length - half);
-        double bias = clipped.Min();
+        int half = forward.Length / 2;
         int padding = Math.Min(EnvelopePadding, data.Length);
         var envelope = new double[data.Length];
         for (int i = 0; i < envelope.Length; i++)
         {
-            envelope[i] = combined[padding + i] - bias;
+            int source = padding + i;
+            envelope[i] = (source < half ? reverse[source] : forward[source]) - bias;
         }
 
         return (envelope, bias);
@@ -485,14 +481,15 @@ public sealed class VsyncSerrationDetector
 
     private int[] PowerRatioSearch(ReadOnlySpan<double> padded)
     {
-        double[] firstHarmonic = IirFilter.ApplyForwardBackward(_serrationBaseHighPass, padded);
-        firstHarmonic = IirFilter.ApplyForwardBackward(_serrationBaseLowPass, firstHarmonic);
+        double[] firstHarmonic = padded.ToArray();
+        IirFilter.ApplyForwardBackwardInPlace(_serrationBaseHighPass, firstHarmonic);
+        IirFilter.ApplyForwardBackwardInPlace(_serrationBaseLowPass, firstHarmonic);
         for (int i = 0; i < firstHarmonic.Length; i++)
         {
             firstHarmonic[i] *= firstHarmonic[i];
         }
 
-        firstHarmonic = IirFilter.ApplyForwardBackward(_serrationEnvelopeFilter, firstHarmonic);
+        IirFilter.ApplyForwardBackwardInPlace(_serrationEnvelopeFilter, firstHarmonic);
         return LocalMinimaIndices(firstHarmonic);
     }
 

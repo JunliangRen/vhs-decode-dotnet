@@ -142,6 +142,10 @@ release compatibility remain the first constraint.
   state updates remain ordered after both branches complete. NumPy-compatible
   float64 medians retain full sorting for small inputs and use bit-exact
   introselect from 32K samples.
+- VSync's private forward/reverse envelope and harmonic BA-IIR chains filter
+  their owned arrays in place. The envelope branches write directly into the
+  reduced result instead of materializing a combined padded array; public IIR
+  results retain independent ownership and identical bits.
 - VSync serration measurement reads its candidate window through a read-only
   span and applies an `Enumerable.Min`-compatible float64 scan, avoiding an
   extra full-window copy. Median scratch ownership and NaN/signed-zero bit
@@ -577,6 +581,22 @@ regressed from 14.71 to 14.76 s by default and from 12.05 to 12.26 s with 20
 workers. The scalar line-span form was also not retained as final after its
 first 400-field pair completed candidate/baseline in 28.353/27.647 s; only the
 AVX2/SSE4.1 form passed the final long-run gate.
+
+The VSync in-place BA-IIR pass keeps the same filtering arithmetic while
+reusing each private chain's owned array and writing the envelope blend
+directly into its final reduced output. On the pinned PAL field fixture, the
+isolated median moved from 6.610 to 5.080 ms per field (23.1% faster), while
+managed allocation fell from 15.60 to 8.50 MiB per field (45.5%). A matched
+10-frame GC trace reduced sampled allocation from 2.264 to 1.947 GiB (14.0%)
+and Gen2 collections from 15 to 11. Five interleaved 40-frame pairs moved
+default wall/CPU medians from 4.455/12.547 to 4.319/12.156 s and 20-worker
+medians from 3.819/14.094 to 3.606/14.625 s. Five 160-frame 20-worker pairs
+moved wall/CPU/peak-working-set medians from 12.059 s/45.406 s/1.475 GiB to
+11.796 s/45.922 s/1.058 GiB. Two 400-frame pairs completed candidate/baseline
+in 26.776/27.438 s and baseline/candidate in 27.214/26.785 s; candidate peaks
+were 1.448/1.439 GiB. The 400-frame candidate used 1.4-5.0% more CPU while
+finishing 1.6-2.4% sooner. Every recorded luma, chroma, and JSON hash remained
+exact.
 
 </details>
 

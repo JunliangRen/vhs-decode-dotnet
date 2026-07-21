@@ -138,6 +138,10 @@
   input 上で並行実行します。両 branch の完了後、candidate arbitration と detector
   state update は引き続き順序どおりに行います。NumPy-compatible float64 median は
   small input で full sort を維持し、32K sample 以上で bit-exact introselect を使います。
+- VSync の private forward/reverse envelope と harmonic BA-IIR chain は、それぞれが
+  ownership を持つ array を in-place filter します。envelope branch は combined padded
+  array を生成せず、reduced final result へ直接書き込みます。public IIR result の独立した
+  ownership と bit-exact output は維持します。
 - VSync serration measurement は candidate window を read-only span で参照し、
   `Enumerable.Min`-compatible な float64 scan を使うため、full-window copy を 1 つ
   省きます。median scratch の ownership と NaN/signed-zero の bit semantics は不変です。
@@ -542,6 +546,22 @@ exact です。最初の full-field neutral-fill form は 160-field wall median 
 14.71 秒から 14.76 秒、20-worker で 12.05 秒から 12.26 秒へ後退したため作り直しました。
 scalar line-span form も最初の 400-field candidate/baseline が 28.353/27.647 秒だったため
 final にはせず、AVX2/SSE4.1 form のみが最終 long-run gate を通過しました。
+
+VSync in-place BA-IIR pass は filtering arithmetic を変えず、各 private chain が ownership
+を持つ array を再利用し、envelope blend を reduced final output へ直接書き込みます。
+固定した PAL field fixture の isolated median は field あたり 6.610 ms から 5.080 ms
+（23.1% 高速）へ、managed allocation は field あたり 15.60 MiB から 8.50 MiB
+（45.5% 削減）へ改善しました。同一条件の 10-frame GC trace では sampled allocation が
+2.264 GiB から 1.947 GiB（14.0% 削減）、Gen2 collection が 15 回から 11 回へ減少しました。
+交互に実行した 5 組の 40-frame pair では default wall/CPU median が
+4.455/12.547 秒から 4.319/12.156 秒、20-worker は 3.819/14.094 秒から
+3.606/14.625 秒へ変化しました。5 組の 160-frame 20-worker pair では
+wall/CPU/peak-working-set median が 12.059 秒/45.406 秒/1.475 GiB から
+11.796 秒/45.922 秒/1.058 GiB へ変化しました。2 組の 400-frame pair は
+candidate/baseline が 26.776/27.438 秒、baseline/candidate が 27.214/26.785 秒で、
+candidate peak は 1.448/1.439 GiB でした。400-frame candidate は CPU を 1.4-5.0%
+多く使う一方で 1.6-2.4% 早く完了し、記録した luma、chroma、JSON hash はすべて
+exact です。
 
 </details>
 

@@ -657,9 +657,13 @@ public sealed class DspWorkingBufferTests
         {
             foreach (int? padLength in new int?[] { null, 0, 7 })
             {
+                double[] expectedFiltered = ApplyForwardBackwardIirReference(filter, input, padLength);
                 AssertDoubleBitsEqual(
-                    ApplyForwardBackwardIirReference(filter, input, padLength),
+                    expectedFiltered,
                     IirFilter.ApplyForwardBackward(filter, input, padLength));
+                double[] inPlace = input.ToArray();
+                IirFilter.ApplyForwardBackwardInPlace(filter, inPlace, padLength);
+                AssertDoubleBitsEqual(expectedFiltered, inPlace);
             }
 
             int stateLength = Math.Max(filter.Numerator.Length, filter.Denominator.Length) - 1;
