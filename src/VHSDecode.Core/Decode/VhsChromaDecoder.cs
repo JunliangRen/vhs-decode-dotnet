@@ -583,22 +583,27 @@ public static class VhsChromaDecoder
             && options.ChromaDeemphasisFilter is null
             && (options.FinalSosFilter is not null || options.FinalFilter is null);
 
-        if (!options.DisableComb)
-        {
-            upconverted = IsNtsc(options.ColorSystem)
-                ? ApplyNtscComb(upconverted, options.OutputLineLength, retainFloat32)
-                : ApplyPalComb(upconverted, options.OutputLineLength, retainFloat32);
-        }
-
-        AutomaticChromaGainResult gained = ApplyAutomaticChromaGain(
-            upconverted,
-            options.BurstAbsRef,
-            options.BurstStart,
-            options.BurstEnd,
-            options.OutputLineLength,
-            options.OutputLineCount,
-            phase.BurstDetectedLine,
-            useFloat32Rms: retainFloat32);
+        AutomaticChromaGainResult gained = options.DisableComb
+            ? ApplyAutomaticChromaGain(
+                upconverted,
+                options.BurstAbsRef,
+                options.BurstStart,
+                options.BurstEnd,
+                options.OutputLineLength,
+                options.OutputLineCount,
+                phase.BurstDetectedLine,
+                useFloat32Rms: retainFloat32)
+            : ApplyAutomaticChromaGainWithComb(
+                upconverted,
+                options.BurstAbsRef,
+                options.BurstStart,
+                options.BurstEnd,
+                options.OutputLineLength,
+                options.OutputLineCount,
+                phase.BurstDetectedLine,
+                IsNtsc(options.ColorSystem) ? 1 : 2,
+                retainFloat32,
+                useFloat32Rms: retainFloat32);
         return new VhsChromaFieldResult(
             ChromaToU16(gained.Samples),
             phase.BurstDetectedLine,
@@ -1489,6 +1494,94 @@ public static class VhsChromaDecoder
             for (int i = 0; i < lineLength; i++)
             {
                 output[lineStart + i] = chroma[lineStart + i] * scale;
+            }
+
+            meanBurstAccumulator += rms;
+        }
+
+        return new AutomaticChromaGainResult(output, meanBurstAccumulator / (lines - StartingLine));
+    }
+
+    internal static AutomaticChromaGainResult ApplyAutomaticChromaGainWithComb(
+        ReadOnlySpan<double> chroma,
+        double burstAbsRef,
+        int burstStart,
+        int burstEnd,
+        int lineLength,
+        int lines,
+        int burstDetectedLine,
+        int lineDistance,
+        bool retainFloat32,
+        bool useFloat32Rms)
+    {
+        if (lines <= StartingLine)
+        {
+            throw new ArgumentOutOfRangeException(nameof(lines), "Chroma ACC requires more than 16 lines.");
+        }
+
+        if (lineDistance is not (1 or 2))
+        {
+            throw new ArgumentOutOfRangeException(nameof(lineDistance));
+        }
+
+        ValidateLineShape(chroma.Length, lines, lineLength);
+        ValidateBurstRange(burstStart, burstEnd, lineLength);
+
+        const int MaxStackLineLength = 4_096;
+        Span<double> combinedLine = lineLength <= MaxStackLineLength
+            ? stackalloc double[lineLength]
+            : new double[lineLength];
+        double[] output = new double[chroma.Length];
+        double meanBurstAccumulator = 0.0;
+        for (int line = StartingLine; line < lines; line++)
+        {
+            if (line < burstDetectedLine)
+            {
+                continue;
+            }
+
+            int lineStart = line * lineLength;
+            double rms;
+            if (line < lines - 2)
+            {
+                ReadOnlySpan<double> current = chroma.Slice(lineStart, lineLength);
+                ReadOnlySpan<double> advanced = chroma.Slice(
+                    (line + lineDistance) * lineLength,
+                    lineLength);
+                ReadOnlySpan<double> delayed = chroma.Slice(
+                    (line - lineDistance) * lineLength,
+                    lineLength);
+                for (int i = 0; i < lineLength; i++)
+                {
+                    // Match Numba's PAL delayed-first and NTSC source-order subtraction.
+                    double combined = !retainFloat32 && lineDistance == 2
+                        ? ((current[i] * 2.0) - delayed[i] - advanced[i]) / 4.0
+                        : ((current[i] * 2.0) - advanced[i] - delayed[i]) / 4.0;
+                    combinedLine[i] = retainFloat32 ? (double)(float)combined : combined;
+                }
+
+                ReadOnlySpan<double> burst = combinedLine.Slice(
+                    burstStart,
+                    burstEnd - burstStart);
+                rms = useFloat32Rms ? RmsFloat32(burst) : Rms(burst);
+                double scale = rms != 0.0 ? burstAbsRef / rms : 1.0;
+                for (int i = 0; i < lineLength; i++)
+                {
+                    output[lineStart + i] = combinedLine[i] * scale;
+                }
+            }
+            else
+            {
+                ReadOnlySpan<double> lineSamples = chroma.Slice(lineStart, lineLength);
+                ReadOnlySpan<double> burst = lineSamples.Slice(
+                    burstStart,
+                    burstEnd - burstStart);
+                rms = useFloat32Rms ? RmsFloat32(burst) : Rms(burst);
+                double scale = rms != 0.0 ? burstAbsRef / rms : 1.0;
+                for (int i = 0; i < lineLength; i++)
+                {
+                    output[lineStart + i] = lineSamples[i] * scale;
+                }
             }
 
             meanBurstAccumulator += rms;

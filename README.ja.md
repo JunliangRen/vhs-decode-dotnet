@@ -155,6 +155,9 @@
   field-owned resampled array を直接 read-only で使います。chroma prefilter が未設定なら
   decode も同じ read-only array を借用します。filter 設定時は owned result を返し、public
   prefilter API も independent-copy contract を維持します。
+- 内部 VHS chroma comb と automatic gain は line-size の stack workspace を共有し、
+  gain-owned field output へ直接書き込むため、独立した full-field comb result は不要です。
+  3 つの public stage API は independent-output contract を維持します。
 - HiFi は境界付き並列 block decode の後、順序どおりに後処理と書き込みを行います。
 - Managed real FFT は pool 化した packing/scratch buffer を再利用します。float32 SOS の
   forward/backward filtering は拡張 buffer を 1 つ rent して in-place 実行し、呼び出し
@@ -504,6 +507,22 @@ candidate/baseline が 28.039/28.553 秒、baseline/candidate が
 28.224/28.308 秒で、candidate peak は 1.474/1.475 GiB でした。記録した luma、
 chroma、JSON hash はすべて exact です。
 
+VHS chroma comb/gain pass は line-size の stack workspace 1 つで 2 つの内部 stage を
+融合し、3 つの public stage API は変更しません。同一条件の 10-field GC trace で
+sampled managed allocation は 2.360 GiB から 2.322 GiB、`Double[]` allocation は
+2,197.06 MiB から 2,147.33 MiB へ減少しました。59.629 MiB の `ApplyComb`
+allocation stack は消え、final gain-owned 59.629 MiB output は維持されました。Gen2
+collection は両 run とも 14 回です。交互に実行した 5 組の 40-field pair では default
+wall/CPU median が 4.455/12.250 秒から 4.366/12.125 秒、20-worker は
+3.721/15.719 秒から 3.657/14.094 秒へ低下しました。別の 5 組の 160-field
+20-worker run は wall/CPU median が 12.180/47.922 秒から 12.064/44.031 秒へ
+低下しました。実行順を反転した 2 組の 400-field pair は candidate/baseline が
+26.916/27.468 秒、baseline/candidate が 27.398/27.664 秒で、candidate peak は
+1.484/1.481 GiB でした。記録した luma、chroma、JSON hash はすべて exact です。
+以前の line-history in-place prototype は、160-field wall median が default で
+15.20 秒から 15.53 秒、20-worker で 12.45 秒から 12.68 秒へ後退したため、完全に
+削除しました。
+
 </details>
 
 <!-- SECTION: build -->
@@ -525,7 +544,7 @@ dotnet test --solution VHSDecodeDotNet.slnx -c Release --no-build --no-restore
 
 現在の正式な Release build は warning 0、error 0 です。xUnit v3 project は
 `dotnet test` と Visual Studio Test Explorer の両方で個別に検出できる
-**811** tests を公開します。
+**812** tests を公開します。
 
 <!-- SECTION: usage -->
 

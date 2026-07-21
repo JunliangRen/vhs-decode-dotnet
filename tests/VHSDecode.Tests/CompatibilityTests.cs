@@ -3582,9 +3582,11 @@ public void VhsChromaDecoderEmitsFieldSamples()
     VhsChromaFieldOptions ntscOptions = options with
     {
         ColorSystem = "NTSC",
-        ColorUnderCarrierHz = 1_000_000.0
+        ColorUnderCarrierHz = 1_000_000.0,
+        DisableComb = false
     };
     double[]? capturedUpconverted = null;
+    double[]? returnedUpconverted = null;
     VhsChromaFieldResult ntscResult = VhsChromaDecoder.DecodeField(
         chroma,
         ntscOptions,
@@ -3592,6 +3594,7 @@ public void VhsChromaDecoderEmitsFieldSamples()
         inputLineLength: 100,
         finalFilter: values =>
         {
+            returnedUpconverted = values;
             capturedUpconverted = values.ToArray();
             return values;
         });
@@ -3614,6 +3617,7 @@ public void VhsChromaDecoderEmitsFieldSamples()
         ntscResult.Phase.PhaseSequence,
         heterodyne);
     AssertSequence(expectedUpconverted, capturedUpconverted!);
+    AssertSequence(expectedUpconverted, returnedUpconverted!);
 
     VhsChromaFieldResult filteredBurst = VhsChromaDecoder.DecodeField(
         chroma,

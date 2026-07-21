@@ -161,6 +161,10 @@ release compatibility remain the first constraint.
   array directly. Decode borrows that same read-only array when no chroma
   prefilter is configured; configured filtering still returns owned output,
   and the public prefilter API retains its independent-copy contract.
+- Internal VHS chroma comb and automatic gain share one line-sized stack
+  workspace and write directly to the gain-owned field output, avoiding a
+  separate full-field comb result. The three public stage APIs retain their
+  independent-output contracts.
 - HiFi uses bounded parallel block decoding followed by ordered
   post-processing and writing.
 - Managed real FFTs reuse pooled packing and scratch buffers. Float32 SOS
@@ -535,6 +539,22 @@ from 15.104/41.297 to 14.732/40.344 s; 20-worker wall time remained neutral at
 baseline/candidate in 28.224/28.308 s; candidate peaks were
 1.474/1.475 GiB. Every recorded luma, chroma, and JSON hash remained exact.
 
+The VHS chroma comb/gain pass fuses those two internal stages with one
+line-sized stack workspace while leaving the public stage APIs unchanged. A
+matched 10-field GC trace reduced sampled managed allocation from 2.360 to
+2.322 GiB and `Double[]` allocation from 2,197.06 to 2,147.33 MiB. The
+59.629 MiB `ApplyComb` allocation stack disappeared, the final gain-owned
+59.629 MiB output remained, and both runs performed 14 Gen2 collections. Five
+interleaved 40-field pairs moved default wall/CPU medians from 4.455/12.250 to
+4.366/12.125 s and 20-worker medians from 3.721/15.719 to 3.657/14.094 s. A
+separate five-pair 160-field 20-worker run moved wall/CPU medians from
+12.180/47.922 to 12.064/44.031 s. Two reversed-order 400-field pairs completed
+candidate/baseline in 26.916/27.468 s and baseline/candidate in
+27.398/27.664 s; candidate peaks were 1.484/1.481 GiB. Every recorded luma,
+chroma, and JSON hash remained exact. An earlier line-history in-place
+prototype was fully removed after its 160-field wall medians regressed from
+15.20 to 15.53 s by default and from 12.45 to 12.68 s with 20 workers.
+
 </details>
 
 <!-- SECTION: build -->
@@ -555,7 +575,7 @@ dotnet test --solution VHSDecodeDotNet.slnx -c Release --no-build --no-restore
 ```
 
 The current formal Release build has zero warnings and errors. The xUnit v3
-project exposes **811** independently discoverable tests to both
+project exposes **812** independently discoverable tests to both
 `dotnet test` and Visual Studio Test Explorer.
 
 <!-- SECTION: usage -->
