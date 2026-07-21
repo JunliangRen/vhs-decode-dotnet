@@ -214,6 +214,16 @@ Windows 11 build 26220 和 .NET SDK/runtime
 SHA-256 在 Python 与两次本项目运行之间都逐字节一致；两边的 `--threads 0` 都选择
 确定性串行模式。
 
+另一个独立的无 seek 启动检查点使用 `RF-Sample_2026-07-19_23-58-20.lds`，保持相同
+PAL VHS 参数，并使用 `--threads 0 -l 1000`。Python 与本项目得到逐字节一致的亮度
+SHA-256 `E6616B63BD7DD1DB6C093FC6D1DCA7D23AABEF34EFD52089338D992F2DDCD0CD`
+和色度 SHA-256
+`A292BD77A8EB3373B6C631CE4552F77B6D4E5AF2228A85F01C63EDBBBFB4C0EF`。
+2,000 个场记录、135 次启动恢复步骤，以及 1,000 项文件帧序列（`22..1021`）也全部
+一致。打包的 Python 基准写入 8 字符身份 `g43155200`，本项目使用 `g4315520`；对应
+`gitCommit`/`version` 程序身份字符串是 JSON 中仅有的差异。该正确性运行期间还有另一
+个解码进程并发执行，因此它的耗时不作为 benchmark 结果。
+
 这些数字只对应特定夹具，不是通用 benchmark。下述 40-frame 调优 A/B 使用 .NET
 SDK/runtime `11.0.100-preview.6.26359.118`、`--threads 20`、默认色度和默认重采样。
 在可重复的 40-frame PAL probe 上，保存的连续流水线改造前基线中位数为 11.60 秒，

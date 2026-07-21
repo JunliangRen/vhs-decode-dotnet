@@ -91,6 +91,67 @@ public sealed class VhsSavedLevelStateCompatibilityTests
             diagnosticLogger: null));
     }
 
+    [Fact(DisplayName = "VHS first fallback pass reuses FieldState without storing serration levels")]
+    public void FirstFallbackPassDefersSerrationLevelStorage()
+    {
+        var fieldState = new VhsFieldLevelState(framesPerSecond: 25.0);
+        fieldState.PushLevels(60.0, 100.0);
+        var detector = new VsyncSerrationDetector(
+            sampleRateHz: 4_000_000.0,
+            framesPerSecond: 25.0,
+            frameLines: 625.0,
+            equalizingPulseUs: 2.35);
+        detector.PushLevels(180.0, 280.0);
+        var diagnostics = new List<(string Level, string Message)>();
+
+        Assert.True(TbcFieldDecodePipeline.TryResolveVhsSerrationRefinementFallback(
+            SerrationLevelFailureKind.NonFiniteLevels,
+            fieldState,
+            (level, message) => diagnostics.Add((level, message)),
+            out (double SyncLevel, double BlankLevel)? levels));
+
+        Assert.Equal((60.0, 100.0), levels);
+        Assert.Equal((180.0, 280.0), detector.PullLevels());
+        Assert.Equal(
+            [("DEBUG", "blacklevel or synclevel had a NaN!")],
+            diagnostics);
+    }
+
+    [Fact(DisplayName = "VHS serration fallback resolves FieldState after refinement updates")]
+    public void SerrationFallbackUsesPostRefinementFieldState()
+    {
+        var fieldState = new VhsFieldLevelState(framesPerSecond: 25.0);
+        for (int syncLevel = 1; syncLevel <= 10; syncLevel++)
+        {
+            fieldState.PushLevels(syncLevel, 100.0);
+        }
+
+        double[] syncReference = [0.0, 100.0];
+        var rejectedSerrationLevels = (SyncLevel: 100.0, BlankLevel: 200.0);
+        (double SyncLevel, double BlankLevel)? beforeRefinement =
+            TbcFieldDecodePipeline.SelectUsableVhsLevels(
+                syncReference,
+                referenceSyncLevel: 60.0,
+                rejectedSerrationLevels,
+                hzIre: 1.0,
+                fieldState,
+                diagnosticLogger: null);
+        Assert.Equal((5.5, 100.0), beforeRefinement);
+
+        fieldState.PushSyncLevel(100.0);
+        fieldState.PushSyncLevel(200.0);
+
+        (double SyncLevel, double BlankLevel)? afterRefinement =
+            TbcFieldDecodePipeline.SelectUsableVhsLevels(
+                syncReference,
+                referenceSyncLevel: 60.0,
+                rejectedSerrationLevels,
+                hzIre: 1.0,
+                fieldState,
+                diagnosticLogger: null);
+        Assert.Equal((35.2, 100.0), afterRefinement);
+    }
+
     [Fact(DisplayName = "VHS line-location issue state forces fresh level detection")]
     public void LineLocationIssueStateForcesFreshLevelDetection()
     {

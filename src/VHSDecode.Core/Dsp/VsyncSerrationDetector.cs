@@ -22,10 +22,10 @@ public sealed class VsyncSerrationDetector
 {
     private const int EnvelopePadding = 1024;
     private readonly int _divisor;
-    private readonly SosSection[] _vsyncEnvelopeFilter;
-    private readonly SosSection[] _serrationBaseHighPass;
-    private readonly SosSection[] _serrationBaseLowPass;
-    private readonly SosSection[] _serrationEnvelopeFilter;
+    private readonly TransferFunction _vsyncEnvelopeFilter;
+    private readonly TransferFunction _serrationBaseHighPass;
+    private readonly TransferFunction _serrationBaseLowPass;
+    private readonly TransferFunction _serrationEnvelopeFilter;
     private readonly MovingAverageWindow _syncLevels = new(window: 2, minimumWatermark: 1);
     private readonly MovingAverageWindow _blankLevels = new(window: 2, minimumWatermark: 1);
 
@@ -149,10 +149,10 @@ public sealed class VsyncSerrationDetector
         int paddedLength = reduced.Length + padding;
         int minimumFilteredLength = new[]
         {
-            SosFilter.DefaultPadLength(_vsyncEnvelopeFilter),
-            SosFilter.DefaultPadLength(_serrationBaseHighPass),
-            SosFilter.DefaultPadLength(_serrationBaseLowPass),
-            SosFilter.DefaultPadLength(_serrationEnvelopeFilter)
+            IirFilter.DefaultPadLength(_vsyncEnvelopeFilter),
+            IirFilter.DefaultPadLength(_serrationBaseHighPass),
+            IirFilter.DefaultPadLength(_serrationBaseLowPass),
+            IirFilter.DefaultPadLength(_serrationEnvelopeFilter)
         }.Max() + 1;
         if (paddedLength < minimumFilteredLength)
         {
@@ -459,12 +459,12 @@ public sealed class VsyncSerrationDetector
         double[]? forward = null;
         double[]? reverse = null;
         Parallel.Invoke(
-            () => forward = SosFilter.ApplyForwardBackward(_vsyncEnvelopeFilter, clipped),
+            () => forward = IirFilter.ApplyForwardBackward(_vsyncEnvelopeFilter, clipped),
             () =>
             {
                 double[] reversed = clipped.ToArray();
                 Array.Reverse(reversed);
-                reverse = SosFilter.ApplyForwardBackward(_vsyncEnvelopeFilter, reversed);
+                reverse = IirFilter.ApplyForwardBackward(_vsyncEnvelopeFilter, reversed);
                 Array.Reverse(reverse);
             });
 
@@ -485,18 +485,18 @@ public sealed class VsyncSerrationDetector
 
     private int[] PowerRatioSearch(ReadOnlySpan<double> padded)
     {
-        double[] firstHarmonic = SosFilter.ApplyForwardBackward(_serrationBaseHighPass, padded);
-        firstHarmonic = SosFilter.ApplyForwardBackward(_serrationBaseLowPass, firstHarmonic);
+        double[] firstHarmonic = IirFilter.ApplyForwardBackward(_serrationBaseHighPass, padded);
+        firstHarmonic = IirFilter.ApplyForwardBackward(_serrationBaseLowPass, firstHarmonic);
         for (int i = 0; i < firstHarmonic.Length; i++)
         {
             firstHarmonic[i] *= firstHarmonic[i];
         }
 
-        firstHarmonic = SosFilter.ApplyForwardBackward(_serrationEnvelopeFilter, firstHarmonic);
+        firstHarmonic = IirFilter.ApplyForwardBackward(_serrationEnvelopeFilter, firstHarmonic);
         return LocalMinimaIndices(firstHarmonic);
     }
 
-    private static SosSection[] DesignFilter(
+    private static TransferFunction DesignFilter(
         double sampleRateHz,
         double cutoffHz,
         double transitionWidthHz,
@@ -512,8 +512,8 @@ public sealed class VsyncSerrationDetector
             stopAttenuationDb: 30.0);
         int order = Math.Min(calculatedOrder, 20);
         return highPass
-            ? IirFilterDesign.ButterworthHighPass(order, normalizedCutoff)
-            : IirFilterDesign.ButterworthLowPass(order, normalizedCutoff);
+            ? IirFilterDesign.ButterworthHighPassTransferFunction(order, normalizedCutoff)
+            : IirFilterDesign.ButterworthLowPassTransferFunction(order, normalizedCutoff);
     }
 
     private static double[] BuildPaddedInput(ReadOnlySpan<double> data)
