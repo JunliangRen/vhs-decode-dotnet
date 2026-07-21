@@ -2,7 +2,7 @@
 
 **[English](README.md)** | [简体中文](README.zh-CN.md) | [日本語](README.ja.md)
 
-<!-- README_SYNC: 2026-07-22.16 -->
+<!-- README_SYNC: 2026-07-22.17 -->
 
 .NET 11 rewrite of the decode-facing parts of
 [`oyvindln/vhs-decode`](https://github.com/oyvindln/vhs-decode), focused on
@@ -650,6 +650,19 @@ replay, candidate peak working sets stayed bounded at or below 1.14 GiB, and
 all ten runs produced one exact luma, chroma, and JSON hash set. An AVX
 pulse-state prototype was removed after it failed the 160-frame gate.
 
+Default linear TBC source positions are now filled one output line at a time.
+The implementation caches each line's two location values while retaining the
+original per-sample division, subtraction, multiplication, and addition order.
+Randomized tests compare every generated double bit-for-bit with the previous
+scalar interpolation. Against baseline `c51f059` on the same `xxf.lds`
+160-frame window, two interleaved default-worker pairs moved average wall/CPU
+time from 14.060/40.164 s to 13.598/40.438 s (3.3% less wall time; CPU was 0.7%
+higher within run noise). Two 20-worker pairs moved from 10.907/45.039 s to
+10.771/43.414 s (1.2% less wall time and 3.6% less CPU). The matching default
+trace reduced sampled `BuildSourcePositions` self time from 711.35 to 257.61 ms
+(63.8%). Candidate peak working sets stayed at or below 1.13 GiB, and all eight
+runs produced one exact luma, chroma, and JSON hash set.
+
 </details>
 
 <!-- SECTION: build -->
@@ -670,7 +683,7 @@ dotnet test --solution VHSDecodeDotNet.slnx -c Release --no-build --no-restore
 ```
 
 The current formal Release build has zero warnings and errors. The xUnit v3
-project exposes **821** independently discoverable tests to both
+project exposes **822** independently discoverable tests to both
 `dotnet test` and Visual Studio Test Explorer.
 
 <!-- SECTION: usage -->

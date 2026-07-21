@@ -364,12 +364,10 @@ public sealed class TbcLineResampler
             {
                 void BuildSourcePositions()
                 {
-                    for (int i = 0; i < destinationLength; i++)
-                    {
-                        sourcePositions[i] = interpolator.EvaluateOutputPosition(
-                            prefixSamples + i,
-                            OutputLineLength);
-                    }
+                    linear.FillOutputPositions(
+                        prefixSamples,
+                        OutputLineLength,
+                        sourcePositions.AsSpan(0, destinationLength));
                 }
 
                 if (_workerThreads > 1 && destinationLength >= ParallelSampleThreshold)
@@ -817,6 +815,33 @@ public sealed class TbcLineResampler
             int left = Math.Clamp((int)Math.Floor(linePosition), 0, locations.Count - 2);
             double fraction = Math.Clamp(linePosition - left, 0.0, 1.0);
             return locations[left] + ((locations[left + 1] - locations[left]) * fraction);
+        }
+
+        public void FillOutputPositions(
+            int firstSampleIndex,
+            int outputLineLength,
+            Span<double> destination)
+        {
+            int sampleIndex = firstSampleIndex;
+            int destinationIndex = 0;
+            while (destinationIndex < destination.Length)
+            {
+                int left = sampleIndex / outputLineLength;
+                double leftLocation = locations[left];
+                double locationDelta = locations[left + 1] - leftLocation;
+                int samplesThisLine = Math.Min(
+                    outputLineLength - (sampleIndex % outputLineLength),
+                    destination.Length - destinationIndex);
+                int destinationEnd = destinationIndex + samplesThisLine;
+                while (destinationIndex < destinationEnd)
+                {
+                    double linePosition = (double)sampleIndex / outputLineLength;
+                    double fraction = Math.Clamp(linePosition - left, 0.0, 1.0);
+                    destination[destinationIndex] = leftLocation + (locationDelta * fraction);
+                    destinationIndex++;
+                    sampleIndex++;
+                }
+            }
         }
 
         public double EvaluateDerivative(double linePosition, double inputScale)

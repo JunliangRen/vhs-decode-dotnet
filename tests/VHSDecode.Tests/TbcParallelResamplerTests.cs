@@ -7,6 +7,49 @@ namespace VHSDecode.Tests;
 
 public sealed class TbcParallelResamplerTests
 {
+    [Fact(DisplayName = "Batched linear TBC positions remain bit-exact to scalar interpolation")]
+    public void BatchedLinearTbcPositionsRemainBitExactToScalarInterpolation()
+    {
+        var random = new Random(0x51C0_2026);
+        for (int iteration = 0; iteration < 64; iteration++)
+        {
+            int outputLineLength = random.Next(1, 258);
+            int locationCount = random.Next(4, 40);
+            var locations = new double[locationCount];
+            locations[0] = (random.NextDouble() - 0.5) * 1_000_000.0;
+            for (int i = 1; i < locations.Length; i++)
+            {
+                locations[i] = locations[i - 1] + 0.001 + (random.NextDouble() * 10_000.0);
+            }
+
+            int firstLine = random.Next(0, locationCount - 1);
+            int lineCount = random.Next(0, locationCount - firstLine);
+            var resampler = new TbcLineResampler(
+                outputLineLength,
+                TbcLineInterpolationMethod.Linear,
+                nominalInputLineLength: 2_000.125,
+                workerThreads: 5);
+
+            using TbcLineResampler.ResamplingPlan plan = resampler.PrepareLineResampling(
+                locations,
+                firstLine,
+                lineCount);
+            for (int i = 0; i < plan.DestinationLength; i++)
+            {
+                int sampleIndex = checked((firstLine * outputLineLength) + i);
+                double linePosition = (double)sampleIndex / outputLineLength;
+                int left = Math.Clamp((int)Math.Floor(linePosition), 0, locations.Length - 2);
+                double fraction = Math.Clamp(linePosition - left, 0.0, 1.0);
+                double expected = locations[left]
+                    + ((locations[left + 1] - locations[left]) * fraction);
+
+                Assert.Equal(
+                    BitConverter.DoubleToInt64Bits(expected),
+                    BitConverter.DoubleToInt64Bits(plan.SourcePositions[i]));
+            }
+        }
+    }
+
     [Fact(DisplayName = "TBC sinc interior and clamped edges remain bit-exact")]
     public void TbcSincInteriorAndClampedEdgesRemainBitExact()
     {

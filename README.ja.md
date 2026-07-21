@@ -2,7 +2,7 @@
 
 [English](README.md) | [简体中文](README.zh-CN.md) | **[日本語](README.ja.md)**
 
-<!-- README_SYNC: 2026-07-22.16 -->
+<!-- README_SYNC: 2026-07-22.17 -->
 
 [`oyvindln/vhs-decode`](https://github.com/oyvindln/vhs-decode) の
 デコード関連部分を .NET 11 で再実装するプロジェクトです。現在は release
@@ -614,6 +614,18 @@ replay を合わせても、candidate peak working set は 1.14 GiB 以下の bo
 収まり、全 10 run の luma、chroma、JSON hash は同一でした。160-frame gate を
 通過しなかった AVX pulse-state prototype は削除しました。
 
+default linear TBC の source position は output line 単位で一括生成するようになりました。
+各 line の 2 つの location value を cache しつつ、sample ごとの元の division、
+subtraction、multiplication、addition 順序を維持します。randomized test は生成した
+すべての double を以前の scalar interpolation と bit-for-bit で比較します。`c51f059`
+を baseline とし、同じ `xxf.lds` の 160-frame window で測定した 2 組の interleaved
+default-worker pair は平均 wall/CPU が 14.060/40.164 秒から 13.598/40.438 秒へ
+変化しました（wall 3.3% 減、CPU は run noise 内で 0.7% 増）。2 組の 20-worker pair
+は 10.907/45.039 秒から 10.771/43.414 秒へ変化しました（wall 1.2%、CPU 3.6% 減）。
+対応する default trace では sampled `BuildSourcePositions` self time が 711.35 ms から
+257.61 ms へ低下しました（63.8% 減）。candidate peak working set は 1.13 GiB 以下に
+収まり、全 8 run の luma、chroma、JSON hash は同一でした。
+
 </details>
 
 <!-- SECTION: build -->
@@ -635,7 +647,7 @@ dotnet test --solution VHSDecodeDotNet.slnx -c Release --no-build --no-restore
 
 現在の正式な Release build は warning 0、error 0 です。xUnit v3 project は
 `dotnet test` と Visual Studio Test Explorer の両方で個別に検出できる
-**821** tests を公開します。
+**822** tests を公開します。
 
 <!-- SECTION: usage -->
 
