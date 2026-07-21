@@ -21,6 +21,7 @@ public sealed record VsyncSerrationResult(
 public sealed class VsyncSerrationDetector
 {
     private const int EnvelopePadding = 1024;
+    private const int MaximumRetainedWorkspaceSampleCount = 1024 * 1024;
     private readonly int _divisor;
     private readonly TransferFunction _vsyncEnvelopeFilter;
     private readonly TransferFunction _serrationBaseHighPass;
@@ -28,6 +29,7 @@ public sealed class VsyncSerrationDetector
     private readonly TransferFunction _serrationEnvelopeFilter;
     private readonly MovingAverageWindow _syncLevels = new(window: 2, minimumWatermark: 1);
     private readonly MovingAverageWindow _blankLevels = new(window: 2, minimumWatermark: 1);
+    private AnalysisWorkspace? _analysisWorkspace;
 
     public VsyncSerrationDetector(
         double sampleRateHz,
@@ -144,9 +146,12 @@ public sealed class VsyncSerrationDetector
             return new VsyncSerrationResult(false, HasLevels, null, null, double.NaN, [], [], [], []);
         }
 
-        double[] reduced = Downsample(data, _divisor);
-        int padding = Math.Min(EnvelopePadding, reduced.Length);
-        int paddedLength = reduced.Length + padding;
+        int reducedLength = (data.Length + _divisor - 1) / _divisor;
+        int padding = Math.Min(EnvelopePadding, reducedLength);
+        int paddedLength = reducedLength + padding;
+        AnalysisWorkspace workspace = GetAnalysisWorkspace(reducedLength, paddedLength);
+        double[] reduced = workspace.Reduced;
+        Downsample(data, _divisor, reduced);
         int minimumFilteredLength = new[]
         {
             IirFilter.DefaultPadLength(_vsyncEnvelopeFilter),
@@ -170,17 +175,18 @@ public sealed class VsyncSerrationDetector
                 []);
         }
 
-        double[] padded = BuildPaddedInput(reduced);
+        double[] padded = workspace.Padded;
+        BuildPaddedInput(reduced, padded);
         int[] envelopeMinima = [];
         int[] harmonicMinima = [];
         double bias = 0.0;
         Parallel.Invoke(
             () =>
             {
-                (double[] envelope, bias) = BuildVsyncEnvelope(reduced, padded);
-                envelopeMinima = LocalMinimaIndices(envelope);
+                bias = BuildVsyncEnvelope(reduced, padded, workspace);
+                envelopeMinima = LocalMinimaIndices(workspace.Envelope);
             },
-            () => harmonicMinima = PowerRatioSearch(padded));
+            () => harmonicMinima = PowerRatioSearch(padded, workspace.PowerRatio));
         int[] candidates = ArbitrateVsync(
             VsyncLength,
             envelopeMinima,
@@ -310,8 +316,8 @@ public sealed class VsyncSerrationDetector
             return false;
         }
 
-        double[] block = data[start..end].ToArray();
-        double minimum = block.Min();
+        ReadOnlySpan<double> block = data[start..end];
+        double minimum = MinimumFloat64(block);
         double level = ((Median(block) - minimum) / 2.0) + minimum;
         var crossings = new List<int>();
         int previousSign = PythonSign(block[0] - level);
@@ -446,53 +452,52 @@ public sealed class VsyncSerrationDetector
         return true;
     }
 
-    private (double[] Envelope, double Bias) BuildVsyncEnvelope(
+    private double BuildVsyncEnvelope(
         ReadOnlySpan<double> data,
-        ReadOnlySpan<double> padded)
+        ReadOnlySpan<double> padded,
+        AnalysisWorkspace workspace)
     {
-        var clipped = new double[padded.Length];
-        for (int i = 0; i < clipped.Length; i++)
+        double[] forward = workspace.Forward;
+        for (int i = 0; i < forward.Length; i++)
         {
-            clipped[i] = Math.Max(0.0, padded[i]);
+            forward[i] = Math.Max(0.0, padded[i]);
         }
 
-        double[]? forward = null;
-        double[]? reverse = null;
+        double bias = forward.Min();
+        double[] reverse = workspace.Reverse;
+        forward.CopyTo(reverse, 0);
         Parallel.Invoke(
-            () => forward = IirFilter.ApplyForwardBackward(_vsyncEnvelopeFilter, clipped),
+            () => IirFilter.ApplyForwardBackwardInPlace(_vsyncEnvelopeFilter, forward),
             () =>
             {
-                double[] reversed = clipped.ToArray();
-                Array.Reverse(reversed);
-                reverse = IirFilter.ApplyForwardBackward(_vsyncEnvelopeFilter, reversed);
+                Array.Reverse(reverse);
+                IirFilter.ApplyForwardBackwardInPlace(_vsyncEnvelopeFilter, reverse);
                 Array.Reverse(reverse);
             });
 
-        int half = clipped.Length / 2;
-        var combined = new double[clipped.Length];
-        Array.Copy(reverse!, 0, combined, 0, half);
-        Array.Copy(forward!, half, combined, half, combined.Length - half);
-        double bias = clipped.Min();
+        int half = forward.Length / 2;
         int padding = Math.Min(EnvelopePadding, data.Length);
-        var envelope = new double[data.Length];
+        double[] envelope = workspace.Envelope;
         for (int i = 0; i < envelope.Length; i++)
         {
-            envelope[i] = combined[padding + i] - bias;
+            int source = padding + i;
+            envelope[i] = (source < half ? reverse[source] : forward[source]) - bias;
         }
 
-        return (envelope, bias);
+        return bias;
     }
 
-    private int[] PowerRatioSearch(ReadOnlySpan<double> padded)
+    private int[] PowerRatioSearch(ReadOnlySpan<double> padded, double[] firstHarmonic)
     {
-        double[] firstHarmonic = IirFilter.ApplyForwardBackward(_serrationBaseHighPass, padded);
-        firstHarmonic = IirFilter.ApplyForwardBackward(_serrationBaseLowPass, firstHarmonic);
+        padded.CopyTo(firstHarmonic);
+        IirFilter.ApplyForwardBackwardInPlace(_serrationBaseHighPass, firstHarmonic);
+        IirFilter.ApplyForwardBackwardInPlace(_serrationBaseLowPass, firstHarmonic);
         for (int i = 0; i < firstHarmonic.Length; i++)
         {
             firstHarmonic[i] *= firstHarmonic[i];
         }
 
-        firstHarmonic = IirFilter.ApplyForwardBackward(_serrationEnvelopeFilter, firstHarmonic);
+        IirFilter.ApplyForwardBackwardInPlace(_serrationEnvelopeFilter, firstHarmonic);
         return LocalMinimaIndices(firstHarmonic);
     }
 
@@ -516,43 +521,128 @@ public sealed class VsyncSerrationDetector
             : IirFilterDesign.ButterworthLowPassTransferFunction(order, normalizedCutoff);
     }
 
-    private static double[] BuildPaddedInput(ReadOnlySpan<double> data)
+    private AnalysisWorkspace GetAnalysisWorkspace(int reducedLength, int paddedLength)
+    {
+        if (paddedLength > MaximumRetainedWorkspaceSampleCount)
+        {
+            return new AnalysisWorkspace(reducedLength, paddedLength);
+        }
+
+        if (_analysisWorkspace is null
+            || _analysisWorkspace.Reduced.Length != reducedLength
+            || _analysisWorkspace.Padded.Length != paddedLength)
+        {
+            _analysisWorkspace = new AnalysisWorkspace(reducedLength, paddedLength);
+        }
+
+        return _analysisWorkspace;
+    }
+
+    private static void BuildPaddedInput(ReadOnlySpan<double> data, Span<double> padded)
     {
         int padding = Math.Min(EnvelopePadding, data.Length);
-        var padded = new double[data.Length + padding];
+        if (padded.Length != data.Length + padding)
+        {
+            throw new ArgumentException("Padded workspace length did not match the input.", nameof(padded));
+        }
+
         for (int i = 0; i < padding; i++)
         {
             padded[i] = data[padding - 1 - i];
         }
 
-        data.CopyTo(padded.AsSpan(padding));
-        return padded;
+        data.CopyTo(padded[padding..]);
     }
 
-    private static double[] Downsample(ReadOnlySpan<double> data, int divisor)
+    private static void Downsample(ReadOnlySpan<double> data, int divisor, Span<double> output)
     {
-        if (divisor == 1)
+        int expectedLength = (data.Length + divisor - 1) / divisor;
+        if (output.Length != expectedLength)
         {
-            return data.ToArray();
+            throw new ArgumentException("Downsample workspace length did not match the input.", nameof(output));
         }
 
-        var output = new double[(data.Length + divisor - 1) / divisor];
+        if (divisor == 1)
+        {
+            data.CopyTo(output);
+            return;
+        }
+
         for (int i = 0, source = 0; i < output.Length; i++, source += divisor)
         {
             output[i] = data[source];
         }
-
-        return output;
     }
 
     private static int PythonSign(double value)
         => value > 0.0 ? 1 : value < 0.0 ? -1 : 0;
 
+    internal static double MinimumFloat64(ReadOnlySpan<double> values)
+    {
+        if (values.IsEmpty)
+        {
+            throw new InvalidOperationException("Sequence contains no elements");
+        }
+
+        int index = 0;
+        double minimum = values[index++];
+        while (double.IsNaN(minimum))
+        {
+            if (index >= values.Length)
+            {
+                return minimum;
+            }
+
+            minimum = values[index++];
+        }
+
+        for (; index < values.Length; index++)
+        {
+            double value = values[index];
+            if (double.IsNaN(value))
+            {
+                return value;
+            }
+
+            if (value < minimum)
+            {
+                minimum = value;
+            }
+        }
+
+        return minimum;
+    }
+
     private static double Median(IEnumerable<double> values)
         => NumpyReduction.MedianFloat64(values.ToArray());
 
-    private static double Median(double[] values)
+    private static double Median(ReadOnlySpan<double> values)
         => NumpyReduction.MedianFloat64(values);
+
+    private sealed class AnalysisWorkspace
+    {
+        public AnalysisWorkspace(int reducedLength, int paddedLength)
+        {
+            Reduced = new double[reducedLength];
+            Padded = new double[paddedLength];
+            Forward = new double[paddedLength];
+            Reverse = new double[paddedLength];
+            Envelope = new double[reducedLength];
+            PowerRatio = new double[paddedLength];
+        }
+
+        public double[] Reduced { get; }
+
+        public double[] Padded { get; }
+
+        public double[] Forward { get; }
+
+        public double[] Reverse { get; }
+
+        public double[] Envelope { get; }
+
+        public double[] PowerRatio { get; }
+    }
 
     private sealed class MovingAverageWindow(int window, int minimumWatermark)
     {

@@ -3582,9 +3582,11 @@ public void VhsChromaDecoderEmitsFieldSamples()
     VhsChromaFieldOptions ntscOptions = options with
     {
         ColorSystem = "NTSC",
-        ColorUnderCarrierHz = 1_000_000.0
+        ColorUnderCarrierHz = 1_000_000.0,
+        DisableComb = false
     };
     double[]? capturedUpconverted = null;
+    double[]? returnedUpconverted = null;
     VhsChromaFieldResult ntscResult = VhsChromaDecoder.DecodeField(
         chroma,
         ntscOptions,
@@ -3592,6 +3594,7 @@ public void VhsChromaDecoderEmitsFieldSamples()
         inputLineLength: 100,
         finalFilter: values =>
         {
+            returnedUpconverted = values;
             capturedUpconverted = values.ToArray();
             return values;
         });
@@ -3614,6 +3617,7 @@ public void VhsChromaDecoderEmitsFieldSamples()
         ntscResult.Phase.PhaseSequence,
         heterodyne);
     AssertSequence(expectedUpconverted, capturedUpconverted!);
+    AssertSequence(expectedUpconverted, returnedUpconverted!);
 
     VhsChromaFieldResult filteredBurst = VhsChromaDecoder.DecodeField(
         chroma,
@@ -6876,6 +6880,18 @@ public void VsyncSerrationDetectorMatchesV04Rules()
     AssertTrue(measurement.End - measurement.Start > detector.MinimumVbiLength);
     AssertTrue(measurement.End - measurement.Start < detector.MaximumVbiLength);
 
+    long allocationBefore = GC.GetAllocatedBytesForCurrentThread();
+    AssertTrue(VsyncSerrationDetector.TryMeasureSerration(
+        field,
+        firstPulse + (detector.LineLength * 2),
+        detector.LineLength,
+        detector.EqualizingPulseLength,
+        detector.MinimumVbiLength,
+        detector.MaximumVbiLength,
+        out _));
+    long allocated = GC.GetAllocatedBytesForCurrentThread() - allocationBefore;
+    AssertTrue(allocated < 200_000);
+
     var automatic = new VsyncSerrationDetector(
         sampleRateHz: 4_000_000.0,
         framesPerSecond: 25.0,
@@ -7093,6 +7109,87 @@ public void VsyncSerrationDetectorMatchesV04Rules()
         true,
         true)!;
     AssertClose(80.0, Convert.ToDouble(PrivatePropertyValue(prepared, "Threshold")), 1e-12);
+}
+
+[Fact(DisplayName = "VBI serration span minimum preserves float64 bit semantics")]
+public void VsyncSerrationSpanMinimumPreservesFloat64BitSemantics()
+{
+    double firstNan = BitConverter.UInt64BitsToDouble(0x7FF8000000000123UL);
+    double secondNan = BitConverter.UInt64BitsToDouble(0xFFF8000000000456UL);
+    double[][] inputs =
+    [
+        [3.0, 1.0, 2.0],
+        [-0.0, 0.0],
+        [0.0, -0.0],
+        [1.0, firstNan, secondNan],
+        [secondNan, firstNan]
+    ];
+
+    foreach (double[] values in inputs)
+    {
+        AssertEqual(
+            BitConverter.DoubleToUInt64Bits(values.Min()),
+            BitConverter.DoubleToUInt64Bits(VsyncSerrationDetector.MinimumFloat64(values)));
+    }
+}
+
+[Fact(DisplayName = "VHS sync DC offset reuses an exact low-pass workspace")]
+public void VhsSyncDcOffsetReusesExactLowPassWorkspace()
+{
+    var analyzer = new SyncAnalyzer(
+        sampleRateHz: 4_000_000.0,
+        linePeriodUs: 64.0,
+        hsyncPulseUs: 4.7,
+        equalizingPulseUs: 2.35,
+        vsyncPulseUs: 27.3);
+    var frameSpec = new TbcFrameSpec(
+        "PAL",
+        OutputLineLength: 4,
+        OutputLineCount: 2,
+        OutputSampleRateHz: 4_000_000.0,
+        ColourBurstStart: null,
+        ColourBurstEnd: null,
+        ActiveVideoStart: null,
+        ActiveVideoEnd: null);
+    var converter = new VideoOutputConverter(
+        ire0: 100.0,
+        hzIre: 1.0,
+        outputZero: 256,
+        vsyncIre: -40.0,
+        outputScale: 10.0);
+    var pipeline = new TbcFieldDecodePipeline(
+        analyzer,
+        new TbcFieldRenderer(frameSpec, converter),
+        converter,
+        "PAL",
+        TbcDropoutDetectionOptions.Disabled,
+        syncDetectionOptions: new SyncDetectionOptions(DetectLevels: true, LevelDetectDivisor: 1),
+        decodeType: "vhs");
+
+    double[] firstLowPass = [90.0, 130.0, 150.0];
+    object firstPrepared = InvokePrivateMethod(
+        pipeline,
+        "PrepareSyncSpanFromLevels",
+        new RfDecodedSpan(0, [], firstLowPass, firstLowPass, VideoLowPass: firstLowPass),
+        (90.0, 130.0),
+        false)!;
+    var firstSpan = (RfDecodedSpan)PrivatePropertyValue(firstPrepared, "Span")!;
+    AssertSequence([60.0, 100.0, 120.0], firstSpan.VideoLowPass!);
+    AssertSequence([90.0, 130.0, 150.0], firstLowPass);
+    AssertTrue(ReferenceEquals(firstLowPass, firstSpan.Video));
+    double[] workspace = firstSpan.VideoLowPass!;
+
+    double[] secondLowPass = [80.0, 120.0, 160.0];
+    object secondPrepared = InvokePrivateMethod(
+        pipeline,
+        "PrepareSyncSpanFromLevels",
+        new RfDecodedSpan(0, [], secondLowPass, secondLowPass, VideoLowPass: secondLowPass),
+        (80.0, 120.0),
+        false)!;
+    var secondSpan = (RfDecodedSpan)PrivatePropertyValue(secondPrepared, "Span")!;
+    AssertTrue(ReferenceEquals(workspace, secondSpan.VideoLowPass));
+    AssertSequence([60.0, 100.0, 140.0], secondSpan.VideoLowPass!);
+    AssertSequence([80.0, 120.0, 160.0], secondLowPass);
 }
 
 [Fact(DisplayName = "VHS debug mode hashes sync references")]
@@ -16035,6 +16132,89 @@ public void PackedLdsLoaderUnpacksSamples()
     byte[] packed = Pack4x10([0, 512, 1023, 513, 1, 2, 3, 4, 5, 6, 7, 8]);
     double[]? actual = new PackedDdD4To40SampleLoader().Read(new MemoryStream(packed), 1, 5);
     AssertSequence([0, 32704, 64, -32704, -32640], actual!);
+}
+
+[Theory(DisplayName = "packed LDS loader handles every group alignment")]
+[InlineData(0, 1)]
+[InlineData(1, 1)]
+[InlineData(2, 2)]
+[InlineData(3, 1)]
+[InlineData(4, 8)]
+[InlineData(5, 7)]
+[InlineData(6, 9)]
+[InlineData(7, 10)]
+public void PackedLdsLoaderHandlesEveryGroupAlignment(int start, int length)
+{
+    int[] samples = Enumerable.Range(0, 32)
+        .Select(index => (index * 73) % 1024)
+        .ToArray();
+    byte[] packed = Pack4x10(samples);
+
+    double[] expected = samples
+        .Skip(start)
+        .Take(length)
+        .Select(value => (double)(short)((value - 512) << 6))
+        .ToArray();
+    double[]? actual = new PackedDdD4To40SampleLoader().Read(
+        new MemoryStream(packed),
+        start,
+        length);
+
+    AssertSequence(expected, actual!);
+}
+
+[Fact(DisplayName = "packed LDS loader reuses its byte input buffer")]
+public void PackedLdsLoaderReusesItsByteInputBuffer()
+{
+    const int readLength = 32_768;
+    int[] samples = Enumerable.Range(0, readLength + 4)
+        .Select(index => (index * 73) % 1024)
+        .ToArray();
+    byte[] packed = Pack4x10(samples);
+    using var stream = new MemoryStream(packed, writable: false);
+    var loader = new PackedDdD4To40SampleLoader();
+    _ = loader.Read(stream, 0, readLength);
+
+    long before = GC.GetAllocatedBytesForCurrentThread();
+    double[]? actual = loader.Read(stream, 0, readLength);
+    long allocated = GC.GetAllocatedBytesForCurrentThread() - before;
+
+    Assert.NotNull(actual);
+    Assert.Equal(readLength, actual.Length);
+    Assert.Equal((double)(short)((samples[0] - 512) << 6), actual[0]);
+    Assert.Equal((double)(short)((samples[readLength - 1] - 512) << 6), actual[^1]);
+    Assert.True(
+        allocated < 270_000,
+        $"Warm 32K packed LDS read allocated {allocated:N0} bytes.");
+}
+
+[Fact(DisplayName = "packed LDS loader buffer cache remains safe under concurrent reads")]
+public void PackedLdsLoaderBufferCacheRemainsSafeUnderConcurrentReads()
+{
+    int[] samples = Enumerable.Range(0, 4_100)
+        .Select(index => (index * 73) % 1024)
+        .ToArray();
+    byte[] packed = Pack4x10(samples);
+    var loader = new PackedDdD4To40SampleLoader();
+
+    Parallel.For(
+        0,
+        32,
+        new ParallelOptions { MaxDegreeOfParallelism = 8 },
+        iteration =>
+        {
+            int start = iteration % 8;
+            const int length = 2_048;
+            using var stream = new MemoryStream(packed, writable: false);
+            double[] expected = samples
+                .Skip(start)
+                .Take(length)
+                .Select(value => (double)(short)((value - 512) << 6))
+                .ToArray();
+            double[]? actual = loader.Read(stream, start, length);
+
+            Assert.Equal(expected, actual);
+        });
 }
 
 [Fact(DisplayName = "packed r30 loader unpacks 3x10 bit samples")]

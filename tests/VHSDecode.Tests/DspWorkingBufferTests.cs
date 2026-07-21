@@ -67,6 +67,29 @@ public sealed class DspWorkingBufferTests
         Assert.All(inverseBuffer[length..], value => Assert.True(double.IsNaN(value)));
     }
 
+    [Fact(DisplayName = "32K real FFT radix stages remain bit-exact")]
+    public void ThirtyTwoKilobyteRealFftRadixStagesRemainBitExact()
+    {
+        const int length = 32_768;
+        var input = new double[length];
+        uint state = 0x12345678;
+        for (int index = 0; index < input.Length; index++)
+        {
+            state = (1_664_525 * state) + 1_013_904_223;
+            input[index] = ((state >> 8) / 16_777_216.0) - 0.5;
+        }
+
+        Complex[] spectrum = PocketFftReal.Forward(input);
+        double[] inverse = PocketFftReal.Inverse(spectrum, length);
+
+        Assert.Equal(
+            "2109467E306D566CF2E101D16D0DEB464BB235BD1D896847980A956EC4E0FF32",
+            Convert.ToHexString(SHA256.HashData(MemoryMarshal.AsBytes(spectrum.AsSpan()))));
+        Assert.Equal(
+            "252170F26D392BD773B180ABAFF095B2DE32361B70531C65AAEA666DA5C5D4D4",
+            Convert.ToHexString(SHA256.HashData(MemoryMarshal.AsBytes(inverse.AsSpan()))));
+    }
+
     [Fact(DisplayName = "In-place RF rotations match allocating compatibility paths exactly")]
     public void InPlaceRfRotationsMatchAllocatingCompatibilityPathsExactly()
     {
@@ -96,6 +119,242 @@ public sealed class DspWorkingBufferTests
         double[] actualFloat = chroma.ToArray();
         VhsChromaDecoder.ShiftChromaAndRemoveDcFloat32InPlace(actualFloat, 23);
         Assert.Equal(expectedFloat, actualFloat);
+    }
+
+    [Fact(DisplayName = "Unconfigured VHS chroma prefilter borrows input without changing public ownership")]
+    public void UnconfiguredVhsChromaPrefilterBorrowsInputWithoutChangingPublicOwnership()
+    {
+        var options = new VhsChromaFieldOptions(
+            ColorSystem: "PAL",
+            OutputLineLength: 64,
+            OutputLineCount: 64,
+            OutputSampleRateHz: 4_000_000.0,
+            FscMHz: 1.0,
+            ColorUnderCarrierHz: 0.0,
+            BurstStart: 8,
+            BurstEnd: 16,
+            BurstAbsRef: 10.0,
+            ChromaRotation: null,
+            DisableComb: true,
+            DisablePhaseCorrection: true,
+            EnableColorKiller: false,
+            DetectChromaTrackPhase: false);
+        double[] chroma = Enumerable.Range(0, options.OutputLineLength * options.OutputLineCount)
+            .Select(index => Math.Sin(index * 0.03125) + (index * 0.0001))
+            .ToArray();
+        double[] original = chroma.ToArray();
+
+        _ = VhsChromaDecoder.ApplyConfiguredChromaPreFilter(chroma, options);
+        long before = GC.GetAllocatedBytesForCurrentThread();
+        double[]? borrowed = VhsChromaDecoder.ApplyConfiguredChromaPreFilter(chroma, options);
+        long allocated = GC.GetAllocatedBytesForCurrentThread() - before;
+
+        Assert.Null(borrowed);
+        Assert.True(
+            allocated < 256,
+            $"Unconfigured VHS chroma prefilter allocated {allocated:N0} bytes.");
+        Assert.Equal(original, chroma);
+
+        double[] publicResult = VhsChromaDecoder.ApplyChromaPreFilter(chroma, options);
+        Assert.NotSame(chroma, publicResult);
+        Assert.Equal(original, publicResult);
+        publicResult[0] += 1.0;
+        Assert.Equal(original, chroma);
+    }
+
+    [Fact(DisplayName = "Fused VHS chroma comb and gain match allocating stages with one field output")]
+    public void FusedVhsChromaCombAndGainMatchAllocatingStagesWithOneFieldOutput()
+    {
+        const int lineLength = 257;
+        const int lines = 24;
+        const int burstStart = 8;
+        const int burstEnd = 32;
+        const double burstAbsRef = 30_000.0;
+        double[] input = Enumerable.Range(0, lines * lineLength)
+            .Select(index => Math.Sin(index * 0.019) + (index * 0.00037))
+            .ToArray();
+        double[] original = input.ToArray();
+
+        foreach (bool retainFloat32 in new[] { true, false })
+        {
+            foreach (bool useFloat32Rms in new[] { true, false })
+            {
+                AssertFusedCombGain(
+                    input,
+                    lineLength,
+                    lines,
+                    burstStart,
+                    burstEnd,
+                    burstAbsRef,
+                    lineDistance: 1,
+                    retainFloat32,
+                    useFloat32Rms);
+                AssertFusedCombGain(
+                    input,
+                    lineLength,
+                    lines,
+                    burstStart,
+                    burstEnd,
+                    burstAbsRef,
+                    lineDistance: 2,
+                    retainFloat32,
+                    useFloat32Rms);
+            }
+        }
+
+        Assert.Equal(original, input);
+
+        const int productionLineLength = 1_135;
+        const int productionLines = 273;
+        double[] allocationProbe = Enumerable.Range(0, productionLines * productionLineLength)
+            .Select(index => Math.Cos(index * 0.013) - (index * 0.00011))
+            .ToArray();
+        _ = VhsChromaDecoder.ApplyAutomaticChromaGainWithComb(
+            allocationProbe,
+            burstAbsRef,
+            burstStart,
+            burstEnd,
+            productionLineLength,
+            productionLines,
+            burstDetectedLine: 0,
+            lineDistance: 2,
+            retainFloat32: true,
+            useFloat32Rms: true);
+        long before = GC.GetAllocatedBytesForCurrentThread();
+        AutomaticChromaGainResult result = VhsChromaDecoder.ApplyAutomaticChromaGainWithComb(
+            allocationProbe,
+            burstAbsRef,
+            burstStart,
+            burstEnd,
+            productionLineLength,
+            productionLines,
+            burstDetectedLine: 0,
+            lineDistance: 2,
+            retainFloat32: true,
+            useFloat32Rms: true);
+        long allocated = GC.GetAllocatedBytesForCurrentThread() - before;
+        GC.KeepAlive(result);
+        long maximumExpected = ((long)allocationProbe.Length * sizeof(double)) + 4_096;
+        Assert.True(
+            allocated < maximumExpected,
+            $"Fused VHS chroma comb/gain allocated {allocated:N0} bytes.");
+    }
+
+    [Fact(DisplayName = "Fused VHS chroma gain-to-U16 matches allocating stages with one output")]
+    public void FusedVhsChromaGainToU16MatchesAllocatingStagesWithOneOutput()
+    {
+        const int lineLength = 257;
+        const int lines = 25;
+        const int burstStart = 8;
+        const int burstEnd = 32;
+        const double burstAbsRef = 30_000.0;
+        double[] input = Enumerable.Range(0, lines * lineLength)
+            .Select(index => Math.Sin(index * 0.019) + (index * 0.00037))
+            .ToArray();
+        input[(18 * lineLength) + 100] = double.NaN;
+        input[(18 * lineLength) + 101] = double.PositiveInfinity;
+        input[(18 * lineLength) + 102] = double.NegativeInfinity;
+        input[^2] = -50_339.0;
+        input[^1] = 80_733.0;
+        double[] original = input.ToArray();
+
+        foreach (bool useFloat32Rms in new[] { true, false })
+        {
+            AssertFusedGainToU16(
+                input,
+                lineLength,
+                lines,
+                burstStart,
+                burstEnd,
+                burstAbsRef,
+                useFloat32Rms);
+            foreach (bool retainFloat32 in new[] { true, false })
+            {
+                AssertFusedCombGainToU16(
+                    input,
+                    lineLength,
+                    lines,
+                    burstStart,
+                    burstEnd,
+                    burstAbsRef,
+                    lineDistance: 1,
+                    retainFloat32,
+                    useFloat32Rms);
+                AssertFusedCombGainToU16(
+                    input,
+                    lineLength,
+                    lines,
+                    burstStart,
+                    burstEnd,
+                    burstAbsRef,
+                    lineDistance: 2,
+                    retainFloat32,
+                    useFloat32Rms);
+            }
+        }
+
+        Assert.Equal(original, input);
+
+        const int productionLineLength = 1_135;
+        const int productionLines = 273;
+        double[] allocationProbe = Enumerable.Range(0, productionLines * productionLineLength)
+            .Select(index => Math.Cos(index * 0.013) - (index * 0.00011))
+            .ToArray();
+        _ = VhsChromaDecoder.ApplyAutomaticChromaGainToU16(
+            allocationProbe,
+            burstAbsRef,
+            burstStart,
+            burstEnd,
+            productionLineLength,
+            productionLines,
+            burstDetectedLine: 0,
+            useFloat32Rms: true);
+        _ = VhsChromaDecoder.ApplyAutomaticChromaGainWithCombToU16(
+            allocationProbe,
+            burstAbsRef,
+            burstStart,
+            burstEnd,
+            productionLineLength,
+            productionLines,
+            burstDetectedLine: 0,
+            lineDistance: 2,
+            retainFloat32: true,
+            useFloat32Rms: true);
+
+        long maximumExpected = ((long)allocationProbe.Length * sizeof(ushort)) + 4_096;
+        long before = GC.GetAllocatedBytesForCurrentThread();
+        ushort[] gainResult = VhsChromaDecoder.ApplyAutomaticChromaGainToU16(
+            allocationProbe,
+            burstAbsRef,
+            burstStart,
+            burstEnd,
+            productionLineLength,
+            productionLines,
+            burstDetectedLine: 0,
+            useFloat32Rms: true);
+        long gainAllocated = GC.GetAllocatedBytesForCurrentThread() - before;
+        GC.KeepAlive(gainResult);
+        Assert.True(
+            gainAllocated < maximumExpected,
+            $"Fused VHS chroma gain-to-U16 allocated {gainAllocated:N0} bytes.");
+
+        before = GC.GetAllocatedBytesForCurrentThread();
+        ushort[] combResult = VhsChromaDecoder.ApplyAutomaticChromaGainWithCombToU16(
+            allocationProbe,
+            burstAbsRef,
+            burstStart,
+            burstEnd,
+            productionLineLength,
+            productionLines,
+            burstDetectedLine: 0,
+            lineDistance: 2,
+            retainFloat32: true,
+            useFloat32Rms: true);
+        long combAllocated = GC.GetAllocatedBytesForCurrentThread() - before;
+        GC.KeepAlive(combResult);
+        Assert.True(
+            combAllocated < maximumExpected,
+            $"Fused VHS chroma comb/gain-to-U16 allocated {combAllocated:N0} bytes.");
     }
 
     [Fact(DisplayName = "PAL VHS RF block reuses temporary spectra after warm-up")]
@@ -269,6 +528,18 @@ public sealed class DspWorkingBufferTests
             compactSosBytes < 170_000,
             $"Warm compact float32 SOS forward/backward allocated {compactSosBytes:N0} bytes.");
 
+        TransferFunction iir = IirFilterDesign.ButterworthLowPassTransferFunction(
+            order: 4,
+            normalizedCutoff: 0.2);
+        _ = IirFilter.ApplyForwardBackward(iir, input);
+        long beforeIir = GC.GetAllocatedBytesForCurrentThread();
+        double[] iirFiltered = IirFilter.ApplyForwardBackward(iir, input);
+        long iirBytes = GC.GetAllocatedBytesForCurrentThread() - beforeIir;
+        GC.KeepAlive(iirFiltered);
+        Assert.True(
+            iirBytes < 350_000,
+            $"Warm IIR forward/backward allocated {iirBytes:N0} bytes.");
+
         const int outputLineLength = 512;
         const int lineCount = 64;
         double[] resampleSource = Enumerable.Range(0, (lineCount + 1) * 1_024 + 16)
@@ -347,6 +618,475 @@ public sealed class DspWorkingBufferTests
                 hash,
                 Convert.ToHexString(SHA256.HashData(MemoryMarshal.AsBytes(output.AsSpan()))));
         }
+    }
+
+    [Fact(DisplayName = "Double SOS common-section kernels remain section-major bit-exact")]
+    public void DoubleSosCommonSectionKernelsRemainSectionMajorBitExact()
+    {
+        const int length = 4_096;
+        double[] input = Enumerable.Range(0, length)
+            .Select(index => Math.Sin(index * 0.013) + (0.125 * Math.Cos(index * 0.029)))
+            .ToArray();
+        SosSection[][] cases =
+        [
+            IirFilterDesign.ButterworthBandPassSos(
+                order: 2,
+                normalizedLowCutoff: 0.1,
+                normalizedHighCutoff: 0.4),
+            IirFilterDesign.ButterworthBandPassSos(
+                order: 4,
+                normalizedLowCutoff: 0.1,
+                normalizedHighCutoff: 0.4)
+        ];
+
+        foreach (SosSection[] sections in cases)
+        {
+            var initialConditions = new double[sections.Length, 2];
+            for (int section = 0; section < sections.Length; section++)
+            {
+                initialConditions[section, 0] = (section + 1) * 0.03125;
+                initialConditions[section, 1] = -(section + 1) * 0.015625;
+            }
+
+            AssertDoubleBitsEqual(
+                ApplyForwardSectionMajorReference(sections, input, initialConditions),
+                SosFilter.ApplyForward(sections, input, initialConditions));
+            AssertDoubleBitsEqual(
+                ApplyForwardBackwardSectionMajorReference(sections, input, padLength: 0),
+                SosFilter.ApplyForwardBackward(sections, input, padLength: 0));
+            AssertDoubleBitsEqual(
+                ApplyForwardBackwardSectionMajorReference(sections, input),
+                SosFilter.ApplyForwardBackward(sections, input));
+        }
+    }
+
+    [Fact(DisplayName = "In-place IIR filtering remains allocating-reference bit-exact")]
+    public void InPlaceIirFilteringRemainsAllocatingReferenceBitExact()
+    {
+        const int length = 4_096;
+        double[] input = Enumerable.Range(0, length)
+            .Select(index => Math.Sin(index * 0.013) + (0.125 * Math.Cos(index * 0.029)))
+            .ToArray();
+        TransferFunction[] filters =
+        [
+            new TransferFunction([1.0], [1.0]),
+            IirFilterDesign.ButterworthLowPassTransferFunction(order: 4, normalizedCutoff: 0.2),
+            IirFilterDesign.ButterworthHighPassTransferFunction(order: 9, normalizedCutoff: 0.35),
+            new TransferFunction([0.25, 0.1], [2.0, -0.3, 0.1]),
+            new TransferFunction([0.2, 0.1, 0.05], [1.0, -0.25])
+        ];
+
+        foreach (TransferFunction filter in filters)
+        {
+            foreach (int? padLength in new int?[] { null, 0, 7 })
+            {
+                double[] expectedFiltered = ApplyForwardBackwardIirReference(filter, input, padLength);
+                AssertDoubleBitsEqual(
+                    expectedFiltered,
+                    IirFilter.ApplyForwardBackward(filter, input, padLength));
+                double[] inPlace = input.ToArray();
+                IirFilter.ApplyForwardBackwardInPlace(filter, inPlace, padLength);
+                AssertDoubleBitsEqual(expectedFiltered, inPlace);
+            }
+
+            int stateLength = Math.Max(filter.Numerator.Length, filter.Denominator.Length) - 1;
+            double[] initialState = Enumerable.Range(0, stateLength)
+                .Select(index => (index + 1) * 0.03125)
+                .ToArray();
+            double[] expectedFinalState = initialState.ToArray();
+            double[] expected = ApplyForwardIirReference(filter, input, expectedFinalState);
+            double[] actual = IirFilter.ApplyForward(filter, input, initialState, out double[] actualFinalState);
+            AssertDoubleBitsEqual(expected, actual);
+            AssertDoubleBitsEqual(expectedFinalState, actualFinalState);
+            AssertDoubleBitsEqual(
+                initialState,
+                Enumerable.Range(0, stateLength).Select(index => (index + 1) * 0.03125).ToArray());
+        }
+    }
+
+    private static double[] ApplyForwardBackwardIirReference(
+        TransferFunction filter,
+        ReadOnlySpan<double> input,
+        int? padLength)
+    {
+        (double[] numerator, double[] denominator) = NormalizeIirReference(filter);
+        int edge = padLength ?? (3 * Math.Max(numerator.Length, denominator.Length));
+        double[] extended = edge == 0
+            ? input.ToArray()
+            : OddExtensionReference(input, Math.Min(edge, input.Length - 1));
+        double[] zi = SteadyStateIirReference(numerator, denominator);
+        double[] forward = ApplyForwardIirReference(
+            numerator,
+            denominator,
+            extended,
+            ScaleIirReference(zi, extended[0]));
+        Array.Reverse(forward);
+        double[] backward = ApplyForwardIirReference(
+            numerator,
+            denominator,
+            forward,
+            ScaleIirReference(zi, forward[0]));
+        Array.Reverse(backward);
+        if (edge == 0)
+        {
+            return backward;
+        }
+
+        int actualEdge = (extended.Length - input.Length) / 2;
+        return backward.AsSpan(actualEdge, input.Length).ToArray();
+    }
+
+    private static double[] ApplyForwardIirReference(
+        TransferFunction filter,
+        ReadOnlySpan<double> input,
+        double[] state)
+    {
+        (double[] numerator, double[] denominator) = NormalizeIirReference(filter);
+        return ApplyForwardIirReference(numerator, denominator, input, state);
+    }
+
+    private static double[] ApplyForwardIirReference(
+        double[] numerator,
+        double[] denominator,
+        ReadOnlySpan<double> input,
+        double[] state)
+    {
+        int stateLength = Math.Max(numerator.Length, denominator.Length) - 1;
+        var output = new double[input.Length];
+        for (int sample = 0; sample < input.Length; sample++)
+        {
+            double x = input[sample];
+            double y = (numerator[0] * x) + (stateLength > 0 ? state[0] : 0.0);
+            for (int i = 1; i < stateLength; i++)
+            {
+                double b = i < numerator.Length ? numerator[i] : 0.0;
+                double a = i < denominator.Length ? denominator[i] : 0.0;
+                state[i - 1] = (b * x) + state[i] - (a * y);
+            }
+
+            if (stateLength > 0)
+            {
+                int i = stateLength;
+                double b = i < numerator.Length ? numerator[i] : 0.0;
+                double a = i < denominator.Length ? denominator[i] : 0.0;
+                state[stateLength - 1] = (b * x) - (a * y);
+            }
+
+            output[sample] = y;
+        }
+
+        return output;
+    }
+
+    private static (double[] Numerator, double[] Denominator) NormalizeIirReference(
+        TransferFunction filter)
+    {
+        double[] numerator = filter.Numerator.ToArray();
+        double[] denominator = filter.Denominator.ToArray();
+        double a0 = denominator[0];
+        if (a0 != 1.0)
+        {
+            for (int i = 0; i < numerator.Length; i++)
+            {
+                numerator[i] /= a0;
+            }
+
+            for (int i = 0; i < denominator.Length; i++)
+            {
+                denominator[i] /= a0;
+            }
+        }
+
+        return (numerator, denominator);
+    }
+
+    private static double[] SteadyStateIirReference(double[] numerator, double[] denominator)
+    {
+        int stateLength = Math.Max(numerator.Length, denominator.Length) - 1;
+        if (stateLength == 0)
+        {
+            return [];
+        }
+
+        int coefficientCount = stateLength + 1;
+        var paddedNumerator = new double[coefficientCount];
+        var paddedDenominator = new double[coefficientCount];
+        numerator.CopyTo(paddedNumerator, 0);
+        denominator.CopyTo(paddedDenominator, 0);
+        double steadyOutput = SumNumpyIirReference(paddedNumerator)
+            / SumNumpyIirReference(paddedDenominator);
+        var state = new double[stateLength];
+        double cumulative = 0.0;
+        for (int i = coefficientCount - 1; i >= 1; i--)
+        {
+            cumulative += paddedNumerator[i] - (steadyOutput * paddedDenominator[i]);
+            state[i - 1] = cumulative;
+        }
+
+        return state;
+    }
+
+    private static double SumNumpyIirReference(ReadOnlySpan<double> values)
+    {
+        if (values.Length < 8)
+        {
+            double shortSum = -0.0;
+            foreach (double value in values)
+            {
+                shortSum += value;
+            }
+
+            return shortSum;
+        }
+
+        double r0 = values[0];
+        double r1 = values[1];
+        double r2 = values[2];
+        double r3 = values[3];
+        double r4 = values[4];
+        double r5 = values[5];
+        double r6 = values[6];
+        double r7 = values[7];
+        int index = 8;
+        int blockEnd = values.Length - (values.Length % 8);
+        for (; index < blockEnd; index += 8)
+        {
+            r0 += values[index];
+            r1 += values[index + 1];
+            r2 += values[index + 2];
+            r3 += values[index + 3];
+            r4 += values[index + 4];
+            r5 += values[index + 5];
+            r6 += values[index + 6];
+            r7 += values[index + 7];
+        }
+
+        double sum = ((r0 + r1) + (r2 + r3)) + ((r4 + r5) + (r6 + r7));
+        for (; index < values.Length; index++)
+        {
+            sum += values[index];
+        }
+
+        return sum;
+    }
+
+    private static double[] ScaleIirReference(ReadOnlySpan<double> values, double scale)
+    {
+        var output = new double[values.Length];
+        for (int i = 0; i < output.Length; i++)
+        {
+            output[i] = values[i] * scale;
+        }
+
+        return output;
+    }
+
+    private static double[] ApplyForwardBackwardSectionMajorReference(
+        IReadOnlyList<SosSection> sections,
+        ReadOnlySpan<double> input,
+        int? padLength = null)
+    {
+        int edge = padLength ?? SosFilter.DefaultPadLength(sections);
+        double[] extended = edge == 0
+            ? input.ToArray()
+            : OddExtensionReference(input, edge);
+        double[,] zi = SosFilter.SteadyStateInitialConditions(sections);
+        ApplyForwardSectionMajorReferenceInPlace(
+            sections,
+            extended,
+            ScaleInitialConditionsReference(zi, extended[0]));
+        Array.Reverse(extended);
+        ApplyForwardSectionMajorReferenceInPlace(
+            sections,
+            extended,
+            ScaleInitialConditionsReference(zi, extended[0]));
+        Array.Reverse(extended);
+        return edge == 0
+            ? extended
+            : extended.AsSpan(edge, input.Length).ToArray();
+    }
+
+    private static double[] ApplyForwardSectionMajorReference(
+        IReadOnlyList<SosSection> sections,
+        ReadOnlySpan<double> input,
+        double[,] initialConditions)
+    {
+        double[] output = input.ToArray();
+        ApplyForwardSectionMajorReferenceInPlace(sections, output, initialConditions);
+        return output;
+    }
+
+    private static void ApplyForwardSectionMajorReferenceInPlace(
+        IReadOnlyList<SosSection> sections,
+        Span<double> output,
+        double[,] initialConditions)
+    {
+        for (int sectionIndex = 0; sectionIndex < sections.Count; sectionIndex++)
+        {
+            SosSection section = sections[sectionIndex].Normalize();
+            double z1 = initialConditions[sectionIndex, 0];
+            double z2 = initialConditions[sectionIndex, 1];
+            for (int sample = 0; sample < output.Length; sample++)
+            {
+                double value = output[sample];
+                double filtered = (section.B0 * value) + z1;
+                z1 = (section.B1 * value) - (section.A1 * filtered) + z2;
+                z2 = (section.B2 * value) - (section.A2 * filtered);
+                output[sample] = filtered;
+            }
+        }
+    }
+
+    private static double[,] ScaleInitialConditionsReference(double[,] initialConditions, double scale)
+    {
+        var output = new double[initialConditions.GetLength(0), 2];
+        for (int section = 0; section < output.GetLength(0); section++)
+        {
+            output[section, 0] = initialConditions[section, 0] * scale;
+            output[section, 1] = initialConditions[section, 1] * scale;
+        }
+
+        return output;
+    }
+
+    private static double[] OddExtensionReference(ReadOnlySpan<double> input, int edge)
+    {
+        var output = new double[input.Length + (edge * 2)];
+        double first = input[0];
+        for (int index = 0; index < edge; index++)
+        {
+            output[index] = (2.0 * first) - input[edge - index];
+        }
+
+        input.CopyTo(output.AsSpan(edge, input.Length));
+        double last = input[^1];
+        for (int index = 0; index < edge; index++)
+        {
+            output[edge + input.Length + index] =
+                (2.0 * last) - input[input.Length - 2 - index];
+        }
+
+        return output;
+    }
+
+    private static void AssertFusedCombGain(
+        double[] input,
+        int lineLength,
+        int lines,
+        int burstStart,
+        int burstEnd,
+        double burstAbsRef,
+        int lineDistance,
+        bool retainFloat32,
+        bool useFloat32Rms)
+    {
+        double[] combined = lineDistance == 1
+            ? VhsChromaDecoder.ApplyNtscComb(input, lineLength, retainFloat32)
+            : VhsChromaDecoder.ApplyPalComb(input, lineLength, retainFloat32);
+        AutomaticChromaGainResult expected = VhsChromaDecoder.ApplyAutomaticChromaGain(
+            combined,
+            burstAbsRef,
+            burstStart,
+            burstEnd,
+            lineLength,
+            lines,
+            burstDetectedLine: 18,
+            useFloat32Rms);
+        AutomaticChromaGainResult actual = VhsChromaDecoder.ApplyAutomaticChromaGainWithComb(
+            input,
+            burstAbsRef,
+            burstStart,
+            burstEnd,
+            lineLength,
+            lines,
+            burstDetectedLine: 18,
+            lineDistance,
+            retainFloat32,
+            useFloat32Rms);
+
+        AssertDoubleBitsEqual(expected.Samples, actual.Samples);
+        Assert.Equal(
+            BitConverter.DoubleToUInt64Bits(expected.MeanBurstRms),
+            BitConverter.DoubleToUInt64Bits(actual.MeanBurstRms));
+    }
+
+    private static void AssertFusedGainToU16(
+        double[] input,
+        int lineLength,
+        int lines,
+        int burstStart,
+        int burstEnd,
+        double burstAbsRef,
+        bool useFloat32Rms)
+    {
+        ushort[] expected = VhsChromaDecoder.ChromaToU16(
+            VhsChromaDecoder.ApplyAutomaticChromaGain(
+                input,
+                burstAbsRef,
+                burstStart,
+                burstEnd,
+                lineLength,
+                lines,
+                burstDetectedLine: 18,
+                useFloat32Rms).Samples);
+        ushort[] actual = VhsChromaDecoder.ApplyAutomaticChromaGainToU16(
+            input,
+            burstAbsRef,
+            burstStart,
+            burstEnd,
+            lineLength,
+            lines,
+            burstDetectedLine: 18,
+            useFloat32Rms);
+
+        Assert.Equal(expected, actual);
+    }
+
+    private static void AssertFusedCombGainToU16(
+        double[] input,
+        int lineLength,
+        int lines,
+        int burstStart,
+        int burstEnd,
+        double burstAbsRef,
+        int lineDistance,
+        bool retainFloat32,
+        bool useFloat32Rms)
+    {
+        double[] combined = lineDistance == 1
+            ? VhsChromaDecoder.ApplyNtscComb(input, lineLength, retainFloat32)
+            : VhsChromaDecoder.ApplyPalComb(input, lineLength, retainFloat32);
+        ushort[] expected = VhsChromaDecoder.ChromaToU16(
+            VhsChromaDecoder.ApplyAutomaticChromaGain(
+                combined,
+                burstAbsRef,
+                burstStart,
+                burstEnd,
+                lineLength,
+                lines,
+                burstDetectedLine: 18,
+                useFloat32Rms).Samples);
+        ushort[] actual = VhsChromaDecoder.ApplyAutomaticChromaGainWithCombToU16(
+            input,
+            burstAbsRef,
+            burstStart,
+            burstEnd,
+            lineLength,
+            lines,
+            burstDetectedLine: 18,
+            lineDistance,
+            retainFloat32,
+            useFloat32Rms);
+
+        Assert.Equal(expected, actual);
+    }
+
+    private static void AssertDoubleBitsEqual(ReadOnlySpan<double> expected, ReadOnlySpan<double> actual)
+    {
+        Assert.Equal(expected.Length, actual.Length);
+        Assert.True(
+            MemoryMarshal.AsBytes(expected).SequenceEqual(MemoryMarshal.AsBytes(actual)),
+            "Double sequences differ at the bit level.");
     }
 
     private static double[] BuildPalVhsProbe(int length, double sampleRateHz)

@@ -163,6 +163,7 @@ public sealed class TbcFieldDecodePipeline
     private const int MaximumOutputFirstLine = 4;
     private const int LineLocationLookahead = 10;
     private const int VhsChromaPhaseAnalysisFirstLine = 1;
+    private const int DcOffsetLowPassWorkspaceCapacity = 2;
     private readonly SyncAnalyzer _syncAnalyzer;
     private readonly TbcFieldRenderer _renderer;
     private readonly VideoOutputConverter _videoOutput;
@@ -185,6 +186,8 @@ public sealed class TbcFieldDecodePipeline
     private readonly VhsChromaCarrierTableCache? _chromaCarrierTableCache;
     private readonly VsyncSerrationDetector? _vsyncSerrationDetector;
     private readonly VhsFieldLevelState? _vhsFieldLevelState;
+    private readonly ExactLengthDoubleWorkspaceCache _dcOffsetLowPassWorkspaces =
+        new(DcOffsetLowPassWorkspaceCapacity);
     private readonly string? _decodeType;
     private readonly double? _framesPerSecond;
     private readonly Action<string, string>? _diagnosticLogger;
@@ -842,18 +845,12 @@ public sealed class TbcFieldDecodePipeline
             renderLineLocations = RenderLineLocations(lineLocations, outputFirstLine);
         }
 
-        double[]? chromaBurstSamples = ResampleChromaBurst(
-            span.Chroma,
-            renderLineLocations,
-            outputFirstLine);
-
         if (string.Equals(_decodeType, "vhs", StringComparison.Ordinal)
             && FormatCatalog.ParentSystem(_system) == "NTSC")
         {
             double fscMHz = _renderer.FrameSpec.OutputSampleRateHz / 4_000_000.0;
             lineLocations = ApplyNtscFscPhaseShiftCore(lineLocations, fscMHz);
             renderLineLocations = RenderLineLocations(lineLocations, outputFirstLine);
-            chromaBurstSamples = ResampleChromaBurst(span.Chroma, renderLineLocations, outputFirstLine);
         }
 
         int? laserDiscFieldPhaseId = null;
@@ -877,8 +874,15 @@ public sealed class TbcFieldDecodePipeline
         {
             lineLocations = ntscBurstLineLocations;
             renderLineLocations = RenderLineLocations(lineLocations, outputFirstLine);
-            chromaBurstSamples = ResampleChromaBurst(span.Chroma, renderLineLocations, outputFirstLine);
         }
+
+        using TbcLineResampler.ResamplingPlan? renderResamplingPlan =
+            span.Chroma is { Length: > 0 }
+                ? _renderer.PrepareFieldResampling(renderLineLocations, outputFirstLine)
+                : null;
+        double[]? chromaBurstSamples = renderResamplingPlan is null
+            ? null
+            : _renderer.ResamplePreparedField(span.Chroma!, renderResamplingPlan);
 
         int syncConfidence = SyncConfidenceCalculator.Compute(
             lineLocations.Locations,
@@ -932,15 +936,30 @@ public sealed class TbcFieldDecodePipeline
         TbcRenderedField rendered;
         try
         {
-            rendered = deferredRenderSource is null
-                ? _renderer.RenderFieldPayload(
+            if (deferredRenderSource is not null)
+            {
+                rendered = new TbcRenderedField([]);
+            }
+            else if (renderResamplingPlan is not null)
+            {
+                rendered = _renderer.RenderPreparedFieldPayload(
+                    span.Video,
+                    renderResamplingPlan,
+                    fieldNumber,
+                    fieldConverter,
+                    chromaPhase?.NextChromaRotationIndex);
+            }
+            else
+            {
+                rendered = _renderer.RenderFieldPayload(
                     span.Video,
                     renderLineLocations,
                     firstLine: outputFirstLine,
                     fieldNumber: fieldNumber,
                     converterOverride: fieldConverter,
-                    trackPhaseOverride: chromaPhase?.NextChromaRotationIndex)
-                : new TbcRenderedField([]);
+                    trackPhaseOverride: chromaPhase?.NextChromaRotationIndex);
+            }
+
             if (chromaDecodeTask is not null)
             {
                 chroma = chromaDecodeTask.GetAwaiter().GetResult();
@@ -961,6 +980,10 @@ public sealed class TbcFieldDecodePipeline
             }
 
             throw;
+        }
+        finally
+        {
+            renderResamplingPlan?.Dispose();
         }
 
         double? blackToWhiteRfRatio = ComputeLaserDiscBlackToWhiteRfRatio(
@@ -1917,10 +1940,10 @@ public sealed class TbcFieldDecodePipeline
                     ? AddDcOffset(span.Video, dcOffset)
                     : span.Video,
                 VideoLowPass = normalizeTapeSyncReference
-                    ? AddDcOffset(span.VideoLowPass ?? span.Video, dcOffset)
+                    ? AddDcOffsetToLowPass(span.VideoLowPass ?? span.Video, dcOffset)
                     : span.VideoLowPass is null
                         ? null
-                        : AddDcOffset(span.VideoLowPass, dcOffset)
+                        : AddDcOffsetToLowPass(span.VideoLowPass, dcOffset)
             },
             SyncThresholdFromLevels(adjustedLevels),
             usedSavedLevels);
@@ -1955,6 +1978,56 @@ public sealed class TbcFieldDecodePipeline
         }
 
         return output;
+    }
+
+    private double[] AddDcOffsetToLowPass(double[] input, double offset)
+    {
+        double[] output = _dcOffsetLowPassWorkspaces.Get(input.Length);
+        for (int i = 0; i < output.Length; i++)
+        {
+            output[i] = input[i] + offset;
+        }
+
+        return output;
+    }
+
+    private sealed class ExactLengthDoubleWorkspaceCache
+    {
+        private readonly double[]?[] _buffers;
+        private int _nextReplacement;
+
+        internal ExactLengthDoubleWorkspaceCache(int capacity)
+        {
+            if (capacity <= 0)
+            {
+                throw new ArgumentOutOfRangeException(nameof(capacity));
+            }
+
+            _buffers = new double[]?[capacity];
+        }
+
+        internal double[] Get(int length)
+        {
+            for (int i = 0; i < _buffers.Length; i++)
+            {
+                if (_buffers[i]?.Length == length)
+                {
+                    return _buffers[i]!;
+                }
+            }
+
+            for (int i = 0; i < _buffers.Length; i++)
+            {
+                if (_buffers[i] is null)
+                {
+                    return _buffers[i] = new double[length];
+                }
+            }
+
+            int replacement = _nextReplacement;
+            _nextReplacement = (_nextReplacement + 1) % _buffers.Length;
+            return _buffers[replacement] = new double[length];
+        }
     }
 
     private static double SyncThresholdFromLevels((double SyncLevel, double BlankLevel) levels)

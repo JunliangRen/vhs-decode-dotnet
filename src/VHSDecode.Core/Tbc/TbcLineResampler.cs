@@ -28,31 +28,49 @@ public sealed class TbcLineResampler
     private readonly double? _nominalInputLineLength;
     private readonly int _workerThreads;
 
-    private readonly struct ResamplingPreparation : IDisposable
+    internal sealed class ResamplingPlan : IDisposable
     {
+        private readonly TbcLineResampler _owner;
         private readonly bool _pooled;
+        private int _disposed;
 
-        public ResamplingPreparation(
+        internal ResamplingPlan(
+            TbcLineResampler owner,
             double[] sourcePositions,
             double[] levelAdjusts,
             int prefixSamples,
+            int destinationLength,
             bool pooled)
         {
+            _owner = owner;
             SourcePositions = sourcePositions;
             LevelAdjusts = levelAdjusts;
             PrefixSamples = prefixSamples;
+            DestinationLength = destinationLength;
             _pooled = pooled;
         }
 
-        public double[] SourcePositions { get; }
+        internal double[] SourcePositions { get; }
 
-        public double[] LevelAdjusts { get; }
+        internal double[] LevelAdjusts { get; }
 
-        public int PrefixSamples { get; }
+        internal int PrefixSamples { get; }
+
+        internal int DestinationLength { get; }
+
+        internal void ValidateOwner(TbcLineResampler owner)
+        {
+            if (!ReferenceEquals(_owner, owner))
+            {
+                throw new ArgumentException("The resampling plan belongs to a different resampler.", nameof(owner));
+            }
+
+            ObjectDisposedException.ThrowIf(Volatile.Read(ref _disposed) != 0, this);
+        }
 
         public void Dispose()
         {
-            if (!_pooled)
+            if (Interlocked.Exchange(ref _disposed, 1) != 0 || !_pooled)
             {
                 return;
             }
@@ -133,20 +151,46 @@ public sealed class TbcLineResampler
 
     public double[] ResampleLines(ReadOnlySpan<double> source, IReadOnlyList<double> lineLocations, int firstLine, int lineCount)
     {
+        if (source.IsEmpty)
+        {
+            throw new ArgumentException("Source must contain at least one sample.", nameof(source));
+        }
+
+        using ResamplingPlan plan = PrepareLineResampling(lineLocations, firstLine, lineCount);
+        return ResamplePrepared(source, plan);
+    }
+
+    internal ResamplingPlan PrepareLineResampling(
+        IReadOnlyList<double> lineLocations,
+        int firstLine,
+        int lineCount)
+    {
         if (lineCount < 0)
         {
             throw new ArgumentOutOfRangeException(nameof(lineCount));
         }
 
-        var output = new double[checked(OutputLineLength * lineCount)];
-        ILineLocationInterpolator interpolator = BuildInterpolator(source, lineLocations);
+        ILineLocationInterpolator interpolator = BuildInterpolator(lineLocations);
         if (firstLine < 0 || firstLine + lineCount >= interpolator.Count)
         {
             throw new ArgumentOutOfRangeException(nameof(firstLine));
         }
 
-        ResampleSamples(source, interpolator, firstLine, output);
+        int destinationLength = checked(OutputLineLength * lineCount);
+        return PrepareResampling(interpolator, firstLine, destinationLength);
+    }
 
+    internal double[] ResamplePrepared(ReadOnlySpan<double> source, ResamplingPlan plan)
+    {
+        if (source.IsEmpty)
+        {
+            throw new ArgumentException("Source must contain at least one sample.", nameof(source));
+        }
+
+        ArgumentNullException.ThrowIfNull(plan);
+        plan.ValidateOwner(this);
+        var output = new double[plan.DestinationLength];
+        ResampleSamples(source, plan, output);
         return output;
     }
 
@@ -172,6 +216,13 @@ public sealed class TbcLineResampler
         {
             throw new ArgumentException("Source must contain at least one sample.", nameof(source));
         }
+
+        return BuildInterpolator(lineLocations);
+    }
+
+    private ILineLocationInterpolator BuildInterpolator(IReadOnlyList<double> lineLocations)
+    {
+        ArgumentNullException.ThrowIfNull(lineLocations);
 
         if (lineLocations.Count < 2)
         {
@@ -199,14 +250,23 @@ public sealed class TbcLineResampler
         };
     }
 
-    private unsafe void ResampleSamples(
+    private void ResampleSamples(
         ReadOnlySpan<double> source,
         ILineLocationInterpolator interpolator,
         int firstLine,
         Span<double> destination)
     {
-        using ResamplingPreparation preparation =
+        using ResamplingPlan preparation =
             PrepareResampling(interpolator, firstLine, destination.Length);
+        ResampleSamples(source, preparation, destination);
+    }
+
+    private unsafe void ResampleSamples(
+        ReadOnlySpan<double> source,
+        ResamplingPlan preparation,
+        Span<double> destination)
+    {
+        preparation.ValidateOwner(this);
         double[] sourcePositions = preparation.SourcePositions;
         double[] levelAdjusts = preparation.LevelAdjusts;
         int prefixSamples = preparation.PrefixSamples;
@@ -226,14 +286,23 @@ public sealed class TbcLineResampler
         }
     }
 
-    private unsafe void ResampleSamples(
+    private void ResampleSamples(
         ReadOnlySpan<double> source,
         ILineLocationInterpolator interpolator,
         int firstLine,
         double[] destination)
     {
-        using ResamplingPreparation preparation =
+        using ResamplingPlan preparation =
             PrepareResampling(interpolator, firstLine, destination.Length);
+        ResampleSamples(source, preparation, destination);
+    }
+
+    private unsafe void ResampleSamples(
+        ReadOnlySpan<double> source,
+        ResamplingPlan preparation,
+        double[] destination)
+    {
+        preparation.ValidateOwner(this);
         double[] sourcePositions = preparation.SourcePositions;
         double[] levelAdjusts = preparation.LevelAdjusts;
         int prefixSamples = preparation.PrefixSamples;
@@ -279,7 +348,7 @@ public sealed class TbcLineResampler
         }
     }
 
-    private ResamplingPreparation PrepareResampling(
+    private ResamplingPlan PrepareResampling(
         ILineLocationInterpolator interpolator,
         int firstLine,
         int destinationLength)
@@ -316,10 +385,12 @@ public sealed class TbcLineResampler
                     BuildLinearLevelAdjusts(linear, scaledSampleCount, levelAdjusts);
                 }
 
-                return new ResamplingPreparation(
+                return new ResamplingPlan(
+                    this,
                     sourcePositions,
                     levelAdjusts,
                     prefixSamples,
+                    destinationLength,
                     pooled: true);
             }
             catch
@@ -344,10 +415,12 @@ public sealed class TbcLineResampler
             }
         }
 
-        return new ResamplingPreparation(
+        return new ResamplingPlan(
+            this,
             allocatedSourcePositions,
             BuildLevelAdjusts(wowFactors),
             prefixSamples,
+            destinationLength,
             pooled: false);
     }
 

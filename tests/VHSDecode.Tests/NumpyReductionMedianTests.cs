@@ -6,6 +6,9 @@ namespace VHSDecode.Tests;
 public sealed class NumpyReductionMedianTests
 {
     [Theory(DisplayName = "Large float64 median matches the sorted reference")]
+    [InlineData(32_768)]
+    [InlineData(32_769)]
+    [InlineData(51_180)]
     [InlineData(131_072)]
     [InlineData(355_255)]
     [InlineData(355_256)]

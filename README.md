@@ -124,6 +124,11 @@ release compatibility remain the first constraint.
 - Exact 40.0 MHz `.s16` inputs use the native signed-16 loader instead of a
   no-op FFmpeg pass-through. Other formats and actual resampling keep their
   existing FFmpeg paths.
+- Packed `.lds` input decodes directly into the requested result array,
+  including Python-compatible partial tail groups, instead of allocating and
+  copying a second fully unpacked array. Its loader reuses one private packed
+  byte buffer up to 1,048,576 bytes; concurrent callers never share a borrowed
+  buffer, and larger reads are not retained.
 - A stream-scoped decoded RF cache avoids duplicate FFT work across overlapping
   field reads while keeping memory bounded.
 - VHS uses a bounded continuous RF pipeline. One producer owns ordered input
@@ -136,7 +141,20 @@ release compatibility remain the first constraint.
   worker bound; serial and stateful block paths retain ordered assembly.
 - VSync envelope/minima work and harmonic power-ratio search run concurrently
   over one shared read-only padded input. Candidate arbitration and detector
-  state updates remain ordered after both branches complete.
+  state updates remain ordered after both branches complete. NumPy-compatible
+  float64 medians retain full sorting for small inputs and use bit-exact
+  introselect from 32K samples.
+- VSync's private forward/reverse envelope and harmonic BA-IIR chains filter
+  their owned arrays in place. The envelope branches write directly into the
+  reduced result instead of materializing a combined padded array; public IIR
+  results retain independent ownership and identical bits. The stateful
+  detector reuses one exact-sized six-array analysis workspace when the padded
+  input is at most 1,048,576 samples (about 48 MiB retained at the cap). A size
+  change replaces that one entry, while larger inputs use an unretained workspace.
+- VSync serration measurement reads its candidate window through a read-only
+  span and applies an `Enumerable.Min`-compatible float64 scan, avoiding an
+  extra full-window copy. Median scratch ownership and NaN/signed-zero bit
+  semantics remain unchanged.
 - VHS field decode overlaps luma TBC rendering with chroma field decoding when
   workers are enabled. Only one chroma task can be in flight, and its state is
   committed on the calling thread before the next field advances.
@@ -149,12 +167,23 @@ release compatibility remain the first constraint.
   session-owned one-entry cache. Exact-key hits reuse the original arrays;
   sample-shape, carrier, phase, or AFC changes replace the prior entry instead
   of growing retained state. Phase analysis reads the field-owned resampled
-  array directly, while decode creates its only writable copy at prefiltering.
+  array directly. Decode borrows that same read-only array when no chroma
+  prefilter is configured; configured filtering still returns owned output,
+  and the public prefilter API retains its independent-copy contract.
+- Internal VHS chroma comb and automatic gain share one line-sized stack
+  workspace, and the decode-only path maps scaled samples directly into the
+  final `ushort[]`. AVX2/SSE4.1 handles the saturating body while an exact scalar
+  fallback preserves unsupported-CPU and tail semantics. Public comb, gain, and
+  conversion APIs retain their independent-output contracts.
 - HiFi uses bounded parallel block decoding followed by ordered
   post-processing and writing.
 - Managed real FFTs reuse pooled packing and scratch buffers. Float32 SOS
   forward/backward filtering rents one extended buffer, operates in place, and
   returns it synchronously; returned output arrays retain normal ownership.
+- Double-precision BA IIR forward/backward filtering also operates on one
+  in-place padded workspace. Its private pool retains at most three arrays per
+  bucket through 4M samples, returns them synchronously, and keeps every result
+  in an independently owned exact-length array.
 - RF span assembly writes directly into the requested output window instead of
   allocating whole-block field arrays and slicing a second copy.
 - Default linear TBC resampling rents its per-field source-position and
@@ -175,6 +204,10 @@ release compatibility remain the first constraint.
   matching the only two block counts a fixed read window can cover. Buffers are
   returned after synchronous field decode; public `Read` results, deferred CVBS
   rendering, and retained LD VITS sources keep independent ownership.
+- VHS sync-level DC adjustment reuses at most two exact-length low-pass
+  workspaces. The stateful pipeline owns those private buffers; original video,
+  public results, and deferred-render inputs remain untouched and independently
+  owned.
 - VHS drops block-local raw input, raw demodulation, analytic, and RF high-pass
   results after their last block-local consumer. Compact real-FFT blocks feed
   their split real/imaginary workspaces directly into the FM unwrap. This omits
@@ -201,38 +234,43 @@ release compatibility remain the first constraint.
 
 The current thread matrix used an Intel Core Ultra 7 265K (20 logical
 processors), Windows 11 build 26220, .NET SDK/runtime
-`11.0.100-preview.6.26359.118`, and Python v0.4.0 (`g4315520`). Each value is
-the median of three interleaved Release runs:
+`11.0.100-preview.6.26359.118`, port checkpoint `a45d433`, and Python v0.4.0
+commit `43155200da87c0d49eb37d8ec09b1372075ee8e4` (reported as `g4315520`).
+The isolated Python environment used NumPy 2.4.6, SciPy 1.18.0, Numba 0.66.0,
+and python-soxr 1.1.0. Each value is the median of three interleaved Release
+runs:
 
 | CLI mode | Effective workers | This port | Python | Speedup | Wall-time reduction |
 | --- | ---: | ---: | ---: | ---: | ---: |
-| default | 5 | 4.908 s | 11.788 s | 2.40x | 58.4% |
-| `--threads 1` | 1 | 9.605 s | 12.729 s | 1.33x | 24.5% |
-| `--threads 5` | 5 | 4.936 s | 11.432 s | 2.32x | 56.8% |
-| `--threads 10` | 10 | 4.682 s | 11.797 s | 2.52x | 60.3% |
-| `--threads 20` | 20 | 4.159 s | 12.011 s | 2.89x | 65.4% |
+| default | 5 | 4.646 s | 13.112 s | 2.82x | 64.6% |
+| `--threads 1` | 1 | 9.203 s | 14.111 s | 1.53x | 34.8% |
+| `--threads 5` | 5 | 4.544 s | 12.799 s | 2.82x | 64.5% |
+| `--threads 10` | 10 | 4.074 s | 13.560 s | 3.33x | 70.0% |
+| `--threads 20` | 20 | 3.779 s | 14.046 s | 3.72x | 73.1% |
 
 The default remains **5 workers**, matching Release 4.0 CLI semantics; explicit
 20-worker mode was fastest on this 20-logical-processor fixture. The matrix used
-`RF-Sample_2026-07-19_09-12-03.lds` with `--system pal
+`RF-Sample_2026-07-19_23-58-20.lds` with `--system pal
 --detect_chroma_track_phase --ire0_adjust --tape_format VHS --frequency 40
---start_fileloc 281303040 -l 40 --overwrite`, plus the row's thread option.
+--start_fileloc 620000000 -l 40 --overwrite`, plus the row's thread option.
 
 All 15 port runs produced one identical luma TBC, chroma TBC, and JSON hash set
-across every worker count. Upstream Python's requested nonzero thread modes were
-not byte-deterministic on this fixture: its 15 matrix runs produced 15 distinct
-luma/chroma pairs. Three additional Python `--threads 0` controls were mutually
-identical and exactly matched every port run. The matrix therefore compares
-observed throughput; the serial checkpoint below is the strict exact-output A/B.
+across every worker count. Three additional Python `--threads 0` controls were
+mutually identical and exactly matched every port run. Upstream Python's
+default/nonzero matrix modes were not a reliable byte-exact baseline: its 15
+runs produced two luma/chroma pairs. Twelve runs matched the serial reference;
+all three `--threads 5` runs produced the alternate pair. The matrix therefore
+compares observed throughput, while Python `--threads 0` is the strict
+compatibility baseline.
 
 The compatibility baseline for this 40-frame fixture is Python v0.4.0
 `g4315520` with `--threads 0`:
 
 | Baseline artifact | SHA-256 |
 | --- | --- |
-| Luma TBC | `857315FEC19C3F8D364896CDB4FC3AA26769D86D6E825DE095845EF6647C44A9` |
-| Chroma TBC | `CE54E7F6050E1445E0E205867CD8C3B912B4BB16708D31C303FABC8B04C3AA3B` |
-| JSON | `D0BFA50DD75ABACAE1BAD7E275BB2FD2159230F6FDF98461F045F3784BDF6DD8` |
+| Luma TBC | `64C518A03B208F7CF950916BC01A997021CB0F76B3D6F131FBEE74E9035FD30C` |
+| Chroma TBC | `70112719879FB64FA95DC8F3ED6E5FA335D4F8B62C50FC2AF3C26D2C2098F26F` |
+| JSON | `C223671830D0105271F24172923B280A96C8D0D427567C49E9C0E562D38FA881` |
 
 A longer exact-output checkpoint used an Intel Core Ultra 7 265K (20 logical
 processors), Windows 11 build 26220, and .NET SDK/runtime
@@ -268,11 +306,12 @@ tuning A/B runs below used .NET SDK/runtime `11.0.100-preview.6.26359.118`,
 `--threads 20`, default chroma, and default resampling. On a reproducible
 40-frame PAL probe,
 the saved pre-continuous-pipeline baseline median was 11.60 s and the latest
-median was 4.97 s, a 57.2% cumulative gain. The newest direct-`.s16` checkpoint
-alone moved matched wall/CPU medians from 5.33/17.11 s to 4.97/15.94 s
-(6.8%/6.8%). Process CPU divided by wall time remains about 3.2 active cores,
-so further work still targets state-safe field-stage parallelism. Paired TBC,
-JSON, and chroma SHA-256 values were identical.
+median was 4.228 s, a 63.6% cumulative gain. The newest exact-kernel checkpoint
+alone moved matched wall/CPU/peak-working-set medians from
+4.434 s/16.516 s/1.314 GiB to 4.228 s/15.328 s/1.069 GiB
+(4.6%/7.2%/18.6%). Process CPU divided by wall time is about 3.63 active cores,
+so further work still targets state-safe field-stage parallelism. All 14 runs
+produced identical paired TBC, JSON, and chroma SHA-256 values.
 
 Earlier 40/160/320-frame sustained runs completed in 7.65/26.58/52.51 s. Peak
 working sets were 1.76/1.88/1.67 GiB, while second-half medians were
@@ -446,6 +485,159 @@ sampled allocation from 4.134 to 3.861 GiB and `Complex[]` allocation from
 pairs were wall-time neutral within run noise, so no speedup is claimed;
 long-run memory remained bounded and all 409-field hashes stayed exact.
 
+The current double-SOS and BA-IIR pass fuses the common two- and four-section
+double cascades and reuses the BA filter's padded workspace through a private
+bounded pool. Isolated two/four-section SOS medians improved by 37.5%/58.9%.
+Across 32K-sample high-pass orders 4/9/20, the current IIR path was
+23.7%/30.3%/26.6% faster than the old allocating reference and reduced warm
+thread allocation from about 1.05 MB to 262 KB. Seven interleaved 40-frame
+full-path pairs produced the 4.6% wall, 7.2% CPU, and 18.6% peak-working-set
+improvements above. A fixture-limited 409-field run completed in 17.431 s;
+25-50%, 50-75%, and 75-100% output intervals were 4.06/4.02/4.27 s, while
+second-half median working/private memory rose by only 10.8/7.4 MiB. Every
+recorded luma, chroma, and JSON hash remained exact.
+
+The packed `.lds` loader now writes decoded samples directly into its requested
+output and preserves Python's partial-tail-group behavior. Five interleaved
+40-frame real-capture pairs moved default wall/CPU medians from
+4.687/12.422 s to 4.610/12.188 s and 20-worker medians from 3.813/14.469 s to
+3.743/13.109 s. Three 160-frame default pairs moved wall time from 15.281 to
+14.993 s; a separate five-pair 20-worker repeat moved wall/CPU medians from
+12.655/46.297 s to 12.601/46.156 s and peak working set from 1.319 GiB to
+1.198 GiB. All 42 recorded real-capture runs produced one exact luma, chroma,
+and JSON hash set per fixture.
+
+A follow-up packed-input pass reuses one loader-owned read buffer. In a
+1,024-block 32K probe, median time moved from 68.20 to 65.17 us per block
+(4.4% faster) and managed allocation from 310.49 to 268.52 MB (13.5% lower).
+Matched 160-frame runtime counters reduced total allocation from 22.248 to
+22.113 GiB, about 139 MiB (0.61%). Five 40-frame pairs moved default wall/CPU
+medians from 4.380/12.016 to 4.325/11.594 s and 20-worker medians from
+3.645/14.813 to 3.586/14.188 s. Three 160-frame pairs were wall-neutral at
+14.173/11.692 versus 14.231/11.701 s for default/20-worker. Two reversed-order
+400-frame pairs completed candidate/baseline in 26.229/26.403 s and
+baseline/candidate in 26.395/26.540 s. The pass is retained for lower long-run
+allocation; the 160/400-frame results do not establish a stable full-path CPU
+speedup. Every luma, chroma, and JSON hash remained exact.
+
+The VHS sync-reference DC-offset pass now reuses at most two exact-length
+low-pass workspaces. A matched 10-field GC trace reduced sampled managed
+allocation from 2.639 to 2.466 GiB, `Double[]` allocation from 2,469.42 to
+2,291.86 MiB, and Gen2 collections from 17 to 15. Five interleaved 40-field
+pairs were wall-time neutral within run noise (default 4.473/4.522 s;
+20-worker 3.736/3.778 s), while CPU medians moved from 12.719 to 11.969 s and
+14.375 to 13.859 s. Three 160-field pairs moved default/20-worker wall medians
+from 15.272/12.560 to 15.113/12.378 s. A 400-field 20-worker A/B moved
+wall/CPU from 28.937/106.984 to 28.296/105.344 s; candidate private-memory
+quarter medians were 1.076/0.766/1.025/0.726 GiB with a 1.463 GiB peak, showing
+no monotonic growth. Every recorded luma, chroma, and JSON A/B hash remained
+exact.
+
+The VSync serration-window pass removes the full-window copy made before level
+measurement. A matched 10-field GC trace reduced sampled managed allocation
+from 2.465 to 2.434 GiB and `Double[]` allocation from 2,291.20 to 2,266.54
+MiB, a 24.7 MiB reduction, without adding retained buffers. Five interleaved
+40-field pairs were wall/CPU neutral within run noise (default
+4.508/12.188 to 4.556/12.422 s; 20-worker 3.719/14.203 to
+3.696/14.531 s). Three 160-field pairs were also neutral (default
+14.847/40.484 to 14.904/40.406 s; 20-worker 12.319/45.172 to
+12.361/45.391 s). A conservative candidate-first 400-field 20-worker A/B
+moved wall/CPU from 28.015/107.828 to 27.865/108.547 s and peak working set
+from 1.481 GiB to 1.465 GiB. The change is retained for lower long-run allocation
+pressure rather than a claimed CPU-speed gain; every recorded luma, chroma,
+and JSON hash remained exact.
+
+The VHS chroma-prefilter ownership pass borrows the immutable field input when
+no prefilter is configured, while configured filters and the public
+`ApplyChromaPreFilter` API continue to return independently owned arrays. A
+matched 10-field GC trace reduced sampled managed allocation from 2.440 to
+2.384 GiB and `Double[]` allocation from 2,267.10 to 2,207.39 MiB, removing the
+59.629 MiB `ApplyChromaPreFilter` allocation stack; both runs performed 15 Gen2
+collections. Five interleaved 40-field pairs moved default wall/CPU medians
+from 4.475/12.312 to 4.433/12.219 s and 20-worker medians from
+3.694/14.531 to 3.638/14.531 s. Three 160-field pairs moved default medians
+from 15.104/41.297 to 14.732/40.344 s; 20-worker wall time remained neutral at
+12.179/12.206 s while CPU time moved from 49.312 to 46.094 s. Two reversed-order
+400-field pairs completed candidate/baseline in 28.039/28.553 s and
+baseline/candidate in 28.224/28.308 s; candidate peaks were
+1.474/1.475 GiB. Every recorded luma, chroma, and JSON hash remained exact.
+
+The VHS chroma comb/gain pass fuses those two internal stages with one
+line-sized stack workspace while leaving the public stage APIs unchanged. A
+matched 10-field GC trace reduced sampled managed allocation from 2.360 to
+2.322 GiB and `Double[]` allocation from 2,197.06 to 2,147.33 MiB. The
+59.629 MiB `ApplyComb` allocation stack disappeared, the final gain-owned
+59.629 MiB output remained, and both runs performed 14 Gen2 collections. Five
+interleaved 40-field pairs moved default wall/CPU medians from 4.455/12.250 to
+4.366/12.125 s and 20-worker medians from 3.721/15.719 to 3.657/14.094 s. A
+separate five-pair 160-field 20-worker run moved wall/CPU medians from
+12.180/47.922 to 12.064/44.031 s. Two reversed-order 400-field pairs completed
+candidate/baseline in 26.916/27.468 s and baseline/candidate in
+27.398/27.664 s; candidate peaks were 1.484/1.481 GiB. Every recorded luma,
+chroma, and JSON hash remained exact. An earlier line-history in-place
+prototype was fully removed after its 160-field wall medians regressed from
+15.20 to 15.53 s by default and from 12.45 to 12.68 s with 20 workers.
+
+The subsequent VHS chroma gain-to-U16 pass removes the remaining gain-owned
+double field from internal decode while leaving the public gain and conversion
+APIs unchanged. A matched final 10-field GC trace reduced sampled managed
+allocation from 2.320069 to 2.266559 GiB and `Double[]` allocation from
+2,147.315 to 2,086.828 MiB. The 59.629 MiB
+`ApplyAutomaticChromaGainWithComb` allocation stack disappeared, `UInt16[]`
+allocation remained 29.815 MiB, and Gen2 collections moved from 15 to 14. Five
+interleaved 40-field pairs moved default wall/CPU medians from
+4.461/12.781 to 4.403/12.047 s and 20-worker medians from
+3.706/14.406 to 3.665/12.906 s. A separate five-pair 160-field 20-worker run
+moved wall/CPU medians from 12.196/46.047 to 11.985/45.625 s. Two
+reversed-order 400-field pairs completed candidate/baseline wall/CPU in
+27.566/27.877 s and 107.531/105.828 CPU-s, then baseline/candidate in
+28.120/27.263 s and 105.422/107.594 CPU-s; candidate peaks were
+1.355/1.474 GiB. The longer runs therefore used more total CPU while finishing
+sooner, and every recorded luma, chroma, and JSON hash remained exact. An
+initial full-field neutral-fill form was reworked after 160-field wall medians
+regressed from 14.71 to 14.76 s by default and from 12.05 to 12.26 s with 20
+workers. The scalar line-span form was also not retained as final after its
+first 400-field pair completed candidate/baseline in 28.353/27.647 s; only the
+AVX2/SSE4.1 form passed the final long-run gate.
+
+The VSync in-place BA-IIR pass keeps the same filtering arithmetic while
+reusing each private chain's owned array and writing the envelope blend
+directly into its final reduced output. On the pinned PAL field fixture, the
+isolated median moved from 6.610 to 5.080 ms per field (23.1% faster), while
+managed allocation fell from 15.60 to 8.50 MiB per field (45.5%). A matched
+10-frame GC trace reduced sampled allocation from 2.264 to 1.947 GiB (14.0%)
+and Gen2 collections from 15 to 11. Five interleaved 40-frame pairs moved
+default wall/CPU medians from 4.455/12.547 to 4.319/12.156 s and 20-worker
+medians from 3.819/14.094 to 3.606/14.625 s. Five 160-frame 20-worker pairs
+moved wall/CPU/peak-working-set medians from 12.059 s/45.406 s/1.475 GiB to
+11.796 s/45.922 s/1.058 GiB. Two 400-frame pairs completed candidate/baseline
+in 26.776/27.438 s and baseline/candidate in 27.214/26.785 s; candidate peaks
+were 1.448/1.439 GiB. The 400-frame candidate used 1.4-5.0% more CPU while
+finishing 1.6-2.4% sooner. Every recorded luma, chroma, and JSON hash remained
+exact.
+
+A follow-up detector-owned VSync workspace pass reuses the six exact-sized
+analysis arrays across fields. On the same isolated fixture, median time moved
+from 5.080 to 4.325 ms per field (14.9% faster), while warm-call allocation fell
+from 8.50 MiB to about 3.8 KiB per field. A matched 10-frame trace reduced
+sampled allocation from 1.947 to 1.720 GiB and sampled `Double[]` allocation
+from 1,760.85 to 1,524.33 MiB. Three 160-frame default-worker pairs moved
+wall/CPU/peak medians from 14.44 s/40.94 s/1.03 GiB to
+14.21 s/39.56 s/0.77 GiB; five 20-worker pairs were neutral at
+11.63 s/45.17 s/1.19 GiB versus 11.67 s/44.77 s/1.21 GiB. Two 400-frame
+20-worker pairs finished 0.8-1.7% sooner with bounded 1.508/1.534 GiB candidate
+peaks versus 1.451/1.404 GiB baselines. Every luma, chroma, and JSON hash was
+exact.
+
+The shared final-field TBC resampling plan now computes source positions and
+wow level adjustments once, uses the same read-only plan for chroma and luma,
+and returns its bounded buffers to `ArrayPool` immediately after rendering.
+Two reversed-order 400-frame default-worker pairs moved median wall/CPU time
+from 33.690/97.734 s to 32.805/93.609 s (2.6% less wall time and 4.2% less CPU).
+Two 20-worker pairs were wall-neutral at 26.713 versus 26.760 s while reducing
+median CPU time from 106.563 to 105.266 s; candidate peaks were bounded at
+1.411/1.445 GiB. All recorded luma, chroma, and JSON hashes remained exact.
+
 </details>
 
 <!-- SECTION: build -->
@@ -466,7 +658,7 @@ dotnet test --solution VHSDecodeDotNet.slnx -c Release --no-build --no-restore
 ```
 
 The current formal Release build has zero warnings and errors. The xUnit v3
-project exposes **793** independently discoverable tests to both
+project exposes **818** independently discoverable tests to both
 `dotnet test` and Visual Studio Test Explorer.
 
 <!-- SECTION: usage -->
