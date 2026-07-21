@@ -162,9 +162,10 @@ release compatibility remain the first constraint.
   prefilter is configured; configured filtering still returns owned output,
   and the public prefilter API retains its independent-copy contract.
 - Internal VHS chroma comb and automatic gain share one line-sized stack
-  workspace and write directly to the gain-owned field output, avoiding a
-  separate full-field comb result. The three public stage APIs retain their
-  independent-output contracts.
+  workspace, and the decode-only path maps scaled samples directly into the
+  final `ushort[]`. AVX2/SSE4.1 handles the saturating body while an exact scalar
+  fallback preserves unsupported-CPU and tail semantics. Public comb, gain, and
+  conversion APIs retain their independent-output contracts.
 - HiFi uses bounded parallel block decoding followed by ordered
   post-processing and writing.
 - Managed real FFTs reuse pooled packing and scratch buffers. Float32 SOS
@@ -555,6 +556,28 @@ chroma, and JSON hash remained exact. An earlier line-history in-place
 prototype was fully removed after its 160-field wall medians regressed from
 15.20 to 15.53 s by default and from 12.45 to 12.68 s with 20 workers.
 
+The subsequent VHS chroma gain-to-U16 pass removes the remaining gain-owned
+double field from internal decode while leaving the public gain and conversion
+APIs unchanged. A matched final 10-field GC trace reduced sampled managed
+allocation from 2.320069 to 2.266559 GiB and `Double[]` allocation from
+2,147.315 to 2,086.828 MiB. The 59.629 MiB
+`ApplyAutomaticChromaGainWithComb` allocation stack disappeared, `UInt16[]`
+allocation remained 29.815 MiB, and Gen2 collections moved from 15 to 14. Five
+interleaved 40-field pairs moved default wall/CPU medians from
+4.461/12.781 to 4.403/12.047 s and 20-worker medians from
+3.706/14.406 to 3.665/12.906 s. A separate five-pair 160-field 20-worker run
+moved wall/CPU medians from 12.196/46.047 to 11.985/45.625 s. Two
+reversed-order 400-field pairs completed candidate/baseline wall/CPU in
+27.566/27.877 s and 107.531/105.828 CPU-s, then baseline/candidate in
+28.120/27.263 s and 105.422/107.594 CPU-s; candidate peaks were
+1.355/1.474 GiB. The longer runs therefore used more total CPU while finishing
+sooner, and every recorded luma, chroma, and JSON hash remained exact. An
+initial full-field neutral-fill form was reworked after 160-field wall medians
+regressed from 14.71 to 14.76 s by default and from 12.05 to 12.26 s with 20
+workers. The scalar line-span form was also not retained as final after its
+first 400-field pair completed candidate/baseline in 28.353/27.647 s; only the
+AVX2/SSE4.1 form passed the final long-run gate.
+
 </details>
 
 <!-- SECTION: build -->
@@ -575,7 +598,7 @@ dotnet test --solution VHSDecodeDotNet.slnx -c Release --no-build --no-restore
 ```
 
 The current formal Release build has zero warnings and errors. The xUnit v3
-project exposes **812** independently discoverable tests to both
+project exposes **813** independently discoverable tests to both
 `dotnet test` and Visual Studio Test Explorer.
 
 <!-- SECTION: usage -->

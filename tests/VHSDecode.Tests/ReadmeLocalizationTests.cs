@@ -64,7 +64,7 @@ public sealed partial class ReadmeLocalizationTests
         [
             "43155200da87c0d49eb37d8ec09b1372075ee8e4",
             "11.0.100-preview.6.26359.118",
-            "**812**",
+            "**813**",
             "4.646 s",
             "13.112 s",
             "2.82x",
@@ -277,6 +277,34 @@ public sealed partial class ReadmeLocalizationTests
             "15.53",
             "12.45",
             "12.68",
+            "2.320069",
+            "2.266559",
+            "2,147.315",
+            "2,086.828",
+            "29.815 MiB",
+            "4.461",
+            "4.403",
+            "12.781",
+            "12.047",
+            "3.706",
+            "3.665",
+            "14.406",
+            "12.906",
+            "12.196",
+            "11.985",
+            "46.047",
+            "45.625",
+            "27.566/27.877",
+            "107.531/105.828",
+            "28.120/27.263",
+            "105.422/107.594",
+            "1.355/1.474 GiB",
+            "14.71",
+            "14.76",
+            "12.05",
+            "12.26",
+            "28.353/27.647",
+            "AVX2/SSE4.1",
             "--use_saved_levels",
             "docs/COMPATIBILITY_EVIDENCE.md"
         ];
@@ -314,6 +342,7 @@ public sealed partial class ReadmeLocalizationTests
             Assert.DoesNotContain("**809**", content, StringComparison.Ordinal);
             Assert.DoesNotContain("**810**", content, StringComparison.Ordinal);
             Assert.DoesNotContain("**811**", content, StringComparison.Ordinal);
+            Assert.DoesNotContain("**812**", content, StringComparison.Ordinal);
             Assert.DoesNotContain("13.88", content, StringComparison.Ordinal);
             Assert.DoesNotContain("39.80", content, StringComparison.Ordinal);
             Assert.DoesNotContain("53.23", content, StringComparison.Ordinal);

@@ -156,8 +156,9 @@
   decode も同じ read-only array を借用します。filter 設定時は owned result を返し、public
   prefilter API も independent-copy contract を維持します。
 - 内部 VHS chroma comb と automatic gain は line-size の stack workspace を共有し、
-  gain-owned field output へ直接書き込むため、独立した full-field comb result は不要です。
-  3 つの public stage API は independent-output contract を維持します。
+  decode 専用 path は scale 済み sample を final `ushort[]` へ直接 map します。saturating
+  body は AVX2/SSE4.1 を使い、未対応 CPU と末尾 sample は exact scalar fallback を
+  維持します。public comb、gain、conversion API の independent-output contract は不変です。
 - HiFi は境界付き並列 block decode の後、順序どおりに後処理と書き込みを行います。
 - Managed real FFT は pool 化した packing/scratch buffer を再利用します。float32 SOS の
   forward/backward filtering は拡張 buffer を 1 つ rent して in-place 実行し、呼び出し
@@ -523,6 +524,25 @@ wall/CPU median が 4.455/12.250 秒から 4.366/12.125 秒、20-worker は
 15.20 秒から 15.53 秒、20-worker で 12.45 秒から 12.68 秒へ後退したため、完全に
 削除しました。
 
+続く VHS chroma gain-to-U16 pass は public gain/conversion API を変えず、内部 decode に
+残っていた gain-owned double field を削除します。final implementation の同一条件
+10-field GC trace では sampled managed allocation が 2.320069 GiB から
+2.266559 GiB、`Double[]` allocation が 2,147.315 MiB から 2,086.828 MiB へ
+減少しました。59.629 MiB の `ApplyAutomaticChromaGainWithComb` allocation stack は
+消え、`UInt16[]` allocation は 29.815 MiB のまま、Gen2 collection は 15 回から
+14 回へ減少しました。交互に実行した 5 組の 40-field pair では default wall/CPU
+median が 4.461/12.781 秒から 4.403/12.047 秒、20-worker は 3.706/14.406 秒から
+3.665/12.906 秒へ低下しました。別の 5 組の 160-field 20-worker run は wall/CPU
+median が 12.196/46.047 秒から 11.985/45.625 秒へ低下しました。実行順を反転した
+2 組の 400-field pair は、candidate/baseline wall 27.566/27.877 秒、CPU
+107.531/105.828 秒、次に baseline/candidate wall 28.120/27.263 秒、CPU
+105.422/107.594 秒で、candidate peak は 1.355/1.474 GiB でした。長時間 run は
+total CPU を多く使う一方で早く終了し、記録した luma、chroma、JSON hash はすべて
+exact です。最初の full-field neutral-fill form は 160-field wall median が default で
+14.71 秒から 14.76 秒、20-worker で 12.05 秒から 12.26 秒へ後退したため作り直しました。
+scalar line-span form も最初の 400-field candidate/baseline が 28.353/27.647 秒だったため
+final にはせず、AVX2/SSE4.1 form のみが最終 long-run gate を通過しました。
+
 </details>
 
 <!-- SECTION: build -->
@@ -544,7 +564,7 @@ dotnet test --solution VHSDecodeDotNet.slnx -c Release --no-build --no-restore
 
 現在の正式な Release build は warning 0、error 0 です。xUnit v3 project は
 `dotnet test` と Visual Studio Test Explorer の両方で個別に検出できる
-**812** tests を公開します。
+**813** tests を公開します。
 
 <!-- SECTION: usage -->
 

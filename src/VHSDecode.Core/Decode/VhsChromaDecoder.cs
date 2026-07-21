@@ -1,6 +1,8 @@
 using System.Collections.Concurrent;
 using System.Numerics;
 using System.Runtime.InteropServices;
+using System.Runtime.Intrinsics;
+using System.Runtime.Intrinsics.X86;
 using VHSDecode.Core.Dsp;
 
 namespace VHSDecode.Core.Decode;
@@ -462,7 +464,7 @@ public static class VhsChromaDecoder
         if (phase.BurstDetectedLine == -1)
         {
             return new VhsChromaFieldResult(
-                ChromaToU16(new double[chroma.Length]),
+                CreateNeutralChromaU16(chroma.Length),
                 phase.BurstDetectedLine,
                 null,
                 phase.NextChromaRotationIndex,
@@ -583,8 +585,8 @@ public static class VhsChromaDecoder
             && options.ChromaDeemphasisFilter is null
             && (options.FinalSosFilter is not null || options.FinalFilter is null);
 
-        AutomaticChromaGainResult gained = options.DisableComb
-            ? ApplyAutomaticChromaGain(
+        ushort[] gained = options.DisableComb
+            ? ApplyAutomaticChromaGainToU16(
                 upconverted,
                 options.BurstAbsRef,
                 options.BurstStart,
@@ -593,7 +595,7 @@ public static class VhsChromaDecoder
                 options.OutputLineCount,
                 phase.BurstDetectedLine,
                 useFloat32Rms: retainFloat32)
-            : ApplyAutomaticChromaGainWithComb(
+            : ApplyAutomaticChromaGainWithCombToU16(
                 upconverted,
                 options.BurstAbsRef,
                 options.BurstStart,
@@ -605,7 +607,7 @@ public static class VhsChromaDecoder
                 retainFloat32,
                 useFloat32Rms: retainFloat32);
         return new VhsChromaFieldResult(
-            ChromaToU16(gained.Samples),
+            gained,
             phase.BurstDetectedLine,
             fieldPhaseId,
             phase.NextChromaRotationIndex,
@@ -1502,6 +1504,44 @@ public static class VhsChromaDecoder
         return new AutomaticChromaGainResult(output, meanBurstAccumulator / (lines - StartingLine));
     }
 
+    internal static ushort[] ApplyAutomaticChromaGainToU16(
+        ReadOnlySpan<double> chroma,
+        double burstAbsRef,
+        int burstStart,
+        int burstEnd,
+        int lineLength,
+        int lines,
+        int burstDetectedLine,
+        bool useFloat32Rms)
+    {
+        if (lines <= StartingLine)
+        {
+            throw new ArgumentOutOfRangeException(nameof(lines), "Chroma ACC requires more than 16 lines.");
+        }
+
+        ValidateLineShape(chroma.Length, lines, lineLength);
+        ValidateBurstRange(burstStart, burstEnd, lineLength);
+
+        int firstProcessedLine = Math.Min(lines, Math.Max(StartingLine, burstDetectedLine));
+        int configuredSampleCount = checked(lines * lineLength);
+        ushort[] output = CreateAutomaticGainChromaU16(
+            chroma.Length,
+            checked(firstProcessedLine * lineLength),
+            configuredSampleCount);
+        int vectorizedLength = chroma.Length & ~3;
+        for (int line = firstProcessedLine; line < lines; line++)
+        {
+            int lineStart = line * lineLength;
+            ReadOnlySpan<double> lineSamples = chroma.Slice(lineStart, lineLength);
+            ReadOnlySpan<double> burst = lineSamples.Slice(burstStart, burstEnd - burstStart);
+            double rms = useFloat32Rms ? RmsFloat32(burst) : Rms(burst);
+            double scale = rms != 0.0 ? burstAbsRef / rms : 1.0;
+            WriteScaledChromaToU16(lineSamples, output, lineStart, scale, vectorizedLength);
+        }
+
+        return output;
+    }
+
     internal static AutomaticChromaGainResult ApplyAutomaticChromaGainWithComb(
         ReadOnlySpan<double> chroma,
         double burstAbsRef,
@@ -1588,6 +1628,161 @@ public static class VhsChromaDecoder
         }
 
         return new AutomaticChromaGainResult(output, meanBurstAccumulator / (lines - StartingLine));
+    }
+
+    internal static ushort[] ApplyAutomaticChromaGainWithCombToU16(
+        ReadOnlySpan<double> chroma,
+        double burstAbsRef,
+        int burstStart,
+        int burstEnd,
+        int lineLength,
+        int lines,
+        int burstDetectedLine,
+        int lineDistance,
+        bool retainFloat32,
+        bool useFloat32Rms)
+    {
+        if (lines <= StartingLine)
+        {
+            throw new ArgumentOutOfRangeException(nameof(lines), "Chroma ACC requires more than 16 lines.");
+        }
+
+        if (lineDistance is not (1 or 2))
+        {
+            throw new ArgumentOutOfRangeException(nameof(lineDistance));
+        }
+
+        ValidateLineShape(chroma.Length, lines, lineLength);
+        ValidateBurstRange(burstStart, burstEnd, lineLength);
+
+        const int MaxStackLineLength = 4_096;
+        Span<double> combinedLine = lineLength <= MaxStackLineLength
+            ? stackalloc double[lineLength]
+            : new double[lineLength];
+        int firstProcessedLine = Math.Min(lines, Math.Max(StartingLine, burstDetectedLine));
+        int configuredSampleCount = checked(lines * lineLength);
+        ushort[] output = CreateAutomaticGainChromaU16(
+            chroma.Length,
+            checked(firstProcessedLine * lineLength),
+            configuredSampleCount);
+        int vectorizedLength = chroma.Length & ~3;
+        for (int line = firstProcessedLine; line < lines; line++)
+        {
+            int lineStart = line * lineLength;
+            double rms;
+            if (line < lines - 2)
+            {
+                ReadOnlySpan<double> current = chroma.Slice(lineStart, lineLength);
+                ReadOnlySpan<double> advanced = chroma.Slice(
+                    (line + lineDistance) * lineLength,
+                    lineLength);
+                ReadOnlySpan<double> delayed = chroma.Slice(
+                    (line - lineDistance) * lineLength,
+                    lineLength);
+                for (int i = 0; i < lineLength; i++)
+                {
+                    // Match Numba's PAL delayed-first and NTSC source-order subtraction.
+                    double combined = !retainFloat32 && lineDistance == 2
+                        ? ((current[i] * 2.0) - delayed[i] - advanced[i]) / 4.0
+                        : ((current[i] * 2.0) - advanced[i] - delayed[i]) / 4.0;
+                    combinedLine[i] = retainFloat32 ? (double)(float)combined : combined;
+                }
+
+                ReadOnlySpan<double> burst = combinedLine.Slice(
+                    burstStart,
+                    burstEnd - burstStart);
+                rms = useFloat32Rms ? RmsFloat32(burst) : Rms(burst);
+                double scale = rms != 0.0 ? burstAbsRef / rms : 1.0;
+                WriteScaledChromaToU16(combinedLine, output, lineStart, scale, vectorizedLength);
+            }
+            else
+            {
+                ReadOnlySpan<double> lineSamples = chroma.Slice(lineStart, lineLength);
+                ReadOnlySpan<double> burst = lineSamples.Slice(
+                    burstStart,
+                    burstEnd - burstStart);
+                rms = useFloat32Rms ? RmsFloat32(burst) : Rms(burst);
+                double scale = rms != 0.0 ? burstAbsRef / rms : 1.0;
+                WriteScaledChromaToU16(lineSamples, output, lineStart, scale, vectorizedLength);
+            }
+        }
+
+        return output;
+    }
+
+    private static ushort[] CreateNeutralChromaU16(int sampleCount)
+    {
+        var output = new ushort[sampleCount];
+        Array.Fill(output, (ushort)S16AbsMax);
+        return output;
+    }
+
+    private static ushort[] CreateAutomaticGainChromaU16(
+        int sampleCount,
+        int firstProcessedSample,
+        int configuredSampleCount)
+    {
+        var output = new ushort[sampleCount];
+        output.AsSpan(0, firstProcessedSample).Fill((ushort)S16AbsMax);
+        output.AsSpan(configuredSampleCount).Fill((ushort)S16AbsMax);
+        return output;
+    }
+
+    private static void WriteScaledChromaToU16(
+        ReadOnlySpan<double> source,
+        Span<ushort> output,
+        int outputStart,
+        double scale,
+        int vectorizedLength)
+    {
+        Span<ushort> destination = output.Slice(outputStart, source.Length);
+        int saturatingLength = Math.Clamp(vectorizedLength - outputStart, 0, source.Length);
+        int index = 0;
+        if (Avx2.IsSupported && Sse41.IsSupported)
+        {
+            int simdLength = saturatingLength & ~3;
+            Vector256<double> scaleVector = Vector256.Create(scale);
+            Vector256<double> offsetVector = Vector256.Create(S16AbsMax);
+            Vector256<double> maximumVector = Vector256.Create((double)ushort.MaxValue);
+            Vector256<long> exponentMask = Vector256.Create(0x7FF0_0000_0000_0000L);
+            ref double sourceReference = ref MemoryMarshal.GetReference(source);
+            ref ushort destinationReference = ref MemoryMarshal.GetReference(destination);
+            for (; index < simdLength; index += 4)
+            {
+                Vector256<double> values = Vector256.LoadUnsafe(ref sourceReference, (nuint)index);
+                Vector256<double> scaled = Avx.Multiply(values, scaleVector);
+                Vector256<double> shifted = Avx.Add(scaled, offsetVector);
+                // Ordered comparisons include infinities, so inspect exponent bits to match double.IsFinite.
+                Vector256<long> exponents = Avx2.And(shifted.AsInt64(), exponentMask);
+                Vector256<double> finiteMask = Avx2.CompareGreaterThan(exponentMask, exponents).AsDouble();
+                shifted = Avx.And(shifted, finiteMask);
+                shifted = Avx.Max(shifted, Vector256<double>.Zero);
+                shifted = Avx.Min(shifted, maximumVector);
+                Vector128<int> converted = Avx.ConvertToVector128Int32WithTruncation(shifted);
+                Vector128<ushort> packed = Sse41.PackUnsignedSaturate(converted, Vector128<int>.Zero);
+                packed.GetLower().StoreUnsafe(ref destinationReference, (nuint)index);
+            }
+        }
+
+        for (; index < saturatingLength; index++)
+        {
+            double scaled = source[index] * scale;
+            double shifted = scaled + S16AbsMax;
+            destination[index] = !double.IsFinite(shifted) || shifted <= 0.0
+                ? ushort.MinValue
+                : shifted >= ushort.MaxValue
+                    ? ushort.MaxValue
+                    : (ushort)shifted;
+        }
+
+        for (; index < source.Length; index++)
+        {
+            double scaled = source[index] * scale;
+            double shifted = scaled + S16AbsMax;
+            destination[index] = !double.IsFinite(shifted) || shifted < long.MinValue || shifted > long.MaxValue
+                ? ushort.MinValue
+                : unchecked((ushort)(long)shifted);
+        }
     }
 
     private static double[] ApplyComb(

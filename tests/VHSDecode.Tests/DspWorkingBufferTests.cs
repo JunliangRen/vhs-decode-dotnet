@@ -217,6 +217,123 @@ public sealed class DspWorkingBufferTests
             $"Fused VHS chroma comb/gain allocated {allocated:N0} bytes.");
     }
 
+    [Fact(DisplayName = "Fused VHS chroma gain-to-U16 matches allocating stages with one output")]
+    public void FusedVhsChromaGainToU16MatchesAllocatingStagesWithOneOutput()
+    {
+        const int lineLength = 257;
+        const int lines = 25;
+        const int burstStart = 8;
+        const int burstEnd = 32;
+        const double burstAbsRef = 30_000.0;
+        double[] input = Enumerable.Range(0, lines * lineLength)
+            .Select(index => Math.Sin(index * 0.019) + (index * 0.00037))
+            .ToArray();
+        input[(18 * lineLength) + 100] = double.NaN;
+        input[(18 * lineLength) + 101] = double.PositiveInfinity;
+        input[(18 * lineLength) + 102] = double.NegativeInfinity;
+        input[^2] = -50_339.0;
+        input[^1] = 80_733.0;
+        double[] original = input.ToArray();
+
+        foreach (bool useFloat32Rms in new[] { true, false })
+        {
+            AssertFusedGainToU16(
+                input,
+                lineLength,
+                lines,
+                burstStart,
+                burstEnd,
+                burstAbsRef,
+                useFloat32Rms);
+            foreach (bool retainFloat32 in new[] { true, false })
+            {
+                AssertFusedCombGainToU16(
+                    input,
+                    lineLength,
+                    lines,
+                    burstStart,
+                    burstEnd,
+                    burstAbsRef,
+                    lineDistance: 1,
+                    retainFloat32,
+                    useFloat32Rms);
+                AssertFusedCombGainToU16(
+                    input,
+                    lineLength,
+                    lines,
+                    burstStart,
+                    burstEnd,
+                    burstAbsRef,
+                    lineDistance: 2,
+                    retainFloat32,
+                    useFloat32Rms);
+            }
+        }
+
+        Assert.Equal(original, input);
+
+        const int productionLineLength = 1_135;
+        const int productionLines = 273;
+        double[] allocationProbe = Enumerable.Range(0, productionLines * productionLineLength)
+            .Select(index => Math.Cos(index * 0.013) - (index * 0.00011))
+            .ToArray();
+        _ = VhsChromaDecoder.ApplyAutomaticChromaGainToU16(
+            allocationProbe,
+            burstAbsRef,
+            burstStart,
+            burstEnd,
+            productionLineLength,
+            productionLines,
+            burstDetectedLine: 0,
+            useFloat32Rms: true);
+        _ = VhsChromaDecoder.ApplyAutomaticChromaGainWithCombToU16(
+            allocationProbe,
+            burstAbsRef,
+            burstStart,
+            burstEnd,
+            productionLineLength,
+            productionLines,
+            burstDetectedLine: 0,
+            lineDistance: 2,
+            retainFloat32: true,
+            useFloat32Rms: true);
+
+        long maximumExpected = ((long)allocationProbe.Length * sizeof(ushort)) + 4_096;
+        long before = GC.GetAllocatedBytesForCurrentThread();
+        ushort[] gainResult = VhsChromaDecoder.ApplyAutomaticChromaGainToU16(
+            allocationProbe,
+            burstAbsRef,
+            burstStart,
+            burstEnd,
+            productionLineLength,
+            productionLines,
+            burstDetectedLine: 0,
+            useFloat32Rms: true);
+        long gainAllocated = GC.GetAllocatedBytesForCurrentThread() - before;
+        GC.KeepAlive(gainResult);
+        Assert.True(
+            gainAllocated < maximumExpected,
+            $"Fused VHS chroma gain-to-U16 allocated {gainAllocated:N0} bytes.");
+
+        before = GC.GetAllocatedBytesForCurrentThread();
+        ushort[] combResult = VhsChromaDecoder.ApplyAutomaticChromaGainWithCombToU16(
+            allocationProbe,
+            burstAbsRef,
+            burstStart,
+            burstEnd,
+            productionLineLength,
+            productionLines,
+            burstDetectedLine: 0,
+            lineDistance: 2,
+            retainFloat32: true,
+            useFloat32Rms: true);
+        long combAllocated = GC.GetAllocatedBytesForCurrentThread() - before;
+        GC.KeepAlive(combResult);
+        Assert.True(
+            combAllocated < maximumExpected,
+            $"Fused VHS chroma comb/gain-to-U16 allocated {combAllocated:N0} bytes.");
+    }
+
     [Fact(DisplayName = "PAL VHS RF block reuses temporary spectra after warm-up")]
     public void PalVhsRfBlockReusesTemporarySpectraAfterWarmUp()
     {
@@ -864,6 +981,77 @@ public sealed class DspWorkingBufferTests
         Assert.Equal(
             BitConverter.DoubleToUInt64Bits(expected.MeanBurstRms),
             BitConverter.DoubleToUInt64Bits(actual.MeanBurstRms));
+    }
+
+    private static void AssertFusedGainToU16(
+        double[] input,
+        int lineLength,
+        int lines,
+        int burstStart,
+        int burstEnd,
+        double burstAbsRef,
+        bool useFloat32Rms)
+    {
+        ushort[] expected = VhsChromaDecoder.ChromaToU16(
+            VhsChromaDecoder.ApplyAutomaticChromaGain(
+                input,
+                burstAbsRef,
+                burstStart,
+                burstEnd,
+                lineLength,
+                lines,
+                burstDetectedLine: 18,
+                useFloat32Rms).Samples);
+        ushort[] actual = VhsChromaDecoder.ApplyAutomaticChromaGainToU16(
+            input,
+            burstAbsRef,
+            burstStart,
+            burstEnd,
+            lineLength,
+            lines,
+            burstDetectedLine: 18,
+            useFloat32Rms);
+
+        Assert.Equal(expected, actual);
+    }
+
+    private static void AssertFusedCombGainToU16(
+        double[] input,
+        int lineLength,
+        int lines,
+        int burstStart,
+        int burstEnd,
+        double burstAbsRef,
+        int lineDistance,
+        bool retainFloat32,
+        bool useFloat32Rms)
+    {
+        double[] combined = lineDistance == 1
+            ? VhsChromaDecoder.ApplyNtscComb(input, lineLength, retainFloat32)
+            : VhsChromaDecoder.ApplyPalComb(input, lineLength, retainFloat32);
+        ushort[] expected = VhsChromaDecoder.ChromaToU16(
+            VhsChromaDecoder.ApplyAutomaticChromaGain(
+                combined,
+                burstAbsRef,
+                burstStart,
+                burstEnd,
+                lineLength,
+                lines,
+                burstDetectedLine: 18,
+                useFloat32Rms).Samples);
+        ushort[] actual = VhsChromaDecoder.ApplyAutomaticChromaGainWithCombToU16(
+            input,
+            burstAbsRef,
+            burstStart,
+            burstEnd,
+            lineLength,
+            lines,
+            burstDetectedLine: 18,
+            lineDistance,
+            retainFloat32,
+            useFloat32Rms);
+
+        Assert.Equal(expected, actual);
     }
 
     private static void AssertDoubleBitsEqual(ReadOnlySpan<double> expected, ReadOnlySpan<double> actual)
