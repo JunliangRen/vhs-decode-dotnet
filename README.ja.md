@@ -2,7 +2,7 @@
 
 [English](README.md) | [简体中文](README.zh-CN.md) | **[日本語](README.ja.md)**
 
-<!-- README_SYNC: 2026-07-20.15 -->
+<!-- README_SYNC: 2026-07-22.16 -->
 
 [`oyvindln/vhs-decode`](https://github.com/oyvindln/vhs-decode) の
 デコード関連部分を .NET 11 で再実装するプロジェクトです。現在は release
@@ -602,6 +602,18 @@ default-worker pair では wall/CPU median が 33.690/97.734 秒から
 105.266 秒へ低下し、candidate peak は bounded な 1.411/1.445 GiB でした。
 luma、chroma、JSON hash はすべて exact です。
 
+fallback serration-level search は field ごとに一度だけ decimation を行い、1 個の
+bounded `ArrayPool` buffer に格納して、順序を保つ 30-step、5-IRE search 全体で同じ
+pulse list を再利用します。最後の full-resolution retry、threshold sequence、scalar
+comparison、pulse order は変わりません。main `4a67ae9` を baseline とし、`xxf.lds`
+（`--start_fileloc 620000000 -l 160`）で測定した 2 組の interleaved default-worker
+pair は平均 wall/CPU が 13.991/41.492 秒から 13.595/39.773 秒へ低下しました
+（2.8%/4.1% 減）。2 組の 20-worker pair は 11.152/48.508 秒から
+10.838/47.180 秒へ低下しました（2.8%/2.7% 減）。これらの pair と最後の clean-source
+replay を合わせても、candidate peak working set は 1.14 GiB 以下の bounded range に
+収まり、全 10 run の luma、chroma、JSON hash は同一でした。160-frame gate を
+通過しなかった AVX pulse-state prototype は削除しました。
+
 </details>
 
 <!-- SECTION: build -->
@@ -623,7 +635,7 @@ dotnet test --solution VHSDecodeDotNet.slnx -c Release --no-build --no-restore
 
 現在の正式な Release build は warning 0、error 0 です。xUnit v3 project は
 `dotnet test` と Visual Studio Test Explorer の両方で個別に検出できる
-**818** tests を公開します。
+**821** tests を公開します。
 
 <!-- SECTION: usage -->
 

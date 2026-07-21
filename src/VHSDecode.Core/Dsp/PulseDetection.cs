@@ -43,14 +43,56 @@ public static class PulseDetection
         int minimumSyncLength = 0,
         int maximumSyncLength = 5000)
     {
-        if (syncReference.IsEmpty)
+        var pulses = new List<Pulse>();
+        FindPulses(
+            syncReference,
+            high,
+            minimumSyncLength,
+            maximumSyncLength,
+            pulses,
+            positionScale: 1);
+        return pulses;
+    }
+
+    internal static void FindPulses(
+        ReadOnlySpan<double> syncReference,
+        double high,
+        int minimumSyncLength,
+        int maximumSyncLength,
+        List<Pulse> pulses,
+        int positionScale)
+    {
+        ArgumentNullException.ThrowIfNull(pulses);
+        if (positionScale <= 0)
         {
-            return [];
+            throw new ArgumentOutOfRangeException(nameof(positionScale));
         }
 
+        pulses.Clear();
+        if (syncReference.IsEmpty)
+        {
+            return;
+        }
+
+        FindPulsesScalar(
+            syncReference,
+            high,
+            minimumSyncLength,
+            maximumSyncLength,
+            pulses,
+            positionScale);
+    }
+
+    private static void FindPulsesScalar(
+        ReadOnlySpan<double> syncReference,
+        double high,
+        int minimumSyncLength,
+        int maximumSyncLength,
+        List<Pulse> pulses,
+        int positionScale)
+    {
         bool inPulse = syncReference[0] <= high;
         int currentStart = 0;
-        var pulses = new List<Pulse>();
 
         for (int position = 0; position < syncReference.Length; position++)
         {
@@ -62,7 +104,9 @@ public static class PulseDetection
                     int length = position - currentStart;
                     if (InRange(length, minimumSyncLength, maximumSyncLength) && currentStart != 0)
                     {
-                        pulses.Add(new Pulse(currentStart, length));
+                        pulses.Add(new Pulse(
+                            currentStart * positionScale,
+                            length * positionScale));
                     }
 
                     inPulse = false;
@@ -74,8 +118,6 @@ public static class PulseDetection
                 inPulse = true;
             }
         }
-
-        return pulses;
     }
 
     private static double? CalculateZeroCrossingForward(

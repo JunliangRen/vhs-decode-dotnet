@@ -2,7 +2,7 @@
 
 **[English](README.md)** | [简体中文](README.zh-CN.md) | [日本語](README.ja.md)
 
-<!-- README_SYNC: 2026-07-20.15 -->
+<!-- README_SYNC: 2026-07-22.16 -->
 
 .NET 11 rewrite of the decode-facing parts of
 [`oyvindln/vhs-decode`](https://github.com/oyvindln/vhs-decode), focused on
@@ -638,6 +638,18 @@ Two 20-worker pairs were wall-neutral at 26.713 versus 26.760 s while reducing
 median CPU time from 106.563 to 105.266 s; candidate peaks were bounded at
 1.411/1.445 GiB. All recorded luma, chroma, and JSON hashes remained exact.
 
+The fallback serration-level search now decimates each field once into one
+bounded `ArrayPool` buffer and reuses one pulse list across the ordered 30-step,
+5-IRE search. Its final full-resolution retry, threshold sequence, scalar
+comparisons, and pulse ordering remain unchanged. Against main `4a67ae9` on
+`xxf.lds` (`--start_fileloc 620000000 -l 160`), two interleaved default-worker
+pairs moved average wall/CPU time from 13.991/41.492 s to 13.595/39.773 s
+(2.8%/4.1% lower); two 20-worker pairs moved from 11.152/48.508 s to
+10.838/47.180 s (2.8%/2.7% lower). Across those pairs and the final clean-source
+replay, candidate peak working sets stayed bounded at or below 1.14 GiB, and
+all ten runs produced one exact luma, chroma, and JSON hash set. An AVX
+pulse-state prototype was removed after it failed the 160-frame gate.
+
 </details>
 
 <!-- SECTION: build -->
@@ -658,7 +670,7 @@ dotnet test --solution VHSDecodeDotNet.slnx -c Release --no-build --no-restore
 ```
 
 The current formal Release build has zero warnings and errors. The xUnit v3
-project exposes **818** independently discoverable tests to both
+project exposes **821** independently discoverable tests to both
 `dotnet test` and Visual Studio Test Explorer.
 
 <!-- SECTION: usage -->
