@@ -193,6 +193,19 @@ public static class IirFilter
         int stateLength = state.Length;
         if (numerator.Length == stateLength + 1 && denominator.Length == stateLength + 1)
         {
+            switch (stateLength)
+            {
+                case 3:
+                    ApplyForwardOrder3InPlace(numerator, denominator, samples, state);
+                    return;
+                case 4:
+                    ApplyForwardOrder4InPlace(numerator, denominator, samples, state);
+                    return;
+                case 5:
+                    ApplyForwardOrder5InPlace(numerator, denominator, samples, state);
+                    return;
+            }
+
             for (int sample = 0; sample < samples.Length; sample++)
             {
                 double x = samples[sample];
@@ -235,6 +248,114 @@ public static class IirFilter
 
             samples[sample] = y;
         }
+    }
+
+    private static void ApplyForwardOrder3InPlace(
+        double[] numerator,
+        double[] denominator,
+        Span<double> samples,
+        double[] state)
+    {
+        double b0 = numerator[0];
+        double b1 = numerator[1];
+        double b2 = numerator[2];
+        double b3 = numerator[3];
+        double a1 = denominator[1];
+        double a2 = denominator[2];
+        double a3 = denominator[3];
+        double s0 = state[0];
+        double s1 = state[1];
+        double s2 = state[2];
+        foreach (ref double sample in samples)
+        {
+            double x = sample;
+            double y = (b0 * x) + s0;
+            s0 = (b1 * x) + s1 - (a1 * y);
+            s1 = (b2 * x) + s2 - (a2 * y);
+            s2 = (b3 * x) - (a3 * y);
+            sample = y;
+        }
+
+        state[0] = s0;
+        state[1] = s1;
+        state[2] = s2;
+    }
+
+    private static void ApplyForwardOrder4InPlace(
+        double[] numerator,
+        double[] denominator,
+        Span<double> samples,
+        double[] state)
+    {
+        double b0 = numerator[0];
+        double b1 = numerator[1];
+        double b2 = numerator[2];
+        double b3 = numerator[3];
+        double b4 = numerator[4];
+        double a1 = denominator[1];
+        double a2 = denominator[2];
+        double a3 = denominator[3];
+        double a4 = denominator[4];
+        double s0 = state[0];
+        double s1 = state[1];
+        double s2 = state[2];
+        double s3 = state[3];
+        foreach (ref double sample in samples)
+        {
+            double x = sample;
+            double y = (b0 * x) + s0;
+            s0 = (b1 * x) + s1 - (a1 * y);
+            s1 = (b2 * x) + s2 - (a2 * y);
+            s2 = (b3 * x) + s3 - (a3 * y);
+            s3 = (b4 * x) - (a4 * y);
+            sample = y;
+        }
+
+        state[0] = s0;
+        state[1] = s1;
+        state[2] = s2;
+        state[3] = s3;
+    }
+
+    private static void ApplyForwardOrder5InPlace(
+        double[] numerator,
+        double[] denominator,
+        Span<double> samples,
+        double[] state)
+    {
+        double b0 = numerator[0];
+        double b1 = numerator[1];
+        double b2 = numerator[2];
+        double b3 = numerator[3];
+        double b4 = numerator[4];
+        double b5 = numerator[5];
+        double a1 = denominator[1];
+        double a2 = denominator[2];
+        double a3 = denominator[3];
+        double a4 = denominator[4];
+        double a5 = denominator[5];
+        double s0 = state[0];
+        double s1 = state[1];
+        double s2 = state[2];
+        double s3 = state[3];
+        double s4 = state[4];
+        foreach (ref double sample in samples)
+        {
+            double x = sample;
+            double y = (b0 * x) + s0;
+            s0 = (b1 * x) + s1 - (a1 * y);
+            s1 = (b2 * x) + s2 - (a2 * y);
+            s2 = (b3 * x) + s3 - (a3 * y);
+            s3 = (b4 * x) + s4 - (a4 * y);
+            s4 = (b5 * x) - (a5 * y);
+            sample = y;
+        }
+
+        state[0] = s0;
+        state[1] = s1;
+        state[2] = s2;
+        state[3] = s3;
+        state[4] = s4;
     }
 
     private static void ApplyForwardBackwardInPlace(

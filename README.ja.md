@@ -682,6 +682,23 @@ run は 6 種類の output/normalized diagnostic hash が一致し、既存の N
 normalized stderr/log、2,000 個すべての `fileLoc`、52 件の startup recovery diagnostic が
 完全一致しました。
 
+一般的な order-3、order-4、order-5 BA-IIR path は fixed-order scalar kernel を使うように
+なりました。coefficient type、sample ごとの expression、arithmetic order、state update、
+public buffer ownership は変更せず、その他の filter shape は generic implementation を
+使い続けます。isolated kernel median は managed allocation を変えずに 1.77-1.88 倍へ
+改善しました。同じ local PAL RF capture の 5 組の interleaved 160-frame
+`--threads 20` pair では wall median が 14.116 秒から 12.897 秒（8.6% 減）、CPU median が
+53.156 秒から 49.813 秒（6.3% 減）となり、すべての candidate run が高速でした。全 10
+run の luma、chroma、JSON、stdout、normalized stderr、timestamp-normalized log hash は
+完全一致しました。順序を反転した 2 組の 400-frame pair は 7.0-7.7% 高速で、peak working
+set は 1.551 GiB 以下に収まり、同じ 6 artifact が一致しました。candidate の
+serial/default-5/20/64-worker run も 6 artifact すべてで exact です。同じ local NTSC-J RF
+capture の新しい 160-frame large-seek gate でも、main baseline の 20 worker と candidate の
+serial/default-5/20/64 worker の間で 6 artifact がすべて一致しました。PAL と NTSC-J は
+同じ 3 種類の specialized filter order を構築し、独立した scalar xUnit oracle が全 path を
+検証し、848 test はすべて pass しています。上記の既存 1,000-frame NTSC-J gate に変更は
+ありません。
+
 </details>
 
 <!-- SECTION: build -->
