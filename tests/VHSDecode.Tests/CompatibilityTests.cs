@@ -312,16 +312,16 @@ public void DecodeRunnerPrintsCommandHelpBeforeValidation()
 {
     var standaloneHashes = new Dictionary<string, string>(StringComparer.Ordinal)
     {
-        ["vhs"] = "174450C2379D07D59109F289FF9F587BDA433E8E38C63EFE604535BBCD9077C4",
-        ["cvbs"] = "7933C5EFFD23A835419449AA805D7110ABA4298E23FD46FF51805AF933712D15",
-        ["ld"] = "E890F90169572401CF3C1565FF5EF44B23354824516E330250BD80BA136FB579",
+        ["vhs"] = "DA713FA6C8040EEFDF219810263C3920A473D73057334F6F4AC806B2E896F814",
+        ["cvbs"] = "7EB7781182FC7EC8893E68047FCBC451C68483CEC20F4386886D88103A70C446",
+        ["ld"] = "9AC5EECA50980DE163886F93D14D2AF28EB4C23BF1913097A07FF599C9C9148C",
         ["hifi"] = "27E40DE774B9CD5E3A6E126A497B074AD239319AD7A79004D4594F74CB7ECC2B"
     };
     var facadeHashes = new Dictionary<string, string>(StringComparer.Ordinal)
     {
-        ["vhs"] = "9FE63E4A3C18927DE477D66BCF612085FB01ED85DA8BFD7AE2FACAE9E0E0EDA1",
-        ["cvbs"] = "A19F45D777A92EDB940880F5953A9E2D2298AF850F7769A3615FB14CDC12877B",
-        ["ld"] = "62D9A869755E04C5F7EC0ADCD682AC856554C1EE861B8D463DC9AA21BDDC2F68",
+        ["vhs"] = "E3201D66D396EB2B8302203FF52F62FE5291674DAE3ED4888B8D9340020FC92D",
+        ["cvbs"] = "802A9F081B95059DF058786E956315F11E5189692E913CE20CF99237F0A9CAE1",
+        ["ld"] = "B61CA52C5D20A8F17618DE42F0895C84A2D48F2EEC8BEE81CD377ABA2409A8D7",
         ["hifi"] = "14F69F3DD5869D3BAF3D44558ADF32DAC040F97F37CF00A2F3127FA101D7765E"
     };
 
@@ -10064,7 +10064,9 @@ public void DecodeCancellationFinalizesPartialOutputAndMatchesUpstreamStreams()
             + Environment.NewLine;
         AssertEqual(1, exitCode);
         AssertEqual(termination, output.ToString());
-        AssertEqual(string.Empty, error.ToString());
+        AssertEqual(
+            RfComputeBackendSelector.AutomaticCpuDiagnostic + Environment.NewLine,
+            error.ToString());
         AssertFalse(File.Exists(runnerBase + ".tbc.json"));
         AssertEqual("{", File.ReadAllText(runnerBase + ".tbc.json.tmp"));
 
@@ -10238,7 +10240,11 @@ public void DecodeReadErrorsReportContextAndFinalizePartialOutput()
         AssertEqual(1, exitCode);
         AssertEqual(2, reads);
         AssertEqual(string.Empty, output.ToString());
-        AssertTrue(errorText.StartsWith(
+        string expectedBackendDiagnostic =
+            RfComputeBackendSelector.AutomaticCpuDiagnostic + Environment.NewLine;
+        AssertTrue(errorText.StartsWith(expectedBackendDiagnostic, StringComparison.Ordinal));
+        string normalizedErrorText = errorText[expectedBackendDiagnostic.Length..];
+        AssertTrue(normalizedErrorText.StartsWith(
             Environment.NewLine
             + "ERROR - please paste the following into a bug report:"
             + Environment.NewLine,

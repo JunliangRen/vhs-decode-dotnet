@@ -1,6 +1,8 @@
 usage: decode.py [-h] [--system system] [-s start]
                  [--start_fileloc start_fileloc] [-l length] [--overwrite]
-                 [--write_db] [-f FREQ] [-t threads] [--ct] [--sl sharpness]
+                 [--write_db] [-f FREQ] [-t threads]
+                 [--compute-backend {auto,cpu,cuda}] [--cuda-device device]
+                 [--ct] [--sl sharpness]
                  [--notch notch] [--notch_q notch_q] [-p] [-n] [--pm]
                  [--NTSCJ] [--debug] [--skip_hsync_refine] [-S seek]
                  [--no_auto_sync] [-C] [--agc_speed speed]
@@ -21,6 +23,9 @@ options:
   --system system       video system (overriden by individual options)
   -t threads, --threads threads
                         number of CPU threads to use
+  --compute-backend {auto,cpu,cuda}
+                        RF compute backend (default: auto)
+  --cuda-device device  zero-based CUDA device index (default: 0)
   -S seek, --seek seek  seek to frame n of capture
   --no_auto_sync        Disable auto sync level detection.
   -C, --clamp_agc       Clamp signal (black level) and enable automatic gain control.

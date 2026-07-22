@@ -19,7 +19,8 @@ internal static class PythonNamespaceFormatter
 
         foreach (OptionSpec option in command.Spec.Options)
         {
-            if (option.Destination is "help" or "version")
+            if (!option.IncludeInPythonNamespace
+                || option.Destination is "help" or "version")
             {
                 continue;
             }

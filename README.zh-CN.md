@@ -187,8 +187,10 @@
   变换位模式与输出 hash 不变。
 - 恢复元数据以磁盘流式写入，snapshot 队列容量为 1，场顺序历史和 RF 缓存均有
   硬上限；长时间解码不会保留所有已解码场，也不会无限排入未来工作。
-- CUDA/OpenCL 不是运行时依赖。当前 trace 不支持把孤立的 32K FFT 在主机与设备间
-  往返；未来可选 GPU 后端必须批量处理常驻显存的 DSP 阶段，并保留精确 CPU 回退。
+- CUDA/OpenCL 不是运行时依赖。可选的 [CUDA RF sidecar](docs/CUDA.md) 会批量处理
+  常驻显存的 VHS、CVBS 和 LD RF 工作，同时保留此 managed 实现作为参考和完整回退。
+  CUDA 目前仍是显式预览：在代表性 VHS、LD capture 通过文档规定的一致性与 1.25x
+  端到端发布门槛前，`--compute-backend auto` 会选择 CPU。
 
 当前线程矩阵使用 Intel Core Ultra 7 265K（20 个逻辑处理器）、Windows 11 build
 26220、.NET SDK/runtime `11.0.100-preview.6.26359.118`，以及 Python v0.4.0

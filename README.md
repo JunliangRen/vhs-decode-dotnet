@@ -234,9 +234,12 @@ release compatibility remain the first constraint.
 - Recovery metadata is disk-streamed; its snapshot queue has capacity one, and
   field-order history and RF caches have hard limits. Long decodes therefore do
   not retain every decoded field or enqueue an unbounded amount of future work.
-- CUDA/OpenCL is not a runtime dependency. Current traces do not justify moving
-  isolated 32K FFTs across the host/device boundary; any future optional GPU
-  backend must batch a device-resident DSP stage and retain an exact CPU fallback.
+- CUDA/OpenCL is not a runtime dependency. An [optional CUDA RF sidecar](docs/CUDA.md)
+  batches device-resident VHS, CVBS, and LD RF work while keeping this managed
+  implementation as the reference and complete fallback. CUDA remains an
+  explicit preview: `--compute-backend auto` selects CPU until representative
+  VHS and LD captures pass the documented compatibility and 1.25x end-to-end
+  release gates.
 
 The current thread matrix used an Intel Core Ultra 7 265K (20 logical
 processors), Windows 11 build 26220, .NET SDK/runtime

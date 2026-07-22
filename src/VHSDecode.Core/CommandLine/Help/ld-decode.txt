@@ -9,7 +9,9 @@ usage: ld-decode [-h] [--start file-location] [--length frames] [--seek frame]
                  [--deemp_strength deemp_str]
                  [--wow_level_adjust_smoothing WOW_LEVEL_ADJUST_SMOOTHING]
                  [--wow_interpolation_method {linear,quadratic,cubic}]
-                 [-t threads] [-f FREQ] [--analog_audio_frequency AFREQ]
+                 [-t threads] [--compute-backend {auto,cpu,cuda}]
+                 [--cuda-device device] [-f FREQ]
+                 [--analog_audio_frequency AFREQ]
                  [--ntsc_audio_rate] [--video_bpf_low FREQ]
                  [--video_bpf_high FREQ] [--video_lpf FREQ]
                  [--video_lpf_order VLPF_ORDER] [--audio_filterwidth FREQ]
@@ -70,6 +72,9 @@ options:
                           cubic
   -t threads, --threads threads
                         number of CPU threads to use
+  --compute-backend {auto,cpu,cuda}
+                        RF compute backend (default: auto)
+  --cuda-device device  zero-based CUDA device index (default: 0)
   -f FREQ, --frequency FREQ
                         RF sampling frequency in source file (default is 40MHz)
   --analog_audio_frequency AFREQ

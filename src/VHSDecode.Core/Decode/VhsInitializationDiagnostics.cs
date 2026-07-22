@@ -17,6 +17,8 @@ internal static class VhsInitializationDiagnostics
                 "--cxadc is deprecated! use -f 8fsc instead!"));
         }
 
+        diagnostics.AddRange(session.ComputeBackendDiagnostics);
+
         if (command.Spec != CliSpecs.Vhs)
         {
             return diagnostics;

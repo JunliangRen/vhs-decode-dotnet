@@ -1,5 +1,6 @@
 using System.Numerics;
 using System.Runtime.Intrinsics.X86;
+using VHSDecode.Core.Compute.Cuda;
 using VHSDecode.Core.Dsp;
 using VHSDecode.Core.Rf;
 using VHSDecode.Core.Tbc;
@@ -54,6 +55,54 @@ public sealed class RfBlockDecodePipeline : IDisposable
     internal bool RetainsRfDiagnosticChannels => _retainRfDiagnosticChannels;
 
     internal bool RequiresSequentialBlockDecode => _filterOptions.SharpnessEq is not null;
+
+    internal CudaRfPipelineDescriptor DescribeCudaRfPipeline()
+    {
+        CudaRfMode mode = _cvbsOptions is not null
+            ? CudaRfMode.Cvbs
+            : _filterOptions.FmDemodulatorMode == RfFmDemodulatorMode.VhsRustApproximation
+                ? CudaRfMode.VhsRustApproximation
+                : CudaRfMode.StandardConjugate;
+
+        double cvbsRawScale = 1.0;
+        double cvbsRawOffset = 0.0;
+        if (_cvbsOptions is { AutoSync: false } cvbs)
+        {
+            double whiteHz = cvbs.VideoOutput.IreToHz(100.0);
+            cvbsRawScale = whiteHz / (4.0 * ushort.MaxValue);
+            cvbsRawOffset = ((ushort.MaxValue / 2.0) * cvbsRawScale)
+                + cvbs.VideoOutput.IreToHz(cvbs.VideoOutput.VSyncIre);
+        }
+
+        return new CudaRfPipelineDescriptor(
+            mode,
+            _filters.RfVideo.Length,
+            _demodulator.SampleRateHz,
+            _filters.RfVideo,
+            _filters.RfHighPass,
+            _filters.RfMtf,
+            _filters.Video,
+            _filters.VideoLowPass05,
+            _filters.VideoLowPass05Offset,
+            _filters.LdEfm,
+            _filters.LdAnalogAudio,
+            _referenceFilters,
+            _retainRfDiagnosticChannels,
+            _filterOptions.LdPalV4300DNotch,
+            _filterOptions.RfHighBoost,
+            _filterOptions.DiffDemodRepair,
+            _filterOptions.ChromaTrap,
+            _filterOptions.SharpnessEq,
+            _filterOptions.NonlinearDeemphasis,
+            _filterOptions.SubDeemphasis,
+            _filterOptions.BetamaxFscNotchHz,
+            _filters.VhsEnvelopeSos is not null,
+            _filters.VhsRfTopSos is not null,
+            _filterOptions.VideoNotchHz,
+            _filters.CvbsVideoBurst is not null,
+            cvbsRawScale,
+            cvbsRawOffset);
+    }
 
     public RfDemodulatedBlock? DecodeBlock(Stream stream, long sample, int blockLength)
     {
@@ -138,6 +187,205 @@ public sealed class RfBlockDecodePipeline : IDisposable
             inputSpectrum,
             includeRfHighPassOutput: retainRfDiagnosticChannels,
             includeAnalyticOutput: retainRfDiagnosticChannels);
+
+        return CompletePreparedRfBlock(
+            input,
+            demodulated,
+            reportDiagnostics,
+            retainRfDiagnosticChannels,
+            inputSpectrum);
+    }
+
+    internal RfPipelineBlock CompleteCudaRfBlock(
+        double[] input,
+        RfDemodulatedBlock demodulated,
+        bool reportDiagnostics,
+        short[]? precomputedEfm = null,
+        LaserDiscAnalogAudioBlock? precomputedAnalogAudio = null)
+    {
+        ArgumentNullException.ThrowIfNull(input);
+        ArgumentNullException.ThrowIfNull(demodulated);
+        return CompletePreparedRfBlock(
+            input,
+            demodulated,
+            reportDiagnostics,
+            _retainRfDiagnosticChannels,
+            inputSpectrum: null,
+            precomputedEfm,
+            precomputedAnalogAudio);
+    }
+
+    internal RfPipelineBlock CompleteCudaStandardFullGraph(
+        double[] input,
+        double[] video,
+        double[] demodRaw,
+        Complex[] analytic,
+        double[] envelope,
+        double[] videoLowPass,
+        double[] rfHighPass,
+        bool reportDiagnostics,
+        short[]? precomputedEfm = null,
+        LaserDiscAnalogAudioBlock? precomputedAnalogAudio = null)
+    {
+        if (_filters.VideoLowPass05Offset != 0)
+        {
+            FrequencyDomainFilter.RollInPlace(videoLowPass, -_filters.VideoLowPass05Offset);
+        }
+
+        var demodulated = new RfDemodulatedBlock(
+            video,
+            demodRaw,
+            analytic,
+            envelope,
+            videoLowPass,
+            rfHighPass);
+        return CompleteCudaRfBlock(
+            input,
+            demodulated,
+            reportDiagnostics,
+            precomputedEfm,
+            precomputedAnalogAudio);
+    }
+
+    internal RfPipelineBlock CompleteCudaStandardFirstStage(
+        double[] input,
+        double[] demodRaw,
+        Complex[] analytic,
+        double[] envelope,
+        double[] rfHighPass,
+        bool reportDiagnostics,
+        short[]? precomputedEfm = null,
+        LaserDiscAnalogAudioBlock? precomputedAnalogAudio = null)
+    {
+        RfDemodulatedBlock demodulated = _demodulator.CompleteStandardConjugateFirstStage(
+            demodRaw,
+            analytic,
+            envelope,
+            rfHighPass,
+            _filters.Video,
+            _filters.VideoLowPass05,
+            _filters.VideoLowPass05Offset,
+            _referenceFilters);
+        return CompleteCudaRfBlock(
+            input,
+            demodulated,
+            reportDiagnostics,
+            precomputedEfm,
+            precomputedAnalogAudio);
+    }
+
+    internal short[] ConvertCudaLdEfmOutput(ReadOnlySpan<double> filtered)
+    {
+        if (_filters.LdEfm is null)
+        {
+            throw new InvalidOperationException(
+                "A CUDA LD EFM output was returned for a pipeline without an EFM filter.");
+        }
+
+        if (filtered.Length != _filters.RfVideo.Length)
+        {
+            throw new ArgumentException(
+                "CUDA LD EFM output length must match the RF block length.",
+                nameof(filtered));
+        }
+
+        return QuantizeEfmSamples(filtered);
+    }
+
+    internal LaserDiscAnalogAudioBlock ConvertCudaLdAnalogAudioOutput(
+        ReadOnlySpan<Complex> leftAnalytic,
+        ReadOnlySpan<Complex> rightAnalytic)
+    {
+        LaserDiscAnalogAudioFilterSet filters = _filters.LdAnalogAudio
+            ?? throw new InvalidOperationException(
+                "A CUDA LD analog-audio output was returned for a pipeline without analog-audio filters.");
+        if (leftAnalytic.Length != filters.Left.BinCount ||
+            rightAnalytic.Length != filters.Right.BinCount)
+        {
+            throw new ArgumentException(
+                "CUDA LD analog-audio channel lengths must match their configured FFT slices.");
+        }
+
+        return new LaserDiscAnalogAudioBlock(
+            DemodulateAnalogAudioChannel(leftAnalytic, filters.Left),
+            DemodulateAnalogAudioChannel(rightAnalytic, filters.Right),
+            filters.DecimationFactor);
+    }
+
+    internal RfPipelineBlock CompleteCudaVhsFirstStage(
+        double[] input,
+        double[] demodRaw,
+        Complex[] analytic,
+        double[] rfHighPass,
+        bool reportDiagnostics)
+    {
+        RfDemodulatedBlock demodulated = _demodulator.CompleteVhsRustFirstStage(
+            demodRaw,
+            analytic,
+            rfHighPass,
+            _filters.Video,
+            _filters.VideoLowPass05,
+            _filters.VideoLowPass05Offset,
+            _filterOptions.DiffDemodRepair,
+            _filterOptions.ChromaTrap,
+            _filterOptions.NonlinearDeemphasis,
+            _filterOptions.SubDeemphasis,
+            _filterOptions.BetamaxFscNotchHz,
+            _filters.VhsEnvelopeSos,
+            _referenceFilters);
+        return CompleteCudaRfBlock(input, demodulated, reportDiagnostics);
+    }
+
+    internal RfPipelineBlock CompleteCudaCvbsGraph(
+        double[] input,
+        double[] luma,
+        double[] envelope,
+        double[] videoLowPass)
+    {
+        ArgumentNullException.ThrowIfNull(input);
+        ArgumentNullException.ThrowIfNull(luma);
+        ArgumentNullException.ThrowIfNull(envelope);
+        ArgumentNullException.ThrowIfNull(videoLowPass);
+        if (luma.Length != input.Length
+            || envelope.Length != input.Length
+            || videoLowPass.Length != input.Length)
+        {
+            throw new ArgumentException("Accelerated CVBS channel lengths must match the RF input block.");
+        }
+
+        if (_filters.VideoLowPass05Offset != 0)
+        {
+            FrequencyDomainFilter.RollInPlace(videoLowPass, -_filters.VideoLowPass05Offset);
+        }
+
+        double[]? videoBurst = null;
+        if (_filters.CvbsVideoBurst is not null)
+        {
+            Complex[] lumaSpectrum = PocketFftComplex.ForwardDuccReal(luma);
+            videoBurst = FilterRealSignalPocket(lumaSpectrum, _filters.CvbsVideoBurst, luma.Length);
+            QuantizeToFloat32InPlace(videoBurst);
+        }
+
+        var demodulated = new RfDemodulatedBlock(
+            luma.ToArray(),
+            luma.ToArray(),
+            [],
+            envelope,
+            videoLowPass,
+            luma.ToArray(),
+            VideoBurst: videoBurst);
+        return new RfPipelineBlock(input, demodulated);
+    }
+
+    private RfPipelineBlock CompletePreparedRfBlock(
+        double[] input,
+        RfDemodulatedBlock demodulated,
+        bool reportDiagnostics,
+        bool retainRfDiagnosticChannels,
+        Complex[]? inputSpectrum,
+        short[]? precomputedEfm = null,
+        LaserDiscAnalogAudioBlock? precomputedAnalogAudio = null)
+    {
         if (reportDiagnostics)
         {
             ReportDiagnostics(demodulated);
@@ -175,14 +423,58 @@ public sealed class RfBlockDecodePipeline : IDisposable
 
         if (_filters.LdEfm is not null)
         {
-            inputSpectrum ??= PocketFftComplex.ForwardDuccRealFull(input);
-            demodulated = demodulated with { Efm = DecodeEfmBlock(inputSpectrum, _filters.LdEfm) };
+            short[] efm;
+            if (precomputedEfm is not null)
+            {
+                if (precomputedEfm.Length != input.Length)
+                {
+                    throw new InvalidDataException(
+                        "Precomputed CUDA LD EFM output length does not match the RF block.");
+                }
+
+                efm = precomputedEfm;
+            }
+            else
+            {
+                inputSpectrum ??= PocketFftComplex.ForwardDuccRealFull(input);
+                efm = DecodeEfmBlock(inputSpectrum, _filters.LdEfm);
+            }
+
+            demodulated = demodulated with { Efm = efm };
+        }
+        else if (precomputedEfm is not null)
+        {
+            throw new InvalidDataException(
+                "Precomputed CUDA LD EFM output was supplied without an EFM filter.");
         }
 
         if (_filters.LdAnalogAudio is not null)
         {
-            inputSpectrum ??= PocketFftComplex.ForwardDuccRealFull(input);
-            demodulated = demodulated with { AnalogAudio = DecodeAnalogAudioBlock(inputSpectrum, _filters.LdAnalogAudio) };
+            LaserDiscAnalogAudioBlock analogAudio;
+            if (precomputedAnalogAudio is not null)
+            {
+                if (precomputedAnalogAudio.Left.Length != _filters.LdAnalogAudio.Left.BinCount ||
+                    precomputedAnalogAudio.Right.Length != _filters.LdAnalogAudio.Right.BinCount ||
+                    precomputedAnalogAudio.DecimationFactor != _filters.LdAnalogAudio.DecimationFactor)
+                {
+                    throw new InvalidDataException(
+                        "Precomputed CUDA LD analog-audio output does not match the configured channel slices.");
+                }
+
+                analogAudio = precomputedAnalogAudio;
+            }
+            else
+            {
+                inputSpectrum ??= PocketFftComplex.ForwardDuccRealFull(input);
+                analogAudio = DecodeAnalogAudioBlock(inputSpectrum, _filters.LdAnalogAudio);
+            }
+
+            demodulated = demodulated with { AnalogAudio = analogAudio };
+        }
+        else if (precomputedAnalogAudio is not null)
+        {
+            throw new InvalidDataException(
+                "Precomputed CUDA LD analog-audio output was supplied without analog-audio filters.");
         }
 
         if (_filterOptions.ExportRawTbc)
@@ -396,6 +688,11 @@ public sealed class RfBlockDecodePipeline : IDisposable
     private static short[] DecodeEfmBlock(ReadOnlySpan<Complex> spectrum, ReadOnlySpan<Complex> efmFilter)
     {
         double[] filtered = FilterRealSignal(spectrum, efmFilter);
+        return QuantizeEfmSamples(filtered);
+    }
+
+    private static short[] QuantizeEfmSamples(ReadOnlySpan<double> filtered)
+    {
         var output = new short[filtered.Length];
         for (int i = 0; i < output.Length; i++)
         {
@@ -426,6 +723,13 @@ public sealed class RfBlockDecodePipeline : IDisposable
         }
 
         Complex[] analytic = PocketFftComplex.Inverse(sliced);
+        return DemodulateAnalogAudioChannel(analytic, filter);
+    }
+
+    private static double[] DemodulateAnalogAudioChannel(
+        ReadOnlySpan<Complex> analytic,
+        LaserDiscAnalogAudioChannelFilter filter)
+    {
         double[] demodulated = PortedMath.UnwrapHilbert(analytic, filter.SliceSampleRateHz);
         for (int i = 0; i < demodulated.Length; i++)
         {

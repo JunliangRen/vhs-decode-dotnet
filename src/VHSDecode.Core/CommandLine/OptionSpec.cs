@@ -34,6 +34,8 @@ public sealed class OptionSpec
 
     public bool Hidden { get; init; }
 
+    public bool IncludeInPythonNamespace { get; init; } = true;
+
     public string PrimaryName => Names[0];
 
     public string DisplayName => string.Join('/', Names);

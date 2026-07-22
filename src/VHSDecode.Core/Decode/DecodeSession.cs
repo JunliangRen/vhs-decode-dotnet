@@ -42,6 +42,7 @@ public sealed record DecodeSession(
 {
     internal DecodeRuntimeReporter? RuntimeReporter { get; set; }
     internal IReadOnlyList<DecodeInitializationDiagnostic> VhsParamsFileDiagnostics { get; set; } = [];
+    internal IReadOnlyList<DecodeInitializationDiagnostic> ComputeBackendDiagnostics { get; set; } = [];
 
     public void Dispose()
     {
@@ -81,6 +82,13 @@ public sealed record ChromaDecodeOptions(
     bool DisablePhaseCorrection,
     bool UseOldRawChromaOutput);
 
+public enum RfComputeBackend
+{
+    Auto,
+    Cpu,
+    Cuda
+}
+
 public sealed record DecodeExecutionOptions(
     int RequestedThreads,
     int WorkerThreads,
@@ -91,7 +99,9 @@ public sealed record DecodeExecutionOptions(
     bool IgnoreLeadOut,
     bool VerboseVits,
     bool UseProfiler,
-    bool CxAdcCompatibilityMode)
+    bool CxAdcCompatibilityMode,
+    RfComputeBackend ComputeBackend,
+    int CudaDevice)
 {
     public BigInteger RequestedThreadsInteger { get; init; } = new(RequestedThreads);
 }
@@ -186,6 +196,9 @@ public static class DecodeSessionFactory
             return session;
         }
 
+        // Backend selection is a decode-start diagnostic. Preserve the legacy
+        // validation output when this format/system pair cannot start a decode.
+        session.ComputeBackendDiagnostics = [];
         IReadOnlyList<DecodeInitializationDiagnostic> diagnostics =
             VhsInitializationDiagnostics.Build(command, session);
         session.Dispose();
@@ -261,17 +274,30 @@ public static class DecodeSessionFactory
             BuildRfInputProcessor(command),
             WriteDiagnostic,
             retainRfDiagnosticChannels: command.Spec.Name != "vhs");
-        var streamDecoder = new RfBlockStreamDecoder(
-            pipeline,
-            blockLength,
-            blockCut,
-            blockCutEnd,
-            executionOptions.WorkerThreads,
-            prefetchBlocks: command.Spec.Name == "vhs" && pipeline.InputProcessor is null
-                ? RfBlockStreamDecoder.RecommendedPrefetchBlocks(
-                    executionOptions.WorkerThreads,
-                    Environment.ProcessorCount)
-                : 0);
+        IRfBlockComputeBackend? pendingComputeBackend = null;
+        RfBlockStreamDecoder? streamDecoder = null;
+        try
+        {
+            RfComputeBackendSelection backendSelection = RfComputeBackendSelector.Select(
+                executionOptions,
+                pipeline,
+                blockLength);
+            pendingComputeBackend = backendSelection.Backend;
+            streamDecoder = new RfBlockStreamDecoder(
+                pipeline,
+                blockLength,
+                blockCut,
+                blockCutEnd,
+                executionOptions.WorkerThreads,
+                prefetchBlocks: pipeline.InputProcessor is null
+                    && (command.Spec.Name == "vhs"
+                        || pendingComputeBackend?.IsHardwareAccelerated == true)
+                    ? RfBlockStreamDecoder.RecommendedPrefetchBlocks(
+                        executionOptions.WorkerThreads,
+                        Environment.ProcessorCount)
+                    : 0,
+                computeBackend: pendingComputeBackend);
+            pendingComputeBackend = null;
         TbcFrameSpec tbcFrameSpec = TbcFrameSpec.FromParameters(parameters);
         var tbcRenderer = new TbcFieldRenderer(
             tbcFrameSpec,
@@ -375,7 +401,21 @@ public static class DecodeSessionFactory
             chromaOptions,
             laserDiscAudioOptions,
             NullableString(command, "write_test_ldf"));
+        activeSession.ComputeBackendDiagnostics = [backendSelection.Diagnostic];
         return activeSession;
+        }
+        catch
+        {
+            streamDecoder?.Dispose();
+            pendingComputeBackend?.Dispose();
+            pipeline.Dispose();
+            if (loader is IDisposable disposableLoader)
+            {
+                disposableLoader.Dispose();
+            }
+
+            throw;
+        }
     }
 
     private static double BuildLevelAdjust(ParsedCommand command)
@@ -562,11 +602,25 @@ public static class DecodeSessionFactory
             IgnoreLeadOut: BoolValueOrDefault(command, "ignoreleadout"),
             VerboseVits: BoolValueOrDefault(command, "verboseVITS"),
             UseProfiler: BoolValueOrDefault(command, "use_profiler"),
-            CxAdcCompatibilityMode: command.Spec.Name == "vhs" && command.Get<bool>("cxadc"))
+            CxAdcCompatibilityMode: command.Spec.Name == "vhs" && command.Get<bool>("cxadc"),
+            ComputeBackend: ParseComputeBackend(command.Get<string>("compute_backend")),
+            CudaDevice: command.Get<int>("cuda_device"))
         {
             RequestedThreadsInteger = requestedThreadsInteger
         };
     }
+
+    private static RfComputeBackend ParseComputeBackend(string value)
+        => value switch
+        {
+            "auto" => RfComputeBackend.Auto,
+            "cpu" => RfComputeBackend.Cpu,
+            "cuda" => RfComputeBackend.Cuda,
+            _ => throw new ArgumentOutOfRangeException(
+                nameof(value),
+                value,
+                "Unsupported RF compute backend.")
+        };
 
     private static LaserDiscAudioOptions? BuildLaserDiscAudioOptions(ParsedCommand command, string system)
     {

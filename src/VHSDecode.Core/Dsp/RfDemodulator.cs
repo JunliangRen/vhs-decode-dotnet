@@ -484,6 +484,191 @@ public sealed class RfDemodulator
             VhsWeakRfSignal: vhsWeakRfSignal);
     }
 
+    /// <summary>
+    /// Completes the CPU-only portion of the explicitly supported CUDA/CPU hybrid graph.
+    /// The CUDA stage has already produced the standard conjugate-product RF channels;
+    /// this method preserves the legacy LD rule that clipping applies to the video and
+    /// reference-filter source without changing <paramref name="demodRaw"/> itself.
+    /// </summary>
+    internal RfDemodulatedBlock CompleteStandardConjugateFirstStage(
+        double[] demodRaw,
+        Complex[] analytic,
+        double[] envelope,
+        double[] rfHighPass,
+        ReadOnlySpan<Complex> videoFilter,
+        ReadOnlySpan<Complex> videoLowPassFilter,
+        int videoLowPassOffset,
+        RfVideoReferenceFilterSet? referenceFilters)
+    {
+        ArgumentNullException.ThrowIfNull(demodRaw);
+        ArgumentNullException.ThrowIfNull(analytic);
+        ArgumentNullException.ThrowIfNull(envelope);
+        ArgumentNullException.ThrowIfNull(rfHighPass);
+        if ((analytic.Length != 0 && analytic.Length != demodRaw.Length)
+            || envelope.Length != demodRaw.Length
+            || (rfHighPass.Length != 0 && rfHighPass.Length != demodRaw.Length))
+        {
+            throw new ArgumentException("Accelerated RF first-stage channel lengths must match.");
+        }
+
+        ReadOnlySpan<double> demodVideoSource = referenceFilters?.ClipDemodForVideo == true
+            ? ClipDemodForVideo(demodRaw, SampleRateHz)
+            : demodRaw;
+        Complex[] demodSpectrum = PocketFftComplex.ForwardDuccRealFull(demodVideoSource);
+
+        Complex[] videoSpectrum = ApplyFrequencyFilter(demodSpectrum, videoFilter);
+        PocketFftComplex.InverseDuccInPlace(videoSpectrum);
+        double[] video = ExtractReal(videoSpectrum);
+
+        Complex[] videoLowPassSpectrum = ApplyFrequencyFilter(demodSpectrum, videoLowPassFilter);
+        PocketFftComplex.InverseDuccInPlace(videoLowPassSpectrum);
+        double[] videoLowPass = ExtractReal(videoLowPassSpectrum);
+        if (videoLowPassOffset != 0)
+        {
+            FrequencyDomainFilter.RollInPlace(videoLowPass, -videoLowPassOffset);
+        }
+
+        double[]? videoBurst = DecodeReferenceIfPresent(
+            demodSpectrum,
+            referenceFilters?.VideoBurst,
+            referenceFilters?.VideoBurstOffset ?? 0);
+        double[]? videoPilot = DecodeReferenceIfPresent(
+            demodSpectrum,
+            referenceFilters?.VideoPilot,
+            offset: 0);
+
+        return new RfDemodulatedBlock(
+            video,
+            demodRaw,
+            analytic,
+            envelope,
+            videoLowPass,
+            rfHighPass,
+            VideoBurst: videoBurst,
+            VideoPilot: videoPilot);
+    }
+
+    /// <summary>
+    /// Completes the legacy VHS graph after CUDA has produced filtered analytic
+    /// RF samples and the Rust-compatible first demodulation. Recursive filters,
+    /// spike repair, and the second video stage intentionally remain on the CPU.
+    /// </summary>
+    internal RfDemodulatedBlock CompleteVhsRustFirstStage(
+        double[] demodRaw,
+        Complex[] analytic,
+        double[] rfHighPass,
+        ReadOnlySpan<Complex> videoFilter,
+        ReadOnlySpan<Complex> videoLowPassFilter,
+        int videoLowPassOffset,
+        DiffDemodRepairOptions? diffDemodRepair,
+        ChromaTrapOptions? chromaTrap,
+        NonlinearDeemphasisOptions? nonlinearDeemphasis,
+        SubDeemphasisOptions? subDeemphasis,
+        double? betamaxFscNotchHz,
+        IReadOnlyList<SosSection>? vhsEnvelopeFilter,
+        RfVideoReferenceFilterSet? referenceFilters)
+    {
+        ArgumentNullException.ThrowIfNull(demodRaw);
+        ArgumentNullException.ThrowIfNull(analytic);
+        ArgumentNullException.ThrowIfNull(rfHighPass);
+        if (analytic.Length != demodRaw.Length
+            || (rfHighPass.Length != 0 && rfHighPass.Length != demodRaw.Length))
+        {
+            throw new ArgumentException("Accelerated VHS RF first-stage channel lengths must match.");
+        }
+
+        using VhsRealFftWorkspaceLease workspaceLease = _vhsRealFftWorkspacePool.Rent(demodRaw.Length);
+        VhsRealFftWorkspace workspace = workspaceLease.Workspace;
+        Span<double> real = workspace.Real.AsSpan(0, demodRaw.Length);
+        Span<double> imaginary = workspace.Imaginary.AsSpan(0, demodRaw.Length);
+        for (int i = 0; i < analytic.Length; i++)
+        {
+            real[i] = analytic[i].Real;
+            imaginary[i] = analytic[i].Imaginary;
+        }
+
+        double[] envelope = vhsEnvelopeFilter is not null
+            ? BuildVhsEnvelope(real, vhsEnvelopeFilter, workspace.RawEnvelope.AsSpan(0, demodRaw.Length))
+            : BuildAnalyticMagnitudeEnvelope(real, imaginary);
+        bool vhsWeakRfSignal = false;
+        for (int i = 0; i < envelope.Length; i++)
+        {
+            if (envelope[i] == 0.0)
+            {
+                vhsWeakRfSignal = true;
+                break;
+            }
+        }
+
+        ApplyDiffDemodRepairIfPresent(
+            demodRaw,
+            real,
+            imaginary,
+            diffDemodRepair,
+            RfFmDemodulatorMode.VhsRustApproximation,
+            workspace.DiffedAnalytic);
+        if (chromaTrap is not null)
+        {
+            demodRaw = ApplyChromaTrap(demodRaw, SampleRateHz, chromaTrap.FscHz);
+        }
+
+        ReadOnlySpan<double> demodVideoSource = referenceFilters?.ClipDemodForVideo == true
+            ? ClipDemodForVideo(demodRaw, SampleRateHz)
+            : demodRaw;
+        int activeSpectrumLength = (demodVideoSource.Length / 2) + 1;
+        Span<Complex> demodSpectrum = workspace.First.AsSpan(0, activeSpectrumLength);
+        Span<Complex> videoSpectrum = workspace.Second.AsSpan(0, activeSpectrumLength);
+        PocketFftReal.Forward(demodVideoSource, workspace.First);
+        ApplyNumpyRealFrequencyFilter(
+            demodSpectrum,
+            videoFilter,
+            demodVideoSource.Length,
+            videoSpectrum);
+        double[] video = new double[demodVideoSource.Length];
+        PocketFftReal.Inverse(videoSpectrum, demodVideoSource.Length, video);
+
+        ApplyNonlinearDeemphasisIfPresent(video, videoSpectrum, nonlinearDeemphasis, useVhsRealFft: true);
+        ApplySubDeemphasisIfPresent(video, videoSpectrum, subDeemphasis, useVhsRealFft: true);
+        if (betamaxFscNotchHz is { } fscNotchHz)
+        {
+            video = ApplyBetamaxFscNotch(video, SampleRateHz, fscNotchHz);
+        }
+
+        ApplyNumpyRealFrequencyFilter(
+            demodSpectrum,
+            videoLowPassFilter,
+            demodVideoSource.Length,
+            videoSpectrum);
+        double[] videoLowPass = new double[demodVideoSource.Length];
+        PocketFftReal.Inverse(videoSpectrum, demodVideoSource.Length, videoLowPass);
+        if (videoLowPassOffset != 0)
+        {
+            FrequencyDomainFilter.RollInPlace(videoLowPass, -videoLowPassOffset);
+        }
+
+        double[]? videoBurst = DecodeRealReferenceIfPresent(
+            demodSpectrum,
+            referenceFilters?.VideoBurst,
+            referenceFilters?.VideoBurstOffset ?? 0,
+            demodVideoSource.Length);
+        double[]? videoPilot = DecodeRealReferenceIfPresent(
+            demodSpectrum,
+            referenceFilters?.VideoPilot,
+            offset: 0,
+            demodVideoSource.Length);
+
+        return new RfDemodulatedBlock(
+            video,
+            demodRaw,
+            analytic,
+            envelope,
+            videoLowPass,
+            rfHighPass,
+            VideoBurst: videoBurst,
+            VideoPilot: videoPilot,
+            VhsWeakRfSignal: vhsWeakRfSignal);
+    }
+
     public static Complex[] RemoveLdPalV4300DSpur(ReadOnlySpan<Complex> spectrum, double sampleRateHz)
     {
         if (sampleRateHz <= 0)

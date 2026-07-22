@@ -27,6 +27,7 @@ public sealed class RfBlockStreamDecoder : IDisposable
     internal const int MaximumConcurrentPrefetchBlocks = 8;
     internal const int MaximumPrefetchBlocks = 32;
     private readonly RfBlockDecodePipeline _pipeline;
+    private readonly IRfBlockComputeBackend? _computeBackend;
     private readonly Dictionary<long, RfPipelineBlock> _decodedBlockCache = [];
     private readonly Dictionary<long, RfPipelineBlock> _prefetchedBlockCache = [];
     private readonly Dictionary<long, RfPipelineBlock> _sequentialBlockCache = [];
@@ -45,6 +46,25 @@ public sealed class RfBlockStreamDecoder : IDisposable
         int blockCutEnd,
         int workerThreads = 1,
         int prefetchBlocks = 0)
+        : this(
+            pipeline,
+            blockLength,
+            blockCut,
+            blockCutEnd,
+            workerThreads,
+            prefetchBlocks,
+            computeBackend: null)
+    {
+    }
+
+    internal RfBlockStreamDecoder(
+        RfBlockDecodePipeline pipeline,
+        int blockLength,
+        int blockCut,
+        int blockCutEnd,
+        int workerThreads,
+        int prefetchBlocks,
+        IRfBlockComputeBackend? computeBackend)
     {
         if (blockLength <= 0)
         {
@@ -66,13 +86,21 @@ public sealed class RfBlockStreamDecoder : IDisposable
             throw new ArgumentOutOfRangeException(nameof(prefetchBlocks));
         }
 
+        if (computeBackend is not null && pipeline.RequiresSequentialBlockDecode)
+        {
+            throw new NotSupportedException(
+                $"RF compute backend '{computeBackend.Name}' cannot be combined with stateful sequential block decoding.");
+        }
+
         _pipeline = pipeline;
+        _computeBackend = computeBackend;
         BlockLength = blockLength;
         BlockCut = blockCut;
         BlockCutEnd = blockCutEnd;
         BlockStride = blockLength - blockCut - blockCutEnd;
         WorkerThreads = workerThreads;
-        PrefetchBlocks = workerThreads > 1 && !_pipeline.RequiresSequentialBlockDecode
+        PrefetchBlocks = workerThreads > 1
+            && !_pipeline.RequiresSequentialBlockDecode
             ? Math.Min(prefetchBlocks, MaximumPrefetchBlocks)
             : 0;
         PrefetchWorkerThreads = Math.Min(
@@ -92,6 +120,10 @@ public sealed class RfBlockStreamDecoder : IDisposable
     public int WorkerThreads { get; }
 
     public int PrefetchBlocks { get; }
+
+    internal string ComputeBackendName => _computeBackend?.Name ?? "cpu";
+
+    internal bool UsesHardwareAcceleration => _computeBackend?.IsHardwareAccelerated == true;
 
     internal int PrefetchWorkerThreads { get; }
 
@@ -155,13 +187,28 @@ public sealed class RfBlockStreamDecoder : IDisposable
     internal void InvalidateCachedBlocks()
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
-        FinishPrefetch(cancel: true, suppressFailures: true);
+        FinishPrefetch(cancel: true, suppressFailures: _computeBackend is null);
         _decodedBlockCache.Clear();
         _prefetchedBlockCache.Clear();
         _sequentialBlockCache.Clear();
         _decodedBlockCacheStream = null;
         _lastReadFirstBlock = null;
         _lastSequentialDecodedBlock = null;
+    }
+
+    internal void CompletePendingHardwareWork()
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+        if (_computeBackend?.IsHardwareAccelerated != true)
+        {
+            return;
+        }
+
+        // Prefetch is speculative, so stop work beyond the committed decode
+        // window. Await the producer and surface any batch/device failure that
+        // was already in flight before callers finalize outputs or print a
+        // successful completion message.
+        FinishPrefetch(cancel: true, suppressFailures: false);
     }
 
     public RfDecodedSpan? Read(Stream stream, long begin, int length)
@@ -463,7 +510,10 @@ public sealed class RfBlockStreamDecoder : IDisposable
                 {
                     StopPrefetchBeforeDirectRead();
                     long sample = checked(block * BlockStride);
-                    pipelineBlock = _pipeline.DecodeStreamBlockWithInput(stream, sample, BlockLength);
+                    double[]? preparedInput = _pipeline.LoadBlockInput(stream, sample, BlockLength);
+                    pipelineBlock = preparedInput is null
+                        ? null
+                        : DecodePreparedBatch([preparedInput], reportDiagnostics: true)[0];
                     if (pipelineBlock is not null && _pipeline.RequiresSequentialBlockDecode)
                     {
                         _sequentialBlockCache[block] = pipelineBlock;
@@ -518,15 +568,36 @@ public sealed class RfBlockStreamDecoder : IDisposable
             {
                 MaxDegreeOfParallelism = Math.Min(WorkerThreads, blockCount)
             };
-            Parallel.For(
-                0,
-                missingBlockCount,
-                parallelOptions,
-                missingIndex =>
+            if (_computeBackend is null)
+            {
+                Parallel.For(
+                    0,
+                    missingBlockCount,
+                    parallelOptions,
+                    missingIndex =>
+                    {
+                        int blockIndex = missingBlocks[missingIndex];
+                        decodedBlocks[blockIndex] = _pipeline.DecodePreparedStreamBlock(preparedInputs[blockIndex]);
+                    });
+            }
+            else if (missingBlockCount > 0)
+            {
+                var batchInputs = new double[missingBlockCount][];
+                for (int i = 0; i < missingBlockCount; i++)
                 {
-                    int blockIndex = missingBlocks[missingIndex];
-                    decodedBlocks[blockIndex] = _pipeline.DecodePreparedStreamBlock(preparedInputs[blockIndex]);
-                });
+                    batchInputs[i] = preparedInputs[missingBlocks[i]];
+                }
+
+                RfPipelineBlock[] batchResults = DecodePreparedBatch(
+                    batchInputs,
+                    reportDiagnostics: false);
+                for (int i = 0; i < missingBlockCount; i++)
+                {
+                    int blockIndex = missingBlocks[i];
+                    decodedBlocks[blockIndex] = batchResults[i];
+                    _pipeline.ReportDeferredDiagnostics(batchResults[i]);
+                }
+            }
             for (int i = 0; i < missingBlockCount; i++)
             {
                 int blockIndex = missingBlocks[i];
@@ -582,18 +653,96 @@ public sealed class RfBlockStreamDecoder : IDisposable
         Volatile.Write(ref _disposed, true);
         try
         {
-            FinishPrefetch(cancel: true, suppressFailures: true);
+            // Preserve legacy CPU teardown behavior, but a selected compute
+            // backend must surface any kernel/device failure that completed
+            // after cancellation was requested. Runtime backend failures are
+            // task-fatal and may never be turned into a successful decode by
+            // Dispose.
+            FinishPrefetch(cancel: true, suppressFailures: _computeBackend is null);
         }
         finally
         {
-            _decodedBlockCache.Clear();
-            _prefetchedBlockCache.Clear();
-            _sequentialBlockCache.Clear();
-            for (int i = 0; i < _reusableSpanBuffers.Length; i++)
+            try
             {
-                _ = Interlocked.Exchange(ref _reusableSpanBuffers[i], null);
+                _computeBackend?.Dispose();
+            }
+            finally
+            {
+                _decodedBlockCache.Clear();
+                _prefetchedBlockCache.Clear();
+                _sequentialBlockCache.Clear();
+                for (int i = 0; i < _reusableSpanBuffers.Length; i++)
+                {
+                    _ = Interlocked.Exchange(ref _reusableSpanBuffers[i], null);
+                }
             }
         }
+    }
+
+    private RfPipelineBlock[] DecodePreparedBatch(
+        IReadOnlyList<double[]> preparedInputs,
+        bool reportDiagnostics)
+    {
+        if (preparedInputs.Count == 0)
+        {
+            return [];
+        }
+
+        if (_computeBackend is not null)
+        {
+            int maximumBatchSize = _computeBackend.GetMaximumBatchSize(preparedInputs.Count);
+            if (maximumBatchSize <= 0 || maximumBatchSize > preparedInputs.Count)
+            {
+                throw new InvalidDataException(
+                    $"RF compute backend '{_computeBackend.Name}' returned invalid maximum batch size {maximumBatchSize} for {preparedInputs.Count} prepared blocks.");
+            }
+
+            var combined = new RfPipelineBlock[preparedInputs.Count];
+            for (int offset = 0; offset < preparedInputs.Count;)
+            {
+                int batchSize = Math.Min(maximumBatchSize, preparedInputs.Count - offset);
+                IReadOnlyList<double[]> batchInputs;
+                if (offset == 0 && batchSize == preparedInputs.Count)
+                {
+                    batchInputs = preparedInputs;
+                }
+                else
+                {
+                    var slice = new double[batchSize][];
+                    for (int index = 0; index < batchSize; index++)
+                    {
+                        slice[index] = preparedInputs[offset + index];
+                    }
+
+                    batchInputs = slice;
+                }
+
+                RfPipelineBlock[] results = _computeBackend.DecodeBatch(
+                    _pipeline,
+                    batchInputs,
+                    reportDiagnostics);
+                if (results.Length != batchSize)
+                {
+                    throw new InvalidDataException(
+                        $"RF compute backend '{_computeBackend.Name}' returned {results.Length} blocks for a {batchSize}-block request.");
+                }
+
+                results.CopyTo(combined, offset);
+                offset += batchSize;
+            }
+
+            return combined;
+        }
+
+        var cpuResults = new RfPipelineBlock[preparedInputs.Count];
+        for (int i = 0; i < cpuResults.Length; i++)
+        {
+            cpuResults[i] = _pipeline.DecodePreparedStreamBlock(
+                preparedInputs[i],
+                reportDiagnostics);
+        }
+
+        return cpuResults;
     }
 
     private ReusableSpanBuffers TakeReusableSpanBuffers(int length)
@@ -653,7 +802,7 @@ public sealed class RfBlockStreamDecoder : IDisposable
             || (_lastReadFirstBlock.HasValue && firstBlock < _lastReadFirstBlock.Value);
         if (resetCache)
         {
-            FinishPrefetch(cancel: true, suppressFailures: true);
+            FinishPrefetch(cancel: true, suppressFailures: _computeBackend is null);
             _decodedBlockCache.Clear();
             _prefetchedBlockCache.Clear();
         }
@@ -805,6 +954,12 @@ public sealed class RfBlockStreamDecoder : IDisposable
 
     private void ProducePrefetchedBlocks(PrefetchOperation operation)
     {
+        if (_computeBackend is not null)
+        {
+            ProduceBackendPrefetchedBlocks(operation);
+            return;
+        }
+
         CancellationToken cancellationToken = operation.Cancellation.Token;
         var workers = new List<Task>(operation.Slots.Length);
         bool inputUnavailable = false;
@@ -914,12 +1069,74 @@ public sealed class RfBlockStreamDecoder : IDisposable
         }
     }
 
+    private void ProduceBackendPrefetchedBlocks(PrefetchOperation operation)
+    {
+        CancellationToken cancellationToken = operation.Cancellation.Token;
+        var activeSlots = new List<PrefetchSlot>(operation.Slots.Length);
+        var preparedInputs = new List<double[]>(operation.Slots.Length);
+        try
+        {
+            foreach (PrefetchSlot slot in operation.Slots)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                long sample = checked(slot.Block * BlockStride);
+                double[]? preparedInput = _pipeline.LoadBlockInput(
+                    operation.Stream,
+                    sample,
+                    BlockLength);
+                if (preparedInput is null)
+                {
+                    slot.Completion.TrySetResult(null);
+                    break;
+                }
+
+                activeSlots.Add(slot);
+                preparedInputs.Add(preparedInput);
+            }
+
+            cancellationToken.ThrowIfCancellationRequested();
+            RfPipelineBlock[] decoded = DecodePreparedBatch(
+                preparedInputs,
+                reportDiagnostics: false);
+            for (int i = 0; i < decoded.Length; i++)
+            {
+                activeSlots[i].Completion.TrySetResult(decoded[i]);
+            }
+
+            foreach (PrefetchSlot slot in operation.Slots)
+            {
+                if (!slot.Completion.Task.IsCompleted)
+                {
+                    slot.Completion.TrySetResult(null);
+                }
+            }
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            foreach (PrefetchSlot slot in operation.Slots)
+            {
+                slot.Completion.TrySetCanceled(cancellationToken);
+            }
+        }
+        catch (Exception exception)
+        {
+            foreach (PrefetchSlot slot in operation.Slots)
+            {
+                slot.Completion.TrySetException(exception);
+            }
+
+            throw;
+        }
+    }
+
     private void StopPrefetchBeforeDirectRead()
     {
         if (_prefetchOperation is not null)
         {
-            // A speculative block must not fail the direct read that replaces it.
-            FinishPrefetch(cancel: true, suppressFailures: true);
+            // Preserve the legacy CPU prefetch policy. Once a hardware backend
+            // has been selected, however, a speculative execution failure is
+            // a task-fatal runtime error and must not be hidden by a direct read.
+            FinishPrefetch(cancel: true, suppressFailures: _computeBackend is null);
         }
     }
 

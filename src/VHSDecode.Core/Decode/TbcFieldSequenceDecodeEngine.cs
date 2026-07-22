@@ -207,6 +207,7 @@ public sealed class TbcFieldSequenceDecodeEngine
                     output.WriteMetadataSnapshot();
                 });
             output.DrainPendingWrites();
+            session.StreamDecoder.CompletePendingHardwareWork();
             if (session.Spec.Name == "cvbs")
             {
                 session.RuntimeReporter?.WriteCvbsCompletion(session.TbcRenderer.CvbsAgcStatistics);
@@ -978,13 +979,14 @@ public sealed class TbcFieldSequenceDecodeEngine
             throw new InvalidOperationException("Dynamic LD MTF response length did not match the active RF filter set.");
         }
 
+        // Stop and discard speculative work before mutating the shared filter.
+        // This keeps every CPU or CUDA batch on one complete MTF version.
+        session.StreamDecoder.InvalidateCachedBlocks();
         for (int i = 0; i < response.Length; i++)
         {
             session.Filters.RfMtf[i] = response[i];
             session.Filters.RfMtfMagnitude[i] = response[i].Magnitude;
         }
-
-        session.StreamDecoder.InvalidateCachedBlocks();
     }
 
     private static TbcDecodedField? ReadFieldFromSession(

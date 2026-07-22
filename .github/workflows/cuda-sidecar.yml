@@ -1,0 +1,134 @@
+name: CUDA sidecar
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+    paths:
+      - .github/workflows/cuda-sidecar.yml
+      - docs/CUDA.md
+      - eng/cuda/**
+      - native/cuda/**
+      - src/VHSDecode.Core/Decode/**
+      - src/VHSDecode.Core/Dsp/RfDemodulator.cs
+      - tests/VHSDecode.Tests/Cuda*.cs
+      - tests/VHSDecode.Tests/RfComputeBackend*.cs
+
+permissions:
+  contents: read
+
+concurrency:
+  group: cuda-sidecar-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  DOTNET_CLI_TELEMETRY_OPTOUT: "1"
+  DOTNET_NOLOGO: "1"
+
+jobs:
+  build-test-package:
+    name: Build and test CUDA 13.0 U2 sidecar
+    runs-on:
+      - self-hosted
+      - Windows
+      - X64
+      - cuda-13-0-u2
+      - gpu
+    timeout-minutes: 45
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+
+      - name: Set up .NET 11 Preview 6
+        uses: actions/setup-dotnet@v5
+        with:
+          global-json-file: global.json
+
+      - name: Record GPU and CUDA toolchain
+        shell: pwsh
+        run: |
+          nvidia-smi --query-gpu=name,driver_version,memory.total,compute_cap --format=csv
+          & "$env:CUDA_PATH\bin\nvcc.exe" --version
+          cmake --version
+
+      - name: Build, hardware-test, and package sidecar
+        shell: pwsh
+        run: |
+          ./eng/cuda/Build-CudaPackage.ps1 `
+            -CudaToolkitRoot $env:CUDA_PATH `
+            -BuildDirectory artifacts/cuda-native `
+            -OutputDirectory artifacts/cuda-package `
+            -RequireGpuTest
+
+      - name: Run managed CUDA probe and failure tests
+        shell: pwsh
+        run: |
+          $env:VHSDECODE_CUDA_TEST_COMPONENT_DIR = (Resolve-Path `
+            artifacts/cuda-package/vhs-decode-dotnet_cuda-win-x64_cuda-13.0.2).Path
+          $env:VHSDECODE_CUDA_REQUIRE_GPU_TESTS = '1'
+          dotnet restore tests/VHSDecode.Tests/VHSDecode.Tests.csproj
+          dotnet build tests/VHSDecode.Tests/VHSDecode.Tests.csproj `
+            --configuration Release `
+            --no-restore
+          & tests/VHSDecode.Tests/bin/Release/net11.0/VHSDecode.Tests.exe `
+            --filter "FullyQualifiedName~Cuda" `
+            --progress off
+
+      - name: Verify single-file CLI sidecar discovery and selection
+        shell: pwsh
+        run: |
+          $publish = 'artifacts/cuda-singlefile-smoke'
+          dotnet publish src/VHSDecode.Cli/VHSDecode.Cli.csproj `
+            --configuration Release `
+            --runtime win-x64 `
+            --self-contained true `
+            -p:PublishProfile=FolderProfile `
+            --output $publish
+          $component = 'artifacts/cuda-package/vhs-decode-dotnet_cuda-win-x64_cuda-13.0.2'
+          Copy-Item "$component/vhsdecode_cuda.dll" $publish
+          Copy-Item "$component/cudart64_13.dll" $publish
+          Copy-Item "$component/cufft64_12.dll" $publish
+          Copy-Item "$component/cuda-component.json" $publish
+          $input = Join-Path $publish 'smoke.raw'
+          [IO.File]::WriteAllBytes($input, [byte[]]::new(65536))
+          foreach ($backend in @('cpu', 'auto', 'cuda')) {
+            $outputBase = Join-Path $publish "smoke-$backend"
+            $diagnostics = @(& "$publish/decode.exe" cvbs `
+                --length 0 `
+                --compute-backend $backend `
+                --cuda-device 0 `
+                $input `
+                $outputBase 2>&1)
+            if ($LASTEXITCODE -ne 0) {
+              throw "Single-file $backend smoke failed: $($diagnostics -join [Environment]::NewLine)"
+            }
+            $expected = if ($backend -eq 'cuda') { 'cuda device 0' } else { 'cpu' }
+            if (-not ($diagnostics -match "RF compute backend selected: $expected")) {
+              throw "Single-file $backend smoke did not select $expected."
+            }
+          }
+
+      - name: Test qualification harness normalization
+        shell: pwsh
+        run: ./eng/cuda/tests/Test-CompareCudaDecode.ps1
+
+      - name: Verify the archived package
+        shell: pwsh
+        run: |
+          $archive = Get-Item artifacts/cuda-package/*.zip
+          $expanded = Join-Path $env:RUNNER_TEMP 'vhsdecode-cuda-package'
+          if (Test-Path -LiteralPath $expanded) {
+            Remove-Item -LiteralPath $expanded -Recurse -Force
+          }
+          Expand-Archive -LiteralPath $archive.FullName -DestinationPath $expanded
+          ./eng/cuda/Test-CudaPackage.ps1 -PackagePath $expanded
+
+      - name: Upload optional CUDA component
+        uses: actions/upload-artifact@v7
+        with:
+          name: vhs-decode-dotnet-cuda-win-x64-${{ github.sha }}
+          path: artifacts/cuda-package/*.zip
+          if-no-files-found: error
+          retention-days: 30

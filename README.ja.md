@@ -217,9 +217,12 @@
 - Recovery metadata は disk streaming され、snapshot queue の容量は 1、field-order
   history と RF cache にも hard limit があります。長時間 decode でも全 field を
   保持したり、将来の work を無制限に enqueue したりしません。
-- CUDA/OpenCL は runtime dependency ではありません。現在の trace では、独立した
-  32K FFT を host/device 間で往復させる根拠がありません。将来の任意 GPU backend は
-  device-resident DSP stage を batch 化し、正確な CPU fallback を維持する必要があります。
+- CUDA/OpenCL は runtime dependency ではありません。任意の
+  [CUDA RF sidecar](docs/CUDA.md) は device-resident な VHS、CVBS、LD の RF 処理を
+  batch 化し、この managed 実装を reference と完全な fallback として維持します。
+  CUDA は明示的な preview のままで、代表的な VHS と LD capture が文書化された
+  互換性と 1.25x の end-to-end release gate を満たすまで
+  `--compute-backend auto` は CPU を選択します。
 
 現在の thread matrix は Intel Core Ultra 7 265K（20 logical processor）、
 Windows 11 build 26220、.NET SDK/runtime `11.0.100-preview.6.26359.118`、

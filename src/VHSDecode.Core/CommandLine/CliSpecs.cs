@@ -1,3 +1,4 @@
+using System.Numerics;
 using VHSDecode.Core.HiFi;
 
 namespace VHSDecode.Core.CommandLine;
@@ -31,6 +32,8 @@ public static class CliSpecs
     public static readonly string[] TapeSpeeds = ["sp", "lp", "ep", "slp", "vp"];
 
     public static readonly string[] VideoSystems = ["PAL", "PAL_M", "PALM", "NTSC", "MESECAM", "405", "819", "NLINHA"];
+
+    public static readonly string[] ComputeBackends = ["auto", "cpu", "cuda"];
 
     public static DecodeCommandSpec Vhs { get; } = new(
         "vhs",
@@ -80,6 +83,11 @@ public static class CliSpecs
         yield return Freq("inputfreq", ["-f", "--frequency"], null, ParseCommonInputFrequency, "_parse_frequency");
         yield return Flag("cxadc", ["--cxadc"], hidden: true);
         yield return Int("threads", ["-t", "--threads"], defaultThreads);
+        foreach (OptionSpec option in ComputeOptions())
+        {
+            yield return option;
+        }
+
         yield return Flag("chroma_trap", ["--ct", "--chroma_trap"]);
         yield return Int("sharpness", ["--sl", "--sharpness"], 0);
         yield return Freq("notch", ["--notch"], null);
@@ -198,6 +206,11 @@ public static class CliSpecs
             pythonDefaultValue: 0);
         yield return Str("wow_interpolation_method", ["--wow_interpolation_method"], "linear", ["linear", "quadratic", "cubic"]);
         yield return Int("threads", ["-t", "--threads"], 4);
+        foreach (OptionSpec option in ComputeOptions())
+        {
+            yield return option;
+        }
+
         yield return Freq("inputfreq", ["-f", "--frequency"], null);
         yield return Int("analog_audio_freq", ["--analog_audio_frequency"], 44100);
         yield return Flag("ntsc_audio_rate", ["--ntsc_audio_rate"]);
@@ -278,6 +291,23 @@ public static class CliSpecs
         yield return Dbl("nr_deemphasis_high_tau", ["--nr_deemphasis_high_tau"], null);
     }
 
+    private static IEnumerable<OptionSpec> ComputeOptions()
+    {
+        yield return Str(
+            "compute_backend",
+            ["--compute-backend"],
+            "auto",
+            ComputeBackends,
+            Lower,
+            includeInPythonNamespace: false);
+        yield return Int(
+            "cuda_device",
+            ["--cuda-device"],
+            0,
+            ValidateCudaDevice,
+            includeInPythonNamespace: false);
+    }
+
     private static OptionSpec Flag(string dest, string[] names, bool defaultValue = false, bool hidden = false)
         => new()
         {
@@ -296,7 +326,8 @@ public static class CliSpecs
         string? defaultValue,
         string[]? choices = null,
         Func<string, string>? normalize = null,
-        Func<string, string?>? validationError = null)
+        Func<string, string?>? validationError = null,
+        bool includeInPythonNamespace = true)
         => new()
         {
             Destination = dest,
@@ -308,7 +339,8 @@ public static class CliSpecs
             Choices = choices,
             NormalizeString = normalize,
             ParseErrorTypeName = "str",
-            ValidationError = validationError
+            ValidationError = validationError,
+            IncludeInPythonNamespace = includeInPythonNamespace
         };
 
     private static OptionSpec OptionalStr(
@@ -334,7 +366,12 @@ public static class CliSpecs
             ParseErrorTypeName = "_parse_ire0_adjust"
         };
 
-    private static OptionSpec Int(string dest, string[] names, int? defaultValue)
+    private static OptionSpec Int(
+        string dest,
+        string[] names,
+        int? defaultValue,
+        Func<string, string?>? validationError = null,
+        bool includeInPythonNamespace = true)
         => new()
         {
             Destination = dest,
@@ -343,7 +380,9 @@ public static class CliSpecs
             ValueKind = OptionValueKind.Integer,
             ParseErrorTypeName = "int",
             DefaultValue = defaultValue,
-            PythonDefaultValue = defaultValue
+            PythonDefaultValue = defaultValue,
+            ValidationError = validationError,
+            IncludeInPythonNamespace = includeInPythonNamespace
         };
 
     private static OptionSpec Dbl(
@@ -413,6 +452,20 @@ public static class CliSpecs
         => value is "detect" or "duplicate" or "drop" or "none"
             ? null
             : "--field_order_action must be one of [\"detect\", \"duplicate\", \"drop\", \"none\"]";
+
+    private static string? ValidateCudaDevice(string value)
+    {
+        object parsed = PythonNumericParser.ParseInteger(value);
+        BigInteger device = parsed is int integer ? integer : (BigInteger)parsed;
+        if (device < BigInteger.Zero)
+        {
+            return "must be a non-negative integer";
+        }
+
+        return device > int.MaxValue
+            ? $"must be no greater than {int.MaxValue}"
+            : null;
+    }
 
     private static string Upper(string value) => value.ToUpperInvariant();
 
