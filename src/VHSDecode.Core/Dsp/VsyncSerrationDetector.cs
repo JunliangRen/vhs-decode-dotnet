@@ -29,7 +29,8 @@ public sealed class VsyncSerrationDetector
     private readonly TransferFunction _serrationEnvelopeFilter;
     private readonly MovingAverageWindow _syncLevels = new(window: 2, minimumWatermark: 1);
     private readonly MovingAverageWindow _blankLevels = new(window: 2, minimumWatermark: 1);
-    private AnalysisWorkspace? _analysisWorkspace;
+    private AnalysisWorkspace? _mostRecentAnalysisWorkspace;
+    private AnalysisWorkspace? _previousAnalysisWorkspace;
 
     public VsyncSerrationDetector(
         double sampleRateHz,
@@ -528,15 +529,39 @@ public sealed class VsyncSerrationDetector
             return new AnalysisWorkspace(reducedLength, paddedLength);
         }
 
-        if (_analysisWorkspace is null
-            || _analysisWorkspace.Reduced.Length != reducedLength
-            || _analysisWorkspace.Padded.Length != paddedLength)
+        if (Matches(_mostRecentAnalysisWorkspace, reducedLength, paddedLength))
         {
-            _analysisWorkspace = new AnalysisWorkspace(reducedLength, paddedLength);
+            return _mostRecentAnalysisWorkspace!;
         }
 
-        return _analysisWorkspace;
+        if (Matches(_previousAnalysisWorkspace, reducedLength, paddedLength))
+        {
+            (_mostRecentAnalysisWorkspace, _previousAnalysisWorkspace) =
+                (_previousAnalysisWorkspace, _mostRecentAnalysisWorkspace);
+            return _mostRecentAnalysisWorkspace!;
+        }
+
+        var workspace = new AnalysisWorkspace(reducedLength, paddedLength);
+        _previousAnalysisWorkspace = _mostRecentAnalysisWorkspace;
+        _mostRecentAnalysisWorkspace = workspace;
+        return workspace;
     }
+
+    internal int RetainedAnalysisWorkspaceCount
+        => (_mostRecentAnalysisWorkspace is null ? 0 : 1)
+            + (_previousAnalysisWorkspace is null ? 0 : 1);
+
+    internal bool HasRetainedAnalysisWorkspace(int reducedLength, int paddedLength)
+        => Matches(_mostRecentAnalysisWorkspace, reducedLength, paddedLength)
+            || Matches(_previousAnalysisWorkspace, reducedLength, paddedLength);
+
+    private static bool Matches(
+        AnalysisWorkspace? workspace,
+        int reducedLength,
+        int paddedLength)
+        => workspace is not null
+            && workspace.Reduced.Length == reducedLength
+            && workspace.Padded.Length == paddedLength;
 
     private static void BuildPaddedInput(ReadOnlySpan<double> data, Span<double> padded)
     {

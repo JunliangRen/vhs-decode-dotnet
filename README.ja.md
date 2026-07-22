@@ -144,8 +144,9 @@
   ownership を持つ array を in-place filter します。envelope branch は combined padded
   array を生成せず、reduced final result へ直接書き込みます。public IIR result の独立した
   ownership と bit-exact output は維持します。stateful detector は padded input が
-  1,048,576 sample 以下のとき、exact-size の 6-array analysis workspace を 1 つ再利用
-  します（上限時の保持量は約 48 MiB）。size 変更時はこの 1 entry を置き換え、それを
+  1,048,576 sample 以下のとき、最近使用した 2 個の exact-size 6-array analysis
+  workspace を保持します（上限では 1 entry 約 48 MiB、合計約 96 MiB）。exact-shape
+  hit は entry を昇格させ、3 番目の shape は最も古い entry を破棄します。上限を
   超える input には保持しない temporary workspace を使います。
 - VSync serration measurement は candidate window を read-only span で参照し、
   `Enumerable.Min`-compatible な float64 scan を使うため、full-window copy を 1 つ
@@ -662,6 +663,25 @@ interleaved default-worker pair は平均 wall/CPU が 14.060/40.164 秒から 1
 257.61 ms へ低下しました（63.8% 減）。candidate peak working set は 1.13 GiB 以下に
 収まり、全 8 run の luma、chroma、JSON hash は同一でした。
 
+VSync analysis は、通常の field length が交互に現れるたびに唯一の workspace を置き換える
+代わりに、2-entry の exact-shape LRU を保持します。array type、実際に書き込む range、
+padding、filter arithmetic、detector-state の commit 順序は変更せず、各 entry は従来の
+1,048,576-sample 上限を維持します。
+同じ実 PAL 10-frame GC trace で sampled managed allocation は 1.633 GiB から
+1.463 GiB（10.4% 減）、sampled `Double[]` は 1,464.83 MiB から 1,295.74 MiB
+（11.5% 減）、`AnalysisWorkspace` allocation は 205.69 MiB から 34.28 MiB
+（83.3% 減）になりました。5 組の interleaved 160-frame `--threads 20` pair では wall
+median が 10.188 秒から 10.029 秒（1.6% 高速）、mean が 10.217 秒から 10.030 秒
+（1.8% 高速）になり、全 pair が 0.9-3.7% 高速でした。CPU median は 2.1% 増えましたが、
+peak-working-set median は 1.375 GiB から 0.936 GiB へ低下しました。400-frame gate は
+wall/CPU/peak を 24.032 秒/101.969 秒/1.455 GiB から
+23.722 秒/97.828 秒/0.958 GiB へ改善しました。candidate の quarter working-set median は
+0.705/0.752/0.776/0.654 GiB で、進行に伴う増加はありません。PAL の serial/default/20/64-worker
+run は 6 種類の output/normalized diagnostic hash が一致し、既存の NTSC-J large-seek
+1,000-frame gate も Python v0.4.0 `--threads 0` と luma、chroma、JSON、stdout、
+normalized stderr/log、2,000 個すべての `fileLoc`、52 件の startup recovery diagnostic が
+完全一致しました。
+
 </details>
 
 <!-- SECTION: build -->
@@ -683,7 +703,7 @@ dotnet test --solution VHSDecodeDotNet.slnx -c Release --no-build --no-restore
 
 現在の正式な Release build は warning 0、error 0 です。xUnit v3 project は
 `dotnet test` と Visual Studio Test Explorer の両方で個別に検出できる
-**822** tests を公開します。
+**848** tests を公開します。
 
 <!-- SECTION: usage -->
 
