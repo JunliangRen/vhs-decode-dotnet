@@ -18,6 +18,16 @@ public sealed class VsyncWorkspaceTests
 
         AssertResultEqual(fresh, first);
         AssertResultEqual(fresh, afterResize);
+        Assert.Equal(2, reused.RetainedAnalysisWorkspaceCount);
+        Assert.True(reused.HasRetainedAnalysisWorkspace(120_000, 121_024));
+        Assert.True(reused.HasRetainedAnalysisWorkspace(60_000, 61_024));
+
+        _ = reused.Analyze(Enumerable.Repeat(100.0, 30_000).ToArray());
+
+        Assert.Equal(2, reused.RetainedAnalysisWorkspaceCount);
+        Assert.True(reused.HasRetainedAnalysisWorkspace(120_000, 121_024));
+        Assert.True(reused.HasRetainedAnalysisWorkspace(30_000, 31_024));
+        Assert.False(reused.HasRetainedAnalysisWorkspace(60_000, 61_024));
     }
 
     private static VsyncSerrationDetector CreateDetector()

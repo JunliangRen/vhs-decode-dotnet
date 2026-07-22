@@ -1673,6 +1673,23 @@ possible capture has already been proven byte-for-byte identical.
   160-frame scalar/AVX A/B at `--threads 20` moved wall medians from
   12.029 s to 11.854 s (1.5%) and CPU medians from 46.984 s to 46.250 s
   (1.6%); all five hashes and `fileLoc` ranges remained exact
+- the two-entry exact-shape VSync analysis-workspace candidate preserves the
+  existing per-entry 1,048,576-sample retention cap and evicts the
+  least-recently-used shape. A matched real PAL 10-frame GC trace reduced
+  sampled managed allocation from 1.633 to 1.463 GiB (10.4%), sampled
+  `Double[]` allocation from 1,464.83 to 1,295.74 MiB (11.5%), and
+  `AnalysisWorkspace` allocation from 205.69 to 34.28 MiB (83.3%). Five
+  interleaved 160-frame `--threads 20` pairs moved wall medians from 10.188 to
+  10.029 s and mean wall time from 10.217 to 10.030 s; all five pairs were
+  0.9-3.7% faster, while peak-working-set medians fell from 1.375 to 0.936 GiB.
+  A 400-frame gate moved wall/CPU/peak from
+  24.032 s/101.969 s/1.455 GiB to 23.722 s/97.828 s/0.958 GiB, with candidate
+  quarter-working-set medians of 0.705/0.752/0.776/0.654 GiB. PAL
+  serial/default/20/64-worker runs produced one exact luma, chroma, JSON,
+  stdout, normalized-stderr, and normalized-log hash set. The 1,000-frame
+  large-seek NTSC-J gate also exactly matched Python v0.4.0 `--threads 0` for
+  those six artifacts, all 2,000 ordered `fileLoc` values from `243978240`
+  through `1577932800`, and all 52 startup recovery diagnostics
 - one-frame non-default NTSC VHS fixtures are also byte-exact for
   `--sharpness 20`, `--fm_audio_notch 10`, and the combined
   `--high_boost 1.3 --sharpness 20 --nld --sd` path; the stateful sharpness

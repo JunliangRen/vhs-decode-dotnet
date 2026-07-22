@@ -148,9 +148,11 @@ release compatibility remain the first constraint.
   their owned arrays in place. The envelope branches write directly into the
   reduced result instead of materializing a combined padded array; public IIR
   results retain independent ownership and identical bits. The stateful
-  detector reuses one exact-sized six-array analysis workspace when the padded
-  input is at most 1,048,576 samples (about 48 MiB retained at the cap). A size
-  change replaces that one entry, while larger inputs use an unretained workspace.
+  detector retains the two most recently used exact-sized six-array analysis
+  workspaces when the padded input is at most 1,048,576 samples (about 48 MiB
+  per entry and 96 MiB total at the cap). Exact-shape hits promote an entry and
+  a third shape evicts the least-recently-used entry; larger inputs use an
+  unretained workspace.
 - VSync serration measurement reads its candidate window through a read-only
   span and applies an `Enumerable.Min`-compatible float64 scan, avoiding an
   extra full-window copy. Median scratch ownership and NaN/signed-zero bit
@@ -705,6 +707,26 @@ trace reduced sampled `BuildSourcePositions` self time from 711.35 to 257.61 ms
 (63.8%). Candidate peak working sets stayed at or below 1.13 GiB, and all eight
 runs produced one exact luma, chroma, and JSON hash set.
 
+VSync analysis now retains a two-entry exact-shape LRU instead of replacing its
+only workspace when normal field lengths alternate. Array types, populated
+ranges, padding, filter arithmetic, and detector-state ordering are unchanged,
+and each entry keeps the existing 1,048,576-sample cap. A matched real PAL
+10-frame GC trace
+reduced sampled managed allocation from 1.633 to 1.463 GiB (10.4%), sampled
+`Double[]` allocation from 1,464.83 to 1,295.74 MiB (11.5%), and
+`AnalysisWorkspace` allocation from 205.69 to 34.28 MiB (83.3%). Five
+interleaved 160-frame `--threads 20` pairs moved wall medians from 10.188 to
+10.029 s (1.6%) and means from 10.217 to 10.030 s (1.8%); every pair was
+0.9-3.7% faster, while the CPU median was 2.1% higher and the peak-working-set
+median fell from 1.375 to 0.936 GiB. A 400-frame gate moved wall/CPU/peak from
+24.032 s/101.969 s/1.455 GiB to 23.722 s/97.828 s/0.958 GiB. Candidate
+quarter-working-set medians were 0.705/0.752/0.776/0.654 GiB, so memory did not
+grow with progress. PAL serial/default/20/64-worker runs matched all six output
+and normalized diagnostic hashes, and the established 1,000-frame NTSC-J
+large-seek gate exactly matched Python v0.4.0 `--threads 0` for luma, chroma,
+JSON, stdout, normalized stderr/log, all 2,000 `fileLoc` values, and all 52
+startup recovery diagnostics.
+
 </details>
 
 <!-- SECTION: build -->
@@ -725,7 +747,7 @@ dotnet test --solution VHSDecodeDotNet.slnx -c Release --no-build --no-restore
 ```
 
 The current formal Release build has zero warnings and errors. The xUnit v3
-project exposes **822** independently discoverable tests to both
+project exposes **848** independently discoverable tests to both
 `dotnet test` and Visual Studio Test Explorer.
 
 <!-- SECTION: usage -->
