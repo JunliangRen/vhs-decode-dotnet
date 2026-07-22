@@ -7194,25 +7194,22 @@ public void VsyncSerrationDetectorMatchesV04Rules()
     AssertClose(80.0, Convert.ToDouble(PrivatePropertyValue(prepared, "Threshold")), 1e-12);
 }
 
-[Theory(DisplayName = "VHS serration fallback diagnostics follow v0.4.0 lookahead phase")]
-[InlineData(0, false, true)]
-[InlineData(9, false, false)]
-[InlineData(10, false, true)]
-[InlineData(0, true, false)]
-[InlineData(8, true, false)]
-[InlineData(9, true, true)]
-[InlineData(10, true, false)]
-[InlineData(19, true, true)]
-public void VhsSerrationFallbackDiagnosticMatchesLookaheadPhase(
+[Theory(DisplayName = "VHS serration fallback diagnostics follow v0.4.0 detector cadence")]
+[InlineData(0, true)]
+[InlineData(1, false)]
+[InlineData(9, false)]
+[InlineData(10, true)]
+[InlineData(19, false)]
+[InlineData(20, true)]
+[InlineData(29, false)]
+[InlineData(30, true)]
+public void VhsSerrationFallbackDiagnosticMatchesDetectorCadence(
     int detectorFieldCount,
-    bool lookaheadPhase,
     bool expected)
 {
     AssertEqual(
         expected,
-        TbcFieldDecodePipeline.ShouldLogVhsSerrationFallback(
-            detectorFieldCount,
-            lookaheadPhase));
+        TbcFieldDecodePipeline.ShouldLogVhsSerrationFallback(detectorFieldCount));
 }
 
 [Fact(DisplayName = "VBI serration span minimum preserves float64 bit semantics")]

@@ -219,7 +219,6 @@ public sealed class TbcFieldDecodePipeline
     private IReadOnlyDictionary<int, double>? _previousLaserDiscPalPhaseAdjustments;
     private int _previousLaserDiscSkipCheckScore;
     private bool _vhsPulseSearchInitialized;
-    private bool _vhsSerrationLogLookaheadPhase;
 
     public TbcFieldDecodePipeline(
         SyncAnalyzer syncAnalyzer,
@@ -610,11 +609,6 @@ public sealed class TbcFieldDecodePipeline
             // Upstream starts the next field before downscaling the current one,
             // so a clamp measurement is first visible to the following decode.
             _delayedCvbsSyncLevels = previouslyRenderedCvbsLevels;
-        }
-
-        if (string.Equals(_decodeType, "vhs", StringComparison.Ordinal))
-        {
-            _vhsSerrationLogLookaheadPhase = true;
         }
 
         return decoded;
@@ -1690,9 +1684,7 @@ public sealed class TbcFieldDecodePipeline
                     FormattableString.Invariant(
                         $"VBI serration levels {serration.LevelCountBeforePull} - Sync tip: {serration.SyncLevel.Value / 1e3:F2} kHz, Blanking (ire0): {serration.BlankLevel.Value / 1e3:F2} kHz"));
             }
-            else if (ShouldLogVhsSerrationFallback(
-                         serrationFieldNumber,
-                         _vhsSerrationLogLookaheadPhase))
+            else if (ShouldLogVhsSerrationFallback(serrationFieldNumber))
             {
                 _diagnosticLogger?.Invoke(
                     "DEBUG",
@@ -1932,15 +1924,10 @@ public sealed class TbcFieldDecodePipeline
             : new SyncPreparedSpan(span, defaultThreshold);
     }
 
-    internal static bool ShouldLogVhsSerrationFallback(
-        int detectorFieldCount,
-        bool lookaheadPhase)
+    internal static bool ShouldLogVhsSerrationFallback(int detectorFieldCount)
     {
         ArgumentOutOfRangeException.ThrowIfNegative(detectorFieldCount);
-
-        // Once the first field succeeds, v0.4.0's producer remains one field
-        // ahead of output processing and its periodic diagnostic arrives early.
-        return detectorFieldCount % 10 == (lookaheadPhase ? 9 : 0);
+        return detectorFieldCount % 10 == 0;
     }
 
     private SyncPreparedSpan PrepareSyncSpanFromLevels(

@@ -195,6 +195,25 @@ public sealed class RfContainerLoaderIntegrationTests
         Assert.Equal(Pcm16Bytes(expected), ReadToEnd(beforeFirstPts));
     }
 
+    [Fact(DisplayName = "PyAV frame timing can preserve logical mono s16 frame lengths")]
+    public void PyAvFrameTimingCanPreserveLogicalMonoS16FrameLengths()
+    {
+        short[] source = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12];
+        var geometries = new Queue<PyAvAudioFrameGeometry>(
+        [
+            new PyAvAudioFrameGeometry(3, 1_000),
+            new PyAvAudioFrameGeometry(5, 1_064),
+            new PyAvAudioFrameGeometry(4, 1_128)
+        ]);
+        using var stream = new PyAvAudioPlanePaddingStream(
+            new MemoryStream(Pcm16Bytes(source)),
+            () => geometries.TryDequeue(out PyAvAudioFrameGeometry geometry) ? geometry : null,
+            targetSample: 1_002,
+            preservePlanePadding: false);
+
+        Assert.Equal(Pcm16Bytes(source.AsSpan(2)), ReadToEnd(stream));
+    }
+
     [Fact(DisplayName = "PyAV plane padding retains high-water capacity and recycled tails")]
     public void PyAvPlanePaddingRetainsHighWaterCapacityAndRecycledTails()
     {

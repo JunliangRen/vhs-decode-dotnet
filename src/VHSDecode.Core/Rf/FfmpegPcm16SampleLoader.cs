@@ -341,13 +341,13 @@ public sealed class FfmpegPcm16SampleLoader : IRfSampleLoader, IDisposable
         }
 
         ContainerAudioInfo audioInfo = ResolveContainerAudioInfo(filename);
-        Channel<PyAvAudioFrameGeometry>? frameGeometry = audioInfo.RequiresPyAvPlanePadding
-            ? Channel.CreateUnbounded<PyAvAudioFrameGeometry>(new UnboundedChannelOptions
+        // LoadLDF applies the first decoded frame PTS even when mono s16 needs no plane padding.
+        Channel<PyAvAudioFrameGeometry> frameGeometry =
+            Channel.CreateUnbounded<PyAvAudioFrameGeometry>(new UnboundedChannelOptions
             {
                 SingleReader = true,
                 SingleWriter = true
-            })
-            : null;
+            });
 
         var startInfo = new ProcessStartInfo("ffmpeg")
         {
@@ -357,9 +357,10 @@ public sealed class FfmpegPcm16SampleLoader : IRfSampleLoader, IDisposable
             CreateNoWindow = true
         };
 
-        IReadOnlyList<string> arguments = audioInfo.RequiresPyAvPlanePadding
-            ? BuildPyAvFramedFfmpegArguments(filename, sample, audioInfo.SampleRateHz)
-            : BuildFfmpegArguments(filename, sample, audioInfo.SampleRateHz);
+        IReadOnlyList<string> arguments = BuildPyAvFramedFfmpegArguments(
+            filename,
+            sample,
+            audioInfo.SampleRateHz);
         foreach (string argument in arguments)
         {
             startInfo.ArgumentList.Add(argument);
@@ -370,14 +371,15 @@ public sealed class FfmpegPcm16SampleLoader : IRfSampleLoader, IDisposable
         {
             if (args.Data is null)
             {
-                frameGeometry?.Writer.TryComplete();
+                frameGeometry.Writer.TryComplete();
             }
-            else if (frameGeometry is not null
-                && TryParsePyAvAudioFrameGeometry(args.Data, out PyAvAudioFrameGeometry geometry))
+            else if (TryParsePyAvAudioFrameGeometry(
+                args.Data,
+                out PyAvAudioFrameGeometry geometry))
             {
                 frameGeometry.Writer.TryWrite(geometry);
             }
-            else if (frameGeometry is null || IsFfmpegErrorLine(args.Data))
+            else if (IsFfmpegErrorLine(args.Data))
             {
                 _stderr.AppendLine(args.Data);
             }
@@ -392,18 +394,17 @@ public sealed class FfmpegPcm16SampleLoader : IRfSampleLoader, IDisposable
         }
         catch (Win32Exception ex)
         {
-            frameGeometry?.Writer.TryComplete(ex);
+            frameGeometry.Writer.TryComplete(ex);
             throw new NotSupportedException("FFmpeg is required to decode .ldf/.flac/.vhs/raw.oga RF inputs.", ex);
         }
 
         _process.BeginErrorReadLine();
         Stream output = _process.StandardOutput.BaseStream;
-        return frameGeometry is null
-            ? output
-            : new PyAvAudioPlanePaddingStream(
-                output,
-                () => ReadNextFrameGeometry(frameGeometry.Reader),
-                sample);
+        return new PyAvAudioPlanePaddingStream(
+            output,
+            () => ReadNextFrameGeometry(frameGeometry.Reader),
+            sample,
+            audioInfo.RequiresPyAvPlanePadding);
     }
 
     internal static bool TryParsePyAvAudioFrameGeometry(

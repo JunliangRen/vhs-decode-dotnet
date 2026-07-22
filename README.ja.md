@@ -278,6 +278,21 @@ log line のすべてで完全一致しました。最初と最後の `fileLoc` 
 500 frame は 38.03 秒/37.72 秒、`--threads 20` は 30.42 秒/29.37 秒で、両 mode の
 peak working set は run 全体で bounded のままでした。
 
+別の native-container checkpoint では、同じ local NTSC-J `.ldf` file の大きな
+nonzero position から 1,000 frame / 2,000 field を decode しました。
+
+| NTSC-J VHS mode | Wall time | Python 比 speedup |
+| --- | ---: | ---: |
+| Python v0.4.0（`g4315520`、`--threads 0`） | 397.158 s | 1.00x |
+| この移植、`--threads 0` | 175.531 s | 2.26x |
+| この移植、default（5 worker） | 80.761 s | 4.92x |
+| この移植、`--threads 20` | 58.527 s | 6.79x |
+
+この移植の 3 mode はすべて、strict Python baseline と luma、chroma、JSON、stdout
+の SHA-256、順序付き 2,000 `fileLoc`、timestamp を除いた 3,473 log line の全項目で
+完全一致しました。この checkpoint は、大きな seek 後の native `.ldf` loader が
+upstream PyAV の first-frame PTS behavior を保持することも検証します。
+
 独立した no-seek startup checkpoint では、別の local PAL `.lds` file に同じ PAL VHS
 option と `--threads 0 -l 1000` を使用しました。Python とこの移植の luma SHA-256
 `E6616B63BD7DD1DB6C093FC6D1DCA7D23AABEF34EFD52089338D992F2DDCD0CD`

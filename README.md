@@ -296,6 +296,21 @@ second 500-frame halves took 38.03 s and 37.72 s, while `--threads 20` took
 30.42 s and 29.37 s. Peak working set remained bounded throughout both port
 runs.
 
+An independent native-container checkpoint exercised a large nonzero seek in
+the same local NTSC-J `.ldf` capture for 1,000 frames / 2,000 fields:
+
+| NTSC-J VHS mode | Wall time | Speedup vs Python |
+| --- | ---: | ---: |
+| Python v0.4.0 (`g4315520`, `--threads 0`) | 397.158 s | 1.00x |
+| This port, `--threads 0` | 175.531 s | 2.26x |
+| This port, default (5 workers) | 80.761 s | 4.92x |
+| This port, `--threads 20` | 58.527 s | 6.79x |
+
+Every port mode exactly matched the strict Python baseline for luma, chroma,
+JSON, and stdout SHA-256, all 2,000 ordered `fileLoc` values, and all 3,473
+timestamp-normalized log lines. This checkpoint also verifies the native
+`.ldf` loader's upstream PyAV first-frame PTS behavior after a large seek.
+
 An independent no-seek startup checkpoint used a second local PAL `.lds`
 capture with the same PAL VHS options,
 `--threads 0`, and `-l 1000`. Python and this port produced byte-identical luma

@@ -242,6 +242,20 @@ Windows 11 build 26220 和 .NET SDK/runtime
 `--threads 20` 分别为 30.42 秒和 29.37 秒；两种模式的工作集峰值在整个运行期间均
 保持有界。
 
+另一个独立的原生容器检查点，在同一个本地 NTSC-J `.ldf` 文件中从较大的非零位置
+开始解码 1,000 帧 / 2,000 场：
+
+| NTSC-J VHS 模式 | 墙钟时间 | 相对 Python 加速 |
+| --- | ---: | ---: |
+| Python v0.4.0（`g4315520`，`--threads 0`） | 397.158 s | 1.00x |
+| 本项目，`--threads 0` | 175.531 s | 2.26x |
+| 本项目，默认（5 worker） | 80.761 s | 4.92x |
+| 本项目，`--threads 20` | 58.527 s | 6.79x |
+
+本项目三种模式都与严格 Python 基准的亮度、色度、JSON、stdout SHA-256，全部
+2,000 个有序 `fileLoc`，以及 3,473 行去除时间戳后的日志完全一致。该检查点也验证了
+原生 `.ldf` loader 在大幅 seek 后与上游 PyAV 相同的首帧 PTS 行为。
+
 另一个独立的无 seek 启动检查点使用另一个本地 PAL `.lds` 文件，保持相同
 PAL VHS 参数，并使用 `--threads 0 -l 1000`。Python 与本项目得到逐字节一致的亮度
 SHA-256 `E6616B63BD7DD1DB6C093FC6D1DCA7D23AABEF34EFD52089338D992F2DDCD0CD`
