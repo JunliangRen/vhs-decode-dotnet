@@ -248,6 +248,10 @@ possible capture has already been proven byte-for-byte identical.
   short initial frame, Vorbis large-frame-to-small-frame transitions, variable
   terminal frames, nonzero restarts beyond the 2 MB rewind window, and EOF
   frame flushing
+- native mono signed-16 `.ldf` restarts also apply the first decoded frame PTS,
+  matching `LoadLDF` even when the logical frame needs no plane padding; a
+  direct 32,768-sample large-seek block matches the v0.4.0 float64 SHA-256
+  `A15E39BFDBE078336B11DA499A489B2AAD1467136A7F848482591D89AD1940DA`
 - complete static 48 kHz IMA ADPCM WAV inputs use an internal FFmpeg
   n8.1.2-compatible 2-, 3-, 4-, and 5-bit mono/stereo block decoder, avoiding
   host-FFmpeg decoder drift; exact logical-frame, stereo-downmix, plane-padding,
@@ -1611,6 +1615,41 @@ possible capture has already been proven byte-for-byte identical.
   sync-level failure reasons retain their upstream ordering, and VHS sequence
   completion performs the producer's final one-field lookahead before logging
   the completed file frame
+- all eight built-in `video_lpf_extra` order/corner combinations now preserve
+  SciPy's SOS section construction and complete 32K-bin response bits,
+  including odd-order zero/pole padding; the PAL VHS aggregate RF response is
+  locked to SHA-256
+  `37A812C53A7A5BAF918E5B9ADAAA266CA12F51E8EB4205699E7FD53F598A750A`
+- a 1,000-frame real PAL VHS checkpoint matches Python v0.4.0 `--threads 0`
+  exactly under both the port's default 5-worker mode and `--threads 20`:
+  luma
+  `053C4208578AFC8EC75F7F3C68C34042A365B01FC27F84B206E87D21E8A02FC5`,
+  chroma
+  `21AED884AF49F3DA6B529D24E575BC10A04F9404D43F8757B24362A0EA723B6D`,
+  JSON
+  `37288BB3EC5342E4B8AEF559B38317D5C92643161163DF02086ABDB92EC5015F`,
+  stdout
+  `BF01F848ADB4B9542B7DA2A1A70B67412A81DCC73F9C0EFC1EB156796169649F`,
+  all 2,000 `fileLoc`-aligned field records, and all 5,132
+  timestamp-normalized log lines; staged field/render diagnostics retain the
+  producer/downscale order and suppress only the terminal lookahead render
+  diagnostic, matching upstream
+- a separate 1,000-frame / 2,000-field real NTSC-J VHS `.ldf` checkpoint begins
+  after a large native-container seek and exactly matches Python v0.4.0
+  `--threads 0` under the port's serial, default 5-worker, and 20-worker modes:
+  luma
+  `DFAFC53CD737FAC59F98B25B3E4DC1E89B585C412670E448F5DC0F1AB1291314`,
+  chroma
+  `BC51CCFDCFD6F1D75A5681F8F24D09D8F9255A2FC8E66DE65F4D00F2F9BB1F1B`,
+  JSON
+  `488F29B1A5F8699138DB83CCB404CA8A08BFA3A3348E22A9030DFE9A1717E848`,
+  stdout
+  `B1BCC69E3FFDF247A58C00E5A64E1582CAC2E82E9ADC9AF0B0DB8459F6EAAEE8`,
+  all 2,000 ordered `fileLoc` values from `243978240` through `1577932800`,
+  and all 3,473 timestamp-normalized log lines with SHA-256
+  `7DB59631905D6D9C78A965D93DB6CF76D36B98C99AC34BA39FD63CDAB17EE3A0`;
+  wall times were 397.158 s for Python, then 175.531 s, 80.761 s, and
+  58.527 s for the port's serial, default, and 20-worker modes respectively
 - one-frame non-default NTSC VHS fixtures are also byte-exact for
   `--sharpness 20`, `--fm_audio_notch 10`, and the combined
   `--high_boost 1.3 --sharpness 20 --nld --sd` path; the stateful sharpness
@@ -1849,7 +1888,7 @@ dotnet test --solution VHSDecodeDotNet.slnx --no-build
 ```
 
 The current formal solution build completes with zero warnings and errors, and
-the xUnit v3 project exposes 788 independently discoverable compatibility tests
+the xUnit v3 project exposes 847 independently discoverable compatibility tests
 to `dotnet test` and Visual Studio Test Explorer. On the
 same Windows machine and fixtures, Release wall-clock measurements for one
 frame were 2.346 s versus 7.193 s for NTSC VHS and 1.651 s versus 5.865 s for

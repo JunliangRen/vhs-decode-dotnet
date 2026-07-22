@@ -4,7 +4,7 @@ internal readonly record struct PyAvAudioFrameGeometry(
     int LogicalSamples,
     long? PresentationRfSample);
 
-// PyAV exposes each converted plane's aligned capacity in addition to its logical samples.
+// PyAV reports frame timing and may expose a converted plane's aligned capacity.
 internal sealed class PyAvAudioPlanePaddingStream : Stream
 {
     private const int FfmpegPaddingBytes = 64;
@@ -14,6 +14,7 @@ internal sealed class PyAvAudioPlanePaddingStream : Stream
     private readonly int _fixedPaddedFrameSamples;
     private readonly Func<PyAvAudioFrameGeometry?>? _nextFrame;
     private readonly long _targetSample;
+    private readonly bool _preservePlanePadding;
     private readonly byte[][]? _recycledFrames;
     private byte[] _frame;
     private long _remainingInitialSkipSamples;
@@ -68,7 +69,8 @@ internal sealed class PyAvAudioPlanePaddingStream : Stream
     public PyAvAudioPlanePaddingStream(
         Stream source,
         Func<PyAvAudioFrameGeometry?> nextFrame,
-        long targetSample)
+        long targetSample,
+        bool preservePlanePadding = true)
     {
         ArgumentNullException.ThrowIfNull(source);
         ArgumentNullException.ThrowIfNull(nextFrame);
@@ -85,7 +87,8 @@ internal sealed class PyAvAudioPlanePaddingStream : Stream
         _source = source;
         _nextFrame = nextFrame;
         _targetSample = targetSample;
-        _recycledFrames = [[], []];
+        _preservePlanePadding = preservePlanePadding;
+        _recycledFrames = preservePlanePadding ? [[], []] : null;
         _frame = [];
     }
 
@@ -192,7 +195,7 @@ internal sealed class PyAvAudioPlanePaddingStream : Stream
             {
                 Array.Clear(_frame);
             }
-            else
+            else if (_preservePlanePadding)
             {
                 int minimumPaddedFrameBytes = checked(
                     CalculatePaddedFrameSamples(logicalFrameSamples) * sizeof(short));
@@ -207,6 +210,10 @@ internal sealed class PyAvAudioPlanePaddingStream : Stream
                 }
 
                 _frame = recycledFrames[slot];
+            }
+            else if (_frame.Length != logicalFrameBytes)
+            {
+                _frame = new byte[logicalFrameBytes];
             }
 
             int paddedFrameSamples = _frame.Length / sizeof(short);
@@ -238,7 +245,9 @@ internal sealed class PyAvAudioPlanePaddingStream : Stream
                     "FFmpeg ended in the middle of a reported audio frame.");
             }
 
-            if (_nextFrame is not null && logicalBytes < _frame.Length)
+            if (_nextFrame is not null
+                && _preservePlanePadding
+                && logicalBytes < _frame.Length)
             {
                 Array.Clear(
                     _frame,

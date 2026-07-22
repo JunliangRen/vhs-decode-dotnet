@@ -1,3 +1,5 @@
+using System.Buffers;
+
 namespace VHSDecode.Core.Dsp;
 
 public sealed record SerrationLevelRefinement(
@@ -281,72 +283,114 @@ public static class LevelDetection
         double previousMinimumSync = minimumSync;
         bool foundCandidate = false;
         bool checkNext = true;
-        IReadOnlyList<Pulse> pulses = [];
-
-        for (int retry = 0; retry < 30; retry++)
+        double[]? reducedBuffer = null;
+        try
         {
-            double threshold = (minimumSync + blankLevel) / 2.0;
-            pulses = FindReducedPulses(
-                demodulatedLowPass,
-                threshold,
-                analyzer,
-                divisor);
-            if (pulses.Count > 200)
+            ReadOnlySpan<double> reducedData = demodulatedLowPass;
+            if (divisor > 1)
             {
-                int vsyncCount = pulses.Count(pulse => pulse.Length > minimumVsyncLength);
-                int longPulseCount = checkLongPulses && vsyncCount <= 2
-                    ? pulses.Count(pulse => PulseDetection.InRange(
-                        pulse.Length,
-                        minimumLongPulseLength,
-                        maximumLongPulseLength))
-                    : 0;
-                if (vsyncCount > 4 || longPulseCount >= 1)
+                int reducedLength = 1 + ((demodulatedLowPass.Length - 1) / divisor);
+                reducedBuffer = ArrayPool<double>.Shared.Rent(reducedLength);
+                for (int i = 0, source = 0; i < reducedLength; i++, source += divisor)
                 {
-                    if ((vsyncCount == 12 || longPulseCount == 2) && !checkNext)
-                    {
-                        break;
-                    }
-
-                    if (!foundCandidate
-                        || vsyncCount > previousVsyncCount
-                        || longPulseCount > previousLongPulseCount)
-                    {
-                        foundCandidate = true;
-                        previousVsyncCount = vsyncCount;
-                        previousLongPulseCount = longPulseCount;
-                        previousMinimumSync = minimumSync;
-                        checkNext = true;
-                    }
-                    else if (vsyncCount < previousVsyncCount
-                        || longPulseCount < previousLongPulseCount
-                        || !checkNext)
-                    {
-                        minimumSync = previousMinimumSync;
-                        pulses = FindReducedPulses(
-                            demodulatedLowPass,
-                            (minimumSync + blankLevel) / 2.0,
-                            analyzer,
-                            divisor: 1);
-                        break;
-                    }
-                    else
-                    {
-                        checkNext = false;
-                    }
+                    reducedBuffer[i] = demodulatedLowPass[source];
                 }
+
+                reducedData = reducedBuffer.AsSpan(0, reducedLength);
             }
 
-            minimumSync += hzIre * 5.0;
-        }
+            var pulses = new List<Pulse>();
+            for (int retry = 0; retry < 30; retry++)
+            {
+                double threshold = (minimumSync + blankLevel) / 2.0;
+                FindPulsesFromReducedData(
+                    reducedData,
+                    threshold,
+                    analyzer,
+                    divisor,
+                    pulses);
+                if (pulses.Count > 200)
+                {
+                    int vsyncCount = 0;
+                    int longPulseCount = 0;
+                    foreach (Pulse pulse in pulses)
+                    {
+                        if (pulse.Length > minimumVsyncLength)
+                        {
+                            vsyncCount++;
+                        }
+                    }
 
-        return RefineSerrationLevelsFromPulses(
-            demodulatedLowPass,
-            pulses,
-            analyzer,
-            referenceSyncLevel,
-            hzIre,
-            out failureKind,
-            out measuredSyncLevel);
+                    if (checkLongPulses && vsyncCount <= 2)
+                    {
+                        foreach (Pulse pulse in pulses)
+                        {
+                            if (PulseDetection.InRange(
+                                    pulse.Length,
+                                    minimumLongPulseLength,
+                                    maximumLongPulseLength))
+                            {
+                                longPulseCount++;
+                            }
+                        }
+                    }
+
+                    if (vsyncCount > 4 || longPulseCount >= 1)
+                    {
+                        if ((vsyncCount == 12 || longPulseCount == 2) && !checkNext)
+                        {
+                            break;
+                        }
+
+                        if (!foundCandidate
+                            || vsyncCount > previousVsyncCount
+                            || longPulseCount > previousLongPulseCount)
+                        {
+                            foundCandidate = true;
+                            previousVsyncCount = vsyncCount;
+                            previousLongPulseCount = longPulseCount;
+                            previousMinimumSync = minimumSync;
+                            checkNext = true;
+                        }
+                        else if (vsyncCount < previousVsyncCount
+                            || longPulseCount < previousLongPulseCount
+                            || !checkNext)
+                        {
+                            minimumSync = previousMinimumSync;
+                            FindPulsesFromReducedData(
+                                demodulatedLowPass,
+                                (minimumSync + blankLevel) / 2.0,
+                                analyzer,
+                                divisor: 1,
+                                pulses);
+                            break;
+                        }
+                        else
+                        {
+                            checkNext = false;
+                        }
+                    }
+                }
+
+                minimumSync += hzIre * 5.0;
+            }
+
+            return RefineSerrationLevelsFromPulses(
+                demodulatedLowPass,
+                pulses,
+                analyzer,
+                referenceSyncLevel,
+                hzIre,
+                out failureKind,
+                out measuredSyncLevel);
+        }
+        finally
+        {
+            if (reducedBuffer is not null)
+            {
+                ArrayPool<double>.Shared.Return(reducedBuffer);
+            }
+        }
     }
 
     public static double[] PulsesBlackLevelMeans(
@@ -423,30 +467,24 @@ public static class LevelDetection
         return means.ToArray();
     }
 
-    private static IReadOnlyList<Pulse> FindReducedPulses(
-        ReadOnlySpan<double> data,
+    private static void FindPulsesFromReducedData(
+        ReadOnlySpan<double> reducedData,
         double threshold,
         SyncAnalyzer analyzer,
-        int divisor)
+        int divisor,
+        List<Pulse> pulses)
     {
         int minimumLength = Math.Max(0, (int)Math.Ceiling(
             (analyzer.UsecToSamples(analyzer.EqualizingPulseUs) / 8.0) / divisor));
         int maximumLength = Math.Max(1, (int)Math.Floor(
             (analyzer.NominalLineLength * 5.0) / divisor));
-        if (divisor == 1)
-        {
-            return PulseDetection.FindPulses(data, threshold, minimumLength, maximumLength);
-        }
-
-        var reduced = new double[(data.Length + divisor - 1) / divisor];
-        for (int i = 0, source = 0; i < reduced.Length; i++, source += divisor)
-        {
-            reduced[i] = data[source];
-        }
-
-        return PulseDetection.FindPulses(reduced, threshold, minimumLength, maximumLength)
-            .Select(pulse => new Pulse(pulse.Start * divisor, pulse.Length * divisor))
-            .ToArray();
+        PulseDetection.FindPulses(
+            reducedData,
+            threshold,
+            minimumLength,
+            maximumLength,
+            pulses,
+            positionScale: divisor);
     }
 
     private static (double SyncLevel, double BlankLevel)? FindSyncLevelsCore(

@@ -19,7 +19,7 @@
     <PackageReference Include="NetMQ" Version="4.0.4.2" />
     <PackageReference Include="SQLitePCLRaw.bundle_winsqlite3" Version="2.1.11" />
     <!-- Override NetMQ's vulnerable transitive version. -->
-    <PackageReference Include="System.Security.Cryptography.Xml" Version="10.0.10" />
+    <PackageReference Include="System.Security.Cryptography.Xml" Version="11.0.0-preview.6.26359.118" />
   </ItemGroup>
 
   <ItemGroup>

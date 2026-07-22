@@ -21,17 +21,21 @@ public static partial class IirFilterDesign
 
     internal static SosSection[] ButterworthLowPassScipySos(int order, double normalizedCutoff)
     {
-        if ((order & 1) != 0)
-        {
-            throw new ArgumentException("The current SciPy SOS conversion requires an even filter order.", nameof(order));
-        }
-
         (Complex[] digitalPoles, double digitalGain) = DesignButterworthLowPassZpk(
             order,
             normalizedCutoff);
-        var digitalZeros = new Complex[order];
-        Array.Fill(digitalZeros, -Complex.One);
-        return ZpkToNearestSos(digitalZeros, digitalPoles, digitalGain);
+        if ((order & 1) == 0)
+        {
+            var digitalZeros = new Complex[order];
+            Array.Fill(digitalZeros, -Complex.One);
+            return ZpkToNearestSos(digitalZeros, digitalPoles, digitalGain);
+        }
+
+        var paddedZeros = new Complex[order + 1];
+        Array.Fill(paddedZeros, -Complex.One, 0, order);
+        var paddedPoles = new Complex[order + 1];
+        digitalPoles.CopyTo(paddedPoles, 0);
+        return ZpkToNearestSos(paddedZeros, paddedPoles, digitalGain);
     }
 
     internal static TransferFunction ButterworthLowPassTransferFunction(int order, double normalizedCutoff)
@@ -62,7 +66,9 @@ public static partial class IirFilterDesign
         const double digitalSampleRate = 2.0;
         double warped = (2.0 * digitalSampleRate)
             * Math.Tan((Math.PI * normalizedCutoff) / digitalSampleRate);
-        Complex[] prototypePoles = BuildButterworthPrototypePoles(order);
+        Complex[] prototypePoles = BuildButterworthPrototypePoles(
+            order,
+            useComplexAngleDivision: true);
         var analogPoles = new Complex[order];
         for (int i = 0; i < analogPoles.Length; i++)
         {
@@ -102,6 +108,65 @@ public static partial class IirFilterDesign
     public static SosSection[] ButterworthHighPass(int order, double normalizedCutoff)
     {
         return ButterworthLowHighPass(order, normalizedCutoff, highPass: true);
+    }
+
+    internal static SosSection[] ButterworthHighPassScipySos(int order, double normalizedCutoff)
+    {
+        (_, _, Complex[] digitalPoles, double digitalGain) = DesignButterworthHighPassZpk(
+            order,
+            normalizedCutoff,
+            matchScipySosReduction: true);
+        if ((order & 1) == 0)
+        {
+            var digitalZeros = new Complex[order];
+            Array.Fill(digitalZeros, Complex.One);
+            return ZpkToNearestSos(digitalZeros, digitalPoles, digitalGain);
+        }
+
+        var sections = new List<(SosSection Section, double Radius)>((order + 1) / 2);
+        var remainingPoles = digitalPoles.ToList();
+        int realIndex = remainingPoles.FindIndex(value => value.Imaginary == 0.0);
+        if (realIndex < 0)
+        {
+            throw new InvalidOperationException("An odd Butterworth filter must have one real pole.");
+        }
+
+        Complex realPole = remainingPoles[realIndex];
+        remainingPoles.RemoveAt(realIndex);
+        sections.Add((
+            new SosSection(1.0, -1.0, 0.0, 1.0, -realPole.Real, 0.0),
+            realPole.Magnitude));
+
+        while (remainingPoles.Count > 0)
+        {
+            int firstIndex = remainingPoles.FindIndex(value => value.Imaginary > 0.0);
+            Complex first = remainingPoles[firstIndex];
+            remainingPoles.RemoveAt(firstIndex);
+            int secondIndex = IndexOfNearest(remainingPoles, Complex.Conjugate(first));
+            Complex second = remainingPoles[secondIndex];
+            remainingPoles.RemoveAt(secondIndex);
+            sections.Add((
+                new SosSection(
+                    1.0,
+                    -2.0,
+                    1.0,
+                    1.0,
+                    -(first + second).Real,
+                    NumpyComplexMultiply(first, second).Real),
+                Math.Max(first.Magnitude, second.Magnitude)));
+        }
+
+        SosSection[] ordered = sections
+            .OrderBy(section => section.Radius)
+            .Select(section => section.Section)
+            .ToArray();
+        ordered[0] = ordered[0] with
+        {
+            B0 = ordered[0].B0 * digitalGain,
+            B1 = ordered[0].B1 * digitalGain,
+            B2 = ordered[0].B2 * digitalGain
+        };
+        return ordered;
     }
 
     public static TransferFunction ButterworthHighPassTransferFunction(int order, double normalizedCutoff)
@@ -229,7 +294,10 @@ public static partial class IirFilterDesign
         Complex[] PrototypePoles,
         Complex[] AnalogPoles,
         Complex[] DigitalPoles,
-        double DigitalGain) DesignButterworthHighPassZpk(int order, double normalizedCutoff)
+        double DigitalGain) DesignButterworthHighPassZpk(
+            int order,
+            double normalizedCutoff,
+            bool matchScipySosReduction = false)
     {
         if (order <= 0)
         {
@@ -246,7 +314,9 @@ public static partial class IirFilterDesign
         Complex prototypePoleProduct = Complex.One;
         foreach (Complex pole in prototypePoles)
         {
-            prototypePoleProduct = NumpyComplexMultiply(prototypePoleProduct, -pole);
+            prototypePoleProduct = matchScipySosReduction && (order & 1) == 0
+                ? NumpySimdComplexMultiply(prototypePoleProduct, -pole)
+                : NumpyComplexMultiply(prototypePoleProduct, -pole);
         }
 
         double analogGain = NumpyComplexDivide(Complex.One, prototypePoleProduct).Real;
@@ -270,7 +340,9 @@ public static partial class IirFilterDesign
                     bilinearScale + analogPoles[i].Real,
                     analogPoles[i].Imaginary),
                 denominator);
-            bilinearDenominatorProduct = NumpyComplexMultiply(bilinearDenominatorProduct, denominator);
+            bilinearDenominatorProduct = matchScipySosReduction
+                ? NumpySimdComplexMultiply(bilinearDenominatorProduct, denominator)
+                : NumpyComplexMultiply(bilinearDenominatorProduct, denominator);
             bilinearNumeratorProduct *= bilinearScale;
         }
 
@@ -280,7 +352,9 @@ public static partial class IirFilterDesign
         return (prototypePoles, analogPoles, digitalPoles, digitalGain);
     }
 
-    internal static Complex[] BuildButterworthPrototypePoles(int order)
+    internal static Complex[] BuildButterworthPrototypePoles(
+        int order,
+        bool useComplexAngleDivision = false)
     {
         if (order == 2)
         {
@@ -334,7 +408,11 @@ public static partial class IirFilterDesign
         var poles = new Complex[order];
         for (int index = 0, m = -order + 1; index < order; index++, m += 2)
         {
-            double angle = (Math.PI * m) / (2.0 * order);
+            double angle = useComplexAngleDivision
+                ? NumpyComplexDivide(
+                    new Complex(0.0, Math.PI * m),
+                    new Complex(2.0 * order, 0.0)).Imaginary
+                : (Math.PI * m) / (2.0 * order);
             poles[index] = new Complex(-Math.Cos(angle), -Math.Sin(angle));
         }
 
