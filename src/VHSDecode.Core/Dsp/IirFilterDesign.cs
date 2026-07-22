@@ -21,17 +21,21 @@ public static partial class IirFilterDesign
 
     internal static SosSection[] ButterworthLowPassScipySos(int order, double normalizedCutoff)
     {
-        if ((order & 1) != 0)
-        {
-            throw new ArgumentException("The current SciPy SOS conversion requires an even filter order.", nameof(order));
-        }
-
         (Complex[] digitalPoles, double digitalGain) = DesignButterworthLowPassZpk(
             order,
             normalizedCutoff);
-        var digitalZeros = new Complex[order];
-        Array.Fill(digitalZeros, -Complex.One);
-        return ZpkToNearestSos(digitalZeros, digitalPoles, digitalGain);
+        if ((order & 1) == 0)
+        {
+            var digitalZeros = new Complex[order];
+            Array.Fill(digitalZeros, -Complex.One);
+            return ZpkToNearestSos(digitalZeros, digitalPoles, digitalGain);
+        }
+
+        var paddedZeros = new Complex[order + 1];
+        Array.Fill(paddedZeros, -Complex.One, 0, order);
+        var paddedPoles = new Complex[order + 1];
+        digitalPoles.CopyTo(paddedPoles, 0);
+        return ZpkToNearestSos(paddedZeros, paddedPoles, digitalGain);
     }
 
     internal static TransferFunction ButterworthLowPassTransferFunction(int order, double normalizedCutoff)
@@ -62,7 +66,9 @@ public static partial class IirFilterDesign
         const double digitalSampleRate = 2.0;
         double warped = (2.0 * digitalSampleRate)
             * Math.Tan((Math.PI * normalizedCutoff) / digitalSampleRate);
-        Complex[] prototypePoles = BuildButterworthPrototypePoles(order);
+        Complex[] prototypePoles = BuildButterworthPrototypePoles(
+            order,
+            useComplexAngleDivision: true);
         var analogPoles = new Complex[order];
         for (int i = 0; i < analogPoles.Length; i++)
         {
@@ -346,7 +352,9 @@ public static partial class IirFilterDesign
         return (prototypePoles, analogPoles, digitalPoles, digitalGain);
     }
 
-    internal static Complex[] BuildButterworthPrototypePoles(int order)
+    internal static Complex[] BuildButterworthPrototypePoles(
+        int order,
+        bool useComplexAngleDivision = false)
     {
         if (order == 2)
         {
@@ -400,7 +408,11 @@ public static partial class IirFilterDesign
         var poles = new Complex[order];
         for (int index = 0, m = -order + 1; index < order; index++, m += 2)
         {
-            double angle = (Math.PI * m) / (2.0 * order);
+            double angle = useComplexAngleDivision
+                ? NumpyComplexDivide(
+                    new Complex(0.0, Math.PI * m),
+                    new Complex(2.0 * order, 0.0)).Imaginary
+                : (Math.PI * m) / (2.0 * order);
             poles[index] = new Complex(-Math.Cos(angle), -Math.Sin(angle));
         }
 

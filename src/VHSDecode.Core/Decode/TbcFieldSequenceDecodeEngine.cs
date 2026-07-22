@@ -73,9 +73,20 @@ public sealed class TbcFieldSequenceDecodeEngine
 
     private sealed class DeferredDiagnosticBatch(
         Action<string, string> sink,
-        List<(string Level, string Message)> messages)
+        List<(string Level, string Message)> fieldMessages,
+        List<(string Level, string Message)> renderMessages)
     {
-        public void Flush()
+        public void FlushFieldDiagnostics()
+        {
+            Flush(fieldMessages);
+        }
+
+        public void FlushRenderDiagnostics()
+        {
+            Flush(renderMessages);
+        }
+
+        private void Flush(List<(string Level, string Message)> messages)
         {
             foreach ((string level, string message) in messages)
             {
@@ -284,6 +295,7 @@ public sealed class TbcFieldSequenceDecodeEngine
         bool haveFirstTapeField = false;
         string? pendingTapeFrameStatus = null;
         int? pendingTapeCheckpointFieldCount = null;
+        DeferredDiagnosticBatch? pendingVhsRenderDiagnostics = null;
         (TbcDecodedField Field, int DecodedIndex)? pendingCvbsField = null;
         bool pendingCvbsEndOfInputCheckpoint = false;
         bool useCvbsWorkerPrefetch = ShouldUseCvbsWorkerPrefetch(session);
@@ -470,7 +482,10 @@ public sealed class TbcFieldSequenceDecodeEngine
             }
             catch (TbcFieldDecodeRecoveryException ex)
             {
-                deferredVhsFieldDiagnostics?.Flush();
+                deferredVhsFieldDiagnostics?.FlushFieldDiagnostics();
+                pendingVhsRenderDiagnostics?.FlushRenderDiagnostics();
+                pendingVhsRenderDiagnostics = null;
+                deferredVhsFieldDiagnostics?.FlushRenderDiagnostics();
                 bool directVideoNoSync = session.Spec.Name is "cvbs" or "ld"
                     && ex.Kind == TbcFieldDecodeRecoveryKind.NoSyncPulses;
                 bool directVideoNoSyncAfterOutput = directVideoNoSync
@@ -511,19 +526,29 @@ public sealed class TbcFieldSequenceDecodeEngine
             }
             catch (OperationCanceledException) when (_cancellationToken.IsCancellationRequested)
             {
-                deferredVhsFieldDiagnostics?.Flush();
+                deferredVhsFieldDiagnostics?.FlushFieldDiagnostics();
+                pendingVhsRenderDiagnostics?.FlushRenderDiagnostics();
+                deferredVhsFieldDiagnostics?.FlushRenderDiagnostics();
                 throw;
             }
             catch (DecodeFieldReadException)
             {
-                deferredVhsFieldDiagnostics?.Flush();
+                deferredVhsFieldDiagnostics?.FlushFieldDiagnostics();
+                pendingVhsRenderDiagnostics?.FlushRenderDiagnostics();
+                deferredVhsFieldDiagnostics?.FlushRenderDiagnostics();
                 throw;
             }
             catch (Exception ex)
             {
-                deferredVhsFieldDiagnostics?.Flush();
+                deferredVhsFieldDiagnostics?.FlushFieldDiagnostics();
+                pendingVhsRenderDiagnostics?.FlushRenderDiagnostics();
+                deferredVhsFieldDiagnostics?.FlushRenderDiagnostics();
                 throw new DecodeFieldReadException(begin, ex);
             }
+
+            deferredVhsFieldDiagnostics?.FlushFieldDiagnostics();
+            pendingVhsRenderDiagnostics?.FlushRenderDiagnostics();
+            pendingVhsRenderDiagnostics = null;
 
             if (pendingTapeFrameStatus is not null)
             {
@@ -537,10 +562,9 @@ public sealed class TbcFieldSequenceDecodeEngine
                 pendingTapeCheckpointFieldCount = null;
             }
 
-            deferredVhsFieldDiagnostics?.Flush();
-
             if (field is null)
             {
+                deferredVhsFieldDiagnostics?.FlushRenderDiagnostics();
                 if (session.Spec.Name == "cvbs")
                 {
                     pendingCvbsEndOfInputCheckpoint = true;
@@ -552,6 +576,8 @@ public sealed class TbcFieldSequenceDecodeEngine
 
                 break;
             }
+
+            pendingVhsRenderDiagnostics = deferredVhsFieldDiagnostics;
 
             if (ShouldWarnDirectVideoPlayerSkip(session, field))
             {
@@ -685,8 +711,9 @@ public sealed class TbcFieldSequenceDecodeEngine
         bool reachedRequestedTapeOutput = !maxFields.HasValue
             && session.Spec.Name == "vhs"
             && writePlanner.WrittenFieldCount >= requestedFields;
-        if (reachedRequestedTapeOutput && pendingTapeFrameStatus is not null)
+        if (reachedRequestedTapeOutput)
         {
+            DeferredDiagnosticBatch? terminalLookaheadDiagnostics = null;
             try
             {
                 _cancellationToken.ThrowIfCancellationRequested();
@@ -697,14 +724,18 @@ public sealed class TbcFieldSequenceDecodeEngine
                     readLength,
                     decodedFieldCount,
                     writePlanner.WrittenFieldCount,
-                    out _);
+                    out terminalLookaheadDiagnostics);
+                terminalLookaheadDiagnostics?.FlushFieldDiagnostics();
                 _cancellationToken.ThrowIfCancellationRequested();
             }
             catch (TbcFieldDecodeRecoveryException ex)
             {
+                terminalLookaheadDiagnostics?.FlushFieldDiagnostics();
                 LogRecovery(session, ex);
             }
         }
+
+        pendingVhsRenderDiagnostics?.FlushRenderDiagnostics();
 
         if (pendingTapeFrameStatus is not null)
         {
@@ -1043,10 +1074,13 @@ public sealed class TbcFieldSequenceDecodeEngine
                 writtenFieldCount);
         }
 
-        var messages = new List<(string Level, string Message)>();
-        diagnostics = new DeferredDiagnosticBatch(diagnosticSink, messages);
+        var fieldMessages = new List<(string Level, string Message)>();
+        var renderMessages = new List<(string Level, string Message)>();
+        diagnostics = new DeferredDiagnosticBatch(diagnosticSink, fieldMessages, renderMessages);
         session.TbcFieldDecoder.DiagnosticLogger =
-            (level, message) => messages.Add((level, message));
+            (level, message) => fieldMessages.Add((level, message));
+        session.TbcRenderer.DiagnosticLogger =
+            (level, message) => renderMessages.Add((level, message));
         try
         {
             return ReadFieldWithContext(

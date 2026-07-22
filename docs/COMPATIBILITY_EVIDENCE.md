@@ -1611,6 +1611,25 @@ possible capture has already been proven byte-for-byte identical.
   sync-level failure reasons retain their upstream ordering, and VHS sequence
   completion performs the producer's final one-field lookahead before logging
   the completed file frame
+- all eight built-in `video_lpf_extra` order/corner combinations now preserve
+  SciPy's SOS section construction and complete 32K-bin response bits,
+  including odd-order zero/pole padding; the PAL VHS aggregate RF response is
+  locked to SHA-256
+  `37A812C53A7A5BAF918E5B9ADAAA266CA12F51E8EB4205699E7FD53F598A750A`
+- a 1,000-frame real PAL VHS checkpoint matches Python v0.4.0 `--threads 0`
+  exactly under both the port's default 5-worker mode and `--threads 20`:
+  luma
+  `053C4208578AFC8EC75F7F3C68C34042A365B01FC27F84B206E87D21E8A02FC5`,
+  chroma
+  `21AED884AF49F3DA6B529D24E575BC10A04F9404D43F8757B24362A0EA723B6D`,
+  JSON
+  `37288BB3EC5342E4B8AEF559B38317D5C92643161163DF02086ABDB92EC5015F`,
+  stdout
+  `BF01F848ADB4B9542B7DA2A1A70B67412A81DCC73F9C0EFC1EB156796169649F`,
+  all 2,000 `fileLoc`-aligned field records, and all 5,132
+  timestamp-normalized log lines; staged field/render diagnostics retain the
+  producer/downscale order and suppress only the terminal lookahead render
+  diagnostic, matching upstream
 - one-frame non-default NTSC VHS fixtures are also byte-exact for
   `--sharpness 20`, `--fm_audio_notch 10`, and the combined
   `--high_boost 1.3 --sharpness 20 --nld --sd` path; the stateful sharpness
@@ -1849,7 +1868,7 @@ dotnet test --solution VHSDecodeDotNet.slnx --no-build
 ```
 
 The current formal solution build completes with zero warnings and errors, and
-the xUnit v3 project exposes 788 independently discoverable compatibility tests
+the xUnit v3 project exposes 846 independently discoverable compatibility tests
 to `dotnet test` and Visual Studio Test Explorer. On the
 same Windows machine and fixtures, Release wall-clock measurements for one
 frame were 2.346 s versus 7.193 s for NTSC VHS and 1.651 s versus 5.865 s for

@@ -2,7 +2,7 @@
 
 **[English](README.md)** | [简体中文](README.zh-CN.md) | [日本語](README.ja.md)
 
-<!-- README_SYNC: 2026-07-22.17 -->
+<!-- README_SYNC: 2026-07-22.18 -->
 
 .NET 11 rewrite of the decode-facing parts of
 [`oyvindln/vhs-decode`](https://github.com/oyvindln/vhs-decode), focused on
@@ -234,19 +234,19 @@ release compatibility remain the first constraint.
 
 The current thread matrix used an Intel Core Ultra 7 265K (20 logical
 processors), Windows 11 build 26220, .NET SDK/runtime
-`11.0.100-preview.6.26359.118`, port checkpoint `a45d433`, and Python v0.4.0
-commit `43155200da87c0d49eb37d8ec09b1372075ee8e4` (reported as `g4315520`).
+`11.0.100-preview.6.26359.118`, and Python v0.4.0 commit
+`43155200da87c0d49eb37d8ec09b1372075ee8e4` (reported as `g4315520`).
 The isolated Python environment used NumPy 2.4.6, SciPy 1.18.0, Numba 0.66.0,
 and python-soxr 1.1.0. Each value is the median of three interleaved Release
 runs:
 
 | CLI mode | Effective workers | This port | Python | Speedup | Wall-time reduction |
 | --- | ---: | ---: | ---: | ---: | ---: |
-| default | 5 | 4.646 s | 13.112 s | 2.82x | 64.6% |
-| `--threads 1` | 1 | 9.203 s | 14.111 s | 1.53x | 34.8% |
-| `--threads 5` | 5 | 4.544 s | 12.799 s | 2.82x | 64.5% |
-| `--threads 10` | 10 | 4.074 s | 13.560 s | 3.33x | 70.0% |
-| `--threads 20` | 20 | 3.779 s | 14.046 s | 3.72x | 73.1% |
+| default | 5 | 3.861 s | 12.021 s | 3.114x | 67.9% |
+| `--threads 1` | 1 | 8.052 s | 13.700 s | 1.701x | 41.2% |
+| `--threads 5` | 5 | 3.964 s | 11.924 s | 3.008x | 66.8% |
+| `--threads 10` | 10 | 3.379 s | 12.344 s | 3.653x | 72.6% |
+| `--threads 20` | 20 | 3.152 s | 12.649 s | 4.013x | 75.1% |
 
 The default remains **5 workers**, matching Release 4.0 CLI semantics; explicit
 20-worker mode was fastest on this 20-logical-processor fixture. The matrix used
@@ -258,35 +258,43 @@ All 15 port runs produced one identical luma TBC, chroma TBC, and JSON hash set
 across every worker count. Three additional Python `--threads 0` controls were
 mutually identical and exactly matched every port run. Upstream Python's
 default/nonzero matrix modes were not a reliable byte-exact baseline: its 15
-runs produced two luma/chroma pairs. Twelve runs matched the serial reference;
-all three `--threads 5` runs produced the alternate pair. The matrix therefore
-compares observed throughput, while Python `--threads 0` is the strict
-compatibility baseline.
+runs produced 14 distinct luma/chroma pairs and 10 distinct JSON hashes; only
+two runs matched the serial luma/chroma reference. The matrix therefore
+compares observed throughput only, while Python `--threads 0` is the strict
+compatibility baseline for hashes, metadata, console output, and normalized
+logs.
 
 The compatibility baseline for this 40-frame fixture is Python v0.4.0
 `g4315520` with `--threads 0`:
 
 | Baseline artifact | SHA-256 |
 | --- | --- |
-| Luma TBC | `64C518A03B208F7CF950916BC01A997021CB0F76B3D6F131FBEE74E9035FD30C` |
-| Chroma TBC | `70112719879FB64FA95DC8F3ED6E5FA335D4F8B62C50FC2AF3C26D2C2098F26F` |
-| JSON | `C223671830D0105271F24172923B280A96C8D0D427567C49E9C0E562D38FA881` |
+| Luma TBC | `6F4DD4ABE1D05A5030846DEA550758A79E7737D680A2B06024CFA06C83BF5185` |
+| Chroma TBC | `BB91833B7575C003AEC9853ED75D4CFF82C1125690B226E0A79D539B6594169C` |
+| JSON | `2F4C27FB9F3A9F4E8467BB49E89D660132DA5A2DCCC99AE897A072B1DD099EE5` |
 
 A longer exact-output checkpoint used an Intel Core Ultra 7 265K (20 logical
 processors), Windows 11 build 26220, and .NET SDK/runtime
 `11.0.100-preview.6.26359.118`:
 
-| PAL VHS, 1,000 frames / 2,000 fields | Wall time | CPU time | Peak working set |
-| --- | ---: | ---: | ---: |
-| This port, Release (two runs) | 218.00 / 218.63 s | 238.72 / 239.50 s | 829.6-838.2 MiB |
-| Python v0.4.0 (`g4315520`) | 417.37 s | not captured | not captured |
+| PAL VHS, 1,000 frames / 2,000 fields | Wall time | CPU time | Peak working set | Speedup vs Python |
+| --- | ---: | ---: | ---: | ---: |
+| Python v0.4.0 (`g4315520`, `--threads 0`) | 405.63 s | 402.88 s | 0.74 GiB | 1.00x |
+| This port, default (5 workers) | 76.78 s | 215.66 s | 1.11 GiB | 5.28x |
+| This port, `--threads 20` | 60.58 s | 244.95 s | 1.45 GiB | 6.70x |
 
-Both runs used the same local PAL `.lds` capture and
+All three runs used the same local PAL `.lds` capture and
 `--system pal --detect_chroma_track_phase --ire0_adjust --tape_format VHS
---frequency 40 --start_fileloc 281303040 --threads 0 -l 1000 --overwrite`.
-Both port runs were about 1.91x as fast (47.7-47.8% lower wall time), and all
-three paired SHA-256 values were byte-identical across Python and both port
-runs. `--threads 0` selected deterministic serial mode in both implementations.
+--frequency 40 --start_fileloc 620000000 -l 1000 --overwrite`, plus the row's
+thread option. Both port modes exactly matched Python `--threads 0` for luma,
+chroma, JSON and stdout SHA-256, every aligned `fileLoc`, and all 5,132
+timestamp-normalized log lines. The first and last emitted `fileLoc` values
+were `620421120` and `2219612160` in every run.
+
+The long run also showed no progressive slowdown: the default mode's first and
+second 500-frame halves took 38.03 s and 37.72 s, while `--threads 20` took
+30.42 s and 29.37 s. Peak working set remained bounded throughout both port
+runs.
 
 An independent no-seek startup checkpoint used a second local PAL `.lds`
 capture with the same PAL VHS options,

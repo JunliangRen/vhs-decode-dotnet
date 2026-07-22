@@ -1795,7 +1795,7 @@ public static class DecodeFilterSetBuilder
 
         int order = JsonInt(rfParams, "video_lpf_extra_order", defaultValue: 1) ?? 1;
         return IirFilterDesign.FrequencyResponse(
-            IirFilterDesign.ButterworthLowPass(order, cornerElement.GetDouble() / nyquistHz),
+            IirFilterDesign.ButterworthLowPassScipySos(order, cornerElement.GetDouble() / nyquistHz),
             blockLength);
     }
 

@@ -2,7 +2,7 @@
 
 [English](README.md) | **[简体中文](README.zh-CN.md)** | [日本語](README.ja.md)
 
-<!-- README_SYNC: 2026-07-22.17 -->
+<!-- README_SYNC: 2026-07-22.18 -->
 
 这是 [`oyvindln/vhs-decode`](https://github.com/oyvindln/vhs-decode)
 中解码相关部分的 .NET 11 重写，当前以 release `v0.4.0`、commit
@@ -188,18 +188,18 @@
   往返；未来可选 GPU 后端必须批量处理常驻显存的 DSP 阶段，并保留精确 CPU 回退。
 
 当前线程矩阵使用 Intel Core Ultra 7 265K（20 个逻辑处理器）、Windows 11 build
-26220、.NET SDK/runtime `11.0.100-preview.6.26359.118`、本项目检查点 `a45d433`，以及
-Python v0.4.0 commit `43155200da87c0d49eb37d8ec09b1372075ee8e4`（程序报告为
+26220、.NET SDK/runtime `11.0.100-preview.6.26359.118`，以及 Python v0.4.0
+commit `43155200da87c0d49eb37d8ec09b1372075ee8e4`（程序报告为
 `g4315520`）。隔离的 Python 环境使用 NumPy 2.4.6、SciPy 1.18.0、Numba 0.66.0 和
 python-soxr 1.1.0。每项都是三次交错 Release 运行的中位数：
 
 | CLI 模式 | 实际 worker | 本项目 | Python | 加速倍数 | 墙钟降幅 |
 | --- | ---: | ---: | ---: | ---: | ---: |
-| 默认 | 5 | 4.646 s | 13.112 s | 2.82x | 64.6% |
-| `--threads 1` | 1 | 9.203 s | 14.111 s | 1.53x | 34.8% |
-| `--threads 5` | 5 | 4.544 s | 12.799 s | 2.82x | 64.5% |
-| `--threads 10` | 10 | 4.074 s | 13.560 s | 3.33x | 70.0% |
-| `--threads 20` | 20 | 3.779 s | 14.046 s | 3.72x | 73.1% |
+| 默认 | 5 | 3.861 s | 12.021 s | 3.114x | 67.9% |
+| `--threads 1` | 1 | 8.052 s | 13.700 s | 1.701x | 41.2% |
+| `--threads 5` | 5 | 3.964 s | 11.924 s | 3.008x | 66.8% |
+| `--threads 10` | 10 | 3.379 s | 12.344 s | 3.653x | 72.6% |
+| `--threads 20` | 20 | 3.152 s | 12.649 s | 4.013x | 75.1% |
 
 默认值最终保持为 **5 个 worker**，与 Release 4.0 CLI 语义一致；在这台 20 逻辑处理器
 机器上，显式 20 worker 最快。矩阵使用同一个本地 PAL `.lds` 文件，
@@ -209,32 +209,38 @@ python-soxr 1.1.0。每项都是三次交错 Release 运行的中位数：
 本项目 15 次运行在所有 worker 数下都得到同一组亮度 TBC、色度 TBC 和 JSON hash。
 另加的三次 Python `--threads 0` 控制组彼此完全一致，并精确匹配本项目全部运行。
 上游 Python 的默认/非零线程模式不能作为可靠的逐字节基准：矩阵中的 15 次运行得到
-两组亮度/色度配对，其中 12 次匹配串行基准，三次 `--threads 5` 得到另一组。因此线程
-矩阵比较的是实测吞吐，严格兼容性以 Python `--threads 0` 为基准。
+14 组不同的亮度/色度配对和 10 个不同的 JSON hash，只有两次匹配串行亮度/色度基准。
+因此线程矩阵只比较实测吞吐；hash、元数据、控制台输出和归一化日志的严格兼容性均以
+Python `--threads 0` 为基准。
 
 这份 40 帧夹具的兼容性基准是 Python v0.4.0 `g4315520` 的 `--threads 0` 输出：
 
 | 基准产物 | SHA-256 |
 | --- | --- |
-| 亮度 TBC | `64C518A03B208F7CF950916BC01A997021CB0F76B3D6F131FBEE74E9035FD30C` |
-| 色度 TBC | `70112719879FB64FA95DC8F3ED6E5FA335D4F8B62C50FC2AF3C26D2C2098F26F` |
-| JSON | `C223671830D0105271F24172923B280A96C8D0D427567C49E9C0E562D38FA881` |
+| 亮度 TBC | `6F4DD4ABE1D05A5030846DEA550758A79E7737D680A2B06024CFA06C83BF5185` |
+| 色度 TBC | `BB91833B7575C003AEC9853ED75D4CFF82C1125690B226E0A79D539B6594169C` |
+| JSON | `2F4C27FB9F3A9F4E8467BB49E89D660132DA5A2DCCC99AE897A072B1DD099EE5` |
 
 一次更长的精确输出检查使用 Intel Core Ultra 7 265K（20 个逻辑处理器）、
 Windows 11 build 26220 和 .NET SDK/runtime
 `11.0.100-preview.6.26359.118`：
 
-| PAL VHS，1,000 帧 / 2,000 场 | 墙钟时间 | CPU 时间 | 工作集峰值 |
-| --- | ---: | ---: | ---: |
-| 本项目，Release（两次） | 218.00 / 218.63 s | 238.72 / 239.50 s | 829.6-838.2 MiB |
-| Python v0.4.0（`g4315520`） | 417.37 s | 未采集 | 未采集 |
+| PAL VHS，1,000 帧 / 2,000 场 | 墙钟时间 | CPU 时间 | 工作集峰值 | 相对 Python 加速 |
+| --- | ---: | ---: | ---: | ---: |
+| Python v0.4.0（`g4315520`，`--threads 0`） | 405.63 s | 402.88 s | 0.74 GiB | 1.00x |
+| 本项目，默认（5 worker） | 76.78 s | 215.66 s | 1.11 GiB | 5.28x |
+| 本项目，`--threads 20` | 60.58 s | 244.95 s | 1.45 GiB | 6.70x |
 
-两次运行都使用同一个本地 PAL `.lds` 文件，参数为
+三次运行都使用同一个本地 PAL `.lds` 文件，公共参数为
 `--system pal --detect_chroma_track_phase --ire0_adjust --tape_format VHS
---frequency 40 --start_fileloc 281303040 --threads 0 -l 1000 --overwrite`。
-本项目两次运行的墙钟速度均约为 Python 的 1.91 倍（墙钟降低 47.7-47.8%），三项
-SHA-256 在 Python 与两次本项目运行之间都逐字节一致；两边的 `--threads 0` 都选择
-确定性串行模式。
+--frequency 40 --start_fileloc 620000000 -l 1000 --overwrite`，再附加表中线程选项。
+本项目两种模式都与 Python `--threads 0` 的亮度、色度、JSON 和 stdout SHA-256
+完全一致；按 `fileLoc` 对齐的全部元数据及 5,132 行去除时间戳后的日志也完全一致。
+所有运行输出的首尾 `fileLoc` 都是 `620421120` 和 `2219612160`。
+
+长测也没有出现越跑越慢：默认模式前后各 500 帧分别用时 38.03 秒和 37.72 秒，
+`--threads 20` 分别为 30.42 秒和 29.37 秒；两种模式的工作集峰值在整个运行期间均
+保持有界。
 
 另一个独立的无 seek 启动检查点使用另一个本地 PAL `.lds` 文件，保持相同
 PAL VHS 参数，并使用 `--threads 0 -l 1000`。Python 与本项目得到逐字节一致的亮度

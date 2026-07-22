@@ -4996,6 +4996,53 @@ public void VhsVideoLowPassMatchesScipySosResponseBits()
         DoubleBitsSha256(magnitude));
 }
 
+[Theory(DisplayName = "VHS RF extra low-pass matches SciPy SOS bits")]
+[InlineData(2, 0.3275, "CF38E344054215FBABFF8776E814DAC1145AAFC71C12E00D2C162606EF171E08", "D42EC9D8C218A3E6AE021EEFDA0615FEA6CEBEACB3946C6C091B388A239341BC")]
+[InlineData(3, 0.36, "4FC81659124602118DB58CE4C0678648EEE0E60834AF130C0F7A744B5A6E369E", "62217F2B459C009E6C884BA2BA79B43916DA51473DAF31A5B4FF0186D94BBA4D")]
+[InlineData(14, 0.34, "12B43ED032D8D93CB878D4597B924A18956ED053E02D86A163AA2F7FFE08CA9A", "892BF89766C150730D5D1C1793064F9F4560A7C137F089E8A18EE0AAE9FFAF40")]
+[InlineData(15, 0.3825, "073716D6A89D3084DEDF6B59DD18A166B989DEF7A9D0707CF419CCA28654CFCD", "A0A0FC15C8A9308702CD4FDB744CBE35B5911866C3E01EB5559F131616AF065A")]
+[InlineData(16, 0.5155, "5FFA57406908CC0B49402A7F6984E8F63DEC7B9E3466BA663356085B886CA630", "8D573F77BB7DCE2CF227AF052FD2F8BF785F618963CF4877799AD5F6579F772A")]
+[InlineData(17, 0.3575, "5C6D0C75D26649009F2D3E7C8F0BC950D1ED4B13FC5E8D4BE8C816354A408DC6", "5E40B11CC1E17EFF1AA31C0CEBB75E3A90DE9FDEDC4435E88DC9C7F6B7324F3D")]
+[InlineData(20, 0.2955, "CD974BB7CFDAF4588912B3E43510BE7D63807114C1EFF4B92E822873495A7A25", "BAFE536D4F318FD2E73C3FD908CCA2E947727A3FA1A02B2AACA0160CA11ABD1C")]
+[InlineData(25, 0.455, "5ABE21DE65655670A48444CF566C2958B26E7BA26CB2CFC60E9FDA343E546997", "47811BC1AC99EFA64BD50477B643A7065AF33CDEDC1DBE1F65D85441CD76DBB5")]
+public void VhsRfExtraLowPassMatchesScipySosBits(
+    int order,
+    double normalizedCutoff,
+    string expectedSectionHash,
+    string expectedResponseHash)
+{
+    SosSection[] sections = IirFilterDesign.ButterworthLowPassScipySos(
+        order,
+        normalizedCutoff);
+    AssertEqual(
+        expectedSectionHash,
+        DoubleBitsSha256(sections.SelectMany(section => new[]
+        {
+            section.B0,
+            section.B1,
+            section.B2,
+            section.A0,
+            section.A1,
+            section.A2
+        }).ToArray()));
+    AssertEqual(
+        expectedResponseHash,
+        ComplexBitsSha256(IirFilterDesign.FrequencyResponse(sections, 32_768)));
+}
+
+[Fact(DisplayName = "PAL VHS RF response uses the SciPy extra low-pass path")]
+public void PalVhsRfResponseUsesScipyExtraLowPassPath()
+{
+    FormatParameterSet parameters = FormatCatalog.Default.GetTapeParameters("PAL", "VHS", "sp");
+    DecodeFilterSet filters = DecodeFilterSetBuilder.BuildBasic(
+        parameters,
+        sampleRateHz: 40_000_000.0,
+        blockLength: 32_768);
+    AssertEqual(
+        "37A812C53A7A5BAF918E5B9ADAAA266CA12F51E8EB4205699E7FD53F598A750A",
+        ComplexBitsSha256(filters.RfVideo));
+}
+
 [Theory(DisplayName = "VHS RF high-pass SOS matches SciPy section bits")]
 [InlineData(1, "38514F5E186DB41B0A41D6CDEF92EE179A129526D3ECF3484546B08810B8D9BA")]
 [InlineData(3, "D4C3ECF7ED506F25FAF4528C1D7401ABFDC113403A9407D4606381240A0F96AB")]
@@ -12668,15 +12715,37 @@ public void TbcFieldSequenceEnginePerformsVhsTerminalLookahead()
         int lookaheadIndex = log.IndexOf("terminal lookahead marker", StringComparison.Ordinal);
         int firstStatusIndex = log.IndexOf("File Frame 0: VHS ", StringComparison.Ordinal);
         int secondStatusIndex = log.IndexOf("File Frame 1: VHS ", StringComparison.Ordinal);
+        int firstDecodeIndex = log.IndexOf("decode marker 1", StringComparison.Ordinal);
+        int firstFieldDiagnosticIndex = log.IndexOf("field diagnostic 1", StringComparison.Ordinal);
+        int secondDecodeIndex = log.IndexOf("decode marker 2", StringComparison.Ordinal);
+        int secondFieldDiagnosticIndex = log.IndexOf("field diagnostic 2", StringComparison.Ordinal);
+        int firstRenderIndex = log.IndexOf("render diagnostic 1", StringComparison.Ordinal);
         int thirdDecodeIndex = log.IndexOf("decode marker 3", StringComparison.Ordinal);
         int thirdFieldDiagnosticIndex = log.IndexOf("field diagnostic 3", StringComparison.Ordinal);
+        int secondRenderIndex = log.IndexOf("render diagnostic 2", StringComparison.Ordinal);
+        int fourthDecodeIndex = log.IndexOf("decode marker 4", StringComparison.Ordinal);
+        int fourthFieldDiagnosticIndex = log.IndexOf("field diagnostic 4", StringComparison.Ordinal);
         int thirdRenderIndex = log.IndexOf("render diagnostic 3", StringComparison.Ordinal);
+        int fifthDecodeIndex = log.IndexOf("decode marker 5", StringComparison.Ordinal);
+        int fifthFieldDiagnosticIndex = log.IndexOf("field diagnostic 5", StringComparison.Ordinal);
+        int fourthRenderIndex = log.IndexOf("render diagnostic 4", StringComparison.Ordinal);
         AssertTrue(lookaheadIndex >= 0);
-        AssertTrue(thirdDecodeIndex < firstStatusIndex);
-        AssertTrue(firstStatusIndex < thirdFieldDiagnosticIndex);
-        AssertTrue(firstStatusIndex < thirdRenderIndex);
-        AssertTrue(lookaheadIndex < secondStatusIndex);
-        Assert.DoesNotContain("field diagnostic 5", log, StringComparison.Ordinal);
+        AssertTrue(firstDecodeIndex < firstFieldDiagnosticIndex);
+        AssertTrue(firstFieldDiagnosticIndex < secondDecodeIndex);
+        AssertTrue(secondDecodeIndex < secondFieldDiagnosticIndex);
+        AssertTrue(secondFieldDiagnosticIndex < firstRenderIndex);
+        AssertTrue(firstRenderIndex < thirdDecodeIndex);
+        AssertTrue(thirdDecodeIndex < thirdFieldDiagnosticIndex);
+        AssertTrue(thirdFieldDiagnosticIndex < secondRenderIndex);
+        AssertTrue(secondRenderIndex < firstStatusIndex);
+        AssertTrue(firstStatusIndex < fourthDecodeIndex);
+        AssertTrue(fourthDecodeIndex < fourthFieldDiagnosticIndex);
+        AssertTrue(fourthFieldDiagnosticIndex < thirdRenderIndex);
+        AssertTrue(thirdRenderIndex < fifthDecodeIndex);
+        AssertTrue(fifthDecodeIndex < lookaheadIndex);
+        AssertTrue(lookaheadIndex < fifthFieldDiagnosticIndex);
+        AssertTrue(fifthFieldDiagnosticIndex < fourthRenderIndex);
+        AssertTrue(fourthRenderIndex < secondStatusIndex);
         Assert.DoesNotContain("render diagnostic 5", log, StringComparison.Ordinal);
         string firstStatus = "File Frame 0: VHS ";
         string secondStatus = "File Frame 1: VHS ";
