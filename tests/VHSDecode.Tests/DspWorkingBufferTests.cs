@@ -667,10 +667,16 @@ public sealed class DspWorkingBufferTests
         double[] input = Enumerable.Range(0, length)
             .Select(index => Math.Sin(index * 0.013) + (0.125 * Math.Cos(index * 0.029)))
             .ToArray();
+        input[0] = 0.0;
+        input[1] = -0.0;
+        input[2] = double.Epsilon;
+        input[^1] = -double.Epsilon;
         TransferFunction[] filters =
         [
             new TransferFunction([1.0], [1.0]),
+            IirFilterDesign.ButterworthLowPassTransferFunction(order: 3, normalizedCutoff: 0.2),
             IirFilterDesign.ButterworthLowPassTransferFunction(order: 4, normalizedCutoff: 0.2),
+            IirFilterDesign.ButterworthHighPassTransferFunction(order: 5, normalizedCutoff: 0.35),
             IirFilterDesign.ButterworthHighPassTransferFunction(order: 9, normalizedCutoff: 0.35),
             new TransferFunction([0.25, 0.1], [2.0, -0.3, 0.1]),
             new TransferFunction([0.2, 0.1, 0.05], [1.0, -0.25])

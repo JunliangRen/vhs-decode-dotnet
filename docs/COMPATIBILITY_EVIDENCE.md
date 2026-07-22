@@ -1690,6 +1690,24 @@ possible capture has already been proven byte-for-byte identical.
   large-seek NTSC-J gate also exactly matched Python v0.4.0 `--threads 0` for
   those six artifacts, all 2,000 ordered `fileLoc` values from `243978240`
   through `1577932800`, and all 52 startup recovery diagnostics
+- the fixed-order BA-IIR candidate specializes the common order-3, order-4,
+  and order-5 paths without changing coefficient types, per-sample expression
+  order, state updates, or buffer ownership; all other shapes retain the
+  generic implementation. Isolated medians improved by 1.77-1.88x with
+  unchanged managed allocation. Five interleaved real PAL 160-frame
+  `--threads 20` pairs moved wall medians from 14.116 to 12.897 s (8.6%) and
+  CPU medians from 53.156 to 49.813 s (6.3%); every candidate run was faster,
+  and all ten runs produced one exact luma, chroma, JSON, stdout,
+  normalized-stderr, and timestamp-normalized-log hash set. Two reversed-order
+  400-frame pairs were 7.0-7.7% faster, stayed at or below 1.551 GiB peak
+  working set, and matched those six artifacts. Candidate
+  serial/default-5/20/64-worker runs were also exact across all six artifacts.
+  A fresh 160-frame large-seek gate on the same local NTSC-J RF capture also
+  matched all six artifacts between the main baseline at 20 workers and the
+  candidate at serial/default-5/20/64 workers. PAL and NTSC-J construct the
+  same three specialized filter orders, the independent scalar xUnit oracle
+  covers all three paths, all 848 tests pass, and the established 1,000-frame
+  NTSC-J gate above remains unchanged
 - one-frame non-default NTSC VHS fixtures are also byte-exact for
   `--sharpness 20`, `--fm_audio_notch 10`, and the combined
   `--high_boost 1.3 --sharpness 20 --nld --sd` path; the stateful sharpness
