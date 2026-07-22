@@ -19,7 +19,7 @@ public sealed class FfmpegPcm16SampleLoader : IRfSampleLoader, IDisposable
     private readonly Func<string, long, Stream>? _openOutput;
     private readonly Func<int?>? _exitCodeAfterOutputEnd;
     private readonly Func<string>? _stderrProvider;
-    private readonly StringBuilder _stderr = new();
+    private readonly FfmpegDiagnosticTailBuffer _stderr = new();
     private ContainerAudioInfo? _containerAudioInfo;
     private Stream? _output;
     private Process? _process;
@@ -379,7 +379,7 @@ public sealed class FfmpegPcm16SampleLoader : IRfSampleLoader, IDisposable
             {
                 frameGeometry.Writer.TryWrite(geometry);
             }
-            else if (IsFfmpegErrorLine(args.Data))
+            else
             {
                 _stderr.AppendLine(args.Data);
             }
@@ -471,11 +471,6 @@ public sealed class FfmpegPcm16SampleLoader : IRfSampleLoader, IDisposable
             return null;
         }
     }
-
-    private static bool IsFfmpegErrorLine(string line)
-        => line.Contains("[error]", StringComparison.OrdinalIgnoreCase)
-            || line.Contains("[fatal]", StringComparison.OrdinalIgnoreCase)
-            || line.Contains("[panic]", StringComparison.OrdinalIgnoreCase);
 
     private ContainerAudioInfo ResolveContainerAudioInfo(string filename)
     {
@@ -665,7 +660,8 @@ public sealed class FfmpegPcm16SampleLoader : IRfSampleLoader, IDisposable
             return external.Trim();
         }
 
-        return _stderr.Length == 0 ? "no ffmpeg error output was captured" : _stderr.ToString().Trim();
+        string captured = _stderr.GetText();
+        return captured.Length == 0 ? "no ffmpeg error output was captured" : captured;
     }
 
     private void CloseProcess()
@@ -775,5 +771,71 @@ public sealed class FfmpegPcm16SampleLoader : IRfSampleLoader, IDisposable
         public static ContainerAudioInfo Default { get; } = new(
             ContainerAudioSampleRateHz,
             false);
+    }
+}
+
+internal sealed class FfmpegDiagnosticTailBuffer
+{
+    internal const int DefaultMaximumLines = 64;
+    internal const int DefaultMaximumCharacters = 32 * 1024;
+
+    private readonly object _gate = new();
+    private readonly Queue<string> _lines = new();
+    private readonly int _maximumLines;
+    private readonly int _maximumCharacters;
+    private int _storedCharacters;
+
+    public FfmpegDiagnosticTailBuffer(
+        int maximumLines = DefaultMaximumLines,
+        int maximumCharacters = DefaultMaximumCharacters)
+    {
+        _maximumLines = maximumLines > 0
+            ? maximumLines
+            : throw new ArgumentOutOfRangeException(nameof(maximumLines));
+        _maximumCharacters = maximumCharacters > Environment.NewLine.Length
+            ? maximumCharacters
+            : throw new ArgumentOutOfRangeException(nameof(maximumCharacters));
+    }
+
+    public void Clear()
+    {
+        lock (_gate)
+        {
+            _lines.Clear();
+            _storedCharacters = 0;
+        }
+    }
+
+    public void AppendLine(string line)
+    {
+        if (line.Length == 0)
+        {
+            return;
+        }
+
+        int maximumLineCharacters = _maximumCharacters - Environment.NewLine.Length;
+        string retained = line.Length <= maximumLineCharacters
+            ? line
+            : line[^maximumLineCharacters..];
+        int retainedCharacters = retained.Length + Environment.NewLine.Length;
+
+        lock (_gate)
+        {
+            _lines.Enqueue(retained);
+            _storedCharacters += retainedCharacters;
+            while (_lines.Count > _maximumLines || _storedCharacters > _maximumCharacters)
+            {
+                string removed = _lines.Dequeue();
+                _storedCharacters -= removed.Length + Environment.NewLine.Length;
+            }
+        }
+    }
+
+    public string GetText()
+    {
+        lock (_gate)
+        {
+            return string.Join(Environment.NewLine, _lines);
+        }
     }
 }

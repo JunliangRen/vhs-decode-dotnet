@@ -284,6 +284,26 @@ public sealed class RfContainerLoaderIntegrationTests
             out _));
     }
 
+    [Fact(DisplayName = "FFmpeg diagnostic tail retains untagged failures within fixed bounds")]
+    public void FfmpegDiagnosticTailRetainsUntaggedFailuresWithinFixedBounds()
+    {
+        var tail = new FfmpegDiagnosticTailBuffer(maximumLines: 2, maximumCharacters: 128);
+        tail.AppendLine("[info] startup details");
+        tail.AppendLine("Error opening input file without a level tag");
+        tail.AppendLine("Invalid data found when processing input");
+
+        string captured = tail.GetText();
+        Assert.DoesNotContain("startup details", captured, StringComparison.Ordinal);
+        Assert.Contains("Error opening input file", captured, StringComparison.Ordinal);
+        Assert.Contains("Invalid data", captured, StringComparison.Ordinal);
+
+        var longLineTail = new FfmpegDiagnosticTailBuffer(maximumLines: 1, maximumCharacters: 32);
+        longLineTail.AppendLine($"prefix-{new string('x', 64)}-tail");
+        string bounded = longLineTail.GetText();
+        Assert.True(bounded.Length + Environment.NewLine.Length <= 32);
+        Assert.EndsWith("-tail", bounded, StringComparison.Ordinal);
+    }
+
     [Fact(DisplayName = "PyAV plane padding rejects truncated reported frames")]
     public void PyAvPlanePaddingRejectsTruncatedReportedFrames()
     {
