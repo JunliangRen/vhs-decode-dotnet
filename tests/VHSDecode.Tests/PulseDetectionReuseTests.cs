@@ -60,6 +60,27 @@ public sealed class PulseDetectionReuseTests
                 expected.Select(pulse => new Pulse(pulse.Start * 7, pulse.Length * 7)),
                 scaled);
         }
+
+        for (int pulseStart = 1; pulseStart <= 16; pulseStart++)
+        {
+            double[] data = Enumerable.Repeat(10.0, 48).ToArray();
+            Array.Fill(data, -1.0, pulseStart, 9);
+            data[pulseStart - 1] = double.NaN;
+            data[pulseStart + 3] = double.NaN;
+            Pulse[] expected = FindPulsesScalar(
+                data,
+                high: 0.0,
+                minimumSyncLength: 0,
+                maximumSyncLength: data.Length);
+
+            Assert.Equal(
+                expected,
+                PulseDetection.FindPulses(
+                    data,
+                    high: 0.0,
+                    minimumSyncLength: 0,
+                    maximumSyncLength: data.Length));
+        }
     }
 
     [Fact(DisplayName = "Reusable pulse storage clears and scales positions exactly")]

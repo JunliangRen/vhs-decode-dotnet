@@ -155,6 +155,10 @@ release compatibility remain the first constraint.
   span and applies an `Enumerable.Min`-compatible float64 scan, avoiding an
   extra full-window copy. Median scratch ownership and NaN/signed-zero bit
   semantics remain unchanged.
+- Pulse detection uses AVX comparisons only to skip sample runs without a
+  threshold transition. Ordered scalar code still commits each state change,
+  validates pulse lengths, and appends results; unsupported CPUs retain the
+  original scalar path.
 - VHS field decode overlaps luma TBC rendering with chroma field decoding when
   workers are enabled. Only one chroma task can be in flight, and its state is
   committed on the calling thread before the next field advances.
@@ -311,6 +315,16 @@ JSON, and stdout SHA-256, all 2,000 ordered `fileLoc` values, and all 3,473
 timestamp-normalized log lines. This checkpoint also verifies the native
 `.ldf` loader's upstream PyAV first-frame PTS behavior after a large seek.
 
+A fresh strict recheck of the AVX pulse-transition pass used the same local
+NTSC-J `.ldf` capture. Current Python v0.4.0 `--threads 0` completed in
+390.077 s and the port at `--threads 20` in 57.609 s (6.77x; 85.2% less wall
+time). Luma, chroma, JSON, stdout, all 2,000 ordered `fileLoc` values, and all
+3,413 timestamp-normalized log lines matched exactly; the port peaked at
+1.323 GiB working set. A direct Python rerun and clean merged main both
+produced that current 3,413-line log, so the 3,473-line record above remains a
+historical checkpoint. Python CPU and memory are omitted because its launcher
+delegates work to child processes.
+
 An independent no-seek startup checkpoint used a second local PAL `.lds`
 capture with the same PAL VHS options,
 `--threads 0`, and `-l 1000`. Python and this port produced byte-identical luma
@@ -324,8 +338,12 @@ those `gitCommit`/`version` identity strings were the only JSON differences.
 This correctness run overlapped another decode process, so its timing is not a
 benchmark result.
 
-These numbers are fixture-specific, not universal benchmarks. The 40-frame
-tuning A/B runs below used .NET SDK/runtime `11.0.100-preview.6.26359.118`,
+These numbers are fixture-specific, not universal benchmarks. In a three-run
+same-binary 160-frame NTSC-J A/B at `--threads 20`, scalar/AVX wall medians
+were 12.029/11.854 s (1.5% faster), and CPU medians were 46.984/46.250 s
+(1.6% lower). All luma, chroma, JSON, stdout, normalized-log hashes, and
+`fileLoc` ranges matched. The 40-frame tuning A/B runs below used .NET
+SDK/runtime `11.0.100-preview.6.26359.118`,
 `--threads 20`, default chroma, and default resampling. On a reproducible
 40-frame PAL probe,
 the saved pre-continuous-pipeline baseline median was 11.60 s and the latest
