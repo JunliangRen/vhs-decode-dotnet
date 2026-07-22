@@ -252,6 +252,9 @@ possible capture has already been proven byte-for-byte identical.
   matching `LoadLDF` even when the logical frame needs no plane padding; a
   direct 32,768-sample large-seek block matches the v0.4.0 float64 SHA-256
   `A15E39BFDBE078336B11DA499A489B2AAD1467136A7F848482591D89AD1940DA`
+- non-geometry FFmpeg stderr retains a thread-safe tail capped at 64 lines and
+  32 KiB, so untagged failure details remain available without unbounded memory
+  growth during long container decodes
 - complete static 48 kHz IMA ADPCM WAV inputs use an internal FFmpeg
   n8.1.2-compatible 2-, 3-, 4-, and 5-bit mono/stereo block decoder, avoiding
   host-FFmpeg decoder drift; exact logical-frame, stereo-downmix, plane-padding,
@@ -1888,7 +1891,7 @@ dotnet test --solution VHSDecodeDotNet.slnx --no-build
 ```
 
 The current formal solution build completes with zero warnings and errors, and
-the xUnit v3 project exposes 847 independently discoverable compatibility tests
+the xUnit v3 project exposes 848 independently discoverable compatibility tests
 to `dotnet test` and Visual Studio Test Explorer. On the
 same Windows machine and fixtures, Release wall-clock measurements for one
 frame were 2.346 s versus 7.193 s for NTSC VHS and 1.651 s versus 5.865 s for
