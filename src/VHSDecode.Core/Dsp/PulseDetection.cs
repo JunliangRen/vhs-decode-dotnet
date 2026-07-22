@@ -1,3 +1,8 @@
+using System.Numerics;
+using System.Runtime.InteropServices;
+using System.Runtime.Intrinsics;
+using System.Runtime.Intrinsics.X86;
+
 namespace VHSDecode.Core.Dsp;
 
 public readonly record struct Pulse(int Start, int Length);
@@ -74,13 +79,109 @@ public static class PulseDetection
             return;
         }
 
-        FindPulsesScalar(
-            syncReference,
-            high,
-            minimumSyncLength,
-            maximumSyncLength,
-            pulses,
-            positionScale);
+        if (Avx.IsSupported && syncReference.Length >= Vector256<double>.Count + 1)
+        {
+            FindPulsesAvx(
+                syncReference,
+                high,
+                minimumSyncLength,
+                maximumSyncLength,
+                pulses,
+                positionScale);
+        }
+        else
+        {
+            FindPulsesScalar(
+                syncReference,
+                high,
+                minimumSyncLength,
+                maximumSyncLength,
+                pulses,
+                positionScale);
+        }
+    }
+
+    private static void FindPulsesAvx(
+        ReadOnlySpan<double> syncReference,
+        double high,
+        int minimumSyncLength,
+        int maximumSyncLength,
+        List<Pulse> pulses,
+        int positionScale)
+    {
+        bool inPulse = syncReference[0] <= high;
+        int currentStart = 0;
+        int position = 1;
+        int lastVectorStart = syncReference.Length - Vector256<double>.Count;
+        Vector256<double> highVector = Vector256.Create(high);
+        ref double source = ref MemoryMarshal.GetReference(syncReference);
+
+        // SIMD only locates the next state transition; pulse commits remain scalar and ordered.
+        while (position <= lastVectorStart)
+        {
+            Vector256<double> values = Vector256.LoadUnsafe(ref source, (nuint)position);
+            Vector256<double> transitions = inPulse
+                ? Avx.Compare(
+                    values,
+                    highVector,
+                    FloatComparisonMode.OrderedGreaterThanNonSignaling)
+                : Avx.Compare(
+                    values,
+                    highVector,
+                    FloatComparisonMode.OrderedLessThanOrEqualNonSignaling);
+            int transitionMask = Avx.MoveMask(transitions);
+            if (transitionMask == 0)
+            {
+                position += Vector256<double>.Count;
+                continue;
+            }
+
+            position += BitOperations.TrailingZeroCount((uint)transitionMask);
+            if (inPulse)
+            {
+                int length = position - currentStart;
+                if (InRange(length, minimumSyncLength, maximumSyncLength) && currentStart != 0)
+                {
+                    pulses.Add(new Pulse(
+                        currentStart * positionScale,
+                        length * positionScale));
+                }
+
+                inPulse = false;
+            }
+            else
+            {
+                currentStart = position;
+                inPulse = true;
+            }
+
+            position++;
+        }
+
+        for (; position < syncReference.Length; position++)
+        {
+            double value = syncReference[position];
+            if (inPulse)
+            {
+                if (value > high)
+                {
+                    int length = position - currentStart;
+                    if (InRange(length, minimumSyncLength, maximumSyncLength) && currentStart != 0)
+                    {
+                        pulses.Add(new Pulse(
+                            currentStart * positionScale,
+                            length * positionScale));
+                    }
+
+                    inPulse = false;
+                }
+            }
+            else if (value <= high)
+            {
+                currentStart = position;
+                inPulse = true;
+            }
+        }
     }
 
     private static void FindPulsesScalar(

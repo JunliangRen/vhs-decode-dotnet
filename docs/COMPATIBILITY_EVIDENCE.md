@@ -854,6 +854,11 @@ possible capture has already been proven byte-for-byte identical.
   including bit-exact NTSC VHS order-8 BA coefficients
 - ports of upstream zero-crossing, pulse detection, Hilbert multiplier, and
   super-Gaussian envelope helpers
+- pulse detection uses AVX comparisons only to locate the next threshold state
+  transition; state commits, pulse-length filtering, position scaling, and
+  append order remain scalar. Unsupported AVX CPUs and short inputs retain the
+  original scalar path. Randomized xUnit v3 coverage checks every SIMD-lane
+  start offset and NaN boundaries against a scalar oracle
 - ports of fallback v-sync location means and crude sync/blank level detection
 - VHS sync threshold selection now estimates sync/blank levels from the 0.5 MHz
   branch when available, and honors upstream-style `--level_detect_divisor`
@@ -1653,6 +1658,21 @@ possible capture has already been proven byte-for-byte identical.
   `7DB59631905D6D9C78A965D93DB6CF76D36B98C99AC34BA39FD63CDAB17EE3A0`;
   wall times were 397.158 s for Python, then 175.531 s, 80.761 s, and
   58.527 s for the port's serial, default, and 20-worker modes respectively
+- a fresh follow-up of that NTSC-J 1,000-frame gate used current Python v0.4.0
+  `--threads 0` and the AVX pulse-transition candidate at `--threads 20`.
+  Wall times were 390.077 s and 57.609 s respectively (6.77x; 85.2% less),
+  with exact luma, chroma, JSON, stdout, all 2,000 ordered `fileLoc` values,
+  and all 3,413 current timestamp-normalized log lines. The normalized-log
+  SHA-256 was
+  `AFD6419A7D8474C53F309D16806180541AC8D616E0B733CAC498C9EEE805CEF6`.
+  A direct Python rerun and clean merged main reproduced that 3,413-line gate;
+  the 3,473-line archive above remains historical and was not changed by the
+  AVX candidate. The candidate used 232.172 s CPU (4.03 active cores) and
+  peaked at 1.323 GiB working set. Python CPU/memory are omitted because its
+  launcher delegates the decode to child processes. A three-run same-binary
+  160-frame scalar/AVX A/B at `--threads 20` moved wall medians from
+  12.029 s to 11.854 s (1.5%) and CPU medians from 46.984 s to 46.250 s
+  (1.6%); all five hashes and `fileLoc` ranges remained exact
 - one-frame non-default NTSC VHS fixtures are also byte-exact for
   `--sharpness 20`, `--fm_audio_notch 10`, and the combined
   `--high_boost 1.3 --sharpness 20 --nld --sd` path; the stateful sharpness
