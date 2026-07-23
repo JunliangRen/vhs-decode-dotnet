@@ -134,7 +134,10 @@ The DSP backend is selected explicitly with
 this .NET port and is not part of the upstream `oyvindln/vhs-decode` v0.4.0
 CLI. `exact` is the default and retains the existing managed compatibility
 path without probing or loading Intel IPP. `ipp-fast` is an opt-in Windows x64
-backend for supported Intel CPUs; it loads the statically linked
+backend; Intel CPUs are the officially supported target, while compatible
+non-Intel x64 CPUs are a best-effort experimental path in this project. A
+positive IPP non-Intel vendor warning is accepted only when the reported
+feature mask includes SSE4.2. The backend loads the statically linked
 `vhsdecode_ipp.dll`, reports the IPP version and selected ISA, and fails clearly
 if the bridge, ABI, or CPU is unavailable. It never silently falls back to
 `exact`. In v1, only the VHS real-RF FFT stage is routed through IPP. CVBS, LD,

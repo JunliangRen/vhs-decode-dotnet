@@ -132,8 +132,11 @@ DSP backend は `--dsp-backend exact|ipp-fast` で明示的に選択します。
 parameter はこの .NET port の experimental extension であり、upstream
 `oyvindln/vhs-decode` v0.4.0 CLI には含まれません。`exact` が default で、
 既存の managed 互換経路を維持し、Intel IPP の probe や load は行いません。
-`ipp-fast` は対応 Intel CPU 向けの opt-in Windows x64 backend です。静的 link
-済みの `vhsdecode_ipp.dll` を load し、IPP version と選択された ISA を表示します。
+`ipp-fast` は opt-in Windows x64 backend です。Intel CPU が official support
+target であり、compatible non-Intel x64 CPU はこの project の best-effort
+experimental path です。IPP が返す feature mask に SSE4.2 が含まれる場合のみ、
+正の non-Intel vendor warning を受け入れます。静的 link 済みの
+`vhsdecode_ipp.dll` を load し、IPP version と選択された ISA を表示します。
 bridge、ABI、CPU が利用できない場合は明確に失敗し、`exact` へ暗黙に fallback
 しません。v1 で IPP を使うのは VHS real-RF FFT stage のみです。CVBS、LD、HiFi
 は未対応の `ipp-fast` を明示的に拒否し、Exact kernel を実行した結果を誤って

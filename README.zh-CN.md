@@ -123,12 +123,14 @@
 
 DSP 后端通过 `--dsp-backend exact|ipp-fast` 显式选择。该参数是本 .NET 移植
 新增的实验扩展，不属于上游 `oyvindln/vhs-decode` v0.4.0 CLI。`exact` 是默认值，
-保留现有托管兼容路径，并且不会探测或加载 Intel IPP。`ipp-fast` 是面向受支持
-Intel CPU 的 Windows x64 可选后端；它会加载静态链接的 `vhsdecode_ipp.dll`，
-报告 IPP 版本和实际选择的 ISA，并在桥接 DLL、ABI 或 CPU 不可用时明确失败，
-不会静默回退到 `exact`。v1 当前只有 VHS real-RF FFT 阶段走 IPP。CVBS、LD
-和 HiFi 会明确拒绝不支持的 `ipp-fast`，不会悄悄改跑 Exact 内核而产生虚假基准；
-IIR/SOS 以及 HiFi/LD 加速仍是分阶段的后续工作，并非当前活动路径。
+保留现有托管兼容路径，并且不会探测或加载 Intel IPP。`ipp-fast` 是 Windows x64
+可选后端：Intel CPU 是官方支持目标，兼容的非 Intel x64 CPU 则是本项目的
+best-effort 实验路径。只有 IPP 返回的特征掩码包含 SSE4.2 时，才会接受其正值
+non-Intel vendor warning。后端会加载静态链接的 `vhsdecode_ipp.dll`，报告 IPP
+版本和实际选择的 ISA，并在桥接 DLL、ABI 或 CPU 不可用时明确失败，不会静默
+回退到 `exact`。v1 当前只有 VHS real-RF FFT 阶段走 IPP。CVBS、LD 和 HiFi 会
+明确拒绝不支持的 `ipp-fast`，不会悄悄改跑 Exact 内核而产生虚假基准；IIR/SOS
+以及 HiFi/LD 加速仍是分阶段的后续工作，并非当前活动路径。
 
 `ipp-fast` 是数值接近的性能模式，不是逐字节兼容模式。FFT 和向量数学求值差异
 可能改变浮点位模式，并进一步影响阈值决策、元数据、恢复、日志和输出文件。
