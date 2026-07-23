@@ -3,6 +3,7 @@ using System.Text.Json;
 using System.Text.Json.Nodes;
 using VHSDecode.Core.CommandLine;
 using VHSDecode.Core.Dsp;
+using VHSDecode.Core.Dsp.Ipp;
 using VHSDecode.Core.Formats;
 using VHSDecode.Core.Rf;
 using VHSDecode.Core.Tbc;
@@ -91,7 +92,8 @@ public sealed record DecodeExecutionOptions(
     bool IgnoreLeadOut,
     bool VerboseVits,
     bool UseProfiler,
-    bool CxAdcCompatibilityMode)
+    bool CxAdcCompatibilityMode,
+    DspBackend DspBackend)
 {
     public BigInteger RequestedThreadsInteger { get; init; } = new(RequestedThreads);
 }
@@ -137,6 +139,13 @@ public static class DecodeSessionFactory
         if (blockLength <= 0 || blockLength % 2 != 0)
         {
             throw new ArgumentException("Block length must be a positive even value.", nameof(blockLength));
+        }
+
+        DspBackend dspBackend = DspBackendParser.Parse(command.Get<string>("dsp_backend"));
+        DspBackendSupport.EnsureCommandSupported(dspBackend, command.Spec.Name);
+        if (dspBackend == DspBackend.IppFast)
+        {
+            _ = IppRuntime.RequireAvailable();
         }
 
         return command.Spec.Name switch
@@ -260,7 +269,8 @@ public static class DecodeSessionFactory
             BuildCvbsDecodeOptions(command, videoOutput),
             BuildRfInputProcessor(command),
             WriteDiagnostic,
-            retainRfDiagnosticChannels: command.Spec.Name != "vhs");
+            retainRfDiagnosticChannels: command.Spec.Name != "vhs",
+            dspBackend: executionOptions.DspBackend);
         var streamDecoder = new RfBlockStreamDecoder(
             pipeline,
             blockLength,
@@ -562,7 +572,8 @@ public static class DecodeSessionFactory
             IgnoreLeadOut: BoolValueOrDefault(command, "ignoreleadout"),
             VerboseVits: BoolValueOrDefault(command, "verboseVITS"),
             UseProfiler: BoolValueOrDefault(command, "use_profiler"),
-            CxAdcCompatibilityMode: command.Spec.Name == "vhs" && command.Get<bool>("cxadc"))
+            CxAdcCompatibilityMode: command.Spec.Name == "vhs" && command.Get<bool>("cxadc"),
+            DspBackend: DspBackendParser.Parse(command.Get<string>("dsp_backend")))
         {
             RequestedThreadsInteger = requestedThreadsInteger
         };

@@ -32,6 +32,8 @@ public static class CliSpecs
 
     public static readonly string[] VideoSystems = ["PAL", "PAL_M", "PALM", "NTSC", "MESECAM", "405", "819", "NLINHA"];
 
+    public static readonly string[] DspBackends = ["exact", "ipp-fast"];
+
     public static DecodeCommandSpec Vhs { get; } = new(
         "vhs",
         "Extracts video from RAW RF captures of colour-under & composite modulated tapes",
@@ -80,6 +82,7 @@ public static class CliSpecs
         yield return Freq("inputfreq", ["-f", "--frequency"], null, ParseCommonInputFrequency, "_parse_frequency");
         yield return Flag("cxadc", ["--cxadc"], hidden: true);
         yield return Int("threads", ["-t", "--threads"], defaultThreads);
+        yield return DspBackend();
         yield return Flag("chroma_trap", ["--ct", "--chroma_trap"]);
         yield return Int("sharpness", ["--sl", "--sharpness"], 0);
         yield return Freq("notch", ["--notch"], null);
@@ -198,6 +201,7 @@ public static class CliSpecs
             pythonDefaultValue: 0);
         yield return Str("wow_interpolation_method", ["--wow_interpolation_method"], "linear", ["linear", "quadratic", "cubic"]);
         yield return Int("threads", ["-t", "--threads"], 4);
+        yield return DspBackend();
         yield return Freq("inputfreq", ["-f", "--frequency"], null);
         yield return Int("analog_audio_freq", ["--analog_audio_frequency"], 44100);
         yield return Flag("ntsc_audio_rate", ["--ntsc_audio_rate"]);
@@ -216,6 +220,7 @@ public static class CliSpecs
         yield return Freq("inputfreq", ["--frequency", "-f"], 40.0, pythonDefaultValue: 40);
         yield return Flag("overwrite", ["--overwrite"]);
         yield return Int("threads", ["--threads", "-t"], Environment.ProcessorCount);
+        yield return DspBackend();
         yield return Flag("preview", ["--preview"]);
         yield return Flag("UI", ["--gui"]);
         yield return Flag("GRC", ["--gnuradio"]);
@@ -400,6 +405,9 @@ public static class CliSpecs
             PythonDefaultValue = pythonDefaultValue ?? defaultValue,
             ParseFrequencyMHz = parseFrequencyMHz
         };
+
+    private static OptionSpec DspBackend()
+        => Str("dsp_backend", ["--dsp-backend"], "exact", DspBackends, Lower);
 
     private static double ParseCommonInputFrequency(string value)
         => value == "cxadc"

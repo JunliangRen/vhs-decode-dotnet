@@ -28,12 +28,13 @@ public sealed class RfBlockDecodePipeline : IDisposable
         CvbsDecodeOptions? cvbsOptions = null,
         IRfInputProcessor? inputProcessor = null,
         Action<string, string>? diagnosticLogger = null,
-        bool retainRfDiagnosticChannels = true)
+        bool retainRfDiagnosticChannels = true,
+        DspBackend dspBackend = DspBackend.Exact)
     {
         _loader = loader;
         _filters = filters;
         _filterOptions = filterOptions ?? new DecodeFilterOptions();
-        _demodulator = new RfDemodulator(sampleRateHz);
+        _demodulator = new RfDemodulator(sampleRateHz, dspBackend);
         _referenceFilters = filters.LdVideoBurst is null && filters.LdVideoPilot is null && !_filterOptions.LdClipDemodForVideo
             ? null
             : new RfVideoReferenceFilterSet(
@@ -209,7 +210,14 @@ public sealed class RfBlockDecodePipeline : IDisposable
 
     public void Dispose()
     {
-        _inputProcessor?.Dispose();
+        try
+        {
+            _demodulator.Dispose();
+        }
+        finally
+        {
+            _inputProcessor?.Dispose();
+        }
     }
 
     private void ReportDiagnostics(RfDemodulatedBlock demodulated)

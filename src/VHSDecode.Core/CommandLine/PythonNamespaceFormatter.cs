@@ -19,7 +19,7 @@ internal static class PythonNamespaceFormatter
 
         foreach (OptionSpec option in command.Spec.Options)
         {
-            if (option.Destination is "help" or "version")
+            if (option.Destination is "help" or "version" or "dsp_backend")
             {
                 continue;
             }
@@ -116,7 +116,7 @@ internal static class PythonNamespaceFormatter
 
             if (IsPythonPrintable(rune))
             {
-                result.Append(rune.ToString());
+                result.Append(rune);
             }
             else
             {

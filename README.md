@@ -2,7 +2,7 @@
 
 **[English](README.md)** | [简体中文](README.zh-CN.md) | [日本語](README.ja.md)
 
-<!-- README_SYNC: 2026-07-22.18 -->
+<!-- README_SYNC: 2026-07-24.19 -->
 
 .NET 11 rewrite of the decode-facing parts of
 [`oyvindln/vhs-decode`](https://github.com/oyvindln/vhs-decode), focused on
@@ -13,6 +13,16 @@ release `v0.4.0` at commit
 > This is a work-in-progress compatibility port. The top-level decode paths are
 > implemented and heavily tested, but the project does not yet claim
 > byte-for-byte parity for every real capture and rare option interaction.
+
+> [!NOTE]
+> `--dsp-backend ipp-fast` is an experimental extension in this .NET port; it
+> does not exist in upstream `oyvindln/vhs-decode` v0.4.0. On the two measured
+> 400-frame VHS captures at `--threads 5`, it was about 5% faster end to end.
+> NTSC-J luma, chroma, JSON, `fileLoc`, stdout, and normalized logs had zero
+> differences. PAL JSON and all 800 `fileLoc` values also had zero differences,
+> while 0.000794% of luma samples and 0.003226% of chroma samples differed
+> (0.00201% combined); every changed sample was confined to one heavily damaged
+> field out of 800. `exact` remains the default for compatibility-sensitive use.
 
 ## Contents
 
@@ -118,6 +128,37 @@ It does not mean that every possible capture has already been proven identical.
 
 Performance work is part of the implementation, while deterministic output and
 release compatibility remain the first constraint.
+
+The DSP backend is selected explicitly with
+`--dsp-backend exact|ipp-fast`. This option is an experimental extension in
+this .NET port and is not part of the upstream `oyvindln/vhs-decode` v0.4.0
+CLI. `exact` is the default and retains the existing managed compatibility
+path without probing or loading Intel IPP. `ipp-fast` is an opt-in Windows x64
+backend for supported Intel CPUs; it loads the statically linked
+`vhsdecode_ipp.dll`, reports the IPP version and selected ISA, and fails clearly
+if the bridge, ABI, or CPU is unavailable. It never silently falls back to
+`exact`. In v1, only the VHS real-RF FFT stage is routed through IPP. CVBS, LD,
+and HiFi reject `ipp-fast` as unsupported instead of quietly benchmarking
+their Exact kernels; IIR/SOS and HiFi/LD acceleration are staged follow-up
+work, not active paths.
+
+`ipp-fast` is a numerically close performance mode, not a byte-compatibility
+mode. Different FFT and vector-math evaluation can change floating-point bits
+and may affect threshold decisions, metadata, recovery, logs, and output files.
+Use `exact` whenever release-compatible hashes or behavior are required.
+
+Five interleaved and reverse-order A/B pairs were measured for each real
+capture after one warm-up pair, using 400 frames and `--threads 5`:
+
+| Capture | Median end-to-end wall-time gain | Compatibility result |
+| --- | ---: | --- |
+| NTSC-J VHS `cml.lds` | 4.73% | Luma, chroma, JSON, all 800 `fileLoc` values, stdout, and normalized logs were identical. |
+| PAL VHS `pal.ldf` | 5.00% | JSON and all 800 `fileLoc` values were identical. Luma differed in 0.000794% of samples and chroma in 0.003226% (0.00201% combined), all within one heavily damaged field; normalized logs also differed. |
+
+These results describe the tested captures and machine, not a universal speed
+or compatibility guarantee. The PAL zero-output-difference experiment required
+falling back to the Exact inverse FFT and reduced the paired median gain to
+-1.05%, so that fallback is not enabled.
 
 - `-t` / `--threads` drives bounded parallel RF demodulation and filtering;
   stream, FFmpeg, and GNU Radio reads stay ordered.
@@ -756,17 +797,29 @@ Requirements:
 
 - .NET SDK `11.0.100-preview.6.26359.118` (pinned by `global.json`)
 - Visual Studio 2026 for IDE use
+- Visual Studio C++ Build Tools and a Windows SDK when building the optional
+  Intel IPP bridge
 - `ffmpeg` and `ffprobe` on `PATH` for FFmpeg-backed container inputs
 - `ffmpeg` for default HiFi FLAC output
 
 ```powershell
+.\tools\build-ipp-native.ps1
 dotnet restore VHSDecodeDotNet.slnx
 dotnet build VHSDecodeDotNet.slnx -c Release --no-restore
 dotnet test --solution VHSDecodeDotNet.slnx -c Release --no-build --no-restore
 ```
 
+The first command includes the optional `ipp-fast` native artifact; omit it for
+an Exact-only build. The script uses `vswhere` to locate MSBuild, restores the pinned
+`intelipp.static.win-x64` NuGet package, builds the sequential static bridge,
+and rejects external IPP, OpenMP, oneTBB, or Visual C++ runtime DLL
+dependencies. Intel oneAPI does not need to be installed on the development or
+deployment computer. Published applications carry `vhsdecode_ipp.dll`, the
+Intel license, and `THIRD-PARTY-NOTICES.md`; an Exact-only build may omit the
+native build step.
+
 The current formal Release build has zero warnings and errors. The xUnit v3
-project exposes **848** independently discoverable tests to both
+project exposes **908** independently discoverable tests to both
 `dotnet test` and Visual Studio Test Explorer.
 
 <!-- SECTION: usage -->
@@ -787,7 +840,11 @@ After a Release build, use either facade dispatch or an apphost alias:
 ```powershell
 src\VHSDecode.Cli\bin\Release\net11.0\decode.exe vhs [upstream options] input output
 src\VHSDecode.Cli\bin\Release\net11.0\vhs-decode.exe [upstream options] input output
+decode.exe vhs --dsp-backend ipp-fast [upstream options] input output
 ```
+
+The last form selects the optional fast backend explicitly when approximate
+output is acceptable.
 
 Use the matching `cvbs`, `ld`, or `hifi` command and its upstream v0.4.0
 arguments. Run `--help` for the exact accepted surface.

@@ -64,6 +64,7 @@ public sealed class HiFiCompatibilityTests
         string[] expectedNames =
         [
             "-h", "--help", "--frequency", "-f", "--overwrite", "--threads", "-t",
+            "--dsp-backend",
             "--preview", "--gui", "--gnuradio", "--raw_format", "--pal", "-p", "--ntsc", "-n",
             "--8mm", "--demod", "--bias_guess", "--bg", "--auto_fine_tune",
             "--AFE_left_carrier", "--AFE_left_carrier_deviation", "--AFE_right_carrier",
@@ -77,7 +78,7 @@ public sealed class HiFiCompatibilityTests
             "--nr_deemphasis_high_tau"
         ];
 
-        Assert.Equal(42, CliSpecs.HiFi.Options.Length);
+        Assert.Equal(43, CliSpecs.HiFi.Options.Length);
         Assert.Equal(expectedNames, CliSpecs.HiFi.Options.SelectMany(option => option.Names));
         Assert.Equal(0, CliSpecs.HiFi.MinimumPositionals);
         Assert.Equal(2, CliSpecs.HiFi.MaximumPositionals);
@@ -272,8 +273,8 @@ public sealed class HiFiCompatibilityTests
         Assert.StartsWith("usage: decode.py ", facade, StringComparison.Ordinal);
         Assert.Contains("Expander tuning options (advanced):", standalone, StringComparison.Ordinal);
         Assert.Contains("Deemphasis tuning options (advanced):", standalone, StringComparison.Ordinal);
-        Assert.Equal("27E40DE774B9CD5E3A6E126A497B074AD239319AD7A79004D4594F74CB7ECC2B", Utf8LfSha256(standalone));
-        Assert.Equal("14F69F3DD5869D3BAF3D44558ADF32DAC040F97F37CF00A2F3127FA101D7765E", Utf8LfSha256(facade));
+        Assert.Equal("C7EC13F3C5619879D049C4B655A39C3E085BD632D2CABDB3D0B6DA4EE89DCE28", Utf8LfSha256(standalone));
+        Assert.Equal("CD3FAC32B261F10F765D4B403FD36E35615981539EF32AB7E2AF67028462A0D8", Utf8LfSha256(facade));
     }
 
     [Theory(DisplayName = "HiFi AFE standards match v0.4.0")]

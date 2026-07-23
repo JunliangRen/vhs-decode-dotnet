@@ -2,7 +2,7 @@
 
 [English](README.md) | **[简体中文](README.zh-CN.md)** | [日本語](README.ja.md)
 
-<!-- README_SYNC: 2026-07-22.18 -->
+<!-- README_SYNC: 2026-07-24.19 -->
 
 这是 [`oyvindln/vhs-decode`](https://github.com/oyvindln/vhs-decode)
 中解码相关部分的 .NET 11 重写，当前以 release `v0.4.0`、commit
@@ -11,6 +11,15 @@
 > [!IMPORTANT]
 > 这是仍在进行中的兼容性移植。顶层解码路径已经实现并经过大量测试，
 > 但项目目前还不声称每一种真实采集和罕见参数组合都已做到逐字节一致。
+
+> [!NOTE]
+> `--dsp-backend ipp-fast` 是本 .NET 移植相对上游新增的实验参数，上游
+> `oyvindln/vhs-decode` v0.4.0 中没有该参数。在两个 400 帧 VHS 实拍样本、
+> `--threads 5` 的测试中，端到端速度约提升 5%。NTSC-J 的亮度、色度、JSON、
+> `fileLoc`、stdout 和归一化日志均为 0 差异；PAL 的 JSON 和全部 800 个
+> `fileLoc` 也为 0 差异，但亮度有 0.000794%、色度有 0.003226% 的样本不同
+> （合计约 0.00201%），且所有差异都集中在 800 个场中的一个严重损坏场。
+> 兼容性敏感的使用场景仍默认并应继续使用 `exact`。
 
 ## 目录
 
@@ -111,6 +120,30 @@
 ## 性能
 
 性能优化是实现的一部分，但确定性输出和 release 兼容性始终是首要约束。
+
+DSP 后端通过 `--dsp-backend exact|ipp-fast` 显式选择。该参数是本 .NET 移植
+新增的实验扩展，不属于上游 `oyvindln/vhs-decode` v0.4.0 CLI。`exact` 是默认值，
+保留现有托管兼容路径，并且不会探测或加载 Intel IPP。`ipp-fast` 是面向受支持
+Intel CPU 的 Windows x64 可选后端；它会加载静态链接的 `vhsdecode_ipp.dll`，
+报告 IPP 版本和实际选择的 ISA，并在桥接 DLL、ABI 或 CPU 不可用时明确失败，
+不会静默回退到 `exact`。v1 当前只有 VHS real-RF FFT 阶段走 IPP。CVBS、LD
+和 HiFi 会明确拒绝不支持的 `ipp-fast`，不会悄悄改跑 Exact 内核而产生虚假基准；
+IIR/SOS 以及 HiFi/LD 加速仍是分阶段的后续工作，并非当前活动路径。
+
+`ipp-fast` 是数值接近的性能模式，不是逐字节兼容模式。FFT 和向量数学求值差异
+可能改变浮点位模式，并进一步影响阈值决策、元数据、恢复、日志和输出文件。
+需要 release 兼容 hash 或行为时必须使用 `exact`。
+
+每个真实采集都先执行一组预热，再以交错和反向顺序完成五组 A/B；测试长度为
+400 帧，使用 `--threads 5`：
+
+| 采集 | 端到端墙钟时间中位提升 | 兼容性结果 |
+| --- | ---: | --- |
+| NTSC-J VHS `cml.lds` | 4.73% | 亮度、色度、JSON、全部 800 个 `fileLoc`、stdout 和归一化日志完全一致。 |
+| PAL VHS `pal.ldf` | 5.00% | JSON 和全部 800 个 `fileLoc` 完全一致。亮度有 0.000794%、色度有 0.003226% 的样本不同（合计约 0.00201%），全部位于一个严重损坏场；归一化日志也不同。 |
+
+以上数字只描述已测试的采集和机器，不是通用的速度或兼容性保证。PAL 的零输出差异
+实验必须回退到 Exact 逆向 FFT，配对中位提升随即降至 -1.05%，因此没有启用该回退。
 
 - `-t` / `--threads` 驱动有界并行 RF 解调和滤波；stream、FFmpeg
   与 GNU Radio 读取保持有序。
@@ -611,17 +644,26 @@ NTSC-J 门禁保持不变。
 
 - `.NET SDK 11.0.100-preview.6.26359.118`（由 `global.json` 锁定）
 - 使用 IDE 时需要 Visual Studio 2026
+- 构建可选 Intel IPP 桥接 DLL 时需要 Visual Studio C++ Build Tools 和 Windows SDK
 - 对 FFmpeg 支持的容器输入，需要 `ffmpeg` 和 `ffprobe` 位于 `PATH`
 - 默认 HiFi FLAC 输出需要 `ffmpeg`
 
 ```powershell
+.\tools\build-ipp-native.ps1
 dotnet restore VHSDecodeDotNet.slnx
 dotnet build VHSDecodeDotNet.slnx -c Release --no-restore
 dotnet test --solution VHSDecodeDotNet.slnx -c Release --no-build --no-restore
 ```
 
+第一条命令用于包含可选的 `ipp-fast` 原生产物；只构建 Exact 时可以省略。
+该脚本通过 `vswhere` 定位 MSBuild，还原锁定版本的
+`intelipp.static.win-x64` NuGet 包，构建顺序执行的静态桥接，并拒绝任何外部 IPP、
+OpenMP、oneTBB 或 Visual C++ runtime DLL 依赖。开发机和部署电脑都不需要安装
+Intel oneAPI。发布程序会携带 `vhsdecode_ipp.dll`、Intel 许可证和
+`THIRD-PARTY-NOTICES.md`；只构建 Exact 后端时可以省略原生构建步骤。
+
 当前正式 Release 构建为零警告、零错误。xUnit v3 项目向
-`dotnet test` 和 Visual Studio Test Explorer 暴露 **848** 个可独立发现的测试。
+`dotnet test` 和 Visual Studio Test Explorer 暴露 **908** 个可独立发现的测试。
 
 <!-- SECTION: usage -->
 
@@ -641,7 +683,10 @@ Release 构建后，可以使用 facade 分发或 apphost 别名：
 ```powershell
 src\VHSDecode.Cli\bin\Release\net11.0\decode.exe vhs [upstream options] input output
 src\VHSDecode.Cli\bin\Release\net11.0\vhs-decode.exe [upstream options] input output
+decode.exe vhs --dsp-backend ipp-fast [upstream options] input output
 ```
+
+最后一种形式会在接受近似输出时显式选择可选快速后端。
 
 将命令替换为对应的 `cvbs`、`ld` 或 `hifi`，并使用上游 v0.4.0
 参数。运行 `--help` 可查看精确的可接受参数面。

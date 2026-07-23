@@ -143,6 +143,7 @@ public void CliSpecsCoverUpstreamDecodeOptionNames()
         "--cxadc",
         "-t",
         "--threads",
+        "--dsp-backend",
         "--ct",
         "--chroma_trap",
         "--sl",
@@ -289,6 +290,7 @@ public void CliSpecsCoverUpstreamDecodeOptionNames()
         "--wow_interpolation_method",
         "-t",
         "--threads",
+        "--dsp-backend",
         "-f",
         "--frequency",
         "--analog_audio_frequency",
@@ -312,17 +314,17 @@ public void DecodeRunnerPrintsCommandHelpBeforeValidation()
 {
     var standaloneHashes = new Dictionary<string, string>(StringComparer.Ordinal)
     {
-        ["vhs"] = "174450C2379D07D59109F289FF9F587BDA433E8E38C63EFE604535BBCD9077C4",
-        ["cvbs"] = "7933C5EFFD23A835419449AA805D7110ABA4298E23FD46FF51805AF933712D15",
-        ["ld"] = "E890F90169572401CF3C1565FF5EF44B23354824516E330250BD80BA136FB579",
-        ["hifi"] = "27E40DE774B9CD5E3A6E126A497B074AD239319AD7A79004D4594F74CB7ECC2B"
+        ["vhs"] = "0182A458D91A47C5F670F8AC3FAFD36CCCECA2927D85A126F4911FB72689B99B",
+        ["cvbs"] = "EAB1A682E558594E750F48435EE815A7904FE389237DA9D5C960A213841C8113",
+        ["ld"] = "57AF272B79CDDC73F3C609C9C1FD818E2E4FA7BE7F5A8ED90A7CEA4EC73CAC47",
+        ["hifi"] = "C7EC13F3C5619879D049C4B655A39C3E085BD632D2CABDB3D0B6DA4EE89DCE28"
     };
     var facadeHashes = new Dictionary<string, string>(StringComparer.Ordinal)
     {
-        ["vhs"] = "9FE63E4A3C18927DE477D66BCF612085FB01ED85DA8BFD7AE2FACAE9E0E0EDA1",
-        ["cvbs"] = "A19F45D777A92EDB940880F5953A9E2D2298AF850F7769A3615FB14CDC12877B",
-        ["ld"] = "62D9A869755E04C5F7EC0ADCD682AC856554C1EE861B8D463DC9AA21BDDC2F68",
-        ["hifi"] = "14F69F3DD5869D3BAF3D44558ADF32DAC040F97F37CF00A2F3127FA101D7765E"
+        ["vhs"] = "7C1D3FF985B7DDADB8405F94F53FB977E6C0466C371F280CF321D929BED4C75E",
+        ["cvbs"] = "9CB0B81A26DD3DF258823BA6A8B014F4E64EC3E2E58C9F55B0BC5F745333E318",
+        ["ld"] = "EA005AFACC6C99C6A7E83FE224823792A1EA9BB0392A10D27ABBF607E6DBA259",
+        ["hifi"] = "CD3FAC32B261F10F765D4B403FD36E35615981539EF32AB7E2AF67028462A0D8"
     };
 
     foreach (DecodeCommandSpec spec in CliSpecs.AllCommands)
