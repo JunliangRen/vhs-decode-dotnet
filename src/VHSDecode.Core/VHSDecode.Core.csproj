@@ -24,6 +24,9 @@
 
   <ItemGroup>
     <None Include="runtimes\win-x64\native\soxr.dll" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" TargetPath="soxr.dll" />
+    <None Include="..\..\artifacts\native\Release\win-x64\vhsdecode_ipp.dll" Condition="Exists('..\..\artifacts\native\Release\win-x64\vhsdecode_ipp.dll')" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" ExcludeFromSingleFile="true" Link="vhsdecode_ipp.dll" TargetPath="vhsdecode_ipp.dll" />
+    <None Include="..\..\third_party\intel-ipp\LICENSE.txt" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" ExcludeFromSingleFile="true" Link="licenses\intel-ipp\LICENSE.txt" />
+    <None Include="..\..\THIRD-PARTY-NOTICES.md" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" ExcludeFromSingleFile="true" Link="THIRD-PARTY-NOTICES.md" />
     <None Include="..\..\third_party\libsoxr\COPYING.LGPL" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" Link="licenses\libsoxr\COPYING.LGPL" />
     <None Include="..\..\third_party\libsoxr\LICENCE" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" Link="licenses\libsoxr\LICENCE" />
     <None Include="..\..\third_party\libsoxr\README.md" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" Link="licenses\libsoxr\README.md" />

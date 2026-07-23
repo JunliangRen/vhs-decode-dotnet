@@ -9,7 +9,8 @@ usage: decode.py [-h] [--start file-location] [--length frames] [--seek frame]
                  [--deemp_strength deemp_str]
                  [--wow_level_adjust_smoothing WOW_LEVEL_ADJUST_SMOOTHING]
                  [--wow_interpolation_method {linear,quadratic,cubic}]
-                 [-t threads] [-f FREQ] [--analog_audio_frequency AFREQ]
+                 [-t threads] [--dsp-backend {exact,ipp-fast}] [-f FREQ]
+                 [--analog_audio_frequency AFREQ]
                  [--ntsc_audio_rate] [--video_bpf_low FREQ]
                  [--video_bpf_high FREQ] [--video_lpf FREQ]
                  [--video_lpf_order VLPF_ORDER] [--audio_filterwidth FREQ]
@@ -70,6 +71,8 @@ options:
                           cubic
   -t threads, --threads threads
                         number of CPU threads to use
+  --dsp-backend {exact,ipp-fast}
+                        DSP implementation to use (default: exact)
   -f FREQ, --frequency FREQ
                         RF sampling frequency in source file (default is 40MHz)
   --analog_audio_frequency AFREQ

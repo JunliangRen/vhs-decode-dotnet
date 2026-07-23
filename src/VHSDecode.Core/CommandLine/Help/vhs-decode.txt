@@ -1,6 +1,7 @@
 usage: vhs-decode [-h] [--system system] [-s start]
                   [--start_fileloc start_fileloc] [-l length] [--overwrite]
-                  [--write_db] [-f FREQ] [-t threads] [--ct] [--sl sharpness]
+                  [--write_db] [-f FREQ] [-t threads]
+                  [--dsp-backend {exact,ipp-fast}] [--ct] [--sl sharpness]
                   [--notch notch] [--notch_q notch_q] [-p] [-n] [--pm]
                   [--NTSCJ] [--debug] [--skip_hsync_refine] [--tf tape_format]
                   [--ts tape_speed] [--params_file params_file_json] [--orc]
@@ -30,6 +31,8 @@ options:
   --system system       video system (overriden by individual options)
   -t threads, --threads threads
                         number of CPU threads to use
+  --dsp-backend {exact,ipp-fast}
+                        DSP implementation to use (default: exact)
   --tf tape_format, --tape_format tape_format
                         Tape format - TYPEC UMATIC_SP HI8 TYPEB UMATIC BETAMAX VCR_LP VHD VHS VIDEO2000 UMATIC_HI SVHS EIAJ VCR QUADRUPLEX VHSHQ BETAMAX_HIFI VIDEO8 SUPERBETA SVHS_ETare supported
   --ts tape_speed, --tape_speed tape_speed

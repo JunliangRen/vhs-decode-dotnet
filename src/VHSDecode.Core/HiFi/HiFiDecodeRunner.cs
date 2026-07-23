@@ -1,6 +1,8 @@
 using System.Diagnostics;
 using System.Globalization;
 using VHSDecode.Core.CommandLine;
+using VHSDecode.Core.Decode;
+using VHSDecode.Core.Dsp;
 
 namespace VHSDecode.Core.HiFi;
 
@@ -56,6 +58,7 @@ internal sealed class HiFiDecodeRunner : IHiFiCommandRunner
         }
 
         HiFiDecodeOptions options = HiFiDecodeOptions.FromCommand(command);
+        DspBackendSupport.EnsureCommandSupported(options.DspBackend, command.Spec.Name);
         if (!options.Gui && !options.Overwrite && File.Exists(options.OutputFile))
         {
             output.WriteLine(
@@ -83,6 +86,11 @@ internal sealed class HiFiDecodeRunner : IHiFiCommandRunner
                 ? $"ERROR: output file '{options.OutputFile}' cannot be created nor overwritten"
                 : "ERROR: input file not found");
             return 1;
+        }
+
+        if (options.DspBackend == DspBackend.IppFast)
+        {
+            output.WriteLine(DecodeRunner.FormatIppDiagnostic(IppRuntime.RequireAvailable()));
         }
 
         string system = options.Standard == "p" ? "PAL" : "NTSC";

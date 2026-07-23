@@ -25,6 +25,9 @@ jobs:
       - name: Check out repository
         uses: actions/checkout@v6
 
+      - name: Set up MSBuild
+        uses: microsoft/setup-msbuild@v2
+
       - name: Set up .NET 11 Preview 6
         uses: actions/setup-dotnet@v5
         with:
@@ -33,6 +36,19 @@ jobs:
       - name: Install FFmpeg test dependency
         run: choco install ffmpeg --yes --no-progress --limit-output
 
+      - name: Build and verify Intel IPP native bridge
+        shell: pwsh
+        run: ./tools/build-ipp-native.ps1
+
+      - name: Verify Intel IPP artifact
+        shell: pwsh
+        run: |
+          $artifact = 'artifacts/native/Release/win-x64/vhsdecode_ipp.dll'
+          if (-not (Test-Path -LiteralPath $artifact -PathType Leaf)) {
+            throw "Missing native artifact: $artifact"
+          }
+          Get-Item -LiteralPath $artifact
+
       - name: Restore dependencies
         run: dotnet restore VHSDecodeDotNet.slnx
 
@@ -40,13 +56,19 @@ jobs:
         run: dotnet build VHSDecodeDotNet.slnx --configuration Release --no-restore
 
       - name: Run tests
-        run: dotnet test --solution VHSDecodeDotNet.slnx --configuration Release --no-build --no-restore --minimum-expected-tests 848
+        run: dotnet test --solution VHSDecodeDotNet.slnx --configuration Release --no-build --no-restore --minimum-expected-tests 908
+
+      - name: Restore Windows x64 publish assets
+        run: dotnet restore src/VHSDecode.Cli/VHSDecode.Cli.csproj --runtime win-x64
+
+      - name: Publish self-contained single-file release
+        run: dotnet publish src/VHSDecode.Cli/VHSDecode.Cli.csproj --configuration Release --runtime win-x64 --self-contained true --no-restore --property:PublishProfile=FolderProfile --output artifacts/publish/win-x64
 
       - name: Upload release build artifact
         if: github.event_name == 'push'
         uses: actions/upload-artifact@v7
         with:
           name: vhs-decode-dotnet-windows-${{ github.sha }}
-          path: src/VHSDecode.Cli/bin/Release/net11.0/
+          path: artifacts/publish/win-x64/
           if-no-files-found: error
           retention-days: 30

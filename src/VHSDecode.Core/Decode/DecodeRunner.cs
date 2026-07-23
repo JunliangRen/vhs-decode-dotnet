@@ -1,4 +1,6 @@
 using VHSDecode.Core.CommandLine;
+using VHSDecode.Core.Dsp;
+using VHSDecode.Core.Dsp.Ipp;
 using VHSDecode.Core.Formats;
 using VHSDecode.Core.HiFi;
 using VHSDecode.Core.Tbc;
@@ -70,6 +72,7 @@ public sealed class DecodeRunner
                 or FormatException
                 or OverflowException
                 or NotSupportedException
+                or IppBackendUnavailableException
                 or IOException)
             {
                 error.WriteLine(ex.Message);
@@ -132,6 +135,14 @@ public sealed class DecodeRunner
                 DecodeSessionLogWriter.Write(
                     session,
                     VhsInitializationDiagnostics.Build(command, session));
+                if (session.ExecutionOptions.DspBackend == DspBackend.IppFast)
+                {
+                    DecodeSessionLogWriter.Append(
+                        session,
+                        "INFO",
+                        FormatIppDiagnostic(IppRuntime.RequireAvailable()));
+                }
+
                 TbcFieldSequenceDecodeResult result = _engineFactory(cancellationToken)
                     .TryDecodeAndWrite(session);
                 if (result.Success && command.Spec == CliSpecs.Cvbs)
@@ -178,6 +189,7 @@ public sealed class DecodeRunner
             or FormatException
             or OverflowException
             or NotSupportedException
+            or IppBackendUnavailableException
             or FormatParameterException)
         {
             if (ex is VhsFieldClassSelectionException fieldClassException)
@@ -201,6 +213,14 @@ public sealed class DecodeRunner
             error.WriteLine(ex.Message);
             return 1;
         }
+    }
+
+    internal static string FormatIppDiagnostic(IppRuntimeInfo info)
+    {
+        ArgumentNullException.ThrowIfNull(info);
+        return string.Create(
+            CultureInfo.InvariantCulture,
+            $"Intel IPP DSP backend: {info.IppVersion} (target={info.IppTargetCpu}, enabled-features=0x{info.EnabledCpuFeatures:X16}, bridge-abi=0x{info.AbiVersion:X8})");
     }
 
     private static void ValidateRequiredPositionals(ParsedCommand command)

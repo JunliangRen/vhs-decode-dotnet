@@ -1,5 +1,6 @@
 using System.Numerics;
 using VHSDecode.Core.CommandLine;
+using VHSDecode.Core.Dsp;
 
 namespace VHSDecode.Core.HiFi;
 
@@ -50,6 +51,7 @@ public sealed record HiFiDecodeOptions
     public int Threads => checked((int)ThreadsInteger);
     public required bool Overwrite { get; init; }
     public required bool Gui { get; init; }
+    public DspBackend DspBackend { get; init; } = DspBackend.Exact;
 
     public static HiFiDecodeOptions FromCommand(ParsedCommand command)
     {
@@ -166,7 +168,8 @@ public sealed record HiFiDecodeOptions
             AudioMode = PythonOr(command.Get<string?>("mode"), defaultMode),
             ThreadsInteger = command.Get<BigInteger>("threads"),
             Overwrite = command.Get<bool>("overwrite"),
-            Gui = command.Get<bool>("UI")
+            Gui = command.Get<bool>("UI"),
+            DspBackend = DspBackendParser.Parse(command.Get<string>("dsp_backend"))
         };
     }
 

@@ -1,5 +1,18 @@
 # Third-Party Notices
 
+## Intel Integrated Performance Primitives
+
+The optional `vhsdecode_ipp.dll` acceleration backend statically links selected
+functions from Intel Integrated Performance Primitives (Intel IPP)
+`2026.0.1.52`. The bridge uses the sequential static libraries and does not
+redistribute the package's OpenMP, oneTBB, or shared IPP runtime DLLs.
+
+Copyright (C) 1997 Intel Corporation
+
+Intel IPP is redistributed under the Intel Simplified Software License
+(Version October 2022). The complete license text copied from the pinned NuGet
+package is in `third_party/intel-ipp/LICENSE.txt`.
+
 ## pocketfft
 
 `VHSDecode.Core.Dsp.PocketFftReal`, `PocketFftReal32`,
