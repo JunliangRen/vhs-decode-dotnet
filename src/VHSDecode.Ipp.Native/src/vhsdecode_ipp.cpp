@@ -92,23 +92,29 @@ static_assert(sizeof(vhsdecode_ipp_runtime_info_v1) == 240);
 void initialize_ipp() noexcept
 {
     g_ipp_init_status = static_cast<int32_t>(ippInit());
-    if (g_ipp_init_status == ippStsNonIntelCpu ||
-        g_ipp_init_status == ippStsNotSupportedCpu) {
+    // IPP reports a positive warning for a non-Intel x86 processor after the
+    // dispatcher has initialized. Keep validating the actual ISA mask instead
+    // of turning the vendor warning into a bridge failure.
+    if (g_ipp_init_status == ippStsNotSupportedCpu) {
         g_bridge_init_status = VHSDECODE_IPP_STATUS_UNSUPPORTED_CPU;
         return;
     }
-    if (g_ipp_init_status != ippStsNoErr) {
+    if (g_ipp_init_status != ippStsNoErr &&
+        g_ipp_init_status != ippStsNonIntelCpu) {
         g_bridge_init_status = g_ipp_init_status;
         return;
     }
 
     Ipp64u features = 0;
     const IppStatus feature_status = ippGetCpuFeatures(&features, nullptr);
-    if (feature_status == ippStsNotSupportedCpu || feature_status == ippStsNonIntelCpu) {
+    // The feature query uses the same non-Intel warning while still returning
+    // the detected mask. SSE4.2 remains the bridge's minimum execution level.
+    if (feature_status == ippStsNotSupportedCpu) {
         g_bridge_init_status = VHSDECODE_IPP_STATUS_UNSUPPORTED_CPU;
         return;
     }
-    if (feature_status != ippStsNoErr) {
+    if (feature_status != ippStsNoErr &&
+        feature_status != ippStsNonIntelCpu) {
         g_bridge_init_status = static_cast<int32_t>(feature_status);
         return;
     }
@@ -316,7 +322,7 @@ const char* VHSDECODE_IPP_CALL vhsdecode_ipp_status_string(int32_t status)
     case VHSDECODE_IPP_STATUS_INTERNAL_ERROR:
         return "Unexpected native bridge failure";
     case VHSDECODE_IPP_STATUS_UNSUPPORTED_CPU:
-        return "CPU is not a supported Genuine Intel processor with SSE4.2";
+        return "CPU does not provide the required SSE4.2 support";
     default: {
         const char* description = ippGetStatusString(static_cast<IppStatus>(status));
         return description != nullptr ? description : "Unknown status code";
