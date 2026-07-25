@@ -15931,6 +15931,12 @@ public void TapeFamilyBlocksMatchUpstreamChannels()
 
         AssertNamedHash(label, "demod", item, FloatBitsSha256(block.Video));
         AssertNamedHash(label, "demod_05", item, FloatBitsSha256(block.VideoLowPass));
+        if (item.TryGetProperty("demod_f64", out JsonElement demodF64))
+        {
+            AssertEqual(demodF64.GetString()!, DoubleBitsSha256(block.Video));
+            comparedChannels++;
+        }
+
         try
         {
             AssertNamedHash(label, "demod_burst", item, FloatBitsSha256(block.Chroma!));
@@ -15939,6 +15945,13 @@ public void TapeFamilyBlocksMatchUpstreamChannels()
         {
             burstMismatches.Add(ex.Message);
         }
+
+        if (item.TryGetProperty("demod_burst_f64", out JsonElement demodBurstF64))
+        {
+            AssertEqual(demodBurstF64.GetString()!, DoubleBitsSha256(block.Chroma!));
+            comparedChannels++;
+        }
+
         AssertNamedHash(label, "envelope", item, FloatBitsSha256(block.Envelope));
         comparedChannels += 4;
 
@@ -15946,7 +15959,7 @@ public void TapeFamilyBlocksMatchUpstreamChannels()
     }
 
     AssertEqual(357, cases);
-    AssertEqual(1_428, comparedChannels);
+    AssertEqual(1_432, comparedChannels);
     if (burstMismatches.Count != 0)
     {
         throw new Exception(string.Join(Environment.NewLine, burstMismatches));
