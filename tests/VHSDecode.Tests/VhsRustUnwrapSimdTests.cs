@@ -26,6 +26,12 @@ public sealed class VhsRustUnwrapSimdTests
             input.Select(value => value.Real).ToArray(),
             input.Select(value => value.Imaginary).ToArray(),
             40_000_000.0);
+        double[] buffered = Enumerable.Repeat(double.NaN, length).ToArray();
+        PortedMath.UnwrapHilbertVhsRustApproximation(
+            input.Select(value => value.Real).ToArray(),
+            input.Select(value => value.Imaginary).ToArray(),
+            40_000_000.0,
+            buffered);
 
         Assert.Equal(
             expected.Select(BitConverter.DoubleToUInt64Bits),
@@ -33,6 +39,33 @@ public sealed class VhsRustUnwrapSimdTests
         Assert.Equal(
             expected.Select(BitConverter.DoubleToUInt64Bits),
             split.Select(BitConverter.DoubleToUInt64Bits));
+        Assert.Equal(
+            expected.Select(BitConverter.DoubleToUInt64Bits),
+            buffered.Select(BitConverter.DoubleToUInt64Bits));
+    }
+
+    [Fact(DisplayName = "VHS Rust unwrap caller buffer does not allocate after warm-up")]
+    public void VhsRustUnwrapCallerBufferDoesNotAllocateAfterWarmUp()
+    {
+        Complex[] input = BuildInput(32_768);
+        double[] real = input.Select(value => value.Real).ToArray();
+        double[] imaginary = input.Select(value => value.Imaginary).ToArray();
+        var output = new double[input.Length];
+        PortedMath.UnwrapHilbertVhsRustApproximation(
+            real,
+            imaginary,
+            40_000_000.0,
+            output);
+
+        long before = GC.GetAllocatedBytesForCurrentThread();
+        PortedMath.UnwrapHilbertVhsRustApproximation(
+            real,
+            imaginary,
+            40_000_000.0,
+            output);
+        long allocated = GC.GetAllocatedBytesForCurrentThread() - before;
+
+        Assert.Equal(0, allocated);
     }
 
     private static Complex[] BuildInput(int length)

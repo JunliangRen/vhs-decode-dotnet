@@ -416,6 +416,25 @@ public sealed class DspWorkingBufferTests
         }
     }
 
+    [Fact(DisplayName = "Compact PAL VHS raw TBC export retains demodulated video")]
+    public void CompactPalVhsRawTbcExportRetainsDemodulatedVideo()
+    {
+        const int length = DecodeSessionFactory.DefaultBlockLength;
+        ParsedCommand command = new CommandLineParser().Parse(
+            CliSpecs.Vhs,
+            ["--pal", "--no_resample", "--export_raw_tbc", "probe.s16", "probe-output"]);
+        using DecodeSession session = DecodeSessionFactory.Create(command, length);
+        double[] input = BuildPalVhsProbe(length, session.DecodeSampleRateHz);
+
+        RfPipelineBlock full = session.Pipeline.DecodePreparedBlock(input, reportDiagnostics: false);
+        RfPipelineBlock compact = session.Pipeline.DecodePreparedStreamBlock(input, reportDiagnostics: false);
+
+        Assert.NotEmpty(full.Demodulated.DemodRaw);
+        Assert.Empty(compact.Demodulated.DemodRaw);
+        Assert.Equal(full.Demodulated.DemodRaw, full.Demodulated.Video);
+        Assert.Equal(full.Demodulated.DemodRaw, compact.Demodulated.Video);
+    }
+
     [Fact(DisplayName = "VHS diff-demod repair reuses its analytic workspace after warm-up")]
     public void VhsDiffDemodRepairReusesAnalyticWorkspaceAfterWarmUp()
     {

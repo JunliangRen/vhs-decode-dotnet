@@ -116,7 +116,7 @@ public sealed class RfBlockDecodePipeline : IDisposable
         Complex[]? inputSpectrum = _filters.LdEfm is not null || _filters.LdAnalogAudio is not null
             ? PocketFftComplex.ForwardDuccRealFull(input)
             : null;
-        RfDemodulatedBlock demodulated = _demodulator.Demodulate(
+        RfDemodulatedBlock demodulated = _demodulator.DemodulateCore(
             input,
             _filters.RfVideo,
             _filters.RfHighPass,
@@ -138,7 +138,8 @@ public sealed class RfBlockDecodePipeline : IDisposable
             _filters.VhsRfTopSos,
             inputSpectrum,
             includeRfHighPassOutput: retainRfDiagnosticChannels,
-            includeAnalyticOutput: retainRfDiagnosticChannels);
+            includeAnalyticOutput: retainRfDiagnosticChannels,
+            includeDemodRawOutput: retainRfDiagnosticChannels || _filterOptions.ExportRawTbc);
         if (reportDiagnostics)
         {
             ReportDiagnostics(demodulated);
