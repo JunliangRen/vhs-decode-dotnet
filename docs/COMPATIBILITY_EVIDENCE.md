@@ -1591,10 +1591,11 @@ possible capture has already been proven byte-for-byte identical.
   system/format/speed combinations across PAL, PAL-M, NTSC, MESECAM, 405, 819,
   and NLINHA: all 1,428 `demod`, `demod_05`, `demod_burst`, and `envelope`
   channels are float32 byte-exact, including all 75 narrow internal burst
-  references for non-color-under formats; SciPy SOS section ordering,
-  real-input Hilbert transforms, and NumPy complex-magnitude rounding preserve
-  the float64 source bits while those formats continue not to emit a chroma
-  sidecar
+  references for non-color-under formats. Four additional float64 SHA-256
+  gates lock complete PAL QUADRUPLEX/SP and PAL VHD/LP video and burst blocks;
+  SciPy SOS section ordering, real-input Hilbert transforms, and NumPy
+  complex-magnitude rounding preserve the source bits while those formats
+  continue not to emit a chroma sidecar
 - thirty independently discoverable deterministic full-field chroma baselines
   cover every explicitly routed PAL/NTSC color-under family: VHS, VHSHQ,
   S-VHS/S-VHS ET, U-matic variants, Betamax/HiFi/SuperBeta, Video8/Hi8, EIAJ,
@@ -1946,7 +1947,7 @@ dotnet test --solution VHSDecodeDotNet.slnx --no-build
 ```
 
 The current formal solution build completes with zero warnings and errors, and
-the xUnit v3 project exposes 848 independently discoverable compatibility tests
+the xUnit v3 project exposes 908 independently discoverable compatibility tests
 to `dotnet test` and Visual Studio Test Explorer. On the
 same Windows machine and fixtures, Release wall-clock measurements for one
 frame were 2.346 s versus 7.193 s for NTSC VHS and 1.651 s versus 5.865 s for
