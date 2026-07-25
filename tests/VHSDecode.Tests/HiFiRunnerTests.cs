@@ -1649,9 +1649,19 @@ public sealed class HiFiRunnerTests
         while (timeout.Elapsed < TimeSpan.FromSeconds(5))
         {
             cancellationToken.ThrowIfCancellationRequested();
+            var attemptOutput = output is null ? null : new StringWriter();
             try
             {
-                return new HiFiGnuRadioSink(output ?? TextWriter.Null, cancellationToken, port);
+                var sink = new HiFiGnuRadioSink(
+                    attemptOutput ?? TextWriter.Null,
+                    cancellationToken,
+                    port);
+                if (attemptOutput is not null)
+                {
+                    output!.Write(attemptOutput.ToString());
+                }
+
+                return sink;
             }
             catch (InvalidOperationException ex) when (
                 ex.InnerException is AddressAlreadyInUseException)
