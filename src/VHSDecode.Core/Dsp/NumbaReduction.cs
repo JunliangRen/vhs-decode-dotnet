@@ -192,6 +192,9 @@ internal static class NumbaReduction
     }
 
     public static double MeanFloat64FastMath(ReadOnlySpan<double> values)
+        => SumFloat64FastMath(values) / values.Length;
+
+    public static double SumFloat64FastMath(ReadOnlySpan<double> values)
     {
         const int VectorWidth = 4;
         const int Interleave = 4;
@@ -243,6 +246,6 @@ internal static class NumbaReduction
             sum += values[index];
         }
 
-        return sum / values.Length;
+        return sum;
     }
 }

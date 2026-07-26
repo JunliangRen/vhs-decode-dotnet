@@ -1,3 +1,4 @@
+using System.Buffers;
 using System.Collections.Concurrent;
 using System.Numerics;
 using System.Runtime.InteropServices;
@@ -9,12 +10,29 @@ namespace VHSDecode.Core.Decode;
 
 public sealed record AutomaticChromaGainResult(double[] Samples, double MeanBurstRms);
 
+public sealed record CurrentAutomaticChromaGainResult(
+    double MeanBurstAmplitude,
+    double NoiseFloor);
+
 public sealed record ChromaBurstDemodulationResult(
     double PhaseDegrees,
     double PhaseOffsetDegrees,
     double Magnitude,
     double I,
-    double Q);
+    double Q)
+{
+    public int Start { get; init; }
+
+    public int End { get; init; }
+
+    public long Center { get; init; }
+
+    public double Amplitude { get; init; }
+
+    public double Dc { get; init; }
+
+    public double FrequencyHz { get; init; }
+}
 
 public sealed record ChromaPhaseLine(
     int LineNumber,
@@ -23,7 +41,20 @@ public sealed record ChromaPhaseLine(
     double BurstPhaseOffsetDegrees = 0.0,
     double BurstMagnitude = 0.0,
     double I = 0.0,
-    double Q = 0.0);
+    double Q = 0.0)
+{
+    public int BurstStart { get; init; }
+
+    public int BurstEnd { get; init; }
+
+    public long BurstCenter { get; init; }
+
+    public double BurstAmplitude { get; init; }
+
+    public double BurstDc { get; init; }
+
+    public double BurstFrequencyHz { get; init; }
+}
 
 public sealed record ChromaPhaseSequenceResult(
     int NextChromaRotationIndex,
@@ -1273,6 +1304,98 @@ public static class VhsChromaDecoder
         return output;
     }
 
+    public static void UpconvertChromaPhaseCompensatedCurrentInPlace(
+        Span<double> chroma,
+        int lineOffset,
+        int lineLength,
+        IReadOnlyList<ChromaPhaseLine> phaseRotationSequence,
+        double colorUnderCarrierHz,
+        double fscHz,
+        double targetPhaseEvenDegrees,
+        double targetPhaseOddDegrees)
+    {
+        ArgumentOutOfRangeException.ThrowIfNegative(lineOffset);
+        ArgumentOutOfRangeException.ThrowIfNegativeOrZero(lineLength);
+        ArgumentOutOfRangeException.ThrowIfNegativeOrZero(fscHz);
+        ArgumentNullException.ThrowIfNull(phaseRotationSequence);
+
+        double degreesToRadians = Math.PI / 180.0;
+        double piOverTwo = Math.PI / 2.0;
+        double nominalCoefficient =
+            piOverTwo * (1.0 + (colorUnderCarrierHz / fscHz));
+        double targetPhaseEvenRadians =
+            targetPhaseEvenDegrees * degreesToRadians;
+        double targetPhaseOddRadians =
+            targetPhaseOddDegrees * degreesToRadians;
+        double coefficientStepFactor =
+            piOverTwo / (fscHz * lineLength);
+
+        for (int phaseIndex = 0;
+            phaseIndex < phaseRotationSequence.Count;
+            phaseIndex++)
+        {
+            ChromaPhaseLine currentBurst =
+                phaseRotationSequence[phaseIndex];
+            double currentFrequencyRatio =
+                currentBurst.BurstFrequencyHz / fscHz;
+            double currentHeterodyneHz =
+                currentFrequencyRatio * colorUnderCarrierHz;
+            double nextHeterodyneHz;
+            if (phaseIndex < phaseRotationSequence.Count - 1)
+            {
+                ChromaPhaseLine nextBurst =
+                    phaseRotationSequence[phaseIndex + 1];
+                double nextFrequencyRatio =
+                    nextBurst.BurstFrequencyHz / fscHz;
+                nextHeterodyneHz =
+                    nextFrequencyRatio * colorUnderCarrierHz;
+            }
+            else
+            {
+                nextHeterodyneHz = currentHeterodyneHz;
+            }
+
+            int lineStart = checked(
+                (currentBurst.LineNumber - lineOffset) * lineLength);
+            int lineEnd = checked(lineStart + lineLength);
+            if (lineStart < 0 || lineEnd > chroma.Length)
+            {
+                throw new ArgumentOutOfRangeException(
+                    nameof(phaseRotationSequence),
+                    "Current chroma phase line exceeds the output field.");
+            }
+
+            double targetPhaseRadians =
+                (currentBurst.LineNumber & 1) != 0
+                    ? targetPhaseOddRadians
+                    : targetPhaseEvenRadians;
+            double thetaZero =
+                (nominalCoefficient * lineStart)
+                + ((currentBurst.PhaseRotation * piOverTwo)
+                    + targetPhaseRadians
+                    + (currentBurst.BurstPhaseDegrees
+                        * degreesToRadians));
+            double alpha =
+                piOverTwo * (1.0 + (currentHeterodyneHz / fscHz));
+            double deltaCoefficient =
+                (nextHeterodyneHz - currentHeterodyneHz)
+                * coefficientStepFactor;
+            double beta = 0.5 * deltaCoefficient;
+            double dc = currentBurst.BurstDc;
+            for (int sample = 0; sample < lineLength; sample++)
+            {
+                double localIndex = sample;
+                double theta =
+                    (thetaZero + (alpha * localIndex))
+                    + (beta * (localIndex * localIndex));
+                int outputIndex = lineStart + sample;
+                chroma[outputIndex] = (float)(
+                    ((float)chroma[outputIndex] * -Math.Cos(theta))
+                    - dc);
+            }
+        }
+    }
+
     public static double[] RefineLineLocationsFromBurst(
         IReadOnlyList<double> lineLocations,
         int outputLineLength,
@@ -1519,6 +1642,173 @@ public static class VhsChromaDecoder
         }
 
         return new AutomaticChromaGainResult(output, meanBurstAccumulator / (lines - StartingLine));
+    }
+
+    public static CurrentAutomaticChromaGainResult ApplyCurrentAutomaticChromaGainInPlace(
+        Span<double> chroma,
+        double burstAbsRef,
+        IReadOnlyList<ChromaPhaseLine> phaseSequence,
+        int burstDetectedLine,
+        int syncTipLength,
+        int smoothingWindow = 8,
+        double madScale = 2.0)
+    {
+        ArgumentNullException.ThrowIfNull(phaseSequence);
+        int burstCount = phaseSequence.Count;
+        if (burstCount == 0)
+        {
+            return new CurrentAutomaticChromaGainResult(0.0, 0.0);
+        }
+
+        int scratchLength = Math.Max(burstCount, Math.Max(0, syncTipLength));
+        double[] rawGains = ArrayPool<double>.Shared.Rent(burstCount);
+        double[] validGains = ArrayPool<double>.Shared.Rent(burstCount);
+        double[] validAmplitudes = ArrayPool<double>.Shared.Rent(burstCount);
+        double[] smoothedGains = ArrayPool<double>.Shared.Rent(burstCount);
+        double[] medianScratch = ArrayPool<double>.Shared.Rent(
+            Math.Max(1, scratchLength));
+        double[] deviationScratch = ArrayPool<double>.Shared.Rent(
+            Math.Max(1, scratchLength));
+        try
+        {
+            int validCount = 0;
+            for (int index = 0; index < burstCount; index++)
+            {
+                ChromaPhaseLine burst = phaseSequence[index];
+                double amplitude = burst.BurstAmplitude != 0.0
+                    ? burst.BurstAmplitude
+                    : 1e-8;
+                double gain = burstAbsRef / amplitude;
+                rawGains[index] = gain;
+                if (burst.LineNumber >= burstDetectedLine)
+                {
+                    validGains[validCount] = gain;
+                    validAmplitudes[validCount] = amplitude;
+                    validCount++;
+                }
+            }
+
+            double maximumGain;
+            if (validCount > 0)
+            {
+                double medianGain = NumpyReduction.MedianFloat64(
+                    validGains.AsSpan(0, validCount),
+                    medianScratch);
+                for (int index = 0; index < validCount; index++)
+                {
+                    deviationScratch[index] = Math.Abs(
+                        validGains[index] - medianGain);
+                }
+
+                double medianAbsoluteDeviation = NumpyReduction.MedianFloat64(
+                    deviationScratch.AsSpan(0, validCount),
+                    medianScratch);
+                maximumGain = medianGain + (madScale * medianAbsoluteDeviation);
+            }
+            else
+            {
+                maximumGain = 1.0;
+            }
+
+            for (int index = 0; index < burstCount; index++)
+            {
+                rawGains[index] = Math.Min(rawGains[index], maximumGain);
+            }
+
+            int halfWindow = smoothingWindow / 2;
+            for (int index = 0; index < burstCount; index++)
+            {
+                int start = Math.Max(0, index - halfWindow);
+                int end = Math.Min(burstCount, index + halfWindow + 1);
+                smoothedGains[index] = NumbaReduction.SumFloat64FastMath(
+                    rawGains.AsSpan(start, end - start)) / (end - start);
+            }
+
+            double noiseSum = 0.0;
+            int noiseSamples = 0;
+            for (int index = 0; index < burstCount; index++)
+            {
+                ChromaPhaseLine burst = phaseSequence[index];
+                int currentStart = burst.BurstStart;
+                int nextStart = index < burstCount - 1
+                    ? phaseSequence[index + 1].BurstStart
+                    : chroma.Length;
+                (int segmentStart, int segmentEnd) = GetNumpySliceRange(
+                    chroma.Length,
+                    currentStart,
+                    nextStart);
+                if (burst.LineNumber < burstDetectedLine)
+                {
+                    chroma[segmentStart..segmentEnd].Clear();
+                    continue;
+                }
+
+                double gainStart = smoothedGains[index];
+                double gainEnd = index < burstCount - 1
+                    ? smoothedGains[index + 1]
+                    : gainStart;
+                int length = nextStart - currentStart;
+                if (length <= 0)
+                {
+                    continue;
+                }
+
+                double gainIncrement = (gainEnd - gainStart) / length;
+                double gain = gainStart;
+                for (int sample = segmentStart; sample < segmentEnd; sample++)
+                {
+                    chroma[sample] = (float)((float)chroma[sample] * gain);
+                    gain += gainIncrement;
+                }
+
+                (int syncStart, int syncEnd) = GetNumpySliceRange(
+                    chroma.Length,
+                    nextStart + 4 - syncTipLength,
+                    nextStart - 4);
+                int syncLength = syncEnd - syncStart;
+                for (int sample = 0; sample < syncLength; sample++)
+                {
+                    medianScratch[sample] = (float)chroma[syncStart + sample];
+                }
+
+                double median = NumbaReduction.MedianFloat32(
+                    medianScratch.AsSpan(0, syncLength));
+                for (int sample = 0; sample < syncLength; sample++)
+                {
+                    deviationScratch[sample] = Math.Abs(
+                        medianScratch[sample] - median);
+                }
+
+                double medianAbsoluteDeviation = NumpyReduction.MedianFloat64(
+                    deviationScratch.AsSpan(0, syncLength),
+                    medianScratch);
+                noiseSum = Math.FusedMultiplyAdd(
+                    medianAbsoluteDeviation,
+                    1.4826,
+                    noiseSum);
+                noiseSamples++;
+            }
+
+            double noiseFloor = noiseSamples > 0
+                ? noiseSum / noiseSamples
+                : 0.0;
+            double meanAmplitude = validCount > 0
+                ? NumbaReduction.MeanFloat64FastMath(
+                    validAmplitudes.AsSpan(0, validCount))
+                : 0.0;
+            return new CurrentAutomaticChromaGainResult(
+                meanAmplitude,
+                noiseFloor);
+        }
+        finally
+        {
+            ArrayPool<double>.Shared.Return(rawGains);
+            ArrayPool<double>.Shared.Return(validGains);
+            ArrayPool<double>.Shared.Return(validAmplitudes);
+            ArrayPool<double>.Shared.Return(smoothedGains);
+            ArrayPool<double>.Shared.Return(medianScratch);
+            ArrayPool<double>.Shared.Return(deviationScratch);
+        }
     }
 
     internal static ushort[] ApplyAutomaticChromaGainToU16(
@@ -2323,6 +2613,16 @@ public static class VhsChromaDecoder
     {
         int start = checked((lineNumber - lineOffset) * lineLength);
         int end = checked(start + lineLength);
+        start = NormalizeNumpySliceBoundary(start, sampleCount);
+        end = NormalizeNumpySliceBoundary(end, sampleCount);
+        return end > start ? (start, end) : (start, start);
+    }
+
+    private static (int Start, int End) GetNumpySliceRange(
+        int sampleCount,
+        int start,
+        int end)
+    {
         start = NormalizeNumpySliceBoundary(start, sampleCount);
         end = NormalizeNumpySliceBoundary(end, sampleCount);
         return end > start ? (start, end) : (start, start);
