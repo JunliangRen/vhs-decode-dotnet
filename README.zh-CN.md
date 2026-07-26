@@ -244,6 +244,19 @@ float32 前后向滤波；转换点、奇延拓 padding、section 顺序和公�
 亮度 TBC、色度 TBC、JSON、有序 `fileLoc`、stdout、归一化 stderr/日志及跨线程
 hash 完全一致。监控的 200 帧默认 worker 运行也没有后半程变慢或内存单调增长。
 
+VSync serration detector 现在会在最多两块精确形状的 workspace 中，各保留一块固定
+60 行的中位数 scratch；公开静态测量 API 仍保留独立分配的结果路径。同条件 40 帧、
+默认 5 worker 的 `gc-verbose` trace 消除了归因于该中位数的全部 213 次
+`ReadOnlySpan<double>.ToArray()` 采样（77.234 MiB），总采样分配从
+2.863362 GiB 降至 2.790004 GiB（2.6%），Gen2 回收从 16 次降至 15 次。
+160 帧实测中位数在默认 5 worker、20 worker 和一次干净的串行重试中分别改善
+0.2%、1.5% 和 1.4%，但 20 worker 的逐对胜负有波动，因此这里确认的结果是分配
+下降，而不是固定的吞吐提升百分比。`--threads 0`、默认 5 worker 与
+`--threads 20` 的亮度、色度、JSON、全部 320 个有序 `fileLoc`、stdout、
+归一化 stderr/日志及跨线程 hash 完全一致。默认 worker 的 200 帧配对中，候选为
+15.303 s，main 为 15.385 s；候选前后半程分别为 77.22/70.87 ms 每帧，峰值为
+0.993 GiB；每个 detector 最多只保留两块 60 行中位数缓冲。
+
 当前线程矩阵使用 Intel Core Ultra 7 265K（20 个逻辑处理器）、Windows 11 build
 26220、.NET SDK/runtime `11.0.100-preview.6.26359.118`，以及 Python v0.4.0
 commit `43155200da87c0d49eb37d8ec09b1372075ee8e4`（程序报告为
@@ -673,7 +686,7 @@ NTSC-J 门禁保持不变。
 .\tools\build-ipp-native.ps1
 dotnet restore VHSDecodeDotNet.slnx
 dotnet build VHSDecodeDotNet.slnx -c Release --no-restore
-dotnet test --solution VHSDecodeDotNet.slnx -c Release --no-build --no-restore --minimum-expected-tests 925
+dotnet test --solution VHSDecodeDotNet.slnx -c Release --no-build --no-restore --minimum-expected-tests 931
 ```
 
 第一条命令用于包含可选的 `ipp-fast` 原生产物；只构建 Exact 时可以省略。
@@ -684,7 +697,7 @@ Intel oneAPI。发布程序会携带 `vhsdecode_ipp.dll`、Intel 许可证和
 `THIRD-PARTY-NOTICES.md`；只构建 Exact 后端时可以省略原生构建步骤。
 
 当前正式 Release 构建为零警告、零错误。xUnit v3 项目向
-`dotnet test` 和 Visual Studio Test Explorer 暴露 **925** 个可独立发现的测试。
+`dotnet test` 和 Visual Studio Test Explorer 暴露 **931** 个可独立发现的测试。
 
 <!-- SECTION: usage -->
 

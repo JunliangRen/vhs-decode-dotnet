@@ -64,7 +64,11 @@ public sealed partial class ReadmeLocalizationTests
         [
             "43155200da87c0d49eb37d8ec09b1372075ee8e4",
             "11.0.100-preview.6.26359.118",
-            "**925**",
+            "**931**",
+            "77.234 MiB",
+            "2.863362 GiB",
+            "2.790004 GiB",
+            "0.993 GiB",
             "65.17",
             "310.49",
             "268.52",
