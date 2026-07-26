@@ -141,8 +141,8 @@ non-Intel vendor warning。后端会加载静态链接的 `vhsdecode_ipp.dll`，
 
 | 采集 | 端到端墙钟时间中位提升 | 兼容性结果 |
 | --- | ---: | --- |
-| NTSC-J VHS `cml.lds` | 4.73% | 亮度、色度、JSON、全部 800 个 `fileLoc`、stdout 和归一化日志完全一致。 |
-| PAL VHS `pal.ldf` | 5.00% | JSON 和全部 800 个 `fileLoc` 完全一致。亮度有 0.000794%、色度有 0.003226% 的样本不同（合计约 0.00201%），全部位于一个严重损坏场；归一化日志也不同。 |
+| 本地 NTSC-J VHS 采集 | 4.73% | 亮度、色度、JSON、全部 800 个 `fileLoc`、stdout 和归一化日志完全一致。 |
+| 本地 PAL VHS 采集 | 5.00% | JSON 和全部 800 个 `fileLoc` 完全一致。亮度有 0.000794%、色度有 0.003226% 的样本不同（合计约 0.00201%），全部位于一个严重损坏场；归一化日志也不同。 |
 
 以上数字只描述已测试的采集和机器，不是通用的速度或兼容性保证。PAL 的零输出差异
 实验必须回退到 Exact 逆向 FFT，配对中位提升随即降至 -1.05%，因此没有启用该回退。
@@ -175,7 +175,9 @@ non-Intel vendor warning。后端会加载静态链接的 `vhsdecode_ipp.dll`，
 - 脉冲检测只使用 AVX 比较跳过没有阈值跳变的连续样本；每次状态切换、脉冲长度验证和
   结果追加仍由有序标量代码完成。不支持 AVX 的 CPU 保留原标量路径。
 - 启用 worker 时，VHS 场解码会并发执行亮度 TBC 渲染与色度场解码。任何时刻最多只有
-  一个色度任务在运行，并且会在推进下一场前回到调用线程按顺序提交状态。
+  一个色度任务在运行，并且会在推进下一场前回到调用线程按顺序提交状态。Exact 模式的
+  磁带包络 dropout 检测也加入同一有界场内重叠：最多只有一个只读检测任务，并在当前场
+  返回前等待完成。
 - 较长的 TBC sinc 重采样任务共享 worker 配额并保持输出顺序；
   `--threads 0` 和 `--threads 1` 保留确定性的串行路径。
 - 线性 wow 调整每行只计算一次恒定导数，在 median/MAD 修复后再展开；启用 worker 时，
@@ -224,6 +226,14 @@ non-Intel vendor warning。后端会加载静态链接的 `vhsdecode_ipp.dll`，
   硬上限；长时间解码不会保留所有已解码场，也不会无限排入未来工作。
 - CUDA/OpenCL 不是运行时依赖。当前 trace 不支持把孤立的 32K FFT 在主机与设备间
   往返；未来可选 GPU 后端必须批量处理常驻显存的 DSP 阶段，并保留精确 CPU 回退。
+
+dropout 重叠的严格 Exact 模式 benchmark 使用同一个合成 packed PAL RF 夹具，请求
+160 帧；每种模式先预热一对，再交错运行四对 Release A/B。相对改动前的 main，
+`--threads 5` 端到端墙钟中位数降低 2.8%，`--threads 20` 降低 4.5%，候选在全部
+八对中都更快。亮度 TBC、色度 TBC、JSON、stdout、归一化 stderr/日志以及全部
+320 个有序 `fileLoc` 完全一致。`--threads 0` 的未改串行路径也通过同一门禁。
+默认 worker 的 200 帧持续运行没有后半程变慢；每场最多存在一个 dropout 任务，
+采样内存在最后四分之一阶段再次回落。
 
 当前线程矩阵使用 Intel Core Ultra 7 265K（20 个逻辑处理器）、Windows 11 build
 26220、.NET SDK/runtime `11.0.100-preview.6.26359.118`，以及 Python v0.4.0
@@ -654,7 +664,7 @@ NTSC-J 门禁保持不变。
 .\tools\build-ipp-native.ps1
 dotnet restore VHSDecodeDotNet.slnx
 dotnet build VHSDecodeDotNet.slnx -c Release --no-restore
-dotnet test --solution VHSDecodeDotNet.slnx -c Release --no-build --no-restore
+dotnet test --solution VHSDecodeDotNet.slnx -c Release --no-build --no-restore --minimum-expected-tests 924
 ```
 
 第一条命令用于包含可选的 `ipp-fast` 原生产物；只构建 Exact 时可以省略。
@@ -665,7 +675,7 @@ Intel oneAPI。发布程序会携带 `vhsdecode_ipp.dll`、Intel 许可证和
 `THIRD-PARTY-NOTICES.md`；只构建 Exact 后端时可以省略原生构建步骤。
 
 当前正式 Release 构建为零警告、零错误。xUnit v3 项目向
-`dotnet test` 和 Visual Studio Test Explorer 暴露 **908** 个可独立发现的测试。
+`dotnet test` 和 Visual Studio Test Explorer 暴露 **924** 个可独立发现的测试。
 
 <!-- SECTION: usage -->
 

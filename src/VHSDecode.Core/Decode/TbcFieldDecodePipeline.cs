@@ -194,6 +194,7 @@ public sealed class TbcFieldDecodePipeline
     private Action<string, string>? _diagnosticLogger;
     private readonly bool _debug;
     private readonly int _inputBlockCutSamples;
+    private readonly int _workerThreads;
     private (double SyncLevel, double BlankLevel)? _lastDetectedSyncLevels;
     private bool _vhsLineLocationIssues;
     private (double SyncLevel, double BlankLevel)? _delayedCvbsSyncLevels;
@@ -246,7 +247,8 @@ public sealed class TbcFieldDecodePipeline
         double? framesPerSecond = null,
         Action<string, string>? diagnosticLogger = null,
         bool debug = false,
-        int inputBlockCutSamples = 0)
+        int inputBlockCutSamples = 0,
+        int workerThreads = 1)
     {
         _syncAnalyzer = syncAnalyzer;
         _renderer = renderer;
@@ -284,6 +286,9 @@ public sealed class TbcFieldDecodePipeline
         _inputBlockCutSamples = inputBlockCutSamples >= 0
             ? inputBlockCutSamples
             : throw new ArgumentOutOfRangeException(nameof(inputBlockCutSamples));
+        _workerThreads = workerThreads >= 0
+            ? workerThreads
+            : throw new ArgumentOutOfRangeException(nameof(workerThreads));
     }
 
     public bool HasChromaOutput => _chromaFieldOptions is not null;
@@ -291,6 +296,8 @@ public sealed class TbcFieldDecodePipeline
     public VhsChromaFieldOptions? ChromaFieldOptions => _chromaFieldOptions;
 
     public bool DecodesVbiData => _decodeVbiData;
+
+    internal int WorkerThreads => _workerThreads;
 
     internal Action<string, string>? DiagnosticLogger
     {
@@ -449,7 +456,8 @@ public sealed class TbcFieldDecodePipeline
             framesPerSecond: JsonDouble(session.Parameters.SysParams, "FPS"),
             diagnosticLogger: (level, message) => DecodeSessionLogWriter.Append(session, level, message),
             debug: session.ExecutionOptions.Debug,
-            inputBlockCutSamples: session.BlockCut);
+            inputBlockCutSamples: session.BlockCut,
+            workerThreads: session.ExecutionOptions.WorkerThreads);
     }
 
     public int EstimateReadSampleCount(int extraLines = 3)
@@ -934,6 +942,15 @@ public sealed class TbcFieldDecodePipeline
             && _chromaFieldOptions is { WorkerThreads: > 1 }
             && chromaBurstSamples is not null
             && chromaAnalysis is not null;
+        bool parallelizeVhsDropoutDetection = isTape
+            && deferredRenderSource is null
+            && _workerThreads > 1
+            && _dropoutOptions is
+            {
+                Enabled: true,
+                Mode: TbcDropoutDetectionMode.TapeEnvelope
+            }
+            && span.Envelope is { Length: > 0 };
         Task<VhsChromaFieldResult?>? chromaDecodeTask = parallelizeVhsChroma
             ? Task.Run(() => DecodeChromaField(
                 chromaBurstSamples!,
@@ -942,7 +959,16 @@ public sealed class TbcFieldDecodePipeline
                 fieldNumber,
                 outputFirstLine))
             : null;
+        Task<TbcDropoutMap?>? dropoutDetectionTask = parallelizeVhsDropoutDetection
+            ? Task.Run(() => DetectDropouts(
+                span,
+                lineLocations,
+                timing,
+                parity.IsFirstField,
+                fieldConverter ?? _videoOutput))
+            : null;
         VhsChromaFieldResult? chroma = null;
+        TbcDropoutMap? dropouts = null;
         TbcRenderedField rendered;
         try
         {
@@ -974,6 +1000,11 @@ public sealed class TbcFieldDecodePipeline
             {
                 chroma = chromaDecodeTask.GetAwaiter().GetResult();
             }
+
+            if (dropoutDetectionTask is not null)
+            {
+                dropouts = dropoutDetectionTask.GetAwaiter().GetResult();
+            }
         }
         catch
         {
@@ -986,6 +1017,18 @@ public sealed class TbcFieldDecodePipeline
                 catch
                 {
                     // Preserve the earlier render failure, matching the serial path.
+                }
+            }
+
+            if (dropoutDetectionTask is not null)
+            {
+                try
+                {
+                    _ = dropoutDetectionTask.GetAwaiter().GetResult();
+                }
+                catch
+                {
+                    // Preserve the earlier render or chroma failure.
                 }
             }
 
@@ -1002,12 +1045,15 @@ public sealed class TbcFieldDecodePipeline
             lineLocations.Locations,
             parity.IsFirstField == true,
             fieldConverter ?? _videoOutput);
-        TbcDropoutMap? dropouts = DetectDropouts(
-            span,
-            lineLocations,
-            timing,
-            parity.IsFirstField,
-            fieldConverter ?? _videoOutput);
+        if (dropoutDetectionTask is null)
+        {
+            dropouts = DetectDropouts(
+                span,
+                lineLocations,
+                timing,
+                parity.IsFirstField,
+                fieldConverter ?? _videoOutput);
+        }
         short[]? efm = SliceFieldEfm(span.Efm, lineLocations.Locations, currentFieldLineCount);
         short[]? audioPcm = DownscaleAnalogAudio(
             span.AnalogAudio,

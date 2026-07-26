@@ -351,7 +351,8 @@ public static class DecodeSessionFactory
             framesPerSecond: JsonRequiredDouble(parameters.SysParams, "FPS"),
             diagnosticLogger: WriteDiagnostic,
             debug: executionOptions.Debug,
-            inputBlockCutSamples: blockCut);
+            inputBlockCutSamples: blockCut,
+            workerThreads: executionOptions.WorkerThreads);
         DecodeRunBounds runBounds = DecodeRunBounds.FromCommand(
             command,
             tbcFieldDecoder.EstimateNominalFieldSampleCount());
