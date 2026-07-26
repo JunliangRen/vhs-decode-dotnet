@@ -148,6 +148,26 @@ public sealed class TbcFieldRenderer
         TbcLineResampler.ResamplingPlan plan)
         => _resampler.ResamplePrepared(videoHz, plan);
 
+    internal void ResampleFieldInto(
+        ReadOnlySpan<double> videoHz,
+        IReadOnlyList<double> lineLocations,
+        int firstLine,
+        double[] destination)
+    {
+        ArgumentNullException.ThrowIfNull(destination);
+        if (destination.Length != FrameSpec.FieldSampleCount)
+        {
+            throw new ArgumentException(
+                "Destination length must match the configured TBC field size.",
+                nameof(destination));
+        }
+
+        using TbcLineResampler.ResamplingPlan plan = PrepareFieldResampling(
+            lineLocations,
+            firstLine);
+        _resampler.ResamplePrepared(videoHz, plan, destination);
+    }
+
     public TbcRenderedField RenderFieldPayload(
         ReadOnlySpan<double> videoHz,
         IReadOnlyList<double> lineLocations,

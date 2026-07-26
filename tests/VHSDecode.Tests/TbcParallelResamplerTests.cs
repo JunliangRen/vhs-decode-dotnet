@@ -117,6 +117,73 @@ public sealed class TbcParallelResamplerTests
         Assert.Throws<ObjectDisposedException>(() => resampler.ResamplePrepared(firstSource, plan));
     }
 
+    [Theory(DisplayName = "Prepared TBC resampling writes caller-owned buffers bit-exactly")]
+    [InlineData(1)]
+    [InlineData(5)]
+    public void PreparedTbcResamplingWritesCallerOwnedBuffersBitExactly(int workerThreads)
+    {
+        const int outputLineLength = 1_024;
+        const int lineCount = 100;
+        double[] source = Enumerable.Range(0, 220_000)
+            .Select(index => Math.Sin(index * 0.0031) + Math.Cos(index * 0.0007))
+            .ToArray();
+        double[] lineLocations = Enumerable.Range(0, lineCount + 1)
+            .Select(line => 1_000.25 + (line * 2_000.125) + (0.01 * line * line))
+            .ToArray();
+        var resampler = new TbcLineResampler(
+            outputLineLength,
+            TbcLineInterpolationMethod.Linear,
+            wowLevelAdjustSmoothing: 1.5,
+            nominalInputLineLength: 2_000.125,
+            workerThreads);
+
+        using TbcLineResampler.ResamplingPlan plan = resampler.PrepareLineResampling(
+            lineLocations,
+            firstLine: 0,
+            lineCount);
+        double[] expected = resampler.ResamplePrepared(source, plan);
+        var destination = new double[plan.DestinationLength];
+        Array.Fill(destination, double.NaN);
+
+        resampler.ResamplePrepared(source, plan, destination);
+
+        Assert.Equal(expected, destination);
+        Assert.Throws<ArgumentException>(
+            () => resampler.ResamplePrepared(source, plan, new double[destination.Length - 1]));
+    }
+
+    [Fact(DisplayName = "Prepared TBC resampling reuses caller-owned output without field allocation")]
+    public void PreparedTbcResamplingReusesCallerOwnedOutputWithoutFieldAllocation()
+    {
+        const int outputLineLength = 512;
+        const int lineCount = 64;
+        double[] source = Enumerable.Range(0, (lineCount + 1) * 1_024 + 16)
+            .Select(index => Math.Sin(index * 0.007) + (0.2 * Math.Cos(index * 0.011)))
+            .ToArray();
+        double[] lineLocations = Enumerable.Range(0, lineCount + 1)
+            .Select(line => line * 1_024.0)
+            .ToArray();
+        var resampler = new TbcLineResampler(
+            outputLineLength,
+            nominalInputLineLength: 1_024.0,
+            workerThreads: 1);
+        using TbcLineResampler.ResamplingPlan plan = resampler.PrepareLineResampling(
+            lineLocations,
+            firstLine: 0,
+            lineCount);
+        var destination = new double[plan.DestinationLength];
+        resampler.ResamplePrepared(source, plan, destination);
+
+        long before = GC.GetAllocatedBytesForCurrentThread();
+        resampler.ResamplePrepared(source, plan, destination);
+        long allocated = GC.GetAllocatedBytesForCurrentThread() - before;
+
+        GC.KeepAlive(destination);
+        Assert.True(
+            allocated < 16_384,
+            $"Warm prepared TBC resampling allocated {allocated:N0} bytes.");
+    }
+
     [Theory(DisplayName = "Parallel TBC sinc resampling remains bit-exact")]
     [InlineData(TbcLineInterpolationMethod.Linear)]
     [InlineData(TbcLineInterpolationMethod.Quadratic)]

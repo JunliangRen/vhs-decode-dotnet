@@ -212,6 +212,29 @@ public sealed class TbcLineResampler
         return output;
     }
 
+    internal void ResamplePrepared(
+        ReadOnlySpan<double> source,
+        ResamplingPlan plan,
+        double[] destination)
+    {
+        if (source.IsEmpty)
+        {
+            throw new ArgumentException("Source must contain at least one sample.", nameof(source));
+        }
+
+        ArgumentNullException.ThrowIfNull(plan);
+        ArgumentNullException.ThrowIfNull(destination);
+        plan.ValidateOwner(this);
+        if (destination.Length != plan.DestinationLength)
+        {
+            throw new ArgumentException(
+                "Destination length must match the prepared resampling plan.",
+                nameof(destination));
+        }
+
+        ResampleSamples(source, plan, destination);
+    }
+
     private void ResampleLine(
         ReadOnlySpan<double> source,
         ILineLocationInterpolator interpolator,
