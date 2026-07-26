@@ -680,6 +680,41 @@ possible capture has already been proven byte-for-byte identical.
   filter to each padded burst window as v0.4.0 before I/Q demodulation, and
   NTSC fields apply the upstream post-burst amplitude doubling before
   heterodyne upconversion
+- opt-in `--compat-version current` replaces only the final color-under SOS
+  stage with pinned upstream PR 341's asymmetric zero-phase Super-Gaussian
+  filter; burst and track-phase analysis deliberately retain the legacy
+  `FChromaFinal` path
+- the Super-Gaussian implementation reproduces SciPy 1.18's symmetric
+  reflection padding, complex `next_fast_len`, float32 DUCC mixed-radix
+  rFFT/irFFT staging, float64 response construction, complex64 multiply, and
+  trimmed float32 output. SHA-256 oracles cover the production NTSC, PAL,
+  PAL-M/NLINE, and MESECAM field lengths, while `v0.4.0` and non-color-under
+  routing tests prove that the release-compatible default remains unchanged
+- a production-shaped 355,255-sample PAL field captured immediately before the
+  pinned upstream filter was replayed through the port. The complete float32
+  result matched SciPy byte-for-byte with SHA-256
+  `C114D82D0F7D2DE4BEA1CD232DC4DB3673FDAEF6E1DCC390E4776297FE03C021`;
+  the fixed RF fixture is synthetic, so this gate does not claim broad
+  real-capture certification
+- a four-frame fixed-RF regression against detached `main` commit
+  `71bf36d90022e40211cf55ffd17b43fa18988cc3` kept the default `v0.4.0`
+  luma, chroma, JSON, stdout, all eight ordered `fileLoc` values, all 161
+  timestamp-normalized log lines, and timing-normalized stderr identical.
+  Luma/chroma/JSON SHA-256 values were
+  `529FFD6CD9734D3EDAF710D96B8A0B61A5BD38A6B58C8EEB550FB3F2A0D1E684`,
+  `C3966B01723E3C78DAD99E38F0EAEBF08AC09A0798124D3E65873094CD10ABCB`,
+  and `83F1DF5E8EEEC4DFC19FC63B7F17EA75A770C0E09C3DCF8798B6FB94953BBBFC`
+- the same four-frame `current` run was deterministic at `--threads 0`,
+  automatic workers, and `--threads 20`, with luma/chroma/JSON SHA-256 values
+  `6DF70D9FC9FADE98DBF91F063E66DF79931622B4846F67F9B2AB06F1B3144B8E`,
+  `91020B6E2D00728EDA6BCA511CAAA9AC05477D8984BFA0796AD8988C33BD8084`,
+  and `BF71DD78409714E7394FA723ACE8F853D375A502960E582B9A9E430760797FEB`
+- a complete four-frame `current` comparison against pinned upstream PR 341
+  aligned all eight `fileLoc` values and stdout but did not match complete
+  luma, chroma, or JSON. The isolated prefilter replay above proves the new
+  Super-Gaussian stage itself; earlier HSync/VSync profile stages still require
+  capture-wide parity work, so `current` remains opt-in and is not eligible for
+  default promotion
 - VHS `--track_phase 0|1` now seeds the first field's chroma rotation index as
   well as the track-dependent luma `ire0` adjustment, with each rendered field
   consuming the same detected/alternated next-track index that v0.4.0 stores
@@ -1947,7 +1982,7 @@ dotnet test --solution VHSDecodeDotNet.slnx --no-build
 ```
 
 The current formal solution build completes with zero warnings and errors, and
-the xUnit v3 project exposes 908 independently discoverable compatibility tests
+the xUnit v3 project exposes 1,022 independently discoverable compatibility tests
 to `dotnet test` and Visual Studio Test Explorer. On the
 same Windows machine and fixtures, Release wall-clock measurements for one
 frame were 2.346 s versus 7.193 s for NTSC VHS and 1.651 s versus 5.865 s for

@@ -70,7 +70,7 @@ CLI compatibility requires it.
 | --- | --- | --- |
 | Solution and tests | Implemented | .NET 11 `.slnx`; standard xUnit v3 tests work in Visual Studio Test Explorer and with `dotnet test`. |
 | CLI and arguments | Implemented and snapshot-tested | Facade and standalone help, aliases, defaults, validation, diagnostics, and exit behavior target v0.4.0. |
-| Upstream behavior profiles | Staged | `v0.4.0` remains the default; `current` is an opt-in profile whose first three implemented stages are the merged PR 341 VHS HSync detector, VSync level refinement, and NTSC chroma group-delay correction. |
+| Upstream behavior profiles | Staged | `v0.4.0` remains the default; `current` is an opt-in profile whose first four implemented stages are the merged PR 341 VHS HSync detector, VSync level refinement, NTSC chroma group-delay correction, and asymmetric zero-phase Super-Gaussian final chroma filter. |
 | VHS and tape families | Implemented; rare capture gaps remain | VHS, S-VHS, Betamax, Video8/Hi8, U-matic, Type C, EIAJ, and supported PAL/NTSC variants share the release-compatible decode path. |
 | CVBS | Implemented for release-supported systems | PAL and NTSC paths run; uncommon vblank and cross-option cases need more real-capture fixtures. |
 | LaserDisc | Implemented; rare capture gaps remain | Video, VBI, EFM, analog audio, AC3, RF-TBC, metadata, recovery, and PAL/NTSC paths are connected. |
@@ -133,18 +133,23 @@ VHS decode accepts `--compat-version v0.4.0|current`:
 | Profile | Default | Pinned upstream source | Active behavior |
 | --- | --- | --- | --- |
 | `v0.4.0` | Yes | release v0.4.0, commit `43155200da87c0d49eb37d8ec09b1372075ee8e4` | Existing release-compatible decode path. |
-| `current` | No | merged PR 341, commit `2f21e8ed6018b14561396cc95f1f6828054470b8` | Exact-first VHS HSync candidate extraction, MAD rejection, multi-grid lock, calibrated levels, subpixel pulse synthesis, robust VSync level refinement, and NTSC chroma group-delay correction. |
+| `current` | No | merged PR 341, commit `2f21e8ed6018b14561396cc95f1f6828054470b8` | Exact-first VHS HSync candidate extraction, MAD rejection, multi-grid lock, calibrated levels, subpixel pulse synthesis, robust VSync level refinement, NTSC chroma group-delay correction, and asymmetric zero-phase Super-Gaussian final chroma filtering. |
 
-`current` is deliberately staged. The Super-Gaussian final filter and CTI are
-still pending and are not silently enabled by this profile. The embedded
-baseline catalog records that boundary explicitly.
+`current` is deliberately staged. CTI is still pending and is not silently
+enabled by this profile. The embedded baseline catalog records that boundary
+explicitly.
 
 The HSync, VSync-level, and group-delay stages are checked against the original
 upstream functions with deterministic synthetic fixtures. The chroma stage
 keeps burst and track-phase analysis unshifted, then adds the pinned float64
 source-coordinate shift only to final 16-tap chroma resampling. Its tests cover
 the Numba output bits, zero-shift legacy path, actual parallel threshold, and
-the upstream all-positive phase-truthiness behavior. HSync also retains its
+the upstream all-positive phase-truthiness behavior. The Super-Gaussian stage
+replaces only the final color-under SOS filter: burst and track-phase analysis
+remain on the legacy path. Its deterministic SciPy 1.18 oracles cover symmetric
+reflection padding, `next_fast_len`, float32 DUCC-compatible mixed-radix
+rFFT/irFFT, a float64 response, complex64 multiplication, and the production
+NTSC, PAL, PAL-M/NLINE, and MESECAM field lengths. HSync also retains its
 upstream PAL fixture gate. The pinned VSync behavior intentionally includes its
 upstream back-porch assignment quirk; a correction would require a separate
 profile change. Separate end-to-end gates keep the default `v0.4.0` profile
@@ -892,7 +897,7 @@ Intel license, and `THIRD-PARTY-NOTICES.md`; an Exact-only build may omit the
 native build step.
 
 The current formal Release build has zero warnings and errors. The xUnit v3
-project exposes **976** independently discoverable tests to both
+project exposes **1,022** independently discoverable tests to both
 `dotnet test` and Visual Studio Test Explorer.
 
 <!-- SECTION: usage -->
@@ -967,6 +972,8 @@ These are bounded parity and verification gaps, not missing top-level commands:
 - additional HiFi real-capture end-to-end baselines
 - PAL LaserDisc, AC3, and verbose VITS real-capture edge cases
 - uncommon VHS/CVBS vblank, chroma track-phase, and cross-option interactions
+- capture-wide certification of the complete opt-in `current` profile,
+  including its earlier HSync and VSync stages, before any default promotion
 - rare first-HSync/vblank recovery and complete JSON/SQLite field metadata
 - remaining TBC writer bit-compatibility edges and output parity across every
   format, option combination, and real capture

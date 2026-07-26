@@ -23,7 +23,7 @@
         "vhsSync": "current",
         "vhsVsyncLevels": "current",
         "chromaGroupDelay": "current",
-        "chromaFinalFilter": "pending",
+        "chromaFinalFilter": "current",
         "cti": "pending"
       }
     }
