@@ -214,6 +214,14 @@ public sealed class TbcFieldRenderer
         VideoOutputConverter? converterOverride = null,
         int? trackPhaseOverride = null)
     {
+        if (CanConvertPreparedFieldDirectly())
+        {
+            VideoOutputConverter activeConverter = converterOverride ?? _converter;
+            return new TbcRenderedField(
+                _resampler.ResamplePreparedToUInt16(videoHz, plan, activeConverter),
+                OutputConverter: activeConverter);
+        }
+
         double[] resampled = ResamplePreparedField(videoHz, plan);
         return RenderResampledFieldPayload(
             resampled,
@@ -222,6 +230,13 @@ public sealed class TbcFieldRenderer
             converterProvider: null,
             trackPhaseOverride);
     }
+
+    private bool CanConvertPreparedFieldDirectly()
+        => YCombLimitHz == 0.0
+            && !ExportRawTbc
+            && CvbsClampAgc is null
+            && Ire0Adjust is null
+            && TrackPhaseIre0Offset is null;
 
     private TbcRenderedField RenderResampledFieldPayload(
         double[] resampled,

@@ -1,3 +1,4 @@
+using System.Runtime.CompilerServices;
 using System.Text.Json;
 using VHSDecode.Core.Formats;
 
@@ -5,6 +6,40 @@ namespace VHSDecode.Core.Tbc;
 
 public sealed class VideoOutputConverter
 {
+    internal readonly struct FastMathConversion
+    {
+        private readonly double _ire0;
+        private readonly double _outputScale;
+        private readonly double _inverseHzIre;
+        private readonly double _offset;
+
+        internal FastMathConversion(VideoOutputConverter converter)
+        {
+            _ire0 = converter.Ire0;
+            _outputScale = converter.OutputScale;
+            _inverseHzIre = 1.0 / converter.HzIre;
+            _offset = (converter.OutputZero + 0.5) - (converter.VSyncIre * converter.OutputScale);
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        internal ushort Convert(double input)
+        {
+            double scaledDelta = _outputScale * (input - _ire0);
+            double value = Math.FusedMultiplyAdd(scaledDelta, _inverseHzIre, _offset);
+            if (value <= 0.0)
+            {
+                return 0;
+            }
+
+            if (value >= ushort.MaxValue)
+            {
+                return ushort.MaxValue;
+            }
+
+            return (ushort)value;
+        }
+    }
+
     public const int PalOutputScaleDividend = 0xD300 - 0x0100;
     public const int NtscOutputScaleDividend = 0xC800 - 0x0400;
 
@@ -121,28 +156,16 @@ public sealed class VideoOutputConverter
             throw new ArgumentException("Output length must match input length.", nameof(output));
         }
 
-        double inverseHzIre = 1.0 / HzIre;
-        double fastMathOffset = (OutputZero + 0.5) - (VSyncIre * OutputScale);
+        FastMathConversion conversion = CreateFastMathConversion();
         for (int i = 0; i < input.Length; i++)
         {
             // Upstream's ndarray conversion is Numba fastmath code, which
             // reassociates around ire0 and contracts the final multiply-add.
-            double scaledDelta = OutputScale * (input[i] - Ire0);
-            double value = Math.FusedMultiplyAdd(scaledDelta, inverseHzIre, fastMathOffset);
-            if (value <= 0.0)
-            {
-                output[i] = 0;
-            }
-            else if (value >= ushort.MaxValue)
-            {
-                output[i] = ushort.MaxValue;
-            }
-            else
-            {
-                output[i] = (ushort)value;
-            }
+            output[i] = conversion.Convert(input[i]);
         }
     }
+
+    internal FastMathConversion CreateFastMathConversion() => new(this);
 
     private static double GetDecoderParameter(FormatParameterSet parameters, string propertyName)
     {
