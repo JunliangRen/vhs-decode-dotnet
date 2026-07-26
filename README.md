@@ -294,6 +294,19 @@ identical. `--threads 0` also passed the same gate on its unchanged serial path.
 A 200-frame default-worker run had no second-half slowdown; only one dropout
 task can exist per field, and sampled memory fell again in the final quarter.
 
+The subsequent owned-buffer VHS chroma SOS pass runs the same float32
+forward/backward filter in place only when the current stage exclusively owns
+the `double[]`; conversion points, odd padding, section order, and public
+ownership remain unchanged. A matched 40-frame trace reduced sampled managed
+allocation from 3.143 to 2.865 GiB (8.9%), `Double[]` allocation from
+2,637.6 to 2,351.7 MiB (10.8%), and Gen2 collections from 18 to 17. Four
+alternating 160-frame pairs reduced wall-time medians by 2.2% at
+`--threads 5` and 3.5% at `--threads 20`; two serial pairs improved by 1.0%,
+and the candidate was faster in all ten pairs. Luma TBC, chroma TBC, JSON,
+ordered `fileLoc`, stdout, normalized stderr/logs, and cross-thread hashes were
+identical. A monitored 200-frame default-worker run also had no second-half
+slowdown or monotonic memory growth.
+
 The current thread matrix used an Intel Core Ultra 7 265K (20 logical
 processors), Windows 11 build 26220, .NET SDK/runtime
 `11.0.100-preview.6.26359.118`, and Python v0.4.0 commit
@@ -821,7 +834,7 @@ Requirements:
 .\tools\build-ipp-native.ps1
 dotnet restore VHSDecodeDotNet.slnx
 dotnet build VHSDecodeDotNet.slnx -c Release --no-restore
-dotnet test --solution VHSDecodeDotNet.slnx -c Release --no-build --no-restore --minimum-expected-tests 924
+dotnet test --solution VHSDecodeDotNet.slnx -c Release --no-build --no-restore --minimum-expected-tests 925
 ```
 
 The first command includes the optional `ipp-fast` native artifact; omit it for
@@ -834,7 +847,7 @@ Intel license, and `THIRD-PARTY-NOTICES.md`; an Exact-only build may omit the
 native build step.
 
 The current formal Release build has zero warnings and errors. The xUnit v3
-project exposes **924** independently discoverable tests to both
+project exposes **925** independently discoverable tests to both
 `dotnet test` and Visual Studio Test Explorer.
 
 <!-- SECTION: usage -->

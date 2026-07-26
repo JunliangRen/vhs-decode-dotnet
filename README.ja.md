@@ -277,6 +277,18 @@ median は `--threads 5` で 2.8%、`--threads 20` で 4.5% 短縮し、candidat
 では後半の slowdown がなく、field ごとの dropout task は最大 1 つで、sampled memory
 は最後の quarter で再び低下しました。
 
+続く owned-buffer VHS chroma SOS pass は、現在の stage が `double[]` を排他的に
+所有する場合に限り、同じ float32 forward/backward filter を in-place で実行します。
+conversion point、odd-extension padding、section order、public ownership は変更して
+いません。同条件の 40-frame trace では sampled managed allocation が 3.143 から
+2.865 GiB（8.9%）、`Double[]` allocation が 2,637.6 から 2,351.7 MiB（10.8%）へ
+減少し、Gen2 collection は 18 回から 17 回になりました。160-frame の alternating
+4 pair では wall-time median が `--threads 5` で 2.2%、`--threads 20` で 3.5%
+短縮し、serial 2 pair も 1.0% 短縮しました。candidate は全 10 pair で高速でした。
+Luma TBC、chroma TBC、JSON、順序付き `fileLoc`、stdout、normalized stderr/log、
+cross-thread hash はすべて一致しました。monitor 付き 200-frame default-worker run
+にも後半の slowdown や単調な memory growth はありませんでした。
+
 現在の thread matrix は Intel Core Ultra 7 265K（20 logical processor）、
 Windows 11 build 26220、.NET SDK/runtime `11.0.100-preview.6.26359.118`、
 Python v0.4.0 commit
@@ -773,7 +785,7 @@ serial/default-5/20/64 worker の間で 6 artifact がすべて一致しまし�
 .\tools\build-ipp-native.ps1
 dotnet restore VHSDecodeDotNet.slnx
 dotnet build VHSDecodeDotNet.slnx -c Release --no-restore
-dotnet test --solution VHSDecodeDotNet.slnx -c Release --no-build --no-restore --minimum-expected-tests 924
+dotnet test --solution VHSDecodeDotNet.slnx -c Release --no-build --no-restore --minimum-expected-tests 925
 ```
 
 最初の command は optional `ipp-fast` native artifact を含めるためのものです。
@@ -786,7 +798,7 @@ bridge を build します。外部 IPP、OpenMP、oneTBB、Visual C++ runtime D
 
 現在の正式な Release build は warning 0、error 0 です。xUnit v3 project は
 `dotnet test` と Visual Studio Test Explorer の両方で個別に検出できる
-**924** tests を公開します。
+**925** tests を公開します。
 
 <!-- SECTION: usage -->
 

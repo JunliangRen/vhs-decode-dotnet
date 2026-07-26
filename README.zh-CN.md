@@ -235,6 +235,15 @@ dropout 重叠的严格 Exact 模式 benchmark 使用同一个合成 packed PAL 
 默认 worker 的 200 帧持续运行没有后半程变慢；每场最多存在一个 dropout 任务，
 采样内存在最后四分之一阶段再次回落。
 
+后续的 VHS 色度 SOS 独占缓冲区优化只在当前阶段独占 `double[]` 时，原地执行同一套
+float32 前后向滤波；转换点、奇延拓 padding、section 顺序和公共所有权均未改变。
+同条件 40 帧 trace 将采样托管分配从 3.143 GiB 降至 2.865 GiB（8.9%），
+`Double[]` 分配从 2637.6 MiB 降至 2351.7 MiB（10.8%），Gen2 回收从 18 次降至
+17 次。四对交错的 160 帧测试中，`--threads 5` 墙钟中位数降低 2.2%，
+`--threads 20` 降低 3.5%；两对串行测试降低 1.0%，候选在全部十对中都更快。
+亮度 TBC、色度 TBC、JSON、有序 `fileLoc`、stdout、归一化 stderr/日志及跨线程
+hash 完全一致。监控的 200 帧默认 worker 运行也没有后半程变慢或内存单调增长。
+
 当前线程矩阵使用 Intel Core Ultra 7 265K（20 个逻辑处理器）、Windows 11 build
 26220、.NET SDK/runtime `11.0.100-preview.6.26359.118`，以及 Python v0.4.0
 commit `43155200da87c0d49eb37d8ec09b1372075ee8e4`（程序报告为
@@ -664,7 +673,7 @@ NTSC-J 门禁保持不变。
 .\tools\build-ipp-native.ps1
 dotnet restore VHSDecodeDotNet.slnx
 dotnet build VHSDecodeDotNet.slnx -c Release --no-restore
-dotnet test --solution VHSDecodeDotNet.slnx -c Release --no-build --no-restore --minimum-expected-tests 924
+dotnet test --solution VHSDecodeDotNet.slnx -c Release --no-build --no-restore --minimum-expected-tests 925
 ```
 
 第一条命令用于包含可选的 `ipp-fast` 原生产物；只构建 Exact 时可以省略。
@@ -675,7 +684,7 @@ Intel oneAPI。发布程序会携带 `vhsdecode_ipp.dll`、Intel 许可证和
 `THIRD-PARTY-NOTICES.md`；只构建 Exact 后端时可以省略原生构建步骤。
 
 当前正式 Release 构建为零警告、零错误。xUnit v3 项目向
-`dotnet test` 和 Visual Studio Test Explorer 暴露 **924** 个可独立发现的测试。
+`dotnet test` 和 Visual Studio Test Explorer 暴露 **925** 个可独立发现的测试。
 
 <!-- SECTION: usage -->
 
