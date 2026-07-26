@@ -76,19 +76,38 @@ public static class PortedMath
         ReadOnlySpan<double> imaginary,
         double frequencyHz)
     {
-        if (real.IsEmpty)
-        {
-            throw new ArgumentException("Input must not be empty.", nameof(real));
-        }
-
-        if (imaginary.Length != real.Length)
-        {
-            throw new ArgumentException("Real and imaginary inputs must have matching lengths.", nameof(imaginary));
-        }
-
+        ValidateVhsRustSplitInput(real, imaginary);
         var output = new double[real.Length];
+        FillVhsRustFrequencyDifferences(real, imaginary, frequencyHz, output);
+        return output;
+    }
+
+    internal static unsafe void UnwrapHilbertVhsRustApproximation(
+        ReadOnlySpan<double> real,
+        ReadOnlySpan<double> imaginary,
+        double frequencyHz,
+        Span<double> output)
+    {
+        ValidateVhsRustSplitInput(real, imaginary);
+        if (output.Length != real.Length)
+        {
+            throw new ArgumentException(
+                "Output length must match the real and imaginary inputs.",
+                nameof(output));
+        }
+
+        FillVhsRustFrequencyDifferences(real, imaginary, frequencyHz, output);
+    }
+
+    private static unsafe void FillVhsRustFrequencyDifferences(
+        ReadOnlySpan<double> real,
+        ReadOnlySpan<double> imaginary,
+        double frequencyHz,
+        Span<double> output)
+    {
         float frequency = (float)frequencyHz;
         float previous = VhsRustAtan2Approximation((float)imaginary[0], (float)real[0]);
+        output[0] = 0.0;
         int i = 1;
         if (Avx.IsSupported && Sse.IsSupported)
         {
@@ -145,8 +164,21 @@ public static class PortedMath
             output[i] = VhsRustFrequencyDifference(current, previous, frequency);
             previous = current;
         }
+    }
 
-        return output;
+    private static void ValidateVhsRustSplitInput(
+        ReadOnlySpan<double> real,
+        ReadOnlySpan<double> imaginary)
+    {
+        if (real.IsEmpty)
+        {
+            throw new ArgumentException("Input must not be empty.", nameof(real));
+        }
+
+        if (imaginary.Length != real.Length)
+        {
+            throw new ArgumentException("Real and imaginary inputs must have matching lengths.", nameof(imaginary));
+        }
     }
 
     private static unsafe double[] UnwrapHilbertVhsRustApproximationCore(

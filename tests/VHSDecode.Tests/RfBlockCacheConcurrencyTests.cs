@@ -149,6 +149,60 @@ public sealed class RfBlockCacheConcurrencyTests
         Assert.Equal(24, compact.AvailableSampleCountOverride);
     }
 
+    [Fact(DisplayName = "Compact packed LDS inputs are returned after parallel decode")]
+    public void CompactPackedLdsInputsAreReturnedAfterParallelDecode()
+    {
+        int[] samples = Enumerable.Range(0, 256)
+            .Select(index => (index * 73) % 1024)
+            .ToArray();
+        byte[] packed = Pack4x10(samples);
+        var fullLoader = new PackedDdD4To40SampleLoader();
+        var compactLoader = new PackedDdD4To40SampleLoader();
+        using var fullStream = new MemoryStream(packed, writable: false);
+        using var compactStream = new MemoryStream(packed, writable: false);
+        using var fullDecoder = BuildDecoder(fullLoader, workerThreads: 4);
+        using var compactDecoder = BuildDecoder(
+            compactLoader,
+            workerThreads: 4,
+            retainRfDiagnosticChannels: false);
+
+        RfDecodedSpan full = fullDecoder.Read(fullStream, begin: 0, length: 24)!;
+        RfDecodedSpan compact = compactDecoder.Read(compactStream, begin: 0, length: 24)!;
+
+        Assert.Equal(full.Video, compact.Video);
+        Assert.Equal(full.Envelope, compact.Envelope);
+        Assert.Equal(full.VideoLowPass, compact.VideoLowPass);
+        Assert.Empty(compact.Input);
+        Assert.InRange(
+            compactLoader.CachedReusableDecodedBufferCount,
+            1,
+            PackedDdD4To40SampleLoader.MaximumRetainedDecodedBufferCount);
+        Assert.Equal(0, fullLoader.CachedReusableDecodedBufferCount);
+    }
+
+    [Fact(DisplayName = "Parallel decode failures return every compact packed LDS input")]
+    public void ParallelDecodeFailuresReturnEveryCompactPackedLdsInput()
+    {
+        int[] samples = Enumerable.Range(0, 256)
+            .Select(index => (index * 73) % 1024)
+            .ToArray();
+        byte[] packed = Pack4x10(samples);
+        var loader = new PackedDdD4To40SampleLoader();
+        using var stream = new MemoryStream(packed, writable: false);
+        using var decoder = BuildDecoder(
+            loader,
+            workerThreads: 4,
+            retainRfDiagnosticChannels: false,
+            fmDemodulatorMode: (RfFmDemodulatorMode)int.MaxValue);
+
+        _ = Assert.ThrowsAny<Exception>(() => decoder.Read(stream, begin: 0, length: 24));
+
+        Assert.InRange(
+            loader.CachedReusableDecodedBufferCount,
+            1,
+            PackedDdD4To40SampleLoader.MaximumRetainedDecodedBufferCount);
+    }
+
     [Fact(DisplayName = "Compact VHS RF spans widen float32 chroma exactly once during assembly")]
     public void CompactVhsRfSpansWidenFloat32ChromaDuringAssembly()
     {
@@ -378,7 +432,8 @@ public sealed class RfBlockCacheConcurrencyTests
         bool optionalOutputs = false,
         Action<string, string>? diagnosticLogger = null,
         bool retainRfDiagnosticChannels = true,
-        bool float32Chroma = false)
+        bool float32Chroma = false,
+        RfFmDemodulatorMode? fmDemodulatorMode = null)
     {
         const int blockLength = 16;
         Complex[] identity = RfDemodulator.IdentityFilter(blockLength);
@@ -433,8 +488,9 @@ public sealed class RfBlockCacheConcurrencyTests
             loader,
             filters,
             sampleRateHz: 16.0,
-            filterOptions: weakRfDiagnostics
-                ? new DecodeFilterOptions(FmDemodulatorMode: RfFmDemodulatorMode.VhsRustApproximation)
+            filterOptions: weakRfDiagnostics || fmDemodulatorMode.HasValue
+                ? new DecodeFilterOptions(
+                    FmDemodulatorMode: fmDemodulatorMode ?? RfFmDemodulatorMode.VhsRustApproximation)
                 : null,
             diagnosticLogger: diagnosticLogger,
             retainRfDiagnosticChannels: retainRfDiagnosticChannels);
@@ -456,6 +512,31 @@ public sealed class RfBlockCacheConcurrencyTests
         => Assert.True(SpinWait.SpinUntil(
             () => loader.ReadCount >= expected,
             TimeSpan.FromSeconds(5)));
+
+    private static byte[] Pack4x10(int[] samples)
+    {
+        if (samples.Length % 4 != 0)
+        {
+            throw new ArgumentException("Sample count must be divisible by four.", nameof(samples));
+        }
+
+        byte[] output = new byte[(samples.Length / 4) * 5];
+        for (int group = 0; group < samples.Length / 4; group++)
+        {
+            int s0 = samples[group * 4] & 0x3FF;
+            int s1 = samples[(group * 4) + 1] & 0x3FF;
+            int s2 = samples[(group * 4) + 2] & 0x3FF;
+            int s3 = samples[(group * 4) + 3] & 0x3FF;
+            int i = group * 5;
+            output[i] = (byte)(s0 >> 2);
+            output[i + 1] = (byte)(((s0 & 0x03) << 6) | (s1 >> 4));
+            output[i + 2] = (byte)(((s1 & 0x0F) << 4) | (s2 >> 6));
+            output[i + 3] = (byte)(((s2 & 0x3F) << 2) | (s3 >> 8));
+            output[i + 4] = (byte)(s3 & 0xFF);
+        }
+
+        return output;
+    }
 
     private sealed class CountingSampleLoader : IRfSampleLoader
     {

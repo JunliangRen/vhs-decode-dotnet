@@ -116,6 +116,57 @@ public sealed class RfDemodulator : IDisposable
         bool includeRfHighPassOutput = true,
         bool includeAnalyticOutput = true)
     {
+        return DemodulateCore(
+            input,
+            rfVideoFilter,
+            rfHighPassFilter,
+            rfMtfFilter,
+            videoFilter,
+            videoLowPassFilter,
+            videoLowPassOffset,
+            removeLdPalV4300DSpur,
+            rfHighBoost,
+            diffDemodRepair,
+            chromaTrap,
+            sharpnessEq,
+            nonlinearDeemphasis,
+            subDeemphasis,
+            betamaxFscNotchHz,
+            referenceFilters,
+            fmDemodulatorMode,
+            vhsEnvelopeFilter,
+            vhsRfTopFilter,
+            precomputedInputSpectrum,
+            includeRfHighPassOutput,
+            includeAnalyticOutput,
+            includeDemodRawOutput: true);
+    }
+
+    internal RfDemodulatedBlock DemodulateCore(
+        ReadOnlySpan<double> input,
+        ReadOnlySpan<Complex> rfVideoFilter,
+        ReadOnlySpan<Complex> rfHighPassFilter,
+        ReadOnlySpan<Complex> rfMtfFilter,
+        ReadOnlySpan<Complex> videoFilter,
+        ReadOnlySpan<Complex> videoLowPassFilter,
+        int videoLowPassOffset,
+        bool removeLdPalV4300DSpur,
+        RfHighBoostOptions? rfHighBoost,
+        DiffDemodRepairOptions? diffDemodRepair,
+        ChromaTrapOptions? chromaTrap,
+        SharpnessEqOptions? sharpnessEq,
+        NonlinearDeemphasisOptions? nonlinearDeemphasis,
+        SubDeemphasisOptions? subDeemphasis,
+        double? betamaxFscNotchHz,
+        RfVideoReferenceFilterSet? referenceFilters,
+        RfFmDemodulatorMode fmDemodulatorMode,
+        IReadOnlyList<SosSection>? vhsEnvelopeFilter,
+        IReadOnlyList<SosSection>? vhsRfTopFilter,
+        Complex[]? precomputedInputSpectrum,
+        bool includeRfHighPassOutput,
+        bool includeAnalyticOutput,
+        bool includeDemodRawOutput)
+    {
         ObjectDisposedException.ThrowIf(Volatile.Read(ref _disposed) != 0, this);
         if (input.IsEmpty)
         {
@@ -363,7 +414,20 @@ public sealed class RfDemodulator : IDisposable
         {
             ReadOnlySpan<double> real = vhsRfFilteredReal!.AsSpan(0, input.Length);
             ReadOnlySpan<double> imaginary = vhsRealFftWorkspace!.Imaginary.AsSpan(0, input.Length);
-            demodRaw = DemodulateAnalytic(real, imaginary, fmDemodulatorMode);
+            if (includeDemodRawOutput)
+            {
+                demodRaw = DemodulateAnalytic(real, imaginary, fmDemodulatorMode);
+            }
+            else
+            {
+                demodRaw = vhsRealFftWorkspace.RawEnvelope;
+                DemodulateAnalytic(
+                    real,
+                    imaginary,
+                    fmDemodulatorMode,
+                    demodRaw.AsSpan(0, input.Length));
+            }
+
             ApplyDiffDemodRepairIfPresent(
                 demodRaw,
                 real,
@@ -509,7 +573,7 @@ public sealed class RfDemodulator : IDisposable
 
         return new RfDemodulatedBlock(
             video,
-            demodRaw,
+            includeDemodRawOutput ? demodRaw : [],
             analyticOutput,
             envelope,
             videoLowPass,
@@ -1638,6 +1702,26 @@ public sealed class RfDemodulator : IDisposable
                 PortedMath.UnwrapHilbertVhsRustApproximation(real, imaginary, SampleRateHz),
             _ => throw new ArgumentOutOfRangeException(nameof(mode), mode, null)
         };
+    }
+
+    private void DemodulateAnalytic(
+        ReadOnlySpan<double> real,
+        ReadOnlySpan<double> imaginary,
+        RfFmDemodulatorMode mode,
+        Span<double> output)
+    {
+        switch (mode)
+        {
+            case RfFmDemodulatorMode.VhsRustApproximation:
+                PortedMath.UnwrapHilbertVhsRustApproximation(
+                    real,
+                    imaginary,
+                    SampleRateHz,
+                    output);
+                break;
+            default:
+                throw new ArgumentOutOfRangeException(nameof(mode), mode, null);
+        }
     }
 
     private void ApplyNonlinearDeemphasisIfPresent(
