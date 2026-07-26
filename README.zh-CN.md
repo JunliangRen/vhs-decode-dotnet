@@ -229,7 +229,7 @@ non-Intel vendor warning。后端会加载静态链接的 `vhsdecode_ipp.dll`，
 
 dropout 重叠的严格 Exact 模式 benchmark 使用同一个合成 packed PAL RF 夹具，请求
 160 帧；每种模式先预热一对，再交错运行四对 Release A/B。相对改动前的 main，
-`--threads 5` 端到端墙钟中位数降低 4.7%，`--threads 20` 降低 5.5%，候选在全部
+`--threads 5` 端到端墙钟中位数降低 2.8%，`--threads 20` 降低 4.5%，候选在全部
 八对中都更快。亮度 TBC、色度 TBC、JSON、stdout、归一化 stderr/日志以及全部
 320 个有序 `fileLoc` 完全一致。`--threads 0` 的未改串行路径也通过同一门禁。
 默认 worker 的 200 帧持续运行没有后半程变慢；每场最多存在一个 dropout 任务，

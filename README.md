@@ -287,7 +287,7 @@ falling back to the Exact inverse FFT and reduced the paired median gain to
 A strict Exact-mode benchmark of the dropout overlap used the same synthetic
 packed PAL RF fixture, 160 requested frames, one warm-up pair, and four
 alternating Release pairs per mode. Against the pre-change main build, median
-end-to-end wall time fell by 4.7% at `--threads 5` and 5.5% at
+end-to-end wall time fell by 2.8% at `--threads 5` and 4.5% at
 `--threads 20`; the candidate won all eight pairs. Luma TBC, chroma TBC, JSON,
 stdout, normalized stderr/logs, and all 320 ordered `fileLoc` values were
 identical. `--threads 0` also passed the same gate on its unchanged serial path.

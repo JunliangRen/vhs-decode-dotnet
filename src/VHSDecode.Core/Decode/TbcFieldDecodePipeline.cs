@@ -297,6 +297,8 @@ public sealed class TbcFieldDecodePipeline
 
     public bool DecodesVbiData => _decodeVbiData;
 
+    internal int WorkerThreads => _workerThreads;
+
     internal Action<string, string>? DiagnosticLogger
     {
         get => _diagnosticLogger;

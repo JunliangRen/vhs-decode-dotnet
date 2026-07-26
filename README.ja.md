@@ -270,7 +270,7 @@ FFT への fallback が必要で、paired median gain は -1.05% まで低下し
 dropout overlap の strict Exact-mode benchmark は、同じ synthetic packed PAL RF
 fixture で 160 frame を要求し、各 mode について 1 組の warm-up 後に 4 組の
 alternating Release A/B を実行しました。変更前の main と比べ、end-to-end wall-time
-median は `--threads 5` で 4.7%、`--threads 20` で 5.5% 短縮し、candidate は全 8 組で
+median は `--threads 5` で 2.8%、`--threads 20` で 4.5% 短縮し、candidate は全 8 組で
 高速でした。Luma TBC、chroma TBC、JSON、stdout、normalized stderr/log、および
 順序付き 320 個すべての `fileLoc` は一致しました。変更のない serial path の
 `--threads 0` も同じ gate を通過しました。default-worker の 200-frame sustained run
