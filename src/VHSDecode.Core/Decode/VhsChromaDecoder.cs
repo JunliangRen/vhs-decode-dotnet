@@ -335,7 +335,11 @@ public static class VhsChromaDecoder
         if (effectiveBurstFilter is null && options.FinalSosFilter is not null)
         {
             effectiveBurstFilter = useFloat32Samples
-                ? values => SosFilter.ApplyForwardBackwardFloat32(options.FinalSosFilter, values)
+                ? values =>
+                {
+                    SosFilter.ApplyForwardBackwardFloat32InPlace(options.FinalSosFilter, values);
+                    return values;
+                }
                 : values => SosFilter.ApplyForwardBackward(options.FinalSosFilter, values);
         }
         else if (effectiveBurstFilter is null && options.FinalFilter is not null)
@@ -485,7 +489,7 @@ public static class VhsChromaDecoder
             double[] filteredCarrierProbe = SosFilter.ApplyForwardBackwardFloat32(
                 measurementFilters.HighPass,
                 carrierProbe);
-            filteredCarrierProbe = SosFilter.ApplyForwardBackwardFloat32(
+            SosFilter.ApplyForwardBackwardFloat32InPlace(
                 measurementFilters.LowPass,
                 filteredCarrierProbe);
             carrierProbe = filteredCarrierProbe;
@@ -569,7 +573,7 @@ public static class VhsChromaDecoder
         }
         else if (options.FinalSosFilter is not null)
         {
-            upconverted = SosFilter.ApplyForwardBackwardFloat32(options.FinalSosFilter, upconverted);
+            SosFilter.ApplyForwardBackwardFloat32InPlace(options.FinalSosFilter, upconverted);
         }
         else if (options.FinalFilter is not null)
         {

@@ -639,6 +639,64 @@ public sealed class DspWorkingBufferTests
         }
     }
 
+    [Fact(DisplayName = "In-place float32 SOS remains allocating-reference bit-exact")]
+    public void InPlaceFloat32SosRemainsAllocatingReferenceBitExact()
+    {
+        const int length = 32_768;
+        double[] input = Enumerable.Range(0, length)
+            .Select(index => Math.Sin(index * 0.013) + (0.125 * Math.Cos(index * 0.029)))
+            .ToArray();
+        SosSection[][] cases =
+        [
+            [
+                new SosSection(
+                    0.06745527,
+                    0.13491055,
+                    0.06745527,
+                    1.0,
+                    -1.1429805,
+                    0.4128016)
+            ],
+            IirFilterDesign.ButterworthBandPassSos(
+                order: 2,
+                normalizedLowCutoff: 0.1,
+                normalizedHighCutoff: 0.4),
+            IirFilterDesign.ButterworthBandPassSos(
+                order: 4,
+                normalizedLowCutoff: 0.1,
+                normalizedHighCutoff: 0.4),
+            IirFilterDesign.ButterworthBandPassSos(
+                order: 5,
+                normalizedLowCutoff: 0.1,
+                normalizedHighCutoff: 0.4)
+        ];
+
+        foreach (SosSection[] sections in cases)
+        {
+            foreach (int? padLength in new int?[] { null, 0, 7 })
+            {
+                double[] expected = SosFilter.ApplyForwardBackwardFloat32(
+                    sections,
+                    input,
+                    padLength);
+                double[] actual = input.ToArray();
+                SosFilter.ApplyForwardBackwardFloat32InPlace(sections, actual, padLength);
+                AssertDoubleBitsEqual(expected, actual);
+            }
+        }
+
+        SosSection[] allocationSections = cases[1];
+        double[] allocationProbe = input.ToArray();
+        SosFilter.ApplyForwardBackwardFloat32InPlace(allocationSections, allocationProbe);
+        input.CopyTo(allocationProbe, 0);
+        long before = GC.GetAllocatedBytesForCurrentThread();
+        SosFilter.ApplyForwardBackwardFloat32InPlace(allocationSections, allocationProbe);
+        long allocated = GC.GetAllocatedBytesForCurrentThread() - before;
+        Assert.True(
+            allocated < 4_096,
+            $"Warm in-place float32 SOS forward/backward allocated {allocated:N0} bytes.");
+    }
+
     [Fact(DisplayName = "Double SOS common-section kernels remain section-major bit-exact")]
     public void DoubleSosCommonSectionKernelsRemainSectionMajorBitExact()
     {

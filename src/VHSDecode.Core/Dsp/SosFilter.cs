@@ -224,6 +224,36 @@ public static class SosFilter
             throw new ArgumentOutOfRangeException(nameof(padLength));
         }
 
+        var output = new double[input.Length];
+        ApplyForwardBackwardFloat32Core(sections, input, output, edge);
+        return output;
+    }
+
+    internal static void ApplyForwardBackwardFloat32InPlace(
+        IReadOnlyList<SosSection> sections,
+        Span<double> samples,
+        int? padLength = null)
+    {
+        if (samples.IsEmpty)
+        {
+            return;
+        }
+
+        int edge = padLength ?? DefaultPadLength(sections);
+        if (edge < 0)
+        {
+            throw new ArgumentOutOfRangeException(nameof(padLength));
+        }
+
+        ApplyForwardBackwardFloat32Core(sections, samples, samples, edge);
+    }
+
+    private static void ApplyForwardBackwardFloat32Core(
+        IReadOnlyList<SosSection> sections,
+        ReadOnlySpan<double> input,
+        Span<double> output,
+        int edge)
+    {
         FloatSosSection[] floatSections = ConvertToFloat32(sections);
         int extendedLength = checked(input.Length + (edge * 2));
         float[] rented = ArrayPool<float>.Shared.Rent(extendedLength);
@@ -241,9 +271,7 @@ public static class SosFilter
 
             ApplyForwardBackwardFloat32InPlace(floatSections, extended);
 
-            var output = new double[input.Length];
             ConvertToFloat64(extended.Slice(edge, input.Length), output);
-            return output;
         }
         finally
         {
