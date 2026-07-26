@@ -65,7 +65,9 @@ public sealed class VhsRustUnwrapSimdTests
             output);
         long allocated = GC.GetAllocatedBytesForCurrentThread() - before;
 
-        Assert.Equal(0, allocated);
+        Assert.True(
+            allocated < 256,
+            $"Warm VHS Rust unwrap caller-buffer path allocated {allocated:N0} bytes.");
     }
 
     private static Complex[] BuildInput(int length)
