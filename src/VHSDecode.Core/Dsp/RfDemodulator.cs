@@ -434,7 +434,8 @@ public sealed class RfDemodulator : IDisposable
                 imaginary,
                 diffDemodRepair,
                 fmDemodulatorMode,
-                vhsRealFftWorkspace.DiffedAnalytic);
+                vhsRealFftWorkspace,
+                preserveAnalyticComponents: includeAnalyticOutput);
             analyticOutput = includeAnalyticOutput
                 ? MaterializeVhsAnalyticSignal(real, imaginary)
                 : [];
@@ -1634,7 +1635,8 @@ public sealed class RfDemodulator : IDisposable
         ReadOnlySpan<double> imaginary,
         DiffDemodRepairOptions? options,
         RfFmDemodulatorMode fmDemodulatorMode,
-        Complex[]? diffedWorkspace)
+        VhsRealFftWorkspace? workspace,
+        bool preserveAnalyticComponents)
     {
         if (options is null || demod.Length <= 40)
         {
@@ -1661,6 +1663,7 @@ public sealed class RfDemodulator : IDisposable
             return;
         }
 
+        Complex[]? diffedWorkspace = workspace?.DiffedAnalytic;
         Complex[] diffed = diffedWorkspace is not null && diffedWorkspace.Length >= real.Length
             ? diffedWorkspace
             : new Complex[real.Length];
@@ -1673,8 +1676,29 @@ public sealed class RfDemodulator : IDisposable
         }
 
         activeDiffed[0] = Complex.Zero;
-        double[] demodDiffed = DemodulateAnalytic(activeDiffed, fmDemodulatorMode);
-        ReplaceSpikes(demod, demodDiffed, options.MaxValue);
+        // RawEnvelope is free after envelope filtering unless compact output owns it.
+        // In that compact case, Real is free only when no analytic output will escape.
+        double[]? reusableDemodDiffed = workspace is null
+            ? null
+            : !ReferenceEquals(demod, workspace.RawEnvelope)
+                ? workspace.RawEnvelope
+                : preserveAnalyticComponents
+                    ? null
+                    : workspace.Real;
+        if (reusableDemodDiffed is not null
+            && fmDemodulatorMode == RfFmDemodulatorMode.VhsRustApproximation)
+        {
+            PortedMath.UnwrapHilbertVhsRustApproximation(
+                activeDiffed,
+                SampleRateHz,
+                reusableDemodDiffed);
+            ReplaceSpikes(demod, reusableDemodDiffed, options.MaxValue);
+        }
+        else
+        {
+            double[] demodDiffed = DemodulateAnalytic(activeDiffed, fmDemodulatorMode);
+            ReplaceSpikes(demod, demodDiffed, options.MaxValue);
+        }
     }
 
     private double[] DemodulateAnalytic(
