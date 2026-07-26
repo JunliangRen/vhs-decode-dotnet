@@ -17,6 +17,7 @@ public sealed class RfBlockDecodePipeline : IDisposable
     private readonly RfVideoReferenceFilterSet? _referenceFilters;
     private readonly CvbsDecodeOptions? _cvbsOptions;
     private readonly IRfInputProcessor? _inputProcessor;
+    private readonly PackedDdD4To40SampleLoader? _reusableStreamInputLoader;
     private readonly Action<string, string>? _diagnosticLogger;
     private readonly bool _retainRfDiagnosticChannels;
 
@@ -44,6 +45,11 @@ public sealed class RfBlockDecodePipeline : IDisposable
                 _filterOptions.LdClipDemodForVideo);
         _cvbsOptions = cvbsOptions;
         _inputProcessor = inputProcessor;
+        _reusableStreamInputLoader = !retainRfDiagnosticChannels
+            && cvbsOptions is null
+            && inputProcessor is null
+            ? loader as PackedDdD4To40SampleLoader
+            : null;
         _diagnosticLogger = diagnosticLogger;
         _retainRfDiagnosticChannels = retainRfDiagnosticChannels;
     }
@@ -81,10 +87,20 @@ public sealed class RfBlockDecodePipeline : IDisposable
 
     internal RfPipelineBlock? DecodeStreamBlockWithInput(Stream stream, long sample, int blockLength)
     {
-        double[]? input = LoadBlockInput(stream, sample, blockLength);
-        return input is null
-            ? null
-            : DecodePreparedStreamBlock(input);
+        double[]? input = LoadStreamBlockInput(stream, sample, blockLength);
+        if (input is null)
+        {
+            return null;
+        }
+
+        try
+        {
+            return DecodePreparedStreamBlock(input);
+        }
+        finally
+        {
+            ReturnStreamBlockInput(input);
+        }
     }
 
     internal double[]? LoadBlockInput(Stream stream, long sample, int blockLength)
@@ -93,6 +109,16 @@ public sealed class RfBlockDecodePipeline : IDisposable
         return loadedInput is null
             ? null
             : _inputProcessor?.Process(loadedInput) ?? loadedInput;
+    }
+
+    internal double[]? LoadStreamBlockInput(Stream stream, long sample, int blockLength)
+        => _reusableStreamInputLoader is null
+            ? LoadBlockInput(stream, sample, blockLength)
+            : _reusableStreamInputLoader.ReadReusable(stream, sample, blockLength);
+
+    internal void ReturnStreamBlockInput(double[] input)
+    {
+        _reusableStreamInputLoader?.ReturnReusable(input);
     }
 
     internal RfPipelineBlock DecodePreparedBlock(double[] input, bool reportDiagnostics = true)

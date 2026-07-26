@@ -5,9 +5,44 @@ namespace VHSDecode.Core.Rf;
 public sealed class PackedDdD4To40SampleLoader : IRfSampleLoader
 {
     private const int MaximumRetainedBufferLength = 1024 * 1024;
+    internal const int MaximumRetainedDecodedBufferLength = MaximumRetainedBufferLength / sizeof(double);
+    internal const int MaximumRetainedDecodedBufferCount = 32;
     private byte[]? _readBuffer;
+    private readonly object _decodedBufferLock = new();
+    private readonly double[]?[] _decodedBuffers = new double[]?[MaximumRetainedDecodedBufferCount];
+    private int _decodedBufferCount;
 
     public double[]? Read(Stream stream, long sample, int readLength)
+        => ReadCore(stream, sample, readLength, reuseDecodedBuffer: false);
+
+    internal double[]? ReadReusable(Stream stream, long sample, int readLength)
+        => ReadCore(stream, sample, readLength, reuseDecodedBuffer: true);
+
+    internal int CachedReusableDecodedBufferCount
+    {
+        get
+        {
+            lock (_decodedBufferLock)
+            {
+                return _decodedBufferCount;
+            }
+        }
+    }
+
+    internal void ReturnReusable(double[] buffer)
+    {
+        ArgumentNullException.ThrowIfNull(buffer);
+        lock (_decodedBufferLock)
+        {
+            if (buffer.Length <= MaximumRetainedDecodedBufferLength
+                && _decodedBufferCount < _decodedBuffers.Length)
+            {
+                _decodedBuffers[_decodedBufferCount++] = buffer;
+            }
+        }
+    }
+
+    private double[]? ReadCore(Stream stream, long sample, int readLength, bool reuseDecodedBuffer)
     {
         long start = (sample / 4) * 5;
         int offset = (int)(sample % 4);
@@ -15,6 +50,8 @@ public sealed class PackedDdD4To40SampleLoader : IRfSampleLoader
 
         stream.Seek(start, SeekOrigin.Begin);
         byte[] buffer = TakeReadBuffer(needed);
+        double[]? output = null;
+        bool completed = false;
         try
         {
             int read = stream.ReadAtLeast(
@@ -34,7 +71,9 @@ public sealed class PackedDdD4To40SampleLoader : IRfSampleLoader
                 return null;
             }
 
-            var output = new double[readLength];
+            output = reuseDecodedBuffer
+                ? TakeDecodedBuffer(readLength)
+                : new double[readLength];
             int outputIndex = 0;
             int firstCount = Math.Min(4 - offset, readLength);
             for (int sampleIndex = offset; sampleIndex < offset + firstCount; sampleIndex++)
@@ -64,12 +103,38 @@ public sealed class PackedDdD4To40SampleLoader : IRfSampleLoader
                 output[outputIndex++] = DecodeSample(buffer, group * 5, sampleIndex);
             }
 
+            completed = true;
             return output;
         }
         finally
         {
+            if (reuseDecodedBuffer && output is not null && !completed)
+            {
+                ReturnReusable(output);
+            }
+
             ReturnReadBuffer(buffer);
         }
+    }
+
+    private double[] TakeDecodedBuffer(int length)
+    {
+        lock (_decodedBufferLock)
+        {
+            for (int i = _decodedBufferCount - 1; i >= 0; i--)
+            {
+                double[] candidate = _decodedBuffers[i]!;
+                if (candidate.Length == length)
+                {
+                    int last = --_decodedBufferCount;
+                    _decodedBuffers[i] = _decodedBuffers[last];
+                    _decodedBuffers[last] = null;
+                    return candidate;
+                }
+            }
+        }
+
+        return new double[length];
     }
 
     private byte[] TakeReadBuffer(int needed)

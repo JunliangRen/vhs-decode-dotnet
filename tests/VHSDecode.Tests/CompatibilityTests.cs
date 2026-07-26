@@ -16344,6 +16344,95 @@ public void PackedLdsLoaderReusesItsByteInputBuffer()
         $"Warm 32K packed LDS read allocated {allocated:N0} bytes.");
 }
 
+[Fact(DisplayName = "packed LDS reusable reads overwrite every decoded sample")]
+public void PackedLdsReusableReadsOverwriteEveryDecodedSample()
+{
+    const int readLength = 8;
+    int[] samples = Enumerable.Range(0, 32)
+        .Select(index => (index * 73) % 1024)
+        .ToArray();
+    byte[] packed = Pack4x10(samples);
+    using var stream = new MemoryStream(packed, writable: false);
+    var loader = new PackedDdD4To40SampleLoader();
+
+    double[] first = loader.ReadReusable(stream, 0, readLength)!;
+    Array.Fill(first, double.NaN);
+    loader.ReturnReusable(first);
+    double[] second = loader.ReadReusable(stream, 5, readLength)!;
+
+    Assert.Same(first, second);
+    Assert.Equal(
+        samples
+            .Skip(5)
+            .Take(readLength)
+            .Select(value => (double)(short)((value - 512) << 6)),
+        second);
+
+    loader.ReturnReusable(second);
+    Assert.Equal(1, loader.CachedReusableDecodedBufferCount);
+}
+
+[Fact(DisplayName = "packed LDS reusable reads allocate no decoded array after warmup")]
+public void PackedLdsReusableReadsAllocateNoDecodedArrayAfterWarmup()
+{
+    const int readLength = 32_768;
+    int[] samples = Enumerable.Range(0, readLength + 4)
+        .Select(index => (index * 73) % 1024)
+        .ToArray();
+    byte[] packed = Pack4x10(samples);
+    using var stream = new MemoryStream(packed, writable: false);
+    var loader = new PackedDdD4To40SampleLoader();
+    double[] warm = loader.ReadReusable(stream, 0, readLength)!;
+    loader.ReturnReusable(warm);
+
+    long before = GC.GetAllocatedBytesForCurrentThread();
+    double[]? actual = loader.ReadReusable(stream, 0, readLength);
+    long allocated = GC.GetAllocatedBytesForCurrentThread() - before;
+
+    Assert.NotNull(actual);
+    Assert.Same(warm, actual);
+    Assert.Equal((double)(short)((samples[0] - 512) << 6), actual[0]);
+    Assert.Equal((double)(short)((samples[readLength - 1] - 512) << 6), actual[^1]);
+    loader.ReturnReusable(actual);
+    Assert.True(
+        allocated < 1_024,
+        $"Warm reusable 32K packed LDS read allocated {allocated:N0} bytes.");
+}
+
+[Fact(DisplayName = "packed LDS reusable reads do not rent output before EOF validation")]
+public void PackedLdsReusableReadsDoNotRentOutputBeforeEofValidation()
+{
+    byte[] incomplete = Pack4x10(Enumerable.Range(0, 8).ToArray());
+    var loader = new PackedDdD4To40SampleLoader();
+
+    double[]? actual = loader.ReadReusable(
+        new MemoryStream(incomplete, writable: false),
+        sample: 0,
+        readLength: 8);
+
+    Assert.Null(actual);
+    Assert.Equal(0, loader.CachedReusableDecodedBufferCount);
+}
+
+[Fact(DisplayName = "packed LDS reusable decoded buffer retention is bounded")]
+public void PackedLdsReusableDecodedBufferRetentionIsBounded()
+{
+    var loader = new PackedDdD4To40SampleLoader();
+    for (int i = 0; i < PackedDdD4To40SampleLoader.MaximumRetainedDecodedBufferCount + 4; i++)
+    {
+        loader.ReturnReusable(new double[8]);
+    }
+
+    Assert.Equal(
+        PackedDdD4To40SampleLoader.MaximumRetainedDecodedBufferCount,
+        loader.CachedReusableDecodedBufferCount);
+
+    var oversizedLoader = new PackedDdD4To40SampleLoader();
+    oversizedLoader.ReturnReusable(
+        new double[PackedDdD4To40SampleLoader.MaximumRetainedDecodedBufferLength + 1]);
+    Assert.Equal(0, oversizedLoader.CachedReusableDecodedBufferCount);
+}
+
 [Fact(DisplayName = "packed LDS loader buffer cache remains safe under concurrent reads")]
 public void PackedLdsLoaderBufferCacheRemainsSafeUnderConcurrentReads()
 {
