@@ -93,7 +93,8 @@ public sealed record DecodeExecutionOptions(
     bool VerboseVits,
     bool UseProfiler,
     bool CxAdcCompatibilityMode,
-    DspBackend DspBackend)
+    DspBackend DspBackend,
+    UpstreamBehaviorProfile UpstreamBehaviorProfile)
 {
     public BigInteger RequestedThreadsInteger { get; init; } = new(RequestedThreads);
 }
@@ -352,7 +353,16 @@ public static class DecodeSessionFactory
             diagnosticLogger: WriteDiagnostic,
             debug: executionOptions.Debug,
             inputBlockCutSamples: blockCut,
-            workerThreads: executionOptions.WorkerThreads);
+            workerThreads: executionOptions.WorkerThreads,
+            upstreamBehaviorProfile: executionOptions.UpstreamBehaviorProfile,
+            activeVideoStartUs: command.Spec.Name == "vhs"
+                && executionOptions.UpstreamBehaviorProfile == UpstreamBehaviorProfile.Current
+                    ? parameters.SysParams
+                        .GetProperty("activeVideoUS")
+                        .EnumerateArray()
+                        .First()
+                        .GetDouble()
+                    : null);
         DecodeRunBounds runBounds = DecodeRunBounds.FromCommand(
             command,
             tbcFieldDecoder.EstimateNominalFieldSampleCount());
@@ -574,7 +584,12 @@ public static class DecodeSessionFactory
             VerboseVits: BoolValueOrDefault(command, "verboseVITS"),
             UseProfiler: BoolValueOrDefault(command, "use_profiler"),
             CxAdcCompatibilityMode: command.Spec.Name == "vhs" && command.Get<bool>("cxadc"),
-            DspBackend: DspBackendParser.Parse(command.Get<string>("dsp_backend")))
+            DspBackend: DspBackendParser.Parse(command.Get<string>("dsp_backend")),
+            UpstreamBehaviorProfile: UpstreamBehaviorProfileParser.Parse(
+                command.Values.TryGetValue("compat_version", out object? compatibilityVersion)
+                    && compatibilityVersion is string profileValue
+                    ? profileValue
+                    : UpstreamBehaviorProfileParser.V040Value))
         {
             RequestedThreadsInteger = requestedThreadsInteger
         };

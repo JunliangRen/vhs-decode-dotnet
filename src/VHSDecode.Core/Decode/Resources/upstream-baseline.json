@@ -1,0 +1,31 @@
+{
+  "repository": "oyvindln/vhs-decode",
+  "profiles": [
+    {
+      "name": "v0.4.0",
+      "release": "v0.4.0",
+      "commit": "43155200da87c0d49eb37d8ec09b1372075ee8e4",
+      "source": "release/0.4.0",
+      "algorithms": {
+        "vhsSync": "v0.4.0",
+        "vhsVsyncLevels": "v0.4.0",
+        "chromaGroupDelay": "v0.4.0",
+        "chromaFinalFilter": "v0.4.0",
+        "cti": "disabled"
+      }
+    },
+    {
+      "name": "current",
+      "release": null,
+      "commit": "2f21e8ed6018b14561396cc95f1f6828054470b8",
+      "source": "pull/341",
+      "algorithms": {
+        "vhsSync": "current",
+        "vhsVsyncLevels": "pending",
+        "chromaGroupDelay": "pending",
+        "chromaFinalFilter": "pending",
+        "cti": "pending"
+      }
+    }
+  ]
+}

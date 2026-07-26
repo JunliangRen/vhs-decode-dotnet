@@ -34,6 +34,8 @@ public static class CliSpecs
 
     public static readonly string[] DspBackends = ["exact", "ipp-fast"];
 
+    public static readonly string[] CompatibilityVersions = ["v0.4.0", "current"];
+
     public static DecodeCommandSpec Vhs { get; } = new(
         "vhs",
         "Extracts video from RAW RF captures of colour-under & composite modulated tapes",
@@ -97,6 +99,7 @@ public static class CliSpecs
 
     private static IEnumerable<OptionSpec> VhsOptions()
     {
+        yield return CompatibilityVersion();
         yield return Str("tape_format", ["--tf", "--tape_format"], "VHS", SupportedTapeFormats, Upper);
         yield return Str("tape_speed", ["--ts", "--tape_speed"], "sp", TapeSpeeds, Lower);
         yield return Str("params_file", ["--params_file"], null, validationError: ValidateParamsFile);
@@ -408,6 +411,9 @@ public static class CliSpecs
 
     private static OptionSpec DspBackend()
         => Str("dsp_backend", ["--dsp-backend"], "exact", DspBackends, Lower);
+
+    private static OptionSpec CompatibilityVersion()
+        => Str("compat_version", ["--compat-version"], "v0.4.0", CompatibilityVersions, Lower);
 
     private static double ParseCommonInputFrequency(string value)
         => value == "cxadc"

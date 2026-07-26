@@ -2,7 +2,7 @@
 
 [English](README.md) | [简体中文](README.zh-CN.md) | **[日本語](README.ja.md)**
 
-<!-- README_SYNC: 2026-07-24.19 -->
+<!-- README_SYNC: 2026-07-26.1 -->
 
 [`oyvindln/vhs-decode`](https://github.com/oyvindln/vhs-decode) の
 デコード関連部分を .NET 11 で再実装するプロジェクトです。現在は release
@@ -30,6 +30,7 @@
 - [対象範囲](#対象範囲)
 - [現在の状態](#現在の状態)
 - [互換性の範囲](#互換性の範囲)
+- [上流動作プロファイル](#上流動作プロファイル)
 - [パフォーマンス](#パフォーマンス)
 - [ビルドとテスト](#ビルドとテスト)
 - [使用方法](#使用方法)
@@ -71,6 +72,7 @@
 | --- | --- | --- |
 | ソリューションとテスト | 実装済み | .NET 11 `.slnx`。標準 xUnit v3 テストは Visual Studio Test Explorer と `dotnet test` で利用できます。 |
 | CLI と引数 | 実装済み、スナップショットテストあり | facade とスタンドアロンの help、alias、default、validation、diagnostic、exit 動作は v0.4.0 を対象とします。 |
+| 上流動作プロファイル | 段階的に実装 | `v0.4.0` が引き続き default です。`current` は opt-in で、最初の stage として merged PR 341 の VHS HSync detector を実装しています。 |
 | VHS とテープ形式 | 実装済み。まれなキャプチャ差分あり | VHS、S-VHS、Betamax、Video8/Hi8、U-matic、Type C、EIAJ、および対応 PAL/NTSC 形式は release 互換経路を共有します。 |
 | CVBS | release 対応システムを実装済み | PAL/NTSC 経路は動作します。まれな vblank とオプション間のケースには実キャプチャ fixture の追加が必要です。 |
 | LaserDisc | 実装済み。まれなキャプチャ差分あり | Video、VBI、EFM、analog audio、AC3、RF-TBC、metadata、recovery、PAL/NTSC 経路を接続済みです。 |
@@ -121,6 +123,27 @@
 - 定期的な recovery JSON snapshot と上流形式の partial-file lifecycle。
 - デコード中も TBC、chroma、JSON、raw audio sidecar を並行して読み取れるため、
   preview tool は完了を待つ必要がありません。
+
+<!-- SECTION: upstream-behavior -->
+
+## 上流動作プロファイル
+
+VHS decode は `--compat-version v0.4.0|current` を受け付けます。
+
+| Profile | Default | 固定した upstream source | 現在有効な動作 |
+| --- | --- | --- | --- |
+| `v0.4.0` | はい | release v0.4.0、commit `43155200da87c0d49eb37d8ec09b1372075ee8e4` | 既存の release 互換 decode path。 |
+| `current` | いいえ | merged PR 341、commit `2f21e8ed6018b14561396cc95f1f6828054470b8` | exact-first VHS HSync candidate extraction、MAD rejection、multi-grid lock、level calibration、subpixel pulse synthesis。 |
+
+`current` は意図的に段階導入します。VSync level refinement、
+chroma group-delay correction、Super-Gaussian final filter、CTI はまだ
+pending であり、この profile によって暗黙に有効にはなりません。
+embedded baseline catalog がこの境界を明示します。
+
+HSync stage は original upstream function と直接比較し、deterministic synthetic
+fixture と upstream PAL fixture で pulse coordinate と floating-point bit pattern
+を検証します。別の end-to-end gate により、default `v0.4.0` profile は
+`--threads 0`、default、`--threads 20` のすべてで同一に保たれます。
 
 <!-- SECTION: performance -->
 
@@ -801,7 +824,7 @@ serial/default-5/20/64 worker の間で 6 artifact がすべて一致しまし�
 .\tools\build-ipp-native.ps1
 dotnet restore VHSDecodeDotNet.slnx
 dotnet build VHSDecodeDotNet.slnx -c Release --no-restore
-dotnet test --solution VHSDecodeDotNet.slnx -c Release --no-build --no-restore --minimum-expected-tests 931
+dotnet test --solution VHSDecodeDotNet.slnx -c Release --no-build --no-restore --minimum-expected-tests 950
 ```
 
 最初の command は optional `ipp-fast` native artifact を含めるためのものです。
@@ -814,7 +837,7 @@ bridge を build します。外部 IPP、OpenMP、oneTBB、Visual C++ runtime D
 
 現在の正式な Release build は warning 0、error 0 です。xUnit v3 project は
 `dotnet test` と Visual Studio Test Explorer の両方で個別に検出できる
-**931** tests を公開します。
+**950** tests を公開します。
 
 <!-- SECTION: usage -->
 

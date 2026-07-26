@@ -2,7 +2,7 @@
 
 [English](README.md) | **[简体中文](README.zh-CN.md)** | [日本語](README.ja.md)
 
-<!-- README_SYNC: 2026-07-24.19 -->
+<!-- README_SYNC: 2026-07-26.1 -->
 
 这是 [`oyvindln/vhs-decode`](https://github.com/oyvindln/vhs-decode)
 中解码相关部分的 .NET 11 重写，当前以 release `v0.4.0`、commit
@@ -26,6 +26,7 @@
 - [范围](#范围)
 - [当前状态](#当前状态)
 - [兼容性覆盖](#兼容性覆盖)
+- [上游行为配置](#上游行为配置)
 - [性能](#性能)
 - [构建和测试](#构建和测试)
 - [使用方法](#使用方法)
@@ -65,6 +66,7 @@
 | --- | --- | --- |
 | 解决方案和测试 | 已实现 | .NET 11 `.slnx`；标准 xUnit v3 测试可在 Visual Studio Test Explorer 和 `dotnet test` 中使用。 |
 | CLI 和参数 | 已实现并做快照测试 | facade 与独立命令的帮助、别名、默认值、校验、诊断和退出行为以 v0.4.0 为目标。 |
+| 上游行为配置 | 分阶段实现 | `v0.4.0` 仍是默认值；`current` 是显式启用的配置，第一阶段实现已合并 PR 341 的 VHS HSync 检测器。 |
 | VHS 与磁带格式 | 已实现；仍有罕见采集差距 | VHS、S-VHS、Betamax、Video8/Hi8、U-matic、Type C、EIAJ 及支持的 PAL/NTSC 变体共用 release 兼容解码路径。 |
 | CVBS | 已实现 release 支持的系统 | PAL 和 NTSC 路径可运行；少见的 vblank 与跨参数组合仍需更多真实采集夹具。 |
 | LaserDisc | 已实现；仍有罕见采集差距 | 视频、VBI、EFM、模拟音频、AC3、RF-TBC、元数据、恢复和 PAL/NTSC 路径均已连接。 |
@@ -114,6 +116,25 @@
 - 周期性恢复 JSON 快照以及上游风格的部分文件生命周期。
 - 解码进行时，活动的 TBC、色度、JSON 和原始音频 sidecar 可被并发读取，
   预览工具无需等待解码结束。
+
+<!-- SECTION: upstream-behavior -->
+
+## 上游行为配置
+
+VHS 解码支持 `--compat-version v0.4.0|current`：
+
+| 配置 | 默认 | 固定的上游来源 | 当前启用的行为 |
+| --- | --- | --- | --- |
+| `v0.4.0` | 是 | release v0.4.0，commit `43155200da87c0d49eb37d8ec09b1372075ee8e4` | 现有 release 兼容解码路径。 |
+| `current` | 否 | 已合并的 PR 341，commit `2f21e8ed6018b14561396cc95f1f6828054470b8` | exact-first VHS HSync 候选提取、MAD 异常值剔除、多网格锁定、电平校准和亚采样脉冲合成。 |
+
+`current` 会分阶段推进。VSync 电平精修、色度群延迟校正、
+Super-Gaussian 最终滤波器和 CTI 仍处于待实现状态，不会因为选择该配置而被
+静默启用；嵌入的基线目录会明确记录这一边界。
+
+HSync 阶段会直接对照上游原函数，并用确定性合成夹具和上游 PAL 夹具检查
+脉冲坐标及浮点位模式。独立的端到端门禁同时保证默认 `v0.4.0` 配置在
+`--threads 0`、默认线程和 `--threads 20` 下保持完全一致。
 
 <!-- SECTION: performance -->
 
@@ -686,7 +707,7 @@ NTSC-J 门禁保持不变。
 .\tools\build-ipp-native.ps1
 dotnet restore VHSDecodeDotNet.slnx
 dotnet build VHSDecodeDotNet.slnx -c Release --no-restore
-dotnet test --solution VHSDecodeDotNet.slnx -c Release --no-build --no-restore --minimum-expected-tests 931
+dotnet test --solution VHSDecodeDotNet.slnx -c Release --no-build --no-restore --minimum-expected-tests 950
 ```
 
 第一条命令用于包含可选的 `ipp-fast` 原生产物；只构建 Exact 时可以省略。
@@ -697,7 +718,7 @@ Intel oneAPI。发布程序会携带 `vhsdecode_ipp.dll`、Intel 许可证和
 `THIRD-PARTY-NOTICES.md`；只构建 Exact 后端时可以省略原生构建步骤。
 
 当前正式 Release 构建为零警告、零错误。xUnit v3 项目向
-`dotnet test` 和 Visual Studio Test Explorer 暴露 **931** 个可独立发现的测试。
+`dotnet test` 和 Visual Studio Test Explorer 暴露 **950** 个可独立发现的测试。
 
 <!-- SECTION: usage -->
 
