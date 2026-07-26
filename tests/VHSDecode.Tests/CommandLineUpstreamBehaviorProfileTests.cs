@@ -77,7 +77,7 @@ public sealed class CommandLineUpstreamBehaviorProfileTests
         Assert.Equal("2f21e8ed6018b14561396cc95f1f6828054470b8", current.Commit);
         Assert.Equal("pull/341", current.Source);
         Assert.Equal("current", current.Algorithms["vhsSync"]);
-        Assert.Equal("pending", current.Algorithms["vhsVsyncLevels"]);
+        Assert.Equal("current", current.Algorithms["vhsVsyncLevels"]);
         Assert.Equal("pending", current.Algorithms["chromaGroupDelay"]);
         Assert.Equal("pending", current.Algorithms["chromaFinalFilter"]);
         Assert.Equal("pending", current.Algorithms["cti"]);

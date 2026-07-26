@@ -187,6 +187,7 @@ public sealed class TbcFieldDecodePipeline
     private readonly VhsChromaCarrierTableCache? _chromaCarrierTableCache;
     private readonly VsyncSerrationDetector? _vsyncSerrationDetector;
     private readonly VhsSyncDetector? _vhsSyncDetector;
+    private readonly VhsVSyncLevelRefiner? _vhsVSyncLevelRefiner;
     private readonly VhsFieldLevelState? _vhsFieldLevelState;
     private readonly UpstreamBehaviorProfile _upstreamBehaviorProfile;
     private readonly ExactLengthDoubleWorkspaceCache _dcOffsetLowPassWorkspaces =
@@ -295,6 +296,7 @@ public sealed class TbcFieldDecodePipeline
                 syncAnalyzer.UsecToSamples(activeVideoStart - syncAnalyzer.HSyncPulseUs - 2.0),
                 checked((int)Math.Round(syncAnalyzer.NominalLineLength, MidpointRounding.ToEven)),
                 syncAnalyzer.UsecToSamples(0.22));
+            _vhsVSyncLevelRefiner = new VhsVSyncLevelRefiner();
         }
 
         _framesPerSecond = framesPerSecond is > 0.0 ? framesPerSecond : null;
@@ -320,6 +322,10 @@ public sealed class TbcFieldDecodePipeline
     internal int WorkerThreads => _workerThreads;
 
     internal UpstreamBehaviorProfile UpstreamBehaviorProfile => _upstreamBehaviorProfile;
+
+    internal bool CurrentVhsVSyncLevelRefinementEnabled
+        => _vhsVSyncLevelRefiner is not null
+            && !_syncDetectionOptions.UseSavedLevels;
 
     internal Action<string, string>? DiagnosticLogger
     {
@@ -676,18 +682,19 @@ public sealed class TbcFieldDecodePipeline
             ?? _laserDiscSyncConverter
             ?? _videoOutput;
         ReadOnlySpan<double> pulseReference = span.VideoLowPass ?? span.Video;
+        VhsSyncDetectionResult? currentVhsSync = null;
         IReadOnlyList<Pulse> rawPulses;
         if (_vhsSyncDetector is not null && !prepared.ExplicitThreshold)
         {
-            VhsSyncDetectionResult currentSync = _vhsSyncDetector.Detect(
+            currentVhsSync = _vhsSyncDetector.Detect(
                 pulseReference,
                 detectLevels: !prepared.UsedSavedLevels,
                 syncTipEstimate: activeVideoOutput.Ire0,
                 blankingEstimate: activeVideoOutput.IreToHz(activeVideoOutput.VSyncIre));
-            rawPulses = currentSync.Pulses
+            rawPulses = currentVhsSync.Pulses
                 .Select(static pulse => new Pulse(pulse.Start, pulse.Length))
                 .ToArray();
-            activeVideoOutput = ApplyCurrentVhsLevels(currentSync, activeVideoOutput);
+            activeVideoOutput = ApplyCurrentVhsLevels(currentVhsSync, activeVideoOutput);
             threshold = activeVideoOutput.IreToHz(activeVideoOutput.VSyncIre / 2.0);
         }
         else
@@ -856,6 +863,23 @@ public sealed class TbcFieldDecodePipeline
                 processedLines,
                 preferEarlierPulseOnEqualDistance: usePalCvbsLine0Anchor);
         }
+        if (currentVhsSync is not null
+            && CurrentVhsVSyncLevelRefinementEnabled
+            && !prepared.ExplicitThreshold)
+        {
+            VhsVSyncLevelRefinementResult refinedLevels =
+                _vhsVSyncLevelRefiner!.RefineField(
+                    span.Video,
+                    line0.Location,
+                    meanLineLength,
+                    currentVhsSync.SyncTipLevel,
+                    currentVhsSync.BlankLevel);
+            activeVideoOutput = ApplyCurrentVhsVSyncLevels(
+                refinedLevels,
+                activeVideoOutput);
+            threshold = activeVideoOutput.IreToHz(activeVideoOutput.VSyncIre / 2.0);
+        }
+
         if (string.Equals(_decodeType, "vhs", StringComparison.Ordinal))
         {
             CompleteVhsLineLocationComputation(lineLocations.Filled);
@@ -1492,6 +1516,34 @@ public sealed class TbcFieldDecodePipeline
             : current.Ire0;
         double hzIre = adjustment.HSync
             ? (detection.BlankLevel - detection.SyncTipLevel) / -current.VSyncIre
+            : current.HzIre;
+        _currentVhsVideoOutput = new VideoOutputConverter(
+            ire0,
+            hzIre,
+            current.OutputZero,
+            current.VSyncIre,
+            current.OutputScale);
+        return _currentVhsVideoOutput;
+    }
+
+    internal VideoOutputConverter ApplyCurrentVhsVSyncLevels(
+        VhsVSyncLevelRefinementResult refinement,
+        VideoOutputConverter current)
+    {
+        Ire0AdjustOptions? adjustment = _renderer.Ire0Adjust;
+        if (adjustment is null)
+        {
+            return current;
+        }
+
+        // The pinned PR 341 baseline assigns the refined sync-tip level to
+        // ire0 in this back-porch branch. Preserve that behavior in Current;
+        // any upstream correction belongs in a separately versioned change.
+        double ire0 = adjustment.BackPorch
+            ? refinement.SyncTipLevel
+            : current.Ire0;
+        double hzIre = adjustment.HSync
+            ? (refinement.BlankLevel - refinement.SyncTipLevel) / -current.VSyncIre
             : current.HzIre;
         _currentVhsVideoOutput = new VideoOutputConverter(
             ire0,
