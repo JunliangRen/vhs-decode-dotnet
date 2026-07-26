@@ -396,6 +396,13 @@ public sealed class TbcLineResampler
         ushort[] destination)
     {
         preparation.ValidateOwner(this);
+        if (destination.Length != preparation.DestinationLength)
+        {
+            throw new ArgumentException(
+                "Destination length must match the prepared resampling plan.",
+                nameof(destination));
+        }
+
         double[] sourcePositions = preparation.SourcePositions;
         double[] levelAdjusts = preparation.LevelAdjusts;
         int prefixSamples = preparation.PrefixSamples;
