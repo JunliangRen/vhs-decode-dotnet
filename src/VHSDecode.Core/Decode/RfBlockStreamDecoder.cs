@@ -493,47 +493,59 @@ public sealed class RfBlockStreamDecoder : IDisposable
             var missingBlocks = new int[blockCount];
             int missingBlockCount = 0;
             var decodedBlocks = new RfPipelineBlock[blockCount];
-            for (int i = 0; i < blockCount; i++)
+            ParallelOptions? parallelOptions = null;
+            try
             {
-                long block = firstBlock + i;
-                if (TryTakeDecodedBlock(block, out RfPipelineBlock cachedBlock))
+                for (int i = 0; i < blockCount; i++)
                 {
-                    decodedBlocks[i] = cachedBlock;
-                    continue;
+                    long block = firstBlock + i;
+                    if (TryTakeDecodedBlock(block, out RfPipelineBlock cachedBlock))
+                    {
+                        decodedBlocks[i] = cachedBlock;
+                        continue;
+                    }
+
+                    StopPrefetchBeforeDirectRead();
+                    long sample = checked((firstBlock + i) * BlockStride);
+                    double[]? preparedInput = _pipeline.LoadStreamBlockInput(stream, sample, BlockLength);
+                    if (preparedInput is null)
+                    {
+                        return null;
+                    }
+
+                    preparedInputs[i] = preparedInput;
+                    missingBlocks[missingBlockCount++] = i;
                 }
 
-                StopPrefetchBeforeDirectRead();
-                long sample = checked((firstBlock + i) * BlockStride);
-                double[]? preparedInput = _pipeline.LoadBlockInput(stream, sample, BlockLength);
-                if (preparedInput is null)
+                parallelOptions = new ParallelOptions
                 {
-                    return null;
+                    MaxDegreeOfParallelism = Math.Min(WorkerThreads, blockCount)
+                };
+                Parallel.For(
+                    0,
+                    missingBlockCount,
+                    parallelOptions,
+                    missingIndex =>
+                    {
+                        int blockIndex = missingBlocks[missingIndex];
+                        decodedBlocks[blockIndex] = _pipeline.DecodePreparedStreamBlock(preparedInputs[blockIndex]);
+                    });
+            }
+            finally
+            {
+                for (int i = 0; i < missingBlockCount; i++)
+                {
+                    _pipeline.ReturnStreamBlockInput(preparedInputs[missingBlocks[i]]);
                 }
-
-                preparedInputs[i] = preparedInput;
-                missingBlocks[missingBlockCount++] = i;
             }
 
-            var parallelOptions = new ParallelOptions
-            {
-                MaxDegreeOfParallelism = Math.Min(WorkerThreads, blockCount)
-            };
-            Parallel.For(
-                0,
-                missingBlockCount,
-                parallelOptions,
-                missingIndex =>
-                {
-                    int blockIndex = missingBlocks[missingIndex];
-                    decodedBlocks[blockIndex] = _pipeline.DecodePreparedStreamBlock(preparedInputs[blockIndex]);
-                });
             for (int i = 0; i < missingBlockCount; i++)
             {
                 int blockIndex = missingBlocks[i];
                 CacheDecodedBlock(firstBlock + blockIndex, decodedBlocks[blockIndex]);
             }
 
-            AppendBlocksParallel(decodedBlocks, parallelOptions);
+            AppendBlocksParallel(decodedBlocks, parallelOptions!);
         }
 
         StartPrefetch(stream, lastBlock);
@@ -820,7 +832,7 @@ public sealed class RfBlockStreamDecoder : IDisposable
                 try
                 {
                     long sample = checked(slot.Block * BlockStride);
-                    preparedInput = _pipeline.LoadBlockInput(operation.Stream, sample, BlockLength);
+                    preparedInput = _pipeline.LoadStreamBlockInput(operation.Stream, sample, BlockLength);
                 }
                 catch (Exception exception) when (
                     exception is not OutOfMemoryException and not AccessViolationException)
@@ -837,30 +849,44 @@ public sealed class RfBlockStreamDecoder : IDisposable
                     break;
                 }
 
-                workers.Add(Task.Run(() =>
+                double[] workerInput = preparedInput;
+                Task workerTask;
+                try
                 {
-                    try
+                    workerTask = Task.Run(() =>
                     {
-                        cancellationToken.ThrowIfCancellationRequested();
-                        RfPipelineBlock decoded = _pipeline.DecodePreparedStreamBlock(
-                            preparedInput,
-                            reportDiagnostics: false);
-                        slot.Completion.TrySetResult(decoded);
-                    }
-                    catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
-                    {
-                        slot.Completion.TrySetCanceled(cancellationToken);
-                    }
-                    catch (Exception exception)
-                    {
-                        slot.Completion.TrySetException(exception);
-                        throw;
-                    }
-                    finally
-                    {
-                        operation.WorkerSlots.Release();
-                    }
-                }));
+                        try
+                        {
+                            cancellationToken.ThrowIfCancellationRequested();
+                            RfPipelineBlock decoded = _pipeline.DecodePreparedStreamBlock(
+                                workerInput,
+                                reportDiagnostics: false);
+                            slot.Completion.TrySetResult(decoded);
+                        }
+                        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+                        {
+                            slot.Completion.TrySetCanceled(cancellationToken);
+                        }
+                        catch (Exception exception)
+                        {
+                            slot.Completion.TrySetException(exception);
+                            throw;
+                        }
+                        finally
+                        {
+                            _pipeline.ReturnStreamBlockInput(workerInput);
+                            operation.WorkerSlots.Release();
+                        }
+                    });
+                }
+                catch
+                {
+                    _pipeline.ReturnStreamBlockInput(workerInput);
+                    operation.WorkerSlots.Release();
+                    throw;
+                }
+
+                workers.Add(workerTask);
             }
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
