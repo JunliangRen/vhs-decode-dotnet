@@ -194,6 +194,47 @@ public sealed class TbcLineResampler
         return output;
     }
 
+    internal ushort[] ResamplePreparedToUInt16(
+        ReadOnlySpan<double> source,
+        ResamplingPlan plan,
+        VideoOutputConverter converter)
+    {
+        if (source.IsEmpty)
+        {
+            throw new ArgumentException("Source must contain at least one sample.", nameof(source));
+        }
+
+        ArgumentNullException.ThrowIfNull(plan);
+        ArgumentNullException.ThrowIfNull(converter);
+        plan.ValidateOwner(this);
+        var output = new ushort[plan.DestinationLength];
+        ResampleSamplesToUInt16(source, plan, converter, output);
+        return output;
+    }
+
+    internal void ResamplePrepared(
+        ReadOnlySpan<double> source,
+        ResamplingPlan plan,
+        double[] destination)
+    {
+        if (source.IsEmpty)
+        {
+            throw new ArgumentException("Source must contain at least one sample.", nameof(source));
+        }
+
+        ArgumentNullException.ThrowIfNull(plan);
+        ArgumentNullException.ThrowIfNull(destination);
+        plan.ValidateOwner(this);
+        if (destination.Length != plan.DestinationLength)
+        {
+            throw new ArgumentException(
+                "Destination length must match the prepared resampling plan.",
+                nameof(destination));
+        }
+
+        ResampleSamples(source, plan, destination);
+    }
+
     private void ResampleLine(
         ReadOnlySpan<double> source,
         ILineLocationInterpolator interpolator,
@@ -343,6 +384,68 @@ public sealed class TbcLineResampler
                                 sourcePositions[i],
                                 parallelSincLookup)
                             * levelAdjusts[prefixSamples + i]);
+                    }
+                });
+        }
+    }
+
+    private unsafe void ResampleSamplesToUInt16(
+        ReadOnlySpan<double> source,
+        ResamplingPlan preparation,
+        VideoOutputConverter converter,
+        ushort[] destination)
+    {
+        preparation.ValidateOwner(this);
+        if (destination.Length != preparation.DestinationLength)
+        {
+            throw new ArgumentException(
+                "Destination length must match the prepared resampling plan.",
+                nameof(destination));
+        }
+
+        double[] sourcePositions = preparation.SourcePositions;
+        double[] levelAdjusts = preparation.LevelAdjusts;
+        int prefixSamples = preparation.PrefixSamples;
+        float[] sincLookup = SincLookup.Value;
+        VideoOutputConverter.FastMathConversion conversion = converter.CreateFastMathConversion();
+        fixed (double* sourcePointer = source)
+        fixed (float* sincLookupPointer = sincLookup)
+        {
+            if (_workerThreads <= 1 || destination.Length < ParallelSampleThreshold)
+            {
+                for (int i = 0; i < destination.Length; i++)
+                {
+                    double resampled = (float)(SampleSinc(
+                            sourcePointer,
+                            source.Length,
+                            sourcePositions[i],
+                            sincLookupPointer)
+                        * levelAdjusts[prefixSamples + i]);
+                    destination[i] = conversion.Convert(resampled);
+                }
+
+                return;
+            }
+
+            nint sourceAddress = (nint)sourcePointer;
+            nint sincLookupAddress = (nint)sincLookupPointer;
+            int sourceLength = source.Length;
+            Parallel.ForEach(
+                Partitioner.Create(0, destination.Length),
+                new ParallelOptions { MaxDegreeOfParallelism = _workerThreads },
+                range =>
+                {
+                    var parallelSource = (double*)sourceAddress;
+                    var parallelSincLookup = (float*)sincLookupAddress;
+                    for (int i = range.Item1; i < range.Item2; i++)
+                    {
+                        double resampled = (float)(SampleSinc(
+                                parallelSource,
+                                sourceLength,
+                                sourcePositions[i],
+                                parallelSincLookup)
+                            * levelAdjusts[prefixSamples + i]);
+                        destination[i] = conversion.Convert(resampled);
                     }
                 });
         }

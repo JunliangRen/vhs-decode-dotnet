@@ -148,6 +148,26 @@ public sealed class TbcFieldRenderer
         TbcLineResampler.ResamplingPlan plan)
         => _resampler.ResamplePrepared(videoHz, plan);
 
+    internal void ResampleFieldInto(
+        ReadOnlySpan<double> videoHz,
+        IReadOnlyList<double> lineLocations,
+        int firstLine,
+        double[] destination)
+    {
+        ArgumentNullException.ThrowIfNull(destination);
+        if (destination.Length != FrameSpec.FieldSampleCount)
+        {
+            throw new ArgumentException(
+                "Destination length must match the configured TBC field size.",
+                nameof(destination));
+        }
+
+        using TbcLineResampler.ResamplingPlan plan = PrepareFieldResampling(
+            lineLocations,
+            firstLine);
+        _resampler.ResamplePrepared(videoHz, plan, destination);
+    }
+
     public TbcRenderedField RenderFieldPayload(
         ReadOnlySpan<double> videoHz,
         IReadOnlyList<double> lineLocations,
@@ -214,6 +234,14 @@ public sealed class TbcFieldRenderer
         VideoOutputConverter? converterOverride = null,
         int? trackPhaseOverride = null)
     {
+        if (CanConvertPreparedFieldDirectly())
+        {
+            VideoOutputConverter activeConverter = converterOverride ?? _converter;
+            return new TbcRenderedField(
+                _resampler.ResamplePreparedToUInt16(videoHz, plan, activeConverter),
+                OutputConverter: activeConverter);
+        }
+
         double[] resampled = ResamplePreparedField(videoHz, plan);
         return RenderResampledFieldPayload(
             resampled,
@@ -222,6 +250,13 @@ public sealed class TbcFieldRenderer
             converterProvider: null,
             trackPhaseOverride);
     }
+
+    private bool CanConvertPreparedFieldDirectly()
+        => YCombLimitHz == 0.0
+            && !ExportRawTbc
+            && CvbsClampAgc is null
+            && Ire0Adjust is null
+            && TrackPhaseIre0Offset is null;
 
     private TbcRenderedField RenderResampledFieldPayload(
         double[] resampled,

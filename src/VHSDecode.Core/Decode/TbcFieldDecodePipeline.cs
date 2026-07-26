@@ -188,6 +188,7 @@ public sealed class TbcFieldDecodePipeline
     private readonly VhsFieldLevelState? _vhsFieldLevelState;
     private readonly ExactLengthDoubleWorkspaceCache _dcOffsetLowPassWorkspaces =
         new(DcOffsetLowPassWorkspaceCapacity);
+    private readonly ExactLengthDoubleWorkspaceCache _chromaPhaseAnalysisWorkspaces = new(1);
     private readonly string? _decodeType;
     private readonly double? _framesPerSecond;
     private Action<string, string>? _diagnosticLogger;
@@ -1432,7 +1433,9 @@ public sealed class TbcFieldDecodePipeline
             return null;
         }
 
-        return _renderer.ResampleField(chroma, lineLocations, firstLine: outputFirstLine);
+        double[] output = _chromaPhaseAnalysisWorkspaces.Get(_renderer.FrameSpec.FieldSampleCount);
+        _renderer.ResampleFieldInto(chroma, lineLocations, outputFirstLine, output);
+        return output;
     }
 
     private VhsChromaPhaseAnalysis? AnalyzeChromaPhase(
