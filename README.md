@@ -307,6 +307,23 @@ ordered `fileLoc`, stdout, normalized stderr/logs, and cross-thread hashes were
 identical. A monitored 200-frame default-worker run also had no second-half
 slowdown or monotonic memory growth.
 
+The VSync serration detector now keeps one fixed 60-line median scratch buffer
+inside each of its at-most-two exact-shape workspaces; the public static
+measurement API retains its independently allocated result path. A matched
+40-frame default-5 `gc-verbose` trace removed all 213
+`ReadOnlySpan<double>.ToArray()` samples attributed to that median
+(77.234 MiB), reduced total sampled allocation from 2.863362 GiB to
+2.790004 GiB (2.6%), and reduced Gen2 collections from 16 to 15. The observed
+160-frame medians improved by 0.2% at default-5, 1.5% at 20 workers, and 1.4%
+in a clean serial retry, but pair wins were mixed at 20 workers, so the claimed
+result is the allocation reduction rather than a fixed throughput percentage.
+Luma, chroma, JSON, all 320 ordered `fileLoc` values, stdout, normalized
+stderr/logs, and cross-thread hashes were exact at `--threads 0`, default-5,
+and `--threads 20`. A matched 200-frame default-worker check completed in
+15.303 s versus 15.385 s on main, ran its first/second halves at 77.22/70.87 ms
+per frame, and peaked at 0.993 GiB; retained median storage remains bounded to
+two 60-line buffers per detector.
+
 The current thread matrix used an Intel Core Ultra 7 265K (20 logical
 processors), Windows 11 build 26220, .NET SDK/runtime
 `11.0.100-preview.6.26359.118`, and Python v0.4.0 commit
@@ -834,7 +851,7 @@ Requirements:
 .\tools\build-ipp-native.ps1
 dotnet restore VHSDecodeDotNet.slnx
 dotnet build VHSDecodeDotNet.slnx -c Release --no-restore
-dotnet test --solution VHSDecodeDotNet.slnx -c Release --no-build --no-restore --minimum-expected-tests 925
+dotnet test --solution VHSDecodeDotNet.slnx -c Release --no-build --no-restore --minimum-expected-tests 931
 ```
 
 The first command includes the optional `ipp-fast` native artifact; omit it for
@@ -847,7 +864,7 @@ Intel license, and `THIRD-PARTY-NOTICES.md`; an Exact-only build may omit the
 native build step.
 
 The current formal Release build has zero warnings and errors. The xUnit v3
-project exposes **925** independently discoverable tests to both
+project exposes **931** independently discoverable tests to both
 `dotnet test` and Visual Studio Test Explorer.
 
 <!-- SECTION: usage -->

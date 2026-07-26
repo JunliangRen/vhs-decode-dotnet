@@ -289,6 +289,22 @@ Luma TBC、chroma TBC、JSON、順序付き `fileLoc`、stdout、normalized stde
 cross-thread hash はすべて一致しました。monitor 付き 200-frame default-worker run
 にも後半の slowdown や単調な memory growth はありませんでした。
 
+VSync serration detector は、最大 2 個の exact-shape workspace のそれぞれに固定
+60-line の median scratch buffer を保持するようになりました。public static
+measurement API は独立 allocation の result path を維持します。同条件の 40-frame
+default-5 `gc-verbose` trace では、この median に由来する
+`ReadOnlySpan<double>.ToArray()` sample 213 回（77.234 MiB）がすべて消え、
+total sampled allocation は 2.863362 GiB から 2.790004 GiB（2.6%）へ減少し、
+Gen2 collection は 16 回から 15 回になりました。160-frame の observed median は
+default-5 で 0.2%、20 worker で 1.5%、clean serial retry で 1.4% 改善しましたが、
+20-worker pair の勝敗は混在したため、ここで確認した結果は固定 throughput 率ではなく
+allocation reduction です。`--threads 0`、default-5、`--threads 20` の luma、
+chroma、JSON、順序付き 320 個すべての `fileLoc`、stdout、normalized stderr/log、
+cross-thread hash は完全一致しました。default-worker の 200-frame matched check は
+candidate 15.303 s、main 15.385 s で、candidate の前半/後半は
+77.22/70.87 ms per frame、peak は 0.993 GiB でした。retained median storage は
+detector ごとに 60-line buffer 2 個までに制限されます。
+
 現在の thread matrix は Intel Core Ultra 7 265K（20 logical processor）、
 Windows 11 build 26220、.NET SDK/runtime `11.0.100-preview.6.26359.118`、
 Python v0.4.0 commit
@@ -785,7 +801,7 @@ serial/default-5/20/64 worker の間で 6 artifact がすべて一致しまし�
 .\tools\build-ipp-native.ps1
 dotnet restore VHSDecodeDotNet.slnx
 dotnet build VHSDecodeDotNet.slnx -c Release --no-restore
-dotnet test --solution VHSDecodeDotNet.slnx -c Release --no-build --no-restore --minimum-expected-tests 925
+dotnet test --solution VHSDecodeDotNet.slnx -c Release --no-build --no-restore --minimum-expected-tests 931
 ```
 
 最初の command は optional `ipp-fast` native artifact を含めるためのものです。
@@ -798,7 +814,7 @@ bridge を build します。外部 IPP、OpenMP、oneTBB、Visual C++ runtime D
 
 現在の正式な Release build は warning 0、error 0 です。xUnit v3 project は
 `dotnet test` と Visual Studio Test Explorer の両方で個別に検出できる
-**925** tests を公開します。
+**931** tests を公開します。
 
 <!-- SECTION: usage -->
 

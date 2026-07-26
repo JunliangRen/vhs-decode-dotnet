@@ -20,6 +20,7 @@ public sealed record VsyncSerrationResult(
 
 public sealed class VsyncSerrationDetector
 {
+    private const int DefaultSerrationLineSpan = 30;
     private const int EnvelopePadding = 1024;
     private const int MaximumRetainedWorkspaceSampleCount = 1024 * 1024;
     private readonly int _divisor;
@@ -203,7 +204,8 @@ public sealed class VsyncSerrationDetector
                     EqualizingPulseLength,
                     MinimumVbiLength,
                     MaximumVbiLength,
-                    out VsyncSerrationMeasurement? measurement))
+                    out VsyncSerrationMeasurement? measurement,
+                    workspace.SerrationMedianScratch))
             {
                 measurements.Add(measurement!);
                 PushLevels(measurement!.SyncLevel, measurement.BlankLevel);
@@ -302,7 +304,28 @@ public sealed class VsyncSerrationDetector
         double minimumVbiLength,
         double maximumVbiLength,
         out VsyncSerrationMeasurement? measurement,
-        int lineSpan = 30)
+        int lineSpan = DefaultSerrationLineSpan)
+        => TryMeasureSerration(
+            data,
+            position,
+            lineLength,
+            equalizingPulseLength,
+            minimumVbiLength,
+            maximumVbiLength,
+            out measurement,
+            medianScratch: null,
+            lineSpan: lineSpan);
+
+    private static bool TryMeasureSerration(
+        ReadOnlySpan<double> data,
+        int position,
+        int lineLength,
+        int equalizingPulseLength,
+        double minimumVbiLength,
+        double maximumVbiLength,
+        out VsyncSerrationMeasurement? measurement,
+        double[]? medianScratch,
+        int lineSpan = DefaultSerrationLineSpan)
     {
         measurement = null;
         if (data.IsEmpty || lineLength <= 0 || equalizingPulseLength <= 0 || lineSpan <= 0)
@@ -319,7 +342,10 @@ public sealed class VsyncSerrationDetector
 
         ReadOnlySpan<double> block = data[start..end];
         double minimum = MinimumFloat64(block);
-        double level = ((Median(block) - minimum) / 2.0) + minimum;
+        double median = medianScratch is null
+            ? Median(block)
+            : NumpyReduction.MedianFloat64(block, medianScratch);
+        double level = ((median - minimum) / 2.0) + minimum;
         var crossings = new List<int>();
         int previousSign = PythonSign(block[0] - level);
         for (int i = 1; i < block.Length; i++)
@@ -524,9 +550,12 @@ public sealed class VsyncSerrationDetector
 
     private AnalysisWorkspace GetAnalysisWorkspace(int reducedLength, int paddedLength)
     {
+        int medianScratchLength = (int)Math.Min(
+            reducedLength,
+            (long)LineLength * DefaultSerrationLineSpan * 2);
         if (paddedLength > MaximumRetainedWorkspaceSampleCount)
         {
-            return new AnalysisWorkspace(reducedLength, paddedLength);
+            return new AnalysisWorkspace(reducedLength, paddedLength, medianScratchLength);
         }
 
         if (Matches(_mostRecentAnalysisWorkspace, reducedLength, paddedLength))
@@ -541,7 +570,7 @@ public sealed class VsyncSerrationDetector
             return _mostRecentAnalysisWorkspace!;
         }
 
-        var workspace = new AnalysisWorkspace(reducedLength, paddedLength);
+        var workspace = new AnalysisWorkspace(reducedLength, paddedLength, medianScratchLength);
         _previousAnalysisWorkspace = _mostRecentAnalysisWorkspace;
         _mostRecentAnalysisWorkspace = workspace;
         return workspace;
@@ -646,7 +675,7 @@ public sealed class VsyncSerrationDetector
 
     private sealed class AnalysisWorkspace
     {
-        public AnalysisWorkspace(int reducedLength, int paddedLength)
+        public AnalysisWorkspace(int reducedLength, int paddedLength, int medianScratchLength)
         {
             Reduced = new double[reducedLength];
             Padded = new double[paddedLength];
@@ -654,6 +683,7 @@ public sealed class VsyncSerrationDetector
             Reverse = new double[paddedLength];
             Envelope = new double[reducedLength];
             PowerRatio = new double[paddedLength];
+            SerrationMedianScratch = new double[medianScratchLength];
         }
 
         public double[] Reduced { get; }
@@ -667,6 +697,8 @@ public sealed class VsyncSerrationDetector
         public double[] Envelope { get; }
 
         public double[] PowerRatio { get; }
+
+        public double[] SerrationMedianScratch { get; }
     }
 
     private sealed class MovingAverageWindow(int window, int minimumWatermark)

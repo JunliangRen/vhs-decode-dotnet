@@ -15,9 +15,33 @@ internal static class NumpyReduction
         }
 
         double[] working = values.ToArray();
+        return MedianFloat64InPlace(working, working.Length);
+    }
+
+    internal static double MedianFloat64(ReadOnlySpan<double> values, double[] scratch)
+    {
+        ArgumentNullException.ThrowIfNull(scratch);
+        if (values.IsEmpty)
+        {
+            return double.NaN;
+        }
+
+        if (scratch.Length < values.Length)
+        {
+            throw new ArgumentException(
+                "Median scratch length must be at least the input length.",
+                nameof(scratch));
+        }
+
+        values.CopyTo(scratch);
+        return MedianFloat64InPlace(scratch, values.Length);
+    }
+
+    private static double MedianFloat64InPlace(double[] working, int length)
+    {
         bool hasPositiveZero = false;
         bool hasNegativeZero = false;
-        for (int i = 0; i < working.Length; i++)
+        for (int i = 0; i < length; i++)
         {
             double value = working[i];
             if (double.IsNaN(value))
@@ -38,15 +62,23 @@ internal static class NumpyReduction
             }
         }
 
-        if (working.Length < IntroselectThreshold || (hasPositiveZero && hasNegativeZero))
+        if (length < IntroselectThreshold || (hasPositiveZero && hasNegativeZero))
         {
-            Array.Sort(working);
-            return SortedMedian(working);
+            if (length == working.Length)
+            {
+                Array.Sort(working);
+            }
+            else
+            {
+                Array.Sort(working, 0, length);
+            }
+
+            return SortedMedian(working, length);
         }
 
-        int middle = working.Length / 2;
-        double upper = SelectKth(working, middle);
-        if ((working.Length & 1) != 0)
+        int middle = length / 2;
+        double upper = SelectKth(working, middle, length);
+        if ((length & 1) != 0)
         {
             return upper;
         }
@@ -63,19 +95,19 @@ internal static class NumpyReduction
         return (lower + upper) / 2.0;
     }
 
-    private static double SortedMedian(double[] sorted)
+    private static double SortedMedian(double[] sorted, int length)
     {
-        int middle = sorted.Length / 2;
-        return (sorted.Length & 1) == 0
+        int middle = length / 2;
+        return (length & 1) == 0
             ? (sorted[middle - 1] + sorted[middle]) / 2.0
             : sorted[middle];
     }
 
-    private static double SelectKth(double[] values, int target)
+    private static double SelectKth(double[] values, int target, int count)
     {
         int left = 0;
-        int right = values.Length - 1;
-        int depthLimit = 2 * (BitOperations.Log2((uint)values.Length) + 1);
+        int right = count - 1;
+        int depthLimit = 2 * (BitOperations.Log2((uint)count) + 1);
         while (left < right)
         {
             int length = right - left + 1;
