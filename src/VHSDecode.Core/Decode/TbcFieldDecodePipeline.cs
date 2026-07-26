@@ -135,6 +135,7 @@ internal sealed record TbcFieldDecodeState(
     bool VhsLineLocationIssues,
     (double SyncLevel, double BlankLevel)? DelayedCvbsSyncLevels,
     VideoOutputConverter CurrentCvbsOutputConverter,
+    VideoOutputConverter CurrentVhsVideoOutput,
     long? PreviousAnalogAudioStartSample,
     long PreviousAnalogAudioFieldNumber,
     int? ChromaRotationIndex,
@@ -185,7 +186,9 @@ public sealed class TbcFieldDecodePipeline
     private readonly VhsChromaFieldOptions? _chromaFieldOptions;
     private readonly VhsChromaCarrierTableCache? _chromaCarrierTableCache;
     private readonly VsyncSerrationDetector? _vsyncSerrationDetector;
+    private readonly VhsSyncDetector? _vhsSyncDetector;
     private readonly VhsFieldLevelState? _vhsFieldLevelState;
+    private readonly UpstreamBehaviorProfile _upstreamBehaviorProfile;
     private readonly ExactLengthDoubleWorkspaceCache _dcOffsetLowPassWorkspaces =
         new(DcOffsetLowPassWorkspaceCapacity);
     private readonly ExactLengthDoubleWorkspaceCache _chromaPhaseAnalysisWorkspaces = new(1);
@@ -199,6 +202,7 @@ public sealed class TbcFieldDecodePipeline
     private bool _vhsLineLocationIssues;
     private (double SyncLevel, double BlankLevel)? _delayedCvbsSyncLevels;
     private VideoOutputConverter _currentCvbsOutputConverter;
+    private VideoOutputConverter _currentVhsVideoOutput;
     private long? _previousAnalogAudioStartSample;
     private long _previousAnalogAudioFieldNumber;
     private int? _chromaRotationIndex;
@@ -248,7 +252,9 @@ public sealed class TbcFieldDecodePipeline
         Action<string, string>? diagnosticLogger = null,
         bool debug = false,
         int inputBlockCutSamples = 0,
-        int workerThreads = 1)
+        int workerThreads = 1,
+        UpstreamBehaviorProfile upstreamBehaviorProfile = UpstreamBehaviorProfile.V040,
+        double? activeVideoStartUs = null)
     {
         _syncAnalyzer = syncAnalyzer;
         _renderer = renderer;
@@ -266,6 +272,7 @@ public sealed class TbcFieldDecodePipeline
         _syncDetectionOptions = syncDetectionOptions ?? SyncDetectionOptions.Disabled;
         _delayedCvbsSyncLevels = renderer.LastCvbsSyncLevels;
         _currentCvbsOutputConverter = videoOutput;
+        _currentVhsVideoOutput = videoOutput;
         _decodeLaserDiscVbi = decodeLaserDiscVbi;
         _decodeVbiData = decodeLaserDiscVbi || decodeVbiData;
         _preserveRawMetricSources = preserveRawMetricSources;
@@ -277,6 +284,19 @@ public sealed class TbcFieldDecodePipeline
         _laserDiscNtscBurstRefineOptions = laserDiscNtscBurstRefineOptions;
         _vsyncSerrationDetector = vsyncSerrationDetector;
         _decodeType = decodeType;
+        _upstreamBehaviorProfile = upstreamBehaviorProfile;
+        if (upstreamBehaviorProfile == UpstreamBehaviorProfile.Current
+            && string.Equals(decodeType, "vhs", StringComparison.Ordinal))
+        {
+            double activeVideoStart = activeVideoStartUs
+                ?? throw new ArgumentNullException(nameof(activeVideoStartUs));
+            _vhsSyncDetector = new VhsSyncDetector(
+                syncAnalyzer.UsecToSamples(syncAnalyzer.HSyncPulseUs),
+                syncAnalyzer.UsecToSamples(activeVideoStart - syncAnalyzer.HSyncPulseUs - 2.0),
+                checked((int)Math.Round(syncAnalyzer.NominalLineLength, MidpointRounding.ToEven)),
+                syncAnalyzer.UsecToSamples(0.22));
+        }
+
         _framesPerSecond = framesPerSecond is > 0.0 ? framesPerSecond : null;
         _vhsFieldLevelState = string.Equals(decodeType, "vhs", StringComparison.Ordinal)
             ? new VhsFieldLevelState(_framesPerSecond ?? 25.0)
@@ -299,6 +319,8 @@ public sealed class TbcFieldDecodePipeline
 
     internal int WorkerThreads => _workerThreads;
 
+    internal UpstreamBehaviorProfile UpstreamBehaviorProfile => _upstreamBehaviorProfile;
+
     internal Action<string, string>? DiagnosticLogger
     {
         get => _diagnosticLogger;
@@ -316,6 +338,7 @@ public sealed class TbcFieldDecodePipeline
             _vhsLineLocationIssues,
             _delayedCvbsSyncLevels,
             Volatile.Read(ref _currentCvbsOutputConverter),
+            _currentVhsVideoOutput,
             _previousAnalogAudioStartSample,
             _previousAnalogAudioFieldNumber,
             _chromaRotationIndex,
@@ -347,6 +370,7 @@ public sealed class TbcFieldDecodePipeline
         _vhsLineLocationIssues = state.VhsLineLocationIssues;
         _delayedCvbsSyncLevels = state.DelayedCvbsSyncLevels;
         Volatile.Write(ref _currentCvbsOutputConverter, state.CurrentCvbsOutputConverter);
+        _currentVhsVideoOutput = state.CurrentVhsVideoOutput;
         _previousAnalogAudioStartSample = state.PreviousAnalogAudioStartSample;
         _previousAnalogAudioFieldNumber = state.PreviousAnalogAudioFieldNumber;
         _chromaRotationIndex = state.ChromaRotationIndex;
@@ -457,7 +481,16 @@ public sealed class TbcFieldDecodePipeline
             diagnosticLogger: (level, message) => DecodeSessionLogWriter.Append(session, level, message),
             debug: session.ExecutionOptions.Debug,
             inputBlockCutSamples: session.BlockCut,
-            workerThreads: session.ExecutionOptions.WorkerThreads);
+            workerThreads: session.ExecutionOptions.WorkerThreads,
+            upstreamBehaviorProfile: session.ExecutionOptions.UpstreamBehaviorProfile,
+            activeVideoStartUs: session.Spec.Name == "vhs"
+                && session.ExecutionOptions.UpstreamBehaviorProfile == UpstreamBehaviorProfile.Current
+                    ? session.Parameters.SysParams
+                        .GetProperty("activeVideoUS")
+                        .EnumerateArray()
+                        .First()
+                        .GetDouble()
+                    : null);
     }
 
     public int EstimateReadSampleCount(int extraLines = 3)
@@ -629,7 +662,8 @@ public sealed class TbcFieldDecodePipeline
         bool deferCvbsOutputConversion)
     {
         RfDecodedSpan span = prepared.Span;
-        if (string.Equals(_decodeType, "vhs", StringComparison.Ordinal))
+        bool isVhs = string.Equals(_decodeType, "vhs", StringComparison.Ordinal);
+        if (isVhs)
         {
             // Upstream leaves this set when field processing exits before a
             // trustworthy line-location result is produced.
@@ -642,7 +676,25 @@ public sealed class TbcFieldDecodePipeline
             ?? _laserDiscSyncConverter
             ?? _videoOutput;
         ReadOnlySpan<double> pulseReference = span.VideoLowPass ?? span.Video;
-        IReadOnlyList<Pulse> rawPulses = FindRawPulses(pulseReference, threshold);
+        IReadOnlyList<Pulse> rawPulses;
+        if (_vhsSyncDetector is not null && !prepared.ExplicitThreshold)
+        {
+            VhsSyncDetectionResult currentSync = _vhsSyncDetector.Detect(
+                pulseReference,
+                detectLevels: !prepared.UsedSavedLevels,
+                syncTipEstimate: activeVideoOutput.Ire0,
+                blankingEstimate: activeVideoOutput.IreToHz(activeVideoOutput.VSyncIre));
+            rawPulses = currentSync.Pulses
+                .Select(static pulse => new Pulse(pulse.Start, pulse.Length))
+                .ToArray();
+            activeVideoOutput = ApplyCurrentVhsLevels(currentSync, activeVideoOutput);
+            threshold = activeVideoOutput.IreToHz(activeVideoOutput.VSyncIre / 2.0);
+        }
+        else
+        {
+            rawPulses = FindRawPulses(pulseReference, threshold);
+        }
+
         if (string.Equals(_decodeType, "ld", StringComparison.Ordinal)
             && rawPulses.Count == 0
             && fieldNumber == 0
@@ -714,12 +766,14 @@ public sealed class TbcFieldDecodePipeline
                 "No classified sync pulses were detected in the decoded span.");
         }
 
-        IReadOnlyList<ClassifiedSyncPulse> refinedPulses = string.Equals(_decodeType, "vhs", StringComparison.Ordinal)
-            ? _syncAnalyzer.RefinePulses(
-                rawPulses,
-                timing,
-                span.VideoLowPass ?? span.Video,
-                10.0 * _videoOutput.HzIre)
+        IReadOnlyList<ClassifiedSyncPulse> refinedPulses = isVhs
+            ? _vhsSyncDetector is not null && !prepared.ExplicitThreshold
+                ? _syncAnalyzer.RefinePulses(rawPulses, timing)
+                : _syncAnalyzer.RefinePulses(
+                    rawPulses,
+                    timing,
+                    span.VideoLowPass ?? span.Video,
+                    10.0 * _videoOutput.HzIre)
             : _syncAnalyzer.RefinePulses(rawPulses, timing);
 
         double meanLineLength = _syncAnalyzer.ComputeMeanLineLength(refinedPulses);
@@ -753,7 +807,7 @@ public sealed class TbcFieldDecodePipeline
             meanLineLength,
             parity.IsFirstField,
             fallback);
-        bool isTape = string.Equals(_decodeType, "vhs", StringComparison.Ordinal);
+        bool isTape = isVhs;
         if (isTape)
         {
             // v0.4.0 retains VHS sync history even when the span is later rejected as too short.
@@ -916,6 +970,9 @@ public sealed class TbcFieldDecodePipeline
             activeVideoOutput,
             fieldNumber);
         VideoOutputConverter? fieldConverter = agcConverter
+            ?? (_vhsSyncDetector is not null && !prepared.ExplicitThreshold
+                ? activeVideoOutput
+                : null)
             ?? prepared.ConverterOverride
             ?? _laserDiscAgcConverter
             ?? _laserDiscSyncConverter;
@@ -1420,6 +1477,31 @@ public sealed class TbcFieldDecodePipeline
             maximumPulseUs: _syncAnalyzer.VSyncPulseUs + 2.0);
     }
 
+    private VideoOutputConverter ApplyCurrentVhsLevels(
+        VhsSyncDetectionResult detection,
+        VideoOutputConverter current)
+    {
+        Ire0AdjustOptions? adjustment = _renderer.Ire0Adjust;
+        if (adjustment is null)
+        {
+            return current;
+        }
+
+        double ire0 = adjustment.BackPorch
+            ? detection.BlankLevel
+            : current.Ire0;
+        double hzIre = adjustment.HSync
+            ? (detection.BlankLevel - detection.SyncTipLevel) / -current.VSyncIre
+            : current.HzIre;
+        _currentVhsVideoOutput = new VideoOutputConverter(
+            ire0,
+            hzIre,
+            current.OutputZero,
+            current.VSyncIre,
+            current.OutputScale);
+        return _currentVhsVideoOutput;
+    }
+
     private double? FindNextVBlankEqualizing1(
         IReadOnlyList<ClassifiedSyncPulse> classified,
         double line0Location,
@@ -1694,6 +1776,18 @@ public sealed class TbcFieldDecodePipeline
             string.Equals(_decodeType, "ld", StringComparison.Ordinal)
                 ? -20.0
                 : thresholdConverter.VSyncIre / 2.0);
+
+        if (_vhsSyncDetector is not null)
+        {
+            bool usedSavedLevels = allowSavedLevels
+                && _syncDetectionOptions.UseSavedLevels
+                && !_vhsLineLocationIssues;
+            return new SyncPreparedSpan(
+                span,
+                defaultThreshold,
+                UsedSavedLevels: usedSavedLevels,
+                ConverterOverride: _currentVhsVideoOutput);
+        }
 
         if (!_syncDetectionOptions.DetectLevels)
         {

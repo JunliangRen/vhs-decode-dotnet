@@ -9,6 +9,7 @@
 
   <ItemGroup>
     <EmbeddedResource Include="Formats\format-params.snapshot.json" />
+    <EmbeddedResource Include="Decode\Resources\upstream-baseline.json" />
     <EmbeddedResource Include="Formats\custom\*.txt" />
     <EmbeddedResource Include="CommandLine\Help\*.txt" />
     <EmbeddedResource Include="Tbc\Resources\sinc_lut.npz" />
