@@ -22,7 +22,7 @@
       "algorithms": {
         "vhsSync": "current",
         "vhsVsyncLevels": "current",
-        "chromaGroupDelay": "pending",
+        "chromaGroupDelay": "current",
         "chromaFinalFilter": "pending",
         "cti": "pending"
       }

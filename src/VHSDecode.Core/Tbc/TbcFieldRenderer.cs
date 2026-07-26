@@ -145,14 +145,18 @@ public sealed class TbcFieldRenderer
 
     internal double[] ResamplePreparedField(
         ReadOnlySpan<double> videoHz,
-        TbcLineResampler.ResamplingPlan plan)
-        => _resampler.ResamplePrepared(videoHz, plan);
+        TbcLineResampler.ResamplingPlan plan,
+        double sourcePositionShift = 0.0)
+        => sourcePositionShift == 0.0
+            ? _resampler.ResamplePrepared(videoHz, plan)
+            : _resampler.ResamplePreparedShifted(videoHz, plan, sourcePositionShift);
 
     internal void ResampleFieldInto(
         ReadOnlySpan<double> videoHz,
         IReadOnlyList<double> lineLocations,
         int firstLine,
-        double[] destination)
+        double[] destination,
+        double sourcePositionShift = 0.0)
     {
         ArgumentNullException.ThrowIfNull(destination);
         if (destination.Length != FrameSpec.FieldSampleCount)
@@ -165,7 +169,18 @@ public sealed class TbcFieldRenderer
         using TbcLineResampler.ResamplingPlan plan = PrepareFieldResampling(
             lineLocations,
             firstLine);
-        _resampler.ResamplePrepared(videoHz, plan, destination);
+        if (sourcePositionShift == 0.0)
+        {
+            _resampler.ResamplePrepared(videoHz, plan, destination);
+        }
+        else
+        {
+            _resampler.ResamplePreparedShifted(
+                videoHz,
+                plan,
+                sourcePositionShift,
+                destination);
+        }
     }
 
     public TbcRenderedField RenderFieldPayload(

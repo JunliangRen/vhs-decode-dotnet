@@ -194,6 +194,33 @@ public sealed class TbcLineResampler
         return output;
     }
 
+    internal double[] ResamplePreparedShifted(
+        ReadOnlySpan<double> source,
+        ResamplingPlan plan,
+        double sourcePositionShift)
+    {
+        if (sourcePositionShift == 0.0)
+        {
+            return ResamplePrepared(source, plan);
+        }
+
+        if (source.IsEmpty)
+        {
+            throw new ArgumentException("Source must contain at least one sample.", nameof(source));
+        }
+
+        if (!double.IsFinite(sourcePositionShift))
+        {
+            throw new ArgumentOutOfRangeException(nameof(sourcePositionShift));
+        }
+
+        ArgumentNullException.ThrowIfNull(plan);
+        plan.ValidateOwner(this);
+        var output = new double[plan.DestinationLength];
+        ResampleSamplesShifted(source, plan, sourcePositionShift, output);
+        return output;
+    }
+
     internal ushort[] ResamplePreparedToUInt16(
         ReadOnlySpan<double> source,
         ResamplingPlan plan,
@@ -233,6 +260,41 @@ public sealed class TbcLineResampler
         }
 
         ResampleSamples(source, plan, destination);
+    }
+
+    internal void ResamplePreparedShifted(
+        ReadOnlySpan<double> source,
+        ResamplingPlan plan,
+        double sourcePositionShift,
+        double[] destination)
+    {
+        if (sourcePositionShift == 0.0)
+        {
+            ResamplePrepared(source, plan, destination);
+            return;
+        }
+
+        if (source.IsEmpty)
+        {
+            throw new ArgumentException("Source must contain at least one sample.", nameof(source));
+        }
+
+        if (!double.IsFinite(sourcePositionShift))
+        {
+            throw new ArgumentOutOfRangeException(nameof(sourcePositionShift));
+        }
+
+        ArgumentNullException.ThrowIfNull(plan);
+        ArgumentNullException.ThrowIfNull(destination);
+        plan.ValidateOwner(this);
+        if (destination.Length != plan.DestinationLength)
+        {
+            throw new ArgumentException(
+                "Destination length must match the prepared resampling plan.",
+                nameof(destination));
+        }
+
+        ResampleSamplesShifted(source, plan, sourcePositionShift, destination);
     }
 
     private void ResampleLine(
@@ -382,6 +444,58 @@ public sealed class TbcLineResampler
                                 parallelSource,
                                 sourceLength,
                                 sourcePositions[i],
+                                parallelSincLookup)
+                            * levelAdjusts[prefixSamples + i]);
+                    }
+                });
+        }
+    }
+
+    private unsafe void ResampleSamplesShifted(
+        ReadOnlySpan<double> source,
+        ResamplingPlan preparation,
+        double sourcePositionShift,
+        double[] destination)
+    {
+        preparation.ValidateOwner(this);
+        double[] sourcePositions = preparation.SourcePositions;
+        double[] levelAdjusts = preparation.LevelAdjusts;
+        int prefixSamples = preparation.PrefixSamples;
+        float[] sincLookup = SincLookup.Value;
+        fixed (double* sourcePointer = source)
+        fixed (float* sincLookupPointer = sincLookup)
+        {
+            if (_workerThreads <= 1 || destination.Length < ParallelSampleThreshold)
+            {
+                for (int i = 0; i < destination.Length; i++)
+                {
+                    destination[i] = (float)(SampleSinc(
+                            sourcePointer,
+                            source.Length,
+                            sourcePositions[i] + sourcePositionShift,
+                            sincLookupPointer)
+                        * levelAdjusts[prefixSamples + i]);
+                }
+
+                return;
+            }
+
+            nint sourceAddress = (nint)sourcePointer;
+            nint sincLookupAddress = (nint)sincLookupPointer;
+            int sourceLength = source.Length;
+            Parallel.ForEach(
+                Partitioner.Create(0, destination.Length),
+                new ParallelOptions { MaxDegreeOfParallelism = _workerThreads },
+                range =>
+                {
+                    var parallelSource = (double*)sourceAddress;
+                    var parallelSincLookup = (float*)sincLookupAddress;
+                    for (int i = range.Item1; i < range.Item2; i++)
+                    {
+                        destination[i] = (float)(SampleSinc(
+                                parallelSource,
+                                sourceLength,
+                                sourcePositions[i] + sourcePositionShift,
                                 parallelSincLookup)
                             * levelAdjusts[prefixSamples + i]);
                     }

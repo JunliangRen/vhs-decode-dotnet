@@ -2,7 +2,7 @@
 
 **[English](README.md)** | [简体中文](README.zh-CN.md) | [日本語](README.ja.md)
 
-<!-- README_SYNC: 2026-07-26.2 -->
+<!-- README_SYNC: 2026-07-26.3 -->
 
 .NET 11 rewrite of the decode-facing parts of
 [`oyvindln/vhs-decode`](https://github.com/oyvindln/vhs-decode), focused on
@@ -70,7 +70,7 @@ CLI compatibility requires it.
 | --- | --- | --- |
 | Solution and tests | Implemented | .NET 11 `.slnx`; standard xUnit v3 tests work in Visual Studio Test Explorer and with `dotnet test`. |
 | CLI and arguments | Implemented and snapshot-tested | Facade and standalone help, aliases, defaults, validation, diagnostics, and exit behavior target v0.4.0. |
-| Upstream behavior profiles | Staged | `v0.4.0` remains the default; `current` is an opt-in profile whose first two implemented stages are the merged PR 341 VHS HSync detector and VSync level refinement. |
+| Upstream behavior profiles | Staged | `v0.4.0` remains the default; `current` is an opt-in profile whose first three implemented stages are the merged PR 341 VHS HSync detector, VSync level refinement, and NTSC chroma group-delay correction. |
 | VHS and tape families | Implemented; rare capture gaps remain | VHS, S-VHS, Betamax, Video8/Hi8, U-matic, Type C, EIAJ, and supported PAL/NTSC variants share the release-compatible decode path. |
 | CVBS | Implemented for release-supported systems | PAL and NTSC paths run; uncommon vblank and cross-option cases need more real-capture fixtures. |
 | LaserDisc | Implemented; rare capture gaps remain | Video, VBI, EFM, analog audio, AC3, RF-TBC, metadata, recovery, and PAL/NTSC paths are connected. |
@@ -133,20 +133,22 @@ VHS decode accepts `--compat-version v0.4.0|current`:
 | Profile | Default | Pinned upstream source | Active behavior |
 | --- | --- | --- | --- |
 | `v0.4.0` | Yes | release v0.4.0, commit `43155200da87c0d49eb37d8ec09b1372075ee8e4` | Existing release-compatible decode path. |
-| `current` | No | merged PR 341, commit `2f21e8ed6018b14561396cc95f1f6828054470b8` | Exact-first VHS HSync candidate extraction, MAD rejection, multi-grid lock, calibrated levels, subpixel pulse synthesis, and robust VSync level refinement. |
+| `current` | No | merged PR 341, commit `2f21e8ed6018b14561396cc95f1f6828054470b8` | Exact-first VHS HSync candidate extraction, MAD rejection, multi-grid lock, calibrated levels, subpixel pulse synthesis, robust VSync level refinement, and NTSC chroma group-delay correction. |
 
-`current` is deliberately staged. Chroma group-delay correction, the
-Super-Gaussian final filter, and CTI are still pending and are not silently
-enabled by this profile. The embedded baseline catalog records that boundary
-explicitly.
+`current` is deliberately staged. The Super-Gaussian final filter and CTI are
+still pending and are not silently enabled by this profile. The embedded
+baseline catalog records that boundary explicitly.
 
-The HSync and VSync-level stages are checked against the original upstream
-functions with deterministic synthetic fixtures, including pulse coordinates,
-field-window semantics, and floating-point bit patterns. HSync also retains
-its upstream PAL fixture gate. The pinned VSync behavior intentionally includes
-its upstream back-porch assignment quirk; a correction would require a
-separate profile change. Separate end-to-end gates keep the default `v0.4.0`
-profile identical across `--threads 0`, default, and `--threads 20`.
+The HSync, VSync-level, and group-delay stages are checked against the original
+upstream functions with deterministic synthetic fixtures. The chroma stage
+keeps burst and track-phase analysis unshifted, then adds the pinned float64
+source-coordinate shift only to final 16-tap chroma resampling. Its tests cover
+the Numba output bits, zero-shift legacy path, actual parallel threshold, and
+the upstream all-positive phase-truthiness behavior. HSync also retains its
+upstream PAL fixture gate. The pinned VSync behavior intentionally includes its
+upstream back-porch assignment quirk; a correction would require a separate
+profile change. Separate end-to-end gates keep the default `v0.4.0` profile
+identical across `--threads 0`, default, and `--threads 20`.
 
 <!-- SECTION: performance -->
 
@@ -877,7 +879,7 @@ Requirements:
 .\tools\build-ipp-native.ps1
 dotnet restore VHSDecodeDotNet.slnx
 dotnet build VHSDecodeDotNet.slnx -c Release --no-restore
-dotnet test --solution VHSDecodeDotNet.slnx -c Release --no-build --no-restore --minimum-expected-tests 964
+dotnet test --solution VHSDecodeDotNet.slnx -c Release --no-build --no-restore --minimum-expected-tests 976
 ```
 
 The first command includes the optional `ipp-fast` native artifact; omit it for
@@ -890,7 +892,7 @@ Intel license, and `THIRD-PARTY-NOTICES.md`; an Exact-only build may omit the
 native build step.
 
 The current formal Release build has zero warnings and errors. The xUnit v3
-project exposes **964** independently discoverable tests to both
+project exposes **976** independently discoverable tests to both
 `dotnet test` and Visual Studio Test Explorer.
 
 <!-- SECTION: usage -->

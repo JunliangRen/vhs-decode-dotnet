@@ -36,7 +36,8 @@ options:
                         DSP implementation to use (default: exact)
   --compat-version {v0.4.0,current}
                         upstream behavior profile (default: v0.4.0; current
-                        selects the staged PR 341 HSync and VSync-level behavior)
+                        selects staged PR 341 HSync, VSync-level, and NTSC
+                        chroma group-delay behavior)
   --tf tape_format, --tape_format tape_format
                         Tape format - TYPEC UMATIC_SP HI8 TYPEB UMATIC BETAMAX VCR_LP VHD VHS VIDEO2000 UMATIC_HI SVHS EIAJ VCR QUADRUPLEX VHSHQ BETAMAX_HIFI VIDEO8 SUPERBETA SVHS_ETare supported
   --ts tape_speed, --tape_speed tape_speed
