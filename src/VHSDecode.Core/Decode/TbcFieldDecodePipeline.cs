@@ -327,6 +327,11 @@ public sealed class TbcFieldDecodePipeline
         => _vhsVSyncLevelRefiner is not null
             && !_syncDetectionOptions.UseSavedLevels;
 
+    internal bool CurrentVhsChromaGroupDelayEnabled
+        => _upstreamBehaviorProfile == UpstreamBehaviorProfile.Current
+            && string.Equals(_decodeType, "vhs", StringComparison.Ordinal)
+            && _chromaFieldOptions is not null;
+
     internal Action<string, string>? DiagnosticLogger
     {
         get => _diagnosticLogger;
@@ -976,9 +981,20 @@ public sealed class TbcFieldDecodePipeline
             span.Chroma is { Length: > 0 }
                 ? _renderer.PrepareFieldResampling(renderLineLocations, outputFirstLine)
                 : null;
+        double chromaSourcePositionShift =
+            CurrentVhsChromaGroupDelayEnabled
+            && chromaAnalysis?.Phase.BurstDetectedLine != -1
+                ? VhsChromaDecoder.CurrentNtscChromaGroupDelayShiftSamples(
+                    _chromaFieldOptions!,
+                    parity.IsFirstField,
+                    fieldNumber)
+                : 0.0;
         double[]? chromaBurstSamples = renderResamplingPlan is null
             ? null
-            : _renderer.ResamplePreparedField(span.Chroma!, renderResamplingPlan);
+            : _renderer.ResamplePreparedField(
+                span.Chroma!,
+                renderResamplingPlan,
+                chromaSourcePositionShift);
 
         int syncConfidence = SyncConfidenceCalculator.Compute(
             lineLocations.Locations,
