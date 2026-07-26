@@ -63,6 +63,12 @@ public sealed record VhsChromaFieldOptions(
 
     public IReadOnlyList<SosSection>? FinalSosFilter { get; init; }
 
+    internal ChromaSuperGaussianFinalFilter? SuperGaussianFinalFilter
+    {
+        get;
+        init;
+    }
+
     public TransferFunction? ChromaDeemphasisFilter { get; init; }
 
     public TransferFunction? ChromaPreFilter { get; init; }
@@ -571,6 +577,11 @@ public static class VhsChromaDecoder
         {
             upconverted = finalFilter(upconverted);
         }
+        else if (options.SuperGaussianFinalFilter is not null)
+        {
+            upconverted =
+                options.SuperGaussianFinalFilter.Apply(upconverted);
+        }
         else if (options.FinalSosFilter is not null)
         {
             SosFilter.ApplyForwardBackwardFloat32InPlace(options.FinalSosFilter, upconverted);
@@ -587,7 +598,9 @@ public static class VhsChromaDecoder
 
         bool retainFloat32 = finalFilter is null
             && options.ChromaDeemphasisFilter is null
-            && (options.FinalSosFilter is not null || options.FinalFilter is null);
+            && (options.SuperGaussianFinalFilter is not null
+                || options.FinalSosFilter is not null
+                || options.FinalFilter is null);
 
         ushort[] gained = options.DisableComb
             ? ApplyAutomaticChromaGainToU16(

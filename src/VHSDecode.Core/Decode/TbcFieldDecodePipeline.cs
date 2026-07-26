@@ -473,7 +473,9 @@ public sealed class TbcFieldDecodePipeline
                 session.FilterOptions,
                 session.DecodeSampleRateHz,
                 session.TbcRenderer.TrackPhaseIre0Offset?.TrackPhase,
-                workerThreads: session.ExecutionOptions.WorkerThreads),
+                workerThreads: session.ExecutionOptions.WorkerThreads,
+                upstreamBehaviorProfile:
+                    session.ExecutionOptions.UpstreamBehaviorProfile),
             BuildLaserDiscPilotRefineOptions(session.Spec.Name, session.System, session.Parameters),
             BuildLaserDiscNtscBurstRefineOptions(session.Spec.Name, session.System, session.Parameters),
             session.Spec.Name,
@@ -1703,7 +1705,9 @@ public sealed class TbcFieldDecodePipeline
         DecodeFilterOptions? filterOptions = null,
         double decodeSampleRateHz = 40_000_000.0,
         int? initialChromaRotationIndex = null,
-        int workerThreads = 1)
+        int workerThreads = 1,
+        UpstreamBehaviorProfile upstreamBehaviorProfile =
+            UpstreamBehaviorProfile.V040)
     {
         if (chromaOptions?.WriteChroma != true
             || !parameters.SysParams.TryGetProperty("colorBurstUS", out JsonElement colorBurstRange)
@@ -1742,6 +1746,18 @@ public sealed class TbcFieldDecodePipeline
         {
             FinalFilter = DecodeFilterSetBuilder.BuildChromaFinalFilter(parameters, chromaSampleRateHz, chromaOptions.IsColorUnder),
             FinalSosFilter = DecodeFilterSetBuilder.BuildChromaFinalSosFilter(parameters, chromaSampleRateHz, chromaOptions.IsColorUnder),
+            SuperGaussianFinalFilter =
+                upstreamBehaviorProfile == UpstreamBehaviorProfile.Current
+                && chromaOptions.IsColorUnder
+                    ? new ChromaSuperGaussianFinalFilter(
+                        checked(
+                            frameSpec.OutputLineLength
+                            * frameSpec.OutputLineCount),
+                        frameSpec.OutputSampleRateHz / 4.0,
+                        JsonDouble(
+                            parameters.RfParams,
+                            "color_under_carrier"))
+                    : null,
             ChromaDeemphasisFilter = chromaOptions.ChromaDeemphasisFilter
                 ? DecodeFilterSetBuilder.BuildChromaDeemphasisFilter(parameters, chromaSampleRateHz)
                 : null,

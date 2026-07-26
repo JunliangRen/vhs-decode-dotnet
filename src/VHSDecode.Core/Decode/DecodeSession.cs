@@ -334,7 +334,9 @@ public static class DecodeSessionFactory
                 filterOptions,
                 sampleRateHz,
                 tbcRenderer.TrackPhaseIre0Offset?.TrackPhase,
-                workerThreads: executionOptions.WorkerThreads),
+                workerThreads: executionOptions.WorkerThreads,
+                upstreamBehaviorProfile:
+                    executionOptions.UpstreamBehaviorProfile),
             TbcFieldDecodePipeline.BuildLaserDiscPilotRefineOptions(command.Spec.Name, system, parameters),
             TbcFieldDecodePipeline.BuildLaserDiscNtscBurstRefineOptions(command.Spec.Name, system, parameters),
             command.Spec.Name,

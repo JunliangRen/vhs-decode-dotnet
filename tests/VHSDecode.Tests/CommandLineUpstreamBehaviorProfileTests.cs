@@ -79,7 +79,7 @@ public sealed class CommandLineUpstreamBehaviorProfileTests
         Assert.Equal("current", current.Algorithms["vhsSync"]);
         Assert.Equal("current", current.Algorithms["vhsVsyncLevels"]);
         Assert.Equal("current", current.Algorithms["chromaGroupDelay"]);
-        Assert.Equal("pending", current.Algorithms["chromaFinalFilter"]);
+        Assert.Equal("current", current.Algorithms["chromaFinalFilter"]);
         Assert.Equal("pending", current.Algorithms["cti"]);
     }
 
@@ -101,6 +101,10 @@ public sealed class CommandLineUpstreamBehaviorProfileTests
 
         Assert.Equal(expected, session.ExecutionOptions.UpstreamBehaviorProfile);
         Assert.Equal(expected, session.TbcFieldDecoder.UpstreamBehaviorProfile);
+        Assert.Equal(
+            expected == UpstreamBehaviorProfile.Current,
+            session.TbcFieldDecoder.ChromaFieldOptions!
+                .SuperGaussianFinalFilter is not null);
     }
 
     [Fact(DisplayName = "Non-VHS decode sessions retain the v0.4.0 behavior profile")]
@@ -111,6 +115,9 @@ public sealed class CommandLineUpstreamBehaviorProfileTests
 
         Assert.Equal(UpstreamBehaviorProfile.V040, session.ExecutionOptions.UpstreamBehaviorProfile);
         Assert.Equal(UpstreamBehaviorProfile.V040, session.TbcFieldDecoder.UpstreamBehaviorProfile);
+        Assert.Null(
+            session.TbcFieldDecoder.ChromaFieldOptions?
+                .SuperGaussianFinalFilter);
     }
 
     private static ParsedCommand Parse(DecodeCommandSpec spec, params string[] arguments)

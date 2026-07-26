@@ -13,14 +13,16 @@ Intel IPP is redistributed under the Intel Simplified Software License
 (Version October 2022). The complete license text copied from the pinned NuGet
 package is in `third_party/intel-ipp/LICENSE.txt`.
 
-## pocketfft
+## pocketfft / DUCC FFT
 
 `VHSDecode.Core.Dsp.PocketFftReal`, `PocketFftReal32`,
 `PocketFftComplex`, and `PocketFftComplex32` contain C# adaptations of
-pocketfft's radix-2/radix-4 real-transform path and radix-2/radix-4/radix-8
-complex-transform path, as used by NumPy 2.4.6 and SciPy 1.18.0.
+pocketfft/DUCC's float32 real and complex mixed-radix transform paths,
+including radix 2, 3, 4, 5, 7, 8, and 11 passes and large-transform planning,
+as used by NumPy 2.4.6 and SciPy 1.18.0.
 
-Copyright (C) 2010-2021 Max-Planck-Society
+Copyright (C) 2010-2026 Max-Planck-Society
+Copyright (C) 2019 Peter Bell
 
 Redistribution and use in source and binary forms, with or without
 modification, are permitted provided that the following conditions are met:
