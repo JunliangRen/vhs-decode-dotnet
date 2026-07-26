@@ -153,8 +153,8 @@ release-compatible な hash または動作が必要な場合は `exact` を使�
 
 | Capture | end-to-end wall-time median gain | Compatibility result |
 | --- | ---: | --- |
-| NTSC-J VHS `cml.lds` | 4.73% | Luma、chroma、JSON、800 個すべての `fileLoc`、stdout、normalized log が一致しました。 |
-| PAL VHS `pal.ldf` | 5.00% | JSON と 800 個すべての `fileLoc` が一致しました。Luma sample の 0.000794%、chroma sample の 0.003226%（合計約 0.00201%）が異なり、すべて 1 つの深刻に損傷した field 内でした。normalized log も異なりました。 |
+| Local NTSC-J VHS capture | 4.73% | Luma、chroma、JSON、800 個すべての `fileLoc`、stdout、normalized log が一致しました。 |
+| Local PAL VHS capture | 5.00% | JSON と 800 個すべての `fileLoc` が一致しました。Luma sample の 0.000794%、chroma sample の 0.003226%（合計約 0.00201%）が異なり、すべて 1 つの深刻に損傷した field 内でした。normalized log も異なりました。 |
 
 これらは tested capture と machine の結果であり、一般的な speed/compatibility
 guarantee ではありません。PAL の zero-output-difference 実験には Exact inverse
@@ -200,7 +200,9 @@ FFT への fallback が必要で、paired median gain は -1.05% まで低下し
   引き続き順序付き scalar code で行い、AVX 非対応 CPU は元の scalar path を使います。
 - worker 有効時、VHS field decode は luma TBC render と chroma field decode を
   並行実行します。同時に存在する chroma task は最大 1 つで、次の field へ進む前に
-  calling thread 上で順序どおり state を commit します。
+  calling thread 上で順序どおり state を commit します。Exact mode の tape-envelope
+  dropout detection も同じ bounded field overlap を共有し、read-only task は最大 1 つで、
+  field が return する前に必ず join されます。
 - 長い TBC sinc-resampling job は worker budget を共有し、出力順序を維持します。
   `--threads 0` と `--threads 1` は決定的な serial path を保持します。
 - linear wow adjustment は一定の derivative を line ごとに 1 回だけ計算し、median/MAD
@@ -264,6 +266,16 @@ FFT への fallback が必要で、paired median gain は -1.05% まで低下し
 - CUDA/OpenCL は runtime dependency ではありません。現在の trace では、独立した
   32K FFT を host/device 間で往復させる根拠がありません。将来の任意 GPU backend は
   device-resident DSP stage を batch 化し、正確な CPU fallback を維持する必要があります。
+
+dropout overlap の strict Exact-mode benchmark は、同じ synthetic packed PAL RF
+fixture で 160 frame を要求し、各 mode について 1 組の warm-up 後に 4 組の
+alternating Release A/B を実行しました。変更前の main と比べ、end-to-end wall-time
+median は `--threads 5` で 4.7%、`--threads 20` で 5.5% 短縮し、candidate は全 8 組で
+高速でした。Luma TBC、chroma TBC、JSON、stdout、normalized stderr/log、および
+順序付き 320 個すべての `fileLoc` は一致しました。変更のない serial path の
+`--threads 0` も同じ gate を通過しました。default-worker の 200-frame sustained run
+では後半の slowdown がなく、field ごとの dropout task は最大 1 つで、sampled memory
+は最後の quarter で再び低下しました。
 
 現在の thread matrix は Intel Core Ultra 7 265K（20 logical processor）、
 Windows 11 build 26220、.NET SDK/runtime `11.0.100-preview.6.26359.118`、
@@ -761,7 +773,7 @@ serial/default-5/20/64 worker の間で 6 artifact がすべて一致しまし�
 .\tools\build-ipp-native.ps1
 dotnet restore VHSDecodeDotNet.slnx
 dotnet build VHSDecodeDotNet.slnx -c Release --no-restore
-dotnet test --solution VHSDecodeDotNet.slnx -c Release --no-build --no-restore
+dotnet test --solution VHSDecodeDotNet.slnx -c Release --no-build --no-restore --minimum-expected-tests 924
 ```
 
 最初の command は optional `ipp-fast` native artifact を含めるためのものです。
@@ -774,7 +786,7 @@ bridge を build します。外部 IPP、OpenMP、oneTBB、Visual C++ runtime D
 
 現在の正式な Release build は warning 0、error 0 です。xUnit v3 project は
 `dotnet test` と Visual Studio Test Explorer の両方で個別に検出できる
-**908** tests を公開します。
+**924** tests を公開します。
 
 <!-- SECTION: usage -->
 

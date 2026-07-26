@@ -155,8 +155,8 @@ capture after one warm-up pair, using 400 frames and `--threads 5`:
 
 | Capture | Median end-to-end wall-time gain | Compatibility result |
 | --- | ---: | --- |
-| NTSC-J VHS `cml.lds` | 4.73% | Luma, chroma, JSON, all 800 `fileLoc` values, stdout, and normalized logs were identical. |
-| PAL VHS `pal.ldf` | 5.00% | JSON and all 800 `fileLoc` values were identical. Luma differed in 0.000794% of samples and chroma in 0.003226% (0.00201% combined), all within one heavily damaged field; normalized logs also differed. |
+| Local NTSC-J VHS capture | 4.73% | Luma, chroma, JSON, all 800 `fileLoc` values, stdout, and normalized logs were identical. |
+| Local PAL VHS capture | 5.00% | JSON and all 800 `fileLoc` values were identical. Luma differed in 0.000794% of samples and chroma in 0.003226% (0.00201% combined), all within one heavily damaged field; normalized logs also differed. |
 
 These results describe the tested captures and machine, not a universal speed
 or compatibility guarantee. The PAL zero-output-difference experiment required
@@ -207,7 +207,9 @@ falling back to the Exact inverse FFT and reduced the paired median gain to
   original scalar path.
 - VHS field decode overlaps luma TBC rendering with chroma field decoding when
   workers are enabled. Only one chroma task can be in flight, and its state is
-  committed on the calling thread before the next field advances.
+  committed on the calling thread before the next field advances. Exact-mode
+  tape-envelope dropout detection shares this bounded field overlap: at most
+  one read-only dropout task exists, and it is joined before the field returns.
 - Long TBC sinc-resampling jobs share the worker budget and preserve output
   order; `--threads 0` and `--threads 1` retain deterministic serial paths.
 - Linear wow adjustment evaluates the constant derivative once per line,
@@ -281,6 +283,16 @@ falling back to the Exact inverse FFT and reduced the paired median gain to
 - CUDA/OpenCL is not a runtime dependency. Current traces do not justify moving
   isolated 32K FFTs across the host/device boundary; any future optional GPU
   backend must batch a device-resident DSP stage and retain an exact CPU fallback.
+
+A strict Exact-mode benchmark of the dropout overlap used the same synthetic
+packed PAL RF fixture, 160 requested frames, one warm-up pair, and four
+alternating Release pairs per mode. Against the pre-change main build, median
+end-to-end wall time fell by 4.7% at `--threads 5` and 5.5% at
+`--threads 20`; the candidate won all eight pairs. Luma TBC, chroma TBC, JSON,
+stdout, normalized stderr/logs, and all 320 ordered `fileLoc` values were
+identical. `--threads 0` also passed the same gate on its unchanged serial path.
+A 200-frame default-worker run had no second-half slowdown; only one dropout
+task can exist per field, and sampled memory fell again in the final quarter.
 
 The current thread matrix used an Intel Core Ultra 7 265K (20 logical
 processors), Windows 11 build 26220, .NET SDK/runtime
@@ -809,7 +821,7 @@ Requirements:
 .\tools\build-ipp-native.ps1
 dotnet restore VHSDecodeDotNet.slnx
 dotnet build VHSDecodeDotNet.slnx -c Release --no-restore
-dotnet test --solution VHSDecodeDotNet.slnx -c Release --no-build --no-restore
+dotnet test --solution VHSDecodeDotNet.slnx -c Release --no-build --no-restore --minimum-expected-tests 924
 ```
 
 The first command includes the optional `ipp-fast` native artifact; omit it for
@@ -822,7 +834,7 @@ Intel license, and `THIRD-PARTY-NOTICES.md`; an Exact-only build may omit the
 native build step.
 
 The current formal Release build has zero warnings and errors. The xUnit v3
-project exposes **908** independently discoverable tests to both
+project exposes **924** independently discoverable tests to both
 `dotnet test` and Visual Studio Test Explorer.
 
 <!-- SECTION: usage -->
