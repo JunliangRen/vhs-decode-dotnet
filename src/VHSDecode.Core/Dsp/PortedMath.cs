@@ -66,6 +66,15 @@ public static class PortedMath
         double frequencyHz)
         => UnwrapHilbertVhsRustApproximationCore(input, frequencyHz, allowSimd: true);
 
+    internal static void UnwrapHilbertVhsRustApproximation(
+        ReadOnlySpan<Complex> input,
+        double frequencyHz,
+        double[] output)
+    {
+        ValidateVhsRustComplexInput(input, output);
+        FillVhsRustFrequencyDifferences(input, frequencyHz, output);
+    }
+
     internal static double[] UnwrapHilbertVhsRustApproximationScalar(
         ReadOnlySpan<Complex> input,
         double frequencyHz)
@@ -254,6 +263,93 @@ public static class PortedMath
         }
 
         return output;
+    }
+
+    private static void ValidateVhsRustComplexInput(
+        ReadOnlySpan<Complex> input,
+        double[] output)
+    {
+        if (input.IsEmpty)
+        {
+            throw new ArgumentException("Input must not be empty.", nameof(input));
+        }
+
+        if (output.Length != input.Length)
+        {
+            throw new ArgumentException(
+                "Output length must match the complex input.",
+                nameof(output));
+        }
+    }
+
+    private static unsafe void FillVhsRustFrequencyDifferences(
+        ReadOnlySpan<Complex> input,
+        double frequencyHz,
+        double[] output)
+    {
+        // Keep the caller-buffer loop separate so the allocating hot path retains its
+        // array-local JIT code generation at high worker counts.
+        float frequency = (float)frequencyHz;
+        float previous = VhsRustAtan2Approximation(
+            (float)input[0].Imaginary,
+            (float)input[0].Real);
+        output[0] = 0.0;
+        int i = 1;
+        if (Avx.IsSupported && Sse.IsSupported)
+        {
+            fixed (Complex* inputPointer = input)
+            fixed (double* outputPointer = output)
+            {
+                float* angles = stackalloc float[4];
+                double* inputValues = (double*)inputPointer;
+                int vectorizedEnd = input.Length - ((input.Length - i) % 4);
+                for (; i < vectorizedEnd; i += 4)
+                {
+                    if (TryVhsRustAtan2Approximation4(inputValues + (i * 2), out Vector128<float> currentAngles))
+                    {
+                        if (Sse41.IsSupported)
+                        {
+                            previous = StoreVhsRustFrequencyDifferences4(
+                                currentAngles,
+                                previous,
+                                frequency,
+                                outputPointer + i);
+                        }
+                        else
+                        {
+                            Sse.Store(angles, currentAngles);
+                            for (int lane = 0; lane < 4; lane++)
+                            {
+                                float current = angles[lane];
+                                outputPointer[i + lane] = VhsRustFrequencyDifference(current, previous, frequency);
+                                previous = current;
+                            }
+                        }
+                    }
+                    else
+                    {
+                        for (int lane = 0; lane < 4; lane++)
+                        {
+                            Complex sample = inputPointer[i + lane];
+                            float current = VhsRustAtan2Approximation(
+                                (float)sample.Imaginary,
+                                (float)sample.Real);
+                            outputPointer[i + lane] = VhsRustFrequencyDifference(current, previous, frequency);
+                            previous = current;
+                        }
+                    }
+                }
+            }
+        }
+
+        for (; i < input.Length; i++)
+        {
+            float current = VhsRustAtan2Approximation(
+                (float)input[i].Imaginary,
+                (float)input[i].Real);
+            output[i] = VhsRustFrequencyDifference(current, previous, frequency);
+            previous = current;
+        }
     }
 
     public static double[] UnwrapAngles(ReadOnlySpan<double> input)

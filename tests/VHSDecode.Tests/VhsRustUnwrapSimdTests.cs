@@ -22,6 +22,11 @@ public sealed class VhsRustUnwrapSimdTests
         double[] expected = PortedMath.UnwrapHilbertVhsRustApproximationScalar(input, 40_000_000.0);
 
         double[] actual = PortedMath.UnwrapHilbertVhsRustApproximation(input, 40_000_000.0);
+        double[] complexBuffered = Enumerable.Repeat(double.NaN, length).ToArray();
+        PortedMath.UnwrapHilbertVhsRustApproximation(
+            input,
+            40_000_000.0,
+            complexBuffered);
         double[] split = PortedMath.UnwrapHilbertVhsRustApproximation(
             input.Select(value => value.Real).ToArray(),
             input.Select(value => value.Imaginary).ToArray(),
@@ -38,6 +43,9 @@ public sealed class VhsRustUnwrapSimdTests
             actual.Select(BitConverter.DoubleToUInt64Bits));
         Assert.Equal(
             expected.Select(BitConverter.DoubleToUInt64Bits),
+            complexBuffered.Select(BitConverter.DoubleToUInt64Bits));
+        Assert.Equal(
+            expected.Select(BitConverter.DoubleToUInt64Bits),
             split.Select(BitConverter.DoubleToUInt64Bits));
         Assert.Equal(
             expected.Select(BitConverter.DoubleToUInt64Bits),
@@ -52,12 +60,20 @@ public sealed class VhsRustUnwrapSimdTests
         double[] imaginary = input.Select(value => value.Imaginary).ToArray();
         var output = new double[input.Length];
         PortedMath.UnwrapHilbertVhsRustApproximation(
+            input,
+            40_000_000.0,
+            output);
+        PortedMath.UnwrapHilbertVhsRustApproximation(
             real,
             imaginary,
             40_000_000.0,
             output);
 
         long before = GC.GetAllocatedBytesForCurrentThread();
+        PortedMath.UnwrapHilbertVhsRustApproximation(
+            input,
+            40_000_000.0,
+            output);
         PortedMath.UnwrapHilbertVhsRustApproximation(
             real,
             imaginary,
