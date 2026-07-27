@@ -24,6 +24,11 @@ public static class ChromaTransientImprovement
             return;
         }
 
+        if (width < 0L || mix == 0.0)
+        {
+            return;
+        }
+
         int lineCount = (chromaData.Length - lineStart) / lineLength;
         if (lineCount <= 0)
         {

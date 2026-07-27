@@ -858,7 +858,7 @@ serial/default-5/20/64 worker の間で 6 artifact がすべて一致しまし�
 .\tools\build-ipp-native.ps1
 dotnet restore VHSDecodeDotNet.slnx
 dotnet build VHSDecodeDotNet.slnx -c Release --no-restore
-dotnet test --solution VHSDecodeDotNet.slnx -c Release --no-build --no-restore --minimum-expected-tests 1068
+dotnet test --solution VHSDecodeDotNet.slnx -c Release --no-build --no-restore --minimum-expected-tests 1071
 ```
 
 最初の command は optional `ipp-fast` native artifact を含めるためのものです。
@@ -871,7 +871,7 @@ bridge を build します。外部 IPP、OpenMP、oneTBB、Visual C++ runtime D
 
 現在の正式な Release build は warning 0、error 0 です。xUnit v3 project は
 `dotnet test` と Visual Studio Test Explorer の両方で個別に検出できる
-**1,068** tests を公開します。
+**1,071** tests を公開します。
 
 <!-- SECTION: usage -->
 

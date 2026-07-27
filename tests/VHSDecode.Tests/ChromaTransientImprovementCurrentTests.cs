@@ -74,6 +74,31 @@ public sealed class ChromaTransientImprovementCurrentTests
         Assert.Equal(InputHash, Float32BitsSha256(samples));
     }
 
+    [Theory(DisplayName = "Disabled current CTI preserves float64 samples bit for bit")]
+    [InlineData(-1, 1.0)]
+    [InlineData(2, 0.0)]
+    public void DisabledCurrentCtiPreservesFloat64SamplesBitForBit(
+        long width,
+        double mix)
+    {
+        double[] samples = BuildFloat64Input();
+        long[] expectedBits = samples
+            .Select(BitConverter.DoubleToInt64Bits)
+            .ToArray();
+
+        ChromaTransientImprovement.ApplyInPlace(
+            samples,
+            lineStart: 0,
+            lineLength: 64,
+            baseNoiseFloor: 1.0,
+            width,
+            mix);
+
+        Assert.Equal(
+            expectedBits,
+            samples.Select(BitConverter.DoubleToInt64Bits));
+    }
+
     private static double[] BuildInput()
     {
         var samples = new double[8 * 64];
@@ -81,6 +106,17 @@ public sealed class ChromaTransientImprovementCurrentTests
         {
             int integer = ((index * 7_919 + 104_729) % 65_521) - 32_760;
             samples[index] = (float)integer * 0.01f;
+        }
+
+        return samples;
+    }
+
+    private static double[] BuildFloat64Input()
+    {
+        var samples = new double[2 * 64];
+        for (int index = 0; index < samples.Length; index++)
+        {
+            samples[index] = (index * 0.125) + (1.0 / 3.0);
         }
 
         return samples;

@@ -1936,6 +1936,7 @@ public static class VhsChromaDecoder
         double madScale = 2.0)
     {
         ArgumentNullException.ThrowIfNull(phaseSequence);
+        ArgumentOutOfRangeException.ThrowIfNegative(smoothingWindow);
         int burstCount = phaseSequence.Count;
         if (burstCount == 0)
         {
