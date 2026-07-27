@@ -840,6 +840,18 @@ serial/default-5/20/64 worker の間で 6 artifact がすべて一致しまし�
 検証し、848 test はすべて pass しています。上記の既存 1,000-frame NTSC-J gate に変更は
 ありません。
 
+native `.ldf` PCM16 loader は、2 MiB の rewind history を 1 個の fixed circular buffer に
+保持し、fresh byte を requested block へ直接読み込み、forward-discard buffer を再利用する
+ようになりました。FFmpeg launch、seek、padding、byte order、rewind boundary、partial EOF
+後の position advancement、sample conversion の意味は変えていません。同じ private local
+NTSC `.ldf` capture に対する machine-idle の controlled 400-frame `--threads 20` pair では、
+baseline/candidate の wall time が 26.242 秒から 24.741 秒（5.7% 減）、CPU time が
+145.516 秒から 136.484 秒（6.2% 減）、peak working set が 1,204.5 MiB から
+1,190.6 MiB になりました。luma、chroma、JSON、stdout、normalized stderr、
+timestamp-normalized log はすべて一致しました。candidate は default `v0.4.0` と opt-in
+`current` の両 profile でも中断せず 1,000 frame / 2,000 field を完了し、同じ 6 comparison
+すべてで保存済みの各 Python oracle と完全一致しました。IPP は gate から除外しています。
+
 </details>
 
 <!-- SECTION: build -->
@@ -858,7 +870,7 @@ serial/default-5/20/64 worker の間で 6 artifact がすべて一致しまし�
 .\tools\build-ipp-native.ps1
 dotnet restore VHSDecodeDotNet.slnx
 dotnet build VHSDecodeDotNet.slnx -c Release --no-restore
-dotnet test --solution VHSDecodeDotNet.slnx -c Release --no-build --no-restore --minimum-expected-tests 1079
+dotnet test --solution VHSDecodeDotNet.slnx -c Release --no-build --no-restore --minimum-expected-tests 1083
 ```
 
 最初の command は optional `ipp-fast` native artifact を含めるためのものです。
@@ -871,7 +883,7 @@ bridge を build します。外部 IPP、OpenMP、oneTBB、Visual C++ runtime D
 
 現在の正式な Release build は warning 0、error 0 です。xUnit v3 project は
 `dotnet test` と Visual Studio Test Explorer の両方で個別に検出できる
-**1,079** tests を公開します。
+**1,083** tests を公開します。
 
 <!-- SECTION: usage -->
 

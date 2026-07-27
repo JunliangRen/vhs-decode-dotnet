@@ -890,6 +890,19 @@ three specialized filter orders, the independent scalar xUnit oracle covers
 all three paths, all 848 tests pass, and the established 1,000-frame NTSC-J
 gate above remains unchanged.
 
+The native `.ldf` PCM16 loader now keeps its 2 MiB rewind history in one fixed
+circular buffer, reads fresh bytes directly into the requested block, and
+reuses its forward-discard buffer. FFmpeg launch, seek, padding, byte order,
+rewind boundaries, partial-EOF advancement, and sample conversion remain
+unchanged. In one controlled idle 400-frame `--threads 20` pair on the same
+private local NTSC `.ldf` capture, baseline/candidate wall time moved from
+26.242 to 24.741 s (5.7% less), CPU time from 145.516 to 136.484 s (6.2%
+less), and peak working set from 1,204.5 to 1,190.6 MiB. Luma, chroma, JSON,
+stdout, normalized stderr, and timestamp-normalized logs all matched. The
+candidate also completed 1,000 frames / 2,000 fields without interruption
+under default `v0.4.0` and opt-in `current`; both profiles matched their stored
+Python oracles in the same six comparisons. IPP was excluded.
+
 </details>
 
 <!-- SECTION: build -->
@@ -909,7 +922,7 @@ Requirements:
 .\tools\build-ipp-native.ps1
 dotnet restore VHSDecodeDotNet.slnx
 dotnet build VHSDecodeDotNet.slnx -c Release --no-restore
-dotnet test --solution VHSDecodeDotNet.slnx -c Release --no-build --no-restore --minimum-expected-tests 1079
+dotnet test --solution VHSDecodeDotNet.slnx -c Release --no-build --no-restore --minimum-expected-tests 1083
 ```
 
 The first command includes the optional `ipp-fast` native artifact; omit it for
@@ -922,7 +935,7 @@ Intel license, and `THIRD-PARTY-NOTICES.md`; an Exact-only build may omit the
 native build step.
 
 The current formal Release build has zero warnings and errors. The xUnit v3
-project exposes **1,079** independently discoverable tests to both
+project exposes **1,083** independently discoverable tests to both
 `dotnet test` and Visual Studio Test Explorer.
 
 <!-- SECTION: usage -->

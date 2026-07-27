@@ -24,7 +24,10 @@ public sealed class FfmpegPcm16SampleLoader : IRfSampleLoader, IDisposable
     private Stream? _output;
     private Process? _process;
     private long _positionBytes;
-    private byte[] _rewindBuffer = [];
+    private byte[]? _rewindBuffer;
+    private byte[]? _discardBuffer;
+    private int _rewindStart;
+    private int _rewindCount;
     private bool _disposed;
 
     public FfmpegPcm16SampleLoader(string filename)
@@ -233,25 +236,25 @@ public sealed class FfmpegPcm16SampleLoader : IRfSampleLoader, IDisposable
     private double[]? ReadStreaming(long sample, int readLength)
     {
         long sampleBytes = checked(sample * 2);
-        int readLengthBytes = checked(readLength * 2);
+        int totalBytes = checked(readLength * 2);
+        int remainingBytes = totalBytes;
         EnsureStarted(sample);
-        byte[] buffered = [];
+        int rewindOffset = 0;
+        int bufferedBytes = 0;
 
         if (sampleBytes < _positionBytes)
         {
-            long rewindStart = _positionBytes - _rewindBuffer.Length;
+            long rewindStart = _positionBytes - _rewindCount;
             if (sampleBytes < rewindStart)
             {
                 RestartAt(sample);
             }
             else
             {
-                int start = checked((int)(sampleBytes - rewindStart));
-                int available = Math.Min(readLengthBytes, _rewindBuffer.Length - start);
-                buffered = new byte[available];
-                Array.Copy(_rewindBuffer, start, buffered, 0, available);
-                sampleBytes += available;
-                readLengthBytes -= available;
+                rewindOffset = checked((int)(sampleBytes - rewindStart));
+                bufferedBytes = Math.Min(remainingBytes, _rewindCount - rewindOffset);
+                sampleBytes += bufferedBytes;
+                remainingBytes -= bufferedBytes;
             }
         }
 
@@ -267,7 +270,7 @@ public sealed class FfmpegPcm16SampleLoader : IRfSampleLoader, IDisposable
                 while (sampleBytes > _positionBytes)
                 {
                     int discardCount = checked((int)Math.Min(sampleBytes - _positionBytes, RewindSize));
-                    if (ReadData(discardCount).Length == 0)
+                    if (DiscardData(discardCount) == 0)
                     {
                         return null;
                     }
@@ -275,16 +278,12 @@ public sealed class FfmpegPcm16SampleLoader : IRfSampleLoader, IDisposable
             }
         }
 
-        byte[] fresh = readLengthBytes > 0 ? ReadData(readLengthBytes) : [];
-        if (fresh.Length < readLengthBytes)
-        {
-            return null;
-        }
-
-        byte[] data = new byte[buffered.Length + fresh.Length];
-        Array.Copy(buffered, data, buffered.Length);
-        Array.Copy(fresh, 0, data, buffered.Length, fresh.Length);
-        if (data.Length != checked(readLength * 2))
+        byte[] data = GC.AllocateUninitializedArray<byte>(totalBytes);
+        CopyRewind(rewindOffset, data.AsSpan(0, bufferedBytes));
+        int freshBytes = remainingBytes > 0
+            ? ReadData(data.AsSpan(bufferedBytes, remainingBytes))
+            : 0;
+        if (freshBytes < remainingBytes)
         {
             return null;
         }
@@ -325,7 +324,8 @@ public sealed class FfmpegPcm16SampleLoader : IRfSampleLoader, IDisposable
             _openOutput ?? throw new InvalidOperationException("Streaming ffmpeg output is not configured.");
         _output = openOutput(_filename, sample);
         _positionBytes = checked(sample * 2);
-        _rewindBuffer = [];
+        _rewindStart = 0;
+        _rewindCount = 0;
     }
 
     private Stream OpenFfmpegOutput(string filename, long sample)
@@ -570,19 +570,33 @@ public sealed class FfmpegPcm16SampleLoader : IRfSampleLoader, IDisposable
             requiresPadding);
     }
 
-    private byte[] ReadData(int count)
+    private int DiscardData(int count)
     {
         if (count == 0)
         {
-            return [];
+            return 0;
+        }
+
+        if (_discardBuffer is null || _discardBuffer.Length < count)
+        {
+            _discardBuffer = GC.AllocateUninitializedArray<byte>(count);
+        }
+
+        return ReadData(_discardBuffer.AsSpan(0, count));
+    }
+
+    private int ReadData(Span<byte> destination)
+    {
+        if (destination.IsEmpty)
+        {
+            return 0;
         }
 
         Stream output = _output ?? throw new InvalidOperationException("FFmpeg output stream was not opened.");
-        byte[] buffer = new byte[count];
         int total = 0;
-        while (total < count)
+        while (total < destination.Length)
         {
-            int read = output.Read(buffer.AsSpan(total, count - total));
+            int read = output.Read(destination[total..]);
             if (read == 0)
             {
                 ThrowIfProcessFailed();
@@ -592,34 +606,68 @@ public sealed class FfmpegPcm16SampleLoader : IRfSampleLoader, IDisposable
             total += read;
         }
 
-        if (total != buffer.Length)
-        {
-            Array.Resize(ref buffer, total);
-        }
-
         _positionBytes += total;
-        AppendRewind(buffer);
-        return buffer;
+        AppendRewind(destination[..total]);
+        return total;
     }
 
-    private void AppendRewind(byte[] data)
+    private void AppendRewind(ReadOnlySpan<byte> data)
     {
-        if (data.Length == 0)
+        if (data.IsEmpty)
         {
             return;
         }
 
-        int combinedLength = Math.Min(RewindSize, _rewindBuffer.Length + data.Length);
-        byte[] combined = new byte[combinedLength];
-        int dataBytes = Math.Min(data.Length, combinedLength);
-        int oldBytes = combinedLength - dataBytes;
-        if (oldBytes > 0)
+        _rewindBuffer ??= GC.AllocateUninitializedArray<byte>(RewindSize);
+        if (data.Length >= _rewindBuffer.Length)
         {
-            Array.Copy(_rewindBuffer, _rewindBuffer.Length - oldBytes, combined, 0, oldBytes);
+            data[^_rewindBuffer.Length..].CopyTo(_rewindBuffer);
+            _rewindStart = 0;
+            _rewindCount = _rewindBuffer.Length;
+            return;
         }
 
-        Array.Copy(data, data.Length - dataBytes, combined, oldBytes, dataBytes);
-        _rewindBuffer = combined;
+        int writeStart = (_rewindStart + _rewindCount) % _rewindBuffer.Length;
+        CopyToCircularBuffer(data, _rewindBuffer, writeStart);
+        int combinedCount = _rewindCount + data.Length;
+        if (combinedCount > _rewindBuffer.Length)
+        {
+            int overwritten = combinedCount - _rewindBuffer.Length;
+            _rewindStart = (_rewindStart + overwritten) % _rewindBuffer.Length;
+            _rewindCount = _rewindBuffer.Length;
+        }
+        else
+        {
+            _rewindCount = combinedCount;
+        }
+    }
+
+    private void CopyRewind(int offset, Span<byte> destination)
+    {
+        if (destination.IsEmpty)
+        {
+            return;
+        }
+
+        byte[] buffer = _rewindBuffer
+            ?? throw new InvalidOperationException("FFmpeg rewind buffer was not initialized.");
+        int sourceStart = (_rewindStart + offset) % buffer.Length;
+        int firstLength = Math.Min(destination.Length, buffer.Length - sourceStart);
+        buffer.AsSpan(sourceStart, firstLength).CopyTo(destination);
+        if (firstLength < destination.Length)
+        {
+            buffer.AsSpan(0, destination.Length - firstLength).CopyTo(destination[firstLength..]);
+        }
+    }
+
+    private static void CopyToCircularBuffer(ReadOnlySpan<byte> source, byte[] destination, int start)
+    {
+        int firstLength = Math.Min(source.Length, destination.Length - start);
+        source[..firstLength].CopyTo(destination.AsSpan(start));
+        if (firstLength < source.Length)
+        {
+            source[firstLength..].CopyTo(destination);
+        }
     }
 
     private void ThrowIfProcessFailed()
@@ -685,7 +733,10 @@ public sealed class FfmpegPcm16SampleLoader : IRfSampleLoader, IDisposable
             _process = null;
             _output = null;
             _positionBytes = 0;
-            _rewindBuffer = [];
+            _rewindStart = 0;
+            _rewindCount = 0;
+            _rewindBuffer = null;
+            _discardBuffer = null;
         }
     }
 
