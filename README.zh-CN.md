@@ -2,7 +2,7 @@
 
 [English](README.md) | **[简体中文](README.zh-CN.md)** | [日本語](README.ja.md)
 
-<!-- README_SYNC: 2026-07-27.1 -->
+<!-- README_SYNC: 2026-07-28.1 -->
 
 这是 [`oyvindln/vhs-decode`](https://github.com/oyvindln/vhs-decode)
 中解码相关部分的 .NET 11 重写，当前以 release `v0.4.0`、commit
@@ -148,6 +148,23 @@ Gauss-Newton burst 拟合、逐行频率/DC 相位补偿、MAD 限幅插值增�
 行为会有意保留上游的 back-porch 赋值问题；修正它需要单独变更行为配置。
 独立的端到端门禁同时保证默认 `v0.4.0` 配置在 `--threads 0`、默认线程和
 `--threads 20` 下保持完全一致。
+
+### 1,000 帧发版门禁
+
+同一个私有本地 NTSC `.ldf` 文件分别在两种行为配置下使用 Exact 后端和默认
+5 worker 解码两次：
+
+| 配置 | Python oracle | 本项目，两次运行 | 工作集峰值 | 结果 |
+| --- | ---: | ---: | ---: | --- |
+| 默认 `v0.4.0` | 499.80 s | 95.37 / 93.17 s | 1.14 / 1.11 GiB | 六项比较完全一致且结果确定 |
+| `current` | 459.34 s | 141.85 / 143.13 s | 923 / 942 MiB | 六项比较完全一致且结果确定 |
+
+每次运行的亮度 TBC、色度 TBC、JSON/`fileLoc` 和 stdout SHA-256 都完全一致；
+stderr 只去除耗时行后逐行一致，日志去除时间戳后逐行一致。所有运行均连续完成
+1,000 帧。默认 oracle 是上游 v0.4.0 的 `--threads 0`。固定的 PR 341
+`current` 源码会在 438 帧后因浮点切片触发自身的 `TypeError`，因此剩余范围使用
+一份仅将六个切片边界转换为 `int`、其他源码完全相同的延伸 oracle。本次发版
+门禁不包含 IPP。
 
 <!-- SECTION: performance -->
 
@@ -720,7 +737,7 @@ NTSC-J 门禁保持不变。
 .\tools\build-ipp-native.ps1
 dotnet restore VHSDecodeDotNet.slnx
 dotnet build VHSDecodeDotNet.slnx -c Release --no-restore
-dotnet test --solution VHSDecodeDotNet.slnx -c Release --no-build --no-restore --minimum-expected-tests 1039
+dotnet test --solution VHSDecodeDotNet.slnx -c Release --no-build --no-restore --minimum-expected-tests 1068
 ```
 
 第一条命令用于包含可选的 `ipp-fast` 原生产物；只构建 Exact 时可以省略。
@@ -731,7 +748,7 @@ Intel oneAPI。发布程序会携带 `vhsdecode_ipp.dll`、Intel 许可证和
 `THIRD-PARTY-NOTICES.md`；只构建 Exact 后端时可以省略原生构建步骤。
 
 当前正式 Release 构建为零警告、零错误。xUnit v3 项目向
-`dotnet test` 和 Visual Studio Test Explorer 暴露 **1,039** 个可独立发现的测试。
+`dotnet test` 和 Visual Studio Test Explorer 暴露 **1,068** 个可独立发现的测试。
 
 <!-- SECTION: usage -->
 
@@ -802,8 +819,8 @@ hash 保存在下方链接的共享证据文档中。
 - 更多 HiFi 真实采集端到端基线
 - PAL LaserDisc、AC3 和 verbose VITS 的真实采集边缘情况
 - 少见 VHS/CVBS vblank、色度 track-phase 和跨参数组合
-- 在提升为默认配置前，对完整的 opt-in `current` 配置做采集级认证，
-  包括此前的 HSync 和 VSync 阶段
+- 在提升为默认配置前，继续用其他格式和参数组合对完整的 opt-in `current`
+  配置做采集级认证
 - 罕见 first-HSync/vblank 恢复以及完整 JSON/SQLite 场元数据
 - 剩余 TBC writer 位兼容边缘，以及所有格式、参数组合和真实采集的输出一致性
 - 在兼容性受到夹具保护后，继续分析 CPU 利用率、分配、SIMD 和 worker 调度

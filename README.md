@@ -2,7 +2,7 @@
 
 **[English](README.md)** | [简体中文](README.zh-CN.md) | [日本語](README.ja.md)
 
-<!-- README_SYNC: 2026-07-27.1 -->
+<!-- README_SYNC: 2026-07-28.1 -->
 
 .NET 11 rewrite of the decode-facing parts of
 [`oyvindln/vhs-decode`](https://github.com/oyvindln/vhs-decode), focused on
@@ -161,6 +161,24 @@ pinned VSync behavior intentionally includes its upstream back-porch assignment
 quirk; a correction would require a separate profile change. Separate
 end-to-end gates keep the default `v0.4.0` profile identical across
 `--threads 0`, default, and `--threads 20`.
+
+### 1,000-frame release gate
+
+The same private local NTSC `.ldf` capture was decoded twice with the Exact
+backend and the default 5 workers under both behavior profiles:
+
+| Profile | Python oracle | This port, two runs | Peak working set | Result |
+| --- | ---: | ---: | ---: | --- |
+| default `v0.4.0` | 499.80 s | 95.37 / 93.17 s | 1.14 / 1.11 GiB | All six comparisons exact and deterministic |
+| `current` | 459.34 s | 141.85 / 143.13 s | 923 / 942 MiB | All six comparisons exact and deterministic |
+
+For each run, luma TBC, chroma TBC, JSON/`fileLoc`, and stdout SHA-256 matched;
+stderr matched after removing only the elapsed-time line, and logs matched
+after timestamp normalization. All runs completed 1,000 frames without an
+interruption. The default oracle is upstream v0.4.0 `--threads 0`. The pinned
+PR 341 `current` source reaches its own float-slice `TypeError` after 438
+frames, so the remainder uses an otherwise source-identical oracle with only
+six slice bounds converted to `int`. IPP was excluded from this release gate.
 
 <!-- SECTION: performance -->
 
@@ -891,7 +909,7 @@ Requirements:
 .\tools\build-ipp-native.ps1
 dotnet restore VHSDecodeDotNet.slnx
 dotnet build VHSDecodeDotNet.slnx -c Release --no-restore
-dotnet test --solution VHSDecodeDotNet.slnx -c Release --no-build --no-restore --minimum-expected-tests 1039
+dotnet test --solution VHSDecodeDotNet.slnx -c Release --no-build --no-restore --minimum-expected-tests 1068
 ```
 
 The first command includes the optional `ipp-fast` native artifact; omit it for
@@ -904,7 +922,7 @@ Intel license, and `THIRD-PARTY-NOTICES.md`; an Exact-only build may omit the
 native build step.
 
 The current formal Release build has zero warnings and errors. The xUnit v3
-project exposes **1,039** independently discoverable tests to both
+project exposes **1,068** independently discoverable tests to both
 `dotnet test` and Visual Studio Test Explorer.
 
 <!-- SECTION: usage -->
@@ -979,8 +997,8 @@ These are bounded parity and verification gaps, not missing top-level commands:
 - additional HiFi real-capture end-to-end baselines
 - PAL LaserDisc, AC3, and verbose VITS real-capture edge cases
 - uncommon VHS/CVBS vblank, chroma track-phase, and cross-option interactions
-- capture-wide certification of the complete opt-in `current` profile,
-  including its earlier HSync and VSync stages, before any default promotion
+- additional capture-wide certification of the complete opt-in `current`
+  profile across other formats and option combinations before default promotion
 - rare first-HSync/vblank recovery and complete JSON/SQLite field metadata
 - remaining TBC writer bit-compatibility edges and output parity across every
   format, option combination, and real capture

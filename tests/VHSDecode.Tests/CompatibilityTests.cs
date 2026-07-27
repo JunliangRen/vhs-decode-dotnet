@@ -12840,6 +12840,89 @@ public void VhsFrameStatusSkipsFieldOrderRecoveryFields()
     }
 }
 
+[Fact(DisplayName = "VHS pending frame status precedes diagnostics from a recovered field")]
+public void VhsPendingFrameStatusPrecedesRecoveredFieldDiagnostics()
+{
+    string tempDirectory = Path.Combine(
+        Path.GetTempPath(),
+        "vhsdecode-dotnet-tests-" + Guid.NewGuid().ToString("N"));
+    Directory.CreateDirectory(tempDirectory);
+    try
+    {
+        string outputBase = Path.Combine(tempDirectory, "vhs-status-read-recovery");
+        using DecodeSession session = DecodeSessionFactory.Create(Parse(CliSpecs.Vhs, [
+            "--pal",
+            "--length",
+            "2",
+            "input.u8",
+            outputBase
+        ]));
+        session.RuntimeReporter = new DecodeRuntimeReporter(
+            new StringWriter(),
+            new StringWriter(),
+            () => 0.0);
+        DecodeSessionLogWriter.Write(session);
+
+        int reads = 0;
+        TbcDecodedField? ReadField(
+            DecodeSession activeSession,
+            Stream _,
+            long begin,
+            int __,
+            int ___)
+        {
+            reads++;
+            activeSession.TbcRenderer.DiagnosticLogger?.Invoke(
+                "DEBUG",
+                $"render diagnostic {reads}");
+            if (reads == 3)
+            {
+                throw new TbcFieldDecodeRecoveryException(
+                    TbcFieldDecodeRecoveryKind.NoFirstHSync,
+                    suggestedOffsetSamples: 100,
+                    "synthetic field recovery");
+            }
+
+            return BuildSyntheticTbcField(
+                    begin,
+                    new ushort[activeSession.TbcFrameSpec.FieldSampleCount],
+                    detectedFirstField: reads is 1 or 4 or 6)
+                with
+                {
+                    NextFieldOffsetSamples = 100.0,
+                    DiskLocation = reads - 1,
+                    ChromaSamples = new ushort[activeSession.TbcFrameSpec.FieldSampleCount]
+                };
+        }
+
+        TbcFieldSequenceDecodeResult result = new TbcFieldSequenceDecodeEngine(
+            readField: ReadField).TryDecodeAndWrite(session, Stream.Null);
+
+        if (!result.Success)
+        {
+            throw new Exception(result.Message);
+        }
+
+        AssertEqual(4, result.WrittenFieldCount);
+        AssertEqual(6, reads);
+        string log = File.ReadAllText(outputBase + ".log");
+        int previousRenderIndex = log.IndexOf("render diagnostic 2", StringComparison.Ordinal);
+        int pendingStatusIndex = log.IndexOf("File Frame 0: VHS ", StringComparison.Ordinal);
+        int failedRenderIndex = log.IndexOf("render diagnostic 3", StringComparison.Ordinal);
+        int recoveryIndex = log.IndexOf(
+            "Unable to determine start of field - dropping field",
+            StringComparison.Ordinal);
+        AssertTrue(previousRenderIndex >= 0);
+        AssertTrue(previousRenderIndex < pendingStatusIndex);
+        AssertTrue(pendingStatusIndex < failedRenderIndex);
+        AssertTrue(failedRenderIndex < recoveryIndex);
+    }
+    finally
+    {
+        Directory.Delete(tempDirectory, recursive: true);
+    }
+}
+
 [Fact(DisplayName = "TBC field sequence engine emits LD frame status")]
 public void TbcFieldSequenceEngineEmitsLdFrameStatus()
 {

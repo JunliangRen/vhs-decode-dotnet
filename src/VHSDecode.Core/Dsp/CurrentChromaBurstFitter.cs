@@ -95,6 +95,24 @@ internal static class CurrentChromaBurstFitter
         Span<double> time = burst.Length <= 256
             ? stackalloc double[burst.Length]
             : new double[burst.Length];
+        Span<double> theta = burst.Length <= 256
+            ? stackalloc double[burst.Length]
+            : new double[burst.Length];
+        Span<double> cosine = burst.Length <= 256
+            ? stackalloc double[burst.Length]
+            : new double[burst.Length];
+        Span<double> sine = burst.Length <= 256
+            ? stackalloc double[burst.Length]
+            : new double[burst.Length];
+        Span<double> residual = burst.Length <= 256
+            ? stackalloc double[burst.Length]
+            : new double[burst.Length];
+        Span<double> j1 = burst.Length <= 256
+            ? stackalloc double[burst.Length]
+            : new double[burst.Length];
+        Span<double> j3 = burst.Length <= 256
+            ? stackalloc double[burst.Length]
+            : new double[burst.Length];
         for (int index = 0; index < time.Length; index++)
         {
             time[index] = (index + burstStart) / (4.0 * fscHz);
@@ -111,30 +129,45 @@ internal static class CurrentChromaBurstFitter
             double twoPiFrequency = Math.Tau * frequency;
             for (int index = 0; index < burst.Length; index++)
             {
-                double theta = (twoPiFrequency * time[index]) - phase;
-                double cosine = Math.Cos(theta);
-                double sine = Math.Sin(theta);
-                double residual = burst[index] - ((amplitude * cosine) + dc);
-                double j0 = cosine;
-                double j1 = amplitude * sine;
-                double j3 = (-Math.Tau * time[index]) * j1;
-
-                normal[0] += j0 * j0;
-                normal[1] += j0 * j1;
-                normal[2] += j0;
-                normal[3] += j0 * j3;
-                normal[5] += j1 * j1;
-                normal[6] += j1;
-                normal[7] += j1 * j3;
-                normal[10] += 1.0;
-                normal[11] += j3;
-                normal[15] += j3 * j3;
-
-                rhs[0] += j0 * residual;
-                rhs[1] += j1 * residual;
-                rhs[2] += residual;
-                rhs[3] += j3 * residual;
+                theta[index] = (twoPiFrequency * time[index]) - phase;
             }
+
+            for (int index = 0; index < burst.Length; index++)
+            {
+                cosine[index] = Math.Cos(theta[index]);
+            }
+
+            for (int index = 0; index < burst.Length; index++)
+            {
+                sine[index] = Math.Sin(theta[index]);
+            }
+
+            for (int index = 0; index < burst.Length; index++)
+            {
+                residual[index] =
+                    burst[index] - ((amplitude * cosine[index]) + dc);
+            }
+
+            for (int index = 0; index < burst.Length; index++)
+            {
+                j1[index] = amplitude * sine[index];
+                j3[index] = (-Math.Tau * time[index]) * j1[index];
+            }
+
+            normal[0] = OpenBlasHaswellDot(cosine, cosine);
+            normal[1] = OpenBlasHaswellDot(cosine, j1);
+            normal[2] = SumSequential(cosine);
+            normal[3] = OpenBlasHaswellDot(cosine, j3);
+            normal[5] = OpenBlasHaswellDot(j1, j1);
+            normal[6] = SumSequential(j1);
+            normal[7] = OpenBlasHaswellDot(j1, j3);
+            normal[10] = burst.Length;
+            normal[11] = SumSequential(j3);
+            normal[15] = OpenBlasHaswellDot(j3, j3);
+            rhs[0] = OpenBlasHaswellDot(cosine, residual);
+            rhs[1] = OpenBlasHaswellDot(j1, residual);
+            rhs[2] = SumSequential(residual);
+            rhs[3] = OpenBlasHaswellDot(j3, residual);
 
             normal[4] = normal[1];
             normal[8] = normal[2];
@@ -168,6 +201,66 @@ internal static class CurrentChromaBurstFitter
         }
 
         phase = NormalizeSignedRadians(phase);
+    }
+
+    private static double OpenBlasHaswellDot(
+        ReadOnlySpan<double> left,
+        ReadOnlySpan<double> right)
+    {
+        if (left.Length != right.Length)
+        {
+            throw new ArgumentException("Dot-product spans must have the same length.");
+        }
+
+        // The pinned current oracle's Numba np.dot dispatches to the OpenBLAS
+        // Haswell DDOT kernel: 16 FMA lanes followed by this reduction tree.
+        Span<double> accumulators = stackalloc double[16];
+        accumulators.Clear();
+        int index = 0;
+        int blockEnd = left.Length & ~15;
+        for (; index < blockEnd; index += 16)
+        {
+            for (int lane = 0; lane < 16; lane++)
+            {
+                accumulators[lane] = Math.FusedMultiplyAdd(
+                    left[index + lane],
+                    right[index + lane],
+                    accumulators[lane]);
+            }
+        }
+
+        double pair00 = accumulators[0] + accumulators[2];
+        double pair01 = accumulators[1] + accumulators[3];
+        double pair10 = accumulators[4] + accumulators[6];
+        double pair11 = accumulators[5] + accumulators[7];
+        double pair20 = accumulators[8] + accumulators[10];
+        double pair21 = accumulators[9] + accumulators[11];
+        double pair30 = accumulators[12] + accumulators[14];
+        double pair31 = accumulators[13] + accumulators[15];
+        double lower0 = pair10 + pair00;
+        double lower1 = pair11 + pair01;
+        double upper0 = pair30 + pair20;
+        double upper1 = pair31 + pair21;
+        double dot0 = upper0 + lower0;
+        double dot1 = upper1 + lower1;
+        double dot = dot0 + dot1;
+        for (; index < left.Length; index++)
+        {
+            dot = Math.FusedMultiplyAdd(left[index], right[index], dot);
+        }
+
+        return dot;
+    }
+
+    private static double SumSequential(ReadOnlySpan<double> values)
+    {
+        double sum = 0.0;
+        for (int index = 0; index < values.Length; index++)
+        {
+            sum += values[index];
+        }
+
+        return sum;
     }
 
     private static bool TrySolve4X4(

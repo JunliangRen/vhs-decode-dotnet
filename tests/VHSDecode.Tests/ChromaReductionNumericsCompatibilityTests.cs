@@ -8,6 +8,78 @@ namespace VHSDecode.Tests;
 
 public sealed class ChromaReductionNumericsCompatibilityTests
 {
+    [Fact(DisplayName = "Current RF float32 chroma shift matches pinned PR 341 reduction order")]
+    public void CurrentRfFloat32ChromaShiftMatchesPinnedReductionOrder()
+    {
+        float[] expected =
+        [
+            0.265625f,
+            2.515625f,
+            -8.234375f,
+            -0.609375f,
+            8.265625f,
+            1.0000000200408773e20f,
+            0.265625f,
+            -1.0000000200408773e20f
+        ];
+        float[] input =
+        [
+            1e20f,
+            1.0f,
+            -1e20f,
+            1.0f,
+            3.25f,
+            -7.5f,
+            0.125f,
+            9.0f
+        ];
+
+        float[] actual =
+            VhsChromaDecoder.ShiftChromaAndRemoveDcFloat32CurrentInPlace(
+                input,
+                move: -3);
+
+        Assert.Equal(
+            expected.Select(BitConverter.SingleToUInt32Bits),
+            actual.Select(BitConverter.SingleToUInt32Bits));
+    }
+
+    [Fact(DisplayName = "Current RF double storage preserves float32 shift semantics")]
+    public void CurrentRfDoubleStoragePreservesFloat32ShiftSemantics()
+    {
+        double[] input =
+        [
+            1e20f,
+            1.0f,
+            -1e20f,
+            1.0f,
+            3.25f,
+            -7.5f,
+            0.125f,
+            9.0f
+        ];
+
+        double[] actual =
+            VhsChromaDecoder.ShiftChromaAndRemoveDcFloat32CurrentInPlace(
+                input,
+                move: -3);
+
+        uint[] expectedBits =
+        [
+            0x3E880000,
+            0x40210000,
+            0xC103C000,
+            0xBF1C0000,
+            0x41044000,
+            0x60AD78EC,
+            0x3E880000,
+            0xE0AD78EC
+        ];
+        Assert.Equal(
+            expectedBits,
+            actual.Select(value => BitConverter.SingleToUInt32Bits((float)value)));
+    }
+
     [Fact(DisplayName = "RF float64 chroma DC removal uses Numba fast-math mean")]
     public void RfFloat64ChromaDcRemovalUsesNumbaFastMathMean()
     {

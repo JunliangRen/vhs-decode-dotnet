@@ -1,4 +1,5 @@
 using System.Buffers;
+using System.Runtime.CompilerServices;
 
 namespace VHSDecode.Core.Dsp;
 
@@ -122,7 +123,9 @@ public static class LevelDetection
         double referenceSyncLevel,
         double hzIre,
         out SerrationLevelFailureKind failureKind,
-        out double? measuredSyncLevel)
+        out double? measuredSyncLevel,
+        double? pulseEqualizingLength = null,
+        double? pulseLineLength = null)
     {
         failureKind = SerrationLevelFailureKind.MissingLevels;
         measuredSyncLevel = null;
@@ -132,8 +135,18 @@ public static class LevelDetection
         }
 
         double threshold = (initialSyncLevel + initialBlankLevel) / 2.0;
-        int minimumPulseLength = Math.Max(0, (int)Math.Ceiling(analyzer.UsecToSamples(analyzer.EqualizingPulseUs) / 8.0));
-        int maximumPulseLength = Math.Max(1, (int)Math.Floor(analyzer.NominalLineLength * 5.0));
+        double effectiveEqualizingPulseLength =
+            pulseEqualizingLength
+            ?? analyzer.UsecToSamples(analyzer.EqualizingPulseUs);
+        double effectiveLineLength =
+            pulseLineLength
+            ?? analyzer.NominalLineLength;
+        int minimumPulseLength = Math.Max(
+            0,
+            (int)Math.Ceiling(effectiveEqualizingPulseLength / 8.0));
+        int maximumPulseLength = Math.Max(
+            1,
+            (int)Math.Floor(effectiveLineLength * 5.0));
         IReadOnlyList<Pulse> pulses = PulseDetection.FindPulses(
             demodulatedLowPass,
             threshold,
@@ -260,7 +273,9 @@ public static class LevelDetection
         double hzIre,
         bool checkLongPulses,
         out SerrationLevelFailureKind failureKind,
-        out double? measuredSyncLevel)
+        out double? measuredSyncLevel,
+        double? pulseEqualizingLength = null,
+        double? pulseLineLength = null)
     {
         failureKind = SerrationLevelFailureKind.MissingLevels;
         measuredSyncLevel = null;
@@ -275,9 +290,15 @@ public static class LevelDetection
             minimumSync = Math.Min(minimumSync, demodulatedLowPass[i]);
         }
 
+        double effectiveEqualizingPulseLength =
+            pulseEqualizingLength
+            ?? analyzer.UsecToSamples(analyzer.EqualizingPulseUs);
+        double effectiveLineLength =
+            pulseLineLength
+            ?? analyzer.NominalLineLength;
         double minimumVsyncLength = analyzer.UsecToSamples(analyzer.VSyncPulseUs) * 0.8;
         double minimumLongPulseLength = analyzer.UsecToSamples(analyzer.VSyncPulseUs) * 2.6;
-        double maximumLongPulseLength = analyzer.NominalLineLength * 5.0;
+        double maximumLongPulseLength = effectiveLineLength * 5.0;
         int previousVsyncCount = 0;
         int previousLongPulseCount = 0;
         double previousMinimumSync = minimumSync;
@@ -306,7 +327,8 @@ public static class LevelDetection
                 FindPulsesFromReducedData(
                     reducedData,
                     threshold,
-                    analyzer,
+                    effectiveEqualizingPulseLength,
+                    effectiveLineLength,
                     divisor,
                     pulses);
                 if (pulses.Count > 200)
@@ -360,7 +382,8 @@ public static class LevelDetection
                             FindPulsesFromReducedData(
                                 demodulatedLowPass,
                                 (minimumSync + blankLevel) / 2.0,
-                                analyzer,
+                                effectiveEqualizingPulseLength,
+                                effectiveLineLength,
                                 divisor: 1,
                                 pulses);
                             break;
@@ -372,7 +395,10 @@ public static class LevelDetection
                     }
                 }
 
-                minimumSync += hzIre * 5.0;
+                minimumSync = AdvanceFallbackSyncSearchLevel(
+                    minimumSync,
+                    blankLevel,
+                    hzIre);
             }
 
             return RefineSerrationLevelsFromPulses(
@@ -470,14 +496,15 @@ public static class LevelDetection
     private static void FindPulsesFromReducedData(
         ReadOnlySpan<double> reducedData,
         double threshold,
-        SyncAnalyzer analyzer,
+        double equalizingPulseLength,
+        double lineLength,
         int divisor,
         List<Pulse> pulses)
     {
         int minimumLength = Math.Max(0, (int)Math.Ceiling(
-            (analyzer.UsecToSamples(analyzer.EqualizingPulseUs) / 8.0) / divisor));
+            (equalizingPulseLength / 8.0) / divisor));
         int maximumLength = Math.Max(1, (int)Math.Floor(
-            (analyzer.NominalLineLength * 5.0) / divisor));
+            (lineLength * 5.0) / divisor));
         PulseDetection.FindPulses(
             reducedData,
             threshold,
@@ -485,6 +512,18 @@ public static class LevelDetection
             maximumLength,
             pulses,
             positionScale: divisor);
+    }
+
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    internal static double AdvanceFallbackSyncSearchLevel(
+        double minimumSync,
+        double ire0,
+        double hzIre)
+    {
+        double syncIre = (minimumSync - ire0) / hzIre;
+        double nextIre = syncIre + 5.0;
+        double scaled = hzIre * nextIre;
+        return ire0 + scaled;
     }
 
     private static (double SyncLevel, double BlankLevel)? FindSyncLevelsCore(

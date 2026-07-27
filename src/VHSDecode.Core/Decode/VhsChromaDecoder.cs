@@ -1562,7 +1562,9 @@ public static class VhsChromaDecoder
         int outputLineLength,
         double fscRatio,
         ChromaPhaseSequenceResult phase,
-        string colorSystem)
+        string colorSystem,
+        bool useCurrentFrequencyDrift = false,
+        double fscHz = 0.0)
     {
         ArgumentNullException.ThrowIfNull(lineLocations);
         ArgumentNullException.ThrowIfNull(phase);
@@ -1570,6 +1572,11 @@ public static class VhsChromaDecoder
         if (!double.IsFinite(fscRatio) || fscRatio <= 0.0)
         {
             throw new ArgumentOutOfRangeException(nameof(fscRatio));
+        }
+        if (useCurrentFrequencyDrift
+            && (!double.IsFinite(fscHz) || fscHz <= 0.0))
+        {
+            throw new ArgumentOutOfRangeException(nameof(fscHz));
         }
 
         var output = new double[lineLocations.Count];
@@ -1583,7 +1590,15 @@ public static class VhsChromaDecoder
             return output;
         }
 
+        bool isNtsc = IsNtsc(colorSystem);
         int burstTbcStart = Math.Max(9, phase.BurstDetectedLine);
+        double inverseOutputLineLength = 1.0 / outputLineLength;
+        double inverseFsc = useCurrentFrequencyDrift
+            ? 1.0 / fscHz
+            : 0.0;
+        double phaseToSamplesFactor = useCurrentFrequencyDrift
+            ? fscRatio / 360.0
+            : 0.0;
         for (int phaseIndex = burstTbcStart; phaseIndex < phase.PhaseSequence.Length; phaseIndex++)
         {
             ChromaPhaseLine phaseLine = phase.PhaseSequence[phaseIndex];
@@ -1593,16 +1608,38 @@ public static class VhsChromaDecoder
                 continue;
             }
 
-            double targetPhase = IsNtsc(colorSystem)
+            double targetPhase = isNtsc
                 ? phase.BurstPhaseAverageDegrees
                 : (lineNumber & 1) == 1
                     ? phase.OddBurstPhaseAverageDegrees
                     : phase.EvenBurstPhaseAverageDegrees;
+            double phaseOffset = useCurrentFrequencyDrift && isNtsc
+                ? 0.0
+                : phaseLine.BurstPhaseOffsetDegrees;
             double phaseDelta = PositiveDegrees(
-                targetPhase - phaseLine.BurstPhaseDegrees + phaseLine.BurstPhaseOffsetDegrees + 180.0) - 180.0;
+                targetPhase - phaseLine.BurstPhaseDegrees + phaseOffset + 180.0) - 180.0;
             double lineLength = output[lineNumber + 1] - output[lineNumber];
-            double scale = lineLength / outputLineLength;
-            output[lineNumber] += (phaseDelta / 360.0) * fscRatio * scale;
+            if (useCurrentFrequencyDrift)
+            {
+                double scale = lineLength * inverseOutputLineLength;
+                double lineAdjustment =
+                    phaseDelta * phaseToSamplesFactor;
+                double frequencyOffset =
+                    phaseLine.BurstFrequencyHz - fscHz;
+                double burstCenterDistance =
+                    Math.Truncate(phaseLine.BurstCenter) - output[lineNumber];
+                double accumulatedDriftSamples =
+                    (frequencyOffset * burstCenterDistance) * inverseFsc;
+                double correctedAdjustment =
+                    lineAdjustment - accumulatedDriftSamples;
+                output[lineNumber] += correctedAdjustment * scale;
+            }
+            else
+            {
+                double scale = lineLength / outputLineLength;
+                output[lineNumber] +=
+                    (phaseDelta / 360.0) * fscRatio * scale;
+            }
         }
 
         return output;
@@ -1708,6 +1745,88 @@ public static class VhsChromaDecoder
         for (int i = 0; i < chroma.Length; i++)
         {
             chroma[i] = (float)(chroma[i] - mean);
+        }
+
+        return chroma;
+    }
+
+    internal static double[] ShiftChromaAndRemoveDcFloat32CurrentInPlace(
+        double[] chroma,
+        int move)
+    {
+        ArgumentNullException.ThrowIfNull(chroma);
+        if (chroma.Length == 0)
+        {
+            return chroma;
+        }
+
+        RfBlockDecodePipeline.QuantizeToFloat32InPlace(chroma);
+        int normalizedMove = PositiveModulo(move, chroma.Length);
+        Span<float> wrapped = normalizedMove <= 256
+            ? stackalloc float[normalizedMove]
+            : new float[normalizedMove];
+        int firstWrappedIndex = chroma.Length - normalizedMove;
+        for (int i = 0; i < normalizedMove; i++)
+        {
+            wrapped[i] = (float)chroma[firstWrappedIndex + i];
+        }
+
+        double meanAccumulator = 0.0;
+        for (int i = firstWrappedIndex - 1; i >= 0; i--)
+        {
+            meanAccumulator += chroma[i];
+            chroma[i + normalizedMove] = chroma[i];
+        }
+
+        for (int i = 0; i < normalizedMove; i++)
+        {
+            meanAccumulator += wrapped[i];
+            chroma[i] = wrapped[i];
+        }
+
+        meanAccumulator /= chroma.Length;
+        for (int i = 0; i < chroma.Length; i++)
+        {
+            chroma[i] = (float)(chroma[i] - meanAccumulator);
+        }
+
+        return chroma;
+    }
+
+    internal static float[] ShiftChromaAndRemoveDcFloat32CurrentInPlace(
+        float[] chroma,
+        int move)
+    {
+        ArgumentNullException.ThrowIfNull(chroma);
+        if (chroma.Length == 0)
+        {
+            return chroma;
+        }
+
+        int normalizedMove = PositiveModulo(move, chroma.Length);
+        Span<float> wrapped = normalizedMove <= 256
+            ? stackalloc float[normalizedMove]
+            : new float[normalizedMove];
+        int firstWrappedIndex = chroma.Length - normalizedMove;
+        chroma.AsSpan(firstWrappedIndex, normalizedMove).CopyTo(wrapped);
+
+        double meanAccumulator = 0.0;
+        for (int i = firstWrappedIndex - 1; i >= 0; i--)
+        {
+            meanAccumulator += chroma[i];
+            chroma[i + normalizedMove] = chroma[i];
+        }
+
+        for (int i = 0; i < normalizedMove; i++)
+        {
+            meanAccumulator += wrapped[i];
+            chroma[i] = wrapped[i];
+        }
+
+        meanAccumulator /= chroma.Length;
+        for (int i = 0; i < chroma.Length; i++)
+        {
+            chroma[i] = (float)(chroma[i] - meanAccumulator);
         }
 
         return chroma;

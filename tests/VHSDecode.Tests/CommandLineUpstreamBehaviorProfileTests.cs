@@ -131,8 +131,113 @@ public sealed class CommandLineUpstreamBehaviorProfileTests
         Assert.Equal(
             expected == UpstreamBehaviorProfile.Current ? 119 : 122,
             session.TbcFieldDecoder.ChromaFieldOptions!.BurstEnd);
+        Assert.Equal(
+            expected == UpstreamBehaviorProfile.Current ? 5_730.0 : 4_416.0,
+            session.TbcFieldDecoder.ChromaFieldOptions!.BurstAbsRef);
         Assert.Equal(1.0, session.TbcFieldDecoder.ChromaFieldOptions!.CtiMix);
         Assert.Equal(2, session.TbcFieldDecoder.ChromaFieldOptions!.CtiWidth);
+    }
+
+    [Theory(DisplayName = "Current profile routes upstream NTSC VHS-family burst references")]
+    [InlineData("VHS", "sp", 5_730.0)]
+    [InlineData("VHS", "lp", 2_865.0)]
+    [InlineData("VHS", "ep", 5_730.0)]
+    [InlineData("VHSHQ", "sp", 5_730.0)]
+    [InlineData("VHSHQ", "lp", 2_865.0)]
+    [InlineData("VHSHQ", "ep", 5_730.0)]
+    [InlineData("SVHS", "sp", 5_730.0)]
+    [InlineData("SVHS", "lp", 5_730.0)]
+    [InlineData("SVHS_ET", "ep", 5_730.0)]
+    public void CurrentProfileRoutesNtscVhsFamilyBurstReferences(
+        string tapeFormat,
+        string tapeSpeed,
+        double expected)
+    {
+        ParsedCommand command = Parse(
+            CliSpecs.Vhs,
+            "--compat-version",
+            "current",
+            "--system",
+            "ntsc",
+            "--tape_format",
+            tapeFormat,
+            "--tape_speed",
+            tapeSpeed,
+            "input.s16",
+            "output");
+
+        using DecodeSession session = DecodeSessionFactory.Create(command);
+
+        Assert.Equal(
+            expected,
+            session.TbcFieldDecoder.ChromaFieldOptions!.BurstAbsRef);
+        Assert.Equal(
+            expected,
+            session.Parameters.SysParams.GetProperty("burst_abs_ref").GetDouble());
+    }
+
+    [Theory(DisplayName = "Current burst reference override stays inside its upstream scope")]
+    [InlineData("v0.4.0", "NTSC", "VHS", 4_416.0)]
+    [InlineData("current", "PAL", "VHS", 5_000.0)]
+    [InlineData("current", "NTSC", "BETAMAX", 4_000.0)]
+    [InlineData("current", "NTSC", "VIDEO8", 4_100.0)]
+    public void CurrentBurstReferenceOverrideStaysScoped(
+        string profile,
+        string system,
+        string tapeFormat,
+        double expected)
+    {
+        ParsedCommand command = Parse(
+            CliSpecs.Vhs,
+            "--compat-version",
+            profile,
+            "--system",
+            system,
+            "--tape_format",
+            tapeFormat,
+            "input.s16",
+            "output");
+
+        using DecodeSession session = DecodeSessionFactory.Create(command);
+
+        Assert.Equal(
+            expected,
+            session.TbcFieldDecoder.ChromaFieldOptions!.BurstAbsRef);
+    }
+
+    [Fact(DisplayName = "Current profile applies params file after upstream defaults")]
+    public void CurrentProfileAppliesParamsFileAfterUpstreamDefaults()
+    {
+        string paramsPath = Path.GetTempFileName();
+        try
+        {
+            File.WriteAllText(
+                paramsPath,
+                """{"sys_params":{"burst_abs_ref":1234.5}}""");
+            ParsedCommand command = Parse(
+                CliSpecs.Vhs,
+                "--compat-version",
+                "current",
+                "--params_file",
+                paramsPath,
+                "input.s16",
+                "output");
+
+            using DecodeSession session = DecodeSessionFactory.Create(command);
+
+            Assert.Equal(
+                1_234.5,
+                session.Parameters.SysParams
+                    .GetProperty("burst_abs_ref")
+                    .GetDouble());
+            Assert.Equal(
+                1_234.5,
+                session.TbcFieldDecoder.ChromaFieldOptions!.BurstAbsRef);
+        }
+        finally
+        {
+            File.Delete(paramsPath);
+        }
     }
 
     [Fact(DisplayName = "Current profile routes official CTI parameters")]

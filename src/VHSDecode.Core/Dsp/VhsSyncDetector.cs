@@ -192,13 +192,15 @@ public sealed class VhsSyncDetector
             candidateSyncLevels[candidate] = UpperMedianOfWindow(
                 filtered,
                 Math.Max(0, middle - 2),
-                Math.Min(sampleCount, middle + 3));
+                Math.Min(sampleCount, middle + 3),
+                syncTipEstimate);
 
             int porchCenter = (int)(rises[candidate] + (_backPorchLength * 0.5));
             candidatePorchLevels[candidate] = UpperMedianOfWindow(
                 filtered,
                 Math.Max(0, porchCenter - 2),
-                Math.Min(sampleCount, porchCenter + 3));
+                Math.Min(sampleCount, porchCenter + 3),
+                blankingEstimate);
         }
 
         double[] sortedSync = candidateSyncLevels.ToArray();
@@ -433,6 +435,10 @@ public sealed class VhsSyncDetector
         Span<double> secondSync = stackalloc double[4];
         Span<double> firstPorch = stackalloc double[4];
         Span<double> secondPorch = stackalloc double[4];
+        firstSync.Clear();
+        secondSync.Clear();
+        firstPorch.Clear();
+        secondPorch.Clear();
         int vectorizedLength = count & ~7;
         for (int index = 0; index < vectorizedLength; index += 8)
         {
@@ -488,12 +494,16 @@ public sealed class VhsSyncDetector
         return (syncTip, blanking);
     }
 
-    private static double UpperMedianOfWindow(ReadOnlySpan<double> values, int start, int end)
+    private static double UpperMedianOfWindow(
+        ReadOnlySpan<double> values,
+        int start,
+        int end,
+        double fallback)
     {
         int length = end - start;
         if (length <= 0)
         {
-            return double.NaN;
+            return fallback;
         }
 
         Span<double> window = stackalloc double[5];

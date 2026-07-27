@@ -338,6 +338,31 @@ public sealed class TbcFieldSequenceDecodeEngine
             }
         }
 
+        void FlushPendingTapeOutput()
+        {
+            if (pendingTapeFieldOrderDiagnostics is not null)
+            {
+                foreach ((string level, string message) in pendingTapeFieldOrderDiagnostics)
+                {
+                    DecodeSessionLogWriter.Append(session, level, message);
+                }
+
+                pendingTapeFieldOrderDiagnostics = null;
+            }
+
+            if (pendingTapeFrameStatus is not null)
+            {
+                DecodeSessionLogWriter.Status(session, pendingTapeFrameStatus);
+                pendingTapeFrameStatus = null;
+            }
+
+            if (pendingTapeCheckpointFieldCount.HasValue)
+            {
+                CheckpointOutput(pendingTapeCheckpointFieldCount.Value);
+                pendingTapeCheckpointFieldCount = null;
+            }
+        }
+
         TbcFieldOrderDecision? CompleteField(TbcDecodedField completedField, int decodedIndex)
         {
             fields?.Add(completedField);
@@ -491,6 +516,7 @@ public sealed class TbcFieldSequenceDecodeEngine
                 deferredVhsFieldDiagnostics?.FlushFieldDiagnostics();
                 pendingVhsRenderDiagnostics?.FlushRenderDiagnostics();
                 pendingVhsRenderDiagnostics = null;
+                FlushPendingTapeOutput();
                 deferredVhsFieldDiagnostics?.FlushRenderDiagnostics();
                 bool directVideoNoSync = session.Spec.Name is "cvbs" or "ld"
                     && ex.Kind == TbcFieldDecodeRecoveryKind.NoSyncPulses;
@@ -555,28 +581,7 @@ public sealed class TbcFieldSequenceDecodeEngine
             deferredVhsFieldDiagnostics?.FlushFieldDiagnostics();
             pendingVhsRenderDiagnostics?.FlushRenderDiagnostics();
             pendingVhsRenderDiagnostics = null;
-
-            if (pendingTapeFieldOrderDiagnostics is not null)
-            {
-                foreach ((string level, string message) in pendingTapeFieldOrderDiagnostics)
-                {
-                    DecodeSessionLogWriter.Append(session, level, message);
-                }
-
-                pendingTapeFieldOrderDiagnostics = null;
-            }
-
-            if (pendingTapeFrameStatus is not null)
-            {
-                DecodeSessionLogWriter.Status(session, pendingTapeFrameStatus);
-                pendingTapeFrameStatus = null;
-            }
-
-            if (pendingTapeCheckpointFieldCount.HasValue)
-            {
-                CheckpointOutput(pendingTapeCheckpointFieldCount.Value);
-                pendingTapeCheckpointFieldCount = null;
-            }
+            FlushPendingTapeOutput();
 
             if (field is null)
             {
@@ -767,24 +772,7 @@ public sealed class TbcFieldSequenceDecodeEngine
         }
 
         pendingVhsRenderDiagnostics?.FlushRenderDiagnostics();
-
-        if (pendingTapeFieldOrderDiagnostics is not null)
-        {
-            foreach ((string level, string message) in pendingTapeFieldOrderDiagnostics)
-            {
-                DecodeSessionLogWriter.Append(session, level, message);
-            }
-        }
-
-        if (pendingTapeFrameStatus is not null)
-        {
-            DecodeSessionLogWriter.Status(session, pendingTapeFrameStatus);
-        }
-
-        if (pendingTapeCheckpointFieldCount.HasValue)
-        {
-            CheckpointOutput(pendingTapeCheckpointFieldCount.Value);
-        }
+        FlushPendingTapeOutput();
 
         return new SequenceDecodeSummary(
             fields ?? [],

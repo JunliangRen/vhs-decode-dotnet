@@ -181,6 +181,9 @@ public static class DecodeSessionFactory
             system,
             command.Get<string>("tape_format"),
             command.Get<string>("tape_speed"));
+        parameters = ApplyUpstreamBehaviorFormatDefaults(
+            parameters,
+            SelectedUpstreamBehaviorProfile(command));
         VhsParamsFileOverrideResult paramsOverride = VhsParamsFileOverride.ApplyWithDiagnostics(
             parameters,
             NullableString(command, "params_file"));
@@ -276,7 +279,8 @@ public static class DecodeSessionFactory
             BuildRfInputProcessor(command),
             WriteDiagnostic,
             retainRfDiagnosticChannels: command.Spec.Name != "vhs",
-            dspBackend: executionOptions.DspBackend);
+            dspBackend: executionOptions.DspBackend,
+            upstreamBehaviorProfile: executionOptions.UpstreamBehaviorProfile);
         var streamDecoder = new RfBlockStreamDecoder(
             pipeline,
             blockLength,
@@ -596,14 +600,62 @@ public static class DecodeSessionFactory
             UseProfiler: BoolValueOrDefault(command, "use_profiler"),
             CxAdcCompatibilityMode: command.Spec.Name == "vhs" && command.Get<bool>("cxadc"),
             DspBackend: DspBackendParser.Parse(command.Get<string>("dsp_backend")),
-            UpstreamBehaviorProfile: UpstreamBehaviorProfileParser.Parse(
-                command.Values.TryGetValue("compat_version", out object? compatibilityVersion)
-                    && compatibilityVersion is string profileValue
-                    ? profileValue
-                    : UpstreamBehaviorProfileParser.V040Value))
+            UpstreamBehaviorProfile: SelectedUpstreamBehaviorProfile(command))
         {
             RequestedThreadsInteger = requestedThreadsInteger
         };
+    }
+
+    private static UpstreamBehaviorProfile SelectedUpstreamBehaviorProfile(
+        ParsedCommand command)
+    {
+        return UpstreamBehaviorProfileParser.Parse(
+            command.Values.TryGetValue("compat_version", out object? compatibilityVersion)
+                && compatibilityVersion is string profileValue
+                    ? profileValue
+                    : UpstreamBehaviorProfileParser.V040Value);
+    }
+
+    private static FormatParameterSet ApplyUpstreamBehaviorFormatDefaults(
+        FormatParameterSet parameters,
+        UpstreamBehaviorProfile profile)
+    {
+        if (profile != UpstreamBehaviorProfile.Current
+            || FormatCatalog.NormalizeSystem(parameters.System) != "NTSC")
+        {
+            return parameters;
+        }
+
+        string tapeSpeed = FormatCatalog.NormalizeTapeSpeedName(
+            parameters.TapeSpeed ?? "sp");
+        JsonNode? burstAbsRef = parameters.TapeFormat.ToUpperInvariant() switch
+        {
+            "VHS" or "VHSHQ" => tapeSpeed switch
+            {
+                "sp" or "ep" => JsonValue.Create(5_730),
+                "lp" => JsonValue.Create(2_865.0),
+                _ => null
+            },
+            "SVHS" or "SVHS_ET" => JsonValue.Create(5_730),
+            _ => null
+        };
+        if (burstAbsRef is null)
+        {
+            return parameters;
+        }
+
+        JsonObject sysParams =
+            JsonNode.Parse(parameters.SysParams.GetRawText())!.AsObject();
+        sysParams["burst_abs_ref"] = burstAbsRef;
+        using JsonDocument sysDocument =
+            JsonDocument.Parse(sysParams.ToJsonString());
+        return new FormatParameterSet(
+            parameters.System,
+            parameters.TapeFormat,
+            parameters.TapeSpeed,
+            sysDocument.RootElement,
+            parameters.RfParams,
+            parameters.Warnings);
     }
 
     private static LaserDiscAudioOptions? BuildLaserDiscAudioOptions(ParsedCommand command, string system)

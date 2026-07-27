@@ -42,20 +42,11 @@ public sealed class CurrentChromaBurstFitterTests
         Assert.Equal(0x40933CB58A527D18UL, BitConverter.DoubleToUInt64Bits(fit.I));
         Assert.Equal(0x40912A0F2BA8A118UL, BitConverter.DoubleToUInt64Bits(fit.Q));
         Assert.Equal(0x40573DAEB19A76D0UL, BitConverter.DoubleToUInt64Bits(fit.Center));
-        AssertUpstreamFloat32(0x4054A008E5044C38UL, fit.Amplitude);
-        AssertUpstreamFloat32(0x4099C80B1E455F46UL, fit.Magnitude);
-        AssertUpstreamFloat32(0x4010FA93333330EFUL, fit.Dc);
-        AssertUpstreamFloat32(0x414B4F4C80000029UL, fit.FrequencyHz);
-        AssertUpstreamFloat32(0x3FE75000083EFFC8UL, fit.PhaseRadians);
-        AssertUpstreamFloat32(0x4044DED4E09B8A2DUL, fit.PhaseDegrees);
-    }
-
-    private static void AssertUpstreamFloat32(ulong expectedBits, double actual)
-    {
-        double expected = BitConverter.UInt64BitsToDouble(expectedBits);
-        Assert.Equal(
-            BitConverter.SingleToUInt32Bits((float)expected),
-            BitConverter.SingleToUInt32Bits((float)actual));
-        Assert.InRange(Math.Abs(actual - expected), 0.0, 1e-9);
+        Assert.Equal(0x4054A008E5044C38UL, BitConverter.DoubleToUInt64Bits(fit.Amplitude));
+        Assert.Equal(0x4099C80B1E455F46UL, BitConverter.DoubleToUInt64Bits(fit.Magnitude));
+        Assert.Equal(0x4010FA93333330EFUL, BitConverter.DoubleToUInt64Bits(fit.Dc));
+        Assert.Equal(0x414B4F4C80000029UL, BitConverter.DoubleToUInt64Bits(fit.FrequencyHz));
+        Assert.Equal(0x3FE75000083EFFC8UL, BitConverter.DoubleToUInt64Bits(fit.PhaseRadians));
+        Assert.Equal(0x4044DED4E09B8A2DUL, BitConverter.DoubleToUInt64Bits(fit.PhaseDegrees));
     }
 }

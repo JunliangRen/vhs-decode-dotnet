@@ -20,6 +20,8 @@ public sealed class RfBlockDecodePipeline : IDisposable
     private readonly PackedDdD4To40SampleLoader? _reusableStreamInputLoader;
     private readonly Action<string, string>? _diagnosticLogger;
     private readonly bool _retainRfDiagnosticChannels;
+    private readonly bool _useCurrentChromaShiftDc;
+    private readonly bool _useNumpyComplexVhsAnalytic;
 
     public RfBlockDecodePipeline(
         IRfSampleLoader loader,
@@ -30,7 +32,9 @@ public sealed class RfBlockDecodePipeline : IDisposable
         IRfInputProcessor? inputProcessor = null,
         Action<string, string>? diagnosticLogger = null,
         bool retainRfDiagnosticChannels = true,
-        DspBackend dspBackend = DspBackend.Exact)
+        DspBackend dspBackend = DspBackend.Exact,
+        UpstreamBehaviorProfile upstreamBehaviorProfile =
+            UpstreamBehaviorProfile.V040)
     {
         _loader = loader;
         _filters = filters;
@@ -52,6 +56,9 @@ public sealed class RfBlockDecodePipeline : IDisposable
             : null;
         _diagnosticLogger = diagnosticLogger;
         _retainRfDiagnosticChannels = retainRfDiagnosticChannels;
+        _useCurrentChromaShiftDc =
+            upstreamBehaviorProfile == UpstreamBehaviorProfile.Current;
+        _useNumpyComplexVhsAnalytic = dspBackend == DspBackend.Exact;
     }
 
     public IRfInputProcessor? InputProcessor => _inputProcessor;
@@ -165,7 +172,8 @@ public sealed class RfBlockDecodePipeline : IDisposable
             inputSpectrum,
             includeRfHighPassOutput: retainRfDiagnosticChannels,
             includeAnalyticOutput: retainRfDiagnosticChannels,
-            includeDemodRawOutput: retainRfDiagnosticChannels || _filterOptions.ExportRawTbc);
+            includeDemodRawOutput: retainRfDiagnosticChannels || _filterOptions.ExportRawTbc,
+            useNumpyComplexVhsAnalytic: _useNumpyComplexVhsAnalytic);
         if (reportDiagnostics)
         {
             ReportDiagnostics(demodulated);
@@ -187,7 +195,10 @@ public sealed class RfBlockDecodePipeline : IDisposable
             demodulated = keepCompactFloat32
                 ? demodulated with
                 {
-                    ChromaFloat32 = DecodeChromaBurstFloat32(input, _filters)
+                    ChromaFloat32 = DecodeChromaBurstFloat32(
+                        input,
+                        _filters,
+                        _useCurrentChromaShiftDc)
                 }
                 : demodulated with
                 {
@@ -197,7 +208,8 @@ public sealed class RfBlockDecodePipeline : IDisposable
                         _filters.ChromaBurstUsesDemodulatedVideo
                             ? demodulated.Video
                             : input,
-                        _filters)
+                        _filters,
+                        _useCurrentChromaShiftDc)
                 };
         }
 
@@ -259,7 +271,8 @@ public sealed class RfBlockDecodePipeline : IDisposable
 
     private static double[] DecodeChromaBurst(
         ReadOnlySpan<double> input,
-        DecodeFilterSet filters)
+        DecodeFilterSet filters,
+        bool useCurrentChromaShiftDc)
     {
         bool retainFloat32 = filters.ChromaBurstSos is not null
             && !filters.ChromaBurstUsesDemodulatedVideo;
@@ -284,9 +297,13 @@ public sealed class RfBlockDecodePipeline : IDisposable
 
         if (retainFloat32)
         {
-            return VhsChromaDecoder.ShiftChromaAndRemoveDcFloat32InPlace(
-                chroma,
-                filters.ChromaOffsetSamples);
+            return useCurrentChromaShiftDc
+                ? VhsChromaDecoder.ShiftChromaAndRemoveDcFloat32CurrentInPlace(
+                    chroma,
+                    filters.ChromaOffsetSamples)
+                : VhsChromaDecoder.ShiftChromaAndRemoveDcFloat32InPlace(
+                    chroma,
+                    filters.ChromaOffsetSamples);
         }
 
         return VhsChromaDecoder.ShiftChromaAndRemoveDcInPlace(
@@ -296,15 +313,20 @@ public sealed class RfBlockDecodePipeline : IDisposable
 
     private static float[] DecodeChromaBurstFloat32(
         ReadOnlySpan<double> input,
-        DecodeFilterSet filters)
+        DecodeFilterSet filters,
+        bool useCurrentChromaShiftDc)
     {
         float[] chroma = SosFilter.ApplyForwardBackwardFloat32ToSingle(
             filters.ChromaBurstSos
                 ?? throw new InvalidOperationException("A float32 chroma burst SOS filter is required."),
             input);
-        return VhsChromaDecoder.ShiftChromaAndRemoveDcFloat32InPlace(
-            chroma,
-            filters.ChromaOffsetSamples);
+        return useCurrentChromaShiftDc
+            ? VhsChromaDecoder.ShiftChromaAndRemoveDcFloat32CurrentInPlace(
+                chroma,
+                filters.ChromaOffsetSamples)
+            : VhsChromaDecoder.ShiftChromaAndRemoveDcFloat32InPlace(
+                chroma,
+                filters.ChromaOffsetSamples);
     }
 
     private RfDemodulatedBlock DecodeCvbsBlock(ReadOnlySpan<double> input)

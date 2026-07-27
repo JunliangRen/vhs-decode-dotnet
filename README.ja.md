@@ -2,7 +2,7 @@
 
 [English](README.md) | [简体中文](README.zh-CN.md) | **[日本語](README.ja.md)**
 
-<!-- README_SYNC: 2026-07-27.1 -->
+<!-- README_SYNC: 2026-07-28.1 -->
 
 [`oyvindln/vhs-decode`](https://github.com/oyvindln/vhs-decode) の
 デコード関連部分を .NET 11 で再実装するプロジェクトです。現在は release
@@ -160,6 +160,24 @@ HSync は upstream PAL fixture gate も維持します。固定した VSync beha
 upstream の back-porch assignment quirk も意図的に保持し、修正には別の
 profile change が必要です。別の end-to-end gate により、default `v0.4.0`
 profile は `--threads 0`、default、`--threads 20` のすべてで同一に保たれます。
+
+### 1,000-frame release gate
+
+同じ private local NTSC `.ldf` capture を、両 behavior profile で Exact backend
+と default 5 worker を使って 2 回ずつ decode しました。
+
+| Profile | Python oracle | この移植、2 run | Peak working set | Result |
+| --- | ---: | ---: | ---: | --- |
+| default `v0.4.0` | 499.80 s | 95.37 / 93.17 s | 1.14 / 1.11 GiB | 6 comparison が完全一致し deterministic |
+| `current` | 459.34 s | 141.85 / 143.13 s | 923 / 942 MiB | 6 comparison が完全一致し deterministic |
+
+各 run で luma TBC、chroma TBC、JSON/`fileLoc`、stdout の SHA-256 が一致し、
+stderr は elapsed-time line だけを除いた後、log は timestamp normalization
+後に一致しました。すべての run が中断せず 1,000 frame を完了しました。
+default oracle は upstream v0.4.0 `--threads 0` です。pinned PR 341 の
+`current` source は 438 frame 後に自身の float-slice `TypeError` に到達するため、
+残りは 6 個の slice bound だけを `int` に変換し、ほかは source-identical な
+extended oracle を使用しました。この release gate では IPP を除外しています。
 
 <!-- SECTION: performance -->
 
@@ -840,7 +858,7 @@ serial/default-5/20/64 worker の間で 6 artifact がすべて一致しまし�
 .\tools\build-ipp-native.ps1
 dotnet restore VHSDecodeDotNet.slnx
 dotnet build VHSDecodeDotNet.slnx -c Release --no-restore
-dotnet test --solution VHSDecodeDotNet.slnx -c Release --no-build --no-restore --minimum-expected-tests 1039
+dotnet test --solution VHSDecodeDotNet.slnx -c Release --no-build --no-restore --minimum-expected-tests 1068
 ```
 
 最初の command は optional `ipp-fast` native artifact を含めるためのものです。
@@ -853,7 +871,7 @@ bridge を build します。外部 IPP、OpenMP、oneTBB、Visual C++ runtime D
 
 現在の正式な Release build は warning 0、error 0 です。xUnit v3 project は
 `dotnet test` と Visual Studio Test Explorer の両方で個別に検出できる
-**1,039** tests を公開します。
+**1,068** tests を公開します。
 
 <!-- SECTION: usage -->
 
@@ -925,8 +943,8 @@ file length と snapshot 公開時点の正本は writer です。reader は増�
 - HiFi 実キャプチャの end-to-end baseline 追加
 - PAL LaserDisc、AC3、verbose VITS の実キャプチャ edge case
 - まれな VHS/CVBS vblank、chroma track-phase、cross-option interaction
-- default へ昇格する前の、以前の HSync/VSync stage を含む opt-in
-  `current` profile 全体の capture-wide certification
+- default へ昇格する前に、ほかの format/option combination でも opt-in
+  `current` profile 全体の capture-wide certification を継続
 - まれな first-HSync/vblank recovery と完全な JSON/SQLite field metadata
 - 残る TBC writer bit-compatibility edge と、全 format/option/実キャプチャの output parity
 - fixture で互換性を保護した上での CPU utilization、allocation、SIMD、

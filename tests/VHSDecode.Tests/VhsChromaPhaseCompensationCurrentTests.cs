@@ -43,6 +43,46 @@ public sealed class VhsChromaPhaseCompensationCurrentTests
         Assert.Equal(ExpectedHash, Float32BitsSha256(samples));
     }
 
+    [Fact(DisplayName = "Current burst HSync refinement matches pinned PR 341 integer center")]
+    public void CurrentBurstHSyncRefinementMatchesPinnedIntegerCenter()
+    {
+        const double FscHz = 3_579_545.0;
+        double[] lineLocations = Enumerable.Range(0, 15)
+            .Select(index => 1_000.125 + (index * 2_540.625))
+            .ToArray();
+        ChromaPhaseLine[] phaseSequence = Enumerable.Range(0, 10)
+            .Select(index => new ChromaPhaseLine(
+                LineNumber: index,
+                PhaseRotation: 0,
+                BurstPhaseDegrees: 27.25 + (index * 0.125))
+            {
+                BurstCenter = lineLocations[index] + 95.875,
+                BurstFrequencyHz = FscHz + 123.75
+            })
+            .ToArray();
+        var phase = new ChromaPhaseSequenceResult(
+            NextChromaRotationIndex: 0,
+            PhaseSequence: phaseSequence,
+            BurstDetectedLine: 0,
+            BurstMagnitudeAverage: 1.0,
+            BurstPhaseAverageDegrees: 31.75,
+            EvenBurstPhaseAverageDegrees: 31.75,
+            OddBurstPhaseAverageDegrees: 31.75);
+
+        double[] actual = VhsChromaDecoder.RefineLineLocationsFromBurst(
+            lineLocations,
+            outputLineLength: 910,
+            fscRatio: 4.0,
+            phase,
+            colorSystem: "NTSC",
+            useCurrentFrequencyDrift: true,
+            fscHz: FscHz);
+
+        Assert.Equal(
+            0x40D74E761CB6D0FDUL,
+            BitConverter.DoubleToUInt64Bits(actual[9]));
+    }
+
     private static ChromaPhaseLine[] BuildPhaseSequence(
         int lines,
         int lineLength,

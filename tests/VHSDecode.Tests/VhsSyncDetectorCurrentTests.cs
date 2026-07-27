@@ -1,4 +1,5 @@
 using System.Buffers.Binary;
+using System.Runtime.CompilerServices;
 using System.Security.Cryptography;
 using VHSDecode.Core.Dsp;
 using Xunit;
@@ -63,6 +64,32 @@ public sealed class VhsSyncDetectorCurrentTests
             BitConverter.DoubleToInt64Bits(result.BlankLevel));
     }
 
+    [Fact(DisplayName = "Current VHS sync detector uses the estimate for an empty porch window")]
+    public void CurrentVhsSyncDetectorUsesEstimateForEmptyPorchWindow()
+    {
+        var signal = Enumerable.Repeat(100.0, 1800).ToArray();
+        for (int start = 50; start < signal.Length; start += 115)
+        {
+            PaintPulse(signal, start, Math.Min(10, signal.Length - start), -2.0);
+        }
+
+        var detector = new VhsSyncDetector(
+            hSyncLength: 10.0,
+            backPorchLength: 110.0,
+            lineLength: 100,
+            approximateTransition: 3.0);
+
+        VhsSyncDetectionResult result = detector.Detect(
+            signal,
+            detectLevels: false,
+            syncTipEstimate: -5.0,
+            blankingEstimate: 100.0);
+
+        Assert.NotEmpty(result.Pulses);
+        Assert.True(double.IsFinite(result.BlankLevel));
+        Assert.Equal(100.0, result.BlankLevel);
+    }
+
     [Fact(DisplayName = "Current VHS level reduction matches Numba fastmath order")]
     public void CurrentVhsLevelReductionMatchesNumbaFastMathOrder()
     {
@@ -92,6 +119,32 @@ public sealed class VhsSyncDetectorCurrentTests
         Assert.Equal(
             unchecked((long)0x419A9608D3D9F8B2UL),
             BitConverter.DoubleToInt64Bits(porchSum));
+    }
+
+    [Fact(DisplayName = "Current VHS level reduction clears its stack accumulators")]
+    public void CurrentVhsLevelReductionClearsItsStackAccumulators()
+    {
+        double[] syncLevels = Enumerable.Range(0, 32)
+            .Select(static index => 3_800_000.0 + index)
+            .ToArray();
+        double[] porchLevels = Enumerable.Range(0, 32)
+            .Select(static index => 4_100_000.0 + index)
+            .ToArray();
+        bool[] selected = Enumerable.Repeat(true, 32).ToArray();
+
+        for (int iteration = 0; iteration < 16; iteration++)
+        {
+            _ = PoisonReductionStack();
+            (double syncSum, double porchSum) =
+                VhsSyncDetector.SumSelectedLevelsInUpstreamOrder(
+                    syncLevels,
+                    porchLevels,
+                    selected,
+                    selected.Length);
+
+            Assert.Equal(121_600_496.0, syncSum);
+            Assert.Equal(131_200_496.0, porchSum);
+        }
     }
 
     [Fact(DisplayName = "Current VHS sync detector reuses its full-field workspace")]
@@ -199,6 +252,14 @@ public sealed class VhsSyncDetectorCurrentTests
 
     private static void PaintPulse(double[] signal, int start, int length, double level)
         => Array.Fill(signal, level, start, length);
+
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private static double PoisonReductionStack()
+    {
+        Span<double> values = stackalloc double[32];
+        values.Fill(double.NaN);
+        return values[0];
+    }
 
     private static string HashCoordinates(IReadOnlyList<VhsMeasuredSyncPulse> pulses)
     {
