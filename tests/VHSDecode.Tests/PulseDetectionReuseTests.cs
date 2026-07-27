@@ -114,6 +114,34 @@ public sealed class PulseDetectionReuseTests
             positionScale: 0));
     }
 
+    [Fact(DisplayName = "Legacy HSync rescue exposes raw pulse replacements to fallback VSync")]
+    public void LegacyHSyncRescueExposesRawPulseReplacements()
+    {
+        var analyzer = new SyncAnalyzer(
+            sampleRateHz: 1_000_000.0,
+            linePeriodUs: 100.0,
+            hsyncPulseUs: 10.0,
+            equalizingPulseUs: 5.0,
+            vsyncPulseUs: 20.0,
+            numPulses: 6);
+        Pulse[] rawPulses = [new(0, 10), new(100, 20), new(200, 10)];
+        SyncTiming timing = analyzer.EstimateTiming(rawPulses);
+        double[] syncReference = new double[240];
+        Array.Fill(syncReference, -20.0, 100, 20);
+        Array.Fill(syncReference, -40.0, 104, 10);
+
+        IReadOnlyList<ClassifiedSyncPulse> refined = analyzer.RefinePulses(
+            rawPulses,
+            timing,
+            syncReference,
+            hsyncRescueStepHz: 10.0,
+            out Pulse[] updatedRawPulses);
+
+        Assert.Equal(new Pulse(100, 20), rawPulses[1]);
+        Assert.Equal(new Pulse(104, 10), updatedRawPulses[1]);
+        Assert.Equal(updatedRawPulses[1], refined[1].Pulse);
+    }
+
     [Fact(DisplayName = "Fallback serration search preserves every supported divisor")]
     public void FallbackSerrationSearchPreservesEverySupportedDivisor()
     {
@@ -158,6 +186,20 @@ public sealed class PulseDetectionReuseTests
             Assert.Equal(6, refinement.VsyncPulseCount);
             Assert.True(refinement.PulseCount > 200);
         }
+    }
+
+    [Fact(DisplayName = "Fallback pulse bounds preserve divisor-rounded v0.4.0 timing")]
+    public void FallbackPulseBoundsPreserveDivisorRoundedTiming()
+    {
+        var detector = new VsyncSerrationDetector(
+            sampleRateHz: 40_000_000.0,
+            framesPerSecond: 30_000.0 / 1_001.0,
+            frameLines: 525.0,
+            equalizingPulseUs: 2.35,
+            divisor: 3);
+
+        Assert.Equal(93, detector.OriginalRateEqualizingPulseLength);
+        Assert.Equal(2_541, detector.OriginalRateLineLength);
     }
 
     private static Pulse[] FindPulsesScalar(

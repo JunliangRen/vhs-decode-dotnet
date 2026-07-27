@@ -2,7 +2,7 @@
 
 [English](README.md) | **[简体中文](README.zh-CN.md)** | [日本語](README.ja.md)
 
-<!-- README_SYNC: 2026-07-26.3 -->
+<!-- README_SYNC: 2026-07-28.1 -->
 
 这是 [`oyvindln/vhs-decode`](https://github.com/oyvindln/vhs-decode)
 中解码相关部分的 .NET 11 重写，当前以 release `v0.4.0`、commit
@@ -66,7 +66,7 @@
 | --- | --- | --- |
 | 解决方案和测试 | 已实现 | .NET 11 `.slnx`；标准 xUnit v3 测试可在 Visual Studio Test Explorer 和 `dotnet test` 中使用。 |
 | CLI 和参数 | 已实现并做快照测试 | facade 与独立命令的帮助、别名、默认值、校验、诊断和退出行为以 v0.4.0 为目标。 |
-| 上游行为配置 | 分阶段实现 | `v0.4.0` 仍是默认值；`current` 是显式启用的配置，前四个已实现阶段是已合并 PR 341 的 VHS HSync 检测器、VSync 电平精修、NTSC 色度群延迟校正和非对称零相位 Super-Gaussian 最终色度滤波器。 |
+| 上游行为配置 | 分阶段实现 | `v0.4.0` 仍是默认值；`current` 是显式启用的配置，已实现已合并 PR 341 的五个阶段：VHS HSync 检测、VSync 电平精修、NTSC 色度群延迟校正、非对称 Super-Gaussian 最终滤波，以及 current color-under burst/ACC/CTI 链。 |
 | VHS 与磁带格式 | 已实现；仍有罕见采集差距 | VHS、S-VHS、Betamax、Video8/Hi8、U-matic、Type C、EIAJ 及支持的 PAL/NTSC 变体共用 release 兼容解码路径。 |
 | CVBS | 已实现 release 支持的系统 | PAL 和 NTSC 路径可运行；少见的 vblank 与跨参数组合仍需更多真实采集夹具。 |
 | LaserDisc | 已实现；仍有罕见采集差距 | 视频、VBI、EFM、模拟音频、AC3、RF-TBC、元数据、恢复和 PAL/NTSC 路径均已连接。 |
@@ -126,22 +126,45 @@ VHS 解码支持 `--compat-version v0.4.0|current`：
 | 配置 | 默认 | 固定的上游来源 | 当前启用的行为 |
 | --- | --- | --- | --- |
 | `v0.4.0` | 是 | release v0.4.0，commit `43155200da87c0d49eb37d8ec09b1372075ee8e4` | 现有 release 兼容解码路径。 |
-| `current` | 否 | 已合并的 PR 341，commit `2f21e8ed6018b14561396cc95f1f6828054470b8` | exact-first VHS HSync 候选提取、MAD 异常值剔除、多网格锁定、电平校准、亚采样脉冲合成、稳健 VSync 电平精修、NTSC 色度群延迟校正和非对称零相位 Super-Gaussian 最终色度滤波。 |
+| `current` | 否 | 已合并的 PR 341，commit `2f21e8ed6018b14561396cc95f1f6828054470b8` | exact-first VHS HSync 候选提取、MAD 异常值剔除、多网格锁定、电平校准、亚采样脉冲合成、稳健 VSync 电平精修、NTSC 色度群延迟校正、非对称零相位 Super-Gaussian 最终滤波、拟合 burst 频率/DC 跟踪、相位补偿上变频、current ACC/噪声估计和四遍 CTI。 |
 
-`current` 会分阶段推进。CTI 仍处于待实现状态，不会因为选择该配置而被静默
-启用；嵌入的基线目录会明确记录这一边界。
+`current` 仍按阶段推进且必须显式启用。对 color-under 格式，它现在采用 PR 341
+的正式 CTI 默认值：`--cti_mix 1`、`--cti_width 2`。`--cti_mix 0`
+会关闭 CTI。与上游一致，width 为零并不表示关闭：此时仍使用最小四样本扫描
+半径和零噪声阈值。嵌入的基线目录会明确记录这一阶段。
 
 HSync、VSync 电平和群延迟阶段都会直接对照上游原函数，并使用确定性合成
 夹具。色度阶段保持 burst 与 track-phase 分析不移位，只在最终 16-tap 色度
 重采样时加入固定的 float64 源坐标 shift；测试覆盖 Numba 输出位、零 shift
 旧路径、实际并行阈值及上游全部为正的 phase-truthiness 行为。Super-Gaussian
-阶段只替换最终的 color-under SOS 滤波器，burst 与 track-phase 分析仍走旧路径。
-其确定性 SciPy 1.18 oracle 覆盖对称 reflect padding、`next_fast_len`、
-与 DUCC 兼容的 float32 mixed-radix rFFT/irFFT、float64 响应和 complex64
-乘法，以及实际 NTSC、PAL、PAL-M/NLINE 和 MESECAM 场长度。HSync 还保留
-上游 PAL 夹具门禁。固定的 VSync 行为会有意保留上游的 back-porch 赋值问题；
-修正它需要单独变更行为配置。独立的端到端门禁同时保证默认 `v0.4.0` 配置在
-`--threads 0`、默认线程和 `--threads 20` 下保持完全一致。
+阶段会替换最终的 color-under SOS 滤波器；其确定性 SciPy 1.18 oracle 覆盖
+对称 reflect padding、`next_fast_len`、与 DUCC 兼容的 float32 mixed-radix
+rFFT/irFFT、float64 响应和 complex64 乘法，以及实际 NTSC、PAL、
+PAL-M/NLINE 和 MESECAM 场长度。current 色度阶段还加入固定的四参数
+Gauss-Newton burst 拟合、逐行频率/DC 相位补偿、MAD 限幅插值增益、sync-tip
+噪声估计和 CTI。组件测试会对照 PR 341 的 Numba 输出；可能受 BLAS 影响的
+拟合中间值采用精确的下游 float32 门禁及严格 float64 误差范围，而不宣称
+可移植的 float64 逐位一致。HSync 还保留上游 PAL 夹具门禁。固定的 VSync
+行为会有意保留上游的 back-porch 赋值问题；修正它需要单独变更行为配置。
+独立的端到端门禁同时保证默认 `v0.4.0` 配置在 `--threads 0`、默认线程和
+`--threads 20` 下保持完全一致。
+
+### 1,000 帧发版门禁
+
+同一个私有本地 NTSC `.ldf` 文件分别在两种行为配置下使用 Exact 后端和默认
+5 worker 解码两次：
+
+| 配置 | Python oracle | 本项目，两次运行 | 工作集峰值 | 结果 |
+| --- | ---: | ---: | ---: | --- |
+| 默认 `v0.4.0` | 499.80 s | 95.37 / 93.17 s | 1.14 / 1.11 GiB | 六项比较完全一致且结果确定 |
+| `current` | 459.34 s | 141.85 / 143.13 s | 923 / 942 MiB | 六项比较完全一致且结果确定 |
+
+每次运行的亮度 TBC、色度 TBC、JSON/`fileLoc` 和 stdout SHA-256 都完全一致；
+stderr 只去除耗时行后逐行一致，日志去除时间戳后逐行一致。所有运行均连续完成
+1,000 帧。默认 oracle 是上游 v0.4.0 的 `--threads 0`。固定的 PR 341
+`current` 源码会在 438 帧后因浮点切片触发自身的 `TypeError`，因此剩余范围使用
+一份仅将六个切片边界转换为 `int`、其他源码完全相同的延伸 oracle。本次发版
+门禁不包含 IPP。
 
 <!-- SECTION: performance -->
 
@@ -714,7 +737,7 @@ NTSC-J 门禁保持不变。
 .\tools\build-ipp-native.ps1
 dotnet restore VHSDecodeDotNet.slnx
 dotnet build VHSDecodeDotNet.slnx -c Release --no-restore
-dotnet test --solution VHSDecodeDotNet.slnx -c Release --no-build --no-restore --minimum-expected-tests 976
+dotnet test --solution VHSDecodeDotNet.slnx -c Release --no-build --no-restore --minimum-expected-tests 1079
 ```
 
 第一条命令用于包含可选的 `ipp-fast` 原生产物；只构建 Exact 时可以省略。
@@ -725,7 +748,7 @@ Intel oneAPI。发布程序会携带 `vhsdecode_ipp.dll`、Intel 许可证和
 `THIRD-PARTY-NOTICES.md`；只构建 Exact 后端时可以省略原生构建步骤。
 
 当前正式 Release 构建为零警告、零错误。xUnit v3 项目向
-`dotnet test` 和 Visual Studio Test Explorer 暴露 **1,022** 个可独立发现的测试。
+`dotnet test` 和 Visual Studio Test Explorer 暴露 **1,079** 个可独立发现的测试。
 
 <!-- SECTION: usage -->
 
@@ -796,8 +819,8 @@ hash 保存在下方链接的共享证据文档中。
 - 更多 HiFi 真实采集端到端基线
 - PAL LaserDisc、AC3 和 verbose VITS 的真实采集边缘情况
 - 少见 VHS/CVBS vblank、色度 track-phase 和跨参数组合
-- 在提升为默认配置前，对完整的 opt-in `current` 配置做采集级认证，
-  包括此前的 HSync 和 VSync 阶段
+- 在提升为默认配置前，继续用其他格式和参数组合对完整的 opt-in `current`
+  配置做采集级认证
 - 罕见 first-HSync/vblank 恢复以及完整 JSON/SQLite 场元数据
 - 剩余 TBC writer 位兼容边缘，以及所有格式、参数组合和真实采集的输出一致性
 - 在兼容性受到夹具保护后，继续分析 CPU 利用率、分配、SIMD 和 worker 调度

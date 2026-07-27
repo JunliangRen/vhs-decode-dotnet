@@ -314,14 +314,14 @@ public void DecodeRunnerPrintsCommandHelpBeforeValidation()
 {
     var standaloneHashes = new Dictionary<string, string>(StringComparer.Ordinal)
     {
-        ["vhs"] = "FEA9F3C7D94F739BD83DD12F1E1CAF2967E014B7A65D3930E68218EE34767E39",
+        ["vhs"] = "8A72E12A69B48DDAAC04C7F637873CE343DCCAD954B39788663B14FF2418EEE4",
         ["cvbs"] = "EAB1A682E558594E750F48435EE815A7904FE389237DA9D5C960A213841C8113",
         ["ld"] = "57AF272B79CDDC73F3C609C9C1FD818E2E4FA7BE7F5A8ED90A7CEA4EC73CAC47",
         ["hifi"] = "C7EC13F3C5619879D049C4B655A39C3E085BD632D2CABDB3D0B6DA4EE89DCE28"
     };
     var facadeHashes = new Dictionary<string, string>(StringComparer.Ordinal)
     {
-        ["vhs"] = "D7DBD7C906A769E2CCA26A996C4FFB04B94330DCE0B8E5C129E1431BE93AC98E",
+        ["vhs"] = "0A872C43B2DAA86925E4B425B761998622A79B81F4701C68FDDC4377DC11E5AE",
         ["cvbs"] = "9CB0B81A26DD3DF258823BA6A8B014F4E64EC3E2E58C9F55B0BC5F745333E318",
         ["ld"] = "EA005AFACC6C99C6A7E83FE224823792A1EA9BB0392A10D27ABBF607E6DBA259",
         ["hifi"] = "CD3FAC32B261F10F765D4B403FD36E35615981539EF32AB7E2AF67028462A0D8"
@@ -12833,6 +12833,89 @@ public void VhsFrameStatusSkipsFieldOrderRecoveryFields()
             StringComparison.Ordinal);
         AssertTrue(renderIndex >= 0);
         AssertTrue(renderIndex < recoveryIndex);
+    }
+    finally
+    {
+        Directory.Delete(tempDirectory, recursive: true);
+    }
+}
+
+[Fact(DisplayName = "VHS pending frame status precedes diagnostics from a recovered field")]
+public void VhsPendingFrameStatusPrecedesRecoveredFieldDiagnostics()
+{
+    string tempDirectory = Path.Combine(
+        Path.GetTempPath(),
+        "vhsdecode-dotnet-tests-" + Guid.NewGuid().ToString("N"));
+    Directory.CreateDirectory(tempDirectory);
+    try
+    {
+        string outputBase = Path.Combine(tempDirectory, "vhs-status-read-recovery");
+        using DecodeSession session = DecodeSessionFactory.Create(Parse(CliSpecs.Vhs, [
+            "--pal",
+            "--length",
+            "2",
+            "input.u8",
+            outputBase
+        ]));
+        session.RuntimeReporter = new DecodeRuntimeReporter(
+            new StringWriter(),
+            new StringWriter(),
+            () => 0.0);
+        DecodeSessionLogWriter.Write(session);
+
+        int reads = 0;
+        TbcDecodedField? ReadField(
+            DecodeSession activeSession,
+            Stream _,
+            long begin,
+            int __,
+            int ___)
+        {
+            reads++;
+            activeSession.TbcRenderer.DiagnosticLogger?.Invoke(
+                "DEBUG",
+                $"render diagnostic {reads}");
+            if (reads == 3)
+            {
+                throw new TbcFieldDecodeRecoveryException(
+                    TbcFieldDecodeRecoveryKind.NoFirstHSync,
+                    suggestedOffsetSamples: 100,
+                    "synthetic field recovery");
+            }
+
+            return BuildSyntheticTbcField(
+                    begin,
+                    new ushort[activeSession.TbcFrameSpec.FieldSampleCount],
+                    detectedFirstField: reads is 1 or 4 or 6)
+                with
+                {
+                    NextFieldOffsetSamples = 100.0,
+                    DiskLocation = reads - 1,
+                    ChromaSamples = new ushort[activeSession.TbcFrameSpec.FieldSampleCount]
+                };
+        }
+
+        TbcFieldSequenceDecodeResult result = new TbcFieldSequenceDecodeEngine(
+            readField: ReadField).TryDecodeAndWrite(session, Stream.Null);
+
+        if (!result.Success)
+        {
+            throw new Exception(result.Message);
+        }
+
+        AssertEqual(4, result.WrittenFieldCount);
+        AssertEqual(6, reads);
+        string log = File.ReadAllText(outputBase + ".log");
+        int previousRenderIndex = log.IndexOf("render diagnostic 2", StringComparison.Ordinal);
+        int pendingStatusIndex = log.IndexOf("File Frame 0: VHS ", StringComparison.Ordinal);
+        int failedRenderIndex = log.IndexOf("render diagnostic 3", StringComparison.Ordinal);
+        int recoveryIndex = log.IndexOf(
+            "Unable to determine start of field - dropping field",
+            StringComparison.Ordinal);
+        AssertTrue(previousRenderIndex >= 0);
+        AssertTrue(previousRenderIndex < pendingStatusIndex);
+        AssertTrue(pendingStatusIndex < failedRenderIndex);
+        AssertTrue(failedRenderIndex < recoveryIndex);
     }
     finally
     {

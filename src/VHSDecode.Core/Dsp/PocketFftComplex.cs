@@ -279,8 +279,45 @@ public static class PocketFftComplex
             .Transform(values, forward: true);
     }
 
+    internal static void ForwardReal(
+        ReadOnlySpan<double> input,
+        Span<Complex> output)
+    {
+        ValidateLength(input.Length, nameof(input));
+        if (output.Length != input.Length)
+        {
+            throw new ArgumentException(
+                "FFT output length must match the input length.",
+                nameof(output));
+        }
+
+        for (int i = 0; i < output.Length; i++)
+        {
+            output[i] = new Complex(input[i], 0.0);
+        }
+
+        Plans.GetOrAdd(input.Length, static length => new Plan(length))
+            .Transform(output, output, forward: true);
+    }
+
     public static Complex[] Inverse(ReadOnlySpan<Complex> input)
         => Transform(input, forward: false);
+
+    internal static void Inverse(
+        ReadOnlySpan<Complex> input,
+        Span<Complex> output)
+    {
+        ValidateLength(input.Length, nameof(input));
+        if (output.Length != input.Length)
+        {
+            throw new ArgumentException(
+                "FFT output length must match the input length.",
+                nameof(output));
+        }
+
+        Plans.GetOrAdd(input.Length, static length => new Plan(length))
+            .Transform(input, output, forward: false);
+    }
 
     private static Complex[] Transform(ReadOnlySpan<Complex> input, bool forward)
     {

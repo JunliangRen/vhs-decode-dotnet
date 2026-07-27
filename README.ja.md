@@ -2,7 +2,7 @@
 
 [English](README.md) | [简体中文](README.zh-CN.md) | **[日本語](README.ja.md)**
 
-<!-- README_SYNC: 2026-07-26.3 -->
+<!-- README_SYNC: 2026-07-28.1 -->
 
 [`oyvindln/vhs-decode`](https://github.com/oyvindln/vhs-decode) の
 デコード関連部分を .NET 11 で再実装するプロジェクトです。現在は release
@@ -72,7 +72,7 @@
 | --- | --- | --- |
 | ソリューションとテスト | 実装済み | .NET 11 `.slnx`。標準 xUnit v3 テストは Visual Studio Test Explorer と `dotnet test` で利用できます。 |
 | CLI と引数 | 実装済み、スナップショットテストあり | facade とスタンドアロンの help、alias、default、validation、diagnostic、exit 動作は v0.4.0 を対象とします。 |
-| 上流動作プロファイル | 段階的に実装 | `v0.4.0` が引き続き default です。`current` は opt-in で、最初の 4 stage として merged PR 341 の VHS HSync detector、VSync level refinement、NTSC chroma group-delay correction、asymmetric zero-phase Super-Gaussian final chroma filter を実装しています。 |
+| 上流動作プロファイル | 段階的に実装 | `v0.4.0` が引き続き default です。`current` は opt-in で、merged PR 341 の 5 stage、VHS HSync detection、VSync level refinement、NTSC chroma group-delay correction、asymmetric Super-Gaussian final filtering、current color-under burst/ACC/CTI chain を実装しています。 |
 | VHS とテープ形式 | 実装済み。まれなキャプチャ差分あり | VHS、S-VHS、Betamax、Video8/Hi8、U-matic、Type C、EIAJ、および対応 PAL/NTSC 形式は release 互換経路を共有します。 |
 | CVBS | release 対応システムを実装済み | PAL/NTSC 経路は動作します。まれな vblank とオプション間のケースには実キャプチャ fixture の追加が必要です。 |
 | LaserDisc | 実装済み。まれなキャプチャ差分あり | Video、VBI、EFM、analog audio、AC3、RF-TBC、metadata、recovery、PAL/NTSC 経路を接続済みです。 |
@@ -133,11 +133,13 @@ VHS decode は `--compat-version v0.4.0|current` を受け付けます。
 | Profile | Default | 固定した upstream source | 現在有効な動作 |
 | --- | --- | --- | --- |
 | `v0.4.0` | はい | release v0.4.0、commit `43155200da87c0d49eb37d8ec09b1372075ee8e4` | 既存の release 互換 decode path。 |
-| `current` | いいえ | merged PR 341、commit `2f21e8ed6018b14561396cc95f1f6828054470b8` | exact-first VHS HSync candidate extraction、MAD rejection、multi-grid lock、level calibration、subpixel pulse synthesis、robust VSync level refinement、NTSC chroma group-delay correction、asymmetric zero-phase Super-Gaussian final chroma filtering。 |
+| `current` | いいえ | merged PR 341、commit `2f21e8ed6018b14561396cc95f1f6828054470b8` | exact-first VHS HSync candidate extraction、MAD rejection、multi-grid lock、level calibration、subpixel pulse synthesis、robust VSync level refinement、NTSC chroma group-delay correction、asymmetric zero-phase Super-Gaussian final filtering、fitted burst frequency/DC tracking、phase-compensated upconversion、current ACC/noise estimation、four-pass CTI。 |
 
-`current` は意図的に段階導入します。CTI はまだ pending であり、この
-profile によって暗黙に有効にはなりません。embedded baseline catalog が
-この境界を明示します。
+`current` は段階導入される opt-in profile です。color-under format では
+PR 341 の official CTI default、`--cti_mix 1` と `--cti_width 2` を
+使用します。`--cti_mix 0` で CTI を無効にできます。upstream と同様に
+width 0 は無効化ではなく、minimum 4-sample sweep radius と zero noise
+threshold を維持します。embedded baseline catalog はこの stage を明示します。
 
 HSync、VSync-level、group-delay stage は original upstream function と直接比較し、
 deterministic synthetic fixture で検証します。chroma stage は burst/track-phase
@@ -145,15 +147,37 @@ analysis を shift せず、final 16-tap chroma resampling の source coordinate
 固定した float64 shift を加えます。test は Numba output bit、zero-shift legacy
 path、実際の parallel threshold、upstream の全状態で正になる phase-truthiness
 behavior をカバーします。Super-Gaussian stage は final color-under SOS filter
-だけを置き換え、burst と track-phase analysis は legacy path に残します。
-deterministic SciPy 1.18 oracle は symmetric reflection padding、
-`next_fast_len`、DUCC-compatible float32 mixed-radix rFFT/irFFT、float64
-response、complex64 multiplication、および production NTSC、PAL、
-PAL-M/NLINE、MESECAM field length をカバーします。HSync は upstream PAL
-fixture gate も維持します。固定した VSync behavior は upstream の back-porch
-assignment quirk も意図的に保持し、修正には別の profile change が必要です。
-別の end-to-end gate により、default `v0.4.0` profile は `--threads 0`、
-default、`--threads 20` のすべてで同一に保たれます。
+を置き換えます。deterministic SciPy 1.18 oracle は symmetric reflection
+padding、`next_fast_len`、DUCC-compatible float32 mixed-radix rFFT/irFFT、
+float64 response、complex64 multiplication、および production NTSC、PAL、
+PAL-M/NLINE、MESECAM field length をカバーします。current chroma stage は
+pinned four-parameter Gauss-Newton burst fit、per-line frequency/DC phase
+compensation、MAD-clamped interpolated gain、sync-tip noise estimation、CTI
+を追加します。component test は PR 341 の Numba output と比較し、BLAS の
+影響を受ける fit intermediate には exact downstream float32 gate と厳密な
+float64 tolerance を使い、portable float64 bit identity は主張しません。
+HSync は upstream PAL fixture gate も維持します。固定した VSync behavior は
+upstream の back-porch assignment quirk も意図的に保持し、修正には別の
+profile change が必要です。別の end-to-end gate により、default `v0.4.0`
+profile は `--threads 0`、default、`--threads 20` のすべてで同一に保たれます。
+
+### 1,000-frame release gate
+
+同じ private local NTSC `.ldf` capture を、両 behavior profile で Exact backend
+と default 5 worker を使って 2 回ずつ decode しました。
+
+| Profile | Python oracle | この移植、2 run | Peak working set | Result |
+| --- | ---: | ---: | ---: | --- |
+| default `v0.4.0` | 499.80 s | 95.37 / 93.17 s | 1.14 / 1.11 GiB | 6 comparison が完全一致し deterministic |
+| `current` | 459.34 s | 141.85 / 143.13 s | 923 / 942 MiB | 6 comparison が完全一致し deterministic |
+
+各 run で luma TBC、chroma TBC、JSON/`fileLoc`、stdout の SHA-256 が一致し、
+stderr は elapsed-time line だけを除いた後、log は timestamp normalization
+後に一致しました。すべての run が中断せず 1,000 frame を完了しました。
+default oracle は upstream v0.4.0 `--threads 0` です。pinned PR 341 の
+`current` source は 438 frame 後に自身の float-slice `TypeError` に到達するため、
+残りは 6 個の slice bound だけを `int` に変換し、ほかは source-identical な
+extended oracle を使用しました。この release gate では IPP を除外しています。
 
 <!-- SECTION: performance -->
 
@@ -834,7 +858,7 @@ serial/default-5/20/64 worker の間で 6 artifact がすべて一致しまし�
 .\tools\build-ipp-native.ps1
 dotnet restore VHSDecodeDotNet.slnx
 dotnet build VHSDecodeDotNet.slnx -c Release --no-restore
-dotnet test --solution VHSDecodeDotNet.slnx -c Release --no-build --no-restore --minimum-expected-tests 976
+dotnet test --solution VHSDecodeDotNet.slnx -c Release --no-build --no-restore --minimum-expected-tests 1079
 ```
 
 最初の command は optional `ipp-fast` native artifact を含めるためのものです。
@@ -847,7 +871,7 @@ bridge を build します。外部 IPP、OpenMP、oneTBB、Visual C++ runtime D
 
 現在の正式な Release build は warning 0、error 0 です。xUnit v3 project は
 `dotnet test` と Visual Studio Test Explorer の両方で個別に検出できる
-**1,022** tests を公開します。
+**1,079** tests を公開します。
 
 <!-- SECTION: usage -->
 
@@ -919,8 +943,8 @@ file length と snapshot 公開時点の正本は writer です。reader は増�
 - HiFi 実キャプチャの end-to-end baseline 追加
 - PAL LaserDisc、AC3、verbose VITS の実キャプチャ edge case
 - まれな VHS/CVBS vblank、chroma track-phase、cross-option interaction
-- default へ昇格する前の、以前の HSync/VSync stage を含む opt-in
-  `current` profile 全体の capture-wide certification
+- default へ昇格する前に、ほかの format/option combination でも opt-in
+  `current` profile 全体の capture-wide certification を継続
 - まれな first-HSync/vblank recovery と完全な JSON/SQLite field metadata
 - 残る TBC writer bit-compatibility edge と、全 format/option/実キャプチャの output parity
 - fixture で互換性を保護した上での CPU utilization、allocation、SIMD、

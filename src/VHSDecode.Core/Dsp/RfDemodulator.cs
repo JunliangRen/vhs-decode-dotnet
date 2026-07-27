@@ -10,6 +10,8 @@ public sealed class RfDemodulator : IDisposable
 {
     private static readonly Vector128<float> FloatAbsoluteValueMask =
         Vector128.Create(BitConverter.UInt32BitsToSingle(0x7FFFFFFFU));
+    private static readonly ConcurrentDictionary<int, double[]>
+        NumpyVhsHilbertMultipliers = new();
     private SharpnessEqOptions? _sharpnessLeadingOptions;
     private TransferFunction? _sharpnessLeadingFilter;
     private double[]? _sharpnessLeadingState;
@@ -139,7 +141,8 @@ public sealed class RfDemodulator : IDisposable
             precomputedInputSpectrum,
             includeRfHighPassOutput,
             includeAnalyticOutput,
-            includeDemodRawOutput: true);
+            includeDemodRawOutput: true,
+            useNumpyComplexVhsAnalytic: false);
     }
 
     internal RfDemodulatedBlock DemodulateCore(
@@ -165,7 +168,8 @@ public sealed class RfDemodulator : IDisposable
         Complex[]? precomputedInputSpectrum,
         bool includeRfHighPassOutput,
         bool includeAnalyticOutput,
-        bool includeDemodRawOutput)
+        bool includeDemodRawOutput,
+        bool useNumpyComplexVhsAnalytic)
     {
         ObjectDisposedException.ThrowIf(Volatile.Read(ref _disposed) != 0, this);
         if (input.IsEmpty)
@@ -190,6 +194,7 @@ public sealed class RfDemodulator : IDisposable
         int vhsRealSpectrumLength = (input.Length / 2) + 1;
         Complex[]? analytic = null;
         bool vhsAnalyticComponentsReady = false;
+        bool vhsWorkspaceComplexAnalyticReady = false;
         double[] rfHighPass;
         Complex[]? rfFilteredSpectrum = null;
         double[]? hilbertMultiplier = null;
@@ -268,6 +273,16 @@ public sealed class RfDemodulator : IDisposable
             vhsRfFilteredReal = workspace.Real;
             workspace.Inverse(rfFilteredHalf, vhsRfFilteredReal);
             vhsEnvelopeSource = vhsRfFilteredReal;
+            if (useNumpyComplexVhsAnalytic)
+            {
+                BuildNumpyVhsComplexAnalyticSignal(
+                    input,
+                    rfVideoFilter,
+                    rfMtfFilter,
+                    workspace);
+                analytic = workspace.FullAnalytic;
+                vhsWorkspaceComplexAnalyticReady = true;
+            }
         }
         else
         {
@@ -449,7 +464,11 @@ public sealed class RfDemodulator : IDisposable
                 diffDemodRepair,
                 fmDemodulatorMode,
                 vhsRealFftWorkspace?.DiffedAnalytic);
-            analyticOutput = includeAnalyticOutput ? analytic! : [];
+            analyticOutput = includeAnalyticOutput
+                ? vhsWorkspaceComplexAnalyticReady
+                    ? analytic!.AsSpan(0, input.Length).ToArray()
+                    : analytic!
+                : [];
         }
         if (sharpnessEq is not null)
         {
@@ -1039,6 +1058,51 @@ public sealed class RfDemodulator : IDisposable
         return PocketFftComplex.Inverse(analyticSpectrum);
     }
 
+    private static void BuildNumpyVhsComplexAnalyticSignal(
+        ReadOnlySpan<double> input,
+        ReadOnlySpan<Complex> rfVideoFilter,
+        ReadOnlySpan<Complex> rfMtfFilter,
+        VhsRealFftWorkspace workspace)
+    {
+        Span<Complex> spectrum = workspace.DiffedAnalytic.AsSpan(0, input.Length);
+        PocketFftComplex.ForwardReal(input, spectrum);
+        if (!rfVideoFilter.IsEmpty)
+        {
+            if (rfVideoFilter.Length != input.Length)
+            {
+                throw new ArgumentException(
+                    "RF video filter length must match the RF block length.",
+                    nameof(rfVideoFilter));
+            }
+
+            NumpyComplexMultiply.ApplyInPlace(spectrum, rfVideoFilter);
+        }
+
+        if (!rfMtfFilter.IsEmpty)
+        {
+            if (rfMtfFilter.Length != input.Length)
+            {
+                throw new ArgumentException(
+                    "RF MTF filter length must match the RF block length.",
+                    nameof(rfMtfFilter));
+            }
+
+            NumpyComplexMultiply.ApplyInPlace(spectrum, rfMtfFilter);
+        }
+
+        double[] hilbertMultiplier = NumpyVhsHilbertMultipliers.GetOrAdd(
+            input.Length,
+            static length => PortedMath.BuildHilbertMultiplier(length));
+        for (int i = 0; i < spectrum.Length; i++)
+        {
+            spectrum[i] *= hilbertMultiplier[i];
+        }
+
+        PocketFftComplex.Inverse(
+            spectrum,
+            workspace.FullAnalytic.AsSpan(0, input.Length));
+    }
+
     private static double[] ExtractReal(ReadOnlySpan<Complex> values)
     {
         var output = new double[values.Length];
@@ -1272,6 +1336,7 @@ public sealed class RfDemodulator : IDisposable
             Third = new Complex[spectrumLength];
             HilbertHalf = new Complex[spectrumLength];
             DiffedAnalytic = new Complex[realLength];
+            FullAnalytic = new Complex[realLength];
             Real = new double[realLength];
             Imaginary = new double[realLength];
             RawEnvelope = new double[realLength];
@@ -1291,6 +1356,8 @@ public sealed class RfDemodulator : IDisposable
         public Complex[] HilbertHalf { get; }
 
         public Complex[] DiffedAnalytic { get; }
+
+        public Complex[] FullAnalytic { get; }
 
         public double[] Real { get; }
 

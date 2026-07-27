@@ -7,8 +7,8 @@ namespace VHSDecode.Tests;
 
 public sealed class TbcParallelResamplerTests
 {
-    [Fact(DisplayName = "Batched linear TBC positions remain bit-exact to scalar interpolation")]
-    public void BatchedLinearTbcPositionsRemainBitExactToScalarInterpolation()
+    [Fact(DisplayName = "Batched linear TBC positions preserve upstream scaled coordinates")]
+    public void BatchedLinearTbcPositionsPreserveUpstreamScaledCoordinates()
     {
         var random = new Random(0x51C0_2026);
         for (int iteration = 0; iteration < 64; iteration++)
@@ -37,9 +37,13 @@ public sealed class TbcParallelResamplerTests
             for (int i = 0; i < plan.DestinationLength; i++)
             {
                 int sampleIndex = checked((firstLine * outputLineLength) + i);
-                double linePosition = (double)sampleIndex / outputLineLength;
-                int left = Math.Clamp((int)Math.Floor(linePosition), 0, locations.Length - 2);
-                double fraction = Math.Clamp(linePosition - left, 0.0, 1.0);
+                int left = sampleIndex / outputLineLength;
+                double outputScale = 2_000.125 / outputLineLength;
+                double scaledPosition = sampleIndex * outputScale;
+                double fraction = Math.Clamp(
+                    (scaledPosition - (left * 2_000.125)) / 2_000.125,
+                    0.0,
+                    1.0);
                 double expected = locations[left]
                     + ((locations[left + 1] - locations[left]) * fraction);
 
@@ -68,8 +72,8 @@ public sealed class TbcParallelResamplerTests
             plan.SourcePositions.AsSpan(0, plan.DestinationLength).ToArray());
     }
 
-    [Fact(DisplayName = "TBC sinc interior and clamped edges remain bit-exact")]
-    public void TbcSincInteriorAndClampedEdgesRemainBitExact()
+    [Fact(DisplayName = "TBC sinc interior and bounded edges remain bit-exact")]
+    public void TbcSincInteriorAndBoundedEdgesRemainBitExact()
     {
         var resampler = new TbcLineResampler(outputLineLength: 16);
         double[] output = resampler.ResampleLines(
@@ -79,12 +83,27 @@ public sealed class TbcParallelResamplerTests
             lineCount: 2);
 
         Assert.Equal(
-            "399D86D060BC715962539EA12B2C4EF83E86C330EDFDDAA3F305379B207612DB",
+            "7E3B3F5DCF0E5C38FB7C46E6E5CF362D596F9DECD7416445247F0A4C4878F33C",
             Convert.ToHexString(SHA256.HashData(MemoryMarshal.AsBytes(output.AsSpan()))));
     }
 
-    [Fact(DisplayName = "TBC sinc clamps sources shorter than its tap window")]
-    public void TbcSincClampsSourcesShorterThanTapWindow()
+    [Fact(DisplayName = "TBC sinc negative coordinates match NumPy wrapped indexing")]
+    public void TbcSincNegativeCoordinatesMatchNumpyWrappedIndexing()
+    {
+        var resampler = new TbcLineResampler(outputLineLength: 16);
+        double[] output = resampler.ResampleLines(
+            Enumerable.Range(0, 64).Select(value => (double)value).ToArray(),
+            [-4.25, 28.5],
+            firstLine: 0,
+            lineCount: 1);
+
+        Assert.Equal(
+            "426959AEB3440862EF1B3148CF09D4AF143D5F4F21944E04C6AAA62214F4C0BC",
+            Convert.ToHexString(SHA256.HashData(MemoryMarshal.AsBytes(output.AsSpan()))));
+    }
+
+    [Fact(DisplayName = "TBC sinc bounds sources shorter than its tap window")]
+    public void TbcSincBoundsSourcesShorterThanTapWindow()
     {
         var resampler = new TbcLineResampler(outputLineLength: 16);
         double[] output = resampler.ResampleLines(
@@ -94,7 +113,7 @@ public sealed class TbcParallelResamplerTests
             lineCount: 1);
 
         Assert.Equal(
-            "357269E737450AD2B3007BD6CC78974A536A5B825B0A55AC9F4D0DC9CCFE6BE1",
+            "5E5BED2929B57864FE4E2514C4D3754CF7168A6200A7C57FF45BDE2F97B1BD1F",
             Convert.ToHexString(SHA256.HashData(MemoryMarshal.AsBytes(output.AsSpan()))));
     }
 

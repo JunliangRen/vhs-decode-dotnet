@@ -2,7 +2,7 @@
 
 **[English](README.md)** | [简体中文](README.zh-CN.md) | [日本語](README.ja.md)
 
-<!-- README_SYNC: 2026-07-26.3 -->
+<!-- README_SYNC: 2026-07-28.1 -->
 
 .NET 11 rewrite of the decode-facing parts of
 [`oyvindln/vhs-decode`](https://github.com/oyvindln/vhs-decode), focused on
@@ -70,7 +70,7 @@ CLI compatibility requires it.
 | --- | --- | --- |
 | Solution and tests | Implemented | .NET 11 `.slnx`; standard xUnit v3 tests work in Visual Studio Test Explorer and with `dotnet test`. |
 | CLI and arguments | Implemented and snapshot-tested | Facade and standalone help, aliases, defaults, validation, diagnostics, and exit behavior target v0.4.0. |
-| Upstream behavior profiles | Staged | `v0.4.0` remains the default; `current` is an opt-in profile whose first four implemented stages are the merged PR 341 VHS HSync detector, VSync level refinement, NTSC chroma group-delay correction, and asymmetric zero-phase Super-Gaussian final chroma filter. |
+| Upstream behavior profiles | Staged | `v0.4.0` remains the default; `current` is an opt-in profile with five merged PR 341 stages: VHS HSync detection, VSync level refinement, NTSC chroma group-delay correction, asymmetric Super-Gaussian final filtering, and the current color-under burst/ACC/CTI chain. |
 | VHS and tape families | Implemented; rare capture gaps remain | VHS, S-VHS, Betamax, Video8/Hi8, U-matic, Type C, EIAJ, and supported PAL/NTSC variants share the release-compatible decode path. |
 | CVBS | Implemented for release-supported systems | PAL and NTSC paths run; uncommon vblank and cross-option cases need more real-capture fixtures. |
 | LaserDisc | Implemented; rare capture gaps remain | Video, VBI, EFM, analog audio, AC3, RF-TBC, metadata, recovery, and PAL/NTSC paths are connected. |
@@ -133,11 +133,13 @@ VHS decode accepts `--compat-version v0.4.0|current`:
 | Profile | Default | Pinned upstream source | Active behavior |
 | --- | --- | --- | --- |
 | `v0.4.0` | Yes | release v0.4.0, commit `43155200da87c0d49eb37d8ec09b1372075ee8e4` | Existing release-compatible decode path. |
-| `current` | No | merged PR 341, commit `2f21e8ed6018b14561396cc95f1f6828054470b8` | Exact-first VHS HSync candidate extraction, MAD rejection, multi-grid lock, calibrated levels, subpixel pulse synthesis, robust VSync level refinement, NTSC chroma group-delay correction, and asymmetric zero-phase Super-Gaussian final chroma filtering. |
+| `current` | No | merged PR 341, commit `2f21e8ed6018b14561396cc95f1f6828054470b8` | Exact-first VHS HSync candidate extraction, MAD rejection, multi-grid lock, calibrated levels, subpixel pulse synthesis, robust VSync level refinement, NTSC chroma group-delay correction, asymmetric zero-phase Super-Gaussian final filtering, fitted burst frequency/DC tracking, phase-compensated upconversion, current ACC/noise estimation, and four-pass CTI. |
 
-`current` is deliberately staged. CTI is still pending and is not silently
-enabled by this profile. The embedded baseline catalog records that boundary
-explicitly.
+`current` is deliberately staged and opt-in. For color-under formats it now
+uses the official PR 341 CTI defaults, `--cti_mix 1` and `--cti_width 2`.
+`--cti_mix 0` disables CTI. As in upstream, width zero does not disable it:
+it retains the minimum four-sample sweep radius and a zero noise threshold.
+The embedded baseline catalog records this stage explicitly.
 
 The HSync, VSync-level, and group-delay stages are checked against the original
 upstream functions with deterministic synthetic fixtures. The chroma stage
@@ -145,15 +147,38 @@ keeps burst and track-phase analysis unshifted, then adds the pinned float64
 source-coordinate shift only to final 16-tap chroma resampling. Its tests cover
 the Numba output bits, zero-shift legacy path, actual parallel threshold, and
 the upstream all-positive phase-truthiness behavior. The Super-Gaussian stage
-replaces only the final color-under SOS filter: burst and track-phase analysis
-remain on the legacy path. Its deterministic SciPy 1.18 oracles cover symmetric
-reflection padding, `next_fast_len`, float32 DUCC-compatible mixed-radix
-rFFT/irFFT, a float64 response, complex64 multiplication, and the production
-NTSC, PAL, PAL-M/NLINE, and MESECAM field lengths. HSync also retains its
-upstream PAL fixture gate. The pinned VSync behavior intentionally includes its
-upstream back-porch assignment quirk; a correction would require a separate
-profile change. Separate end-to-end gates keep the default `v0.4.0` profile
-identical across `--threads 0`, default, and `--threads 20`.
+replaces the final color-under SOS filter. Its deterministic SciPy 1.18
+oracles cover symmetric reflection padding, `next_fast_len`, float32
+DUCC-compatible mixed-radix rFFT/irFFT, a float64 response, complex64
+multiplication, and the production NTSC, PAL, PAL-M/NLINE, and MESECAM field
+lengths. The current chroma stage adds the pinned four-parameter Gauss-Newton
+burst fit, per-line frequency/DC phase compensation, MAD-clamped interpolated
+gain, sync-tip noise estimation, and CTI. Component tests compare against the
+PR 341 Numba output; BLAS-dependent fit intermediates use exact downstream
+float32 gates plus tight float64 tolerances rather than claiming portable
+float64 bit identity. HSync also retains its upstream PAL fixture gate. The
+pinned VSync behavior intentionally includes its upstream back-porch assignment
+quirk; a correction would require a separate profile change. Separate
+end-to-end gates keep the default `v0.4.0` profile identical across
+`--threads 0`, default, and `--threads 20`.
+
+### 1,000-frame release gate
+
+The same private local NTSC `.ldf` capture was decoded twice with the Exact
+backend and the default 5 workers under both behavior profiles:
+
+| Profile | Python oracle | This port, two runs | Peak working set | Result |
+| --- | ---: | ---: | ---: | --- |
+| default `v0.4.0` | 499.80 s | 95.37 / 93.17 s | 1.14 / 1.11 GiB | All six comparisons exact and deterministic |
+| `current` | 459.34 s | 141.85 / 143.13 s | 923 / 942 MiB | All six comparisons exact and deterministic |
+
+For each run, luma TBC, chroma TBC, JSON/`fileLoc`, and stdout SHA-256 matched;
+stderr matched after removing only the elapsed-time line, and logs matched
+after timestamp normalization. All runs completed 1,000 frames without an
+interruption. The default oracle is upstream v0.4.0 `--threads 0`. The pinned
+PR 341 `current` source reaches its own float-slice `TypeError` after 438
+frames, so the remainder uses an otherwise source-identical oracle with only
+six slice bounds converted to `int`. IPP was excluded from this release gate.
 
 <!-- SECTION: performance -->
 
@@ -884,7 +909,7 @@ Requirements:
 .\tools\build-ipp-native.ps1
 dotnet restore VHSDecodeDotNet.slnx
 dotnet build VHSDecodeDotNet.slnx -c Release --no-restore
-dotnet test --solution VHSDecodeDotNet.slnx -c Release --no-build --no-restore --minimum-expected-tests 976
+dotnet test --solution VHSDecodeDotNet.slnx -c Release --no-build --no-restore --minimum-expected-tests 1079
 ```
 
 The first command includes the optional `ipp-fast` native artifact; omit it for
@@ -897,7 +922,7 @@ Intel license, and `THIRD-PARTY-NOTICES.md`; an Exact-only build may omit the
 native build step.
 
 The current formal Release build has zero warnings and errors. The xUnit v3
-project exposes **1,022** independently discoverable tests to both
+project exposes **1,079** independently discoverable tests to both
 `dotnet test` and Visual Studio Test Explorer.
 
 <!-- SECTION: usage -->
@@ -972,8 +997,8 @@ These are bounded parity and verification gaps, not missing top-level commands:
 - additional HiFi real-capture end-to-end baselines
 - PAL LaserDisc, AC3, and verbose VITS real-capture edge cases
 - uncommon VHS/CVBS vblank, chroma track-phase, and cross-option interactions
-- capture-wide certification of the complete opt-in `current` profile,
-  including its earlier HSync and VSync stages, before any default promotion
+- additional capture-wide certification of the complete opt-in `current`
+  profile across other formats and option combinations before default promotion
 - rare first-HSync/vblank recovery and complete JSON/SQLite field metadata
 - remaining TBC writer bit-compatibility edges and output parity across every
   format, option combination, and real capture

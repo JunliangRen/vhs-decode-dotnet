@@ -179,6 +179,31 @@ public sealed class VhsVSyncLevelRefinerCurrentTests
         Assert.Equal(1.0, adjusted.HzIre);
     }
 
+    [Fact(DisplayName = "Current VHS levels ignore rejected pulse windows")]
+    public void CurrentVhsLevelsIgnoreRejectedPulseWindows()
+    {
+        using DecodeSession session = CreateSession(
+            "--compat-version",
+            "current",
+            "--ire0_adjust",
+            "backporch");
+        var current = new VideoOutputConverter(
+            ire0: 1_000.0,
+            hzIre: 10.0,
+            outputZero: 256,
+            vsyncIre: -40.0,
+            outputScale: 300.0);
+        var rejected = new VhsSyncDetectionResult(
+            [],
+            SyncTipLevel: 600.0,
+            BlankLevel: double.NaN);
+
+        VideoOutputConverter adjusted =
+            session.TbcFieldDecoder.ApplyCurrentVhsLevels(rejected, current);
+
+        Assert.Same(current, adjusted);
+    }
+
     public static TheoryData<int, long, long> ReductionCases => new()
     {
         {

@@ -184,6 +184,19 @@ public sealed class SyncAnalyzer
         SyncTiming timing,
         ReadOnlySpan<double> syncReference,
         double hsyncRescueStepHz)
+        => RefinePulses(
+            rawPulses,
+            timing,
+            syncReference,
+            hsyncRescueStepHz,
+            out _);
+
+    internal IReadOnlyList<ClassifiedSyncPulse> RefinePulses(
+        IReadOnlyList<Pulse> rawPulses,
+        SyncTiming timing,
+        ReadOnlySpan<double> syncReference,
+        double hsyncRescueStepHz,
+        out Pulse[] updatedRawPulses)
     {
         Pulse[] workingPulses = rawPulses.ToArray();
         var refined = new List<ClassifiedSyncPulse>();
@@ -247,6 +260,7 @@ public sealed class SyncAnalyzer
             index += Math.Max(1, vBlank.Value.Pulses.Count - 2);
         }
 
+        updatedRawPulses = workingPulses;
         return refined;
     }
 

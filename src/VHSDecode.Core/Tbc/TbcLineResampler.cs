@@ -746,16 +746,12 @@ public sealed class TbcLineResampler
         float coord = (float)position;
         int coordInt = (int)coord;
         float fraction = coord - coordInt;
-        if (fraction < 0.0f)
-        {
-            coordInt--;
-            fraction += 1.0f;
-        }
-
         float phasePosition = fraction * SincPhaseCount;
-        int phaseStart = Math.Clamp((int)phasePosition, 0, SincPhaseCount - 1);
-        int phaseEnd = phaseStart + 1;
-        float alpha = phasePosition - phaseStart;
+        int phaseStartIndex = (int)phasePosition;
+        int phaseEndIndex = phaseStartIndex + 1;
+        float alpha = phasePosition - phaseStartIndex;
+        int phaseStart = WrapNegativeIndex(phaseStartIndex, SincPhaseCount + 1);
+        int phaseEnd = WrapNegativeIndex(phaseEndIndex, SincPhaseCount + 1);
         int weightStart = phaseStart * SincTapCount;
         int weightEnd = phaseEnd * SincTapCount;
         int sampleStart = coordInt - ((SincTapCount / 2) - 1);
@@ -792,11 +788,27 @@ public sealed class TbcLineResampler
                 alpha,
                 weights[weightEnd + tap] - startWeight,
                 startWeight);
-            int sampleIndex = Math.Clamp(sampleStart + tap, 0, sourceLength - 1);
+            int sampleIndex = sampleStart + tap;
+            if (sampleIndex < 0)
+            {
+                sampleIndex += sourceLength;
+            }
+
+            sampleIndex = Math.Clamp(sampleIndex, 0, sourceLength - 1);
             result += (float)source[sampleIndex] * weight;
         }
 
         return result;
+    }
+
+    private static int WrapNegativeIndex(int index, int length)
+    {
+        if (index < 0)
+        {
+            index += length;
+        }
+
+        return Math.Clamp(index, 0, length - 1);
     }
 
     private static unsafe double SampleSincInteriorAvxFma(
@@ -1038,6 +1050,7 @@ public sealed class TbcLineResampler
             int outputLineLength,
             Span<double> destination)
         {
+            double outputScale = nominalLineLength / outputLineLength;
             int sampleIndex = firstSampleIndex;
             int destinationIndex = 0;
             while (destinationIndex < destination.Length)
@@ -1051,8 +1064,12 @@ public sealed class TbcLineResampler
                 int destinationEnd = destinationIndex + samplesThisLine;
                 while (destinationIndex < destinationEnd)
                 {
-                    double linePosition = (double)sampleIndex / outputLineLength;
-                    double fraction = Math.Clamp(linePosition - left, 0.0, 1.0);
+                    double scaledPosition = sampleIndex * outputScale;
+                    double fraction = Math.Clamp(
+                        (scaledPosition - (left * nominalLineLength))
+                            / nominalLineLength,
+                        0.0,
+                        1.0);
                     destination[destinationIndex] = leftLocation + (locationDelta * fraction);
                     destinationIndex++;
                     sampleIndex++;
