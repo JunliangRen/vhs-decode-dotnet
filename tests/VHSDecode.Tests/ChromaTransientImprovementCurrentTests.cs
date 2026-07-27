@@ -99,6 +99,27 @@ public sealed class ChromaTransientImprovementCurrentTests
             samples.Select(BitConverter.DoubleToInt64Bits));
     }
 
+    [Theory(DisplayName = "Pinned CTI reciprocal estimate is CPU independent")]
+    [InlineData(0x427564F4u, 0x3C858800u)]
+    [InlineData(0x42C24200u, 0x3C28A800u)]
+    [InlineData(0x4391B180u, 0x3B60E000u)]
+    [InlineData(0x411BD000u, 0x3DD24000u)]
+    [InlineData(0x00000001u, 0x7F800000u)]
+    [InlineData(0x7F000000u, 0x00000000u)]
+    [InlineData(0x7FC12345u, 0x7FC12345u)]
+    [InlineData(0x807FFFFFu, 0xFF800000u)]
+    public void PinnedCurrentCtiReciprocalEstimateIsCpuIndependent(
+        uint inputBits,
+        uint expectedBits)
+    {
+        float input = BitConverter.UInt32BitsToSingle(inputBits);
+
+        float actual =
+            ChromaTransientImprovement.PinnedReciprocalEstimate(input);
+
+        Assert.Equal(expectedBits, BitConverter.SingleToUInt32Bits(actual));
+    }
+
     private static double[] BuildInput()
     {
         var samples = new double[8 * 64];

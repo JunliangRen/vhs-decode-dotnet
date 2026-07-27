@@ -737,7 +737,7 @@ NTSC-J 门禁保持不变。
 .\tools\build-ipp-native.ps1
 dotnet restore VHSDecodeDotNet.slnx
 dotnet build VHSDecodeDotNet.slnx -c Release --no-restore
-dotnet test --solution VHSDecodeDotNet.slnx -c Release --no-build --no-restore --minimum-expected-tests 1071
+dotnet test --solution VHSDecodeDotNet.slnx -c Release --no-build --no-restore --minimum-expected-tests 1079
 ```
 
 第一条命令用于包含可选的 `ipp-fast` 原生产物；只构建 Exact 时可以省略。
@@ -748,7 +748,7 @@ Intel oneAPI。发布程序会携带 `vhsdecode_ipp.dll`、Intel 许可证和
 `THIRD-PARTY-NOTICES.md`；只构建 Exact 后端时可以省略原生构建步骤。
 
 当前正式 Release 构建为零警告、零错误。xUnit v3 项目向
-`dotnet test` 和 Visual Studio Test Explorer 暴露 **1,071** 个可独立发现的测试。
+`dotnet test` 和 Visual Studio Test Explorer 暴露 **1,079** 个可独立发现的测试。
 
 <!-- SECTION: usage -->
 

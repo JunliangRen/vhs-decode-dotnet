@@ -909,7 +909,7 @@ Requirements:
 .\tools\build-ipp-native.ps1
 dotnet restore VHSDecodeDotNet.slnx
 dotnet build VHSDecodeDotNet.slnx -c Release --no-restore
-dotnet test --solution VHSDecodeDotNet.slnx -c Release --no-build --no-restore --minimum-expected-tests 1071
+dotnet test --solution VHSDecodeDotNet.slnx -c Release --no-build --no-restore --minimum-expected-tests 1079
 ```
 
 The first command includes the optional `ipp-fast` native artifact; omit it for
@@ -922,7 +922,7 @@ Intel license, and `THIRD-PARTY-NOTICES.md`; an Exact-only build may omit the
 native build step.
 
 The current formal Release build has zero warnings and errors. The xUnit v3
-project exposes **1,071** independently discoverable tests to both
+project exposes **1,079** independently discoverable tests to both
 `dotnet test` and Visual Studio Test Explorer.
 
 <!-- SECTION: usage -->

@@ -1,6 +1,4 @@
 using System.Buffers;
-using System.Runtime.Intrinsics;
-using System.Runtime.Intrinsics.X86;
 
 namespace VHSDecode.Core.Dsp;
 
@@ -133,14 +131,59 @@ public static class ChromaTransientImprovement
 
     private static float FastVectorizedQuotient(float numerator, float denominator)
     {
-        float reciprocal = Sse.IsSupported
-            ? Sse.ReciprocalScalar(Vector128.CreateScalar(denominator)).ToScalar()
-            : 1.0f / denominator;
+        float reciprocal = PinnedReciprocalEstimate(denominator);
         float initial = reciprocal * numerator;
         float residual = MathF.FusedMultiplyAdd(
             denominator,
             initial,
             -numerator);
         return MathF.FusedMultiplyAdd(-residual, reciprocal, initial);
+    }
+
+    internal static float PinnedReciprocalEstimate(float value)
+    {
+        const uint SignMask = 0x80000000u;
+        const uint MantissaMask = 0x007FFFFFu;
+        const uint InfinityBits = 0x7F800000u;
+        const uint QuietNaNBit = 0x00400000u;
+        const int EstimateNumerator = 1 << 25;
+
+        uint bits = BitConverter.SingleToUInt32Bits(value);
+        uint sign = bits & SignMask;
+        int exponent = (int)((bits >> 23) & 0xFFu);
+        uint mantissa = bits & MantissaMask;
+
+        if (exponent == 0)
+        {
+            return BitConverter.UInt32BitsToSingle(sign | InfinityBits);
+        }
+
+        if (exponent == 0xFF)
+        {
+            return mantissa == 0
+                ? BitConverter.UInt32BitsToSingle(sign)
+                : BitConverter.UInt32BitsToSingle(bits | QuietNaNBit);
+        }
+
+        if (exponent >= 253)
+        {
+            return BitConverter.UInt32BitsToSingle(sign);
+        }
+
+        // For bucket midpoint x=(4097+2b)/4096, the pinned RCPSS
+        // significand is round(2^25/(4097+2b)).
+        int bucket = (int)(mantissa >> 12);
+        int midpointDenominator = 4_097 + (2 * bucket);
+        int estimate = EstimateNumerator / midpointDenominator;
+        int remainder = EstimateNumerator % midpointDenominator;
+        if ((remainder * 2) >= midpointDenominator)
+        {
+            estimate++;
+        }
+
+        uint resultMantissa = (uint)(estimate - 4_096) << 11;
+        uint resultExponent = (uint)(253 - exponent) << 23;
+        return BitConverter.UInt32BitsToSingle(
+            sign | resultExponent | resultMantissa);
     }
 }
