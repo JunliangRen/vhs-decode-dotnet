@@ -50,6 +50,24 @@ public sealed class TbcParallelResamplerTests
         }
     }
 
+    [Fact(DisplayName = "Linear TBC accepts non-monotonic measured line locations like SciPy")]
+    public void LinearTbcAcceptsNonMonotonicMeasuredLineLocations()
+    {
+        double[] locations = [20.0, 30.0, 25.0, 40.0];
+        var resampler = new TbcLineResampler(
+            outputLineLength: 4,
+            nominalInputLineLength: 10.0);
+
+        using TbcLineResampler.ResamplingPlan plan = resampler.PrepareLineResampling(
+            locations,
+            firstLine: 1,
+            lineCount: 1);
+
+        Assert.Equal(
+            [30.0, 28.75, 27.5, 26.25],
+            plan.SourcePositions.AsSpan(0, plan.DestinationLength).ToArray());
+    }
+
     [Fact(DisplayName = "TBC sinc interior and clamped edges remain bit-exact")]
     public void TbcSincInteriorAndClampedEdgesRemainBitExact()
     {

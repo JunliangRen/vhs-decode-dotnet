@@ -286,7 +286,10 @@ public sealed class TbcFieldSequenceDecodeEngine
         long startSample = begin;
 
         var fields = retainFields ? new List<TbcDecodedField>() : null;
-        var writePlanner = new FieldWritePlanner(session, retainWrites: false);
+        var writePlanner = new FieldWritePlanner(
+            session,
+            retainWrites: false,
+            deferTapeDiagnostics: true);
         int decodedFieldCount = 0;
         int laserDiscSpeculativeWrittenFieldCount = 0;
         TbcDecodedField? firstLaserDiscField = null;
@@ -294,6 +297,7 @@ public sealed class TbcFieldSequenceDecodeEngine
         bool laserDiscLeadOut = false;
         bool haveFirstTapeField = false;
         string? pendingTapeFrameStatus = null;
+        IReadOnlyList<(string Level, string Message)>? pendingTapeFieldOrderDiagnostics = null;
         int? pendingTapeCheckpointFieldCount = null;
         DeferredDiagnosticBatch? pendingVhsRenderDiagnostics = null;
         (TbcDecodedField Field, int DecodedIndex)? pendingCvbsField = null;
@@ -334,7 +338,7 @@ public sealed class TbcFieldSequenceDecodeEngine
             }
         }
 
-        void CompleteField(TbcDecodedField completedField, int decodedIndex)
+        TbcFieldOrderDecision? CompleteField(TbcDecodedField completedField, int decodedIndex)
         {
             fields?.Add(completedField);
             int fieldsWrittenBeforeAdd = writePlanner.WrittenFieldCount;
@@ -400,6 +404,8 @@ public sealed class TbcFieldSequenceDecodeEngine
                     session,
                     $"File Frame {rawFrame}: CAV Pulldown/Telecine Frame");
             }
+
+            return writePlanner.LastDecision;
         }
 
         while (maxFields.HasValue
@@ -550,6 +556,16 @@ public sealed class TbcFieldSequenceDecodeEngine
             pendingVhsRenderDiagnostics?.FlushRenderDiagnostics();
             pendingVhsRenderDiagnostics = null;
 
+            if (pendingTapeFieldOrderDiagnostics is not null)
+            {
+                foreach ((string level, string message) in pendingTapeFieldOrderDiagnostics)
+                {
+                    DecodeSessionLogWriter.Append(session, level, message);
+                }
+
+                pendingTapeFieldOrderDiagnostics = null;
+            }
+
             if (pendingTapeFrameStatus is not null)
             {
                 DecodeSessionLogWriter.Status(session, pendingTapeFrameStatus);
@@ -618,11 +634,12 @@ public sealed class TbcFieldSequenceDecodeEngine
             }
 
             bool completedCurrentField = false;
+            TbcFieldOrderDecision? currentFieldOrderDecision = null;
             if (field.DeferredRenderSource is not null)
             {
                 if (useCvbsWorkerPrefetch)
                 {
-                    CompleteField(
+                    currentFieldOrderDecision = CompleteField(
                         FinalizeDeferredCvbsWorkerRender(
                             session,
                             field,
@@ -640,22 +657,36 @@ public sealed class TbcFieldSequenceDecodeEngine
             }
             else
             {
-                CompleteField(field, decodedFieldCount - 1);
+                currentFieldOrderDecision = CompleteField(field, decodedFieldCount - 1);
                 completedCurrentField = true;
             }
 
             bool isFirstField = field.DetectedFirstField ?? ((decodedFieldCount - 1) % 2 == 0);
             if (session.Spec.Name == "vhs")
             {
+                if (writePlanner.LastDiagnostics.Count > 0)
+                {
+                    pendingTapeFieldOrderDiagnostics = [.. writePlanner.LastDiagnostics];
+                }
+
+                bool hasNormalFieldOrder = currentFieldOrderDecision is { DecodeFaults: 0 };
                 if (isFirstField)
                 {
-                    haveFirstTapeField = true;
+                    if (hasNormalFieldOrder)
+                    {
+                        haveFirstTapeField = true;
+                    }
+
                     CheckpointOutput(writePlanner.WrittenFieldCount);
                 }
                 else if (haveFirstTapeField)
                 {
-                    int rawFrame = checked((int)Math.Floor(ComputeFieldDiskLocation(session, field) / 2.0));
-                    pendingTapeFrameStatus = $"File Frame {rawFrame}: {session.Parameters.TapeFormat} ";
+                    if (hasNormalFieldOrder)
+                    {
+                        int rawFrame = checked((int)Math.Floor(ComputeFieldDiskLocation(session, field) / 2.0));
+                        pendingTapeFrameStatus = $"File Frame {rawFrame}: {session.Parameters.TapeFormat} ";
+                    }
+
                     pendingTapeCheckpointFieldCount = writePlanner.WrittenFieldCount;
                 }
                 else
@@ -736,6 +767,14 @@ public sealed class TbcFieldSequenceDecodeEngine
         }
 
         pendingVhsRenderDiagnostics?.FlushRenderDiagnostics();
+
+        if (pendingTapeFieldOrderDiagnostics is not null)
+        {
+            foreach ((string level, string message) in pendingTapeFieldOrderDiagnostics)
+            {
+                DecodeSessionLogWriter.Append(session, level, message);
+            }
+        }
 
         if (pendingTapeFrameStatus is not null)
         {
@@ -1849,22 +1888,35 @@ public sealed class TbcFieldSequenceDecodeEngine
         private readonly List<(TbcDecodedField Field, TbcFieldOrderDecision Decision)>? _retainedWrites;
         private readonly List<(TbcDecodedField Field, TbcFieldOrderDecision Decision)> _history = [];
         private readonly Dictionary<bool, (TbcDecodedField Field, TbcFieldOrderDecision Decision)> _lastValid = [];
+        private readonly bool _deferTapeDiagnostics;
+        private readonly List<(string Level, string Message)> _lastDiagnostics = [];
         private bool _duplicatePreviousField = true;
         private int _writtenFieldCount;
 
-        public FieldWritePlanner(DecodeSession session, bool retainWrites)
+        public FieldWritePlanner(
+            DecodeSession session,
+            bool retainWrites,
+            bool deferTapeDiagnostics = false)
         {
             _session = session;
             _retainedWrites = retainWrites ? [] : null;
+            _deferTapeDiagnostics = deferTapeDiagnostics;
         }
 
         public IReadOnlyList<(TbcDecodedField Field, TbcFieldOrderDecision Decision)> Writes
             => _retainedWrites ?? [];
 
+        public TbcFieldOrderDecision? LastDecision { get; private set; }
+
+        public IReadOnlyList<(string Level, string Message)> LastDiagnostics
+            => _lastDiagnostics;
+
         public int WrittenFieldCount => _writtenFieldCount;
 
         public IReadOnlyList<(TbcDecodedField Field, TbcFieldOrderDecision Decision)> Add(TbcDecodedField field)
         {
+            LastDecision = null;
+            _lastDiagnostics.Clear();
             var emitted = new List<(TbcDecodedField Field, TbcFieldOrderDecision Decision)>(2);
             if (_session.Spec.Name is "ld" or "cvbs")
             {
@@ -1908,8 +1960,7 @@ public sealed class TbcFieldSequenceDecodeEngine
                     && distance <= 1.1;
                 if (progressive)
                 {
-                    DecodeSessionLogWriter.Append(
-                        _session,
+                    LogTapeDiagnostic(
                         "ERROR",
                         "Detected progressive video content..., manually flipping the field order to compensate");
                     decodeFaults |= 1;
@@ -1941,8 +1992,7 @@ public sealed class TbcFieldSequenceDecodeEngine
                     {
                         if (_session.Parameters.TapeFormat != "TYPEC")
                         {
-                            DecodeSessionLogWriter.Append(
-                                _session,
+                            LogTapeDiagnostic(
                                 "ERROR",
                                 "Possibly skipped field (Two fields with same isFirstField in a row), manually flipping the field order to compensate");
                         }
@@ -1951,16 +2001,14 @@ public sealed class TbcFieldSequenceDecodeEngine
                     }
                     else if (_duplicatePreviousField)
                     {
-                        DecodeSessionLogWriter.Append(
-                            _session,
+                        LogTapeDiagnostic(
                             "ERROR",
                             "Possibly skipped field (Two fields with same isFirstField in a row), duplicating the last field to compensate...");
                         isDuplicateField = true;
                     }
                     else
                     {
-                        DecodeSessionLogWriter.Append(
-                            _session,
+                        LogTapeDiagnostic(
                             "ERROR",
                             "Possibly skipped field (Two fields with same isFirstField in a row), dropping the last field to compensate...");
                         writeField = false;
@@ -1976,6 +2024,7 @@ public sealed class TbcFieldSequenceDecodeEngine
                 writeField,
                 syncConfidence,
                 decodeFaults);
+            LastDecision = decision;
             var current = (Field: field, Decision: decision);
             if (writeField)
             {
@@ -1998,6 +2047,17 @@ public sealed class TbcFieldSequenceDecodeEngine
             {
                 Emit(current, emitted);
             }
+        }
+
+        private void LogTapeDiagnostic(string level, string message)
+        {
+            if (_deferTapeDiagnostics)
+            {
+                _lastDiagnostics.Add((level, message));
+                return;
+            }
+
+            DecodeSessionLogWriter.Append(_session, level, message);
         }
 
         private void AddLaserDiscStyleField(
@@ -2057,6 +2117,7 @@ public sealed class TbcFieldSequenceDecodeEngine
                 WriteField: true,
                 syncConfidence,
                 decodeFaults);
+            LastDecision = decision;
             var current = (Field: field, Decision: decision);
             _lastValid[detectedFirstField] = current;
 

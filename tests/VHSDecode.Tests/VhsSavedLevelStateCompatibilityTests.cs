@@ -175,6 +175,19 @@ public sealed class VhsSavedLevelStateCompatibilityTests
             fieldState: null,
             detector,
             diagnosticLogger: null));
+
+        var syncOnlyState = new VhsFieldLevelState(framesPerSecond: 25.0);
+        syncOnlyState.PushSyncLevel(80.0);
+        diagnostics.Clear();
+        Assert.True(TbcFieldDecodePipeline.TryResolveVhsSerrationRefinementFallback(
+            SerrationLevelFailureKind.MissingLevels,
+            syncOnlyState,
+            (level, message) => diagnostics.Add((level, message)),
+            out (double SyncLevel, double BlankLevel)? syncOnlyLevels));
+        Assert.Null(syncOnlyLevels);
+        Assert.Equal(
+            [("DEBUG", "blacklevel or synclevel had a NaN!")],
+            diagnostics);
     }
 
     [Fact(DisplayName = "VHS first fallback pass reuses FieldState without storing serration levels")]

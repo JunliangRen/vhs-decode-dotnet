@@ -773,13 +773,15 @@ public sealed class TbcFieldDecodePipeline
 
         SyncTiming timing = _syncAnalyzer.EstimateTiming(rawPulses);
         IReadOnlyList<ClassifiedSyncPulse> classified = _syncAnalyzer.ClassifyPulses(rawPulses, timing);
-        if (classified.Count == 0)
+        if (classified.Count == 0 && !isVhs)
         {
             throw BuildRecoveryException(
                 TbcFieldDecodeRecoveryKind.NoFirstHSync,
                 "No classified sync pulses were detected in the decoded span.");
         }
 
+        // v0.4.0 still advances VHS field cadence when raw pulses exist but
+        // refinement rejects every pulse, then recovers from the missing line zero.
         IReadOnlyList<ClassifiedSyncPulse> refinedPulses = isVhs
             ? _vhsSyncDetector is not null && !prepared.ExplicitThreshold
                 ? _syncAnalyzer.RefinePulses(rawPulses, timing)
@@ -4566,8 +4568,12 @@ public sealed class TbcFieldDecodePipeline
             return false;
         }
 
+        double? fieldStateSyncLevel = failureKind == SerrationLevelFailureKind.MissingLevels
+            ? fieldState?.PullSyncLevel()
+            : null;
         fieldStateLevels = fieldState?.PullLevels();
-        if (failureKind == SerrationLevelFailureKind.MissingLevels && !fieldStateLevels.HasValue)
+        if (failureKind == SerrationLevelFailureKind.MissingLevels
+            && !fieldStateSyncLevel.HasValue)
         {
             return false;
         }
@@ -5338,7 +5344,7 @@ public sealed class TbcFieldDecodePipeline
             : 100;
     }
 
-    private Line0FallbackCandidate? TryResolveFallbackLine0(
+    internal Line0FallbackCandidate? TryResolveFallbackLine0(
         IReadOnlyList<ClassifiedSyncPulse> validPulses,
         IReadOnlyList<Pulse> rawPulses,
         ReadOnlySpan<double> demodLowPass,
@@ -5378,7 +5384,7 @@ public sealed class TbcFieldDecodePipeline
             rawPulses,
             demodLowPass,
             timing.VSync,
-            meanLineLength,
+            _syncAnalyzer.NominalLineLength,
             _syncAnalyzer.NumPulses,
             fieldLines[0] + fieldLines[1],
             _syncDetectionOptions.RelaxedLine0,
