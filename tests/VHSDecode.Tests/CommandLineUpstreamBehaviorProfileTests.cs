@@ -40,16 +40,32 @@ public sealed class CommandLineUpstreamBehaviorProfileTests
             exception.Message);
     }
 
-    [Fact(DisplayName = "Upstream behavior is excluded from the v0.4.0 Python namespace")]
-    public void UpstreamBehaviorIsExcludedFromPythonNamespace()
+    [Fact(DisplayName = "Only current profile adds CTI to the Python namespace")]
+    public void OnlyCurrentProfileAddsCtiToPythonNamespace()
     {
         string v040 = PythonNamespaceFormatter.Format(
             Parse(CliSpecs.Vhs, "--compat-version", "v0.4.0"));
         string current = PythonNamespaceFormatter.Format(
             Parse(CliSpecs.Vhs, "--compat-version", "current"));
+        string v040WithCti = PythonNamespaceFormatter.Format(
+            Parse(
+                CliSpecs.Vhs,
+                "--cti_mix",
+                "0.35",
+                "--cti_width",
+                "0"));
 
-        Assert.Equal(v040, current);
         Assert.DoesNotContain("compat_version", v040, StringComparison.Ordinal);
+        Assert.DoesNotContain("cti_mix", v040, StringComparison.Ordinal);
+        Assert.DoesNotContain("cti_width", v040, StringComparison.Ordinal);
+        Assert.Equal(v040, v040WithCti);
+        Assert.Contains(
+            "detect_chroma_track_phase=False, cti_mix=1, cti_width=2, disable_phase_correction=False",
+            current,
+            StringComparison.Ordinal);
+        Assert.Equal(
+            v040,
+            current.Replace(", cti_mix=1, cti_width=2", string.Empty, StringComparison.Ordinal));
     }
 
     [Theory(DisplayName = "Upstream behavior parser round-trips supported profiles")]
@@ -80,7 +96,7 @@ public sealed class CommandLineUpstreamBehaviorProfileTests
         Assert.Equal("current", current.Algorithms["vhsVsyncLevels"]);
         Assert.Equal("current", current.Algorithms["chromaGroupDelay"]);
         Assert.Equal("current", current.Algorithms["chromaFinalFilter"]);
-        Assert.Equal("pending", current.Algorithms["cti"]);
+        Assert.Equal("current", current.Algorithms["cti"]);
     }
 
     [Theory(DisplayName = "Decode session routes the selected upstream behavior profile")]
@@ -105,6 +121,42 @@ public sealed class CommandLineUpstreamBehaviorProfileTests
             expected == UpstreamBehaviorProfile.Current,
             session.TbcFieldDecoder.ChromaFieldOptions!
                 .SuperGaussianFinalFilter is not null);
+        Assert.Equal(
+            expected == UpstreamBehaviorProfile.Current,
+            session.TbcFieldDecoder.ChromaFieldOptions!
+                .UseCurrentChromaProcessing);
+        Assert.Equal(
+            expected == UpstreamBehaviorProfile.Current ? 71 : 70,
+            session.TbcFieldDecoder.ChromaFieldOptions!.BurstStart);
+        Assert.Equal(
+            expected == UpstreamBehaviorProfile.Current ? 119 : 122,
+            session.TbcFieldDecoder.ChromaFieldOptions!.BurstEnd);
+        Assert.Equal(1.0, session.TbcFieldDecoder.ChromaFieldOptions!.CtiMix);
+        Assert.Equal(2, session.TbcFieldDecoder.ChromaFieldOptions!.CtiWidth);
+    }
+
+    [Fact(DisplayName = "Current profile routes official CTI parameters")]
+    public void CurrentProfileRoutesOfficialCtiParameters()
+    {
+        ParsedCommand command = Parse(
+            CliSpecs.Vhs,
+            "--compat-version",
+            "current",
+            "--cti_mix",
+            "0.35",
+            "--cti_width",
+            "0",
+            "input.s16",
+            "output");
+
+        using DecodeSession session = DecodeSessionFactory.Create(command);
+        VhsChromaFieldOptions options = session.TbcFieldDecoder.ChromaFieldOptions!;
+
+        Assert.Equal(0.35, command.Get<double>("cti_mix"));
+        Assert.Equal(0, command.Get<int>("cti_width"));
+        Assert.Equal(0.35, options.CtiMix);
+        Assert.Equal(0, options.CtiWidth);
+        Assert.True(options.UseCurrentChromaProcessing);
     }
 
     [Fact(DisplayName = "Non-VHS decode sessions retain the v0.4.0 behavior profile")]

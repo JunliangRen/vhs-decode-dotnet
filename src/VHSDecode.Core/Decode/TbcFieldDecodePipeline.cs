@@ -1721,12 +1721,39 @@ public sealed class TbcFieldDecodePipeline
 
         double outputSamplesPerUsec = JsonDouble(parameters.SysParams, "outfreq");
         double chromaSampleRateHz = JsonDouble(parameters.SysParams, "fsc_mhz") * 4_000_000.0;
+        bool useCurrentChromaProcessing =
+            upstreamBehaviorProfile == UpstreamBehaviorProfile.Current
+            && chromaOptions.IsColorUnder;
+        int nominalBurstStart = checked(
+            (int)Math.Floor(
+                colorBurstRange[0].GetDouble() * outputSamplesPerUsec));
+        int nominalBurstEnd = checked(
+            (int)Math.Ceiling(
+                colorBurstRange[1].GetDouble() * outputSamplesPerUsec));
+        int adjustedBurstStart;
+        int adjustedBurstEnd;
+        if (useCurrentChromaProcessing)
+        {
+            adjustedBurstStart = checked(nominalBurstStart - 4);
+            adjustedBurstEnd = checked(nominalBurstEnd + 8);
+            int alignmentRemainder =
+                (adjustedBurstEnd - adjustedBurstStart) % 4;
+            adjustedBurstEnd -= alignmentRemainder < 0
+                ? alignmentRemainder + 4
+                : alignmentRemainder;
+        }
+        else
+        {
+            adjustedBurstStart = checked(nominalBurstStart - 5);
+            adjustedBurstEnd = checked(nominalBurstEnd + 10);
+        }
+
         int burstStart = Math.Clamp(
-            checked((int)Math.Floor(colorBurstRange[0].GetDouble() * outputSamplesPerUsec) - 5),
+            adjustedBurstStart,
             0,
             frameSpec.OutputLineLength);
         int burstEnd = Math.Clamp(
-            checked((int)Math.Ceiling(colorBurstRange[1].GetDouble() * outputSamplesPerUsec) + 10),
+            adjustedBurstEnd,
             burstStart,
             frameSpec.OutputLineLength);
         filterOptions ??= new DecodeFilterOptions();
@@ -1749,8 +1776,7 @@ public sealed class TbcFieldDecodePipeline
             FinalFilter = DecodeFilterSetBuilder.BuildChromaFinalFilter(parameters, chromaSampleRateHz, chromaOptions.IsColorUnder),
             FinalSosFilter = DecodeFilterSetBuilder.BuildChromaFinalSosFilter(parameters, chromaSampleRateHz, chromaOptions.IsColorUnder),
             SuperGaussianFinalFilter =
-                upstreamBehaviorProfile == UpstreamBehaviorProfile.Current
-                && chromaOptions.IsColorUnder
+                useCurrentChromaProcessing
                     ? new ChromaSuperGaussianFinalFilter(
                         checked(
                             frameSpec.OutputLineLength
@@ -1800,7 +1826,13 @@ public sealed class TbcFieldDecodePipeline
             ChromaAfcDecodeSampleRateHz = chromaOptions.UseChromaAfc ? decodeSampleRateHz : 0.0,
             DisableBurstHsync = chromaOptions.DisableBurstHsync,
             InitialChromaRotationIndex = initialChromaRotationIndex,
-            WorkerThreads = Math.Max(0, workerThreads)
+            WorkerThreads = Math.Max(0, workerThreads),
+            UseCurrentChromaProcessing = useCurrentChromaProcessing,
+            SyncTipLength = checked((int)Math.Floor(
+                JsonDouble(parameters.SysParams, "hsyncPulseUS")
+                * outputSamplesPerUsec)),
+            CtiMix = chromaOptions.CtiMix,
+            CtiWidth = chromaOptions.CtiWidth
         };
     }
 

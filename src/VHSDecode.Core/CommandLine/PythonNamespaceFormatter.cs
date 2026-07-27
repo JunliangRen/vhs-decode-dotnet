@@ -24,6 +24,14 @@ internal static class PythonNamespaceFormatter
                 continue;
             }
 
+            if (option.Destination is "cti_mix" or "cti_width"
+                && command.Values.TryGetValue("compat_version", out object? compatibilityVersion)
+                && compatibilityVersion is string profile
+                && profile.Equals("v0.4.0", StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
             ParsedOptionSource source = command.GetSource(option.Destination);
             if (command.Spec.Name is "vhs" or "cvbs"
                 && option.Destination == "noAGC")

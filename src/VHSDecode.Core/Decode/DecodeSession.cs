@@ -80,7 +80,12 @@ public sealed record ChromaDecodeOptions(
     bool EnableColorKiller,
     bool DisableBurstHsync,
     bool DisablePhaseCorrection,
-    bool UseOldRawChromaOutput);
+    bool UseOldRawChromaOutput)
+{
+    public double CtiMix { get; init; } = 1.0;
+
+    public long CtiWidth { get; init; } = 2;
+}
 
 public sealed record DecodeExecutionOptions(
     int RequestedThreads,
@@ -546,7 +551,11 @@ public static class DecodeSessionFactory
             EnableColorKiller: command.Get<bool>("enable_color_killer"),
             DisableBurstHsync: command.Get<bool>("disable_burst_hsync"),
             DisablePhaseCorrection: command.Get<bool>("disable_phase_correction"),
-            UseOldRawChromaOutput: command.Get<bool>("orc"));
+            UseOldRawChromaOutput: command.Get<bool>("orc"))
+        {
+            CtiMix = command.Get<double>("cti_mix"),
+            CtiWidth = command.Get<long>("cti_width")
+        };
     }
 
     private static DecodeExecutionOptions BuildExecutionOptions(ParsedCommand command)

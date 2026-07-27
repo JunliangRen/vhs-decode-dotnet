@@ -125,6 +125,8 @@ public static class CliSpecs
         yield return Flag("cafc", ["--cafc", "--chroma_AFC"]);
         yield return Int("track_phase", ["-T", "--track_phase"], null);
         yield return Flag("detect_chroma_track_phase", ["--dctp", "--detect_chroma_track_phase"]);
+        yield return Dbl("cti_mix", ["--cti_mix"], 1.0, pythonDefaultValue: 1);
+        yield return Int("cti_width", ["--cti_width"], 2);
         yield return Flag("disable_phase_correction", ["--dpc", "--disable_phase_correction"]);
         yield return Flag("disable_burst_hsync", ["--dbh", "--disable_burst_hsync"]);
         yield return Flag("enable_color_killer", ["--ck", "--enable_color_killer"]);

@@ -11,8 +11,9 @@ usage: vhs-decode [-h] [--system system] [-s start]
                   [--wow_level_adjust_smoothing WOW_LEVEL_ADJUST_SMOOTHING]
                   [--wow_interpolation_method {linear,quadratic,cubic}]
                   [--nodd] [--fm_audio_notch [Q]] [--clamp] [--nld] [--sd]
-                  [--y_comb [IRE]] [--cafc] [-T Track phase] [--dctp] [--dpc]
-                  [--dbh] [--ck] [--no_comb] [--skip_chroma] [--dp DEBUG_PLOT]
+                  [--y_comb [IRE]] [--cafc] [-T Track phase] [--dctp]
+                  [--cti_mix CTI_MIX] [--cti_width CTI_WIDTH] [--dpc] [--dbh] [--ck]
+                  [--no_comb] [--skip_chroma] [--dp DEBUG_PLOT]
                   [--drh] [--level_detect_divisor value] [--no_resample]
                   [--fallback_vsync] [--relaxed_line0]
                   [--field_order_confidence value]
@@ -139,6 +140,11 @@ Chroma decoding options:
                         If set to 0 or 1, force use of video track phase. (No effect on U-matic)
   --dctp, --detect_chroma_track_phase
                         Detects and corrects color-under heterodyne rotation change around head-switching area. Corrects chroma artifacts around head-switching area for color-under formats. (Experimental feature)
+  --cti_mix CTI_MIX     Sets Chroma Transient Improvement amount (color-under only). This is the wet/dry mix of the overall effect. Set to 0 to disable. Default is 1.
+                        Chroma Transient Improvement helps to re-focus edges in up-converted color-under and increases how quickly color can change. Requires --compat-version current.
+  --cti_width CTI_WIDTH
+                        Sets Chroma Transient Improvement width in subcarrier cycles (color-under only). Default is 2.
+                        Larger values increase edge sharpness with less hue detail; smaller values retain more hue detail with less edge sharpness.
   --dpc, --disable_phase_correction
                         Disables phase correction after up-heterodyning color under formats. This can safely be disabled if not using the NTSC 3D decoder. (currently only applicable to NTSC)
   --dbh, --disable_burst_hsync

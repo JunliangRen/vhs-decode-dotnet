@@ -25,7 +25,7 @@ public sealed record ChromaBurstDemodulationResult(
 
     public int End { get; init; }
 
-    public long Center { get; init; }
+    public double Center { get; init; }
 
     public double Amplitude { get; init; }
 
@@ -47,7 +47,7 @@ public sealed record ChromaPhaseLine(
 
     public int BurstEnd { get; init; }
 
-    public long BurstCenter { get; init; }
+    public double BurstCenter { get; init; }
 
     public double BurstAmplitude { get; init; }
 
@@ -131,6 +131,14 @@ public sealed record VhsChromaFieldOptions(
     public bool DisableBurstHsync { get; init; }
 
     public int? InitialChromaRotationIndex { get; init; }
+
+    internal bool UseCurrentChromaProcessing { get; init; }
+
+    internal int SyncTipLength { get; init; }
+
+    internal double CtiMix { get; init; }
+
+    internal long CtiWidth { get; init; } = 2;
 }
 
 public sealed record VhsChromaFieldResult(
@@ -415,20 +423,36 @@ public static class VhsChromaDecoder
             lineOffset,
             options.OutputLineCount,
             inputLineLength,
-            (lineNumber, phaseRotation, lineScale) => ProbeUpconvertedBurst(
-                chromaField,
-                heterodyne,
-                phaseRotation,
-                options.BurstStart,
-                options.BurstEnd,
-                burstSin,
-                burstCos,
-                lineScale,
-                lineNumber,
-                lineOffset,
-                options.OutputLineLength,
-                effectiveBurstFilter,
-                useFloat32Samples),
+            (lineNumber, phaseRotation, lineScale) =>
+                options.UseCurrentChromaProcessing
+                    ? ProbeUpconvertedBurstCurrent(
+                        chromaField,
+                        heterodyne,
+                        phaseRotation,
+                        options.BurstStart,
+                        options.BurstEnd,
+                        burstSin,
+                        burstCos,
+                        lineNumber,
+                        lineOffset,
+                        options.OutputLineLength,
+                        options.FscMHz * 1_000_000.0,
+                        effectiveBurstFilter,
+                        useFloat32Samples)
+                    : ProbeUpconvertedBurst(
+                        chromaField,
+                        heterodyne,
+                        phaseRotation,
+                        options.BurstStart,
+                        options.BurstEnd,
+                        burstSin,
+                        burstCos,
+                        lineScale,
+                        lineNumber,
+                        lineOffset,
+                        options.OutputLineLength,
+                        effectiveBurstFilter,
+                        useFloat32Samples),
             options.DetectChromaTrackPhase,
             rotationCheckStartLine: Math.Max(lineOffset, lineOffset + options.OutputLineCount - BurstCheckSkipLines),
             options.EnableColorKiller,
@@ -574,7 +598,9 @@ public static class VhsChromaDecoder
                 options.OutputLineCount,
                 options.OutputLineLength,
                 options.BurstStart,
-                options.BurstEnd);
+                options.BurstEnd,
+                samplesAfterBurst:
+                    options.UseCurrentChromaProcessing ? 4 : 5);
         }
 
         double[] upconverted;
@@ -584,15 +610,31 @@ public static class VhsChromaDecoder
             (fieldPhaseId, double targetPhase) = NtscFieldPhaseTarget(
                 isFirstField.GetValueOrDefault(),
                 fieldNumber);
-            upconverted = UpconvertChromaPhaseCompensated(
-                chromaField,
-                lineOffset,
-                options.OutputLineLength,
-                phase.PhaseSequence,
-                options.ColorUnderCarrierHz,
-                options.FscMHz,
-                targetPhaseEvenDegrees: targetPhase,
-                targetPhaseOddDegrees: targetPhase);
+            if (options.UseCurrentChromaProcessing)
+            {
+                upconverted = chromaField.ToArray();
+                UpconvertChromaPhaseCompensatedCurrentInPlace(
+                    upconverted,
+                    lineOffset,
+                    options.OutputLineLength,
+                    phase.PhaseSequence,
+                    options.ColorUnderCarrierHz,
+                    options.FscMHz * 1_000_000.0,
+                    targetPhaseEvenDegrees: targetPhase,
+                    targetPhaseOddDegrees: targetPhase);
+            }
+            else
+            {
+                upconverted = UpconvertChromaPhaseCompensated(
+                    chromaField,
+                    lineOffset,
+                    options.OutputLineLength,
+                    phase.PhaseSequence,
+                    options.ColorUnderCarrierHz,
+                    options.FscMHz,
+                    targetPhaseEvenDegrees: targetPhase,
+                    targetPhaseOddDegrees: targetPhase);
+            }
         }
         else
         {
@@ -633,27 +675,65 @@ public static class VhsChromaDecoder
                 || options.FinalSosFilter is not null
                 || options.FinalFilter is null);
 
-        ushort[] gained = options.DisableComb
-            ? ApplyAutomaticChromaGainToU16(
-                upconverted,
-                options.BurstAbsRef,
-                options.BurstStart,
-                options.BurstEnd,
-                options.OutputLineLength,
-                options.OutputLineCount,
-                phase.BurstDetectedLine,
-                useFloat32Rms: retainFloat32)
-            : ApplyAutomaticChromaGainWithCombToU16(
-                upconverted,
-                options.BurstAbsRef,
-                options.BurstStart,
-                options.BurstEnd,
-                options.OutputLineLength,
-                options.OutputLineCount,
-                phase.BurstDetectedLine,
-                IsNtsc(options.ColorSystem) ? 1 : 2,
-                retainFloat32,
-                useFloat32Rms: retainFloat32);
+        ushort[] gained;
+        if (options.UseCurrentChromaProcessing)
+        {
+            double[] currentChroma = options.DisableComb
+                ? upconverted
+                : IsNtsc(options.ColorSystem)
+                    ? ApplyNtscComb(
+                        upconverted,
+                        options.OutputLineLength,
+                        retainFloat32)
+                    : ApplyPalComb(
+                        upconverted,
+                        options.OutputLineLength,
+                        retainFloat32);
+            CurrentAutomaticChromaGainResult gain =
+                ApplyCurrentAutomaticChromaGainInPlace(
+                    currentChroma,
+                    options.BurstAbsRef,
+                    phase.PhaseSequence,
+                    phase.BurstDetectedLine,
+                    options.SyncTipLength);
+            if (options.CtiMix != 0.0)
+            {
+                ChromaTransientImprovement.ApplyInPlace(
+                    currentChroma,
+                    checked(lineOffset * options.OutputLineLength),
+                    options.OutputLineLength,
+                    gain.NoiseFloor,
+                    options.CtiWidth,
+                    options.CtiMix);
+            }
+
+            gained = ChromaToU16(currentChroma);
+        }
+        else
+        {
+            gained = options.DisableComb
+                ? ApplyAutomaticChromaGainToU16(
+                    upconverted,
+                    options.BurstAbsRef,
+                    options.BurstStart,
+                    options.BurstEnd,
+                    options.OutputLineLength,
+                    options.OutputLineCount,
+                    phase.BurstDetectedLine,
+                    useFloat32Rms: retainFloat32)
+                : ApplyAutomaticChromaGainWithCombToU16(
+                    upconverted,
+                    options.BurstAbsRef,
+                    options.BurstStart,
+                    options.BurstEnd,
+                    options.OutputLineLength,
+                    options.OutputLineCount,
+                    phase.BurstDetectedLine,
+                    IsNtsc(options.ColorSystem) ? 1 : 2,
+                    retainFloat32,
+                    useFloat32Rms: retainFloat32);
+        }
+
         return new VhsChromaFieldResult(
             gained,
             phase.BurstDetectedLine,
@@ -1079,6 +1159,87 @@ public static class VhsChromaDecoder
             burstSin,
             burstCos,
             useFloat32Samples);
+    }
+
+    internal static ChromaBurstDemodulationResult ProbeUpconvertedBurstCurrent(
+        ReadOnlySpan<double> chroma,
+        IReadOnlyList<double[]> chromaHeterodyne,
+        int phaseRotation,
+        int burstStart,
+        int burstEnd,
+        ReadOnlySpan<double> burstSin,
+        ReadOnlySpan<double> burstCos,
+        int lineNumber,
+        int lineOffset,
+        int lineLength,
+        double fscHz,
+        Func<double[], double[]>? burstFilter = null,
+        bool useFloat32Samples = false)
+    {
+        ArgumentOutOfRangeException.ThrowIfNegative(lineOffset);
+        ArgumentOutOfRangeException.ThrowIfNegativeOrZero(fscHz);
+        ValidateBurstRange(burstStart, burstEnd, lineLength);
+        (int lineStart, _) = GetLineRange(
+            chroma.Length,
+            lineOffset,
+            lineLength,
+            lineNumber);
+        if (phaseRotation < 0 || phaseRotation >= chromaHeterodyne.Count)
+        {
+            throw new ArgumentOutOfRangeException(nameof(phaseRotation));
+        }
+
+        double[] heterodyne = chromaHeterodyne[phaseRotation];
+        if (heterodyne.Length < chroma.Length)
+        {
+            throw new ArgumentException(
+                "Chroma heterodyne table is shorter than the chroma field.",
+                nameof(chromaHeterodyne));
+        }
+
+        int burstPadding = burstStart;
+        int paddedStart = Math.Max(0, lineStart + burstStart - burstPadding);
+        int paddedEnd = Math.Min(
+            chroma.Length,
+            lineStart + burstEnd + burstPadding);
+        var paddedBurst = new double[Math.Max(0, paddedEnd - paddedStart)];
+        for (int index = 0; index < paddedBurst.Length; index++)
+        {
+            int sourceIndex = paddedStart + index;
+            float heterodyneSample = (float)heterodyne[sourceIndex];
+            paddedBurst[index] = useFloat32Samples
+                ? (float)(heterodyneSample * (float)chroma[sourceIndex])
+                : heterodyneSample * chroma[sourceIndex];
+        }
+
+        double[] filteredPadded = burstFilter?.Invoke(paddedBurst) ?? paddedBurst;
+        int filteredStart = Math.Min(burstPadding, filteredPadded.Length);
+        int filteredEnd = Math.Max(
+            filteredStart,
+            filteredPadded.Length - burstPadding);
+        int globalBurstStart = checked(paddedStart + burstPadding);
+        CurrentChromaBurstFit fit = CurrentChromaBurstFitter.Fit(
+            filteredPadded.AsSpan(
+                filteredStart,
+                filteredEnd - filteredStart),
+            globalBurstStart,
+            burstSin,
+            burstCos,
+            fscHz);
+        return new ChromaBurstDemodulationResult(
+            fit.PhaseDegrees,
+            PhaseOffsetDegrees: 0.0,
+            fit.Magnitude,
+            fit.I,
+            fit.Q)
+        {
+            Start = paddedStart,
+            End = paddedEnd,
+            Center = fit.Center,
+            Amplitude = fit.Amplitude,
+            Dc = fit.Dc,
+            FrequencyHz = fit.FrequencyHz
+        };
     }
 
     public static ChromaPhaseSequenceResult GetPhaseRotationSequence(
@@ -1574,14 +1735,16 @@ public static class VhsChromaDecoder
         int linesOut,
         int lineLength,
         int burstStart,
-        int burstEnd)
+        int burstEnd,
+        int samplesAfterBurst = 5)
     {
         ValidateLineShape(chroma.Length, linesOut, lineLength);
         ArgumentOutOfRangeException.ThrowIfNegative(lineOffset);
+        ArgumentOutOfRangeException.ThrowIfNegative(samplesAfterBurst);
         ValidateBurstRange(burstStart, burstEnd, lineLength);
 
         double[] output = chroma.ToArray();
-        int firstDoubledSample = burstEnd + 5;
+        int firstDoubledSample = checked(burstEnd + samplesAfterBurst);
         if (firstDoubledSample >= lineLength)
         {
             return output;
@@ -2445,7 +2608,15 @@ public static class VhsChromaDecoder
             burst.PhaseOffsetDegrees,
             burst.Magnitude,
             burst.I,
-            burst.Q);
+            burst.Q)
+        {
+            BurstStart = burst.Start,
+            BurstEnd = burst.End,
+            BurstCenter = burst.Center,
+            BurstAmplitude = burst.Amplitude,
+            BurstDc = burst.Dc,
+            BurstFrequencyHz = burst.FrequencyHz
+        };
     }
 
     private static double ComputeLineScale(
