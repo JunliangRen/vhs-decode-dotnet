@@ -9237,7 +9237,8 @@ public void TbcLineResamplerExtractsFixedWidthLines()
     AssertEqual(lookaheadLocations[^1], retainedLookahead[^1]);
 
     AssertThrows<ArgumentOutOfRangeException>(() => resampler.ResampleLine(source, lineLocations, line: 2));
-    AssertThrows<ArgumentException>(() => resampler.ResampleLine(source, [10.0, 10.0], line: 0));
+    AssertThrows<ArgumentException>(() => resampler.ResampleLine(source, [10.0, double.NaN], line: 0));
+    AssertThrows<ArgumentException>(() => resampler.ResampleLine(source, [10.0, double.PositiveInfinity], line: 0));
 }
 
 [Fact(DisplayName = "video output converter maps Hz to TBC samples")]
@@ -12753,6 +12754,85 @@ public void TbcFieldSequenceEnginePerformsVhsTerminalLookahead()
             firstStatus + new string(' ', 80 - firstStatus.Length) + '\r'
                 + secondStatus + new string(' ', 80 - secondStatus.Length) + '\r',
             statusOutput.ToString());
+    }
+    finally
+    {
+        Directory.Delete(tempDirectory, recursive: true);
+    }
+}
+
+[Fact(DisplayName = "VHS frame status skips field-order recovery fields")]
+public void VhsFrameStatusSkipsFieldOrderRecoveryFields()
+{
+    string tempDirectory = Path.Combine(
+        Path.GetTempPath(),
+        "vhsdecode-dotnet-tests-" + Guid.NewGuid().ToString("N"));
+    Directory.CreateDirectory(tempDirectory);
+    try
+    {
+        string outputBase = Path.Combine(tempDirectory, "vhs-status-recovery");
+        using DecodeSession session = DecodeSessionFactory.Create(Parse(CliSpecs.Vhs, [
+            "--pal",
+            "--length",
+            "2",
+            "input.u8",
+            outputBase
+        ]));
+        var statusOutput = new StringWriter();
+        session.RuntimeReporter = new DecodeRuntimeReporter(
+            statusOutput,
+            new StringWriter(),
+            () => 0.0);
+        bool[] detectedFirstFields = [true, false, false, true, false, true];
+
+        TbcDecodedField? ReadField(
+            DecodeSession activeSession,
+            Stream _,
+            long begin,
+            int __,
+            int fieldNumber)
+        {
+            if (fieldNumber >= detectedFirstFields.Length)
+            {
+                return null;
+            }
+
+            activeSession.TbcRenderer.DiagnosticLogger?.Invoke(
+                "DEBUG",
+                $"render diagnostic {fieldNumber}");
+            return BuildSyntheticTbcField(
+                    begin,
+                    new ushort[activeSession.TbcFrameSpec.FieldSampleCount],
+                    detectedFirstField: detectedFirstFields[fieldNumber])
+                with
+                {
+                    NextFieldOffsetSamples = 100.0,
+                    DiskLocation = fieldNumber,
+                    ChromaSamples = new ushort[activeSession.TbcFrameSpec.FieldSampleCount]
+                };
+        }
+
+        TbcFieldSequenceDecodeResult result = new TbcFieldSequenceDecodeEngine(
+            readField: ReadField).TryDecodeAndWrite(session, Stream.Null);
+
+        if (!result.Success)
+        {
+            throw new Exception(result.Message);
+        }
+
+        AssertEqual(4, result.WrittenFieldCount);
+        string status = statusOutput.ToString();
+        AssertContains(status, "File Frame 0: VHS ");
+        Assert.DoesNotContain("File Frame 1: VHS ", status, StringComparison.Ordinal);
+        AssertContains(status, "File Frame 2: VHS ");
+        AssertEqual(2, status.Split("File Frame ", StringSplitOptions.None).Length - 1);
+        string log = File.ReadAllText(outputBase + ".log");
+        int renderIndex = log.IndexOf("render diagnostic 2", StringComparison.Ordinal);
+        int recoveryIndex = log.IndexOf(
+            "Possibly skipped field (Two fields with same isFirstField in a row), dropping the last field to compensate...",
+            StringComparison.Ordinal);
+        AssertTrue(renderIndex >= 0);
+        AssertTrue(renderIndex < recoveryIndex);
     }
     finally
     {

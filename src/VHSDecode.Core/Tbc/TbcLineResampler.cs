@@ -334,10 +334,9 @@ public sealed class TbcLineResampler
 
         for (int i = 0; i < lineLocations.Count; i++)
         {
-            double location = lineLocations[i];
-            if (!double.IsFinite(location) || (i > 0 && location <= lineLocations[i - 1]))
+            if (!double.IsFinite(lineLocations[i]))
             {
-                throw new ArgumentException("Line locations must be finite and strictly increasing.", nameof(lineLocations));
+                throw new ArgumentException("Line locations must be finite.", nameof(lineLocations));
             }
         }
 
