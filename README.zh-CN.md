@@ -719,6 +719,16 @@ worker 运行在六类产物上同样全部一致。PAL 与 NTSC-J 会构造相�
 标量 xUnit oracle 覆盖全部三条路径，848 个测试全部通过，且上面的既有 1,000-frame
 NTSC-J 门禁保持不变。
 
+原生 `.ldf` PCM16 加载器现在使用一个固定的 2 MiB 环形缓冲区保存回退历史，把新读取的
+字节直接写入请求块，并复用向前丢弃缓冲区。FFmpeg 启动、seek、padding、字节序、回退
+边界、部分 EOF 后的位置推进和样本转换语义均未改变。在同一个私有本地 NTSC `.ldf`
+文件上，一组机器空闲时受控的 400-frame `--threads 20` 配对将基线/候选墙钟时间从
+26.242 秒降至 24.741 秒（减少 5.7%），CPU 时间从 145.516 秒降至 136.484 秒
+（减少 6.2%），峰值工作集从 1,204.5 MiB 降至 1,190.6 MiB。亮度、色度、JSON、
+stdout、归一化 stderr 和时间戳归一化日志全部一致。候选还在默认 `v0.4.0` 和显式
+`current` 两种配置下均不中断地完成 1,000 帧 / 2,000 fields；两者在相同六项比较中
+都与各自保存的 Python oracle 完全一致。IPP 未纳入门禁。
+
 </details>
 
 <!-- SECTION: build -->
@@ -737,7 +747,7 @@ NTSC-J 门禁保持不变。
 .\tools\build-ipp-native.ps1
 dotnet restore VHSDecodeDotNet.slnx
 dotnet build VHSDecodeDotNet.slnx -c Release --no-restore
-dotnet test --solution VHSDecodeDotNet.slnx -c Release --no-build --no-restore --minimum-expected-tests 1079
+dotnet test --solution VHSDecodeDotNet.slnx -c Release --no-build --no-restore --minimum-expected-tests 1083
 ```
 
 第一条命令用于包含可选的 `ipp-fast` 原生产物；只构建 Exact 时可以省略。
@@ -748,7 +758,7 @@ Intel oneAPI。发布程序会携带 `vhsdecode_ipp.dll`、Intel 许可证和
 `THIRD-PARTY-NOTICES.md`；只构建 Exact 后端时可以省略原生构建步骤。
 
 当前正式 Release 构建为零警告、零错误。xUnit v3 项目向
-`dotnet test` 和 Visual Studio Test Explorer 暴露 **1,079** 个可独立发现的测试。
+`dotnet test` 和 Visual Studio Test Explorer 暴露 **1,083** 个可独立发现的测试。
 
 <!-- SECTION: usage -->
 
