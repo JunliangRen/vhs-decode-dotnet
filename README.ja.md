@@ -874,6 +874,17 @@ JSON、stdout、normalized stderr、timestamp-normalized log の同じ 1 set に
 deterministic で、計測 run は 37.012 秒、peak 1.949 GiB、quarter working-set median
 0.879/1.208/1.266/1.187 GiB となり、終了側で progressive growth はありませんでした。
 
+opt-in `current` VHS HSync boxcar は、大きな独立 output range を最大 4 worker に分割し、
+各 sample の元の left-to-right float64 multiply-add order を維持するようになりました。
+同じ private local 40 MHz NTSC `BETAMAX_HIFI` capture で、反転順序の 160-frame
+default-worker pair 2 組は 0.5% と 0.9% 高速で、平均は 26.260 秒から 26.075 秒に
+なりました。idle capacity が使われたため、candidate CPU time は平均 102.290 秒から
+104.045 秒に増えました。`--threads 20` pair 2 組は 10.1% と 5.6% 高速で、平均
+17.655 秒から 16.255 秒、CPU 平均は 120.745 秒から 114.130 秒になりました。
+candidate working set は 1.344 GiB 以下に収まりました。`--threads 0`、`1`、
+default 5、`20` を含む 16 short run と 8 long run で、luma、chroma、JSON、stdout、
+normalized stderr、timestamp-normalized log はすべて exact です。
+
 </details>
 
 <!-- SECTION: build -->
