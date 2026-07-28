@@ -3,6 +3,7 @@ using System.Collections.Concurrent;
 using System.Globalization;
 using System.Numerics;
 using System.Runtime.CompilerServices;
+using System.Runtime.ExceptionServices;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
@@ -24,11 +25,23 @@ public static class TbcOutputMetadataWriter
 
     internal sealed class StreamingWriter : IDisposable
     {
+        private static readonly TimeSpan[] SnapshotPublishRetryDelays =
+        [
+            TimeSpan.FromMilliseconds(100),
+            TimeSpan.FromMilliseconds(500),
+            TimeSpan.FromSeconds(2)
+        ];
+
         private sealed record SnapshotWorkItem(
             string Prefix,
             long FieldsByteCount,
             string Suffix,
             bool IsSentinel = false);
+
+        private sealed class SnapshotFinalizationException(
+            string message,
+            Exception innerException)
+            : IOException(message, innerException);
 
         private static readonly SnapshotWorkItem SnapshotSentinel = new("", 0, "", IsSentinel: true);
 
@@ -38,19 +51,27 @@ public static class TbcOutputMetadataWriter
         private readonly bool _verbose;
         private readonly FieldObjectBuilder _fieldBuilder;
         private readonly Func<string, Stream> _createSnapshotOutput;
+        private readonly Action<string, string> _publishSnapshot;
+        private readonly Action<TimeSpan> _delaySnapshotRetry;
         private readonly BlockingCollection<SnapshotWorkItem> _snapshotQueue = new(boundedCapacity: 1);
         private readonly ManualResetEventSlim _snapshotWriting = new();
+        private readonly byte[] _snapshotCopyBuffer = new byte[1024 * 1024];
         private readonly Thread _snapshotThread;
         private StreamWriter? _fieldsWriter;
         private VideoOutputConverter? _lastOutputConverter;
+        private ExceptionDispatchInfo? _lastSnapshotFailure;
         private bool _snapshotWorkerStopped;
+        private bool _completionAttempted;
+        private bool _preserveFieldsJournal;
         private bool _completed;
         private bool _disposed;
 
         public StreamingWriter(
             DecodeSession session,
             string jsonPath,
-            Func<string, Stream>? createSnapshotOutput = null)
+            Func<string, Stream>? createSnapshotOutput = null,
+            Action<string, string>? publishSnapshot = null,
+            Action<TimeSpan>? delaySnapshotRetry = null)
         {
             ArgumentException.ThrowIfNullOrWhiteSpace(jsonPath);
             _session = session;
@@ -59,6 +80,9 @@ public static class TbcOutputMetadataWriter
             _verbose = session.ExecutionOptions.VerboseVits;
             _fieldBuilder = new FieldObjectBuilder(session);
             _createSnapshotOutput = createSnapshotOutput ?? DecodeOutputFile.Create;
+            _publishSnapshot = publishSnapshot
+                ?? (static (source, destination) => File.Move(source, destination, overwrite: true));
+            _delaySnapshotRetry = delaySnapshotRetry ?? Thread.Sleep;
             _fieldsWriter = new StreamWriter(
                 new FileStream(
                     _fieldsPath,
@@ -77,6 +101,9 @@ public static class TbcOutputMetadataWriter
         public int FieldCount { get; private set; }
 
         public VideoOutputConverter? LastOutputConverter => _lastOutputConverter;
+
+        internal Exception? LastSnapshotFailure =>
+            Volatile.Read(ref _lastSnapshotFailure)?.SourceException;
 
         public JsonObject Add(
             TbcDecodedField field,
@@ -107,7 +134,7 @@ public static class TbcOutputMetadataWriter
         public void WriteSnapshot()
         {
             ObjectDisposedException.ThrowIf(_fieldsWriter is null, this);
-            if (!_snapshotWriting.IsSet)
+            if (!_snapshotWriting.IsSet && _snapshotQueue.Count == 0)
             {
                 _snapshotQueue.TryAdd(CaptureSnapshot());
             }
@@ -115,31 +142,49 @@ public static class TbcOutputMetadataWriter
 
         public void Complete()
         {
-            if (_completed)
+            if (_completionAttempted)
             {
-                throw new InvalidOperationException("The streaming metadata writer was already completed.");
+                throw new InvalidOperationException(
+                    _completed
+                        ? "The streaming metadata writer was already completed."
+                        : "The streaming metadata writer finalization was already attempted.");
             }
 
-            SnapshotWorkItem finalSnapshot = CaptureSnapshot();
-            CloseFieldsWriter();
+            _completionAttempted = true;
             try
             {
-                StopSnapshotWorker(finalSnapshot);
+                SnapshotWorkItem finalSnapshot = CaptureSnapshot();
+                CloseFieldsWriter();
+                StopSnapshotWorker();
+                WriteFinalJson(finalSnapshot);
+                File.Delete(_fieldsPath);
                 _completed = true;
             }
-            finally
+            catch (Exception exception)
             {
-                File.Delete(_fieldsPath);
+                _preserveFieldsJournal = FieldCount > 0 && File.Exists(_fieldsPath);
+                CloseFieldsWriterAfterFailure();
+                StopSnapshotWorkerAfterFailure();
+                if (exception is SnapshotFinalizationException)
+                {
+                    throw;
+                }
+
+                throw CreateFinalizationException(exception, recoverySnapshotPath: null);
             }
         }
 
         public void LeaveIncompleteJson()
         {
-            if (_completed)
+            if (_completionAttempted)
             {
-                throw new InvalidOperationException("The streaming metadata writer was already completed.");
+                throw new InvalidOperationException(
+                    _completed
+                        ? "The streaming metadata writer was already completed."
+                        : "The streaming metadata writer finalization was already attempted.");
             }
 
+            _completionAttempted = true;
             CloseFieldsWriter();
             try
             {
@@ -157,6 +202,19 @@ public static class TbcOutputMetadataWriter
             }
         }
 
+        public void PreserveRecoveryJournal()
+        {
+            if (_completed)
+            {
+                return;
+            }
+
+            _completionAttempted = true;
+            _preserveFieldsJournal = FieldCount > 0;
+            CloseFieldsWriterAfterFailure();
+            StopSnapshotWorkerAfterFailure();
+        }
+
         public void Dispose()
         {
             if (_disposed)
@@ -166,7 +224,7 @@ public static class TbcOutputMetadataWriter
 
             CloseFieldsWriter();
             StopSnapshotWorker();
-            if (!_completed)
+            if (!_completed && !_preserveFieldsJournal)
             {
                 File.Delete(_fieldsPath);
             }
@@ -206,7 +264,17 @@ public static class TbcOutputMetadataWriter
                     _snapshotWriting.Set();
                     try
                     {
-                        WriteCurrentJson(snapshot);
+                        try
+                        {
+                            WriteCurrentJson(snapshot);
+                            Volatile.Write(ref _lastSnapshotFailure, null);
+                        }
+                        catch (Exception exception)
+                        {
+                            Volatile.Write(
+                                ref _lastSnapshotFailure,
+                                ExceptionDispatchInfo.Capture(exception));
+                        }
                     }
                     finally
                     {
@@ -214,22 +282,19 @@ public static class TbcOutputMetadataWriter
                     }
                 }
             }
-            catch (Exception)
+            catch (Exception exception)
             {
-                // v0.4.0 lets JSON-dumper thread failures terminate only that worker.
+                Volatile.Write(
+                    ref _lastSnapshotFailure,
+                    ExceptionDispatchInfo.Capture(exception));
             }
         }
 
-        private void StopSnapshotWorker(SnapshotWorkItem? finalSnapshot = null)
+        private void StopSnapshotWorker()
         {
             if (_snapshotWorkerStopped)
             {
                 return;
-            }
-
-            if (finalSnapshot is not null)
-            {
-                _ = EnqueueWhileSnapshotWorkerIsRunning(finalSnapshot);
             }
 
             _ = EnqueueWhileSnapshotWorkerIsRunning(SnapshotSentinel);
@@ -253,6 +318,32 @@ public static class TbcOutputMetadataWriter
         private void WriteCurrentJson(SnapshotWorkItem snapshot)
         {
             string tempPath = _jsonPath + ".tmp";
+            WriteSnapshotTemp(snapshot, tempPath);
+            PublishSnapshotWithRetry(tempPath);
+        }
+
+        private void WriteFinalJson(SnapshotWorkItem snapshot)
+        {
+            string tempPath = _jsonPath + ".tmp";
+            bool completedTempSnapshot = false;
+            try
+            {
+                WriteSnapshotTemp(snapshot, tempPath);
+                completedTempSnapshot = true;
+                PublishSnapshotWithRetry(tempPath);
+                Volatile.Write(ref _lastSnapshotFailure, null);
+            }
+            catch (Exception exception)
+            {
+                string? recoverySnapshotPath = completedTempSnapshot
+                    ? PreserveCompletedSnapshot(tempPath)
+                    : null;
+                throw CreateFinalizationException(exception, recoverySnapshotPath);
+            }
+        }
+
+        private void WriteSnapshotTemp(SnapshotWorkItem snapshot, string tempPath)
+        {
             using (Stream output = _createSnapshotOutput(tempPath))
             {
                 WriteUtf8(output, snapshot.Prefix);
@@ -262,25 +353,115 @@ public static class TbcOutputMetadataWriter
                     FileAccess.Read,
                     FileShare.ReadWrite))
                 {
-                    byte[] buffer = new byte[16 * 1024];
                     long remaining = snapshot.FieldsByteCount;
                     while (remaining > 0)
                     {
-                        int read = fields.Read(buffer, 0, (int)Math.Min(buffer.Length, remaining));
+                        int read = fields.Read(
+                            _snapshotCopyBuffer,
+                            0,
+                            (int)Math.Min(_snapshotCopyBuffer.Length, remaining));
                         if (read == 0)
                         {
                             throw new EndOfStreamException("The streaming metadata field snapshot ended unexpectedly.");
                         }
 
-                        output.Write(buffer, 0, read);
+                        output.Write(_snapshotCopyBuffer, 0, read);
                         remaining -= read;
                     }
                 }
 
                 WriteUtf8(output, snapshot.Suffix);
             }
+        }
 
-            File.Move(tempPath, _jsonPath, overwrite: true);
+        private void PublishSnapshotWithRetry(string tempPath)
+        {
+            for (int attempt = 0; ; attempt++)
+            {
+                try
+                {
+                    _publishSnapshot(tempPath, _jsonPath);
+                    return;
+                }
+                catch (Exception exception) when (
+                    exception is IOException or UnauthorizedAccessException
+                    && attempt < SnapshotPublishRetryDelays.Length)
+                {
+                    _delaySnapshotRetry(SnapshotPublishRetryDelays[attempt]);
+                }
+            }
+        }
+
+        private string? PreserveCompletedSnapshot(string tempPath)
+        {
+            if (!File.Exists(tempPath))
+            {
+                return null;
+            }
+
+            for (int suffix = 0; suffix < 1000; suffix++)
+            {
+                string recoveryPath = suffix == 0
+                    ? _jsonPath + ".final"
+                    : _jsonPath + $".final.{suffix.ToString(CultureInfo.InvariantCulture)}";
+                try
+                {
+                    File.Move(tempPath, recoveryPath, overwrite: false);
+                    return recoveryPath;
+                }
+                catch (IOException) when (File.Exists(recoveryPath))
+                {
+                    // Preserve every prior recovery snapshot.
+                }
+                catch
+                {
+                    return File.Exists(tempPath) ? tempPath : null;
+                }
+            }
+
+            return tempPath;
+        }
+
+        private SnapshotFinalizationException CreateFinalizationException(
+            Exception exception,
+            string? recoverySnapshotPath)
+        {
+            string recoverySnapshot = recoverySnapshotPath is null
+                ? string.Empty
+                : $" A complete recovery snapshot was preserved at '{recoverySnapshotPath}'.";
+            string journal = File.Exists(_fieldsPath)
+                ? $" The append-only field journal was preserved at '{_fieldsPath}'."
+                : string.Empty;
+            return new SnapshotFinalizationException(
+                $"OUTPUT INCOMPLETE: unable to finalize TBC metadata JSON '{_jsonPath}'."
+                + recoverySnapshot
+                + journal
+                + " Close any program using the JSON file and retry recovery from the preserved files.",
+                exception);
+        }
+
+        private void CloseFieldsWriterAfterFailure()
+        {
+            try
+            {
+                CloseFieldsWriter();
+            }
+            catch
+            {
+                // Preserve the finalization failure.
+            }
+        }
+
+        private void StopSnapshotWorkerAfterFailure()
+        {
+            try
+            {
+                StopSnapshotWorker();
+            }
+            catch
+            {
+                // Preserve the finalization failure.
+            }
         }
 
         private static void WriteUtf8(Stream output, string value)

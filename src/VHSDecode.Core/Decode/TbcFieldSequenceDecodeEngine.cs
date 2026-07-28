@@ -137,6 +137,10 @@ public sealed class TbcFieldSequenceDecodeEngine
 
     internal Func<string, Stream> CreateTbcOutput { get; init; } = DecodeOutputFile.Create;
 
+    internal Func<DecodeSession, string, TbcOutputMetadataWriter.StreamingWriter>
+        CreateMetadataWriter { get; init; }
+        = static (session, path) => new TbcOutputMetadataWriter.StreamingWriter(session, path);
+
     public TbcFieldSequenceDecodeResult TryDecodeAndWrite(DecodeSession session, int? maxFields = null)
     {
         try
@@ -185,6 +189,7 @@ public sealed class TbcFieldSequenceDecodeEngine
             session,
             _efmOutputWriter,
             CreateTbcOutput,
+            CreateMetadataWriter,
             parallelPayloadWrites: (_usesSessionReader || EnableParallelPayloadWritesForCustomReader)
                 && session.StreamDecoder.WorkerThreads > 1,
             overlapPayloadWrites: session.Spec.Name == "vhs"
@@ -233,7 +238,7 @@ public sealed class TbcFieldSequenceDecodeEngine
             {
                 try
                 {
-                    _ = output.Complete();
+                    _ = output.Complete(validateOutputConsistency: false);
                 }
                 catch
                 {
@@ -1544,6 +1549,10 @@ public sealed class TbcFieldSequenceDecodeEngine
         private bool _payloadsClosed;
         private bool _completed;
         private int _writtenFieldCount;
+        private long _expectedTbcBytes;
+        private long _expectedChromaBytes;
+        private readonly long _initialTbcLength;
+        private readonly long _initialChromaLength;
 
         public int WrittenFieldCount => _writtenFieldCount;
 
@@ -1551,6 +1560,7 @@ public sealed class TbcFieldSequenceDecodeEngine
             DecodeSession session,
             ILaserDiscEfmOutputWriter efmOutputWriter,
             Func<string, Stream> createTbcOutput,
+            Func<DecodeSession, string, TbcOutputMetadataWriter.StreamingWriter> createMetadataWriter,
             bool parallelPayloadWrites,
             bool overlapPayloadWrites)
         {
@@ -1580,9 +1590,11 @@ public sealed class TbcFieldSequenceDecodeEngine
                     sqlite = new TbcSqliteMetadataWriter.SequenceWriter(session, _paths.DbPath!);
                 }
 
-                metadata = new TbcOutputMetadataWriter.StreamingWriter(session, _paths.JsonPath);
+                metadata = createMetadataWriter(session, _paths.JsonPath);
                 _tbc = tbc;
                 _chroma = chroma;
+                _initialTbcLength = tbc.CanSeek ? tbc.Length : 0;
+                _initialChromaLength = chroma?.CanSeek == true ? chroma.Length : 0;
                 _laserDiscOutput = laserDiscOutput;
                 _metadata = metadata;
                 _sqlite = sqlite;
@@ -1644,7 +1656,7 @@ public sealed class TbcFieldSequenceDecodeEngine
             StopOutputWorker()?.Throw();
         }
 
-        public TbcFieldSequenceDecodeResult Complete()
+        public TbcFieldSequenceDecodeResult Complete(bool validateOutputConsistency = true)
         {
             if (_completed)
             {
@@ -1654,10 +1666,33 @@ public sealed class TbcFieldSequenceDecodeEngine
             ExceptionDispatchInfo? outputFailure = StopOutputWorker();
             if (outputFailure is null)
             {
-                CompleteMetadata();
-                ClosePayloads();
-                _completed = true;
-                return BuildResult();
+                try
+                {
+                    if (validateOutputConsistency)
+                    {
+                        ValidateOutputConsistency();
+                    }
+
+                    CompleteMetadata();
+                    ClosePayloads();
+                    _completed = true;
+                    return BuildResult();
+                }
+                catch
+                {
+                    _metadata.PreserveRecoveryJournal();
+                    try
+                    {
+                        ClosePayloads();
+                    }
+                    catch
+                    {
+                        // Preserve the consistency or metadata failure.
+                    }
+
+                    _completed = true;
+                    throw;
+                }
             }
 
             try
@@ -1835,6 +1870,17 @@ public sealed class TbcFieldSequenceDecodeEngine
                 }
             }
 
+            _expectedTbcBytes = checked(
+                _expectedTbcBytes
+                + (field.OutputPayload?.Bytes.LongLength
+                    ?? (field.Samples.LongLength * sizeof(ushort))));
+            if (_chroma is not null)
+            {
+                _expectedChromaBytes = checked(
+                    _expectedChromaBytes
+                    + (field.ChromaSamples!.LongLength * sizeof(ushort)));
+            }
+
             _writtenFieldCount++;
             _laserDiscOutput.WriteAfterVideo(metadataField);
         }
@@ -1853,6 +1899,51 @@ public sealed class TbcFieldSequenceDecodeEngine
             }
 
             TbcOutputWriter.WriteFrame(_chroma!, field.ChromaSamples, _session.TbcFrameSpec);
+        }
+
+        private void ValidateOutputConsistency()
+        {
+            if (_metadata.FieldCount != _writtenFieldCount)
+            {
+                throw new IOException(
+                    $"TBC output metadata contains {_metadata.FieldCount} fields, but only {_writtenFieldCount} payload fields were written. "
+                    + $"Recovery journal: '{_paths.JsonPath}.fields.tmp'.");
+            }
+
+            _tbc.Flush();
+            _chroma?.Flush();
+            ValidateStreamLength(
+                _tbc,
+                checked(_initialTbcLength + _expectedTbcBytes),
+                _paths.TbcPath,
+                _writtenFieldCount);
+            if (_chroma is not null)
+            {
+                ValidateStreamLength(
+                    _chroma,
+                    checked(_initialChromaLength + _expectedChromaBytes),
+                    _paths.ChromaPath!,
+                    _writtenFieldCount);
+            }
+        }
+
+        private static void ValidateStreamLength(
+            Stream stream,
+            long expectedLength,
+            string path,
+            int fieldCount)
+        {
+            if (!stream.CanSeek)
+            {
+                return;
+            }
+
+            long actualLength = stream.Length;
+            if (actualLength != expectedLength)
+            {
+                throw new IOException(
+                    $"TBC output '{path}' contains {actualLength} bytes after {fieldCount} fields; expected {expectedLength} bytes.");
+            }
         }
 
         private void ClosePayloads()
