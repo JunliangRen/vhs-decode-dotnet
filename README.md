@@ -74,7 +74,7 @@ CLI compatibility requires it.
 | VHS and tape families | Implemented; rare capture gaps remain | VHS, S-VHS, Betamax, Video8/Hi8, U-matic, Type C, EIAJ, and supported PAL/NTSC variants share the release-compatible decode path. |
 | CVBS | Implemented for release-supported systems | PAL and NTSC paths run; uncommon vblank and cross-option cases need more real-capture fixtures. |
 | LaserDisc | Implemented; rare capture gaps remain | Video, VBI, EFM, analog audio, AC3, RF-TBC, metadata, recovery, and PAL/NTSC paths are connected. |
-| HiFi | Implemented; real-capture verification remains | Typed v0.4.0 CLI, bounded parallel decode, post-processing, WAV/FLAC output, preview, and GNU Radio mode are connected. |
+| HiFi | Implemented; more real-capture verification remains | Typed v0.4.0 CLI, bounded parallel decode, post-processing, WAV/FLAC output, preview, and GNU Radio mode are connected; a bounded four-second NTSC Betamax explicit-carrier gate matches Python WAV bytes and decoded FLAC PCM. |
 | Inputs | Broadly implemented | Raw input plus common FFmpeg/PyAV-equivalent container paths are covered; rare codec and timestamp cases remain. |
 | Outputs and recovery | Implemented; edge cases remain | Streaming TBC/audio output, JSON snapshots, SQLite, logs, disk-space handling, and recovery ordering are covered. |
 | Interactive UI | Out of scope | Decode user UI and developer plotting/report windows are intentionally not implemented. |
@@ -939,13 +939,14 @@ Requirements:
 - Visual Studio C++ Build Tools and a Windows SDK when building the optional
   Intel IPP bridge
 - `ffmpeg` and `ffprobe` on `PATH` for FFmpeg-backed container inputs
-- `ffmpeg` for default HiFi FLAC output
+- default HiFi FLAC output uses the bundled libsndfile and does not require
+  FFmpeg
 
 ```powershell
 .\tools\build-ipp-native.ps1
 dotnet restore VHSDecodeDotNet.slnx
 dotnet build VHSDecodeDotNet.slnx -c Release --no-restore
-dotnet test --solution VHSDecodeDotNet.slnx -c Release --no-build --no-restore --minimum-expected-tests 1083
+dotnet test --solution VHSDecodeDotNet.slnx -c Release --no-build --no-restore --minimum-expected-tests 1090
 ```
 
 The first command includes the optional `ipp-fast` native artifact; omit it for
@@ -953,12 +954,12 @@ an Exact-only build. The script uses `vswhere` to locate MSBuild, restores the p
 `intelipp.static.win-x64` NuGet package, builds the sequential static bridge,
 and rejects external IPP, OpenMP, oneTBB, or Visual C++ runtime DLL
 dependencies. Intel oneAPI does not need to be installed on the development or
-deployment computer. Published applications carry `vhsdecode_ipp.dll`, the
-Intel license, and `THIRD-PARTY-NOTICES.md`; an Exact-only build may omit the
-native build step.
+deployment computer. Binary-only single-file releases embed
+`vhsdecode_ipp.dll` and the applicable third-party notices without adding
+sidecar license files. An Exact-only build may omit the native build step.
 
 The current formal Release build has zero warnings and errors. The xUnit v3
-project exposes **1,083** independently discoverable tests to both
+project exposes **1,090** independently discoverable tests to both
 `dotnet test` and Visual Studio Test Explorer.
 
 <!-- SECTION: usage -->

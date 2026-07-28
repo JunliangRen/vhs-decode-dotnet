@@ -108,7 +108,8 @@ formula. The HiFi decoder also dynamically loads an unmodified Windows x64
 build of libsoxr commit `a66f3eeeeb62a32403ff143b756eed92b1ec6b62`, the
 revision embedded by python-soxr 1.1.0 and used by vhs-decode v0.4.0. Build
 provenance, the complete corresponding source archive, and license texts are
-under `third_party/libsoxr` and are copied into release output.
+kept under `third_party/libsoxr` and embedded as resources in binary-only
+single-file releases.
 
 Copyright (c) 2007-2018 robs@users.sourceforge.net
 
@@ -116,6 +117,25 @@ libsoxr is free software; you can redistribute it and/or modify it under the
 terms of the GNU Lesser General Public License as published by the Free
 Software Foundation; either version 2.1 of the License, or (at your option)
 any later version. See `third_party/libsoxr/COPYING.LGPL` for the complete
+license text.
+
+## libsndfile
+
+The HiFi decoder dynamically loads the unmodified `sndfile.dll` from the
+official libsndfile 1.2.2 Windows x64 release and uses its libFLAC-backed
+PCM24 writer. It reproduces Python SoundFile's clipping and compression
+initialization sequence and replaces the previous FFmpeg output process.
+Binary provenance, checksums, corresponding source links, bundled-codec
+notices, and the complete LGPL 2.1 text are under `third_party/libsndfile` and
+are embedded as resources in binary-only single-file releases.
+
+Copyright (C) 1999-2023 Erik de Castro Lopo
+Copyright (C) 2012-2023 libsndfile contributors
+
+libsndfile is free software; you can redistribute it and/or modify it under
+the terms of the GNU Lesser General Public License as published by the Free
+Software Foundation; either version 2.1 of the License, or (at your option)
+any later version. See `third_party/libsndfile/COPYING.LGPL` for the complete
 license text.
 
 ## FFmpeg

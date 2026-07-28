@@ -1140,13 +1140,6 @@ public sealed class HiFiRunnerTests
     [Fact(DisplayName = "HiFi default output is 24-bit stereo FLAC")]
     public void HiFiDefaultOutputIs24BitStereoFlac()
     {
-        Assert.SkipUnless(CanRunFfmpeg(), "ffmpeg is not available on PATH.");
-        Assert.Equal(0, HiFiOutputWriter.QuantizeFlacPcm24(-1.0f / 16_777_216.0f));
-        Assert.Equal(0, HiFiOutputWriter.QuantizeFlacPcm24(1.0f / 16_777_216.0f));
-        Assert.Equal(469_889, HiFiOutputWriter.QuantizeFlacPcm24(0.05601511150598526f));
-        Assert.Equal(-3_652_894, HiFiOutputWriter.QuantizeFlacPcm24(-0.4354589283466339f));
-        Assert.Throws<InvalidDataException>(
-            () => HiFiOutputWriter.QuantizeFlacPcm24(float.NaN));
         string directory = CreateTempDirectory();
         try
         {
@@ -1177,9 +1170,14 @@ public sealed class HiFiRunnerTests
             Assert.Equal(2ul, ((streamInfo >> 41) & 0x7) + 1);
             Assert.Equal(24ul, ((streamInfo >> 36) & 0x1f) + 1);
             Assert.Equal(2ul, streamInfo & 0x0f_ffff_ffff);
+            LibsndfileReadResult decoded = LibsndfileTestReader.ReadPcm32(path);
+            Assert.Equal(48_000, decoded.SampleRate);
+            Assert.Equal(2, decoded.Channels);
+            Assert.Equal(0x170003, decoded.Format);
+            Assert.Equal(2, decoded.Frames);
             Assert.Equal(
                 [0, 0, 120_291_584, -935_140_864],
-                ReadFlacPcm32(path));
+                decoded.Samples);
         }
         finally
         {
@@ -1542,45 +1540,6 @@ public sealed class HiFiRunnerTests
         {
             return false;
         }
-    }
-
-    private static int[] ReadFlacPcm32(string path)
-    {
-        var startInfo = new ProcessStartInfo("ffmpeg")
-        {
-            UseShellExecute = false,
-            RedirectStandardOutput = true,
-            RedirectStandardError = true,
-            CreateNoWindow = true
-        };
-        foreach (string argument in new[]
-        {
-            "-hide_banner", "-loglevel", "error", "-i", path,
-            "-f", "s32le", "-acodec", "pcm_s32le", "pipe:1"
-        })
-        {
-            startInfo.ArgumentList.Add(argument);
-        }
-
-        using var process = Process.Start(startInfo)
-            ?? throw new InvalidOperationException("Failed to start ffmpeg.");
-        Task<string> standardError = process.StandardError.ReadToEndAsync();
-        using var output = new MemoryStream();
-        process.StandardOutput.BaseStream.CopyTo(output);
-        process.WaitForExit();
-        string error = standardError.GetAwaiter().GetResult();
-        Assert.True(process.ExitCode == 0, error);
-
-        byte[] bytes = output.ToArray();
-        Assert.Equal(0, bytes.Length % sizeof(int));
-        var samples = new int[bytes.Length / sizeof(int)];
-        for (int i = 0; i < samples.Length; i++)
-        {
-            samples[i] = BinaryPrimitives.ReadInt32LittleEndian(
-                bytes.AsSpan(i * sizeof(int), sizeof(int)));
-        }
-
-        return samples;
     }
 
     private static float[] CreateDeterministicFloatInput(
