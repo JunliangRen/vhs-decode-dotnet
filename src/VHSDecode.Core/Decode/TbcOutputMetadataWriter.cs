@@ -71,7 +71,8 @@ public static class TbcOutputMetadataWriter
             string jsonPath,
             Func<string, Stream>? createSnapshotOutput = null,
             Action<string, string>? publishSnapshot = null,
-            Action<TimeSpan>? delaySnapshotRetry = null)
+            Action<TimeSpan>? delaySnapshotRetry = null,
+            Func<string, Stream>? createFieldsOutput = null)
         {
             ArgumentException.ThrowIfNullOrWhiteSpace(jsonPath);
             _session = session;
@@ -83,12 +84,14 @@ public static class TbcOutputMetadataWriter
             _publishSnapshot = publishSnapshot
                 ?? (static (source, destination) => File.Move(source, destination, overwrite: true));
             _delaySnapshotRetry = delaySnapshotRetry ?? Thread.Sleep;
-            _fieldsWriter = new StreamWriter(
-                new FileStream(
+            Stream fieldsOutput = createFieldsOutput?.Invoke(_fieldsPath)
+                ?? new FileStream(
                     _fieldsPath,
                     FileMode.Create,
                     FileAccess.Write,
-                    FileShare.ReadWrite),
+                    FileShare.ReadWrite);
+            _fieldsWriter = new StreamWriter(
+                fieldsOutput,
                 new UTF8Encoding(encoderShouldEmitUTF8Identifier: false));
             _snapshotThread = new Thread(ConsumeSnapshots)
             {
@@ -222,16 +225,16 @@ public static class TbcOutputMetadataWriter
                 return;
             }
 
-            CloseFieldsWriter();
-            StopSnapshotWorker();
+            _disposed = true;
+            CloseFieldsWriterAfterFailure();
+            StopSnapshotWorkerAfterFailure();
             if (!_completed && !_preserveFieldsJournal)
             {
-                File.Delete(_fieldsPath);
+                DeleteFieldsJournalAfterFailure();
             }
 
-            _snapshotQueue.Dispose();
-            _snapshotWriting.Dispose();
-            _disposed = true;
+            DisposeAfterFailure(_snapshotQueue);
+            DisposeAfterFailure(_snapshotWriting);
         }
 
         private SnapshotWorkItem CaptureSnapshot()
@@ -464,6 +467,30 @@ public static class TbcOutputMetadataWriter
             }
         }
 
+        private void DeleteFieldsJournalAfterFailure()
+        {
+            try
+            {
+                File.Delete(_fieldsPath);
+            }
+            catch
+            {
+                // Dispose must not mask the failure that ended decoding.
+            }
+        }
+
+        private static void DisposeAfterFailure(IDisposable disposable)
+        {
+            try
+            {
+                disposable.Dispose();
+            }
+            catch
+            {
+                // Dispose must not mask the failure that ended decoding.
+            }
+        }
+
         private static void WriteUtf8(Stream output, string value)
         {
             byte[] bytes = Encoding.UTF8.GetBytes(value);
@@ -525,8 +552,9 @@ public static class TbcOutputMetadataWriter
 
         private void CloseFieldsWriter()
         {
-            _fieldsWriter?.Dispose();
+            StreamWriter? writer = _fieldsWriter;
             _fieldsWriter = null;
+            writer?.Dispose();
         }
     }
 

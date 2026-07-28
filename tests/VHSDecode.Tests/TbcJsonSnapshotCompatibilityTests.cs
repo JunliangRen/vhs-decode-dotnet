@@ -422,6 +422,37 @@ public sealed class TbcJsonSnapshotCompatibilityTests
         }
     }
 
+    [Fact(DisplayName = "metadata disposal does not mask the finalization failure")]
+    public void MetadataDisposalDoesNotMaskFinalizationFailure()
+    {
+        string tempDirectory = CreateTempDirectory();
+        try
+        {
+            string jsonPath = Path.Combine(tempDirectory, "dispose-failure.tbc.json");
+            using DecodeSession session = CreateSession(Path.Combine(tempDirectory, "dispose-failure"));
+
+            IOException exception = Assert.ThrowsAny<IOException>(() =>
+            {
+                using var writer = new TbcOutputMetadataWriter.StreamingWriter(
+                    session,
+                    jsonPath,
+                    createFieldsOutput: _ => new DisposeThrowingMemoryStream());
+                writer.Add(BuildField(startSample: 0, detectedFirstField: true), BuildDecision(1, true));
+                writer.Complete();
+            });
+
+            Assert.Contains("OUTPUT INCOMPLETE", exception.Message, StringComparison.Ordinal);
+            Assert.Contains(
+                "Synthetic field journal close failure.",
+                exception.InnerException?.Message,
+                StringComparison.Ordinal);
+        }
+        finally
+        {
+            Directory.Delete(tempDirectory, recursive: true);
+        }
+    }
+
     [Fact(DisplayName = "metadata finalization failure reports incomplete output after the compatibility completion message")]
     public void MetadataFinalizationFailureReportsIncompleteOutputAfterCompatibilityCompletionMessage()
     {
@@ -626,6 +657,18 @@ public sealed class TbcJsonSnapshotCompatibilityTests
 
         public override void Write(byte[] buffer, int offset, int count)
             => base.Write(buffer, offset, Math.Max(0, count - sizeof(ushort)));
+    }
+
+    private sealed class DisposeThrowingMemoryStream : MemoryStream
+    {
+        protected override void Dispose(bool disposing)
+        {
+            base.Dispose(disposing);
+            if (disposing)
+            {
+                throw new IOException("Synthetic field journal close failure.");
+            }
+        }
     }
 
     private static string CreateTempDirectory()
