@@ -171,6 +171,72 @@ public sealed class VhsSyncDetectorCurrentTests
         Assert.InRange(allocated, 0, 64 * 1024);
     }
 
+    [Fact(DisplayName = "Parallel current VHS boxcar matches serial detection bit for bit")]
+    public void ParallelCurrentVhsBoxcarMatchesSerialDetectionBitForBit()
+    {
+        var signal = new double[1_000_000];
+        for (int index = 0; index < signal.Length; index++)
+        {
+            signal[index] =
+                100.0 + ((((index * 37) % 17) - 8) * 0.125);
+        }
+
+        for (int start = 500;
+            start + 188 < signal.Length;
+            start += 2_560)
+        {
+            PaintPulse(signal, start, 188, -2.0);
+        }
+
+        var serialDetector = new VhsSyncDetector(
+            188.0,
+            152.0,
+            2_560,
+            8.8,
+            workerThreads: 1);
+        var parallelDetector = new VhsSyncDetector(
+            188.0,
+            152.0,
+            2_560,
+            8.8,
+            workerThreads: 5);
+
+        VhsSyncDetectionResult expected = serialDetector.Detect(
+            signal,
+            detectLevels: true,
+            syncTipEstimate: -5.0,
+            blankingEstimate: 100.0);
+        VhsSyncDetectionResult actual = parallelDetector.Detect(
+            signal,
+            detectLevels: true,
+            syncTipEstimate: -5.0,
+            blankingEstimate: 100.0);
+
+        Assert.Equal(
+            BitConverter.DoubleToInt64Bits(expected.SyncTipLevel),
+            BitConverter.DoubleToInt64Bits(actual.SyncTipLevel));
+        Assert.Equal(
+            BitConverter.DoubleToInt64Bits(expected.BlankLevel),
+            BitConverter.DoubleToInt64Bits(actual.BlankLevel));
+        Assert.Equal(expected.Pulses.Count, actual.Pulses.Count);
+        for (int index = 0; index < expected.Pulses.Count; index++)
+        {
+            VhsMeasuredSyncPulse expectedPulse = expected.Pulses[index];
+            VhsMeasuredSyncPulse actualPulse = actual.Pulses[index];
+            Assert.Equal(expectedPulse.Start, actualPulse.Start);
+            Assert.Equal(expectedPulse.Length, actualPulse.Length);
+            Assert.Equal(
+                BitConverter.DoubleToInt64Bits(expectedPulse.Transition),
+                BitConverter.DoubleToInt64Bits(actualPulse.Transition));
+            Assert.Equal(
+                BitConverter.DoubleToInt64Bits(expectedPulse.SyncLevel),
+                BitConverter.DoubleToInt64Bits(actualPulse.SyncLevel));
+            Assert.Equal(
+                BitConverter.DoubleToInt64Bits(expectedPulse.BlankLevel),
+                BitConverter.DoubleToInt64Bits(actualPulse.BlankLevel));
+        }
+    }
+
     [Theory(DisplayName = "Current VHS boxcar convolution matches NumPy same mode")]
     [MemberData(nameof(ConvolutionCases))]
     public void CurrentVhsBoxcarConvolutionMatchesNumpySameMode(
