@@ -653,7 +653,7 @@ public static class VhsChromaDecoder
         else if (options.SuperGaussianFinalFilter is not null)
         {
             upconverted =
-                options.SuperGaussianFinalFilter.Apply(upconverted);
+                options.SuperGaussianFinalFilter.ApplyInPlace(upconverted);
         }
         else if (options.FinalSosFilter is not null)
         {

@@ -175,6 +175,28 @@ public sealed class PocketFftMixedRadixCompatibilityTests
             Sha256(MemoryMarshal.AsBytes(actualFloat32.AsSpan())));
     }
 
+    [Fact(DisplayName = "Super-Gaussian final filter can reuse its input buffer")]
+    public void SuperGaussianFinalFilterCanReuseInputBuffer()
+    {
+        const int RawLength = 32_000;
+        var filter = new ChromaSuperGaussianFinalFilter(
+            RawLength,
+            3_575_611.888111,
+            629_370.6293706294);
+        double[] input = DeterministicInput(RawLength)
+            .Select(static value => (double)value)
+            .ToArray();
+        double[] expected = filter.Apply(input);
+        double[] actual = (double[])input.Clone();
+
+        double[] returned = filter.ApplyInPlace(actual);
+
+        Assert.Same(actual, returned);
+        Assert.Equal(
+            expected.Select(BitConverter.DoubleToInt64Bits),
+            actual.Select(BitConverter.DoubleToInt64Bits));
+    }
+
     [Theory(DisplayName = "Next fast FFT length matches SciPy")]
     [InlineData(1, 1)]
     [InlineData(13, 14)]

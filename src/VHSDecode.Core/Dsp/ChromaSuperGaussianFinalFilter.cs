@@ -36,11 +36,34 @@ internal sealed class ChromaSuperGaussianFinalFilter
 
     internal double[] Apply(ReadOnlySpan<double> input)
     {
+        var output = new double[_inputLength];
+        ApplyCore(input, output);
+        return output;
+    }
+
+    internal double[] ApplyInPlace(double[] input)
+    {
+        ArgumentNullException.ThrowIfNull(input);
+        ApplyCore(input, input);
+        return input;
+    }
+
+    private void ApplyCore(
+        ReadOnlySpan<double> input,
+        Span<double> output)
+    {
         if (input.Length != _inputLength)
         {
             throw new ArgumentException(
                 "Chroma field length does not match the configured filter.",
                 nameof(input));
+        }
+
+        if (output.Length != _inputLength)
+        {
+            throw new ArgumentException(
+                "Chroma output length does not match the configured filter.",
+                nameof(output));
         }
 
         float[] padded = ReflectPad(input, _paddedLength, _padLeft);
@@ -57,13 +80,10 @@ internal sealed class ChromaSuperGaussianFinalFilter
         float[] filtered = PocketFftReal32.InverseAnyLength(
             spectrum,
             _paddedLength);
-        var output = new double[_inputLength];
         for (int i = 0; i < output.Length; i++)
         {
             output[i] = filtered[_padLeft + i];
         }
-
-        return output;
     }
 
     internal static int NextFastLength(int minimumLength)
