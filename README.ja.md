@@ -901,6 +901,23 @@ timestamp-normalized log が一致し、320/800 個の ordered `fileLoc` もす�
 しました。`current` は `--threads 0`、`1`、default 5、`20` で deterministic で、
 別の `v0.4.0` profile regression も同じ 6 surface に一致しました。
 
+high worker count の RF prefetch は、従来の bounded lookahead 計算を維持したまま、
+最大 12 個の active block worker を許可するようになりました。`--threads 20` でも
+prefetch slot は 28 のままで、cache は拡大しません。同じ private local 40 MHz NTSC
+`BETAMAX_HIFI` sample で、4 組の interleaved 160-frame
+`current --threads 20` pair はすべて candidate が高速でした。平均 wall time は
+16.401 秒から 15.650 秒（4.57% 減）、paired median gain は 3.47%、平均 CPU time は
+117.664 秒から 116.902 秒（0.65% 減）でした。反転順序の 400-frame pair 2 組は
+0.63% と 3.11% 高速で、baseline/candidate 平均は 37.053/36.362 秒でした。
+effective occupancy が 7.03 core から 7.78 core に上がったため、平均 CPU time は
+260.422 秒から 283.047 秒へ増加しました。candidate peak は 1.542-1.572 GiB に
+収まり、quarter sample は非単調で、decode progress に伴う増加はありません。
+luma、chroma、JSON、stdout、normalized stderr、timestamp-normalized log、
+320/800 個の ordered `fileLoc` はすべて一致しました。candidate の `current` output は
+`--threads 0`、`1`、default 5、`20` で deterministic で、別の 160-frame
+`v0.4.0` baseline regression も同じ 6 surface と 320 個すべての `fileLoc` に
+一致しました。
+
 </details>
 
 <!-- SECTION: build -->

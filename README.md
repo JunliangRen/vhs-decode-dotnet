@@ -955,6 +955,24 @@ timestamp-normalized logs; all 320/800 ordered `fileLoc` values also matched.
 `20`, and a separate `v0.4.0` profile regression matched the same six
 surfaces.
 
+RF prefetch at high worker counts now permits up to 12 active block workers
+while retaining the existing bounded lookahead calculation: `--threads 20`
+still holds 28 prefetch slots rather than expanding the cache. On the same
+private local 40 MHz NTSC `BETAMAX_HIFI` sample, four interleaved 160-frame
+`current --threads 20` pairs all favored the candidate. Average wall time moved
+from 16.401 to 15.650 s (4.57% less), the paired median gain was 3.47%, and
+average CPU time moved from 117.664 to 116.902 s (0.65% less). Two
+reversed-order 400-frame pairs improved by 0.63% and 3.11%, averaging
+37.053/36.362 s baseline/candidate. Their average CPU time increased from
+260.422 to 283.047 s as effective occupancy rose from 7.03 to 7.78 cores.
+Candidate peaks stayed within 1.542-1.572 GiB and their quarter samples were
+non-monotonic, with no growth by decode progress. Luma, chroma, JSON, stdout,
+normalized stderr, timestamp-normalized logs, and all 320/800 ordered
+`fileLoc` values matched. Candidate `current` output was deterministic at
+`--threads 0`, `1`, default 5, and `20`; a separate 160-frame `v0.4.0`
+baseline regression matched the same six surfaces and all 320 `fileLoc`
+values.
+
 </details>
 
 <!-- SECTION: build -->

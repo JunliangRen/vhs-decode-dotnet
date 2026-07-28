@@ -28,6 +28,15 @@ public sealed class RfBlockCacheConcurrencyTests
             prefetchBlocks: int.MaxValue);
         Assert.Equal(RfBlockStreamDecoder.MaximumPrefetchBlocks, constrainedDecoder.PrefetchBlocks);
         Assert.Equal(2, constrainedDecoder.PrefetchWorkerThreads);
+
+        using var highConcurrencyDecoder = BuildDecoder(
+            new CountingSampleLoader(),
+            workerThreads: 20,
+            prefetchBlocks: RfBlockStreamDecoder.RecommendedPrefetchBlocks(20, 20));
+        Assert.Equal(28, highConcurrencyDecoder.PrefetchBlocks);
+        Assert.Equal(
+            RfBlockStreamDecoder.MaximumConcurrentPrefetchBlocks,
+            highConcurrencyDecoder.PrefetchWorkerThreads);
     }
 
     [Fact(DisplayName = "Parallel RF reads reuse overlapping decoded blocks in order")]
