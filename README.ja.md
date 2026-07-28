@@ -2,7 +2,7 @@
 
 [English](README.md) | [简体中文](README.zh-CN.md) | **[日本語](README.ja.md)**
 
-<!-- README_SYNC: 2026-07-28.5 -->
+<!-- README_SYNC: 2026-07-29.6 -->
 
 [`oyvindln/vhs-decode`](https://github.com/oyvindln/vhs-decode) の
 デコード関連部分を .NET 11 で再実装するプロジェクトです。現在は release
@@ -1004,6 +1004,33 @@ luma、chroma、JSON、stdout、normalized stderr、timestamp-normalized log、
 すべての ordered `fileLoc` が一致しました。candidate の `current` output は
 `--threads 0`、`1`、default 5、`20` で各 2 回とも同一で、別の 160-frame
 `v0.4.0` regression も同じ surface に一致しました。
+
+complex VHS high-boost path は、以前の phase が終了した後、boost 前の analytic-real
+と filtered-real の intermediate を既存の worker-owned workspace array 3 個へ
+格納するようになりました。同じ out-of-place
+`PocketFftComplex.Inverse(input, output)` implementation を使用しており、data
+type、FFT arithmetic、expression order、returned-block ownership、workspace
+pool cap は変更していません。同じ private local 40 MHz NTSC `BETAMAX_HIFI`
+sample の matched 80-frame `gc-verbose` trace では、sampled managed allocation
+が 26.446234 GiB から 22.918228 GiB へ減りました（3.528006 GiB、13.34% 減）。
+`Double[]` allocation は 1,791.025 MiB（13.56%）、`Complex[]` allocation は
+1,793.958 MiB（17.98%）減り、Gen2 collection は 82 回から 80 回へ減りました。
+1 組の 40-frame smoke pair では baseline が 9.16% 高速だったため、short-run gain
+は主張しません。4 組の interleaved 160-frame pair では candidate が 3 組で
+高速となり、paired median throughput は 2.44%、balanced aggregate は 2.43%
+向上しました。aggregate CPU time は 0.27% 減り、median peak working set は
+1.429 GiB から 1.303 GiB へ下がりました。反転順序の 400-frame pair 2 組は
+candidate が 1.98% と 1.55% 高速で、balanced throughput は 1.77% 高く、
+aggregate CPU time は 0.22% 減り、median peak working set は 1.423 GiB から
+1.350 GiB へ下がりました。candidate-first の 1,000-frame pair は wall time が
+ほぼ同等ながら 0.32% 低速でしたが、candidate CPU time は 0.31% 減り、peak
+working set は 1.437 GiB から 1.381 GiB へ下がりました。candidate の 250-frame
+区間 4 個は 28.44/26.40/25.83/26.22 秒で、progressive slowdown や memory growth
+はありませんでした。すべての A/B gate で luma、chroma、JSON、stdout、
+normalized stderr、timestamp-normalized log、すべての ordered `fileLoc` が
+一致しました。candidate の `current` output は `--threads 0`、`1`、default 5、
+`20` で各 2 回とも同一で、別の 160-frame `v0.4.0` regression も同じ surface に
+一致しました。
 
 </details>
 
