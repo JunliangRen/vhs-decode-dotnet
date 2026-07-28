@@ -70,7 +70,7 @@
 | VHS 与磁带格式 | 已实现；仍有罕见采集差距 | VHS、S-VHS、Betamax、Video8/Hi8、U-matic、Type C、EIAJ 及支持的 PAL/NTSC 变体共用 release 兼容解码路径。 |
 | CVBS | 已实现 release 支持的系统 | PAL 和 NTSC 路径可运行；少见的 vblank 与跨参数组合仍需更多真实采集夹具。 |
 | LaserDisc | 已实现；仍有罕见采集差距 | 视频、VBI、EFM、模拟音频、AC3、RF-TBC、元数据、恢复和 PAL/NTSC 路径均已连接。 |
-| HiFi | 已实现；仍需真实采集验证 | 类型化 v0.4.0 CLI、有界并行解码、后处理、WAV/FLAC 输出、预览和 GNU Radio 模式均已连接。 |
+| HiFi | 已实现；仍需更多真实采集验证 | 类型化 v0.4.0 CLI、有界并行解码、后处理、WAV/FLAC 输出、预览和 GNU Radio 模式均已连接；一个有界的 4 秒 NTSC Betamax 显式载波门禁已匹配 Python 的 WAV 字节及 FLAC 解码 PCM。 |
 | 输入 | 已广泛实现 | 已覆盖原始输入及常见的 FFmpeg/PyAV 等价容器路径；罕见 codec 和时间戳情况仍有差距。 |
 | 输出与恢复 | 已实现；仍有边缘情况 | 已覆盖流式 TBC/音频输出、JSON 快照、SQLite、日志、磁盘空间处理和恢复顺序。 |
 | 交互式 UI | 不在范围内 | 解码用户界面和开发者绘图/报告窗口不会实现。 |
@@ -759,24 +759,24 @@ stdout、归一化 stderr 和时间戳归一化日志。另一个显式 `current
 - 使用 IDE 时需要 Visual Studio 2026
 - 构建可选 Intel IPP 桥接 DLL 时需要 Visual Studio C++ Build Tools 和 Windows SDK
 - 对 FFmpeg 支持的容器输入，需要 `ffmpeg` 和 `ffprobe` 位于 `PATH`
-- 默认 HiFi FLAC 输出需要 `ffmpeg`
+- 默认 HiFi FLAC 输出使用内置 libsndfile，不需要 FFmpeg
 
 ```powershell
 .\tools\build-ipp-native.ps1
 dotnet restore VHSDecodeDotNet.slnx
 dotnet build VHSDecodeDotNet.slnx -c Release --no-restore
-dotnet test --solution VHSDecodeDotNet.slnx -c Release --no-build --no-restore --minimum-expected-tests 1083
+dotnet test --solution VHSDecodeDotNet.slnx -c Release --no-build --no-restore --minimum-expected-tests 1090
 ```
 
 第一条命令用于包含可选的 `ipp-fast` 原生产物；只构建 Exact 时可以省略。
 该脚本通过 `vswhere` 定位 MSBuild，还原锁定版本的
 `intelipp.static.win-x64` NuGet 包，构建顺序执行的静态桥接，并拒绝任何外部 IPP、
 OpenMP、oneTBB 或 Visual C++ runtime DLL 依赖。开发机和部署电脑都不需要安装
-Intel oneAPI。发布程序会携带 `vhsdecode_ipp.dll`、Intel 许可证和
-`THIRD-PARTY-NOTICES.md`；只构建 Exact 后端时可以省略原生构建步骤。
+Intel oneAPI。只含二进制的单文件发布会嵌入 `vhsdecode_ipp.dll` 和适用的第三方
+notice，不会额外生成许可证 sidecar 文件。只构建 Exact 后端时可以省略原生构建步骤。
 
 当前正式 Release 构建为零警告、零错误。xUnit v3 项目向
-`dotnet test` 和 Visual Studio Test Explorer 暴露 **1,083** 个可独立发现的测试。
+`dotnet test` 和 Visual Studio Test Explorer 暴露 **1,090** 个可独立发现的测试。
 
 <!-- SECTION: usage -->
 

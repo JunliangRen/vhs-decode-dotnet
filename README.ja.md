@@ -76,7 +76,7 @@
 | VHS とテープ形式 | 実装済み。まれなキャプチャ差分あり | VHS、S-VHS、Betamax、Video8/Hi8、U-matic、Type C、EIAJ、および対応 PAL/NTSC 形式は release 互換経路を共有します。 |
 | CVBS | release 対応システムを実装済み | PAL/NTSC 経路は動作します。まれな vblank とオプション間のケースには実キャプチャ fixture の追加が必要です。 |
 | LaserDisc | 実装済み。まれなキャプチャ差分あり | Video、VBI、EFM、analog audio、AC3、RF-TBC、metadata、recovery、PAL/NTSC 経路を接続済みです。 |
-| HiFi | 実装済み。実キャプチャ検証が残る | 型付き v0.4.0 CLI、境界付き並列デコード、後処理、WAV/FLAC 出力、preview、GNU Radio mode を接続済みです。 |
+| HiFi | 実装済み。実キャプチャ検証がさらに必要 | 型付き v0.4.0 CLI、境界付き並列デコード、後処理、WAV/FLAC 出力、preview、GNU Radio mode を接続済みです。境界付き 4 秒 NTSC Betamax explicit-carrier gate で Python の WAV byte と decoded FLAC PCM に一致します。 |
 | 入力 | 広範囲に実装済み | Raw input と一般的な FFmpeg/PyAV 相当の container 経路をカバーしています。まれな codec/timestamp は今後の対象です。 |
 | 出力とリカバリー | 実装済み。edge case が残る | Streaming TBC/audio、JSON snapshot、SQLite、log、disk-space 処理、recovery 順序をカバーしています。 |
 | 対話型 UI | 対象外 | デコード用 GUI と開発者向け plot/report ウィンドウは意図的に実装しません。 |
@@ -886,13 +886,13 @@ deterministic で、計測 run は 37.012 秒、peak 1.949 GiB、quarter working
 - IDE として使用する場合は Visual Studio 2026
 - optional Intel IPP bridge の build には Visual Studio C++ Build Tools と Windows SDK
 - FFmpeg 対応 container input では `ffmpeg` と `ffprobe` が `PATH` 上に必要
-- デフォルトの HiFi FLAC 出力には `ffmpeg` が必要
+- default HiFi FLAC output は bundled libsndfile を使い、FFmpeg は不要
 
 ```powershell
 .\tools\build-ipp-native.ps1
 dotnet restore VHSDecodeDotNet.slnx
 dotnet build VHSDecodeDotNet.slnx -c Release --no-restore
-dotnet test --solution VHSDecodeDotNet.slnx -c Release --no-build --no-restore --minimum-expected-tests 1083
+dotnet test --solution VHSDecodeDotNet.slnx -c Release --no-build --no-restore --minimum-expected-tests 1090
 ```
 
 最初の command は optional `ipp-fast` native artifact を含めるためのものです。
@@ -900,12 +900,12 @@ Exact-only build では省略できます。この script は `vswhere` で MSBu
 固定した `intelipp.static.win-x64` NuGet package を restore して sequential static
 bridge を build します。外部 IPP、OpenMP、oneTBB、Visual C++ runtime DLL 依存が
 あれば失敗します。development/deployment PC のどちらにも Intel oneAPI の install
-は不要です。publish された application は `vhsdecode_ipp.dll`、Intel license、
-`THIRD-PARTY-NOTICES.md` を含みます。
+は不要です。binary-only single-file release は `vhsdecode_ipp.dll` と必要な
+third-party notice を埋め込み、license sidecar file は追加しません。
 
 現在の正式な Release build は warning 0、error 0 です。xUnit v3 project は
 `dotnet test` と Visual Studio Test Explorer の両方で個別に検出できる
-**1,083** tests を公開します。
+**1,090** tests を公開します。
 
 <!-- SECTION: usage -->
 

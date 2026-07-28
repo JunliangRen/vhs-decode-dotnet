@@ -13,6 +13,14 @@
     <EmbeddedResource Include="Formats\custom\*.txt" />
     <EmbeddedResource Include="CommandLine\Help\*.txt" />
     <EmbeddedResource Include="Tbc\Resources\sinc_lut.npz" />
+    <EmbeddedResource Include="..\..\THIRD-PARTY-NOTICES.md" LogicalName="VHSDecode.Core.Licenses.THIRD-PARTY-NOTICES.md" />
+    <EmbeddedResource Include="..\..\third_party\intel-ipp\LICENSE.txt" LogicalName="VHSDecode.Core.Licenses.intel-ipp.LICENSE.txt" />
+    <EmbeddedResource Include="..\..\third_party\libsndfile\COPYING.LGPL" LogicalName="VHSDecode.Core.Licenses.libsndfile.COPYING.LGPL" />
+    <EmbeddedResource Include="..\..\third_party\libsndfile\README.md" LogicalName="VHSDecode.Core.Licenses.libsndfile.README.md" />
+    <EmbeddedResource Include="..\..\third_party\libsoxr\COPYING.LGPL" LogicalName="VHSDecode.Core.Licenses.libsoxr.COPYING.LGPL" />
+    <EmbeddedResource Include="..\..\third_party\libsoxr\LICENCE" LogicalName="VHSDecode.Core.Licenses.libsoxr.LICENCE" />
+    <EmbeddedResource Include="..\..\third_party\libsoxr\README.md" LogicalName="VHSDecode.Core.Licenses.libsoxr.README.md" />
+    <EmbeddedResource Include="..\..\third_party\libsoxr\soxr-a66f3ee-source.zip" LogicalName="VHSDecode.Core.Licenses.libsoxr.soxr-a66f3ee-source.zip" />
   </ItemGroup>
 
   <ItemGroup>
@@ -24,12 +32,9 @@
   </ItemGroup>
 
   <ItemGroup>
+    <None Include="runtimes\win-x64\native\sndfile.dll" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" TargetPath="sndfile.dll" />
     <None Include="runtimes\win-x64\native\soxr.dll" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" TargetPath="soxr.dll" />
     <None Include="..\..\artifacts\native\Release\win-x64\vhsdecode_ipp.dll" Condition="Exists('..\..\artifacts\native\Release\win-x64\vhsdecode_ipp.dll')" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" Link="vhsdecode_ipp.dll" TargetPath="vhsdecode_ipp.dll" />
-    <None Include="..\..\third_party\libsoxr\COPYING.LGPL" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" Link="licenses\libsoxr\COPYING.LGPL" />
-    <None Include="..\..\third_party\libsoxr\LICENCE" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" Link="licenses\libsoxr\LICENCE" />
-    <None Include="..\..\third_party\libsoxr\README.md" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" Link="licenses\libsoxr\README.md" />
-    <None Include="..\..\third_party\libsoxr\soxr-a66f3ee-source.zip" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" Link="licenses\libsoxr\soxr-a66f3ee-source.zip" />
   </ItemGroup>
 
 </Project>

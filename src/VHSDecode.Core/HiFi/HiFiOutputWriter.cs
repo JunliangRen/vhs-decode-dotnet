@@ -1,14 +1,11 @@
 using System.Buffers;
 using System.Buffers.Binary;
-using System.ComponentModel;
-using System.Diagnostics;
 using System.Globalization;
 using System.Runtime.InteropServices;
-using System.Text;
 
 namespace VHSDecode.Core.HiFi;
 
-internal sealed class HiFiOutputWriter : IDisposable
+internal sealed partial class HiFiOutputWriter : IDisposable
 {
     private const string DefaultChannelSuffix = "channel";
     private const string NormalizeFileSuffix = "tmp_normalize.raw";
@@ -183,29 +180,6 @@ internal sealed class HiFiOutputWriter : IDisposable
         return $"{root}_{channelSuffix}{extension}";
     }
 
-    internal static int QuantizeFlacPcm24(float sample)
-    {
-        if (!float.IsFinite(sample))
-        {
-            throw new InvalidDataException("HiFi FLAC output cannot encode NaN or infinity.");
-        }
-
-        if (sample <= -1.0f)
-        {
-            return -8_388_608;
-        }
-
-        if (sample >= 1.0f)
-        {
-            return 8_388_607;
-        }
-
-        int rounded = checked((int)MathF.Round(
-            sample * 8_388_608.0f,
-            MidpointRounding.ToEven));
-        return Math.Clamp(rounded, -8_388_608, 8_388_607);
-    }
-
     internal static short QuantizeWavePcm16(float sample)
     {
         if (float.IsNaN(sample) || float.IsNegativeInfinity(sample) || sample <= -1.0f)
@@ -238,7 +212,7 @@ internal sealed class HiFiOutputWriter : IDisposable
 
         return path.Contains(".wav", StringComparison.OrdinalIgnoreCase)
             ? new WavePcm16Writer(path, channels, sampleRate)
-            : new FfmpegFlacWriter(path, channels, sampleRate);
+            : new LibsndfileFlacWriter(path, channels, sampleRate);
     }
 
     private static void Normalize(
@@ -489,140 +463,4 @@ internal sealed class HiFiOutputWriter : IDisposable
         }
     }
 
-    private sealed class FfmpegFlacWriter : IHiFiFloatWriter
-    {
-        private readonly Process _process;
-        private readonly Stream _input;
-        private readonly StringBuilder _stderr = new();
-        private bool _completed;
-        private bool _disposed;
-
-        public FfmpegFlacWriter(string path, int channels, int sampleRate)
-        {
-            var startInfo = new ProcessStartInfo("ffmpeg")
-            {
-                UseShellExecute = false,
-                RedirectStandardInput = true,
-                RedirectStandardError = true,
-                CreateNoWindow = true
-            };
-            foreach (string argument in new[]
-            {
-                "-hide_banner", "-loglevel", "error", "-y",
-                "-f", "s32le", "-ar", sampleRate.ToString(CultureInfo.InvariantCulture),
-                "-ac", channels.ToString(CultureInfo.InvariantCulture), "-i", "pipe:0",
-                "-c:a", "flac", "-sample_fmt", "s32", "-bits_per_raw_sample", "24",
-                "-compression_level", "12", "-f", "flac", path
-            })
-            {
-                startInfo.ArgumentList.Add(argument);
-            }
-
-            _process = new Process { StartInfo = startInfo };
-            _process.ErrorDataReceived += (_, args) =>
-            {
-                if (args.Data is { Length: > 0 })
-                {
-                    _stderr.AppendLine(args.Data);
-                }
-            };
-
-            try
-            {
-                if (!_process.Start())
-                {
-                    throw new InvalidOperationException("Failed to start ffmpeg.");
-                }
-            }
-            catch (Win32Exception ex)
-            {
-                _process.Dispose();
-                throw new NotSupportedException(
-                    "ffmpeg is required to write HiFi FLAC output.",
-                    ex);
-            }
-
-            _process.BeginErrorReadLine();
-            _input = _process.StandardInput.BaseStream;
-        }
-
-        public void Write(ReadOnlySpan<float> samples)
-        {
-            ObjectDisposedException.ThrowIf(_disposed, this);
-            if (_completed)
-            {
-                throw new InvalidOperationException("Audio writer is already complete.");
-            }
-
-            byte[] bytes = ArrayPool<byte>.Shared.Rent(Math.Min(
-                checked(samples.Length * sizeof(int)),
-                1024 * 1024));
-            try
-            {
-                int position = 0;
-                while (position < samples.Length)
-                {
-                    int count = Math.Min(samples.Length - position, bytes.Length / sizeof(int));
-                    Span<byte> destination = bytes.AsSpan(0, count * sizeof(int));
-                    for (int i = 0; i < count; i++)
-                    {
-                        int pcm24 = QuantizeFlacPcm24(samples[position + i]);
-                        BinaryPrimitives.WriteInt32LittleEndian(
-                            destination.Slice(i * sizeof(int), sizeof(int)),
-                            pcm24 << 8);
-                    }
-
-                    _input.Write(destination);
-                    position += count;
-                }
-            }
-            finally
-            {
-                ArrayPool<byte>.Shared.Return(bytes);
-            }
-        }
-
-        public void Complete()
-        {
-            ObjectDisposedException.ThrowIf(_disposed, this);
-            if (_completed)
-            {
-                return;
-            }
-
-            _completed = true;
-            _input.Dispose();
-            _process.WaitForExit();
-            if (_process.ExitCode != 0)
-            {
-                throw new InvalidDataException(
-                    $"ffmpeg failed while writing HiFi FLAC output: {_stderr.ToString().Trim()}");
-            }
-        }
-
-        public void Dispose()
-        {
-            if (_disposed)
-            {
-                return;
-            }
-
-            _disposed = true;
-            try
-            {
-                if (!_completed)
-                {
-                    _input.Dispose();
-                    if (!_process.WaitForExit(1000))
-                    {
-                        _process.Kill(entireProcessTree: true);
-                    }
-                }
-            }
-            finally
-            {
-                _process.Dispose();
-            }
-        }
-    }
 }

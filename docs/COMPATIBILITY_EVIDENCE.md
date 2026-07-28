@@ -73,7 +73,7 @@ required by the decode pipeline itself.
 | --- | --- | --- |
 | Solution and tests | Implemented | .NET 11, `.slnx`, and xUnit v3 work with Visual Studio Test Explorer and `dotnet test`. |
 | CLI and arguments | Implemented and snapshot-tested | `decode`, `vhs-decode`, `cvbs-decode`, `ld-decode`, and `hifi-decode` expose the v0.4.0 decode-facing command surface. |
-| HiFi decode | Implemented; more real-capture verification remains | PAL VHS and NTSC 8mm synthetic RF baselines and a bounded NTSC Betamax explicit-carrier WAV baseline are byte-exact. |
+| HiFi decode | Implemented; more real-capture verification remains | PAL VHS and NTSC 8mm synthetic RF baselines plus a bounded four-second NTSC Betamax explicit-carrier gate match Python WAV bytes and decoded FLAC PCM. |
 | VHS decode | Implemented; rare parity gaps remain | All valid format/filter combinations and extensive NTSC field/output fixtures are covered. |
 | CVBS decode | Implemented for release-supported runtime systems | PAL and NTSC execute as v0.4.0 does; uncommon vblank and option interactions still need broader fixtures. |
 | LaserDisc decode | Implemented; rare parity gaps remain | Video, EFM, analog audio, AC3, RF-TBC, metadata, and sidecars are wired with PAL/NTSC differential coverage. |
@@ -121,19 +121,27 @@ possible capture has already been proven byte-for-byte identical.
   deviations and the Nyquist-symmetric left AFE edge; its 22,796-frame PCM16
   WAV is byte-for-byte identical with SHA-256
   `E1AAF3F68DF1392617BC28D162D2E3DD2AFE6251E91E06D4D3191540C3EFA83F`
-- a bounded one-second slice from the same local 40 MHz NTSC Betamax HiFi
-  capture used by the video gate below was decoded with explicit 1.38/1.68 MHz
-  carrier overrides because upstream `hifi-decode` exposes only VHS and 8mm
-  presets. Python v0.4.0 and the current upstream snapshot produced identical
-  48,132-frame stereo PCM16 WAVs. Matching libsndfile 1.2.2's float-to-PCM16
-  conversion through a nearest-even int32 intermediate makes the port's
-  one-worker, default-worker, and five-worker WAVs byte-for-byte identical with
-  SHA-256
-  `4D7FF1D69CBB8D60AE1833D540087CFDA1FAB49BE6696A743ADEBE423E87DDB2`.
-  This certifies the explicit-carrier WAV artifact for this bounded slice, not
-  a Betamax preset that upstream does not provide. Redirected console output is
-  also excluded from a byte-exact claim because upstream multiprocessing
-  changes child-message ordering and can discard buffered bias lines
+- a bounded four-second, 320,000,000-byte slice from the same private local
+  40 MHz NTSC Betamax HiFi capture used by the video gate below was decoded
+  with explicit 1.38/1.68 MHz carrier overrides because upstream
+  `hifi-decode` exposes only VHS and 8mm presets. Python v0.4.0 one-worker and
+  this port's one-worker, default-worker, and five-worker runs produced
+  byte-for-byte identical 192,132-frame stereo PCM16 WAVs with SHA-256
+  `885B39EA234769370CB971FB258BDBFBF32EE94D7F8A7AB7D93D803741F569B2`.
+  The default PCM24 FLAC outputs also have identical 48 kHz stereo geometry
+  and decode to the same PCM32 bytes with SHA-256
+  `7F74444F0D4FA80B63260BC731906E13293C48A75B2B38CD7303904BE202E2E1`.
+  Their compressed container bytes are intentionally not a compatibility gate
+  when libFLAC build details differ. The port bundles the official libsndfile
+  1.2.2 Windows DLL and reproduces Python SoundFile's `SFC_SET_CLIPPING` and
+  compression initialization sequence. A separate 10,000-sample deterministic
+  gate has zero decoded PCM24 differences from the pinned Python environment.
+  This preserves Python's sample conversion without starting FFmpeg and
+  certifies the explicit-carrier artifacts for this bounded slice, not a
+  Betamax preset that upstream does not provide.
+  Redirected console output is also excluded from a byte-exact claim because
+  upstream multiprocessing changes child-message ordering and can discard
+  buffered bias lines
 - HiFi bias pre-reading preserves Release 4.0's omission of `--raw_format`:
   raw files are measured according to their extension, while stdin prints the
   measurement heading and then raises the same required-format error even when
@@ -2036,7 +2044,7 @@ dotnet test --solution VHSDecodeDotNet.slnx --no-build
 ```
 
 The current formal solution build completes with zero warnings and errors, and
-the xUnit v3 project exposes 1,022 independently discoverable compatibility tests
+the xUnit v3 project exposes 1,090 independently discoverable compatibility tests
 to `dotnet test` and Visual Studio Test Explorer. On the
 same Windows machine and fixtures, Release wall-clock measurements for one
 frame were 2.346 s versus 7.193 s for NTSC VHS and 1.651 s versus 5.865 s for
@@ -2044,8 +2052,9 @@ NTSC LD (this port versus the v0.4.0 Python virtual environment); all output
 hashes listed above remained identical.
 
 `ffmpeg` and `ffprobe` must be available on `PATH` for FFmpeg-backed RF
-container inputs; `ffmpeg` is also required for default HiFi FLAC output. HiFi
-`.wav` and recognized raw input paths do not require either tool.
+container inputs. Default HiFi FLAC output uses the bundled libsndfile and does
+not require either tool; HiFi `.wav` and recognized raw input paths do not
+require them either.
 
 To regenerate the embedded format parameter snapshot from the checked-out
 upstream source:
