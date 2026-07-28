@@ -76,11 +76,20 @@ public static class FrequencyDomainFilter
 
         var halfSpectrum = new double[half];
         int rampCount = half - zeroCount;
-        for (int i = 0; i < rampCount; i++)
+        if (rampCount == 1)
         {
-            double t = rampCount == 1 ? 0.0 : (double)i / (rampCount - 1);
+            halfSpectrum[zeroCount] = boostStart;
+        }
+        else if (rampCount > 1)
+        {
             double end = boostMax * (nyquistHz / maxFrequencyHz);
-            halfSpectrum[zeroCount + i] = boostStart + ((end - boostStart) * t);
+            double step = (end - boostStart) / (rampCount - 1);
+            for (int i = 0; i < rampCount; i++)
+            {
+                halfSpectrum[zeroCount + i] = boostStart + (i * step);
+            }
+
+            halfSpectrum[^1] = end;
         }
 
         var output = new double[blockLength];

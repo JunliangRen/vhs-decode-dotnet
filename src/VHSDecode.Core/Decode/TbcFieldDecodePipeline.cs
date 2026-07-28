@@ -827,7 +827,9 @@ public sealed class TbcFieldDecodePipeline
             _vhsPulseSearchInitialized = true;
         }
 
-        SyncTiming timing = _syncAnalyzer.EstimateTiming(rawPulses);
+        SyncTiming timing = _syncAnalyzer.EstimateTiming(
+            rawPulses,
+            preserveVhsEmptyHSyncMedianUnits: isVhs);
         IReadOnlyList<ClassifiedSyncPulse> classified = _syncAnalyzer.ClassifyPulses(rawPulses, timing);
         if (classified.Count == 0 && !isVhs)
         {

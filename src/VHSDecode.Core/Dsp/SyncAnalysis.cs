@@ -126,7 +126,9 @@ public sealed class SyncAnalyzer
             maximumSyncLength: (int)Math.Round(UsecToSamples(maximumPulseUs)));
     }
 
-    public SyncTiming EstimateTiming(IReadOnlyList<Pulse> rawPulses)
+    public SyncTiming EstimateTiming(
+        IReadOnlyList<Pulse> rawPulses,
+        bool preserveVhsEmptyHSyncMedianUnits = false)
     {
         double hsyncCheckMin = UsecToSamples(HSyncPulseUs - 1.75);
         double hsyncCheckMax = UsecToSamples(HSyncPulseUs + 2.0);
@@ -139,7 +141,13 @@ public sealed class SyncAnalyzer
             }
         }
 
-        double hsyncMedian = hsyncLengths.Count > 0 ? Median(hsyncLengths) : UsecToSamples(HSyncPulseUs);
+        // Python v0.4.0 leaves this VHS empty-candidate fallback in microseconds.
+        // Preserve the deliberate unit mismatch because it changes fallback pulse classification.
+        double hsyncMedian = hsyncLengths.Count > 0
+            ? Median(hsyncLengths)
+            : preserveVhsEmptyHSyncMedianUnits
+                ? HSyncPulseUs
+                : UsecToSamples(HSyncPulseUs);
         double hsyncTypical = UsecToSamples(HSyncPulseUs);
         double offset = hsyncMedian - hsyncTypical;
         return new SyncTiming(

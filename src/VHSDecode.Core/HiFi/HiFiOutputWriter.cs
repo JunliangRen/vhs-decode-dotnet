@@ -206,6 +206,25 @@ internal sealed class HiFiOutputWriter : IDisposable
         return Math.Clamp(rounded, -8_388_608, 8_388_607);
     }
 
+    internal static short QuantizeWavePcm16(float sample)
+    {
+        if (float.IsNaN(sample) || float.IsNegativeInfinity(sample) || sample <= -1.0f)
+        {
+            return short.MinValue;
+        }
+
+        if (float.IsPositiveInfinity(sample) || sample >= 1.0f)
+        {
+            return short.MaxValue;
+        }
+
+        // libsndfile 1.2.2 rounds a signed 32-bit sample, then stores its high 16 bits.
+        int pcm32 = checked((int)MathF.Round(
+            sample * 2_147_483_648.0f,
+            MidpointRounding.ToEven));
+        return checked((short)(pcm32 >> 16));
+    }
+
     private static IHiFiFloatWriter CreateWriter(
         string path,
         int channels,
@@ -395,7 +414,7 @@ internal sealed class HiFiOutputWriter : IDisposable
                     {
                         BinaryPrimitives.WriteInt16LittleEndian(
                             destination.Slice(i * sizeof(short), sizeof(short)),
-                            QuantizePcm16(samples[position + i]));
+                            QuantizeWavePcm16(samples[position + i]));
                     }
 
                     _stream.Write(destination);
@@ -459,21 +478,6 @@ internal sealed class HiFiOutputWriter : IDisposable
             {
                 _stream.Dispose();
             }
-        }
-
-        internal static short QuantizePcm16(float sample)
-        {
-            if (float.IsNaN(sample) || float.IsNegativeInfinity(sample) || sample <= -1.0f)
-            {
-                return short.MinValue;
-            }
-
-            if (float.IsPositiveInfinity(sample) || sample >= 1.0f)
-            {
-                return short.MaxValue;
-            }
-
-            return checked((short)MathF.Floor(sample * 32768.0f));
         }
 
         private static void WriteAscii(Span<byte> destination, string value)
