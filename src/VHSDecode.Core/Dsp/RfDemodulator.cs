@@ -18,17 +18,21 @@ public sealed class RfDemodulator : IDisposable
     private readonly object _nonlinearDeemphasisFilterPlanLock = new();
     private readonly object _subDeemphasisFilterPlanLock = new();
     private DeemphasisFilterPlan<NonlinearDeemphasisOptions>? _nonlinearDeemphasisFilterPlan;
-    private DeemphasisFilterPlan<SubDeemphasisOptions>? _subDeemphasisFilterPlan;
+    private DeemphasisFilterPlan<SubDeemphasisFilterKey>? _subDeemphasisFilterPlan;
     private int _nonlinearDeemphasisFilterPlanBuildCount;
     private int _subDeemphasisFilterPlanBuildCount;
     private readonly VhsRealFftWorkspacePool _vhsRealFftWorkspacePool;
     private int _disposed;
 
-    private sealed record DeemphasisFilterPlan<TOptions>(
+    private sealed record DeemphasisFilterPlan<TKey>(
         int Length,
-        TOptions Options,
-        Complex[] HighPass)
-        where TOptions : class;
+        TKey Key,
+        Complex[] HighPass);
+
+    private readonly record struct SubDeemphasisFilterKey(
+        double HighPassHz,
+        double? BandPassUpperHz,
+        int Order);
 
     public RfDemodulator(
         double sampleRateHz,
@@ -2062,7 +2066,7 @@ public sealed class RfDemodulator : IDisposable
     {
         DeemphasisFilterPlan<NonlinearDeemphasisOptions>? plan =
             Volatile.Read(ref _nonlinearDeemphasisFilterPlan);
-        if (plan is not null && plan.Length == length && plan.Options == options)
+        if (plan is not null && plan.Length == length && plan.Key == options)
         {
             return plan.HighPass;
         }
@@ -2070,7 +2074,7 @@ public sealed class RfDemodulator : IDisposable
         lock (_nonlinearDeemphasisFilterPlanLock)
         {
             plan = _nonlinearDeemphasisFilterPlan;
-            if (plan is not null && plan.Length == length && plan.Options == options)
+            if (plan is not null && plan.Length == length && plan.Key == options)
             {
                 return plan.HighPass;
             }
@@ -2089,9 +2093,13 @@ public sealed class RfDemodulator : IDisposable
         int length,
         SubDeemphasisOptions options)
     {
-        DeemphasisFilterPlan<SubDeemphasisOptions>? plan =
+        var key = new SubDeemphasisFilterKey(
+            options.HighPassHz,
+            options.BandPassUpperHz,
+            options.Order);
+        DeemphasisFilterPlan<SubDeemphasisFilterKey>? plan =
             Volatile.Read(ref _subDeemphasisFilterPlan);
-        if (plan is not null && plan.Length == length && plan.Options == options)
+        if (plan is not null && plan.Length == length && plan.Key == key)
         {
             return plan.HighPass;
         }
@@ -2099,14 +2107,14 @@ public sealed class RfDemodulator : IDisposable
         lock (_subDeemphasisFilterPlanLock)
         {
             plan = _subDeemphasisFilterPlan;
-            if (plan is not null && plan.Length == length && plan.Options == options)
+            if (plan is not null && plan.Length == length && plan.Key == key)
             {
                 return plan.HighPass;
             }
 
-            plan = new DeemphasisFilterPlan<SubDeemphasisOptions>(
+            plan = new DeemphasisFilterPlan<SubDeemphasisFilterKey>(
                 length,
-                options,
+                key,
                 BuildNonlinearHighPassFilter(
                     SampleRateHz,
                     length,

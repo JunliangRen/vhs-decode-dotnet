@@ -853,8 +853,8 @@ timestamp-normalized log はすべて一致しました。candidate は default 
 すべてで保存済みの各 Python oracle と完全一致しました。IPP は gate から除外しています。
 
 RF nonlinear/sub-deemphasis は、`RfDemodulator` ごとに exact-key の read-only high-pass
-response を 1 個ずつ保持するようになりました。key は block length と immutable option
-record で構成され、miss 時は lock 内で唯一の entry を置き換えます。このため concurrent
+response を 1 個ずつ保持するようになりました。key は block length と immutable high-pass
+parameter で構成され、miss 時は lock 内で唯一の entry を置き換えます。このため concurrent
 block は完成済み response を共有し、任意の block shape が蓄積しません。同じ private
 local 40 MHz NTSC `BETAMAX_HIFI` `.lds` capture で、baseline `846ad28` に対する 5 組の
 interleaved/reversed 160-frame `--threads 20` pair は、wall median を 16.294 秒から

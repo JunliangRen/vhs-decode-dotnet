@@ -433,6 +433,19 @@ public sealed class DspWorkingBufferTests
             length,
             sampleRateHz,
             nonlinear,
+            sub with
+            {
+                AmplitudeLowPassHz = 10.0,
+                Deviation = 8.0
+            });
+        Assert.Equal(1, demodulator.NonlinearDeemphasisFilterPlanBuildCount);
+        Assert.Equal(1, demodulator.SubDeemphasisFilterPlanBuildCount);
+
+        _ = DecodeDeemphasisProbe(
+            demodulator,
+            length,
+            sampleRateHz,
+            nonlinear,
             sub with { HighPassHz = 18.0 });
         Assert.Equal(1, demodulator.NonlinearDeemphasisFilterPlanBuildCount);
         Assert.Equal(2, demodulator.SubDeemphasisFilterPlanBuildCount);

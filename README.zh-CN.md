@@ -730,8 +730,8 @@ stdout、归一化 stderr 和时间戳归一化日志全部一致。候选还在
 都与各自保存的 Python oracle 完全一致。IPP 未纳入门禁。
 
 RF nonlinear 和 sub-deemphasis 现在会在每个 `RfDemodulator` 中各保留一份精确 key 的
-只读 high-pass 响应。key 由 block 长度和不可变参数 record 组成；miss 时会在锁内替换
-唯一条目，因此并发 block 会共享已经完成的响应，也不会累积任意数量的 block 形状。在
+只读 high-pass 响应。key 由 block 长度和不可变 high-pass 参数组成；miss 时会在锁内
+替换唯一条目，因此并发 block 会共享已经完成的响应，也不会累积任意数量的 block 形状。在
 同一份私有本地 40 MHz NTSC `BETAMAX_HIFI` `.lds` 文件上，相对基线 `846ad28` 的五组
 交错、反向 160-frame `--threads 20` 配对，将墙钟中位数从 16.294 秒降至 16.220 秒
 （减少 0.5%），均值从 16.603 秒降至 16.257 秒（减少 2.1%）；候选赢得五组中的四组。

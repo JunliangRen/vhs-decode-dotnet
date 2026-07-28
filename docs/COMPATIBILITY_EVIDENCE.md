@@ -1772,8 +1772,9 @@ possible capture has already been proven byte-for-byte identical.
   NTSC-J gate above remains unchanged
 - nonlinear and sub-deemphasis now retain one exact-key, read-only high-pass
   response per `RfDemodulator`. Each cache has one entry keyed by block length
-  and the immutable option record; a miss replaces that entry under a lock, so
-  concurrent first use builds once and arbitrary block shapes cannot accumulate.
+  and the immutable high-pass parameters; a miss replaces that entry under a
+  lock, so concurrent first use builds once and arbitrary block shapes cannot
+  accumulate.
   On the same private local 40 MHz NTSC `BETAMAX_HIFI` `.lds` capture, five
   interleaved and reversed 160-frame `--threads 20` pairs against baseline
   `846ad28` moved wall medians from 16.294 to 16.220 s (0.5% less) and means

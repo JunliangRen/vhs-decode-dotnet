@@ -904,11 +904,11 @@ under default `v0.4.0` and opt-in `current`; both profiles matched their stored
 Python oracles in the same six comparisons. IPP was excluded.
 
 RF nonlinear and sub-deemphasis now retain one exact-key, read-only high-pass
-response per `RfDemodulator`. Block length and the immutable option record form
-the key; a miss replaces the sole entry under a lock, so concurrent blocks share
-the completed response without accumulating arbitrary block shapes. On the same
-private local 40 MHz NTSC `BETAMAX_HIFI` `.lds` capture, five interleaved and
-reversed 160-frame `--threads 20` pairs against baseline `846ad28` moved wall
+response per `RfDemodulator`. Block length and the immutable high-pass parameters
+form the key; a miss replaces the sole entry under a lock, so concurrent blocks
+share the completed response without accumulating arbitrary block shapes. On the
+same private local 40 MHz NTSC `BETAMAX_HIFI` `.lds` capture, five interleaved
+and reversed 160-frame `--threads 20` pairs against baseline `846ad28` moved wall
 medians from 16.294 to 16.220 s (0.5% less) and means from 16.603 to 16.257 s
 (2.1% less); the candidate won four of five pairs. CPU medians moved from
 116.641 to 114.234 s (2.1% less) and means from 117.633 to 113.417 s (3.6%
