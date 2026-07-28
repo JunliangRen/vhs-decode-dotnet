@@ -921,6 +921,25 @@ luma、chroma、JSON、stdout、normalized stderr、timestamp-normalized log、
 `v0.4.0` baseline regression も同じ 6 surface と 320 個すべての `fileLoc` に
 一致しました。
 
+VHS full-spectrum analytic path は、RF block ごとに同じ配列を再構築せず、
+read-only Hilbert multiplier を FFT length ごとに cache するようになりました。
+multiplier の値、float64 type、consumer、element evaluation order は変更して
+いません。同じ private local 40 MHz NTSC `BETAMAX_HIFI` sample の独立した
+80-frame `gc-verbose` trace では、sampled managed allocation が
+43.073 GiB から 42.195 GiB（0.878 GiB、2.04% 減）へ、Gen2 collection が
+134 回から 126 回へ減りました。6 組の 40-frame gate は noise が大きく、
+4 組で baseline が高速だったため、short-run gain は主張しません。4 組の
+interleaved 160-frame `current --threads 20` pair はすべて candidate が高速で、
+paired median wall-time gain は 4.85%、average gain は 5.24%、average CPU time
+は 3.59% 減り、median peak working set は 1.520 GiB から 1.479 GiB へ
+下がりました。反転順序の 400-frame pair 2 組は 3.82% と 3.80% 高速で、
+average CPU time は 1.50% 減り、median peak working set は 1.555 GiB から
+1.502 GiB へ下がりました。すべての A/B gate で luma、chroma、JSON、stdout、
+normalized stderr、timestamp-normalized log、すべての ordered `fileLoc` が
+一致しました。candidate の `current` output は `--threads 0`、`1`、default 5、
+`20` でも deterministic で、別の 160-frame `v0.4.0` regression も同じ surface
+に一致しました。
+
 </details>
 
 <!-- SECTION: build -->
