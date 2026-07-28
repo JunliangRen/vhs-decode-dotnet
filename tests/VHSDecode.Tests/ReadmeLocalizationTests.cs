@@ -5,14 +5,33 @@ namespace VHSDecode.Tests;
 
 public sealed partial class ReadmeLocalizationTests
 {
-    private static readonly string[] ReadmeFiles =
+    private static readonly string[] OverviewReadmeFiles =
     [
         "README.md",
         "README.zh-CN.md",
         "README.ja.md"
     ];
 
-    private static readonly string[] ExpectedSections =
+    private static readonly string[] DetailedReadmeFiles =
+    [
+        Path.Combine("docs", "README.detailed.md"),
+        Path.Combine("docs", "README.detailed.zh-CN.md"),
+        Path.Combine("docs", "README.detailed.ja.md")
+    ];
+
+    private static readonly string[] ExpectedOverviewSections =
+    [
+        "overview",
+        "start",
+        "profiles",
+        "performance",
+        "compatibility",
+        "build",
+        "detail",
+        "license"
+    ];
+
+    private static readonly string[] ExpectedDetailedSections =
     [
         "scope",
         "status",
@@ -30,35 +49,78 @@ public sealed partial class ReadmeLocalizationTests
     [Fact(DisplayName = "Localized READMEs share navigation, version, and sections")]
     public void LocalizedReadmesShareNavigationVersionAndSections()
     {
-        IReadOnlyDictionary<string, string> readmes = ReadReadmes();
+        IReadOnlyDictionary<string, string> overviews = ReadReadmes(OverviewReadmeFiles);
+        IReadOnlyDictionary<string, string> details = ReadReadmes(DetailedReadmeFiles);
         string expectedMarker = SingleCapture(
             SyncMarkerRegex(),
-            readmes["README.md"],
+            overviews["README.md"],
             "version");
 
-        foreach ((string filename, string content) in readmes)
+        foreach ((string filename, string content) in overviews)
         {
             Assert.Equal(
                 expectedMarker,
                 SingleCapture(SyncMarkerRegex(), content, "version"));
             Assert.True(
-                ExpectedSections.SequenceEqual(Captures(SectionRegex(), content, "id")),
+                ExpectedOverviewSections.SequenceEqual(Captures(SectionRegex(), content, "id")),
                 $"{filename} does not contain the synchronized section sequence.");
             Assert.Contains("[English](README.md)", content, StringComparison.Ordinal);
             Assert.Contains("[简体中文](README.zh-CN.md)", content, StringComparison.Ordinal);
             Assert.Contains("[日本語](README.ja.md)", content, StringComparison.Ordinal);
+        }
+
+        foreach ((string filename, string content) in details)
+        {
+            Assert.Equal(
+                expectedMarker,
+                SingleCapture(SyncMarkerRegex(), content, "version"));
+            Assert.True(
+                ExpectedDetailedSections.SequenceEqual(Captures(SectionRegex(), content, "id")),
+                $"{filename} does not contain the synchronized detailed section sequence.");
+            Assert.Contains("[English](README.detailed.md)", content, StringComparison.Ordinal);
+            Assert.Contains(
+                "[简体中文](README.detailed.zh-CN.md)",
+                content,
+                StringComparison.Ordinal);
+            Assert.Contains("[日本語](README.detailed.ja.md)", content, StringComparison.Ordinal);
         }
     }
 
     [Fact(DisplayName = "Localized READMEs share commands and release facts")]
     public void LocalizedReadmesShareCommandsAndReleaseFacts()
     {
-        IReadOnlyDictionary<string, string> readmes = ReadReadmes();
-        string[] expectedCommands = Captures(
+        IReadOnlyDictionary<string, string> overviews = ReadReadmes(OverviewReadmeFiles);
+        IReadOnlyDictionary<string, string> details = ReadReadmes(DetailedReadmeFiles);
+        string[] expectedOverviewCommands = Captures(
             PowerShellBlockRegex(),
-            readmes["README.md"],
+            overviews["README.md"],
             "body");
-        Assert.Equal(3, expectedCommands.Length);
+        Assert.Equal(3, expectedOverviewCommands.Length);
+        string[] expectedDetailedCommands = Captures(
+            PowerShellBlockRegex(),
+            details[Path.Combine("docs", "README.detailed.md")],
+            "body");
+        Assert.Equal(3, expectedDetailedCommands.Length);
+
+        string[] overviewFacts =
+        [
+            "43155200da87c0d49eb37d8ec09b1372075ee8e4",
+            "11.0.100-preview.6.26359.118",
+            "**1,092**",
+            "--compat-version",
+            "current",
+            "--dsp-backend",
+            "ipp-fast",
+            "Exact + v0.4.0",
+            "Exact + current",
+            "IPP-fast + v0.4.0",
+            "IPP-fast + current",
+            "14.481 s",
+            "4.097x",
+            "3.174x",
+            "g4315520",
+            "--threads 0"
+        ];
 
         string[] synchronizedFacts =
         [
@@ -365,15 +427,38 @@ public sealed partial class ReadmeLocalizationTests
             "16.52",
             "35.84/39.54",
             "1.459/1.231/0.820/1.422",
+            "FBB07399F2C9DEDD1BF02BBE28B049BE51E8AFD9C38A20BCA73514C7CE8DCAE0",
+            "20.311490",
+            "2.623486",
+            "25.831",
+            "4.097x",
+            "3.174x",
             "--use_saved_levels",
-            "docs/COMPATIBILITY_EVIDENCE.md"
+            "COMPATIBILITY_EVIDENCE.md"
         ];
 
-        foreach ((string filename, string content) in readmes)
+        foreach ((string filename, string content) in overviews)
         {
             Assert.True(
-                expectedCommands.SequenceEqual(Captures(PowerShellBlockRegex(), content, "body")),
-                $"{filename} does not contain the synchronized PowerShell command blocks.");
+                expectedOverviewCommands.SequenceEqual(
+                    Captures(PowerShellBlockRegex(), content, "body")),
+                $"{filename} does not contain the synchronized overview command blocks.");
+            foreach (string fact in overviewFacts)
+            {
+                Assert.Contains(fact, content, StringComparison.Ordinal);
+            }
+            Assert.DoesNotContain(
+                "PERFORMANCE_TABLE_PENDING",
+                content,
+                StringComparison.Ordinal);
+        }
+
+        foreach ((string filename, string content) in details)
+        {
+            Assert.True(
+                expectedDetailedCommands.SequenceEqual(
+                    Captures(PowerShellBlockRegex(), content, "body")),
+                $"{filename} does not contain the synchronized detailed command blocks.");
             foreach (string fact in synchronizedFacts)
             {
                 Assert.Contains(fact, content, StringComparison.Ordinal);
@@ -414,12 +499,19 @@ public sealed partial class ReadmeLocalizationTests
         Assert.True(
             File.Exists(Path.Combine(RepositoryRoot(), "docs", "COMPATIBILITY_EVIDENCE.md")),
             "The shared compatibility evidence document is missing.");
+        foreach (string filename in DetailedReadmeFiles)
+        {
+            Assert.True(
+                File.Exists(Path.Combine(RepositoryRoot(), filename)),
+                $"The detailed README is missing: {filename}");
+        }
     }
 
-    private static IReadOnlyDictionary<string, string> ReadReadmes()
+    private static IReadOnlyDictionary<string, string> ReadReadmes(
+        IEnumerable<string> filenames)
     {
         string root = RepositoryRoot();
-        return ReadmeFiles.ToDictionary(
+        return filenames.ToDictionary(
             filename => filename,
             filename => File.ReadAllText(Path.Combine(root, filename)),
             StringComparer.Ordinal);
