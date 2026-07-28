@@ -2,6 +2,7 @@ namespace VHSDecode.Core.Dsp;
 
 internal sealed class ChromaSuperGaussianFinalFilter
 {
+    private const int MaximumParallelWorkers = 4;
     private const double AttenuationDb = 80.0;
     private const double LowerBandwidthHz = 1_300_000.0;
     private const int Order = 2;
@@ -37,20 +38,26 @@ internal sealed class ChromaSuperGaussianFinalFilter
     internal double[] Apply(ReadOnlySpan<double> input)
     {
         var output = new double[_inputLength];
-        ApplyCore(input, output);
+        ApplyCore(input, output, workerThreads: 1);
         return output;
     }
 
-    internal double[] ApplyInPlace(double[] input)
+    internal double[] ApplyInPlace(
+        double[] input,
+        int workerThreads = 1)
     {
         ArgumentNullException.ThrowIfNull(input);
-        ApplyCore(input, input);
+        ApplyCore(
+            input,
+            input,
+            Math.Clamp(workerThreads, 1, MaximumParallelWorkers));
         return input;
     }
 
     private void ApplyCore(
         ReadOnlySpan<double> input,
-        Span<double> output)
+        Span<double> output,
+        int workerThreads)
     {
         if (input.Length != _inputLength)
         {
@@ -67,7 +74,9 @@ internal sealed class ChromaSuperGaussianFinalFilter
         }
 
         float[] padded = ReflectPad(input, _paddedLength, _padLeft);
-        Complex32[] spectrum = PocketFftReal32.ForwardAnyLength(padded);
+        Complex32[] spectrum = PocketFftReal32.ForwardAnyLength(
+            padded,
+            workerThreads);
         for (int i = 0; i < spectrum.Length; i++)
         {
             double real = spectrum[i].Real;
@@ -79,7 +88,8 @@ internal sealed class ChromaSuperGaussianFinalFilter
 
         float[] filtered = PocketFftReal32.InverseAnyLength(
             spectrum,
-            _paddedLength);
+            _paddedLength,
+            workerThreads);
         for (int i = 0; i < output.Length; i++)
         {
             output[i] = filtered[_padLeft + i];

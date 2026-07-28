@@ -44,17 +44,21 @@ internal static class PocketFftReal32
     }
 
     internal static Complex32[] ForwardAnyLength(
-        ReadOnlySpan<float> input)
+        ReadOnlySpan<float> input,
+        int workerThreads = 1)
     {
         ValidateSupportedEvenLength(input.Length, nameof(input));
         return Plans.GetOrAdd(
             input.Length,
-            static length => new Plan(length)).ForwardDucc(input);
+            static length => new Plan(length)).ForwardDucc(
+                input,
+                workerThreads);
     }
 
     internal static float[] InverseAnyLength(
         ReadOnlySpan<Complex32> input,
-        int outputLength)
+        int outputLength,
+        int workerThreads = 1)
     {
         ValidateSupportedEvenLength(outputLength, nameof(outputLength));
         if (input.Length != (outputLength / 2) + 1)
@@ -66,7 +70,9 @@ internal static class PocketFftReal32
 
         return Plans.GetOrAdd(
             outputLength,
-            static length => new Plan(length)).InverseDucc(input);
+            static length => new Plan(length)).InverseDucc(
+                input,
+                workerThreads);
     }
 
     private static void ValidateSupportedEvenLength(
@@ -144,10 +150,16 @@ internal static class PocketFftReal32
             }
         }
 
-        internal Complex32[] ForwardDucc(ReadOnlySpan<float> input)
-            => _length > 1000 ? ForwardComplexified(input) : Forward(input);
+        internal Complex32[] ForwardDucc(
+            ReadOnlySpan<float> input,
+            int workerThreads = 1)
+            => _length > 1000
+                ? ForwardComplexified(input, workerThreads)
+                : Forward(input);
 
-        private Complex32[] ForwardComplexified(ReadOnlySpan<float> input)
+        private Complex32[] ForwardComplexified(
+            ReadOnlySpan<float> input,
+            int workerThreads)
         {
             int complexLength = _length / 2;
             var complexInput = new Complex32[complexLength];
@@ -160,8 +172,12 @@ internal static class PocketFftReal32
 
             Complex32[] transformed =
                 (_length & (_length - 1)) == 0
-                    ? PocketFftComplex32.ForwardDucc(complexInput)
-                    : PocketFftComplex32.ForwardAnyLengthDucc(complexInput);
+                    ? PocketFftComplex32.ForwardDucc(
+                        complexInput,
+                        workerThreads)
+                    : PocketFftComplex32.ForwardAnyLengthDucc(
+                        complexInput,
+                        workerThreads);
             var output = new Complex32[complexLength + 1];
             output[0] = new Complex32(
                 transformed[0].Real + transformed[0].Imaginary,
@@ -215,11 +231,16 @@ internal static class PocketFftReal32
             return packed;
         }
 
-        internal float[] InverseDucc(ReadOnlySpan<Complex32> input)
-            => _length > 1000 ? InverseComplexified(input) : Inverse(input);
+        internal float[] InverseDucc(
+            ReadOnlySpan<Complex32> input,
+            int workerThreads = 1)
+            => _length > 1000
+                ? InverseComplexified(input, workerThreads)
+                : Inverse(input);
 
         private float[] InverseComplexified(
-            ReadOnlySpan<Complex32> input)
+            ReadOnlySpan<Complex32> input,
+            int workerThreads)
         {
             int complexLength = _length / 2;
             var complexInput = new Complex32[complexLength];
@@ -258,7 +279,9 @@ internal static class PocketFftReal32
             }
 
             Complex32[] transformed =
-                PocketFftComplex32.BackwardAnyLengthDucc(complexInput);
+                PocketFftComplex32.BackwardAnyLengthDucc(
+                    complexInput,
+                    workerThreads);
             float normalization = 1.0f / _length;
             var output = new float[_length];
             for (int i = 0; i < transformed.Length; i++)

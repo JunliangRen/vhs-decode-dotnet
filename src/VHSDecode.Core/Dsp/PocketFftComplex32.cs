@@ -1,4 +1,5 @@
 // Float32 mixed-radix complex FFT adapted from pocketfft/DUCC's BSD-3-Clause implementation.
+using System.Buffers;
 using System.Collections.Concurrent;
 
 namespace VHSDecode.Core.Dsp;
@@ -7,7 +8,9 @@ internal static class PocketFftComplex32
 {
     private static readonly ConcurrentDictionary<(int Length, int RootLength), Plan> RootedPlans = new();
 
-    internal static Complex32[] ForwardDucc(ReadOnlySpan<Complex32> input)
+    internal static Complex32[] ForwardDucc(
+        ReadOnlySpan<Complex32> input,
+        int workerThreads = 1)
     {
         ValidateLength(input.Length, nameof(input));
         if (input.Length is > 300 and <= 100_000)
@@ -16,12 +19,16 @@ internal static class PocketFftComplex32
         }
 
         return input.Length > 10_000
-            ? TransformLargeMultipass(input, input.Length)
+            ? TransformLargeMultipass(
+                input,
+                input.Length,
+                workerThreads)
             : new Plan(input.Length, input.Length).Transform(input);
     }
 
     internal static Complex32[] ForwardAnyLengthDucc(
-        ReadOnlySpan<Complex32> input)
+        ReadOnlySpan<Complex32> input,
+        int workerThreads = 1)
     {
         ValidateSupportedLength(input.Length, nameof(input));
         if (input.Length is > 300 and <= 100_000
@@ -30,13 +37,19 @@ internal static class PocketFftComplex32
             return TransformDuccVectorized(input);
         }
 
-        return TransformWithRootLength(input, input.Length);
+        return TransformWithRootLength(
+            input,
+            input.Length,
+            workerThreads);
     }
 
     internal static Complex32[] InverseAnyLengthDucc(
-        ReadOnlySpan<Complex32> input)
+        ReadOnlySpan<Complex32> input,
+        int workerThreads = 1)
     {
-        Complex32[] transformed = BackwardAnyLengthDucc(input);
+        Complex32[] transformed = BackwardAnyLengthDucc(
+            input,
+            workerThreads);
         float normalization = 1.0f / input.Length;
         for (int i = 0; i < transformed.Length; i++)
         {
@@ -49,7 +62,8 @@ internal static class PocketFftComplex32
     }
 
     internal static Complex32[] BackwardAnyLengthDucc(
-        ReadOnlySpan<Complex32> input)
+        ReadOnlySpan<Complex32> input,
+        int workerThreads = 1)
     {
         ValidateSupportedLength(input.Length, nameof(input));
         var conjugated = new Complex32[input.Length];
@@ -60,7 +74,9 @@ internal static class PocketFftComplex32
                 -input[i].Imaginary);
         }
 
-        Complex32[] transformed = ForwardAnyLengthDucc(conjugated);
+        Complex32[] transformed = ForwardAnyLengthDucc(
+            conjugated,
+            workerThreads);
         for (int i = 0; i < transformed.Length; i++)
         {
             float imaginary = transformed[i].Imaginary;
@@ -74,12 +90,16 @@ internal static class PocketFftComplex32
 
     private static Complex32[] TransformWithRootLength(
         ReadOnlySpan<Complex32> input,
-        int rootLength)
+        int rootLength,
+        int workerThreads = 1)
     {
         ValidateSupportedLength(input.Length, nameof(input));
         if (input.Length > 10_000)
         {
-            return TransformLargeMultipass(input, rootLength);
+            return TransformLargeMultipass(
+                input,
+                rootLength,
+                workerThreads);
         }
 
         return RootedPlans.GetOrAdd(
@@ -90,7 +110,8 @@ internal static class PocketFftComplex32
 
     private static Complex32[] TransformLargeMultipass(
         ReadOnlySpan<Complex32> input,
-        int rootLength)
+        int rootLength,
+        int workerThreads)
     {
         int length = input.Length;
         int[] packets = BuildBalancedPackets(length);
@@ -106,45 +127,91 @@ internal static class PocketFftComplex32
             Plan packetPlan = RootedPlans.GetOrAdd(
                 (packetLength, rootLength),
                 static key => new Plan(key.Length, key.RootLength));
-            var packet = new Complex32[packetLength];
-
             if (l1 == 1)
             {
-                for (int i = 0; i < ido; i++)
+                int parallelWorkers = Math.Min(workerThreads, ido);
+                if (parallelWorkers > 1)
                 {
-                    for (int m = 0; m < packetLength; m++)
-                    {
-                        packet[m] = source[i + (ido * m)];
-                    }
-
-                    Complex32[] transformed = packetPlan.Transform(packet);
-                    for (int m = 0; m < packetLength; m++)
-                    {
-                        Complex32 value = transformed[m];
-                        if (i != 0 && m != 0)
+                    Parallel.For(
+                        fromInclusive: 0,
+                        toExclusive: ido,
+                        new ParallelOptions
                         {
-                            Value rotated = SpecialMultiply(
-                                new Value(value.Real, value.Imaginary),
-                                roots.Get(rootFactor * m * i));
-                            value = new Complex32(
-                                rotated.Real,
-                                rotated.Imaginary);
-                        }
-
-                        source[i + (ido * m)] = value;
+                            MaxDegreeOfParallelism = parallelWorkers
+                        },
+                        () => ArrayPool<Complex32>.Shared.Rent(packetLength),
+                        (i, _, packet) =>
+                        {
+                            TransformFirstPassPacket(
+                                source,
+                                i,
+                                ido,
+                                packetLength,
+                                rootFactor,
+                                packetPlan,
+                                roots,
+                                packet.AsSpan(0, packetLength));
+                            return packet;
+                        },
+                        packet => ArrayPool<Complex32>.Shared.Return(packet));
+                }
+                else
+                {
+                    var packet = new Complex32[packetLength];
+                    for (int i = 0; i < ido; i++)
+                    {
+                        TransformFirstPassPacket(
+                            source,
+                            i,
+                            ido,
+                            packetLength,
+                            rootFactor,
+                            packetPlan,
+                            roots,
+                            packet);
                     }
                 }
             }
             else if (ido == 1)
             {
-                for (int n = 0; n < l1; n++)
+                int parallelWorkers = Math.Min(workerThreads, l1);
+                if (parallelWorkers > 1)
                 {
-                    int inputOffset = n * packetLength;
-                    source.AsSpan(inputOffset, packetLength).CopyTo(packet);
-                    Complex32[] transformed = packetPlan.Transform(packet);
-                    for (int m = 0; m < packetLength; m++)
+                    Parallel.For(
+                        fromInclusive: 0,
+                        toExclusive: l1,
+                        new ParallelOptions
+                        {
+                            MaxDegreeOfParallelism = parallelWorkers
+                        },
+                        () => ArrayPool<Complex32>.Shared.Rent(packetLength),
+                        (n, _, packet) =>
+                        {
+                            TransformSecondPassPacket(
+                                source,
+                                destination,
+                                n,
+                                l1,
+                                packetLength,
+                                packetPlan,
+                                packet.AsSpan(0, packetLength));
+                            return packet;
+                        },
+                        packet => ArrayPool<Complex32>.Shared.Return(packet));
+                }
+                else
+                {
+                    var packet = new Complex32[packetLength];
+                    for (int n = 0; n < l1; n++)
                     {
-                        destination[n + (m * l1)] = transformed[m];
+                        TransformSecondPassPacket(
+                            source,
+                            destination,
+                            n,
+                            l1,
+                            packetLength,
+                            packetPlan,
+                            packet);
                     }
                 }
 
@@ -160,6 +227,58 @@ internal static class PocketFftComplex32
         }
 
         return source;
+    }
+
+    private static void TransformFirstPassPacket(
+        Complex32[] source,
+        int packetIndex,
+        int packetStride,
+        int packetLength,
+        int rootFactor,
+        Plan packetPlan,
+        SinCos2PiByN roots,
+        Span<Complex32> packet)
+    {
+        for (int m = 0; m < packetLength; m++)
+        {
+            packet[m] = source[packetIndex + (packetStride * m)];
+        }
+
+        Complex32[] transformed = packetPlan.Transform(packet);
+        for (int m = 0; m < packetLength; m++)
+        {
+            Complex32 value = transformed[m];
+            if (packetIndex != 0 && m != 0)
+            {
+                Value rotated = SpecialMultiply(
+                    new Value(value.Real, value.Imaginary),
+                    roots.Get(rootFactor * m * packetIndex));
+                value = new Complex32(
+                    rotated.Real,
+                    rotated.Imaginary);
+            }
+
+            source[packetIndex + (packetStride * m)] = value;
+        }
+    }
+
+    private static void TransformSecondPassPacket(
+        Complex32[] source,
+        Complex32[] destination,
+        int packetIndex,
+        int packetStride,
+        int packetLength,
+        Plan packetPlan,
+        Span<Complex32> packet)
+    {
+        int inputOffset = packetIndex * packetLength;
+        source.AsSpan(inputOffset, packetLength).CopyTo(packet);
+        Complex32[] transformed = packetPlan.Transform(packet);
+        for (int m = 0; m < packetLength; m++)
+        {
+            destination[packetIndex + (m * packetStride)] =
+                transformed[m];
+        }
     }
 
     private static int[] BuildBalancedPackets(int length)
