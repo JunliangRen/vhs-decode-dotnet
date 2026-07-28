@@ -1181,7 +1181,7 @@ Requirements:
 .\tools\build-ipp-native.ps1
 dotnet restore VHSDecodeDotNet.slnx
 dotnet build VHSDecodeDotNet.slnx -c Release --no-restore
-dotnet test --solution VHSDecodeDotNet.slnx -c Release --no-build --no-restore --minimum-expected-tests 1092
+dotnet test --solution VHSDecodeDotNet.slnx -c Release --no-build --no-restore --minimum-expected-tests 1103
 ```
 
 The first command includes the optional `ipp-fast` native artifact; omit it for
@@ -1239,6 +1239,15 @@ upstream Python behavior. While a decode is active:
 
 The writer remains the authority for file length and snapshot publication.
 Readers must tolerate a growing TBC file and replace/reopen JSON snapshots.
+
+Snapshot publication retries transient sharing and access failures after
+100 ms, 500 ms, and 2 seconds. A failed checkpoint no longer stops later
+snapshots. If the final canonical JSON still cannot be replaced, decode exits
+nonzero with `OUTPUT INCOMPLETE`, preserves the append-only
+`.tbc.json.fields.tmp` journal, and keeps a complete generated snapshot as
+`.tbc.json.final` (or a numbered `.final.N`) when one is available. The
+previous canonical snapshot is left intact. Successful final JSON bytes and
+the v0.4.0 completion lifecycle remain unchanged.
 
 <!-- SECTION: verification -->
 

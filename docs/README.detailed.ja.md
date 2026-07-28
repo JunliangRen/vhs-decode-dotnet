@@ -1131,7 +1131,7 @@ deterministic でした。
 .\tools\build-ipp-native.ps1
 dotnet restore VHSDecodeDotNet.slnx
 dotnet build VHSDecodeDotNet.slnx -c Release --no-restore
-dotnet test --solution VHSDecodeDotNet.slnx -c Release --no-build --no-restore --minimum-expected-tests 1092
+dotnet test --solution VHSDecodeDotNet.slnx -c Release --no-build --no-restore --minimum-expected-tests 1103
 ```
 
 最初の command は optional `ipp-fast` native artifact を含めるためのものです。
@@ -1188,6 +1188,15 @@ Video decode output は、上流 Python と互換の read/write sharing で開�
 
 file length と snapshot 公開時点の正本は writer です。reader は増加中の TBC file を
 処理し、JSON snapshot の置換後に再度開く必要があります。
+
+snapshot の公開で一時的な sharing/access conflict が発生した場合は、
+100 ms、500 ms、2 秒後に再試行します。1 回の checkpoint failure で後続の
+snapshot worker が停止することはありません。最終 canonical JSON を置換できない
+場合、decode は `OUTPUT INCOMPLETE` と非ゼロ exit code で失敗し、append-only の
+`.tbc.json.fields.tmp` journal を保持します。完全な snapshot を生成済みなら
+`.tbc.json.final`（または番号付き `.final.N`）として保存し、以前の canonical
+snapshot は変更しません。成功時の最終 JSON byte と v0.4.0 completion lifecycle
+は変わりません。
 
 <!-- SECTION: verification -->
 

@@ -956,7 +956,7 @@ VHS real-FFT 子去加重现在会在旧值生命周期结束后，把高频频�
 .\tools\build-ipp-native.ps1
 dotnet restore VHSDecodeDotNet.slnx
 dotnet build VHSDecodeDotNet.slnx -c Release --no-restore
-dotnet test --solution VHSDecodeDotNet.slnx -c Release --no-build --no-restore --minimum-expected-tests 1092
+dotnet test --solution VHSDecodeDotNet.slnx -c Release --no-build --no-restore --minimum-expected-tests 1103
 ```
 
 第一条命令用于包含可选的 `ipp-fast` 原生产物；只构建 Exact 时可以省略。
@@ -1010,6 +1010,13 @@ decode.exe vhs --dsp-backend ipp-fast [upstream options] input output
 
 writer 仍然是文件长度和快照发布时间的权威。reader 必须能够处理持续增长的
 TBC 文件，并在 JSON 快照被替换后重新打开。
+
+快照发布遇到临时共享或访问冲突时，会在 100 ms、500 ms 和 2 秒后重试。
+一次 checkpoint 失败不会再终止后续快照。如果最终仍无法替换规范 JSON，
+解码会以非零退出码和 `OUTPUT INCOMPLETE` 明确失败，保留只追加的
+`.tbc.json.fields.tmp` journal；如果已经生成完整快照，还会将其保存为
+`.tbc.json.final`（或带编号的 `.final.N`）。此前发布的规范快照保持不变。
+成功路径的最终 JSON 字节以及 v0.4.0 完成生命周期不变。
 
 <!-- SECTION: verification -->
 
