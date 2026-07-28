@@ -10,8 +10,10 @@ public sealed class RfDemodulator : IDisposable
 {
     private static readonly Vector128<float> FloatAbsoluteValueMask =
         Vector128.Create(BitConverter.UInt32BitsToSingle(0x7FFFFFFFU));
+    // Arrays are immutable after construction and shared process-wide. The
+    // no-eviction lifetime matches the PocketFFT plan caches.
     private static readonly ConcurrentDictionary<int, double[]>
-        NumpyVhsHilbertMultipliers = new();
+        VhsHilbertMultipliers = new();
     private SharpnessEqOptions? _sharpnessLeadingOptions;
     private TransferFunction? _sharpnessLeadingFilter;
     private double[]? _sharpnessLeadingState;
@@ -244,7 +246,7 @@ public sealed class RfDemodulator : IDisposable
                     input.Length);
             }
 
-            hilbertMultiplier = PortedMath.BuildHilbertMultiplier(rfFilteredSpectrum.Length);
+            hilbertMultiplier = GetVhsHilbertMultiplier(rfFilteredSpectrum.Length);
             analytic = BuildVhsComplexAnalyticSignal(rfFilteredSpectrum, hilbertMultiplier);
             vhsEnvelopeSource = ExtractReal(analytic);
             vhsRfFilteredReal = ExtractReal(PocketFftComplex.Inverse(rfFilteredSpectrum));
@@ -342,7 +344,7 @@ public sealed class RfDemodulator : IDisposable
                 MultiplyFrequencyFilterInPlace(rfFilteredSpectrum, rfMtfFilter);
             }
 
-            hilbertMultiplier = PortedMath.BuildHilbertMultiplier(rfFilteredSpectrum.Length);
+            hilbertMultiplier = GetVhsHilbertMultiplier(rfFilteredSpectrum.Length);
             Complex[] analyticSpectrum = rfFilteredSpectrum.ToArray();
             ApplyHilbertMultiplierInPlace(analyticSpectrum, hilbertMultiplier);
             PocketFftComplex.InverseDuccInPlace(analyticSpectrum);
@@ -1132,9 +1134,7 @@ public sealed class RfDemodulator : IDisposable
             NumpyComplexMultiply.ApplyInPlace(spectrum, rfMtfFilter);
         }
 
-        double[] hilbertMultiplier = NumpyVhsHilbertMultipliers.GetOrAdd(
-            input.Length,
-            static length => PortedMath.BuildHilbertMultiplier(length));
+        double[] hilbertMultiplier = GetVhsHilbertMultiplier(input.Length);
         for (int i = 0; i < spectrum.Length; i++)
         {
             spectrum[i] *= hilbertMultiplier[i];
@@ -1144,6 +1144,11 @@ public sealed class RfDemodulator : IDisposable
             spectrum,
             workspace.FullAnalytic.AsSpan(0, input.Length));
     }
+
+    private static double[] GetVhsHilbertMultiplier(int fftSize)
+        => VhsHilbertMultipliers.GetOrAdd(
+            fftSize,
+            static size => PortedMath.BuildHilbertMultiplier(size));
 
     private static double[] ExtractReal(ReadOnlySpan<Complex> values)
     {

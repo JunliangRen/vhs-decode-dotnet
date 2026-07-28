@@ -976,6 +976,24 @@ normalized stderr, timestamp-normalized logs, and all 320/800 ordered
 baseline regression matched the same six surfaces and all 320 `fileLoc`
 values.
 
+The VHS full-spectrum analytic paths now cache their read-only Hilbert
+multiplier by FFT length instead of rebuilding the same array for every RF
+block. The multiplier values, float64 type, consumers, and element evaluation
+order are unchanged. In separate 80-frame `gc-verbose` traces on the same
+private local 40 MHz NTSC `BETAMAX_HIFI` sample, sampled managed allocation
+fell from 43.073 to 42.195 GiB (0.878 GiB, or 2.04% less) and Gen2 collections
+fell from 134 to 126. A six-pair 40-frame gate was noisy and favored the
+baseline in four pairs, so no short-run gain is claimed. Four interleaved
+160-frame `current --threads 20` pairs all favored the candidate: the paired
+median wall-time gain was 4.85%, the average gain was 5.24%, average CPU time
+fell 3.59%, and median peak working set moved from 1.520 to 1.479 GiB. Two
+reversed-order 400-frame pairs improved by 3.82% and 3.80%; average CPU time
+fell 1.50% and median peak working set moved from 1.555 to 1.502 GiB. Luma,
+chroma, JSON, stdout, normalized stderr, timestamp-normalized logs, and all
+ordered `fileLoc` values matched in every A/B gate. Candidate `current` output
+was also deterministic at `--threads 0`, `1`, default 5, and `20`, and a
+separate 160-frame `v0.4.0` regression matched the same surfaces.
+
 </details>
 
 <!-- SECTION: build -->

@@ -786,6 +786,21 @@ JSON、stdout、归一化 stderr、时间戳归一化日志，以及 320/800 个
 确定性；另一个 160-frame `v0.4.0` 基线回归也匹配同六项内容及全部 320 个
 `fileLoc`。
 
+VHS 全频谱解析信号路径现在会按 FFT 长度缓存只读 Hilbert multiplier，不再为每个
+RF block 重建同一个数组；multiplier 数值、float64 类型、使用方和逐元素求值顺序
+都没有改变。在同一份私有本地 40 MHz NTSC `BETAMAX_HIFI` 样本上，两次独立的
+80-frame `gc-verbose` trace 显示，采样托管分配从 43.073 GiB 降至
+42.195 GiB（减少 0.878 GiB，即 2.04%），Gen2 回收从 134 次降至 126 次。
+六组 40-frame 配对噪声较大，其中四组由基线胜出，因此不宣称短运行收益。四组交错的
+160-frame `current --threads 20` 配对全部由候选胜出：配对墙钟增益中位数为
+4.85%，平均增益为 5.24%，平均 CPU 时间减少 3.59%，峰值工作集中位数从
+1.520 GiB 降至 1.479 GiB。两组反向顺序的 400-frame 配对分别快 3.82% 和
+3.80%，平均 CPU 时间减少 1.50%，峰值工作集中位数从 1.555 GiB 降至
+1.502 GiB。所有 A/B 门禁的亮度、色度、JSON、stdout、归一化 stderr、时间戳
+归一化日志及全部有序 `fileLoc` 都一致。候选 `current` 输出在 `--threads 0`、
+`1`、默认 5 和 `20` 下同样保持确定性，另一个 160-frame `v0.4.0` 回归也匹配
+相同内容。
+
 </details>
 
 <!-- SECTION: build -->
