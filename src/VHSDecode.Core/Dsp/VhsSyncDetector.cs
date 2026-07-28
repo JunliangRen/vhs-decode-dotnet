@@ -37,8 +37,22 @@ public sealed class VhsSyncDetector
         double hSyncLength,
         double backPorchLength,
         int lineLength,
+        double approximateTransition)
+        : this(
+            hSyncLength,
+            backPorchLength,
+            lineLength,
+            approximateTransition,
+            workerThreads: 1)
+    {
+    }
+
+    internal VhsSyncDetector(
+        double hSyncLength,
+        double backPorchLength,
+        int lineLength,
         double approximateTransition,
-        int workerThreads = 1)
+        int workerThreads)
     {
         _hSyncLength = double.IsFinite(hSyncLength) && hSyncLength > 0.0
             ? hSyncLength
