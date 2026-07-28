@@ -2,7 +2,7 @@
 
 [English](README.md) | [简体中文](README.zh-CN.md) | **[日本語](README.ja.md)**
 
-<!-- README_SYNC: 2026-07-28.3 -->
+<!-- README_SYNC: 2026-07-28.4 -->
 
 [`oyvindln/vhs-decode`](https://github.com/oyvindln/vhs-decode) の
 デコード関連部分を .NET 11 で再実装するプロジェクトです。現在は release
@@ -959,6 +959,29 @@ throughput gain は 2.99%、average gain は 2.57%、average CPU time は
 chroma、JSON、stdout、normalized stderr、timestamp-normalized log、すべての
 ordered `fileLoc` が一致しました。candidate の `current` output は
 `--threads 0`、`1`、default 5、`20` で deterministic で、別の 160-frame
+`v0.4.0` regression も同じ surface に一致しました。
+
+VHS complex high-boost path は、互いに重ならない phase で worker-owned の
+full-length analytic FFT buffer 2 個を再利用し、analytic signal を構築するたびに
+spectrum copy と inverse output を割り当てないようになりました。FFT plan、
+float64 arithmetic、expression order、padding、returned-output ownership は
+変更していません。同じ private local 40 MHz NTSC `BETAMAX_HIFI` sample の
+matched 80-frame `gc-verbose` trace では、sampled managed allocation が
+35.1777 GiB から 28.1943 GiB へ減りました（6.9834 GiB、19.85% 減）。
+`Complex[]` allocation は 17,135.251 MiB から 9,974.767 MiB へ 41.79%
+減り、Gen2 collection は 108 回から 88 回へ減りました。6 組の 40-frame pair
+では candidate が 5 組で高速となり、paired throughput gain は median 1.67%、
+average 1.75% でした。4 組の interleaved 160-frame
+`current --threads 20` pair では 3 組で高速となり、paired throughput gain は
+median 3.06%、average 2.73%、balanced aggregate 2.71% でした。aggregate
+CPU time は 2.16% 減り、median peak working set は 1.491 GiB から
+1.457 GiB へ下がりました。反転順序の 400-frame pair 2 組はいずれも candidate
+が高速で、1.96% と 1.86% でした。balanced aggregate throughput は 1.91%
+高く、aggregate CPU time は 3.19% 減り、median peak working set は
+1.529 GiB から 1.445 GiB へ下がりました。すべての A/B gate で luma、
+chroma、JSON、stdout、normalized stderr、timestamp-normalized log、すべての
+ordered `fileLoc` が一致しました。candidate の `current` output は
+`--threads 0`、`1`、default 5、`20` で各 2 回とも同一で、別の 160-frame
 `v0.4.0` regression も同じ surface に一致しました。
 
 </details>

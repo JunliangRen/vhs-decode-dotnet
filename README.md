@@ -2,7 +2,7 @@
 
 **[English](README.md)** | [简体中文](README.zh-CN.md) | [日本語](README.ja.md)
 
-<!-- README_SYNC: 2026-07-28.3 -->
+<!-- README_SYNC: 2026-07-28.4 -->
 
 .NET 11 rewrite of the decode-facing parts of
 [`oyvindln/vhs-decode`](https://github.com/oyvindln/vhs-decode), focused on
@@ -1013,6 +1013,27 @@ Luma, chroma, JSON, stdout, normalized stderr, timestamp-normalized logs, and
 all ordered `fileLoc` values matched in every A/B gate. Candidate `current`
 output was deterministic at `--threads 0`, `1`, default 5, and `20`; a separate
 160-frame `v0.4.0` regression matched the same surfaces.
+
+The VHS complex high-boost path now reuses both worker-owned full-length
+analytic FFT buffers in non-overlapping phases instead of allocating a copied
+spectrum and inverse output for each analytic-signal construction. FFT plans,
+float64 arithmetic, expression order, padding, and returned-output ownership
+remain unchanged. On the same private local 40 MHz NTSC `BETAMAX_HIFI` sample,
+matched 80-frame `gc-verbose` traces reduced sampled managed allocation from
+35.1777 to 28.1943 GiB (6.9834 GiB, or 19.85% less), `Complex[]` allocation
+from 17,135.251 to 9,974.767 MiB (41.79% less), and Gen2 collections from 108
+to 88. The candidate won five of six paired 40-frame runs, with 1.67% median
+and 1.75% average throughput gains. Across four interleaved 160-frame
+`current --threads 20` pairs it won three, with 3.06% median, 2.73% average,
+and 2.71% balanced aggregate throughput gains; aggregate CPU time fell 2.16%,
+and median peak working set moved from 1.491 to 1.457 GiB. Both reverse-order
+400-frame pairs favored the candidate at 1.96% and 1.86%; balanced aggregate
+throughput rose 1.91%, aggregate CPU time fell 3.19%, and median peak working
+set moved from 1.529 to 1.445 GiB. Luma, chroma, JSON, stdout, normalized
+stderr, timestamp-normalized logs, and every ordered `fileLoc` matched in all
+A/B gates. Candidate `current` output was identical across two runs each at
+`--threads 0`, `1`, default 5, and `20`; a separate 160-frame `v0.4.0`
+regression matched the same surfaces.
 
 </details>
 
