@@ -384,6 +384,97 @@ public sealed class DspWorkingBufferTests
             $"Warm PAL VHS RF block allocated {allocated:N0} bytes.");
     }
 
+    [Fact(DisplayName = "RF demodulator reuses bounded deemphasis filter plans")]
+    public void RfDemodulatorReusesBoundedDeemphasisFilterPlans()
+    {
+        const int length = 256;
+        const double sampleRateHz = 256.0;
+        var nonlinear = new NonlinearDeemphasisOptions(
+            HighPassHz: 16.0,
+            BandPassUpperHz: null,
+            Order: 2,
+            LimitLow: -0.25,
+            LimitHigh: 0.25);
+        var sub = new SubDeemphasisOptions(
+            HighPassHz: 16.0,
+            BandPassUpperHz: null,
+            Order: 2,
+            AmplitudeLowPassHz: 8.0,
+            Deviation: 4.0,
+            ExponentialScaling: 1.0,
+            Scaling1: null,
+            Scaling2: null,
+            LogisticMid: null,
+            LogisticRate: null,
+            StaticFactor: null);
+        using var demodulator = new RfDemodulator(sampleRateHz);
+
+        RfDemodulatedBlock first = DecodeDeemphasisProbe(
+            demodulator,
+            length,
+            sampleRateHz,
+            nonlinear,
+            sub);
+        Assert.Equal(1, demodulator.NonlinearDeemphasisFilterPlanBuildCount);
+        Assert.Equal(1, demodulator.SubDeemphasisFilterPlanBuildCount);
+
+        RfDemodulatedBlock reused = DecodeDeemphasisProbe(
+            demodulator,
+            length,
+            sampleRateHz,
+            nonlinear with { },
+            sub with { });
+        Assert.Equal(Hash(first), Hash(reused));
+        Assert.Equal(1, demodulator.NonlinearDeemphasisFilterPlanBuildCount);
+        Assert.Equal(1, demodulator.SubDeemphasisFilterPlanBuildCount);
+
+        _ = DecodeDeemphasisProbe(
+            demodulator,
+            length,
+            sampleRateHz,
+            nonlinear,
+            sub with { HighPassHz = 18.0 });
+        Assert.Equal(1, demodulator.NonlinearDeemphasisFilterPlanBuildCount);
+        Assert.Equal(2, demodulator.SubDeemphasisFilterPlanBuildCount);
+
+        _ = DecodeDeemphasisProbe(
+            demodulator,
+            length * 2,
+            sampleRateHz,
+            nonlinear,
+            sub);
+        Assert.Equal(2, demodulator.NonlinearDeemphasisFilterPlanBuildCount);
+        Assert.Equal(3, demodulator.SubDeemphasisFilterPlanBuildCount);
+
+        _ = DecodeDeemphasisProbe(
+            demodulator,
+            length,
+            sampleRateHz,
+            nonlinear,
+            sub);
+        Assert.Equal(3, demodulator.NonlinearDeemphasisFilterPlanBuildCount);
+        Assert.Equal(4, demodulator.SubDeemphasisFilterPlanBuildCount);
+
+        using var concurrentDemodulator = new RfDemodulator(sampleRateHz);
+        var hashes = new string[16];
+        Parallel.For(
+            0,
+            hashes.Length,
+            new ParallelOptions { MaxDegreeOfParallelism = 8 },
+            index =>
+            {
+                hashes[index] = Hash(DecodeDeemphasisProbe(
+                    concurrentDemodulator,
+                    length,
+                    sampleRateHz,
+                    nonlinear,
+                    sub));
+            });
+        Assert.All(hashes, hash => Assert.Equal(hashes[0], hash));
+        Assert.Equal(1, concurrentDemodulator.NonlinearDeemphasisFilterPlanBuildCount);
+        Assert.Equal(1, concurrentDemodulator.SubDeemphasisFilterPlanBuildCount);
+    }
+
     [Fact(DisplayName = "Compact PAL VHS RF blocks omit the unconsumed analytic channel")]
     public void CompactPalVhsRfBlocksOmitTheUnconsumedAnalyticChannel()
     {
@@ -1206,6 +1297,30 @@ public sealed class DspWorkingBufferTests
             diffDemodRepair: new DiffDemodRepairOptions(double.NegativeInfinity),
             fmDemodulatorMode: RfFmDemodulatorMode.VhsRustApproximation,
             vhsEnvelopeFilter: identitySos);
+    }
+
+    private static RfDemodulatedBlock DecodeDeemphasisProbe(
+        RfDemodulator demodulator,
+        int length,
+        double sampleRateHz,
+        NonlinearDeemphasisOptions nonlinear,
+        SubDeemphasisOptions sub)
+    {
+        double[] input = Enumerable.Range(0, length)
+            .Select(index =>
+                Math.Cos(Math.Tau * 32.0 * index / sampleRateHz)
+                + (0.125 * Math.Cos(Math.Tau * 7.0 * index / sampleRateHz)))
+            .ToArray();
+        Complex[] identity = RfDemodulator.IdentityFilter(length);
+        return demodulator.Demodulate(
+            input,
+            identity,
+            identity,
+            ReadOnlySpan<Complex>.Empty,
+            identity,
+            identity,
+            nonlinearDeemphasis: nonlinear,
+            subDeemphasis: sub);
     }
 
     private static string Hash(RfPipelineBlock block)

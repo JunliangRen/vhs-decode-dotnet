@@ -1770,6 +1770,33 @@ possible capture has already been proven byte-for-byte identical.
   same three specialized filter orders, the independent scalar xUnit oracle
   covers all three paths, all 848 tests pass, and the established 1,000-frame
   NTSC-J gate above remains unchanged
+- nonlinear and sub-deemphasis now retain one exact-key, read-only high-pass
+  response per `RfDemodulator`. Each cache has one entry keyed by block length
+  and the immutable option record; a miss replaces that entry under a lock, so
+  concurrent first use builds once and arbitrary block shapes cannot accumulate.
+  On the same private local 40 MHz NTSC `BETAMAX_HIFI` `.lds` capture, five
+  interleaved and reversed 160-frame `--threads 20` pairs against baseline
+  `846ad28` moved wall medians from 16.294 to 16.220 s (0.5% less) and means
+  from 16.603 to 16.257 s (2.1% less), with the candidate winning four pairs.
+  CPU medians moved from 116.641 to 114.234 s (2.1% less) and means from
+  117.633 to 113.417 s (3.6% less), with all five candidate runs using less
+  CPU. Peak-working-set medians moved from 1.868 to 1.753 GiB, but individual
+  peaks were noisy. All ten runs produced one exact luma
+  `99EB149DFA75CFDEDC25178E323ABBEF2FDA8B25124E0B336BF0FEAC23199BFC`,
+  chroma
+  `5EED27F942741394B3212CDC5AC43BFAE4FE02A9E7A23CFB248E26059DD9EC9F`,
+  JSON
+  `C96DA156519FF42D6E6148F32CC5FE774380CAD6D6CAD013C5583530937933A9`,
+  stdout
+  `25D082E67E56DE130E156602087A0AA90200997E3FA647B7A84E962E46A5BA93`,
+  normalized-stderr, and 1,132-line timestamp-normalized-log set. Serial and
+  default-worker candidates matched that same six-surface baseline. An opt-in
+  `current` 160-frame pair separately matched its profile's six surfaces and
+  all 320 `fileLoc` values while CPU time moved from 122.750 to 115.141 s.
+  Two 400-frame candidate runs were deterministic for all six surfaces and 800
+  `fileLoc` values; the measured run completed in 37.012 s, peaked at
+  1.949 GiB, and had quarter working-set medians of
+  0.879/1.208/1.266/1.187 GiB
 - one-frame non-default NTSC VHS fixtures are also byte-exact for
   `--sharpness 20`, `--fm_audio_notch 10`, and the combined
   `--high_boost 1.3 --sharpness 20 --nld --sd` path; the stateful sharpness
