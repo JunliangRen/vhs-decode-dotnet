@@ -704,7 +704,8 @@ public static class VhsChromaDecoder
                     options.OutputLineLength,
                     gain.NoiseFloor,
                     options.CtiWidth,
-                    options.CtiMix);
+                    options.CtiMix,
+                    options.WorkerThreads);
             }
 
             gained = ChromaToU16(currentChroma);

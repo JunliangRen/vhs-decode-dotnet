@@ -4,6 +4,7 @@ namespace VHSDecode.Core.Dsp;
 
 public static class ChromaTransientImprovement
 {
+    private const int MaximumParallelWorkers = 5;
     private const int PassCount = 4;
     private const double Decay = 0.25;
 
@@ -15,22 +16,118 @@ public static class ChromaTransientImprovement
         long width,
         double mix)
     {
+        if (!TryCreateParameters(
+                chromaData.Length,
+                lineStart,
+                lineLength,
+                baseNoiseFloor,
+                width,
+                mix,
+                out CtiParameters parameters))
+        {
+            return;
+        }
+
+        float[] lineBuffer = ArrayPool<float>.Shared.Rent(lineLength);
+        try
+        {
+            for (int line = 0; line < parameters.LineCount; line++)
+            {
+                ProcessLine(
+                    chromaData,
+                    lineStart,
+                    lineLength,
+                    line,
+                    parameters,
+                    lineBuffer);
+            }
+        }
+        finally
+        {
+            ArrayPool<float>.Shared.Return(lineBuffer);
+        }
+    }
+
+    internal static void ApplyInPlace(
+        double[] chromaData,
+        int lineStart,
+        int lineLength,
+        double baseNoiseFloor,
+        long width,
+        double mix,
+        int workerThreads)
+    {
+        ArgumentNullException.ThrowIfNull(chromaData);
+        if (workerThreads <= 1)
+        {
+            ApplyInPlace(
+                chromaData.AsSpan(),
+                lineStart,
+                lineLength,
+                baseNoiseFloor,
+                width,
+                mix);
+            return;
+        }
+
+        if (!TryCreateParameters(
+                chromaData.Length,
+                lineStart,
+                lineLength,
+                baseNoiseFloor,
+                width,
+                mix,
+                out CtiParameters parameters))
+        {
+            return;
+        }
+
+        Parallel.For(
+            fromInclusive: 0,
+            toExclusive: parameters.LineCount,
+            new ParallelOptions
+            {
+                MaxDegreeOfParallelism = Math.Min(
+                    Math.Min(workerThreads, parameters.LineCount),
+                    MaximumParallelWorkers)
+            },
+            () => ArrayPool<float>.Shared.Rent(lineLength),
+            (line, _, lineBuffer) =>
+            {
+                ProcessLine(
+                    chromaData,
+                    lineStart,
+                    lineLength,
+                    line,
+                    parameters,
+                    lineBuffer);
+                return lineBuffer;
+            },
+            lineBuffer => ArrayPool<float>.Shared.Return(lineBuffer));
+    }
+
+    private static bool TryCreateParameters(
+        int dataLength,
+        int lineStart,
+        int lineLength,
+        double baseNoiseFloor,
+        long width,
+        double mix,
+        out CtiParameters parameters)
+    {
         ArgumentOutOfRangeException.ThrowIfNegative(lineStart);
         ArgumentOutOfRangeException.ThrowIfNegativeOrZero(lineLength);
-        if (lineStart >= chromaData.Length)
+        if (lineStart >= dataLength || width < 0L || mix == 0.0)
         {
-            return;
+            parameters = default;
+            return false;
         }
 
-        if (width < 0L || mix == 0.0)
-        {
-            return;
-        }
-
-        int lineCount = (chromaData.Length - lineStart) / lineLength;
+        int lineCount = (dataLength - lineStart) / lineLength;
         if (lineCount <= 0)
         {
-            return;
+            parameters = default;
+            return false;
         }
 
         Span<float> mixFactors = stackalloc float[PassCount];
@@ -48,84 +145,119 @@ public static class ChromaTransientImprovement
             || firstSample > int.MaxValue
             || endSample > int.MaxValue)
         {
-            return;
+            parameters = default;
+            return false;
         }
 
-        float[] lineBuffer = ArrayPool<float>.Shared.Rent(lineLength);
-        try
+        int first = (int)firstSample;
+        int end = (int)endSample;
+        parameters = new CtiParameters(
+            lineCount,
+            first,
+            end,
+            checked((int)sweepRadius),
+            first + ((end - first) & ~7),
+            threshold,
+            mixFactors[0],
+            mixFactors[1],
+            mixFactors[2],
+            mixFactors[3]);
+        return true;
+    }
+
+    private static void ProcessLine(
+        Span<double> chromaData,
+        int lineStart,
+        int lineLength,
+        int line,
+        CtiParameters parameters,
+        Span<float> lineBuffer)
+    {
+        int lineOffset = checked(lineStart + (line * lineLength));
+        for (int pass = 0; pass < PassCount; pass++)
         {
-            int first = (int)firstSample;
-            int end = (int)endSample;
-            int radius = checked((int)sweepRadius);
-            int vectorEnd = first + ((end - first) & ~7);
-            for (int line = 0; line < lineCount; line++)
+            for (int sample = 0; sample < lineLength; sample++)
             {
-                int lineOffset = checked(lineStart + (line * lineLength));
-                for (int pass = 0; pass < PassCount; pass++)
-                {
-                    for (int sample = 0; sample < lineLength; sample++)
-                    {
-                        lineBuffer[sample] = (float)chromaData[lineOffset + sample];
-                    }
+                lineBuffer[sample] = (float)chromaData[lineOffset + sample];
+            }
 
-                    float currentMix = mixFactors[pass];
-                    for (int sample = first; sample < end; sample++)
-                    {
-                        int index = lineOffset + sample;
-                        float currentI = lineBuffer[sample];
-                        float currentQ = lineBuffer[sample - 1];
-                        float pastI = lineBuffer[sample - radius];
-                        float pastQ = lineBuffer[sample - radius - 1];
-                        float futureI = lineBuffer[sample + radius];
-                        float futureQ = lineBuffer[sample + radius - 1];
+            float currentMix = parameters.MixForPass(pass);
+            for (int sample = parameters.First; sample < parameters.End; sample++)
+            {
+                int index = lineOffset + sample;
+                float currentI = lineBuffer[sample];
+                float currentQ = lineBuffer[sample - 1];
+                float pastI = lineBuffer[sample - parameters.Radius];
+                float pastQ = lineBuffer[sample - parameters.Radius - 1];
+                float futureI = lineBuffer[sample + parameters.Radius];
+                float futureQ = lineBuffer[sample + parameters.Radius - 1];
 
-                        float deltaBackI = currentI - pastI;
-                        float deltaBackQ = currentQ - pastQ;
-                        float distanceBack = MathF.Sqrt(
-                            MathF.FusedMultiplyAdd(
-                                deltaBackQ,
-                                deltaBackQ,
-                                deltaBackI * deltaBackI));
-                        float deltaForwardI = futureI - currentI;
-                        float deltaForwardQ = futureQ - currentQ;
-                        float distanceForward = MathF.Sqrt(
-                            MathF.FusedMultiplyAdd(
-                                deltaForwardQ,
-                                deltaForwardQ,
-                                deltaForwardI * deltaForwardI));
-                        float totalDistance = distanceBack + distanceForward;
+                float deltaBackI = currentI - pastI;
+                float deltaBackQ = currentQ - pastQ;
+                float distanceBack = MathF.Sqrt(
+                    MathF.FusedMultiplyAdd(
+                        deltaBackQ,
+                        deltaBackQ,
+                        deltaBackI * deltaBackI));
+                float deltaForwardI = futureI - currentI;
+                float deltaForwardQ = futureQ - currentQ;
+                float distanceForward = MathF.Sqrt(
+                    MathF.FusedMultiplyAdd(
+                        deltaForwardQ,
+                        deltaForwardQ,
+                        deltaForwardI * deltaForwardI));
+                float totalDistance = distanceBack + distanceForward;
 
-                        double gate = totalDistance > threshold ? 1.0 : 0.0;
-                        double progress = totalDistance != 0.0f
-                            ? sample < vectorEnd
-                                ? FastVectorizedQuotient(distanceBack, totalDistance)
-                                : distanceBack / totalDistance
-                            : 0.0;
-                        bool lowerHalf = progress < 0.5;
-                        double inverseProgress = 1.0 - progress;
-                        double lowerWeight = 4.0 * (progress * progress);
-                        double upperWeight = Math.FusedMultiplyAdd(
-                            -4.0,
-                            inverseProgress * inverseProgress,
-                            1.0);
-                        double weight = lowerHalf ? lowerWeight : upperWeight;
-                        float anchorA = lowerHalf ? pastI : currentI;
-                        float anchorB = lowerHalf ? currentI : futureI;
-                        double targetDelta = Math.FusedMultiplyAdd(
-                            weight,
-                            anchorB - anchorA,
-                            (double)anchorA - currentI);
-                        chromaData[index] = (float)Math.FusedMultiplyAdd(
-                            currentMix * gate,
-                            targetDelta,
-                            currentI);
-                    }
-                }
+                double gate = totalDistance > parameters.Threshold ? 1.0 : 0.0;
+                double progress = totalDistance != 0.0f
+                    ? sample < parameters.VectorEnd
+                        ? FastVectorizedQuotient(distanceBack, totalDistance)
+                        : distanceBack / totalDistance
+                    : 0.0;
+                bool lowerHalf = progress < 0.5;
+                double inverseProgress = 1.0 - progress;
+                double lowerWeight = 4.0 * (progress * progress);
+                double upperWeight = Math.FusedMultiplyAdd(
+                    -4.0,
+                    inverseProgress * inverseProgress,
+                    1.0);
+                double weight = lowerHalf ? lowerWeight : upperWeight;
+                float anchorA = lowerHalf ? pastI : currentI;
+                float anchorB = lowerHalf ? currentI : futureI;
+                double targetDelta = Math.FusedMultiplyAdd(
+                    weight,
+                    anchorB - anchorA,
+                    (double)anchorA - currentI);
+                chromaData[index] = (float)Math.FusedMultiplyAdd(
+                    currentMix * gate,
+                    targetDelta,
+                    currentI);
             }
         }
-        finally
+    }
+
+    private readonly record struct CtiParameters(
+        int LineCount,
+        int First,
+        int End,
+        int Radius,
+        int VectorEnd,
+        double Threshold,
+        float Mix0,
+        float Mix1,
+        float Mix2,
+        float Mix3)
+    {
+        public float MixForPass(int pass)
         {
-            ArrayPool<float>.Shared.Return(lineBuffer);
+            return pass switch
+            {
+                0 => Mix0,
+                1 => Mix1,
+                2 => Mix2,
+                3 => Mix3,
+                _ => throw new ArgumentOutOfRangeException(nameof(pass))
+            };
         }
     }
 
