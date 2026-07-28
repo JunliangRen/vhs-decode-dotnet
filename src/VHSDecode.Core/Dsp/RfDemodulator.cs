@@ -10,6 +10,8 @@ public sealed class RfDemodulator : IDisposable
 {
     private static readonly Vector128<float> FloatAbsoluteValueMask =
         Vector128.Create(BitConverter.UInt32BitsToSingle(0x7FFFFFFFU));
+    // Arrays are immutable after construction and shared process-wide. The
+    // no-eviction lifetime matches the PocketFFT plan caches.
     private static readonly ConcurrentDictionary<int, double[]>
         VhsHilbertMultipliers = new();
     private SharpnessEqOptions? _sharpnessLeadingOptions;
@@ -1143,10 +1145,10 @@ public sealed class RfDemodulator : IDisposable
             workspace.FullAnalytic.AsSpan(0, input.Length));
     }
 
-    private static double[] GetVhsHilbertMultiplier(int length)
+    private static double[] GetVhsHilbertMultiplier(int fftSize)
         => VhsHilbertMultipliers.GetOrAdd(
-            length,
-            static value => PortedMath.BuildHilbertMultiplier(value));
+            fftSize,
+            static size => PortedMath.BuildHilbertMultiplier(size));
 
     private static double[] ExtractReal(ReadOnlySpan<Complex> values)
     {
