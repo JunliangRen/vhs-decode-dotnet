@@ -688,7 +688,7 @@ public sealed class TbcFieldSequenceDecodeEngine
                 {
                     if (hasNormalFieldOrder)
                     {
-                        int rawFrame = checked((int)Math.Floor(ComputeFieldDiskLocation(session, field) / 2.0));
+                        int rawFrame = ComputeTapeRawFileFrame(session, field);
                         pendingTapeFrameStatus = $"File Frame {rawFrame}: {session.Parameters.TapeFormat} ";
                     }
 
@@ -2162,6 +2162,35 @@ public sealed class TbcFieldSequenceDecodeEngine
 
         double samplesPerField = ((int)(session.DecodeSampleRateHz / (framesPerSecond * 2.0))) + 1;
         return Math.Round((field.StartSample / samplesPerField) * 10.0, MidpointRounding.ToEven) / 10.0;
+    }
+
+    internal static int ComputeRawFileFrame(
+        long startSample,
+        double sampleRateHz,
+        double framesPerSecond)
+    {
+        if (framesPerSecond <= 0.0)
+        {
+            return 0;
+        }
+
+        double samplesPerField = ((int)(sampleRateHz / (framesPerSecond * 2.0))) + 1;
+        return checked((int)Math.Floor((startSample / samplesPerField) / 2.0));
+    }
+
+    private static int ComputeTapeRawFileFrame(
+        DecodeSession session,
+        TbcDecodedField field)
+    {
+        if (field.DiskLocation.HasValue)
+        {
+            return checked((int)Math.Floor(field.DiskLocation.Value / 2.0));
+        }
+
+        return ComputeRawFileFrame(
+            field.StartSample,
+            session.DecodeSampleRateHz,
+            session.Parameters.SysParams.GetProperty("FPS").GetDouble());
     }
 
     private static bool IsExpectedLaserDiscFieldPhase(int previous, int current, int fieldPhaseCount)

@@ -4796,6 +4796,14 @@ public void FrequencyDomainFilterHelpersBuildMasksAndApplyResponses()
         boostMax: 2.0,
         nyquistHz: 20_000_000.0,
         blockLength: 8));
+    AssertEqual(
+        "30E7B1AE81ACDB0D670C9AC6CB0BCF18C080010004C0BFADA8D403ACE161277F",
+        DoubleBitsSha256(FrequencyDomainFilter.RampFilter(
+            startFrequencyHz: 626_953.0,
+            boostStart: 0.0,
+            boostMax: 1.0,
+            nyquistHz: 20_000_000.0,
+            blockLength: 32_768)));
 
     Complex[] spectrum = [new Complex(1, 1), new Complex(2, 0)];
     Complex[] filtered = FrequencyDomainFilter.Apply(spectrum, [2.0, 0.5]);
@@ -5042,7 +5050,7 @@ public void PalVhsRfResponseUsesScipyExtraLowPassPath()
         sampleRateHz: 40_000_000.0,
         blockLength: 32_768);
     AssertEqual(
-        "37A812C53A7A5BAF918E5B9ADAAA266CA12F51E8EB4205699E7FD53F598A750A",
+        "27C68FEE9D6C846C9548E9EA2161BE73AB6504DF39264D583235E94113DB327B",
         ComplexBitsSha256(filters.RfVideo));
 }
 
@@ -5080,6 +5088,41 @@ public void NtscVhsRfHighPassMatchesScipySosResponseBits()
     AssertEqual(
         "E58DCE1B2AAE2930E90C2CAE371BBD46DAE97D9BD550A74D6238D25E5079CEAE",
         ComplexBitsSha256(response));
+}
+
+[Fact(DisplayName = "NTSC Betamax HiFi RF filter matches v0.4.0 SciPy bits")]
+public void NtscBetamaxHifiRfFilterMatchesV040ScipyBits()
+{
+    const int blockLength = 32_768;
+    SosSection[] sections = IirFilterDesign.ButterworthHighPassScipySos(
+        order: 12,
+        normalizedCutoff: 2_000_000.0 / 20_000_000.0);
+    AssertEqual(
+        "C1C0DC72EC05217A8A95B9D4D6B99D5C81162A08F2473503E75A94743E261AFE",
+        DoubleBitsSha256(sections.SelectMany(section => new[]
+        {
+            section.B0,
+            section.B1,
+            section.B2,
+            section.A0,
+            section.A1,
+            section.A2
+        }).ToArray()));
+    AssertEqual(
+        "78FF2F7FCE64E778E2C5CFDAE2C1817DBE61E98A139E1E7C4D1A905623A5D1AF",
+        ComplexBitsSha256(IirFilterDesign.FrequencyResponse(sections, blockLength)));
+
+    FormatParameterSet parameters = FormatCatalog.Default.GetTapeParameters(
+        "NTSC",
+        "BETAMAX_HIFI",
+        "sp");
+    DecodeFilterSet filters = DecodeFilterSetBuilder.BuildBasic(
+        parameters,
+        sampleRateHz: 40_000_000.0,
+        blockLength);
+    AssertEqual(
+        "D88A645958098C71026C038E2B16591842EE4A3B8066D222732E156B5580B053",
+        ComplexBitsSha256(filters.RfVideo));
 }
 
 [Fact(DisplayName = "sub-deemphasis analytic magnitude matches SciPy hilbert bits")]
@@ -8042,6 +8085,61 @@ public void SyncAnalyzerClassifiesPulsesAndBuildsLineLocations()
         equalizingToleranceUs: 0.9);
     AssertClose(0.7, tapeFromParams.HSyncToleranceUs, 1e-12);
     AssertClose(0.9, tapeFromParams.EqualizingToleranceUs, 1e-12);
+}
+
+[Fact(DisplayName = "VHS timing preserves v0.4.0 empty HSync median units")]
+public void VhsTimingPreservesV040EmptyHSyncMedianUnits()
+{
+    var analyzer = new SyncAnalyzer(
+        sampleRateHz: 40_000_000.0,
+        linePeriodUs: 63.55,
+        hsyncPulseUs: 4.7,
+        equalizingPulseUs: 2.3,
+        vsyncPulseUs: 27.1,
+        hsyncToleranceUs: 0.7,
+        equalizingToleranceUs: 0.9);
+    Pulse[] noisePulses =
+    [
+        new(100, 17),
+        new(200, 23),
+        new(300, 294),
+        new(700, 50),
+        new(900, 12)
+    ];
+
+    SyncTiming standard = analyzer.EstimateTiming(noisePulses);
+    SyncTiming v040 = analyzer.EstimateTiming(
+        noisePulses,
+        preserveVhsEmptyHSyncMedianUnits: true);
+
+    AssertClose(188.0, standard.HSyncMedian, 1e-12);
+    AssertClose(4.7, v040.HSyncMedian, 1e-12);
+    AssertFalse(standard.HSync.Contains(17));
+    AssertTrue(v040.HSync.Contains(17));
+    AssertTrue(v040.HSync.Contains(23));
+    AssertTrue(v040.HSync.Contains(12));
+    AssertFalse(v040.HSync.Contains(50));
+}
+
+[Fact(DisplayName = "VHS file frame status uses unrounded v0.4.0 read location")]
+public void VhsFileFrameStatusUsesUnroundedV040ReadLocation()
+{
+    const double sampleRateHz = 40_000_000.0;
+    const double framesPerSecond = 30_000.0 / 1_001.0;
+    double samplesPerField = ((int)(sampleRateHz / (framesPerSecond * 2.0))) + 1;
+    long startSample = checked((long)Math.Floor(209.96 * samplesPerField));
+    double roundedDiskLocation = Math.Round(
+        (startSample / samplesPerField) * 10.0,
+        MidpointRounding.ToEven) / 10.0;
+
+    AssertEqual(210.0, roundedDiskLocation);
+    AssertEqual(105, checked((int)Math.Floor(roundedDiskLocation / 2.0)));
+    AssertEqual(
+        104,
+        TbcFieldSequenceDecodeEngine.ComputeRawFileFrame(
+            startSample,
+            sampleRateHz,
+            framesPerSecond));
 }
 
 [Fact(DisplayName = "vblank sync resolver matches upstream distance consensus")]

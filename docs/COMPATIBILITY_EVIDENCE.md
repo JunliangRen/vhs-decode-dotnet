@@ -73,7 +73,7 @@ required by the decode pipeline itself.
 | --- | --- | --- |
 | Solution and tests | Implemented | .NET 11, `.slnx`, and xUnit v3 work with Visual Studio Test Explorer and `dotnet test`. |
 | CLI and arguments | Implemented and snapshot-tested | `decode`, `vhs-decode`, `cvbs-decode`, `ld-decode`, and `hifi-decode` expose the v0.4.0 decode-facing command surface. |
-| HiFi decode | Implemented; more real-capture verification remains | PAL VHS and NTSC 8mm synthetic RF baselines are byte-exact. |
+| HiFi decode | Implemented; more real-capture verification remains | PAL VHS and NTSC 8mm synthetic RF baselines are byte-exact; a real Betamax explicit-carrier slice still has a 1-LSB PCM gap. |
 | VHS decode | Implemented; rare parity gaps remain | All valid format/filter combinations and extensive NTSC field/output fixtures are covered. |
 | CVBS decode | Implemented for release-supported runtime systems | PAL and NTSC execute as v0.4.0 does; uncommon vblank and option interactions still need broader fixtures. |
 | LaserDisc decode | Implemented; rare parity gaps remain | Video, EFM, analog audio, AC3, RF-TBC, metadata, and sidecars are wired with PAL/NTSC differential coverage. |
@@ -121,6 +121,14 @@ possible capture has already been proven byte-for-byte identical.
   deviations and the Nyquist-symmetric left AFE edge; its 22,796-frame PCM16
   WAV is byte-for-byte identical with SHA-256
   `E1AAF3F68DF1392617BC28D162D2E3DD2AFE6251E91E06D4D3191540C3EFA83F`
+- a bounded one-second slice from the same local 40 MHz NTSC Betamax HiFi
+  capture used by the video gate below was decoded with explicit 1.38/1.68 MHz
+  carrier overrides because upstream `hifi-decode` exposes only VHS and 8mm
+  presets. Python v0.4.0 and the current upstream snapshot produced identical
+  48,132-frame stereo PCM16 WAVs. The port produced the same format and length,
+  but 187 of 96,264 interleaved samples differed by exactly 1 LSB; this is
+  recorded as an open real-capture compatibility gap rather than Betamax HiFi
+  audio certification
 - HiFi bias pre-reading preserves Release 4.0's omission of `--raw_format`:
   raw files are measured according to their extension, while stdin prints the
   measurement heading and then raises the same required-format error even when
@@ -1661,9 +1669,22 @@ possible capture has already been proven byte-for-byte identical.
   the completed file frame
 - all eight built-in `video_lpf_extra` order/corner combinations now preserve
   SciPy's SOS section construction and complete 32K-bin response bits,
-  including odd-order zero/pole padding; the PAL VHS aggregate RF response is
-  locked to SHA-256
-  `37A812C53A7A5BAF918E5B9ADAAA266CA12F51E8EB4205699E7FD53F598A750A`
+  including odd-order zero/pole padding; SciPy's order-12 high-pass poles and
+  NumPy's `linspace` ramp order now make the PAL VHS aggregate RF response
+  byte-exact with SHA-256
+  `27C68FEE9D6C846C9548E9EA2161BE73AB6504DF39264D583235E94113DB327B`
+- a bounded 10-frame real 40 MHz NTSC `BETAMAX_HIFI` capture gate matches
+  Python v0.4.0 `--threads 0` exactly for luma, chroma, JSON, stdout,
+  timing-normalized stderr, and timestamp-normalized logs. The respective
+  artifact hashes are
+  `64E5B324447D6FA621E7CEF7FD3DDE84A66546A8FF93C212500415DB308D8ABF`,
+  `F5977278A723F391CC65A47179D0B701A0BA954AB8B3F347CEEC247B9CE874FB`,
+  and
+  `53E658F2B90BDB16B5DBF3C104146EA76F091A7634F144701CFDF3D6C49147A1`.
+  The current upstream behavior profile independently matches its upstream
+  snapshot for the same six surfaces. This gate covers v0.4.0's empty-HSync
+  median-unit fallback, unrounded file-frame status, and the exact SciPy
+  order-12 Butterworth poles used by the format's RF high-pass filter
 - a 1,000-frame real PAL VHS checkpoint matches Python v0.4.0 `--threads 0`
   exactly under both the port's default 5-worker mode and `--threads 20`:
   luma
