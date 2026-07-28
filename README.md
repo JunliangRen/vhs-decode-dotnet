@@ -2,7 +2,7 @@
 
 **[English](README.md)** | [简体中文](README.zh-CN.md) | [日本語](README.ja.md)
 
-<!-- README_SYNC: 2026-07-28.2 -->
+<!-- README_SYNC: 2026-07-28.3 -->
 
 .NET 11 rewrite of the decode-facing parts of
 [`oyvindln/vhs-decode`](https://github.com/oyvindln/vhs-decode), focused on
@@ -993,6 +993,26 @@ chroma, JSON, stdout, normalized stderr, timestamp-normalized logs, and all
 ordered `fileLoc` values matched in every A/B gate. Candidate `current` output
 was also deterministic at `--threads 0`, `1`, default 5, and `20`, and a
 separate 160-frame `v0.4.0` regression matched the same surfaces.
+
+The two full-spectrum VHS `ForwardReal` calls now write into full-length
+worker-owned arrays that were already idle at those points in the RF block
+lifetime. FFT plans, float64 conversion, element evaluation order, and output
+ownership are unchanged. On the same private local 40 MHz NTSC
+`BETAMAX_HIFI` sample, matched 80-frame `gc-verbose` traces reduced sampled
+managed allocation from 42.1717 to 35.1848 GiB (6.9869 GiB, or 16.57% less);
+Gen2 collections were 116 and 115. The six-pair 40-frame gate was noisy: the
+candidate won three pairs and its paired median throughput was 1.63% lower, so
+no short-run gain is claimed. Four interleaved 160-frame
+`current --threads 20` pairs all favored the candidate, with a 2.99% paired
+median throughput gain, a 2.57% average gain, 2.15% less average CPU time, and
+median peak working set moving from 1.510 to 1.484 GiB. Two reverse-order
+400-frame pairs were strongly order-sensitive at -5.20% and +8.94%; after
+balancing both orders, aggregate throughput was 1.37% higher, average CPU time
+was 2.95% lower, and median peak working set moved from 1.550 to 1.529 GiB.
+Luma, chroma, JSON, stdout, normalized stderr, timestamp-normalized logs, and
+all ordered `fileLoc` values matched in every A/B gate. Candidate `current`
+output was deterministic at `--threads 0`, `1`, default 5, and `20`; a separate
+160-frame `v0.4.0` regression matched the same surfaces.
 
 </details>
 

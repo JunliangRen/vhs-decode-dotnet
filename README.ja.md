@@ -2,7 +2,7 @@
 
 [English](README.md) | [简体中文](README.zh-CN.md) | **[日本語](README.ja.md)**
 
-<!-- README_SYNC: 2026-07-28.2 -->
+<!-- README_SYNC: 2026-07-28.3 -->
 
 [`oyvindln/vhs-decode`](https://github.com/oyvindln/vhs-decode) の
 デコード関連部分を .NET 11 で再実装するプロジェクトです。現在は release
@@ -939,6 +939,27 @@ normalized stderr、timestamp-normalized log、すべての ordered `fileLoc` �
 一致しました。candidate の `current` output は `--threads 0`、`1`、default 5、
 `20` でも deterministic で、別の 160-frame `v0.4.0` regression も同じ surface
 に一致しました。
+
+2 か所の VHS full-spectrum `ForwardReal` は、RF block lifetime のその時点で
+未使用だった worker-owned の full-length array へ書き込むようになりました。
+FFT plan、float64 conversion、element evaluation order、output ownership は
+変更していません。同じ private local 40 MHz NTSC `BETAMAX_HIFI` sample の
+matched 80-frame `gc-verbose` trace では、sampled managed allocation が
+42.1717 GiB から 35.1848 GiB へ減りました（6.9869 GiB、16.57% 減）。
+Gen2 collection は 116 回と 115 回でした。6 組の 40-frame pair は noise が
+大きく、candidate は 3 組のみ勝ち、paired median throughput は 1.63% 低かった
+ため、short-run gain は主張しません。4 組の interleaved 160-frame
+`current --threads 20` pair はすべて candidate が高速で、paired median
+throughput gain は 2.99%、average gain は 2.57%、average CPU time は
+2.15% 減り、median peak working set は 1.510 GiB から 1.484 GiB へ
+下がりました。反転順序の 400-frame pair 2 組は run order の影響が強く、
+-5.20% と +8.94% でした。両 order を balanced aggregate にすると throughput は
+1.37% 高く、average CPU time は 2.95% 減り、median peak working set は
+1.550 GiB から 1.529 GiB へ下がりました。すべての A/B gate で luma、
+chroma、JSON、stdout、normalized stderr、timestamp-normalized log、すべての
+ordered `fileLoc` が一致しました。candidate の `current` output は
+`--threads 0`、`1`、default 5、`20` で deterministic で、別の 160-frame
+`v0.4.0` regression も同じ surface に一致しました。
 
 </details>
 

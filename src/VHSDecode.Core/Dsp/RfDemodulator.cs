@@ -227,7 +227,10 @@ public sealed class RfDemodulator : IDisposable
         double[]? vhsRfFilteredReal = null;
         if (useVhsComplexRfHighBoostPath)
         {
-            Complex[] inputSpectrum = PocketFftComplex.ForwardReal(input);
+            VhsRealFftWorkspace workspace = vhsRealFftWorkspace!;
+            // This path leaves both full-length analytic buffers idle until these spectra are consumed.
+            Complex[] inputSpectrum = workspace.DiffedAnalytic;
+            PocketFftComplex.ForwardReal(input, inputSpectrum.AsSpan(0, input.Length));
             rfHighPass = includeRfHighPassOutput
                 ? ExtractReal(PocketFftComplex.Inverse(ApplyNumpyRealFrequencyFilter(
                     inputSpectrum,
@@ -394,7 +397,8 @@ public sealed class RfDemodulator : IDisposable
                 vhsRfFilteredReal!.AsSpan(0, input.Length),
                 envelope,
                 rfHighBoost,
-                vhsRfTopFilter!))
+                vhsRfTopFilter!,
+                vhsRealFftWorkspace!))
             {
                 analytic = BuildVhsComplexAnalyticSignal(
                     rfFilteredSpectrum,
@@ -1568,7 +1572,8 @@ public sealed class RfDemodulator : IDisposable
         ReadOnlySpan<double> rfFiltered,
         ReadOnlySpan<double> envelope,
         RfHighBoostOptions? options,
-        IReadOnlyList<SosSection> rfTopFilter)
+        IReadOnlyList<SosSection> rfTopFilter,
+        VhsRealFftWorkspace workspace)
     {
         if (rfFiltered.Length != envelope.Length
             || rfFilteredSpectrum.Length != rfFiltered.Length)
@@ -1582,7 +1587,8 @@ public sealed class RfDemodulator : IDisposable
             return false;
         }
 
-        Complex[] highPartSpectrum = PocketFftComplex.ForwardReal(highPart);
+        Span<Complex> highPartSpectrum = workspace.FullAnalytic.AsSpan(0, highPart.Length);
+        PocketFftComplex.ForwardReal(highPart, highPartSpectrum);
         for (int i = 0; i < rfFilteredSpectrum.Length; i++)
         {
             rfFilteredSpectrum[i] = new Complex(
