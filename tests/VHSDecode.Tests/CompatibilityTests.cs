@@ -4513,8 +4513,11 @@ public void RfDemodulatorAppliesNonlinearDeemphasis()
         Order: 2,
         LimitLow: -0.25,
         LimitHigh: 0.25);
+    string originalVideoHash = DoubleBitsSha256(video);
     double[] processed = RfDemodulator.ApplyNonlinearDeemphasis(video, videoSpectrum, sampleRate, options);
 
+    AssertFalse(ReferenceEquals(video, processed));
+    AssertEqual(originalVideoHash, DoubleBitsSha256(video));
     AssertTrue(AmplitudeAtBin(processed, bin: 32) < AmplitudeAtBin(video, bin: 32));
     AssertTrue(AmplitudeAtBin(processed, bin: 4) > AmplitudeAtBin(video, bin: 4) * 0.95);
     for (int i = 0; i < video.Length; i++)
@@ -4559,8 +4562,11 @@ public void RfDemodulatorAppliesSubDeemphasis()
         LogisticRate: null,
         StaticFactor: null);
 
+    string originalVideoHash = DoubleBitsSha256(video);
     double[] processed = RfDemodulator.ApplySubDeemphasis(video, videoSpectrum, sampleRate, options);
 
+    AssertFalse(ReferenceEquals(video, processed));
+    AssertEqual(originalVideoHash, DoubleBitsSha256(video));
     AssertTrue(AmplitudeAtBin(processed, bin: 32) < AmplitudeAtBin(video, bin: 32));
     AssertTrue(AmplitudeAtBin(processed, bin: 4) > AmplitudeAtBin(video, bin: 4) * 0.90);
     AssertTrue(processed.Zip(video, (a, b) => Math.Abs(a - b)).Average() > 0.01);
@@ -4570,6 +4576,8 @@ public void RfDemodulatorAppliesSubDeemphasis()
         videoSpectrum,
         sampleRate,
         options with { LogisticMid = 0.2, LogisticRate = 14.0, Scaling1 = 0.8, Scaling2 = 1.2, StaticFactor = 0.1 });
+    AssertFalse(ReferenceEquals(video, logistic));
+    AssertEqual(originalVideoHash, DoubleBitsSha256(video));
     AssertTrue(AmplitudeAtBin(logistic, bin: 32) < AmplitudeAtBin(video, bin: 32));
 
     AssertThrows<ArgumentException>(() => RfDemodulator.ApplySubDeemphasis(
@@ -4590,6 +4598,7 @@ public void RfDemodulatorAppliesSubDeemphasis()
             ((((index * 7919.0) % 65521.0) - 32760.0) * 32.0)
             + ((((index * 37.0) % 101.0) - 50.0) * 4096.0))
         .ToArray();
+    string fixtureHash = DoubleBitsSha256(fixture);
     Complex[] fixtureSpectrum = PocketFftReal.Forward(fixture);
 
     double[] svhs = RfDemodulator.ApplySubDeemphasisReal(
@@ -4608,6 +4617,8 @@ public void RfDemodulatorAppliesSubDeemphasis()
             LogisticMid: 0.2,
             LogisticRate: 14.0,
             StaticFactor: null));
+    AssertFalse(ReferenceEquals(fixture, svhs));
+    AssertEqual(fixtureHash, DoubleBitsSha256(fixture));
     AssertClose(-1_017_798.6896995121, svhs[0], 1e-8);
     AssertClose(281_293.7336982782, svhs[1024], 1e-8);
     AssertClose(-886_929.7006694467, svhs[32533], 1e-8);
@@ -4629,6 +4640,8 @@ public void RfDemodulatorAppliesSubDeemphasis()
             LogisticMid: null,
             LogisticRate: null,
             StaticFactor: null));
+    AssertFalse(ReferenceEquals(fixture, betamax));
+    AssertEqual(fixtureHash, DoubleBitsSha256(fixture));
     AssertClose(-1_183_587.7581180683, betamax[0], 1e-8);
     AssertClose(-534_215.2407867257, betamax[10], 1e-8);
     AssertClose(1_104_548.9812005796, betamax[27734], 1e-8);

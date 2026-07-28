@@ -878,15 +878,25 @@ public sealed class RfDemodulator : IDisposable
         NonlinearDeemphasisOptions options,
         ReadOnlySpan<Complex> highPass)
     {
+        var output = new double[video.Length];
+        ApplyNonlinearDeemphasisCore(video, videoSpectrum, options, highPass, output);
+        return output;
+    }
+
+    private static void ApplyNonlinearDeemphasisCore(
+        ReadOnlySpan<double> video,
+        ReadOnlySpan<Complex> videoSpectrum,
+        NonlinearDeemphasisOptions options,
+        ReadOnlySpan<Complex> highPass,
+        double[] output)
+    {
         Complex[] highSpectrum = ApplyFrequencyFilter(videoSpectrum, highPass);
         Complex[] highComplex = FastFourierTransform.Inverse(highSpectrum);
-        double[] output = video.ToArray();
+        InitializeDeemphasisOutput(video, output);
         for (int i = 0; i < output.Length; i++)
         {
             output[i] -= Math.Clamp(highComplex[i].Real, options.LimitLow, options.LimitHigh);
         }
-
-        return output;
     }
 
     public static double[] ApplySubDeemphasis(
@@ -926,6 +936,19 @@ public sealed class RfDemodulator : IDisposable
         double sampleRateHz,
         SubDeemphasisOptions options,
         ReadOnlySpan<Complex> highPass)
+    {
+        var output = new double[video.Length];
+        ApplySubDeemphasisCore(video, videoSpectrum, sampleRateHz, options, highPass, output);
+        return output;
+    }
+
+    private static void ApplySubDeemphasisCore(
+        ReadOnlySpan<double> video,
+        ReadOnlySpan<Complex> videoSpectrum,
+        double sampleRateHz,
+        SubDeemphasisOptions options,
+        ReadOnlySpan<Complex> highPass,
+        double[] output)
     {
         double nyquistHz = sampleRateHz / 2.0;
         Complex[] highSpectrum = ApplyFrequencyFilter(videoSpectrum, highPass);
@@ -969,15 +992,13 @@ public sealed class RfDemodulator : IDisposable
             }
         }
 
-        double[] output = video.ToArray();
+        InitializeDeemphasisOutput(video, output);
         double staticFactor = options.StaticFactor ?? 0.0;
         for (int i = 0; i < output.Length; i++)
         {
             double staticPart = highPart[i] * staticFactor;
             output[i] -= (highPart[i] * (1.0 - amplitude[i])) + staticPart;
         }
-
-        return output;
     }
 
     public static Complex[] IdentityFilter(int length)
@@ -1634,14 +1655,13 @@ public sealed class RfDemodulator : IDisposable
         float envelopeMean = NumpyReduction.MeanFloat32(envelope);
         float envelopeNumerator = envelopeMean * 0.9f;
         double[] highBand = SosFilter.ApplyForwardBackward(rfTopFilter, rfFiltered);
-        var highPart = new double[highBand.Length];
-        for (int i = 0; i < highPart.Length; i++)
+        for (int i = 0; i < highBand.Length; i++)
         {
             float envelopeScale = envelopeNumerator / (float)envelope[i];
-            highPart[i] = (highBand[i] * envelopeScale) * options.Multiplier;
+            highBand[i] = (highBand[i] * envelopeScale) * options.Multiplier;
         }
 
-        return highPart;
+        return highBand;
     }
 
     private bool ApplyRfHighBoostIfPresent(
@@ -1892,7 +1912,6 @@ public sealed class RfDemodulator : IDisposable
             return;
         }
 
-        double[] output;
         if (useVhsRealFft)
         {
             if (videoSpectrum.Length != (video.Length / 2) + 1)
@@ -1903,7 +1922,7 @@ public sealed class RfDemodulator : IDisposable
             }
 
             Complex[] highPass = GetNonlinearDeemphasisFilter(video.Length, options);
-            output = ApplyNonlinearDeemphasisRealCore(video, videoSpectrum, options, highPass);
+            ApplyNonlinearDeemphasisRealCore(video, videoSpectrum, options, highPass, video);
         }
         else
         {
@@ -1915,10 +1934,8 @@ public sealed class RfDemodulator : IDisposable
             }
 
             Complex[] highPass = GetNonlinearDeemphasisFilter(video.Length, options);
-            output = ApplyNonlinearDeemphasisCore(video, videoSpectrum, options, highPass);
+            ApplyNonlinearDeemphasisCore(video, videoSpectrum, options, highPass, video);
         }
-
-        Array.Copy(output, video, video.Length);
     }
 
     private void ApplySubDeemphasisIfPresent(
@@ -1932,7 +1949,6 @@ public sealed class RfDemodulator : IDisposable
             return;
         }
 
-        double[] output;
         if (useVhsRealFft)
         {
             if (videoSpectrum.Length != (video.Length / 2) + 1)
@@ -1944,7 +1960,13 @@ public sealed class RfDemodulator : IDisposable
 
             ValidateSubDeemphasisOptions(options);
             Complex[] highPass = GetSubDeemphasisFilter(video.Length, options);
-            output = ApplySubDeemphasisRealCore(video, videoSpectrum, SampleRateHz, options, highPass);
+            ApplySubDeemphasisRealCore(
+                video,
+                videoSpectrum,
+                SampleRateHz,
+                options,
+                highPass,
+                video);
         }
         else
         {
@@ -1957,10 +1979,14 @@ public sealed class RfDemodulator : IDisposable
 
             ValidateSubDeemphasisOptions(options);
             Complex[] highPass = GetSubDeemphasisFilter(video.Length, options);
-            output = ApplySubDeemphasisCore(video, videoSpectrum, SampleRateHz, options, highPass);
+            ApplySubDeemphasisCore(
+                video,
+                videoSpectrum,
+                SampleRateHz,
+                options,
+                highPass,
+                video);
         }
-
-        Array.Copy(output, video, video.Length);
     }
 
     internal static double[] ApplyNonlinearDeemphasisReal(
@@ -1984,15 +2010,25 @@ public sealed class RfDemodulator : IDisposable
         NonlinearDeemphasisOptions options,
         ReadOnlySpan<Complex> highPass)
     {
+        var output = new double[video.Length];
+        ApplyNonlinearDeemphasisRealCore(video, videoSpectrum, options, highPass, output);
+        return output;
+    }
+
+    private static void ApplyNonlinearDeemphasisRealCore(
+        ReadOnlySpan<double> video,
+        ReadOnlySpan<Complex> videoSpectrum,
+        NonlinearDeemphasisOptions options,
+        ReadOnlySpan<Complex> highPass,
+        double[] output)
+    {
         Complex[] highSpectrum = ApplyNumpyRealFrequencyFilter(videoSpectrum, highPass, video.Length);
         double[] highPart = PocketFftReal.Inverse(highSpectrum, video.Length);
-        double[] output = video.ToArray();
+        InitializeDeemphasisOutput(video, output);
         for (int i = 0; i < output.Length; i++)
         {
             output[i] -= Math.Clamp(highPart[i], options.LimitLow, options.LimitHigh);
         }
-
-        return output;
     }
 
     internal static double[] ApplySubDeemphasisReal(
@@ -2035,6 +2071,19 @@ public sealed class RfDemodulator : IDisposable
         SubDeemphasisOptions options,
         ReadOnlySpan<Complex> highPass)
     {
+        var output = new double[video.Length];
+        ApplySubDeemphasisRealCore(video, videoSpectrum, sampleRateHz, options, highPass, output);
+        return output;
+    }
+
+    private static void ApplySubDeemphasisRealCore(
+        ReadOnlySpan<double> video,
+        ReadOnlySpan<Complex> videoSpectrum,
+        double sampleRateHz,
+        SubDeemphasisOptions options,
+        ReadOnlySpan<Complex> highPass,
+        double[] output)
+    {
         double nyquistHz = sampleRateHz / 2.0;
         Complex[] highSpectrum = ApplyNumpyRealFrequencyFilter(videoSpectrum, highPass, video.Length);
         double[] highPart = PocketFftReal.Inverse(highSpectrum, video.Length);
@@ -2073,15 +2122,28 @@ public sealed class RfDemodulator : IDisposable
             }
         }
 
-        double[] output = video.ToArray();
+        InitializeDeemphasisOutput(video, output);
         double staticFactor = options.StaticFactor ?? 0.0;
         for (int i = 0; i < output.Length; i++)
         {
             double staticPart = highPart[i] * staticFactor;
             output[i] -= (highPart[i] * (1.0 - amplitude[i])) + staticPart;
         }
+    }
 
-        return output;
+    private static void InitializeDeemphasisOutput(
+        ReadOnlySpan<double> video,
+        double[] output)
+    {
+        if (video.Length != output.Length)
+        {
+            throw new ArgumentException("Deemphasis output length must match video length.", nameof(output));
+        }
+
+        if (!video.Overlaps(output, out int elementOffset) || elementOffset != 0)
+        {
+            video.CopyTo(output);
+        }
     }
 
     private Complex[] GetNonlinearDeemphasisFilter(

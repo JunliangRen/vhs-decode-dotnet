@@ -2,7 +2,7 @@
 
 **[English](README.md)** | [简体中文](README.zh-CN.md) | [日本語](README.ja.md)
 
-<!-- README_SYNC: 2026-07-28.4 -->
+<!-- README_SYNC: 2026-07-28.5 -->
 
 .NET 11 rewrite of the decode-facing parts of
 [`oyvindln/vhs-decode`](https://github.com/oyvindln/vhs-decode), focused on
@@ -1034,6 +1034,26 @@ stderr, timestamp-normalized logs, and every ordered `fileLoc` matched in all
 A/B gates. Candidate `current` output was identical across two runs each at
 `--threads 0`, `1`, default 5, and `20`; a separate 160-frame `v0.4.0`
 regression matched the same surfaces.
+
+RF deemphasis now writes its final per-sample subtraction into the decoder-owned
+video array, while public helpers still return independent arrays. VHS RF
+high-band scaling also reuses its filter output after the old samples become
+dead. Data types, FFT/filter work, per-sample expression order, and public
+ownership remain unchanged. On the same private local 40 MHz NTSC
+`BETAMAX_HIFI` sample, matched 80-frame `gc-verbose` traces reduced sampled
+managed allocation from 28.183423 to 26.445196 GiB (1.738227 GiB, or 6.17%),
+`Double[]` allocation from 14,999.178 to 13,209.475 MiB (11.93% less), and Gen2
+collections from 86 to 66. Four 40-frame pairs were noisy: the candidate won
+two, with -1.49% median and -3.82% balanced throughput, so no short-run gain is
+claimed. Four 160-frame pairs also split two/two, with +0.15% median and +0.82%
+balanced throughput while aggregate CPU time was 0.27% higher. Two
+reverse-order 400-frame pairs measured -0.77% and +1.89%; balanced throughput
+was 0.54% higher and aggregate CPU time was 0.32% lower. Sampled peak working
+set did not improve, so no resident-memory reduction is claimed. Luma, chroma,
+JSON, stdout, normalized stderr, timestamp-normalized logs, and every ordered
+`fileLoc` matched in all A/B gates. Candidate `current` output was identical
+across two runs each at `--threads 0`, `1`, default 5, and `20`; a separate
+160-frame `v0.4.0` regression matched the same surfaces.
 
 </details>
 

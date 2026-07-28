@@ -2,7 +2,7 @@
 
 [English](README.md) | **[简体中文](README.zh-CN.md)** | [日本語](README.ja.md)
 
-<!-- README_SYNC: 2026-07-28.4 -->
+<!-- README_SYNC: 2026-07-28.5 -->
 
 这是 [`oyvindln/vhs-decode`](https://github.com/oyvindln/vhs-decode)
 中解码相关部分的 .NET 11 重写，当前以 release `v0.4.0`、commit
@@ -832,6 +832,22 @@ FFT plan、float64 运算、表达式顺序、padding 和返回结果所有权�
 stdout、归一化 stderr、时间戳归一化日志及全部有序 `fileLoc` 都一致。候选
 `current` 输出在 `--threads 0`、`1`、默认 5 和 `20` 下各重复两次仍完全相同，
 另一个 160-frame `v0.4.0` 回归也匹配相同内容。
+
+RF deemphasis 现在会把最终的逐样本减法直接写入解码器自有的 video 数组，而公开 helper
+仍返回独立数组。VHS RF high-band scaling 也会在旧样本不再使用后复用滤波器输出。
+数据类型、FFT/滤波工作、逐样本表达式顺序和公开所有权均未改变。在同一份私有本地
+40 MHz NTSC `BETAMAX_HIFI` 样本上，匹配的 80-frame `gc-verbose` trace 将采样
+托管分配从 28.183423 GiB 降至 26.445196 GiB（减少 1.738227 GiB，即
+6.17%），`Double[]` 分配从 14,999.178 MiB 降至 13,209.475 MiB（减少
+11.93%），Gen2 回收从 86 次降至 66 次。四组 40-frame 配对噪声较大，候选胜出
+两组，配对吞吐中位数和配平合计分别为 -1.49% 与 -3.82%，因此不宣称短运行收益。
+四组 160-frame 配对也各胜两组，中位数和配平合计吞吐分别为 +0.15% 与 +0.82%，
+合计 CPU 时间增加 0.27%。两组反向顺序的 400-frame 配对分别为 -0.77% 和
++1.89%，配平合计吞吐提高 0.54%，合计 CPU 时间减少 0.32%。采样峰值工作集没有
+改善，因此不宣称常驻内存下降。所有 A/B 门禁的亮度、色度、JSON、stdout、归一化
+stderr、时间戳归一化日志和全部有序 `fileLoc` 均一致。候选 `current` 输出在
+`--threads 0`、`1`、默认 5 和 `20` 下各重复两次仍完全相同；另一个 160-frame
+`v0.4.0` 回归也匹配相同内容。
 
 </details>
 
