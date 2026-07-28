@@ -2561,6 +2561,21 @@ public void RfDemodulatorAppliesRfHighBoost()
     AssertEqual(
         "717670CF99BE6928A0DF9CA1097A275AA4EEF584ED5F0E1E2F69AE943B32FEDF",
         ComplexBitsSha256(vhsBoosted.Analytic));
+
+    Complex[] retainedAnalytic = vhsBoosted.Analytic.ToArray();
+    RfDemodulatedBlock weakVhs = demodulator.Demodulate(
+        new double[n],
+        identity,
+        identity,
+        ReadOnlySpan<Complex>.Empty,
+        identity,
+        identity,
+        rfHighBoost: new RfHighBoostOptions(1.25, 8.0, 24.0),
+        fmDemodulatorMode: RfFmDemodulatorMode.VhsRustApproximation,
+        vhsEnvelopeFilter: identitySos,
+        vhsRfTopFilter: identitySos);
+    AssertTrue(weakVhs.VhsWeakRfSignal);
+    AssertComplexSequence(retainedAnalytic, vhsBoosted.Analytic, 0.0);
 }
 
 [Fact(DisplayName = "RF demodulator replaces diff demod spikes")]

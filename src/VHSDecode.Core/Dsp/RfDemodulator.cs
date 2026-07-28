@@ -228,7 +228,7 @@ public sealed class RfDemodulator : IDisposable
         if (useVhsComplexRfHighBoostPath)
         {
             VhsRealFftWorkspace workspace = vhsRealFftWorkspace!;
-            // This path leaves both full-length analytic buffers idle until these spectra are consumed.
+            // The complex path reuses both full-length buffers in non-overlapping phases.
             Complex[] inputSpectrum = workspace.DiffedAnalytic;
             PocketFftComplex.ForwardReal(input, inputSpectrum.AsSpan(0, input.Length));
             rfHighPass = includeRfHighPassOutput
@@ -250,7 +250,9 @@ public sealed class RfDemodulator : IDisposable
             }
 
             hilbertMultiplier = GetVhsHilbertMultiplier(rfFilteredSpectrum.Length);
-            analytic = BuildVhsComplexAnalyticSignal(rfFilteredSpectrum, hilbertMultiplier);
+            BuildVhsComplexAnalyticSignal(rfFilteredSpectrum, hilbertMultiplier, workspace);
+            analytic = workspace.FullAnalytic;
+            vhsWorkspaceComplexAnalyticReady = true;
             vhsEnvelopeSource = ExtractReal(analytic);
             vhsRfFilteredReal = ExtractReal(PocketFftComplex.Inverse(rfFilteredSpectrum));
         }
@@ -392,17 +394,20 @@ public sealed class RfDemodulator : IDisposable
 
         if (useVhsComplexRfHighBoostPath)
         {
+            VhsRealFftWorkspace workspace = vhsRealFftWorkspace!;
             if (ApplyVhsComplexRfHighBoostIfPresent(
                 rfFilteredSpectrum!,
                 vhsRfFilteredReal!.AsSpan(0, input.Length),
                 envelope,
                 rfHighBoost,
                 vhsRfTopFilter!,
-                vhsRealFftWorkspace!))
+                workspace))
             {
-                analytic = BuildVhsComplexAnalyticSignal(
+                BuildVhsComplexAnalyticSignal(
                     rfFilteredSpectrum,
-                    hilbertMultiplier!);
+                    hilbertMultiplier!,
+                    workspace);
+                analytic = workspace.FullAnalytic;
             }
         }
         else if (vhsRfFilteredHalf is not null
@@ -1097,13 +1102,21 @@ public sealed class RfDemodulator : IDisposable
         return output;
     }
 
-    private static Complex[] BuildVhsComplexAnalyticSignal(
+    private static void BuildVhsComplexAnalyticSignal(
         ReadOnlySpan<Complex> filteredSpectrum,
-        ReadOnlySpan<double> hilbertMultiplier)
+        ReadOnlySpan<double> hilbertMultiplier,
+        VhsRealFftWorkspace workspace)
     {
-        Complex[] analyticSpectrum = filteredSpectrum.ToArray();
-        ApplyHilbertMultiplierInPlace(analyticSpectrum, hilbertMultiplier);
-        return PocketFftComplex.Inverse(analyticSpectrum);
+        Span<Complex> analyticSpectrum = workspace.DiffedAnalytic.AsSpan(0, filteredSpectrum.Length);
+        filteredSpectrum.CopyTo(analyticSpectrum);
+        for (int i = 0; i < analyticSpectrum.Length; i++)
+        {
+            analyticSpectrum[i] *= hilbertMultiplier[i];
+        }
+
+        PocketFftComplex.Inverse(
+            analyticSpectrum,
+            workspace.FullAnalytic.AsSpan(0, filteredSpectrum.Length));
     }
 
     private static void BuildNumpyVhsComplexAnalyticSignal(
