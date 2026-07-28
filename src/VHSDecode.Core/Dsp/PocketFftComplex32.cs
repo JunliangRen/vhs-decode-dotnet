@@ -26,6 +26,25 @@ internal static class PocketFftComplex32
             : new Plan(input.Length, input.Length).Transform(input);
     }
 
+    internal static Complex32[] ForwardDuccOwned(
+        Complex32[] input,
+        int workerThreads = 1)
+    {
+        ArgumentNullException.ThrowIfNull(input);
+        ValidateLength(input.Length, nameof(input));
+        if (input.Length is > 300 and <= 100_000)
+        {
+            return TransformDuccVectorized(input);
+        }
+
+        return input.Length > 10_000
+            ? TransformLargeMultipassOwned(
+                input,
+                input.Length,
+                workerThreads)
+            : new Plan(input.Length, input.Length).Transform(input);
+    }
+
     internal static Complex32[] ForwardAnyLengthDucc(
         ReadOnlySpan<Complex32> input,
         int workerThreads = 1)
@@ -38,6 +57,24 @@ internal static class PocketFftComplex32
         }
 
         return TransformWithRootLength(
+            input,
+            input.Length,
+            workerThreads);
+    }
+
+    internal static Complex32[] ForwardAnyLengthDuccOwned(
+        Complex32[] input,
+        int workerThreads = 1)
+    {
+        ArgumentNullException.ThrowIfNull(input);
+        ValidateSupportedLength(input.Length, nameof(input));
+        if (input.Length is > 300 and <= 100_000
+            && input.Length % 4 == 0)
+        {
+            return TransformDuccVectorized(input);
+        }
+
+        return TransformWithRootLengthOwned(
             input,
             input.Length,
             workerThreads);
@@ -74,7 +111,34 @@ internal static class PocketFftComplex32
                 -input[i].Imaginary);
         }
 
-        Complex32[] transformed = ForwardAnyLengthDucc(
+        return TransformConjugatedBackwardOwned(
+            conjugated,
+            workerThreads);
+    }
+
+    internal static Complex32[] BackwardAnyLengthDuccOwned(
+        Complex32[] input,
+        int workerThreads = 1)
+    {
+        ArgumentNullException.ThrowIfNull(input);
+        ValidateSupportedLength(input.Length, nameof(input));
+        for (int i = 0; i < input.Length; i++)
+        {
+            input[i] = new Complex32(
+                input[i].Real,
+                -input[i].Imaginary);
+        }
+
+        return TransformConjugatedBackwardOwned(
+            input,
+            workerThreads);
+    }
+
+    private static Complex32[] TransformConjugatedBackwardOwned(
+        Complex32[] conjugated,
+        int workerThreads)
+    {
+        Complex32[] transformed = ForwardAnyLengthDuccOwned(
             conjugated,
             workerThreads);
         for (int i = 0; i < transformed.Length; i++)
@@ -108,16 +172,44 @@ internal static class PocketFftComplex32
             .Transform(input);
     }
 
+    private static Complex32[] TransformWithRootLengthOwned(
+        Complex32[] input,
+        int rootLength,
+        int workerThreads = 1)
+    {
+        ValidateSupportedLength(input.Length, nameof(input));
+        if (input.Length > 10_000)
+        {
+            return TransformLargeMultipassOwned(
+                input,
+                rootLength,
+                workerThreads);
+        }
+
+        return RootedPlans.GetOrAdd(
+                (input.Length, rootLength),
+                static key => new Plan(key.Length, key.RootLength))
+            .Transform(input);
+    }
+
     private static Complex32[] TransformLargeMultipass(
         ReadOnlySpan<Complex32> input,
         int rootLength,
         int workerThreads)
+        => TransformLargeMultipassOwned(
+            input.ToArray(),
+            rootLength,
+            workerThreads);
+
+    private static Complex32[] TransformLargeMultipassOwned(
+        Complex32[] source,
+        int rootLength,
+        int workerThreads)
     {
-        int length = input.Length;
+        int length = source.Length;
         int[] packets = BuildBalancedPackets(length);
         var roots = new SinCos2PiByN(rootLength);
         int rootFactor = rootLength / length;
-        Complex32[] source = input.ToArray();
         var destination = new Complex32[length];
         int l1 = 1;
 

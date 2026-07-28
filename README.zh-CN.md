@@ -2,7 +2,7 @@
 
 [English](README.md) | **[简体中文](README.zh-CN.md)** | [日本語](README.ja.md)
 
-<!-- README_SYNC: 2026-07-28.1 -->
+<!-- README_SYNC: 2026-07-28.2 -->
 
 这是 [`oyvindln/vhs-decode`](https://github.com/oyvindln/vhs-decode)
 中解码相关部分的 .NET 11 重写，当前以 release `v0.4.0`、commit
@@ -756,6 +756,19 @@ stdout、归一化 stderr 和时间戳归一化日志。另一个显式 `current
 覆盖 `--threads 0`、`1`、默认 5 和 `20` 的 16 次短运行与 8 次长运行中，亮度、色度、
 JSON、stdout、归一化 stderr 和时间戳归一化日志均保持完全一致。
 
+显式 `current` 的 Super-Gaussian float32 实数 FFT 路径现在会把刚创建的
+`Complex32[]` 所有权转交给大型多遍变换，每场避免三次多余的整缓冲区克隆。保留输入的
+API、FFT plan、float32 转换点、packet 布局和运算顺序均未改变。在同一份私有本地
+40 MHz NTSC `BETAMAX_HIFI` `.lds` 样本上，四组交错的 160-frame
+`--threads 20` 配对平均为候选 16.30 秒、基线 16.52 秒；配对增益依次为
+2.85%、-0.63%、0.89% 和 2.38%，中位数为 1.64%。一组候选先跑的 400-frame
+配对为候选/基线 35.84/39.54 秒、CPU 260.45/269.59 秒；这只是受运行顺序影响的
+单组观测，不是通用百分比。候选四等分工作集峰值为
+1.459/1.231/0.820/1.422 GiB，没有持续增长。两项门禁的亮度、色度、JSON、stdout、
+归一化 stderr 和时间戳归一化日志完全一致，320/800 个有序 `fileLoc` 也全部匹配。
+`current` 在 `--threads 0`、`1`、默认 5 和 `20` 下保持确定性，另一个 `v0.4.0`
+profile 回归也匹配同六项内容。
+
 </details>
 
 <!-- SECTION: build -->
@@ -774,7 +787,7 @@ JSON、stdout、归一化 stderr 和时间戳归一化日志均保持完全一�
 .\tools\build-ipp-native.ps1
 dotnet restore VHSDecodeDotNet.slnx
 dotnet build VHSDecodeDotNet.slnx -c Release --no-restore
-dotnet test --solution VHSDecodeDotNet.slnx -c Release --no-build --no-restore --minimum-expected-tests 1090
+dotnet test --solution VHSDecodeDotNet.slnx -c Release --no-build --no-restore --minimum-expected-tests 1092
 ```
 
 第一条命令用于包含可选的 `ipp-fast` 原生产物；只构建 Exact 时可以省略。
@@ -785,7 +798,7 @@ Intel oneAPI。只含二进制的单文件发布会嵌入 `vhsdecode_ipp.dll` �
 notice，不会额外生成许可证 sidecar 文件。只构建 Exact 后端时可以省略原生构建步骤。
 
 当前正式 Release 构建为零警告、零错误。xUnit v3 项目向
-`dotnet test` 和 Visual Studio Test Explorer 暴露 **1,090** 个可独立发现的测试。
+`dotnet test` 和 Visual Studio Test Explorer 暴露 **1,092** 个可独立发现的测试。
 
 <!-- SECTION: usage -->
 
