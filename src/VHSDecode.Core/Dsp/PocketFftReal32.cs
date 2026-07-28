@@ -117,12 +117,16 @@ internal static class PocketFftReal32
     {
         private readonly Factor[] _factors;
         private readonly int _length;
+        private readonly UnityRoots? _unityRoots;
 
         internal Plan(int length)
         {
             _length = length;
             int[] radices = Factorize(length);
             _factors = BuildFactors(length, radices);
+            _unityRoots = length > 1000
+                ? new UnityRoots(length)
+                : null;
         }
 
         internal Complex32[] Forward(ReadOnlySpan<float> input)
@@ -183,7 +187,7 @@ internal static class PocketFftReal32
                 transformed[0].Real + transformed[0].Imaginary,
                 0.0f);
 
-            var roots = new UnityRoots(_length);
+            UnityRoots roots = _unityRoots!;
             for (int i = 1, inverseIndex = complexLength - 1;
                 i <= inverseIndex;
                 i++, inverseIndex--)
@@ -248,7 +252,7 @@ internal static class PocketFftReal32
                 input[0].Real + input[^1].Real,
                 input[0].Real - input[^1].Real);
 
-            var roots = new UnityRoots(_length);
+            UnityRoots roots = _unityRoots!;
             for (int i = 1, inverseIndex = complexLength - 1;
                 i <= inverseIndex;
                 i++, inverseIndex--)

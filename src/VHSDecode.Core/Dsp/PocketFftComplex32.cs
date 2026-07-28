@@ -6,6 +6,7 @@ namespace VHSDecode.Core.Dsp;
 
 internal static class PocketFftComplex32
 {
+    private static readonly ConcurrentDictionary<int, SinCos2PiByN> RootTables = new();
     private static readonly ConcurrentDictionary<(int Length, int RootLength), Plan> RootedPlans = new();
 
     internal static Complex32[] ForwardDucc(
@@ -115,7 +116,9 @@ internal static class PocketFftComplex32
     {
         int length = input.Length;
         int[] packets = BuildBalancedPackets(length);
-        var roots = new SinCos2PiByN(rootLength);
+        SinCos2PiByN roots = RootTables.GetOrAdd(
+            rootLength,
+            static length => new SinCos2PiByN(length));
         int rootFactor = rootLength / length;
         Complex32[] source = input.ToArray();
         var destination = new Complex32[length];
@@ -409,7 +412,9 @@ internal static class PocketFftComplex32
             _factors = BuildFactors(
                 length,
                 Factorize(length),
-                new SinCos2PiByN(rootLength),
+                RootTables.GetOrAdd(
+                    rootLength,
+                    static value => new SinCos2PiByN(value)),
                 rootLength / length);
         }
 
@@ -443,7 +448,9 @@ internal static class PocketFftComplex32
             Factor factor = BuildFactors(
                 input.Length,
                 [4],
-                new SinCos2PiByN(input.Length),
+                RootTables.GetOrAdd(
+                    input.Length,
+                    static length => new SinCos2PiByN(length)),
                 rootFactor: 1)[0];
             var outputValues = new Value[input.Length];
             Pass4(
