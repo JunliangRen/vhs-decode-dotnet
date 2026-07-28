@@ -926,6 +926,18 @@ runs were deterministic; the measured run completed in 37.012 s, peaked at
 1.949 GiB, and had quarter working-set medians of
 0.879/1.208/1.266/1.187 GiB, with no progressive end-of-run growth.
 
+The opt-in `current` VHS HSync boxcar now divides large, independent output
+ranges among at most four workers while retaining each sample's original
+left-to-right float64 multiply-add order. On the same private local 40 MHz NTSC
+`BETAMAX_HIFI` capture, two reversed-order 160-frame default-worker pairs were
+0.5% and 0.9% faster, averaging 26.075 s versus 26.260 s; candidate CPU time
+averaged 104.045 s versus 102.290 s as idle capacity became active. Two
+`--threads 20` pairs were 10.1% and 5.6% faster, averaging 16.255 s versus
+17.655 s, while average CPU time fell from 120.745 to 114.130 s. Candidate
+working sets stayed bounded at or below 1.344 GiB. Across 16 short and eight
+long runs covering `--threads 0`, `1`, default 5, and `20`, luma, chroma, JSON,
+stdout, normalized stderr, and timestamp-normalized logs each remained exact.
+
 </details>
 
 <!-- SECTION: build -->

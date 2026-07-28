@@ -299,7 +299,8 @@ public sealed class TbcFieldDecodePipeline
                 syncAnalyzer.UsecToSamples(syncAnalyzer.HSyncPulseUs),
                 syncAnalyzer.UsecToSamples(activeVideoStart - syncAnalyzer.HSyncPulseUs - 2.0),
                 checked((int)Math.Round(syncAnalyzer.NominalLineLength, MidpointRounding.ToEven)),
-                syncAnalyzer.UsecToSamples(0.22));
+                syncAnalyzer.UsecToSamples(0.22),
+                workerThreads);
             _vhsVSyncLevelRefiner = new VhsVSyncLevelRefiner();
         }
 
@@ -744,7 +745,7 @@ public sealed class TbcFieldDecodePipeline
             ?? _laserDiscAgcConverter
             ?? _laserDiscSyncConverter
             ?? _videoOutput;
-        ReadOnlySpan<double> pulseReference = span.VideoLowPass ?? span.Video;
+        double[] pulseReference = span.VideoLowPass ?? span.Video;
         VhsSyncDetectionResult? currentVhsSync = null;
         IReadOnlyList<Pulse> rawPulses;
         if (_vhsSyncDetector is not null && !prepared.ExplicitThreshold)

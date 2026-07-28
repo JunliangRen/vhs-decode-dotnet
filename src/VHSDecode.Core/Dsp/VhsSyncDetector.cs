@@ -17,6 +17,8 @@ public sealed record VhsSyncDetectionResult(
 
 public sealed class VhsSyncDetector
 {
+    private const int MaximumParallelBoxcarWorkers = 4;
+    private const int MinimumParallelBoxcarSamples = 65_536;
     private const double SyncSpacingTolerance = 0.15;
     private const int MinimumGridLength = 8;
     private const int PartitionSortThreshold = 32;
@@ -24,6 +26,7 @@ public sealed class VhsSyncDetector
     private readonly double _backPorchLength;
     private readonly int _lineLength;
     private readonly double _approximateTransition;
+    private readonly int _workerThreads;
     private readonly ConcurrentBag<VhsSyncWorkspace> _workspaces = [];
 
     // Upstream: oyvindln/vhs-decode
@@ -35,6 +38,21 @@ public sealed class VhsSyncDetector
         double backPorchLength,
         int lineLength,
         double approximateTransition)
+        : this(
+            hSyncLength,
+            backPorchLength,
+            lineLength,
+            approximateTransition,
+            workerThreads: 1)
+    {
+    }
+
+    internal VhsSyncDetector(
+        double hSyncLength,
+        double backPorchLength,
+        int lineLength,
+        double approximateTransition,
+        int workerThreads)
     {
         _hSyncLength = double.IsFinite(hSyncLength) && hSyncLength > 0.0
             ? hSyncLength
@@ -48,6 +66,71 @@ public sealed class VhsSyncDetector
         _approximateTransition = double.IsFinite(approximateTransition) && approximateTransition > 0.0
             ? approximateTransition
             : throw new ArgumentOutOfRangeException(nameof(approximateTransition));
+        _workerThreads = Math.Clamp(
+            workerThreads,
+            1,
+            MaximumParallelBoxcarWorkers);
+    }
+
+    internal VhsSyncDetectionResult Detect(
+        double[] demodulated,
+        bool detectLevels,
+        double syncTipEstimate,
+        double blankingEstimate)
+    {
+        ArgumentNullException.ThrowIfNull(demodulated);
+        if (_workerThreads == 1
+            || demodulated.Length < MinimumParallelBoxcarSamples)
+        {
+            return Detect(
+                demodulated.AsSpan(),
+                detectLevels,
+                syncTipEstimate,
+                blankingEstimate);
+        }
+
+        int windowSize = Math.Max(3, (int)_approximateTransition);
+        if ((windowSize & 1) == 0)
+        {
+            windowSize++;
+        }
+
+        VhsSyncWorkspace workspace =
+            _workspaces.TryTake(out VhsSyncWorkspace? available)
+                ? available
+                : new VhsSyncWorkspace();
+        try
+        {
+            int filteredLength = Math.Max(
+                demodulated.Length,
+                windowSize);
+            double[] filtered =
+                workspace.EnsureFilteredLength(filteredLength);
+            ConvolveBoxcarSameParallel(
+                demodulated,
+                windowSize,
+                filtered,
+                filteredLength,
+                _workerThreads);
+            if (detectLevels)
+            {
+                double[] partitioned =
+                    workspace.EnsurePartitionedLength(filteredLength);
+                (syncTipEstimate, blankingEstimate) =
+                    EstimateLevels(
+                        filtered.AsSpan(0, filteredLength),
+                        partitioned);
+            }
+
+            return DetectFiltered(
+                filtered.AsSpan(0, filteredLength),
+                syncTipEstimate,
+                blankingEstimate);
+        }
+        finally
+        {
+            _workspaces.Add(workspace);
+        }
     }
 
     public VhsSyncDetectionResult Detect(
@@ -74,7 +157,10 @@ public sealed class VhsSyncDetector
         {
             int filteredLength = Math.Max(demodulated.Length, windowSize);
             double[] filtered = workspace.EnsureFilteredLength(filteredLength);
-            ConvolveBoxcarSame(demodulated, windowSize, filtered.AsSpan(0, filteredLength));
+            ConvolveBoxcarSame(
+                demodulated,
+                windowSize,
+                filtered.AsSpan(0, filteredLength));
             if (detectLevels)
             {
                 double[] partitioned = workspace.EnsurePartitionedLength(filteredLength);
@@ -92,6 +178,69 @@ public sealed class VhsSyncDetector
         finally
         {
             _workspaces.Add(workspace);
+        }
+    }
+
+    private static void ConvolveBoxcarSameParallel(
+        double[] values,
+        int windowSize,
+        double[] output,
+        int outputLength,
+        int workerThreads)
+    {
+        int workerCount = Math.Min(workerThreads, outputLength);
+        Parallel.For(
+            fromInclusive: 0,
+            toExclusive: workerCount,
+            new ParallelOptions
+            {
+                MaxDegreeOfParallelism = workerCount
+            },
+            worker =>
+            {
+                int start = (int)(
+                    ((long)outputLength * worker)
+                    / workerCount);
+                int end = (int)(
+                    ((long)outputLength * (worker + 1))
+                    / workerCount);
+                ConvolveBoxcarRange(
+                    values,
+                    windowSize,
+                    output,
+                    start,
+                    end);
+            });
+    }
+
+    private static void ConvolveBoxcarRange(
+        double[] values,
+        int windowSize,
+        double[] output,
+        int start,
+        int end)
+    {
+        int firstFullIndex =
+            (Math.Min(values.Length, windowSize) - 1) / 2;
+        double scale = 1.0 / windowSize;
+        for (int outputIndex = start;
+            outputIndex < end;
+            outputIndex++)
+        {
+            int fullIndex = firstFullIndex + outputIndex;
+            int sourceStart = Math.Max(
+                0,
+                fullIndex - (windowSize - 1));
+            int sourceEnd = Math.Min(values.Length - 1, fullIndex);
+            double sum = 0.0;
+            for (int sourceIndex = sourceStart;
+                sourceIndex <= sourceEnd;
+                sourceIndex++)
+            {
+                sum += values[sourceIndex] * scale;
+            }
+
+            output[outputIndex] = sum;
         }
     }
 
