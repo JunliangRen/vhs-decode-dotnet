@@ -852,6 +852,28 @@ timestamp-normalized log はすべて一致しました。candidate は default 
 `current` の両 profile でも中断せず 1,000 frame / 2,000 field を完了し、同じ 6 comparison
 すべてで保存済みの各 Python oracle と完全一致しました。IPP は gate から除外しています。
 
+RF nonlinear/sub-deemphasis は、`RfDemodulator` ごとに exact-key の read-only high-pass
+response を 1 個ずつ保持するようになりました。key は block length と immutable high-pass
+parameter で構成され、miss 時は lock 内で唯一の entry を置き換えます。このため concurrent
+block は完成済み response を共有し、任意の block shape が蓄積しません。同じ private
+local 40 MHz NTSC `BETAMAX_HIFI` `.lds` capture で、baseline `846ad28` に対する 5 組の
+interleaved/reversed 160-frame `--threads 20` pair は、wall median を 16.294 秒から
+16.220 秒（0.5% 減）、mean を 16.603 秒から 16.257 秒（2.1% 減）へ移し、candidate は
+5 組中 4 組で高速でした。CPU median は 116.641 秒から 114.234 秒（2.1% 減）、mean は
+117.633 秒から 113.417 秒（3.6% 減）となり、全 5 組で candidate が勝ちました。peak
+working-set median は 1.868 GiB から 1.753 GiB に下がりましたが、個々の peak には
+依然として noise があります。
+
+同じ fixture の single serial/default-worker check は、wall/CPU time をそれぞれ
+94.518/96.641 秒から 83.767/86.547 秒、26.180/108.828 秒から 24.063/99.781 秒へ
+減らしました。これは single-pair observation であり、一般的な percentage では
+ありません。10 回の 20-worker run と serial/default candidate は、luma、chroma、
+JSON、stdout、normalized stderr、timestamp-normalized log の同じ 1 set に一致しました。
+別の opt-in `current` pair も profile 内の同じ 6 surface で一致し、CPU time は
+122.750 秒から 115.141 秒へ低下しました。2 回の 400-frame candidate run は
+deterministic で、計測 run は 37.012 秒、peak 1.949 GiB、quarter working-set median
+0.879/1.208/1.266/1.187 GiB となり、終了側で progressive growth はありませんでした。
+
 </details>
 
 <!-- SECTION: build -->
