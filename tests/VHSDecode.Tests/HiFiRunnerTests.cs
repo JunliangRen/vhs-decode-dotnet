@@ -1089,6 +1089,17 @@ public sealed class HiFiRunnerTests
     [Fact(DisplayName = "HiFi WAV output matches libsndfile PCM16 quantization and padding")]
     public void HiFiWaveOutputMatchesLibsndfilePcm16QuantizationAndPadding()
     {
+        Assert.Equal((short)0, HiFiOutputWriter.QuantizeWavePcm16(-1.0f / 4_294_967_296.0f));
+        Assert.Equal((short)-1, HiFiOutputWriter.QuantizeWavePcm16(-3.0f / 4_294_967_296.0f));
+        Assert.Equal((short)0, HiFiOutputWriter.QuantizeWavePcm16(3.0f / 4_294_967_296.0f));
+        Assert.Equal((short)-2, HiFiOutputWriter.QuantizeWavePcm16(-65_537.0f / 2_147_483_648.0f));
+        Assert.Equal((short)-1, HiFiOutputWriter.QuantizeWavePcm16(-65_536.0f / 2_147_483_648.0f));
+        Assert.Equal((short)0, HiFiOutputWriter.QuantizeWavePcm16(65_535.0f / 2_147_483_648.0f));
+        Assert.Equal((short)1, HiFiOutputWriter.QuantizeWavePcm16(65_536.0f / 2_147_483_648.0f));
+        Assert.Equal(short.MinValue, HiFiOutputWriter.QuantizeWavePcm16(float.NaN));
+        Assert.Equal(short.MinValue, HiFiOutputWriter.QuantizeWavePcm16(float.NegativeInfinity));
+        Assert.Equal(short.MaxValue, HiFiOutputWriter.QuantizeWavePcm16(float.PositiveInfinity));
+
         string directory = CreateTempDirectory();
         try
         {

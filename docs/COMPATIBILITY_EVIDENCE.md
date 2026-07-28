@@ -73,7 +73,7 @@ required by the decode pipeline itself.
 | --- | --- | --- |
 | Solution and tests | Implemented | .NET 11, `.slnx`, and xUnit v3 work with Visual Studio Test Explorer and `dotnet test`. |
 | CLI and arguments | Implemented and snapshot-tested | `decode`, `vhs-decode`, `cvbs-decode`, `ld-decode`, and `hifi-decode` expose the v0.4.0 decode-facing command surface. |
-| HiFi decode | Implemented; more real-capture verification remains | PAL VHS and NTSC 8mm synthetic RF baselines are byte-exact; a real Betamax explicit-carrier slice still has a 1-LSB PCM gap. |
+| HiFi decode | Implemented; more real-capture verification remains | PAL VHS and NTSC 8mm synthetic RF baselines and a bounded NTSC Betamax explicit-carrier WAV baseline are byte-exact. |
 | VHS decode | Implemented; rare parity gaps remain | All valid format/filter combinations and extensive NTSC field/output fixtures are covered. |
 | CVBS decode | Implemented for release-supported runtime systems | PAL and NTSC execute as v0.4.0 does; uncommon vblank and option interactions still need broader fixtures. |
 | LaserDisc decode | Implemented; rare parity gaps remain | Video, EFM, analog audio, AC3, RF-TBC, metadata, and sidecars are wired with PAL/NTSC differential coverage. |
@@ -125,10 +125,15 @@ possible capture has already been proven byte-for-byte identical.
   capture used by the video gate below was decoded with explicit 1.38/1.68 MHz
   carrier overrides because upstream `hifi-decode` exposes only VHS and 8mm
   presets. Python v0.4.0 and the current upstream snapshot produced identical
-  48,132-frame stereo PCM16 WAVs. The port produced the same format and length,
-  but 187 of 96,264 interleaved samples differed by exactly 1 LSB; this is
-  recorded as an open real-capture compatibility gap rather than Betamax HiFi
-  audio certification
+  48,132-frame stereo PCM16 WAVs. Matching libsndfile 1.2.2's float-to-PCM16
+  conversion through a nearest-even int32 intermediate makes the port's
+  one-worker, default-worker, and five-worker WAVs byte-for-byte identical with
+  SHA-256
+  `4D7FF1D69CBB8D60AE1833D540087CFDA1FAB49BE6696A743ADEBE423E87DDB2`.
+  This certifies the explicit-carrier WAV artifact for this bounded slice, not
+  a Betamax preset that upstream does not provide. Redirected console output is
+  also excluded from a byte-exact claim because upstream multiprocessing
+  changes child-message ordering and can discard buffered bias lines
 - HiFi bias pre-reading preserves Release 4.0's omission of `--raw_format`:
   raw files are measured according to their extension, while stdin prints the
   measurement heading and then raises the same required-format error even when
