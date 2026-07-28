@@ -577,7 +577,12 @@ public sealed class RfDemodulator : IDisposable
 
         ReadOnlySpan<Complex> activeVideoSpectrum = videoSpectrum.AsSpan(0, activeSpectrumLength);
         ApplyNonlinearDeemphasisIfPresent(video, activeVideoSpectrum, nonlinearDeemphasis, useVhsRealFft);
-        ApplySubDeemphasisIfPresent(video, activeVideoSpectrum, subDeemphasis, useVhsRealFft);
+        ApplySubDeemphasisIfPresent(
+            video,
+            activeVideoSpectrum,
+            subDeemphasis,
+            useVhsRealFft,
+            vhsRealFftWorkspace);
         if (betamaxFscNotchHz is { } fscNotchHz)
         {
             video = ApplyBetamaxFscNotch(video, SampleRateHz, fscNotchHz);
@@ -1964,7 +1969,8 @@ public sealed class RfDemodulator : IDisposable
         double[] video,
         ReadOnlySpan<Complex> videoSpectrum,
         SubDeemphasisOptions? options,
-        bool useVhsRealFft)
+        bool useVhsRealFft,
+        VhsRealFftWorkspace? workspace)
     {
         if (options is null)
         {
@@ -1988,7 +1994,8 @@ public sealed class RfDemodulator : IDisposable
                 SampleRateHz,
                 options,
                 highPass,
-                video);
+                video,
+                workspace ?? throw new InvalidOperationException("VHS real FFT workspace is unavailable."));
         }
         else
         {
@@ -2104,12 +2111,40 @@ public sealed class RfDemodulator : IDisposable
         double sampleRateHz,
         SubDeemphasisOptions options,
         ReadOnlySpan<Complex> highPass,
-        double[] output)
+        double[] output,
+        VhsRealFftWorkspace? workspace = null)
     {
         double nyquistHz = sampleRateHz / 2.0;
-        Complex[] highSpectrum = ApplyNumpyRealFrequencyFilter(videoSpectrum, highPass, video.Length);
-        double[] highPart = PocketFftReal.Inverse(highSpectrum, video.Length);
-        double[] amplitude = BuildAnalyticMagnitude(highPart);
+        Complex[] highSpectrum;
+        double[] highPart;
+        double[] amplitude;
+        if (workspace is null)
+        {
+            highSpectrum = ApplyNumpyRealFrequencyFilter(videoSpectrum, highPass, video.Length);
+            highPart = PocketFftReal.Inverse(highSpectrum, video.Length);
+            amplitude = BuildAnalyticMagnitude(highPart);
+        }
+        else
+        {
+            if (workspace.RealLength != video.Length)
+            {
+                throw new ArgumentException(
+                    "VHS FFT workspace length does not match sub-deemphasis input.",
+                    nameof(workspace));
+            }
+
+            highSpectrum = workspace.Third;
+            ApplyNumpyRealFrequencyFilter(
+                videoSpectrum,
+                highPass,
+                video.Length,
+                highSpectrum);
+            highPart = workspace.Real;
+            PocketFftReal.Inverse(highSpectrum, video.Length, highPart);
+            amplitude = workspace.Imaginary;
+            BuildAnalyticMagnitude(highPart, amplitude);
+        }
+
         double deviation = options.Deviation / 2.0;
         for (int i = 0; i < amplitude.Length; i++)
         {
@@ -2298,6 +2333,22 @@ public sealed class RfDemodulator : IDisposable
 
     internal static double[] BuildAnalyticMagnitude(ReadOnlySpan<double> input)
     {
+        var magnitude = new double[input.Length];
+        BuildAnalyticMagnitude(input, magnitude);
+        return magnitude;
+    }
+
+    private static void BuildAnalyticMagnitude(
+        ReadOnlySpan<double> input,
+        double[] magnitude)
+    {
+        if (magnitude.Length != input.Length)
+        {
+            throw new ArgumentException(
+                "Analytic-magnitude output length must match the input length.",
+                nameof(magnitude));
+        }
+
         Complex[] spectrum = PocketFftComplex.ForwardDuccRealFull(input);
         int nyquist = spectrum.Length / 2;
         for (int i = 1; i < nyquist; i++)
@@ -2311,13 +2362,10 @@ public sealed class RfDemodulator : IDisposable
         }
 
         PocketFftComplex.InverseDuccInPlace(spectrum);
-        var magnitude = new double[spectrum.Length];
         for (int i = 0; i < magnitude.Length; i++)
         {
             magnitude[i] = NumpyComplexMagnitude(spectrum[i]);
         }
-
-        return magnitude;
     }
 
     private static double NumpyComplexMagnitude(Complex value)
