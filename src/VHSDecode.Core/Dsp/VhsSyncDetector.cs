@@ -77,8 +77,11 @@ public sealed class VhsSyncDetector
             ConvolveBoxcarSame(demodulated, windowSize, filtered.AsSpan(0, filteredLength));
             if (detectLevels)
             {
+                double[] partitioned = workspace.EnsurePartitionedLength(filteredLength);
                 (syncTipEstimate, blankingEstimate) =
-                    EstimateLevels(filtered.AsSpan(0, filteredLength));
+                    EstimateLevels(
+                        filtered.AsSpan(0, filteredLength),
+                        partitioned);
             }
 
             return DetectFiltered(
@@ -484,13 +487,22 @@ public sealed class VhsSyncDetector
         return (syncSum, porchSum);
     }
 
-    private static (double SyncTip, double Blanking) EstimateLevels(ReadOnlySpan<double> filtered)
+    private static (double SyncTip, double Blanking) EstimateLevels(
+        ReadOnlySpan<double> filtered,
+        double[] partitioned)
     {
+        if (partitioned.Length < filtered.Length)
+        {
+            throw new ArgumentException(
+                "The partition workspace must be at least the filtered length.",
+                nameof(partitioned));
+        }
+
         int syncIndex = (int)(filtered.Length * 0.05);
         int blankingIndex = (int)(filtered.Length * 0.25);
-        double[] partitioned = filtered.ToArray();
-        double syncTip = SelectKth(partitioned, syncIndex);
-        double blanking = SelectKth(partitioned, blankingIndex);
+        filtered.CopyTo(partitioned);
+        double syncTip = SelectKth(partitioned, syncIndex, filtered.Length);
+        double blanking = SelectKth(partitioned, blankingIndex, filtered.Length);
         return (syncTip, blanking);
     }
 
@@ -525,11 +537,11 @@ public sealed class VhsSyncDetector
         return window[length / 2];
     }
 
-    private static double SelectKth(double[] values, int target)
+    private static double SelectKth(double[] values, int target, int count)
     {
         int left = 0;
-        int right = values.Length - 1;
-        int depthLimit = 2 * (BitOperations.Log2((uint)values.Length) + 1);
+        int right = count - 1;
+        int depthLimit = 2 * (BitOperations.Log2((uint)count) + 1);
         while (left < right)
         {
             int length = right - left + 1;
@@ -623,6 +635,7 @@ public sealed class VhsSyncDetector
     private sealed class VhsSyncWorkspace
     {
         private double[] _filtered = [];
+        private double[] _partitioned = [];
 
         public double[] EnsureFilteredLength(int length)
         {
@@ -632,6 +645,16 @@ public sealed class VhsSyncDetector
             }
 
             return _filtered;
+        }
+
+        public double[] EnsurePartitionedLength(int length)
+        {
+            if (_partitioned.Length < length)
+            {
+                _partitioned = GC.AllocateUninitializedArray<double>(length);
+            }
+
+            return _partitioned;
         }
     }
 }

@@ -41,6 +41,40 @@ public sealed class PocketFftMixedRadixCompatibilityTests
             Sha256(MemoryMarshal.AsBytes(spectrum.AsSpan())));
     }
 
+    [Fact(DisplayName = "Parallel mixed-radix packets match serial FFT bit for bit")]
+    public void ParallelMixedRadixPacketsMatchSerialFftBitForBit()
+    {
+        const int Length = 120_000;
+        float[] values = DeterministicInput(2 * Length);
+        Complex32[] input = Enumerable.Range(0, Length)
+            .Select(index => new Complex32(
+                values[2 * index],
+                values[(2 * index) + 1]))
+            .ToArray();
+
+        Complex32[] expectedForward =
+            PocketFftComplex32.ForwardAnyLengthDucc(input);
+        Complex32[] actualForward =
+            PocketFftComplex32.ForwardAnyLengthDucc(
+                input,
+                workerThreads: 4);
+        Assert.True(
+            MemoryMarshal.AsBytes(expectedForward.AsSpan())
+                .SequenceEqual(
+                    MemoryMarshal.AsBytes(actualForward.AsSpan())));
+
+        Complex32[] expectedBackward =
+            PocketFftComplex32.BackwardAnyLengthDucc(expectedForward);
+        Complex32[] actualBackward =
+            PocketFftComplex32.BackwardAnyLengthDucc(
+                expectedForward,
+                workerThreads: 4);
+        Assert.True(
+            MemoryMarshal.AsBytes(expectedBackward.AsSpan())
+                .SequenceEqual(
+                    MemoryMarshal.AsBytes(actualBackward.AsSpan())));
+    }
+
     [Theory(DisplayName = "Real FFT plan threshold matches SciPy")]
     [InlineData(512, "2D112631FB98F4C92AA42FB93FC7356FDBEE1F4C688CED08D27E6147E3456B40")]
     [InlineData(1_024, "39C3C9BE39CC952600AFDB1ECF002BE654FEDA2A207C3E5F0D6DA943E7644F3B")]
@@ -173,6 +207,30 @@ public sealed class PocketFftMixedRadixCompatibilityTests
         Assert.Equal(
             expectedSha256,
             Sha256(MemoryMarshal.AsBytes(actualFloat32.AsSpan())));
+    }
+
+    [Fact(DisplayName = "Super-Gaussian final filter can reuse its input buffer")]
+    public void SuperGaussianFinalFilterCanReuseInputBuffer()
+    {
+        const int RawLength = 239_067;
+        var filter = new ChromaSuperGaussianFinalFilter(
+            RawLength,
+            3_575_611.888111,
+            629_370.6293706294);
+        double[] input = DeterministicInput(RawLength)
+            .Select(static value => (double)value)
+            .ToArray();
+        double[] expected = filter.Apply(input);
+        double[] actual = (double[])input.Clone();
+
+        double[] returned = filter.ApplyInPlace(
+            actual,
+            workerThreads: 5);
+
+        Assert.Same(actual, returned);
+        Assert.Equal(
+            expected.Select(BitConverter.DoubleToInt64Bits),
+            actual.Select(BitConverter.DoubleToInt64Bits));
     }
 
     [Theory(DisplayName = "Next fast FFT length matches SciPy")]

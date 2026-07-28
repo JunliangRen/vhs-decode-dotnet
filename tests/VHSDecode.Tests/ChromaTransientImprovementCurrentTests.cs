@@ -99,6 +99,33 @@ public sealed class ChromaTransientImprovementCurrentTests
             samples.Select(BitConverter.DoubleToInt64Bits));
     }
 
+    [Fact(DisplayName = "Parallel current CTI matches serial output bit for bit")]
+    public void ParallelCurrentCtiMatchesSerialOutputBitForBit()
+    {
+        double[] expected = BuildInput();
+        double[] actual = (double[])expected.Clone();
+
+        ChromaTransientImprovement.ApplyInPlace(
+            expected,
+            lineStart: 64,
+            lineLength: 64,
+            baseNoiseFloor: 1.25,
+            width: 2,
+            mix: 1.0);
+        ChromaTransientImprovement.ApplyInPlace(
+            actual,
+            lineStart: 64,
+            lineLength: 64,
+            baseNoiseFloor: 1.25,
+            width: 2,
+            mix: 1.0,
+            workerThreads: 4);
+
+        Assert.Equal(
+            expected.Select(BitConverter.DoubleToInt64Bits),
+            actual.Select(BitConverter.DoubleToInt64Bits));
+    }
+
     [Theory(DisplayName = "Pinned CTI reciprocal estimate is CPU independent")]
     [InlineData(0x427564F4u, 0x3C858800u)]
     [InlineData(0x42C24200u, 0x3C28A800u)]

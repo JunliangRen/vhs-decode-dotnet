@@ -155,14 +155,14 @@ public sealed class VhsSyncDetectorCurrentTests
         var detector = new VhsSyncDetector(188.0, 152.0, 2560, 8.8);
         _ = detector.Detect(
             signal,
-            detectLevels: false,
+            detectLevels: true,
             syncTipEstimate: 3_800_000.0,
             blankingEstimate: 4_100_000.0);
 
         long before = GC.GetAllocatedBytesForCurrentThread();
         VhsSyncDetectionResult result = detector.Detect(
             signal,
-            detectLevels: false,
+            detectLevels: true,
             syncTipEstimate: 3_800_000.0,
             blankingEstimate: 4_100_000.0);
         long allocated = GC.GetAllocatedBytesForCurrentThread() - before;

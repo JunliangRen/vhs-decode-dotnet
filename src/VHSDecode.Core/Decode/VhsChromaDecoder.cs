@@ -653,7 +653,9 @@ public static class VhsChromaDecoder
         else if (options.SuperGaussianFinalFilter is not null)
         {
             upconverted =
-                options.SuperGaussianFinalFilter.Apply(upconverted);
+                options.SuperGaussianFinalFilter.ApplyInPlace(
+                    upconverted,
+                    options.WorkerThreads);
         }
         else if (options.FinalSosFilter is not null)
         {
@@ -704,7 +706,8 @@ public static class VhsChromaDecoder
                     options.OutputLineLength,
                     gain.NoiseFloor,
                     options.CtiWidth,
-                    options.CtiMix);
+                    options.CtiMix,
+                    options.WorkerThreads);
             }
 
             gained = ChromaToU16(currentChroma);
