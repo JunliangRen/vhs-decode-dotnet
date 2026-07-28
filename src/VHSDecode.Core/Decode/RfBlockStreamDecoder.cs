@@ -24,7 +24,8 @@ public sealed class RfBlockStreamDecoder : IDisposable
 {
     private const int DecodedBlockCacheCapacity = 16;
     private const int ReusableSpanBufferSetCapacity = 2;
-    internal const int MaximumConcurrentPrefetchBlocks = 8;
+    private const int MaximumAdditionalPrefetchBlocks = 8;
+    internal const int MaximumConcurrentPrefetchBlocks = 12;
     internal const int MaximumPrefetchBlocks = 32;
     private readonly RfBlockDecodePipeline _pipeline;
     private readonly Dictionary<long, RfPipelineBlock> _decodedBlockCache = [];
@@ -131,7 +132,7 @@ public sealed class RfBlockStreamDecoder : IDisposable
         }
 
         long oneAdditionalWave = (long)effectiveWorkers
-            + Math.Min(effectiveWorkers, MaximumConcurrentPrefetchBlocks);
+            + Math.Min(effectiveWorkers, MaximumAdditionalPrefetchBlocks);
         return (int)Math.Min(oneAdditionalWave, MaximumPrefetchBlocks);
     }
 
