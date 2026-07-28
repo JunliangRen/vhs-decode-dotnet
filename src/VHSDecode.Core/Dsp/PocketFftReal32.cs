@@ -172,10 +172,10 @@ internal static class PocketFftReal32
 
             Complex32[] transformed =
                 (_length & (_length - 1)) == 0
-                    ? PocketFftComplex32.ForwardDucc(
+                    ? PocketFftComplex32.ForwardDuccOwned(
                         complexInput,
                         workerThreads)
-                    : PocketFftComplex32.ForwardAnyLengthDucc(
+                    : PocketFftComplex32.ForwardAnyLengthDuccOwned(
                         complexInput,
                         workerThreads);
             var output = new Complex32[complexLength + 1];
@@ -279,7 +279,7 @@ internal static class PocketFftReal32
             }
 
             Complex32[] transformed =
-                PocketFftComplex32.BackwardAnyLengthDucc(
+                PocketFftComplex32.BackwardAnyLengthDuccOwned(
                     complexInput,
                     workerThreads);
             float normalization = 1.0f / _length;

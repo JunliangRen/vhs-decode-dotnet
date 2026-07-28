@@ -2,7 +2,7 @@
 
 [English](README.md) | [简体中文](README.zh-CN.md) | **[日本語](README.ja.md)**
 
-<!-- README_SYNC: 2026-07-28.1 -->
+<!-- README_SYNC: 2026-07-28.2 -->
 
 [`oyvindln/vhs-decode`](https://github.com/oyvindln/vhs-decode) の
 デコード関連部分を .NET 11 で再実装するプロジェクトです。現在は release
@@ -885,6 +885,22 @@ candidate working set は 1.344 GiB 以下に収まりました。`--threads 0`�
 default 5、`20` を含む 16 short run と 8 long run で、luma、chroma、JSON、stdout、
 normalized stderr、timestamp-normalized log はすべて exact です。
 
+opt-in `current` の Super-Gaussian float32 real-FFT path は、新しく生成した
+`Complex32[]` の ownership を large multipass transform へ渡し、field ごとの
+冗長な whole-buffer clone を 3 回削減するようになりました。input-preserving API、
+FFT plan、float32 conversion point、packet layout、arithmetic order は変更して
+いません。同じ private local 40 MHz NTSC `BETAMAX_HIFI` `.lds` sample で、4 組の
+interleaved 160-frame `--threads 20` pair は candidate 16.30 秒、baseline
+16.52 秒を平均し、pair gain は 2.85%、-0.63%、0.89%、2.38%、median は
+1.64% でした。candidate-first の single 400-frame pair は candidate/baseline
+35.84/39.54 秒、CPU 260.45/269.59 秒でした。この order-sensitive な single
+observation は一般的な percentage ではありません。candidate quarter working-set
+peak は 1.459/1.231/0.820/1.422 GiB で、progressive growth はありませんでした。
+両 gate は luma、chroma、JSON、stdout、normalized stderr、
+timestamp-normalized log が一致し、320/800 個の ordered `fileLoc` もすべて一致
+しました。`current` は `--threads 0`、`1`、default 5、`20` で deterministic で、
+別の `v0.4.0` profile regression も同じ 6 surface に一致しました。
+
 </details>
 
 <!-- SECTION: build -->
@@ -903,7 +919,7 @@ normalized stderr、timestamp-normalized log はすべて exact です。
 .\tools\build-ipp-native.ps1
 dotnet restore VHSDecodeDotNet.slnx
 dotnet build VHSDecodeDotNet.slnx -c Release --no-restore
-dotnet test --solution VHSDecodeDotNet.slnx -c Release --no-build --no-restore --minimum-expected-tests 1090
+dotnet test --solution VHSDecodeDotNet.slnx -c Release --no-build --no-restore --minimum-expected-tests 1092
 ```
 
 最初の command は optional `ipp-fast` native artifact を含めるためのものです。
@@ -916,7 +932,7 @@ third-party notice を埋め込み、license sidecar file は追加しません�
 
 現在の正式な Release build は warning 0、error 0 です。xUnit v3 project は
 `dotnet test` と Visual Studio Test Explorer の両方で個別に検出できる
-**1,090** tests を公開します。
+**1,092** tests を公開します。
 
 <!-- SECTION: usage -->
 

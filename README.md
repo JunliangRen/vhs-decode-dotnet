@@ -2,7 +2,7 @@
 
 **[English](README.md)** | [简体中文](README.zh-CN.md) | [日本語](README.ja.md)
 
-<!-- README_SYNC: 2026-07-28.1 -->
+<!-- README_SYNC: 2026-07-28.2 -->
 
 .NET 11 rewrite of the decode-facing parts of
 [`oyvindln/vhs-decode`](https://github.com/oyvindln/vhs-decode), focused on
@@ -938,6 +938,23 @@ working sets stayed bounded at or below 1.344 GiB. Across 16 short and eight
 long runs covering `--threads 0`, `1`, default 5, and `20`, luma, chroma, JSON,
 stdout, normalized stderr, and timestamp-normalized logs each remained exact.
 
+The opt-in `current` Super-Gaussian float32 real-FFT path now transfers its
+newly built `Complex32[]` buffers into large multipass transforms, avoiding
+three redundant whole-buffer clones per field. Input-preserving APIs, FFT
+plans, float32 conversion points, packet layout, and arithmetic order remain
+unchanged. On the same private local 40 MHz NTSC `BETAMAX_HIFI` `.lds`
+capture, four interleaved 160-frame `--threads 20` pairs averaged
+16.30 s versus 16.52 s; paired gains were 2.85%, -0.63%, 0.89%, and 2.38%,
+with a 1.64% median. A single candidate-first 400-frame pair completed in
+35.84/39.54 s candidate/baseline and 260.45/269.59 CPU-seconds; this
+order-sensitive observation is not a universal percentage. Candidate quarter
+working-set peaks were 1.459/1.231/0.820/1.422 GiB, with no progressive
+growth. Both gates matched luma, chroma, JSON, stdout, normalized stderr, and
+timestamp-normalized logs; all 320/800 ordered `fileLoc` values also matched.
+`current` outputs were deterministic at `--threads 0`, `1`, default 5, and
+`20`, and a separate `v0.4.0` profile regression matched the same six
+surfaces.
+
 </details>
 
 <!-- SECTION: build -->
@@ -958,7 +975,7 @@ Requirements:
 .\tools\build-ipp-native.ps1
 dotnet restore VHSDecodeDotNet.slnx
 dotnet build VHSDecodeDotNet.slnx -c Release --no-restore
-dotnet test --solution VHSDecodeDotNet.slnx -c Release --no-build --no-restore --minimum-expected-tests 1090
+dotnet test --solution VHSDecodeDotNet.slnx -c Release --no-build --no-restore --minimum-expected-tests 1092
 ```
 
 The first command includes the optional `ipp-fast` native artifact; omit it for
@@ -971,7 +988,7 @@ deployment computer. Binary-only single-file releases embed
 sidecar license files. An Exact-only build may omit the native build step.
 
 The current formal Release build has zero warnings and errors. The xUnit v3
-project exposes **1,090** independently discoverable tests to both
+project exposes **1,092** independently discoverable tests to both
 `dotnet test` and Visual Studio Test Explorer.
 
 <!-- SECTION: usage -->

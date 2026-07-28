@@ -75,6 +75,44 @@ public sealed class PocketFftMixedRadixCompatibilityTests
                     MemoryMarshal.AsBytes(actualBackward.AsSpan())));
     }
 
+    [Fact(DisplayName = "Owned large FFT buffers match preserving APIs bit for bit")]
+    public void OwnedLargeFftBuffersMatchPreservingApisBitForBit()
+    {
+        const int Length = 120_000;
+        float[] values = DeterministicInput(2 * Length);
+        Complex32[] input = Enumerable.Range(0, Length)
+            .Select(index => new Complex32(
+                values[2 * index],
+                values[(2 * index) + 1]))
+            .ToArray();
+
+        Complex32[] expectedForward =
+            PocketFftComplex32.ForwardAnyLengthDucc(
+                input,
+                workerThreads: 4);
+        Complex32[] actualForward =
+            PocketFftComplex32.ForwardAnyLengthDuccOwned(
+                (Complex32[])input.Clone(),
+                workerThreads: 4);
+        Assert.True(
+            MemoryMarshal.AsBytes(expectedForward.AsSpan())
+                .SequenceEqual(
+                    MemoryMarshal.AsBytes(actualForward.AsSpan())));
+
+        Complex32[] expectedBackward =
+            PocketFftComplex32.BackwardAnyLengthDucc(
+                expectedForward,
+                workerThreads: 4);
+        Complex32[] actualBackward =
+            PocketFftComplex32.BackwardAnyLengthDuccOwned(
+                (Complex32[])expectedForward.Clone(),
+                workerThreads: 4);
+        Assert.True(
+            MemoryMarshal.AsBytes(expectedBackward.AsSpan())
+                .SequenceEqual(
+                    MemoryMarshal.AsBytes(actualBackward.AsSpan())));
+    }
+
     [Theory(DisplayName = "Real FFT plan threshold matches SciPy")]
     [InlineData(512, "2D112631FB98F4C92AA42FB93FC7356FDBEE1F4C688CED08D27E6147E3456B40")]
     [InlineData(1_024, "39C3C9BE39CC952600AFDB1ECF002BE654FEDA2A207C3E5F0D6DA943E7644F3B")]
