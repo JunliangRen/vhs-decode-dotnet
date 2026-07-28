@@ -141,6 +141,8 @@ public sealed class SyncAnalyzer
             }
         }
 
+        // Python v0.4.0 leaves this VHS empty-candidate fallback in microseconds.
+        // Preserve the deliberate unit mismatch because it changes fallback pulse classification.
         double hsyncMedian = hsyncLengths.Count > 0
             ? Median(hsyncLengths)
             : preserveVhsEmptyHSyncMedianUnits
