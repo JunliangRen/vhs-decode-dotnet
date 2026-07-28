@@ -253,8 +253,17 @@ public sealed class RfDemodulator : IDisposable
             BuildVhsComplexAnalyticSignal(rfFilteredSpectrum, hilbertMultiplier, workspace);
             analytic = workspace.FullAnalytic;
             vhsWorkspaceComplexAnalyticReady = true;
-            vhsEnvelopeSource = ExtractReal(analytic);
-            vhsRfFilteredReal = ExtractReal(PocketFftComplex.Inverse(rfFilteredSpectrum));
+            vhsEnvelopeSource = workspace.Real;
+            ExtractReal(
+                analytic.AsSpan(0, input.Length),
+                vhsEnvelopeSource.AsSpan(0, input.Length));
+            PocketFftComplex.Inverse(
+                rfFilteredSpectrum,
+                workspace.DiffedAnalytic.AsSpan(0, input.Length));
+            vhsRfFilteredReal = workspace.Imaginary;
+            ExtractReal(
+                workspace.DiffedAnalytic.AsSpan(0, input.Length),
+                vhsRfFilteredReal.AsSpan(0, input.Length));
         }
         else if (useVhsRealRfPath)
         {
@@ -1191,12 +1200,25 @@ public sealed class RfDemodulator : IDisposable
     private static double[] ExtractReal(ReadOnlySpan<Complex> values)
     {
         var output = new double[values.Length];
+        ExtractReal(values, output);
+        return output;
+    }
+
+    private static void ExtractReal(
+        ReadOnlySpan<Complex> values,
+        Span<double> output)
+    {
+        if (output.Length != values.Length)
+        {
+            throw new ArgumentException(
+                "Real output length must match the complex input length.",
+                nameof(output));
+        }
+
         for (int i = 0; i < output.Length; i++)
         {
             output[i] = values[i].Real;
         }
-
-        return output;
     }
 
     private static double[] BuildAnalyticMagnitudeEnvelope(ReadOnlySpan<Complex> analytic)

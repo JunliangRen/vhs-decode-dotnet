@@ -2,7 +2,7 @@
 
 **[English](README.md)** | [简体中文](README.zh-CN.md) | [日本語](README.ja.md)
 
-<!-- README_SYNC: 2026-07-28.5 -->
+<!-- README_SYNC: 2026-07-29.6 -->
 
 .NET 11 rewrite of the decode-facing parts of
 [`oyvindln/vhs-decode`](https://github.com/oyvindln/vhs-decode), focused on
@@ -1054,6 +1054,31 @@ JSON, stdout, normalized stderr, timestamp-normalized logs, and every ordered
 `fileLoc` matched in all A/B gates. Candidate `current` output was identical
 across two runs each at `--threads 0`, `1`, default 5, and `20`; a separate
 160-frame `v0.4.0` regression matched the same surfaces.
+
+The complex VHS high-boost path now stores its unboosted analytic-real and
+filtered-real intermediates in three existing worker-owned workspace arrays
+after their earlier phases finish. It still uses the same out-of-place
+`PocketFftComplex.Inverse(input, output)` implementation; data types, FFT
+arithmetic, expression order, returned-block ownership, and the workspace-pool
+cap are unchanged. On the same private local 40 MHz NTSC `BETAMAX_HIFI` sample,
+matched 80-frame `gc-verbose` traces reduced sampled managed allocation from
+26.446234 to 22.918228 GiB (3.528006 GiB, or 13.34% less), `Double[]`
+allocation by 1,791.025 MiB (13.56%), `Complex[]` allocation by 1,793.958 MiB
+(17.98%), and Gen2 collections from 82 to 80. One 40-frame smoke pair favored
+the baseline by 9.16%, so no short-run gain is claimed. The candidate won three
+of four interleaved 160-frame pairs, with 2.44% median and 2.43% balanced
+throughput gains; aggregate CPU time fell 0.27% and median peak working set
+moved from 1.429 to 1.303 GiB. Both reverse-order 400-frame pairs favored the
+candidate by 1.98% and 1.55%; balanced throughput rose 1.77%, aggregate CPU
+time fell 0.22%, and median peak working set moved from 1.423 to 1.350 GiB. A
+candidate-first 1,000-frame pair was wall-time neutral/slightly negative at
+-0.32%, while candidate CPU time fell 0.31% and peak working set moved from
+1.437 to 1.381 GiB. Its four 250-frame intervals were
+28.44/26.40/25.83/26.22 seconds, with no progressive slowdown or memory growth.
+Luma, chroma, JSON, stdout, normalized stderr, timestamp-normalized logs, and
+all ordered `fileLoc` values matched in every A/B gate. Candidate `current`
+output was identical across two runs each at `--threads 0`, `1`, default 5,
+and `20`; a separate 160-frame `v0.4.0` regression matched the same surfaces.
 
 </details>
 

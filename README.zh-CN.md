@@ -2,7 +2,7 @@
 
 [English](README.md) | **[简体中文](README.zh-CN.md)** | [日本語](README.ja.md)
 
-<!-- README_SYNC: 2026-07-28.5 -->
+<!-- README_SYNC: 2026-07-29.6 -->
 
 这是 [`oyvindln/vhs-decode`](https://github.com/oyvindln/vhs-decode)
 中解码相关部分的 .NET 11 重写，当前以 release `v0.4.0`、commit
@@ -848,6 +848,26 @@ RF deemphasis 现在会把最终的逐样本减法直接写入解码器自有的
 stderr、时间戳归一化日志和全部有序 `fileLoc` 均一致。候选 `current` 输出在
 `--threads 0`、`1`、默认 5 和 `20` 下各重复两次仍完全相同；另一个 160-frame
 `v0.4.0` 回归也匹配相同内容。
+
+复杂 VHS high-boost 路径现在会在较早阶段完成后，将未 boost 的 analytic 实部和
+filtered-real 中间结果写入三块已有的 worker 自有 workspace 数组。它仍使用相同的
+out-of-place `PocketFftComplex.Inverse(input, output)` 实现；数据类型、FFT 运算、
+表达式顺序、返回 block 的所有权和 workspace pool 上限均未改变。在同一份私有本地
+40 MHz NTSC `BETAMAX_HIFI` 样本上，匹配的 80-frame `gc-verbose` trace 将采样
+托管分配从 26.446234 GiB 降至 22.918228 GiB（减少 3.528006 GiB，即
+13.34%），`Double[]` 分配减少 1,791.025 MiB（13.56%），`Complex[]` 分配减少
+1,793.958 MiB（17.98%），Gen2 回收从 82 次降至 80 次。一组 40-frame 冒烟配对
+中基线快 9.16%，因此不宣称短运行收益。四组交错的 160-frame 配对中候选胜出三组，
+配对吞吐中位数提高 2.44%，配平合计提高 2.43%；合计 CPU 时间减少 0.27%，峰值
+工作集中位数从 1.429 GiB 降至 1.303 GiB。两组反向顺序的 400-frame 配对均由候选
+胜出，分别提高 1.98% 和 1.55%；配平合计吞吐提高 1.77%，合计 CPU 时间减少
+0.22%，峰值工作集中位数从 1.423 GiB 降至 1.350 GiB。一组候选先运行的
+1,000-frame 配对在墙钟上基本持平但略慢 0.32%，候选 CPU 时间减少 0.31%，峰值
+工作集从 1.437 GiB 降至 1.381 GiB。候选四个 250-frame 区间分别耗时
+28.44/26.40/25.83/26.22 秒，没有随进度持续变慢或内存增长。所有 A/B 门禁的亮度、
+色度、JSON、stdout、归一化 stderr、时间戳归一化日志和全部有序 `fileLoc` 均一致。
+候选 `current` 输出在 `--threads 0`、`1`、默认 5 和 `20` 下各重复两次仍完全相同；
+另一个 160-frame `v0.4.0` 回归也匹配相同内容。
 
 </details>
 
