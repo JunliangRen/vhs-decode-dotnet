@@ -902,9 +902,12 @@ timestamp-normalized log が一致し、320/800 個の ordered `fileLoc` もす�
 別の `v0.4.0` profile regression も同じ 6 surface に一致しました。
 
 high worker count の RF prefetch は、従来の bounded lookahead 計算を維持したまま、
-最大 12 個の active block worker を許可するようになりました。`--threads 20` でも
-prefetch slot は 28 のままで、cache は拡大しません。同じ private local 40 MHz NTSC
-`BETAMAX_HIFI` sample で、4 組の interleaved 160-frame
+最大 12 個の active block worker を許可するようになりました。lookahead は
+`min(effectiveWorkers + min(effectiveWorkers, 8), 32)` で計算され、
+`effectiveWorkers = min(requestedThreads, logicalProcessorCount)` です。20 logical
+processor の benchmark host では、`--threads 20` の prefetch slot は 28 のままで、
+cache は拡大しません。同じ private local 40 MHz NTSC `BETAMAX_HIFI` sample で、
+4 組の interleaved 160-frame
 `current --threads 20` pair はすべて candidate が高速でした。平均 wall time は
 16.401 秒から 15.650 秒（4.57% 減）、paired median gain は 3.47%、平均 CPU time は
 117.664 秒から 116.902 秒（0.65% 減）でした。反転順序の 400-frame pair 2 組は

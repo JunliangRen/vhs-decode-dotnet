@@ -956,9 +956,12 @@ timestamp-normalized logs; all 320/800 ordered `fileLoc` values also matched.
 surfaces.
 
 RF prefetch at high worker counts now permits up to 12 active block workers
-while retaining the existing bounded lookahead calculation: `--threads 20`
-still holds 28 prefetch slots rather than expanding the cache. On the same
-private local 40 MHz NTSC `BETAMAX_HIFI` sample, four interleaved 160-frame
+while retaining the existing bounded lookahead calculation:
+`min(effectiveWorkers + min(effectiveWorkers, 8), 32)`, where
+`effectiveWorkers = min(requestedThreads, logicalProcessorCount)`. On the
+20-logical-processor benchmark host, `--threads 20` therefore still holds 28
+prefetch slots rather than expanding the cache. On the same private local
+40 MHz NTSC `BETAMAX_HIFI` sample, four interleaved 160-frame
 `current --threads 20` pairs all favored the candidate. Average wall time moved
 from 16.401 to 15.650 s (4.57% less), the paired median gain was 3.47%, and
 average CPU time moved from 117.664 to 116.902 s (0.65% less). Two

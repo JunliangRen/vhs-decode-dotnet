@@ -770,7 +770,10 @@ API、FFT plan、float32 转换点、packet 布局和运算顺序均未改变。
 profile 回归也匹配同六项内容。
 
 高 worker 数下的 RF 预取现在最多允许 12 个活跃 block worker，同时保留原有的有界
-前瞻计算：`--threads 20` 仍然只保留 28 个预取槽位，不会扩大缓存。在同一份私有本地
+前瞻计算：`min(effectiveWorkers + min(effectiveWorkers, 8), 32)`，其中
+`effectiveWorkers = min(requestedThreads, logicalProcessorCount)`。在这台拥有
+20 个逻辑处理器的测试机上，
+`--threads 20` 因此仍然只保留 28 个预取槽位，不会扩大缓存。在同一份私有本地
 40 MHz NTSC `BETAMAX_HIFI` 样本上，四组交错的 160-frame
 `current --threads 20` 配对全部由候选胜出。平均墙钟从 16.401 秒降至
 15.650 秒（减少 4.57%），配对增益中位数为 3.47%，平均 CPU 时间从
