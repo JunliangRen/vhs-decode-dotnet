@@ -1144,7 +1144,7 @@ third-party notice を埋め込み、license sidecar file は追加しません�
 
 現在の正式な Release build は warning 0、error 0 です。xUnit v3 project は
 `dotnet test` と Visual Studio Test Explorer の両方で個別に検出できる
-**1,092** tests を公開します。
+**1,103** tests を公開します。
 
 <!-- SECTION: usage -->
 
