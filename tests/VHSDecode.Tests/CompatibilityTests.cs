@@ -5257,6 +5257,16 @@ public void RealFullFftMatchesScipyDuccPacketTransform()
             var overlapping = new Complex[smallLength];
             PocketFftComplex.ForwardDuccRealFull(smallInput, overlapping, overlapping);
         });
+
+    ArgumentException allocatingLengthTwo = Assert.Throws<ArgumentException>(
+        () => PocketFftComplex.ForwardDuccRealFull(new double[2]));
+    ArgumentException preallocatedLengthTwo = Assert.Throws<ArgumentException>(
+        () => PocketFftComplex.ForwardDuccRealFull(
+            new double[2],
+            new Complex[2],
+            new Complex[1]));
+    Assert.Equal(allocatingLengthTwo.ParamName, preallocatedLengthTwo.ParamName);
+    Assert.Equal(allocatingLengthTwo.Message, preallocatedLengthTwo.Message);
 }
 
 [Fact(DisplayName = "LD IIR filters match SciPy 1.18 bits")]

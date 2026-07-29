@@ -233,6 +233,7 @@ public static class PocketFftComplex
 
         int length = input.Length;
         int complexLength = length / 2;
+        ValidateLength(complexLength, nameof(input));
         if (transformScratch.Length < complexLength)
         {
             throw new ArgumentException(
