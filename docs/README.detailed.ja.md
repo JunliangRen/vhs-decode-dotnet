@@ -1543,7 +1543,7 @@ JSON、ordered `fileLoc`、normalized log surface で一致しました。
 反対順序の 1,000-frame pair 2 組は、combined wall time を
 144.526 から 136.988 秒（5.22% 減、1.055x throughput）、counter allocation を
 154.553 から 140.373 GiB（9.17% 減）、GC pause を 1.688 から 0.920 秒
-（45.47% 減）、Gen0 collection を 1,483 から 304（79.5% 減）へ移しました。
+（45.49% 減）、Gen0 collection を 1,483 から 304（79.5% 減）へ移しました。
 全 artifact/log surface と 2,000 個の ordered `fileLoc` は exact です。
 candidate の startup 後 100-frame interval は 6.500 から 6.860 秒で、sampled
 working set は bounded のまま progressive slowdown はありません。Gen2 timing と

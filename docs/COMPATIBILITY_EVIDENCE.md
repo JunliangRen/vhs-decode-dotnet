@@ -1866,7 +1866,7 @@ possible capture has already been proven byte-for-byte identical.
   Twelve v0.4.0/current one/default-five/20-worker gates, six interleaved
   160-frame pairs, matched traces, and two opposite-order 1,000-frame pairs
   matched every applicable artifact/log surface and ordered `fileLoc`.
-  Long-pair wall time fell 5.22%, counter allocation 9.17%, GC pause 45.47%,
+  Long-pair wall time fell 5.22%, counter allocation 9.17%, GC pause 45.49%,
   and Gen0 collections 79.5%; post-startup intervals stayed between 6.500 and
   6.860 s without progressive slowdown
 - one-frame non-default NTSC VHS fixtures are also byte-exact for

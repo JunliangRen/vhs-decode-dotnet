@@ -1585,7 +1585,7 @@ and normalized-log surface.
 
 Two opposite-order 1,000-frame pairs reduced combined wall time from 144.526
 to 136.988 s, a 5.22% reduction and 1.055x throughput. Counter allocation fell
-from 154.553 to 140.373 GiB (9.17%), GC pause from 1.688 to 0.920 s (45.47%),
+from 154.553 to 140.373 GiB (9.17%), GC pause from 1.688 to 0.920 s (45.49%),
 and Gen0 collections from 1,483 to 304 (79.5%). Every artifact/log surface and
 all 2,000 ordered `fileLoc` values remained exact. Candidate post-startup
 100-frame intervals stayed between 6.500 and 6.860 s, sampled working sets
