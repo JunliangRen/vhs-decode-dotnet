@@ -33,7 +33,7 @@
 - VHS 家族包括 VHS/S-VHS、Betamax、Video8/Hi8、U-matic、Type C、EIAJ
   以及上游支持的 PAL/NTSC 变体。
 - TBC 工具、双击启动的用户 GUI 和开发者绘图窗口明确不在范围内。
-- Visual Studio 2026 `.slnx` 包含 **1,108** 项标准 xUnit v3 测试；测试可在
+- Visual Studio 2026 `.slnx` 包含 **1,109** 项标准 xUnit v3 测试；测试可在
   Test Explorer 中查看，也可用 `dotnet test` 运行。
 
 <!-- SECTION: start -->
@@ -95,11 +95,11 @@ CVBS、LaserDisc 和 HiFi 当前会拒绝 `ipp-fast`，这些命令应使用 `ex
 <!-- LATEST_PERFORMANCE_BEGIN -->
 | CLI 模式（workers） | Python v0.4.0 | Exact + v0.4.0 | Exact + current | IPP-fast + v0.4.0 | IPP-fast + current |
 | --- | ---: | ---: | ---: | ---: | ---: |
-| 默认（5） | 16.983 s | 6.770 s / 2.509x | 7.969 s / 2.131x | 6.579 s / 2.581x | 7.938 s / 2.140x |
-| `--threads 1` | 21.263 s | 21.092 s / 1.008x | 22.848 s / 0.931x | 20.468 s / 1.039x | 22.401 s / 0.949x |
-| `--threads 5` | 16.880 s | 6.778 s / 2.490x | 7.993 s / 2.112x | 6.727 s / 2.509x | 7.737 s / 2.182x |
-| `--threads 10` | 17.612 s | 5.242 s / 3.360x | 5.937 s / 2.966x | 4.826 s / 3.649x | 5.870 s / 3.000x |
-| `--threads 20` | 18.330 s | 4.209 s / 4.355x | 5.119 s / 3.581x | 4.160 s / 4.406x | 5.074 s / 3.612x |
+| 默认（5） | 16.983 s | 6.852 s / 2.479x | 8.236 s / 2.062x | 6.717 s / 2.528x | 7.928 s / 2.142x |
+| `--threads 1` | 21.263 s | 21.142 s / 1.006x | 23.571 s / 0.902x | 21.053 s / 1.010x | 22.626 s / 0.940x |
+| `--threads 5` | 16.880 s | 6.884 s / 2.452x | 8.121 s / 2.079x | 6.709 s / 2.516x | 7.980 s / 2.115x |
+| `--threads 10` | 17.612 s | 5.183 s / 3.398x | 6.330 s / 2.782x | 5.042 s / 3.493x | 5.972 s / 2.949x |
+| `--threads 20` | 18.330 s | 4.244 s / 4.318x | 5.467 s / 3.353x | 4.021 s / 4.559x | 4.880 s / 3.756x |
 <!-- LATEST_PERFORMANCE_END -->
 
 每个 .NET 单元格依次给出墙钟中位数和相对同一行 Python 的倍速；低于 `1.000x`
@@ -131,7 +131,7 @@ TBC、色度、JSON 和日志文件允许在解码期间并发读取，兼容的
 dotnet restore VHSDecodeDotNet.slnx
 dotnet build VHSDecodeDotNet.slnx -c Release --no-restore
 dotnet test --solution VHSDecodeDotNet.slnx -c Release `
-  --no-build --no-restore --minimum-expected-tests 1108
+  --no-build --no-restore --minimum-expected-tests 1109
 ```
 
 在 Visual Studio 2026 中打开 `VHSDecodeDotNet.slnx`，即可构建、调试并通过

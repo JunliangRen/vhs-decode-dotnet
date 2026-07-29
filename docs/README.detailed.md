@@ -394,20 +394,20 @@ followed by speedup and wall-time reduction versus Python in the same row:
 
 | CLI mode (workers) | Python v0.4.0 | Exact + v0.4.0 | Exact + current | IPP-fast + v0.4.0 | IPP-fast + current |
 | --- | ---: | ---: | ---: | ---: | ---: |
-| default (5) | 16.983 s | 6.770 s / 2.509x / 60.1% | 7.969 s / 2.131x / 53.1% | 6.579 s / 2.581x / 61.3% | 7.938 s / 2.140x / 53.3% |
-| `--threads 1` | 21.263 s | 21.092 s / 1.008x / 0.8% | 22.848 s / 0.931x / 7.5% slower | 20.468 s / 1.039x / 3.7% | 22.401 s / 0.949x / 5.4% slower |
-| `--threads 5` | 16.880 s | 6.778 s / 2.490x / 59.8% | 7.993 s / 2.112x / 52.6% | 6.727 s / 2.509x / 60.1% | 7.737 s / 2.182x / 54.2% |
-| `--threads 10` | 17.612 s | 5.242 s / 3.360x / 70.2% | 5.937 s / 2.966x / 66.3% | 4.826 s / 3.649x / 72.6% | 5.870 s / 3.000x / 66.7% |
-| `--threads 20` | 18.330 s | 4.209 s / 4.355x / 77.0% | 5.119 s / 3.581x / 72.1% | 4.160 s / 4.406x / 77.3% | 5.074 s / 3.612x / 72.3% |
+| default (5) | 16.983 s | 6.852 s / 2.479x / 59.7% | 8.236 s / 2.062x / 51.5% | 6.717 s / 2.528x / 60.4% | 7.928 s / 2.142x / 53.3% |
+| `--threads 1` | 21.263 s | 21.142 s / 1.006x / 0.6% | 23.571 s / 0.902x / 10.9% slower | 21.053 s / 1.010x / 1.0% | 22.626 s / 0.940x / 6.4% slower |
+| `--threads 5` | 16.880 s | 6.884 s / 2.452x / 59.2% | 8.121 s / 2.079x / 51.9% | 6.709 s / 2.516x / 60.3% | 7.980 s / 2.115x / 52.7% |
+| `--threads 10` | 17.612 s | 5.183 s / 3.398x / 70.6% | 6.330 s / 2.782x / 64.1% | 5.042 s / 3.493x / 71.4% | 5.972 s / 2.949x / 66.1% |
+| `--threads 20` | 18.330 s | 4.244 s / 4.318x / 76.8% | 5.467 s / 3.353x / 70.2% | 4.021 s / 4.559x / 78.1% | 4.880 s / 3.756x / 73.4% |
 
 The benchmark host was an Intel Core Ultra 7 265K with 20 logical processors,
 Windows 11 25H2 build 26220.8925, and .NET SDK/runtime
 `11.0.100-preview.6.26359.118`. The Python column retains the prior fixed-matrix
 medians because Python did not change; all four .NET columns were refreshed
-with 60 interleaved runs. The candidate was based on `b640b3ee` plus the
-PocketFFT Plan workspace optimization described below; its single-file
+with 60 interleaved runs. The candidate was based on `d16573a0` plus the
+Betamax FSC notch in-place optimization described below; its single-file
 `decode.exe` SHA-256 was
-`860D82F3332BF94C822374B08D2F5C5856E7FE3F8132CC2964427F840A7D7324`.
+`1EBA26547DFC57525E57699137A4CBA2E3E478E5A906C472AEAAFE047CB22F6F`.
 Python 3.14.0 used NumPy 2.4.6, SciPy 1.18.0, Numba 0.66.0, and python-soxr
 1.1.0. The shared arguments were:
 
@@ -1242,6 +1242,36 @@ luma, chroma, JSON, normalized logs, and all 800 ordered `fileLoc` values.
 Separate Exact `current` and v0.4.0 gates at `--threads 0`, default 5, and
 `--threads 20` matched all seven surfaces and remained deterministic.
 
+The Betamax FSC notch now filters the decoder-owned video array in place after
+its previous contents become dead. The public helper still returns an
+independent array. Notch design, padding choice, pooled odd-extension buffer,
+forward/backward IIR arithmetic, reversal order, and final copy-back are
+unchanged. Against released v1.3.7, the candidate won five of six
+order-reversed, interleaved 160-frame Exact `current --threads 20` pairs.
+Median wall time moved from 14.667 to 14.495 s (1.17% lower; 1.19% higher
+throughput), median CPU time moved from 107.227 to 106.398 s (0.77% lower),
+and balanced aggregate throughput improved 1.02%.
+
+Matched 80-frame `gc-verbose` traces reduced sampled managed allocation from
+18.245 to 17.388 GiB (4.70%), sampled `Double[]` allocation from 9.690 to
+8.820 GiB (8.98%), and Gen2 collections from 73 to 64. Matched 400-frame
+runtime-counter runs reduced total allocation from 84.082 to 79.278 GiB
+(5.71%) and Gen2 collections from 325 to 294. Their wall times were
+33.179/33.382 s and median working sets were 647.4/649.1 MiB
+baseline/candidate; the candidate also had one 1.392 GiB transient sample, so
+neither a long-run speedup nor a resident-memory reduction is claimed from
+that pair. Candidate 100-frame intervals were
+10.365/7.632/7.594/7.638 s including startup, with no progressive slowdown or
+growth.
+
+Every 160-frame A/B run matched luma, chroma, JSON, stdout, normalized
+stderr/logs, and all 320 ordered `fileLoc` values. The 400-frame outputs also
+matched luma, chroma, JSON, normalized logs, and all 800 ordered `fileLoc`
+values. Twelve additional Exact gates covered `current` and v0.4.0 at
+`--threads 0`, default 5, and `--threads 20`; all seven surfaces matched and
+remained cross-thread deterministic. All 60 refreshed Exact/IPP overview
+matrix runs also passed their recorded compatibility references.
+
 </details>
 
 <!-- SECTION: build -->
@@ -1262,7 +1292,7 @@ Requirements:
 .\tools\build-ipp-native.ps1
 dotnet restore VHSDecodeDotNet.slnx
 dotnet build VHSDecodeDotNet.slnx -c Release --no-restore
-dotnet test --solution VHSDecodeDotNet.slnx -c Release --no-build --no-restore --minimum-expected-tests 1108
+dotnet test --solution VHSDecodeDotNet.slnx -c Release --no-build --no-restore --minimum-expected-tests 1109
 ```
 
 The first command includes the optional `ipp-fast` native artifact; omit it for
@@ -1275,7 +1305,7 @@ deployment computer. Binary-only single-file releases embed
 sidecar license files. An Exact-only build may omit the native build step.
 
 The current formal Release build has zero warnings and errors. The xUnit v3
-project exposes **1,108** independently discoverable tests to both
+project exposes **1,109** independently discoverable tests to both
 `dotnet test` and Visual Studio Test Explorer.
 
 <!-- SECTION: usage -->

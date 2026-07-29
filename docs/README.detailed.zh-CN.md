@@ -319,18 +319,18 @@ Python v0.4.0、Exact v0.4.0、Exact `current`、IPP-fast v0.4.0 和 IPP-fast
 
 | CLI 模式（workers） | Python v0.4.0 | Exact + v0.4.0 | Exact + current | IPP-fast + v0.4.0 | IPP-fast + current |
 | --- | ---: | ---: | ---: | ---: | ---: |
-| 默认（5） | 16.983 s | 6.770 s / 2.509x / 60.1% | 7.969 s / 2.131x / 53.1% | 6.579 s / 2.581x / 61.3% | 7.938 s / 2.140x / 53.3% |
-| `--threads 1` | 21.263 s | 21.092 s / 1.008x / 0.8% | 22.848 s / 0.931x / 慢 7.5% | 20.468 s / 1.039x / 3.7% | 22.401 s / 0.949x / 慢 5.4% |
-| `--threads 5` | 16.880 s | 6.778 s / 2.490x / 59.8% | 7.993 s / 2.112x / 52.6% | 6.727 s / 2.509x / 60.1% | 7.737 s / 2.182x / 54.2% |
-| `--threads 10` | 17.612 s | 5.242 s / 3.360x / 70.2% | 5.937 s / 2.966x / 66.3% | 4.826 s / 3.649x / 72.6% | 5.870 s / 3.000x / 66.7% |
-| `--threads 20` | 18.330 s | 4.209 s / 4.355x / 77.0% | 5.119 s / 3.581x / 72.1% | 4.160 s / 4.406x / 77.3% | 5.074 s / 3.612x / 72.3% |
+| 默认（5） | 16.983 s | 6.852 s / 2.479x / 59.7% | 8.236 s / 2.062x / 51.5% | 6.717 s / 2.528x / 60.4% | 7.928 s / 2.142x / 53.3% |
+| `--threads 1` | 21.263 s | 21.142 s / 1.006x / 0.6% | 23.571 s / 0.902x / 慢 10.9% | 21.053 s / 1.010x / 1.0% | 22.626 s / 0.940x / 慢 6.4% |
+| `--threads 5` | 16.880 s | 6.884 s / 2.452x / 59.2% | 8.121 s / 2.079x / 51.9% | 6.709 s / 2.516x / 60.3% | 7.980 s / 2.115x / 52.7% |
+| `--threads 10` | 17.612 s | 5.183 s / 3.398x / 70.6% | 6.330 s / 2.782x / 64.1% | 5.042 s / 3.493x / 71.4% | 5.972 s / 2.949x / 66.1% |
+| `--threads 20` | 18.330 s | 4.244 s / 4.318x / 76.8% | 5.467 s / 3.353x / 70.2% | 4.021 s / 4.559x / 78.1% | 4.880 s / 3.756x / 73.4% |
 
 测试机为 Intel Core Ultra 7 265K（20 个逻辑处理器）、Windows 11 25H2 build
 26220.8925，以及 .NET SDK/runtime `11.0.100-preview.6.26359.118`。Python 本身
 没有变化，因此 Python 列保留上一份固定矩阵的中位数；四列 .NET 数据均通过
-60 次交错运行重新测量。候选基于 `b640b3ee` 并包含下述 PocketFFT Plan
-workspace 优化；其单文件 `decode.exe` SHA-256 为
-`860D82F3332BF94C822374B08D2F5C5856E7FE3F8132CC2964427F840A7D7324`。
+60 次交错运行重新测量。候选基于 `d16573a0` 并包含下述 Betamax FSC 陷波
+原地优化；其单文件 `decode.exe` SHA-256 为
+`1EBA26547DFC57525E57699137A4CBA2E3E478E5A906C472AEAAFE047CB22F6F`。
 Python 3.14.0 使用 NumPy 2.4.6、SciPy 1.18.0、Numba 0.66.0 和
 python-soxr 1.1.0。公共参数为：
 
@@ -1001,6 +1001,28 @@ JSON、stdout、归一化 stderr/日志和每个有序 `fileLoc` 均一致。另
 `fileLoc` 也一致。另行执行的 Exact `current` 与 v0.4.0 `--threads 0`、默认
 5 和 `--threads 20` 门禁在七个输出面上全部匹配，并保持确定性。
 
+Betamax FSC 陷波现在会在旧内容已失效后直接处理解码器持有的 video 数组；公共
+helper 仍返回独立数组。陷波设计、padding 选择、池化奇延拓缓冲、正反向 IIR
+算术、反转顺序和最终复制均未改变。相对已发布的 v1.3.7，候选在六组反转顺序并
+交错执行的 160 帧 Exact `current --threads 20` 配对中赢了五组。墙钟中位数从
+14.667 秒降至 14.495 秒（下降 1.17%，吞吐提高 1.19%），CPU 时间中位数从
+107.227 秒降至 106.398 秒（下降 0.77%），平衡后的总吞吐提高 1.02%。
+
+匹配的 80 帧 `gc-verbose` trace 将采样托管分配从 18.245 GiB 降至
+17.388 GiB（下降 4.70%），采样 `Double[]` 分配从 9.690 GiB 降至
+8.820 GiB（下降 8.98%），Gen2 回收从 73 次降至 64 次。匹配的 400 帧
+runtime-counter 运行将总分配从 84.082 GiB 降至 79.278 GiB（下降 5.71%），
+Gen2 回收从 325 次降至 294 次。基线/候选墙钟分别为 33.179/33.382 秒，工作集
+中位数为 647.4/649.1 MiB；候选还出现过一次 1.392 GiB 的瞬时采样，因此不根据
+该配对宣称长跑加速或常驻内存下降。候选四个 100 帧区间（含启动）为
+10.365/7.632/7.594/7.638 秒，没有随进度变慢或增长。
+
+每次 160 帧 A/B 的亮度、色度、JSON、stdout、归一化 stderr/日志和全部 320 个
+有序 `fileLoc` 均一致；400 帧输出的亮度、色度、JSON、归一化日志和全部 800 个
+有序 `fileLoc` 也一致。另有 12 次 Exact 门禁覆盖 `current` 与 v0.4.0 的
+`--threads 0`、默认 5 和 `--threads 20`，七个输出面全部匹配且保持跨线程确定性。
+重新测量的 60 次 Exact/IPP 首页矩阵运行也全部通过已记录的兼容参考。
+
 </details>
 
 <!-- SECTION: build -->
@@ -1019,7 +1041,7 @@ JSON、stdout、归一化 stderr/日志和每个有序 `fileLoc` 均一致。另
 .\tools\build-ipp-native.ps1
 dotnet restore VHSDecodeDotNet.slnx
 dotnet build VHSDecodeDotNet.slnx -c Release --no-restore
-dotnet test --solution VHSDecodeDotNet.slnx -c Release --no-build --no-restore --minimum-expected-tests 1108
+dotnet test --solution VHSDecodeDotNet.slnx -c Release --no-build --no-restore --minimum-expected-tests 1109
 ```
 
 第一条命令用于包含可选的 `ipp-fast` 原生产物；只构建 Exact 时可以省略。
@@ -1030,7 +1052,7 @@ Intel oneAPI。只含二进制的单文件发布会嵌入 `vhsdecode_ipp.dll` �
 notice，不会额外生成许可证 sidecar 文件。只构建 Exact 后端时可以省略原生构建步骤。
 
 当前正式 Release 构建为零警告、零错误。xUnit v3 项目向
-`dotnet test` 和 Visual Studio Test Explorer 暴露 **1,108** 个可独立发现的测试。
+`dotnet test` 和 Visual Studio Test Explorer 暴露 **1,109** 个可独立发现的测试。
 
 <!-- SECTION: usage -->
 
