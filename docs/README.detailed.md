@@ -4,7 +4,7 @@
 
 **[English](README.detailed.md)** | [简体中文](README.detailed.zh-CN.md) | [日本語](README.detailed.ja.md)
 
-<!-- README_SYNC: 2026-07-29.8 -->
+<!-- README_SYNC: 2026-07-29.9 -->
 
 .NET 11 rewrite of the decode-facing parts of
 [`oyvindln/vhs-decode`](https://github.com/oyvindln/vhs-decode), focused on
@@ -1176,6 +1176,22 @@ and all 320 ordered `fileLoc` values were exact. Separate 40-frame
 `--threads 0`, default, and `--threads 20` gates were also exact and
 cross-thread deterministic.
 
+Current-mode VHS multi-grid support counting now evaluates each unordered pulse
+pair once and updates both counters, instead of testing the two symmetric
+ordered pairs separately. Ordered pulse locations, tolerance comparisons,
+integer counts, candidate selection, floating-point stages, and detector state
+ordering remain unchanged. Five interleaved, order-reversed 160-frame Exact
+current `--threads 20` pairs against released v1.3.4 moved median wall time from
+15.012 to 14.755 s (1.71% lower), with 1.06% higher balanced aggregate
+throughput; the candidate won four of five pairs. Aggregate CPU time was 0.63%
+higher, so no CPU-time reduction is claimed. Matched 80-frame sampling traces
+moved inclusive `VhsSyncDetector.Detect` time from 2,493 to 2,346 ms (5.89%
+lower), which attributes the hotspot change but is not a second end-to-end
+claim. Luma, chroma, JSON, stdout, normalized stderr/logs, and every ordered
+`fileLoc` matched across all A/B runs. Separate current and v0.4.0
+`--threads 0`, default, and `--threads 20` gates were deterministic and exact;
+the v0.4.0 serial result also matched the Python oracle on every surface.
+
 </details>
 
 <!-- SECTION: build -->
@@ -1196,7 +1212,7 @@ Requirements:
 .\tools\build-ipp-native.ps1
 dotnet restore VHSDecodeDotNet.slnx
 dotnet build VHSDecodeDotNet.slnx -c Release --no-restore
-dotnet test --solution VHSDecodeDotNet.slnx -c Release --no-build --no-restore --minimum-expected-tests 1103
+dotnet test --solution VHSDecodeDotNet.slnx -c Release --no-build --no-restore --minimum-expected-tests 1104
 ```
 
 The first command includes the optional `ipp-fast` native artifact; omit it for
@@ -1209,7 +1225,7 @@ deployment computer. Binary-only single-file releases embed
 sidecar license files. An Exact-only build may omit the native build step.
 
 The current formal Release build has zero warnings and errors. The xUnit v3
-project exposes **1,103** independently discoverable tests to both
+project exposes **1,104** independently discoverable tests to both
 `dotnet test` and Visual Studio Test Explorer.
 
 <!-- SECTION: usage -->

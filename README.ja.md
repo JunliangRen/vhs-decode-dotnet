@@ -2,7 +2,7 @@
 
 [English](README.md) | [简体中文](README.zh-CN.md) | **[日本語](README.ja.md)**
 
-<!-- README_SYNC: 2026-07-29.8 -->
+<!-- README_SYNC: 2026-07-29.9 -->
 
 [`oyvindln/vhs-decode`](https://github.com/oyvindln/vhs-decode) の
 デコード関連部分を .NET 11 で再実装するプロジェクトです。互換性の対象は
@@ -36,7 +36,7 @@ upstream release `v0.4.0`、commit
 - VHS family には VHS/S-VHS、Betamax、Video8/Hi8、U-matic、Type C、EIAJ、
   upstream が対応する PAL/NTSC variant が含まれます。
 - TBC utility、ダブルクリック GUI、開発者向け plot window は対象外です。
-- Visual Studio 2026 の `.slnx` には **1,103** 件の標準 xUnit v3 test があり、
+- Visual Studio 2026 の `.slnx` には **1,104** 件の標準 xUnit v3 test があり、
   Test Explorer と `dotnet test` の両方で実行できます。
 
 <!-- SECTION: start -->
@@ -100,11 +100,11 @@ CVBS、LaserDisc、HiFi は現在 `ipp-fast` を拒否するため、これら�
 <!-- LATEST_PERFORMANCE_BEGIN -->
 | CLI mode（workers） | Python v0.4.0 | Exact + v0.4.0 | Exact + current | IPP-fast + v0.4.0 | IPP-fast + current |
 | --- | ---: | ---: | ---: | ---: | ---: |
-| default（5） | 16.983 s | 6.771 s / 2.508x | 8.495 s / 1.999x | 6.469 s / 2.625x | 8.116 s / 2.092x |
-| `--threads 1` | 21.263 s | 21.075 s / 1.009x | 23.190 s / 0.917x | 20.922 s / 1.016x | 22.825 s / 0.932x |
-| `--threads 5` | 16.880 s | 6.660 s / 2.534x | 8.289 s / 2.036x | 6.668 s / 2.532x | 7.926 s / 2.130x |
-| `--threads 10` | 17.612 s | 5.384 s / 3.271x | 6.262 s / 2.812x | 5.035 s / 3.498x | 6.111 s / 2.882x |
-| `--threads 20` | 18.330 s | 4.430 s / 4.137x | 5.564 s / 3.295x | 4.196 s / 4.368x | 5.799 s / 3.161x |
+| default（5） | 16.983 s | 6.771 s / 2.508x | 8.265 s / 2.055x | 6.469 s / 2.625x | 7.893 s / 2.152x |
+| `--threads 1` | 21.263 s | 21.075 s / 1.009x | 22.955 s / 0.926x | 20.922 s / 1.016x | 22.563 s / 0.942x |
+| `--threads 5` | 16.880 s | 6.660 s / 2.534x | 8.238 s / 2.049x | 6.668 s / 2.532x | 7.989 s / 2.113x |
+| `--threads 10` | 17.612 s | 5.384 s / 3.271x | 6.109 s / 2.883x | 5.035 s / 3.498x | 6.207 s / 2.837x |
+| `--threads 20` | 18.330 s | 4.430 s / 4.137x | 5.415 s / 3.385x | 4.196 s / 4.368x | 5.340 s / 3.433x |
 <!-- LATEST_PERFORMANCE_END -->
 
 各 .NET cell は wall-time median と同じ行の Python に対する speedup の順です。
@@ -139,7 +139,7 @@ preview tool は writer を止めずに partial output を確認できます。
 dotnet restore VHSDecodeDotNet.slnx
 dotnet build VHSDecodeDotNet.slnx -c Release --no-restore
 dotnet test --solution VHSDecodeDotNet.slnx -c Release `
-  --no-build --no-restore --minimum-expected-tests 1103
+  --no-build --no-restore --minimum-expected-tests 1104
 ```
 
 Visual Studio 2026 で `VHSDecodeDotNet.slnx` を開くと、build、debug、
