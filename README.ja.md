@@ -107,13 +107,15 @@ CVBS、LaserDisc、HiFi は現在 `ipp-fast` を拒否するため、これら�
 | `--threads 20` | 18.330 s | 3.900 s / 4.700x | 4.745 s / 3.863x | 3.743 s / 4.897x | 4.511 s / 4.064x |
 <!-- LATEST_PERFORMANCE_END -->
 
-最新の Exact follow-up は PocketFFT の実際の final radix buffer を直接使用し、
-full buffer の追加 copy を省きます。同じ private sample に対する順序を反転した
-1,000-frame run 2 組は、7 compatibility surface すべてで一致しました。
-combined process CPU time は 1,122.17 秒から 1,111.08 秒へ 1.0% 減りましたが、
-combined wall time は 151.78/151.65 秒で実質的に同じです。これは CPU と
-memory-bandwidth の削減であり、新しい whole-pipeline speedup ではないため、
-表は変更しません。
+最新の Exact follow-up は、PocketFFT radix-8 zero-frequency butterfly の
+integer input/output address だけを事前計算します。すべての floating-point
+expression と twiddle 付き loop は変更しません。順序を反転した 160-frame
+pair 6 組は 7 compatibility surface すべてで一致し、process CPU median は
+3.5% 減り、wall time は neutral でした。反対順序の 1,000-frame pair 2 組では
+combined CPU time が 1,056.06 秒から 1,017.89 秒へ 3.6%、combined wall time
+が 138.96 秒から 138.31 秒へ 0.47% 減りました。allocation は neutral で
+progressive slowdown もありません。新しい stable whole-pipeline speedup
+ではないため、表は変更しません。
 
 各 .NET cell は wall-time median と同じ行の Python に対する speedup の順です。
 `1.000x` 未満は Python より遅いことを示します。default は実際に **5 workers**

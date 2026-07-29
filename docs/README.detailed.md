@@ -1458,6 +1458,38 @@ effectively unchanged at 7.437/7.420 GiB with no new allocation type. This
 pass is therefore retained as a CPU and memory-bandwidth reduction and
 classified as throughput-neutral.
 
+The next Exact PocketFFT pass changes only integer indexing in radix-8's
+zero-frequency butterfly. `Pass8FirstIndex` now receives the input/output
+base and stride calculated once by its caller, then advances through the eight
+locations by addition instead of recomputing `InputIndex` and `OutputIndex`
+for every load and store. The `i > 0` twiddled loop, every floating-point
+expression, butterfly and rotation order, normalization, data type, and buffer
+owner remain unchanged. The existing 64-point and 32,768-point forward/inverse
+bit-hash tests cover both even- and odd-pass mixed-radix plans.
+
+Eight order-reversed independent-process microbenchmark pairs over 2,000
+preallocated 32,768-point transforms all favored the candidate. Their
+baseline/candidate medians were 1,445.939/1,296.320 ms (10.35% less), with
+identical checksums and 40 bytes of timing overhead. Twelve real gates covered
+v0.4.0 and `current` at one, default-five, and 20 workers. Six order-reversed
+160-frame pairs matched luma, chroma, raw JSON, stdout, normalized
+stderr/logs, and every ordered `fileLoc`; baseline/candidate wall medians were
+15.613/15.586 s, while CPU medians fell from 107.594 to 103.797 s (3.53%).
+A sampled CPU trace shifted attribution between `Execute` and `Pass8`, so the
+stable aggregate is used: mixed-radix Plan self-time fell from 22.338 to
+20.553 s (8.0%), and total double-precision PocketFFT self-time fell 5.0%.
+
+Two opposite-order 1,000-frame counter pairs also matched luma, chroma, raw
+JSON, normalized stderr/logs, and all 2,000 ordered `fileLoc` values.
+Combined process CPU time fell from 1,056.06 to 1,017.89 s (3.61%), while
+combined wall time moved from 138.962 to 138.308 s (0.47%). Sampled allocation
+was effectively unchanged at 154.186/153.769 GiB; GC and resident-memory
+samples varied with collection timing, so no allocation or resident-memory
+reduction is claimed. Candidate post-startup 100-frame intervals stayed
+between 6.607 and 6.794 s in both orders without progressive growth. The pass
+is retained as a repeatable CPU reduction and classified as
+whole-pipeline-throughput-neutral.
+
 </details>
 
 <!-- SECTION: build -->
