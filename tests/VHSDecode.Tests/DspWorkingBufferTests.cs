@@ -871,6 +871,14 @@ public sealed class DspWorkingBufferTests
                 ApplyForwardBackwardSectionMajorReference(sections, input),
                 SosFilter.ApplyForwardBackward(sections, input));
         }
+
+        long before = GC.GetAllocatedBytesForCurrentThread();
+        double[] allocationProbe = SosFilter.ApplyForwardBackward(cases[0], input);
+        long allocated = GC.GetAllocatedBytesForCurrentThread() - before;
+        GC.KeepAlive(allocationProbe);
+        Assert.True(
+            allocated < 40_000,
+            $"Warm double SOS forward/backward allocated {allocated:N0} bytes.");
     }
 
     [Fact(DisplayName = "In-place IIR filtering remains allocating-reference bit-exact")]

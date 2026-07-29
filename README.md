@@ -2,7 +2,7 @@
 
 **[English](README.md)** | [简体中文](README.zh-CN.md) | [日本語](README.ja.md)
 
-<!-- README_SYNC: 2026-07-29.13 -->
+<!-- README_SYNC: 2026-07-29.14 -->
 
 A .NET 11 rewrite of the decode-facing parts of
 [`oyvindln/vhs-decode`](https://github.com/oyvindln/vhs-decode), targeting
@@ -112,12 +112,14 @@ separately from speed.
 | `--threads 20` | 18.330 s | 3.900 s / 4.700x | 4.745 s / 3.863x | 3.743 s / 4.897x | 4.511 s / 4.064x |
 <!-- LATEST_PERFORMANCE_END -->
 
-The latest matched Exact `current --threads 20` allocation audit reduced
-80-frame sampled managed allocation from 13.900 to 10.415 GiB (25.1%) and
-`Complex[]` allocation from 3.622 GiB to 135 MiB. Six order-reversed
-160-frame pairs were throughput-neutral at 14.069/14.167 s
-baseline/candidate medians, so the table is unchanged and no speedup is
-claimed for this pass.
+The latest follow-up pools the padded double-precision SOS workspace. Against
+v0.4.0-1.4.0, a matched Exact `current --threads 20` 80-frame trace reduced
+sampled managed allocation from 10.415 to 8.659 GiB (16.9%), `Double[]`
+allocation from 8.837 to 7.083 GiB (19.8%), and Gen2 collections from 44 to
+26. Six order-reversed 160-frame pairs remained throughput-neutral and matched
+all seven compatibility surfaces. A 1,000-frame run also matched the prior
+outputs while reducing allocation from 119.650 to 98.679 GiB (17.5%) without
+progressive slowdown, so the table is unchanged and no speedup is claimed.
 
 Each .NET cell shows median wall time followed by speedup versus Python in the
 same row; values below `1.000x` are slower. The default is **5 workers**.

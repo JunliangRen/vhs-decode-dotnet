@@ -4,7 +4,7 @@
 
 **[English](README.detailed.md)** | [简体中文](README.detailed.zh-CN.md) | [日本語](README.detailed.ja.md)
 
-<!-- README_SYNC: 2026-07-29.13 -->
+<!-- README_SYNC: 2026-07-29.14 -->
 
 .NET 11 rewrite of the decode-facing parts of
 [`oyvindln/vhs-decode`](https://github.com/oyvindln/vhs-decode), focused on
@@ -1344,6 +1344,33 @@ post-startup 100-frame intervals stayed between 7.239 and 7.493 s. The
 workspace is therefore bounded and does not progressively slow down, but the
 lower GC pressure can produce higher periodic resident-memory samples; this
 is not a resident-memory reduction claim.
+
+The next Exact pass pools the padded double-precision SOS odd-extension
+workspace. Every logical element is initialized before use; padding,
+double-precision arithmetic, section/sample order, forward/reverse order, and
+the independent exact-length result remain unchanged. The temporary array is
+returned in `finally`, while the no-padding path retains its previous owned
+copy. The existing bit-exact section-major test now also requires a warm
+4,096-sample call to allocate less than 40,000 bytes.
+
+Against released v0.4.0-1.4.0, a matched Exact `current --threads 20`
+80-frame `gc-verbose` trace reduced sampled managed allocation from 10.415 to
+8.659 GiB (16.9%), sampled `Double[]` allocation from 8.837 to 7.083 GiB
+(19.8%), and Gen2 collections from 44 to 26. The former 1.054 GiB
+`OddExtension` allocation caller disappeared. Six order-reversed 160-frame
+pairs matched luma, chroma, raw JSON, stdout, normalized stderr/logs, and every
+ordered `fileLoc`; 13.682/13.602 s baseline/candidate wall medians are treated
+as throughput-neutral. Twelve additional gates covered v0.4.0 and `current`
+at `--threads 0`, default 5, and `--threads 20`.
+
+A separate 1,000-frame candidate run matched the released checkpoint for
+luma, chroma, raw JSON, normalized stderr/logs, and all 2,000 ordered
+`fileLoc` values. Total allocation fell from 119.650 to 98.679 GiB (17.5%),
+GC pause from 1.124 to 1.029 s, and Gen2 collections from 353 to 319. Its
+first/last-third working-set medians were 680/727 MiB; a transient 1,420 MiB
+peak later returned below 900 MiB. The nine post-startup 100-frame intervals
+stayed between 6.800 and 6.989 s. This supports bounded memory and no
+progressive slowdown, not a resident-memory or stable throughput claim.
 
 </details>
 

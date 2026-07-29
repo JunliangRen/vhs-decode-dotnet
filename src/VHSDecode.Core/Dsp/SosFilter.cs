@@ -189,23 +189,52 @@ public static class SosFilter
             throw new ArgumentOutOfRangeException(nameof(padLength));
         }
 
-        double[] extended = edge == 0 ? input.ToArray() : OddExtension(input, edge);
-        double[,] zi = SteadyStateInitialConditions(sections);
-        double[,] firstZi = ScaleInitialConditions(zi, extended[0]);
-        ApplyForwardInPlace(sections, extended, firstZi);
-        Array.Reverse(extended);
-        double[,] secondZi = ScaleInitialConditions(zi, extended[0]);
-        ApplyForwardInPlace(sections, extended, secondZi);
-        Array.Reverse(extended);
-
-        if (edge == 0)
+        if (edge != 0 && input.Length <= edge)
         {
-            return extended;
+            throw new ArgumentException("Input length must be greater than pad length.");
         }
 
-        var trimmed = new double[input.Length];
-        Array.Copy(extended, edge, trimmed, 0, trimmed.Length);
-        return trimmed;
+        double[]? rented = null;
+        try
+        {
+            int extendedLength = checked(input.Length + (edge * 2));
+            double[] extendedArray;
+            if (edge == 0)
+            {
+                extendedArray = input.ToArray();
+            }
+            else
+            {
+                rented = ArrayPool<double>.Shared.Rent(extendedLength);
+                extendedArray = rented;
+                WriteOddExtension(input, edge, extendedArray.AsSpan(0, extendedLength));
+            }
+
+            Span<double> extended = extendedArray.AsSpan(0, extendedLength);
+            double[,] zi = SteadyStateInitialConditions(sections);
+            double[,] firstZi = ScaleInitialConditions(zi, extended[0]);
+            ApplyForwardInPlace(sections, extended, firstZi);
+            extended.Reverse();
+            double[,] secondZi = ScaleInitialConditions(zi, extended[0]);
+            ApplyForwardInPlace(sections, extended, secondZi);
+            extended.Reverse();
+
+            if (edge == 0)
+            {
+                return extendedArray;
+            }
+
+            var trimmed = new double[input.Length];
+            extended.Slice(edge, trimmed.Length).CopyTo(trimmed);
+            return trimmed;
+        }
+        finally
+        {
+            if (rented is not null)
+            {
+                ArrayPool<double>.Shared.Return(rented);
+            }
+        }
     }
 
     public static double[] ApplyForwardBackwardFloat32(
@@ -656,29 +685,35 @@ public static class SosFilter
         return output;
     }
 
-    private static double[] OddExtension(ReadOnlySpan<double> input, int edge)
+    private static void WriteOddExtension(
+        ReadOnlySpan<double> input,
+        int edge,
+        Span<double> output)
     {
         if (input.Length <= edge)
         {
             throw new ArgumentException("Input length must be greater than pad length.");
         }
 
-        var output = new double[input.Length + (edge * 2)];
+        int outputLength = checked(input.Length + (edge * 2));
+        if (output.Length < outputLength)
+        {
+            throw new ArgumentException("Output span is shorter than the extended input.", nameof(output));
+        }
+
         double first = input[0];
         for (int i = 0; i < edge; i++)
         {
             output[i] = (2.0 * first) - input[edge - i];
         }
 
-        input.CopyTo(output.AsSpan(edge, input.Length));
+        input.CopyTo(output.Slice(edge, input.Length));
 
         double last = input[^1];
         for (int i = 0; i < edge; i++)
         {
             output[edge + input.Length + i] = (2.0 * last) - input[input.Length - 2 - i];
         }
-
-        return output;
     }
 
     private static void WriteOddExtensionFloat32(

@@ -4,7 +4,7 @@
 
 [English](README.detailed.md) | **[简体中文](README.detailed.zh-CN.md)** | [日本語](README.detailed.ja.md)
 
-<!-- README_SYNC: 2026-07-29.13 -->
+<!-- README_SYNC: 2026-07-29.14 -->
 
 这是 [`oyvindln/vhs-decode`](https://github.com/oyvindln/vhs-decode)
 中解码相关部分的 .NET 11 重写，当前以 release `v0.4.0`、commit
@@ -1077,6 +1077,29 @@ worker 工作区中，并原地执行可选的 RF MTF 乘法。它最多移除�
 其首/末三分之一区间工作集中位数为 747/782 MiB，最大值为 1,198 MiB，启动后的
 九个 100-frame 区间稳定在 7.239 至 7.493 秒。工作区因此保持有界且没有随进度
 减速；较低 GC 压力会带来更高的周期性常驻内存采样，所以这里不宣称常驻内存下降。
+
+下一轮 Exact 优化会池化复用 double 精度 SOS 的 padded odd-extension 工作区。
+使用前会完整初始化有效范围；padding、double 精度运算、section/sample 顺序、
+前后向顺序和独立精确长度结果都保持不变。临时数组在 `finally` 中归还，
+无 padding 路径仍保留原先的自有副本。现有 section-major 位级一致测试还要求
+预热后的 4,096-sample 调用分配少于 40,000 字节。
+
+相对正式版 v0.4.0-1.4.0，匹配的 Exact `current --threads 20` 80-frame
+`gc-verbose` trace 把采样托管分配从 10.415 GiB 降至 8.659 GiB
+（下降 16.9%），采样 `Double[]` 从 8.837 GiB 降至 7.083 GiB
+（下降 19.8%），Gen2 从 44 次降至 26 次；原先 1.054 GiB 的
+`OddExtension` 分配入口已经消失。六组反序 160-frame 配对在亮度、色度、
+原始 JSON、stdout、归一化 stderr/日志和全部有序 `fileLoc` 上一致；
+基线/候选墙钟中位数 13.682/13.602 秒按吞吐中性处理。另有 12 次门禁覆盖
+v0.4.0 与 `current` 的 `--threads 0`、默认 5 和 `--threads 20`。
+
+另一组 1,000-frame 候选运行在亮度、色度、原始 JSON、归一化 stderr/日志
+和全部 2,000 个有序 `fileLoc` 上匹配正式版检查点。总分配从 119.650 GiB
+降至 98.679 GiB（下降 17.5%），GC pause 从 1.124 秒降至 1.029 秒，
+Gen2 从 353 次降至 319 次。首/末三分之一区间工作集中位数为 680/727 MiB；
+中途 1,420 MiB 的瞬时峰值随后回落到 900 MiB 以下。启动后的九个
+100-frame 区间稳定在 6.800 至 6.989 秒。这证明内存有界且没有渐进减速，
+不代表常驻内存下降或稳定吞吐提升。
 
 </details>
 
