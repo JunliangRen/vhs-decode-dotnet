@@ -4,7 +4,7 @@
 
 [English](README.detailed.md) | [简体中文](README.detailed.zh-CN.md) | **[日本語](README.detailed.ja.md)**
 
-<!-- README_SYNC: 2026-07-29.15 -->
+<!-- README_SYNC: 2026-07-30.01 -->
 
 [`oyvindln/vhs-decode`](https://github.com/oyvindln/vhs-decode) の
 デコード関連部分を .NET 11 で再実装するプロジェクトです。現在は release
@@ -1356,6 +1356,39 @@ reduction は主張しません。startup 後の 100-frame interval 9 個は
 6.787 から 7.035 秒に収まり、bounded memory と progressive slowdown が
 ないことを示します。
 
+最新の Exact pass は numeric semantics を変えず、さらに 1 つの worker-local
+buffer を再利用します。sub-deemphasis は high-pass signal を `Real`、analytic
+magnitude を `Imaginary`、FFT scratch を既存の complex workspace に保持します。
+demod input が `demodSpectrum` に変換された後、以前の `RawEnvelope`/compact
+demod 内容は不要です。そのため新しい full-block `Double[]` を割り当てず、
+既存の destination API で double-precision amplitude SOS result を
+`RawEnvelope` に書き込みます。non-workspace public API、padding choice、
+section/sample と reversal order、post-SOS expression、returned output
+ownership は変更しません。xUnit v3 warm-block allocation test がこの lifetime
+と deterministic output を検証します。
+
+main `583d062` に対する matched Exact `current --threads 20` 80-frame
+`gc-verbose` trace では、sampled managed allocation が 7.797 GiB から
+6.926 GiB へ 11.2%、sampled `Double[]` が 6.221 GiB から 5.342 GiB へ
+14.1% 減り、Gen2 は 33 回から 29 回になりました。sub-deemphasis SOS
+result-allocation caller は消えました。順序を反転した 160-frame 6 組は luma、
+chroma、raw JSON、stdout、normalized stderr/log、すべての ordered `fileLoc`
+で一致しました。baseline/candidate wall median は 13.845/13.404 秒、CPU
+median は 103.258/100.133 秒でしたが、以下の長時間 run では stable
+throughput gain を再現しませんでした。追加の 12 gate は v0.4.0 と `current`
+の `--threads 0`、default 5、`--threads 20` を網羅しました。
+
+反対順序の 1,000-frame counter pair 2 組も luma、chroma、raw JSON、
+normalized stderr/log、2,000 個すべての ordered `fileLoc` で一致しました。
+allocation は 11.87-12.12%、GC pause は 1.28-7.44%、Gen2 は
+21.50-24.35% 減りました。candidate wall time は 0.13% と 1.35% 高かったため、
+この pass は throughput-neutral と判断します。candidate first/last-third
+working-set median は 679/773 MiB と 804/659 MiB、peak は
+1,517/1,516 MiB で、sampled resident memory は改善しませんでした。combined
+post-startup 100-frame interval は 6.924 から 7.195 秒に収まり、どちらの run
+にも progressive growth はありません。これは bounded memory の根拠であり、
+resident-memory reduction の主張ではありません。
+
 </details>
 
 <!-- SECTION: build -->
@@ -1374,7 +1407,7 @@ reduction は主張しません。startup 後の 100-frame interval 9 個は
 .\tools\build-ipp-native.ps1
 dotnet restore VHSDecodeDotNet.slnx
 dotnet build VHSDecodeDotNet.slnx -c Release --no-restore
-dotnet test --solution VHSDecodeDotNet.slnx -c Release --no-build --no-restore --minimum-expected-tests 1115
+dotnet test --solution VHSDecodeDotNet.slnx -c Release --no-build --no-restore --minimum-expected-tests 1116
 ```
 
 最初の command は optional `ipp-fast` native artifact を含めるためのものです。
@@ -1387,7 +1420,7 @@ third-party notice を埋め込み、license sidecar file は追加しません�
 
 現在の正式な Release build は warning 0、error 0 です。xUnit v3 project は
 `dotnet test` と Visual Studio Test Explorer の両方で個別に検出できる
-**1,115** tests を公開します。
+**1,116** tests を公開します。
 
 <!-- SECTION: usage -->
 

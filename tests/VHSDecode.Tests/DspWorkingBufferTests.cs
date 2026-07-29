@@ -721,6 +721,66 @@ public sealed class DspWorkingBufferTests
             $"Warm sub-deemphasis analytic workspace allocated {allocated:N0} bytes.");
     }
 
+    [Fact(DisplayName = "VHS sub-deemphasis reuses its SOS output after warm-up")]
+    public void VhsSubDeemphasisReusesSosOutputAfterWarmUp()
+    {
+        const int length = DecodeSessionFactory.DefaultBlockLength;
+        const double sampleRateHz = 40_000_000.0;
+        double[] input = BuildPalVhsProbe(length, sampleRateHz);
+        Complex[] identity = RfDemodulator.IdentityFilter(length);
+        SosSection[] identitySos =
+        [
+            new SosSection(1.0, 0.0, 0.0, 1.0, 0.0, 0.0)
+        ];
+        var sub = new SubDeemphasisOptions(
+            HighPassHz: 820_000.0,
+            BandPassUpperHz: null,
+            Order: 2,
+            AmplitudeLowPassHz: 700_000.0,
+            Deviation: 1_400_000.0,
+            ExponentialScaling: 0.12,
+            Scaling1: 0.1,
+            Scaling2: null,
+            LogisticMid: null,
+            LogisticRate: null,
+            StaticFactor: null);
+        using var demodulator = new RfDemodulator(sampleRateHz);
+
+        RfDemodulatedBlock expected = DecodeCompactVhsSubDeemphasisProbe(
+            demodulator,
+            input,
+            identity,
+            identitySos,
+            sub);
+        for (int i = 0; i < 3; i++)
+        {
+            _ = DecodeCompactVhsSubDeemphasisProbe(
+                demodulator,
+                input,
+                identity,
+                identitySos,
+                sub);
+        }
+
+        long before = GC.GetAllocatedBytesForCurrentThread();
+        RfDemodulatedBlock actual = DecodeCompactVhsSubDeemphasisProbe(
+            demodulator,
+            input,
+            identity,
+            identitySos,
+            sub);
+        long allocated = GC.GetAllocatedBytesForCurrentThread() - before;
+
+        string actualHash = Hash(actual);
+        Assert.Equal(Hash(expected), actualHash);
+        Assert.Equal(
+            "D3093EC8BC380745EFBE0312FF89D643E54CF9A262A7840C09BFD5EA3FEBDF81",
+            actualHash);
+        Assert.True(
+            allocated < 900_000,
+            $"Warm VHS sub-deemphasis RF block allocated {allocated:N0} bytes.");
+    }
+
     [Fact(DisplayName = "Float32 SOS common-section kernels remain bit-exact")]
     public void Float32SosCommonSectionKernelsRemainBitExact()
     {
@@ -1392,6 +1452,40 @@ public sealed class DspWorkingBufferTests
             identity,
             nonlinearDeemphasis: nonlinear,
             subDeemphasis: sub);
+    }
+
+    private static RfDemodulatedBlock DecodeCompactVhsSubDeemphasisProbe(
+        RfDemodulator demodulator,
+        double[] input,
+        Complex[] identity,
+        SosSection[] identitySos,
+        SubDeemphasisOptions sub)
+    {
+        return demodulator.DemodulateCore(
+            input,
+            identity,
+            identity,
+            ReadOnlySpan<Complex>.Empty,
+            identity,
+            identity,
+            videoLowPassOffset: 0,
+            removeLdPalV4300DSpur: false,
+            rfHighBoost: null,
+            diffDemodRepair: null,
+            chromaTrap: null,
+            sharpnessEq: null,
+            nonlinearDeemphasis: null,
+            subDeemphasis: sub,
+            betamaxFscNotchHz: null,
+            referenceFilters: null,
+            fmDemodulatorMode: RfFmDemodulatorMode.VhsRustApproximation,
+            vhsEnvelopeFilter: identitySos,
+            vhsRfTopFilter: null,
+            precomputedInputSpectrum: null,
+            includeRfHighPassOutput: false,
+            includeAnalyticOutput: false,
+            includeDemodRawOutput: false,
+            useNumpyComplexVhsAnalytic: false);
     }
 
     private static string Hash(RfPipelineBlock block)
