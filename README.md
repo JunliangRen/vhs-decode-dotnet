@@ -2,7 +2,7 @@
 
 **[English](README.md)** | [简体中文](README.zh-CN.md) | [日本語](README.ja.md)
 
-<!-- README_SYNC: 2026-07-29.10 -->
+<!-- README_SYNC: 2026-07-29.11 -->
 
 A .NET 11 rewrite of the decode-facing parts of
 [`oyvindln/vhs-decode`](https://github.com/oyvindln/vhs-decode), targeting
@@ -38,7 +38,7 @@ evidence, and remaining gaps.
   EIAJ, and supported PAL/NTSC variants.
 - TBC utility tools, the double-click GUI, and developer plotting windows are
   intentionally out of scope.
-- The Visual Studio 2026 `.slnx` solution has **1,107** standard xUnit v3 tests
+- The Visual Studio 2026 `.slnx` solution has **1,108** standard xUnit v3 tests
   that are visible in Test Explorer and runnable with `dotnet test`.
 
 <!-- SECTION: start -->
@@ -105,11 +105,11 @@ separately from speed.
 <!-- LATEST_PERFORMANCE_BEGIN -->
 | CLI mode (workers) | Python v0.4.0 | Exact + v0.4.0 | Exact + current | IPP-fast + v0.4.0 | IPP-fast + current |
 | --- | ---: | ---: | ---: | ---: | ---: |
-| default (5) | 16.983 s | 6.771 s / 2.508x | 8.239 s / 2.061x | 6.469 s / 2.625x | 7.929 s / 2.142x |
-| `--threads 1` | 21.263 s | 21.075 s / 1.009x | 23.068 s / 0.922x | 20.922 s / 1.016x | 22.646 s / 0.939x |
-| `--threads 5` | 16.880 s | 6.660 s / 2.534x | 7.977 s / 2.116x | 6.668 s / 2.532x | 7.908 s / 2.134x |
-| `--threads 10` | 17.612 s | 5.384 s / 3.271x | 6.334 s / 2.781x | 5.035 s / 3.498x | 6.011 s / 2.930x |
-| `--threads 20` | 18.330 s | 4.430 s / 4.137x | 5.479 s / 3.346x | 4.196 s / 4.368x | 5.423 s / 3.380x |
+| default (5) | 16.983 s | 6.770 s / 2.509x | 7.969 s / 2.131x | 6.579 s / 2.581x | 7.938 s / 2.140x |
+| `--threads 1` | 21.263 s | 21.092 s / 1.008x | 22.848 s / 0.931x | 20.468 s / 1.039x | 22.401 s / 0.949x |
+| `--threads 5` | 16.880 s | 6.778 s / 2.490x | 7.993 s / 2.112x | 6.727 s / 2.509x | 7.737 s / 2.182x |
+| `--threads 10` | 17.612 s | 5.242 s / 3.360x | 5.937 s / 2.966x | 4.826 s / 3.649x | 5.870 s / 3.000x |
+| `--threads 20` | 18.330 s | 4.209 s / 4.355x | 5.119 s / 3.581x | 4.160 s / 4.406x | 5.074 s / 3.612x |
 <!-- LATEST_PERFORMANCE_END -->
 
 Each .NET cell shows median wall time followed by speedup versus Python in the
@@ -146,7 +146,7 @@ The pinned SDK is .NET `11.0.100-preview.6.26359.118`.
 dotnet restore VHSDecodeDotNet.slnx
 dotnet build VHSDecodeDotNet.slnx -c Release --no-restore
 dotnet test --solution VHSDecodeDotNet.slnx -c Release `
-  --no-build --no-restore --minimum-expected-tests 1107
+  --no-build --no-restore --minimum-expected-tests 1108
 ```
 
 Open `VHSDecodeDotNet.slnx` in Visual Studio 2026 to build, debug, and run the

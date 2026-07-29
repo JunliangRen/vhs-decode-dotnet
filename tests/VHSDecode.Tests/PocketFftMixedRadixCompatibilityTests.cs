@@ -113,6 +113,50 @@ public sealed class PocketFftMixedRadixCompatibilityTests
                     MemoryMarshal.AsBytes(actualBackward.AsSpan())));
     }
 
+    [Fact(DisplayName = "Warm large multipass FFT reuses Plan value workspaces")]
+    public void WarmLargeMultipassFftReusesPlanValueWorkspaces()
+    {
+        const int Length = 239_580;
+        float[] values = DeterministicInput(2 * Length);
+        var original = new Complex32[Length];
+        for (int index = 0; index < original.Length; index++)
+        {
+            original[index] = new Complex32(
+                values[2 * index],
+                values[(2 * index) + 1]);
+        }
+
+        Complex32[] expected = PocketFftComplex32.ForwardAnyLengthDucc(
+            original,
+            workerThreads: 1);
+        var source = new Complex32[Length];
+        var scratch = new Complex32[Length];
+        original.CopyTo(source, 0);
+        _ = PocketFftComplex32.ForwardAnyLengthDuccOwned(
+            source,
+            scratch,
+            workerThreads: 1);
+
+        original.CopyTo(source, 0);
+        Array.Fill(
+            scratch,
+            new Complex32(float.NaN, float.NegativeInfinity));
+        long allocationBefore = GC.GetAllocatedBytesForCurrentThread();
+        Complex32[] actual = PocketFftComplex32.ForwardAnyLengthDuccOwned(
+            source,
+            scratch,
+            workerThreads: 1);
+        long allocated =
+            GC.GetAllocatedBytesForCurrentThread() - allocationBefore;
+
+        Assert.Equal(
+            Sha256(MemoryMarshal.AsBytes(expected.AsSpan())),
+            Sha256(MemoryMarshal.AsBytes(actual.AsSpan())));
+        Assert.True(
+            allocated < 4 * 1024 * 1024,
+            $"Warm multipass FFT allocated {allocated:N0} bytes.");
+    }
+
     [Theory(DisplayName = "Real FFT plan threshold matches SciPy")]
     [InlineData(512, "2D112631FB98F4C92AA42FB93FC7356FDBEE1F4C688CED08D27E6147E3456B40")]
     [InlineData(1_024, "39C3C9BE39CC952600AFDB1ECF002BE654FEDA2A207C3E5F0D6DA943E7644F3B")]

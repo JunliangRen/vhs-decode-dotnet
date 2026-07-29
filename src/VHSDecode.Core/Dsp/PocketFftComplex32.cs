@@ -7,6 +7,10 @@ namespace VHSDecode.Core.Dsp;
 internal static class PocketFftComplex32
 {
     private static readonly ConcurrentDictionary<(int Length, int RootLength), Plan> RootedPlans = new();
+    [ThreadStatic]
+    private static Value[]? _planValues;
+    [ThreadStatic]
+    private static Value[]? _planScratch;
 
     internal static Complex32[] ForwardDucc(
         ReadOnlySpan<Complex32> input,
@@ -525,6 +529,16 @@ internal static class PocketFftComplex32
         return [first, second];
     }
 
+    private static T[] EnsureCapacity<T>(ref T[]? buffer, int length)
+    {
+        if (buffer is null || buffer.Length < length)
+        {
+            buffer = new T[length];
+        }
+
+        return buffer;
+    }
+
     private static Complex32[] TransformDuccVectorized(
         ReadOnlySpan<Complex32> input)
     {
@@ -615,8 +629,9 @@ internal static class PocketFftComplex32
 
         internal Complex32[] Transform(ReadOnlySpan<Complex32> input)
         {
-            var values = new Value[_length];
-            for (int i = 0; i < values.Length; i++)
+            Value[] values =
+                EnsureCapacity(ref _planValues, _length);
+            for (int i = 0; i < _length; i++)
             {
                 values[i] = new Value(input[i].Real, input[i].Imaginary);
             }
@@ -665,7 +680,8 @@ internal static class PocketFftComplex32
 
         private void Execute(Value[] data)
         {
-            var scratch = new Value[_length];
+            Value[] scratch =
+                EnsureCapacity(ref _planScratch, _length);
             Value[] source = data;
             Value[] destination = scratch;
             int l1 = 1;
@@ -705,7 +721,7 @@ internal static class PocketFftComplex32
 
             if (!ReferenceEquals(source, data))
             {
-                source.CopyTo(data, 0);
+                Array.Copy(source, data, _length);
             }
         }
 
