@@ -689,6 +689,38 @@ public sealed class DspWorkingBufferTests
             $"Warm linear TBC resampling allocated {resampleBytes:N0} bytes.");
     }
 
+    [Fact(DisplayName = "Sub-deemphasis analytic workspace avoids block-sized temporary arrays")]
+    public void SubDeemphasisAnalyticWorkspaceAvoidsBlockSizedTemporaryArrays()
+    {
+        const int length = 32_768;
+        double[] input = Enumerable.Range(0, length)
+            .Select(index => Math.Sin(index * 0.013) + (0.125 * Math.Cos(index * 0.029)))
+            .ToArray();
+        var magnitude = new double[length];
+        var spectrum = new Complex[length];
+        var transformScratch = new Complex[length];
+
+        RfDemodulator.BuildAnalyticMagnitudeWithWorkspace(
+            input,
+            magnitude,
+            spectrum,
+            transformScratch);
+        long before = GC.GetAllocatedBytesForCurrentThread();
+        RfDemodulator.BuildAnalyticMagnitudeWithWorkspace(
+            input,
+            magnitude,
+            spectrum,
+            transformScratch);
+        long allocated = GC.GetAllocatedBytesForCurrentThread() - before;
+
+        GC.KeepAlive(magnitude);
+        GC.KeepAlive(spectrum);
+        GC.KeepAlive(transformScratch);
+        Assert.True(
+            allocated < 100_000,
+            $"Warm sub-deemphasis analytic workspace allocated {allocated:N0} bytes.");
+    }
+
     [Fact(DisplayName = "Float32 SOS common-section kernels remain bit-exact")]
     public void Float32SosCommonSectionKernelsRemainBitExact()
     {

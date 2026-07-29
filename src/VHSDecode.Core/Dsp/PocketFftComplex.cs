@@ -218,6 +218,91 @@ public static class PocketFftComplex
         return output;
     }
 
+    internal static void ForwardDuccRealFull(
+        ReadOnlySpan<double> input,
+        Span<Complex> output,
+        Span<Complex> transformScratch)
+    {
+        ValidateLength(input.Length, nameof(input));
+        if (output.Length != input.Length)
+        {
+            throw new ArgumentException(
+                "Full-spectrum output length must match the real input length.",
+                nameof(output));
+        }
+
+        int length = input.Length;
+        int complexLength = length / 2;
+        ValidateLength(complexLength, nameof(input));
+        if (transformScratch.Length < complexLength)
+        {
+            throw new ArgumentException(
+                "Real FFT scratch must hold the packed complex transform.",
+                nameof(transformScratch));
+        }
+
+        if (output.Overlaps(transformScratch[..complexLength]))
+        {
+            throw new ArgumentException(
+                "Full-spectrum output and real FFT scratch must not overlap.",
+                nameof(transformScratch));
+        }
+
+        Complex[] complexInput = EnsureCapacity(ref _realInput, complexLength);
+        for (int i = 0; i < complexLength; i++)
+        {
+            complexInput[i] = new Complex(input[2 * i], input[(2 * i) + 1]);
+        }
+
+        Span<Complex> transformed = transformScratch[..complexLength];
+        if (complexLength > 10_000)
+        {
+            TransformDuccPacketized(
+                complexInput.AsSpan(0, complexLength),
+                forward: true,
+                transformed);
+        }
+        else
+        {
+            Plans.GetOrAdd(complexLength, static value => new Plan(value))
+                .Transform(complexInput.AsSpan(0, complexLength), transformed, forward: true);
+        }
+
+        SinCos2PiByN roots = Roots.GetOrAdd(length, static value => new SinCos2PiByN(value));
+        output[0] = new Complex(transformed[0].Real + transformed[0].Imaginary, 0.0);
+        for (int i = 1, xi = complexLength - 1; i <= xi; i++, xi--)
+        {
+            Complex left = transformed[i];
+            Complex right = transformed[xi];
+            Value even = new(
+                left.Real + right.Real,
+                left.Imaginary - right.Imaginary);
+            Value odd = new(
+                left.Imaginary + right.Imaginary,
+                right.Real - left.Real);
+            Value root = roots.Get(i);
+            Value rotated = SpecialMultiply(odd, root, forward: true);
+            output[i] = new Complex(
+                0.5 * (even.Real + rotated.Real),
+                0.5 * (even.Imaginary + rotated.Imaginary));
+            output[xi] = new Complex(
+                0.5 * (even.Real - rotated.Real),
+                0.5 * (rotated.Imaginary - even.Imaginary));
+        }
+
+        output[complexLength] = new Complex(
+            transformed[0].Real - transformed[0].Imaginary,
+            0.0);
+        for (int i = 1; i < complexLength; i++)
+        {
+            output[^i] = Complex.Conjugate(output[i]);
+        }
+
+        // scipy.fft.fft(real) preserves negative imaginary zero at both real-only bins.
+        output[0] = new Complex(output[0].Real, -0.0);
+        output[complexLength] = new Complex(output[complexLength].Real, -0.0);
+    }
+
     internal static double[] InverseDuccReal(ReadOnlySpan<Complex> input, int outputLength)
     {
         ValidateLength(outputLength, nameof(outputLength));

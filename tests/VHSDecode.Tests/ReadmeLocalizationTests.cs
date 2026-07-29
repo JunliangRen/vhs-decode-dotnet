@@ -106,7 +106,7 @@ public sealed partial class ReadmeLocalizationTests
         [
             "43155200da87c0d49eb37d8ec09b1372075ee8e4",
             "11.0.100-preview.6.26359.118",
-            "**1,109**",
+            "**1,110**",
             "--compat-version",
             "current",
             "--dsp-backend",
@@ -116,8 +116,8 @@ public sealed partial class ReadmeLocalizationTests
             "IPP-fast + v0.4.0",
             "IPP-fast + current",
             "16.983 s",
-            "4.318x",
-            "3.756x",
+            "4.700x",
+            "4.064x",
             "g4315520",
             "--threads 0"
         ];
@@ -126,7 +126,7 @@ public sealed partial class ReadmeLocalizationTests
         [
             "43155200da87c0d49eb37d8ec09b1372075ee8e4",
             "11.0.100-preview.6.26359.118",
-            "**1,109**",
+            "**1,110**",
             "77.234 MiB",
             "2.863362 GiB",
             "2.790004 GiB",
@@ -427,7 +427,7 @@ public sealed partial class ReadmeLocalizationTests
             "16.52",
             "35.84/39.54",
             "1.459/1.231/0.820/1.422",
-            "1EBA26547DFC57525E57699137A4CBA2E3E478E5A906C472AEAAFE047CB22F6F",
+            "BC322E7958DE980690C1A787B8EB5ACA7C80D1E71DDCB4D956A821066FF5B889",
             "20.311490",
             "2.623486",
             "2,240,768",
@@ -445,8 +445,17 @@ public sealed partial class ReadmeLocalizationTests
             "3.00%",
             "1.66%",
             "30.253",
-            "4.318x",
-            "3.756x",
+            "4.700x",
+            "4.064x",
+            "13.900",
+            "49.14%",
+            "161.302",
+            "125.900",
+            "21.95%",
+            "25.76%",
+            "73.267",
+            "7.038",
+            "7.152",
             "--use_saved_levels",
             "COMPATIBILITY_EVIDENCE.md"
         ];
@@ -492,6 +501,7 @@ public sealed partial class ReadmeLocalizationTests
             Assert.DoesNotContain("**759**", content, StringComparison.Ordinal);
             Assert.DoesNotContain("**768**", content, StringComparison.Ordinal);
             Assert.DoesNotContain("**1,090**", content, StringComparison.Ordinal);
+            Assert.DoesNotContain("**1,109**", content, StringComparison.Ordinal);
             Assert.DoesNotContain("**778**", content, StringComparison.Ordinal);
             Assert.DoesNotContain("**779**", content, StringComparison.Ordinal);
             Assert.DoesNotContain("**781**", content, StringComparison.Ordinal);
