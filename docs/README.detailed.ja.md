@@ -4,7 +4,7 @@
 
 [English](README.detailed.md) | [简体中文](README.detailed.zh-CN.md) | **[日本語](README.detailed.ja.md)**
 
-<!-- README_SYNC: 2026-07-29.14 -->
+<!-- README_SYNC: 2026-07-29.15 -->
 
 [`oyvindln/vhs-decode`](https://github.com/oyvindln/vhs-decode) の
 デコード関連部分を .NET 11 で再実装するプロジェクトです。現在は release
@@ -1323,6 +1323,38 @@ GC pause は 1.124 秒から 1.029 秒へ減り、Gen2 は 353 回から 319 回
 100-frame interval 9 個は 6.800 から 6.989 秒に収まっています。これは
 bounded memory と progressive slowdown がないことを示しますが、
 resident-memory reduction や stable throughput improvement の主張ではありません。
+
+次の Exact pass は double SOS forward/backward filtering に internal-only の
+destination form を追加し、public API の independently owned result は
+変更しません。VHS RF high-boost path では worker-owned `RawEnvelope` が
+envelope input の役割を終え、後の demodulation stage まで再利用されないため、
+SOS result と式を変えない float32-envelope scaling をそこへ書き込んでから
+既存 FFT に渡します。padding、double arithmetic、section/sample order、
+reversal order、FFT input、output ownership は不変で、retained array も
+追加しません。destination path は section-major reference と bit-exact で、
+warm 4,096-sample call の allocation は 4,096 bytes 未満に gate されます。
+
+main `a184450` に対する matched Exact `current --threads 20` 80-frame
+`gc-verbose` trace では、sampled managed allocation が 8.667 GiB から
+7.797 GiB へ 10.0%、sampled `Double[]` が 7.091 GiB から 6.221 GiB へ
+12.3% 減り、Gen2 は 36 回から 33 回になりました。約 0.9 GiB の
+high-boost SOS result-allocation chain は消えました。順序を反転した
+160-frame 6 組は 7 compatibility surface すべてで一致し、
+baseline/candidate wall median 13.297/13.375 秒、CPU median
+101.750/101.273 秒は throughput-neutral と判断します。追加の 12 gate は
+v0.4.0 と `current` の `--threads 0`、default 5、`--threads 20` を
+網羅しました。
+
+matched 1,000-frame counter run も luma、chroma、raw JSON、normalized
+stderr/log、2,000 個すべての ordered `fileLoc` で一致しました。total
+allocation は 98.021 GiB から 88.428 GiB へ 9.8% 減り、GC pause は
+0.994/0.998 秒、Gen2 は 289/286 回でした。baseline/candidate wall time は
+72.129/71.352 秒ですが、単一の ordered pair から speedup は主張しません。
+candidate の first/last-third working-set median は 676/874 MiB で、終盤の
+1,484 MiB peak は collection timing の影響を受けるため、resident-memory
+reduction は主張しません。startup 後の 100-frame interval 9 個は
+6.787 から 7.035 秒に収まり、bounded memory と progressive slowdown が
+ないことを示します。
 
 </details>
 

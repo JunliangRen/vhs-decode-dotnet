@@ -1440,8 +1440,14 @@ public sealed class RfDemodulator : IDisposable
             throw new ArgumentException("VHS RF boost inputs must describe one real FFT block.");
         }
 
-        double[]? highPart = BuildVhsRfHighPart(rfFiltered, envelope, options, rfTopFilter);
-        if (highPart is null)
+        // The filtered envelope owns its output, so this scratch is dead until demodulation.
+        Span<double> highPart = workspace.RawEnvelope.AsSpan(0, rfFiltered.Length);
+        if (!TryBuildVhsRfHighPart(
+                rfFiltered,
+                envelope,
+                options,
+                rfTopFilter,
+                highPart))
         {
             return false;
         }
@@ -1674,8 +1680,14 @@ public sealed class RfDemodulator : IDisposable
             throw new ArgumentException("VHS RF boost inputs must describe one complex FFT block.");
         }
 
-        double[]? highPart = BuildVhsRfHighPart(rfFiltered, envelope, options, rfTopFilter);
-        if (highPart is null)
+        // The filtered envelope owns its output, so this scratch is dead until demodulation.
+        Span<double> highPart = workspace.RawEnvelope.AsSpan(0, rfFiltered.Length);
+        if (!TryBuildVhsRfHighPart(
+                rfFiltered,
+                envelope,
+                options,
+                rfTopFilter,
+                highPart))
         {
             return false;
         }
@@ -1692,35 +1704,43 @@ public sealed class RfDemodulator : IDisposable
         return true;
     }
 
-    private static double[]? BuildVhsRfHighPart(
+    private static bool TryBuildVhsRfHighPart(
         ReadOnlySpan<double> rfFiltered,
         ReadOnlySpan<double> envelope,
         RfHighBoostOptions? options,
-        IReadOnlyList<SosSection> rfTopFilter)
+        IReadOnlyList<SosSection> rfTopFilter,
+        Span<double> highPart)
     {
         if (options is null || options.Multiplier == 0.0)
         {
-            return null;
+            return false;
         }
 
         for (int i = 0; i < envelope.Length; i++)
         {
             if (envelope[i] == 0.0)
             {
-                return null;
+                return false;
             }
+        }
+
+        if (highPart.Length != rfFiltered.Length)
+        {
+            throw new ArgumentException(
+                "VHS RF high-boost output must match the filtered RF input.",
+                nameof(highPart));
         }
 
         float envelopeMean = NumpyReduction.MeanFloat32(envelope);
         float envelopeNumerator = envelopeMean * 0.9f;
-        double[] highBand = SosFilter.ApplyForwardBackward(rfTopFilter, rfFiltered);
-        for (int i = 0; i < highBand.Length; i++)
+        SosFilter.ApplyForwardBackwardTo(rfTopFilter, rfFiltered, highPart);
+        for (int i = 0; i < highPart.Length; i++)
         {
             float envelopeScale = envelopeNumerator / (float)envelope[i];
-            highBand[i] = (highBand[i] * envelopeScale) * options.Multiplier;
+            highPart[i] = (highPart[i] * envelopeScale) * options.Multiplier;
         }
 
-        return highBand;
+        return true;
     }
 
     private bool ApplyRfHighBoostIfPresent(

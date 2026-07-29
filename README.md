@@ -2,7 +2,7 @@
 
 **[English](README.md)** | [简体中文](README.zh-CN.md) | [日本語](README.ja.md)
 
-<!-- README_SYNC: 2026-07-29.14 -->
+<!-- README_SYNC: 2026-07-29.15 -->
 
 A .NET 11 rewrite of the decode-facing parts of
 [`oyvindln/vhs-decode`](https://github.com/oyvindln/vhs-decode), targeting
@@ -112,14 +112,15 @@ separately from speed.
 | `--threads 20` | 18.330 s | 3.900 s / 4.700x | 4.745 s / 3.863x | 3.743 s / 4.897x | 4.511 s / 4.064x |
 <!-- LATEST_PERFORMANCE_END -->
 
-The latest follow-up pools the padded double-precision SOS workspace. Against
-v0.4.0-1.4.0, a matched Exact `current --threads 20` 80-frame trace reduced
-sampled managed allocation from 10.415 to 8.659 GiB (16.9%), `Double[]`
-allocation from 8.837 to 7.083 GiB (19.8%), and Gen2 collections from 44 to
-26. Six order-reversed 160-frame pairs remained throughput-neutral and matched
-all seven compatibility surfaces. A 1,000-frame run also matched the prior
-outputs while reducing allocation from 119.650 to 98.679 GiB (17.5%) without
-progressive slowdown, so the table is unchanged and no speedup is claimed.
+The latest follow-up writes the VHS RF high-boost SOS result into an existing
+worker-owned buffer. Against main `a184450`, a matched Exact
+`current --threads 20` 80-frame trace reduced sampled managed allocation from
+8.667 to 7.797 GiB (10.0%), `Double[]` allocation from 7.091 to 6.221 GiB
+(12.3%), and Gen2 collections from 36 to 33. Six order-reversed 160-frame
+pairs remained throughput-neutral and matched all seven compatibility
+surfaces. Matched 1,000-frame runs also reduced allocation from 98.021 to
+88.428 GiB (9.8%) without progressive slowdown, so the table is unchanged and
+no speedup is claimed.
 
 Each .NET cell shows median wall time followed by speedup versus Python in the
 same row; values below `1.000x` are slower. The default is **5 workers**.

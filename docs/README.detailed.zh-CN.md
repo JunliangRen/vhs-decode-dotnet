@@ -4,7 +4,7 @@
 
 [English](README.detailed.md) | **[简体中文](README.detailed.zh-CN.md)** | [日本語](README.detailed.ja.md)
 
-<!-- README_SYNC: 2026-07-29.14 -->
+<!-- README_SYNC: 2026-07-29.15 -->
 
 这是 [`oyvindln/vhs-decode`](https://github.com/oyvindln/vhs-decode)
 中解码相关部分的 .NET 11 重写，当前以 release `v0.4.0`、commit
@@ -1100,6 +1100,31 @@ Gen2 从 353 次降至 319 次。首/末三分之一区间工作集中位数为 
 中途 1,420 MiB 的瞬时峰值随后回落到 900 MiB 以下。启动后的九个
 100-frame 区间稳定在 6.800 至 6.989 秒。这证明内存有界且没有渐进减速，
 不代表常驻内存下降或稳定吞吐提升。
+
+后续 Exact 优化为 double SOS 前后向滤波新增了仅内部使用的 destination 形式，
+公开 API 仍返回独立自有结果。在 VHS RF high-boost 路径中，worker 自有的
+`RawEnvelope` 已完成包络输入用途，并且要到稍后的 demod 阶段才会再次使用；
+因此 SOS 结果和表达式不变的 float32 包络缩放会先写入该 buffer，再送入原有 FFT。
+padding、double 运算、section/sample 顺序、反转顺序、FFT 输入和输出所有权均不变，
+也没有新增保留数组。destination 路径与 section-major 参考逐 bit 一致，预热后的
+4,096-sample 调用以低于 4,096 字节为分配门禁。
+
+相对 main `a184450`，匹配的 Exact `current --threads 20` 80-frame
+`gc-verbose` trace 把采样托管分配从 8.667 GiB 降至 7.797 GiB
+（下降 10.0%），采样 `Double[]` 从 7.091 GiB 降至 6.221 GiB
+（下降 12.3%），Gen2 从 36 次降至 33 次；约 0.9 GiB 的 high-boost SOS
+结果分配链已经消失。六组反序 160-frame 配对的七个兼容面全部一致；
+基线/候选墙钟中位数 13.297/13.375 秒、CPU 中位数 101.750/101.273 秒按
+吞吐中性处理。另有 12 次门禁覆盖 v0.4.0 与 `current` 的 `--threads 0`、
+默认 5 和 `--threads 20`。
+
+匹配的 1,000-frame counters 运行在亮度、色度、原始 JSON、归一化
+stderr/日志和全部 2,000 个有序 `fileLoc` 上也完全一致。总分配从
+98.021 GiB 降至 88.428 GiB（下降 9.8%）；GC pause 为 0.994/0.998 秒，
+Gen2 为 289/286 次。基线/候选墙钟为 72.129/71.352 秒，但单组顺序运行不足以
+证明加速。候选首/末三分之一区间工作集中位数为 676/874 MiB，末段
+1,484 MiB 峰值受回收时机影响，因此不宣称常驻内存下降。启动后的九个
+100-frame 区间保持在 6.787 至 7.035 秒，证明内存有界且没有渐进减速。
 
 </details>
 
