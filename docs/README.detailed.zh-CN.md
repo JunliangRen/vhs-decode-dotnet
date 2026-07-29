@@ -4,7 +4,7 @@
 
 [English](README.detailed.md) | **[简体中文](README.detailed.zh-CN.md)** | [日本語](README.detailed.ja.md)
 
-<!-- README_SYNC: 2026-07-29.15 -->
+<!-- README_SYNC: 2026-07-30.01 -->
 
 这是 [`oyvindln/vhs-decode`](https://github.com/oyvindln/vhs-decode)
 中解码相关部分的 .NET 11 重写，当前以 release `v0.4.0`、commit
@@ -1126,6 +1126,33 @@ Gen2 为 289/286 次。基线/候选墙钟为 72.129/71.352 秒，但单组顺�
 1,484 MiB 峰值受回收时机影响，因此不宣称常驻内存下降。启动后的九个
 100-frame 区间保持在 6.787 至 7.035 秒，证明内存有界且没有渐进减速。
 
+最新一轮 Exact 优化在不改变数值语义的前提下再复用一个 worker 本地 buffer。
+sub-deemphasis 先把高通结果保存在 `Real`、解析幅度保存在 `Imaginary`，FFT 临时量
+继续使用现有 complex 工作区。demod 输入转换成 `demodSpectrum` 后，旧的
+`RawEnvelope`/紧凑 demod 内容已经失效，因此不再分配整块 `Double[]`，而是通过
+现有 destination API 把 double 精度幅度 SOS 结果写入 `RawEnvelope`。非工作区的
+公开 API、padding 选择、section/sample 与反转顺序、SOS 后表达式和返回值所有权
+均保持不变。新增 xUnit v3 预热分配测试覆盖该生命周期和确定性输出。
+
+相对 main `583d062`，匹配的 Exact `current --threads 20` 80-frame
+`gc-verbose` trace 把采样托管分配从 7.797 GiB 降至 6.926 GiB
+（下降 11.2%），采样 `Double[]` 从 6.221 GiB 降至 5.342 GiB
+（下降 14.1%），Gen2 从 33 次降至 29 次；sub-deemphasis SOS 结果分配入口
+已经消失。六组反序 160-frame 配对在亮度、色度、原始 JSON、stdout、归一化
+stderr/日志和全部有序 `fileLoc` 上一致；基线/候选墙钟中位数为
+13.845/13.404 秒，CPU 中位数为 103.258/100.133 秒，但后面的长跑没有复现
+稳定吞吐提升。另有 12 次门禁覆盖 v0.4.0 与 `current` 的 `--threads 0`、
+默认 5 和 `--threads 20`。
+
+两组相反顺序的 1,000-frame counters 配对也在亮度、色度、原始 JSON、
+归一化 stderr/日志和全部 2,000 个有序 `fileLoc` 上一致。分配下降
+11.87-12.12%，GC pause 下降 1.28-7.44%，Gen2 下降 21.50-24.35%。
+候选墙钟分别高 0.13% 和 1.35%，所以本轮按吞吐中性处理。候选首/末三分之一
+工作集中位数分别为 679/773 MiB 和 804/659 MiB，峰值为 1,517/1,516 MiB；
+采样常驻内存没有改善。合并观察的启动后 100-frame 区间保持在
+6.924 至 7.195 秒，两次运行都没有渐进增长，因此这里只证明内存有界，
+不宣称常驻内存下降。
+
 </details>
 
 <!-- SECTION: build -->
@@ -1144,7 +1171,7 @@ Gen2 为 289/286 次。基线/候选墙钟为 72.129/71.352 秒，但单组顺�
 .\tools\build-ipp-native.ps1
 dotnet restore VHSDecodeDotNet.slnx
 dotnet build VHSDecodeDotNet.slnx -c Release --no-restore
-dotnet test --solution VHSDecodeDotNet.slnx -c Release --no-build --no-restore --minimum-expected-tests 1115
+dotnet test --solution VHSDecodeDotNet.slnx -c Release --no-build --no-restore --minimum-expected-tests 1116
 ```
 
 第一条命令用于包含可选的 `ipp-fast` 原生产物；只构建 Exact 时可以省略。
@@ -1155,7 +1182,7 @@ Intel oneAPI。只含二进制的单文件发布会嵌入 `vhsdecode_ipp.dll` �
 notice，不会额外生成许可证 sidecar 文件。只构建 Exact 后端时可以省略原生构建步骤。
 
 当前正式 Release 构建为零警告、零错误。xUnit v3 项目向
-`dotnet test` 和 Visual Studio Test Explorer 暴露 **1,115** 个可独立发现的测试。
+`dotnet test` 和 Visual Studio Test Explorer 暴露 **1,116** 个可独立发现的测试。
 
 <!-- SECTION: usage -->
 

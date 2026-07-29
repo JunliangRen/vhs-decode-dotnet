@@ -4,7 +4,7 @@
 
 **[English](README.detailed.md)** | [简体中文](README.detailed.zh-CN.md) | [日本語](README.detailed.ja.md)
 
-<!-- README_SYNC: 2026-07-29.15 -->
+<!-- README_SYNC: 2026-07-30.01 -->
 
 .NET 11 rewrite of the decode-facing parts of
 [`oyvindln/vhs-decode`](https://github.com/oyvindln/vhs-decode), focused on
@@ -1403,6 +1403,39 @@ late 1,484 MiB peak reflected collection timing; no resident-memory reduction
 is claimed. Its nine post-startup 100-frame intervals stayed between 6.787
 and 7.035 s, supporting bounded memory and no progressive slowdown.
 
+The latest Exact pass reuses one more worker-local buffer without changing
+numeric semantics. Sub-deemphasis first keeps its high-pass signal in
+`Real`, analytic magnitude in `Imaginary`, and FFT scratch in the existing
+complex workspace. Once the demodulated input has been transformed into
+`demodSpectrum`, the old `RawEnvelope`/compact-demod contents are dead.
+The unchanged double-precision amplitude SOS result is therefore written to
+`RawEnvelope` through the existing destination API instead of allocating a
+new full-block `Double[]`. The non-workspace public API, padding choice,
+section/sample and reversal order, post-SOS expressions, and returned output
+ownership are unchanged. An xUnit v3 warm-block allocation test covers this
+lifetime and deterministic output.
+
+Against main `583d062`, a matched Exact `current --threads 20` 80-frame
+`gc-verbose` trace reduced sampled managed allocation from 7.797 to
+6.926 GiB (11.2%), sampled `Double[]` allocation from 6.221 to 5.342 GiB
+(14.1%), and Gen2 collections from 33 to 29. The sub-deemphasis SOS
+result-allocation caller disappeared. Six order-reversed 160-frame pairs
+matched luma, chroma, raw JSON, stdout, normalized stderr/logs, and every
+ordered `fileLoc`. Their baseline/candidate wall medians were
+13.845/13.404 s and CPU medians were 103.258/100.133 s, but the longer runs
+below did not reproduce a stable throughput gain. Twelve additional gates
+covered v0.4.0 and `current` at `--threads 0`, default 5, and `--threads 20`.
+
+Two opposite-order 1,000-frame counter pairs also matched luma, chroma, raw
+JSON, normalized stderr/logs, and all 2,000 ordered `fileLoc` values.
+Allocation fell by 11.87-12.12%, GC pause by 1.28-7.44%, and Gen2
+collections by 21.50-24.35%. Candidate wall time was 0.13% and 1.35% higher,
+so this pass is classified as throughput-neutral. Candidate first/last-third
+working-set medians were 679/773 MiB and 804/659 MiB, with 1,517/1,516 MiB
+peaks; sampled resident memory did not improve. The combined post-startup
+100-frame intervals stayed between 6.924 and 7.195 s and neither run grew
+progressively, supporting bounded memory rather than a resident-memory claim.
+
 </details>
 
 <!-- SECTION: build -->
@@ -1423,7 +1456,7 @@ Requirements:
 .\tools\build-ipp-native.ps1
 dotnet restore VHSDecodeDotNet.slnx
 dotnet build VHSDecodeDotNet.slnx -c Release --no-restore
-dotnet test --solution VHSDecodeDotNet.slnx -c Release --no-build --no-restore --minimum-expected-tests 1115
+dotnet test --solution VHSDecodeDotNet.slnx -c Release --no-build --no-restore --minimum-expected-tests 1116
 ```
 
 The first command includes the optional `ipp-fast` native artifact; omit it for
@@ -1436,7 +1469,7 @@ deployment computer. Binary-only single-file releases embed
 sidecar license files. An Exact-only build may omit the native build step.
 
 The current formal Release build has zero warnings and errors. The xUnit v3
-project exposes **1,115** independently discoverable tests to both
+project exposes **1,116** independently discoverable tests to both
 `dotnet test` and Visual Studio Test Explorer.
 
 <!-- SECTION: usage -->

@@ -2211,9 +2211,26 @@ public sealed class RfDemodulator : IDisposable
             order: 1,
             options.AmplitudeLowPassHz / nyquistHz);
         int defaultPadLength = SosFilter.DefaultPadLength(amplitudeLowPass);
-        amplitude = amplitude.Length > defaultPadLength
-            ? SosFilter.ApplyForwardBackward(amplitudeLowPass, amplitude)
-            : SosFilter.ApplyForwardBackward(amplitudeLowPass, amplitude, padLength: 0);
+        int? padLength = amplitude.Length > defaultPadLength ? null : 0;
+        if (workspace is null)
+        {
+            amplitude = SosFilter.ApplyForwardBackward(
+                amplitudeLowPass,
+                amplitude,
+                padLength);
+        }
+        else
+        {
+            // The caller has already transformed demodRaw into demodSpectrum, so
+            // RawEnvelope no longer carries observable data at this stage.
+            SosFilter.ApplyForwardBackwardTo(
+                amplitudeLowPass,
+                amplitude,
+                workspace.RawEnvelope,
+                padLength);
+            amplitude = workspace.RawEnvelope;
+        }
+
         for (int i = 0; i < amplitude.Length; i++)
         {
             amplitude[i] = Math.Max(0.0, amplitude[i]);

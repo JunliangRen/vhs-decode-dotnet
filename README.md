@@ -2,7 +2,7 @@
 
 **[English](README.md)** | [简体中文](README.zh-CN.md) | [日本語](README.ja.md)
 
-<!-- README_SYNC: 2026-07-29.15 -->
+<!-- README_SYNC: 2026-07-30.01 -->
 
 A .NET 11 rewrite of the decode-facing parts of
 [`oyvindln/vhs-decode`](https://github.com/oyvindln/vhs-decode), targeting
@@ -38,7 +38,7 @@ evidence, and remaining gaps.
   EIAJ, and supported PAL/NTSC variants.
 - TBC utility tools, the double-click GUI, and developer plotting windows are
   intentionally out of scope.
-- The Visual Studio 2026 `.slnx` solution has **1,115** standard xUnit v3 tests
+- The Visual Studio 2026 `.slnx` solution has **1,116** standard xUnit v3 tests
   that are visible in Test Explorer and runnable with `dotnet test`.
 
 <!-- SECTION: start -->
@@ -112,15 +112,15 @@ separately from speed.
 | `--threads 20` | 18.330 s | 3.900 s / 4.700x | 4.745 s / 3.863x | 3.743 s / 4.897x | 4.511 s / 4.064x |
 <!-- LATEST_PERFORMANCE_END -->
 
-The latest follow-up writes the VHS RF high-boost SOS result into an existing
-worker-owned buffer. Against main `a184450`, a matched Exact
+The latest Exact follow-up reuses a worker-owned buffer for the VHS
+sub-deemphasis amplitude SOS result. Against main `583d062`, a matched
 `current --threads 20` 80-frame trace reduced sampled managed allocation from
-8.667 to 7.797 GiB (10.0%), `Double[]` allocation from 7.091 to 6.221 GiB
-(12.3%), and Gen2 collections from 36 to 33. Six order-reversed 160-frame
-pairs remained throughput-neutral and matched all seven compatibility
-surfaces. Matched 1,000-frame runs also reduced allocation from 98.021 to
-88.428 GiB (9.8%) without progressive slowdown, so the table is unchanged and
-no speedup is claimed.
+7.797 to 6.926 GiB (11.2%), `Double[]` allocation from 6.221 to 5.342 GiB
+(14.1%), and Gen2 collections from 33 to 29. Six order-reversed 160-frame
+pairs matched all seven compatibility surfaces. Opposite-order 1,000-frame
+runs reduced allocation by 11.9-12.1% and Gen2 by 21.5-24.4% without
+progressive slowdown. Throughput remained neutral and sampled working set did
+not improve, so the table is unchanged and no speedup is claimed.
 
 Each .NET cell shows median wall time followed by speedup versus Python in the
 same row; values below `1.000x` are slower. The default is **5 workers**.
@@ -156,7 +156,7 @@ The pinned SDK is .NET `11.0.100-preview.6.26359.118`.
 dotnet restore VHSDecodeDotNet.slnx
 dotnet build VHSDecodeDotNet.slnx -c Release --no-restore
 dotnet test --solution VHSDecodeDotNet.slnx -c Release `
-  --no-build --no-restore --minimum-expected-tests 1115
+  --no-build --no-restore --minimum-expected-tests 1116
 ```
 
 Open `VHSDecodeDotNet.slnx` in Visual Studio 2026 to build, debug, and run the
