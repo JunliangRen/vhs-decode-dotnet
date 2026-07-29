@@ -45,6 +45,29 @@ internal static class PocketFftComplex32
             : new Plan(input.Length, input.Length).Transform(input);
     }
 
+    internal static Complex32[] ForwardDuccOwned(
+        Complex32[] input,
+        Complex32[] scratch,
+        int workerThreads = 1)
+    {
+        ArgumentNullException.ThrowIfNull(input);
+        ArgumentNullException.ThrowIfNull(scratch);
+        ValidateLength(input.Length, nameof(input));
+        ValidateTransformScratch(input, scratch);
+        if (input.Length is > 300 and <= 100_000)
+        {
+            return TransformDuccVectorized(input);
+        }
+
+        return input.Length > 10_000
+            ? TransformLargeMultipassOwned(
+                input,
+                input.Length,
+                workerThreads,
+                scratch)
+            : new Plan(input.Length, input.Length).Transform(input);
+    }
+
     internal static Complex32[] ForwardAnyLengthDucc(
         ReadOnlySpan<Complex32> input,
         int workerThreads = 1)
@@ -80,6 +103,28 @@ internal static class PocketFftComplex32
             workerThreads);
     }
 
+    internal static Complex32[] ForwardAnyLengthDuccOwned(
+        Complex32[] input,
+        Complex32[] scratch,
+        int workerThreads = 1)
+    {
+        ArgumentNullException.ThrowIfNull(input);
+        ArgumentNullException.ThrowIfNull(scratch);
+        ValidateSupportedLength(input.Length, nameof(input));
+        ValidateTransformScratch(input, scratch);
+        if (input.Length is > 300 and <= 100_000
+            && input.Length % 4 == 0)
+        {
+            return TransformDuccVectorized(input);
+        }
+
+        return TransformWithRootLengthOwned(
+            input,
+            input.Length,
+            workerThreads,
+            scratch);
+    }
+
     internal static Complex32[] InverseAnyLengthDucc(
         ReadOnlySpan<Complex32> input,
         int workerThreads = 1)
@@ -113,7 +158,8 @@ internal static class PocketFftComplex32
 
         return TransformConjugatedBackwardOwned(
             conjugated,
-            workerThreads);
+            scratch: null,
+            workerThreads: workerThreads);
     }
 
     internal static Complex32[] BackwardAnyLengthDuccOwned(
@@ -131,16 +177,45 @@ internal static class PocketFftComplex32
 
         return TransformConjugatedBackwardOwned(
             input,
+            scratch: null,
+            workerThreads: workerThreads);
+    }
+
+    internal static Complex32[] BackwardAnyLengthDuccOwned(
+        Complex32[] input,
+        Complex32[] scratch,
+        int workerThreads = 1)
+    {
+        ArgumentNullException.ThrowIfNull(input);
+        ArgumentNullException.ThrowIfNull(scratch);
+        ValidateSupportedLength(input.Length, nameof(input));
+        ValidateTransformScratch(input, scratch);
+        for (int i = 0; i < input.Length; i++)
+        {
+            input[i] = new Complex32(
+                input[i].Real,
+                -input[i].Imaginary);
+        }
+
+        return TransformConjugatedBackwardOwned(
+            input,
+            scratch,
             workerThreads);
     }
 
     private static Complex32[] TransformConjugatedBackwardOwned(
         Complex32[] conjugated,
+        Complex32[]? scratch,
         int workerThreads)
     {
-        Complex32[] transformed = ForwardAnyLengthDuccOwned(
-            conjugated,
-            workerThreads);
+        Complex32[] transformed = scratch is null
+            ? ForwardAnyLengthDuccOwned(
+                conjugated,
+                workerThreads)
+            : ForwardAnyLengthDuccOwned(
+                conjugated,
+                scratch,
+                workerThreads);
         for (int i = 0; i < transformed.Length; i++)
         {
             float imaginary = transformed[i].Imaginary;
@@ -175,7 +250,8 @@ internal static class PocketFftComplex32
     private static Complex32[] TransformWithRootLengthOwned(
         Complex32[] input,
         int rootLength,
-        int workerThreads = 1)
+        int workerThreads = 1,
+        Complex32[]? scratch = null)
     {
         ValidateSupportedLength(input.Length, nameof(input));
         if (input.Length > 10_000)
@@ -183,7 +259,8 @@ internal static class PocketFftComplex32
             return TransformLargeMultipassOwned(
                 input,
                 rootLength,
-                workerThreads);
+                workerThreads,
+                scratch);
         }
 
         return RootedPlans.GetOrAdd(
@@ -204,13 +281,25 @@ internal static class PocketFftComplex32
     private static Complex32[] TransformLargeMultipassOwned(
         Complex32[] source,
         int rootLength,
-        int workerThreads)
+        int workerThreads,
+        Complex32[]? scratch = null)
     {
         int length = source.Length;
         int[] packets = BuildBalancedPackets(length);
         var roots = new SinCos2PiByN(rootLength);
         int rootFactor = rootLength / length;
-        var destination = new Complex32[length];
+        Complex32[] destination;
+        if (scratch is null)
+        {
+            destination = new Complex32[length];
+        }
+        else
+        {
+            ValidateTransformScratch(source, scratch);
+            scratch.AsSpan().Clear();
+            destination = scratch;
+        }
+
         int l1 = 1;
 
         foreach (int packetLength in packets)
@@ -319,6 +408,25 @@ internal static class PocketFftComplex32
         }
 
         return source;
+    }
+
+    private static void ValidateTransformScratch(
+        Complex32[] input,
+        Complex32[] scratch)
+    {
+        if (ReferenceEquals(input, scratch))
+        {
+            throw new ArgumentException(
+                "Transform input and scratch buffers must be distinct.",
+                nameof(scratch));
+        }
+
+        if (scratch.Length != input.Length)
+        {
+            throw new ArgumentException(
+                "Transform scratch length must match the input length.",
+                nameof(scratch));
+        }
     }
 
     private static void TransformFirstPassPacket(
