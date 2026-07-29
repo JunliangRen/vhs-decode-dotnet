@@ -374,22 +374,22 @@ wall-time reduction の順です。
 
 | CLI mode（workers） | Python v0.4.0 | Exact + v0.4.0 | Exact + current | IPP-fast + v0.4.0 | IPP-fast + current |
 | --- | ---: | ---: | ---: | ---: | ---: |
-| default（5） | 16.983 s | 6.214 s / 2.733x / 63.4% | 7.581 s / 2.240x / 55.4% | 6.231 s / 2.726x / 63.3% | 7.599 s / 2.235x / 55.3% |
-| `--threads 1` | 21.263 s | 19.228 s / 1.106x / 9.6% | 21.855 s / 0.973x / 2.8% slower | 18.713 s / 1.136x / 12.0% | 21.265 s / 1.000x / 0.01% slower |
-| `--threads 5` | 16.880 s | 6.203 s / 2.721x / 63.2% | 7.724 s / 2.185x / 54.2% | 6.342 s / 2.661x / 62.4% | 7.511 s / 2.247x / 55.5% |
-| `--threads 10` | 17.612 s | 4.689 s / 3.756x / 73.4% | 5.889 s / 2.991x / 66.6% | 4.543 s / 3.877x / 74.2% | 5.747 s / 3.064x / 67.4% |
-| `--threads 20` | 18.330 s | 3.900 s / 4.700x / 78.7% | 4.745 s / 3.863x / 74.1% | 3.743 s / 4.897x / 79.6% | 4.511 s / 4.064x / 75.4% |
+| default（5） | 16.983 s | 5.999 s / 2.831x / 64.7% | 7.904 s / 2.149x / 53.5% | 5.888 s / 2.884x / 65.3% | 7.421 s / 2.289x / 56.3% |
+| `--threads 1` | 21.263 s | 19.450 s / 1.093x / 8.5% | 22.287 s / 0.954x / 4.8% 遅い | 18.770 s / 1.133x / 11.7% | 21.251 s / 1.001x / 0.1% |
+| `--threads 5` | 16.880 s | 6.363 s / 2.653x / 62.3% | 7.653 s / 2.206x / 54.7% | 5.850 s / 2.886x / 65.3% | 7.540 s / 2.239x / 55.3% |
+| `--threads 10` | 17.612 s | 4.600 s / 3.829x / 73.9% | 5.864 s / 3.003x / 66.7% | 4.642 s / 3.794x / 73.6% | 6.061 s / 2.906x / 65.6% |
+| `--threads 20` | 18.330 s | 3.684 s / 4.976x / 79.9% | 4.854 s / 3.777x / 73.5% | 3.760 s / 4.875x / 79.5% | 4.769 s / 3.843x / 74.0% |
 
 benchmark host は Intel Core Ultra 7 265K（20 logical processor）、
 Windows 11 25H2 build 26220.8925、.NET SDK/runtime
 `11.0.100-preview.6.26359.118` です。Python 自体は変更されていないため、
 Python 列は以前の fixed matrix median を保持し、4 つの .NET 列は 60 回の
-interleaved run で再測定しました。candidate は `2b0b7e8` に下記の
-sub-deemphasis analytic workspace 最適化を加えたもので、single-file
+interleaved run で再測定しました。candidate は `ffd2660` に下記の
+worker-local Complex32 FFT packet-output 最適化を加えたもので、single-file
 `decode.exe` SHA-256 は
-`BC322E7958DE980690C1A787B8EB5ACA7C80D1E71DDCB4D956A821066FF5B889`
-でした。下記の isolated v1.3.8 A/B は throughput-neutral だったため、以前の
-public matrix からの変化をこの workspace 最適化だけに帰属させません。
+`DCD12A56710374A4F792FF03E2E2A3F8C2C714C02D1C29FFFA3399B4FACDE5A5`
+でした。fixed 40-frame matrix には startup cost と run ごとの spread が含まれ、
+下記の反対順序 1,000-frame pair が stable whole-pipeline A/B を示します。
 Python 3.14.0 は NumPy 2.4.6、SciPy 1.18.0、Numba 0.66.0、
 python-soxr 1.1.0 を使用しました。共通引数は次のとおりです。
 
@@ -1513,6 +1513,43 @@ whole-pipeline allocation、resident-memory、speedup は主張しません。
 candidate の startup 後 100-frame interval は 6.905 から 7.159 秒に収まり、
 progressive slowdown はありません。この pass は bounded small-object
 elimination として保持し、whole-pipeline-throughput-neutral と判断します。
+
+次の Exact PocketFFT pass は、mixed-radix packet の変換結果を既存の
+worker-local `Complex32` packet span へ書き戻します。plan は入力を従来どおり
+thread-static `Value[]` workspace へコピーし、同じ `Execute` を実行してから
+packet へ出力します。root、twiddle、arithmetic、packet order、normalization、
+data type、ownership は変更していません。既存 SciPy fixture、serial/parallel、
+owned-output hash は exact のままで、warm large-multipass allocation gate は
+4 MiB から 64 KiB へ厳格化しました。
+
+順序を反転した independent-process microbenchmark 8 組は、それぞれ 239,580-point
+FFT を 200 回、20 workers で実行しました。baseline/candidate allocation median
+は 776,701,680/5,062,408 bytes（99.35% 減）、output hash は一致しました。
+wall median は 649.18/631.10 ms でしたが、勝敗は 4 対 4 のため isolated timing
+は neutral と判断します。v0.4.0/current の 1、default 5、20 workers を網羅する
+real gate 12 件と interleaved 160-frame pair 6 組も、luma、chroma、raw JSON、
+stdout、normalized stderr/log、すべての ordered `fileLoc` で一致しました。
+short-pair wall median は 14.03/13.66 秒、勝敗は 3 対 3、CPU median は
+102.97/103.95 秒のため、short timing も neutral と判断します。
+
+matched 40-frame/80-field allocation trace では、sampled total allocation が
+3.706 から 3.366 GiB、events が 15,543 から 12,026、Gen0 start が 30 から 6
+へ減りました。sampled `Complex32[]` は 364.328 MiB/3,559 events から
+2.747 MiB/3 events になり、baseline の `Plan.Transform` caller
+163.263 MiB/1,606 events は消えました。Gen1 は 1/1、Gen2 は 14/17 で、
+collection timing の差から Gen2 改善は主張しません。この trace も全 output、
+JSON、ordered `fileLoc`、normalized log surface で一致しました。
+
+反対順序の 1,000-frame pair 2 組は、combined wall time を
+144.526 から 136.988 秒（5.22% 減、1.055x throughput）、counter allocation を
+154.553 から 140.373 GiB（9.17% 減）、GC pause を 1.688 から 0.920 秒
+（45.47% 減）、Gen0 collection を 1,483 から 304（79.5% 減）へ移しました。
+全 artifact/log surface と 2,000 個の ordered `fileLoc` は exact です。
+candidate の startup 後 100-frame interval は 6.500 から 6.860 秒で、sampled
+working set は bounded のまま progressive slowdown はありません。Gen2 timing と
+resident-memory reduction は主張しません。この pass は allocation/GC と stable
+long-run throughput の改善として保持します。上記 five-path overview は 60 回の
+.NET run で更新し、全 run が同じ compatibility gate を通過しました。
 
 </details>
 

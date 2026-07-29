@@ -448,10 +448,10 @@ internal static class PocketFftComplex32
             packet[m] = source[packetIndex + (packetStride * m)];
         }
 
-        Complex32[] transformed = packetPlan.Transform(packet);
+        packetPlan.TransformInPlace(packet);
         for (int m = 0; m < packetLength; m++)
         {
-            Complex32 value = transformed[m];
+            Complex32 value = packet[m];
             if (packetIndex != 0 && m != 0)
             {
                 Value rotated = SpecialMultiply(
@@ -477,11 +477,11 @@ internal static class PocketFftComplex32
     {
         int inputOffset = packetIndex * packetLength;
         source.AsSpan(inputOffset, packetLength).CopyTo(packet);
-        Complex32[] transformed = packetPlan.Transform(packet);
+        packetPlan.TransformInPlace(packet);
         for (int m = 0; m < packetLength; m++)
         {
             destination[packetIndex + (m * packetStride)] =
-                transformed[m];
+                packet[m];
         }
     }
 
@@ -644,6 +644,26 @@ internal static class PocketFftComplex32
             }
 
             return output;
+        }
+
+        internal void TransformInPlace(Span<Complex32> values)
+        {
+            Value[] planValues =
+                EnsureCapacity(ref _planValues, _length);
+            for (int i = 0; i < _length; i++)
+            {
+                planValues[i] = new Value(
+                    values[i].Real,
+                    values[i].Imaginary);
+            }
+
+            Execute(planValues);
+            for (int i = 0; i < _length; i++)
+            {
+                values[i] = new Complex32(
+                    planValues[i].Real,
+                    planValues[i].Imaginary);
+            }
         }
 
         internal static Complex32[] TransformInitialRadix4(

@@ -394,24 +394,23 @@ followed by speedup and wall-time reduction versus Python in the same row:
 
 | CLI mode (workers) | Python v0.4.0 | Exact + v0.4.0 | Exact + current | IPP-fast + v0.4.0 | IPP-fast + current |
 | --- | ---: | ---: | ---: | ---: | ---: |
-| default (5) | 16.983 s | 6.214 s / 2.733x / 63.4% | 7.581 s / 2.240x / 55.4% | 6.231 s / 2.726x / 63.3% | 7.599 s / 2.235x / 55.3% |
-| `--threads 1` | 21.263 s | 19.228 s / 1.106x / 9.6% | 21.855 s / 0.973x / 2.8% slower | 18.713 s / 1.136x / 12.0% | 21.265 s / 1.000x / 0.01% slower |
-| `--threads 5` | 16.880 s | 6.203 s / 2.721x / 63.2% | 7.724 s / 2.185x / 54.2% | 6.342 s / 2.661x / 62.4% | 7.511 s / 2.247x / 55.5% |
-| `--threads 10` | 17.612 s | 4.689 s / 3.756x / 73.4% | 5.889 s / 2.991x / 66.6% | 4.543 s / 3.877x / 74.2% | 5.747 s / 3.064x / 67.4% |
-| `--threads 20` | 18.330 s | 3.900 s / 4.700x / 78.7% | 4.745 s / 3.863x / 74.1% | 3.743 s / 4.897x / 79.6% | 4.511 s / 4.064x / 75.4% |
+| default (5) | 16.983 s | 5.999 s / 2.831x / 64.7% | 7.904 s / 2.149x / 53.5% | 5.888 s / 2.884x / 65.3% | 7.421 s / 2.289x / 56.3% |
+| `--threads 1` | 21.263 s | 19.450 s / 1.093x / 8.5% | 22.287 s / 0.954x / 4.8% slower | 18.770 s / 1.133x / 11.7% | 21.251 s / 1.001x / 0.1% |
+| `--threads 5` | 16.880 s | 6.363 s / 2.653x / 62.3% | 7.653 s / 2.206x / 54.7% | 5.850 s / 2.886x / 65.3% | 7.540 s / 2.239x / 55.3% |
+| `--threads 10` | 17.612 s | 4.600 s / 3.829x / 73.9% | 5.864 s / 3.003x / 66.7% | 4.642 s / 3.794x / 73.6% | 6.061 s / 2.906x / 65.6% |
+| `--threads 20` | 18.330 s | 3.684 s / 4.976x / 79.9% | 4.854 s / 3.777x / 73.5% | 3.760 s / 4.875x / 79.5% | 4.769 s / 3.843x / 74.0% |
 
 The benchmark host was an Intel Core Ultra 7 265K with 20 logical processors,
 Windows 11 25H2 build 26220.8925, and .NET SDK/runtime
 `11.0.100-preview.6.26359.118`. The Python column retains the prior fixed-matrix
 medians because Python did not change; all four .NET columns were refreshed
-with 60 interleaved runs. The candidate was based on `2b0b7e8` plus the
-sub-deemphasis analytic-workspace optimization described below; its
+with 60 interleaved runs. The candidate was based on `ffd2660` plus the
+worker-local Complex32 FFT packet-output optimization described below; its
 single-file `decode.exe` SHA-256 was
-`BC322E7958DE980690C1A787B8EB5ACA7C80D1E71DDCB4D956A821066FF5B889`.
-Because the isolated v1.3.8 A/B result below was throughput-neutral, changes
-from the previous public matrix are not attributed solely to this workspace
-optimization. Python 3.14.0 used NumPy 2.4.6, SciPy 1.18.0, Numba 0.66.0,
-and python-soxr
+`DCD12A56710374A4F792FF03E2E2A3F8C2C714C02D1C29FFFA3399B4FACDE5A5`.
+The fixed 40-frame matrix includes startup cost and per-run spread; the
+opposite-order 1,000-frame pairs below provide the stable whole-pipeline A/B.
+Python 3.14.0 used NumPy 2.4.6, SciPy 1.18.0, Numba 0.66.0, and python-soxr
 1.1.0. The shared arguments were:
 
 ```text
@@ -1556,6 +1555,45 @@ memory, or speedup claim is made. Candidate post-startup 100-frame intervals
 stayed between 6.905 and 7.159 s without progressive slowdown. The pass is
 retained as a bounded small-object elimination and classified as
 whole-pipeline-throughput-neutral.
+
+The next Exact PocketFFT pass writes each mixed-radix packet result back into
+its existing worker-local `Complex32` packet span. The plan still copies input
+into its thread-static `Value[]` workspace, runs the same `Execute`, and then
+writes the result back to the packet. Roots, twiddles, arithmetic, packet
+order, normalization, data type, and ownership are unchanged. Existing SciPy
+fixture, serial/parallel, and owned-output hashes remain exact, while the warm
+large-multipass allocation gate is tightened from 4 MiB to 64 KiB.
+
+Eight order-reversed independent-process microbenchmark pairs each ran 200
+239,580-point transforms with 20 workers. Baseline/candidate median allocation
+was 776,701,680/5,062,408 bytes, a 99.35% reduction, with identical output
+hashes. Wall medians were 649.18/631.10 ms, but the split was four wins each,
+so isolated timing is classified as neutral. Twelve real gates covered
+v0.4.0/current at one, default-five, and 20 workers. Six interleaved 160-frame
+pairs matched luma, chroma, raw JSON, stdout, normalized stderr/logs, and every
+ordered `fileLoc`. Short-pair wall medians were 14.03/13.66 s with three wins
+each, and CPU medians were 102.97/103.95 s, so short timing is also neutral.
+
+Matched 40-frame/80-field allocation traces reduced sampled total allocation
+from 3.706 to 3.366 GiB, events from 15,543 to 12,026, and Gen0 starts from 30
+to 6. Sampled `Complex32[]` allocation fell from 364.328 MiB across 3,559
+events to 2.747 MiB across three events; the baseline's 163.263 MiB across
+1,606 `Plan.Transform` caller events disappeared. Gen1 starts were 1/1 and
+Gen2 starts were 14/17, so no Gen2 improvement is claimed across differing
+collection timing. The traces matched every output, JSON, ordered `fileLoc`,
+and normalized-log surface.
+
+Two opposite-order 1,000-frame pairs reduced combined wall time from 144.526
+to 136.988 s, a 5.22% reduction and 1.055x throughput. Counter allocation fell
+from 154.553 to 140.373 GiB (9.17%), GC pause from 1.688 to 0.920 s (45.47%),
+and Gen0 collections from 1,483 to 304 (79.5%). Every artifact/log surface and
+all 2,000 ordered `fileLoc` values remained exact. Candidate post-startup
+100-frame intervals stayed between 6.500 and 6.860 s, sampled working sets
+remained bounded, and there was no progressive slowdown. No Gen2-timing or
+resident-memory reduction is claimed. The pass is retained as an
+allocation/GC and stable long-run throughput improvement. The five-path
+overview above was refreshed with 60 .NET runs, all of which passed the same
+compatibility gate.
 
 </details>
 

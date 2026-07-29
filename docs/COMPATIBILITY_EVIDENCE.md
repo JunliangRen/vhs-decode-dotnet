@@ -1856,6 +1856,19 @@ possible capture has already been proven byte-for-byte identical.
   `FloatSosSection[]` events disappeared; whole-pipeline counters and timing
   remained noisy/neutral, and post-startup intervals showed no progressive
   slowdown
+- mixed-radix PocketFFT packet transforms now write results back into their
+  existing worker-local `Complex32` packet spans. The unchanged plan copies
+  input into thread-static `Value[]`, executes the same roots, twiddles,
+  arithmetic, ordering, and normalization, then writes back without allocating
+  a result array. Existing SciPy and ownership hashes remain exact; warm
+  large-multipass allocation fell below 64 KiB. Eight reversed microbenchmark
+  pairs reduced median allocation by 99.35%, while isolated timing was neutral.
+  Twelve v0.4.0/current one/default-five/20-worker gates, six interleaved
+  160-frame pairs, matched traces, and two opposite-order 1,000-frame pairs
+  matched every applicable artifact/log surface and ordered `fileLoc`.
+  Long-pair wall time fell 5.22%, counter allocation 9.17%, GC pause 45.47%,
+  and Gen0 collections 79.5%; post-startup intervals stayed between 6.500 and
+  6.860 s without progressive slowdown
 - one-frame non-default NTSC VHS fixtures are also byte-exact for
   `--sharpness 20`, `--fm_audio_notch 10`, and the combined
   `--high_boost 1.3 --sharpness 20 --nld --sd` path; the stateful sharpness

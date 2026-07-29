@@ -105,22 +105,21 @@ separately from speed.
 <!-- LATEST_PERFORMANCE_BEGIN -->
 | CLI mode (workers) | Python v0.4.0 | Exact + v0.4.0 | Exact + current | IPP-fast + v0.4.0 | IPP-fast + current |
 | --- | ---: | ---: | ---: | ---: | ---: |
-| default (5) | 16.983 s | 6.214 s / 2.733x | 7.581 s / 2.240x | 6.231 s / 2.726x | 7.599 s / 2.235x |
-| `--threads 1` | 21.263 s | 19.228 s / 1.106x | 21.855 s / 0.973x | 18.713 s / 1.136x | 21.265 s / 1.000x |
-| `--threads 5` | 16.880 s | 6.203 s / 2.721x | 7.724 s / 2.185x | 6.342 s / 2.661x | 7.511 s / 2.247x |
-| `--threads 10` | 17.612 s | 4.689 s / 3.756x | 5.889 s / 2.991x | 4.543 s / 3.877x | 5.747 s / 3.064x |
-| `--threads 20` | 18.330 s | 3.900 s / 4.700x | 4.745 s / 3.863x | 3.743 s / 4.897x | 4.511 s / 4.064x |
+| default (5) | 16.983 s | 5.999 s / 2.831x | 7.904 s / 2.149x | 5.888 s / 2.884x | 7.421 s / 2.289x |
+| `--threads 1` | 21.263 s | 19.450 s / 1.093x | 22.287 s / 0.954x | 18.770 s / 1.133x | 21.251 s / 1.001x |
+| `--threads 5` | 16.880 s | 6.363 s / 2.653x | 7.653 s / 2.206x | 5.850 s / 2.886x | 7.540 s / 2.239x |
+| `--threads 10` | 17.612 s | 4.600 s / 3.829x | 5.864 s / 3.003x | 4.642 s / 3.794x | 6.061 s / 2.906x |
+| `--threads 20` | 18.330 s | 3.684 s / 4.976x | 4.854 s / 3.777x | 3.760 s / 4.875x | 4.769 s / 3.843x |
 <!-- LATEST_PERFORMANCE_END -->
 
-The latest Exact follow-up converts float32 SOS coefficients into a bounded
-stack-backed span through 32 sections; larger filters keep a heap fallback.
-Casts, float expressions, and sample/section order remain unchanged. A focused
-benchmark reduced warm allocation from about 72 bytes to zero per call, while
-timing stayed neutral; a 40-frame/80-field trace removed 2.538 MiB across 25
-sampled `FloatSosSection[]` events. Twelve profile/thread gates, six interleaved
-160-frame pairs, and two opposite-order 1,000-frame pairs remained exact.
-Whole-pipeline timing and counter totals stayed within measurement noise, with
-no progressive slowdown, so the performance table remains unchanged.
+The latest Exact follow-up writes each mixed-radix Complex32 FFT packet result
+back into its existing worker-local buffer instead of allocating a temporary
+array. Arithmetic and packet order remain unchanged. A matched trace reduced
+sampled `Complex32[]` allocation from 364.328 to 2.747 MiB. Twelve
+profile/thread gates, six interleaved 160-frame pairs, and two opposite-order
+1,000-frame pairs remained exact. The long pairs reduced combined wall time
+from 144.526 to 136.988 s (5.22%) and counter allocation by 9.17%, with no
+progressive slowdown. The five-path table above was refreshed with 60 runs.
 
 Each .NET cell shows median wall time followed by speedup versus Python in the
 same row; values below `1.000x` are slower. The default is **5 workers**.
