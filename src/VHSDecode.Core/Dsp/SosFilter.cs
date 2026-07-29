@@ -189,10 +189,15 @@ public static class SosFilter
             throw new ArgumentOutOfRangeException(nameof(padLength));
         }
 
+        if (edge != 0 && input.Length <= edge)
+        {
+            throw new ArgumentException("Input length must be greater than pad length.");
+        }
+
         double[]? rented = null;
         try
         {
-            int extendedLength = input.Length + (edge * 2);
+            int extendedLength = checked(input.Length + (edge * 2));
             double[] extendedArray;
             if (edge == 0)
             {
@@ -200,11 +205,6 @@ public static class SosFilter
             }
             else
             {
-                if (input.Length <= edge)
-                {
-                    throw new ArgumentException("Input length must be greater than pad length.");
-                }
-
                 rented = ArrayPool<double>.Shared.Rent(extendedLength);
                 extendedArray = rented;
                 WriteOddExtension(input, edge, extendedArray.AsSpan(0, extendedLength));
@@ -695,7 +695,7 @@ public static class SosFilter
             throw new ArgumentException("Input length must be greater than pad length.");
         }
 
-        int outputLength = input.Length + (edge * 2);
+        int outputLength = checked(input.Length + (edge * 2));
         if (output.Length < outputLength)
         {
             throw new ArgumentException("Output span is shorter than the extended input.", nameof(output));
