@@ -635,9 +635,17 @@ public static class PocketFftComplex
             Value[] twiddles,
             bool forward)
         {
+            int outputStride = ido * l1;
             for (int k = 0; k < l1; k++)
             {
-                Pass8FirstIndex(ido, l1, input, output, k, forward);
+                Pass8FirstIndex(
+                    input,
+                    output,
+                    ido * 8 * k,
+                    ido * k,
+                    ido,
+                    outputStride,
+                    forward);
                 for (int i = 1; i < ido; i++)
                 {
                     Pair(
@@ -703,23 +711,31 @@ public static class PocketFftComplex
         }
 
         private static void Pass8FirstIndex(
-            int ido,
-            int l1,
             Value[] input,
             Value[] output,
-            int k,
+            int inputBase,
+            int outputBase,
+            int inputStride,
+            int outputStride,
             bool forward)
         {
+            int input1 = inputBase + inputStride;
+            int input2 = input1 + inputStride;
+            int input3 = input2 + inputStride;
+            int input4 = input3 + inputStride;
+            int input5 = input4 + inputStride;
+            int input6 = input5 + inputStride;
+            int input7 = input6 + inputStride;
             Pair(
                 out Value a1,
                 out Value a5,
-                input[InputIndex(0, 1, k, ido, 8)],
-                input[InputIndex(0, 5, k, ido, 8)]);
+                input[input1],
+                input[input5]);
             Pair(
                 out Value a3,
                 out Value a7,
-                input[InputIndex(0, 3, k, ido, 8)],
-                input[InputIndex(0, 7, k, ido, 8)]);
+                input[input3],
+                input[input7]);
             PairInPlace(ref a1, ref a3);
             a3 = RotateX90(a3, forward);
             a7 = RotateX90(a7, forward);
@@ -729,26 +745,33 @@ public static class PocketFftComplex
             Pair(
                 out Value a0,
                 out Value a4,
-                input[InputIndex(0, 0, k, ido, 8)],
-                input[InputIndex(0, 4, k, ido, 8)]);
+                input[inputBase],
+                input[input4]);
             Pair(
                 out Value a2,
                 out Value a6,
-                input[InputIndex(0, 2, k, ido, 8)],
-                input[InputIndex(0, 6, k, ido, 8)]);
+                input[input2],
+                input[input6]);
             Pair(out Value output0, out Value output4, Add(a0, a2), a1);
             Pair(out Value output2, out Value output6, Subtract(a0, a2), a3);
             a6 = RotateX90(a6, forward);
             Pair(out Value output1, out Value output5, Add(a4, a6), a5);
             Pair(out Value output3, out Value output7, Subtract(a4, a6), a7);
-            output[OutputIndex(0, k, 0, ido, l1)] = output0;
-            output[OutputIndex(0, k, 1, ido, l1)] = output1;
-            output[OutputIndex(0, k, 2, ido, l1)] = output2;
-            output[OutputIndex(0, k, 3, ido, l1)] = output3;
-            output[OutputIndex(0, k, 4, ido, l1)] = output4;
-            output[OutputIndex(0, k, 5, ido, l1)] = output5;
-            output[OutputIndex(0, k, 6, ido, l1)] = output6;
-            output[OutputIndex(0, k, 7, ido, l1)] = output7;
+            output[outputBase] = output0;
+            outputBase += outputStride;
+            output[outputBase] = output1;
+            outputBase += outputStride;
+            output[outputBase] = output2;
+            outputBase += outputStride;
+            output[outputBase] = output3;
+            outputBase += outputStride;
+            output[outputBase] = output4;
+            outputBase += outputStride;
+            output[outputBase] = output5;
+            outputBase += outputStride;
+            output[outputBase] = output6;
+            outputBase += outputStride;
+            output[outputBase] = output7;
         }
 
         private static int[] Factorize(int length)

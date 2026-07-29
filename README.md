@@ -112,13 +112,15 @@ separately from speed.
 | `--threads 20` | 18.330 s | 3.900 s / 4.700x | 4.745 s / 3.863x | 3.743 s / 4.897x | 4.511 s / 4.064x |
 <!-- LATEST_PERFORMANCE_END -->
 
-The latest Exact follow-up consumes PocketFFT's actual final radix buffer
-directly instead of copying the whole buffer once more. Two opposite-order
-1,000-frame runs on the same private sample matched all seven compatibility
-surfaces. Combined process CPU time fell from 1,122.17 to 1,111.08 seconds
-(1.0%), while combined wall time was effectively unchanged at
-151.78/151.65 seconds. This is a CPU and memory-bandwidth reduction, not a new
-whole-pipeline speed claim, so the table is unchanged.
+The latest Exact follow-up precomputes only the integer input/output addresses
+for PocketFFT's radix-8 zero-frequency butterfly; every floating-point
+expression and the twiddled loop remain unchanged. Six order-reversed
+160-frame pairs matched all seven compatibility surfaces while median process
+CPU time fell 3.5% and wall time stayed neutral. Two opposite-order
+1,000-frame pairs reduced combined CPU time from 1,056.06 to 1,017.89 seconds
+(3.6%) and combined wall time from 138.96 to 138.31 seconds (0.47%), with
+neutral allocation and no progressive slowdown. The table remains unchanged
+because this is not a new stable whole-pipeline speed claim.
 
 Each .NET cell shows median wall time followed by speedup versus Python in the
 same row; values below `1.000x` are slower. The default is **5 workers**.

@@ -1818,6 +1818,19 @@ possible capture has already been proven byte-for-byte identical.
   1,111.078 s (0.99%) while wall time was effectively unchanged at
   151.782/151.650 s; the eliminated copy's 374.725 ms `Memmove` trace caller
   disappeared and sampled allocation remained effectively unchanged
+- radix-8 zero-frequency butterflies now receive precomputed integer
+  input/output bases and strides, replacing repeated `InputIndex` and
+  `OutputIndex` arithmetic without changing the twiddled loop or any
+  floating-point expression. Existing 64-point and 32,768-point bit-hash
+  tests remain exact. Twelve v0.4.0/current one/default-five/20-worker real
+  gates and six order-reversed 160-frame pairs matched luma, chroma, raw JSON,
+  stdout, normalized stderr/logs, and every ordered `fileLoc`; paired CPU
+  medians fell 3.53% while wall medians were neutral. Two opposite-order
+  1,000-frame pairs also matched all 2,000 `fileLoc` values and the applicable
+  output/log surfaces. Combined process CPU time fell from 1,056.06 to
+  1,017.89 s (3.61%) while wall time moved from 138.962 to 138.308 s (0.47%);
+  allocation remained neutral and post-startup 100-frame intervals stayed
+  between 6.607 and 6.794 s without progressive growth
 - one-frame non-default NTSC VHS fixtures are also byte-exact for
   `--sharpness 20`, `--fm_audio_notch 10`, and the combined
   `--high_boost 1.3 --sharpness 20 --nld --sd` path; the stateful sharpness

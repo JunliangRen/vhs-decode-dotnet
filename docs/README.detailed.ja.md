@@ -1412,6 +1412,39 @@ final copy に由来する 374.725 ms の `Memmove` caller が消えています
 pass は CPU と memory-bandwidth の削減として保持し、throughput-neutral と
 判断します。
 
+次の Exact PocketFFT pass は、radix-8 zero-frequency butterfly の integer
+indexing だけを変更します。`Pass8FirstIndex` は caller が 1 回だけ計算した
+input/output base と stride を受け取り、各 load/store で `InputIndex` と
+`OutputIndex` を再計算せず、加算で 8 つの location を進みます。`i > 0` の
+twiddle 付き loop、すべての floating-point expression、butterfly と rotation
+order、normalization、data type、buffer ownership は変更しません。既存の
+64-point と 32,768-point forward/inverse bit-hash test が even/odd pass の
+mixed-radix plan を網羅します。
+
+preallocated 32,768-point transform を 2,000 回実行する、順序を反転した
+independent-process microbenchmark 8 組はすべて candidate が速く、
+baseline/candidate median は 1,445.939/1,296.320 ms（10.35% 減）でした。
+checksum は同一で timing overhead は双方 40 bytes です。real gate 12 件は
+v0.4.0 と `current` の 1、default 5、20 workers を網羅しました。順序を
+反転した 160-frame pair 6 組は luma、chroma、raw JSON、stdout、normalized
+stderr/log、すべての ordered `fileLoc` で一致し、wall median は
+15.613/15.586 秒、CPU median は 107.594 秒から 103.797 秒へ 3.53%
+減りました。CPU trace は `Execute` と `Pass8` の間で attribution が移動した
+ため、安定した aggregate を使います。mixed-radix Plan self-time は
+22.338 秒から 20.553 秒へ 8.0%、double-precision PocketFFT total self-time
+は 5.0% 減りました。
+
+反対順序の 1,000-frame counter pair 2 組も luma、chroma、raw JSON、
+normalized stderr/log、2,000 個すべての ordered `fileLoc` で一致しました。
+combined process CPU time は 1,056.06 秒から 1,017.89 秒へ 3.61%、
+combined wall time は 138.962 秒から 138.308 秒へ 0.47% 減りました。
+sampled allocation は 154.186/153.769 GiB で実質同じです。GC と resident
+memory sample は collection timing によって変動するため、allocation または
+resident-memory reduction は主張しません。candidate の startup 後の
+100-frame interval は両方の順序で 6.607 から 6.794 秒に収まり、
+progressive growth はありません。この pass は repeatable な CPU reduction
+として保持し、whole-pipeline-throughput-neutral と判断します。
+
 </details>
 
 <!-- SECTION: build -->
