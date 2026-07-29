@@ -4,7 +4,7 @@
 
 **[English](README.detailed.md)** | [简体中文](README.detailed.zh-CN.md) | [日本語](README.detailed.ja.md)
 
-<!-- README_SYNC: 2026-07-29.10 -->
+<!-- README_SYNC: 2026-07-29.11 -->
 
 .NET 11 rewrite of the decode-facing parts of
 [`oyvindln/vhs-decode`](https://github.com/oyvindln/vhs-decode), focused on
@@ -394,20 +394,20 @@ followed by speedup and wall-time reduction versus Python in the same row:
 
 | CLI mode (workers) | Python v0.4.0 | Exact + v0.4.0 | Exact + current | IPP-fast + v0.4.0 | IPP-fast + current |
 | --- | ---: | ---: | ---: | ---: | ---: |
-| default (5) | 16.983 s | 6.771 s / 2.508x / 60.1% | 8.239 s / 2.061x / 51.5% | 6.469 s / 2.625x / 61.9% | 7.929 s / 2.142x / 53.3% |
-| `--threads 1` | 21.263 s | 21.075 s / 1.009x / 0.9% | 23.068 s / 0.922x / 8.5% slower | 20.922 s / 1.016x / 1.6% | 22.646 s / 0.939x / 6.5% slower |
-| `--threads 5` | 16.880 s | 6.660 s / 2.534x / 60.5% | 7.977 s / 2.116x / 52.7% | 6.668 s / 2.532x / 60.5% | 7.908 s / 2.134x / 53.2% |
-| `--threads 10` | 17.612 s | 5.384 s / 3.271x / 69.4% | 6.334 s / 2.781x / 64.0% | 5.035 s / 3.498x / 71.4% | 6.011 s / 2.930x / 65.9% |
-| `--threads 20` | 18.330 s | 4.430 s / 4.137x / 75.8% | 5.479 s / 3.346x / 70.1% | 4.196 s / 4.368x / 77.1% | 5.423 s / 3.380x / 70.4% |
+| default (5) | 16.983 s | 6.770 s / 2.509x / 60.1% | 7.969 s / 2.131x / 53.1% | 6.579 s / 2.581x / 61.3% | 7.938 s / 2.140x / 53.3% |
+| `--threads 1` | 21.263 s | 21.092 s / 1.008x / 0.8% | 22.848 s / 0.931x / 7.5% slower | 20.468 s / 1.039x / 3.7% | 22.401 s / 0.949x / 5.4% slower |
+| `--threads 5` | 16.880 s | 6.778 s / 2.490x / 59.8% | 7.993 s / 2.112x / 52.6% | 6.727 s / 2.509x / 60.1% | 7.737 s / 2.182x / 54.2% |
+| `--threads 10` | 17.612 s | 5.242 s / 3.360x / 70.2% | 5.937 s / 2.966x / 66.3% | 4.826 s / 3.649x / 72.6% | 5.870 s / 3.000x / 66.7% |
+| `--threads 20` | 18.330 s | 4.209 s / 4.355x / 77.0% | 5.119 s / 3.581x / 72.1% | 4.160 s / 4.406x / 77.3% | 5.074 s / 3.612x / 72.3% |
 
 The benchmark host was an Intel Core Ultra 7 265K with 20 logical processors,
 Windows 11 25H2 build 26220.8925, and .NET SDK/runtime
-`11.0.100-preview.6.26359.118`. The Python and v0.4.0 columns retain the prior
-fixed-matrix medians because this candidate changes only `current`; the two
-`current` columns were refreshed with 30 interleaved runs. The candidate was
-based on `a159d724` plus the Super-Gaussian FFT workspace optimization
-described below; its single-file `decode.exe` SHA-256 was
-`521996A8987886E4488FA987D84DAE7DD9BD00381FD8037E0A23E7247F30CEAD`.
+`11.0.100-preview.6.26359.118`. The Python column retains the prior fixed-matrix
+medians because Python did not change; all four .NET columns were refreshed
+with 60 interleaved runs. The candidate was based on `b640b3ee` plus the
+PocketFFT Plan workspace optimization described below; its single-file
+`decode.exe` SHA-256 was
+`860D82F3332BF94C822374B08D2F5C5856E7FE3F8132CC2964427F840A7D7324`.
 Python 3.14.0 used NumPy 2.4.6, SciPy 1.18.0, Numba 0.66.0, and python-soxr
 1.1.0. The shared arguments were:
 
@@ -1216,6 +1216,32 @@ ordered `fileLoc` matched in every A/B gate. Separate `current` and `v0.4.0`
 checks at `--threads 0`, default 5, and `--threads 20` matched all seven
 surfaces; Exact v0.4.0 also matched the Python serial oracle.
 
+The mixed-radix float32 PocketFFT Plan now retains one thread-local value
+workspace and one scratch workspace, growing either only when a larger Plan is
+encountered. Transform outputs remain caller-owned. Input conversion,
+factorization, packet order, per-sample arithmetic, inverse normalization, and
+copy boundaries are unchanged. A production-length 239,580-point xUnit v3
+probe reduced warm per-call allocation from 11,594,232 to 3,878,568 bytes
+(66.55%) while retaining the exact output SHA-256.
+
+Against released v1.3.6, six order-reversed, interleaved 160-frame Exact
+`current` `--threads 20` pairs reduced median wall time from 15.009 to
+14.553 s (3.04% lower; 3.13% higher throughput) and median CPU time from
+110.820 to 107.227 s (3.24% lower). Matched 400-frame runtime-counter runs
+reduced sampled managed allocation from 91.712 to 85.902 GiB (6.34%), GC pause
+from 1.066 to 0.760 s, Gen0 collections from 765 to 306, and Gen2 collections
+from 327 to 313. The retained worker-local buffers raised sampled median
+working set from 674 to 742 MiB, so no resident-memory reduction is claimed;
+the candidate moved from a 757 MiB first-third median to 699 MiB in the final
+third and showed no progressive growth. Its four successive 100-frame
+intervals after startup were 8.350, 7.628, 7.495, and 7.599 s.
+
+Every 160-frame A/B run matched luma, chroma, JSON, stdout, normalized
+stderr/logs, and all ordered `fileLoc` values. The 400-frame pair also matched
+luma, chroma, JSON, normalized logs, and all 800 ordered `fileLoc` values.
+Separate Exact `current` and v0.4.0 gates at `--threads 0`, default 5, and
+`--threads 20` matched all seven surfaces and remained deterministic.
+
 </details>
 
 <!-- SECTION: build -->
@@ -1236,7 +1262,7 @@ Requirements:
 .\tools\build-ipp-native.ps1
 dotnet restore VHSDecodeDotNet.slnx
 dotnet build VHSDecodeDotNet.slnx -c Release --no-restore
-dotnet test --solution VHSDecodeDotNet.slnx -c Release --no-build --no-restore --minimum-expected-tests 1107
+dotnet test --solution VHSDecodeDotNet.slnx -c Release --no-build --no-restore --minimum-expected-tests 1108
 ```
 
 The first command includes the optional `ipp-fast` native artifact; omit it for
@@ -1249,7 +1275,7 @@ deployment computer. Binary-only single-file releases embed
 sidecar license files. An Exact-only build may omit the native build step.
 
 The current formal Release build has zero warnings and errors. The xUnit v3
-project exposes **1,107** independently discoverable tests to both
+project exposes **1,108** independently discoverable tests to both
 `dotnet test` and Visual Studio Test Explorer.
 
 <!-- SECTION: usage -->
