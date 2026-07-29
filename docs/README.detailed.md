@@ -1490,6 +1490,41 @@ between 6.607 and 6.794 s in both orders without progressive growth. The pass
 is retained as a repeatable CPU reduction and classified as
 whole-pipeline-throughput-neutral.
 
+The following Exact allocation pass keeps float32 SOS initial state in two
+flat spans. Up to 32 sections, the steady-state and scaled-state spans are
+stack-backed; larger uncommon filters retain bounded heap fallbacks. The
+scaled span is overwritten for the backward pass instead of allocating a
+second scaled matrix. SOS coefficients, float32 conversion points, steady-state
+expressions, scale operations, sample-major section order, reversal order, and
+output ownership are unchanged. Existing one-, two-, four-, and generic-section
+bit-hash tests remain exact, and the warm in-place allocation gate is tightened
+from 4,096 to 512 bytes.
+
+Eight order-reversed independent-process microbenchmark pairs each ran 10,000
+preallocated 4,096-sample two-section filters. Six favored the candidate;
+baseline/candidate medians were 238.658/234.193 ms (1.87% less), while
+allocation fell from 2,400,040 to 720,040 bytes, or about 240 to 72 bytes per
+call. Twelve real gates covered v0.4.0 and `current` at one, default-five, and
+20 workers. Six order-reversed 160-frame pairs matched luma, chroma, raw JSON,
+stdout, normalized stderr/logs, and every ordered `fileLoc`; wall medians were
+13.134/13.257 s and CPU medians were 98.500/100.969 s, so no whole-pipeline
+speedup is claimed.
+
+In matched 80-frame allocation traces, the former 18.511 MiB across 182 sampled
+`System.Single[,]` events disappeared. Total sampled allocation was neutral at
+6.918/6.920 GiB and Gen2 starts were 27/28 because unrelated large arrays
+dominated. Two opposite-order 1,000-frame counter pairs also matched every
+applicable artifact/log surface and all 2,000 ordered `fileLoc` values.
+Combined counter-reported allocation fell from 155.200 to 154.364 GiB (0.54%);
+Gen0/Gen2 collections moved from 1,515/492 to 1,491/486 and GC pause from
+1.857 to 1.777 s. Combined CPU time was effectively unchanged at
+1,078.188/1,077.734 s. Combined wall time moved from 145.978 to 144.539 s,
+but the shorter pairs did not confirm a stable throughput gain. Candidate
+post-startup 100-frame intervals stayed between 6.877 and 7.121 s in both
+orders. Working-set samples varied with collection timing, so no resident-
+memory reduction is claimed. The pass is retained as a bounded small-object
+and GC reduction and classified as whole-pipeline-throughput-neutral.
+
 </details>
 
 <!-- SECTION: build -->

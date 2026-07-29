@@ -1445,6 +1445,42 @@ resident-memory reduction は主張しません。candidate の startup 後の
 progressive growth はありません。この pass は repeatable な CPU reduction
 として保持し、whole-pipeline-throughput-neutral と判断します。
 
+続く Exact allocation pass は、float32 SOS initial state を 2 つの flat span
+に保持します。32 sections までは steady-state と scaled-state span を stack
+backed とし、それを超える uncommon filter は bounded heap fallback を維持します。
+backward pass では scaled span を上書きして再利用し、2 個目の scaled matrix を
+割り当てません。SOS coefficient、float32 conversion point、steady-state
+expression、scale operation、sample-major section order、reverse order、output
+ownership は変更しません。既存の 1、2、4、generic-section bit-hash test は
+exact のままで、warm in-place allocation gate は 4,096 から 512 bytes へ
+厳格化しました。
+
+順序を反転した independent-process microbenchmark 8 組は、それぞれ
+preallocated 4,096-sample two-section filter を 10,000 回実行しました。6 組で
+candidate が速く、baseline/candidate median は 238.658/234.193 ms
+（1.87% 減）、allocation は 2,400,040/720,040 bytes、つまり約
+240/72 bytes per call でした。real gate 12 件は v0.4.0 と `current` の 1、
+default 5、20 workers を網羅しました。順序を反転した 160-frame pair 6 組は
+luma、chroma、raw JSON、stdout、normalized stderr/log、すべての ordered
+`fileLoc` で一致しました。wall median は 13.134/13.257 秒、CPU median は
+98.500/100.969 秒のため、whole-pipeline speedup は主張しません。
+
+matched 80-frame allocation trace では、以前の sampled `System.Single[,]`
+182 events、合計 18.511 MiB が消えました。unrelated large array が支配的なため、
+total sampled allocation は 6.918/6.920 GiB で neutral、Gen2 start は 27/28
+でした。反対順序の 1,000-frame counter pair 2 組も、すべての applicable
+artifact/log surface と 2,000 個の ordered `fileLoc` で一致しました。combined
+counter-reported allocation は 155.200 GiB から 154.364 GiB へ 0.54% 減り、
+Gen0/Gen2 collection は 1,515/492 から 1,491/486、GC pause は
+1.857 秒から 1.777 秒へ変化しました。combined CPU time は
+1,078.188/1,077.734 秒で実質同じです。combined wall time は
+145.978/144.539 秒でしたが、short pair は stable throughput gain を確認して
+いません。candidate の startup 後 100-frame interval は両方の順序で
+6.877 から 7.121 秒に収まりました。working-set sample は collection timing
+で変動するため、resident-memory reduction は主張しません。この pass は
+bounded small-object/GC reduction として保持し、
+whole-pipeline-throughput-neutral と判断します。
+
 </details>
 
 <!-- SECTION: build -->

@@ -889,7 +889,7 @@ public sealed class DspWorkingBufferTests
         SosFilter.ApplyForwardBackwardFloat32InPlace(allocationSections, allocationProbe);
         long allocated = GC.GetAllocatedBytesForCurrentThread() - before;
         Assert.True(
-            allocated < 4_096,
+            allocated < 512,
             $"Warm in-place float32 SOS forward/backward allocated {allocated:N0} bytes.");
     }
 

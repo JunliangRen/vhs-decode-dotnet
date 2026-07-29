@@ -1831,6 +1831,19 @@ possible capture has already been proven byte-for-byte identical.
   1,017.89 s (3.61%) while wall time moved from 138.962 to 138.308 s (0.47%);
   allocation remained neutral and post-startup 100-frame intervals stayed
   between 6.607 and 6.794 s without progressive growth
+- float32 SOS forward/backward filtering now stores steady-state and scaled
+  initial conditions in flat spans, stack-backed through 32 sections, and
+  reuses the scaled span for the backward pass. Coefficients, conversion
+  points, float expressions, sample-major section order, reversal order, and
+  ownership are unchanged. One-, two-, four-, and generic-section bit hashes
+  remain exact, while a warm focused benchmark reduced allocation from about
+  240 to 72 bytes per call. Twelve v0.4.0/current one/default-five/20-worker
+  real gates and six order-reversed 160-frame pairs matched all seven
+  compatibility surfaces. Two opposite-order 1,000-frame pairs matched all
+  2,000 ordered `fileLoc` values and applicable artifact/log surfaces;
+  combined counter allocation fell 0.54%, combined CPU was effectively
+  unchanged, wall time was throughput-neutral, and post-startup 100-frame
+  intervals stayed between 6.877 and 7.121 s without progressive growth
 - one-frame non-default NTSC VHS fixtures are also byte-exact for
   `--sharpness 20`, `--fm_audio_notch 10`, and the combined
   `--high_boost 1.3 --sharpness 20 --nld --sd` path; the stateful sharpness

@@ -112,15 +112,17 @@ separately from speed.
 | `--threads 20` | 18.330 s | 3.900 s / 4.700x | 4.745 s / 3.863x | 3.743 s / 4.897x | 4.511 s / 4.064x |
 <!-- LATEST_PERFORMANCE_END -->
 
-The latest Exact follow-up precomputes only the integer input/output addresses
-for PocketFFT's radix-8 zero-frequency butterfly; every floating-point
-expression and the twiddled loop remain unchanged. Six order-reversed
-160-frame pairs matched all seven compatibility surfaces while median process
-CPU time fell 3.5% and wall time stayed neutral. Two opposite-order
-1,000-frame pairs reduced combined CPU time from 1,056.06 to 1,017.89 seconds
-(3.6%) and combined wall time from 138.96 to 138.31 seconds (0.47%), with
-neutral allocation and no progressive slowdown. The table remains unchanged
-because this is not a new stable whole-pipeline speed claim.
+The latest Exact follow-up keeps float32 SOS steady-state and scaled initial
+conditions in flat stack-backed spans for the common section counts and reuses
+the scaled span for the backward pass. Coefficients, float expressions, and
+sample/section order remain unchanged. A focused benchmark reduced warm
+allocation from about 240 to 72 bytes per call; an 80-frame allocation trace
+removed the former 18.511 MiB sampled `Single[,]` type. Twelve profile/thread
+gates, six order-reversed 160-frame pairs, and two opposite-order 1,000-frame
+pairs remained exact. The long pairs reduced combined allocation by about
+0.54%, with effectively unchanged CPU, neutral wall time, and no progressive
+slowdown. The table remains unchanged because this is not a new stable
+whole-pipeline speed claim.
 
 Each .NET cell shows median wall time followed by speedup versus Python in the
 same row; values below `1.000x` are slower. The default is **5 workers**.
