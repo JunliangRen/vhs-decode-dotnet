@@ -374,17 +374,18 @@ wall-time reduction の順です。
 
 | CLI mode（workers） | Python v0.4.0 | Exact + v0.4.0 | Exact + current | IPP-fast + v0.4.0 | IPP-fast + current |
 | --- | ---: | ---: | ---: | ---: | ---: |
-| default（5） | 14.481 s | 6.264 s / 2.312x / 56.7% | 8.050 s / 1.799x / 44.4% | 6.162 s / 2.350x / 57.4% | 7.861 s / 1.842x / 45.7% |
-| `--threads 1` | 18.486 s | 19.746 s / 0.936x / 6.8% slower | 22.281 s / 0.830x / 20.5% slower | 19.346 s / 0.956x / 4.7% slower | 21.503 s / 0.860x / 16.3% slower |
-| `--threads 5` | 15.065 s | 6.404 s / 2.352x / 57.5% | 8.047 s / 1.872x / 46.6% | 6.164 s / 2.444x / 59.1% | 7.881 s / 1.911x / 47.7% |
-| `--threads 10` | 15.362 s | 4.951 s / 3.103x / 67.8% | 6.285 s / 2.444x / 59.1% | 4.675 s / 3.286x / 69.6% | 6.277 s / 2.447x / 59.1% |
-| `--threads 20` | 16.026 s | 3.911 s / 4.097x / 75.6% | 5.661 s / 2.831x / 64.7% | 4.349 s / 3.685x / 72.9% | 5.049 s / 3.174x / 68.5% |
+| default（5） | 16.983 s | 6.771 s / 2.508x / 60.1% | 8.495 s / 1.999x / 50.0% | 6.469 s / 2.625x / 61.9% | 8.116 s / 2.092x / 52.2% |
+| `--threads 1` | 21.263 s | 21.075 s / 1.009x / 0.9% | 23.190 s / 0.917x / 9.1% slower | 20.922 s / 1.016x / 1.6% | 22.825 s / 0.932x / 7.3% slower |
+| `--threads 5` | 16.880 s | 6.660 s / 2.534x / 60.5% | 8.289 s / 2.036x / 50.9% | 6.668 s / 2.532x / 60.5% | 7.926 s / 2.130x / 53.0% |
+| `--threads 10` | 17.612 s | 5.384 s / 3.271x / 69.4% | 6.262 s / 2.812x / 64.4% | 5.035 s / 3.498x / 71.4% | 6.111 s / 2.882x / 65.3% |
+| `--threads 20` | 18.330 s | 4.430 s / 4.137x / 75.8% | 5.564 s / 3.295x / 69.6% | 4.196 s / 4.368x / 77.1% | 5.799 s / 3.161x / 68.4% |
 
 benchmark host は Intel Core Ultra 7 265K（20 logical processor）、
 Windows 11 25H2 build 26220.8925、.NET SDK/runtime
-`11.0.100-preview.6.26359.118` です。candidate は `2b170b4` を基にし、
-`VHSDecode.Core.dll` SHA-256 は
-`FBB07399F2C9DEDD1BF02BBE28B049BE51E8AFD9C38A20BCA73514C7CE8DCAE0`
+`11.0.100-preview.6.26359.118` です。candidate は `0fd0da48` に下記の
+linear-TBC plan scratch 最適化を加えたもので、single-file `decode.exe`
+SHA-256 は
+`58F2744DA0E468E1A56761AC5BA053295B8F7542346AA2A96274891249AE1487`
 でした。Python 3.14.0 は NumPy 2.4.6、SciPy 1.18.0、Numba 0.66.0、
 python-soxr 1.1.0 を使用しました。共通引数は次のとおりです。
 
@@ -395,7 +396,7 @@ python-soxr 1.1.0 を使用しました。共通引数は次のとおりです�
 ```
 
 両実装の default は **5 workers** です。独立した 3 回の Python
-`--threads 0` control は median 25.831 s で、互いに完全一致しました。すべての
+`--threads 0` control は median 30.253 s で、互いに完全一致しました。すべての
 Exact v0.4.0 run は luma、chroma、JSON、stdout、normalized stderr/log、
 順序付き 80 個すべての `fileLoc` でこの oracle と一致しました。4 つの .NET
 profile/backend combination はそれぞれ 15 run 全体で 1 つの deterministic hash
@@ -405,7 +406,7 @@ set を生成しました。この sample では IPP-fast の luma、chroma、JS
 byte-compatibility の保証ではありません。
 
 今回の Python nonzero/default 15 run は、この sample では同じ
-luma/chroma/JSON set を保ちましたが、normalized log hash は 8 種類でした。
+luma/chroma/JSON set を保ちましたが、normalized log hash は 7 種類でした。
 以前の fixed matrix では worker count 間の Python artifact hash 不安定性も確認
 されています。したがって nonzero-thread Python 行は throughput 比較専用で、
 strict oracle は upstream `g4315520 --threads 0` のままです。
@@ -1112,6 +1113,20 @@ normalized stderr/log、すべての ordered `fileLoc` が一致しました。�
 5-path matrix でも Exact v0.4.0 は Python `--threads 0` と一致し、4 つの .NET
 profile/backend combination は default、1、5、10、20 workers でそれぞれ
 deterministic でした。
+
+linear-TBC plan preparation は per-line MAD scratch 3 個を rent し、median
+scratch を再利用して、補正済み factor を pooled level-adjust buffer へ直接
+書き込むようになりました。derivative、median/MAD、threshold、smoothing、
+position、conversion、16-tap sinc、ownership semantics は変更していません。
+273 line の plan を 200 回準備する allocation probe は 2,240,768 bytes から
+30,400 bytes へ減少しました（98.64%）。release v1.3.3 を baseline とした、
+実行順を反転した interleaved 160-frame Exact v0.4.0 `--threads 20` A/B pair
+3 組では、wall-time median が 12.084 s から 11.766 s（2.63% 減、throughput
+2.71% 増）、average CPU time が 102.385 s から 100.432 s（1.91% 減）へ
+変化しました。peak-memory noise から memory reduction は主張しません。
+luma、chroma、JSON、stdout、normalized stderr/log、順序付き 320 個すべての
+`fileLoc` は完全一致しました。別の 40-frame `--threads 0`、default、
+`--threads 20` gate も exact で、thread 間で deterministic でした。
 
 </details>
 

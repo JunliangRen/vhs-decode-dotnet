@@ -394,17 +394,18 @@ followed by speedup and wall-time reduction versus Python in the same row:
 
 | CLI mode (workers) | Python v0.4.0 | Exact + v0.4.0 | Exact + current | IPP-fast + v0.4.0 | IPP-fast + current |
 | --- | ---: | ---: | ---: | ---: | ---: |
-| default (5) | 14.481 s | 6.264 s / 2.312x / 56.7% | 8.050 s / 1.799x / 44.4% | 6.162 s / 2.350x / 57.4% | 7.861 s / 1.842x / 45.7% |
-| `--threads 1` | 18.486 s | 19.746 s / 0.936x / 6.8% slower | 22.281 s / 0.830x / 20.5% slower | 19.346 s / 0.956x / 4.7% slower | 21.503 s / 0.860x / 16.3% slower |
-| `--threads 5` | 15.065 s | 6.404 s / 2.352x / 57.5% | 8.047 s / 1.872x / 46.6% | 6.164 s / 2.444x / 59.1% | 7.881 s / 1.911x / 47.7% |
-| `--threads 10` | 15.362 s | 4.951 s / 3.103x / 67.8% | 6.285 s / 2.444x / 59.1% | 4.675 s / 3.286x / 69.6% | 6.277 s / 2.447x / 59.1% |
-| `--threads 20` | 16.026 s | 3.911 s / 4.097x / 75.6% | 5.661 s / 2.831x / 64.7% | 4.349 s / 3.685x / 72.9% | 5.049 s / 3.174x / 68.5% |
+| default (5) | 16.983 s | 6.771 s / 2.508x / 60.1% | 8.495 s / 1.999x / 50.0% | 6.469 s / 2.625x / 61.9% | 8.116 s / 2.092x / 52.2% |
+| `--threads 1` | 21.263 s | 21.075 s / 1.009x / 0.9% | 23.190 s / 0.917x / 9.1% slower | 20.922 s / 1.016x / 1.6% | 22.825 s / 0.932x / 7.3% slower |
+| `--threads 5` | 16.880 s | 6.660 s / 2.534x / 60.5% | 8.289 s / 2.036x / 50.9% | 6.668 s / 2.532x / 60.5% | 7.926 s / 2.130x / 53.0% |
+| `--threads 10` | 17.612 s | 5.384 s / 3.271x / 69.4% | 6.262 s / 2.812x / 64.4% | 5.035 s / 3.498x / 71.4% | 6.111 s / 2.882x / 65.3% |
+| `--threads 20` | 18.330 s | 4.430 s / 4.137x / 75.8% | 5.564 s / 3.295x / 69.6% | 4.196 s / 4.368x / 77.1% | 5.799 s / 3.161x / 68.4% |
 
 The benchmark host was an Intel Core Ultra 7 265K with 20 logical processors,
 Windows 11 25H2 build 26220.8925, and .NET SDK/runtime
-`11.0.100-preview.6.26359.118`. The candidate was based on `2b170b4`; its
-`VHSDecode.Core.dll` SHA-256 was
-`FBB07399F2C9DEDD1BF02BBE28B049BE51E8AFD9C38A20BCA73514C7CE8DCAE0`.
+`11.0.100-preview.6.26359.118`. The candidate was based on `0fd0da48` plus the
+linear-TBC plan scratch optimization described below; its single-file
+`decode.exe` SHA-256 was
+`58F2744DA0E468E1A56761AC5BA053295B8F7542346AA2A96274891249AE1487`.
 Python 3.14.0 used NumPy 2.4.6, SciPy 1.18.0, Numba 0.66.0, and python-soxr
 1.1.0. The shared arguments were:
 
@@ -415,7 +416,7 @@ Python 3.14.0 used NumPy 2.4.6, SciPy 1.18.0, Numba 0.66.0, and python-soxr
 ```
 
 The default is **5 workers** in both implementations. Three separate Python
-`--threads 0` controls had a 25.831 s median and were mutually identical.
+`--threads 0` controls had a 30.253 s median and were mutually identical.
 Every Exact v0.4.0 run matched that oracle for luma, chroma, JSON, stdout,
 normalized stderr/log, and all 80 ordered `fileLoc` values. Each of the four
 .NET profile/backend combinations produced one deterministic hash set across
@@ -425,7 +426,7 @@ changes normalized stderr/log, and this sample-specific result is not a
 byte-compatibility promise.
 
 The 15 nonzero/default Python matrix runs happened to retain one
-luma/chroma/JSON set on this sample, but produced eight normalized log hashes.
+luma/chroma/JSON set on this sample, but produced seven normalized log hashes.
 A previous fixed matrix also observed unstable Python artifact hashes across
 worker counts. Nonzero-thread Python rows are therefore throughput comparisons
 only; upstream `g4315520 --threads 0` remains the strict oracle.
@@ -1160,6 +1161,20 @@ stdout, normalized stderr/log, and all ordered `fileLoc` values. The final
 five-path matrix also kept Exact v0.4.0 identical to Python `--threads 0` and
 all four .NET profile/backend combinations deterministic across default,
 1, 5, 10, and 20 workers.
+
+Linear-TBC plan preparation now rents three per-line MAD scratch buffers,
+reuses its median scratch, and writes corrected factors directly into the
+pooled level-adjust buffer. Derivative, median/MAD, threshold, smoothing,
+position, conversion, 16-tap sinc, and ownership semantics remain unchanged.
+A 200-plan, 273-line allocation probe fell from 2,240,768 to 30,400 bytes
+(98.64%). Three interleaved, order-reversed 160-frame Exact v0.4.0
+`--threads 20` A/B pairs against released v1.3.3 moved median wall time from
+12.084 to 11.766 s (2.63% lower; 2.71% higher throughput) and average CPU time
+from 102.385 to 100.432 s (1.91% lower); peak-memory noise does not support a
+memory-reduction claim. Luma, chroma, JSON, stdout, normalized stderr/logs,
+and all 320 ordered `fileLoc` values were exact. Separate 40-frame
+`--threads 0`, default, and `--threads 20` gates were also exact and
+cross-thread deterministic.
 
 </details>
 
