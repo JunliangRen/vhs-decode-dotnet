@@ -2363,6 +2363,25 @@ public void PocketComplexFftMatchesNumpyBitPatterns()
     AssertThrows<ArgumentException>(() => PocketFftComplex.Inverse([Complex.One]));
 }
 
+[Fact(DisplayName = "pocket complex FFT odd-pass output remains bit-exact")]
+public void PocketComplexFftOddPassOutputRemainsBitExact()
+{
+    const int length = 32_768;
+    double[] input = Enumerable.Range(0, length)
+        .Select(index => Math.Sin(index * 0.017) + (0.25 * Math.Cos(index * 0.031)))
+        .ToArray();
+    var output = new Complex[length];
+
+    PocketFftComplex.ForwardReal(input, output);
+    Complex[] inverse = PocketFftComplex.Inverse(output);
+    AssertEqual(
+        "950264D00BFBB9E577539DD1CD8BAE660B3EA9EAC82DD131794CAA108341061B",
+        ComplexBitsSha256(output));
+    AssertEqual(
+        "3CC982F0D601FD7B484FECAF26FC912F0DDF77593B378E1E45ED9B9EBB1EF5B5",
+        ComplexBitsSha256(inverse));
+}
+
 [Fact(DisplayName = "analytic signal recovers sinusoid quadrature")]
 public void AnalyticSignalRecoversSinusoidQuadrature()
 {

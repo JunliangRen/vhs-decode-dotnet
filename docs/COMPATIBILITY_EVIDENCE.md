@@ -1806,6 +1806,18 @@ possible capture has already been proven byte-for-byte identical.
   `fileLoc` values; the measured run completed in 37.012 s, peaked at
   1.949 GiB, and had quarter working-set medians of
   0.879/1.208/1.266/1.187 GiB
+- complex PocketFFT transforms now consume the actual final mixed-radix buffer
+  directly instead of copying it once more before the existing sample-by-sample
+  `Complex` conversion. Radix and packet order, arithmetic, normalization,
+  data types, and worker-local ownership are unchanged. A deterministic
+  32,768-point odd-pass test locks both forward and inverse bit hashes. Twelve
+  real gates covered v0.4.0 and `current` at one, default-five, and 20 workers;
+  six interleaved 160-frame pairs matched luma, chroma, raw JSON, stdout,
+  normalized stderr/logs, and every ordered `fileLoc`. In two opposite-order
+  1,000-frame pairs, combined process CPU time fell from 1,122.171 to
+  1,111.078 s (0.99%) while wall time was effectively unchanged at
+  151.782/151.650 s; the eliminated copy's 374.725 ms `Memmove` trace caller
+  disappeared and sampled allocation remained effectively unchanged
 - one-frame non-default NTSC VHS fixtures are also byte-exact for
   `--sharpness 20`, `--fm_audio_notch 10`, and the combined
   `--high_boost 1.3 --sharpness 20 --nld --sd` path; the stateful sharpness
@@ -2044,7 +2056,7 @@ dotnet test --solution VHSDecodeDotNet.slnx --no-build
 ```
 
 The current formal solution build completes with zero warnings and errors, and
-the xUnit v3 project exposes 1,116 independently discoverable tests
+the xUnit v3 project exposes 1,117 independently discoverable tests
 to `dotnet test` and Visual Studio Test Explorer. On the
 same Windows machine and fixtures, Release wall-clock measurements for one
 frame were 2.346 s versus 7.193 s for NTSC VHS and 1.651 s versus 5.865 s for

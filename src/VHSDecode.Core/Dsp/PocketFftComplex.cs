@@ -482,14 +482,22 @@ public static class PocketFftComplex
                 values[i] = new Value(input[i].Real, input[i].Imaginary);
             }
 
-            Execute(values, scratch, forward, forward ? 1.0 : 1.0 / _length);
+            Value[] transformed = Execute(
+                values,
+                scratch,
+                forward,
+                forward ? 1.0 : 1.0 / _length);
             for (int i = 0; i < output.Length; i++)
             {
-                output[i] = new Complex(values[i].Real, values[i].Imaginary);
+                output[i] = new Complex(transformed[i].Real, transformed[i].Imaginary);
             }
         }
 
-        private void Execute(Value[] data, Value[] scratch, bool forward, double normalization)
+        private Value[] Execute(
+            Value[] data,
+            Value[] scratch,
+            bool forward,
+            double normalization)
         {
             Value[] source = data;
             Value[] destination = scratch;
@@ -516,27 +524,15 @@ public static class PocketFftComplex
                 l1 *= factor.Radix;
             }
 
-            if (!ReferenceEquals(source, data))
-            {
-                if (normalization == 1.0)
-                {
-                    Array.Copy(source, data, _length);
-                }
-                else
-                {
-                    for (int i = 0; i < _length; i++)
-                    {
-                        data[i] = Scale(source[i], normalization);
-                    }
-                }
-            }
-            else if (normalization != 1.0)
+            if (normalization != 1.0)
             {
                 for (int i = 0; i < _length; i++)
                 {
-                    data[i] = Scale(data[i], normalization);
+                    source[i] = Scale(source[i], normalization);
                 }
             }
+
+            return source;
         }
 
         private static void Pass2(

@@ -1436,6 +1436,28 @@ peaks; sampled resident memory did not improve. The combined post-startup
 100-frame intervals stayed between 6.924 and 7.195 s and neither run grew
 progressively, supporting bounded memory rather than a resident-memory claim.
 
+The subsequent Exact PocketFFT pass removes one final full-buffer copy from
+each complex transform. The mixed-radix plan now returns whichever
+worker-local value buffer contains the last radix pass, and the existing
+sample-by-sample `Complex` conversion consumes that buffer immediately.
+Radix selection, packet order, arithmetic expressions, normalization order,
+data types, and thread-local ownership are unchanged. A deterministic
+32,768-point odd-pass xUnit case locks forward and inverse bit hashes to
+`950264D00BFBB9E577539DD1CD8BAE660B3EA9EAC82DD131794CAA108341061B`
+and
+`3CC982F0D601FD7B484FECAF26FC912F0DDF77593B378E1E45ED9B9EBB1EF5B5`.
+
+Twelve real gates covered v0.4.0 and `current` at one, default-five, and
+20 workers; six interleaved 160-frame pairs also matched luma, chroma, raw
+JSON, stdout, normalized stderr/logs, and every ordered `fileLoc`. A CPU trace
+removed the 374.725 ms `Memmove` caller attributed to the old final copy.
+Across two opposite-order 1,000-frame counter pairs, combined process CPU time
+fell from 1,122.171 to 1,111.078 s (0.99%), while combined wall time was
+effectively unchanged at 151.782/151.650 s. Sampled allocation was also
+effectively unchanged at 7.437/7.420 GiB with no new allocation type. This
+pass is therefore retained as a CPU and memory-bandwidth reduction and
+classified as throughput-neutral.
+
 </details>
 
 <!-- SECTION: build -->
@@ -1456,7 +1478,7 @@ Requirements:
 .\tools\build-ipp-native.ps1
 dotnet restore VHSDecodeDotNet.slnx
 dotnet build VHSDecodeDotNet.slnx -c Release --no-restore
-dotnet test --solution VHSDecodeDotNet.slnx -c Release --no-build --no-restore --minimum-expected-tests 1116
+dotnet test --solution VHSDecodeDotNet.slnx -c Release --no-build --no-restore --minimum-expected-tests 1117
 ```
 
 The first command includes the optional `ipp-fast` native artifact; omit it for
@@ -1469,7 +1491,7 @@ deployment computer. Binary-only single-file releases embed
 sidecar license files. An Exact-only build may omit the native build step.
 
 The current formal Release build has zero warnings and errors. The xUnit v3
-project exposes **1,116** independently discoverable tests to both
+project exposes **1,117** independently discoverable tests to both
 `dotnet test` and Visual Studio Test Explorer.
 
 <!-- SECTION: usage -->
