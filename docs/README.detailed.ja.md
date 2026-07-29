@@ -1481,6 +1481,39 @@ Gen0/Gen2 collection は 1,515/492 から 1,491/486、GC pause は
 bounded small-object/GC reduction として保持し、
 whole-pipeline-throughput-neutral と判断します。
 
+次の Exact allocation pass は、float32 SOS coefficient を destination span
+へ直接変換します。32 sections までは coefficient span を stack-backed とし、
+それを超える uncommon filter は以前の heap allocation を bounded fallback
+として維持します。6 個の coefficient cast、steady-state expression、scale
+operation、sample-major section order、reverse order、output ownership、
+filter object lifetime は変更しません。focused test は既存の 1、2、4、
+generic-section bit hash と 33-section fallback を網羅し、warm in-place
+allocation gate は 512 から 64 bytes へ厳格化しました。
+
+順序を反転した independent-process microbenchmark 8 組は、それぞれ
+preallocated 4,096-sample two-section filter を 10,000 回実行しました。
+baseline/candidate allocation は 720,040/40 bytes、つまり約
+72/0 bytes per call です。median は 231.419/231.810 ms で、candidate が
+速かったのは 2 組だけのため、timing は neutral と判断します。real gate
+12 件は v0.4.0 と `current` の 1、default 5、20 workers を網羅しました。
+interleaved 160-frame pair 6 組は luma、chroma、raw JSON、stdout、
+normalized stderr/log、すべての ordered `fileLoc` で一致しました。
+baseline/candidate wall median は 13.390/13.410 秒、CPU median は
+101.609/101.477 秒でした。
+
+matched 40-frame/80-field allocation trace では、baseline の sampled
+`FloatSosSection[]` 25 events、合計 2.538 MiB が candidate で消えました。
+total sampled allocation は 3.723/3.714 GiB、Gen0/Gen1/Gen2 start は同じ
+30/1/18 ですが、unrelated large array がこの sample を支配します。反対順序の
+1,000-frame counter pair 2 組も、すべての applicable artifact/log surface と
+2,000 個の ordered `fileLoc` で一致し、combined wall time は
+145.840/145.455 秒でした。counter-reported allocation は
+154.112/154.379 GiB で、消えた小配列よりはるかに大きい scale で変動するため、
+whole-pipeline allocation、resident-memory、speedup は主張しません。
+candidate の startup 後 100-frame interval は 6.905 から 7.159 秒に収まり、
+progressive slowdown はありません。この pass は bounded small-object
+elimination として保持し、whole-pipeline-throughput-neutral と判断します。
+
 </details>
 
 <!-- SECTION: build -->

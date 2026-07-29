@@ -112,17 +112,15 @@ separately from speed.
 | `--threads 20` | 18.330 s | 3.900 s / 4.700x | 4.745 s / 3.863x | 3.743 s / 4.897x | 4.511 s / 4.064x |
 <!-- LATEST_PERFORMANCE_END -->
 
-The latest Exact follow-up keeps float32 SOS steady-state and scaled initial
-conditions in flat stack-backed spans for the common section counts and reuses
-the scaled span for the backward pass. Coefficients, float expressions, and
-sample/section order remain unchanged. A focused benchmark reduced warm
-allocation from about 240 to 72 bytes per call; an 80-frame allocation trace
-removed the former 18.511 MiB sampled `Single[,]` type. Twelve profile/thread
-gates, six order-reversed 160-frame pairs, and two opposite-order 1,000-frame
-pairs remained exact. The long pairs reduced combined allocation by about
-0.54%, with effectively unchanged CPU, neutral wall time, and no progressive
-slowdown. The table remains unchanged because this is not a new stable
-whole-pipeline speed claim.
+The latest Exact follow-up converts float32 SOS coefficients into a bounded
+stack-backed span through 32 sections; larger filters keep a heap fallback.
+Casts, float expressions, and sample/section order remain unchanged. A focused
+benchmark reduced warm allocation from about 72 bytes to zero per call, while
+timing stayed neutral; a 40-frame/80-field trace removed 2.538 MiB across 25
+sampled `FloatSosSection[]` events. Twelve profile/thread gates, six interleaved
+160-frame pairs, and two opposite-order 1,000-frame pairs remained exact.
+Whole-pipeline timing and counter totals stayed within measurement noise, with
+no progressive slowdown, so the performance table remains unchanged.
 
 Each .NET cell shows median wall time followed by speedup versus Python in the
 same row; values below `1.000x` are slower. The default is **5 workers**.

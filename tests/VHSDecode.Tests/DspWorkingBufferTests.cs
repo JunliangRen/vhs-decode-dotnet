@@ -864,7 +864,17 @@ public sealed class DspWorkingBufferTests
             IirFilterDesign.ButterworthBandPassSos(
                 order: 5,
                 normalizedLowCutoff: 0.1,
-                normalizedHighCutoff: 0.4)
+                normalizedHighCutoff: 0.4),
+            Enumerable.Repeat(
+                    new SosSection(
+                        0.06745527,
+                        0.13491055,
+                        0.06745527,
+                        1.0,
+                        -1.1429805,
+                        0.4128016),
+                    33)
+                .ToArray()
         ];
 
         foreach (SosSection[] sections in cases)
@@ -889,7 +899,7 @@ public sealed class DspWorkingBufferTests
         SosFilter.ApplyForwardBackwardFloat32InPlace(allocationSections, allocationProbe);
         long allocated = GC.GetAllocatedBytesForCurrentThread() - before;
         Assert.True(
-            allocated < 512,
+            allocated < 64,
             $"Warm in-place float32 SOS forward/backward allocated {allocated:N0} bytes.");
     }
 

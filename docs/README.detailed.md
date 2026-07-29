@@ -1525,6 +1525,38 @@ orders. Working-set samples varied with collection timing, so no resident-
 memory reduction is claimed. The pass is retained as a bounded small-object
 and GC reduction and classified as whole-pipeline-throughput-neutral.
 
+The next Exact allocation pass converts float32 SOS coefficients directly into
+a destination span. Up to 32 sections, the coefficient span is stack-backed;
+larger uncommon filters retain the previous heap allocation as a bounded
+fallback. The six coefficient casts, steady-state expressions, scale
+operations, sample-major section order, reversal order, output ownership, and
+filter object lifetime are unchanged. Focused tests cover the existing one-,
+two-, four-, and generic-section bit hashes plus the 33-section fallback. The
+warm in-place allocation gate is tightened from 512 to 64 bytes.
+
+Eight order-reversed independent-process microbenchmark pairs each ran 10,000
+preallocated 4,096-sample two-section filters. Baseline/candidate allocation
+was 720,040/40 bytes, or about 72/0 bytes per call. Their medians were
+231.419/231.810 ms and only two pairs favored the candidate, so timing is
+classified as neutral. Twelve real gates covered v0.4.0 and `current` at one,
+default-five, and 20 workers. Six interleaved 160-frame pairs matched luma,
+chroma, raw JSON, stdout, normalized stderr/logs, and every ordered `fileLoc`;
+baseline/candidate wall medians were 13.390/13.410 s and CPU medians were
+101.609/101.477 s.
+
+Matched 40-frame/80-field allocation traces removed the baseline's 2.538 MiB
+across 25 sampled `FloatSosSection[]` events. Total sampled allocation moved from
+3.723 to 3.714 GiB, with identical 30/1/18 Gen0/Gen1/Gen2 starts, but unrelated
+large arrays dominate that sample. Two opposite-order 1,000-frame counter
+pairs also matched every applicable artifact/log surface and all 2,000 ordered
+`fileLoc` values. Combined wall time was 145.840/145.455 s.
+Counter-reported allocation was 154.112/154.379 GiB and varied at a scale far
+larger than the eliminated arrays, so no whole-pipeline allocation, resident-
+memory, or speedup claim is made. Candidate post-startup 100-frame intervals
+stayed between 6.905 and 7.159 s without progressive slowdown. The pass is
+retained as a bounded small-object elimination and classified as
+whole-pipeline-throughput-neutral.
+
 </details>
 
 <!-- SECTION: build -->
