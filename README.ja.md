@@ -107,15 +107,16 @@ CVBS、LaserDisc、HiFi は現在 `ipp-fast` を拒否するため、これら�
 | `--threads 20` | 18.330 s | 3.900 s / 4.700x | 4.745 s / 3.863x | 3.743 s / 4.897x | 4.511 s / 4.064x |
 <!-- LATEST_PERFORMANCE_END -->
 
-最新の Exact follow-up は、PocketFFT radix-8 zero-frequency butterfly の
-integer input/output address だけを事前計算します。すべての floating-point
-expression と twiddle 付き loop は変更しません。順序を反転した 160-frame
-pair 6 組は 7 compatibility surface すべてで一致し、process CPU median は
-3.5% 減り、wall time は neutral でした。反対順序の 1,000-frame pair 2 組では
-combined CPU time が 1,056.06 秒から 1,017.89 秒へ 3.6%、combined wall time
-が 138.96 秒から 138.31 秒へ 0.47% 減りました。allocation は neutral で
-progressive slowdown もありません。新しい stable whole-pipeline speedup
-ではないため、表は変更しません。
+最新の Exact follow-up は、float32 SOS の steady-state と scaled initial
+condition を common section count では stack-backed flat span に置き、
+backward pass で scaled span を再利用します。coefficient、float expression、
+sample/section order は変更しません。focused benchmark の warm allocation
+は約 240 bytes/call から 72 bytes/call へ減り、80-frame allocation trace では
+以前の 18.511 MiB sampled `Single[,]` type が消えました。profile/thread gate
+12 件、順序を反転した 160-frame pair 6 組、反対順序の 1,000-frame pair 2 組は
+すべて exact です。long pair の combined allocation は約 0.54% 減り、CPU は
+実質同じ、wall time は neutral で、progressive slowdown もありません。新しい
+stable whole-pipeline speedup ではないため、表は変更しません。
 
 各 .NET cell は wall-time median と同じ行の Python に対する speedup の順です。
 `1.000x` 未満は Python より遅いことを示します。default は実際に **5 workers**
