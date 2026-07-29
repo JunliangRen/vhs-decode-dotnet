@@ -1389,6 +1389,29 @@ post-startup 100-frame interval は 6.924 から 7.195 秒に収まり、どち�
 にも progressive growth はありません。これは bounded memory の根拠であり、
 resident-memory reduction の主張ではありません。
 
+続く Exact PocketFFT pass は、各 complex transform の最後にあった full-buffer
+copy を 1 回削除します。mixed-radix plan は最後の radix pass が実際に書き込んだ
+worker-local value buffer を返し、既存の sample ごとの `Complex` conversion が
+直ちに使用します。radix selection、packet order、arithmetic expression、
+normalization order、data type、thread-local ownership は変更しません。
+deterministic な 32,768-point odd-pass xUnit case は forward/inverse bit hash を
+それぞれ
+`950264D00BFBB9E577539DD1CD8BAE660B3EA9EAC82DD131794CAA108341061B`
+と
+`3CC982F0D601FD7B484FECAF26FC912F0DDF77593B378E1E45ED9B9EBB1EF5B5`
+に固定します。
+
+real gate 12 件は v0.4.0 と `current` の 1、default 5、20 workers を網羅し、
+interleaved 160-frame pair 6 組も luma、chroma、raw JSON、stdout、normalized
+stderr/log、すべての ordered `fileLoc` で一致しました。CPU trace では以前の
+final copy に由来する 374.725 ms の `Memmove` caller が消えています。順序を
+反転した 1,000-frame counter pair 2 組の combined process CPU time は
+1,122.171 秒から 1,111.078 秒へ 0.99% 減り、combined wall time は
+151.782/151.650 秒で実質的に同じでした。sampled allocation も
+7.437/7.420 GiB で実質同じで、新しい allocation type はありません。この
+pass は CPU と memory-bandwidth の削減として保持し、throughput-neutral と
+判断します。
+
 </details>
 
 <!-- SECTION: build -->
@@ -1407,7 +1430,7 @@ resident-memory reduction の主張ではありません。
 .\tools\build-ipp-native.ps1
 dotnet restore VHSDecodeDotNet.slnx
 dotnet build VHSDecodeDotNet.slnx -c Release --no-restore
-dotnet test --solution VHSDecodeDotNet.slnx -c Release --no-build --no-restore --minimum-expected-tests 1116
+dotnet test --solution VHSDecodeDotNet.slnx -c Release --no-build --no-restore --minimum-expected-tests 1117
 ```
 
 最初の command は optional `ipp-fast` native artifact を含めるためのものです。
@@ -1420,7 +1443,7 @@ third-party notice を埋め込み、license sidecar file は追加しません�
 
 現在の正式な Release build は warning 0、error 0 です。xUnit v3 project は
 `dotnet test` と Visual Studio Test Explorer の両方で個別に検出できる
-**1,116** tests を公開します。
+**1,117** tests を公開します。
 
 <!-- SECTION: usage -->
 

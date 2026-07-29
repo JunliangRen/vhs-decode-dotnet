@@ -36,7 +36,7 @@ upstream release `v0.4.0`、commit
 - VHS family には VHS/S-VHS、Betamax、Video8/Hi8、U-matic、Type C、EIAJ、
   upstream が対応する PAL/NTSC variant が含まれます。
 - TBC utility、ダブルクリック GUI、開発者向け plot window は対象外です。
-- Visual Studio 2026 の `.slnx` には **1,116** 件の標準 xUnit v3 test があり、
+- Visual Studio 2026 の `.slnx` には **1,117** 件の標準 xUnit v3 test があり、
   Test Explorer と `dotnet test` の両方で実行できます。
 
 <!-- SECTION: start -->
@@ -107,16 +107,13 @@ CVBS、LaserDisc、HiFi は現在 `ipp-fast` を拒否するため、これら�
 | `--threads 20` | 18.330 s | 3.900 s / 4.700x | 4.745 s / 3.863x | 3.743 s / 4.897x | 4.511 s / 4.064x |
 <!-- LATEST_PERFORMANCE_END -->
 
-最新の Exact follow-up は VHS sub-deemphasis amplitude SOS result に
-worker-owned buffer を再利用します。main `583d062` に対する matched
-`current --threads 20` 80-frame trace では、sampled managed allocation が
-7.797 GiB から 6.926 GiB へ 11.2%、`Double[]` が 6.221 GiB から
-5.342 GiB へ 14.1% 減り、Gen2 は 33 回から 29 回になりました。順序を
-反転した 160-frame 6 組は 7 compatibility surface すべてで一致しました。
-反対順序の 1,000-frame run 2 組でも allocation は 11.9-12.1%、Gen2 は
-21.5-24.4% 減り、progressive slowdown はありません。throughput は neutral
-で sampled working set も改善しなかったため、表は変更せず speedup は
-主張しません。
+最新の Exact follow-up は PocketFFT の実際の final radix buffer を直接使用し、
+full buffer の追加 copy を省きます。同じ private sample に対する順序を反転した
+1,000-frame run 2 組は、7 compatibility surface すべてで一致しました。
+combined process CPU time は 1,122.17 秒から 1,111.08 秒へ 1.0% 減りましたが、
+combined wall time は 151.78/151.65 秒で実質的に同じです。これは CPU と
+memory-bandwidth の削減であり、新しい whole-pipeline speedup ではないため、
+表は変更しません。
 
 各 .NET cell は wall-time median と同じ行の Python に対する speedup の順です。
 `1.000x` 未満は Python より遅いことを示します。default は実際に **5 workers**
@@ -150,7 +147,7 @@ preview tool は writer を止めずに partial output を確認できます。
 dotnet restore VHSDecodeDotNet.slnx
 dotnet build VHSDecodeDotNet.slnx -c Release --no-restore
 dotnet test --solution VHSDecodeDotNet.slnx -c Release `
-  --no-build --no-restore --minimum-expected-tests 1116
+  --no-build --no-restore --minimum-expected-tests 1117
 ```
 
 Visual Studio 2026 で `VHSDecodeDotNet.slnx` を開くと、build、debug、

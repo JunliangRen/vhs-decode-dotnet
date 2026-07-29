@@ -1153,6 +1153,23 @@ stderr/日志和全部有序 `fileLoc` 上一致；基线/候选墙钟中位数�
 6.924 至 7.195 秒，两次运行都没有渐进增长，因此这里只证明内存有界，
 不宣称常驻内存下降。
 
+随后一轮 Exact PocketFFT 优化移除了每次 complex transform 末尾的一次整块
+buffer 复制。混合基数 plan 现在返回最后一次 radix pass 实际写入的 worker 本地
+value buffer，现有的逐样本 `Complex` 转换会立即使用它。radix 选择、packet
+顺序、算术表达式、归一化顺序、数据类型和线程本地所有权均保持不变。新增确定性的
+32,768 点奇数 pass xUnit 用例，将正向和逆向 bit hash 分别锁定为
+`950264D00BFBB9E577539DD1CD8BAE660B3EA9EAC82DD131794CAA108341061B`
+和
+`3CC982F0D601FD7B484FECAF26FC912F0DDF77593B378E1E45ED9B9EBB1EF5B5`。
+
+12 次真实门禁覆盖 v0.4.0 与 `current` 的 1、默认 5 和 20 workers；六组交错
+160 帧配对也在亮度、色度、原始 JSON、stdout、归一化 stderr/日志和全部有序
+`fileLoc` 上一致。CPU trace 中原来归属于末尾复制的 374.725 ms `Memmove`
+入口已经消失。两组相反顺序的 1000 帧 counters 配对合计把进程 CPU 时间从
+1,122.171 秒降至 1,111.078 秒（下降 0.99%），合计墙钟则基本不变，为
+151.782/151.650 秒。采样分配也基本不变，为 7.437/7.420 GiB，且没有出现新的
+分配类型。因此本轮作为 CPU 和内存带宽优化保留，并按吞吐中性处理。
+
 </details>
 
 <!-- SECTION: build -->
@@ -1171,7 +1188,7 @@ stderr/日志和全部有序 `fileLoc` 上一致；基线/候选墙钟中位数�
 .\tools\build-ipp-native.ps1
 dotnet restore VHSDecodeDotNet.slnx
 dotnet build VHSDecodeDotNet.slnx -c Release --no-restore
-dotnet test --solution VHSDecodeDotNet.slnx -c Release --no-build --no-restore --minimum-expected-tests 1116
+dotnet test --solution VHSDecodeDotNet.slnx -c Release --no-build --no-restore --minimum-expected-tests 1117
 ```
 
 第一条命令用于包含可选的 `ipp-fast` 原生产物；只构建 Exact 时可以省略。
@@ -1182,7 +1199,7 @@ Intel oneAPI。只含二进制的单文件发布会嵌入 `vhsdecode_ipp.dll` �
 notice，不会额外生成许可证 sidecar 文件。只构建 Exact 后端时可以省略原生构建步骤。
 
 当前正式 Release 构建为零警告、零错误。xUnit v3 项目向
-`dotnet test` 和 Visual Studio Test Explorer 暴露 **1,116** 个可独立发现的测试。
+`dotnet test` 和 Visual Studio Test Explorer 暴露 **1,117** 个可独立发现的测试。
 
 <!-- SECTION: usage -->
 
