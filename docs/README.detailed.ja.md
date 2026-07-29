@@ -4,7 +4,7 @@
 
 [English](README.detailed.md) | [简体中文](README.detailed.zh-CN.md) | **[日本語](README.detailed.ja.md)**
 
-<!-- README_SYNC: 2026-07-29.12 -->
+<!-- README_SYNC: 2026-07-29.13 -->
 
 [`oyvindln/vhs-decode`](https://github.com/oyvindln/vhs-decode) の
 デコード関連部分を .NET 11 で再実装するプロジェクトです。現在は release
@@ -1265,6 +1265,36 @@ ordered `fileLoc` が一致しました。追加の Exact gate 12 件は v0.4.0 
 Exact/IPP matrix run 60 件も、記録済みの compatibility reference をすべて
 通過しました。
 
+続く VHS complex-RF filtered-spectrum workspace pass は、full filtered
+spectrum を既存の上限付き worker workspace に保持し、optional RF MTF multiply
+を in-place で実行します。per-block の `Complex[]` output を最大 2 本削除しながら、
+complex-multiply の式と fallback、full-complex FFT/Hilbert lifetime、係数、
+data type、ordered output state を維持します。通常値と特殊値の in-place test は
+長さ 0、1、2、3、32,769 を網羅します。warm PAL RF block の allocation は
+2,098,184 bytes で、新しい上限は 2,400,000 bytes です。
+
+formal release v0.4.0-1.3.9 に対する matched 80-frame `gc-verbose` trace では、
+sampled managed allocation が 13.900 GiB から 10.415 GiB へ 25.1% 減り、
+sampled `Complex[]` allocation が 3.622 GiB から 135 MiB へ 96.4% 減り、
+Gen2 collection が 57 回から 44 回へ 22.8% 減りました。順序を反転した
+160-frame 6 組は 7 compatibility surface すべてで一致し、
+baseline/candidate wall median は 14.069/14.167 秒、CPU median の変化は
+-0.44% だったため、この pass は throughput-neutral と判断します。
+
+順序が逆の 400-frame runtime-counter 2 組では、aggregate allocation が
+127.255 GiB から 93.795 GiB へ 26.29% 減り、Gen2 collection が 496 回から
+261 回へ 47.38% 減りました。counter 計測下の aggregate wall time は 3.57%
+高かったため、long-run speedup は主張しません。candidate の sampled working
+set 最大値は 1.23 GiB で、reverse-order run の first/last-third median は
+905/908 MiB でした。別の 1,000-frame candidate run は luma、chroma、raw JSON、
+normalized log、2,000 個すべての ordered `fileLoc` で前 release checkpoint と
+一致し、allocation を 160.525 GiB から 119.650 GiB へ 25.46%、Gen2 を
+628 回から 353 回へ 43.79% 減らしました。first/last-third working-set median は
+747/782 MiB、最大値は 1,198 MiB で、startup 後の 100-frame interval 9 個は
+7.239 から 7.493 秒に収まりました。workspace は bounded で progressive
+slowdown もありませんが、GC pressure の低下により periodic resident-memory
+sample は高くなるため、resident-memory reduction は主張しません。
+
 </details>
 
 <!-- SECTION: build -->
@@ -1283,7 +1313,7 @@ Exact/IPP matrix run 60 件も、記録済みの compatibility reference をす�
 .\tools\build-ipp-native.ps1
 dotnet restore VHSDecodeDotNet.slnx
 dotnet build VHSDecodeDotNet.slnx -c Release --no-restore
-dotnet test --solution VHSDecodeDotNet.slnx -c Release --no-build --no-restore --minimum-expected-tests 1110
+dotnet test --solution VHSDecodeDotNet.slnx -c Release --no-build --no-restore --minimum-expected-tests 1115
 ```
 
 最初の command は optional `ipp-fast` native artifact を含めるためのものです。
@@ -1296,7 +1326,7 @@ third-party notice を埋め込み、license sidecar file は追加しません�
 
 現在の正式な Release build は warning 0、error 0 です。xUnit v3 project は
 `dotnet test` と Visual Studio Test Explorer の両方で個別に検出できる
-**1,110** tests を公開します。
+**1,115** tests を公開します。
 
 <!-- SECTION: usage -->
 

@@ -4,7 +4,7 @@
 
 **[English](README.detailed.md)** | [简体中文](README.detailed.zh-CN.md) | [日本語](README.detailed.ja.md)
 
-<!-- README_SYNC: 2026-07-29.12 -->
+<!-- README_SYNC: 2026-07-29.13 -->
 
 .NET 11 rewrite of the decode-facing parts of
 [`oyvindln/vhs-decode`](https://github.com/oyvindln/vhs-decode), focused on
@@ -1313,6 +1313,38 @@ seven surfaces matched baseline and remained cross-thread deterministic. All
 60 refreshed Exact/IPP matrix runs also passed their recorded compatibility
 references.
 
+The following VHS complex-RF filter workspace pass keeps the full filtered
+spectrum in the existing capped worker workspace and applies the optional RF
+MTF multiply in place. It removes up to two per-block `Complex[]` outputs while
+retaining the exact complex-multiply expression and fallback, full-complex
+FFT/Hilbert lifetimes, coefficients, data types, and ordered output state.
+General and special-value in-place tests cover lengths 0, 1, 2, 3, and 32,769.
+The warm PAL RF block allocated 2,098,184 bytes under its new 2,400,000-byte
+ceiling.
+
+Against released v0.4.0-1.3.9, a matched 80-frame `gc-verbose` trace reduced
+sampled managed allocation from 13.900 to 10.415 GiB (25.1%), sampled
+`Complex[]` allocation from 3.622 GiB to 135 MiB (96.4%), and Gen2
+collections from 57 to 44 (22.8%). Six order-reversed 160-frame pairs matched
+all seven compatibility surfaces and had 14.069/14.167 s baseline/candidate
+wall medians; median CPU time changed by -0.44%, so this pass remains
+throughput-neutral.
+
+Two opposite-order 400-frame runtime-counter pairs reduced aggregate
+allocation from 127.255 to 93.795 GiB (26.29%) and Gen2 collections from 496
+to 261 (47.38%). Counter-instrumented aggregate wall time was 3.57% higher,
+so no long-run speedup is claimed. The candidate's highest sampled working
+set was 1.23 GiB; in the reverse-order run its first/last-third medians were
+905/908 MiB. A separate 1,000-frame candidate run matched the prior release
+checkpoint for luma, chroma, raw JSON, normalized logs, and all 2,000 ordered
+`fileLoc` values while reducing allocation from 160.525 to 119.650 GiB
+(25.46%) and Gen2 collections from 628 to 353 (43.79%). Its first/last-third
+working-set medians were 747/782 MiB, its maximum was 1,198 MiB, and the nine
+post-startup 100-frame intervals stayed between 7.239 and 7.493 s. The
+workspace is therefore bounded and does not progressively slow down, but the
+lower GC pressure can produce higher periodic resident-memory samples; this
+is not a resident-memory reduction claim.
+
 </details>
 
 <!-- SECTION: build -->
@@ -1333,7 +1365,7 @@ Requirements:
 .\tools\build-ipp-native.ps1
 dotnet restore VHSDecodeDotNet.slnx
 dotnet build VHSDecodeDotNet.slnx -c Release --no-restore
-dotnet test --solution VHSDecodeDotNet.slnx -c Release --no-build --no-restore --minimum-expected-tests 1110
+dotnet test --solution VHSDecodeDotNet.slnx -c Release --no-build --no-restore --minimum-expected-tests 1115
 ```
 
 The first command includes the optional `ipp-fast` native artifact; omit it for
@@ -1346,7 +1378,7 @@ deployment computer. Binary-only single-file releases embed
 sidecar license files. An Exact-only build may omit the native build step.
 
 The current formal Release build has zero warnings and errors. The xUnit v3
-project exposes **1,110** independently discoverable tests to both
+project exposes **1,115** independently discoverable tests to both
 `dotnet test` and Visual Studio Test Explorer.
 
 <!-- SECTION: usage -->

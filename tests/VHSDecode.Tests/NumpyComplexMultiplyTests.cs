@@ -24,6 +24,23 @@ public sealed class NumpyComplexMultiplyTests
         AssertComplexBitsEqual(expected, actual);
     }
 
+    [Theory(DisplayName = "SIMD in-place complex multiply matches scalar NumPy rounding")]
+    [InlineData(0)]
+    [InlineData(1)]
+    [InlineData(2)]
+    [InlineData(3)]
+    [InlineData(32_769)]
+    public void SimdInPlaceComplexMultiplyMatchesScalarNumpyRounding(int length)
+    {
+        Complex[] left = BuildValues(length, 0xD1B54A32D192ED03UL);
+        Complex[] right = BuildValues(length, 0x94D049BB133111EBUL);
+        Complex[] expected = ScalarMultiply(left, right);
+
+        NumpyComplexMultiply.ApplyInPlace(left, right);
+
+        AssertComplexBitsEqual(expected, left);
+    }
+
     [Fact(DisplayName = "SIMD in-place complex multiply preserves scalar special values")]
     public void SimdInPlaceComplexMultiplyPreservesScalarSpecialValues()
     {
