@@ -113,8 +113,8 @@ public sealed class PocketFftMixedRadixCompatibilityTests
                     MemoryMarshal.AsBytes(actualBackward.AsSpan())));
     }
 
-    [Fact(DisplayName = "Warm large multipass FFT reuses Plan value workspaces")]
-    public void WarmLargeMultipassFftReusesPlanValueWorkspaces()
+    [Fact(DisplayName = "Warm large multipass FFT reuses Plan and packet workspaces")]
+    public void WarmLargeMultipassFftReusesPlanAndPacketWorkspaces()
     {
         const int Length = 239_580;
         float[] values = DeterministicInput(2 * Length);
@@ -153,7 +153,7 @@ public sealed class PocketFftMixedRadixCompatibilityTests
             Sha256(MemoryMarshal.AsBytes(expected.AsSpan())),
             Sha256(MemoryMarshal.AsBytes(actual.AsSpan())));
         Assert.True(
-            allocated < 4 * 1024 * 1024,
+            allocated < 64 * 1024,
             $"Warm multipass FFT allocated {allocated:N0} bytes.");
     }
 

@@ -100,22 +100,21 @@ CVBS、LaserDisc、HiFi は現在 `ipp-fast` を拒否するため、これら�
 <!-- LATEST_PERFORMANCE_BEGIN -->
 | CLI mode（workers） | Python v0.4.0 | Exact + v0.4.0 | Exact + current | IPP-fast + v0.4.0 | IPP-fast + current |
 | --- | ---: | ---: | ---: | ---: | ---: |
-| default（5） | 16.983 s | 6.214 s / 2.733x | 7.581 s / 2.240x | 6.231 s / 2.726x | 7.599 s / 2.235x |
-| `--threads 1` | 21.263 s | 19.228 s / 1.106x | 21.855 s / 0.973x | 18.713 s / 1.136x | 21.265 s / 1.000x |
-| `--threads 5` | 16.880 s | 6.203 s / 2.721x | 7.724 s / 2.185x | 6.342 s / 2.661x | 7.511 s / 2.247x |
-| `--threads 10` | 17.612 s | 4.689 s / 3.756x | 5.889 s / 2.991x | 4.543 s / 3.877x | 5.747 s / 3.064x |
-| `--threads 20` | 18.330 s | 3.900 s / 4.700x | 4.745 s / 3.863x | 3.743 s / 4.897x | 4.511 s / 4.064x |
+| default（5） | 16.983 s | 5.999 s / 2.831x | 7.904 s / 2.149x | 5.888 s / 2.884x | 7.421 s / 2.289x |
+| `--threads 1` | 21.263 s | 19.450 s / 1.093x | 22.287 s / 0.954x | 18.770 s / 1.133x | 21.251 s / 1.001x |
+| `--threads 5` | 16.880 s | 6.363 s / 2.653x | 7.653 s / 2.206x | 5.850 s / 2.886x | 7.540 s / 2.239x |
+| `--threads 10` | 17.612 s | 4.600 s / 3.829x | 5.864 s / 3.003x | 4.642 s / 3.794x | 6.061 s / 2.906x |
+| `--threads 20` | 18.330 s | 3.684 s / 4.976x | 4.854 s / 3.777x | 3.760 s / 4.875x | 4.769 s / 3.843x |
 <!-- LATEST_PERFORMANCE_END -->
 
-最新の Exact follow-up は、float32 SOS coefficient conversion を 32 sections
-まで bounded stack-backed span に置き、それを超える filter では heap fallback
-を維持します。cast、float expression、sample/section order は変更しません。
-focused benchmark の warm allocation は約 72 bytes/call から zero になり、
-timing は neutral でした。40-frame/80-field trace では 25 events、合計
-2.538 MiB の sampled `FloatSosSection[]` が消えました。profile/thread gate 12 件、
-interleaved 160-frame pair 6 組、反対順序の 1,000-frame pair 2 組はすべて
-exact です。whole-pipeline timing と counter total は measurement noise 内で、
-progressive slowdown もないため、performance table は変更しません。
+最新の Exact follow-up は、mixed-radix Complex32 FFT packet の result を
+既存の worker-local buffer へ直接書き戻し、temporary array allocation を
+なくします。arithmetic と packet order は変更しません。matched trace の
+sampled `Complex32[]` allocation は 364.328 MiB から 2.747 MiB へ減りました。
+profile/thread gate 12 件、interleaved 160-frame pair 6 組、反対順序の
+1,000-frame pair 2 組はすべて exact です。long pair の combined wall time は
+144.526 秒から 136.988 秒へ 5.22%、counter allocation は 9.17% 減り、
+progressive slowdown もありません。上の five-path table は 60 runs で更新しました。
 
 各 .NET cell は wall-time median と同じ行の Python に対する speedup の順です。
 `1.000x` 未満は Python より遅いことを示します。default は実際に **5 workers**
