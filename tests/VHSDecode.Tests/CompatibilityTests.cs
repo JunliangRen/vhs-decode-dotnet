@@ -5611,6 +5611,31 @@ public void DecodeFilterSetBuilderAppliesBetamaxFscNotch()
         sampleRateHz / 2.0));
 }
 
+[Fact(DisplayName = "Betamax fsc notch in-place path is bit-exact")]
+public void BetamaxFscNotchInPlaceIsBitExact()
+{
+    const double sampleRateHz = 40_000_000.0;
+    const double fscHz = 3_579_545.0;
+    foreach (int length in new[] { 8, 8192 })
+    {
+        double[] input = Enumerable.Range(0, length)
+            .Select(index =>
+                Math.Sin(Math.Tau * fscHz * index / sampleRateHz)
+                + (0.25 * Math.Cos(Math.Tau * 1_000_000.0 * index / sampleRateHz)))
+            .ToArray();
+        input[0] = -0.0;
+        double[] expected = RfDemodulator.ApplyBetamaxFscNotch(
+            input,
+            sampleRateHz,
+            fscHz);
+        double[] actual = input.ToArray();
+
+        RfDemodulator.ApplyBetamaxFscNotchInPlace(actual, sampleRateHz, fscHz);
+
+        AssertEqual(DoubleBitsSha256(expected), DoubleBitsSha256(actual));
+    }
+}
+
 [Fact(DisplayName = "decode filter-set builder applies LD MTF options")]
 public void DecodeFilterSetBuilderAppliesLdMtfOptions()
 {

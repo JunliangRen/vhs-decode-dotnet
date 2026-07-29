@@ -585,7 +585,7 @@ public sealed class RfDemodulator : IDisposable
             vhsRealFftWorkspace);
         if (betamaxFscNotchHz is { } fscNotchHz)
         {
-            video = ApplyBetamaxFscNotch(video, SampleRateHz, fscNotchHz);
+            ApplyBetamaxFscNotchInPlace(video, SampleRateHz, fscNotchHz);
         }
 
         double[] videoLowPass;
@@ -741,6 +741,34 @@ public sealed class RfDemodulator : IDisposable
         double sampleRateHz,
         double fscHz)
     {
+        TransferFunction notch = BuildBetamaxFscNotch(sampleRateHz, fscHz);
+        int defaultPadLength = IirFilter.DefaultPadLength(notch);
+        return video.Length > defaultPadLength
+            ? IirFilter.ApplyForwardBackward(notch, video)
+            : IirFilter.ApplyForwardBackward(notch, video, padLength: 0);
+    }
+
+    internal static void ApplyBetamaxFscNotchInPlace(
+        Span<double> video,
+        double sampleRateHz,
+        double fscHz)
+    {
+        TransferFunction notch = BuildBetamaxFscNotch(sampleRateHz, fscHz);
+        int defaultPadLength = IirFilter.DefaultPadLength(notch);
+        if (video.Length > defaultPadLength)
+        {
+            IirFilter.ApplyForwardBackwardInPlace(notch, video);
+        }
+        else
+        {
+            IirFilter.ApplyForwardBackwardInPlace(notch, video, padLength: 0);
+        }
+    }
+
+    private static TransferFunction BuildBetamaxFscNotch(
+        double sampleRateHz,
+        double fscHz)
+    {
         if (sampleRateHz <= 0.0)
         {
             throw new ArgumentOutOfRangeException(nameof(sampleRateHz));
@@ -752,11 +780,7 @@ public sealed class RfDemodulator : IDisposable
             throw new ArgumentOutOfRangeException(nameof(fscHz), "Betamax fsc notch frequency must be between 0 Hz and Nyquist.");
         }
 
-        TransferFunction notch = IirFilterDesign.Notch(fscHz / nyquistHz, q: 2.0);
-        int defaultPadLength = IirFilter.DefaultPadLength(notch);
-        return video.Length > defaultPadLength
-            ? IirFilter.ApplyForwardBackward(notch, video)
-            : IirFilter.ApplyForwardBackward(notch, video, padLength: 0);
+        return IirFilterDesign.Notch(fscHz / nyquistHz, q: 2.0);
     }
 
     public static double[] ApplySharpnessEq(

@@ -374,20 +374,20 @@ wall-time reduction の順です。
 
 | CLI mode（workers） | Python v0.4.0 | Exact + v0.4.0 | Exact + current | IPP-fast + v0.4.0 | IPP-fast + current |
 | --- | ---: | ---: | ---: | ---: | ---: |
-| default（5） | 16.983 s | 6.770 s / 2.509x / 60.1% | 7.969 s / 2.131x / 53.1% | 6.579 s / 2.581x / 61.3% | 7.938 s / 2.140x / 53.3% |
-| `--threads 1` | 21.263 s | 21.092 s / 1.008x / 0.8% | 22.848 s / 0.931x / 7.5% slower | 20.468 s / 1.039x / 3.7% | 22.401 s / 0.949x / 5.4% slower |
-| `--threads 5` | 16.880 s | 6.778 s / 2.490x / 59.8% | 7.993 s / 2.112x / 52.6% | 6.727 s / 2.509x / 60.1% | 7.737 s / 2.182x / 54.2% |
-| `--threads 10` | 17.612 s | 5.242 s / 3.360x / 70.2% | 5.937 s / 2.966x / 66.3% | 4.826 s / 3.649x / 72.6% | 5.870 s / 3.000x / 66.7% |
-| `--threads 20` | 18.330 s | 4.209 s / 4.355x / 77.0% | 5.119 s / 3.581x / 72.1% | 4.160 s / 4.406x / 77.3% | 5.074 s / 3.612x / 72.3% |
+| default（5） | 16.983 s | 6.852 s / 2.479x / 59.7% | 8.236 s / 2.062x / 51.5% | 6.717 s / 2.528x / 60.4% | 7.928 s / 2.142x / 53.3% |
+| `--threads 1` | 21.263 s | 21.142 s / 1.006x / 0.6% | 23.571 s / 0.902x / 10.9% slower | 21.053 s / 1.010x / 1.0% | 22.626 s / 0.940x / 6.4% slower |
+| `--threads 5` | 16.880 s | 6.884 s / 2.452x / 59.2% | 8.121 s / 2.079x / 51.9% | 6.709 s / 2.516x / 60.3% | 7.980 s / 2.115x / 52.7% |
+| `--threads 10` | 17.612 s | 5.183 s / 3.398x / 70.6% | 6.330 s / 2.782x / 64.1% | 5.042 s / 3.493x / 71.4% | 5.972 s / 2.949x / 66.1% |
+| `--threads 20` | 18.330 s | 4.244 s / 4.318x / 76.8% | 5.467 s / 3.353x / 70.2% | 4.021 s / 4.559x / 78.1% | 4.880 s / 3.756x / 73.4% |
 
 benchmark host は Intel Core Ultra 7 265K（20 logical processor）、
 Windows 11 25H2 build 26220.8925、.NET SDK/runtime
 `11.0.100-preview.6.26359.118` です。Python 自体は変更されていないため、
 Python 列は以前の fixed matrix median を保持し、4 つの .NET 列は 60 回の
-interleaved run で再測定しました。candidate は `b640b3ee` に下記の
-PocketFFT Plan workspace 最適化を加えたもので、single-file `decode.exe`
+interleaved run で再測定しました。candidate は `d16573a0` に下記の
+Betamax FSC notch in-place 最適化を加えたもので、single-file `decode.exe`
 SHA-256 は
-`860D82F3332BF94C822374B08D2F5C5856E7FE3F8132CC2964427F840A7D7324`
+`1EBA26547DFC57525E57699137A4CBA2E3E478E5A906C472AEAAFE047CB22F6F`
 でした。Python 3.14.0 は NumPy 2.4.6、SciPy 1.18.0、Numba 0.66.0、
 python-soxr 1.1.0 を使用しました。共通引数は次のとおりです。
 
@@ -1196,6 +1196,35 @@ chroma、JSON、normalized log、順序付き 800 個すべての `fileLoc` が�
 別の Exact `current`/v0.4.0 `--threads 0`、default 5、`--threads 20` gate も
 7 surface すべてで一致し、deterministic でした。
 
+Betamax FSC notch は、以前の内容が不要になった decoder-owned video array を
+in-place で filter するようになりました。public helper は引き続き独立した
+array を返します。notch design、padding choice、pooled odd-extension buffer、
+forward/backward IIR arithmetic、reverse order、final copy-back は変更して
+いません。release v1.3.7 を baseline とした、順序を反転した interleaved
+160-frame Exact `current --threads 20` pair 6 組では candidate が 5 組で勝ち、
+wall-time median は 14.667 s から 14.495 s（1.17% 減、throughput 1.19% 増）、
+CPU-time median は 107.227 s から 106.398 s（0.77% 減）、balanced aggregate
+throughput は 1.02% 増えました。
+
+matched 80-frame `gc-verbose` trace では sampled managed allocation が
+18.245 GiB から 17.388 GiB（4.70% 減）、sampled `Double[]` allocation が
+9.690 GiB から 8.820 GiB（8.98% 減）、Gen2 collection が 73 回から 64 回へ
+減りました。matched 400-frame runtime-counter run では total allocation が
+84.082 GiB から 79.278 GiB（5.71% 減）、Gen2 collection が 325 回から
+294 回へ減りました。baseline/candidate の wall time は 33.179/33.382 s、
+median working set は 647.4/649.1 MiB で、candidate には 1.392 GiB の一時的な
+sample もあったため、この pair から long-run speedup や resident-memory
+reduction は主張しません。startup を含む candidate の 100-frame interval は
+10.365/7.632/7.594/7.638 s で、progressive slowdown や growth はありません。
+
+すべての 160-frame A/B run で luma、chroma、JSON、stdout、normalized
+stderr/log、順序付き 320 個すべての `fileLoc` が一致しました。400-frame
+output でも luma、chroma、JSON、normalized log、順序付き 800 個すべての
+`fileLoc` が一致しました。追加の Exact gate 12 run は `current` と v0.4.0 の
+`--threads 0`、default 5、`--threads 20` を対象とし、7 surface すべてで一致し、
+cross-thread deterministic でした。更新した Exact/IPP overview matrix 60 run
+も、記録済み compatibility reference をすべて通過しました。
+
 </details>
 
 <!-- SECTION: build -->
@@ -1214,7 +1243,7 @@ chroma、JSON、normalized log、順序付き 800 個すべての `fileLoc` が�
 .\tools\build-ipp-native.ps1
 dotnet restore VHSDecodeDotNet.slnx
 dotnet build VHSDecodeDotNet.slnx -c Release --no-restore
-dotnet test --solution VHSDecodeDotNet.slnx -c Release --no-build --no-restore --minimum-expected-tests 1108
+dotnet test --solution VHSDecodeDotNet.slnx -c Release --no-build --no-restore --minimum-expected-tests 1109
 ```
 
 最初の command は optional `ipp-fast` native artifact を含めるためのものです。
@@ -1227,7 +1256,7 @@ third-party notice を埋め込み、license sidecar file は追加しません�
 
 現在の正式な Release build は warning 0、error 0 です。xUnit v3 project は
 `dotnet test` と Visual Studio Test Explorer の両方で個別に検出できる
-**1,108** tests を公開します。
+**1,109** tests を公開します。
 
 <!-- SECTION: usage -->
 

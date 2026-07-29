@@ -106,7 +106,7 @@ public sealed partial class ReadmeLocalizationTests
         [
             "43155200da87c0d49eb37d8ec09b1372075ee8e4",
             "11.0.100-preview.6.26359.118",
-            "**1,108**",
+            "**1,109**",
             "--compat-version",
             "current",
             "--dsp-backend",
@@ -116,8 +116,8 @@ public sealed partial class ReadmeLocalizationTests
             "IPP-fast + v0.4.0",
             "IPP-fast + current",
             "16.983 s",
-            "4.355x",
-            "3.612x",
+            "4.318x",
+            "3.756x",
             "g4315520",
             "--threads 0"
         ];
@@ -126,7 +126,7 @@ public sealed partial class ReadmeLocalizationTests
         [
             "43155200da87c0d49eb37d8ec09b1372075ee8e4",
             "11.0.100-preview.6.26359.118",
-            "**1,108**",
+            "**1,109**",
             "77.234 MiB",
             "2.863362 GiB",
             "2.790004 GiB",
@@ -427,7 +427,7 @@ public sealed partial class ReadmeLocalizationTests
             "16.52",
             "35.84/39.54",
             "1.459/1.231/0.820/1.422",
-            "860D82F3332BF94C822374B08D2F5C5856E7FE3F8132CC2964427F840A7D7324",
+            "1EBA26547DFC57525E57699137A4CBA2E3E478E5A906C472AEAAFE047CB22F6F",
             "20.311490",
             "2.623486",
             "2,240,768",
@@ -445,8 +445,8 @@ public sealed partial class ReadmeLocalizationTests
             "3.00%",
             "1.66%",
             "30.253",
-            "4.355x",
-            "3.612x",
+            "4.318x",
+            "3.756x",
             "--use_saved_levels",
             "COMPATIBILITY_EVIDENCE.md"
         ];
