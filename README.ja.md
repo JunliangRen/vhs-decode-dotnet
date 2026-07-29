@@ -2,7 +2,7 @@
 
 [English](README.md) | [简体中文](README.zh-CN.md) | **[日本語](README.ja.md)**
 
-<!-- README_SYNC: 2026-07-29.14 -->
+<!-- README_SYNC: 2026-07-29.15 -->
 
 [`oyvindln/vhs-decode`](https://github.com/oyvindln/vhs-decode) の
 デコード関連部分を .NET 11 で再実装するプロジェクトです。互換性の対象は
@@ -107,15 +107,16 @@ CVBS、LaserDisc、HiFi は現在 `ipp-fast` を拒否するため、これら�
 | `--threads 20` | 18.330 s | 3.900 s / 4.700x | 4.745 s / 3.863x | 3.743 s / 4.897x | 4.511 s / 4.064x |
 <!-- LATEST_PERFORMANCE_END -->
 
-最新の follow-up は double precision SOS の padded workspace を再利用します。
-v0.4.0-1.4.0 に対する matched Exact `current --threads 20` 80-frame trace では、
-sampled managed allocation が 10.415 GiB から 8.659 GiB へ 16.9%、
-`Double[]` が 8.837 GiB から 7.083 GiB へ 19.8% 減り、Gen2 は 44 回から
-26 回になりました。順序を反転した 160-frame 6 組は throughput-neutral で、
-7 compatibility surface がすべて一致しました。1,000-frame run も以前の
-output と一致し、allocation を 119.650 GiB から 98.679 GiB へ 17.5% 減らして
-progressive slowdown はありませんでした。そのため上の表は変更せず、この
-pass の speedup は主張しません。
+最新の follow-up は VHS RF high-boost の SOS result を既存の worker-owned
+buffer へ直接書き込みます。main `a184450` に対する matched Exact
+`current --threads 20` 80-frame trace では、sampled managed allocation が
+8.667 GiB から 7.797 GiB へ 10.0%、`Double[]` が 7.091 GiB から
+6.221 GiB へ 12.3% 減り、Gen2 は 36 回から 33 回になりました。順序を
+反転した 160-frame 6 組は throughput-neutral で、7 compatibility surface が
+すべて一致しました。matched 1,000-frame run でも allocation が
+98.021 GiB から 88.428 GiB へ 9.8% 減り、progressive slowdown は
+ありませんでした。そのため上の表は変更せず、この pass の speedup は
+主張しません。
 
 各 .NET cell は wall-time median と同じ行の Python に対する speedup の順です。
 `1.000x` 未満は Python より遅いことを示します。default は実際に **5 workers**

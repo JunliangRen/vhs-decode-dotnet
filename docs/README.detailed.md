@@ -4,7 +4,7 @@
 
 **[English](README.detailed.md)** | [简体中文](README.detailed.zh-CN.md) | [日本語](README.detailed.ja.md)
 
-<!-- README_SYNC: 2026-07-29.14 -->
+<!-- README_SYNC: 2026-07-29.15 -->
 
 .NET 11 rewrite of the decode-facing parts of
 [`oyvindln/vhs-decode`](https://github.com/oyvindln/vhs-decode), focused on
@@ -1371,6 +1371,37 @@ first/last-third working-set medians were 680/727 MiB; a transient 1,420 MiB
 peak later returned below 900 MiB. The nine post-startup 100-frame intervals
 stayed between 6.800 and 6.989 s. This supports bounded memory and no
 progressive slowdown, not a resident-memory or stable throughput claim.
+
+The following Exact pass adds an internal destination form of double SOS
+forward/backward filtering while leaving the public independently owned result
+API unchanged. In the VHS RF high-boost paths, the worker-owned `RawEnvelope`
+buffer has finished its envelope-input role and is not used again until the
+later demodulation stage, so the SOS result and unchanged float32-envelope
+scaling are written there before the existing FFT. Padding, double arithmetic,
+section/sample order, reversal order, FFT input, and output ownership remain
+unchanged, and no additional retained array is introduced. The destination
+path is section-major bit-exact and its warm 4,096-sample allocation is gated
+below 4,096 bytes.
+
+Against main `a184450`, matched Exact `current --threads 20` 80-frame
+`gc-verbose` traces reduced sampled managed allocation from 8.667 to
+7.797 GiB (10.0%), sampled `Double[]` allocation from 7.091 to 6.221 GiB
+(12.3%), and Gen2 collections from 36 to 33. The roughly 0.9 GiB high-boost
+SOS result-allocation chain disappeared. Six order-reversed 160-frame pairs
+matched all seven compatibility surfaces; 13.297/13.375 s baseline/candidate
+wall medians and 101.750/101.273 s CPU medians are treated as
+throughput-neutral. Twelve additional gates covered v0.4.0 and `current` at
+`--threads 0`, default 5, and `--threads 20`.
+
+Matched 1,000-frame counter runs also matched luma, chroma, raw JSON,
+normalized stderr/logs, and all 2,000 ordered `fileLoc` values. Total
+allocation fell from 98.021 to 88.428 GiB (9.8%); GC pause was
+0.994/0.998 s and Gen2 collections were 289/286. Baseline/candidate wall times
+were 72.129/71.352 s, but a single ordered pair does not establish a speedup.
+The candidate's first/last-third working-set medians were 676/874 MiB and a
+late 1,484 MiB peak reflected collection timing; no resident-memory reduction
+is claimed. Its nine post-startup 100-frame intervals stayed between 6.787
+and 7.035 s, supporting bounded memory and no progressive slowdown.
 
 </details>
 

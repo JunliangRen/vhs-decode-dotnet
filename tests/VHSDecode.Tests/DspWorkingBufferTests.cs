@@ -870,6 +870,15 @@ public sealed class DspWorkingBufferTests
             AssertDoubleBitsEqual(
                 ApplyForwardBackwardSectionMajorReference(sections, input),
                 SosFilter.ApplyForwardBackward(sections, input));
+            var destination = new double[input.Length];
+            SosFilter.ApplyForwardBackwardTo(sections, input, destination);
+            AssertDoubleBitsEqual(
+                ApplyForwardBackwardSectionMajorReference(sections, input),
+                destination);
+            SosFilter.ApplyForwardBackwardTo(sections, input, destination, padLength: 0);
+            AssertDoubleBitsEqual(
+                ApplyForwardBackwardSectionMajorReference(sections, input, padLength: 0),
+                destination);
         }
 
         long before = GC.GetAllocatedBytesForCurrentThread();
@@ -879,6 +888,15 @@ public sealed class DspWorkingBufferTests
         Assert.True(
             allocated < 40_000,
             $"Warm double SOS forward/backward allocated {allocated:N0} bytes.");
+
+        var destinationProbe = new double[input.Length];
+        SosFilter.ApplyForwardBackwardTo(cases[0], input, destinationProbe);
+        before = GC.GetAllocatedBytesForCurrentThread();
+        SosFilter.ApplyForwardBackwardTo(cases[0], input, destinationProbe);
+        allocated = GC.GetAllocatedBytesForCurrentThread() - before;
+        Assert.True(
+            allocated < 4_096,
+            $"Warm destination double SOS forward/backward allocated {allocated:N0} bytes.");
     }
 
     [Fact(DisplayName = "In-place IIR filtering remains allocating-reference bit-exact")]

@@ -2,7 +2,7 @@
 
 [English](README.md) | **[简体中文](README.zh-CN.md)** | [日本語](README.ja.md)
 
-<!-- README_SYNC: 2026-07-29.14 -->
+<!-- README_SYNC: 2026-07-29.15 -->
 
 这是 [`oyvindln/vhs-decode`](https://github.com/oyvindln/vhs-decode)
 中解码相关部分的 .NET 11 重写，兼容目标为上游 release `v0.4.0`、commit
@@ -102,13 +102,13 @@ CVBS、LaserDisc 和 HiFi 当前会拒绝 `ipp-fast`，这些命令应使用 `ex
 | `--threads 20` | 18.330 s | 3.900 s / 4.700x | 4.745 s / 3.863x | 3.743 s / 4.897x | 4.511 s / 4.064x |
 <!-- LATEST_PERFORMANCE_END -->
 
-最新一轮后续优化复用了 double 精度 SOS 的 padded workspace。与
-v0.4.0-1.4.0 相比，匹配的 Exact `current --threads 20` 80 帧 trace 把采样
-托管分配从 10.415 GiB 降至 8.659 GiB（下降 16.9%），`Double[]` 从
-8.837 GiB 降至 7.083 GiB（下降 19.8%），Gen2 从 44 次降至 26 次。六组
-反序 160 帧配对保持吞吐中性，七项兼容表面全部一致；1000 帧长跑也与先前输出
-一致，并把分配从 119.650 GiB 降至 98.679 GiB（下降 17.5%），没有渐进减速。
-因此上表保持不变，本轮不宣称速度提升。
+最新一轮后续优化把 VHS RF high-boost 的 SOS 结果直接写入现有的 worker 自有
+buffer。与 main `a184450` 相比，匹配的 Exact `current --threads 20` 80 帧
+trace 把采样托管分配从 8.667 GiB 降至 7.797 GiB（下降 10.0%），
+`Double[]` 从 7.091 GiB 降至 6.221 GiB（下降 12.3%），Gen2 从 36 次
+降至 33 次。六组反序 160 帧配对保持吞吐中性，七项兼容表面全部一致；
+匹配的 1000 帧长跑还把分配从 98.021 GiB 降至 88.428 GiB（下降 9.8%），
+没有渐进减速。因此上表保持不变，本轮不宣称速度提升。
 
 每个 .NET 单元格依次给出墙钟中位数和相对同一行 Python 的倍速；低于 `1.000x`
 表示更慢。默认实际使用 **5 个 workers**。非零线程的 Python 行只用于吞吐比较，

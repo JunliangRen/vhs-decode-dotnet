@@ -211,13 +211,7 @@ public static class SosFilter
             }
 
             Span<double> extended = extendedArray.AsSpan(0, extendedLength);
-            double[,] zi = SteadyStateInitialConditions(sections);
-            double[,] firstZi = ScaleInitialConditions(zi, extended[0]);
-            ApplyForwardInPlace(sections, extended, firstZi);
-            extended.Reverse();
-            double[,] secondZi = ScaleInitialConditions(zi, extended[0]);
-            ApplyForwardInPlace(sections, extended, secondZi);
-            extended.Reverse();
+            ApplyForwardBackwardInPlaceCore(sections, extended);
 
             if (edge == 0)
             {
@@ -235,6 +229,70 @@ public static class SosFilter
                 ArrayPool<double>.Shared.Return(rented);
             }
         }
+    }
+
+    internal static void ApplyForwardBackwardTo(
+        IReadOnlyList<SosSection> sections,
+        ReadOnlySpan<double> input,
+        Span<double> output,
+        int? padLength = null)
+    {
+        if (output.Length != input.Length)
+        {
+            throw new ArgumentException(
+                "SOS output length must match the input length.",
+                nameof(output));
+        }
+
+        if (input.IsEmpty)
+        {
+            return;
+        }
+
+        int edge = padLength ?? DefaultPadLength(sections);
+        if (edge < 0)
+        {
+            throw new ArgumentOutOfRangeException(nameof(padLength));
+        }
+
+        if (edge != 0 && input.Length <= edge)
+        {
+            throw new ArgumentException("Input length must be greater than pad length.");
+        }
+
+        if (edge == 0)
+        {
+            input.CopyTo(output);
+            ApplyForwardBackwardInPlaceCore(sections, output);
+            return;
+        }
+
+        int extendedLength = checked(input.Length + (edge * 2));
+        double[] rented = ArrayPool<double>.Shared.Rent(extendedLength);
+        try
+        {
+            Span<double> extended = rented.AsSpan(0, extendedLength);
+            WriteOddExtension(input, edge, extended);
+            ApplyForwardBackwardInPlaceCore(sections, extended);
+            extended.Slice(edge, output.Length).CopyTo(output);
+        }
+        finally
+        {
+            ArrayPool<double>.Shared.Return(rented);
+        }
+    }
+
+    private static void ApplyForwardBackwardInPlaceCore(
+        IReadOnlyList<SosSection> sections,
+        Span<double> samples)
+    {
+        double[,] zi = SteadyStateInitialConditions(sections);
+        double[,] firstZi = ScaleInitialConditions(zi, samples[0]);
+        ApplyForwardInPlace(sections, samples, firstZi);
+        samples.Reverse();
+        double[,] secondZi = ScaleInitialConditions(zi, samples[0]);
+        ApplyForwardInPlace(sections, samples, secondZi);
+        samples.Reverse();
     }
 
     public static double[] ApplyForwardBackwardFloat32(
