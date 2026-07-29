@@ -4,7 +4,7 @@
 
 [English](README.detailed.md) | [简体中文](README.detailed.zh-CN.md) | **[日本語](README.detailed.ja.md)**
 
-<!-- README_SYNC: 2026-07-29.9 -->
+<!-- README_SYNC: 2026-07-29.10 -->
 
 [`oyvindln/vhs-decode`](https://github.com/oyvindln/vhs-decode) の
 デコード関連部分を .NET 11 で再実装するプロジェクトです。現在は release
@@ -374,18 +374,20 @@ wall-time reduction の順です。
 
 | CLI mode（workers） | Python v0.4.0 | Exact + v0.4.0 | Exact + current | IPP-fast + v0.4.0 | IPP-fast + current |
 | --- | ---: | ---: | ---: | ---: | ---: |
-| default（5） | 16.983 s | 6.771 s / 2.508x / 60.1% | 8.495 s / 1.999x / 50.0% | 6.469 s / 2.625x / 61.9% | 8.116 s / 2.092x / 52.2% |
-| `--threads 1` | 21.263 s | 21.075 s / 1.009x / 0.9% | 23.190 s / 0.917x / 9.1% slower | 20.922 s / 1.016x / 1.6% | 22.825 s / 0.932x / 7.3% slower |
-| `--threads 5` | 16.880 s | 6.660 s / 2.534x / 60.5% | 8.289 s / 2.036x / 50.9% | 6.668 s / 2.532x / 60.5% | 7.926 s / 2.130x / 53.0% |
-| `--threads 10` | 17.612 s | 5.384 s / 3.271x / 69.4% | 6.262 s / 2.812x / 64.4% | 5.035 s / 3.498x / 71.4% | 6.111 s / 2.882x / 65.3% |
-| `--threads 20` | 18.330 s | 4.430 s / 4.137x / 75.8% | 5.564 s / 3.295x / 69.6% | 4.196 s / 4.368x / 77.1% | 5.799 s / 3.161x / 68.4% |
+| default（5） | 16.983 s | 6.771 s / 2.508x / 60.1% | 8.239 s / 2.061x / 51.5% | 6.469 s / 2.625x / 61.9% | 7.929 s / 2.142x / 53.3% |
+| `--threads 1` | 21.263 s | 21.075 s / 1.009x / 0.9% | 23.068 s / 0.922x / 8.5% slower | 20.922 s / 1.016x / 1.6% | 22.646 s / 0.939x / 6.5% slower |
+| `--threads 5` | 16.880 s | 6.660 s / 2.534x / 60.5% | 7.977 s / 2.116x / 52.7% | 6.668 s / 2.532x / 60.5% | 7.908 s / 2.134x / 53.2% |
+| `--threads 10` | 17.612 s | 5.384 s / 3.271x / 69.4% | 6.334 s / 2.781x / 64.0% | 5.035 s / 3.498x / 71.4% | 6.011 s / 2.930x / 65.9% |
+| `--threads 20` | 18.330 s | 4.430 s / 4.137x / 75.8% | 5.479 s / 3.346x / 70.1% | 4.196 s / 4.368x / 77.1% | 5.423 s / 3.380x / 70.4% |
 
 benchmark host は Intel Core Ultra 7 265K（20 logical processor）、
 Windows 11 25H2 build 26220.8925、.NET SDK/runtime
-`11.0.100-preview.6.26359.118` です。candidate は `0fd0da48` に下記の
-linear-TBC plan scratch 最適化を加えたもので、single-file `decode.exe`
-SHA-256 は
-`58F2744DA0E468E1A56761AC5BA053295B8F7542346AA2A96274891249AE1487`
+`11.0.100-preview.6.26359.118` です。この candidate は `current` だけを変更する
+ため、Python と v0.4.0 の列は以前の fixed matrix median を保持し、2 つの
+`current` 列を 30 回の interleaved run で再測定しました。candidate は
+`a159d724` に下記の Super-Gaussian FFT workspace 最適化を加えたもので、
+single-file `decode.exe` SHA-256 は
+`521996A8987886E4488FA987D84DAE7DD9BD00381FD8037E0A23E7247F30CEAD`
 でした。Python 3.14.0 は NumPy 2.4.6、SciPy 1.18.0、Numba 0.66.0、
 python-soxr 1.1.0 を使用しました。共通引数は次のとおりです。
 
@@ -396,11 +398,13 @@ python-soxr 1.1.0 を使用しました。共通引数は次のとおりです�
 ```
 
 両実装の default は **5 workers** です。独立した 3 回の Python
-`--threads 0` control は median 30.253 s で、互いに完全一致しました。すべての
-Exact v0.4.0 run は luma、chroma、JSON、stdout、normalized stderr/log、
-順序付き 80 個すべての `fileLoc` でこの oracle と一致しました。4 つの .NET
-profile/backend combination はそれぞれ 15 run 全体で 1 つの deterministic hash
-set を生成しました。この sample では IPP-fast の luma、chroma、JSON、
+`--threads 0` control は median 30.253 s で、互いに完全一致しました。保持した
+すべての Exact v0.4.0 run は luma、chroma、JSON、stdout、normalized
+stderr/log、順序付き 80 個すべての `fileLoc` でこの oracle と一致しました。
+再測定した Exact-current と IPP-current の各列は 15 run 全体でそれぞれ 1 つの
+deterministic hash set を生成しました。別の candidate gate でも
+`--threads 0`、default、`--threads 20` の Exact v0.4.0 が Python oracle と
+完全一致しました。この sample では IPP-fast の luma、chroma、JSON、
 `fileLoc` は対応する Exact profile と一致しましたが、明示的な IPP diagnostic
 により normalized stderr/log は異なります。この sample 固有の結果は
 byte-compatibility の保証ではありません。
@@ -1144,6 +1148,27 @@ stdout、normalized stderr/log、全 ordered `fileLoc` が一致しました。�
 current/v0.4.0 `--threads 0`、default、`--threads 20` gate も deterministic
 かつ exact で、v0.4.0 serial result は全 surface で Python oracle と一致しました。
 
+current mode の Super-Gaussian chroma final filter は、instance-local FFT
+workspace を 1 個だけ再利用するようになりました。concurrent caller には別々の
+workspace が渡され、完了後に保持するのは最大 1 個です。reflection padding、
+float32 conversion point、DUCC/PocketFFT packet order、mask arithmetic、
+inverse normalization、output ownership は変更していません。dirty-buffer reuse
+と concurrent-call gate を含む 52 件の focused FFT/filter xUnit v3 test がすべて
+pass しました。
+
+同じ private local capture の matched 80-frame runtime-counter run では、
+sampled managed allocation が 20.241 GiB から 17.580 GiB、Gen2 collection が
+75 回から 73 回へ減りました。sampled peak working set は一貫して改善しなかった
+ため、resident-memory reduction は主張しません。interleaved 160-frame pair
+5 組は short-run noise でわずかに baseline 側だったため、short-run speedup も
+主張しません。順序を反転した 400-frame pair 2 組は candidate が 2.82% と
+3.00% 高速で、balanced aggregate throughput は 3.00% 高く、aggregate CPU time
+は 1.66% 減りました。400-frame counter series は progress とともに増えず、
+non-monotonic でした。すべての A/B gate で luma、chroma、JSON、stdout、
+normalized stderr/log、全 ordered `fileLoc` が一致しました。別の `current` と
+`v0.4.0` の `--threads 0`、default 5、`--threads 20` check も 7 surface すべてで
+一致し、Exact v0.4.0 は Python serial oracle と一致しました。
+
 </details>
 
 <!-- SECTION: build -->
@@ -1162,7 +1187,7 @@ current/v0.4.0 `--threads 0`、default、`--threads 20` gate も deterministic
 .\tools\build-ipp-native.ps1
 dotnet restore VHSDecodeDotNet.slnx
 dotnet build VHSDecodeDotNet.slnx -c Release --no-restore
-dotnet test --solution VHSDecodeDotNet.slnx -c Release --no-build --no-restore --minimum-expected-tests 1104
+dotnet test --solution VHSDecodeDotNet.slnx -c Release --no-build --no-restore --minimum-expected-tests 1107
 ```
 
 最初の command は optional `ipp-fast` native artifact を含めるためのものです。
@@ -1175,7 +1200,7 @@ third-party notice を埋め込み、license sidecar file は追加しません�
 
 現在の正式な Release build は warning 0、error 0 です。xUnit v3 project は
 `dotnet test` と Visual Studio Test Explorer の両方で個別に検出できる
-**1,104** tests を公開します。
+**1,107** tests を公開します。
 
 <!-- SECTION: usage -->
 

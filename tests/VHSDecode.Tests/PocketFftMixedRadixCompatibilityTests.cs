@@ -271,6 +271,144 @@ public sealed class PocketFftMixedRadixCompatibilityTests
             actual.Select(BitConverter.DoubleToInt64Bits));
     }
 
+    [Fact(DisplayName = "Super-Gaussian final filter retains one reusable FFT workspace")]
+    public void SuperGaussianFinalFilterRetainsOneReusableFftWorkspace()
+    {
+        const int RawLength = 239_067;
+        var filter = new ChromaSuperGaussianFinalFilter(
+            RawLength,
+            3_575_611.888111,
+            629_370.6293706294);
+        double[] source = DeterministicInput(RawLength)
+            .Select(static value => (double)value)
+            .ToArray();
+        double[] first = (double[])source.Clone();
+        double[] second = (double[])source.Clone();
+
+        filter.ApplyInPlace(first, workerThreads: 4);
+
+        Assert.Equal(1, filter.WorkspaceCreationCount);
+        Assert.Equal(1, filter.RetainedWorkspaceCount);
+
+        filter.ApplyInPlace(second, workerThreads: 4);
+
+        Assert.Equal(1, filter.WorkspaceCreationCount);
+        Assert.Equal(1, filter.RetainedWorkspaceCount);
+        Assert.Equal(
+            first.Select(BitConverter.DoubleToInt64Bits),
+            second.Select(BitConverter.DoubleToInt64Bits));
+    }
+
+    [Fact(DisplayName = "Concurrent Super-Gaussian calls use isolated bounded workspaces")]
+    public async Task ConcurrentSuperGaussianCallsUseIsolatedBoundedWorkspaces()
+    {
+        const int RawLength = 239_067;
+        const double FscHz = 3_575_611.888111;
+        const double CarrierHz = 629_370.6293706294;
+        double[] firstSource = DeterministicInput(RawLength)
+            .Select(static value => (double)value)
+            .ToArray();
+        double[] secondSource = firstSource
+            .Select(static (value, index) =>
+                value + (((index % 17) - 8) * 0.0001))
+            .ToArray();
+        double[] expectedFirst = new ChromaSuperGaussianFinalFilter(
+                RawLength,
+                FscHz,
+                CarrierHz)
+            .ApplyInPlace((double[])firstSource.Clone(), workerThreads: 4);
+        double[] expectedSecond = new ChromaSuperGaussianFinalFilter(
+                RawLength,
+                FscHz,
+                CarrierHz)
+            .ApplyInPlace((double[])secondSource.Clone(), workerThreads: 4);
+        var sharedFilter = new ChromaSuperGaussianFinalFilter(
+            RawLength,
+            FscHz,
+            CarrierHz);
+        using var startGate = new Barrier(participantCount: 2);
+
+        Task<double[]> firstTask = StartConcurrentApply(firstSource);
+        Task<double[]> secondTask = StartConcurrentApply(secondSource);
+        double[][] actual = await Task.WhenAll(firstTask, secondTask);
+
+        Assert.Equal(
+            expectedFirst.Select(BitConverter.DoubleToInt64Bits),
+            actual[0].Select(BitConverter.DoubleToInt64Bits));
+        Assert.Equal(
+            expectedSecond.Select(BitConverter.DoubleToInt64Bits),
+            actual[1].Select(BitConverter.DoubleToInt64Bits));
+        Assert.InRange(sharedFilter.WorkspaceCreationCount, 1, 2);
+        Assert.Equal(1, sharedFilter.RetainedWorkspaceCount);
+
+        Task<double[]> StartConcurrentApply(double[] source)
+            => Task.Factory.StartNew(
+                () =>
+                {
+                    startGate.SignalAndWait();
+                    return sharedFilter.ApplyInPlace(
+                        (double[])source.Clone(),
+                        workerThreads: 4);
+                },
+                CancellationToken.None,
+                TaskCreationOptions.LongRunning,
+                TaskScheduler.Default);
+    }
+
+    [Fact(DisplayName = "Large real FFT workspace path matches allocating API after dirty reuse")]
+    public void LargeRealFftWorkspacePathMatchesAllocatingApiAfterDirtyReuse()
+    {
+        const int Length = 239_580;
+        float[] input = DeterministicInput(Length);
+        Complex32[] expectedSpectrum =
+            PocketFftReal32.ForwardAnyLength(input, workerThreads: 4);
+        float[] expectedOutput = PocketFftReal32.InverseAnyLength(
+            expectedSpectrum,
+            Length,
+            workerThreads: 4);
+        var complexInput = new Complex32[Length / 2];
+        var transformScratch = new Complex32[Length / 2];
+        var actualSpectrum = new Complex32[(Length / 2) + 1];
+        var actualOutput = new float[Length];
+
+        AssertWorkspaceTransformMatches();
+        Array.Fill(
+            complexInput,
+            new Complex32(float.NaN, float.NegativeInfinity));
+        Array.Fill(
+            transformScratch,
+            new Complex32(float.PositiveInfinity, float.NaN));
+        Array.Fill(
+            actualSpectrum,
+            new Complex32(float.NaN, float.NaN));
+        Array.Fill(actualOutput, float.NaN);
+        AssertWorkspaceTransformMatches();
+
+        void AssertWorkspaceTransformMatches()
+        {
+            PocketFftReal32.ForwardAnyLength(
+                input,
+                complexInput,
+                transformScratch,
+                actualSpectrum,
+                workerThreads: 4);
+            Assert.Equal(
+                Sha256(MemoryMarshal.AsBytes(expectedSpectrum.AsSpan())),
+                Sha256(MemoryMarshal.AsBytes(actualSpectrum.AsSpan())));
+
+            PocketFftReal32.InverseAnyLength(
+                actualSpectrum,
+                Length,
+                complexInput,
+                transformScratch,
+                actualOutput,
+                workerThreads: 4);
+            Assert.Equal(
+                Sha256(MemoryMarshal.AsBytes(expectedOutput.AsSpan())),
+                Sha256(MemoryMarshal.AsBytes(actualOutput.AsSpan())));
+        }
+    }
+
     [Theory(DisplayName = "Next fast FFT length matches SciPy")]
     [InlineData(1, 1)]
     [InlineData(13, 14)]

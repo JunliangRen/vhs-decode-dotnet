@@ -12,6 +12,8 @@ internal sealed class ChromaSuperGaussianFinalFilter
     private readonly double[] _mask;
     private readonly int _padLeft;
     private readonly int _paddedLength;
+    private Workspace? _availableWorkspace;
+    private int _workspaceCreationCount;
 
     internal ChromaSuperGaussianFinalFilter(
         int inputLength,
@@ -34,6 +36,12 @@ internal sealed class ChromaSuperGaussianFinalFilter
     }
 
     internal int PaddedLength => _paddedLength;
+
+    internal int RetainedWorkspaceCount =>
+        Volatile.Read(ref _availableWorkspace) is null ? 0 : 1;
+
+    internal int WorkspaceCreationCount =>
+        Volatile.Read(ref _workspaceCreationCount);
 
     internal double[] Apply(ReadOnlySpan<double> input)
     {
@@ -73,26 +81,40 @@ internal sealed class ChromaSuperGaussianFinalFilter
                 nameof(output));
         }
 
-        float[] padded = ReflectPad(input, _paddedLength, _padLeft);
-        Complex32[] spectrum = PocketFftReal32.ForwardAnyLength(
-            padded,
-            workerThreads);
-        for (int i = 0; i < spectrum.Length; i++)
+        Workspace workspace = RentWorkspace();
+        try
         {
-            double real = spectrum[i].Real;
-            double imaginary = spectrum[i].Imaginary;
-            spectrum[i] = new Complex32(
-                (float)((real * _mask[i]) - (imaginary * 0.0)),
-                (float)((real * 0.0) + (imaginary * _mask[i])));
-        }
+            FillReflectPad(input, workspace.Padded, _padLeft);
+            PocketFftReal32.ForwardAnyLength(
+                workspace.Padded,
+                workspace.ComplexInput,
+                workspace.TransformScratch,
+                workspace.Spectrum,
+                workerThreads);
+            for (int i = 0; i < workspace.Spectrum.Length; i++)
+            {
+                double real = workspace.Spectrum[i].Real;
+                double imaginary = workspace.Spectrum[i].Imaginary;
+                workspace.Spectrum[i] = new Complex32(
+                    (float)((real * _mask[i]) - (imaginary * 0.0)),
+                    (float)((real * 0.0) + (imaginary * _mask[i])));
+            }
 
-        float[] filtered = PocketFftReal32.InverseAnyLength(
-            spectrum,
-            _paddedLength,
-            workerThreads);
-        for (int i = 0; i < output.Length; i++)
+            PocketFftReal32.InverseAnyLength(
+                workspace.Spectrum,
+                _paddedLength,
+                workspace.ComplexInput,
+                workspace.TransformScratch,
+                workspace.Filtered,
+                workerThreads);
+            for (int i = 0; i < output.Length; i++)
+            {
+                output[i] = workspace.Filtered[_padLeft + i];
+            }
+        }
+        finally
         {
-            output[i] = filtered[_padLeft + i];
+            ReturnWorkspace(workspace);
         }
     }
 
@@ -176,12 +198,31 @@ internal sealed class ChromaSuperGaussianFinalFilter
         return mask;
     }
 
-    private static float[] ReflectPad(
+    private Workspace RentWorkspace()
+    {
+        Workspace? workspace =
+            Interlocked.Exchange(ref _availableWorkspace, null);
+        if (workspace is not null)
+        {
+            return workspace;
+        }
+
+        Interlocked.Increment(ref _workspaceCreationCount);
+        return new Workspace(_paddedLength);
+    }
+
+    private void ReturnWorkspace(Workspace workspace)
+        => Interlocked.CompareExchange(
+            ref _availableWorkspace,
+            workspace,
+            comparand: null);
+
+    private static void FillReflectPad(
         ReadOnlySpan<double> input,
-        int paddedLength,
+        Span<float> output,
         int padLeft)
     {
-        int padRight = paddedLength - input.Length - padLeft;
+        int padRight = output.Length - input.Length - padLeft;
         if (padLeft >= input.Length || padRight >= input.Length)
         {
             throw new ArgumentException(
@@ -189,7 +230,6 @@ internal sealed class ChromaSuperGaussianFinalFilter
                 nameof(input));
         }
 
-        var output = new float[paddedLength];
         for (int i = 0; i < padLeft; i++)
         {
             output[i] = (float)input[padLeft - i];
@@ -205,7 +245,28 @@ internal sealed class ChromaSuperGaussianFinalFilter
             output[padLeft + input.Length + i] =
                 (float)input[input.Length - i - 2];
         }
+    }
 
-        return output;
+    private sealed class Workspace
+    {
+        internal Workspace(int paddedLength)
+        {
+            Padded = new float[paddedLength];
+            Filtered = new float[paddedLength];
+            int complexLength = paddedLength / 2;
+            ComplexInput = new Complex32[complexLength];
+            TransformScratch = new Complex32[complexLength];
+            Spectrum = new Complex32[complexLength + 1];
+        }
+
+        internal Complex32[] ComplexInput { get; }
+
+        internal float[] Filtered { get; }
+
+        internal float[] Padded { get; }
+
+        internal Complex32[] Spectrum { get; }
+
+        internal Complex32[] TransformScratch { get; }
     }
 }

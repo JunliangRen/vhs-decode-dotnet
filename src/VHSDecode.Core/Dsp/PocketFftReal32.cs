@@ -55,6 +55,40 @@ internal static class PocketFftReal32
                 workerThreads);
     }
 
+    internal static void ForwardAnyLength(
+        ReadOnlySpan<float> input,
+        Complex32[] complexInput,
+        Complex32[] transformScratch,
+        Span<Complex32> output,
+        int workerThreads = 1)
+    {
+        ArgumentNullException.ThrowIfNull(complexInput);
+        ArgumentNullException.ThrowIfNull(transformScratch);
+        ValidateSupportedEvenLength(input.Length, nameof(input));
+        int complexLength = input.Length / 2;
+        ValidateWorkspaceLength(
+            complexInput.Length,
+            complexLength,
+            nameof(complexInput));
+        ValidateWorkspaceLength(
+            transformScratch.Length,
+            complexLength,
+            nameof(transformScratch));
+        ValidateWorkspaceLength(
+            output.Length,
+            complexLength + 1,
+            nameof(output));
+        Plans.GetOrAdd(
+                input.Length,
+                static length => new Plan(length))
+            .ForwardDucc(
+                input,
+                complexInput,
+                transformScratch,
+                output,
+                workerThreads);
+    }
+
     internal static float[] InverseAnyLength(
         ReadOnlySpan<Complex32> input,
         int outputLength,
@@ -73,6 +107,58 @@ internal static class PocketFftReal32
             static length => new Plan(length)).InverseDucc(
                 input,
                 workerThreads);
+    }
+
+    internal static void InverseAnyLength(
+        ReadOnlySpan<Complex32> input,
+        int outputLength,
+        Complex32[] complexInput,
+        Complex32[] transformScratch,
+        Span<float> output,
+        int workerThreads = 1)
+    {
+        ArgumentNullException.ThrowIfNull(complexInput);
+        ArgumentNullException.ThrowIfNull(transformScratch);
+        ValidateSupportedEvenLength(outputLength, nameof(outputLength));
+        int complexLength = outputLength / 2;
+        ValidateWorkspaceLength(
+            input.Length,
+            complexLength + 1,
+            nameof(input));
+        ValidateWorkspaceLength(
+            complexInput.Length,
+            complexLength,
+            nameof(complexInput));
+        ValidateWorkspaceLength(
+            transformScratch.Length,
+            complexLength,
+            nameof(transformScratch));
+        ValidateWorkspaceLength(
+            output.Length,
+            outputLength,
+            nameof(output));
+        Plans.GetOrAdd(
+                outputLength,
+                static length => new Plan(length))
+            .InverseDucc(
+                input,
+                complexInput,
+                transformScratch,
+                output,
+                workerThreads);
+    }
+
+    private static void ValidateWorkspaceLength(
+        int actual,
+        int expected,
+        string parameterName)
+    {
+        if (actual != expected)
+        {
+            throw new ArgumentException(
+                "FFT workspace length does not match the transform length.",
+                parameterName);
+        }
     }
 
     private static void ValidateSupportedEvenLength(
@@ -157,6 +243,27 @@ internal static class PocketFftReal32
                 ? ForwardComplexified(input, workerThreads)
                 : Forward(input);
 
+        internal void ForwardDucc(
+            ReadOnlySpan<float> input,
+            Complex32[] complexInput,
+            Complex32[] transformScratch,
+            Span<Complex32> output,
+            int workerThreads)
+        {
+            if (_length > 1000)
+            {
+                ForwardComplexified(
+                    input,
+                    complexInput,
+                    transformScratch,
+                    output,
+                    workerThreads);
+                return;
+            }
+
+            Forward(input).CopyTo(output);
+        }
+
         private Complex32[] ForwardComplexified(
             ReadOnlySpan<float> input,
             int workerThreads)
@@ -216,6 +323,67 @@ internal static class PocketFftReal32
             return output;
         }
 
+        private void ForwardComplexified(
+            ReadOnlySpan<float> input,
+            Complex32[] complexInput,
+            Complex32[] transformScratch,
+            Span<Complex32> output,
+            int workerThreads)
+        {
+            int complexLength = _length / 2;
+            for (int i = 0; i < complexLength; i++)
+            {
+                complexInput[i] = new Complex32(
+                    input[2 * i],
+                    input[(2 * i) + 1]);
+            }
+
+            Complex32[] transformed =
+                (_length & (_length - 1)) == 0
+                    ? PocketFftComplex32.ForwardDuccOwned(
+                        complexInput,
+                        transformScratch,
+                        workerThreads)
+                    : PocketFftComplex32.ForwardAnyLengthDuccOwned(
+                        complexInput,
+                        transformScratch,
+                        workerThreads);
+            output[0] = new Complex32(
+                transformed[0].Real + transformed[0].Imaginary,
+                0.0f);
+
+            var roots = new UnityRoots(_length);
+            for (int i = 1, inverseIndex = complexLength - 1;
+                i <= inverseIndex;
+                i++, inverseIndex--)
+            {
+                Complex32 current = transformed[i];
+                Complex32 inverse = transformed[inverseIndex];
+                float evenReal = current.Real + inverse.Real;
+                float evenImaginary = current.Imaginary - inverse.Imaginary;
+                float oddReal = current.Imaginary + inverse.Imaginary;
+                float oddImaginary = inverse.Real - current.Real;
+                FloatTwiddle root = roots.Get(i);
+                MultiplyConjugate(
+                    root.Real,
+                    root.Imaginary,
+                    oddReal,
+                    oddImaginary,
+                    out float rotatedReal,
+                    out float rotatedImaginary);
+                output[i] = new Complex32(
+                    0.5f * (evenReal + rotatedReal),
+                    0.5f * (evenImaginary + rotatedImaginary));
+                output[inverseIndex] = new Complex32(
+                    0.5f * (evenReal - rotatedReal),
+                    0.5f * (rotatedImaginary - evenImaginary));
+            }
+
+            output[^1] = new Complex32(
+                transformed[0].Real - transformed[0].Imaginary,
+                0.0f);
+        }
+
         internal float[] Inverse(ReadOnlySpan<Complex32> input)
         {
             var packed = new float[_length];
@@ -237,6 +405,27 @@ internal static class PocketFftReal32
             => _length > 1000
                 ? InverseComplexified(input, workerThreads)
                 : Inverse(input);
+
+        internal void InverseDucc(
+            ReadOnlySpan<Complex32> input,
+            Complex32[] complexInput,
+            Complex32[] transformScratch,
+            Span<float> output,
+            int workerThreads)
+        {
+            if (_length > 1000)
+            {
+                InverseComplexified(
+                    input,
+                    complexInput,
+                    transformScratch,
+                    output,
+                    workerThreads);
+                return;
+            }
+
+            Inverse(input).CopyTo(output);
+        }
 
         private float[] InverseComplexified(
             ReadOnlySpan<Complex32> input,
@@ -293,6 +482,63 @@ internal static class PocketFftReal32
             }
 
             return output;
+        }
+
+        private void InverseComplexified(
+            ReadOnlySpan<Complex32> input,
+            Complex32[] complexInput,
+            Complex32[] transformScratch,
+            Span<float> output,
+            int workerThreads)
+        {
+            int complexLength = _length / 2;
+            complexInput[0] = new Complex32(
+                input[0].Real + input[^1].Real,
+                input[0].Real - input[^1].Real);
+
+            var roots = new UnityRoots(_length);
+            for (int i = 1, inverseIndex = complexLength - 1;
+                i <= inverseIndex;
+                i++, inverseIndex--)
+            {
+                Complex32 first = input[i];
+                Complex32 second = new(
+                    input[inverseIndex].Real,
+                    -input[inverseIndex].Imaginary);
+                float evenReal = first.Real + second.Real;
+                float evenImaginary =
+                    first.Imaginary + second.Imaginary;
+                float oddReal = first.Real - second.Real;
+                float oddImaginary =
+                    first.Imaginary - second.Imaginary;
+                FloatTwiddle root = roots.Get(i);
+                float rotatedReal =
+                    (oddReal * root.Real)
+                    - (oddImaginary * root.Imaginary);
+                float rotatedImaginary =
+                    (oddReal * root.Imaginary)
+                    + (oddImaginary * root.Real);
+                complexInput[i] = new Complex32(
+                    evenReal - rotatedImaginary,
+                    evenImaginary + rotatedReal);
+                complexInput[inverseIndex] = new Complex32(
+                    evenReal + rotatedImaginary,
+                    -evenImaginary + rotatedReal);
+            }
+
+            Complex32[] transformed =
+                PocketFftComplex32.BackwardAnyLengthDuccOwned(
+                    complexInput,
+                    transformScratch,
+                    workerThreads);
+            float normalization = 1.0f / _length;
+            for (int i = 0; i < transformed.Length; i++)
+            {
+                output[2 * i] =
+                    transformed[i].Real * normalization;
+                output[(2 * i) + 1] =
+                    transformed[i].Imaginary * normalization;
+            }
         }
 
         private void ExecuteForward(float[] data)

@@ -4,7 +4,7 @@
 
 **[English](README.detailed.md)** | [简体中文](README.detailed.zh-CN.md) | [日本語](README.detailed.ja.md)
 
-<!-- README_SYNC: 2026-07-29.9 -->
+<!-- README_SYNC: 2026-07-29.10 -->
 
 .NET 11 rewrite of the decode-facing parts of
 [`oyvindln/vhs-decode`](https://github.com/oyvindln/vhs-decode), focused on
@@ -394,18 +394,20 @@ followed by speedup and wall-time reduction versus Python in the same row:
 
 | CLI mode (workers) | Python v0.4.0 | Exact + v0.4.0 | Exact + current | IPP-fast + v0.4.0 | IPP-fast + current |
 | --- | ---: | ---: | ---: | ---: | ---: |
-| default (5) | 16.983 s | 6.771 s / 2.508x / 60.1% | 8.495 s / 1.999x / 50.0% | 6.469 s / 2.625x / 61.9% | 8.116 s / 2.092x / 52.2% |
-| `--threads 1` | 21.263 s | 21.075 s / 1.009x / 0.9% | 23.190 s / 0.917x / 9.1% slower | 20.922 s / 1.016x / 1.6% | 22.825 s / 0.932x / 7.3% slower |
-| `--threads 5` | 16.880 s | 6.660 s / 2.534x / 60.5% | 8.289 s / 2.036x / 50.9% | 6.668 s / 2.532x / 60.5% | 7.926 s / 2.130x / 53.0% |
-| `--threads 10` | 17.612 s | 5.384 s / 3.271x / 69.4% | 6.262 s / 2.812x / 64.4% | 5.035 s / 3.498x / 71.4% | 6.111 s / 2.882x / 65.3% |
-| `--threads 20` | 18.330 s | 4.430 s / 4.137x / 75.8% | 5.564 s / 3.295x / 69.6% | 4.196 s / 4.368x / 77.1% | 5.799 s / 3.161x / 68.4% |
+| default (5) | 16.983 s | 6.771 s / 2.508x / 60.1% | 8.239 s / 2.061x / 51.5% | 6.469 s / 2.625x / 61.9% | 7.929 s / 2.142x / 53.3% |
+| `--threads 1` | 21.263 s | 21.075 s / 1.009x / 0.9% | 23.068 s / 0.922x / 8.5% slower | 20.922 s / 1.016x / 1.6% | 22.646 s / 0.939x / 6.5% slower |
+| `--threads 5` | 16.880 s | 6.660 s / 2.534x / 60.5% | 7.977 s / 2.116x / 52.7% | 6.668 s / 2.532x / 60.5% | 7.908 s / 2.134x / 53.2% |
+| `--threads 10` | 17.612 s | 5.384 s / 3.271x / 69.4% | 6.334 s / 2.781x / 64.0% | 5.035 s / 3.498x / 71.4% | 6.011 s / 2.930x / 65.9% |
+| `--threads 20` | 18.330 s | 4.430 s / 4.137x / 75.8% | 5.479 s / 3.346x / 70.1% | 4.196 s / 4.368x / 77.1% | 5.423 s / 3.380x / 70.4% |
 
 The benchmark host was an Intel Core Ultra 7 265K with 20 logical processors,
 Windows 11 25H2 build 26220.8925, and .NET SDK/runtime
-`11.0.100-preview.6.26359.118`. The candidate was based on `0fd0da48` plus the
-linear-TBC plan scratch optimization described below; its single-file
-`decode.exe` SHA-256 was
-`58F2744DA0E468E1A56761AC5BA053295B8F7542346AA2A96274891249AE1487`.
+`11.0.100-preview.6.26359.118`. The Python and v0.4.0 columns retain the prior
+fixed-matrix medians because this candidate changes only `current`; the two
+`current` columns were refreshed with 30 interleaved runs. The candidate was
+based on `a159d724` plus the Super-Gaussian FFT workspace optimization
+described below; its single-file `decode.exe` SHA-256 was
+`521996A8987886E4488FA987D84DAE7DD9BD00381FD8037E0A23E7247F30CEAD`.
 Python 3.14.0 used NumPy 2.4.6, SciPy 1.18.0, Numba 0.66.0, and python-soxr
 1.1.0. The shared arguments were:
 
@@ -417,11 +419,13 @@ Python 3.14.0 used NumPy 2.4.6, SciPy 1.18.0, Numba 0.66.0, and python-soxr
 
 The default is **5 workers** in both implementations. Three separate Python
 `--threads 0` controls had a 30.253 s median and were mutually identical.
-Every Exact v0.4.0 run matched that oracle for luma, chroma, JSON, stdout,
-normalized stderr/log, and all 80 ordered `fileLoc` values. Each of the four
-.NET profile/backend combinations produced one deterministic hash set across
-all 15 runs. On this sample, IPP-fast happened to match its corresponding
-Exact profile for luma, chroma, JSON, and `fileLoc`; its explicit IPP diagnostic
+Every retained Exact v0.4.0 run matched that oracle for luma, chroma, JSON,
+stdout, normalized stderr/log, and all 80 ordered `fileLoc` values. The
+refreshed Exact-current and IPP-current columns each produced one deterministic
+hash set across all 15 runs. A separate candidate gate at `--threads 0`,
+default, and `--threads 20` also kept Exact v0.4.0 identical to the Python
+oracle. On this sample, IPP-fast happened to match its corresponding Exact
+profile for luma, chroma, JSON, and `fileLoc`; its explicit IPP diagnostic
 changes normalized stderr/log, and this sample-specific result is not a
 byte-compatibility promise.
 
@@ -1192,6 +1196,26 @@ claim. Luma, chroma, JSON, stdout, normalized stderr/logs, and every ordered
 `--threads 0`, default, and `--threads 20` gates were deterministic and exact;
 the v0.4.0 serial result also matched the Python oracle on every surface.
 
+The current-mode Super-Gaussian chroma final filter now retains one reusable
+instance-local FFT workspace. Concurrent callers receive separate workspaces,
+and only one is retained after they finish. Reflection padding, float32
+conversion points, DUCC/PocketFFT packet order, mask arithmetic, inverse
+normalization, and output ownership are unchanged. All 52 focused FFT/filter
+xUnit v3 tests passed, including dirty-buffer reuse and concurrent-call gates.
+
+On the same private local capture, matched 80-frame runtime-counter runs reduced
+sampled managed allocation from 20.241 to 17.580 GiB and Gen2 collections from
+75 to 73; sampled peak working set did not consistently improve, so no
+resident-memory reduction is claimed. Five interleaved 160-frame pairs were
+short-run noise and slightly favored the baseline, so no short-run speedup is
+claimed. Both opposite-order 400-frame pairs favored the candidate by 2.82%
+and 3.00%; balanced aggregate throughput rose 3.00% and aggregate CPU time
+fell 1.66%. The 400-frame counter series was non-monotonic rather than growing
+with progress. Luma, chroma, JSON, stdout, normalized stderr/logs, and every
+ordered `fileLoc` matched in every A/B gate. Separate `current` and `v0.4.0`
+checks at `--threads 0`, default 5, and `--threads 20` matched all seven
+surfaces; Exact v0.4.0 also matched the Python serial oracle.
+
 </details>
 
 <!-- SECTION: build -->
@@ -1212,7 +1236,7 @@ Requirements:
 .\tools\build-ipp-native.ps1
 dotnet restore VHSDecodeDotNet.slnx
 dotnet build VHSDecodeDotNet.slnx -c Release --no-restore
-dotnet test --solution VHSDecodeDotNet.slnx -c Release --no-build --no-restore --minimum-expected-tests 1104
+dotnet test --solution VHSDecodeDotNet.slnx -c Release --no-build --no-restore --minimum-expected-tests 1107
 ```
 
 The first command includes the optional `ipp-fast` native artifact; omit it for
@@ -1225,7 +1249,7 @@ deployment computer. Binary-only single-file releases embed
 sidecar license files. An Exact-only build may omit the native build step.
 
 The current formal Release build has zero warnings and errors. The xUnit v3
-project exposes **1,104** independently discoverable tests to both
+project exposes **1,107** independently discoverable tests to both
 `dotnet test` and Visual Studio Test Explorer.
 
 <!-- SECTION: usage -->
