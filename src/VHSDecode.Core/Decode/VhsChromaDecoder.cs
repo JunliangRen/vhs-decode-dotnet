@@ -590,9 +590,10 @@ public static class VhsChromaDecoder
                         options.WorkerThreads);
         }
 
+        double[]? burstDeemphasizedChroma = null;
         if (IsNtsc(options.ColorSystem))
         {
-            chromaField = ApplyBurstDeemphasis(
+            burstDeemphasizedChroma = ApplyBurstDeemphasis(
                 chromaField,
                 lineOffset,
                 options.OutputLineCount,
@@ -601,6 +602,7 @@ public static class VhsChromaDecoder
                 options.BurstEnd,
                 samplesAfterBurst:
                     options.UseCurrentChromaProcessing ? 4 : 5);
+            chromaField = burstDeemphasizedChroma;
         }
 
         double[] upconverted;
@@ -612,7 +614,7 @@ public static class VhsChromaDecoder
                 fieldNumber);
             if (options.UseCurrentChromaProcessing)
             {
-                upconverted = chromaField.ToArray();
+                upconverted = burstDeemphasizedChroma!;
                 UpconvertChromaPhaseCompensatedCurrentInPlace(
                     upconverted,
                     lineOffset,

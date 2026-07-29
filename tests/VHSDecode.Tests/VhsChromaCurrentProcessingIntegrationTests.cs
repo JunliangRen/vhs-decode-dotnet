@@ -109,6 +109,63 @@ public sealed class VhsChromaCurrentProcessingIntegrationTests
         Assert.Equal(2.0, current[7]);
     }
 
+    [Fact(DisplayName = "Current NTSC phase compensation reuses burst deemphasis storage")]
+    public void CurrentNtscPhaseCompensationReusesBurstDeemphasisStorage()
+    {
+        const int LineLength = 1_135;
+        const int LineCount = 273;
+        int sampleCount = LineLength * LineCount;
+        double[] chroma = BuildInput(sampleCount);
+        VhsChromaFieldOptions options = CreateOptions(ctiMix: 0.0) with
+        {
+            OutputLineLength = LineLength,
+            OutputLineCount = LineCount
+        };
+        ChromaPhaseLine[] phaseLines = Enumerable.Range(0, LineCount)
+            .Select(line => new ChromaPhaseLine(
+                LineNumber: line,
+                PhaseRotation: line & 3,
+                BurstPhaseDegrees: (line & 1) == 0 ? 12.5 : -7.25)
+            {
+                BurstStart = line * LineLength,
+                BurstAmplitude = 72.0,
+                BurstDc = (line % 5) * 0.125,
+                BurstFrequencyHz = options.FscMHz * 1_000_000.0
+            })
+            .ToArray();
+        var phase = new ChromaPhaseSequenceResult(
+            NextChromaRotationIndex: 0,
+            PhaseSequence: phaseLines,
+            BurstDetectedLine: 0,
+            BurstMagnitudeAverage: 72.0,
+            BurstPhaseAverageDegrees: 0.0,
+            EvenBurstPhaseAverageDegrees: 12.5,
+            OddBurstPhaseAverageDegrees: -7.25);
+
+        _ = VhsChromaDecoder.DecodeFieldWithPhase(
+            chroma,
+            options,
+            phase,
+            isFirstField: true,
+            fieldNumber: 0);
+        long before = GC.GetAllocatedBytesForCurrentThread();
+        VhsChromaFieldResult result = VhsChromaDecoder.DecodeFieldWithPhase(
+            chroma,
+            options,
+            phase,
+            isFirstField: true,
+            fieldNumber: 0);
+        long allocated = GC.GetAllocatedBytesForCurrentThread() - before;
+
+        GC.KeepAlive(result);
+        long maximumExpected =
+            ((long)sampleCount * ((2 * sizeof(double)) + sizeof(ushort)))
+            + (256 * 1024);
+        Assert.True(
+            allocated < maximumExpected,
+            $"Current NTSC chroma decode allocated {allocated:N0} bytes.");
+    }
+
     private static VhsChromaFieldOptions CreateOptions(double ctiMix)
         => new(
             ColorSystem: "NTSC",
