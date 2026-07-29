@@ -2166,7 +2166,11 @@ public sealed class RfDemodulator : IDisposable
             highPart = workspace.Real;
             PocketFftReal.Inverse(highSpectrum, video.Length, highPart);
             amplitude = workspace.Imaginary;
-            BuildAnalyticMagnitude(highPart, amplitude);
+            BuildAnalyticMagnitudeWithWorkspace(
+                highPart,
+                amplitude,
+                workspace.FullAnalytic,
+                workspace.DiffedAnalytic);
         }
 
         double deviation = options.Deviation / 2.0;
@@ -2374,6 +2378,45 @@ public sealed class RfDemodulator : IDisposable
         }
 
         Complex[] spectrum = PocketFftComplex.ForwardDuccRealFull(input);
+        int nyquist = spectrum.Length / 2;
+        for (int i = 1; i < nyquist; i++)
+        {
+            spectrum[i] *= 2.0;
+        }
+
+        for (int i = nyquist + 1; i < spectrum.Length; i++)
+        {
+            spectrum[i] = Complex.Zero;
+        }
+
+        PocketFftComplex.InverseDuccInPlace(spectrum);
+        for (int i = 0; i < magnitude.Length; i++)
+        {
+            magnitude[i] = NumpyComplexMagnitude(spectrum[i]);
+        }
+    }
+
+    internal static void BuildAnalyticMagnitudeWithWorkspace(
+        ReadOnlySpan<double> input,
+        double[] magnitude,
+        Complex[] spectrum,
+        Complex[] transformScratch)
+    {
+        if (magnitude.Length != input.Length)
+        {
+            throw new ArgumentException(
+                "Analytic-magnitude output length must match the input length.",
+                nameof(magnitude));
+        }
+
+        if (spectrum.Length != input.Length)
+        {
+            throw new ArgumentException(
+                "Analytic-magnitude spectrum length must match the input length.",
+                nameof(spectrum));
+        }
+
+        PocketFftComplex.ForwardDuccRealFull(input, spectrum, transformScratch);
         int nyquist = spectrum.Length / 2;
         for (int i = 1; i < nyquist; i++)
         {

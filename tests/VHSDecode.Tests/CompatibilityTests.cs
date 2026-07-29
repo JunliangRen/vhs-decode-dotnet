@@ -5163,9 +5163,21 @@ public void SubDeemphasisAnalyticMagnitudeMatchesScipyHilbertBits()
         input[(int)i] = (unchecked((i * 1_103_515_245UL) + 12_345UL) & 0xffffUL) - 32_768.0;
     }
 
+    const string expectedSha256 =
+        "2AD6816EF4E085A2C65950897ACD97863248F3152377DE6F17322CB38AA9ED13";
     AssertEqual(
-        "2AD6816EF4E085A2C65950897ACD97863248F3152377DE6F17322CB38AA9ED13",
+        expectedSha256,
         DoubleBitsSha256(RfDemodulator.BuildAnalyticMagnitude(input)));
+
+    var magnitude = new double[length];
+    var spectrum = new Complex[length];
+    var transformScratch = new Complex[length];
+    RfDemodulator.BuildAnalyticMagnitudeWithWorkspace(
+        input,
+        magnitude,
+        spectrum,
+        transformScratch);
+    AssertEqual(expectedSha256, DoubleBitsSha256(magnitude));
 }
 
 [Fact(DisplayName = "complex FFT matches SciPy DUCC packet transforms")]
@@ -5200,15 +5212,51 @@ public void RealFullFftMatchesScipyDuccPacketTransform()
     }
 
     Complex[] spectrum = PocketFftComplex.ForwardDuccRealFull(input);
-    AssertEqual(
-        "5ED16316814D498111E0A6EE33EDED7E0862CBD7ACBACD9D00DA13C8125FACF4",
-        ComplexBitsSha256(spectrum));
+    const string expectedSha256 =
+        "5ED16316814D498111E0A6EE33EDED7E0862CBD7ACBACD9D00DA13C8125FACF4";
+    AssertEqual(expectedSha256, ComplexBitsSha256(spectrum));
     AssertEqual(
         BitConverter.DoubleToInt64Bits(-0.0),
         BitConverter.DoubleToInt64Bits(spectrum[0].Imaginary));
     AssertEqual(
         BitConverter.DoubleToInt64Bits(-0.0),
         BitConverter.DoubleToInt64Bits(spectrum[length / 2].Imaginary));
+
+    var preallocated = new Complex[length];
+    var transformScratch = new Complex[length];
+    PocketFftComplex.ForwardDuccRealFull(input, preallocated, transformScratch);
+    AssertEqual(expectedSha256, ComplexBitsSha256(preallocated));
+    AssertEqual(
+        BitConverter.DoubleToInt64Bits(-0.0),
+        BitConverter.DoubleToInt64Bits(preallocated[0].Imaginary));
+    AssertEqual(
+        BitConverter.DoubleToInt64Bits(-0.0),
+        BitConverter.DoubleToInt64Bits(preallocated[length / 2].Imaginary));
+
+    const int smallLength = 1_024;
+    var smallInput = new double[smallLength];
+    for (int i = 0; i < smallInput.Length; i++)
+    {
+        smallInput[i] = Math.Sin(i * 0.019) + (0.25 * Math.Cos(i * 0.037));
+    }
+
+    Complex[] smallExpected = PocketFftComplex.ForwardDuccRealFull(smallInput);
+    var smallPreallocated = new Complex[smallLength];
+    var smallScratch = new Complex[smallLength / 2];
+    PocketFftComplex.ForwardDuccRealFull(smallInput, smallPreallocated, smallScratch);
+    AssertEqual(ComplexBitsSha256(smallExpected), ComplexBitsSha256(smallPreallocated));
+
+    Assert.Throws<ArgumentException>(
+        () => PocketFftComplex.ForwardDuccRealFull(
+            smallInput,
+            new Complex[smallLength],
+            new Complex[(smallLength / 2) - 1]));
+    Assert.Throws<ArgumentException>(
+        () =>
+        {
+            var overlapping = new Complex[smallLength];
+            PocketFftComplex.ForwardDuccRealFull(smallInput, overlapping, overlapping);
+        });
 }
 
 [Fact(DisplayName = "LD IIR filters match SciPy 1.18 bits")]

@@ -4,7 +4,7 @@
 
 [English](README.detailed.md) | [简体中文](README.detailed.zh-CN.md) | **[日本語](README.detailed.ja.md)**
 
-<!-- README_SYNC: 2026-07-29.11 -->
+<!-- README_SYNC: 2026-07-29.12 -->
 
 [`oyvindln/vhs-decode`](https://github.com/oyvindln/vhs-decode) の
 デコード関連部分を .NET 11 で再実装するプロジェクトです。現在は release
@@ -374,21 +374,23 @@ wall-time reduction の順です。
 
 | CLI mode（workers） | Python v0.4.0 | Exact + v0.4.0 | Exact + current | IPP-fast + v0.4.0 | IPP-fast + current |
 | --- | ---: | ---: | ---: | ---: | ---: |
-| default（5） | 16.983 s | 6.852 s / 2.479x / 59.7% | 8.236 s / 2.062x / 51.5% | 6.717 s / 2.528x / 60.4% | 7.928 s / 2.142x / 53.3% |
-| `--threads 1` | 21.263 s | 21.142 s / 1.006x / 0.6% | 23.571 s / 0.902x / 10.9% slower | 21.053 s / 1.010x / 1.0% | 22.626 s / 0.940x / 6.4% slower |
-| `--threads 5` | 16.880 s | 6.884 s / 2.452x / 59.2% | 8.121 s / 2.079x / 51.9% | 6.709 s / 2.516x / 60.3% | 7.980 s / 2.115x / 52.7% |
-| `--threads 10` | 17.612 s | 5.183 s / 3.398x / 70.6% | 6.330 s / 2.782x / 64.1% | 5.042 s / 3.493x / 71.4% | 5.972 s / 2.949x / 66.1% |
-| `--threads 20` | 18.330 s | 4.244 s / 4.318x / 76.8% | 5.467 s / 3.353x / 70.2% | 4.021 s / 4.559x / 78.1% | 4.880 s / 3.756x / 73.4% |
+| default（5） | 16.983 s | 6.214 s / 2.733x / 63.4% | 7.581 s / 2.240x / 55.4% | 6.231 s / 2.726x / 63.3% | 7.599 s / 2.235x / 55.3% |
+| `--threads 1` | 21.263 s | 19.228 s / 1.106x / 9.6% | 21.855 s / 0.973x / 2.8% slower | 18.713 s / 1.136x / 12.0% | 21.265 s / 1.000x / 0.01% slower |
+| `--threads 5` | 16.880 s | 6.203 s / 2.721x / 63.2% | 7.724 s / 2.185x / 54.2% | 6.342 s / 2.661x / 62.4% | 7.511 s / 2.247x / 55.5% |
+| `--threads 10` | 17.612 s | 4.689 s / 3.756x / 73.4% | 5.889 s / 2.991x / 66.6% | 4.543 s / 3.877x / 74.2% | 5.747 s / 3.064x / 67.4% |
+| `--threads 20` | 18.330 s | 3.900 s / 4.700x / 78.7% | 4.745 s / 3.863x / 74.1% | 3.743 s / 4.897x / 79.6% | 4.511 s / 4.064x / 75.4% |
 
 benchmark host は Intel Core Ultra 7 265K（20 logical processor）、
 Windows 11 25H2 build 26220.8925、.NET SDK/runtime
 `11.0.100-preview.6.26359.118` です。Python 自体は変更されていないため、
 Python 列は以前の fixed matrix median を保持し、4 つの .NET 列は 60 回の
-interleaved run で再測定しました。candidate は `d16573a0` に下記の
-Betamax FSC notch in-place 最適化を加えたもので、single-file `decode.exe`
-SHA-256 は
-`1EBA26547DFC57525E57699137A4CBA2E3E478E5A906C472AEAAFE047CB22F6F`
-でした。Python 3.14.0 は NumPy 2.4.6、SciPy 1.18.0、Numba 0.66.0、
+interleaved run で再測定しました。candidate は `2b0b7e8` に下記の
+sub-deemphasis analytic workspace 最適化を加えたもので、single-file
+`decode.exe` SHA-256 は
+`BC322E7958DE980690C1A787B8EB5ACA7C80D1E71DDCB4D956A821066FF5B889`
+でした。下記の isolated v1.3.8 A/B は throughput-neutral だったため、以前の
+public matrix からの変化をこの workspace 最適化だけに帰属させません。
+Python 3.14.0 は NumPy 2.4.6、SciPy 1.18.0、Numba 0.66.0、
 python-soxr 1.1.0 を使用しました。共通引数は次のとおりです。
 
 ```text
@@ -1225,6 +1227,44 @@ output でも luma、chroma、JSON、normalized log、順序付き 800 個すべ
 cross-thread deterministic でした。更新した Exact/IPP overview matrix 60 run
 も、記録済み compatibility reference をすべて通過しました。
 
+VHS real-FFT sub-deemphasis の analytic stage は、以前の内容が不要になった
+後で worker-owned の full-length complex buffer 2 個を再利用するように
+なりました。新しい preallocated DUCC real-to-full-spectrum overload は、
+同じ input packing、Plan/packetized transform 選択、root multiplication、
+conjugate mirroring、negative-zero 処理、Hilbert mask、inverse transform、
+data type、sample ごとの magnitude 式を維持します。public helper は引き続き
+独立配列を返します。focused xUnit v3 coverage は 1,024-point Plan と
+32,768-point packetized の両 branch、無効または重複する buffer、SciPy bit
+hash、warm allocation を確認します。
+
+release v1.3.8 に対する一致した 80-frame `gc-verbose` trace では、sampled
+managed allocation が 17.388 GiB から 13.900 GiB へ 20.06% 減り、
+sampled `Complex[]` allocation が 7.122 GiB から 3.622 GiB へ 49.14%
+減り、Gen2 collection が 64 回から 57 回へ 10.94% 減りました。順序を反転して
+interleave した 160-frame Exact `current --threads 20` 6 組では、
+baseline/candidate の wall median は 13.523/13.654 秒でした。balanced
+aggregate wall/CPU time の変化は +0.14%/+0.08% にとどまり、candidate の
+wall 勝利は 6 組中 4 組だったため、再現可能な throughput 向上は主張しません。
+
+順序が逆の 400-frame runtime-counter 2 組を合計すると、allocation は
+161.302 GiB から 125.900 GiB へ 21.95% 減り、Gen2 collection は 656 回から
+487 回へ 25.76% 減りました。candidate の aggregate wall time は 1.52%
+高かったため、long-run speedup も主張しません。candidate の 1 run には
+1,381 MiB の一時的 working-set sample がありましたが、reverse-order run では
+再現せず 731 MiB が最大でした。別の 1,000-frame candidate run は 2,000
+fields を 73.267 秒で完了し、sampled working set の median/max は
+648/1,032 MiB でした。first/last-third median は 664/642 MiB で、9.247 秒の
+startup interval 後、9 個の 100-frame interval は 7.038 から 7.152 秒に
+収まりました。これは bounded memory と progressive slowdown がないことを
+支持しますが、resident-memory reduction の主張ではありません。
+
+すべての A/B で luma、chroma、raw JSON、stdout、normalized stderr/log、
+ordered `fileLoc` が一致しました。追加の Exact gate 12 件は v0.4.0 と
+`current` を `--threads 0`、default 5、`--threads 20` で網羅し、7 surface
+すべてで baseline と一致して cross-thread deterministic でした。再測定した
+Exact/IPP matrix run 60 件も、記録済みの compatibility reference をすべて
+通過しました。
+
 </details>
 
 <!-- SECTION: build -->
@@ -1243,7 +1283,7 @@ cross-thread deterministic でした。更新した Exact/IPP overview matrix 60
 .\tools\build-ipp-native.ps1
 dotnet restore VHSDecodeDotNet.slnx
 dotnet build VHSDecodeDotNet.slnx -c Release --no-restore
-dotnet test --solution VHSDecodeDotNet.slnx -c Release --no-build --no-restore --minimum-expected-tests 1109
+dotnet test --solution VHSDecodeDotNet.slnx -c Release --no-build --no-restore --minimum-expected-tests 1110
 ```
 
 最初の command は optional `ipp-fast` native artifact を含めるためのものです。
@@ -1256,7 +1296,7 @@ third-party notice を埋め込み、license sidecar file は追加しません�
 
 現在の正式な Release build は warning 0、error 0 です。xUnit v3 project は
 `dotnet test` と Visual Studio Test Explorer の両方で個別に検出できる
-**1,109** tests を公開します。
+**1,110** tests を公開します。
 
 <!-- SECTION: usage -->
 
