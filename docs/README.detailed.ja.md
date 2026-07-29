@@ -4,7 +4,7 @@
 
 [English](README.detailed.md) | [简体中文](README.detailed.zh-CN.md) | **[日本語](README.detailed.ja.md)**
 
-<!-- README_SYNC: 2026-07-29.13 -->
+<!-- README_SYNC: 2026-07-29.14 -->
 
 [`oyvindln/vhs-decode`](https://github.com/oyvindln/vhs-decode) の
 デコード関連部分を .NET 11 で再実装するプロジェクトです。現在は release
@@ -1294,6 +1294,35 @@ normalized log、2,000 個すべての ordered `fileLoc` で前 release checkpoi
 7.239 から 7.493 秒に収まりました。workspace は bounded で progressive
 slowdown もありませんが、GC pressure の低下により periodic resident-memory
 sample は高くなるため、resident-memory reduction は主張しません。
+
+次の Exact pass は double precision SOS の padded odd-extension workspace
+を pool で再利用します。使用前に logical range をすべて初期化し、padding、
+double precision arithmetic、section/sample order、forward/reverse order、
+独立した exact-length result は変更しません。temporary array は `finally`
+で返却し、no-padding path は従来の owned copy を維持します。既存の
+section-major bit-exact test は、warm 4,096-sample call の allocation が
+40,000 bytes 未満であることも検証します。
+
+formal release v0.4.0-1.4.0 に対する matched Exact
+`current --threads 20` 80-frame `gc-verbose` trace では、sampled managed
+allocation が 10.415 GiB から 8.659 GiB へ 16.9%、sampled `Double[]` が
+8.837 GiB から 7.083 GiB へ 19.8% 減り、Gen2 は 44 回から 26 回に
+なりました。以前の 1.054 GiB `OddExtension` allocation caller は消えました。
+順序を反転した 160-frame 6 組は luma、chroma、raw JSON、stdout、
+normalized stderr/log、すべての ordered `fileLoc` で一致し、
+baseline/candidate wall median の 13.682/13.602 秒は throughput-neutral
+と判断します。追加の 12 gate は v0.4.0 と `current` の `--threads 0`、
+default 5、`--threads 20` を網羅しました。
+
+別の 1,000-frame candidate run も luma、chroma、raw JSON、normalized
+stderr/log、2,000 個すべての ordered `fileLoc` で formal release checkpoint
+と一致しました。total allocation は 119.650 GiB から 98.679 GiB へ 17.5%、
+GC pause は 1.124 秒から 1.029 秒へ減り、Gen2 は 353 回から 319 回に
+なりました。first/last-third working-set median は 680/727 MiB で、
+一時的な 1,420 MiB peak は後に 900 MiB 未満へ戻りました。startup 後の
+100-frame interval 9 個は 6.800 から 6.989 秒に収まっています。これは
+bounded memory と progressive slowdown がないことを示しますが、
+resident-memory reduction や stable throughput improvement の主張ではありません。
 
 </details>
 
