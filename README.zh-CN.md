@@ -2,7 +2,7 @@
 
 [English](README.md) | **[简体中文](README.zh-CN.md)** | [日本語](README.ja.md)
 
-<!-- README_SYNC: 2026-07-29.8 -->
+<!-- README_SYNC: 2026-07-29.9 -->
 
 这是 [`oyvindln/vhs-decode`](https://github.com/oyvindln/vhs-decode)
 中解码相关部分的 .NET 11 重写，兼容目标为上游 release `v0.4.0`、commit
@@ -33,7 +33,7 @@
 - VHS 家族包括 VHS/S-VHS、Betamax、Video8/Hi8、U-matic、Type C、EIAJ
   以及上游支持的 PAL/NTSC 变体。
 - TBC 工具、双击启动的用户 GUI 和开发者绘图窗口明确不在范围内。
-- Visual Studio 2026 `.slnx` 包含 **1,103** 项标准 xUnit v3 测试；测试可在
+- Visual Studio 2026 `.slnx` 包含 **1,104** 项标准 xUnit v3 测试；测试可在
   Test Explorer 中查看，也可用 `dotnet test` 运行。
 
 <!-- SECTION: start -->
@@ -95,11 +95,11 @@ CVBS、LaserDisc 和 HiFi 当前会拒绝 `ipp-fast`，这些命令应使用 `ex
 <!-- LATEST_PERFORMANCE_BEGIN -->
 | CLI 模式（workers） | Python v0.4.0 | Exact + v0.4.0 | Exact + current | IPP-fast + v0.4.0 | IPP-fast + current |
 | --- | ---: | ---: | ---: | ---: | ---: |
-| 默认（5） | 16.983 s | 6.771 s / 2.508x | 8.495 s / 1.999x | 6.469 s / 2.625x | 8.116 s / 2.092x |
-| `--threads 1` | 21.263 s | 21.075 s / 1.009x | 23.190 s / 0.917x | 20.922 s / 1.016x | 22.825 s / 0.932x |
-| `--threads 5` | 16.880 s | 6.660 s / 2.534x | 8.289 s / 2.036x | 6.668 s / 2.532x | 7.926 s / 2.130x |
-| `--threads 10` | 17.612 s | 5.384 s / 3.271x | 6.262 s / 2.812x | 5.035 s / 3.498x | 6.111 s / 2.882x |
-| `--threads 20` | 18.330 s | 4.430 s / 4.137x | 5.564 s / 3.295x | 4.196 s / 4.368x | 5.799 s / 3.161x |
+| 默认（5） | 16.983 s | 6.771 s / 2.508x | 8.265 s / 2.055x | 6.469 s / 2.625x | 7.893 s / 2.152x |
+| `--threads 1` | 21.263 s | 21.075 s / 1.009x | 22.955 s / 0.926x | 20.922 s / 1.016x | 22.563 s / 0.942x |
+| `--threads 5` | 16.880 s | 6.660 s / 2.534x | 8.238 s / 2.049x | 6.668 s / 2.532x | 7.989 s / 2.113x |
+| `--threads 10` | 17.612 s | 5.384 s / 3.271x | 6.109 s / 2.883x | 5.035 s / 3.498x | 6.207 s / 2.837x |
+| `--threads 20` | 18.330 s | 4.430 s / 4.137x | 5.415 s / 3.385x | 4.196 s / 4.368x | 5.340 s / 3.433x |
 <!-- LATEST_PERFORMANCE_END -->
 
 每个 .NET 单元格依次给出墙钟中位数和相对同一行 Python 的倍速；低于 `1.000x`
@@ -131,7 +131,7 @@ TBC、色度、JSON 和日志文件允许在解码期间并发读取，兼容的
 dotnet restore VHSDecodeDotNet.slnx
 dotnet build VHSDecodeDotNet.slnx -c Release --no-restore
 dotnet test --solution VHSDecodeDotNet.slnx -c Release `
-  --no-build --no-restore --minimum-expected-tests 1103
+  --no-build --no-restore --minimum-expected-tests 1104
 ```
 
 在 Visual Studio 2026 中打开 `VHSDecodeDotNet.slnx`，即可构建、调试并通过

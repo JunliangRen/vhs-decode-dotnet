@@ -393,29 +393,12 @@ public sealed class VhsSyncDetector
         double effectiveLineLength = _lineLength * (1.0 + SyncSpacingTolerance);
         double jitterTolerance = _lineLength * 0.1;
         var gridSupportCount = new int[amplitudeCount];
-        for (int first = 0; first < amplitudeCount; first++)
-        {
-            int connections = 1;
-            for (int second = 0; second < amplitudeCount; second++)
-            {
-                if (first == second)
-                {
-                    continue;
-                }
-
-                int delta = second > first
-                    ? falls[second] - falls[first]
-                    : falls[first] - falls[second];
-                double remainder = delta % effectiveLineLength;
-                if (remainder < jitterTolerance
-                    || remainder > effectiveLineLength - jitterTolerance)
-                {
-                    connections++;
-                }
-            }
-
-            gridSupportCount[first] = connections;
-        }
+        FillOrderedGridSupportCounts(
+            falls,
+            amplitudeCount,
+            effectiveLineLength,
+            jitterTolerance,
+            gridSupportCount);
 
         var finalMask = new bool[amplitudeCount];
         int hSyncFitCount = 0;
@@ -565,6 +548,38 @@ public sealed class VhsSyncDetector
             pulseCount == pulses.Length ? pulses : pulses[..pulseCount],
             syncTipLevel,
             backPorchLevel);
+    }
+
+    internal static void FillOrderedGridSupportCounts(
+        ReadOnlySpan<int> falls,
+        int count,
+        double effectiveLineLength,
+        double jitterTolerance,
+        Span<int> supportCounts)
+    {
+        if ((uint)count > (uint)falls.Length
+            || (uint)count > (uint)supportCounts.Length)
+        {
+            throw new ArgumentOutOfRangeException(nameof(count));
+        }
+
+        Span<int> counts = supportCounts[..count];
+        counts.Fill(1);
+        double upperTolerance = effectiveLineLength - jitterTolerance;
+        for (int first = 0; first < count - 1; first++)
+        {
+            for (int second = first + 1; second < count; second++)
+            {
+                int delta = falls[second] - falls[first];
+                double remainder = delta % effectiveLineLength;
+                if (remainder < jitterTolerance
+                    || remainder > upperTolerance)
+                {
+                    counts[first]++;
+                    counts[second]++;
+                }
+            }
+        }
     }
 
     internal static (double SyncSum, double PorchSum) SumSelectedLevelsInUpstreamOrder(

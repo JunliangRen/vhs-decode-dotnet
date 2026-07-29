@@ -4,7 +4,7 @@
 
 [English](README.detailed.md) | **[简体中文](README.detailed.zh-CN.md)** | [日本語](README.detailed.ja.md)
 
-<!-- README_SYNC: 2026-07-29.8 -->
+<!-- README_SYNC: 2026-07-29.9 -->
 
 这是 [`oyvindln/vhs-decode`](https://github.com/oyvindln/vhs-decode)
 中解码相关部分的 .NET 11 重写，当前以 release `v0.4.0`、commit
@@ -950,6 +950,18 @@ VHS real-FFT 子去加重现在会在旧值生命周期结束后，把高频频�
 完全一致；另行执行的 40 帧 `--threads 0`、默认及 `--threads 20` 门禁也完全
 一致，并保持跨线程确定性。
 
+current 模式的 VHS 多网格支持计数现在只计算每个无序脉冲对一次，并同时递增两端
+计数，不再分别测试两个对称的有序脉冲对。脉冲位置顺序、容差比较、整数计数、
+候选选择、浮点阶段和检测器状态顺序均未改变。以已发布 v1.3.4 为基线，五组交错
+并反转顺序的 160 帧 Exact current `--threads 20` 配对将墙钟中位数从 15.012 秒
+降至 14.755 秒（下降 1.71%），配平合计吞吐提高 1.06%；候选在五组中胜出四组。
+合计 CPU 时间增加 0.63%，因此不宣称 CPU 时间下降。匹配的 80 帧采样 trace 将
+`VhsSyncDetector.Detect` 的 inclusive 时间从 2,493 ms 降至 2,346 ms
+（下降 5.89%）；这用于确认热点变化，不作为第二项端到端收益。全部 A/B 的亮度、
+色度、JSON、stdout、归一化 stderr/日志和所有有序 `fileLoc` 均一致。另行执行的
+current 与 v0.4.0 `--threads 0`、默认及 `--threads 20` 门禁也保持确定且完全
+一致；v0.4.0 串行结果在所有输出面上同样匹配 Python oracle。
+
 </details>
 
 <!-- SECTION: build -->
@@ -968,7 +980,7 @@ VHS real-FFT 子去加重现在会在旧值生命周期结束后，把高频频�
 .\tools\build-ipp-native.ps1
 dotnet restore VHSDecodeDotNet.slnx
 dotnet build VHSDecodeDotNet.slnx -c Release --no-restore
-dotnet test --solution VHSDecodeDotNet.slnx -c Release --no-build --no-restore --minimum-expected-tests 1103
+dotnet test --solution VHSDecodeDotNet.slnx -c Release --no-build --no-restore --minimum-expected-tests 1104
 ```
 
 第一条命令用于包含可选的 `ipp-fast` 原生产物；只构建 Exact 时可以省略。
@@ -979,7 +991,7 @@ Intel oneAPI。只含二进制的单文件发布会嵌入 `vhsdecode_ipp.dll` �
 notice，不会额外生成许可证 sidecar 文件。只构建 Exact 后端时可以省略原生构建步骤。
 
 当前正式 Release 构建为零警告、零错误。xUnit v3 项目向
-`dotnet test` 和 Visual Studio Test Explorer 暴露 **1,103** 个可独立发现的测试。
+`dotnet test` 和 Visual Studio Test Explorer 暴露 **1,104** 个可独立发现的测试。
 
 <!-- SECTION: usage -->
 

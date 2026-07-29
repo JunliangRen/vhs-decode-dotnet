@@ -147,6 +147,38 @@ public sealed class VhsSyncDetectorCurrentTests
         }
     }
 
+    [Fact(DisplayName = "Current VHS symmetric grid counting matches the ordered-pair oracle")]
+    public void CurrentVhsSymmetricGridCountingMatchesOrderedPairOracle()
+    {
+        const int Count = 313;
+        const double EffectiveLineLength = 2_944.75;
+        const double JitterTolerance = 256.0;
+        var falls = new int[Count];
+        for (int index = 1; index < falls.Length; index++)
+        {
+            int spacing = index % 17 == 0
+                ? 0
+                : 2_560 + (((index * 37) % 401) - 200);
+            falls[index] = falls[index - 1] + spacing;
+        }
+
+        int[] expected = CountGridSupportOrderedPairReference(
+            falls,
+            EffectiveLineLength,
+            JitterTolerance);
+        var actual = Enumerable.Repeat(int.MinValue, Count + 3).ToArray();
+
+        VhsSyncDetector.FillOrderedGridSupportCounts(
+            falls,
+            Count,
+            EffectiveLineLength,
+            JitterTolerance,
+            actual);
+
+        Assert.Equal(expected, actual[..Count]);
+        Assert.All(actual[Count..], value => Assert.Equal(int.MinValue, value));
+    }
+
     [Fact(DisplayName = "Current VHS sync detector reuses its full-field workspace")]
     public void CurrentVhsSyncDetectorReusesFullFieldWorkspace()
     {
@@ -318,6 +350,39 @@ public sealed class VhsSyncDetectorCurrentTests
 
     private static void PaintPulse(double[] signal, int start, int length, double level)
         => Array.Fill(signal, level, start, length);
+
+    private static int[] CountGridSupportOrderedPairReference(
+        IReadOnlyList<int> falls,
+        double effectiveLineLength,
+        double jitterTolerance)
+    {
+        var counts = new int[falls.Count];
+        for (int first = 0; first < falls.Count; first++)
+        {
+            int connections = 1;
+            for (int second = 0; second < falls.Count; second++)
+            {
+                if (first == second)
+                {
+                    continue;
+                }
+
+                int delta = second > first
+                    ? falls[second] - falls[first]
+                    : falls[first] - falls[second];
+                double remainder = delta % effectiveLineLength;
+                if (remainder < jitterTolerance
+                    || remainder > effectiveLineLength - jitterTolerance)
+                {
+                    connections++;
+                }
+            }
+
+            counts[first] = connections;
+        }
+
+        return counts;
+    }
 
     [MethodImpl(MethodImplOptions.NoInlining)]
     private static double PoisonReductionStack()
