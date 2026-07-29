@@ -2,7 +2,7 @@
 
 [English](README.md) | **[简体中文](README.zh-CN.md)** | [日本語](README.ja.md)
 
-<!-- README_SYNC: 2026-07-29.12 -->
+<!-- README_SYNC: 2026-07-29.13 -->
 
 这是 [`oyvindln/vhs-decode`](https://github.com/oyvindln/vhs-decode)
 中解码相关部分的 .NET 11 重写，兼容目标为上游 release `v0.4.0`、commit
@@ -33,7 +33,7 @@
 - VHS 家族包括 VHS/S-VHS、Betamax、Video8/Hi8、U-matic、Type C、EIAJ
   以及上游支持的 PAL/NTSC 变体。
 - TBC 工具、双击启动的用户 GUI 和开发者绘图窗口明确不在范围内。
-- Visual Studio 2026 `.slnx` 包含 **1,110** 项标准 xUnit v3 测试；测试可在
+- Visual Studio 2026 `.slnx` 包含 **1,115** 项标准 xUnit v3 测试；测试可在
   Test Explorer 中查看，也可用 `dotnet test` 运行。
 
 <!-- SECTION: start -->
@@ -102,6 +102,11 @@ CVBS、LaserDisc 和 HiFi 当前会拒绝 `ipp-fast`，这些命令应使用 `ex
 | `--threads 20` | 18.330 s | 3.900 s / 4.700x | 4.745 s / 3.863x | 3.743 s / 4.897x | 4.511 s / 4.064x |
 <!-- LATEST_PERFORMANCE_END -->
 
+最新一轮匹配的 Exact `current --threads 20` 分配审计把 80 帧采样托管分配从
+13.900 GiB 降至 10.415 GiB（下降 25.1%），`Complex[]` 分配从 3.622 GiB
+降至 135 MiB。六组反序 160 帧配对的基线/候选墙钟中位数为
+14.069/14.167 秒，属于吞吐中性，因此上表保持不变，本轮不宣称速度提升。
+
 每个 .NET 单元格依次给出墙钟中位数和相对同一行 Python 的倍速；低于 `1.000x`
 表示更慢。默认实际使用 **5 个 workers**。非零线程的 Python 行只用于吞吐比较，
 严格兼容基准仍是 Python `--threads 0`。
@@ -131,7 +136,7 @@ TBC、色度、JSON 和日志文件允许在解码期间并发读取，兼容的
 dotnet restore VHSDecodeDotNet.slnx
 dotnet build VHSDecodeDotNet.slnx -c Release --no-restore
 dotnet test --solution VHSDecodeDotNet.slnx -c Release `
-  --no-build --no-restore --minimum-expected-tests 1110
+  --no-build --no-restore --minimum-expected-tests 1115
 ```
 
 在 Visual Studio 2026 中打开 `VHSDecodeDotNet.slnx`，即可构建、调试并通过

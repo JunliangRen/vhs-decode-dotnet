@@ -2,7 +2,7 @@
 
 [English](README.md) | [简体中文](README.zh-CN.md) | **[日本語](README.ja.md)**
 
-<!-- README_SYNC: 2026-07-29.12 -->
+<!-- README_SYNC: 2026-07-29.13 -->
 
 [`oyvindln/vhs-decode`](https://github.com/oyvindln/vhs-decode) の
 デコード関連部分を .NET 11 で再実装するプロジェクトです。互換性の対象は
@@ -36,7 +36,7 @@ upstream release `v0.4.0`、commit
 - VHS family には VHS/S-VHS、Betamax、Video8/Hi8、U-matic、Type C、EIAJ、
   upstream が対応する PAL/NTSC variant が含まれます。
 - TBC utility、ダブルクリック GUI、開発者向け plot window は対象外です。
-- Visual Studio 2026 の `.slnx` には **1,110** 件の標準 xUnit v3 test があり、
+- Visual Studio 2026 の `.slnx` には **1,115** 件の標準 xUnit v3 test があり、
   Test Explorer と `dotnet test` の両方で実行できます。
 
 <!-- SECTION: start -->
@@ -107,6 +107,13 @@ CVBS、LaserDisc、HiFi は現在 `ipp-fast` を拒否するため、これら�
 | `--threads 20` | 18.330 s | 3.900 s / 4.700x | 4.745 s / 3.863x | 3.743 s / 4.897x | 4.511 s / 4.064x |
 <!-- LATEST_PERFORMANCE_END -->
 
+最新の matched Exact `current --threads 20` allocation audit では、80-frame
+sampled managed allocation が 13.900 GiB から 10.415 GiB へ 25.1% 減り、
+`Complex[]` allocation が 3.622 GiB から 135 MiB へ減りました。順序を反転した
+160-frame 6 組の baseline/candidate wall median は 14.069/14.167 秒で
+throughput-neutral だったため、上の表は変更せず、この pass の speedup は
+主張しません。
+
 各 .NET cell は wall-time median と同じ行の Python に対する speedup の順です。
 `1.000x` 未満は Python より遅いことを示します。default は実際に **5 workers**
 です。Python の nonzero-thread 行は throughput 比較専用で、strict compatibility
@@ -139,7 +146,7 @@ preview tool は writer を止めずに partial output を確認できます。
 dotnet restore VHSDecodeDotNet.slnx
 dotnet build VHSDecodeDotNet.slnx -c Release --no-restore
 dotnet test --solution VHSDecodeDotNet.slnx -c Release `
-  --no-build --no-restore --minimum-expected-tests 1110
+  --no-build --no-restore --minimum-expected-tests 1115
 ```
 
 Visual Studio 2026 で `VHSDecodeDotNet.slnx` を開くと、build、debug、

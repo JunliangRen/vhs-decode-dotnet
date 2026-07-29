@@ -4,7 +4,7 @@
 
 [English](README.detailed.md) | **[简体中文](README.detailed.zh-CN.md)** | [日本語](README.detailed.ja.md)
 
-<!-- README_SYNC: 2026-07-29.12 -->
+<!-- README_SYNC: 2026-07-29.13 -->
 
 这是 [`oyvindln/vhs-decode`](https://github.com/oyvindln/vhs-decode)
 中解码相关部分的 .NET 11 重写，当前以 release `v0.4.0`、commit
@@ -1054,6 +1054,30 @@ CPU 时间仅变化 +0.14% 与 +0.08%。候选赢得六组中的四组，因此�
 `--threads 0`、默认 5 和 `--threads 20`；七个输出面全部匹配基线并保持跨线程
 确定。重新测量的 60 次 Exact/IPP 矩阵运行也全部通过已记录的兼容参考。
 
+后续 VHS complex-RF 过滤频谱工作区优化会把完整过滤频谱保存在现有的有上限
+worker 工作区中，并原地执行可选的 RF MTF 乘法。它最多移除每 block 两个
+`Complex[]` 输出，同时保持复数乘法表达式与回退、全复数 FFT/Hilbert 生命周期、
+系数、数据类型和有序输出状态不变。通用与特殊值原地测试覆盖
+0、1、2、3 和 32,769 点；预热后的 PAL RF block 实测分配 2,098,184 字节，
+并以 2,400,000 字节为新门禁上限。
+
+相对正式版 v0.4.0-1.3.9，匹配的 80-frame `gc-verbose` trace 将采样托管分配从
+13.900 GiB 降至 10.415 GiB（下降 25.1%），采样 `Complex[]` 分配从
+3.622 GiB 降至 135 MiB（下降 96.4%），Gen2 回收从 57 次降至 44 次
+（下降 22.8%）。六组反序 160-frame 配对的七个兼容面全部匹配，基线/候选墙钟
+中位数为 14.069/14.167 秒，CPU 中位数变化为 -0.44%，因此本轮仍按吞吐中性处理。
+
+两组顺序相反的 400-frame runtime-counter 配对把合计分配从 127.255 GiB 降至
+93.795 GiB（下降 26.29%），Gen2 回收从 496 次降至 261 次（下降 47.38%）。
+带 counters 的合计墙钟高 3.57%，所以不宣称长跑加速。候选最高工作集采样为
+1.23 GiB；反序运行的首/末三分之一区间中位数为 905/908 MiB。另一组
+1,000-frame 候选运行在亮度、色度、原始 JSON、归一化日志和全部 2,000 个有序
+`fileLoc` 上匹配上一正式版检查点，同时把分配从 160.525 GiB 降至
+119.650 GiB（下降 25.46%），Gen2 从 628 次降至 353 次（下降 43.79%）。
+其首/末三分之一区间工作集中位数为 747/782 MiB，最大值为 1,198 MiB，启动后的
+九个 100-frame 区间稳定在 7.239 至 7.493 秒。工作区因此保持有界且没有随进度
+减速；较低 GC 压力会带来更高的周期性常驻内存采样，所以这里不宣称常驻内存下降。
+
 </details>
 
 <!-- SECTION: build -->
@@ -1072,7 +1096,7 @@ CPU 时间仅变化 +0.14% 与 +0.08%。候选赢得六组中的四组，因此�
 .\tools\build-ipp-native.ps1
 dotnet restore VHSDecodeDotNet.slnx
 dotnet build VHSDecodeDotNet.slnx -c Release --no-restore
-dotnet test --solution VHSDecodeDotNet.slnx -c Release --no-build --no-restore --minimum-expected-tests 1110
+dotnet test --solution VHSDecodeDotNet.slnx -c Release --no-build --no-restore --minimum-expected-tests 1115
 ```
 
 第一条命令用于包含可选的 `ipp-fast` 原生产物；只构建 Exact 时可以省略。
@@ -1083,7 +1107,7 @@ Intel oneAPI。只含二进制的单文件发布会嵌入 `vhsdecode_ipp.dll` �
 notice，不会额外生成许可证 sidecar 文件。只构建 Exact 后端时可以省略原生构建步骤。
 
 当前正式 Release 构建为零警告、零错误。xUnit v3 项目向
-`dotnet test` 和 Visual Studio Test Explorer 暴露 **1,110** 个可独立发现的测试。
+`dotnet test` 和 Visual Studio Test Explorer 暴露 **1,115** 个可独立发现的测试。
 
 <!-- SECTION: usage -->
 

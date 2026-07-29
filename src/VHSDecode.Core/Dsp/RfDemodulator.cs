@@ -228,7 +228,8 @@ public sealed class RfDemodulator : IDisposable
         if (useVhsComplexRfHighBoostPath)
         {
             VhsRealFftWorkspace workspace = vhsRealFftWorkspace!;
-            // The complex path reuses both full-length buffers in non-overlapping phases.
+            // The complex path keeps the filtered spectrum alive while the other
+            // full-length buffers are reused for inverse and analytic transforms.
             Complex[] inputSpectrum = workspace.DiffedAnalytic;
             PocketFftComplex.ForwardReal(input, inputSpectrum.AsSpan(0, input.Length));
             rfHighPass = includeRfHighPassOutput
@@ -237,16 +238,19 @@ public sealed class RfDemodulator : IDisposable
                     rfHighPassFilter,
                     input.Length)))
                 : [];
-            rfFilteredSpectrum = ApplyNumpyRealFrequencyFilter(
+            rfFilteredSpectrum = workspace.RfFilteredSpectrum;
+            ApplyNumpyRealFrequencyFilter(
                 inputSpectrum,
                 rfVideoFilter,
-                input.Length);
+                input.Length,
+                rfFilteredSpectrum);
             if (!rfMtfFilter.IsEmpty)
             {
-                rfFilteredSpectrum = ApplyNumpyRealFrequencyFilter(
+                ApplyNumpyRealFrequencyFilter(
                     rfFilteredSpectrum,
                     rfMtfFilter,
-                    input.Length);
+                    input.Length,
+                    rfFilteredSpectrum);
             }
 
             hilbertMultiplier = GetVhsHilbertMultiplier(rfFilteredSpectrum.Length);
@@ -1462,6 +1466,7 @@ public sealed class RfDemodulator : IDisposable
     private sealed class VhsRealFftWorkspace : IDisposable
     {
         private readonly IppRealFft? _ippFft;
+        private Complex[]? _rfFilteredSpectrum;
 
         public VhsRealFftWorkspace(int realLength, DspBackend dspBackend)
         {
@@ -1494,6 +1499,9 @@ public sealed class RfDemodulator : IDisposable
         public Complex[] DiffedAnalytic { get; }
 
         public Complex[] FullAnalytic { get; }
+
+        public Complex[] RfFilteredSpectrum =>
+            _rfFilteredSpectrum ??= new Complex[RealLength];
 
         public double[] Real { get; }
 

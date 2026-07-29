@@ -380,7 +380,7 @@ public sealed class DspWorkingBufferTests
             "AEC0D4FFFF58D5A35771AE7374C0A62C1DA955125249B91C6AD9946D7BBBFEF4",
             Hash(block));
         Assert.True(
-            allocated < 3_000_000,
+            allocated < 2_400_000,
             $"Warm PAL VHS RF block allocated {allocated:N0} bytes.");
     }
 
