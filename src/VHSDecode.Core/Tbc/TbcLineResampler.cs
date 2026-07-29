@@ -661,22 +661,52 @@ public sealed class TbcLineResampler
         }
 
         int lineCount = sampleCount / OutputLineLength;
-        var lineFactors = new double[lineCount];
-        for (int line = 0; line < lineCount; line++)
+        if (lineCount == 0)
         {
-            lineFactors[line] = interpolator.EvaluateOutputDerivative(
-                line * OutputLineLength,
-                OutputLineLength);
+            return;
         }
 
-        double[] adjustedLineFactors = ReplaceWowFactorOutliers(lineFactors);
-        for (int line = 0; line < lineCount; line++)
+        double[] lineFactors = ArrayPool<double>.Shared.Rent(lineCount);
+        double[] medianScratch = ArrayPool<double>.Shared.Rent(lineCount);
+        double[] deviationScratch = ArrayPool<double>.Shared.Rent(lineCount);
+        try
         {
-            Array.Fill(
-                levelAdjusts,
-                adjustedLineFactors[line],
-                line * OutputLineLength,
-                OutputLineLength);
+            for (int line = 0; line < lineCount; line++)
+            {
+                lineFactors[line] = interpolator.EvaluateOutputDerivative(
+                    line * OutputLineLength,
+                    OutputLineLength);
+            }
+
+            ReadOnlySpan<double> factors = lineFactors.AsSpan(0, lineCount);
+            double median = NumpyReduction.MedianFloat64(factors, medianScratch);
+            for (int line = 0; line < lineCount; line++)
+            {
+                deviationScratch[line] = Math.Abs(lineFactors[line] - median);
+            }
+
+            double mad = NumpyReduction.MedianFloat64(
+                deviationScratch.AsSpan(0, lineCount),
+                medianScratch);
+            double threshold = mad > 0.0 ? 15.0 * mad : 0.001;
+            for (int line = 0; line < lineCount; line++)
+            {
+                double factor = lineFactors[line];
+                double adjustedFactor = Math.Abs(factor - median) > threshold
+                    ? median
+                    : factor;
+                Array.Fill(
+                    levelAdjusts,
+                    adjustedFactor,
+                    line * OutputLineLength,
+                    OutputLineLength);
+            }
+        }
+        finally
+        {
+            ArrayPool<double>.Shared.Return(lineFactors);
+            ArrayPool<double>.Shared.Return(medianScratch);
+            ArrayPool<double>.Shared.Return(deviationScratch);
         }
 
         SmoothLevelAdjusts(levelAdjusts.AsSpan(0, sampleCount));
