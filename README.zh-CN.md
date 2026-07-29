@@ -102,13 +102,14 @@ CVBS、LaserDisc 和 HiFi 当前会拒绝 `ipp-fast`，这些命令应使用 `ex
 | `--threads 20` | 18.330 s | 3.900 s / 4.700x | 4.745 s / 3.863x | 3.743 s / 4.897x | 4.511 s / 4.064x |
 <!-- LATEST_PERFORMANCE_END -->
 
-最新一轮 Exact 优化把 float32 SOS 的稳态与缩放初始条件放入常见 section 数下
-由栈支持的扁平 span，并让反向 pass 复用缩放 span；系数、float 表达式以及
-sample/section 顺序保持不变。聚焦微基准把热调用分配从约 240 降至 72 bytes；
-80 帧分配 trace 中原有的 18.511 MiB `Single[,]` 采样类型已经消失。12 次
-profile/thread 门禁、六组反序 160 帧配对和两组相反顺序的 1000 帧配对均保持
-精确一致。长配对的合计分配约下降 0.54%，CPU 基本不变，墙钟按中性处理，且
-没有渐进减速。由于尚未形成新的稳定整条流水线加速档位，上表保持不变。
+最新一轮 Exact 优化把 float32 SOS 系数转换放入最多 32 个 sections 的有界
+栈 span；更大的滤波器保留堆回退。转换、float 表达式和 sample/section 顺序
+均保持不变。聚焦微基准把热调用分配从约 72 bytes 降到零，耗时保持中性；
+40 帧/80 fields trace 中 25 个合计 2.538 MiB 的 `FloatSosSection[]` 采样事件
+已经消失。
+12 次 profile/thread 门禁、六组交错 160 帧配对和两组相反顺序的 1000 帧配对
+均精确一致。整条流水线耗时与 counters 总量仍在测量噪声内，且没有渐进减速，
+因此性能表保持不变。
 
 每个 .NET 单元格依次给出墙钟中位数和相对同一行 Python 的倍速；低于 `1.000x`
 表示更慢。默认实际使用 **5 个 workers**。非零线程的 Python 行只用于吞吐比较，

@@ -341,7 +341,6 @@ public static class SosFilter
         Span<double> output,
         int edge)
     {
-        FloatSosSection[] floatSections = ConvertToFloat32(sections);
         int extendedLength = checked(input.Length + (edge * 2));
         float[] rented = ArrayPool<float>.Shared.Rent(extendedLength);
         try
@@ -356,7 +355,7 @@ public static class SosFilter
                 WriteOddExtensionFloat32(input, edge, extended);
             }
 
-            ApplyForwardBackwardFloat32InPlace(floatSections, extended);
+            ApplyForwardBackwardFloat32InPlace(sections, extended);
 
             ConvertToFloat64(extended.Slice(edge, input.Length), output);
         }
@@ -382,7 +381,6 @@ public static class SosFilter
             throw new ArgumentOutOfRangeException(nameof(padLength));
         }
 
-        FloatSosSection[] floatSections = ConvertToFloat32(sections);
         int extendedLength = checked(input.Length + (edge * 2));
         float[] rented = ArrayPool<float>.Shared.Rent(extendedLength);
         try
@@ -397,7 +395,7 @@ public static class SosFilter
                 WriteOddExtensionFloat32(input, edge, extended);
             }
 
-            ApplyForwardBackwardFloat32InPlace(floatSections, extended);
+            ApplyForwardBackwardFloat32InPlace(sections, extended);
             return extended.Slice(edge, input.Length).ToArray();
         }
         finally
@@ -422,11 +420,10 @@ public static class SosFilter
             throw new ArgumentOutOfRangeException(nameof(padLength));
         }
 
-        FloatSosSection[] floatSections = ConvertToFloat32(sections);
         if (edge == 0)
         {
             float[] output = input.ToArray();
-            ApplyForwardBackwardFloat32InPlace(floatSections, output);
+            ApplyForwardBackwardFloat32InPlace(sections, output);
             return output;
         }
 
@@ -436,7 +433,7 @@ public static class SosFilter
         {
             Span<float> extended = rented.AsSpan(0, extendedLength);
             WriteOddExtensionFloat32(input, edge, extended);
-            ApplyForwardBackwardFloat32InPlace(floatSections, extended);
+            ApplyForwardBackwardFloat32InPlace(sections, extended);
             return extended.Slice(edge, input.Length).ToArray();
         }
         finally
@@ -446,7 +443,19 @@ public static class SosFilter
     }
 
     private static void ApplyForwardBackwardFloat32InPlace(
-        FloatSosSection[] floatSections,
+        IReadOnlyList<SosSection> sections,
+        Span<float> values)
+    {
+        const int MaxStackSections = 32;
+        Span<FloatSosSection> floatSections = sections.Count <= MaxStackSections
+            ? stackalloc FloatSosSection[sections.Count]
+            : new FloatSosSection[sections.Count];
+        ConvertToFloat32(sections, floatSections);
+        ApplyForwardBackwardFloat32InPlace(floatSections, values);
+    }
+
+    private static void ApplyForwardBackwardFloat32InPlace(
+        ReadOnlySpan<FloatSosSection> floatSections,
         Span<float> values)
     {
         const int MaxStackSections = 32;
@@ -510,7 +519,7 @@ public static class SosFilter
     }
 
     private static void ApplyForwardFloat32InPlace(
-        FloatSosSection[] sections,
+        ReadOnlySpan<FloatSosSection> sections,
         Span<float> values,
         ReadOnlySpan<float> initialConditions)
     {
@@ -632,10 +641,18 @@ public static class SosFilter
         }
     }
 
-    private static FloatSosSection[] ConvertToFloat32(IReadOnlyList<SosSection> sections)
+    private static void ConvertToFloat32(
+        IReadOnlyList<SosSection> sections,
+        Span<FloatSosSection> output)
     {
-        var output = new FloatSosSection[sections.Count];
-        for (int i = 0; i < output.Length; i++)
+        if (output.Length != sections.Count)
+        {
+            throw new ArgumentException(
+                "Float SOS destination length must match the section count.",
+                nameof(output));
+        }
+
+        for (int i = 0; i < sections.Count; i++)
         {
             SosSection section = sections[i];
             output[i] = new FloatSosSection(
@@ -646,8 +663,6 @@ public static class SosFilter
                 (float)section.A1,
                 (float)section.A2);
         }
-
-        return output;
     }
 
     private static float[] ConvertToFloat32(ReadOnlySpan<double> input)
@@ -716,16 +731,16 @@ public static class SosFilter
     }
 
     private static void SteadyStateInitialConditionsFloat32(
-        IReadOnlyList<FloatSosSection> sections,
+        ReadOnlySpan<FloatSosSection> sections,
         Span<float> zi)
     {
-        if (zi.Length != checked(sections.Count * 2))
+        if (zi.Length != checked(sections.Length * 2))
         {
             throw new ArgumentException("Initial condition span must have shape [sections, 2].", nameof(zi));
         }
 
         float scale = 1.0f;
-        for (int i = 0; i < sections.Count; i++)
+        for (int i = 0; i < sections.Length; i++)
         {
             FloatSosSection section = sections[i];
             float firstTerm = section.B1 - (section.A1 * section.B0);

@@ -1844,6 +1844,18 @@ possible capture has already been proven byte-for-byte identical.
   combined counter allocation fell 0.54%, combined CPU was effectively
   unchanged, wall time was throughput-neutral, and post-startup 100-frame
   intervals stayed between 6.877 and 7.121 s without progressive growth
+- float32 SOS coefficient conversion now writes into a bounded stack-backed
+  span through 32 sections, with a heap fallback above that boundary. Casts,
+  float expressions, filtering order, and ownership are unchanged. Existing
+  bit hashes and a new 33-section fallback case remain exact; warm focused
+  allocation fell from about 72 to zero bytes per call. Twelve
+  v0.4.0/current one/default-five/20-worker gates and six interleaved 160-frame
+  pairs matched all seven compatibility surfaces. Two opposite-order
+  1,000-frame pairs matched every applicable artifact/log surface and all
+  2,000 ordered `fileLoc` values. The baseline's 2.538 MiB across 25 sampled
+  `FloatSosSection[]` events disappeared; whole-pipeline counters and timing
+  remained noisy/neutral, and post-startup intervals showed no progressive
+  slowdown
 - one-frame non-default NTSC VHS fixtures are also byte-exact for
   `--sharpness 20`, `--fm_audio_notch 10`, and the combined
   `--high_boost 1.3 --sharpness 20 --nld --sd` path; the stateful sharpness
