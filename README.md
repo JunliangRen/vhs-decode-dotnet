@@ -38,7 +38,7 @@ evidence, and remaining gaps.
   EIAJ, and supported PAL/NTSC variants.
 - TBC utility tools, the double-click GUI, and developer plotting windows are
   intentionally out of scope.
-- The Visual Studio 2026 `.slnx` solution has **1,117** standard xUnit v3 tests
+- The Visual Studio 2026 `.slnx` solution has **1,118** standard xUnit v3 tests
   that are visible in Test Explorer and runnable with `dotnet test`.
 
 <!-- SECTION: start -->
@@ -112,14 +112,17 @@ separately from speed.
 | `--threads 20` | 18.330 s | 3.684 s / 4.976x | 4.854 s / 3.777x | 3.760 s / 4.875x | 4.769 s / 3.843x |
 <!-- LATEST_PERFORMANCE_END -->
 
-The latest Exact follow-up writes each mixed-radix Complex32 FFT packet result
-back into its existing worker-local buffer instead of allocating a temporary
-array. Arithmetic and packet order remain unchanged. A matched trace reduced
-sampled `Complex32[]` allocation from 364.328 to 2.747 MiB. Twelve
+The latest Exact allocation follow-up transfers the already-owned NTSC
+burst-deemphasis field buffer directly into current phase compensation instead
+of cloning the complete field once more. Filtering, float32 conversion points,
+arithmetic order, and caller input ownership remain unchanged. Twelve
 profile/thread gates, six interleaved 160-frame pairs, and two opposite-order
-1,000-frame pairs remained exact. The long pairs reduced combined wall time
-from 144.526 to 136.988 s (5.22%) and counter allocation by 9.17%, with no
-progressive slowdown. The five-path table above was refreshed with 60 runs.
+1,000-frame pairs remained exact. The idle long pairs reduced combined counter
+allocation from 140.055 to 132.532 GiB (5.37%); combined wall time was neutral
+at 142.323/142.893 s and GC pause at 1.100/1.116 s. Post-startup 100-frame
+intervals stayed between 6.794 and 6.981 s without progressive slowdown.
+Because no stable whole-pipeline speedup is claimed, the table above remains
+the last valid idle 60-run matrix.
 
 Each .NET cell shows median wall time followed by speedup versus Python in the
 same row; values below `1.000x` are slower. The default is **5 workers**.
@@ -155,7 +158,7 @@ The pinned SDK is .NET `11.0.100-preview.6.26359.118`.
 dotnet restore VHSDecodeDotNet.slnx
 dotnet build VHSDecodeDotNet.slnx -c Release --no-restore
 dotnet test --solution VHSDecodeDotNet.slnx -c Release `
-  --no-build --no-restore --minimum-expected-tests 1117
+  --no-build --no-restore --minimum-expected-tests 1118
 ```
 
 Open `VHSDecodeDotNet.slnx` in Visual Studio 2026 to build, debug, and run the

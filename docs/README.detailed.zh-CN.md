@@ -1276,6 +1276,30 @@ Gen1 为 1/1，Gen2 为 14/17；由于回收时机不同，不宣称 Gen2 改善
 下降。本轮作为分配/GC 和稳定长跑吞吐改进保留。上方五路径 overview 已用
 60 次 .NET 运行刷新，全部运行都通过同一兼容门禁。
 
+下一轮 Exact `current` 色度分配优化保留 NTSC burst deemphasis 返回的独占
+`double[]`，并把该缓冲直接交给 `current` 相位补偿。原路径只以只读 span 暴露
+同一数组，随后在原地上变频前完整复制一次场数据；被删除的操作因此只是所有权
+复制。滤波、float32 转换点、相位算术、样本顺序和调用者输入均保持不变。
+PAL、v0.4.0、禁用相位校正和缺少场奇偶信息的路径继续保持原行为。新增的生产
+尺寸 xUnit v3 分配门禁只允许两份场级 `double[]` 输出加最终 `ushort[]`；
+旧实现的第三份场复制会明确超过该上限。
+
+本地 Release 解决方案以零警告、零错误构建，1,118 项测试全部通过。最终
+GitHub Actions 同样发现 1,118 项测试：1,117 项通过，一项需要可选 AC3 依赖
+的测试跳过，失败为零。12 次真实门禁覆盖 v0.4.0/current 的 1、默认 5 和
+20 workers。六组空闲交错 160 帧配对在亮度、色度、原始 JSON、stdout、
+归一化 stderr/日志和全部有序 `fileLoc` 上保持一致；基线/候选墙钟中位数为
+13.513/13.224 秒，CPU 中位数为 103.375/101.617 秒。候选在六组中赢四组，
+但短跑耗时不作为整链提速结论。
+
+两组空闲、相反顺序的 1000 帧 counter 配对也在全部产物/日志表面和 2,000 个
+有序 `fileLoc` 上保持一致。counter 合计分配从 140.055 降至 132.532 GiB，
+减少 7.523 GiB（5.37%）。合计墙钟为 142.323/142.893 秒，GC pause 为
+1.100/1.116 秒，均按中性处理；采样工作集保持有界。候选启动后的每 100 帧
+区间稳定在 6.794 至 6.981 秒，没有渐进减速。本轮作为确定性的整场分配消除
+保留，并归类为整链吞吐中性，因此五路径 overview 继续使用上一份有效的空闲
+60-run 矩阵。
+
 </details>
 
 <!-- SECTION: build -->
@@ -1294,7 +1318,7 @@ Gen1 为 1/1，Gen2 为 14/17；由于回收时机不同，不宣称 Gen2 改善
 .\tools\build-ipp-native.ps1
 dotnet restore VHSDecodeDotNet.slnx
 dotnet build VHSDecodeDotNet.slnx -c Release --no-restore
-dotnet test --solution VHSDecodeDotNet.slnx -c Release --no-build --no-restore --minimum-expected-tests 1117
+dotnet test --solution VHSDecodeDotNet.slnx -c Release --no-build --no-restore --minimum-expected-tests 1118
 ```
 
 第一条命令用于包含可选的 `ipp-fast` 原生产物；只构建 Exact 时可以省略。
@@ -1305,7 +1329,7 @@ Intel oneAPI。只含二进制的单文件发布会嵌入 `vhsdecode_ipp.dll` �
 notice，不会额外生成许可证 sidecar 文件。只构建 Exact 后端时可以省略原生构建步骤。
 
 当前正式 Release 构建为零警告、零错误。xUnit v3 项目向
-`dotnet test` 和 Visual Studio Test Explorer 暴露 **1,117** 个可独立发现的测试。
+`dotnet test` 和 Visual Studio Test Explorer 暴露 **1,118** 个可独立发现的测试。
 
 <!-- SECTION: usage -->
 

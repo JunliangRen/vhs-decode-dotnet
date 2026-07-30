@@ -36,7 +36,7 @@ upstream release `v0.4.0`、commit
 - VHS family には VHS/S-VHS、Betamax、Video8/Hi8、U-matic、Type C、EIAJ、
   upstream が対応する PAL/NTSC variant が含まれます。
 - TBC utility、ダブルクリック GUI、開発者向け plot window は対象外です。
-- Visual Studio 2026 の `.slnx` には **1,117** 件の標準 xUnit v3 test があり、
+- Visual Studio 2026 の `.slnx` には **1,118** 件の標準 xUnit v3 test があり、
   Test Explorer と `dotnet test` の両方で実行できます。
 
 <!-- SECTION: start -->
@@ -107,14 +107,17 @@ CVBS、LaserDisc、HiFi は現在 `ipp-fast` を拒否するため、これら�
 | `--threads 20` | 18.330 s | 3.684 s / 4.976x | 4.854 s / 3.777x | 3.760 s / 4.875x | 4.769 s / 3.843x |
 <!-- LATEST_PERFORMANCE_END -->
 
-最新の Exact follow-up は、mixed-radix Complex32 FFT packet の result を
-既存の worker-local buffer へ直接書き戻し、temporary array allocation を
-なくします。arithmetic と packet order は変更しません。matched trace の
-sampled `Complex32[]` allocation は 364.328 MiB から 2.747 MiB へ減りました。
-profile/thread gate 12 件、interleaved 160-frame pair 6 組、反対順序の
-1,000-frame pair 2 組はすべて exact です。long pair の combined wall time は
-144.526 秒から 136.988 秒へ 5.22%、counter allocation は 9.17% 減り、
-progressive slowdown もありません。上の five-path table は 60 runs で更新しました。
+最新の Exact allocation follow-up は、すでに exclusive ownership を持つ NTSC
+burst-deemphasis field buffer を `current` phase compensation へ直接渡し、
+field 全体の追加 clone をなくします。filtering、float32 conversion point、
+arithmetic order、caller input ownership は変更しません。profile/thread gate
+12 件、interleaved 160-frame pair 6 組、反対順序の 1,000-frame pair 2 組は
+すべて exact です。idle long pair の combined counter allocation は
+140.055 から 132.532 GiB（5.37% 減）になりました。combined wall time は
+142.323/142.893 秒、GC pause は 1.100/1.116 秒で、どちらも neutral と判断します。
+startup 後の 100-frame interval は 6.794 から 6.981 秒で、progressive slowdown
+はありません。stable whole-pipeline speedup は主張しないため、上の table は
+直前の valid idle 60-run matrix を維持します。
 
 各 .NET cell は wall-time median と同じ行の Python に対する speedup の順です。
 `1.000x` 未満は Python より遅いことを示します。default は実際に **5 workers**
@@ -148,7 +151,7 @@ preview tool は writer を止めずに partial output を確認できます。
 dotnet restore VHSDecodeDotNet.slnx
 dotnet build VHSDecodeDotNet.slnx -c Release --no-restore
 dotnet test --solution VHSDecodeDotNet.slnx -c Release `
-  --no-build --no-restore --minimum-expected-tests 1117
+  --no-build --no-restore --minimum-expected-tests 1118
 ```
 
 Visual Studio 2026 で `VHSDecodeDotNet.slnx` を開くと、build、debug、

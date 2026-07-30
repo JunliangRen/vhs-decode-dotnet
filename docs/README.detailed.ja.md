@@ -1551,6 +1551,36 @@ resident-memory reduction は主張しません。この pass は allocation/GC 
 long-run throughput の改善として保持します。上記 five-path overview は 60 回の
 .NET run で更新し、全 run が同じ compatibility gate を通過しました。
 
+次の Exact `current` chroma allocation pass は、NTSC burst deemphasis が返す
+exclusive `double[]` を保持し、その buffer を `current` phase compensation へ
+直接渡します。従来は同じ array を read-only span として扱った後、in-place
+upconversion の直前に field 全体を clone していました。削除した処理は純粋な
+ownership copy であり、filtering、float32 conversion point、phase arithmetic、
+sample order、caller-owned input は変わりません。PAL、v0.4.0、phase correction
+disabled、field parity がない path も従来どおりです。production-size の xUnit v3
+allocation gate は field-size `double[]` output 2 個と final `ushort[]` だけが
+budget 内に収まることを確認し、旧実装の 3 個目の field copy は上限を超えます。
+
+local Release solution は warning/error 0 で build され、1,118 tests がすべて
+pass しました。final GitHub Actions も同じ 1,118 tests を discover し、
+1,117 pass、optional AC3 dependency を必要とする 1 test が skip、failure 0
+でした。real gate 12 件は v0.4.0/current の 1、default 5、20 workers を
+網羅します。idle interleaved 160-frame pair 6 組は luma、chroma、raw JSON、
+stdout、normalized stderr/log、すべての ordered `fileLoc` で一致しました。
+baseline/candidate wall median は 13.513/13.224 秒、CPU median は
+103.375/101.617 秒です。candidate は 6 組中 4 組で速かったものの、short-run
+timing は whole-pipeline speedup の根拠にはしません。
+
+idle opposite-order 1,000-frame counter pair 2 組も、すべての artifact/log surface
+と 2,000 個の ordered `fileLoc` で一致しました。combined counter allocation は
+140.055 から 132.532 GiB へ 7.523 GiB（5.37%）減りました。combined wall time は
+142.323/142.893 秒、GC pause は 1.100/1.116 秒で neutral、sampled working set は
+bounded のままです。candidate の startup 後 100-frame interval は 6.794 から
+6.981 秒で、progressive slowdown はありません。この pass は deterministic な
+full-field allocation reduction として保持し、whole-pipeline-throughput-neutral
+に分類します。そのため five-path overview は直前の valid idle 60-run matrix を
+維持します。
+
 </details>
 
 <!-- SECTION: build -->
@@ -1569,7 +1599,7 @@ long-run throughput の改善として保持します。上記 five-path overvie
 .\tools\build-ipp-native.ps1
 dotnet restore VHSDecodeDotNet.slnx
 dotnet build VHSDecodeDotNet.slnx -c Release --no-restore
-dotnet test --solution VHSDecodeDotNet.slnx -c Release --no-build --no-restore --minimum-expected-tests 1117
+dotnet test --solution VHSDecodeDotNet.slnx -c Release --no-build --no-restore --minimum-expected-tests 1118
 ```
 
 最初の command は optional `ipp-fast` native artifact を含めるためのものです。
@@ -1582,7 +1612,7 @@ third-party notice を埋め込み、license sidecar file は追加しません�
 
 現在の正式な Release build は warning 0、error 0 です。xUnit v3 project は
 `dotnet test` と Visual Studio Test Explorer の両方で個別に検出できる
-**1,117** tests を公開します。
+**1,118** tests を公開します。
 
 <!-- SECTION: usage -->
 
