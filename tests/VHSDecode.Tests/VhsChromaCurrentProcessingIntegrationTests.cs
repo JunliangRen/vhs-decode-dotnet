@@ -109,8 +109,61 @@ public sealed class VhsChromaCurrentProcessingIntegrationTests
         Assert.Equal(2.0, current[7]);
     }
 
-    [Fact(DisplayName = "Current NTSC phase compensation reuses burst deemphasis storage")]
-    public void CurrentNtscPhaseCompensationReusesBurstDeemphasisStorage()
+    [Fact(DisplayName = "Current chroma comb in-place path matches the copying reference bit-exactly")]
+    public void CurrentChromaCombInPlaceMatchesCopyingReferenceBitExactly()
+    {
+        const int LineLength = 37;
+        const int LineCount = 41;
+        double[] input = BuildInput(LineLength * LineCount);
+
+        foreach (bool retainFloat32 in new[] { false, true })
+        {
+            double[] expectedNtsc = ApplyCombReference(
+                input,
+                LineLength,
+                lineDistance: 1,
+                retainFloat32);
+            double[] copyingNtsc = VhsChromaDecoder.ApplyNtscComb(
+                input,
+                LineLength,
+                retainFloat32);
+            double[] actualNtsc = input.ToArray();
+            VhsChromaDecoder.ApplyNtscCombInPlace(
+                actualNtsc,
+                LineLength,
+                retainFloat32);
+            Assert.Equal(
+                expectedNtsc.Select(BitConverter.DoubleToUInt64Bits),
+                copyingNtsc.Select(BitConverter.DoubleToUInt64Bits));
+            Assert.Equal(
+                expectedNtsc.Select(BitConverter.DoubleToUInt64Bits),
+                actualNtsc.Select(BitConverter.DoubleToUInt64Bits));
+
+            double[] expectedPal = ApplyCombReference(
+                input,
+                LineLength,
+                lineDistance: 2,
+                retainFloat32);
+            double[] copyingPal = VhsChromaDecoder.ApplyPalComb(
+                input,
+                LineLength,
+                retainFloat32);
+            double[] actualPal = input.ToArray();
+            VhsChromaDecoder.ApplyPalCombInPlace(
+                actualPal,
+                LineLength,
+                retainFloat32);
+            Assert.Equal(
+                expectedPal.Select(BitConverter.DoubleToUInt64Bits),
+                copyingPal.Select(BitConverter.DoubleToUInt64Bits));
+            Assert.Equal(
+                expectedPal.Select(BitConverter.DoubleToUInt64Bits),
+                actualPal.Select(BitConverter.DoubleToUInt64Bits));
+        }
+    }
+
+    [Fact(DisplayName = "Current NTSC phase compensation and comb reuse owned storage")]
+    public void CurrentNtscPhaseCompensationAndCombReuseOwnedStorage()
     {
         const int LineLength = 1_135;
         const int LineCount = 273;
@@ -159,7 +212,7 @@ public sealed class VhsChromaCurrentProcessingIntegrationTests
 
         GC.KeepAlive(result);
         long maximumExpected =
-            ((long)sampleCount * ((2 * sizeof(double)) + sizeof(ushort)))
+            ((long)sampleCount * (sizeof(double) + sizeof(ushort)))
             + (256 * 1024);
         Assert.True(
             allocated < maximumExpected,
@@ -199,6 +252,36 @@ public sealed class VhsChromaCurrentProcessingIntegrationTests
         }
 
         return samples;
+    }
+
+    private static double[] ApplyCombReference(
+        ReadOnlySpan<double> chroma,
+        int lineLength,
+        int lineDistance,
+        bool retainFloat32)
+    {
+        double[] output = chroma.ToArray();
+        int lineCount = chroma.Length / lineLength;
+        for (int line = 16; line < lineCount - 2; line++)
+        {
+            int lineStart = line * lineLength;
+            int advancedStart = (line + lineDistance) * lineLength;
+            int delayedStart = (line - lineDistance) * lineLength;
+            for (int index = 0; index < lineLength; index++)
+            {
+                double combined = !retainFloat32 && lineDistance == 2
+                    ? ((chroma[lineStart + index] * 2.0)
+                        - chroma[delayedStart + index]
+                        - chroma[advancedStart + index]) / 4.0
+                    : ((chroma[lineStart + index] * 2.0)
+                        - chroma[advancedStart + index]
+                        - chroma[delayedStart + index]) / 4.0;
+                output[lineStart + index] =
+                    retainFloat32 ? (double)(float)combined : combined;
+            }
+        }
+
+        return output;
     }
 
     private static string Sha256(ushort[] samples)

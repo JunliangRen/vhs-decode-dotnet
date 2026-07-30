@@ -4,7 +4,7 @@
 
 [English](README.detailed.md) | **[简体中文](README.detailed.zh-CN.md)** | [日本語](README.detailed.ja.md)
 
-<!-- README_SYNC: 2026-07-30.01 -->
+<!-- README_SYNC: 2026-07-30.02 -->
 
 这是 [`oyvindln/vhs-decode`](https://github.com/oyvindln/vhs-decode)
 中解码相关部分的 .NET 11 重写，当前以 release `v0.4.0`、commit
@@ -319,18 +319,18 @@ Python v0.4.0、Exact v0.4.0、Exact `current`、IPP-fast v0.4.0 和 IPP-fast
 
 | CLI 模式（workers） | Python v0.4.0 | Exact + v0.4.0 | Exact + current | IPP-fast + v0.4.0 | IPP-fast + current |
 | --- | ---: | ---: | ---: | ---: | ---: |
-| 默认（5） | 16.983 s | 5.999 s / 2.831x / 64.7% | 7.904 s / 2.149x / 53.5% | 5.888 s / 2.884x / 65.3% | 7.421 s / 2.289x / 56.3% |
-| `--threads 1` | 21.263 s | 19.450 s / 1.093x / 8.5% | 22.287 s / 0.954x / 慢 4.8% | 18.770 s / 1.133x / 11.7% | 21.251 s / 1.001x / 0.1% |
-| `--threads 5` | 16.880 s | 6.363 s / 2.653x / 62.3% | 7.653 s / 2.206x / 54.7% | 5.850 s / 2.886x / 65.3% | 7.540 s / 2.239x / 55.3% |
-| `--threads 10` | 17.612 s | 4.600 s / 3.829x / 73.9% | 5.864 s / 3.003x / 66.7% | 4.642 s / 3.794x / 73.6% | 6.061 s / 2.906x / 65.6% |
-| `--threads 20` | 18.330 s | 3.684 s / 4.976x / 79.9% | 4.854 s / 3.777x / 73.5% | 3.760 s / 4.875x / 79.5% | 4.769 s / 3.843x / 74.0% |
+| 默认（5） | 16.983 s | 5.817 s / 2.920x / 65.8% | 6.976 s / 2.435x / 58.9% | 5.530 s / 3.071x / 67.4% | 6.961 s / 2.440x / 59.0% |
+| `--threads 1` | 21.263 s | 19.055 s / 1.116x / 10.4% | 21.556 s / 0.986x / 慢 1.4% | 18.609 s / 1.143x / 12.5% | 21.044 s / 1.010x / 1.0% |
+| `--threads 5` | 16.880 s | 5.555 s / 3.039x / 67.1% | 6.952 s / 2.428x / 58.8% | 5.554 s / 3.039x / 67.1% | 7.382 s / 2.287x / 56.3% |
+| `--threads 10` | 17.612 s | 4.616 s / 3.816x / 73.8% | 5.554 s / 3.171x / 68.5% | 4.527 s / 3.891x / 74.3% | 5.381 s / 3.273x / 69.4% |
+| `--threads 20` | 18.330 s | 3.578 s / 5.124x / 80.5% | 4.798 s / 3.820x / 73.8% | 3.580 s / 5.120x / 80.5% | 4.995 s / 3.670x / 72.7% |
 
 测试机为 Intel Core Ultra 7 265K（20 个逻辑处理器）、Windows 11 25H2 build
 26220.8925，以及 .NET SDK/runtime `11.0.100-preview.6.26359.118`。Python 本身
 没有变化，因此 Python 列保留上一份固定矩阵的中位数；四列 .NET 数据均通过
-60 次交错运行重新测量。候选基于 `ffd2660` 并包含下述 worker-local Complex32
-FFT packet 输出优化；其单文件 `decode.exe` SHA-256 为
-`DCD12A56710374A4F792FF03E2E2A3F8C2C714C02D1C29FFFA3399B4FACDE5A5`。
+60 次交错运行重新测量。候选基于 `547a3a1` 并包含下述 current 色度 comb
+原地优化；其单文件 `decode.exe` SHA-256 为
+`4DE8F0662797BFEA5285CF916BAFD446F9332030699A1BDA08F4A0B9131A384E`。
 固定 40 帧矩阵包含启动成本和单次波动；下文相反顺序的 1000 帧配对提供稳定的
 整条流水线 A/B。Python 3.14.0 使用 NumPy 2.4.6、SciPy 1.18.0、
 Numba 0.66.0 和 python-soxr 1.1.0。公共参数为：
@@ -1300,6 +1300,30 @@ GitHub Actions 同样发现 1,118 项测试：1,117 项通过，一项需要可�
 保留，并归类为整链吞吐中性，因此五路径 overview 继续使用上一份有效的空闲
 60-run 矩阵。
 
+随后一轮 Exact/current 优化把 1H 或 2H 色度 comb 直接应用到解码器独占的
+整场缓冲。公共 `ApplyNtscComb` 和 `ApplyPalComb` API 仍会复制调用者输入；
+内部路径只在 `ArrayPool<double>` 中保留一行 NTSC 或两行 PAL 延迟数据，以便
+正向覆盖整场时仍能读取原始延迟行。float32 转换点以及 PAL/NTSC 的减法顺序
+均不改变。新增逐位 xUnit v3 测试覆盖两个制式和两种精度模式；生产尺寸分配
+门禁现在只允许一份场级 `double[]` 加最终 `ushort[]`，旧 comb 的额外整场
+输出会超过该上限。
+
+本地 Release 解决方案以零警告、零错误构建，1,119 项测试全部通过。12 次真实
+门禁覆盖 v0.4.0/current 的 1、默认 5 和 20 workers，并在基线/候选以及各线程
+之间匹配亮度、色度、原始 JSON、stdout、归一化 stderr/日志和全部有序
+`fileLoc`。六组交错 160 帧 current 配对也全部精确一致；基线/候选墙钟中位数
+为 13.299/13.318 秒，CPU 中位数为 101.664/103.000 秒，候选赢两组，因此短跑
+耗时按中性处理。
+
+两组相反顺序的 1000 帧 current counter 配对在四次运行中都匹配全部检查的
+产物/日志表面和 2,000 个有序 `fileLoc`。counter 合计分配从 132.089 降至
+125.320 GiB，减少 6.769 GiB（5.12%）；合计墙钟从 142.414 降至
+140.016 秒，下降 1.68%、吞吐为 1.017x；GC pause 从 1.067 降至
+1.000 秒。候选启动后的每 100 帧区间稳定在 6.68 至 6.89 秒。最大采样工作集
+为 1,481.6 MiB，基线为 1,467.4 MiB，因此不宣称常驻内存下降，但两者均保持
+有界且没有渐进减速。刷新后的五路径 overview 使用 60 次交错 .NET 运行，
+全部 60 次均通过既有兼容参考。
+
 </details>
 
 <!-- SECTION: build -->
@@ -1318,7 +1342,7 @@ GitHub Actions 同样发现 1,118 项测试：1,117 项通过，一项需要可�
 .\tools\build-ipp-native.ps1
 dotnet restore VHSDecodeDotNet.slnx
 dotnet build VHSDecodeDotNet.slnx -c Release --no-restore
-dotnet test --solution VHSDecodeDotNet.slnx -c Release --no-build --no-restore --minimum-expected-tests 1118
+dotnet test --solution VHSDecodeDotNet.slnx -c Release --no-build --no-restore --minimum-expected-tests 1119
 ```
 
 第一条命令用于包含可选的 `ipp-fast` 原生产物；只构建 Exact 时可以省略。
@@ -1329,7 +1353,7 @@ Intel oneAPI。只含二进制的单文件发布会嵌入 `vhsdecode_ipp.dll` �
 notice，不会额外生成许可证 sidecar 文件。只构建 Exact 后端时可以省略原生构建步骤。
 
 当前正式 Release 构建为零警告、零错误。xUnit v3 项目向
-`dotnet test` 和 Visual Studio Test Explorer 暴露 **1,118** 个可独立发现的测试。
+`dotnet test` 和 Visual Studio Test Explorer 暴露 **1,119** 个可独立发现的测试。
 
 <!-- SECTION: usage -->
 
