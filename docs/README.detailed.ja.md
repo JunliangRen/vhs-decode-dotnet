@@ -4,7 +4,7 @@
 
 [English](README.detailed.md) | [简体中文](README.detailed.zh-CN.md) | **[日本語](README.detailed.ja.md)**
 
-<!-- README_SYNC: 2026-07-30.02 -->
+<!-- README_SYNC: 2026-07-31.01 -->
 
 [`oyvindln/vhs-decode`](https://github.com/oyvindln/vhs-decode) の
 デコード関連部分を .NET 11 で再実装するプロジェクトです。現在は release
@@ -1693,6 +1693,45 @@ current/default、v0.4.0/default pair median はそれぞれ 30.834/31.169、
 set は単調増加せず final third がより速いため、bounded memory と progressive
 slowdown がないことを支持します。
 
+最新の Exact NTSC chroma ownership pass は、internal non-retained
+sequence-resampling buffer を burst deemphasis に直接移譲します。public decode
+API と retained diagnostic path は引き続き input を copy して独立した array を
+返し、in-place deemphasis と後続 phase/comb stage は明示的に internal-owned
+である buffer にだけ適用されます。data type、multiplication expression、loop
+order、phase/comb order、ordered field commit は変わりません。
+
+candidate commit `0270f101aa21d2f2a3c5679365eb4a4e9655d77c` から構築した
+self-contained `decode.exe` の SHA-256 は
+`2626A0F82B89D7F4025F41600C034048E61F89F399B08746071968B6E3E619B5`、
+測定した baseline executable は
+`FFCB821C0E46885B7735A9ADCA1AA1ACD6454DC43C84ED671EC7B2EB31DA261C`
+です。Release build は warning 0、error 0 で、標準 xUnit v3 test 1,126 件が
+すべて pass しました。Exact v0.4.0 と `current` はいずれも `--threads 0`、
+省略/default-five、`--threads 20` の strict gate を通過しました。thread 間でも
+luma、chroma、raw JSON、stdout、normalized stderr/log、すべての ordered
+`fileLoc` が一致しました。homepage の refreshed five-path matrix も candidate
+run 60 回すべてで compatibility reference と一致しました。
+
+同条件の 100-frame allocation trace では、total sampled allocation が
+4,994,031,752 から 4,611,843,896 bytes（7.65% 減）、sampled `Double[]` が
+4,061,498,384 から 3,679,431,952 bytes（9.41% 減）になりました。baseline
+trace は 2 つの burst-deemphasis call site で、約 1.9 MiB の full-field
+`double[]` allocation event を 202 回記録しましたが、candidate trace では
+両方とも消えました。100-frame output 自体は 200 fields です。
+
+反対順序の current/20-worker 160-frame pair 6 組では median wall time が
+13.398 から 13.451 秒（+0.40%）へ動き、CPU time は 103.133 から
+101.398 秒（-1.68%）へ減ったため、short-run throughput は neutral と判断します。
+対応する v0.4.0 pair は wall time を 10.672 から 10.563 秒（1.02%、1.010x）、
+CPU time を 97.453 から 95.141 秒（2.37%）へ改善しました。各 profile の
+反対順序 1,000-frame pair 2 組も完全一致し、中断せず完了しました。`current`
+は 72.151 から 70.557 秒（2.21%、1.023x）へ改善し CPU time は実質 neutral、
+v0.4.0 は 55.700 から 55.200 秒（0.90%、1.009x）へ改善し CPU time を
+2.00% 削減しました。この pass は主に allocation reduction のため採用し、
+modest な long-run throughput benefit も確認しています。refreshed homepage
+matrix は新しい candidate run 60 回で構成し、Python column は既存の固定 sample
+oracle measurement を維持します。
+
 </details>
 
 <!-- SECTION: build -->
@@ -1711,7 +1750,7 @@ slowdown がないことを支持します。
 .\tools\build-ipp-native.ps1
 dotnet restore VHSDecodeDotNet.slnx
 dotnet build VHSDecodeDotNet.slnx -c Release --no-restore
-dotnet test --solution VHSDecodeDotNet.slnx -c Release --no-build --no-restore --minimum-expected-tests 1122
+dotnet test --solution VHSDecodeDotNet.slnx -c Release --no-build --no-restore --minimum-expected-tests 1126
 ```
 
 最初の command は optional `ipp-fast` native artifact を含めるためのものです。
@@ -1724,7 +1763,7 @@ third-party notice を埋め込み、license sidecar file は追加しません�
 
 現在の正式な Release build は warning 0、error 0 です。xUnit v3 project は
 `dotnet test` と Visual Studio Test Explorer の両方で個別に検出できる
-**1,122** tests を公開します。
+**1,126** tests を公開します。
 
 <!-- SECTION: usage -->
 

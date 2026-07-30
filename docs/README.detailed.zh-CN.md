@@ -4,7 +4,7 @@
 
 [English](README.detailed.md) | **[简体中文](README.detailed.zh-CN.md)** | [日本語](README.detailed.ja.md)
 
-<!-- README_SYNC: 2026-07-30.02 -->
+<!-- README_SYNC: 2026-07-31.01 -->
 
 这是 [`oyvindln/vhs-decode`](https://github.com/oyvindln/vhs-decode)
 中解码相关部分的 .NET 11 重写，当前以 release `v0.4.0`、commit
@@ -1395,6 +1395,39 @@ artifact/日志表面和有序 `fileLoc` 上一致。
 721.87/1,304.73/601.61/864.18 MiB，峰值 1,462.11 MiB。工作集没有单调
 增长，最后一段反而更快，支持内存有界且没有渐进减速。
 
+最新一轮 Exact NTSC 色度所有权优化把内部无需保留的 sequence-resampling
+缓冲直接交给 burst deemphasis。公共 decode API 和保留诊断路径仍会复制输入并返回
+独立数组；只有明确由内部独占的缓冲才会原地执行 deemphasis 及后续 phase/comb
+阶段。数据类型、乘法表达式、循环顺序、phase/comb 顺序和有序 field 提交均未改变。
+
+候选 commit `0270f101aa21d2f2a3c5679365eb4a4e9655d77c` 构建出的自包含
+`decode.exe` SHA-256 为
+`2626A0F82B89D7F4025F41600C034048E61F89F399B08746071968B6E3E619B5`；
+被测基线可执行文件为
+`FFCB821C0E46885B7735A9ADCA1AA1ACD6454DC43C84ED671EC7B2EB31DA261C`。
+Release 构建零警告、零错误，1,126 项标准 xUnit v3 测试全部通过。Exact v0.4.0
+和 `current` 均通过 `--threads 0`、省略参数/默认 5、`--threads 20` 的严格门禁；
+跨线程的亮度、色度、原始 JSON、stdout、归一化 stderr/日志和全部有序
+`fileLoc` 完全一致。首页刷新后的五路径矩阵也在 60 次候选运行中全部匹配兼容性
+参考结果。
+
+同条件 100 帧 allocation trace 把 sampled allocation 总量从
+4,994,031,752 降至 4,611,843,896 bytes（减少 7.65%），其中 sampled
+`Double[]` 从 4,061,498,384 降至 3,679,431,952 bytes（减少 9.41%）。
+基线 trace 在两个 burst-deemphasis 调用位置记录了 202 次完整 field
+`double[]` 分配，每次约 1.9 MiB；候选 trace 中这两处均已消失。100 帧输出
+本身包含 200 个 fields。
+
+六组相反顺序的 current/20-worker 160 帧配对把中位墙钟从 13.398 变为
+13.451 秒（+0.40%），CPU 时间从 103.133 降至 101.398 秒（-1.68%），因此
+短跑吞吐按中性处理。对应的 v0.4.0 配对把墙钟从 10.672 降至 10.563 秒
+（改善 1.02%，1.010x），CPU 时间从 97.453 降至 95.141 秒（改善 2.37%）。
+两个 profile 各两组相反顺序的 1000 帧配对均完全一致且未中断：`current`
+从 72.151 改善到 70.557 秒（2.21%，1.023x），CPU 时间基本中性；
+v0.4.0 从 55.700 改善到 55.200 秒（0.90%，1.009x），CPU 时间减少
+2.00%。本轮主要因为显著减少分配而保留，并带来小幅长跑吞吐收益。首页刷新后的
+矩阵包含 60 次新候选运行；Python 列沿用已有固定样本 oracle 实测。
+
 </details>
 
 <!-- SECTION: build -->
@@ -1413,7 +1446,7 @@ artifact/日志表面和有序 `fileLoc` 上一致。
 .\tools\build-ipp-native.ps1
 dotnet restore VHSDecodeDotNet.slnx
 dotnet build VHSDecodeDotNet.slnx -c Release --no-restore
-dotnet test --solution VHSDecodeDotNet.slnx -c Release --no-build --no-restore --minimum-expected-tests 1122
+dotnet test --solution VHSDecodeDotNet.slnx -c Release --no-build --no-restore --minimum-expected-tests 1126
 ```
 
 第一条命令用于包含可选的 `ipp-fast` 原生产物；只构建 Exact 时可以省略。
@@ -1424,7 +1457,7 @@ Intel oneAPI。只含二进制的单文件发布会嵌入 `vhsdecode_ipp.dll` �
 notice，不会额外生成许可证 sidecar 文件。只构建 Exact 后端时可以省略原生构建步骤。
 
 当前正式 Release 构建为零警告、零错误。xUnit v3 项目向
-`dotnet test` 和 Visual Studio Test Explorer 暴露 **1,122** 个可独立发现的测试。
+`dotnet test` 和 Visual Studio Test Explorer 暴露 **1,126** 个可独立发现的测试。
 
 <!-- SECTION: usage -->
 

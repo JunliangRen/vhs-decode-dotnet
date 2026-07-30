@@ -1104,6 +1104,7 @@ public sealed class TbcFieldDecodePipeline
                     fieldNumber)
                 : 0.0;
         double[]? chromaBurstSamples = null;
+        bool ownsChromaBurstSamples = false;
         if (renderResamplingPlan is not null)
         {
             if (retainChromaBurstSamples)
@@ -1124,6 +1125,7 @@ public sealed class TbcFieldDecodePipeline
                     renderResamplingPlan,
                     chromaBurstSamples,
                     chromaSourcePositionShift);
+                ownsChromaBurstSamples = true;
             }
         }
 
@@ -1185,7 +1187,8 @@ public sealed class TbcFieldDecodePipeline
                 chromaAnalysis!,
                 parity.IsFirstField,
                 fieldNumber,
-                outputFirstLine))
+                outputFirstLine,
+                ownsChromaBuffer: ownsChromaBurstSamples))
             : null;
         Task<TbcDropoutMap?>? dropoutDetectionTask = parallelizeVhsDropoutDetection
             ? Task.Run(() => DetectDropouts(
@@ -1324,7 +1327,8 @@ public sealed class TbcFieldDecodePipeline
                 chromaAnalysis,
                 parity.IsFirstField,
                 fieldNumber,
-                outputFirstLine);
+                outputFirstLine,
+                ownsChromaBuffer: ownsChromaBurstSamples);
         }
 
         if (chroma is not null)
@@ -1801,22 +1805,33 @@ public sealed class TbcFieldDecodePipeline
         VhsChromaPhaseAnalysis? analysis,
         bool? isFirstField,
         int fieldNumber,
-        int outputFirstLine)
+        int outputFirstLine,
+        bool ownsChromaBuffer)
     {
         if (_chromaFieldOptions is null || chromaBurstSamples is null || analysis is null)
         {
             return null;
         }
 
-        return VhsChromaDecoder.DecodeFieldWithPhase(
-            chromaBurstSamples,
-            _chromaFieldOptions,
-            analysis,
-            isFirstField,
-            fieldNumber,
-            lineOffset: outputFirstLine,
-            previousChromaAfcCarrierHz: _chromaAfcCarrierHz,
-            previousChromaAfcPhaseRadians: _chromaAfcPhaseRadians);
+        return ownsChromaBuffer
+            ? VhsChromaDecoder.DecodeOwnedFieldWithPhase(
+                chromaBurstSamples,
+                _chromaFieldOptions,
+                analysis,
+                isFirstField,
+                fieldNumber,
+                lineOffset: outputFirstLine,
+                previousChromaAfcCarrierHz: _chromaAfcCarrierHz,
+                previousChromaAfcPhaseRadians: _chromaAfcPhaseRadians)
+            : VhsChromaDecoder.DecodeFieldWithPhase(
+                chromaBurstSamples,
+                _chromaFieldOptions,
+                analysis,
+                isFirstField,
+                fieldNumber,
+                lineOffset: outputFirstLine,
+                previousChromaAfcCarrierHz: _chromaAfcCarrierHz,
+                previousChromaAfcPhaseRadians: _chromaAfcPhaseRadians);
     }
 
     private void CommitChromaState(VhsChromaFieldResult chroma)

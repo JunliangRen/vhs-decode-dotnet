@@ -509,6 +509,59 @@ public static class VhsChromaDecoder
             previousChromaAfcPhaseRadians,
             analysis);
 
+    internal static VhsChromaFieldResult DecodeOwnedFieldWithPhase(
+        double[] chroma,
+        VhsChromaFieldOptions options,
+        ChromaPhaseSequenceResult phase,
+        bool? isFirstField = null,
+        int fieldNumber = 0,
+        Func<double[], double[]>? finalFilter = null,
+        int lineOffset = 0,
+        double? previousChromaAfcCarrierHz = null,
+        double previousChromaAfcPhaseRadians = 0.0)
+    {
+        ArgumentNullException.ThrowIfNull(chroma);
+        return DecodeFieldWithPhaseCore(
+            chroma,
+            options,
+            phase,
+            isFirstField,
+            fieldNumber,
+            finalFilter,
+            lineOffset,
+            previousChromaAfcCarrierHz,
+            previousChromaAfcPhaseRadians,
+            preparedAnalysis: null,
+            ownedChromaInput: chroma);
+    }
+
+    internal static VhsChromaFieldResult DecodeOwnedFieldWithPhase(
+        double[] chroma,
+        VhsChromaFieldOptions options,
+        VhsChromaPhaseAnalysis analysis,
+        bool? isFirstField = null,
+        int fieldNumber = 0,
+        Func<double[], double[]>? finalFilter = null,
+        int lineOffset = 0,
+        double? previousChromaAfcCarrierHz = null,
+        double previousChromaAfcPhaseRadians = 0.0)
+    {
+        ArgumentNullException.ThrowIfNull(chroma);
+        ArgumentNullException.ThrowIfNull(analysis);
+        return DecodeFieldWithPhaseCore(
+            chroma,
+            options,
+            analysis.Phase,
+            isFirstField,
+            fieldNumber,
+            finalFilter,
+            lineOffset,
+            previousChromaAfcCarrierHz,
+            previousChromaAfcPhaseRadians,
+            analysis,
+            ownedChromaInput: chroma);
+    }
+
     private static VhsChromaFieldResult DecodeFieldWithPhaseCore(
         ReadOnlySpan<double> chroma,
         VhsChromaFieldOptions options,
@@ -519,7 +572,8 @@ public static class VhsChromaDecoder
         int lineOffset,
         double? previousChromaAfcCarrierHz,
         double previousChromaAfcPhaseRadians,
-        VhsChromaPhaseAnalysis? preparedAnalysis)
+        VhsChromaPhaseAnalysis? preparedAnalysis,
+        double[]? ownedChromaInput = null)
     {
         ArgumentNullException.ThrowIfNull(options);
         ArgumentNullException.ThrowIfNull(phase);
@@ -536,13 +590,14 @@ public static class VhsChromaDecoder
                 phase);
         }
 
-        double[]? ownedChromaField = ApplyConfiguredChromaPreFilter(
+        double[]? mutableChromaField = ApplyConfiguredChromaPreFilter(
             chroma,
             options,
             previousChromaAfcCarrierHz);
-        ReadOnlySpan<double> chromaField = ownedChromaField is null
+        mutableChromaField ??= ownedChromaInput;
+        ReadOnlySpan<double> chromaField = mutableChromaField is null
             ? chroma
-            : ownedChromaField;
+            : mutableChromaField;
         double outputSampleRateMHz = options.FscMHz * 4.0;
         ReadOnlySpan<double> carrierProbe = chromaField;
         if (options.ChromaAfcTrackCarrier && options.ChromaAfcMeasurementFilters is { } measurementFilters)
@@ -593,15 +648,32 @@ public static class VhsChromaDecoder
         double[]? burstDeemphasizedChroma = null;
         if (IsNtsc(options.ColorSystem))
         {
-            burstDeemphasizedChroma = ApplyBurstDeemphasis(
-                chromaField,
-                lineOffset,
-                options.OutputLineCount,
-                options.OutputLineLength,
-                options.BurstStart,
-                options.BurstEnd,
-                samplesAfterBurst:
-                    options.UseCurrentChromaProcessing ? 4 : 5);
+            if (mutableChromaField is not null)
+            {
+                ApplyBurstDeemphasisInPlace(
+                    mutableChromaField,
+                    lineOffset,
+                    options.OutputLineCount,
+                    options.OutputLineLength,
+                    options.BurstStart,
+                    options.BurstEnd,
+                    samplesAfterBurst:
+                        options.UseCurrentChromaProcessing ? 4 : 5);
+                burstDeemphasizedChroma = mutableChromaField;
+            }
+            else
+            {
+                burstDeemphasizedChroma = ApplyBurstDeemphasis(
+                    chromaField,
+                    lineOffset,
+                    options.OutputLineCount,
+                    options.OutputLineLength,
+                    options.BurstStart,
+                    options.BurstEnd,
+                    samplesAfterBurst:
+                        options.UseCurrentChromaProcessing ? 4 : 5);
+            }
+
             chromaField = burstDeemphasizedChroma;
         }
 
@@ -1906,10 +1978,50 @@ public static class VhsChromaDecoder
         ValidateBurstRange(burstStart, burstEnd, lineLength);
 
         double[] output = chroma.ToArray();
+        ApplyBurstDeemphasisCore(
+            output,
+            lineOffset,
+            linesOut,
+            lineLength,
+            burstEnd,
+            samplesAfterBurst);
+        return output;
+    }
+
+    internal static void ApplyBurstDeemphasisInPlace(
+        Span<double> chroma,
+        int lineOffset,
+        int linesOut,
+        int lineLength,
+        int burstStart,
+        int burstEnd,
+        int samplesAfterBurst = 5)
+    {
+        ValidateLineShape(chroma.Length, linesOut, lineLength);
+        ArgumentOutOfRangeException.ThrowIfNegative(lineOffset);
+        ArgumentOutOfRangeException.ThrowIfNegative(samplesAfterBurst);
+        ValidateBurstRange(burstStart, burstEnd, lineLength);
+        ApplyBurstDeemphasisCore(
+            chroma,
+            lineOffset,
+            linesOut,
+            lineLength,
+            burstEnd,
+            samplesAfterBurst);
+    }
+
+    private static void ApplyBurstDeemphasisCore(
+        Span<double> output,
+        int lineOffset,
+        int linesOut,
+        int lineLength,
+        int burstEnd,
+        int samplesAfterBurst)
+    {
         int firstDoubledSample = checked(burstEnd + samplesAfterBurst);
         if (firstDoubledSample >= lineLength)
         {
-            return output;
+            return;
         }
 
         for (int line = lineOffset; line < linesOut + lineOffset; line++)
@@ -1921,8 +2033,6 @@ public static class VhsChromaDecoder
                 output[i] *= 2.0;
             }
         }
-
-        return output;
     }
 
     public static AutomaticChromaGainResult ApplyAutomaticChromaGain(
