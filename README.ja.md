@@ -100,25 +100,25 @@ CVBS、LaserDisc、HiFi は現在 `ipp-fast` を拒否するため、これら�
 <!-- LATEST_PERFORMANCE_BEGIN -->
 | CLI mode（workers） | Python v0.4.0 | Exact + v0.4.0 | Exact + current | IPP-fast + v0.4.0 | IPP-fast + current |
 | --- | ---: | ---: | ---: | ---: | ---: |
-| default（5） | 16.983 s | 5.558 s / 3.055x | 7.343 s / 2.313x | 5.517 s / 3.078x | 7.136 s / 2.380x |
-| `--threads 1` | 21.263 s | 18.759 s / 1.133x | 21.318 s / 0.997x | 18.095 s / 1.175x | 20.655 s / 1.029x |
-| `--threads 5` | 16.880 s | 5.543 s / 3.045x | 6.972 s / 2.421x | 5.417 s / 3.116x | 6.958 s / 2.426x |
-| `--threads 10` | 17.612 s | 4.566 s / 3.857x | 5.610 s / 3.139x | 4.625 s / 3.808x | 5.978 s / 2.946x |
-| `--threads 20` | 18.330 s | 3.830 s / 4.786x | 5.294 s / 3.462x | 3.511 s / 5.221x | 4.917 s / 3.728x |
+| default（5） | 16.983 s | 6.416 s / 2.647x | 7.678 s / 2.212x | 5.667 s / 2.997x | 7.184 s / 2.364x |
+| `--threads 1` | 21.263 s | 20.547 s / 1.035x | 22.961 s / 0.926x | 20.129 s / 1.056x | 22.320 s / 0.953x |
+| `--threads 5` | 16.880 s | 6.173 s / 2.735x | 7.802 s / 2.164x | 5.802 s / 2.909x | 7.186 s / 2.349x |
+| `--threads 10` | 17.612 s | 4.880 s / 3.609x | 6.118 s / 2.879x | 4.636 s / 3.799x | 5.744 s / 3.066x |
+| `--threads 20` | 18.330 s | 3.997 s / 4.586x | 4.767 s / 3.845x | 3.966 s / 4.622x | 4.919 s / 3.726x |
 <!-- LATEST_PERFORMANCE_END -->
 
-最新の Exact field-resampling pass は、stateful CLI sequence decoder に
-exact-length の luma workspace と chroma workspace を個別に保持します。public
-`Decode()` と retained `DecodeFields()` の result は引き続き独立した
-`ChromaBurstSamples` を所有し、internal non-retaining CLI path だけが省略します。
-direct UInt16 path、16-tap sinc の式と演算順序、public copying API は変わりません。
-6 組の profile/thread gate と上の 60 run はすべて exact でした。反対順序の
-current/20-worker 1,000-frame pair 2 組では、allocation が 126.226 から
-110.873 GiB（12.16% 減）、wall time が 141.015 から 140.405 秒
-（0.43% 減、throughput 1.004x）、GC pause が 1.015 から 0.885 秒になりました。
-default-current pair でも wall time は 1.05%、allocation は 11.23% 改善しました。
-3,000-frame run の quarterly working-set median は 794/800/748/772 MiB で、
-最後の steady 1,000 frames は最初の steady 1,000 frames より遅くありません。
+最新の Exact pass は、escape しない worker-local complex-demodulation buffer を
+2 個再利用し、retained diagnostic output は引き続き独立して所有します。data type、
+式、演算順序、FFT behavior、ordered state commit は変わりません。すべての
+profile/thread gate と上の refreshed 60 run は exact でした。反対順序の
+current/20-worker 500-frame pair 4 組では median wall time は +0.26% に留まり、
+CPU time は 1.82% 減りました。より長い default と v0.4.0 pair は -0.32% から
++1.10% の範囲なので、throughput-neutral と判断します。反対順序の 1,000-frame
+counter pair 2 組では allocation が 111.461 から 88.022 GiB（21.03% 減）、
+GC pause が 0.994 から 0.791 秒（20.43% 減）になりました。3,000-frame run の
+最初/中間/最後の 1,000 frames は 72.00/69.11/68.50 秒、quarterly working-set
+median は 722/1305/602/864 MiB で、bounded memory と progressive slowdown が
+ないことを確認しました。
 
 各 .NET cell は wall-time median と同じ行の Python に対する speedup の順です。
 `1.000x` 未満は Python より遅いことを示します。default は実際に **5 workers**

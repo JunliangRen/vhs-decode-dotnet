@@ -380,19 +380,19 @@ wall-time reduction の順です。
 
 | CLI mode（workers） | Python v0.4.0 | Exact + v0.4.0 | Exact + current | IPP-fast + v0.4.0 | IPP-fast + current |
 | --- | ---: | ---: | ---: | ---: | ---: |
-| default（5） | 16.983 s | 5.558 s / 3.055x / 67.3% | 7.343 s / 2.313x / 56.8% | 5.517 s / 3.078x / 67.5% | 7.136 s / 2.380x / 58.0% |
-| `--threads 1` | 21.263 s | 18.759 s / 1.133x / 11.8% | 21.318 s / 0.997x / 0.3% 遅い | 18.095 s / 1.175x / 14.9% | 20.655 s / 1.029x / 2.9% |
-| `--threads 5` | 16.880 s | 5.543 s / 3.045x / 67.2% | 6.972 s / 2.421x / 58.7% | 5.417 s / 3.116x / 67.9% | 6.958 s / 2.426x / 58.8% |
-| `--threads 10` | 17.612 s | 4.566 s / 3.857x / 74.1% | 5.610 s / 3.139x / 68.1% | 4.625 s / 3.808x / 73.7% | 5.978 s / 2.946x / 66.1% |
-| `--threads 20` | 18.330 s | 3.830 s / 4.786x / 79.1% | 5.294 s / 3.462x / 71.1% | 3.511 s / 5.221x / 80.8% | 4.917 s / 3.728x / 73.2% |
+| default（5） | 16.983 s | 6.416 s / 2.647x / 62.2% | 7.678 s / 2.212x / 54.8% | 5.667 s / 2.997x / 66.6% | 7.184 s / 2.364x / 57.7% |
+| `--threads 1` | 21.263 s | 20.547 s / 1.035x / 3.4% | 22.961 s / 0.926x / 8.0% 遅い | 20.129 s / 1.056x / 5.3% | 22.320 s / 0.953x / 5.0% 遅い |
+| `--threads 5` | 16.880 s | 6.173 s / 2.735x / 63.4% | 7.802 s / 2.164x / 53.8% | 5.802 s / 2.909x / 65.6% | 7.186 s / 2.349x / 57.4% |
+| `--threads 10` | 17.612 s | 4.880 s / 3.609x / 72.3% | 6.118 s / 2.879x / 65.3% | 4.636 s / 3.799x / 73.7% | 5.744 s / 3.066x / 67.4% |
+| `--threads 20` | 18.330 s | 3.997 s / 4.586x / 78.2% | 4.767 s / 3.845x / 74.0% | 3.966 s / 4.622x / 78.4% | 4.919 s / 3.726x / 73.2% |
 
 benchmark host は Intel Core Ultra 7 265K（20 logical processor）、
 Windows 11 25H2 build 26220.8925、.NET SDK/runtime
 `11.0.100-preview.6.26359.118` です。Python 自体は変更されていないため、
 Python 列は以前の fixed matrix median を保持し、4 つの .NET 列は 60 回の
-interleaved run で再測定しました。candidate は `d07d1ad` に下記の
-field-resampling workspace 最適化を加えたもので、single-file `decode.exe` SHA-256 は
-`EDFECE6AD069D9D05E73BCA426162FC73CEEB0A5313F1C6FD0DD470F5DE2178B`
+interleaved run で再測定しました。candidate executable は `d0508f9` の
+production code change を含み、single-file `decode.exe` SHA-256 は
+`98ADB0ED3F5EF086AC2A189F302101C751C68F0390123817EAF5452DD83BE7A1`
 でした。fixed 40-frame matrix には startup cost と run ごとの spread が含まれ、
 下記の反対順序 1,000-frame pair が stable whole-pipeline A/B を示します。
 Python 3.14.0 は NumPy 2.4.6、SciPy 1.18.0、Numba 0.66.0、
@@ -1650,6 +1650,48 @@ maximum は 1,400.8 MiB、final sample は 957.3 MiB でした。最初と最後
 steady 100-frame interval 10 個の median は 5.492 と 5.440 秒です。これは
 retained memory が bounded で progressive slowdown がないことを支持しますが、
 collection-timing peak を resident-memory reduction とは表現しません。
+
+次の Exact complex-demodulation workspace pass は、compact path の escape しない
+raw FM result を worker の exact-length `RawEnvelope` buffer に書き、optional
+diff-demod repair result をその時点で不要な `Real` buffer に書きます。retained
+`DemodRaw` と analytic diagnostic は引き続き独立した array を所有します。data
+type、atan approximation、sample expression、SIMD lane order、FFT behavior、
+repair order、pool cap、serial state/output commit は変わりません。2 件の focused
+xUnit v3 test は destination-buffer repair を独立に再構築した allocating oracle
+と比較し、workspace を繰り返し lease した後の retained array も bit 単位で
+確認します。完全な Release suite は 1,122 tests すべてに pass しました。
+
+短い real profile/thread gate 6 組は Exact v0.4.0 と `current` の
+`--threads 0`、default-five、`--threads 20` を網羅しました。current/20-worker
+500-frame run 8 回、current/20-worker 1,000-frame run 4 回、さらに
+v0.4.0/20-worker、current/default、v0.4.0/default の 500-frame run 各 4 回は、
+baseline の luma、chroma、raw JSON、stdout、normalized stderr/log、すべての
+ordered `fileLoc` と一致しました。refreshed five-path matrix も 20 cell 各 3 回、
+合計 60/60 compatible run を完了しました。同じ production code から構築した
+self-contained validation `decode.exe` の SHA-256 は
+`333D051E361FE425EA893EE819129BB1CFC9249CF77E29746C94252F263D19D0` です。
+measured `98ADB0...7A1` executable との 100-frame strict gate も、7 つの
+artifact/log surface と ordered `fileLoc` すべてで一致しました。
+
+反対順序の current/20-worker 500-frame pair 4 組では median wall time が
+37.905 から 38.002 秒（+0.26%）へ動き、median CPU は 294.055 から
+288.711 秒（-1.82%）へ減りました。より長い v0.4.0/20-worker、
+current/default、v0.4.0/default pair median はそれぞれ 30.834/31.169、
+67.850/67.632、59.756/59.871 秒です。wall change は -0.32% から
++1.10% の範囲なので、この pass は speedup ではなく throughput-neutral と
+判断します。
+
+反対順序の current/20-worker 1,000-frame counter pair 2 組では、allocation が
+111.461 から 88.022 GiB（21.03% 減）、GC pause が 0.994 から 0.791 秒
+（20.43% 減）になりました。instrumented wall time は 147.734 から
+150.428 秒（+1.82%）、maximum sampled working set は
+1,472.19/1,507.75 MiB であるため、resident-memory または wall-time reduction
+は主張しません。candidate-only current/20-worker 3,000-frame run は
+209.767 秒、allocation 133.2 GiB、GC pause 1.146 秒でした。最初/中間/最後の
+1,000-frame total は 72.00/69.11/68.50 秒、working-set-quarter median は
+721.87/1,304.73/601.61/864.18 MiB、maximum は 1,462.11 MiB です。working
+set は単調増加せず final third がより速いため、bounded memory と progressive
+slowdown がないことを支持します。
 
 </details>
 
