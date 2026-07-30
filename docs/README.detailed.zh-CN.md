@@ -1337,7 +1337,7 @@ GitHub Actions 同样发现 1,118 项测试：1,117 项通过，一项需要可�
 直接 UInt16 路径仍不分配 double 场，公共重采样 API 继续遵守独立输出契约。
 每个角色只保留一块缓冲，形状变化时替换，因此保留内存有界且不会随解码长度增长。
 
-Release 解决方案以零警告、零错误构建，全部 1,122 项 xUnit v3 测试通过。
+Release 解决方案以零警告、零错误构建，全部 1,120 项 xUnit v3 测试通过。
 六组真实 profile/thread 门禁覆盖 Exact v0.4.0 和 `current` 的
 `--threads 0`、默认 5 与 `--threads 20`。候选在亮度、色度、原始 JSON、
 stdout、归一化 stderr/日志和全部有序 `fileLoc` 上匹配基线；连续公共

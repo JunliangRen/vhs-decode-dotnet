@@ -1625,7 +1625,7 @@ double field を allocation せず、public resampling API も independent-outpu
 contract を維持します。各 role で保持する buffer は 1 個だけで、shape change は
 置換されるため、retained memory は decode length に比例せず bounded です。
 
-Release solution は warning/error 0 で build され、1,122 件の xUnit v3 test が
+Release solution は warning/error 0 で build され、1,120 件の xUnit v3 test が
 すべて pass しました。real profile/thread gate 6 組は Exact v0.4.0 と `current`
 の `--threads 0`、default-five、`--threads 20` を網羅しました。candidate は
 baseline の luma、chroma、raw JSON、stdout、normalized stderr/log、すべての

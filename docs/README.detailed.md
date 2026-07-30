@@ -1676,7 +1676,7 @@ field, and public resampling APIs retain their independent-output contract.
 Shape changes replace the single retained buffer in each role, so
 retained memory is bounded rather than proportional to decode length.
 
-The Release solution built with zero warnings and errors, and all 1,122 xUnit
+The Release solution built with zero warnings and errors, and all 1,120 xUnit
 v3 tests passed. Six real profile/thread gates covered Exact v0.4.0 and
 `current` at `--threads 0`, default-five, and `--threads 20`. The candidate
 matched baseline luma, chroma, raw JSON, stdout, normalized stderr/logs, and

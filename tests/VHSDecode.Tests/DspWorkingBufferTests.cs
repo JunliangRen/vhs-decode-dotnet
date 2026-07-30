@@ -586,6 +586,18 @@ public sealed class DspWorkingBufferTests
         var diffRepair = new DiffDemodRepairOptions(double.NegativeInfinity);
         using var demodulator = new RfDemodulator(sampleRateHz);
 
+        RfDemodulatedBlock withoutRepair = DecodeComplexVhsProbe(
+            demodulator,
+            input,
+            identity,
+            identitySos,
+            highBoost,
+            diffRepair: null,
+            retainDiagnosticOutputs: true);
+        double[] expectedDemodRaw = BuildDiffDemodRepairOracle(
+            withoutRepair,
+            sampleRateHz,
+            diffRepair.MaxValue);
         RfDemodulatedBlock full = DecodeComplexVhsProbe(
             demodulator,
             input,
@@ -594,6 +606,8 @@ public sealed class DspWorkingBufferTests
             highBoost,
             diffRepair,
             retainDiagnosticOutputs: true);
+        double[] retainedDemodRaw = full.DemodRaw.ToArray();
+        Complex[] retainedAnalytic = full.Analytic.ToArray();
         RfDemodulatedBlock compact = DecodeComplexVhsProbe(
             demodulator,
             input,
@@ -607,6 +621,7 @@ public sealed class DspWorkingBufferTests
         Assert.NotEmpty(full.Analytic);
         Assert.Empty(compact.DemodRaw);
         Assert.Empty(compact.Analytic);
+        AssertDoubleBitsEqual(expectedDemodRaw, full.DemodRaw);
         Assert.Equal(full.Video, compact.Video);
         Assert.Equal(full.Envelope, compact.Envelope);
         Assert.Equal(full.VideoLowPass, compact.VideoLowPass);
@@ -635,6 +650,8 @@ public sealed class DspWorkingBufferTests
         long allocated = GC.GetAllocatedBytesForCurrentThread() - before;
         GC.KeepAlive(allocationProbe);
 
+        AssertDoubleBitsEqual(retainedDemodRaw, full.DemodRaw);
+        AssertComplexBitsEqual(retainedAnalytic, full.Analytic);
         Assert.True(
             allocated < 1_700_000,
             $"Warm compact complex VHS RF block allocated {allocated:N0} bytes.");
@@ -651,6 +668,19 @@ public sealed class DspWorkingBufferTests
         var diffRepair = new DiffDemodRepairOptions(double.NegativeInfinity);
         using var demodulator = new RfDemodulator(sampleRateHz);
 
+        RfDemodulatedBlock withoutRepair = DecodeComplexVhsProbe(
+            demodulator,
+            input,
+            identity,
+            identitySos,
+            highBoost: null,
+            diffRepair: null,
+            retainDiagnosticOutputs: true,
+            useNumpyComplexVhsAnalytic: true);
+        double[] expectedDemodRaw = BuildDiffDemodRepairOracle(
+            withoutRepair,
+            sampleRateHz,
+            diffRepair.MaxValue);
         RfDemodulatedBlock full = DecodeComplexVhsProbe(
             demodulator,
             input,
@@ -660,7 +690,18 @@ public sealed class DspWorkingBufferTests
             diffRepair: diffRepair,
             retainDiagnosticOutputs: true,
             useNumpyComplexVhsAnalytic: true);
+        double[] retainedDemodRaw = full.DemodRaw.ToArray();
+        Complex[] retainedAnalytic = full.Analytic.ToArray();
         RfDemodulatedBlock compact = DecodeComplexVhsProbe(
+            demodulator,
+            input,
+            identity,
+            identitySos,
+            highBoost: null,
+            diffRepair: diffRepair,
+            retainDiagnosticOutputs: false,
+            useNumpyComplexVhsAnalytic: true);
+        _ = DecodeComplexVhsProbe(
             demodulator,
             input,
             identity,
@@ -674,6 +715,9 @@ public sealed class DspWorkingBufferTests
         Assert.NotEmpty(full.Analytic);
         Assert.Empty(compact.DemodRaw);
         Assert.Empty(compact.Analytic);
+        AssertDoubleBitsEqual(expectedDemodRaw, full.DemodRaw);
+        AssertDoubleBitsEqual(retainedDemodRaw, full.DemodRaw);
+        AssertComplexBitsEqual(retainedAnalytic, full.Analytic);
         Assert.Equal(full.Video, compact.Video);
         Assert.Equal(full.Envelope, compact.Envelope);
         Assert.Equal(full.VideoLowPass, compact.VideoLowPass);
@@ -1509,6 +1553,34 @@ public sealed class DspWorkingBufferTests
             "Double sequences differ at the bit level.");
     }
 
+    private static void AssertComplexBitsEqual(ReadOnlySpan<Complex> expected, ReadOnlySpan<Complex> actual)
+    {
+        Assert.Equal(expected.Length, actual.Length);
+        Assert.True(
+            MemoryMarshal.AsBytes(expected).SequenceEqual(MemoryMarshal.AsBytes(actual)),
+            "Complex sequences differ at the bit level.");
+    }
+
+    private static double[] BuildDiffDemodRepairOracle(
+        RfDemodulatedBlock withoutRepair,
+        double sampleRateHz,
+        double maxValue)
+    {
+        Complex[] diffed = withoutRepair.Analytic.ToArray();
+        for (int i = diffed.Length - 1; i >= 1; i--)
+        {
+            diffed[i] -= diffed[i - 1];
+        }
+
+        diffed[0] = Complex.Zero;
+        double[] demodDiffed = PortedMath.UnwrapHilbertVhsRustApproximation(
+            diffed,
+            sampleRateHz);
+        double[] expected = withoutRepair.DemodRaw.ToArray();
+        RfDemodulator.ReplaceSpikes(expected, demodDiffed, maxValue);
+        return expected;
+    }
+
     private static double[] BuildPalVhsProbe(int length, double sampleRateHz)
     {
         var input = new double[length];
@@ -1551,7 +1623,7 @@ public sealed class DspWorkingBufferTests
         Complex[] identity,
         SosSection[] identitySos,
         RfHighBoostOptions? highBoost,
-        DiffDemodRepairOptions diffRepair,
+        DiffDemodRepairOptions? diffRepair,
         bool retainDiagnosticOutputs,
         bool useNumpyComplexVhsAnalytic = false)
     {
