@@ -106,7 +106,7 @@ public sealed partial class ReadmeLocalizationTests
         [
             "43155200da87c0d49eb37d8ec09b1372075ee8e4",
             "11.0.100-preview.6.26359.118",
-            "**1,122**",
+            "**1,126**",
             "--compat-version",
             "current",
             "--dsp-backend",
@@ -116,10 +116,10 @@ public sealed partial class ReadmeLocalizationTests
             "IPP-fast + v0.4.0",
             "IPP-fast + current",
             "16.983 s",
-            "6.416 s",
-            "7.678 s",
-            "4.586x",
-            "3.845x",
+            "5.504 s",
+            "7.299 s",
+            "4.887x",
+            "3.524x",
             "g4315520",
             "--threads 0"
         ];
@@ -128,7 +128,12 @@ public sealed partial class ReadmeLocalizationTests
         [
             "43155200da87c0d49eb37d8ec09b1372075ee8e4",
             "11.0.100-preview.6.26359.118",
-            "**1,122**",
+            "**1,126**",
+            "2626A0F82B89D7F4025F41600C034048E61F89F399B08746071968B6E3E619B5",
+            "FFCB821C0E46885B7735A9ADCA1AA1ACD6454DC43C84ED671EC7B2EB31DA261C",
+            "4,994,031,752",
+            "4,611,843,896",
+            "7.65%",
             "126.226",
             "110.873",
             "12.16%",

@@ -2,7 +2,7 @@
 
 **[English](README.md)** | [简体中文](README.zh-CN.md) | [日本語](README.ja.md)
 
-<!-- README_SYNC: 2026-07-30.02 -->
+<!-- README_SYNC: 2026-07-31.01 -->
 
 A .NET 11 rewrite of the decode-facing parts of
 [`oyvindln/vhs-decode`](https://github.com/oyvindln/vhs-decode), targeting
@@ -38,7 +38,7 @@ evidence, and remaining gaps.
   EIAJ, and supported PAL/NTSC variants.
 - TBC utility tools, the double-click GUI, and developer plotting windows are
   intentionally out of scope.
-- The Visual Studio 2026 `.slnx` solution has **1,122** standard xUnit v3 tests
+- The Visual Studio 2026 `.slnx` solution has **1,126** standard xUnit v3 tests
   that are visible in Test Explorer and runnable with `dotnet test`.
 
 <!-- SECTION: start -->
@@ -105,25 +105,21 @@ separately from speed.
 <!-- LATEST_PERFORMANCE_BEGIN -->
 | CLI mode (workers) | Python v0.4.0 | Exact + v0.4.0 | Exact + current | IPP-fast + v0.4.0 | IPP-fast + current |
 | --- | ---: | ---: | ---: | ---: | ---: |
-| default (5) | 16.983 s | 6.416 s / 2.647x | 7.678 s / 2.212x | 5.667 s / 2.997x | 7.184 s / 2.364x |
-| `--threads 1` | 21.263 s | 20.547 s / 1.035x | 22.961 s / 0.926x | 20.129 s / 1.056x | 22.320 s / 0.953x |
-| `--threads 5` | 16.880 s | 6.173 s / 2.735x | 7.802 s / 2.164x | 5.802 s / 2.909x | 7.186 s / 2.349x |
-| `--threads 10` | 17.612 s | 4.880 s / 3.609x | 6.118 s / 2.879x | 4.636 s / 3.799x | 5.744 s / 3.066x |
-| `--threads 20` | 18.330 s | 3.997 s / 4.586x | 4.767 s / 3.845x | 3.966 s / 4.622x | 4.919 s / 3.726x |
+| default (5) | 16.983 s | 5.504 s / 3.085x | 7.299 s / 2.327x | 5.408 s / 3.140x | 7.126 s / 2.383x |
+| `--threads 1` | 21.263 s | 17.809 s / 1.194x | 20.531 s / 1.036x | 17.876 s / 1.189x | 19.867 s / 1.070x |
+| `--threads 5` | 16.880 s | 5.736 s / 2.943x | 7.106 s / 2.375x | 5.524 s / 3.056x | 7.048 s / 2.395x |
+| `--threads 10` | 17.612 s | 4.476 s / 3.935x | 5.333 s / 3.302x | 4.339 s / 4.059x | 5.522 s / 3.190x |
+| `--threads 20` | 18.330 s | 3.751 s / 4.887x | 5.201 s / 3.524x | 3.780 s / 4.850x | 4.938 s / 3.712x |
 <!-- LATEST_PERFORMANCE_END -->
 
-The latest Exact pass reuses two non-escaping, worker-local complex-demodulation
-buffers while retained diagnostics remain independent. Data types, expressions,
-operation order, FFT behavior, and ordered state commits are unchanged. All
-profile/thread gates and all 60 refreshed matrix runs above remained exact.
-Four opposite-order current/20-worker 500-frame pairs moved median wall time by
-only +0.26% while reducing CPU time by 1.82%; the longer default and v0.4.0
-pairs ranged from -0.32% to +1.10%, so throughput is classified as neutral.
-Two opposite-order 1,000-frame counter pairs reduced allocation from 111.461
-to 88.022 GiB (21.03%) and GC pause from 0.994 to 0.791 s (20.43%). A
-3,000-frame run kept its first/middle/final 1,000-frame totals at
-72.00/69.11/68.50 s with non-monotonic 722/1,305/602/864 MiB working-set
-quarter medians, showing bounded memory and no progressive slowdown.
+The latest Exact pass transfers the internal non-retained chroma field buffer
+to NTSC burst deemphasis instead of cloning the whole field. Public and
+diagnostic APIs still return independent arrays; data types, expressions, and
+operation order are unchanged. A matched 100-frame trace removed one roughly
+1.9 MiB `double[]` per output field and reduced sampled allocation by 7.65%.
+All `0/default/20` profile/thread gates and all 60 refreshed matrix runs above
+remained exact. Opposite-order 1,000-frame pairs were also exact and improved
+median wall time by 2.21% for `current` and 0.90% for v0.4.0.
 
 Each .NET cell shows median wall time followed by speedup versus Python in the
 same row; values below `1.000x` are slower. The default is **5 workers**.
@@ -159,7 +155,7 @@ The pinned SDK is .NET `11.0.100-preview.6.26359.118`.
 dotnet restore VHSDecodeDotNet.slnx
 dotnet build VHSDecodeDotNet.slnx -c Release --no-restore
 dotnet test --solution VHSDecodeDotNet.slnx -c Release `
-  --no-build --no-restore --minimum-expected-tests 1122
+  --no-build --no-restore --minimum-expected-tests 1126
 ```
 
 Open `VHSDecodeDotNet.slnx` in Visual Studio 2026 to build, debug, and run the

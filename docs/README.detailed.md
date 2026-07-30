@@ -4,7 +4,7 @@
 
 **[English](README.detailed.md)** | [简体中文](README.detailed.zh-CN.md) | [日本語](README.detailed.ja.md)
 
-<!-- README_SYNC: 2026-07-30.02 -->
+<!-- README_SYNC: 2026-07-31.01 -->
 
 .NET 11 rewrite of the decode-facing parts of
 [`oyvindln/vhs-decode`](https://github.com/oyvindln/vhs-decode), focused on
@@ -1743,6 +1743,46 @@ were 72.00/69.11/68.50 s; working-set-quarter medians were
 non-monotonic working set and faster final third support bounded memory and
 no progressive slowdown.
 
+The latest Exact NTSC chroma ownership pass transfers the internal,
+non-retained sequence-resampling buffer directly into burst deemphasis. Public
+decode APIs and retained diagnostic paths still copy their input and return
+independent arrays; in-place deemphasis and the subsequent phase/comb stages
+are used only for an explicitly owned internal buffer. Data types,
+multiplication expressions, loop order, phase/comb order, and ordered field
+commit are unchanged.
+
+Candidate commit `0270f101aa21d2f2a3c5679365eb4a4e9655d77c` produced a
+self-contained `decode.exe` with SHA-256
+`2626A0F82B89D7F4025F41600C034048E61F89F399B08746071968B6E3E619B5`;
+the measured baseline executable was
+`FFCB821C0E46885B7735A9ADCA1AA1ACD6454DC43C84ED671EC7B2EB31DA261C`.
+The Release build completed with zero warnings and errors, and all 1,126
+standard xUnit v3 tests passed. Exact v0.4.0 and `current` both passed strict
+`--threads 0`, omitted/default-five, and `--threads 20` gates. Cross-thread
+luma, chroma, raw JSON, stdout, normalized stderr/logs, and every ordered
+`fileLoc` were identical. The refreshed five-path homepage matrix also matched
+its compatibility references in all 60 candidate runs.
+
+Matched 100-frame allocation traces reduced total sampled allocation from
+4,994,031,752 to 4,611,843,896 bytes (7.65%) and sampled `Double[]` allocation
+from 4,061,498,384 to 3,679,431,952 bytes (9.41%). The baseline allocated one
+roughly 1.9 MiB full-field `double[]` for each of 202 output fields across the
+two burst-deemphasis call sites; both sites disappeared from the candidate
+trace.
+
+Six opposite-order current/20-worker 160-frame pairs moved median wall time
+from 13.398 to 13.451 s (+0.40%) while CPU time fell from 103.133 to 101.398 s
+(-1.68%), so the short-run throughput result is neutral. The corresponding
+v0.4.0 pairs improved wall time from 10.672 to 10.563 s (1.02%, 1.010x) and
+CPU time from 97.453 to 95.141 s (2.37%). Two opposite-order 1,000-frame pairs
+for each profile remained exact and completed without interruption:
+`current` improved from 72.151 to 70.557 s (2.21%, 1.023x) with effectively
+neutral CPU time, while v0.4.0 improved from 55.700 to 55.200 s (0.90%,
+1.009x) and reduced CPU time by 2.00%. The pass is retained primarily for its
+allocation reduction, with a modest long-run throughput benefit. The refreshed
+homepage matrix contains 60 new candidate runs; its Python columns retain the
+existing fixed-sample oracle measurements.
+
 </details>
 
 <!-- SECTION: build -->
@@ -1763,7 +1803,7 @@ Requirements:
 .\tools\build-ipp-native.ps1
 dotnet restore VHSDecodeDotNet.slnx
 dotnet build VHSDecodeDotNet.slnx -c Release --no-restore
-dotnet test --solution VHSDecodeDotNet.slnx -c Release --no-build --no-restore --minimum-expected-tests 1122
+dotnet test --solution VHSDecodeDotNet.slnx -c Release --no-build --no-restore --minimum-expected-tests 1126
 ```
 
 The first command includes the optional `ipp-fast` native artifact; omit it for
@@ -1776,7 +1816,7 @@ deployment computer. Binary-only single-file releases embed
 sidecar license files. An Exact-only build may omit the native build step.
 
 The current formal Release build has zero warnings and errors. The xUnit v3
-project exposes **1,122** independently discoverable tests to both
+project exposes **1,126** independently discoverable tests to both
 `dotnet test` and Visual Studio Test Explorer.
 
 <!-- SECTION: usage -->
