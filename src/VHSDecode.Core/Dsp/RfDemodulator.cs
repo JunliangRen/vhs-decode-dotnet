@@ -503,13 +503,28 @@ public sealed class RfDemodulator : IDisposable
         }
         else
         {
-            demodRaw = DemodulateAnalytic(analytic!, fmDemodulatorMode);
+            if (!includeDemodRawOutput && vhsWorkspaceComplexAnalyticReady)
+            {
+                demodRaw = vhsRealFftWorkspace!.RawEnvelope;
+                DemodulateAnalytic(
+                    analytic!.AsSpan(0, input.Length),
+                    fmDemodulatorMode,
+                    demodRaw);
+            }
+            else
+            {
+                demodRaw = DemodulateAnalytic(analytic!, fmDemodulatorMode);
+            }
+
             ApplyDiffDemodRepairIfPresent(
                 demodRaw,
                 analytic!,
                 diffDemodRepair,
                 fmDemodulatorMode,
-                vhsRealFftWorkspace?.DiffedAnalytic);
+                vhsRealFftWorkspace?.DiffedAnalytic,
+                vhsWorkspaceComplexAnalyticReady
+                    ? vhsRealFftWorkspace!.Real
+                    : null);
             analyticOutput = includeAnalyticOutput
                 ? vhsWorkspaceComplexAnalyticReady
                     ? analytic!.AsSpan(0, input.Length).ToArray()
@@ -1824,7 +1839,8 @@ public sealed class RfDemodulator : IDisposable
         ReadOnlySpan<Complex> analytic,
         DiffDemodRepairOptions? options,
         RfFmDemodulatorMode fmDemodulatorMode,
-        Complex[]? diffedWorkspace)
+        Complex[]? diffedWorkspace,
+        double[]? demodDiffedWorkspace = null)
     {
         if (options is null || demod.Length <= 40)
         {
@@ -1857,8 +1873,21 @@ public sealed class RfDemodulator : IDisposable
         }
 
         activeDiffed[0] = Complex.Zero;
-        double[] demodDiffed = DemodulateAnalytic(activeDiffed, fmDemodulatorMode);
-        ReplaceSpikes(demod, demodDiffed, options.MaxValue);
+        if (demodDiffedWorkspace is not null
+            && demodDiffedWorkspace.Length == activeDiffed.Length
+            && !ReferenceEquals(demod, demodDiffedWorkspace))
+        {
+            DemodulateAnalytic(
+                activeDiffed,
+                fmDemodulatorMode,
+                demodDiffedWorkspace);
+            ReplaceSpikes(demod, demodDiffedWorkspace, options.MaxValue);
+        }
+        else
+        {
+            double[] demodDiffed = DemodulateAnalytic(activeDiffed, fmDemodulatorMode);
+            ReplaceSpikes(demod, demodDiffed, options.MaxValue);
+        }
     }
 
     private void ApplyDiffDemodRepairIfPresent(
@@ -1958,6 +1987,24 @@ public sealed class RfDemodulator : IDisposable
                 PortedMath.UnwrapHilbertVhsRustApproximation(real, imaginary, SampleRateHz),
             _ => throw new ArgumentOutOfRangeException(nameof(mode), mode, null)
         };
+    }
+
+    private void DemodulateAnalytic(
+        ReadOnlySpan<Complex> analytic,
+        RfFmDemodulatorMode mode,
+        double[] output)
+    {
+        switch (mode)
+        {
+            case RfFmDemodulatorMode.VhsRustApproximation:
+                PortedMath.UnwrapHilbertVhsRustApproximation(
+                    analytic,
+                    SampleRateHz,
+                    output);
+                break;
+            default:
+                throw new ArgumentOutOfRangeException(nameof(mode), mode, null);
+        }
     }
 
     private void DemodulateAnalytic(

@@ -33,7 +33,7 @@
 - VHS 家族包括 VHS/S-VHS、Betamax、Video8/Hi8、U-matic、Type C、EIAJ
   以及上游支持的 PAL/NTSC 变体。
 - TBC 工具、双击启动的用户 GUI 和开发者绘图窗口明确不在范围内。
-- Visual Studio 2026 `.slnx` 包含 **1,120** 项标准 xUnit v3 测试；测试可在
+- Visual Studio 2026 `.slnx` 包含 **1,122** 项标准 xUnit v3 测试；测试可在
   Test Explorer 中查看，也可用 `dotnet test` 运行。
 
 <!-- SECTION: start -->
@@ -95,23 +95,22 @@ CVBS、LaserDisc 和 HiFi 当前会拒绝 `ipp-fast`，这些命令应使用 `ex
 <!-- LATEST_PERFORMANCE_BEGIN -->
 | CLI 模式（workers） | Python v0.4.0 | Exact + v0.4.0 | Exact + current | IPP-fast + v0.4.0 | IPP-fast + current |
 | --- | ---: | ---: | ---: | ---: | ---: |
-| 默认（5） | 16.983 s | 5.558 s / 3.055x | 7.343 s / 2.313x | 5.517 s / 3.078x | 7.136 s / 2.380x |
-| `--threads 1` | 21.263 s | 18.759 s / 1.133x | 21.318 s / 0.997x | 18.095 s / 1.175x | 20.655 s / 1.029x |
-| `--threads 5` | 16.880 s | 5.543 s / 3.045x | 6.972 s / 2.421x | 5.417 s / 3.116x | 6.958 s / 2.426x |
-| `--threads 10` | 17.612 s | 4.566 s / 3.857x | 5.610 s / 3.139x | 4.625 s / 3.808x | 5.978 s / 2.946x |
-| `--threads 20` | 18.330 s | 3.830 s / 4.786x | 5.294 s / 3.462x | 3.511 s / 5.221x | 4.917 s / 3.728x |
+| 默认（5） | 16.983 s | 6.416 s / 2.647x | 7.678 s / 2.212x | 5.667 s / 2.997x | 7.184 s / 2.364x |
+| `--threads 1` | 21.263 s | 20.547 s / 1.035x | 22.961 s / 0.926x | 20.129 s / 1.056x | 22.320 s / 0.953x |
+| `--threads 5` | 16.880 s | 6.173 s / 2.735x | 7.802 s / 2.164x | 5.802 s / 2.909x | 7.186 s / 2.349x |
+| `--threads 10` | 17.612 s | 4.880 s / 3.609x | 6.118 s / 2.879x | 4.636 s / 3.799x | 5.744 s / 3.066x |
+| `--threads 20` | 18.330 s | 3.997 s / 4.586x | 4.767 s / 3.845x | 3.966 s / 4.622x | 4.919 s / 3.726x |
 <!-- LATEST_PERFORMANCE_END -->
 
-最新一轮 Exact 场重采样优化为有状态的 CLI 顺序解码器分别保留一个定长亮度
-workspace 和一个定长色度 workspace。公共 `Decode()` 与保留结果的
-`DecodeFields()` 仍为每个结果提供独立的 `ChromaBurstSamples`；只有 CLI 内部
-非保留路径省略它。直接 UInt16 路径、16-tap sinc 表达式和运算顺序以及公共复制
-API 均未改变。六组 profile/thread 门禁和上表全部 60 次运行都保持精确。
-两组相反顺序的 current/20-worker 1000 帧配对中，分配从 126.226 降至
-110.873 GiB（减少 12.16%），墙钟从 141.015 降至 140.405 秒（减少 0.43%，
-吞吐 1.004x），GC pause 从 1.015 降至 0.885 秒。默认 current 配对的墙钟也
-改善 1.05%，分配减少 11.23%。3000 帧长跑的四段工作集中位数为
-794/800/748/772 MiB，最后稳定 1000 帧没有比最初稳定 1000 帧变慢。
+最新一轮 Exact 优化复用两块不会逃逸的 worker-local complex-demodulation 缓冲，
+同时保留诊断输出仍各自独立。数据类型、表达式、运算顺序、FFT 行为和有序状态提交
+均未改变；全部 profile/thread 门禁和上表 60 次刷新运行都保持精确。四组相反顺序的
+current/20-worker 500 帧配对中，中位墙钟仅变化 +0.26%，CPU 时间减少 1.82%；
+更长的默认与 v0.4.0 配对介于 -0.32% 到 +1.10%，因此吞吐按中性处理。两组相反
+顺序的 1000 帧 counters 配对把分配从 111.461 降至 88.022 GiB（减少 21.03%），
+GC pause 从 0.994 降至 0.791 秒（减少 20.43%）。3000 帧长跑的前/中/后
+1000 帧耗时为 72.00/69.11/68.50 秒，四段工作集中位数为
+722/1305/602/864 MiB，说明内存有界且没有越跑越慢。
 
 每个 .NET 单元格依次给出墙钟中位数和相对同一行 Python 的倍速；低于 `1.000x`
 表示更慢。默认实际使用 **5 个 workers**。非零线程的 Python 行只用于吞吐比较，
@@ -142,7 +141,7 @@ TBC、色度、JSON 和日志文件允许在解码期间并发读取，兼容的
 dotnet restore VHSDecodeDotNet.slnx
 dotnet build VHSDecodeDotNet.slnx -c Release --no-restore
 dotnet test --solution VHSDecodeDotNet.slnx -c Release `
-  --no-build --no-restore --minimum-expected-tests 1120
+  --no-build --no-restore --minimum-expected-tests 1122
 ```
 
 在 Visual Studio 2026 中打开 `VHSDecodeDotNet.slnx`，即可构建、调试并通过

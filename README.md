@@ -38,7 +38,7 @@ evidence, and remaining gaps.
   EIAJ, and supported PAL/NTSC variants.
 - TBC utility tools, the double-click GUI, and developer plotting windows are
   intentionally out of scope.
-- The Visual Studio 2026 `.slnx` solution has **1,120** standard xUnit v3 tests
+- The Visual Studio 2026 `.slnx` solution has **1,122** standard xUnit v3 tests
   that are visible in Test Explorer and runnable with `dotnet test`.
 
 <!-- SECTION: start -->
@@ -105,25 +105,25 @@ separately from speed.
 <!-- LATEST_PERFORMANCE_BEGIN -->
 | CLI mode (workers) | Python v0.4.0 | Exact + v0.4.0 | Exact + current | IPP-fast + v0.4.0 | IPP-fast + current |
 | --- | ---: | ---: | ---: | ---: | ---: |
-| default (5) | 16.983 s | 5.558 s / 3.055x | 7.343 s / 2.313x | 5.517 s / 3.078x | 7.136 s / 2.380x |
-| `--threads 1` | 21.263 s | 18.759 s / 1.133x | 21.318 s / 0.997x | 18.095 s / 1.175x | 20.655 s / 1.029x |
-| `--threads 5` | 16.880 s | 5.543 s / 3.045x | 6.972 s / 2.421x | 5.417 s / 3.116x | 6.958 s / 2.426x |
-| `--threads 10` | 17.612 s | 4.566 s / 3.857x | 5.610 s / 3.139x | 4.625 s / 3.808x | 5.978 s / 2.946x |
-| `--threads 20` | 18.330 s | 3.830 s / 4.786x | 5.294 s / 3.462x | 3.511 s / 5.221x | 4.917 s / 3.728x |
+| default (5) | 16.983 s | 6.416 s / 2.647x | 7.678 s / 2.212x | 5.667 s / 2.997x | 7.184 s / 2.364x |
+| `--threads 1` | 21.263 s | 20.547 s / 1.035x | 22.961 s / 0.926x | 20.129 s / 1.056x | 22.320 s / 0.953x |
+| `--threads 5` | 16.880 s | 6.173 s / 2.735x | 7.802 s / 2.164x | 5.802 s / 2.909x | 7.186 s / 2.349x |
+| `--threads 10` | 17.612 s | 4.880 s / 3.609x | 6.118 s / 2.879x | 4.636 s / 3.799x | 5.744 s / 3.066x |
+| `--threads 20` | 18.330 s | 3.997 s / 4.586x | 4.767 s / 3.845x | 3.966 s / 4.622x | 4.919 s / 3.726x |
 <!-- LATEST_PERFORMANCE_END -->
 
-The latest Exact field-resampling pass gives the stateful CLI sequence decoder
-separate exact-length luma and chroma workspaces. Public `Decode()` and retained
-`DecodeFields()` results still own independent `ChromaBurstSamples`; only the
-internal non-retaining CLI path omits them. The direct UInt16 path, 16-tap sinc
-expressions and order, and public copying APIs are unchanged. Six
-profile/thread gates and all 60 matrix runs above remained exact. Across two
-opposite-order current/20-worker 1,000-frame pairs, allocation fell from
-126.226 to 110.873 GiB (12.16%), wall time from 141.015 to 140.405 s (0.43%,
-1.004x throughput), and GC pause from 1.015 to 0.885 s. Default-current pairs
-also improved wall time by 1.05% and allocation by 11.23%. A 3,000-frame run
-held quarterly working-set medians at 794/800/748/772 MiB and its final
-steady 1,000 frames were not slower than its first.
+The latest Exact pass reuses two non-escaping, worker-local complex-demodulation
+buffers while retained diagnostics remain independent. Data types, expressions,
+operation order, FFT behavior, and ordered state commits are unchanged. All
+profile/thread gates and all 60 refreshed matrix runs above remained exact.
+Four opposite-order current/20-worker 500-frame pairs moved median wall time by
+only +0.26% while reducing CPU time by 1.82%; the longer default and v0.4.0
+pairs ranged from -0.32% to +1.10%, so throughput is classified as neutral.
+Two opposite-order 1,000-frame counter pairs reduced allocation from 111.461
+to 88.022 GiB (21.03%) and GC pause from 0.994 to 0.791 s (20.43%). A
+3,000-frame run kept its first/middle/final 1,000-frame totals at
+72.00/69.11/68.50 s with non-monotonic 722/1,305/602/864 MiB working-set
+quarter medians, showing bounded memory and no progressive slowdown.
 
 Each .NET cell shows median wall time followed by speedup versus Python in the
 same row; values below `1.000x` are slower. The default is **5 workers**.
@@ -159,7 +159,7 @@ The pinned SDK is .NET `11.0.100-preview.6.26359.118`.
 dotnet restore VHSDecodeDotNet.slnx
 dotnet build VHSDecodeDotNet.slnx -c Release --no-restore
 dotnet test --solution VHSDecodeDotNet.slnx -c Release `
-  --no-build --no-restore --minimum-expected-tests 1120
+  --no-build --no-restore --minimum-expected-tests 1122
 ```
 
 Open `VHSDecodeDotNet.slnx` in Visual Studio 2026 to build, debug, and run the

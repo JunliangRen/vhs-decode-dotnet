@@ -574,6 +574,155 @@ public sealed class DspWorkingBufferTests
             $"Warm VHS diff-demod RF block allocated {allocated:N0} bytes.");
     }
 
+    [Fact(DisplayName = "Compact complex VHS demod reuses non-escaping workspace buffers")]
+    public void CompactComplexVhsDemodReusesNonEscapingWorkspaceBuffers()
+    {
+        const int length = DecodeSessionFactory.DefaultBlockLength;
+        const double sampleRateHz = 40_000_000.0;
+        double[] input = BuildPalVhsProbe(length, sampleRateHz);
+        Complex[] identity = RfDemodulator.IdentityFilter(length);
+        SosSection[] identitySos = [new SosSection(1.0, 0.0, 0.0, 1.0, 0.0, 0.0)];
+        var highBoost = new RfHighBoostOptions(1.25, 8.0, 24.0);
+        var diffRepair = new DiffDemodRepairOptions(double.NegativeInfinity);
+        using var demodulator = new RfDemodulator(sampleRateHz);
+
+        RfDemodulatedBlock withoutRepair = DecodeComplexVhsProbe(
+            demodulator,
+            input,
+            identity,
+            identitySos,
+            highBoost,
+            diffRepair: null,
+            retainDiagnosticOutputs: true);
+        double[] expectedDemodRaw = BuildDiffDemodRepairOracle(
+            withoutRepair,
+            sampleRateHz,
+            diffRepair.MaxValue);
+        RfDemodulatedBlock full = DecodeComplexVhsProbe(
+            demodulator,
+            input,
+            identity,
+            identitySos,
+            highBoost,
+            diffRepair,
+            retainDiagnosticOutputs: true);
+        double[] retainedDemodRaw = full.DemodRaw.ToArray();
+        Complex[] retainedAnalytic = full.Analytic.ToArray();
+        RfDemodulatedBlock compact = DecodeComplexVhsProbe(
+            demodulator,
+            input,
+            identity,
+            identitySos,
+            highBoost,
+            diffRepair,
+            retainDiagnosticOutputs: false);
+
+        Assert.NotEmpty(full.DemodRaw);
+        Assert.NotEmpty(full.Analytic);
+        Assert.Empty(compact.DemodRaw);
+        Assert.Empty(compact.Analytic);
+        AssertDoubleBitsEqual(expectedDemodRaw, full.DemodRaw);
+        Assert.Equal(full.Video, compact.Video);
+        Assert.Equal(full.Envelope, compact.Envelope);
+        Assert.Equal(full.VideoLowPass, compact.VideoLowPass);
+
+        for (int i = 0; i < 3; i++)
+        {
+            _ = DecodeComplexVhsProbe(
+                demodulator,
+                input,
+                identity,
+                identitySos,
+                highBoost,
+                diffRepair,
+                retainDiagnosticOutputs: false);
+        }
+
+        long before = GC.GetAllocatedBytesForCurrentThread();
+        RfDemodulatedBlock allocationProbe = DecodeComplexVhsProbe(
+            demodulator,
+            input,
+            identity,
+            identitySos,
+            highBoost,
+            diffRepair,
+            retainDiagnosticOutputs: false);
+        long allocated = GC.GetAllocatedBytesForCurrentThread() - before;
+        GC.KeepAlive(allocationProbe);
+
+        AssertDoubleBitsEqual(retainedDemodRaw, full.DemodRaw);
+        AssertComplexBitsEqual(retainedAnalytic, full.Analytic);
+        Assert.True(
+            allocated < 1_700_000,
+            $"Warm compact complex VHS RF block allocated {allocated:N0} bytes.");
+    }
+
+    [Fact(DisplayName = "Compact NumPy-complex VHS demod matches retained diagnostic outputs")]
+    public void CompactNumpyComplexVhsDemodMatchesRetainedDiagnosticOutputs()
+    {
+        const int length = DecodeSessionFactory.DefaultBlockLength;
+        const double sampleRateHz = 40_000_000.0;
+        double[] input = BuildPalVhsProbe(length, sampleRateHz);
+        Complex[] identity = RfDemodulator.IdentityFilter(length);
+        SosSection[] identitySos = [new SosSection(1.0, 0.0, 0.0, 1.0, 0.0, 0.0)];
+        var diffRepair = new DiffDemodRepairOptions(double.NegativeInfinity);
+        using var demodulator = new RfDemodulator(sampleRateHz);
+
+        RfDemodulatedBlock withoutRepair = DecodeComplexVhsProbe(
+            demodulator,
+            input,
+            identity,
+            identitySos,
+            highBoost: null,
+            diffRepair: null,
+            retainDiagnosticOutputs: true,
+            useNumpyComplexVhsAnalytic: true);
+        double[] expectedDemodRaw = BuildDiffDemodRepairOracle(
+            withoutRepair,
+            sampleRateHz,
+            diffRepair.MaxValue);
+        RfDemodulatedBlock full = DecodeComplexVhsProbe(
+            demodulator,
+            input,
+            identity,
+            identitySos,
+            highBoost: null,
+            diffRepair: diffRepair,
+            retainDiagnosticOutputs: true,
+            useNumpyComplexVhsAnalytic: true);
+        double[] retainedDemodRaw = full.DemodRaw.ToArray();
+        Complex[] retainedAnalytic = full.Analytic.ToArray();
+        RfDemodulatedBlock compact = DecodeComplexVhsProbe(
+            demodulator,
+            input,
+            identity,
+            identitySos,
+            highBoost: null,
+            diffRepair: diffRepair,
+            retainDiagnosticOutputs: false,
+            useNumpyComplexVhsAnalytic: true);
+        _ = DecodeComplexVhsProbe(
+            demodulator,
+            input,
+            identity,
+            identitySos,
+            highBoost: null,
+            diffRepair: diffRepair,
+            retainDiagnosticOutputs: false,
+            useNumpyComplexVhsAnalytic: true);
+
+        Assert.NotEmpty(full.DemodRaw);
+        Assert.NotEmpty(full.Analytic);
+        Assert.Empty(compact.DemodRaw);
+        Assert.Empty(compact.Analytic);
+        AssertDoubleBitsEqual(expectedDemodRaw, full.DemodRaw);
+        AssertDoubleBitsEqual(retainedDemodRaw, full.DemodRaw);
+        AssertComplexBitsEqual(retainedAnalytic, full.Analytic);
+        Assert.Equal(full.Video, compact.Video);
+        Assert.Equal(full.Envelope, compact.Envelope);
+        Assert.Equal(full.VideoLowPass, compact.VideoLowPass);
+    }
+
     [Fact(DisplayName = "PAL VHS RF workspaces remain bit-exact under parallel load")]
     public void PalVhsRfWorkspacesRemainBitExactUnderParallelLoad()
     {
@@ -1404,6 +1553,34 @@ public sealed class DspWorkingBufferTests
             "Double sequences differ at the bit level.");
     }
 
+    private static void AssertComplexBitsEqual(ReadOnlySpan<Complex> expected, ReadOnlySpan<Complex> actual)
+    {
+        Assert.Equal(expected.Length, actual.Length);
+        Assert.True(
+            MemoryMarshal.AsBytes(expected).SequenceEqual(MemoryMarshal.AsBytes(actual)),
+            "Complex sequences differ at the bit level.");
+    }
+
+    private static double[] BuildDiffDemodRepairOracle(
+        RfDemodulatedBlock withoutRepair,
+        double sampleRateHz,
+        double maxValue)
+    {
+        Complex[] diffed = withoutRepair.Analytic.ToArray();
+        for (int i = diffed.Length - 1; i >= 1; i--)
+        {
+            diffed[i] -= diffed[i - 1];
+        }
+
+        diffed[0] = Complex.Zero;
+        double[] demodDiffed = PortedMath.UnwrapHilbertVhsRustApproximation(
+            diffed,
+            sampleRateHz);
+        double[] expected = withoutRepair.DemodRaw.ToArray();
+        RfDemodulator.ReplaceSpikes(expected, demodDiffed, maxValue);
+        return expected;
+    }
+
     private static double[] BuildPalVhsProbe(int length, double sampleRateHz)
     {
         var input = new double[length];
@@ -1438,6 +1615,43 @@ public sealed class DspWorkingBufferTests
             diffDemodRepair: new DiffDemodRepairOptions(double.NegativeInfinity),
             fmDemodulatorMode: RfFmDemodulatorMode.VhsRustApproximation,
             vhsEnvelopeFilter: identitySos);
+    }
+
+    private static RfDemodulatedBlock DecodeComplexVhsProbe(
+        RfDemodulator demodulator,
+        double[] input,
+        Complex[] identity,
+        SosSection[] identitySos,
+        RfHighBoostOptions? highBoost,
+        DiffDemodRepairOptions? diffRepair,
+        bool retainDiagnosticOutputs,
+        bool useNumpyComplexVhsAnalytic = false)
+    {
+        return demodulator.DemodulateCore(
+            input,
+            identity,
+            identity,
+            ReadOnlySpan<Complex>.Empty,
+            identity,
+            identity,
+            videoLowPassOffset: 0,
+            removeLdPalV4300DSpur: false,
+            rfHighBoost: highBoost,
+            diffDemodRepair: diffRepair,
+            chromaTrap: null,
+            sharpnessEq: null,
+            nonlinearDeemphasis: null,
+            subDeemphasis: null,
+            betamaxFscNotchHz: null,
+            referenceFilters: null,
+            fmDemodulatorMode: RfFmDemodulatorMode.VhsRustApproximation,
+            vhsEnvelopeFilter: identitySos,
+            vhsRfTopFilter: identitySos,
+            precomputedInputSpectrum: null,
+            includeRfHighPassOutput: false,
+            includeAnalyticOutput: retainDiagnosticOutputs,
+            includeDemodRawOutput: retainDiagnosticOutputs,
+            useNumpyComplexVhsAnalytic);
     }
 
     private static RfDemodulatedBlock DecodeDeemphasisProbe(

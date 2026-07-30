@@ -1869,6 +1869,29 @@ possible capture has already been proven byte-for-byte identical.
   Long-pair wall time fell 5.22%, counter allocation 9.17%, GC pause 45.49%,
   and Gen0 collections 79.5%; post-startup intervals stayed between 6.500 and
   6.860 s without progressive slowdown
+- compact complex VHS demodulation now reuses the leased worker's exact-length
+  `RawEnvelope` for the non-escaping raw FM result and `Real` for the optional
+  diff-demod repair result. Retained diagnostic arrays remain independently
+  owned, and data types, expressions, SIMD order, FFT behavior, repair order,
+  workspace-pool cap, and ordered state/output commit are unchanged. Focused
+  xUnit v3 tests compare repair output with an independently reconstructed
+  allocating oracle and verify retained arrays bit for bit after repeated
+  leases. Six short v0.4.0/current serial/default-five/20-worker gates, eight
+  current/20-worker 500-frame runs, four current/20-worker 1,000-frame runs,
+  and four 500-frame runs for each longer v0.4.0/default/high-worker
+  combination matched all applicable artifact/log surfaces and every ordered
+  `fileLoc`; the refreshed five-path matrix passed 60/60 compatibility gates.
+  Two opposite-order 1,000-frame counter pairs reduced allocation from
+  111.461 to 88.022 GiB (21.03%) and GC pause from 0.994 to 0.791 s (20.43%)
+  while instrumented wall time remained neutral/noisy. A 3,000-frame
+  candidate run completed its first/middle/final thirds in
+  72.00/69.11/68.50 s with non-monotonic working-set-quarter medians of
+  721.87/1,304.73/601.61/864.18 MiB, supporting bounded memory and no
+  progressive slowdown. A self-contained validation `decode.exe` built from
+  the same production code had SHA-256
+  `333D051E361FE425EA893EE819129BB1CFC9249CF77E29746C94252F263D19D0`;
+  a 100-frame strict gate against the measured candidate executable matched
+  luma, chroma, JSON, stdout, normalized stderr/logs, and ordered `fileLoc`
 - one-frame non-default NTSC VHS fixtures are also byte-exact for
   `--sharpness 20`, `--fm_audio_notch 10`, and the combined
   `--high_boost 1.3 --sharpness 20 --nld --sd` path; the stateful sharpness
@@ -2107,7 +2130,7 @@ dotnet test --solution VHSDecodeDotNet.slnx --no-build
 ```
 
 The current formal solution build completes with zero warnings and errors, and
-the xUnit v3 project exposes 1,120 independently discoverable tests
+the xUnit v3 project exposes 1,122 independently discoverable tests
 to `dotnet test` and Visual Studio Test Explorer. On the
 same Windows machine and fixtures, Release wall-clock measurements for one
 frame were 2.346 s versus 7.193 s for NTSC VHS and 1.651 s versus 5.865 s for

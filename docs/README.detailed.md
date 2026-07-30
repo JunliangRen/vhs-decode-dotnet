@@ -400,20 +400,19 @@ followed by speedup and wall-time reduction versus Python in the same row:
 
 | CLI mode (workers) | Python v0.4.0 | Exact + v0.4.0 | Exact + current | IPP-fast + v0.4.0 | IPP-fast + current |
 | --- | ---: | ---: | ---: | ---: | ---: |
-| default (5) | 16.983 s | 5.558 s / 3.055x / 67.3% | 7.343 s / 2.313x / 56.8% | 5.517 s / 3.078x / 67.5% | 7.136 s / 2.380x / 58.0% |
-| `--threads 1` | 21.263 s | 18.759 s / 1.133x / 11.8% | 21.318 s / 0.997x / 0.3% slower | 18.095 s / 1.175x / 14.9% | 20.655 s / 1.029x / 2.9% |
-| `--threads 5` | 16.880 s | 5.543 s / 3.045x / 67.2% | 6.972 s / 2.421x / 58.7% | 5.417 s / 3.116x / 67.9% | 6.958 s / 2.426x / 58.8% |
-| `--threads 10` | 17.612 s | 4.566 s / 3.857x / 74.1% | 5.610 s / 3.139x / 68.1% | 4.625 s / 3.808x / 73.7% | 5.978 s / 2.946x / 66.1% |
-| `--threads 20` | 18.330 s | 3.830 s / 4.786x / 79.1% | 5.294 s / 3.462x / 71.1% | 3.511 s / 5.221x / 80.8% | 4.917 s / 3.728x / 73.2% |
+| default (5) | 16.983 s | 6.416 s / 2.647x / 62.2% | 7.678 s / 2.212x / 54.8% | 5.667 s / 2.997x / 66.6% | 7.184 s / 2.364x / 57.7% |
+| `--threads 1` | 21.263 s | 20.547 s / 1.035x / 3.4% | 22.961 s / 0.926x / 8.0% slower | 20.129 s / 1.056x / 5.3% | 22.320 s / 0.953x / 5.0% slower |
+| `--threads 5` | 16.880 s | 6.173 s / 2.735x / 63.4% | 7.802 s / 2.164x / 53.8% | 5.802 s / 2.909x / 65.6% | 7.186 s / 2.349x / 57.4% |
+| `--threads 10` | 17.612 s | 4.880 s / 3.609x / 72.3% | 6.118 s / 2.879x / 65.3% | 4.636 s / 3.799x / 73.7% | 5.744 s / 3.066x / 67.4% |
+| `--threads 20` | 18.330 s | 3.997 s / 4.586x / 78.2% | 4.767 s / 3.845x / 74.0% | 3.966 s / 4.622x / 78.4% | 4.919 s / 3.726x / 73.2% |
 
 The benchmark host was an Intel Core Ultra 7 265K with 20 logical processors,
 Windows 11 25H2 build 26220.8925, and .NET SDK/runtime
 `11.0.100-preview.6.26359.118`. The Python column retains the prior fixed-matrix
 medians because Python did not change; all four .NET columns were refreshed
-with 60 interleaved runs. The candidate was based on `d07d1ad` plus the
-field-resampling workspace optimization described below; its single-file
-`decode.exe` SHA-256 was
-`EDFECE6AD069D9D05E73BCA426162FC73CEEB0A5313F1C6FD0DD470F5DE2178B`.
+with 60 interleaved runs. The candidate executable contains the production
+change from `d0508f9`; its single-file `decode.exe` SHA-256 was
+`98ADB0ED3F5EF086AC2A189F302101C751C68F0390123817EAF5452DD83BE7A1`.
 The fixed 40-frame matrix includes startup cost and per-run spread; the
 opposite-order 1,000-frame pairs below provide the stable whole-pipeline A/B.
 Python 3.14.0 used NumPy 2.4.6, SciPy 1.18.0, Numba 0.66.0, and python-soxr
@@ -1701,6 +1700,49 @@ The first and last steady ten 100-frame intervals had 5.492 and 5.440 s
 medians. This supports bounded retained memory and no progressive slowdown;
 collection-timing peaks are not presented as a resident-memory reduction.
 
+The next Exact complex-demodulation workspace pass writes the compact
+non-escaping raw FM result into the worker's exact-length `RawEnvelope` buffer
+and the optional diff-demod repair result into its otherwise-dead `Real`
+buffer. Retained `DemodRaw` and analytic diagnostics still own independent
+arrays. Data types, atan approximation, sample expressions, SIMD lane order,
+FFT behavior, repair order, pool cap, and serial state/output commit are
+unchanged. Two focused xUnit v3 tests compare the destination-buffer repair
+against an independently reconstructed allocating oracle and verify retained
+arrays bit for bit after repeated workspace leases. The full Release suite
+passed all 1,122 tests.
+
+Six short real profile/thread gates covered Exact v0.4.0 and `current` at
+`--threads 0`, default-five, and `--threads 20`. Eight current/20-worker
+500-frame runs, four current/20-worker 1,000-frame runs, and four 500-frame
+runs for each of v0.4.0/20-worker, current/default, and v0.4.0/default matched
+baseline luma, chroma, raw JSON, stdout, normalized stderr/logs, and every
+ordered `fileLoc`. The refreshed five-path matrix also completed 60/60
+compatible runs, with three runs in each of its 20 cells. A self-contained
+validation `decode.exe` built from the same production code had SHA-256
+`333D051E361FE425EA893EE819129BB1CFC9249CF77E29746C94252F263D19D0`;
+a 100-frame strict gate against the measured `98ADB0...7A1` executable matched
+all seven artifact/log surfaces and ordered `fileLoc`.
+
+The four opposite-order current/20-worker 500-frame pairs moved median wall
+time from 37.905 to 38.002 s (+0.26%) while median CPU fell from 294.055 to
+288.711 s (-1.82%). The longer v0.4.0/20-worker, current/default, and
+v0.4.0/default pair medians were respectively 30.834/31.169,
+67.850/67.632, and 59.756/59.871 s. Their wall changes therefore ranged from
+-0.32% to +1.10%, so this pass is classified as throughput-neutral rather
+than a speedup.
+
+Across two opposite-order current/20-worker 1,000-frame counter pairs,
+allocation fell from 111.461 to 88.022 GiB (21.03%) and GC pause from 0.994
+to 0.791 s (20.43%). Instrumented wall time moved from 147.734 to 150.428 s
+(+1.82%), and maximum sampled working set was 1,472.19/1,507.75 MiB, so no
+resident-memory or wall-time improvement is claimed. A candidate-only
+current/20-worker 3,000-frame run completed in 209.767 s with 133.2 GiB
+allocated and 1.146 s GC pause. Its first/middle/final 1,000-frame totals
+were 72.00/69.11/68.50 s; working-set-quarter medians were
+721.87/1,304.73/601.61/864.18 MiB with a 1,462.11 MiB maximum. The
+non-monotonic working set and faster final third support bounded memory and
+no progressive slowdown.
+
 </details>
 
 <!-- SECTION: build -->
@@ -1721,7 +1763,7 @@ Requirements:
 .\tools\build-ipp-native.ps1
 dotnet restore VHSDecodeDotNet.slnx
 dotnet build VHSDecodeDotNet.slnx -c Release --no-restore
-dotnet test --solution VHSDecodeDotNet.slnx -c Release --no-build --no-restore --minimum-expected-tests 1120
+dotnet test --solution VHSDecodeDotNet.slnx -c Release --no-build --no-restore --minimum-expected-tests 1122
 ```
 
 The first command includes the optional `ipp-fast` native artifact; omit it for
@@ -1734,7 +1776,7 @@ deployment computer. Binary-only single-file releases embed
 sidecar license files. An Exact-only build may omit the native build step.
 
 The current formal Release build has zero warnings and errors. The xUnit v3
-project exposes **1,120** independently discoverable tests to both
+project exposes **1,122** independently discoverable tests to both
 `dotnet test` and Visual Studio Test Explorer.
 
 <!-- SECTION: usage -->
