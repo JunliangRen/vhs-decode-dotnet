@@ -685,7 +685,21 @@ public static class VhsChromaDecoder
             double[] currentChroma = upconverted;
             if (!options.DisableComb)
             {
-                if (IsNtsc(options.ColorSystem))
+                bool isNtsc = IsNtsc(options.ColorSystem);
+                if (finalFilter is not null)
+                {
+                    // A custom filter may retain or share its returned array.
+                    currentChroma = isNtsc
+                        ? ApplyNtscComb(
+                            currentChroma,
+                            options.OutputLineLength,
+                            retainFloat32)
+                        : ApplyPalComb(
+                            currentChroma,
+                            options.OutputLineLength,
+                            retainFloat32);
+                }
+                else if (isNtsc)
                 {
                     ApplyNtscCombInPlace(
                         currentChroma,

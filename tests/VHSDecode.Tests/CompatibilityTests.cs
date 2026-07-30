@@ -3656,6 +3656,29 @@ public void VhsChromaDecoderEmitsFieldSamples()
     AssertSequence(expectedUpconverted, capturedUpconverted!);
     AssertSequence(expectedUpconverted, returnedUpconverted!);
 
+    foreach (string colorSystem in new[] { "NTSC", "PAL" })
+    {
+        VhsChromaFieldOptions currentOptions = ntscOptions with
+        {
+            ColorSystem = colorSystem,
+            UseCurrentChromaProcessing = true
+        };
+        double[]? capturedCurrent = null;
+        double[]? returnedCurrent = null;
+        _ = VhsChromaDecoder.DecodeField(
+            chroma,
+            currentOptions,
+            lineLocations,
+            inputLineLength: 100,
+            finalFilter: values =>
+            {
+                returnedCurrent = values;
+                capturedCurrent = values.ToArray();
+                return values;
+            });
+        AssertSequence(capturedCurrent!, returnedCurrent!);
+    }
+
     VhsChromaFieldResult filteredBurst = VhsChromaDecoder.DecodeField(
         chroma,
         options with { FinalFilter = new TransferFunction([2.0], [1.0]) },
