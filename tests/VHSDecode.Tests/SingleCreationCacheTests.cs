@@ -38,26 +38,80 @@ public sealed class SingleCreationCacheTests
                 TaskScheduler.Default))
             .ToArray();
 
-        Assert.True(ready.Wait(TimeSpan.FromSeconds(5), cancellationToken));
-        start.Set();
-        Assert.True(SpinWait.SpinUntil(
-            () => Volatile.Read(ref callsStarted) == callerCount,
-            TimeSpan.FromSeconds(5)));
-        Assert.True(factoryEntered.Wait(TimeSpan.FromSeconds(5), cancellationToken));
+        bool allReady = false;
+        bool allStarted = false;
+        bool factoryStarted = false;
+        int blockedFactoryCalls = 0;
+        object[]? values = null;
         try
         {
-            Thread.Sleep(50);
-            Assert.Equal(1, Volatile.Read(ref factoryCalls));
+            allReady = ready.Wait(TimeSpan.FromSeconds(5), cancellationToken);
+            start.Set();
+            allStarted = SpinWait.SpinUntil(
+                () => Volatile.Read(ref callsStarted) == callerCount,
+                TimeSpan.FromSeconds(5));
+            factoryStarted = factoryEntered.Wait(TimeSpan.FromSeconds(5), cancellationToken);
+            if (factoryStarted)
+            {
+                Thread.Sleep(50);
+            }
+
+            blockedFactoryCalls = Volatile.Read(ref factoryCalls);
         }
         finally
         {
+            start.Set();
             releaseFactory.Set();
+            values = await Task.WhenAll(callers)
+                .WaitAsync(TimeSpan.FromSeconds(5), CancellationToken.None);
         }
 
-        object[] values = await Task.WhenAll(callers);
-
+        Assert.True(allReady);
+        Assert.True(allStarted);
+        Assert.True(factoryStarted);
+        Assert.Equal(1, blockedFactoryCalls);
         Assert.Equal(1, factoryCalls);
         Assert.All(values, value => Assert.Same(values[0], value));
+    }
+
+    [Fact(DisplayName = "Single-creation cache builds different keys concurrently")]
+    public async Task BuildsDifferentKeysConcurrently()
+    {
+        var cache = new SingleCreationCache<int, object>();
+        using var factoriesEntered = new CountdownEvent(2);
+        using var releaseFactories = new ManualResetEventSlim();
+        CancellationToken cancellationToken = TestContext.Current.CancellationToken;
+
+        Task<object>[] callers = Enumerable.Range(1, 2)
+            .Select(key => Task.Factory.StartNew(
+                () => cache.GetOrAdd(key, _ =>
+                {
+                    factoriesEntered.Signal();
+                    releaseFactories.Wait(cancellationToken);
+                    return new object();
+                }),
+                cancellationToken,
+                TaskCreationOptions.LongRunning,
+                TaskScheduler.Default))
+            .ToArray();
+
+        bool bothFactoriesStarted = false;
+        object[]? values = null;
+        try
+        {
+            bothFactoriesStarted = factoriesEntered.Wait(
+                TimeSpan.FromSeconds(5),
+                cancellationToken);
+        }
+        finally
+        {
+            releaseFactories.Set();
+            values = await Task.WhenAll(callers)
+                .WaitAsync(TimeSpan.FromSeconds(5), CancellationToken.None);
+        }
+
+        Assert.True(bothFactoriesStarted);
+        Assert.NotSame(values[0], values[1]);
     }
 
     [Fact(DisplayName = "Single-creation cache retries a failed factory")]
@@ -82,5 +136,26 @@ public sealed class SingleCreationCacheTests
 
         Assert.Equal(2, factoryCalls);
         Assert.Same(expected, actual);
+    }
+
+    [Fact(DisplayName = "Single-creation cache rejects same-key factory reentrancy")]
+    public void RejectsSameKeyFactoryReentrancy()
+    {
+        var cache = new SingleCreationCache<int, object>();
+        var expected = new object();
+
+        object actual = cache.GetOrAdd(7, key =>
+        {
+            InvalidOperationException exception = Assert.Throws<InvalidOperationException>(
+                () => cache.GetOrAdd(key, _ => new object()));
+
+            Assert.Contains("same cache key", exception.Message, StringComparison.Ordinal);
+            return expected;
+        });
+
+        object cached = cache.GetOrAdd(7, _ => throw new InvalidOperationException("must not run"));
+
+        Assert.Same(expected, actual);
+        Assert.Same(expected, cached);
     }
 }

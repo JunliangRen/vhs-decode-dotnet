@@ -2,7 +2,7 @@
 
 [English](README.md) | **[简体中文](README.zh-CN.md)** | [日本語](README.ja.md)
 
-<!-- README_SYNC: 2026-07-31.02 -->
+<!-- README_SYNC: 2026-07-31.03 -->
 
 这是 [`oyvindln/vhs-decode`](https://github.com/oyvindln/vhs-decode)
 中解码相关部分的 .NET 11 重写，兼容目标为上游 release `v0.4.0`、commit
@@ -33,7 +33,7 @@
 - VHS 家族包括 VHS/S-VHS、Betamax、Video8/Hi8、U-matic、Type C、EIAJ
   以及上游支持的 PAL/NTSC 变体。
 - TBC 工具、双击启动的用户 GUI 和开发者绘图窗口明确不在范围内。
-- Visual Studio 2026 `.slnx` 包含 **1,128** 项标准 xUnit v3 测试；测试可在
+- Visual Studio 2026 `.slnx` 包含 **1,130** 项标准 xUnit v3 测试；测试可在
   Test Explorer 中查看，也可用 `dotnet test` 运行。
 
 <!-- SECTION: start -->
@@ -95,11 +95,11 @@ CVBS、LaserDisc 和 HiFi 当前会拒绝 `ipp-fast`，这些命令应使用 `ex
 <!-- LATEST_PERFORMANCE_BEGIN -->
 | CLI 模式（workers） | Python v0.4.0 | Exact + v0.4.0 | Exact + current | IPP-fast + v0.4.0 | IPP-fast + current |
 | --- | ---: | ---: | ---: | ---: | ---: |
-| 默认（5） | 16.983 s | 5.832 s / 2.912x | 7.033 s / 2.415x | 5.461 s / 3.110x | 6.861 s / 2.475x |
-| `--threads 1` | 21.263 s | 18.895 s / 1.125x | 21.262 s / 1.000x | 18.193 s / 1.169x | 20.828 s / 1.021x |
-| `--threads 5` | 16.880 s | 5.996 s / 2.815x | 7.393 s / 2.283x | 5.971 s / 2.827x | 7.214 s / 2.340x |
-| `--threads 10` | 17.612 s | 4.492 s / 3.921x | 5.748 s / 3.064x | 4.434 s / 3.972x | 5.816 s / 3.028x |
-| `--threads 20` | 18.330 s | 3.790 s / 4.836x | 5.094 s / 3.599x | 3.677 s / 4.985x | 4.636 s / 3.954x |
+| 默认（5） | 16.983 s | 5.660 s / 3.001x | 6.830 s / 2.486x | 5.415 s / 3.136x | 7.086 s / 2.397x |
+| `--threads 1` | 21.263 s | 18.312 s / 1.161x | 20.631 s / 1.031x | 17.982 s / 1.182x | 20.564 s / 1.034x |
+| `--threads 5` | 16.880 s | 5.487 s / 3.077x | 6.816 s / 2.477x | 5.447 s / 3.099x | 7.071 s / 2.387x |
+| `--threads 10` | 17.612 s | 4.438 s / 3.968x | 5.344 s / 3.295x | 4.520 s / 3.896x | 5.259 s / 3.349x |
+| `--threads 20` | 18.330 s | 3.718 s / 4.930x | 4.978 s / 3.682x | 3.593 s / 5.102x | 5.294 s / 3.463x |
 <!-- LATEST_PERFORMANCE_END -->
 
 最新一轮 Exact 优化保证每个 cache key 的 PocketFFT plan 和 root 在冷启动时
@@ -109,7 +109,7 @@ CVBS、LaserDisc 和 HiFi 当前会拒绝 `ipp-fast`，这些命令应使用 `ex
 
 12 次严格 main/candidate 线程与 profile 门禁，以及刷新后的 60 次矩阵运行，
 都匹配各自参考结果。5 组交错的 `current`/20-worker 配对把解码时间中位数从
-8.91 降至 8.59 秒（改善 3.6%）；平均值改善 1.4%，因此这是小幅冷启动和端到端
+9.12 降至 8.58 秒（改善 5.9%）；平均值改善 4.3%，因此这是小幅冷启动和端到端
 收益。另一次 1000 帧门禁也保持完全一致，并确认工作集有界。
 
 每个 .NET 单元格依次给出墙钟中位数和相对同一行 Python 的倍速；低于 `1.000x`
@@ -141,7 +141,7 @@ TBC、色度、JSON 和日志文件允许在解码期间并发读取，兼容的
 dotnet restore VHSDecodeDotNet.slnx
 dotnet build VHSDecodeDotNet.slnx -c Release --no-restore
 dotnet test --solution VHSDecodeDotNet.slnx -c Release `
-  --no-build --no-restore --minimum-expected-tests 1128
+  --no-build --no-restore --minimum-expected-tests 1130
 ```
 
 在 Visual Studio 2026 中打开 `VHSDecodeDotNet.slnx`，即可构建、调试并通过

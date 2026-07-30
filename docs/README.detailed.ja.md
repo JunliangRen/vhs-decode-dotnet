@@ -4,7 +4,7 @@
 
 [English](README.detailed.md) | [简体中文](README.detailed.zh-CN.md) | **[日本語](README.detailed.ja.md)**
 
-<!-- README_SYNC: 2026-07-31.02 -->
+<!-- README_SYNC: 2026-07-31.03 -->
 
 [`oyvindln/vhs-decode`](https://github.com/oyvindln/vhs-decode) の
 デコード関連部分を .NET 11 で再実装するプロジェクトです。現在は release
@@ -1737,20 +1737,20 @@ oracle measurement を維持します。
 競合すると、最終的に 1 つの value だけを公開する場合でも expensive value
 factory を複数回呼び出すことがあります。4 つの PocketFFT implementation は
 shared single-creation cache を使い、既存 value の read は concurrent fast path、
-cold miss だけが cache ごとの double-check lock に入ります。factory exception
-は cache されず、後続 call で retry できます。cache key、retained plan
-cardinality、FFT data type、coefficient、arithmetic order、thread-local scratch
-は変わりません。
+cold miss は独立した per-key gate で調整されるため、異なる length は並列に
+build できます。same-key factory reentrancy は拒否され、factory exception は
+cache されず、後続 call で retry できます。cache key、retained plan cardinality、
+FFT data type、coefficient、arithmetic order、thread-local scratch は変わりません。
 
 同条件の 100-frame allocation trace では、complex plan construction が
 30 calls/9,746,000 sampled bytes から 1 call/458,672 bytes、real plan
 construction が 30 calls/3,031,704 sampled bytes から 1 call/131,120 bytes
 になりました。duplicate sampled construction を 12,187,912 bytes
 （12.19 MB）除去し、total sampled allocation は 4,611,843,896 から
-4,599,481,168 bytes に減りました。float-real plan build 2 回は実際の
+4,598,751,544 bytes に減りました。float-real plan build 2 回は実際の
 2 lengths に対応するため変わりません。
 
-candidate は標準 Release build と xUnit v3 test 1,128 件をすべて pass し、
+candidate は標準 Release build と xUnit v3 test 1,130 件をすべて pass し、
 concurrent factory、failure 後の retry、mixed-radix、workspace、FFT の focused
 test を含みます。strict main/candidate run 12 回は Exact v0.4.0/`current` の
 `--threads 0`、省略/default-five、`--threads 20` を対象とし、各 profile 内の
@@ -1762,12 +1762,12 @@ default/1/5/10/20-worker matrix 60 回も、各 backend/profile reference と一
 `g4315520 --threads 0` evidence を transitive upstream reference としています。
 
 交互順序の 100-frame Exact `current`/20-worker pair 5 組では、decode-time
-median が 8.91 から 8.59 秒（3.6% 減）になりました。candidate の 1 run が
-遅かったため、mean は 8.932 から 8.806 秒（1.4% 減）であり、modest な
+median が 9.12 から 8.58 秒（5.9% 減）になりました。run 間の variance は
+残りましたが、mean は 9.150 から 8.756 秒（4.3% 減）であり、modest な
 cold-start/end-to-end gain と判断します。別の candidate 1,000-frame run は
-2,000 fields を 70.235 秒で完了し、current-main の luma、chroma、raw JSON、
+2,000 fields を 69.862 秒で完了し、current-main の luma、chroma、raw JSON、
 normalized stderr/log、ordered `fileLoc` reference と一致しました。sampled
-working set は maximum 757.9 MiB、first/final-third median 612.9/638.4 MiB
+working set は maximum 1,479.6 MiB、first/final-third median 659.9/593.2 MiB
 で、progressive growth のない bounded memory を支持します。
 
 </details>
@@ -1788,7 +1788,7 @@ working set は maximum 757.9 MiB、first/final-third median 612.9/638.4 MiB
 .\tools\build-ipp-native.ps1
 dotnet restore VHSDecodeDotNet.slnx
 dotnet build VHSDecodeDotNet.slnx -c Release --no-restore
-dotnet test --solution VHSDecodeDotNet.slnx -c Release --no-build --no-restore --minimum-expected-tests 1128
+dotnet test --solution VHSDecodeDotNet.slnx -c Release --no-build --no-restore --minimum-expected-tests 1130
 ```
 
 最初の command は optional `ipp-fast` native artifact を含めるためのものです。
@@ -1801,7 +1801,7 @@ third-party notice を埋め込み、license sidecar file は追加しません�
 
 現在の正式な Release build は warning 0、error 0 です。xUnit v3 project は
 `dotnet test` と Visual Studio Test Explorer の両方で個別に検出できる
-**1,128** tests を公開します。
+**1,130** tests を公開します。
 
 <!-- SECTION: usage -->
 

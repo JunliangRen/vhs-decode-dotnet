@@ -4,7 +4,7 @@
 
 [English](README.detailed.md) | **[简体中文](README.detailed.zh-CN.md)** | [日本語](README.detailed.ja.md)
 
-<!-- README_SYNC: 2026-07-31.02 -->
+<!-- README_SYNC: 2026-07-31.03 -->
 
 这是 [`oyvindln/vhs-decode`](https://github.com/oyvindln/vhs-decode)
 中解码相关部分的 .NET 11 重写，当前以 release `v0.4.0`、commit
@@ -1431,19 +1431,19 @@ v0.4.0 从 55.700 改善到 55.200 秒（0.90%，1.009x），CPU 时间减少
 最新一轮 Exact PocketFFT cache 优化消除了 cold key 的重复 plan 构建。
 `ConcurrentDictionary.GetOrAdd` 在多个 worker 同时遇到缺失 key 时，可能多次调用
 昂贵的 value factory，尽管最终只发布一个值。四个 PocketFFT 实现现在共用
-single-creation cache：已有值仍走并发快速路径，只有 cold miss 进入每个 cache
-自己的 double-check lock；factory 异常不会被缓存，后续可以重试。cache key、
-最终保留的 plan 数量、FFT 数据类型、系数、运算顺序和 thread-local scratch
-均未改变。
+single-creation cache：已有值仍走并发快速路径，cold miss 通过彼此独立的
+per-key gate 协调，因此不同长度仍可并行构建；同 key factory 重入会被拒绝，
+factory 异常不会被缓存，后续可以重试。cache key、最终保留的 plan 数量、
+FFT 数据类型、系数、运算顺序和 thread-local scratch 均未改变。
 
 同条件 100 帧 allocation trace 中，complex plan 构建从 30 次、
 9,746,000 sampled bytes 降至 1 次、458,672 bytes；real plan 构建从 30 次、
 3,031,704 sampled bytes 降至 1 次、131,120 bytes。共消除 12,187,912 bytes
 （12.19 MB）重复 sampled 构建，总 sampled allocation 从 4,611,843,896
-降至 4,599,481,168 bytes。float-real 的两次 plan 构建对应两个真实长度，
+降至 4,598,751,544 bytes。float-real 的两次 plan 构建对应两个真实长度，
 因此保持不变。
 
-候选通过标准 Release 构建和全部 1,128 项 xUnit v3 测试，包括并发 factory、
+候选通过标准 Release 构建和全部 1,130 项 xUnit v3 测试，包括并发 factory、
 异常后重试、mixed-radix、workspace 和 FFT 聚焦测试。12 次严格 main/candidate
 运行覆盖 Exact v0.4.0 与 `current` 的 `--threads 0`、省略参数/默认 5 workers
 及 `--threads 20`；每个 profile 内的亮度、色度、原始 JSON、stdout、归一化
@@ -1454,11 +1454,11 @@ Python；main 已有的 Python v0.4.0 `g4315520 --threads 0` 直接证据仍作�
 上游参考。
 
 5 组交错顺序的 100 帧 Exact `current`/20-worker 配对把解码时间中位数从
-8.91 降至 8.59 秒（减少 3.6%）。由于一次候选运行偏慢，平均值只从 8.932
-降至 8.806 秒（减少 1.4%），因此按小幅冷启动和端到端收益处理。另一次候选
-1000 帧运行在 70.235 秒内完成全部 2000 fields，并匹配当前 main 的亮度、
+9.12 降至 8.58 秒（减少 5.9%）。运行间仍有可见波动，平均值从 9.150
+降至 8.756 秒（减少 4.3%），因此按小幅冷启动和端到端收益处理。另一次候选
+1000 帧运行在 69.862 秒内完成全部 2000 fields，并匹配当前 main 的亮度、
 色度、原始 JSON、归一化 stderr/日志及有序 `fileLoc`。采样工作集峰值
-757.9 MiB，首段/末段三分位中位数为 612.9/638.4 MiB，支持内存有界且没有
+1,479.6 MiB，首段/末段三分位中位数为 659.9/593.2 MiB，支持内存有界且没有
 渐进增长。
 
 </details>
@@ -1479,7 +1479,7 @@ Python；main 已有的 Python v0.4.0 `g4315520 --threads 0` 直接证据仍作�
 .\tools\build-ipp-native.ps1
 dotnet restore VHSDecodeDotNet.slnx
 dotnet build VHSDecodeDotNet.slnx -c Release --no-restore
-dotnet test --solution VHSDecodeDotNet.slnx -c Release --no-build --no-restore --minimum-expected-tests 1128
+dotnet test --solution VHSDecodeDotNet.slnx -c Release --no-build --no-restore --minimum-expected-tests 1130
 ```
 
 第一条命令用于包含可选的 `ipp-fast` 原生产物；只构建 Exact 时可以省略。
@@ -1490,7 +1490,7 @@ Intel oneAPI。只含二进制的单文件发布会嵌入 `vhsdecode_ipp.dll` �
 notice，不会额外生成许可证 sidecar 文件。只构建 Exact 后端时可以省略原生构建步骤。
 
 当前正式 Release 构建为零警告、零错误。xUnit v3 项目向
-`dotnet test` 和 Visual Studio Test Explorer 暴露 **1,128** 个可独立发现的测试。
+`dotnet test` 和 Visual Studio Test Explorer 暴露 **1,130** 个可独立发现的测试。
 
 <!-- SECTION: usage -->
 

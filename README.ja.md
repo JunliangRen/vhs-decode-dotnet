@@ -2,7 +2,7 @@
 
 [English](README.md) | [简体中文](README.zh-CN.md) | **[日本語](README.ja.md)**
 
-<!-- README_SYNC: 2026-07-31.02 -->
+<!-- README_SYNC: 2026-07-31.03 -->
 
 [`oyvindln/vhs-decode`](https://github.com/oyvindln/vhs-decode) の
 デコード関連部分を .NET 11 で再実装するプロジェクトです。互換性の対象は
@@ -36,7 +36,7 @@ upstream release `v0.4.0`、commit
 - VHS family には VHS/S-VHS、Betamax、Video8/Hi8、U-matic、Type C、EIAJ、
   upstream が対応する PAL/NTSC variant が含まれます。
 - TBC utility、ダブルクリック GUI、開発者向け plot window は対象外です。
-- Visual Studio 2026 の `.slnx` には **1,128** 件の標準 xUnit v3 test があり、
+- Visual Studio 2026 の `.slnx` には **1,130** 件の標準 xUnit v3 test があり、
   Test Explorer と `dotnet test` の両方で実行できます。
 
 <!-- SECTION: start -->
@@ -100,11 +100,11 @@ CVBS、LaserDisc、HiFi は現在 `ipp-fast` を拒否するため、これら�
 <!-- LATEST_PERFORMANCE_BEGIN -->
 | CLI mode（workers） | Python v0.4.0 | Exact + v0.4.0 | Exact + current | IPP-fast + v0.4.0 | IPP-fast + current |
 | --- | ---: | ---: | ---: | ---: | ---: |
-| default（5） | 16.983 s | 5.832 s / 2.912x | 7.033 s / 2.415x | 5.461 s / 3.110x | 6.861 s / 2.475x |
-| `--threads 1` | 21.263 s | 18.895 s / 1.125x | 21.262 s / 1.000x | 18.193 s / 1.169x | 20.828 s / 1.021x |
-| `--threads 5` | 16.880 s | 5.996 s / 2.815x | 7.393 s / 2.283x | 5.971 s / 2.827x | 7.214 s / 2.340x |
-| `--threads 10` | 17.612 s | 4.492 s / 3.921x | 5.748 s / 3.064x | 4.434 s / 3.972x | 5.816 s / 3.028x |
-| `--threads 20` | 18.330 s | 3.790 s / 4.836x | 5.094 s / 3.599x | 3.677 s / 4.985x | 4.636 s / 3.954x |
+| default（5） | 16.983 s | 5.660 s / 3.001x | 6.830 s / 2.486x | 5.415 s / 3.136x | 7.086 s / 2.397x |
+| `--threads 1` | 21.263 s | 18.312 s / 1.161x | 20.631 s / 1.031x | 17.982 s / 1.182x | 20.564 s / 1.034x |
+| `--threads 5` | 16.880 s | 5.487 s / 3.077x | 6.816 s / 2.477x | 5.447 s / 3.099x | 7.071 s / 2.387x |
+| `--threads 10` | 17.612 s | 4.438 s / 3.968x | 5.344 s / 3.295x | 4.520 s / 3.896x | 5.259 s / 3.349x |
+| `--threads 20` | 18.330 s | 3.718 s / 4.930x | 4.978 s / 3.682x | 3.593 s / 5.102x | 5.294 s / 3.463x |
 <!-- LATEST_PERFORMANCE_END -->
 
 最新の Exact pass は、cold PocketFFT plan/root construction を cache key ごとに
@@ -115,7 +115,7 @@ duplicate construction を除去しました。
 
 main/candidate の strict thread-profile gate 12 回と refreshed matrix 60 回は、
 すべて各 reference と一致しました。交互順序の `current`/20-worker pair 5 組では、
-decode-time median が 8.91 から 8.59 秒（3.6% 改善）、mean が 1.4% 改善したため、
+decode-time median が 9.12 から 8.58 秒（5.9% 改善）、mean が 4.3% 改善したため、
 modest な cold-start/end-to-end gain と判断します。1,000-frame gate も完全一致し、
 working set が bounded であることを確認しました。
 
@@ -151,7 +151,7 @@ preview tool は writer を止めずに partial output を確認できます。
 dotnet restore VHSDecodeDotNet.slnx
 dotnet build VHSDecodeDotNet.slnx -c Release --no-restore
 dotnet test --solution VHSDecodeDotNet.slnx -c Release `
-  --no-build --no-restore --minimum-expected-tests 1128
+  --no-build --no-restore --minimum-expected-tests 1130
 ```
 
 Visual Studio 2026 で `VHSDecodeDotNet.slnx` を開くと、build、debug、
