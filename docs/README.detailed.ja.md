@@ -1625,7 +1625,7 @@ double field を allocation せず、public resampling API も independent-outpu
 contract を維持します。各 role で保持する buffer は 1 個だけで、shape change は
 置換されるため、retained memory は decode length に比例せず bounded です。
 
-Release solution は warning/error 0 で build され、1,120 件の xUnit v3 test が
+Release solution は warning/error 0 で build され、1,122 件の xUnit v3 test が
 すべて pass しました。real profile/thread gate 6 組は Exact v0.4.0 と `current`
 の `--threads 0`、default-five、`--threads 20` を網羅しました。candidate は
 baseline の luma、chroma、raw JSON、stdout、normalized stderr/log、すべての
@@ -1669,7 +1669,7 @@ collection-timing peak を resident-memory reduction とは表現しません。
 .\tools\build-ipp-native.ps1
 dotnet restore VHSDecodeDotNet.slnx
 dotnet build VHSDecodeDotNet.slnx -c Release --no-restore
-dotnet test --solution VHSDecodeDotNet.slnx -c Release --no-build --no-restore --minimum-expected-tests 1120
+dotnet test --solution VHSDecodeDotNet.slnx -c Release --no-build --no-restore --minimum-expected-tests 1122
 ```
 
 最初の command は optional `ipp-fast` native artifact を含めるためのものです。
@@ -1682,7 +1682,7 @@ third-party notice を埋め込み、license sidecar file は追加しません�
 
 現在の正式な Release build は warning 0、error 0 です。xUnit v3 project は
 `dotnet test` と Visual Studio Test Explorer の両方で個別に検出できる
-**1,120** tests を公開します。
+**1,122** tests を公開します。
 
 <!-- SECTION: usage -->
 

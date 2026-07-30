@@ -1676,7 +1676,7 @@ field, and public resampling APIs retain their independent-output contract.
 Shape changes replace the single retained buffer in each role, so
 retained memory is bounded rather than proportional to decode length.
 
-The Release solution built with zero warnings and errors, and all 1,120 xUnit
+The Release solution built with zero warnings and errors, and all 1,122 xUnit
 v3 tests passed. Six real profile/thread gates covered Exact v0.4.0 and
 `current` at `--threads 0`, default-five, and `--threads 20`. The candidate
 matched baseline luma, chroma, raw JSON, stdout, normalized stderr/logs, and
@@ -1721,7 +1721,7 @@ Requirements:
 .\tools\build-ipp-native.ps1
 dotnet restore VHSDecodeDotNet.slnx
 dotnet build VHSDecodeDotNet.slnx -c Release --no-restore
-dotnet test --solution VHSDecodeDotNet.slnx -c Release --no-build --no-restore --minimum-expected-tests 1120
+dotnet test --solution VHSDecodeDotNet.slnx -c Release --no-build --no-restore --minimum-expected-tests 1122
 ```
 
 The first command includes the optional `ipp-fast` native artifact; omit it for
@@ -1734,7 +1734,7 @@ deployment computer. Binary-only single-file releases embed
 sidecar license files. An Exact-only build may omit the native build step.
 
 The current formal Release build has zero warnings and errors. The xUnit v3
-project exposes **1,120** independently discoverable tests to both
+project exposes **1,122** independently discoverable tests to both
 `dotnet test` and Visual Studio Test Explorer.
 
 <!-- SECTION: usage -->
