@@ -103,9 +103,10 @@ CVBS、LaserDisc 和 HiFi 当前会拒绝 `ipp-fast`，这些命令应使用 `ex
 <!-- LATEST_PERFORMANCE_END -->
 
 最新一轮 Exact 场重采样优化为有状态的 CLI 顺序解码器分别保留一个定长亮度
-workspace 和一个定长色度 workspace。公共 `Decode()` 结果仍拥有独立的
-`ChromaBurstSamples`；直接 UInt16 路径、16-tap sinc 表达式和运算顺序以及公共
-复制 API 均未改变。六组 profile/thread 门禁和上表全部 60 次运行都保持精确。
+workspace 和一个定长色度 workspace。公共 `Decode()` 与保留结果的
+`DecodeFields()` 仍为每个结果提供独立的 `ChromaBurstSamples`；只有 CLI 内部
+非保留路径省略它。直接 UInt16 路径、16-tap sinc 表达式和运算顺序以及公共复制
+API 均未改变。六组 profile/thread 门禁和上表全部 60 次运行都保持精确。
 两组相反顺序的 current/20-worker 1000 帧配对中，分配从 126.226 降至
 110.873 GiB（减少 12.16%），墙钟从 141.015 降至 140.405 秒（减少 0.43%，
 吞吐 1.004x），GC pause 从 1.015 降至 0.885 秒。默认 current 配对的墙钟也

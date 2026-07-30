@@ -113,9 +113,10 @@ separately from speed.
 <!-- LATEST_PERFORMANCE_END -->
 
 The latest Exact field-resampling pass gives the stateful CLI sequence decoder
-separate exact-length luma and chroma workspaces. Public `Decode()` results
-still own independent `ChromaBurstSamples`; the direct UInt16 path, 16-tap
-sinc expressions and order, and public copying APIs are unchanged. Six
+separate exact-length luma and chroma workspaces. Public `Decode()` and retained
+`DecodeFields()` results still own independent `ChromaBurstSamples`; only the
+internal non-retaining CLI path omits them. The direct UInt16 path, 16-tap sinc
+expressions and order, and public copying APIs are unchanged. Six
 profile/thread gates and all 60 matrix runs above remained exact. Across two
 opposite-order current/20-worker 1,000-frame pairs, allocation fell from
 126.226 to 110.873 GiB (12.16%), wall time from 141.015 to 140.405 s (0.43%,

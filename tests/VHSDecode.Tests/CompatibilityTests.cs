@@ -12068,6 +12068,7 @@ public void TbcFieldDecodePipelineAppliesAnalyzedVhsTrackPhaseToLuma(
     TbcFieldDecodePipeline serialPipeline = CreatePipeline(workerThreads: 1);
     TbcFieldDecodePipeline pipeline = CreatePipeline(workerThreads: 4);
     TbcFieldDecodePipeline sequencePipeline = CreatePipeline(workerThreads: 4);
+    TbcFieldDecodePipeline retainedSequencePipeline = CreatePipeline(workerThreads: 4);
 
     double[] video = Enumerable.Repeat(0.0, 6_500).ToArray();
     PaintPulse(video, 10, 10, -40.0);
@@ -12093,9 +12094,25 @@ public void TbcFieldDecodePipelineAppliesAnalyzedVhsTrackPhaseToLuma(
     TbcDecodedField serialFirst = serialPipeline.Decode(firstSpan, fieldNumber: 0);
     TbcDecodedField serialSecond = serialPipeline.Decode(secondSpan, fieldNumber: 1);
     TbcDecodedField sequenceFirst =
-        sequencePipeline.DecodeVhsForSequence(firstSpan, fieldNumber: 0);
+        sequencePipeline.DecodeVhsForSequence(
+            firstSpan,
+            fieldNumber: 0,
+            retainChromaBurstSamples: false);
     TbcDecodedField sequenceSecond =
-        sequencePipeline.DecodeVhsForSequence(secondSpan, fieldNumber: 1);
+        sequencePipeline.DecodeVhsForSequence(
+            secondSpan,
+            fieldNumber: 1,
+            retainChromaBurstSamples: false);
+    TbcDecodedField retainedSequenceFirst =
+        retainedSequencePipeline.DecodeVhsForSequence(
+            firstSpan,
+            fieldNumber: 0,
+            retainChromaBurstSamples: true);
+    TbcDecodedField retainedSequenceSecond =
+        retainedSequencePipeline.DecodeVhsForSequence(
+            secondSpan,
+            fieldNumber: 1,
+            retainChromaBurstSamples: true);
     TbcDecodedField first = pipeline.Decode(firstSpan, fieldNumber: 0);
     AssertEqual<int?>(firstNextTrackPhase, pipeline.CaptureState().ChromaRotationIndex);
     AssertEqual(firstExpectedSample, first.Samples[stableLumaSample]);
@@ -12112,10 +12129,29 @@ public void TbcFieldDecodePipelineAppliesAnalyzedVhsTrackPhaseToLuma(
     Assert.NotSame(serialFirst.ChromaBurstSamples, serialSecond.ChromaBurstSamples);
     Assert.Null(sequenceFirst.ChromaBurstSamples);
     Assert.Null(sequenceSecond.ChromaBurstSamples);
+    Assert.NotNull(retainedSequenceFirst.ChromaBurstSamples);
+    Assert.NotNull(retainedSequenceSecond.ChromaBurstSamples);
+    Assert.NotSame(
+        retainedSequenceFirst.ChromaBurstSamples,
+        retainedSequenceSecond.ChromaBurstSamples);
+    Assert.Equal<double>(
+        serialFirst.ChromaBurstSamples!,
+        retainedSequenceFirst.ChromaBurstSamples!);
+    Assert.Equal<double>(
+        serialSecond.ChromaBurstSamples!,
+        retainedSequenceSecond.ChromaBurstSamples!);
     Assert.Equal<ushort>(serialFirst.Samples, sequenceFirst.Samples);
     Assert.Equal<ushort>(serialFirst.ChromaSamples!, sequenceFirst.ChromaSamples!);
     Assert.Equal<ushort>(serialSecond.Samples, sequenceSecond.Samples);
     Assert.Equal<ushort>(serialSecond.ChromaSamples!, sequenceSecond.ChromaSamples!);
+    Assert.Equal<ushort>(serialFirst.Samples, retainedSequenceFirst.Samples);
+    Assert.Equal<ushort>(
+        serialFirst.ChromaSamples!,
+        retainedSequenceFirst.ChromaSamples!);
+    Assert.Equal<ushort>(serialSecond.Samples, retainedSequenceSecond.Samples);
+    Assert.Equal<ushort>(
+        serialSecond.ChromaSamples!,
+        retainedSequenceSecond.ChromaSamples!);
 }
 
 static double[] BuildOutputChromaCarrier(int lineLength, int lineCount, double fscMHz, double outputSampleRateHz)

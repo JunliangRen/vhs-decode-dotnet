@@ -109,8 +109,9 @@ CVBS、LaserDisc、HiFi は現在 `ipp-fast` を拒否するため、これら�
 
 最新の Exact field-resampling pass は、stateful CLI sequence decoder に
 exact-length の luma workspace と chroma workspace を個別に保持します。public
-`Decode()` result は引き続き独立した `ChromaBurstSamples` を所有し、direct
-UInt16 path、16-tap sinc の式と演算順序、public copying API は変わりません。
+`Decode()` と retained `DecodeFields()` の result は引き続き独立した
+`ChromaBurstSamples` を所有し、internal non-retaining CLI path だけが省略します。
+direct UInt16 path、16-tap sinc の式と演算順序、public copying API は変わりません。
 6 組の profile/thread gate と上の 60 run はすべて exact でした。反対順序の
 current/20-worker 1,000-frame pair 2 組では、allocation が 126.226 から
 110.873 GiB（12.16% 減）、wall time が 141.015 から 140.405 秒

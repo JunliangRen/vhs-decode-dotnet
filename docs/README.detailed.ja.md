@@ -290,9 +290,10 @@ FFT への fallback が必要で、paired median gain は -1.05% まで低下し
   rent し、正確な span だけを使用して、同期 serial/parallel resample の完了後に返却します。
 - stateful VHS CLI sequence path は、luma rendering と chroma decode が重なるため、
   exact-length の luma field workspace と別の chroma field workspace を保持します。
-  public `Decode()` result は独立した `ChromaBurstSamples` を所有し続け、direct UInt16
-  path は double field を必要とせず、public resampling API も independent-output
-  ownership を維持します。
+  public `Decode()` と retained `DecodeFields()` の result は独立した
+  `ChromaBurstSamples` を所有し続け、internal non-retaining CLI path だけが省略します。
+  direct UInt16 path は double field を必要とせず、public resampling API も
+  independent-output ownership を維持します。
 - VHS diff-demod spike repair は、既存の 16-slot real-FFT workspace pool 内にある全長の
   complex scratch array を再利用します。返される analytic array は独立した ownership を
   維持し、非 VHS path は従来の allocation fallback を保持します。
@@ -391,7 +392,7 @@ Windows 11 25H2 build 26220.8925、.NET SDK/runtime
 Python 列は以前の fixed matrix median を保持し、4 つの .NET 列は 60 回の
 interleaved run で再測定しました。candidate は `d07d1ad` に下記の
 field-resampling workspace 最適化を加えたもので、single-file `decode.exe` SHA-256 は
-`5A43C9E34EA01CEA29DA78831BE7C61F6B9E654FBC757E1520785A2335380465`
+`EDFECE6AD069D9D05E73BCA426162FC73CEEB0A5313F1C6FD0DD470F5DE2178B`
 でした。fixed 40-frame matrix には startup cost と run ごとの spread が含まれ、
 下記の反対順序 1,000-frame pair が stable whole-pipeline A/B を示します。
 Python 3.14.0 は NumPy 2.4.6、SciPy 1.18.0、Numba 0.66.0、
@@ -1617,12 +1618,12 @@ compatibility reference を通過しました。
 しますが、16-tap sinc expression、float32 conversion point、sample order、
 resampling plan は変えません。stateful VHS CLI sequence decoder は、bounded
 chroma task が luma rendering と重なるため、exact-length の luma workspace と
-別の chroma workspace を所有します。public `Decode()` は独立した
-`ChromaBurstSamples` を引き続き allocation して返し、sequence result は internal
-buffer を公開しません。direct UInt16 path は double field を allocation せず、
-public resampling API も independent-output contract を維持します。各 role で保持
-する buffer は 1 個だけで、shape change は置換されるため、retained memory は
-decode length に比例せず bounded です。
+別の chroma workspace を所有します。public `Decode()` と retained
+`DecodeFields()` は独立した `ChromaBurstSamples` を引き続き allocation して返し、
+internal non-retaining CLI sequence result だけが省略します。direct UInt16 path は
+double field を allocation せず、public resampling API も independent-output
+contract を維持します。各 role で保持する buffer は 1 個だけで、shape change は
+置換されるため、retained memory は decode length に比例せず bounded です。
 
 Release solution は warning/error 0 で build され、1,120 件の xUnit v3 test が
 すべて pass しました。real profile/thread gate 6 組は Exact v0.4.0 と `current`

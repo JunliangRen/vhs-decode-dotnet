@@ -691,12 +691,15 @@ public sealed class TbcFieldDecodePipeline
             deferCvbsOutputConversion: true,
             retainChromaBurstSamples: true);
 
-    internal TbcDecodedField DecodeVhsForSequence(RfDecodedSpan span, int fieldNumber)
+    internal TbcDecodedField DecodeVhsForSequence(
+        RfDecodedSpan span,
+        int fieldNumber,
+        bool retainChromaBurstSamples)
         => Decode(
             span,
             syncThresholdHz: null,
             fieldNumber,
-            retainChromaBurstSamples: false);
+            retainChromaBurstSamples);
 
     internal bool CanDeferCvbsOutputConversion
         => string.Equals(_decodeType, "cvbs", StringComparison.Ordinal)

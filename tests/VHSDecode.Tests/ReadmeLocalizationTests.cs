@@ -433,7 +433,7 @@ public sealed partial class ReadmeLocalizationTests
             "16.52",
             "35.84/39.54",
             "1.459/1.231/0.820/1.422",
-            "5A43C9E34EA01CEA29DA78831BE7C61F6B9E654FBC757E1520785A2335380465",
+            "EDFECE6AD069D9D05E73BCA426162FC73CEEB0A5313F1C6FD0DD470F5DE2178B",
             "20.311490",
             "2.623486",
             "2,240,768",

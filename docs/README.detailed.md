@@ -303,9 +303,10 @@ falling back to the Exact inverse FFT and reduced the paired median gain to
   synchronous serial or parallel resample.
 - The stateful VHS CLI sequence path retains one exact-length luma field
   workspace and one separate chroma field workspace because luma rendering can
-  overlap chroma decoding. Public `Decode()` results still own independent
-  `ChromaBurstSamples`, the direct UInt16 path needs no double field, and
-  public resampling APIs retain independent-output ownership.
+  overlap chroma decoding. Public `Decode()` and retained `DecodeFields()`
+  results still own independent `ChromaBurstSamples`; only the internal
+  non-retaining CLI path omits them. The direct UInt16 path needs no double
+  field, and public resampling APIs retain independent-output ownership.
 - VHS diff-demod spike repair reuses one full-length complex scratch array
   inside the existing 16-slot real-FFT workspace pool. Returned analytic arrays
   retain independent ownership; non-VHS paths keep their allocating fallback.
@@ -412,7 +413,7 @@ medians because Python did not change; all four .NET columns were refreshed
 with 60 interleaved runs. The candidate was based on `d07d1ad` plus the
 field-resampling workspace optimization described below; its single-file
 `decode.exe` SHA-256 was
-`5A43C9E34EA01CEA29DA78831BE7C61F6B9E654FBC757E1520785A2335380465`.
+`EDFECE6AD069D9D05E73BCA426162FC73CEEB0A5313F1C6FD0DD470F5DE2178B`.
 The fixed 40-frame matrix includes startup cost and per-run spread; the
 opposite-order 1,000-frame pairs below provide the stable whole-pipeline A/B.
 Python 3.14.0 used NumPy 2.4.6, SciPy 1.18.0, Numba 0.66.0, and python-soxr
@@ -1667,11 +1668,12 @@ The latest Exact field-resampling allocation pass adds destination-buffer
 forms without changing the 16-tap sinc expression, float32 conversion point,
 sample order, or resampling plan. The stateful VHS CLI sequence decoder owns
 one exact-length luma workspace and one separate chroma workspace because its
-bounded chroma task can overlap luma rendering. Public `Decode()` calls still
-allocate and return independent `ChromaBurstSamples`; sequence results omit
-that internal buffer, the direct UInt16 path remains allocation-free for the
-double field, and public resampling APIs retain their independent-output
-contract. Shape changes replace the single retained buffer in each role, so
+bounded chroma task can overlap luma rendering. Public `Decode()` and retained
+`DecodeFields()` results still allocate and return independent
+`ChromaBurstSamples`; only internal non-retaining CLI sequence results omit
+that buffer. The direct UInt16 path remains allocation-free for the double
+field, and public resampling APIs retain their independent-output contract.
+Shape changes replace the single retained buffer in each role, so
 retained memory is bounded rather than proportional to decode length.
 
 The Release solution built with zero warnings and errors, and all 1,120 xUnit

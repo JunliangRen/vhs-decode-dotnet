@@ -252,8 +252,9 @@ non-Intel vendor warning。后端会加载静态链接的 `vhsdecode_ipp.dll`，
 - 默认 linear TBC 重采样会租用每场的 source-position 与 level-adjust 工作区，按精确 span
   使用，并在每次同步串行或并行重采样结束后归还两者。
 - 有状态的 VHS CLI 顺序路径会分别保留一个精确长度的亮度场 workspace 和色度场
-  workspace，因为亮度渲染可能与色度解码重叠。公共 `Decode()` 结果仍拥有独立的
-  `ChromaBurstSamples`，直接 UInt16 路径不需要 double 场缓冲，公共重采样 API
+  workspace，因为亮度渲染可能与色度解码重叠。公共 `Decode()` 和保留结果的
+  `DecodeFields()` 仍为每个结果提供独立的 `ChromaBurstSamples`，只有 CLI 内部
+  非保留路径省略它。直接 UInt16 路径不需要 double 场缓冲，公共重采样 API
   继续遵守独立输出所有权。
 - VHS diff-demod 尖峰修复复用现有 16 槽 real-FFT 工作区池中的一块全长复数暂存数组；
   返回的 analytic 数组仍保持独立所有权，非 VHS 路径保留原有的分配回退。
@@ -334,7 +335,7 @@ Python v0.4.0、Exact v0.4.0、Exact `current`、IPP-fast v0.4.0 和 IPP-fast
 没有变化，因此 Python 列保留上一份固定矩阵的中位数；四列 .NET 数据均通过
 60 次交错运行重新测量。候选基于 `d07d1ad` 并包含下述场重采样 workspace
 优化；其单文件 `decode.exe` SHA-256 为
-`5A43C9E34EA01CEA29DA78831BE7C61F6B9E654FBC757E1520785A2335380465`。
+`EDFECE6AD069D9D05E73BCA426162FC73CEEB0A5313F1C6FD0DD470F5DE2178B`。
 固定 40 帧矩阵包含启动成本和单次波动；下文相反顺序的 1000 帧配对提供稳定的
 整条流水线 A/B。Python 3.14.0 使用 NumPy 2.4.6、SciPy 1.18.0、
 Numba 0.66.0 和 python-soxr 1.1.0。公共参数为：
@@ -1331,16 +1332,17 @@ GitHub Actions 同样发现 1,118 项测试：1,117 项通过，一项需要可�
 最新一轮 Exact 场重采样分配优化增加了 destination-buffer 形式，但不改变
 16-tap sinc 表达式、float32 转换点、样本顺序或重采样计划。有状态的 VHS CLI
 顺序解码器持有一块精确长度的亮度 workspace 和一块独立色度 workspace，因为
-有界色度任务可能与亮度渲染重叠。公共 `Decode()` 仍分配并返回独立的
-`ChromaBurstSamples`；顺序结果不暴露内部缓冲，直接 UInt16 路径仍不分配
-double 场，公共重采样 API 继续遵守独立输出契约。每个角色只保留一块缓冲，
-形状变化时替换，因此保留内存有界且不会随解码长度增长。
+有界色度任务可能与亮度渲染重叠。公共 `Decode()` 和保留结果的 `DecodeFields()`
+仍分配并返回独立的 `ChromaBurstSamples`；只有 CLI 内部非保留顺序结果省略它。
+直接 UInt16 路径仍不分配 double 场，公共重采样 API 继续遵守独立输出契约。
+每个角色只保留一块缓冲，形状变化时替换，因此保留内存有界且不会随解码长度增长。
 
 Release 解决方案以零警告、零错误构建，全部 1,120 项 xUnit v3 测试通过。
 六组真实 profile/thread 门禁覆盖 Exact v0.4.0 和 `current` 的
 `--threads 0`、默认 5 与 `--threads 20`。候选在亮度、色度、原始 JSON、
 stdout、归一化 stderr/日志和全部有序 `fileLoc` 上匹配基线；连续公共
-`Decode()` 结果也保留不同的色度 burst 数组。刷新后的五路径矩阵对四种
+`Decode()` 与保留结果的 `DecodeFields()` 也保留不同的色度 burst 数组。刷新后的
+五路径矩阵对四种
 Exact/IPP profile 组合分别以默认、1、5、10、20 workers 各运行三次，
 全部 60 次都匹配既有兼容参考。
 
