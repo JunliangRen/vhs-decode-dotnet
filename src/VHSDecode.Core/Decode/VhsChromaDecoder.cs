@@ -682,17 +682,39 @@ public static class VhsChromaDecoder
         ushort[] gained;
         if (options.UseCurrentChromaProcessing)
         {
-            double[] currentChroma = options.DisableComb
-                ? upconverted
-                : IsNtsc(options.ColorSystem)
-                    ? ApplyNtscComb(
-                        upconverted,
-                        options.OutputLineLength,
-                        retainFloat32)
-                    : ApplyPalComb(
-                        upconverted,
+            double[] currentChroma = upconverted;
+            if (!options.DisableComb)
+            {
+                bool isNtsc = IsNtsc(options.ColorSystem);
+                if (finalFilter is not null)
+                {
+                    // A custom filter may retain or share its returned array.
+                    currentChroma = isNtsc
+                        ? ApplyNtscComb(
+                            currentChroma,
+                            options.OutputLineLength,
+                            retainFloat32)
+                        : ApplyPalComb(
+                            currentChroma,
+                            options.OutputLineLength,
+                            retainFloat32);
+                }
+                else if (isNtsc)
+                {
+                    ApplyNtscCombInPlace(
+                        currentChroma,
                         options.OutputLineLength,
                         retainFloat32);
+                }
+                else
+                {
+                    ApplyPalCombInPlace(
+                        currentChroma,
+                        options.OutputLineLength,
+                        retainFloat32);
+                }
+            }
+
             CurrentAutomaticChromaGainResult gain =
                 ApplyCurrentAutomaticChromaGainInPlace(
                     currentChroma,
@@ -1842,7 +1864,9 @@ public static class VhsChromaDecoder
         int lineLength,
         bool retainFloat32 = true)
     {
-        return ApplyComb(chroma, lineLength, lineDistance: 1, retainFloat32);
+        double[] output = chroma.ToArray();
+        ApplyCombInPlace(output, lineLength, lineDistance: 1, retainFloat32);
+        return output;
     }
 
     public static double[] ApplyPalComb(
@@ -1850,8 +1874,22 @@ public static class VhsChromaDecoder
         int lineLength,
         bool retainFloat32 = true)
     {
-        return ApplyComb(chroma, lineLength, lineDistance: 2, retainFloat32);
+        double[] output = chroma.ToArray();
+        ApplyCombInPlace(output, lineLength, lineDistance: 2, retainFloat32);
+        return output;
     }
+
+    internal static void ApplyNtscCombInPlace(
+        Span<double> chroma,
+        int lineLength,
+        bool retainFloat32 = true)
+        => ApplyCombInPlace(chroma, lineLength, lineDistance: 1, retainFloat32);
+
+    internal static void ApplyPalCombInPlace(
+        Span<double> chroma,
+        int lineLength,
+        bool retainFloat32 = true)
+        => ApplyCombInPlace(chroma, lineLength, lineDistance: 2, retainFloat32);
 
     public static double[] ApplyBurstDeemphasis(
         ReadOnlySpan<double> chroma,
@@ -2380,32 +2418,52 @@ public static class VhsChromaDecoder
         }
     }
 
-    private static double[] ApplyComb(
-        ReadOnlySpan<double> chroma,
+    private static void ApplyCombInPlace(
+        Span<double> chroma,
         int lineLength,
         int lineDistance,
         bool retainFloat32)
     {
         ArgumentOutOfRangeException.ThrowIfNegativeOrZero(lineLength);
 
-        double[] output = chroma.ToArray();
         int lineCount = chroma.Length / lineLength;
-        for (int line = StartingLine; line < lineCount - 2; line++)
+        if (lineCount <= StartingLine + 2)
         {
-            int lineStart = line * lineLength;
-            int advancedStart = (line + lineDistance) * lineLength;
-            int delayedStart = (line - lineDistance) * lineLength;
-            for (int i = 0; i < lineLength; i++)
-            {
-                // Numba lowers PAL's float64 2H expression with the delayed term first; NTSC 1H retains source order.
-                double combined = !retainFloat32 && lineDistance == 2
-                    ? ((chroma[lineStart + i] * 2.0) - chroma[delayedStart + i] - chroma[advancedStart + i]) / 4.0
-                    : ((chroma[lineStart + i] * 2.0) - chroma[advancedStart + i] - chroma[delayedStart + i]) / 4.0;
-                output[lineStart + i] = retainFloat32 ? (double)(float)combined : combined;
-            }
+            return;
         }
 
-        return output;
+        int delayedLength = checked(lineDistance * lineLength);
+        double[] rented = ArrayPool<double>.Shared.Rent(delayedLength);
+        try
+        {
+            Span<double> delayedLines = rented.AsSpan(0, delayedLength);
+            int firstDelayedStart = checked((StartingLine - lineDistance) * lineLength);
+            chroma.Slice(firstDelayedStart, delayedLength).CopyTo(delayedLines);
+
+            for (int line = StartingLine; line < lineCount - 2; line++)
+            {
+                int lineStart = line * lineLength;
+                int advancedStart = (line + lineDistance) * lineLength;
+                int delayedOffset = ((line - StartingLine) % lineDistance) * lineLength;
+                Span<double> delayedLine = delayedLines.Slice(delayedOffset, lineLength);
+                for (int i = 0; i < lineLength; i++)
+                {
+                    double current = chroma[lineStart + i];
+                    double advanced = chroma[advancedStart + i];
+                    double delayed = delayedLine[i];
+                    // Numba lowers PAL's float64 2H expression with the delayed term first; NTSC 1H retains source order.
+                    double combined = !retainFloat32 && lineDistance == 2
+                        ? ((current * 2.0) - delayed - advanced) / 4.0
+                        : ((current * 2.0) - advanced - delayed) / 4.0;
+                    chroma[lineStart + i] = retainFloat32 ? (double)(float)combined : combined;
+                    delayedLine[i] = current;
+                }
+            }
+        }
+        finally
+        {
+            ArrayPool<double>.Shared.Return(rented);
+        }
     }
 
     private static float MeanFloat32FastMath(ReadOnlySpan<double> values)

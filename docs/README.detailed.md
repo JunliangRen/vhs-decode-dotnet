@@ -4,7 +4,7 @@
 
 **[English](README.detailed.md)** | [简体中文](README.detailed.zh-CN.md) | [日本語](README.detailed.ja.md)
 
-<!-- README_SYNC: 2026-07-30.01 -->
+<!-- README_SYNC: 2026-07-30.02 -->
 
 .NET 11 rewrite of the decode-facing parts of
 [`oyvindln/vhs-decode`](https://github.com/oyvindln/vhs-decode), focused on
@@ -394,20 +394,20 @@ followed by speedup and wall-time reduction versus Python in the same row:
 
 | CLI mode (workers) | Python v0.4.0 | Exact + v0.4.0 | Exact + current | IPP-fast + v0.4.0 | IPP-fast + current |
 | --- | ---: | ---: | ---: | ---: | ---: |
-| default (5) | 16.983 s | 5.999 s / 2.831x / 64.7% | 7.904 s / 2.149x / 53.5% | 5.888 s / 2.884x / 65.3% | 7.421 s / 2.289x / 56.3% |
-| `--threads 1` | 21.263 s | 19.450 s / 1.093x / 8.5% | 22.287 s / 0.954x / 4.8% slower | 18.770 s / 1.133x / 11.7% | 21.251 s / 1.001x / 0.1% |
-| `--threads 5` | 16.880 s | 6.363 s / 2.653x / 62.3% | 7.653 s / 2.206x / 54.7% | 5.850 s / 2.886x / 65.3% | 7.540 s / 2.239x / 55.3% |
-| `--threads 10` | 17.612 s | 4.600 s / 3.829x / 73.9% | 5.864 s / 3.003x / 66.7% | 4.642 s / 3.794x / 73.6% | 6.061 s / 2.906x / 65.6% |
-| `--threads 20` | 18.330 s | 3.684 s / 4.976x / 79.9% | 4.854 s / 3.777x / 73.5% | 3.760 s / 4.875x / 79.5% | 4.769 s / 3.843x / 74.0% |
+| default (5) | 16.983 s | 5.817 s / 2.920x / 65.8% | 6.976 s / 2.435x / 58.9% | 5.530 s / 3.071x / 67.4% | 6.961 s / 2.440x / 59.0% |
+| `--threads 1` | 21.263 s | 19.055 s / 1.116x / 10.4% | 21.556 s / 0.986x / 1.4% slower | 18.609 s / 1.143x / 12.5% | 21.044 s / 1.010x / 1.0% |
+| `--threads 5` | 16.880 s | 5.555 s / 3.039x / 67.1% | 6.952 s / 2.428x / 58.8% | 5.554 s / 3.039x / 67.1% | 7.382 s / 2.287x / 56.3% |
+| `--threads 10` | 17.612 s | 4.616 s / 3.816x / 73.8% | 5.554 s / 3.171x / 68.5% | 4.527 s / 3.891x / 74.3% | 5.381 s / 3.273x / 69.4% |
+| `--threads 20` | 18.330 s | 3.578 s / 5.124x / 80.5% | 4.798 s / 3.820x / 73.8% | 3.580 s / 5.120x / 80.5% | 4.995 s / 3.670x / 72.7% |
 
 The benchmark host was an Intel Core Ultra 7 265K with 20 logical processors,
 Windows 11 25H2 build 26220.8925, and .NET SDK/runtime
 `11.0.100-preview.6.26359.118`. The Python column retains the prior fixed-matrix
 medians because Python did not change; all four .NET columns were refreshed
-with 60 interleaved runs. The candidate was based on `ffd2660` plus the
-worker-local Complex32 FFT packet-output optimization described below; its
-single-file `decode.exe` SHA-256 was
-`DCD12A56710374A4F792FF03E2E2A3F8C2C714C02D1C29FFFA3399B4FACDE5A5`.
+with 60 interleaved runs. The candidate was based on `547a3a1` plus the
+in-place current-chroma comb optimization described below; its single-file
+`decode.exe` SHA-256 was
+`4DE8F0662797BFEA5285CF916BAFD446F9332030699A1BDA08F4A0B9131A384E`.
 The fixed 40-frame matrix includes startup cost and per-run spread; the
 opposite-order 1,000-frame pairs below provide the stable whole-pipeline A/B.
 Python 3.14.0 used NumPy 2.4.6, SciPy 1.18.0, Numba 0.66.0, and python-soxr
@@ -1628,6 +1628,36 @@ full-field allocation reduction and classified as whole-pipeline-throughput
 neutral, so the five-path overview remains the preceding valid idle 60-run
 matrix.
 
+The following Exact/current pass applies the 1H or 2H chroma comb directly to
+the decoder-owned field buffer. The public `ApplyNtscComb` and `ApplyPalComb`
+APIs still copy their caller input. The internal path retains at most one NTSC
+line or two PAL lines in `ArrayPool<double>` storage so each delayed source
+line remains available while the field is overwritten in forward order.
+Float32 conversion points and the PAL/NTSC subtraction order are unchanged.
+A bit-exact xUnit v3 test covers both systems at both precision modes, and the
+production-sized allocation gate now permits only one field-sized `double[]`
+plus the final `ushort[]`. The former extra comb field exceeds that budget.
+
+The local Release solution built with zero warnings and errors, and all 1,119
+tests passed. Twelve real gates covered v0.4.0/current at one, default-five,
+and 20 workers. They matched luma, chroma, raw JSON, stdout, normalized
+stderr/logs, and every ordered `fileLoc` across baseline/candidate and all
+thread counts. Six interleaved 160-frame current pairs were also exact; their
+baseline/candidate wall medians were 13.299/13.318 s and CPU medians were
+101.664/103.000 s, with two candidate wins, so short timing is classified as
+neutral.
+
+Two opposite-order 1,000-frame current counter pairs matched every checked
+artifact/log surface and all 2,000 ordered `fileLoc` values in all four runs.
+Combined counter-reported allocation fell from 132.089 to 125.320 GiB, a
+6.769 GiB or 5.12% reduction. Combined wall time fell from 142.414 to
+140.016 s, a 1.68% reduction and 1.017x throughput; GC pause fell from 1.067
+to 1.000 s. Candidate post-startup 100-frame intervals stayed between 6.68
+and 6.89 s. Maximum sampled working set was 1,481.6 MiB versus 1,467.4 MiB,
+so no resident-memory reduction is claimed, but both runs remained bounded
+without progressive slowdown. The refreshed five-path overview used 60
+interleaved .NET runs, and all 60 passed the existing compatibility references.
+
 </details>
 
 <!-- SECTION: build -->
@@ -1648,7 +1678,7 @@ Requirements:
 .\tools\build-ipp-native.ps1
 dotnet restore VHSDecodeDotNet.slnx
 dotnet build VHSDecodeDotNet.slnx -c Release --no-restore
-dotnet test --solution VHSDecodeDotNet.slnx -c Release --no-build --no-restore --minimum-expected-tests 1118
+dotnet test --solution VHSDecodeDotNet.slnx -c Release --no-build --no-restore --minimum-expected-tests 1119
 ```
 
 The first command includes the optional `ipp-fast` native artifact; omit it for
@@ -1661,7 +1691,7 @@ deployment computer. Binary-only single-file releases embed
 sidecar license files. An Exact-only build may omit the native build step.
 
 The current formal Release build has zero warnings and errors. The xUnit v3
-project exposes **1,118** independently discoverable tests to both
+project exposes **1,119** independently discoverable tests to both
 `dotnet test` and Visual Studio Test Explorer.
 
 <!-- SECTION: usage -->

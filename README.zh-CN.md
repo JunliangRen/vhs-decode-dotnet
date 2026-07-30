@@ -2,7 +2,7 @@
 
 [English](README.md) | **[简体中文](README.zh-CN.md)** | [日本語](README.ja.md)
 
-<!-- README_SYNC: 2026-07-30.01 -->
+<!-- README_SYNC: 2026-07-30.02 -->
 
 这是 [`oyvindln/vhs-decode`](https://github.com/oyvindln/vhs-decode)
 中解码相关部分的 .NET 11 重写，兼容目标为上游 release `v0.4.0`、commit
@@ -33,7 +33,7 @@
 - VHS 家族包括 VHS/S-VHS、Betamax、Video8/Hi8、U-matic、Type C、EIAJ
   以及上游支持的 PAL/NTSC 变体。
 - TBC 工具、双击启动的用户 GUI 和开发者绘图窗口明确不在范围内。
-- Visual Studio 2026 `.slnx` 包含 **1,118** 项标准 xUnit v3 测试；测试可在
+- Visual Studio 2026 `.slnx` 包含 **1,119** 项标准 xUnit v3 测试；测试可在
   Test Explorer 中查看，也可用 `dotnet test` 运行。
 
 <!-- SECTION: start -->
@@ -95,21 +95,21 @@ CVBS、LaserDisc 和 HiFi 当前会拒绝 `ipp-fast`，这些命令应使用 `ex
 <!-- LATEST_PERFORMANCE_BEGIN -->
 | CLI 模式（workers） | Python v0.4.0 | Exact + v0.4.0 | Exact + current | IPP-fast + v0.4.0 | IPP-fast + current |
 | --- | ---: | ---: | ---: | ---: | ---: |
-| 默认（5） | 16.983 s | 5.999 s / 2.831x | 7.904 s / 2.149x | 5.888 s / 2.884x | 7.421 s / 2.289x |
-| `--threads 1` | 21.263 s | 19.450 s / 1.093x | 22.287 s / 0.954x | 18.770 s / 1.133x | 21.251 s / 1.001x |
-| `--threads 5` | 16.880 s | 6.363 s / 2.653x | 7.653 s / 2.206x | 5.850 s / 2.886x | 7.540 s / 2.239x |
-| `--threads 10` | 17.612 s | 4.600 s / 3.829x | 5.864 s / 3.003x | 4.642 s / 3.794x | 6.061 s / 2.906x |
-| `--threads 20` | 18.330 s | 3.684 s / 4.976x | 4.854 s / 3.777x | 3.760 s / 4.875x | 4.769 s / 3.843x |
+| 默认（5） | 16.983 s | 5.817 s / 2.920x | 6.976 s / 2.435x | 5.530 s / 3.071x | 6.961 s / 2.440x |
+| `--threads 1` | 21.263 s | 19.055 s / 1.116x | 21.556 s / 0.986x | 18.609 s / 1.143x | 21.044 s / 1.010x |
+| `--threads 5` | 16.880 s | 5.555 s / 3.039x | 6.952 s / 2.428x | 5.554 s / 3.039x | 7.382 s / 2.287x |
+| `--threads 10` | 17.612 s | 4.616 s / 3.816x | 5.554 s / 3.171x | 4.527 s / 3.891x | 5.381 s / 3.273x |
+| `--threads 20` | 18.330 s | 3.578 s / 5.124x | 4.798 s / 3.820x | 3.580 s / 5.120x | 4.995 s / 3.670x |
 <!-- LATEST_PERFORMANCE_END -->
 
-最新一轮 Exact 分配优化把已经独占的 NTSC burst-deemphasis 场缓冲直接交给
-`current` 相位补偿，不再完整复制一次场数据；滤波、float32 转换点、算术顺序
-和调用者输入所有权均不变。12 次 profile/thread 门禁、六组交错 160 帧配对和
-两组相反顺序的 1000 帧配对均精确一致。空闲长配对的 counter 合计分配从
-140.055 降至 132.532 GiB（下降 5.37%）；合计墙钟为 142.323/142.893 秒，
-GC pause 为 1.100/1.116 秒，均按中性处理。启动后的每 100 帧区间稳定在
-6.794 至 6.981 秒，没有渐进减速。由于不宣称稳定的整链吞吐提升，上表保留
-上一次有效的空闲 60-run 矩阵。
+最新一轮 Exact/current 分配优化在解码器已经独占整场缓冲后，直接原地执行
+1H/2H 色度 comb；最多只在有界池化存储中保留两行延迟数据。公共复制 API、
+float32 转换点、运算顺序和调用者输入所有权均未改变。12 次 profile/thread
+门禁、六组交错 160 帧配对和两组相反顺序的 1000 帧配对全部精确一致。长跑
+counter 合计分配从 132.089 降至 125.320 GiB（减少 5.12%），墙钟从
+142.414 降至 140.016 秒（减少 1.68%，吞吐 1.017x），GC pause 从 1.067
+降至 1.000 秒。候选启动后的每 100 帧区间稳定在 6.68 至 6.89 秒，工作集
+保持有界。上表刷新后的 60 次运行也全部通过同一兼容性门禁。
 
 每个 .NET 单元格依次给出墙钟中位数和相对同一行 Python 的倍速；低于 `1.000x`
 表示更慢。默认实际使用 **5 个 workers**。非零线程的 Python 行只用于吞吐比较，
@@ -140,7 +140,7 @@ TBC、色度、JSON 和日志文件允许在解码期间并发读取，兼容的
 dotnet restore VHSDecodeDotNet.slnx
 dotnet build VHSDecodeDotNet.slnx -c Release --no-restore
 dotnet test --solution VHSDecodeDotNet.slnx -c Release `
-  --no-build --no-restore --minimum-expected-tests 1118
+  --no-build --no-restore --minimum-expected-tests 1119
 ```
 
 在 Visual Studio 2026 中打开 `VHSDecodeDotNet.slnx`，即可构建、调试并通过
