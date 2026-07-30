@@ -33,7 +33,7 @@
 - VHS 家族包括 VHS/S-VHS、Betamax、Video8/Hi8、U-matic、Type C、EIAJ
   以及上游支持的 PAL/NTSC 变体。
 - TBC 工具、双击启动的用户 GUI 和开发者绘图窗口明确不在范围内。
-- Visual Studio 2026 `.slnx` 包含 **1,117** 项标准 xUnit v3 测试；测试可在
+- Visual Studio 2026 `.slnx` 包含 **1,118** 项标准 xUnit v3 测试；测试可在
   Test Explorer 中查看，也可用 `dotnet test` 运行。
 
 <!-- SECTION: start -->
@@ -102,12 +102,14 @@ CVBS、LaserDisc 和 HiFi 当前会拒绝 `ipp-fast`，这些命令应使用 `ex
 | `--threads 20` | 18.330 s | 3.684 s / 4.976x | 4.854 s / 3.777x | 3.760 s / 4.875x | 4.769 s / 3.843x |
 <!-- LATEST_PERFORMANCE_END -->
 
-最新一轮 Exact 优化把 mixed-radix Complex32 FFT 的每个 packet 结果直接写回
-现有 worker-local 缓冲，不再分配临时数组；算术和 packet 顺序均不变。匹配
-trace 中 `Complex32[]` 采样分配从 364.328 降至 2.747 MiB。12 次
-profile/thread 门禁、六组交错 160 帧配对和两组相反顺序的 1000 帧配对均精确
-一致。长配对合计墙钟从 144.526 降至 136.988 秒（下降 5.22%），counter
-分配下降 9.17%，且没有渐进减速。上方五路径表已用 60 次运行刷新。
+最新一轮 Exact 分配优化把已经独占的 NTSC burst-deemphasis 场缓冲直接交给
+`current` 相位补偿，不再完整复制一次场数据；滤波、float32 转换点、算术顺序
+和调用者输入所有权均不变。12 次 profile/thread 门禁、六组交错 160 帧配对和
+两组相反顺序的 1000 帧配对均精确一致。空闲长配对的 counter 合计分配从
+140.055 降至 132.532 GiB（下降 5.37%）；合计墙钟为 142.323/142.893 秒，
+GC pause 为 1.100/1.116 秒，均按中性处理。启动后的每 100 帧区间稳定在
+6.794 至 6.978 秒，没有渐进减速。由于不宣称稳定的整链吞吐提升，上表保留
+上一次有效的空闲 60-run 矩阵。
 
 每个 .NET 单元格依次给出墙钟中位数和相对同一行 Python 的倍速；低于 `1.000x`
 表示更慢。默认实际使用 **5 个 workers**。非零线程的 Python 行只用于吞吐比较，
@@ -138,7 +140,7 @@ TBC、色度、JSON 和日志文件允许在解码期间并发读取，兼容的
 dotnet restore VHSDecodeDotNet.slnx
 dotnet build VHSDecodeDotNet.slnx -c Release --no-restore
 dotnet test --solution VHSDecodeDotNet.slnx -c Release `
-  --no-build --no-restore --minimum-expected-tests 1117
+  --no-build --no-restore --minimum-expected-tests 1118
 ```
 
 在 Visual Studio 2026 中打开 `VHSDecodeDotNet.slnx`，即可构建、调试并通过
