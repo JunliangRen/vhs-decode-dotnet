@@ -11993,6 +11993,107 @@ public void TbcFieldDecodePipelineEmitsChromaSamples()
     AssertEqual(32746, decoded.ChromaSamples[line16 + 2]);
 }
 
+[Theory(DisplayName = "NTSC sequence compact chroma matches retained storage bit-exactly")]
+[InlineData(false)]
+[InlineData(true)]
+public void NtscSequenceCompactChromaMatchesRetainedStorageBitExactly(
+    bool useCurrentProcessing)
+{
+    var spec = new TbcFrameSpec(
+        "NTSC",
+        OutputLineLength: 20,
+        OutputLineCount: 40,
+        OutputSampleRateHz: 4_000_000.0,
+        ColourBurstStart: 5,
+        ColourBurstEnd: 10,
+        ActiveVideoStart: null,
+        ActiveVideoEnd: null);
+    var converter = new VideoOutputConverter(
+        ire0: 0.0,
+        hzIre: 1.0,
+        outputZero: 256,
+        vsyncIre: -40.0,
+        outputScale: 10.0);
+    var chromaOptions = new VhsChromaFieldOptions(
+        ColorSystem: "NTSC",
+        OutputLineLength: spec.OutputLineLength,
+        OutputLineCount: spec.OutputLineCount,
+        OutputSampleRateHz: spec.OutputSampleRateHz,
+        FscMHz: 1.0,
+        ColorUnderCarrierHz: 0.0,
+        BurstStart: 5,
+        BurstEnd: 10,
+        BurstAbsRef: 10.0,
+        ChromaRotation: null,
+        DisableComb: false,
+        DisablePhaseCorrection: true,
+        EnableColorKiller: false,
+        DetectChromaTrackPhase: false)
+    {
+        UseCurrentChromaProcessing = useCurrentProcessing
+    };
+
+    TbcFieldDecodePipeline CreatePipeline()
+    {
+        var analyzer = new SyncAnalyzer(
+            sampleRateHz: 1_000_000.0,
+            linePeriodUs: 100.0,
+            hsyncPulseUs: 10.0,
+            equalizingPulseUs: 5.0,
+            vsyncPulseUs: 20.0,
+            numPulses: 6);
+        return new TbcFieldDecodePipeline(
+            analyzer,
+            new TbcFieldRenderer(spec, converter),
+            converter,
+            "NTSC",
+            TbcDropoutDetectionOptions.Disabled,
+            chromaFieldOptions: chromaOptions,
+            decodeType: "vhs");
+    }
+
+    double[] video = Enumerable.Repeat(0.0, 6_500).ToArray();
+    PaintPulse(video, 10, 10, -40.0);
+    PaintPulse(video, 110, 10, -40.0);
+    PaintTestVBlank(video, line0: 210, isFirstField: true, system: "NTSC");
+    for (int line = 11; line <= 60; line++)
+    {
+        PaintPulse(video, 210 + (line * 100), 10, -40.0);
+    }
+
+    double[] chroma = BuildRawChromaCarrier(
+        video.Length,
+        firstLineStart: 210,
+        lineLength: 100,
+        lineCount: 61,
+        outputLineLength: spec.OutputLineLength,
+        fscMHz: chromaOptions.FscMHz,
+        outputSampleRateHz: spec.OutputSampleRateHz);
+    var span = new RfDecodedSpan(
+        0,
+        video,
+        video,
+        video,
+        VideoLowPass: video,
+        Chroma: chroma);
+
+    TbcDecodedField compact = CreatePipeline().DecodeVhsForSequence(
+        span,
+        fieldNumber: 0,
+        retainChromaBurstSamples: false);
+    TbcDecodedField retained = CreatePipeline().DecodeVhsForSequence(
+        span,
+        fieldNumber: 0,
+        retainChromaBurstSamples: true);
+
+    Assert.Null(compact.ChromaBurstSamples);
+    Assert.NotNull(retained.ChromaBurstSamples);
+    Assert.Equal<ushort>(retained.Samples, compact.Samples);
+    Assert.Equal<ushort>(retained.ChromaSamples!, compact.ChromaSamples!);
+    Assert.Equal(retained.FieldPhaseId, compact.FieldPhaseId);
+    Assert.Equal(retained.BurstStartLine, compact.BurstStartLine);
+}
+
 [Theory(DisplayName = "TBC field decode pipeline applies analyzed VHS track phase to luma")]
 [InlineData(0, 0, 456, 0, 656)]
 [InlineData(1, 0, 456, 0, 656)]

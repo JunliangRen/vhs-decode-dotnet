@@ -82,6 +82,63 @@ public sealed class VhsChromaCurrentProcessingIntegrationTests
         Assert.False(legacy.UseCurrentChromaProcessing);
     }
 
+    [Theory(DisplayName = "Owned NTSC chroma storage matches copying decode bit-exactly")]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void OwnedNtscChromaStorageMatchesCopyingDecodeBitExactly(bool useCurrentProcessing)
+    {
+        const int LineLength = 64;
+        const int LineCount = 48;
+        double[] chroma = BuildInput(LineLength * LineCount);
+        double[] original = chroma.ToArray();
+        VhsChromaFieldOptions options = CreateOptions(ctiMix: 0.0) with
+        {
+            UseCurrentChromaProcessing = useCurrentProcessing
+        };
+        ChromaPhaseLine[] phaseLines = Enumerable.Range(0, LineCount)
+            .Select(line => new ChromaPhaseLine(
+                LineNumber: line,
+                PhaseRotation: line & 3,
+                BurstPhaseDegrees: (line & 1) == 0 ? 12.5 : -7.25)
+            {
+                BurstStart = line * LineLength,
+                BurstAmplitude = 72.0,
+                BurstDc = (line % 5) * 0.125,
+                BurstFrequencyHz = options.FscMHz * 1_000_000.0
+            })
+            .ToArray();
+        var phase = new ChromaPhaseSequenceResult(
+            NextChromaRotationIndex: 0,
+            PhaseSequence: phaseLines,
+            BurstDetectedLine: 0,
+            BurstMagnitudeAverage: 72.0,
+            BurstPhaseAverageDegrees: 0.0,
+            EvenBurstPhaseAverageDegrees: 12.5,
+            OddBurstPhaseAverageDegrees: -7.25);
+
+        VhsChromaFieldResult expected = VhsChromaDecoder.DecodeFieldWithPhase(
+            chroma,
+            options,
+            phase,
+            isFirstField: true,
+            fieldNumber: 0);
+        double[] ownedChroma = chroma.ToArray();
+        VhsChromaFieldResult actual = VhsChromaDecoder.DecodeOwnedFieldWithPhase(
+            ownedChroma,
+            options,
+            phase,
+            isFirstField: true,
+            fieldNumber: 0);
+
+        Assert.Equal(
+            original.Select(BitConverter.DoubleToUInt64Bits),
+            chroma.Select(BitConverter.DoubleToUInt64Bits));
+        Assert.Equal(expected.Samples, actual.Samples);
+        Assert.Equal(expected.FieldPhaseId, actual.FieldPhaseId);
+        Assert.Equal(expected.NextChromaRotationIndex, actual.NextChromaRotationIndex);
+        Assert.Equal(expected.BurstDetectedLine, actual.BurstDetectedLine);
+    }
+
     [Fact(DisplayName = "Current NTSC burst deemphasis uses the PR 341 boundary")]
     public void CurrentNtscBurstDeemphasisUsesPr341Boundary()
     {
@@ -102,11 +159,23 @@ public sealed class VhsChromaCurrentProcessingIntegrationTests
             burstStart: 1,
             burstEnd: 2,
             samplesAfterBurst: 4);
+        double[] currentOwned = samples.ToArray();
+        VhsChromaDecoder.ApplyBurstDeemphasisInPlace(
+            currentOwned,
+            lineOffset: 1,
+            linesOut: 2,
+            lineLength: 8,
+            burstStart: 1,
+            burstEnd: 2,
+            samplesAfterBurst: 4);
 
         Assert.Equal(1.0, legacy[6]);
         Assert.Equal(2.0, current[6]);
         Assert.Equal(2.0, legacy[7]);
         Assert.Equal(2.0, current[7]);
+        Assert.Equal(
+            current.Select(BitConverter.DoubleToUInt64Bits),
+            currentOwned.Select(BitConverter.DoubleToUInt64Bits));
     }
 
     [Fact(DisplayName = "Current chroma comb in-place path matches the copying reference bit-exactly")]
@@ -195,15 +264,22 @@ public sealed class VhsChromaCurrentProcessingIntegrationTests
             EvenBurstPhaseAverageDegrees: 12.5,
             OddBurstPhaseAverageDegrees: -7.25);
 
-        _ = VhsChromaDecoder.DecodeFieldWithPhase(
+        _ = VhsChromaDecoder.DecodeOwnedFieldWithPhase(
+            chroma.ToArray(),
+            options,
+            phase,
+            isFirstField: true,
+            fieldNumber: 0);
+        VhsChromaFieldResult expected = VhsChromaDecoder.DecodeFieldWithPhase(
             chroma,
             options,
             phase,
             isFirstField: true,
             fieldNumber: 0);
+        double[] ownedChroma = chroma.ToArray();
         long before = GC.GetAllocatedBytesForCurrentThread();
-        VhsChromaFieldResult result = VhsChromaDecoder.DecodeFieldWithPhase(
-            chroma,
+        VhsChromaFieldResult result = VhsChromaDecoder.DecodeOwnedFieldWithPhase(
+            ownedChroma,
             options,
             phase,
             isFirstField: true,
@@ -211,8 +287,9 @@ public sealed class VhsChromaCurrentProcessingIntegrationTests
         long allocated = GC.GetAllocatedBytesForCurrentThread() - before;
 
         GC.KeepAlive(result);
+        Assert.Equal(expected.Samples, result.Samples);
         long maximumExpected =
-            ((long)sampleCount * (sizeof(double) + sizeof(ushort)))
+            ((long)sampleCount * sizeof(ushort))
             + (256 * 1024);
         Assert.True(
             allocated < maximumExpected,
