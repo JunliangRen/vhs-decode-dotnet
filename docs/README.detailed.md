@@ -301,6 +301,11 @@ falling back to the Exact inverse FFT and reduced the paired median gain to
 - Default linear TBC resampling rents its per-field source-position and
   level-adjust workspaces, uses exact spans, and returns both after every
   synchronous serial or parallel resample.
+- The stateful VHS CLI sequence path retains one exact-length luma field
+  workspace and one separate chroma field workspace because luma rendering can
+  overlap chroma decoding. Public `Decode()` results still own independent
+  `ChromaBurstSamples`, the direct UInt16 path needs no double field, and
+  public resampling APIs retain independent-output ownership.
 - VHS diff-demod spike repair reuses one full-length complex scratch array
   inside the existing 16-slot real-FFT workspace pool. Returned analytic arrays
   retain independent ownership; non-VHS paths keep their allocating fallback.
@@ -394,20 +399,20 @@ followed by speedup and wall-time reduction versus Python in the same row:
 
 | CLI mode (workers) | Python v0.4.0 | Exact + v0.4.0 | Exact + current | IPP-fast + v0.4.0 | IPP-fast + current |
 | --- | ---: | ---: | ---: | ---: | ---: |
-| default (5) | 16.983 s | 5.817 s / 2.920x / 65.8% | 6.976 s / 2.435x / 58.9% | 5.530 s / 3.071x / 67.4% | 6.961 s / 2.440x / 59.0% |
-| `--threads 1` | 21.263 s | 19.055 s / 1.116x / 10.4% | 21.556 s / 0.986x / 1.4% slower | 18.609 s / 1.143x / 12.5% | 21.044 s / 1.010x / 1.0% |
-| `--threads 5` | 16.880 s | 5.555 s / 3.039x / 67.1% | 6.952 s / 2.428x / 58.8% | 5.554 s / 3.039x / 67.1% | 7.382 s / 2.287x / 56.3% |
-| `--threads 10` | 17.612 s | 4.616 s / 3.816x / 73.8% | 5.554 s / 3.171x / 68.5% | 4.527 s / 3.891x / 74.3% | 5.381 s / 3.273x / 69.4% |
-| `--threads 20` | 18.330 s | 3.578 s / 5.124x / 80.5% | 4.798 s / 3.820x / 73.8% | 3.580 s / 5.120x / 80.5% | 4.995 s / 3.670x / 72.7% |
+| default (5) | 16.983 s | 5.558 s / 3.055x / 67.3% | 7.343 s / 2.313x / 56.8% | 5.517 s / 3.078x / 67.5% | 7.136 s / 2.380x / 58.0% |
+| `--threads 1` | 21.263 s | 18.759 s / 1.133x / 11.8% | 21.318 s / 0.997x / 0.3% slower | 18.095 s / 1.175x / 14.9% | 20.655 s / 1.029x / 2.9% |
+| `--threads 5` | 16.880 s | 5.543 s / 3.045x / 67.2% | 6.972 s / 2.421x / 58.7% | 5.417 s / 3.116x / 67.9% | 6.958 s / 2.426x / 58.8% |
+| `--threads 10` | 17.612 s | 4.566 s / 3.857x / 74.1% | 5.610 s / 3.139x / 68.1% | 4.625 s / 3.808x / 73.7% | 5.978 s / 2.946x / 66.1% |
+| `--threads 20` | 18.330 s | 3.830 s / 4.786x / 79.1% | 5.294 s / 3.462x / 71.1% | 3.511 s / 5.221x / 80.8% | 4.917 s / 3.728x / 73.2% |
 
 The benchmark host was an Intel Core Ultra 7 265K with 20 logical processors,
 Windows 11 25H2 build 26220.8925, and .NET SDK/runtime
 `11.0.100-preview.6.26359.118`. The Python column retains the prior fixed-matrix
 medians because Python did not change; all four .NET columns were refreshed
-with 60 interleaved runs. The candidate was based on `547a3a1` plus the
-in-place current-chroma comb optimization described below; its single-file
+with 60 interleaved runs. The candidate was based on `d07d1ad` plus the
+field-resampling workspace optimization described below; its single-file
 `decode.exe` SHA-256 was
-`4DE8F0662797BFEA5285CF916BAFD446F9332030699A1BDA08F4A0B9131A384E`.
+`5A43C9E34EA01CEA29DA78831BE7C61F6B9E654FBC757E1520785A2335380465`.
 The fixed 40-frame matrix includes startup cost and per-run spread; the
 opposite-order 1,000-frame pairs below provide the stable whole-pipeline A/B.
 Python 3.14.0 used NumPy 2.4.6, SciPy 1.18.0, Numba 0.66.0, and python-soxr
@@ -1658,6 +1663,42 @@ so no resident-memory reduction is claimed, but both runs remained bounded
 without progressive slowdown. The refreshed five-path overview used 60
 interleaved .NET runs, and all 60 passed the existing compatibility references.
 
+The latest Exact field-resampling allocation pass adds destination-buffer
+forms without changing the 16-tap sinc expression, float32 conversion point,
+sample order, or resampling plan. The stateful VHS CLI sequence decoder owns
+one exact-length luma workspace and one separate chroma workspace because its
+bounded chroma task can overlap luma rendering. Public `Decode()` calls still
+allocate and return independent `ChromaBurstSamples`; sequence results omit
+that internal buffer, the direct UInt16 path remains allocation-free for the
+double field, and public resampling APIs retain their independent-output
+contract. Shape changes replace the single retained buffer in each role, so
+retained memory is bounded rather than proportional to decode length.
+
+The Release solution built with zero warnings and errors, and all 1,120 xUnit
+v3 tests passed. Six real profile/thread gates covered Exact v0.4.0 and
+`current` at `--threads 0`, default-five, and `--threads 20`. The candidate
+matched baseline luma, chroma, raw JSON, stdout, normalized stderr/logs, and
+every ordered `fileLoc`; public consecutive `Decode()` results also retain
+distinct chroma-burst arrays. The refreshed five-path matrix ran all four
+Exact/IPP profile combinations at default, 1, 5, 10, and 20 workers three
+times each; all 60 runs matched their existing compatibility references.
+
+Two opposite-order Exact-current/20-worker 1,000-frame pairs reduced combined
+counter allocation from 126.226 to 110.873 GiB (12.16%), GC pause from 1.015
+to 0.885 s (12.83%), and wall time from 141.015 to 140.405 s (0.43%, 1.004x
+throughput). Two opposite-order current/default 500-frame pairs reduced
+allocation from 62.638 to 55.606 GiB (11.23%), GC pause by 11.91%, and wall
+time by 1.05%. The corresponding v0.4.0/default pairs reduced allocation by
+10.80%, GC pause by 22.65%, and wall time by 0.88%; v0.4.0/20-worker
+1,000-frame pairs reduced allocation by 10.40% and wall time by 2.11%.
+
+A candidate-only v0.4.0/20-worker 3,000-frame run completed in 164.593 s.
+Its four working-set-quarter medians were 793.94, 799.89, 747.98, and
+772.25 MiB; the maximum was 1,400.8 MiB and the final sample was 957.3 MiB.
+The first and last steady ten 100-frame intervals had 5.492 and 5.440 s
+medians. This supports bounded retained memory and no progressive slowdown;
+collection-timing peaks are not presented as a resident-memory reduction.
+
 </details>
 
 <!-- SECTION: build -->
@@ -1678,7 +1719,7 @@ Requirements:
 .\tools\build-ipp-native.ps1
 dotnet restore VHSDecodeDotNet.slnx
 dotnet build VHSDecodeDotNet.slnx -c Release --no-restore
-dotnet test --solution VHSDecodeDotNet.slnx -c Release --no-build --no-restore --minimum-expected-tests 1119
+dotnet test --solution VHSDecodeDotNet.slnx -c Release --no-build --no-restore --minimum-expected-tests 1120
 ```
 
 The first command includes the optional `ipp-fast` native artifact; omit it for
@@ -1691,7 +1732,7 @@ deployment computer. Binary-only single-file releases embed
 sidecar license files. An Exact-only build may omit the native build step.
 
 The current formal Release build has zero warnings and errors. The xUnit v3
-project exposes **1,119** independently discoverable tests to both
+project exposes **1,120** independently discoverable tests to both
 `dotnet test` and Visual Studio Test Explorer.
 
 <!-- SECTION: usage -->

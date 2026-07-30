@@ -1035,7 +1035,7 @@ public sealed class TbcFieldSequenceDecodeEngine
                 window.SampleCount);
             return lease is null
                 ? null
-                : session.TbcFieldDecoder.Decode(lease.Span, fieldNumber: fieldNumber);
+                : session.TbcFieldDecoder.DecodeVhsForSequence(lease.Span, fieldNumber);
         }
 
         RfDecodedSpan? span = session.StreamDecoder.Read(input, window.StartSample, window.SampleCount);

@@ -38,7 +38,7 @@ evidence, and remaining gaps.
   EIAJ, and supported PAL/NTSC variants.
 - TBC utility tools, the double-click GUI, and developer plotting windows are
   intentionally out of scope.
-- The Visual Studio 2026 `.slnx` solution has **1,119** standard xUnit v3 tests
+- The Visual Studio 2026 `.slnx` solution has **1,120** standard xUnit v3 tests
   that are visible in Test Explorer and runnable with `dotnet test`.
 
 <!-- SECTION: start -->
@@ -105,24 +105,24 @@ separately from speed.
 <!-- LATEST_PERFORMANCE_BEGIN -->
 | CLI mode (workers) | Python v0.4.0 | Exact + v0.4.0 | Exact + current | IPP-fast + v0.4.0 | IPP-fast + current |
 | --- | ---: | ---: | ---: | ---: | ---: |
-| default (5) | 16.983 s | 5.817 s / 2.920x | 6.976 s / 2.435x | 5.530 s / 3.071x | 6.961 s / 2.440x |
-| `--threads 1` | 21.263 s | 19.055 s / 1.116x | 21.556 s / 0.986x | 18.609 s / 1.143x | 21.044 s / 1.010x |
-| `--threads 5` | 16.880 s | 5.555 s / 3.039x | 6.952 s / 2.428x | 5.554 s / 3.039x | 7.382 s / 2.287x |
-| `--threads 10` | 17.612 s | 4.616 s / 3.816x | 5.554 s / 3.171x | 4.527 s / 3.891x | 5.381 s / 3.273x |
-| `--threads 20` | 18.330 s | 3.578 s / 5.124x | 4.798 s / 3.820x | 3.580 s / 5.120x | 4.995 s / 3.670x |
+| default (5) | 16.983 s | 5.558 s / 3.055x | 7.343 s / 2.313x | 5.517 s / 3.078x | 7.136 s / 2.380x |
+| `--threads 1` | 21.263 s | 18.759 s / 1.133x | 21.318 s / 0.997x | 18.095 s / 1.175x | 20.655 s / 1.029x |
+| `--threads 5` | 16.880 s | 5.543 s / 3.045x | 6.972 s / 2.421x | 5.417 s / 3.116x | 6.958 s / 2.426x |
+| `--threads 10` | 17.612 s | 4.566 s / 3.857x | 5.610 s / 3.139x | 4.625 s / 3.808x | 5.978 s / 2.946x |
+| `--threads 20` | 18.330 s | 3.830 s / 4.786x | 5.294 s / 3.462x | 3.511 s / 5.221x | 4.917 s / 3.728x |
 <!-- LATEST_PERFORMANCE_END -->
 
-The latest Exact/current allocation pass applies the 1H/2H chroma comb in
-place once the decoder owns the field buffer. At most two delayed lines are
-kept in bounded pooled storage; the public copying APIs, float32 conversion
-points, arithmetic order, and caller input ownership remain unchanged.
-Twelve profile/thread gates, six interleaved 160-frame pairs, and two
-opposite-order 1,000-frame pairs remained exact. The long pairs reduced
-combined counter allocation from 132.089 to 125.320 GiB (5.12%) and wall time
-from 142.414 to 140.016 s (1.68%, 1.017x throughput); GC pause fell from 1.067
-to 1.000 s. Candidate post-startup 100-frame intervals stayed between 6.68
-and 6.89 s with bounded working sets. All 60 refreshed matrix runs above
-passed the same compatibility gate.
+The latest Exact field-resampling pass gives the stateful CLI sequence decoder
+separate exact-length luma and chroma workspaces. Public `Decode()` results
+still own independent `ChromaBurstSamples`; the direct UInt16 path, 16-tap
+sinc expressions and order, and public copying APIs are unchanged. Six
+profile/thread gates and all 60 matrix runs above remained exact. Across two
+opposite-order current/20-worker 1,000-frame pairs, allocation fell from
+126.226 to 110.873 GiB (12.16%), wall time from 141.015 to 140.405 s (0.43%,
+1.004x throughput), and GC pause from 1.015 to 0.885 s. Default-current pairs
+also improved wall time by 1.05% and allocation by 11.23%. A 3,000-frame run
+held quarterly working-set medians at 794/800/748/772 MiB and its final
+steady 1,000 frames were not slower than its first.
 
 Each .NET cell shows median wall time followed by speedup versus Python in the
 same row; values below `1.000x` are slower. The default is **5 workers**.
@@ -158,7 +158,7 @@ The pinned SDK is .NET `11.0.100-preview.6.26359.118`.
 dotnet restore VHSDecodeDotNet.slnx
 dotnet build VHSDecodeDotNet.slnx -c Release --no-restore
 dotnet test --solution VHSDecodeDotNet.slnx -c Release `
-  --no-build --no-restore --minimum-expected-tests 1119
+  --no-build --no-restore --minimum-expected-tests 1120
 ```
 
 Open `VHSDecodeDotNet.slnx` in Visual Studio 2026 to build, debug, and run the

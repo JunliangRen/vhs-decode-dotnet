@@ -151,6 +151,26 @@ public sealed class TbcFieldRenderer
             ? _resampler.ResamplePrepared(videoHz, plan)
             : _resampler.ResamplePreparedShifted(videoHz, plan, sourcePositionShift);
 
+    internal void ResamplePreparedField(
+        ReadOnlySpan<double> videoHz,
+        TbcLineResampler.ResamplingPlan plan,
+        double[] destination,
+        double sourcePositionShift = 0.0)
+    {
+        if (sourcePositionShift == 0.0)
+        {
+            _resampler.ResamplePrepared(videoHz, plan, destination);
+        }
+        else
+        {
+            _resampler.ResamplePreparedShifted(
+                videoHz,
+                plan,
+                sourcePositionShift,
+                destination);
+        }
+    }
+
     internal void ResampleFieldInto(
         ReadOnlySpan<double> videoHz,
         IReadOnlyList<double> lineLocations,
@@ -247,7 +267,8 @@ public sealed class TbcFieldRenderer
         TbcLineResampler.ResamplingPlan plan,
         int fieldNumber = 0,
         VideoOutputConverter? converterOverride = null,
-        int? trackPhaseOverride = null)
+        int? trackPhaseOverride = null,
+        double[]? resamplingWorkspace = null)
     {
         if (CanConvertPreparedFieldDirectly())
         {
@@ -257,7 +278,20 @@ public sealed class TbcFieldRenderer
                 OutputConverter: activeConverter);
         }
 
-        double[] resampled = ResamplePreparedField(videoHz, plan);
+        double[] resampled;
+        if (resamplingWorkspace is null)
+        {
+            resampled = ResamplePreparedField(videoHz, plan);
+        }
+        else
+        {
+            ResamplePreparedField(
+                videoHz,
+                plan,
+                resamplingWorkspace);
+            resampled = resamplingWorkspace;
+        }
+
         return RenderResampledFieldPayload(
             resampled,
             fieldNumber,
@@ -266,7 +300,7 @@ public sealed class TbcFieldRenderer
             trackPhaseOverride);
     }
 
-    private bool CanConvertPreparedFieldDirectly()
+    internal bool CanConvertPreparedFieldDirectly()
         => YCombLimitHz == 0.0
             && !ExportRawTbc
             && CvbsClampAgc is null

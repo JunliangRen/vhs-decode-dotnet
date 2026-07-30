@@ -12067,6 +12067,7 @@ public void TbcFieldDecodePipelineAppliesAnalyzedVhsTrackPhaseToLuma(
 
     TbcFieldDecodePipeline serialPipeline = CreatePipeline(workerThreads: 1);
     TbcFieldDecodePipeline pipeline = CreatePipeline(workerThreads: 4);
+    TbcFieldDecodePipeline sequencePipeline = CreatePipeline(workerThreads: 4);
 
     double[] video = Enumerable.Repeat(0.0, 6_500).ToArray();
     PaintPulse(video, 10, 10, -40.0);
@@ -12091,6 +12092,10 @@ public void TbcFieldDecodePipelineAppliesAnalyzedVhsTrackPhaseToLuma(
 
     TbcDecodedField serialFirst = serialPipeline.Decode(firstSpan, fieldNumber: 0);
     TbcDecodedField serialSecond = serialPipeline.Decode(secondSpan, fieldNumber: 1);
+    TbcDecodedField sequenceFirst =
+        sequencePipeline.DecodeVhsForSequence(firstSpan, fieldNumber: 0);
+    TbcDecodedField sequenceSecond =
+        sequencePipeline.DecodeVhsForSequence(secondSpan, fieldNumber: 1);
     TbcDecodedField first = pipeline.Decode(firstSpan, fieldNumber: 0);
     AssertEqual<int?>(firstNextTrackPhase, pipeline.CaptureState().ChromaRotationIndex);
     AssertEqual(firstExpectedSample, first.Samples[stableLumaSample]);
@@ -12102,6 +12107,15 @@ public void TbcFieldDecodePipelineAppliesAnalyzedVhsTrackPhaseToLuma(
     Assert.Equal<ushort>(serialFirst.ChromaSamples!, first.ChromaSamples!);
     Assert.Equal<ushort>(serialSecond.Samples, second.Samples);
     Assert.Equal<ushort>(serialSecond.ChromaSamples!, second.ChromaSamples!);
+    Assert.NotNull(serialFirst.ChromaBurstSamples);
+    Assert.NotNull(serialSecond.ChromaBurstSamples);
+    Assert.NotSame(serialFirst.ChromaBurstSamples, serialSecond.ChromaBurstSamples);
+    Assert.Null(sequenceFirst.ChromaBurstSamples);
+    Assert.Null(sequenceSecond.ChromaBurstSamples);
+    Assert.Equal<ushort>(serialFirst.Samples, sequenceFirst.Samples);
+    Assert.Equal<ushort>(serialFirst.ChromaSamples!, sequenceFirst.ChromaSamples!);
+    Assert.Equal<ushort>(serialSecond.Samples, sequenceSecond.Samples);
+    Assert.Equal<ushort>(serialSecond.ChromaSamples!, sequenceSecond.ChromaSamples!);
 }
 
 static double[] BuildOutputChromaCarrier(int lineLength, int lineCount, double fscMHz, double outputSampleRateHz)
