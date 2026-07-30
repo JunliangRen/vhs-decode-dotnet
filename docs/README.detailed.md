@@ -4,7 +4,7 @@
 
 **[English](README.detailed.md)** | [简体中文](README.detailed.zh-CN.md) | [日本語](README.detailed.ja.md)
 
-<!-- README_SYNC: 2026-07-31.01 -->
+<!-- README_SYNC: 2026-07-31.02 -->
 
 .NET 11 rewrite of the decode-facing parts of
 [`oyvindln/vhs-decode`](https://github.com/oyvindln/vhs-decode), focused on
@@ -1783,6 +1783,46 @@ allocation reduction, with a modest long-run throughput benefit. The refreshed
 homepage matrix contains 60 new candidate runs; its Python columns retain the
 existing fixed-sample oracle measurements.
 
+The latest Exact PocketFFT cache pass prevents duplicate cold-key plan
+construction. `ConcurrentDictionary.GetOrAdd` can invoke an expensive value
+factory more than once when workers race on a missing key, even though only one
+value is published. The four PocketFFT implementations now use a shared
+single-creation cache: populated reads retain the concurrent fast path, while
+only a cold miss enters a double-checked per-cache lock. Factory exceptions are
+not cached and can be retried. Cache keys, retained plan cardinality, FFT data
+types, coefficients, arithmetic order, and thread-local scratch remain
+unchanged.
+
+A matched 100-frame allocation trace reduced complex plan construction from
+30 calls and 9,746,000 sampled bytes to one call and 458,672 bytes. Real plan
+construction fell from 30 calls and 3,031,704 sampled bytes to one call and
+131,120 bytes. This removes 12,187,912 bytes (12.19 MB) of duplicate sampled
+construction; total sampled allocation fell from 4,611,843,896 to
+4,599,481,168 bytes. The two float-real plan builds represented two actual
+lengths and remained unchanged.
+
+The candidate passed the standard Release build and all 1,128 xUnit v3 tests,
+including focused concurrent-factory, retry-after-failure, mixed-radix,
+workspace, and FFT tests. Twelve strict main/candidate runs covered Exact
+v0.4.0 and `current` with `--threads 0`, omitted/default-five workers, and
+`--threads 20`. Luma, chroma, raw JSON, stdout, normalized stderr/logs, and
+ordered `fileLoc` matched within every profile. All 60 refreshed
+Exact/IPP-fast, v0.4.0/`current`, and default/1/5/10/20-worker matrix runs also
+matched their backend/profile references. This round used the current main
+binary as its byte-exact oracle; main's direct Python v0.4.0 `g4315520
+--threads 0` evidence remains the transitive upstream reference rather than
+being rerun.
+
+Five alternating 100-frame Exact `current`/20-worker pairs moved median decode
+time from 8.91 to 8.59 seconds (3.6% lower). Mean decode time moved from 8.932
+to 8.806 seconds (1.4% lower) because one candidate run was slower, so the
+result is classified as a modest cold-start/end-to-end gain. A separate
+1,000-frame candidate run completed all 2,000 fields in 70.235 seconds and
+matched the current-main luma, chroma, raw JSON, normalized stderr/log, and
+ordered `fileLoc` references. Sampled working set had a 757.9 MiB maximum and
+first/final-third medians of 612.9/638.4 MiB, supporting bounded memory without
+progressive growth.
+
 </details>
 
 <!-- SECTION: build -->
@@ -1803,7 +1843,7 @@ Requirements:
 .\tools\build-ipp-native.ps1
 dotnet restore VHSDecodeDotNet.slnx
 dotnet build VHSDecodeDotNet.slnx -c Release --no-restore
-dotnet test --solution VHSDecodeDotNet.slnx -c Release --no-build --no-restore --minimum-expected-tests 1126
+dotnet test --solution VHSDecodeDotNet.slnx -c Release --no-build --no-restore --minimum-expected-tests 1128
 ```
 
 The first command includes the optional `ipp-fast` native artifact; omit it for
@@ -1816,7 +1856,7 @@ deployment computer. Binary-only single-file releases embed
 sidecar license files. An Exact-only build may omit the native build step.
 
 The current formal Release build has zero warnings and errors. The xUnit v3
-project exposes **1,126** independently discoverable tests to both
+project exposes **1,128** independently discoverable tests to both
 `dotnet test` and Visual Studio Test Explorer.
 
 <!-- SECTION: usage -->

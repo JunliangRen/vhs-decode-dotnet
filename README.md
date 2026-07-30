@@ -2,7 +2,7 @@
 
 **[English](README.md)** | [简体中文](README.zh-CN.md) | [日本語](README.ja.md)
 
-<!-- README_SYNC: 2026-07-31.01 -->
+<!-- README_SYNC: 2026-07-31.02 -->
 
 A .NET 11 rewrite of the decode-facing parts of
 [`oyvindln/vhs-decode`](https://github.com/oyvindln/vhs-decode), targeting
@@ -38,7 +38,7 @@ evidence, and remaining gaps.
   EIAJ, and supported PAL/NTSC variants.
 - TBC utility tools, the double-click GUI, and developer plotting windows are
   intentionally out of scope.
-- The Visual Studio 2026 `.slnx` solution has **1,126** standard xUnit v3 tests
+- The Visual Studio 2026 `.slnx` solution has **1,128** standard xUnit v3 tests
   that are visible in Test Explorer and runnable with `dotnet test`.
 
 <!-- SECTION: start -->
@@ -105,21 +105,24 @@ separately from speed.
 <!-- LATEST_PERFORMANCE_BEGIN -->
 | CLI mode (workers) | Python v0.4.0 | Exact + v0.4.0 | Exact + current | IPP-fast + v0.4.0 | IPP-fast + current |
 | --- | ---: | ---: | ---: | ---: | ---: |
-| default (5) | 16.983 s | 5.504 s / 3.085x | 7.299 s / 2.327x | 5.408 s / 3.140x | 7.126 s / 2.383x |
-| `--threads 1` | 21.263 s | 17.809 s / 1.194x | 20.531 s / 1.036x | 17.876 s / 1.189x | 19.867 s / 1.070x |
-| `--threads 5` | 16.880 s | 5.736 s / 2.943x | 7.106 s / 2.375x | 5.524 s / 3.056x | 7.048 s / 2.395x |
-| `--threads 10` | 17.612 s | 4.476 s / 3.935x | 5.333 s / 3.302x | 4.339 s / 4.059x | 5.522 s / 3.190x |
-| `--threads 20` | 18.330 s | 3.751 s / 4.887x | 5.201 s / 3.524x | 3.780 s / 4.850x | 4.938 s / 3.712x |
+| default (5) | 16.983 s | 5.832 s / 2.912x | 7.033 s / 2.415x | 5.461 s / 3.110x | 6.861 s / 2.475x |
+| `--threads 1` | 21.263 s | 18.895 s / 1.125x | 21.262 s / 1.000x | 18.193 s / 1.169x | 20.828 s / 1.021x |
+| `--threads 5` | 16.880 s | 5.996 s / 2.815x | 7.393 s / 2.283x | 5.971 s / 2.827x | 7.214 s / 2.340x |
+| `--threads 10` | 17.612 s | 4.492 s / 3.921x | 5.748 s / 3.064x | 4.434 s / 3.972x | 5.816 s / 3.028x |
+| `--threads 20` | 18.330 s | 3.790 s / 4.836x | 5.094 s / 3.599x | 3.677 s / 4.985x | 4.636 s / 3.954x |
 <!-- LATEST_PERFORMANCE_END -->
 
-The latest Exact pass transfers the internal non-retained chroma field buffer
-to NTSC burst deemphasis instead of cloning the whole field. Public and
-diagnostic APIs still return independent arrays; data types, expressions, and
-operation order are unchanged. A matched 100-frame trace removed one roughly
-1.9 MiB `double[]` per output field and reduced sampled allocation by 7.65%.
-All `0/default/20` profile/thread gates and all 60 refreshed matrix runs above
-remained exact. Opposite-order 1,000-frame pairs were also exact and improved
-median wall time by 2.21% for `current` and 0.90% for v0.4.0.
+The latest Exact pass makes cold PocketFFT plan and root construction execute
+once per cache key. FFT data types, coefficients, arithmetic order, and
+worker-local scratch are unchanged. A matched 100-frame allocation trace
+reduced complex and real plan factories from 30 calls each to one, removing
+12.19 MB of sampled duplicate construction.
+
+All 12 strict main/candidate thread-profile gates and all 60 refreshed matrix
+runs matched their references. Five alternating `current`/20-worker pairs
+moved median decode time from 8.91 to 8.59 seconds (3.6%); the mean improved
+1.4%, so this is a modest cold-start/end-to-end gain. A 1,000-frame gate also
+remained exact and showed bounded working-set behavior.
 
 Each .NET cell shows median wall time followed by speedup versus Python in the
 same row; values below `1.000x` are slower. The default is **5 workers**.
@@ -155,7 +158,7 @@ The pinned SDK is .NET `11.0.100-preview.6.26359.118`.
 dotnet restore VHSDecodeDotNet.slnx
 dotnet build VHSDecodeDotNet.slnx -c Release --no-restore
 dotnet test --solution VHSDecodeDotNet.slnx -c Release `
-  --no-build --no-restore --minimum-expected-tests 1126
+  --no-build --no-restore --minimum-expected-tests 1128
 ```
 
 Open `VHSDecodeDotNet.slnx` in Visual Studio 2026 to build, debug, and run the

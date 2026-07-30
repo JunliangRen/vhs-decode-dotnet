@@ -1,14 +1,13 @@
 // Radix-2/4/8 complex FFT adapted from pocketfft's BSD-3-Clause implementation.
-using System.Collections.Concurrent;
 using System.Numerics;
 
 namespace VHSDecode.Core.Dsp;
 
 public static class PocketFftComplex
 {
-    private static readonly ConcurrentDictionary<int, Plan> Plans = new();
-    private static readonly ConcurrentDictionary<(int Length, int RootLength), Plan> RootedPlans = new();
-    private static readonly ConcurrentDictionary<int, SinCos2PiByN> Roots = new();
+    private static readonly SingleCreationCache<int, Plan> Plans = new();
+    private static readonly SingleCreationCache<(int Length, int RootLength), Plan> RootedPlans = new();
+    private static readonly SingleCreationCache<int, SinCos2PiByN> Roots = new();
     [ThreadStatic]
     private static Complex[]? _packetStage;
     [ThreadStatic]
