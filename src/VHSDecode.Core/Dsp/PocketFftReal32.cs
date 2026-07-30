@@ -1,12 +1,11 @@
 // Float32 mixed-radix real FFT adapted from pocketfft/DUCC's BSD-3-Clause implementation.
 using System.Buffers;
-using System.Collections.Concurrent;
 
 namespace VHSDecode.Core.Dsp;
 
 internal static class PocketFftReal32
 {
-    private static readonly ConcurrentDictionary<int, Plan> Plans = new();
+    private static readonly SingleCreationCache<int, Plan> Plans = new();
 
     internal static Complex32[] Forward(ReadOnlySpan<float> input)
     {

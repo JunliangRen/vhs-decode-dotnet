@@ -1,13 +1,12 @@
 // Radix-2/4 real FFT adapted from pocketfft's BSD-3-Clause implementation.
 using System.Buffers;
-using System.Collections.Concurrent;
 using System.Numerics;
 
 namespace VHSDecode.Core.Dsp;
 
 public static class PocketFftReal
 {
-    private static readonly ConcurrentDictionary<int, Plan> Plans = new();
+    private static readonly SingleCreationCache<int, Plan> Plans = new();
 
     public static Complex[] Forward(ReadOnlySpan<double> input)
     {

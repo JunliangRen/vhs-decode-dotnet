@@ -1,12 +1,11 @@
 // Float32 mixed-radix complex FFT adapted from pocketfft/DUCC's BSD-3-Clause implementation.
 using System.Buffers;
-using System.Collections.Concurrent;
 
 namespace VHSDecode.Core.Dsp;
 
 internal static class PocketFftComplex32
 {
-    private static readonly ConcurrentDictionary<(int Length, int RootLength), Plan> RootedPlans = new();
+    private static readonly SingleCreationCache<(int Length, int RootLength), Plan> RootedPlans = new();
     [ThreadStatic]
     private static Value[]? _planValues;
     [ThreadStatic]
