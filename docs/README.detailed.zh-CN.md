@@ -251,6 +251,11 @@ non-Intel vendor warning。后端会加载静态链接的 `vhsdecode_ipp.dll`，
 - RF span 直接写入请求的最终输出窗口，不再先分配整块边界场数组再做第二次切片复制。
 - 默认 linear TBC 重采样会租用每场的 source-position 与 level-adjust 工作区，按精确 span
   使用，并在每次同步串行或并行重采样结束后归还两者。
+- 有状态的 VHS CLI 顺序路径会分别保留一个精确长度的亮度场 workspace 和色度场
+  workspace，因为亮度渲染可能与色度解码重叠。公共 `Decode()` 和保留结果的
+  `DecodeFields()` 仍为每个结果提供独立的 `ChromaBurstSamples`，只有 CLI 内部
+  非保留路径省略它。直接 UInt16 路径不需要 double 场缓冲，公共重采样 API
+  继续遵守独立输出所有权。
 - VHS diff-demod 尖峰修复复用现有 16 槽 real-FFT 工作区池中的一块全长复数暂存数组；
   返回的 analytic 数组仍保持独立所有权，非 VHS 路径保留原有的分配回退。
 - 在小端主机上，TBC 与 chroma 样本直接从 `ushort` span 写入，不再分配整场 byte 副本；
@@ -319,18 +324,18 @@ Python v0.4.0、Exact v0.4.0、Exact `current`、IPP-fast v0.4.0 和 IPP-fast
 
 | CLI 模式（workers） | Python v0.4.0 | Exact + v0.4.0 | Exact + current | IPP-fast + v0.4.0 | IPP-fast + current |
 | --- | ---: | ---: | ---: | ---: | ---: |
-| 默认（5） | 16.983 s | 5.817 s / 2.920x / 65.8% | 6.976 s / 2.435x / 58.9% | 5.530 s / 3.071x / 67.4% | 6.961 s / 2.440x / 59.0% |
-| `--threads 1` | 21.263 s | 19.055 s / 1.116x / 10.4% | 21.556 s / 0.986x / 慢 1.4% | 18.609 s / 1.143x / 12.5% | 21.044 s / 1.010x / 1.0% |
-| `--threads 5` | 16.880 s | 5.555 s / 3.039x / 67.1% | 6.952 s / 2.428x / 58.8% | 5.554 s / 3.039x / 67.1% | 7.382 s / 2.287x / 56.3% |
-| `--threads 10` | 17.612 s | 4.616 s / 3.816x / 73.8% | 5.554 s / 3.171x / 68.5% | 4.527 s / 3.891x / 74.3% | 5.381 s / 3.273x / 69.4% |
-| `--threads 20` | 18.330 s | 3.578 s / 5.124x / 80.5% | 4.798 s / 3.820x / 73.8% | 3.580 s / 5.120x / 80.5% | 4.995 s / 3.670x / 72.7% |
+| 默认（5） | 16.983 s | 5.558 s / 3.055x / 67.3% | 7.343 s / 2.313x / 56.8% | 5.517 s / 3.078x / 67.5% | 7.136 s / 2.380x / 58.0% |
+| `--threads 1` | 21.263 s | 18.759 s / 1.133x / 11.8% | 21.318 s / 0.997x / 慢 0.3% | 18.095 s / 1.175x / 14.9% | 20.655 s / 1.029x / 2.9% |
+| `--threads 5` | 16.880 s | 5.543 s / 3.045x / 67.2% | 6.972 s / 2.421x / 58.7% | 5.417 s / 3.116x / 67.9% | 6.958 s / 2.426x / 58.8% |
+| `--threads 10` | 17.612 s | 4.566 s / 3.857x / 74.1% | 5.610 s / 3.139x / 68.1% | 4.625 s / 3.808x / 73.7% | 5.978 s / 2.946x / 66.1% |
+| `--threads 20` | 18.330 s | 3.830 s / 4.786x / 79.1% | 5.294 s / 3.462x / 71.1% | 3.511 s / 5.221x / 80.8% | 4.917 s / 3.728x / 73.2% |
 
 测试机为 Intel Core Ultra 7 265K（20 个逻辑处理器）、Windows 11 25H2 build
 26220.8925，以及 .NET SDK/runtime `11.0.100-preview.6.26359.118`。Python 本身
 没有变化，因此 Python 列保留上一份固定矩阵的中位数；四列 .NET 数据均通过
-60 次交错运行重新测量。候选基于 `547a3a1` 并包含下述 current 色度 comb
-原地优化；其单文件 `decode.exe` SHA-256 为
-`4DE8F0662797BFEA5285CF916BAFD446F9332030699A1BDA08F4A0B9131A384E`。
+60 次交错运行重新测量。候选基于 `d07d1ad` 并包含下述场重采样 workspace
+优化；其单文件 `decode.exe` SHA-256 为
+`EDFECE6AD069D9D05E73BCA426162FC73CEEB0A5313F1C6FD0DD470F5DE2178B`。
 固定 40 帧矩阵包含启动成本和单次波动；下文相反顺序的 1000 帧配对提供稳定的
 整条流水线 A/B。Python 3.14.0 使用 NumPy 2.4.6、SciPy 1.18.0、
 Numba 0.66.0 和 python-soxr 1.1.0。公共参数为：
@@ -1324,6 +1329,37 @@ GitHub Actions 同样发现 1,118 项测试：1,117 项通过，一项需要可�
 有界且没有渐进减速。刷新后的五路径 overview 使用 60 次交错 .NET 运行，
 全部 60 次均通过既有兼容参考。
 
+最新一轮 Exact 场重采样分配优化增加了 destination-buffer 形式，但不改变
+16-tap sinc 表达式、float32 转换点、样本顺序或重采样计划。有状态的 VHS CLI
+顺序解码器持有一块精确长度的亮度 workspace 和一块独立色度 workspace，因为
+有界色度任务可能与亮度渲染重叠。公共 `Decode()` 和保留结果的 `DecodeFields()`
+仍分配并返回独立的 `ChromaBurstSamples`；只有 CLI 内部非保留顺序结果省略它。
+直接 UInt16 路径仍不分配 double 场，公共重采样 API 继续遵守独立输出契约。
+每个角色只保留一块缓冲，形状变化时替换，因此保留内存有界且不会随解码长度增长。
+
+Release 解决方案以零警告、零错误构建，全部 1,120 项 xUnit v3 测试通过。
+六组真实 profile/thread 门禁覆盖 Exact v0.4.0 和 `current` 的
+`--threads 0`、默认 5 与 `--threads 20`。候选在亮度、色度、原始 JSON、
+stdout、归一化 stderr/日志和全部有序 `fileLoc` 上匹配基线；连续公共
+`Decode()` 与保留结果的 `DecodeFields()` 也保留不同的色度 burst 数组。刷新后的
+五路径矩阵对四种
+Exact/IPP profile 组合分别以默认、1、5、10、20 workers 各运行三次，
+全部 60 次都匹配既有兼容参考。
+
+两组相反顺序的 Exact-current/20-worker 1000 帧配对把 counter 合计分配从
+126.226 降至 110.873 GiB（12.16%），GC pause 从 1.015 降至 0.885 秒
+（12.83%），墙钟从 141.015 降至 140.405 秒（减少 0.43%，吞吐 1.004x）。
+两组相反顺序的 current/默认 500 帧配对把分配从 62.638 降至 55.606 GiB
+（11.23%），GC pause 减少 11.91%，墙钟减少 1.05%。对应的
+v0.4.0/默认配对分别减少分配 10.80%、GC pause 22.65%、墙钟 0.88%；
+v0.4.0/20-worker 1000 帧配对减少分配 10.40%、墙钟 2.11%。
+
+候选单独运行的 v0.4.0/20-worker 3000 帧长跑耗时 164.593 秒。四个工作集
+四分位中位数为 793.94、799.89、747.98 和 772.25 MiB；峰值为
+1,400.8 MiB，最后一个样本为 957.3 MiB。最初与最后十个稳定的 100 帧区间
+中位数分别为 5.492 和 5.440 秒。这支持保留内存有界且没有渐进减速；
+不把由回收时机造成的峰值描述为常驻内存下降。
+
 </details>
 
 <!-- SECTION: build -->
@@ -1342,7 +1378,7 @@ GitHub Actions 同样发现 1,118 项测试：1,117 项通过，一项需要可�
 .\tools\build-ipp-native.ps1
 dotnet restore VHSDecodeDotNet.slnx
 dotnet build VHSDecodeDotNet.slnx -c Release --no-restore
-dotnet test --solution VHSDecodeDotNet.slnx -c Release --no-build --no-restore --minimum-expected-tests 1119
+dotnet test --solution VHSDecodeDotNet.slnx -c Release --no-build --no-restore --minimum-expected-tests 1120
 ```
 
 第一条命令用于包含可选的 `ipp-fast` 原生产物；只构建 Exact 时可以省略。
@@ -1353,7 +1389,7 @@ Intel oneAPI。只含二进制的单文件发布会嵌入 `vhsdecode_ipp.dll` �
 notice，不会额外生成许可证 sidecar 文件。只构建 Exact 后端时可以省略原生构建步骤。
 
 当前正式 Release 构建为零警告、零错误。xUnit v3 项目向
-`dotnet test` 和 Visual Studio Test Explorer 暴露 **1,119** 个可独立发现的测试。
+`dotnet test` 和 Visual Studio Test Explorer 暴露 **1,120** 个可独立发现的测试。
 
 <!-- SECTION: usage -->
 

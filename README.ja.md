@@ -36,7 +36,7 @@ upstream release `v0.4.0`、commit
 - VHS family には VHS/S-VHS、Betamax、Video8/Hi8、U-matic、Type C、EIAJ、
   upstream が対応する PAL/NTSC variant が含まれます。
 - TBC utility、ダブルクリック GUI、開発者向け plot window は対象外です。
-- Visual Studio 2026 の `.slnx` には **1,119** 件の標準 xUnit v3 test があり、
+- Visual Studio 2026 の `.slnx` には **1,120** 件の標準 xUnit v3 test があり、
   Test Explorer と `dotnet test` の両方で実行できます。
 
 <!-- SECTION: start -->
@@ -100,23 +100,25 @@ CVBS、LaserDisc、HiFi は現在 `ipp-fast` を拒否するため、これら�
 <!-- LATEST_PERFORMANCE_BEGIN -->
 | CLI mode（workers） | Python v0.4.0 | Exact + v0.4.0 | Exact + current | IPP-fast + v0.4.0 | IPP-fast + current |
 | --- | ---: | ---: | ---: | ---: | ---: |
-| default（5） | 16.983 s | 5.817 s / 2.920x | 6.976 s / 2.435x | 5.530 s / 3.071x | 6.961 s / 2.440x |
-| `--threads 1` | 21.263 s | 19.055 s / 1.116x | 21.556 s / 0.986x | 18.609 s / 1.143x | 21.044 s / 1.010x |
-| `--threads 5` | 16.880 s | 5.555 s / 3.039x | 6.952 s / 2.428x | 5.554 s / 3.039x | 7.382 s / 2.287x |
-| `--threads 10` | 17.612 s | 4.616 s / 3.816x | 5.554 s / 3.171x | 4.527 s / 3.891x | 5.381 s / 3.273x |
-| `--threads 20` | 18.330 s | 3.578 s / 5.124x | 4.798 s / 3.820x | 3.580 s / 5.120x | 4.995 s / 3.670x |
+| default（5） | 16.983 s | 5.558 s / 3.055x | 7.343 s / 2.313x | 5.517 s / 3.078x | 7.136 s / 2.380x |
+| `--threads 1` | 21.263 s | 18.759 s / 1.133x | 21.318 s / 0.997x | 18.095 s / 1.175x | 20.655 s / 1.029x |
+| `--threads 5` | 16.880 s | 5.543 s / 3.045x | 6.972 s / 2.421x | 5.417 s / 3.116x | 6.958 s / 2.426x |
+| `--threads 10` | 17.612 s | 4.566 s / 3.857x | 5.610 s / 3.139x | 4.625 s / 3.808x | 5.978 s / 2.946x |
+| `--threads 20` | 18.330 s | 3.830 s / 4.786x | 5.294 s / 3.462x | 3.511 s / 5.221x | 4.917 s / 3.728x |
 <!-- LATEST_PERFORMANCE_END -->
 
-最新の Exact/current allocation pass は、decoder が field buffer を独占した後に
-1H/2H chroma comb を原地実行します。bounded pooled storage に保持する delayed
-data は最大 2 line で、public copying API、float32 conversion point、arithmetic
-order、caller input ownership は変更しません。profile/thread gate 12 件、
-interleaved 160-frame pair 6 組、反対順序の 1,000-frame pair 2 組はすべて exact
-です。long pair の combined counter allocation は 132.089 から 125.320 GiB
-（5.12% 減）、wall time は 142.414 から 140.016 秒（1.68% 減、throughput
-1.017x）、GC pause は 1.067 から 1.000 秒になりました。candidate の startup 後
-100-frame interval は 6.68 から 6.89 秒で、working set は bounded のままです。
-上の refreshed 60 run もすべて同じ compatibility gate を通過しました。
+最新の Exact field-resampling pass は、stateful CLI sequence decoder に
+exact-length の luma workspace と chroma workspace を個別に保持します。public
+`Decode()` と retained `DecodeFields()` の result は引き続き独立した
+`ChromaBurstSamples` を所有し、internal non-retaining CLI path だけが省略します。
+direct UInt16 path、16-tap sinc の式と演算順序、public copying API は変わりません。
+6 組の profile/thread gate と上の 60 run はすべて exact でした。反対順序の
+current/20-worker 1,000-frame pair 2 組では、allocation が 126.226 から
+110.873 GiB（12.16% 減）、wall time が 141.015 から 140.405 秒
+（0.43% 減、throughput 1.004x）、GC pause が 1.015 から 0.885 秒になりました。
+default-current pair でも wall time は 1.05%、allocation は 11.23% 改善しました。
+3,000-frame run の quarterly working-set median は 794/800/748/772 MiB で、
+最後の steady 1,000 frames は最初の steady 1,000 frames より遅くありません。
 
 各 .NET cell は wall-time median と同じ行の Python に対する speedup の順です。
 `1.000x` 未満は Python より遅いことを示します。default は実際に **5 workers**
@@ -150,7 +152,7 @@ preview tool は writer を止めずに partial output を確認できます。
 dotnet restore VHSDecodeDotNet.slnx
 dotnet build VHSDecodeDotNet.slnx -c Release --no-restore
 dotnet test --solution VHSDecodeDotNet.slnx -c Release `
-  --no-build --no-restore --minimum-expected-tests 1119
+  --no-build --no-restore --minimum-expected-tests 1120
 ```
 
 Visual Studio 2026 で `VHSDecodeDotNet.slnx` を開くと、build、debug、

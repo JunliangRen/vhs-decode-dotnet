@@ -288,6 +288,12 @@ FFT への fallback が必要で、paired median gain は -1.05% まで低下し
   最終 output window へ直接書き込みます。
 - default linear TBC resampling は field ごとの source-position/level-adjust workspace を
   rent し、正確な span だけを使用して、同期 serial/parallel resample の完了後に返却します。
+- stateful VHS CLI sequence path は、luma rendering と chroma decode が重なるため、
+  exact-length の luma field workspace と別の chroma field workspace を保持します。
+  public `Decode()` と retained `DecodeFields()` の result は独立した
+  `ChromaBurstSamples` を所有し続け、internal non-retaining CLI path だけが省略します。
+  direct UInt16 path は double field を必要とせず、public resampling API も
+  independent-output ownership を維持します。
 - VHS diff-demod spike repair は、既存の 16-slot real-FFT workspace pool 内にある全長の
   complex scratch array を再利用します。返される analytic array は独立した ownership を
   維持し、非 VHS path は従来の allocation fallback を保持します。
@@ -374,19 +380,19 @@ wall-time reduction の順です。
 
 | CLI mode（workers） | Python v0.4.0 | Exact + v0.4.0 | Exact + current | IPP-fast + v0.4.0 | IPP-fast + current |
 | --- | ---: | ---: | ---: | ---: | ---: |
-| default（5） | 16.983 s | 5.817 s / 2.920x / 65.8% | 6.976 s / 2.435x / 58.9% | 5.530 s / 3.071x / 67.4% | 6.961 s / 2.440x / 59.0% |
-| `--threads 1` | 21.263 s | 19.055 s / 1.116x / 10.4% | 21.556 s / 0.986x / 1.4% 遅い | 18.609 s / 1.143x / 12.5% | 21.044 s / 1.010x / 1.0% |
-| `--threads 5` | 16.880 s | 5.555 s / 3.039x / 67.1% | 6.952 s / 2.428x / 58.8% | 5.554 s / 3.039x / 67.1% | 7.382 s / 2.287x / 56.3% |
-| `--threads 10` | 17.612 s | 4.616 s / 3.816x / 73.8% | 5.554 s / 3.171x / 68.5% | 4.527 s / 3.891x / 74.3% | 5.381 s / 3.273x / 69.4% |
-| `--threads 20` | 18.330 s | 3.578 s / 5.124x / 80.5% | 4.798 s / 3.820x / 73.8% | 3.580 s / 5.120x / 80.5% | 4.995 s / 3.670x / 72.7% |
+| default（5） | 16.983 s | 5.558 s / 3.055x / 67.3% | 7.343 s / 2.313x / 56.8% | 5.517 s / 3.078x / 67.5% | 7.136 s / 2.380x / 58.0% |
+| `--threads 1` | 21.263 s | 18.759 s / 1.133x / 11.8% | 21.318 s / 0.997x / 0.3% 遅い | 18.095 s / 1.175x / 14.9% | 20.655 s / 1.029x / 2.9% |
+| `--threads 5` | 16.880 s | 5.543 s / 3.045x / 67.2% | 6.972 s / 2.421x / 58.7% | 5.417 s / 3.116x / 67.9% | 6.958 s / 2.426x / 58.8% |
+| `--threads 10` | 17.612 s | 4.566 s / 3.857x / 74.1% | 5.610 s / 3.139x / 68.1% | 4.625 s / 3.808x / 73.7% | 5.978 s / 2.946x / 66.1% |
+| `--threads 20` | 18.330 s | 3.830 s / 4.786x / 79.1% | 5.294 s / 3.462x / 71.1% | 3.511 s / 5.221x / 80.8% | 4.917 s / 3.728x / 73.2% |
 
 benchmark host は Intel Core Ultra 7 265K（20 logical processor）、
 Windows 11 25H2 build 26220.8925、.NET SDK/runtime
 `11.0.100-preview.6.26359.118` です。Python 自体は変更されていないため、
 Python 列は以前の fixed matrix median を保持し、4 つの .NET 列は 60 回の
-interleaved run で再測定しました。candidate は `547a3a1` に下記の in-place
-current-chroma comb 最適化を加えたもので、single-file `decode.exe` SHA-256 は
-`4DE8F0662797BFEA5285CF916BAFD446F9332030699A1BDA08F4A0B9131A384E`
+interleaved run で再測定しました。candidate は `d07d1ad` に下記の
+field-resampling workspace 最適化を加えたもので、single-file `decode.exe` SHA-256 は
+`EDFECE6AD069D9D05E73BCA426162FC73CEEB0A5313F1C6FD0DD470F5DE2178B`
 でした。fixed 40-frame matrix には startup cost と run ごとの spread が含まれ、
 下記の反対順序 1,000-frame pair が stable whole-pipeline A/B を示します。
 Python 3.14.0 は NumPy 2.4.6、SciPy 1.18.0、Numba 0.66.0、
@@ -1608,6 +1614,43 @@ combined wall time は 142.414 から 140.016 秒へ 1.68% 減、throughput は
 five-path overview は 60 回の interleaved .NET run を使い、全 60 run が既存の
 compatibility reference を通過しました。
 
+最新の Exact field-resampling allocation pass は destination-buffer form を追加
+しますが、16-tap sinc expression、float32 conversion point、sample order、
+resampling plan は変えません。stateful VHS CLI sequence decoder は、bounded
+chroma task が luma rendering と重なるため、exact-length の luma workspace と
+別の chroma workspace を所有します。public `Decode()` と retained
+`DecodeFields()` は独立した `ChromaBurstSamples` を引き続き allocation して返し、
+internal non-retaining CLI sequence result だけが省略します。direct UInt16 path は
+double field を allocation せず、public resampling API も independent-output
+contract を維持します。各 role で保持する buffer は 1 個だけで、shape change は
+置換されるため、retained memory は decode length に比例せず bounded です。
+
+Release solution は warning/error 0 で build され、1,120 件の xUnit v3 test が
+すべて pass しました。real profile/thread gate 6 組は Exact v0.4.0 と `current`
+の `--threads 0`、default-five、`--threads 20` を網羅しました。candidate は
+baseline の luma、chroma、raw JSON、stdout、normalized stderr/log、すべての
+ordered `fileLoc` と一致し、連続する public `Decode()` result も異なる chroma
+burst array を保持します。refreshed five-path matrix は 4 つの Exact/IPP profile
+combination を default、1、5、10、20 workers で各 3 回実行し、全 60 run が既存
+compatibility reference と一致しました。
+
+反対順序の Exact-current/20-worker 1,000-frame pair 2 組では、combined counter
+allocation が 126.226 から 110.873 GiB（12.16% 減）、GC pause が 1.015 から
+0.885 秒（12.83% 減）、wall time が 141.015 から 140.405 秒
+（0.43% 減、throughput 1.004x）になりました。反対順序の current/default
+500-frame pair 2 組では allocation が 62.638 から 55.606 GiB（11.23% 減）、
+GC pause が 11.91%、wall time が 1.05% 改善しました。対応する
+v0.4.0/default pair は allocation 10.80%、GC pause 22.65%、wall time 0.88%
+を削減し、v0.4.0/20-worker 1,000-frame pair は allocation 10.40%、
+wall time 2.11% を削減しました。
+
+candidate-only の v0.4.0/20-worker 3,000-frame run は 164.593 秒で完了しました。
+4 つの working-set quarter median は 793.94、799.89、747.98、772.25 MiB、
+maximum は 1,400.8 MiB、final sample は 957.3 MiB でした。最初と最後の
+steady 100-frame interval 10 個の median は 5.492 と 5.440 秒です。これは
+retained memory が bounded で progressive slowdown がないことを支持しますが、
+collection-timing peak を resident-memory reduction とは表現しません。
+
 </details>
 
 <!-- SECTION: build -->
@@ -1626,7 +1669,7 @@ compatibility reference を通過しました。
 .\tools\build-ipp-native.ps1
 dotnet restore VHSDecodeDotNet.slnx
 dotnet build VHSDecodeDotNet.slnx -c Release --no-restore
-dotnet test --solution VHSDecodeDotNet.slnx -c Release --no-build --no-restore --minimum-expected-tests 1119
+dotnet test --solution VHSDecodeDotNet.slnx -c Release --no-build --no-restore --minimum-expected-tests 1120
 ```
 
 最初の command は optional `ipp-fast` native artifact を含めるためのものです。
@@ -1639,7 +1682,7 @@ third-party notice を埋め込み、license sidecar file は追加しません�
 
 現在の正式な Release build は warning 0、error 0 です。xUnit v3 project は
 `dotnet test` と Visual Studio Test Explorer の両方で個別に検出できる
-**1,119** tests を公開します。
+**1,120** tests を公開します。
 
 <!-- SECTION: usage -->
 

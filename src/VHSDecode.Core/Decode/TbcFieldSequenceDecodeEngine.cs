@@ -23,10 +23,18 @@ public delegate TbcDecodedField? TbcFieldSequenceReadField(
 
 public sealed class TbcFieldSequenceDecodeEngine
 {
+    private delegate TbcDecodedField? SequenceReadField(
+        DecodeSession session,
+        Stream input,
+        long begin,
+        int readLength,
+        int fieldNumber,
+        bool retainVhsChromaBurstSamples);
+
     private const int TestLdfLookaheadSamples = 1_100_000;
     private readonly ILdTestLdfWriter _testLdfWriter;
     private readonly ILaserDiscEfmOutputWriter _efmOutputWriter;
-    private readonly TbcFieldSequenceReadField _readField;
+    private readonly SequenceReadField _readField;
     private readonly VhsDiskSpaceGuard _vhsDiskSpaceGuard;
     private readonly CancellationToken _cancellationToken;
     private readonly bool _usesSessionReader;
@@ -122,7 +130,10 @@ public sealed class TbcFieldSequenceDecodeEngine
         _vhsDiskSpaceGuard = vhsDiskSpaceGuard ?? new VhsDiskSpaceGuard();
         _cancellationToken = cancellationToken;
         _usesSessionReader = readField is null;
-        _readField = readField ?? ReadFieldFromSession;
+        _readField = readField is null
+            ? ReadFieldFromSession
+            : (session, input, begin, readLength, fieldNumber, _) =>
+                readField(session, input, begin, readLength, fieldNumber);
     }
 
     public int ExtraReadLines { get; }
@@ -463,6 +474,7 @@ public sealed class TbcFieldSequenceDecodeEngine
                         readLength,
                         decodedFieldCount,
                         initialReadWrittenFieldCount,
+                        retainVhsChromaBurstSamples: retainFields,
                         out deferredVhsFieldDiagnostics);
                 }
                 else
@@ -765,6 +777,7 @@ public sealed class TbcFieldSequenceDecodeEngine
                     readLength,
                     decodedFieldCount,
                     writePlanner.WrittenFieldCount,
+                    retainVhsChromaBurstSamples: false,
                     out terminalLookaheadDiagnostics);
                 terminalLookaheadDiagnostics?.FlushFieldDiagnostics();
                 _cancellationToken.ThrowIfCancellationRequested();
@@ -1024,7 +1037,8 @@ public sealed class TbcFieldSequenceDecodeEngine
         Stream input,
         long begin,
         int readLength,
-        int fieldNumber)
+        int fieldNumber,
+        bool retainVhsChromaBurstSamples)
     {
         DecodeReadWindow window = DecodeReadWindowPlanner.Resolve(session, begin, readLength);
         if (session.Spec.Name == "vhs")
@@ -1035,7 +1049,10 @@ public sealed class TbcFieldSequenceDecodeEngine
                 window.SampleCount);
             return lease is null
                 ? null
-                : session.TbcFieldDecoder.Decode(lease.Span, fieldNumber: fieldNumber);
+                : session.TbcFieldDecoder.DecodeVhsForSequence(
+                    lease.Span,
+                    fieldNumber,
+                    retainVhsChromaBurstSamples);
         }
 
         RfDecodedSpan? span = session.StreamDecoder.Read(input, window.StartSample, window.SampleCount);
@@ -1055,7 +1072,8 @@ public sealed class TbcFieldSequenceDecodeEngine
         long begin,
         int readLength,
         int fieldNumber,
-        int? writtenFieldCount = null)
+        int? writtenFieldCount = null,
+        bool retainVhsChromaBurstSamples = true)
     {
         try
         {
@@ -1064,7 +1082,13 @@ public sealed class TbcFieldSequenceDecodeEngine
                 session.Spec.Name,
                 fieldNumber,
                 writtenFieldCount);
-            return _readField(session, input, begin, readLength, effectiveFieldNumber);
+            return _readField(
+                session,
+                input,
+                begin,
+                readLength,
+                effectiveFieldNumber,
+                retainVhsChromaBurstSamples);
         }
         catch (TbcFieldDecodeRecoveryException)
         {
@@ -1091,6 +1115,7 @@ public sealed class TbcFieldSequenceDecodeEngine
         int readLength,
         int fieldNumber,
         int? writtenFieldCount,
+        bool retainVhsChromaBurstSamples,
         out DeferredDiagnosticBatch? diagnostics)
     {
         diagnostics = null;
@@ -1103,7 +1128,8 @@ public sealed class TbcFieldSequenceDecodeEngine
                 begin,
                 readLength,
                 fieldNumber,
-                writtenFieldCount);
+                writtenFieldCount,
+                retainVhsChromaBurstSamples);
         }
 
         var fieldMessages = new List<(string Level, string Message)>();
@@ -1121,7 +1147,8 @@ public sealed class TbcFieldSequenceDecodeEngine
                 begin,
                 readLength,
                 fieldNumber,
-                writtenFieldCount);
+                writtenFieldCount,
+                retainVhsChromaBurstSamples);
         }
         finally
         {

@@ -175,6 +175,70 @@ public sealed class TbcDirectConversionTests
             $"Direct prepared TBC rendering allocated {allocated:N0} bytes.");
     }
 
+    [Fact(DisplayName = "Prepared TBC fallback renderer reuses a caller workspace")]
+    public void PreparedTbcFallbackRendererReusesCallerWorkspace()
+    {
+        const int outputLineLength = 1_024;
+        const int lineCount = 100;
+        const int destinationLength = outputLineLength * lineCount;
+        var frameSpec = new TbcFrameSpec(
+            "PAL",
+            outputLineLength,
+            lineCount,
+            OutputSampleRateHz: 4_000_000.0,
+            ColourBurstStart: null,
+            ColourBurstEnd: null,
+            ActiveVideoStart: null,
+            ActiveVideoEnd: null);
+        var converter = new VideoOutputConverter(
+            ire0: 4_000_000.25,
+            hzIre: 100_000.125,
+            outputZero: 256,
+            vsyncIre: -40.0,
+            outputScale: 512.25);
+        var renderer = new TbcFieldRenderer(
+            frameSpec,
+            converter,
+            ire0Adjust: new Ire0AdjustOptions(
+                BackPorch: false,
+                HSync: false,
+                BackPorchStart: 0,
+                BackPorchEnd: 0),
+            nominalInputLineLength: 2_000.125,
+            workerThreads: 1);
+        double[] source = Enumerable.Range(0, 220_000)
+            .Select(index => 4_000_000.0
+                + (1_500_000.0 * Math.Sin(index * 0.0031))
+                + (250_000.0 * Math.Cos(index * 0.0007)))
+            .ToArray();
+        double[] lineLocations = Enumerable.Range(0, lineCount + 1)
+            .Select(line => 1_000.25 + (line * 2_000.125) + (0.01 * line * line))
+            .ToArray();
+        var workspace = new double[destinationLength];
+
+        using TbcLineResampler.ResamplingPlan plan =
+            renderer.PrepareFieldResampling(lineLocations);
+        TbcRenderedField expected =
+            renderer.RenderPreparedFieldPayload(source, plan);
+        _ = renderer.RenderPreparedFieldPayload(
+            source,
+            plan,
+            resamplingWorkspace: workspace);
+        Array.Fill(workspace, double.NaN);
+
+        long before = GC.GetAllocatedBytesForCurrentThread();
+        TbcRenderedField actual = renderer.RenderPreparedFieldPayload(
+            source,
+            plan,
+            resamplingWorkspace: workspace);
+        long allocated = GC.GetAllocatedBytesForCurrentThread() - before;
+
+        Assert.Equal(expected.Samples, actual.Samples);
+        Assert.True(
+            allocated < destinationLength * 3L,
+            $"Workspace-backed prepared TBC rendering allocated {allocated:N0} bytes.");
+    }
+
     private static double[] BuildLegacyLinearLevelAdjusts(
         IReadOnlyList<double> lineLocations,
         int outputLineLength,

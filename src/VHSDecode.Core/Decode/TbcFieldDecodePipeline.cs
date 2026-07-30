@@ -195,6 +195,8 @@ public sealed class TbcFieldDecodePipeline
     private readonly ExactLengthDoubleWorkspaceCache _dcOffsetLowPassWorkspaces =
         new(DcOffsetLowPassWorkspaceCapacity);
     private readonly ExactLengthDoubleWorkspaceCache _chromaPhaseAnalysisWorkspaces = new(1);
+    private readonly ExactLengthDoubleWorkspaceCache _chromaFieldResamplingWorkspaces = new(1);
+    private readonly ExactLengthDoubleWorkspaceCache _videoFieldResamplingWorkspaces = new(1);
     private readonly string? _decodeType;
     private readonly double? _framesPerSecond;
     private Action<string, string>? _diagnosticLogger;
@@ -618,6 +620,17 @@ public sealed class TbcFieldDecodePipeline
     }
 
     public TbcDecodedField Decode(RfDecodedSpan span, double? syncThresholdHz = null, int fieldNumber = 0)
+        => Decode(
+            span,
+            syncThresholdHz,
+            fieldNumber,
+            retainChromaBurstSamples: true);
+
+    private TbcDecodedField Decode(
+        RfDecodedSpan span,
+        double? syncThresholdHz,
+        int fieldNumber,
+        bool retainChromaBurstSamples)
     {
         if (!string.Equals(_decodeType, "vhs", StringComparison.Ordinal))
         {
@@ -625,7 +638,8 @@ public sealed class TbcFieldDecodePipeline
                 span,
                 syncThresholdHz,
                 fieldNumber,
-                deferCvbsOutputConversion: false);
+                deferCvbsOutputConversion: false,
+                retainChromaBurstSamples);
         }
 
         int effectiveFieldNumber = ResolveVhsFieldNumber(
@@ -638,7 +652,8 @@ public sealed class TbcFieldDecodePipeline
                 span,
                 syncThresholdHz,
                 effectiveFieldNumber,
-                deferCvbsOutputConversion: false);
+                deferCvbsOutputConversion: false,
+                retainChromaBurstSamples);
             _previousVhsFieldNumber = effectiveFieldNumber;
             _previousVhsFieldReadLocation = span.StartSample;
             return decoded;
@@ -669,7 +684,22 @@ public sealed class TbcFieldDecodePipeline
     }
 
     internal TbcDecodedField DecodeForSequence(RfDecodedSpan span, int fieldNumber)
-        => DecodeCore(span, syncThresholdHz: null, fieldNumber, deferCvbsOutputConversion: true);
+        => DecodeCore(
+            span,
+            syncThresholdHz: null,
+            fieldNumber,
+            deferCvbsOutputConversion: true,
+            retainChromaBurstSamples: true);
+
+    internal TbcDecodedField DecodeVhsForSequence(
+        RfDecodedSpan span,
+        int fieldNumber,
+        bool retainChromaBurstSamples)
+        => Decode(
+            span,
+            syncThresholdHz: null,
+            fieldNumber,
+            retainChromaBurstSamples);
 
     internal bool CanDeferCvbsOutputConversion
         => string.Equals(_decodeType, "cvbs", StringComparison.Ordinal)
@@ -690,7 +720,8 @@ public sealed class TbcFieldDecodePipeline
         RfDecodedSpan span,
         double? syncThresholdHz,
         int fieldNumber,
-        bool deferCvbsOutputConversion)
+        bool deferCvbsOutputConversion,
+        bool retainChromaBurstSamples)
     {
         (double SyncLevel, double BlankLevel)? previouslyRenderedCvbsLevels = _renderer.LastCvbsSyncLevels;
         SyncPreparedSpan prepared = PrepareSyncSpan(span, syncThresholdHz);
@@ -700,7 +731,8 @@ public sealed class TbcFieldDecodePipeline
             decoded = DecodePrepared(
                 prepared,
                 fieldNumber,
-                deferCvbsOutputConversion && CanDeferCvbsOutputConversion);
+                deferCvbsOutputConversion && CanDeferCvbsOutputConversion,
+                retainChromaBurstSamples);
         }
         catch (InvalidOperationException ex) when (prepared.UsedSavedLevels && IsSyncLocationFailure(ex))
         {
@@ -713,7 +745,8 @@ public sealed class TbcFieldDecodePipeline
             decoded = DecodePrepared(
                 retried,
                 fieldNumber,
-                deferCvbsOutputConversion && CanDeferCvbsOutputConversion);
+                deferCvbsOutputConversion && CanDeferCvbsOutputConversion,
+                retainChromaBurstSamples);
         }
 
         if (_syncDetectionOptions.CvbsAutoSync && _renderer.CvbsClampAgc is not null)
@@ -729,7 +762,8 @@ public sealed class TbcFieldDecodePipeline
     private TbcDecodedField DecodePrepared(
         SyncPreparedSpan prepared,
         int fieldNumber,
-        bool deferCvbsOutputConversion)
+        bool deferCvbsOutputConversion,
+        bool retainChromaBurstSamples)
     {
         RfDecodedSpan span = prepared.Span;
         bool isVhs = string.Equals(_decodeType, "vhs", StringComparison.Ordinal);
@@ -1069,12 +1103,29 @@ public sealed class TbcFieldDecodePipeline
                     parity.IsFirstField,
                     fieldNumber)
                 : 0.0;
-        double[]? chromaBurstSamples = renderResamplingPlan is null
-            ? null
-            : _renderer.ResamplePreparedField(
-                span.Chroma!,
-                renderResamplingPlan,
-                chromaSourcePositionShift);
+        double[]? chromaBurstSamples = null;
+        if (renderResamplingPlan is not null)
+        {
+            if (retainChromaBurstSamples)
+            {
+                chromaBurstSamples = _renderer.ResamplePreparedField(
+                    span.Chroma!,
+                    renderResamplingPlan,
+                    chromaSourcePositionShift);
+            }
+            else
+            {
+                // Sequence decoding consumes this buffer before returning and
+                // omits it from TbcDecodedField, so the next field may reuse it.
+                chromaBurstSamples = _chromaFieldResamplingWorkspaces.Get(
+                    renderResamplingPlan.DestinationLength);
+                _renderer.ResamplePreparedField(
+                    span.Chroma!,
+                    renderResamplingPlan,
+                    chromaBurstSamples,
+                    chromaSourcePositionShift);
+            }
+        }
 
         int syncConfidence = SyncConfidenceCalculator.Compute(
             lineLocations.Locations,
@@ -1155,12 +1206,18 @@ public sealed class TbcFieldDecodePipeline
             }
             else if (renderResamplingPlan is not null)
             {
+                double[]? videoResamplingWorkspace =
+                    _renderer.CanConvertPreparedFieldDirectly()
+                        ? null
+                        : _videoFieldResamplingWorkspaces.Get(
+                            renderResamplingPlan.DestinationLength);
                 rendered = _renderer.RenderPreparedFieldPayload(
                     span.Video,
                     renderResamplingPlan,
                     fieldNumber,
                     fieldConverter,
-                    chromaPhase?.NextChromaRotationIndex);
+                    chromaPhase?.NextChromaRotationIndex,
+                    videoResamplingWorkspace);
             }
             else
             {
@@ -1303,7 +1360,7 @@ public sealed class TbcFieldDecodePipeline
             FieldPhaseId: chroma?.FieldPhaseId ?? laserDiscFieldPhaseId,
             MedianBurstIre: medianBurstIre,
             VbiData: vbiData,
-            ChromaBurstSamples: chromaBurstSamples,
+            ChromaBurstSamples: retainChromaBurstSamples ? chromaBurstSamples : null,
             ChromaSamples: chroma?.Samples,
             BurstStartLine: chroma?.BurstDetectedLine,
             RawInputSamples: _preserveRawMetricSources ? span.Input : null,
