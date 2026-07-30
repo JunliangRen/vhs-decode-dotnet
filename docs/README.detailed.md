@@ -1607,20 +1607,22 @@ production-sized xUnit v3 allocation gate verifies that only two field-sized
 `double[]` outputs plus the final `ushort[]` fit within the allowed budget; the
 old third field copy exceeds that bound.
 
-The Release solution built with zero warnings and errors, and all 1,118 tests
-passed. Twelve real gates covered v0.4.0/current at one, default-five, and 20
-workers. Six idle interleaved 160-frame pairs matched luma, chroma, raw JSON,
-stdout, normalized stderr/logs, and every ordered `fileLoc`; baseline/candidate
-wall medians were 13.513/13.224 s and CPU medians were 103.375/101.617 s.
-Candidate wall time won four of six pairs, but short-run timing is not used as
-a whole-pipeline speedup claim.
+The local Release solution built with zero warnings and errors, and all 1,118
+tests passed. Final GitHub Actions discovered the same 1,118 tests: 1,117
+passed and one optional AC3 dependency test was skipped, with zero failures.
+Twelve real gates covered v0.4.0/current at one, default-five, and 20 workers.
+Six idle interleaved 160-frame pairs matched luma, chroma, raw JSON, stdout,
+normalized stderr/logs, and every ordered `fileLoc`; baseline/candidate wall
+medians were 13.513/13.224 s and CPU medians were 103.375/101.617 s. Candidate
+wall time won four of six pairs, but short-run timing is not used as a
+whole-pipeline speedup claim.
 
 Two idle opposite-order 1,000-frame counter pairs also matched every
 artifact/log surface and all 2,000 ordered `fileLoc` values. Combined
 counter-reported allocation fell from 140.055 to 132.532 GiB, a 7.523 GiB or
 5.37% reduction. Combined wall time was neutral at 142.323/142.893 s, GC pause
 was neutral at 1.100/1.116 s, and sampled working sets remained bounded.
-Candidate post-startup 100-frame intervals stayed between 6.794 and 6.978 s
+Candidate post-startup 100-frame intervals stayed between 6.794 and 6.981 s
 without progressive slowdown. The pass is retained as a deterministic
 full-field allocation reduction and classified as whole-pipeline-throughput
 neutral, so the five-path overview remains the preceding valid idle 60-run

@@ -115,7 +115,7 @@ arithmetic order、caller input ownership は変更しません。profile/thread
 すべて exact です。idle long pair の combined counter allocation は
 140.055 から 132.532 GiB（5.37% 減）になりました。combined wall time は
 142.323/142.893 秒、GC pause は 1.100/1.116 秒で、どちらも neutral と判断します。
-startup 後の 100-frame interval は 6.794 から 6.978 秒で、progressive slowdown
+startup 後の 100-frame interval は 6.794 から 6.981 秒で、progressive slowdown
 はありません。stable whole-pipeline speedup は主張しないため、上の table は
 直前の valid idle 60-run matrix を維持します。
 

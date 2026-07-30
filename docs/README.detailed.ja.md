@@ -1561,8 +1561,10 @@ disabled、field parity がない path も従来どおりです。production-siz
 allocation gate は field-size `double[]` output 2 個と final `ushort[]` だけが
 budget 内に収まることを確認し、旧実装の 3 個目の field copy は上限を超えます。
 
-Release solution は warning/error 0 で build され、1,118 tests がすべて pass
-しました。real gate 12 件は v0.4.0/current の 1、default 5、20 workers を
+local Release solution は warning/error 0 で build され、1,118 tests がすべて
+pass しました。final GitHub Actions も同じ 1,118 tests を discover し、
+1,117 pass、optional AC3 dependency を必要とする 1 test が skip、failure 0
+でした。real gate 12 件は v0.4.0/current の 1、default 5、20 workers を
 網羅します。idle interleaved 160-frame pair 6 組は luma、chroma、raw JSON、
 stdout、normalized stderr/log、すべての ordered `fileLoc` で一致しました。
 baseline/candidate wall median は 13.513/13.224 秒、CPU median は
@@ -1574,7 +1576,7 @@ idle opposite-order 1,000-frame counter pair 2 組も、すべての artifact/lo
 140.055 から 132.532 GiB へ 7.523 GiB（5.37%）減りました。combined wall time は
 142.323/142.893 秒、GC pause は 1.100/1.116 秒で neutral、sampled working set は
 bounded のままです。candidate の startup 後 100-frame interval は 6.794 から
-6.978 秒で、progressive slowdown はありません。この pass は deterministic な
+6.981 秒で、progressive slowdown はありません。この pass は deterministic な
 full-field allocation reduction として保持し、whole-pipeline-throughput-neutral
 に分類します。そのため five-path overview は直前の valid idle 60-run matrix を
 維持します。

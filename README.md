@@ -120,7 +120,7 @@ profile/thread gates, six interleaved 160-frame pairs, and two opposite-order
 1,000-frame pairs remained exact. The idle long pairs reduced combined counter
 allocation from 140.055 to 132.532 GiB (5.37%); combined wall time was neutral
 at 142.323/142.893 s and GC pause at 1.100/1.116 s. Post-startup 100-frame
-intervals stayed between 6.794 and 6.978 s without progressive slowdown.
+intervals stayed between 6.794 and 6.981 s without progressive slowdown.
 Because no stable whole-pipeline speedup is claimed, the table above remains
 the last valid idle 60-run matrix.
 
