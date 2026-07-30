@@ -1765,10 +1765,10 @@ its compatibility references in all 60 candidate runs.
 
 Matched 100-frame allocation traces reduced total sampled allocation from
 4,994,031,752 to 4,611,843,896 bytes (7.65%) and sampled `Double[]` allocation
-from 4,061,498,384 to 3,679,431,952 bytes (9.41%). The baseline allocated one
-roughly 1.9 MiB full-field `double[]` for each of 202 output fields across the
-two burst-deemphasis call sites; both sites disappeared from the candidate
-trace.
+from 4,061,498,384 to 3,679,431,952 bytes (9.41%). Across the two
+burst-deemphasis call sites, the baseline trace recorded 202 full-field
+`double[]` allocation events of roughly 1.9 MiB each; both sites disappeared
+from the candidate trace. The 100-frame output itself contains 200 fields.
 
 Six opposite-order current/20-worker 160-frame pairs moved median wall time
 from 13.398 to 13.451 s (+0.40%) while CPU time fell from 103.133 to 101.398 s

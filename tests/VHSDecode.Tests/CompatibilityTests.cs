@@ -11993,7 +11993,7 @@ public void TbcFieldDecodePipelineEmitsChromaSamples()
     AssertEqual(32746, decoded.ChromaSamples[line16 + 2]);
 }
 
-[Theory(DisplayName = "NTSC sequence compact chroma matches retained storage bit-exactly")]
+[Theory(DisplayName = "NTSC multi-field parallel sequence chroma matches retained storage bit-exactly")]
 [InlineData(false)]
 [InlineData(true)]
 public void NtscSequenceCompactChromaMatchesRetainedStorageBitExactly(
@@ -12033,7 +12033,7 @@ public void NtscSequenceCompactChromaMatchesRetainedStorageBitExactly(
         UseCurrentChromaProcessing = useCurrentProcessing
     };
 
-    TbcFieldDecodePipeline CreatePipeline()
+    TbcFieldDecodePipeline CreatePipeline(int workerThreads)
     {
         var analyzer = new SyncAnalyzer(
             sampleRateHz: 1_000_000.0,
@@ -12044,11 +12044,11 @@ public void NtscSequenceCompactChromaMatchesRetainedStorageBitExactly(
             numPulses: 6);
         return new TbcFieldDecodePipeline(
             analyzer,
-            new TbcFieldRenderer(spec, converter),
+            new TbcFieldRenderer(spec, converter, workerThreads: workerThreads),
             converter,
             "NTSC",
             TbcDropoutDetectionOptions.Disabled,
-            chromaFieldOptions: chromaOptions,
+            chromaFieldOptions: chromaOptions with { WorkerThreads = workerThreads },
             decodeType: "vhs");
     }
 
@@ -12061,7 +12061,7 @@ public void NtscSequenceCompactChromaMatchesRetainedStorageBitExactly(
         PaintPulse(video, 210 + (line * 100), 10, -40.0);
     }
 
-    double[] chroma = BuildRawChromaCarrier(
+    double[] firstChroma = BuildRawChromaCarrier(
         video.Length,
         firstLineStart: 210,
         lineLength: 100,
@@ -12069,29 +12069,67 @@ public void NtscSequenceCompactChromaMatchesRetainedStorageBitExactly(
         outputLineLength: spec.OutputLineLength,
         fscMHz: chromaOptions.FscMHz,
         outputSampleRateHz: spec.OutputSampleRateHz);
-    var span = new RfDecodedSpan(
+    double[] secondChroma = firstChroma.ToArray();
+    for (int sample = 3_200; sample < secondChroma.Length; sample++)
+    {
+        secondChroma[sample] *= -0.75;
+    }
+
+    double[] firstChromaSnapshot = firstChroma.ToArray();
+    double[] secondChromaSnapshot = secondChroma.ToArray();
+    var firstSpan = new RfDecodedSpan(
         0,
         video,
         video,
         video,
         VideoLowPass: video,
-        Chroma: chroma);
+        Chroma: firstChroma);
+    var secondSpan = firstSpan with
+    {
+        StartSample = video.Length,
+        Chroma = secondChroma
+    };
+    TbcFieldDecodePipeline compactPipeline = CreatePipeline(workerThreads: 4);
+    TbcFieldDecodePipeline retainedPipeline = CreatePipeline(workerThreads: 1);
 
-    TbcDecodedField compact = CreatePipeline().DecodeVhsForSequence(
-        span,
+    TbcDecodedField compactFirst = compactPipeline.DecodeVhsForSequence(
+        firstSpan,
         fieldNumber: 0,
         retainChromaBurstSamples: false);
-    TbcDecodedField retained = CreatePipeline().DecodeVhsForSequence(
-        span,
+    TbcDecodedField retainedFirst = retainedPipeline.DecodeVhsForSequence(
+        firstSpan,
         fieldNumber: 0,
         retainChromaBurstSamples: true);
+    Assert.NotNull(retainedFirst.ChromaBurstSamples);
+    double[] retainedFirstBurstSnapshot = retainedFirst.ChromaBurstSamples.ToArray();
+    ushort[] compactFirstOutputSnapshot = compactFirst.ChromaSamples!.ToArray();
 
-    Assert.Null(compact.ChromaBurstSamples);
-    Assert.NotNull(retained.ChromaBurstSamples);
-    Assert.Equal<ushort>(retained.Samples, compact.Samples);
-    Assert.Equal<ushort>(retained.ChromaSamples!, compact.ChromaSamples!);
-    Assert.Equal(retained.FieldPhaseId, compact.FieldPhaseId);
-    Assert.Equal(retained.BurstStartLine, compact.BurstStartLine);
+    TbcDecodedField compactSecond = compactPipeline.DecodeVhsForSequence(
+        secondSpan,
+        fieldNumber: 1,
+        retainChromaBurstSamples: false);
+    TbcDecodedField retainedSecond = retainedPipeline.DecodeVhsForSequence(
+        secondSpan,
+        fieldNumber: 1,
+        retainChromaBurstSamples: true);
+
+    Assert.Null(compactFirst.ChromaBurstSamples);
+    Assert.Null(compactSecond.ChromaBurstSamples);
+    Assert.NotNull(retainedSecond.ChromaBurstSamples);
+    Assert.NotSame(retainedFirst.ChromaBurstSamples, retainedSecond.ChromaBurstSamples);
+    Assert.Equal<double>(retainedFirstBurstSnapshot, retainedFirst.ChromaBurstSamples);
+    Assert.Equal<ushort>(compactFirstOutputSnapshot, compactFirst.ChromaSamples);
+    Assert.Equal<double>(firstChromaSnapshot, firstChroma);
+    Assert.Equal<double>(secondChromaSnapshot, secondChroma);
+    Assert.False(firstChroma.SequenceEqual(secondChroma));
+    Assert.Equal<ushort>(retainedFirst.Samples, compactFirst.Samples);
+    Assert.Equal<ushort>(retainedFirst.ChromaSamples!, compactFirst.ChromaSamples);
+    Assert.Equal(retainedFirst.FieldPhaseId, compactFirst.FieldPhaseId);
+    Assert.Equal(retainedFirst.BurstStartLine, compactFirst.BurstStartLine);
+    Assert.Equal<ushort>(retainedSecond.Samples, compactSecond.Samples);
+    Assert.Equal<ushort>(retainedSecond.ChromaSamples!, compactSecond.ChromaSamples!);
+    Assert.Equal(retainedSecond.FieldPhaseId, compactSecond.FieldPhaseId);
+    Assert.Equal(retainedSecond.BurstStartLine, compactSecond.BurstStartLine);
 }
 
 [Theory(DisplayName = "TBC field decode pipeline applies analyzed VHS track phase to luma")]

@@ -1414,8 +1414,9 @@ Release 构建零警告、零错误，1,126 项标准 xUnit v3 测试全部通�
 同条件 100 帧 allocation trace 把 sampled allocation 总量从
 4,994,031,752 降至 4,611,843,896 bytes（减少 7.65%），其中 sampled
 `Double[]` 从 4,061,498,384 降至 3,679,431,952 bytes（减少 9.41%）。
-基线在两个 burst-deemphasis 调用位置为 202 个输出 field 各分配一块约
-1.9 MiB 的完整 field `double[]`；候选 trace 中这两处均已消失。
+基线 trace 在两个 burst-deemphasis 调用位置记录了 202 次完整 field
+`double[]` 分配，每次约 1.9 MiB；候选 trace 中这两处均已消失。100 帧输出
+本身包含 200 个 fields。
 
 六组相反顺序的 current/20-worker 160 帧配对把中位墙钟从 13.398 变为
 13.451 秒（+0.40%），CPU 时间从 103.133 降至 101.398 秒（-1.68%），因此

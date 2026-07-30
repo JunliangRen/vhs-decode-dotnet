@@ -1715,9 +1715,9 @@ run 60 回すべてで compatibility reference と一致しました。
 同条件の 100-frame allocation trace では、total sampled allocation が
 4,994,031,752 から 4,611,843,896 bytes（7.65% 減）、sampled `Double[]` が
 4,061,498,384 から 3,679,431,952 bytes（9.41% 減）になりました。baseline
-では 2 つの burst-deemphasis call site を通じ、202 output field のそれぞれで
-約 1.9 MiB の full-field `double[]` を 1 個 allocation していましたが、
-candidate trace では両方とも消えました。
+trace は 2 つの burst-deemphasis call site で、約 1.9 MiB の full-field
+`double[]` allocation event を 202 回記録しましたが、candidate trace では
+両方とも消えました。100-frame output 自体は 200 fields です。
 
 反対順序の current/20-worker 160-frame pair 6 組では median wall time が
 13.398 から 13.451 秒（+0.40%）へ動き、CPU time は 103.133 から
