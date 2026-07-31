@@ -33,7 +33,7 @@
 - VHS 家族包括 VHS/S-VHS、Betamax、Video8/Hi8、U-matic、Type C、EIAJ
   以及上游支持的 PAL/NTSC 变体。
 - TBC 工具、双击启动的用户 GUI 和开发者绘图窗口明确不在范围内。
-- Visual Studio 2026 `.slnx` 包含 **1,190** 项标准 xUnit v3 测试；测试可在
+- Visual Studio 2026 `.slnx` 包含 **1,193** 项标准 xUnit v3 测试；测试可在
   Test Explorer 中查看，也可用 `dotnet test` 运行。
 
 <!-- SECTION: start -->
@@ -141,9 +141,10 @@ libsndfile 候选分别用时 8.319 s 和 7.345 s（墙钟缩短 11.71%，吞吐
 TBC、色度、JSON 和日志文件允许在解码期间并发读取，兼容的预览工具可以检查
 部分输出而不会阻塞写入。
 
-40 kHz、单声道 PCM16 的直接 raw `fLaC` `.ldf`/`.flac` 输入使用内置 libsndfile
-读取器。Ogg/FLAC、立体声、PCM24、其他采样率、未完成的文件头和其他容器继续使用
-与 FFmpeg/PyAV 兼容的路径。
+在原生输入路径上，40 kHz、单声道 PCM16 的直接 raw `fLaC` `.ldf`/`.flac` 使用
+内置 libsndfile。这包括默认 40 MHz VHS `.ldf`、VHS `--no_resample`，以及未指定
+`--inputfreq` 的 LD；默认 VHS `.flac` 和全部 CVBS 输入仍走 FFmpeg/PyAV 兼容路径。
+Ogg/FLAC、立体声、PCM24、其他采样率和未完成的文件头也继续使用 FFmpeg。
 
 <!-- SECTION: build -->
 
@@ -155,7 +156,7 @@ TBC、色度、JSON 和日志文件允许在解码期间并发读取，兼容的
 dotnet restore VHSDecodeDotNet.slnx
 dotnet build VHSDecodeDotNet.slnx -c Release --no-restore
 dotnet test --solution VHSDecodeDotNet.slnx -c Release `
-  --no-build --no-restore --minimum-expected-tests 1190
+  --no-build --no-restore --minimum-expected-tests 1193
 ```
 
 在 Visual Studio 2026 中打开 `VHSDecodeDotNet.slnx`，即可构建、调试并通过

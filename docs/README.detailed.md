@@ -969,15 +969,18 @@ candidate also completed 1,000 frames / 2,000 fields without interruption
 under default `v0.4.0` and opt-in `current`; both profiles matched their stored
 Python oracles in the same six comparisons. IPP was excluded.
 
-Direct raw `fLaC` `.ldf`/`.flac` input now uses bundled libsndfile only when
-the first metadata block is a complete 34-byte STREAMINFO describing 40 kHz,
-mono, PCM16 data with a known nonzero sample count. The handle opens lazily;
-sequential reads remain seek-free, random reads use exact frame seeks, and one
-pooled PCM16 workspace feeds the unchanged `short`-to-`double` conversion.
-Unavailable or unsupported native opens fall back once to the established
-FFmpeg/PyAV-compatible loader. Ogg/FLAC, stereo, PCM24, other rates, unknown
-totals, malformed headers, `.vhs`, `.wav`, and `raw.oga` retain FFmpeg. Native
-seek/read failures are surfaced rather than hidden by a backend switch.
+On native-input routes, direct raw `fLaC` `.ldf`/`.flac` input now uses bundled
+libsndfile only when the first metadata block is a complete 34-byte STREAMINFO
+describing 40 kHz, mono, PCM16 data with a known nonzero sample count. The
+handle opens lazily; sequential reads remain seek-free, random reads use exact
+frame seeks, and one pooled PCM16 workspace feeds the unchanged
+`short`-to-`double` conversion. Unavailable or unsupported native opens and
+native seek/decode errors switch once to the established FFmpeg/PyAV-compatible
+loader and retry the same requested sample; clean native EOF remains a short
+read. Default 40 MHz VHS `.ldf`, VHS `--no_resample`, and LD without
+`--inputfreq` can select this route. Default VHS `.flac`, every CVBS input,
+Ogg/FLAC, stereo, PCM24, other rates, unknown totals, malformed headers,
+`.vhs`, `.wav`, and `raw.oga` retain FFmpeg.
 
 On the same private local RF window, Release 1.4.4 through FFmpeg and the
 candidate through libsndfile matched luma, chroma, raw JSON, stdout, normalized
@@ -1963,16 +1966,17 @@ Requirements:
 - Visual Studio C++ Build Tools and a Windows SDK when building the optional
   Intel IPP bridge
 - `ffmpeg` and `ffprobe` on `PATH` for container inputs outside the narrowly
-  gated direct 40 kHz mono PCM16 raw-FLAC route
-- direct raw-FLAC RF input, default HiFi FLAC output, and LD
-  `--write-test-ldf` use the bundled libsndfile and do not require FFmpeg; all
-  retain their documented FFmpeg fallback or compatibility boundaries
+  gated direct 40 kHz mono PCM16 raw-FLAC native-input route, and for that
+  route's recovery fallback after a native open/seek/decode failure
+- clean eligible raw-FLAC RF input on a native-input route, default HiFi FLAC
+  output, and LD `--write-test-ldf` use the bundled libsndfile without FFmpeg;
+  all retain their documented fallback or compatibility boundaries
 
 ```powershell
 .\tools\build-ipp-native.ps1
 dotnet restore VHSDecodeDotNet.slnx
 dotnet build VHSDecodeDotNet.slnx -c Release --no-restore
-dotnet test --solution VHSDecodeDotNet.slnx -c Release --no-build --no-restore --minimum-expected-tests 1190
+dotnet test --solution VHSDecodeDotNet.slnx -c Release --no-build --no-restore --minimum-expected-tests 1193
 ```
 
 The first command includes the optional `ipp-fast` native artifact; omit it for
@@ -1985,7 +1989,7 @@ deployment computer. Binary-only single-file releases embed
 sidecar license files. An Exact-only build may omit the native build step.
 
 The current formal Release build has zero warnings and errors. The xUnit v3
-project exposes **1,190** independently discoverable tests to both
+project exposes **1,193** independently discoverable tests to both
 `dotnet test` and Visual Studio Test Explorer.
 
 <!-- SECTION: usage -->

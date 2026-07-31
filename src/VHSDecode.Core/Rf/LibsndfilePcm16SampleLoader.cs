@@ -52,63 +52,69 @@ internal sealed class LibsndfilePcm16SampleLoader : IRfSampleLoader, IDisposable
                 return _fallback.Read(stream, sample, readLength);
             }
 
-            ILibsndfilePcm16Source source;
             try
             {
-                source = _source ??= _openSource(_filename);
+                ILibsndfilePcm16Source source = _source ??= _openSource(_filename);
+                return ReadNative(source, sample, readLength);
             }
             catch (LibsndfilePcm16FallbackException)
             {
                 ActivateFallback();
                 return _fallback.Read(stream, sample, readLength);
             }
+        }
+    }
 
-            if (sample > source.Frames
-                || readLength > source.Frames - sample)
+    private double[]? ReadNative(
+        ILibsndfilePcm16Source source,
+        long sample,
+        int readLength)
+    {
+        if (sample > source.Frames
+            || readLength > source.Frames - sample)
+        {
+            return null;
+        }
+
+        if (sample != _positionFrames)
+        {
+            long position = source.Seek(sample);
+            if (position != sample)
+            {
+                throw new LibsndfilePcm16FallbackException(
+                    $"libsndfile sought to RF sample {position} instead of {sample}.");
+            }
+
+            _positionFrames = position;
+        }
+
+        short[] samples = ArrayPool<short>.Shared.Rent(readLength);
+        try
+        {
+            long framesRead = source.ReadFrames(samples.AsSpan(0, readLength));
+            if (framesRead < 0 || framesRead > readLength)
+            {
+                throw new LibsndfilePcm16FallbackException(
+                    $"libsndfile returned an invalid RF frame count of {framesRead} for a {readLength}-frame read.");
+            }
+
+            _positionFrames += framesRead;
+            if (framesRead != readLength)
             {
                 return null;
             }
 
-            if (sample != _positionFrames)
+            double[] output = GC.AllocateUninitializedArray<double>(readLength);
+            for (int i = 0; i < output.Length; i++)
             {
-                long position = source.Seek(sample);
-                if (position != sample)
-                {
-                    throw new InvalidDataException(
-                        $"libsndfile sought to RF sample {position} instead of {sample}.");
-                }
-
-                _positionFrames = position;
+                output[i] = samples[i];
             }
 
-            short[] samples = ArrayPool<short>.Shared.Rent(readLength);
-            try
-            {
-                long framesRead = source.ReadFrames(samples.AsSpan(0, readLength));
-                if (framesRead < 0 || framesRead > readLength)
-                {
-                    throw new InvalidDataException(
-                        $"libsndfile returned an invalid RF frame count of {framesRead} for a {readLength}-frame read.");
-                }
-
-                _positionFrames += framesRead;
-                if (framesRead != readLength)
-                {
-                    return null;
-                }
-
-                double[] output = GC.AllocateUninitializedArray<double>(readLength);
-                for (int i = 0; i < output.Length; i++)
-                {
-                    output[i] = samples[i];
-                }
-
-                return output;
-            }
-            finally
-            {
-                ArrayPool<short>.Shared.Return(samples);
-            }
+            return output;
+        }
+        finally
+        {
+            ArrayPool<short>.Shared.Return(samples);
         }
     }
 
@@ -237,9 +243,9 @@ internal sealed unsafe partial class LibsndfilePcm16Source : ILibsndfilePcm16Sou
                 _file,
                 samplePointer,
                 samples.Length);
-            if (framesRead < samples.Length && NativeMethods.Error(_file) != NoError)
+            if (NativeMethods.Error(_file) != NoError)
             {
-                throw new InvalidDataException(
+                throw new LibsndfilePcm16FallbackException(
                     $"libsndfile failed while reading raw FLAC RF input: {ErrorText(_file)}");
             }
 

@@ -36,7 +36,7 @@ upstream release `v0.4.0`、commit
 - VHS family には VHS/S-VHS、Betamax、Video8/Hi8、U-matic、Type C、EIAJ、
   upstream が対応する PAL/NTSC variant が含まれます。
 - TBC utility、ダブルクリック GUI、開発者向け plot window は対象外です。
-- Visual Studio 2026 の `.slnx` には **1,190** 件の標準 xUnit v3 test があり、
+- Visual Studio 2026 の `.slnx` には **1,193** 件の標準 xUnit v3 test があり、
   Test Explorer と `dotnet test` の両方で実行できます。
 
 <!-- SECTION: start -->
@@ -153,9 +153,11 @@ build success や同じ file size だけを互換性の証明とはしません�
 TBC、chroma、JSON、log は decode 中も concurrent read できるため、対応する
 preview tool は writer を止めずに partial output を確認できます。
 
-40 kHz mono PCM16 の direct raw `fLaC` `.ldf`/`.flac` input は bundled
-libsndfile reader を使います。Ogg/FLAC、stereo、PCM24、他の sample rate、未完了の
-header、その他の container は FFmpeg/PyAV-compatible path を維持します。
+native-input route では、40 kHz mono PCM16 の direct raw `fLaC` `.ldf`/`.flac`
+input に bundled libsndfile を使います。対象は default 40 MHz VHS `.ldf`、VHS
+`--no_resample`、`--inputfreq` なしの LD です。default VHS `.flac` と全 CVBS input、
+Ogg/FLAC、stereo、PCM24、他の sample rate、未完了 header は FFmpeg/PyAV-compatible
+path を維持します。
 
 <!-- SECTION: build -->
 
@@ -167,7 +169,7 @@ header、その他の container は FFmpeg/PyAV-compatible path を維持しま�
 dotnet restore VHSDecodeDotNet.slnx
 dotnet build VHSDecodeDotNet.slnx -c Release --no-restore
 dotnet test --solution VHSDecodeDotNet.slnx -c Release `
-  --no-build --no-restore --minimum-expected-tests 1190
+  --no-build --no-restore --minimum-expected-tests 1193
 ```
 
 Visual Studio 2026 で `VHSDecodeDotNet.slnx` を開くと、build、debug、
