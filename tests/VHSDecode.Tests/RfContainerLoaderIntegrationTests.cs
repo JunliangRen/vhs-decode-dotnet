@@ -100,10 +100,16 @@ public sealed class RfContainerLoaderIntegrationTests
             EncodeFlac(wavePath, ldfPath, oggContainer: true);
             EncodeFlac(wave24Path, flac24Path, oggContainer: false);
 
+            Assert.IsType<LibsndfilePcm16SampleLoader>(RfLoaderFactory.CreateNative(flacPath)).Dispose();
+            Assert.IsType<FfmpegPcm16SampleLoader>(RfLoaderFactory.CreateNative(ldfPath)).Dispose();
+            Assert.IsType<FfmpegPcm16SampleLoader>(RfLoaderFactory.CreateNative(flac24Path)).Dispose();
+
             foreach (string path in new[] { wavePath, wave17900Path, flacPath, ldfPath })
             {
                 VerifyReads(path, samples);
             }
+
+            VerifyNativeReads(flacPath, samples);
 
             VerifyHashes(wave24Path, Pcm24WaveReadCases);
             VerifyHashes(flac24Path, Pcm24FlacReadCases);
@@ -136,6 +142,7 @@ public sealed class RfContainerLoaderIntegrationTests
             WriteWave(wave17900Path, samples, stereo: true, sampleRate: 17_900);
             EncodeFlac(wavePath, flacPath, oggContainer: false);
             EncodeFlac(wavePath, ldfPath, oggContainer: true);
+            Assert.IsType<FfmpegPcm16SampleLoader>(RfLoaderFactory.CreateNative(flacPath)).Dispose();
             VerifyHashes(wavePath, StereoWaveReadCases);
             VerifyHashes(wave17900Path, StereoWave17900ReadCases);
             VerifyHashes(flacPath, StereoFlacReadCases);
@@ -676,6 +683,30 @@ public sealed class RfContainerLoaderIntegrationTests
             }
 
             Assert.NotNull(actual);
+            Assert.Equal(readCase.Sha256, Sha256(actual));
+        }
+    }
+
+    private static void VerifyNativeReads(string path, short[] source)
+    {
+        IRfSampleLoader loader = RfLoaderFactory.CreateNative(path);
+        using IDisposable? disposableLoader = loader as IDisposable;
+        Assert.IsType<LibsndfilePcm16SampleLoader>(loader);
+        using FileStream input = File.OpenRead(path);
+        foreach (ReadCase readCase in ReadCases)
+        {
+            double[]? actual = loader.Read(input, readCase.Start, readCase.Length);
+            if (readCase.Sha256 is null)
+            {
+                Assert.Null(actual);
+                continue;
+            }
+
+            Assert.NotNull(actual);
+            Assert.Equal(
+                source.AsSpan(readCase.Start, readCase.Length).ToArray()
+                    .Select(static sample => (double)sample),
+                actual);
             Assert.Equal(readCase.Sha256, Sha256(actual));
         }
     }

@@ -77,7 +77,7 @@ required by the decode pipeline itself.
 | VHS decode | Implemented; rare parity gaps remain | All valid format/filter combinations and extensive NTSC field/output fixtures are covered. |
 | CVBS decode | Implemented for release-supported runtime systems | PAL and NTSC execute as v0.4.0 does; uncommon vblank and option interactions still need broader fixtures. |
 | LaserDisc decode | Implemented; rare parity gaps remain | Video, EFM, analog audio, AC3, RF-TBC, metadata, and sidecars are wired with PAL/NTSC differential coverage. |
-| Input containers | Broadly implemented | Raw input and common FFmpeg/PyAV container paths are covered; rare codec/timestamp cases remain. |
+| Input containers | Broadly implemented | Raw input, narrowly gated direct raw FLAC through bundled libsndfile, and common FFmpeg/PyAV container paths are covered; rare codec/timestamp cases remain. |
 | Output and recovery | Implemented; edge cases remain | Streaming TBC/audio writes, JSON recovery, SQLite, logs, and failure ordering are covered. |
 | Interactive UI and developer tooling | Out of scope | The double-click GUI launcher, Matplotlib `--debug_plot` windows, and line-profiler report are intentionally not rendered. |
 
@@ -250,9 +250,18 @@ possible capture has already been proven byte-for-byte identical.
 
 - native RF sample loader foundation for `.u8`, `.r8`, `.s16`, `.u16`, `.r16`,
   `.rf`, `.lds`, `.r30`, and mono PCM16 `.wav`
-- FFmpeg-backed RF container loader path for upstream `.ldf`, `.flac`, `.vhs`,
-  and `raw.oga` inputs, decoding them as mono signed 16-bit PCM with an
-  upstream-style 2 MB rewind cache and 40 MB seek/restart threshold
+- direct raw `fLaC` `.ldf`/`.flac` input on native-input routes uses bundled
+  libsndfile only for a complete 34-byte STREAMINFO describing 40 kHz mono
+  PCM16 with a known nonzero sample count; lazy open, seek-free sequential
+  reads, exact random seeks, a pooled PCM16 workspace, per-read native error
+  checks, and same-sample FFmpeg recovery after native open/seek/decode failure
+  or a reported-length boundary are covered by focused and real-backend tests;
+  clean native EOF remains EOF when FFmpeg is unavailable
+- the FFmpeg-backed RF container loader remains authoritative for Ogg/FLAC,
+  stereo, PCM24, other rates, unknown totals, headers rejected by the narrow
+  gate, `.vhs`, `.wav`, `raw.oga`, default VHS `.flac`, every CVBS input, and
+  other supported containers, retaining the upstream-style 2 MB rewind cache
+  and 40 MB seek/restart threshold
 - container seeks probe the decoded stream's actual sample rate and convert RF
   sample offsets to FFmpeg timestamps from that rate, so `--no_resample`
   captures such as 17.9 MHz FLAC do not silently seek as if they were 40 MHz
@@ -273,6 +282,13 @@ possible capture has already been proven byte-for-byte identical.
   matching `LoadLDF` even when the logical frame needs no plane padding; a
   direct 32,768-sample large-seek block matches the v0.4.0 float64 SHA-256
   `A15E39BFDBE078336B11DA499A489B2AAD1467136A7F848482591D89AD1940DA`
+- a private direct-raw-FLAC RF window matched the Release 1.4.4 FFmpeg baseline
+  through the product decoder under default, `--threads 0`, and `--threads 20`:
+  luma, chroma, raw JSON, stdout, normalized stderr/logs, and every ordered
+  `fileLoc` were exact. A longer 100-frame/200-field pair also matched all
+  surfaces while wall time moved from 8.319 s to 7.345 s and sampled aggregate
+  `decode` plus FFmpeg peak working set moved from 797.0 to 724.9 MiB. The
+  timing is scoped single-pair evidence, not a universal percentage
 - non-geometry FFmpeg stderr retains a thread-safe tail capped at 64 lines and
   32 KiB, so untagged failure details remain available without unbounded memory
   growth during long container decodes
@@ -2133,17 +2149,18 @@ dotnet test --solution VHSDecodeDotNet.slnx --no-build
 ```
 
 The current formal solution build completes with zero warnings and errors, and
-the xUnit v3 project exposes 1,173 independently discoverable tests
+the xUnit v3 project exposes 1,195 independently discoverable tests
 to `dotnet test` and Visual Studio Test Explorer. On the
 same Windows machine and fixtures, Release wall-clock measurements for one
 frame were 2.346 s versus 7.193 s for NTSC VHS and 1.651 s versus 5.865 s for
 NTSC LD (this port versus the v0.4.0 Python virtual environment); all output
 hashes listed above remained identical.
 
-`ffmpeg` and `ffprobe` must be available on `PATH` for FFmpeg-backed RF
-container inputs. Default HiFi FLAC output and LD `--write-test-ldf` use the
-bundled libsndfile and do not require either tool; LD retains an FFmpeg fallback
-when libsndfile is unavailable. HiFi `.wav` and recognized raw input paths do
+`ffmpeg` and `ffprobe` must be available on `PATH` for RF container inputs
+outside the narrowly gated direct 40 kHz mono PCM16 raw-FLAC route. Direct
+raw-FLAC RF input, default HiFi FLAC output, and LD `--write-test-ldf` use the
+bundled libsndfile and do not require either tool; their documented fallback
+and compatibility boundaries remain. HiFi `.wav` and recognized raw input paths do
 not require them either.
 
 To regenerate the embedded format parameter snapshot from the checked-out

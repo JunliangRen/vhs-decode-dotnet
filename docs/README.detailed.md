@@ -4,7 +4,7 @@
 
 **[English](README.detailed.md)** | [简体中文](README.detailed.zh-CN.md) | [日本語](README.detailed.ja.md)
 
-<!-- README_SYNC: 2026-07-31.05 -->
+<!-- README_SYNC: 2026-08-01.01 -->
 
 .NET 11 rewrite of the decode-facing parts of
 [`oyvindln/vhs-decode`](https://github.com/oyvindln/vhs-decode), focused on
@@ -77,7 +77,7 @@ CLI compatibility requires it.
 | CVBS | Implemented for release-supported systems | PAL and NTSC paths run; uncommon vblank and cross-option cases need more real-capture fixtures. |
 | LaserDisc | Implemented; rare capture gaps remain | Video, VBI, EFM, analog audio, AC3, RF-TBC, metadata, recovery, and PAL/NTSC paths are connected. |
 | HiFi | Implemented; more real-capture verification remains | Typed v0.4.0 CLI, bounded parallel decode, post-processing, WAV/FLAC output, preview, and GNU Radio mode are connected; a bounded four-second NTSC Betamax explicit-carrier gate matches Python WAV bytes and decoded FLAC PCM. |
-| Inputs | Broadly implemented | Raw input plus common FFmpeg/PyAV-equivalent container paths are covered; rare codec and timestamp cases remain. |
+| Inputs | Broadly implemented | Raw input, narrowly gated direct raw FLAC through bundled libsndfile, and common FFmpeg/PyAV-equivalent container paths are covered; rare codec and timestamp cases remain. |
 | Outputs and recovery | Implemented; edge cases remain | Streaming TBC/audio output, JSON snapshots, SQLite, logs, disk-space handling, and recovery ordering are covered. |
 | Interactive UI | Out of scope | Decode user UI and developer plotting/report windows are intentionally not implemented. |
 
@@ -968,6 +968,31 @@ stdout, normalized stderr, and timestamp-normalized logs all matched. The
 candidate also completed 1,000 frames / 2,000 fields without interruption
 under default `v0.4.0` and opt-in `current`; both profiles matched their stored
 Python oracles in the same six comparisons. IPP was excluded.
+
+On native-input routes, direct raw `fLaC` `.ldf`/`.flac` input now uses bundled
+libsndfile only when the first metadata block is a complete 34-byte STREAMINFO
+describing 40 kHz, mono, PCM16 data with a known nonzero sample count. The
+handle opens lazily; sequential reads remain seek-free, random reads use exact
+frame seeks, and one pooled PCM16 workspace feeds the unchanged
+`short`-to-`double` conversion. Unavailable or unsupported native opens,
+native seek/decode errors, and reads crossing the reported FLAC length try the
+established FFmpeg/PyAV-compatible loader at the same requested sample and
+switch once when it is available. A clean reported EOF remains EOF when FFmpeg
+is not installed. Default 40 MHz VHS `.ldf`, VHS `--no_resample`, and LD without
+`--inputfreq` can select this route. Default VHS `.flac`, every CVBS input,
+Ogg/FLAC, stereo, PCM24, other rates, unknown totals, headers rejected by the
+narrow gate, `.vhs`, `.wav`, and `raw.oga` retain FFmpeg.
+
+On the same private local RF window, Release 1.4.4 through FFmpeg and the
+candidate through libsndfile matched luma, chroma, raw JSON, stdout, normalized
+stderr/logs, and every ordered `fileLoc` under default, `--threads 0`, and
+`--threads 20`. Three interleaved 20-frame pairs at 20 workers moved median
+wall time from 3.88 to 2.99 seconds; default-worker medians were 4.36 and 4.30
+seconds with overlapping ranges. A longer single 100-frame/200-field pair at
+20 workers moved wall time from 8.319 s to 7.345 s (11.71% less; 1.133x
+throughput) and sampled aggregate `decode` plus FFmpeg peak working set from
+797.0 to 724.9 MiB. The long result is a scoped single-pair observation, not a
+universal speed percentage.
 
 RF nonlinear and sub-deemphasis now retain one exact-key, read-only high-pass
 response per `RfDemodulator`. Block length and the immutable high-pass parameters
@@ -1941,16 +1966,19 @@ Requirements:
 - Visual Studio 2026 for IDE use
 - Visual Studio C++ Build Tools and a Windows SDK when building the optional
   Intel IPP bridge
-- `ffmpeg` and `ffprobe` on `PATH` for FFmpeg-backed container inputs
-- default HiFi FLAC output and LD `--write-test-ldf` use the bundled libsndfile
-  and do not require FFmpeg; LD retains an FFmpeg fallback when libsndfile is
-  unavailable
+- `ffmpeg` and `ffprobe` on `PATH` for container inputs outside the narrowly
+  gated direct 40 kHz mono PCM16 raw-FLAC native-input route, and for that
+  route's recovery fallback after a native open/seek/decode failure or a
+  reported-length boundary
+- clean eligible raw-FLAC RF input on a native-input route, default HiFi FLAC
+  output, and LD `--write-test-ldf` use the bundled libsndfile without FFmpeg;
+  all retain their documented fallback or compatibility boundaries
 
 ```powershell
 .\tools\build-ipp-native.ps1
 dotnet restore VHSDecodeDotNet.slnx
 dotnet build VHSDecodeDotNet.slnx -c Release --no-restore
-dotnet test --solution VHSDecodeDotNet.slnx -c Release --no-build --no-restore --minimum-expected-tests 1173
+dotnet test --solution VHSDecodeDotNet.slnx -c Release --no-build --no-restore --minimum-expected-tests 1195
 ```
 
 The first command includes the optional `ipp-fast` native artifact; omit it for
@@ -1963,7 +1991,7 @@ deployment computer. Binary-only single-file releases embed
 sidecar license files. An Exact-only build may omit the native build step.
 
 The current formal Release build has zero warnings and errors. The xUnit v3
-project exposes **1,173** independently discoverable tests to both
+project exposes **1,195** independently discoverable tests to both
 `dotnet test` and Visual Studio Test Explorer.
 
 <!-- SECTION: usage -->

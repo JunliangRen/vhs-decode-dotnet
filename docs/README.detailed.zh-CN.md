@@ -4,7 +4,7 @@
 
 [English](README.detailed.md) | **[简体中文](README.detailed.zh-CN.md)** | [日本語](README.detailed.ja.md)
 
-<!-- README_SYNC: 2026-07-31.05 -->
+<!-- README_SYNC: 2026-08-01.01 -->
 
 这是 [`oyvindln/vhs-decode`](https://github.com/oyvindln/vhs-decode)
 中解码相关部分的 .NET 11 重写，当前以 release `v0.4.0`、commit
@@ -73,7 +73,7 @@
 | CVBS | 已实现 release 支持的系统 | PAL 和 NTSC 路径可运行；少见的 vblank 与跨参数组合仍需更多真实采集夹具。 |
 | LaserDisc | 已实现；仍有罕见采集差距 | 视频、VBI、EFM、模拟音频、AC3、RF-TBC、元数据、恢复和 PAL/NTSC 路径均已连接。 |
 | HiFi | 已实现；仍需更多真实采集验证 | 类型化 v0.4.0 CLI、有界并行解码、后处理、WAV/FLAC 输出、预览和 GNU Radio 模式均已连接；一个有界的 4 秒 NTSC Betamax 显式载波门禁已匹配 Python 的 WAV 字节及 FLAC 解码 PCM。 |
-| 输入 | 已广泛实现 | 已覆盖原始输入及常见的 FFmpeg/PyAV 等价容器路径；罕见 codec 和时间戳情况仍有差距。 |
+| 输入 | 已广泛实现 | 已覆盖原始输入、由内置 libsndfile 严格门控的直接 raw FLAC，以及常见的 FFmpeg/PyAV 等价容器路径；罕见 codec 和时间戳情况仍有差距。 |
 | 输出与恢复 | 已实现；仍有边缘情况 | 已覆盖流式 TBC/音频输出、JSON 快照、SQLite、日志、磁盘空间处理和恢复顺序。 |
 | 交互式 UI | 不在范围内 | 解码用户界面和开发者绘图/报告窗口不会实现。 |
 
@@ -786,6 +786,26 @@ NTSC-J 门禁保持不变。
 stdout、归一化 stderr 和时间戳归一化日志全部一致。候选还在默认 `v0.4.0` 和显式
 `current` 两种配置下均不中断地完成 1,000 帧 / 2,000 fields；两者在相同六项比较中
 都与各自保存的 Python oracle 完全一致。IPP 未纳入门禁。
+
+在原生输入路径上，直接 raw `fLaC` `.ldf`/`.flac` 只在第一个元数据块是完整
+34 字节 STREAMINFO、并且声明 40 kHz、单声道、PCM16 和已知非零样本总数时使用
+内置 libsndfile。文件句柄按需打开；连续读取不做 seek，随机读取使用精确 frame
+seek，一个池化 PCM16 workspace 继续执行不变的 `short` 到 `double` 转换。原生
+后端不可用、不支持、发生 seek/decode 错误，或读取跨过 FLAC 报告长度时，会从同一
+请求样本尝试既有 FFmpeg/PyAV 兼容加载器，并在可用时只切换一次。若未安装 FFmpeg，
+正常的报告 EOF 仍按 EOF 结束。默认 40 MHz VHS `.ldf`、
+VHS `--no_resample` 和未指定 `--inputfreq` 的 LD 可选择此路径。默认 VHS `.flac`、
+全部 CVBS 输入、Ogg/FLAC、立体声、PCM24、其他采样率、未知总数、未通过严格门控的
+文件头、`.vhs`、`.wav` 和 `raw.oga` 继续走 FFmpeg。
+
+在同一个私有本地 RF 窗口上，Release 1.4.4 的 FFmpeg 路径与候选的 libsndfile
+路径在默认、`--threads 0` 和 `--threads 20` 下均匹配亮度、色度、原始 JSON、
+stdout、归一化 stderr/日志以及全部有序 `fileLoc`。三组交错的 20 帧、20-worker
+配对将墙钟中位数从 3.88 秒降至 2.99 秒；默认 worker 的中位数为 4.36 和
+4.30 秒，范围有重叠。更长的一组 100 帧 / 200 fields、20-worker 配对把墙钟从
+8.319 s 降至 7.345 s（缩短 11.71%，吞吐为 1.133x），采样到的 `decode` 加
+FFmpeg 合计峰值工作集从 797.0 降至 724.9 MiB。长窗口结果只是范围明确的单组
+观测，不是通用的性能百分比。
 
 RF nonlinear 和 sub-deemphasis 现在会在每个 `RfDemodulator` 中各保留一份精确 key 的
 只读 high-pass 响应。key 由 block 长度和不可变 high-pass 参数组成；miss 时会在锁内
@@ -1554,15 +1574,18 @@ JSON、stdout、归一化 stderr/日志及有序 `fileLoc` 全部一致，并包
 - `.NET SDK 11.0.100-preview.6.26359.118`（由 `global.json` 锁定）
 - 使用 IDE 时需要 Visual Studio 2026
 - 构建可选 Intel IPP 桥接 DLL 时需要 Visual Studio C++ Build Tools 和 Windows SDK
-- 对 FFmpeg 支持的容器输入，需要 `ffmpeg` 和 `ffprobe` 位于 `PATH`
-- 默认 HiFi FLAC 输出和 LD `--write-test-ldf` 使用内置 libsndfile，不需要
-  FFmpeg；当 libsndfile 不可用时，LD 仍保留 FFmpeg 回退路径
+- 对不属于严格门控的直接 40 kHz 单声道 PCM16 raw-FLAC 原生输入路径的容器，
+  以及该路径发生原生打开/seek/decode 错误或到达报告长度边界后的恢复回退，
+  需要 `ffmpeg` 和 `ffprobe` 位于 `PATH`
+- 原生输入路径上的正常且符合条件的 raw-FLAC RF、默认 HiFi FLAC 输出和 LD
+  `--write-test-ldf` 可直接使用内置 libsndfile；各路径仍保留文档所述的回退或
+  兼容边界
 
 ```powershell
 .\tools\build-ipp-native.ps1
 dotnet restore VHSDecodeDotNet.slnx
 dotnet build VHSDecodeDotNet.slnx -c Release --no-restore
-dotnet test --solution VHSDecodeDotNet.slnx -c Release --no-build --no-restore --minimum-expected-tests 1173
+dotnet test --solution VHSDecodeDotNet.slnx -c Release --no-build --no-restore --minimum-expected-tests 1195
 ```
 
 第一条命令用于包含可选的 `ipp-fast` 原生产物；只构建 Exact 时可以省略。
@@ -1573,7 +1596,7 @@ Intel oneAPI。只含二进制的单文件发布会嵌入 `vhsdecode_ipp.dll` �
 notice，不会额外生成许可证 sidecar 文件。只构建 Exact 后端时可以省略原生构建步骤。
 
 当前正式 Release 构建为零警告、零错误。xUnit v3 项目向
-`dotnet test` 和 Visual Studio Test Explorer 暴露 **1,173** 个可独立发现的测试。
+`dotnet test` 和 Visual Studio Test Explorer 暴露 **1,195** 个可独立发现的测试。
 
 <!-- SECTION: usage -->
 

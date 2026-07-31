@@ -42,6 +42,14 @@ public static class RfLoaderFactory
             || filename.EndsWith(".wav", StringComparison.Ordinal)
             || filename.EndsWith("raw.oga", StringComparison.Ordinal))
         {
+            if ((filename.EndsWith(".ldf", StringComparison.Ordinal)
+                    || filename.EndsWith(".flac", StringComparison.Ordinal))
+                && RawFlacStreamInfo.TryRead(filename, out RawFlacStreamInfo info)
+                && info.IsNativeRfPcm16)
+            {
+                return new LibsndfilePcm16SampleLoader(filename);
+            }
+
             return new FfmpegPcm16SampleLoader(filename);
         }
 
