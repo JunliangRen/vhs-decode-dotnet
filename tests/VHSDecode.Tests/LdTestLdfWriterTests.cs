@@ -1,7 +1,9 @@
 using System.Buffers.Binary;
+using System.Diagnostics;
 using System.Text;
 using VHSDecode.Core.CommandLine;
 using VHSDecode.Core.Decode;
+using VHSDecode.Core.Rf;
 using Xunit;
 
 namespace VHSDecode.Tests;
@@ -48,6 +50,58 @@ public sealed class LdTestLdfWriterTests
             Assert.Equal(
                 source[1..6].Select(sample => (int)sample << 16),
                 decoded.Samples);
+        }
+        finally
+        {
+            Directory.Delete(tempDirectory, recursive: true);
+        }
+    }
+
+    [Fact(DisplayName = "LD test LDF round-trips through the production RF loader")]
+    public void NativeWriterRoundTripsThroughProductionLoader()
+    {
+        Assert.SkipUnless(CanRunFfmpeg(), "ffmpeg is not available on PATH.");
+        string tempDirectory = CreateTempDirectory();
+        try
+        {
+            const int StartLength = 4_097;
+            const long SeekStart = 40_001_003;
+            const int SeekLength = 4_099;
+            long sampleCount = SeekStart + SeekLength;
+            short[] startExpected = CreatePattern(StartLength, seed: 17);
+            short[] seekExpected = CreatePattern(SeekLength, seed: 29);
+
+            string inputPath = Path.Combine(tempDirectory, "input.s16");
+            WriteSparsePcm16(
+                inputPath,
+                sampleCount,
+                (StartSample: 0, Samples: startExpected),
+                (StartSample: SeekStart, Samples: seekExpected));
+            string ldfPath = Path.Combine(tempDirectory, "sample.ldf");
+            using DecodeSession session = CreateSession(inputPath, ldfPath);
+            using FileStream input = File.OpenRead(inputPath);
+            var writer = new LdTestLdfWriter();
+
+            LdTestLdfWriteResult result = writer.Write(
+                session,
+                startSample: 0,
+                endSample: sampleCount,
+                input);
+
+            Assert.True(result.Success);
+            Assert.Equal(sampleCount, result.SamplesWritten);
+            Assert.Contains(
+                "-ss",
+                FfmpegPcm16SampleLoader.BuildPyAvFramedFfmpegArguments(
+                    ldfPath,
+                    SeekStart,
+                    FfmpegPcm16SampleLoader.ContainerAudioSampleRateHz));
+            Assert.Equal(
+                startExpected.Select(static sample => (double)sample),
+                ReadWithProductLoader(ldfPath, startSample: 0, readLength: StartLength));
+            Assert.Equal(
+                seekExpected.Select(static sample => (double)sample),
+                ReadWithProductLoader(ldfPath, startSample: SeekStart, readLength: SeekLength));
         }
         finally
         {
@@ -123,6 +177,23 @@ public sealed class LdTestLdfWriterTests
     }
 
     private static void WritePcm16(string path, IReadOnlyList<short> samples)
+        => File.WriteAllBytes(path, Pcm16Bytes(samples));
+
+    private static void WriteSparsePcm16(
+        string path,
+        long sampleCount,
+        params (long StartSample, short[] Samples)[] segments)
+    {
+        using var output = new FileStream(path, FileMode.Create, FileAccess.Write, FileShare.Read);
+        output.SetLength(checked(sampleCount * sizeof(short)));
+        foreach ((long startSample, short[] samples) in segments)
+        {
+            output.Position = checked(startSample * sizeof(short));
+            output.Write(Pcm16Bytes(samples));
+        }
+    }
+
+    private static byte[] Pcm16Bytes(IReadOnlyList<short> samples)
     {
         byte[] bytes = new byte[checked(samples.Count * sizeof(short))];
         for (int i = 0; i < samples.Count; i++)
@@ -130,7 +201,61 @@ public sealed class LdTestLdfWriterTests
             BinaryPrimitives.WriteInt16LittleEndian(bytes.AsSpan(i * sizeof(short)), samples[i]);
         }
 
-        File.WriteAllBytes(path, bytes);
+        return bytes;
+    }
+
+    private static short[] CreatePattern(int sampleCount, int seed)
+    {
+        var samples = new short[sampleCount];
+        for (int i = 0; i < samples.Length; i++)
+        {
+            samples[i] = unchecked((short)((i * 7_919) + (seed * 1_003) + (i / 17)));
+        }
+
+        return samples;
+    }
+
+    private static double[] ReadWithProductLoader(
+        string path,
+        long startSample,
+        int readLength)
+    {
+        IRfSampleLoader loader = RfLoaderFactory.CreateNative(path);
+        using IDisposable? disposableLoader = loader as IDisposable;
+        using FileStream input = File.OpenRead(path);
+        double[]? samples = loader.Read(input, startSample, readLength);
+        Assert.NotNull(samples);
+        return samples;
+    }
+
+    private static bool CanRunFfmpeg()
+    {
+        var startInfo = new ProcessStartInfo("ffmpeg")
+        {
+            UseShellExecute = false,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            CreateNoWindow = true
+        };
+        startInfo.ArgumentList.Add("-version");
+        try
+        {
+            using Process? process = Process.Start(startInfo);
+            if (process is null)
+            {
+                return false;
+            }
+
+            Task<string> standardOutput = process.StandardOutput.ReadToEndAsync();
+            Task<string> standardError = process.StandardError.ReadToEndAsync();
+            process.WaitForExit();
+            Task.WhenAll(standardOutput, standardError).GetAwaiter().GetResult();
+            return process.ExitCode == 0;
+        }
+        catch (System.ComponentModel.Win32Exception)
+        {
+            return false;
+        }
     }
 
     private static string CreateTempDirectory()
