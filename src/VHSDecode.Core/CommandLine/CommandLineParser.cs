@@ -198,7 +198,7 @@ public sealed class CommandLineParser
         out bool help)
     {
         help = false;
-        if (!token.StartsWith("-", StringComparison.Ordinal)
+        if (!token.StartsWith('-', StringComparison.Ordinal)
             || token.StartsWith("--", StringComparison.Ordinal)
             || token.Length <= 2)
         {

@@ -20,7 +20,7 @@ public sealed class GnuRadioRfAfeBridge : IRfInputProcessor
     private readonly ResponseSocket _sendSocket;
     private readonly RequestSocket _receiveSocket;
     private readonly TextWriter _output;
-    private readonly object _socketLock = new();
+    private readonly Lock _socketLock = new();
     private bool _disposed;
 
     public GnuRadioRfAfeBridge(

@@ -159,7 +159,7 @@ internal sealed record VhsChromaPhaseAnalysis(
 
 internal sealed class VhsChromaCarrierTableCache
 {
-    private readonly object _gate = new();
+    private readonly Lock _gate = new();
     private HeterodyneEntry? _heterodyne;
     private CarrierEntry? _carrier;
 

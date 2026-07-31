@@ -3949,7 +3949,7 @@ public sealed class TbcFieldDecodePipeline
         return true;
     }
 
-    private bool TryRefineLeftHSync(
+    private static bool TryRefineLeftHSync(
         ReadOnlySpan<double> syncReference,
         int searchStart,
         double crossing,
@@ -4029,7 +4029,7 @@ public sealed class TbcFieldDecodePipeline
         return true;
     }
 
-    private bool TryConfirmRightHSync(
+    private static bool TryConfirmRightHSync(
         ReadOnlySpan<double> syncReference,
         int rightSearchStart,
         double rightCrossing,
@@ -4074,7 +4074,7 @@ public sealed class TbcFieldDecodePipeline
             || (FormatCatalog.ParentSystem(_system) == "PAL" && line >= 1 && line <= 2);
     }
 
-    private bool HSyncAreaLooksValid(
+    private static bool HSyncAreaLooksValid(
         ReadOnlySpan<double> syncReference,
         double crossing,
         int oneMicrosecond,
