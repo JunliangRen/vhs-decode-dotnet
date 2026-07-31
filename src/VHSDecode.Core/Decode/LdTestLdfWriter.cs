@@ -1,6 +1,7 @@
 using System.Buffers.Binary;
 using System.ComponentModel;
 using System.Diagnostics;
+using System.Runtime.InteropServices;
 using System.Text;
 using VHSDecode.Core.Rf;
 
@@ -18,6 +19,332 @@ public readonly record struct LdTestLdfWriteResult(
 public interface ILdTestLdfWriter
 {
     LdTestLdfWriteResult Write(DecodeSession session, long startSample, long endSample, Stream input);
+}
+
+public sealed class LdTestLdfWriter : ILdTestLdfWriter
+{
+    private readonly ILdTestLdfWriter _preferred;
+    private readonly ILdTestLdfWriter _fallback;
+
+    public LdTestLdfWriter(int chunkSamples = FfmpegLdTestLdfWriter.DefaultChunkSamples)
+        : this(
+            new LibsndfileLdTestLdfWriter(chunkSamples),
+            new FfmpegLdTestLdfWriter(chunkSamples))
+    {
+    }
+
+    internal LdTestLdfWriter(ILdTestLdfWriter preferred, ILdTestLdfWriter fallback)
+    {
+        _preferred = preferred ?? throw new ArgumentNullException(nameof(preferred));
+        _fallback = fallback ?? throw new ArgumentNullException(nameof(fallback));
+    }
+
+    public LdTestLdfWriteResult Write(
+        DecodeSession session,
+        long startSample,
+        long endSample,
+        Stream input)
+    {
+        try
+        {
+            return _preferred.Write(session, startSample, endSample, input);
+        }
+        catch (LdTestLdfBackendUnavailableException)
+        {
+            return _fallback.Write(session, startSample, endSample, input);
+        }
+    }
+}
+
+internal sealed class LibsndfileLdTestLdfWriter : ILdTestLdfWriter
+{
+    internal const int SampleRate = 40_000;
+    internal const double CompressionLevel = 0.6;
+
+    private readonly FfmpegLdTestLdfWriter _writer;
+
+    public LibsndfileLdTestLdfWriter(int chunkSamples)
+    {
+        _writer = new FfmpegLdTestLdfWriter(
+            path => new LibsndfilePcm16FlacStream(path, SampleRate, CompressionLevel),
+            chunkSamples);
+    }
+
+    public LdTestLdfWriteResult Write(
+        DecodeSession session,
+        long startSample,
+        long endSample,
+        Stream input)
+        => _writer.Write(session, startSample, endSample, input);
+}
+
+internal sealed class LdTestLdfBackendUnavailableException(string message, Exception innerException)
+    : Exception(message, innerException)
+{
+}
+
+internal sealed unsafe partial class LibsndfilePcm16FlacStream : Stream
+{
+    internal const int FlacPcm16Format = 0x170002;
+
+    private const int SetCompressionLevelCommand = 0x1301;
+    private const int WriteMode = 0x20;
+
+    private nint _file;
+    private bool _disposed;
+
+    public LibsndfilePcm16FlacStream(string path, int sampleRate, double compressionLevel)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(path);
+        ArgumentOutOfRangeException.ThrowIfNegativeOrZero(sampleRate);
+        ArgumentOutOfRangeException.ThrowIfLessThan(compressionLevel, 0.0);
+        ArgumentOutOfRangeException.ThrowIfGreaterThan(compressionLevel, 1.0);
+
+        var info = new SoundFileInfo
+        {
+            SampleRate = sampleRate,
+            Channels = 1,
+            Format = FlacPcm16Format
+        };
+
+        try
+        {
+            _file = NativeMethods.Open(path, WriteMode, ref info);
+        }
+        catch (Exception ex) when (IsUnavailable(ex))
+        {
+            throw BackendUnavailable(ex);
+        }
+
+        if (_file == 0)
+        {
+            throw new InvalidDataException(
+                $"libsndfile failed to open LD test FLAC output: {ErrorText(0)}");
+        }
+
+        try
+        {
+            double level = compressionLevel;
+            int result = NativeMethods.Command(
+                _file,
+                SetCompressionLevelCommand,
+                &level,
+                sizeof(double));
+            if (result != 1)
+            {
+                throw new InvalidDataException(
+                    $"libsndfile failed to set LD test FLAC compression: {ErrorText(_file)}");
+            }
+        }
+        catch (Exception ex) when (IsUnavailable(ex))
+        {
+            CloseAfterInitializationFailure();
+            throw BackendUnavailable(ex);
+        }
+        catch
+        {
+            CloseAfterInitializationFailure();
+            throw;
+        }
+    }
+
+    public override bool CanRead => false;
+
+    public override bool CanSeek => false;
+
+    public override bool CanWrite => !_disposed;
+
+    public override long Length => throw new NotSupportedException();
+
+    public override long Position
+    {
+        get => throw new NotSupportedException();
+        set => throw new NotSupportedException();
+    }
+
+    public override void Flush()
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+        try
+        {
+            NativeMethods.WriteSync(_file);
+        }
+        catch (Exception ex) when (IsUnavailable(ex))
+        {
+            throw BackendUnavailable(ex);
+        }
+    }
+
+    public override int Read(byte[] buffer, int offset, int count) => throw new NotSupportedException();
+
+    public override long Seek(long offset, SeekOrigin origin) => throw new NotSupportedException();
+
+    public override void SetLength(long value) => throw new NotSupportedException();
+
+    public override void Write(byte[] buffer, int offset, int count)
+    {
+        ArgumentNullException.ThrowIfNull(buffer);
+        Write(buffer.AsSpan(offset, count));
+    }
+
+    public override void Write(ReadOnlySpan<byte> buffer)
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+        if ((buffer.Length & 1) != 0)
+        {
+            throw new ArgumentException(
+                "PCM16 output must contain complete little-endian samples.",
+                nameof(buffer));
+        }
+
+        if (buffer.IsEmpty)
+        {
+            return;
+        }
+
+        if (!BitConverter.IsLittleEndian)
+        {
+            throw new PlatformNotSupportedException(
+                "The bundled libsndfile PCM16 writer requires a little-endian process.");
+        }
+
+        long sampleCount = buffer.Length / sizeof(short);
+        fixed (byte* bytes = buffer)
+        {
+            long written;
+            try
+            {
+                written = NativeMethods.WriteShort(_file, (short*)bytes, sampleCount);
+            }
+            catch (Exception ex) when (IsUnavailable(ex))
+            {
+                throw BackendUnavailable(ex);
+            }
+
+            if (written != sampleCount)
+            {
+                throw new InvalidDataException(
+                    $"libsndfile wrote {written} of {sampleCount} LD test PCM samples: {ErrorText(_file)}");
+            }
+        }
+    }
+
+    protected override void Dispose(bool disposing)
+    {
+        if (_disposed)
+        {
+            return;
+        }
+
+        _disposed = true;
+        nint file = _file;
+        _file = 0;
+        if (disposing && file != 0)
+        {
+            int result;
+            try
+            {
+                result = NativeMethods.Close(file);
+            }
+            catch (Exception ex) when (IsUnavailable(ex))
+            {
+                throw BackendUnavailable(ex);
+            }
+
+            if (result != 0)
+            {
+                throw new InvalidDataException(
+                    $"libsndfile failed while finalizing LD test FLAC output: {ErrorText(0)}");
+            }
+        }
+
+        base.Dispose(disposing);
+    }
+
+    private static bool IsUnavailable(Exception exception)
+        => exception is DllNotFoundException or EntryPointNotFoundException or BadImageFormatException;
+
+    private static LdTestLdfBackendUnavailableException BackendUnavailable(Exception exception)
+        => new("libsndfile is unavailable for LD test FLAC output.", exception);
+
+    private static string ErrorText(nint file)
+        => Marshal.PtrToStringUTF8(NativeMethods.StrError(file))
+            ?? "unknown libsndfile error";
+
+    private void CloseAfterInitializationFailure()
+    {
+        nint file = _file;
+        _file = 0;
+        if (file == 0)
+        {
+            return;
+        }
+
+        try
+        {
+            NativeMethods.Close(file);
+        }
+        catch (Exception ex) when (IsUnavailable(ex))
+        {
+        }
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct SoundFileInfo
+    {
+        public long Frames;
+        public int SampleRate;
+        public int Channels;
+        public int Format;
+        public int Sections;
+        public int Seekable;
+    }
+
+    private static partial class NativeMethods
+    {
+        private const string LibraryName = "sndfile";
+
+        [LibraryImport(
+            LibraryName,
+            EntryPoint = "sf_wchar_open",
+            StringMarshalling = StringMarshalling.Utf16)]
+        internal static partial nint Open(
+            string path,
+            int mode,
+            ref SoundFileInfo info);
+
+        [LibraryImport(
+            LibraryName,
+            EntryPoint = "sf_command")]
+        internal static partial int Command(
+            nint file,
+            int command,
+            void* data,
+            int dataSize);
+
+        [LibraryImport(
+            LibraryName,
+            EntryPoint = "sf_write_short")]
+        internal static partial long WriteShort(
+            nint file,
+            short* samples,
+            long sampleCount);
+
+        [LibraryImport(
+            LibraryName,
+            EntryPoint = "sf_write_sync")]
+        internal static partial void WriteSync(nint file);
+
+        [LibraryImport(
+            LibraryName,
+            EntryPoint = "sf_close")]
+        internal static partial int Close(nint file);
+
+        [LibraryImport(
+            LibraryName,
+            EntryPoint = "sf_strerror")]
+        internal static partial nint StrError(nint file);
+    }
 }
 
 public sealed class FfmpegLdTestLdfWriter(

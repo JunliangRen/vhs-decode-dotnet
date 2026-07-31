@@ -801,7 +801,9 @@ possible capture has already been proven byte-for-byte identical.
   session
 - LD `--write-test-ldf` bug-report capture export, reading from the actual
   decoded/seeked field start plus upstream-compatible 1,100,000-sample
-  lookahead and writing an Ogg/FLAC `.ldf` through FFmpeg
+  lookahead; bundled libsndfile writes mono 40 kHz PCM16 FLAC by default with
+  sample-exact decoded PCM, while unavailable native loading falls back to the
+  upstream-style FFmpeg Ogg/FLAC pipe
 - sequential overlap-save RF block stream decoder with upstream-style
   blockcut/blockcut_end trimming and stitching
 - sync analysis foundation for raw pulse detection, HSYNC/EQ/VSYNC
@@ -1630,7 +1632,8 @@ possible capture has already been proven byte-for-byte identical.
   committed to JSON/SQLite even though `fields_written` has not advanced
 - successful VHS/LD and CVBS completion notices now precede JSON/SQLite and
   payload finalization; LD test-LDF path/range lines are emitted before encoding,
-  sample totals before the FFmpeg pipe closes, and the success line afterward
+  sample totals before the selected FLAC encoder closes, and the success line
+  afterward
 - LD streaming output now preserves v0.4.0's write order across failure points:
   pre-EFM/EFM precede JSON/SQLite metadata, main TBC follows metadata, and
   RF_TBC/AC3 plus analog PCM follow main TBC; a field with no analog payload
@@ -2130,7 +2133,7 @@ dotnet test --solution VHSDecodeDotNet.slnx --no-build
 ```
 
 The current formal solution build completes with zero warnings and errors, and
-the xUnit v3 project exposes 1,169 independently discoverable tests
+the xUnit v3 project exposes 1,173 independently discoverable tests
 to `dotnet test` and Visual Studio Test Explorer. On the
 same Windows machine and fixtures, Release wall-clock measurements for one
 frame were 2.346 s versus 7.193 s for NTSC VHS and 1.651 s versus 5.865 s for
@@ -2138,9 +2141,10 @@ NTSC LD (this port versus the v0.4.0 Python virtual environment); all output
 hashes listed above remained identical.
 
 `ffmpeg` and `ffprobe` must be available on `PATH` for FFmpeg-backed RF
-container inputs. Default HiFi FLAC output uses the bundled libsndfile and does
-not require either tool; HiFi `.wav` and recognized raw input paths do not
-require them either.
+container inputs. Default HiFi FLAC output and LD `--write-test-ldf` use the
+bundled libsndfile and do not require either tool; LD retains an FFmpeg fallback
+when libsndfile is unavailable. HiFi `.wav` and recognized raw input paths do
+not require them either.
 
 To regenerate the embedded format parameter snapshot from the checked-out
 upstream source:
