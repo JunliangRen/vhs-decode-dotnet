@@ -125,7 +125,7 @@ public sealed class TbcFieldSequenceDecodeEngine
         }
 
         ExtraReadLines = extraReadLines;
-        _testLdfWriter = testLdfWriter ?? new FfmpegLdTestLdfWriter();
+        _testLdfWriter = testLdfWriter ?? new LdTestLdfWriter();
         _efmOutputWriter = efmOutputWriter ?? new LaserDiscEfmOutputWriter();
         _vhsDiskSpaceGuard = vhsDiskSpaceGuard ?? new VhsDiskSpaceGuard();
         _cancellationToken = cancellationToken;
@@ -148,8 +148,7 @@ public sealed class TbcFieldSequenceDecodeEngine
 
     internal Func<string, Stream> CreateTbcOutput { get; init; } = DecodeOutputFile.Create;
 
-    internal Func<DecodeSession, string, TbcOutputMetadataWriter.StreamingWriter>
-        CreateMetadataWriter { get; init; }
+    internal Func<DecodeSession, string, TbcOutputMetadataWriter.StreamingWriter> CreateMetadataWriter { get; init; }
         = static (session, path) => new TbcOutputMetadataWriter.StreamingWriter(session, path);
 
     public TbcFieldSequenceDecodeResult TryDecodeAndWrite(DecodeSession session, int? maxFields = null)

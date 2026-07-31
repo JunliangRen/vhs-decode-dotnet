@@ -4,7 +4,7 @@
 
 **[English](README.detailed.md)** | [简体中文](README.detailed.zh-CN.md) | [日本語](README.detailed.ja.md)
 
-<!-- README_SYNC: 2026-07-31.03 -->
+<!-- README_SYNC: 2026-07-31.04 -->
 
 .NET 11 rewrite of the decode-facing parts of
 [`oyvindln/vhs-decode`](https://github.com/oyvindln/vhs-decode), focused on
@@ -1942,14 +1942,15 @@ Requirements:
 - Visual Studio C++ Build Tools and a Windows SDK when building the optional
   Intel IPP bridge
 - `ffmpeg` and `ffprobe` on `PATH` for FFmpeg-backed container inputs
-- default HiFi FLAC output uses the bundled libsndfile and does not require
-  FFmpeg
+- default HiFi FLAC output and LD `--write-test-ldf` use the bundled libsndfile
+  and do not require FFmpeg; LD retains an FFmpeg fallback when libsndfile is
+  unavailable
 
 ```powershell
 .\tools\build-ipp-native.ps1
 dotnet restore VHSDecodeDotNet.slnx
 dotnet build VHSDecodeDotNet.slnx -c Release --no-restore
-dotnet test --solution VHSDecodeDotNet.slnx -c Release --no-build --no-restore --minimum-expected-tests 1169
+dotnet test --solution VHSDecodeDotNet.slnx -c Release --no-build --no-restore --minimum-expected-tests 1172
 ```
 
 The first command includes the optional `ipp-fast` native artifact; omit it for
@@ -1962,7 +1963,7 @@ deployment computer. Binary-only single-file releases embed
 sidecar license files. An Exact-only build may omit the native build step.
 
 The current formal Release build has zero warnings and errors. The xUnit v3
-project exposes **1,169** independently discoverable tests to both
+project exposes **1,172** independently discoverable tests to both
 `dotnet test` and Visual Studio Test Explorer.
 
 <!-- SECTION: usage -->

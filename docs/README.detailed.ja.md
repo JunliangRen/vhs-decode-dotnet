@@ -4,7 +4,7 @@
 
 [English](README.detailed.md) | [简体中文](README.detailed.zh-CN.md) | **[日本語](README.detailed.ja.md)**
 
-<!-- README_SYNC: 2026-07-31.03 -->
+<!-- README_SYNC: 2026-07-31.04 -->
 
 [`oyvindln/vhs-decode`](https://github.com/oyvindln/vhs-decode) の
 デコード関連部分を .NET 11 で再実装するプロジェクトです。現在は release
@@ -1884,13 +1884,15 @@ profile peer です。
 - IDE として使用する場合は Visual Studio 2026
 - optional Intel IPP bridge の build には Visual Studio C++ Build Tools と Windows SDK
 - FFmpeg 対応 container input では `ffmpeg` と `ffprobe` が `PATH` 上に必要
-- default HiFi FLAC output は bundled libsndfile を使い、FFmpeg は不要
+- default HiFi FLAC output と LD `--write-test-ldf` は bundled libsndfile を
+  使うため FFmpeg は不要。libsndfile が利用できない場合、LD は FFmpeg fallback
+  を維持
 
 ```powershell
 .\tools\build-ipp-native.ps1
 dotnet restore VHSDecodeDotNet.slnx
 dotnet build VHSDecodeDotNet.slnx -c Release --no-restore
-dotnet test --solution VHSDecodeDotNet.slnx -c Release --no-build --no-restore --minimum-expected-tests 1169
+dotnet test --solution VHSDecodeDotNet.slnx -c Release --no-build --no-restore --minimum-expected-tests 1172
 ```
 
 最初の command は optional `ipp-fast` native artifact を含めるためのものです。
@@ -1903,7 +1905,7 @@ third-party notice を埋め込み、license sidecar file は追加しません�
 
 現在の正式な Release build は warning 0、error 0 です。xUnit v3 project は
 `dotnet test` と Visual Studio Test Explorer の両方で個別に検出できる
-**1,169** tests を公開します。
+**1,172** tests を公開します。
 
 <!-- SECTION: usage -->
 
