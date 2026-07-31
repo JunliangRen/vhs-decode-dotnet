@@ -381,11 +381,11 @@ sample で Python v0.4.0、merge 済みの Python PR341、Exact v0.4.0、Exact
 <!-- LATEST_PERFORMANCE_BEGIN -->
 | CLI mode（workers） | Python v0.4.0 | Python PR341 | Exact + v0.4.0 | Exact + current | IPP-fast + v0.4.0 | IPP-fast + current |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| default（5） | 16.983 s | 14.414 s | 5.781 s / 2.938x / 66.0% | 7.216 s / 1.998x / 49.9% | 5.657 s / 3.002x / 66.7% | 7.092 s / 2.032x / 50.8% |
-| `--threads 1` | 21.263 s | 19.881 s | 18.232 s / 1.166x / 14.3% | 20.627 s / 0.964x / 3.8% 遅い | 17.542 s / 1.212x / 17.5% | 20.201 s / 0.984x / 1.6% 遅い |
-| `--threads 5` | 16.880 s | 14.329 s | 5.906 s / 2.858x / 65.0% | 7.463 s / 1.920x / 47.9% | 5.689 s / 2.967x / 66.3% | 7.459 s / 1.921x / 47.9% |
-| `--threads 10` | 17.612 s | 15.149 s | 4.536 s / 3.883x / 74.2% | 5.887 s / 2.573x / 61.1% | 4.414 s / 3.990x / 74.9% | 5.537 s / 2.736x / 63.5% |
-| `--threads 20` | 18.330 s | 15.447 s | 3.568 s / 5.138x / 80.5% | 5.049 s / 3.059x / 67.3% | 3.471 s / 5.281x / 81.1% | 4.496 s / 3.435x / 70.9% |
+| default（5） | 16.983 s | 14.414 s | 5.623 s / 3.020x / 66.9% | 6.730 s / 2.142x / 53.3% | 5.295 s / 3.207x / 68.8% | 6.688 s / 2.155x / 53.6% |
+| `--threads 1` | 21.263 s | 19.881 s | 15.275 s / 1.392x / 28.2% | 17.979 s / 1.106x / 9.6% | 14.625 s / 1.454x / 31.2% | 17.008 s / 1.169x / 14.4% |
+| `--threads 5` | 16.880 s | 14.329 s | 5.475 s / 3.083x / 67.6% | 6.514 s / 2.200x / 54.5% | 5.361 s / 3.149x / 68.2% | 6.841 s / 2.094x / 52.3% |
+| `--threads 10` | 17.612 s | 15.149 s | 4.640 s / 3.795x / 73.7% | 5.890 s / 2.572x / 61.1% | 4.900 s / 3.594x / 72.2% | 5.631 s / 2.690x / 62.8% |
+| `--threads 20` | 18.330 s | 15.447 s | 3.809 s / 4.812x / 79.2% | 4.388 s / 3.520x / 71.6% | 3.722 s / 4.924x / 79.7% | 4.819 s / 3.206x / 68.8% |
 <!-- LATEST_PERFORMANCE_END -->
 
 benchmark host は Intel Core Ultra 7 265K（20 logical processor）、
@@ -1810,8 +1810,8 @@ median が 8.72 から 8.58 秒（1.61% 減）、mean が 8.710 から 8.617 秒
 残るため throughput gain は modest と明示し、allocation reduction を主結果と
 します。
 
-reviewed candidate は local で warning 0 の Release build と xUnit v3 test 1,141 件を
-すべて pass しました。GitHub Actions command は discoverable test 1,141 件以上を
+reviewed candidate は local で warning 0 の Release build と xUnit v3 test 1,169 件を
+すべて pass しました。GitHub Actions command は discoverable test 1,169 件以上を
 要求し、clean runner に external AC3 tools がない場合は optional LD AC3
 reference-pipeline test を skip できます。strict main/candidate run
 12 回は Exact v0.4.0/`current` の
@@ -1827,6 +1827,50 @@ final 1,000-frame Exact `current`/20-worker run は 2,000 fields を 69.475 秒�
 gate を pass しました。前 round と同じく current main が direct A/B oracle で、
 verified Python v0.4.0 `g4315520 --threads 0` evidence を transitive upstream
 reference とします。
+
+### 採用した Exact hot-path specialization
+
+次の Exact pass は、独立 gate を通過した 4 つの変更をまとめたものです。
+PocketFFT radix-8 kernel は forward/inverse direction を hot loop の外で選択します。
+VHS chroma UInt16 conversion は AVX2/SSE4.1 を使いながら、`+32767`、finite check、
+saturation、truncation、scalar tail の規則を維持します。`current` burst fitter は
+検証済み scalar form と同じ lane expression/reduction tree を持つ固定 16-lane
+AVX/FMA dot-product shape を使用します。`current` sync quantile は partition を
+再利用し、deterministic 16+16 radix selection で 32-bit sortable prefix を絞って
+から既存の final Quickselect を実行します。signed zero、infinity、NaN は元の
+sequential path を使います。worker-local histogram は workspace ごとに約
+768 KiB の固定サイズです。cross-field state、output order、data type、numerical
+operation order は移動していません。
+
+performance commit は native hardware、AVX2 disabled、all hardware intrinsic
+disabled の各環境で xUnit v3 test 1,169 件をすべて pass しました。native 12 run
+と scalar 12 run の strict profile/thread gate は Exact v0.4.0/`current` の
+`--threads 0`、default-five、`--threads 20` を対象とし、luma、chroma、raw JSON、
+stdout、normalized stderr/log、ordered `fileLoc` が一致しました。native/scalar
+cross comparison 84 項も一致し、final reviewed source は warning 0 の Release
+build と 1,169 tests を pass しました。
+
+release `v0.4.0-1.4.2` に対する balanced 100-frame Exact
+`current`/20-worker pair 6 組では、median wall time が 9.637 から 8.627 秒
+（10.48% 減、throughput 11.71% 増）となり、candidate が 6 回すべて勝ちました。
+serial pair 4 組では 50.377 から 37.300 秒（25.96% 減、throughput 35.06% 増）
+となり、candidate が 4 回すべて勝ちました。比較した artifact/diagnostic surface
+はすべて exact です。
+
+反対順序の 1,000-frame pair 2 組はそれぞれ 2,000 fields を完了し、luma、chroma、
+raw JSON、normalized log、全 ordered `fileLoc` が一致しました。mean wall time は
+72.405 から 62.752 秒（13.33% 減、throughput 15.38% 増）になりました。mean
+integrated allocation は 3.799 から 3.806 GiB（+0.18%）で、GC pause は実質
+neutral、candidate working set は 706 MiB 未満でした。両 run order で後半 5 個の
+100-frame interval が前半 5 個より速く、bounded-memory gate に progressive
+slowdown はありませんでした。
+
+final six-path table は `d526ef5` から build した executable
+`7F3434744E2120282C9888CF66AF730A184A103465561DE5A2B3F63B0022202F`
+を使用します。final 60 run はすべて complete profile/backend reference と一致
+しました。Python column は同じ固定 host の測定値を維持し、v0.4.0 の strict
+oracle は引き続き `g4315520 --threads 0`、merged Python PR341 は `current` の
+profile peer です。
 
 </details>
 
@@ -1846,7 +1890,7 @@ reference とします。
 .\tools\build-ipp-native.ps1
 dotnet restore VHSDecodeDotNet.slnx
 dotnet build VHSDecodeDotNet.slnx -c Release --no-restore
-dotnet test --solution VHSDecodeDotNet.slnx -c Release --no-build --no-restore --minimum-expected-tests 1141
+dotnet test --solution VHSDecodeDotNet.slnx -c Release --no-build --no-restore --minimum-expected-tests 1169
 ```
 
 最初の command は optional `ipp-fast` native artifact を含めるためのものです。
@@ -1859,7 +1903,7 @@ third-party notice を埋め込み、license sidecar file は追加しません�
 
 現在の正式な Release build は warning 0、error 0 です。xUnit v3 project は
 `dotnet test` と Visual Studio Test Explorer の両方で個別に検出できる
-**1,141** tests を公開します。
+**1,169** tests を公開します。
 
 <!-- SECTION: usage -->
 

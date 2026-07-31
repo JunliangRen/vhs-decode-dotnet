@@ -1,5 +1,7 @@
 // Radix-2/4/8 complex FFT adapted from pocketfft's BSD-3-Clause implementation.
 using System.Numerics;
+using System.Runtime.CompilerServices;
+using System.Runtime.InteropServices;
 
 namespace VHSDecode.Core.Dsp;
 
@@ -634,89 +636,116 @@ public static class PocketFftComplex
             Value[] twiddles,
             bool forward)
         {
+            if (forward)
+            {
+                Pass8Core<ForwardPass8Direction>(
+                    ido,
+                    l1,
+                    input,
+                    output,
+                    twiddles);
+            }
+            else
+            {
+                Pass8Core<BackwardPass8Direction>(
+                    ido,
+                    l1,
+                    input,
+                    output,
+                    twiddles);
+            }
+        }
+
+        private static void Pass8Core<TDirection>(
+            int ido,
+            int l1,
+            Value[] input,
+            Value[] output,
+            Value[] twiddles)
+            where TDirection : struct, IPass8Direction
+        {
             int outputStride = ido * l1;
+            // Plan construction guarantees every unchecked radix-8 access is in range.
+            System.Diagnostics.Debug.Assert((long)ido * l1 * 8 <= input.Length);
+            System.Diagnostics.Debug.Assert((long)ido * l1 * 8 <= output.Length);
+            System.Diagnostics.Debug.Assert((long)(ido - 1) * 7 <= twiddles.Length);
+            ref Value inputStart = ref MemoryMarshal.GetArrayDataReference(input);
+            ref Value outputStart = ref MemoryMarshal.GetArrayDataReference(output);
+            ref Value twiddleStart = ref MemoryMarshal.GetArrayDataReference(twiddles);
             for (int k = 0; k < l1; k++)
             {
-                Pass8FirstIndex(
+                Pass8FirstIndex<TDirection>(
                     input,
                     output,
                     ido * 8 * k,
                     ido * k,
                     ido,
-                    outputStride,
-                    forward);
+                    outputStride);
                 for (int i = 1; i < ido; i++)
                 {
                     Pair(
                         out Value a1,
                         out Value a5,
-                        input[InputIndex(i, 1, k, ido, 8)],
-                        input[InputIndex(i, 5, k, ido, 8)]);
+                        Unsafe.Add(ref inputStart, InputIndex(i, 1, k, ido, 8)),
+                        Unsafe.Add(ref inputStart, InputIndex(i, 5, k, ido, 8)));
                     Pair(
                         out Value a3,
                         out Value a7,
-                        input[InputIndex(i, 3, k, ido, 8)],
-                        input[InputIndex(i, 7, k, ido, 8)]);
-                    a7 = RotateX90(a7, forward);
+                        Unsafe.Add(ref inputStart, InputIndex(i, 3, k, ido, 8)),
+                        Unsafe.Add(ref inputStart, InputIndex(i, 7, k, ido, 8)));
+                    a7 = TDirection.RotateX90(a7);
                     PairInPlace(ref a1, ref a3);
-                    a3 = RotateX90(a3, forward);
+                    a3 = TDirection.RotateX90(a3);
                     PairInPlace(ref a5, ref a7);
-                    a5 = RotateX45(a5, forward);
-                    a7 = RotateX135(a7, forward);
+                    a5 = TDirection.RotateX45(a5);
+                    a7 = TDirection.RotateX135(a7);
                     Pair(
                         out Value a0,
                         out Value a4,
-                        input[InputIndex(i, 0, k, ido, 8)],
-                        input[InputIndex(i, 4, k, ido, 8)]);
+                        Unsafe.Add(ref inputStart, InputIndex(i, 0, k, ido, 8)),
+                        Unsafe.Add(ref inputStart, InputIndex(i, 4, k, ido, 8)));
                     Pair(
                         out Value a2,
                         out Value a6,
-                        input[InputIndex(i, 2, k, ido, 8)],
-                        input[InputIndex(i, 6, k, ido, 8)]);
+                        Unsafe.Add(ref inputStart, InputIndex(i, 2, k, ido, 8)),
+                        Unsafe.Add(ref inputStart, InputIndex(i, 6, k, ido, 8)));
                     PairInPlace(ref a0, ref a2);
-                    output[OutputIndex(i, k, 0, ido, l1)] = Add(a0, a1);
-                    output[OutputIndex(i, k, 4, ido, l1)] = SpecialMultiply(
+                    Unsafe.Add(ref outputStart, OutputIndex(i, k, 0, ido, l1)) = Add(a0, a1);
+                    Unsafe.Add(ref outputStart, OutputIndex(i, k, 4, ido, l1)) = TDirection.SpecialMultiply(
                         Subtract(a0, a1),
-                        Twiddle(twiddles, 3, i, ido),
-                        forward);
-                    output[OutputIndex(i, k, 2, ido, l1)] = SpecialMultiply(
+                        Unsafe.Add(ref twiddleStart, TwiddleIndex(3, i, ido)));
+                    Unsafe.Add(ref outputStart, OutputIndex(i, k, 2, ido, l1)) = TDirection.SpecialMultiply(
                         Add(a2, a3),
-                        Twiddle(twiddles, 1, i, ido),
-                        forward);
-                    output[OutputIndex(i, k, 6, ido, l1)] = SpecialMultiply(
+                        Unsafe.Add(ref twiddleStart, TwiddleIndex(1, i, ido)));
+                    Unsafe.Add(ref outputStart, OutputIndex(i, k, 6, ido, l1)) = TDirection.SpecialMultiply(
                         Subtract(a2, a3),
-                        Twiddle(twiddles, 5, i, ido),
-                        forward);
-                    a6 = RotateX90(a6, forward);
+                        Unsafe.Add(ref twiddleStart, TwiddleIndex(5, i, ido)));
+                    a6 = TDirection.RotateX90(a6);
                     PairInPlace(ref a4, ref a6);
-                    output[OutputIndex(i, k, 1, ido, l1)] = SpecialMultiply(
+                    Unsafe.Add(ref outputStart, OutputIndex(i, k, 1, ido, l1)) = TDirection.SpecialMultiply(
                         Add(a4, a5),
-                        Twiddle(twiddles, 0, i, ido),
-                        forward);
-                    output[OutputIndex(i, k, 5, ido, l1)] = SpecialMultiply(
+                        Unsafe.Add(ref twiddleStart, TwiddleIndex(0, i, ido)));
+                    Unsafe.Add(ref outputStart, OutputIndex(i, k, 5, ido, l1)) = TDirection.SpecialMultiply(
                         Subtract(a4, a5),
-                        Twiddle(twiddles, 4, i, ido),
-                        forward);
-                    output[OutputIndex(i, k, 3, ido, l1)] = SpecialMultiply(
+                        Unsafe.Add(ref twiddleStart, TwiddleIndex(4, i, ido)));
+                    Unsafe.Add(ref outputStart, OutputIndex(i, k, 3, ido, l1)) = TDirection.SpecialMultiply(
                         Add(a6, a7),
-                        Twiddle(twiddles, 2, i, ido),
-                        forward);
-                    output[OutputIndex(i, k, 7, ido, l1)] = SpecialMultiply(
+                        Unsafe.Add(ref twiddleStart, TwiddleIndex(2, i, ido)));
+                    Unsafe.Add(ref outputStart, OutputIndex(i, k, 7, ido, l1)) = TDirection.SpecialMultiply(
                         Subtract(a6, a7),
-                        Twiddle(twiddles, 6, i, ido),
-                        forward);
+                        Unsafe.Add(ref twiddleStart, TwiddleIndex(6, i, ido)));
                 }
             }
         }
 
-        private static void Pass8FirstIndex(
+        private static void Pass8FirstIndex<TDirection>(
             Value[] input,
             Value[] output,
             int inputBase,
             int outputBase,
             int inputStride,
-            int outputStride,
-            bool forward)
+            int outputStride)
+            where TDirection : struct, IPass8Direction
         {
             int input1 = inputBase + inputStride;
             int input2 = input1 + inputStride;
@@ -736,11 +765,11 @@ public static class PocketFftComplex
                 input[input3],
                 input[input7]);
             PairInPlace(ref a1, ref a3);
-            a3 = RotateX90(a3, forward);
-            a7 = RotateX90(a7, forward);
+            a3 = TDirection.RotateX90(a3);
+            a7 = TDirection.RotateX90(a7);
             PairInPlace(ref a5, ref a7);
-            a5 = RotateX45(a5, forward);
-            a7 = RotateX135(a7, forward);
+            a5 = TDirection.RotateX45(a5);
+            a7 = TDirection.RotateX135(a7);
             Pair(
                 out Value a0,
                 out Value a4,
@@ -753,7 +782,7 @@ public static class PocketFftComplex
                 input[input6]);
             Pair(out Value output0, out Value output4, Add(a0, a2), a1);
             Pair(out Value output2, out Value output6, Subtract(a0, a2), a3);
-            a6 = RotateX90(a6, forward);
+            a6 = TDirection.RotateX90(a6);
             Pair(out Value output1, out Value output5, Add(a4, a6), a5);
             Pair(out Value output3, out Value output7, Subtract(a4, a6), a7);
             output[outputBase] = output0;
@@ -842,7 +871,10 @@ public static class PocketFftComplex
         }
 
         private static Value Twiddle(Value[] values, int x, int i, int ido)
-            => values[(i - 1) + (x * (ido - 1))];
+            => values[TwiddleIndex(x, i, ido)];
+
+        private static int TwiddleIndex(int x, int i, int ido)
+            => (i - 1) + (x * (ido - 1));
 
         private static int InputIndex(int a, int b, int c, int ido, int radix)
             => a + (ido * (b + (radix * c)));
@@ -855,9 +887,84 @@ public static class PocketFftComplex
 
     private readonly record struct Value(double Real, double Imaginary);
 
+    private interface IPass8Direction
+    {
+        static abstract Value SpecialMultiply(Value left, Value right);
+
+        static abstract Value RotateX90(Value value);
+
+        static abstract Value RotateX45(Value value);
+
+        static abstract Value RotateX135(Value value);
+    }
+
+    private readonly struct ForwardPass8Direction : IPass8Direction
+    {
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static Value SpecialMultiply(Value left, Value right)
+            => new(
+                (left.Real * right.Real) + (left.Imaginary * right.Imaginary),
+                (left.Imaginary * right.Real) - (left.Real * right.Imaginary));
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static Value RotateX90(Value value)
+            => new(value.Imaginary, -value.Real);
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static Value RotateX45(Value value)
+        {
+            const double HalfSqrt2 = 0.707106781186547524400844362104849;
+            return new Value(
+                HalfSqrt2 * (value.Real + value.Imaginary),
+                HalfSqrt2 * (value.Imaginary - value.Real));
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static Value RotateX135(Value value)
+        {
+            const double HalfSqrt2 = 0.707106781186547524400844362104849;
+            return new Value(
+                HalfSqrt2 * (value.Imaginary - value.Real),
+                HalfSqrt2 * (-value.Real - value.Imaginary));
+        }
+    }
+
+    private readonly struct BackwardPass8Direction : IPass8Direction
+    {
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static Value SpecialMultiply(Value left, Value right)
+            => new(
+                (left.Real * right.Real) - (left.Imaginary * right.Imaginary),
+                (left.Real * right.Imaginary) + (left.Imaginary * right.Real));
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static Value RotateX90(Value value)
+            => new(-value.Imaginary, value.Real);
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static Value RotateX45(Value value)
+        {
+            const double HalfSqrt2 = 0.707106781186547524400844362104849;
+            return new Value(
+                HalfSqrt2 * (value.Real - value.Imaginary),
+                HalfSqrt2 * (value.Imaginary + value.Real));
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static Value RotateX135(Value value)
+        {
+            const double HalfSqrt2 = 0.707106781186547524400844362104849;
+            return new Value(
+                HalfSqrt2 * (-value.Real - value.Imaginary),
+                HalfSqrt2 * (value.Real - value.Imaginary));
+        }
+    }
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private static Value Add(Value left, Value right)
         => new(left.Real + right.Real, left.Imaginary + right.Imaginary);
 
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private static Value Subtract(Value left, Value right)
         => new(left.Real - right.Real, left.Imaginary - right.Imaginary);
 
@@ -870,6 +977,7 @@ public static class PocketFftComplex
         difference = Subtract(left, right);
     }
 
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private static void PairInPlace(ref Value left, ref Value right)
     {
         Value originalLeft = left;

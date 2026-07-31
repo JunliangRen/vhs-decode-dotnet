@@ -401,11 +401,11 @@ speedup, and wall-time reduction against its profile-matched Python column:
 <!-- LATEST_PERFORMANCE_BEGIN -->
 | CLI mode (workers) | Python v0.4.0 | Python PR341 | Exact + v0.4.0 | Exact + current | IPP-fast + v0.4.0 | IPP-fast + current |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| default (5) | 16.983 s | 14.414 s | 5.781 s / 2.938x / 66.0% | 7.216 s / 1.998x / 49.9% | 5.657 s / 3.002x / 66.7% | 7.092 s / 2.032x / 50.8% |
-| `--threads 1` | 21.263 s | 19.881 s | 18.232 s / 1.166x / 14.3% | 20.627 s / 0.964x / 3.8% slower | 17.542 s / 1.212x / 17.5% | 20.201 s / 0.984x / 1.6% slower |
-| `--threads 5` | 16.880 s | 14.329 s | 5.906 s / 2.858x / 65.0% | 7.463 s / 1.920x / 47.9% | 5.689 s / 2.967x / 66.3% | 7.459 s / 1.921x / 47.9% |
-| `--threads 10` | 17.612 s | 15.149 s | 4.536 s / 3.883x / 74.2% | 5.887 s / 2.573x / 61.1% | 4.414 s / 3.990x / 74.9% | 5.537 s / 2.736x / 63.5% |
-| `--threads 20` | 18.330 s | 15.447 s | 3.568 s / 5.138x / 80.5% | 5.049 s / 3.059x / 67.3% | 3.471 s / 5.281x / 81.1% | 4.496 s / 3.435x / 70.9% |
+| default (5) | 16.983 s | 14.414 s | 5.623 s / 3.020x / 66.9% | 6.730 s / 2.142x / 53.3% | 5.295 s / 3.207x / 68.8% | 6.688 s / 2.155x / 53.6% |
+| `--threads 1` | 21.263 s | 19.881 s | 15.275 s / 1.392x / 28.2% | 17.979 s / 1.106x / 9.6% | 14.625 s / 1.454x / 31.2% | 17.008 s / 1.169x / 14.4% |
+| `--threads 5` | 16.880 s | 14.329 s | 5.475 s / 3.083x / 67.6% | 6.514 s / 2.200x / 54.5% | 5.361 s / 3.149x / 68.2% | 6.841 s / 2.094x / 52.3% |
+| `--threads 10` | 17.612 s | 15.149 s | 4.640 s / 3.795x / 73.7% | 5.890 s / 2.572x / 61.1% | 4.900 s / 3.594x / 72.2% | 5.631 s / 2.690x / 62.8% |
+| `--threads 20` | 18.330 s | 15.447 s | 3.809 s / 4.812x / 79.2% | 4.388 s / 3.520x / 71.6% | 3.722 s / 4.924x / 79.7% | 4.819 s / 3.206x / 68.8% |
 <!-- LATEST_PERFORMANCE_END -->
 
 The benchmark host was an Intel Core Ultra 7 265K with 20 logical processors,
@@ -1865,8 +1865,8 @@ decode time from 8.72 to 8.58 seconds (1.61% lower) and mean decode time from
 gain is deliberately classified as modest because run-to-run variance remains
 visible; the allocation reduction is the primary result.
 
-The reviewed candidate passed a zero-warning Release build and all 1,141 xUnit
-v3 tests locally. The GitHub Actions command requires at least 1,141
+The reviewed candidate passed a zero-warning Release build and all 1,169 xUnit
+v3 tests locally. The GitHub Actions command requires at least 1,169
 discoverable tests; a clean runner may skip the optional LD AC3
 reference-pipeline test when the external AC3 tools are unavailable. Twelve
 strict main/candidate runs covered Exact v0.4.0 and `current`
@@ -1882,6 +1882,52 @@ first/final-third medians of 627.5/703.7 MiB, so the bounded-memory gate passed
 without progressive unbounded growth. As in the preceding pass, current main
 is the direct A/B oracle and its verified Python v0.4.0 `g4315520 --threads 0`
 evidence remains the transitive upstream reference.
+
+### Retained Exact hot-path specialization
+
+The next retained Exact pass combines four independently gated changes. The
+PocketFFT radix-8 kernel selects forward or inverse direction outside its hot
+loop. VHS chroma UInt16 conversion uses AVX2/SSE4.1 while preserving the
+`+32767`, finite check, saturation, truncation, and scalar-tail rules. The
+`current` burst fitter uses a pinned 16-lane AVX/FMA dot-product shape with the
+same lane expressions and reduction tree as the verified scalar form. The
+`current` sync quantiles reuse their partition and narrow the 32-bit sortable
+prefix with deterministic 16+16 radix selection before the existing final
+Quickselect; signed zero, infinity, and NaN use the original sequential path.
+The worker-local histogram is fixed at about 768 KiB per workspace. No
+cross-field state, output ordering, data type, or numerical operation order was
+moved.
+
+The performance commits passed all 1,169 xUnit v3 tests with native hardware,
+with AVX2 disabled, and with all hardware intrinsics disabled. Twelve native
+and twelve scalar strict profile/thread runs covered Exact v0.4.0 and
+`current` at `--threads 0`, default-five, and `--threads 20`; all luma, chroma,
+raw JSON, stdout, normalized stderr/log, and ordered `fileLoc` surfaces matched,
+including 84 cross-native/scalar comparisons. The final reviewed source also
+passed a zero-warning Release build and all 1,169 tests locally.
+
+Against release `v0.4.0-1.4.2`, six balanced 100-frame Exact
+`current`/20-worker pairs reduced median wall time from 9.637 to 8.627 seconds
+(10.48% lower, 11.71% more throughput), with the candidate faster in all six.
+Four serial pairs reduced the median from 50.377 to 37.300 seconds (25.96%
+lower, 35.06% more throughput), with four wins. Every compared artifact and
+diagnostic surface was exact.
+
+Two opposite-order 1,000-frame pairs each completed 2,000 fields and matched
+luma, chroma, raw JSON, normalized logs, and all ordered `fileLoc` values.
+Mean wall time fell from 72.405 to 62.752 seconds (13.33% lower, 15.38% more
+throughput). Mean integrated allocation changed from 3.799 to 3.806 GiB
+(+0.18%), GC pause stayed effectively neutral, and candidate working set
+remained below 706 MiB. Its later five 100-frame intervals were faster than
+the first five in both run orders, so the bounded-memory gate showed no
+progressive slowdown.
+
+The final six-path table uses executable
+`7F3434744E2120282C9888CF66AF730A184A103465561DE5A2B3F63B0022202F`
+built from `d526ef5`. All 60 final runs passed their complete profile/backend
+references. The Python columns retain the same fixed-host measurements:
+v0.4.0 remains the strict `g4315520 --threads 0` oracle, and merged Python
+PR341 remains the profile peer for `current`.
 
 </details>
 
@@ -1903,7 +1949,7 @@ Requirements:
 .\tools\build-ipp-native.ps1
 dotnet restore VHSDecodeDotNet.slnx
 dotnet build VHSDecodeDotNet.slnx -c Release --no-restore
-dotnet test --solution VHSDecodeDotNet.slnx -c Release --no-build --no-restore --minimum-expected-tests 1141
+dotnet test --solution VHSDecodeDotNet.slnx -c Release --no-build --no-restore --minimum-expected-tests 1169
 ```
 
 The first command includes the optional `ipp-fast` native artifact; omit it for
@@ -1916,7 +1962,7 @@ deployment computer. Binary-only single-file releases embed
 sidecar license files. An Exact-only build may omit the native build step.
 
 The current formal Release build has zero warnings and errors. The xUnit v3
-project exposes **1,141** independently discoverable tests to both
+project exposes **1,169** independently discoverable tests to both
 `dotnet test` and Visual Studio Test Explorer.
 
 <!-- SECTION: usage -->

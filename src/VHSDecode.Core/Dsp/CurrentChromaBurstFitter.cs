@@ -1,3 +1,7 @@
+using System.Runtime.InteropServices;
+using System.Runtime.Intrinsics;
+using System.Runtime.Intrinsics.X86;
+
 namespace VHSDecode.Core.Dsp;
 
 internal readonly record struct CurrentChromaBurstFit(
@@ -203,7 +207,21 @@ internal static class CurrentChromaBurstFitter
         phase = NormalizeSignedRadians(phase);
     }
 
-    private static double OpenBlasHaswellDot(
+    internal static double OpenBlasHaswellDot(
+        ReadOnlySpan<double> left,
+        ReadOnlySpan<double> right)
+    {
+        if (left.Length != right.Length)
+        {
+            throw new ArgumentException("Dot-product spans must have the same length.");
+        }
+
+        return Avx.IsSupported && Fma.IsSupported
+            ? OpenBlasHaswellDotVector256(left, right)
+            : OpenBlasHaswellDotScalar(left, right);
+    }
+
+    internal static double OpenBlasHaswellDotScalar(
         ReadOnlySpan<double> left,
         ReadOnlySpan<double> right)
     {
@@ -228,6 +246,68 @@ internal static class CurrentChromaBurstFitter
                     accumulators[lane]);
             }
         }
+
+        double pair00 = accumulators[0] + accumulators[2];
+        double pair01 = accumulators[1] + accumulators[3];
+        double pair10 = accumulators[4] + accumulators[6];
+        double pair11 = accumulators[5] + accumulators[7];
+        double pair20 = accumulators[8] + accumulators[10];
+        double pair21 = accumulators[9] + accumulators[11];
+        double pair30 = accumulators[12] + accumulators[14];
+        double pair31 = accumulators[13] + accumulators[15];
+        double lower0 = pair10 + pair00;
+        double lower1 = pair11 + pair01;
+        double upper0 = pair30 + pair20;
+        double upper1 = pair31 + pair21;
+        double dot0 = upper0 + lower0;
+        double dot1 = upper1 + lower1;
+        double dot = dot0 + dot1;
+        for (; index < left.Length; index++)
+        {
+            dot = Math.FusedMultiplyAdd(left[index], right[index], dot);
+        }
+
+        return dot;
+    }
+
+    private static double OpenBlasHaswellDotVector256(
+        ReadOnlySpan<double> left,
+        ReadOnlySpan<double> right)
+    {
+        ref double leftReference = ref MemoryMarshal.GetReference(left);
+        ref double rightReference = ref MemoryMarshal.GetReference(right);
+        Vector256<double> accumulator0 = Vector256<double>.Zero;
+        Vector256<double> accumulator1 = Vector256<double>.Zero;
+        Vector256<double> accumulator2 = Vector256<double>.Zero;
+        Vector256<double> accumulator3 = Vector256<double>.Zero;
+        int index = 0;
+        int blockEnd = left.Length & ~15;
+        for (; index < blockEnd; index += 16)
+        {
+            accumulator0 = Fma.MultiplyAdd(
+                Vector256.LoadUnsafe(ref leftReference, (nuint)index),
+                Vector256.LoadUnsafe(ref rightReference, (nuint)index),
+                accumulator0);
+            accumulator1 = Fma.MultiplyAdd(
+                Vector256.LoadUnsafe(ref leftReference, (nuint)(index + 4)),
+                Vector256.LoadUnsafe(ref rightReference, (nuint)(index + 4)),
+                accumulator1);
+            accumulator2 = Fma.MultiplyAdd(
+                Vector256.LoadUnsafe(ref leftReference, (nuint)(index + 8)),
+                Vector256.LoadUnsafe(ref rightReference, (nuint)(index + 8)),
+                accumulator2);
+            accumulator3 = Fma.MultiplyAdd(
+                Vector256.LoadUnsafe(ref leftReference, (nuint)(index + 12)),
+                Vector256.LoadUnsafe(ref rightReference, (nuint)(index + 12)),
+                accumulator3);
+        }
+
+        Span<double> accumulators = stackalloc double[16];
+        ref double accumulatorReference = ref MemoryMarshal.GetReference(accumulators);
+        accumulator0.StoreUnsafe(ref accumulatorReference);
+        accumulator1.StoreUnsafe(ref accumulatorReference, 4);
+        accumulator2.StoreUnsafe(ref accumulatorReference, 8);
+        accumulator3.StoreUnsafe(ref accumulatorReference, 12);
 
         double pair00 = accumulators[0] + accumulators[2];
         double pair01 = accumulators[1] + accumulators[3];

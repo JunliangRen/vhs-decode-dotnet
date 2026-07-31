@@ -22,6 +22,7 @@ public sealed class VhsSyncDetector
     private const double SyncSpacingTolerance = 0.15;
     private const int MinimumGridLength = 8;
     private const int PartitionSortThreshold = 32;
+    internal const int RadixHistogramWidth = 1 << 16;
     private readonly double _hSyncLength;
     private readonly double _backPorchLength;
     private readonly int _lineLength;
@@ -114,12 +115,10 @@ public sealed class VhsSyncDetector
                 _workerThreads);
             if (detectLevels)
             {
-                double[] partitioned =
-                    workspace.EnsurePartitionedLength(filteredLength);
                 (syncTipEstimate, blankingEstimate) =
                     EstimateLevels(
                         filtered.AsSpan(0, filteredLength),
-                        partitioned);
+                        workspace);
             }
 
             return DetectFiltered(
@@ -163,11 +162,10 @@ public sealed class VhsSyncDetector
                 filtered.AsSpan(0, filteredLength));
             if (detectLevels)
             {
-                double[] partitioned = workspace.EnsurePartitionedLength(filteredLength);
                 (syncTipEstimate, blankingEstimate) =
                     EstimateLevels(
                         filtered.AsSpan(0, filteredLength),
-                        partitioned);
+                        workspace);
             }
 
             return DetectFiltered(
@@ -653,21 +651,17 @@ public sealed class VhsSyncDetector
 
     private static (double SyncTip, double Blanking) EstimateLevels(
         ReadOnlySpan<double> filtered,
-        double[] partitioned)
+        VhsSyncWorkspace workspace)
     {
-        if (partitioned.Length < filtered.Length)
-        {
-            throw new ArgumentException(
-                "The partition workspace must be at least the filtered length.",
-                nameof(partitioned));
-        }
-
         int syncIndex = (int)(filtered.Length * 0.05);
         int blankingIndex = (int)(filtered.Length * 0.25);
-        filtered.CopyTo(partitioned);
-        double syncTip = SelectKth(partitioned, syncIndex, filtered.Length);
-        double blanking = SelectKth(partitioned, blankingIndex, filtered.Length);
-        return (syncTip, blanking);
+        return SelectLevelQuantilesRadix(
+            filtered,
+            workspace.EnsurePartitionedLength(filtered.Length),
+            workspace.EnsureHighHistogram(),
+            workspace.EnsureMiddleHistograms(),
+            syncIndex,
+            blankingIndex);
     }
 
     private static double UpperMedianOfWindow(
@@ -701,17 +695,266 @@ public sealed class VhsSyncDetector
         return window[length / 2];
     }
 
-    private static double SelectKth(double[] values, int target, int count)
+    internal static (double SyncTip, double Blanking) SelectLevelQuantilesRadix(
+        ReadOnlySpan<double> values,
+        double[] scratch,
+        int[] highHistogram,
+        int[] middleHistograms,
+        int syncTarget,
+        int blankingTarget)
     {
-        int left = 0;
-        int right = count - 1;
-        int depthLimit = 2 * (BitOperations.Log2((uint)count) + 1);
+        if (values.IsEmpty)
+        {
+            throw new ArgumentException("At least one level sample is required.", nameof(values));
+        }
+
+        if ((uint)syncTarget >= (uint)values.Length
+            || (uint)blankingTarget >= (uint)values.Length
+            || syncTarget > blankingTarget)
+        {
+            throw new ArgumentOutOfRangeException(nameof(syncTarget));
+        }
+
+        if (scratch.Length < values.Length
+            || highHistogram.Length < RadixHistogramWidth
+            || middleHistograms.Length < RadixHistogramWidth * 2)
+        {
+            throw new ArgumentException("The radix quantile workspaces are too small.");
+        }
+
+        Array.Clear(highHistogram, 0, RadixHistogramWidth);
+        for (int index = 0; index < values.Length; index++)
+        {
+            double value = values[index];
+            if (!double.IsFinite(value) || value == 0.0)
+            {
+                values.CopyTo(scratch);
+                return SelectLevelQuantilesSequential(
+                    scratch,
+                    syncTarget,
+                    blankingTarget,
+                    values.Length);
+            }
+
+            uint prefix = SortablePrefix(value);
+            highHistogram[prefix >> 16]++;
+        }
+
+        BucketSelection syncHigh = LocateBucket(
+            highHistogram.AsSpan(0, RadixHistogramWidth),
+            syncTarget);
+        BucketSelection blankingHigh = LocateBucket(
+            highHistogram.AsSpan(0, RadixHistogramWidth),
+            blankingTarget);
+
+        int middleHistogramLength = syncHigh.Bucket == blankingHigh.Bucket
+            ? RadixHistogramWidth
+            : RadixHistogramWidth * 2;
+        Array.Clear(middleHistograms, 0, middleHistogramLength);
+        int blankingHistogramOffset = syncHigh.Bucket == blankingHigh.Bucket
+            ? 0
+            : RadixHistogramWidth;
+        for (int index = 0; index < values.Length; index++)
+        {
+            uint prefix = SortablePrefix(values[index]);
+            int high = (int)(prefix >> 16);
+            int middle = (int)(prefix & 0xFFFF);
+            if (high == syncHigh.Bucket)
+            {
+                middleHistograms[middle]++;
+            }
+            else if (high == blankingHigh.Bucket)
+            {
+                middleHistograms[blankingHistogramOffset + middle]++;
+            }
+        }
+
+        BucketSelection syncMiddle = LocateBucket(
+            middleHistograms.AsSpan(0, RadixHistogramWidth),
+            syncHigh.RankWithinBucket);
+        BucketSelection blankingMiddle = LocateBucket(
+            middleHistograms.AsSpan(blankingHistogramOffset, RadixHistogramWidth),
+            blankingHigh.RankWithinBucket);
+        uint syncPrefix = ((uint)syncHigh.Bucket << 16) | (uint)syncMiddle.Bucket;
+        uint blankingPrefix = ((uint)blankingHigh.Bucket << 16) | (uint)blankingMiddle.Bucket;
+
+        if (syncPrefix == blankingPrefix)
+        {
+            int write = 0;
+            for (int index = 0; index < values.Length; index++)
+            {
+                double value = values[index];
+                if (SortablePrefix(value) == syncPrefix)
+                {
+                    scratch[write++] = value;
+                }
+            }
+
+            System.Diagnostics.Debug.Assert(write == syncMiddle.Count);
+            return SelectTwoInRange(
+                scratch,
+                left: 0,
+                count: write,
+                syncMiddle.RankWithinBucket,
+                blankingMiddle.RankWithinBucket);
+        }
+
+        int syncWrite = 0;
+        int blankingStart = syncMiddle.Count;
+        int blankingWrite = blankingStart;
+        for (int index = 0; index < values.Length; index++)
+        {
+            double value = values[index];
+            uint prefix = SortablePrefix(value);
+            if (prefix == syncPrefix)
+            {
+                scratch[syncWrite++] = value;
+            }
+            else if (prefix == blankingPrefix)
+            {
+                scratch[blankingWrite++] = value;
+            }
+        }
+
+        System.Diagnostics.Debug.Assert(syncWrite == syncMiddle.Count);
+        System.Diagnostics.Debug.Assert(blankingWrite - blankingStart == blankingMiddle.Count);
+        double syncTip = SelectKth(
+            scratch,
+            syncMiddle.RankWithinBucket,
+            left: 0,
+            right: syncWrite - 1,
+            out _,
+            out _);
+        int blankingTargetInScratch = blankingStart + blankingMiddle.RankWithinBucket;
+        double blanking = SelectKth(
+            scratch,
+            blankingTargetInScratch,
+            left: blankingStart,
+            right: blankingWrite - 1,
+            out _,
+            out _);
+        return (syncTip, blanking);
+    }
+
+    private static uint SortablePrefix(double value)
+    {
+        ulong bits = BitConverter.DoubleToUInt64Bits(value);
+        ulong key = (bits & 0x8000_0000_0000_0000UL) != 0
+            ? ~bits
+            : bits ^ 0x8000_0000_0000_0000UL;
+        return (uint)(key >> 32);
+    }
+
+    private static BucketSelection LocateBucket(ReadOnlySpan<int> histogram, int target)
+    {
+        int before = 0;
+        for (int bucket = 0; bucket < histogram.Length; bucket++)
+        {
+            int count = histogram[bucket];
+            if (target < before + count)
+            {
+                return new BucketSelection(bucket, target - before, count);
+            }
+
+            before += count;
+        }
+
+        throw new ArgumentOutOfRangeException(nameof(target));
+    }
+
+    internal static (double SyncTip, double Blanking) SelectLevelQuantiles(
+        double[] values,
+        int syncTarget,
+        int blankingTarget,
+        int count)
+    {
+        for (int index = 0; index < count; index++)
+        {
+            double value = values[index];
+            if (!double.IsFinite(value) || value == 0.0)
+            {
+                return SelectLevelQuantilesSequential(
+                    values,
+                    syncTarget,
+                    blankingTarget,
+                    count);
+            }
+        }
+
+        return SelectTwoInRange(
+            values,
+            left: 0,
+            count,
+            syncTarget,
+            blankingTarget);
+    }
+
+    private static (double SyncTip, double Blanking) SelectTwoInRange(
+        double[] values,
+        int left,
+        int count,
+        int syncTargetWithinRange,
+        int blankingTargetWithinRange)
+    {
+        int syncTarget = left + syncTargetWithinRange;
+        int blankingTarget = left + blankingTargetWithinRange;
+        double blanking = SelectKth(
+            values,
+            blankingTarget,
+            left,
+            right: left + count - 1,
+            out int lowerBound,
+            out _);
+        double syncTip = syncTarget < lowerBound
+            ? SelectKth(
+                values,
+                syncTarget,
+                left,
+                right: lowerBound - 1,
+                out _,
+                out _)
+            : values[syncTarget];
+        return (syncTip, blanking);
+    }
+
+    internal static (double SyncTip, double Blanking) SelectLevelQuantilesSequential(
+        double[] values,
+        int syncTarget,
+        int blankingTarget,
+        int count)
+    {
+        double syncTip = SelectKth(values, syncTarget, count);
+        double blanking = SelectKth(values, blankingTarget, count);
+        return (syncTip, blanking);
+    }
+
+    private static double SelectKth(double[] values, int target, int count)
+        => SelectKth(
+            values,
+            target,
+            left: 0,
+            right: count - 1,
+            out _,
+            out _);
+
+    private static double SelectKth(
+        double[] values,
+        int target,
+        int left,
+        int right,
+        out int lowerBound,
+        out int upperBound)
+    {
+        int depthLimit =
+            2 * (BitOperations.Log2((uint)(right - left + 1)) + 1);
         while (left < right)
         {
             int length = right - left + 1;
             if (length <= PartitionSortThreshold || depthLimit-- == 0)
             {
                 Array.Sort(values, left, length, NumpyDoubleComparer.Instance);
+                lowerBound = target;
+                upperBound = target;
                 return values[target];
             }
 
@@ -752,10 +995,14 @@ public sealed class VhsSyncDetector
             }
             else
             {
+                lowerBound = lower;
+                upperBound = upper;
                 return values[target];
             }
         }
 
+        lowerBound = left;
+        upperBound = right;
         return values[target];
     }
 
@@ -796,10 +1043,17 @@ public sealed class VhsSyncDetector
         }
     }
 
+    private readonly record struct BucketSelection(
+        int Bucket,
+        int RankWithinBucket,
+        int Count);
+
     private sealed class VhsSyncWorkspace
     {
         private double[] _filtered = [];
         private double[] _partitioned = [];
+        private int[] _highHistogram = [];
+        private int[] _middleHistograms = [];
 
         public double[] EnsureFilteredLength(int length)
         {
@@ -819,6 +1073,27 @@ public sealed class VhsSyncDetector
             }
 
             return _partitioned;
+        }
+
+        public int[] EnsureHighHistogram()
+        {
+            if (_highHistogram.Length < RadixHistogramWidth)
+            {
+                _highHistogram = GC.AllocateUninitializedArray<int>(RadixHistogramWidth);
+            }
+
+            return _highHistogram;
+        }
+
+        public int[] EnsureMiddleHistograms()
+        {
+            int length = RadixHistogramWidth * 2;
+            if (_middleHistograms.Length < length)
+            {
+                _middleHistograms = GC.AllocateUninitializedArray<int>(length);
+            }
+
+            return _middleHistograms;
         }
     }
 }

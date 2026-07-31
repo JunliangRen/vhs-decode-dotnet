@@ -159,7 +159,7 @@ internal sealed record VhsChromaPhaseAnalysis(
 
 internal sealed class VhsChromaCarrierTableCache
 {
-    private readonly object _gate = new();
+    private readonly Lock _gate = new();
     private HeterodyneEntry? _heterodyne;
     private CarrierEntry? _carrier;
 
@@ -266,20 +266,47 @@ public static class VhsChromaDecoder
     {
         var output = new ushort[chroma.Length];
         int vectorizedLength = chroma.Length & ~3;
-        for (int i = 0; i < vectorizedLength; i++)
+        int index = 0;
+        if (Avx2.IsSupported && Sse41.IsSupported)
         {
-            double shifted = chroma[i] + S16AbsMax;
-            output[i] = !double.IsFinite(shifted) || shifted <= 0.0
+            Vector256<double> offsetVector = Vector256.Create(S16AbsMax);
+            Vector256<double> maximumVector = Vector256.Create((double)ushort.MaxValue);
+            Vector256<long> exponentMask = Vector256.Create(0x7FF0_0000_0000_0000L);
+            ref double sourceReference = ref MemoryMarshal.GetReference(chroma);
+            ref ushort destinationReference = ref MemoryMarshal.GetArrayDataReference(output);
+            for (; index < vectorizedLength; index += 4)
+            {
+                Vector256<double> values = Vector256.LoadUnsafe(ref sourceReference, (nuint)index);
+                Vector256<double> shifted = Avx.Add(values, offsetVector);
+                Vector256<long> exponents = Avx2.And(shifted.AsInt64(), exponentMask);
+                Vector256<double> finiteMask = Avx2.CompareGreaterThan(
+                    exponentMask,
+                    exponents).AsDouble();
+                shifted = Avx.And(shifted, finiteMask);
+                shifted = Avx.Max(shifted, Vector256<double>.Zero);
+                shifted = Avx.Min(shifted, maximumVector);
+                Vector128<int> converted = Avx.ConvertToVector128Int32WithTruncation(shifted);
+                Vector128<ushort> packed = Sse41.PackUnsignedSaturate(
+                    converted,
+                    Vector128<int>.Zero);
+                packed.GetLower().StoreUnsafe(ref destinationReference, (nuint)index);
+            }
+        }
+
+        for (; index < vectorizedLength; index++)
+        {
+            double shifted = chroma[index] + S16AbsMax;
+            output[index] = !double.IsFinite(shifted) || shifted <= 0.0
                 ? ushort.MinValue
                 : shifted >= ushort.MaxValue
                     ? ushort.MaxValue
                     : (ushort)shifted;
         }
 
-        for (int i = vectorizedLength; i < chroma.Length; i++)
+        for (; index < chroma.Length; index++)
         {
-            double shifted = chroma[i] + S16AbsMax;
-            output[i] = !double.IsFinite(shifted) || shifted < long.MinValue || shifted > long.MaxValue
+            double shifted = chroma[index] + S16AbsMax;
+            output[index] = !double.IsFinite(shifted) || shifted < long.MinValue || shifted > long.MaxValue
                 ? ushort.MinValue
                 : unchecked((ushort)(long)shifted);
         }
