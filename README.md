@@ -98,18 +98,18 @@ for compatibility-sensitive work.
 
 The table below uses one fixed private local 40 MHz NTSC `BETAMAX_HIFI` `.lds`
 sample and the same bounded frame range for every run. The sample filename is
-intentionally not published. Each .NET gain is measured against Python
-v0.4.0 at the same requested worker count; compatibility is evaluated
-separately from speed.
+intentionally not published. The v0.4.0 .NET profiles are compared with Python
+v0.4.0; the `current` profiles are compared with merged Python PR341 at the
+same requested worker count. Compatibility is evaluated separately from speed.
 
 <!-- LATEST_PERFORMANCE_BEGIN -->
-| CLI mode (workers) | Python v0.4.0 | Exact + v0.4.0 | Exact + current | IPP-fast + v0.4.0 | IPP-fast + current |
-| --- | ---: | ---: | ---: | ---: | ---: |
-| default (5) | 16.983 s | 5.781 s / 2.938x | 7.216 s / 2.354x | 5.657 s / 3.002x | 7.092 s / 2.395x |
-| `--threads 1` | 21.263 s | 18.232 s / 1.166x | 20.627 s / 1.031x | 17.542 s / 1.212x | 20.201 s / 1.053x |
-| `--threads 5` | 16.880 s | 5.906 s / 2.858x | 7.463 s / 2.262x | 5.689 s / 2.967x | 7.459 s / 2.263x |
-| `--threads 10` | 17.612 s | 4.536 s / 3.883x | 5.887 s / 2.992x | 4.414 s / 3.990x | 5.537 s / 3.181x |
-| `--threads 20` | 18.330 s | 3.568 s / 5.138x | 5.049 s / 3.631x | 3.471 s / 5.281x | 4.496 s / 4.077x |
+| CLI mode (workers) | Python v0.4.0 | Python PR341 | Exact + v0.4.0 | Exact + current | IPP-fast + v0.4.0 | IPP-fast + current |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| default (5) | 16.983 s | 14.414 s | 5.781 s / 2.938x | 7.216 s / 1.998x | 5.657 s / 3.002x | 7.092 s / 2.032x |
+| `--threads 1` | 21.263 s | 19.881 s | 18.232 s / 1.166x | 20.627 s / 0.964x | 17.542 s / 1.212x | 20.201 s / 0.984x |
+| `--threads 5` | 16.880 s | 14.329 s | 5.906 s / 2.858x | 7.463 s / 1.920x | 5.689 s / 2.967x | 7.459 s / 1.921x |
+| `--threads 10` | 17.612 s | 15.149 s | 4.536 s / 3.883x | 5.887 s / 2.573x | 4.414 s / 3.990x | 5.537 s / 2.736x |
+| `--threads 20` | 18.330 s | 15.447 s | 3.568 s / 5.138x | 5.049 s / 3.059x | 3.471 s / 5.281x | 4.496 s / 3.435x |
 <!-- LATEST_PERFORMANCE_END -->
 
 The latest Exact pass recycles the VHS RF stream outputs only after their
@@ -125,10 +125,12 @@ improved 1.07%, so the throughput gain is modest while allocation pressure is
 substantially lower. A 1,000-frame gate remained exact, completed in 69.475
 seconds, and kept working set bounded below 711.6 MiB.
 
-Each .NET cell shows median wall time followed by speedup versus Python in the
-same row; values below `1.000x` are slower. The default is **5 workers**.
-Nonzero-thread Python rows are throughput comparisons only; strict
-compatibility still uses Python `--threads 0`.
+Each .NET cell shows median wall time followed by speedup versus its
+profile-matched Python column; values below `1.000x` are slower. Python PR341
+is merge commit `2f21e8ed6018b14561396cc95f1f6828054470b8`, the upstream peer
+for `current`. The default is **5 workers**. Nonzero-thread Python rows are
+throughput comparisons only; strict compatibility still uses Python v0.4.0
+`g4315520 --threads 0`.
 
 Default worker counts, exact commands, build hashes, hardware, repeated-run
 methodology, output hashes, and older measurements are recorded in the

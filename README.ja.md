@@ -94,17 +94,18 @@ CVBS、LaserDisc、HiFi は現在 `ipp-fast` を拒否するため、これら�
 
 次の表は、同じ private local 40 MHz NTSC `BETAMAX_HIFI` `.lds` sample と
 同じ bounded frame range を全 run で使用します。sample filename は公開しません。
-各 .NET gain は同じ requested worker count の Python v0.4.0 に対する値で、
-互換性判定は速度とは別に行います。
+v0.4.0 の .NET profile は Python v0.4.0、`current` profile は merge 済みの
+Python PR341 と同じ requested worker count で比較します。互換性判定は速度とは
+別に行います。
 
 <!-- LATEST_PERFORMANCE_BEGIN -->
-| CLI mode（workers） | Python v0.4.0 | Exact + v0.4.0 | Exact + current | IPP-fast + v0.4.0 | IPP-fast + current |
-| --- | ---: | ---: | ---: | ---: | ---: |
-| default（5） | 16.983 s | 5.781 s / 2.938x | 7.216 s / 2.354x | 5.657 s / 3.002x | 7.092 s / 2.395x |
-| `--threads 1` | 21.263 s | 18.232 s / 1.166x | 20.627 s / 1.031x | 17.542 s / 1.212x | 20.201 s / 1.053x |
-| `--threads 5` | 16.880 s | 5.906 s / 2.858x | 7.463 s / 2.262x | 5.689 s / 2.967x | 7.459 s / 2.263x |
-| `--threads 10` | 17.612 s | 4.536 s / 3.883x | 5.887 s / 2.992x | 4.414 s / 3.990x | 5.537 s / 3.181x |
-| `--threads 20` | 18.330 s | 3.568 s / 5.138x | 5.049 s / 3.631x | 3.471 s / 5.281x | 4.496 s / 4.077x |
+| CLI mode（workers） | Python v0.4.0 | Python PR341 | Exact + v0.4.0 | Exact + current | IPP-fast + v0.4.0 | IPP-fast + current |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| default（5） | 16.983 s | 14.414 s | 5.781 s / 2.938x | 7.216 s / 1.998x | 5.657 s / 3.002x | 7.092 s / 2.032x |
+| `--threads 1` | 21.263 s | 19.881 s | 18.232 s / 1.166x | 20.627 s / 0.964x | 17.542 s / 1.212x | 20.201 s / 0.984x |
+| `--threads 5` | 16.880 s | 14.329 s | 5.906 s / 2.858x | 7.463 s / 1.920x | 5.689 s / 2.967x | 7.459 s / 1.921x |
+| `--threads 10` | 17.612 s | 15.149 s | 4.536 s / 3.883x | 5.887 s / 2.573x | 4.414 s / 3.990x | 5.537 s / 2.736x |
+| `--threads 20` | 18.330 s | 15.447 s | 3.568 s / 5.138x | 5.049 s / 3.059x | 3.471 s / 5.281x | 4.496 s / 3.435x |
 <!-- LATEST_PERFORMANCE_END -->
 
 最新の Exact pass は、VHS RF stream block が全 cache から外れ、現在の span
@@ -120,10 +121,12 @@ throughput gain は modest ですが allocation pressure は大幅に低下し�
 1,000-frame gate も完全一致し、69.475 秒で完了、working set は bounded かつ
 711.6 MiB 未満でした。
 
-各 .NET cell は wall-time median と同じ行の Python に対する speedup の順です。
-`1.000x` 未満は Python より遅いことを示します。default は実際に **5 workers**
-です。Python の nonzero-thread 行は throughput 比較専用で、strict compatibility
-の基準は引き続き Python `--threads 0` です。
+各 .NET cell は wall-time median と profile が対応する Python 列に対する
+speedup の順です。`1.000x` 未満は Python より遅いことを示します。Python
+PR341 は merge commit `2f21e8ed6018b14561396cc95f1f6828054470b8` で、
+`current` の upstream peer です。default は実際に **5 workers** です。Python
+の nonzero-thread 行は throughput 比較専用で、strict compatibility の基準は
+引き続き Python v0.4.0 `g4315520 --threads 0` です。
 
 default worker の実数、完全な command、build hash、hardware、反復測定方法、
 output hash、過去の測定は
