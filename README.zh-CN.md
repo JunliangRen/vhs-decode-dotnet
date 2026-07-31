@@ -33,7 +33,7 @@
 - VHS 家族包括 VHS/S-VHS、Betamax、Video8/Hi8、U-matic、Type C、EIAJ
   以及上游支持的 PAL/NTSC 变体。
 - TBC 工具、双击启动的用户 GUI 和开发者绘图窗口明确不在范围内。
-- Visual Studio 2026 `.slnx` 包含 **1,141** 项标准 xUnit v3 测试；测试可在
+- Visual Studio 2026 `.slnx` 包含 **1,169** 项标准 xUnit v3 测试；测试可在
   Test Explorer 中查看，也可用 `dotnet test` 运行。
 
 <!-- SECTION: start -->
@@ -96,23 +96,23 @@ CVBS、LaserDisc 和 HiFi 当前会拒绝 `ipp-fast`，这些命令应使用 `ex
 <!-- LATEST_PERFORMANCE_BEGIN -->
 | CLI 模式（workers） | Python v0.4.0 | Python PR341 | Exact + v0.4.0 | Exact + current | IPP-fast + v0.4.0 | IPP-fast + current |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| 默认（5） | 16.983 s | 14.414 s | 5.781 s / 2.938x | 7.216 s / 1.998x | 5.657 s / 3.002x | 7.092 s / 2.032x |
-| `--threads 1` | 21.263 s | 19.881 s | 18.232 s / 1.166x | 20.627 s / 0.964x | 17.542 s / 1.212x | 20.201 s / 0.984x |
-| `--threads 5` | 16.880 s | 14.329 s | 5.906 s / 2.858x | 7.463 s / 1.920x | 5.689 s / 2.967x | 7.459 s / 1.921x |
-| `--threads 10` | 17.612 s | 15.149 s | 4.536 s / 3.883x | 5.887 s / 2.573x | 4.414 s / 3.990x | 5.537 s / 2.736x |
-| `--threads 20` | 18.330 s | 15.447 s | 3.568 s / 5.138x | 5.049 s / 3.059x | 3.471 s / 5.281x | 4.496 s / 3.435x |
+| 默认（5） | 16.983 s | 14.414 s | 5.623 s / 3.020x | 6.730 s / 2.142x | 5.295 s / 3.207x | 6.688 s / 2.155x |
+| `--threads 1` | 21.263 s | 19.881 s | 15.275 s / 1.392x | 17.979 s / 1.106x | 14.625 s / 1.454x | 17.008 s / 1.169x |
+| `--threads 5` | 16.880 s | 14.329 s | 5.475 s / 3.083x | 6.514 s / 2.200x | 5.361 s / 3.149x | 6.841 s / 2.094x |
+| `--threads 10` | 17.612 s | 15.149 s | 4.640 s / 3.795x | 5.890 s / 2.572x | 4.900 s / 3.594x | 5.631 s / 2.690x |
+| `--threads 20` | 18.330 s | 15.447 s | 3.809 s / 4.812x | 4.388 s / 3.520x | 3.722 s / 4.924x | 4.819 s / 3.206x |
 <!-- LATEST_PERFORMANCE_END -->
 
-最新一轮 Exact 优化仅在 VHS RF 流式块离开全部缓存、且本次 span 拼装完成后，
-才复用其输出数组。公开块结果仍保持独立所有权，DSP 运算不变，空闲保留池硬上限为
-48 组。同条件 100 帧 trace 将 sampled allocation 从 4.599 GB 降至
-566.9 MB（减少 87.7%）。
+最新一轮 Exact 优化专门化了 PocketFFT radix-8 的方向分派，对逐字节一致的 VHS
+色度 UInt16 转换和 `current` burst fit 做了向量化，并用确定性的 radix 筛选缩小
+`current` sync 分位数范围。标量回退、数据类型和原始数值运算顺序均保留。
 
-12 次严格 main/candidate 线程与 profile 门禁，以及刷新后的 60 次矩阵运行，
-都匹配各自参考结果。10 组交错的 `current`/20-worker 配对把解码时间中位数从
-8.72 降至 8.58 秒（改善 1.61%），平均值改善 1.07%；吞吐提升较小，但分配压力
-显著下降。1000 帧门禁仍完全一致，用时 69.475 秒，工作集保持有界且低于
-711.6 MiB。
+原生与标量线程/profile 门禁以及最终 60 次矩阵运行全部匹配参考结果。6 组平衡顺序的
+`current`/20-worker 配对把墙钟中位数从 9.637 降至 8.627 秒（缩短 10.48%，
+吞吐提高 11.71%）；4 组单线程配对从 50.377 降至 37.300 秒（缩短 25.96%，
+吞吐提高 35.06%）。两组相反顺序的 1000 帧配对中，平均墙钟从 72.405 降至
+62.752 秒（缩短 13.33%，吞吐提高 15.38%）。分配量仅变化 0.18%，候选工作集
+低于 706 MiB，且没有渐进减速。
 
 每个 .NET 单元格依次给出墙钟中位数和相对同 profile Python 列的倍速；低于
 `1.000x` 表示更慢。Python PR341 使用合并提交
@@ -145,7 +145,7 @@ TBC、色度、JSON 和日志文件允许在解码期间并发读取，兼容的
 dotnet restore VHSDecodeDotNet.slnx
 dotnet build VHSDecodeDotNet.slnx -c Release --no-restore
 dotnet test --solution VHSDecodeDotNet.slnx -c Release `
-  --no-build --no-restore --minimum-expected-tests 1141
+  --no-build --no-restore --minimum-expected-tests 1169
 ```
 
 在 Visual Studio 2026 中打开 `VHSDecodeDotNet.slnx`，即可构建、调试并通过

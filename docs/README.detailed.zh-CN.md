@@ -325,11 +325,11 @@ IPP-fast v0.4.0 和 IPP-fast `current`。文件名不会公开。每个 .NET 单
 <!-- LATEST_PERFORMANCE_BEGIN -->
 | CLI 模式（workers） | Python v0.4.0 | Python PR341 | Exact + v0.4.0 | Exact + current | IPP-fast + v0.4.0 | IPP-fast + current |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| 默认（5） | 16.983 s | 14.414 s | 5.781 s / 2.938x / 66.0% | 7.216 s / 1.998x / 49.9% | 5.657 s / 3.002x / 66.7% | 7.092 s / 2.032x / 50.8% |
-| `--threads 1` | 21.263 s | 19.881 s | 18.232 s / 1.166x / 14.3% | 20.627 s / 0.964x / 慢 3.8% | 17.542 s / 1.212x / 17.5% | 20.201 s / 0.984x / 慢 1.6% |
-| `--threads 5` | 16.880 s | 14.329 s | 5.906 s / 2.858x / 65.0% | 7.463 s / 1.920x / 47.9% | 5.689 s / 2.967x / 66.3% | 7.459 s / 1.921x / 47.9% |
-| `--threads 10` | 17.612 s | 15.149 s | 4.536 s / 3.883x / 74.2% | 5.887 s / 2.573x / 61.1% | 4.414 s / 3.990x / 74.9% | 5.537 s / 2.736x / 63.5% |
-| `--threads 20` | 18.330 s | 15.447 s | 3.568 s / 5.138x / 80.5% | 5.049 s / 3.059x / 67.3% | 3.471 s / 5.281x / 81.1% | 4.496 s / 3.435x / 70.9% |
+| 默认（5） | 16.983 s | 14.414 s | 5.623 s / 3.020x / 66.9% | 6.730 s / 2.142x / 53.3% | 5.295 s / 3.207x / 68.8% | 6.688 s / 2.155x / 53.6% |
+| `--threads 1` | 21.263 s | 19.881 s | 15.275 s / 1.392x / 28.2% | 17.979 s / 1.106x / 9.6% | 14.625 s / 1.454x / 31.2% | 17.008 s / 1.169x / 14.4% |
+| `--threads 5` | 16.880 s | 14.329 s | 5.475 s / 3.083x / 67.6% | 6.514 s / 2.200x / 54.5% | 5.361 s / 3.149x / 68.2% | 6.841 s / 2.094x / 52.3% |
+| `--threads 10` | 17.612 s | 15.149 s | 4.640 s / 3.795x / 73.7% | 5.890 s / 2.572x / 61.1% | 4.900 s / 3.594x / 72.2% | 5.631 s / 2.690x / 62.8% |
+| `--threads 20` | 18.330 s | 15.447 s | 3.809 s / 4.812x / 79.2% | 4.388 s / 3.520x / 71.6% | 3.722 s / 4.924x / 79.7% | 4.819 s / 3.206x / 68.8% |
 <!-- LATEST_PERFORMANCE_END -->
 
 测试机为 Intel Core Ultra 7 265K（20 个逻辑处理器）、Windows 11 25H2 build
@@ -1493,8 +1493,8 @@ cache 的最大配置容量：16 个基础条目加最多 32 个预取额度条�
 （减少 1.07%）；墙钟中位数减少 1.72%。运行间仍有可见波动，因此吞吐收益
 明确归类为小幅，主要结果是分配量下降。
 
-复审后的候选在本机通过零警告 Release 构建和全部 1,141 项 xUnit v3 测试。
-GitHub Actions 命令要求至少发现 1,141 项测试；干净 runner 缺少外部 AC3 工具时，
+复审后的候选在本机通过零警告 Release 构建和全部 1,169 项 xUnit v3 测试。
+GitHub Actions 命令要求至少发现 1,169 项测试；干净 runner 缺少外部 AC3 工具时，
 可以跳过可选的 LD AC3 参考管线测试。12 次严格 main/candidate
 运行覆盖 Exact v0.4.0 与 `current` 的 `--threads 0`、默认 5
 workers 和 `--threads 20`；亮度、色度、原始 JSON、stdout、归一化
@@ -1507,6 +1507,41 @@ profile/backend 参考。
 711.6 MiB，首段/末段三分位中位数为 627.5/703.7 MiB，因此有界内存门禁通过，
 没有渐进式无界增长。与上一轮相同，当前 main 是直接 A/B oracle，其已验证的
 Python v0.4.0 `g4315520 --threads 0` 证据继续作为传递的上游参考。
+
+### 保留的 Exact 热点专用优化
+
+下一轮保留的 Exact 候选由四项独立门禁的改动组成。PocketFFT radix-8 内核把正向/
+反向选择移出热点循环；VHS 色度 UInt16 转换使用 AVX2/SSE4.1，同时保持 `+32767`、
+有限值检查、饱和、截断和标量尾部规则；`current` burst fitter 使用固定的 16-lane
+AVX/FMA dot-product 形状，并保持已验证标量版本的 lane 表达式和 reduction tree；
+`current` sync 分位数复用 partition，通过确定性的 16+16 radix 筛选缩小 32-bit
+sortable prefix，再进入原有最终 Quickselect。signed zero、infinity 和 NaN 仍走原始
+顺序路径。每个 workspace 的 worker-local histogram 固定约 768 KiB。跨 field 状态、
+输出顺序、数据类型和数值运算顺序均未移动。
+
+这些性能提交在原生硬件、禁用 AVX2、禁用全部硬件 intrinsic 三种环境下都通过
+1,169 项 xUnit v3 测试。12 次原生和 12 次标量严格 profile/thread 运行覆盖 Exact
+v0.4.0 与 `current` 的 `--threads 0`、默认 5 和 `--threads 20`；亮度、色度、原始
+JSON、stdout、归一化 stderr/日志及有序 `fileLoc` 全部一致，并包含 84 项原生/标量
+交叉比较。最终复审源码也通过零警告 Release 构建和全部 1,169 项测试。
+
+相对 release `v0.4.0-1.4.2`，6 组平衡顺序的 100 帧 Exact
+`current`/20-worker 配对把墙钟中位数从 9.637 降至 8.627 秒（缩短 10.48%，
+吞吐提高 11.71%），候选 6 次全胜。4 组单线程配对把中位数从 50.377 降至
+37.300 秒（缩短 25.96%，吞吐提高 35.06%），候选 4 次全胜。所有比较的产物和
+诊断表面都完全一致。
+
+两组相反顺序的 1000 帧配对各自完成 2000 fields，并匹配亮度、色度、原始 JSON、
+归一化日志和全部有序 `fileLoc`。平均墙钟从 72.405 降至 62.752 秒（缩短 13.33%，
+吞吐提高 15.38%）。平均累计分配从 3.799 变为 3.806 GiB（+0.18%），GC pause
+基本中性，候选工作集保持低于 706 MiB。两种运行顺序中，候选后 5 个 100 帧区间
+都快于前 5 个，因此有界内存门禁没有发现渐进减速。
+
+最终六路径表使用从 `d526ef5` 构建的可执行文件
+`7F3434744E2120282C9888CF66AF730A184A103465561DE5A2B3F63B0022202F`。
+最终 60 次运行全部匹配完整 profile/backend 参考。Python 列沿用同一固定主机的
+实测：v0.4.0 的严格 oracle 仍是 `g4315520 --threads 0`，已合并的 Python PR341
+仍是 `current` 的 profile 对应版本。
 
 </details>
 
@@ -1526,7 +1561,7 @@ Python v0.4.0 `g4315520 --threads 0` 证据继续作为传递的上游参考。
 .\tools\build-ipp-native.ps1
 dotnet restore VHSDecodeDotNet.slnx
 dotnet build VHSDecodeDotNet.slnx -c Release --no-restore
-dotnet test --solution VHSDecodeDotNet.slnx -c Release --no-build --no-restore --minimum-expected-tests 1141
+dotnet test --solution VHSDecodeDotNet.slnx -c Release --no-build --no-restore --minimum-expected-tests 1169
 ```
 
 第一条命令用于包含可选的 `ipp-fast` 原生产物；只构建 Exact 时可以省略。
@@ -1537,7 +1572,7 @@ Intel oneAPI。只含二进制的单文件发布会嵌入 `vhsdecode_ipp.dll` �
 notice，不会额外生成许可证 sidecar 文件。只构建 Exact 后端时可以省略原生构建步骤。
 
 当前正式 Release 构建为零警告、零错误。xUnit v3 项目向
-`dotnet test` 和 Visual Studio Test Explorer 暴露 **1,141** 个可独立发现的测试。
+`dotnet test` 和 Visual Studio Test Explorer 暴露 **1,169** 个可独立发现的测试。
 
 <!-- SECTION: usage -->
 
