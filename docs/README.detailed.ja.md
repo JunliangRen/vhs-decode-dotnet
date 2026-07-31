@@ -370,33 +370,35 @@ candidate 15.303 s、main 15.385 s で、candidate の前半/後半は
 77.22/70.87 ms per frame、peak は 0.993 GiB でした。retained median storage は
 detector ごとに 60-line buffer 2 個までに制限されます。
 
-### 最新の 5-path thread matrix
+### 最新の 6-path thread matrix
 
 最新の overview は、同じ private local 40 MHz NTSC `BETAMAX_HIFI` `.lds`
-sample で Python v0.4.0、Exact v0.4.0、Exact `current`、IPP-fast v0.4.0、
-IPP-fast `current` を比較します。filename は公開しません。各 cell は 3 回の
-interleaved Release run の wall-time median、同じ行の Python に対する speedup、
-wall-time reduction の順です。
+sample で Python v0.4.0、merge 済みの Python PR341、Exact v0.4.0、Exact
+`current`、IPP-fast v0.4.0、IPP-fast `current` を比較します。filename は
+公開しません。各 .NET cell は wall-time median、profile が対応する Python
+列に対する speedup、wall-time reduction の順です。
 
-| CLI mode（workers） | Python v0.4.0 | Exact + v0.4.0 | Exact + current | IPP-fast + v0.4.0 | IPP-fast + current |
-| --- | ---: | ---: | ---: | ---: | ---: |
-| default（5） | 16.983 s | 6.416 s / 2.647x / 62.2% | 7.678 s / 2.212x / 54.8% | 5.667 s / 2.997x / 66.6% | 7.184 s / 2.364x / 57.7% |
-| `--threads 1` | 21.263 s | 20.547 s / 1.035x / 3.4% | 22.961 s / 0.926x / 8.0% 遅い | 20.129 s / 1.056x / 5.3% | 22.320 s / 0.953x / 5.0% 遅い |
-| `--threads 5` | 16.880 s | 6.173 s / 2.735x / 63.4% | 7.802 s / 2.164x / 53.8% | 5.802 s / 2.909x / 65.6% | 7.186 s / 2.349x / 57.4% |
-| `--threads 10` | 17.612 s | 4.880 s / 3.609x / 72.3% | 6.118 s / 2.879x / 65.3% | 4.636 s / 3.799x / 73.7% | 5.744 s / 3.066x / 67.4% |
-| `--threads 20` | 18.330 s | 3.997 s / 4.586x / 78.2% | 4.767 s / 3.845x / 74.0% | 3.966 s / 4.622x / 78.4% | 4.919 s / 3.726x / 73.2% |
+<!-- LATEST_PERFORMANCE_BEGIN -->
+| CLI mode（workers） | Python v0.4.0 | Python PR341 | Exact + v0.4.0 | Exact + current | IPP-fast + v0.4.0 | IPP-fast + current |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| default（5） | 16.983 s | 14.414 s | 5.781 s / 2.938x / 66.0% | 7.216 s / 1.998x / 49.9% | 5.657 s / 3.002x / 66.7% | 7.092 s / 2.032x / 50.8% |
+| `--threads 1` | 21.263 s | 19.881 s | 18.232 s / 1.166x / 14.3% | 20.627 s / 0.964x / 3.8% 遅い | 17.542 s / 1.212x / 17.5% | 20.201 s / 0.984x / 1.6% 遅い |
+| `--threads 5` | 16.880 s | 14.329 s | 5.906 s / 2.858x / 65.0% | 7.463 s / 1.920x / 47.9% | 5.689 s / 2.967x / 66.3% | 7.459 s / 1.921x / 47.9% |
+| `--threads 10` | 17.612 s | 15.149 s | 4.536 s / 3.883x / 74.2% | 5.887 s / 2.573x / 61.1% | 4.414 s / 3.990x / 74.9% | 5.537 s / 2.736x / 63.5% |
+| `--threads 20` | 18.330 s | 15.447 s | 3.568 s / 5.138x / 80.5% | 5.049 s / 3.059x / 67.3% | 3.471 s / 5.281x / 81.1% | 4.496 s / 3.435x / 70.9% |
+<!-- LATEST_PERFORMANCE_END -->
 
 benchmark host は Intel Core Ultra 7 265K（20 logical processor）、
 Windows 11 25H2 build 26220.8925、.NET SDK/runtime
-`11.0.100-preview.6.26359.118` です。Python 自体は変更されていないため、
-Python 列は以前の fixed matrix median を保持し、4 つの .NET 列は 60 回の
-interleaved run で再測定しました。candidate executable は `d0508f9` の
-production code change を含み、single-file `decode.exe` SHA-256 は
-`98ADB0ED3F5EF086AC2A189F302101C751C68F0390123817EAF5452DD83BE7A1`
-でした。fixed 40-frame matrix には startup cost と run ごとの spread が含まれ、
-下記の反対順序 1,000-frame pair が stable whole-pipeline A/B を示します。
-Python 3.14.0 は NumPy 2.4.6、SciPy 1.18.0、Numba 0.66.0、
-python-soxr 1.1.0 を使用しました。共通引数は次のとおりです。
+`11.0.100-preview.6.26359.118` です。Python v0.4.0 列は以前の fixed
+matrix median を保持します。merge 済み PR341 commit
+`2f21e8ed6018b14561396cc95f1f6828054470b8`
+（`v0.4.0-40-g2f21e8ed`）は別 session の 15 run で測定し、4 つの .NET 列は
+最新の 60 interleaved run を保持します。すべて同じ host、sample、40-frame
+window を使いますが、PR341 session は .NET matrix と interleave していない
+ため、paired A/B ではなく profile-peer comparison です。Python 3.14.0 は
+NumPy 2.4.6、SciPy 1.18.0、Numba 0.66.0、python-soxr 1.1.0 を使用しました。
+共通引数は次のとおりです。
 
 ```text
 --system ntsc --NTSCJ --detect_chroma_track_phase --ire0_adjust
@@ -404,7 +406,7 @@ python-soxr 1.1.0 を使用しました。共通引数は次のとおりです�
 --start 100 --length 40 --overwrite
 ```
 
-両実装の default は **5 workers** です。独立した 3 回の Python
+両実装の default は **5 workers** です。独立した 3 回の Python v0.4.0
 `--threads 0` control は median 30.253 s で、互いに完全一致しました。保持した
 すべての Exact v0.4.0 run は luma、chroma、JSON、stdout、normalized
 stderr/log、順序付き 80 個すべての `fileLoc` でこの oracle と一致しました。
@@ -416,11 +418,15 @@ deterministic hash set を生成しました。別の candidate gate でも
 により normalized stderr/log は異なります。この sample 固有の結果は
 byte-compatibility の保証ではありません。
 
-今回の Python nonzero/default 15 run は、この sample では同じ
-luma/chroma/JSON set を保ちましたが、normalized log hash は 7 種類でした。
-以前の fixed matrix では worker count 間の Python artifact hash 不安定性も確認
-されています。したがって nonzero-thread Python 行は throughput 比較専用で、
-strict oracle は upstream `g4315520 --threads 0` のままです。
+Python PR341 の warm-up は luma、chroma、順序付き 80 個すべての `fileLoc`、
+stdout、timestamp-normalized stderr/log で `.NET current` reference と一致
+しました。予期される `version` と `gitCommit` の source-identity field を除けば
+JSON payload も一致し、この sample の PR341 15 run は 1 つの hash set を生成
+しました。一方、Python v0.4.0 の nonzero/default 15 run は同じ
+luma/chroma/JSON set を保ったものの normalized log hash は 7 種類で、以前の
+fixed matrix では worker count 間の v0.4.0 artifact hash 不安定性も確認されて
+います。したがって nonzero-thread Python 行は throughput 比較専用で、strict
+oracle は upstream v0.4.0 `g4315520 --threads 0` のままです。
 
 以前の Exact-only thread matrix は Intel Core Ultra 7 265K（20 logical processor）、
 Windows 11 build 26220、.NET SDK/runtime `11.0.100-preview.6.26359.118`、
@@ -1770,6 +1776,58 @@ normalized stderr/log、ordered `fileLoc` reference と一致しました。samp
 working set は maximum 1,479.6 MiB、first/final-third median 659.9/593.2 MiB
 で、progressive growth のない bounded memory を支持します。
 
+### RF stream output buffer reuse
+
+現在の Exact candidate では、VHS stream decoder が demodulated video、
+RF envelope、low-pass video、float32 chroma の 4 つの block-sized output
+ownership を管理します。block が cache 内にある間、または現在の span assembly
+に参加している間は array を排他的に保持し、両方の利用が終了した後だけ
+concurrent pool に返します。public `DecodePreparedBlock` result は独立 allocation
+のままです。worker failure、cancelled prefetch、cache invalidation、replacement、
+eviction、stream change、disposal は eligible set を返し、active parallel
+assembly が必要とする eviction は copy 完了まで返却を遅延します。serial
+assembly でも full cache 内で low-numbered block が自分自身を evict する場合は
+返却を遅延します。deferred diagnostic callback が例外を投げた場合は harvested
+block を返してから例外を再送出し、in-flight prefetch cancellation test は後続の
+input read を block した状態で completed output がすべて回収されることを確認します。idle pool の
+retained hard limit は 48 sets で、decoded cache の maximum configured capacity、
+すなわち base 16 entries と最大 32 prefetch allowance entries に一致します。
+active decoded/prefetched block と current span lease は retained count に含まれず、
+total live sets は一時的に 48 を超え得ます。DSP type、coefficient、expression、
+operation order、padding、field commit order は変わりません。
+
+同じ 100-frame Exact `current`/20-worker trace で total sampled allocation は
+4,598,751,544 から 566,944,304 bytes へ減少し、4,031,807,240 bytes、
+87.67% を削減しました。final trace は initial concurrency で output set を
+60 組作成した後に安定して再利用し、retained subset は 48 を超えません。
+対応する 1,000-frame counter run では integrated allocation が 40.641 から
+3.844 GiB へ減りました。この最適化は decoder の numerical path ではなく
+GC pressure を削減します。
+
+反対順序の 100-frame Exact `current`/20-worker pair 10 組では、decode-time
+median が 8.72 から 8.58 秒（1.61% 減）、mean が 8.710 から 8.617 秒
+（1.07% 減）になり、wall-time median は 1.72% 減りました。run 間 variance が
+残るため throughput gain は modest と明示し、allocation reduction を主結果と
+します。
+
+reviewed candidate は local で warning 0 の Release build と xUnit v3 test 1,141 件を
+すべて pass しました。GitHub Actions command は discoverable test 1,141 件以上を
+要求し、clean runner に external AC3 tools がない場合は optional LD AC3
+reference-pipeline test を skip できます。strict main/candidate run
+12 回は Exact v0.4.0/`current` の
+`--threads 0`、default-five、`--threads 20` を対象にし、luma、chroma、raw JSON、
+stdout、normalized stderr/log、ordered `fileLoc` が一致しました。refreshed
+Exact/IPP-fast、v0.4.0/`current`、default/1/5/10/20-worker matrix 60 回も、
+各 profile/backend reference と一致しました。
+
+final 1,000-frame Exact `current`/20-worker run は 2,000 fields を 69.475 秒で
+完了し、current-main artifact、normalized diagnostic、ordered `fileLoc` と一致
+しました。working set は maximum 711.6 MiB、first/final-third median
+627.5/703.7 MiB で、progressive unbounded growth なしとして bounded-memory
+gate を pass しました。前 round と同じく current main が direct A/B oracle で、
+verified Python v0.4.0 `g4315520 --threads 0` evidence を transitive upstream
+reference とします。
+
 </details>
 
 <!-- SECTION: build -->
@@ -1788,7 +1846,7 @@ working set は maximum 1,479.6 MiB、first/final-third median 659.9/593.2 MiB
 .\tools\build-ipp-native.ps1
 dotnet restore VHSDecodeDotNet.slnx
 dotnet build VHSDecodeDotNet.slnx -c Release --no-restore
-dotnet test --solution VHSDecodeDotNet.slnx -c Release --no-build --no-restore --minimum-expected-tests 1130
+dotnet test --solution VHSDecodeDotNet.slnx -c Release --no-build --no-restore --minimum-expected-tests 1141
 ```
 
 最初の command は optional `ipp-fast` native artifact を含めるためのものです。
@@ -1801,7 +1859,7 @@ third-party notice を埋め込み、license sidecar file は追加しません�
 
 現在の正式な Release build は warning 0、error 0 です。xUnit v3 project は
 `dotnet test` と Visual Studio Test Explorer の両方で個別に検出できる
-**1,130** tests を公開します。
+**1,141** tests を公開します。
 
 <!-- SECTION: usage -->
 

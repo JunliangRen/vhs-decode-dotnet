@@ -101,12 +101,29 @@ public sealed partial class ReadmeLocalizationTests
             details[Path.Combine("docs", "README.detailed.md")],
             "body");
         Assert.Equal(3, expectedDetailedCommands.Length);
+        string[] expectedOverviewPerformanceRows =
+        [
+            "16.983 s | 14.414 s | 5.781 s | 2.938x | 7.216 s | 1.998x | 5.657 s | 3.002x | 7.092 s | 2.032x",
+            "21.263 s | 19.881 s | 18.232 s | 1.166x | 20.627 s | 0.964x | 17.542 s | 1.212x | 20.201 s | 0.984x",
+            "16.880 s | 14.329 s | 5.906 s | 2.858x | 7.463 s | 1.920x | 5.689 s | 2.967x | 7.459 s | 1.921x",
+            "17.612 s | 15.149 s | 4.536 s | 3.883x | 5.887 s | 2.573x | 4.414 s | 3.990x | 5.537 s | 2.736x",
+            "18.330 s | 15.447 s | 3.568 s | 5.138x | 5.049 s | 3.059x | 3.471 s | 5.281x | 4.496 s | 3.435x"
+        ];
+        string[] expectedDetailedPerformanceRows =
+        [
+            "16.983 s | 14.414 s | 5.781 s | 2.938x | 66.0% | 7.216 s | 1.998x | 49.9% | 5.657 s | 3.002x | 66.7% | 7.092 s | 2.032x | 50.8%",
+            "21.263 s | 19.881 s | 18.232 s | 1.166x | 14.3% | 20.627 s | 0.964x | 3.8% | 17.542 s | 1.212x | 17.5% | 20.201 s | 0.984x | 1.6%",
+            "16.880 s | 14.329 s | 5.906 s | 2.858x | 65.0% | 7.463 s | 1.920x | 47.9% | 5.689 s | 2.967x | 66.3% | 7.459 s | 1.921x | 47.9%",
+            "17.612 s | 15.149 s | 4.536 s | 3.883x | 74.2% | 5.887 s | 2.573x | 61.1% | 4.414 s | 3.990x | 74.9% | 5.537 s | 2.736x | 63.5%",
+            "18.330 s | 15.447 s | 3.568 s | 5.138x | 80.5% | 5.049 s | 3.059x | 67.3% | 3.471 s | 5.281x | 81.1% | 4.496 s | 3.435x | 70.9%"
+        ];
 
         string[] overviewFacts =
         [
             "43155200da87c0d49eb37d8ec09b1372075ee8e4",
+            "2f21e8ed6018b14561396cc95f1f6828054470b8",
             "11.0.100-preview.6.26359.118",
-            "**1,130**",
+            "**1,141**",
             "--compat-version",
             "current",
             "--dsp-backend",
@@ -116,10 +133,12 @@ public sealed partial class ReadmeLocalizationTests
             "IPP-fast + v0.4.0",
             "IPP-fast + current",
             "16.983 s",
-            "5.660 s",
-            "6.830 s",
-            "4.930x",
-            "3.682x",
+            "14.414 s",
+            "5.781 s",
+            "7.216 s",
+            "5.138x",
+            "3.059x",
+            "3.435x",
             "g4315520",
             "--threads 0"
         ];
@@ -127,13 +146,26 @@ public sealed partial class ReadmeLocalizationTests
         string[] synchronizedFacts =
         [
             "43155200da87c0d49eb37d8ec09b1372075ee8e4",
+            "2f21e8ed6018b14561396cc95f1f6828054470b8",
+            "v0.4.0-40-g2f21e8ed",
             "11.0.100-preview.6.26359.118",
-            "**1,130**",
+            "**1,141**",
             "2626A0F82B89D7F4025F41600C034048E61F89F399B08746071968B6E3E619B5",
             "FFCB821C0E46885B7735A9ADCA1AA1ACD6454DC43C84ED671EC7B2EB31DA261C",
             "4,994,031,752",
             "4,611,843,896",
             "4,598,751,544",
+            "566,944,304",
+            "4,031,807,240",
+            "87.67%",
+            "8.72",
+            "8.58",
+            "8.710",
+            "8.617",
+            "69.475",
+            "3.844 GiB",
+            "711.6 MiB",
+            "627.5/703.7 MiB",
             "12,187,912",
             "7.65%",
             "69.862",
@@ -444,7 +476,6 @@ public sealed partial class ReadmeLocalizationTests
             "16.52",
             "35.84/39.54",
             "1.459/1.231/0.820/1.422",
-            "98ADB0ED3F5EF086AC2A189F302101C751C68F0390123817EAF5452DD83BE7A1",
             "333D051E361FE425EA893EE819129BB1CFC9249CF77E29746C94252F263D19D0",
             "20.311490",
             "2.623486",
@@ -463,8 +494,10 @@ public sealed partial class ReadmeLocalizationTests
             "3.00%",
             "1.66%",
             "30.253",
-            "4.586x",
-            "3.845x",
+            "14.414 s",
+            "5.138x",
+            "3.059x",
+            "3.435x",
             "37.905",
             "38.002",
             "294.055",
@@ -498,6 +531,9 @@ public sealed partial class ReadmeLocalizationTests
                 expectedOverviewCommands.SequenceEqual(
                     Captures(PowerShellBlockRegex(), content, "body")),
                 $"{filename} does not contain the synchronized overview command blocks.");
+            Assert.True(
+                expectedOverviewPerformanceRows.SequenceEqual(PerformanceMetricRows(content)),
+                $"{filename} does not contain the expected profile-matched performance matrix.");
             foreach (string fact in overviewFacts)
             {
                 Assert.Contains(fact, content, StringComparison.Ordinal);
@@ -514,6 +550,9 @@ public sealed partial class ReadmeLocalizationTests
                 expectedDetailedCommands.SequenceEqual(
                     Captures(PowerShellBlockRegex(), content, "body")),
                 $"{filename} does not contain the synchronized detailed command blocks.");
+            Assert.True(
+                expectedDetailedPerformanceRows.SequenceEqual(PerformanceMetricRows(content)),
+                $"{filename} does not contain the expected detailed performance matrix.");
             foreach (string fact in synchronizedFacts)
             {
                 Assert.Contains(fact, content, StringComparison.Ordinal);
@@ -599,6 +638,19 @@ public sealed partial class ReadmeLocalizationTests
             .ToArray();
     }
 
+    private static string[] PerformanceMetricRows(string content)
+    {
+        string table = SingleCapture(LatestPerformanceRegex(), content, "body");
+        return table.ReplaceLineEndings("\n")
+            .Split('\n', StringSplitOptions.RemoveEmptyEntries)
+            .Select(line => PerformanceMetricRegex().Matches(line))
+            .Where(matches => matches.Count > 0)
+            .Select(matches => string.Join(
+                " | ",
+                matches.Select(match => match.Value)))
+            .ToArray();
+    }
+
     [GeneratedRegex(@"<!-- README_SYNC: (?<version>[^ ]+) -->", RegexOptions.CultureInvariant)]
     private static partial Regex SyncMarkerRegex();
 
@@ -609,4 +661,12 @@ public sealed partial class ReadmeLocalizationTests
         @"```powershell\r?\n(?<body>.*?)\r?\n```",
         RegexOptions.CultureInvariant | RegexOptions.Singleline)]
     private static partial Regex PowerShellBlockRegex();
+
+    [GeneratedRegex(
+        @"<!-- LATEST_PERFORMANCE_BEGIN -->\r?\n(?<body>.*?)\r?\n<!-- LATEST_PERFORMANCE_END -->",
+        RegexOptions.CultureInvariant | RegexOptions.Singleline)]
+    private static partial Regex LatestPerformanceRegex();
+
+    [GeneratedRegex(@"\d+\.\d+(?: s|x|%)", RegexOptions.CultureInvariant)]
+    private static partial Regex PerformanceMetricRegex();
 }

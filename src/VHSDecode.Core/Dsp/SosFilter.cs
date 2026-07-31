@@ -316,6 +316,33 @@ public static class SosFilter
         return output;
     }
 
+    internal static void ApplyForwardBackwardFloat32(
+        IReadOnlyList<SosSection> sections,
+        ReadOnlySpan<double> input,
+        Span<double> output,
+        int? padLength = null)
+    {
+        if (output.Length != input.Length)
+        {
+            throw new ArgumentException(
+                "Float32 forward/backward output length must match the input length.",
+                nameof(output));
+        }
+
+        if (input.IsEmpty)
+        {
+            return;
+        }
+
+        int edge = padLength ?? DefaultPadLength(sections);
+        if (edge < 0)
+        {
+            throw new ArgumentOutOfRangeException(nameof(padLength));
+        }
+
+        ApplyForwardBackwardFloat32Core(sections, input, output, edge);
+    }
+
     internal static void ApplyForwardBackwardFloat32InPlace(
         IReadOnlyList<SosSection> sections,
         Span<double> samples,
@@ -375,6 +402,29 @@ public static class SosFilter
             return [];
         }
 
+        var output = new float[input.Length];
+        ApplyForwardBackwardFloat32ToSingle(sections, input, output, padLength);
+        return output;
+    }
+
+    internal static void ApplyForwardBackwardFloat32ToSingle(
+        IReadOnlyList<SosSection> sections,
+        ReadOnlySpan<double> input,
+        Span<float> output,
+        int? padLength = null)
+    {
+        if (output.Length != input.Length)
+        {
+            throw new ArgumentException(
+                "Float32 forward/backward output length must match the input length.",
+                nameof(output));
+        }
+
+        if (input.IsEmpty)
+        {
+            return;
+        }
+
         int edge = padLength ?? DefaultPadLength(sections);
         if (edge < 0)
         {
@@ -396,7 +446,7 @@ public static class SosFilter
             }
 
             ApplyForwardBackwardFloat32InPlace(sections, extended);
-            return extended.Slice(edge, input.Length).ToArray();
+            extended.Slice(edge, input.Length).CopyTo(output);
         }
         finally
         {

@@ -12,7 +12,7 @@ public sealed class RfDemodulator : IDisposable
         Vector128.Create(BitConverter.UInt32BitsToSingle(0x7FFFFFFFU));
     // Arrays are immutable after construction and shared process-wide. The
     // no-eviction lifetime matches the PocketFFT plan caches.
-    private static readonly ConcurrentDictionary<int, double[]>
+    private static readonly SingleCreationCache<int, double[]>
         VhsHilbertMultipliers = new();
     private SharpnessEqOptions? _sharpnessLeadingOptions;
     private TransferFunction? _sharpnessLeadingFilter;
@@ -193,9 +193,17 @@ public sealed class RfDemodulator : IDisposable
         bool includeRfHighPassOutput,
         bool includeAnalyticOutput,
         bool includeDemodRawOutput,
-        bool useNumpyComplexVhsAnalytic)
+        bool useNumpyComplexVhsAnalytic,
+        RfDemodulatedBlockOutputBuffers? outputBuffers = null)
     {
         ObjectDisposedException.ThrowIf(Volatile.Read(ref _disposed) != 0, this);
+        if (outputBuffers is not null && outputBuffers.Length != input.Length)
+        {
+            throw new ArgumentException(
+                "RF demodulation output buffer length must match the input length.",
+                nameof(outputBuffers));
+        }
+
         if (input.IsEmpty)
         {
             return new RfDemodulatedBlock([], [], [], [], [], []);
@@ -385,13 +393,16 @@ public sealed class RfDemodulator : IDisposable
             ? BuildVhsEnvelope(
                 vhsEnvelopeSource.AsSpan(0, input.Length),
                 vhsEnvelopeFilter,
-                vhsRealFftWorkspace!.RawEnvelope.AsSpan(0, input.Length))
+                vhsRealFftWorkspace!.RawEnvelope.AsSpan(0, input.Length),
+                outputBuffers?.Envelope)
             : vhsAnalyticComponentsReady
                 ? BuildAnalyticMagnitudeEnvelope(
                     vhsRfFilteredReal!.AsSpan(0, input.Length),
-                    vhsRealFftWorkspace!.Imaginary.AsSpan(0, input.Length))
+                    vhsRealFftWorkspace!.Imaginary.AsSpan(0, input.Length),
+                    outputBuffers?.Envelope)
                 : BuildAnalyticMagnitudeEnvelope(
-                    analytic ?? throw new InvalidOperationException("The analytic RF signal was not initialized."));
+                    analytic ?? throw new InvalidOperationException("The analytic RF signal was not initialized."),
+                    outputBuffers?.Envelope);
         bool vhsWeakRfSignal = false;
         if (vhsEnvelopeSource is not null)
         {
@@ -566,7 +577,7 @@ public sealed class RfDemodulator : IDisposable
                 demodVideoSource.Length,
                 videoSpectrum.AsSpan(0, activeSpectrumLength),
                 workspace);
-            video = new double[demodVideoSource.Length];
+            video = outputBuffers?.Video ?? new double[demodVideoSource.Length];
             workspace.Inverse(
                 videoSpectrum.AsSpan(0, activeSpectrumLength),
                 video);
@@ -617,7 +628,7 @@ public sealed class RfDemodulator : IDisposable
                 demodVideoSource.Length,
                 videoLowPassSpectrum,
                 vhsRealFftWorkspace!);
-            videoLowPass = new double[demodVideoSource.Length];
+            videoLowPass = outputBuffers?.VideoLowPass ?? new double[demodVideoSource.Length];
             vhsRealFftWorkspace!.Inverse(videoLowPassSpectrum, videoLowPass);
         }
         else
@@ -1269,9 +1280,18 @@ public sealed class RfDemodulator : IDisposable
         }
     }
 
-    private static double[] BuildAnalyticMagnitudeEnvelope(ReadOnlySpan<Complex> analytic)
+    private static double[] BuildAnalyticMagnitudeEnvelope(
+        ReadOnlySpan<Complex> analytic,
+        double[]? destination = null)
     {
-        var envelope = new double[analytic.Length];
+        double[] envelope = destination ?? new double[analytic.Length];
+        if (envelope.Length != analytic.Length)
+        {
+            throw new ArgumentException(
+                "Envelope output length must match the analytic signal length.",
+                nameof(destination));
+        }
+
         for (int i = 0; i < envelope.Length; i++)
         {
             envelope[i] = analytic[i].Magnitude;
@@ -1282,14 +1302,22 @@ public sealed class RfDemodulator : IDisposable
 
     private static double[] BuildAnalyticMagnitudeEnvelope(
         ReadOnlySpan<double> real,
-        ReadOnlySpan<double> imaginary)
+        ReadOnlySpan<double> imaginary,
+        double[]? destination = null)
     {
         if (imaginary.Length != real.Length)
         {
             throw new ArgumentException("Real and imaginary signals must have matching lengths.", nameof(imaginary));
         }
 
-        var envelope = new double[real.Length];
+        double[] envelope = destination ?? new double[real.Length];
+        if (envelope.Length != real.Length)
+        {
+            throw new ArgumentException(
+                "Envelope output length must match the analytic signal length.",
+                nameof(destination));
+        }
+
         for (int i = 0; i < envelope.Length; i++)
         {
             envelope[i] = new Complex(real[i], imaginary[i]).Magnitude;
@@ -1301,15 +1329,25 @@ public sealed class RfDemodulator : IDisposable
     private static double[] BuildVhsEnvelope(
         ReadOnlySpan<double> filteredReal,
         IReadOnlyList<SosSection> envelopeFilter,
-        Span<double> rawEnvelope)
+        Span<double> rawEnvelope,
+        double[]? destination = null)
     {
         if (filteredReal.IsEmpty)
         {
-            return [];
+            return destination ?? [];
+        }
+
+        double[] envelope = destination ?? new double[filteredReal.Length];
+        if (envelope.Length != filteredReal.Length)
+        {
+            throw new ArgumentException(
+                "Envelope output length must match the filtered RF input.",
+                nameof(destination));
         }
 
         FillVhsRawEnvelope(filteredReal, rawEnvelope);
-        return SosFilter.ApplyForwardBackwardFloat32(envelopeFilter, rawEnvelope);
+        SosFilter.ApplyForwardBackwardFloat32(envelopeFilter, rawEnvelope, envelope);
+        return envelope;
     }
 
     internal static unsafe double[] BuildVhsRawEnvelope(ReadOnlySpan<double> filteredReal)
@@ -2629,6 +2667,26 @@ public sealed class RfDemodulator : IDisposable
             spectrum[mirrored] = Complex.Zero;
         }
     }
+}
+
+internal sealed class RfDemodulatedBlockOutputBuffers
+{
+    internal RfDemodulatedBlockOutputBuffers(int length)
+    {
+        ArgumentOutOfRangeException.ThrowIfNegative(length);
+        Length = length;
+        Video = new double[length];
+        Envelope = new double[length];
+        VideoLowPass = new double[length];
+    }
+
+    internal int Length { get; }
+
+    internal double[] Video { get; }
+
+    internal double[] Envelope { get; }
+
+    internal double[] VideoLowPass { get; }
 }
 
 public sealed record RfDemodulatedBlock(

@@ -390,33 +390,35 @@ and `--threads 20`. A matched 200-frame default-worker check completed in
 per frame, and peaked at 0.993 GiB; retained median storage remains bounded to
 two 60-line buffers per detector.
 
-### Latest five-path thread matrix
+### Latest six-path thread matrix
 
-The latest public summary compares Python v0.4.0, Exact v0.4.0, Exact
-`current`, IPP-fast v0.4.0, and IPP-fast `current` on the same private local
-40 MHz NTSC `BETAMAX_HIFI` `.lds` sample. The filename is intentionally not
-published. Each cell below is the median of three interleaved Release runs,
-followed by speedup and wall-time reduction versus Python in the same row:
+The latest public summary compares Python v0.4.0, merged Python PR341, Exact
+v0.4.0, Exact `current`, IPP-fast v0.4.0, and IPP-fast `current` on the same
+private local 40 MHz NTSC `BETAMAX_HIFI` `.lds` sample. The filename is
+intentionally not published. Each .NET cell gives the median wall time,
+speedup, and wall-time reduction against its profile-matched Python column:
 
-| CLI mode (workers) | Python v0.4.0 | Exact + v0.4.0 | Exact + current | IPP-fast + v0.4.0 | IPP-fast + current |
-| --- | ---: | ---: | ---: | ---: | ---: |
-| default (5) | 16.983 s | 6.416 s / 2.647x / 62.2% | 7.678 s / 2.212x / 54.8% | 5.667 s / 2.997x / 66.6% | 7.184 s / 2.364x / 57.7% |
-| `--threads 1` | 21.263 s | 20.547 s / 1.035x / 3.4% | 22.961 s / 0.926x / 8.0% slower | 20.129 s / 1.056x / 5.3% | 22.320 s / 0.953x / 5.0% slower |
-| `--threads 5` | 16.880 s | 6.173 s / 2.735x / 63.4% | 7.802 s / 2.164x / 53.8% | 5.802 s / 2.909x / 65.6% | 7.186 s / 2.349x / 57.4% |
-| `--threads 10` | 17.612 s | 4.880 s / 3.609x / 72.3% | 6.118 s / 2.879x / 65.3% | 4.636 s / 3.799x / 73.7% | 5.744 s / 3.066x / 67.4% |
-| `--threads 20` | 18.330 s | 3.997 s / 4.586x / 78.2% | 4.767 s / 3.845x / 74.0% | 3.966 s / 4.622x / 78.4% | 4.919 s / 3.726x / 73.2% |
+<!-- LATEST_PERFORMANCE_BEGIN -->
+| CLI mode (workers) | Python v0.4.0 | Python PR341 | Exact + v0.4.0 | Exact + current | IPP-fast + v0.4.0 | IPP-fast + current |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| default (5) | 16.983 s | 14.414 s | 5.781 s / 2.938x / 66.0% | 7.216 s / 1.998x / 49.9% | 5.657 s / 3.002x / 66.7% | 7.092 s / 2.032x / 50.8% |
+| `--threads 1` | 21.263 s | 19.881 s | 18.232 s / 1.166x / 14.3% | 20.627 s / 0.964x / 3.8% slower | 17.542 s / 1.212x / 17.5% | 20.201 s / 0.984x / 1.6% slower |
+| `--threads 5` | 16.880 s | 14.329 s | 5.906 s / 2.858x / 65.0% | 7.463 s / 1.920x / 47.9% | 5.689 s / 2.967x / 66.3% | 7.459 s / 1.921x / 47.9% |
+| `--threads 10` | 17.612 s | 15.149 s | 4.536 s / 3.883x / 74.2% | 5.887 s / 2.573x / 61.1% | 4.414 s / 3.990x / 74.9% | 5.537 s / 2.736x / 63.5% |
+| `--threads 20` | 18.330 s | 15.447 s | 3.568 s / 5.138x / 80.5% | 5.049 s / 3.059x / 67.3% | 3.471 s / 5.281x / 81.1% | 4.496 s / 3.435x / 70.9% |
+<!-- LATEST_PERFORMANCE_END -->
 
 The benchmark host was an Intel Core Ultra 7 265K with 20 logical processors,
 Windows 11 25H2 build 26220.8925, and .NET SDK/runtime
-`11.0.100-preview.6.26359.118`. The Python column retains the prior fixed-matrix
-medians because Python did not change; all four .NET columns were refreshed
-with 60 interleaved runs. The candidate executable contains the production
-change from `d0508f9`; its single-file `decode.exe` SHA-256 was
-`98ADB0ED3F5EF086AC2A189F302101C751C68F0390123817EAF5452DD83BE7A1`.
-The fixed 40-frame matrix includes startup cost and per-run spread; the
-opposite-order 1,000-frame pairs below provide the stable whole-pipeline A/B.
-Python 3.14.0 used NumPy 2.4.6, SciPy 1.18.0, Numba 0.66.0, and python-soxr
-1.1.0. The shared arguments were:
+`11.0.100-preview.6.26359.118`. Python v0.4.0 retains the prior fixed-matrix
+medians. Merged PR341 commit
+`2f21e8ed6018b14561396cc95f1f6828054470b8`
+(`v0.4.0-40-g2f21e8ed`) was measured separately with 15 runs, while the four
+.NET columns retain their latest 60 interleaved runs. All measurements use the
+same host, sample, and 40-frame window, but the PR341 session was not
+interleaved with the .NET session and is therefore a profile-peer comparison
+rather than a paired A/B. Python 3.14.0 used NumPy 2.4.6, SciPy 1.18.0, Numba
+0.66.0, and python-soxr 1.1.0. The shared arguments were:
 
 ```text
 --system ntsc --NTSCJ --detect_chroma_track_phase --ire0_adjust
@@ -425,22 +427,26 @@ Python 3.14.0 used NumPy 2.4.6, SciPy 1.18.0, Numba 0.66.0, and python-soxr
 ```
 
 The default is **5 workers** in both implementations. Three separate Python
-`--threads 0` controls had a 30.253 s median and were mutually identical.
-Every retained Exact v0.4.0 run matched that oracle for luma, chroma, JSON,
-stdout, normalized stderr/log, and all 80 ordered `fileLoc` values. The
-refreshed Exact-current and IPP-current columns each produced one deterministic
-hash set across all 15 runs. A separate candidate gate at `--threads 0`,
-default, and `--threads 20` also kept Exact v0.4.0 identical to the Python
-oracle. On this sample, IPP-fast happened to match its corresponding Exact
-profile for luma, chroma, JSON, and `fileLoc`; its explicit IPP diagnostic
-changes normalized stderr/log, and this sample-specific result is not a
-byte-compatibility promise.
+v0.4.0 `--threads 0` controls had a 30.253 s median and were mutually
+identical. Every retained Exact v0.4.0 run matched that oracle for luma,
+chroma, JSON, stdout, normalized stderr/log, and all 80 ordered `fileLoc`
+values. The refreshed Exact-current and IPP-current columns each produced one
+deterministic hash set across all 15 runs. A separate candidate gate at
+`--threads 0`, default, and `--threads 20` also kept Exact v0.4.0 identical to
+the Python oracle. On this sample, IPP-fast happened to match its corresponding
+Exact profile for luma, chroma, JSON, and `fileLoc`; its explicit IPP
+diagnostic changes normalized stderr/log, and this sample-specific result is
+not a byte-compatibility promise.
 
-The 15 nonzero/default Python matrix runs happened to retain one
-luma/chroma/JSON set on this sample, but produced seven normalized log hashes.
-A previous fixed matrix also observed unstable Python artifact hashes across
-worker counts. Nonzero-thread Python rows are therefore throughput comparisons
-only; upstream `g4315520 --threads 0` remains the strict oracle.
+The Python PR341 warm-up matched the `.NET current` reference for luma, chroma,
+all 80 ordered `fileLoc` values, stdout, and timestamp-normalized stderr/log.
+Its JSON payload also matched after excluding the expected `version` and
+`gitCommit` source-identity fields. All 15 PR341 runs produced one hash set on
+this sample. By contrast, the 15 nonzero/default Python v0.4.0 matrix runs kept
+one luma/chroma/JSON set here but produced seven normalized log hashes, and a
+previous fixed matrix observed unstable v0.4.0 artifact hashes across worker
+counts. Nonzero-thread Python rows are therefore throughput comparisons only;
+upstream v0.4.0 `g4315520 --threads 0` remains the strict oracle.
 
 A previous Exact-only thread matrix used an Intel Core Ultra 7 265K (20 logical
 processors), Windows 11 build 26220, .NET SDK/runtime
@@ -1824,6 +1830,59 @@ ordered `fileLoc` references. Sampled working set had a 1,479.6 MiB maximum and
 first/final-third medians of 659.9/593.2 MiB, supporting bounded memory without
 progressive growth.
 
+### RF stream output buffer reuse
+
+The current Exact candidate gives the VHS stream decoder ownership of four
+block-sized outputs: demodulated video, RF envelope, low-pass video, and
+float32 chroma. A block keeps exclusive ownership while it is cached or is
+still participating in span assembly. Only after both uses end can its buffer
+set return to a concurrent pool. Public `DecodePreparedBlock` results remain
+independently allocated. Failed workers, cancelled prefetch, cache
+invalidation, replacement, eviction, stream changes, and disposal all return
+eligible sets; an eviction needed by the active parallel assembly is deferred
+until copying completes. Serial assembly likewise defers a low-numbered block
+that evicts itself from a full cache. A throwing deferred diagnostic returns
+its harvested block before propagating the exception, and an in-flight
+prefetch cancellation test holds a later input read open while verifying every
+completed output is reclaimed. The idle pool retains at most 48 sets, matching the
+decoded cache's maximum configured capacity: 16 base entries plus up to 32
+prefetch allowance entries. Active decoded or prefetched blocks and the current
+span's leases are not part of that retained count, so total live sets can
+temporarily exceed 48. DSP types, coefficients, expressions, operation order,
+padding, and field commit order are unchanged.
+
+On the same 100-frame Exact `current`/20-worker trace, total sampled allocation
+fell from 4,598,751,544 to 566,944,304 bytes: 4,031,807,240 fewer bytes, or
+87.67%. The final trace created 60 output sets during initial concurrency and
+then reused them; the retained subset never exceeds 48. The corresponding
+1,000-frame counter run reduced integrated allocation from 40.641 to
+3.844 GiB. This optimization reduces GC traffic rather than changing the
+decoder's numerical path.
+
+Ten opposite-order 100-frame Exact `current`/20-worker pairs moved median
+decode time from 8.72 to 8.58 seconds (1.61% lower) and mean decode time from
+8.710 to 8.617 seconds (1.07% lower). Median wall time was 1.72% lower. The
+gain is deliberately classified as modest because run-to-run variance remains
+visible; the allocation reduction is the primary result.
+
+The reviewed candidate passed a zero-warning Release build and all 1,141 xUnit
+v3 tests locally. The GitHub Actions command requires at least 1,141
+discoverable tests; a clean runner may skip the optional LD AC3
+reference-pipeline test when the external AC3 tools are unavailable. Twelve
+strict main/candidate runs covered Exact v0.4.0 and `current`
+with `--threads 0`, default-five, and `--threads 20`; all luma, chroma, raw
+JSON, stdout, normalized stderr/logs, and ordered `fileLoc` values matched.
+All 60 refreshed Exact/IPP-fast, v0.4.0/`current`, and default/1/5/10/20-worker
+matrix runs also matched their profile/backend references.
+
+The final 1,000-frame Exact `current`/20-worker run completed 2,000 fields in
+69.475 seconds and matched the current-main artifacts, normalized diagnostics,
+and ordered `fileLoc`. Working set had a 711.6 MiB maximum and
+first/final-third medians of 627.5/703.7 MiB, so the bounded-memory gate passed
+without progressive unbounded growth. As in the preceding pass, current main
+is the direct A/B oracle and its verified Python v0.4.0 `g4315520 --threads 0`
+evidence remains the transitive upstream reference.
+
 </details>
 
 <!-- SECTION: build -->
@@ -1844,7 +1903,7 @@ Requirements:
 .\tools\build-ipp-native.ps1
 dotnet restore VHSDecodeDotNet.slnx
 dotnet build VHSDecodeDotNet.slnx -c Release --no-restore
-dotnet test --solution VHSDecodeDotNet.slnx -c Release --no-build --no-restore --minimum-expected-tests 1130
+dotnet test --solution VHSDecodeDotNet.slnx -c Release --no-build --no-restore --minimum-expected-tests 1141
 ```
 
 The first command includes the optional `ipp-fast` native artifact; omit it for
@@ -1857,7 +1916,7 @@ deployment computer. Binary-only single-file releases embed
 sidecar license files. An Exact-only build may omit the native build step.
 
 The current formal Release build has zero warnings and errors. The xUnit v3
-project exposes **1,130** independently discoverable tests to both
+project exposes **1,141** independently discoverable tests to both
 `dotnet test` and Visual Studio Test Explorer.
 
 <!-- SECTION: usage -->

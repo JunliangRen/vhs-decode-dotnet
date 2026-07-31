@@ -1,4 +1,6 @@
+using System.Collections.Concurrent;
 using System.Numerics;
+using System.Runtime.CompilerServices;
 using System.Runtime.Intrinsics.X86;
 using VHSDecode.Core.Dsp;
 using VHSDecode.Core.Rf;
@@ -10,6 +12,8 @@ public sealed record CvbsDecodeOptions(bool AutoSync, VideoOutputConverter Video
 
 public sealed class RfBlockDecodePipeline : IDisposable
 {
+    // Bounds the idle reuse reservoir at the decoded cache's maximum configured capacity.
+    internal const int MaximumRetainedStreamOutputBufferSets = 48;
     private readonly IRfSampleLoader _loader;
     private readonly DecodeFilterSet _filters;
     private readonly DecodeFilterOptions _filterOptions;
@@ -22,6 +26,12 @@ public sealed class RfBlockDecodePipeline : IDisposable
     private readonly bool _retainRfDiagnosticChannels;
     private readonly bool _useCurrentChromaShiftDc;
     private readonly bool _useNumpyComplexVhsAnalytic;
+    private readonly ConcurrentStack<StreamBlockOutputBuffers> _streamOutputBufferPool = new();
+    private readonly ConditionalWeakTable<RfPipelineBlock, StreamBlockOutputBuffers>
+        _streamOutputBufferLeases = new();
+    private int _retainedStreamOutputBufferSetCount;
+    private int _createdStreamOutputBufferSetCount;
+    private int _streamOutputBufferPoolDisposed;
 
     public RfBlockDecodePipeline(
         IRfSampleLoader loader,
@@ -68,6 +78,12 @@ public sealed class RfBlockDecodePipeline : IDisposable
     internal bool RetainsRfDiagnosticChannels => _retainRfDiagnosticChannels;
 
     internal bool RequiresSequentialBlockDecode => _filterOptions.SharpnessEq is not null;
+
+    internal int RetainedStreamOutputBufferSetCount =>
+        Volatile.Read(ref _retainedStreamOutputBufferSetCount);
+
+    internal int CreatedStreamOutputBufferSetCount =>
+        Volatile.Read(ref _createdStreamOutputBufferSetCount);
 
     public RfDemodulatedBlock? DecodeBlock(Stream stream, long sample, int blockLength)
     {
@@ -129,15 +145,24 @@ public sealed class RfBlockDecodePipeline : IDisposable
     }
 
     internal RfPipelineBlock DecodePreparedBlock(double[] input, bool reportDiagnostics = true)
-        => DecodePreparedBlockCore(input, reportDiagnostics, retainRfDiagnosticChannels: true);
+        => DecodePreparedBlockCore(
+            input,
+            reportDiagnostics,
+            retainRfDiagnosticChannels: true,
+            reuseStreamOutputBuffers: false);
 
     internal RfPipelineBlock DecodePreparedStreamBlock(double[] input, bool reportDiagnostics = true)
-        => DecodePreparedBlockCore(input, reportDiagnostics, _retainRfDiagnosticChannels);
+        => DecodePreparedBlockCore(
+            input,
+            reportDiagnostics,
+            _retainRfDiagnosticChannels,
+            reuseStreamOutputBuffers: !_retainRfDiagnosticChannels);
 
     private RfPipelineBlock DecodePreparedBlockCore(
         double[] input,
         bool reportDiagnostics,
-        bool retainRfDiagnosticChannels)
+        bool retainRfDiagnosticChannels,
+        bool reuseStreamOutputBuffers)
     {
         ArgumentNullException.ThrowIfNull(input);
 
@@ -146,99 +171,123 @@ public sealed class RfBlockDecodePipeline : IDisposable
             return new RfPipelineBlock(input, DecodeCvbsBlock(input));
         }
 
-        Complex[]? inputSpectrum = _filters.LdEfm is not null || _filters.LdAnalogAudio is not null
-            ? PocketFftComplex.ForwardDuccRealFull(input)
+        StreamBlockOutputBuffers? streamOutputBuffers = reuseStreamOutputBuffers
+            ? RentStreamOutputBuffers(input.Length)
             : null;
-        RfDemodulatedBlock demodulated = _demodulator.DemodulateCore(
-            input,
-            _filters.RfVideo,
-            _filters.RfHighPass,
-            _filters.RfMtf,
-            _filters.Video,
-            _filters.VideoLowPass05,
-            _filters.VideoLowPass05Offset,
-            _filterOptions.LdPalV4300DNotch,
-            _filterOptions.RfHighBoost,
-            _filterOptions.DiffDemodRepair,
-            _filterOptions.ChromaTrap,
-            _filterOptions.SharpnessEq,
-            _filterOptions.NonlinearDeemphasis,
-            _filterOptions.SubDeemphasis,
-            _filterOptions.BetamaxFscNotchHz,
-            _referenceFilters,
-            _filterOptions.FmDemodulatorMode,
-            _filters.VhsEnvelopeSos,
-            _filters.VhsRfTopSos,
-            inputSpectrum,
-            includeRfHighPassOutput: retainRfDiagnosticChannels,
-            includeAnalyticOutput: retainRfDiagnosticChannels,
-            includeDemodRawOutput: retainRfDiagnosticChannels || _filterOptions.ExportRawTbc,
-            useNumpyComplexVhsAnalytic: _useNumpyComplexVhsAnalytic);
-        if (reportDiagnostics)
+        try
         {
-            ReportDiagnostics(demodulated);
-        }
+            Complex[]? inputSpectrum = _filters.LdEfm is not null || _filters.LdAnalogAudio is not null
+                ? PocketFftComplex.ForwardDuccRealFull(input)
+                : null;
+            RfDemodulatedBlock demodulated = _demodulator.DemodulateCore(
+                input,
+                _filters.RfVideo,
+                _filters.RfHighPass,
+                _filters.RfMtf,
+                _filters.Video,
+                _filters.VideoLowPass05,
+                _filters.VideoLowPass05Offset,
+                _filterOptions.LdPalV4300DNotch,
+                _filterOptions.RfHighBoost,
+                _filterOptions.DiffDemodRepair,
+                _filterOptions.ChromaTrap,
+                _filterOptions.SharpnessEq,
+                _filterOptions.NonlinearDeemphasis,
+                _filterOptions.SubDeemphasis,
+                _filterOptions.BetamaxFscNotchHz,
+                _referenceFilters,
+                _filterOptions.FmDemodulatorMode,
+                _filters.VhsEnvelopeSos,
+                _filters.VhsRfTopSos,
+                inputSpectrum,
+                includeRfHighPassOutput: retainRfDiagnosticChannels,
+                includeAnalyticOutput: retainRfDiagnosticChannels,
+                includeDemodRawOutput: retainRfDiagnosticChannels || _filterOptions.ExportRawTbc,
+                useNumpyComplexVhsAnalytic: _useNumpyComplexVhsAnalytic,
+                outputBuffers: streamOutputBuffers?.Demodulated);
+            if (reportDiagnostics)
+            {
+                ReportDiagnostics(demodulated);
+            }
 
-        if (_filterOptions.LdClipDemodForVideo)
+            if (_filterOptions.LdClipDemodForVideo)
+            {
+                QuantizeLaserDiscVideoChannels(demodulated);
+            }
+
+            if (_filters.ChromaBurst is not null || _filters.ChromaBurstSos is not null)
+            {
+                bool keepCompactFloat32 = !retainRfDiagnosticChannels
+                    && !_filterOptions.UseChromaAfc
+                    && _filters.ChromaBurstSos is not null
+                    && !_filters.ChromaBurstUsesDemodulatedVideo
+                    && _filters.ChromaBurstAudioNotch is null
+                    && _filters.ChromaBurstVideoNotch is null;
+                demodulated = keepCompactFloat32
+                    ? demodulated with
+                    {
+                        ChromaFloat32 = DecodeChromaBurstFloat32(
+                            input,
+                            _filters,
+                            _useCurrentChromaShiftDc,
+                            streamOutputBuffers?.Chroma)
+                    }
+                    : demodulated with
+                    {
+                        Chroma = _filterOptions.UseChromaAfc
+                        ? input.ToArray()
+                        : DecodeChromaBurst(
+                            _filters.ChromaBurstUsesDemodulatedVideo
+                                ? demodulated.Video
+                                : input,
+                            _filters,
+                            _useCurrentChromaShiftDc)
+                    };
+            }
+
+            if (_filters.LdEfm is not null)
+            {
+                inputSpectrum ??= PocketFftComplex.ForwardDuccRealFull(input);
+                demodulated = demodulated with { Efm = DecodeEfmBlock(inputSpectrum, _filters.LdEfm) };
+            }
+
+            if (_filters.LdAnalogAudio is not null)
+            {
+                inputSpectrum ??= PocketFftComplex.ForwardDuccRealFull(input);
+                demodulated = demodulated with { AnalogAudio = DecodeAnalogAudioBlock(inputSpectrum, _filters.LdAnalogAudio) };
+            }
+
+            if (_filterOptions.ExportRawTbc)
+            {
+                demodulated = demodulated with { Video = demodulated.DemodRaw };
+            }
+
+            if (!retainRfDiagnosticChannels)
+            {
+                // VHS consumes these arrays only while decoding this block; field assembly needs the retained channels below.
+                demodulated = demodulated with { DemodRaw = [], Analytic = [], RfHighPass = [] };
+            }
+
+            var pipelineBlock = new RfPipelineBlock(
+                retainRfDiagnosticChannels ? input : [],
+                demodulated);
+            if (streamOutputBuffers is not null)
+            {
+                _streamOutputBufferLeases.Add(pipelineBlock, streamOutputBuffers);
+                streamOutputBuffers = null;
+            }
+
+            return pipelineBlock;
+        }
+        catch
         {
-            QuantizeLaserDiscVideoChannels(demodulated);
-        }
+            if (streamOutputBuffers is not null)
+            {
+                ReturnStreamOutputBuffers(streamOutputBuffers);
+            }
 
-        if (_filters.ChromaBurst is not null || _filters.ChromaBurstSos is not null)
-        {
-            bool keepCompactFloat32 = !retainRfDiagnosticChannels
-                && !_filterOptions.UseChromaAfc
-                && _filters.ChromaBurstSos is not null
-                && !_filters.ChromaBurstUsesDemodulatedVideo
-                && _filters.ChromaBurstAudioNotch is null
-                && _filters.ChromaBurstVideoNotch is null;
-            demodulated = keepCompactFloat32
-                ? demodulated with
-                {
-                    ChromaFloat32 = DecodeChromaBurstFloat32(
-                        input,
-                        _filters,
-                        _useCurrentChromaShiftDc)
-                }
-                : demodulated with
-                {
-                    Chroma = _filterOptions.UseChromaAfc
-                    ? input.ToArray()
-                    : DecodeChromaBurst(
-                        _filters.ChromaBurstUsesDemodulatedVideo
-                            ? demodulated.Video
-                            : input,
-                        _filters,
-                        _useCurrentChromaShiftDc)
-                };
+            throw;
         }
-
-        if (_filters.LdEfm is not null)
-        {
-            inputSpectrum ??= PocketFftComplex.ForwardDuccRealFull(input);
-            demodulated = demodulated with { Efm = DecodeEfmBlock(inputSpectrum, _filters.LdEfm) };
-        }
-
-        if (_filters.LdAnalogAudio is not null)
-        {
-            inputSpectrum ??= PocketFftComplex.ForwardDuccRealFull(input);
-            demodulated = demodulated with { AnalogAudio = DecodeAnalogAudioBlock(inputSpectrum, _filters.LdAnalogAudio) };
-        }
-
-        if (_filterOptions.ExportRawTbc)
-        {
-            demodulated = demodulated with { Video = demodulated.DemodRaw };
-        }
-
-        if (!retainRfDiagnosticChannels)
-        {
-            // VHS consumes these arrays only while decoding this block; field assembly needs the retained channels below.
-            demodulated = demodulated with { DemodRaw = [], Analytic = [], RfHighPass = [] };
-        }
-
-        return new RfPipelineBlock(
-            retainRfDiagnosticChannels ? input : [],
-            demodulated);
     }
 
     internal void ReportDeferredDiagnostics(RfPipelineBlock block)
@@ -247,8 +296,30 @@ public sealed class RfBlockDecodePipeline : IDisposable
         ReportDiagnostics(block.Demodulated);
     }
 
+    internal void ReleaseStreamBlock(RfPipelineBlock block)
+    {
+        ArgumentNullException.ThrowIfNull(block);
+        if (_streamOutputBufferLeases.TryGetValue(
+                block,
+                out StreamBlockOutputBuffers? buffers)
+            && _streamOutputBufferLeases.Remove(block))
+        {
+            ReturnStreamOutputBuffers(buffers);
+        }
+    }
+
     public void Dispose()
     {
+        if (Interlocked.Exchange(ref _streamOutputBufferPoolDisposed, 1) != 0)
+        {
+            return;
+        }
+
+        while (_streamOutputBufferPool.TryPop(out _))
+        {
+            Interlocked.Decrement(ref _retainedStreamOutputBufferSetCount);
+        }
+
         try
         {
             _demodulator.Dispose();
@@ -256,6 +327,43 @@ public sealed class RfBlockDecodePipeline : IDisposable
         finally
         {
             _inputProcessor?.Dispose();
+        }
+    }
+
+    private StreamBlockOutputBuffers RentStreamOutputBuffers(int length)
+    {
+        while (_streamOutputBufferPool.TryPop(out StreamBlockOutputBuffers? buffers))
+        {
+            Interlocked.Decrement(ref _retainedStreamOutputBufferSetCount);
+            if (buffers.Length == length)
+            {
+                return buffers;
+            }
+        }
+
+        Interlocked.Increment(ref _createdStreamOutputBufferSetCount);
+        return new StreamBlockOutputBuffers(length);
+    }
+
+    private void ReturnStreamOutputBuffers(StreamBlockOutputBuffers buffers)
+    {
+        if (Volatile.Read(ref _streamOutputBufferPoolDisposed) != 0)
+        {
+            return;
+        }
+
+        int retained = Interlocked.Increment(ref _retainedStreamOutputBufferSetCount);
+        if (retained > MaximumRetainedStreamOutputBufferSets)
+        {
+            Interlocked.Decrement(ref _retainedStreamOutputBufferSetCount);
+            return;
+        }
+
+        _streamOutputBufferPool.Push(buffers);
+        if (Volatile.Read(ref _streamOutputBufferPoolDisposed) != 0
+            && _streamOutputBufferPool.TryPop(out _))
+        {
+            Interlocked.Decrement(ref _retainedStreamOutputBufferSetCount);
         }
     }
 
@@ -314,12 +422,22 @@ public sealed class RfBlockDecodePipeline : IDisposable
     private static float[] DecodeChromaBurstFloat32(
         ReadOnlySpan<double> input,
         DecodeFilterSet filters,
-        bool useCurrentChromaShiftDc)
+        bool useCurrentChromaShiftDc,
+        float[]? destination = null)
     {
-        float[] chroma = SosFilter.ApplyForwardBackwardFloat32ToSingle(
-            filters.ChromaBurstSos
-                ?? throw new InvalidOperationException("A float32 chroma burst SOS filter is required."),
-            input);
+        IReadOnlyList<SosSection> chromaBurstSos = filters.ChromaBurstSos
+            ?? throw new InvalidOperationException("A float32 chroma burst SOS filter is required.");
+        float[] chroma;
+        if (destination is null)
+        {
+            chroma = SosFilter.ApplyForwardBackwardFloat32ToSingle(chromaBurstSos, input);
+        }
+        else
+        {
+            SosFilter.ApplyForwardBackwardFloat32ToSingle(chromaBurstSos, input, destination);
+            chroma = destination;
+        }
+
         return useCurrentChromaShiftDc
             ? VhsChromaDecoder.ShiftChromaAndRemoveDcFloat32CurrentInPlace(
                 chroma,
@@ -532,6 +650,23 @@ public sealed class RfBlockDecodePipeline : IDisposable
         {
             values[index] = (float)values[index];
         }
+    }
+
+    private sealed class StreamBlockOutputBuffers
+    {
+        internal StreamBlockOutputBuffers(int length)
+        {
+            ArgumentOutOfRangeException.ThrowIfNegative(length);
+            Length = length;
+            Demodulated = new RfDemodulatedBlockOutputBuffers(length);
+            Chroma = new float[length];
+        }
+
+        internal int Length { get; }
+
+        internal RfDemodulatedBlockOutputBuffers Demodulated { get; }
+
+        internal float[] Chroma { get; }
     }
 }
 

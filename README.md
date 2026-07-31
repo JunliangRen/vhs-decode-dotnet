@@ -38,7 +38,7 @@ evidence, and remaining gaps.
   EIAJ, and supported PAL/NTSC variants.
 - TBC utility tools, the double-click GUI, and developer plotting windows are
   intentionally out of scope.
-- The Visual Studio 2026 `.slnx` solution has **1,130** standard xUnit v3 tests
+- The Visual Studio 2026 `.slnx` solution has **1,141** standard xUnit v3 tests
   that are visible in Test Explorer and runnable with `dotnet test`.
 
 <!-- SECTION: start -->
@@ -98,36 +98,39 @@ for compatibility-sensitive work.
 
 The table below uses one fixed private local 40 MHz NTSC `BETAMAX_HIFI` `.lds`
 sample and the same bounded frame range for every run. The sample filename is
-intentionally not published. Each .NET gain is measured against Python
-v0.4.0 at the same requested worker count; compatibility is evaluated
-separately from speed.
+intentionally not published. The v0.4.0 .NET profiles are compared with Python
+v0.4.0; the `current` profiles are compared with merged Python PR341 at the
+same requested worker count. Compatibility is evaluated separately from speed.
 
 <!-- LATEST_PERFORMANCE_BEGIN -->
-| CLI mode (workers) | Python v0.4.0 | Exact + v0.4.0 | Exact + current | IPP-fast + v0.4.0 | IPP-fast + current |
-| --- | ---: | ---: | ---: | ---: | ---: |
-| default (5) | 16.983 s | 5.660 s / 3.001x | 6.830 s / 2.486x | 5.415 s / 3.136x | 7.086 s / 2.397x |
-| `--threads 1` | 21.263 s | 18.312 s / 1.161x | 20.631 s / 1.031x | 17.982 s / 1.182x | 20.564 s / 1.034x |
-| `--threads 5` | 16.880 s | 5.487 s / 3.077x | 6.816 s / 2.477x | 5.447 s / 3.099x | 7.071 s / 2.387x |
-| `--threads 10` | 17.612 s | 4.438 s / 3.968x | 5.344 s / 3.295x | 4.520 s / 3.896x | 5.259 s / 3.349x |
-| `--threads 20` | 18.330 s | 3.718 s / 4.930x | 4.978 s / 3.682x | 3.593 s / 5.102x | 5.294 s / 3.463x |
+| CLI mode (workers) | Python v0.4.0 | Python PR341 | Exact + v0.4.0 | Exact + current | IPP-fast + v0.4.0 | IPP-fast + current |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| default (5) | 16.983 s | 14.414 s | 5.781 s / 2.938x | 7.216 s / 1.998x | 5.657 s / 3.002x | 7.092 s / 2.032x |
+| `--threads 1` | 21.263 s | 19.881 s | 18.232 s / 1.166x | 20.627 s / 0.964x | 17.542 s / 1.212x | 20.201 s / 0.984x |
+| `--threads 5` | 16.880 s | 14.329 s | 5.906 s / 2.858x | 7.463 s / 1.920x | 5.689 s / 2.967x | 7.459 s / 1.921x |
+| `--threads 10` | 17.612 s | 15.149 s | 4.536 s / 3.883x | 5.887 s / 2.573x | 4.414 s / 3.990x | 5.537 s / 2.736x |
+| `--threads 20` | 18.330 s | 15.447 s | 3.568 s / 5.138x | 5.049 s / 3.059x | 3.471 s / 5.281x | 4.496 s / 3.435x |
 <!-- LATEST_PERFORMANCE_END -->
 
-The latest Exact pass makes cold PocketFFT plan and root construction execute
-once per cache key. FFT data types, coefficients, arithmetic order, and
-worker-local scratch are unchanged. A matched 100-frame allocation trace
-reduced complex and real plan factories from 30 calls each to one, removing
-12.19 MB of sampled duplicate construction.
+The latest Exact pass recycles the VHS RF stream outputs only after their
+decoded blocks leave every cache and the current span assembly is complete.
+Public block results keep independent ownership, arithmetic is unchanged, and
+the idle retained pool has a 48-set hard limit. A matched 100-frame trace reduced
+sampled allocation from 4.599 GB to 566.9 MB (87.7%).
 
 All 12 strict main/candidate thread-profile gates and all 60 refreshed matrix
-runs matched their references. Five alternating `current`/20-worker pairs
-moved median decode time from 9.12 to 8.58 seconds (5.9%); the mean improved
-4.3%, so this is a modest cold-start/end-to-end gain. A 1,000-frame gate also
-remained exact and showed bounded working-set behavior.
+runs matched their references. Across ten alternating `current`/20-worker
+pairs, median decode time moved from 8.72 to 8.58 seconds (1.61%); the mean
+improved 1.07%, so the throughput gain is modest while allocation pressure is
+substantially lower. A 1,000-frame gate remained exact, completed in 69.475
+seconds, and kept working set bounded below 711.6 MiB.
 
-Each .NET cell shows median wall time followed by speedup versus Python in the
-same row; values below `1.000x` are slower. The default is **5 workers**.
-Nonzero-thread Python rows are throughput comparisons only; strict
-compatibility still uses Python `--threads 0`.
+Each .NET cell shows median wall time followed by speedup versus its
+profile-matched Python column; values below `1.000x` are slower. Python PR341
+is merge commit `2f21e8ed6018b14561396cc95f1f6828054470b8`, the upstream peer
+for `current`. The default is **5 workers**. Nonzero-thread Python rows are
+throughput comparisons only; strict compatibility still uses Python v0.4.0
+`g4315520 --threads 0`.
 
 Default worker counts, exact commands, build hashes, hardware, repeated-run
 methodology, output hashes, and older measurements are recorded in the
@@ -158,7 +161,7 @@ The pinned SDK is .NET `11.0.100-preview.6.26359.118`.
 dotnet restore VHSDecodeDotNet.slnx
 dotnet build VHSDecodeDotNet.slnx -c Release --no-restore
 dotnet test --solution VHSDecodeDotNet.slnx -c Release `
-  --no-build --no-restore --minimum-expected-tests 1130
+  --no-build --no-restore --minimum-expected-tests 1141
 ```
 
 Open `VHSDecodeDotNet.slnx` in Visual Studio 2026 to build, debug, and run the
