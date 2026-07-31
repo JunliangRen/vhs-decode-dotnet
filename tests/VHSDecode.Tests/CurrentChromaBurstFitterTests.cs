@@ -1,3 +1,4 @@
+using System.Runtime.Intrinsics.X86;
 using VHSDecode.Core.Decode;
 using VHSDecode.Core.Dsp;
 using Xunit;
@@ -6,6 +7,88 @@ namespace VHSDecode.Tests;
 
 public sealed class CurrentChromaBurstFitterTests
 {
+    [Fact(DisplayName = "Vectorized current burst dot matches the scalar OpenBLAS reduction")]
+    public void VectorizedCurrentBurstDotMatchesScalarOpenBlasReduction()
+    {
+        if (!Avx.IsSupported || !Fma.IsSupported)
+        {
+            return;
+        }
+
+        int[] lengths =
+        [
+            0, 1, 2, 3, 4, 7, 8, 15, 16, 17, 31, 32, 33, 39, 40, 41,
+            63, 64, 65, 127, 128, 129, 255, 256, 257
+        ];
+        var random = new Random(341);
+        foreach (int length in lengths)
+        {
+            for (int iteration = 0; iteration < 64; iteration++)
+            {
+                var left = new double[length];
+                var right = new double[length];
+                for (int index = 0; index < length; index++)
+                {
+                    left[index] = (random.NextDouble() - 0.5) * 1e6;
+                    right[index] = (random.NextDouble() - 0.5) * 1e-3;
+                }
+
+                double expected = CurrentChromaBurstFitter.OpenBlasHaswellDotScalar(
+                    left,
+                    right);
+                double actual = CurrentChromaBurstFitter.OpenBlasHaswellDot(left, right);
+                Assert.Equal(
+                    BitConverter.DoubleToUInt64Bits(expected),
+                    BitConverter.DoubleToUInt64Bits(actual));
+            }
+        }
+    }
+
+    [Fact(DisplayName = "Vectorized current burst dot preserves exceptional IEEE values")]
+    public void VectorizedCurrentBurstDotPreservesExceptionalIeeeValues()
+    {
+        if (!Avx.IsSupported || !Fma.IsSupported)
+        {
+            return;
+        }
+
+        ulong[] exceptionalBits =
+        [
+            0x0000000000000000UL,
+            0x8000000000000000UL,
+            0x0000000000000001UL,
+            0x8000000000000001UL,
+            0x0010000000000000UL,
+            0x8010000000000000UL,
+            0x7FEFFFFFFFFFFFFFUL,
+            0xFFEFFFFFFFFFFFFFUL,
+            0x7FF0000000000000UL,
+            0xFFF0000000000000UL,
+            0x7FF8000000000341UL,
+            0xFFF8000000000341UL
+        ];
+        for (int length = 1; length <= 64; length++)
+        {
+            var left = new double[length];
+            var right = new double[length];
+            for (int index = 0; index < length; index++)
+            {
+                left[index] = BitConverter.UInt64BitsToDouble(
+                    exceptionalBits[index % exceptionalBits.Length]);
+                right[index] = BitConverter.UInt64BitsToDouble(
+                    exceptionalBits[(index * 5 + 3) % exceptionalBits.Length]);
+            }
+
+            double expected = CurrentChromaBurstFitter.OpenBlasHaswellDotScalar(
+                left,
+                right);
+            double actual = CurrentChromaBurstFitter.OpenBlasHaswellDot(left, right);
+            Assert.Equal(
+                BitConverter.DoubleToUInt64Bits(expected),
+                BitConverter.DoubleToUInt64Bits(actual));
+        }
+    }
+
     [Fact(DisplayName = "Current chroma burst fitting matches pinned PR 341 Numba output")]
     public void CurrentChromaBurstFittingMatchesPinnedNumbaOutput()
     {
