@@ -215,6 +215,49 @@ public sealed class RfBlockCacheConcurrencyTests
             PackedDdD4To40SampleLoader.MaximumRetainedDecodedBufferCount);
     }
 
+    [Fact(DisplayName = "Partial parallel failures return completed compact VHS outputs")]
+    public void PartialParallelFailuresReturnCompletedCompactVhsOutputs()
+    {
+        var loader = new CountingSampleLoader();
+        using var stream = new MemoryStream();
+        int diagnosticCalls = 0;
+        RfBlockDecodePipeline? pipeline = null;
+        pipeline = BuildPipeline(
+            loader,
+            weakRfDiagnostics: true,
+            diagnosticLogger: (_, _) =>
+            {
+                Interlocked.Increment(ref diagnosticCalls);
+                if (!SpinWait.SpinUntil(
+                        () => pipeline!.CreatedStreamOutputBufferSetCount >= 2,
+                        TimeSpan.FromSeconds(5)))
+                {
+                    throw new TimeoutException("Parallel RF workers did not all start.");
+                }
+
+                throw new InvalidOperationException("Synthetic diagnostic failure.");
+            },
+            retainRfDiagnosticChannels: false,
+            fmDemodulatorMode: RfFmDemodulatorMode.VhsRustApproximation);
+        using (pipeline)
+        using (var decoder = new RfBlockStreamDecoder(
+            pipeline,
+            TestBlockLength,
+            blockCut: 2,
+            blockCutEnd: 2,
+            workerThreads: 2))
+        {
+            _ = Assert.ThrowsAny<Exception>(() =>
+                decoder.Read(stream, begin: 0, length: 24));
+
+            Assert.Equal(1, diagnosticCalls);
+            Assert.Equal(2, pipeline.CreatedStreamOutputBufferSetCount);
+            Assert.Equal(
+                pipeline.CreatedStreamOutputBufferSetCount,
+                pipeline.RetainedStreamOutputBufferSetCount);
+        }
+    }
+
     [Fact(DisplayName = "Compact VHS RF spans widen float32 chroma exactly once during assembly")]
     public void CompactVhsRfSpansWidenFloat32ChromaDuringAssembly()
     {
@@ -368,6 +411,47 @@ public sealed class RfBlockCacheConcurrencyTests
 
         Parallel.ForEach(reused, pipeline.ReleaseStreamBlock);
         Assert.Equal(retainedCapacity, pipeline.RetainedStreamOutputBufferSetCount);
+    }
+
+    [Fact(DisplayName = "Compact VHS stream output release remains safe during disposal")]
+    public void CompactVhsStreamOutputReleaseRemainsSafeDuringDisposal()
+    {
+        RfBlockDecodePipeline pipeline = BuildPipeline(
+            new CountingSampleLoader(),
+            weakRfDiagnostics: true,
+            retainRfDiagnosticChannels: false,
+            float32Chroma: true,
+            fmDemodulatorMode: RfFmDemodulatorMode.VhsRustApproximation);
+        try
+        {
+            double[] input = Enumerable.Range(0, TestBlockLength)
+                .Select(index => Math.Sin(index * 0.19) + (0.2 * Math.Cos(index * 0.31)))
+                .ToArray();
+            RfPipelineBlock shared = pipeline.DecodePreparedStreamBlock(
+                input,
+                reportDiagnostics: false);
+
+            Parallel.For(0, 64, _ => pipeline.ReleaseStreamBlock(shared));
+            Assert.Equal(1, pipeline.RetainedStreamOutputBufferSetCount);
+
+            RfPipelineBlock[] active = Enumerable.Range(
+                    0,
+                    RfBlockDecodePipeline.MaximumRetainedStreamOutputBufferSets)
+                .Select(_ => pipeline.DecodePreparedStreamBlock(input, reportDiagnostics: false))
+                .ToArray();
+            Assert.Equal(0, pipeline.RetainedStreamOutputBufferSetCount);
+
+            Parallel.Invoke(
+                pipeline.Dispose,
+                () => Parallel.ForEach(active, pipeline.ReleaseStreamBlock),
+                () => Parallel.ForEach(active, pipeline.ReleaseStreamBlock));
+
+            Assert.Equal(0, pipeline.RetainedStreamOutputBufferSetCount);
+        }
+        finally
+        {
+            pipeline.Dispose();
+        }
     }
 
     [Fact(DisplayName = "Cancelled compact VHS prefetch returns completed stream outputs")]

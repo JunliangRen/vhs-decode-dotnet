@@ -1834,9 +1834,12 @@ set return to a concurrent pool. Public `DecodePreparedBlock` results remain
 independently allocated. Failed workers, cancelled prefetch, cache
 invalidation, replacement, eviction, stream changes, and disposal all return
 eligible sets; an eviction needed by the active parallel assembly is deferred
-until copying completes. The pool retains at most 48 sets, matching the
-16 decoded-block plus 32 prefetch-block ceiling. DSP types, coefficients,
-expressions, operation order, padding, and field commit order are unchanged.
+until copying completes. The idle pool retains at most 48 sets, matching the
+decoded cache's maximum configured capacity: 16 base entries plus up to 32
+prefetch allowance entries. Active decoded or prefetched blocks and the current
+span's leases are not part of that retained count, so total live sets can
+temporarily exceed 48. DSP types, coefficients, expressions, operation order,
+padding, and field commit order are unchanged.
 
 On the same 100-frame Exact `current`/20-worker trace, total sampled allocation
 fell from 4,598,751,544 to 566,944,304 bytes: 4,031,807,240 fewer bytes, or
@@ -1852,8 +1855,11 @@ decode time from 8.72 to 8.58 seconds (1.61% lower) and mean decode time from
 gain is deliberately classified as modest because run-to-run variance remains
 visible; the allocation reduction is the primary result.
 
-The final candidate passed a zero-warning Release build and all 1,136 xUnit v3
-tests. Twelve strict main/candidate runs covered Exact v0.4.0 and `current`
+The final candidate passed a zero-warning Release build and all 1,138 xUnit v3
+tests locally. GitHub Actions independently discovered all 1,138 tests; its
+clean runner skipped the optional LD AC3 reference-pipeline test when the
+external AC3 tools were unavailable and passed the remaining 1,137. Twelve
+strict main/candidate runs covered Exact v0.4.0 and `current`
 with `--threads 0`, default-five, and `--threads 20`; all luma, chroma, raw
 JSON, stdout, normalized stderr/logs, and ordered `fileLoc` values matched.
 All 60 refreshed Exact/IPP-fast, v0.4.0/`current`, and default/1/5/10/20-worker
@@ -1887,7 +1893,7 @@ Requirements:
 .\tools\build-ipp-native.ps1
 dotnet restore VHSDecodeDotNet.slnx
 dotnet build VHSDecodeDotNet.slnx -c Release --no-restore
-dotnet test --solution VHSDecodeDotNet.slnx -c Release --no-build --no-restore --minimum-expected-tests 1136
+dotnet test --solution VHSDecodeDotNet.slnx -c Release --no-build --no-restore --minimum-expected-tests 1138
 ```
 
 The first command includes the optional `ipp-fast` native artifact; omit it for
@@ -1900,7 +1906,7 @@ deployment computer. Binary-only single-file releases embed
 sidecar license files. An Exact-only build may omit the native build step.
 
 The current formal Release build has zero warnings and errors. The xUnit v3
-project exposes **1,136** independently discoverable tests to both
+project exposes **1,138** independently discoverable tests to both
 `dotnet test` and Visual Studio Test Explorer.
 
 <!-- SECTION: usage -->

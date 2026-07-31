@@ -12,7 +12,7 @@ public sealed record CvbsDecodeOptions(bool AutoSync, VideoOutputConverter Video
 
 public sealed class RfBlockDecodePipeline : IDisposable
 {
-    // Matches the stream decoder's 16 decoded blocks plus its 32-block prefetch ceiling.
+    // Bounds the idle reuse reservoir at the decoded cache's maximum configured capacity.
     internal const int MaximumRetainedStreamOutputBufferSets = 48;
     private readonly IRfSampleLoader _loader;
     private readonly DecodeFilterSet _filters;

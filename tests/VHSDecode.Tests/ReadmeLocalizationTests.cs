@@ -106,7 +106,7 @@ public sealed partial class ReadmeLocalizationTests
         [
             "43155200da87c0d49eb37d8ec09b1372075ee8e4",
             "11.0.100-preview.6.26359.118",
-            "**1,136**",
+            "**1,138**",
             "--compat-version",
             "current",
             "--dsp-backend",
@@ -128,7 +128,7 @@ public sealed partial class ReadmeLocalizationTests
         [
             "43155200da87c0d49eb37d8ec09b1372075ee8e4",
             "11.0.100-preview.6.26359.118",
-            "**1,136**",
+            "**1,138**",
             "2626A0F82B89D7F4025F41600C034048E61F89F399B08746071968B6E3E619B5",
             "FFCB821C0E46885B7735A9ADCA1AA1ACD6454DC43C84ED671EC7B2EB31DA261C",
             "4,994,031,752",

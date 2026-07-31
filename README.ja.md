@@ -36,7 +36,7 @@ upstream release `v0.4.0`、commit
 - VHS family には VHS/S-VHS、Betamax、Video8/Hi8、U-matic、Type C、EIAJ、
   upstream が対応する PAL/NTSC variant が含まれます。
 - TBC utility、ダブルクリック GUI、開発者向け plot window は対象外です。
-- Visual Studio 2026 の `.slnx` には **1,136** 件の標準 xUnit v3 test があり、
+- Visual Studio 2026 の `.slnx` には **1,138** 件の標準 xUnit v3 test があり、
   Test Explorer と `dotnet test` の両方で実行できます。
 
 <!-- SECTION: start -->
@@ -109,7 +109,7 @@ CVBS、LaserDisc、HiFi は現在 `ipp-fast` を拒否するため、これら�
 
 最新の Exact pass は、VHS RF stream block が全 cache から外れ、現在の span
 assembly が完了した後にのみ output array を再利用します。public block result の
-ownership と DSP 演算は変えず、retained pool は 48 set の hard limit を持ちます。
+ownership と DSP 演算は変えず、idle retained pool は 48 set の hard limit を持ちます。
 同条件の 100-frame trace では sampled allocation が 4.599 GB から
 566.9 MB へ 87.7% 減少しました。
 
@@ -152,7 +152,7 @@ preview tool は writer を止めずに partial output を確認できます。
 dotnet restore VHSDecodeDotNet.slnx
 dotnet build VHSDecodeDotNet.slnx -c Release --no-restore
 dotnet test --solution VHSDecodeDotNet.slnx -c Release `
-  --no-build --no-restore --minimum-expected-tests 1136
+  --no-build --no-restore --minimum-expected-tests 1138
 ```
 
 Visual Studio 2026 で `VHSDecodeDotNet.slnx` を開くと、build、debug、

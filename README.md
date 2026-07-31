@@ -38,7 +38,7 @@ evidence, and remaining gaps.
   EIAJ, and supported PAL/NTSC variants.
 - TBC utility tools, the double-click GUI, and developer plotting windows are
   intentionally out of scope.
-- The Visual Studio 2026 `.slnx` solution has **1,136** standard xUnit v3 tests
+- The Visual Studio 2026 `.slnx` solution has **1,138** standard xUnit v3 tests
   that are visible in Test Explorer and runnable with `dotnet test`.
 
 <!-- SECTION: start -->
@@ -115,7 +115,7 @@ separately from speed.
 The latest Exact pass recycles the VHS RF stream outputs only after their
 decoded blocks leave every cache and the current span assembly is complete.
 Public block results keep independent ownership, arithmetic is unchanged, and
-the retained pool has a 48-set hard limit. A matched 100-frame trace reduced
+the idle retained pool has a 48-set hard limit. A matched 100-frame trace reduced
 sampled allocation from 4.599 GB to 566.9 MB (87.7%).
 
 All 12 strict main/candidate thread-profile gates and all 60 refreshed matrix
@@ -159,7 +159,7 @@ The pinned SDK is .NET `11.0.100-preview.6.26359.118`.
 dotnet restore VHSDecodeDotNet.slnx
 dotnet build VHSDecodeDotNet.slnx -c Release --no-restore
 dotnet test --solution VHSDecodeDotNet.slnx -c Release `
-  --no-build --no-restore --minimum-expected-tests 1136
+  --no-build --no-restore --minimum-expected-tests 1138
 ```
 
 Open `VHSDecodeDotNet.slnx` in Visual Studio 2026 to build, debug, and run the
