@@ -923,12 +923,14 @@ block が完全な 34-byte STREAMINFO で、40 kHz、mono、PCM16、既知の no
 sample count を示す場合だけ bundled libsndfile を使います。handle は lazy-open、
 sequential read は seek-free、random read は exact frame seek で、pooled PCM16
 workspace から従来どおり `short` を `double` へ変換します。native open が
-unavailable/unsupported の場合、または native seek/decode error の場合は、既存の
-FFmpeg/PyAV-compatible loader へ一度だけ切り替え、同じ requested sample から
-retry します。正常な native EOF は short read のままです。default 40 MHz VHS
+unavailable/unsupported の場合、native seek/decode error の場合、または read が
+reported FLAC length を越える場合は、同じ requested sample から既存の
+FFmpeg/PyAV-compatible loader を試し、利用可能なら一度だけ切り替えます。FFmpeg
+未導入時も正常な reported EOF は EOF のままです。default 40 MHz VHS
 `.ldf`、VHS `--no_resample`、`--inputfreq` なしの LD がこの route を選べます。
 default VHS `.flac`、全 CVBS input、Ogg/FLAC、stereo、PCM24、他の rate、unknown
-total、malformed header、`.vhs`、`.wav`、`raw.oga` は FFmpeg を維持します。
+total、narrow gate で rejected された header、`.vhs`、`.wav`、`raw.oga` は FFmpeg
+を維持します。
 
 同じ private local RF window で、Release 1.4.4 の FFmpeg path と candidate の
 libsndfile path は default、`--threads 0`、`--threads 20` の luma、chroma、raw
@@ -1906,8 +1908,8 @@ profile peer です。
 - IDE として使用する場合は Visual Studio 2026
 - optional Intel IPP bridge の build には Visual Studio C++ Build Tools と Windows SDK
 - 厳密に限定した direct 40 kHz mono PCM16 raw-FLAC native-input route 以外の
-  container input、および native open/seek/decode failure 後の recovery fallback
-  では `ffmpeg` と `ffprobe` が `PATH` 上に必要
+  container input、および native open/seek/decode failure または reported-length
+  boundary 後の recovery fallback では `ffmpeg` と `ffprobe` が `PATH` 上に必要
 - native-input route の正常な eligible raw-FLAC RF input、default HiFi FLAC output、
   LD `--write-test-ldf` は bundled libsndfile を直接使えます。各 path は文書化した
   fallback または compatibility boundary を維持します
@@ -1916,7 +1918,7 @@ profile peer です。
 .\tools\build-ipp-native.ps1
 dotnet restore VHSDecodeDotNet.slnx
 dotnet build VHSDecodeDotNet.slnx -c Release --no-restore
-dotnet test --solution VHSDecodeDotNet.slnx -c Release --no-build --no-restore --minimum-expected-tests 1193
+dotnet test --solution VHSDecodeDotNet.slnx -c Release --no-build --no-restore --minimum-expected-tests 1195
 ```
 
 最初の command は optional `ipp-fast` native artifact を含めるためのものです。
@@ -1929,7 +1931,7 @@ third-party notice を埋め込み、license sidecar file は追加しません�
 
 現在の正式な Release build は warning 0、error 0 です。xUnit v3 project は
 `dotnet test` と Visual Studio Test Explorer の両方で個別に検出できる
-**1,193** tests を公開します。
+**1,195** tests を公開します。
 
 <!-- SECTION: usage -->
 

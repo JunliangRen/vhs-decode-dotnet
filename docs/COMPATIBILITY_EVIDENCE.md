@@ -254,13 +254,14 @@ possible capture has already been proven byte-for-byte identical.
   libsndfile only for a complete 34-byte STREAMINFO describing 40 kHz mono
   PCM16 with a known nonzero sample count; lazy open, seek-free sequential
   reads, exact random seeks, a pooled PCM16 workspace, per-read native error
-  checks, and one-time same-sample FFmpeg recovery after native open/seek/decode
-  failure are covered by focused and real-backend tests
+  checks, and same-sample FFmpeg recovery after native open/seek/decode failure
+  or a reported-length boundary are covered by focused and real-backend tests;
+  clean native EOF remains EOF when FFmpeg is unavailable
 - the FFmpeg-backed RF container loader remains authoritative for Ogg/FLAC,
-  stereo, PCM24, other rates, unknown totals, malformed headers, `.vhs`,
-  `.wav`, `raw.oga`, default VHS `.flac`, every CVBS input, and other supported
-  containers, retaining the upstream-style 2 MB rewind cache and 40 MB
-  seek/restart threshold
+  stereo, PCM24, other rates, unknown totals, headers rejected by the narrow
+  gate, `.vhs`, `.wav`, `raw.oga`, default VHS `.flac`, every CVBS input, and
+  other supported containers, retaining the upstream-style 2 MB rewind cache
+  and 40 MB seek/restart threshold
 - container seeks probe the decoded stream's actual sample rate and convert RF
   sample offsets to FFmpeg timestamps from that rate, so `--no_resample`
   captures such as 17.9 MHz FLAC do not silently seek as if they were 40 MHz
@@ -2148,7 +2149,7 @@ dotnet test --solution VHSDecodeDotNet.slnx --no-build
 ```
 
 The current formal solution build completes with zero warnings and errors, and
-the xUnit v3 project exposes 1,193 independently discoverable tests
+the xUnit v3 project exposes 1,195 independently discoverable tests
 to `dotnet test` and Visual Studio Test Explorer. On the
 same Windows machine and fixtures, Release wall-clock measurements for one
 frame were 2.346 s versus 7.193 s for NTSC VHS and 1.651 s versus 5.865 s for

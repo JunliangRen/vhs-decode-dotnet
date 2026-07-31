@@ -791,11 +791,12 @@ stdout、归一化 stderr 和时间戳归一化日志全部一致。候选还在
 34 字节 STREAMINFO、并且声明 40 kHz、单声道、PCM16 和已知非零样本总数时使用
 内置 libsndfile。文件句柄按需打开；连续读取不做 seek，随机读取使用精确 frame
 seek，一个池化 PCM16 workspace 继续执行不变的 `short` 到 `double` 转换。原生
-后端不可用、不支持或发生 seek/decode 错误时，只切换一次到既有 FFmpeg/PyAV 兼容
-加载器，并从同一个请求样本重试；正常原生 EOF 仍返回短读。默认 40 MHz VHS `.ldf`、
+后端不可用、不支持、发生 seek/decode 错误，或读取跨过 FLAC 报告长度时，会从同一
+请求样本尝试既有 FFmpeg/PyAV 兼容加载器，并在可用时只切换一次。若未安装 FFmpeg，
+正常的报告 EOF 仍按 EOF 结束。默认 40 MHz VHS `.ldf`、
 VHS `--no_resample` 和未指定 `--inputfreq` 的 LD 可选择此路径。默认 VHS `.flac`、
-全部 CVBS 输入、Ogg/FLAC、立体声、PCM24、其他采样率、未知总数、畸形文件头、
-`.vhs`、`.wav` 和 `raw.oga` 继续走 FFmpeg。
+全部 CVBS 输入、Ogg/FLAC、立体声、PCM24、其他采样率、未知总数、未通过严格门控的
+文件头、`.vhs`、`.wav` 和 `raw.oga` 继续走 FFmpeg。
 
 在同一个私有本地 RF 窗口上，Release 1.4.4 的 FFmpeg 路径与候选的 libsndfile
 路径在默认、`--threads 0` 和 `--threads 20` 下均匹配亮度、色度、原始 JSON、
@@ -1574,8 +1575,8 @@ JSON、stdout、归一化 stderr/日志及有序 `fileLoc` 全部一致，并包
 - 使用 IDE 时需要 Visual Studio 2026
 - 构建可选 Intel IPP 桥接 DLL 时需要 Visual Studio C++ Build Tools 和 Windows SDK
 - 对不属于严格门控的直接 40 kHz 单声道 PCM16 raw-FLAC 原生输入路径的容器，
-  以及该路径发生原生打开/seek/decode 错误后的恢复回退，需要 `ffmpeg` 和
-  `ffprobe` 位于 `PATH`
+  以及该路径发生原生打开/seek/decode 错误或到达报告长度边界后的恢复回退，
+  需要 `ffmpeg` 和 `ffprobe` 位于 `PATH`
 - 原生输入路径上的正常且符合条件的 raw-FLAC RF、默认 HiFi FLAC 输出和 LD
   `--write-test-ldf` 可直接使用内置 libsndfile；各路径仍保留文档所述的回退或
   兼容边界
@@ -1584,7 +1585,7 @@ JSON、stdout、归一化 stderr/日志及有序 `fileLoc` 全部一致，并包
 .\tools\build-ipp-native.ps1
 dotnet restore VHSDecodeDotNet.slnx
 dotnet build VHSDecodeDotNet.slnx -c Release --no-restore
-dotnet test --solution VHSDecodeDotNet.slnx -c Release --no-build --no-restore --minimum-expected-tests 1193
+dotnet test --solution VHSDecodeDotNet.slnx -c Release --no-build --no-restore --minimum-expected-tests 1195
 ```
 
 第一条命令用于包含可选的 `ipp-fast` 原生产物；只构建 Exact 时可以省略。
@@ -1595,7 +1596,7 @@ Intel oneAPI。只含二进制的单文件发布会嵌入 `vhsdecode_ipp.dll` �
 notice，不会额外生成许可证 sidecar 文件。只构建 Exact 后端时可以省略原生构建步骤。
 
 当前正式 Release 构建为零警告、零错误。xUnit v3 项目向
-`dotnet test` 和 Visual Studio Test Explorer 暴露 **1,193** 个可独立发现的测试。
+`dotnet test` 和 Visual Studio Test Explorer 暴露 **1,195** 个可独立发现的测试。
 
 <!-- SECTION: usage -->
 

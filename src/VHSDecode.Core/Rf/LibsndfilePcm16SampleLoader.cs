@@ -1,4 +1,5 @@
 using System.Buffers;
+using System.ComponentModel;
 using System.Runtime.InteropServices;
 
 namespace VHSDecode.Core.Rf;
@@ -55,6 +56,12 @@ internal sealed class LibsndfilePcm16SampleLoader : IRfSampleLoader, IDisposable
             try
             {
                 ILibsndfilePcm16Source source = _source ??= _openSource(_filename);
+                if (sample > source.Frames
+                    || readLength > source.Frames - sample)
+                {
+                    return ReadAtNativeLengthBoundary(stream, sample, readLength);
+                }
+
                 return ReadNative(source, sample, readLength);
             }
             catch (LibsndfilePcm16FallbackException)
@@ -70,12 +77,6 @@ internal sealed class LibsndfilePcm16SampleLoader : IRfSampleLoader, IDisposable
         long sample,
         int readLength)
     {
-        if (sample > source.Frames
-            || readLength > source.Frames - sample)
-        {
-            return null;
-        }
-
         if (sample != _positionFrames)
         {
             long position = source.Seek(sample);
@@ -115,6 +116,24 @@ internal sealed class LibsndfilePcm16SampleLoader : IRfSampleLoader, IDisposable
         finally
         {
             ArrayPool<short>.Shared.Return(samples);
+        }
+    }
+
+    private double[]? ReadAtNativeLengthBoundary(
+        Stream stream,
+        long sample,
+        int readLength)
+    {
+        try
+        {
+            double[]? result = _fallback.Read(stream, sample, readLength);
+            ActivateFallback();
+            return result;
+        }
+        catch (NotSupportedException ex) when (ex.InnerException is Win32Exception)
+        {
+            // A clean native file must still reach EOF when FFmpeg is not installed.
+            return null;
         }
     }
 

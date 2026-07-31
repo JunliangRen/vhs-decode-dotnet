@@ -1,4 +1,5 @@
 using System.Buffers.Binary;
+using System.ComponentModel;
 using VHSDecode.Core.Decode;
 using VHSDecode.Core.Rf;
 using Xunit;
@@ -31,7 +32,9 @@ public sealed class LibsndfilePcm16SampleLoaderTests
             Assert.Equal([20.0, 30.0, 40.0], randomRead);
             Assert.Equal([1], source.SeekSamples);
             Assert.Null(loader.Read(input, 5, 2));
-            Assert.Equal(0, fallback.ReadCount);
+            Assert.Equal(1, fallback.ReadCount);
+            Assert.Equal(5, fallback.LastSample);
+            Assert.Equal(2, fallback.LastReadLength);
         }
 
         Assert.True(source.Disposed);
@@ -270,6 +273,73 @@ public sealed class LibsndfilePcm16SampleLoaderTests
         }
     }
 
+    [Fact(DisplayName = "underreported FLAC totals retry the boundary read through fallback")]
+    public void UnderreportedFlacTotalActivatesFallback()
+    {
+        Assert.SkipUnless(OperatingSystem.IsWindows(), "The bundled sndfile.dll is a Windows runtime asset.");
+        string directory = CreateTemporaryDirectory();
+        try
+        {
+            const int reportedSamples = 16_384;
+            short[] source = CreateNativeSamples(65_536);
+            string path = Path.Combine(directory, "underreported total.ldf");
+            WriteDirectRawFlac(path, source);
+            SetFlacTotalSamples(path, reportedSamples);
+            Assert.True(RawFlacStreamInfo.TryRead(path, out RawFlacStreamInfo info));
+            Assert.Equal(reportedSamples, info.TotalSamples);
+
+            double[] fallbackSamples = Enumerable.Repeat(4321.0, 64).ToArray();
+            var fallback = new RecordingFallback(fallbackSamples);
+            using var loader = new LibsndfilePcm16SampleLoader(
+                path,
+                candidatePath =>
+                {
+                    ILibsndfilePcm16Source native = LibsndfilePcm16Source.Open(candidatePath);
+                    Assert.Equal(reportedSamples, native.Frames);
+                    return native;
+                },
+                fallback);
+
+            double[]? actual = loader.Read(Stream.Null, reportedSamples, fallbackSamples.Length);
+
+            Assert.Same(fallbackSamples, actual);
+            Assert.Equal(1, fallback.ReadCount);
+            Assert.Equal(reportedSamples, fallback.LastSample);
+            Assert.Equal(fallbackSamples.Length, fallback.LastReadLength);
+        }
+        finally
+        {
+            Directory.Delete(directory, recursive: true);
+        }
+    }
+
+    [Fact(DisplayName = "clean native EOF remains EOF when FFmpeg is unavailable")]
+    public void MissingFfmpegAtNativeLengthBoundaryRemainsEof()
+    {
+        var source = new RecordingSource([10, 20, 30, 40]);
+        var fallback = new RecordingFallback
+        {
+            ReadException = new NotSupportedException(
+                "FFmpeg is unavailable.",
+                new Win32Exception(2))
+        };
+        using (var loader = new LibsndfilePcm16SampleLoader(
+            "capture.flac",
+            _ => source,
+            fallback))
+        {
+            Assert.Null(loader.Read(Stream.Null, source.Frames, 1));
+            Assert.False(source.Disposed);
+
+            double[]? earlierRead = loader.Read(Stream.Null, 0, 2);
+            Assert.NotNull(earlierRead);
+            Assert.Equal([10.0, 20.0], earlierRead);
+            Assert.Equal(1, fallback.ReadCount);
+        }
+
+        Assert.True(source.Disposed);
+    }
+
     public static TheoryData<byte[]> InvalidFlacHeaders
         => new()
         {
@@ -371,6 +441,19 @@ public sealed class LibsndfilePcm16SampleLoaderTests
         File.WriteAllBytes(path, bytes);
     }
 
+    private static void SetFlacTotalSamples(string path, long totalSamples)
+    {
+        const ulong totalSamplesMask = 0x0000000FFFFFFFFFUL;
+        Assert.InRange(totalSamples, 1, (long)totalSamplesMask);
+        byte[] bytes = File.ReadAllBytes(path);
+        Assert.True(bytes.AsSpan(0, 4).SequenceEqual("fLaC"u8));
+        Assert.True(bytes.Length >= 26);
+        ulong packed = BinaryPrimitives.ReadUInt64BigEndian(bytes.AsSpan(18, sizeof(ulong)));
+        packed = (packed & ~totalSamplesMask) | (ulong)totalSamples;
+        BinaryPrimitives.WriteUInt64BigEndian(bytes.AsSpan(18, sizeof(ulong)), packed);
+        File.WriteAllBytes(path, bytes);
+    }
+
     private sealed class RecordingSource(short[] samples) : ILibsndfilePcm16Source
     {
         private long _position;
@@ -432,11 +515,18 @@ public sealed class LibsndfilePcm16SampleLoaderTests
 
         public int? LastReadLength { get; private set; }
 
+        public Exception? ReadException { get; init; }
+
         public double[]? Read(Stream stream, long sample, int readLength)
         {
             ReadCount++;
             LastSample = sample;
             LastReadLength = readLength;
+            if (ReadException is not null)
+            {
+                throw ReadException;
+            }
+
             return result;
         }
 
