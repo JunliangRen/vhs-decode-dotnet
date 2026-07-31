@@ -36,7 +36,7 @@ upstream release `v0.4.0`、commit
 - VHS family には VHS/S-VHS、Betamax、Video8/Hi8、U-matic、Type C、EIAJ、
   upstream が対応する PAL/NTSC variant が含まれます。
 - TBC utility、ダブルクリック GUI、開発者向け plot window は対象外です。
-- Visual Studio 2026 の `.slnx` には **1,130** 件の標準 xUnit v3 test があり、
+- Visual Studio 2026 の `.slnx` には **1,136** 件の標準 xUnit v3 test があり、
   Test Explorer と `dotnet test` の両方で実行できます。
 
 <!-- SECTION: start -->
@@ -100,24 +100,25 @@ CVBS、LaserDisc、HiFi は現在 `ipp-fast` を拒否するため、これら�
 <!-- LATEST_PERFORMANCE_BEGIN -->
 | CLI mode（workers） | Python v0.4.0 | Exact + v0.4.0 | Exact + current | IPP-fast + v0.4.0 | IPP-fast + current |
 | --- | ---: | ---: | ---: | ---: | ---: |
-| default（5） | 16.983 s | 5.660 s / 3.001x | 6.830 s / 2.486x | 5.415 s / 3.136x | 7.086 s / 2.397x |
-| `--threads 1` | 21.263 s | 18.312 s / 1.161x | 20.631 s / 1.031x | 17.982 s / 1.182x | 20.564 s / 1.034x |
-| `--threads 5` | 16.880 s | 5.487 s / 3.077x | 6.816 s / 2.477x | 5.447 s / 3.099x | 7.071 s / 2.387x |
-| `--threads 10` | 17.612 s | 4.438 s / 3.968x | 5.344 s / 3.295x | 4.520 s / 3.896x | 5.259 s / 3.349x |
-| `--threads 20` | 18.330 s | 3.718 s / 4.930x | 4.978 s / 3.682x | 3.593 s / 5.102x | 5.294 s / 3.463x |
+| default（5） | 16.983 s | 5.781 s / 2.938x | 7.216 s / 2.354x | 5.657 s / 3.002x | 7.092 s / 2.395x |
+| `--threads 1` | 21.263 s | 18.232 s / 1.166x | 20.627 s / 1.031x | 17.542 s / 1.212x | 20.201 s / 1.053x |
+| `--threads 5` | 16.880 s | 5.906 s / 2.858x | 7.463 s / 2.262x | 5.689 s / 2.967x | 7.459 s / 2.263x |
+| `--threads 10` | 17.612 s | 4.536 s / 3.883x | 5.887 s / 2.992x | 4.414 s / 3.990x | 5.537 s / 3.181x |
+| `--threads 20` | 18.330 s | 3.568 s / 5.138x | 5.049 s / 3.631x | 3.471 s / 5.281x | 4.496 s / 4.077x |
 <!-- LATEST_PERFORMANCE_END -->
 
-最新の Exact pass は、cold PocketFFT plan/root construction を cache key ごとに
-1 回だけ実行します。FFT data type、coefficient、arithmetic order、
-worker-local scratch は変わりません。同条件の 100-frame allocation trace では、
-complex/real plan factory がそれぞれ 30 回から 1 回になり、12.19 MB の sampled
-duplicate construction を除去しました。
+最新の Exact pass は、VHS RF stream block が全 cache から外れ、現在の span
+assembly が完了した後にのみ output array を再利用します。public block result の
+ownership と DSP 演算は変えず、retained pool は 48 set の hard limit を持ちます。
+同条件の 100-frame trace では sampled allocation が 4.599 GB から
+566.9 MB へ 87.7% 減少しました。
 
 main/candidate の strict thread-profile gate 12 回と refreshed matrix 60 回は、
-すべて各 reference と一致しました。交互順序の `current`/20-worker pair 5 組では、
-decode-time median が 9.12 から 8.58 秒（5.9% 改善）、mean が 4.3% 改善したため、
-modest な cold-start/end-to-end gain と判断します。1,000-frame gate も完全一致し、
-working set が bounded であることを確認しました。
+すべて各 reference と一致しました。交互順序の `current`/20-worker pair 10 組では、
+decode-time median が 8.72 から 8.58 秒（1.61% 改善）、mean が 1.07% 改善しました。
+throughput gain は modest ですが allocation pressure は大幅に低下しています。
+1,000-frame gate も完全一致し、69.475 秒で完了、working set は bounded かつ
+711.6 MiB 未満でした。
 
 各 .NET cell は wall-time median と同じ行の Python に対する speedup の順です。
 `1.000x` 未満は Python より遅いことを示します。default は実際に **5 workers**
@@ -151,7 +152,7 @@ preview tool は writer を止めずに partial output を確認できます。
 dotnet restore VHSDecodeDotNet.slnx
 dotnet build VHSDecodeDotNet.slnx -c Release --no-restore
 dotnet test --solution VHSDecodeDotNet.slnx -c Release `
-  --no-build --no-restore --minimum-expected-tests 1130
+  --no-build --no-restore --minimum-expected-tests 1136
 ```
 
 Visual Studio 2026 で `VHSDecodeDotNet.slnx` を開くと、build、debug、

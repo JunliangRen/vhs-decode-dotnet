@@ -1461,6 +1461,41 @@ Python；main 已有的 Python v0.4.0 `g4315520 --threads 0` 直接证据仍作�
 1,479.6 MiB，首段/末段三分位中位数为 659.9/593.2 MiB，支持内存有界且没有
 渐进增长。
 
+### RF 流式输出缓冲复用
+
+当前 Exact 候选让 VHS 流式解码器管理四个 block-sized 输出的所有权：解调视频、
+RF 包络、低通视频和 float32 色度。块仍在缓存中或仍参与当前 span 拼装时，
+始终独占这些数组；两种用途都结束后，缓冲组才可归还并发池。公开
+`DecodePreparedBlock` 的结果仍独立分配。worker 失败、预取取消、缓存失效、
+替换、淘汰、输入流切换和释放都会归还符合条件的缓冲；若本次并行拼装仍需要
+被淘汰块，则延迟到复制结束后再归还。池最多保留 48 组，对应 16 个已解码块与
+32 个预取块的上限。DSP 类型、系数、表达式、运算顺序、padding 和 field 提交
+顺序均未改变。
+
+同一个 100 帧 Exact `current`/20-worker trace 中，总 sampled allocation 从
+4,598,751,544 降至 566,944,304 bytes，共减少 4,031,807,240 bytes，
+即 87.67%。最终 trace 在初始并发阶段创建 60 组输出，此后稳定复用；保留子集
+始终不超过 48 组。对应的 1000 帧 counter 运行将累计分配从 40.641 降至
+3.844 GiB。本优化减少的是 GC 压力，而不是改变解码器数值路径。
+
+10 组相反顺序的 100 帧 Exact `current`/20-worker 配对把解码时间中位数从
+8.72 降至 8.58 秒（减少 1.61%），平均值从 8.710 降至 8.617 秒
+（减少 1.07%）；墙钟中位数减少 1.72%。运行间仍有可见波动，因此吞吐收益
+明确归类为小幅，主要结果是分配量下降。
+
+最终候选通过零警告 Release 构建和全部 1,136 项 xUnit v3 测试。12 次严格
+main/candidate 运行覆盖 Exact v0.4.0 与 `current` 的 `--threads 0`、默认 5
+workers 和 `--threads 20`；亮度、色度、原始 JSON、stdout、归一化
+stderr/日志及有序 `fileLoc` 全部一致。刷新后的 60 次 Exact/IPP-fast、
+v0.4.0/`current`、默认/1/5/10/20-worker 矩阵运行也全部匹配各自的
+profile/backend 参考。
+
+最终 1000 帧 Exact `current`/20-worker 运行在 69.475 秒内完成 2000 fields，
+并匹配当前 main 的产物、归一化诊断和有序 `fileLoc`。工作集峰值为
+711.6 MiB，首段/末段三分位中位数为 627.5/703.7 MiB，因此有界内存门禁通过，
+没有渐进式无界增长。与上一轮相同，当前 main 是直接 A/B oracle，其已验证的
+Python v0.4.0 `g4315520 --threads 0` 证据继续作为传递的上游参考。
+
 </details>
 
 <!-- SECTION: build -->
@@ -1479,7 +1514,7 @@ Python；main 已有的 Python v0.4.0 `g4315520 --threads 0` 直接证据仍作�
 .\tools\build-ipp-native.ps1
 dotnet restore VHSDecodeDotNet.slnx
 dotnet build VHSDecodeDotNet.slnx -c Release --no-restore
-dotnet test --solution VHSDecodeDotNet.slnx -c Release --no-build --no-restore --minimum-expected-tests 1130
+dotnet test --solution VHSDecodeDotNet.slnx -c Release --no-build --no-restore --minimum-expected-tests 1136
 ```
 
 第一条命令用于包含可选的 `ipp-fast` 原生产物；只构建 Exact 时可以省略。
@@ -1490,7 +1525,7 @@ Intel oneAPI。只含二进制的单文件发布会嵌入 `vhsdecode_ipp.dll` �
 notice，不会额外生成许可证 sidecar 文件。只构建 Exact 后端时可以省略原生构建步骤。
 
 当前正式 Release 构建为零警告、零错误。xUnit v3 项目向
-`dotnet test` 和 Visual Studio Test Explorer 暴露 **1,130** 个可独立发现的测试。
+`dotnet test` 和 Visual Studio Test Explorer 暴露 **1,136** 个可独立发现的测试。
 
 <!-- SECTION: usage -->
 

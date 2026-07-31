@@ -1770,6 +1770,49 @@ normalized stderr/log、ordered `fileLoc` reference と一致しました。samp
 working set は maximum 1,479.6 MiB、first/final-third median 659.9/593.2 MiB
 で、progressive growth のない bounded memory を支持します。
 
+### RF stream output buffer reuse
+
+現在の Exact candidate では、VHS stream decoder が demodulated video、
+RF envelope、low-pass video、float32 chroma の 4 つの block-sized output
+ownership を管理します。block が cache 内にある間、または現在の span assembly
+に参加している間は array を排他的に保持し、両方の利用が終了した後だけ
+concurrent pool に返します。public `DecodePreparedBlock` result は独立 allocation
+のままです。worker failure、cancelled prefetch、cache invalidation、replacement、
+eviction、stream change、disposal は eligible set を返し、active parallel
+assembly が必要とする eviction は copy 完了まで返却を遅延します。pool の retained
+hard limit は 48 sets で、decoded block 16 と prefetch block 32 の ceiling に一致
+します。DSP type、coefficient、expression、operation order、padding、field commit
+order は変わりません。
+
+同じ 100-frame Exact `current`/20-worker trace で total sampled allocation は
+4,598,751,544 から 566,944,304 bytes へ減少し、4,031,807,240 bytes、
+87.67% を削減しました。final trace は initial concurrency で output set を
+60 組作成した後に安定して再利用し、retained subset は 48 を超えません。
+対応する 1,000-frame counter run では integrated allocation が 40.641 から
+3.844 GiB へ減りました。この最適化は decoder の numerical path ではなく
+GC pressure を削減します。
+
+反対順序の 100-frame Exact `current`/20-worker pair 10 組では、decode-time
+median が 8.72 から 8.58 秒（1.61% 減）、mean が 8.710 から 8.617 秒
+（1.07% 減）になり、wall-time median は 1.72% 減りました。run 間 variance が
+残るため throughput gain は modest と明示し、allocation reduction を主結果と
+します。
+
+final candidate は warning 0 の Release build と xUnit v3 test 1,136 件をすべて
+pass しました。strict main/candidate run 12 回は Exact v0.4.0/`current` の
+`--threads 0`、default-five、`--threads 20` を対象にし、luma、chroma、raw JSON、
+stdout、normalized stderr/log、ordered `fileLoc` が一致しました。refreshed
+Exact/IPP-fast、v0.4.0/`current`、default/1/5/10/20-worker matrix 60 回も、
+各 profile/backend reference と一致しました。
+
+final 1,000-frame Exact `current`/20-worker run は 2,000 fields を 69.475 秒で
+完了し、current-main artifact、normalized diagnostic、ordered `fileLoc` と一致
+しました。working set は maximum 711.6 MiB、first/final-third median
+627.5/703.7 MiB で、progressive unbounded growth なしとして bounded-memory
+gate を pass しました。前 round と同じく current main が direct A/B oracle で、
+verified Python v0.4.0 `g4315520 --threads 0` evidence を transitive upstream
+reference とします。
+
 </details>
 
 <!-- SECTION: build -->
@@ -1788,7 +1831,7 @@ working set は maximum 1,479.6 MiB、first/final-third median 659.9/593.2 MiB
 .\tools\build-ipp-native.ps1
 dotnet restore VHSDecodeDotNet.slnx
 dotnet build VHSDecodeDotNet.slnx -c Release --no-restore
-dotnet test --solution VHSDecodeDotNet.slnx -c Release --no-build --no-restore --minimum-expected-tests 1130
+dotnet test --solution VHSDecodeDotNet.slnx -c Release --no-build --no-restore --minimum-expected-tests 1136
 ```
 
 最初の command は optional `ipp-fast` native artifact を含めるためのものです。
@@ -1801,7 +1844,7 @@ third-party notice を埋め込み、license sidecar file は追加しません�
 
 現在の正式な Release build は warning 0、error 0 です。xUnit v3 project は
 `dotnet test` と Visual Studio Test Explorer の両方で個別に検出できる
-**1,130** tests を公開します。
+**1,136** tests を公開します。
 
 <!-- SECTION: usage -->
 

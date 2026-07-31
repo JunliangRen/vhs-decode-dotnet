@@ -1824,6 +1824,49 @@ ordered `fileLoc` references. Sampled working set had a 1,479.6 MiB maximum and
 first/final-third medians of 659.9/593.2 MiB, supporting bounded memory without
 progressive growth.
 
+### RF stream output buffer reuse
+
+The current Exact candidate gives the VHS stream decoder ownership of four
+block-sized outputs: demodulated video, RF envelope, low-pass video, and
+float32 chroma. A block keeps exclusive ownership while it is cached or is
+still participating in span assembly. Only after both uses end can its buffer
+set return to a concurrent pool. Public `DecodePreparedBlock` results remain
+independently allocated. Failed workers, cancelled prefetch, cache
+invalidation, replacement, eviction, stream changes, and disposal all return
+eligible sets; an eviction needed by the active parallel assembly is deferred
+until copying completes. The pool retains at most 48 sets, matching the
+16 decoded-block plus 32 prefetch-block ceiling. DSP types, coefficients,
+expressions, operation order, padding, and field commit order are unchanged.
+
+On the same 100-frame Exact `current`/20-worker trace, total sampled allocation
+fell from 4,598,751,544 to 566,944,304 bytes: 4,031,807,240 fewer bytes, or
+87.67%. The final trace created 60 output sets during initial concurrency and
+then reused them; the retained subset never exceeds 48. The corresponding
+1,000-frame counter run reduced integrated allocation from 40.641 to
+3.844 GiB. This optimization reduces GC traffic rather than changing the
+decoder's numerical path.
+
+Ten opposite-order 100-frame Exact `current`/20-worker pairs moved median
+decode time from 8.72 to 8.58 seconds (1.61% lower) and mean decode time from
+8.710 to 8.617 seconds (1.07% lower). Median wall time was 1.72% lower. The
+gain is deliberately classified as modest because run-to-run variance remains
+visible; the allocation reduction is the primary result.
+
+The final candidate passed a zero-warning Release build and all 1,136 xUnit v3
+tests. Twelve strict main/candidate runs covered Exact v0.4.0 and `current`
+with `--threads 0`, default-five, and `--threads 20`; all luma, chroma, raw
+JSON, stdout, normalized stderr/logs, and ordered `fileLoc` values matched.
+All 60 refreshed Exact/IPP-fast, v0.4.0/`current`, and default/1/5/10/20-worker
+matrix runs also matched their profile/backend references.
+
+The final 1,000-frame Exact `current`/20-worker run completed 2,000 fields in
+69.475 seconds and matched the current-main artifacts, normalized diagnostics,
+and ordered `fileLoc`. Working set had a 711.6 MiB maximum and
+first/final-third medians of 627.5/703.7 MiB, so the bounded-memory gate passed
+without progressive unbounded growth. As in the preceding pass, current main
+is the direct A/B oracle and its verified Python v0.4.0 `g4315520 --threads 0`
+evidence remains the transitive upstream reference.
+
 </details>
 
 <!-- SECTION: build -->
@@ -1844,7 +1887,7 @@ Requirements:
 .\tools\build-ipp-native.ps1
 dotnet restore VHSDecodeDotNet.slnx
 dotnet build VHSDecodeDotNet.slnx -c Release --no-restore
-dotnet test --solution VHSDecodeDotNet.slnx -c Release --no-build --no-restore --minimum-expected-tests 1130
+dotnet test --solution VHSDecodeDotNet.slnx -c Release --no-build --no-restore --minimum-expected-tests 1136
 ```
 
 The first command includes the optional `ipp-fast` native artifact; omit it for
@@ -1857,7 +1900,7 @@ deployment computer. Binary-only single-file releases embed
 sidecar license files. An Exact-only build may omit the native build step.
 
 The current formal Release build has zero warnings and errors. The xUnit v3
-project exposes **1,130** independently discoverable tests to both
+project exposes **1,136** independently discoverable tests to both
 `dotnet test` and Visual Studio Test Explorer.
 
 <!-- SECTION: usage -->

@@ -1052,6 +1052,78 @@ public sealed class DspWorkingBufferTests
             $"Warm in-place float32 SOS forward/backward allocated {allocated:N0} bytes.");
     }
 
+    [Fact(DisplayName = "Destination float32 SOS remains allocating-reference bit-exact")]
+    public void DestinationFloat32SosRemainsAllocatingReferenceBitExact()
+    {
+        const int length = 4_096;
+        double[] input = Enumerable.Range(0, length)
+            .Select(index => Math.Sin(index * 0.013) + (0.125 * Math.Cos(index * 0.029)))
+            .ToArray();
+        SosSection[][] cases =
+        [
+            [
+                new SosSection(
+                    0.06745527,
+                    0.13491055,
+                    0.06745527,
+                    1.0,
+                    -1.1429805,
+                    0.4128016)
+            ],
+            IirFilterDesign.ButterworthBandPassSos(
+                order: 4,
+                normalizedLowCutoff: 0.1,
+                normalizedHighCutoff: 0.4),
+            IirFilterDesign.ButterworthBandPassSos(
+                order: 5,
+                normalizedLowCutoff: 0.1,
+                normalizedHighCutoff: 0.4)
+        ];
+
+        foreach (SosSection[] sections in cases)
+        {
+            foreach (int? padLength in new int?[] { null, 0, 7 })
+            {
+                double[] expected = SosFilter.ApplyForwardBackwardFloat32(
+                    sections,
+                    input,
+                    padLength);
+                var actual = new double[length];
+                Array.Fill(actual, double.NaN);
+                SosFilter.ApplyForwardBackwardFloat32(
+                    sections,
+                    input,
+                    actual,
+                    padLength);
+                AssertDoubleBitsEqual(expected, actual);
+
+                float[] expectedSingle = SosFilter.ApplyForwardBackwardFloat32ToSingle(
+                    sections,
+                    input,
+                    padLength);
+                var actualSingle = new float[length];
+                Array.Fill(actualSingle, float.NaN);
+                SosFilter.ApplyForwardBackwardFloat32ToSingle(
+                    sections,
+                    input,
+                    actualSingle,
+                    padLength);
+                AssertFloatBitsEqual(expectedSingle, actualSingle);
+            }
+        }
+
+        Assert.Throws<ArgumentException>(() =>
+            SosFilter.ApplyForwardBackwardFloat32(
+                cases[0],
+                input,
+                new double[length - 1]));
+        Assert.Throws<ArgumentException>(() =>
+            SosFilter.ApplyForwardBackwardFloat32ToSingle(
+                cases[0],
+                input,
+                new float[length - 1]));
+    }
+
     [Fact(DisplayName = "Double SOS common-section kernels remain section-major bit-exact")]
     public void DoubleSosCommonSectionKernelsRemainSectionMajorBitExact()
     {
@@ -1551,6 +1623,14 @@ public sealed class DspWorkingBufferTests
         Assert.True(
             MemoryMarshal.AsBytes(expected).SequenceEqual(MemoryMarshal.AsBytes(actual)),
             "Double sequences differ at the bit level.");
+    }
+
+    private static void AssertFloatBitsEqual(ReadOnlySpan<float> expected, ReadOnlySpan<float> actual)
+    {
+        Assert.Equal(expected.Length, actual.Length);
+        Assert.True(
+            MemoryMarshal.AsBytes(expected).SequenceEqual(MemoryMarshal.AsBytes(actual)),
+            "Float sequences differ at the bit level.");
     }
 
     private static void AssertComplexBitsEqual(ReadOnlySpan<Complex> expected, ReadOnlySpan<Complex> actual)

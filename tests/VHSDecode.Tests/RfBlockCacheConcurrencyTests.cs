@@ -1,4 +1,5 @@
 using System.Numerics;
+using System.Runtime.InteropServices;
 using VHSDecode.Core.Decode;
 using VHSDecode.Core.Dsp;
 using VHSDecode.Core.Rf;
@@ -8,6 +9,8 @@ namespace VHSDecode.Tests;
 
 public sealed class RfBlockCacheConcurrencyTests
 {
+    private const int TestBlockLength = 16;
+
     [Fact(DisplayName = "RF prefetch recommendation adds one bounded worker wave")]
     public void RfPrefetchRecommendationAddsOneBoundedWorkerWave()
     {
@@ -234,6 +237,231 @@ public sealed class RfBlockCacheConcurrencyTests
         Assert.Equal(full.Chroma, compact.Chroma);
     }
 
+    [Fact(DisplayName = "Compact VHS stream outputs reuse only after block release")]
+    public void CompactVhsStreamOutputsReuseOnlyAfterBlockRelease()
+    {
+        using RfBlockDecodePipeline pipeline = BuildPipeline(
+            new CountingSampleLoader(),
+            weakRfDiagnostics: true,
+            retainRfDiagnosticChannels: false,
+            float32Chroma: true,
+            fmDemodulatorMode: RfFmDemodulatorMode.VhsRustApproximation);
+        double[] input = Enumerable.Range(0, TestBlockLength)
+            .Select(index => Math.Sin(index * 0.19) + (0.2 * Math.Cos(index * 0.31)))
+            .ToArray();
+
+        RfPipelineBlock fullFirst = pipeline.DecodePreparedBlock(input, reportDiagnostics: false);
+        RfPipelineBlock fullSecond = pipeline.DecodePreparedBlock(input, reportDiagnostics: false);
+        Assert.NotSame(fullFirst.Demodulated.Video, fullSecond.Demodulated.Video);
+        Assert.NotSame(fullFirst.Demodulated.Envelope, fullSecond.Demodulated.Envelope);
+        Assert.NotSame(fullFirst.Demodulated.VideoLowPass, fullSecond.Demodulated.VideoLowPass);
+
+        RfPipelineBlock first = pipeline.DecodePreparedStreamBlock(input, reportDiagnostics: false);
+        double[] expectedVideo = first.Demodulated.Video.ToArray();
+        double[] expectedEnvelope = first.Demodulated.Envelope.ToArray();
+        double[] expectedVideoLowPass = first.Demodulated.VideoLowPass.ToArray();
+        float[] expectedChroma = Assert.IsType<float[]>(first.Demodulated.ChromaFloat32).ToArray();
+
+        RfPipelineBlock second = pipeline.DecodePreparedStreamBlock(input, reportDiagnostics: false);
+        Assert.NotSame(first.Demodulated.Video, second.Demodulated.Video);
+        Assert.NotSame(first.Demodulated.Envelope, second.Demodulated.Envelope);
+        Assert.NotSame(first.Demodulated.VideoLowPass, second.Demodulated.VideoLowPass);
+        Assert.NotSame(first.Demodulated.ChromaFloat32, second.Demodulated.ChromaFloat32);
+        Assert.Equal(2, pipeline.CreatedStreamOutputBufferSetCount);
+        Assert.Equal(0, pipeline.RetainedStreamOutputBufferSetCount);
+
+        pipeline.ReleaseStreamBlock(first);
+        pipeline.ReleaseStreamBlock(first);
+        Assert.Equal(1, pipeline.RetainedStreamOutputBufferSetCount);
+
+        RfPipelineBlock reused = pipeline.DecodePreparedStreamBlock(input, reportDiagnostics: false);
+        Assert.Same(first.Demodulated.Video, reused.Demodulated.Video);
+        Assert.Same(first.Demodulated.Envelope, reused.Demodulated.Envelope);
+        Assert.Same(first.Demodulated.VideoLowPass, reused.Demodulated.VideoLowPass);
+        Assert.Same(first.Demodulated.ChromaFloat32, reused.Demodulated.ChromaFloat32);
+        AssertDoubleBitsEqual(expectedVideo, reused.Demodulated.Video);
+        AssertDoubleBitsEqual(expectedEnvelope, reused.Demodulated.Envelope);
+        AssertDoubleBitsEqual(expectedVideoLowPass, reused.Demodulated.VideoLowPass);
+        AssertFloatBitsEqual(
+            expectedChroma,
+            Assert.IsType<float[]>(reused.Demodulated.ChromaFloat32));
+        Assert.Equal(2, pipeline.CreatedStreamOutputBufferSetCount);
+
+        pipeline.ReleaseStreamBlock(second);
+        pipeline.ReleaseStreamBlock(reused);
+        Assert.Equal(2, pipeline.RetainedStreamOutputBufferSetCount);
+    }
+
+    [Fact(DisplayName = "Compact VHS cache invalidation returns stream output buffers")]
+    public void CompactVhsCacheInvalidationReturnsStreamOutputBuffers()
+    {
+        var loader = new CountingSampleLoader();
+        using var stream = new MemoryStream();
+        using RfBlockDecodePipeline pipeline = BuildPipeline(
+            loader,
+            weakRfDiagnostics: true,
+            retainRfDiagnosticChannels: false,
+            float32Chroma: true,
+            fmDemodulatorMode: RfFmDemodulatorMode.VhsRustApproximation);
+        using var decoder = new RfBlockStreamDecoder(
+            pipeline,
+            TestBlockLength,
+            blockCut: 2,
+            blockCutEnd: 2,
+            workerThreads: 4);
+
+        RfDecodedSpan first = decoder.Read(stream, begin: 0, length: 24)!;
+        double[] expectedVideo = first.Video.ToArray();
+        double[] expectedEnvelope = first.Envelope!.ToArray();
+        double[] expectedVideoLowPass = first.VideoLowPass!.ToArray();
+        int created = pipeline.CreatedStreamOutputBufferSetCount;
+        Assert.Equal(2, created);
+        Assert.Equal(0, pipeline.RetainedStreamOutputBufferSetCount);
+
+        decoder.InvalidateCachedBlocks();
+        Assert.Equal(created, pipeline.RetainedStreamOutputBufferSetCount);
+
+        RfDecodedSpan second = decoder.Read(stream, begin: 0, length: 24)!;
+        AssertDoubleBitsEqual(expectedVideo, second.Video);
+        AssertDoubleBitsEqual(expectedEnvelope, second.Envelope!);
+        AssertDoubleBitsEqual(expectedVideoLowPass, second.VideoLowPass!);
+        Assert.Equal(created, pipeline.CreatedStreamOutputBufferSetCount);
+        Assert.Equal(0, pipeline.RetainedStreamOutputBufferSetCount);
+
+        decoder.InvalidateCachedBlocks();
+        Assert.Equal(created, pipeline.RetainedStreamOutputBufferSetCount);
+    }
+
+    [Fact(DisplayName = "Compact VHS stream output pool remains bounded")]
+    public void CompactVhsStreamOutputPoolRemainsBounded()
+    {
+        using RfBlockDecodePipeline pipeline = BuildPipeline(
+            new CountingSampleLoader(),
+            weakRfDiagnostics: true,
+            retainRfDiagnosticChannels: false,
+            float32Chroma: true,
+            fmDemodulatorMode: RfFmDemodulatorMode.VhsRustApproximation);
+        double[] input = Enumerable.Range(0, TestBlockLength)
+            .Select(index => Math.Sin(index * 0.19) + (0.2 * Math.Cos(index * 0.31)))
+            .ToArray();
+        int retainedCapacity = RfBlockDecodePipeline.MaximumRetainedStreamOutputBufferSets;
+        RfPipelineBlock[] blocks = Enumerable.Range(0, retainedCapacity + 16)
+            .Select(_ => pipeline.DecodePreparedStreamBlock(input, reportDiagnostics: false))
+            .ToArray();
+
+        Assert.Equal(blocks.Length, pipeline.CreatedStreamOutputBufferSetCount);
+        Assert.Equal(
+            blocks.Length,
+            blocks
+                .Select(block => block.Demodulated.Video)
+                .Distinct(ReferenceEqualityComparer.Instance)
+                .Count());
+
+        Parallel.ForEach(blocks, pipeline.ReleaseStreamBlock);
+        Assert.Equal(retainedCapacity, pipeline.RetainedStreamOutputBufferSetCount);
+
+        RfPipelineBlock[] reused = Enumerable.Range(0, retainedCapacity)
+            .Select(_ => pipeline.DecodePreparedStreamBlock(input, reportDiagnostics: false))
+            .ToArray();
+        Assert.Equal(blocks.Length, pipeline.CreatedStreamOutputBufferSetCount);
+        Assert.Equal(0, pipeline.RetainedStreamOutputBufferSetCount);
+
+        Parallel.ForEach(reused, pipeline.ReleaseStreamBlock);
+        Assert.Equal(retainedCapacity, pipeline.RetainedStreamOutputBufferSetCount);
+    }
+
+    [Fact(DisplayName = "Cancelled compact VHS prefetch returns completed stream outputs")]
+    public void CancelledCompactVhsPrefetchReturnsCompletedStreamOutputs()
+    {
+        var loader = new CountingSampleLoader();
+        using var stream = new MemoryStream();
+        using RfBlockDecodePipeline pipeline = BuildPipeline(
+            loader,
+            weakRfDiagnostics: true,
+            retainRfDiagnosticChannels: false,
+            float32Chroma: true,
+            fmDemodulatorMode: RfFmDemodulatorMode.VhsRustApproximation);
+        using var decoder = new RfBlockStreamDecoder(
+            pipeline,
+            TestBlockLength,
+            blockCut: 2,
+            blockCutEnd: 2,
+            workerThreads: 4,
+            prefetchBlocks: 2);
+
+        _ = decoder.Read(stream, begin: 0, length: 24);
+        WaitForReadCount(loader, expected: 4);
+        Assert.True(SpinWait.SpinUntil(
+            () => decoder.CachedPrefetchedBlockCount == 2,
+            TimeSpan.FromSeconds(5)));
+        int created = pipeline.CreatedStreamOutputBufferSetCount;
+        Assert.Equal(4, created);
+
+        decoder.InvalidateCachedBlocks();
+        Assert.Equal(created, pipeline.RetainedStreamOutputBufferSetCount);
+
+        _ = decoder.Read(stream, begin: 0, length: 24);
+        WaitForReadCount(loader, expected: 8);
+        Assert.True(SpinWait.SpinUntil(
+            () => decoder.CachedPrefetchedBlockCount == 2,
+            TimeSpan.FromSeconds(5)));
+        Assert.Equal(created, pipeline.CreatedStreamOutputBufferSetCount);
+
+        decoder.InvalidateCachedBlocks();
+        Assert.Equal(created, pipeline.RetainedStreamOutputBufferSetCount);
+    }
+
+    [Fact(DisplayName = "Compact VHS prefetch keeps selected blocks alive through span assembly")]
+    public void CompactVhsPrefetchKeepsSelectedBlocksAliveThroughSpanAssembly()
+    {
+        var loader = new CountingSampleLoader();
+        using var stream = new MemoryStream();
+        using RfBlockDecodePipeline pipeline = BuildPipeline(
+            loader,
+            weakRfDiagnostics: true,
+            retainRfDiagnosticChannels: false,
+            float32Chroma: true,
+            fmDemodulatorMode: RfFmDemodulatorMode.VhsRustApproximation);
+        using var decoder = new RfBlockStreamDecoder(
+            pipeline,
+            TestBlockLength,
+            blockCut: 2,
+            blockCutEnd: 2,
+            workerThreads: 4,
+            prefetchBlocks: 2);
+
+        using var referenceStream = new MemoryStream();
+        using RfBlockDecodePipeline referencePipeline = BuildPipeline(
+            new CountingSampleLoader(),
+            weakRfDiagnostics: true,
+            retainRfDiagnosticChannels: false,
+            float32Chroma: true,
+            fmDemodulatorMode: RfFmDemodulatorMode.VhsRustApproximation);
+        using var referenceDecoder = new RfBlockStreamDecoder(
+            referencePipeline,
+            TestBlockLength,
+            blockCut: 2,
+            blockCutEnd: 2,
+            workerThreads: 1);
+
+        _ = decoder.Read(stream, begin: 0, length: 18 * 12);
+        WaitForReadCount(loader, expected: 20);
+        Assert.True(SpinWait.SpinUntil(
+            () => decoder.CachedPrefetchedBlockCount == 2,
+            TimeSpan.FromSeconds(5)));
+
+        RfDecodedSpan actual = decoder.Read(stream, begin: 0, length: 22 * 12)!;
+        RfDecodedSpan expected = referenceDecoder.Read(
+            referenceStream,
+            begin: 0,
+            length: 22 * 12)!;
+
+        AssertDoubleBitsEqual(expected.Video, actual.Video);
+        AssertDoubleBitsEqual(expected.Envelope!, actual.Envelope!);
+        AssertDoubleBitsEqual(expected.VideoLowPass!, actual.VideoLowPass!);
+        AssertDoubleBitsEqual(expected.Chroma!, actual.Chroma!);
+    }
+
     [Fact(DisplayName = "RF decoded-block cache invalidation forces fresh parallel work")]
     public void RfDecodedBlockCacheInvalidationForcesFreshParallelWork()
     {
@@ -444,9 +672,34 @@ public sealed class RfBlockCacheConcurrencyTests
         bool float32Chroma = false,
         RfFmDemodulatorMode? fmDemodulatorMode = null)
     {
-        const int blockLength = 16;
-        Complex[] identity = RfDemodulator.IdentityFilter(blockLength);
-        double[] ones = Enumerable.Repeat(1.0, blockLength).ToArray();
+        RfBlockDecodePipeline pipeline = BuildPipeline(
+            loader,
+            weakRfDiagnostics,
+            optionalOutputs,
+            diagnosticLogger,
+            retainRfDiagnosticChannels,
+            float32Chroma,
+            fmDemodulatorMode);
+        return new RfBlockStreamDecoder(
+            pipeline,
+            TestBlockLength,
+            blockCut: 2,
+            blockCutEnd: 2,
+            workerThreads,
+            prefetchBlocks);
+    }
+
+    private static RfBlockDecodePipeline BuildPipeline(
+        IRfSampleLoader loader,
+        bool weakRfDiagnostics = false,
+        bool optionalOutputs = false,
+        Action<string, string>? diagnosticLogger = null,
+        bool retainRfDiagnosticChannels = true,
+        bool float32Chroma = false,
+        RfFmDemodulatorMode? fmDemodulatorMode = null)
+    {
+        Complex[] identity = RfDemodulator.IdentityFilter(TestBlockLength);
+        double[] ones = Enumerable.Repeat(1.0, TestBlockLength).ToArray();
         var filters = new DecodeFilterSet(
             identity,
             identity,
@@ -503,13 +756,7 @@ public sealed class RfBlockCacheConcurrencyTests
                 : null,
             diagnosticLogger: diagnosticLogger,
             retainRfDiagnosticChannels: retainRfDiagnosticChannels);
-        return new RfBlockStreamDecoder(
-            pipeline,
-            blockLength,
-            blockCut: 2,
-            blockCutEnd: 2,
-            workerThreads,
-            prefetchBlocks);
+        return pipeline;
     }
 
     private static void WaitForReadCount(CountingSampleLoader loader, int expected)
@@ -545,6 +792,22 @@ public sealed class RfBlockCacheConcurrencyTests
         }
 
         return output;
+    }
+
+    private static void AssertDoubleBitsEqual(ReadOnlySpan<double> expected, ReadOnlySpan<double> actual)
+    {
+        Assert.Equal(expected.Length, actual.Length);
+        Assert.True(
+            MemoryMarshal.AsBytes(expected).SequenceEqual(MemoryMarshal.AsBytes(actual)),
+            "Double sequences differ at the bit level.");
+    }
+
+    private static void AssertFloatBitsEqual(ReadOnlySpan<float> expected, ReadOnlySpan<float> actual)
+    {
+        Assert.Equal(expected.Length, actual.Length);
+        Assert.True(
+            MemoryMarshal.AsBytes(expected).SequenceEqual(MemoryMarshal.AsBytes(actual)),
+            "Float sequences differ at the bit level.");
     }
 
     private sealed class CountingSampleLoader : IRfSampleLoader
