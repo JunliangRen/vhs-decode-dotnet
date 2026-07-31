@@ -203,6 +203,212 @@ public sealed class VhsSyncDetectorCurrentTests
         Assert.InRange(allocated, 0, 64 * 1024);
     }
 
+    [Fact(DisplayName = "Current VHS level quantiles match sequential Quickselect for finite values")]
+    public void CurrentVhsLevelQuantilesMatchSequentialQuickselectForFiniteValues()
+    {
+        var random = new Random(4_315_520);
+        for (int iteration = 0; iteration < 256; iteration++)
+        {
+            int length = 33 + random.Next(8_192);
+            var source = new double[length];
+            for (int index = 0; index < source.Length; index++)
+            {
+                source[index] = index % 17 == 0
+                    ? 4_100_000.0
+                    : 3_700_000.0 + (random.NextDouble() * 600_000.0);
+            }
+
+            int syncTarget = (int)(length * 0.05);
+            int blankingTarget = (int)(length * 0.25);
+            double[] expectedWork = source.ToArray();
+            double[] actualWork = source.ToArray();
+            (double expectedSync, double expectedBlanking) =
+                VhsSyncDetector.SelectLevelQuantilesSequential(
+                    expectedWork,
+                    syncTarget,
+                    blankingTarget,
+                    length);
+            (double actualSync, double actualBlanking) =
+                VhsSyncDetector.SelectLevelQuantiles(
+                    actualWork,
+                    syncTarget,
+                    blankingTarget,
+                    length);
+
+            Assert.Equal(
+                BitConverter.DoubleToInt64Bits(expectedSync),
+                BitConverter.DoubleToInt64Bits(actualSync));
+            Assert.Equal(
+                BitConverter.DoubleToInt64Bits(expectedBlanking),
+                BitConverter.DoubleToInt64Bits(actualBlanking));
+        }
+    }
+
+    [Fact(DisplayName = "Current VHS level quantiles preserve exceptional-value fallback")]
+    public void CurrentVhsLevelQuantilesPreserveExceptionalValueFallback()
+    {
+        long[] exceptionalBits =
+        [
+            0,
+            unchecked((long)0x8000000000000000UL),
+            unchecked((long)0x7FF0000000000000UL),
+            unchecked((long)0xFFF0000000000000UL),
+            unchecked((long)0x7FF8000000000001UL),
+            unchecked((long)0xFFF8000000000001UL)
+        ];
+        var random = new Random(4_315_520);
+        for (int iteration = 0; iteration < 128; iteration++)
+        {
+            int length = 33 + random.Next(4_096);
+            var source = new double[length];
+            for (int index = 0; index < source.Length; index++)
+            {
+                source[index] = BitConverter.Int64BitsToDouble(random.NextInt64());
+            }
+
+            source[iteration % length] = BitConverter.Int64BitsToDouble(
+                exceptionalBits[iteration % exceptionalBits.Length]);
+            int syncTarget = (int)(length * 0.05);
+            int blankingTarget = (int)(length * 0.25);
+            double[] expectedWork = source.ToArray();
+            double[] actualWork = source.ToArray();
+            (double expectedSync, double expectedBlanking) =
+                VhsSyncDetector.SelectLevelQuantilesSequential(
+                    expectedWork,
+                    syncTarget,
+                    blankingTarget,
+                    length);
+            (double actualSync, double actualBlanking) =
+                VhsSyncDetector.SelectLevelQuantiles(
+                    actualWork,
+                    syncTarget,
+                    blankingTarget,
+                    length);
+
+            Assert.Equal(
+                BitConverter.DoubleToInt64Bits(expectedSync),
+                BitConverter.DoubleToInt64Bits(actualSync));
+            Assert.Equal(
+                BitConverter.DoubleToInt64Bits(expectedBlanking),
+                BitConverter.DoubleToInt64Bits(actualBlanking));
+            Assert.Equal(
+                expectedWork.Select(BitConverter.DoubleToInt64Bits),
+                actualWork.Select(BitConverter.DoubleToInt64Bits));
+        }
+    }
+
+    [Fact(DisplayName = "Current VHS radix level quantiles match retained Quickselect bit for bit")]
+    public void CurrentVhsRadixLevelQuantilesMatchRetainedQuickselectBitForBit()
+    {
+        var random = new Random(34_104_315);
+        int[] lengths =
+        [
+            1, 2, 3, 4, 7, 8, 15, 16, 17, 31, 32, 33, 63, 64, 65,
+            127, 128, 129, 257, 1_024, 8_192
+        ];
+        foreach (int length in lengths)
+        {
+            for (int iteration = 0; iteration < 64; iteration++)
+            {
+                var source = new double[length];
+                for (int index = 0; index < source.Length; index++)
+                {
+                    source[index] = index % 17 == 0
+                        ? 4_100_000.0
+                        : (random.Next(2) == 0 ? -1.0 : 1.0)
+                            * (1.0 + (random.NextDouble() * 10_000_000.0));
+                }
+
+                double[] original = source.ToArray();
+                int syncTarget = (int)(length * 0.05);
+                int blankingTarget = (int)(length * 0.25);
+                double[] expectedWork = source.ToArray();
+                double[] actualWork = new double[length];
+                var highHistogram = new int[VhsSyncDetector.RadixHistogramWidth];
+                var middleHistograms = new int[VhsSyncDetector.RadixHistogramWidth * 2];
+                (double expectedSync, double expectedBlanking) =
+                    VhsSyncDetector.SelectLevelQuantiles(
+                        expectedWork,
+                        syncTarget,
+                        blankingTarget,
+                        length);
+                (double actualSync, double actualBlanking) =
+                    VhsSyncDetector.SelectLevelQuantilesRadix(
+                        source,
+                        actualWork,
+                        highHistogram,
+                        middleHistograms,
+                        syncTarget,
+                        blankingTarget);
+
+                Assert.Equal(
+                    BitConverter.DoubleToInt64Bits(expectedSync),
+                    BitConverter.DoubleToInt64Bits(actualSync));
+                Assert.Equal(
+                    BitConverter.DoubleToInt64Bits(expectedBlanking),
+                    BitConverter.DoubleToInt64Bits(actualBlanking));
+                Assert.Equal(original, source);
+            }
+        }
+    }
+
+    [Fact(DisplayName = "Current VHS radix level quantiles preserve exceptional fallback workspace")]
+    public void CurrentVhsRadixLevelQuantilesPreserveExceptionalFallbackWorkspace()
+    {
+        long[] exceptionalBits =
+        [
+            0,
+            unchecked((long)0x8000000000000000UL),
+            unchecked((long)0x7FF0000000000000UL),
+            unchecked((long)0xFFF0000000000000UL),
+            unchecked((long)0x7FF8000000000001UL),
+            unchecked((long)0xFFF8000000000042UL)
+        ];
+        var random = new Random(341);
+        var highHistogram = new int[VhsSyncDetector.RadixHistogramWidth];
+        var middleHistograms = new int[VhsSyncDetector.RadixHistogramWidth * 2];
+        for (int iteration = 0; iteration < 128; iteration++)
+        {
+            int length = 33 + random.Next(4_096);
+            var source = new double[length];
+            for (int index = 0; index < source.Length; index++)
+            {
+                source[index] = 3_700_000.0 + (random.NextDouble() * 600_000.0);
+            }
+
+            source[iteration % length] = BitConverter.Int64BitsToDouble(
+                exceptionalBits[iteration % exceptionalBits.Length]);
+            int syncTarget = (int)(length * 0.05);
+            int blankingTarget = (int)(length * 0.25);
+            double[] expectedWork = source.ToArray();
+            double[] actualWork = new double[length];
+            (double expectedSync, double expectedBlanking) =
+                VhsSyncDetector.SelectLevelQuantiles(
+                    expectedWork,
+                    syncTarget,
+                    blankingTarget,
+                    length);
+            (double actualSync, double actualBlanking) =
+                VhsSyncDetector.SelectLevelQuantilesRadix(
+                    source,
+                    actualWork,
+                    highHistogram,
+                    middleHistograms,
+                    syncTarget,
+                    blankingTarget);
+
+            Assert.Equal(
+                BitConverter.DoubleToInt64Bits(expectedSync),
+                BitConverter.DoubleToInt64Bits(actualSync));
+            Assert.Equal(
+                BitConverter.DoubleToInt64Bits(expectedBlanking),
+                BitConverter.DoubleToInt64Bits(actualBlanking));
+            Assert.Equal(
+                expectedWork.Select(BitConverter.DoubleToInt64Bits),
+                actualWork.Select(BitConverter.DoubleToInt64Bits));
+        }
+    }
+
     [Fact(DisplayName = "Parallel current VHS boxcar matches serial detection bit for bit")]
     public void ParallelCurrentVhsBoxcarMatchesSerialDetectionBitForBit()
     {
