@@ -2,7 +2,7 @@
 
 **[English](README.md)** | [简体中文](README.zh-CN.md) | [日本語](README.ja.md)
 
-<!-- README_SYNC: 2026-07-31.05 -->
+<!-- README_SYNC: 2026-08-01.01 -->
 
 A .NET 11 rewrite of the decode-facing parts of
 [`oyvindln/vhs-decode`](https://github.com/oyvindln/vhs-decode), targeting
@@ -38,7 +38,7 @@ evidence, and remaining gaps.
   EIAJ, and supported PAL/NTSC variants.
 - TBC utility tools, the double-click GUI, and developer plotting windows are
   intentionally out of scope.
-- The Visual Studio 2026 `.slnx` solution has **1,173** standard xUnit v3 tests
+- The Visual Studio 2026 `.slnx` solution has **1,190** standard xUnit v3 tests
   that are visible in Test Explorer and runnable with `dotnet test`.
 
 <!-- SECTION: start -->
@@ -126,6 +126,13 @@ Across two opposite-order 1,000-frame pairs, mean wall time fell from 72.405 to
 0.18%, candidate working set stayed below 706 MiB, and no progressive slowdown
 was observed.
 
+The new direct raw `fLaC` input path does not affect the fixed `.lds` table.
+On one private 100-frame, 20-worker RF window, the Release 1.4.4 FFmpeg baseline
+and bundled-libsndfile candidate took 8.319 s and 7.345 s respectively (11.71%
+less wall time; 1.133x throughput), while luma, chroma, raw JSON, stdout,
+normalized stderr/logs, and all 200 ordered `fileLoc` values matched. This is a
+scoped single-pair observation, not a universal decoder speed claim.
+
 Each .NET cell shows median wall time followed by speedup versus its
 profile-matched Python column; values below `1.000x` are slower. Python PR341
 is merge commit `2f21e8ed6018b14561396cc95f1f6828054470b8`, the upstream peer
@@ -152,6 +159,11 @@ TBC, chroma, JSON, and log files are opened for concurrent reading while a
 decode is running, allowing compatible preview tools to inspect partial output
 without blocking the writer.
 
+Direct raw `fLaC` `.ldf`/`.flac` inputs that are 40 kHz mono PCM16 use the
+bundled libsndfile reader. Ogg/FLAC, stereo, PCM24, other sample rates,
+unfinished headers, and other containers retain the FFmpeg/PyAV-compatible
+path.
+
 <!-- SECTION: build -->
 
 ## Build and test
@@ -162,7 +174,7 @@ The pinned SDK is .NET `11.0.100-preview.6.26359.118`.
 dotnet restore VHSDecodeDotNet.slnx
 dotnet build VHSDecodeDotNet.slnx -c Release --no-restore
 dotnet test --solution VHSDecodeDotNet.slnx -c Release `
-  --no-build --no-restore --minimum-expected-tests 1173
+  --no-build --no-restore --minimum-expected-tests 1190
 ```
 
 Open `VHSDecodeDotNet.slnx` in Visual Studio 2026 to build, debug, and run the

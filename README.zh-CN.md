@@ -2,7 +2,7 @@
 
 [English](README.md) | **[简体中文](README.zh-CN.md)** | [日本語](README.ja.md)
 
-<!-- README_SYNC: 2026-07-31.05 -->
+<!-- README_SYNC: 2026-08-01.01 -->
 
 这是 [`oyvindln/vhs-decode`](https://github.com/oyvindln/vhs-decode)
 中解码相关部分的 .NET 11 重写，兼容目标为上游 release `v0.4.0`、commit
@@ -33,7 +33,7 @@
 - VHS 家族包括 VHS/S-VHS、Betamax、Video8/Hi8、U-matic、Type C、EIAJ
   以及上游支持的 PAL/NTSC 变体。
 - TBC 工具、双击启动的用户 GUI 和开发者绘图窗口明确不在范围内。
-- Visual Studio 2026 `.slnx` 包含 **1,173** 项标准 xUnit v3 测试；测试可在
+- Visual Studio 2026 `.slnx` 包含 **1,190** 项标准 xUnit v3 测试；测试可在
   Test Explorer 中查看，也可用 `dotnet test` 运行。
 
 <!-- SECTION: start -->
@@ -114,6 +114,12 @@ CVBS、LaserDisc 和 HiFi 当前会拒绝 `ipp-fast`，这些命令应使用 `ex
 62.752 秒（缩短 13.33%，吞吐提高 15.38%）。分配量仅变化 0.18%，候选工作集
 低于 706 MiB，且没有渐进减速。
 
+新的直接 raw `fLaC` 输入路径不会影响上面的固定 `.lds` 表。在同一个私有本地 RF
+窗口上进行的一组 100 帧、20-worker 配对中，Release 1.4.4 的 FFmpeg 基线与内置
+libsndfile 候选分别用时 8.319 s 和 7.345 s（墙钟缩短 11.71%，吞吐为 1.133x）；
+亮度、色度、原始 JSON、stdout、归一化 stderr/日志以及全部 200 个有序 `fileLoc`
+完全一致。这只是范围明确的单组观测，不是对所有解码的通用加速声明。
+
 每个 .NET 单元格依次给出墙钟中位数和相对同 profile Python 列的倍速；低于
 `1.000x` 表示更慢。Python PR341 使用合并提交
 `2f21e8ed6018b14561396cc95f1f6828054470b8`，它是 `current` 的上游对应版本。
@@ -135,6 +141,10 @@ CVBS、LaserDisc 和 HiFi 当前会拒绝 `ipp-fast`，这些命令应使用 `ex
 TBC、色度、JSON 和日志文件允许在解码期间并发读取，兼容的预览工具可以检查
 部分输出而不会阻塞写入。
 
+40 kHz、单声道 PCM16 的直接 raw `fLaC` `.ldf`/`.flac` 输入使用内置 libsndfile
+读取器。Ogg/FLAC、立体声、PCM24、其他采样率、未完成的文件头和其他容器继续使用
+与 FFmpeg/PyAV 兼容的路径。
+
 <!-- SECTION: build -->
 
 ## 构建与测试
@@ -145,7 +155,7 @@ TBC、色度、JSON 和日志文件允许在解码期间并发读取，兼容的
 dotnet restore VHSDecodeDotNet.slnx
 dotnet build VHSDecodeDotNet.slnx -c Release --no-restore
 dotnet test --solution VHSDecodeDotNet.slnx -c Release `
-  --no-build --no-restore --minimum-expected-tests 1173
+  --no-build --no-restore --minimum-expected-tests 1190
 ```
 
 在 Visual Studio 2026 中打开 `VHSDecodeDotNet.slnx`，即可构建、调试并通过

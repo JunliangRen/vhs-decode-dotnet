@@ -4,7 +4,7 @@
 
 [English](README.detailed.md) | [简体中文](README.detailed.zh-CN.md) | **[日本語](README.detailed.ja.md)**
 
-<!-- README_SYNC: 2026-07-31.05 -->
+<!-- README_SYNC: 2026-08-01.01 -->
 
 [`oyvindln/vhs-decode`](https://github.com/oyvindln/vhs-decode) の
 デコード関連部分を .NET 11 で再実装するプロジェクトです。現在は release
@@ -79,7 +79,7 @@
 | CVBS | release 対応システムを実装済み | PAL/NTSC 経路は動作します。まれな vblank とオプション間のケースには実キャプチャ fixture の追加が必要です。 |
 | LaserDisc | 実装済み。まれなキャプチャ差分あり | Video、VBI、EFM、analog audio、AC3、RF-TBC、metadata、recovery、PAL/NTSC 経路を接続済みです。 |
 | HiFi | 実装済み。実キャプチャ検証がさらに必要 | 型付き v0.4.0 CLI、境界付き並列デコード、後処理、WAV/FLAC 出力、preview、GNU Radio mode を接続済みです。境界付き 4 秒 NTSC Betamax explicit-carrier gate で Python の WAV byte と decoded FLAC PCM に一致します。 |
-| 入力 | 広範囲に実装済み | Raw input と一般的な FFmpeg/PyAV 相当の container 経路をカバーしています。まれな codec/timestamp は今後の対象です。 |
+| 入力 | 広範囲に実装済み | Raw input、bundled libsndfile へ厳密に限定した direct raw FLAC、一般的な FFmpeg/PyAV 相当の container 経路をカバーしています。まれな codec/timestamp は今後の対象です。 |
 | 出力とリカバリー | 実装済み。edge case が残る | Streaming TBC/audio、JSON snapshot、SQLite、log、disk-space 処理、recovery 順序をカバーしています。 |
 | 対話型 UI | 対象外 | デコード用 GUI と開発者向け plot/report ウィンドウは意図的に実装しません。 |
 
@@ -917,6 +917,26 @@ baseline/candidate の wall time が 26.242 秒から 24.741 秒（5.7% 減）�
 timestamp-normalized log はすべて一致しました。candidate は default `v0.4.0` と opt-in
 `current` の両 profile でも中断せず 1,000 frame / 2,000 field を完了し、同じ 6 comparison
 すべてで保存済みの各 Python oracle と完全一致しました。IPP は gate から除外しています。
+
+direct raw `fLaC` `.ldf`/`.flac` input は、最初の metadata block が完全な
+34-byte STREAMINFO で、40 kHz、mono、PCM16、既知の nonzero sample count を
+示す場合だけ bundled libsndfile を使います。handle は lazy-open され、sequential
+read は seek-free、random read は exact frame seek を使い、pooled PCM16 workspace
+から従来どおり `short` を `double` へ変換します。native open が unavailable または
+unsupported の場合だけ、既存の FFmpeg/PyAV-compatible loader へ一度切り替えます。
+Ogg/FLAC、stereo、PCM24、他の rate、unknown total、malformed header、`.vhs`、
+`.wav`、`raw.oga` は FFmpeg を維持します。native seek/read error は backend switch
+で隠さず、そのまま報告します。
+
+同じ private local RF window で、Release 1.4.4 の FFmpeg path と candidate の
+libsndfile path は default、`--threads 0`、`--threads 20` の luma、chroma、raw
+JSON、stdout、normalized stderr/log、ordered `fileLoc` がすべて一致しました。
+20-worker の interleaved 20-frame pair 3 組では wall median が 3.88 秒から
+2.99 秒になりました。default-worker median は 4.36 秒と 4.30 秒で range が
+重なります。より長い single 100-frame/200-field、20-worker pair は 8.319 s から
+7.345 s（11.71% 減、throughput 1.133x）となり、sampled aggregate `decode` plus
+FFmpeg peak working set は 797.0 から 724.9 MiB になりました。long-window result は
+範囲を限定した single-pair observation で、一般的な speed percentage ではありません。
 
 RF nonlinear/sub-deemphasis は、`RfDemodulator` ごとに exact-key の read-only high-pass
 response を 1 個ずつ保持するようになりました。key は block length と immutable high-pass
@@ -1883,16 +1903,17 @@ profile peer です。
 - `.NET SDK 11.0.100-preview.6.26359.118`（`global.json` で固定）
 - IDE として使用する場合は Visual Studio 2026
 - optional Intel IPP bridge の build には Visual Studio C++ Build Tools と Windows SDK
-- FFmpeg 対応 container input では `ffmpeg` と `ffprobe` が `PATH` 上に必要
-- default HiFi FLAC output と LD `--write-test-ldf` は bundled libsndfile を
-  使うため FFmpeg は不要。libsndfile が利用できない場合、LD は FFmpeg fallback
-  を維持
+- 厳密に限定した direct 40 kHz mono PCM16 raw-FLAC route 以外の container input
+  では `ffmpeg` と `ffprobe` が `PATH` 上に必要
+- direct raw-FLAC RF input、default HiFi FLAC output、LD `--write-test-ldf` は
+  bundled libsndfile を使うため FFmpeg は不要です。各 path は文書化した FFmpeg
+  fallback または compatibility boundary を維持します
 
 ```powershell
 .\tools\build-ipp-native.ps1
 dotnet restore VHSDecodeDotNet.slnx
 dotnet build VHSDecodeDotNet.slnx -c Release --no-restore
-dotnet test --solution VHSDecodeDotNet.slnx -c Release --no-build --no-restore --minimum-expected-tests 1173
+dotnet test --solution VHSDecodeDotNet.slnx -c Release --no-build --no-restore --minimum-expected-tests 1190
 ```
 
 最初の command は optional `ipp-fast` native artifact を含めるためのものです。
@@ -1905,7 +1926,7 @@ third-party notice を埋め込み、license sidecar file は追加しません�
 
 現在の正式な Release build は warning 0、error 0 です。xUnit v3 project は
 `dotnet test` と Visual Studio Test Explorer の両方で個別に検出できる
-**1,173** tests を公開します。
+**1,190** tests を公開します。
 
 <!-- SECTION: usage -->
 

@@ -102,6 +102,9 @@ public sealed class LdTestLdfWriterTests
             Assert.Equal(
                 seekExpected.Select(static sample => (double)sample),
                 ReadWithProductLoader(ldfPath, startSample: SeekStart, readLength: SeekLength));
+            Assert.Equal(
+                seekExpected.Select(static sample => (double)sample),
+                ReadWithFfmpegLoader(ldfPath, startSample: SeekStart, readLength: SeekLength));
         }
         finally
         {
@@ -222,6 +225,19 @@ public sealed class LdTestLdfWriterTests
     {
         IRfSampleLoader loader = RfLoaderFactory.CreateNative(path);
         using IDisposable? disposableLoader = loader as IDisposable;
+        Assert.IsType<LibsndfilePcm16SampleLoader>(loader);
+        using FileStream input = File.OpenRead(path);
+        double[]? samples = loader.Read(input, startSample, readLength);
+        Assert.NotNull(samples);
+        return samples;
+    }
+
+    private static double[] ReadWithFfmpegLoader(
+        string path,
+        long startSample,
+        int readLength)
+    {
+        using var loader = new FfmpegPcm16SampleLoader(path);
         using FileStream input = File.OpenRead(path);
         double[]? samples = loader.Read(input, startSample, readLength);
         Assert.NotNull(samples);
