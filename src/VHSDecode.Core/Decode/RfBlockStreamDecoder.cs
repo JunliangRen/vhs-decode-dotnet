@@ -31,11 +31,13 @@ public sealed class RfBlockStreamDecoder : IDisposable
     private readonly Dictionary<long, RfPipelineBlock> _decodedBlockCache = [];
     private readonly Dictionary<long, RfPipelineBlock> _prefetchedBlockCache = [];
     private readonly Dictionary<long, RfPipelineBlock> _sequentialBlockCache = [];
+    private readonly List<RfPipelineBlock> _serialDeferredReleases = [];
     private readonly int _decodedBlockCacheCapacity;
     private Stream? _decodedBlockCacheStream;
     private long? _lastReadFirstBlock;
     private long? _lastSequentialDecodedBlock;
     private PrefetchOperation? _prefetchOperation;
+    private int _prefetchCancellationCount;
     private readonly ReusableSpanBuffers?[] _reusableSpanBuffers = new ReusableSpanBuffers?[ReusableSpanBufferSetCapacity];
     private bool _disposed;
 
@@ -95,6 +97,8 @@ public sealed class RfBlockStreamDecoder : IDisposable
     public int PrefetchBlocks { get; }
 
     internal int PrefetchWorkerThreads { get; }
+
+    internal int PrefetchCancellationCount => Volatile.Read(ref _prefetchCancellationCount);
 
     internal int CachedDecodedBlockCount => _decodedBlockCache.Count;
 
@@ -426,65 +430,74 @@ public sealed class RfBlockStreamDecoder : IDisposable
                 }
             }
 
-            for (long block = firstBlock; block <= lastBlock; block++)
+            List<RfPipelineBlock> deferredReleases = _serialDeferredReleases;
+            try
             {
-                if (_pipeline.RequiresSequentialBlockDecode
-                    && _lastSequentialDecodedBlock is { } lastDecoded
-                    && block > lastDecoded + 1)
+                for (long block = firstBlock; block <= lastBlock; block++)
                 {
-                    for (long warmBlock = lastDecoded + 1; warmBlock < block; warmBlock++)
+                    if (_pipeline.RequiresSequentialBlockDecode
+                        && _lastSequentialDecodedBlock is { } lastDecoded
+                        && block > lastDecoded + 1)
                     {
-                        long warmSample = checked(warmBlock * BlockStride);
-                        RfPipelineBlock? warmed = _pipeline.DecodeStreamBlockWithInput(
-                            stream,
-                            warmSample,
-                            BlockLength);
-                        if (warmed is null)
+                        for (long warmBlock = lastDecoded + 1; warmBlock < block; warmBlock++)
                         {
-                            return null;
-                        }
+                            long warmSample = checked(warmBlock * BlockStride);
+                            RfPipelineBlock? warmed = _pipeline.DecodeStreamBlockWithInput(
+                                stream,
+                                warmSample,
+                                BlockLength);
+                            if (warmed is null)
+                            {
+                                return null;
+                            }
 
-                        _sequentialBlockCache[warmBlock] = warmed;
-                        _lastSequentialDecodedBlock = warmBlock;
-                    }
-                }
-
-                RfPipelineBlock? pipelineBlock;
-                if (_pipeline.RequiresSequentialBlockDecode
-                    && _sequentialBlockCache.TryGetValue(block, out RfPipelineBlock? cachedBlock))
-                {
-                    pipelineBlock = cachedBlock;
-                }
-                else if (!_pipeline.RequiresSequentialBlockDecode
-                    && TryTakeDecodedBlock(block, out cachedBlock))
-                {
-                    pipelineBlock = cachedBlock;
-                }
-                else
-                {
-                    StopPrefetchBeforeDirectRead();
-                    long sample = checked(block * BlockStride);
-                    pipelineBlock = _pipeline.DecodeStreamBlockWithInput(stream, sample, BlockLength);
-                    if (pipelineBlock is not null && _pipeline.RequiresSequentialBlockDecode)
-                    {
-                        _sequentialBlockCache[block] = pipelineBlock;
-                        if (!_lastSequentialDecodedBlock.HasValue || block > _lastSequentialDecodedBlock.Value)
-                        {
-                            _lastSequentialDecodedBlock = block;
+                            _sequentialBlockCache[warmBlock] = warmed;
+                            _lastSequentialDecodedBlock = warmBlock;
                         }
                     }
-                    else if (pipelineBlock is not null)
+
+                    RfPipelineBlock? pipelineBlock;
+                    if (_pipeline.RequiresSequentialBlockDecode
+                        && _sequentialBlockCache.TryGetValue(block, out RfPipelineBlock? cachedBlock))
                     {
-                        CacheDecodedBlock(block, pipelineBlock);
+                        pipelineBlock = cachedBlock;
                     }
-                }
+                    else if (!_pipeline.RequiresSequentialBlockDecode
+                        && TryTakeDecodedBlock(block, out cachedBlock, deferredReleases))
+                    {
+                        pipelineBlock = cachedBlock;
+                    }
+                    else
+                    {
+                        StopPrefetchBeforeDirectRead();
+                        long sample = checked(block * BlockStride);
+                        pipelineBlock = _pipeline.DecodeStreamBlockWithInput(stream, sample, BlockLength);
+                        if (pipelineBlock is not null && _pipeline.RequiresSequentialBlockDecode)
+                        {
+                            _sequentialBlockCache[block] = pipelineBlock;
+                            if (!_lastSequentialDecodedBlock.HasValue || block > _lastSequentialDecodedBlock.Value)
+                            {
+                                _lastSequentialDecodedBlock = block;
+                            }
+                        }
+                        else if (pipelineBlock is not null)
+                        {
+                            CacheDecodedBlock(block, pipelineBlock, deferredReleases);
+                        }
+                    }
 
-                if (pipelineBlock is null)
-                {
-                    return null;
-                }
+                    if (pipelineBlock is null)
+                    {
+                        return null;
+                    }
 
-                AppendBlock(pipelineBlock);
+                    AppendBlock(pipelineBlock);
+                    ReleaseDeferredBlocks(deferredReleases);
+                }
+            }
+            finally
+            {
+                ReleaseDeferredBlocks(deferredReleases);
             }
         }
         else
@@ -724,6 +737,16 @@ public sealed class RfBlockStreamDecoder : IDisposable
         }
     }
 
+    private void ReleaseDeferredBlocks(List<RfPipelineBlock> deferredReleases)
+    {
+        foreach (RfPipelineBlock block in deferredReleases)
+        {
+            _pipeline.ReleaseStreamBlock(block);
+        }
+
+        deferredReleases.Clear();
+    }
+
     private void PrepareDecodedBlockCache(Stream stream, long firstBlock)
     {
         if (_pipeline.RequiresSequentialBlockDecode)
@@ -810,7 +833,7 @@ public sealed class RfBlockStreamDecoder : IDisposable
         if (_prefetchedBlockCache.Remove(block, out cached))
         {
             decoded = cached;
-            _pipeline.ReportDeferredDiagnostics(decoded);
+            ReportDeferredDiagnosticsOrRelease(decoded);
             CacheDecodedBlock(block, decoded, deferredReleases);
             return true;
         }
@@ -834,7 +857,7 @@ public sealed class RfBlockStreamDecoder : IDisposable
             if (prefetched is not null)
             {
                 decoded = prefetched;
-                _pipeline.ReportDeferredDiagnostics(decoded);
+                ReportDeferredDiagnosticsOrRelease(decoded);
                 CacheDecodedBlock(block, decoded, deferredReleases);
                 return true;
             }
@@ -844,6 +867,19 @@ public sealed class RfBlockStreamDecoder : IDisposable
 
         decoded = null!;
         return false;
+    }
+
+    private void ReportDeferredDiagnosticsOrRelease(RfPipelineBlock decoded)
+    {
+        try
+        {
+            _pipeline.ReportDeferredDiagnostics(decoded);
+        }
+        catch
+        {
+            _pipeline.ReleaseStreamBlock(decoded);
+            throw;
+        }
     }
 
     private void StartPrefetch(Stream stream, long lastBlock)
@@ -1053,6 +1089,7 @@ public sealed class RfBlockStreamDecoder : IDisposable
         if (cancel)
         {
             operation.Cancellation.Cancel();
+            Interlocked.Increment(ref _prefetchCancellationCount);
         }
 
         try

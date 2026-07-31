@@ -1840,7 +1840,11 @@ set return to a concurrent pool. Public `DecodePreparedBlock` results remain
 independently allocated. Failed workers, cancelled prefetch, cache
 invalidation, replacement, eviction, stream changes, and disposal all return
 eligible sets; an eviction needed by the active parallel assembly is deferred
-until copying completes. The idle pool retains at most 48 sets, matching the
+until copying completes. Serial assembly likewise defers a low-numbered block
+that evicts itself from a full cache. A throwing deferred diagnostic returns
+its harvested block before propagating the exception, and an in-flight
+prefetch cancellation test holds a later input read open while verifying every
+completed output is reclaimed. The idle pool retains at most 48 sets, matching the
 decoded cache's maximum configured capacity: 16 base entries plus up to 32
 prefetch allowance entries. Active decoded or prefetched blocks and the current
 span's leases are not part of that retained count, so total live sets can
@@ -1861,10 +1865,10 @@ decode time from 8.72 to 8.58 seconds (1.61% lower) and mean decode time from
 gain is deliberately classified as modest because run-to-run variance remains
 visible; the allocation reduction is the primary result.
 
-The final candidate passed a zero-warning Release build and all 1,138 xUnit v3
-tests locally. GitHub Actions independently discovered all 1,138 tests; its
-clean runner skipped the optional LD AC3 reference-pipeline test when the
-external AC3 tools were unavailable and passed the remaining 1,137. Twelve
+The reviewed candidate passed a zero-warning Release build and all 1,141 xUnit
+v3 tests locally. The GitHub Actions command requires at least 1,141
+discoverable tests; a clean runner may skip the optional LD AC3
+reference-pipeline test when the external AC3 tools are unavailable. Twelve
 strict main/candidate runs covered Exact v0.4.0 and `current`
 with `--threads 0`, default-five, and `--threads 20`; all luma, chroma, raw
 JSON, stdout, normalized stderr/logs, and ordered `fileLoc` values matched.
@@ -1899,7 +1903,7 @@ Requirements:
 .\tools\build-ipp-native.ps1
 dotnet restore VHSDecodeDotNet.slnx
 dotnet build VHSDecodeDotNet.slnx -c Release --no-restore
-dotnet test --solution VHSDecodeDotNet.slnx -c Release --no-build --no-restore --minimum-expected-tests 1138
+dotnet test --solution VHSDecodeDotNet.slnx -c Release --no-build --no-restore --minimum-expected-tests 1141
 ```
 
 The first command includes the optional `ipp-fast` native artifact; omit it for
@@ -1912,7 +1916,7 @@ deployment computer. Binary-only single-file releases embed
 sidecar license files. An Exact-only build may omit the native build step.
 
 The current formal Release build has zero warnings and errors. The xUnit v3
-project exposes **1,138** independently discoverable tests to both
+project exposes **1,141** independently discoverable tests to both
 `dotnet test` and Visual Studio Test Explorer.
 
 <!-- SECTION: usage -->

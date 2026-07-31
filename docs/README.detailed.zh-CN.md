@@ -1474,7 +1474,10 @@ RF 包络、低通视频和 float32 色度。块仍在缓存中或仍参与当�
 始终独占这些数组；两种用途都结束后，缓冲组才可归还并发池。公开
 `DecodePreparedBlock` 的结果仍独立分配。worker 失败、预取取消、缓存失效、
 替换、淘汰、输入流切换和释放都会归还符合条件的缓冲；若本次并行拼装仍需要
-被淘汰块，则延迟到复制结束后再归还。空闲池最多保留 48 组，对应 decoded
+被淘汰块，则延迟到复制结束后再归还。串行拼装中，若低编号块在满缓存内淘汰
+自身，也同样延迟归还。延迟诊断回调抛异常时会先归还已接管的块；in-flight
+预取取消测试还会阻塞后续输入读取，并验证所有已完成输出均被回收。空闲池最多
+保留 48 组，对应 decoded
 cache 的最大配置容量：16 个基础条目加最多 32 个预取额度条目。活动的已解码块、
 预取块和当前 span 的 lease 不计入这个保留数，因此活动缓冲总数可以暂时超过
 48。DSP 类型、系数、表达式、运算顺序、padding 和 field 提交顺序均未改变。
@@ -1490,9 +1493,9 @@ cache 的最大配置容量：16 个基础条目加最多 32 个预取额度条�
 （减少 1.07%）；墙钟中位数减少 1.72%。运行间仍有可见波动，因此吞吐收益
 明确归类为小幅，主要结果是分配量下降。
 
-最终候选在本机通过零警告 Release 构建和全部 1,138 项 xUnit v3 测试。
-GitHub Actions 也发现了全部 1,138 项测试；其干净 runner 因缺少外部 AC3 工具
-跳过可选的 LD AC3 参考管线测试，其余 1,137 项全部通过。12 次严格 main/candidate
+复审后的候选在本机通过零警告 Release 构建和全部 1,141 项 xUnit v3 测试。
+GitHub Actions 命令要求至少发现 1,141 项测试；干净 runner 缺少外部 AC3 工具时，
+可以跳过可选的 LD AC3 参考管线测试。12 次严格 main/candidate
 运行覆盖 Exact v0.4.0 与 `current` 的 `--threads 0`、默认 5
 workers 和 `--threads 20`；亮度、色度、原始 JSON、stdout、归一化
 stderr/日志及有序 `fileLoc` 全部一致。刷新后的 60 次 Exact/IPP-fast、
@@ -1523,7 +1526,7 @@ Python v0.4.0 `g4315520 --threads 0` 证据继续作为传递的上游参考。
 .\tools\build-ipp-native.ps1
 dotnet restore VHSDecodeDotNet.slnx
 dotnet build VHSDecodeDotNet.slnx -c Release --no-restore
-dotnet test --solution VHSDecodeDotNet.slnx -c Release --no-build --no-restore --minimum-expected-tests 1138
+dotnet test --solution VHSDecodeDotNet.slnx -c Release --no-build --no-restore --minimum-expected-tests 1141
 ```
 
 第一条命令用于包含可选的 `ipp-fast` 原生产物；只构建 Exact 时可以省略。
@@ -1534,7 +1537,7 @@ Intel oneAPI。只含二进制的单文件发布会嵌入 `vhsdecode_ipp.dll` �
 notice，不会额外生成许可证 sidecar 文件。只构建 Exact 后端时可以省略原生构建步骤。
 
 当前正式 Release 构建为零警告、零错误。xUnit v3 项目向
-`dotnet test` 和 Visual Studio Test Explorer 暴露 **1,138** 个可独立发现的测试。
+`dotnet test` 和 Visual Studio Test Explorer 暴露 **1,141** 个可独立发现的测试。
 
 <!-- SECTION: usage -->
 

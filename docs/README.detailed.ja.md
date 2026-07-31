@@ -1785,7 +1785,11 @@ ownership を管理します。block が cache 内にある間、または現在
 concurrent pool に返します。public `DecodePreparedBlock` result は独立 allocation
 のままです。worker failure、cancelled prefetch、cache invalidation、replacement、
 eviction、stream change、disposal は eligible set を返し、active parallel
-assembly が必要とする eviction は copy 完了まで返却を遅延します。idle pool の
+assembly が必要とする eviction は copy 完了まで返却を遅延します。serial
+assembly でも full cache 内で low-numbered block が自分自身を evict する場合は
+返却を遅延します。deferred diagnostic callback が例外を投げた場合は harvested
+block を返してから例外を再送出し、in-flight prefetch cancellation test は後続の
+input read を block した状態で completed output がすべて回収されることを確認します。idle pool の
 retained hard limit は 48 sets で、decoded cache の maximum configured capacity、
 すなわち base 16 entries と最大 32 prefetch allowance entries に一致します。
 active decoded/prefetched block と current span lease は retained count に含まれず、
@@ -1806,10 +1810,10 @@ median が 8.72 から 8.58 秒（1.61% 減）、mean が 8.710 から 8.617 秒
 残るため throughput gain は modest と明示し、allocation reduction を主結果と
 します。
 
-final candidate は local で warning 0 の Release build と xUnit v3 test 1,138 件を
-すべて pass しました。GitHub Actions も 1,138 tests すべてを discover し、clean
-runner では external AC3 tools がないため optional LD AC3 reference-pipeline test
-1 件を skip、残り 1,137 件をすべて pass しました。strict main/candidate run
+reviewed candidate は local で warning 0 の Release build と xUnit v3 test 1,141 件を
+すべて pass しました。GitHub Actions command は discoverable test 1,141 件以上を
+要求し、clean runner に external AC3 tools がない場合は optional LD AC3
+reference-pipeline test を skip できます。strict main/candidate run
 12 回は Exact v0.4.0/`current` の
 `--threads 0`、default-five、`--threads 20` を対象にし、luma、chroma、raw JSON、
 stdout、normalized stderr/log、ordered `fileLoc` が一致しました。refreshed
@@ -1842,7 +1846,7 @@ reference とします。
 .\tools\build-ipp-native.ps1
 dotnet restore VHSDecodeDotNet.slnx
 dotnet build VHSDecodeDotNet.slnx -c Release --no-restore
-dotnet test --solution VHSDecodeDotNet.slnx -c Release --no-build --no-restore --minimum-expected-tests 1138
+dotnet test --solution VHSDecodeDotNet.slnx -c Release --no-build --no-restore --minimum-expected-tests 1141
 ```
 
 最初の command は optional `ipp-fast` native artifact を含めるためのものです。
@@ -1855,7 +1859,7 @@ third-party notice を埋め込み、license sidecar file は追加しません�
 
 現在の正式な Release build は warning 0、error 0 です。xUnit v3 project は
 `dotnet test` と Visual Studio Test Explorer の両方で個別に検出できる
-**1,138** tests を公開します。
+**1,141** tests を公開します。
 
 <!-- SECTION: usage -->
 

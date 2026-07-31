@@ -375,6 +375,54 @@ public sealed class RfBlockCacheConcurrencyTests
         Assert.Equal(created, pipeline.RetainedStreamOutputBufferSetCount);
     }
 
+    [Fact(DisplayName = "Serial compact VHS cache eviction keeps the current block alive through assembly")]
+    public void SerialCompactVhsCacheEvictionKeepsCurrentBlockAliveThroughAssembly()
+    {
+        using var stream = new MemoryStream();
+        using RfBlockDecodePipeline pipeline = BuildPipeline(
+            new CountingSampleLoader(),
+            weakRfDiagnostics: true,
+            retainRfDiagnosticChannels: false,
+            float32Chroma: true,
+            fmDemodulatorMode: RfFmDemodulatorMode.VhsRustApproximation);
+        using var decoder = new RfBlockStreamDecoder(
+            pipeline,
+            TestBlockLength,
+            blockCut: 2,
+            blockCutEnd: 2,
+            workerThreads: 1);
+
+        using var referenceStream = new MemoryStream();
+        using RfBlockDecodePipeline referencePipeline = BuildPipeline(
+            new CountingSampleLoader(),
+            weakRfDiagnostics: true,
+            retainRfDiagnosticChannels: false,
+            float32Chroma: true,
+            fmDemodulatorMode: RfFmDemodulatorMode.VhsRustApproximation);
+        using var referenceDecoder = new RfBlockStreamDecoder(
+            referencePipeline,
+            TestBlockLength,
+            blockCut: 2,
+            blockCutEnd: 2,
+            workerThreads: 1);
+
+        _ = decoder.Read(stream, begin: 0, length: 20 * 12);
+        Assert.Equal(16, decoder.CachedDecodedBlockCount);
+        Assert.Equal(17, pipeline.CreatedStreamOutputBufferSetCount);
+        Assert.Equal(1, pipeline.RetainedStreamOutputBufferSetCount);
+
+        RfDecodedSpan actual = decoder.Read(stream, begin: 0, length: 12)!;
+        RfDecodedSpan expected = referenceDecoder.Read(referenceStream, begin: 0, length: 12)!;
+
+        AssertDoubleBitsEqual(expected.Video, actual.Video);
+        AssertDoubleBitsEqual(expected.Envelope!, actual.Envelope!);
+        AssertDoubleBitsEqual(expected.VideoLowPass!, actual.VideoLowPass!);
+        AssertDoubleBitsEqual(expected.Chroma!, actual.Chroma!);
+        Assert.Equal(16, decoder.CachedDecodedBlockCount);
+        Assert.Equal(17, pipeline.CreatedStreamOutputBufferSetCount);
+        Assert.Equal(1, pipeline.RetainedStreamOutputBufferSetCount);
+    }
+
     [Fact(DisplayName = "Compact VHS stream output pool remains bounded")]
     public void CompactVhsStreamOutputPoolRemainsBounded()
     {
@@ -493,6 +541,112 @@ public sealed class RfBlockCacheConcurrencyTests
 
         decoder.InvalidateCachedBlocks();
         Assert.Equal(created, pipeline.RetainedStreamOutputBufferSetCount);
+    }
+
+    [Fact(DisplayName = "In-flight compact VHS prefetch cancellation returns every stream output")]
+    public async Task InFlightCompactVhsPrefetchCancellationReturnsEveryStreamOutput()
+    {
+        using var loader = new BlockingFutureSampleLoader(blockedSample: 36);
+        using var stream = new MemoryStream();
+        using RfBlockDecodePipeline pipeline = BuildPipeline(
+            loader,
+            weakRfDiagnostics: true,
+            retainRfDiagnosticChannels: false,
+            float32Chroma: true,
+            fmDemodulatorMode: RfFmDemodulatorMode.VhsRustApproximation);
+        using var decoder = new RfBlockStreamDecoder(
+            pipeline,
+            TestBlockLength,
+            blockCut: 2,
+            blockCutEnd: 2,
+            workerThreads: 4,
+            prefetchBlocks: 2);
+
+        _ = decoder.Read(stream, begin: 0, length: 24);
+        await loader.Blocked.WaitAsync(
+            TimeSpan.FromSeconds(5),
+            TestContext.Current.CancellationToken);
+        Assert.True(SpinWait.SpinUntil(
+            () => pipeline.CreatedStreamOutputBufferSetCount >= 3,
+            TimeSpan.FromSeconds(5)));
+        int created = pipeline.CreatedStreamOutputBufferSetCount;
+        int cancellationCount = decoder.PrefetchCancellationCount;
+        Task invalidation = Task.Run(
+            decoder.InvalidateCachedBlocks,
+            TestContext.Current.CancellationToken);
+
+        try
+        {
+            Assert.True(SpinWait.SpinUntil(
+                () => decoder.PrefetchCancellationCount > cancellationCount,
+                TimeSpan.FromSeconds(5)));
+            Assert.False(invalidation.IsCompleted);
+        }
+        finally
+        {
+            loader.Release();
+        }
+
+        await invalidation.WaitAsync(
+            TimeSpan.FromSeconds(5),
+            TestContext.Current.CancellationToken);
+        Assert.Equal(created, pipeline.RetainedStreamOutputBufferSetCount);
+    }
+
+    [Fact(DisplayName = "Throwing deferred diagnostics return harvested compact VHS outputs")]
+    public async Task ThrowingDeferredDiagnosticsReturnHarvestedCompactVhsOutputs()
+    {
+        using var loader = new BlockingFutureSampleLoader(
+            blockedSample: 36,
+            returnZeros: true);
+        using var stream = new MemoryStream();
+        int diagnosticCalls = 0;
+        using RfBlockDecodePipeline pipeline = BuildPipeline(
+            loader,
+            weakRfDiagnostics: true,
+            diagnosticLogger: (_, _) =>
+            {
+                if (Interlocked.Increment(ref diagnosticCalls) == 3)
+                {
+                    throw new InvalidOperationException("Synthetic deferred diagnostic failure.");
+                }
+            },
+            retainRfDiagnosticChannels: false,
+            float32Chroma: true,
+            fmDemodulatorMode: RfFmDemodulatorMode.VhsRustApproximation);
+        using var decoder = new RfBlockStreamDecoder(
+            pipeline,
+            TestBlockLength,
+            blockCut: 2,
+            blockCutEnd: 2,
+            workerThreads: 4,
+            prefetchBlocks: 2);
+
+        _ = decoder.Read(stream, begin: 0, length: 24);
+        await loader.Blocked.WaitAsync(
+            TimeSpan.FromSeconds(5),
+            TestContext.Current.CancellationToken);
+        Assert.True(SpinWait.SpinUntil(
+            () => decoder.CachedPrefetchedBlockCount == 1,
+            TimeSpan.FromSeconds(5)));
+        Assert.Equal(3, pipeline.CreatedStreamOutputBufferSetCount);
+
+        try
+        {
+            InvalidOperationException exception = Assert.Throws<InvalidOperationException>(
+                () => decoder.Read(stream, begin: 24, length: 12));
+            Assert.Equal("Synthetic deferred diagnostic failure.", exception.Message);
+            Assert.Equal(3, diagnosticCalls);
+        }
+        finally
+        {
+            loader.Release();
+        }
+
+        decoder.InvalidateCachedBlocks();
+        Assert.Equal(
+            pipeline.CreatedStreamOutputBufferSetCount,
+            pipeline.RetainedStreamOutputBufferSetCount);
     }
 
     [Fact(DisplayName = "Compact VHS prefetch keeps selected blocks alive through span assembly")]
@@ -940,7 +1094,9 @@ public sealed class RfBlockCacheConcurrencyTests
         }
     }
 
-    private sealed class BlockingFutureSampleLoader(long blockedSample) : IRfSampleLoader, IDisposable
+    private sealed class BlockingFutureSampleLoader(
+        long blockedSample,
+        bool returnZeros = false) : IRfSampleLoader, IDisposable
     {
         private readonly TaskCompletionSource<bool> _blocked = new(
             TaskCreationOptions.RunContinuationsAsynchronously);
@@ -964,9 +1120,11 @@ public sealed class RfBlockCacheConcurrencyTests
                     _release.Wait(TimeSpan.FromSeconds(10));
                 }
 
-                return Enumerable.Range(0, readLength)
-                    .Select(index => (double)(sample + index))
-                    .ToArray();
+                return returnZeros
+                    ? new double[readLength]
+                    : Enumerable.Range(0, readLength)
+                        .Select(index => (double)(sample + index))
+                        .ToArray();
             }
             finally
             {
