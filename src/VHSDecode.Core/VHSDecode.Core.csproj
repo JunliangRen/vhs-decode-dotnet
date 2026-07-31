@@ -27,7 +27,7 @@
     <PackageReference Include="Microsoft.Data.Sqlite.Core" Version="11.0.0-preview.6.26359.118" />
     <PackageReference Include="NetMQ" Version="4.0.4.3" />
     <PackageReference Include="SQLitePCLRaw.bundle_winsqlite3" Version="2.1.11" />
-    <!-- Override NetMQ's vulnerable transitive version. -->
+    <!-- Align NetMQ's transitive dependency with the pinned .NET 11 preview runtime. -->
     <PackageReference Include="System.Security.Cryptography.Xml" Version="11.0.0-preview.6.26359.118" />
   </ItemGroup>
 
