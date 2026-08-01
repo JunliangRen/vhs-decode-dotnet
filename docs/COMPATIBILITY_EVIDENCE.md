@@ -748,10 +748,22 @@ possible capture has already been proven byte-for-byte identical.
   and `BF71DD78409714E7394FA723ACE8F853D375A502960E582B9A9E430760797FEB`
 - a complete four-frame `current` comparison against pinned upstream PR 341
   aligned all eight `fileLoc` values and stdout but did not match complete
-  luma, chroma, or JSON. The isolated prefilter replay above proves the new
-  Super-Gaussian stage itself; earlier HSync/VSync profile stages still require
-  capture-wide parity work, so `current` remains opt-in and is not eligible for
-  default promotion
+  luma, chroma, or JSON. That fixture remains an unresolved compatibility
+  surface until it is rerun against the current implementation
+- a separate natural-start 20-frame `current` comparison on a private local PAL
+  VHS RF capture against merged upstream PR 341 commit
+  `2f21e8ed6018b14561396cc95f1f6828054470b8` matched all 40 fields. Luma and
+  chroma SHA-256 values were
+  `512CADF432E18565FA6C0FE5FADAA70F173207ADB139906709CBDE3015FAC952`
+  and `D366BB2ECB5F3CFB3361A9517F76F66EA83418D7FB2AE5A3F01E1EAF93EB0E52`;
+  ordered `fileLoc`, raw stdout, timing-normalized stderr, all 754
+  timestamp-normalized log lines, and JSON after normalizing only source
+  identity also matched. Exact `current` produced the same raw TBC/JSON/stdout
+  and normalized diagnostics at `--threads 0`, default, and `--threads 20`.
+  This is an additional real-capture gate and does not erase the distinct
+  four-frame mismatch above. `current` remains opt-in because it targets a
+  newer upstream behavior profile rather than the release-default v0.4.0
+  contract
 - VHS `--track_phase 0|1` now seeds the first field's chroma rotation index as
   well as the track-dependent luma `ire0` adjustment, with each rendered field
   consuming the same detected/alternated next-track index that v0.4.0 stores
@@ -1607,6 +1619,12 @@ possible capture has already been proven byte-for-byte identical.
   the 30-step/5-IRE pulse-count search and finally the legacy level detector;
   `--fallback_vsync` enables the upstream abnormal-long-pulse candidate, while
   405/819-line systems retain the upstream serration bypass
+- the v0.4.0 serration default path now preserves the upstream detector
+  watermark: reversed sync/blank defaults are used only after a completed
+  measurement reports no serration, while an unmeasured detector performs the
+  normal first observation. Field-state overrides keep their original
+  precedence, and warning text/classification matches the upstream fallback
+  branch; the opt-in `current` profile remains isolated from this v0.4.0 rule
 - VSync envelope/minima work and harmonic power-ratio search now overlap over
   one shared read-only padded input; candidate arbitration, moving levels, and
   detector state updates remain ordered after both branches finish
@@ -2149,7 +2167,7 @@ dotnet test --solution VHSDecodeDotNet.slnx --no-build
 ```
 
 The current formal solution build completes with zero warnings and errors, and
-the xUnit v3 project exposes 1,195 independently discoverable tests
+the xUnit v3 project exposes 1,222 independently discoverable tests
 to `dotnet test` and Visual Studio Test Explorer. On the
 same Windows machine and fixtures, Release wall-clock measurements for one
 frame were 2.346 s versus 7.193 s for NTSC VHS and 1.651 s versus 5.865 s for

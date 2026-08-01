@@ -164,6 +164,13 @@ quirk; a correction would require a separate profile change. Separate
 end-to-end gates keep the default `v0.4.0` profile identical across
 `--threads 0`, default, and `--threads 20`.
 
+A natural-start 20-frame gate on a private local PAL VHS RF capture
+also matches merged Python PR 341 and Exact `current` across all 40 fields:
+luma/chroma bytes, ordered `fileLoc`, stdout, timing-normalized stderr,
+754 timestamp-normalized log lines, and JSON after normalizing only source
+identity. Exact `current` remains deterministic at `--threads 0`, default,
+and `--threads 20` on that gate.
+
 ### 1,000-frame release gate
 
 The same private local NTSC `.ldf` capture was decoded twice with the Exact
@@ -1978,7 +1985,7 @@ Requirements:
 .\tools\build-ipp-native.ps1
 dotnet restore VHSDecodeDotNet.slnx
 dotnet build VHSDecodeDotNet.slnx -c Release --no-restore
-dotnet test --solution VHSDecodeDotNet.slnx -c Release --no-build --no-restore --minimum-expected-tests 1195
+dotnet test --solution VHSDecodeDotNet.slnx -c Release --no-build --no-restore --minimum-expected-tests 1222
 ```
 
 The first command includes the optional `ipp-fast` native artifact; omit it for
@@ -1991,7 +1998,7 @@ deployment computer. Binary-only single-file releases embed
 sidecar license files. An Exact-only build may omit the native build step.
 
 The current formal Release build has zero warnings and errors. The xUnit v3
-project exposes **1,195** independently discoverable tests to both
+project exposes **1,222** independently discoverable tests to both
 `dotnet test` and Visual Studio Test Explorer.
 
 <!-- SECTION: usage -->
