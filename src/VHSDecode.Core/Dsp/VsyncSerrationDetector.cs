@@ -6,6 +6,13 @@ public sealed record VsyncSerrationMeasurement(
     double SyncLevel,
     double BlankLevel);
 
+public enum VsyncSerrationDiagnostic
+{
+    None,
+    UnexpectedArbitrage,
+    UnexpectedVideoEnvelope
+}
+
 public sealed record VsyncSerrationResult(
     bool FoundSerration,
     bool HasLevels,
@@ -16,7 +23,10 @@ public sealed record VsyncSerrationResult(
     IReadOnlyList<int> EnvelopeMinima,
     IReadOnlyList<int> HarmonicMinima,
     IReadOnlyList<int> Candidates,
-    int LevelCountBeforePull = 0);
+    int LevelCountBeforePull = 0)
+{
+    public VsyncSerrationDiagnostic Diagnostic { get; init; }
+}
 
 public sealed class VsyncSerrationDetector
 {
@@ -194,6 +204,9 @@ public sealed class VsyncSerrationDetector
             envelopeMinima,
             harmonicMinima,
             reduced.Length + Math.Min(EnvelopePadding, reduced.Length));
+        VsyncSerrationDiagnostic diagnostic = ClassifyDiagnostic(
+            envelopeMinima.Length,
+            candidates.Length);
         var measurements = new List<VsyncSerrationMeasurement>();
         foreach (int candidate in candidates)
         {
@@ -225,7 +238,26 @@ public sealed class VsyncSerrationDetector
             envelopeMinima,
             harmonicMinima,
             candidates,
-            levelCountBeforePull);
+            levelCountBeforePull)
+        {
+            Diagnostic = diagnostic
+        };
+    }
+
+    internal static VsyncSerrationDiagnostic ClassifyDiagnostic(
+        int envelopeMinimumCount,
+        int candidateCount)
+    {
+        ArgumentOutOfRangeException.ThrowIfNegative(envelopeMinimumCount);
+        ArgumentOutOfRangeException.ThrowIfNegative(candidateCount);
+        if (envelopeMinimumCount == 0)
+        {
+            return VsyncSerrationDiagnostic.UnexpectedVideoEnvelope;
+        }
+
+        return candidateCount == 0
+            ? VsyncSerrationDiagnostic.UnexpectedArbitrage
+            : VsyncSerrationDiagnostic.None;
     }
 
     public static int[] LocalMinimaIndices(ReadOnlySpan<double> data)

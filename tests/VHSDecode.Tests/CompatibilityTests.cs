@@ -7128,6 +7128,15 @@ public void VsyncSerrationDetectorMatchesV04Rules()
             envelopeMinima: [25, 35, 65],
             serrations: [20, 60, 90],
             dataLength: 120));
+    AssertEqual(
+        VsyncSerrationDiagnostic.UnexpectedVideoEnvelope,
+        VsyncSerrationDetector.ClassifyDiagnostic(0, 0));
+    AssertEqual(
+        VsyncSerrationDiagnostic.UnexpectedArbitrage,
+        VsyncSerrationDetector.ClassifyDiagnostic(2, 0));
+    AssertEqual(
+        VsyncSerrationDiagnostic.None,
+        VsyncSerrationDetector.ClassifyDiagnostic(2, 1));
 
     var detector = new VsyncSerrationDetector(
         sampleRateHz: 4_000_000.0,
