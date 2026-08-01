@@ -265,6 +265,17 @@ public static class VhsChromaDecoder
     public static ushort[] ChromaToU16(ReadOnlySpan<double> chroma)
     {
         var output = new ushort[chroma.Length];
+        ChromaToU16(chroma, output);
+        return output;
+    }
+
+    internal static void ChromaToU16(ReadOnlySpan<double> chroma, Span<ushort> output)
+    {
+        if (output.Length != chroma.Length)
+        {
+            throw new ArgumentException("Output length must match chroma length.", nameof(output));
+        }
+
         int vectorizedLength = chroma.Length & ~3;
         int index = 0;
         if (Avx2.IsSupported && Sse41.IsSupported)
@@ -273,7 +284,7 @@ public static class VhsChromaDecoder
             Vector256<double> maximumVector = Vector256.Create((double)ushort.MaxValue);
             Vector256<long> exponentMask = Vector256.Create(0x7FF0_0000_0000_0000L);
             ref double sourceReference = ref MemoryMarshal.GetReference(chroma);
-            ref ushort destinationReference = ref MemoryMarshal.GetArrayDataReference(output);
+            ref ushort destinationReference = ref MemoryMarshal.GetReference(output);
             for (; index < vectorizedLength; index += 4)
             {
                 Vector256<double> values = Vector256.LoadUnsafe(ref sourceReference, (nuint)index);
@@ -311,7 +322,6 @@ public static class VhsChromaDecoder
                 : unchecked((ushort)(long)shifted);
         }
 
-        return output;
     }
 
     public static VhsChromaFieldResult DecodeField(
@@ -412,7 +422,7 @@ public static class VhsChromaDecoder
                     SosFilter.ApplyForwardBackwardFloat32InPlace(options.FinalSosFilter, values);
                     return values;
                 }
-                : values => SosFilter.ApplyForwardBackward(options.FinalSosFilter, values);
+            : values => SosFilter.ApplyForwardBackward(options.FinalSosFilter, values);
         }
         else if (effectiveBurstFilter is null && options.FinalFilter is not null)
         {
@@ -523,7 +533,8 @@ public static class VhsChromaDecoder
         Func<double[], double[]>? finalFilter = null,
         int lineOffset = 0,
         double? previousChromaAfcCarrierHz = null,
-        double previousChromaAfcPhaseRadians = 0.0)
+        double previousChromaAfcPhaseRadians = 0.0,
+        ushort[]? outputDestination = null)
         => DecodeFieldWithPhaseCore(
             chroma,
             options,
@@ -534,7 +545,8 @@ public static class VhsChromaDecoder
             lineOffset,
             previousChromaAfcCarrierHz,
             previousChromaAfcPhaseRadians,
-            analysis);
+            analysis,
+            outputDestination: outputDestination);
 
     internal static VhsChromaFieldResult DecodeOwnedFieldWithPhase(
         double[] chroma,
@@ -571,7 +583,8 @@ public static class VhsChromaDecoder
         Func<double[], double[]>? finalFilter = null,
         int lineOffset = 0,
         double? previousChromaAfcCarrierHz = null,
-        double previousChromaAfcPhaseRadians = 0.0)
+        double previousChromaAfcPhaseRadians = 0.0,
+        ushort[]? outputDestination = null)
     {
         ArgumentNullException.ThrowIfNull(chroma);
         ArgumentNullException.ThrowIfNull(analysis);
@@ -586,7 +599,8 @@ public static class VhsChromaDecoder
             previousChromaAfcCarrierHz,
             previousChromaAfcPhaseRadians,
             analysis,
-            ownedChromaInput: chroma);
+            ownedChromaInput: chroma,
+            outputDestination: outputDestination);
     }
 
     private static VhsChromaFieldResult DecodeFieldWithPhaseCore(
@@ -600,17 +614,26 @@ public static class VhsChromaDecoder
         double? previousChromaAfcCarrierHz,
         double previousChromaAfcPhaseRadians,
         VhsChromaPhaseAnalysis? preparedAnalysis,
-        double[]? ownedChromaInput = null)
+        double[]? ownedChromaInput = null,
+        ushort[]? outputDestination = null)
     {
         ArgumentNullException.ThrowIfNull(options);
         ArgumentNullException.ThrowIfNull(phase);
         ValidateLineShape(chroma.Length, options.OutputLineCount, options.OutputLineLength);
         ValidateBurstRange(options.BurstStart, options.BurstEnd, options.OutputLineLength);
+        if (outputDestination is not null && outputDestination.Length != chroma.Length)
+        {
+            throw new ArgumentException(
+                "Output destination length must match chroma length.",
+                nameof(outputDestination));
+        }
 
         if (phase.BurstDetectedLine == -1)
         {
+            ushort[] neutral = outputDestination ?? new ushort[chroma.Length];
+            neutral.AsSpan().Fill((ushort)S16AbsMax);
             return new VhsChromaFieldResult(
-                CreateNeutralChromaU16(chroma.Length),
+                neutral,
                 phase.BurstDetectedLine,
                 null,
                 phase.NextChromaRotationIndex,
@@ -833,31 +856,68 @@ public static class VhsChromaDecoder
                     options.WorkerThreads);
             }
 
-            gained = ChromaToU16(currentChroma);
+            if (outputDestination is null)
+            {
+                gained = ChromaToU16(currentChroma);
+            }
+            else
+            {
+                ChromaToU16(currentChroma, outputDestination);
+                gained = outputDestination;
+            }
         }
         else
         {
-            gained = options.DisableComb
-                ? ApplyAutomaticChromaGainToU16(
-                    upconverted,
-                    options.BurstAbsRef,
-                    options.BurstStart,
-                    options.BurstEnd,
-                    options.OutputLineLength,
-                    options.OutputLineCount,
-                    phase.BurstDetectedLine,
-                    useFloat32Rms: retainFloat32)
-                : ApplyAutomaticChromaGainWithCombToU16(
-                    upconverted,
-                    options.BurstAbsRef,
-                    options.BurstStart,
-                    options.BurstEnd,
-                    options.OutputLineLength,
-                    options.OutputLineCount,
-                    phase.BurstDetectedLine,
-                    IsNtsc(options.ColorSystem) ? 1 : 2,
-                    retainFloat32,
-                    useFloat32Rms: retainFloat32);
+            if (options.DisableComb)
+            {
+                gained = outputDestination is null
+                    ? ApplyAutomaticChromaGainToU16(
+                        upconverted,
+                        options.BurstAbsRef,
+                        options.BurstStart,
+                        options.BurstEnd,
+                        options.OutputLineLength,
+                        options.OutputLineCount,
+                        phase.BurstDetectedLine,
+                        useFloat32Rms: retainFloat32)
+                    : ApplyAutomaticChromaGainToU16(
+                        upconverted,
+                        options.BurstAbsRef,
+                        options.BurstStart,
+                        options.BurstEnd,
+                        options.OutputLineLength,
+                        options.OutputLineCount,
+                        phase.BurstDetectedLine,
+                        useFloat32Rms: retainFloat32,
+                        output: outputDestination);
+            }
+            else
+            {
+                gained = outputDestination is null
+                    ? ApplyAutomaticChromaGainWithCombToU16(
+                        upconverted,
+                        options.BurstAbsRef,
+                        options.BurstStart,
+                        options.BurstEnd,
+                        options.OutputLineLength,
+                        options.OutputLineCount,
+                        phase.BurstDetectedLine,
+                        IsNtsc(options.ColorSystem) ? 1 : 2,
+                        retainFloat32,
+                        useFloat32Rms: retainFloat32)
+                    : ApplyAutomaticChromaGainWithCombToU16(
+                        upconverted,
+                        options.BurstAbsRef,
+                        options.BurstStart,
+                        options.BurstEnd,
+                        options.OutputLineLength,
+                        options.OutputLineCount,
+                        phase.BurstDetectedLine,
+                        IsNtsc(options.ColorSystem) ? 1 : 2,
+                        retainFloat32,
+                        useFloat32Rms: retainFloat32,
+                        output: outputDestination);
+            }
         }
 
         return new VhsChromaFieldResult(
@@ -2283,6 +2343,27 @@ public static class VhsChromaDecoder
         int lines,
         int burstDetectedLine,
         bool useFloat32Rms)
+        => ApplyAutomaticChromaGainToU16(
+            chroma,
+            burstAbsRef,
+            burstStart,
+            burstEnd,
+            lineLength,
+            lines,
+            burstDetectedLine,
+            useFloat32Rms,
+            new ushort[chroma.Length]);
+
+    internal static ushort[] ApplyAutomaticChromaGainToU16(
+        ReadOnlySpan<double> chroma,
+        double burstAbsRef,
+        int burstStart,
+        int burstEnd,
+        int lineLength,
+        int lines,
+        int burstDetectedLine,
+        bool useFloat32Rms,
+        ushort[] output)
     {
         if (lines <= StartingLine)
         {
@@ -2291,11 +2372,12 @@ public static class VhsChromaDecoder
 
         ValidateLineShape(chroma.Length, lines, lineLength);
         ValidateBurstRange(burstStart, burstEnd, lineLength);
+        ValidateOutputLength(output, chroma.Length);
 
         int firstProcessedLine = Math.Min(lines, Math.Max(StartingLine, burstDetectedLine));
         int configuredSampleCount = checked(lines * lineLength);
-        ushort[] output = CreateAutomaticGainChromaU16(
-            chroma.Length,
+        InitializeAutomaticGainChromaU16(
+            output,
             checked(firstProcessedLine * lineLength),
             configuredSampleCount);
         int vectorizedLength = chroma.Length & ~3;
@@ -2411,6 +2493,31 @@ public static class VhsChromaDecoder
         int lineDistance,
         bool retainFloat32,
         bool useFloat32Rms)
+        => ApplyAutomaticChromaGainWithCombToU16(
+            chroma,
+            burstAbsRef,
+            burstStart,
+            burstEnd,
+            lineLength,
+            lines,
+            burstDetectedLine,
+            lineDistance,
+            retainFloat32,
+            useFloat32Rms,
+            new ushort[chroma.Length]);
+
+    internal static ushort[] ApplyAutomaticChromaGainWithCombToU16(
+        ReadOnlySpan<double> chroma,
+        double burstAbsRef,
+        int burstStart,
+        int burstEnd,
+        int lineLength,
+        int lines,
+        int burstDetectedLine,
+        int lineDistance,
+        bool retainFloat32,
+        bool useFloat32Rms,
+        ushort[] output)
     {
         if (lines <= StartingLine)
         {
@@ -2424,6 +2531,7 @@ public static class VhsChromaDecoder
 
         ValidateLineShape(chroma.Length, lines, lineLength);
         ValidateBurstRange(burstStart, burstEnd, lineLength);
+        ValidateOutputLength(output, chroma.Length);
 
         const int MaxStackLineLength = 4_096;
         Span<double> combinedLine = lineLength <= MaxStackLineLength
@@ -2431,8 +2539,8 @@ public static class VhsChromaDecoder
             : new double[lineLength];
         int firstProcessedLine = Math.Min(lines, Math.Max(StartingLine, burstDetectedLine));
         int configuredSampleCount = checked(lines * lineLength);
-        ushort[] output = CreateAutomaticGainChromaU16(
-            chroma.Length,
+        InitializeAutomaticGainChromaU16(
+            output,
             checked(firstProcessedLine * lineLength),
             configuredSampleCount);
         int vectorizedLength = chroma.Length & ~3;
@@ -2480,22 +2588,22 @@ public static class VhsChromaDecoder
         return output;
     }
 
-    private static ushort[] CreateNeutralChromaU16(int sampleCount)
-    {
-        var output = new ushort[sampleCount];
-        Array.Fill(output, (ushort)S16AbsMax);
-        return output;
-    }
-
-    private static ushort[] CreateAutomaticGainChromaU16(
-        int sampleCount,
+    private static void InitializeAutomaticGainChromaU16(
+        Span<ushort> output,
         int firstProcessedSample,
         int configuredSampleCount)
     {
-        var output = new ushort[sampleCount];
-        output.AsSpan(0, firstProcessedSample).Fill((ushort)S16AbsMax);
-        output.AsSpan(configuredSampleCount).Fill((ushort)S16AbsMax);
-        return output;
+        output[..firstProcessedSample].Fill((ushort)S16AbsMax);
+        output[configuredSampleCount..].Fill((ushort)S16AbsMax);
+    }
+
+    private static void ValidateOutputLength(ushort[] output, int expectedLength)
+    {
+        ArgumentNullException.ThrowIfNull(output);
+        if (output.Length != expectedLength)
+        {
+            throw new ArgumentException("Output length must match chroma length.", nameof(output));
+        }
     }
 
     private static void WriteScaledChromaToU16(

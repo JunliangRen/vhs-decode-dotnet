@@ -79,6 +79,24 @@ public sealed class TbcFieldSequenceDecodeEngine
         }
     }
 
+    private sealed class PooledFieldOutputOwner : IDisposable
+    {
+        private TbcDecodedField? _field;
+
+        internal TbcDecodedField? Replace(TbcDecodedField? field)
+        {
+            _field?.ReleaseOutputBuffers();
+            _field = field;
+            return field;
+        }
+
+        public void Dispose()
+        {
+            _field?.ReleaseOutputBuffers();
+            _field = null;
+        }
+    }
+
     private sealed class DeferredDiagnosticBatch(
         Action<string, string> sink,
         List<(string Level, string Message)> fieldMessages,
@@ -301,7 +319,7 @@ public sealed class TbcFieldSequenceDecodeEngine
         long startSample = begin;
 
         var fields = retainFields ? new List<TbcDecodedField>() : null;
-        var writePlanner = new FieldWritePlanner(
+        using var writePlanner = new FieldWritePlanner(
             session,
             retainWrites: false,
             deferTapeDiagnostics: true);
@@ -453,6 +471,7 @@ public sealed class TbcFieldSequenceDecodeEngine
             : writePlanner.WrittenFieldCount < requestedFields)
         {
             _cancellationToken.ThrowIfCancellationRequested();
+            using var fieldOutputOwner = new PooledFieldOutputOwner();
             TbcDecodedField? field;
             DeferredDiagnosticBatch? deferredVhsFieldDiagnostics = null;
             TbcFieldDecodeState? fieldState = autoMtf is null
@@ -466,7 +485,7 @@ public sealed class TbcFieldSequenceDecodeEngine
                     : writePlanner.WrittenFieldCount;
                 if (prefetchedField is null)
                 {
-                    field = ReadFieldWithDeferredVhsFieldDiagnostics(
+                    field = fieldOutputOwner.Replace(ReadFieldWithDeferredVhsFieldDiagnostics(
                         session,
                         input,
                         begin,
@@ -474,11 +493,11 @@ public sealed class TbcFieldSequenceDecodeEngine
                         decodedFieldCount,
                         initialReadWrittenFieldCount,
                         retainVhsChromaBurstSamples: retainFields,
-                        out deferredVhsFieldDiagnostics);
+                        out deferredVhsFieldDiagnostics));
                 }
                 else
                 {
-                    field = prefetchedField.GetAwaiter().GetResult();
+                    field = fieldOutputOwner.Replace(prefetchedField.GetAwaiter().GetResult());
                 }
 
                 if (session.Spec.Name == "ld")
@@ -514,13 +533,13 @@ public sealed class TbcFieldSequenceDecodeEngine
                     if (requiresRetry)
                     {
                         session.TbcFieldDecoder.RestoreStateForRetry(fieldState!);
-                        field = ReadFieldWithContext(
+                        field = fieldOutputOwner.Replace(ReadFieldWithContext(
                             session,
                             input,
                             begin,
                             readLength,
                             decodedFieldCount,
-                            writePlanner.WrittenFieldCount);
+                            writePlanner.WrittenFieldCount));
                         laserDiscSpeculativeWrittenFieldCount = writePlanner.WrittenFieldCount;
                     }
                 }
@@ -766,10 +785,11 @@ public sealed class TbcFieldSequenceDecodeEngine
         if (reachedRequestedTapeOutput)
         {
             DeferredDiagnosticBatch? terminalLookaheadDiagnostics = null;
+            using var terminalFieldOutputOwner = new PooledFieldOutputOwner();
             try
             {
                 _cancellationToken.ThrowIfCancellationRequested();
-                _ = ReadFieldWithDeferredVhsFieldDiagnostics(
+                _ = terminalFieldOutputOwner.Replace(ReadFieldWithDeferredVhsFieldDiagnostics(
                     session,
                     input,
                     begin,
@@ -777,7 +797,7 @@ public sealed class TbcFieldSequenceDecodeEngine
                     decodedFieldCount,
                     writePlanner.WrittenFieldCount,
                     retainVhsChromaBurstSamples: false,
-                    out terminalLookaheadDiagnostics);
+                    out terminalLookaheadDiagnostics));
                 terminalLookaheadDiagnostics?.FlushFieldDiagnostics();
                 _cancellationToken.ThrowIfCancellationRequested();
             }
@@ -1051,7 +1071,8 @@ public sealed class TbcFieldSequenceDecodeEngine
                 : session.TbcFieldDecoder.DecodeVhsForSequence(
                     lease.Span,
                     fieldNumber,
-                    retainVhsChromaBurstSamples);
+                    retainVhsChromaBurstSamples,
+                    usePooledOutputBuffers: !retainVhsChromaBurstSamples);
         }
 
         RfDecodedSpan? span = session.StreamDecoder.Read(input, window.StartSample, window.SampleCount);
@@ -1536,7 +1557,7 @@ public sealed class TbcFieldSequenceDecodeEngine
         DecodeSession session,
         IReadOnlyList<TbcDecodedField> fields)
     {
-        var planner = new FieldWritePlanner(session, retainWrites: true);
+        using var planner = new FieldWritePlanner(session, retainWrites: true);
         foreach (TbcDecodedField field in fields)
         {
             planner.Add(field);
@@ -1659,7 +1680,9 @@ public sealed class TbcFieldSequenceDecodeEngine
                 }
                 else
                 {
-                    EnqueueOutput(new OutputWorkItem(OutputWorkKind.Field, field, decision));
+                    var work = new OutputWorkItem(OutputWorkKind.Field, field, decision);
+                    field.RetainOutputBuffers();
+                    EnqueueOutput(work);
                 }
             }
         }
@@ -1768,43 +1791,75 @@ public sealed class TbcFieldSequenceDecodeEngine
             {
                 foreach (OutputWorkItem work in _outputQueue!.GetConsumingEnumerable())
                 {
-                    if (work.Kind == OutputWorkKind.MetadataSnapshot)
+                    try
                     {
-                        _metadata.WriteSnapshot();
-                        continue;
-                    }
+                        if (work.Kind == OutputWorkKind.MetadataSnapshot)
+                        {
+                            _metadata.WriteSnapshot();
+                            continue;
+                        }
 
-                    WriteSynchronously(
-                        work.Field ?? throw new InvalidOperationException("Field output work was missing its field."),
-                        work.Decision ?? throw new InvalidOperationException("Field output work was missing its decision."));
+                        WriteSynchronously(
+                            work.Field ?? throw new InvalidOperationException("Field output work was missing its field."),
+                            work.Decision ?? throw new InvalidOperationException("Field output work was missing its decision."));
+                    }
+                    finally
+                    {
+                        work.Field?.ReleaseOutputBuffers();
+                    }
                 }
             }
             catch (Exception exception)
             {
                 Volatile.Write(ref _outputFailure, ExceptionDispatchInfo.Capture(exception));
+                try
+                {
+                    _outputQueue!.CompleteAdding();
+                }
+                catch (InvalidOperationException)
+                {
+                    // Another shutdown path already completed the queue.
+                }
+
+                while (_outputQueue!.TryTake(out OutputWorkItem? abandoned))
+                {
+                    abandoned.Field?.ReleaseOutputBuffers();
+                }
             }
         }
 
         private void EnqueueOutput(OutputWorkItem work)
         {
-            while (true)
+            bool added = false;
+            try
             {
-                ThrowIfOutputFailed();
-                try
+                while (true)
                 {
-                    if (_outputQueue!.TryAdd(work, millisecondsTimeout: 50))
+                    ThrowIfOutputFailed();
+                    try
                     {
-                        break;
+                        if (_outputQueue!.TryAdd(work, millisecondsTimeout: 50))
+                        {
+                            added = true;
+                            break;
+                        }
+                    }
+                    catch (InvalidOperationException) when (Volatile.Read(ref _outputFailure) is { } failure)
+                    {
+                        failure.Throw();
+                        throw;
                     }
                 }
-                catch (InvalidOperationException) when (Volatile.Read(ref _outputFailure) is { } failure)
+
+                ThrowIfOutputFailed();
+            }
+            finally
+            {
+                if (!added)
                 {
-                    failure.Throw();
-                    throw;
+                    work.Field?.ReleaseOutputBuffers();
                 }
             }
-
-            ThrowIfOutputFailed();
         }
 
         private ExceptionDispatchInfo? StopOutputWorker()
@@ -1987,7 +2042,7 @@ public sealed class TbcFieldSequenceDecodeEngine
         }
     }
 
-    private sealed class FieldWritePlanner
+    private sealed class FieldWritePlanner : IDisposable
     {
         private readonly DecodeSession _session;
         private readonly List<(TbcDecodedField Field, TbcFieldOrderDecision Decision)>? _retainedWrites;
@@ -1996,6 +2051,7 @@ public sealed class TbcFieldSequenceDecodeEngine
         private readonly bool _deferTapeDiagnostics;
         private readonly List<(string Level, string Message)> _lastDiagnostics = [];
         private bool _duplicatePreviousField = true;
+        private bool _disposed;
         private int _writtenFieldCount;
 
         public FieldWritePlanner(
@@ -2133,7 +2189,7 @@ public sealed class TbcFieldSequenceDecodeEngine
             var current = (Field: field, Decision: decision);
             if (writeField)
             {
-                _lastValid[detectedFirstField] = current;
+                ReplaceLastValid(detectedFirstField, current);
             }
 
             if (isDuplicateField)
@@ -2224,7 +2280,7 @@ public sealed class TbcFieldSequenceDecodeEngine
                 decodeFaults);
             LastDecision = decision;
             var current = (Field: field, Decision: decision);
-            _lastValid[detectedFirstField] = current;
+            ReplaceLastValid(detectedFirstField, current);
 
             if (isDuplicateField)
             {
@@ -2256,11 +2312,48 @@ public sealed class TbcFieldSequenceDecodeEngine
             emitted.Add(write);
             _retainedWrites?.Add(write);
             _writtenFieldCount++;
+            write.Field.RetainOutputBuffers();
             _history.Add(write);
             if (_history.Count > 2)
             {
+                _history[0].Field.ReleaseOutputBuffers();
                 _history.RemoveAt(0);
             }
+        }
+
+        private void ReplaceLastValid(
+            bool detectedFirstField,
+            (TbcDecodedField Field, TbcFieldOrderDecision Decision) current)
+        {
+            current.Field.RetainOutputBuffers();
+            if (_lastValid.TryGetValue(detectedFirstField, out var previous))
+            {
+                previous.Field.ReleaseOutputBuffers();
+            }
+
+            _lastValid[detectedFirstField] = current;
+        }
+
+        public void Dispose()
+        {
+            if (_disposed)
+            {
+                return;
+            }
+
+            _disposed = true;
+            foreach ((TbcDecodedField field, _) in _history)
+            {
+                field.ReleaseOutputBuffers();
+            }
+
+            foreach ((TbcDecodedField field, _) in _lastValid.Values)
+            {
+                field.ReleaseOutputBuffers();
+            }
+
+            _history.Clear();
+            _lastValid.Clear();
         }
     }
 

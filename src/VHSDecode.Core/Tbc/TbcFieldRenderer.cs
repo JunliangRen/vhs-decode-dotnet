@@ -268,11 +268,24 @@ public sealed class TbcFieldRenderer
         int fieldNumber = 0,
         VideoOutputConverter? converterOverride = null,
         int? trackPhaseOverride = null,
-        double[]? resamplingWorkspace = null)
+        double[]? resamplingWorkspace = null,
+        ushort[]? outputDestination = null)
     {
         if (CanConvertPreparedFieldDirectly())
         {
             VideoOutputConverter activeConverter = converterOverride ?? _converter;
+            if (outputDestination is not null)
+            {
+                _resampler.ResamplePreparedToUInt16(
+                    videoHz,
+                    plan,
+                    activeConverter,
+                    outputDestination);
+                return new TbcRenderedField(
+                    outputDestination,
+                    OutputConverter: activeConverter);
+            }
+
             return new TbcRenderedField(
                 _resampler.ResamplePreparedToUInt16(videoHz, plan, activeConverter),
                 OutputConverter: activeConverter);
@@ -297,7 +310,8 @@ public sealed class TbcFieldRenderer
             fieldNumber,
             converterOverride,
             converterProvider: null,
-            trackPhaseOverride);
+            trackPhaseOverride,
+            outputDestination);
     }
 
     internal bool CanConvertPreparedFieldDirectly()
@@ -312,7 +326,8 @@ public sealed class TbcFieldRenderer
         int fieldNumber,
         VideoOutputConverter? converterOverride,
         Func<VideoOutputConverter?>? converterProvider,
-        int? trackPhaseOverride)
+        int? trackPhaseOverride,
+        ushort[]? outputDestination = null)
     {
         if (YCombLimitHz != 0.0)
         {
@@ -333,8 +348,19 @@ public sealed class TbcFieldRenderer
         VideoOutputConverter activeConverter = converterProvider?.Invoke()
             ?? converterOverride
             ?? _converter;
+        VideoOutputConverter fieldConverter = BuildFieldConverter(
+            resampled,
+            fieldNumber,
+            activeConverter,
+            trackPhaseOverride);
+        if (outputDestination is not null)
+        {
+            fieldConverter.ConvertHz(resampled, outputDestination);
+            return new TbcRenderedField(outputDestination, rawPayload, activeConverter);
+        }
+
         return new TbcRenderedField(
-            BuildFieldConverter(resampled, fieldNumber, activeConverter, trackPhaseOverride).ConvertHz(resampled),
+            fieldConverter.ConvertHz(resampled),
             rawPayload,
             activeConverter);
     }

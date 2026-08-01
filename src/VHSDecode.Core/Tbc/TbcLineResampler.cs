@@ -239,6 +239,31 @@ public sealed class TbcLineResampler
         return output;
     }
 
+    internal void ResamplePreparedToUInt16(
+        ReadOnlySpan<double> source,
+        ResamplingPlan plan,
+        VideoOutputConverter converter,
+        ushort[] destination)
+    {
+        if (source.IsEmpty)
+        {
+            throw new ArgumentException("Source must contain at least one sample.", nameof(source));
+        }
+
+        ArgumentNullException.ThrowIfNull(plan);
+        ArgumentNullException.ThrowIfNull(converter);
+        ArgumentNullException.ThrowIfNull(destination);
+        plan.ValidateOwner(this);
+        if (destination.Length != plan.DestinationLength)
+        {
+            throw new ArgumentException(
+                "Destination length must match the prepared resampling plan.",
+                nameof(destination));
+        }
+
+        ResampleSamplesToUInt16(source, plan, converter, destination);
+    }
+
     internal void ResamplePrepared(
         ReadOnlySpan<double> source,
         ResamplingPlan plan,

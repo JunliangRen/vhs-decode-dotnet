@@ -12091,6 +12091,7 @@ public void NtscSequenceCompactChromaMatchesRetainedStorageBitExactly(
     };
     TbcFieldDecodePipeline compactPipeline = CreatePipeline(workerThreads: 4);
     TbcFieldDecodePipeline retainedPipeline = CreatePipeline(workerThreads: 1);
+    TbcFieldDecodePipeline pooledPipeline = CreatePipeline(workerThreads: 4);
 
     TbcDecodedField compactFirst = compactPipeline.DecodeVhsForSequence(
         firstSpan,
@@ -12100,6 +12101,11 @@ public void NtscSequenceCompactChromaMatchesRetainedStorageBitExactly(
         firstSpan,
         fieldNumber: 0,
         retainChromaBurstSamples: true);
+    TbcDecodedField pooledFirst = pooledPipeline.DecodeVhsForSequence(
+        firstSpan,
+        fieldNumber: 0,
+        retainChromaBurstSamples: false,
+        usePooledOutputBuffers: true);
     Assert.NotNull(retainedFirst.ChromaBurstSamples);
     double[] retainedFirstBurstSnapshot = retainedFirst.ChromaBurstSamples.ToArray();
     ushort[] compactFirstOutputSnapshot = compactFirst.ChromaSamples!.ToArray();
@@ -12112,24 +12118,47 @@ public void NtscSequenceCompactChromaMatchesRetainedStorageBitExactly(
         secondSpan,
         fieldNumber: 1,
         retainChromaBurstSamples: true);
+    TbcDecodedField pooledSecond = pooledPipeline.DecodeVhsForSequence(
+        secondSpan,
+        fieldNumber: 1,
+        retainChromaBurstSamples: false,
+        usePooledOutputBuffers: true);
 
-    Assert.Null(compactFirst.ChromaBurstSamples);
-    Assert.Null(compactSecond.ChromaBurstSamples);
-    Assert.NotNull(retainedSecond.ChromaBurstSamples);
-    Assert.NotSame(retainedFirst.ChromaBurstSamples, retainedSecond.ChromaBurstSamples);
-    Assert.Equal<double>(retainedFirstBurstSnapshot, retainedFirst.ChromaBurstSamples);
-    Assert.Equal<ushort>(compactFirstOutputSnapshot, compactFirst.ChromaSamples);
-    Assert.Equal<double>(firstChromaSnapshot, firstChroma);
-    Assert.Equal<double>(secondChromaSnapshot, secondChroma);
-    Assert.False(firstChroma.SequenceEqual(secondChroma));
-    Assert.Equal<ushort>(retainedFirst.Samples, compactFirst.Samples);
-    Assert.Equal<ushort>(retainedFirst.ChromaSamples!, compactFirst.ChromaSamples);
-    Assert.Equal(retainedFirst.FieldPhaseId, compactFirst.FieldPhaseId);
-    Assert.Equal(retainedFirst.BurstStartLine, compactFirst.BurstStartLine);
-    Assert.Equal<ushort>(retainedSecond.Samples, compactSecond.Samples);
-    Assert.Equal<ushort>(retainedSecond.ChromaSamples!, compactSecond.ChromaSamples!);
-    Assert.Equal(retainedSecond.FieldPhaseId, compactSecond.FieldPhaseId);
-    Assert.Equal(retainedSecond.BurstStartLine, compactSecond.BurstStartLine);
+    try
+    {
+        Assert.Null(compactFirst.ChromaBurstSamples);
+        Assert.Null(compactSecond.ChromaBurstSamples);
+        Assert.NotNull(retainedSecond.ChromaBurstSamples);
+        Assert.NotSame(retainedFirst.ChromaBurstSamples, retainedSecond.ChromaBurstSamples);
+        Assert.Equal<double>(retainedFirstBurstSnapshot, retainedFirst.ChromaBurstSamples);
+        Assert.Equal<ushort>(compactFirstOutputSnapshot, compactFirst.ChromaSamples);
+        Assert.Equal<double>(firstChromaSnapshot, firstChroma);
+        Assert.Equal<double>(secondChromaSnapshot, secondChroma);
+        Assert.False(firstChroma.SequenceEqual(secondChroma));
+        Assert.Equal<ushort>(retainedFirst.Samples, compactFirst.Samples);
+        Assert.Equal<ushort>(retainedFirst.ChromaSamples!, compactFirst.ChromaSamples);
+        Assert.Equal(retainedFirst.FieldPhaseId, compactFirst.FieldPhaseId);
+        Assert.Equal(retainedFirst.BurstStartLine, compactFirst.BurstStartLine);
+        Assert.Equal<ushort>(retainedSecond.Samples, compactSecond.Samples);
+        Assert.Equal<ushort>(retainedSecond.ChromaSamples!, compactSecond.ChromaSamples!);
+        Assert.Equal(retainedSecond.FieldPhaseId, compactSecond.FieldPhaseId);
+        Assert.Equal(retainedSecond.BurstStartLine, compactSecond.BurstStartLine);
+        Assert.NotNull(pooledFirst.OutputBufferLease);
+        Assert.NotNull(pooledSecond.OutputBufferLease);
+        Assert.Same(pooledFirst.OutputBufferLease.Luma, pooledFirst.Samples);
+        Assert.Same(pooledFirst.OutputBufferLease.Chroma, pooledFirst.ChromaSamples);
+        Assert.Same(pooledSecond.OutputBufferLease.Luma, pooledSecond.Samples);
+        Assert.Same(pooledSecond.OutputBufferLease.Chroma, pooledSecond.ChromaSamples);
+        Assert.Equal<ushort>(compactFirst.Samples, pooledFirst.Samples);
+        Assert.Equal<ushort>(compactFirst.ChromaSamples!, pooledFirst.ChromaSamples!);
+        Assert.Equal<ushort>(compactSecond.Samples, pooledSecond.Samples);
+        Assert.Equal<ushort>(compactSecond.ChromaSamples!, pooledSecond.ChromaSamples!);
+    }
+    finally
+    {
+        pooledFirst.ReleaseOutputBuffers();
+        pooledSecond.ReleaseOutputBuffers();
+    }
 }
 
 [Theory(DisplayName = "TBC field decode pipeline applies analyzed VHS track phase to luma")]
