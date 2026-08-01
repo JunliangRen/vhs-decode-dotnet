@@ -49,12 +49,15 @@ public sealed class TbcDirectConversionTests
             wowLevelAdjustSmoothing: 1.5);
         ushort[] expected = converter.ConvertHz(resampler.ResamplePrepared(source, plan));
         ushort[] actual = resampler.ResamplePreparedToUInt16(source, plan, converter);
+        var callerOwned = new ushort[plan.DestinationLength];
+        resampler.ResamplePreparedToUInt16(source, plan, converter, callerOwned);
 
         Assert.True(
             MemoryMarshal.AsBytes(expectedLevelAdjusts.AsSpan()).SequenceEqual(
                 MemoryMarshal.AsBytes(plan.LevelAdjusts.AsSpan(0, expectedLevelAdjusts.Length))),
             "Prepared linear TBC level adjustment differs from the allocation-based reference.");
         Assert.Equal(expected, actual);
+        Assert.Equal(expected, callerOwned);
 
         if (workerThreads == 1)
         {
@@ -120,10 +123,27 @@ public sealed class TbcDirectConversionTests
             fallbackRenderer.PrepareFieldResampling(lineLocations);
         TbcRenderedField direct = directRenderer.RenderPreparedFieldPayload(source, directPlan);
         TbcRenderedField fallback = fallbackRenderer.RenderPreparedFieldPayload(source, fallbackPlan);
+        var directDestination = new ushort[frameSpec.FieldSampleCount];
+        var fallbackDestination = new ushort[frameSpec.FieldSampleCount];
+        TbcRenderedField directIntoDestination = directRenderer.RenderPreparedFieldPayload(
+            source,
+            directPlan,
+            outputDestination: directDestination);
+        TbcRenderedField fallbackIntoDestination = fallbackRenderer.RenderPreparedFieldPayload(
+            source,
+            fallbackPlan,
+            outputDestination: fallbackDestination);
 
         Assert.Equal(fallback.Samples, direct.Samples);
+        Assert.Equal(direct.Samples, directIntoDestination.Samples);
+        Assert.Equal(fallback.Samples, fallbackIntoDestination.Samples);
+        Assert.Same(directDestination, directIntoDestination.Samples);
+        Assert.Same(fallbackDestination, fallbackIntoDestination.Samples);
         Assert.Null(direct.OutputPayload);
         Assert.NotNull(fallback.OutputPayload);
+        Assert.NotNull(fallbackIntoDestination.OutputPayload);
+        Assert.Equal(fallback.OutputPayload.SampleFormat, fallbackIntoDestination.OutputPayload.SampleFormat);
+        Assert.Equal(fallback.OutputPayload.Bytes, fallbackIntoDestination.OutputPayload.Bytes);
         Assert.Same(converter, direct.OutputConverter);
     }
 

@@ -279,6 +279,204 @@ public sealed class DecodeOutputSharingCompatibilityTests
         }
     }
 
+    [Fact(DisplayName = "Overlapped VHS output releases pooled field buffers")]
+    public void OverlappedVhsOutputReleasesPooledFieldBuffers()
+    {
+        string tempDirectory = CreateTempDirectory();
+        try
+        {
+            string outputBase = Path.Combine(tempDirectory, "pooled-overlap");
+            ParsedCommand command = new CommandLineParser().Parse(CliSpecs.Vhs, [
+                "--pal",
+                "--threads", "2",
+                "input.u8",
+                outputBase
+            ]);
+            using DecodeSession session = DecodeSessionFactory.Create(command);
+            int sampleCount = session.TbcFrameSpec.FieldSampleCount;
+            var pool = new TbcFieldOutputBufferPool(
+                sampleCount,
+                sampleCount,
+                maximumRetainedBuffers: 4);
+            int readCount = 0;
+            TbcDecodedField? ReadField(DecodeSession activeSession, Stream _, long begin, int __, int ___)
+            {
+                int current = Interlocked.Increment(ref readCount);
+                return current switch
+                {
+                    1 => BuildPooledField(activeSession, pool, begin, detectedFirstField: true, 0x1234),
+                    2 => BuildPooledField(activeSession, pool, begin, detectedFirstField: false, 0x5678),
+                    _ => null
+                };
+            }
+
+            var engine = new TbcFieldSequenceDecodeEngine(readField: ReadField)
+            {
+                EnableParallelPayloadWritesForCustomReader = true,
+                EnablePayloadWriteOverlapForCustomReader = true,
+                CreateTbcOutput = _ => new MemoryStream()
+            };
+
+            TbcFieldSequenceDecodeResult result = engine.TryDecodeAndWrite(
+                session,
+                Stream.Null,
+                maxFields: 2);
+
+            Assert.True(result.Success, result.Message);
+            Assert.Equal(2, result.WrittenFieldCount);
+            Assert.Equal(2, pool.RetainedLumaBufferCount);
+            Assert.Equal(2, pool.RetainedChromaBufferCount);
+        }
+        finally
+        {
+            Directory.Delete(tempDirectory, recursive: true);
+        }
+    }
+
+    [Fact(DisplayName = "Failed overlapped VHS output releases active and queued pooled buffers")]
+    public async Task FailedOverlappedVhsOutputReleasesActiveAndQueuedPooledBuffers()
+    {
+        CancellationToken cancellationToken = TestContext.Current.CancellationToken;
+        string tempDirectory = CreateTempDirectory();
+        using var writeStarted = new ManualResetEventSlim();
+        using var releaseFailure = new ManualResetEventSlim();
+        using var secondReadCompleted = new ManualResetEventSlim();
+        Task<TbcFieldSequenceDecodeResult>? decodeTask = null;
+        try
+        {
+            string outputBase = Path.Combine(tempDirectory, "pooled-failure");
+            ParsedCommand command = new CommandLineParser().Parse(CliSpecs.Vhs, [
+                "--pal",
+                "--threads", "2",
+                "input.u8",
+                outputBase
+            ]);
+            using DecodeSession session = DecodeSessionFactory.Create(command);
+            int sampleCount = session.TbcFrameSpec.FieldSampleCount;
+            var pool = new TbcFieldOutputBufferPool(
+                sampleCount,
+                sampleCount,
+                maximumRetainedBuffers: 4);
+            int readCount = 0;
+            TbcDecodedField? ReadField(DecodeSession activeSession, Stream _, long begin, int __, int ___)
+            {
+                int current = Interlocked.Increment(ref readCount);
+                if (current > 2)
+                {
+                    return null;
+                }
+
+                TbcDecodedField field = BuildPooledField(
+                    activeSession,
+                    pool,
+                    begin,
+                    detectedFirstField: current == 1,
+                    sample: current == 1 ? (ushort)0x1234 : (ushort)0x5678);
+                if (current == 2)
+                {
+                    secondReadCompleted.Set();
+                }
+
+                return field;
+            }
+
+            var failingOutput = new BlockingThrowWriteStream(
+                writeStarted,
+                releaseFailure,
+                cancellationToken);
+            var engine = new TbcFieldSequenceDecodeEngine(readField: ReadField)
+            {
+                EnablePayloadWriteOverlapForCustomReader = true,
+                CreateTbcOutput = path => path.EndsWith("_chroma.tbc", StringComparison.Ordinal)
+                    ? new MemoryStream()
+                    : failingOutput
+            };
+            decodeTask = Task.Factory.StartNew(
+                () => engine.TryDecodeAndWrite(session, Stream.Null, maxFields: 2),
+                cancellationToken,
+                TaskCreationOptions.LongRunning,
+                TaskScheduler.Default);
+
+            Assert.True(writeStarted.Wait(TimeSpan.FromSeconds(10), cancellationToken));
+            Assert.True(secondReadCompleted.Wait(TimeSpan.FromSeconds(10), cancellationToken));
+            releaseFailure.Set();
+            TbcFieldSequenceDecodeResult result = await decodeTask.WaitAsync(
+                TimeSpan.FromSeconds(10),
+                cancellationToken);
+
+            Assert.False(result.Success);
+            Assert.Contains("synthetic pooled output failure", result.Message, StringComparison.Ordinal);
+            Assert.Equal(2, pool.RetainedLumaBufferCount);
+            Assert.Equal(2, pool.RetainedChromaBufferCount);
+        }
+        finally
+        {
+            releaseFailure.Set();
+            if (decodeTask is not null)
+            {
+                try
+                {
+                    await decodeTask.WaitAsync(TimeSpan.FromSeconds(10), CancellationToken.None);
+                }
+                catch
+                {
+                    // Preserve the assertion or timeout that ended the test.
+                }
+            }
+
+            Directory.Delete(tempDirectory, recursive: true);
+        }
+    }
+
+    [Fact(DisplayName = "Overlapped VHS output buffer count stays bounded across 500 fields")]
+    public void OverlappedVhsOutputBufferCountStaysBoundedAcrossFiveHundredFields()
+    {
+        string tempDirectory = CreateTempDirectory();
+        try
+        {
+            string outputBase = Path.Combine(tempDirectory, "pooled-long-run");
+            ParsedCommand command = new CommandLineParser().Parse(CliSpecs.Vhs, [
+                "--pal",
+                "--threads", "2",
+                "input.u8",
+                outputBase
+            ]);
+            using DecodeSession session = DecodeSessionFactory.Create(command);
+            int sampleCount = session.TbcFrameSpec.FieldSampleCount;
+            var pool = new TbcFieldOutputBufferPool(
+                sampleCount,
+                sampleCount,
+                maximumRetainedBuffers: 8);
+            var engine = new TbcFieldSequenceDecodeEngine(
+                readField: (activeSession, _, begin, _, fieldNumber) => BuildPooledField(
+                    activeSession,
+                    pool,
+                    begin,
+                    detectedFirstField: (fieldNumber & 1) == 0,
+                    sample: unchecked((ushort)fieldNumber)))
+            {
+                EnablePayloadWriteOverlapForCustomReader = true,
+                CreateTbcOutput = _ => new CountingWriteStream()
+            };
+
+            TbcFieldSequenceDecodeResult result = engine.TryDecodeAndWrite(
+                session,
+                Stream.Null,
+                maxFields: 500);
+
+            Assert.True(result.Success, result.Message);
+            Assert.Equal(500, result.WrittenFieldCount);
+            Assert.InRange(pool.CreatedLumaBufferCount, 1, 4);
+            Assert.InRange(pool.CreatedChromaBufferCount, 1, 4);
+            Assert.Equal(pool.CreatedLumaBufferCount, pool.RetainedLumaBufferCount);
+            Assert.Equal(pool.CreatedChromaBufferCount, pool.RetainedChromaBufferCount);
+        }
+        finally
+        {
+            Directory.Delete(tempDirectory, recursive: true);
+        }
+    }
+
     [Fact(DisplayName = "Raw decode output sharing matches Python deny-none behavior")]
     public void RawDecodeOutputSharingMatchesPythonDenyNoneBehavior()
     {
@@ -387,7 +585,7 @@ public sealed class DecodeOutputSharingCompatibilityTests
             Array.Fill(chroma, checked((ushort)(sample + 1)));
         }
 
-        return new TbcDecodedField(
+        TbcDecodedField field = new(
             StartSample: startSample,
             Samples: samples,
             LineLocations: new LineLocationResult([], []),
@@ -407,6 +605,41 @@ public sealed class DecodeOutputSharingCompatibilityTests
             ChromaSamples: chroma,
             NextFieldOffsetSamples: 100,
             NominalFieldLengthSamples: 100);
+        return field;
+    }
+
+    private static TbcDecodedField BuildPooledField(
+        DecodeSession session,
+        TbcFieldOutputBufferPool pool,
+        long startSample,
+        bool detectedFirstField,
+        ushort sample)
+    {
+        TbcFieldOutputBufferPool.TbcFieldOutputBufferLease lease = pool.Rent();
+        Array.Fill(lease.Luma, sample);
+        Array.Fill(lease.Chroma!, checked((ushort)(sample + 1)));
+        TbcDecodedField field = new(
+            StartSample: startSample,
+            Samples: lease.Luma,
+            LineLocations: new LineLocationResult([], []),
+            Timing: new SyncTiming(
+                0,
+                0,
+                0,
+                new SyncRange(0, 0),
+                new SyncRange(0, 0),
+                new SyncRange(0, 0)),
+            SyncThresholdHz: 0,
+            MeanLineLength: 0,
+            RawPulseCount: 0,
+            ClassifiedPulseCount: 0,
+            DetectedFirstField: detectedFirstField,
+            DetectedFirstFieldConfidence: 100,
+            ChromaSamples: lease.Chroma,
+            NextFieldOffsetSamples: 100,
+            NominalFieldLengthSamples: 100);
+        field.AttachOutputBuffers(lease);
+        return field;
     }
 
     private static FileStream OpenPreview(string path)
@@ -416,6 +649,91 @@ public sealed class DecodeOutputSharingCompatibilityTests
             FileMode.Open,
             FileAccess.Read,
             FileShare.ReadWrite);
+    }
+
+    private sealed class BlockingThrowWriteStream(
+        ManualResetEventSlim writeStarted,
+        ManualResetEventSlim releaseFailure,
+        CancellationToken cancellationToken) : MemoryStream
+    {
+        public override void Write(ReadOnlySpan<byte> buffer)
+        {
+            writeStarted.Set();
+            if (!releaseFailure.Wait(TimeSpan.FromSeconds(10), cancellationToken))
+            {
+                throw new TimeoutException("The pooled output failure test did not release the writer.");
+            }
+
+            throw new IOException("synthetic pooled output failure");
+        }
+
+        public override void Write(byte[] buffer, int offset, int count)
+            => Write(buffer.AsSpan(offset, count));
+    }
+
+    private sealed class CountingWriteStream : Stream
+    {
+        private long _length;
+        private long _position;
+
+        public override bool CanRead => false;
+
+        public override bool CanSeek => true;
+
+        public override bool CanWrite => true;
+
+        public override long Length => _length;
+
+        public override long Position
+        {
+            get => _position;
+            set => _position = value >= 0
+                ? value
+                : throw new ArgumentOutOfRangeException(nameof(value));
+        }
+
+        public override void Flush()
+        {
+        }
+
+        public override int Read(byte[] buffer, int offset, int count)
+            => throw new NotSupportedException();
+
+        public override long Seek(long offset, SeekOrigin origin)
+        {
+            long basis = origin switch
+            {
+                SeekOrigin.Begin => 0,
+                SeekOrigin.Current => _position,
+                SeekOrigin.End => _length,
+                _ => throw new ArgumentOutOfRangeException(nameof(origin))
+            };
+            Position = checked(basis + offset);
+            return _position;
+        }
+
+        public override void SetLength(long value)
+        {
+            if (value < 0)
+            {
+                throw new ArgumentOutOfRangeException(nameof(value));
+            }
+
+            _length = value;
+            if (_position > value)
+            {
+                _position = value;
+            }
+        }
+
+        public override void Write(byte[] buffer, int offset, int count)
+            => Write(buffer.AsSpan(offset, count));
+
+        public override void Write(ReadOnlySpan<byte> buffer)
+        {
+            _position = checked(_position + buffer.Length);
+            _length = Math.Max(_length, _position);
+        }
     }
 
     private static FileStream OpenPreviewEventually(

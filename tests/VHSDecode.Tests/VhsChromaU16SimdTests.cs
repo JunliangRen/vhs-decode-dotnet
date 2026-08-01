@@ -88,6 +88,77 @@ public sealed class VhsChromaU16SimdTests
         Assert.Equal(ConvertScalar(input), VhsChromaDecoder.ChromaToU16(input));
     }
 
+    [Fact(DisplayName = "VHS chroma uint16 conversion fills a caller-owned destination")]
+    public void VhsChromaU16ConversionFillsCallerOwnedDestination()
+    {
+        double[] input = BuildInput(65_539);
+        var destination = new ushort[input.Length];
+
+        VhsChromaDecoder.ChromaToU16(input, destination);
+
+        Assert.Equal(VhsChromaDecoder.ChromaToU16(input), destination);
+    }
+
+    [Theory(DisplayName = "VHS automatic chroma gain fills a caller-owned destination")]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void VhsAutomaticChromaGainFillsCallerOwnedDestination(bool useComb)
+    {
+        const int lineLength = 64;
+        const int lines = 20;
+        double[] input = BuildInput(lineLength * lines);
+        var destination = new ushort[input.Length];
+        Array.Fill(destination, (ushort)0xDEAD);
+
+        ushort[] expected = useComb
+            ? VhsChromaDecoder.ApplyAutomaticChromaGainWithCombToU16(
+                input,
+                burstAbsRef: 50_000.0,
+                burstStart: 8,
+                burstEnd: 24,
+                lineLength,
+                lines,
+                burstDetectedLine: 17,
+                lineDistance: 1,
+                retainFloat32: true,
+                useFloat32Rms: true)
+            : VhsChromaDecoder.ApplyAutomaticChromaGainToU16(
+                input,
+                burstAbsRef: 50_000.0,
+                burstStart: 8,
+                burstEnd: 24,
+                lineLength,
+                lines,
+                burstDetectedLine: 17,
+                useFloat32Rms: true);
+        ushort[] actual = useComb
+            ? VhsChromaDecoder.ApplyAutomaticChromaGainWithCombToU16(
+                input,
+                burstAbsRef: 50_000.0,
+                burstStart: 8,
+                burstEnd: 24,
+                lineLength,
+                lines,
+                burstDetectedLine: 17,
+                lineDistance: 1,
+                retainFloat32: true,
+                useFloat32Rms: true,
+                output: destination)
+            : VhsChromaDecoder.ApplyAutomaticChromaGainToU16(
+                input,
+                burstAbsRef: 50_000.0,
+                burstStart: 8,
+                burstEnd: 24,
+                lineLength,
+                lines,
+                burstDetectedLine: 17,
+                useFloat32Rms: true,
+                output: destination);
+
+        Assert.Same(destination, actual);
+        Assert.Equal(expected, actual);
+    }
+
     private static double[] BuildInput(int length)
     {
         var input = new double[length];
