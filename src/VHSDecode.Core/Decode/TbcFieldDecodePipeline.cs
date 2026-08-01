@@ -454,6 +454,12 @@ public sealed class TbcFieldDecodePipeline
     internal int RetainedFieldOutputLumaBufferCount
         => _fieldOutputBufferPool?.RetainedLumaBufferCount ?? 0;
 
+    internal int CreatedFieldOutputChromaBufferCount
+        => _fieldOutputBufferPool?.CreatedChromaBufferCount ?? 0;
+
+    internal int RetainedFieldOutputChromaBufferCount
+        => _fieldOutputBufferPool?.RetainedChromaBufferCount ?? 0;
+
     internal void RestoreStateForRetry(TbcFieldDecodeState state)
     {
         VideoOutputConverter? adjustedAgcConverter = _laserDiscAgcConverter;

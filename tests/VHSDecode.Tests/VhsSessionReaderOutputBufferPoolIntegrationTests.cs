@@ -6,28 +6,34 @@ namespace VHSDecode.Tests;
 
 public sealed class VhsSessionReaderOutputBufferPoolIntegrationTests
 {
-    [Fact(DisplayName = "VHS session reader pools and returns decoded luma output")]
-    public void VhsSessionReaderPoolsAndReturnsDecodedLumaOutput()
+    [Theory(DisplayName = "VHS session reader pools and returns decoded field output")]
+    [InlineData(true)]
+    [InlineData(false)]
+    public void VhsSessionReaderPoolsAndReturnsDecodedFieldOutput(bool skipChroma)
     {
         string tempDirectory = CreateTempDirectory();
         try
         {
             string outputBase = Path.Combine(tempDirectory, "session-reader");
-            ParsedCommand command = new CommandLineParser().Parse(
-                CliSpecs.Vhs,
-                [
-                    "--pal",
-                    "--frequency", "40",
-                    "--no_resample",
-                    "--skip_chroma",
-                    "--fallback_vsync",
-                    "--relaxed_line0",
-                    "--threads", "2",
-                    "input.s16",
-                    outputBase
-                ]);
+            List<string> arguments =
+            [
+                "--pal",
+                "--frequency", "40",
+                "--no_resample",
+                "--fallback_vsync",
+                "--relaxed_line0",
+                "--threads", "2"
+            ];
+            if (skipChroma)
+            {
+                arguments.Add("--skip_chroma");
+            }
+
+            arguments.Add("input.s16");
+            arguments.Add(outputBase);
+            ParsedCommand command = new CommandLineParser().Parse(CliSpecs.Vhs, arguments);
             using DecodeSession session = DecodeSessionFactory.Create(command);
-            Assert.True(session.ExecutionOptions.WorkerThreads > 1);
+            Assert.True(session.StreamDecoder.WorkerThreads > 1);
             using var input = new MemoryStream(BuildPalVhsRf(session));
 
             TbcFieldSequenceDecodeResult result = new TbcFieldSequenceDecodeEngine()
@@ -47,6 +53,22 @@ public sealed class VhsSessionReaderOutputBufferPoolIntegrationTests
             Assert.Equal(
                 session.TbcFrameSpec.FieldSampleCount * sizeof(ushort),
                 new FileInfo(outputBase + ".tbc").Length);
+            if (skipChroma)
+            {
+                Assert.Equal(0, session.TbcFieldDecoder.CreatedFieldOutputChromaBufferCount);
+                Assert.Equal(0, session.TbcFieldDecoder.RetainedFieldOutputChromaBufferCount);
+                Assert.False(File.Exists(outputBase + "_chroma.tbc"));
+            }
+            else
+            {
+                Assert.InRange(session.TbcFieldDecoder.CreatedFieldOutputChromaBufferCount, 1, 4);
+                Assert.Equal(
+                    session.TbcFieldDecoder.CreatedFieldOutputChromaBufferCount,
+                    session.TbcFieldDecoder.RetainedFieldOutputChromaBufferCount);
+                Assert.Equal(
+                    session.TbcFrameSpec.FieldSampleCount * sizeof(ushort),
+                    new FileInfo(outputBase + "_chroma.tbc").Length);
+            }
         }
         finally
         {
