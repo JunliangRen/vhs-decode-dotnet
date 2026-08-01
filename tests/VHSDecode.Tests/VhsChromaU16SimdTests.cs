@@ -95,8 +95,22 @@ public sealed class VhsChromaU16SimdTests
         var destination = new ushort[input.Length];
 
         VhsChromaDecoder.ChromaToU16(input, destination);
+        long before = GC.GetAllocatedBytesForCurrentThread();
+        VhsChromaDecoder.ChromaToU16(input, destination);
+        long callerOwnedAllocated = GC.GetAllocatedBytesForCurrentThread() - before;
 
-        Assert.Equal(VhsChromaDecoder.ChromaToU16(input), destination);
+        before = GC.GetAllocatedBytesForCurrentThread();
+        ushort[] allocated = VhsChromaDecoder.ChromaToU16(input);
+        long allocatingPathBytes = GC.GetAllocatedBytesForCurrentThread() - before;
+
+        Assert.Equal(allocated, destination);
+        Assert.True(
+            callerOwnedAllocated < 4_096,
+            $"Caller-owned VHS chroma conversion allocated {callerOwnedAllocated:N0} bytes.");
+        Assert.True(
+            allocatingPathBytes - callerOwnedAllocated >= input.Length * sizeof(ushort),
+            $"Caller-owned VHS chroma output saved only "
+                + $"{allocatingPathBytes - callerOwnedAllocated:N0} bytes.");
     }
 
     [Theory(DisplayName = "VHS automatic chroma gain fills a caller-owned destination")]

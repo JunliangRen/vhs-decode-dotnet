@@ -185,14 +185,35 @@ public sealed class TbcDirectConversionTests
         using TbcLineResampler.ResamplingPlan plan =
             renderer.PrepareFieldResampling(lineLocations);
         _ = renderer.RenderPreparedFieldPayload(source, plan);
+        var destination = new ushort[destinationLength];
+        _ = renderer.RenderPreparedFieldPayload(
+            source,
+            plan,
+            outputDestination: destination);
+
         long before = GC.GetAllocatedBytesForCurrentThread();
         TbcRenderedField rendered = renderer.RenderPreparedFieldPayload(source, plan);
         long allocated = GC.GetAllocatedBytesForCurrentThread() - before;
 
+        before = GC.GetAllocatedBytesForCurrentThread();
+        TbcRenderedField callerOwned = renderer.RenderPreparedFieldPayload(
+            source,
+            plan,
+            outputDestination: destination);
+        long callerOwnedAllocated = GC.GetAllocatedBytesForCurrentThread() - before;
+
         Assert.Equal(destinationLength, rendered.Samples.Length);
+        Assert.Same(destination, callerOwned.Samples);
+        Assert.Equal(rendered.Samples, callerOwned.Samples);
         Assert.True(
             allocated < destinationLength * 3L,
             $"Direct prepared TBC rendering allocated {allocated:N0} bytes.");
+        Assert.True(
+            callerOwnedAllocated < 16_384,
+            $"Caller-owned prepared TBC rendering allocated {callerOwnedAllocated:N0} bytes.");
+        Assert.True(
+            allocated >= destinationLength * sizeof(ushort),
+            $"Allocating prepared TBC rendering allocated only {allocated:N0} bytes.");
     }
 
     [Fact(DisplayName = "Prepared TBC fallback renderer reuses a caller workspace")]
