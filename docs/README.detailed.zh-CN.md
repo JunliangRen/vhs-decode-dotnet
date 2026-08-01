@@ -151,6 +151,12 @@ Gauss-Newton burst 拟合、逐行频率/DC 相位补偿、MAD 限幅插值增�
 独立的端到端门禁同时保证默认 `v0.4.0` 配置在 `--threads 0`、默认线程和
 `--threads 20` 下保持完全一致。
 
+一个私有本地 PAL VHS RF 样本还完成了自然起点 20 帧门禁。已合并的
+Python PR 341 与 Exact `current` 在全部 40 个 field 上一致，包括亮度/色度
+字节、顺序 `fileLoc`、stdout、归一化耗时后的 stderr、754 行时间戳归一化
+日志，以及仅统一来源身份后的 JSON。Exact `current` 在 `--threads 0`、
+默认线程和 `--threads 20` 下也保持确定性。
+
 ### 1,000 帧发版门禁
 
 同一个私有本地 NTSC `.ldf` 文件分别在两种行为配置下使用 Exact 后端和默认
@@ -1585,7 +1591,7 @@ JSON、stdout、归一化 stderr/日志及有序 `fileLoc` 全部一致，并包
 .\tools\build-ipp-native.ps1
 dotnet restore VHSDecodeDotNet.slnx
 dotnet build VHSDecodeDotNet.slnx -c Release --no-restore
-dotnet test --solution VHSDecodeDotNet.slnx -c Release --no-build --no-restore --minimum-expected-tests 1195
+dotnet test --solution VHSDecodeDotNet.slnx -c Release --no-build --no-restore --minimum-expected-tests 1222
 ```
 
 第一条命令用于包含可选的 `ipp-fast` 原生产物；只构建 Exact 时可以省略。
@@ -1596,7 +1602,7 @@ Intel oneAPI。只含二进制的单文件发布会嵌入 `vhsdecode_ipp.dll` �
 notice，不会额外生成许可证 sidecar 文件。只构建 Exact 后端时可以省略原生构建步骤。
 
 当前正式 Release 构建为零警告、零错误。xUnit v3 项目向
-`dotnet test` 和 Visual Studio Test Explorer 暴露 **1,195** 个可独立发现的测试。
+`dotnet test` 和 Visual Studio Test Explorer 暴露 **1,222** 个可独立发现的测试。
 
 <!-- SECTION: usage -->
 

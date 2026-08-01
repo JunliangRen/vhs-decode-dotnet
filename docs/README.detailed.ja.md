@@ -163,6 +163,13 @@ upstream の back-porch assignment quirk も意図的に保持し、修正には
 profile change が必要です。別の end-to-end gate により、default `v0.4.0`
 profile は `--threads 0`、default、`--threads 20` のすべてで同一に保たれます。
 
+private local PAL VHS RF capture の natural-start 20-frame gate でも、
+merged Python PR 341 と Exact `current` は全 40 field で一致しました。対象は
+luma/chroma byte、ordered `fileLoc`、stdout、timing-normalized stderr、
+754 行の timestamp-normalized log、および source identity だけを正規化した
+JSON です。Exact `current` は `--threads 0`、default、`--threads 20` でも
+deterministic です。
+
 ### 1,000-frame release gate
 
 同じ private local NTSC `.ldf` capture を、両 behavior profile で Exact backend
@@ -1918,7 +1925,7 @@ profile peer です。
 .\tools\build-ipp-native.ps1
 dotnet restore VHSDecodeDotNet.slnx
 dotnet build VHSDecodeDotNet.slnx -c Release --no-restore
-dotnet test --solution VHSDecodeDotNet.slnx -c Release --no-build --no-restore --minimum-expected-tests 1195
+dotnet test --solution VHSDecodeDotNet.slnx -c Release --no-build --no-restore --minimum-expected-tests 1222
 ```
 
 最初の command は optional `ipp-fast` native artifact を含めるためのものです。
@@ -1931,7 +1938,7 @@ third-party notice を埋め込み、license sidecar file は追加しません�
 
 現在の正式な Release build は warning 0、error 0 です。xUnit v3 project は
 `dotnet test` と Visual Studio Test Explorer の両方で個別に検出できる
-**1,195** tests を公開します。
+**1,222** tests を公開します。
 
 <!-- SECTION: usage -->
 
