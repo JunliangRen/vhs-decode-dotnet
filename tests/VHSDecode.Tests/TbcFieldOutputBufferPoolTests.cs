@@ -125,12 +125,10 @@ public sealed class TbcFieldOutputBufferPoolTests
     public void FieldOutputOwnershipDoesNotChangeDecodedFieldValueEquality()
     {
         var pool = new TbcFieldOutputBufferPool(0, chromaLength: null);
-        TbcFieldOutputBufferPool.TbcFieldOutputBufferLease firstLease = pool.Rent();
-        TbcFieldOutputBufferPool.TbcFieldOutputBufferLease secondLease = pool.Rent();
-        TbcDecodedField first = CreateEmptyField();
-        TbcDecodedField second = CreateEmptyField();
-        first.AttachOutputBuffers(firstLease);
-        second.AttachOutputBuffers(secondLease);
+        TbcFieldOutputBufferPool.TbcFieldOutputBufferLease lease = pool.Rent();
+        TbcDecodedField first = CreateEmptyField() with { Samples = lease.Luma };
+        TbcDecodedField second = first with { };
+        first.AttachOutputBuffers(lease);
 
         try
         {
@@ -140,8 +138,33 @@ public sealed class TbcFieldOutputBufferPoolTests
         finally
         {
             first.ReleaseOutputBuffers();
-            second.ReleaseOutputBuffers();
         }
+    }
+
+    [Fact(DisplayName = "Fields with pooled output buffers reject record cloning")]
+    public void FieldsWithPooledOutputBuffersRejectRecordCloning()
+    {
+        var pool = new TbcFieldOutputBufferPool(8, chromaLength: 8, maximumRetainedBuffers: 1);
+        TbcFieldOutputBufferPool.TbcFieldOutputBufferLease lease = pool.Rent();
+        TbcDecodedField original = CreateEmptyField() with
+        {
+            Samples = lease.Luma,
+            ChromaSamples = lease.Chroma
+        };
+        original.AttachOutputBuffers(lease);
+
+        try
+        {
+            Assert.Throws<InvalidOperationException>(() => original with { StartSample = 1 });
+            Assert.Same(lease, original.OutputBufferLease);
+        }
+        finally
+        {
+            original.ReleaseOutputBuffers();
+        }
+
+        Assert.Null(original.OutputBufferLease);
+        Assert.Throws<InvalidOperationException>(() => original with { StartSample = 2 });
     }
 
     private static TbcDecodedField CreateEmptyField()

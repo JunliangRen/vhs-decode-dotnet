@@ -46,6 +46,50 @@ public sealed record TbcDecodedField(
 {
     internal TbcDeferredRenderSource? DeferredRenderSource { get; init; }
 
+    private TbcDecodedField(TbcDecodedField original)
+        : base()
+    {
+        if (TbcDecodedFieldOutputBufferRegistry.WasPooled(original))
+        {
+            throw new InvalidOperationException("A field with pooled output buffers cannot be copied.");
+        }
+
+        StartSample = original.StartSample;
+        Samples = original.Samples;
+        LineLocations = original.LineLocations;
+        Timing = original.Timing;
+        SyncThresholdHz = original.SyncThresholdHz;
+        MeanLineLength = original.MeanLineLength;
+        RawPulseCount = original.RawPulseCount;
+        ClassifiedPulseCount = original.ClassifiedPulseCount;
+        DetectedFirstField = original.DetectedFirstField;
+        DetectedFirstFieldConfidence = original.DetectedFirstFieldConfidence;
+        Dropouts = original.Dropouts;
+        OutputPayload = original.OutputPayload;
+        Efm = original.Efm;
+        AudioPcm = original.AudioPcm;
+        RfTbc = original.RfTbc;
+        EfmTValueCount = original.EfmTValueCount;
+        AudioSampleCount = original.AudioSampleCount;
+        DiskLocation = original.DiskLocation;
+        MedianBurstIre = original.MedianBurstIre;
+        FieldPhaseId = original.FieldPhaseId;
+        VitsMetrics = original.VitsMetrics;
+        VbiData = original.VbiData;
+        ChromaBurstSamples = original.ChromaBurstSamples;
+        ChromaSamples = original.ChromaSamples;
+        BurstStartLine = original.BurstStartLine;
+        RawInputSamples = original.RawInputSamples;
+        PreTbcVideoSamples = original.PreTbcVideoSamples;
+        NextFieldOffsetSamples = original.NextFieldOffsetSamples;
+        NominalFieldLengthSamples = original.NominalFieldLengthSamples;
+        SyncConfidence = original.SyncConfidence;
+        OutputConverter = original.OutputConverter;
+        BlackToWhiteRfRatio = original.BlackToWhiteRfRatio;
+        LaserDiscAgcAdjusted = original.LaserDiscAgcAdjusted;
+        DeferredRenderSource = original.DeferredRenderSource;
+    }
+
     internal TbcFieldOutputBufferPool.TbcFieldOutputBufferLease? OutputBufferLease
         => TbcDecodedFieldOutputBufferRegistry.Get(this);
 

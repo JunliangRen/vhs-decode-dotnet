@@ -6,12 +6,15 @@ internal static class TbcDecodedFieldOutputBufferRegistry
 {
     private static readonly ConditionalWeakTable<
         TbcDecodedField,
-        TbcFieldOutputBufferPool.TbcFieldOutputBufferLease> Leases = new();
+        OutputBufferRegistration> Registrations = new();
 
     internal static TbcFieldOutputBufferPool.TbcFieldOutputBufferLease? Get(TbcDecodedField field)
-        => Leases.TryGetValue(field, out TbcFieldOutputBufferPool.TbcFieldOutputBufferLease? lease)
-            ? lease
+        => Registrations.TryGetValue(field, out OutputBufferRegistration? registration)
+            ? Volatile.Read(ref registration.Lease)
             : null;
+
+    internal static bool WasPooled(TbcDecodedField field)
+        => Registrations.TryGetValue(field, out _);
 
     internal static void Attach(
         TbcDecodedField field,
@@ -19,7 +22,7 @@ internal static class TbcDecodedFieldOutputBufferRegistry
     {
         ArgumentNullException.ThrowIfNull(field);
         ArgumentNullException.ThrowIfNull(lease);
-        Leases.Add(field, lease);
+        Registrations.Add(field, new OutputBufferRegistration(lease));
     }
 
     internal static void Retain(TbcDecodedField field)
@@ -27,11 +30,22 @@ internal static class TbcDecodedFieldOutputBufferRegistry
 
     internal static void Release(TbcDecodedField field)
     {
-        TbcFieldOutputBufferPool.TbcFieldOutputBufferLease? lease = Get(field);
+        if (!Registrations.TryGetValue(field, out OutputBufferRegistration? registration))
+        {
+            return;
+        }
+
+        TbcFieldOutputBufferPool.TbcFieldOutputBufferLease? lease = Volatile.Read(ref registration.Lease);
         if (lease?.ReleaseReference() == true)
         {
-            Leases.Remove(field);
+            Interlocked.CompareExchange(ref registration.Lease, null, lease);
         }
+    }
+
+    private sealed class OutputBufferRegistration(
+        TbcFieldOutputBufferPool.TbcFieldOutputBufferLease lease)
+    {
+        internal TbcFieldOutputBufferPool.TbcFieldOutputBufferLease? Lease = lease;
     }
 }
 
