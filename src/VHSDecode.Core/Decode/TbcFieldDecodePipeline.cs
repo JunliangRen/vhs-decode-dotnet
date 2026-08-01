@@ -448,6 +448,12 @@ public sealed class TbcFieldDecodePipeline
             _previousVhsFieldReadLocation);
     }
 
+    internal int CreatedFieldOutputLumaBufferCount
+        => _fieldOutputBufferPool?.CreatedLumaBufferCount ?? 0;
+
+    internal int RetainedFieldOutputLumaBufferCount
+        => _fieldOutputBufferPool?.RetainedLumaBufferCount ?? 0;
+
     internal void RestoreStateForRetry(TbcFieldDecodeState state)
     {
         VideoOutputConverter? adjustedAgcConverter = _laserDiscAgcConverter;
