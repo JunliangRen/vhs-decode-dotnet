@@ -317,6 +317,205 @@ public sealed class VhsSavedLevelStateCompatibilityTests
         Assert.Empty(diagnostics);
     }
 
+    [Fact(DisplayName = "v0.4.0 rejected serration levels use reversed defaults when FieldState is empty")]
+    public void V040RejectedDetectorLevelsWithEmptyFieldStateUseReversedDefaults()
+    {
+        var diagnostics = new List<(string Level, string Message)>();
+        TbcFieldDecodePipeline pipeline = CreateSerrationPipeline(
+            diagnostics,
+            out _);
+        RfDecodedSpan span = BuildSerrationFallbackSpan();
+
+        SyncPreparedSpan prepared = PrepareSyncSpan(pipeline, span);
+
+        Assert.Equal(120.0, prepared.Threshold);
+        Assert.False(prepared.UsedSavedLevels);
+        Assert.False(prepared.ExplicitThreshold);
+        Assert.Same(span.Video, prepared.Span.Video);
+        Assert.Equal([40.0, 140.0], prepared.Span.VideoLowPass!);
+        Assert.Equal([0.0, 100.0], span.VideoLowPass!);
+        Assert.Null(pipeline.CaptureState().LastDetectedSyncLevels);
+        Assert.Equal(
+            [
+                (
+                    "DEBUG",
+                    "Level detection failed - sync or blank is None"),
+                (
+                    "DEBUG",
+                    "Level check failed on serration measured levels, using defaults.")
+            ],
+            diagnostics);
+    }
+
+    [Fact(DisplayName = "v0.4.0 sync-only FieldState still uses reversed defaults")]
+    public void V040SyncOnlyFieldStateUsesReversedDefaults()
+    {
+        var diagnostics = new List<(string Level, string Message)>();
+        TbcFieldDecodePipeline pipeline = CreateSerrationPipeline(
+            diagnostics,
+            out _);
+        GetVhsFieldLevelState(pipeline).PushSyncLevel(75.0);
+
+        SyncPreparedSpan prepared = PrepareSyncSpan(pipeline, BuildSerrationFallbackSpan());
+
+        Assert.Equal(120.0, prepared.Threshold);
+        Assert.Null(pipeline.CaptureState().LastDetectedSyncLevels);
+        Assert.Contains(
+            ("DEBUG", "Level check failed on serration measured levels, using defaults."),
+            diagnostics);
+    }
+
+    [Fact(DisplayName = "v0.4.0 full FieldState takes precedence over reversed defaults")]
+    public void V040PopulatedFieldStateTakesPrecedenceOverReversedDefaults()
+    {
+        var diagnostics = new List<(string Level, string Message)>();
+        TbcFieldDecodePipeline pipeline = CreateSerrationPipeline(
+            diagnostics,
+            out _);
+        GetVhsFieldLevelState(pipeline).PushLevels(60.0, 100.0);
+
+        SyncPreparedSpan prepared = PrepareSyncSpan(pipeline, BuildSerrationFallbackSpan());
+
+        Assert.Equal(80.0, prepared.Threshold);
+        Assert.Equal((60.0, 100.0), pipeline.CaptureState().LastDetectedSyncLevels);
+        Assert.DoesNotContain(
+            diagnostics,
+            entry => entry.Message == "Level check failed on serration measured levels, using defaults.");
+        Assert.Contains(
+            diagnostics,
+            entry => entry.Message.StartsWith(
+                "Level check failed on serration measured levels [new_sync:",
+                StringComparison.Ordinal));
+    }
+
+    [Fact(DisplayName = "v0.4.0 retained valid serration levels bypass reversed defaults")]
+    public void V040RetainedValidDetectorLevelsBypassReversedDefaults()
+    {
+        var diagnostics = new List<(string Level, string Message)>();
+        TbcFieldDecodePipeline pipeline = CreateSerrationPipeline(
+            diagnostics,
+            out VsyncSerrationDetector detector);
+        detector.PushLevels(60.0, 100.0);
+        detector.PushLevels(60.0, 100.0);
+
+        SyncPreparedSpan prepared = PrepareSyncSpan(pipeline, BuildSerrationFallbackSpan());
+
+        Assert.Equal(80.0, prepared.Threshold);
+        Assert.Equal((60.0, 100.0), pipeline.CaptureState().LastDetectedSyncLevels);
+        Assert.DoesNotContain(
+            diagnostics,
+            entry => entry.Message == "Level check failed on serration measured levels, using defaults.");
+    }
+
+    [Fact(DisplayName = "v0.4.0 single rejected serration measurement does not use reversed defaults")]
+    public void V040SingleRejectedSerrationMeasurementDoesNotUseReversedDefaults()
+    {
+        var diagnostics = new List<(string Level, string Message)>();
+        (TbcFieldDecodePipeline pipeline, RfDecodedSpan span) =
+            CreateSingleRejectedSerrationPipeline(diagnostics);
+
+        SyncPreparedSpan prepared = PrepareSyncSpan(pipeline, span);
+
+        Assert.Equal(80.0, prepared.Threshold);
+        Assert.Same(span, prepared.Span);
+        Assert.Null(pipeline.CaptureState().LastDetectedSyncLevels);
+        Assert.DoesNotContain(
+            diagnostics,
+            entry => entry.Message == "Level check failed on serration measured levels, using defaults.");
+        Assert.Contains(
+            ("DEBUG", "Level detection had issues, so don't store anything in VsyncSerration."),
+            diagnostics);
+    }
+
+    [Fact(DisplayName = "v0.4.0 rejected serration uses reversed defaults in immediate detector path")]
+    public void V040RejectedSerrationUsesReversedDefaultsInImmediateDetectorPath()
+    {
+        var diagnostics = new List<(string Level, string Message)>();
+        (TbcFieldDecodePipeline pipeline, RfDecodedSpan span) =
+            CreateSingleRejectedSerrationPipeline(
+                diagnostics,
+                seedDetectorLevel: true);
+
+        SyncPreparedSpan prepared = PrepareSyncSpan(pipeline, span);
+
+        Assert.Equal(120.0, prepared.Threshold);
+        Assert.False(prepared.UsedSavedLevels);
+        Assert.False(prepared.ExplicitThreshold);
+        Assert.Null(pipeline.CaptureState().LastDetectedSyncLevels);
+        Assert.Equal(
+            [
+                (
+                    "DEBUG",
+                    "VBI serration levels 2 - Sync tip: 0.10 kHz, Blanking (ire0): 0.20 kHz"),
+                (
+                    "DEBUG",
+                    "Level detection had issues, so don't store anything in VsyncSerration."),
+                (
+                    "DEBUG",
+                    "Level check failed on serration measured levels, using defaults.")
+            ],
+            diagnostics);
+    }
+
+    [Fact(DisplayName = "current profile does not use v0.4.0 reversed serration defaults")]
+    public void CurrentProfileDoesNotUseReversedSerrationDefaults()
+    {
+        var diagnostics = new List<(string Level, string Message)>();
+        TbcFieldDecodePipeline pipeline = CreateSerrationPipeline(
+            diagnostics,
+            out VsyncSerrationDetector detector,
+            upstreamBehaviorProfile: UpstreamBehaviorProfile.Current);
+        RfDecodedSpan span = BuildSerrationFallbackSpan();
+
+        SyncPreparedSpan prepared = PrepareSyncSpan(pipeline, span);
+
+        Assert.Equal(80.0, prepared.Threshold);
+        Assert.Same(span, prepared.Span);
+        Assert.Equal(1, detector.FieldCount);
+        Assert.Empty(diagnostics);
+    }
+
+    [Fact(DisplayName = "v0.4.0 reversed defaults preserve clamp behavior")]
+    public void V040ReversedDefaultsPreserveClampBehavior()
+    {
+        var diagnostics = new List<(string Level, string Message)>();
+        TbcFieldDecodePipeline pipeline = CreateSerrationPipeline(
+            diagnostics,
+            out _,
+            clampDcOffset: true);
+        RfDecodedSpan span = BuildSerrationFallbackSpan();
+
+        SyncPreparedSpan prepared = PrepareSyncSpan(pipeline, span);
+
+        Assert.Equal([50.0, 60.0], prepared.Span.Video);
+        Assert.Equal([40.0, 140.0], prepared.Span.VideoLowPass!);
+        Assert.Equal([10.0, 20.0], span.Video);
+        Assert.Equal([0.0, 100.0], span.VideoLowPass!);
+        Assert.Same(span.Input, prepared.Span.Input);
+        Assert.Same(span.DemodRaw, prepared.Span.DemodRaw);
+    }
+
+    [Fact(DisplayName = "explicit sync threshold bypasses v0.4.0 reversed defaults")]
+    public void ExplicitThresholdBypassesReversedDefaults()
+    {
+        var diagnostics = new List<(string Level, string Message)>();
+        TbcFieldDecodePipeline pipeline = CreateSerrationPipeline(
+            diagnostics,
+            out VsyncSerrationDetector detector);
+        RfDecodedSpan span = BuildSerrationFallbackSpan();
+
+        SyncPreparedSpan prepared = PrepareSyncSpan(
+            pipeline,
+            span,
+            explicitThreshold: 123.0);
+
+        Assert.Equal(123.0, prepared.Threshold);
+        Assert.True(prepared.ExplicitThreshold);
+        Assert.Same(span, prepared.Span);
+        Assert.Equal(1, detector.FieldCount);
+        Assert.Empty(diagnostics);
+    }
+
     [Fact(DisplayName = "VHS line-location issue state forces fresh level detection")]
     public void LineLocationIssueStateForcesFreshLevelDetection()
     {
@@ -436,16 +635,161 @@ public sealed class VhsSavedLevelStateCompatibilityTests
             diagnosticLogger: (level, message) => diagnostics.Add((level, message)));
     }
 
+    private static TbcFieldDecodePipeline CreateSerrationPipeline(
+        ICollection<(string Level, string Message)> diagnostics,
+        out VsyncSerrationDetector detector,
+        UpstreamBehaviorProfile upstreamBehaviorProfile = UpstreamBehaviorProfile.V040,
+        bool clampDcOffset = false)
+    {
+        var converter = new VideoOutputConverter(
+            ire0: 100.0,
+            hzIre: 1.0,
+            outputZero: 256,
+            vsyncIre: -40.0,
+            outputScale: 10.0);
+        var renderer = new TbcFieldRenderer(
+            new TbcFrameSpec(
+                "PAL",
+                OutputLineLength: 4,
+                OutputLineCount: 2,
+                OutputSampleRateHz: 1_000_000.0,
+                ColourBurstStart: null,
+                ColourBurstEnd: null,
+                ActiveVideoStart: null,
+                ActiveVideoEnd: null),
+            converter);
+        var analyzer = new SyncAnalyzer(
+            sampleRateHz: 1_000_000.0,
+            linePeriodUs: 64.0,
+            hsyncPulseUs: 4.7,
+            equalizingPulseUs: 2.35,
+            vsyncPulseUs: 27.3);
+        detector = new VsyncSerrationDetector(
+            sampleRateHz: 1_000_000.0,
+            framesPerSecond: 25.0,
+            frameLines: 625.0,
+            equalizingPulseUs: 2.35);
+        _ = detector.Analyze([]);
+        detector.PushLevels(100.0, 200.0);
+        detector.PushLevels(100.0, 200.0);
+        return new TbcFieldDecodePipeline(
+            analyzer,
+            renderer,
+            converter,
+            "PAL",
+            TbcDropoutDetectionOptions.Disabled,
+            syncDetectionOptions: new SyncDetectionOptions(
+                DetectLevels: true,
+                LevelDetectDivisor: 1,
+                ClampDcOffset: clampDcOffset),
+            decodeType: "vhs",
+            vsyncSerrationDetector: detector,
+            framesPerSecond: 25.0,
+            diagnosticLogger: (level, message) => diagnostics.Add((level, message)),
+            upstreamBehaviorProfile: upstreamBehaviorProfile,
+            activeVideoStartUs: 12.0);
+    }
+
+    private static VhsFieldLevelState GetVhsFieldLevelState(TbcFieldDecodePipeline pipeline)
+    {
+        FieldInfo field = typeof(TbcFieldDecodePipeline).GetField(
+            "_vhsFieldLevelState",
+            BindingFlags.Instance | BindingFlags.NonPublic)
+            ?? throw new MissingFieldException(
+                nameof(TbcFieldDecodePipeline),
+                "_vhsFieldLevelState");
+        return Assert.IsType<VhsFieldLevelState>(field.GetValue(pipeline));
+    }
+
+    private static (TbcFieldDecodePipeline Pipeline, RfDecodedSpan Span)
+        CreateSingleRejectedSerrationPipeline(
+            ICollection<(string Level, string Message)> diagnostics,
+            bool seedDetectorLevel = false)
+    {
+        const double sampleRateHz = 4_000_000.0;
+        var converter = new VideoOutputConverter(
+            ire0: 100.0,
+            hzIre: 1.0,
+            outputZero: 256,
+            vsyncIre: -40.0,
+            outputScale: 10.0);
+        var analyzer = new SyncAnalyzer(
+            sampleRateHz,
+            linePeriodUs: 64.0,
+            hsyncPulseUs: 4.7,
+            equalizingPulseUs: 2.35,
+            vsyncPulseUs: 27.3);
+        var detector = new VsyncSerrationDetector(
+            sampleRateHz,
+            framesPerSecond: 25.0,
+            frameLines: 625.0,
+            equalizingPulseUs: 2.35);
+        if (seedDetectorLevel)
+        {
+            detector.PushLevels(100.0, 200.0);
+        }
+        var renderer = new TbcFieldRenderer(
+            new TbcFrameSpec(
+                "PAL",
+                OutputLineLength: 4,
+                OutputLineCount: 2,
+                OutputSampleRateHz: sampleRateHz,
+                ColourBurstStart: null,
+                ColourBurstEnd: null,
+                ActiveVideoStart: null,
+                ActiveVideoEnd: null),
+            converter);
+        var pipeline = new TbcFieldDecodePipeline(
+            analyzer,
+            renderer,
+            converter,
+            "PAL",
+            TbcDropoutDetectionOptions.Disabled,
+            syncDetectionOptions: new SyncDetectionOptions(
+                DetectLevels: true,
+                LevelDetectDivisor: 1),
+            decodeType: "vhs",
+            vsyncSerrationDetector: detector,
+            framesPerSecond: 25.0,
+            diagnosticLogger: (level, message) => diagnostics.Add((level, message)));
+        double[] syncReference = Enumerable.Repeat(200.0, detector.LineLength * 400).ToArray();
+        int firstPulse = detector.LineLength * 20;
+        for (int pulse = 0; pulse < 11; pulse++)
+        {
+            int start = firstPulse + (pulse * detector.LineLength / 2);
+            Array.Fill(syncReference, 100.0, start, detector.EqualizingPulseLength);
+        }
+
+        var span = new RfDecodedSpan(
+            0,
+            [],
+            syncReference,
+            syncReference,
+            VideoLowPass: syncReference);
+        return (pipeline, span);
+    }
+
     private static SyncPreparedSpan PrepareSyncSpan(
         TbcFieldDecodePipeline pipeline,
-        RfDecodedSpan span)
+        RfDecodedSpan span,
+        double? explicitThreshold = null)
     {
         MethodInfo method = typeof(TbcFieldDecodePipeline).GetMethod(
             "PrepareSyncSpan",
             BindingFlags.Instance | BindingFlags.NonPublic)
             ?? throw new MissingMethodException(nameof(TbcFieldDecodePipeline), "PrepareSyncSpan");
-        return Assert.IsType<SyncPreparedSpan>(method.Invoke(pipeline, [span, null, true, true]));
+        return Assert.IsType<SyncPreparedSpan>(method.Invoke(
+            pipeline,
+            [span, explicitThreshold, true, true]));
     }
+
+    private static RfDecodedSpan BuildSerrationFallbackSpan()
+        => new(
+            0,
+            [1.0, 2.0],
+            [10.0, 20.0],
+            [30.0, 40.0],
+            VideoLowPass: [0.0, 100.0]);
 
     private static RfDecodedSpan BuildLevelDetectionSpan(double syncLevel)
     {

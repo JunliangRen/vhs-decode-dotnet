@@ -52,5 +52,6 @@ public sealed class VsyncWorkspaceTests
         Assert.Equal(expected.HarmonicMinima, actual.HarmonicMinima);
         Assert.Equal(expected.Candidates, actual.Candidates);
         Assert.Equal(expected.LevelCountBeforePull, actual.LevelCountBeforePull);
+        Assert.Equal(expected.Diagnostic, actual.Diagnostic);
     }
 }
