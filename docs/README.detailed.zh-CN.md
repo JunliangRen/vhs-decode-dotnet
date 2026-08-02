@@ -334,15 +334,17 @@ IPP-fast v0.4.0 和 IPP-fast `current`。文件名不会公开。每个 .NET 单
 | 默认（5） | 15.207 s | 16.780 s | 4.389 s / 3.465x / 71.14% | 5.896 s / 2.846x / 64.86% | 3.609 s / 4.213x / 76.27% | 4.654 s / 3.606x / 72.26% |
 | `--threads 1` | 17.694 s | 19.414 s | 10.065 s / 1.758x / 43.11% | 13.488 s / 1.439x / 30.52% | 7.215 s / 2.453x / 59.23% | 10.256 s / 1.893x / 47.17% |
 | `--threads 5` | 15.719 s | 17.801 s | 4.282 s / 3.671x / 72.76% | 5.982 s / 2.976x / 66.40% | 3.568 s / 4.406x / 77.30% | 5.082 s / 3.503x / 71.45% |
-| `--threads 10` | 16.037 s | 18.266 s | 3.494 s / 4.589x / 78.21% | 5.101 s / 3.581x / 72.07% | 3.098 s / 5.177x / 80.68% | 4.234 s / 4.314x / 76.82% |
-| `--threads 20` | 16.405 s | 18.395 s | 3.235 s / 5.071x / 80.28% | 4.268 s / 4.310x / 76.80% | 2.654 s / 6.182x / 83.82% | 4.464 s / 4.121x / 75.73% |
+| `--threads 10` | 16.037 s | 18.266 s | 3.494 s / 4.589x / 78.21% | 4.877 s / 3.745x / 73.30% | 3.098 s / 5.177x / 80.68% | 4.375 s / 4.175x / 76.05% |
+| `--threads 20` | 16.405 s | 18.395 s | 3.235 s / 5.071x / 80.28% | 4.689 s / 3.923x / 74.51% | 2.654 s / 6.182x / 83.82% | 4.084 s / 4.504x / 77.80% |
 <!-- LATEST_PERFORMANCE_END -->
 
 本轮于 2026-08-02 在 main commit
 `c92af1dfd0f96cd7f2d49f3219fb428d0f4e0865` 上完成。测试机为 Intel Core
 Ultra 7 265K（20 个逻辑处理器）、Windows 11 build 26220，以及 .NET
 SDK/runtime `11.0.100-preview.6.26359.118`。30 个模式/profile 组合各交错运行
-三次，共 90 次 Release 运行。Python v0.4.0 commit 为
+三次，共 90 次 Release 运行。将严格独立的 CTI 扫描线上限从 5 调整为 8 后，
+10 和 20 worker 的四个 `current` 单元格各以六组交替基线/候选配对重新测量，
+另增加 48 次 Release 运行。Python v0.4.0 commit 为
 `43155200da87c0d49eb37d8ec09b1372075ee8e4`，已合并 PR341 commit 为
 `2f21e8ed6018b14561396cc95f1f6828054470b8`（`v0.4.0-40-g2f21e8ed`）。
 Python 3.14.0 使用 NumPy
@@ -350,12 +352,11 @@ Python 3.14.0 使用 NumPy
 
 ```text
 --system pal --detect_chroma_track_phase --ire0_adjust
---tape_format VHS --frequency 40 --length 40 --overwrite
+--tape_format VHS --frequency 40 --length 40 --start 100 --overwrite
 ```
 
-命令没有使用 `--start` 或 `--start_fileloc`：本地夹具直接从选定 PCM 窗口开始，
-确保两种实现读取同一物理样本，不经过容器随机 seek 路径。两种实现的默认值都是
-**5 个 workers**。
+共享的 `--start 100` 为每个 profile 选择同一个有界帧窗口；没有使用
+`--start_fileloc`。两种实现的默认值都是 **5 个 workers**。
 
 另行执行的 40 帧 `--threads 0` 门禁中，Exact v0.4.0 与 Python `g4315520`
 在亮度、色度、原始 JSON、全部 80 个有序 `fileLoc`、stdout、归一化 stderr 和

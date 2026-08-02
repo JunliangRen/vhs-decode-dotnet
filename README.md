@@ -98,9 +98,10 @@ for compatibility-sensitive work.
 
 The table below uses one fixed private local 40 MHz PAL VHS `.ldf` fixture and
 the same 40-frame window for every run. The source filename is intentionally
-not published. Each value is the median of three interleaved runs measured on
-2026-08-02 from main commit `c92af1d`. Compatibility is evaluated separately
-from speed.
+not published. The base matrix uses three interleaved runs measured on
+2026-08-02 from main commit `c92af1d`; the four `current` cells at 10 and 20
+workers were refreshed from six paired runs after the CTI worker tuning in
+this branch. Compatibility is evaluated separately from speed.
 
 <!-- LATEST_PERFORMANCE_BEGIN -->
 | CLI mode (workers) | Python v0.4.0 | Python PR341 | Exact + v0.4.0 | Exact + current | IPP-fast + v0.4.0 | IPP-fast + current |
@@ -108,15 +109,16 @@ from speed.
 | default (5) | 15.207 s | 16.780 s | 4.389 s / 3.465x | 5.896 s / 2.846x | 3.609 s / 4.213x | 4.654 s / 3.606x |
 | `--threads 1` | 17.694 s | 19.414 s | 10.065 s / 1.758x | 13.488 s / 1.439x | 7.215 s / 2.453x | 10.256 s / 1.893x |
 | `--threads 5` | 15.719 s | 17.801 s | 4.282 s / 3.671x | 5.982 s / 2.976x | 3.568 s / 4.406x | 5.082 s / 3.503x |
-| `--threads 10` | 16.037 s | 18.266 s | 3.494 s / 4.589x | 5.101 s / 3.581x | 3.098 s / 5.177x | 4.234 s / 4.314x |
-| `--threads 20` | 16.405 s | 18.395 s | 3.235 s / 5.071x | 4.268 s / 4.310x | 2.654 s / 6.182x | 4.464 s / 4.121x |
+| `--threads 10` | 16.037 s | 18.266 s | 3.494 s / 4.589x | 4.877 s / 3.745x | 3.098 s / 5.177x | 4.375 s / 4.175x |
+| `--threads 20` | 16.405 s | 18.395 s | 3.235 s / 5.071x | 4.689 s / 3.923x | 2.654 s / 6.182x | 4.084 s / 4.504x |
 <!-- LATEST_PERFORMANCE_END -->
 
 Each .NET cell shows median wall time followed by speedup versus its
 profile-matched Python column; values below `1.000x` are slower. Python PR341
 is merge commit `2f21e8ed6018b14561396cc95f1f6828054470b8`, the upstream peer
-for `current`. The default is **5 workers**. The matrix contains 90 runs:
-three repetitions of all 30 mode/profile cells.
+for `current`. The default is **5 workers**. The base matrix contains 90 runs:
+three repetitions of all 30 mode/profile cells. The four refreshed cells add
+48 strictly paired baseline/candidate runs.
 
 Every .NET profile and Python PR341 produced one deterministic hash set per
 mode. Python v0.4.0 produced three luma/chroma/JSON/log hash sets in every

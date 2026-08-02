@@ -411,15 +411,18 @@ speedup, and wall-time reduction against its profile-matched Python column:
 | default (5) | 15.207 s | 16.780 s | 4.389 s / 3.465x / 71.14% | 5.896 s / 2.846x / 64.86% | 3.609 s / 4.213x / 76.27% | 4.654 s / 3.606x / 72.26% |
 | `--threads 1` | 17.694 s | 19.414 s | 10.065 s / 1.758x / 43.11% | 13.488 s / 1.439x / 30.52% | 7.215 s / 2.453x / 59.23% | 10.256 s / 1.893x / 47.17% |
 | `--threads 5` | 15.719 s | 17.801 s | 4.282 s / 3.671x / 72.76% | 5.982 s / 2.976x / 66.40% | 3.568 s / 4.406x / 77.30% | 5.082 s / 3.503x / 71.45% |
-| `--threads 10` | 16.037 s | 18.266 s | 3.494 s / 4.589x / 78.21% | 5.101 s / 3.581x / 72.07% | 3.098 s / 5.177x / 80.68% | 4.234 s / 4.314x / 76.82% |
-| `--threads 20` | 16.405 s | 18.395 s | 3.235 s / 5.071x / 80.28% | 4.268 s / 4.310x / 76.80% | 2.654 s / 6.182x / 83.82% | 4.464 s / 4.121x / 75.73% |
+| `--threads 10` | 16.037 s | 18.266 s | 3.494 s / 4.589x / 78.21% | 4.877 s / 3.745x / 73.30% | 3.098 s / 5.177x / 80.68% | 4.375 s / 4.175x / 76.05% |
+| `--threads 20` | 16.405 s | 18.395 s | 3.235 s / 5.071x / 80.28% | 4.689 s / 3.923x / 74.51% | 2.654 s / 6.182x / 83.82% | 4.084 s / 4.504x / 77.80% |
 <!-- LATEST_PERFORMANCE_END -->
 
 The benchmark ran on 2026-08-02 using main commit
 `c92af1dfd0f96cd7f2d49f3219fb428d0f4e0865`, an Intel Core Ultra 7 265K with
 20 logical processors, Windows 11 build 26220, and .NET SDK/runtime
 `11.0.100-preview.6.26359.118`. Each of the 30 mode/profile cells was measured
-three times in interleaved order, for 90 Release runs. Python v0.4.0 was commit
+three times in interleaved order, for 90 Release runs. After raising the
+strictly independent CTI scan-line cap from 5 to 8, the four `current` cells
+at 10 and 20 workers were refreshed with six alternating baseline/candidate
+pairs each, adding 48 Release runs. Python v0.4.0 was commit
 `43155200da87c0d49eb37d8ec09b1372075ee8e4`; merged PR341 was commit
 `2f21e8ed6018b14561396cc95f1f6828054470b8` (`v0.4.0-40-g2f21e8ed`).
 Python 3.14.0 used NumPy 2.4.6,
@@ -427,13 +430,12 @@ SciPy 1.18.0, Numba 0.66.0, and python-soxr 1.1.0. The shared arguments were:
 
 ```text
 --system pal --detect_chroma_track_phase --ire0_adjust
---tape_format VHS --frequency 40 --length 40 --overwrite
+--tape_format VHS --frequency 40 --length 40 --start 100 --overwrite
 ```
 
-No `--start` or `--start_fileloc` option was used: the local fixture begins at
-the selected PCM window. This keeps both implementations on the same physical
-samples without involving a container-specific random-seek path. The default
-is **5 workers** in both implementations.
+The shared `--start 100` selects the same bounded frame window for every
+profile; no `--start_fileloc` option was used. The default is **5 workers** in
+both implementations.
 
 A separate 40-frame `--threads 0` gate made Exact v0.4.0 match Python
 `g4315520` for luma, chroma, raw JSON, all 80 ordered `fileLoc` values, stdout,
