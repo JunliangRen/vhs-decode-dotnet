@@ -1077,6 +1077,14 @@ possible capture has already been proven byte-for-byte identical.
   AFC output filtering, is reused for burst-based line correction and final
   chroma, and keeps the previous field's AFC carrier/phase for the next lock;
   this removes two redundant full chroma filter/FFT passes per field
+- VHS dropped-field recovery now maps Python's `prevfield=None` color-killer
+  behavior by resetting only the previous burst-detected line to zero; field
+  rotation, chroma AFC, HSync, saved-level, and RF continuity state remain
+  intact. A directed xUnit v3 test covers valid-state-to-recovery reset. With
+  `--enable_color_killer`, the four-frame fixed RF fixture is exact against
+  both Python v0.4.0 and PR341/current at threads 0, automatic, and 20, while a
+  separate private local PAL VHS RF capture is exact for 40 current-profile
+  fields and 754 normalized log lines at the same worker settings
 - chroma heterodyne/FSC tables, mixed `uphet` samples, comb arithmetic, and
   final SOS filtering now retain the upstream float32 boundaries through to
   ACC, including `sci-rs` float32 state/coefficient arithmetic

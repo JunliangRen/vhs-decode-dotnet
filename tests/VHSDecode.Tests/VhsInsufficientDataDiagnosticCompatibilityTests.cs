@@ -73,7 +73,13 @@ public sealed class VhsInsufficientDataDiagnosticCompatibilityTests : IDisposabl
             PreviousFirstHSyncReadLocation = 0,
             PreviousSyncConfidence = 100,
             PreviousVhsFieldNumber = 7,
-            PreviousVhsFieldReadLocation = 0
+            PreviousVhsFieldReadLocation = 0,
+            ChromaRotationIndex = 1,
+            PreviousBurstDetectedLine = -1,
+            ChromaAfcCarrierHz = 629_000.0,
+            ChromaAfcPhaseRadians = 0.25,
+            ChromaAfcPhaseCarrierHz = 628_500.0,
+            ChromaAfcPhaseCarrierRadians = 0.5
         });
 
         Assert.Throws<TbcFieldDecodeRecoveryException>(() =>
@@ -87,9 +93,15 @@ public sealed class VhsInsufficientDataDiagnosticCompatibilityTests : IDisposabl
         TbcFieldDecodeState recovered = session.TbcFieldDecoder.CaptureState();
         Assert.Null(recovered.PreviousVhsFieldNumber);
         Assert.Null(recovered.PreviousVhsFieldReadLocation);
+        Assert.Equal(0, recovered.PreviousBurstDetectedLine);
         Assert.Equal(100, recovered.PreviousSyncConfidence);
         Assert.Equal(100.0, recovered.PreviousFirstHSyncLocation);
         Assert.Equal(0, recovered.PreviousFirstHSyncReadLocation);
+        Assert.Equal(1, recovered.ChromaRotationIndex);
+        Assert.Equal(629_000.0, recovered.ChromaAfcCarrierHz);
+        Assert.Equal(0.25, recovered.ChromaAfcPhaseRadians);
+        Assert.Equal(628_500.0, recovered.ChromaAfcPhaseCarrierHz);
+        Assert.Equal(0.5, recovered.ChromaAfcPhaseCarrierRadians);
 
         var error = new StringWriter();
         session.RuntimeReporter = new DecodeRuntimeReporter(TextWriter.Null, error);
