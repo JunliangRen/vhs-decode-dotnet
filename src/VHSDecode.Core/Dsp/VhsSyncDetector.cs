@@ -19,6 +19,7 @@ public sealed class VhsSyncDetector
 {
     private const int MaximumParallelBoxcarWorkers = 4;
     private const int MinimumParallelBoxcarSamples = 65_536;
+    private const int MinimumParallelEdgeScanSamples = 65_536;
     private const int MinimumParallelRadixSamples = 524_288;
     private const double SyncSpacingTolerance = 0.15;
     private const int MinimumGridLength = 8;
@@ -127,7 +128,9 @@ public sealed class VhsSyncDetector
             return DetectFiltered(
                 filtered.AsSpan(0, filteredLength),
                 syncTipEstimate,
-                blankingEstimate);
+                blankingEstimate,
+                filtered,
+                _workerThreads);
         }
         finally
         {
@@ -296,47 +299,68 @@ public sealed class VhsSyncDetector
     private VhsSyncDetectionResult DetectFiltered(
         ReadOnlySpan<double> filtered,
         double syncTipEstimate,
-        double blankingEstimate)
+        double blankingEstimate,
+        double[]? parallelFiltered = null,
+        int parallelWorkerThreads = 1)
     {
         int sampleCount = filtered.Length;
         double slicerLevelEstimate = (syncTipEstimate + blankingEstimate) / 2.0;
         int candidateStride = Math.Max(10, _lineLength / 2);
         int initialCapacity = Math.Max(4, sampleCount / candidateStride);
-        var hSyncFalls = new List<int>(initialCapacity);
-        var hSyncRises = new List<int>(initialCapacity);
         double minimumWidth = _hSyncLength * 0.6;
         double maximumWidth = _hSyncLength * 1.4;
         int fallingIndex = -1;
-        for (int index = 0; index < sampleCount - 1; index++)
+        int[] falls;
+        int[] rises;
+        if (parallelFiltered is not null
+            && parallelWorkerThreads > 1
+            && sampleCount >= MinimumParallelEdgeScanSamples)
         {
-            if (filtered[index] >= slicerLevelEstimate
-                && filtered[index + 1] < slicerLevelEstimate)
+            (falls, rises) = FindInitialEdgesParallel(
+                parallelFiltered,
+                sampleCount,
+                slicerLevelEstimate,
+                minimumWidth,
+                maximumWidth,
+                parallelWorkerThreads,
+                initialCapacity);
+        }
+        else
+        {
+            var hSyncFalls = new List<int>(initialCapacity);
+            var hSyncRises = new List<int>(initialCapacity);
+            for (int index = 0; index < sampleCount - 1; index++)
             {
-                fallingIndex = index;
-            }
-            else if (fallingIndex != -1
-                     && filtered[index] < slicerLevelEstimate
-                     && filtered[index + 1] >= slicerLevelEstimate)
-            {
-                int width = index - fallingIndex;
-                if (minimumWidth < width && width < maximumWidth)
+                if (filtered[index] >= slicerLevelEstimate
+                    && filtered[index + 1] < slicerLevelEstimate)
                 {
-                    hSyncFalls.Add(fallingIndex);
-                    hSyncRises.Add(index);
+                    fallingIndex = index;
                 }
+                else if (fallingIndex != -1
+                         && filtered[index] < slicerLevelEstimate
+                         && filtered[index + 1] >= slicerLevelEstimate)
+                {
+                    int width = index - fallingIndex;
+                    if (minimumWidth < width && width < maximumWidth)
+                    {
+                        hSyncFalls.Add(fallingIndex);
+                        hSyncRises.Add(index);
+                    }
 
-                fallingIndex = -1;
+                    fallingIndex = -1;
+                }
             }
+
+            falls = hSyncFalls.ToArray();
+            rises = hSyncRises.ToArray();
         }
 
-        if (hSyncFalls.Count == 0)
+        if (falls.Length == 0)
         {
             return new VhsSyncDetectionResult([], syncTipEstimate, blankingEstimate);
         }
 
-        int candidateCount = hSyncFalls.Count;
-        int[] falls = hSyncFalls.ToArray();
-        int[] rises = hSyncRises.ToArray();
+        int candidateCount = falls.Length;
         var candidateSyncLevels = new double[candidateCount];
         var candidatePorchLevels = new double[candidateCount];
         for (int candidate = 0; candidate < candidateCount; candidate++)
@@ -549,6 +573,86 @@ public sealed class VhsSyncDetector
             pulseCount == pulses.Length ? pulses : pulses[..pulseCount],
             syncTipLevel,
             backPorchLevel);
+    }
+
+    private static (int[] Falls, int[] Rises) FindInitialEdgesParallel(
+        double[] filtered,
+        int sampleCount,
+        double slicerLevel,
+        double minimumWidth,
+        double maximumWidth,
+        int workerThreads,
+        int initialCapacity)
+    {
+        int scanLimit = sampleCount - 1;
+        int workerCount = Math.Min(workerThreads, scanLimit);
+        int overlap = maximumWidth >= scanLimit - 2.0
+            ? scanLimit
+            : (int)Math.Ceiling(maximumWidth) + 2;
+        var fallsByWorker = new List<int>[workerCount];
+        var risesByWorker = new List<int>[workerCount];
+        Parallel.For(
+            0,
+            workerCount,
+            new ParallelOptions { MaxDegreeOfParallelism = workerCount },
+            worker =>
+            {
+                int coreStart = (int)(((long)scanLimit * worker) / workerCount);
+                int coreEnd = (int)(((long)scanLimit * (worker + 1)) / workerCount);
+                int scanStart = Math.Max(0, coreStart - overlap);
+                int scanEnd = (int)Math.Min(scanLimit, (long)coreEnd + overlap);
+                int partitionCapacity = Math.Max(4, (initialCapacity / workerCount) + 2);
+                var localFalls = new List<int>(partitionCapacity);
+                var localRises = new List<int>(partitionCapacity);
+                int fallingIndex = -1;
+                for (int index = scanStart; index < scanEnd; index++)
+                {
+                    if (filtered[index] >= slicerLevel
+                        && filtered[index + 1] < slicerLevel)
+                    {
+                        fallingIndex = index;
+                    }
+                    else if (fallingIndex != -1
+                             && filtered[index] < slicerLevel
+                             && filtered[index + 1] >= slicerLevel)
+                    {
+                        int width = index - fallingIndex;
+                        if (fallingIndex >= coreStart
+                            && fallingIndex < coreEnd
+                            && minimumWidth < width
+                            && width < maximumWidth)
+                        {
+                            localFalls.Add(fallingIndex);
+                            localRises.Add(index);
+                        }
+
+                        fallingIndex = -1;
+                    }
+                }
+
+                fallsByWorker[worker] = localFalls;
+                risesByWorker[worker] = localRises;
+            });
+
+        int candidateCount = 0;
+        for (int worker = 0; worker < workerCount; worker++)
+        {
+            candidateCount = checked(candidateCount + fallsByWorker[worker].Count);
+        }
+
+        var falls = new int[candidateCount];
+        var rises = new int[candidateCount];
+        int destination = 0;
+        for (int worker = 0; worker < workerCount; worker++)
+        {
+            List<int> localFalls = fallsByWorker[worker];
+            List<int> localRises = risesByWorker[worker];
+            localFalls.CopyTo(falls, destination);
+            localRises.CopyTo(rises, destination);
+            destination += localFalls.Count;
+        }
+
+        return (falls, rises);
     }
 
     internal static void FillOrderedGridSupportCounts(

@@ -95,7 +95,8 @@ CVBS、LaserDisc、HiFi は現在 `ipp-fast` を拒否するため、これら�
 次の表は、同じ private local 40 MHz PAL VHS `.ldf` fixture と同じ 40-frame
 window を全 run で使用します。source filename は公開しません。各値は
 2026-08-02 に main commit `c92af1d` で実行した 3 回の interleaved run の
-median です。互換性判定は速度とは別に行います。
+median です。10/20 worker の 4 つの `current` cell は、この branch の CTI と
+VHS sync-scan 並列 tuning 後に 10 pair ずつ再測定しました。互換性判定は速度とは別に行います。
 
 <!-- LATEST_PERFORMANCE_BEGIN -->
 | CLI mode（workers） | Python v0.4.0 | Python PR341 | Exact + v0.4.0 | Exact + current | IPP-fast + v0.4.0 | IPP-fast + current |
@@ -103,15 +104,16 @@ median です。互換性判定は速度とは別に行います。
 | default（5） | 15.207 s | 16.780 s | 4.389 s / 3.465x | 5.896 s / 2.846x | 3.609 s / 4.213x | 4.654 s / 3.606x |
 | `--threads 1` | 17.694 s | 19.414 s | 10.065 s / 1.758x | 13.488 s / 1.439x | 7.215 s / 2.453x | 10.256 s / 1.893x |
 | `--threads 5` | 15.719 s | 17.801 s | 4.282 s / 3.671x | 5.982 s / 2.976x | 3.568 s / 4.406x | 5.082 s / 3.503x |
-| `--threads 10` | 16.037 s | 18.266 s | 3.494 s / 4.589x | 4.877 s / 3.745x | 3.098 s / 5.177x | 4.375 s / 4.175x |
-| `--threads 20` | 16.405 s | 18.395 s | 3.235 s / 5.071x | 4.689 s / 3.923x | 2.654 s / 6.182x | 4.084 s / 4.504x |
+| `--threads 10` | 16.037 s | 18.266 s | 3.494 s / 4.589x | 4.927 s / 3.707x | 3.098 s / 5.177x | 4.403 s / 4.149x |
+| `--threads 20` | 16.405 s | 18.395 s | 3.235 s / 5.071x | 4.443 s / 4.140x | 2.654 s / 6.182x | 4.397 s / 4.183x |
 <!-- LATEST_PERFORMANCE_END -->
 
 各 .NET cell は wall-time median と profile が対応する Python 列に対する
 speedup の順です。`1.000x` 未満は Python より遅いことを示します。Python
 PR341 は merge commit `2f21e8ed6018b14561396cc95f1f6828054470b8` で、
 `current` の upstream peer です。default は実際に **5 workers** です。matrix
-は 30 個の mode/profile cell を 3 回ずつ繰り返した 90 run です。
+は 30 個の mode/profile cell を 3 回ずつ繰り返した 90 run です。4 つの更新 cell は
+baseline/candidate 10 pair ずつ、合計 80 run を追加しました。
 
 各 .NET profile と Python PR341 は mode ごとに 1 つの deterministic hash set
 だけを生成しました。Python v0.4.0 は各 default/nonzero mode の 3 run で

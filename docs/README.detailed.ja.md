@@ -391,8 +391,8 @@ Python v0.4.0、merge 済みの Python PR341、Exact v0.4.0、Exact
 | default（5） | 15.207 s | 16.780 s | 4.389 s / 3.465x / 71.14% | 5.896 s / 2.846x / 64.86% | 3.609 s / 4.213x / 76.27% | 4.654 s / 3.606x / 72.26% |
 | `--threads 1` | 17.694 s | 19.414 s | 10.065 s / 1.758x / 43.11% | 13.488 s / 1.439x / 30.52% | 7.215 s / 2.453x / 59.23% | 10.256 s / 1.893x / 47.17% |
 | `--threads 5` | 15.719 s | 17.801 s | 4.282 s / 3.671x / 72.76% | 5.982 s / 2.976x / 66.40% | 3.568 s / 4.406x / 77.30% | 5.082 s / 3.503x / 71.45% |
-| `--threads 10` | 16.037 s | 18.266 s | 3.494 s / 4.589x / 78.21% | 4.877 s / 3.745x / 73.30% | 3.098 s / 5.177x / 80.68% | 4.375 s / 4.175x / 76.05% |
-| `--threads 20` | 16.405 s | 18.395 s | 3.235 s / 5.071x / 80.28% | 4.689 s / 3.923x / 74.51% | 2.654 s / 6.182x / 83.82% | 4.084 s / 4.504x / 77.80% |
+| `--threads 10` | 16.037 s | 18.266 s | 3.494 s / 4.589x / 78.21% | 4.927 s / 3.707x / 73.03% | 3.098 s / 5.177x / 80.68% | 4.403 s / 4.149x / 75.90% |
+| `--threads 20` | 16.405 s | 18.395 s | 3.235 s / 5.071x / 80.28% | 4.443 s / 4.140x / 75.85% | 2.654 s / 6.182x / 83.82% | 4.397 s / 4.183x / 76.10% |
 <!-- LATEST_PERFORMANCE_END -->
 
 この測定は 2026-08-02 に main commit
@@ -400,8 +400,9 @@ Python v0.4.0、merge 済みの Python PR341、Exact v0.4.0、Exact
 Core Ultra 7 265K（20 logical processor）、Windows 11 build 26220、.NET
 SDK/runtime `11.0.100-preview.6.26359.118` です。30 個の mode/profile cell を
 3 回ずつ interleaved order で測定し、合計 90 Release run です。独立した CTI
-scan-line の上限を 5 から 8 に調整した後、10/20 worker の 4 つの `current`
-cell を baseline/candidate 6 pair ずつで再測定し、48 Release run を追加しました。Python
+scan-line の上限を 5 から 8 に調整し、幅が bounded な VHS initial sync-edge scan
+を並列化した後、10/20 worker の 4 つの `current` cell を baseline/candidate
+10 pair ずつで再測定し、80 Release run を追加しました。Python
 v0.4.0 commit は `43155200da87c0d49eb37d8ec09b1372075ee8e4`、merge 済み
 PR341 commit は `2f21e8ed6018b14561396cc95f1f6828054470b8`
 （`v0.4.0-40-g2f21e8ed`）です。Python
@@ -415,6 +416,15 @@ PR341 commit は `2f21e8ed6018b14561396cc95f1f6828054470b8`
 
 共通の `--start 100` は各 profile で同じ bounded frame window を選択します。
 `--start_fileloc` は使用していません。両実装の default は **5 workers** です。
+
+sync-scan candidate は short public matrix とは別に、Exact `current`、20 workers、
+start offset なしでも gate しました。160/400-frame の interleaved median は
+17.23 から 16.80 秒、33.14 から 32.57 秒へ短縮し、active core median は
+5.27 から 5.60、5.25 から 5.51 へ増えました。実行順を反転した 2 回の
+1,000-frame run は 72.01/72.03 秒から 70.57/70.59 秒へ短縮しました。maximum
+working set は 435.8-437.4 MiB、allocation は 3.02-3.04 GiB の範囲に留まり、
+luma、chroma、JSON、stdout/stderr、normalized log、順序付き 2,000 個すべての
+`fileLoc` は変更前 build と一致しました。
 
 別の 40-frame `--threads 0` gate では、Exact v0.4.0 が Python `g4315520` と
 luma、chroma、raw JSON、順序付き 80 個すべての `fileLoc`、stdout、normalized

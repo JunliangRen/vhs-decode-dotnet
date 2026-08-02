@@ -411,8 +411,8 @@ speedup, and wall-time reduction against its profile-matched Python column:
 | default (5) | 15.207 s | 16.780 s | 4.389 s / 3.465x / 71.14% | 5.896 s / 2.846x / 64.86% | 3.609 s / 4.213x / 76.27% | 4.654 s / 3.606x / 72.26% |
 | `--threads 1` | 17.694 s | 19.414 s | 10.065 s / 1.758x / 43.11% | 13.488 s / 1.439x / 30.52% | 7.215 s / 2.453x / 59.23% | 10.256 s / 1.893x / 47.17% |
 | `--threads 5` | 15.719 s | 17.801 s | 4.282 s / 3.671x / 72.76% | 5.982 s / 2.976x / 66.40% | 3.568 s / 4.406x / 77.30% | 5.082 s / 3.503x / 71.45% |
-| `--threads 10` | 16.037 s | 18.266 s | 3.494 s / 4.589x / 78.21% | 4.877 s / 3.745x / 73.30% | 3.098 s / 5.177x / 80.68% | 4.375 s / 4.175x / 76.05% |
-| `--threads 20` | 16.405 s | 18.395 s | 3.235 s / 5.071x / 80.28% | 4.689 s / 3.923x / 74.51% | 2.654 s / 6.182x / 83.82% | 4.084 s / 4.504x / 77.80% |
+| `--threads 10` | 16.037 s | 18.266 s | 3.494 s / 4.589x / 78.21% | 4.927 s / 3.707x / 73.03% | 3.098 s / 5.177x / 80.68% | 4.403 s / 4.149x / 75.90% |
+| `--threads 20` | 16.405 s | 18.395 s | 3.235 s / 5.071x / 80.28% | 4.443 s / 4.140x / 75.85% | 2.654 s / 6.182x / 83.82% | 4.397 s / 4.183x / 76.10% |
 <!-- LATEST_PERFORMANCE_END -->
 
 The benchmark ran on 2026-08-02 using main commit
@@ -420,9 +420,10 @@ The benchmark ran on 2026-08-02 using main commit
 20 logical processors, Windows 11 build 26220, and .NET SDK/runtime
 `11.0.100-preview.6.26359.118`. Each of the 30 mode/profile cells was measured
 three times in interleaved order, for 90 Release runs. After raising the
-strictly independent CTI scan-line cap from 5 to 8, the four `current` cells
-at 10 and 20 workers were refreshed with six alternating baseline/candidate
-pairs each, adding 48 Release runs. Python v0.4.0 was commit
+strictly independent CTI scan-line cap from 5 to 8 and parallelizing the
+bounded initial VHS sync-edge scan, the four `current` cells at 10 and 20
+workers were refreshed with ten alternating baseline/candidate pairs each,
+adding 80 Release runs. Python v0.4.0 was commit
 `43155200da87c0d49eb37d8ec09b1372075ee8e4`; merged PR341 was commit
 `2f21e8ed6018b14561396cc95f1f6828054470b8` (`v0.4.0-40-g2f21e8ed`).
 Python 3.14.0 used NumPy 2.4.6,
@@ -436,6 +437,15 @@ SciPy 1.18.0, Numba 0.66.0, and python-soxr 1.1.0. The shared arguments were:
 The shared `--start 100` selects the same bounded frame window for every
 profile; no `--start_fileloc` option was used. The default is **5 workers** in
 both implementations.
+
+The sync-scan candidate was also gated outside the short public matrix with
+Exact `current`, 20 workers, and no start offset. Interleaved 160- and
+400-frame medians moved from 17.23 to 16.80 s and from 33.14 to 32.57 s while
+median active cores rose from 5.27 to 5.60 and from 5.25 to 5.51. Two
+opposite-order 1,000-frame runs moved from 72.01/72.03 s to 70.57/70.59 s.
+Maximum working set stayed within 435.8-437.4 MiB and allocation stayed within
+3.02-3.04 GiB. Luma, chroma, JSON, stdout/stderr, normalized logs, and all
+2,000 ordered `fileLoc` values matched the pre-change build.
 
 A separate 40-frame `--threads 0` gate made Exact v0.4.0 match Python
 `g4315520` for luma, chroma, raw JSON, all 80 ordered `fileLoc` values, stdout,
