@@ -5243,6 +5243,35 @@ public void ComplexFftMatchesScipyDuccPacketTransforms()
         ComplexBitsSha256(PocketFftComplex.InverseDucc(forward)));
 }
 
+[Fact(DisplayName = "complex FFT packet buffers allocate no arrays after warmup")]
+public void ComplexFftPacketBuffersAllocateNoArraysAfterWarmup()
+{
+    const int length = 32_768;
+    var values = new Complex[length];
+    for (int i = 0; i < values.Length; i++)
+    {
+        values[i] = new Complex(
+            ((((i * 37) % 101) - 50) / 64.0)
+            + ((((i * 19) % 67) - 30) / 128.0),
+            ((((i * 13) % 89) - 40) / 96.0)
+            - ((((i * 29) % 73) - 35) / 160.0));
+    }
+
+    PocketFftComplex.InverseDuccInPlace(values);
+    PocketFftComplex.InverseDuccInPlace(values);
+
+    long before = GC.GetAllocatedBytesForCurrentThread();
+    for (int i = 0; i < 16; i++)
+    {
+        PocketFftComplex.InverseDuccInPlace(values);
+    }
+
+    long allocated = GC.GetAllocatedBytesForCurrentThread() - before;
+    Assert.True(
+        allocated < 1_024,
+        $"Warm 32K complex packet transforms allocated {allocated:N0} bytes.");
+}
+
 [Fact(DisplayName = "real full FFT matches SciPy DUCC packet transform")]
 public void RealFullFftMatchesScipyDuccPacketTransform()
 {

@@ -1569,6 +1569,24 @@ JSON、stdout、归一化 stderr/日志及有序 `fileLoc` 全部一致，并包
 实测：v0.4.0 的严格 oracle 仍是 `g4315520 --threads 0`，已合并的 Python PR341
 仍是 `current` 的 profile 对应版本。
 
+### Double PocketFFT packet buffer 复用
+
+double-precision DUCC packet 路径现在按 worker thread 复用第一遍和第二遍
+`Complex[]` packet。每块 buffer 只增长到该 worker 请求过的最大 packet，并在每次
+调用中切成精确活动长度。gather、transform、twiddle、scatter、归一化、数据类型和
+运算顺序均未改变；decoder 或 field 状态也没有跨 worker 边界。
+
+基于最新 main 的候选通过零警告 Release 构建，以及原生硬件和禁用 AVX2 环境下的
+全部 1,224 项 xUnit v3 测试。12 次私有本地 PAL VHS RF 运行覆盖 Exact v0.4.0 与
+`current` 的 `--threads 0`、默认和 `--threads 20`；baseline、candidate 和各 worker
+数量的亮度、色度、原始 JSON、stdout、归一化 stderr/日志及有序 `fileLoc` 全部一致。
+
+两组相反顺序的 1000 帧 Exact `current`/20-worker 配对让每个 build 共完成 4000
+fields，所有比较表面都一致。合并累计分配下降 0.18%，GC pause 下降 7.94%；合并墙钟
+从 156.090 变为 156.173 秒（+0.05%），因此吞吐明确归类为中性。候选工作集保持在
+834 MiB 以下，前半和后半的每 100 帧中位数都在 7.07 到 7.09 秒之间，没有渐进减速、
+OOM 或无界增长。
+
 </details>
 
 <!-- SECTION: build -->
@@ -1591,7 +1609,7 @@ JSON、stdout、归一化 stderr/日志及有序 `fileLoc` 全部一致，并包
 .\tools\build-ipp-native.ps1
 dotnet restore VHSDecodeDotNet.slnx
 dotnet build VHSDecodeDotNet.slnx -c Release --no-restore
-dotnet test --solution VHSDecodeDotNet.slnx -c Release --no-build --no-restore --minimum-expected-tests 1223
+dotnet test --solution VHSDecodeDotNet.slnx -c Release --no-build --no-restore --minimum-expected-tests 1224
 ```
 
 第一条命令用于包含可选的 `ipp-fast` 原生产物；只构建 Exact 时可以省略。
@@ -1602,7 +1620,7 @@ Intel oneAPI。只含二进制的单文件发布会嵌入 `vhsdecode_ipp.dll` �
 notice，不会额外生成许可证 sidecar 文件。只构建 Exact 后端时可以省略原生构建步骤。
 
 当前正式 Release 构建为零警告、零错误。xUnit v3 项目向
-`dotnet test` 和 Visual Studio Test Explorer 暴露 **1,223** 个可独立发现的测试。
+`dotnet test` 和 Visual Studio Test Explorer 暴露 **1,224** 个可独立发现的测试。
 
 <!-- SECTION: usage -->
 

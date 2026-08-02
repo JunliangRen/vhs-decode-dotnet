@@ -1903,6 +1903,27 @@ final six-path table は `d526ef5` から build した executable
 oracle は引き続き `g4315520 --threads 0`、merged Python PR341 は `current` の
 profile peer です。
 
+### Double PocketFFT packet buffer の再利用
+
+double-precision DUCC packet path は first/second pass の `Complex[]` packet を
+worker thread ごとに再利用します。各 buffer はその worker が要求した最大 packet
+までだけ増加し、呼び出しごとに正確な active length へ slice されます。gather、
+transform、twiddle、scatter、normalization、data type、arithmetic order は変更せず、
+decoder/field state も worker boundary を越えません。
+
+latest main の candidate は warning 0 の Release build と、native hardware および
+AVX2 disabled の全 1,224 xUnit v3 tests を通過しました。private local PAL VHS RF の
+12 runs は Exact v0.4.0/`current` の `--threads 0`、default、`--threads 20` を対象にし、
+baseline/candidate/worker count 間で luma、chroma、raw JSON、stdout、normalized
+stderr/log、ordered `fileLoc` がすべて一致しました。
+
+反対順序の 1,000-frame Exact `current`/20-worker pair 2 組では build ごとに合計
+4,000 fields を完了し、比較 surface はすべて一致しました。combined allocation は
+0.18%、GC pause は 7.94% 減少しました。combined wall time は 156.090 から
+156.173 秒（+0.05%）で、throughput は明示的に neutral と分類します。candidate の
+working set は 834 MiB 未満で、前半/後半の 100-frame median は 7.07～7.09 秒を
+維持し、progressive slowdown、OOM、unbounded growth はありませんでした。
+
 </details>
 
 <!-- SECTION: build -->
@@ -1925,7 +1946,7 @@ profile peer です。
 .\tools\build-ipp-native.ps1
 dotnet restore VHSDecodeDotNet.slnx
 dotnet build VHSDecodeDotNet.slnx -c Release --no-restore
-dotnet test --solution VHSDecodeDotNet.slnx -c Release --no-build --no-restore --minimum-expected-tests 1223
+dotnet test --solution VHSDecodeDotNet.slnx -c Release --no-build --no-restore --minimum-expected-tests 1224
 ```
 
 最初の command は optional `ipp-fast` native artifact を含めるためのものです。
@@ -1938,7 +1959,7 @@ third-party notice を埋め込み、license sidecar file は追加しません�
 
 現在の正式な Release build は warning 0、error 0 です。xUnit v3 project は
 `dotnet test` と Visual Studio Test Explorer の両方で個別に検出できる
-**1,223** tests を公開します。
+**1,224** tests を公開します。
 
 <!-- SECTION: usage -->
 

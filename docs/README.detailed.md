@@ -1961,6 +1961,28 @@ references. The Python columns retain the same fixed-host measurements:
 v0.4.0 remains the strict `g4315520 --threads 0` oracle, and merged Python
 PR341 remains the profile peer for `current`.
 
+### Double PocketFFT packet-buffer reuse
+
+The double-precision DUCC packet path now reuses its first- and second-pass
+`Complex[]` packets per worker thread. Each buffer grows only to that worker's
+largest requested packet and is sliced to the exact active length. Gather,
+transform, twiddle, scatter, normalization, data type, and arithmetic order are
+unchanged; no decoder or field state crosses a worker boundary.
+
+The latest-main candidate passed a zero-warning Release build and all 1,224
+xUnit v3 tests on native hardware and with AVX2 disabled. Twelve private local
+PAL VHS RF runs covered Exact v0.4.0 and `current` at `--threads 0`, default,
+and `--threads 20`; luma, chroma, raw JSON, stdout, normalized stderr/log, and
+ordered `fileLoc` matched across baseline, candidate, and worker counts.
+
+Two opposite-order 1,000-frame Exact `current`/20-worker pairs completed 4,000
+fields per build with every compared surface identical. Combined allocation
+fell 0.18% and GC pause fell 7.94%; combined wall time changed from 156.090 to
+156.173 seconds (+0.05%), so throughput is explicitly classified as neutral.
+Candidate working set remained bounded below 834 MiB. First-half and last-half
+100-frame medians stayed between 7.07 and 7.09 seconds, with no progressive
+slowdown, OOM, or unbounded growth.
+
 </details>
 
 <!-- SECTION: build -->
@@ -1985,7 +2007,7 @@ Requirements:
 .\tools\build-ipp-native.ps1
 dotnet restore VHSDecodeDotNet.slnx
 dotnet build VHSDecodeDotNet.slnx -c Release --no-restore
-dotnet test --solution VHSDecodeDotNet.slnx -c Release --no-build --no-restore --minimum-expected-tests 1223
+dotnet test --solution VHSDecodeDotNet.slnx -c Release --no-build --no-restore --minimum-expected-tests 1224
 ```
 
 The first command includes the optional `ipp-fast` native artifact; omit it for
@@ -1998,7 +2020,7 @@ deployment computer. Binary-only single-file releases embed
 sidecar license files. An Exact-only build may omit the native build step.
 
 The current formal Release build has zero warnings and errors. The xUnit v3
-project exposes **1,223** independently discoverable tests to both
+project exposes **1,224** independently discoverable tests to both
 `dotnet test` and Visual Studio Test Explorer.
 
 <!-- SECTION: usage -->
