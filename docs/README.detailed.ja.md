@@ -4,7 +4,7 @@
 
 [English](README.detailed.md) | [简体中文](README.detailed.zh-CN.md) | **[日本語](README.detailed.ja.md)**
 
-<!-- README_SYNC: 2026-08-01.01 -->
+<!-- README_SYNC: 2026-08-02.01 -->
 
 [`oyvindln/vhs-decode`](https://github.com/oyvindln/vhs-decode) の
 デコード関連部分を .NET 11 で再実装するプロジェクトです。現在は release
@@ -1956,6 +1956,44 @@ thread option 省略時の default、`--threads 20` を対象にしました。l
 JSON、stdout、normalized stderr/log、ordered `fileLoc` は pre-change build と各
 worker-count reference に一致しました。
 
+### Deterministic parallel current VHS sync quantile
+
+Exact `current` VHS detector は 524,288 samples 以上の field で high/middle-prefix
+radix histogram scan を最大 4 個の worker-local slab に分配します。reduction は固定
+worker order です。exceptional-value fallback、最後の source-order prefix collection、
+Quickselect、floating-point expression、全 cross-field state は従来どおり serial の
+ままです。同時に active または retained となる parallel workspace ごとに最大約
+2 MiB 増加し、reuse 前に clear します。product concurrency は既存 field-worker
+scheduler で bounded です。小さい field と one-worker decode は従来の serial path
+を使います。
+
+新しい focused test 3 件は dirty workspace を one/two-bucket case 間で連続 reuse
+した bit-exact result、worker boundary の exceptional value、active length 外で
+無視される poison tail、warm caller-thread allocation を検証します。zero-warning
+Release build と 1,234 件すべての xUnit v3 test は native、AVX2 disabled、all
+hardware intrinsics disabled の 3 環境で通過し、各 summary は別の local log に
+保存しました。real-RF
+gate 12 回は Exact v0.4.0/`current` の explicit `--threads 0`、omitted/default、
+`--threads 20` を対象にし、luma、chroma、raw JSON、stdout、normalized stderr/log、
+ordered `fileLoc`、thread 間 determinism が pre-change build と一致しました。
+
+同じ private local PAL VHS RF capture で one-worker short gate と 160-frame
+default-five pair 4 組は throughput-neutral でした。10-worker pair 4 組では candidate
+が 3 組で勝ち、median wall time は 20.029 から 19.766 秒（1.31% 減）でした。
+20-worker pair 6 組はすべて candidate が高速で、median は 18.622 から 17.739 秒
+（4.74% 減、throughput 4.97% 増）でした。sampled trace では従来の serial selector
+work が 2 個の worker-local histogram loop に分かれ、final selection は serial の
+ままであることを確認しました。
+
+反対順序の 1,000-frame/2,000-field pair 2 組では luma、chroma、raw JSON、
+normalized stderr/log、全 ordered `fileLoc` が一致し、mean wall time は 78.559 から
+76.495 秒（2.63% 減、throughput 2.70% 増）でした。別の thread gate では stdout
+と thread 間 determinism も一致しました。combined sampled allocation は 16.570
+から 16.661 GiB、GC pause は 0.247 から 0.259 秒となったため、allocation/GC
+improvement は主張しません。candidate の once-per-second working-set sample の
+最大値は 779.98 MiB、Gen2 collection は 42 から 40 で、両 run は progressive
+sampled growth や OOM なしで完了しました。
+
 </details>
 
 <!-- SECTION: build -->
@@ -1978,7 +2016,7 @@ worker-count reference に一致しました。
 .\tools\build-ipp-native.ps1
 dotnet restore VHSDecodeDotNet.slnx
 dotnet build VHSDecodeDotNet.slnx -c Release --no-restore
-dotnet test --solution VHSDecodeDotNet.slnx -c Release --no-build --no-restore --minimum-expected-tests 1231
+dotnet test --solution VHSDecodeDotNet.slnx -c Release --no-build --no-restore --minimum-expected-tests 1234
 ```
 
 最初の command は optional `ipp-fast` native artifact を含めるためのものです。
@@ -1991,7 +2029,7 @@ third-party notice を埋め込み、license sidecar file は追加しません�
 
 現在の正式な Release build は warning 0、error 0 です。xUnit v3 project は
 `dotnet test` と Visual Studio Test Explorer の両方で個別に検出できる
-**1,231** tests を公開します。
+**1,234** tests を公開します。
 
 <!-- SECTION: usage -->
 

@@ -4,7 +4,7 @@
 
 **[English](README.detailed.md)** | [简体中文](README.detailed.zh-CN.md) | [日本語](README.detailed.ja.md)
 
-<!-- README_SYNC: 2026-08-01.01 -->
+<!-- README_SYNC: 2026-08-02.01 -->
 
 .NET 11 rewrite of the decode-facing parts of
 [`oyvindln/vhs-decode`](https://github.com/oyvindln/vhs-decode), focused on
@@ -2018,6 +2018,47 @@ Twelve baseline/candidate gates covered Exact v0.4.0 and `current` at explicit
 JSON, stdout, normalized stderr/log, and ordered `fileLoc` matched both the
 pre-change build and every worker-count reference.
 
+### Deterministic parallel current VHS sync quantiles
+
+The Exact `current` VHS detector now distributes its high- and middle-prefix
+radix histogram scans across at most four worker-local slabs for fields of at
+least 524,288 samples. Reductions use a fixed worker order. Exceptional-value
+fallback, final source-order prefix collection, Quickselect, floating-point
+expressions, and all cross-field state remain unchanged and serial. Each
+simultaneously active or retained parallel workspace adds at most about 2 MiB
+and is cleared before reuse; product concurrency remains bounded by the
+existing field-worker scheduler. Smaller fields and one-worker decoding keep
+the previous serial path.
+
+The three new focused tests cover bit-exact serial/parallel quantiles while
+reusing dirty workspaces across one- and two-bucket cases, exceptional values
+at worker boundaries, ignored poison values beyond the active backing-array
+length, and warm caller-thread allocation. The zero-warning Release build and
+all 1,234 xUnit v3 tests passed on native hardware, with AVX2 disabled, and
+with every hardware intrinsic disabled; separate local logs retain each test
+summary. Twelve real-RF gates covered Exact
+v0.4.0 and `current` at explicit `--threads 0`, omitted/default threads, and
+`--threads 20`; luma, chroma, raw JSON, stdout, normalized stderr/log, ordered
+`fileLoc`, and cross-thread determinism matched the pre-change build.
+
+On the same private local PAL VHS RF capture, the one-worker short gate and
+four 160-frame default-five pairs were throughput-neutral. Four 10-worker
+pairs improved median wall time from 20.029 to 19.766 seconds (1.31%), with
+three candidate wins. Six 20-worker pairs all favored the candidate and moved
+the median from 18.622 to 17.739 seconds (4.74% less wall time; 4.97% more
+throughput). A sampled trace showed the former serial selector work split into
+the two worker-local histogram loops while final selection remained serial.
+
+Two opposite-order 1,000-frame/2,000-field pairs matched luma, chroma, raw
+JSON, normalized stderr/log, and every ordered `fileLoc`, and reduced mean wall
+time from 78.559 to 76.495 seconds (2.63%; 2.70% more throughput). Separate
+thread gates also matched stdout and cross-thread determinism. Combined sampled
+allocation moved from 16.570 to 16.661 GiB and GC pause from 0.247 to 0.259
+seconds, so no allocation or GC improvement is claimed. The maximum
+once-per-second candidate working-set sample was 779.98 MiB, Gen2 collections
+moved from 42 to 40, and both runs completed without progressive sampled
+growth or OOM.
+
 </details>
 
 <!-- SECTION: build -->
@@ -2042,7 +2083,7 @@ Requirements:
 .\tools\build-ipp-native.ps1
 dotnet restore VHSDecodeDotNet.slnx
 dotnet build VHSDecodeDotNet.slnx -c Release --no-restore
-dotnet test --solution VHSDecodeDotNet.slnx -c Release --no-build --no-restore --minimum-expected-tests 1231
+dotnet test --solution VHSDecodeDotNet.slnx -c Release --no-build --no-restore --minimum-expected-tests 1234
 ```
 
 The first command includes the optional `ipp-fast` native artifact; omit it for
@@ -2055,7 +2096,7 @@ deployment computer. Binary-only single-file releases embed
 sidecar license files. An Exact-only build may omit the native build step.
 
 The current formal Release build has zero warnings and errors. The xUnit v3
-project exposes **1,231** independently discoverable tests to both
+project exposes **1,234** independently discoverable tests to both
 `dotnet test` and Visual Studio Test Explorer.
 
 <!-- SECTION: usage -->

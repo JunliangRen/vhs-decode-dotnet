@@ -19,6 +19,7 @@ public sealed class VhsSyncDetector
 {
     private const int MaximumParallelBoxcarWorkers = 4;
     private const int MinimumParallelBoxcarSamples = 65_536;
+    private const int MinimumParallelRadixSamples = 524_288;
     private const double SyncSpacingTolerance = 0.15;
     private const int MinimumGridLength = 8;
     private const int PartitionSortThreshold = 32;
@@ -116,9 +117,11 @@ public sealed class VhsSyncDetector
             if (detectLevels)
             {
                 (syncTipEstimate, blankingEstimate) =
-                    EstimateLevels(
-                        filtered.AsSpan(0, filteredLength),
-                        workspace);
+                    EstimateLevelsParallel(
+                        filtered,
+                        filteredLength,
+                        workspace,
+                        _workerThreads);
             }
 
             return DetectFiltered(
@@ -664,6 +667,35 @@ public sealed class VhsSyncDetector
             blankingIndex);
     }
 
+    private static (double SyncTip, double Blanking) EstimateLevelsParallel(
+        double[] filtered,
+        int filteredLength,
+        VhsSyncWorkspace workspace,
+        int workerThreads)
+    {
+        if (workerThreads <= 1
+            || filteredLength < MinimumParallelRadixSamples)
+        {
+            return EstimateLevels(
+                filtered.AsSpan(0, filteredLength),
+                workspace);
+        }
+
+        int syncIndex = (int)(filteredLength * 0.05);
+        int blankingIndex = (int)(filteredLength * 0.25);
+        return SelectLevelQuantilesRadixParallel(
+            filtered,
+            filteredLength,
+            workspace.EnsurePartitionedLength(filteredLength),
+            workspace.EnsureHighHistogram(),
+            workspace.EnsureMiddleHistograms(),
+            workspace.EnsureWorkerHistograms(workerThreads),
+            workspace.EnsureWorkerFlags(workerThreads),
+            syncIndex,
+            blankingIndex,
+            workerThreads);
+    }
+
     private static double UpperMedianOfWindow(
         ReadOnlySpan<double> values,
         int start,
@@ -702,6 +734,65 @@ public sealed class VhsSyncDetector
         int[] middleHistograms,
         int syncTarget,
         int blankingTarget)
+        => SelectLevelQuantilesRadixCore(
+            values,
+            parallelValues: null,
+            parallelValueCount: 0,
+            scratch,
+            highHistogram,
+            middleHistograms,
+            workerHistograms: null,
+            workerFlags: null,
+            syncTarget,
+            blankingTarget,
+            workerThreads: 1);
+
+    internal static (double SyncTip, double Blanking) SelectLevelQuantilesRadixParallel(
+        double[] values,
+        int valueCount,
+        double[] scratch,
+        int[] highHistogram,
+        int[] middleHistograms,
+        int[] workerHistograms,
+        int[] workerFlags,
+        int syncTarget,
+        int blankingTarget,
+        int workerThreads)
+    {
+        ArgumentNullException.ThrowIfNull(values);
+        ArgumentOutOfRangeException.ThrowIfNegativeOrZero(valueCount);
+        if (valueCount > values.Length)
+        {
+            throw new ArgumentOutOfRangeException(nameof(valueCount));
+        }
+
+        ArgumentOutOfRangeException.ThrowIfNegativeOrZero(workerThreads);
+        return SelectLevelQuantilesRadixCore(
+            values.AsSpan(0, valueCount),
+            values,
+            valueCount,
+            scratch,
+            highHistogram,
+            middleHistograms,
+            workerHistograms,
+            workerFlags,
+            syncTarget,
+            blankingTarget,
+            workerThreads);
+    }
+
+    private static (double SyncTip, double Blanking) SelectLevelQuantilesRadixCore(
+        ReadOnlySpan<double> values,
+        double[]? parallelValues,
+        int parallelValueCount,
+        double[] scratch,
+        int[] highHistogram,
+        int[] middleHistograms,
+        int[]? workerHistograms,
+        int[]? workerFlags,
+        int syncTarget,
+        int blankingTarget,
+        int workerThreads)
     {
         if (values.IsEmpty)
         {
@@ -722,22 +813,33 @@ public sealed class VhsSyncDetector
             throw new ArgumentException("The radix quantile workspaces are too small.");
         }
 
-        Array.Clear(highHistogram, 0, RadixHistogramWidth);
-        for (int index = 0; index < values.Length; index++)
+        bool finiteNonZero;
+        if (parallelValues is not null)
         {
-            double value = values[index];
-            if (!double.IsFinite(value) || value == 0.0)
-            {
-                values.CopyTo(scratch);
-                return SelectLevelQuantilesSequential(
-                    scratch,
-                    syncTarget,
-                    blankingTarget,
-                    values.Length);
-            }
+            ArgumentNullException.ThrowIfNull(workerHistograms);
+            ArgumentNullException.ThrowIfNull(workerFlags);
 
-            uint prefix = SortablePrefix(value);
-            highHistogram[prefix >> 16]++;
+            finiteNonZero = FillHighHistogramParallel(
+                parallelValues,
+                parallelValueCount,
+                highHistogram,
+                workerHistograms,
+                workerFlags,
+                workerThreads);
+        }
+        else
+        {
+            finiteNonZero = FillHighHistogramSequential(values, highHistogram);
+        }
+
+        if (!finiteNonZero)
+        {
+            values.CopyTo(scratch);
+            return SelectLevelQuantilesSequential(
+                scratch,
+                syncTarget,
+                blankingTarget,
+                values.Length);
         }
 
         BucketSelection syncHigh = LocateBucket(
@@ -750,23 +852,31 @@ public sealed class VhsSyncDetector
         int middleHistogramLength = syncHigh.Bucket == blankingHigh.Bucket
             ? RadixHistogramWidth
             : RadixHistogramWidth * 2;
-        Array.Clear(middleHistograms, 0, middleHistogramLength);
         int blankingHistogramOffset = syncHigh.Bucket == blankingHigh.Bucket
             ? 0
             : RadixHistogramWidth;
-        for (int index = 0; index < values.Length; index++)
+        if (parallelValues is not null)
         {
-            uint prefix = SortablePrefix(values[index]);
-            int high = (int)(prefix >> 16);
-            int middle = (int)(prefix & 0xFFFF);
-            if (high == syncHigh.Bucket)
-            {
-                middleHistograms[middle]++;
-            }
-            else if (high == blankingHigh.Bucket)
-            {
-                middleHistograms[blankingHistogramOffset + middle]++;
-            }
+            FillMiddleHistogramsParallel(
+                parallelValues,
+                parallelValueCount,
+                middleHistograms,
+                workerHistograms!,
+                syncHigh.Bucket,
+                blankingHigh.Bucket,
+                blankingHistogramOffset,
+                middleHistogramLength,
+                workerThreads);
+        }
+        else
+        {
+            FillMiddleHistogramsSequential(
+                values,
+                middleHistograms,
+                syncHigh.Bucket,
+                blankingHigh.Bucket,
+                blankingHistogramOffset,
+                middleHistogramLength);
         }
 
         BucketSelection syncMiddle = LocateBucket(
@@ -834,6 +944,182 @@ public sealed class VhsSyncDetector
             out _,
             out _);
         return (syncTip, blanking);
+    }
+
+    private static bool FillHighHistogramSequential(
+        ReadOnlySpan<double> values,
+        int[] highHistogram)
+    {
+        Array.Clear(highHistogram, 0, RadixHistogramWidth);
+        for (int index = 0; index < values.Length; index++)
+        {
+            double value = values[index];
+            if (!double.IsFinite(value) || value == 0.0)
+            {
+                return false;
+            }
+
+            uint prefix = SortablePrefix(value);
+            highHistogram[prefix >> 16]++;
+        }
+
+        return true;
+    }
+
+    private static bool FillHighHistogramParallel(
+        double[] values,
+        int valueCount,
+        int[] highHistogram,
+        int[] workerHistograms,
+        int[] workerFlags,
+        int workerThreads)
+    {
+        int workerHistogramLength = checked(
+            workerThreads * RadixHistogramWidth);
+        if (workerHistograms.Length < workerHistogramLength
+            || workerFlags.Length < workerThreads)
+        {
+            throw new ArgumentException(
+                "The parallel radix workspaces are too small.");
+        }
+
+        Array.Clear(workerHistograms, 0, workerHistogramLength);
+        Array.Clear(workerFlags, 0, workerThreads);
+        Parallel.For(
+            fromInclusive: 0,
+            toExclusive: workerThreads,
+            new ParallelOptions
+            {
+                MaxDegreeOfParallelism = workerThreads
+            },
+            worker =>
+            {
+                int start = (int)(((long)valueCount * worker) / workerThreads);
+                int end = (int)(((long)valueCount * (worker + 1)) / workerThreads);
+                int histogramOffset = worker * RadixHistogramWidth;
+                for (int index = start; index < end; index++)
+                {
+                    double value = values[index];
+                    if (!double.IsFinite(value) || value == 0.0)
+                    {
+                        workerFlags[worker] = 1;
+                        continue;
+                    }
+
+                    uint prefix = SortablePrefix(value);
+                    workerHistograms[histogramOffset + (prefix >> 16)]++;
+                }
+            });
+
+        for (int worker = 0; worker < workerThreads; worker++)
+        {
+            if (workerFlags[worker] != 0)
+            {
+                return false;
+            }
+        }
+
+        for (int bucket = 0; bucket < RadixHistogramWidth; bucket++)
+        {
+            int count = 0;
+            for (int worker = 0; worker < workerThreads; worker++)
+            {
+                count += workerHistograms[
+                    (worker * RadixHistogramWidth) + bucket];
+            }
+
+            highHistogram[bucket] = count;
+        }
+
+        return true;
+    }
+
+    private static void FillMiddleHistogramsSequential(
+        ReadOnlySpan<double> values,
+        int[] middleHistograms,
+        int syncHighBucket,
+        int blankingHighBucket,
+        int blankingHistogramOffset,
+        int middleHistogramLength)
+    {
+        Array.Clear(middleHistograms, 0, middleHistogramLength);
+        for (int index = 0; index < values.Length; index++)
+        {
+            uint prefix = SortablePrefix(values[index]);
+            int high = (int)(prefix >> 16);
+            int middle = (int)(prefix & 0xFFFF);
+            if (high == syncHighBucket)
+            {
+                middleHistograms[middle]++;
+            }
+            else if (high == blankingHighBucket)
+            {
+                middleHistograms[blankingHistogramOffset + middle]++;
+            }
+        }
+    }
+
+    private static void FillMiddleHistogramsParallel(
+        double[] values,
+        int valueCount,
+        int[] middleHistograms,
+        int[] workerHistograms,
+        int syncHighBucket,
+        int blankingHighBucket,
+        int blankingHistogramOffset,
+        int middleHistogramLength,
+        int workerThreads)
+    {
+        int workerHistogramLength = checked(
+            workerThreads * middleHistogramLength);
+        if (workerHistograms.Length < workerHistogramLength)
+        {
+            throw new ArgumentException(
+                "The parallel radix histogram workspace is too small.",
+                nameof(workerHistograms));
+        }
+
+        Array.Clear(workerHistograms, 0, workerHistogramLength);
+        Parallel.For(
+            fromInclusive: 0,
+            toExclusive: workerThreads,
+            new ParallelOptions
+            {
+                MaxDegreeOfParallelism = workerThreads
+            },
+            worker =>
+            {
+                int start = (int)(((long)valueCount * worker) / workerThreads);
+                int end = (int)(((long)valueCount * (worker + 1)) / workerThreads);
+                int workerOffset = worker * middleHistogramLength;
+                for (int index = start; index < end; index++)
+                {
+                    uint prefix = SortablePrefix(values[index]);
+                    int high = (int)(prefix >> 16);
+                    int middle = (int)(prefix & 0xFFFF);
+                    if (high == syncHighBucket)
+                    {
+                        workerHistograms[workerOffset + middle]++;
+                    }
+                    else if (high == blankingHighBucket)
+                    {
+                        workerHistograms[
+                            workerOffset + blankingHistogramOffset + middle]++;
+                    }
+                }
+            });
+
+        for (int bucket = 0; bucket < middleHistogramLength; bucket++)
+        {
+            int count = 0;
+            for (int worker = 0; worker < workerThreads; worker++)
+            {
+                count += workerHistograms[
+                    (worker * middleHistogramLength) + bucket];
+            }
+
+            middleHistograms[bucket] = count;
+        }
     }
 
     private static uint SortablePrefix(double value)
@@ -1054,6 +1340,8 @@ public sealed class VhsSyncDetector
         private double[] _partitioned = [];
         private int[] _highHistogram = [];
         private int[] _middleHistograms = [];
+        private int[] _workerHistograms = [];
+        private int[] _workerFlags = [];
 
         public double[] EnsureFilteredLength(int length)
         {
@@ -1094,6 +1382,28 @@ public sealed class VhsSyncDetector
             }
 
             return _middleHistograms;
+        }
+
+        public int[] EnsureWorkerHistograms(int workerThreads)
+        {
+            int length = checked(
+                workerThreads * RadixHistogramWidth * 2);
+            if (_workerHistograms.Length < length)
+            {
+                _workerHistograms = GC.AllocateUninitializedArray<int>(length);
+            }
+
+            return _workerHistograms;
+        }
+
+        public int[] EnsureWorkerFlags(int workerThreads)
+        {
+            if (_workerFlags.Length < workerThreads)
+            {
+                _workerFlags = GC.AllocateUninitializedArray<int>(workerThreads);
+            }
+
+            return _workerFlags;
         }
     }
 }

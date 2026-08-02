@@ -2,7 +2,7 @@
 
 [English](README.md) | **[简体中文](README.zh-CN.md)** | [日本語](README.ja.md)
 
-<!-- README_SYNC: 2026-08-01.01 -->
+<!-- README_SYNC: 2026-08-02.01 -->
 
 这是 [`oyvindln/vhs-decode`](https://github.com/oyvindln/vhs-decode)
 中解码相关部分的 .NET 11 重写，兼容目标为上游 release `v0.4.0`、commit
@@ -33,7 +33,7 @@
 - VHS 家族包括 VHS/S-VHS、Betamax、Video8/Hi8、U-matic、Type C、EIAJ
   以及上游支持的 PAL/NTSC 变体。
 - TBC 工具、双击启动的用户 GUI 和开发者绘图窗口明确不在范围内。
-- Visual Studio 2026 `.slnx` 包含 **1,231** 项标准 xUnit v3 测试；测试可在
+- Visual Studio 2026 `.slnx` 包含 **1,234** 项标准 xUnit v3 测试；测试可在
   Test Explorer 中查看，也可用 `dotnet test` 运行。
 
 <!-- SECTION: start -->
@@ -127,6 +127,18 @@ RF 输入块；串行 decode 仍保持原来的分配行为。在同一个私有
 155.74 变为 155.31 秒（0.28%），因此吞吐归类为中性。全部输出和诊断一致，候选
 工作集保持在 772 MiB 以下。上面的固定 `.lds` 矩阵不受影响，因此数值保持不变。
 
+最新的 Exact `current` VHS 优化只并行执行同步电平分位数的两次确定性 radix
+histogram 扫描；最终按源顺序筛选和全部 field 状态仍保持串行。在同一份私有本地
+PAL VHS RF 样本上，6 组平衡顺序的 160 帧 `--threads 20` 配对全部由候选胜出，
+墙钟中位数从 18.622 降至 17.739 秒（缩短 4.74%，吞吐提高 4.97%）。单线程和
+默认 5 worker 的结果为中性，10 worker 中位数提高 1.31%。两组相反顺序的 1000 帧
+配对把平均墙钟从 78.559 降至 76.495 秒（缩短 2.63%）。1000 帧运行实际比较的
+亮度、色度、原始 JSON、归一化 stderr/日志和
+有序 `fileLoc` 均一致；另行执行的线程门禁还匹配 stdout 和跨线程确定性。候选每秒一次
+工作集采样的最高值为 779.98 MiB，且未观察到渐进采样增长。固定 `.lds` 表保留上次
+审计结果，因为本次刷新时无法取得完全相同的私有矩阵样本，不会用其他样本替换成
+不可比数据。
+
 每个 .NET 单元格依次给出墙钟中位数和相对同 profile Python 列的倍速；低于
 `1.000x` 表示更慢。Python PR341 使用合并提交
 `2f21e8ed6018b14561396cc95f1f6828054470b8`，它是 `current` 的上游对应版本。
@@ -163,7 +175,7 @@ Ogg/FLAC、立体声、PCM24、其他采样率和未完成的文件头也继续�
 dotnet restore VHSDecodeDotNet.slnx
 dotnet build VHSDecodeDotNet.slnx -c Release --no-restore
 dotnet test --solution VHSDecodeDotNet.slnx -c Release `
-  --no-build --no-restore --minimum-expected-tests 1231
+  --no-build --no-restore --minimum-expected-tests 1234
 ```
 
 在 Visual Studio 2026 中打开 `VHSDecodeDotNet.slnx`，即可构建、调试并通过

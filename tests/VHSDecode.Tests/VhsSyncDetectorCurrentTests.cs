@@ -203,6 +203,35 @@ public sealed class VhsSyncDetectorCurrentTests
         Assert.InRange(allocated, 0, 64 * 1024);
     }
 
+    [Fact(DisplayName = "Parallel current VHS sync detector reuses radix workspaces without caller allocation")]
+    public void ParallelCurrentVhsSyncDetectorReusesRadixWorkspacesWithoutCallerAllocation()
+    {
+        var signal = new double[1_000_000];
+        Array.Fill(signal, 42.0);
+        var detector = new VhsSyncDetector(
+            188.0,
+            152.0,
+            2_560,
+            8.8,
+            workerThreads: 4);
+        _ = detector.Detect(
+            signal,
+            detectLevels: true,
+            syncTipEstimate: 3_800_000.0,
+            blankingEstimate: 4_100_000.0);
+
+        long before = GC.GetAllocatedBytesForCurrentThread();
+        VhsSyncDetectionResult result = detector.Detect(
+            signal,
+            detectLevels: true,
+            syncTipEstimate: 3_800_000.0,
+            blankingEstimate: 4_100_000.0);
+        long allocated = GC.GetAllocatedBytesForCurrentThread() - before;
+
+        Assert.Empty(result.Pulses);
+        Assert.InRange(allocated, 0, 256 * 1024);
+    }
+
     [Fact(DisplayName = "Current VHS level quantiles match sequential Quickselect for finite values")]
     public void CurrentVhsLevelQuantilesMatchSequentialQuickselectForFiniteValues()
     {
@@ -406,6 +435,150 @@ public sealed class VhsSyncDetectorCurrentTests
             Assert.Equal(
                 expectedWork.Select(BitConverter.DoubleToInt64Bits),
                 actualWork.Select(BitConverter.DoubleToInt64Bits));
+        }
+    }
+
+    [Fact(DisplayName = "Parallel current VHS radix quantiles match serial bit for bit")]
+    public void ParallelCurrentVhsRadixQuantilesMatchSerialBitForBit()
+    {
+        const int length = 600_013;
+        var random = new Random(34_104_315);
+        double[][] sources =
+        [
+            Enumerable.Range(0, length)
+                .Select(index => index % 19 == 0
+                    ? 4_100_000.0
+                    : 4_000_000.0 + random.NextDouble())
+                .ToArray(),
+            Enumerable.Range(0, length)
+                .Select(index => index % 23 == 0
+                    ? -7_500_000.0
+                    : (random.Next(2) == 0 ? -1.0 : 1.0)
+                        * (1.0 + (random.NextDouble() * 10_000_000.0)))
+                .ToArray()
+        ];
+        var workerHistograms = Enumerable.Repeat(
+            int.MinValue,
+            4 * VhsSyncDetector.RadixHistogramWidth * 2).ToArray();
+        var workerFlags = Enumerable.Repeat(int.MinValue, 4).ToArray();
+
+        foreach (double[] source in sources)
+        {
+            var backing = new double[source.Length + 17];
+            source.CopyTo(backing, 0);
+            for (int index = source.Length; index < backing.Length; index++)
+            {
+                backing[index] = index % 3 switch
+                {
+                    0 => double.NaN,
+                    1 => 0.0,
+                    _ => double.MaxValue
+                };
+            }
+
+            int syncTarget = (int)(source.Length * 0.05);
+            int blankingTarget = (int)(source.Length * 0.25);
+            var expectedScratch = new double[source.Length];
+            (double expectedSync, double expectedBlanking) =
+                VhsSyncDetector.SelectLevelQuantilesRadix(
+                    source,
+                    expectedScratch,
+                    new int[VhsSyncDetector.RadixHistogramWidth],
+                    new int[VhsSyncDetector.RadixHistogramWidth * 2],
+                    syncTarget,
+                    blankingTarget);
+
+            for (int workers = 2; workers <= 4; workers++)
+            {
+                var actualScratch = new double[source.Length];
+                (double actualSync, double actualBlanking) =
+                    VhsSyncDetector.SelectLevelQuantilesRadixParallel(
+                        backing,
+                        source.Length,
+                        actualScratch,
+                        new int[VhsSyncDetector.RadixHistogramWidth],
+                        new int[VhsSyncDetector.RadixHistogramWidth * 2],
+                        workerHistograms,
+                        workerFlags,
+                        syncTarget,
+                        blankingTarget,
+                        workers);
+
+                Assert.Equal(
+                    BitConverter.DoubleToInt64Bits(expectedSync),
+                    BitConverter.DoubleToInt64Bits(actualSync));
+                Assert.Equal(
+                    BitConverter.DoubleToInt64Bits(expectedBlanking),
+                    BitConverter.DoubleToInt64Bits(actualBlanking));
+                Assert.All(
+                    workerFlags.AsSpan(0, workers).ToArray(),
+                    flag => Assert.Equal(0, flag));
+            }
+        }
+    }
+
+    [Fact(DisplayName = "Parallel current VHS radix quantiles preserve exceptional fallback")]
+    public void ParallelCurrentVhsRadixQuantilesPreserveExceptionalFallback()
+    {
+        const int workers = 4;
+        const int length = 2_048;
+        long[] exceptionalBits =
+        [
+            0,
+            unchecked((long)0x8000000000000000UL),
+            unchecked((long)0x7FF0000000000000UL),
+            unchecked((long)0xFFF0000000000000UL),
+            unchecked((long)0x7FF8000000000042UL),
+            unchecked((long)0xFFF8000000000042UL)
+        ];
+        int[] exceptionalIndexes = [0, 511, 512, 1_023, 1_024, 1_535, 1_536, 2_047];
+        foreach (long exceptionalBitsValue in exceptionalBits)
+        {
+            var source = Enumerable.Range(0, length)
+                .Select(index => 3_700_000.0 + (index * 0.125))
+                .ToArray();
+            foreach (int index in exceptionalIndexes)
+            {
+                source[index] = BitConverter.Int64BitsToDouble(exceptionalBitsValue);
+            }
+
+            int syncTarget = (int)(length * 0.05);
+            int blankingTarget = (int)(length * 0.25);
+            double[] expectedScratch = source.ToArray();
+            (double expectedSync, double expectedBlanking) =
+                VhsSyncDetector.SelectLevelQuantilesSequential(
+                    expectedScratch,
+                    syncTarget,
+                    blankingTarget,
+                    length);
+            var actualScratch = Enumerable.Repeat(double.NaN, length).ToArray();
+            var workerHistograms = Enumerable.Repeat(
+                int.MinValue,
+                workers * VhsSyncDetector.RadixHistogramWidth * 2).ToArray();
+            var workerFlags = Enumerable.Repeat(int.MinValue, workers).ToArray();
+
+            (double actualSync, double actualBlanking) =
+                VhsSyncDetector.SelectLevelQuantilesRadixParallel(
+                    source,
+                    source.Length,
+                    actualScratch,
+                    new int[VhsSyncDetector.RadixHistogramWidth],
+                    new int[VhsSyncDetector.RadixHistogramWidth * 2],
+                    workerHistograms,
+                    workerFlags,
+                    syncTarget,
+                    blankingTarget,
+                    workers);
+
+            Assert.Equal(
+                BitConverter.DoubleToInt64Bits(expectedSync),
+                BitConverter.DoubleToInt64Bits(actualSync));
+            Assert.Equal(
+                BitConverter.DoubleToInt64Bits(expectedBlanking),
+                BitConverter.DoubleToInt64Bits(actualBlanking));
+            Assert.Equal(
+                expectedScratch.Select(BitConverter.DoubleToInt64Bits),
+                actualScratch.Select(BitConverter.DoubleToInt64Bits));
         }
     }
 
