@@ -388,11 +388,11 @@ Python v0.4.0、merge 済みの Python PR341、Exact v0.4.0、Exact
 <!-- LATEST_PERFORMANCE_BEGIN -->
 | CLI mode（workers） | Python v0.4.0 | Python PR341 | Exact + v0.4.0 | Exact + current | IPP-fast + v0.4.0 | IPP-fast + current |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| default（5） | 15.207 s | 16.780 s | 4.389 s / 3.465x / 71.14% | 5.322 s / 3.153x / 68.28% | 3.609 s / 4.213x / 76.27% | 4.469 s / 3.755x / 73.37% |
-| `--threads 1` | 17.694 s | 19.414 s | 10.065 s / 1.758x / 43.11% | 13.495 s / 1.439x / 30.49% | 7.215 s / 2.453x / 59.23% | 10.757 s / 1.805x / 44.59% |
-| `--threads 5` | 15.719 s | 17.801 s | 4.282 s / 3.671x / 72.76% | 5.323 s / 3.344x / 70.10% | 3.568 s / 4.406x / 77.30% | 4.282 s / 4.157x / 75.95% |
-| `--threads 10` | 16.037 s | 18.266 s | 3.494 s / 4.589x / 78.21% | 4.553 s / 4.012x / 75.08% | 3.098 s / 5.177x / 80.68% | 4.026 s / 4.537x / 77.96% |
-| `--threads 20` | 16.405 s | 18.395 s | 3.235 s / 5.071x / 80.28% | 4.060 s / 4.531x / 77.93% | 2.654 s / 6.182x / 83.82% | 3.526 s / 5.216x / 80.83% |
+| default（5） | 15.207 s | 16.780 s | 4.389 s / 3.465x / 71.14% | 5.604 s / 2.994x / 66.61% | 3.609 s / 4.213x / 76.27% | 4.335 s / 3.871x / 74.17% |
+| `--threads 1` | 17.694 s | 19.414 s | 10.065 s / 1.758x / 43.11% | 13.069 s / 1.486x / 32.69% | 7.215 s / 2.453x / 59.23% | 10.473 s / 1.854x / 46.06% |
+| `--threads 5` | 15.719 s | 17.801 s | 4.282 s / 3.671x / 72.76% | 5.335 s / 3.337x / 70.03% | 3.568 s / 4.406x / 77.30% | 4.273 s / 4.166x / 76.00% |
+| `--threads 10` | 16.037 s | 18.266 s | 3.494 s / 4.589x / 78.21% | 4.461 s / 4.094x / 75.58% | 3.098 s / 5.177x / 80.68% | 3.741 s / 4.883x / 79.52% |
+| `--threads 20` | 16.405 s | 18.395 s | 3.235 s / 5.071x / 80.28% | 4.219 s / 4.360x / 77.07% | 2.654 s / 6.182x / 83.82% | 3.523 s / 5.222x / 80.85% |
 <!-- LATEST_PERFORMANCE_END -->
 
 この測定は 2026-08-02 に main commit
@@ -400,8 +400,8 @@ Python v0.4.0、merge 済みの Python PR341、Exact v0.4.0、Exact
 Core Ultra 7 265K（20 logical processor）、Windows 11 build 26220、.NET
 SDK/runtime `11.0.100-preview.6.26359.118` です。30 個の mode/profile cell を
 3 回ずつ interleaved order で測定し、合計 90 Release run です。2026-08-03、
-bounded current ACC segment parallelization 後の final branch candidate で
-10 個すべての `current` cell を 6 回ずつ再測定し、60 Release run を追加しました。
+bounded ACC segment と Super-Gaussian FFT の parallelization 後の final branch
+candidate で 10 個すべての `current` cell を 6 回ずつ再測定し、60 Release run を追加しました。
 Python と .NET v0.4.0 cell は従来の audited value を維持します。Python v0.4.0
 commit は `43155200da87c0d49eb37d8ec09b1372075ee8e4`、merge 済み
 PR341 commit は `2f21e8ed6018b14561396cc95f1f6828054470b8`
@@ -2101,6 +2101,28 @@ luma、chroma、raw JSON、stdout、該当する normalized stderr/log、全 ord
 更新した `current` matrix は Exact と IPP-fast の default/1/5/10/20 worker を各 6 回
 interleaved 測定し、合計 60 Release run です。compatibility hash set はすべて 1 値
 でした。zero-warning Release build と 1,261 件すべての xUnit v3/
+Microsoft.Testing.Platform test が通過しました。
+
+### Bounded current Super-Gaussian FFT parallelism
+
+`current` Super-Gaussian chroma final filter の既存 PocketFFT packet-independent
+stage は、requested worker count が許す場合の internal cap を 4 から 8 に増やしました。
+packet decomposition、padding、mask、arithmetic、transform order、output order、serial
+path は変更していません。filter は bounded instance-local workspace を 1 つ保持し、
+concurrent call は互いに分離した temporary workspace を使用します。
+
+matched cap-4/cap-8 short pair 12 組の combined median wall time は 14.67 から
+14.29 秒へ 2.57% 短縮し、median active core は 6.50 から 6.88 に増えました。
+反対順序の 1,000-frame/2,000-field comparison 2 回では combined median が
+54.345 から 52.408 秒へ 3.56% 短縮しました。luma、chroma、raw JSON、stdout、
+normalized stderr/log、全 ordered `fileLoc` は一致しました。2 回の candidate の
+first/last-third working-set median は 428.6/433.1 MiB と 382.4/382.7 MiB、maximum
+は 435.9 と 386.5 MiB で、progressive growth や OOM はありません。
+
+cap-12 experiment は却下しました。wall time は 14.09 から 14.36 秒へ悪化し、
+active core は 6.93 から 7.10、process CPU time は 97.66 から 101.92 秒へ増えました。
+final 60-run `current` matrix の全 cell で各 compatibility surface は 1 hash でした。
+zero-warning Release build と 1,261 件すべての xUnit v3/
 Microsoft.Testing.Platform test が通過しました。
 
 </details>

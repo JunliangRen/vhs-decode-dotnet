@@ -101,18 +101,18 @@ the same 40-frame window for every run. The source filename is intentionally
 not published. The base matrix uses three interleaved runs measured on
 2026-08-02 from main commit `c92af1d`. On 2026-08-03, every `current` cell was
 refreshed from six interleaved runs of the final branch candidate after bounded
-current ACC segment parallelization. The Python and .NET v0.4.0 cells retain
-their prior audited measurements. Compatibility is evaluated separately from
-speed.
+ACC segment and Super-Gaussian FFT parallelization. The Python and .NET v0.4.0
+cells retain their prior audited measurements. Compatibility is evaluated
+separately from speed.
 
 <!-- LATEST_PERFORMANCE_BEGIN -->
 | CLI mode (workers) | Python v0.4.0 | Python PR341 | Exact + v0.4.0 | Exact + current | IPP-fast + v0.4.0 | IPP-fast + current |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| default (5) | 15.207 s | 16.780 s | 4.389 s / 3.465x | 5.322 s / 3.153x | 3.609 s / 4.213x | 4.469 s / 3.755x |
-| `--threads 1` | 17.694 s | 19.414 s | 10.065 s / 1.758x | 13.495 s / 1.439x | 7.215 s / 2.453x | 10.757 s / 1.805x |
-| `--threads 5` | 15.719 s | 17.801 s | 4.282 s / 3.671x | 5.323 s / 3.344x | 3.568 s / 4.406x | 4.282 s / 4.157x |
-| `--threads 10` | 16.037 s | 18.266 s | 3.494 s / 4.589x | 4.553 s / 4.012x | 3.098 s / 5.177x | 4.026 s / 4.537x |
-| `--threads 20` | 16.405 s | 18.395 s | 3.235 s / 5.071x | 4.060 s / 4.531x | 2.654 s / 6.182x | 3.526 s / 5.216x |
+| default (5) | 15.207 s | 16.780 s | 4.389 s / 3.465x | 5.604 s / 2.994x | 3.609 s / 4.213x | 4.335 s / 3.871x |
+| `--threads 1` | 17.694 s | 19.414 s | 10.065 s / 1.758x | 13.069 s / 1.486x | 7.215 s / 2.453x | 10.473 s / 1.854x |
+| `--threads 5` | 15.719 s | 17.801 s | 4.282 s / 3.671x | 5.335 s / 3.337x | 3.568 s / 4.406x | 4.273 s / 4.166x |
+| `--threads 10` | 16.037 s | 18.266 s | 3.494 s / 4.589x | 4.461 s / 4.094x | 3.098 s / 5.177x | 3.741 s / 4.883x |
+| `--threads 20` | 16.405 s | 18.395 s | 3.235 s / 5.071x | 4.219 s / 4.360x | 2.654 s / 6.182x | 3.523 s / 5.222x |
 <!-- LATEST_PERFORMANCE_END -->
 
 Each .NET cell shows median wall time followed by speedup versus its

@@ -408,11 +408,11 @@ speedup, and wall-time reduction against its profile-matched Python column:
 <!-- LATEST_PERFORMANCE_BEGIN -->
 | CLI mode (workers) | Python v0.4.0 | Python PR341 | Exact + v0.4.0 | Exact + current | IPP-fast + v0.4.0 | IPP-fast + current |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| default (5) | 15.207 s | 16.780 s | 4.389 s / 3.465x / 71.14% | 5.322 s / 3.153x / 68.28% | 3.609 s / 4.213x / 76.27% | 4.469 s / 3.755x / 73.37% |
-| `--threads 1` | 17.694 s | 19.414 s | 10.065 s / 1.758x / 43.11% | 13.495 s / 1.439x / 30.49% | 7.215 s / 2.453x / 59.23% | 10.757 s / 1.805x / 44.59% |
-| `--threads 5` | 15.719 s | 17.801 s | 4.282 s / 3.671x / 72.76% | 5.323 s / 3.344x / 70.10% | 3.568 s / 4.406x / 77.30% | 4.282 s / 4.157x / 75.95% |
-| `--threads 10` | 16.037 s | 18.266 s | 3.494 s / 4.589x / 78.21% | 4.553 s / 4.012x / 75.08% | 3.098 s / 5.177x / 80.68% | 4.026 s / 4.537x / 77.96% |
-| `--threads 20` | 16.405 s | 18.395 s | 3.235 s / 5.071x / 80.28% | 4.060 s / 4.531x / 77.93% | 2.654 s / 6.182x / 83.82% | 3.526 s / 5.216x / 80.83% |
+| default (5) | 15.207 s | 16.780 s | 4.389 s / 3.465x / 71.14% | 5.604 s / 2.994x / 66.61% | 3.609 s / 4.213x / 76.27% | 4.335 s / 3.871x / 74.17% |
+| `--threads 1` | 17.694 s | 19.414 s | 10.065 s / 1.758x / 43.11% | 13.069 s / 1.486x / 32.69% | 7.215 s / 2.453x / 59.23% | 10.473 s / 1.854x / 46.06% |
+| `--threads 5` | 15.719 s | 17.801 s | 4.282 s / 3.671x / 72.76% | 5.335 s / 3.337x / 70.03% | 3.568 s / 4.406x / 77.30% | 4.273 s / 4.166x / 76.00% |
+| `--threads 10` | 16.037 s | 18.266 s | 3.494 s / 4.589x / 78.21% | 4.461 s / 4.094x / 75.58% | 3.098 s / 5.177x / 80.68% | 3.741 s / 4.883x / 79.52% |
+| `--threads 20` | 16.405 s | 18.395 s | 3.235 s / 5.071x / 80.28% | 4.219 s / 4.360x / 77.07% | 2.654 s / 6.182x / 83.82% | 3.523 s / 5.222x / 80.85% |
 <!-- LATEST_PERFORMANCE_END -->
 
 The benchmark ran on 2026-08-02 using main commit
@@ -421,8 +421,9 @@ The benchmark ran on 2026-08-02 using main commit
 `11.0.100-preview.6.26359.118`. Each of the 30 mode/profile cells was measured
 three times in interleaved order, for 90 Release runs. On 2026-08-03, all ten
 `current` cells were refreshed with six interleaved runs of the final branch
-candidate after bounded current ACC segment parallelization, adding 60 Release
-runs. The Python and .NET v0.4.0 cells retain their earlier audited measurements.
+candidate after bounded ACC segment and Super-Gaussian FFT parallelization,
+adding 60 Release runs. The Python and .NET v0.4.0 cells retain their earlier
+audited measurements.
 Python v0.4.0 was commit
 `43155200da87c0d49eb37d8ec09b1372075ee8e4`; merged PR341 was commit
 `2f21e8ed6018b14561396cc95f1f6828054470b8` (`v0.4.0-40-g2f21e8ed`).
@@ -2177,6 +2178,30 @@ The refreshed `current` matrix uses six interleaved runs for default, 1, 5, 10,
 and 20 workers in Exact and IPP-fast, for 60 Release runs. Every compatibility
 hash set contained one value. The zero-warning Release build and all 1,261 xUnit
 v3/Microsoft.Testing.Platform tests passed.
+
+### Bounded current Super-Gaussian FFT parallelism
+
+The existing packet-independent PocketFFT stages in the `current`
+Super-Gaussian chroma final filter now use at most eight internal workers instead
+of four when the requested worker count permits it. Packet decomposition,
+padding, masks, arithmetic, transform order, output order, and the serial path
+are unchanged. The filter still retains one bounded instance-local workspace;
+concurrent calls obtain isolated temporary workspaces.
+
+Across twelve matched short cap-4/cap-8 pairs, combined median wall time fell
+from 14.67 to 14.29 seconds (2.57%) while median active cores rose from 6.50 to
+6.88. Two opposite-order 1,000-frame/2,000-field comparisons reduced the
+combined median from 54.345 to 52.408 seconds (3.56%). Luma, chroma, raw JSON,
+stdout, normalized stderr/log, and every ordered `fileLoc` matched. Candidate
+first/last-third working-set medians were 428.6/433.1 MiB and 382.4/382.7 MiB
+across the two runs, with maxima of 435.9 and 386.5 MiB and no progressive
+growth or OOM.
+
+A cap-12 experiment was rejected: wall time regressed from 14.09 to 14.36
+seconds while active cores rose from 6.93 to 7.10 and process CPU time rose from
+97.66 to 101.92 seconds. The final 60-run `current` matrix produced one hash for
+every compatibility surface in every cell. The zero-warning Release build and
+all 1,261 xUnit v3/Microsoft.Testing.Platform tests passed.
 
 </details>
 

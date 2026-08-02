@@ -291,7 +291,7 @@ public sealed class PocketFftMixedRadixCompatibilityTests
             Sha256(MemoryMarshal.AsBytes(actualFloat32.AsSpan())));
     }
 
-    [Fact(DisplayName = "Super-Gaussian final filter can reuse its input buffer")]
+    [Fact(DisplayName = "Super-Gaussian final filter is bit-exact across worker counts")]
     public void SuperGaussianFinalFilterCanReuseInputBuffer()
     {
         const int RawLength = 239_067;
@@ -303,16 +303,20 @@ public sealed class PocketFftMixedRadixCompatibilityTests
             .Select(static value => (double)value)
             .ToArray();
         double[] expected = filter.Apply(input);
-        double[] actual = (double[])input.Clone();
+        long[] expectedBits = expected
+            .Select(BitConverter.DoubleToInt64Bits)
+            .ToArray();
 
-        double[] returned = filter.ApplyInPlace(
-            actual,
-            workerThreads: 5);
+        foreach (int workerThreads in new[] { 1, 4, 5, 8, 20 })
+        {
+            double[] actual = (double[])input.Clone();
+            double[] returned = filter.ApplyInPlace(actual, workerThreads);
 
-        Assert.Same(actual, returned);
-        Assert.Equal(
-            expected.Select(BitConverter.DoubleToInt64Bits),
-            actual.Select(BitConverter.DoubleToInt64Bits));
+            Assert.Same(actual, returned);
+            Assert.Equal(
+                expectedBits,
+                actual.Select(BitConverter.DoubleToInt64Bits));
+        }
     }
 
     [Fact(DisplayName = "Super-Gaussian final filter retains one reusable FFT workspace")]
@@ -360,12 +364,12 @@ public sealed class PocketFftMixedRadixCompatibilityTests
                 RawLength,
                 FscHz,
                 CarrierHz)
-            .ApplyInPlace((double[])firstSource.Clone(), workerThreads: 4);
+            .ApplyInPlace((double[])firstSource.Clone(), workerThreads: 8);
         double[] expectedSecond = new ChromaSuperGaussianFinalFilter(
                 RawLength,
                 FscHz,
                 CarrierHz)
-            .ApplyInPlace((double[])secondSource.Clone(), workerThreads: 4);
+            .ApplyInPlace((double[])secondSource.Clone(), workerThreads: 8);
         var sharedFilter = new ChromaSuperGaussianFinalFilter(
             RawLength,
             FscHz,
@@ -392,7 +396,7 @@ public sealed class PocketFftMixedRadixCompatibilityTests
                     startGate.SignalAndWait();
                     return sharedFilter.ApplyInPlace(
                         (double[])source.Clone(),
-                        workerThreads: 4);
+                        workerThreads: 8);
                 },
                 CancellationToken.None,
                 TaskCreationOptions.LongRunning,
