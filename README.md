@@ -96,87 +96,35 @@ for compatibility-sensitive work.
 
 ## Latest performance
 
-The table below uses one fixed private local 40 MHz NTSC `BETAMAX_HIFI` `.lds`
-sample and the same bounded frame range for every run. The sample filename is
-intentionally not published. The v0.4.0 .NET profiles are compared with Python
-v0.4.0; the `current` profiles are compared with merged Python PR341 at the
-same requested worker count. Compatibility is evaluated separately from speed.
+The table below uses one fixed private local 40 MHz PAL VHS `.ldf` fixture and
+the same 40-frame window for every run. The source filename is intentionally
+not published. Each value is the median of three interleaved runs measured on
+2026-08-02 from main commit `c92af1d`. Compatibility is evaluated separately
+from speed.
 
 <!-- LATEST_PERFORMANCE_BEGIN -->
 | CLI mode (workers) | Python v0.4.0 | Python PR341 | Exact + v0.4.0 | Exact + current | IPP-fast + v0.4.0 | IPP-fast + current |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| default (5) | 16.983 s | 14.414 s | 5.623 s / 3.020x | 6.730 s / 2.142x | 5.295 s / 3.207x | 6.688 s / 2.155x |
-| `--threads 1` | 21.263 s | 19.881 s | 15.275 s / 1.392x | 17.979 s / 1.106x | 14.625 s / 1.454x | 17.008 s / 1.169x |
-| `--threads 5` | 16.880 s | 14.329 s | 5.475 s / 3.083x | 6.514 s / 2.200x | 5.361 s / 3.149x | 6.841 s / 2.094x |
-| `--threads 10` | 17.612 s | 15.149 s | 4.640 s / 3.795x | 5.890 s / 2.572x | 4.900 s / 3.594x | 5.631 s / 2.690x |
-| `--threads 20` | 18.330 s | 15.447 s | 3.809 s / 4.812x | 4.388 s / 3.520x | 3.722 s / 4.924x | 4.819 s / 3.206x |
+| default (5) | 15.207 s | 16.780 s | 4.389 s / 3.465x | 5.896 s / 2.846x | 3.609 s / 4.213x | 4.654 s / 3.606x |
+| `--threads 1` | 17.694 s | 19.414 s | 10.065 s / 1.758x | 13.488 s / 1.439x | 7.215 s / 2.453x | 10.256 s / 1.893x |
+| `--threads 5` | 15.719 s | 17.801 s | 4.282 s / 3.671x | 5.982 s / 2.976x | 3.568 s / 4.406x | 5.082 s / 3.503x |
+| `--threads 10` | 16.037 s | 18.266 s | 3.494 s / 4.589x | 5.101 s / 3.581x | 3.098 s / 5.177x | 4.234 s / 4.314x |
+| `--threads 20` | 16.405 s | 18.395 s | 3.235 s / 5.071x | 4.268 s / 4.310x | 2.654 s / 6.182x | 4.464 s / 4.121x |
 <!-- LATEST_PERFORMANCE_END -->
-
-The latest Exact pass specializes PocketFFT radix-8 direction, vectorizes the
-bit-exact VHS chroma UInt16 conversion and `current` burst fit, and narrows
-`current` sync quantiles with deterministic radix selection. Scalar fallbacks,
-data types, and the original numerical operation order remain available.
-
-Native and scalar thread/profile gates and all 60 final matrix runs matched
-their references. Six balanced `current`/20-worker pairs reduced median wall
-time from 9.637 to 8.627 seconds (10.48%; 11.71% more throughput); four serial
-pairs reduced it from 50.377 to 37.300 seconds (25.96%; 35.06% more throughput).
-Across two opposite-order 1,000-frame pairs, mean wall time fell from 72.405 to
-62.752 seconds (13.33%; 15.38% more throughput). Allocation changed by only
-0.18%, candidate working set stayed below 706 MiB, and no progressive slowdown
-was observed.
-
-The new direct raw `fLaC` input path does not affect the fixed `.lds` table.
-On one private 100-frame, 20-worker RF window, the Release 1.4.4 FFmpeg baseline
-and bundled-libsndfile candidate took 8.319 s and 7.345 s respectively (11.71%
-less wall time; 1.133x throughput), while luma, chroma, raw JSON, stdout,
-normalized stderr/logs, and all 200 ordered `fileLoc` values matched. This is a
-scoped single-pair observation, not a universal decoder speed claim.
-
-The latest direct-raw-FLAC input pass keeps up to 48 exact 32K RF input blocks
-for parallel decode and prefetch, while sequential decode retains its previous
-allocation behavior. On one private local PAL VHS RF capture, two
-opposite-order 1,000-frame `current`/Exact/20-worker pairs reduced combined
-managed allocation from 43.96 to 16.63 GiB (62.18%) and GC pause from 0.380 to
-0.253 seconds (33.46%). Combined wall time changed from 155.74 to 155.31 seconds
-(0.28%), so throughput is classified as neutral. All outputs and diagnostics
-matched, and candidate working set remained bounded below 772 MiB. The fixed
-`.lds` matrix above is unaffected and therefore remains unchanged.
-
-The latest Exact `current` VHS pass parallelizes only the two deterministic
-radix-histogram scans used for sync-level quantiles; final source-order
-selection and all field state remain serial. On one private local PAL VHS RF
-capture, six balanced 160-frame `--threads 20` pairs all favored the candidate:
-median wall time fell from 18.622 to 17.739 seconds (4.74%; 4.97% more
-throughput). The same pass was neutral at one/default-five workers and improved
-the 10-worker median by 1.31%. Two opposite-order 1,000-frame pairs reduced
-mean wall time from 78.559 to 76.495 seconds (2.63%); luma, chroma, raw JSON,
-normalized stderr/log, and ordered `fileLoc` matched. Separate thread gates
-also matched stdout and cross-thread determinism. The maximum once-per-second
-candidate working-set sample was 779.98 MiB, with no progressive sampled
-growth. The fixed `.lds` table retains its prior audited snapshot because that
-exact private matrix sample was unavailable for this refresh.
-
-The latest Exact `current` PAL VHS pass reuses the decoder-owned chroma field
-during heterodyne upconversion instead of allocating another full-field
-`double[]`. On the same private local PAL VHS RF sample, six balanced 80-frame
-20-worker pairs were mixed at four candidate wins and two losses; mean wall
-time changed from 11.942 to 11.776 seconds (1.39%), so throughput remains
-classified as near-neutral. A matched 1,000-frame counter pair reduced managed
-allocation from 8.254 to 3.009 GiB (63.54%), Gen2 collections from 20 to 2,
-and maximum sampled working set from 773.29 to 439.86 MiB. First/last-quarter
-candidate working-set medians were 405.84/406.51 MiB without progressive
-growth. Wall time changed from 74.130 to 73.217 seconds (1.23%). Luma, chroma,
-raw JSON, normalized stderr/log, and all 2,000 ordered `fileLoc` values matched;
-separate profile/thread gates also matched stdout and determinism. The fixed
-`.lds` matrix is unaffected and remains the preceding audited snapshot.
 
 Each .NET cell shows median wall time followed by speedup versus its
 profile-matched Python column; values below `1.000x` are slower. Python PR341
 is merge commit `2f21e8ed6018b14561396cc95f1f6828054470b8`, the upstream peer
-for `current`. The default is **5 workers**. Nonzero-thread Python rows are
-throughput comparisons only; strict compatibility still uses Python v0.4.0
-`g4315520 --threads 0`.
+for `current`. The default is **5 workers**. The matrix contains 90 runs:
+three repetitions of all 30 mode/profile cells.
+
+Every .NET profile and Python PR341 produced one deterministic hash set per
+mode. Python v0.4.0 produced three luma/chroma/JSON/log hash sets in every
+default/nonzero mode, while ordered `fileLoc`, stdout, and normalized stderr
+remained stable. Those Python rows are throughput comparisons only. A separate
+40-frame `--threads 0` gate made Exact v0.4.0 and Exact `current` match their
+Python peers for output bytes, metadata, stdout/stderr, and normalized logs;
+Python v0.4.0 `g4315520 --threads 0` remains the strict oracle.
 
 Default worker counts, exact commands, build hashes, hardware, repeated-run
 methodology, output hashes, and older measurements are recorded in the

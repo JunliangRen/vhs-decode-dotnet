@@ -323,7 +323,7 @@ VSync serration detector 现在会在最多两块精确形状的 workspace 中�
 
 ### 最新六路径线程矩阵
 
-最新首页摘要在同一个私有本地 40 MHz NTSC `BETAMAX_HIFI` `.lds` 样本上比较
+最新首页摘要在同一个私有本地 40 MHz PAL VHS `.ldf` 夹具上比较
 Python v0.4.0、已合并的 Python PR341、Exact v0.4.0、Exact `current`、
 IPP-fast v0.4.0 和 IPP-fast `current`。文件名不会公开。每个 .NET 单元格依次
 给出墙钟中位数、相对同 profile Python 列的倍速和墙钟缩短比例：
@@ -331,46 +331,49 @@ IPP-fast v0.4.0 和 IPP-fast `current`。文件名不会公开。每个 .NET 单
 <!-- LATEST_PERFORMANCE_BEGIN -->
 | CLI 模式（workers） | Python v0.4.0 | Python PR341 | Exact + v0.4.0 | Exact + current | IPP-fast + v0.4.0 | IPP-fast + current |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| 默认（5） | 16.983 s | 14.414 s | 5.623 s / 3.020x / 66.9% | 6.730 s / 2.142x / 53.3% | 5.295 s / 3.207x / 68.8% | 6.688 s / 2.155x / 53.6% |
-| `--threads 1` | 21.263 s | 19.881 s | 15.275 s / 1.392x / 28.2% | 17.979 s / 1.106x / 9.6% | 14.625 s / 1.454x / 31.2% | 17.008 s / 1.169x / 14.4% |
-| `--threads 5` | 16.880 s | 14.329 s | 5.475 s / 3.083x / 67.6% | 6.514 s / 2.200x / 54.5% | 5.361 s / 3.149x / 68.2% | 6.841 s / 2.094x / 52.3% |
-| `--threads 10` | 17.612 s | 15.149 s | 4.640 s / 3.795x / 73.7% | 5.890 s / 2.572x / 61.1% | 4.900 s / 3.594x / 72.2% | 5.631 s / 2.690x / 62.8% |
-| `--threads 20` | 18.330 s | 15.447 s | 3.809 s / 4.812x / 79.2% | 4.388 s / 3.520x / 71.6% | 3.722 s / 4.924x / 79.7% | 4.819 s / 3.206x / 68.8% |
+| 默认（5） | 15.207 s | 16.780 s | 4.389 s / 3.465x / 71.14% | 5.896 s / 2.846x / 64.86% | 3.609 s / 4.213x / 76.27% | 4.654 s / 3.606x / 72.26% |
+| `--threads 1` | 17.694 s | 19.414 s | 10.065 s / 1.758x / 43.11% | 13.488 s / 1.439x / 30.52% | 7.215 s / 2.453x / 59.23% | 10.256 s / 1.893x / 47.17% |
+| `--threads 5` | 15.719 s | 17.801 s | 4.282 s / 3.671x / 72.76% | 5.982 s / 2.976x / 66.40% | 3.568 s / 4.406x / 77.30% | 5.082 s / 3.503x / 71.45% |
+| `--threads 10` | 16.037 s | 18.266 s | 3.494 s / 4.589x / 78.21% | 5.101 s / 3.581x / 72.07% | 3.098 s / 5.177x / 80.68% | 4.234 s / 4.314x / 76.82% |
+| `--threads 20` | 16.405 s | 18.395 s | 3.235 s / 5.071x / 80.28% | 4.268 s / 4.310x / 76.80% | 2.654 s / 6.182x / 83.82% | 4.464 s / 4.121x / 75.73% |
 <!-- LATEST_PERFORMANCE_END -->
 
-测试机为 Intel Core Ultra 7 265K（20 个逻辑处理器）、Windows 11 25H2 build
-26220.8925，以及 .NET SDK/runtime `11.0.100-preview.6.26359.118`。Python
-v0.4.0 列保留上一份固定矩阵的中位数。已合并的 PR341 提交
-`2f21e8ed6018b14561396cc95f1f6828054470b8`
-（`v0.4.0-40-g2f21e8ed`）另行完成 15 次运行，四列 .NET 数据则保留最新 60 次
-交错运行。所有测量使用同一主机、样本和 40 帧区间，但 PR341 与 .NET 矩阵没有
-交错执行，因此这里是 profile 对应比较，不是配对 A/B。Python 3.14.0 使用
-NumPy 2.4.6、SciPy 1.18.0、Numba 0.66.0 和 python-soxr 1.1.0。
-公共参数为：
+本轮于 2026-08-02 在 main commit
+`c92af1dfd0f96cd7f2d49f3219fb428d0f4e0865` 上完成。测试机为 Intel Core
+Ultra 7 265K（20 个逻辑处理器）、Windows 11 build 26220，以及 .NET
+SDK/runtime `11.0.100-preview.6.26359.118`。30 个模式/profile 组合各交错运行
+三次，共 90 次 Release 运行。Python v0.4.0 commit 为
+`43155200da87c0d49eb37d8ec09b1372075ee8e4`，已合并 PR341 commit 为
+`2f21e8ed6018b14561396cc95f1f6828054470b8`（`v0.4.0-40-g2f21e8ed`）。
+Python 3.14.0 使用 NumPy
+2.4.6、SciPy 1.18.0、Numba 0.66.0 和 python-soxr 1.1.0。公共参数为：
 
 ```text
---system ntsc --NTSCJ --detect_chroma_track_phase --ire0_adjust
---tape_format BETAMAX_HIFI --frequency 40 --sub_deemphasis
---start 100 --length 40 --overwrite
+--system pal --detect_chroma_track_phase --ire0_adjust
+--tape_format VHS --frequency 40 --length 40 --overwrite
 ```
 
-两种实现的默认值都是 **5 个 workers**。三次独立 Python v0.4.0
-`--threads 0` control 的中位数为 30.253 秒，且彼此完全相同。保留的全部
-Exact v0.4.0 运行都在亮度、色度、JSON、stdout、归一化 stderr/日志以及全部
-80 个有序 `fileLoc` 上匹配该 oracle。重新测量的 Exact-current 和 IPP-current
-两列各自在 15 次运行中只产生一个确定性 hash 集。另行执行的候选
-`--threads 0`、默认和 `--threads 20` 门禁同样保持 Exact v0.4.0 与 Python
-oracle 完全一致。在这个样本上，IPP-fast 的亮度、色度、JSON 和 `fileLoc`
-恰好匹配相应 Exact profile；显式 IPP 诊断会改变归一化 stderr/日志，这个样本
-结果不构成逐字节兼容承诺。
+命令没有使用 `--start` 或 `--start_fileloc`：本地夹具直接从选定 PCM 窗口开始，
+确保两种实现读取同一物理样本，不经过容器随机 seek 路径。两种实现的默认值都是
+**5 个 workers**。
 
-Python PR341 的预热运行在亮度、色度、全部 80 个有序 `fileLoc`、stdout 和
-时间戳归一化 stderr/日志上匹配 `.NET current` 参考；排除预期的 `version` 与
-`gitCommit` 源身份字段后，JSON payload 也一致。该样本上的 15 次 PR341 运行
-只产生一套 hash。相比之下，15 次非零/默认线程 Python v0.4.0 矩阵运行虽然保持
-同一组亮度、色度和 JSON，却产生 7 种归一化日志 hash；更早的固定矩阵还观察到
-v0.4.0 在不同 worker 数下的产物 hash 不稳定。因此非零线程 Python 行只用于
-吞吐比较，严格 oracle 仍是上游 v0.4.0 `g4315520 --threads 0`。
+另行执行的 40 帧 `--threads 0` 门禁中，Exact v0.4.0 与 Python `g4315520`
+在亮度、色度、原始 JSON、全部 80 个有序 `fileLoc`、stdout、归一化 stderr 和
+去时间戳日志上完全一致。Exact `current` 与 Python PR341 在排除预期的构建身份
+JSON 字段后，也在相同表面全部一致。v0.4.0 严格 oracle 产物为：
+
+| 基准产物 | SHA-256 |
+| --- | --- |
+| 亮度 TBC | `37B799282A82770461AD9DB8EC2E471AB86F9C05F145D411C2FCA5A6D695CACE` |
+| 色度 TBC | `DC2E3C6FAC3323F05080F22CBEB1236A9EBFB3F0A8CB58B6D498F42EA1AFD794` |
+| JSON | `9FB6DC1FAE18024B63B93E1165C5C3F7858AC6A01A786043F7A0E4BF5EAEC30C` |
+
+每个 .NET profile 和 Python PR341 在各模式下都只产生一套确定性 hash。Python
+v0.4.0 的每个默认/非零线程模式在三次重复中都产生三套不同的亮度、色度、JSON
+和日志 hash，但有序 `fileLoc`、stdout 与归一化 stderr 保持稳定。因此这些 Python
+行只用于吞吐比较，严格 oracle 仍是 Python v0.4.0
+`g4315520 --threads 0`。IPP-fast 在此夹具上匹配相应 Exact 的亮度和色度 hash，
+但这个样本结果不构成通用逐字节兼容承诺。
 
 上一份仅 Exact 的线程矩阵使用 Intel Core Ultra 7 265K（20 个逻辑处理器）、Windows 11 build
 26220、.NET SDK/runtime `11.0.100-preview.6.26359.118`，以及 Python v0.4.0

@@ -379,8 +379,8 @@ detector ごとに 60-line buffer 2 個までに制限されます。
 
 ### 最新の 6-path thread matrix
 
-最新の overview は、同じ private local 40 MHz NTSC `BETAMAX_HIFI` `.lds`
-sample で Python v0.4.0、merge 済みの Python PR341、Exact v0.4.0、Exact
+最新の overview は、同じ private local 40 MHz PAL VHS `.ldf` fixture で
+Python v0.4.0、merge 済みの Python PR341、Exact v0.4.0、Exact
 `current`、IPP-fast v0.4.0、IPP-fast `current` を比較します。filename は
 公開しません。各 .NET cell は wall-time median、profile が対応する Python
 列に対する speedup、wall-time reduction の順です。
@@ -388,52 +388,52 @@ sample で Python v0.4.0、merge 済みの Python PR341、Exact v0.4.0、Exact
 <!-- LATEST_PERFORMANCE_BEGIN -->
 | CLI mode（workers） | Python v0.4.0 | Python PR341 | Exact + v0.4.0 | Exact + current | IPP-fast + v0.4.0 | IPP-fast + current |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| default（5） | 16.983 s | 14.414 s | 5.623 s / 3.020x / 66.9% | 6.730 s / 2.142x / 53.3% | 5.295 s / 3.207x / 68.8% | 6.688 s / 2.155x / 53.6% |
-| `--threads 1` | 21.263 s | 19.881 s | 15.275 s / 1.392x / 28.2% | 17.979 s / 1.106x / 9.6% | 14.625 s / 1.454x / 31.2% | 17.008 s / 1.169x / 14.4% |
-| `--threads 5` | 16.880 s | 14.329 s | 5.475 s / 3.083x / 67.6% | 6.514 s / 2.200x / 54.5% | 5.361 s / 3.149x / 68.2% | 6.841 s / 2.094x / 52.3% |
-| `--threads 10` | 17.612 s | 15.149 s | 4.640 s / 3.795x / 73.7% | 5.890 s / 2.572x / 61.1% | 4.900 s / 3.594x / 72.2% | 5.631 s / 2.690x / 62.8% |
-| `--threads 20` | 18.330 s | 15.447 s | 3.809 s / 4.812x / 79.2% | 4.388 s / 3.520x / 71.6% | 3.722 s / 4.924x / 79.7% | 4.819 s / 3.206x / 68.8% |
+| default（5） | 15.207 s | 16.780 s | 4.389 s / 3.465x / 71.14% | 5.896 s / 2.846x / 64.86% | 3.609 s / 4.213x / 76.27% | 4.654 s / 3.606x / 72.26% |
+| `--threads 1` | 17.694 s | 19.414 s | 10.065 s / 1.758x / 43.11% | 13.488 s / 1.439x / 30.52% | 7.215 s / 2.453x / 59.23% | 10.256 s / 1.893x / 47.17% |
+| `--threads 5` | 15.719 s | 17.801 s | 4.282 s / 3.671x / 72.76% | 5.982 s / 2.976x / 66.40% | 3.568 s / 4.406x / 77.30% | 5.082 s / 3.503x / 71.45% |
+| `--threads 10` | 16.037 s | 18.266 s | 3.494 s / 4.589x / 78.21% | 5.101 s / 3.581x / 72.07% | 3.098 s / 5.177x / 80.68% | 4.234 s / 4.314x / 76.82% |
+| `--threads 20` | 16.405 s | 18.395 s | 3.235 s / 5.071x / 80.28% | 4.268 s / 4.310x / 76.80% | 2.654 s / 6.182x / 83.82% | 4.464 s / 4.121x / 75.73% |
 <!-- LATEST_PERFORMANCE_END -->
 
-benchmark host は Intel Core Ultra 7 265K（20 logical processor）、
-Windows 11 25H2 build 26220.8925、.NET SDK/runtime
-`11.0.100-preview.6.26359.118` です。Python v0.4.0 列は以前の fixed
-matrix median を保持します。merge 済み PR341 commit
-`2f21e8ed6018b14561396cc95f1f6828054470b8`
-（`v0.4.0-40-g2f21e8ed`）は別 session の 15 run で測定し、4 つの .NET 列は
-最新の 60 interleaved run を保持します。すべて同じ host、sample、40-frame
-window を使いますが、PR341 session は .NET matrix と interleave していない
-ため、paired A/B ではなく profile-peer comparison です。Python 3.14.0 は
-NumPy 2.4.6、SciPy 1.18.0、Numba 0.66.0、python-soxr 1.1.0 を使用しました。
-共通引数は次のとおりです。
+この測定は 2026-08-02 に main commit
+`c92af1dfd0f96cd7f2d49f3219fb428d0f4e0865` で実行しました。host は Intel
+Core Ultra 7 265K（20 logical processor）、Windows 11 build 26220、.NET
+SDK/runtime `11.0.100-preview.6.26359.118` です。30 個の mode/profile cell を
+3 回ずつ interleaved order で測定し、合計 90 Release run です。Python
+v0.4.0 commit は `43155200da87c0d49eb37d8ec09b1372075ee8e4`、merge 済み
+PR341 commit は `2f21e8ed6018b14561396cc95f1f6828054470b8`
+（`v0.4.0-40-g2f21e8ed`）です。Python
+3.14.0 は NumPy 2.4.6、SciPy 1.18.0、Numba 0.66.0、python-soxr 1.1.0 を
+使用しました。共通引数は次のとおりです。
 
 ```text
---system ntsc --NTSCJ --detect_chroma_track_phase --ire0_adjust
---tape_format BETAMAX_HIFI --frequency 40 --sub_deemphasis
---start 100 --length 40 --overwrite
+--system pal --detect_chroma_track_phase --ire0_adjust
+--tape_format VHS --frequency 40 --length 40 --overwrite
 ```
 
-両実装の default は **5 workers** です。独立した 3 回の Python v0.4.0
-`--threads 0` control は median 30.253 s で、互いに完全一致しました。保持した
-すべての Exact v0.4.0 run は luma、chroma、JSON、stdout、normalized
-stderr/log、順序付き 80 個すべての `fileLoc` でこの oracle と一致しました。
-再測定した Exact-current と IPP-current の各列は 15 run 全体でそれぞれ 1 つの
-deterministic hash set を生成しました。別の candidate gate でも
-`--threads 0`、default、`--threads 20` の Exact v0.4.0 が Python oracle と
-完全一致しました。この sample では IPP-fast の luma、chroma、JSON、
-`fileLoc` は対応する Exact profile と一致しましたが、明示的な IPP diagnostic
-により normalized stderr/log は異なります。この sample 固有の結果は
-byte-compatibility の保証ではありません。
+command は `--start` と `--start_fileloc` を使用していません。local fixture は
+選択した PCM window から直接始まり、container 固有の random-seek path を通さずに
+両実装が同じ physical sample を読みます。両実装の default は **5 workers** です。
 
-Python PR341 の warm-up は luma、chroma、順序付き 80 個すべての `fileLoc`、
-stdout、timestamp-normalized stderr/log で `.NET current` reference と一致
-しました。予期される `version` と `gitCommit` の source-identity field を除けば
-JSON payload も一致し、この sample の PR341 15 run は 1 つの hash set を生成
-しました。一方、Python v0.4.0 の nonzero/default 15 run は同じ
-luma/chroma/JSON set を保ったものの normalized log hash は 7 種類で、以前の
-fixed matrix では worker count 間の v0.4.0 artifact hash 不安定性も確認されて
-います。したがって nonzero-thread Python 行は throughput 比較専用で、strict
-oracle は upstream v0.4.0 `g4315520 --threads 0` のままです。
+別の 40-frame `--threads 0` gate では、Exact v0.4.0 が Python `g4315520` と
+luma、chroma、raw JSON、順序付き 80 個すべての `fileLoc`、stdout、normalized
+stderr、timestamp-normalized log で完全一致しました。Exact `current` も、予期
+される build-identity JSON field を除外したうえで Python PR341 と同じ surface が
+一致しました。v0.4.0 strict-oracle artifact は次のとおりです。
+
+| Baseline artifact | SHA-256 |
+| --- | --- |
+| Luma TBC | `37B799282A82770461AD9DB8EC2E471AB86F9C05F145D411C2FCA5A6D695CACE` |
+| Chroma TBC | `DC2E3C6FAC3323F05080F22CBEB1236A9EBFB3F0A8CB58B6D498F42EA1AFD794` |
+| JSON | `9FB6DC1FAE18024B63B93E1165C5C3F7858AC6A01A786043F7A0E4BF5EAEC30C` |
+
+各 .NET profile と Python PR341 は mode ごとに 1 つの deterministic hash set
+だけを生成しました。Python v0.4.0 の各 default/nonzero mode は 3 回の反復で
+luma/chroma/JSON/log hash を 3 種類生成しましたが、ordered `fileLoc`、stdout、
+normalized stderr は安定していました。そのため、これらの Python 行は throughput
+比較専用で、strict oracle は Python v0.4.0 `g4315520 --threads 0` のままです。
+IPP-fast はこの fixture では対応する Exact の luma/chroma hash と一致しましたが、
+この sample 固有の結果は一般的な byte-compatibility 保証ではありません。
 
 以前の Exact-only thread matrix は Intel Core Ultra 7 265K（20 logical processor）、
 Windows 11 build 26220、.NET SDK/runtime `11.0.100-preview.6.26359.118`、
