@@ -139,6 +139,92 @@ public sealed class VhsChromaCurrentProcessingIntegrationTests
         Assert.Equal(expected.BurstDetectedLine, actual.BurstDetectedLine);
     }
 
+    [Fact(DisplayName = "Owned PAL chroma upconversion matches the copying path bit-exactly")]
+    public void OwnedPalChromaUpconversionMatchesCopyingPathBitExactly()
+    {
+        const int LineLength = 17;
+        const int LineCount = 9;
+        const int LineOffset = 2;
+        double[] input = BuildInput(LineLength * LineCount);
+        ChromaPhaseLine[] phaseLines = [
+            new(LineNumber: 3, PhaseRotation: 0),
+            new(LineNumber: 5, PhaseRotation: 1),
+            new(LineNumber: 6, PhaseRotation: 2),
+            new(LineNumber: 8, PhaseRotation: 3)
+        ];
+        double[][] heterodyne = Enumerable.Range(0, 4)
+            .Select(phase => Enumerable.Range(0, input.Length)
+                .Select(index => 0.25 + phase + (index * 0.0001))
+                .ToArray())
+            .ToArray();
+
+        double[] expected = VhsChromaDecoder.UpconvertChroma(
+            input,
+            LineOffset,
+            LineLength,
+            phaseLines,
+            heterodyne);
+        double[] actual = input.ToArray();
+
+        Assert.True(VhsChromaDecoder.TryUpconvertChromaInPlace(
+            actual,
+            LineOffset,
+            LineLength,
+            phaseLines,
+            heterodyne));
+        Assert.Equal(
+            expected.Select(BitConverter.DoubleToUInt64Bits),
+            actual.Select(BitConverter.DoubleToUInt64Bits));
+
+        ChromaPhaseLine[] wrappedPhaseLines = Enumerable.Range(1, LineCount)
+            .Select(line => new ChromaPhaseLine(
+                LineNumber: line,
+                PhaseRotation: line & 3))
+            .ToArray();
+        double[] wrappedExpected = VhsChromaDecoder.UpconvertChroma(
+            input,
+            lineOffset: 3,
+            LineLength,
+            wrappedPhaseLines,
+            heterodyne);
+        double[] wrappedActual = input.ToArray();
+        Assert.True(VhsChromaDecoder.TryUpconvertChromaInPlace(
+            wrappedActual,
+            lineOffset: 3,
+            LineLength,
+            wrappedPhaseLines,
+            heterodyne));
+        Assert.Equal(
+            wrappedExpected.Select(BitConverter.DoubleToUInt64Bits),
+            wrappedActual.Select(BitConverter.DoubleToUInt64Bits));
+
+        ChromaPhaseLine[] overlapping = [phaseLines[0], phaseLines[0]];
+        double[] rejected = input.ToArray();
+        Assert.False(VhsChromaDecoder.TryUpconvertChromaInPlace(
+            rejected,
+            LineOffset,
+            LineLength,
+            overlapping,
+            heterodyne));
+        Assert.Equal(
+            input.Select(BitConverter.DoubleToUInt64Bits),
+            rejected.Select(BitConverter.DoubleToUInt64Bits));
+
+        ChromaPhaseLine[] aliasedPhaseLines = [new(LineNumber: 2, PhaseRotation: 0)];
+        double[] aliased = input.ToArray();
+        double[][] aliasedHeterodyne = heterodyne.ToArray();
+        aliasedHeterodyne[0] = aliased;
+        Assert.False(VhsChromaDecoder.TryUpconvertChromaInPlace(
+            aliased,
+            LineOffset,
+            LineLength,
+            aliasedPhaseLines,
+            aliasedHeterodyne));
+        Assert.Equal(
+            input.Select(BitConverter.DoubleToUInt64Bits),
+            aliased.Select(BitConverter.DoubleToUInt64Bits));
+    }
+
     [Fact(DisplayName = "Current NTSC burst deemphasis uses the PR 341 boundary")]
     public void CurrentNtscBurstDeemphasisUsesPr341Boundary()
     {
@@ -294,6 +380,98 @@ public sealed class VhsChromaCurrentProcessingIntegrationTests
         Assert.True(
             allocated < maximumExpected,
             $"Current NTSC chroma decode allocated {allocated:N0} bytes.");
+    }
+
+    [Fact(DisplayName = "Current PAL upconversion and comb reuse owned storage")]
+    public void CurrentPalUpconversionAndCombReuseOwnedStorage()
+    {
+        const int LineLength = 1_135;
+        const int LineCount = 273;
+        int sampleCount = LineLength * LineCount;
+        double[] chroma = BuildInput(sampleCount);
+        VhsChromaFieldOptions options = CreateOptions(ctiMix: 0.0) with
+        {
+            ColorSystem = "PAL",
+            OutputLineLength = LineLength,
+            OutputLineCount = LineCount
+        };
+        ChromaPhaseLine[] phaseLines = Enumerable.Range(0, LineCount)
+            .Select(line => new ChromaPhaseLine(
+                LineNumber: line,
+                PhaseRotation: line & 3,
+                BurstPhaseDegrees: (line & 1) == 0 ? 12.5 : -7.25)
+            {
+                BurstStart = line * LineLength,
+                BurstAmplitude = 72.0,
+                BurstDc = (line % 5) * 0.125,
+                BurstFrequencyHz = options.FscMHz * 1_000_000.0
+            })
+            .ToArray();
+        var phase = new ChromaPhaseSequenceResult(
+            NextChromaRotationIndex: 0,
+            PhaseSequence: phaseLines,
+            BurstDetectedLine: 0,
+            BurstMagnitudeAverage: 72.0,
+            BurstPhaseAverageDegrees: 0.0,
+            EvenBurstPhaseAverageDegrees: 12.5,
+            OddBurstPhaseAverageDegrees: -7.25);
+        double[][] heterodyne = VhsChromaDecoder.BuildHeterodyneTable(
+            sampleCount,
+            options.FscMHz,
+            options.ColorUnderCarrierHz / 1_000_000.0,
+            options.FscMHz * 4.0,
+            workerThreads: options.WorkerThreads);
+        var analysis = new VhsChromaPhaseAnalysis(
+            phase,
+            heterodyne,
+            options.ColorUnderCarrierHz,
+            HeterodynePhaseRadians: 0.0);
+
+        _ = VhsChromaDecoder.DecodeOwnedFieldWithPhase(
+            chroma.ToArray(),
+            options,
+            analysis,
+            outputDestination: new ushort[sampleCount]);
+        var expectedDestination = new ushort[sampleCount];
+        VhsChromaFieldResult expected = VhsChromaDecoder.DecodeFieldWithPhase(
+            chroma,
+            options,
+            analysis,
+            outputDestination: expectedDestination);
+        double[] ownedChroma = chroma.ToArray();
+        var actualDestination = new ushort[sampleCount];
+        long before = GC.GetAllocatedBytesForCurrentThread();
+        VhsChromaFieldResult actual = VhsChromaDecoder.DecodeOwnedFieldWithPhase(
+            ownedChroma,
+            options,
+            analysis,
+            outputDestination: actualDestination);
+        long allocated = GC.GetAllocatedBytesForCurrentThread() - before;
+
+        GC.KeepAlive(actual);
+        Assert.Same(actualDestination, actual.Samples);
+        Assert.Equal(expected.Samples, actual.Samples);
+        Assert.NotEqual(
+            chroma.Select(BitConverter.DoubleToUInt64Bits),
+            ownedChroma.Select(BitConverter.DoubleToUInt64Bits));
+        Assert.True(
+            allocated < 256 * 1024,
+            $"Current PAL chroma decode allocated {allocated:N0} bytes.");
+
+        double[] retainedOwnedChroma = chroma.ToArray();
+        double[]? retainedFilterInput = null;
+        _ = VhsChromaDecoder.DecodeOwnedFieldWithPhase(
+            retainedOwnedChroma,
+            options,
+            analysis,
+            finalFilter: values =>
+            {
+                retainedFilterInput = values;
+                return values;
+            },
+            outputDestination: new ushort[sampleCount]);
+        Assert.NotNull(retainedFilterInput);
+        Assert.NotSame(retainedOwnedChroma, retainedFilterInput);
     }
 
     private static VhsChromaFieldOptions CreateOptions(double ctiMix)

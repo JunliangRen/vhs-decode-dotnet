@@ -1994,6 +1994,42 @@ improvement は主張しません。candidate の once-per-second working-set sa
 最大値は 779.98 MiB、Gen2 collection は 42 から 40 で、両 run は progressive
 sampled growth や OOM なしで完了しました。
 
+### Decoder-owned PAL chroma upconversion
+
+最新の Exact `current` PAL path は decoder-owned の resampled chroma field に
+heterodyne multiplier を直接適用します。public read-only API は独立 output を従来
+どおり allocation します。internal path は最初の書き込み前に phase-table length を
+検証し、normalize 後の NumPy-style line range が non-overlap で、sorted または
+合法な tail-to-head wrap 1 回だけであることを確認します。非対応 sequence は入力を
+変更する前に fallback します。multiplication、`(double)(float)` conversion point、
+line order、gap zeroing、後続 filter/comb/gain、cross-field state は変わりません。
+
+focused xUnit v3 test は sorted range、gap、実際の PAL single-wrap layout について
+各 output `double` の bit を allocating reference と比較します。duplicate range は
+fallback が input を変更しないことも確認します。production-size の完全 PAL decode
+は copying path と一致し、warm-up 後に caller-owned UInt16 output を使う場合の
+allocation は 256 KiB 未満です。zero-warning Release build と 1,236 tests は native、
+AVX2 disabled、all hardware intrinsics disabled の 3 環境ですべて通過しました。
+
+同じ private local PAL VHS RF sample の matched 80-frame allocation trace では、
+sampled object bytes が 872,958,736 から 415,617,272（52.39% 減）、sampled
+allocation amount が 2,065,610,264 から 1,606,599,696（22.22% 減）になりました。
+baseline の 235,891,312-byte `UpconvertChroma` と 221,894,168-byte field-copy
+allocation stack は消えました。balanced 80-frame Exact `current`/20-worker pair
+6 組は candidate 4 勝 2 敗で、mean wall time は 11.942 から 11.776 秒（1.39% 減）
+でした。このため short throughput は near-neutral と分類します。
+
+matched 1,000-frame/2,000-field counter pair は managed allocation を 8.254 から
+3.009 GiB（63.54% 減）、GC pause を 0.134 から 0.113 秒（15.63% 減）、Gen2
+collection を 20 から 2、maximum sampled working set を 773.29 から
+439.86 MiB（43.12% 減）へ移しました。candidate first/last-quarter working-set
+median は 405.84/406.51 MiB で progressive growth や OOM はありません。wall time
+は 74.130 から 73.217 秒（1.23% 減、throughput 1.25% 増）ですが、範囲を限定した
+single-pair observation とします。luma、chroma、raw JSON、normalized stderr/log、
+2,000 個すべての ordered `fileLoc` が一致しました。別の gate 12 件は Exact
+v0.4.0/current の explicit zero、omitted/default、20 workers を対象にし、stdout と
+thread 間 determinism も一致しました。
+
 </details>
 
 <!-- SECTION: build -->
@@ -2016,7 +2052,7 @@ sampled growth や OOM なしで完了しました。
 .\tools\build-ipp-native.ps1
 dotnet restore VHSDecodeDotNet.slnx
 dotnet build VHSDecodeDotNet.slnx -c Release --no-restore
-dotnet test --solution VHSDecodeDotNet.slnx -c Release --no-build --no-restore --minimum-expected-tests 1234
+dotnet test --solution VHSDecodeDotNet.slnx -c Release --no-build --no-restore --minimum-expected-tests 1236
 ```
 
 最初の command は optional `ipp-fast` native artifact を含めるためのものです。
@@ -2029,7 +2065,7 @@ third-party notice を埋め込み、license sidecar file は追加しません�
 
 現在の正式な Release build は warning 0、error 0 です。xUnit v3 project は
 `dotnet test` と Visual Studio Test Explorer の両方で個別に検出できる
-**1,234** tests を公開します。
+**1,236** tests を公開します。
 
 <!-- SECTION: usage -->
 

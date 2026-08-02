@@ -762,12 +762,27 @@ public static class VhsChromaDecoder
         }
         else
         {
-            upconverted = UpconvertChroma(
-                chromaField,
-                lineOffset,
-                options.OutputLineLength,
-                phase.PhaseSequence,
-                heterodyne!);
+            if (finalFilter is null
+                && ownedChromaInput is not null
+                && mutableChromaField is not null
+                && TryUpconvertChromaInPlace(
+                    mutableChromaField,
+                    lineOffset,
+                    options.OutputLineLength,
+                    phase.PhaseSequence,
+                    heterodyne!))
+            {
+                upconverted = mutableChromaField;
+            }
+            else
+            {
+                upconverted = UpconvertChroma(
+                    chromaField,
+                    lineOffset,
+                    options.OutputLineLength,
+                    phase.PhaseSequence,
+                    heterodyne!);
+            }
         }
 
         if (finalFilter is not null)
@@ -1566,6 +1581,126 @@ public static class VhsChromaDecoder
         }
 
         return output;
+    }
+
+    internal static bool TryUpconvertChromaInPlace(
+        double[] chroma,
+        int lineOffset,
+        int lineLength,
+        IReadOnlyList<ChromaPhaseLine> phaseRotationSequence,
+        IReadOnlyList<double[]> chromaHeterodyne)
+    {
+        ArgumentNullException.ThrowIfNull(chroma);
+        ArgumentNullException.ThrowIfNull(phaseRotationSequence);
+        ArgumentNullException.ThrowIfNull(chromaHeterodyne);
+        ArgumentOutOfRangeException.ThrowIfNegative(lineOffset);
+        ArgumentOutOfRangeException.ThrowIfNegativeOrZero(lineLength);
+
+        int wrapIndex = -1;
+        int firstRangeStart = 0;
+        int previousEnd = 0;
+        bool hasNonEmptyRange = false;
+        for (int phaseIndex = 0; phaseIndex < phaseRotationSequence.Count; phaseIndex++)
+        {
+            ChromaPhaseLine phaseLine = phaseRotationSequence[phaseIndex];
+            (int lineStart, int lineEnd) = GetNumpySliceRange(
+                chroma.Length,
+                lineOffset,
+                lineLength,
+                phaseLine.LineNumber);
+            if (phaseLine.PhaseRotation < 0
+                || phaseLine.PhaseRotation >= chromaHeterodyne.Count)
+            {
+                throw new ArgumentOutOfRangeException(
+                    nameof(phaseRotationSequence),
+                    "Chroma phase rotation index has no heterodyne table.");
+            }
+
+            double[] heterodyne = chromaHeterodyne[phaseLine.PhaseRotation];
+            if (heterodyne.Length < chroma.Length)
+            {
+                throw new ArgumentException(
+                    "Chroma heterodyne table is shorter than the chroma field.",
+                    nameof(chromaHeterodyne));
+            }
+
+            if (ReferenceEquals(heterodyne, chroma))
+            {
+                return false;
+            }
+
+            if (lineEnd == lineStart)
+            {
+                continue;
+            }
+
+            if (!hasNonEmptyRange)
+            {
+                firstRangeStart = lineStart;
+                hasNonEmptyRange = true;
+            }
+            else if (lineStart < previousEnd)
+            {
+                if (wrapIndex >= 0 || lineEnd > firstRangeStart)
+                {
+                    return false;
+                }
+
+                wrapIndex = phaseIndex;
+            }
+
+            if (wrapIndex >= 0 && lineEnd > firstRangeStart)
+            {
+                return false;
+            }
+
+            previousEnd = lineEnd;
+        }
+
+        foreach (ChromaPhaseLine phaseLine in phaseRotationSequence)
+        {
+            (int lineStart, int lineEnd) = GetNumpySliceRange(
+                chroma.Length,
+                lineOffset,
+                lineLength,
+                phaseLine.LineNumber);
+            double[] heterodyne = chromaHeterodyne[phaseLine.PhaseRotation];
+            for (int index = lineStart; index < lineEnd; index++)
+            {
+                chroma[index] = (double)(float)(chroma[index] * heterodyne[index]);
+            }
+        }
+
+        int clearCursor = 0;
+        int sortedStart = wrapIndex < 0 ? 0 : wrapIndex;
+        ClearGaps(sortedStart, phaseRotationSequence.Count, ref clearCursor);
+        if (wrapIndex >= 0)
+        {
+            ClearGaps(0, wrapIndex, ref clearCursor);
+        }
+
+        chroma.AsSpan(clearCursor).Clear();
+        return true;
+
+        void ClearGaps(int startIndex, int endIndex, ref int cursor)
+        {
+            for (int phaseIndex = startIndex; phaseIndex < endIndex; phaseIndex++)
+            {
+                ChromaPhaseLine phaseLine = phaseRotationSequence[phaseIndex];
+                (int lineStart, int lineEnd) = GetNumpySliceRange(
+                    chroma.Length,
+                    lineOffset,
+                    lineLength,
+                    phaseLine.LineNumber);
+                if (lineEnd == lineStart)
+                {
+                    continue;
+                }
+
+                chroma.AsSpan(cursor, lineStart - cursor).Clear();
+                cursor = lineEnd;
+            }
+        }
     }
 
     public static double[] UpconvertChromaPhaseCompensated(
