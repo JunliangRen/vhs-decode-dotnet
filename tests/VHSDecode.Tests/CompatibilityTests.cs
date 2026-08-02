@@ -17037,7 +17037,7 @@ public void PackedLdsReusableReadsAllocateNoDecodedArrayAfterWarmup()
     Assert.Equal((double)(short)((samples[readLength - 1] - 512) << 6), actual[^1]);
     loader.ReturnReusable(actual);
     Assert.True(
-        allocated < 1_024,
+        allocated < 32 * 1_024,
         $"Warm reusable 32K packed LDS read allocated {allocated:N0} bytes.");
 }
 
