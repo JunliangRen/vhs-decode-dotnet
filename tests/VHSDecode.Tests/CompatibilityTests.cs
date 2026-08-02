@@ -13318,8 +13318,8 @@ public void VhsFrameStatusSkipsFieldOrderRecoveryFields()
     }
 }
 
-[Fact(DisplayName = "VHS pending frame status precedes diagnostics from a recovered field")]
-public void VhsPendingFrameStatusPrecedesRecoveredFieldDiagnostics()
+[Fact(DisplayName = "VHS recovered field diagnostics precede pending frame status")]
+public void VhsRecoveredFieldDiagnosticsPrecedePendingFrameStatus()
 {
     string tempDirectory = Path.Combine(
         Path.GetTempPath(),
@@ -13390,10 +13390,10 @@ public void VhsPendingFrameStatusPrecedesRecoveredFieldDiagnostics()
         int recoveryIndex = log.IndexOf(
             "Unable to determine start of field - dropping field",
             StringComparison.Ordinal);
-        AssertTrue(previousRenderIndex >= 0);
-        AssertTrue(previousRenderIndex < pendingStatusIndex);
-        AssertTrue(pendingStatusIndex < failedRenderIndex);
+        AssertTrue(failedRenderIndex >= 0);
         AssertTrue(failedRenderIndex < recoveryIndex);
+        AssertTrue(recoveryIndex < previousRenderIndex);
+        AssertTrue(previousRenderIndex < pendingStatusIndex);
     }
     finally
     {

@@ -549,15 +549,15 @@ public sealed class TbcFieldSequenceDecodeEngine
             catch (TbcFieldDecodeRecoveryException ex)
             {
                 deferredVhsFieldDiagnostics?.FlushFieldDiagnostics();
-                pendingVhsRenderDiagnostics?.FlushRenderDiagnostics();
-                pendingVhsRenderDiagnostics = null;
-                FlushPendingTapeOutput();
                 deferredVhsFieldDiagnostics?.FlushRenderDiagnostics();
                 bool directVideoNoSync = session.Spec.Name is "cvbs" or "ld"
                     && ex.Kind == TbcFieldDecodeRecoveryKind.NoSyncPulses;
                 bool directVideoNoSyncAfterOutput = directVideoNoSync
                     && writePlanner.WrittenFieldCount > 0;
                 LogRecovery(session, ex, directVideoNoSyncAfterOutput);
+                pendingVhsRenderDiagnostics?.FlushRenderDiagnostics();
+                pendingVhsRenderDiagnostics = null;
+                FlushPendingTapeOutput();
                 if (session.Spec.Name == "cvbs")
                 {
                     if (pendingCvbsField is not null)

@@ -35,7 +35,9 @@ public sealed class VhsInsufficientDataDiagnosticCompatibilityTests : IDisposabl
             {
                 PreviousFirstHSyncLocation = 100.0,
                 PreviousFirstHSyncReadLocation = 0,
-                PreviousSyncConfidence = 100
+                PreviousSyncConfidence = 100,
+                PreviousVhsFieldNumber = 7,
+                PreviousVhsFieldReadLocation = 0
             });
         }
 
@@ -58,6 +60,45 @@ public sealed class VhsInsufficientDataDiagnosticCompatibilityTests : IDisposabl
         string log = File.ReadAllText(session.OutputBase + ".log");
         Assert.Contains("INFO - " + DetailsMessage, log, StringComparison.Ordinal);
         Assert.Contains("INFO - " + SkipMessage, log, StringComparison.Ordinal);
+    }
+
+    [Fact(DisplayName = "VHS recovery clears the upstream prevfield diagnostic context")]
+    public void RecoveryClearsPreviousFieldDiagnosticContext()
+    {
+        using DecodeSession session = CreateSession("after-recovery");
+        TbcFieldDecodeState state = session.TbcFieldDecoder.CaptureState();
+        session.TbcFieldDecoder.RestoreStateForRetry(state with
+        {
+            PreviousFirstHSyncLocation = 100.0,
+            PreviousFirstHSyncReadLocation = 0,
+            PreviousSyncConfidence = 100,
+            PreviousVhsFieldNumber = 7,
+            PreviousVhsFieldReadLocation = 0
+        });
+
+        Assert.Throws<TbcFieldDecodeRecoveryException>(() =>
+            session.TbcFieldDecoder.Decode(new RfDecodedSpan(
+                StartSample: 0,
+                Input: [],
+                Video: [1.0, 2.0],
+                DemodRaw: [],
+                VideoLowPass: [1.0, 2.0])));
+
+        TbcFieldDecodeState recovered = session.TbcFieldDecoder.CaptureState();
+        Assert.Null(recovered.PreviousVhsFieldNumber);
+        Assert.Null(recovered.PreviousVhsFieldReadLocation);
+        Assert.Equal(100, recovered.PreviousSyncConfidence);
+        Assert.Equal(100.0, recovered.PreviousFirstHSyncLocation);
+        Assert.Equal(0, recovered.PreviousFirstHSyncReadLocation);
+
+        var error = new StringWriter();
+        session.RuntimeReporter = new DecodeRuntimeReporter(TextWriter.Null, error);
+        _ = InvokeInsufficientDataCheck(session.TbcFieldDecoder);
+
+        Assert.Empty(error.ToString());
+        string log = File.ReadAllText(session.OutputBase + ".log");
+        Assert.DoesNotContain(DetailsMessage, log, StringComparison.Ordinal);
+        Assert.DoesNotContain(SkipMessage, log, StringComparison.Ordinal);
     }
 
     public void Dispose()

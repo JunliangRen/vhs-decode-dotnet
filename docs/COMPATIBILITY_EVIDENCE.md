@@ -733,23 +733,28 @@ possible capture has already been proven byte-for-byte identical.
   `C114D82D0F7D2DE4BEA1CD232DC4DB3673FDAEF6E1DCC390E4776297FE03C021`;
   the fixed RF fixture is synthetic, so this gate does not claim broad
   real-capture certification
-- a four-frame fixed-RF regression against detached `main` commit
-  `71bf36d90022e40211cf55ffd17b43fa18988cc3` kept the default `v0.4.0`
-  luma, chroma, JSON, stdout, all eight ordered `fileLoc` values, all 161
-  timestamp-normalized log lines, and timing-normalized stderr identical.
-  Luma/chroma/JSON SHA-256 values were
-  `529FFD6CD9734D3EDAF710D96B8A0B61A5BD38A6B58C8EEB550FB3F2A0D1E684`,
+- a fresh four-frame fixed-RF comparison against clean v0.4.0 commit
+  `43155200da87c0d49eb37d8ec09b1372075ee8e4` matched luma, chroma, raw stdout,
+  all eight ordered `fileLoc` values, semantic JSON after normalizing only
+  version identity, timing-normalized stderr, and all 161 timestamp-normalized
+  log lines. Luma/chroma/stdout SHA-256 values were
+  `ED63EAAD11C8F776B232D3029B01EA6005DE454BECD4F31BEF6844557B0D624D`,
   `C3966B01723E3C78DAD99E38F0EAEBF08AC09A0798124D3E65873094CD10ABCB`,
-  and `83F1DF5E8EEEC4DFC19FC63B7F17EA75A770C0E09C3DCF8798B6FB94953BBBFC`
-- the same four-frame `current` run was deterministic at `--threads 0`,
-  automatic workers, and `--threads 20`, with luma/chroma/JSON SHA-256 values
-  `6DF70D9FC9FADE98DBF91F063E66DF79931622B4846F67F9B2AB06F1B3144B8E`,
-  `91020B6E2D00728EDA6BCA511CAAA9AC05477D8984BFA0796AD8988C33BD8084`,
-  and `BF71DD78409714E7394FA723ACE8F853D375A502960E582B9A9E430760797FEB`
-- a complete four-frame `current` comparison against pinned upstream PR 341
-  aligned all eight `fileLoc` values and stdout but did not match complete
-  luma, chroma, or JSON. That fixture remains an unresolved compatibility
-  surface until it is rerun against the current implementation
+  and `A92076E647A71EAB0234BF3B87731608A20C44641860EB14115A6BBE9EE44250`;
+  exact output and normalized diagnostics were deterministic at `--threads 0`,
+  automatic workers, and `--threads 20`
+- the same four-frame fixture now also matches merged upstream PR 341 commit
+  `2f21e8ed6018b14561396cc95f1f6828054470b8` under `current`, both with the
+  default CTI and with `--cti_mix 0`. The default-CTI luma/chroma/stdout
+  SHA-256 values were
+  `D6FFC7D55A018E16D4A25C07E380AC38564D4F34577FB6659DB74FB5BEE04B0B`,
+  `6747ED23AE7507C9BE0ACE343B78A53ADBC2B28D4071B203DC8CCEA3BA2E0469`,
+  and `F123DFA25A98821012737DE86FFD8BBF22ACCAAD7A8634F6ECB647B2D88B1CEF`.
+  All eight ordered `fileLoc` values, semantic JSON, timing-normalized stderr,
+  and all 199 timestamp-normalized log lines matched, including recovery-log
+  order. `--threads 0`, automatic workers, and `--threads 20` were identical.
+  This resolves the historical four-frame `current` mismatch recorded by the
+  earlier Super-Gaussian implementation
 - a separate natural-start 20-frame `current` comparison on a private local PAL
   VHS RF capture against merged upstream PR 341 commit
   `2f21e8ed6018b14561396cc95f1f6828054470b8` matched all 40 fields. Luma and
@@ -760,10 +765,9 @@ possible capture has already been proven byte-for-byte identical.
   timestamp-normalized log lines, and JSON after normalizing only source
   identity also matched. Exact `current` produced the same raw TBC/JSON/stdout
   and normalized diagnostics at `--threads 0`, default, and `--threads 20`.
-  This is an additional real-capture gate and does not erase the distinct
-  four-frame mismatch above. `current` remains opt-in because it targets a
-  newer upstream behavior profile rather than the release-default v0.4.0
-  contract
+  This independently corroborates the fixed-RF gate on a real capture.
+  `current` remains opt-in because it targets a newer upstream behavior profile
+  rather than the release-default v0.4.0 contract
 - VHS `--track_phase 0|1` now seeds the first field's chroma rotation index as
   well as the track-dependent luma `ire0` adjustment, with each rendered field
   consuming the same detected/alternated next-track index that v0.4.0 stores
@@ -2167,7 +2171,7 @@ dotnet test --solution VHSDecodeDotNet.slnx --no-build
 ```
 
 The current formal solution build completes with zero warnings and errors, and
-the xUnit v3 project exposes 1,222 independently discoverable tests
+the xUnit v3 project exposes 1,223 independently discoverable tests
 to `dotnet test` and Visual Studio Test Explorer. On the
 same Windows machine and fixtures, Release wall-clock measurements for one
 frame were 2.346 s versus 7.193 s for NTSC VHS and 1.651 s versus 5.865 s for
