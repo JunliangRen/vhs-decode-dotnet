@@ -319,7 +319,8 @@ public sealed class TbcFieldDecodePipeline
         int inputBlockCutSamples = 0,
         int workerThreads = 1,
         UpstreamBehaviorProfile upstreamBehaviorProfile = UpstreamBehaviorProfile.V040,
-        double? activeVideoStartUs = null)
+        double? activeVideoStartUs = null,
+        DspBackend dspBackend = DspBackend.Exact)
     {
         _syncAnalyzer = syncAnalyzer;
         _renderer = renderer;
@@ -367,7 +368,8 @@ public sealed class TbcFieldDecodePipeline
                 syncAnalyzer.UsecToSamples(activeVideoStart - syncAnalyzer.HSyncPulseUs - 2.0),
                 checked((int)Math.Round(syncAnalyzer.NominalLineLength, MidpointRounding.ToEven)),
                 syncAnalyzer.UsecToSamples(0.22),
-                workerThreads);
+                workerThreads,
+                parallelizePreciseEdgeScan: dspBackend == DspBackend.Exact);
             _vhsVSyncLevelRefiner = new VhsVSyncLevelRefiner();
         }
 

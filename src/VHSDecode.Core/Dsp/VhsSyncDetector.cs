@@ -18,6 +18,7 @@ public sealed record VhsSyncDetectionResult(
 public sealed class VhsSyncDetector
 {
     private const int MaximumParallelBoxcarWorkers = 4;
+    private const int MaximumBufferedThresholdCrossingsPerWorker = 16_384;
     private const int MinimumParallelBoxcarSamples = 65_536;
     private const int MinimumParallelEdgeScanSamples = 65_536;
     private const int MinimumParallelRadixSamples = 524_288;
@@ -30,6 +31,7 @@ public sealed class VhsSyncDetector
     private readonly int _lineLength;
     private readonly double _approximateTransition;
     private readonly int _workerThreads;
+    private readonly bool _parallelizePreciseEdgeScan;
     private readonly ConcurrentBag<VhsSyncWorkspace> _workspaces = [];
 
     // Upstream: oyvindln/vhs-decode
@@ -55,7 +57,8 @@ public sealed class VhsSyncDetector
         double backPorchLength,
         int lineLength,
         double approximateTransition,
-        int workerThreads)
+        int workerThreads,
+        bool parallelizePreciseEdgeScan = true)
     {
         _hSyncLength = double.IsFinite(hSyncLength) && hSyncLength > 0.0
             ? hSyncLength
@@ -73,6 +76,7 @@ public sealed class VhsSyncDetector
             workerThreads,
             1,
             MaximumParallelBoxcarWorkers);
+        _parallelizePreciseEdgeScan = parallelizePreciseEdgeScan;
     }
 
     internal VhsSyncDetectionResult Detect(
@@ -130,7 +134,8 @@ public sealed class VhsSyncDetector
                 syncTipEstimate,
                 blankingEstimate,
                 filtered,
-                _workerThreads);
+                _workerThreads,
+                workspace);
         }
         finally
         {
@@ -301,7 +306,8 @@ public sealed class VhsSyncDetector
         double syncTipEstimate,
         double blankingEstimate,
         double[]? parallelFiltered = null,
-        int parallelWorkerThreads = 1)
+        int parallelWorkerThreads = 1,
+        VhsSyncWorkspace? parallelWorkspace = null)
     {
         int sampleCount = filtered.Length;
         double slicerLevelEstimate = (syncTipEstimate + blankingEstimate) / 2.0;
@@ -457,43 +463,96 @@ public sealed class VhsSyncDetector
         double preciseMidpoint = (syncTipLevel + backPorchLevel) / 2.0;
         var fallingEdges = new List<int>(initialCapacity);
         var risingEdges = new List<int>(initialCapacity);
-        fallingIndex = -1;
-        for (int index = 0; index < sampleCount - 1; index++)
+        bool preciseScanCompleted = false;
+        if (_parallelizePreciseEdgeScan
+            && parallelFiltered is not null
+            && parallelWorkerThreads > 1
+            && sampleCount >= MinimumParallelEdgeScanSamples)
         {
-            if (filtered[index] >= preciseMidpoint
-                && filtered[index + 1] < preciseMidpoint)
+            (List<int>[] crossingsByWorker, int workerCount, bool overflowed) =
+                FindThresholdCrossingsParallel(
+                    parallelFiltered,
+                    sampleCount,
+                    preciseMidpoint,
+                    parallelWorkerThreads,
+                    initialCapacity,
+                    parallelWorkspace!);
+            if (!overflowed)
             {
-                fallingIndex = index;
-            }
-            else if (fallingIndex != -1
-                     && filtered[index] < preciseMidpoint
-                     && filtered[index + 1] >= preciseMidpoint)
-            {
-                bool belongsToValidGrid = false;
-                for (int candidate = 0; candidate < amplitudeCount; candidate++)
-                {
-                    if (!finalMask[candidate])
-                    {
-                        continue;
-                    }
-
-                    int delta = Math.Abs(fallingIndex - falls[candidate]);
-                    double remainder = delta % effectiveLineLength;
-                    if (remainder < jitterTolerance
-                        || remainder > effectiveLineLength - jitterTolerance)
-                    {
-                        belongsToValidGrid = true;
-                        break;
-                    }
-                }
-
-                if (belongsToValidGrid)
-                {
-                    fallingEdges.Add(fallingIndex);
-                    risingEdges.Add(index);
-                }
-
                 fallingIndex = -1;
+                for (int worker = 0; worker < workerCount; worker++)
+                {
+                    List<int> crossings = crossingsByWorker[worker];
+                    for (int index = 0; index < crossings.Count; index++)
+                    {
+                        int crossing = crossings[index];
+                        if (crossing >= 0)
+                        {
+                            fallingIndex = crossing;
+                        }
+                        else if (fallingIndex != -1)
+                        {
+                            if (IsOnValidGrid(
+                                fallingIndex,
+                                falls,
+                                finalMask,
+                                amplitudeCount,
+                                effectiveLineLength,
+                                jitterTolerance))
+                            {
+                                fallingEdges.Add(fallingIndex);
+                                risingEdges.Add(~crossing);
+                            }
+
+                            fallingIndex = -1;
+                        }
+                    }
+                }
+
+                preciseScanCompleted = true;
+            }
+        }
+
+        if (!preciseScanCompleted)
+        {
+            fallingIndex = -1;
+            for (int index = 0; index < sampleCount - 1; index++)
+            {
+                if (filtered[index] >= preciseMidpoint
+                    && filtered[index + 1] < preciseMidpoint)
+                {
+                    fallingIndex = index;
+                }
+                else if (fallingIndex != -1
+                         && filtered[index] < preciseMidpoint
+                         && filtered[index + 1] >= preciseMidpoint)
+                {
+                    bool belongsToValidGrid = false;
+                    for (int candidate = 0; candidate < amplitudeCount; candidate++)
+                    {
+                        if (!finalMask[candidate])
+                        {
+                            continue;
+                        }
+
+                        int delta = Math.Abs(fallingIndex - falls[candidate]);
+                        double remainder = delta % effectiveLineLength;
+                        if (remainder < jitterTolerance
+                            || remainder > effectiveLineLength - jitterTolerance)
+                        {
+                            belongsToValidGrid = true;
+                            break;
+                        }
+                    }
+
+                    if (belongsToValidGrid)
+                    {
+                        fallingEdges.Add(fallingIndex);
+                        risingEdges.Add(index);
+                    }
+
+                    fallingIndex = -1;
+                }
             }
         }
 
@@ -653,6 +712,117 @@ public sealed class VhsSyncDetector
         }
 
         return (falls, rises);
+    }
+
+    private static (List<int>[] CrossingsByWorker, int WorkerCount, bool Overflowed)
+        FindThresholdCrossingsParallel(
+        double[] filtered,
+        int sampleCount,
+        double threshold,
+        int workerThreads,
+        int initialCapacity,
+        VhsSyncWorkspace workspace)
+    {
+        int scanLimit = sampleCount - 1;
+        int workerCount = Math.Min(workerThreads, scanLimit);
+        int partitionCapacity = Math.Min(
+            MaximumBufferedThresholdCrossingsPerWorker,
+            Math.Max(
+                8,
+                checked((int)((((long)initialCapacity * 2) / workerCount) + 2))));
+        List<int>[] crossingsByWorker = workspace.PrepareThresholdCrossingLists(
+            workerCount,
+            partitionCapacity);
+        int[] overflowFlags = workspace.PrepareThresholdCrossingOverflowFlags(workerCount);
+        Parallel.For(
+            0,
+            workerCount,
+            new ParallelOptions { MaxDegreeOfParallelism = workerCount },
+            worker =>
+            {
+                int start = (int)(((long)scanLimit * worker) / workerCount);
+                int end = (int)(((long)scanLimit * (worker + 1)) / workerCount);
+                List<int> crossings = crossingsByWorker[worker];
+                if (!TryFillThresholdCrossingsPartition(
+                    filtered,
+                    start,
+                    end,
+                    threshold,
+                    MaximumBufferedThresholdCrossingsPerWorker,
+                    crossings))
+                {
+                    overflowFlags[worker] = 1;
+                }
+            });
+
+        bool overflowed = Array.IndexOf(overflowFlags, 1, 0, workerCount) >= 0;
+        return (crossingsByWorker, workerCount, overflowed);
+    }
+
+    internal static bool TryFillThresholdCrossingsPartition(
+        double[] filtered,
+        int start,
+        int end,
+        double threshold,
+        int maximumCrossings,
+        List<int> crossings)
+    {
+        ArgumentOutOfRangeException.ThrowIfNegativeOrZero(maximumCrossings);
+        for (int index = start; index < end; index++)
+        {
+            int crossing;
+            if (filtered[index] >= threshold
+                && filtered[index + 1] < threshold)
+            {
+                crossing = index;
+            }
+            else if (filtered[index] < threshold
+                     && filtered[index + 1] >= threshold)
+            {
+                // Complements keep rising index zero distinct in the shared event list.
+                crossing = ~index;
+            }
+            else
+            {
+                continue;
+            }
+
+            if (crossings.Count >= maximumCrossings)
+            {
+                return false;
+            }
+
+            crossings.Add(crossing);
+        }
+
+        return true;
+    }
+
+    private static bool IsOnValidGrid(
+        int fallingIndex,
+        int[] falls,
+        bool[] finalMask,
+        int amplitudeCount,
+        double effectiveLineLength,
+        double jitterTolerance)
+    {
+        for (int candidate = 0; candidate < amplitudeCount; candidate++)
+        {
+            if (!finalMask[candidate])
+            {
+                continue;
+            }
+
+            int delta = Math.Abs(fallingIndex - falls[candidate]);
+            double remainder = delta % effectiveLineLength;
+            if (remainder < jitterTolerance
+                || remainder > effectiveLineLength - jitterTolerance)
+            {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     internal static void FillOrderedGridSupportCounts(
@@ -1446,6 +1616,8 @@ public sealed class VhsSyncDetector
         private int[] _middleHistograms = [];
         private int[] _workerHistograms = [];
         private int[] _workerFlags = [];
+        private List<int>[] _thresholdCrossingsByWorker = [];
+        private int[] _thresholdCrossingOverflowFlags = [];
 
         public double[] EnsureFilteredLength(int length)
         {
@@ -1508,6 +1680,37 @@ public sealed class VhsSyncDetector
             }
 
             return _workerFlags;
+        }
+
+        public List<int>[] PrepareThresholdCrossingLists(
+            int workerCount,
+            int partitionCapacity)
+        {
+            if (_thresholdCrossingsByWorker.Length < workerCount)
+            {
+                Array.Resize(ref _thresholdCrossingsByWorker, workerCount);
+            }
+
+            for (int worker = 0; worker < workerCount; worker++)
+            {
+                List<int> crossings = _thresholdCrossingsByWorker[worker]
+                    ??= new List<int>(partitionCapacity);
+                crossings.Clear();
+                crossings.EnsureCapacity(partitionCapacity);
+            }
+
+            return _thresholdCrossingsByWorker;
+        }
+
+        public int[] PrepareThresholdCrossingOverflowFlags(int workerCount)
+        {
+            if (_thresholdCrossingOverflowFlags.Length < workerCount)
+            {
+                _thresholdCrossingOverflowFlags = new int[workerCount];
+            }
+
+            Array.Clear(_thresholdCrossingOverflowFlags, 0, workerCount);
+            return _thresholdCrossingOverflowFlags;
         }
     }
 }

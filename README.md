@@ -101,7 +101,8 @@ the same 40-frame window for every run. The source filename is intentionally
 not published. The base matrix uses three interleaved runs measured on
 2026-08-02 from main commit `c92af1d`; the four `current` cells at 10 and 20
 workers were refreshed from ten paired runs after the CTI and VHS sync-scan
-parallel tuning in this branch. Compatibility is evaluated separately from speed.
+tuning in this branch. Exact uses both parallel sync scans; IPP-fast retains
+only the profitable initial scan. Compatibility is evaluated separately from speed.
 
 <!-- LATEST_PERFORMANCE_BEGIN -->
 | CLI mode (workers) | Python v0.4.0 | Python PR341 | Exact + v0.4.0 | Exact + current | IPP-fast + v0.4.0 | IPP-fast + current |
@@ -109,8 +110,8 @@ parallel tuning in this branch. Compatibility is evaluated separately from speed
 | default (5) | 15.207 s | 16.780 s | 4.389 s / 3.465x | 5.896 s / 2.846x | 3.609 s / 4.213x | 4.654 s / 3.606x |
 | `--threads 1` | 17.694 s | 19.414 s | 10.065 s / 1.758x | 13.488 s / 1.439x | 7.215 s / 2.453x | 10.256 s / 1.893x |
 | `--threads 5` | 15.719 s | 17.801 s | 4.282 s / 3.671x | 5.982 s / 2.976x | 3.568 s / 4.406x | 5.082 s / 3.503x |
-| `--threads 10` | 16.037 s | 18.266 s | 3.494 s / 4.589x | 4.927 s / 3.707x | 3.098 s / 5.177x | 4.403 s / 4.149x |
-| `--threads 20` | 16.405 s | 18.395 s | 3.235 s / 5.071x | 4.443 s / 4.140x | 2.654 s / 6.182x | 4.397 s / 4.183x |
+| `--threads 10` | 16.037 s | 18.266 s | 3.494 s / 4.589x | 4.835 s / 3.778x | 3.098 s / 5.177x | 4.403 s / 4.149x |
+| `--threads 20` | 16.405 s | 18.395 s | 3.235 s / 5.071x | 4.368 s / 4.212x | 2.654 s / 6.182x | 4.397 s / 4.183x |
 <!-- LATEST_PERFORMANCE_END -->
 
 Each .NET cell shows median wall time followed by speedup versus its

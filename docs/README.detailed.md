@@ -411,8 +411,8 @@ speedup, and wall-time reduction against its profile-matched Python column:
 | default (5) | 15.207 s | 16.780 s | 4.389 s / 3.465x / 71.14% | 5.896 s / 2.846x / 64.86% | 3.609 s / 4.213x / 76.27% | 4.654 s / 3.606x / 72.26% |
 | `--threads 1` | 17.694 s | 19.414 s | 10.065 s / 1.758x / 43.11% | 13.488 s / 1.439x / 30.52% | 7.215 s / 2.453x / 59.23% | 10.256 s / 1.893x / 47.17% |
 | `--threads 5` | 15.719 s | 17.801 s | 4.282 s / 3.671x / 72.76% | 5.982 s / 2.976x / 66.40% | 3.568 s / 4.406x / 77.30% | 5.082 s / 3.503x / 71.45% |
-| `--threads 10` | 16.037 s | 18.266 s | 3.494 s / 4.589x / 78.21% | 4.927 s / 3.707x / 73.03% | 3.098 s / 5.177x / 80.68% | 4.403 s / 4.149x / 75.90% |
-| `--threads 20` | 16.405 s | 18.395 s | 3.235 s / 5.071x / 80.28% | 4.443 s / 4.140x / 75.85% | 2.654 s / 6.182x / 83.82% | 4.397 s / 4.183x / 76.10% |
+| `--threads 10` | 16.037 s | 18.266 s | 3.494 s / 4.589x / 78.21% | 4.835 s / 3.778x / 73.53% | 3.098 s / 5.177x / 80.68% | 4.403 s / 4.149x / 75.90% |
+| `--threads 20` | 16.405 s | 18.395 s | 3.235 s / 5.071x / 80.28% | 4.368 s / 4.212x / 76.26% | 2.654 s / 6.182x / 83.82% | 4.397 s / 4.183x / 76.10% |
 <!-- LATEST_PERFORMANCE_END -->
 
 The benchmark ran on 2026-08-02 using main commit
@@ -420,10 +420,11 @@ The benchmark ran on 2026-08-02 using main commit
 20 logical processors, Windows 11 build 26220, and .NET SDK/runtime
 `11.0.100-preview.6.26359.118`. Each of the 30 mode/profile cells was measured
 three times in interleaved order, for 90 Release runs. After raising the
-strictly independent CTI scan-line cap from 5 to 8 and parallelizing the
-bounded initial VHS sync-edge scan, the four `current` cells at 10 and 20
-workers were refreshed with ten alternating baseline/candidate pairs each,
-adding 80 Release runs. Python v0.4.0 was commit
+strictly independent CTI scan-line cap from 5 to 8 and tuning the VHS
+sync-edge scans, the four `current` cells at 10 and 20 workers were refreshed
+with ten alternating baseline/candidate pairs each, adding 80 Release runs.
+Exact parallelizes both scans; IPP-fast retains only the profitable initial
+scan. Python v0.4.0 was commit
 `43155200da87c0d49eb37d8ec09b1372075ee8e4`; merged PR341 was commit
 `2f21e8ed6018b14561396cc95f1f6828054470b8` (`v0.4.0-40-g2f21e8ed`).
 Python 3.14.0 used NumPy 2.4.6,
@@ -446,6 +447,15 @@ opposite-order 1,000-frame runs moved from 72.01/72.03 s to 70.57/70.59 s.
 Maximum working set stayed within 435.8-437.4 MiB and allocation stayed within
 3.02-3.04 GiB. Luma, chroma, JSON, stdout/stderr, normalized logs, and all
 2,000 ordered `fileLoc` values matched the pre-change build.
+
+The later Exact-only precise-scan stage replaced the second serial million-
+sample threshold pass with parallel crossing extraction, then rebuilt the
+original state machine and grid decisions in input order. Opposite-order
+1,000-frame runs moved from 70.06/69.32 s to 68.26/68.67 s, a 0.9-2.6%
+reduction. Allocation stayed at 3.02-3.05 GiB and maximum working set at
+435.5-437.2 MiB. The paired 40-frame results were mixed, so no fixed short-run
+gain is claimed. IPP-fast keeps its original serial second scan after a
+six-pair 160-frame check was neutral at 11.64/11.67 s.
 
 A separate 40-frame `--threads 0` gate made Exact v0.4.0 match Python
 `g4315520` for luma, chroma, raw JSON, all 80 ordered `fileLoc` values, stdout,

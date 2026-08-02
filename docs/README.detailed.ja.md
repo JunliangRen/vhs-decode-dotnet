@@ -391,8 +391,8 @@ Python v0.4.0、merge 済みの Python PR341、Exact v0.4.0、Exact
 | default（5） | 15.207 s | 16.780 s | 4.389 s / 3.465x / 71.14% | 5.896 s / 2.846x / 64.86% | 3.609 s / 4.213x / 76.27% | 4.654 s / 3.606x / 72.26% |
 | `--threads 1` | 17.694 s | 19.414 s | 10.065 s / 1.758x / 43.11% | 13.488 s / 1.439x / 30.52% | 7.215 s / 2.453x / 59.23% | 10.256 s / 1.893x / 47.17% |
 | `--threads 5` | 15.719 s | 17.801 s | 4.282 s / 3.671x / 72.76% | 5.982 s / 2.976x / 66.40% | 3.568 s / 4.406x / 77.30% | 5.082 s / 3.503x / 71.45% |
-| `--threads 10` | 16.037 s | 18.266 s | 3.494 s / 4.589x / 78.21% | 4.927 s / 3.707x / 73.03% | 3.098 s / 5.177x / 80.68% | 4.403 s / 4.149x / 75.90% |
-| `--threads 20` | 16.405 s | 18.395 s | 3.235 s / 5.071x / 80.28% | 4.443 s / 4.140x / 75.85% | 2.654 s / 6.182x / 83.82% | 4.397 s / 4.183x / 76.10% |
+| `--threads 10` | 16.037 s | 18.266 s | 3.494 s / 4.589x / 78.21% | 4.835 s / 3.778x / 73.53% | 3.098 s / 5.177x / 80.68% | 4.403 s / 4.149x / 75.90% |
+| `--threads 20` | 16.405 s | 18.395 s | 3.235 s / 5.071x / 80.28% | 4.368 s / 4.212x / 76.26% | 2.654 s / 6.182x / 83.82% | 4.397 s / 4.183x / 76.10% |
 <!-- LATEST_PERFORMANCE_END -->
 
 この測定は 2026-08-02 に main commit
@@ -400,9 +400,10 @@ Python v0.4.0、merge 済みの Python PR341、Exact v0.4.0、Exact
 Core Ultra 7 265K（20 logical processor）、Windows 11 build 26220、.NET
 SDK/runtime `11.0.100-preview.6.26359.118` です。30 個の mode/profile cell を
 3 回ずつ interleaved order で測定し、合計 90 Release run です。独立した CTI
-scan-line の上限を 5 から 8 に調整し、幅が bounded な VHS initial sync-edge scan
-を並列化した後、10/20 worker の 4 つの `current` cell を baseline/candidate
-10 pair ずつで再測定し、80 Release run を追加しました。Python
+scan-line の上限を 5 から 8 に調整し、VHS sync-edge scan を tuning した後、
+10/20 worker の 4 つの `current` cell を baseline/candidate 10 pair ずつで再測定し、
+80 Release run を追加しました。Exact は両 scan を並列化し、IPP-fast は効果のある
+initial scan だけを保持します。Python
 v0.4.0 commit は `43155200da87c0d49eb37d8ec09b1372075ee8e4`、merge 済み
 PR341 commit は `2f21e8ed6018b14561396cc95f1f6828054470b8`
 （`v0.4.0-40-g2f21e8ed`）です。Python
@@ -425,6 +426,14 @@ start offset なしでも gate しました。160/400-frame の interleaved medi
 working set は 435.8-437.4 MiB、allocation は 3.02-3.04 GiB の範囲に留まり、
 luma、chroma、JSON、stdout/stderr、normalized log、順序付き 2,000 個すべての
 `fileLoc` は変更前 build と一致しました。
+
+後続の Exact 専用 precise-scan stage は、2 回目の serial million-sample threshold
+pass を parallel crossing extraction に置き換え、元の state machine と grid decision
+を input order で再構築します。逆順を含む 2 回の 1,000-frame run は
+70.06/69.32 秒から 68.26/68.67 秒へ短縮し、0.9-2.6% の削減でした。allocation は
+3.02-3.05 GiB、maximum working set は 435.5-437.2 MiB の範囲です。40-frame pair
+は結果が混在したため、固定の short-run gain は主張しません。IPP-fast の 6 pair
+160-frame check は 11.64/11.67 秒で中立だったため、元の serial second scan を維持します。
 
 別の 40-frame `--threads 0` gate では、Exact v0.4.0 が Python `g4315520` と
 luma、chroma、raw JSON、順序付き 80 個すべての `fileLoc`、stdout、normalized
