@@ -2,7 +2,7 @@
 
 [English](README.md) | [简体中文](README.zh-CN.md) | **[日本語](README.ja.md)**
 
-<!-- README_SYNC: 2026-08-01.01 -->
+<!-- README_SYNC: 2026-08-02.01 -->
 
 [`oyvindln/vhs-decode`](https://github.com/oyvindln/vhs-decode) の
 デコード関連部分を .NET 11 で再実装するプロジェクトです。互換性の対象は
@@ -36,7 +36,7 @@ upstream release `v0.4.0`、commit
 - VHS family には VHS/S-VHS、Betamax、Video8/Hi8、U-matic、Type C、EIAJ、
   upstream が対応する PAL/NTSC variant が含まれます。
 - TBC utility、ダブルクリック GUI、開発者向け plot window は対象外です。
-- Visual Studio 2026 の `.slnx` には **1,231** 件の標準 xUnit v3 test があり、
+- Visual Studio 2026 の `.slnx` には **1,234** 件の標準 xUnit v3 test があり、
   Test Explorer と `dotnet test` の両方で実行できます。
 
 <!-- SECTION: start -->
@@ -138,6 +138,20 @@ combined wall time は 155.74 から 155.31 秒（0.28%）で、throughput は n
 分類します。全 output/diagnostic は一致し、candidate working set は 772 MiB 未満に
 収まりました。上の固定 `.lds` matrix は影響を受けないため、数値は変更していません。
 
+最新の Exact `current` VHS pass は、sync-level quantile に使う deterministic radix
+histogram scan 2 回だけを parallelize します。最終 source-order selection と全 field
+state は serial のままです。同じ private local PAL VHS RF capture の balanced
+160-frame `--threads 20` pair 6 組はすべて candidate が高速で、median wall time は
+18.622 から 17.739 秒（4.74% 減、throughput 4.97% 増）になりました。1 worker と
+default-five は neutral、10 worker median は 1.31% 改善しました。反対順序の
+1,000-frame pair 2 組では mean wall time が 78.559 から 76.495 秒（2.63% 減）となり、
+luma、chroma、raw JSON、normalized stderr/log、ordered `fileLoc` が一致しました。
+別の thread gate では stdout と thread 間 determinism も一致しました。candidate の
+once-per-second working-set sample の最大値は 779.98 MiB で、progressive sampled
+growth は観測されませんでした。固定 `.lds` table は、今回まったく同じ private matrix
+sample を利用できなかったため、別 sample の比較不能な値で置換せず、前回の audited
+snapshot を維持します。
+
 各 .NET cell は wall-time median と profile が対応する Python 列に対する
 speedup の順です。`1.000x` 未満は Python より遅いことを示します。Python
 PR341 は merge commit `2f21e8ed6018b14561396cc95f1f6828054470b8` で、
@@ -178,7 +192,7 @@ path を維持します。
 dotnet restore VHSDecodeDotNet.slnx
 dotnet build VHSDecodeDotNet.slnx -c Release --no-restore
 dotnet test --solution VHSDecodeDotNet.slnx -c Release `
-  --no-build --no-restore --minimum-expected-tests 1231
+  --no-build --no-restore --minimum-expected-tests 1234
 ```
 
 Visual Studio 2026 で `VHSDecodeDotNet.slnx` を開くと、build、debug、

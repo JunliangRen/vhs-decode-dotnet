@@ -2,7 +2,7 @@
 
 **[English](README.md)** | [简体中文](README.zh-CN.md) | [日本語](README.ja.md)
 
-<!-- README_SYNC: 2026-08-01.01 -->
+<!-- README_SYNC: 2026-08-02.01 -->
 
 A .NET 11 rewrite of the decode-facing parts of
 [`oyvindln/vhs-decode`](https://github.com/oyvindln/vhs-decode), targeting
@@ -38,7 +38,7 @@ evidence, and remaining gaps.
   EIAJ, and supported PAL/NTSC variants.
 - TBC utility tools, the double-click GUI, and developer plotting windows are
   intentionally out of scope.
-- The Visual Studio 2026 `.slnx` solution has **1,231** standard xUnit v3 tests
+- The Visual Studio 2026 `.slnx` solution has **1,234** standard xUnit v3 tests
   that are visible in Test Explorer and runnable with `dotnet test`.
 
 <!-- SECTION: start -->
@@ -143,6 +143,20 @@ managed allocation from 43.96 to 16.63 GiB (62.18%) and GC pause from 0.380 to
 matched, and candidate working set remained bounded below 772 MiB. The fixed
 `.lds` matrix above is unaffected and therefore remains unchanged.
 
+The latest Exact `current` VHS pass parallelizes only the two deterministic
+radix-histogram scans used for sync-level quantiles; final source-order
+selection and all field state remain serial. On one private local PAL VHS RF
+capture, six balanced 160-frame `--threads 20` pairs all favored the candidate:
+median wall time fell from 18.622 to 17.739 seconds (4.74%; 4.97% more
+throughput). The same pass was neutral at one/default-five workers and improved
+the 10-worker median by 1.31%. Two opposite-order 1,000-frame pairs reduced
+mean wall time from 78.559 to 76.495 seconds (2.63%); luma, chroma, raw JSON,
+normalized stderr/log, and ordered `fileLoc` matched. Separate thread gates
+also matched stdout and cross-thread determinism. The maximum once-per-second
+candidate working-set sample was 779.98 MiB, with no progressive sampled
+growth. The fixed `.lds` table retains its prior audited snapshot because that
+exact private matrix sample was unavailable for this refresh.
+
 Each .NET cell shows median wall time followed by speedup versus its
 profile-matched Python column; values below `1.000x` are slower. Python PR341
 is merge commit `2f21e8ed6018b14561396cc95f1f6828054470b8`, the upstream peer
@@ -185,7 +199,7 @@ The pinned SDK is .NET `11.0.100-preview.6.26359.118`.
 dotnet restore VHSDecodeDotNet.slnx
 dotnet build VHSDecodeDotNet.slnx -c Release --no-restore
 dotnet test --solution VHSDecodeDotNet.slnx -c Release `
-  --no-build --no-restore --minimum-expected-tests 1231
+  --no-build --no-restore --minimum-expected-tests 1234
 ```
 
 Open `VHSDecodeDotNet.slnx` in Visual Studio 2026 to build, debug, and run the

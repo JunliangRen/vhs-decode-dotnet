@@ -2179,7 +2179,7 @@ dotnet test --solution VHSDecodeDotNet.slnx --no-build
 ```
 
 The current formal solution build completes with zero warnings and errors, and
-the xUnit v3 project exposes 1,231 independently discoverable tests
+the xUnit v3 project exposes 1,234 independently discoverable tests
 to `dotnet test` and Visual Studio Test Explorer. On the
 same Windows machine and fixtures, Release wall-clock measurements for one
 frame were 2.346 s versus 7.193 s for NTSC VHS and 1.651 s versus 5.865 s for
@@ -2204,6 +2204,47 @@ throughput is classified as neutral. Candidate working set stayed below
 or progressive slowdown. Twelve v0.4.0/current and 0/default/20-worker gates
 matched luma, chroma, raw JSON, stdout, normalized stderr/log, and ordered
 `fileLoc` across baseline, candidate, and worker counts.
+
+### Deterministic parallel current VHS sync quantiles
+
+For Exact `current` VHS fields of at least 524,288 samples, the two radix
+histogram scans used by sync-level quantile selection now use at most four
+worker-local slabs and fixed-order integer reductions. Exceptional-value
+fallback, source-order candidate collection, Quickselect, floating-point
+expressions, and cross-field state remain serial and unchanged. Each
+simultaneously active or retained parallel workspace adds at most about 2 MiB
+and is cleared before reuse; product concurrency remains bounded by the
+existing field-worker scheduler. One-worker and smaller-field calls retain the
+prior serial path.
+
+Three focused tests exercise serial/parallel bit identity while reusing dirty
+one-/two-bucket workspaces, exceptional values at every worker boundary,
+ignored poison values beyond the active backing-array length, and warm
+caller-thread allocation. The zero-warning Release build and all 1,234 xUnit
+v3 tests passed under native, AVX2-disabled, and all-intrinsics-disabled
+execution; separate local logs retain each test summary.
+Twelve real-RF gates covered Exact v0.4.0/current at explicit zero workers,
+omitted/default workers, and 20 workers. Luma, chroma, raw JSON, stdout,
+normalized stderr/log, every ordered `fileLoc`, and cross-thread determinism
+matched the pre-change build.
+
+On one private local PAL VHS RF capture, a short one-worker gate was neutral;
+four default-five 160-frame pairs split two wins each and changed medians from
+24.987 to 25.080 seconds, also neutral. Four 10-worker pairs moved medians from
+20.029 to 19.766 seconds (1.31%) with three candidate wins. Six 20-worker
+pairs all favored the candidate and reduced medians from 18.622 to 17.739
+seconds (4.74%; 4.97% more throughput). A sampled trace showed the former
+serial selector work split into the two worker-local histogram loops while
+final selection remained serial.
+
+Two opposite-order 1,000-frame/2,000-field pairs matched luma, chroma, raw
+JSON, normalized stderr/log, and every ordered `fileLoc`. Mean wall time fell
+from 78.559 to 76.495 seconds (2.63%; 2.70% more throughput). Separate thread
+gates also matched stdout and cross-thread determinism. Combined allocation
+moved from 16.570 to 16.661 GiB and GC pause from 0.247 to 0.259 seconds, so
+neither is claimed as an improvement. The maximum once-per-second candidate
+working-set sample was 779.98 MiB, Gen2 collections moved from 42 to 40, and
+both runs completed without progressive sampled growth or OOM.
 
 `ffmpeg` and `ffprobe` must be available on `PATH` for RF container inputs
 outside the narrowly gated direct 40 kHz mono PCM16 raw-FLAC route. Direct
