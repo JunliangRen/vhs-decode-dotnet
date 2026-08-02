@@ -741,9 +741,10 @@ public sealed class TbcFieldDecodePipeline
         catch (TbcFieldDecodeRecoveryException)
         {
             // v0.4.0 passes prevfield=None after an invalid field, restarting
-            // the VHS field-number chain and short-field diagnostic context.
+            // the VHS field-number, diagnostic, and color-killer context.
             _previousVhsFieldNumber = null;
             _previousVhsFieldReadLocation = null;
+            _previousBurstDetectedLine = 0;
             throw;
         }
     }
