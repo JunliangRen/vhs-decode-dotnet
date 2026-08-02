@@ -741,7 +741,7 @@ public sealed class TbcFieldDecodePipeline
         catch (TbcFieldDecodeRecoveryException)
         {
             // v0.4.0 passes prevfield=None after an invalid field, restarting
-            // the VHS field-number chain used by NTSC chroma framing.
+            // the VHS field-number chain and short-field diagnostic context.
             _previousVhsFieldNumber = null;
             _previousVhsFieldReadLocation = null;
             throw;
@@ -5231,7 +5231,7 @@ public sealed class TbcFieldDecodePipeline
             return;
         }
 
-        if (tape && _previousSyncConfidence.HasValue)
+        if (tape && _previousVhsFieldNumber.HasValue)
         {
             _diagnosticLogger?.Invoke(
                 "INFO",
