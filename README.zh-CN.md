@@ -33,7 +33,7 @@
 - VHS 家族包括 VHS/S-VHS、Betamax、Video8/Hi8、U-matic、Type C、EIAJ
   以及上游支持的 PAL/NTSC 变体。
 - TBC 工具、双击启动的用户 GUI 和开发者绘图窗口明确不在范围内。
-- Visual Studio 2026 `.slnx` 包含 **1,236** 项标准 xUnit v3 测试；测试可在
+- Visual Studio 2026 `.slnx` 包含 **1,261** 项标准 xUnit v3 测试；测试可在
   Test Explorer 中查看，也可用 `dotnet test` 运行。
 
 <!-- SECTION: start -->
@@ -90,25 +90,25 @@ CVBS、LaserDisc 和 HiFi 当前会拒绝 `ipp-fast`，这些命令应使用 `ex
 
 下表固定使用同一份私有本地 40 MHz PAL VHS `.ldf` 夹具和相同的 40 帧窗口，
 不会公开源文件名。基础矩阵是 2026-08-02 在 main commit `c92af1d` 上完成的
-三次交错运行中位数。2026-08-03，在完成 current burst 前缀并行化后，最终分支候选
-重新交错测量了全部多 worker `current` 单元格；未改变的单 worker 与 v0.4.0
+三次交错运行中位数。2026-08-03，在完成有界 current ACC 分段并行化后，最终分支
+候选以六次交错运行重新测量了全部 `current` 单元格；Python 与 .NET v0.4.0
 单元格沿用此前审计值。兼容性结论与速度数据分开判断。
 
 <!-- LATEST_PERFORMANCE_BEGIN -->
 | CLI 模式（workers） | Python v0.4.0 | Python PR341 | Exact + v0.4.0 | Exact + current | IPP-fast + v0.4.0 | IPP-fast + current |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| 默认（5） | 15.207 s | 16.780 s | 4.389 s / 3.465x | 5.163 s / 3.250x | 3.609 s / 4.213x | 4.354 s / 3.854x |
-| `--threads 1` | 17.694 s | 19.414 s | 10.065 s / 1.758x | 13.488 s / 1.439x | 7.215 s / 2.453x | 10.256 s / 1.893x |
-| `--threads 5` | 15.719 s | 17.801 s | 4.282 s / 3.671x | 5.353 s / 3.325x | 3.568 s / 4.406x | 4.230 s / 4.209x |
-| `--threads 10` | 16.037 s | 18.266 s | 3.494 s / 4.589x | 4.027 s / 4.536x | 3.098 s / 5.177x | 3.701 s / 4.935x |
-| `--threads 20` | 16.405 s | 18.395 s | 3.235 s / 5.071x | 4.336 s / 4.243x | 2.654 s / 6.182x | 3.856 s / 4.770x |
+| 默认（5） | 15.207 s | 16.780 s | 4.389 s / 3.465x | 5.322 s / 3.153x | 3.609 s / 4.213x | 4.469 s / 3.755x |
+| `--threads 1` | 17.694 s | 19.414 s | 10.065 s / 1.758x | 13.495 s / 1.439x | 7.215 s / 2.453x | 10.757 s / 1.805x |
+| `--threads 5` | 15.719 s | 17.801 s | 4.282 s / 3.671x | 5.323 s / 3.344x | 3.568 s / 4.406x | 4.282 s / 4.157x |
+| `--threads 10` | 16.037 s | 18.266 s | 3.494 s / 4.589x | 4.553 s / 4.012x | 3.098 s / 5.177x | 4.026 s / 4.537x |
+| `--threads 20` | 16.405 s | 18.395 s | 3.235 s / 5.071x | 4.060 s / 4.531x | 2.654 s / 6.182x | 3.526 s / 5.216x |
 <!-- LATEST_PERFORMANCE_END -->
 
 每个 .NET 单元格依次给出墙钟中位数和相对同 profile Python 列的倍速；低于
 `1.000x` 表示更慢。Python PR341 使用合并提交
 `2f21e8ed6018b14561396cc95f1f6828054470b8`，它是 `current` 的上游对应版本。
 默认实际使用 **5 个 workers**。基础矩阵共 90 次运行，即 30 个模式/profile
-组合各重复三次；八个刷新的多 worker `current` 单元格另增加 24 次最终候选交错运行。
+组合各重复三次；十个刷新的 `current` 单元格另增加 60 次最终候选交错运行。
 
 每个 .NET profile 和 Python PR341 在各模式下都只产生一套确定性 hash。Python
 v0.4.0 在每个默认/非零线程模式的三次运行中都产生三套亮度、色度、JSON 和日志
@@ -147,7 +147,7 @@ Ogg/FLAC、立体声、PCM24、其他采样率和未完成的文件头也继续�
 dotnet restore VHSDecodeDotNet.slnx
 dotnet build VHSDecodeDotNet.slnx -c Release --no-restore
 dotnet test --solution VHSDecodeDotNet.slnx -c Release `
-  --no-build --no-restore --minimum-expected-tests 1236
+  --no-build --no-restore --minimum-expected-tests 1261
 ```
 
 在 Visual Studio 2026 中打开 `VHSDecodeDotNet.slnx`，即可构建、调试并通过

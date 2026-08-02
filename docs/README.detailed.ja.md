@@ -388,11 +388,11 @@ Python v0.4.0、merge 済みの Python PR341、Exact v0.4.0、Exact
 <!-- LATEST_PERFORMANCE_BEGIN -->
 | CLI mode（workers） | Python v0.4.0 | Python PR341 | Exact + v0.4.0 | Exact + current | IPP-fast + v0.4.0 | IPP-fast + current |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| default（5） | 15.207 s | 16.780 s | 4.389 s / 3.465x / 71.14% | 5.163 s / 3.250x / 69.23% | 3.609 s / 4.213x / 76.27% | 4.354 s / 3.854x / 74.05% |
-| `--threads 1` | 17.694 s | 19.414 s | 10.065 s / 1.758x / 43.11% | 13.488 s / 1.439x / 30.52% | 7.215 s / 2.453x / 59.23% | 10.256 s / 1.893x / 47.17% |
-| `--threads 5` | 15.719 s | 17.801 s | 4.282 s / 3.671x / 72.76% | 5.353 s / 3.325x / 69.93% | 3.568 s / 4.406x / 77.30% | 4.230 s / 4.209x / 76.24% |
-| `--threads 10` | 16.037 s | 18.266 s | 3.494 s / 4.589x / 78.21% | 4.027 s / 4.536x / 77.96% | 3.098 s / 5.177x / 80.68% | 3.701 s / 4.935x / 79.74% |
-| `--threads 20` | 16.405 s | 18.395 s | 3.235 s / 5.071x / 80.28% | 4.336 s / 4.243x / 76.43% | 2.654 s / 6.182x / 83.82% | 3.856 s / 4.770x / 79.04% |
+| default（5） | 15.207 s | 16.780 s | 4.389 s / 3.465x / 71.14% | 5.322 s / 3.153x / 68.28% | 3.609 s / 4.213x / 76.27% | 4.469 s / 3.755x / 73.37% |
+| `--threads 1` | 17.694 s | 19.414 s | 10.065 s / 1.758x / 43.11% | 13.495 s / 1.439x / 30.49% | 7.215 s / 2.453x / 59.23% | 10.757 s / 1.805x / 44.59% |
+| `--threads 5` | 15.719 s | 17.801 s | 4.282 s / 3.671x / 72.76% | 5.323 s / 3.344x / 70.10% | 3.568 s / 4.406x / 77.30% | 4.282 s / 4.157x / 75.95% |
+| `--threads 10` | 16.037 s | 18.266 s | 3.494 s / 4.589x / 78.21% | 4.553 s / 4.012x / 75.08% | 3.098 s / 5.177x / 80.68% | 4.026 s / 4.537x / 77.96% |
+| `--threads 20` | 16.405 s | 18.395 s | 3.235 s / 5.071x / 80.28% | 4.060 s / 4.531x / 77.93% | 2.654 s / 6.182x / 83.82% | 3.526 s / 5.216x / 80.83% |
 <!-- LATEST_PERFORMANCE_END -->
 
 この測定は 2026-08-02 に main commit
@@ -400,10 +400,10 @@ Python v0.4.0、merge 済みの Python PR341、Exact v0.4.0、Exact
 Core Ultra 7 265K（20 logical processor）、Windows 11 build 26220、.NET
 SDK/runtime `11.0.100-preview.6.26359.118` です。30 個の mode/profile cell を
 3 回ずつ interleaved order で測定し、合計 90 Release run です。2026-08-03、
-current burst-prefix parallelization 後の final branch candidate で 8 個の
-multi-worker `current` cell を 3 回ずつ再測定し、24 Release run を追加しました。
-変更のない one-worker と v0.4.0 cell は従来の audited value を維持します。Python
-v0.4.0 commit は `43155200da87c0d49eb37d8ec09b1372075ee8e4`、merge 済み
+bounded current ACC segment parallelization 後の final branch candidate で
+10 個すべての `current` cell を 6 回ずつ再測定し、60 Release run を追加しました。
+Python と .NET v0.4.0 cell は従来の audited value を維持します。Python v0.4.0
+commit は `43155200da87c0d49eb37d8ec09b1372075ee8e4`、merge 済み
 PR341 commit は `2f21e8ed6018b14561396cc95f1f6828054470b8`
 （`v0.4.0-40-g2f21e8ed`）です。Python
 3.14.0 は NumPy 2.4.6、SciPy 1.18.0、Numba 0.66.0、python-soxr 1.1.0 を
@@ -2079,6 +2079,30 @@ sample は 393.8/515.0 MiB ですが、first/last-third median は 386.4/390.1 �
 490.0/493.6 MiB に留まりました。両 long run は progressive growth や OOM なしで
 完了し、追加の parallel result と scheduling work は field ごとに bounded です。
 
+### Bounded parallel current ACC segments
+
+`current` automatic chroma-gain pass は、独立した単調増加の chroma segment を固定
+contiguous range に分け、最大 8 worker で処理します。raw-gain construction、
+outlier limit、smoothing、final noise FMA reduction、mean amplitude、cross-field state、
+output submission は入力順のままです。各 sync-tip window が自身の segment 内に完全に
+収まり、scratch が 4,096 sample 以下の場合だけ parallel path を使用します。異常または
+overlap する入力、v0.4.0、one-worker call は serial path を維持します。従来の public
+CLR method signature は変更していません。worker exception は捕捉し、input partition
+順に再送出します。worker-local float/double median scratch は output mutation 前に rent
+し、すべての exit path で返却します。
+
+160-frame Exact `current`/20-worker の interleaved pair 6 組では、median wall time が
+11.15 から 10.47 秒へ 6.1% 短縮し、median active core は 6.67 から 7.58 に増えました。
+別の 1,000-frame/2,000-field pair は 55.851 から 53.003 秒へ 5.1% 短縮しました。
+luma、chroma、raw JSON、stdout、該当する normalized stderr/log、全 ordered `fileLoc`
+は一致しました。candidate allocation は 1.918 GiB、first/last-third working-set median
+は 382.9/383.0 MiB、maximum は 386.7 MiB で、progressive growth や OOM はありません。
+
+更新した `current` matrix は Exact と IPP-fast の default/1/5/10/20 worker を各 6 回
+interleaved 測定し、合計 60 Release run です。compatibility hash set はすべて 1 値
+でした。zero-warning Release build と 1,261 件すべての xUnit v3/
+Microsoft.Testing.Platform test が通過しました。
+
 </details>
 
 <!-- SECTION: build -->
@@ -2101,7 +2125,7 @@ sample は 393.8/515.0 MiB ですが、first/last-third median は 386.4/390.1 �
 .\tools\build-ipp-native.ps1
 dotnet restore VHSDecodeDotNet.slnx
 dotnet build VHSDecodeDotNet.slnx -c Release --no-restore
-dotnet test --solution VHSDecodeDotNet.slnx -c Release --no-build --no-restore --minimum-expected-tests 1236
+dotnet test --solution VHSDecodeDotNet.slnx -c Release --no-build --no-restore --minimum-expected-tests 1261
 ```
 
 最初の command は optional `ipp-fast` native artifact を含めるためのものです。
@@ -2114,7 +2138,7 @@ third-party notice を埋め込み、license sidecar file は追加しません�
 
 現在の正式な Release build は warning 0、error 0 です。xUnit v3 project は
 `dotnet test` と Visual Studio Test Explorer の両方で個別に検出できる
-**1,236** tests を公開します。
+**1,261** tests を公開します。
 
 <!-- SECTION: usage -->
 

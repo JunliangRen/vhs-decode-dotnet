@@ -331,21 +331,20 @@ IPP-fast v0.4.0 和 IPP-fast `current`。文件名不会公开。每个 .NET 单
 <!-- LATEST_PERFORMANCE_BEGIN -->
 | CLI 模式（workers） | Python v0.4.0 | Python PR341 | Exact + v0.4.0 | Exact + current | IPP-fast + v0.4.0 | IPP-fast + current |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| 默认（5） | 15.207 s | 16.780 s | 4.389 s / 3.465x / 71.14% | 5.163 s / 3.250x / 69.23% | 3.609 s / 4.213x / 76.27% | 4.354 s / 3.854x / 74.05% |
-| `--threads 1` | 17.694 s | 19.414 s | 10.065 s / 1.758x / 43.11% | 13.488 s / 1.439x / 30.52% | 7.215 s / 2.453x / 59.23% | 10.256 s / 1.893x / 47.17% |
-| `--threads 5` | 15.719 s | 17.801 s | 4.282 s / 3.671x / 72.76% | 5.353 s / 3.325x / 69.93% | 3.568 s / 4.406x / 77.30% | 4.230 s / 4.209x / 76.24% |
-| `--threads 10` | 16.037 s | 18.266 s | 3.494 s / 4.589x / 78.21% | 4.027 s / 4.536x / 77.96% | 3.098 s / 5.177x / 80.68% | 3.701 s / 4.935x / 79.74% |
-| `--threads 20` | 16.405 s | 18.395 s | 3.235 s / 5.071x / 80.28% | 4.336 s / 4.243x / 76.43% | 2.654 s / 6.182x / 83.82% | 3.856 s / 4.770x / 79.04% |
+| 默认（5） | 15.207 s | 16.780 s | 4.389 s / 3.465x / 71.14% | 5.322 s / 3.153x / 68.28% | 3.609 s / 4.213x / 76.27% | 4.469 s / 3.755x / 73.37% |
+| `--threads 1` | 17.694 s | 19.414 s | 10.065 s / 1.758x / 43.11% | 13.495 s / 1.439x / 30.49% | 7.215 s / 2.453x / 59.23% | 10.757 s / 1.805x / 44.59% |
+| `--threads 5` | 15.719 s | 17.801 s | 4.282 s / 3.671x / 72.76% | 5.323 s / 3.344x / 70.10% | 3.568 s / 4.406x / 77.30% | 4.282 s / 4.157x / 75.95% |
+| `--threads 10` | 16.037 s | 18.266 s | 3.494 s / 4.589x / 78.21% | 4.553 s / 4.012x / 75.08% | 3.098 s / 5.177x / 80.68% | 4.026 s / 4.537x / 77.96% |
+| `--threads 20` | 16.405 s | 18.395 s | 3.235 s / 5.071x / 80.28% | 4.060 s / 4.531x / 77.93% | 2.654 s / 6.182x / 83.82% | 3.526 s / 5.216x / 80.83% |
 <!-- LATEST_PERFORMANCE_END -->
 
 本轮于 2026-08-02 在 main commit
 `c92af1dfd0f96cd7f2d49f3219fb428d0f4e0865` 上完成。测试机为 Intel Core
 Ultra 7 265K（20 个逻辑处理器）、Windows 11 build 26220，以及 .NET
 SDK/runtime `11.0.100-preview.6.26359.118`。30 个模式/profile 组合各交错运行
-三次，共 90 次 Release 运行。2026-08-03，在完成 current burst 前缀并行化后，
-八个多 worker `current` 单元格使用最终分支候选各交错测量三次，另增加 24 次
-Release 运行。未改变的单 worker 与 v0.4.0 单元格沿用此前审计值。Python
-v0.4.0 commit 为
+三次，共 90 次 Release 运行。2026-08-03，在完成有界的 current ACC 分段并行化后，
+全部十个 `current` 单元格使用最终分支候选各交错测量六次，另增加 60 次 Release
+运行。Python 与 .NET v0.4.0 单元格沿用此前审计值。Python v0.4.0 commit 为
 `43155200da87c0d49eb37d8ec09b1372075ee8e4`，已合并 PR341 commit 为
 `2f21e8ed6018b14561396cc95f1f6828054470b8`（`v0.4.0-40-g2f21e8ed`）。
 Python 3.14.0 使用 NumPy
@@ -1720,6 +1719,27 @@ Microsoft.Testing.Platform 测试通过。
 386.4/390.1 和 490.0/493.6 MiB。两次长跑都没有渐进增长或 OOM；额外的并行结果与
 调度开销按 field 保持有界。
 
+### 有界并行的 current ACC 分段
+
+`current` 自动色度增益现在把相互独立、单调递增的色度分段切成固定连续区间，最多由
+八个 worker 处理。原始增益构造、离群限制、平滑、最终噪声 FMA 归约、平均幅度、跨
+field 状态与输出提交仍按输入顺序执行。只有每个 sync-tip 窗口完全位于自身分段内，
+且 scratch 不超过 4,096 个样本时才启用并行；异常或重叠输入、v0.4.0 及单 worker
+调用继续走串行路径。原有公开 CLR 方法签名保持不变。worker 异常会被捕获，并按输入
+分区顺序重新抛出。每个 worker 独占的 float/double 中位数 scratch 会在修改输出前
+租用，并在所有退出路径归还。
+
+六组交错的 160 帧 Exact `current`/20-worker 对比把墙钟中位数从 11.15 秒降至
+10.47 秒（缩短 6.1%），有效核心数中位数从 6.67 增至 7.58。另一个 1,000 帧/
+2,000 field 对比把 55.851 秒降至 53.003 秒（缩短 5.1%）；亮度、色度、原始 JSON、
+stdout、适用的归一化 stderr/日志及全部有序 `fileLoc` 均一致。候选累计分配为
+1.918 GiB，首末三分之一区间的工作集中位数为 382.9/383.0 MiB，最大值为
+386.7 MiB，没有渐进增长或 OOM。
+
+刷新的 `current` 矩阵覆盖 Exact 与 IPP-fast 的默认、1、5、10、20 worker，每个单元格
+交错运行六次，共 60 次 Release 运行。所有兼容性 hash set 都只有一个值。零警告的
+Release build 与全部 1,261 项 xUnit v3/Microsoft.Testing.Platform 测试通过。
+
 </details>
 
 <!-- SECTION: build -->
@@ -1742,7 +1762,7 @@ Microsoft.Testing.Platform 测试通过。
 .\tools\build-ipp-native.ps1
 dotnet restore VHSDecodeDotNet.slnx
 dotnet build VHSDecodeDotNet.slnx -c Release --no-restore
-dotnet test --solution VHSDecodeDotNet.slnx -c Release --no-build --no-restore --minimum-expected-tests 1236
+dotnet test --solution VHSDecodeDotNet.slnx -c Release --no-build --no-restore --minimum-expected-tests 1261
 ```
 
 第一条命令用于包含可选的 `ipp-fast` 原生产物；只构建 Exact 时可以省略。
@@ -1753,7 +1773,7 @@ Intel oneAPI。只含二进制的单文件发布会嵌入 `vhsdecode_ipp.dll` �
 notice，不会额外生成许可证 sidecar 文件。只构建 Exact 后端时可以省略原生构建步骤。
 
 当前正式 Release 构建为零警告、零错误。xUnit v3 项目向
-`dotnet test` 和 Visual Studio Test Explorer 暴露 **1,236** 个可独立发现的测试。
+`dotnet test` 和 Visual Studio Test Explorer 暴露 **1,261** 个可独立发现的测试。
 
 <!-- SECTION: usage -->
 

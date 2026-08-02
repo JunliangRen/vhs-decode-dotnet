@@ -166,6 +166,39 @@ internal static class NumbaReduction
             : sorted[middle];
     }
 
+    internal static double MedianFloat32(
+        ReadOnlySpan<double> values,
+        float[] scratch)
+    {
+        ArgumentNullException.ThrowIfNull(scratch);
+        if (values.IsEmpty)
+        {
+            return BitConverter.UInt32BitsToSingle(0x7FC00000);
+        }
+
+        if (scratch.Length < values.Length)
+        {
+            throw new ArgumentException(
+                "Median scratch length must be at least the input length.",
+                nameof(scratch));
+        }
+
+        for (int i = 0; i < values.Length; i++)
+        {
+            scratch[i] = (float)values[i];
+            if (float.IsNaN(scratch[i]))
+            {
+                return scratch[i];
+            }
+        }
+
+        Array.Sort(scratch, 0, values.Length);
+        int middle = values.Length / 2;
+        return values.Length % 2 == 0
+            ? (float)((scratch[middle - 1] + scratch[middle]) / 2.0f)
+            : scratch[middle];
+    }
+
     public static double MeanFloat64(ReadOnlySpan<double> values)
     {
         double sum = 0.0;

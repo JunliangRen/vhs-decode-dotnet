@@ -408,22 +408,22 @@ speedup, and wall-time reduction against its profile-matched Python column:
 <!-- LATEST_PERFORMANCE_BEGIN -->
 | CLI mode (workers) | Python v0.4.0 | Python PR341 | Exact + v0.4.0 | Exact + current | IPP-fast + v0.4.0 | IPP-fast + current |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| default (5) | 15.207 s | 16.780 s | 4.389 s / 3.465x / 71.14% | 5.163 s / 3.250x / 69.23% | 3.609 s / 4.213x / 76.27% | 4.354 s / 3.854x / 74.05% |
-| `--threads 1` | 17.694 s | 19.414 s | 10.065 s / 1.758x / 43.11% | 13.488 s / 1.439x / 30.52% | 7.215 s / 2.453x / 59.23% | 10.256 s / 1.893x / 47.17% |
-| `--threads 5` | 15.719 s | 17.801 s | 4.282 s / 3.671x / 72.76% | 5.353 s / 3.325x / 69.93% | 3.568 s / 4.406x / 77.30% | 4.230 s / 4.209x / 76.24% |
-| `--threads 10` | 16.037 s | 18.266 s | 3.494 s / 4.589x / 78.21% | 4.027 s / 4.536x / 77.96% | 3.098 s / 5.177x / 80.68% | 3.701 s / 4.935x / 79.74% |
-| `--threads 20` | 16.405 s | 18.395 s | 3.235 s / 5.071x / 80.28% | 4.336 s / 4.243x / 76.43% | 2.654 s / 6.182x / 83.82% | 3.856 s / 4.770x / 79.04% |
+| default (5) | 15.207 s | 16.780 s | 4.389 s / 3.465x / 71.14% | 5.322 s / 3.153x / 68.28% | 3.609 s / 4.213x / 76.27% | 4.469 s / 3.755x / 73.37% |
+| `--threads 1` | 17.694 s | 19.414 s | 10.065 s / 1.758x / 43.11% | 13.495 s / 1.439x / 30.49% | 7.215 s / 2.453x / 59.23% | 10.757 s / 1.805x / 44.59% |
+| `--threads 5` | 15.719 s | 17.801 s | 4.282 s / 3.671x / 72.76% | 5.323 s / 3.344x / 70.10% | 3.568 s / 4.406x / 77.30% | 4.282 s / 4.157x / 75.95% |
+| `--threads 10` | 16.037 s | 18.266 s | 3.494 s / 4.589x / 78.21% | 4.553 s / 4.012x / 75.08% | 3.098 s / 5.177x / 80.68% | 4.026 s / 4.537x / 77.96% |
+| `--threads 20` | 16.405 s | 18.395 s | 3.235 s / 5.071x / 80.28% | 4.060 s / 4.531x / 77.93% | 2.654 s / 6.182x / 83.82% | 3.526 s / 5.216x / 80.83% |
 <!-- LATEST_PERFORMANCE_END -->
 
 The benchmark ran on 2026-08-02 using main commit
 `c92af1dfd0f96cd7f2d49f3219fb428d0f4e0865`, an Intel Core Ultra 7 265K with
 20 logical processors, Windows 11 build 26220, and .NET SDK/runtime
 `11.0.100-preview.6.26359.118`. Each of the 30 mode/profile cells was measured
-three times in interleaved order, for 90 Release runs. On 2026-08-03, the eight
-multi-worker `current` cells were refreshed with three interleaved runs of the
-final branch candidate after current burst-prefix parallelization, adding 24
-Release runs. The unchanged one-worker and v0.4.0 cells retain their earlier
-audited measurements. Python v0.4.0 was commit
+three times in interleaved order, for 90 Release runs. On 2026-08-03, all ten
+`current` cells were refreshed with six interleaved runs of the final branch
+candidate after bounded current ACC segment parallelization, adding 60 Release
+runs. The Python and .NET v0.4.0 cells retain their earlier audited measurements.
+Python v0.4.0 was commit
 `43155200da87c0d49eb37d8ec09b1372075ee8e4`; merged PR341 was commit
 `2f21e8ed6018b14561396cc95f1f6828054470b8` (`v0.4.0-40-g2f21e8ed`).
 Python 3.14.0 used NumPy 2.4.6,
@@ -2152,6 +2152,32 @@ at 386.4/390.1 and 490.0/493.6 MiB. Both long runs completed without progressive
 growth or OOM; the extra parallel results and scheduling work remain bounded per
 field.
 
+### Bounded parallel current ACC segments
+
+The `current` automatic chroma-gain pass now processes independent, monotonic
+chroma segments in fixed contiguous ranges across at most eight workers. Raw-gain
+construction, outlier limits, smoothing, final noise FMA reduction, mean
+amplitude, cross-field state, and output submission remain in input order.
+Parallel work is enabled only when each sync-tip window is wholly inside its own
+segment and scratch is at most 4,096 samples; unusual or overlapping input,
+v0.4.0, and one-worker calls retain the serial path. The prior public CLR method
+signature is unchanged. Worker exceptions are captured and rethrown in
+input-partition order. Worker-local float/double median scratch is rented before
+output mutation and returned on every exit.
+
+Six interleaved 160-frame Exact `current`/20-worker pairs reduced median wall
+time from 11.15 to 10.47 seconds (6.1%) while median active cores rose from 6.67
+to 7.58. A separate 1,000-frame/2,000-field pair moved from 55.851 to 53.003
+seconds (5.1%); luma, chroma, raw JSON, stdout, normalized stderr/log where
+applicable, and all ordered `fileLoc` values matched. Candidate allocation was
+1.918 GiB and its first/last-third working-set medians were 382.9/383.0 MiB,
+with a 386.7 MiB maximum and no progressive growth or OOM.
+
+The refreshed `current` matrix uses six interleaved runs for default, 1, 5, 10,
+and 20 workers in Exact and IPP-fast, for 60 Release runs. Every compatibility
+hash set contained one value. The zero-warning Release build and all 1,261 xUnit
+v3/Microsoft.Testing.Platform tests passed.
+
 </details>
 
 <!-- SECTION: build -->
@@ -2176,7 +2202,7 @@ Requirements:
 .\tools\build-ipp-native.ps1
 dotnet restore VHSDecodeDotNet.slnx
 dotnet build VHSDecodeDotNet.slnx -c Release --no-restore
-dotnet test --solution VHSDecodeDotNet.slnx -c Release --no-build --no-restore --minimum-expected-tests 1236
+dotnet test --solution VHSDecodeDotNet.slnx -c Release --no-build --no-restore --minimum-expected-tests 1261
 ```
 
 The first command includes the optional `ipp-fast` native artifact; omit it for
@@ -2189,7 +2215,7 @@ deployment computer. Binary-only single-file releases embed
 sidecar license files. An Exact-only build may omit the native build step.
 
 The current formal Release build has zero warnings and errors. The xUnit v3
-project exposes **1,236** independently discoverable tests to both
+project exposes **1,261** independently discoverable tests to both
 `dotnet test` and Visual Studio Test Explorer.
 
 <!-- SECTION: usage -->
