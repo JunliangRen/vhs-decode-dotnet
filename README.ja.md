@@ -36,7 +36,7 @@ upstream release `v0.4.0`、commit
 - VHS family には VHS/S-VHS、Betamax、Video8/Hi8、U-matic、Type C、EIAJ、
   upstream が対応する PAL/NTSC variant が含まれます。
 - TBC utility、ダブルクリック GUI、開発者向け plot window は対象外です。
-- Visual Studio 2026 の `.slnx` には **1,234** 件の標準 xUnit v3 test があり、
+- Visual Studio 2026 の `.slnx` には **1,236** 件の標準 xUnit v3 test があり、
   Test Explorer と `dotnet test` の両方で実行できます。
 
 <!-- SECTION: start -->
@@ -152,6 +152,19 @@ growth は観測されませんでした。固定 `.lds` table は、今回ま�
 sample を利用できなかったため、別 sample の比較不能な値で置換せず、前回の audited
 snapshot を維持します。
 
+最新の Exact `current` PAL VHS pass は heterodyne upconversion で decoder-owned
+chroma field を再利用し、別の full-field `double[]` allocation を除去します。同じ
+private local PAL VHS RF sample の balanced 80-frame/20-worker pair 6 組は candidate
+4 勝 2 敗で、mean wall time は 11.942 から 11.776 秒（1.39% 減）でした。このため
+throughput は near-neutral と分類します。matched 1,000-frame counter pair では
+managed allocation が 8.254 から 3.009 GiB（63.54% 減）、Gen2 collection が
+20 から 2、maximum sampled working set が 773.29 から 439.86 MiB になりました。
+candidate の first/last-quarter working-set median は 405.84/406.51 MiB で progressive
+growth はなく、wall time は 74.130 から 73.217 秒（1.23% 減）でした。luma、
+chroma、raw JSON、normalized stderr/log、2,000 個すべての ordered `fileLoc` は一致し、
+別の profile/thread gate では stdout と determinism も一致しました。固定 `.lds`
+matrix は影響を受けず、直前の comparable audited snapshot を維持します。
+
 各 .NET cell は wall-time median と profile が対応する Python 列に対する
 speedup の順です。`1.000x` 未満は Python より遅いことを示します。Python
 PR341 は merge commit `2f21e8ed6018b14561396cc95f1f6828054470b8` で、
@@ -192,7 +205,7 @@ path を維持します。
 dotnet restore VHSDecodeDotNet.slnx
 dotnet build VHSDecodeDotNet.slnx -c Release --no-restore
 dotnet test --solution VHSDecodeDotNet.slnx -c Release `
-  --no-build --no-restore --minimum-expected-tests 1234
+  --no-build --no-restore --minimum-expected-tests 1236
 ```
 
 Visual Studio 2026 で `VHSDecodeDotNet.slnx` を開くと、build、debug、

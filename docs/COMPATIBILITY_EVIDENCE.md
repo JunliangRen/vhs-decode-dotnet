@@ -2179,7 +2179,7 @@ dotnet test --solution VHSDecodeDotNet.slnx --no-build
 ```
 
 The current formal solution build completes with zero warnings and errors, and
-the xUnit v3 project exposes 1,234 independently discoverable tests
+the xUnit v3 project exposes 1,236 independently discoverable tests
 to `dotnet test` and Visual Studio Test Explorer. On the
 same Windows machine and fixtures, Release wall-clock measurements for one
 frame were 2.346 s versus 7.193 s for NTSC VHS and 1.651 s versus 5.865 s for
@@ -2245,6 +2245,41 @@ moved from 16.570 to 16.661 GiB and GC pause from 0.247 to 0.259 seconds, so
 neither is claimed as an improvement. The maximum once-per-second candidate
 working-set sample was 779.98 MiB, Gen2 collections moved from 42 to 40, and
 both runs completed without progressive sampled growth or OOM.
+
+### Decoder-owned PAL chroma upconversion
+
+The Exact `current` PAL decoder now applies heterodyne upconversion directly to
+its exclusive resampled chroma field. Public read-only calls keep allocating an
+independent output. The internal path validates every heterodyne table and all
+normalized NumPy-style line ranges before writing, accepts only non-overlapping
+sorted ranges or one legal tail-to-head wrap, and falls back before mutation
+for unsupported layouts. Multiplication, `(double)(float)` conversion, gap
+zeroing, subsequent filters/comb/gain, and cross-field state are unchanged.
+
+Focused xUnit v3 tests cover bit-exact sorted, gapped, and real PAL wrapped
+layouts; untouched-input fallback on duplicate ranges; and a production-sized
+complete PAL field with less than 256 KiB of warm caller-thread allocation.
+All 1,236 tests passed under native, AVX2-disabled, and all-intrinsics-disabled
+execution. Twelve v0.4.0/current and zero/default/20-worker real-RF gates
+matched luma, chroma, raw JSON, stdout, normalized stderr/log, ordered
+`fileLoc`, and cross-thread determinism.
+
+On one private local PAL VHS RF sample, an 80-frame allocation trace reduced
+sampled object bytes from 872,958,736 to 415,617,272 (52.39%) and sampled
+allocation amount from 2,065,610,264 to 1,606,599,696 (22.22%). The baseline's
+235,891,312-byte `UpconvertChroma` and 221,894,168-byte field-copy allocation
+stacks disappeared. Six balanced 80-frame/20-worker pairs split four candidate
+wins and two losses, with mean wall time moving from 11.942 to 11.776 seconds;
+short throughput is classified as near-neutral.
+
+One matched 1,000-frame/2,000-field counter pair reduced managed allocation
+from 8.254 to 3.009 GiB (63.54%), GC pause from 0.134 to 0.113 seconds (15.63%),
+Gen2 collections from 20 to 2, and maximum sampled working set from 773.29 to
+439.86 MiB (43.12%). Candidate first/last-quarter working-set medians were
+405.84/406.51 MiB without progressive growth or OOM. Wall time moved from
+74.130 to 73.217 seconds (1.23%; 1.25% more throughput), retained as a scoped
+single-pair observation rather than a general speed claim. Every checked
+artifact/log surface and all 2,000 ordered `fileLoc` values remained exact.
 
 `ffmpeg` and `ffprobe` must be available on `PATH` for RF container inputs
 outside the narrowly gated direct 40 kHz mono PCM16 raw-FLAC route. Direct

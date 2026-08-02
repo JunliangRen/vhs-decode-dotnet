@@ -2059,6 +2059,44 @@ once-per-second candidate working-set sample was 779.98 MiB, Gen2 collections
 moved from 42 to 40, and both runs completed without progressive sampled
 growth or OOM.
 
+### Decoder-owned PAL chroma upconversion
+
+The latest Exact `current` PAL path applies the heterodyne multiplier directly
+to the decoder-owned resampled chroma field. The public read-only API still
+allocates an independent output. Before mutating internal storage, the new path
+validates phase-table lengths and proves that the normalized NumPy-style line
+ranges are non-overlapping and either sorted or contain one legal tail-to-head
+wrap. Unsupported sequences fall back before the first write. Multiplication,
+the `(double)(float)` conversion point, line order, gap zeroing, later filters,
+comb, gain, and cross-field state are unchanged.
+
+Focused xUnit v3 coverage compares every output `double` bit with the allocating
+reference for sorted ranges, gaps, and the real PAL single-wrap layout. A
+duplicate-range case proves fallback leaves its input untouched, and a
+production-sized complete PAL decode matches the copying path while allocating
+less than 256 KiB after warm-up with caller-owned UInt16 output. The zero-warning
+Release build and all 1,236 tests passed on native hardware, with AVX2 disabled,
+and with every hardware intrinsic disabled.
+
+On the same private local PAL VHS RF sample, a matched 80-frame allocation trace
+reduced sampled object bytes from 872,958,736 to 415,617,272 (52.39%) and sampled
+allocation amount from 2,065,610,264 to 1,606,599,696 (22.22%). The baseline's
+235,891,312-byte `UpconvertChroma` and 221,894,168-byte field-copy allocation
+stacks disappeared. Six balanced 80-frame Exact `current`/20-worker pairs were
+mixed at four candidate wins and two losses. Mean wall time changed from 11.942
+to 11.776 seconds (1.39%), so short throughput is classified as near-neutral.
+
+A matched 1,000-frame/2,000-field counter pair reduced managed allocation from
+8.254 to 3.009 GiB (63.54%), GC pause from 0.134 to 0.113 seconds (15.63%), Gen2
+collections from 20 to 2, and maximum sampled working set from 773.29 to
+439.86 MiB (43.12%). Candidate first/last-quarter working-set medians were
+405.84/406.51 MiB, with no progressive growth or OOM. Wall time changed from
+74.130 to 73.217 seconds (1.23%; 1.25% more throughput), which remains a scoped
+single-pair observation. Luma, chroma, raw JSON, normalized stderr/log, and all
+2,000 ordered `fileLoc` values matched. Twelve separate gates covered Exact
+v0.4.0/current at explicit zero, omitted/default, and 20 workers and also matched
+stdout and cross-thread determinism.
+
 </details>
 
 <!-- SECTION: build -->
@@ -2083,7 +2121,7 @@ Requirements:
 .\tools\build-ipp-native.ps1
 dotnet restore VHSDecodeDotNet.slnx
 dotnet build VHSDecodeDotNet.slnx -c Release --no-restore
-dotnet test --solution VHSDecodeDotNet.slnx -c Release --no-build --no-restore --minimum-expected-tests 1234
+dotnet test --solution VHSDecodeDotNet.slnx -c Release --no-build --no-restore --minimum-expected-tests 1236
 ```
 
 The first command includes the optional `ipp-fast` native artifact; omit it for
@@ -2096,7 +2134,7 @@ deployment computer. Binary-only single-file releases embed
 sidecar license files. An Exact-only build may omit the native build step.
 
 The current formal Release build has zero warnings and errors. The xUnit v3
-project exposes **1,234** independently discoverable tests to both
+project exposes **1,236** independently discoverable tests to both
 `dotnet test` and Visual Studio Test Explorer.
 
 <!-- SECTION: usage -->

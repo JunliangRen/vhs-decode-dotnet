@@ -38,7 +38,7 @@ evidence, and remaining gaps.
   EIAJ, and supported PAL/NTSC variants.
 - TBC utility tools, the double-click GUI, and developer plotting windows are
   intentionally out of scope.
-- The Visual Studio 2026 `.slnx` solution has **1,234** standard xUnit v3 tests
+- The Visual Studio 2026 `.slnx` solution has **1,236** standard xUnit v3 tests
   that are visible in Test Explorer and runnable with `dotnet test`.
 
 <!-- SECTION: start -->
@@ -157,6 +157,20 @@ candidate working-set sample was 779.98 MiB, with no progressive sampled
 growth. The fixed `.lds` table retains its prior audited snapshot because that
 exact private matrix sample was unavailable for this refresh.
 
+The latest Exact `current` PAL VHS pass reuses the decoder-owned chroma field
+during heterodyne upconversion instead of allocating another full-field
+`double[]`. On the same private local PAL VHS RF sample, six balanced 80-frame
+20-worker pairs were mixed at four candidate wins and two losses; mean wall
+time changed from 11.942 to 11.776 seconds (1.39%), so throughput remains
+classified as near-neutral. A matched 1,000-frame counter pair reduced managed
+allocation from 8.254 to 3.009 GiB (63.54%), Gen2 collections from 20 to 2,
+and maximum sampled working set from 773.29 to 439.86 MiB. First/last-quarter
+candidate working-set medians were 405.84/406.51 MiB without progressive
+growth. Wall time changed from 74.130 to 73.217 seconds (1.23%). Luma, chroma,
+raw JSON, normalized stderr/log, and all 2,000 ordered `fileLoc` values matched;
+separate profile/thread gates also matched stdout and determinism. The fixed
+`.lds` matrix is unaffected and remains the preceding audited snapshot.
+
 Each .NET cell shows median wall time followed by speedup versus its
 profile-matched Python column; values below `1.000x` are slower. Python PR341
 is merge commit `2f21e8ed6018b14561396cc95f1f6828054470b8`, the upstream peer
@@ -199,7 +213,7 @@ The pinned SDK is .NET `11.0.100-preview.6.26359.118`.
 dotnet restore VHSDecodeDotNet.slnx
 dotnet build VHSDecodeDotNet.slnx -c Release --no-restore
 dotnet test --solution VHSDecodeDotNet.slnx -c Release `
-  --no-build --no-restore --minimum-expected-tests 1234
+  --no-build --no-restore --minimum-expected-tests 1236
 ```
 
 Open `VHSDecodeDotNet.slnx` in Visual Studio 2026 to build, debug, and run the

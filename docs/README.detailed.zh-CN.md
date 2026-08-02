@@ -1645,6 +1645,37 @@ stderr/日志和全部有序 `fileLoc` 一致，平均墙钟从 78.559 降至 76
 分配或 GC 改善。候选每秒一次工作集采样的最高值为 779.98 MiB，Gen2 collection
 从 42 变为 40；两次运行均完成，没有渐进采样增长或 OOM。
 
+### 复用解码器拥有的 PAL 色度上变频缓冲区
+
+最新的 Exact `current` PAL 路径直接在解码器拥有的重采样色度 field 上执行
+heterodyne 乘法。公开只读 API 仍分配独立输出。内部路径在第一次写入前会验证 phase
+table 长度，并证明归一化后的 NumPy 风格行区间互不重叠，且要么有序、要么只包含
+一次合法的尾部到头部回绕；不支持的序列会在修改输入前回退。乘法、
+`(double)(float)` 转换点、行顺序、空洞清零、后续 filter、comb、gain 和跨 field
+状态均保持不变。
+
+新增的 xUnit v3 聚焦测试对有序区间、空洞和真实 PAL 单次回绕布局逐个比较
+`double` 位模式；重复区间还验证回退不会修改输入。production-size 的完整 PAL
+解码与复制路径一致，并在预热且由调用方提供 UInt16 输出时分配少于 256 KiB。
+零警告 Release build 和全部 1,236 项测试在原生硬件、禁用 AVX2、禁用全部硬件
+Intrinsic 三种环境下通过。
+
+在同一份私有本地 PAL VHS RF 样本上，一组匹配的 80 帧 allocation trace 把 sampled
+object bytes 从 872,958,736 降到 415,617,272（减少 52.39%），sampled allocation
+amount 从 2,065,610,264 降到 1,606,599,696（减少 22.22%）。基线中的
+235,891,312-byte `UpconvertChroma` 和 221,894,168-byte field-copy 分配栈消失。
+6 组平衡顺序的 80 帧 Exact `current`/20-worker 配对中候选 4 胜 2 负，平均墙钟从
+11.942 变为 11.776 秒（缩短 1.39%），因此短跑吞吐归类为近似中性。
+
+一组匹配的 1000 帧/2000 field counters 配对把托管分配从 8.254 降到 3.009 GiB
+（减少 63.54%），GC pause 从 0.134 降到 0.113 秒（减少 15.63%），Gen2 回收从
+20 次降到 2 次，最大采样工作集从 773.29 降到 439.86 MiB（减少 43.12%）。候选
+首末四分之一区间的工作集中位数为 405.84/406.51 MiB，没有渐进增长或 OOM。墙钟
+从 74.130 降到 73.217 秒（缩短 1.23%，吞吐提高 1.25%），这仍然只是范围明确的
+单组观测。亮度、色度、原始 JSON、归一化 stderr/日志及全部 2000 个有序 `fileLoc`
+一致。另行执行的 12 次门禁覆盖 Exact v0.4.0/current 的显式零线程、默认省略参数和
+20 workers，并匹配 stdout 与跨线程确定性。
+
 </details>
 
 <!-- SECTION: build -->
@@ -1667,7 +1698,7 @@ stderr/日志和全部有序 `fileLoc` 一致，平均墙钟从 78.559 降至 76
 .\tools\build-ipp-native.ps1
 dotnet restore VHSDecodeDotNet.slnx
 dotnet build VHSDecodeDotNet.slnx -c Release --no-restore
-dotnet test --solution VHSDecodeDotNet.slnx -c Release --no-build --no-restore --minimum-expected-tests 1234
+dotnet test --solution VHSDecodeDotNet.slnx -c Release --no-build --no-restore --minimum-expected-tests 1236
 ```
 
 第一条命令用于包含可选的 `ipp-fast` 原生产物；只构建 Exact 时可以省略。
@@ -1678,7 +1709,7 @@ Intel oneAPI。只含二进制的单文件发布会嵌入 `vhsdecode_ipp.dll` �
 notice，不会额外生成许可证 sidecar 文件。只构建 Exact 后端时可以省略原生构建步骤。
 
 当前正式 Release 构建为零警告、零错误。xUnit v3 项目向
-`dotnet test` 和 Visual Studio Test Explorer 暴露 **1,234** 个可独立发现的测试。
+`dotnet test` 和 Visual Studio Test Explorer 暴露 **1,236** 个可独立发现的测试。
 
 <!-- SECTION: usage -->
 
