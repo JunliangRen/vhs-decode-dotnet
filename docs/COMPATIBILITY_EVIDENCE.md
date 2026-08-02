@@ -2179,12 +2179,31 @@ dotnet test --solution VHSDecodeDotNet.slnx --no-build
 ```
 
 The current formal solution build completes with zero warnings and errors, and
-the xUnit v3 project exposes 1,224 independently discoverable tests
+the xUnit v3 project exposes 1,231 independently discoverable tests
 to `dotnet test` and Visual Studio Test Explorer. On the
 same Windows machine and fixtures, Release wall-clock measurements for one
 frame were 2.346 s versus 7.193 s for NTSC VHS and 1.651 s versus 5.865 s for
 NTSC LD (this port versus the v0.4.0 Python virtual environment); all output
 hashes listed above remained identical.
+
+### Bounded libsndfile RF input blocks
+
+The compact parallel raw-FLAC RF path now returns exact 32K input arrays to a
+loader-owned pool capped at 48 entries (about 12 MiB). Sequential libsndfile
+decode, public/diagnostic reads, arithmetic, and native PCM16 conversion remain
+unchanged; fallback results are copied before entering loader-owned storage.
+
+On one private local PAL VHS RF capture, a 100-frame trace reduced sampled
+allocation from 3,561,003,024 to 986,114,768 bytes (72.31%) with exact luma,
+chroma, raw JSON, normalized logs, and ordered `fileLoc`. Two opposite-order
+1,000-frame `current`/Exact/20-worker pairs reduced combined allocation from
+43.96 to 16.63 GiB (62.18%), GC pause from 0.380 to 0.253 seconds (33.46%), and
+Gen2 collections from 151 to 40. Combined wall time changed by only -0.28%, so
+throughput is classified as neutral. Candidate working set stayed below
+772 MiB, and steady 100-frame intervals remained near 7.0 seconds without OOM
+or progressive slowdown. Twelve v0.4.0/current and 0/default/20-worker gates
+matched luma, chroma, raw JSON, stdout, normalized stderr/log, and ordered
+`fileLoc` across baseline, candidate, and worker counts.
 
 `ffmpeg` and `ffprobe` must be available on `PATH` for RF container inputs
 outside the narrowly gated direct 40 kHz mono PCM16 raw-FLAC route. Direct

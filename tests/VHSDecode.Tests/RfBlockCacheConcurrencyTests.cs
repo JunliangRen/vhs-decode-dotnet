@@ -192,6 +192,36 @@ public sealed class RfBlockCacheConcurrencyTests
         Assert.Equal(0, fullLoader.CachedReusableDecodedBufferCount);
     }
 
+    [Fact(DisplayName = "Compact RF input reuse can be limited to parallel decode")]
+    public void CompactRfInputReuseCanBeLimitedToParallelDecode()
+    {
+        var serialLoader = new PolicySampleLoader(reuseForSequentialDecode: false);
+        using (var serialDecoder = BuildDecoder(
+            serialLoader,
+            workerThreads: 1,
+            retainRfDiagnosticChannels: false))
+        {
+            Assert.NotNull(serialDecoder.Read(Stream.Null, begin: 0, length: 24));
+        }
+
+        Assert.True(serialLoader.ReadCount > 0);
+        Assert.Equal(0, serialLoader.ReusableReadCount);
+        Assert.Equal(0, serialLoader.ReturnCount);
+
+        var parallelLoader = new PolicySampleLoader(reuseForSequentialDecode: false);
+        using (var parallelDecoder = BuildDecoder(
+            parallelLoader,
+            workerThreads: 4,
+            retainRfDiagnosticChannels: false))
+        {
+            Assert.NotNull(parallelDecoder.Read(Stream.Null, begin: 0, length: 24));
+        }
+
+        Assert.Equal(0, parallelLoader.ReadCount);
+        Assert.True(parallelLoader.ReusableReadCount > 0);
+        Assert.Equal(parallelLoader.ReusableReadCount, parallelLoader.ReturnCount);
+    }
+
     [Fact(DisplayName = "Parallel decode failures return every compact packed LDS input")]
     public void ParallelDecodeFailuresReturnEveryCompactPackedLdsInput()
     {
@@ -1072,6 +1102,45 @@ public sealed class RfBlockCacheConcurrencyTests
                 .Select(index => (double)(sample + index))
                 .ToArray();
         }
+    }
+
+    private sealed class PolicySampleLoader(bool reuseForSequentialDecode)
+        : IReusableRfSampleLoader
+    {
+        private int _readCount;
+        private int _reusableReadCount;
+        private int _returnCount;
+
+        public int ReadCount => Volatile.Read(ref _readCount);
+
+        public int ReusableReadCount => Volatile.Read(ref _reusableReadCount);
+
+        public int ReturnCount => Volatile.Read(ref _returnCount);
+
+        bool IReusableRfSampleLoader.ReuseForSequentialDecode => reuseForSequentialDecode;
+
+        public double[] Read(Stream stream, long sample, int readLength)
+        {
+            Interlocked.Increment(ref _readCount);
+            return CreateSamples(sample, readLength);
+        }
+
+        double[] IReusableRfSampleLoader.ReadReusable(
+            Stream stream,
+            long sample,
+            int readLength)
+        {
+            Interlocked.Increment(ref _reusableReadCount);
+            return CreateSamples(sample, readLength);
+        }
+
+        void IReusableRfSampleLoader.ReturnReusable(double[] buffer)
+            => Interlocked.Increment(ref _returnCount);
+
+        private static double[] CreateSamples(long sample, int readLength)
+            => Enumerable.Range(0, readLength)
+                .Select(index => (double)(sample + index))
+                .ToArray();
     }
 
     private sealed class FailsAfterReadCountLoader(int successfulReads) : IRfSampleLoader

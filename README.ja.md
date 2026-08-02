@@ -36,7 +36,7 @@ upstream release `v0.4.0`、commit
 - VHS family には VHS/S-VHS、Betamax、Video8/Hi8、U-matic、Type C、EIAJ、
   upstream が対応する PAL/NTSC variant が含まれます。
 - TBC utility、ダブルクリック GUI、開発者向け plot window は対象外です。
-- Visual Studio 2026 の `.slnx` には **1,224** 件の標準 xUnit v3 test があり、
+- Visual Studio 2026 の `.slnx` には **1,231** 件の標準 xUnit v3 test があり、
   Test Explorer と `dotnet test` の両方で実行できます。
 
 <!-- SECTION: start -->
@@ -129,6 +129,15 @@ FFmpeg baseline が 8.319 s、bundled-libsndfile candidate が 7.345 s でした
 normalized stderr/log、ordered `fileLoc` 200 個はすべて一致しました。これは範囲を
 限定した single-pair observation であり、decoder 全体への一般的な speed claim ではありません。
 
+最新の direct raw-FLAC input 改善では、parallel decode/prefetch 用に最大 48 個の
+正確な 32K RF input block を保持し、sequential decode は従来の allocation behavior
+を維持します。同じ private local PAL VHS RF capture の逆順 1,000-frame
+`current`/Exact/20-worker pair 2 組で、combined managed allocation は 43.96 から
+16.63 GiB（62.18%）、GC pause は 0.380 から 0.253 秒（33.46%）へ減少しました。
+combined wall time は 155.74 から 155.31 秒（0.28%）で、throughput は neutral と
+分類します。全 output/diagnostic は一致し、candidate working set は 772 MiB 未満に
+収まりました。上の固定 `.lds` matrix は影響を受けないため、数値は変更していません。
+
 各 .NET cell は wall-time median と profile が対応する Python 列に対する
 speedup の順です。`1.000x` 未満は Python より遅いことを示します。Python
 PR341 は merge commit `2f21e8ed6018b14561396cc95f1f6828054470b8` で、
@@ -169,7 +178,7 @@ path を維持します。
 dotnet restore VHSDecodeDotNet.slnx
 dotnet build VHSDecodeDotNet.slnx -c Release --no-restore
 dotnet test --solution VHSDecodeDotNet.slnx -c Release `
-  --no-build --no-restore --minimum-expected-tests 1224
+  --no-build --no-restore --minimum-expected-tests 1231
 ```
 
 Visual Studio 2026 で `VHSDecodeDotNet.slnx` を開くと、build、debug、

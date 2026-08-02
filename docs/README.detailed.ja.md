@@ -1924,6 +1924,38 @@ stderr/log、ordered `fileLoc` がすべて一致しました。
 working set は 834 MiB 未満で、前半/後半の 100-frame median は 7.07～7.09 秒を
 維持し、progressive slowdown、OOM、unbounded growth はありませんでした。
 
+### Bounded libsndfile RF input reuse
+
+compact streaming pipeline は packed LDS と direct raw-FLAC loader に共通の
+internal reusable-input ownership contract を提供します。libsndfile implementation
+が保持するのは、正確に 32,768 samples の `double[]` block 最大 48 個、約 12 MiB
+です。これは PAL field 1 個の parallel block batch と prefetch を収容し、oversized
+array は保持しません。native PCM16 sample は従来と同じ
+`output[i] = samples[i]` で変換します。fallback output は pool に入る前に
+loader-owned storage へ copy され、public/diagnostic read は独立 array のままです。
+
+最初の candidate は sequential decode でも libsndfile block を再利用しましたが、
+default-worker pair 4 組で約 6% の regression が出たため却下しました。採用した実装は
+parallel block decode/prefetch だけで libsndfile reuse を有効にします。guard 後の
+default-worker pair 4 組は方向が混在し、median wall time は 61.43 から 61.61 秒
+（+0.29%）で neutral と分類します。packed LDS の既存 sequential reuse policy は
+維持します。
+
+同じ private local PAL VHS RF capture の同一 parameter 100-frame allocation trace は
+3,561,003,024 から 986,114,768 sampled bytes（72.31%）へ減少し、luma、chroma、
+raw JSON、normalized log、ordered `fileLoc` は一致しました。逆順 1,000-frame
+`current`/Exact/20-worker pair 2 組では build ごとに 4,000 fields を完了し、全 surface
+が一致しました。combined allocation は 43.96 から 16.63 GiB（62.18%）、GC pause
+は 0.380 から 0.253 秒（33.46%）、Gen2 collection は 151 から 40 へ減少しました。
+combined wall time は 155.74 から 155.31 秒（0.28%）で throughput は neutral です。
+candidate working set は 772 MiB 未満、steady 100-frame interval は約 7.0 秒で、
+progressive slowdown、OOM、unbounded growth はありませんでした。
+
+baseline/candidate gate 12 組は Exact v0.4.0/`current` の explicit `--threads 0`、
+thread option 省略時の default、`--threads 20` を対象にしました。luma、chroma、raw
+JSON、stdout、normalized stderr/log、ordered `fileLoc` は pre-change build と各
+worker-count reference に一致しました。
+
 </details>
 
 <!-- SECTION: build -->
@@ -1946,7 +1978,7 @@ working set は 834 MiB 未満で、前半/後半の 100-frame median は 7.07�
 .\tools\build-ipp-native.ps1
 dotnet restore VHSDecodeDotNet.slnx
 dotnet build VHSDecodeDotNet.slnx -c Release --no-restore
-dotnet test --solution VHSDecodeDotNet.slnx -c Release --no-build --no-restore --minimum-expected-tests 1224
+dotnet test --solution VHSDecodeDotNet.slnx -c Release --no-build --no-restore --minimum-expected-tests 1231
 ```
 
 最初の command は optional `ipp-fast` native artifact を含めるためのものです。
@@ -1959,7 +1991,7 @@ third-party notice を埋め込み、license sidecar file は追加しません�
 
 現在の正式な Release build は warning 0、error 0 です。xUnit v3 project は
 `dotnet test` と Visual Studio Test Explorer の両方で個別に検出できる
-**1,224** tests を公開します。
+**1,231** tests を公開します。
 
 <!-- SECTION: usage -->
 

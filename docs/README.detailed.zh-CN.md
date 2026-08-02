@@ -1587,6 +1587,34 @@ fields，所有比较表面都一致。合并累计分配下降 0.18%，GC pause
 834 MiB 以下，前半和后半的每 100 帧中位数都在 7.07 到 7.09 秒之间，没有渐进减速、
 OOM 或无界增长。
 
+### 有界 libsndfile RF 输入复用
+
+紧凑 streaming pipeline 现在为 packed LDS 和直接 raw-FLAC loader 提供同一个内部
+可复用输入所有权协议。libsndfile 最多保留 48 个精确长度为 32768 samples 的
+`double[]` block，约 12 MiB；这足以覆盖一个 PAL field 的并行 block batch 和
+prefetch，同时不会接收超长数组。每个原生 PCM16 sample 仍使用完全相同的
+`output[i] = samples[i]` 赋值进行转换。fallback 输出在进入池之前会复制到 loader
+自有存储；公开读取和诊断读取仍返回独立数组。
+
+最初候选也在串行 decode 中复用 libsndfile block；四组默认 worker 配对显示约 6%
+回归，因此该路径已被否决。保留实现只在并行 block decode 和 prefetch 中启用
+libsndfile 复用。加入保护后，四组默认 worker 配对方向混合，中位墙钟从 61.43 变为
+61.61 秒（+0.29%），归类为中性。packed LDS 保留原有的串行复用策略。
+
+在同一个私有本地 PAL VHS RF 样本上，完全相同参数的 100 帧 allocation trace 从
+3,561,003,024 降到 986,114,768 sampled bytes（72.31%）；亮度、色度、原始 JSON、
+归一化日志和有序 `fileLoc` 一致。两组相反顺序的 1000 帧
+`current`/Exact/20-worker 配对随后让每个 build 完成 4000 fields，所有比较表面都
+一致。合并分配从 43.96 降到 16.63 GiB（62.18%），GC pause 从 0.380 降到
+0.253 秒（33.46%），Gen2 collection 从 151 降到 40。合并墙钟从 155.74 变为
+155.31 秒（0.28%），因此吞吐仍归类为中性。候选工作集保持在 772 MiB 以下，
+稳定阶段每 100 帧约 7.0 秒，没有渐进减速、OOM 或无界增长。
+
+12 组 baseline/candidate 门禁覆盖 Exact v0.4.0 和 `current` 的显式
+`--threads 0`、省略参数的默认线程和 `--threads 20`。亮度、色度、原始 JSON、
+stdout、归一化 stderr/日志及有序 `fileLoc` 与修改前 build 和各 worker 数基准全部
+一致。
+
 </details>
 
 <!-- SECTION: build -->
@@ -1609,7 +1637,7 @@ OOM 或无界增长。
 .\tools\build-ipp-native.ps1
 dotnet restore VHSDecodeDotNet.slnx
 dotnet build VHSDecodeDotNet.slnx -c Release --no-restore
-dotnet test --solution VHSDecodeDotNet.slnx -c Release --no-build --no-restore --minimum-expected-tests 1224
+dotnet test --solution VHSDecodeDotNet.slnx -c Release --no-build --no-restore --minimum-expected-tests 1231
 ```
 
 第一条命令用于包含可选的 `ipp-fast` 原生产物；只构建 Exact 时可以省略。
@@ -1620,7 +1648,7 @@ Intel oneAPI。只含二进制的单文件发布会嵌入 `vhsdecode_ipp.dll` �
 notice，不会额外生成许可证 sidecar 文件。只构建 Exact 后端时可以省略原生构建步骤。
 
 当前正式 Release 构建为零警告、零错误。xUnit v3 项目向
-`dotnet test` 和 Visual Studio Test Explorer 暴露 **1,224** 个可独立发现的测试。
+`dotnet test` 和 Visual Studio Test Explorer 暴露 **1,231** 个可独立发现的测试。
 
 <!-- SECTION: usage -->
 

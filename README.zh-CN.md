@@ -33,7 +33,7 @@
 - VHS 家族包括 VHS/S-VHS、Betamax、Video8/Hi8、U-matic、Type C、EIAJ
   以及上游支持的 PAL/NTSC 变体。
 - TBC 工具、双击启动的用户 GUI 和开发者绘图窗口明确不在范围内。
-- Visual Studio 2026 `.slnx` 包含 **1,224** 项标准 xUnit v3 测试；测试可在
+- Visual Studio 2026 `.slnx` 包含 **1,231** 项标准 xUnit v3 测试；测试可在
   Test Explorer 中查看，也可用 `dotnet test` 运行。
 
 <!-- SECTION: start -->
@@ -120,6 +120,13 @@ libsndfile 候选分别用时 8.319 s 和 7.345 s（墙钟缩短 11.71%，吞吐
 亮度、色度、原始 JSON、stdout、归一化 stderr/日志以及全部 200 个有序 `fileLoc`
 完全一致。这只是范围明确的单组观测，不是对所有解码的通用加速声明。
 
+最新的直接 raw-FLAC 输入优化会为并行 decode 和 prefetch 保留最多 48 个精确 32K
+RF 输入块；串行 decode 仍保持原来的分配行为。在同一个私有本地 PAL VHS RF 样本上，
+两组相反顺序的 1000 帧 `current`/Exact/20-worker 配对把合并托管分配从 43.96 降到
+16.63 GiB（62.18%），GC pause 从 0.380 降到 0.253 秒（33.46%）。合并墙钟从
+155.74 变为 155.31 秒（0.28%），因此吞吐归类为中性。全部输出和诊断一致，候选
+工作集保持在 772 MiB 以下。上面的固定 `.lds` 矩阵不受影响，因此数值保持不变。
+
 每个 .NET 单元格依次给出墙钟中位数和相对同 profile Python 列的倍速；低于
 `1.000x` 表示更慢。Python PR341 使用合并提交
 `2f21e8ed6018b14561396cc95f1f6828054470b8`，它是 `current` 的上游对应版本。
@@ -156,7 +163,7 @@ Ogg/FLAC、立体声、PCM24、其他采样率和未完成的文件头也继续�
 dotnet restore VHSDecodeDotNet.slnx
 dotnet build VHSDecodeDotNet.slnx -c Release --no-restore
 dotnet test --solution VHSDecodeDotNet.slnx -c Release `
-  --no-build --no-restore --minimum-expected-tests 1224
+  --no-build --no-restore --minimum-expected-tests 1231
 ```
 
 在 Visual Studio 2026 中打开 `VHSDecodeDotNet.slnx`，即可构建、调试并通过

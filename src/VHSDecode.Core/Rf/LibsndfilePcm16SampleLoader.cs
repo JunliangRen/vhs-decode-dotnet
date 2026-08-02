@@ -4,15 +4,21 @@ using System.Runtime.InteropServices;
 
 namespace VHSDecode.Core.Rf;
 
-internal sealed class LibsndfilePcm16SampleLoader : IRfSampleLoader, IDisposable
+internal sealed class LibsndfilePcm16SampleLoader : IReusableRfSampleLoader, IDisposable
 {
+    internal const int MaximumRetainedDecodedBufferLength = 32 * 1024;
+    internal const int MaximumRetainedDecodedBufferCount = 48;
     private readonly string _filename;
     private readonly Func<string, ILibsndfilePcm16Source> _openSource;
     private readonly IRfSampleLoader _fallback;
     private readonly object _gate = new();
+    private readonly object _decodedBufferLock = new();
+    private readonly double[]?[] _decodedBuffers =
+        new double[]?[MaximumRetainedDecodedBufferCount];
 
     private ILibsndfilePcm16Source? _source;
     private long _positionFrames;
+    private int _decodedBufferCount;
     private bool _fallbackActive;
     private bool _disposed;
 
@@ -36,6 +42,52 @@ internal sealed class LibsndfilePcm16SampleLoader : IRfSampleLoader, IDisposable
     }
 
     public double[]? Read(Stream stream, long sample, int readLength)
+        => ReadCore(stream, sample, readLength, reuseDecodedBuffer: false);
+
+    bool IReusableRfSampleLoader.ReuseForSequentialDecode => false;
+
+    internal double[]? ReadReusable(Stream stream, long sample, int readLength)
+        => ReadCore(stream, sample, readLength, reuseDecodedBuffer: true);
+
+    double[]? IReusableRfSampleLoader.ReadReusable(
+        Stream stream,
+        long sample,
+        int readLength)
+        => ReadReusable(stream, sample, readLength);
+
+    internal int CachedReusableDecodedBufferCount
+    {
+        get
+        {
+            lock (_decodedBufferLock)
+            {
+                return _decodedBufferCount;
+            }
+        }
+    }
+
+    internal void ReturnReusable(double[] buffer)
+    {
+        ArgumentNullException.ThrowIfNull(buffer);
+        lock (_decodedBufferLock)
+        {
+            if (!_disposed
+                && buffer.Length <= MaximumRetainedDecodedBufferLength
+                && _decodedBufferCount < _decodedBuffers.Length)
+            {
+                _decodedBuffers[_decodedBufferCount++] = buffer;
+            }
+        }
+    }
+
+    void IReusableRfSampleLoader.ReturnReusable(double[] buffer)
+        => ReturnReusable(buffer);
+
+    private double[]? ReadCore(
+        Stream stream,
+        long sample,
+        int readLength,
+        bool reuseDecodedBuffer)
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
         ArgumentOutOfRangeException.ThrowIfNegative(sample);
@@ -50,7 +102,7 @@ internal sealed class LibsndfilePcm16SampleLoader : IRfSampleLoader, IDisposable
             ObjectDisposedException.ThrowIf(_disposed, this);
             if (_fallbackActive)
             {
-                return _fallback.Read(stream, sample, readLength);
+                return ReadFallback(stream, sample, readLength, reuseDecodedBuffer);
             }
 
             try
@@ -59,15 +111,19 @@ internal sealed class LibsndfilePcm16SampleLoader : IRfSampleLoader, IDisposable
                 if (sample > source.Frames
                     || readLength > source.Frames - sample)
                 {
-                    return ReadAtNativeLengthBoundary(stream, sample, readLength);
+                    return ReadAtNativeLengthBoundary(
+                        stream,
+                        sample,
+                        readLength,
+                        reuseDecodedBuffer);
                 }
 
-                return ReadNative(source, sample, readLength);
+                return ReadNative(source, sample, readLength, reuseDecodedBuffer);
             }
             catch (LibsndfilePcm16FallbackException)
             {
                 ActivateFallback();
-                return _fallback.Read(stream, sample, readLength);
+                return ReadFallback(stream, sample, readLength, reuseDecodedBuffer);
             }
         }
     }
@@ -75,7 +131,8 @@ internal sealed class LibsndfilePcm16SampleLoader : IRfSampleLoader, IDisposable
     private double[]? ReadNative(
         ILibsndfilePcm16Source source,
         long sample,
-        int readLength)
+        int readLength,
+        bool reuseDecodedBuffer)
     {
         if (sample != _positionFrames)
         {
@@ -105,7 +162,9 @@ internal sealed class LibsndfilePcm16SampleLoader : IRfSampleLoader, IDisposable
                 return null;
             }
 
-            double[] output = GC.AllocateUninitializedArray<double>(readLength);
+            double[] output = reuseDecodedBuffer
+                ? TakeDecodedBuffer(readLength)
+                : GC.AllocateUninitializedArray<double>(readLength);
             for (int i = 0; i < output.Length; i++)
             {
                 output[i] = samples[i];
@@ -119,16 +178,61 @@ internal sealed class LibsndfilePcm16SampleLoader : IRfSampleLoader, IDisposable
         }
     }
 
+    private double[] TakeDecodedBuffer(int length)
+    {
+        lock (_decodedBufferLock)
+        {
+            for (int i = _decodedBufferCount - 1; i >= 0; i--)
+            {
+                double[] candidate = _decodedBuffers[i]!;
+                if (candidate.Length == length)
+                {
+                    int last = --_decodedBufferCount;
+                    _decodedBuffers[i] = _decodedBuffers[last];
+                    _decodedBuffers[last] = null;
+                    return candidate;
+                }
+            }
+        }
+
+        return GC.AllocateUninitializedArray<double>(length);
+    }
+
+    private double[]? ReadFallback(
+        Stream stream,
+        long sample,
+        int readLength,
+        bool reuseDecodedBuffer)
+    {
+        double[]? result = _fallback.Read(stream, sample, readLength);
+        if (!reuseDecodedBuffer || result is null)
+        {
+            return result;
+        }
+
+        double[] output = TakeDecodedBuffer(result.Length);
+        result.AsSpan().CopyTo(output);
+        return output;
+    }
+
     private double[]? ReadAtNativeLengthBoundary(
         Stream stream,
         long sample,
-        int readLength)
+        int readLength,
+        bool reuseDecodedBuffer)
     {
         try
         {
             double[]? result = _fallback.Read(stream, sample, readLength);
             ActivateFallback();
-            return result;
+            if (!reuseDecodedBuffer || result is null)
+            {
+                return result;
+            }
+
+            double[] output = TakeDecodedBuffer(result.Length);
+            result.AsSpan().CopyTo(output);
+            return output;
         }
         catch (NotSupportedException ex) when (ex.InnerException is Win32Exception)
         {
@@ -156,6 +260,12 @@ internal sealed class LibsndfilePcm16SampleLoader : IRfSampleLoader, IDisposable
                 if (_fallback is IDisposable disposableFallback)
                 {
                     disposableFallback.Dispose();
+                }
+
+                lock (_decodedBufferLock)
+                {
+                    Array.Clear(_decodedBuffers);
+                    _decodedBufferCount = 0;
                 }
             }
         }
