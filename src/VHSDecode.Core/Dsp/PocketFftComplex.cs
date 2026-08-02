@@ -13,6 +13,10 @@ public static class PocketFftComplex
     [ThreadStatic]
     private static Complex[]? _packetStage;
     [ThreadStatic]
+    private static Complex[]? _packetFirst;
+    [ThreadStatic]
+    private static Complex[]? _packetSecond;
+    [ThreadStatic]
     private static Complex[]? _realInput;
     [ThreadStatic]
     private static Value[]? _planValues;
@@ -77,7 +81,8 @@ public static class PocketFftComplex
         int length = input.Length;
         SinCos2PiByN roots = Roots.GetOrAdd(length, static value => new SinCos2PiByN(value));
         Complex[] stage = EnsureCapacity(ref _packetStage, length);
-        var firstPacket = new Complex[firstPacketLength];
+        Complex[] firstPacketBuffer = EnsureCapacity(ref _packetFirst, firstPacketLength);
+        Span<Complex> firstPacket = firstPacketBuffer.AsSpan(0, firstPacketLength);
         for (int i = 0; i < secondPacketLength; i++)
         {
             for (int m = 0; m < firstPacketLength; m++)
@@ -103,7 +108,8 @@ public static class PocketFftComplex
             }
         }
 
-        var secondPacket = new Complex[secondPacketLength];
+        Complex[] secondPacketBuffer = EnsureCapacity(ref _packetSecond, secondPacketLength);
+        Span<Complex> secondPacket = secondPacketBuffer.AsSpan(0, secondPacketLength);
         for (int k = 0; k < firstPacketLength; k++)
         {
             int offset = secondPacketLength * k;
