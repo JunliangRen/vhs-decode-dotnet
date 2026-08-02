@@ -408,23 +408,22 @@ speedup, and wall-time reduction against its profile-matched Python column:
 <!-- LATEST_PERFORMANCE_BEGIN -->
 | CLI mode (workers) | Python v0.4.0 | Python PR341 | Exact + v0.4.0 | Exact + current | IPP-fast + v0.4.0 | IPP-fast + current |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| default (5) | 15.207 s | 16.780 s | 4.389 s / 3.465x / 71.14% | 5.896 s / 2.846x / 64.86% | 3.609 s / 4.213x / 76.27% | 4.654 s / 3.606x / 72.26% |
+| default (5) | 15.207 s | 16.780 s | 4.389 s / 3.465x / 71.14% | 5.163 s / 3.250x / 69.23% | 3.609 s / 4.213x / 76.27% | 4.354 s / 3.854x / 74.05% |
 | `--threads 1` | 17.694 s | 19.414 s | 10.065 s / 1.758x / 43.11% | 13.488 s / 1.439x / 30.52% | 7.215 s / 2.453x / 59.23% | 10.256 s / 1.893x / 47.17% |
-| `--threads 5` | 15.719 s | 17.801 s | 4.282 s / 3.671x / 72.76% | 5.982 s / 2.976x / 66.40% | 3.568 s / 4.406x / 77.30% | 5.082 s / 3.503x / 71.45% |
-| `--threads 10` | 16.037 s | 18.266 s | 3.494 s / 4.589x / 78.21% | 4.835 s / 3.778x / 73.53% | 3.098 s / 5.177x / 80.68% | 4.403 s / 4.149x / 75.90% |
-| `--threads 20` | 16.405 s | 18.395 s | 3.235 s / 5.071x / 80.28% | 4.368 s / 4.212x / 76.26% | 2.654 s / 6.182x / 83.82% | 4.397 s / 4.183x / 76.10% |
+| `--threads 5` | 15.719 s | 17.801 s | 4.282 s / 3.671x / 72.76% | 5.353 s / 3.325x / 69.93% | 3.568 s / 4.406x / 77.30% | 4.230 s / 4.209x / 76.24% |
+| `--threads 10` | 16.037 s | 18.266 s | 3.494 s / 4.589x / 78.21% | 4.027 s / 4.536x / 77.96% | 3.098 s / 5.177x / 80.68% | 3.701 s / 4.935x / 79.74% |
+| `--threads 20` | 16.405 s | 18.395 s | 3.235 s / 5.071x / 80.28% | 4.336 s / 4.243x / 76.43% | 2.654 s / 6.182x / 83.82% | 3.856 s / 4.770x / 79.04% |
 <!-- LATEST_PERFORMANCE_END -->
 
 The benchmark ran on 2026-08-02 using main commit
 `c92af1dfd0f96cd7f2d49f3219fb428d0f4e0865`, an Intel Core Ultra 7 265K with
 20 logical processors, Windows 11 build 26220, and .NET SDK/runtime
 `11.0.100-preview.6.26359.118`. Each of the 30 mode/profile cells was measured
-three times in interleaved order, for 90 Release runs. After raising the
-strictly independent CTI scan-line cap from 5 to 8 and tuning the VHS
-sync-edge scans, the four `current` cells at 10 and 20 workers were refreshed
-with ten alternating baseline/candidate pairs each, adding 80 Release runs.
-Exact parallelizes both scans; IPP-fast retains only the profitable initial
-scan. Python v0.4.0 was commit
+three times in interleaved order, for 90 Release runs. On 2026-08-03, the eight
+multi-worker `current` cells were refreshed with three interleaved runs of the
+final branch candidate after current burst-prefix parallelization, adding 24
+Release runs. The unchanged one-worker and v0.4.0 cells retain their earlier
+audited measurements. Python v0.4.0 was commit
 `43155200da87c0d49eb37d8ec09b1372075ee8e4`; merged PR341 was commit
 `2f21e8ed6018b14561396cc95f1f6828054470b8` (`v0.4.0-40-g2f21e8ed`).
 Python 3.14.0 used NumPy 2.4.6,
@@ -2119,6 +2118,39 @@ single-pair observation. Luma, chroma, raw JSON, normalized stderr/log, and all
 2,000 ordered `fileLoc` values matched. Twelve separate gates covered Exact
 v0.4.0/current at explicit zero, omitted/default, and 20 workers and also matched
 stdout and cross-thread determinism.
+
+### Bounded parallel current burst-prefix analysis
+
+The `current` chroma phase pass now probes the state-independent line prefix in
+fixed contiguous ranges across at most four workers. The final 16-line track
+rotation check, phase-sequence assembly, color-killer summary, all reductions,
+and every cross-field state transition remain in input order on the decode
+thread. A worker exception discards the speculative prefix and reruns the
+original serial path, preserving the prior exception and recovery behavior.
+v0.4.0 and one-worker decoding retain the serial path.
+
+An earlier 20-way prototype raised short-run CPU use but regressed 40-frame wall
+time, so it was rejected. Direct ten-pair 4-versus-8-worker testing was
+throughput-neutral; the four-worker internal cap was retained to leave RF and
+FFT work runnable under `--threads 20`. Six interleaved 160-frame Exact
+`current`/20-worker pairs all favored the retained candidate. Median wall time
+fell from 11.94 to 10.68 seconds (10.6%) while median active cores rose from
+6.11 to 6.69 and median process CPU time fell from 72.98 to 71.43 seconds.
+
+Two opposite-order 1,000-frame/2,000-field Exact `current`/20-worker comparisons
+moved wall time from 64.36/65.15 to 56.31/56.05 seconds, a 12.5-14.0% reduction.
+Luma, chroma, raw JSON, stdout, normalized stderr/log, and every ordered
+`fileLoc` matched across baseline, candidate, explicit-zero/default/20-worker
+gates, and the refreshed Exact/IPP-fast matrix. The final matrix also produced
+one deterministic hash set per current backend across default, 5, 10, and 20
+workers. All 1,244 xUnit v3/Microsoft.Testing.Platform tests passed.
+
+No allocation improvement is claimed: sampled baseline allocation was
+2.079/2.085 GiB versus 2.125/2.237 GiB for the candidate. Candidate maximum
+working-set samples were 393.8/515.0 MiB, but first/last-third medians stayed
+at 386.4/390.1 and 490.0/493.6 MiB. Both long runs completed without progressive
+growth or OOM; the extra parallel results and scheduling work remain bounded per
+field.
 
 </details>
 

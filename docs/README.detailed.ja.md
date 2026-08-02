@@ -388,22 +388,21 @@ Python v0.4.0、merge 済みの Python PR341、Exact v0.4.0、Exact
 <!-- LATEST_PERFORMANCE_BEGIN -->
 | CLI mode（workers） | Python v0.4.0 | Python PR341 | Exact + v0.4.0 | Exact + current | IPP-fast + v0.4.0 | IPP-fast + current |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| default（5） | 15.207 s | 16.780 s | 4.389 s / 3.465x / 71.14% | 5.896 s / 2.846x / 64.86% | 3.609 s / 4.213x / 76.27% | 4.654 s / 3.606x / 72.26% |
+| default（5） | 15.207 s | 16.780 s | 4.389 s / 3.465x / 71.14% | 5.163 s / 3.250x / 69.23% | 3.609 s / 4.213x / 76.27% | 4.354 s / 3.854x / 74.05% |
 | `--threads 1` | 17.694 s | 19.414 s | 10.065 s / 1.758x / 43.11% | 13.488 s / 1.439x / 30.52% | 7.215 s / 2.453x / 59.23% | 10.256 s / 1.893x / 47.17% |
-| `--threads 5` | 15.719 s | 17.801 s | 4.282 s / 3.671x / 72.76% | 5.982 s / 2.976x / 66.40% | 3.568 s / 4.406x / 77.30% | 5.082 s / 3.503x / 71.45% |
-| `--threads 10` | 16.037 s | 18.266 s | 3.494 s / 4.589x / 78.21% | 4.835 s / 3.778x / 73.53% | 3.098 s / 5.177x / 80.68% | 4.403 s / 4.149x / 75.90% |
-| `--threads 20` | 16.405 s | 18.395 s | 3.235 s / 5.071x / 80.28% | 4.368 s / 4.212x / 76.26% | 2.654 s / 6.182x / 83.82% | 4.397 s / 4.183x / 76.10% |
+| `--threads 5` | 15.719 s | 17.801 s | 4.282 s / 3.671x / 72.76% | 5.353 s / 3.325x / 69.93% | 3.568 s / 4.406x / 77.30% | 4.230 s / 4.209x / 76.24% |
+| `--threads 10` | 16.037 s | 18.266 s | 3.494 s / 4.589x / 78.21% | 4.027 s / 4.536x / 77.96% | 3.098 s / 5.177x / 80.68% | 3.701 s / 4.935x / 79.74% |
+| `--threads 20` | 16.405 s | 18.395 s | 3.235 s / 5.071x / 80.28% | 4.336 s / 4.243x / 76.43% | 2.654 s / 6.182x / 83.82% | 3.856 s / 4.770x / 79.04% |
 <!-- LATEST_PERFORMANCE_END -->
 
 この測定は 2026-08-02 に main commit
 `c92af1dfd0f96cd7f2d49f3219fb428d0f4e0865` で実行しました。host は Intel
 Core Ultra 7 265K（20 logical processor）、Windows 11 build 26220、.NET
 SDK/runtime `11.0.100-preview.6.26359.118` です。30 個の mode/profile cell を
-3 回ずつ interleaved order で測定し、合計 90 Release run です。独立した CTI
-scan-line の上限を 5 から 8 に調整し、VHS sync-edge scan を tuning した後、
-10/20 worker の 4 つの `current` cell を baseline/candidate 10 pair ずつで再測定し、
-80 Release run を追加しました。Exact は両 scan を並列化し、IPP-fast は効果のある
-initial scan だけを保持します。Python
+3 回ずつ interleaved order で測定し、合計 90 Release run です。2026-08-03、
+current burst-prefix parallelization 後の final branch candidate で 8 個の
+multi-worker `current` cell を 3 回ずつ再測定し、24 Release run を追加しました。
+変更のない one-worker と v0.4.0 cell は従来の audited value を維持します。Python
 v0.4.0 commit は `43155200da87c0d49eb37d8ec09b1372075ee8e4`、merge 済み
 PR341 commit は `2f21e8ed6018b14561396cc95f1f6828054470b8`
 （`v0.4.0-40-g2f21e8ed`）です。Python
@@ -2049,6 +2048,36 @@ single-pair observation とします。luma、chroma、raw JSON、normalized std
 2,000 個すべての ordered `fileLoc` が一致しました。別の gate 12 件は Exact
 v0.4.0/current の explicit zero、omitted/default、20 workers を対象にし、stdout と
 thread 間 determinism も一致しました。
+
+### Bounded parallel current burst-prefix analysis
+
+`current` chroma phase pass は state-independent な line prefix を固定 contiguous
+range に分け、最大 4 worker で probe します。最後の 16-line track-rotation check、
+phase-sequence assembly、color-killer summary、全 reduction、全 cross-field state
+transition は decode thread が input order で実行します。worker exception が起きた
+場合は speculative prefix を破棄して元の serial path を再実行し、従来の exception/
+recovery behavior を維持します。v0.4.0 と one-worker decode は serial のままです。
+
+初期の 20-way prototype は short-run CPU use を上げましたが 40-frame wall time を
+悪化させたため却下しました。4-versus-8-worker の direct 10-pair test は throughput
+neutral で、`--threads 20` の RF/FFT work を妨げない 4-worker internal cap を採用
+しました。160-frame Exact `current`/20-worker pair 6 組はすべて candidate が速く、
+median wall time は 11.94 から 10.68 秒（10.6% 減）、median active core は 6.11
+から 6.69、median process CPU time は 72.98 から 71.43 秒になりました。
+
+反対順序の 1,000-frame/2,000-field Exact `current`/20-worker 比較 2 回は wall time
+を 64.36/65.15 から 56.31/56.05 秒へ短縮しました（12.5-14.0%）。luma、chroma、
+raw JSON、stdout、normalized stderr/log、全 ordered `fileLoc` は baseline、candidate、
+explicit-zero/default/20-worker gate、更新した Exact/IPP-fast matrix で一致しました。
+final matrix でも current backend ごとに default/5/10/20 worker 全体で deterministic
+hash set は 1 つです。xUnit v3/Microsoft.Testing.Platform test は 1,244 件すべて
+通過しました。
+
+allocation improvement は主張しません。sampled baseline allocation は
+2.079/2.085 GiB、candidate は 2.125/2.237 GiB でした。candidate maximum working-set
+sample は 393.8/515.0 MiB ですが、first/last-third median は 386.4/390.1 と
+490.0/493.6 MiB に留まりました。両 long run は progressive growth や OOM なしで
+完了し、追加の parallel result と scheduling work は field ごとに bounded です。
 
 </details>
 

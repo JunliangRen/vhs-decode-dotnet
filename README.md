@@ -99,27 +99,28 @@ for compatibility-sensitive work.
 The table below uses one fixed private local 40 MHz PAL VHS `.ldf` fixture and
 the same 40-frame window for every run. The source filename is intentionally
 not published. The base matrix uses three interleaved runs measured on
-2026-08-02 from main commit `c92af1d`; the four `current` cells at 10 and 20
-workers were refreshed from ten paired runs after the CTI and VHS sync-scan
-tuning in this branch. Exact uses both parallel sync scans; IPP-fast retains
-only the profitable initial scan. Compatibility is evaluated separately from speed.
+2026-08-02 from main commit `c92af1d`. On 2026-08-03, every multi-worker
+`current` cell was refreshed from three interleaved runs of the final branch
+candidate after current burst-prefix parallelization. The unchanged one-worker
+and v0.4.0 cells retain their prior audited measurements. Compatibility is
+evaluated separately from speed.
 
 <!-- LATEST_PERFORMANCE_BEGIN -->
 | CLI mode (workers) | Python v0.4.0 | Python PR341 | Exact + v0.4.0 | Exact + current | IPP-fast + v0.4.0 | IPP-fast + current |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| default (5) | 15.207 s | 16.780 s | 4.389 s / 3.465x | 5.896 s / 2.846x | 3.609 s / 4.213x | 4.654 s / 3.606x |
+| default (5) | 15.207 s | 16.780 s | 4.389 s / 3.465x | 5.163 s / 3.250x | 3.609 s / 4.213x | 4.354 s / 3.854x |
 | `--threads 1` | 17.694 s | 19.414 s | 10.065 s / 1.758x | 13.488 s / 1.439x | 7.215 s / 2.453x | 10.256 s / 1.893x |
-| `--threads 5` | 15.719 s | 17.801 s | 4.282 s / 3.671x | 5.982 s / 2.976x | 3.568 s / 4.406x | 5.082 s / 3.503x |
-| `--threads 10` | 16.037 s | 18.266 s | 3.494 s / 4.589x | 4.835 s / 3.778x | 3.098 s / 5.177x | 4.403 s / 4.149x |
-| `--threads 20` | 16.405 s | 18.395 s | 3.235 s / 5.071x | 4.368 s / 4.212x | 2.654 s / 6.182x | 4.397 s / 4.183x |
+| `--threads 5` | 15.719 s | 17.801 s | 4.282 s / 3.671x | 5.353 s / 3.325x | 3.568 s / 4.406x | 4.230 s / 4.209x |
+| `--threads 10` | 16.037 s | 18.266 s | 3.494 s / 4.589x | 4.027 s / 4.536x | 3.098 s / 5.177x | 3.701 s / 4.935x |
+| `--threads 20` | 16.405 s | 18.395 s | 3.235 s / 5.071x | 4.336 s / 4.243x | 2.654 s / 6.182x | 3.856 s / 4.770x |
 <!-- LATEST_PERFORMANCE_END -->
 
 Each .NET cell shows median wall time followed by speedup versus its
 profile-matched Python column; values below `1.000x` are slower. Python PR341
 is merge commit `2f21e8ed6018b14561396cc95f1f6828054470b8`, the upstream peer
 for `current`. The default is **5 workers**. The base matrix contains 90 runs:
-three repetitions of all 30 mode/profile cells. The four refreshed cells add
-80 strictly paired baseline/candidate runs.
+three repetitions of all 30 mode/profile cells. The eight refreshed
+multi-worker `current` cells add 24 interleaved final-candidate runs.
 
 Every .NET profile and Python PR341 produced one deterministic hash set per
 mode. Python v0.4.0 produced three luma/chroma/JSON/log hash sets in every
