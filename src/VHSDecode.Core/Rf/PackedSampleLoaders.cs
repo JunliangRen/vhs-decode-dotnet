@@ -2,7 +2,7 @@ using System.Buffers.Binary;
 
 namespace VHSDecode.Core.Rf;
 
-public sealed class PackedDdD4To40SampleLoader : IRfSampleLoader
+public sealed class PackedDdD4To40SampleLoader : IReusableRfSampleLoader
 {
     private const int MaximumRetainedBufferLength = 1024 * 1024;
     internal const int MaximumRetainedDecodedBufferLength = MaximumRetainedBufferLength / sizeof(double);
@@ -15,8 +15,16 @@ public sealed class PackedDdD4To40SampleLoader : IRfSampleLoader
     public double[]? Read(Stream stream, long sample, int readLength)
         => ReadCore(stream, sample, readLength, reuseDecodedBuffer: false);
 
+    bool IReusableRfSampleLoader.ReuseForSequentialDecode => true;
+
     internal double[]? ReadReusable(Stream stream, long sample, int readLength)
         => ReadCore(stream, sample, readLength, reuseDecodedBuffer: true);
+
+    double[]? IReusableRfSampleLoader.ReadReusable(
+        Stream stream,
+        long sample,
+        int readLength)
+        => ReadReusable(stream, sample, readLength);
 
     internal int CachedReusableDecodedBufferCount
     {
@@ -41,6 +49,9 @@ public sealed class PackedDdD4To40SampleLoader : IRfSampleLoader
             }
         }
     }
+
+    void IReusableRfSampleLoader.ReturnReusable(double[] buffer)
+        => ReturnReusable(buffer);
 
     private double[]? ReadCore(Stream stream, long sample, int readLength, bool reuseDecodedBuffer)
     {

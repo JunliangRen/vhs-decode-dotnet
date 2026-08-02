@@ -1983,6 +1983,41 @@ Candidate working set remained bounded below 834 MiB. First-half and last-half
 100-frame medians stayed between 7.07 and 7.09 seconds, with no progressive
 slowdown, OOM, or unbounded growth.
 
+### Bounded libsndfile RF input reuse
+
+The compact streaming pipeline now exposes one internal reusable-input
+ownership contract to the packed LDS and direct raw-FLAC loaders. The
+libsndfile implementation retains at most 48 exact-length 32,768-sample
+`double[]` blocks, or about 12 MiB, which covers one PAL field's parallel block
+batch plus prefetch without accepting oversized arrays. Every native PCM16
+sample is still converted by the same `output[i] = samples[i]` assignment.
+Fallback output is copied into loader-owned storage before it can enter the
+pool, and public or diagnostic reads continue to return independent arrays.
+
+An initial candidate also reused libsndfile blocks during sequential decode;
+four default-worker pairs showed an approximately 6% regression, so that path
+was rejected. The retained implementation enables libsndfile reuse only for
+parallel block decode and prefetch. After this guard, four default-worker pairs
+were mixed and changed median wall time from 61.43 to 61.61 seconds (+0.29%),
+which is classified as neutral. Packed LDS retains its existing sequential
+reuse policy.
+
+On the same private local PAL VHS RF capture, an exact-parameter 100-frame
+allocation trace fell from 3,561,003,024 to 986,114,768 sampled bytes (72.31%).
+Luma, chroma, raw JSON, normalized logs, and ordered `fileLoc` matched. Two
+opposite-order 1,000-frame `current`/Exact/20-worker pairs then completed 4,000
+fields per build with every compared surface identical. Combined allocation
+fell from 43.96 to 16.63 GiB (62.18%), GC pause from 0.380 to 0.253 seconds
+(33.46%), and Gen2 collections from 151 to 40. Combined wall time changed from
+155.74 to 155.31 seconds (0.28%), so throughput remains neutral. Candidate
+working set stayed below 772 MiB; its steady 100-frame intervals remained near
+7.0 seconds without progressive slowdown, OOM, or unbounded growth.
+
+Twelve baseline/candidate gates covered Exact v0.4.0 and `current` at explicit
+`--threads 0`, omitted/default threads, and `--threads 20`. Luma, chroma, raw
+JSON, stdout, normalized stderr/log, and ordered `fileLoc` matched both the
+pre-change build and every worker-count reference.
+
 </details>
 
 <!-- SECTION: build -->
@@ -2007,7 +2042,7 @@ Requirements:
 .\tools\build-ipp-native.ps1
 dotnet restore VHSDecodeDotNet.slnx
 dotnet build VHSDecodeDotNet.slnx -c Release --no-restore
-dotnet test --solution VHSDecodeDotNet.slnx -c Release --no-build --no-restore --minimum-expected-tests 1224
+dotnet test --solution VHSDecodeDotNet.slnx -c Release --no-build --no-restore --minimum-expected-tests 1231
 ```
 
 The first command includes the optional `ipp-fast` native artifact; omit it for
@@ -2020,7 +2055,7 @@ deployment computer. Binary-only single-file releases embed
 sidecar license files. An Exact-only build may omit the native build step.
 
 The current formal Release build has zero warnings and errors. The xUnit v3
-project exposes **1,224** independently discoverable tests to both
+project exposes **1,231** independently discoverable tests to both
 `dotnet test` and Visual Studio Test Explorer.
 
 <!-- SECTION: usage -->

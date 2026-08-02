@@ -41,6 +41,121 @@ public sealed class LibsndfilePcm16SampleLoaderTests
         Assert.True(fallback.Disposed);
     }
 
+    [Fact(DisplayName = "libsndfile reusable reads overwrite every decoded sample")]
+    public void NativeReusableReadsOverwriteEveryDecodedSample()
+    {
+        var source = new RecordingSource([10, 20, 30, 40, 50, 60]);
+        using var loader = new LibsndfilePcm16SampleLoader(
+            "capture.flac",
+            _ => source,
+            new RecordingFallback());
+
+        double[] first = loader.ReadReusable(Stream.Null, 0, 3)!;
+        Array.Fill(first, double.NaN);
+        loader.ReturnReusable(first);
+        double[] second = loader.ReadReusable(Stream.Null, 3, 3)!;
+
+        Assert.Same(first, second);
+        Assert.Equal([40.0, 50.0, 60.0], second);
+        loader.ReturnReusable(second);
+        Assert.Equal(1, loader.CachedReusableDecodedBufferCount);
+    }
+
+    [Fact(DisplayName = "libsndfile reusable reads never alias active leases")]
+    public void NativeReusableReadsNeverAliasActiveLeases()
+    {
+        var source = new RecordingSource([10, 20, 30, 40, 50, 60]);
+        using var loader = new LibsndfilePcm16SampleLoader(
+            "capture.flac",
+            _ => source,
+            new RecordingFallback());
+
+        double[] first = loader.ReadReusable(Stream.Null, 0, 3)!;
+        double[] second = loader.ReadReusable(Stream.Null, 3, 3)!;
+
+        Assert.NotSame(first, second);
+        Assert.Equal([10.0, 20.0, 30.0], first);
+        Assert.Equal([40.0, 50.0, 60.0], second);
+        loader.ReturnReusable(first);
+        loader.ReturnReusable(second);
+    }
+
+    [Fact(DisplayName = "libsndfile reusable fallback copies into loader-owned storage")]
+    public void NativeReusableFallbackCopiesIntoLoaderOwnedStorage()
+    {
+        double[] fallbackSamples = [71.0, 72.0];
+        var fallback = new RecordingFallback(fallbackSamples);
+        using var loader = new LibsndfilePcm16SampleLoader(
+            "capture.flac",
+            _ => throw new LibsndfilePcm16FallbackException("unavailable"),
+            fallback);
+
+        double[] first = loader.ReadReusable(Stream.Null, 0, 2)!;
+        Assert.NotSame(fallbackSamples, first);
+        Assert.Equal(fallbackSamples, first);
+        loader.ReturnReusable(first);
+
+        double[] second = loader.ReadReusable(Stream.Null, 2, 2)!;
+        Assert.Same(first, second);
+        Assert.Equal(fallbackSamples, second);
+        Assert.Equal(2, fallback.ReadCount);
+        loader.ReturnReusable(second);
+    }
+
+    [Fact(DisplayName = "libsndfile reusable reads allocate no decoded array after warmup")]
+    public void NativeReusableReadsAllocateNoDecodedArrayAfterWarmup()
+    {
+        const int readLength = 32_768;
+        short[] samples = CreateNativeSamples(readLength * 2);
+        var source = new RecordingSource(samples);
+        using var loader = new LibsndfilePcm16SampleLoader(
+            "capture.flac",
+            _ => source,
+            new RecordingFallback());
+        double[] warm = loader.ReadReusable(Stream.Null, 0, readLength)!;
+        loader.ReturnReusable(warm);
+
+        long before = GC.GetAllocatedBytesForCurrentThread();
+        double[] actual = loader.ReadReusable(Stream.Null, readLength, readLength)!;
+        long allocated = GC.GetAllocatedBytesForCurrentThread() - before;
+
+        Assert.Same(warm, actual);
+        Assert.Equal((double)samples[readLength], actual[0]);
+        Assert.Equal((double)samples[^1], actual[^1]);
+        loader.ReturnReusable(actual);
+        Assert.True(
+            allocated < 32 * 1_024,
+            $"Warm reusable 32K libsndfile read allocated {allocated:N0} bytes.");
+    }
+
+    [Fact(DisplayName = "libsndfile reusable decoded buffer retention is concurrency-safe and bounded")]
+    public void NativeReusableDecodedBufferRetentionIsConcurrencySafeAndBounded()
+    {
+        using var loader = new LibsndfilePcm16SampleLoader(
+            "capture.flac",
+            _ => new RecordingSource([]),
+            new RecordingFallback());
+
+        Parallel.For(
+            0,
+            LibsndfilePcm16SampleLoader.MaximumRetainedDecodedBufferCount * 2,
+            i => loader.ReturnReusable(new double[8 + (i & 1)]));
+
+        Assert.Equal(
+            LibsndfilePcm16SampleLoader.MaximumRetainedDecodedBufferCount,
+            loader.CachedReusableDecodedBufferCount);
+        loader.Dispose();
+        Assert.Equal(0, loader.CachedReusableDecodedBufferCount);
+
+        using var oversizedLoader = new LibsndfilePcm16SampleLoader(
+            "capture.flac",
+            _ => new RecordingSource([]),
+            new RecordingFallback());
+        oversizedLoader.ReturnReusable(
+            new double[LibsndfilePcm16SampleLoader.MaximumRetainedDecodedBufferLength + 1]);
+        Assert.Equal(0, oversizedLoader.CachedReusableDecodedBufferCount);
+    }
+
     [Fact(DisplayName = "libsndfile RF loader switches to FFmpeg only once when native open is unavailable")]
     public void NativeOpenUnavailableUsesPersistentFallback()
     {
@@ -90,8 +205,8 @@ public sealed class LibsndfilePcm16SampleLoaderTests
         Assert.Equal(1, fallback.LastReadLength);
     }
 
-    [Fact(DisplayName = "libsndfile RF loader returns null on native short reads without fallback")]
-    public void NativeShortReadReturnsNullWithoutFallback()
+    [Fact(DisplayName = "libsndfile reusable reads return null before renting output on native short reads")]
+    public void NativeReusableShortReadReturnsNullBeforeRentingOutput()
     {
         var source = new RecordingSource([1, 2, 3, 4])
         {
@@ -103,9 +218,42 @@ public sealed class LibsndfilePcm16SampleLoaderTests
             _ => source,
             fallback);
         using var input = new MemoryStream();
+        double[] retained = new double[2];
+        loader.ReturnReusable(retained);
 
-        Assert.Null(loader.Read(input, 0, 2));
+        Assert.Null(loader.ReadReusable(input, 0, 2));
         Assert.Equal(0, fallback.ReadCount);
+        Assert.Equal(1, loader.CachedReusableDecodedBufferCount);
+
+        source.MaximumFramesPerRead = int.MaxValue;
+        double[] complete = loader.ReadReusable(input, 0, 2)!;
+        Assert.Same(retained, complete);
+        Assert.Equal([1.0, 2.0], complete);
+        loader.ReturnReusable(complete);
+    }
+
+    [Fact(DisplayName = "libsndfile reusable boundary fallback copies into loader-owned storage")]
+    public void NativeReusableBoundaryFallbackCopiesIntoLoaderOwnedStorage()
+    {
+        var source = new RecordingSource([10, 20, 30, 40]);
+        double[] fallbackSamples = [91.0, 92.0];
+        var fallback = new RecordingFallback(fallbackSamples);
+        using var loader = new LibsndfilePcm16SampleLoader(
+            "capture.flac",
+            _ => source,
+            fallback);
+
+        double[] first = loader.ReadReusable(Stream.Null, 3, 2)!;
+        Assert.NotSame(fallbackSamples, first);
+        Assert.Equal(fallbackSamples, first);
+        Assert.True(source.Disposed);
+        loader.ReturnReusable(first);
+
+        double[] second = loader.ReadReusable(Stream.Null, 8, 2)!;
+        Assert.Same(first, second);
+        Assert.Equal(fallbackSamples, second);
+        Assert.Equal(2, fallback.ReadCount);
+        loader.ReturnReusable(second);
     }
 
     [Theory(DisplayName = "libsndfile RF loader retries invalid native read counts through fallback")]
@@ -464,7 +612,7 @@ public sealed class LibsndfilePcm16SampleLoaderTests
 
         public long? SeekResultOverride { get; init; }
 
-        public int MaximumFramesPerRead { get; init; } = int.MaxValue;
+        public int MaximumFramesPerRead { get; set; } = int.MaxValue;
 
         public long? FramesReadOverride { get; init; }
 

@@ -38,7 +38,7 @@ evidence, and remaining gaps.
   EIAJ, and supported PAL/NTSC variants.
 - TBC utility tools, the double-click GUI, and developer plotting windows are
   intentionally out of scope.
-- The Visual Studio 2026 `.slnx` solution has **1,224** standard xUnit v3 tests
+- The Visual Studio 2026 `.slnx` solution has **1,231** standard xUnit v3 tests
   that are visible in Test Explorer and runnable with `dotnet test`.
 
 <!-- SECTION: start -->
@@ -133,6 +133,16 @@ less wall time; 1.133x throughput), while luma, chroma, raw JSON, stdout,
 normalized stderr/logs, and all 200 ordered `fileLoc` values matched. This is a
 scoped single-pair observation, not a universal decoder speed claim.
 
+The latest direct-raw-FLAC input pass keeps up to 48 exact 32K RF input blocks
+for parallel decode and prefetch, while sequential decode retains its previous
+allocation behavior. On one private local PAL VHS RF capture, two
+opposite-order 1,000-frame `current`/Exact/20-worker pairs reduced combined
+managed allocation from 43.96 to 16.63 GiB (62.18%) and GC pause from 0.380 to
+0.253 seconds (33.46%). Combined wall time changed from 155.74 to 155.31 seconds
+(0.28%), so throughput is classified as neutral. All outputs and diagnostics
+matched, and candidate working set remained bounded below 772 MiB. The fixed
+`.lds` matrix above is unaffected and therefore remains unchanged.
+
 Each .NET cell shows median wall time followed by speedup versus its
 profile-matched Python column; values below `1.000x` are slower. Python PR341
 is merge commit `2f21e8ed6018b14561396cc95f1f6828054470b8`, the upstream peer
@@ -175,7 +185,7 @@ The pinned SDK is .NET `11.0.100-preview.6.26359.118`.
 dotnet restore VHSDecodeDotNet.slnx
 dotnet build VHSDecodeDotNet.slnx -c Release --no-restore
 dotnet test --solution VHSDecodeDotNet.slnx -c Release `
-  --no-build --no-restore --minimum-expected-tests 1224
+  --no-build --no-restore --minimum-expected-tests 1231
 ```
 
 Open `VHSDecodeDotNet.slnx` in Visual Studio 2026 to build, debug, and run the

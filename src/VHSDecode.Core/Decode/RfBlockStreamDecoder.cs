@@ -529,7 +529,11 @@ public sealed class RfBlockStreamDecoder : IDisposable
 
                         StopPrefetchBeforeDirectRead();
                         long sample = checked((firstBlock + i) * BlockStride);
-                        double[]? preparedInput = _pipeline.LoadStreamBlockInput(stream, sample, BlockLength);
+                        double[]? preparedInput = _pipeline.LoadStreamBlockInput(
+                            stream,
+                            sample,
+                            BlockLength,
+                            parallelDecode: true);
                         if (preparedInput is null)
                         {
                             return null;
@@ -558,7 +562,9 @@ public sealed class RfBlockStreamDecoder : IDisposable
                 {
                     for (int i = 0; i < missingBlockCount; i++)
                     {
-                        _pipeline.ReturnStreamBlockInput(preparedInputs[missingBlocks[i]]);
+                        _pipeline.ReturnStreamBlockInput(
+                            preparedInputs[missingBlocks[i]],
+                            parallelDecode: true);
                     }
 
                     if (!missingBlocksDecoded)
@@ -960,7 +966,11 @@ public sealed class RfBlockStreamDecoder : IDisposable
                 try
                 {
                     long sample = checked(slot.Block * BlockStride);
-                    preparedInput = _pipeline.LoadStreamBlockInput(operation.Stream, sample, BlockLength);
+                    preparedInput = _pipeline.LoadStreamBlockInput(
+                        operation.Stream,
+                        sample,
+                        BlockLength,
+                        parallelDecode: true);
                 }
                 catch (Exception exception) when (
                     exception is not OutOfMemoryException and not AccessViolationException)
@@ -1002,14 +1012,14 @@ public sealed class RfBlockStreamDecoder : IDisposable
                         }
                         finally
                         {
-                            _pipeline.ReturnStreamBlockInput(workerInput);
+                            _pipeline.ReturnStreamBlockInput(workerInput, parallelDecode: true);
                             operation.WorkerSlots.Release();
                         }
                     });
                 }
                 catch
                 {
-                    _pipeline.ReturnStreamBlockInput(workerInput);
+                    _pipeline.ReturnStreamBlockInput(workerInput, parallelDecode: true);
                     operation.WorkerSlots.Release();
                     throw;
                 }

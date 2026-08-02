@@ -21,7 +21,7 @@ public sealed class RfBlockDecodePipeline : IDisposable
     private readonly RfVideoReferenceFilterSet? _referenceFilters;
     private readonly CvbsDecodeOptions? _cvbsOptions;
     private readonly IRfInputProcessor? _inputProcessor;
-    private readonly PackedDdD4To40SampleLoader? _reusableStreamInputLoader;
+    private readonly IReusableRfSampleLoader? _reusableStreamInputLoader;
     private readonly Action<string, string>? _diagnosticLogger;
     private readonly bool _retainRfDiagnosticChannels;
     private readonly bool _useCurrentChromaShiftDc;
@@ -62,7 +62,7 @@ public sealed class RfBlockDecodePipeline : IDisposable
         _reusableStreamInputLoader = !retainRfDiagnosticChannels
             && cvbsOptions is null
             && inputProcessor is null
-            ? loader as PackedDdD4To40SampleLoader
+            ? loader as IReusableRfSampleLoader
             : null;
         _diagnosticLogger = diagnosticLogger;
         _retainRfDiagnosticChannels = retainRfDiagnosticChannels;
@@ -134,15 +134,26 @@ public sealed class RfBlockDecodePipeline : IDisposable
             : _inputProcessor?.Process(loadedInput) ?? loadedInput;
     }
 
-    internal double[]? LoadStreamBlockInput(Stream stream, long sample, int blockLength)
-        => _reusableStreamInputLoader is null
+    internal double[]? LoadStreamBlockInput(
+        Stream stream,
+        long sample,
+        int blockLength,
+        bool parallelDecode = false)
+        => !CanReuseStreamBlockInput(parallelDecode)
             ? LoadBlockInput(stream, sample, blockLength)
-            : _reusableStreamInputLoader.ReadReusable(stream, sample, blockLength);
+            : _reusableStreamInputLoader!.ReadReusable(stream, sample, blockLength);
 
-    internal void ReturnStreamBlockInput(double[] input)
+    internal void ReturnStreamBlockInput(double[] input, bool parallelDecode = false)
     {
-        _reusableStreamInputLoader?.ReturnReusable(input);
+        if (CanReuseStreamBlockInput(parallelDecode))
+        {
+            _reusableStreamInputLoader!.ReturnReusable(input);
+        }
     }
+
+    private bool CanReuseStreamBlockInput(bool parallelDecode)
+        => _reusableStreamInputLoader is not null
+            && (parallelDecode || _reusableStreamInputLoader.ReuseForSequentialDecode);
 
     internal RfPipelineBlock DecodePreparedBlock(double[] input, bool reportDiagnostics = true)
         => DecodePreparedBlockCore(
