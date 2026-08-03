@@ -81,6 +81,35 @@ public sealed class RfBlockCacheConcurrencyTests
         Assert.InRange(decoder.CachedDecodedBlockCount, 1, 16);
     }
 
+    [Fact(DisplayName = "RF stream slices assembled LD analog audio at the requested sample offset")]
+    public void RfStreamSlicesAssembledLaserDiscAnalogAudioAtRequestedOffset()
+    {
+        using var fullStream = new MemoryStream();
+        using var fullDecoder = BuildDecoder(
+            new CountingSampleLoader(),
+            workerThreads: 2,
+            analogAudio: true);
+        using var slicedStream = new MemoryStream();
+        using var slicedDecoder = BuildDecoder(
+            new CountingSampleLoader(),
+            workerThreads: 2,
+            analogAudio: true);
+
+        RfDecodedSpan full = fullDecoder.Read(fullStream, begin: 0, length: 24)!;
+        RfDecodedSpan sliced = slicedDecoder.Read(slicedStream, begin: 3, length: 17)!;
+
+        LaserDiscAnalogAudioBlock fullAudio = Assert.IsType<LaserDiscAnalogAudioBlock>(
+            full.AnalogAudio);
+        LaserDiscAnalogAudioBlock slicedAudio = Assert.IsType<LaserDiscAnalogAudioBlock>(
+            sliced.AnalogAudio);
+        Assert.Equal(1, fullAudio.DecimationFactor);
+        Assert.Equal(1, slicedAudio.DecimationFactor);
+        Assert.Equal(17, slicedAudio.Left.Length);
+        Assert.Equal(17, slicedAudio.Right.Length);
+        AssertDoubleBitsEqual(fullAudio.Left.AsSpan(3, 17), slicedAudio.Left);
+        AssertDoubleBitsEqual(fullAudio.Right.AsSpan(3, 17), slicedAudio.Right);
+    }
+
     [Fact(DisplayName = "Leased RF spans reuse two exact-size buffer sets only after disposal")]
     public void LeasedRfSpansReuseTwoExactSizeBufferSetsOnlyAfterDisposal()
     {
@@ -938,7 +967,8 @@ public sealed class RfBlockCacheConcurrencyTests
         Action<string, string>? diagnosticLogger = null,
         bool retainRfDiagnosticChannels = true,
         bool float32Chroma = false,
-        RfFmDemodulatorMode? fmDemodulatorMode = null)
+        RfFmDemodulatorMode? fmDemodulatorMode = null,
+        bool analogAudio = false)
     {
         RfBlockDecodePipeline pipeline = BuildPipeline(
             loader,
@@ -947,7 +977,8 @@ public sealed class RfBlockCacheConcurrencyTests
             diagnosticLogger,
             retainRfDiagnosticChannels,
             float32Chroma,
-            fmDemodulatorMode);
+            fmDemodulatorMode,
+            analogAudio);
         return new RfBlockStreamDecoder(
             pipeline,
             TestBlockLength,
@@ -964,7 +995,8 @@ public sealed class RfBlockCacheConcurrencyTests
         Action<string, string>? diagnosticLogger = null,
         bool retainRfDiagnosticChannels = true,
         bool float32Chroma = false,
-        RfFmDemodulatorMode? fmDemodulatorMode = null)
+        RfFmDemodulatorMode? fmDemodulatorMode = null,
+        bool analogAudio = false)
     {
         Complex[] identity = RfDemodulator.IdentityFilter(TestBlockLength);
         double[] ones = Enumerable.Repeat(1.0, TestBlockLength).ToArray();
@@ -1011,6 +1043,27 @@ public sealed class RfBlockCacheConcurrencyTests
             filters = filters with
             {
                 ChromaBurstSos = [new SosSection(1.0, 0.0, 0.0, 1.0, 0.0, 0.0)]
+            };
+        }
+
+        if (analogAudio)
+        {
+            Complex[] stage1 = Enumerable.Repeat(Complex.One, TestBlockLength).ToArray();
+            Complex[] stage2 = Enumerable.Repeat(Complex.One, 1024).ToArray();
+            var channel = new LaserDiscAnalogAudioChannelFilter(
+                LowBin: 0,
+                BinCount: TestBlockLength,
+                SliceSampleRateHz: 40_000_000.0,
+                LowFrequencyHz: 0.0,
+                CenterFrequencyHz: 0.0,
+                Stage1Filter: stage1,
+                Stage2Filter: stage2);
+            filters = filters with
+            {
+                LdAnalogAudio = new LaserDiscAnalogAudioFilterSet(
+                    channel,
+                    channel,
+                    DecimationFactor: 1)
             };
         }
 
