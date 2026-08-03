@@ -336,22 +336,31 @@ IPP-fast v0.4.0 和 IPP-fast `current`。文件名不会公开。每个 .NET 单
 <!-- LATEST_PERFORMANCE_BEGIN -->
 | CLI 模式（workers） | Python v0.4.0 | Python PR341 | Exact + v0.4.0 | Exact + current | IPP-fast + v0.4.0 | IPP-fast + current |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| 默认（5） | 15.207 s | 16.780 s | 4.332 s / 3.510x / 71.51% | 5.402 s / 3.106x / 67.81% | 3.414 s / 4.454x / 77.55% | 3.285 s / 5.108x / 80.42% |
-| `--threads 1` | 17.694 s | 19.414 s | 9.867 s / 1.793x / 44.24% | 12.596 s / 1.541x / 35.12% | 7.163 s / 2.470x / 59.52% | 8.754 s / 2.218x / 54.91% |
-| `--threads 5` | 15.719 s | 17.801 s | 4.268 s / 3.683x / 72.85% | 5.365 s / 3.318x / 69.86% | 3.530 s / 4.453x / 77.54% | 3.269 s / 5.445x / 81.63% |
-| `--threads 10` | 16.037 s | 18.266 s | 3.579 s / 4.481x / 77.68% | 4.379 s / 4.171x / 76.02% | 3.007 s / 5.333x / 81.25% | 2.896 s / 6.307x / 84.14% |
-| `--threads 20` | 16.405 s | 18.395 s | 2.951 s / 5.559x / 82.01% | 3.885 s / 4.735x / 78.88% | 2.618 s / 6.267x / 84.04% | 2.433 s / 7.559x / 86.77% |
+| 默认（5） | 15.207 s | 16.780 s | 4.332 s / 3.510x / 71.51% | 5.067 s / 3.312x / 69.80% | 3.414 s / 4.454x / 77.55% | 3.274 s / 5.125x / 80.49% |
+| `--threads 1` | 17.694 s | 19.414 s | 9.867 s / 1.793x / 44.24% | 11.990 s / 1.619x / 38.24% | 7.163 s / 2.470x / 59.52% | 8.069 s / 2.406x / 58.44% |
+| `--threads 5` | 15.719 s | 17.801 s | 4.268 s / 3.683x / 72.85% | 5.216 s / 3.413x / 70.70% | 3.530 s / 4.453x / 77.54% | 3.203 s / 5.558x / 82.01% |
+| `--threads 10` | 16.037 s | 18.266 s | 3.579 s / 4.481x / 77.68% | 4.328 s / 4.221x / 76.31% | 3.007 s / 5.333x / 81.25% | 2.824 s / 6.469x / 84.54% |
+| `--threads 20` | 16.405 s | 18.395 s | 2.951 s / 5.559x / 82.01% | 3.634 s / 5.062x / 80.24% | 2.618 s / 6.267x / 84.04% | 2.443 s / 7.530x / 86.72% |
 <!-- LATEST_PERFORMANCE_END -->
-<!-- LATEST_PERFORMANCE_RUNS: ipp-refresh=30 repeats=3 -->
+<!-- LATEST_PERFORMANCE_RUNS: current-refresh=30 repeats=3 -->
 
 Python 测量于 2026-08-02 在 main commit
-`c92af1dfd0f96cd7f2d49f3219fb428d0f4e0865` 上完成审计。由于本候选不会进入
-Exact，该列沿用已合并相位前缀改动的审计矩阵。2026-08-04，基于 main
-`714f5a6` 的本分支候选重新测量了本次受影响的 10 个 IPP-fast 单元格，每格三次
+`c92af1dfd0f96cd7f2d49f3219fb428d0f4e0865` 上完成审计。未受影响的 v0.4.0
+.NET 两列沿用同一窗口的已审计测量值。2026-08-04，基于 main `9042d9a` 的本分支
+候选重新测量了五个 Exact `current` 与五个 IPP-fast `current` 单元格，每格三次
 交错运行，共 30 次 Release 运行。测试机为 Intel Core Ultra 7 265K（20 个逻辑
 处理器）、Windows 11 build 26220，以及 .NET SDK/runtime
-`11.0.100-preview.6.26359.118`。每个刷新单元格的三次运行都只产生一套亮度、
-色度、原始 JSON 和 stdout hash。
+`11.0.100-preview.6.26359.118`。各后端在所有 worker 数与重复运行中都只产生一套
+亮度、色度、原始 JSON 和 stdout hash。
+
+本轮 `current` CTI 候选把固定 RCPSS 尾数近似预计算为一张进程级 2,048 项只读表
+（8 KiB 数据），在不改变转换点和任何算术结果的前提下，消除了逐样本整数除法与
+取模。21 对实际场尺寸 CTI 微基准从 1.590 降至 1.401 ms（缩短 11.88%，吞吐
+1.135x）。固定 100 帧 `current --dsp-backend ipp-fast --threads 20` 窗口上，每个
+构建各交错运行三次，解码器报告的中位数从 5.14 降至 5.07 秒（缩短 1.36%，吞吐
+1.014x）。亮度、色度、原始 JSON、stdout、耗时归一化 stderr 和时间戳归一化日志
+全部一致。Exact 矩阵 hash 与先前严格 `current` 门禁一致，IPP 矩阵 hash 与已合并
+SOS32 基线一致。
 
 SOS32 候选为 VHS 长块色度 burst 提供 worker-local IPP 单精度 biquad 上下文，
 最多保留 12 个空闲上下文。固定 200 帧
@@ -1870,7 +1879,7 @@ stdout SHA-256、归一化 stderr、归一化日志和全部有序 `fileLoc` 均
 .\tools\build-ipp-native.ps1
 dotnet restore VHSDecodeDotNet.slnx
 dotnet build VHSDecodeDotNet.slnx -c Release --no-restore
-dotnet test --solution VHSDecodeDotNet.slnx -c Release --no-build --no-restore --minimum-expected-tests 1295
+dotnet test --solution VHSDecodeDotNet.slnx -c Release --no-build --no-restore --minimum-expected-tests 1296
 dotnet test --project tests\VHSDecode.Tests\VHSDecode.Tests.csproj -c Release --no-build --no-restore --coverage --coverage-output coverage.cobertura.xml --coverage-output-format cobertura
 ```
 
@@ -1882,7 +1891,7 @@ Intel oneAPI。只含二进制的单文件发布会嵌入 `vhsdecode_ipp.dll` �
 notice，不会额外生成许可证 sidecar 文件。只构建 Exact 后端时可以省略原生构建步骤。
 
 当前正式 Release 构建为零警告、零错误。xUnit v3 项目向
-`dotnet test` 和 Visual Studio Test Explorer 暴露 **1,295** 个可独立发现的测试。
+`dotnet test` 和 Visual Studio Test Explorer 暴露 **1,296** 个可独立发现的测试。
 
 <!-- SECTION: usage -->
 

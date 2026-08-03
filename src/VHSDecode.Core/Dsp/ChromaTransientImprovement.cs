@@ -7,6 +7,8 @@ public static class ChromaTransientImprovement
     private const int MaximumParallelWorkers = 8;
     private const int PassCount = 4;
     private const double Decay = 0.25;
+    private static readonly uint[] PinnedReciprocalMantissas =
+        CreatePinnedReciprocalMantissas();
 
     public static void ApplyInPlace(
         Span<double> chromaData,
@@ -278,8 +280,6 @@ public static class ChromaTransientImprovement
         const uint MantissaMask = 0x007FFFFFu;
         const uint InfinityBits = 0x7F800000u;
         const uint QuietNaNBit = 0x00400000u;
-        const int EstimateNumerator = 1 << 25;
-
         uint bits = BitConverter.SingleToUInt32Bits(value);
         uint sign = bits & SignMask;
         int exponent = (int)((bits >> 23) & 0xFFu);
@@ -305,17 +305,29 @@ public static class ChromaTransientImprovement
         // For bucket midpoint x=(4097+2b)/4096, the pinned RCPSS
         // significand is round(2^25/(4097+2b)).
         int bucket = (int)(mantissa >> 12);
-        int midpointDenominator = 4_097 + (2 * bucket);
-        int estimate = EstimateNumerator / midpointDenominator;
-        int remainder = EstimateNumerator % midpointDenominator;
-        if ((remainder * 2) >= midpointDenominator)
-        {
-            estimate++;
-        }
-
-        uint resultMantissa = (uint)(estimate - 4_096) << 11;
+        uint resultMantissa = PinnedReciprocalMantissas[bucket];
         uint resultExponent = (uint)(253 - exponent) << 23;
         return BitConverter.UInt32BitsToSingle(
             sign | resultExponent | resultMantissa);
+    }
+
+    private static uint[] CreatePinnedReciprocalMantissas()
+    {
+        const int EstimateNumerator = 1 << 25;
+        var result = new uint[2_048];
+        for (int bucket = 0; bucket < result.Length; bucket++)
+        {
+            int midpointDenominator = 4_097 + (2 * bucket);
+            int estimate = EstimateNumerator / midpointDenominator;
+            int remainder = EstimateNumerator % midpointDenominator;
+            if ((remainder * 2) >= midpointDenominator)
+            {
+                estimate++;
+            }
+
+            result[bucket] = (uint)(estimate - 4_096) << 11;
+        }
+
+        return result;
     }
 }

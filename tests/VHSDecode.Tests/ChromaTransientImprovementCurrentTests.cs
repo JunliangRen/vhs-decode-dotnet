@@ -147,6 +147,31 @@ public sealed class ChromaTransientImprovementCurrentTests
         Assert.Equal(expectedBits, BitConverter.SingleToUInt32Bits(actual));
     }
 
+    [Fact(DisplayName = "Pinned CTI reciprocal table matches every reference mantissa bucket")]
+    public void PinnedCurrentCtiReciprocalTableMatchesEveryReferenceMantissaBucket()
+    {
+        const int EstimateNumerator = 1 << 25;
+        const uint ExponentBits = 127u << 23;
+
+        for (int bucket = 0; bucket < 2_048; bucket++)
+        {
+            int midpointDenominator = 4_097 + (2 * bucket);
+            int estimate = EstimateNumerator / midpointDenominator;
+            int remainder = EstimateNumerator % midpointDenominator;
+            if ((remainder * 2) >= midpointDenominator)
+            {
+                estimate++;
+            }
+
+            uint inputBits = ExponentBits | ((uint)bucket << 12);
+            uint expectedBits = (126u << 23) | ((uint)(estimate - 4_096) << 11);
+            float actual = ChromaTransientImprovement.PinnedReciprocalEstimate(
+                BitConverter.UInt32BitsToSingle(inputBits));
+
+            Assert.Equal(expectedBits, BitConverter.SingleToUInt32Bits(actual));
+        }
+    }
+
     private static double[] BuildInput()
     {
         var samples = new double[8 * 64];
