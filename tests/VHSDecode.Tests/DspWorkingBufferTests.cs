@@ -1,9 +1,11 @@
+using System.Globalization;
 using System.Numerics;
 using System.Runtime.InteropServices;
 using System.Security.Cryptography;
 using VHSDecode.Core.CommandLine;
 using VHSDecode.Core.Decode;
 using VHSDecode.Core.Dsp;
+using VHSDecode.Core.Rf;
 using VHSDecode.Core.Tbc;
 using Xunit;
 
@@ -745,6 +747,111 @@ public sealed class DspWorkingBufferTests
         Assert.Equal(full.Video, compact.Video);
         Assert.Equal(full.Envelope, compact.Envelope);
         Assert.Equal(full.VideoLowPass, compact.VideoLowPass);
+    }
+
+    [Fact(DisplayName = "Parallel VHS inverse staging remains bit-exact under load")]
+    public void ParallelVhsInverseStagingRemainsBitExactUnderLoad()
+    {
+        const int length = DecodeSessionFactory.DefaultBlockLength;
+        const double sampleRateHz = 40_000_000.0;
+        double[] input = BuildPalVhsProbe(length, sampleRateHz);
+        Complex[] identity = RfDemodulator.IdentityFilter(length);
+        SosSection[] identitySos = [new SosSection(1.0, 0.0, 0.0, 1.0, 0.0, 0.0)];
+        using var serial = new RfDemodulator(sampleRateHz);
+        using var parallel = new RfDemodulator(
+            sampleRateHz,
+            DspBackend.Exact,
+            parallelizeVhsInverseStaging: true);
+
+        RfDemodulatedBlock expected = DecodeComplexVhsProbe(
+            serial,
+            input,
+            identity,
+            identitySos,
+            highBoost: null,
+            diffRepair: new DiffDemodRepairOptions(double.NegativeInfinity),
+            retainDiagnosticOutputs: false,
+            useNumpyComplexVhsAnalytic: true);
+        string expectedHash = Hash(expected);
+        var hashes = new string[16];
+
+        Parallel.For(
+            0,
+            hashes.Length,
+            new ParallelOptions { MaxDegreeOfParallelism = 8 },
+            index =>
+            {
+                RfDemodulatedBlock actual = DecodeComplexVhsProbe(
+                    parallel,
+                    input,
+                    identity,
+                    identitySos,
+                    highBoost: null,
+                    diffRepair: new DiffDemodRepairOptions(double.NegativeInfinity),
+                    retainDiagnosticOutputs: false,
+                    useNumpyComplexVhsAnalytic: true);
+                hashes[index] = Hash(actual);
+            });
+
+        Assert.True(parallel.ParallelizesVhsInverseStaging);
+        Assert.All(hashes, hash => Assert.Equal(expectedHash, hash));
+    }
+
+    [Theory(DisplayName = "VHS inverse staging follows the bounded current-profile policy")]
+    [InlineData(12, "current", false, false)]
+    [InlineData(20, "current", false, true)]
+    [InlineData(20, "v0.4.0", false, false)]
+    [InlineData(20, "current", true, false)]
+    public void VhsInverseStagingFollowsHighWorkerPolicy(
+        int workerThreads,
+        string profile,
+        bool useGnrc,
+        bool expected)
+    {
+        List<string> arguments =
+        [
+            "--pal",
+            "--no_resample",
+            "--threads",
+            workerThreads.ToString(CultureInfo.InvariantCulture),
+            "--compat-version",
+            profile
+        ];
+        if (useGnrc)
+        {
+            arguments.Add("--gnrc");
+        }
+
+        arguments.Add("probe.s16");
+        arguments.Add("probe-output");
+        ParsedCommand command = new CommandLineParser().Parse(
+            CliSpecs.Vhs,
+            arguments);
+        using DecodeSession session = DecodeSessionFactory.Create(
+            command,
+            DecodeSessionFactory.DefaultBlockLength);
+
+        Assert.Equal(expected, session.Pipeline.ParallelizesVhsInverseStaging);
+    }
+
+    [Fact(DisplayName = "RF constructors retain their public binary signatures")]
+    public void RfConstructorsRetainTheirPublicBinarySignatures()
+    {
+        Assert.NotNull(typeof(RfDemodulator).GetConstructor(
+            [typeof(double), typeof(DspBackend)]));
+        Assert.NotNull(typeof(RfBlockDecodePipeline).GetConstructor(
+        [
+            typeof(IRfSampleLoader),
+            typeof(DecodeFilterSet),
+            typeof(double),
+            typeof(DecodeFilterOptions),
+            typeof(CvbsDecodeOptions),
+            typeof(IRfInputProcessor),
+            typeof(Action<string, string>),
+            typeof(bool),
+            typeof(DspBackend),
+            typeof(UpstreamBehaviorProfile)
+        ]));
     }
 
     [Fact(DisplayName = "PAL VHS RF workspaces remain bit-exact under parallel load")]

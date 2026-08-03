@@ -45,11 +45,41 @@ public sealed class RfBlockDecodePipeline : IDisposable
         DspBackend dspBackend = DspBackend.Exact,
         UpstreamBehaviorProfile upstreamBehaviorProfile =
             UpstreamBehaviorProfile.V040)
+        : this(
+            loader,
+            filters,
+            sampleRateHz,
+            filterOptions,
+            cvbsOptions,
+            inputProcessor,
+            diagnosticLogger,
+            retainRfDiagnosticChannels,
+            dspBackend,
+            upstreamBehaviorProfile,
+            parallelizeVhsInverseStaging: false)
+    {
+    }
+
+    internal RfBlockDecodePipeline(
+        IRfSampleLoader loader,
+        DecodeFilterSet filters,
+        double sampleRateHz,
+        DecodeFilterOptions? filterOptions,
+        CvbsDecodeOptions? cvbsOptions,
+        IRfInputProcessor? inputProcessor,
+        Action<string, string>? diagnosticLogger,
+        bool retainRfDiagnosticChannels,
+        DspBackend dspBackend,
+        UpstreamBehaviorProfile upstreamBehaviorProfile,
+        bool parallelizeVhsInverseStaging)
     {
         _loader = loader;
         _filters = filters;
         _filterOptions = filterOptions ?? new DecodeFilterOptions();
-        _demodulator = new RfDemodulator(sampleRateHz, dspBackend);
+        _demodulator = new RfDemodulator(
+            sampleRateHz,
+            dspBackend,
+            parallelizeVhsInverseStaging);
         _referenceFilters = filters.LdVideoBurst is null && filters.LdVideoPilot is null && !_filterOptions.LdClipDemodForVideo
             ? null
             : new RfVideoReferenceFilterSet(
@@ -76,6 +106,9 @@ public sealed class RfBlockDecodePipeline : IDisposable
     internal int RfHighPassOffset => _filters.RfHighPassOffset;
 
     internal bool RetainsRfDiagnosticChannels => _retainRfDiagnosticChannels;
+
+    internal bool ParallelizesVhsInverseStaging =>
+        _demodulator.ParallelizesVhsInverseStaging;
 
     internal bool RequiresSequentialBlockDecode => _filterOptions.SharpnessEq is not null;
 

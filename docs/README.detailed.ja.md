@@ -2158,6 +2158,32 @@ wall time が 10.309 から 10.003 秒へ 2.97% 短縮しました。process CPU
 すべての ordered `fileLoc` が一致しました。この single pair は recent optimization
 evidence であり、上の full matrix median を置き換えるものではありません。
 
+### High-worker VHS inverse staging の並行化
+
+Exact VHS `current` request が既存の 12-worker outer prefetch cap を超える場合も、
+NumPy-compatible analytic spectrum は従来と同じ順序で serial preparation します。
+その後、complex inverse FFT と独立した real inverse FFT を並行実行します。両処理は
+異なる source spectrum を読み、異なる worker-local destination に書き込みます。
+default、1 から 12 worker、v0.4.0、non-VHS、`ipp-fast` path は serial staging を
+維持し、`--gnrc` も serial path のままです。sample-length buffer は追加せず、outer
+block concurrency は 12 のままです。serial path における real inverse exception の
+優先順も維持し、task の同期 scheduling failure は元の serial sequence に戻します。
+
+同じ private local PAL VHS fixture の fixed 200-frame Exact
+`current --threads 20` pair で main `eec3658` と branch candidate を比較しました：
+
+| Metric | main `eec3658` | Branch candidate | 変化 |
+| --- | ---: | ---: | ---: |
+| Wall time | 11.945 s | 11.480 s | 3.89% 短縮 / throughput 1.041x |
+| Process CPU time | 95.359 s | 90.828 s | 4.75% 低下 |
+| Active cores | 7.98 | 7.91 | 実質同等 |
+
+exit status、field count、luma TBC SHA-256、chroma TBC SHA-256、raw JSON
+SHA-256、stdout SHA-256、normalized stderr、normalized log、全 ordered `fileLoc`
+が一致しました。harness が有効な peak-working-set 値を返さなかったため、実測 memory
+値は主張しません。scope の異なるこの 200-frame pair は反復 40-frame matrix と
+分けて記録します。
+
 </details>
 
 <!-- SECTION: build -->
@@ -2180,7 +2206,7 @@ evidence であり、上の full matrix median を置き換えるものではあ
 .\tools\build-ipp-native.ps1
 dotnet restore VHSDecodeDotNet.slnx
 dotnet build VHSDecodeDotNet.slnx -c Release --no-restore
-dotnet test --solution VHSDecodeDotNet.slnx -c Release --no-build --no-restore --minimum-expected-tests 1267
+dotnet test --solution VHSDecodeDotNet.slnx -c Release --no-build --no-restore --minimum-expected-tests 1273
 dotnet test --project tests\VHSDecode.Tests\VHSDecode.Tests.csproj -c Release --no-build --no-restore --coverage --coverage-output coverage.cobertura.xml --coverage-output-format cobertura
 ```
 
@@ -2194,7 +2220,7 @@ third-party notice を埋め込み、license sidecar file は追加しません�
 
 現在の正式な Release build は warning 0、error 0 です。xUnit v3 project は
 `dotnet test` と Visual Studio Test Explorer の両方で個別に検出できる
-**1,267** tests を公開します。
+**1,273** tests を公開します。
 
 <!-- SECTION: usage -->
 

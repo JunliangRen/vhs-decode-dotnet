@@ -36,7 +36,7 @@ upstream release `v0.4.0`、commit
 - VHS family には VHS/S-VHS、Betamax、Video8/Hi8、U-matic、Type C、EIAJ、
   upstream が対応する PAL/NTSC variant が含まれます。
 - TBC utility、ダブルクリック GUI、開発者向け plot window は対象外です。
-- Visual Studio 2026 の `.slnx` には **1,267** 件の標準 xUnit v3 test があり、
+- Visual Studio 2026 の `.slnx` には **1,273** 件の標準 xUnit v3 test があり、
   Test Explorer と `dotnet test` の両方で実行できます。
 
 <!-- SECTION: start -->
@@ -126,6 +126,22 @@ set は `435.3`/`435.0` MiB で横ばいでした。9 項目の compatibility co
 すべて一致しました。この single pair は最新 optimization evidence の更新であり、
 上の full matrix median を置き換えるものではありません。
 
+今回採用する high-worker Exact VHS candidate は、serial spectrum preparation 後の
+独立した 2 つの inverse FFT stage を並行実行します。同じ private local PAL VHS
+fixture に対する fixed 200-frame Exact `current --threads 20` pair の結果です：
+
+| 最新の採用 optimization | main `eec3658` | Branch candidate | 変化 |
+| --- | ---: | ---: | ---: |
+| Wall time | 11.945 s | 11.480 s | 3.89% 短縮 / throughput 1.041x |
+| Process CPU time | 95.359 s | 90.828 s | 4.75% 低下 |
+| Active cores | 7.98 | 7.91 | 実質同等 |
+
+exit status、field count、luma、chroma、raw JSON、stdout、normalized stderr、
+normalized log、ordered `fileLoc` の 9 gate はすべて一致しました。測定 harness が
+有効な peak-working-set 値を返さなかったため memory 数値は主張しません。実装は
+sample-length buffer を追加せず、既存の 12-block outer pipeline bound を維持します。
+scope の異なるこの 200-frame pair は上の 40-frame repeated-run matrix を置き換えません。
+
 各 .NET cell は wall-time median と profile が対応する Python 列に対する
 speedup の順です。`1.000x` 未満は Python より遅いことを示します。Python
 PR341 は merge commit `2f21e8ed6018b14561396cc95f1f6828054470b8` で、
@@ -175,7 +191,7 @@ path を維持します。
 dotnet restore VHSDecodeDotNet.slnx
 dotnet build VHSDecodeDotNet.slnx -c Release --no-restore
 dotnet test --solution VHSDecodeDotNet.slnx -c Release `
-  --no-build --no-restore --minimum-expected-tests 1267
+  --no-build --no-restore --minimum-expected-tests 1273
 ```
 
 Visual Studio 2026 で `VHSDecodeDotNet.slnx` を開くと、build、debug、
