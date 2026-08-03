@@ -48,19 +48,26 @@ public sealed record DecodeSession(
     {
         try
         {
-            StreamDecoder.Dispose();
+            TbcFieldDecoder.Dispose();
         }
         finally
         {
             try
             {
-                Pipeline.Dispose();
+                StreamDecoder.Dispose();
             }
             finally
             {
-                if (Loader is IDisposable disposable)
+                try
                 {
-                    disposable.Dispose();
+                    Pipeline.Dispose();
+                }
+                finally
+                {
+                    if (Loader is IDisposable disposable)
+                    {
+                        disposable.Dispose();
+                    }
                 }
             }
         }
@@ -355,7 +362,8 @@ public static class DecodeSessionFactory
                 tbcRenderer.TrackPhaseIre0Offset?.TrackPhase,
                 workerThreads: executionOptions.WorkerThreads,
                 upstreamBehaviorProfile:
-                    executionOptions.UpstreamBehaviorProfile),
+                    executionOptions.UpstreamBehaviorProfile,
+                dspBackend: executionOptions.DspBackend),
             TbcFieldDecodePipeline.BuildLaserDiscPilotRefineOptions(command.Spec.Name, system, parameters),
             TbcFieldDecodePipeline.BuildLaserDiscNtscBurstRefineOptions(command.Spec.Name, system, parameters),
             command.Spec.Name,

@@ -1,6 +1,8 @@
+using VHSDecode.Core.Dsp.Ipp;
+
 namespace VHSDecode.Core.Dsp;
 
-internal sealed class ChromaSuperGaussianFinalFilter
+internal sealed class ChromaSuperGaussianFinalFilter : IDisposable
 {
     private const int MaximumParallelWorkers = 12;
     private const double AttenuationDb = 80.0;
@@ -12,13 +14,16 @@ internal sealed class ChromaSuperGaussianFinalFilter
     private readonly double[] _mask;
     private readonly int _padLeft;
     private readonly int _paddedLength;
+    private readonly IppRealDft32? _ippDft;
     private Workspace? _availableWorkspace;
+    private int _disposed;
     private int _workspaceCreationCount;
 
     internal ChromaSuperGaussianFinalFilter(
         int inputLength,
         double fscHz,
-        double colorUnderCarrierHz)
+        double colorUnderCarrierHz,
+        DspBackend dspBackend = DspBackend.Exact)
     {
         ArgumentOutOfRangeException.ThrowIfNegativeOrZero(inputLength);
         ArgumentOutOfRangeException.ThrowIfNegativeOrZero(fscHz);
@@ -33,6 +38,15 @@ internal sealed class ChromaSuperGaussianFinalFilter
             _paddedLength,
             fscHz,
             colorUnderCarrierHz);
+        _ippDft = dspBackend switch
+        {
+            DspBackend.Exact => null,
+            DspBackend.IppFast => new IppRealDft32(_paddedLength),
+            _ => throw new ArgumentOutOfRangeException(
+                nameof(dspBackend),
+                dspBackend,
+                "Unknown DSP backend.")
+        };
     }
 
     internal int PaddedLength => _paddedLength;
@@ -67,6 +81,9 @@ internal sealed class ChromaSuperGaussianFinalFilter
         Span<double> output,
         int workerThreads)
     {
+        ObjectDisposedException.ThrowIf(
+            Volatile.Read(ref _disposed) != 0,
+            this);
         if (input.Length != _inputLength)
         {
             throw new ArgumentException(
@@ -85,28 +102,14 @@ internal sealed class ChromaSuperGaussianFinalFilter
         try
         {
             FillReflectPad(input, workspace.Padded, _padLeft);
-            PocketFftReal32.ForwardAnyLength(
-                workspace.Padded,
-                workspace.ComplexInput,
-                workspace.TransformScratch,
-                workspace.Spectrum,
-                workerThreads);
-            for (int i = 0; i < workspace.Spectrum.Length; i++)
+            if (_ippDft is null)
             {
-                double real = workspace.Spectrum[i].Real;
-                double imaginary = workspace.Spectrum[i].Imaginary;
-                workspace.Spectrum[i] = new Complex32(
-                    (float)((real * _mask[i]) - (imaginary * 0.0)),
-                    (float)((real * 0.0) + (imaginary * _mask[i])));
+                ApplyManagedTransform(workspace, workerThreads);
             }
-
-            PocketFftReal32.InverseAnyLength(
-                workspace.Spectrum,
-                _paddedLength,
-                workspace.ComplexInput,
-                workspace.TransformScratch,
-                workspace.Filtered,
-                workerThreads);
+            else
+            {
+                ApplyIppTransform(workspace);
+            }
             for (int i = 0; i < output.Length; i++)
             {
                 output[i] = workspace.Filtered[_padLeft + i];
@@ -116,6 +119,52 @@ internal sealed class ChromaSuperGaussianFinalFilter
         {
             ReturnWorkspace(workspace);
         }
+    }
+
+    private void ApplyManagedTransform(Workspace workspace, int workerThreads)
+    {
+        Complex32[] complexInput = workspace.ComplexInput!;
+        Complex32[] transformScratch = workspace.TransformScratch!;
+        Complex32[] spectrum = workspace.Spectrum!;
+        PocketFftReal32.ForwardAnyLength(
+            workspace.Padded,
+            complexInput,
+            transformScratch,
+            spectrum,
+            workerThreads);
+        for (int i = 0; i < spectrum.Length; i++)
+        {
+            double real = spectrum[i].Real;
+            double imaginary = spectrum[i].Imaginary;
+            spectrum[i] = new Complex32(
+                (float)((real * _mask[i]) - (imaginary * 0.0)),
+                (float)((real * 0.0) + (imaginary * _mask[i])));
+        }
+
+        PocketFftReal32.InverseAnyLength(
+            spectrum,
+            _paddedLength,
+            complexInput,
+            transformScratch,
+            workspace.Filtered,
+            workerThreads);
+    }
+
+    private void ApplyIppTransform(Workspace workspace)
+    {
+        IppRealDft32 ippDft = _ippDft!;
+        IppComplex32[] spectrum = workspace.IppSpectrum!;
+        ippDft.Forward(workspace.Padded, spectrum);
+        for (int i = 0; i < spectrum.Length; i++)
+        {
+            double real = spectrum[i].Real;
+            double imaginary = spectrum[i].Imaginary;
+            spectrum[i] = new IppComplex32(
+                (float)((real * _mask[i]) - (imaginary * 0.0)),
+                (float)((real * 0.0) + (imaginary * _mask[i])));
+        }
+
+        ippDft.Inverse(spectrum, workspace.Filtered);
     }
 
     internal static int NextFastLength(int minimumLength)
@@ -208,7 +257,7 @@ internal sealed class ChromaSuperGaussianFinalFilter
         }
 
         Interlocked.Increment(ref _workspaceCreationCount);
-        return new Workspace(_paddedLength);
+        return new Workspace(_paddedLength, _ippDft is not null);
     }
 
     private void ReturnWorkspace(Workspace workspace)
@@ -216,6 +265,16 @@ internal sealed class ChromaSuperGaussianFinalFilter
             ref _availableWorkspace,
             workspace,
             comparand: null);
+
+    public void Dispose()
+    {
+        if (Interlocked.Exchange(ref _disposed, 1) != 0)
+        {
+            return;
+        }
+
+        _ippDft?.Dispose();
+    }
 
     private static void FillReflectPad(
         ReadOnlySpan<double> input,
@@ -249,24 +308,33 @@ internal sealed class ChromaSuperGaussianFinalFilter
 
     private sealed class Workspace
     {
-        internal Workspace(int paddedLength)
+        internal Workspace(int paddedLength, bool useIpp)
         {
             Padded = new float[paddedLength];
             Filtered = new float[paddedLength];
             int complexLength = paddedLength / 2;
-            ComplexInput = new Complex32[complexLength];
-            TransformScratch = new Complex32[complexLength];
-            Spectrum = new Complex32[complexLength + 1];
+            if (useIpp)
+            {
+                IppSpectrum = new IppComplex32[complexLength + 1];
+            }
+            else
+            {
+                ComplexInput = new Complex32[complexLength];
+                TransformScratch = new Complex32[complexLength];
+                Spectrum = new Complex32[complexLength + 1];
+            }
         }
 
-        internal Complex32[] ComplexInput { get; }
+        internal Complex32[]? ComplexInput { get; }
 
         internal float[] Filtered { get; }
 
         internal float[] Padded { get; }
 
-        internal Complex32[] Spectrum { get; }
+        internal IppComplex32[]? IppSpectrum { get; }
 
-        internal Complex32[] TransformScratch { get; }
+        internal Complex32[]? Spectrum { get; }
+
+        internal Complex32[]? TransformScratch { get; }
     }
 }

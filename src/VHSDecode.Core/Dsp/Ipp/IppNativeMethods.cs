@@ -6,7 +6,7 @@ namespace VHSDecode.Core.Dsp.Ipp;
 internal static partial class IppNativeMethods
 {
     internal const string LibraryName = "vhsdecode_ipp";
-    internal const uint RequiredAbiVersion = 0x0001_0000;
+    internal const uint RequiredAbiVersion = 0x0001_0001;
 
     internal static readonly string[] RequiredExports =
     [
@@ -16,6 +16,10 @@ internal static partial class IppNativeMethods
         "vhsdecode_ipp_fft64_destroy",
         "vhsdecode_ipp_fft64_forward_real",
         "vhsdecode_ipp_fft64_inverse_real",
+        "vhsdecode_ipp_dft32_create",
+        "vhsdecode_ipp_dft32_destroy",
+        "vhsdecode_ipp_dft32_forward_real",
+        "vhsdecode_ipp_dft32_inverse_real",
         "vhsdecode_ipp_complex64_multiply",
         "vhsdecode_ipp_complex64_magnitude_phase",
         "vhsdecode_ipp_iir64_create",
@@ -65,6 +69,32 @@ internal static partial class IppNativeMethods
         IppComplex64* input,
         int inputLength,
         double* output,
+        int outputLength);
+
+    [LibraryImport(LibraryName, EntryPoint = "vhsdecode_ipp_dft32_create")]
+    [UnmanagedCallConv(CallConvs = [typeof(CallConvCdecl)])]
+    internal static partial int Dft32Create(int length, out nint context);
+
+    [LibraryImport(LibraryName, EntryPoint = "vhsdecode_ipp_dft32_destroy")]
+    [UnmanagedCallConv(CallConvs = [typeof(CallConvCdecl)])]
+    internal static partial int Dft32Destroy(nint context);
+
+    [LibraryImport(LibraryName, EntryPoint = "vhsdecode_ipp_dft32_forward_real")]
+    [UnmanagedCallConv(CallConvs = [typeof(CallConvCdecl)])]
+    internal static unsafe partial int Dft32ForwardReal(
+        IppDft32SafeHandle context,
+        float* input,
+        int inputLength,
+        IppComplex32* output,
+        int outputLength);
+
+    [LibraryImport(LibraryName, EntryPoint = "vhsdecode_ipp_dft32_inverse_real")]
+    [UnmanagedCallConv(CallConvs = [typeof(CallConvCdecl)])]
+    internal static unsafe partial int Dft32InverseReal(
+        IppDft32SafeHandle context,
+        IppComplex32* input,
+        int inputLength,
+        float* output,
         int outputLength);
 
     [LibraryImport(LibraryName, EntryPoint = "vhsdecode_ipp_complex64_multiply")]

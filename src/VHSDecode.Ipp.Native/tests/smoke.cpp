@@ -58,6 +58,44 @@ bool check_round_trip(vhsdecode_ipp_fft64_context* context, int32_t length, doub
     return true;
 }
 
+bool check_dft32_round_trip(
+    vhsdecode_ipp_dft32_context* context,
+    int32_t length)
+{
+    std::vector<float> input(static_cast<size_t>(length));
+    std::vector<vhsdecode_ipp_complex32> spectrum(
+        static_cast<size_t>(length / 2 + 1));
+    std::vector<float> output(static_cast<size_t>(length));
+
+    for (int32_t i = 0; i < length; ++i) {
+        const float phase = static_cast<float>(
+            (2.0 * std::numbers::pi * static_cast<double>(i)) /
+            static_cast<double>(length));
+        input[static_cast<size_t>(i)] =
+            std::sin(3.0F * phase) + (0.25F * std::cos(17.0F * phase));
+    }
+
+    if (!expect_status(vhsdecode_ipp_dft32_forward_real(
+            context, input.data(), length, spectrum.data(), length / 2 + 1),
+            "DFT32 forward") ||
+        !expect_status(vhsdecode_ipp_dft32_inverse_real(
+            context, spectrum.data(), length / 2 + 1, output.data(), length),
+            "DFT32 inverse")) {
+        return false;
+    }
+
+    float max_error = 0.0F;
+    for (int32_t i = 0; i < length; ++i) {
+        max_error = (std::max)(max_error, std::abs(
+            input[static_cast<size_t>(i)] - output[static_cast<size_t>(i)]));
+    }
+    if (max_error > 2.0e-5F) {
+        std::cerr << "DFT32 round-trip error too large: " << max_error << '\n';
+        return false;
+    }
+    return true;
+}
+
 std::vector<double> make_filter_input(int32_t length)
 {
     std::vector<double> input(static_cast<size_t>(length));
@@ -527,6 +565,28 @@ int main()
 
     if (!expect_status(vhsdecode_ipp_fft64_destroy(context), "FFT destroy") ||
         !expect_status(vhsdecode_ipp_fft64_destroy(nullptr), "FFT destroy NULL")) {
+        return 1;
+    }
+
+    if (vhsdecode_ipp_dft32_create(12, nullptr) != VHSDECODE_IPP_STATUS_NULL_POINTER) {
+        std::cerr << "DFT32 null output-context validation failed\n";
+        return 1;
+    }
+    vhsdecode_ipp_dft32_context* invalid_dft_context = nullptr;
+    if (vhsdecode_ipp_dft32_create(13, &invalid_dft_context) !=
+        VHSDECODE_IPP_STATUS_UNSUPPORTED_LENGTH) {
+        std::cerr << "Invalid DFT32 length validation failed\n";
+        return 1;
+    }
+
+    constexpr int32_t dft_length = 3564;
+    vhsdecode_ipp_dft32_context* dft_context = nullptr;
+    if (!expect_status(
+            vhsdecode_ipp_dft32_create(dft_length, &dft_context),
+            "DFT32 create") ||
+        !check_dft32_round_trip(dft_context, dft_length) ||
+        !expect_status(vhsdecode_ipp_dft32_destroy(dft_context), "DFT32 destroy") ||
+        !expect_status(vhsdecode_ipp_dft32_destroy(nullptr), "DFT32 destroy NULL")) {
         return 1;
     }
 

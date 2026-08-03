@@ -15,7 +15,7 @@
 #  define VHSDECODE_IPP_CALL
 #endif
 
-#define VHSDECODE_IPP_ABI_VERSION 0x00010000u
+#define VHSDECODE_IPP_ABI_VERSION 0x00010001u
 #define VHSDECODE_IPP_NAME_CAPACITY 64u
 #define VHSDECODE_IPP_VERSION_CAPACITY 64u
 #define VHSDECODE_IPP_BUILD_DATE_CAPACITY 32u
@@ -35,6 +35,11 @@ typedef enum vhsdecode_ipp_status {
     VHSDECODE_IPP_STATUS_INTERNAL_ERROR = -10005,
     VHSDECODE_IPP_STATUS_UNSUPPORTED_CPU = -10006
 } vhsdecode_ipp_status;
+
+typedef struct vhsdecode_ipp_complex32 {
+    float real;
+    float imag;
+} vhsdecode_ipp_complex32;
 
 typedef struct vhsdecode_ipp_complex64 {
     double real;
@@ -74,6 +79,7 @@ typedef struct vhsdecode_ipp_runtime_info_v1 {
 } vhsdecode_ipp_runtime_info_v1;
 
 typedef struct vhsdecode_ipp_fft64_context vhsdecode_ipp_fft64_context;
+typedef struct vhsdecode_ipp_dft32_context vhsdecode_ipp_dft32_context;
 typedef struct vhsdecode_ipp_iir64_context vhsdecode_ipp_iir64_context;
 typedef struct vhsdecode_ipp_sos64_context vhsdecode_ipp_sos64_context;
 
@@ -123,6 +129,40 @@ vhsdecode_ipp_fft64_inverse_real(
     const vhsdecode_ipp_complex64* input,
     int32_t input_length,
     double* output,
+    int32_t output_length);
+
+/*
+ * Creates an even-length, single-precision real DFT context. Unlike fft64,
+ * this transform supports mixed-radix lengths. The context owns an immutable
+ * IPP DFT spec and a private scratch buffer. Calls on one context are
+ * serialized; different contexts can execute concurrently.
+ */
+VHSDECODE_IPP_API int32_t VHSDECODE_IPP_CALL
+vhsdecode_ipp_dft32_create(int32_t length, vhsdecode_ipp_dft32_context** out_context);
+
+VHSDECODE_IPP_API int32_t VHSDECODE_IPP_CALL
+vhsdecode_ipp_dft32_destroy(vhsdecode_ipp_dft32_context* context);
+
+/*
+ * Forward R2C transform. input_length must equal N and output_length must
+ * equal N/2+1. The output is ordinary interleaved complex data, including
+ * DC and Nyquist. The forward transform is not normalized.
+ */
+VHSDECODE_IPP_API int32_t VHSDECODE_IPP_CALL
+vhsdecode_ipp_dft32_forward_real(
+    vhsdecode_ipp_dft32_context* context,
+    const float* input,
+    int32_t input_length,
+    vhsdecode_ipp_complex32* output,
+    int32_t output_length);
+
+/* The inverse result is normalized by 1/N. */
+VHSDECODE_IPP_API int32_t VHSDECODE_IPP_CALL
+vhsdecode_ipp_dft32_inverse_real(
+    vhsdecode_ipp_dft32_context* context,
+    const vhsdecode_ipp_complex32* input,
+    int32_t input_length,
+    float* output,
     int32_t output_length);
 
 /* Input and output arrays must not overlap. */

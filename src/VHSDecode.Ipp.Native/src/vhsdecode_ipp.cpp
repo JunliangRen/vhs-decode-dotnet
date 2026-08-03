@@ -30,6 +30,24 @@ struct vhsdecode_ipp_fft64_context {
     }
 };
 
+struct vhsdecode_ipp_dft32_context {
+    int32_t length = 0;
+    Ipp8u* spec_storage = nullptr;
+    IppsDFTSpec_R_32f* spec = nullptr;
+    Ipp8u* work_buffer = nullptr;
+    std::mutex work_mutex;
+
+    ~vhsdecode_ipp_dft32_context()
+    {
+        if (work_buffer != nullptr) {
+            ippsFree(work_buffer);
+        }
+        if (spec_storage != nullptr) {
+            ippsFree(spec_storage);
+        }
+    }
+};
+
 struct vhsdecode_ipp_iir64_context {
     int32_t state_length = 0;
     std::vector<Ipp64f> taps;
@@ -76,6 +94,10 @@ int32_t g_bridge_init_status = VHSDECODE_IPP_STATUS_INTERNAL_ERROR;
 uint64_t g_cpu_features = 0;
 uint64_t g_enabled_cpu_features = 0;
 
+static_assert(sizeof(vhsdecode_ipp_complex32) == sizeof(Ipp32fc));
+static_assert(alignof(vhsdecode_ipp_complex32) == alignof(Ipp32fc));
+static_assert(offsetof(vhsdecode_ipp_complex32, real) == offsetof(Ipp32fc, re));
+static_assert(offsetof(vhsdecode_ipp_complex32, imag) == offsetof(Ipp32fc, im));
 static_assert(sizeof(vhsdecode_ipp_complex64) == sizeof(Ipp64fc));
 static_assert(alignof(vhsdecode_ipp_complex64) == alignof(Ipp64fc));
 static_assert(offsetof(vhsdecode_ipp_complex64, real) == offsetof(Ipp64fc, re));
@@ -471,6 +493,158 @@ vhsdecode_ipp_fft64_inverse_real(
         const std::lock_guard lock(context->work_mutex);
         return static_cast<int32_t>(ippsFFTInv_CCSToR_64f(
             reinterpret_cast<const Ipp64f*>(as_ipp_complex(input)),
+            output,
+            context->spec,
+            context->work_buffer));
+    }
+    catch (...) {
+        return VHSDECODE_IPP_STATUS_INTERNAL_ERROR;
+    }
+}
+
+int32_t VHSDECODE_IPP_CALL
+vhsdecode_ipp_dft32_create(
+    int32_t length,
+    vhsdecode_ipp_dft32_context** out_context)
+{
+    if (out_context == nullptr) {
+        return VHSDECODE_IPP_STATUS_NULL_POINTER;
+    }
+    *out_context = nullptr;
+    if (length < 2 || (length & 1) != 0) {
+        return VHSDECODE_IPP_STATUS_UNSUPPORTED_LENGTH;
+    }
+
+    const int32_t initialization_status = ensure_ipp_initialized();
+    if (initialization_status != VHSDECODE_IPP_STATUS_OK) {
+        return initialization_status;
+    }
+
+    try {
+        auto* context = new (std::nothrow) vhsdecode_ipp_dft32_context();
+        if (context == nullptr) {
+            return VHSDECODE_IPP_STATUS_OUT_OF_MEMORY;
+        }
+        context->length = length;
+
+        int spec_size = 0;
+        int init_buffer_size = 0;
+        int work_buffer_size = 0;
+        IppStatus status = ippsDFTGetSize_R_32f(
+            length,
+            IPP_FFT_DIV_INV_BY_N,
+            ippAlgHintNone,
+            &spec_size,
+            &init_buffer_size,
+            &work_buffer_size);
+        if (status != ippStsNoErr) {
+            delete context;
+            return static_cast<int32_t>(status);
+        }
+
+        context->spec_storage = ippsMalloc_8u(spec_size);
+        if (context->spec_storage == nullptr) {
+            delete context;
+            return VHSDECODE_IPP_STATUS_OUT_OF_MEMORY;
+        }
+        context->spec = reinterpret_cast<IppsDFTSpec_R_32f*>(
+            context->spec_storage);
+
+        Ipp8u* init_buffer = nullptr;
+        if (init_buffer_size > 0) {
+            init_buffer = ippsMalloc_8u(init_buffer_size);
+            if (init_buffer == nullptr) {
+                delete context;
+                return VHSDECODE_IPP_STATUS_OUT_OF_MEMORY;
+            }
+        }
+
+        status = ippsDFTInit_R_32f(
+            length,
+            IPP_FFT_DIV_INV_BY_N,
+            ippAlgHintNone,
+            context->spec,
+            init_buffer);
+        if (init_buffer != nullptr) {
+            ippsFree(init_buffer);
+        }
+        if (status != ippStsNoErr) {
+            delete context;
+            return static_cast<int32_t>(status);
+        }
+
+        if (work_buffer_size > 0) {
+            context->work_buffer = ippsMalloc_8u(work_buffer_size);
+            if (context->work_buffer == nullptr) {
+                delete context;
+                return VHSDECODE_IPP_STATUS_OUT_OF_MEMORY;
+            }
+        }
+
+        *out_context = context;
+        return VHSDECODE_IPP_STATUS_OK;
+    }
+    catch (...) {
+        return VHSDECODE_IPP_STATUS_INTERNAL_ERROR;
+    }
+}
+
+int32_t VHSDECODE_IPP_CALL
+vhsdecode_ipp_dft32_destroy(vhsdecode_ipp_dft32_context* context)
+{
+    delete context;
+    return VHSDECODE_IPP_STATUS_OK;
+}
+
+int32_t VHSDECODE_IPP_CALL
+vhsdecode_ipp_dft32_forward_real(
+    vhsdecode_ipp_dft32_context* context,
+    const float* input,
+    int32_t input_length,
+    vhsdecode_ipp_complex32* output,
+    int32_t output_length)
+{
+    if (context == nullptr || input == nullptr || output == nullptr) {
+        return VHSDECODE_IPP_STATUS_NULL_POINTER;
+    }
+    if (input_length != context->length ||
+        output_length != (context->length / 2) + 1) {
+        return VHSDECODE_IPP_STATUS_INVALID_ARGUMENT;
+    }
+
+    try {
+        const std::lock_guard lock(context->work_mutex);
+        return static_cast<int32_t>(ippsDFTFwd_RToCCS_32f(
+            input,
+            reinterpret_cast<Ipp32f*>(output),
+            context->spec,
+            context->work_buffer));
+    }
+    catch (...) {
+        return VHSDECODE_IPP_STATUS_INTERNAL_ERROR;
+    }
+}
+
+int32_t VHSDECODE_IPP_CALL
+vhsdecode_ipp_dft32_inverse_real(
+    vhsdecode_ipp_dft32_context* context,
+    const vhsdecode_ipp_complex32* input,
+    int32_t input_length,
+    float* output,
+    int32_t output_length)
+{
+    if (context == nullptr || input == nullptr || output == nullptr) {
+        return VHSDECODE_IPP_STATUS_NULL_POINTER;
+    }
+    if (input_length != (context->length / 2) + 1 ||
+        output_length != context->length) {
+        return VHSDECODE_IPP_STATUS_INVALID_ARGUMENT;
+    }
+
+    try {
+        const std::lock_guard lock(context->work_mutex);
+        return static_cast<int32_t>(ippsDFTInv_CCSToR_32f(
+            reinterpret_cast<const Ipp32f*>(input),
             output,
             context->spec,
             context->work_buffer));

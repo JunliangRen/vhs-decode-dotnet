@@ -218,7 +218,7 @@ internal sealed record TbcFieldDecodeState(
     int? PreviousVhsFieldNumber = null,
     long? PreviousVhsFieldReadLocation = null);
 
-public sealed class TbcFieldDecodePipeline
+public sealed class TbcFieldDecodePipeline : IDisposable
 {
     private const int MaximumOutputFirstLine = 4;
     private const int LineLocationLookahead = 10;
@@ -416,6 +416,9 @@ public sealed class TbcFieldDecodePipeline
         }
     }
 
+    public void Dispose()
+        => _chromaFieldOptions?.SuperGaussianFinalFilter?.Dispose();
+
     internal TbcFieldDecodeState CaptureState()
     {
         return new TbcFieldDecodeState(
@@ -565,7 +568,8 @@ public sealed class TbcFieldDecodePipeline
                 session.TbcRenderer.TrackPhaseIre0Offset?.TrackPhase,
                 workerThreads: session.ExecutionOptions.WorkerThreads,
                 upstreamBehaviorProfile:
-                    session.ExecutionOptions.UpstreamBehaviorProfile),
+                    session.ExecutionOptions.UpstreamBehaviorProfile,
+                dspBackend: session.ExecutionOptions.DspBackend),
             BuildLaserDiscPilotRefineOptions(session.Spec.Name, session.System, session.Parameters),
             BuildLaserDiscNtscBurstRefineOptions(session.Spec.Name, session.System, session.Parameters),
             session.Spec.Name,
@@ -1973,7 +1977,8 @@ public sealed class TbcFieldDecodePipeline
         int? initialChromaRotationIndex = null,
         int workerThreads = 1,
         UpstreamBehaviorProfile upstreamBehaviorProfile =
-            UpstreamBehaviorProfile.V040)
+            UpstreamBehaviorProfile.V040,
+        DspBackend dspBackend = DspBackend.Exact)
     {
         if (chromaOptions?.WriteChroma != true
             || !parameters.SysParams.TryGetProperty("colorBurstUS", out JsonElement colorBurstRange)
@@ -2048,7 +2053,8 @@ public sealed class TbcFieldDecodePipeline
                         frameSpec.OutputSampleRateHz / 4.0,
                         JsonDouble(
                             parameters.RfParams,
-                            "color_under_carrier"))
+                            "color_under_carrier"),
+                        dspBackend)
                     : null,
             ChromaDeemphasisFilter = chromaOptions.ChromaDeemphasisFilter
                 ? DecodeFilterSetBuilder.BuildChromaDeemphasisFilter(parameters, chromaSampleRateHz)

@@ -204,10 +204,11 @@ experimental path です。IPP が返す feature mask に SSE4.2 が含まれる
 正の non-Intel vendor warning を受け入れます。静的 link 済みの
 `vhsdecode_ipp.dll` を load し、IPP version と選択された ISA を表示します。
 bridge、ABI、CPU が利用できない場合は明確に失敗し、`exact` へ暗黙に fallback
-しません。v1 で IPP を使うのは VHS real-RF FFT stage のみです。CVBS、LD、HiFi
-は未対応の `ipp-fast` を明示的に拒否し、Exact kernel を実行した結果を誤って
-benchmark として扱うことはありません。IIR/SOS と HiFi/LD の高速化は段階的な
-今後の作業であり、現在の active path ではありません。
+しません。v1 の IPP routing は VHS real-RF FFT と、`current` profile の
+color-under Super-Gaussian DFT に限定されます。CVBS、LD、HiFi は未対応の
+`ipp-fast` を明示的に拒否し、Exact kernel を実行した結果を誤って benchmark と
+して扱うことはありません。IIR/SOS と HiFi/LD の高速化は段階的な今後の作業で
+あり、現在の active path ではありません。
 
 `ipp-fast` は数値的に近い performance mode であり、byte-compatible mode では
 ありません。FFT と vector math の評価差は floating-point bit を変え、threshold
@@ -388,13 +389,13 @@ Python v0.4.0、merge 済みの Python PR341、Exact v0.4.0、Exact
 <!-- LATEST_PERFORMANCE_BEGIN -->
 | CLI mode（workers） | Python v0.4.0 | Python PR341 | Exact + v0.4.0 | Exact + current | IPP-fast + v0.4.0 | IPP-fast + current |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| default（5） | 15.207 s | 16.780 s | 4.389 s / 3.465x / 71.14% | 7.030 s / 2.387x / 58.10% | 3.609 s / 4.213x / 76.27% | 5.946 s / 2.822x / 64.57% |
-| `--threads 1` | 17.694 s | 19.414 s | 10.065 s / 1.758x / 43.11% | 13.871 s / 1.400x / 28.55% | 7.215 s / 2.453x / 59.23% | 11.301 s / 1.718x / 41.79% |
-| `--threads 5` | 15.719 s | 17.801 s | 4.282 s / 3.671x / 72.76% | 7.428 s / 2.396x / 58.27% | 3.568 s / 4.406x / 77.30% | 5.816 s / 3.061x / 67.33% |
-| `--threads 10` | 16.037 s | 18.266 s | 3.494 s / 4.589x / 78.21% | 6.040 s / 3.024x / 66.93% | 3.098 s / 5.177x / 80.68% | 5.190 s / 3.519x / 71.59% |
-| `--threads 20` | 16.405 s | 18.395 s | 3.235 s / 5.071x / 80.28% | 5.118 s / 3.594x / 72.18% | 2.654 s / 6.182x / 83.82% | 4.713 s / 3.903x / 74.38% |
+| default（5） | 15.207 s | 16.780 s | 4.389 s / 3.465x / 71.14% | 7.030 s / 2.387x / 58.10% | 3.609 s / 4.213x / 76.27% | 3.801 s / 4.415x / 77.35% |
+| `--threads 1` | 17.694 s | 19.414 s | 10.065 s / 1.758x / 43.11% | 13.871 s / 1.400x / 28.55% | 7.215 s / 2.453x / 59.23% | 9.527 s / 2.038x / 50.93% |
+| `--threads 5` | 15.719 s | 17.801 s | 4.282 s / 3.671x / 72.76% | 7.428 s / 2.396x / 58.27% | 3.568 s / 4.406x / 77.30% | 3.583 s / 4.968x / 79.87% |
+| `--threads 10` | 16.037 s | 18.266 s | 3.494 s / 4.589x / 78.21% | 6.040 s / 3.024x / 66.93% | 3.098 s / 5.177x / 80.68% | 3.027 s / 6.035x / 83.43% |
+| `--threads 20` | 16.405 s | 18.395 s | 3.235 s / 5.071x / 80.28% | 5.118 s / 3.594x / 72.18% | 2.654 s / 6.182x / 83.82% | 2.545 s / 7.229x / 86.17% |
 <!-- LATEST_PERFORMANCE_END -->
-<!-- LATEST_PERFORMANCE_RUNS: base=90 current-refresh=30 repeats=3 -->
+<!-- LATEST_PERFORMANCE_RUNS: base=90 current-refresh=30 ipp-current-refresh=15 repeats=3 -->
 
 この測定は 2026-08-02 に main commit
 `c92af1dfd0f96cd7f2d49f3219fb428d0f4e0865` で実行しました。host は Intel
@@ -403,7 +404,24 @@ SDK/runtime `11.0.100-preview.6.26359.118` です。30 個の mode/profile cell 
 3 回ずつ interleaved order で測定し、合計 90 Release run です。2026-08-03、
 bounded ACC segment と Super-Gaussian FFT の parallelization 後の final cap-12 branch
 candidate で 10 個すべての `current` cell を 3 回ずつ再測定し、30 Release run を追加しました。
-Python と .NET v0.4.0 cell は従来の audited value を維持します。Python v0.4.0
+Python と .NET v0.4.0 cell は従来の audited value を維持します。その後、
+356400-point Super-Gaussian transform を arbitrary-length IPP DFT32 に移し、各
+worker setting で 3 回 interleaved measurement を行って `IPP-fast + current` 列を
+更新し、15 run を追加しました。
+
+DFT32 candidate は previous release と fixed 200-frame
+`current --dsp-backend ipp-fast --threads 20` pair でも比較しました。wall time は
+10.815 から 9.470 秒（12.43% 短縮、throughput 1.142x）、process CPU time は
+65.797 から 51.047 秒（22.42% 低下）、peak working set は 352.9 から 351.2 MiB
+へ低下しました。field count、stdout、ABI-normalized stderr/log、ordered `fileLoc`
+は一致し、luma と raw JSON hash も一致しました。142,102,000 unsigned chroma
+sample の numerical comparison では 0.1627% に差があり、全 sample の 99.99987%
+は差 1 以下、RMSE は 0.063、差 4 超は 124 sample でした。これは `ipp-fast` の
+numerical result であり、Exact byte-compatibility claim ではありません。別の
+40-frame Exact v0.4.0/`current` release-candidate pair は byte、metadata、console、
+log、`fileLoc` の 9 gate をすべて通過しました。
+
+Python v0.4.0
 commit は `43155200da87c0d49eb37d8ec09b1372075ee8e4`、merge 済み
 PR341 commit は `2f21e8ed6018b14561396cc95f1f6828054470b8`
 （`v0.4.0-40-g2f21e8ed`）です。Python
@@ -2206,7 +2224,7 @@ SHA-256、stdout SHA-256、normalized stderr、normalized log、全 ordered `fil
 .\tools\build-ipp-native.ps1
 dotnet restore VHSDecodeDotNet.slnx
 dotnet build VHSDecodeDotNet.slnx -c Release --no-restore
-dotnet test --solution VHSDecodeDotNet.slnx -c Release --no-build --no-restore --minimum-expected-tests 1273
+dotnet test --solution VHSDecodeDotNet.slnx -c Release --no-build --no-restore --minimum-expected-tests 1283
 dotnet test --project tests\VHSDecode.Tests\VHSDecode.Tests.csproj -c Release --no-build --no-restore --coverage --coverage-output coverage.cobertura.xml --coverage-output-format cobertura
 ```
 
@@ -2220,7 +2238,7 @@ third-party notice を埋め込み、license sidecar file は追加しません�
 
 現在の正式な Release build は warning 0、error 0 です。xUnit v3 project は
 `dotnet test` と Visual Studio Test Explorer の両方で個別に検出できる
-**1,273** tests を公開します。
+**1,283** tests を公開します。
 
 <!-- SECTION: usage -->
 
