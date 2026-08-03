@@ -275,6 +275,11 @@ FFT への fallback が必要で、paired median gain は -1.05% まで低下し
 - linear wow adjustment は一定の derivative を line ごとに 1 回だけ計算し、median/MAD
   repair 後に展開します。worker 有効時も source position と level preparation は固定 2-way
   のみで並行実行します。
+- `current` color-under path の phase analysis は、burst probe が各 output line から
+  実際に読み得る先頭 `BurstStart + BurstEnd` sample だけを resample します。linear
+  interpolation は compact な pooled source-position/level-adjust array を使いますが、
+  wow smoothing は省略 sample も original FMA recurrence で逐次更新し、non-linear
+  interpolation は full-plan fallback を維持します。
 - VHS heterodyne/carrier table は境界付き並行構築と session-owned one-entry cache を
   使用します。exact-key hit は元の array を再利用し、sample shape、carrier、phase、
   AFC の変更時は旧 entry を置き換えるため、保持 state は増加しません。phase analysis は
@@ -389,25 +394,32 @@ Python v0.4.0、merge 済みの Python PR341、Exact v0.4.0、Exact
 <!-- LATEST_PERFORMANCE_BEGIN -->
 | CLI mode（workers） | Python v0.4.0 | Python PR341 | Exact + v0.4.0 | Exact + current | IPP-fast + v0.4.0 | IPP-fast + current |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| default（5） | 15.207 s | 16.780 s | 4.389 s / 3.465x / 71.14% | 7.030 s / 2.387x / 58.10% | 3.609 s / 4.213x / 76.27% | 3.801 s / 4.415x / 77.35% |
-| `--threads 1` | 17.694 s | 19.414 s | 10.065 s / 1.758x / 43.11% | 13.871 s / 1.400x / 28.55% | 7.215 s / 2.453x / 59.23% | 9.527 s / 2.038x / 50.93% |
-| `--threads 5` | 15.719 s | 17.801 s | 4.282 s / 3.671x / 72.76% | 7.428 s / 2.396x / 58.27% | 3.568 s / 4.406x / 77.30% | 3.583 s / 4.968x / 79.87% |
-| `--threads 10` | 16.037 s | 18.266 s | 3.494 s / 4.589x / 78.21% | 6.040 s / 3.024x / 66.93% | 3.098 s / 5.177x / 80.68% | 3.027 s / 6.035x / 83.43% |
-| `--threads 20` | 16.405 s | 18.395 s | 3.235 s / 5.071x / 80.28% | 5.118 s / 3.594x / 72.18% | 2.654 s / 6.182x / 83.82% | 2.545 s / 7.229x / 86.17% |
+| default（5） | 15.207 s | 16.780 s | 4.332 s / 3.510x / 71.51% | 5.402 s / 3.106x / 67.81% | 3.575 s / 4.254x / 76.49% | 3.558 s / 4.717x / 78.80% |
+| `--threads 1` | 17.694 s | 19.414 s | 9.867 s / 1.793x / 44.24% | 12.596 s / 1.541x / 35.12% | 7.070 s / 2.503x / 60.04% | 8.636 s / 2.248x / 55.51% |
+| `--threads 5` | 15.719 s | 17.801 s | 4.268 s / 3.683x / 72.85% | 5.365 s / 3.318x / 69.86% | 3.521 s / 4.465x / 77.60% | 3.503 s / 5.081x / 80.32% |
+| `--threads 10` | 16.037 s | 18.266 s | 3.579 s / 4.481x / 77.68% | 4.379 s / 4.171x / 76.02% | 3.014 s / 5.321x / 81.21% | 2.886 s / 6.328x / 84.20% |
+| `--threads 20` | 16.405 s | 18.395 s | 2.951 s / 5.559x / 82.01% | 3.885 s / 4.735x / 78.88% | 2.672 s / 6.140x / 83.71% | 2.583 s / 7.123x / 85.96% |
 <!-- LATEST_PERFORMANCE_END -->
-<!-- LATEST_PERFORMANCE_RUNS: base=90 current-refresh=30 ipp-current-refresh=15 repeats=3 -->
+<!-- LATEST_PERFORMANCE_RUNS: dotnet-refresh=60 repeats=3 -->
 
-この測定は 2026-08-02 に main commit
-`c92af1dfd0f96cd7f2d49f3219fb428d0f4e0865` で実行しました。host は Intel
+Python measurement は 2026-08-02 に main commit
+`c92af1dfd0f96cd7f2d49f3219fb428d0f4e0865` で audit しました。2026-08-04、
+main `3bfa9b9` を基にしたこの branch candidate で .NET の全 20 mode/profile cell
+を 3 回ずつ interleaved 測定し、60 Release run を実行しました。host は Intel
 Core Ultra 7 265K（20 logical processor）、Windows 11 build 26220、.NET
-SDK/runtime `11.0.100-preview.6.26359.118` です。30 個の mode/profile cell を
-3 回ずつ interleaved order で測定し、合計 90 Release run です。2026-08-03、
-bounded ACC segment と Super-Gaussian FFT の parallelization 後の final cap-12 branch
-candidate で 10 個すべての `current` cell を 3 回ずつ再測定し、30 Release run を追加しました。
-Python と .NET v0.4.0 cell は従来の audited value を維持します。その後、
-356400-point Super-Gaussian transform を arbitrary-length IPP DFT32 に移し、各
-worker setting で 3 回 interleaved measurement を行って `IPP-fast + current` 列を
-更新し、15 run を追加しました。
+SDK/runtime `11.0.100-preview.6.26359.118` です。各 .NET cell の 3 run は luma、
+chroma、raw JSON、stdout について 1 hash set だけを生成しました。
+
+phase-prefix candidate は main `3bfa9b9` と fixed 200-frame
+`current --dsp-backend ipp-fast --threads 20` window で build ごとに 3 回
+interleaved 比較しました。median wall time は 10.250 から 10.018 秒へ 2.26%
+短縮（throughput 1.023x）、process CPU time は 53.797 から 53.141 秒へ 1.22%
+低下しました。peak working set は candidate 351.2-364.3 MiB、main
+351.2-353.1 MiB の bounded range です。luma、chroma、raw JSON、stdout、
+timing-normalized stderr、timestamp-normalized log、ordered `fileLoc` は一致しました。
+別の 17-run 80-frame matrix は Exact/IPP-fast `current` の zero/default/1/5/10/20
+workers と未変更の Exact v0.4.0 を対象にし、各 profile/backend group は artifact と
+`fileLoc` hash を 1 組だけ生成しました。
 
 DFT32 candidate は previous release と fixed 200-frame
 `current --dsp-backend ipp-fast --threads 20` pair でも比較しました。wall time は
@@ -2224,7 +2236,7 @@ SHA-256、stdout SHA-256、normalized stderr、normalized log、全 ordered `fil
 .\tools\build-ipp-native.ps1
 dotnet restore VHSDecodeDotNet.slnx
 dotnet build VHSDecodeDotNet.slnx -c Release --no-restore
-dotnet test --solution VHSDecodeDotNet.slnx -c Release --no-build --no-restore --minimum-expected-tests 1283
+dotnet test --solution VHSDecodeDotNet.slnx -c Release --no-build --no-restore --minimum-expected-tests 1288
 dotnet test --project tests\VHSDecode.Tests\VHSDecode.Tests.csproj -c Release --no-build --no-restore --coverage --coverage-output coverage.cobertura.xml --coverage-output-format cobertura
 ```
 
@@ -2238,7 +2250,7 @@ third-party notice を埋め込み、license sidecar file は追加しません�
 
 現在の正式な Release build は warning 0、error 0 です。xUnit v3 project は
 `dotnet test` と Visual Studio Test Explorer の両方で個別に検出できる
-**1,283** tests を公開します。
+**1,288** tests を公開します。
 
 <!-- SECTION: usage -->
 

@@ -1888,7 +1888,24 @@ public sealed class TbcFieldDecodePipeline : IDisposable
         }
 
         double[] output = _chromaPhaseAnalysisWorkspaces.Get(_renderer.FrameSpec.FieldSampleCount);
-        _renderer.ResampleFieldInto(chroma, lineLocations, outputFirstLine, output);
+        int phasePrefixSamples = _chromaFieldOptions?.UseCurrentChromaProcessing == true
+            ? checked(_chromaFieldOptions.BurstStart + _chromaFieldOptions.BurstEnd)
+            : 0;
+        if (phasePrefixSamples > 0
+            && phasePrefixSamples <= _renderer.FrameSpec.OutputLineLength)
+        {
+            _renderer.ResampleFieldLinePrefixesInto(
+                chroma,
+                lineLocations,
+                outputFirstLine,
+                phasePrefixSamples,
+                output);
+        }
+        else
+        {
+            _renderer.ResampleFieldInto(chroma, lineLocations, outputFirstLine, output);
+        }
+
         return output;
     }
 

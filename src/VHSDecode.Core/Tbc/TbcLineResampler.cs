@@ -20,6 +20,7 @@ public enum TbcLineInterpolationMethod
 public sealed class TbcLineResampler
 {
     private const int ParallelSampleThreshold = 64 * 1024;
+    private const int MinimumParallelSamplesPerWorker = 16 * 1024;
     private const int SincTapCount = 16;
     private const int SincPhaseCount = 65536;
     private const double KaiserBeta = 5.0;
@@ -160,6 +161,108 @@ public sealed class TbcLineResampler
         return ResamplePrepared(source, plan);
     }
 
+    internal void ResampleLinePrefixes(
+        ReadOnlySpan<double> source,
+        IReadOnlyList<double> lineLocations,
+        int firstLine,
+        int lineCount,
+        int samplesPerLine,
+        double[] destination)
+    {
+        if (source.IsEmpty)
+        {
+            throw new ArgumentException("Source must contain at least one sample.", nameof(source));
+        }
+
+        ArgumentNullException.ThrowIfNull(destination);
+        if (lineCount < 0)
+        {
+            throw new ArgumentOutOfRangeException(nameof(lineCount));
+        }
+
+        if (samplesPerLine <= 0 || samplesPerLine > OutputLineLength)
+        {
+            throw new ArgumentOutOfRangeException(nameof(samplesPerLine));
+        }
+
+        int destinationLength = checked(OutputLineLength * lineCount);
+        if (destination.Length != destinationLength)
+        {
+            throw new ArgumentException(
+                "Destination length must match the requested output lines.",
+                nameof(destination));
+        }
+
+        ILineLocationInterpolator interpolator = BuildInterpolator(lineLocations);
+        if (firstLine < 0 || firstLine + lineCount >= interpolator.Count)
+        {
+            throw new ArgumentOutOfRangeException(nameof(firstLine));
+        }
+
+        if (interpolator is not LinearLineLocationInterpolator linear)
+        {
+            using ResamplingPlan plan = PrepareResampling(
+                interpolator,
+                firstLine,
+                destinationLength);
+            ResamplePreparedLinePrefixes(source, plan, samplesPerLine, destination);
+            return;
+        }
+
+        int compactLength = checked(samplesPerLine * lineCount);
+        double[] sourcePositions = ArrayPool<double>.Shared.Rent(compactLength);
+        double[] levelAdjusts = ArrayPool<double>.Shared.Rent(compactLength);
+        try
+        {
+            void BuildSourcePositions()
+            {
+                for (int line = 0; line < lineCount; line++)
+                {
+                    linear.FillOutputPositions(
+                        checked((firstLine + line) * OutputLineLength),
+                        OutputLineLength,
+                        sourcePositions.AsSpan(line * samplesPerLine, samplesPerLine));
+                }
+            }
+
+            if (_workerThreads > 1 && compactLength >= ParallelSampleThreshold)
+            {
+                Parallel.Invoke(
+                    new ParallelOptions { MaxDegreeOfParallelism = 2 },
+                    BuildSourcePositions,
+                    () => BuildLinearPrefixLevelAdjusts(
+                        linear,
+                        firstLine,
+                        lineCount,
+                        samplesPerLine,
+                        levelAdjusts));
+            }
+            else
+            {
+                BuildSourcePositions();
+                BuildLinearPrefixLevelAdjusts(
+                    linear,
+                    firstLine,
+                    lineCount,
+                    samplesPerLine,
+                    levelAdjusts);
+            }
+
+            ResampleCompactLinePrefixes(
+                source,
+                sourcePositions,
+                levelAdjusts,
+                lineCount,
+                samplesPerLine,
+                destination);
+        }
+        finally
+        {
+            ArrayPool<double>.Shared.Return(sourcePositions);
+            ArrayPool<double>.Shared.Return(levelAdjusts);
+        }
+    }
+
     internal ResamplingPlan PrepareLineResampling(
         IReadOnlyList<double> lineLocations,
         int firstLine,
@@ -285,6 +388,42 @@ public sealed class TbcLineResampler
         }
 
         ResampleSamples(source, plan, destination);
+    }
+
+    internal void ResamplePreparedLinePrefixes(
+        ReadOnlySpan<double> source,
+        ResamplingPlan plan,
+        int samplesPerLine,
+        double[] destination)
+    {
+        if (source.IsEmpty)
+        {
+            throw new ArgumentException("Source must contain at least one sample.", nameof(source));
+        }
+
+        ArgumentNullException.ThrowIfNull(plan);
+        ArgumentNullException.ThrowIfNull(destination);
+        plan.ValidateOwner(this);
+        if (destination.Length != plan.DestinationLength)
+        {
+            throw new ArgumentException(
+                "Destination length must match the prepared resampling plan.",
+                nameof(destination));
+        }
+
+        if (samplesPerLine <= 0 || samplesPerLine > OutputLineLength)
+        {
+            throw new ArgumentOutOfRangeException(nameof(samplesPerLine));
+        }
+
+        if (destination.Length % OutputLineLength != 0)
+        {
+            throw new ArgumentException(
+                "Prepared destination length must contain complete output lines.",
+                nameof(plan));
+        }
+
+        ResampleLinePrefixes(source, plan, samplesPerLine, destination);
     }
 
     internal void ResamplePreparedShifted(
@@ -737,6 +876,103 @@ public sealed class TbcLineResampler
         SmoothLevelAdjusts(levelAdjusts.AsSpan(0, sampleCount));
     }
 
+    private void BuildLinearPrefixLevelAdjusts(
+        ILineLocationInterpolator interpolator,
+        int firstLine,
+        int lineCount,
+        int samplesPerLine,
+        double[] levelAdjusts)
+    {
+        int scaledLineCount = checked(firstLine + lineCount);
+        int compactLength = checked(lineCount * samplesPerLine);
+        if (levelAdjusts.Length < compactLength)
+        {
+            throw new ArgumentException(
+                "Level-adjust buffer is shorter than the compact sample count.",
+                nameof(levelAdjusts));
+        }
+
+        if (scaledLineCount == 0)
+        {
+            return;
+        }
+
+        double[] lineFactors = ArrayPool<double>.Shared.Rent(scaledLineCount);
+        double[] medianScratch = ArrayPool<double>.Shared.Rent(scaledLineCount);
+        double[] deviationScratch = ArrayPool<double>.Shared.Rent(scaledLineCount);
+        try
+        {
+            for (int line = 0; line < scaledLineCount; line++)
+            {
+                lineFactors[line] = interpolator.EvaluateOutputDerivative(
+                    line * OutputLineLength,
+                    OutputLineLength);
+            }
+
+            ReadOnlySpan<double> factors = lineFactors.AsSpan(0, scaledLineCount);
+            double median = NumpyReduction.MedianFloat64(factors, medianScratch);
+            for (int line = 0; line < scaledLineCount; line++)
+            {
+                deviationScratch[line] = Math.Abs(lineFactors[line] - median);
+            }
+
+            double mad = NumpyReduction.MedianFloat64(
+                deviationScratch.AsSpan(0, scaledLineCount),
+                medianScratch);
+            double threshold = mad > 0.0 ? 15.0 * mad : 0.001;
+            for (int line = 0; line < scaledLineCount; line++)
+            {
+                double factor = lineFactors[line];
+                lineFactors[line] = Math.Abs(factor - median) > threshold
+                    ? median
+                    : factor;
+            }
+
+            if (WowLevelAdjustSmoothing <= 0.0)
+            {
+                for (int line = 0; line < lineCount; line++)
+                {
+                    Array.Fill(
+                        levelAdjusts,
+                        lineFactors[firstLine + line],
+                        line * samplesPerLine,
+                        samplesPerLine);
+                }
+
+                return;
+            }
+
+            double alpha = 1.0 / (WowLevelAdjustSmoothing * OutputLineLength);
+            double previous = lineFactors[0];
+            for (int line = 0; line < scaledLineCount; line++)
+            {
+                double factor = lineFactors[line];
+                int compactStart = (line - firstLine) * samplesPerLine;
+                for (int sample = 0; sample < OutputLineLength; sample++)
+                {
+                    if (line != 0 || sample != 0)
+                    {
+                        previous = Math.FusedMultiplyAdd(
+                            factor - previous,
+                            alpha,
+                            previous);
+                    }
+
+                    if (line >= firstLine && sample < samplesPerLine)
+                    {
+                        levelAdjusts[compactStart + sample] = previous;
+                    }
+                }
+            }
+        }
+        finally
+        {
+            ArrayPool<double>.Shared.Return(lineFactors);
+            ArrayPool<double>.Shared.Return(medianScratch);
+            ArrayPool<double>.Shared.Return(deviationScratch);
+        }
+    }
+
     private static double[] ReplaceWowFactorOutliers(double[] wowFactors)
     {
         double median = Median(wowFactors);
@@ -770,6 +1006,146 @@ public sealed class TbcLineResampler
                     alpha,
                     previous);
             }
+        }
+    }
+
+    private unsafe void ResampleLinePrefixes(
+        ReadOnlySpan<double> source,
+        ResamplingPlan preparation,
+        int samplesPerLine,
+        double[] destination)
+    {
+        preparation.ValidateOwner(this);
+        double[] sourcePositions = preparation.SourcePositions;
+        double[] levelAdjusts = preparation.LevelAdjusts;
+        int prefixSamples = preparation.PrefixSamples;
+        int lineCount = destination.Length / OutputLineLength;
+        int resampledSampleCount = checked(lineCount * samplesPerLine);
+        float[] sincLookup = SincLookup.Value;
+        fixed (double* sourcePointer = source)
+        fixed (float* sincLookupPointer = sincLookup)
+        {
+            if (_workerThreads <= 1 || resampledSampleCount < ParallelSampleThreshold)
+            {
+                for (int line = 0; line < lineCount; line++)
+                {
+                    int lineStart = line * OutputLineLength;
+                    int lineEnd = lineStart + samplesPerLine;
+                    for (int i = lineStart; i < lineEnd; i++)
+                    {
+                        destination[i] = (float)(SampleSinc(
+                                sourcePointer,
+                                source.Length,
+                                sourcePositions[i],
+                                sincLookupPointer)
+                            * levelAdjusts[prefixSamples + i]);
+                    }
+                }
+
+                return;
+            }
+
+            nint sourceAddress = (nint)sourcePointer;
+            nint sincLookupAddress = (nint)sincLookupPointer;
+            int sourceLength = source.Length;
+            int workerCount = Math.Min(_workerThreads, lineCount);
+            Parallel.For(
+                0,
+                workerCount,
+                new ParallelOptions { MaxDegreeOfParallelism = workerCount },
+                workerIndex =>
+                {
+                    var parallelSource = (double*)sourceAddress;
+                    var parallelSincLookup = (float*)sincLookupAddress;
+                    int firstLine = (lineCount * workerIndex) / workerCount;
+                    int lastLine = (lineCount * (workerIndex + 1)) / workerCount;
+                    for (int line = firstLine; line < lastLine; line++)
+                    {
+                        int lineStart = line * OutputLineLength;
+                        int lineEnd = lineStart + samplesPerLine;
+                        for (int i = lineStart; i < lineEnd; i++)
+                        {
+                            destination[i] = (float)(SampleSinc(
+                                    parallelSource,
+                                    sourceLength,
+                                    sourcePositions[i],
+                                    parallelSincLookup)
+                                * levelAdjusts[prefixSamples + i]);
+                        }
+                    }
+                });
+        }
+    }
+
+    private unsafe void ResampleCompactLinePrefixes(
+        ReadOnlySpan<double> source,
+        double[] sourcePositions,
+        double[] levelAdjusts,
+        int lineCount,
+        int samplesPerLine,
+        double[] destination)
+    {
+        int compactLength = checked(lineCount * samplesPerLine);
+        float[] sincLookup = SincLookup.Value;
+        fixed (double* sourcePointer = source)
+        fixed (float* sincLookupPointer = sincLookup)
+        {
+            int maximumUsefulWorkers = compactLength == 0
+                ? 1
+                : 1 + ((compactLength - 1) / MinimumParallelSamplesPerWorker);
+            int workerCount = Math.Min(
+                Math.Min(_workerThreads, lineCount),
+                maximumUsefulWorkers);
+            if (workerCount <= 1 || compactLength < ParallelSampleThreshold)
+            {
+                for (int line = 0; line < lineCount; line++)
+                {
+                    int compactStart = line * samplesPerLine;
+                    int destinationStart = line * OutputLineLength;
+                    for (int sample = 0; sample < samplesPerLine; sample++)
+                    {
+                        int compactIndex = compactStart + sample;
+                        destination[destinationStart + sample] = (float)(SampleSinc(
+                                sourcePointer,
+                                source.Length,
+                                sourcePositions[compactIndex],
+                                sincLookupPointer)
+                            * levelAdjusts[compactIndex]);
+                    }
+                }
+
+                return;
+            }
+
+            nint sourceAddress = (nint)sourcePointer;
+            nint sincLookupAddress = (nint)sincLookupPointer;
+            int sourceLength = source.Length;
+            Parallel.For(
+                0,
+                workerCount,
+                new ParallelOptions { MaxDegreeOfParallelism = workerCount },
+                workerIndex =>
+                {
+                    var parallelSource = (double*)sourceAddress;
+                    var parallelSincLookup = (float*)sincLookupAddress;
+                    int firstWorkerLine = (lineCount * workerIndex) / workerCount;
+                    int lastWorkerLine = (lineCount * (workerIndex + 1)) / workerCount;
+                    for (int line = firstWorkerLine; line < lastWorkerLine; line++)
+                    {
+                        int compactStart = line * samplesPerLine;
+                        int destinationStart = line * OutputLineLength;
+                        for (int sample = 0; sample < samplesPerLine; sample++)
+                        {
+                            int compactIndex = compactStart + sample;
+                            destination[destinationStart + sample] = (float)(SampleSinc(
+                                    parallelSource,
+                                    sourceLength,
+                                    sourcePositions[compactIndex],
+                                    parallelSincLookup)
+                                * levelAdjusts[compactIndex]);
+                        }
+                    }
+                });
         }
     }
 

@@ -189,6 +189,63 @@ public sealed class TbcParallelResamplerTests
             () => resampler.ResamplePrepared(source, plan, new double[destination.Length - 1]));
     }
 
+    [Theory(DisplayName = "Prepared TBC line-prefix resampling matches full output bit-exactly")]
+    [InlineData(TbcLineInterpolationMethod.Linear, 1)]
+    [InlineData(TbcLineInterpolationMethod.Linear, 8)]
+    [InlineData(TbcLineInterpolationMethod.Quadratic, 8)]
+    [InlineData(TbcLineInterpolationMethod.Cubic, 8)]
+    public void PreparedTbcLinePrefixResamplingMatchesFullOutputBitExactly(
+        TbcLineInterpolationMethod interpolationMethod,
+        int workerThreads)
+    {
+        const int OutputLineLength = 1_024;
+        const int SamplesPerLine = 320;
+        const int LineCount = 256;
+        const int FirstLine = 1;
+        double[] source = Enumerable.Range(0, 560_000)
+            .Select(index => Math.Sin(index * 0.0031) + Math.Cos(index * 0.0007))
+            .ToArray();
+        double[] lineLocations = Enumerable.Range(0, FirstLine + LineCount + 1)
+            .Select(line => 1_000.25 + (line * 2_000.125) + (0.01 * line * line))
+            .ToArray();
+        var resampler = new TbcLineResampler(
+            OutputLineLength,
+            interpolationMethod,
+            wowLevelAdjustSmoothing: 1.5,
+            nominalInputLineLength: 2_000.125,
+            workerThreads);
+
+        using TbcLineResampler.ResamplingPlan plan = resampler.PrepareLineResampling(
+            lineLocations,
+            FirstLine,
+            LineCount);
+        double[] expected = resampler.ResamplePrepared(source, plan);
+        var actual = new double[plan.DestinationLength];
+        Array.Fill(actual, double.NaN);
+
+        resampler.ResampleLinePrefixes(
+            source,
+            lineLocations,
+            FirstLine,
+            LineCount,
+            SamplesPerLine,
+            actual);
+
+        for (int line = 0; line < LineCount; line++)
+        {
+            int lineStart = line * OutputLineLength;
+            Assert.Equal(
+                expected.AsSpan(lineStart, SamplesPerLine),
+                actual.AsSpan(lineStart, SamplesPerLine));
+            Assert.All(
+                actual.AsSpan(
+                        lineStart + SamplesPerLine,
+                        OutputLineLength - SamplesPerLine)
+                    .ToArray(),
+                static value => Assert.True(double.IsNaN(value)));
+        }
+    }
+
     [Fact(DisplayName = "Prepared TBC resampling reuses caller-owned output without field allocation")]
     public void PreparedTbcResamplingReusesCallerOwnedOutputWithoutFieldAllocation()
     {
