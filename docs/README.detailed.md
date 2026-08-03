@@ -408,21 +408,22 @@ speedup, and wall-time reduction against its profile-matched Python column:
 <!-- LATEST_PERFORMANCE_BEGIN -->
 | CLI mode (workers) | Python v0.4.0 | Python PR341 | Exact + v0.4.0 | Exact + current | IPP-fast + v0.4.0 | IPP-fast + current |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| default (5) | 15.207 s | 16.780 s | 4.389 s / 3.465x / 71.14% | 5.604 s / 2.994x / 66.61% | 3.609 s / 4.213x / 76.27% | 4.335 s / 3.871x / 74.17% |
-| `--threads 1` | 17.694 s | 19.414 s | 10.065 s / 1.758x / 43.11% | 13.069 s / 1.486x / 32.69% | 7.215 s / 2.453x / 59.23% | 10.473 s / 1.854x / 46.06% |
-| `--threads 5` | 15.719 s | 17.801 s | 4.282 s / 3.671x / 72.76% | 5.335 s / 3.337x / 70.03% | 3.568 s / 4.406x / 77.30% | 4.273 s / 4.166x / 76.00% |
-| `--threads 10` | 16.037 s | 18.266 s | 3.494 s / 4.589x / 78.21% | 4.461 s / 4.094x / 75.58% | 3.098 s / 5.177x / 80.68% | 3.741 s / 4.883x / 79.52% |
-| `--threads 20` | 16.405 s | 18.395 s | 3.235 s / 5.071x / 80.28% | 4.219 s / 4.360x / 77.07% | 2.654 s / 6.182x / 83.82% | 3.523 s / 5.222x / 80.85% |
+| default (5) | 15.207 s | 16.780 s | 4.389 s / 3.465x / 71.14% | 7.030 s / 2.387x / 58.10% | 3.609 s / 4.213x / 76.27% | 5.946 s / 2.822x / 64.57% |
+| `--threads 1` | 17.694 s | 19.414 s | 10.065 s / 1.758x / 43.11% | 13.871 s / 1.400x / 28.55% | 7.215 s / 2.453x / 59.23% | 11.301 s / 1.718x / 41.79% |
+| `--threads 5` | 15.719 s | 17.801 s | 4.282 s / 3.671x / 72.76% | 7.428 s / 2.396x / 58.27% | 3.568 s / 4.406x / 77.30% | 5.816 s / 3.061x / 67.33% |
+| `--threads 10` | 16.037 s | 18.266 s | 3.494 s / 4.589x / 78.21% | 6.040 s / 3.024x / 66.93% | 3.098 s / 5.177x / 80.68% | 5.190 s / 3.519x / 71.59% |
+| `--threads 20` | 16.405 s | 18.395 s | 3.235 s / 5.071x / 80.28% | 5.118 s / 3.594x / 72.18% | 2.654 s / 6.182x / 83.82% | 4.713 s / 3.903x / 74.38% |
 <!-- LATEST_PERFORMANCE_END -->
+<!-- LATEST_PERFORMANCE_RUNS: base=90 current-refresh=30 repeats=3 -->
 
 The benchmark ran on 2026-08-02 using main commit
 `c92af1dfd0f96cd7f2d49f3219fb428d0f4e0865`, an Intel Core Ultra 7 265K with
 20 logical processors, Windows 11 build 26220, and .NET SDK/runtime
 `11.0.100-preview.6.26359.118`. Each of the 30 mode/profile cells was measured
 three times in interleaved order, for 90 Release runs. On 2026-08-03, all ten
-`current` cells were refreshed with six interleaved runs of the final branch
-candidate after bounded ACC segment and Super-Gaussian FFT parallelization,
-adding 60 Release runs. The Python and .NET v0.4.0 cells retain their earlier
+`current` cells were refreshed with three interleaved runs of the final cap-12
+branch candidate after bounded ACC segment and Super-Gaussian FFT parallelization,
+adding 30 Release runs. The Python and .NET v0.4.0 cells retain their earlier
 audited measurements.
 Python v0.4.0 was commit
 `43155200da87c0d49eb37d8ec09b1372075ee8e4`; merged PR341 was commit
@@ -2174,16 +2175,16 @@ applicable, and all ordered `fileLoc` values matched. Candidate allocation was
 1.918 GiB and its first/last-third working-set medians were 382.9/383.0 MiB,
 with a 386.7 MiB maximum and no progressive growth or OOM.
 
-The refreshed `current` matrix uses six interleaved runs for default, 1, 5, 10,
-and 20 workers in Exact and IPP-fast, for 60 Release runs. Every compatibility
-hash set contained one value. The zero-warning Release build and all 1,261 xUnit
+The cap-8 audit's then-current matrix used six interleaved runs for default, 1,
+5, 10, and 20 workers in Exact and IPP-fast, for 60 Release runs. Every compatibility
+hash set contained one value. The zero-warning Release build and all 1,262 xUnit
 v3/Microsoft.Testing.Platform tests passed.
 
 ### Bounded current Super-Gaussian FFT parallelism
 
 The existing packet-independent PocketFFT stages in the `current`
-Super-Gaussian chroma final filter now use at most eight internal workers instead
-of four when the requested worker count permits it. Packet decomposition,
+Super-Gaussian chroma final filter now use at most twelve internal workers when
+the requested worker count permits it. Packet decomposition,
 padding, masks, arithmetic, transform order, output order, and the serial path
 are unchanged. The filter still retains one bounded instance-local workspace;
 concurrent calls obtain isolated temporary workspaces.
@@ -2197,11 +2198,15 @@ first/last-third working-set medians were 428.6/433.1 MiB and 382.4/382.7 MiB
 across the two runs, with maxima of 435.9 and 386.5 MiB and no progressive
 growth or OOM.
 
-A cap-12 experiment was rejected: wall time regressed from 14.09 to 14.36
-seconds while active cores rose from 6.93 to 7.10 and process CPU time rose from
-97.66 to 101.92 seconds. The final 60-run `current` matrix produced one hash for
-every compatibility surface in every cell. The zero-warning Release build and
-all 1,261 xUnit v3/Microsoft.Testing.Platform tests passed.
+An earlier cap-12 experiment against an older pipeline was rejected. After the
+later bounded pipeline and output-buffer changes, a fresh exact-HEAD cap-8 versus
+cap-12 audit retained cap 12: it won five of six interleaved 160-frame pairs and
+reduced median wall time from 14.43 to 13.88 seconds (3.8%). Median process CPU
+time also fell from 109.33 to 103.95 seconds, while median peak working set stayed
+effectively flat at 787.95 versus 787.69 MiB. Luma, chroma, raw JSON, stdout,
+normalized stderr/log, and ordered `fileLoc` matched in every run. The refreshed
+30-run `current` matrix also produced one hash for every compatibility surface in
+every cell.
 
 </details>
 
@@ -2227,7 +2232,7 @@ Requirements:
 .\tools\build-ipp-native.ps1
 dotnet restore VHSDecodeDotNet.slnx
 dotnet build VHSDecodeDotNet.slnx -c Release --no-restore
-dotnet test --solution VHSDecodeDotNet.slnx -c Release --no-build --no-restore --minimum-expected-tests 1261
+dotnet test --solution VHSDecodeDotNet.slnx -c Release --no-build --no-restore --minimum-expected-tests 1262
 ```
 
 The first command includes the optional `ipp-fast` native artifact; omit it for
@@ -2240,7 +2245,7 @@ deployment computer. Binary-only single-file releases embed
 sidecar license files. An Exact-only build may omit the native build step.
 
 The current formal Release build has zero warnings and errors. The xUnit v3
-project exposes **1,261** independently discoverable tests to both
+project exposes **1,262** independently discoverable tests to both
 `dotnet test` and Visual Studio Test Explorer.
 
 <!-- SECTION: usage -->

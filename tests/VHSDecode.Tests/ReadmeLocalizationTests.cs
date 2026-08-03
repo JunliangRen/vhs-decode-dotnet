@@ -103,19 +103,19 @@ public sealed partial class ReadmeLocalizationTests
         Assert.Equal(3, expectedDetailedCommands.Length);
         string[] expectedOverviewPerformanceRows =
         [
-            "15.207 s | 16.780 s | 4.389 s | 3.465x | 5.604 s | 2.994x | 3.609 s | 4.213x | 4.335 s | 3.871x",
-            "17.694 s | 19.414 s | 10.065 s | 1.758x | 13.069 s | 1.486x | 7.215 s | 2.453x | 10.473 s | 1.854x",
-            "15.719 s | 17.801 s | 4.282 s | 3.671x | 5.335 s | 3.337x | 3.568 s | 4.406x | 4.273 s | 4.166x",
-            "16.037 s | 18.266 s | 3.494 s | 4.589x | 4.461 s | 4.094x | 3.098 s | 5.177x | 3.741 s | 4.883x",
-            "16.405 s | 18.395 s | 3.235 s | 5.071x | 4.219 s | 4.360x | 2.654 s | 6.182x | 3.523 s | 5.222x"
+            "15.207 s | 16.780 s | 4.389 s | 3.465x | 7.030 s | 2.387x | 3.609 s | 4.213x | 5.946 s | 2.822x",
+            "17.694 s | 19.414 s | 10.065 s | 1.758x | 13.871 s | 1.400x | 7.215 s | 2.453x | 11.301 s | 1.718x",
+            "15.719 s | 17.801 s | 4.282 s | 3.671x | 7.428 s | 2.396x | 3.568 s | 4.406x | 5.816 s | 3.061x",
+            "16.037 s | 18.266 s | 3.494 s | 4.589x | 6.040 s | 3.024x | 3.098 s | 5.177x | 5.190 s | 3.519x",
+            "16.405 s | 18.395 s | 3.235 s | 5.071x | 5.118 s | 3.594x | 2.654 s | 6.182x | 4.713 s | 3.903x"
         ];
         string[] expectedDetailedPerformanceRows =
         [
-            "15.207 s | 16.780 s | 4.389 s | 3.465x | 71.14% | 5.604 s | 2.994x | 66.61% | 3.609 s | 4.213x | 76.27% | 4.335 s | 3.871x | 74.17%",
-            "17.694 s | 19.414 s | 10.065 s | 1.758x | 43.11% | 13.069 s | 1.486x | 32.69% | 7.215 s | 2.453x | 59.23% | 10.473 s | 1.854x | 46.06%",
-            "15.719 s | 17.801 s | 4.282 s | 3.671x | 72.76% | 5.335 s | 3.337x | 70.03% | 3.568 s | 4.406x | 77.30% | 4.273 s | 4.166x | 76.00%",
-            "16.037 s | 18.266 s | 3.494 s | 4.589x | 78.21% | 4.461 s | 4.094x | 75.58% | 3.098 s | 5.177x | 80.68% | 3.741 s | 4.883x | 79.52%",
-            "16.405 s | 18.395 s | 3.235 s | 5.071x | 80.28% | 4.219 s | 4.360x | 77.07% | 2.654 s | 6.182x | 83.82% | 3.523 s | 5.222x | 80.85%"
+            "15.207 s | 16.780 s | 4.389 s | 3.465x | 71.14% | 7.030 s | 2.387x | 58.10% | 3.609 s | 4.213x | 76.27% | 5.946 s | 2.822x | 64.57%",
+            "17.694 s | 19.414 s | 10.065 s | 1.758x | 43.11% | 13.871 s | 1.400x | 28.55% | 7.215 s | 2.453x | 59.23% | 11.301 s | 1.718x | 41.79%",
+            "15.719 s | 17.801 s | 4.282 s | 3.671x | 72.76% | 7.428 s | 2.396x | 58.27% | 3.568 s | 4.406x | 77.30% | 5.816 s | 3.061x | 67.33%",
+            "16.037 s | 18.266 s | 3.494 s | 4.589x | 78.21% | 6.040 s | 3.024x | 66.93% | 3.098 s | 5.177x | 80.68% | 5.190 s | 3.519x | 71.59%",
+            "16.405 s | 18.395 s | 3.235 s | 5.071x | 80.28% | 5.118 s | 3.594x | 72.18% | 2.654 s | 6.182x | 83.82% | 4.713 s | 3.903x | 74.38%"
         ];
 
         string[] overviewFacts =
@@ -123,7 +123,7 @@ public sealed partial class ReadmeLocalizationTests
             "43155200da87c0d49eb37d8ec09b1372075ee8e4",
             "2f21e8ed6018b14561396cc95f1f6828054470b8",
             "11.0.100-preview.6.26359.118",
-            "**1,261**",
+            "**1,262**",
             "--compat-version",
             "current",
             "--dsp-backend",
@@ -136,7 +136,7 @@ public sealed partial class ReadmeLocalizationTests
             "15.207 s",
             "16.780 s",
             "4.389 s",
-            "5.604 s",
+            "7.030 s",
             "6.182x",
             "g4315520",
             "--threads 0"
@@ -148,7 +148,8 @@ public sealed partial class ReadmeLocalizationTests
             "2f21e8ed6018b14561396cc95f1f6828054470b8",
             "v0.4.0-40-g2f21e8ed",
             "11.0.100-preview.6.26359.118",
-            "**1,261**",
+            "**1,262**",
+            "<!-- LATEST_PERFORMANCE_RUNS: base=90 current-refresh=30 repeats=3 -->",
             "754",
             "8.319 s",
             "7.345 s",
@@ -541,7 +542,7 @@ public sealed partial class ReadmeLocalizationTests
             "53.003",
             "1.918 GiB",
             "382.9/383.0 MiB",
-            "1,261",
+            "1,262",
             "--use_saved_levels",
             "COMPATIBILITY_EVIDENCE.md"
         ];
@@ -607,7 +608,6 @@ public sealed partial class ReadmeLocalizationTests
             Assert.DoesNotContain("**811**", content, StringComparison.Ordinal);
             Assert.DoesNotContain("**812**", content, StringComparison.Ordinal);
             Assert.DoesNotContain("**821**", content, StringComparison.Ordinal);
-            Assert.DoesNotContain("13.88", content, StringComparison.Ordinal);
             Assert.DoesNotContain("39.80", content, StringComparison.Ordinal);
             Assert.DoesNotContain("53.23", content, StringComparison.Ordinal);
         }

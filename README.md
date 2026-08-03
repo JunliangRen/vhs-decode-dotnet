@@ -38,7 +38,7 @@ evidence, and remaining gaps.
   EIAJ, and supported PAL/NTSC variants.
 - TBC utility tools, the double-click GUI, and developer plotting windows are
   intentionally out of scope.
-- The Visual Studio 2026 `.slnx` solution has **1,261** standard xUnit v3 tests
+- The Visual Studio 2026 `.slnx` solution has **1,262** standard xUnit v3 tests
   that are visible in Test Explorer and runnable with `dotnet test`.
 
 <!-- SECTION: start -->
@@ -100,27 +100,28 @@ The table below uses one fixed private local 40 MHz PAL VHS `.ldf` fixture and
 the same 40-frame window for every run. The source filename is intentionally
 not published. The base matrix uses three interleaved runs measured on
 2026-08-02 from main commit `c92af1d`. On 2026-08-03, every `current` cell was
-refreshed from six interleaved runs of the final branch candidate after bounded
-ACC segment and Super-Gaussian FFT parallelization. The Python and .NET v0.4.0
+refreshed from three interleaved runs of the final cap-12 branch candidate after
+bounded ACC segment and Super-Gaussian FFT parallelization. The Python and .NET v0.4.0
 cells retain their prior audited measurements. Compatibility is evaluated
 separately from speed.
 
 <!-- LATEST_PERFORMANCE_BEGIN -->
 | CLI mode (workers) | Python v0.4.0 | Python PR341 | Exact + v0.4.0 | Exact + current | IPP-fast + v0.4.0 | IPP-fast + current |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| default (5) | 15.207 s | 16.780 s | 4.389 s / 3.465x | 5.604 s / 2.994x | 3.609 s / 4.213x | 4.335 s / 3.871x |
-| `--threads 1` | 17.694 s | 19.414 s | 10.065 s / 1.758x | 13.069 s / 1.486x | 7.215 s / 2.453x | 10.473 s / 1.854x |
-| `--threads 5` | 15.719 s | 17.801 s | 4.282 s / 3.671x | 5.335 s / 3.337x | 3.568 s / 4.406x | 4.273 s / 4.166x |
-| `--threads 10` | 16.037 s | 18.266 s | 3.494 s / 4.589x | 4.461 s / 4.094x | 3.098 s / 5.177x | 3.741 s / 4.883x |
-| `--threads 20` | 16.405 s | 18.395 s | 3.235 s / 5.071x | 4.219 s / 4.360x | 2.654 s / 6.182x | 3.523 s / 5.222x |
+| default (5) | 15.207 s | 16.780 s | 4.389 s / 3.465x | 7.030 s / 2.387x | 3.609 s / 4.213x | 5.946 s / 2.822x |
+| `--threads 1` | 17.694 s | 19.414 s | 10.065 s / 1.758x | 13.871 s / 1.400x | 7.215 s / 2.453x | 11.301 s / 1.718x |
+| `--threads 5` | 15.719 s | 17.801 s | 4.282 s / 3.671x | 7.428 s / 2.396x | 3.568 s / 4.406x | 5.816 s / 3.061x |
+| `--threads 10` | 16.037 s | 18.266 s | 3.494 s / 4.589x | 6.040 s / 3.024x | 3.098 s / 5.177x | 5.190 s / 3.519x |
+| `--threads 20` | 16.405 s | 18.395 s | 3.235 s / 5.071x | 5.118 s / 3.594x | 2.654 s / 6.182x | 4.713 s / 3.903x |
 <!-- LATEST_PERFORMANCE_END -->
+<!-- LATEST_PERFORMANCE_RUNS: base=90 current-refresh=30 repeats=3 -->
 
 Each .NET cell shows median wall time followed by speedup versus its
 profile-matched Python column; values below `1.000x` are slower. Python PR341
 is merge commit `2f21e8ed6018b14561396cc95f1f6828054470b8`, the upstream peer
 for `current`. The default is **5 workers**. The base matrix contains 90 runs:
 three repetitions of all 30 mode/profile cells. The ten refreshed `current`
-cells add 60 interleaved final-candidate runs.
+cells add 30 interleaved final-candidate runs.
 
 Every .NET profile and Python PR341 produced one deterministic hash set per
 mode. Python v0.4.0 produced three luma/chroma/JSON/log hash sets in every
@@ -165,7 +166,7 @@ The pinned SDK is .NET `11.0.100-preview.6.26359.118`.
 dotnet restore VHSDecodeDotNet.slnx
 dotnet build VHSDecodeDotNet.slnx -c Release --no-restore
 dotnet test --solution VHSDecodeDotNet.slnx -c Release `
-  --no-build --no-restore --minimum-expected-tests 1261
+  --no-build --no-restore --minimum-expected-tests 1262
 ```
 
 Open `VHSDecodeDotNet.slnx` in Visual Studio 2026 to build, debug, and run the

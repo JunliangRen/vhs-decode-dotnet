@@ -307,7 +307,7 @@ public sealed class PocketFftMixedRadixCompatibilityTests
             .Select(BitConverter.DoubleToInt64Bits)
             .ToArray();
 
-        foreach (int workerThreads in new[] { 1, 4, 5, 8, 20 })
+        foreach (int workerThreads in new[] { 1, 4, 5, 8, 12, 20 })
         {
             double[] actual = (double[])input.Clone();
             double[] returned = filter.ApplyInPlace(actual, workerThreads);
@@ -364,12 +364,12 @@ public sealed class PocketFftMixedRadixCompatibilityTests
                 RawLength,
                 FscHz,
                 CarrierHz)
-            .ApplyInPlace((double[])firstSource.Clone(), workerThreads: 8);
+            .ApplyInPlace((double[])firstSource.Clone(), workerThreads: 12);
         double[] expectedSecond = new ChromaSuperGaussianFinalFilter(
                 RawLength,
                 FscHz,
                 CarrierHz)
-            .ApplyInPlace((double[])secondSource.Clone(), workerThreads: 8);
+            .ApplyInPlace((double[])secondSource.Clone(), workerThreads: 12);
         var sharedFilter = new ChromaSuperGaussianFinalFilter(
             RawLength,
             FscHz,
@@ -396,7 +396,7 @@ public sealed class PocketFftMixedRadixCompatibilityTests
                     startGate.SignalAndWait();
                     return sharedFilter.ApplyInPlace(
                         (double[])source.Clone(),
-                        workerThreads: 8);
+                        workerThreads: 12);
                 },
                 CancellationToken.None,
                 TaskCreationOptions.LongRunning,

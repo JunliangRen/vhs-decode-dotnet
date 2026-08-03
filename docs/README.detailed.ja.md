@@ -388,20 +388,21 @@ Python v0.4.0、merge 済みの Python PR341、Exact v0.4.0、Exact
 <!-- LATEST_PERFORMANCE_BEGIN -->
 | CLI mode（workers） | Python v0.4.0 | Python PR341 | Exact + v0.4.0 | Exact + current | IPP-fast + v0.4.0 | IPP-fast + current |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| default（5） | 15.207 s | 16.780 s | 4.389 s / 3.465x / 71.14% | 5.604 s / 2.994x / 66.61% | 3.609 s / 4.213x / 76.27% | 4.335 s / 3.871x / 74.17% |
-| `--threads 1` | 17.694 s | 19.414 s | 10.065 s / 1.758x / 43.11% | 13.069 s / 1.486x / 32.69% | 7.215 s / 2.453x / 59.23% | 10.473 s / 1.854x / 46.06% |
-| `--threads 5` | 15.719 s | 17.801 s | 4.282 s / 3.671x / 72.76% | 5.335 s / 3.337x / 70.03% | 3.568 s / 4.406x / 77.30% | 4.273 s / 4.166x / 76.00% |
-| `--threads 10` | 16.037 s | 18.266 s | 3.494 s / 4.589x / 78.21% | 4.461 s / 4.094x / 75.58% | 3.098 s / 5.177x / 80.68% | 3.741 s / 4.883x / 79.52% |
-| `--threads 20` | 16.405 s | 18.395 s | 3.235 s / 5.071x / 80.28% | 4.219 s / 4.360x / 77.07% | 2.654 s / 6.182x / 83.82% | 3.523 s / 5.222x / 80.85% |
+| default（5） | 15.207 s | 16.780 s | 4.389 s / 3.465x / 71.14% | 7.030 s / 2.387x / 58.10% | 3.609 s / 4.213x / 76.27% | 5.946 s / 2.822x / 64.57% |
+| `--threads 1` | 17.694 s | 19.414 s | 10.065 s / 1.758x / 43.11% | 13.871 s / 1.400x / 28.55% | 7.215 s / 2.453x / 59.23% | 11.301 s / 1.718x / 41.79% |
+| `--threads 5` | 15.719 s | 17.801 s | 4.282 s / 3.671x / 72.76% | 7.428 s / 2.396x / 58.27% | 3.568 s / 4.406x / 77.30% | 5.816 s / 3.061x / 67.33% |
+| `--threads 10` | 16.037 s | 18.266 s | 3.494 s / 4.589x / 78.21% | 6.040 s / 3.024x / 66.93% | 3.098 s / 5.177x / 80.68% | 5.190 s / 3.519x / 71.59% |
+| `--threads 20` | 16.405 s | 18.395 s | 3.235 s / 5.071x / 80.28% | 5.118 s / 3.594x / 72.18% | 2.654 s / 6.182x / 83.82% | 4.713 s / 3.903x / 74.38% |
 <!-- LATEST_PERFORMANCE_END -->
+<!-- LATEST_PERFORMANCE_RUNS: base=90 current-refresh=30 repeats=3 -->
 
 この測定は 2026-08-02 に main commit
 `c92af1dfd0f96cd7f2d49f3219fb428d0f4e0865` で実行しました。host は Intel
 Core Ultra 7 265K（20 logical processor）、Windows 11 build 26220、.NET
 SDK/runtime `11.0.100-preview.6.26359.118` です。30 個の mode/profile cell を
 3 回ずつ interleaved order で測定し、合計 90 Release run です。2026-08-03、
-bounded ACC segment と Super-Gaussian FFT の parallelization 後の final branch
-candidate で 10 個すべての `current` cell を 6 回ずつ再測定し、60 Release run を追加しました。
+bounded ACC segment と Super-Gaussian FFT の parallelization 後の final cap-12 branch
+candidate で 10 個すべての `current` cell を 3 回ずつ再測定し、30 Release run を追加しました。
 Python と .NET v0.4.0 cell は従来の audited value を維持します。Python v0.4.0
 commit は `43155200da87c0d49eb37d8ec09b1372075ee8e4`、merge 済み
 PR341 commit は `2f21e8ed6018b14561396cc95f1f6828054470b8`
@@ -2098,15 +2099,15 @@ luma、chroma、raw JSON、stdout、該当する normalized stderr/log、全 ord
 は一致しました。candidate allocation は 1.918 GiB、first/last-third working-set median
 は 382.9/383.0 MiB、maximum は 386.7 MiB で、progressive growth や OOM はありません。
 
-更新した `current` matrix は Exact と IPP-fast の default/1/5/10/20 worker を各 6 回
-interleaved 測定し、合計 60 Release run です。compatibility hash set はすべて 1 値
-でした。zero-warning Release build と 1,261 件すべての xUnit v3/
+cap-8 audit 当時の `current` matrix は Exact と IPP-fast の default/1/5/10/20 worker を
+各 6 回 interleaved 測定し、合計 60 Release run です。compatibility hash set はすべて 1 値
+でした。zero-warning Release build と 1,262 件すべての xUnit v3/
 Microsoft.Testing.Platform test が通過しました。
 
 ### Bounded current Super-Gaussian FFT parallelism
 
 `current` Super-Gaussian chroma final filter の既存 PocketFFT packet-independent
-stage は、requested worker count が許す場合の internal cap を 4 から 8 に増やしました。
+stage は、requested worker count が許す場合に最大 12 internal worker を使用します。
 packet decomposition、padding、mask、arithmetic、transform order、output order、serial
 path は変更していません。filter は bounded instance-local workspace を 1 つ保持し、
 concurrent call は互いに分離した temporary workspace を使用します。
@@ -2119,11 +2120,14 @@ normalized stderr/log、全 ordered `fileLoc` は一致しました。2 回の c
 first/last-third working-set median は 428.6/433.1 MiB と 382.4/382.7 MiB、maximum
 は 435.9 と 386.5 MiB で、progressive growth や OOM はありません。
 
-cap-12 experiment は却下しました。wall time は 14.09 から 14.36 秒へ悪化し、
-active core は 6.93 から 7.10、process CPU time は 97.66 から 101.92 秒へ増えました。
-final 60-run `current` matrix の全 cell で各 compatibility surface は 1 hash でした。
-zero-warning Release build と 1,261 件すべての xUnit v3/
-Microsoft.Testing.Platform test が通過しました。
+旧 pipeline に対する初期 cap-12 experiment は一度却下されました。その後の bounded
+pipeline と output-buffer 変更を含む最新 HEAD で cap-8/cap-12 audit を再実行し、cap 12
+を採用しました。160-frame interleaved pair 6 組中 5 組で candidate が速く、median wall
+time は 14.43 から 13.88 秒へ 3.8% 短縮し、median process CPU time も 109.33 から
+103.95 秒へ低下しました。median peak working set は 787.95 と 787.69 MiB で実質同等です。
+全 run の luma、chroma、raw JSON、stdout、normalized stderr/log、ordered `fileLoc` が
+一致し、更新した 30-run `current` matrix の全 cell でも各 compatibility surface は
+1 hash でした。
 
 </details>
 
@@ -2147,7 +2151,7 @@ Microsoft.Testing.Platform test が通過しました。
 .\tools\build-ipp-native.ps1
 dotnet restore VHSDecodeDotNet.slnx
 dotnet build VHSDecodeDotNet.slnx -c Release --no-restore
-dotnet test --solution VHSDecodeDotNet.slnx -c Release --no-build --no-restore --minimum-expected-tests 1261
+dotnet test --solution VHSDecodeDotNet.slnx -c Release --no-build --no-restore --minimum-expected-tests 1262
 ```
 
 最初の command は optional `ipp-fast` native artifact を含めるためのものです。
@@ -2160,7 +2164,7 @@ third-party notice を埋め込み、license sidecar file は追加しません�
 
 現在の正式な Release build は warning 0、error 0 です。xUnit v3 project は
 `dotnet test` と Visual Studio Test Explorer の両方で個別に検出できる
-**1,261** tests を公開します。
+**1,262** tests を公開します。
 
 <!-- SECTION: usage -->
 
