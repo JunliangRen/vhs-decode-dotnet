@@ -1787,6 +1787,29 @@ stdout、归一化 stderr/日志及全部有序 `fileLoc` 均一致。两次候�
 归一化 stderr/日志和全部有序 `fileLoc` 均一致。这一单组数据只作为近期优化证据，
 不替代上面的完整矩阵中位数。
 
+### 高 worker VHS 逆变换并行阶段
+
+当 Exact VHS `current` 请求超过现有 12-worker 外层预取上限时，解码器仍按原顺序串行
+准备 NumPy 兼容 analytic 频谱，随后让其复数逆 FFT 与彼此独立的实数逆 FFT 重叠执行。
+两项操作读取不同的源频谱，并写入不同的 worker-local 目标。默认、1 到 12 worker、
+v0.4.0、非 VHS、`--gnrc` 和 `ipp-fast` 路径继续使用串行阶段。实现没有增加样本长度
+级别的缓冲，外层 block 并发仍受 12 限制，同时保留串行路径中实数逆变换异常优先的
+行为；如果任务同步调度失败，则回退到原串行顺序。
+
+同一份私有本地 PAL VHS 夹具上，一组固定 200 帧 Exact `current --threads 20` 配对
+比较了 main `eec3658` 与分支候选：
+
+| 指标 | main `eec3658` | 分支候选 | 变化 |
+| --- | ---: | ---: | ---: |
+| 墙钟时间 | 11.945 s | 11.480 s | 缩短 3.89% / 吞吐 1.041x |
+| 进程 CPU 时间 | 95.359 s | 90.828 s | 降低 4.75% |
+| 有效核心数 | 7.98 | 7.91 | 基本不变 |
+
+退出状态、field 数、亮度 TBC SHA-256、色度 TBC SHA-256、原始 JSON SHA-256、
+stdout SHA-256、归一化 stderr、归一化日志和全部有序 `fileLoc` 均一致。测量脚本没有
+返回可用的峰值工作集，因此本次审计不声明实测内存数字。这组 200 帧数据与重复运行的
+40 帧矩阵范围不同，二者分开保留。
+
 </details>
 
 <!-- SECTION: build -->
@@ -1809,7 +1832,7 @@ stdout、归一化 stderr/日志及全部有序 `fileLoc` 均一致。两次候�
 .\tools\build-ipp-native.ps1
 dotnet restore VHSDecodeDotNet.slnx
 dotnet build VHSDecodeDotNet.slnx -c Release --no-restore
-dotnet test --solution VHSDecodeDotNet.slnx -c Release --no-build --no-restore --minimum-expected-tests 1267
+dotnet test --solution VHSDecodeDotNet.slnx -c Release --no-build --no-restore --minimum-expected-tests 1273
 dotnet test --project tests\VHSDecode.Tests\VHSDecode.Tests.csproj -c Release --no-build --no-restore --coverage --coverage-output coverage.cobertura.xml --coverage-output-format cobertura
 ```
 
@@ -1821,7 +1844,7 @@ Intel oneAPI。只含二进制的单文件发布会嵌入 `vhsdecode_ipp.dll` �
 notice，不会额外生成许可证 sidecar 文件。只构建 Exact 后端时可以省略原生构建步骤。
 
 当前正式 Release 构建为零警告、零错误。xUnit v3 项目向
-`dotnet test` 和 Visual Studio Test Explorer 暴露 **1,267** 个可独立发现的测试。
+`dotnet test` 和 Visual Studio Test Explorer 暴露 **1,273** 个可独立发现的测试。
 
 <!-- SECTION: usage -->
 

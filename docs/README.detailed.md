@@ -2239,6 +2239,33 @@ from 69.453 to 70.797 seconds (1.93%), while peak working set stayed flat at
 and every ordered `fileLoc` matched. This single pair is recent optimization
 evidence and does not replace the full matrix medians above.
 
+### Parallel high-worker VHS inverse staging
+
+For Exact VHS `current` requests above the existing 12-worker outer prefetch
+cap, the decoder now prepares the NumPy-compatible analytic spectrum in the
+same serial order and then overlaps its complex inverse FFT with the independent
+real inverse FFT. Each operation reads a disjoint source spectrum and writes a
+disjoint worker-local destination. The default, 1- through 12-worker, v0.4.0,
+non-VHS, `--gnrc`, and `ipp-fast` paths retain serial staging. No sample-length
+buffer was added; outer block concurrency remains bounded at 12. The serial
+path's real inverse exception priority is also retained, and a synchronous task
+scheduling failure falls back to the original serial sequence.
+
+One fixed 200-frame Exact `current --threads 20` pair on the same private local
+PAL VHS fixture measured main `eec3658` against the branch candidate:
+
+| Metric | main `eec3658` | Branch candidate | Change |
+| --- | ---: | ---: | ---: |
+| Wall time | 11.945 s | 11.480 s | 3.89% lower / 1.041x throughput |
+| Process CPU time | 95.359 s | 90.828 s | 4.75% lower |
+| Active cores | 7.98 | 7.91 | effectively unchanged |
+
+Exit status, field count, luma TBC SHA-256, chroma TBC SHA-256, raw JSON
+SHA-256, stdout SHA-256, normalized stderr, normalized log, and every ordered
+`fileLoc` matched. The harness did not return a usable peak-working-set value,
+so this audit makes no measured-memory claim. Its different 200-frame scope is
+kept separate from the repeated 40-frame matrix.
+
 </details>
 
 <!-- SECTION: build -->
@@ -2263,7 +2290,7 @@ Requirements:
 .\tools\build-ipp-native.ps1
 dotnet restore VHSDecodeDotNet.slnx
 dotnet build VHSDecodeDotNet.slnx -c Release --no-restore
-dotnet test --solution VHSDecodeDotNet.slnx -c Release --no-build --no-restore --minimum-expected-tests 1267
+dotnet test --solution VHSDecodeDotNet.slnx -c Release --no-build --no-restore --minimum-expected-tests 1273
 dotnet test --project tests\VHSDecode.Tests\VHSDecode.Tests.csproj -c Release --no-build --no-restore --coverage --coverage-output coverage.cobertura.xml --coverage-output-format cobertura
 ```
 
@@ -2277,7 +2304,7 @@ deployment computer. Binary-only single-file releases embed
 sidecar license files. An Exact-only build may omit the native build step.
 
 The current formal Release build has zero warnings and errors. The xUnit v3
-project exposes **1,267** independently discoverable tests to both
+project exposes **1,273** independently discoverable tests to both
 `dotnet test` and Visual Studio Test Explorer.
 
 <!-- SECTION: usage -->

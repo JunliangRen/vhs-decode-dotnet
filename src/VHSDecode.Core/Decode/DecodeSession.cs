@@ -270,17 +270,27 @@ public static class DecodeSessionFactory
         DecodeFilterSet filters = DecodeFilterSetBuilder.BuildBasic(parameters, sampleRateHz, blockLength, filterOptions);
         VideoOutputConverter videoOutput = VideoOutputConverter.FromParameters(parameters);
         DecodeExecutionOptions executionOptions = BuildExecutionOptions(command);
+        CvbsDecodeOptions? cvbsOptions = BuildCvbsDecodeOptions(command, videoOutput);
+        IRfInputProcessor? inputProcessor = BuildRfInputProcessor(command);
+        bool parallelizeVhsInverseStaging = command.Spec.Name == "vhs"
+            && executionOptions.DspBackend == DspBackend.Exact
+            && executionOptions.UpstreamBehaviorProfile
+                == UpstreamBehaviorProfile.Current
+            && inputProcessor is null
+            && executionOptions.WorkerThreads
+                > RfBlockStreamDecoder.MaximumConcurrentPrefetchBlocks;
         var pipeline = new RfBlockDecodePipeline(
             loader,
             filters,
             sampleRateHz,
             filterOptions,
-            BuildCvbsDecodeOptions(command, videoOutput),
-            BuildRfInputProcessor(command),
+            cvbsOptions,
+            inputProcessor,
             WriteDiagnostic,
             retainRfDiagnosticChannels: command.Spec.Name != "vhs",
             dspBackend: executionOptions.DspBackend,
-            upstreamBehaviorProfile: executionOptions.UpstreamBehaviorProfile);
+            upstreamBehaviorProfile: executionOptions.UpstreamBehaviorProfile,
+            parallelizeVhsInverseStaging);
         var streamDecoder = new RfBlockStreamDecoder(
             pipeline,
             blockLength,
