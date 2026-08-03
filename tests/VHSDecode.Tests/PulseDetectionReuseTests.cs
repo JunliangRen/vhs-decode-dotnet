@@ -5,6 +5,20 @@ namespace VHSDecode.Tests;
 
 public sealed class PulseDetectionReuseTests
 {
+    [Fact(DisplayName = "Classified sync pulses retain values without per-pulse object allocation")]
+    public void ClassifiedSyncPulsesAreImmutableValues()
+    {
+        var pulse = new ClassifiedSyncPulse(
+            SyncPulseKind.EqualizingSecond,
+            new Pulse(123, 45),
+            InOrder: true);
+
+        Assert.True(typeof(ClassifiedSyncPulse).IsValueType);
+        Assert.Equal(SyncPulseKind.EqualizingSecond, pulse.Kind);
+        Assert.Equal(new Pulse(123, 45), pulse.Pulse);
+        Assert.True(pulse.InOrder);
+    }
+
     [Fact(DisplayName = "Reusable pulse detection matches the v0.4.0 scalar state machine")]
     public void ReusablePulseDetectionMatchesScalarStateMachine()
     {

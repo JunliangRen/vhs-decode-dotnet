@@ -2224,6 +2224,21 @@ is retained as CPU/allocation evidence, not a throughput claim, so the full
 performance matrix above is unchanged. Luma TBC, chroma TBC, raw JSON, stdout,
 normalized stderr/log, and zero/default/20-worker determinism all matched.
 
+### Value-type classified sync pulses
+
+`ClassifiedSyncPulse` is now an immutable record struct. Kind, pulse geometry,
+ordering flags, list order, and all downstream numerical expressions remain
+unchanged; pulse classification and VBlank refinement no longer allocate one
+managed object for every accepted pulse. A focused xUnit v3 test locks the
+value-type contract and stored values.
+
+One matched 80-frame Exact `current --threads 20` baseline/candidate screen
+reduced wall time from 10.309 to 10.003 seconds (2.97%). Process CPU time rose
+from 69.453 to 70.797 seconds (1.93%), while peak working set stayed flat at
+435.3/435.0 MiB. Luma TBC, chroma TBC, raw JSON, stdout, normalized stderr/log,
+and every ordered `fileLoc` matched. This single pair is recent optimization
+evidence and does not replace the full matrix medians above.
+
 </details>
 
 <!-- SECTION: build -->
@@ -2248,7 +2263,7 @@ Requirements:
 .\tools\build-ipp-native.ps1
 dotnet restore VHSDecodeDotNet.slnx
 dotnet build VHSDecodeDotNet.slnx -c Release --no-restore
-dotnet test --solution VHSDecodeDotNet.slnx -c Release --no-build --no-restore --minimum-expected-tests 1266
+dotnet test --solution VHSDecodeDotNet.slnx -c Release --no-build --no-restore --minimum-expected-tests 1267
 dotnet test --project tests\VHSDecode.Tests\VHSDecode.Tests.csproj -c Release --no-build --no-restore --coverage --coverage-output coverage.cobertura.xml --coverage-output-format cobertura
 ```
 
@@ -2262,7 +2277,7 @@ deployment computer. Binary-only single-file releases embed
 sidecar license files. An Exact-only build may omit the native build step.
 
 The current formal Release build has zero warnings and errors. The xUnit v3
-project exposes **1,266** independently discoverable tests to both
+project exposes **1,267** independently discoverable tests to both
 `dotnet test` and Visual Studio Test Explorer.
 
 <!-- SECTION: usage -->

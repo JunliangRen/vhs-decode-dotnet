@@ -33,7 +33,7 @@
 - VHS 家族包括 VHS/S-VHS、Betamax、Video8/Hi8、U-matic、Type C、EIAJ
   以及上游支持的 PAL/NTSC 变体。
 - TBC 工具、双击启动的用户 GUI 和开发者绘图窗口明确不在范围内。
-- Visual Studio 2026 `.slnx` 包含 **1,266** 项标准 xUnit v3 测试；测试可在
+- Visual Studio 2026 `.slnx` 包含 **1,267** 项标准 xUnit v3 测试；测试可在
   Test Explorer 中查看，也可用 `dotnet test` 运行。
 
 <!-- SECTION: start -->
@@ -111,6 +111,12 @@ decoder-local burst-probe 缓冲复用的墙钟基本持平（`9.393` 降至 `9.
 `430.5` MiB。这一组结果不作为新的吞吐提升声明。亮度 TBC、色度 TBC、JSON、
 stdout、归一化 stderr/日志以及零线程/默认/20 worker 确定性均一致。
 
+2026-08-03 最新一组短筛把分类后的同步脉冲改为不可变值，避免为每个脉冲分配
+单独对象。在同一份 80 帧 Exact `current --threads 20` 门禁中，墙钟从
+`10.309` 降至 `10.003` 秒（快 `2.97%`），进程 CPU 时间从 `69.453` 增至
+`70.797` 秒（增加 `1.93%`），峰值工作集基本不变，为 `435.3`/`435.0` MiB；
+九项兼容性比较全部一致。这一组只更新近期优化证据，不替代上面的完整矩阵中位数。
+
 每个 .NET 单元格依次给出墙钟中位数和相对同 profile Python 列的倍速；低于
 `1.000x` 表示更慢。Python PR341 使用合并提交
 `2f21e8ed6018b14561396cc95f1f6828054470b8`，它是 `current` 的上游对应版本。
@@ -154,7 +160,7 @@ Ogg/FLAC、立体声、PCM24、其他采样率和未完成的文件头也继续�
 dotnet restore VHSDecodeDotNet.slnx
 dotnet build VHSDecodeDotNet.slnx -c Release --no-restore
 dotnet test --solution VHSDecodeDotNet.slnx -c Release `
-  --no-build --no-restore --minimum-expected-tests 1266
+  --no-build --no-restore --minimum-expected-tests 1267
 ```
 
 在 Visual Studio 2026 中打开 `VHSDecodeDotNet.slnx`，即可构建、调试并通过

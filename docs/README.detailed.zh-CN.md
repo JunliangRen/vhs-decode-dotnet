@@ -1775,6 +1775,18 @@ stdout、归一化 stderr/日志及全部有序 `fileLoc` 均一致。两次候�
 保持不变。亮度 TBC、色度 TBC、原始 JSON、stdout、归一化 stderr/日志及
 零线程/默认/20 worker 确定性全部一致。
 
+### 值类型分类同步脉冲
+
+`ClassifiedSyncPulse` 现在是不可变 record struct。脉冲种类、几何位置、顺序标志、
+列表顺序和所有下游数值表达式均保持不变；脉冲分类与 VBlank 细化不再为每个接受的
+脉冲分配单独的托管对象。新增的 xUnit v3 测试锁定值类型契约和保存的字段值。
+
+一组匹配的 80 帧 Exact `current --threads 20` 基线/候选短筛把墙钟从 10.309 降至
+10.003 秒（快 2.97%）。进程 CPU 时间从 69.453 增至 70.797 秒（增加 1.93%），
+峰值工作集基本不变，为 435.3/435.0 MiB。亮度 TBC、色度 TBC、原始 JSON、stdout、
+归一化 stderr/日志和全部有序 `fileLoc` 均一致。这一单组数据只作为近期优化证据，
+不替代上面的完整矩阵中位数。
+
 </details>
 
 <!-- SECTION: build -->
@@ -1797,7 +1809,7 @@ stdout、归一化 stderr/日志及全部有序 `fileLoc` 均一致。两次候�
 .\tools\build-ipp-native.ps1
 dotnet restore VHSDecodeDotNet.slnx
 dotnet build VHSDecodeDotNet.slnx -c Release --no-restore
-dotnet test --solution VHSDecodeDotNet.slnx -c Release --no-build --no-restore --minimum-expected-tests 1266
+dotnet test --solution VHSDecodeDotNet.slnx -c Release --no-build --no-restore --minimum-expected-tests 1267
 dotnet test --project tests\VHSDecode.Tests\VHSDecode.Tests.csproj -c Release --no-build --no-restore --coverage --coverage-output coverage.cobertura.xml --coverage-output-format cobertura
 ```
 
@@ -1809,7 +1821,7 @@ Intel oneAPI。只含二进制的单文件发布会嵌入 `vhsdecode_ipp.dll` �
 notice，不会额外生成许可证 sidecar 文件。只构建 Exact 后端时可以省略原生构建步骤。
 
 当前正式 Release 构建为零警告、零错误。xUnit v3 项目向
-`dotnet test` 和 Visual Studio Test Explorer 暴露 **1,266** 个可独立发现的测试。
+`dotnet test` 和 Visual Studio Test Explorer 暴露 **1,267** 个可独立发现的测试。
 
 <!-- SECTION: usage -->
 
