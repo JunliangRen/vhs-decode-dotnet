@@ -48,18 +48,6 @@ jobs:
             "https://www.gyan.dev/ffmpeg/builds/packages/$archiveName"
           )
 
-          $existingFfmpeg = Get-Command ffmpeg -ErrorAction SilentlyContinue
-          $existingFfprobe = Get-Command ffprobe -ErrorAction SilentlyContinue
-          if ($null -ne $existingFfmpeg -and $null -ne $existingFfprobe) {
-            ffmpeg -version
-            $ffmpegExitCode = $LASTEXITCODE
-            ffprobe -version
-            $ffprobeExitCode = $LASTEXITCODE
-            if ($ffmpegExitCode -eq 0 -and $ffprobeExitCode -eq 0) {
-              exit 0
-            }
-          }
-
           $downloaded = $false
           foreach ($url in $downloadUrls) {
             try {
@@ -67,7 +55,9 @@ jobs:
               Invoke-WebRequest `
                 -Uri $url `
                 -OutFile $archivePath `
-                -MaximumRetryCount 2 `
+                -ConnectionTimeoutSeconds 30 `
+                -OperationTimeoutSeconds 180 `
+                -MaximumRetryCount 1 `
                 -RetryIntervalSec 5
               $actualSha256 = (Get-FileHash `
                 -LiteralPath $archivePath `
