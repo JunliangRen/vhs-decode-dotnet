@@ -34,7 +34,35 @@ jobs:
           global-json-file: global.json
 
       - name: Install FFmpeg test dependency
-        run: choco install ffmpeg --yes --no-progress --limit-output
+        shell: pwsh
+        run: |
+          $chocoExitCode = $null
+          $ffmpegExitCode = $null
+          $ffprobeExitCode = $null
+          for ($attempt = 1; $attempt -le 3; $attempt++) {
+            choco install ffmpeg --yes --no-progress --limit-output
+            $chocoExitCode = $LASTEXITCODE
+            $ffmpeg = Get-Command ffmpeg -ErrorAction SilentlyContinue
+            $ffprobe = Get-Command ffprobe -ErrorAction SilentlyContinue
+            if ($null -ne $ffmpeg -and $null -ne $ffprobe) {
+              ffmpeg -version
+              $ffmpegExitCode = $LASTEXITCODE
+              ffprobe -version
+              $ffprobeExitCode = $LASTEXITCODE
+              if ($ffmpegExitCode -eq 0 -and $ffprobeExitCode -eq 0) {
+                exit 0
+              }
+            }
+
+            if ($attempt -lt 3) {
+              Start-Sleep -Seconds (15 * $attempt)
+            }
+          }
+
+          throw (
+            'FFmpeg and FFprobe were unavailable after three install attempts. ' +
+            "Chocolatey exit: $chocoExitCode; FFmpeg exit: $ffmpegExitCode; " +
+            "FFprobe exit: $ffprobeExitCode.")
 
       - name: Build and verify Intel IPP native bridge
         shell: pwsh
@@ -56,7 +84,7 @@ jobs:
         run: dotnet build VHSDecodeDotNet.slnx --configuration Release --no-restore
 
       - name: Run tests
-        run: dotnet test --solution VHSDecodeDotNet.slnx --configuration Release --no-build --no-restore --minimum-expected-tests 1262
+        run: dotnet test --solution VHSDecodeDotNet.slnx --configuration Release --no-build --no-restore --minimum-expected-tests 1273
 
       - name: Restore Windows x64 publish assets
         run: dotnet restore src/VHSDecode.Cli/VHSDecode.Cli.csproj --runtime win-x64
