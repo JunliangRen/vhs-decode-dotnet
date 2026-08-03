@@ -6,7 +6,7 @@ namespace VHSDecode.Core.Dsp.Ipp;
 internal static partial class IppNativeMethods
 {
     internal const string LibraryName = "vhsdecode_ipp";
-    internal const uint RequiredAbiVersion = 0x0001_0001;
+    internal const uint RequiredAbiVersion = 0x0001_0002;
 
     internal static readonly string[] RequiredExports =
     [
@@ -34,6 +34,12 @@ internal static partial class IppNativeMethods
         "vhsdecode_ipp_sos64_get_state",
         "vhsdecode_ipp_sos64_set_state",
         "vhsdecode_ipp_sos64_process",
+        "vhsdecode_ipp_sos32_create",
+        "vhsdecode_ipp_sos32_destroy",
+        "vhsdecode_ipp_sos32_reset",
+        "vhsdecode_ipp_sos32_get_state",
+        "vhsdecode_ipp_sos32_set_state",
+        "vhsdecode_ipp_sos32_process",
         "vhsdecode_ipp_status_string"
     ];
 
@@ -191,6 +197,45 @@ internal static partial class IppNativeMethods
         IppSos64SafeHandle context,
         double* input,
         double* output,
+        int length);
+
+    [LibraryImport(LibraryName, EntryPoint = "vhsdecode_ipp_sos32_create")]
+    [UnmanagedCallConv(CallConvs = [typeof(CallConvCdecl)])]
+    internal static unsafe partial int Sos32Create(
+        IppSos32Section* sections,
+        int sectionCount,
+        float* initialState,
+        int initialStateLength,
+        out nint context);
+
+    [LibraryImport(LibraryName, EntryPoint = "vhsdecode_ipp_sos32_destroy")]
+    [UnmanagedCallConv(CallConvs = [typeof(CallConvCdecl)])]
+    internal static partial int Sos32Destroy(nint context);
+
+    [LibraryImport(LibraryName, EntryPoint = "vhsdecode_ipp_sos32_reset")]
+    [UnmanagedCallConv(CallConvs = [typeof(CallConvCdecl)])]
+    internal static partial int Sos32Reset(IppSos32SafeHandle context);
+
+    [LibraryImport(LibraryName, EntryPoint = "vhsdecode_ipp_sos32_get_state")]
+    [UnmanagedCallConv(CallConvs = [typeof(CallConvCdecl)])]
+    internal static unsafe partial int Sos32GetState(
+        IppSos32SafeHandle context,
+        float* state,
+        int stateLength);
+
+    [LibraryImport(LibraryName, EntryPoint = "vhsdecode_ipp_sos32_set_state")]
+    [UnmanagedCallConv(CallConvs = [typeof(CallConvCdecl)])]
+    internal static unsafe partial int Sos32SetState(
+        IppSos32SafeHandle context,
+        float* state,
+        int stateLength);
+
+    [LibraryImport(LibraryName, EntryPoint = "vhsdecode_ipp_sos32_process")]
+    [UnmanagedCallConv(CallConvs = [typeof(CallConvCdecl)])]
+    internal static unsafe partial int Sos32Process(
+        IppSos32SafeHandle context,
+        float* input,
+        float* output,
         int length);
 
     [LibraryImport(LibraryName, EntryPoint = "vhsdecode_ipp_status_string")]

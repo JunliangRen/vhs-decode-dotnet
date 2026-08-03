@@ -2281,6 +2281,40 @@ Gen2 collections from 20 to 2, and maximum sampled working set from 773.29 to
 single-pair observation rather than a general speed claim. Every checked
 artifact/log surface and all 2,000 ordered `fileLoc` values remained exact.
 
+### IPP-fast worker-local float32 SOS
+
+The opt-in IPP-fast VHS path now runs the long chroma-burst SOS cascade through
+worker-local native IPP single-precision biquad contexts. The pool snapshots
+normalized coefficients, reconstructs the existing float32 steady-state
+initial conditions in the same expression order, resets both forward passes
+explicitly, and retains at most 12 idle contexts. Exact never constructs or
+calls the new ABI v1.2 (`0x00010002`) entry points.
+
+Native smoke coverage and standard xUnit v3 tests validate the six-float ABI
+row, scalar numerical agreement, split/in-place/reset/state behavior, parallel
+determinism, disposal, and a four-context retention bound. The full Release
+suite passed all 1,295 tests. Six 40-frame Exact main/candidate pairs covered
+v0.4.0 and `current` at one, default-five, and 20 workers; luma, chroma, raw
+JSON, stdout, normalized stderr/log, and all ordered `fileLoc` values matched
+byte for byte. Candidate IPP-fast v0.4.0 and `current` also produced one luma,
+chroma, raw-JSON, stdout, and ordered-`fileLoc` hash at zero, default, and 20
+workers. Sampled peak working set stayed bounded at 281.2-707.4 MiB.
+
+Three interleaved 200-frame `current --dsp-backend ipp-fast --threads 20`
+pairs moved median wall time from 9.740 to 9.480 seconds (2.67% lower, 1.027x
+throughput) and process CPU time from 52.160 to 48.590 seconds (6.84% lower).
+The refreshed 40-frame public matrix used three runs for each of the 10
+IPP-fast profile/worker cells. The current 20-worker median was 2.433 seconds,
+7.559x faster than profile-matched Python PR341 on that fixed window.
+
+This route intentionally inherits IPP-fast's numerically-close contract.
+Against main on the 200-frame window, 0.172492% of luma samples and 12.995980%
+of chroma samples differed. Mean absolute errors were 0.031664 and 0.154614;
+RMS errors were 11.216850 and 1.817706. One field changed its dropout decision,
+producing the luma maximum difference of 26,666 and the only raw-JSON property
+difference; field count, `seqNo`, stdout, normalized stderr, and every ordered
+`fileLoc` remained equal. This is not an Exact compatibility claim.
+
 `ffmpeg` and `ffprobe` must be available on `PATH` for RF container inputs
 outside the narrowly gated direct 40 kHz mono PCM16 raw-FLAC route. Direct
 raw-FLAC RF input, default HiFi FLAC output, and LD `--write-test-ldf` use the

@@ -195,6 +195,60 @@ void reference_sos(
     }
 }
 
+void reference_sos32(
+    const std::vector<vhsdecode_ipp_sos32_section>& sections,
+    const std::vector<float>& input,
+    std::vector<float>& state,
+    std::vector<float>& output)
+{
+    output = input;
+    for (size_t section_index = 0; section_index < sections.size(); ++section_index) {
+        const auto& section = sections[section_index];
+        const float b0 = section.b0 / section.a0;
+        const float b1 = section.b1 / section.a0;
+        const float b2 = section.b2 / section.a0;
+        const float a1 = section.a1 / section.a0;
+        const float a2 = section.a2 / section.a0;
+        float z1 = state[section_index * 2];
+        float z2 = state[(section_index * 2) + 1];
+        for (float& value : output) {
+            const float x = value;
+            const float y = (b0 * x) + z1;
+            z1 = (b1 * x) - (a1 * y) + z2;
+            z2 = (b2 * x) - (a2 * y);
+            value = y;
+        }
+        state[section_index * 2] = z1;
+        state[(section_index * 2) + 1] = z2;
+    }
+}
+
+bool compare_vectors32(
+    const char* operation,
+    const std::vector<float>& expected,
+    const std::vector<float>& actual,
+    float tolerance = 2.0e-5F)
+{
+    if (expected.size() != actual.size()) {
+        std::cerr << operation << " length mismatch\n";
+        return false;
+    }
+
+    for (size_t i = 0; i < expected.size(); ++i) {
+        const float error = std::abs(expected[i] - actual[i]);
+        const float allowed = tolerance * (1.0F + std::abs(expected[i]));
+        if (error > allowed) {
+            std::cerr << operation << " mismatch at " << i
+                      << ": expected " << expected[i]
+                      << ", actual " << actual[i]
+                      << ", error " << error
+                      << ", allowed " << allowed << '\n';
+            return false;
+        }
+    }
+    return true;
+}
+
 bool check_direct_iir()
 {
     const std::vector<double> numerator{0.18, -0.07, 0.035};
@@ -448,6 +502,52 @@ bool check_sos_iir()
         compare_vectors("SOS split state", final_state, split_state);
 }
 
+bool check_sos32_iir()
+{
+    const std::vector<vhsdecode_ipp_sos32_section> sections{
+        {0.35F, 0.1F, -0.03F, 2.0F, -0.4F, 0.08F},
+        {0.42F, -0.16F, 0.04F, 1.0F, -0.25F, 0.06F}};
+    const std::vector<float> initial_state{0.02F, -0.01F, 0.015F, -0.007F};
+    const std::vector<double> source = make_filter_input(257);
+    std::vector<float> input(source.size());
+    std::transform(source.begin(), source.end(), input.begin(),
+        [](double value) { return static_cast<float>(value); });
+    std::vector<float> expected_state = initial_state;
+    std::vector<float> expected_output;
+    reference_sos32(sections, input, expected_state, expected_output);
+
+    vhsdecode_ipp_sos32_context* context = nullptr;
+    if (!expect_status(vhsdecode_ipp_sos32_create(
+            sections.data(),
+            static_cast<int32_t>(sections.size()),
+            initial_state.data(),
+            static_cast<int32_t>(initial_state.size()),
+            &context),
+            "SOS32 create")) {
+        return false;
+    }
+
+    std::vector<float> output(input.size());
+    std::vector<float> final_state(initial_state.size());
+    const bool result =
+        expect_status(vhsdecode_ipp_sos32_process(
+            context,
+            input.data(),
+            output.data(),
+            static_cast<int32_t>(input.size())),
+            "SOS32 process") &&
+        expect_status(vhsdecode_ipp_sos32_get_state(
+            context,
+            final_state.data(),
+            static_cast<int32_t>(final_state.size())),
+            "SOS32 get state") &&
+        compare_vectors32("SOS32 output", expected_output, output) &&
+        compare_vectors32("SOS32 final state", expected_state, final_state) &&
+        expect_status(vhsdecode_ipp_sos32_reset(context), "SOS32 reset");
+    vhsdecode_ipp_sos32_destroy(context);
+    return result;
+}
+
 } // namespace
 
 int main()
@@ -590,7 +690,7 @@ int main()
         return 1;
     }
 
-    if (!check_direct_iir() || !check_sos_iir()) {
+    if (!check_direct_iir() || !check_sos_iir() || !check_sos32_iir()) {
         return 1;
     }
 

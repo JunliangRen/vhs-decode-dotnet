@@ -86,6 +86,25 @@ struct vhsdecode_ipp_sos64_context {
     }
 };
 
+struct vhsdecode_ipp_sos32_context {
+    int32_t state_length = 0;
+    std::vector<Ipp32f> taps;
+    Ipp8u* state_storage = nullptr;
+    IppsIIRState_32f* state = nullptr;
+    Ipp32f* zero_state = nullptr;
+    std::mutex state_mutex;
+
+    ~vhsdecode_ipp_sos32_context()
+    {
+        if (zero_state != nullptr) {
+            ippsFree(zero_state);
+        }
+        if (state_storage != nullptr) {
+            ippsFree(state_storage);
+        }
+    }
+};
+
 namespace {
 
 std::once_flag g_ipp_init_once;
@@ -109,6 +128,13 @@ static_assert(offsetof(vhsdecode_ipp_sos64_section, b2) == 2 * sizeof(double));
 static_assert(offsetof(vhsdecode_ipp_sos64_section, a0) == 3 * sizeof(double));
 static_assert(offsetof(vhsdecode_ipp_sos64_section, a1) == 4 * sizeof(double));
 static_assert(offsetof(vhsdecode_ipp_sos64_section, a2) == 5 * sizeof(double));
+static_assert(sizeof(vhsdecode_ipp_sos32_section) == 6 * sizeof(float));
+static_assert(offsetof(vhsdecode_ipp_sos32_section, b0) == 0 * sizeof(float));
+static_assert(offsetof(vhsdecode_ipp_sos32_section, b1) == 1 * sizeof(float));
+static_assert(offsetof(vhsdecode_ipp_sos32_section, b2) == 2 * sizeof(float));
+static_assert(offsetof(vhsdecode_ipp_sos32_section, a0) == 3 * sizeof(float));
+static_assert(offsetof(vhsdecode_ipp_sos32_section, a1) == 4 * sizeof(float));
+static_assert(offsetof(vhsdecode_ipp_sos32_section, a2) == 5 * sizeof(float));
 static_assert(sizeof(vhsdecode_ipp_runtime_info_v1) == 240);
 
 void initialize_ipp() noexcept
@@ -277,6 +303,97 @@ int32_t process_iir_context(
         }
         return static_cast<int32_t>(
             ippsIIR_64f(input, output, length, context->state));
+    }
+    catch (...) {
+        return VHSDECODE_IPP_STATUS_INTERNAL_ERROR;
+    }
+}
+
+int32_t reset_iir32_context(vhsdecode_ipp_sos32_context* context)
+{
+    if (context == nullptr) {
+        return VHSDECODE_IPP_STATUS_NULL_POINTER;
+    }
+
+    try {
+        const std::lock_guard lock(context->state_mutex);
+        return static_cast<int32_t>(
+            ippsIIRSetDlyLine_32f(context->state, context->zero_state));
+    }
+    catch (...) {
+        return VHSDECODE_IPP_STATUS_INTERNAL_ERROR;
+    }
+}
+
+int32_t get_iir32_context_state(
+    vhsdecode_ipp_sos32_context* context,
+    float* state,
+    int32_t state_length)
+{
+    if (context == nullptr || state == nullptr) {
+        return VHSDECODE_IPP_STATUS_NULL_POINTER;
+    }
+    if (state_length != context->state_length) {
+        return VHSDECODE_IPP_STATUS_INVALID_ARGUMENT;
+    }
+
+    try {
+        const std::lock_guard lock(context->state_mutex);
+        return static_cast<int32_t>(ippsIIRGetDlyLine_32f(context->state, state));
+    }
+    catch (...) {
+        return VHSDECODE_IPP_STATUS_INTERNAL_ERROR;
+    }
+}
+
+int32_t set_iir32_context_state(
+    vhsdecode_ipp_sos32_context* context,
+    const float* state,
+    int32_t state_length)
+{
+    if (context == nullptr || state == nullptr) {
+        return VHSDECODE_IPP_STATUS_NULL_POINTER;
+    }
+    if (state_length != context->state_length) {
+        return VHSDECODE_IPP_STATUS_INVALID_ARGUMENT;
+    }
+
+    try {
+        const std::lock_guard lock(context->state_mutex);
+        return static_cast<int32_t>(ippsIIRSetDlyLine_32f(context->state, state));
+    }
+    catch (...) {
+        return VHSDECODE_IPP_STATUS_INTERNAL_ERROR;
+    }
+}
+
+int32_t process_iir32_context(
+    vhsdecode_ipp_sos32_context* context,
+    const float* input,
+    float* output,
+    int32_t length)
+{
+    if (context == nullptr) {
+        return VHSDECODE_IPP_STATUS_NULL_POINTER;
+    }
+    if (length < 0) {
+        return VHSDECODE_IPP_STATUS_INVALID_ARGUMENT;
+    }
+    if (length == 0) {
+        return VHSDECODE_IPP_STATUS_OK;
+    }
+    if (input == nullptr || output == nullptr) {
+        return VHSDECODE_IPP_STATUS_NULL_POINTER;
+    }
+
+    try {
+        const std::lock_guard lock(context->state_mutex);
+        if (input == output) {
+            return static_cast<int32_t>(
+                ippsIIR_32f_I(output, length, context->state));
+        }
+        return static_cast<int32_t>(
+            ippsIIR_32f(input, output, length, context->state));
     }
     catch (...) {
         return VHSDECODE_IPP_STATUS_INTERNAL_ERROR;
@@ -985,4 +1102,144 @@ vhsdecode_ipp_sos64_process(
     int32_t length)
 {
     return process_iir_context(context, input, output, length);
+}
+
+int32_t VHSDECODE_IPP_CALL
+vhsdecode_ipp_sos32_create(
+    const vhsdecode_ipp_sos32_section* sections,
+    int32_t section_count,
+    const float* initial_state,
+    int32_t initial_state_length,
+    vhsdecode_ipp_sos32_context** out_context)
+{
+    if (out_context == nullptr) {
+        return VHSDECODE_IPP_STATUS_NULL_POINTER;
+    }
+    *out_context = nullptr;
+    if (sections == nullptr) {
+        return VHSDECODE_IPP_STATUS_NULL_POINTER;
+    }
+    if (section_count <= 0 ||
+        section_count > (std::numeric_limits<int32_t>::max)() / 2) {
+        return VHSDECODE_IPP_STATUS_INVALID_ARGUMENT;
+    }
+
+    const int32_t state_length = section_count * 2;
+    if (initial_state_length != 0 && initial_state_length != state_length) {
+        return VHSDECODE_IPP_STATUS_INVALID_ARGUMENT;
+    }
+    if (initial_state_length != 0 && initial_state == nullptr) {
+        return VHSDECODE_IPP_STATUS_NULL_POINTER;
+    }
+    for (int32_t i = 0; i < section_count; ++i) {
+        if (sections[i].a0 == 0.0F) {
+            return VHSDECODE_IPP_STATUS_INVALID_ARGUMENT;
+        }
+    }
+
+    const int32_t initialization_status = ensure_ipp_initialized();
+    if (initialization_status != VHSDECODE_IPP_STATUS_OK) {
+        return initialization_status;
+    }
+
+    try {
+        std::vector<Ipp32f> taps(static_cast<size_t>(section_count) * 6);
+        for (int32_t i = 0; i < section_count; ++i) {
+            const auto& section = sections[i];
+            const size_t offset = static_cast<size_t>(i) * 6;
+            taps[offset] = section.b0 / section.a0;
+            taps[offset + 1] = section.b1 / section.a0;
+            taps[offset + 2] = section.b2 / section.a0;
+            taps[offset + 3] = 1.0F;
+            taps[offset + 4] = section.a1 / section.a0;
+            taps[offset + 5] = section.a2 / section.a0;
+        }
+
+        int state_size = 0;
+        IppStatus status = ippsIIRGetStateSize_BiQuad_32f(section_count, &state_size);
+        if (status != ippStsNoErr) {
+            return static_cast<int32_t>(status);
+        }
+
+        auto* context = new (std::nothrow) vhsdecode_ipp_sos32_context();
+        if (context == nullptr) {
+            return VHSDECODE_IPP_STATUS_OUT_OF_MEMORY;
+        }
+        context->state_length = state_length;
+        context->taps = std::move(taps);
+        context->state_storage = ippsMalloc_8u(state_size);
+        context->zero_state = ippsMalloc_32f(state_length);
+        if (context->state_storage == nullptr || context->zero_state == nullptr) {
+            delete context;
+            return VHSDECODE_IPP_STATUS_OUT_OF_MEMORY;
+        }
+        status = ippsZero_32f(context->zero_state, state_length);
+        if (status != ippStsNoErr) {
+            delete context;
+            return static_cast<int32_t>(status);
+        }
+
+        const Ipp32f* effective_state =
+            initial_state_length == state_length ? initial_state : context->zero_state;
+        status = ippsIIRInit_BiQuad_32f(
+            &context->state,
+            context->taps.data(),
+            section_count,
+            effective_state,
+            context->state_storage);
+        if (status != ippStsNoErr) {
+            delete context;
+            return static_cast<int32_t>(status);
+        }
+
+        *out_context = context;
+        return VHSDECODE_IPP_STATUS_OK;
+    }
+    catch (const std::bad_alloc&) {
+        return VHSDECODE_IPP_STATUS_OUT_OF_MEMORY;
+    }
+    catch (...) {
+        return VHSDECODE_IPP_STATUS_INTERNAL_ERROR;
+    }
+}
+
+int32_t VHSDECODE_IPP_CALL
+vhsdecode_ipp_sos32_destroy(vhsdecode_ipp_sos32_context* context)
+{
+    delete context;
+    return VHSDECODE_IPP_STATUS_OK;
+}
+
+int32_t VHSDECODE_IPP_CALL
+vhsdecode_ipp_sos32_reset(vhsdecode_ipp_sos32_context* context)
+{
+    return reset_iir32_context(context);
+}
+
+int32_t VHSDECODE_IPP_CALL
+vhsdecode_ipp_sos32_get_state(
+    vhsdecode_ipp_sos32_context* context,
+    float* state,
+    int32_t state_length)
+{
+    return get_iir32_context_state(context, state, state_length);
+}
+
+int32_t VHSDECODE_IPP_CALL
+vhsdecode_ipp_sos32_set_state(
+    vhsdecode_ipp_sos32_context* context,
+    const float* state,
+    int32_t state_length)
+{
+    return set_iir32_context_state(context, state, state_length);
+}
+
+int32_t VHSDECODE_IPP_CALL
+vhsdecode_ipp_sos32_process(
+    vhsdecode_ipp_sos32_context* context,
+    const float* input,
+    float* output,
+    int32_t length)
+{
+    return process_iir32_context(context, input, output, length);
 }
