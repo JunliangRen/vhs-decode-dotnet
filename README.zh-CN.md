@@ -33,7 +33,7 @@
 - VHS 家族包括 VHS/S-VHS、Betamax、Video8/Hi8、U-matic、Type C、EIAJ
   以及上游支持的 PAL/NTSC 变体。
 - TBC 工具、双击启动的用户 GUI 和开发者绘图窗口明确不在范围内。
-- Visual Studio 2026 `.slnx` 包含 **1,283** 项标准 xUnit v3 测试；测试可在
+- Visual Studio 2026 `.slnx` 包含 **1,288** 项标准 xUnit v3 测试；测试可在
   Test Explorer 中查看，也可用 `dotnet test` 运行。
 
 <!-- SECTION: start -->
@@ -89,75 +89,32 @@ CVBS、LaserDisc 和 HiFi 当前会拒绝 `ipp-fast`，这些命令应使用 `ex
 ## 最新性能
 
 下表固定使用同一份私有本地 40 MHz PAL VHS `.ldf` 夹具和相同的 40 帧窗口，
-不会公开源文件名。基础矩阵是 2026-08-02 在 main commit `c92af1d` 上完成的
-三次交错运行中位数。2026-08-03，在完成有界 ACC 分段和 Super-Gaussian FFT
-并行化后，最终 cap-12 分支候选以三次交错运行重新测量了全部 `current` 单元格；Python
-与 .NET v0.4.0 单元格沿用此前审计值。随后又用 15 次最终候选运行刷新了
-`IPP-fast + current` 列，其中混合基数 Super-Gaussian 变换改走 IPP DFT32。
-兼容性结论与速度数据分开判断。
+不会公开源文件名。2026-08-04，以 main `3bfa9b9` 为基础的本分支候选重新测量了
+全部 20 个 .NET 单元格，每格三次交错运行，共 60 次 Release 运行。Python 两列
+沿用同一窗口的已审计测量值；兼容性结论与速度数据分开判断。
 
 <!-- LATEST_PERFORMANCE_BEGIN -->
 | CLI 模式（workers） | Python v0.4.0 | Python PR341 | Exact + v0.4.0 | Exact + current | IPP-fast + v0.4.0 | IPP-fast + current |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| 默认（5） | 15.207 s | 16.780 s | 4.389 s / 3.465x | 7.030 s / 2.387x | 3.609 s / 4.213x | 3.801 s / 4.415x |
-| `--threads 1` | 17.694 s | 19.414 s | 10.065 s / 1.758x | 13.871 s / 1.400x | 7.215 s / 2.453x | 9.527 s / 2.038x |
-| `--threads 5` | 15.719 s | 17.801 s | 4.282 s / 3.671x | 7.428 s / 2.396x | 3.568 s / 4.406x | 3.583 s / 4.968x |
-| `--threads 10` | 16.037 s | 18.266 s | 3.494 s / 4.589x | 6.040 s / 3.024x | 3.098 s / 5.177x | 3.027 s / 6.035x |
-| `--threads 20` | 16.405 s | 18.395 s | 3.235 s / 5.071x | 5.118 s / 3.594x | 2.654 s / 6.182x | 2.545 s / 7.229x |
+| 默认（5） | 15.207 s | 16.780 s | 4.332 s / 3.510x | 5.402 s / 3.106x | 3.575 s / 4.254x | 3.558 s / 4.717x |
+| `--threads 1` | 17.694 s | 19.414 s | 9.867 s / 1.793x | 12.596 s / 1.541x | 7.070 s / 2.503x | 8.636 s / 2.248x |
+| `--threads 5` | 15.719 s | 17.801 s | 4.268 s / 3.683x | 5.365 s / 3.318x | 3.521 s / 4.465x | 3.503 s / 5.081x |
+| `--threads 10` | 16.037 s | 18.266 s | 3.579 s / 4.481x | 4.379 s / 4.171x | 3.014 s / 5.321x | 2.886 s / 6.328x |
+| `--threads 20` | 16.405 s | 18.395 s | 2.951 s / 5.559x | 3.885 s / 4.735x | 2.672 s / 6.140x | 2.583 s / 7.123x |
 <!-- LATEST_PERFORMANCE_END -->
-<!-- LATEST_PERFORMANCE_RUNS: base=90 current-refresh=30 ipp-current-refresh=15 repeats=3 -->
+<!-- LATEST_PERFORMANCE_RUNS: dotnet-refresh=60 repeats=3 -->
 
-本轮保留的 IPP 候选只把 `ipp-fast + current` 的 356400 点托管 float32 变换
-替换为任意长度 IPP DFT32。同一份私有本地 PAL VHS 样本的一组固定 200 帧
-`--threads 20` 配对中，墙钟从 `10.815` 降到 `9.470` 秒（缩短 12.43%，
-吞吐 1.142x），进程 CPU 时间从 `65.797` 降到 `51.047` 秒，峰值工作集减少
-1.7 MiB。亮度和原始 JSON 逐字节一致；1.42102 亿个色度样本中 0.1627% 有位差，
-全部样本的 99.99987% 误差不超过 1，RMSE 为 0.063，符合已说明的近似
-`ipp-fast` 约定。另行执行的 Exact v0.4.0 与 `current` 真实样本门禁均为九项全同。
+每个 .NET 单元格依次给出墙钟中位数和相对同 profile Python 列的倍速；默认实际
+使用 **5 个 workers**。本轮让 `current` 色度相位分析只重采样真正读取的逐行前缀，
+同时保持线性 wow 状态和 16-tap sinc 表达式不变。固定 200 帧
+`ipp-fast + current --threads 20` A/B 中，墙钟中位数从 10.250 降至 10.018 秒
+（缩短 2.26%，吞吐 1.023x），CPU 时间降低 1.22%；亮度、色度、JSON、stdout、
+归一化 stderr/日志和有序 `fileLoc` 全部一致。
 
-随后又用 Exact `current --threads 20` 做了一组 80 帧短筛，保留上面的完整矩阵不变：
-decoder-local burst-probe 缓冲复用的墙钟基本持平（`9.393` 降至 `9.371` 秒），
-进程 CPU 时间从 `74.406` 降至 `67.922` 秒，峰值工作集从 `435.1` 降至
-`430.5` MiB。这一组结果不作为新的吞吐提升声明。亮度 TBC、色度 TBC、JSON、
-stdout、归一化 stderr/日志以及零线程/默认/20 worker 确定性均一致。
-
-2026-08-03 最新一组短筛把分类后的同步脉冲改为不可变值，避免为每个脉冲分配
-单独对象。在同一份 80 帧 Exact `current --threads 20` 门禁中，墙钟从
-`10.309` 降至 `10.003` 秒（快 `2.97%`），进程 CPU 时间从 `69.453` 增至
-`70.797` 秒（增加 `1.93%`），峰值工作集基本不变，为 `435.3`/`435.0` MiB；
-九项兼容性比较全部一致。这一组只更新近期优化证据，不替代上面的完整矩阵中位数。
-
-本轮保留的高 worker Exact VHS 候选在串行完成频谱准备后，并行执行两个彼此独立的
-逆 FFT 阶段。同一份私有本地 PAL VHS 夹具上，一组固定 200 帧 Exact
-`current --threads 20` 配对结果如下：
-
-| 本轮保留优化 | main `eec3658` | 分支候选 | 变化 |
-| --- | ---: | ---: | ---: |
-| 墙钟时间 | 11.945 s | 11.480 s | 缩短 3.89% / 吞吐 1.041x |
-| 进程 CPU 时间 | 95.359 s | 90.828 s | 降低 4.75% |
-| 有效核心数 | 7.98 | 7.91 | 基本不变 |
-
-退出状态、field 数、亮度、色度、原始 JSON、stdout、归一化 stderr、归一化日志和
-有序 `fileLoc` 九项门禁全部一致。测量脚本没有返回可用的峰值工作集，因此不声明
-内存数字；实现没有增加样本长度级别的缓冲，并继续受现有 12-block 外层流水线约束。
-这组 200 帧数据的范围不同，不替代上面的 40 帧重复运行矩阵。
-
-每个 .NET 单元格依次给出墙钟中位数和相对同 profile Python 列的倍速；低于
-`1.000x` 表示更慢。Python PR341 使用合并提交
-`2f21e8ed6018b14561396cc95f1f6828054470b8`，它是 `current` 的上游对应版本。
-默认实际使用 **5 个 workers**。基础矩阵共 90 次运行，即 30 个模式/profile
-组合各重复三次；十个刷新的 `current` 单元格另增加 30 次最终候选交错运行，
-最终 IPP DFT32 列再增加 15 次运行。
-
-每个 .NET profile 和 Python PR341 在各模式下都只产生一套确定性 hash。Python
-v0.4.0 在每个默认/非零线程模式的三次运行中都产生三套亮度、色度、JSON 和日志
-hash，但有序 `fileLoc`、stdout 与归一化 stderr 保持稳定，因此这些 Python 行只用于
-吞吐比较。另行执行的 40 帧 `--threads 0` 门禁中，Exact v0.4.0 与 Exact
-`current` 在输出字节、元数据、stdout/stderr 和归一化日志上匹配各自 Python
-对应版本；严格 oracle 仍是 Python v0.4.0 `g4315520 --threads 0`。
-
-默认 worker 的实际数量、完整命令、构建 hash、硬件、重复测量方法、输出 hash
-以及旧数据请查看[详细性能说明](docs/README.detailed.zh-CN.md#性能)。
+本次刷新的所有 .NET 单元格都保持确定性。Python v0.4.0 在非零 worker 数下可能
+产生不同输出 hash，因此严格 oracle 仍是 Python v0.4.0
+`g4315520 --threads 0`。完整命令、硬件、hash、内存边界和历史测量请查看
+[详细性能说明](docs/README.detailed.zh-CN.md#性能)。
 
 <!-- SECTION: compatibility -->
 
@@ -186,7 +143,7 @@ Ogg/FLAC、立体声、PCM24、其他采样率和未完成的文件头也继续�
 dotnet restore VHSDecodeDotNet.slnx
 dotnet build VHSDecodeDotNet.slnx -c Release --no-restore
 dotnet test --solution VHSDecodeDotNet.slnx -c Release `
-  --no-build --no-restore --minimum-expected-tests 1283
+  --no-build --no-restore --minimum-expected-tests 1288
 ```
 
 在 Visual Studio 2026 中打开 `VHSDecodeDotNet.slnx`，即可构建、调试并通过

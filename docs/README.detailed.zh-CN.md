@@ -242,6 +242,10 @@ color-under Super-Gaussian DFT。CVBS、LD 和 HiFi 会明确拒绝不支持的 
   `--threads 0` 和 `--threads 1` 保留确定性的串行路径。
 - 线性 wow 调整每行只计算一次恒定导数，在 median/MAD 修复后再展开；启用 worker 时，
   源位置与电平准备仅以固定两路并发执行。
+- 在 `current` color-under 路径中，相位分析只重采样 burst probe 实际可能读取的每行
+  前 `BurstStart + BurstEnd` 个样本。线性插值使用紧凑的池化 source-position 和
+  level-adjust 数组；wow 平滑仍按原 FMA 递推逐点跨过所有省略样本，非线性插值继续
+  使用完整计划回退。
 - VHS heterodyne 与 carrier 表使用有界并行构造和 session 自有的单条目缓存。key 完全
   一致时复用原数组；样本形状、载波、相位或 AFC 变化时替换旧条目，不会累积保留状态。
   相位分析直接只读场自有的重采样数组；没有配置色度预滤波时，解码也会借用同一个
@@ -332,23 +336,30 @@ IPP-fast v0.4.0 和 IPP-fast `current`。文件名不会公开。每个 .NET 单
 <!-- LATEST_PERFORMANCE_BEGIN -->
 | CLI 模式（workers） | Python v0.4.0 | Python PR341 | Exact + v0.4.0 | Exact + current | IPP-fast + v0.4.0 | IPP-fast + current |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| 默认（5） | 15.207 s | 16.780 s | 4.389 s / 3.465x / 71.14% | 7.030 s / 2.387x / 58.10% | 3.609 s / 4.213x / 76.27% | 3.801 s / 4.415x / 77.35% |
-| `--threads 1` | 17.694 s | 19.414 s | 10.065 s / 1.758x / 43.11% | 13.871 s / 1.400x / 28.55% | 7.215 s / 2.453x / 59.23% | 9.527 s / 2.038x / 50.93% |
-| `--threads 5` | 15.719 s | 17.801 s | 4.282 s / 3.671x / 72.76% | 7.428 s / 2.396x / 58.27% | 3.568 s / 4.406x / 77.30% | 3.583 s / 4.968x / 79.87% |
-| `--threads 10` | 16.037 s | 18.266 s | 3.494 s / 4.589x / 78.21% | 6.040 s / 3.024x / 66.93% | 3.098 s / 5.177x / 80.68% | 3.027 s / 6.035x / 83.43% |
-| `--threads 20` | 16.405 s | 18.395 s | 3.235 s / 5.071x / 80.28% | 5.118 s / 3.594x / 72.18% | 2.654 s / 6.182x / 83.82% | 2.545 s / 7.229x / 86.17% |
+| 默认（5） | 15.207 s | 16.780 s | 4.332 s / 3.510x / 71.51% | 5.402 s / 3.106x / 67.81% | 3.575 s / 4.254x / 76.49% | 3.558 s / 4.717x / 78.80% |
+| `--threads 1` | 17.694 s | 19.414 s | 9.867 s / 1.793x / 44.24% | 12.596 s / 1.541x / 35.12% | 7.070 s / 2.503x / 60.04% | 8.636 s / 2.248x / 55.51% |
+| `--threads 5` | 15.719 s | 17.801 s | 4.268 s / 3.683x / 72.85% | 5.365 s / 3.318x / 69.86% | 3.521 s / 4.465x / 77.60% | 3.503 s / 5.081x / 80.32% |
+| `--threads 10` | 16.037 s | 18.266 s | 3.579 s / 4.481x / 77.68% | 4.379 s / 4.171x / 76.02% | 3.014 s / 5.321x / 81.21% | 2.886 s / 6.328x / 84.20% |
+| `--threads 20` | 16.405 s | 18.395 s | 2.951 s / 5.559x / 82.01% | 3.885 s / 4.735x / 78.88% | 2.672 s / 6.140x / 83.71% | 2.583 s / 7.123x / 85.96% |
 <!-- LATEST_PERFORMANCE_END -->
-<!-- LATEST_PERFORMANCE_RUNS: base=90 current-refresh=30 ipp-current-refresh=15 repeats=3 -->
+<!-- LATEST_PERFORMANCE_RUNS: dotnet-refresh=60 repeats=3 -->
 
-本轮于 2026-08-02 在 main commit
-`c92af1dfd0f96cd7f2d49f3219fb428d0f4e0865` 上完成。测试机为 Intel Core
-Ultra 7 265K（20 个逻辑处理器）、Windows 11 build 26220，以及 .NET
-SDK/runtime `11.0.100-preview.6.26359.118`。30 个模式/profile 组合各交错运行
-三次，共 90 次 Release 运行。2026-08-03，在完成有界 ACC 分段和 Super-Gaussian
-FFT 并行化后，全部十个 `current` 单元格使用最终 cap-12 分支候选各交错测量三次，另增加
-30 次 Release 运行。Python 与 .NET v0.4.0 单元格沿用此前审计值。随后把
-356400 点 Super-Gaussian 变换改走任意长度 IPP DFT32，并在每个 worker 档位交错
-测量三次，刷新 `IPP-fast + current` 列，另增加 15 次运行。
+Python 测量于 2026-08-02 在 main commit
+`c92af1dfd0f96cd7f2d49f3219fb428d0f4e0865` 上完成审计。2026-08-04，基于
+main `3bfa9b9` 的本分支候选重新测量了全部 20 个 .NET 模式/profile 单元格，
+每格三次交错运行，共 60 次 Release 运行。测试机为 Intel Core Ultra 7 265K
+（20 个逻辑处理器）、Windows 11 build 26220，以及 .NET SDK/runtime
+`11.0.100-preview.6.26359.118`。每个 .NET 单元格的三次运行都只产生一套亮度、
+色度、原始 JSON 和 stdout hash。
+
+相位前缀候选还与 main `3bfa9b9` 在固定 200 帧
+`current --dsp-backend ipp-fast --threads 20` 窗口上各交错运行三次。墙钟中位数
+从 10.250 降到 10.018 秒（缩短 2.26%，吞吐 1.023x），进程 CPU 时间从
+53.797 降到 53.141 秒（降低 1.22%）；峰值工作集保持有界，候选为
+351.2-364.3 MiB，main 为 351.2-353.1 MiB。亮度、色度、原始 JSON、stdout、
+耗时归一化 stderr、时间戳归一化日志和有序 `fileLoc` 全部一致。另一个 17 次、
+80 帧矩阵覆盖 Exact/IPP-fast `current` 的零/默认/1/5/10/20 workers，以及未改动的
+Exact v0.4.0；每个 profile/backend 组都只产生一套产物和 `fileLoc` hash。
 
 DFT32 候选还与上一发布版做了一组固定 200 帧
 `current --dsp-backend ipp-fast --threads 20` 配对。墙钟从 10.815 降到 9.470 秒
@@ -1848,7 +1859,7 @@ stdout SHA-256、归一化 stderr、归一化日志和全部有序 `fileLoc` 均
 .\tools\build-ipp-native.ps1
 dotnet restore VHSDecodeDotNet.slnx
 dotnet build VHSDecodeDotNet.slnx -c Release --no-restore
-dotnet test --solution VHSDecodeDotNet.slnx -c Release --no-build --no-restore --minimum-expected-tests 1283
+dotnet test --solution VHSDecodeDotNet.slnx -c Release --no-build --no-restore --minimum-expected-tests 1288
 dotnet test --project tests\VHSDecode.Tests\VHSDecode.Tests.csproj -c Release --no-build --no-restore --coverage --coverage-output coverage.cobertura.xml --coverage-output-format cobertura
 ```
 
@@ -1860,7 +1871,7 @@ Intel oneAPI。只含二进制的单文件发布会嵌入 `vhsdecode_ipp.dll` �
 notice，不会额外生成许可证 sidecar 文件。只构建 Exact 后端时可以省略原生构建步骤。
 
 当前正式 Release 构建为零警告、零错误。xUnit v3 项目向
-`dotnet test` 和 Visual Studio Test Explorer 暴露 **1,283** 个可独立发现的测试。
+`dotnet test` 和 Visual Studio Test Explorer 暴露 **1,288** 个可独立发现的测试。
 
 <!-- SECTION: usage -->
 

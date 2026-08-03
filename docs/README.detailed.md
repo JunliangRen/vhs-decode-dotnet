@@ -282,6 +282,12 @@ falling back to the Exact inverse FFT and reduced the paired median gain to
 - Linear wow adjustment evaluates the constant derivative once per line,
   expands it only after median/MAD repair, and overlaps source-position and
   level preparation with a fixed two-way task when workers are enabled.
+- Under `current` color-under processing, phase analysis resamples only the
+  first `BurstStart + BurstEnd` samples that its burst probe can read from each
+  output line. Linear interpolation uses compact pooled source-position and
+  level-adjust arrays; wow smoothing still advances through every omitted
+  sample with the original FMA recurrence, and non-linear interpolation keeps
+  the full-plan fallback.
 - VHS heterodyne and carrier tables use bounded parallel construction and a
   session-owned one-entry cache. Exact-key hits reuse the original arrays;
   sample-shape, carrier, phase, or AFC changes replace the prior entry instead
@@ -408,25 +414,32 @@ speedup, and wall-time reduction against its profile-matched Python column:
 <!-- LATEST_PERFORMANCE_BEGIN -->
 | CLI mode (workers) | Python v0.4.0 | Python PR341 | Exact + v0.4.0 | Exact + current | IPP-fast + v0.4.0 | IPP-fast + current |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| default (5) | 15.207 s | 16.780 s | 4.389 s / 3.465x / 71.14% | 7.030 s / 2.387x / 58.10% | 3.609 s / 4.213x / 76.27% | 3.801 s / 4.415x / 77.35% |
-| `--threads 1` | 17.694 s | 19.414 s | 10.065 s / 1.758x / 43.11% | 13.871 s / 1.400x / 28.55% | 7.215 s / 2.453x / 59.23% | 9.527 s / 2.038x / 50.93% |
-| `--threads 5` | 15.719 s | 17.801 s | 4.282 s / 3.671x / 72.76% | 7.428 s / 2.396x / 58.27% | 3.568 s / 4.406x / 77.30% | 3.583 s / 4.968x / 79.87% |
-| `--threads 10` | 16.037 s | 18.266 s | 3.494 s / 4.589x / 78.21% | 6.040 s / 3.024x / 66.93% | 3.098 s / 5.177x / 80.68% | 3.027 s / 6.035x / 83.43% |
-| `--threads 20` | 16.405 s | 18.395 s | 3.235 s / 5.071x / 80.28% | 5.118 s / 3.594x / 72.18% | 2.654 s / 6.182x / 83.82% | 2.545 s / 7.229x / 86.17% |
+| default (5) | 15.207 s | 16.780 s | 4.332 s / 3.510x / 71.51% | 5.402 s / 3.106x / 67.81% | 3.575 s / 4.254x / 76.49% | 3.558 s / 4.717x / 78.80% |
+| `--threads 1` | 17.694 s | 19.414 s | 9.867 s / 1.793x / 44.24% | 12.596 s / 1.541x / 35.12% | 7.070 s / 2.503x / 60.04% | 8.636 s / 2.248x / 55.51% |
+| `--threads 5` | 15.719 s | 17.801 s | 4.268 s / 3.683x / 72.85% | 5.365 s / 3.318x / 69.86% | 3.521 s / 4.465x / 77.60% | 3.503 s / 5.081x / 80.32% |
+| `--threads 10` | 16.037 s | 18.266 s | 3.579 s / 4.481x / 77.68% | 4.379 s / 4.171x / 76.02% | 3.014 s / 5.321x / 81.21% | 2.886 s / 6.328x / 84.20% |
+| `--threads 20` | 16.405 s | 18.395 s | 2.951 s / 5.559x / 82.01% | 3.885 s / 4.735x / 78.88% | 2.672 s / 6.140x / 83.71% | 2.583 s / 7.123x / 85.96% |
 <!-- LATEST_PERFORMANCE_END -->
-<!-- LATEST_PERFORMANCE_RUNS: base=90 current-refresh=30 ipp-current-refresh=15 repeats=3 -->
+<!-- LATEST_PERFORMANCE_RUNS: dotnet-refresh=60 repeats=3 -->
 
-The benchmark ran on 2026-08-02 using main commit
-`c92af1dfd0f96cd7f2d49f3219fb428d0f4e0865`, an Intel Core Ultra 7 265K with
-20 logical processors, Windows 11 build 26220, and .NET SDK/runtime
-`11.0.100-preview.6.26359.118`. Each of the 30 mode/profile cells was measured
-three times in interleaved order, for 90 Release runs. On 2026-08-03, all ten
-`current` cells were refreshed with three interleaved runs of the final cap-12
-branch candidate after bounded ACC segment and Super-Gaussian FFT parallelization,
-adding 30 Release runs. The Python and .NET v0.4.0 cells retain their earlier
-audited measurements. The `IPP-fast + current` column was subsequently refreshed
-with three interleaved runs at each worker setting after the 356400-point
-Super-Gaussian transform moved to arbitrary-length IPP DFT32, adding 15 runs.
+The Python measurements were audited on 2026-08-02 using main commit
+`c92af1dfd0f96cd7f2d49f3219fb428d0f4e0865`. On 2026-08-04, all 20 .NET
+mode/profile cells were refreshed from this branch candidate based on main
+`3bfa9b9`, with three interleaved runs per cell for 60 Release runs. The host
+was an Intel Core Ultra 7 265K with 20 logical processors, Windows 11 build
+26220, and .NET SDK/runtime `11.0.100-preview.6.26359.118`. Every .NET cell
+produced one luma, chroma, raw-JSON, and stdout hash across its three runs.
+
+The phase-prefix candidate was screened against main `3bfa9b9` with three
+interleaved runs per build on a fixed 200-frame
+`current --dsp-backend ipp-fast --threads 20` window. Median wall time moved
+from 10.250 to 10.018 seconds (2.26% lower, 1.023x throughput), process CPU
+time from 53.797 to 53.141 seconds (1.22% lower), and peak working set remained
+bounded at 351.2-364.3 MiB versus 351.2-353.1 MiB. Luma, chroma, raw JSON,
+stdout, timing-normalized stderr, timestamp-normalized logs, and ordered
+`fileLoc` all matched. A separate 17-run 80-frame matrix covered Exact and
+IPP-fast `current` at zero/default/1/5/10/20 workers plus unchanged Exact
+v0.4.0; every profile/backend group retained one artifact and `fileLoc` hash.
 
 The DFT32 candidate was also screened against the previous release on one fixed
 200-frame `current --dsp-backend ipp-fast --threads 20` pair. Wall time moved
@@ -2304,7 +2317,7 @@ Requirements:
 .\tools\build-ipp-native.ps1
 dotnet restore VHSDecodeDotNet.slnx
 dotnet build VHSDecodeDotNet.slnx -c Release --no-restore
-dotnet test --solution VHSDecodeDotNet.slnx -c Release --no-build --no-restore --minimum-expected-tests 1283
+dotnet test --solution VHSDecodeDotNet.slnx -c Release --no-build --no-restore --minimum-expected-tests 1288
 dotnet test --project tests\VHSDecode.Tests\VHSDecode.Tests.csproj -c Release --no-build --no-restore --coverage --coverage-output coverage.cobertura.xml --coverage-output-format cobertura
 ```
 
@@ -2318,7 +2331,7 @@ deployment computer. Binary-only single-file releases embed
 sidecar license files. An Exact-only build may omit the native build step.
 
 The current formal Release build has zero warnings and errors. The xUnit v3
-project exposes **1,283** independently discoverable tests to both
+project exposes **1,288** independently discoverable tests to both
 `dotnet test` and Visual Studio Test Explorer.
 
 <!-- SECTION: usage -->

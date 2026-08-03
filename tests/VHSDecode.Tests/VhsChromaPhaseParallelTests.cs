@@ -1,5 +1,6 @@
 using VHSDecode.Core.Decode;
 using VHSDecode.Core.Dsp;
+using VHSDecode.Core.Tbc;
 using Xunit;
 
 namespace VHSDecode.Tests;
@@ -152,6 +153,87 @@ public sealed class VhsChromaPhaseParallelTests
 
         Assert.Equal(8, cache.BurstProbeBufferCreationCount);
         Assert.Equal(4, cache.RetainedBurstProbeBufferCount);
+    }
+
+    [Fact(DisplayName = "Current phase analysis reads only resampled line prefixes")]
+    public void CurrentPhaseAnalysisReadsOnlyResampledLinePrefixes()
+    {
+        const int LineLength = 128;
+        const int LineCount = 80;
+        const int BurstStart = 12;
+        const int BurstEnd = 36;
+        const int PhasePrefixSamples = BurstStart + BurstEnd;
+        double[] source = Enumerable.Range(0, 17_000)
+            .Select(static index =>
+                Math.Sin(index * 0.013) + (0.25 * Math.Cos(index * 0.003)))
+            .ToArray();
+        double[] lineLocations = Enumerable.Range(0, LineCount + 1)
+            .Select(static line => 200.25 + (line * 192.125) + ((line % 7) * 0.01))
+            .ToArray();
+        var resampler = new TbcLineResampler(
+            LineLength,
+            TbcLineInterpolationMethod.Linear,
+            wowLevelAdjustSmoothing: 1.5,
+            nominalInputLineLength: 192.125,
+            workerThreads: 8);
+        using TbcLineResampler.ResamplingPlan plan = resampler.PrepareLineResampling(
+            lineLocations,
+            firstLine: 0,
+            LineCount);
+        double[] full = resampler.ResamplePrepared(source, plan);
+        var sparse = new double[plan.DestinationLength];
+        Array.Fill(sparse, double.NaN);
+        resampler.ResampleLinePrefixes(
+            source,
+            lineLocations,
+            firstLine: 0,
+            LineCount,
+            PhasePrefixSamples,
+            sparse);
+        var options = new VhsChromaFieldOptions(
+            ColorSystem: "NTSC",
+            OutputLineLength: LineLength,
+            OutputLineCount: LineCount,
+            OutputSampleRateHz: 4_000_000.0,
+            FscMHz: 1.0,
+            ColorUnderCarrierHz: 250_000.0,
+            BurstStart,
+            BurstEnd,
+            BurstAbsRef: 72.0,
+            ChromaRotation: [-1, 1],
+            DisableComb: false,
+            DisablePhaseCorrection: false,
+            EnableColorKiller: false,
+            DetectChromaTrackPhase: true)
+        {
+            WorkerThreads = 8,
+            UseCurrentChromaProcessing = true,
+            FinalSosFilter = [new SosSection(1.0, 0.0, 0.0, 1.0, 0.0, 0.0)]
+        };
+
+        VhsChromaPhaseAnalysis expected = Analyze(full);
+        VhsChromaPhaseAnalysis actual = Analyze(sparse);
+
+        AssertPhaseAnalysisEqual(expected.Phase, actual.Phase);
+        AssertDoubleBitsEqual(expected.HeterodyneCarrierHz, actual.HeterodyneCarrierHz);
+        AssertDoubleBitsEqual(expected.HeterodynePhaseRadians, actual.HeterodynePhaseRadians);
+        Assert.All(
+            Enumerable.Range(0, LineCount),
+            line => Assert.All(
+                sparse.AsSpan(
+                        (line * LineLength) + PhasePrefixSamples,
+                        LineLength - PhasePrefixSamples)
+                    .ToArray(),
+                static value => Assert.True(double.IsNaN(value))));
+
+        VhsChromaPhaseAnalysis Analyze(double[] samples)
+            => VhsChromaDecoder.AnalyzeFieldPhaseWithWorkspace(
+                samples,
+                options,
+                lineLocations,
+                inputLineLength: 192,
+                carrierTableCache: new VhsChromaCarrierTableCache(),
+                useFloat32Samples: true);
     }
 
     [Theory(DisplayName = "Parallel current phase prefix matches serial phase analysis")]

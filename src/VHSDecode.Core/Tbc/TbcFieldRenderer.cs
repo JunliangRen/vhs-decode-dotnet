@@ -203,6 +203,30 @@ public sealed class TbcFieldRenderer
         }
     }
 
+    internal void ResampleFieldLinePrefixesInto(
+        ReadOnlySpan<double> videoHz,
+        IReadOnlyList<double> lineLocations,
+        int firstLine,
+        int samplesPerLine,
+        double[] destination)
+    {
+        ArgumentNullException.ThrowIfNull(destination);
+        if (destination.Length != FrameSpec.FieldSampleCount)
+        {
+            throw new ArgumentException(
+                "Destination length must match the configured TBC field size.",
+                nameof(destination));
+        }
+
+        _resampler.ResampleLinePrefixes(
+            videoHz,
+            lineLocations,
+            firstLine,
+            FrameSpec.OutputLineCount,
+            samplesPerLine,
+            destination);
+    }
+
     public TbcRenderedField RenderFieldPayload(
         ReadOnlySpan<double> videoHz,
         IReadOnlyList<double> lineLocations,
