@@ -41,8 +41,9 @@ public sealed class VhsChromaPhaseParallelTests
         var cache = new VhsChromaCarrierTableCache();
 
         VhsChromaPhaseAnalysis first = Analyze();
-        int creationCount = cache.BurstProbeBufferCreationCount;
-        double[][] dirtyBuffers = Enumerable.Range(0, creationCount)
+        int firstAnalysisCreationCount = cache.BurstProbeBufferCreationCount;
+        double[][] dirtyBuffers = Enumerable
+            .Range(0, VhsChromaCarrierTableCache.BurstProbeBufferCapacity)
             .Select(_ => cache.RentBurstProbeBuffer(32))
             .ToArray();
         foreach (double[] buffer in dirtyBuffers)
@@ -51,11 +52,20 @@ public sealed class VhsChromaPhaseParallelTests
             cache.ReturnBurstProbeBuffer(buffer);
         }
 
+        int seededCreationCount = cache.BurstProbeBufferCreationCount;
         VhsChromaPhaseAnalysis second = Analyze();
 
-        Assert.InRange(creationCount, 1, 4);
-        Assert.Equal(creationCount, cache.BurstProbeBufferCreationCount);
-        Assert.Equal(creationCount, cache.RetainedBurstProbeBufferCount);
+        Assert.InRange(
+            firstAnalysisCreationCount,
+            1,
+            VhsChromaCarrierTableCache.BurstProbeBufferCapacity);
+        Assert.Equal(
+            VhsChromaCarrierTableCache.BurstProbeBufferCapacity,
+            seededCreationCount);
+        Assert.Equal(seededCreationCount, cache.BurstProbeBufferCreationCount);
+        Assert.Equal(
+            VhsChromaCarrierTableCache.BurstProbeBufferCapacity,
+            cache.RetainedBurstProbeBufferCount);
         AssertPhaseAnalysisEqual(first.Phase, second.Phase);
 
         VhsChromaPhaseAnalysis Analyze()
