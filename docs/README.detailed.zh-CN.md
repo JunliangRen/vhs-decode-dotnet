@@ -4,7 +4,7 @@
 
 [English](README.detailed.md) | **[简体中文](README.detailed.zh-CN.md)** | [日本語](README.detailed.ja.md)
 
-<!-- README_SYNC: 2026-08-02.01 -->
+<!-- README_SYNC: 2026-08-03.01 -->
 
 这是 [`oyvindln/vhs-decode`](https://github.com/oyvindln/vhs-decode)
 中解码相关部分的 .NET 11 重写，当前以 release `v0.4.0`、commit
@@ -1762,6 +1762,19 @@ stdout、归一化 stderr/日志及全部有序 `fileLoc` 均一致。两次候�
 每次运行的亮度、色度、原始 JSON、stdout、归一化 stderr/日志及有序 `fileLoc` 都一致。
 刷新的 30 次 `current` 矩阵中，每个单元格的每项兼容性表面也都只产生一个 hash。
 
+### Decoder-local current burst-probe 缓冲
+
+`current` 色度相位分析现在从 4 个 decoder-local、无锁槽位复用精确长度的 padded-burst
+数组。4 槽上限与现有 burst-probe worker 上限一致。每次使用前都会覆盖全部有效样本，
+之后仍执行相同的 SOS 滤波和拟合；算术、滤波顺序、worker 数、跨 field 状态及异常顺序
+均未改变。所有退出路径都会归还缓冲，最多只保留 4 个数组。
+
+一组 80 帧 Exact `current --threads 20` 基线/候选短筛的墙钟基本持平，为
+9.393/9.371 秒；进程 CPU 时间从 74.406 降至 67.922 秒，峰值工作集从 435.1 降至
+430.5 MiB。这一组只作为 CPU/分配证据，不作为吞吐提升声明，因此上面的完整性能矩阵
+保持不变。亮度 TBC、色度 TBC、原始 JSON、stdout、归一化 stderr/日志及
+零线程/默认/20 worker 确定性全部一致。
+
 </details>
 
 <!-- SECTION: build -->
@@ -1784,7 +1797,8 @@ stdout、归一化 stderr/日志及全部有序 `fileLoc` 均一致。两次候�
 .\tools\build-ipp-native.ps1
 dotnet restore VHSDecodeDotNet.slnx
 dotnet build VHSDecodeDotNet.slnx -c Release --no-restore
-dotnet test --solution VHSDecodeDotNet.slnx -c Release --no-build --no-restore --minimum-expected-tests 1262
+dotnet test --solution VHSDecodeDotNet.slnx -c Release --no-build --no-restore --minimum-expected-tests 1266
+dotnet test --project tests\VHSDecode.Tests\VHSDecode.Tests.csproj -c Release --no-build --no-restore --coverage --coverage-output coverage.cobertura.xml --coverage-output-format cobertura
 ```
 
 第一条命令用于包含可选的 `ipp-fast` 原生产物；只构建 Exact 时可以省略。
@@ -1795,7 +1809,7 @@ Intel oneAPI。只含二进制的单文件发布会嵌入 `vhsdecode_ipp.dll` �
 notice，不会额外生成许可证 sidecar 文件。只构建 Exact 后端时可以省略原生构建步骤。
 
 当前正式 Release 构建为零警告、零错误。xUnit v3 项目向
-`dotnet test` 和 Visual Studio Test Explorer 暴露 **1,262** 个可独立发现的测试。
+`dotnet test` 和 Visual Studio Test Explorer 暴露 **1,266** 个可独立发现的测试。
 
 <!-- SECTION: usage -->
 

@@ -4,7 +4,7 @@
 
 **[English](README.detailed.md)** | [简体中文](README.detailed.zh-CN.md) | [日本語](README.detailed.ja.md)
 
-<!-- README_SYNC: 2026-08-02.01 -->
+<!-- README_SYNC: 2026-08-03.01 -->
 
 .NET 11 rewrite of the decode-facing parts of
 [`oyvindln/vhs-decode`](https://github.com/oyvindln/vhs-decode), focused on
@@ -2208,6 +2208,22 @@ normalized stderr/log, and ordered `fileLoc` matched in every run. The refreshed
 30-run `current` matrix also produced one hash for every compatibility surface in
 every cell.
 
+### Decoder-local current burst-probe buffers
+
+The `current` chroma phase analyzer now reuses exact-length padded-burst arrays
+from four decoder-local, lock-free slots. The four-slot bound matches the
+existing burst-probe worker cap. Every active sample is overwritten before the
+same SOS filter and fitter run; arithmetic, filter order, worker count,
+cross-field state, and exception ordering are unchanged. Buffers are returned
+on every exit, and no more than four arrays remain retained.
+
+One 80-frame Exact `current --threads 20` baseline/candidate screen was
+wall-neutral at 9.393/9.371 seconds. Process CPU time moved from 74.406 to
+67.922 seconds and peak working set from 435.1 to 430.5 MiB. This single pair
+is retained as CPU/allocation evidence, not a throughput claim, so the full
+performance matrix above is unchanged. Luma TBC, chroma TBC, raw JSON, stdout,
+normalized stderr/log, and zero/default/20-worker determinism all matched.
+
 </details>
 
 <!-- SECTION: build -->
@@ -2232,7 +2248,8 @@ Requirements:
 .\tools\build-ipp-native.ps1
 dotnet restore VHSDecodeDotNet.slnx
 dotnet build VHSDecodeDotNet.slnx -c Release --no-restore
-dotnet test --solution VHSDecodeDotNet.slnx -c Release --no-build --no-restore --minimum-expected-tests 1262
+dotnet test --solution VHSDecodeDotNet.slnx -c Release --no-build --no-restore --minimum-expected-tests 1266
+dotnet test --project tests\VHSDecode.Tests\VHSDecode.Tests.csproj -c Release --no-build --no-restore --coverage --coverage-output coverage.cobertura.xml --coverage-output-format cobertura
 ```
 
 The first command includes the optional `ipp-fast` native artifact; omit it for
@@ -2245,7 +2262,7 @@ deployment computer. Binary-only single-file releases embed
 sidecar license files. An Exact-only build may omit the native build step.
 
 The current formal Release build has zero warnings and errors. The xUnit v3
-project exposes **1,262** independently discoverable tests to both
+project exposes **1,266** independently discoverable tests to both
 `dotnet test` and Visual Studio Test Explorer.
 
 <!-- SECTION: usage -->

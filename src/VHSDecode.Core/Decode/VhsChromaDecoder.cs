@@ -160,9 +160,33 @@ internal sealed record VhsChromaPhaseAnalysis(
 
 internal sealed class VhsChromaCarrierTableCache
 {
+    internal const int BurstProbeBufferCapacity = 4;
     private readonly Lock _gate = new();
+    private readonly double[]?[] _burstProbeBuffers =
+        new double[BurstProbeBufferCapacity][];
     private HeterodyneEntry? _heterodyne;
     private CarrierEntry? _carrier;
+    private int _burstProbeBufferCreationCount;
+
+    internal int BurstProbeBufferCreationCount =>
+        Volatile.Read(ref _burstProbeBufferCreationCount);
+
+    internal int RetainedBurstProbeBufferCount
+    {
+        get
+        {
+            int count = 0;
+            for (int index = 0; index < _burstProbeBuffers.Length; index++)
+            {
+                if (Volatile.Read(ref _burstProbeBuffers[index]) is not null)
+                {
+                    count++;
+                }
+            }
+
+            return count;
+        }
+    }
 
     internal double[][] GetHeterodyne(
         int sampleCount,
@@ -233,6 +257,43 @@ internal sealed class VhsChromaCarrierTableCache
         }
     }
 
+    internal double[] RentBurstProbeBuffer(int length)
+    {
+        ArgumentOutOfRangeException.ThrowIfNegative(length);
+        for (int index = 0; index < _burstProbeBuffers.Length; index++)
+        {
+            double[]? candidate = Volatile.Read(ref _burstProbeBuffers[index]);
+            if (candidate?.Length == length
+                && ReferenceEquals(
+                    Interlocked.CompareExchange(
+                        ref _burstProbeBuffers[index],
+                        null,
+                        candidate),
+                    candidate))
+            {
+                return candidate;
+            }
+        }
+
+        Interlocked.Increment(ref _burstProbeBufferCreationCount);
+        return new double[length];
+    }
+
+    internal void ReturnBurstProbeBuffer(double[] buffer)
+    {
+        ArgumentNullException.ThrowIfNull(buffer);
+        for (int index = 0; index < _burstProbeBuffers.Length; index++)
+        {
+            if (Interlocked.CompareExchange(
+                    ref _burstProbeBuffers[index],
+                    buffer,
+                    null) is null)
+            {
+                return;
+            }
+        }
+    }
+
     private sealed record HeterodyneEntry(
         int SampleCount,
         double FscMHz,
@@ -263,7 +324,8 @@ public static class VhsChromaDecoder
     private const int StartingLine = 16;
     private const double BurstMagnitudeThreshold = 2.5e4;
     private const int BurstCheckSkipLines = 16;
-    private const int MaximumBurstProbeWorkers = 4;
+    private const int MaximumBurstProbeWorkers =
+        VhsChromaCarrierTableCache.BurstProbeBufferCapacity;
     private const double TrackChangeThresholdDegrees = 90.0;
     private const double S16AbsMax = 32767.0;
 
@@ -467,7 +529,7 @@ public static class VhsChromaDecoder
             inputLineLength,
             (lineNumber, phaseRotation, lineScale) =>
                 options.UseCurrentChromaProcessing
-                    ? ProbeUpconvertedBurstCurrent(
+                    ? ProbeUpconvertedBurstCurrentCore(
                         chromaField,
                         heterodyne,
                         phaseRotation,
@@ -480,7 +542,8 @@ public static class VhsChromaDecoder
                         options.OutputLineLength,
                         options.FscMHz * 1_000_000.0,
                         effectiveBurstFilter,
-                        useFloat32Samples)
+                        useFloat32Samples,
+                        burstFilter is null ? carrierTableCache : null)
                     : ProbeUpconvertedBurst(
                         chromaField,
                         heterodyne,
@@ -1383,6 +1446,37 @@ public static class VhsChromaDecoder
         double fscHz,
         Func<double[], double[]>? burstFilter = null,
         bool useFloat32Samples = false)
+        => ProbeUpconvertedBurstCurrentCore(
+            chroma,
+            chromaHeterodyne,
+            phaseRotation,
+            burstStart,
+            burstEnd,
+            burstSin,
+            burstCos,
+            lineNumber,
+            lineOffset,
+            lineLength,
+            fscHz,
+            burstFilter,
+            useFloat32Samples,
+            carrierTableCache: null);
+
+    private static ChromaBurstDemodulationResult ProbeUpconvertedBurstCurrentCore(
+        ReadOnlySpan<double> chroma,
+        IReadOnlyList<double[]> chromaHeterodyne,
+        int phaseRotation,
+        int burstStart,
+        int burstEnd,
+        ReadOnlySpan<double> burstSin,
+        ReadOnlySpan<double> burstCos,
+        int lineNumber,
+        int lineOffset,
+        int lineLength,
+        double fscHz,
+        Func<double[], double[]>? burstFilter,
+        bool useFloat32Samples,
+        VhsChromaCarrierTableCache? carrierTableCache)
     {
         ArgumentOutOfRangeException.ThrowIfNegative(lineOffset);
         ArgumentOutOfRangeException.ThrowIfNegativeOrZero(fscHz);
@@ -1410,44 +1504,53 @@ public static class VhsChromaDecoder
         int paddedEnd = Math.Min(
             chroma.Length,
             lineStart + burstEnd + burstPadding);
-        var paddedBurst = new double[Math.Max(0, paddedEnd - paddedStart)];
-        for (int index = 0; index < paddedBurst.Length; index++)
+        int paddedLength = Math.Max(0, paddedEnd - paddedStart);
+        double[] paddedBurst = carrierTableCache?.RentBurstProbeBuffer(paddedLength)
+            ?? new double[paddedLength];
+        try
         {
-            int sourceIndex = paddedStart + index;
-            float heterodyneSample = (float)heterodyne[sourceIndex];
-            paddedBurst[index] = useFloat32Samples
-                ? (float)(heterodyneSample * (float)chroma[sourceIndex])
-                : heterodyneSample * chroma[sourceIndex];
-        }
+            for (int index = 0; index < paddedBurst.Length; index++)
+            {
+                int sourceIndex = paddedStart + index;
+                float heterodyneSample = (float)heterodyne[sourceIndex];
+                paddedBurst[index] = useFloat32Samples
+                    ? (float)(heterodyneSample * (float)chroma[sourceIndex])
+                    : heterodyneSample * chroma[sourceIndex];
+            }
 
-        double[] filteredPadded = burstFilter?.Invoke(paddedBurst) ?? paddedBurst;
-        int filteredStart = Math.Min(burstPadding, filteredPadded.Length);
-        int filteredEnd = Math.Max(
-            filteredStart,
-            filteredPadded.Length - burstPadding);
-        int globalBurstStart = checked(paddedStart + burstPadding);
-        CurrentChromaBurstFit fit = CurrentChromaBurstFitter.Fit(
-            filteredPadded.AsSpan(
+            double[] filteredPadded = burstFilter?.Invoke(paddedBurst) ?? paddedBurst;
+            int filteredStart = Math.Min(burstPadding, filteredPadded.Length);
+            int filteredEnd = Math.Max(
                 filteredStart,
-                filteredEnd - filteredStart),
-            globalBurstStart,
-            burstSin,
-            burstCos,
-            fscHz);
-        return new ChromaBurstDemodulationResult(
-            fit.PhaseDegrees,
-            PhaseOffsetDegrees: 0.0,
-            fit.Magnitude,
-            fit.I,
-            fit.Q)
+                filteredPadded.Length - burstPadding);
+            int globalBurstStart = checked(paddedStart + burstPadding);
+            CurrentChromaBurstFit fit = CurrentChromaBurstFitter.Fit(
+                filteredPadded.AsSpan(
+                    filteredStart,
+                    filteredEnd - filteredStart),
+                globalBurstStart,
+                burstSin,
+                burstCos,
+                fscHz);
+            return new ChromaBurstDemodulationResult(
+                fit.PhaseDegrees,
+                PhaseOffsetDegrees: 0.0,
+                fit.Magnitude,
+                fit.I,
+                fit.Q)
+            {
+                Start = paddedStart,
+                End = paddedEnd,
+                Center = fit.Center,
+                Amplitude = fit.Amplitude,
+                Dc = fit.Dc,
+                FrequencyHz = fit.FrequencyHz
+            };
+        }
+        finally
         {
-            Start = paddedStart,
-            End = paddedEnd,
-            Center = fit.Center,
-            Amplitude = fit.Amplitude,
-            Dc = fit.Dc,
-            FrequencyHz = fit.FrequencyHz
-        };
+            carrierTableCache?.ReturnBurstProbeBuffer(paddedBurst);
+        }
     }
 
     public static ChromaPhaseSequenceResult GetPhaseRotationSequence(

@@ -123,7 +123,7 @@ public sealed partial class ReadmeLocalizationTests
             "43155200da87c0d49eb37d8ec09b1372075ee8e4",
             "2f21e8ed6018b14561396cc95f1f6828054470b8",
             "11.0.100-preview.6.26359.118",
-            "**1,262**",
+            "**1,266**",
             "--compat-version",
             "current",
             "--dsp-backend",
@@ -148,7 +148,7 @@ public sealed partial class ReadmeLocalizationTests
             "2f21e8ed6018b14561396cc95f1f6828054470b8",
             "v0.4.0-40-g2f21e8ed",
             "11.0.100-preview.6.26359.118",
-            "**1,262**",
+            "**1,266**",
             "<!-- LATEST_PERFORMANCE_RUNS: base=90 current-refresh=30 repeats=3 -->",
             "754",
             "8.319 s",
@@ -542,7 +542,7 @@ public sealed partial class ReadmeLocalizationTests
             "53.003",
             "1.918 GiB",
             "382.9/383.0 MiB",
-            "1,262",
+            "1,266",
             "--use_saved_levels",
             "COMPATIBILITY_EVIDENCE.md"
         ];

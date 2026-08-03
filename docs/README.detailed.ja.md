@@ -4,7 +4,7 @@
 
 [English](README.detailed.md) | [简体中文](README.detailed.zh-CN.md) | **[日本語](README.detailed.ja.md)**
 
-<!-- README_SYNC: 2026-08-02.01 -->
+<!-- README_SYNC: 2026-08-03.01 -->
 
 [`oyvindln/vhs-decode`](https://github.com/oyvindln/vhs-decode) の
 デコード関連部分を .NET 11 で再実装するプロジェクトです。現在は release
@@ -2129,6 +2129,21 @@ time は 14.43 から 13.88 秒へ 3.8% 短縮し、median process CPU time も 
 一致し、更新した 30-run `current` matrix の全 cell でも各 compatibility surface は
 1 hash でした。
 
+### Decoder-local current burst-probe buffer
+
+`current` chroma phase analyzer は、exact-length padded-burst array を 4 個の
+decoder-local lock-free slot から再利用します。4-slot bound は既存 burst-probe
+worker cap と一致します。active sample は毎回すべて上書きしてから同じ SOS filter と
+fitter を実行し、arithmetic、filter order、worker count、cross-field state、exception
+order は変更しません。buffer はすべての exit path で返却され、保持は最大 4 array です。
+
+80-frame Exact `current --threads 20` baseline/candidate short screen の wall time は
+9.393/9.371 秒で実質 neutral でした。process CPU time は 74.406 から 67.922 秒、
+peak working set は 435.1 から 430.5 MiB へ低下しました。この single pair は
+CPU/allocation evidence としてのみ扱い、新しい throughput claim にはしないため、
+上の full performance matrix は変更していません。luma TBC、chroma TBC、raw JSON、
+stdout、normalized stderr/log、zero/default/20-worker determinism はすべて一致しました。
+
 </details>
 
 <!-- SECTION: build -->
@@ -2151,7 +2166,8 @@ time は 14.43 から 13.88 秒へ 3.8% 短縮し、median process CPU time も 
 .\tools\build-ipp-native.ps1
 dotnet restore VHSDecodeDotNet.slnx
 dotnet build VHSDecodeDotNet.slnx -c Release --no-restore
-dotnet test --solution VHSDecodeDotNet.slnx -c Release --no-build --no-restore --minimum-expected-tests 1262
+dotnet test --solution VHSDecodeDotNet.slnx -c Release --no-build --no-restore --minimum-expected-tests 1266
+dotnet test --project tests\VHSDecode.Tests\VHSDecode.Tests.csproj -c Release --no-build --no-restore --coverage --coverage-output coverage.cobertura.xml --coverage-output-format cobertura
 ```
 
 最初の command は optional `ipp-fast` native artifact を含めるためのものです。
@@ -2164,7 +2180,7 @@ third-party notice を埋め込み、license sidecar file は追加しません�
 
 現在の正式な Release build は warning 0、error 0 です。xUnit v3 project は
 `dotnet test` と Visual Studio Test Explorer の両方で個別に検出できる
-**1,262** tests を公開します。
+**1,266** tests を公開します。
 
 <!-- SECTION: usage -->
 
