@@ -61,6 +61,69 @@ public sealed class LibsndfilePcm16SampleLoaderTests
         Assert.Equal(1, loader.CachedReusableDecodedBufferCount);
     }
 
+    [Fact(DisplayName = "libsndfile PCM16 conversion is exact for every value and vector tail")]
+    public void Pcm16ConversionMatchesScalarForEveryValueAndTail()
+    {
+        const int ValueCount = 1 << 16;
+        var source = new short[ValueCount + 7];
+        for (int i = 0; i < source.Length; i++)
+        {
+            source[i] = unchecked((short)(short.MinValue + i));
+        }
+
+        for (int tail = 0; tail < 8; tail++)
+        {
+            int length = ValueCount + tail;
+            var actual = new double[length];
+            LibsndfilePcm16SampleLoader.ConvertPcm16ToDouble(
+                source.AsSpan(0, length),
+                actual);
+
+            for (int i = 0; i < actual.Length; i++)
+            {
+                Assert.Equal((double)source[i], actual[i]);
+            }
+        }
+    }
+
+    [Fact(DisplayName = "libsndfile PCM16 conversion preserves short-span boundaries")]
+    public void Pcm16ConversionPreservesShortSpanBoundaries()
+    {
+        const double Sentinel = 123456.75;
+        for (int length = 0; length <= 15; length++)
+        {
+            var source = new short[length + 2];
+            var destination = new double[length + 2];
+            Array.Fill(destination, Sentinel);
+            for (int i = 0; i < length; i++)
+            {
+                source[i + 1] = unchecked((short)(short.MinValue + (i * 4099)));
+            }
+
+            LibsndfilePcm16SampleLoader.ConvertPcm16ToDouble(
+                source.AsSpan(1, length),
+                destination.AsSpan(1, length));
+
+            Assert.Equal(Sentinel, destination[0]);
+            Assert.Equal(Sentinel, destination[^1]);
+            for (int i = 0; i < length; i++)
+            {
+                Assert.Equal((double)source[i + 1], destination[i + 1]);
+            }
+        }
+    }
+
+    [Fact(DisplayName = "libsndfile PCM16 conversion rejects a short destination")]
+    public void Pcm16ConversionRejectsShortDestination()
+    {
+        var exception = Assert.Throws<ArgumentException>(() =>
+            LibsndfilePcm16SampleLoader.ConvertPcm16ToDouble(
+                new short[] { short.MinValue, short.MaxValue },
+                new double[1]));
+
+        Assert.Equal("destination", exception.ParamName);
+    }
+
     [Fact(DisplayName = "libsndfile reusable reads never alias active leases")]
     public void NativeReusableReadsNeverAliasActiveLeases()
     {

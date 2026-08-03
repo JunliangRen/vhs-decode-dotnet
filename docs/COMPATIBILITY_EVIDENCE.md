@@ -2315,6 +2315,31 @@ producing the luma maximum difference of 26,666 and the only raw-JSON property
 difference; field count, `seqNo`, stdout, normalized stderr, and every ordered
 `fileLoc` remained equal. This is not an Exact compatibility claim.
 
+### Vectorized native PCM16 ingest
+
+The native libsndfile RF loader now converts PCM16 input to `double` eight
+samples at a time on AVX2 systems, with the original scalar conversion retained
+for vector tails and non-AVX2 hosts. Signed 16-bit integers are exactly
+representable as `double`; the implementation adds no scaling, FMA, reduction,
+sample reordering, or extra long-lived buffer. A standard xUnit v3 test checks
+all 65,536 PCM16 values and every vector tail. All 31 loader tests pass under
+native, AVX2-disabled, and all-intrinsics-disabled execution. The zero-warning
+Release build and all 1,299 tests passed.
+
+Twelve short Exact baseline/candidate gates covered v0.4.0 and `current` at
+zero, default-five, and 20 workers. Luma, chroma, raw JSON, stdout,
+timing-normalized stderr, timestamp-normalized logs, every ordered `fileLoc`,
+and cross-thread determinism matched. Three additional fixed 100-frame
+IPP-fast/current 20-worker pairs matched the same surfaces. Their
+decoder-reported baseline times were 5.02/5.00/5.01 seconds and candidate times
+were 4.91/5.22/4.96 seconds. The two candidate wins, one loss, and 5.01-to-5.03
+second arithmetic-mean change classify end-to-end throughput as near-neutral.
+The isolated conversion median moved from 72.241 to 44.311 ms (38.66% lower,
+1.630x throughput). The refreshed 60-run public matrix was
+deterministic within each profile/backend; its IPP-fast/current 20-worker cell
+was 2.378 seconds, 7.735x faster than the profile-matched Python PR341
+measurement on the fixed private window.
+
 `ffmpeg` and `ffprobe` must be available on `PATH` for RF container inputs
 outside the narrowly gated direct 40 kHz mono PCM16 raw-FLAC route. Direct
 raw-FLAC RF input, default HiFi FLAC output, and LD `--write-test-ldf` use the

@@ -36,7 +36,7 @@ upstream release `v0.4.0`、commit
 - VHS family には VHS/S-VHS、Betamax、Video8/Hi8、U-matic、Type C、EIAJ、
   upstream が対応する PAL/NTSC variant が含まれます。
 - TBC utility、ダブルクリック GUI、開発者向け plot window は対象外です。
-- Visual Studio 2026 の `.slnx` には **1,296** 件の標準 xUnit v3 test があり、
+- Visual Studio 2026 の `.slnx` には **1,299** 件の標準 xUnit v3 test があり、
   Test Explorer と `dotnet test` の両方で実行できます。
 
 <!-- SECTION: start -->
@@ -94,34 +94,35 @@ CVBS、LaserDisc、HiFi は現在 `ipp-fast` を拒否するため、これら�
 
 次の表は同じ private local 40 MHz PAL VHS `.ldf` fixture と同じ 40-frame
 window を使用し、source filename は公開しません。2026-08-04、main
-`9042d9a` を基にしたこの branch candidate で、影響を受ける 10 個の `current`
-cell を 3 回ずつ interleaved 測定しました（30 Release run）。Python と変更のない
-v0.4.0 .NET 列は同じ window の audited measurement を維持します。互換性判定は
-速度とは別に行います。
+`bb3d350` を基にしたこの branch candidate で、20 個すべての .NET cell を 3 回ずつ
+interleaved 測定しました（60 Release run）。Python 列は同じ window の audited
+measurement を維持します。互換性判定は速度とは別に行います。
 
 <!-- LATEST_PERFORMANCE_BEGIN -->
 | CLI mode（workers） | Python v0.4.0 | Python PR341 | Exact + v0.4.0 | Exact + current | IPP-fast + v0.4.0 | IPP-fast + current |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| default（5） | 15.207 s | 16.780 s | 4.332 s / 3.510x | 5.067 s / 3.312x | 3.414 s / 4.454x | 3.274 s / 5.125x |
-| `--threads 1` | 17.694 s | 19.414 s | 9.867 s / 1.793x | 11.990 s / 1.619x | 7.163 s / 2.470x | 8.069 s / 2.406x |
-| `--threads 5` | 15.719 s | 17.801 s | 4.268 s / 3.683x | 5.216 s / 3.413x | 3.530 s / 4.453x | 3.203 s / 5.558x |
-| `--threads 10` | 16.037 s | 18.266 s | 3.579 s / 4.481x | 4.328 s / 4.221x | 3.007 s / 5.333x | 2.824 s / 6.469x |
-| `--threads 20` | 16.405 s | 18.395 s | 2.951 s / 5.559x | 3.634 s / 5.062x | 2.618 s / 6.267x | 2.443 s / 7.530x |
+| default（5） | 15.207 s | 16.780 s | 4.454 s / 3.414x | 4.954 s / 3.387x | 3.619 s / 4.202x | 3.463 s / 4.845x |
+| `--threads 1` | 17.694 s | 19.414 s | 9.931 s / 1.782x | 11.898 s / 1.632x | 7.198 s / 2.458x | 7.989 s / 2.430x |
+| `--threads 5` | 15.719 s | 17.801 s | 4.499 s / 3.494x | 4.893 s / 3.638x | 3.612 s / 4.352x | 3.445 s / 5.167x |
+| `--threads 10` | 16.037 s | 18.266 s | 3.727 s / 4.303x | 4.341 s / 4.207x | 3.036 s / 5.282x | 2.762 s / 6.612x |
+| `--threads 20` | 16.405 s | 18.395 s | 3.045 s / 5.387x | 3.828 s / 4.805x | 2.751 s / 5.964x | 2.378 s / 7.735x |
 <!-- LATEST_PERFORMANCE_END -->
-<!-- LATEST_PERFORMANCE_RUNS: current-refresh=30 repeats=3 -->
+<!-- LATEST_PERFORMANCE_RUNS: dotnet-refresh=60 repeats=3 -->
 
 各 .NET cell は wall-time median と profile が対応する Python 列に対する
-speedup の順で、default は **5 workers** です。固定された `current` CTI reciprocal
-は、sample ごとの integer division と remainder の代わりに process-wide の
-2,048-entry mantissa table を使います。実際の field size の CTI microbenchmark は
-1.590 から 1.401 ms へ 11.88% 短縮（throughput 1.135x）、fixed 100-frame
-`ipp-fast + current --threads 20` の 3-pair A/B は 5.14 から 5.07 秒へ 1.36% 短縮
-（throughput 1.014x）しました。
+speedup の順で、default は **5 workers** です。native PCM16 ingest は AVX2 で
+8 個の signed sample を一度に exact conversion し、同じ scalar tail/fallback を
+維持します。conversion microbenchmark は 72.241 から 44.311 ms へ 38.66% 短縮
+（throughput 1.630x）しました。fixed 100-frame
+`ipp-fast + current --threads 20` の 3-pair A/B median は 5.01 から 4.96 秒へ
+変化しましたが、2 win/1 loss と candidate variance のため end-to-end result は
+near-neutral とし、一般的な speedup claim には使用しません。
 
-更新した 30 個の `current` cell は backend ごとに deterministic でした。100-frame
-A/B は luma、chroma、raw JSON、stdout、timing-normalized stderr、
-timestamp-normalized log で一致しました。IPP-fast は明示的な numerically-close
-backend のままであり、artifact が Exact と byte-for-byte 同一とは主張しません。
+更新した 60 個の .NET cell は profile/backend ごとに deterministic でした。
+strict baseline/candidate gate も両 profile の zero/default/20 workers で luma、
+chroma、raw JSON、stdout、timing-normalized stderr、timestamp-normalized log、
+ordered `fileLoc` が一致しました。IPP-fast は明示的な numerically-close backend の
+ままであり、artifact が Exact と byte-for-byte 同一とは主張しません。
 Python v0.4.0 は nonzero worker
 count で output hash が変わる場合があるため、strict oracle は引き続き Python
 v0.4.0 `g4315520 --threads 0` です。完全な command、hardware、hash、memory
@@ -157,7 +158,7 @@ path を維持します。
 dotnet restore VHSDecodeDotNet.slnx
 dotnet build VHSDecodeDotNet.slnx -c Release --no-restore
 dotnet test --solution VHSDecodeDotNet.slnx -c Release `
-  --no-build --no-restore --minimum-expected-tests 1296
+  --no-build --no-restore --minimum-expected-tests 1299
 ```
 
 Visual Studio 2026 で `VHSDecodeDotNet.slnx` を開くと、build、debug、

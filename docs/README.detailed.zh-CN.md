@@ -336,24 +336,37 @@ IPP-fast v0.4.0 和 IPP-fast `current`。文件名不会公开。每个 .NET 单
 <!-- LATEST_PERFORMANCE_BEGIN -->
 | CLI 模式（workers） | Python v0.4.0 | Python PR341 | Exact + v0.4.0 | Exact + current | IPP-fast + v0.4.0 | IPP-fast + current |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| 默认（5） | 15.207 s | 16.780 s | 4.332 s / 3.510x / 71.51% | 5.067 s / 3.312x / 69.80% | 3.414 s / 4.454x / 77.55% | 3.274 s / 5.125x / 80.49% |
-| `--threads 1` | 17.694 s | 19.414 s | 9.867 s / 1.793x / 44.24% | 11.990 s / 1.619x / 38.24% | 7.163 s / 2.470x / 59.52% | 8.069 s / 2.406x / 58.44% |
-| `--threads 5` | 15.719 s | 17.801 s | 4.268 s / 3.683x / 72.85% | 5.216 s / 3.413x / 70.70% | 3.530 s / 4.453x / 77.54% | 3.203 s / 5.558x / 82.01% |
-| `--threads 10` | 16.037 s | 18.266 s | 3.579 s / 4.481x / 77.68% | 4.328 s / 4.221x / 76.31% | 3.007 s / 5.333x / 81.25% | 2.824 s / 6.469x / 84.54% |
-| `--threads 20` | 16.405 s | 18.395 s | 2.951 s / 5.559x / 82.01% | 3.634 s / 5.062x / 80.24% | 2.618 s / 6.267x / 84.04% | 2.443 s / 7.530x / 86.72% |
+| 默认（5） | 15.207 s | 16.780 s | 4.454 s / 3.414x / 70.71% | 4.954 s / 3.387x / 70.48% | 3.619 s / 4.202x / 76.20% | 3.463 s / 4.845x / 79.36% |
+| `--threads 1` | 17.694 s | 19.414 s | 9.931 s / 1.782x / 43.87% | 11.898 s / 1.632x / 38.71% | 7.198 s / 2.458x / 59.32% | 7.989 s / 2.430x / 58.85% |
+| `--threads 5` | 15.719 s | 17.801 s | 4.499 s / 3.494x / 71.38% | 4.893 s / 3.638x / 72.51% | 3.612 s / 4.352x / 77.02% | 3.445 s / 5.167x / 80.65% |
+| `--threads 10` | 16.037 s | 18.266 s | 3.727 s / 4.303x / 76.76% | 4.341 s / 4.207x / 76.23% | 3.036 s / 5.282x / 81.07% | 2.762 s / 6.612x / 84.88% |
+| `--threads 20` | 16.405 s | 18.395 s | 3.045 s / 5.387x / 81.44% | 3.828 s / 4.805x / 79.19% | 2.751 s / 5.964x / 83.23% | 2.378 s / 7.735x / 87.07% |
 <!-- LATEST_PERFORMANCE_END -->
-<!-- LATEST_PERFORMANCE_RUNS: current-refresh=30 repeats=3 -->
+<!-- LATEST_PERFORMANCE_RUNS: dotnet-refresh=60 repeats=3 -->
 
 Python 测量于 2026-08-02 在 main commit
-`c92af1dfd0f96cd7f2d49f3219fb428d0f4e0865` 上完成审计。未受影响的 v0.4.0
-.NET 两列沿用同一窗口的已审计测量值。2026-08-04，基于 main `9042d9a` 的本分支
-候选重新测量了五个 Exact `current` 与五个 IPP-fast `current` 单元格，每格三次
-交错运行，共 30 次 Release 运行。测试机为 Intel Core Ultra 7 265K（20 个逻辑
+`c92af1dfd0f96cd7f2d49f3219fb428d0f4e0865` 上完成审计。2026-08-04，基于 main
+`bb3d350` 的本分支候选重新测量了全部 20 个 .NET 单元格，每格三次交错运行，共
+60 次 Release 运行。测试机为 Intel Core Ultra 7 265K（20 个逻辑
 处理器）、Windows 11 build 26220，以及 .NET SDK/runtime
-`11.0.100-preview.6.26359.118`。各后端在所有 worker 数与重复运行中都只产生一套
-亮度、色度、原始 JSON 和 stdout hash。
+`11.0.100-preview.6.26359.118`。各 profile/后端在所有 worker 数与重复运行中都只
+产生一套亮度、色度、原始 JSON、stdout、归一化 stderr/日志和有序 `fileLoc` hash。
 
-本轮 `current` CTI 候选把固定 RCPSS 尾数近似预计算为一张进程级 2,048 项只读表
+本轮候选使用 AVX2 将原生 libsndfile PCM16 输入每 8 个样本转换为 `double`。标量
+尾部和非 AVX2 回退完全保留原有有符号整数转换；没有增加缓冲区，也没有乘法、归约、
+FMA 或样本重排。聚焦 xUnit v3 测试覆盖全部 65,536 个 PCM16 值和每种向量尾部；
+31 项加载器测试在原生、禁用 AVX2 和禁用全部 Intrinsic 时均全部通过。八对转换
+微基准的中位数从 72.241 降至 44.311 ms（缩短 38.66%，吞吐 1.630x）。
+固定 100 帧 `ipp-fast + current --threads 20` 三对交错 A/B 的基线分别为
+5.02/5.00/5.01 秒，候选分别为 4.91/5.22/4.96 秒。候选两胜一负；中位数从 5.01
+变为 4.96 秒，但算术均值从 5.01 变为 5.03 秒。因此这组有噪声的端到端结果归类为
+近似持平，不作为普遍提速声明。全部六次运行的亮度、色度、原始
+JSON、stdout、耗时归一化 stderr、时间戳归一化日志和有序 `fileLoc` 均一致。
+另有 12 个严格 Exact 基线/候选门禁覆盖两个 profile 的零、默认和 20 workers，
+包括跨线程确定性也完全一致。本轮 IPP-fast/current 20-worker 表格单元格为
+2.378 秒，在该固定窗口上是对应 Python PR341 测量的 7.735x。
+
+前一轮 `current` CTI 优化把固定 RCPSS 尾数近似预计算为一张进程级 2,048 项只读表
 （8 KiB 数据），在不改变转换点和任何算术结果的前提下，消除了逐样本整数除法与
 取模。21 对实际场尺寸 CTI 微基准从 1.590 降至 1.401 ms（缩短 11.88%，吞吐
 1.135x）。固定 100 帧 `current --dsp-backend ipp-fast --threads 20` 窗口上，每个
@@ -1879,7 +1892,7 @@ stdout SHA-256、归一化 stderr、归一化日志和全部有序 `fileLoc` 均
 .\tools\build-ipp-native.ps1
 dotnet restore VHSDecodeDotNet.slnx
 dotnet build VHSDecodeDotNet.slnx -c Release --no-restore
-dotnet test --solution VHSDecodeDotNet.slnx -c Release --no-build --no-restore --minimum-expected-tests 1296
+dotnet test --solution VHSDecodeDotNet.slnx -c Release --no-build --no-restore --minimum-expected-tests 1299
 dotnet test --project tests\VHSDecode.Tests\VHSDecode.Tests.csproj -c Release --no-build --no-restore --coverage --coverage-output coverage.cobertura.xml --coverage-output-format cobertura
 ```
 
@@ -1891,7 +1904,7 @@ Intel oneAPI。只含二进制的单文件发布会嵌入 `vhsdecode_ipp.dll` �
 notice，不会额外生成许可证 sidecar 文件。只构建 Exact 后端时可以省略原生构建步骤。
 
 当前正式 Release 构建为零警告、零错误。xUnit v3 项目向
-`dotnet test` 和 Visual Studio Test Explorer 暴露 **1,296** 个可独立发现的测试。
+`dotnet test` 和 Visual Studio Test Explorer 暴露 **1,299** 个可独立发现的测试。
 
 <!-- SECTION: usage -->
 

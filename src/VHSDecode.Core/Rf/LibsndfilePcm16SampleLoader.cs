@@ -1,5 +1,7 @@
 using System.Buffers;
 using System.ComponentModel;
+using System.Runtime.Intrinsics;
+using System.Runtime.Intrinsics.X86;
 using System.Runtime.InteropServices;
 
 namespace VHSDecode.Core.Rf;
@@ -165,16 +167,51 @@ internal sealed class LibsndfilePcm16SampleLoader : IReusableRfSampleLoader, IDi
             double[] output = reuseDecodedBuffer
                 ? TakeDecodedBuffer(readLength)
                 : GC.AllocateUninitializedArray<double>(readLength);
-            for (int i = 0; i < output.Length; i++)
-            {
-                output[i] = samples[i];
-            }
+            ConvertPcm16ToDouble(samples.AsSpan(0, readLength), output);
 
             return output;
         }
         finally
         {
             ArrayPool<short>.Shared.Return(samples);
+        }
+    }
+
+    internal static unsafe void ConvertPcm16ToDouble(
+        ReadOnlySpan<short> source,
+        Span<double> destination)
+    {
+        if (destination.Length < source.Length)
+        {
+            throw new ArgumentException(
+                "PCM16 conversion destination is shorter than the source.",
+                nameof(destination));
+        }
+
+        int index = 0;
+        if (Avx2.IsSupported)
+        {
+            fixed (short* sourcePointer = source)
+            fixed (double* destinationPointer = destination)
+            {
+                int vectorizedEnd = source.Length - (source.Length % 8);
+                for (; index < vectorizedEnd; index += 8)
+                {
+                    var integers = Avx2.ConvertToVector256Int32(
+                        Sse2.LoadVector128(sourcePointer + index));
+                    Avx.Store(
+                        destinationPointer + index,
+                        Avx.ConvertToVector256Double(integers.GetLower()));
+                    Avx.Store(
+                        destinationPointer + index + 4,
+                        Avx.ConvertToVector256Double(integers.GetUpper()));
+                }
+            }
+        }
+
+        for (; index < source.Length; index++)
+        {
+            destination[index] = source[index];
         }
     }
 

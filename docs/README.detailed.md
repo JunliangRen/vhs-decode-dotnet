@@ -414,25 +414,45 @@ speedup, and wall-time reduction against its profile-matched Python column:
 <!-- LATEST_PERFORMANCE_BEGIN -->
 | CLI mode (workers) | Python v0.4.0 | Python PR341 | Exact + v0.4.0 | Exact + current | IPP-fast + v0.4.0 | IPP-fast + current |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| default (5) | 15.207 s | 16.780 s | 4.332 s / 3.510x / 71.51% | 5.067 s / 3.312x / 69.80% | 3.414 s / 4.454x / 77.55% | 3.274 s / 5.125x / 80.49% |
-| `--threads 1` | 17.694 s | 19.414 s | 9.867 s / 1.793x / 44.24% | 11.990 s / 1.619x / 38.24% | 7.163 s / 2.470x / 59.52% | 8.069 s / 2.406x / 58.44% |
-| `--threads 5` | 15.719 s | 17.801 s | 4.268 s / 3.683x / 72.85% | 5.216 s / 3.413x / 70.70% | 3.530 s / 4.453x / 77.54% | 3.203 s / 5.558x / 82.01% |
-| `--threads 10` | 16.037 s | 18.266 s | 3.579 s / 4.481x / 77.68% | 4.328 s / 4.221x / 76.31% | 3.007 s / 5.333x / 81.25% | 2.824 s / 6.469x / 84.54% |
-| `--threads 20` | 16.405 s | 18.395 s | 2.951 s / 5.559x / 82.01% | 3.634 s / 5.062x / 80.24% | 2.618 s / 6.267x / 84.04% | 2.443 s / 7.530x / 86.72% |
+| default (5) | 15.207 s | 16.780 s | 4.454 s / 3.414x / 70.71% | 4.954 s / 3.387x / 70.48% | 3.619 s / 4.202x / 76.20% | 3.463 s / 4.845x / 79.36% |
+| `--threads 1` | 17.694 s | 19.414 s | 9.931 s / 1.782x / 43.87% | 11.898 s / 1.632x / 38.71% | 7.198 s / 2.458x / 59.32% | 7.989 s / 2.430x / 58.85% |
+| `--threads 5` | 15.719 s | 17.801 s | 4.499 s / 3.494x / 71.38% | 4.893 s / 3.638x / 72.51% | 3.612 s / 4.352x / 77.02% | 3.445 s / 5.167x / 80.65% |
+| `--threads 10` | 16.037 s | 18.266 s | 3.727 s / 4.303x / 76.76% | 4.341 s / 4.207x / 76.23% | 3.036 s / 5.282x / 81.07% | 2.762 s / 6.612x / 84.88% |
+| `--threads 20` | 16.405 s | 18.395 s | 3.045 s / 5.387x / 81.44% | 3.828 s / 4.805x / 79.19% | 2.751 s / 5.964x / 83.23% | 2.378 s / 7.735x / 87.07% |
 <!-- LATEST_PERFORMANCE_END -->
-<!-- LATEST_PERFORMANCE_RUNS: current-refresh=30 repeats=3 -->
+<!-- LATEST_PERFORMANCE_RUNS: dotnet-refresh=60 repeats=3 -->
 
 The Python measurements were audited on 2026-08-02 using main commit
-`c92af1dfd0f96cd7f2d49f3219fb428d0f4e0865`. The unchanged v0.4.0 .NET columns
-retain their audited same-window measurements. On 2026-08-04, the five Exact
-`current` and five IPP-fast `current` cells were refreshed from this branch
-candidate based on main `9042d9a`, with three interleaved runs per cell for 30
-Release runs. The host was an Intel Core Ultra 7 265K with 20 logical
+`c92af1dfd0f96cd7f2d49f3219fb428d0f4e0865`. On 2026-08-04, all 20 .NET cells
+were refreshed from this branch candidate based on main `bb3d350`, with three
+interleaved runs per cell for 60 Release runs. The host was an Intel Core Ultra
+7 265K with 20 logical
 processors, Windows 11 build 26220, and .NET SDK/runtime
-`11.0.100-preview.6.26359.118`. Each backend produced one luma, chroma, raw-JSON,
-and stdout hash across every worker count and repetition.
+`11.0.100-preview.6.26359.118`. Each profile/backend produced one luma, chroma,
+raw-JSON, stdout, normalized-stderr/log, and ordered-`fileLoc` hash across every
+worker count and repetition.
 
-The current CTI candidate precomputes the pinned RCPSS mantissa approximation
+This candidate converts native libsndfile PCM16 input to `double` eight samples
+at a time with AVX2. The scalar tail and non-AVX2 fallback retain the original
+signed integer conversion exactly; no extra buffer, multiply, reduction, FMA,
+or sample reordering is introduced. A focused xUnit v3 test covers all 65,536
+PCM16 values and every vector tail; all 31 loader tests pass under native,
+AVX2-disabled, and all-intrinsics-disabled execution. Eight paired
+conversion-microbenchmark runs moved the median from 72.241 to 44.311 ms
+(38.66% lower, 1.630x throughput).
+Three interleaved fixed 100-frame `ipp-fast + current --threads 20` pairs had
+baseline times of 5.02/5.00/5.01 seconds and candidate times of
+4.91/5.22/4.96 seconds. The candidate won two pairs and lost one; its median
+moved from 5.01 to 4.96 seconds while its arithmetic mean moved from 5.01 to
+5.03 seconds. This noisy end-to-end result is classified as near-neutral, not
+as a general speed claim. Luma, chroma, raw JSON, stdout, timing-normalized stderr,
+timestamp-normalized logs, and ordered `fileLoc` matched in all six runs.
+Twelve strict Exact baseline/candidate gates also matched both profiles at
+zero, default, and 20 workers, including cross-thread determinism. The refreshed
+IPP-fast/current 20-worker matrix cell is 2.378 seconds, 7.735x faster than the
+profile-matched Python PR341 measurement on this fixed window.
+
+The preceding current CTI optimization precomputes the pinned RCPSS mantissa approximation
 into one process-wide 2,048-entry read-only table (8 KiB of payload), replacing
 integer division and remainder in the per-sample hot path without changing any
 conversion point or arithmetic result. A 21-pair production-sized CTI
@@ -2345,7 +2365,7 @@ Requirements:
 .\tools\build-ipp-native.ps1
 dotnet restore VHSDecodeDotNet.slnx
 dotnet build VHSDecodeDotNet.slnx -c Release --no-restore
-dotnet test --solution VHSDecodeDotNet.slnx -c Release --no-build --no-restore --minimum-expected-tests 1296
+dotnet test --solution VHSDecodeDotNet.slnx -c Release --no-build --no-restore --minimum-expected-tests 1299
 dotnet test --project tests\VHSDecode.Tests\VHSDecode.Tests.csproj -c Release --no-build --no-restore --coverage --coverage-output coverage.cobertura.xml --coverage-output-format cobertura
 ```
 
@@ -2359,7 +2379,7 @@ deployment computer. Binary-only single-file releases embed
 sidecar license files. An Exact-only build may omit the native build step.
 
 The current formal Release build has zero warnings and errors. The xUnit v3
-project exposes **1,296** independently discoverable tests to both
+project exposes **1,299** independently discoverable tests to both
 `dotnet test` and Visual Studio Test Explorer.
 
 <!-- SECTION: usage -->
