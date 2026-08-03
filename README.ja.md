@@ -36,7 +36,7 @@ upstream release `v0.4.0`、commit
 - VHS family には VHS/S-VHS、Betamax、Video8/Hi8、U-matic、Type C、EIAJ、
   upstream が対応する PAL/NTSC variant が含まれます。
 - TBC utility、ダブルクリック GUI、開発者向け plot window は対象外です。
-- Visual Studio 2026 の `.slnx` には **1,273** 件の標準 xUnit v3 test があり、
+- Visual Studio 2026 の `.slnx` には **1,283** 件の標準 xUnit v3 test があり、
   Test Explorer と `dotnet test` の両方で実行できます。
 
 <!-- SECTION: start -->
@@ -98,18 +98,30 @@ window を全 run で使用します。source filename は公開しません。�
 median が基礎です。2026-08-03、bounded ACC segment と Super-Gaussian FFT の
 parallelization 後の final cap-12 branch candidate で全 `current` cell を 3 回ずつ
 再測定しました。Python と .NET v0.4.0 cell は従来の audited value を維持します。
-互換性判定は速度とは別に行います。
+さらに mixed-radix Super-Gaussian transform を IPP DFT32 に移した後、15 回の
+final-candidate run で `IPP-fast + current` 列を更新しました。互換性判定は速度とは
+別に行います。
 
 <!-- LATEST_PERFORMANCE_BEGIN -->
 | CLI mode（workers） | Python v0.4.0 | Python PR341 | Exact + v0.4.0 | Exact + current | IPP-fast + v0.4.0 | IPP-fast + current |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| default（5） | 15.207 s | 16.780 s | 4.389 s / 3.465x | 7.030 s / 2.387x | 3.609 s / 4.213x | 5.946 s / 2.822x |
-| `--threads 1` | 17.694 s | 19.414 s | 10.065 s / 1.758x | 13.871 s / 1.400x | 7.215 s / 2.453x | 11.301 s / 1.718x |
-| `--threads 5` | 15.719 s | 17.801 s | 4.282 s / 3.671x | 7.428 s / 2.396x | 3.568 s / 4.406x | 5.816 s / 3.061x |
-| `--threads 10` | 16.037 s | 18.266 s | 3.494 s / 4.589x | 6.040 s / 3.024x | 3.098 s / 5.177x | 5.190 s / 3.519x |
-| `--threads 20` | 16.405 s | 18.395 s | 3.235 s / 5.071x | 5.118 s / 3.594x | 2.654 s / 6.182x | 4.713 s / 3.903x |
+| default（5） | 15.207 s | 16.780 s | 4.389 s / 3.465x | 7.030 s / 2.387x | 3.609 s / 4.213x | 3.801 s / 4.415x |
+| `--threads 1` | 17.694 s | 19.414 s | 10.065 s / 1.758x | 13.871 s / 1.400x | 7.215 s / 2.453x | 9.527 s / 2.038x |
+| `--threads 5` | 15.719 s | 17.801 s | 4.282 s / 3.671x | 7.428 s / 2.396x | 3.568 s / 4.406x | 3.583 s / 4.968x |
+| `--threads 10` | 16.037 s | 18.266 s | 3.494 s / 4.589x | 6.040 s / 3.024x | 3.098 s / 5.177x | 3.027 s / 6.035x |
+| `--threads 20` | 16.405 s | 18.395 s | 3.235 s / 5.071x | 5.118 s / 3.594x | 2.654 s / 6.182x | 2.545 s / 7.229x |
 <!-- LATEST_PERFORMANCE_END -->
-<!-- LATEST_PERFORMANCE_RUNS: base=90 current-refresh=30 repeats=3 -->
+<!-- LATEST_PERFORMANCE_RUNS: base=90 current-refresh=30 ipp-current-refresh=15 repeats=3 -->
+
+採用した IPP candidate は、`ipp-fast + current` の 356400-point managed float32
+transform だけを arbitrary-length IPP DFT32 に置き換えます。同じ private local
+PAL VHS sample の fixed 200-frame `--threads 20` pair では wall time が `10.815`
+から `9.470` 秒（12.43% 短縮、throughput 1.142x）、process CPU time が
+`65.797` から `51.047` 秒へ低下し、peak working set も 1.7 MiB 減少しました。
+luma と raw JSON は byte-identical です。1 億 4210.2 万 chroma sample の 0.1627%
+に bit difference がありましたが、全 sample の 99.99987% は差 1 以下、RMSE は
+0.063 で、documented approximate `ipp-fast` contract 内です。別の real-sample
+Exact v0.4.0/`current` check は両方とも 9 gate 全一致でした。
 
 その後の 80-frame Exact `current --threads 20` short screen では、上の full matrix を
 維持しています。decoder-local burst-probe buffer reuse の wall time は実質 neutral
@@ -147,7 +159,8 @@ speedup の順です。`1.000x` 未満は Python より遅いことを示しま�
 PR341 は merge commit `2f21e8ed6018b14561396cc95f1f6828054470b8` で、
 `current` の upstream peer です。default は実際に **5 workers** です。matrix
 は 30 個の mode/profile cell を 3 回ずつ繰り返した 90 run です。更新した 10 個の
-`current` cell は final candidate の interleaved run 30 回を追加しました。
+`current` cell は final candidate の interleaved run 30 回、final IPP DFT32 列は
+さらに 15 run を追加しました。
 
 各 .NET profile と Python PR341 は mode ごとに 1 つの deterministic hash set
 だけを生成しました。Python v0.4.0 は各 default/nonzero mode の 3 run で
@@ -191,7 +204,7 @@ path を維持します。
 dotnet restore VHSDecodeDotNet.slnx
 dotnet build VHSDecodeDotNet.slnx -c Release --no-restore
 dotnet test --solution VHSDecodeDotNet.slnx -c Release `
-  --no-build --no-restore --minimum-expected-tests 1273
+  --no-build --no-restore --minimum-expected-tests 1283
 ```
 
 Visual Studio 2026 で `VHSDecodeDotNet.slnx` を開くと、build、debug、

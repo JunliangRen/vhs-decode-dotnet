@@ -207,10 +207,10 @@ positive IPP non-Intel vendor warning is accepted only when the reported
 feature mask includes SSE4.2. The backend loads the statically linked
 `vhsdecode_ipp.dll`, reports the IPP version and selected ISA, and fails clearly
 if the bridge, ABI, or CPU is unavailable. It never silently falls back to
-`exact`. In v1, only the VHS real-RF FFT stage is routed through IPP. CVBS, LD,
-and HiFi reject `ipp-fast` as unsupported instead of quietly benchmarking
-their Exact kernels; IIR/SOS and HiFi/LD acceleration are staged follow-up
-work, not active paths.
+`exact`. In v1, IPP routing is limited to the VHS real-RF FFT and, under the
+`current` profile, the color-under Super-Gaussian DFT. CVBS, LD, and HiFi reject
+`ipp-fast` as unsupported instead of quietly benchmarking their Exact kernels;
+IIR/SOS and HiFi/LD acceleration are staged follow-up work, not active paths.
 
 `ipp-fast` is a numerically close performance mode, not a byte-compatibility
 mode. Different FFT and vector-math evaluation can change floating-point bits
@@ -408,13 +408,13 @@ speedup, and wall-time reduction against its profile-matched Python column:
 <!-- LATEST_PERFORMANCE_BEGIN -->
 | CLI mode (workers) | Python v0.4.0 | Python PR341 | Exact + v0.4.0 | Exact + current | IPP-fast + v0.4.0 | IPP-fast + current |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| default (5) | 15.207 s | 16.780 s | 4.389 s / 3.465x / 71.14% | 7.030 s / 2.387x / 58.10% | 3.609 s / 4.213x / 76.27% | 5.946 s / 2.822x / 64.57% |
-| `--threads 1` | 17.694 s | 19.414 s | 10.065 s / 1.758x / 43.11% | 13.871 s / 1.400x / 28.55% | 7.215 s / 2.453x / 59.23% | 11.301 s / 1.718x / 41.79% |
-| `--threads 5` | 15.719 s | 17.801 s | 4.282 s / 3.671x / 72.76% | 7.428 s / 2.396x / 58.27% | 3.568 s / 4.406x / 77.30% | 5.816 s / 3.061x / 67.33% |
-| `--threads 10` | 16.037 s | 18.266 s | 3.494 s / 4.589x / 78.21% | 6.040 s / 3.024x / 66.93% | 3.098 s / 5.177x / 80.68% | 5.190 s / 3.519x / 71.59% |
-| `--threads 20` | 16.405 s | 18.395 s | 3.235 s / 5.071x / 80.28% | 5.118 s / 3.594x / 72.18% | 2.654 s / 6.182x / 83.82% | 4.713 s / 3.903x / 74.38% |
+| default (5) | 15.207 s | 16.780 s | 4.389 s / 3.465x / 71.14% | 7.030 s / 2.387x / 58.10% | 3.609 s / 4.213x / 76.27% | 3.801 s / 4.415x / 77.35% |
+| `--threads 1` | 17.694 s | 19.414 s | 10.065 s / 1.758x / 43.11% | 13.871 s / 1.400x / 28.55% | 7.215 s / 2.453x / 59.23% | 9.527 s / 2.038x / 50.93% |
+| `--threads 5` | 15.719 s | 17.801 s | 4.282 s / 3.671x / 72.76% | 7.428 s / 2.396x / 58.27% | 3.568 s / 4.406x / 77.30% | 3.583 s / 4.968x / 79.87% |
+| `--threads 10` | 16.037 s | 18.266 s | 3.494 s / 4.589x / 78.21% | 6.040 s / 3.024x / 66.93% | 3.098 s / 5.177x / 80.68% | 3.027 s / 6.035x / 83.43% |
+| `--threads 20` | 16.405 s | 18.395 s | 3.235 s / 5.071x / 80.28% | 5.118 s / 3.594x / 72.18% | 2.654 s / 6.182x / 83.82% | 2.545 s / 7.229x / 86.17% |
 <!-- LATEST_PERFORMANCE_END -->
-<!-- LATEST_PERFORMANCE_RUNS: base=90 current-refresh=30 repeats=3 -->
+<!-- LATEST_PERFORMANCE_RUNS: base=90 current-refresh=30 ipp-current-refresh=15 repeats=3 -->
 
 The benchmark ran on 2026-08-02 using main commit
 `c92af1dfd0f96cd7f2d49f3219fb428d0f4e0865`, an Intel Core Ultra 7 265K with
@@ -424,7 +424,21 @@ three times in interleaved order, for 90 Release runs. On 2026-08-03, all ten
 `current` cells were refreshed with three interleaved runs of the final cap-12
 branch candidate after bounded ACC segment and Super-Gaussian FFT parallelization,
 adding 30 Release runs. The Python and .NET v0.4.0 cells retain their earlier
-audited measurements.
+audited measurements. The `IPP-fast + current` column was subsequently refreshed
+with three interleaved runs at each worker setting after the 356400-point
+Super-Gaussian transform moved to arbitrary-length IPP DFT32, adding 15 runs.
+
+The DFT32 candidate was also screened against the previous release on one fixed
+200-frame `current --dsp-backend ipp-fast --threads 20` pair. Wall time moved
+from 10.815 to 9.470 seconds (12.43% lower, 1.142x throughput), process CPU time
+from 65.797 to 51.047 seconds (22.42% lower), and peak working set from 352.9 to
+351.2 MiB. Field count, stdout, ABI-normalized stderr/logs, and ordered `fileLoc`
+matched. Luma and raw JSON hashes also matched. Chroma was numerically compared
+over 142,102,000 unsigned samples: 0.1627% differed, 99.99987% of all samples
+were within one code value, RMSE was 0.063, and 124 samples differed by more
+than four. This is an `ipp-fast` numerical result, not an Exact byte-compatibility
+claim. Separate 40-frame Exact v0.4.0 and `current` release/candidate pairs
+matched all nine byte, metadata, console, log, and `fileLoc` gates.
 Python v0.4.0 was commit
 `43155200da87c0d49eb37d8ec09b1372075ee8e4`; merged PR341 was commit
 `2f21e8ed6018b14561396cc95f1f6828054470b8` (`v0.4.0-40-g2f21e8ed`).
@@ -2290,7 +2304,7 @@ Requirements:
 .\tools\build-ipp-native.ps1
 dotnet restore VHSDecodeDotNet.slnx
 dotnet build VHSDecodeDotNet.slnx -c Release --no-restore
-dotnet test --solution VHSDecodeDotNet.slnx -c Release --no-build --no-restore --minimum-expected-tests 1273
+dotnet test --solution VHSDecodeDotNet.slnx -c Release --no-build --no-restore --minimum-expected-tests 1283
 dotnet test --project tests\VHSDecode.Tests\VHSDecode.Tests.csproj -c Release --no-build --no-restore --coverage --coverage-output coverage.cobertura.xml --coverage-output-format cobertura
 ```
 
@@ -2304,7 +2318,7 @@ deployment computer. Binary-only single-file releases embed
 sidecar license files. An Exact-only build may omit the native build step.
 
 The current formal Release build has zero warnings and errors. The xUnit v3
-project exposes **1,273** independently discoverable tests to both
+project exposes **1,283** independently discoverable tests to both
 `dotnet test` and Visual Studio Test Explorer.
 
 <!-- SECTION: usage -->

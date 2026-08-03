@@ -187,9 +187,10 @@ DSP 后端通过 `--dsp-backend exact|ipp-fast` 显式选择。该参数是本 .
 best-effort 实验路径。只有 IPP 返回的特征掩码包含 SSE4.2 时，才会接受其正值
 non-Intel vendor warning。后端会加载静态链接的 `vhsdecode_ipp.dll`，报告 IPP
 版本和实际选择的 ISA，并在桥接 DLL、ABI 或 CPU 不可用时明确失败，不会静默
-回退到 `exact`。v1 当前只有 VHS real-RF FFT 阶段走 IPP。CVBS、LD 和 HiFi 会
-明确拒绝不支持的 `ipp-fast`，不会悄悄改跑 Exact 内核而产生虚假基准；IIR/SOS
-以及 HiFi/LD 加速仍是分阶段的后续工作，并非当前活动路径。
+回退到 `exact`。v1 的 IPP 路由仅包括 VHS real-RF FFT，以及 `current` profile 下的
+color-under Super-Gaussian DFT。CVBS、LD 和 HiFi 会明确拒绝不支持的 `ipp-fast`，
+不会悄悄改跑 Exact 内核而产生虚假基准；IIR/SOS 以及 HiFi/LD 加速仍是分阶段的
+后续工作，并非当前活动路径。
 
 `ipp-fast` 是数值接近的性能模式，不是逐字节兼容模式。FFT 和向量数学求值差异
 可能改变浮点位模式，并进一步影响阈值决策、元数据、恢复、日志和输出文件。
@@ -331,13 +332,13 @@ IPP-fast v0.4.0 和 IPP-fast `current`。文件名不会公开。每个 .NET 单
 <!-- LATEST_PERFORMANCE_BEGIN -->
 | CLI 模式（workers） | Python v0.4.0 | Python PR341 | Exact + v0.4.0 | Exact + current | IPP-fast + v0.4.0 | IPP-fast + current |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| 默认（5） | 15.207 s | 16.780 s | 4.389 s / 3.465x / 71.14% | 7.030 s / 2.387x / 58.10% | 3.609 s / 4.213x / 76.27% | 5.946 s / 2.822x / 64.57% |
-| `--threads 1` | 17.694 s | 19.414 s | 10.065 s / 1.758x / 43.11% | 13.871 s / 1.400x / 28.55% | 7.215 s / 2.453x / 59.23% | 11.301 s / 1.718x / 41.79% |
-| `--threads 5` | 15.719 s | 17.801 s | 4.282 s / 3.671x / 72.76% | 7.428 s / 2.396x / 58.27% | 3.568 s / 4.406x / 77.30% | 5.816 s / 3.061x / 67.33% |
-| `--threads 10` | 16.037 s | 18.266 s | 3.494 s / 4.589x / 78.21% | 6.040 s / 3.024x / 66.93% | 3.098 s / 5.177x / 80.68% | 5.190 s / 3.519x / 71.59% |
-| `--threads 20` | 16.405 s | 18.395 s | 3.235 s / 5.071x / 80.28% | 5.118 s / 3.594x / 72.18% | 2.654 s / 6.182x / 83.82% | 4.713 s / 3.903x / 74.38% |
+| 默认（5） | 15.207 s | 16.780 s | 4.389 s / 3.465x / 71.14% | 7.030 s / 2.387x / 58.10% | 3.609 s / 4.213x / 76.27% | 3.801 s / 4.415x / 77.35% |
+| `--threads 1` | 17.694 s | 19.414 s | 10.065 s / 1.758x / 43.11% | 13.871 s / 1.400x / 28.55% | 7.215 s / 2.453x / 59.23% | 9.527 s / 2.038x / 50.93% |
+| `--threads 5` | 15.719 s | 17.801 s | 4.282 s / 3.671x / 72.76% | 7.428 s / 2.396x / 58.27% | 3.568 s / 4.406x / 77.30% | 3.583 s / 4.968x / 79.87% |
+| `--threads 10` | 16.037 s | 18.266 s | 3.494 s / 4.589x / 78.21% | 6.040 s / 3.024x / 66.93% | 3.098 s / 5.177x / 80.68% | 3.027 s / 6.035x / 83.43% |
+| `--threads 20` | 16.405 s | 18.395 s | 3.235 s / 5.071x / 80.28% | 5.118 s / 3.594x / 72.18% | 2.654 s / 6.182x / 83.82% | 2.545 s / 7.229x / 86.17% |
 <!-- LATEST_PERFORMANCE_END -->
-<!-- LATEST_PERFORMANCE_RUNS: base=90 current-refresh=30 repeats=3 -->
+<!-- LATEST_PERFORMANCE_RUNS: base=90 current-refresh=30 ipp-current-refresh=15 repeats=3 -->
 
 本轮于 2026-08-02 在 main commit
 `c92af1dfd0f96cd7f2d49f3219fb428d0f4e0865` 上完成。测试机为 Intel Core
@@ -345,7 +346,22 @@ Ultra 7 265K（20 个逻辑处理器）、Windows 11 build 26220，以及 .NET
 SDK/runtime `11.0.100-preview.6.26359.118`。30 个模式/profile 组合各交错运行
 三次，共 90 次 Release 运行。2026-08-03，在完成有界 ACC 分段和 Super-Gaussian
 FFT 并行化后，全部十个 `current` 单元格使用最终 cap-12 分支候选各交错测量三次，另增加
-30 次 Release 运行。Python 与 .NET v0.4.0 单元格沿用此前审计值。Python v0.4.0 commit 为
+30 次 Release 运行。Python 与 .NET v0.4.0 单元格沿用此前审计值。随后把
+356400 点 Super-Gaussian 变换改走任意长度 IPP DFT32，并在每个 worker 档位交错
+测量三次，刷新 `IPP-fast + current` 列，另增加 15 次运行。
+
+DFT32 候选还与上一发布版做了一组固定 200 帧
+`current --dsp-backend ipp-fast --threads 20` 配对。墙钟从 10.815 降到 9.470 秒
+（缩短 12.43%，吞吐 1.142x），进程 CPU 时间从 65.797 降到 51.047 秒
+（降低 22.42%），峰值工作集从 352.9 降到 351.2 MiB。field 数、stdout、归一化
+ABI 后的 stderr/日志和有序 `fileLoc` 一致，亮度与原始 JSON hash 也一致。
+对 142,102,000 个无符号色度样本的数值比较中，0.1627% 有位差，全部样本的
+99.99987% 误差不超过 1，RMSE 为 0.063，仅 124 个样本误差大于 4。这是
+`ipp-fast` 的数值结果，不是 Exact 逐字节兼容声明。另行执行的 40 帧 Exact
+v0.4.0 与 `current` 发布版/候选配对均通过全部九项字节、元数据、console、日志和
+`fileLoc` 门禁。
+
+Python v0.4.0 commit 为
 `43155200da87c0d49eb37d8ec09b1372075ee8e4`，已合并 PR341 commit 为
 `2f21e8ed6018b14561396cc95f1f6828054470b8`（`v0.4.0-40-g2f21e8ed`）。
 Python 3.14.0 使用 NumPy
@@ -1832,7 +1848,7 @@ stdout SHA-256、归一化 stderr、归一化日志和全部有序 `fileLoc` 均
 .\tools\build-ipp-native.ps1
 dotnet restore VHSDecodeDotNet.slnx
 dotnet build VHSDecodeDotNet.slnx -c Release --no-restore
-dotnet test --solution VHSDecodeDotNet.slnx -c Release --no-build --no-restore --minimum-expected-tests 1273
+dotnet test --solution VHSDecodeDotNet.slnx -c Release --no-build --no-restore --minimum-expected-tests 1283
 dotnet test --project tests\VHSDecode.Tests\VHSDecode.Tests.csproj -c Release --no-build --no-restore --coverage --coverage-output coverage.cobertura.xml --coverage-output-format cobertura
 ```
 
@@ -1844,7 +1860,7 @@ Intel oneAPI。只含二进制的单文件发布会嵌入 `vhsdecode_ipp.dll` �
 notice，不会额外生成许可证 sidecar 文件。只构建 Exact 后端时可以省略原生构建步骤。
 
 当前正式 Release 构建为零警告、零错误。xUnit v3 项目向
-`dotnet test` 和 Visual Studio Test Explorer 暴露 **1,273** 个可独立发现的测试。
+`dotnet test` 和 Visual Studio Test Explorer 暴露 **1,283** 个可独立发现的测试。
 
 <!-- SECTION: usage -->
 
