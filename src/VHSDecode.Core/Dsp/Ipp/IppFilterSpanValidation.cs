@@ -21,4 +21,24 @@ internal static class IppFilterSpanValidation
                 nameof(output));
         }
     }
+
+    internal static void ValidateProcessBuffers(
+        ReadOnlySpan<float> input,
+        Span<float> output)
+    {
+        if (output.Length < input.Length)
+        {
+            throw new ArgumentException(
+                "Output must be at least as long as the input.",
+                nameof(output));
+        }
+
+        Span<float> destination = output[..input.Length];
+        if (input.Overlaps(destination, out int elementOffset) && elementOffset != 0)
+        {
+            throw new ArgumentException(
+                "Input and output may be identical or disjoint, but must not partially overlap.",
+                nameof(output));
+        }
+    }
 }

@@ -336,30 +336,41 @@ IPP-fast v0.4.0 和 IPP-fast `current`。文件名不会公开。每个 .NET 单
 <!-- LATEST_PERFORMANCE_BEGIN -->
 | CLI 模式（workers） | Python v0.4.0 | Python PR341 | Exact + v0.4.0 | Exact + current | IPP-fast + v0.4.0 | IPP-fast + current |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| 默认（5） | 15.207 s | 16.780 s | 4.332 s / 3.510x / 71.51% | 5.402 s / 3.106x / 67.81% | 3.575 s / 4.254x / 76.49% | 3.558 s / 4.717x / 78.80% |
-| `--threads 1` | 17.694 s | 19.414 s | 9.867 s / 1.793x / 44.24% | 12.596 s / 1.541x / 35.12% | 7.070 s / 2.503x / 60.04% | 8.636 s / 2.248x / 55.51% |
-| `--threads 5` | 15.719 s | 17.801 s | 4.268 s / 3.683x / 72.85% | 5.365 s / 3.318x / 69.86% | 3.521 s / 4.465x / 77.60% | 3.503 s / 5.081x / 80.32% |
-| `--threads 10` | 16.037 s | 18.266 s | 3.579 s / 4.481x / 77.68% | 4.379 s / 4.171x / 76.02% | 3.014 s / 5.321x / 81.21% | 2.886 s / 6.328x / 84.20% |
-| `--threads 20` | 16.405 s | 18.395 s | 2.951 s / 5.559x / 82.01% | 3.885 s / 4.735x / 78.88% | 2.672 s / 6.140x / 83.71% | 2.583 s / 7.123x / 85.96% |
+| 默认（5） | 15.207 s | 16.780 s | 4.332 s / 3.510x / 71.51% | 5.402 s / 3.106x / 67.81% | 3.414 s / 4.454x / 77.55% | 3.285 s / 5.108x / 80.42% |
+| `--threads 1` | 17.694 s | 19.414 s | 9.867 s / 1.793x / 44.24% | 12.596 s / 1.541x / 35.12% | 7.163 s / 2.470x / 59.52% | 8.754 s / 2.218x / 54.91% |
+| `--threads 5` | 15.719 s | 17.801 s | 4.268 s / 3.683x / 72.85% | 5.365 s / 3.318x / 69.86% | 3.530 s / 4.453x / 77.54% | 3.269 s / 5.445x / 81.63% |
+| `--threads 10` | 16.037 s | 18.266 s | 3.579 s / 4.481x / 77.68% | 4.379 s / 4.171x / 76.02% | 3.007 s / 5.333x / 81.25% | 2.896 s / 6.307x / 84.14% |
+| `--threads 20` | 16.405 s | 18.395 s | 2.951 s / 5.559x / 82.01% | 3.885 s / 4.735x / 78.88% | 2.618 s / 6.267x / 84.04% | 2.433 s / 7.559x / 86.77% |
 <!-- LATEST_PERFORMANCE_END -->
-<!-- LATEST_PERFORMANCE_RUNS: dotnet-refresh=60 repeats=3 -->
+<!-- LATEST_PERFORMANCE_RUNS: ipp-refresh=30 repeats=3 -->
 
 Python 测量于 2026-08-02 在 main commit
-`c92af1dfd0f96cd7f2d49f3219fb428d0f4e0865` 上完成审计。2026-08-04，基于
-main `3bfa9b9` 的本分支候选重新测量了全部 20 个 .NET 模式/profile 单元格，
-每格三次交错运行，共 60 次 Release 运行。测试机为 Intel Core Ultra 7 265K
-（20 个逻辑处理器）、Windows 11 build 26220，以及 .NET SDK/runtime
-`11.0.100-preview.6.26359.118`。每个 .NET 单元格的三次运行都只产生一套亮度、
+`c92af1dfd0f96cd7f2d49f3219fb428d0f4e0865` 上完成审计。由于本候选不会进入
+Exact，该列沿用已合并相位前缀改动的审计矩阵。2026-08-04，基于 main
+`714f5a6` 的本分支候选重新测量了本次受影响的 10 个 IPP-fast 单元格，每格三次
+交错运行，共 30 次 Release 运行。测试机为 Intel Core Ultra 7 265K（20 个逻辑
+处理器）、Windows 11 build 26220，以及 .NET SDK/runtime
+`11.0.100-preview.6.26359.118`。每个刷新单元格的三次运行都只产生一套亮度、
 色度、原始 JSON 和 stdout hash。
 
-相位前缀候选还与 main `3bfa9b9` 在固定 200 帧
-`current --dsp-backend ipp-fast --threads 20` 窗口上各交错运行三次。墙钟中位数
-从 10.250 降到 10.018 秒（缩短 2.26%，吞吐 1.023x），进程 CPU 时间从
-53.797 降到 53.141 秒（降低 1.22%）；峰值工作集保持有界，候选为
-351.2-364.3 MiB，main 为 351.2-353.1 MiB。亮度、色度、原始 JSON、stdout、
-耗时归一化 stderr、时间戳归一化日志和有序 `fileLoc` 全部一致。另一个 17 次、
-80 帧矩阵覆盖 Exact/IPP-fast `current` 的零/默认/1/5/10/20 workers，以及未改动的
-Exact v0.4.0；每个 profile/backend 组都只产生一套产物和 `fileLoc` hash。
+SOS32 候选为 VHS 长块色度 burst 提供 worker-local IPP 单精度 biquad 上下文，
+最多保留 12 个空闲上下文。固定 200 帧
+`current --dsp-backend ipp-fast --threads 20` 窗口上，每个构建各交错运行三次，
+墙钟中位数从 9.740 降到 9.480 秒（缩短 2.67%，吞吐 1.027x），进程 CPU 时间
+从 52.160 降到 48.590 秒（降低 6.84%）。v0.4.0 与 `current` 的 40 帧门禁在
+零/默认/20 workers 下各自只产生一套产物、stdout 和 `fileLoc` hash；采样峰值
+工作集有界于 281.2-707.4 MiB。另有六组 Exact main/候选配对覆盖两个 profile 的
+1/默认/20 workers，亮度、色度、原始 JSON、stdout、耗时归一化 stderr、时间戳
+归一化日志和全部有序 `fileLoc` 均逐字节一致。
+
+IPP BiQuad 与旧托管 SOS 循环采用不同的 float32 求值顺序，因此这是有意限定在
+`ipp-fast` 的数值变化。在 200 帧窗口上相对 main，142,102,000 个亮度样本中有
+245,115 个（0.172492%）不同，平均绝对误差 0.031664、RMS 误差 11.216850，
+最大值 26,666 来自一个场中的 dropout 判定变化。色度有 18,467,547 个样本
+（12.995980%）不同，平均绝对误差 0.154614、RMS 误差 1.817706，最大值 1,661。
+field 数、`seqNo`、stdout、归一化 stderr 和有序 `fileLoc` 一致；原始 JSON 只在
+该场的 `dropOuts` 不同，对应的数值 IRE 日志行也发生变化。这些数据不是 Exact
+兼容声明。
 
 DFT32 候选还与上一发布版做了一组固定 200 帧
 `current --dsp-backend ipp-fast --threads 20` 配对。墙钟从 10.815 降到 9.470 秒
@@ -415,8 +426,8 @@ JSON 字段后，也在相同表面全部一致。v0.4.0 严格 oracle 产物为
 v0.4.0 的每个默认/非零线程模式在三次重复中都产生三套不同的亮度、色度、JSON
 和日志 hash，但有序 `fileLoc`、stdout 与归一化 stderr 保持稳定。因此这些 Python
 行只用于吞吐比较，严格 oracle 仍是 Python v0.4.0
-`g4315520 --threads 0`。IPP-fast 在此夹具上匹配相应 Exact 的亮度和色度 hash，
-但这个样本结果不构成通用逐字节兼容承诺。
+`g4315520 --threads 0`。在上文所述 SOS32 优化之前，IPP-fast 曾在此夹具上匹配
+相应 Exact 的亮度和色度 hash；这个历史样本结果不构成通用逐字节兼容承诺。
 
 上一份仅 Exact 的线程矩阵使用 Intel Core Ultra 7 265K（20 个逻辑处理器）、Windows 11 build
 26220、.NET SDK/runtime `11.0.100-preview.6.26359.118`，以及 Python v0.4.0
@@ -1859,7 +1870,7 @@ stdout SHA-256、归一化 stderr、归一化日志和全部有序 `fileLoc` 均
 .\tools\build-ipp-native.ps1
 dotnet restore VHSDecodeDotNet.slnx
 dotnet build VHSDecodeDotNet.slnx -c Release --no-restore
-dotnet test --solution VHSDecodeDotNet.slnx -c Release --no-build --no-restore --minimum-expected-tests 1288
+dotnet test --solution VHSDecodeDotNet.slnx -c Release --no-build --no-restore --minimum-expected-tests 1295
 dotnet test --project tests\VHSDecode.Tests\VHSDecode.Tests.csproj -c Release --no-build --no-restore --coverage --coverage-output coverage.cobertura.xml --coverage-output-format cobertura
 ```
 
@@ -1871,7 +1882,7 @@ Intel oneAPI。只含二进制的单文件发布会嵌入 `vhsdecode_ipp.dll` �
 notice，不会额外生成许可证 sidecar 文件。只构建 Exact 后端时可以省略原生构建步骤。
 
 当前正式 Release 构建为零警告、零错误。xUnit v3 项目向
-`dotnet test` 和 Visual Studio Test Explorer 暴露 **1,288** 个可独立发现的测试。
+`dotnet test` 和 Visual Studio Test Explorer 暴露 **1,295** 个可独立发现的测试。
 
 <!-- SECTION: usage -->
 

@@ -33,7 +33,7 @@
 - VHS 家族包括 VHS/S-VHS、Betamax、Video8/Hi8、U-matic、Type C、EIAJ
   以及上游支持的 PAL/NTSC 变体。
 - TBC 工具、双击启动的用户 GUI 和开发者绘图窗口明确不在范围内。
-- Visual Studio 2026 `.slnx` 包含 **1,288** 项标准 xUnit v3 测试；测试可在
+- Visual Studio 2026 `.slnx` 包含 **1,295** 项标准 xUnit v3 测试；测试可在
   Test Explorer 中查看，也可用 `dotnet test` 运行。
 
 <!-- SECTION: start -->
@@ -89,29 +89,32 @@ CVBS、LaserDisc 和 HiFi 当前会拒绝 `ipp-fast`，这些命令应使用 `ex
 ## 最新性能
 
 下表固定使用同一份私有本地 40 MHz PAL VHS `.ldf` 夹具和相同的 40 帧窗口，
-不会公开源文件名。2026-08-04，以 main `3bfa9b9` 为基础的本分支候选重新测量了
-全部 20 个 .NET 单元格，每格三次交错运行，共 60 次 Release 运行。Python 两列
-沿用同一窗口的已审计测量值；兼容性结论与速度数据分开判断。
+不会公开源文件名。2026-08-04，以 main `714f5a6` 为基础的本分支候选重新测量了
+本次受影响的 10 个 IPP-fast 单元格，每格三次交错运行，共 30 次 Release 运行。
+由于本改动不会进入 Exact，Exact 与 Python 两列沿用同一窗口的已审计测量值；
+兼容性结论与速度数据分开判断。
 
 <!-- LATEST_PERFORMANCE_BEGIN -->
 | CLI 模式（workers） | Python v0.4.0 | Python PR341 | Exact + v0.4.0 | Exact + current | IPP-fast + v0.4.0 | IPP-fast + current |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| 默认（5） | 15.207 s | 16.780 s | 4.332 s / 3.510x | 5.402 s / 3.106x | 3.575 s / 4.254x | 3.558 s / 4.717x |
-| `--threads 1` | 17.694 s | 19.414 s | 9.867 s / 1.793x | 12.596 s / 1.541x | 7.070 s / 2.503x | 8.636 s / 2.248x |
-| `--threads 5` | 15.719 s | 17.801 s | 4.268 s / 3.683x | 5.365 s / 3.318x | 3.521 s / 4.465x | 3.503 s / 5.081x |
-| `--threads 10` | 16.037 s | 18.266 s | 3.579 s / 4.481x | 4.379 s / 4.171x | 3.014 s / 5.321x | 2.886 s / 6.328x |
-| `--threads 20` | 16.405 s | 18.395 s | 2.951 s / 5.559x | 3.885 s / 4.735x | 2.672 s / 6.140x | 2.583 s / 7.123x |
+| 默认（5） | 15.207 s | 16.780 s | 4.332 s / 3.510x | 5.402 s / 3.106x | 3.414 s / 4.454x | 3.285 s / 5.108x |
+| `--threads 1` | 17.694 s | 19.414 s | 9.867 s / 1.793x | 12.596 s / 1.541x | 7.163 s / 2.470x | 8.754 s / 2.218x |
+| `--threads 5` | 15.719 s | 17.801 s | 4.268 s / 3.683x | 5.365 s / 3.318x | 3.530 s / 4.453x | 3.269 s / 5.445x |
+| `--threads 10` | 16.037 s | 18.266 s | 3.579 s / 4.481x | 4.379 s / 4.171x | 3.007 s / 5.333x | 2.896 s / 6.307x |
+| `--threads 20` | 16.405 s | 18.395 s | 2.951 s / 5.559x | 3.885 s / 4.735x | 2.618 s / 6.267x | 2.433 s / 7.559x |
 <!-- LATEST_PERFORMANCE_END -->
-<!-- LATEST_PERFORMANCE_RUNS: dotnet-refresh=60 repeats=3 -->
+<!-- LATEST_PERFORMANCE_RUNS: ipp-refresh=30 repeats=3 -->
 
 每个 .NET 单元格依次给出墙钟中位数和相对同 profile Python 列的倍速；默认实际
-使用 **5 个 workers**。本轮让 `current` 色度相位分析只重采样真正读取的逐行前缀，
-同时保持线性 wow 状态和 16-tap sinc 表达式不变。固定 200 帧
-`ipp-fast + current --threads 20` A/B 中，墙钟中位数从 10.250 降至 10.018 秒
-（缩短 2.26%，吞吐 1.023x），CPU 时间降低 1.22%；亮度、色度、JSON、stdout、
-归一化 stderr/日志和有序 `fileLoc` 全部一致。
+使用 **5 个 workers**。本轮为 VHS 长块色度 burst 提供 worker-local、有上限的 IPP
+float32 SOS 上下文。固定 200 帧 `ipp-fast + current --threads 20` A/B 中，墙钟中位数
+从 9.740 降至 9.480 秒（缩短 2.67%，吞吐 1.027x），CPU 时间从 52.160 降至
+48.590 秒（降低 6.84%）。Exact 在两个 profile 的 1/默认/20 workers 下均与 main
+逐字节一致。
 
-本次刷新的所有 .NET 单元格都保持确定性。Python v0.4.0 在非零 worker 数下可能
+本次刷新的所有 IPP-fast 单元格都保持确定性，包括 `--threads 0`、默认和 20-worker
+门禁。IPP-fast 仍是显式启用的数值近似后端，因此不声称其产物与 Exact 或旧 IPP
+求值顺序逐字节一致。Python v0.4.0 在非零 worker 数下可能
 产生不同输出 hash，因此严格 oracle 仍是 Python v0.4.0
 `g4315520 --threads 0`。完整命令、硬件、hash、内存边界和历史测量请查看
 [详细性能说明](docs/README.detailed.zh-CN.md#性能)。
@@ -143,7 +146,7 @@ Ogg/FLAC、立体声、PCM24、其他采样率和未完成的文件头也继续�
 dotnet restore VHSDecodeDotNet.slnx
 dotnet build VHSDecodeDotNet.slnx -c Release --no-restore
 dotnet test --solution VHSDecodeDotNet.slnx -c Release `
-  --no-build --no-restore --minimum-expected-tests 1288
+  --no-build --no-restore --minimum-expected-tests 1295
 ```
 
 在 Visual Studio 2026 中打开 `VHSDecodeDotNet.slnx`，即可构建、调试并通过

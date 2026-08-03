@@ -146,7 +146,7 @@ public sealed class IppBackendInteropTests
         }
 
         Assert.NotNull(runtimeInfo);
-        Assert.Equal(0x0001_0001U, runtimeInfo.AbiVersion);
+        Assert.Equal(0x0001_0002U, runtimeInfo.AbiVersion);
 
         double[] input = BuildFiniteInput(length);
         Complex[] expectedSpectrum = PocketFftReal.Forward(input);

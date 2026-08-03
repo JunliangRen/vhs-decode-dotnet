@@ -15,7 +15,7 @@
 #  define VHSDECODE_IPP_CALL
 #endif
 
-#define VHSDECODE_IPP_ABI_VERSION 0x00010001u
+#define VHSDECODE_IPP_ABI_VERSION 0x00010002u
 #define VHSDECODE_IPP_NAME_CAPACITY 64u
 #define VHSDECODE_IPP_VERSION_CAPACITY 64u
 #define VHSDECODE_IPP_BUILD_DATE_CAPACITY 32u
@@ -56,6 +56,16 @@ typedef struct vhsdecode_ipp_sos64_section {
     double a2;
 } vhsdecode_ipp_sos64_section;
 
+/* One single-precision SOS row in SciPy/.NET order. */
+typedef struct vhsdecode_ipp_sos32_section {
+    float b0;
+    float b1;
+    float b2;
+    float a0;
+    float a1;
+    float a2;
+} vhsdecode_ipp_sos32_section;
+
 /*
  * Version 1 runtime information. The caller must set struct_size to
  * sizeof(vhsdecode_ipp_runtime_info_v1) before calling get_runtime_info.
@@ -82,6 +92,7 @@ typedef struct vhsdecode_ipp_fft64_context vhsdecode_ipp_fft64_context;
 typedef struct vhsdecode_ipp_dft32_context vhsdecode_ipp_dft32_context;
 typedef struct vhsdecode_ipp_iir64_context vhsdecode_ipp_iir64_context;
 typedef struct vhsdecode_ipp_sos64_context vhsdecode_ipp_sos64_context;
+typedef struct vhsdecode_ipp_sos32_context vhsdecode_ipp_sos32_context;
 
 VHSDECODE_IPP_API uint32_t VHSDECODE_IPP_CALL
 vhsdecode_ipp_get_abi_version(void);
@@ -279,6 +290,43 @@ vhsdecode_ipp_sos64_process(
     vhsdecode_ipp_sos64_context* context,
     const double* input,
     double* output,
+    int32_t length);
+
+/*
+ * Single-precision counterpart to sos64. State layout, normalization,
+ * in-place behavior, and stream-order requirements are identical.
+ */
+VHSDECODE_IPP_API int32_t VHSDECODE_IPP_CALL
+vhsdecode_ipp_sos32_create(
+    const vhsdecode_ipp_sos32_section* sections,
+    int32_t section_count,
+    const float* initial_state,
+    int32_t initial_state_length,
+    vhsdecode_ipp_sos32_context** out_context);
+
+VHSDECODE_IPP_API int32_t VHSDECODE_IPP_CALL
+vhsdecode_ipp_sos32_destroy(vhsdecode_ipp_sos32_context* context);
+
+VHSDECODE_IPP_API int32_t VHSDECODE_IPP_CALL
+vhsdecode_ipp_sos32_reset(vhsdecode_ipp_sos32_context* context);
+
+VHSDECODE_IPP_API int32_t VHSDECODE_IPP_CALL
+vhsdecode_ipp_sos32_get_state(
+    vhsdecode_ipp_sos32_context* context,
+    float* state,
+    int32_t state_length);
+
+VHSDECODE_IPP_API int32_t VHSDECODE_IPP_CALL
+vhsdecode_ipp_sos32_set_state(
+    vhsdecode_ipp_sos32_context* context,
+    const float* state,
+    int32_t state_length);
+
+VHSDECODE_IPP_API int32_t VHSDECODE_IPP_CALL
+vhsdecode_ipp_sos32_process(
+    vhsdecode_ipp_sos32_context* context,
+    const float* input,
+    float* output,
     int32_t length);
 
 #ifdef __cplusplus

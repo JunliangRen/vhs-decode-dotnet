@@ -414,32 +414,47 @@ speedup, and wall-time reduction against its profile-matched Python column:
 <!-- LATEST_PERFORMANCE_BEGIN -->
 | CLI mode (workers) | Python v0.4.0 | Python PR341 | Exact + v0.4.0 | Exact + current | IPP-fast + v0.4.0 | IPP-fast + current |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| default (5) | 15.207 s | 16.780 s | 4.332 s / 3.510x / 71.51% | 5.402 s / 3.106x / 67.81% | 3.575 s / 4.254x / 76.49% | 3.558 s / 4.717x / 78.80% |
-| `--threads 1` | 17.694 s | 19.414 s | 9.867 s / 1.793x / 44.24% | 12.596 s / 1.541x / 35.12% | 7.070 s / 2.503x / 60.04% | 8.636 s / 2.248x / 55.51% |
-| `--threads 5` | 15.719 s | 17.801 s | 4.268 s / 3.683x / 72.85% | 5.365 s / 3.318x / 69.86% | 3.521 s / 4.465x / 77.60% | 3.503 s / 5.081x / 80.32% |
-| `--threads 10` | 16.037 s | 18.266 s | 3.579 s / 4.481x / 77.68% | 4.379 s / 4.171x / 76.02% | 3.014 s / 5.321x / 81.21% | 2.886 s / 6.328x / 84.20% |
-| `--threads 20` | 16.405 s | 18.395 s | 2.951 s / 5.559x / 82.01% | 3.885 s / 4.735x / 78.88% | 2.672 s / 6.140x / 83.71% | 2.583 s / 7.123x / 85.96% |
+| default (5) | 15.207 s | 16.780 s | 4.332 s / 3.510x / 71.51% | 5.402 s / 3.106x / 67.81% | 3.414 s / 4.454x / 77.55% | 3.285 s / 5.108x / 80.42% |
+| `--threads 1` | 17.694 s | 19.414 s | 9.867 s / 1.793x / 44.24% | 12.596 s / 1.541x / 35.12% | 7.163 s / 2.470x / 59.52% | 8.754 s / 2.218x / 54.91% |
+| `--threads 5` | 15.719 s | 17.801 s | 4.268 s / 3.683x / 72.85% | 5.365 s / 3.318x / 69.86% | 3.530 s / 4.453x / 77.54% | 3.269 s / 5.445x / 81.63% |
+| `--threads 10` | 16.037 s | 18.266 s | 3.579 s / 4.481x / 77.68% | 4.379 s / 4.171x / 76.02% | 3.007 s / 5.333x / 81.25% | 2.896 s / 6.307x / 84.14% |
+| `--threads 20` | 16.405 s | 18.395 s | 2.951 s / 5.559x / 82.01% | 3.885 s / 4.735x / 78.88% | 2.618 s / 6.267x / 84.04% | 2.433 s / 7.559x / 86.77% |
 <!-- LATEST_PERFORMANCE_END -->
-<!-- LATEST_PERFORMANCE_RUNS: dotnet-refresh=60 repeats=3 -->
+<!-- LATEST_PERFORMANCE_RUNS: ipp-refresh=30 repeats=3 -->
 
 The Python measurements were audited on 2026-08-02 using main commit
-`c92af1dfd0f96cd7f2d49f3219fb428d0f4e0865`. On 2026-08-04, all 20 .NET
-mode/profile cells were refreshed from this branch candidate based on main
-`3bfa9b9`, with three interleaved runs per cell for 60 Release runs. The host
-was an Intel Core Ultra 7 265K with 20 logical processors, Windows 11 build
-26220, and .NET SDK/runtime `11.0.100-preview.6.26359.118`. Every .NET cell
-produced one luma, chroma, raw-JSON, and stdout hash across its three runs.
+`c92af1dfd0f96cd7f2d49f3219fb428d0f4e0865`. Exact retains the audited matrix
+from the now-merged phase-prefix change because this candidate does not enter
+that backend. On 2026-08-04, the 10 affected IPP-fast cells were refreshed from
+this branch candidate based on main `714f5a6`, with three interleaved runs per
+cell for 30 Release runs. The host was an Intel Core Ultra 7 265K with 20
+logical processors, Windows 11 build 26220, and .NET SDK/runtime
+`11.0.100-preview.6.26359.118`. Every refreshed cell produced one luma, chroma,
+raw-JSON, and stdout hash across its three runs.
 
-The phase-prefix candidate was screened against main `3bfa9b9` with three
+The SOS32 candidate gives long VHS chroma-burst blocks worker-local IPP
+single-precision biquad contexts and retains at most 12 idle contexts. Three
 interleaved runs per build on a fixed 200-frame
-`current --dsp-backend ipp-fast --threads 20` window. Median wall time moved
-from 10.250 to 10.018 seconds (2.26% lower, 1.023x throughput), process CPU
-time from 53.797 to 53.141 seconds (1.22% lower), and peak working set remained
-bounded at 351.2-364.3 MiB versus 351.2-353.1 MiB. Luma, chroma, raw JSON,
-stdout, timing-normalized stderr, timestamp-normalized logs, and ordered
-`fileLoc` all matched. A separate 17-run 80-frame matrix covered Exact and
-IPP-fast `current` at zero/default/1/5/10/20 workers plus unchanged Exact
-v0.4.0; every profile/backend group retained one artifact and `fileLoc` hash.
+`current --dsp-backend ipp-fast --threads 20` window moved median wall time
+from 9.740 to 9.480 seconds (2.67% lower, 1.027x throughput) and process CPU
+time from 52.160 to 48.590 seconds (6.84% lower). The v0.4.0 and `current`
+40-frame gates each produced one artifact/stdout/`fileLoc` hash at zero,
+default, and 20 workers; sampled peak working set stayed bounded at
+281.2-707.4 MiB. Six Exact main/candidate pairs covering both profiles at one,
+default, and 20 workers matched luma, chroma, raw JSON, stdout,
+timing-normalized stderr, timestamp-normalized logs, and all ordered `fileLoc`
+values byte for byte.
+
+IPP BiQuad uses a different float32 evaluation order from the previous managed
+SOS loop, so this is intentionally an `ipp-fast` numerical change. Against
+main on the 200-frame window, 245,115 of 142,102,000 luma samples (0.172492%)
+differed, with 0.031664 mean absolute error, 11.216850 RMS error, and a 26,666
+maximum caused by a changed dropout decision in one field. Chroma changed in
+18,467,547 samples (12.995980%), with 0.154614 mean absolute error, 1.817706 RMS
+error, and a 1,661 maximum. Field count, `seqNo`, stdout, normalized stderr,
+and ordered `fileLoc` matched; raw JSON differed only in that one field's
+`dropOuts`, and numerical IRE log lines changed accordingly. These figures are
+not an Exact compatibility claim.
 
 The DFT32 candidate was also screened against the previous release on one fixed
 200-frame `current --dsp-backend ipp-fast --threads 20` pair. Wall time moved
@@ -502,9 +517,10 @@ mode. Each Python v0.4.0 default/nonzero mode produced three distinct
 luma/chroma/JSON/log hash sets across its three repetitions, while ordered
 `fileLoc`, stdout, and normalized stderr stayed stable. Those Python rows are
 therefore throughput comparisons only; Python v0.4.0 `g4315520 --threads 0`
-remains the strict oracle. IPP-fast matched its corresponding Exact luma and
-chroma hashes on this fixture, but that sample-specific observation is not a
-general byte-compatibility promise.
+remains the strict oracle. Before the SOS32 optimization documented above,
+IPP-fast matched its corresponding Exact luma and chroma hashes on this
+fixture; that historical, sample-specific observation is not a general
+byte-compatibility promise.
 
 A previous Exact-only thread matrix used an Intel Core Ultra 7 265K (20 logical
 processors), Windows 11 build 26220, .NET SDK/runtime
@@ -2317,7 +2333,7 @@ Requirements:
 .\tools\build-ipp-native.ps1
 dotnet restore VHSDecodeDotNet.slnx
 dotnet build VHSDecodeDotNet.slnx -c Release --no-restore
-dotnet test --solution VHSDecodeDotNet.slnx -c Release --no-build --no-restore --minimum-expected-tests 1288
+dotnet test --solution VHSDecodeDotNet.slnx -c Release --no-build --no-restore --minimum-expected-tests 1295
 dotnet test --project tests\VHSDecode.Tests\VHSDecode.Tests.csproj -c Release --no-build --no-restore --coverage --coverage-output coverage.cobertura.xml --coverage-output-format cobertura
 ```
 
@@ -2331,7 +2347,7 @@ deployment computer. Binary-only single-file releases embed
 sidecar license files. An Exact-only build may omit the native build step.
 
 The current formal Release build has zero warnings and errors. The xUnit v3
-project exposes **1,288** independently discoverable tests to both
+project exposes **1,295** independently discoverable tests to both
 `dotnet test` and Visual Studio Test Explorer.
 
 <!-- SECTION: usage -->

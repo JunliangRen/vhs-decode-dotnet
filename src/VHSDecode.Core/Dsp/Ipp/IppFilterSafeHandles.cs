@@ -55,3 +55,30 @@ internal sealed class IppSos64SafeHandle : SafeHandleZeroOrMinusOneIsInvalid
         }
     }
 }
+
+internal sealed class IppSos32SafeHandle : SafeHandleZeroOrMinusOneIsInvalid
+{
+    private IppSos32SafeHandle()
+        : base(ownsHandle: true)
+    {
+    }
+
+    internal static IppSos32SafeHandle FromNativeHandle(nint nativeHandle)
+    {
+        var result = new IppSos32SafeHandle();
+        result.SetHandle(nativeHandle);
+        return result;
+    }
+
+    protected override bool ReleaseHandle()
+    {
+        try
+        {
+            return IppNativeMethods.Sos32Destroy(handle) >= IppStatus.Success;
+        }
+        catch
+        {
+            return false;
+        }
+    }
+}

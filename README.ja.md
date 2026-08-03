@@ -36,7 +36,7 @@ upstream release `v0.4.0`、commit
 - VHS family には VHS/S-VHS、Betamax、Video8/Hi8、U-matic、Type C、EIAJ、
   upstream が対応する PAL/NTSC variant が含まれます。
 - TBC utility、ダブルクリック GUI、開発者向け plot window は対象外です。
-- Visual Studio 2026 の `.slnx` には **1,288** 件の標準 xUnit v3 test があり、
+- Visual Studio 2026 の `.slnx` には **1,295** 件の標準 xUnit v3 test があり、
   Test Explorer と `dotnet test` の両方で実行できます。
 
 <!-- SECTION: start -->
@@ -94,30 +94,34 @@ CVBS、LaserDisc、HiFi は現在 `ipp-fast` を拒否するため、これら�
 
 次の表は同じ private local 40 MHz PAL VHS `.ldf` fixture と同じ 40-frame
 window を使用し、source filename は公開しません。2026-08-04、main
-`3bfa9b9` を基にしたこの branch candidate で .NET の全 20 cell を 3 回ずつ
-interleaved 測定しました（60 Release run）。Python 列は同じ window の audited
-measurement を維持します。互換性判定は速度とは別に行います。
+`714f5a6` を基にしたこの branch candidate で、影響を受ける 10 個の IPP-fast
+cell を 3 回ずつ interleaved 測定しました（30 Release run）。この変更は Exact
+に入らないため、Exact と Python は同じ window の audited measurement を維持します。
+互換性判定は速度とは別に行います。
 
 <!-- LATEST_PERFORMANCE_BEGIN -->
 | CLI mode（workers） | Python v0.4.0 | Python PR341 | Exact + v0.4.0 | Exact + current | IPP-fast + v0.4.0 | IPP-fast + current |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| default（5） | 15.207 s | 16.780 s | 4.332 s / 3.510x | 5.402 s / 3.106x | 3.575 s / 4.254x | 3.558 s / 4.717x |
-| `--threads 1` | 17.694 s | 19.414 s | 9.867 s / 1.793x | 12.596 s / 1.541x | 7.070 s / 2.503x | 8.636 s / 2.248x |
-| `--threads 5` | 15.719 s | 17.801 s | 4.268 s / 3.683x | 5.365 s / 3.318x | 3.521 s / 4.465x | 3.503 s / 5.081x |
-| `--threads 10` | 16.037 s | 18.266 s | 3.579 s / 4.481x | 4.379 s / 4.171x | 3.014 s / 5.321x | 2.886 s / 6.328x |
-| `--threads 20` | 16.405 s | 18.395 s | 2.951 s / 5.559x | 3.885 s / 4.735x | 2.672 s / 6.140x | 2.583 s / 7.123x |
+| default（5） | 15.207 s | 16.780 s | 4.332 s / 3.510x | 5.402 s / 3.106x | 3.414 s / 4.454x | 3.285 s / 5.108x |
+| `--threads 1` | 17.694 s | 19.414 s | 9.867 s / 1.793x | 12.596 s / 1.541x | 7.163 s / 2.470x | 8.754 s / 2.218x |
+| `--threads 5` | 15.719 s | 17.801 s | 4.268 s / 3.683x | 5.365 s / 3.318x | 3.530 s / 4.453x | 3.269 s / 5.445x |
+| `--threads 10` | 16.037 s | 18.266 s | 3.579 s / 4.481x | 4.379 s / 4.171x | 3.007 s / 5.333x | 2.896 s / 6.307x |
+| `--threads 20` | 16.405 s | 18.395 s | 2.951 s / 5.559x | 3.885 s / 4.735x | 2.618 s / 6.267x | 2.433 s / 7.559x |
 <!-- LATEST_PERFORMANCE_END -->
-<!-- LATEST_PERFORMANCE_RUNS: dotnet-refresh=60 repeats=3 -->
+<!-- LATEST_PERFORMANCE_RUNS: ipp-refresh=30 repeats=3 -->
 
 各 .NET cell は wall-time median と profile が対応する Python 列に対する
-speedup の順で、default は **5 workers** です。今回の変更は `current` chroma
-phase analysis が実際に読む line prefix だけを resample し、linear wow state と
-16-tap sinc expression はそのまま維持します。fixed 200-frame
-`ipp-fast + current --threads 20` A/B では median wall time が 10.250 から
-10.018 秒へ 2.26% 短縮（throughput 1.023x）、CPU time が 1.22% 低下しました。
-luma、chroma、JSON、stdout、normalized stderr/log、ordered `fileLoc` は一致しました。
+speedup の順で、default は **5 workers** です。今回の変更は長い VHS chroma
+burst block に worker-local かつ bounded な IPP float32 SOS context を与えます。
+fixed 200-frame `ipp-fast + current --threads 20` A/B では median wall time が
+9.740 から 9.480 秒へ 2.67% 短縮（throughput 1.027x）、CPU time が 52.160 から
+48.590 秒へ 6.84% 低下しました。Exact は両 profile の 1/default/20 workers で
+main と byte-for-byte 一致しました。
 
-更新した全 .NET cell は deterministic でした。Python v0.4.0 は nonzero worker
+更新した全 IPP-fast cell は deterministic で、`--threads 0`、default、20-worker
+gate も一致しました。IPP-fast は明示的な numerically-close backend のままであり、
+artifact が Exact または以前の IPP evaluation order と byte-for-byte 同一とは
+主張しません。Python v0.4.0 は nonzero worker
 count で output hash が変わる場合があるため、strict oracle は引き続き Python
 v0.4.0 `g4315520 --threads 0` です。完全な command、hardware、hash、memory
 bound、過去の測定は
@@ -152,7 +156,7 @@ path を維持します。
 dotnet restore VHSDecodeDotNet.slnx
 dotnet build VHSDecodeDotNet.slnx -c Release --no-restore
 dotnet test --solution VHSDecodeDotNet.slnx -c Release `
-  --no-build --no-restore --minimum-expected-tests 1288
+  --no-build --no-restore --minimum-expected-tests 1295
 ```
 
 Visual Studio 2026 で `VHSDecodeDotNet.slnx` を開くと、build、debug、

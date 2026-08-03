@@ -26,6 +26,7 @@ public sealed class RfBlockDecodePipeline : IDisposable
     private readonly bool _retainRfDiagnosticChannels;
     private readonly bool _useCurrentChromaShiftDc;
     private readonly bool _useNumpyComplexVhsAnalytic;
+    private readonly IppSos32FilterPool? _chromaBurstIppSos;
     private readonly ConcurrentStack<StreamBlockOutputBuffers> _streamOutputBufferPool = new();
     private readonly ConditionalWeakTable<RfPipelineBlock, StreamBlockOutputBuffers>
         _streamOutputBufferLeases = new();
@@ -99,6 +100,10 @@ public sealed class RfBlockDecodePipeline : IDisposable
         _useCurrentChromaShiftDc =
             upstreamBehaviorProfile == UpstreamBehaviorProfile.Current;
         _useNumpyComplexVhsAnalytic = dspBackend == DspBackend.Exact;
+        if (dspBackend == DspBackend.IppFast)
+        {
+            _chromaBurstIppSos = IppSos32FilterPool.TryCreate(filters.ChromaBurstSos);
+        }
     }
 
     public IRfInputProcessor? InputProcessor => _inputProcessor;
@@ -274,7 +279,8 @@ public sealed class RfBlockDecodePipeline : IDisposable
                             input,
                             _filters,
                             _useCurrentChromaShiftDc,
-                            streamOutputBuffers?.Chroma)
+                            streamOutputBuffers?.Chroma,
+                            _chromaBurstIppSos)
                     }
                     : demodulated with
                     {
@@ -285,7 +291,8 @@ public sealed class RfBlockDecodePipeline : IDisposable
                                 ? demodulated.Video
                                 : input,
                             _filters,
-                            _useCurrentChromaShiftDc)
+                            _useCurrentChromaShiftDc,
+                            _chromaBurstIppSos)
                     };
             }
 
@@ -366,6 +373,7 @@ public sealed class RfBlockDecodePipeline : IDisposable
 
         try
         {
+            _chromaBurstIppSos?.Dispose();
             _demodulator.Dispose();
         }
         finally
@@ -424,13 +432,14 @@ public sealed class RfBlockDecodePipeline : IDisposable
     private static double[] DecodeChromaBurst(
         ReadOnlySpan<double> input,
         DecodeFilterSet filters,
-        bool useCurrentChromaShiftDc)
+        bool useCurrentChromaShiftDc,
+        IppSos32FilterPool? ippFilter = null)
     {
         bool retainFloat32 = filters.ChromaBurstSos is not null
             && !filters.ChromaBurstUsesDemodulatedVideo;
         double[] chroma = filters.ChromaBurstSos is not null
             ? retainFloat32
-                ? SosFilter.ApplyForwardBackwardFloat32(filters.ChromaBurstSos, input)
+                ? ApplyFloat32SosToDouble(filters.ChromaBurstSos, input, ippFilter)
                 : SosFilter.ApplyForwardBackward(filters.ChromaBurstSos, input)
             : FilterRealSignal(
                 PocketFftComplex.ForwardReal(input),
@@ -467,18 +476,26 @@ public sealed class RfBlockDecodePipeline : IDisposable
         ReadOnlySpan<double> input,
         DecodeFilterSet filters,
         bool useCurrentChromaShiftDc,
-        float[]? destination = null)
+        float[]? destination = null,
+        IppSos32FilterPool? ippFilter = null)
     {
         IReadOnlyList<SosSection> chromaBurstSos = filters.ChromaBurstSos
             ?? throw new InvalidOperationException("A float32 chroma burst SOS filter is required.");
         float[] chroma;
         if (destination is null)
         {
-            chroma = SosFilter.ApplyForwardBackwardFloat32ToSingle(chromaBurstSos, input);
+            chroma = SosFilter.ApplyForwardBackwardFloat32ToSingle(
+                chromaBurstSos,
+                input,
+                ippFilter: ippFilter);
         }
         else
         {
-            SosFilter.ApplyForwardBackwardFloat32ToSingle(chromaBurstSos, input, destination);
+            SosFilter.ApplyForwardBackwardFloat32ToSingle(
+                chromaBurstSos,
+                input,
+                destination,
+                ippFilter: ippFilter);
             chroma = destination;
         }
 
@@ -489,6 +506,20 @@ public sealed class RfBlockDecodePipeline : IDisposable
             : VhsChromaDecoder.ShiftChromaAndRemoveDcFloat32InPlace(
                 chroma,
                 filters.ChromaOffsetSamples);
+    }
+
+    private static double[] ApplyFloat32SosToDouble(
+        IReadOnlyList<SosSection> sections,
+        ReadOnlySpan<double> input,
+        IppSos32FilterPool? ippFilter)
+    {
+        var output = new double[input.Length];
+        SosFilter.ApplyForwardBackwardFloat32(
+            sections,
+            input,
+            output,
+            ippFilter: ippFilter);
+        return output;
     }
 
     private RfDemodulatedBlock DecodeCvbsBlock(ReadOnlySpan<double> input)

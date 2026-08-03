@@ -320,7 +320,8 @@ public static class SosFilter
         IReadOnlyList<SosSection> sections,
         ReadOnlySpan<double> input,
         Span<double> output,
-        int? padLength = null)
+        int? padLength = null,
+        IppSos32FilterPool? ippFilter = null)
     {
         if (output.Length != input.Length)
         {
@@ -340,13 +341,14 @@ public static class SosFilter
             throw new ArgumentOutOfRangeException(nameof(padLength));
         }
 
-        ApplyForwardBackwardFloat32Core(sections, input, output, edge);
+        ApplyForwardBackwardFloat32Core(sections, input, output, edge, ippFilter);
     }
 
     internal static void ApplyForwardBackwardFloat32InPlace(
         IReadOnlyList<SosSection> sections,
         Span<double> samples,
-        int? padLength = null)
+        int? padLength = null,
+        IppSos32FilterPool? ippFilter = null)
     {
         if (samples.IsEmpty)
         {
@@ -359,14 +361,15 @@ public static class SosFilter
             throw new ArgumentOutOfRangeException(nameof(padLength));
         }
 
-        ApplyForwardBackwardFloat32Core(sections, samples, samples, edge);
+        ApplyForwardBackwardFloat32Core(sections, samples, samples, edge, ippFilter);
     }
 
     private static void ApplyForwardBackwardFloat32Core(
         IReadOnlyList<SosSection> sections,
         ReadOnlySpan<double> input,
         Span<double> output,
-        int edge)
+        int edge,
+        IppSos32FilterPool? ippFilter = null)
     {
         int extendedLength = checked(input.Length + (edge * 2));
         float[] rented = ArrayPool<float>.Shared.Rent(extendedLength);
@@ -382,7 +385,7 @@ public static class SosFilter
                 WriteOddExtensionFloat32(input, edge, extended);
             }
 
-            ApplyForwardBackwardFloat32InPlace(sections, extended);
+            ApplyForwardBackwardFloat32InPlace(sections, extended, ippFilter);
 
             ConvertToFloat64(extended.Slice(edge, input.Length), output);
         }
@@ -395,7 +398,8 @@ public static class SosFilter
     internal static float[] ApplyForwardBackwardFloat32ToSingle(
         IReadOnlyList<SosSection> sections,
         ReadOnlySpan<double> input,
-        int? padLength = null)
+        int? padLength = null,
+        IppSos32FilterPool? ippFilter = null)
     {
         if (input.IsEmpty)
         {
@@ -403,7 +407,7 @@ public static class SosFilter
         }
 
         var output = new float[input.Length];
-        ApplyForwardBackwardFloat32ToSingle(sections, input, output, padLength);
+        ApplyForwardBackwardFloat32ToSingle(sections, input, output, padLength, ippFilter);
         return output;
     }
 
@@ -411,7 +415,8 @@ public static class SosFilter
         IReadOnlyList<SosSection> sections,
         ReadOnlySpan<double> input,
         Span<float> output,
-        int? padLength = null)
+        int? padLength = null,
+        IppSos32FilterPool? ippFilter = null)
     {
         if (output.Length != input.Length)
         {
@@ -445,7 +450,7 @@ public static class SosFilter
                 WriteOddExtensionFloat32(input, edge, extended);
             }
 
-            ApplyForwardBackwardFloat32InPlace(sections, extended);
+            ApplyForwardBackwardFloat32InPlace(sections, extended, ippFilter);
             extended.Slice(edge, input.Length).CopyTo(output);
         }
         finally
@@ -494,8 +499,15 @@ public static class SosFilter
 
     private static void ApplyForwardBackwardFloat32InPlace(
         IReadOnlyList<SosSection> sections,
-        Span<float> values)
+        Span<float> values,
+        IppSos32FilterPool? ippFilter = null)
     {
+        if (ippFilter is not null)
+        {
+            ippFilter.ApplyForwardBackwardInPlace(values);
+            return;
+        }
+
         const int MaxStackSections = 32;
         Span<FloatSosSection> floatSections = sections.Count <= MaxStackSections
             ? stackalloc FloatSosSection[sections.Count]
