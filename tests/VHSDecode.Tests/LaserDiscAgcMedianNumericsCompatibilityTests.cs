@@ -25,6 +25,24 @@ public sealed class LaserDiscAgcMedianNumericsCompatibilityTests
             BitConverter.DoubleToUInt64Bits(NumpyReduction.MedianFloat64([])));
     }
 
+    [Theory(DisplayName = "Caller-owned Numba float32 median scratch is bit-exact")]
+    [InlineData(0)]
+    [InlineData(1)]
+    [InlineData(2)]
+    [InlineData(31)]
+    [InlineData(200)]
+    public void CallerOwnedNumbaFloat32MedianScratchIsBitExact(int length)
+    {
+        double[] values = Enumerable.Range(0, length)
+            .Select(index => (double)(float)(((index * 7_919) % 101) - 50) * 0.125)
+            .ToArray();
+        var scratch = new float[Math.Max(1, length)];
+
+        Assert.Equal(
+            BitConverter.DoubleToInt64Bits(NumbaReduction.MedianFloat32(values)),
+            BitConverter.DoubleToInt64Bits(NumbaReduction.MedianFloat32(values, scratch)));
+    }
+
     [Fact(DisplayName = "LD AGC line levels use Numba float32 medians")]
     public void LaserDiscAgcLineLevelsUseNumbaFloat32Medians()
     {

@@ -4,7 +4,7 @@ namespace VHSDecode.Core.Dsp;
 
 public static class ChromaTransientImprovement
 {
-    private const int MaximumParallelWorkers = 5;
+    private const int MaximumParallelWorkers = 8;
     private const int PassCount = 4;
     private const double Decay = 0.25;
 

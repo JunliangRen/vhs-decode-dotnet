@@ -36,7 +36,7 @@ upstream release `v0.4.0`、commit
 - VHS family には VHS/S-VHS、Betamax、Video8/Hi8、U-matic、Type C、EIAJ、
   upstream が対応する PAL/NTSC variant が含まれます。
 - TBC utility、ダブルクリック GUI、開発者向け plot window は対象外です。
-- Visual Studio 2026 の `.slnx` には **1,236** 件の標準 xUnit v3 test があり、
+- Visual Studio 2026 の `.slnx` には **1,262** 件の標準 xUnit v3 test があり、
   Test Explorer と `dotnet test` の両方で実行できます。
 
 <!-- SECTION: start -->
@@ -92,85 +92,40 @@ CVBS、LaserDisc、HiFi は現在 `ipp-fast` を拒否するため、これら�
 
 ## 最新の性能
 
-次の表は、同じ private local 40 MHz NTSC `BETAMAX_HIFI` `.lds` sample と
-同じ bounded frame range を全 run で使用します。sample filename は公開しません。
-v0.4.0 の .NET profile は Python v0.4.0、`current` profile は merge 済みの
-Python PR341 と同じ requested worker count で比較します。互換性判定は速度とは
-別に行います。
+次の表は、同じ private local 40 MHz PAL VHS `.ldf` fixture と同じ 40-frame
+window を全 run で使用します。source filename は公開しません。各値は
+2026-08-02 に main commit `c92af1d` で実行した 3 回の interleaved run の
+median が基礎です。2026-08-03、bounded ACC segment と Super-Gaussian FFT の
+parallelization 後の final cap-12 branch candidate で全 `current` cell を 3 回ずつ
+再測定しました。Python と .NET v0.4.0 cell は従来の audited value を維持します。
+互換性判定は速度とは別に行います。
 
 <!-- LATEST_PERFORMANCE_BEGIN -->
 | CLI mode（workers） | Python v0.4.0 | Python PR341 | Exact + v0.4.0 | Exact + current | IPP-fast + v0.4.0 | IPP-fast + current |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| default（5） | 16.983 s | 14.414 s | 5.623 s / 3.020x | 6.730 s / 2.142x | 5.295 s / 3.207x | 6.688 s / 2.155x |
-| `--threads 1` | 21.263 s | 19.881 s | 15.275 s / 1.392x | 17.979 s / 1.106x | 14.625 s / 1.454x | 17.008 s / 1.169x |
-| `--threads 5` | 16.880 s | 14.329 s | 5.475 s / 3.083x | 6.514 s / 2.200x | 5.361 s / 3.149x | 6.841 s / 2.094x |
-| `--threads 10` | 17.612 s | 15.149 s | 4.640 s / 3.795x | 5.890 s / 2.572x | 4.900 s / 3.594x | 5.631 s / 2.690x |
-| `--threads 20` | 18.330 s | 15.447 s | 3.809 s / 4.812x | 4.388 s / 3.520x | 3.722 s / 4.924x | 4.819 s / 3.206x |
+| default（5） | 15.207 s | 16.780 s | 4.389 s / 3.465x | 7.030 s / 2.387x | 3.609 s / 4.213x | 5.946 s / 2.822x |
+| `--threads 1` | 17.694 s | 19.414 s | 10.065 s / 1.758x | 13.871 s / 1.400x | 7.215 s / 2.453x | 11.301 s / 1.718x |
+| `--threads 5` | 15.719 s | 17.801 s | 4.282 s / 3.671x | 7.428 s / 2.396x | 3.568 s / 4.406x | 5.816 s / 3.061x |
+| `--threads 10` | 16.037 s | 18.266 s | 3.494 s / 4.589x | 6.040 s / 3.024x | 3.098 s / 5.177x | 5.190 s / 3.519x |
+| `--threads 20` | 16.405 s | 18.395 s | 3.235 s / 5.071x | 5.118 s / 3.594x | 2.654 s / 6.182x | 4.713 s / 3.903x |
 <!-- LATEST_PERFORMANCE_END -->
-
-最新の Exact pass は PocketFFT radix-8 の direction dispatch を専用化し、
-bit-exact な VHS chroma UInt16 conversion と `current` burst fit を vectorize し、
-deterministic radix selection で `current` sync quantile を絞り込みます。scalar
-fallback、data type、元の numerical operation order は維持されています。
-
-native/scalar thread-profile gate と final matrix 60 run はすべて reference と
-一致しました。balanced な `current`/20-worker pair 6 組では wall-time median が
-9.637 から 8.627 秒（10.48% 減、throughput 11.71% 増）、serial pair 4 組では
-50.377 から 37.300 秒（25.96% 減、throughput 35.06% 増）になりました。
-反対順序の 1,000-frame pair 2 組では mean wall time が 72.405 から 62.752 秒
-（13.33% 減、throughput 15.38% 増）になりました。allocation change は
-0.18% に留まり、candidate working set は 706 MiB 未満で progressive slowdown
-もありませんでした。
-
-新しい direct raw `fLaC` input path は、上の固定 `.lds` table には影響しません。
-同じ private local RF window の 100-frame、20-worker pair 1 組では、Release 1.4.4
-FFmpeg baseline が 8.319 s、bundled-libsndfile candidate が 7.345 s でした
-（wall time 11.71% 減、throughput 1.133x）。luma、chroma、raw JSON、stdout、
-normalized stderr/log、ordered `fileLoc` 200 個はすべて一致しました。これは範囲を
-限定した single-pair observation であり、decoder 全体への一般的な speed claim ではありません。
-
-最新の direct raw-FLAC input 改善では、parallel decode/prefetch 用に最大 48 個の
-正確な 32K RF input block を保持し、sequential decode は従来の allocation behavior
-を維持します。同じ private local PAL VHS RF capture の逆順 1,000-frame
-`current`/Exact/20-worker pair 2 組で、combined managed allocation は 43.96 から
-16.63 GiB（62.18%）、GC pause は 0.380 から 0.253 秒（33.46%）へ減少しました。
-combined wall time は 155.74 から 155.31 秒（0.28%）で、throughput は neutral と
-分類します。全 output/diagnostic は一致し、candidate working set は 772 MiB 未満に
-収まりました。上の固定 `.lds` matrix は影響を受けないため、数値は変更していません。
-
-最新の Exact `current` VHS pass は、sync-level quantile に使う deterministic radix
-histogram scan 2 回だけを parallelize します。最終 source-order selection と全 field
-state は serial のままです。同じ private local PAL VHS RF capture の balanced
-160-frame `--threads 20` pair 6 組はすべて candidate が高速で、median wall time は
-18.622 から 17.739 秒（4.74% 減、throughput 4.97% 増）になりました。1 worker と
-default-five は neutral、10 worker median は 1.31% 改善しました。反対順序の
-1,000-frame pair 2 組では mean wall time が 78.559 から 76.495 秒（2.63% 減）となり、
-luma、chroma、raw JSON、normalized stderr/log、ordered `fileLoc` が一致しました。
-別の thread gate では stdout と thread 間 determinism も一致しました。candidate の
-once-per-second working-set sample の最大値は 779.98 MiB で、progressive sampled
-growth は観測されませんでした。固定 `.lds` table は、今回まったく同じ private matrix
-sample を利用できなかったため、別 sample の比較不能な値で置換せず、前回の audited
-snapshot を維持します。
-
-最新の Exact `current` PAL VHS pass は heterodyne upconversion で decoder-owned
-chroma field を再利用し、別の full-field `double[]` allocation を除去します。同じ
-private local PAL VHS RF sample の balanced 80-frame/20-worker pair 6 組は candidate
-4 勝 2 敗で、mean wall time は 11.942 から 11.776 秒（1.39% 減）でした。このため
-throughput は near-neutral と分類します。matched 1,000-frame counter pair では
-managed allocation が 8.254 から 3.009 GiB（63.54% 減）、Gen2 collection が
-20 から 2、maximum sampled working set が 773.29 から 439.86 MiB になりました。
-candidate の first/last-quarter working-set median は 405.84/406.51 MiB で progressive
-growth はなく、wall time は 74.130 から 73.217 秒（1.23% 減）でした。luma、
-chroma、raw JSON、normalized stderr/log、2,000 個すべての ordered `fileLoc` は一致し、
-別の profile/thread gate では stdout と determinism も一致しました。固定 `.lds`
-matrix は影響を受けず、直前の comparable audited snapshot を維持します。
+<!-- LATEST_PERFORMANCE_RUNS: base=90 current-refresh=30 repeats=3 -->
 
 各 .NET cell は wall-time median と profile が対応する Python 列に対する
 speedup の順です。`1.000x` 未満は Python より遅いことを示します。Python
 PR341 は merge commit `2f21e8ed6018b14561396cc95f1f6828054470b8` で、
-`current` の upstream peer です。default は実際に **5 workers** です。Python
-の nonzero-thread 行は throughput 比較専用で、strict compatibility の基準は
-引き続き Python v0.4.0 `g4315520 --threads 0` です。
+`current` の upstream peer です。default は実際に **5 workers** です。matrix
+は 30 個の mode/profile cell を 3 回ずつ繰り返した 90 run です。更新した 10 個の
+`current` cell は final candidate の interleaved run 30 回を追加しました。
+
+各 .NET profile と Python PR341 は mode ごとに 1 つの deterministic hash set
+だけを生成しました。Python v0.4.0 は各 default/nonzero mode の 3 run で
+luma/chroma/JSON/log hash を 3 種類生成しましたが、ordered `fileLoc`、stdout、
+normalized stderr は安定していました。そのため、これらの Python 行は throughput
+比較専用です。別の 40-frame `--threads 0` gate では Exact v0.4.0 と Exact
+`current` が output byte、metadata、stdout/stderr、normalized log で各 Python
+peer と一致しました。strict oracle は引き続き Python v0.4.0
+`g4315520 --threads 0` です。
 
 default worker の実数、完全な command、build hash、hardware、反復測定方法、
 output hash、過去の測定は
@@ -205,7 +160,7 @@ path を維持します。
 dotnet restore VHSDecodeDotNet.slnx
 dotnet build VHSDecodeDotNet.slnx -c Release --no-restore
 dotnet test --solution VHSDecodeDotNet.slnx -c Release `
-  --no-build --no-restore --minimum-expected-tests 1236
+  --no-build --no-restore --minimum-expected-tests 1262
 ```
 
 Visual Studio 2026 で `VHSDecodeDotNet.slnx` を開くと、build、debug、

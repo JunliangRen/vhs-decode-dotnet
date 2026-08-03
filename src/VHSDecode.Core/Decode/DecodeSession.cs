@@ -373,7 +373,8 @@ public static class DecodeSessionFactory
                         .EnumerateArray()
                         .First()
                         .GetDouble()
-                    : null);
+                    : null,
+            dspBackend: executionOptions.DspBackend);
         DecodeRunBounds runBounds = DecodeRunBounds.FromCommand(
             command,
             tbcFieldDecoder.EstimateNominalFieldSampleCount());

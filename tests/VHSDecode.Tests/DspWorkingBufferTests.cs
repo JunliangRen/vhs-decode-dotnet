@@ -90,6 +90,30 @@ public sealed class DspWorkingBufferTests
             Convert.ToHexString(SHA256.HashData(MemoryMarshal.AsBytes(inverse.AsSpan()))));
     }
 
+    [Fact(DisplayName = "32K complex FFT preserves signed-zero packetized hash")]
+    public void ThirtyTwoKilobyteComplexFftPreservesSignedZeroPacketizedHash()
+    {
+        const int length = 32_768;
+        var input = new Complex[length];
+        uint state = 0x1234_5678;
+        for (int index = 0; index < input.Length; index++)
+        {
+            state = (1_664_525 * state) + 1_013_904_223;
+            double real = ((state >> 8) / 16_777_216.0) - 0.5;
+            state = (1_664_525 * state) + 1_013_904_223;
+            double imaginary = ((state >> 8) / 16_777_216.0) - 0.5;
+            input[index] = new Complex(real, imaginary);
+        }
+
+        input[0] = new Complex(0.0, -0.0);
+        input[8_191] = new Complex(-0.0, 0.0);
+
+        Complex[] forward = PocketFftComplex.ForwardDucc(input);
+        Assert.Equal(
+            "37D8C4B14D999502AF5879224EC18C828E66BABC750560958245FED9C5D4C5F7",
+            Convert.ToHexString(SHA256.HashData(MemoryMarshal.AsBytes(forward.AsSpan()))));
+    }
+
     [Fact(DisplayName = "In-place RF rotations match allocating compatibility paths exactly")]
     public void InPlaceRfRotationsMatchAllocatingCompatibilityPathsExactly()
     {

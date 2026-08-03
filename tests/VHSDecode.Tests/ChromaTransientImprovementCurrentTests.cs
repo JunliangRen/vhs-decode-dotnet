@@ -119,7 +119,7 @@ public sealed class ChromaTransientImprovementCurrentTests
             baseNoiseFloor: 1.25,
             width: 2,
             mix: 1.0,
-            workerThreads: 4);
+            workerThreads: 20);
 
         Assert.Equal(
             expected.Select(BitConverter.DoubleToInt64Bits),

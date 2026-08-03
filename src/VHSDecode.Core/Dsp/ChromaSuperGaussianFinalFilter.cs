@@ -2,7 +2,7 @@ namespace VHSDecode.Core.Dsp;
 
 internal sealed class ChromaSuperGaussianFinalFilter
 {
-    private const int MaximumParallelWorkers = 4;
+    private const int MaximumParallelWorkers = 12;
     private const double AttenuationDb = 80.0;
     private const double LowerBandwidthHz = 1_300_000.0;
     private const int Order = 2;

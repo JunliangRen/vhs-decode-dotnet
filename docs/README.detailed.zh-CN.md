@@ -323,7 +323,7 @@ VSync serration detector 现在会在最多两块精确形状的 workspace 中�
 
 ### 最新六路径线程矩阵
 
-最新首页摘要在同一个私有本地 40 MHz NTSC `BETAMAX_HIFI` `.lds` 样本上比较
+最新首页摘要在同一个私有本地 40 MHz PAL VHS `.ldf` 夹具上比较
 Python v0.4.0、已合并的 Python PR341、Exact v0.4.0、Exact `current`、
 IPP-fast v0.4.0 和 IPP-fast `current`。文件名不会公开。每个 .NET 单元格依次
 给出墙钟中位数、相对同 profile Python 列的倍速和墙钟缩短比例：
@@ -331,46 +331,65 @@ IPP-fast v0.4.0 和 IPP-fast `current`。文件名不会公开。每个 .NET 单
 <!-- LATEST_PERFORMANCE_BEGIN -->
 | CLI 模式（workers） | Python v0.4.0 | Python PR341 | Exact + v0.4.0 | Exact + current | IPP-fast + v0.4.0 | IPP-fast + current |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| 默认（5） | 16.983 s | 14.414 s | 5.623 s / 3.020x / 66.9% | 6.730 s / 2.142x / 53.3% | 5.295 s / 3.207x / 68.8% | 6.688 s / 2.155x / 53.6% |
-| `--threads 1` | 21.263 s | 19.881 s | 15.275 s / 1.392x / 28.2% | 17.979 s / 1.106x / 9.6% | 14.625 s / 1.454x / 31.2% | 17.008 s / 1.169x / 14.4% |
-| `--threads 5` | 16.880 s | 14.329 s | 5.475 s / 3.083x / 67.6% | 6.514 s / 2.200x / 54.5% | 5.361 s / 3.149x / 68.2% | 6.841 s / 2.094x / 52.3% |
-| `--threads 10` | 17.612 s | 15.149 s | 4.640 s / 3.795x / 73.7% | 5.890 s / 2.572x / 61.1% | 4.900 s / 3.594x / 72.2% | 5.631 s / 2.690x / 62.8% |
-| `--threads 20` | 18.330 s | 15.447 s | 3.809 s / 4.812x / 79.2% | 4.388 s / 3.520x / 71.6% | 3.722 s / 4.924x / 79.7% | 4.819 s / 3.206x / 68.8% |
+| 默认（5） | 15.207 s | 16.780 s | 4.389 s / 3.465x / 71.14% | 7.030 s / 2.387x / 58.10% | 3.609 s / 4.213x / 76.27% | 5.946 s / 2.822x / 64.57% |
+| `--threads 1` | 17.694 s | 19.414 s | 10.065 s / 1.758x / 43.11% | 13.871 s / 1.400x / 28.55% | 7.215 s / 2.453x / 59.23% | 11.301 s / 1.718x / 41.79% |
+| `--threads 5` | 15.719 s | 17.801 s | 4.282 s / 3.671x / 72.76% | 7.428 s / 2.396x / 58.27% | 3.568 s / 4.406x / 77.30% | 5.816 s / 3.061x / 67.33% |
+| `--threads 10` | 16.037 s | 18.266 s | 3.494 s / 4.589x / 78.21% | 6.040 s / 3.024x / 66.93% | 3.098 s / 5.177x / 80.68% | 5.190 s / 3.519x / 71.59% |
+| `--threads 20` | 16.405 s | 18.395 s | 3.235 s / 5.071x / 80.28% | 5.118 s / 3.594x / 72.18% | 2.654 s / 6.182x / 83.82% | 4.713 s / 3.903x / 74.38% |
 <!-- LATEST_PERFORMANCE_END -->
+<!-- LATEST_PERFORMANCE_RUNS: base=90 current-refresh=30 repeats=3 -->
 
-测试机为 Intel Core Ultra 7 265K（20 个逻辑处理器）、Windows 11 25H2 build
-26220.8925，以及 .NET SDK/runtime `11.0.100-preview.6.26359.118`。Python
-v0.4.0 列保留上一份固定矩阵的中位数。已合并的 PR341 提交
-`2f21e8ed6018b14561396cc95f1f6828054470b8`
-（`v0.4.0-40-g2f21e8ed`）另行完成 15 次运行，四列 .NET 数据则保留最新 60 次
-交错运行。所有测量使用同一主机、样本和 40 帧区间，但 PR341 与 .NET 矩阵没有
-交错执行，因此这里是 profile 对应比较，不是配对 A/B。Python 3.14.0 使用
-NumPy 2.4.6、SciPy 1.18.0、Numba 0.66.0 和 python-soxr 1.1.0。
-公共参数为：
+本轮于 2026-08-02 在 main commit
+`c92af1dfd0f96cd7f2d49f3219fb428d0f4e0865` 上完成。测试机为 Intel Core
+Ultra 7 265K（20 个逻辑处理器）、Windows 11 build 26220，以及 .NET
+SDK/runtime `11.0.100-preview.6.26359.118`。30 个模式/profile 组合各交错运行
+三次，共 90 次 Release 运行。2026-08-03，在完成有界 ACC 分段和 Super-Gaussian
+FFT 并行化后，全部十个 `current` 单元格使用最终 cap-12 分支候选各交错测量三次，另增加
+30 次 Release 运行。Python 与 .NET v0.4.0 单元格沿用此前审计值。Python v0.4.0 commit 为
+`43155200da87c0d49eb37d8ec09b1372075ee8e4`，已合并 PR341 commit 为
+`2f21e8ed6018b14561396cc95f1f6828054470b8`（`v0.4.0-40-g2f21e8ed`）。
+Python 3.14.0 使用 NumPy
+2.4.6、SciPy 1.18.0、Numba 0.66.0 和 python-soxr 1.1.0。公共参数为：
 
 ```text
---system ntsc --NTSCJ --detect_chroma_track_phase --ire0_adjust
---tape_format BETAMAX_HIFI --frequency 40 --sub_deemphasis
---start 100 --length 40 --overwrite
+--system pal --detect_chroma_track_phase --ire0_adjust
+--tape_format VHS --frequency 40 --length 40 --start 100 --overwrite
 ```
 
-两种实现的默认值都是 **5 个 workers**。三次独立 Python v0.4.0
-`--threads 0` control 的中位数为 30.253 秒，且彼此完全相同。保留的全部
-Exact v0.4.0 运行都在亮度、色度、JSON、stdout、归一化 stderr/日志以及全部
-80 个有序 `fileLoc` 上匹配该 oracle。重新测量的 Exact-current 和 IPP-current
-两列各自在 15 次运行中只产生一个确定性 hash 集。另行执行的候选
-`--threads 0`、默认和 `--threads 20` 门禁同样保持 Exact v0.4.0 与 Python
-oracle 完全一致。在这个样本上，IPP-fast 的亮度、色度、JSON 和 `fileLoc`
-恰好匹配相应 Exact profile；显式 IPP 诊断会改变归一化 stderr/日志，这个样本
-结果不构成逐字节兼容承诺。
+共享的 `--start 100` 为每个 profile 选择同一个有界帧窗口；没有使用
+`--start_fileloc`。两种实现的默认值都是 **5 个 workers**。
 
-Python PR341 的预热运行在亮度、色度、全部 80 个有序 `fileLoc`、stdout 和
-时间戳归一化 stderr/日志上匹配 `.NET current` 参考；排除预期的 `version` 与
-`gitCommit` 源身份字段后，JSON payload 也一致。该样本上的 15 次 PR341 运行
-只产生一套 hash。相比之下，15 次非零/默认线程 Python v0.4.0 矩阵运行虽然保持
-同一组亮度、色度和 JSON，却产生 7 种归一化日志 hash；更早的固定矩阵还观察到
-v0.4.0 在不同 worker 数下的产物 hash 不稳定。因此非零线程 Python 行只用于
-吞吐比较，严格 oracle 仍是上游 v0.4.0 `g4315520 --threads 0`。
+同步扫描候选还在短公开矩阵之外，以 Exact `current`、20 workers、无起始偏移完成
+长测门禁。160 帧和 400 帧交错中位数分别从 17.23 降到 16.80 秒、从 33.14 降到
+32.57 秒；有效核心中位数分别从 5.27 增至 5.60、从 5.25 增至 5.51。两次正反顺序
+的 1,000 帧运行从 72.01/72.03 秒降到 70.57/70.59 秒。最大工作集保持在
+435.8-437.4 MiB，分配量保持在 3.02-3.04 GiB；亮度、色度、JSON、stdout/stderr、
+归一化日志和全部 2,000 个有序 `fileLoc` 均匹配改动前构建。
+
+后续仅 Exact 启用的精确扫描阶段，把第二次串行百万采样阈值扫描改成并行提取交叉
+事件，再按输入顺序重建原状态机与网格判断。两次正反顺序的 1,000 帧运行从
+70.06/69.32 秒降到 68.26/68.67 秒，降幅为 0.9-2.6%；分配量保持在
+3.02-3.05 GiB，最大工作集保持在 435.5-437.2 MiB。40 帧配对结果有快有慢，
+因此不宣称固定短运行收益。IPP-fast 在六组 160 帧配对中为 11.64/11.67 秒，属于
+中性结果，所以继续使用原串行第二次扫描。
+
+另行执行的 40 帧 `--threads 0` 门禁中，Exact v0.4.0 与 Python `g4315520`
+在亮度、色度、原始 JSON、全部 80 个有序 `fileLoc`、stdout、归一化 stderr 和
+去时间戳日志上完全一致。Exact `current` 与 Python PR341 在排除预期的构建身份
+JSON 字段后，也在相同表面全部一致。v0.4.0 严格 oracle 产物为：
+
+| 基准产物 | SHA-256 |
+| --- | --- |
+| 亮度 TBC | `37B799282A82770461AD9DB8EC2E471AB86F9C05F145D411C2FCA5A6D695CACE` |
+| 色度 TBC | `DC2E3C6FAC3323F05080F22CBEB1236A9EBFB3F0A8CB58B6D498F42EA1AFD794` |
+| JSON | `9FB6DC1FAE18024B63B93E1165C5C3F7858AC6A01A786043F7A0E4BF5EAEC30C` |
+
+每个 .NET profile 和 Python PR341 在各模式下都只产生一套确定性 hash。Python
+v0.4.0 的每个默认/非零线程模式在三次重复中都产生三套不同的亮度、色度、JSON
+和日志 hash，但有序 `fileLoc`、stdout 与归一化 stderr 保持稳定。因此这些 Python
+行只用于吞吐比较，严格 oracle 仍是 Python v0.4.0
+`g4315520 --threads 0`。IPP-fast 在此夹具上匹配相应 Exact 的亮度和色度 hash，
+但这个样本结果不构成通用逐字节兼容承诺。
 
 上一份仅 Exact 的线程矩阵使用 Intel Core Ultra 7 265K（20 个逻辑处理器）、Windows 11 build
 26220、.NET SDK/runtime `11.0.100-preview.6.26359.118`，以及 Python v0.4.0
@@ -1676,6 +1695,73 @@ amount 从 2,065,610,264 降到 1,606,599,696（减少 22.22%）。基线中的
 一致。另行执行的 12 次门禁覆盖 Exact v0.4.0/current 的显式零线程、默认省略参数和
 20 workers，并匹配 stdout 与跨线程确定性。
 
+### 有界并行的 current burst 前缀分析
+
+`current` 色度相位阶段现在会把无状态依赖的行前缀按固定连续区间分给最多 4 个
+worker。最后 16 行的轨道旋转检查、相位序列组装、color-killer 汇总、全部归约和所有
+跨 field 状态转换仍由解码线程按输入顺序执行。worker 异常时会丢弃预计算前缀并重跑
+原串行路径，从而保持此前的异常与恢复行为。v0.4.0 和单 worker 解码继续走串行路径。
+
+早期 20 路原型虽然提高了短运行 CPU 占用，却让 40 帧墙钟回退，因此被淘汰。4 路与
+8 路直接进行 10 组配对后吞吐持平，最终保留 4 路内部上限，让 `--threads 20` 下的
+RF 与 FFT 工作仍有运行空间。6 组交错的 160 帧 Exact `current`/20-worker 配对全部
+由候选胜出；墙钟中位数从 11.94 降至 10.68 秒（缩短 10.6%），有效核心中位数从
+6.11 增至 6.69，进程 CPU 时间中位数还从 72.98 降至 71.43 秒。
+
+两次正反顺序的 1000 帧/2000 field Exact `current`/20-worker 对比把墙钟从
+64.36/65.15 降至 56.31/56.05 秒，缩短 12.5-14.0%。亮度、色度、原始 JSON、
+stdout、归一化 stderr/日志和全部有序 `fileLoc` 在基线、候选、显式零线程/默认/20
+worker 门禁及刷新的 Exact/IPP-fast 矩阵中一致。最终矩阵的 default、5、10、20
+worker 在每个 current 后端也都只产生一套确定性 hash。全部 1,244 项 xUnit v3/
+Microsoft.Testing.Platform 测试通过。
+
+这里不宣称分配改善：基线采样分配为 2.079/2.085 GiB，候选为 2.125/2.237 GiB。
+候选最大工作集采样为 393.8/515.0 MiB，但首末三分之一区间的中位数分别保持在
+386.4/390.1 和 490.0/493.6 MiB。两次长跑都没有渐进增长或 OOM；额外的并行结果与
+调度开销按 field 保持有界。
+
+### 有界并行的 current ACC 分段
+
+`current` 自动色度增益现在把相互独立、单调递增的色度分段切成固定连续区间，最多由
+八个 worker 处理。原始增益构造、离群限制、平滑、最终噪声 FMA 归约、平均幅度、跨
+field 状态与输出提交仍按输入顺序执行。只有每个 sync-tip 窗口完全位于自身分段内，
+且 scratch 不超过 4,096 个样本时才启用并行；异常或重叠输入、v0.4.0 及单 worker
+调用继续走串行路径。原有公开 CLR 方法签名保持不变。worker 异常会被捕获，并按输入
+分区顺序重新抛出。每个 worker 独占的 float/double 中位数 scratch 会在修改输出前
+租用，并在所有退出路径归还。
+
+六组交错的 160 帧 Exact `current`/20-worker 对比把墙钟中位数从 11.15 秒降至
+10.47 秒（缩短 6.1%），有效核心数中位数从 6.67 增至 7.58。另一个 1,000 帧/
+2,000 field 对比把 55.851 秒降至 53.003 秒（缩短 5.1%）；亮度、色度、原始 JSON、
+stdout、适用的归一化 stderr/日志及全部有序 `fileLoc` 均一致。候选累计分配为
+1.918 GiB，首末三分之一区间的工作集中位数为 382.9/383.0 MiB，最大值为
+386.7 MiB，没有渐进增长或 OOM。
+
+cap-8 审计当时的 `current` 矩阵覆盖 Exact 与 IPP-fast 的默认、1、5、10、20 worker，
+每个单元格交错运行六次，共 60 次 Release 运行。所有兼容性 hash set 都只有一个值。零警告的
+Release build 与全部 1,262 项 xUnit v3/Microsoft.Testing.Platform 测试通过。
+
+### 有界的 current Super-Gaussian FFT 并行化
+
+`current` Super-Gaussian 色度末级滤波器中原有的 PocketFFT 独立 packet 阶段，
+现在会在请求 worker 数允许时使用最多 12 个内部 worker。packet 分解、padding、mask、
+算术、变换顺序、输出顺序和串行路径均未改变。滤波器仍保留一份有界的实例内
+workspace；并发调用使用彼此隔离的临时 workspace。
+
+十二组匹配的 cap-4/cap-8 短测合并中位数从 14.67 降至 14.29 秒（缩短 2.57%），
+有效核心数中位数从 6.50 增至 6.88。两次正反顺序的 1,000 帧/2,000 field 对比，
+合并中位数从 54.345 降至 52.408 秒（缩短 3.56%）。亮度、色度、原始 JSON、
+stdout、归一化 stderr/日志及全部有序 `fileLoc` 均一致。两次候选运行首末三分之一区间
+的工作集中位数分别为 428.6/433.1 MiB 和 382.4/382.7 MiB，最大值为 435.9 与
+386.5 MiB，没有渐进增长或 OOM。
+
+早期针对旧流水线的 cap-12 实验曾被淘汰。在之后的有界流水线与输出缓冲改动完成后，
+使用最新 HEAD 重新进行 cap-8/cap-12 审计，最终保留 cap 12：6 组交错 160 帧配对中
+候选赢了 5 组，墙钟中位数从 14.43 降至 13.88 秒（缩短 3.8%），进程 CPU 时间中位数
+也从 109.33 降至 103.95 秒；峰值工作集中位数基本不变，为 787.95 与 787.69 MiB。
+每次运行的亮度、色度、原始 JSON、stdout、归一化 stderr/日志及有序 `fileLoc` 都一致。
+刷新的 30 次 `current` 矩阵中，每个单元格的每项兼容性表面也都只产生一个 hash。
+
 </details>
 
 <!-- SECTION: build -->
@@ -1698,7 +1784,7 @@ amount 从 2,065,610,264 降到 1,606,599,696（减少 22.22%）。基线中的
 .\tools\build-ipp-native.ps1
 dotnet restore VHSDecodeDotNet.slnx
 dotnet build VHSDecodeDotNet.slnx -c Release --no-restore
-dotnet test --solution VHSDecodeDotNet.slnx -c Release --no-build --no-restore --minimum-expected-tests 1236
+dotnet test --solution VHSDecodeDotNet.slnx -c Release --no-build --no-restore --minimum-expected-tests 1262
 ```
 
 第一条命令用于包含可选的 `ipp-fast` 原生产物；只构建 Exact 时可以省略。
@@ -1709,7 +1795,7 @@ Intel oneAPI。只含二进制的单文件发布会嵌入 `vhsdecode_ipp.dll` �
 notice，不会额外生成许可证 sidecar 文件。只构建 Exact 后端时可以省略原生构建步骤。
 
 当前正式 Release 构建为零警告、零错误。xUnit v3 项目向
-`dotnet test` 和 Visual Studio Test Explorer 暴露 **1,236** 个可独立发现的测试。
+`dotnet test` 和 Visual Studio Test Explorer 暴露 **1,262** 个可独立发现的测试。
 
 <!-- SECTION: usage -->
 

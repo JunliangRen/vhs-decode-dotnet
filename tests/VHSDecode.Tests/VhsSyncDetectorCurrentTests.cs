@@ -582,19 +582,24 @@ public sealed class VhsSyncDetectorCurrentTests
         }
     }
 
-    [Fact(DisplayName = "Parallel current VHS boxcar matches serial detection bit for bit")]
-    public void ParallelCurrentVhsBoxcarMatchesSerialDetectionBitForBit()
+    [Theory(DisplayName = "Parallel current VHS sync preprocessing matches serial detection across partitions")]
+    [InlineData(2)]
+    [InlineData(3)]
+    [InlineData(4)]
+    public void ParallelCurrentVhsSyncPreprocessingMatchesSerialDetectionAcrossPartitions(
+        int workers)
     {
-        var signal = new double[1_000_000];
+        const int LineLength = 2_500;
+        var signal = new double[1_200_001];
         for (int index = 0; index < signal.Length; index++)
         {
             signal[index] =
                 100.0 + ((((index * 37) % 17) - 8) * 0.125);
         }
 
-        for (int start = 500;
+        for (int start = 2_437;
             start + 188 < signal.Length;
-            start += 2_560)
+            start += LineLength)
         {
             PaintPulse(signal, start, 188, -2.0);
         }
@@ -602,15 +607,22 @@ public sealed class VhsSyncDetectorCurrentTests
         var serialDetector = new VhsSyncDetector(
             188.0,
             152.0,
-            2_560,
+            LineLength,
             8.8,
             workerThreads: 1);
         var parallelDetector = new VhsSyncDetector(
             188.0,
             152.0,
-            2_560,
+            LineLength,
             8.8,
-            workerThreads: 5);
+            workerThreads: workers);
+        var initialScanOnlyDetector = new VhsSyncDetector(
+            188.0,
+            152.0,
+            LineLength,
+            8.8,
+            workerThreads: workers,
+            parallelizePreciseEdgeScan: false);
 
         VhsSyncDetectionResult expected = serialDetector.Detect(
             signal,
@@ -622,7 +634,21 @@ public sealed class VhsSyncDetectorCurrentTests
             detectLevels: true,
             syncTipEstimate: -5.0,
             blankingEstimate: 100.0);
+        VhsSyncDetectionResult initialScanOnly = initialScanOnlyDetector.Detect(
+            signal,
+            detectLevels: true,
+            syncTipEstimate: -5.0,
+            blankingEstimate: 100.0);
 
+        int scanLimit = signal.Length - 1;
+        for (int partition = 1; partition < workers; partition++)
+        {
+            int boundary = (int)(((long)scanLimit * partition) / workers);
+            Assert.Contains(
+                expected.Pulses,
+                pulse => pulse.Start < boundary
+                         && pulse.Start + pulse.Length > boundary);
+        }
         Assert.Equal(
             BitConverter.DoubleToInt64Bits(expected.SyncTipLevel),
             BitConverter.DoubleToInt64Bits(actual.SyncTipLevel));
@@ -630,6 +656,13 @@ public sealed class VhsSyncDetectorCurrentTests
             BitConverter.DoubleToInt64Bits(expected.BlankLevel),
             BitConverter.DoubleToInt64Bits(actual.BlankLevel));
         Assert.Equal(expected.Pulses.Count, actual.Pulses.Count);
+        Assert.Equal(expected.Pulses, initialScanOnly.Pulses);
+        Assert.Equal(
+            BitConverter.DoubleToInt64Bits(expected.SyncTipLevel),
+            BitConverter.DoubleToInt64Bits(initialScanOnly.SyncTipLevel));
+        Assert.Equal(
+            BitConverter.DoubleToInt64Bits(expected.BlankLevel),
+            BitConverter.DoubleToInt64Bits(initialScanOnly.BlankLevel));
         for (int index = 0; index < expected.Pulses.Count; index++)
         {
             VhsMeasuredSyncPulse expectedPulse = expected.Pulses[index];
@@ -646,6 +679,44 @@ public sealed class VhsSyncDetectorCurrentTests
                 BitConverter.DoubleToInt64Bits(expectedPulse.BlankLevel),
                 BitConverter.DoubleToInt64Bits(actualPulse.BlankLevel));
         }
+
+        var saturatedOverlapDetector = new VhsSyncDetector(
+            double.MaxValue,
+            152.0,
+            LineLength,
+            8.8,
+            workerThreads: workers);
+        Assert.Empty(saturatedOverlapDetector.Detect(
+            new double[65_536],
+            detectLevels: false,
+            syncTipEstimate: -5.0,
+            blankingEstimate: 100.0).Pulses);
+    }
+
+    [Fact(DisplayName = "Parallel precise sync crossing buffers preserve index zero and report overflow")]
+    public void ParallelPreciseSyncCrossingBuffersPreserveIndexZeroAndReportOverflow()
+    {
+        double[] filtered = [1.0, -1.0, 1.0, -1.0, 1.0];
+        var crossings = new List<int>();
+
+        Assert.False(VhsSyncDetector.TryFillThresholdCrossingsPartition(
+            filtered,
+            start: 0,
+            end: filtered.Length - 1,
+            threshold: 0.0,
+            maximumCrossings: 2,
+            crossings));
+        Assert.Equal([0, ~1], crossings);
+
+        crossings.Clear();
+        Assert.True(VhsSyncDetector.TryFillThresholdCrossingsPartition(
+            filtered,
+            start: 0,
+            end: filtered.Length - 1,
+            threshold: 0.0,
+            maximumCrossings: 4,
+            crossings));
+        Assert.Equal([0, ~1, 2, ~3], crossings);
     }
 
     [Theory(DisplayName = "Current VHS boxcar convolution matches NumPy same mode")]

@@ -379,8 +379,8 @@ detector ごとに 60-line buffer 2 個までに制限されます。
 
 ### 最新の 6-path thread matrix
 
-最新の overview は、同じ private local 40 MHz NTSC `BETAMAX_HIFI` `.lds`
-sample で Python v0.4.0、merge 済みの Python PR341、Exact v0.4.0、Exact
+最新の overview は、同じ private local 40 MHz PAL VHS `.ldf` fixture で
+Python v0.4.0、merge 済みの Python PR341、Exact v0.4.0、Exact
 `current`、IPP-fast v0.4.0、IPP-fast `current` を比較します。filename は
 公開しません。各 .NET cell は wall-time median、profile が対応する Python
 列に対する speedup、wall-time reduction の順です。
@@ -388,52 +388,72 @@ sample で Python v0.4.0、merge 済みの Python PR341、Exact v0.4.0、Exact
 <!-- LATEST_PERFORMANCE_BEGIN -->
 | CLI mode（workers） | Python v0.4.0 | Python PR341 | Exact + v0.4.0 | Exact + current | IPP-fast + v0.4.0 | IPP-fast + current |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| default（5） | 16.983 s | 14.414 s | 5.623 s / 3.020x / 66.9% | 6.730 s / 2.142x / 53.3% | 5.295 s / 3.207x / 68.8% | 6.688 s / 2.155x / 53.6% |
-| `--threads 1` | 21.263 s | 19.881 s | 15.275 s / 1.392x / 28.2% | 17.979 s / 1.106x / 9.6% | 14.625 s / 1.454x / 31.2% | 17.008 s / 1.169x / 14.4% |
-| `--threads 5` | 16.880 s | 14.329 s | 5.475 s / 3.083x / 67.6% | 6.514 s / 2.200x / 54.5% | 5.361 s / 3.149x / 68.2% | 6.841 s / 2.094x / 52.3% |
-| `--threads 10` | 17.612 s | 15.149 s | 4.640 s / 3.795x / 73.7% | 5.890 s / 2.572x / 61.1% | 4.900 s / 3.594x / 72.2% | 5.631 s / 2.690x / 62.8% |
-| `--threads 20` | 18.330 s | 15.447 s | 3.809 s / 4.812x / 79.2% | 4.388 s / 3.520x / 71.6% | 3.722 s / 4.924x / 79.7% | 4.819 s / 3.206x / 68.8% |
+| default（5） | 15.207 s | 16.780 s | 4.389 s / 3.465x / 71.14% | 7.030 s / 2.387x / 58.10% | 3.609 s / 4.213x / 76.27% | 5.946 s / 2.822x / 64.57% |
+| `--threads 1` | 17.694 s | 19.414 s | 10.065 s / 1.758x / 43.11% | 13.871 s / 1.400x / 28.55% | 7.215 s / 2.453x / 59.23% | 11.301 s / 1.718x / 41.79% |
+| `--threads 5` | 15.719 s | 17.801 s | 4.282 s / 3.671x / 72.76% | 7.428 s / 2.396x / 58.27% | 3.568 s / 4.406x / 77.30% | 5.816 s / 3.061x / 67.33% |
+| `--threads 10` | 16.037 s | 18.266 s | 3.494 s / 4.589x / 78.21% | 6.040 s / 3.024x / 66.93% | 3.098 s / 5.177x / 80.68% | 5.190 s / 3.519x / 71.59% |
+| `--threads 20` | 16.405 s | 18.395 s | 3.235 s / 5.071x / 80.28% | 5.118 s / 3.594x / 72.18% | 2.654 s / 6.182x / 83.82% | 4.713 s / 3.903x / 74.38% |
 <!-- LATEST_PERFORMANCE_END -->
+<!-- LATEST_PERFORMANCE_RUNS: base=90 current-refresh=30 repeats=3 -->
 
-benchmark host は Intel Core Ultra 7 265K（20 logical processor）、
-Windows 11 25H2 build 26220.8925、.NET SDK/runtime
-`11.0.100-preview.6.26359.118` です。Python v0.4.0 列は以前の fixed
-matrix median を保持します。merge 済み PR341 commit
-`2f21e8ed6018b14561396cc95f1f6828054470b8`
-（`v0.4.0-40-g2f21e8ed`）は別 session の 15 run で測定し、4 つの .NET 列は
-最新の 60 interleaved run を保持します。すべて同じ host、sample、40-frame
-window を使いますが、PR341 session は .NET matrix と interleave していない
-ため、paired A/B ではなく profile-peer comparison です。Python 3.14.0 は
-NumPy 2.4.6、SciPy 1.18.0、Numba 0.66.0、python-soxr 1.1.0 を使用しました。
-共通引数は次のとおりです。
+この測定は 2026-08-02 に main commit
+`c92af1dfd0f96cd7f2d49f3219fb428d0f4e0865` で実行しました。host は Intel
+Core Ultra 7 265K（20 logical processor）、Windows 11 build 26220、.NET
+SDK/runtime `11.0.100-preview.6.26359.118` です。30 個の mode/profile cell を
+3 回ずつ interleaved order で測定し、合計 90 Release run です。2026-08-03、
+bounded ACC segment と Super-Gaussian FFT の parallelization 後の final cap-12 branch
+candidate で 10 個すべての `current` cell を 3 回ずつ再測定し、30 Release run を追加しました。
+Python と .NET v0.4.0 cell は従来の audited value を維持します。Python v0.4.0
+commit は `43155200da87c0d49eb37d8ec09b1372075ee8e4`、merge 済み
+PR341 commit は `2f21e8ed6018b14561396cc95f1f6828054470b8`
+（`v0.4.0-40-g2f21e8ed`）です。Python
+3.14.0 は NumPy 2.4.6、SciPy 1.18.0、Numba 0.66.0、python-soxr 1.1.0 を
+使用しました。共通引数は次のとおりです。
 
 ```text
---system ntsc --NTSCJ --detect_chroma_track_phase --ire0_adjust
---tape_format BETAMAX_HIFI --frequency 40 --sub_deemphasis
---start 100 --length 40 --overwrite
+--system pal --detect_chroma_track_phase --ire0_adjust
+--tape_format VHS --frequency 40 --length 40 --start 100 --overwrite
 ```
 
-両実装の default は **5 workers** です。独立した 3 回の Python v0.4.0
-`--threads 0` control は median 30.253 s で、互いに完全一致しました。保持した
-すべての Exact v0.4.0 run は luma、chroma、JSON、stdout、normalized
-stderr/log、順序付き 80 個すべての `fileLoc` でこの oracle と一致しました。
-再測定した Exact-current と IPP-current の各列は 15 run 全体でそれぞれ 1 つの
-deterministic hash set を生成しました。別の candidate gate でも
-`--threads 0`、default、`--threads 20` の Exact v0.4.0 が Python oracle と
-完全一致しました。この sample では IPP-fast の luma、chroma、JSON、
-`fileLoc` は対応する Exact profile と一致しましたが、明示的な IPP diagnostic
-により normalized stderr/log は異なります。この sample 固有の結果は
-byte-compatibility の保証ではありません。
+共通の `--start 100` は各 profile で同じ bounded frame window を選択します。
+`--start_fileloc` は使用していません。両実装の default は **5 workers** です。
 
-Python PR341 の warm-up は luma、chroma、順序付き 80 個すべての `fileLoc`、
-stdout、timestamp-normalized stderr/log で `.NET current` reference と一致
-しました。予期される `version` と `gitCommit` の source-identity field を除けば
-JSON payload も一致し、この sample の PR341 15 run は 1 つの hash set を生成
-しました。一方、Python v0.4.0 の nonzero/default 15 run は同じ
-luma/chroma/JSON set を保ったものの normalized log hash は 7 種類で、以前の
-fixed matrix では worker count 間の v0.4.0 artifact hash 不安定性も確認されて
-います。したがって nonzero-thread Python 行は throughput 比較専用で、strict
-oracle は upstream v0.4.0 `g4315520 --threads 0` のままです。
+sync-scan candidate は short public matrix とは別に、Exact `current`、20 workers、
+start offset なしでも gate しました。160/400-frame の interleaved median は
+17.23 から 16.80 秒、33.14 から 32.57 秒へ短縮し、active core median は
+5.27 から 5.60、5.25 から 5.51 へ増えました。実行順を反転した 2 回の
+1,000-frame run は 72.01/72.03 秒から 70.57/70.59 秒へ短縮しました。maximum
+working set は 435.8-437.4 MiB、allocation は 3.02-3.04 GiB の範囲に留まり、
+luma、chroma、JSON、stdout/stderr、normalized log、順序付き 2,000 個すべての
+`fileLoc` は変更前 build と一致しました。
+
+後続の Exact 専用 precise-scan stage は、2 回目の serial million-sample threshold
+pass を parallel crossing extraction に置き換え、元の state machine と grid decision
+を input order で再構築します。逆順を含む 2 回の 1,000-frame run は
+70.06/69.32 秒から 68.26/68.67 秒へ短縮し、0.9-2.6% の削減でした。allocation は
+3.02-3.05 GiB、maximum working set は 435.5-437.2 MiB の範囲です。40-frame pair
+は結果が混在したため、固定の short-run gain は主張しません。IPP-fast の 6 pair
+160-frame check は 11.64/11.67 秒で中立だったため、元の serial second scan を維持します。
+
+別の 40-frame `--threads 0` gate では、Exact v0.4.0 が Python `g4315520` と
+luma、chroma、raw JSON、順序付き 80 個すべての `fileLoc`、stdout、normalized
+stderr、timestamp-normalized log で完全一致しました。Exact `current` も、予期
+される build-identity JSON field を除外したうえで Python PR341 と同じ surface が
+一致しました。v0.4.0 strict-oracle artifact は次のとおりです。
+
+| Baseline artifact | SHA-256 |
+| --- | --- |
+| Luma TBC | `37B799282A82770461AD9DB8EC2E471AB86F9C05F145D411C2FCA5A6D695CACE` |
+| Chroma TBC | `DC2E3C6FAC3323F05080F22CBEB1236A9EBFB3F0A8CB58B6D498F42EA1AFD794` |
+| JSON | `9FB6DC1FAE18024B63B93E1165C5C3F7858AC6A01A786043F7A0E4BF5EAEC30C` |
+
+各 .NET profile と Python PR341 は mode ごとに 1 つの deterministic hash set
+だけを生成しました。Python v0.4.0 の各 default/nonzero mode は 3 回の反復で
+luma/chroma/JSON/log hash を 3 種類生成しましたが、ordered `fileLoc`、stdout、
+normalized stderr は安定していました。そのため、これらの Python 行は throughput
+比較専用で、strict oracle は Python v0.4.0 `g4315520 --threads 0` のままです。
+IPP-fast はこの fixture では対応する Exact の luma/chroma hash と一致しましたが、
+この sample 固有の結果は一般的な byte-compatibility 保証ではありません。
 
 以前の Exact-only thread matrix は Intel Core Ultra 7 265K（20 logical processor）、
 Windows 11 build 26220、.NET SDK/runtime `11.0.100-preview.6.26359.118`、
@@ -2030,6 +2050,85 @@ single-pair observation とします。luma、chroma、raw JSON、normalized std
 v0.4.0/current の explicit zero、omitted/default、20 workers を対象にし、stdout と
 thread 間 determinism も一致しました。
 
+### Bounded parallel current burst-prefix analysis
+
+`current` chroma phase pass は state-independent な line prefix を固定 contiguous
+range に分け、最大 4 worker で probe します。最後の 16-line track-rotation check、
+phase-sequence assembly、color-killer summary、全 reduction、全 cross-field state
+transition は decode thread が input order で実行します。worker exception が起きた
+場合は speculative prefix を破棄して元の serial path を再実行し、従来の exception/
+recovery behavior を維持します。v0.4.0 と one-worker decode は serial のままです。
+
+初期の 20-way prototype は short-run CPU use を上げましたが 40-frame wall time を
+悪化させたため却下しました。4-versus-8-worker の direct 10-pair test は throughput
+neutral で、`--threads 20` の RF/FFT work を妨げない 4-worker internal cap を採用
+しました。160-frame Exact `current`/20-worker pair 6 組はすべて candidate が速く、
+median wall time は 11.94 から 10.68 秒（10.6% 減）、median active core は 6.11
+から 6.69、median process CPU time は 72.98 から 71.43 秒になりました。
+
+反対順序の 1,000-frame/2,000-field Exact `current`/20-worker 比較 2 回は wall time
+を 64.36/65.15 から 56.31/56.05 秒へ短縮しました（12.5-14.0%）。luma、chroma、
+raw JSON、stdout、normalized stderr/log、全 ordered `fileLoc` は baseline、candidate、
+explicit-zero/default/20-worker gate、更新した Exact/IPP-fast matrix で一致しました。
+final matrix でも current backend ごとに default/5/10/20 worker 全体で deterministic
+hash set は 1 つです。xUnit v3/Microsoft.Testing.Platform test は 1,244 件すべて
+通過しました。
+
+allocation improvement は主張しません。sampled baseline allocation は
+2.079/2.085 GiB、candidate は 2.125/2.237 GiB でした。candidate maximum working-set
+sample は 393.8/515.0 MiB ですが、first/last-third median は 386.4/390.1 と
+490.0/493.6 MiB に留まりました。両 long run は progressive growth や OOM なしで
+完了し、追加の parallel result と scheduling work は field ごとに bounded です。
+
+### Bounded parallel current ACC segments
+
+`current` automatic chroma-gain pass は、独立した単調増加の chroma segment を固定
+contiguous range に分け、最大 8 worker で処理します。raw-gain construction、
+outlier limit、smoothing、final noise FMA reduction、mean amplitude、cross-field state、
+output submission は入力順のままです。各 sync-tip window が自身の segment 内に完全に
+収まり、scratch が 4,096 sample 以下の場合だけ parallel path を使用します。異常または
+overlap する入力、v0.4.0、one-worker call は serial path を維持します。従来の public
+CLR method signature は変更していません。worker exception は捕捉し、input partition
+順に再送出します。worker-local float/double median scratch は output mutation 前に rent
+し、すべての exit path で返却します。
+
+160-frame Exact `current`/20-worker の interleaved pair 6 組では、median wall time が
+11.15 から 10.47 秒へ 6.1% 短縮し、median active core は 6.67 から 7.58 に増えました。
+別の 1,000-frame/2,000-field pair は 55.851 から 53.003 秒へ 5.1% 短縮しました。
+luma、chroma、raw JSON、stdout、該当する normalized stderr/log、全 ordered `fileLoc`
+は一致しました。candidate allocation は 1.918 GiB、first/last-third working-set median
+は 382.9/383.0 MiB、maximum は 386.7 MiB で、progressive growth や OOM はありません。
+
+cap-8 audit 当時の `current` matrix は Exact と IPP-fast の default/1/5/10/20 worker を
+各 6 回 interleaved 測定し、合計 60 Release run です。compatibility hash set はすべて 1 値
+でした。zero-warning Release build と 1,262 件すべての xUnit v3/
+Microsoft.Testing.Platform test が通過しました。
+
+### Bounded current Super-Gaussian FFT parallelism
+
+`current` Super-Gaussian chroma final filter の既存 PocketFFT packet-independent
+stage は、requested worker count が許す場合に最大 12 internal worker を使用します。
+packet decomposition、padding、mask、arithmetic、transform order、output order、serial
+path は変更していません。filter は bounded instance-local workspace を 1 つ保持し、
+concurrent call は互いに分離した temporary workspace を使用します。
+
+matched cap-4/cap-8 short pair 12 組の combined median wall time は 14.67 から
+14.29 秒へ 2.57% 短縮し、median active core は 6.50 から 6.88 に増えました。
+反対順序の 1,000-frame/2,000-field comparison 2 回では combined median が
+54.345 から 52.408 秒へ 3.56% 短縮しました。luma、chroma、raw JSON、stdout、
+normalized stderr/log、全 ordered `fileLoc` は一致しました。2 回の candidate の
+first/last-third working-set median は 428.6/433.1 MiB と 382.4/382.7 MiB、maximum
+は 435.9 と 386.5 MiB で、progressive growth や OOM はありません。
+
+旧 pipeline に対する初期 cap-12 experiment は一度却下されました。その後の bounded
+pipeline と output-buffer 変更を含む最新 HEAD で cap-8/cap-12 audit を再実行し、cap 12
+を採用しました。160-frame interleaved pair 6 組中 5 組で candidate が速く、median wall
+time は 14.43 から 13.88 秒へ 3.8% 短縮し、median process CPU time も 109.33 から
+103.95 秒へ低下しました。median peak working set は 787.95 と 787.69 MiB で実質同等です。
+全 run の luma、chroma、raw JSON、stdout、normalized stderr/log、ordered `fileLoc` が
+一致し、更新した 30-run `current` matrix の全 cell でも各 compatibility surface は
+1 hash でした。
+
 </details>
 
 <!-- SECTION: build -->
@@ -2052,7 +2151,7 @@ thread 間 determinism も一致しました。
 .\tools\build-ipp-native.ps1
 dotnet restore VHSDecodeDotNet.slnx
 dotnet build VHSDecodeDotNet.slnx -c Release --no-restore
-dotnet test --solution VHSDecodeDotNet.slnx -c Release --no-build --no-restore --minimum-expected-tests 1236
+dotnet test --solution VHSDecodeDotNet.slnx -c Release --no-build --no-restore --minimum-expected-tests 1262
 ```
 
 最初の command は optional `ipp-fast` native artifact を含めるためのものです。
@@ -2065,7 +2164,7 @@ third-party notice を埋め込み、license sidecar file は追加しません�
 
 現在の正式な Release build は warning 0、error 0 です。xUnit v3 project は
 `dotnet test` と Visual Studio Test Explorer の両方で個別に検出できる
-**1,236** tests を公開します。
+**1,262** tests を公開します。
 
 <!-- SECTION: usage -->
 

@@ -97,6 +97,205 @@ public sealed class VhsChromaAutomaticGainCurrentTests
                 smoothingWindow: -1));
     }
 
+    [Theory(DisplayName = "Parallel current chroma ACC remains bit-exact")]
+    [InlineData(-1)]
+    [InlineData(0)]
+    [InlineData(1)]
+    [InlineData(2)]
+    [InlineData(5)]
+    [InlineData(20)]
+    [InlineData(int.MaxValue)]
+    public void ParallelCurrentChromaAccRemainsBitExact(int workerThreads)
+    {
+        const int LineCount = 300;
+        const int LineLength = 1_024;
+        const int LineOffset = 3;
+        double[] expectedSamples = BuildInput(LineCount * LineLength);
+        double[] actualSamples = (double[])expectedSamples.Clone();
+        ChromaPhaseLine[] phaseSequence = BuildPhaseSequence(
+            LineCount,
+            LineLength,
+            LineOffset);
+
+        CurrentAutomaticChromaGainResult expected =
+            VhsChromaDecoder.ApplyCurrentAutomaticChromaGainInPlace(
+                expectedSamples,
+                burstAbsRef: 72.0,
+                phaseSequence,
+                burstDetectedLine: 8,
+                syncTipLength: 200,
+                workerThreads: 1);
+        CurrentAutomaticChromaGainResult actual =
+            VhsChromaDecoder.ApplyCurrentAutomaticChromaGainInPlace(
+                actualSamples,
+                burstAbsRef: 72.0,
+                phaseSequence,
+                burstDetectedLine: 8,
+                syncTipLength: 200,
+                workerThreads: workerThreads);
+
+        Assert.Equal(expectedSamples, actualSamples);
+        Assert.Equal(
+            BitConverter.DoubleToInt64Bits(expected.MeanBurstAmplitude),
+            BitConverter.DoubleToInt64Bits(actual.MeanBurstAmplitude));
+        Assert.Equal(
+            BitConverter.DoubleToInt64Bits(expected.NoiseFloor),
+            BitConverter.DoubleToInt64Bits(actual.NoiseFloor));
+    }
+
+    [Fact(DisplayName = "Parallel current chroma ACC preserves non-monotonic fallback behavior")]
+    public void ParallelCurrentChromaAccPreservesNonMonotonicFallbackBehavior()
+    {
+        const int LineCount = 300;
+        const int LineLength = 1_024;
+        double[] expectedSamples = BuildInput(LineCount * LineLength);
+        double[] actualSamples = (double[])expectedSamples.Clone();
+        ChromaPhaseLine[] phaseSequence = BuildPhaseSequence(
+            LineCount,
+            LineLength,
+            lineOffset: 0);
+        phaseSequence[151] = phaseSequence[151] with
+        {
+            BurstStart = phaseSequence[149].BurstStart
+        };
+
+        CurrentAutomaticChromaGainResult expected =
+            VhsChromaDecoder.ApplyCurrentAutomaticChromaGainInPlace(
+                expectedSamples,
+                burstAbsRef: 72.0,
+                phaseSequence,
+                burstDetectedLine: 8,
+                syncTipLength: 200,
+                workerThreads: 1);
+        CurrentAutomaticChromaGainResult actual =
+            VhsChromaDecoder.ApplyCurrentAutomaticChromaGainInPlace(
+                actualSamples,
+                burstAbsRef: 72.0,
+                phaseSequence,
+                burstDetectedLine: 8,
+                syncTipLength: 200,
+                workerThreads: 20);
+
+        Assert.Equal(expectedSamples, actualSamples);
+        Assert.Equal(expected, actual);
+    }
+
+    [Fact(DisplayName = "Parallel current chroma ACC falls back for overlapping sync-tip windows")]
+    public void ParallelCurrentChromaAccFallsBackForOverlappingSyncTipWindows()
+    {
+        const int LineCount = 1_200;
+        const int LineLength = 64;
+        double[] expectedSamples = BuildInput(LineCount * LineLength);
+        double[] actualSamples = (double[])expectedSamples.Clone();
+        ChromaPhaseLine[] phaseSequence = BuildPhaseSequence(
+            LineCount,
+            LineLength,
+            lineOffset: 0);
+
+        CurrentAutomaticChromaGainResult expected =
+            VhsChromaDecoder.ApplyCurrentAutomaticChromaGainInPlace(
+                expectedSamples,
+                burstAbsRef: 72.0,
+                phaseSequence,
+                burstDetectedLine: 8,
+                syncTipLength: 200);
+        CurrentAutomaticChromaGainResult actual =
+            VhsChromaDecoder.ApplyCurrentAutomaticChromaGainInPlace(
+                actualSamples,
+                burstAbsRef: 72.0,
+                phaseSequence,
+                burstDetectedLine: 8,
+                syncTipLength: 200,
+                workerThreads: 20);
+
+        Assert.Equal(expectedSamples, actualSamples);
+        Assert.Equal(expected, actual);
+    }
+
+    [Fact(DisplayName = "Parallel current chroma ACC bounds workers to the phase count")]
+    public void ParallelCurrentChromaAccBoundsWorkersToPhaseCount()
+    {
+        const int LineCount = 3;
+        const int LineLength = 30_000;
+        double[] expectedSamples = BuildInput(LineCount * LineLength);
+        double[] actualSamples = (double[])expectedSamples.Clone();
+        ChromaPhaseLine[] phaseSequence = BuildPhaseSequence(
+            LineCount,
+            LineLength,
+            lineOffset: 0);
+
+        CurrentAutomaticChromaGainResult expected =
+            VhsChromaDecoder.ApplyCurrentAutomaticChromaGainInPlace(
+                expectedSamples,
+                burstAbsRef: 72.0,
+                phaseSequence,
+                burstDetectedLine: 0,
+                syncTipLength: 200);
+        CurrentAutomaticChromaGainResult actual =
+            VhsChromaDecoder.ApplyCurrentAutomaticChromaGainInPlace(
+                actualSamples,
+                burstAbsRef: 72.0,
+                phaseSequence,
+                burstDetectedLine: 0,
+                syncTipLength: 200,
+                workerThreads: int.MaxValue);
+
+        Assert.Equal(expectedSamples, actualSamples);
+        Assert.Equal(expected, actual);
+    }
+
+    [Fact(DisplayName = "Current chroma ACC retains its public CLR signature")]
+    public void CurrentChromaAccRetainsItsPublicClrSignature()
+    {
+        Type[] expectedParameterTypes =
+        [
+            typeof(Span<double>),
+            typeof(double),
+            typeof(IReadOnlyList<ChromaPhaseLine>),
+            typeof(int),
+            typeof(int),
+            typeof(int),
+            typeof(double)
+        ];
+
+        Assert.NotNull(typeof(VhsChromaDecoder).GetMethod(
+            nameof(VhsChromaDecoder.ApplyCurrentAutomaticChromaGainInPlace),
+            expectedParameterTypes));
+    }
+
+    [Fact(DisplayName = "Parallel current chroma ACC preserves invalid phase exception side effects")]
+    public void ParallelCurrentChromaAccPreservesInvalidPhaseExceptionSideEffects()
+    {
+        const int LineCount = 300;
+        const int LineLength = 1_024;
+        double[] expectedSamples = BuildInput(LineCount * LineLength);
+        double[] actualSamples = (double[])expectedSamples.Clone();
+        ChromaPhaseLine[] phaseSequence = BuildPhaseSequence(
+            LineCount,
+            LineLength,
+            lineOffset: 0);
+        phaseSequence[150] = null!;
+
+        Exception expected = Assert.Throws<NullReferenceException>(
+            () => VhsChromaDecoder.ApplyCurrentAutomaticChromaGainInPlace(
+                expectedSamples,
+                burstAbsRef: 72.0,
+                phaseSequence,
+                burstDetectedLine: 8,
+                syncTipLength: 200));
+        Exception actual = Assert.Throws<NullReferenceException>(
+            () => VhsChromaDecoder.ApplyCurrentAutomaticChromaGainInPlace(
+                actualSamples,
+                burstAbsRef: 72.0,
+                phaseSequence,
+                burstDetectedLine: 8,
+                syncTipLength: 200,
+                workerThreads: 20));
+
+        Assert.Equal(expected.GetType(), actual.GetType());
+        Assert.Equal(expectedSamples, actualSamples);
+    }
+
     private static double CalculateSyncTipMad(ReadOnlySpan<double> samples)
     {
         double median = CalculateMedian(samples);

@@ -401,59 +401,83 @@ two 60-line buffers per detector.
 
 The latest public summary compares Python v0.4.0, merged Python PR341, Exact
 v0.4.0, Exact `current`, IPP-fast v0.4.0, and IPP-fast `current` on the same
-private local 40 MHz NTSC `BETAMAX_HIFI` `.lds` sample. The filename is
+private local 40 MHz PAL VHS `.ldf` fixture. The source filename is
 intentionally not published. Each .NET cell gives the median wall time,
 speedup, and wall-time reduction against its profile-matched Python column:
 
 <!-- LATEST_PERFORMANCE_BEGIN -->
 | CLI mode (workers) | Python v0.4.0 | Python PR341 | Exact + v0.4.0 | Exact + current | IPP-fast + v0.4.0 | IPP-fast + current |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| default (5) | 16.983 s | 14.414 s | 5.623 s / 3.020x / 66.9% | 6.730 s / 2.142x / 53.3% | 5.295 s / 3.207x / 68.8% | 6.688 s / 2.155x / 53.6% |
-| `--threads 1` | 21.263 s | 19.881 s | 15.275 s / 1.392x / 28.2% | 17.979 s / 1.106x / 9.6% | 14.625 s / 1.454x / 31.2% | 17.008 s / 1.169x / 14.4% |
-| `--threads 5` | 16.880 s | 14.329 s | 5.475 s / 3.083x / 67.6% | 6.514 s / 2.200x / 54.5% | 5.361 s / 3.149x / 68.2% | 6.841 s / 2.094x / 52.3% |
-| `--threads 10` | 17.612 s | 15.149 s | 4.640 s / 3.795x / 73.7% | 5.890 s / 2.572x / 61.1% | 4.900 s / 3.594x / 72.2% | 5.631 s / 2.690x / 62.8% |
-| `--threads 20` | 18.330 s | 15.447 s | 3.809 s / 4.812x / 79.2% | 4.388 s / 3.520x / 71.6% | 3.722 s / 4.924x / 79.7% | 4.819 s / 3.206x / 68.8% |
+| default (5) | 15.207 s | 16.780 s | 4.389 s / 3.465x / 71.14% | 7.030 s / 2.387x / 58.10% | 3.609 s / 4.213x / 76.27% | 5.946 s / 2.822x / 64.57% |
+| `--threads 1` | 17.694 s | 19.414 s | 10.065 s / 1.758x / 43.11% | 13.871 s / 1.400x / 28.55% | 7.215 s / 2.453x / 59.23% | 11.301 s / 1.718x / 41.79% |
+| `--threads 5` | 15.719 s | 17.801 s | 4.282 s / 3.671x / 72.76% | 7.428 s / 2.396x / 58.27% | 3.568 s / 4.406x / 77.30% | 5.816 s / 3.061x / 67.33% |
+| `--threads 10` | 16.037 s | 18.266 s | 3.494 s / 4.589x / 78.21% | 6.040 s / 3.024x / 66.93% | 3.098 s / 5.177x / 80.68% | 5.190 s / 3.519x / 71.59% |
+| `--threads 20` | 16.405 s | 18.395 s | 3.235 s / 5.071x / 80.28% | 5.118 s / 3.594x / 72.18% | 2.654 s / 6.182x / 83.82% | 4.713 s / 3.903x / 74.38% |
 <!-- LATEST_PERFORMANCE_END -->
+<!-- LATEST_PERFORMANCE_RUNS: base=90 current-refresh=30 repeats=3 -->
 
-The benchmark host was an Intel Core Ultra 7 265K with 20 logical processors,
-Windows 11 25H2 build 26220.8925, and .NET SDK/runtime
-`11.0.100-preview.6.26359.118`. Python v0.4.0 retains the prior fixed-matrix
-medians. Merged PR341 commit
-`2f21e8ed6018b14561396cc95f1f6828054470b8`
-(`v0.4.0-40-g2f21e8ed`) was measured separately with 15 runs, while the four
-.NET columns retain their latest 60 interleaved runs. All measurements use the
-same host, sample, and 40-frame window, but the PR341 session was not
-interleaved with the .NET session and is therefore a profile-peer comparison
-rather than a paired A/B. Python 3.14.0 used NumPy 2.4.6, SciPy 1.18.0, Numba
-0.66.0, and python-soxr 1.1.0. The shared arguments were:
+The benchmark ran on 2026-08-02 using main commit
+`c92af1dfd0f96cd7f2d49f3219fb428d0f4e0865`, an Intel Core Ultra 7 265K with
+20 logical processors, Windows 11 build 26220, and .NET SDK/runtime
+`11.0.100-preview.6.26359.118`. Each of the 30 mode/profile cells was measured
+three times in interleaved order, for 90 Release runs. On 2026-08-03, all ten
+`current` cells were refreshed with three interleaved runs of the final cap-12
+branch candidate after bounded ACC segment and Super-Gaussian FFT parallelization,
+adding 30 Release runs. The Python and .NET v0.4.0 cells retain their earlier
+audited measurements.
+Python v0.4.0 was commit
+`43155200da87c0d49eb37d8ec09b1372075ee8e4`; merged PR341 was commit
+`2f21e8ed6018b14561396cc95f1f6828054470b8` (`v0.4.0-40-g2f21e8ed`).
+Python 3.14.0 used NumPy 2.4.6,
+SciPy 1.18.0, Numba 0.66.0, and python-soxr 1.1.0. The shared arguments were:
 
 ```text
---system ntsc --NTSCJ --detect_chroma_track_phase --ire0_adjust
---tape_format BETAMAX_HIFI --frequency 40 --sub_deemphasis
---start 100 --length 40 --overwrite
+--system pal --detect_chroma_track_phase --ire0_adjust
+--tape_format VHS --frequency 40 --length 40 --start 100 --overwrite
 ```
 
-The default is **5 workers** in both implementations. Three separate Python
-v0.4.0 `--threads 0` controls had a 30.253 s median and were mutually
-identical. Every retained Exact v0.4.0 run matched that oracle for luma,
-chroma, JSON, stdout, normalized stderr/log, and all 80 ordered `fileLoc`
-values. The refreshed Exact-current and IPP-current columns each produced one
-deterministic hash set across all 15 runs. A separate candidate gate at
-`--threads 0`, default, and `--threads 20` also kept Exact v0.4.0 identical to
-the Python oracle. On this sample, IPP-fast happened to match its corresponding
-Exact profile for luma, chroma, JSON, and `fileLoc`; its explicit IPP
-diagnostic changes normalized stderr/log, and this sample-specific result is
-not a byte-compatibility promise.
+The shared `--start 100` selects the same bounded frame window for every
+profile; no `--start_fileloc` option was used. The default is **5 workers** in
+both implementations.
 
-The Python PR341 warm-up matched the `.NET current` reference for luma, chroma,
-all 80 ordered `fileLoc` values, stdout, and timestamp-normalized stderr/log.
-Its JSON payload also matched after excluding the expected `version` and
-`gitCommit` source-identity fields. All 15 PR341 runs produced one hash set on
-this sample. By contrast, the 15 nonzero/default Python v0.4.0 matrix runs kept
-one luma/chroma/JSON set here but produced seven normalized log hashes, and a
-previous fixed matrix observed unstable v0.4.0 artifact hashes across worker
-counts. Nonzero-thread Python rows are therefore throughput comparisons only;
-upstream v0.4.0 `g4315520 --threads 0` remains the strict oracle.
+The sync-scan candidate was also gated outside the short public matrix with
+Exact `current`, 20 workers, and no start offset. Interleaved 160- and
+400-frame medians moved from 17.23 to 16.80 s and from 33.14 to 32.57 s while
+median active cores rose from 5.27 to 5.60 and from 5.25 to 5.51. Two
+opposite-order 1,000-frame runs moved from 72.01/72.03 s to 70.57/70.59 s.
+Maximum working set stayed within 435.8-437.4 MiB and allocation stayed within
+3.02-3.04 GiB. Luma, chroma, JSON, stdout/stderr, normalized logs, and all
+2,000 ordered `fileLoc` values matched the pre-change build.
+
+The later Exact-only precise-scan stage replaced the second serial million-
+sample threshold pass with parallel crossing extraction, then rebuilt the
+original state machine and grid decisions in input order. Opposite-order
+1,000-frame runs moved from 70.06/69.32 s to 68.26/68.67 s, a 0.9-2.6%
+reduction. Allocation stayed at 3.02-3.05 GiB and maximum working set at
+435.5-437.2 MiB. The paired 40-frame results were mixed, so no fixed short-run
+gain is claimed. IPP-fast keeps its original serial second scan after a
+six-pair 160-frame check was neutral at 11.64/11.67 s.
+
+A separate 40-frame `--threads 0` gate made Exact v0.4.0 match Python
+`g4315520` for luma, chroma, raw JSON, all 80 ordered `fileLoc` values, stdout,
+normalized stderr, and timestamp-normalized logs. Exact `current` matched
+Python PR341 on the same surfaces after excluding expected build-identity JSON
+fields. The v0.4.0 strict-oracle artifacts were:
+
+| Baseline artifact | SHA-256 |
+| --- | --- |
+| Luma TBC | `37B799282A82770461AD9DB8EC2E471AB86F9C05F145D411C2FCA5A6D695CACE` |
+| Chroma TBC | `DC2E3C6FAC3323F05080F22CBEB1236A9EBFB3F0A8CB58B6D498F42EA1AFD794` |
+| JSON | `9FB6DC1FAE18024B63B93E1165C5C3F7858AC6A01A786043F7A0E4BF5EAEC30C` |
+
+Every .NET profile and Python PR341 produced one deterministic hash set per
+mode. Each Python v0.4.0 default/nonzero mode produced three distinct
+luma/chroma/JSON/log hash sets across its three repetitions, while ordered
+`fileLoc`, stdout, and normalized stderr stayed stable. Those Python rows are
+therefore throughput comparisons only; Python v0.4.0 `g4315520 --threads 0`
+remains the strict oracle. IPP-fast matched its corresponding Exact luma and
+chroma hashes on this fixture, but that sample-specific observation is not a
+general byte-compatibility promise.
 
 A previous Exact-only thread matrix used an Intel Core Ultra 7 265K (20 logical
 processors), Windows 11 build 26220, .NET SDK/runtime
@@ -2097,6 +2121,93 @@ single-pair observation. Luma, chroma, raw JSON, normalized stderr/log, and all
 v0.4.0/current at explicit zero, omitted/default, and 20 workers and also matched
 stdout and cross-thread determinism.
 
+### Bounded parallel current burst-prefix analysis
+
+The `current` chroma phase pass now probes the state-independent line prefix in
+fixed contiguous ranges across at most four workers. The final 16-line track
+rotation check, phase-sequence assembly, color-killer summary, all reductions,
+and every cross-field state transition remain in input order on the decode
+thread. A worker exception discards the speculative prefix and reruns the
+original serial path, preserving the prior exception and recovery behavior.
+v0.4.0 and one-worker decoding retain the serial path.
+
+An earlier 20-way prototype raised short-run CPU use but regressed 40-frame wall
+time, so it was rejected. Direct ten-pair 4-versus-8-worker testing was
+throughput-neutral; the four-worker internal cap was retained to leave RF and
+FFT work runnable under `--threads 20`. Six interleaved 160-frame Exact
+`current`/20-worker pairs all favored the retained candidate. Median wall time
+fell from 11.94 to 10.68 seconds (10.6%) while median active cores rose from
+6.11 to 6.69 and median process CPU time fell from 72.98 to 71.43 seconds.
+
+Two opposite-order 1,000-frame/2,000-field Exact `current`/20-worker comparisons
+moved wall time from 64.36/65.15 to 56.31/56.05 seconds, a 12.5-14.0% reduction.
+Luma, chroma, raw JSON, stdout, normalized stderr/log, and every ordered
+`fileLoc` matched across baseline, candidate, explicit-zero/default/20-worker
+gates, and the refreshed Exact/IPP-fast matrix. The final matrix also produced
+one deterministic hash set per current backend across default, 5, 10, and 20
+workers. All 1,244 xUnit v3/Microsoft.Testing.Platform tests passed.
+
+No allocation improvement is claimed: sampled baseline allocation was
+2.079/2.085 GiB versus 2.125/2.237 GiB for the candidate. Candidate maximum
+working-set samples were 393.8/515.0 MiB, but first/last-third medians stayed
+at 386.4/390.1 and 490.0/493.6 MiB. Both long runs completed without progressive
+growth or OOM; the extra parallel results and scheduling work remain bounded per
+field.
+
+### Bounded parallel current ACC segments
+
+The `current` automatic chroma-gain pass now processes independent, monotonic
+chroma segments in fixed contiguous ranges across at most eight workers. Raw-gain
+construction, outlier limits, smoothing, final noise FMA reduction, mean
+amplitude, cross-field state, and output submission remain in input order.
+Parallel work is enabled only when each sync-tip window is wholly inside its own
+segment and scratch is at most 4,096 samples; unusual or overlapping input,
+v0.4.0, and one-worker calls retain the serial path. The prior public CLR method
+signature is unchanged. Worker exceptions are captured and rethrown in
+input-partition order. Worker-local float/double median scratch is rented before
+output mutation and returned on every exit.
+
+Six interleaved 160-frame Exact `current`/20-worker pairs reduced median wall
+time from 11.15 to 10.47 seconds (6.1%) while median active cores rose from 6.67
+to 7.58. A separate 1,000-frame/2,000-field pair moved from 55.851 to 53.003
+seconds (5.1%); luma, chroma, raw JSON, stdout, normalized stderr/log where
+applicable, and all ordered `fileLoc` values matched. Candidate allocation was
+1.918 GiB and its first/last-third working-set medians were 382.9/383.0 MiB,
+with a 386.7 MiB maximum and no progressive growth or OOM.
+
+The cap-8 audit's then-current matrix used six interleaved runs for default, 1,
+5, 10, and 20 workers in Exact and IPP-fast, for 60 Release runs. Every compatibility
+hash set contained one value. The zero-warning Release build and all 1,262 xUnit
+v3/Microsoft.Testing.Platform tests passed.
+
+### Bounded current Super-Gaussian FFT parallelism
+
+The existing packet-independent PocketFFT stages in the `current`
+Super-Gaussian chroma final filter now use at most twelve internal workers when
+the requested worker count permits it. Packet decomposition,
+padding, masks, arithmetic, transform order, output order, and the serial path
+are unchanged. The filter still retains one bounded instance-local workspace;
+concurrent calls obtain isolated temporary workspaces.
+
+Across twelve matched short cap-4/cap-8 pairs, combined median wall time fell
+from 14.67 to 14.29 seconds (2.57%) while median active cores rose from 6.50 to
+6.88. Two opposite-order 1,000-frame/2,000-field comparisons reduced the
+combined median from 54.345 to 52.408 seconds (3.56%). Luma, chroma, raw JSON,
+stdout, normalized stderr/log, and every ordered `fileLoc` matched. Candidate
+first/last-third working-set medians were 428.6/433.1 MiB and 382.4/382.7 MiB
+across the two runs, with maxima of 435.9 and 386.5 MiB and no progressive
+growth or OOM.
+
+An earlier cap-12 experiment against an older pipeline was rejected. After the
+later bounded pipeline and output-buffer changes, a fresh exact-HEAD cap-8 versus
+cap-12 audit retained cap 12: it won five of six interleaved 160-frame pairs and
+reduced median wall time from 14.43 to 13.88 seconds (3.8%). Median process CPU
+time also fell from 109.33 to 103.95 seconds, while median peak working set stayed
+effectively flat at 787.95 versus 787.69 MiB. Luma, chroma, raw JSON, stdout,
+normalized stderr/log, and ordered `fileLoc` matched in every run. The refreshed
+30-run `current` matrix also produced one hash for every compatibility surface in
+every cell.
+
 </details>
 
 <!-- SECTION: build -->
@@ -2121,7 +2232,7 @@ Requirements:
 .\tools\build-ipp-native.ps1
 dotnet restore VHSDecodeDotNet.slnx
 dotnet build VHSDecodeDotNet.slnx -c Release --no-restore
-dotnet test --solution VHSDecodeDotNet.slnx -c Release --no-build --no-restore --minimum-expected-tests 1236
+dotnet test --solution VHSDecodeDotNet.slnx -c Release --no-build --no-restore --minimum-expected-tests 1262
 ```
 
 The first command includes the optional `ipp-fast` native artifact; omit it for
@@ -2134,7 +2245,7 @@ deployment computer. Binary-only single-file releases embed
 sidecar license files. An Exact-only build may omit the native build step.
 
 The current formal Release build has zero warnings and errors. The xUnit v3
-project exposes **1,236** independently discoverable tests to both
+project exposes **1,262** independently discoverable tests to both
 `dotnet test` and Visual Studio Test Explorer.
 
 <!-- SECTION: usage -->
