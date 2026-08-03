@@ -36,7 +36,7 @@ upstream release `v0.4.0`、commit
 - VHS family には VHS/S-VHS、Betamax、Video8/Hi8、U-matic、Type C、EIAJ、
   upstream が対応する PAL/NTSC variant が含まれます。
 - TBC utility、ダブルクリック GUI、開発者向け plot window は対象外です。
-- Visual Studio 2026 の `.slnx` には **1,266** 件の標準 xUnit v3 test があり、
+- Visual Studio 2026 の `.slnx` には **1,267** 件の標準 xUnit v3 test があり、
   Test Explorer と `dotnet test` の両方で実行できます。
 
 <!-- SECTION: start -->
@@ -118,6 +118,14 @@ parallelization 後の final cap-12 branch candidate で全 `current` cell を 3
 を新しい throughput claim には使用しません。TBC、chroma、JSON、stdout、normalized
 stderr/log、および zero/default/20-worker determinism はすべて一致しました。
 
+2026-08-03 の最新 short screen では、classified sync pulse を immutable value として
+保持し、pulse ごとの object allocation を除去しました。同じ 80-frame Exact
+`current --threads 20` gate で wall time は `10.309` から `10.003` 秒へ `2.97%`
+短縮し、process CPU time は `69.453` から `70.797` 秒へ `1.93%` 増加、peak working
+set は `435.3`/`435.0` MiB で横ばいでした。9 項目の compatibility comparison は
+すべて一致しました。この single pair は最新 optimization evidence の更新であり、
+上の full matrix median を置き換えるものではありません。
+
 各 .NET cell は wall-time median と profile が対応する Python 列に対する
 speedup の順です。`1.000x` 未満は Python より遅いことを示します。Python
 PR341 は merge commit `2f21e8ed6018b14561396cc95f1f6828054470b8` で、
@@ -167,7 +175,7 @@ path を維持します。
 dotnet restore VHSDecodeDotNet.slnx
 dotnet build VHSDecodeDotNet.slnx -c Release --no-restore
 dotnet test --solution VHSDecodeDotNet.slnx -c Release `
-  --no-build --no-restore --minimum-expected-tests 1266
+  --no-build --no-restore --minimum-expected-tests 1267
 ```
 
 Visual Studio 2026 で `VHSDecodeDotNet.slnx` を開くと、build、debug、

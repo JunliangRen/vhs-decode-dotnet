@@ -2144,6 +2144,20 @@ CPU/allocation evidence としてのみ扱い、新しい throughput claim に�
 上の full performance matrix は変更していません。luma TBC、chroma TBC、raw JSON、
 stdout、normalized stderr/log、zero/default/20-worker determinism はすべて一致しました。
 
+### Value-type classified sync pulse
+
+`ClassifiedSyncPulse` は immutable record struct になりました。kind、pulse geometry、
+ordering flag、list order、および downstream の数値式は変更せず、pulse classification
+と VBlank refinement で accepted pulse ごとの managed object allocation を除去します。
+focused xUnit v3 test が value-type contract と保存値を固定します。
+
+matched 80-frame Exact `current --threads 20` baseline/candidate short screen では、
+wall time が 10.309 から 10.003 秒へ 2.97% 短縮しました。process CPU time は
+69.453 から 70.797 秒へ 1.93% 増加し、peak working set は 435.3/435.0 MiB で
+横ばいでした。luma TBC、chroma TBC、raw JSON、stdout、normalized stderr/log、
+すべての ordered `fileLoc` が一致しました。この single pair は recent optimization
+evidence であり、上の full matrix median を置き換えるものではありません。
+
 </details>
 
 <!-- SECTION: build -->
@@ -2166,7 +2180,7 @@ stdout、normalized stderr/log、zero/default/20-worker determinism はすべて
 .\tools\build-ipp-native.ps1
 dotnet restore VHSDecodeDotNet.slnx
 dotnet build VHSDecodeDotNet.slnx -c Release --no-restore
-dotnet test --solution VHSDecodeDotNet.slnx -c Release --no-build --no-restore --minimum-expected-tests 1266
+dotnet test --solution VHSDecodeDotNet.slnx -c Release --no-build --no-restore --minimum-expected-tests 1267
 dotnet test --project tests\VHSDecode.Tests\VHSDecode.Tests.csproj -c Release --no-build --no-restore --coverage --coverage-output coverage.cobertura.xml --coverage-output-format cobertura
 ```
 
@@ -2180,7 +2194,7 @@ third-party notice を埋め込み、license sidecar file は追加しません�
 
 現在の正式な Release build は warning 0、error 0 です。xUnit v3 project は
 `dotnet test` と Visual Studio Test Explorer の両方で個別に検出できる
-**1,266** tests を公開します。
+**1,267** tests を公開します。
 
 <!-- SECTION: usage -->
 

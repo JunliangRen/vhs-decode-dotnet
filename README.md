@@ -38,7 +38,7 @@ evidence, and remaining gaps.
   EIAJ, and supported PAL/NTSC variants.
 - TBC utility tools, the double-click GUI, and developer plotting windows are
   intentionally out of scope.
-- The Visual Studio 2026 `.slnx` solution has **1,266** standard xUnit v3 tests
+- The Visual Studio 2026 `.slnx` solution has **1,267** standard xUnit v3 tests
   that are visible in Test Explorer and runnable with `dotnet test`.
 
 <!-- SECTION: start -->
@@ -123,6 +123,14 @@ peak working set fell from `435.1` to `430.5` MiB. This single pair is not used
 as a new throughput claim. TBC, chroma, JSON, stdout, normalized stderr/logs,
 and zero/default/20-worker determinism all matched.
 
+The latest 2026-08-03 short screen stores classified sync pulses as immutable
+values instead of allocating one object per pulse. On the same 80-frame Exact
+`current --threads 20` gate, wall time fell from `10.309` to `10.003` seconds
+(`2.97%`), process CPU time rose from `69.453` to `70.797` seconds (`1.93%`),
+and peak working set stayed flat at `435.3`/`435.0` MiB. All nine compatibility
+comparisons matched. This single pair updates recent optimization evidence,
+not the full matrix medians above.
+
 Each .NET cell shows median wall time followed by speedup versus its
 profile-matched Python column; values below `1.000x` are slower. Python PR341
 is merge commit `2f21e8ed6018b14561396cc95f1f6828054470b8`, the upstream peer
@@ -173,7 +181,7 @@ The pinned SDK is .NET `11.0.100-preview.6.26359.118`.
 dotnet restore VHSDecodeDotNet.slnx
 dotnet build VHSDecodeDotNet.slnx -c Release --no-restore
 dotnet test --solution VHSDecodeDotNet.slnx -c Release `
-  --no-build --no-restore --minimum-expected-tests 1266
+  --no-build --no-restore --minimum-expected-tests 1267
 ```
 
 Open `VHSDecodeDotNet.slnx` in Visual Studio 2026 to build, debug, and run the

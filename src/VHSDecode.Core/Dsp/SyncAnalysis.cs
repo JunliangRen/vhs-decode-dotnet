@@ -24,7 +24,7 @@ public sealed record SyncTiming(
     SyncRange Equalizing,
     SyncRange VSync);
 
-public sealed record ClassifiedSyncPulse(SyncPulseKind Kind, Pulse Pulse, bool InOrder);
+public readonly record struct ClassifiedSyncPulse(SyncPulseKind Kind, Pulse Pulse, bool InOrder);
 
 public sealed record LineLocationResult(double[] Locations, bool[] Filled);
 
