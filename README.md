@@ -38,7 +38,7 @@ evidence, and remaining gaps.
   EIAJ, and supported PAL/NTSC variants.
 - TBC utility tools, the double-click GUI, and developer plotting windows are
   intentionally out of scope.
-- The Visual Studio 2026 `.slnx` solution has **1,296** standard xUnit v3 tests
+- The Visual Studio 2026 `.slnx` solution has **1,299** standard xUnit v3 tests
   that are visible in Test Explorer and runnable with `dotnet test`.
 
 <!-- SECTION: start -->
@@ -98,36 +98,37 @@ for compatibility-sensitive work.
 
 The table uses one fixed private local 40 MHz PAL VHS `.ldf` fixture and the
 same 40-frame window for every run; the filename is intentionally not
-published. On 2026-08-04, the 10 affected `current` cells were refreshed from
-three interleaved runs of this branch candidate based on main `9042d9a` (30
-Release runs). Python and the unchanged v0.4.0 .NET columns retain their
-audited same-window measurements. Compatibility is evaluated separately from
-speed.
+published. On 2026-08-04, all 20 .NET cells were refreshed from three
+interleaved runs of this branch candidate based on main `bb3d350` (60 Release
+runs). The Python columns retain their audited same-window measurements.
+Compatibility is evaluated separately from speed.
 
 <!-- LATEST_PERFORMANCE_BEGIN -->
 | CLI mode (workers) | Python v0.4.0 | Python PR341 | Exact + v0.4.0 | Exact + current | IPP-fast + v0.4.0 | IPP-fast + current |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| default (5) | 15.207 s | 16.780 s | 4.332 s / 3.510x | 5.067 s / 3.312x | 3.414 s / 4.454x | 3.274 s / 5.125x |
-| `--threads 1` | 17.694 s | 19.414 s | 9.867 s / 1.793x | 11.990 s / 1.619x | 7.163 s / 2.470x | 8.069 s / 2.406x |
-| `--threads 5` | 15.719 s | 17.801 s | 4.268 s / 3.683x | 5.216 s / 3.413x | 3.530 s / 4.453x | 3.203 s / 5.558x |
-| `--threads 10` | 16.037 s | 18.266 s | 3.579 s / 4.481x | 4.328 s / 4.221x | 3.007 s / 5.333x | 2.824 s / 6.469x |
-| `--threads 20` | 16.405 s | 18.395 s | 2.951 s / 5.559x | 3.634 s / 5.062x | 2.618 s / 6.267x | 2.443 s / 7.530x |
+| default (5) | 15.207 s | 16.780 s | 4.454 s / 3.414x | 4.954 s / 3.387x | 3.619 s / 4.202x | 3.463 s / 4.845x |
+| `--threads 1` | 17.694 s | 19.414 s | 9.931 s / 1.782x | 11.898 s / 1.632x | 7.198 s / 2.458x | 7.989 s / 2.430x |
+| `--threads 5` | 15.719 s | 17.801 s | 4.499 s / 3.494x | 4.893 s / 3.638x | 3.612 s / 4.352x | 3.445 s / 5.167x |
+| `--threads 10` | 16.037 s | 18.266 s | 3.727 s / 4.303x | 4.341 s / 4.207x | 3.036 s / 5.282x | 2.762 s / 6.612x |
+| `--threads 20` | 16.405 s | 18.395 s | 3.045 s / 5.387x | 3.828 s / 4.805x | 2.751 s / 5.964x | 2.378 s / 7.735x |
 <!-- LATEST_PERFORMANCE_END -->
-<!-- LATEST_PERFORMANCE_RUNS: current-refresh=30 repeats=3 -->
+<!-- LATEST_PERFORMANCE_RUNS: dotnet-refresh=60 repeats=3 -->
 
 Each .NET cell shows median wall time and speedup versus its profile-matched
-Python column. The default is **5 workers**. The pinned `current` CTI reciprocal
-now uses one process-wide 2,048-entry mantissa table instead of repeating
-integer division and remainder per sample. A production-sized CTI microbenchmark
-improved from 1.590 to 1.401 ms (11.88%; 1.135x throughput); a three-pair fixed
-100-frame `ipp-fast + current --threads 20` A/B improved from 5.14 to 5.07
-seconds (1.36%; 1.014x throughput).
+Python column. The default is **5 workers**. Native PCM16 ingest now converts
+eight signed samples at a time with AVX2 while retaining the exact scalar tail
+and fallback. Its conversion microbenchmark moved from 72.241 to 44.311 ms
+(38.66% lower; 1.630x throughput). A three-pair fixed 100-frame
+`ipp-fast + current --threads 20` A/B had a 5.01-to-4.96-second median change,
+but its two wins, one loss, and candidate variance make the end-to-end result
+near-neutral rather than a general speed claim.
 
-All 30 refreshed `current` cells were deterministic within each backend. The
-100-frame A/B matched luma, chroma, raw JSON, stdout, timing-normalized stderr,
-and timestamp-normalized logs. IPP-fast remains an explicit numerically close
-backend, so its artifacts are not claimed to match Exact byte for byte. Python
-v0.4.0 can produce
+All 60 refreshed .NET cells were deterministic within each profile/backend.
+Strict baseline/candidate gates also matched luma, chroma, raw JSON, stdout,
+timing-normalized stderr, timestamp-normalized logs, and ordered `fileLoc` for
+both profiles at zero, default, and 20 workers. IPP-fast remains an explicit
+numerically close backend, so its artifacts are not claimed to match Exact
+byte for byte. Python v0.4.0 can produce
 different output hashes with nonzero worker counts, so Python v0.4.0
 `g4315520 --threads 0` remains the strict oracle. Commands, hardware, hashes,
 memory bounds, and historical measurements are in the
@@ -164,7 +165,7 @@ The pinned SDK is .NET `11.0.100-preview.6.26359.118`.
 dotnet restore VHSDecodeDotNet.slnx
 dotnet build VHSDecodeDotNet.slnx -c Release --no-restore
 dotnet test --solution VHSDecodeDotNet.slnx -c Release `
-  --no-build --no-restore --minimum-expected-tests 1296
+  --no-build --no-restore --minimum-expected-tests 1299
 ```
 
 Open `VHSDecodeDotNet.slnx` in Visual Studio 2026 to build, debug, and run the
