@@ -414,23 +414,35 @@ speedup, and wall-time reduction against its profile-matched Python column:
 <!-- LATEST_PERFORMANCE_BEGIN -->
 | CLI mode (workers) | Python v0.4.0 | Python PR341 | Exact + v0.4.0 | Exact + current | IPP-fast + v0.4.0 | IPP-fast + current |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| default (5) | 15.207 s | 16.780 s | 4.332 s / 3.510x / 71.51% | 5.402 s / 3.106x / 67.81% | 3.414 s / 4.454x / 77.55% | 3.285 s / 5.108x / 80.42% |
-| `--threads 1` | 17.694 s | 19.414 s | 9.867 s / 1.793x / 44.24% | 12.596 s / 1.541x / 35.12% | 7.163 s / 2.470x / 59.52% | 8.754 s / 2.218x / 54.91% |
-| `--threads 5` | 15.719 s | 17.801 s | 4.268 s / 3.683x / 72.85% | 5.365 s / 3.318x / 69.86% | 3.530 s / 4.453x / 77.54% | 3.269 s / 5.445x / 81.63% |
-| `--threads 10` | 16.037 s | 18.266 s | 3.579 s / 4.481x / 77.68% | 4.379 s / 4.171x / 76.02% | 3.007 s / 5.333x / 81.25% | 2.896 s / 6.307x / 84.14% |
-| `--threads 20` | 16.405 s | 18.395 s | 2.951 s / 5.559x / 82.01% | 3.885 s / 4.735x / 78.88% | 2.618 s / 6.267x / 84.04% | 2.433 s / 7.559x / 86.77% |
+| default (5) | 15.207 s | 16.780 s | 4.332 s / 3.510x / 71.51% | 5.067 s / 3.312x / 69.80% | 3.414 s / 4.454x / 77.55% | 3.274 s / 5.125x / 80.49% |
+| `--threads 1` | 17.694 s | 19.414 s | 9.867 s / 1.793x / 44.24% | 11.990 s / 1.619x / 38.24% | 7.163 s / 2.470x / 59.52% | 8.069 s / 2.406x / 58.44% |
+| `--threads 5` | 15.719 s | 17.801 s | 4.268 s / 3.683x / 72.85% | 5.216 s / 3.413x / 70.70% | 3.530 s / 4.453x / 77.54% | 3.203 s / 5.558x / 82.01% |
+| `--threads 10` | 16.037 s | 18.266 s | 3.579 s / 4.481x / 77.68% | 4.328 s / 4.221x / 76.31% | 3.007 s / 5.333x / 81.25% | 2.824 s / 6.469x / 84.54% |
+| `--threads 20` | 16.405 s | 18.395 s | 2.951 s / 5.559x / 82.01% | 3.634 s / 5.062x / 80.24% | 2.618 s / 6.267x / 84.04% | 2.443 s / 7.530x / 86.72% |
 <!-- LATEST_PERFORMANCE_END -->
-<!-- LATEST_PERFORMANCE_RUNS: ipp-refresh=30 repeats=3 -->
+<!-- LATEST_PERFORMANCE_RUNS: current-refresh=30 repeats=3 -->
 
 The Python measurements were audited on 2026-08-02 using main commit
-`c92af1dfd0f96cd7f2d49f3219fb428d0f4e0865`. Exact retains the audited matrix
-from the now-merged phase-prefix change because this candidate does not enter
-that backend. On 2026-08-04, the 10 affected IPP-fast cells were refreshed from
-this branch candidate based on main `714f5a6`, with three interleaved runs per
-cell for 30 Release runs. The host was an Intel Core Ultra 7 265K with 20
-logical processors, Windows 11 build 26220, and .NET SDK/runtime
-`11.0.100-preview.6.26359.118`. Every refreshed cell produced one luma, chroma,
-raw-JSON, and stdout hash across its three runs.
+`c92af1dfd0f96cd7f2d49f3219fb428d0f4e0865`. The unchanged v0.4.0 .NET columns
+retain their audited same-window measurements. On 2026-08-04, the five Exact
+`current` and five IPP-fast `current` cells were refreshed from this branch
+candidate based on main `9042d9a`, with three interleaved runs per cell for 30
+Release runs. The host was an Intel Core Ultra 7 265K with 20 logical
+processors, Windows 11 build 26220, and .NET SDK/runtime
+`11.0.100-preview.6.26359.118`. Each backend produced one luma, chroma, raw-JSON,
+and stdout hash across every worker count and repetition.
+
+The current CTI candidate precomputes the pinned RCPSS mantissa approximation
+into one process-wide 2,048-entry read-only table (8 KiB of payload), replacing
+integer division and remainder in the per-sample hot path without changing any
+conversion point or arithmetic result. A 21-pair production-sized CTI
+microbenchmark moved from 1.590 to 1.401 ms (11.88% lower, 1.135x throughput).
+Three interleaved runs per build on a fixed 100-frame
+`current --dsp-backend ipp-fast --threads 20` window moved the decoder-reported
+median from 5.14 to 5.07 seconds (1.36% lower, 1.014x throughput). Luma, chroma,
+raw JSON, stdout, timing-normalized stderr, and timestamp-normalized logs all
+matched. Exact matrix hashes matched the earlier strict current gate, and IPP
+matrix hashes matched the merged SOS32 baseline.
 
 The SOS32 candidate gives long VHS chroma-burst blocks worker-local IPP
 single-precision biquad contexts and retains at most 12 idle contexts. Three
@@ -2333,7 +2345,7 @@ Requirements:
 .\tools\build-ipp-native.ps1
 dotnet restore VHSDecodeDotNet.slnx
 dotnet build VHSDecodeDotNet.slnx -c Release --no-restore
-dotnet test --solution VHSDecodeDotNet.slnx -c Release --no-build --no-restore --minimum-expected-tests 1295
+dotnet test --solution VHSDecodeDotNet.slnx -c Release --no-build --no-restore --minimum-expected-tests 1296
 dotnet test --project tests\VHSDecode.Tests\VHSDecode.Tests.csproj -c Release --no-build --no-restore --coverage --coverage-output coverage.cobertura.xml --coverage-output-format cobertura
 ```
 
@@ -2347,7 +2359,7 @@ deployment computer. Binary-only single-file releases embed
 sidecar license files. An Exact-only build may omit the native build step.
 
 The current formal Release build has zero warnings and errors. The xUnit v3
-project exposes **1,295** independently discoverable tests to both
+project exposes **1,296** independently discoverable tests to both
 `dotnet test` and Visual Studio Test Explorer.
 
 <!-- SECTION: usage -->

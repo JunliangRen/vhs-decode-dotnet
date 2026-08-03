@@ -394,22 +394,34 @@ Python v0.4.0、merge 済みの Python PR341、Exact v0.4.0、Exact
 <!-- LATEST_PERFORMANCE_BEGIN -->
 | CLI mode（workers） | Python v0.4.0 | Python PR341 | Exact + v0.4.0 | Exact + current | IPP-fast + v0.4.0 | IPP-fast + current |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| default（5） | 15.207 s | 16.780 s | 4.332 s / 3.510x / 71.51% | 5.402 s / 3.106x / 67.81% | 3.414 s / 4.454x / 77.55% | 3.285 s / 5.108x / 80.42% |
-| `--threads 1` | 17.694 s | 19.414 s | 9.867 s / 1.793x / 44.24% | 12.596 s / 1.541x / 35.12% | 7.163 s / 2.470x / 59.52% | 8.754 s / 2.218x / 54.91% |
-| `--threads 5` | 15.719 s | 17.801 s | 4.268 s / 3.683x / 72.85% | 5.365 s / 3.318x / 69.86% | 3.530 s / 4.453x / 77.54% | 3.269 s / 5.445x / 81.63% |
-| `--threads 10` | 16.037 s | 18.266 s | 3.579 s / 4.481x / 77.68% | 4.379 s / 4.171x / 76.02% | 3.007 s / 5.333x / 81.25% | 2.896 s / 6.307x / 84.14% |
-| `--threads 20` | 16.405 s | 18.395 s | 2.951 s / 5.559x / 82.01% | 3.885 s / 4.735x / 78.88% | 2.618 s / 6.267x / 84.04% | 2.433 s / 7.559x / 86.77% |
+| default（5） | 15.207 s | 16.780 s | 4.332 s / 3.510x / 71.51% | 5.067 s / 3.312x / 69.80% | 3.414 s / 4.454x / 77.55% | 3.274 s / 5.125x / 80.49% |
+| `--threads 1` | 17.694 s | 19.414 s | 9.867 s / 1.793x / 44.24% | 11.990 s / 1.619x / 38.24% | 7.163 s / 2.470x / 59.52% | 8.069 s / 2.406x / 58.44% |
+| `--threads 5` | 15.719 s | 17.801 s | 4.268 s / 3.683x / 72.85% | 5.216 s / 3.413x / 70.70% | 3.530 s / 4.453x / 77.54% | 3.203 s / 5.558x / 82.01% |
+| `--threads 10` | 16.037 s | 18.266 s | 3.579 s / 4.481x / 77.68% | 4.328 s / 4.221x / 76.31% | 3.007 s / 5.333x / 81.25% | 2.824 s / 6.469x / 84.54% |
+| `--threads 20` | 16.405 s | 18.395 s | 2.951 s / 5.559x / 82.01% | 3.634 s / 5.062x / 80.24% | 2.618 s / 6.267x / 84.04% | 2.443 s / 7.530x / 86.72% |
 <!-- LATEST_PERFORMANCE_END -->
-<!-- LATEST_PERFORMANCE_RUNS: ipp-refresh=30 repeats=3 -->
+<!-- LATEST_PERFORMANCE_RUNS: current-refresh=30 repeats=3 -->
 
 Python measurement は 2026-08-02 に main commit
-`c92af1dfd0f96cd7f2d49f3219fb428d0f4e0865` で audit しました。この candidate は
-Exact に入らないため、Exact は merge 済み phase-prefix change の audited matrix
-を維持します。2026-08-04、main `714f5a6` を基に、影響を受ける 10 個の IPP-fast
-cell を 3 回ずつ interleaved 測定し、30 Release run を実行しました。host は Intel
-Core Ultra 7 265K（20 logical processor）、Windows 11 build 26220、.NET
-SDK/runtime `11.0.100-preview.6.26359.118` です。更新した各 cell の 3 run は luma、
-chroma、raw JSON、stdout について 1 hash set だけを生成しました。
+`c92af1dfd0f96cd7f2d49f3219fb428d0f4e0865` で audit しました。変更のない v0.4.0
+.NET 列は同じ window の audited measurement を維持します。2026-08-04、main
+`9042d9a` を基に、Exact `current` 5 cell と IPP-fast `current` 5 cell を 3 回ずつ
+interleaved 測定し、30 Release run を実行しました。host は Intel Core Ultra 7
+265K（20 logical processor）、Windows 11 build 26220、.NET SDK/runtime
+`11.0.100-preview.6.26359.118` です。各 backend は全 worker count と全 repeat で
+luma、chroma、raw JSON、stdout について 1 hash set だけを生成しました。
+
+今回の `current` CTI candidate は、固定 RCPSS mantissa approximation を process-wide
+の 2,048-entry read-only table（payload 8 KiB）へ事前計算し、conversion point と
+arithmetic result を変えずに per-sample integer division/remainder を除去します。
+21-pair の production-sized CTI microbenchmark は 1.590 から 1.401 ms へ 11.88%
+短縮（throughput 1.135x）しました。fixed 100-frame
+`current --dsp-backend ipp-fast --threads 20` window で build ごとに 3 回
+interleaved 測定した decoder-reported median は 5.14 から 5.07 秒へ 1.36% 短縮
+（throughput 1.014x）しました。luma、chroma、raw JSON、stdout、
+timing-normalized stderr、timestamp-normalized log はすべて一致しました。Exact
+matrix hash は以前の strict current gate、IPP matrix hash は merge 済み SOS32
+baseline と一致しました。
 
 SOS32 candidate は長い VHS chroma-burst block に worker-local IPP single-precision
 biquad context を与え、idle context は最大 12 個だけ保持します。fixed 200-frame
@@ -2249,7 +2261,7 @@ SHA-256、stdout SHA-256、normalized stderr、normalized log、全 ordered `fil
 .\tools\build-ipp-native.ps1
 dotnet restore VHSDecodeDotNet.slnx
 dotnet build VHSDecodeDotNet.slnx -c Release --no-restore
-dotnet test --solution VHSDecodeDotNet.slnx -c Release --no-build --no-restore --minimum-expected-tests 1295
+dotnet test --solution VHSDecodeDotNet.slnx -c Release --no-build --no-restore --minimum-expected-tests 1296
 dotnet test --project tests\VHSDecode.Tests\VHSDecode.Tests.csproj -c Release --no-build --no-restore --coverage --coverage-output coverage.cobertura.xml --coverage-output-format cobertura
 ```
 
@@ -2263,7 +2275,7 @@ third-party notice を埋め込み、license sidecar file は追加しません�
 
 現在の正式な Release build は warning 0、error 0 です。xUnit v3 project は
 `dotnet test` と Visual Studio Test Explorer の両方で個別に検出できる
-**1,295** tests を公開します。
+**1,296** tests を公開します。
 
 <!-- SECTION: usage -->
 
