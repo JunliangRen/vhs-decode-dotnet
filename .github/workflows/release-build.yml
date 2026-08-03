@@ -33,36 +33,82 @@ jobs:
         with:
           global-json-file: global.json
 
-      - name: Install FFmpeg test dependency
+      - name: Install pinned FFmpeg test dependency
         shell: pwsh
         run: |
-          $chocoExitCode = $null
-          $ffmpegExitCode = $null
-          $ffprobeExitCode = $null
-          for ($attempt = 1; $attempt -le 3; $attempt++) {
-            choco install ffmpeg --yes --no-progress --limit-output
-            $chocoExitCode = $LASTEXITCODE
-            $ffmpeg = Get-Command ffmpeg -ErrorAction SilentlyContinue
-            $ffprobe = Get-Command ffprobe -ErrorAction SilentlyContinue
-            if ($null -ne $ffmpeg -and $null -ne $ffprobe) {
-              ffmpeg -version
-              $ffmpegExitCode = $LASTEXITCODE
-              ffprobe -version
-              $ffprobeExitCode = $LASTEXITCODE
-              if ($ffmpegExitCode -eq 0 -and $ffprobeExitCode -eq 0) {
-                exit 0
-              }
-            }
+          $ErrorActionPreference = 'Stop'
+          $version = '8.1.2'
+          $expectedSha256 =
+            'DB580001CAA24AC104C8CB856CD113A87B0A443F7BDF47D8C12B1D740584A2EC'
+          $archiveName = "ffmpeg-$version-essentials_build.zip"
+          $archivePath = Join-Path $env:RUNNER_TEMP $archiveName
+          $installRoot = Join-Path $env:RUNNER_TEMP "ffmpeg-$version"
+          $downloadUrls = @(
+            "https://github.com/GyanD/codexffmpeg/releases/download/$version/$archiveName",
+            "https://www.gyan.dev/ffmpeg/builds/packages/$archiveName"
+          )
 
-            if ($attempt -lt 3) {
-              Start-Sleep -Seconds (15 * $attempt)
+          $downloaded = $false
+          foreach ($url in $downloadUrls) {
+            try {
+              Remove-Item -LiteralPath $archivePath -Force -ErrorAction SilentlyContinue
+              Invoke-WebRequest `
+                -Uri $url `
+                -OutFile $archivePath `
+                -ConnectionTimeoutSeconds 30 `
+                -OperationTimeoutSeconds 180 `
+                -MaximumRetryCount 1 `
+                -RetryIntervalSec 5
+              $actualSha256 = (Get-FileHash `
+                -LiteralPath $archivePath `
+                -Algorithm SHA256).Hash
+              if ($actualSha256 -cne $expectedSha256) {
+                throw "SHA-256 mismatch: expected $expectedSha256, got $actualSha256."
+              }
+
+              $downloaded = $true
+              break
+            }
+            catch {
+              Write-Warning "Download failed from ${url}: $($_.Exception.Message)"
             }
           }
 
-          throw (
-            'FFmpeg and FFprobe were unavailable after three install attempts. ' +
-            "Chocolatey exit: $chocoExitCode; FFmpeg exit: $ffmpegExitCode; " +
-            "FFprobe exit: $ffprobeExitCode.")
+          if (-not $downloaded) {
+            throw 'Unable to download the pinned FFmpeg archive from either source.'
+          }
+
+          Expand-Archive `
+            -LiteralPath $archivePath `
+            -DestinationPath $installRoot `
+            -Force
+          $ffmpegPath = Get-ChildItem `
+            -LiteralPath $installRoot `
+            -Filter ffmpeg.exe `
+            -File `
+            -Recurse |
+            Select-Object -First 1 -ExpandProperty FullName
+          if ($null -eq $ffmpegPath) {
+            throw 'The pinned FFmpeg archive did not contain ffmpeg.exe.'
+          }
+
+          $binDirectory = Split-Path -Parent $ffmpegPath
+          $ffprobePath = Join-Path $binDirectory 'ffprobe.exe'
+          if (-not (Test-Path -LiteralPath $ffprobePath -PathType Leaf)) {
+            throw 'The pinned FFmpeg archive did not contain ffprobe.exe.'
+          }
+
+          Add-Content -LiteralPath $env:GITHUB_PATH -Value $binDirectory
+          $env:PATH = "$binDirectory;$env:PATH"
+          & $ffmpegPath -version
+          $ffmpegExitCode = $LASTEXITCODE
+          & $ffprobePath -version
+          $ffprobeExitCode = $LASTEXITCODE
+          if ($ffmpegExitCode -ne 0 -or $ffprobeExitCode -ne 0) {
+            throw (
+              "Pinned FFmpeg validation failed. FFmpeg exit: $ffmpegExitCode; " +
+              "FFprobe exit: $ffprobeExitCode.")
+          }
 
       - name: Build and verify Intel IPP native bridge
         shell: pwsh
