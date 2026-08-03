@@ -2,7 +2,7 @@
 
 [English](README.md) | [简体中文](README.zh-CN.md) | **[日本語](README.ja.md)**
 
-<!-- README_SYNC: 2026-08-02.01 -->
+<!-- README_SYNC: 2026-08-03.01 -->
 
 [`oyvindln/vhs-decode`](https://github.com/oyvindln/vhs-decode) の
 デコード関連部分を .NET 11 で再実装するプロジェクトです。互換性の対象は
@@ -36,7 +36,7 @@ upstream release `v0.4.0`、commit
 - VHS family には VHS/S-VHS、Betamax、Video8/Hi8、U-matic、Type C、EIAJ、
   upstream が対応する PAL/NTSC variant が含まれます。
 - TBC utility、ダブルクリック GUI、開発者向け plot window は対象外です。
-- Visual Studio 2026 の `.slnx` には **1,262** 件の標準 xUnit v3 test があり、
+- Visual Studio 2026 の `.slnx` には **1,266** 件の標準 xUnit v3 test があり、
   Test Explorer と `dotnet test` の両方で実行できます。
 
 <!-- SECTION: start -->
@@ -111,6 +111,13 @@ parallelization 後の final cap-12 branch candidate で全 `current` cell を 3
 <!-- LATEST_PERFORMANCE_END -->
 <!-- LATEST_PERFORMANCE_RUNS: base=90 current-refresh=30 repeats=3 -->
 
+その後の 80-frame Exact `current --threads 20` short screen では、上の full matrix を
+維持しています。decoder-local burst-probe buffer reuse の wall time は実質 neutral
+（`9.393` から `9.371` 秒）でしたが、process CPU time は `74.406` から `67.922`
+秒、peak working set は `435.1` から `430.5` MiB へ低下しました。この single pair
+を新しい throughput claim には使用しません。TBC、chroma、JSON、stdout、normalized
+stderr/log、および zero/default/20-worker determinism はすべて一致しました。
+
 各 .NET cell は wall-time median と profile が対応する Python 列に対する
 speedup の順です。`1.000x` 未満は Python より遅いことを示します。Python
 PR341 は merge commit `2f21e8ed6018b14561396cc95f1f6828054470b8` で、
@@ -160,7 +167,7 @@ path を維持します。
 dotnet restore VHSDecodeDotNet.slnx
 dotnet build VHSDecodeDotNet.slnx -c Release --no-restore
 dotnet test --solution VHSDecodeDotNet.slnx -c Release `
-  --no-build --no-restore --minimum-expected-tests 1262
+  --no-build --no-restore --minimum-expected-tests 1266
 ```
 
 Visual Studio 2026 で `VHSDecodeDotNet.slnx` を開くと、build、debug、
