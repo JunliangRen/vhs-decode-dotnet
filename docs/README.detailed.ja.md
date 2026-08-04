@@ -394,22 +394,48 @@ Python v0.4.0、merge 済みの Python PR341、Exact v0.4.0、Exact
 <!-- LATEST_PERFORMANCE_BEGIN -->
 | CLI mode（workers） | Python v0.4.0 | Python PR341 | Exact + v0.4.0 | Exact + current | IPP-fast + v0.4.0 | IPP-fast + current |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| default（5） | 15.207 s | 16.780 s | 4.267 s / 3.564x / 71.94% | 4.690 s / 3.578x / 72.05% | 3.608 s / 4.215x / 76.28% | 3.393 s / 4.946x / 79.78% |
-| `--threads 1` | 17.694 s | 19.414 s | 9.732 s / 1.818x / 45.00% | 11.640 s / 1.668x / 40.05% | 7.089 s / 2.496x / 59.93% | 7.947 s / 2.443x / 59.07% |
-| `--threads 5` | 15.719 s | 17.801 s | 4.167 s / 3.772x / 73.49% | 4.648 s / 3.830x / 73.89% | 3.607 s / 4.358x / 77.05% | 3.388 s / 5.254x / 80.97% |
-| `--threads 10` | 16.037 s | 18.266 s | 3.274 s / 4.899x / 79.59% | 4.096 s / 4.459x / 77.57% | 3.069 s / 5.225x / 80.86% | 2.732 s / 6.686x / 85.04% |
-| `--threads 20` | 16.405 s | 18.395 s | 2.919 s / 5.620x / 82.21% | 3.765 s / 4.886x / 79.53% | 2.667 s / 6.150x / 83.74% | 2.180 s / 8.438x / 88.15% |
+| default（5） | 15.207 s | 16.780 s | 4.267 s / 3.564x / 71.94% | 4.723 s / 3.553x / 71.85% | 3.608 s / 4.215x / 76.28% | 3.337 s / 5.029x / 80.12% |
+| `--threads 1` | 17.694 s | 19.414 s | 9.732 s / 1.818x / 45.00% | 11.602 s / 1.673x / 40.24% | 7.089 s / 2.496x / 59.93% | 7.845 s / 2.475x / 59.59% |
+| `--threads 5` | 15.719 s | 17.801 s | 4.167 s / 3.772x / 73.49% | 5.026 s / 3.542x / 71.77% | 3.607 s / 4.358x / 77.05% | 3.228 s / 5.515x / 81.87% |
+| `--threads 10` | 16.037 s | 18.266 s | 3.274 s / 4.899x / 79.59% | 3.869 s / 4.721x / 78.82% | 3.069 s / 5.225x / 80.86% | 2.802 s / 6.518x / 84.66% |
+| `--threads 20` | 16.405 s | 18.395 s | 2.919 s / 5.620x / 82.21% | 3.612 s / 5.093x / 80.36% | 2.667 s / 6.150x / 83.74% | 2.262 s / 8.134x / 87.71% |
 <!-- LATEST_PERFORMANCE_END -->
-<!-- LATEST_PERFORMANCE_RUNS: prior-full-refresh=60 affected-refresh=3 repeats=3 -->
+<!-- LATEST_PERFORMANCE_RUNS: prior-full-refresh=60 current-refresh=30 repeats=3 -->
 
 Python measurement は 2026-08-02 に main commit
 `c92af1dfd0f96cd7f2d49f3219fb428d0f4e0865` で audit しました。この branch は
-main `4f50fa9` を基点に、影響を受ける IPP-fast/current 20-worker cell だけを 3 回
-再測定しました。Python 列と影響を受けない 19 個の .NET cell は直前の audited full
-refresh を維持します。host は Intel Core Ultra 7 265K（20 logical processor）、
-Windows 11 build 26220、.NET SDK/runtime `11.0.100-preview.6.26359.118` です。
+main `89a0a09` を基点に、10 個の `current` .NET cell を各 3 回再測定しました。
+Python 列と 10 個の v0.4.0 .NET cell は直前の audited full refresh を維持します。
+host は Intel Core Ultra 7 265K（20 logical processor）、
+Windows 11 build 26220、.NET SDK/runtime `11.0.100-preview.6.26359.118` です。raw
+run directory は private fixture path を含むため local にのみ保持します。以下は
+報告された local measurement であり、公開された independently reproducible
+benchmark corpus ではありません。
 
-requested worker が 12 を超える場合、pooled IPP VHS workspace ごとに private な
+`current` VHS の 9-tap sync boxcar は、各 AVX vector で隣接する 4 output sample を
+計算します。各 lane は従来の ascending source order で同じ 9 回の multiply と add
+を実行します。FMA、reassociation、worker-cap change、allocation、retained buffer
+は追加しません。vector tail と AVX 非対応 host は従来の scalar loop を使います。
+standard xUnit v3 test は独立した scalar reference を使い、2、3、4 workers で
+length 9、10、10,003 の bit pattern を検証し、NaN payload、正負の infinity、
+subnormal、minimum normal、signed zero も網羅します。CI は別 process で
+`DOTNET_EnableHWIntrinsic=0` を設定し、focused sync test 25 個を再実行して scalar
+fallback を検証します。
+
+fixed 40-frame `ipp-fast + current --threads 20` の alternating 5-pair は wall median
+を 2.452 から 2.359 秒へ短縮し（3.81% lower、throughput 1.040x）、process CPU
+median を 12.063 から 11.031 秒へ削減しました（8.55% lower）。candidate は 4 勝
+1 敗で、sampled peak working-set median は 356.4 対 355.6 MiB と実質的に同じです。
+最後の 200-frame pair は wall time を 8.904 から 8.777 秒へ（1.43% lower）、CPU
+time を 47.219 から 44.891 秒へ削減し（4.93% lower）、peak は両方 363.8 MiB でした。
+すべての pair で exit status、field count、luma、chroma、raw JSON、stdout、
+timing-normalized stderr、timestamp-normalized log、ordered `fileLoc` が一致しました。
+更新した 30 matrix run は default、1、5、10、20 workers の backend ごとに 1 つの
+hash set のみを生成しました。Release solution は warning/error 0、1,319 個すべての
+xUnit v3 test が pass しました。
+
+先に merge 済みの IPP inverse-staging optimization は requested worker が 12 を
+超える場合に適用されます。pooled IPP VHS workspace ごとに private な
 companion IPP real-FFT plan を 1 個所有します。これにより、stateful native plan を
 共有せず real RF inverse と独立した Hilbert imaginary inverse を並行実行できます。
 DSP expression、transform input、output order、16-workspace retention limit は変更
@@ -420,9 +446,10 @@ DSP expression、transform input、output order、16-workspace retention limit �
 4.88 へ上昇し、mean peak working set は 402.1 から 414.7 MiB へ増えました。
 companion plan の bounded cost は 12.5 MiB です。
 
-documented 40-frame 3-pair はすべて高速で、decoder-reported median は 2.290 から
-2.180 秒へ 4.80% 短縮しました。更新 cell は profile-matched Python PR341 より
-8.438x 高速で、wall time を 88.15% 削減します。別の no-start 1,000-frame candidate
+その checkpoint では documented 40-frame 3-pair はすべて高速で、decoder-reported
+median は 2.290 から 2.180 秒へ 4.80% 短縮しました。この historical cell は
+profile-matched Python PR341 より 8.438x 高速で、wall time を 88.15% 削減しました。
+別の no-start 1,000-frame candidate
 run は 46.359 秒、5.27 effective core で完了しました。sampled working set は
 414.9 MiB で peak に達し、early mean 400.8 MiB に対し final quarter mean は
 387.9 MiB で、progressive growth はありませんでした。

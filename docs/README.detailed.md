@@ -414,23 +414,50 @@ speedup, and wall-time reduction against its profile-matched Python column:
 <!-- LATEST_PERFORMANCE_BEGIN -->
 | CLI mode (workers) | Python v0.4.0 | Python PR341 | Exact + v0.4.0 | Exact + current | IPP-fast + v0.4.0 | IPP-fast + current |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| default (5) | 15.207 s | 16.780 s | 4.267 s / 3.564x / 71.94% | 4.690 s / 3.578x / 72.05% | 3.608 s / 4.215x / 76.28% | 3.393 s / 4.946x / 79.78% |
-| `--threads 1` | 17.694 s | 19.414 s | 9.732 s / 1.818x / 45.00% | 11.640 s / 1.668x / 40.05% | 7.089 s / 2.496x / 59.93% | 7.947 s / 2.443x / 59.07% |
-| `--threads 5` | 15.719 s | 17.801 s | 4.167 s / 3.772x / 73.49% | 4.648 s / 3.830x / 73.89% | 3.607 s / 4.358x / 77.05% | 3.388 s / 5.254x / 80.97% |
-| `--threads 10` | 16.037 s | 18.266 s | 3.274 s / 4.899x / 79.59% | 4.096 s / 4.459x / 77.57% | 3.069 s / 5.225x / 80.86% | 2.732 s / 6.686x / 85.04% |
-| `--threads 20` | 16.405 s | 18.395 s | 2.919 s / 5.620x / 82.21% | 3.765 s / 4.886x / 79.53% | 2.667 s / 6.150x / 83.74% | 2.180 s / 8.438x / 88.15% |
+| default (5) | 15.207 s | 16.780 s | 4.267 s / 3.564x / 71.94% | 4.723 s / 3.553x / 71.85% | 3.608 s / 4.215x / 76.28% | 3.337 s / 5.029x / 80.12% |
+| `--threads 1` | 17.694 s | 19.414 s | 9.732 s / 1.818x / 45.00% | 11.602 s / 1.673x / 40.24% | 7.089 s / 2.496x / 59.93% | 7.845 s / 2.475x / 59.59% |
+| `--threads 5` | 15.719 s | 17.801 s | 4.167 s / 3.772x / 73.49% | 5.026 s / 3.542x / 71.77% | 3.607 s / 4.358x / 77.05% | 3.228 s / 5.515x / 81.87% |
+| `--threads 10` | 16.037 s | 18.266 s | 3.274 s / 4.899x / 79.59% | 3.869 s / 4.721x / 78.82% | 3.069 s / 5.225x / 80.86% | 2.802 s / 6.518x / 84.66% |
+| `--threads 20` | 16.405 s | 18.395 s | 2.919 s / 5.620x / 82.21% | 3.612 s / 5.093x / 80.36% | 2.667 s / 6.150x / 83.74% | 2.262 s / 8.134x / 87.71% |
 <!-- LATEST_PERFORMANCE_END -->
-<!-- LATEST_PERFORMANCE_RUNS: prior-full-refresh=60 affected-refresh=3 repeats=3 -->
+<!-- LATEST_PERFORMANCE_RUNS: prior-full-refresh=60 current-refresh=30 repeats=3 -->
 
 The Python measurements were audited on 2026-08-02 using main commit
 `c92af1dfd0f96cd7f2d49f3219fb428d0f4e0865`. This branch, based on main
-`4f50fa9`, remeasured the affected IPP-fast/current 20-worker cell three times;
-the Python columns and 19 unaffected .NET cells retain the preceding audited
-full refresh. The host was an Intel Core Ultra 7 265K with 20 logical
+`89a0a09`, remeasured all ten `current` .NET cells three times; the Python
+columns and ten v0.4.0 .NET cells retain the preceding audited full refresh.
+The host was an Intel Core Ultra 7 265K with 20 logical
 processors, Windows 11 build 26220, and .NET SDK/runtime
-`11.0.100-preview.6.26359.118`.
+`11.0.100-preview.6.26359.118`. Raw run directories are retained locally because
+they contain the private fixture path; the figures below are reported local
+measurements, not an independently reproducible public benchmark corpus.
 
-At more than 12 requested workers, each pooled IPP VHS workspace now owns one
+The `current` VHS nine-tap sync boxcar now evaluates four adjacent output
+samples per AVX vector. Each lane performs the same nine multiplications and
+additions in the original ascending source order. It introduces no FMA,
+reassociation, worker-cap change, allocation, or retained buffer; vector tails
+and hosts without AVX use the original scalar loop. The standard xUnit v3 test
+uses an independent scalar reference and checks bit patterns at lengths 9, 10,
+and 10,003 with two, three, and four workers. It also covers NaN payloads,
+infinities, subnormals, minimum normals, and signed zero. CI reruns all 25
+focused sync tests with `DOTNET_EnableHWIntrinsic=0` to exercise the scalar
+fallback in a separate process.
+
+Five alternating fixed 40-frame `ipp-fast + current --threads 20` pairs moved
+median wall time from 2.452 to 2.359 seconds (3.81% lower, 1.040x throughput)
+and median process CPU time from 12.063 to 11.031 seconds (8.55% lower). The
+candidate won four of five pairs, while median sampled peak working set stayed
+effectively unchanged at 356.4 versus 355.6 MiB. One final 200-frame pair moved
+wall time from 8.904 to 8.777 seconds (1.43% lower) and CPU time from 47.219 to
+44.891 seconds (4.93% lower), with both peak working sets at 363.8 MiB. Every
+pair matched exit status, field count, luma, chroma, raw JSON, stdout,
+timing-normalized stderr, timestamp-normalized logs, and ordered `fileLoc`.
+All 30 refreshed matrix runs produced one hash set per backend across default,
+1, 5, 10, and 20 workers. The Release solution built without warnings or
+errors, and all 1,319 xUnit v3 tests passed.
+
+The preceding merged IPP inverse-staging optimization applies at more than 12
+requested workers. Each pooled IPP VHS workspace owns one
 private companion IPP real-FFT plan. The real RF inverse and independent
 Hilbert imaginary inverse can therefore run concurrently without sharing a
 stateful native plan. DSP expressions, transform inputs, output ordering, and
@@ -441,9 +468,10 @@ GNRC, and nonzero RF high boost retain serial staging. Five alternating fixed
 effective core use rose from 4.74 to 4.88. Mean peak working set rose from
 402.1 to 414.7 MiB, a bounded 12.5 MiB cost for the companion plans.
 
-All three documented 40-frame pairs were faster: decoder-reported median time
-moved from 2.290 to 2.180 seconds (4.80% lower). The refreshed cell is 8.438x
-faster than profile-matched Python PR341 and reduces its wall time by 88.15%.
+At that checkpoint, all three documented 40-frame pairs were faster:
+decoder-reported median time moved from 2.290 to 2.180 seconds (4.80% lower).
+That historical cell was 8.438x faster than profile-matched Python PR341 and
+reduced its wall time by 88.15%.
 A separate no-start 1,000-frame candidate run completed in 46.359 seconds with
 5.27 effective cores. Sampled working set peaked at 414.9 MiB and averaged
 400.8 MiB early versus 387.9 MiB in the final quarter, showing no progressive

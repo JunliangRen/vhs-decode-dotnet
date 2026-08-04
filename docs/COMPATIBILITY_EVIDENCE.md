@@ -2340,6 +2340,39 @@ deterministic within each profile/backend; its IPP-fast/current 20-worker cell
 was 2.378 seconds, 7.735x faster than the profile-matched Python PR341
 measurement on the fixed private window.
 
+### AVX current VHS sync boxcar
+
+The raw benchmark run directories are retained locally because they include
+the private fixture path. The measurements in this section are reported local
+evidence, not an independently reproducible public benchmark corpus.
+
+The `current` VHS nine-tap sync boxcar evaluates four adjacent output samples
+per AVX vector. Every lane retains the scalar kernel's ascending nine
+multiplications and additions; no FMA, reassociation, worker-cap change,
+allocation, or retained buffer was introduced. Vector tails and non-AVX hosts
+continue through the original scalar loop. A standard xUnit v3 test compares
+the production output bits with an independent scalar reference at lengths 9,
+10, and 10,003 for two, three, and four workers. The same test covers NaN
+payloads, infinities, subnormals, minimum normals, and signed zero. CI reruns
+all 25 focused sync tests in a separate process with
+`DOTNET_EnableHWIntrinsic=0` to exercise the scalar fallback.
+
+Five alternating fixed 40-frame `ipp-fast + current --threads 20` pairs moved
+median wall time from 2.452 to 2.359 seconds (3.81% lower, 1.040x throughput)
+and median process CPU time from 12.063 to 11.031 seconds (8.55% lower). The
+candidate won four pairs and lost one; median sampled peak working set remained
+effectively flat at 356.4 versus 355.6 MiB. A final 200-frame pair moved wall
+time from 8.904 to 8.777 seconds (1.43% lower) and CPU time from 47.219 to
+44.891 seconds (4.93% lower), with both peak working sets at 363.8 MiB.
+
+All paired runs matched exit status, field count, luma, chroma, raw JSON,
+stdout, timing-normalized stderr, timestamp-normalized logs, and ordered
+`fileLoc`. Thirty Release matrix runs refreshed Exact `current` and IPP-fast
+`current` at default, 1, 5, 10, and 20 workers with three repetitions per cell;
+each backend produced one luma, chroma, JSON, stdout, normalized stderr/log,
+and ordered-`fileLoc` hash set. The Release solution built with zero warnings
+or errors, and all 1,319 xUnit v3 tests passed.
+
 `ffmpeg` and `ffprobe` must be available on `PATH` for RF container inputs
 outside the narrowly gated direct 40 kHz mono PCM16 raw-FLAC route. Direct
 raw-FLAC RF input, default HiFi FLAC output, and LD `--write-test-ldf` use the

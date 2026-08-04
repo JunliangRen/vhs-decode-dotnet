@@ -89,31 +89,32 @@ CVBS、LaserDisc 和 HiFi 当前会拒绝 `ipp-fast`，这些命令应使用 `ex
 ## 最新性能
 
 下表固定使用同一份私有本地 40 MHz PAL VHS `.ldf` 夹具和相同的 40 帧窗口，
-不会公开源文件名。Python 两列和 19 个未受影响的 .NET 单元格沿用已审计测量值。
-本分支基于 main `4f50fa9`，只把受影响的 IPP-fast/current 20-worker 单元格重测
-三次；兼容性结论与速度数据分开判断。
+不会公开源文件名。Python 两列和 10 个 v0.4.0 .NET 单元格沿用已审计测量值。
+本分支基于 main `89a0a09`，把 10 个 `current` .NET 单元格各重测三次；兼容性
+结论与速度数据分开判断。原始运行目录含有私有夹具路径，因此只保留在本地；这些
+数字是如实报告的本地测量，不是可公开独立复现的 benchmark corpus。
 
 <!-- LATEST_PERFORMANCE_BEGIN -->
 | CLI 模式（workers） | Python v0.4.0 | Python PR341 | Exact + v0.4.0 | Exact + current | IPP-fast + v0.4.0 | IPP-fast + current |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| 默认（5） | 15.207 s | 16.780 s | 4.267 s / 3.564x | 4.690 s / 3.578x | 3.608 s / 4.215x | 3.393 s / 4.946x |
-| `--threads 1` | 17.694 s | 19.414 s | 9.732 s / 1.818x | 11.640 s / 1.668x | 7.089 s / 2.496x | 7.947 s / 2.443x |
-| `--threads 5` | 15.719 s | 17.801 s | 4.167 s / 3.772x | 4.648 s / 3.830x | 3.607 s / 4.358x | 3.388 s / 5.254x |
-| `--threads 10` | 16.037 s | 18.266 s | 3.274 s / 4.899x | 4.096 s / 4.459x | 3.069 s / 5.225x | 2.732 s / 6.686x |
-| `--threads 20` | 16.405 s | 18.395 s | 2.919 s / 5.620x | 3.765 s / 4.886x | 2.667 s / 6.150x | 2.180 s / 8.438x |
+| 默认（5） | 15.207 s | 16.780 s | 4.267 s / 3.564x | 4.723 s / 3.553x | 3.608 s / 4.215x | 3.337 s / 5.029x |
+| `--threads 1` | 17.694 s | 19.414 s | 9.732 s / 1.818x | 11.602 s / 1.673x | 7.089 s / 2.496x | 7.845 s / 2.475x |
+| `--threads 5` | 15.719 s | 17.801 s | 4.167 s / 3.772x | 5.026 s / 3.542x | 3.607 s / 4.358x | 3.228 s / 5.515x |
+| `--threads 10` | 16.037 s | 18.266 s | 3.274 s / 4.899x | 3.869 s / 4.721x | 3.069 s / 5.225x | 2.802 s / 6.518x |
+| `--threads 20` | 16.405 s | 18.395 s | 2.919 s / 5.620x | 3.612 s / 5.093x | 2.667 s / 6.150x | 2.262 s / 8.134x |
 <!-- LATEST_PERFORMANCE_END -->
-<!-- LATEST_PERFORMANCE_RUNS: prior-full-refresh=60 affected-refresh=3 repeats=3 -->
+<!-- LATEST_PERFORMANCE_RUNS: prior-full-refresh=60 current-refresh=30 repeats=3 -->
 
 每个 .NET 单元格依次给出墙钟中位数和相对同 profile Python 列的倍速；默认实际
-使用 **5 个 workers**。高 worker 数下，每个池化 IPP VHS workspace 现在独占一个
-有界的 companion FFT plan，并发执行互相独立的实数与 Hilbert 逆变换；DSP 算术和
-16 个 workspace 的保留上限均未改变。固定 100 帧的五对测试把平均墙钟从 9.347
-降至 9.035 秒（缩短 3.3%），平均有效核心数从 4.74 增至 4.88。正式 40 帧三对
-测试全部更快；刷新的 20-worker 单元格为 2.180 秒，达到对应 Python PR341 的
-8.438x。
+使用 **5 个 workers**。`current` VHS 的 9-tap 同步 boxcar 现在每个 AVX 向量并行
+处理 4 个独立输出，同时保持每条 lane 原有的乘加顺序；没有引入 FMA、重结合、
+worker、分配或常驻缓冲变化。40 帧五对门禁中，IPP-fast/current 20-worker 的墙钟
+中位数缩短 3.81%，CPU 时间下降 8.55%；最终 200 帧配对的墙钟缩短 1.43%，CPU
+时间下降 4.93%，峰值内存不变。刷新的 20-worker 单元格为 2.262 秒，达到对应
+Python PR341 的 8.134x。
 
-刷新运行和两个 profile/thread 门禁都保持确定性。基线/候选门禁匹配了亮度、色度、
-原始 JSON、stdout、归一化 stderr/日志和有序 `fileLoc`。IPP-fast 仍是显式启用的数值近似后端，
+30 次刷新运行在各后端内都保持确定性。基线/候选门禁匹配了亮度、色度、原始 JSON、
+stdout、归一化 stderr/日志和有序 `fileLoc`。IPP-fast 仍是显式启用的数值近似后端，
 因此不声称其产物与 Exact 逐字节一致。Python v0.4.0 在非零 worker 数下可能改变
 输出 hash，因此严格 oracle 仍是 Python v0.4.0 `g4315520 --threads 0`。完整命令、
 硬件、hash、内存边界和历史测量请查看
