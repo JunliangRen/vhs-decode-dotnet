@@ -49,29 +49,59 @@ public sealed class NumpyReductionMeanTests
     [Fact(DisplayName = "Float32 mean preserves exceptional IEEE values")]
     public void Float32MeanPreservesExceptionalIeeeValues()
     {
-        double[] values =
+        double signalingNaN = BitConverter.UInt64BitsToDouble(0x7FF0_0000_0000_0123UL);
+        double quietNaN = BitConverter.UInt64BitsToDouble(0x7FF8_0000_0000_0456UL);
+        double negativeSignalingNaN =
+            BitConverter.UInt64BitsToDouble(0xFFF0_0000_0000_0789UL);
+        double halfMinimumSubnormal = Math.ScaleB(1.0, -150);
+        double[] conversionBoundaries =
         [
-            -0.0,
-            0.0,
-            double.Epsilon,
-            -double.Epsilon,
-            float.Epsilon,
-            -float.Epsilon,
-            float.MaxValue,
-            -float.MaxValue,
-            double.PositiveInfinity,
-            double.NegativeInfinity,
-            BitConverter.UInt64BitsToDouble(0x7FF8_0000_0000_0123UL),
-            BitConverter.UInt64BitsToDouble(0xFFF8_0000_0000_0456UL),
-            1.0,
-            -1.0,
-            0.5,
-            -0.5
+            Math.BitDecrement(halfMinimumSubnormal),
+            halfMinimumSubnormal,
+            Math.BitIncrement(halfMinimumSubnormal),
+            -Math.BitDecrement(halfMinimumSubnormal),
+            -halfMinimumSubnormal,
+            -Math.BitIncrement(halfMinimumSubnormal)
         ];
 
-        Assert.Equal(
-            BitConverter.SingleToUInt32Bits(ScalarMeanFloat32(values)),
-            BitConverter.SingleToUInt32Bits(NumpyReduction.MeanFloat32(values)));
+        var cases = new List<double[]>
+        {
+            CreateFilledValues(8, -0.0),
+            CreateSparseValues(8, 3, (double)float.MaxValue),
+            CreateSparseValues(8, 4, Math.BitIncrement((double)float.MaxValue)),
+            CreateSparseValues(8, 5, double.MaxValue),
+            CreateSparseValues(8, 7, signalingNaN),
+            CreateSparseValues(9, 8, quietNaN),
+            CreateSparseValues(128, 127, negativeSignalingNaN),
+            CreateSparseValues(129, 128, signalingNaN),
+            CreateSparseValues(8, 2, double.PositiveInfinity),
+            CreateSparseValues(9, 8, double.NegativeInfinity)
+        };
+        foreach (double boundary in conversionBoundaries)
+        {
+            cases.Add(CreateFilledValues(8, boundary));
+        }
+
+        foreach (double[] values in cases)
+        {
+            Assert.Equal(
+                BitConverter.SingleToUInt32Bits(ScalarMeanFloat32(values)),
+                BitConverter.SingleToUInt32Bits(NumpyReduction.MeanFloat32(values)));
+        }
+    }
+
+    private static double[] CreateFilledValues(int length, double value)
+    {
+        var values = new double[length];
+        Array.Fill(values, value);
+        return values;
+    }
+
+    private static double[] CreateSparseValues(int length, int index, double value)
+    {
+        var values = new double[length];
+        values[index] = value;
+        return values;
     }
 
     private static float ScalarMeanFloat32(ReadOnlySpan<double> values)
