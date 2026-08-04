@@ -750,7 +750,7 @@ public sealed class VhsSyncDetectorCurrentTests
                     + (((index * 37) % 23) * 0.125);
             }
 
-            double[] expected = VhsSyncDetector.ConvolveBoxcarSame(input, windowSize: 9);
+            double[] expected = ConvolveBoxcarNineTapScalar(input);
             var actual = new double[expected.Length];
             VhsSyncDetector.ConvolveBoxcarSameParallel(
                 input,
@@ -808,6 +808,27 @@ public sealed class VhsSyncDetectorCurrentTests
             ]
         }
     };
+
+    private static double[] ConvolveBoxcarNineTapScalar(double[] input)
+    {
+        const int HalfWindow = 4;
+        const double Scale = 1.0 / 9.0;
+        var output = new double[input.Length];
+        for (int outputIndex = 0; outputIndex < output.Length; outputIndex++)
+        {
+            int sourceStart = Math.Max(0, outputIndex - HalfWindow);
+            int sourceEnd = Math.Min(input.Length - 1, outputIndex + HalfWindow);
+            double sum = 0.0;
+            for (int sourceIndex = sourceStart; sourceIndex <= sourceEnd; sourceIndex++)
+            {
+                sum += input[sourceIndex] * Scale;
+            }
+
+            output[outputIndex] = sum;
+        }
+
+        return output;
+    }
 
     private static double[] BuildTwoGridSignal()
     {

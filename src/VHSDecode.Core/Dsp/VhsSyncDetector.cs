@@ -1,5 +1,7 @@
 using System.Collections.Concurrent;
 using System.Numerics;
+using System.Runtime.Intrinsics;
+using System.Runtime.Intrinsics.X86;
 
 namespace VHSDecode.Core.Dsp;
 
@@ -282,7 +284,29 @@ public sealed class VhsSyncDetector
         fixed (double* valuesPointer = values)
         fixed (double* outputPointer = output)
         {
-            for (int outputIndex = interiorStart; outputIndex < interiorEnd; outputIndex++)
+            int outputIndex = interiorStart;
+            if (Avx.IsSupported)
+            {
+                Vector256<double> scale = Vector256.Create(Scale);
+                int vectorEnd = interiorEnd - ((interiorEnd - outputIndex) & 3);
+                for (; outputIndex < vectorEnd; outputIndex += 4)
+                {
+                    double* source = valuesPointer + outputIndex - HalfWindow;
+                    Vector256<double> sum = Vector256<double>.Zero;
+                    sum = Avx.Add(sum, Avx.Multiply(Avx.LoadVector256(source), scale));
+                    sum = Avx.Add(sum, Avx.Multiply(Avx.LoadVector256(source + 1), scale));
+                    sum = Avx.Add(sum, Avx.Multiply(Avx.LoadVector256(source + 2), scale));
+                    sum = Avx.Add(sum, Avx.Multiply(Avx.LoadVector256(source + 3), scale));
+                    sum = Avx.Add(sum, Avx.Multiply(Avx.LoadVector256(source + 4), scale));
+                    sum = Avx.Add(sum, Avx.Multiply(Avx.LoadVector256(source + 5), scale));
+                    sum = Avx.Add(sum, Avx.Multiply(Avx.LoadVector256(source + 6), scale));
+                    sum = Avx.Add(sum, Avx.Multiply(Avx.LoadVector256(source + 7), scale));
+                    sum = Avx.Add(sum, Avx.Multiply(Avx.LoadVector256(source + 8), scale));
+                    Avx.Store(outputPointer + outputIndex, sum);
+                }
+            }
+
+            for (; outputIndex < interiorEnd; outputIndex++)
             {
                 double* source = valuesPointer + outputIndex - HalfWindow;
                 double sum = 0.0;

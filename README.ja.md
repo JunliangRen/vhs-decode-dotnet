@@ -93,32 +93,32 @@ CVBS、LaserDisc、HiFi は現在 `ipp-fast` を拒否するため、これら�
 ## 最新の性能
 
 次の表は同じ private local 40 MHz PAL VHS `.ldf` fixture と同じ 40-frame
-window を使用し、source filename は公開しません。Python 列と影響を受けない 19 個の
-.NET cell は audited measurement を維持します。main `4f50fa9` を基にしたこの branch
-では、影響を受ける IPP-fast/current 20-worker cell だけを 3 回再測定しました。
-互換性判定は速度とは別です。
+window を使用し、source filename は公開しません。Python 列と 10 個の v0.4.0
+.NET cell は audited measurement を維持します。main `89a0a09` を基にしたこの branch
+では、10 個すべての `current` .NET cell を各 3 回再測定しました。互換性判定は
+速度とは別です。
 
 <!-- LATEST_PERFORMANCE_BEGIN -->
 | CLI mode（workers） | Python v0.4.0 | Python PR341 | Exact + v0.4.0 | Exact + current | IPP-fast + v0.4.0 | IPP-fast + current |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| default（5） | 15.207 s | 16.780 s | 4.267 s / 3.564x | 4.690 s / 3.578x | 3.608 s / 4.215x | 3.393 s / 4.946x |
-| `--threads 1` | 17.694 s | 19.414 s | 9.732 s / 1.818x | 11.640 s / 1.668x | 7.089 s / 2.496x | 7.947 s / 2.443x |
-| `--threads 5` | 15.719 s | 17.801 s | 4.167 s / 3.772x | 4.648 s / 3.830x | 3.607 s / 4.358x | 3.388 s / 5.254x |
-| `--threads 10` | 16.037 s | 18.266 s | 3.274 s / 4.899x | 4.096 s / 4.459x | 3.069 s / 5.225x | 2.732 s / 6.686x |
-| `--threads 20` | 16.405 s | 18.395 s | 2.919 s / 5.620x | 3.765 s / 4.886x | 2.667 s / 6.150x | 2.180 s / 8.438x |
+| default（5） | 15.207 s | 16.780 s | 4.267 s / 3.564x | 4.723 s / 3.553x | 3.608 s / 4.215x | 3.337 s / 5.029x |
+| `--threads 1` | 17.694 s | 19.414 s | 9.732 s / 1.818x | 11.602 s / 1.673x | 7.089 s / 2.496x | 7.845 s / 2.475x |
+| `--threads 5` | 15.719 s | 17.801 s | 4.167 s / 3.772x | 5.026 s / 3.542x | 3.607 s / 4.358x | 3.228 s / 5.515x |
+| `--threads 10` | 16.037 s | 18.266 s | 3.274 s / 4.899x | 3.869 s / 4.721x | 3.069 s / 5.225x | 2.802 s / 6.518x |
+| `--threads 20` | 16.405 s | 18.395 s | 2.919 s / 5.620x | 3.612 s / 5.093x | 2.667 s / 6.150x | 2.262 s / 8.134x |
 <!-- LATEST_PERFORMANCE_END -->
-<!-- LATEST_PERFORMANCE_RUNS: prior-full-refresh=60 affected-refresh=3 repeats=3 -->
+<!-- LATEST_PERFORMANCE_RUNS: prior-full-refresh=60 current-refresh=30 repeats=3 -->
 
 各 .NET cell は wall-time median と profile が対応する Python 列に対する
-speedup の順で、default は **5 workers** です。高 worker count では、pooled IPP VHS
-workspace ごとに bounded companion FFT plan を 1 個所有し、独立した real/Hilbert
-inverse transform を並行実行します。DSP arithmetic と 16-workspace retention limit
-は変わりません。fixed 100-frame 5-pair の平均 wall time は 9.347 から 9.035 秒へ
-3.3% 短縮し、平均 effective core use は 4.74 から 4.88 へ上昇しました。documented
-40-frame 3-pair はすべて高速で、更新した 20-worker cell は 2.180 秒、profile-matched
-Python PR341 measurement の 8.438x です。
+speedup の順で、default は **5 workers** です。`current` VHS の 9-tap sync boxcar は
+各 AVX vector で独立した 4 output を処理し、各 lane の従来の multiply/add order を
+維持します。FMA、reassociation、worker、allocation、retained-buffer の変更は
+ありません。40-frame 5-pair gate で IPP-fast/current 20-worker の wall median は
+3.81%、CPU time は 8.55% 減少しました。最後の 200-frame pair では wall time が
+1.43%、CPU time が 4.93% 減少し、peak memory は同じでした。更新した 20-worker
+cell は 2.262 秒、profile-matched Python PR341 measurement の 8.134x です。
 
-更新 run と 2 profile/thread gate はすべて deterministic でした。baseline/candidate
+更新した 30 run は backend ごとに deterministic でした。baseline/candidate
 gate は luma、chroma、raw JSON、stdout、normalized stderr/log、ordered `fileLoc` が一致しました。
 IPP-fast は明示的な numerically-close backend のままで、Exact と byte-for-byte
 同一とは主張しません。Python v0.4.0 は nonzero worker count で output hash が
