@@ -2342,6 +2342,10 @@ measurement on the fixed private window.
 
 ### AVX current VHS sync boxcar
 
+The raw benchmark run directories are retained locally because they include
+the private fixture path. The measurements in this section are reported local
+evidence, not an independently reproducible public benchmark corpus.
+
 The `current` VHS nine-tap sync boxcar evaluates four adjacent output samples
 per AVX vector. Every lane retains the scalar kernel's ascending nine
 multiplications and additions; no FMA, reassociation, worker-cap change,

@@ -96,7 +96,9 @@ CVBS、LaserDisc、HiFi は現在 `ipp-fast` を拒否するため、これら�
 window を使用し、source filename は公開しません。Python 列と 10 個の v0.4.0
 .NET cell は audited measurement を維持します。main `89a0a09` を基にしたこの branch
 では、10 個すべての `current` .NET cell を各 3 回再測定しました。互換性判定は
-速度とは別です。
+速度とは別です。raw run directory には private fixture path が含まれるため local
+にのみ保持します。この数値は報告された local measurement であり、公開された
+independently reproducible benchmark corpus ではありません。
 
 <!-- LATEST_PERFORMANCE_BEGIN -->
 | CLI mode（workers） | Python v0.4.0 | Python PR341 | Exact + v0.4.0 | Exact + current | IPP-fast + v0.4.0 | IPP-fast + current |

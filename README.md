@@ -101,7 +101,9 @@ same 40-frame window for every run; the filename is intentionally not
 published. The Python columns and ten v0.4.0 .NET cells retain their audited
 measurements. This branch, based on main `89a0a09`, refreshed all ten `current`
 .NET cells with three Release runs each. Compatibility is evaluated separately
-from speed.
+from speed. Raw run directories remain local because they contain the private
+fixture path, so these are reported local measurements rather than a publicly
+reproducible benchmark corpus.
 
 <!-- LATEST_PERFORMANCE_BEGIN -->
 | CLI mode (workers) | Python v0.4.0 | Python PR341 | Exact + v0.4.0 | Exact + current | IPP-fast + v0.4.0 | IPP-fast + current |

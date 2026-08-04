@@ -349,7 +349,8 @@ Python 测量于 2026-08-02 在 main commit
 `89a0a09`，把 10 个 `current` .NET 单元格各重测三次；Python 两列和 10 个
 v0.4.0 .NET 单元格沿用此前完整刷新后的审计数据。测试机为 Intel Core Ultra 7
 265K（20 个逻辑处理器）、Windows 11 build 26220，以及 .NET SDK/runtime
-`11.0.100-preview.6.26359.118`。
+`11.0.100-preview.6.26359.118`。原始运行目录含有私有夹具路径，因此只保留在本地；
+下列数字是如实报告的本地测量，不是可公开独立复现的 benchmark corpus。
 
 `current` VHS 的 9-tap 同步 boxcar 现在每个 AVX 向量计算相邻的 4 个输出样本。
 每条 lane 仍按原有递增 source 顺序完成相同的 9 次乘法和加法；没有引入 FMA、

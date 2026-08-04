@@ -91,7 +91,8 @@ CVBS、LaserDisc 和 HiFi 当前会拒绝 `ipp-fast`，这些命令应使用 `ex
 下表固定使用同一份私有本地 40 MHz PAL VHS `.ldf` 夹具和相同的 40 帧窗口，
 不会公开源文件名。Python 两列和 10 个 v0.4.0 .NET 单元格沿用已审计测量值。
 本分支基于 main `89a0a09`，把 10 个 `current` .NET 单元格各重测三次；兼容性
-结论与速度数据分开判断。
+结论与速度数据分开判断。原始运行目录含有私有夹具路径，因此只保留在本地；这些
+数字是如实报告的本地测量，不是可公开独立复现的 benchmark corpus。
 
 <!-- LATEST_PERFORMANCE_BEGIN -->
 | CLI 模式（workers） | Python v0.4.0 | Python PR341 | Exact + v0.4.0 | Exact + current | IPP-fast + v0.4.0 | IPP-fast + current |

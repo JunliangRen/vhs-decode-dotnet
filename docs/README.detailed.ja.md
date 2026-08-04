@@ -407,7 +407,10 @@ Python measurement は 2026-08-02 に main commit
 main `89a0a09` を基点に、10 個の `current` .NET cell を各 3 回再測定しました。
 Python 列と 10 個の v0.4.0 .NET cell は直前の audited full refresh を維持します。
 host は Intel Core Ultra 7 265K（20 logical processor）、
-Windows 11 build 26220、.NET SDK/runtime `11.0.100-preview.6.26359.118` です。
+Windows 11 build 26220、.NET SDK/runtime `11.0.100-preview.6.26359.118` です。raw
+run directory は private fixture path を含むため local にのみ保持します。以下は
+報告された local measurement であり、公開された independently reproducible
+benchmark corpus ではありません。
 
 `current` VHS の 9-tap sync boxcar は、各 AVX vector で隣接する 4 output sample を
 計算します。各 lane は従来の ascending source order で同じ 9 回の multiply と add

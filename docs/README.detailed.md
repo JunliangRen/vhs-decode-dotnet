@@ -428,7 +428,9 @@ The Python measurements were audited on 2026-08-02 using main commit
 columns and ten v0.4.0 .NET cells retain the preceding audited full refresh.
 The host was an Intel Core Ultra 7 265K with 20 logical
 processors, Windows 11 build 26220, and .NET SDK/runtime
-`11.0.100-preview.6.26359.118`.
+`11.0.100-preview.6.26359.118`. Raw run directories are retained locally because
+they contain the private fixture path; the figures below are reported local
+measurements, not an independently reproducible public benchmark corpus.
 
 The `current` VHS nine-tap sync boxcar now evaluates four adjacent output
 samples per AVX vector. Each lane performs the same nine multiplications and
