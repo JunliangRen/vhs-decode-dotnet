@@ -2,7 +2,7 @@
 
 **[English](README.md)** | [简体中文](README.zh-CN.md) | [日本語](README.ja.md)
 
-<!-- README_SYNC: 2026-08-04.02 -->
+<!-- README_SYNC: 2026-08-04.03 -->
 
 A .NET 11 rewrite of the decode-facing parts of
 [`oyvindln/vhs-decode`](https://github.com/oyvindln/vhs-decode), targeting
@@ -38,7 +38,7 @@ evidence, and remaining gaps.
   EIAJ, and supported PAL/NTSC variants.
 - TBC utility tools, the double-click GUI, and developer plotting windows are
   intentionally out of scope.
-- The Visual Studio 2026 `.slnx` solution has **1,319** standard xUnit v3 tests
+- The Visual Studio 2026 `.slnx` solution has **1,324** standard xUnit v3 tests
   that are visible in Test Explorer and runnable with `dotnet test`.
 
 <!-- SECTION: start -->
@@ -99,7 +99,7 @@ for compatibility-sensitive work.
 The table uses one fixed private local 40 MHz PAL VHS `.ldf` fixture and the
 same 40-frame window for every run; the filename is intentionally not
 published. The Python columns and ten v0.4.0 .NET cells retain their audited
-measurements. This branch, based on main `89a0a09`, refreshed all ten `current`
+measurements. This branch, based on main `d306ebe`, refreshed all ten `current`
 .NET cells with three Release runs each. Compatibility is evaluated separately
 from speed. Raw run directories remain local because they contain the private
 fixture path, so these are reported local measurements rather than a publicly
@@ -108,22 +108,21 @@ reproducible benchmark corpus.
 <!-- LATEST_PERFORMANCE_BEGIN -->
 | CLI mode (workers) | Python v0.4.0 | Python PR341 | Exact + v0.4.0 | Exact + current | IPP-fast + v0.4.0 | IPP-fast + current |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| default (5) | 15.207 s | 16.780 s | 4.267 s / 3.564x | 4.723 s / 3.553x | 3.608 s / 4.215x | 3.337 s / 5.029x |
-| `--threads 1` | 17.694 s | 19.414 s | 9.732 s / 1.818x | 11.602 s / 1.673x | 7.089 s / 2.496x | 7.845 s / 2.475x |
-| `--threads 5` | 15.719 s | 17.801 s | 4.167 s / 3.772x | 5.026 s / 3.542x | 3.607 s / 4.358x | 3.228 s / 5.515x |
-| `--threads 10` | 16.037 s | 18.266 s | 3.274 s / 4.899x | 3.869 s / 4.721x | 3.069 s / 5.225x | 2.802 s / 6.518x |
-| `--threads 20` | 16.405 s | 18.395 s | 2.919 s / 5.620x | 3.612 s / 5.093x | 2.667 s / 6.150x | 2.262 s / 8.134x |
+| default (5) | 15.207 s | 16.780 s | 4.267 s / 3.564x | 5.062 s / 3.315x | 3.608 s / 4.215x | 3.382 s / 4.961x |
+| `--threads 1` | 17.694 s | 19.414 s | 9.732 s / 1.818x | 11.789 s / 1.647x | 7.089 s / 2.496x | 7.978 s / 2.433x |
+| `--threads 5` | 15.719 s | 17.801 s | 4.167 s / 3.772x | 5.058 s / 3.519x | 3.607 s / 4.358x | 3.297 s / 5.399x |
+| `--threads 10` | 16.037 s | 18.266 s | 3.274 s / 4.899x | 4.391 s / 4.160x | 3.069 s / 5.225x | 2.710 s / 6.740x |
+| `--threads 20` | 16.405 s | 18.395 s | 2.919 s / 5.620x | 3.198 s / 5.753x | 2.667 s / 6.150x | 2.189 s / 8.405x |
 <!-- LATEST_PERFORMANCE_END -->
 <!-- LATEST_PERFORMANCE_RUNS: prior-full-refresh=60 current-refresh=30 repeats=3 -->
 
 Each .NET cell shows median wall time and speedup versus its profile-matched
-Python column. The default is **5 workers**. The `current` VHS nine-tap sync
-boxcar now processes four independent outputs per AVX vector while preserving
-each lane's original multiply/add order; it adds no FMA, reassociation, worker,
-allocation, or retained-buffer change. A five-pair 40-frame gate reduced median
-IPP-fast/current 20-worker wall time by 3.81% and CPU time by 8.55%. A final
-200-frame pair reduced wall time by 1.43% and CPU time by 4.93%, with unchanged
-peak memory. The refreshed 20-worker cell is 2.262 seconds, 8.134x faster than
+Python column. The default is **5 workers**. AVX now accelerates the center
+conversion in Super-Gaussian reflect padding, the IPP spectrum mask, and output
+expansion without FMA, reassociation, new allocation, or retained-buffer changes. Three
+alternating 200-frame pairs reduced median IPP-fast/current 20-worker wall time
+from 9.064 to 8.503 seconds (6.19%) and CPU time from 48.312 to 46.609 seconds
+(3.52%). The refreshed 20-worker cell is 2.189 seconds, 8.405x faster than
 profile-matched Python PR341.
 
 All 30 refreshed runs were deterministic within each backend. Baseline/candidate
@@ -167,7 +166,7 @@ The pinned SDK is .NET `11.0.100-preview.6.26359.118`.
 dotnet restore VHSDecodeDotNet.slnx
 dotnet build VHSDecodeDotNet.slnx -c Release --no-restore
 dotnet test --solution VHSDecodeDotNet.slnx -c Release `
-  --no-build --no-restore --minimum-expected-tests 1319
+  --no-build --no-restore --minimum-expected-tests 1324
 ```
 
 Open `VHSDecodeDotNet.slnx` in Visual Studio 2026 to build, debug, and run the

@@ -4,7 +4,7 @@
 
 **[English](README.detailed.md)** | [简体中文](README.detailed.zh-CN.md) | [日本語](README.detailed.ja.md)
 
-<!-- README_SYNC: 2026-08-04.02 -->
+<!-- README_SYNC: 2026-08-04.03 -->
 
 .NET 11 rewrite of the decode-facing parts of
 [`oyvindln/vhs-decode`](https://github.com/oyvindln/vhs-decode), focused on
@@ -414,23 +414,44 @@ speedup, and wall-time reduction against its profile-matched Python column:
 <!-- LATEST_PERFORMANCE_BEGIN -->
 | CLI mode (workers) | Python v0.4.0 | Python PR341 | Exact + v0.4.0 | Exact + current | IPP-fast + v0.4.0 | IPP-fast + current |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| default (5) | 15.207 s | 16.780 s | 4.267 s / 3.564x / 71.94% | 4.723 s / 3.553x / 71.85% | 3.608 s / 4.215x / 76.28% | 3.337 s / 5.029x / 80.12% |
-| `--threads 1` | 17.694 s | 19.414 s | 9.732 s / 1.818x / 45.00% | 11.602 s / 1.673x / 40.24% | 7.089 s / 2.496x / 59.93% | 7.845 s / 2.475x / 59.59% |
-| `--threads 5` | 15.719 s | 17.801 s | 4.167 s / 3.772x / 73.49% | 5.026 s / 3.542x / 71.77% | 3.607 s / 4.358x / 77.05% | 3.228 s / 5.515x / 81.87% |
-| `--threads 10` | 16.037 s | 18.266 s | 3.274 s / 4.899x / 79.59% | 3.869 s / 4.721x / 78.82% | 3.069 s / 5.225x / 80.86% | 2.802 s / 6.518x / 84.66% |
-| `--threads 20` | 16.405 s | 18.395 s | 2.919 s / 5.620x / 82.21% | 3.612 s / 5.093x / 80.36% | 2.667 s / 6.150x / 83.74% | 2.262 s / 8.134x / 87.71% |
+| default (5) | 15.207 s | 16.780 s | 4.267 s / 3.564x / 71.94% | 5.062 s / 3.315x / 69.84% | 3.608 s / 4.215x / 76.28% | 3.382 s / 4.961x / 79.84% |
+| `--threads 1` | 17.694 s | 19.414 s | 9.732 s / 1.818x / 45.00% | 11.789 s / 1.647x / 39.28% | 7.089 s / 2.496x / 59.93% | 7.978 s / 2.433x / 58.90% |
+| `--threads 5` | 15.719 s | 17.801 s | 4.167 s / 3.772x / 73.49% | 5.058 s / 3.519x / 71.59% | 3.607 s / 4.358x / 77.05% | 3.297 s / 5.399x / 81.48% |
+| `--threads 10` | 16.037 s | 18.266 s | 3.274 s / 4.899x / 79.59% | 4.391 s / 4.160x / 75.96% | 3.069 s / 5.225x / 80.86% | 2.710 s / 6.740x / 85.16% |
+| `--threads 20` | 16.405 s | 18.395 s | 2.919 s / 5.620x / 82.21% | 3.198 s / 5.753x / 82.62% | 2.667 s / 6.150x / 83.74% | 2.189 s / 8.405x / 88.10% |
 <!-- LATEST_PERFORMANCE_END -->
 <!-- LATEST_PERFORMANCE_RUNS: prior-full-refresh=60 current-refresh=30 repeats=3 -->
 
 The Python measurements were audited on 2026-08-02 using main commit
 `c92af1dfd0f96cd7f2d49f3219fb428d0f4e0865`. This branch, based on main
-`89a0a09`, remeasured all ten `current` .NET cells three times; the Python
+`d306ebe`, remeasured all ten `current` .NET cells three times; the Python
 columns and ten v0.4.0 .NET cells retain the preceding audited full refresh.
 The host was an Intel Core Ultra 7 265K with 20 logical
 processors, Windows 11 build 26220, and .NET SDK/runtime
 `11.0.100-preview.6.26359.118`. Raw run directories are retained locally because
 they contain the private fixture path; the figures below are reported local
 measurements, not an independently reproducible public benchmark corpus.
+
+The current Super-Gaussian staging path uses AVX for the center conversion while
+building reflected float32 input, for the existing IPP spectrum mask, and for
+expanding float32 output to float64. Every lane retains the original conversion points and the
+mask's multiply, explicit multiply-by-zero, add, and subtract order. It uses no
+FMA or reassociation, and adds no allocation or retained buffer. Vector tails
+and hosts without AVX use the original scalar expressions. Focused tests cover
+NaN payloads, infinities, subnormals, signed zero, unaligned destinations, and
+non-vector lengths against independent scalar references.
+
+Seven alternating production-size filter microbenchmark pairs retained one
+identical output SHA-256 and moved the median from 1.95 to 1.18 ms (39.5%
+lower, 1.653x throughput). Three alternating fixed 200-frame
+`ipp-fast + current --threads 20` pairs moved median wall time from 9.064 to
+8.503 seconds (6.19% lower) and process CPU time from 48.312 to 46.609 seconds
+(3.52% lower); effective core use rose from 5.33 to 5.48. Every pair matched
+exit status, field count, luma, chroma, raw JSON, stdout, timing-normalized
+stderr, timestamp-normalized logs, and ordered `fileLoc`. All 30 refreshed
+matrix runs were deterministic within each backend and matched the preceding
+audited matrix hashes. The Release solution built without warnings or errors,
+and all 1,324 xUnit v3 tests passed.
 
 The `current` VHS nine-tap sync boxcar now evaluates four adjacent output
 samples per AVX vector. Each lane performs the same nine multiplications and
@@ -2451,7 +2472,7 @@ Requirements:
 .\tools\build-ipp-native.ps1
 dotnet restore VHSDecodeDotNet.slnx
 dotnet build VHSDecodeDotNet.slnx -c Release --no-restore
-dotnet test --solution VHSDecodeDotNet.slnx -c Release --no-build --no-restore --minimum-expected-tests 1319
+dotnet test --solution VHSDecodeDotNet.slnx -c Release --no-build --no-restore --minimum-expected-tests 1324
 dotnet test --project tests\VHSDecode.Tests\VHSDecode.Tests.csproj -c Release --no-build --no-restore --coverage --coverage-output coverage.cobertura.xml --coverage-output-format cobertura
 ```
 
@@ -2465,7 +2486,7 @@ deployment computer. Binary-only single-file releases embed
 sidecar license files. An Exact-only build may omit the native build step.
 
 The current formal Release build has zero warnings and errors. The xUnit v3
-project exposes **1,319** independently discoverable tests to both
+project exposes **1,324** independently discoverable tests to both
 `dotnet test` and Visual Studio Test Explorer.
 
 <!-- SECTION: usage -->

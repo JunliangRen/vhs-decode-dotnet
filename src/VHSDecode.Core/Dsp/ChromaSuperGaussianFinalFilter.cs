@@ -1,3 +1,5 @@
+using System.Runtime.Intrinsics;
+using System.Runtime.Intrinsics.X86;
 using VHSDecode.Core.Dsp.Ipp;
 
 namespace VHSDecode.Core.Dsp;
@@ -110,10 +112,9 @@ internal sealed class ChromaSuperGaussianFinalFilter : IDisposable
             {
                 ApplyIppTransform(workspace);
             }
-            for (int i = 0; i < output.Length; i++)
-            {
-                output[i] = workspace.Filtered[_padLeft + i];
-            }
+            CopyFloat32ToFloat64(
+                workspace.Filtered.AsSpan(_padLeft, output.Length),
+                output);
         }
         finally
         {
@@ -155,16 +156,66 @@ internal sealed class ChromaSuperGaussianFinalFilter : IDisposable
         IppRealDft32 ippDft = _ippDft!;
         IppComplex32[] spectrum = workspace.IppSpectrum!;
         ippDft.Forward(workspace.Padded, spectrum);
-        for (int i = 0; i < spectrum.Length; i++)
-        {
-            double real = spectrum[i].Real;
-            double imaginary = spectrum[i].Imaginary;
-            spectrum[i] = new IppComplex32(
-                (float)((real * _mask[i]) - (imaginary * 0.0)),
-                (float)((real * 0.0) + (imaginary * _mask[i])));
-        }
+        ApplyIppMask(spectrum, _mask);
 
         ippDft.Inverse(spectrum, workspace.Filtered);
+    }
+
+    internal static unsafe void ApplyIppMask(
+        Span<IppComplex32> spectrum,
+        ReadOnlySpan<double> mask)
+    {
+        if (spectrum.Length != mask.Length)
+        {
+            throw new ArgumentException(
+                "IPP spectrum and Super-Gaussian mask lengths must match.",
+                nameof(mask));
+        }
+
+        int index = 0;
+        if (Avx.IsSupported)
+        {
+            fixed (IppComplex32* spectrumPointer = spectrum)
+            fixed (double* maskPointer = mask)
+            {
+                float* components = (float*)spectrumPointer;
+                int vectorizedEnd = spectrum.Length - (spectrum.Length % 4);
+                Vector256<double> zero = Vector256<double>.Zero;
+                for (; index < vectorizedEnd; index += 4)
+                {
+                    Vector128<float> first = Sse.LoadVector128(components + (index * 2));
+                    Vector128<float> second = Sse.LoadVector128(components + (index * 2) + 4);
+                    Vector256<double> real = Avx.ConvertToVector256Double(
+                        Sse.Shuffle(first, second, 0x88));
+                    Vector256<double> imaginary = Avx.ConvertToVector256Double(
+                        Sse.Shuffle(first, second, 0xDD));
+                    Vector256<double> factors = Avx.LoadVector256(maskPointer + index);
+                    Vector128<float> filteredReal = Avx.ConvertToVector128Single(
+                        Avx.Subtract(
+                            Avx.Multiply(real, factors),
+                            Avx.Multiply(imaginary, zero)));
+                    Vector128<float> filteredImaginary = Avx.ConvertToVector128Single(
+                        Avx.Add(
+                            Avx.Multiply(real, zero),
+                            Avx.Multiply(imaginary, factors)));
+                    Sse.Store(
+                        components + (index * 2),
+                        Sse.UnpackLow(filteredReal, filteredImaginary));
+                    Sse.Store(
+                        components + (index * 2) + 4,
+                        Sse.UnpackHigh(filteredReal, filteredImaginary));
+                }
+            }
+        }
+
+        for (; index < spectrum.Length; index++)
+        {
+            double real = spectrum[index].Real;
+            double imaginary = spectrum[index].Imaginary;
+            spectrum[index] = new IppComplex32(
+                (float)((real * mask[index]) - (imaginary * 0.0)),
+                (float)((real * 0.0) + (imaginary * mask[index])));
+        }
     }
 
     internal static int NextFastLength(int minimumLength)
@@ -276,7 +327,7 @@ internal sealed class ChromaSuperGaussianFinalFilter : IDisposable
         _ippDft?.Dispose();
     }
 
-    private static void FillReflectPad(
+    internal static void FillReflectPad(
         ReadOnlySpan<double> input,
         Span<float> output,
         int padLeft)
@@ -294,15 +345,85 @@ internal sealed class ChromaSuperGaussianFinalFilter : IDisposable
             output[i] = (float)input[padLeft - i];
         }
 
-        for (int i = 0; i < input.Length; i++)
-        {
-            output[padLeft + i] = (float)input[i];
-        }
+        CopyFloat64ToFloat32(input, output.Slice(padLeft, input.Length));
 
         for (int i = 0; i < padRight; i++)
         {
             output[padLeft + input.Length + i] =
                 (float)input[input.Length - i - 2];
+        }
+    }
+
+    internal static unsafe void CopyFloat64ToFloat32(
+        ReadOnlySpan<double> source,
+        Span<float> destination)
+    {
+        if (destination.Length < source.Length)
+        {
+            throw new ArgumentException(
+                "Destination is shorter than the source.",
+                nameof(destination));
+        }
+
+        int index = 0;
+        if (Avx.IsSupported)
+        {
+            fixed (double* sourcePointer = source)
+            fixed (float* destinationPointer = destination)
+            {
+                int vectorizedEnd = source.Length - (source.Length % 8);
+                for (; index < vectorizedEnd; index += 8)
+                {
+                    Vector256<float> converted = Vector256.Create(
+                        Avx.ConvertToVector128Single(
+                            Avx.LoadVector256(sourcePointer + index)),
+                        Avx.ConvertToVector128Single(
+                            Avx.LoadVector256(sourcePointer + index + 4)));
+                    Avx.Store(destinationPointer + index, converted);
+                }
+            }
+        }
+
+        for (; index < source.Length; index++)
+        {
+            destination[index] = (float)source[index];
+        }
+    }
+
+    internal static unsafe void CopyFloat32ToFloat64(
+        ReadOnlySpan<float> source,
+        Span<double> destination)
+    {
+        if (destination.Length < source.Length)
+        {
+            throw new ArgumentException(
+                "Destination is shorter than the source.",
+                nameof(destination));
+        }
+
+        int index = 0;
+        if (Avx.IsSupported)
+        {
+            fixed (float* sourcePointer = source)
+            fixed (double* destinationPointer = destination)
+            {
+                int vectorizedEnd = source.Length - (source.Length % 8);
+                for (; index < vectorizedEnd; index += 8)
+                {
+                    Vector256<float> values = Avx.LoadVector256(sourcePointer + index);
+                    Avx.Store(
+                        destinationPointer + index,
+                        Avx.ConvertToVector256Double(values.GetLower()));
+                    Avx.Store(
+                        destinationPointer + index + 4,
+                        Avx.ConvertToVector256Double(values.GetUpper()));
+                }
+            }
+        }
+
+        for (; index < source.Length; index++)
+        {
+            destination[index] = source[index];
         }
     }
 

@@ -4,7 +4,7 @@
 
 [English](README.detailed.md) | [简体中文](README.detailed.zh-CN.md) | **[日本語](README.detailed.ja.md)**
 
-<!-- README_SYNC: 2026-08-04.02 -->
+<!-- README_SYNC: 2026-08-04.03 -->
 
 [`oyvindln/vhs-decode`](https://github.com/oyvindln/vhs-decode) の
 デコード関連部分を .NET 11 で再実装するプロジェクトです。現在は release
@@ -394,23 +394,43 @@ Python v0.4.0、merge 済みの Python PR341、Exact v0.4.0、Exact
 <!-- LATEST_PERFORMANCE_BEGIN -->
 | CLI mode（workers） | Python v0.4.0 | Python PR341 | Exact + v0.4.0 | Exact + current | IPP-fast + v0.4.0 | IPP-fast + current |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| default（5） | 15.207 s | 16.780 s | 4.267 s / 3.564x / 71.94% | 4.723 s / 3.553x / 71.85% | 3.608 s / 4.215x / 76.28% | 3.337 s / 5.029x / 80.12% |
-| `--threads 1` | 17.694 s | 19.414 s | 9.732 s / 1.818x / 45.00% | 11.602 s / 1.673x / 40.24% | 7.089 s / 2.496x / 59.93% | 7.845 s / 2.475x / 59.59% |
-| `--threads 5` | 15.719 s | 17.801 s | 4.167 s / 3.772x / 73.49% | 5.026 s / 3.542x / 71.77% | 3.607 s / 4.358x / 77.05% | 3.228 s / 5.515x / 81.87% |
-| `--threads 10` | 16.037 s | 18.266 s | 3.274 s / 4.899x / 79.59% | 3.869 s / 4.721x / 78.82% | 3.069 s / 5.225x / 80.86% | 2.802 s / 6.518x / 84.66% |
-| `--threads 20` | 16.405 s | 18.395 s | 2.919 s / 5.620x / 82.21% | 3.612 s / 5.093x / 80.36% | 2.667 s / 6.150x / 83.74% | 2.262 s / 8.134x / 87.71% |
+| default（5） | 15.207 s | 16.780 s | 4.267 s / 3.564x / 71.94% | 5.062 s / 3.315x / 69.84% | 3.608 s / 4.215x / 76.28% | 3.382 s / 4.961x / 79.84% |
+| `--threads 1` | 17.694 s | 19.414 s | 9.732 s / 1.818x / 45.00% | 11.789 s / 1.647x / 39.28% | 7.089 s / 2.496x / 59.93% | 7.978 s / 2.433x / 58.90% |
+| `--threads 5` | 15.719 s | 17.801 s | 4.167 s / 3.772x / 73.49% | 5.058 s / 3.519x / 71.59% | 3.607 s / 4.358x / 77.05% | 3.297 s / 5.399x / 81.48% |
+| `--threads 10` | 16.037 s | 18.266 s | 3.274 s / 4.899x / 79.59% | 4.391 s / 4.160x / 75.96% | 3.069 s / 5.225x / 80.86% | 2.710 s / 6.740x / 85.16% |
+| `--threads 20` | 16.405 s | 18.395 s | 2.919 s / 5.620x / 82.21% | 3.198 s / 5.753x / 82.62% | 2.667 s / 6.150x / 83.74% | 2.189 s / 8.405x / 88.10% |
 <!-- LATEST_PERFORMANCE_END -->
 <!-- LATEST_PERFORMANCE_RUNS: prior-full-refresh=60 current-refresh=30 repeats=3 -->
 
 Python measurement は 2026-08-02 に main commit
 `c92af1dfd0f96cd7f2d49f3219fb428d0f4e0865` で audit しました。この branch は
-main `89a0a09` を基点に、10 個の `current` .NET cell を各 3 回再測定しました。
+main `d306ebe` を基点に、10 個の `current` .NET cell を各 3 回再測定しました。
 Python 列と 10 個の v0.4.0 .NET cell は直前の audited full refresh を維持します。
 host は Intel Core Ultra 7 265K（20 logical processor）、
 Windows 11 build 26220、.NET SDK/runtime `11.0.100-preview.6.26359.118` です。raw
 run directory は private fixture path を含むため local にのみ保持します。以下は
 報告された local measurement であり、公開された independently reproducible
 benchmark corpus ではありません。
+
+現在の Super-Gaussian staging path は AVX を使い、reflect padding を構築する中央部の
+float64-to-float32 変換、既存の IPP spectrum mask、float32-to-float64 output expansion を
+高速化します。各 lane は元の conversion point と、mask の multiply、明示的な
+multiply-by-zero、add、subtract の順序を維持します。FMA、reassociation、allocation、
+retained buffer は追加しません。vector tail と AVX 非対応 host は元の scalar
+expression を使います。focused test は独立した scalar reference に対して NaN
+payload、infinity、subnormal、signed zero、unaligned destination、non-vector length を
+検証します。
+
+production-size filter microbenchmark の alternating 7-pair は同一の output SHA-256 を
+維持し、median を 1.95 から 1.18 ms へ短縮しました（39.5% lower、throughput
+1.653x）。fixed 200-frame `ipp-fast + current --threads 20` の alternating 3-pair は
+wall median を 9.064 から 8.503 秒へ 6.19%、process CPU median を 48.312 から
+46.609 秒へ 3.52% 削減し、effective core use は 5.33 から 5.48 へ上昇しました。
+すべての pair で exit status、field count、luma、chroma、raw JSON、stdout、
+timing-normalized stderr、timestamp-normalized log、ordered `fileLoc` が一致しました。
+更新した 30 matrix run は backend ごとに deterministic で、直前の audited matrix
+hash と一致しました。Release solution は warning/error 0、1,324 個すべての xUnit
+v3 test が pass しました。
 
 `current` VHS の 9-tap sync boxcar は、各 AVX vector で隣接する 4 output sample を
 計算します。各 lane は従来の ascending source order で同じ 9 回の multiply と add
@@ -2359,7 +2379,7 @@ SHA-256、stdout SHA-256、normalized stderr、normalized log、全 ordered `fil
 .\tools\build-ipp-native.ps1
 dotnet restore VHSDecodeDotNet.slnx
 dotnet build VHSDecodeDotNet.slnx -c Release --no-restore
-dotnet test --solution VHSDecodeDotNet.slnx -c Release --no-build --no-restore --minimum-expected-tests 1319
+dotnet test --solution VHSDecodeDotNet.slnx -c Release --no-build --no-restore --minimum-expected-tests 1324
 dotnet test --project tests\VHSDecode.Tests\VHSDecode.Tests.csproj -c Release --no-build --no-restore --coverage --coverage-output coverage.cobertura.xml --coverage-output-format cobertura
 ```
 
@@ -2373,7 +2393,7 @@ third-party notice を埋め込み、license sidecar file は追加しません�
 
 現在の正式な Release build は warning 0、error 0 です。xUnit v3 project は
 `dotnet test` と Visual Studio Test Explorer の両方で個別に検出できる
-**1,319** tests を公開します。
+**1,324** tests を公開します。
 
 <!-- SECTION: usage -->
 
