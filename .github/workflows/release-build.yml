@@ -137,6 +137,11 @@ jobs:
           DOTNET_EnableHWIntrinsic: "0"
         run: dotnet test tests/VHSDecode.Tests/VHSDecode.Tests.csproj --configuration Release --no-build --no-restore --filter-class VHSDecode.Tests.NumpyReductionMeanTests --minimum-expected-tests 13
 
+      - name: Run current VHS sync scalar fallback tests
+        env:
+          DOTNET_EnableHWIntrinsic: "0"
+        run: dotnet test tests/VHSDecode.Tests/VHSDecode.Tests.csproj --configuration Release --no-build --no-restore --filter-class VHSDecode.Tests.VhsSyncDetectorCurrentTests --minimum-expected-tests 25
+
       - name: Run PCM16 scalar fallback tests
         env:
           DOTNET_EnableAVX2: "0"

@@ -414,7 +414,10 @@ Windows 11 build 26220、.NET SDK/runtime `11.0.100-preview.6.26359.118` です�
 を実行します。FMA、reassociation、worker-cap change、allocation、retained buffer
 は追加しません。vector tail と AVX 非対応 host は従来の scalar loop を使います。
 standard xUnit v3 test は独立した scalar reference を使い、2、3、4 workers で
-length 9、10、10,003 の bit pattern を検証します。
+length 9、10、10,003 の bit pattern を検証し、NaN payload、正負の infinity、
+subnormal、minimum normal、signed zero も網羅します。CI は別 process で
+`DOTNET_EnableHWIntrinsic=0` を設定し、focused sync test 25 個を再実行して scalar
+fallback を検証します。
 
 fixed 40-frame `ipp-fast + current --threads 20` の alternating 5-pair は wall median
 を 2.452 から 2.359 秒へ短縮し（3.81% lower、throughput 1.040x）、process CPU

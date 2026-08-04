@@ -436,7 +436,10 @@ additions in the original ascending source order. It introduces no FMA,
 reassociation, worker-cap change, allocation, or retained buffer; vector tails
 and hosts without AVX use the original scalar loop. The standard xUnit v3 test
 uses an independent scalar reference and checks bit patterns at lengths 9, 10,
-and 10,003 with two, three, and four workers.
+and 10,003 with two, three, and four workers. It also covers NaN payloads,
+infinities, subnormals, minimum normals, and signed zero. CI reruns all 25
+focused sync tests with `DOTNET_EnableHWIntrinsic=0` to exercise the scalar
+fallback in a separate process.
 
 Five alternating fixed 40-frame `ipp-fast + current --threads 20` pairs moved
 median wall time from 2.452 to 2.359 seconds (3.81% lower, 1.040x throughput)
