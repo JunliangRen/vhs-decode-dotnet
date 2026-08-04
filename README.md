@@ -2,7 +2,7 @@
 
 **[English](README.md)** | [简体中文](README.zh-CN.md) | [日本語](README.ja.md)
 
-<!-- README_SYNC: 2026-08-04.01 -->
+<!-- README_SYNC: 2026-08-04.02 -->
 
 A .NET 11 rewrite of the decode-facing parts of
 [`oyvindln/vhs-decode`](https://github.com/oyvindln/vhs-decode), targeting
@@ -38,7 +38,7 @@ evidence, and remaining gaps.
   EIAJ, and supported PAL/NTSC variants.
 - TBC utility tools, the double-click GUI, and developer plotting windows are
   intentionally out of scope.
-- The Visual Studio 2026 `.slnx` solution has **1,315** standard xUnit v3 tests
+- The Visual Studio 2026 `.slnx` solution has **1,319** standard xUnit v3 tests
   that are visible in Test Explorer and runnable with `dotnet test`.
 
 <!-- SECTION: start -->
@@ -98,9 +98,10 @@ for compatibility-sensitive work.
 
 The table uses one fixed private local 40 MHz PAL VHS `.ldf` fixture and the
 same 40-frame window for every run; the filename is intentionally not
-published. The Python columns retain their audited measurements. This branch,
-based on main `72664dc`, refreshed all 20 .NET cells with three runs each (60
-Release runs). Compatibility is evaluated separately from speed.
+published. The Python columns and 19 unaffected .NET cells retain their audited
+measurements. This branch, based on main `4f50fa9`, refreshed the affected
+IPP-fast/current 20-worker cell with three Release runs. Compatibility is
+evaluated separately from speed.
 
 <!-- LATEST_PERFORMANCE_BEGIN -->
 | CLI mode (workers) | Python v0.4.0 | Python PR341 | Exact + v0.4.0 | Exact + current | IPP-fast + v0.4.0 | IPP-fast + current |
@@ -109,22 +110,23 @@ Release runs). Compatibility is evaluated separately from speed.
 | `--threads 1` | 17.694 s | 19.414 s | 9.732 s / 1.818x | 11.640 s / 1.668x | 7.089 s / 2.496x | 7.947 s / 2.443x |
 | `--threads 5` | 15.719 s | 17.801 s | 4.167 s / 3.772x | 4.648 s / 3.830x | 3.607 s / 4.358x | 3.388 s / 5.254x |
 | `--threads 10` | 16.037 s | 18.266 s | 3.274 s / 4.899x | 4.096 s / 4.459x | 3.069 s / 5.225x | 2.732 s / 6.686x |
-| `--threads 20` | 16.405 s | 18.395 s | 2.919 s / 5.620x | 3.765 s / 4.886x | 2.667 s / 6.150x | 2.327 s / 7.905x |
+| `--threads 20` | 16.405 s | 18.395 s | 2.919 s / 5.620x | 3.765 s / 4.886x | 2.667 s / 6.150x | 2.180 s / 8.438x |
 <!-- LATEST_PERFORMANCE_END -->
-<!-- LATEST_PERFORMANCE_RUNS: full-refresh=60 repeats=3 -->
+<!-- LATEST_PERFORMANCE_RUNS: prior-full-refresh=60 affected-refresh=3 repeats=3 -->
 
 Each .NET cell shows median wall time and speedup versus its profile-matched
-Python column. The default is **5 workers**. The hot NumPy-compatible float32
-mean now converts eight float64 inputs at a time and accumulates them in eight
-AVX lanes while preserving the original recursive split and reduction order;
-it uses no FMA or new retained buffer. A three-pair fixed 160-frame
-`ipp-fast + current --threads 20` A/B moved the median from 11.855 to 11.620
-seconds (2.0% lower), with the candidate faster in two of three pairs. Median
-effective core use rose from 4.66 to 4.94. The refreshed 20-worker table cell is
-2.327 seconds, 7.905x faster than the profile-matched Python PR341 measurement.
+Python column. The default is **5 workers**. At high worker counts, each pooled
+IPP VHS workspace now owns one bounded companion FFT plan and runs the
+independent real and Hilbert inverse transforms concurrently; DSP arithmetic
+and the 16-workspace retention limit are unchanged. Five fixed 100-frame pairs
+reduced mean wall time from 9.347 to 9.035 seconds (3.3%), with median effective
+core use rising from 4.74 to 4.88. All three documented 40-frame pairs were
+faster; the refreshed 20-worker cell is 2.180 seconds, 8.438x faster than the
+profile-matched Python PR341 measurement.
 
-All 60 refreshed runs were deterministic within each profile. Baseline/candidate gates matched
-luma, chroma, raw JSON, stdout, normalized stderr/logs, and ordered `fileLoc`.
+All refreshed runs and both profile/thread gates were deterministic.
+Baseline/candidate gates matched luma, chroma, raw JSON, stdout, normalized
+stderr/logs, and ordered `fileLoc`.
 IPP-fast remains an explicit numerically close backend, so its artifacts are
 not claimed to match Exact byte for byte. Python v0.4.0 can change output hashes
 with nonzero worker counts, so Python v0.4.0 `g4315520 --threads 0` remains the
@@ -163,7 +165,7 @@ The pinned SDK is .NET `11.0.100-preview.6.26359.118`.
 dotnet restore VHSDecodeDotNet.slnx
 dotnet build VHSDecodeDotNet.slnx -c Release --no-restore
 dotnet test --solution VHSDecodeDotNet.slnx -c Release `
-  --no-build --no-restore --minimum-expected-tests 1315
+  --no-build --no-restore --minimum-expected-tests 1319
 ```
 
 Open `VHSDecodeDotNet.slnx` in Visual Studio 2026 to build, debug, and run the
