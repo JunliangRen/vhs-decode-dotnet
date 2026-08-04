@@ -197,6 +197,14 @@ public sealed class VhsSyncDetector
         int outputLength,
         int workerThreads)
     {
+        if ((uint)outputLength > (uint)output.Length)
+        {
+            throw new ArgumentOutOfRangeException(
+                nameof(outputLength),
+                outputLength,
+                "The output length must fit within the destination array.");
+        }
+
         int workerCount = Math.Min(workerThreads, outputLength);
         Parallel.For(
             fromInclusive: 0,
