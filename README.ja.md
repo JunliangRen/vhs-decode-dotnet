@@ -36,7 +36,7 @@ upstream release `v0.4.0`、commit
 - VHS family には VHS/S-VHS、Betamax、Video8/Hi8、U-matic、Type C、EIAJ、
   upstream が対応する PAL/NTSC variant が含まれます。
 - TBC utility、ダブルクリック GUI、開発者向け plot window は対象外です。
-- Visual Studio 2026 の `.slnx` には **1,299** 件の標準 xUnit v3 test があり、
+- Visual Studio 2026 の `.slnx` には **1,302** 件の標準 xUnit v3 test があり、
   Test Explorer と `dotnet test` の両方で実行できます。
 
 <!-- SECTION: start -->
@@ -93,40 +93,37 @@ CVBS、LaserDisc、HiFi は現在 `ipp-fast` を拒否するため、これら�
 ## 最新の性能
 
 次の表は同じ private local 40 MHz PAL VHS `.ldf` fixture と同じ 40-frame
-window を使用し、source filename は公開しません。2026-08-04、main
-`bb3d350` を基にしたこの branch candidate で、20 個すべての .NET cell を 3 回ずつ
-interleaved 測定しました（60 Release run）。Python 列は同じ window の audited
-measurement を維持します。互換性判定は速度とは別に行います。
+window を使用し、source filename は公開しません。Python 列と影響を受けない
+.NET cell は 2026-08-04 の audited measurement を維持します。main `0f59971`
+を基にしたこの branch では、影響を受ける 8 個の parallel `current` cell を
+各 3 回、合計 24 Release run で更新しました。互換性判定は速度とは別です。
 
 <!-- LATEST_PERFORMANCE_BEGIN -->
 | CLI mode（workers） | Python v0.4.0 | Python PR341 | Exact + v0.4.0 | Exact + current | IPP-fast + v0.4.0 | IPP-fast + current |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| default（5） | 15.207 s | 16.780 s | 4.454 s / 3.414x | 4.954 s / 3.387x | 3.619 s / 4.202x | 3.463 s / 4.845x |
+| default（5） | 15.207 s | 16.780 s | 4.454 s / 3.414x | 4.960 s / 3.383x | 3.619 s / 4.202x | 3.400 s / 4.936x |
 | `--threads 1` | 17.694 s | 19.414 s | 9.931 s / 1.782x | 11.898 s / 1.632x | 7.198 s / 2.458x | 7.989 s / 2.430x |
-| `--threads 5` | 15.719 s | 17.801 s | 4.499 s / 3.494x | 4.893 s / 3.638x | 3.612 s / 4.352x | 3.445 s / 5.167x |
-| `--threads 10` | 16.037 s | 18.266 s | 3.727 s / 4.303x | 4.341 s / 4.207x | 3.036 s / 5.282x | 2.762 s / 6.612x |
-| `--threads 20` | 16.405 s | 18.395 s | 3.045 s / 5.387x | 3.828 s / 4.805x | 2.751 s / 5.964x | 2.378 s / 7.735x |
+| `--threads 5` | 15.719 s | 17.801 s | 4.499 s / 3.494x | 4.480 s / 3.973x | 3.612 s / 4.352x | 3.190 s / 5.581x |
+| `--threads 10` | 16.037 s | 18.266 s | 3.727 s / 4.303x | 4.013 s / 4.551x | 3.036 s / 5.282x | 2.748 s / 6.646x |
+| `--threads 20` | 16.405 s | 18.395 s | 3.045 s / 5.387x | 3.529 s / 5.212x | 2.751 s / 5.964x | 2.288 s / 8.038x |
 <!-- LATEST_PERFORMANCE_END -->
-<!-- LATEST_PERFORMANCE_RUNS: dotnet-refresh=60 repeats=3 -->
+<!-- LATEST_PERFORMANCE_RUNS: prior-full-refresh=60 affected-current-refresh=24 repeats=3 -->
 
 各 .NET cell は wall-time median と profile が対応する Python 列に対する
-speedup の順で、default は **5 workers** です。native PCM16 ingest は AVX2 で
-8 個の signed sample を一度に exact conversion し、同じ scalar tail/fallback を
-維持します。conversion microbenchmark は 72.241 から 44.311 ms へ 38.66% 短縮
-（throughput 1.630x）しました。fixed 100-frame
-`ipp-fast + current --threads 20` の 3-pair A/B median は 5.01 から 4.96 秒へ
-変化しましたが、2 win/1 loss と candidate variance のため end-to-end result は
-near-neutral とし、一般的な speedup claim には使用しません。
+speedup の順で、default は **5 workers** です。parallel `current` VHS sync path は
+固定 9-tap boxcar を専用化し、元の left-to-right float64 operation order、worker
+cap、memory ownership を変更しません。fixed 160-frame
+`ipp-fast + current --threads 20` の 3-pair A/B median は 12.67 から 12.51 秒へ
+1.2% 短縮し、全 candidate run が高速でした。更新した 20-worker table cell は
+2.288 秒で、profile-matched Python PR341 measurement の 8.038x です。
 
-更新した 60 個の .NET cell は profile/backend ごとに deterministic でした。
-strict baseline/candidate gate も両 profile の zero/default/20 workers で luma、
-chroma、raw JSON、stdout、timing-normalized stderr、timestamp-normalized log、
-ordered `fileLoc` が一致しました。IPP-fast は明示的な numerically-close backend の
-ままであり、artifact が Exact と byte-for-byte 同一とは主張しません。
-Python v0.4.0 は nonzero worker
-count で output hash が変わる場合があるため、strict oracle は引き続き Python
-v0.4.0 `g4315520 --threads 0` です。完全な command、hardware、hash、memory
-bound、過去の測定は
+更新した 24 cell はすべて deterministic でした。baseline/candidate gate は luma、
+chroma、raw JSON、stdout、normalized stderr/log、ordered `fileLoc` が一致しました。
+IPP-fast は明示的な numerically-close backend のままで、Exact と byte-for-byte
+同一とは主張しません。Python v0.4.0 は nonzero worker count で output hash が
+変わる場合があるため、strict oracle は Python v0.4.0
+`g4315520 --threads 0` です。完全な command、hardware、hash、memory bound、
+過去の測定は
 [詳細な性能リファレンス](docs/README.detailed.ja.md#パフォーマンス)にあります。
 
 <!-- SECTION: compatibility -->
@@ -158,7 +155,7 @@ path を維持します。
 dotnet restore VHSDecodeDotNet.slnx
 dotnet build VHSDecodeDotNet.slnx -c Release --no-restore
 dotnet test --solution VHSDecodeDotNet.slnx -c Release `
-  --no-build --no-restore --minimum-expected-tests 1299
+  --no-build --no-restore --minimum-expected-tests 1302
 ```
 
 Visual Studio 2026 で `VHSDecodeDotNet.slnx` を開くと、build、debug、

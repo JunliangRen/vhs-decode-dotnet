@@ -190,13 +190,21 @@ public sealed class VhsSyncDetector
         }
     }
 
-    private static void ConvolveBoxcarSameParallel(
+    internal static void ConvolveBoxcarSameParallel(
         double[] values,
         int windowSize,
         double[] output,
         int outputLength,
         int workerThreads)
     {
+        if ((uint)outputLength > (uint)output.Length)
+        {
+            throw new ArgumentOutOfRangeException(
+                nameof(outputLength),
+                outputLength,
+                "The output length must fit within the destination array.");
+        }
+
         int workerCount = Math.Min(workerThreads, outputLength);
         Parallel.For(
             fromInclusive: 0,
@@ -229,6 +237,12 @@ public sealed class VhsSyncDetector
         int start,
         int end)
     {
+        if (windowSize == 9 && values.Length >= 9)
+        {
+            ConvolveBoxcarRange9(values, output, start, end);
+            return;
+        }
+
         int firstFullIndex =
             (Math.Min(values.Length, windowSize) - 1) / 2;
         double scale = 1.0 / windowSize;
@@ -247,6 +261,63 @@ public sealed class VhsSyncDetector
                 sourceIndex++)
             {
                 sum += values[sourceIndex] * scale;
+            }
+
+            output[outputIndex] = sum;
+        }
+    }
+
+    private static unsafe void ConvolveBoxcarRange9(
+        double[] values,
+        double[] output,
+        int start,
+        int end)
+    {
+        const int HalfWindow = 4;
+        const double Scale = 1.0 / 9.0;
+        int interiorStart = Math.Max(start, HalfWindow);
+        int interiorEnd = Math.Min(end, values.Length - HalfWindow);
+        ConvolveBoxcarRangeEdge9(values, output, start, Math.Min(end, interiorStart));
+
+        fixed (double* valuesPointer = values)
+        fixed (double* outputPointer = output)
+        {
+            for (int outputIndex = interiorStart; outputIndex < interiorEnd; outputIndex++)
+            {
+                double* source = valuesPointer + outputIndex - HalfWindow;
+                double sum = 0.0;
+                sum += source[0] * Scale;
+                sum += source[1] * Scale;
+                sum += source[2] * Scale;
+                sum += source[3] * Scale;
+                sum += source[4] * Scale;
+                sum += source[5] * Scale;
+                sum += source[6] * Scale;
+                sum += source[7] * Scale;
+                sum += source[8] * Scale;
+                outputPointer[outputIndex] = sum;
+            }
+        }
+
+        ConvolveBoxcarRangeEdge9(values, output, Math.Max(start, interiorEnd), end);
+    }
+
+    private static void ConvolveBoxcarRangeEdge9(
+        double[] values,
+        double[] output,
+        int start,
+        int end)
+    {
+        const int HalfWindow = 4;
+        const double Scale = 1.0 / 9.0;
+        for (int outputIndex = start; outputIndex < end; outputIndex++)
+        {
+            int sourceStart = Math.Max(0, outputIndex - HalfWindow);
+            int sourceEnd = Math.Min(values.Length - 1, outputIndex + HalfWindow);
+            double sum = 0.0;
+            for (int sourceIndex = sourceStart; sourceIndex <= sourceEnd; sourceIndex++)
+            {
+                sum += values[sourceIndex] * Scale;
             }
 
             output[outputIndex] = sum;

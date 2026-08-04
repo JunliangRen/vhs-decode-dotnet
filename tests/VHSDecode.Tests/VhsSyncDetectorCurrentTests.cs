@@ -733,6 +733,45 @@ public sealed class VhsSyncDetectorCurrentTests
             actual.Select(BitConverter.DoubleToInt64Bits).ToArray());
     }
 
+    [Theory(DisplayName = "Parallel nine-tap VHS boxcar matches serial output bit for bit")]
+    [InlineData(2)]
+    [InlineData(3)]
+    [InlineData(4)]
+    public void ParallelNineTapVhsBoxcarMatchesSerialOutputBitForBit(int workers)
+    {
+        foreach (int length in new[] { 9, 10, 10_003 })
+        {
+            var input = new double[length];
+            for (int index = 0; index < input.Length; index++)
+            {
+                input[index] =
+                    Math.Sin(index * 0.017)
+                    + (Math.Cos(index * 0.031) * 0.25)
+                    + (((index * 37) % 23) * 0.125);
+            }
+
+            double[] expected = VhsSyncDetector.ConvolveBoxcarSame(input, windowSize: 9);
+            var actual = new double[expected.Length];
+            VhsSyncDetector.ConvolveBoxcarSameParallel(
+                input,
+                windowSize: 9,
+                actual,
+                actual.Length,
+                workers);
+
+            Assert.Equal(
+                expected.Select(BitConverter.DoubleToInt64Bits),
+                actual.Select(BitConverter.DoubleToInt64Bits));
+            Assert.Throws<ArgumentOutOfRangeException>(() =>
+                VhsSyncDetector.ConvolveBoxcarSameParallel(
+                    input,
+                    windowSize: 9,
+                    actual,
+                    actual.Length + 1,
+                    workers));
+        }
+    }
+
     public static TheoryData<double[], int, long[]> ConvolutionCases => new()
     {
         {
