@@ -5,6 +5,7 @@ using System.Security.Cryptography;
 using VHSDecode.Core.CommandLine;
 using VHSDecode.Core.Decode;
 using VHSDecode.Core.Dsp;
+using VHSDecode.Core.Dsp.Ipp;
 using VHSDecode.Core.Rf;
 using VHSDecode.Core.Tbc;
 using Xunit;
@@ -797,17 +798,78 @@ public sealed class DspWorkingBufferTests
         Assert.All(hashes, hash => Assert.Equal(expectedHash, hash));
     }
 
+    [Fact(DisplayName = "Parallel IPP VHS inverse staging remains bit-exact under load")]
+    public void ParallelIppVhsInverseStagingRemainsBitExactUnderLoad()
+    {
+        if (!IppRuntime.TryProbe(out _))
+        {
+            return;
+        }
+
+        const int length = DecodeSessionFactory.DefaultBlockLength;
+        const double sampleRateHz = 40_000_000.0;
+        double[] input = BuildPalVhsProbe(length, sampleRateHz);
+        Complex[] identity = RfDemodulator.IdentityFilter(length);
+        SosSection[] identitySos = [new SosSection(1.0, 0.0, 0.0, 1.0, 0.0, 0.0)];
+        using var serial = new RfDemodulator(sampleRateHz, DspBackend.IppFast);
+        using var parallel = new RfDemodulator(
+            sampleRateHz,
+            DspBackend.IppFast,
+            parallelizeVhsInverseStaging: true);
+
+        RfDemodulatedBlock expected = DecodeComplexVhsProbe(
+            serial,
+            input,
+            identity,
+            identitySos,
+            highBoost: null,
+            diffRepair: new DiffDemodRepairOptions(double.NegativeInfinity),
+            retainDiagnosticOutputs: false,
+            useNumpyComplexVhsAnalytic: false);
+        string expectedHash = Hash(expected);
+        var hashes = new string[8];
+
+        Parallel.For(
+            0,
+            hashes.Length,
+            new ParallelOptions { MaxDegreeOfParallelism = 4 },
+            index =>
+            {
+                RfDemodulatedBlock actual = DecodeComplexVhsProbe(
+                    parallel,
+                    input,
+                    identity,
+                    identitySos,
+                    highBoost: null,
+                    diffRepair: new DiffDemodRepairOptions(double.NegativeInfinity),
+                    retainDiagnosticOutputs: false,
+                    useNumpyComplexVhsAnalytic: false);
+                hashes[index] = Hash(actual);
+            });
+
+        Assert.True(parallel.ParallelizesVhsInverseStaging);
+        Assert.All(hashes, hash => Assert.Equal(expectedHash, hash));
+    }
+
     [Theory(DisplayName = "VHS inverse staging follows the bounded current-profile policy")]
-    [InlineData(12, "current", false, false)]
-    [InlineData(20, "current", false, true)]
-    [InlineData(20, "v0.4.0", false, false)]
-    [InlineData(20, "current", true, false)]
+    [InlineData(12, "current", false, false, "exact")]
+    [InlineData(20, "current", false, true, "exact")]
+    [InlineData(20, "v0.4.0", false, false, "exact")]
+    [InlineData(20, "current", true, false, "exact")]
+    [InlineData(12, "current", false, false, "ipp-fast")]
+    [InlineData(20, "current", false, true, "ipp-fast")]
     public void VhsInverseStagingFollowsHighWorkerPolicy(
         int workerThreads,
         string profile,
         bool useGnrc,
-        bool expected)
+        bool expected,
+        string backend)
     {
+        if (backend == "ipp-fast" && !IppRuntime.TryProbe(out _))
+        {
+            return;
+        }
+
         List<string> arguments =
         [
             "--pal",
@@ -815,7 +877,9 @@ public sealed class DspWorkingBufferTests
             "--threads",
             workerThreads.ToString(CultureInfo.InvariantCulture),
             "--compat-version",
-            profile
+            profile,
+            "--dsp-backend",
+            backend
         ];
         if (useGnrc)
         {

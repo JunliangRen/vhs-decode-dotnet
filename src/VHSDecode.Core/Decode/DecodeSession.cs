@@ -280,7 +280,6 @@ public static class DecodeSessionFactory
         CvbsDecodeOptions? cvbsOptions = BuildCvbsDecodeOptions(command, videoOutput);
         IRfInputProcessor? inputProcessor = BuildRfInputProcessor(command);
         bool parallelizeVhsInverseStaging = command.Spec.Name == "vhs"
-            && executionOptions.DspBackend == DspBackend.Exact
             && executionOptions.UpstreamBehaviorProfile
                 == UpstreamBehaviorProfile.Current
             && inputProcessor is null

@@ -4,7 +4,7 @@
 
 **[English](README.detailed.md)** | [简体中文](README.detailed.zh-CN.md) | [日本語](README.detailed.ja.md)
 
-<!-- README_SYNC: 2026-08-04.01 -->
+<!-- README_SYNC: 2026-08-04.02 -->
 
 .NET 11 rewrite of the decode-facing parts of
 [`oyvindln/vhs-decode`](https://github.com/oyvindln/vhs-decode), focused on
@@ -418,17 +418,38 @@ speedup, and wall-time reduction against its profile-matched Python column:
 | `--threads 1` | 17.694 s | 19.414 s | 9.732 s / 1.818x / 45.00% | 11.640 s / 1.668x / 40.05% | 7.089 s / 2.496x / 59.93% | 7.947 s / 2.443x / 59.07% |
 | `--threads 5` | 15.719 s | 17.801 s | 4.167 s / 3.772x / 73.49% | 4.648 s / 3.830x / 73.89% | 3.607 s / 4.358x / 77.05% | 3.388 s / 5.254x / 80.97% |
 | `--threads 10` | 16.037 s | 18.266 s | 3.274 s / 4.899x / 79.59% | 4.096 s / 4.459x / 77.57% | 3.069 s / 5.225x / 80.86% | 2.732 s / 6.686x / 85.04% |
-| `--threads 20` | 16.405 s | 18.395 s | 2.919 s / 5.620x / 82.21% | 3.765 s / 4.886x / 79.53% | 2.667 s / 6.150x / 83.74% | 2.327 s / 7.905x / 87.35% |
+| `--threads 20` | 16.405 s | 18.395 s | 2.919 s / 5.620x / 82.21% | 3.765 s / 4.886x / 79.53% | 2.667 s / 6.150x / 83.74% | 2.180 s / 8.438x / 88.15% |
 <!-- LATEST_PERFORMANCE_END -->
-<!-- LATEST_PERFORMANCE_RUNS: full-refresh=60 repeats=3 -->
+<!-- LATEST_PERFORMANCE_RUNS: prior-full-refresh=60 affected-refresh=3 repeats=3 -->
 
 The Python measurements were audited on 2026-08-02 using main commit
 `c92af1dfd0f96cd7f2d49f3219fb428d0f4e0865`. This branch, based on main
-`72664dc`, remeasured all 20 .NET cells three times each for 60 Release runs.
-The host was an Intel Core Ultra 7 265K with 20 logical processors, Windows 11
-build 26220, and .NET SDK/runtime `11.0.100-preview.6.26359.118`.
+`4f50fa9`, remeasured the affected IPP-fast/current 20-worker cell three times;
+the Python columns and 19 unaffected .NET cells retain the preceding audited
+full refresh. The host was an Intel Core Ultra 7 265K with 20 logical
+processors, Windows 11 build 26220, and .NET SDK/runtime
+`11.0.100-preview.6.26359.118`.
 
-The new reduction kernel accelerates the NumPy-compatible float32 mean used in
+At more than 12 requested workers, each pooled IPP VHS workspace now owns one
+private companion IPP real-FFT plan. The real RF inverse and independent
+Hilbert imaginary inverse can therefore run concurrently without sharing a
+stateful native plan. DSP expressions, transform inputs, output ordering, and
+the 16-workspace retention limit are unchanged; lower worker counts, v0.4.0,
+GNRC, and nonzero RF high boost retain serial staging. Five alternating fixed
+100-frame pairs reduced mean wall time from 9.347 to 9.035 seconds (3.33% lower,
+1.034x throughput), with a 4.22% paired median and four candidate wins. Mean
+effective core use rose from 4.74 to 4.88. Mean peak working set rose from
+402.1 to 414.7 MiB, a bounded 12.5 MiB cost for the companion plans.
+
+All three documented 40-frame pairs were faster: decoder-reported median time
+moved from 2.290 to 2.180 seconds (4.80% lower). The refreshed cell is 8.438x
+faster than profile-matched Python PR341 and reduces its wall time by 88.15%.
+A separate no-start 1,000-frame candidate run completed in 46.359 seconds with
+5.27 effective cores. Sampled working set peaked at 414.9 MiB and averaged
+400.8 MiB early versus 387.9 MiB in the final quarter, showing no progressive
+growth.
+
+The preceding reduction kernel accelerates the NumPy-compatible float32 mean used in
 VHS RF processing. Each leaf still uses the original 128-element pairwise
 boundary, recursive split points, eight independent accumulators, and final
 addition tree; AVX only converts eight float64 inputs and advances those same
@@ -443,14 +464,12 @@ gain comes with measurably higher but useful CPU occupancy. All paired runs
 matched luma, chroma, raw JSON, stdout, timing-normalized stderr,
 timestamp-normalized logs, and ordered `fileLoc`.
 
-Twelve baseline/candidate real-RF gates covered v0.4.0 and `current` at explicit
-zero, default, and 20 workers and matched every compatibility surface, including
-cross-thread determinism. All 60 refreshed matrix runs were deterministic within
-their profile. The final IPP-fast/current 20-worker cell is 2.327 seconds,
-7.905x faster than the profile-matched Python PR341 measurement. The Release
-solution built with zero warnings/errors, all **1,315** xUnit v3 tests passed,
-and the 13 focused bit-identity cases passed both normally and with all hardware
-intrinsics disabled.
+Six candidate real-RF gates covered IPP-fast v0.4.0 and `current` at explicit
+zero, default-five, and 20 workers. Within each profile, luma, chroma, raw JSON,
+stdout, timing-normalized stderr, timestamp-normalized logs, and ordered
+`fileLoc` all matched across worker counts. Every baseline/candidate 100-frame
+and documented 40-frame pair matched those same surfaces. The Release solution
+built with zero warnings/errors and all **1,318** xUnit v3 tests passed.
 
 The preceding merged parallel `current` VHS sync kernel specializes the fixed nine-tap
 boxcar. Its nine multiply-add statements preserve the previous ascending
@@ -2404,7 +2423,7 @@ Requirements:
 .\tools\build-ipp-native.ps1
 dotnet restore VHSDecodeDotNet.slnx
 dotnet build VHSDecodeDotNet.slnx -c Release --no-restore
-dotnet test --solution VHSDecodeDotNet.slnx -c Release --no-build --no-restore --minimum-expected-tests 1315
+dotnet test --solution VHSDecodeDotNet.slnx -c Release --no-build --no-restore --minimum-expected-tests 1318
 dotnet test --project tests\VHSDecode.Tests\VHSDecode.Tests.csproj -c Release --no-build --no-restore --coverage --coverage-output coverage.cobertura.xml --coverage-output-format cobertura
 ```
 
@@ -2418,7 +2437,7 @@ deployment computer. Binary-only single-file releases embed
 sidecar license files. An Exact-only build may omit the native build step.
 
 The current formal Release build has zero warnings and errors. The xUnit v3
-project exposes **1,315** independently discoverable tests to both
+project exposes **1,318** independently discoverable tests to both
 `dotnet test` and Visual Studio Test Explorer.
 
 <!-- SECTION: usage -->

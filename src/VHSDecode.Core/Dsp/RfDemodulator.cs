@@ -70,9 +70,10 @@ public sealed class RfDemodulator : IDisposable
 
         SampleRateHz = sampleRateHz;
         DspBackend = dspBackend;
-        _parallelizeVhsInverseStaging = parallelizeVhsInverseStaging
-            && dspBackend == DspBackend.Exact;
-        _vhsRealFftWorkspacePool = new VhsRealFftWorkspacePool(dspBackend);
+        _parallelizeVhsInverseStaging = parallelizeVhsInverseStaging;
+        _vhsRealFftWorkspacePool = new VhsRealFftWorkspacePool(
+            dspBackend,
+            parallelizeVhsInverseStaging);
     }
 
     public double SampleRateHz { get; }
@@ -370,6 +371,37 @@ public sealed class RfDemodulator : IDisposable
                 analytic = workspace.FullAnalytic;
                 vhsWorkspaceComplexAnalyticReady = true;
             }
+            else if (_parallelizeVhsInverseStaging
+                && DspBackend == DspBackend.IppFast
+                && !useNumpyComplexVhsAnalytic
+                && (rfHighBoost is null || rfHighBoost.Multiplier == 0.0))
+            {
+                ExceptionDispatchInfo? preparationFailure = null;
+                try
+                {
+                    PrepareVhsAnalyticImaginarySpectrum(
+                        rfFilteredHalf,
+                        input.Length,
+                        workspace);
+                }
+                catch (Exception exception)
+                {
+                    preparationFailure = ExceptionDispatchInfo.Capture(exception);
+                }
+
+                if (preparationFailure is not null)
+                {
+                    // Preserve the serial path's real-inverse exception priority.
+                    workspace.Inverse(rfFilteredHalf, vhsRfFilteredReal);
+                    preparationFailure.Throw();
+                }
+
+                RunParallelIppVhsInverseStaging(
+                    workspace,
+                    vhsRfFilteredHalf,
+                    vhsRealSpectrumLength);
+                vhsAnalyticComponentsReady = true;
+            }
             else
             {
                 workspace.Inverse(rfFilteredHalf, vhsRfFilteredReal);
@@ -429,6 +461,7 @@ public sealed class RfDemodulator : IDisposable
         }
 
         if (analytic is null
+            && !vhsAnalyticComponentsReady
             && vhsEnvelopeFilter is null
             && vhsRfFilteredHalf is not null
             && vhsRfFilteredReal is not null)
@@ -1197,6 +1230,20 @@ public sealed class RfDemodulator : IDisposable
         int realLength,
         VhsRealFftWorkspace workspace)
     {
+        PrepareVhsAnalyticImaginarySpectrum(
+            filteredHalfSpectrum,
+            realLength,
+            workspace);
+        workspace.Inverse(
+            workspace.HilbertHalf.AsSpan(0, filteredHalfSpectrum.Length),
+            workspace.Imaginary);
+    }
+
+    private static void PrepareVhsAnalyticImaginarySpectrum(
+        ReadOnlySpan<Complex> filteredHalfSpectrum,
+        int realLength,
+        VhsRealFftWorkspace workspace)
+    {
         if (filteredHalfSpectrum.Length != (realLength / 2) + 1)
         {
             throw new ArgumentException(
@@ -1219,7 +1266,6 @@ public sealed class RfDemodulator : IDisposable
         }
 
         hilbertHalfSpectrum[^1] = Complex.Zero;
-        workspace.Inverse(hilbertHalfSpectrum, workspace.Imaginary);
     }
 
     private static Complex[] MaterializeVhsAnalyticSignal(
@@ -1341,6 +1387,55 @@ public sealed class RfDemodulator : IDisposable
                 rfFilteredHalf.AsSpan(0, spectrumLength),
                 workspace.Real);
             CompleteNumpyVhsComplexAnalyticSignal(workspace, inputLength);
+            return;
+        }
+
+        ExceptionDispatchInfo? realInverseFailure = null;
+        try
+        {
+            workspace.Inverse(
+                rfFilteredHalf.AsSpan(0, spectrumLength),
+                workspace.Real);
+        }
+        catch (Exception exception)
+        {
+            realInverseFailure = ExceptionDispatchInfo.Capture(exception);
+        }
+
+        try
+        {
+            analyticInverse.GetAwaiter().GetResult();
+        }
+        catch when (realInverseFailure is not null)
+        {
+            // Serial execution would surface the real inverse failure first.
+        }
+
+        realInverseFailure?.Throw();
+    }
+
+    private static void RunParallelIppVhsInverseStaging(
+        VhsRealFftWorkspace workspace,
+        Complex[] rfFilteredHalf,
+        int spectrumLength)
+    {
+        Task analyticInverse;
+        try
+        {
+            analyticInverse = Task.Run(() => workspace.InverseCompanion(
+                workspace.HilbertHalf.AsSpan(0, spectrumLength),
+                workspace.Imaginary));
+        }
+        catch (Exception)
+        {
+            // Concurrency is optional; preserve the original serial behavior if
+            // the runtime cannot schedule the companion transform.
+            workspace.Inverse(
+                rfFilteredHalf.AsSpan(0, spectrumLength),
+                workspace.Real);
+            workspace.InverseCompanion(
+                workspace.HilbertHalf.AsSpan(0, spectrumLength),
+                workspace.Imaginary);
             return;
         }
 
@@ -1642,9 +1737,13 @@ public sealed class RfDemodulator : IDisposable
     private sealed class VhsRealFftWorkspace : IDisposable
     {
         private readonly IppRealFft? _ippFft;
+        private readonly IppRealFft? _companionIppFft;
         private Complex[]? _rfFilteredSpectrum;
 
-        public VhsRealFftWorkspace(int realLength, DspBackend dspBackend)
+        public VhsRealFftWorkspace(
+            int realLength,
+            DspBackend dspBackend,
+            bool parallelizeInverseStaging)
         {
             RealLength = realLength;
             int spectrumLength = (realLength / 2) + 1;
@@ -1657,9 +1756,21 @@ public sealed class RfDemodulator : IDisposable
             Real = new double[realLength];
             Imaginary = new double[realLength];
             RawEnvelope = new double[realLength];
-            _ippFft = dspBackend == DspBackend.IppFast
-                ? new IppRealFft(realLength)
-                : null;
+            if (dspBackend == DspBackend.IppFast)
+            {
+                _ippFft = new IppRealFft(realLength);
+                try
+                {
+                    _companionIppFft = parallelizeInverseStaging
+                        ? new IppRealFft(realLength)
+                        : null;
+                }
+                catch
+                {
+                    _ippFft.Dispose();
+                    throw;
+                }
+            }
         }
 
         public int RealLength { get; }
@@ -1707,6 +1818,16 @@ public sealed class RfDemodulator : IDisposable
             _ippFft.Inverse(input, output.AsSpan(0, RealLength));
         }
 
+        public void InverseCompanion(
+            ReadOnlySpan<Complex> input,
+            double[] output)
+        {
+            IppRealFft companion = _companionIppFft
+                ?? throw new InvalidOperationException(
+                    "A companion IPP FFT plan was not configured for this workspace.");
+            companion.Inverse(input, output.AsSpan(0, RealLength));
+        }
+
         public void Multiply(
             ReadOnlySpan<Complex> left,
             ReadOnlySpan<Complex> right,
@@ -1721,7 +1842,17 @@ public sealed class RfDemodulator : IDisposable
             IppComplex64Vector.Multiply(left, right, output);
         }
 
-        public void Dispose() => _ippFft?.Dispose();
+        public void Dispose()
+        {
+            try
+            {
+                _companionIppFft?.Dispose();
+            }
+            finally
+            {
+                _ippFft?.Dispose();
+            }
+        }
     }
 
     private sealed class VhsRealFftWorkspacePool : IDisposable
@@ -1731,12 +1862,16 @@ public sealed class RfDemodulator : IDisposable
         private const int MaximumRetainedWorkspaces = 16;
         private readonly ConcurrentStack<VhsRealFftWorkspace> _available = new();
         private readonly DspBackend _dspBackend;
+        private readonly bool _parallelizeInverseStaging;
         private int _retainedCount;
         private int _disposed;
 
-        public VhsRealFftWorkspacePool(DspBackend dspBackend)
+        public VhsRealFftWorkspacePool(
+            DspBackend dspBackend,
+            bool parallelizeInverseStaging)
         {
             _dspBackend = dspBackend;
+            _parallelizeInverseStaging = parallelizeInverseStaging;
         }
 
         public VhsRealFftWorkspaceLease Rent(int realLength)
@@ -1753,7 +1888,12 @@ public sealed class RfDemodulator : IDisposable
                 workspace.Dispose();
             }
 
-            return new VhsRealFftWorkspaceLease(this, new VhsRealFftWorkspace(realLength, _dspBackend));
+            return new VhsRealFftWorkspaceLease(
+                this,
+                new VhsRealFftWorkspace(
+                    realLength,
+                    _dspBackend,
+                    _parallelizeInverseStaging));
         }
 
         public void Return(VhsRealFftWorkspace workspace)
