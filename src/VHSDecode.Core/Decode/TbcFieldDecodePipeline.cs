@@ -169,7 +169,8 @@ internal sealed record SyncPreparedSpan(
     double Threshold,
     bool UsedSavedLevels = false,
     VideoOutputConverter? ConverterOverride = null,
-    bool ExplicitThreshold = false);
+    bool ExplicitThreshold = false,
+    double DeferredVideoDcOffset = 0.0);
 
 internal sealed record Line0Resolution(
     double Location,
@@ -814,6 +815,33 @@ public sealed class TbcFieldDecodePipeline : IDisposable
         bool retainChromaBurstSamples,
         bool usePooledOutputBuffers)
     {
+        RfBlockStreamDecoder.VhsPayloadMaterializer? deferredVhsPayload = span.DeferredVhsPayload;
+        _ = deferredVhsPayload?.BeginMaterialization();
+        try
+        {
+            return DecodeCoreAfterPayloadStart(
+                span,
+                syncThresholdHz,
+                fieldNumber,
+                deferCvbsOutputConversion,
+                retainChromaBurstSamples,
+                usePooledOutputBuffers);
+        }
+        catch
+        {
+            deferredVhsPayload?.EnsureMaterialized();
+            throw;
+        }
+    }
+
+    private TbcDecodedField DecodeCoreAfterPayloadStart(
+        RfDecodedSpan span,
+        double? syncThresholdHz,
+        int fieldNumber,
+        bool deferCvbsOutputConversion,
+        bool retainChromaBurstSamples,
+        bool usePooledOutputBuffers)
+    {
         (double SyncLevel, double BlankLevel)? previouslyRenderedCvbsLevels = _renderer.LastCvbsSyncLevels;
         SyncPreparedSpan prepared = PrepareSyncSpan(span, syncThresholdHz);
         TbcDecodedField decoded;
@@ -1069,6 +1097,19 @@ public sealed class TbcFieldDecodePipeline : IDisposable
                 processedLines,
                 preferEarlierPulseOnEqualDistance: usePalCvbsLine0Anchor);
         }
+
+        if (span.DeferredVhsPayload is { } deferredVhsPayload)
+        {
+            deferredVhsPayload.EnsureMaterialized();
+            if (prepared.DeferredVideoDcOffset != 0.0)
+            {
+                span = span with
+                {
+                    Video = AddDcOffset(span.Video, prepared.DeferredVideoDcOffset)
+                };
+            }
+        }
+
         if (currentVhsSync is not null
             && CurrentVhsVSyncLevelRefinementEnabled
             && !prepared.ExplicitThreshold)
@@ -2573,11 +2614,15 @@ public sealed class TbcFieldDecodePipeline : IDisposable
         }
 
         var adjustedLevels = (levels.SyncLevel + dcOffset, levels.BlankLevel + dcOffset);
+        bool deferVideoDcOffset = _syncDetectionOptions.ClampDcOffset
+            && span.DeferredVhsPayload is not null;
         return new SyncPreparedSpan(
             span with
             {
                 Video = _syncDetectionOptions.ClampDcOffset
-                    ? AddDcOffset(span.Video, dcOffset)
+                    ? deferVideoDcOffset
+                        ? span.Video
+                        : AddDcOffset(span.Video, dcOffset)
                     : span.Video,
                 VideoLowPass = normalizeTapeSyncReference
                     ? AddDcOffsetToLowPass(span.VideoLowPass ?? span.Video, dcOffset)
@@ -2586,7 +2631,8 @@ public sealed class TbcFieldDecodePipeline : IDisposable
                         : AddDcOffsetToLowPass(span.VideoLowPass, dcOffset)
             },
             SyncThresholdFromLevels(adjustedLevels),
-            usedSavedLevels);
+            usedSavedLevels,
+            DeferredVideoDcOffset: deferVideoDcOffset ? dcOffset : 0.0);
     }
 
     internal void CompleteVhsLineLocationComputation(ReadOnlySpan<bool> lineLocationErrors)

@@ -36,7 +36,7 @@ upstream release `v0.4.0`、commit
 - VHS family には VHS/S-VHS、Betamax、Video8/Hi8、U-matic、Type C、EIAJ、
   upstream が対応する PAL/NTSC variant が含まれます。
 - TBC utility、ダブルクリック GUI、開発者向け plot window は対象外です。
-- Visual Studio 2026 の `.slnx` には **1,324** 件の標準 xUnit v3 test があり、
+- Visual Studio 2026 の `.slnx` には **1,331** 件の標準 xUnit v3 test があり、
   Test Explorer と `dotnet test` の両方で実行できます。
 
 <!-- SECTION: start -->
@@ -93,34 +93,33 @@ CVBS、LaserDisc、HiFi は現在 `ipp-fast` を拒否するため、これら�
 ## 最新の性能
 
 次の表は同じ private local 40 MHz PAL VHS `.ldf` fixture と同じ 40-frame
-window を使用し、source filename は公開しません。Python 列と 10 個の v0.4.0
-.NET cell は audited measurement を維持します。main `d306ebe` を基にしたこの branch
-では、10 個すべての `current` .NET cell を各 3 回再測定しました。互換性判定は
-速度とは別です。raw run directory には private fixture path が含まれるため local
-にのみ保持します。この数値は報告された local measurement であり、公開された
-independently reproducible benchmark corpus ではありません。
+window を使用し、source filename は公開しません。Python 列は audited measurement
+を維持します。main `d14bda8` を基にしたこの candidate では、20 個すべての .NET
+cell を各 3 回 Release 測定しました。互換性判定は速度とは別で、private fixture
+path を含む raw run directory は local にのみ保持します。
 
 <!-- LATEST_PERFORMANCE_BEGIN -->
 | CLI mode（workers） | Python v0.4.0 | Python PR341 | Exact + v0.4.0 | Exact + current | IPP-fast + v0.4.0 | IPP-fast + current |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| default（5） | 15.207 s | 16.780 s | 4.267 s / 3.564x | 5.062 s / 3.315x | 3.608 s / 4.215x | 3.382 s / 4.961x |
-| `--threads 1` | 17.694 s | 19.414 s | 9.732 s / 1.818x | 11.789 s / 1.647x | 7.089 s / 2.496x | 7.978 s / 2.433x |
-| `--threads 5` | 15.719 s | 17.801 s | 4.167 s / 3.772x | 5.058 s / 3.519x | 3.607 s / 4.358x | 3.297 s / 5.399x |
-| `--threads 10` | 16.037 s | 18.266 s | 3.274 s / 4.899x | 4.391 s / 4.160x | 3.069 s / 5.225x | 2.710 s / 6.740x |
-| `--threads 20` | 16.405 s | 18.395 s | 2.919 s / 5.620x | 3.198 s / 5.753x | 2.667 s / 6.150x | 2.189 s / 8.405x |
+| default（5） | 15.207 s | 16.780 s | 4.295 s / 3.541x | 4.689 s / 3.579x | 3.532 s / 4.305x | 3.312 s / 5.066x |
+| `--threads 1` | 17.694 s | 19.414 s | 9.798 s / 1.806x | 11.757 s / 1.651x | 7.065 s / 2.504x | 7.997 s / 2.428x |
+| `--threads 5` | 15.719 s | 17.801 s | 4.137 s / 3.799x | 4.711 s / 3.779x | 3.592 s / 4.376x | 3.475 s / 5.122x |
+| `--threads 10` | 16.037 s | 18.266 s | 3.433 s / 4.672x | 4.551 s / 4.013x | 3.013 s / 5.322x | 2.817 s / 6.485x |
+| `--threads 20` | 16.405 s | 18.395 s | 3.091 s / 5.307x | 3.454 s / 5.325x | 2.562 s / 6.404x | 2.229 s / 8.252x |
 <!-- LATEST_PERFORMANCE_END -->
-<!-- LATEST_PERFORMANCE_RUNS: prior-full-refresh=60 current-refresh=30 repeats=3 -->
+<!-- LATEST_PERFORMANCE_RUNS: dotnet-full-refresh=60 repeats=3 staged-paired=16 determinism=12 -->
 
 各 .NET cell は wall-time median と profile が対応する Python 列に対する
-speedup の順で、default は **5 workers** です。AVX は Super-Gaussian reflect
-padding の中央変換、IPP spectrum mask、output expansion を高速化します。FMA、reassociation、
-new allocation、retained-buffer change はありません。alternating 200-frame 3-pair
-では IPP-fast/current 20-worker wall median が 9.064 から 8.503 秒へ 6.19%、CPU
-time が 48.312 から 46.609 秒へ 3.52% 減少しました。更新した 20-worker cell は
-2.189 秒、profile-matched Python PR341 measurement の 8.405x です。
+speedup の順で、default は **5 workers** です。multi-worker compact VHS path は
+low-pass sync work と並行して `Video`、`Envelope`、`Chroma` を materialize します。
+active staged span は 1 個に制限され、serial/stateful path は eager のままです。
+reverse-order 1,000-frame Exact pair では v0.4.0 が 2.66%、`current` が 2.55%
+短縮しました。600-frame IPP-fast pair は v0.4.0 が 1.85% 改善し、`current` は
+実質 neutral（-0.03%）でした。
 
-更新した 30 run は backend ごとに deterministic でした。baseline/candidate
-gate は luma、chroma、raw JSON、stdout、normalized stderr/log、ordered `fileLoc` が一致しました。
+更新した 60 matrix run はすべて deterministic でした。別の `--threads 0`、
+default-5、`--threads 20` gate でも、両 profile/backend の luma、chroma、raw JSON、
+stdout、normalized stderr/log、ordered `fileLoc` が一致しました。
 IPP-fast は明示的な numerically-close backend のままで、Exact と byte-for-byte
 同一とは主張しません。Python v0.4.0 は nonzero worker count で output hash が
 変わる場合があるため、strict oracle は Python v0.4.0
@@ -157,7 +156,7 @@ path を維持します。
 dotnet restore VHSDecodeDotNet.slnx
 dotnet build VHSDecodeDotNet.slnx -c Release --no-restore
 dotnet test --solution VHSDecodeDotNet.slnx -c Release `
-  --no-build --no-restore --minimum-expected-tests 1324
+  --no-build --no-restore --minimum-expected-tests 1331
 ```
 
 Visual Studio 2026 で `VHSDecodeDotNet.slnx` を開くと、build、debug、

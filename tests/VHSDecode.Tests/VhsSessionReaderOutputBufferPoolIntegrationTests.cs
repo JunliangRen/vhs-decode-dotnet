@@ -6,6 +6,57 @@ namespace VHSDecode.Tests;
 
 public sealed class VhsSessionReaderOutputBufferPoolIntegrationTests
 {
+    [Theory(DisplayName = "Staged VHS sequence output matches eager fallback and saved-level decoding")]
+    [InlineData("v0.4.0")]
+    [InlineData("current")]
+    public void StagedVhsSequenceOutputMatchesEagerFallbackAndSavedLevelDecoding(
+        string compatibility)
+    {
+        string tempDirectory = CreateTempDirectory();
+        try
+        {
+            string eagerOutput = Path.Combine(tempDirectory, "eager");
+            string stagedOutput = Path.Combine(tempDirectory, "staged");
+            using DecodeSession eagerSession = CreateSession(
+                eagerOutput,
+                compatibility,
+                threads: 1);
+            byte[] inputBytes = BuildPalVhsRf(eagerSession);
+            using DecodeSession stagedSession = CreateSession(
+                stagedOutput,
+                compatibility,
+                threads: 2);
+            using var eagerInput = new MemoryStream(inputBytes, writable: false);
+            using var stagedInput = new MemoryStream(inputBytes, writable: false);
+
+            TbcFieldSequenceDecodeResult eager = new TbcFieldSequenceDecodeEngine()
+                .TryDecodeAndWrite(eagerSession, eagerInput, maxFields: 2);
+            TbcFieldSequenceDecodeResult staged = new TbcFieldSequenceDecodeEngine()
+                .TryDecodeAndWrite(stagedSession, stagedInput, maxFields: 2);
+
+            Assert.True(eager.Success, eager.Message);
+            Assert.True(staged.Success, staged.Message);
+            Assert.Equal(2, eager.WrittenFieldCount);
+            Assert.Equal(eager.WrittenFieldCount, staged.WrittenFieldCount);
+            Assert.Equal(
+                File.ReadAllBytes(eagerOutput + ".tbc"),
+                File.ReadAllBytes(stagedOutput + ".tbc"));
+            Assert.Equal(
+                File.ReadAllBytes(eagerOutput + "_chroma.tbc"),
+                File.ReadAllBytes(stagedOutput + "_chroma.tbc"));
+            Assert.Equal(
+                File.ReadAllText(eagerOutput + ".tbc.json"),
+                File.ReadAllText(stagedOutput + ".tbc.json"));
+            Assert.Equal(
+                NormalizeLog(File.ReadAllText(eagerOutput + ".log")),
+                NormalizeLog(File.ReadAllText(stagedOutput + ".log")));
+        }
+        finally
+        {
+            Directory.Delete(tempDirectory, recursive: true);
+        }
+    }
+
     [Theory(DisplayName = "VHS session reader pools and returns decoded field output")]
     [InlineData(true)]
     [InlineData(false)]
@@ -157,4 +208,34 @@ public sealed class VhsSessionReaderOutputBufferPoolIntegrationTests
         Directory.CreateDirectory(path);
         return path;
     }
+
+    private static DecodeSession CreateSession(
+        string outputBase,
+        string compatibility,
+        int threads)
+    {
+        string[] arguments =
+        [
+            "--pal",
+            "--frequency", "40",
+            "--no_resample",
+            "--fallback_vsync",
+            "--relaxed_line0",
+            "--use_saved_levels",
+            "--clamp",
+            "--ire0_adjust",
+            "--compat-version", compatibility,
+            "--threads", threads.ToString(System.Globalization.CultureInfo.InvariantCulture),
+            "input.s16",
+            outputBase
+        ];
+        ParsedCommand command = new CommandLineParser().Parse(CliSpecs.Vhs, arguments);
+        return DecodeSessionFactory.Create(command);
+    }
+
+    private static string NormalizeLog(string value)
+        => System.Text.RegularExpressions.Regex.Replace(
+            value,
+            @"(?m)^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2},\d{3} - ",
+            string.Empty);
 }

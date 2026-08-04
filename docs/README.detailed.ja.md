@@ -394,23 +394,47 @@ Python v0.4.0、merge 済みの Python PR341、Exact v0.4.0、Exact
 <!-- LATEST_PERFORMANCE_BEGIN -->
 | CLI mode（workers） | Python v0.4.0 | Python PR341 | Exact + v0.4.0 | Exact + current | IPP-fast + v0.4.0 | IPP-fast + current |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| default（5） | 15.207 s | 16.780 s | 4.267 s / 3.564x / 71.94% | 5.062 s / 3.315x / 69.84% | 3.608 s / 4.215x / 76.28% | 3.382 s / 4.961x / 79.84% |
-| `--threads 1` | 17.694 s | 19.414 s | 9.732 s / 1.818x / 45.00% | 11.789 s / 1.647x / 39.28% | 7.089 s / 2.496x / 59.93% | 7.978 s / 2.433x / 58.90% |
-| `--threads 5` | 15.719 s | 17.801 s | 4.167 s / 3.772x / 73.49% | 5.058 s / 3.519x / 71.59% | 3.607 s / 4.358x / 77.05% | 3.297 s / 5.399x / 81.48% |
-| `--threads 10` | 16.037 s | 18.266 s | 3.274 s / 4.899x / 79.59% | 4.391 s / 4.160x / 75.96% | 3.069 s / 5.225x / 80.86% | 2.710 s / 6.740x / 85.16% |
-| `--threads 20` | 16.405 s | 18.395 s | 2.919 s / 5.620x / 82.21% | 3.198 s / 5.753x / 82.62% | 2.667 s / 6.150x / 83.74% | 2.189 s / 8.405x / 88.10% |
+| default（5） | 15.207 s | 16.780 s | 4.295 s / 3.541x / 71.76% | 4.689 s / 3.579x / 72.06% | 3.532 s / 4.305x / 76.77% | 3.312 s / 5.066x / 80.26% |
+| `--threads 1` | 17.694 s | 19.414 s | 9.798 s / 1.806x / 44.63% | 11.757 s / 1.651x / 39.44% | 7.065 s / 2.504x / 60.07% | 7.997 s / 2.428x / 58.81% |
+| `--threads 5` | 15.719 s | 17.801 s | 4.137 s / 3.799x / 73.68% | 4.711 s / 3.779x / 73.54% | 3.592 s / 4.376x / 77.15% | 3.475 s / 5.122x / 80.48% |
+| `--threads 10` | 16.037 s | 18.266 s | 3.433 s / 4.672x / 78.59% | 4.551 s / 4.013x / 75.08% | 3.013 s / 5.322x / 81.21% | 2.817 s / 6.485x / 84.58% |
+| `--threads 20` | 16.405 s | 18.395 s | 3.091 s / 5.307x / 81.16% | 3.454 s / 5.325x / 81.22% | 2.562 s / 6.404x / 84.38% | 2.229 s / 8.252x / 87.88% |
 <!-- LATEST_PERFORMANCE_END -->
-<!-- LATEST_PERFORMANCE_RUNS: prior-full-refresh=60 current-refresh=30 repeats=3 -->
+<!-- LATEST_PERFORMANCE_RUNS: dotnet-full-refresh=60 repeats=3 staged-paired=16 determinism=12 -->
 
 Python measurement は 2026-08-02 に main commit
-`c92af1dfd0f96cd7f2d49f3219fb428d0f4e0865` で audit しました。この branch は
-main `d306ebe` を基点に、10 個の `current` .NET cell を各 3 回再測定しました。
-Python 列と 10 個の v0.4.0 .NET cell は直前の audited full refresh を維持します。
+`c92af1dfd0f96cd7f2d49f3219fb428d0f4e0865` で audit しました。この candidate は
+main `d14bda8` を基点に、20 個すべての .NET cell を各 3 回再測定しました。
+Python 列は直前の audited measurement を維持します。
 host は Intel Core Ultra 7 265K（20 logical processor）、
 Windows 11 build 26220、.NET SDK/runtime `11.0.100-preview.6.26359.118` です。raw
 run directory は private fixture path を含むため local にのみ保持します。以下は
 報告された local measurement であり、公開された independently reproducible
 benchmark corpus ではありません。
+
+最新の compact VHS path は、完全な low-pass sync reference を先に組み立て、
+low-pass のみを使う field sync work と並行して `Video`、`Envelope`、`Chroma` を
+materialize します。stream decoder ごとに decoded block と pooled destination
+buffer を所有できる active staged span は 1 個だけです。serial、single-block、
+diagnostic、stateful sharpness path は eager のままです。copy expression、float32
+chroma widening point、DC-offset order、field-state boundary、ordered commit path は
+変更していません。
+
+reverse-order 1,000-frame Exact A/B 2 pair では、v0.4.0 が 49.195 から
+47.886 秒へ短縮し（2.66% lower、1.027x）、`current` が 43.986 から 42.862 秒へ
+短縮しました（2.55% lower、1.026x）。average active core はそれぞれ
+5.70 から 5.82、7.38 から 7.81 へ上昇しました。reverse-order 600-frame
+IPP-fast A/B 2 pair では v0.4.0 が 28.758 から 28.226 秒へ 1.85% 改善し、
+`current` は 23.415 対 23.422 秒で neutral（-0.03%）でした。long pair の
+candidate peak working set は main と同じ 0.38-0.71 GB の観測範囲に収まり、
+active staged span は 1 個で retained-growth path はありません。
+
+すべての long pair で luma、chroma、raw JSON、stdout、timing-normalized stderr、
+timestamp-normalized log、ordered `fileLoc` が一致しました。別の 100-frame matrix
+では Exact/IPP-fast と両 behavior profile について `--threads 0`、default-5、
+`--threads 20` が一致し、更新した 40-frame matrix 60 run はすべて deterministic
+でした。focused sequence test は eager/staged `current`、fallback VSync、saved
+levels、clamp/DC offset、retry ownership、dispose も検証します。
 
 現在の Super-Gaussian staging path は AVX を使い、reflect padding を構築する中央部の
 float64-to-float32 変換、既存の IPP spectrum mask、float32-to-float64 output expansion を
@@ -2379,7 +2403,7 @@ SHA-256、stdout SHA-256、normalized stderr、normalized log、全 ordered `fil
 .\tools\build-ipp-native.ps1
 dotnet restore VHSDecodeDotNet.slnx
 dotnet build VHSDecodeDotNet.slnx -c Release --no-restore
-dotnet test --solution VHSDecodeDotNet.slnx -c Release --no-build --no-restore --minimum-expected-tests 1324
+dotnet test --solution VHSDecodeDotNet.slnx -c Release --no-build --no-restore --minimum-expected-tests 1331
 dotnet test --project tests\VHSDecode.Tests\VHSDecode.Tests.csproj -c Release --no-build --no-restore --coverage --coverage-output coverage.cobertura.xml --coverage-output-format cobertura
 ```
 
@@ -2393,7 +2417,7 @@ third-party notice を埋め込み、license sidecar file は追加しません�
 
 現在の正式な Release build は warning 0、error 0 です。xUnit v3 project は
 `dotnet test` と Visual Studio Test Explorer の両方で個別に検出できる
-**1,324** tests を公開します。
+**1,331** tests を公開します。
 
 <!-- SECTION: usage -->
 
