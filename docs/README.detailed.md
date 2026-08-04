@@ -469,7 +469,7 @@ zero, default-five, and 20 workers. Within each profile, luma, chroma, raw JSON,
 stdout, timing-normalized stderr, timestamp-normalized logs, and ordered
 `fileLoc` all matched across worker counts. Every baseline/candidate 100-frame
 and documented 40-frame pair matched those same surfaces. The Release solution
-built with zero warnings/errors and all **1,318** xUnit v3 tests passed.
+built with zero warnings/errors and all **1,319** xUnit v3 tests passed.
 
 The preceding merged parallel `current` VHS sync kernel specializes the fixed nine-tap
 boxcar. Its nine multiply-add statements preserve the previous ascending
@@ -2423,7 +2423,7 @@ Requirements:
 .\tools\build-ipp-native.ps1
 dotnet restore VHSDecodeDotNet.slnx
 dotnet build VHSDecodeDotNet.slnx -c Release --no-restore
-dotnet test --solution VHSDecodeDotNet.slnx -c Release --no-build --no-restore --minimum-expected-tests 1318
+dotnet test --solution VHSDecodeDotNet.slnx -c Release --no-build --no-restore --minimum-expected-tests 1319
 dotnet test --project tests\VHSDecode.Tests\VHSDecode.Tests.csproj -c Release --no-build --no-restore --coverage --coverage-output coverage.cobertura.xml --coverage-output-format cobertura
 ```
 
@@ -2437,7 +2437,7 @@ deployment computer. Binary-only single-file releases embed
 sidecar license files. An Exact-only build may omit the native build step.
 
 The current formal Release build has zero warnings and errors. The xUnit v3
-project exposes **1,318** independently discoverable tests to both
+project exposes **1,319** independently discoverable tests to both
 `dotnet test` and Visual Studio Test Explorer.
 
 <!-- SECTION: usage -->

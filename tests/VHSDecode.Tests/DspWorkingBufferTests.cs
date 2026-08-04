@@ -801,10 +801,9 @@ public sealed class DspWorkingBufferTests
     [Fact(DisplayName = "Parallel IPP VHS inverse staging remains bit-exact under load")]
     public void ParallelIppVhsInverseStagingRemainsBitExactUnderLoad()
     {
-        if (!IppRuntime.TryProbe(out _))
-        {
-            return;
-        }
+        Assert.SkipUnless(
+            IppRuntime.TryProbe(out _),
+            "The Intel IPP native runtime is unavailable.");
 
         const int length = DecodeSessionFactory.DefaultBlockLength;
         const double sampleRateHz = 40_000_000.0;
@@ -851,6 +850,56 @@ public sealed class DspWorkingBufferTests
         Assert.All(hashes, hash => Assert.Equal(expectedHash, hash));
     }
 
+    [Fact(DisplayName = "IPP VHS inverse staging falls back when the companion plan is unavailable")]
+    public void IppVhsInverseStagingFallsBackWhenCompanionPlanIsUnavailable()
+    {
+        Assert.SkipUnless(
+            IppRuntime.TryProbe(out _),
+            "The Intel IPP native runtime is unavailable.");
+
+        const int length = DecodeSessionFactory.DefaultBlockLength;
+        const double sampleRateHz = 40_000_000.0;
+        double[] input = BuildPalVhsProbe(length, sampleRateHz);
+        Complex[] identity = RfDemodulator.IdentityFilter(length);
+        SosSection[] identitySos = [new SosSection(1.0, 0.0, 0.0, 1.0, 0.0, 0.0)];
+        using var serial = new RfDemodulator(sampleRateHz, DspBackend.IppFast);
+        int companionCreationAttempts = 0;
+        using var fallback = new RfDemodulator(
+            sampleRateHz,
+            DspBackend.IppFast,
+            parallelizeVhsInverseStaging: true,
+            _ =>
+            {
+                companionCreationAttempts++;
+                throw new IppNativeException(
+                    "fft64_create",
+                    -1,
+                    "injected companion allocation failure");
+            });
+
+        RfDemodulatedBlock expected = DecodeComplexVhsProbe(
+            serial,
+            input,
+            identity,
+            identitySos,
+            highBoost: null,
+            diffRepair: new DiffDemodRepairOptions(double.NegativeInfinity),
+            retainDiagnosticOutputs: false,
+            useNumpyComplexVhsAnalytic: false);
+        RfDemodulatedBlock actual = DecodeComplexVhsProbe(
+            fallback,
+            input,
+            identity,
+            identitySos,
+            highBoost: null,
+            diffRepair: new DiffDemodRepairOptions(double.NegativeInfinity),
+            retainDiagnosticOutputs: false,
+            useNumpyComplexVhsAnalytic: false);
+
+        Assert.Equal(1, companionCreationAttempts);
+        Assert.Equal(Hash(expected), Hash(actual));
+    }
+
     [Theory(DisplayName = "VHS inverse staging follows the bounded current-profile policy")]
     [InlineData(12, "current", false, false, "exact")]
     [InlineData(20, "current", false, true, "exact")]
@@ -865,10 +914,9 @@ public sealed class DspWorkingBufferTests
         bool expected,
         string backend)
     {
-        if (backend == "ipp-fast" && !IppRuntime.TryProbe(out _))
-        {
-            return;
-        }
+        Assert.SkipUnless(
+            backend != "ipp-fast" || IppRuntime.TryProbe(out _),
+            "The Intel IPP native runtime is unavailable.");
 
         List<string> arguments =
         [

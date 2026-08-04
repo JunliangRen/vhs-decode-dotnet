@@ -446,7 +446,7 @@ default-five、20 workers を網羅しました。profile 内の luma、chroma�
 stdout、timing-normalized stderr、timestamp-normalized log、ordered `fileLoc` は
 worker count をまたいで一致しました。すべての baseline/candidate 100-frame pair と
 documented 40-frame pair も同じ surface で一致しました。Release solution は
-warning/error 0、**1,318** 個すべての xUnit v3 test が pass しました。
+warning/error 0、**1,319** 個すべての xUnit v3 test が pass しました。
 
 先に merge 済みの parallel `current` VHS sync kernel は固定 9-tap boxcar を専用化します。
 9 個の multiply-add statement は従来の ascending source order と float64 conversion
@@ -2332,7 +2332,7 @@ SHA-256、stdout SHA-256、normalized stderr、normalized log、全 ordered `fil
 .\tools\build-ipp-native.ps1
 dotnet restore VHSDecodeDotNet.slnx
 dotnet build VHSDecodeDotNet.slnx -c Release --no-restore
-dotnet test --solution VHSDecodeDotNet.slnx -c Release --no-build --no-restore --minimum-expected-tests 1318
+dotnet test --solution VHSDecodeDotNet.slnx -c Release --no-build --no-restore --minimum-expected-tests 1319
 dotnet test --project tests\VHSDecode.Tests\VHSDecode.Tests.csproj -c Release --no-build --no-restore --coverage --coverage-output coverage.cobertura.xml --coverage-output-format cobertura
 ```
 
@@ -2346,7 +2346,7 @@ third-party notice を埋め込み、license sidecar file は追加しません�
 
 現在の正式な Release build は warning 0、error 0 です。xUnit v3 project は
 `dotnet test` と Visual Studio Test Explorer の両方で個別に検出できる
-**1,318** tests を公開します。
+**1,319** tests を公開します。
 
 <!-- SECTION: usage -->
 

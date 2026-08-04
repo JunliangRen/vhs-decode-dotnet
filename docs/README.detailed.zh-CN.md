@@ -378,7 +378,7 @@ JSON、stdout、耗时归一化 stderr、时间戳归一化日志和有序 `file
 六个候选真实 RF 门禁覆盖 IPP-fast v0.4.0 与 `current` 的显式零、默认 5 和
 20 workers。每个 profile 内的亮度、色度、原始 JSON、stdout、耗时归一化 stderr、
 时间戳归一化日志及有序 `fileLoc` 均跨 worker 数一致。全部 100 帧和正式 40 帧
-基线/候选配对也匹配这些表面。Release solution 零警告、零错误，**1,318** 项
+基线/候选配对也匹配这些表面。Release solution 零警告、零错误，**1,319** 项
 xUnit v3 测试全部通过。
 
 此前已合并的并行 `current` VHS 同步内核为固定 9-tap boxcar 提供专用实现。九条乘加语句
@@ -1935,7 +1935,7 @@ stdout SHA-256、归一化 stderr、归一化日志和全部有序 `fileLoc` 均
 .\tools\build-ipp-native.ps1
 dotnet restore VHSDecodeDotNet.slnx
 dotnet build VHSDecodeDotNet.slnx -c Release --no-restore
-dotnet test --solution VHSDecodeDotNet.slnx -c Release --no-build --no-restore --minimum-expected-tests 1318
+dotnet test --solution VHSDecodeDotNet.slnx -c Release --no-build --no-restore --minimum-expected-tests 1319
 dotnet test --project tests\VHSDecode.Tests\VHSDecode.Tests.csproj -c Release --no-build --no-restore --coverage --coverage-output coverage.cobertura.xml --coverage-output-format cobertura
 ```
 
@@ -1947,7 +1947,7 @@ Intel oneAPI。只含二进制的单文件发布会嵌入 `vhsdecode_ipp.dll` �
 notice，不会额外生成许可证 sidecar 文件。只构建 Exact 后端时可以省略原生构建步骤。
 
 当前正式 Release 构建为零警告、零错误。xUnit v3 项目向
-`dotnet test` 和 Visual Studio Test Explorer 暴露 **1,318** 个可独立发现的测试。
+`dotnet test` 和 Visual Studio Test Explorer 暴露 **1,319** 个可独立发现的测试。
 
 <!-- SECTION: usage -->
 

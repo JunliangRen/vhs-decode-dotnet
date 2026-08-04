@@ -51,7 +51,8 @@ public sealed class RfDemodulator : IDisposable
     internal RfDemodulator(
         double sampleRateHz,
         DspBackend dspBackend,
-        bool parallelizeVhsInverseStaging)
+        bool parallelizeVhsInverseStaging,
+        Func<int, IppRealFft>? companionIppFftFactory = null)
     {
         if (sampleRateHz <= 0)
         {
@@ -73,7 +74,8 @@ public sealed class RfDemodulator : IDisposable
         _parallelizeVhsInverseStaging = parallelizeVhsInverseStaging;
         _vhsRealFftWorkspacePool = new VhsRealFftWorkspacePool(
             dspBackend,
-            parallelizeVhsInverseStaging);
+            parallelizeVhsInverseStaging,
+            companionIppFftFactory);
     }
 
     public double SampleRateHz { get; }
@@ -374,6 +376,7 @@ public sealed class RfDemodulator : IDisposable
             else if (_parallelizeVhsInverseStaging
                 && DspBackend == DspBackend.IppFast
                 && !useNumpyComplexVhsAnalytic
+                && workspace.CanParallelizeIppInverseStaging
                 && (rfHighBoost is null || rfHighBoost.Multiplier == 0.0))
             {
                 ExceptionDispatchInfo? preparationFailure = null;
@@ -1743,7 +1746,8 @@ public sealed class RfDemodulator : IDisposable
         public VhsRealFftWorkspace(
             int realLength,
             DspBackend dspBackend,
-            bool parallelizeInverseStaging)
+            bool parallelizeInverseStaging,
+            Func<int, IppRealFft>? companionIppFftFactory)
         {
             RealLength = realLength;
             int spectrumLength = (realLength / 2) + 1;
@@ -1759,16 +1763,18 @@ public sealed class RfDemodulator : IDisposable
             if (dspBackend == DspBackend.IppFast)
             {
                 _ippFft = new IppRealFft(realLength);
-                try
+                if (parallelizeInverseStaging)
                 {
-                    _companionIppFft = parallelizeInverseStaging
-                        ? new IppRealFft(realLength)
-                        : null;
-                }
-                catch
-                {
-                    _ippFft.Dispose();
-                    throw;
+                    try
+                    {
+                        _companionIppFft = companionIppFftFactory?.Invoke(realLength)
+                            ?? new IppRealFft(realLength);
+                    }
+                    catch (InvalidOperationException)
+                    {
+                        // The companion is optional. Keep the primary plan and
+                        // use the original serial IPP path if native allocation fails.
+                    }
                 }
             }
         }
@@ -1795,6 +1801,7 @@ public sealed class RfDemodulator : IDisposable
         public double[] Imaginary { get; }
 
         public double[] RawEnvelope { get; }
+        public bool CanParallelizeIppInverseStaging => _companionIppFft is not null;
 
         public void Forward(ReadOnlySpan<double> input, Complex[] output)
         {
@@ -1863,15 +1870,18 @@ public sealed class RfDemodulator : IDisposable
         private readonly ConcurrentStack<VhsRealFftWorkspace> _available = new();
         private readonly DspBackend _dspBackend;
         private readonly bool _parallelizeInverseStaging;
+        private readonly Func<int, IppRealFft>? _companionIppFftFactory;
         private int _retainedCount;
         private int _disposed;
 
         public VhsRealFftWorkspacePool(
             DspBackend dspBackend,
-            bool parallelizeInverseStaging)
+            bool parallelizeInverseStaging,
+            Func<int, IppRealFft>? companionIppFftFactory)
         {
             _dspBackend = dspBackend;
             _parallelizeInverseStaging = parallelizeInverseStaging;
+            _companionIppFftFactory = companionIppFftFactory;
         }
 
         public VhsRealFftWorkspaceLease Rent(int realLength)
@@ -1893,7 +1903,8 @@ public sealed class RfDemodulator : IDisposable
                 new VhsRealFftWorkspace(
                     realLength,
                     _dspBackend,
-                    _parallelizeInverseStaging));
+                    _parallelizeInverseStaging,
+                    _companionIppFftFactory));
         }
 
         public void Return(VhsRealFftWorkspace workspace)
