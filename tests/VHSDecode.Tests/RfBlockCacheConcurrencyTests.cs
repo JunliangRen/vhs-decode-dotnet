@@ -339,6 +339,157 @@ public sealed class RfBlockCacheConcurrencyTests
         Assert.Equal(full.Chroma, compact.Chroma);
     }
 
+    [Fact(DisplayName = "Staged VHS payload materialization is bit exact across cache eviction")]
+    public void StagedVhsPayloadMaterializationIsBitExactAcrossCacheEviction()
+    {
+        const int begin = 3;
+        const int length = (20 * 20) + 5;
+        using var eagerStream = new MemoryStream();
+        using var stagedStream = new MemoryStream();
+        using var eagerDecoder = BuildDecoder(
+            new CountingSampleLoader(),
+            workerThreads: 4,
+            retainRfDiagnosticChannels: false,
+            float32Chroma: true);
+        using var stagedDecoder = BuildDecoder(
+            new CountingSampleLoader(),
+            workerThreads: 4,
+            retainRfDiagnosticChannels: false,
+            float32Chroma: true);
+        using RfBlockStreamDecoder.RfDecodedSpanLease eagerLease = Assert.IsType<
+            RfBlockStreamDecoder.RfDecodedSpanLease>(
+            eagerDecoder.ReadLeased(eagerStream, begin, length));
+        using RfBlockStreamDecoder.RfDecodedSpanLease stagedLease = Assert.IsType<
+            RfBlockStreamDecoder.RfDecodedSpanLease>(
+            stagedDecoder.ReadVhsStagedLeased(stagedStream, begin, length));
+
+        RfDecodedSpan eager = eagerLease.Span;
+        RfDecodedSpan staged = stagedLease.Span;
+        RfBlockStreamDecoder.VhsPayloadMaterializer materializer = Assert.IsType<
+            RfBlockStreamDecoder.VhsPayloadMaterializer>(staged.DeferredVhsPayload);
+        Assert.False(materializer.MaterializationStarted);
+        AssertDoubleBitsEqual(eager.VideoLowPass!, staged.VideoLowPass!);
+
+        materializer.EnsureMaterialized();
+
+        Assert.True(materializer.MaterializationStarted);
+        AssertDoubleBitsEqual(eager.Video, staged.Video);
+        AssertDoubleBitsEqual(eager.Envelope!, staged.Envelope!);
+        AssertDoubleBitsEqual(eager.Chroma!, staged.Chroma!);
+        Assert.Empty(staged.Input);
+        Assert.Empty(staged.DemodRaw);
+        Assert.Empty(staged.RfHighPass!);
+    }
+
+    [Fact(DisplayName = "Unstarted staged VHS payload releases held blocks and span buffers")]
+    public void UnstartedStagedVhsPayloadReleasesHeldBlocksAndSpanBuffers()
+    {
+        using var stream = new MemoryStream();
+        using RfBlockDecodePipeline pipeline = BuildPipeline(
+            new CountingSampleLoader(),
+            retainRfDiagnosticChannels: false,
+            float32Chroma: true);
+        using var decoder = new RfBlockStreamDecoder(
+            pipeline,
+            TestBlockLength,
+            blockCut: 2,
+            blockCutEnd: 2,
+            workerThreads: 4);
+        RfBlockStreamDecoder.RfDecodedSpanLease lease = Assert.IsType<
+            RfBlockStreamDecoder.RfDecodedSpanLease>(
+            decoder.ReadVhsStagedLeased(stream, begin: 0, length: 20 * 20));
+        RfBlockStreamDecoder.VhsPayloadMaterializer materializer = Assert.IsType<
+            RfBlockStreamDecoder.VhsPayloadMaterializer>(lease.Span.DeferredVhsPayload);
+        int created = pipeline.CreatedStreamOutputBufferSetCount;
+
+        lease.Dispose();
+        lease.Dispose();
+
+        Assert.False(materializer.MaterializationStarted);
+        Assert.Equal(1, decoder.CachedReusableSpanBufferSetCount);
+        decoder.InvalidateCachedBlocks();
+        Assert.Equal(created, pipeline.RetainedStreamOutputBufferSetCount);
+    }
+
+    [Fact(DisplayName = "A decoder permits only one active staged VHS payload")]
+    public void DecoderPermitsOnlyOneActiveStagedVhsPayload()
+    {
+        using var stream = new MemoryStream();
+        using var decoder = BuildDecoder(
+            new CountingSampleLoader(),
+            workerThreads: 4,
+            retainRfDiagnosticChannels: false,
+            float32Chroma: true);
+        using RfBlockStreamDecoder.RfDecodedSpanLease first = Assert.IsType<
+            RfBlockStreamDecoder.RfDecodedSpanLease>(
+            decoder.ReadVhsStagedLeased(stream, begin: 0, length: 24));
+
+        InvalidOperationException exception = Assert.Throws<InvalidOperationException>(() =>
+            decoder.ReadVhsStagedLeased(stream, begin: 12, length: 24));
+
+        Assert.Contains("Only one staged VHS span", exception.Message, StringComparison.Ordinal);
+        first.Dispose();
+        using RfBlockStreamDecoder.RfDecodedSpanLease second = Assert.IsType<
+            RfBlockStreamDecoder.RfDecodedSpanLease>(
+            decoder.ReadVhsStagedLeased(stream, begin: 12, length: 24));
+        second.Span.DeferredVhsPayload!.EnsureMaterialized();
+    }
+
+    [Fact(DisplayName = "A staged VHS read reserves its slot before RF loading")]
+    public async Task StagedVhsReadReservesItsSlotBeforeRfLoading()
+    {
+        using var loader = new BlockingFutureSampleLoader(blockedSample: 0);
+        using var stream = new MemoryStream();
+        using var decoder = BuildDecoder(
+            loader,
+            workerThreads: 4,
+            retainRfDiagnosticChannels: false,
+            float32Chroma: true);
+        Task<RfBlockStreamDecoder.RfDecodedSpanLease?> firstRead = Task.Run(
+            () => decoder.ReadVhsStagedLeased(stream, begin: 0, length: 24),
+            TestContext.Current.CancellationToken);
+        await loader.Blocked.WaitAsync(
+            TimeSpan.FromSeconds(5),
+            TestContext.Current.CancellationToken);
+
+        try
+        {
+            InvalidOperationException exception = Assert.Throws<InvalidOperationException>(() =>
+                decoder.ReadVhsStagedLeased(stream, begin: 12, length: 24));
+            Assert.Contains("Only one staged VHS span", exception.Message, StringComparison.Ordinal);
+        }
+        finally
+        {
+            loader.Release();
+        }
+
+        using RfBlockStreamDecoder.RfDecodedSpanLease lease = Assert.IsType<
+            RfBlockStreamDecoder.RfDecodedSpanLease>(
+            await firstRead.WaitAsync(
+                TimeSpan.FromSeconds(5),
+                TestContext.Current.CancellationToken));
+        lease.Span.DeferredVhsPayload!.EnsureMaterialized();
+    }
+
+    [Fact(DisplayName = "A single-block VHS lease stays eagerly materialized")]
+    public void SingleBlockVhsLeaseStaysEagerlyMaterialized()
+    {
+        using var stream = new MemoryStream();
+        using var decoder = BuildDecoder(
+            new CountingSampleLoader(),
+            workerThreads: 4,
+            retainRfDiagnosticChannels: false,
+            float32Chroma: true);
+        using RfBlockStreamDecoder.RfDecodedSpanLease lease = Assert.IsType<
+            RfBlockStreamDecoder.RfDecodedSpanLease>(
+            decoder.ReadVhsStagedLeased(stream, begin: 3, length: 4));
+
+        Assert.Null(lease.Span.DeferredVhsPayload);
+        Assert.Contains(lease.Span.Video, static sample => sample != 0.0);
+        Assert.Contains(lease.Span.Envelope!, static sample => sample != 0.0);
+        Assert.Contains(lease.Span.Chroma!, static sample => sample != 0.0);
+    }
+
     [Fact(DisplayName = "Compact VHS stream outputs reuse only after block release")]
     public void CompactVhsStreamOutputsReuseOnlyAfterBlockRelease()
     {

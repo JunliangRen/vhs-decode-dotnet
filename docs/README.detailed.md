@@ -414,23 +414,48 @@ speedup, and wall-time reduction against its profile-matched Python column:
 <!-- LATEST_PERFORMANCE_BEGIN -->
 | CLI mode (workers) | Python v0.4.0 | Python PR341 | Exact + v0.4.0 | Exact + current | IPP-fast + v0.4.0 | IPP-fast + current |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| default (5) | 15.207 s | 16.780 s | 4.267 s / 3.564x / 71.94% | 5.062 s / 3.315x / 69.84% | 3.608 s / 4.215x / 76.28% | 3.382 s / 4.961x / 79.84% |
-| `--threads 1` | 17.694 s | 19.414 s | 9.732 s / 1.818x / 45.00% | 11.789 s / 1.647x / 39.28% | 7.089 s / 2.496x / 59.93% | 7.978 s / 2.433x / 58.90% |
-| `--threads 5` | 15.719 s | 17.801 s | 4.167 s / 3.772x / 73.49% | 5.058 s / 3.519x / 71.59% | 3.607 s / 4.358x / 77.05% | 3.297 s / 5.399x / 81.48% |
-| `--threads 10` | 16.037 s | 18.266 s | 3.274 s / 4.899x / 79.59% | 4.391 s / 4.160x / 75.96% | 3.069 s / 5.225x / 80.86% | 2.710 s / 6.740x / 85.16% |
-| `--threads 20` | 16.405 s | 18.395 s | 2.919 s / 5.620x / 82.21% | 3.198 s / 5.753x / 82.62% | 2.667 s / 6.150x / 83.74% | 2.189 s / 8.405x / 88.10% |
+| default (5) | 15.207 s | 16.780 s | 4.295 s / 3.541x / 71.76% | 4.689 s / 3.579x / 72.06% | 3.532 s / 4.305x / 76.77% | 3.312 s / 5.066x / 80.26% |
+| `--threads 1` | 17.694 s | 19.414 s | 9.798 s / 1.806x / 44.63% | 11.757 s / 1.651x / 39.44% | 7.065 s / 2.504x / 60.07% | 7.997 s / 2.428x / 58.81% |
+| `--threads 5` | 15.719 s | 17.801 s | 4.137 s / 3.799x / 73.68% | 4.711 s / 3.779x / 73.54% | 3.592 s / 4.376x / 77.15% | 3.475 s / 5.122x / 80.48% |
+| `--threads 10` | 16.037 s | 18.266 s | 3.433 s / 4.672x / 78.59% | 4.551 s / 4.013x / 75.08% | 3.013 s / 5.322x / 81.21% | 2.817 s / 6.485x / 84.58% |
+| `--threads 20` | 16.405 s | 18.395 s | 3.091 s / 5.307x / 81.16% | 3.454 s / 5.325x / 81.22% | 2.562 s / 6.404x / 84.38% | 2.229 s / 8.252x / 87.88% |
 <!-- LATEST_PERFORMANCE_END -->
-<!-- LATEST_PERFORMANCE_RUNS: prior-full-refresh=60 current-refresh=30 repeats=3 -->
+<!-- LATEST_PERFORMANCE_RUNS: dotnet-full-refresh=60 repeats=3 staged-paired=16 determinism=12 -->
 
 The Python measurements were audited on 2026-08-02 using main commit
-`c92af1dfd0f96cd7f2d49f3219fb428d0f4e0865`. This branch, based on main
-`d306ebe`, remeasured all ten `current` .NET cells three times; the Python
-columns and ten v0.4.0 .NET cells retain the preceding audited full refresh.
+`c92af1dfd0f96cd7f2d49f3219fb428d0f4e0865`. This candidate, based on main
+`d14bda8`, remeasured all twenty .NET cells three times; the Python columns
+retain the preceding audited measurements.
 The host was an Intel Core Ultra 7 265K with 20 logical
 processors, Windows 11 build 26220, and .NET SDK/runtime
 `11.0.100-preview.6.26359.118`. Raw run directories are retained locally because
 they contain the private fixture path; the figures below are reported local
 measurements, not an independently reproducible public benchmark corpus.
+
+The latest compact VHS path first assembles the complete low-pass sync
+reference, then materializes `Video`, `Envelope`, and `Chroma` while sync-only
+field work continues. Exactly one staged span may own decoded blocks and pooled
+destination buffers per stream decoder. Serial, single-block, diagnostic, and
+stateful sharpness paths remain eager. The copy expressions, float32 chroma
+widening point, DC-offset order, field-state boundaries, and ordered commit path
+are unchanged.
+
+Two reverse-order 1,000-frame Exact pairs moved v0.4.0 from 49.195 to 47.886
+seconds (2.66% lower, 1.027x) and `current` from 43.986 to 42.862 seconds
+(2.55% lower, 1.026x). Average active cores rose from 5.70 to 5.82 and from
+7.38 to 7.81 respectively. Two reverse-order 600-frame IPP-fast pairs moved
+v0.4.0 from 28.758 to 28.226 seconds (1.85% lower); `current` was neutral at
+23.415 versus 23.422 seconds (-0.03%). Candidate peak working sets across the
+long pairs stayed within the same observed 0.38-0.71 GB range as main, with one
+active staged span and no retained-growth path.
+
+Every long pair matched luma, chroma, raw JSON, stdout, timing-normalized
+stderr, timestamp-normalized logs, and ordered `fileLoc`. A separate 100-frame
+matrix matched the same surfaces at `--threads 0`, default-5, and
+`--threads 20` for Exact/IPP-fast and both behavior profiles. All 60 refreshed
+40-frame matrix runs were deterministic. Focused sequence tests additionally
+cover eager versus staged `current`, fallback VSync, saved levels, clamp/DC
+offset, retry ownership, and disposal.
 
 The current Super-Gaussian staging path uses AVX for the center conversion while
 building reflected float32 input, for the existing IPP spectrum mask, and for
@@ -2472,7 +2497,7 @@ Requirements:
 .\tools\build-ipp-native.ps1
 dotnet restore VHSDecodeDotNet.slnx
 dotnet build VHSDecodeDotNet.slnx -c Release --no-restore
-dotnet test --solution VHSDecodeDotNet.slnx -c Release --no-build --no-restore --minimum-expected-tests 1324
+dotnet test --solution VHSDecodeDotNet.slnx -c Release --no-build --no-restore --minimum-expected-tests 1331
 dotnet test --project tests\VHSDecode.Tests\VHSDecode.Tests.csproj -c Release --no-build --no-restore --coverage --coverage-output coverage.cobertura.xml --coverage-output-format cobertura
 ```
 
@@ -2486,7 +2511,7 @@ deployment computer. Binary-only single-file releases embed
 sidecar license files. An Exact-only build may omit the native build step.
 
 The current formal Release build has zero warnings and errors. The xUnit v3
-project exposes **1,324** independently discoverable tests to both
+project exposes **1,331** independently discoverable tests to both
 `dotnet test` and Visual Studio Test Explorer.
 
 <!-- SECTION: usage -->

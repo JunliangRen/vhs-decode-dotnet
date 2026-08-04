@@ -18,6 +18,8 @@ public sealed record RfDecodedSpan(
     double[]? VideoPilot = null)
 {
     internal int? AvailableSampleCountOverride { get; init; }
+
+    internal RfBlockStreamDecoder.VhsPayloadMaterializer? DeferredVhsPayload { get; init; }
 }
 
 public sealed class RfBlockStreamDecoder : IDisposable
@@ -37,6 +39,8 @@ public sealed class RfBlockStreamDecoder : IDisposable
     private long? _lastReadFirstBlock;
     private long? _lastSequentialDecodedBlock;
     private PrefetchOperation? _prefetchOperation;
+    private VhsPayloadMaterializer? _activeVhsPayload;
+    private int _stagedVhsReadActive;
     private int _prefetchCancellationCount;
     private readonly ReusableSpanBuffers?[] _reusableSpanBuffers = new ReusableSpanBuffers?[ReusableSpanBufferSetCapacity];
     private bool _disposed;
@@ -170,7 +174,13 @@ public sealed class RfBlockStreamDecoder : IDisposable
     }
 
     public RfDecodedSpan? Read(Stream stream, long begin, int length)
-        => ReadCore(stream, begin, length, reusableBuffers: null);
+        => ReadCore(
+            stream,
+            begin,
+            length,
+            reusableBuffers: null,
+            stageVhsPayload: false,
+            out _);
 
     internal RfDecodedSpanLease? ReadLeased(Stream stream, long begin, int length)
     {
@@ -196,7 +206,13 @@ public sealed class RfBlockStreamDecoder : IDisposable
         ReusableSpanBuffers buffers = TakeReusableSpanBuffers(length);
         try
         {
-            RfDecodedSpan? span = ReadCore(stream, begin, length, buffers);
+            RfDecodedSpan? span = ReadCore(
+                stream,
+                begin,
+                length,
+                buffers,
+                stageVhsPayload: false,
+                out _);
             if (span is null)
             {
                 ReturnReusableSpanBuffers(buffers);
@@ -212,12 +228,103 @@ public sealed class RfBlockStreamDecoder : IDisposable
         }
     }
 
+    internal RfDecodedSpanLease? ReadVhsStagedLeased(Stream stream, long begin, int length)
+    {
+        if (WorkerThreads <= 1
+            || _pipeline.RequiresSequentialBlockDecode
+            || _pipeline.RetainsRfDiagnosticChannels)
+        {
+            return ReadLeased(stream, begin, length);
+        }
+
+        ObjectDisposedException.ThrowIf(_disposed, this);
+        if (begin < 0)
+        {
+            throw new ArgumentOutOfRangeException(nameof(begin));
+        }
+
+        if (length < 0)
+        {
+            throw new ArgumentOutOfRangeException(nameof(length));
+        }
+
+        if (length == 0)
+        {
+            return new RfDecodedSpanLease(
+                owner: null,
+                buffers: null,
+                span: new RfDecodedSpan(begin, [], [], []));
+        }
+
+        long endExclusive = checked(begin + length);
+        if (begin / BlockStride == (endExclusive - 1) / BlockStride)
+        {
+            return ReadLeased(stream, begin, length);
+        }
+
+        ReusableSpanBuffers buffers = TakeReusableSpanBuffers(length);
+        if (Interlocked.CompareExchange(ref _stagedVhsReadActive, 1, 0) != 0)
+        {
+            ReturnReusableSpanBuffers(buffers);
+            throw new InvalidOperationException(
+                "Only one staged VHS span can be active per RF stream decoder.");
+        }
+
+        VhsPayloadMaterializer? materializer = null;
+        bool reservationOwned = true;
+        try
+        {
+            RfDecodedSpan? span = ReadCore(
+                stream,
+                begin,
+                length,
+                buffers,
+                stageVhsPayload: true,
+                out materializer);
+            if (span is null)
+            {
+                ReleaseStagedVhsRead();
+                reservationOwned = false;
+                ReturnReusableSpanBuffers(buffers);
+                return null;
+            }
+
+            if (materializer is null)
+            {
+                throw new InvalidOperationException("Staged VHS payload was not created.");
+            }
+
+            Volatile.Write(ref _activeVhsPayload, materializer);
+            reservationOwned = false;
+            return new RfDecodedSpanLease(this, buffers, span, materializer);
+        }
+        catch
+        {
+            if (materializer is not null)
+            {
+                materializer.Dispose();
+                reservationOwned = false;
+            }
+
+            if (reservationOwned)
+            {
+                ReleaseStagedVhsRead();
+            }
+
+            ReturnReusableSpanBuffers(buffers);
+            throw;
+        }
+    }
+
     private RfDecodedSpan? ReadCore(
         Stream stream,
         long begin,
         int length,
-        ReusableSpanBuffers? reusableBuffers)
+        ReusableSpanBuffers? reusableBuffers,
+        bool stageVhsPayload,
+        out VhsPayloadMaterializer? stagedMaterializer)
     {
+        stagedMaterializer = null;
         ObjectDisposedException.ThrowIf(_disposed, this);
         if (begin < 0)
         {
@@ -262,6 +369,8 @@ public sealed class RfBlockStreamDecoder : IDisposable
         int audioDecimationFactor = 0;
         int audioDestination = 0;
         int destination = 0;
+        RfPipelineBlock[]? stagedBlocks = null;
+        RfPipelineBlock[]? stagedDeferredBlocks = null;
 
         void AppendAnalogAudio(LaserDiscAnalogAudioBlock audio)
         {
@@ -338,7 +447,10 @@ public sealed class RfBlockStreamDecoder : IDisposable
             destination += BlockStride;
         }
 
-        void AppendBlocksParallel(RfPipelineBlock[] pipelineBlocks, ParallelOptions parallelOptions)
+        void AppendBlocksParallel(
+            RfPipelineBlock[] pipelineBlocks,
+            ParallelOptions parallelOptions,
+            bool syncOnly)
         {
             bool hasChroma = false;
             bool hasEfm = false;
@@ -371,6 +483,16 @@ public sealed class RfBlockStreamDecoder : IDisposable
                 int blockDestination = checked(blockIndex * BlockStride);
                 RfPipelineBlock pipelineBlock = pipelineBlocks[blockIndex];
                 RfDemodulatedBlock demodulated = pipelineBlock.Demodulated;
+                CopyTrimmedWindow(
+                    demodulated.VideoLowPass,
+                    videoLowPass,
+                    blockDestination,
+                    offset);
+                if (syncOnly)
+                {
+                    return;
+                }
+
                 if (retainRfDiagnosticChannels)
                 {
                     CopyTrimmedWindow(pipelineBlock.Input, input, blockDestination, offset);
@@ -385,7 +507,6 @@ public sealed class RfBlockStreamDecoder : IDisposable
 
                 CopyTrimmedWindow(demodulated.Video, video, blockDestination, offset);
                 CopyTrimmedWindow(demodulated.Envelope, envelope, blockDestination, offset);
-                CopyTrimmedWindow(demodulated.VideoLowPass, videoLowPass, blockDestination, offset);
                 if (chroma is not null && demodulated.Chroma is { } blockChroma)
                 {
                     CopyTrimmedWindow(blockChroma, chroma, blockDestination, offset);
@@ -410,6 +531,11 @@ public sealed class RfBlockStreamDecoder : IDisposable
                     CopyTrimmedWindow(blockVideoPilot, videoPilot, blockDestination, offset);
                 }
             });
+
+            if (syncOnly)
+            {
+                return;
+            }
 
             foreach (RfPipelineBlock pipelineBlock in pipelineBlocks)
             {
@@ -590,7 +716,26 @@ public sealed class RfBlockStreamDecoder : IDisposable
                     cachedMissingBlockCount++;
                 }
 
-                AppendBlocksParallel(decodedBlocks, parallelOptions!);
+                AppendBlocksParallel(decodedBlocks, parallelOptions!, stageVhsPayload);
+                if (stageVhsPayload)
+                {
+                    var currentBlocks = new HashSet<RfPipelineBlock>(
+                        decodedBlocks,
+                        ReferenceEqualityComparer.Instance);
+                    var heldBlocks = new List<RfPipelineBlock>();
+                    for (int i = deferredReleases.Count - 1; i >= 0; i--)
+                    {
+                        RfPipelineBlock deferred = deferredReleases[i];
+                        if (currentBlocks.Contains(deferred))
+                        {
+                            heldBlocks.Add(deferred);
+                            deferredReleases.RemoveAt(i);
+                        }
+                    }
+
+                    stagedBlocks = decodedBlocks;
+                    stagedDeferredBlocks = heldBlocks.ToArray();
+                }
             }
             finally
             {
@@ -609,40 +754,78 @@ public sealed class RfBlockStreamDecoder : IDisposable
             }
         }
 
-        StartPrefetch(stream, lastBlock);
-
-        LaserDiscAnalogAudioBlock? audioSpan = null;
-        if (audioLeft is not null && audioRight is not null)
+        try
         {
-            LaserDiscAnalogAudioBlock assembledAudio = _pipeline.ApplyLaserDiscAnalogAudioPhase2(
-                new LaserDiscAnalogAudioBlock(audioLeft, audioRight, audioDecimationFactor));
-            int audioOffset = offset / audioDecimationFactor;
-            int audioLength = Math.Min(
-                assembledAudio.Left.Length - audioOffset,
-                (int)Math.Ceiling((double)length / audioDecimationFactor));
-            audioSpan = new LaserDiscAnalogAudioBlock(
-                Slice(assembledAudio.Left, audioOffset, audioLength),
-                Slice(assembledAudio.Right, audioOffset, audioLength),
-                audioDecimationFactor,
-                assembledAudio.UsesFloat32Storage);
+            StartPrefetch(stream, lastBlock);
+            if (stageVhsPayload)
+            {
+                stagedMaterializer = new VhsPayloadMaterializer(
+                    this,
+                    stagedBlocks
+                        ?? throw new InvalidOperationException("Staged VHS blocks were not retained."),
+                    stagedDeferredBlocks ?? [],
+                    video,
+                    envelope,
+                    chroma,
+                    offset,
+                    WorkerThreads);
+            }
+        }
+        catch
+        {
+            if (stagedDeferredBlocks is not null)
+            {
+                foreach (RfPipelineBlock block in stagedDeferredBlocks)
+                {
+                    _pipeline.ReleaseStreamBlock(block);
+                }
+            }
+
+            throw;
         }
 
-        return new RfDecodedSpan(
-            begin,
-            input,
-            video,
-            demodRaw,
-            envelope,
-            videoLowPass,
-            rfHighPass,
-            efm,
-            audioSpan,
-            chroma,
-            videoBurst,
-            videoPilot)
+        try
         {
-            AvailableSampleCountOverride = length
-        };
+            LaserDiscAnalogAudioBlock? audioSpan = null;
+            if (audioLeft is not null && audioRight is not null)
+            {
+                LaserDiscAnalogAudioBlock assembledAudio = _pipeline.ApplyLaserDiscAnalogAudioPhase2(
+                    new LaserDiscAnalogAudioBlock(audioLeft, audioRight, audioDecimationFactor));
+                int audioOffset = offset / audioDecimationFactor;
+                int audioLength = Math.Min(
+                    assembledAudio.Left.Length - audioOffset,
+                    (int)Math.Ceiling((double)length / audioDecimationFactor));
+                audioSpan = new LaserDiscAnalogAudioBlock(
+                    Slice(assembledAudio.Left, audioOffset, audioLength),
+                    Slice(assembledAudio.Right, audioOffset, audioLength),
+                    audioDecimationFactor,
+                    assembledAudio.UsesFloat32Storage);
+            }
+
+            return new RfDecodedSpan(
+                begin,
+                input,
+                video,
+                demodRaw,
+                envelope,
+                videoLowPass,
+                rfHighPass,
+                efm,
+                audioSpan,
+                chroma,
+                videoBurst,
+                videoPilot)
+            {
+                AvailableSampleCountOverride = length,
+                DeferredVhsPayload = stagedMaterializer
+            };
+        }
+        catch
+        {
+            stagedMaterializer?.Dispose();
+            stagedMaterializer = null;
+            throw;
+        }
     }
 
     public void Dispose()
@@ -655,6 +838,7 @@ public sealed class RfBlockStreamDecoder : IDisposable
         Volatile.Write(ref _disposed, true);
         try
         {
+            Volatile.Read(ref _activeVhsPayload)?.Dispose();
             FinishPrefetch(cancel: true, suppressFailures: true);
         }
         finally
@@ -668,6 +852,18 @@ public sealed class RfBlockStreamDecoder : IDisposable
             }
         }
     }
+
+    private void ReleaseActiveVhsPayload(VhsPayloadMaterializer materializer)
+    {
+        _ = Interlocked.CompareExchange(
+            ref _activeVhsPayload,
+            null,
+            materializer);
+        ReleaseStagedVhsRead();
+    }
+
+    private void ReleaseStagedVhsRead()
+        => Volatile.Write(ref _stagedVhsReadActive, 0);
 
     private ReusableSpanBuffers TakeReusableSpanBuffers(int length)
     {
@@ -1322,14 +1518,17 @@ public sealed class RfBlockStreamDecoder : IDisposable
     {
         private RfBlockStreamDecoder? _owner;
         private ReusableSpanBuffers? _buffers;
+        private VhsPayloadMaterializer? _materializer;
 
         internal RfDecodedSpanLease(
             RfBlockStreamDecoder? owner,
             ReusableSpanBuffers? buffers,
-            RfDecodedSpan span)
+            RfDecodedSpan span,
+            VhsPayloadMaterializer? materializer = null)
         {
             _owner = owner;
             _buffers = buffers;
+            _materializer = materializer;
             Span = span;
         }
 
@@ -1339,10 +1538,147 @@ public sealed class RfBlockStreamDecoder : IDisposable
         {
             RfBlockStreamDecoder? owner = Interlocked.Exchange(ref _owner, null);
             ReusableSpanBuffers? buffers = Interlocked.Exchange(ref _buffers, null);
+            VhsPayloadMaterializer? materializer = Interlocked.Exchange(ref _materializer, null);
+            materializer?.Dispose();
             if (owner is not null && buffers is not null)
             {
                 owner.ReturnReusableSpanBuffers(buffers);
             }
+        }
+    }
+
+    internal sealed class VhsPayloadMaterializer : IDisposable
+    {
+        private readonly object _gate = new();
+        private readonly RfBlockStreamDecoder _owner;
+        private readonly RfPipelineBlock[] _blocks;
+        private readonly RfPipelineBlock[] _deferredBlocks;
+        private readonly double[] _video;
+        private readonly double[] _envelope;
+        private readonly double[]? _chroma;
+        private readonly int _windowOffset;
+        private readonly int _workerThreads;
+        private Task? _materialization;
+        private bool _disposed;
+
+        internal VhsPayloadMaterializer(
+            RfBlockStreamDecoder owner,
+            RfPipelineBlock[] blocks,
+            RfPipelineBlock[] deferredBlocks,
+            double[] video,
+            double[] envelope,
+            double[]? chroma,
+            int windowOffset,
+            int workerThreads)
+        {
+            _owner = owner;
+            _blocks = blocks;
+            _deferredBlocks = deferredBlocks;
+            _video = video;
+            _envelope = envelope;
+            _chroma = chroma;
+            _windowOffset = windowOffset;
+            _workerThreads = workerThreads;
+        }
+
+        internal bool MaterializationStarted
+        {
+            get
+            {
+                lock (_gate)
+                {
+                    return _materialization is not null;
+                }
+            }
+        }
+
+        internal Task BeginMaterialization()
+        {
+            lock (_gate)
+            {
+                ObjectDisposedException.ThrowIf(_disposed, this);
+                return _materialization ??= Task.Run(Materialize);
+            }
+        }
+
+        internal void EnsureMaterialized()
+            => BeginMaterialization().GetAwaiter().GetResult();
+
+        public void Dispose()
+        {
+            Task? materialization;
+            lock (_gate)
+            {
+                if (_disposed)
+                {
+                    return;
+                }
+
+                _disposed = true;
+                materialization = _materialization;
+            }
+
+            if (materialization is not null)
+            {
+                try
+                {
+                    materialization.GetAwaiter().GetResult();
+                }
+                catch
+                {
+                    // DecodeCore observes materialization failures before lease release.
+                }
+            }
+
+            foreach (RfPipelineBlock block in _deferredBlocks)
+            {
+                _owner._pipeline.ReleaseStreamBlock(block);
+            }
+
+            _owner.ReleaseActiveVhsPayload(this);
+        }
+
+        private void Materialize()
+        {
+            Parallel.For(
+                0,
+                _blocks.Length,
+                new ParallelOptions
+                {
+                    MaxDegreeOfParallelism = Math.Min(_workerThreads, _blocks.Length)
+                },
+                blockIndex =>
+                {
+                    int blockDestination = checked(blockIndex * _owner.BlockStride);
+                    RfDemodulatedBlock demodulated = _blocks[blockIndex].Demodulated;
+                    _owner.CopyTrimmedWindow(
+                        demodulated.Video,
+                        _video,
+                        blockDestination,
+                        _windowOffset);
+                    _owner.CopyTrimmedWindow(
+                        demodulated.Envelope,
+                        _envelope,
+                        blockDestination,
+                        _windowOffset);
+                    if (_chroma is not null && demodulated.Chroma is { } blockChroma)
+                    {
+                        _owner.CopyTrimmedWindow(
+                            blockChroma,
+                            _chroma,
+                            blockDestination,
+                            _windowOffset);
+                    }
+                    else if (_chroma is not null
+                        && demodulated.ChromaFloat32 is { } blockChromaFloat32)
+                    {
+                        _owner.CopyTrimmedWindow(
+                            blockChromaFloat32,
+                            _chroma,
+                            blockDestination,
+                            _windowOffset);
+                    }
+                });
         }
     }
 
