@@ -414,25 +414,40 @@ speedup, and wall-time reduction against its profile-matched Python column:
 <!-- LATEST_PERFORMANCE_BEGIN -->
 | CLI mode (workers) | Python v0.4.0 | Python PR341 | Exact + v0.4.0 | Exact + current | IPP-fast + v0.4.0 | IPP-fast + current |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| default (5) | 15.207 s | 16.780 s | 4.454 s / 3.414x / 70.71% | 4.954 s / 3.387x / 70.48% | 3.619 s / 4.202x / 76.20% | 3.463 s / 4.845x / 79.36% |
+| default (5) | 15.207 s | 16.780 s | 4.454 s / 3.414x / 70.71% | 4.960 s / 3.383x / 70.44% | 3.619 s / 4.202x / 76.20% | 3.400 s / 4.936x / 79.74% |
 | `--threads 1` | 17.694 s | 19.414 s | 9.931 s / 1.782x / 43.87% | 11.898 s / 1.632x / 38.71% | 7.198 s / 2.458x / 59.32% | 7.989 s / 2.430x / 58.85% |
-| `--threads 5` | 15.719 s | 17.801 s | 4.499 s / 3.494x / 71.38% | 4.893 s / 3.638x / 72.51% | 3.612 s / 4.352x / 77.02% | 3.445 s / 5.167x / 80.65% |
-| `--threads 10` | 16.037 s | 18.266 s | 3.727 s / 4.303x / 76.76% | 4.341 s / 4.207x / 76.23% | 3.036 s / 5.282x / 81.07% | 2.762 s / 6.612x / 84.88% |
-| `--threads 20` | 16.405 s | 18.395 s | 3.045 s / 5.387x / 81.44% | 3.828 s / 4.805x / 79.19% | 2.751 s / 5.964x / 83.23% | 2.378 s / 7.735x / 87.07% |
+| `--threads 5` | 15.719 s | 17.801 s | 4.499 s / 3.494x / 71.38% | 4.480 s / 3.973x / 74.83% | 3.612 s / 4.352x / 77.02% | 3.190 s / 5.581x / 82.08% |
+| `--threads 10` | 16.037 s | 18.266 s | 3.727 s / 4.303x / 76.76% | 4.013 s / 4.551x / 78.03% | 3.036 s / 5.282x / 81.07% | 2.748 s / 6.646x / 84.95% |
+| `--threads 20` | 16.405 s | 18.395 s | 3.045 s / 5.387x / 81.44% | 3.529 s / 5.212x / 80.81% | 2.751 s / 5.964x / 83.23% | 2.288 s / 8.038x / 87.56% |
 <!-- LATEST_PERFORMANCE_END -->
-<!-- LATEST_PERFORMANCE_RUNS: dotnet-refresh=60 repeats=3 -->
+<!-- LATEST_PERFORMANCE_RUNS: prior-full-refresh=60 affected-current-refresh=24 repeats=3 -->
 
 The Python measurements were audited on 2026-08-02 using main commit
-`c92af1dfd0f96cd7f2d49f3219fb428d0f4e0865`. On 2026-08-04, all 20 .NET cells
-were refreshed from this branch candidate based on main `bb3d350`, with three
-interleaved runs per cell for 60 Release runs. The host was an Intel Core Ultra
-7 265K with 20 logical
-processors, Windows 11 build 26220, and .NET SDK/runtime
-`11.0.100-preview.6.26359.118`. Each profile/backend produced one luma, chroma,
-raw-JSON, stdout, normalized-stderr/log, and ordered-`fileLoc` hash across every
-worker count and repetition.
+`c92af1dfd0f96cd7f2d49f3219fb428d0f4e0865`. Unaffected .NET cells retain the
+2026-08-04 60-run refresh now merged as main `0f59971`. This branch remeasured
+the eight affected parallel `current` cells three times each for 24 Release
+runs. The host was an Intel Core Ultra 7 265K with 20 logical processors,
+Windows 11 build 26220, and .NET SDK/runtime `11.0.100-preview.6.26359.118`.
 
-This candidate converts native libsndfile PCM16 input to `double` eight samples
+The new parallel `current` VHS sync kernel specializes the fixed nine-tap
+boxcar. Its nine multiply-add statements preserve the previous ascending
+source order and float64 conversion points; it introduces no SIMD, FMA,
+reassociation, worker-cap change, or new retained buffer. Three interleaved
+fixed 160-frame `ipp-fast + current --threads 20` pairs moved median wall time
+from 12.667 to 12.512 seconds (1.22% lower, 1.012x throughput), and every
+candidate run was faster. Median CPU time moved from 58.438 to 58.141 seconds,
+while median effective core use moved from 4.61 to 4.65. All runs matched luma,
+chroma, raw JSON, stdout, timing-normalized stderr, timestamp-normalized logs,
+and ordered `fileLoc`. The 24-cell affected matrix refresh was deterministic
+within both current backends. Exact v0.4.0 zero/default/20 baseline-candidate
+gates also remained exact; current/default passed its paired gate, current/20
+passed the longer A/B gate, and `--threads 0` never dispatches this kernel.
+The Release solution built with zero warnings/errors and all 1,302 xUnit v3
+tests passed. Three focused bit-identity cases also passed with AVX2 disabled
+and with all hardware intrinsics disabled.
+
+The preceding merged PCM16 candidate converts native libsndfile input to
+`double` eight samples
 at a time with AVX2. The scalar tail and non-AVX2 fallback retain the original
 signed integer conversion exactly; no extra buffer, multiply, reduction, FMA,
 or sample reordering is introduced. A focused xUnit v3 test covers all 65,536
@@ -448,9 +463,10 @@ moved from 5.01 to 4.96 seconds while its arithmetic mean moved from 5.01 to
 as a general speed claim. Luma, chroma, raw JSON, stdout, timing-normalized stderr,
 timestamp-normalized logs, and ordered `fileLoc` matched in all six runs.
 Twelve strict Exact baseline/candidate gates also matched both profiles at
-zero, default, and 20 workers, including cross-thread determinism. The refreshed
-IPP-fast/current 20-worker matrix cell is 2.378 seconds, 7.735x faster than the
-profile-matched Python PR341 measurement on this fixed window.
+zero, default, and 20 workers, including cross-thread determinism. At that
+checkpoint, the IPP-fast/current 20-worker matrix cell was 2.378 seconds,
+7.735x faster than the profile-matched Python PR341 measurement on this fixed
+window.
 
 The preceding current CTI optimization precomputes the pinned RCPSS mantissa approximation
 into one process-wide 2,048-entry read-only table (8 KiB of payload), replacing
@@ -2365,7 +2381,7 @@ Requirements:
 .\tools\build-ipp-native.ps1
 dotnet restore VHSDecodeDotNet.slnx
 dotnet build VHSDecodeDotNet.slnx -c Release --no-restore
-dotnet test --solution VHSDecodeDotNet.slnx -c Release --no-build --no-restore --minimum-expected-tests 1299
+dotnet test --solution VHSDecodeDotNet.slnx -c Release --no-build --no-restore --minimum-expected-tests 1302
 dotnet test --project tests\VHSDecode.Tests\VHSDecode.Tests.csproj -c Release --no-build --no-restore --coverage --coverage-output coverage.cobertura.xml --coverage-output-format cobertura
 ```
 
@@ -2379,7 +2395,7 @@ deployment computer. Binary-only single-file releases embed
 sidecar license files. An Exact-only build may omit the native build step.
 
 The current formal Release build has zero warnings and errors. The xUnit v3
-project exposes **1,299** independently discoverable tests to both
+project exposes **1,302** independently discoverable tests to both
 `dotnet test` and Visual Studio Test Explorer.
 
 <!-- SECTION: usage -->

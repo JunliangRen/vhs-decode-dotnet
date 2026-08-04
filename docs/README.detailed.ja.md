@@ -394,24 +394,39 @@ Python v0.4.0、merge 済みの Python PR341、Exact v0.4.0、Exact
 <!-- LATEST_PERFORMANCE_BEGIN -->
 | CLI mode（workers） | Python v0.4.0 | Python PR341 | Exact + v0.4.0 | Exact + current | IPP-fast + v0.4.0 | IPP-fast + current |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| default（5） | 15.207 s | 16.780 s | 4.454 s / 3.414x / 70.71% | 4.954 s / 3.387x / 70.48% | 3.619 s / 4.202x / 76.20% | 3.463 s / 4.845x / 79.36% |
+| default（5） | 15.207 s | 16.780 s | 4.454 s / 3.414x / 70.71% | 4.960 s / 3.383x / 70.44% | 3.619 s / 4.202x / 76.20% | 3.400 s / 4.936x / 79.74% |
 | `--threads 1` | 17.694 s | 19.414 s | 9.931 s / 1.782x / 43.87% | 11.898 s / 1.632x / 38.71% | 7.198 s / 2.458x / 59.32% | 7.989 s / 2.430x / 58.85% |
-| `--threads 5` | 15.719 s | 17.801 s | 4.499 s / 3.494x / 71.38% | 4.893 s / 3.638x / 72.51% | 3.612 s / 4.352x / 77.02% | 3.445 s / 5.167x / 80.65% |
-| `--threads 10` | 16.037 s | 18.266 s | 3.727 s / 4.303x / 76.76% | 4.341 s / 4.207x / 76.23% | 3.036 s / 5.282x / 81.07% | 2.762 s / 6.612x / 84.88% |
-| `--threads 20` | 16.405 s | 18.395 s | 3.045 s / 5.387x / 81.44% | 3.828 s / 4.805x / 79.19% | 2.751 s / 5.964x / 83.23% | 2.378 s / 7.735x / 87.07% |
+| `--threads 5` | 15.719 s | 17.801 s | 4.499 s / 3.494x / 71.38% | 4.480 s / 3.973x / 74.83% | 3.612 s / 4.352x / 77.02% | 3.190 s / 5.581x / 82.08% |
+| `--threads 10` | 16.037 s | 18.266 s | 3.727 s / 4.303x / 76.76% | 4.013 s / 4.551x / 78.03% | 3.036 s / 5.282x / 81.07% | 2.748 s / 6.646x / 84.95% |
+| `--threads 20` | 16.405 s | 18.395 s | 3.045 s / 5.387x / 81.44% | 3.529 s / 5.212x / 80.81% | 2.751 s / 5.964x / 83.23% | 2.288 s / 8.038x / 87.56% |
 <!-- LATEST_PERFORMANCE_END -->
-<!-- LATEST_PERFORMANCE_RUNS: dotnet-refresh=60 repeats=3 -->
+<!-- LATEST_PERFORMANCE_RUNS: prior-full-refresh=60 affected-current-refresh=24 repeats=3 -->
 
 Python measurement は 2026-08-02 に main commit
-`c92af1dfd0f96cd7f2d49f3219fb428d0f4e0865` で audit しました。2026-08-04、main
-`bb3d350` を基に、20 個すべての .NET cell を 3 回ずつ interleaved 測定し、
-60 Release run を実行しました。host は Intel Core Ultra 7
-265K（20 logical processor）、Windows 11 build 26220、.NET SDK/runtime
-`11.0.100-preview.6.26359.118` です。各 profile/backend は全 worker count と全
-repeat で luma、chroma、raw JSON、stdout、normalized stderr/log、ordered
-`fileLoc` について 1 hash set だけを生成しました。
+`c92af1dfd0f96cd7f2d49f3219fb428d0f4e0865` で audit しました。影響を受けない
+.NET cell は 2026-08-04 に main `0f59971` へ merge された 60-run refresh を
+維持します。この branch は影響を受ける 8 個の parallel `current` cell を各 3 回、
+合計 24 Release run で再測定しました。host は Intel Core Ultra 7 265K
+（20 logical processor）、Windows 11 build 26220、.NET SDK/runtime
+`11.0.100-preview.6.26359.118` です。
 
-今回の candidate は native libsndfile PCM16 input を AVX2 で 8 sample ずつ
+新しい parallel `current` VHS sync kernel は固定 9-tap boxcar を専用化します。
+9 個の multiply-add statement は従来の ascending source order と float64 conversion
+point を維持し、SIMD、FMA、reassociation、worker-cap change、新しい retained
+buffer は導入しません。fixed 160-frame
+`ipp-fast + current --threads 20` の 3-pair interleaved A/B は wall median を
+12.667 から 12.512 秒へ 1.22% 短縮（throughput 1.012x）し、全 candidate run が
+高速でした。CPU median は 58.438 から 58.141 秒、median effective core use は
+4.61 から 4.65 になりました。全 run で luma、chroma、raw JSON、stdout、
+timing-normalized stderr、timestamp-normalized log、ordered `fileLoc` が一致しました。
+24-cell refresh は両 current backend 内で deterministic でした。Exact v0.4.0 の
+zero/default/20 baseline-candidate gate も exact を維持し、current/default は paired
+gate、current/20 は長い A/B gate を通過しました。`--threads 0` はこの kernel を
+dispatch しません。Release solution は warning/error 0、1,302 xUnit v3 test は
+すべて pass し、3 個の focused bit-identity case は AVX2-disabled と
+all-hardware-intrinsics-disabled でも pass しました。
+
+先に merge 済みの PCM16 candidate は native libsndfile input を AVX2 で 8 sample ずつ
 `double` へ変換します。scalar tail と non-AVX2 fallback は元の signed integer
 conversion を exact に維持し、追加 buffer、multiply、reduction、FMA、sample
 reordering はありません。focused xUnit v3 test は 65,536 個すべての PCM16 値と
@@ -425,9 +440,9 @@ all-intrinsics-disabled execution のすべてで pass しました。8-pair con
 claim には使用しません。6 run すべてで luma、chroma、raw JSON、stdout、timing-normalized stderr、
 timestamp-normalized log、ordered `fileLoc` が一致しました。さらに 12 個の strict
 Exact baseline/candidate gate が両 profile の zero/default/20 workers と cross-thread
-determinism を一致させました。今回の IPP-fast/current 20-worker matrix cell は
-2.378 秒で、この fixed window の profile-matched Python PR341 measurement より
-7.735x 高速です。
+determinism を一致させました。その checkpoint の IPP-fast/current 20-worker
+matrix cell は 2.378 秒で、この fixed window の profile-matched Python PR341
+measurement より 7.735x 高速でした。
 
 前回の `current` CTI optimization は、固定 RCPSS mantissa approximation を process-wide
 の 2,048-entry read-only table（payload 8 KiB）へ事前計算し、conversion point と
@@ -2279,7 +2294,7 @@ SHA-256、stdout SHA-256、normalized stderr、normalized log、全 ordered `fil
 .\tools\build-ipp-native.ps1
 dotnet restore VHSDecodeDotNet.slnx
 dotnet build VHSDecodeDotNet.slnx -c Release --no-restore
-dotnet test --solution VHSDecodeDotNet.slnx -c Release --no-build --no-restore --minimum-expected-tests 1299
+dotnet test --solution VHSDecodeDotNet.slnx -c Release --no-build --no-restore --minimum-expected-tests 1302
 dotnet test --project tests\VHSDecode.Tests\VHSDecode.Tests.csproj -c Release --no-build --no-restore --coverage --coverage-output coverage.cobertura.xml --coverage-output-format cobertura
 ```
 
@@ -2293,7 +2308,7 @@ third-party notice を埋め込み、license sidecar file は追加しません�
 
 現在の正式な Release build は warning 0、error 0 です。xUnit v3 project は
 `dotnet test` と Visual Studio Test Explorer の両方で個別に検出できる
-**1,299** tests を公開します。
+**1,302** tests を公開します。
 
 <!-- SECTION: usage -->
 
