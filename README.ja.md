@@ -2,7 +2,7 @@
 
 [English](README.md) | [简体中文](README.zh-CN.md) | **[日本語](README.ja.md)**
 
-<!-- README_SYNC: 2026-08-03.01 -->
+<!-- README_SYNC: 2026-08-04.01 -->
 
 [`oyvindln/vhs-decode`](https://github.com/oyvindln/vhs-decode) の
 デコード関連部分を .NET 11 で再実装するプロジェクトです。互換性の対象は
@@ -36,7 +36,7 @@ upstream release `v0.4.0`、commit
 - VHS family には VHS/S-VHS、Betamax、Video8/Hi8、U-matic、Type C、EIAJ、
   upstream が対応する PAL/NTSC variant が含まれます。
 - TBC utility、ダブルクリック GUI、開発者向け plot window は対象外です。
-- Visual Studio 2026 の `.slnx` には **1,302** 件の標準 xUnit v3 test があり、
+- Visual Studio 2026 の `.slnx` には **1,315** 件の標準 xUnit v3 test があり、
   Test Explorer と `dotnet test` の両方で実行できます。
 
 <!-- SECTION: start -->
@@ -93,31 +93,31 @@ CVBS、LaserDisc、HiFi は現在 `ipp-fast` を拒否するため、これら�
 ## 最新の性能
 
 次の表は同じ private local 40 MHz PAL VHS `.ldf` fixture と同じ 40-frame
-window を使用し、source filename は公開しません。Python 列と影響を受けない
-.NET cell は 2026-08-04 の audited measurement を維持します。main `0f59971`
-を基にしたこの branch では、影響を受ける 8 個の parallel `current` cell を
-各 3 回、合計 24 Release run で更新しました。互換性判定は速度とは別です。
+window を使用し、source filename は公開しません。Python 列は audited measurement
+を維持します。main `72664dc` を基にしたこの branch では、20 個すべての .NET
+cell を各 3 回、合計 60 Release run で更新しました。互換性判定は速度とは別です。
 
 <!-- LATEST_PERFORMANCE_BEGIN -->
 | CLI mode（workers） | Python v0.4.0 | Python PR341 | Exact + v0.4.0 | Exact + current | IPP-fast + v0.4.0 | IPP-fast + current |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| default（5） | 15.207 s | 16.780 s | 4.454 s / 3.414x | 4.960 s / 3.383x | 3.619 s / 4.202x | 3.400 s / 4.936x |
-| `--threads 1` | 17.694 s | 19.414 s | 9.931 s / 1.782x | 11.898 s / 1.632x | 7.198 s / 2.458x | 7.989 s / 2.430x |
-| `--threads 5` | 15.719 s | 17.801 s | 4.499 s / 3.494x | 4.480 s / 3.973x | 3.612 s / 4.352x | 3.190 s / 5.581x |
-| `--threads 10` | 16.037 s | 18.266 s | 3.727 s / 4.303x | 4.013 s / 4.551x | 3.036 s / 5.282x | 2.748 s / 6.646x |
-| `--threads 20` | 16.405 s | 18.395 s | 3.045 s / 5.387x | 3.529 s / 5.212x | 2.751 s / 5.964x | 2.288 s / 8.038x |
+| default（5） | 15.207 s | 16.780 s | 4.267 s / 3.564x | 4.690 s / 3.578x | 3.608 s / 4.215x | 3.393 s / 4.946x |
+| `--threads 1` | 17.694 s | 19.414 s | 9.732 s / 1.818x | 11.640 s / 1.668x | 7.089 s / 2.496x | 7.947 s / 2.443x |
+| `--threads 5` | 15.719 s | 17.801 s | 4.167 s / 3.772x | 4.648 s / 3.830x | 3.607 s / 4.358x | 3.388 s / 5.254x |
+| `--threads 10` | 16.037 s | 18.266 s | 3.274 s / 4.899x | 4.096 s / 4.459x | 3.069 s / 5.225x | 2.732 s / 6.686x |
+| `--threads 20` | 16.405 s | 18.395 s | 2.919 s / 5.620x | 3.765 s / 4.886x | 2.667 s / 6.150x | 2.327 s / 7.905x |
 <!-- LATEST_PERFORMANCE_END -->
-<!-- LATEST_PERFORMANCE_RUNS: prior-full-refresh=60 affected-current-refresh=24 repeats=3 -->
+<!-- LATEST_PERFORMANCE_RUNS: full-refresh=60 repeats=3 -->
 
 各 .NET cell は wall-time median と profile が対応する Python 列に対する
-speedup の順で、default は **5 workers** です。parallel `current` VHS sync path は
-固定 9-tap boxcar を専用化し、元の left-to-right float64 operation order、worker
-cap、memory ownership を変更しません。fixed 160-frame
-`ipp-fast + current --threads 20` の 3-pair A/B median は 12.67 から 12.51 秒へ
-1.2% 短縮し、全 candidate run が高速でした。更新した 20-worker table cell は
-2.288 秒で、profile-matched Python PR341 measurement の 8.038x です。
+speedup の順で、default は **5 workers** です。hot NumPy-compatible float32 mean は
+float64 input を 8 個ずつ変換し、元の recursive split と reduction order を保った
+8 AVX lane で累積します。FMA や新しい retained buffer は使用しません。fixed
+160-frame `ipp-fast + current --threads 20` の 3-pair A/B median は 11.855 から
+11.620 秒へ 2.0% 短縮し、candidate は 3 pair 中 2 pair で高速でした。median
+effective core use は 4.66 から 4.94 へ上昇しました。更新した 20-worker table cell
+は 2.327 秒で、profile-matched Python PR341 measurement の 7.905x です。
 
-更新した 24 cell はすべて deterministic でした。baseline/candidate gate は luma、
+更新した 60 run は各 profile 内ですべて deterministic でした。baseline/candidate gate は luma、
 chroma、raw JSON、stdout、normalized stderr/log、ordered `fileLoc` が一致しました。
 IPP-fast は明示的な numerically-close backend のままで、Exact と byte-for-byte
 同一とは主張しません。Python v0.4.0 は nonzero worker count で output hash が
@@ -155,7 +155,7 @@ path を維持します。
 dotnet restore VHSDecodeDotNet.slnx
 dotnet build VHSDecodeDotNet.slnx -c Release --no-restore
 dotnet test --solution VHSDecodeDotNet.slnx -c Release `
-  --no-build --no-restore --minimum-expected-tests 1302
+  --no-build --no-restore --minimum-expected-tests 1315
 ```
 
 Visual Studio 2026 で `VHSDecodeDotNet.slnx` を開くと、build、debug、
