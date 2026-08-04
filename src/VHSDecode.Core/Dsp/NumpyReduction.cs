@@ -1,4 +1,6 @@
 using System.Numerics;
+using System.Runtime.Intrinsics;
+using System.Runtime.Intrinsics.X86;
 
 namespace VHSDecode.Core.Dsp;
 
@@ -267,26 +269,60 @@ internal static class NumpyReduction
                 + PairwiseSumFloat32(values[split..]);
         }
 
-        float sum0 = (float)values[0];
-        float sum1 = (float)values[1];
-        float sum2 = (float)values[2];
-        float sum3 = (float)values[3];
-        float sum4 = (float)values[4];
-        float sum5 = (float)values[5];
-        float sum6 = (float)values[6];
-        float sum7 = (float)values[7];
         int index = 8;
         int vectorizedEnd = values.Length - (values.Length % 8);
-        for (; index < vectorizedEnd; index += 8)
+        float sum0;
+        float sum1;
+        float sum2;
+        float sum3;
+        float sum4;
+        float sum5;
+        float sum6;
+        float sum7;
+        if (Avx.IsSupported)
         {
-            sum0 += (float)values[index];
-            sum1 += (float)values[index + 1];
-            sum2 += (float)values[index + 2];
-            sum3 += (float)values[index + 3];
-            sum4 += (float)values[index + 4];
-            sum5 += (float)values[index + 5];
-            sum6 += (float)values[index + 6];
-            sum7 += (float)values[index + 7];
+            unsafe
+            {
+                fixed (double* valuesPointer = values)
+                {
+                    Vector256<float> sums = LoadFloat32x8(valuesPointer);
+                    for (; index < vectorizedEnd; index += 8)
+                    {
+                        sums = Avx.Add(sums, LoadFloat32x8(valuesPointer + index));
+                    }
+
+                    sum0 = sums.GetElement(0);
+                    sum1 = sums.GetElement(1);
+                    sum2 = sums.GetElement(2);
+                    sum3 = sums.GetElement(3);
+                    sum4 = sums.GetElement(4);
+                    sum5 = sums.GetElement(5);
+                    sum6 = sums.GetElement(6);
+                    sum7 = sums.GetElement(7);
+                }
+            }
+        }
+        else
+        {
+            sum0 = (float)values[0];
+            sum1 = (float)values[1];
+            sum2 = (float)values[2];
+            sum3 = (float)values[3];
+            sum4 = (float)values[4];
+            sum5 = (float)values[5];
+            sum6 = (float)values[6];
+            sum7 = (float)values[7];
+            for (; index < vectorizedEnd; index += 8)
+            {
+                sum0 += (float)values[index];
+                sum1 += (float)values[index + 1];
+                sum2 += (float)values[index + 2];
+                sum3 += (float)values[index + 3];
+                sum4 += (float)values[index + 4];
+                sum5 += (float)values[index + 5];
+                sum6 += (float)values[index + 6];
+                sum7 += (float)values[index + 7];
+            }
         }
 
         float combinedSum = ((sum0 + sum1) + (sum2 + sum3))
@@ -298,6 +334,11 @@ internal static class NumpyReduction
 
         return combinedSum;
     }
+
+    private static unsafe Vector256<float> LoadFloat32x8(double* values)
+        => Vector256.Create(
+            Avx.ConvertToVector128Single(Avx.LoadVector256(values)),
+            Avx.ConvertToVector128Single(Avx.LoadVector256(values + 4)));
 
     private static float PairwiseSumFloat32(ReadOnlySpan<float> values)
     {

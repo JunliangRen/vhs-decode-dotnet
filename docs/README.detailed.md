@@ -4,7 +4,7 @@
 
 **[English](README.detailed.md)** | [简体中文](README.detailed.zh-CN.md) | [日本語](README.detailed.ja.md)
 
-<!-- README_SYNC: 2026-08-03.01 -->
+<!-- README_SYNC: 2026-08-04.01 -->
 
 .NET 11 rewrite of the decode-facing parts of
 [`oyvindln/vhs-decode`](https://github.com/oyvindln/vhs-decode), focused on
@@ -414,22 +414,45 @@ speedup, and wall-time reduction against its profile-matched Python column:
 <!-- LATEST_PERFORMANCE_BEGIN -->
 | CLI mode (workers) | Python v0.4.0 | Python PR341 | Exact + v0.4.0 | Exact + current | IPP-fast + v0.4.0 | IPP-fast + current |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| default (5) | 15.207 s | 16.780 s | 4.454 s / 3.414x / 70.71% | 4.960 s / 3.383x / 70.44% | 3.619 s / 4.202x / 76.20% | 3.400 s / 4.936x / 79.74% |
-| `--threads 1` | 17.694 s | 19.414 s | 9.931 s / 1.782x / 43.87% | 11.898 s / 1.632x / 38.71% | 7.198 s / 2.458x / 59.32% | 7.989 s / 2.430x / 58.85% |
-| `--threads 5` | 15.719 s | 17.801 s | 4.499 s / 3.494x / 71.38% | 4.480 s / 3.973x / 74.83% | 3.612 s / 4.352x / 77.02% | 3.190 s / 5.581x / 82.08% |
-| `--threads 10` | 16.037 s | 18.266 s | 3.727 s / 4.303x / 76.76% | 4.013 s / 4.551x / 78.03% | 3.036 s / 5.282x / 81.07% | 2.748 s / 6.646x / 84.95% |
-| `--threads 20` | 16.405 s | 18.395 s | 3.045 s / 5.387x / 81.44% | 3.529 s / 5.212x / 80.81% | 2.751 s / 5.964x / 83.23% | 2.288 s / 8.038x / 87.56% |
+| default (5) | 15.207 s | 16.780 s | 4.267 s / 3.564x / 71.94% | 4.690 s / 3.578x / 72.05% | 3.608 s / 4.215x / 76.28% | 3.393 s / 4.946x / 79.78% |
+| `--threads 1` | 17.694 s | 19.414 s | 9.732 s / 1.818x / 45.00% | 11.640 s / 1.668x / 40.05% | 7.089 s / 2.496x / 59.93% | 7.947 s / 2.443x / 59.07% |
+| `--threads 5` | 15.719 s | 17.801 s | 4.167 s / 3.772x / 73.49% | 4.648 s / 3.830x / 73.89% | 3.607 s / 4.358x / 77.05% | 3.388 s / 5.254x / 80.97% |
+| `--threads 10` | 16.037 s | 18.266 s | 3.274 s / 4.899x / 79.59% | 4.096 s / 4.459x / 77.57% | 3.069 s / 5.225x / 80.86% | 2.732 s / 6.686x / 85.04% |
+| `--threads 20` | 16.405 s | 18.395 s | 2.919 s / 5.620x / 82.21% | 3.765 s / 4.886x / 79.53% | 2.667 s / 6.150x / 83.74% | 2.327 s / 7.905x / 87.35% |
 <!-- LATEST_PERFORMANCE_END -->
-<!-- LATEST_PERFORMANCE_RUNS: prior-full-refresh=60 affected-current-refresh=24 repeats=3 -->
+<!-- LATEST_PERFORMANCE_RUNS: full-refresh=60 repeats=3 -->
 
 The Python measurements were audited on 2026-08-02 using main commit
-`c92af1dfd0f96cd7f2d49f3219fb428d0f4e0865`. Unaffected .NET cells retain the
-2026-08-04 60-run refresh now merged as main `0f59971`. This branch remeasured
-the eight affected parallel `current` cells three times each for 24 Release
-runs. The host was an Intel Core Ultra 7 265K with 20 logical processors,
-Windows 11 build 26220, and .NET SDK/runtime `11.0.100-preview.6.26359.118`.
+`c92af1dfd0f96cd7f2d49f3219fb428d0f4e0865`. This branch, based on main
+`72664dc`, remeasured all 20 .NET cells three times each for 60 Release runs.
+The host was an Intel Core Ultra 7 265K with 20 logical processors, Windows 11
+build 26220, and .NET SDK/runtime `11.0.100-preview.6.26359.118`.
 
-The new parallel `current` VHS sync kernel specializes the fixed nine-tap
+The new reduction kernel accelerates the NumPy-compatible float32 mean used in
+VHS RF processing. Each leaf still uses the original 128-element pairwise
+boundary, recursive split points, eight independent accumulators, and final
+addition tree; AVX only converts eight float64 inputs and advances those same
+eight lanes together. It uses no FMA, reassociation, allocation, or new retained
+buffer. Eight alternating production-sized microbenchmark runs moved median
+time from 82.23 to 42.30 ms (48.6% lower, 1.944x throughput). Three interleaved
+fixed 160-frame `ipp-fast + current --threads 20` pairs moved median wall time
+from 11.855 to 11.620 seconds (1.98% lower, 1.020x throughput); the candidate
+won two pairs and lost one. Median process CPU time rose from 55.297 to 57.422
+seconds while median effective core use rose from 4.66 to 4.94, so the wall-time
+gain comes with measurably higher but useful CPU occupancy. All paired runs
+matched luma, chroma, raw JSON, stdout, timing-normalized stderr,
+timestamp-normalized logs, and ordered `fileLoc`.
+
+Twelve baseline/candidate real-RF gates covered v0.4.0 and `current` at explicit
+zero, default, and 20 workers and matched every compatibility surface, including
+cross-thread determinism. All 60 refreshed matrix runs were deterministic within
+their profile. The final IPP-fast/current 20-worker cell is 2.327 seconds,
+7.905x faster than the profile-matched Python PR341 measurement. The Release
+solution built with zero warnings/errors, all **1,315** xUnit v3 tests passed,
+and the 13 focused bit-identity cases passed both normally and with all hardware
+intrinsics disabled.
+
+The preceding merged parallel `current` VHS sync kernel specializes the fixed nine-tap
 boxcar. Its nine multiply-add statements preserve the previous ascending
 source order and float64 conversion points; it introduces no SIMD, FMA,
 reassociation, worker-cap change, or new retained buffer. Three interleaved
@@ -2381,7 +2404,7 @@ Requirements:
 .\tools\build-ipp-native.ps1
 dotnet restore VHSDecodeDotNet.slnx
 dotnet build VHSDecodeDotNet.slnx -c Release --no-restore
-dotnet test --solution VHSDecodeDotNet.slnx -c Release --no-build --no-restore --minimum-expected-tests 1302
+dotnet test --solution VHSDecodeDotNet.slnx -c Release --no-build --no-restore --minimum-expected-tests 1315
 dotnet test --project tests\VHSDecode.Tests\VHSDecode.Tests.csproj -c Release --no-build --no-restore --coverage --coverage-output coverage.cobertura.xml --coverage-output-format cobertura
 ```
 
@@ -2395,7 +2418,7 @@ deployment computer. Binary-only single-file releases embed
 sidecar license files. An Exact-only build may omit the native build step.
 
 The current formal Release build has zero warnings and errors. The xUnit v3
-project exposes **1,302** independently discoverable tests to both
+project exposes **1,315** independently discoverable tests to both
 `dotnet test` and Visual Studio Test Explorer.
 
 <!-- SECTION: usage -->
