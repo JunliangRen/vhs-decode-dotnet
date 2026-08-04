@@ -134,6 +134,109 @@ public sealed class IppRealDft32Tests
         Assert.InRange(maximum, 0.0, 2.0);
     }
 
+    [Fact(DisplayName = "IPP Super-Gaussian staging conversions preserve scalar bits")]
+    public void SuperGaussianStagingConversionsPreserveScalarBits()
+    {
+        double[] source = BuildStagingDoubleValues();
+        float[] expectedFloat = source
+            .Select(static value => (float)value)
+            .ToArray();
+        var actualFloat = new float[source.Length + 3];
+        Array.Fill(actualFloat, float.NaN);
+
+        ChromaSuperGaussianFinalFilter.CopyFloat64ToFloat32(
+            source,
+            actualFloat.AsSpan(1, source.Length));
+
+        for (int index = 0; index < source.Length; index++)
+        {
+            Assert.Equal(
+                BitConverter.SingleToUInt32Bits(expectedFloat[index]),
+                BitConverter.SingleToUInt32Bits(actualFloat[index + 1]));
+        }
+
+        double[] expectedDouble = expectedFloat
+            .Select(static value => (double)value)
+            .ToArray();
+        var actualDouble = new double[expectedFloat.Length + 3];
+        Array.Fill(actualDouble, double.NaN);
+
+        ChromaSuperGaussianFinalFilter.CopyFloat32ToFloat64(
+            expectedFloat,
+            actualDouble.AsSpan(2, expectedFloat.Length));
+
+        for (int index = 0; index < expectedFloat.Length; index++)
+        {
+            Assert.Equal(
+                BitConverter.DoubleToUInt64Bits(expectedDouble[index]),
+                BitConverter.DoubleToUInt64Bits(actualDouble[index + 2]));
+        }
+    }
+
+    [Fact(DisplayName = "IPP Super-Gaussian mask SIMD preserves scalar complex bits")]
+    public void SuperGaussianMaskSimdPreservesScalarComplexBits()
+    {
+        double[] values = BuildStagingDoubleValues();
+        var mask = new double[values.Length];
+        var expected = new IppComplex32[values.Length];
+        var actual = new IppComplex32[values.Length];
+        for (int index = 0; index < values.Length; index++)
+        {
+            float real = (float)values[index];
+            float imaginary = (float)values[(index * 7 + 3) % values.Length];
+            double factor = values[(index * 5 + 1) % values.Length];
+            mask[index] = factor;
+            expected[index] = ApplyScalarMask(real, imaginary, factor);
+            actual[index] = new IppComplex32(real, imaginary);
+        }
+
+        ChromaSuperGaussianFinalFilter.ApplyIppMask(actual, mask);
+
+        for (int index = 0; index < expected.Length; index++)
+        {
+            Assert.Equal(
+                BitConverter.SingleToUInt32Bits(expected[index].Real),
+                BitConverter.SingleToUInt32Bits(actual[index].Real));
+            Assert.Equal(
+                BitConverter.SingleToUInt32Bits(expected[index].Imaginary),
+                BitConverter.SingleToUInt32Bits(actual[index].Imaginary));
+        }
+    }
+
+    [Theory(DisplayName = "Super-Gaussian reflect padding preserves scalar layout")]
+    [InlineData(1)]
+    [InlineData(7)]
+    [InlineData(16)]
+    public void SuperGaussianReflectPaddingPreservesScalarLayout(int padLeft)
+    {
+        double[] input = BuildStagingDoubleValues();
+        int padRight = padLeft + 1;
+        var expected = new float[input.Length + padLeft + padRight];
+        var actual = new float[expected.Length];
+        for (int index = 0; index < padLeft; index++)
+        {
+            expected[index] = (float)input[padLeft - index];
+        }
+        for (int index = 0; index < input.Length; index++)
+        {
+            expected[padLeft + index] = (float)input[index];
+        }
+        for (int index = 0; index < padRight; index++)
+        {
+            expected[padLeft + input.Length + index] =
+                (float)input[input.Length - index - 2];
+        }
+
+        ChromaSuperGaussianFinalFilter.FillReflectPad(input, actual, padLeft);
+
+        for (int index = 0; index < expected.Length; index++)
+        {
+            Assert.Equal(
+                BitConverter.SingleToUInt32Bits(expected[index]),
+                BitConverter.SingleToUInt32Bits(actual[index]));
+        }
+    }
+
     [Fact(DisplayName = "IPP Super-Gaussian contexts are released by repeated pipeline disposal")]
     public void PipelineDisposalReleasesRepeatedSuperGaussianContexts()
     {
@@ -170,6 +273,47 @@ public sealed class IppRealDft32Tests
         }
 
         return input;
+    }
+
+    private static double[] BuildStagingDoubleValues()
+    {
+        double[] edgeValues =
+        [
+            0.0,
+            -0.0,
+            double.Epsilon,
+            -double.Epsilon,
+            float.Epsilon,
+            -float.Epsilon,
+            float.MaxValue,
+            -float.MaxValue,
+            double.PositiveInfinity,
+            double.NegativeInfinity,
+            BitConverter.UInt64BitsToDouble(0x7FF8_1234_5678_9ABC),
+            BitConverter.UInt64BitsToDouble(0xFFF8_1234_5678_9ABC)
+        ];
+        var values = new double[37];
+        edgeValues.CopyTo(values, 0);
+        for (int index = edgeValues.Length; index < values.Length; index++)
+        {
+            values[index] =
+                (Math.Sin(index * 0.37) * 1000.0)
+                + (((index % 5) - 2) * 0.125);
+        }
+
+        return values;
+    }
+
+    private static IppComplex32 ApplyScalarMask(
+        float realValue,
+        float imaginaryValue,
+        double factor)
+    {
+        double real = realValue;
+        double imaginary = imaginaryValue;
+        return new IppComplex32(
+            (float)((real * factor) - (imaginary * 0.0)),
+            (float)((real * 0.0) + (imaginary * factor)));
     }
 
     private static TbcFieldDecodePipeline BuildPipeline(
