@@ -202,12 +202,14 @@ internal static class PocketFftReal32
     {
         private readonly Factor[] _factors;
         private readonly int _length;
+        private readonly UnityRoots _roots;
 
         internal Plan(int length)
         {
             _length = length;
+            _roots = new UnityRoots(length);
             int[] radices = Factorize(length);
-            _factors = BuildFactors(length, radices);
+            _factors = BuildFactors(length, radices, _roots);
         }
 
         internal Complex32[] Forward(ReadOnlySpan<float> input)
@@ -289,7 +291,6 @@ internal static class PocketFftReal32
                 transformed[0].Real + transformed[0].Imaginary,
                 0.0f);
 
-            var roots = new UnityRoots(_length);
             for (int i = 1, inverseIndex = complexLength - 1;
                 i <= inverseIndex;
                 i++, inverseIndex--)
@@ -300,7 +301,7 @@ internal static class PocketFftReal32
                 float evenImaginary = current.Imaginary - inverse.Imaginary;
                 float oddReal = current.Imaginary + inverse.Imaginary;
                 float oddImaginary = inverse.Real - current.Real;
-                FloatTwiddle root = roots.Get(i);
+                FloatTwiddle root = _roots.Get(i);
                 MultiplyConjugate(
                     root.Real,
                     root.Imaginary,
@@ -351,7 +352,6 @@ internal static class PocketFftReal32
                 transformed[0].Real + transformed[0].Imaginary,
                 0.0f);
 
-            var roots = new UnityRoots(_length);
             for (int i = 1, inverseIndex = complexLength - 1;
                 i <= inverseIndex;
                 i++, inverseIndex--)
@@ -362,7 +362,7 @@ internal static class PocketFftReal32
                 float evenImaginary = current.Imaginary - inverse.Imaginary;
                 float oddReal = current.Imaginary + inverse.Imaginary;
                 float oddImaginary = inverse.Real - current.Real;
-                FloatTwiddle root = roots.Get(i);
+                FloatTwiddle root = _roots.Get(i);
                 MultiplyConjugate(
                     root.Real,
                     root.Imaginary,
@@ -436,7 +436,6 @@ internal static class PocketFftReal32
                 input[0].Real + input[^1].Real,
                 input[0].Real - input[^1].Real);
 
-            var roots = new UnityRoots(_length);
             for (int i = 1, inverseIndex = complexLength - 1;
                 i <= inverseIndex;
                 i++, inverseIndex--)
@@ -451,7 +450,7 @@ internal static class PocketFftReal32
                 float oddReal = first.Real - second.Real;
                 float oddImaginary =
                     first.Imaginary - second.Imaginary;
-                FloatTwiddle root = roots.Get(i);
+                FloatTwiddle root = _roots.Get(i);
                 float rotatedReal =
                     (oddReal * root.Real)
                     - (oddImaginary * root.Imaginary);
@@ -495,7 +494,6 @@ internal static class PocketFftReal32
                 input[0].Real + input[^1].Real,
                 input[0].Real - input[^1].Real);
 
-            var roots = new UnityRoots(_length);
             for (int i = 1, inverseIndex = complexLength - 1;
                 i <= inverseIndex;
                 i++, inverseIndex--)
@@ -510,7 +508,7 @@ internal static class PocketFftReal32
                 float oddReal = first.Real - second.Real;
                 float oddImaginary =
                     first.Imaginary - second.Imaginary;
-                FloatTwiddle root = roots.Get(i);
+                FloatTwiddle root = _roots.Get(i);
                 float rotatedReal =
                     (oddReal * root.Real)
                     - (oddImaginary * root.Imaginary);
@@ -744,10 +742,12 @@ internal static class PocketFftReal32
             return factors.ToArray();
         }
 
-        private static Factor[] BuildFactors(int length, int[] radices)
+        private static Factor[] BuildFactors(
+            int length,
+            int[] radices,
+            UnityRoots roots)
         {
             var factors = new Factor[radices.Length];
-            var roots = new UnityRoots(length);
             int l1 = 1;
             for (int factorIndex = 0;
                 factorIndex < factors.Length;

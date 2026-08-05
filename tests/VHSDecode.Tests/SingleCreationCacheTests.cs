@@ -8,13 +8,24 @@ public sealed class SingleCreationCacheTests
     [Fact(DisplayName = "Single-creation cache runs one factory for concurrent callers")]
     public async Task RunsOneFactoryForConcurrentCallers()
     {
+        CancellationToken cancellationToken = TestContext.Current.CancellationToken;
+        await AssertRunsOneFactoryForConcurrentCallers(
+            new SingleCreationCache<int, object>(),
+            cancellationToken);
+        await AssertRunsOneFactoryForConcurrentCallers(
+            new SingleCreationCache<int, object>(capacity: 32),
+            cancellationToken);
+    }
+
+    private static async Task AssertRunsOneFactoryForConcurrentCallers(
+        SingleCreationCache<int, object> cache,
+        CancellationToken cancellationToken)
+    {
         const int callerCount = 12;
-        var cache = new SingleCreationCache<int, object>();
         using var ready = new CountdownEvent(callerCount);
         using var start = new ManualResetEventSlim();
         using var factoryEntered = new ManualResetEventSlim();
         using var releaseFactory = new ManualResetEventSlim();
-        CancellationToken cancellationToken = TestContext.Current.CancellationToken;
         int callsStarted = 0;
         int factoryCalls = 0;
 
@@ -114,8 +125,8 @@ public sealed class SingleCreationCacheTests
         Assert.NotSame(values[0], values[1]);
     }
 
-    [Fact(DisplayName = "Single-creation cache retries a failed factory")]
-    public void RetriesFailedFactory()
+    [Fact(DisplayName = "Single-creation cache retries failures and enforces optional capacity")]
+    public void RetriesFailedFactoryAndEnforcesOptionalCapacity()
     {
         var cache = new SingleCreationCache<int, object>();
         int factoryCalls = 0;
@@ -136,12 +147,51 @@ public sealed class SingleCreationCacheTests
 
         Assert.Equal(2, factoryCalls);
         Assert.Same(expected, actual);
+
+        Assert.Throws<ArgumentOutOfRangeException>(
+            () => new SingleCreationCache<int, object>(capacity: 0));
+
+        const int capacity = 32;
+        var boundedCache = new SingleCreationCache<int, object>(capacity);
+        object[] initialValues = Enumerable.Range(0, capacity)
+            .Select(key => boundedCache.GetOrAdd(key, static _ => new object()))
+            .ToArray();
+
+        Assert.Same(
+            initialValues[0],
+            boundedCache.GetOrAdd(0, static _ => new object()));
+
+        _ = boundedCache.GetOrAdd(capacity, static _ => new object());
+
+        Assert.Same(
+            initialValues[1],
+            boundedCache.GetOrAdd(1, static _ => new object()));
+
+        object firstAfterEviction = boundedCache.GetOrAdd(
+            0,
+            static _ => new object());
+
+        Assert.NotSame(initialValues[0], firstAfterEviction);
+        Assert.Same(
+            firstAfterEviction,
+            boundedCache.GetOrAdd(0, static _ => new object()));
+        Assert.NotSame(
+            initialValues[1],
+            boundedCache.GetOrAdd(1, static _ => new object()));
     }
 
     [Fact(DisplayName = "Single-creation cache rejects same-key factory reentrancy")]
     public void RejectsSameKeyFactoryReentrancy()
     {
-        var cache = new SingleCreationCache<int, object>();
+        AssertRejectsSameKeyFactoryReentrancy(
+            new SingleCreationCache<int, object>());
+        AssertRejectsSameKeyFactoryReentrancy(
+            new SingleCreationCache<int, object>(capacity: 32));
+    }
+
+    private static void AssertRejectsSameKeyFactoryReentrancy(
+        SingleCreationCache<int, object> cache)
+    {
         var expected = new object();
 
         object actual = cache.GetOrAdd(7, key =>

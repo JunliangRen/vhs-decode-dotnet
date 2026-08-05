@@ -414,17 +414,17 @@ speedup, and wall-time reduction against its profile-matched Python column:
 <!-- LATEST_PERFORMANCE_BEGIN -->
 | CLI mode (workers) | Python v0.4.0 | Python PR341 | Exact + v0.4.0 | Exact + current | IPP-fast + v0.4.0 | IPP-fast + current |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| default (5) | 15.207 s | 16.780 s | 4.295 s / 3.541x / 71.76% | 4.689 s / 3.579x / 72.06% | 3.532 s / 4.305x / 76.77% | 3.312 s / 5.066x / 80.26% |
-| `--threads 1` | 17.694 s | 19.414 s | 9.798 s / 1.806x / 44.63% | 11.757 s / 1.651x / 39.44% | 7.065 s / 2.504x / 60.07% | 7.997 s / 2.428x / 58.81% |
-| `--threads 5` | 15.719 s | 17.801 s | 4.137 s / 3.799x / 73.68% | 4.711 s / 3.779x / 73.54% | 3.592 s / 4.376x / 77.15% | 3.475 s / 5.122x / 80.48% |
-| `--threads 10` | 16.037 s | 18.266 s | 3.433 s / 4.672x / 78.59% | 4.551 s / 4.013x / 75.08% | 3.013 s / 5.322x / 81.21% | 2.817 s / 6.485x / 84.58% |
-| `--threads 20` | 16.405 s | 18.395 s | 3.091 s / 5.307x / 81.16% | 3.454 s / 5.325x / 81.22% | 2.562 s / 6.404x / 84.38% | 2.229 s / 8.252x / 87.88% |
+| default (5) | 15.207 s | 16.780 s | 4.126 s / 3.686x / 72.87% | 4.980 s / 3.369x / 70.32% | 3.480 s / 4.369x / 77.11% | 3.342 s / 5.021x / 80.08% |
+| `--threads 1` | 17.694 s | 19.414 s | 9.767 s / 1.812x / 44.80% | 11.844 s / 1.639x / 38.99% | 7.104 s / 2.491x / 59.85% | 7.887 s / 2.462x / 59.38% |
+| `--threads 5` | 15.719 s | 17.801 s | 4.221 s / 3.724x / 73.15% | 4.853 s / 3.668x / 72.74% | 3.555 s / 4.422x / 77.38% | 3.437 s / 5.179x / 80.69% |
+| `--threads 10` | 16.037 s | 18.266 s | 3.427 s / 4.680x / 78.63% | 4.242 s / 4.306x / 76.77% | 3.036 s / 5.282x / 81.07% | 2.565 s / 7.121x / 85.96% |
+| `--threads 20` | 16.405 s | 18.395 s | 2.928 s / 5.602x / 82.15% | 3.316 s / 5.548x / 81.97% | 2.601 s / 6.308x / 84.15% | 2.239 s / 8.217x / 87.83% |
 <!-- LATEST_PERFORMANCE_END -->
-<!-- LATEST_PERFORMANCE_RUNS: dotnet-full-refresh=60 repeats=3 staged-paired=16 determinism=12 -->
+<!-- LATEST_PERFORMANCE_RUNS: dotnet-full-refresh=60 repeats=3 long-paired=6 compat=8 determinism=12 -->
 
 The Python measurements were audited on 2026-08-02 using main commit
 `c92af1dfd0f96cd7f2d49f3219fb428d0f4e0865`. This candidate, based on main
-`d14bda8`, remeasured all twenty .NET cells three times; the Python columns
+`ced6afb`, remeasured all twenty .NET cells three times; the Python columns
 retain the preceding audited measurements.
 The host was an Intel Core Ultra 7 265K with 20 logical
 processors, Windows 11 build 26220, and .NET SDK/runtime
@@ -2472,6 +2472,31 @@ SHA-256, stdout SHA-256, normalized stderr, normalized log, and every ordered
 `fileLoc` matched. The harness did not return a usable peak-working-set value,
 so this audit makes no measured-memory claim. Its different 200-frame scope is
 kept separate from the repeated 40-frame matrix.
+
+### Reused float32 FFT root tables
+
+`PocketFftReal32.Plan` now retains its immutable unity-root table for factor
+construction and every complexified forward/inverse recombination.
+`PocketFftComplex32` shares immutable `SinCos2PiByN` tables by root length
+across large multipass transforms and rooted packet plans. That cache uses a
+32-entry FIFO bound; eviction only drops the cache reference, so an active
+transform keeps its immutable table safely. Scratch arrays, transform state,
+data types, operation order, and float conversion points are unchanged. The
+root keys match the already retained plan dimensions.
+
+Matched final 200-frame Exact `current --threads 20` traces reduced sampled
+allocation amount from 579,283,536 to 541,701,824 bytes (6.49%) and sampled
+object bytes from 391,712,736 to 373,960,808 (4.53%). The final bounded-cache
+three-pair 1,000-frame comparison against main `ced6afb` was mixed and is
+treated as throughput-neutral: 1/3 pairs were faster, median main/candidate
+wall time was 44.924/44.985 seconds (+0.14%, 0.999x), and median CPU time was
+332.672/333.734 seconds (+0.32%). Median peak working set was 391.9/396.5 MiB;
+one candidate sampling outlier reached 614.3 MiB, so no memory-reduction claim
+is made from these short-lived process samples. Every run matched all nine
+compatibility surfaces. The final 60-run matrix and 12-run determinism matrix
+also passed. The focused 16 KiB unit-test thresholds measure warmed allocations
+on the calling thread only; process-wide allocation statements above come from
+the matched trace, not those unit tests.
 
 </details>
 

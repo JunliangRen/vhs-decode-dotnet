@@ -94,20 +94,20 @@ CVBS、LaserDisc、HiFi は現在 `ipp-fast` を拒否するため、これら�
 
 次の表は同じ private local 40 MHz PAL VHS `.ldf` fixture と同じ 40-frame
 window を使用し、source filename は公開しません。Python 列は audited measurement
-を維持します。main `d14bda8` を基にしたこの candidate では、20 個すべての .NET
+を維持します。main `ced6afb` を基にしたこの candidate では、20 個すべての .NET
 cell を各 3 回 Release 測定しました。互換性判定は速度とは別で、private fixture
 path を含む raw run directory は local にのみ保持します。
 
 <!-- LATEST_PERFORMANCE_BEGIN -->
 | CLI mode（workers） | Python v0.4.0 | Python PR341 | Exact + v0.4.0 | Exact + current | IPP-fast + v0.4.0 | IPP-fast + current |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| default（5） | 15.207 s | 16.780 s | 4.295 s / 3.541x | 4.689 s / 3.579x | 3.532 s / 4.305x | 3.312 s / 5.066x |
-| `--threads 1` | 17.694 s | 19.414 s | 9.798 s / 1.806x | 11.757 s / 1.651x | 7.065 s / 2.504x | 7.997 s / 2.428x |
-| `--threads 5` | 15.719 s | 17.801 s | 4.137 s / 3.799x | 4.711 s / 3.779x | 3.592 s / 4.376x | 3.475 s / 5.122x |
-| `--threads 10` | 16.037 s | 18.266 s | 3.433 s / 4.672x | 4.551 s / 4.013x | 3.013 s / 5.322x | 2.817 s / 6.485x |
-| `--threads 20` | 16.405 s | 18.395 s | 3.091 s / 5.307x | 3.454 s / 5.325x | 2.562 s / 6.404x | 2.229 s / 8.252x |
+| default（5） | 15.207 s | 16.780 s | 4.126 s / 3.686x | 4.980 s / 3.369x | 3.480 s / 4.369x | 3.342 s / 5.021x |
+| `--threads 1` | 17.694 s | 19.414 s | 9.767 s / 1.812x | 11.844 s / 1.639x | 7.104 s / 2.491x | 7.887 s / 2.462x |
+| `--threads 5` | 15.719 s | 17.801 s | 4.221 s / 3.724x | 4.853 s / 3.668x | 3.555 s / 4.422x | 3.437 s / 5.179x |
+| `--threads 10` | 16.037 s | 18.266 s | 3.427 s / 4.680x | 4.242 s / 4.306x | 3.036 s / 5.282x | 2.565 s / 7.121x |
+| `--threads 20` | 16.405 s | 18.395 s | 2.928 s / 5.602x | 3.316 s / 5.548x | 2.601 s / 6.308x | 2.239 s / 8.217x |
 <!-- LATEST_PERFORMANCE_END -->
-<!-- LATEST_PERFORMANCE_RUNS: dotnet-full-refresh=60 repeats=3 staged-paired=16 determinism=12 -->
+<!-- LATEST_PERFORMANCE_RUNS: dotnet-full-refresh=60 repeats=3 long-paired=6 compat=8 determinism=12 -->
 
 各 .NET cell は wall-time median と profile が対応する Python 列に対する
 speedup の順で、default は **5 workers** です。multi-worker compact VHS path は
@@ -116,6 +116,14 @@ active staged span は 1 個に制限され、serial/stateful path は eager の
 reverse-order 1,000-frame Exact pair では v0.4.0 が 2.66%、`current` が 2.55%
 短縮しました。600-frame IPP-fast pair は v0.4.0 が 1.85% 改善し、`current` は
 実質 neutral（-0.03%）でした。
+
+float32 PocketFFT plan は immutable real-root table を保持し、最大 32 個の complex
+root table を root length ごとに共有します。main `ced6afb` との final 3-pair
+1,000-frame Exact `current` 比較は throughput-neutral で、1/3 pair のみ高速でした。
+main/candidate の median wall time は 44.924/44.985 秒（candidate +0.14%、0.999x）、
+median CPU time は 332.672/333.734 秒（+0.32%）です。matched final 200-frame
+allocation trace では sampled allocation amount が 579,283,536 から
+541,701,824 bytes へ 6.49% 減りました。
 
 更新した 60 matrix run はすべて deterministic でした。別の `--threads 0`、
 default-5、`--threads 20` gate でも、両 profile/backend の luma、chroma、raw JSON、
