@@ -10,8 +10,38 @@ internal sealed class SingleCreationCache<TKey, TValue>
         public int OwnerThreadId { get; set; }
     }
 
+    private sealed class BoundedState
+    {
+        public BoundedState(int capacity)
+        {
+            Capacity = capacity;
+        }
+
+        public int Capacity { get; }
+
+        public object Gate { get; } = new();
+
+        public HashSet<TKey> KeysBeingCreated { get; } = [];
+
+        public Queue<TKey> InsertionOrder { get; } = new();
+    }
+
     private readonly ConcurrentDictionary<TKey, TValue> _values = new();
     private readonly ConcurrentDictionary<TKey, CreationGate> _creationGates = new();
+    private readonly BoundedState? _boundedState;
+
+    public SingleCreationCache(int? capacity = null)
+    {
+        if (capacity is <= 0)
+        {
+            throw new ArgumentOutOfRangeException(nameof(capacity));
+        }
+
+        if (capacity is int boundedCapacity)
+        {
+            _boundedState = new BoundedState(boundedCapacity);
+        }
+    }
 
     public TValue GetOrAdd(TKey key, Func<TKey, TValue> valueFactory)
     {
@@ -21,12 +51,57 @@ internal sealed class SingleCreationCache<TKey, TValue>
             return value;
         }
 
+        return _boundedState is { } boundedState
+            ? GetOrAddBounded(key, valueFactory, boundedState)
+            : GetOrAddUnbounded(key, valueFactory);
+    }
+
+    private TValue GetOrAddBounded(
+        TKey key,
+        Func<TKey, TValue> valueFactory,
+        BoundedState state)
+    {
+        lock (state.Gate)
+        {
+            if (_values.TryGetValue(key, out TValue? value))
+            {
+                return value;
+            }
+
+            if (!state.KeysBeingCreated.Add(key))
+            {
+                throw new InvalidOperationException(
+                    "A value factory cannot re-enter the same cache key.");
+            }
+
+            try
+            {
+                TValue created = valueFactory(key);
+                while (_values.Count >= state.Capacity)
+                {
+                    TKey evictedKey = state.InsertionOrder.Dequeue();
+                    _values.TryRemove(evictedKey, out _);
+                }
+
+                _values.TryAdd(key, created);
+                state.InsertionOrder.Enqueue(key);
+                return created;
+            }
+            finally
+            {
+                state.KeysBeingCreated.Remove(key);
+            }
+        }
+    }
+
+    private TValue GetOrAddUnbounded(TKey key, Func<TKey, TValue> valueFactory)
+    {
         // GetOrAdd can invoke an expensive factory more than once on a cold key.
         CreationGate gate = _creationGates.GetOrAdd(key, static _ => new CreationGate());
         TValue result;
         lock (gate)
         {
-            if (_values.TryGetValue(key, out value))
+            if (_values.TryGetValue(key, out TValue? value))
             {
                 result = value;
             }

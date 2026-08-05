@@ -5,6 +5,7 @@ namespace VHSDecode.Core.Dsp;
 
 internal static class PocketFftComplex32
 {
+    private static readonly SingleCreationCache<int, SinCos2PiByN> Roots = new(capacity: 32);
     private static readonly SingleCreationCache<(int Length, int RootLength), Plan> RootedPlans = new();
     [ThreadStatic]
     private static Value[]? _planValues;
@@ -289,7 +290,9 @@ internal static class PocketFftComplex32
     {
         int length = source.Length;
         int[] packets = BuildBalancedPackets(length);
-        var roots = new SinCos2PiByN(rootLength);
+        SinCos2PiByN roots = Roots.GetOrAdd(
+            rootLength,
+            static length => new SinCos2PiByN(length));
         int rootFactor = rootLength / length;
         Complex32[] destination;
         if (scratch is null)
@@ -622,7 +625,9 @@ internal static class PocketFftComplex32
             _factors = BuildFactors(
                 length,
                 Factorize(length),
-                new SinCos2PiByN(rootLength),
+                Roots.GetOrAdd(
+                    rootLength,
+                    static value => new SinCos2PiByN(value)),
                 rootLength / length);
         }
 
@@ -677,7 +682,9 @@ internal static class PocketFftComplex32
             Factor factor = BuildFactors(
                 input.Length,
                 [4],
-                new SinCos2PiByN(input.Length),
+                Roots.GetOrAdd(
+                    input.Length,
+                    static length => new SinCos2PiByN(length)),
                 rootFactor: 1)[0];
             var outputValues = new Value[input.Length];
             Pass4(

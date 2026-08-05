@@ -100,19 +100,19 @@ The table uses one fixed private local 40 MHz PAL VHS `.ldf` fixture and the
 same 40-frame window for every run; the filename is intentionally not
 published. The Python columns retain their audited measurements. All twenty
 .NET cells were refreshed with three Release runs on this candidate, based on
-main `d14bda8`. Compatibility is evaluated separately from speed, and the raw
+main `ced6afb`. Compatibility is evaluated separately from speed, and the raw
 run directories remain local because they contain the private fixture path.
 
 <!-- LATEST_PERFORMANCE_BEGIN -->
 | CLI mode (workers) | Python v0.4.0 | Python PR341 | Exact + v0.4.0 | Exact + current | IPP-fast + v0.4.0 | IPP-fast + current |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| default (5) | 15.207 s | 16.780 s | 4.295 s / 3.541x | 4.689 s / 3.579x | 3.532 s / 4.305x | 3.312 s / 5.066x |
-| `--threads 1` | 17.694 s | 19.414 s | 9.798 s / 1.806x | 11.757 s / 1.651x | 7.065 s / 2.504x | 7.997 s / 2.428x |
-| `--threads 5` | 15.719 s | 17.801 s | 4.137 s / 3.799x | 4.711 s / 3.779x | 3.592 s / 4.376x | 3.475 s / 5.122x |
-| `--threads 10` | 16.037 s | 18.266 s | 3.433 s / 4.672x | 4.551 s / 4.013x | 3.013 s / 5.322x | 2.817 s / 6.485x |
-| `--threads 20` | 16.405 s | 18.395 s | 3.091 s / 5.307x | 3.454 s / 5.325x | 2.562 s / 6.404x | 2.229 s / 8.252x |
+| default (5) | 15.207 s | 16.780 s | 4.126 s / 3.686x | 4.980 s / 3.369x | 3.480 s / 4.369x | 3.342 s / 5.021x |
+| `--threads 1` | 17.694 s | 19.414 s | 9.767 s / 1.812x | 11.844 s / 1.639x | 7.104 s / 2.491x | 7.887 s / 2.462x |
+| `--threads 5` | 15.719 s | 17.801 s | 4.221 s / 3.724x | 4.853 s / 3.668x | 3.555 s / 4.422x | 3.437 s / 5.179x |
+| `--threads 10` | 16.037 s | 18.266 s | 3.427 s / 4.680x | 4.242 s / 4.306x | 3.036 s / 5.282x | 2.565 s / 7.121x |
+| `--threads 20` | 16.405 s | 18.395 s | 2.928 s / 5.602x | 3.316 s / 5.548x | 2.601 s / 6.308x | 2.239 s / 8.217x |
 <!-- LATEST_PERFORMANCE_END -->
-<!-- LATEST_PERFORMANCE_RUNS: dotnet-full-refresh=60 repeats=3 staged-paired=16 determinism=12 -->
+<!-- LATEST_PERFORMANCE_RUNS: dotnet-full-refresh=60 repeats=3 long-paired=6 compat=8 determinism=12 -->
 
 Each .NET cell shows median wall time and speedup versus its profile-matched
 Python column. The default is **5 workers**. Multi-worker compact VHS decoding
@@ -121,6 +121,14 @@ continues, with one bounded staged span and eager fallbacks for serial or
 stateful paths. Reverse-order 1,000-frame Exact pairs reduced wall time by
 2.66% for v0.4.0 and 2.55% for `current`; 600-frame IPP-fast pairs improved
 v0.4.0 by 1.85% and were neutral for `current` (-0.03%).
+
+Float32 PocketFFT plans now retain immutable real-root tables and share up to
+32 complex root tables by root length. A final direct three-pair 1,000-frame
+Exact `current` comparison against main `ced6afb` was throughput-neutral: 1/3
+pairs were faster, median wall time was 44.924/44.985 seconds (main/candidate,
++0.14%, 0.999x), and median CPU time was 332.672/333.734 seconds (+0.32%).
+Matched final 200-frame allocation traces reduced sampled allocation amount
+from 579,283,536 to 541,701,824 bytes (6.49%).
 
 All 60 refreshed matrix runs were deterministic. Separate `--threads 0`,
 default-5, and `--threads 20` gates matched luma, chroma, raw JSON, stdout,

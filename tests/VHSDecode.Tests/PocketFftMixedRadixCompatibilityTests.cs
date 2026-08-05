@@ -153,7 +153,7 @@ public sealed class PocketFftMixedRadixCompatibilityTests
             Sha256(MemoryMarshal.AsBytes(expected.AsSpan())),
             Sha256(MemoryMarshal.AsBytes(actual.AsSpan())));
         Assert.True(
-            allocated < 64 * 1024,
+            allocated < 16 * 1024,
             $"Warm multipass FFT allocated {allocated:N0} bytes.");
     }
 
@@ -431,6 +431,27 @@ public sealed class PocketFftMixedRadixCompatibilityTests
             new Complex32(float.NaN, float.NaN));
         Array.Fill(actualOutput, float.NaN);
         AssertWorkspaceTransformMatches();
+
+        long allocationBefore = GC.GetAllocatedBytesForCurrentThread();
+        PocketFftReal32.ForwardAnyLength(
+            input,
+            complexInput,
+            transformScratch,
+            actualSpectrum,
+            workerThreads: 1);
+        PocketFftReal32.InverseAnyLength(
+            actualSpectrum,
+            Length,
+            complexInput,
+            transformScratch,
+            actualOutput,
+            workerThreads: 1);
+        long allocated =
+            GC.GetAllocatedBytesForCurrentThread() - allocationBefore;
+
+        Assert.True(
+            allocated < 16 * 1024,
+            $"Warm real FFT workspace pair allocated {allocated:N0} bytes.");
 
         void AssertWorkspaceTransformMatches()
         {

@@ -394,17 +394,17 @@ Python v0.4.0、merge 済みの Python PR341、Exact v0.4.0、Exact
 <!-- LATEST_PERFORMANCE_BEGIN -->
 | CLI mode（workers） | Python v0.4.0 | Python PR341 | Exact + v0.4.0 | Exact + current | IPP-fast + v0.4.0 | IPP-fast + current |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| default（5） | 15.207 s | 16.780 s | 4.295 s / 3.541x / 71.76% | 4.689 s / 3.579x / 72.06% | 3.532 s / 4.305x / 76.77% | 3.312 s / 5.066x / 80.26% |
-| `--threads 1` | 17.694 s | 19.414 s | 9.798 s / 1.806x / 44.63% | 11.757 s / 1.651x / 39.44% | 7.065 s / 2.504x / 60.07% | 7.997 s / 2.428x / 58.81% |
-| `--threads 5` | 15.719 s | 17.801 s | 4.137 s / 3.799x / 73.68% | 4.711 s / 3.779x / 73.54% | 3.592 s / 4.376x / 77.15% | 3.475 s / 5.122x / 80.48% |
-| `--threads 10` | 16.037 s | 18.266 s | 3.433 s / 4.672x / 78.59% | 4.551 s / 4.013x / 75.08% | 3.013 s / 5.322x / 81.21% | 2.817 s / 6.485x / 84.58% |
-| `--threads 20` | 16.405 s | 18.395 s | 3.091 s / 5.307x / 81.16% | 3.454 s / 5.325x / 81.22% | 2.562 s / 6.404x / 84.38% | 2.229 s / 8.252x / 87.88% |
+| default（5） | 15.207 s | 16.780 s | 4.126 s / 3.686x / 72.87% | 4.980 s / 3.369x / 70.32% | 3.480 s / 4.369x / 77.11% | 3.342 s / 5.021x / 80.08% |
+| `--threads 1` | 17.694 s | 19.414 s | 9.767 s / 1.812x / 44.80% | 11.844 s / 1.639x / 38.99% | 7.104 s / 2.491x / 59.85% | 7.887 s / 2.462x / 59.38% |
+| `--threads 5` | 15.719 s | 17.801 s | 4.221 s / 3.724x / 73.15% | 4.853 s / 3.668x / 72.74% | 3.555 s / 4.422x / 77.38% | 3.437 s / 5.179x / 80.69% |
+| `--threads 10` | 16.037 s | 18.266 s | 3.427 s / 4.680x / 78.63% | 4.242 s / 4.306x / 76.77% | 3.036 s / 5.282x / 81.07% | 2.565 s / 7.121x / 85.96% |
+| `--threads 20` | 16.405 s | 18.395 s | 2.928 s / 5.602x / 82.15% | 3.316 s / 5.548x / 81.97% | 2.601 s / 6.308x / 84.15% | 2.239 s / 8.217x / 87.83% |
 <!-- LATEST_PERFORMANCE_END -->
-<!-- LATEST_PERFORMANCE_RUNS: dotnet-full-refresh=60 repeats=3 staged-paired=16 determinism=12 -->
+<!-- LATEST_PERFORMANCE_RUNS: dotnet-full-refresh=60 repeats=3 long-paired=6 compat=8 determinism=12 -->
 
 Python measurement は 2026-08-02 に main commit
 `c92af1dfd0f96cd7f2d49f3219fb428d0f4e0865` で audit しました。この candidate は
-main `d14bda8` を基点に、20 個すべての .NET cell を各 3 回再測定しました。
+main `ced6afb` を基点に、20 個すべての .NET cell を各 3 回再測定しました。
 Python 列は直前の audited measurement を維持します。
 host は Intel Core Ultra 7 265K（20 logical processor）、
 Windows 11 build 26220、.NET SDK/runtime `11.0.100-preview.6.26359.118` です。raw
@@ -2380,6 +2380,30 @@ SHA-256、stdout SHA-256、normalized stderr、normalized log、全 ordered `fil
 が一致しました。harness が有効な peak-working-set 値を返さなかったため、実測 memory
 値は主張しません。scope の異なるこの 200-frame pair は反復 40-frame matrix と
 分けて記録します。
+
+### float32 FFT root table の再利用
+
+`PocketFftReal32.Plan` は immutable unity-root table を保持し、factor construction
+および complexified forward/inverse recombination ごとに再利用します。
+`PocketFftComplex32` は large multipass transform と rooted packet plan の間で、
+immutable `SinCos2PiByN` table を root length ごとに共有します。この cache は
+32-entry FIFO 上限を持ち、eviction は cache reference だけを外すため、実行中の
+transform は immutable table を安全に保持します。scratch array、transform state、
+data type、operation order、float conversion point は変更していません。root key は
+既存 plan の dimension と一致します。
+
+matched final 200-frame Exact `current --threads 20` trace では、sampled allocation
+amount が 579,283,536 から 541,701,824 bytes へ 6.49%、sampled object bytes が
+391,712,736 から 373,960,808 へ 4.53% 減少しました。final bounded-cache candidate
+と main `ced6afb` の 1,000-frame 3 pair は mixed result のため throughput-neutral
+と扱います。1/3 pair のみ高速で、main/candidate の median wall time は
+44.924/44.985 秒（candidate +0.14%、0.999x）、median CPU time は
+332.672/333.734 秒（+0.32%）でした。median peak working set は
+391.9/396.5 MiB ですが、candidate の 1 run は 614.3 MiB まで達したため、これらの
+短時間 process sample から memory reduction は主張しません。全 run で 9 compatibility
+surface が一致し、final 60-run matrix と 12-run determinism matrix も通過しました。
+focused 16 KiB unit-test threshold は warmed calling thread の allocation だけを測定し、
+上記 process-wide allocation は unit test ではなく matched trace に基づきます。
 
 </details>
 
