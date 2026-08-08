@@ -5,6 +5,11 @@ namespace VHSDecode.Core.Rf;
 public static class RfLoaderFactory
 {
     public static IRfSampleLoader CreateNative(string filename)
+        => CreateNative(filename, preferPyAvMappedRawFlacSeeking: false);
+
+    internal static IRfSampleLoader CreateNative(
+        string filename,
+        bool preferPyAvMappedRawFlacSeeking)
     {
         if (filename.EndsWith(".lds", StringComparison.Ordinal))
         {
@@ -44,14 +49,22 @@ public static class RfLoaderFactory
         {
             if ((filename.EndsWith(".ldf", StringComparison.Ordinal)
                     || filename.EndsWith(".flac", StringComparison.Ordinal))
-                && RawFlacStreamInfo.TryRead(filename, out RawFlacStreamInfo info)
-                // libsndfile 1.2.2 can report a successful sf_seek while returning
-                // samples from the wrong FLAC position when the stream's total
-                // sample count exceeds the signed 32-bit range. Large RF captures
-                // must use the bit-exact FFmpeg path instead.
-                && info.SupportsExactLibsndfileSeeking)
+                && RawFlacStreamInfo.TryRead(filename, out RawFlacStreamInfo info))
             {
-                return new LibsndfilePcm16SampleLoader(filename);
+                if (info.SupportsExactLibsndfileSeeking)
+                {
+                    return new LibsndfilePcm16SampleLoader(filename);
+                }
+
+                if (preferPyAvMappedRawFlacSeeking
+                    && info.SupportsPyAvMappedLibsndfileSeeking)
+                {
+                    return new LibsndfilePcm16SampleLoader(
+                        filename,
+                        new PyAvRawFlacSampleMapper(
+                            info.SampleRateHz,
+                            info.FixedBlockSize!.Value));
+                }
             }
 
             return new FfmpegPcm16SampleLoader(filename);

@@ -8,11 +8,19 @@ namespace VHSDecode.Core.Rf;
 
 internal sealed class LibsndfilePcm16SampleLoader : IReusableRfSampleLoader, IDisposable
 {
+    private readonly record struct MappedReadPlan(
+        long PhysicalSample,
+        long PhysicalOffset,
+        bool Restart);
+
     internal const int MaximumRetainedDecodedBufferLength = 32 * 1024;
     internal const int MaximumRetainedDecodedBufferCount = 48;
+    private const int RewindCapacityFrames = FfmpegPcm16SampleLoader.DefaultRewindSize / sizeof(short);
+    private const int SeekThresholdFrames = FfmpegPcm16SampleLoader.DefaultSeekThreshold / sizeof(short);
     private readonly string _filename;
     private readonly Func<string, ILibsndfilePcm16Source> _openSource;
     private readonly IRfSampleLoader _fallback;
+    private readonly PyAvRawFlacSampleMapper? _sampleMapper;
     private readonly object _gate = new();
     private readonly object _decodedBufferLock = new();
     private readonly double[]?[] _decodedBuffers =
@@ -20,7 +28,11 @@ internal sealed class LibsndfilePcm16SampleLoader : IReusableRfSampleLoader, IDi
 
     private ILibsndfilePcm16Source? _source;
     private long _positionFrames;
+    private long _logicalPositionFrames;
+    private long _rewindStartFrames;
+    private long _physicalOffsetFrames;
     private int _decodedBufferCount;
+    private bool _mappedDecoderStarted;
     private bool _fallbackActive;
     private bool _disposed;
 
@@ -34,13 +46,26 @@ internal sealed class LibsndfilePcm16SampleLoader : IReusableRfSampleLoader, IDi
 
     internal LibsndfilePcm16SampleLoader(
         string filename,
+        PyAvRawFlacSampleMapper sampleMapper)
+        : this(
+            filename,
+            LibsndfilePcm16Source.Open,
+            new FfmpegPcm16SampleLoader(filename),
+            sampleMapper)
+    {
+    }
+
+    internal LibsndfilePcm16SampleLoader(
+        string filename,
         Func<string, ILibsndfilePcm16Source> openSource,
-        IRfSampleLoader fallback)
+        IRfSampleLoader fallback,
+        PyAvRawFlacSampleMapper? sampleMapper = null)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(filename);
         _filename = filename;
         _openSource = openSource ?? throw new ArgumentNullException(nameof(openSource));
         _fallback = fallback ?? throw new ArgumentNullException(nameof(fallback));
+        _sampleMapper = sampleMapper;
     }
 
     public double[]? Read(Stream stream, long sample, int readLength)
@@ -67,6 +92,8 @@ internal sealed class LibsndfilePcm16SampleLoader : IReusableRfSampleLoader, IDi
             }
         }
     }
+
+    internal bool UsesPyAvMappedSeeking => _sampleMapper is not null;
 
     internal void ReturnReusable(double[] buffer)
     {
@@ -110,8 +137,29 @@ internal sealed class LibsndfilePcm16SampleLoader : IReusableRfSampleLoader, IDi
             try
             {
                 ILibsndfilePcm16Source source = _source ??= _openSource(_filename);
-                if (sample > source.Frames
-                    || readLength > source.Frames - sample)
+                if (_sampleMapper is null)
+                {
+                    if (sample > source.Frames
+                        || readLength > source.Frames - sample)
+                    {
+                        return ReadAtNativeLengthBoundary(
+                            stream,
+                            sample,
+                            readLength,
+                            reuseDecodedBuffer);
+                    }
+
+                    return ReadNative(source, sample, readLength, reuseDecodedBuffer);
+                }
+
+                if (!TryResolveMappedRead(sample, readLength, out MappedReadPlan mappedRead))
+                {
+                    throw new LibsndfilePcm16FallbackException(
+                        $"Could not map PyAV RF sample {sample} to a native FLAC position.");
+                }
+
+                if (mappedRead.PhysicalSample > source.Frames
+                    || readLength > source.Frames - mappedRead.PhysicalSample)
                 {
                     return ReadAtNativeLengthBoundary(
                         stream,
@@ -120,13 +168,72 @@ internal sealed class LibsndfilePcm16SampleLoader : IReusableRfSampleLoader, IDi
                         reuseDecodedBuffer);
                 }
 
-                return ReadNative(source, sample, readLength, reuseDecodedBuffer);
+                return ReadMappedNative(
+                    source,
+                    sample,
+                    readLength,
+                    reuseDecodedBuffer,
+                    mappedRead);
             }
             catch (LibsndfilePcm16FallbackException)
             {
                 ActivateFallback();
                 return ReadFallback(stream, sample, readLength, reuseDecodedBuffer);
             }
+        }
+    }
+
+    private bool TryResolveMappedRead(
+        long logicalSample,
+        int readLength,
+        out MappedReadPlan mappedRead)
+    {
+        mappedRead = default;
+        if (logicalSample > long.MaxValue - readLength)
+        {
+            return false;
+        }
+
+        bool restart = !_mappedDecoderStarted
+            || logicalSample < _rewindStartFrames
+            || (logicalSample > _logicalPositionFrames
+                && logicalSample - _logicalPositionFrames > SeekThresholdFrames);
+        try
+        {
+            long physicalSample;
+            long physicalOffset;
+            if (restart)
+            {
+                if (!(_sampleMapper
+                        ?? throw new InvalidOperationException(
+                            "Mapped FLAC seeking is not configured."))
+                    .TryMapRestartSample(logicalSample, out physicalSample))
+                {
+                    return false;
+                }
+
+                physicalOffset = checked(physicalSample - logicalSample);
+            }
+            else
+            {
+                physicalOffset = _physicalOffsetFrames;
+                physicalSample = checked(logicalSample + physicalOffset);
+            }
+
+            if (physicalSample < 0)
+            {
+                return false;
+            }
+
+            mappedRead = new MappedReadPlan(
+                physicalSample,
+                physicalOffset,
+                restart);
+            return true;
+        }
+        catch (OverflowException)
+        {
+            return false;
         }
     }
 
@@ -174,6 +281,74 @@ internal sealed class LibsndfilePcm16SampleLoader : IReusableRfSampleLoader, IDi
         finally
         {
             ArrayPool<short>.Shared.Return(samples);
+        }
+    }
+
+    private double[]? ReadMappedNative(
+        ILibsndfilePcm16Source source,
+        long logicalSample,
+        int readLength,
+        bool reuseDecodedBuffer,
+        MappedReadPlan mappedRead)
+    {
+        if (mappedRead.PhysicalSample != _positionFrames)
+        {
+            long position = source.Seek(mappedRead.PhysicalSample);
+            if (position != mappedRead.PhysicalSample)
+            {
+                throw new LibsndfilePcm16FallbackException(
+                    $"libsndfile sought to FLAC sample {position} instead of {mappedRead.PhysicalSample}.");
+            }
+
+            _positionFrames = position;
+        }
+
+        if (mappedRead.Restart)
+        {
+            _mappedDecoderStarted = true;
+            _physicalOffsetFrames = mappedRead.PhysicalOffset;
+            _logicalPositionFrames = logicalSample;
+            _rewindStartFrames = logicalSample;
+        }
+
+        short[] samples = ArrayPool<short>.Shared.Rent(readLength);
+        try
+        {
+            long framesRead = source.ReadFrames(samples.AsSpan(0, readLength));
+            if (framesRead < 0 || framesRead > readLength)
+            {
+                throw new LibsndfilePcm16FallbackException(
+                    $"libsndfile returned an invalid RF frame count of {framesRead} for a {readLength}-frame read.");
+            }
+
+            _positionFrames += framesRead;
+            UpdateMappedDecoderWindow(logicalSample, framesRead);
+            if (framesRead != readLength)
+            {
+                return null;
+            }
+
+            double[] output = reuseDecodedBuffer
+                ? TakeDecodedBuffer(readLength)
+                : GC.AllocateUninitializedArray<double>(readLength);
+            ConvertPcm16ToDouble(samples.AsSpan(0, readLength), output);
+            return output;
+        }
+        finally
+        {
+            ArrayPool<short>.Shared.Return(samples);
+        }
+    }
+
+    private void UpdateMappedDecoderWindow(long logicalSample, long framesRead)
+    {
+        long end = checked(logicalSample + framesRead);
+        if (end > _logicalPositionFrames)
+        {
+            _logicalPositionFrames = end;
+            _rewindStartFrames = Math.Max(
+                _rewindStartFrames,
+                _logicalPositionFrames - RewindCapacityFrames);
         }
     }
 
@@ -313,6 +488,10 @@ internal sealed class LibsndfilePcm16SampleLoader : IReusableRfSampleLoader, IDi
         _source?.Dispose();
         _source = null;
         _positionFrames = 0;
+        _logicalPositionFrames = 0;
+        _rewindStartFrames = 0;
+        _physicalOffsetFrames = 0;
+        _mappedDecoderStarted = false;
         _fallbackActive = true;
     }
 }

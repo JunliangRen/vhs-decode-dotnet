@@ -415,29 +415,62 @@ speedup, and wall-time reduction against its profile-matched Python column:
 <!-- LATEST_PERFORMANCE_BEGIN -->
 | CLI mode (workers) | Python v0.4.0 | Python PR341 | Exact + v0.4.0 | Exact + current | IPP-fast + v0.4.0 | IPP-fast + current |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| default (5) | 15.207 s | 16.780 s | 6.875 s / 2.212x / 54.79% | 7.169 s / 2.341x / 57.28% | 5.162 s / 2.946x / 66.06% | 4.510 s / 3.721x / 73.12% |
-| `--threads 1` | 17.694 s | 19.414 s | 11.740 s / 1.507x / 33.65% | 13.167 s / 1.474x / 32.18% | 8.386 s / 2.110x / 52.60% | 9.188 s / 2.113x / 52.67% |
-| `--threads 5` | 15.719 s | 17.801 s | 6.846 s / 2.296x / 56.45% | 7.129 s / 2.497x / 59.95% | 5.150 s / 3.052x / 67.23% | 4.444 s / 4.006x / 75.04% |
-| `--threads 10` | 16.037 s | 18.266 s | 5.967 s / 2.687x / 62.79% | 6.255 s / 2.920x / 65.76% | 4.732 s / 3.389x / 70.49% | 4.032 s / 4.530x / 77.93% |
-| `--threads 20` | 16.405 s | 18.395 s | 5.381 s / 3.048x / 67.20% | 5.576 s / 3.299x / 69.69% | 4.450 s / 3.686x / 72.87% | 3.609 s / 5.098x / 80.38% |
+| default (5) | 17.680 s | 20.173 s | 4.096 s / 4.316x / 76.83% | 4.618 s / 4.369x / 77.11% | 3.604 s / 4.906x / 79.62% | 3.392 s / 5.948x / 83.19% |
+| `--threads 1` | 18.995 s | 21.062 s | 11.613 s / 1.636x / 38.86% | 13.183 s / 1.598x / 37.41% | 8.407 s / 2.259x / 55.74% | 9.340 s / 2.255x / 55.66% |
+| `--threads 5` | 17.599 s | 19.493 s | 4.307 s / 4.086x / 75.52% | 4.805 s / 4.057x / 75.35% | 3.525 s / 4.993x / 79.97% | 3.203 s / 6.087x / 83.57% |
+| `--threads 10` | 17.182 s | 19.727 s | 3.240 s / 5.303x / 81.14% | 3.764 s / 5.241x / 80.92% | 3.142 s / 5.468x / 81.71% | 2.830 s / 6.972x / 85.66% |
+| `--threads 20` | 17.594 s | 19.583 s | 2.730 s / 6.445x / 84.48% | 3.168 s / 6.181x / 83.82% | 2.667 s / 6.598x / 84.84% | 2.327 s / 8.416x / 88.12% |
 <!-- LATEST_PERFORMANCE_END -->
-<!-- LATEST_PERFORMANCE_RUNS: current-refresh=30 repeats=3 cti-kernel-paired=16 exact-short-paired=12 exact-long-paired=4 ipp-short-paired=12 thread-gates=24 determinism=30 -->
+<!-- LATEST_PERFORMANCE_RUNS: full-refresh=90 repeats=3 mapped-ab=36 mapped-long=4 dotnet-determinism=60 -->
 
-The Python measurements were audited on 2026-08-02 using main commit
-`c92af1dfd0f96cd7f2d49f3219fb428d0f4e0865`. The Python and v0.4.0 .NET
-columns retain the preceding audited measurements. This candidate, based on
-merged main `cc98519`, remeasured all ten `current` .NET cells three times.
-The fixed fixture exceeds the
-libsndfile 1.2.2 exact-seek sample limit and now correctly routes through
-FFmpeg, so these short-window figures are not directly comparable with the
-former `ced6afb`-based table, which used libsndfile.
-The host was an Intel Core Ultra 7 265K with 20 logical
-processors, Windows 11 build 26220, and .NET SDK/runtime
-`11.0.100-preview.6.26359.118`. Raw run directories are retained locally because
-they contain the private fixture path; the figures below are reported local
-measurements, not an independently reproducible public benchmark corpus. The
-matrix candidate executable had SHA-256
-`81CC6E816A10C1EE61AA234194BED92658D250A2615A908844C30CCFD6067B11`.
+All 90 cells were freshly measured on 2026-08-09 from this candidate, based on
+merged main `63251d8`. Each cell is the median of three Release runs; mode and
+profile ordering was reversed and mixed across the three passes. The host was
+an Intel Core Ultra 7 265K with 20 logical processors, Windows 11 build 26220,
+and .NET SDK/runtime `11.0.100-preview.6.26359.118`. Raw run directories are
+retained locally because they contain the private fixture path; these are local
+measurements rather than an independently reproducible public corpus. The
+candidate executable had SHA-256
+`808D09DD0D1B98548AB6A712BFF777E2F6192027D5943C84A9C0C7482BCF6E6B`.
+
+An older public table used a different private NTSC Betamax HiFi `.lds`
+fixture, so its multipliers are not directly comparable with this PAL VHS
+matrix. Within this same PAL fixture, the preceding main build also paid a real
+performance and memory cost because oversized raw FLAC had to use the strict
+FFmpeg/PyAV-emulation path. The following change removes that cost without
+changing the serial oracle contract.
+
+### Oversized raw-FLAC mapped seeking
+
+The raw-FLAC parser now admits mapped libsndfile reads only for 40 MHz mono
+PCM16 streams that exceed the signed 32-bit sample range, have a complete
+metadata chain, use one fixed block size and fixed blocking strategy, and have
+no seektable. The mapper reproduces the first-frame PTS and RF-position
+rounding used by the pinned FFmpeg/PyAV path with integer arithmetic. It is
+enabled only for ordinary parallel VHS decode. `--threads 0/1`, debug plots,
+GNU Radio AFE input, resampling, variable-block streams, streams with a
+seektable, and all unrecognized layouts keep FFmpeg. Mapping, seek, read, or
+length-boundary failure activates a one-way FFmpeg fallback at the same logical
+sample. Direct probes at the beginning, middle, signed 32-bit boundary, and
+near EOF matched both FFmpeg and the reference FLAC decoder.
+
+Thirty-six interleaved baseline/candidate real-RF runs matched luma, chroma,
+raw JSON, ordered `fileLoc`, stdout, timing-normalized stderr, and
+timestamp-normalized logs. Exact `current --threads 20` moved from 14.876 to
+11.135 seconds over 200 frames (25.15% lower); effective cores rose from 6.99
+to 8.06 and peak working set fell from 803.4 to 407.0 MiB. Two reverse-order
+1,000-frame pairs moved from 53.230 to 44.055 seconds (17.24% lower), effective
+cores from 6.76 to 7.41, and peak working set from 773.2 to 402.4 MiB. At 32
+workers, 100 frames moved from 10.030 to 6.679 seconds (33.41% lower), with
+effective cores rising from 6.80 to 8.88. The unchanged single-worker route
+was neutral at 13.901 versus 13.877 seconds.
+
+Separate 200-frame gates improved Exact v0.4.0 by 22.24% and IPP-fast
+`current` by 24.64%. All 60 .NET runs in the six-path matrix retained one hash
+per profile across default-5 and `--threads 1/5/10/20`. Merged Python PR341
+was also deterministic in this bounded matrix. Python v0.4.0 produced 14
+luma/chroma hashes across 15 nonzero-worker runs, so Python v0.4.0
+`g4315520 --threads 0` remains the strict oracle.
 
 ### Managed current CTI quotient and finish AVX
 
@@ -1293,21 +1326,26 @@ candidate also completed 1,000 frames / 2,000 fields without interruption
 under default `v0.4.0` and opt-in `current`; both profiles matched their stored
 Python oracles in the same six comparisons. IPP was excluded.
 
-On native-input routes, direct raw `fLaC` `.ldf`/`.flac` input now uses bundled
-libsndfile only when the first metadata block is a complete 34-byte STREAMINFO
-describing 40 kHz, mono, PCM16 data with a known nonzero sample count no greater
-than `Int32.MaxValue`. The
-handle opens lazily; sequential reads remain seek-free, random reads use exact
-frame seeks, and one pooled PCM16 workspace feeds the unchanged
-`short`-to-`double` conversion. Unavailable or unsupported native opens,
-native seek/decode errors, and reads crossing the reported FLAC length try the
-established FFmpeg/PyAV-compatible loader at the same requested sample and
-switch once when it is available. A clean reported EOF remains EOF when FFmpeg
-is not installed. Default 40 MHz VHS `.ldf`, VHS `--no_resample`, and LD without
-`--inputfreq` can select this route when the reported total is within the gate.
-Larger raw-FLAC captures, default VHS `.flac`, every CVBS input, Ogg/FLAC,
-stereo, PCM24, other rates, unknown totals, headers rejected by the narrow
-gate, `.vhs`, `.wav`, and `raw.oga` retain FFmpeg.
+On native-input routes, direct raw `fLaC` `.ldf`/`.flac` input uses bundled
+libsndfile when the first metadata block is a complete 34-byte STREAMINFO
+describing 40 kHz mono PCM16 data with a known nonzero sample count no greater
+than `Int32.MaxValue`. The handle opens lazily; sequential reads remain
+seek-free, random reads use exact frame seeks, and one pooled PCM16 workspace
+feeds the unchanged `short`-to-`double` conversion.
+
+An additional oversized-input gate is available only to ordinary parallel VHS
+decode. It requires a complete metadata chain, one fixed nonzero STREAMINFO
+block size, a fixed-blocking first audio frame, no SEEKTABLE, and more than
+`Int32.MaxValue` samples. At every decoder restart, integer time-base and block
+arithmetic maps the logical RF sample to the same first native FLAC sample as
+the pinned FFmpeg/PyAV path; the established 2 MiB rewind window and 40 MiB
+byte-distance restart threshold are preserved. `--threads 0/1`, debug-plot and
+GNU Radio AFE modes, LD, CVBS, and all inputs outside this gate retain FFmpeg.
+Unavailable or unsupported native opens, seek/decode errors, mapping or length
+boundary failures switch once to the established FFmpeg/PyAV-compatible loader
+at the same logical sample. A clean reported EOF remains EOF when FFmpeg is not
+installed. Default VHS `.flac`, Ogg/FLAC, stereo, PCM24, other rates, unknown
+totals, rejected headers, `.vhs`, `.wav`, and `raw.oga` also retain FFmpeg.
 
 On the same private local RF window, Release 1.4.4 through FFmpeg and the
 candidate through libsndfile matched luma, chroma, raw JSON, stdout, normalized
@@ -2611,7 +2649,7 @@ Requirements:
 .\tools\build-ipp-native.ps1
 dotnet restore VHSDecodeDotNet.slnx
 dotnet build VHSDecodeDotNet.slnx -c Release --no-restore
-dotnet test --solution VHSDecodeDotNet.slnx -c Release --no-build --no-restore --minimum-expected-tests 1349
+dotnet test --solution VHSDecodeDotNet.slnx -c Release --no-build --no-restore --minimum-expected-tests 1368
 dotnet test --project tests\VHSDecode.Tests\VHSDecode.Tests.csproj -c Release --no-build --no-restore --coverage --coverage-output coverage.cobertura.xml --coverage-output-format cobertura
 ```
 
@@ -2625,7 +2663,7 @@ deployment computer. Binary-only single-file releases embed
 sidecar license files. An Exact-only build may omit the native build step.
 
 The current formal Release build has zero warnings and errors. The xUnit v3
-project exposes **1,349** independently discoverable tests to both
+project exposes **1,368** independently discoverable tests to both
 `dotnet test` and Visual Studio Test Explorer.
 
 <!-- SECTION: usage -->
