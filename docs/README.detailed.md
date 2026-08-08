@@ -415,18 +415,21 @@ speedup, and wall-time reduction against its profile-matched Python column:
 <!-- LATEST_PERFORMANCE_BEGIN -->
 | CLI mode (workers) | Python v0.4.0 | Python PR341 | Exact + v0.4.0 | Exact + current | IPP-fast + v0.4.0 | IPP-fast + current |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| default (5) | 15.207 s | 16.780 s | 4.126 s / 3.686x / 72.87% | 4.980 s / 3.369x / 70.32% | 3.480 s / 4.369x / 77.11% | 3.342 s / 5.021x / 80.08% |
-| `--threads 1` | 17.694 s | 19.414 s | 9.767 s / 1.812x / 44.80% | 11.844 s / 1.639x / 38.99% | 7.104 s / 2.491x / 59.85% | 7.887 s / 2.462x / 59.38% |
-| `--threads 5` | 15.719 s | 17.801 s | 4.221 s / 3.724x / 73.15% | 4.853 s / 3.668x / 72.74% | 3.555 s / 4.422x / 77.38% | 3.437 s / 5.179x / 80.69% |
-| `--threads 10` | 16.037 s | 18.266 s | 3.427 s / 4.680x / 78.63% | 4.242 s / 4.306x / 76.77% | 3.036 s / 5.282x / 81.07% | 2.565 s / 7.121x / 85.96% |
-| `--threads 20` | 16.405 s | 18.395 s | 2.928 s / 5.602x / 82.15% | 3.316 s / 5.548x / 81.97% | 2.601 s / 6.308x / 84.15% | 2.239 s / 8.217x / 87.83% |
+| default (5) | 15.207 s | 16.780 s | 7.209 s / 2.109x / 52.59% | 7.914 s / 2.120x / 52.84% | 5.388 s / 2.822x / 64.57% | 5.279 s / 3.179x / 68.54% |
+| `--threads 1` | 17.694 s | 19.414 s | 12.109 s / 1.461x / 31.56% | 14.143 s / 1.373x / 27.15% | 8.568 s / 2.065x / 51.58% | 9.757 s / 1.990x / 49.74% |
+| `--threads 5` | 15.719 s | 17.801 s | 7.238 s / 2.172x / 53.95% | 7.651 s / 2.327x / 57.02% | 5.266 s / 2.985x / 66.50% | 5.125 s / 3.473x / 71.21% |
+| `--threads 10` | 16.037 s | 18.266 s | 5.862 s / 2.736x / 63.44% | 6.720 s / 2.718x / 63.21% | 4.967 s / 3.229x / 69.03% | 4.645 s / 3.933x / 74.57% |
+| `--threads 20` | 16.405 s | 18.395 s | 5.779 s / 2.839x / 64.77% | 6.323 s / 2.909x / 65.62% | 4.634 s / 3.540x / 71.75% | 4.361 s / 4.218x / 76.29% |
 <!-- LATEST_PERFORMANCE_END -->
-<!-- LATEST_PERFORMANCE_RUNS: dotnet-full-refresh=60 repeats=3 long-paired=6 compat=8 determinism=12 -->
+<!-- LATEST_PERFORMANCE_RUNS: dotnet-full-refresh=60 repeats=3 cti-long-paired=8 determinism=60 -->
 
 The Python measurements were audited on 2026-08-02 using main commit
 `c92af1dfd0f96cd7f2d49f3219fb428d0f4e0865`. This candidate, based on main
-`ced6afb`, remeasured all twenty .NET cells three times; the Python columns
-retain the preceding audited measurements.
+`aceec7e`, remeasured all twenty .NET cells three times; the Python columns
+retain the preceding audited measurements. The fixed fixture exceeds the
+libsndfile 1.2.2 exact-seek sample limit and now correctly routes through
+FFmpeg, so these short-window figures are not directly comparable with the
+former `ced6afb`-based table, which used libsndfile.
 The host was an Intel Core Ultra 7 265K with 20 logical
 processors, Windows 11 build 26220, and .NET SDK/runtime
 `11.0.100-preview.6.26359.118`. Raw run directories are retained locally because
@@ -457,6 +460,28 @@ matrix matched the same surfaces at `--threads 0`, default-5, and
 40-frame matrix runs were deterministic. Focused sequence tests additionally
 cover eager versus staged `current`, fallback VSync, saved levels, clamp/DC
 offset, retry ownership, and disposal.
+
+The managed `current` CTI distance stage now evaluates eight independent
+float32 lanes with AVX/FMA. Each lane preserves the original subtraction,
+multiplication, fused multiply-add, square-root, threshold, reciprocal,
+weighting, and write order. Vector tails and hosts without AVX/FMA use the
+original scalar expressions. The 18 pinned PR341 xUnit v3 cases pass both the
+hardware path and a separate AVX-disabled process. Six interleaved
+production-size kernel pairs retained one SHA-256 and reduced median wall time
+from 4,969.497 to 4,387.421 ms (11.71%) and CPU time from 4,812.500 to
+4,289.063 ms (10.88%).
+
+Two reverse-order 1,000-frame Exact `current --threads 20` pairs were neutral:
+baseline/candidate wall medians were 50.687/50.793 s (-0.21%) and CPU medians
+were 378.680/381.266 s, so no Exact end-to-end speedup is claimed. Two matching
+IPP-fast pairs both favored the candidate, moving wall medians from 43.730 to
+42.872 s (1.96% lower) and CPU medians from 255.273 to 251.797 s (1.36% lower).
+Maximum sampled working set in those IPP pairs was 736.8/734.6 MiB. All eight
+measured runs matched
+luma, chroma, raw JSON, ordered `fileLoc`, stdout, normalized stderr, and
+timestamp-normalized logs. The refreshed 60-run matrix was deterministic and
+produced one hash set per backend/profile across default-5 and
+`--threads 1/5/10/20`.
 
 The current Super-Gaussian staging path uses AVX for the center conversion while
 building reflected float32 input, for the existing IPP spectrum mask, and for

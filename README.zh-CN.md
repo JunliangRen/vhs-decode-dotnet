@@ -90,20 +90,21 @@ CVBS 和 HiFi 仍会拒绝 `ipp-fast`；需要 release 兼容行为时应使用 
 ## 最新性能
 
 下表固定使用同一份私有本地 40 MHz PAL VHS `.ldf` 夹具和相同的 40 帧窗口，
-不会公开源文件名。Python 两列沿用已审计测量值；本候选基于 main `ced6afb`，
-20 个 .NET 单元格均重新进行三次 Release 测量。兼容性结论与速度数据分开判断；
-原始运行目录含有私有夹具路径，因此只保留在本地。
+不会公开源文件名。Python 两列沿用已审计测量值；本候选基于 main `aceec7e`，
+20 个 .NET 单元格均重新进行三次 Release 测量。这份超大 raw-FLAC 已超过
+libsndfile 1.2.2 的精确定位门禁，因此现在会正确改走 FFmpeg；新结果不能与之前基于
+`ced6afb` 的表格直接比较。兼容性结论与速度数据分开判断。
 
 <!-- LATEST_PERFORMANCE_BEGIN -->
 | CLI 模式（workers） | Python v0.4.0 | Python PR341 | Exact + v0.4.0 | Exact + current | IPP-fast + v0.4.0 | IPP-fast + current |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| 默认（5） | 15.207 s | 16.780 s | 4.126 s / 3.686x | 4.980 s / 3.369x | 3.480 s / 4.369x | 3.342 s / 5.021x |
-| `--threads 1` | 17.694 s | 19.414 s | 9.767 s / 1.812x | 11.844 s / 1.639x | 7.104 s / 2.491x | 7.887 s / 2.462x |
-| `--threads 5` | 15.719 s | 17.801 s | 4.221 s / 3.724x | 4.853 s / 3.668x | 3.555 s / 4.422x | 3.437 s / 5.179x |
-| `--threads 10` | 16.037 s | 18.266 s | 3.427 s / 4.680x | 4.242 s / 4.306x | 3.036 s / 5.282x | 2.565 s / 7.121x |
-| `--threads 20` | 16.405 s | 18.395 s | 2.928 s / 5.602x | 3.316 s / 5.548x | 2.601 s / 6.308x | 2.239 s / 8.217x |
+| 默认（5） | 15.207 s | 16.780 s | 7.209 s / 2.109x | 7.914 s / 2.120x | 5.388 s / 2.822x | 5.279 s / 3.179x |
+| `--threads 1` | 17.694 s | 19.414 s | 12.109 s / 1.461x | 14.143 s / 1.373x | 8.568 s / 2.065x | 9.757 s / 1.990x |
+| `--threads 5` | 15.719 s | 17.801 s | 7.238 s / 2.172x | 7.651 s / 2.327x | 5.266 s / 2.985x | 5.125 s / 3.473x |
+| `--threads 10` | 16.037 s | 18.266 s | 5.862 s / 2.736x | 6.720 s / 2.718x | 4.967 s / 3.229x | 4.645 s / 3.933x |
+| `--threads 20` | 16.405 s | 18.395 s | 5.779 s / 2.839x | 6.323 s / 2.909x | 4.634 s / 3.540x | 4.361 s / 4.218x |
 <!-- LATEST_PERFORMANCE_END -->
-<!-- LATEST_PERFORMANCE_RUNS: dotnet-full-refresh=60 repeats=3 long-paired=6 compat=8 determinism=12 -->
+<!-- LATEST_PERFORMANCE_RUNS: dotnet-full-refresh=60 repeats=3 cti-long-paired=8 determinism=60 -->
 
 每个 .NET 单元格依次给出墙钟中位数和相对同 profile Python 列的倍速；默认实际
 使用 **5 个 workers**。多 worker 的紧凑 VHS 路径现在会在低通同步工作继续进行时
@@ -112,16 +113,16 @@ CVBS 和 HiFi 仍会拒绝 `ipp-fast`；需要 release 兼容行为时应使用 
 墙钟分别缩短 2.66% 和 2.55%；600 帧 IPP-fast 配对中，v0.4.0 缩短 1.85%，
 `current` 基本中性（-0.03%）。
 
-float32 PocketFFT plan 现在会保留不可变的实数根表，并按 root length 共享最多 32 份
-复数根表。与 main `ced6afb` 直接比较的最终三对 1000 帧 Exact `current` 长跑属于
-吞吐中性：只有 1/3 对更快，main/候选墙钟中位数为 44.924/44.985 秒（候选增加
-0.14%，吞吐 0.999x），CPU 时间中位数为 332.672/333.734 秒（增加 0.32%）。
-匹配的最终 200 帧 allocation trace 将 sampled allocation amount 从 579,283,536
-降至 541,701,824 bytes（减少 6.49%）。
+托管 AVX 现在一次计算 8 个彼此独立的 `current` CTI 距离 lane，同时保留原有
+float32 FMA 顺序、标量尾部和无 AVX 回退。两组反序 1000 帧 Exact 配对基本中性，
+基线/候选为 50.687/50.793 秒（-0.21%）。两组 IPP-fast 配对都由候选胜出：
+43.730/42.872 秒（缩短 1.96%），CPU 时间从 255.273 降至 251.797 秒
+（减少 1.36%）；IPP 配对的峰值内存没有增加。
 
-60 次刷新矩阵全部保持确定性；另行执行的 `--threads 0`、默认 5、`--threads 20`
-门禁在两个 profile 和两个 backend 下均匹配亮度、色度、原始 JSON、stdout、归一化
-stderr/日志和有序 `fileLoc`。IPP-fast 仍是显式启用的数值近似后端，
+60 次刷新矩阵全部保持确定性；默认 5 以及 `--threads 1/5/10/20` 在每个 profile
+内都只有一套亮度、色度、原始 JSON、stdout、归一化 stderr 和日志 hash。Exact 与
+IPP-fast 的 CTI 长跑门禁还在基线/候选之间匹配全部有序 `fileLoc`。IPP-fast 仍是
+显式启用的数值近似后端，
 因此不声称其产物与 Exact 逐字节一致。Python v0.4.0 在非零 worker 数下可能改变
 输出 hash，因此严格 oracle 仍是 Python v0.4.0 `g4315520 --threads 0`。完整命令、
 硬件、hash、内存边界和历史测量请查看
