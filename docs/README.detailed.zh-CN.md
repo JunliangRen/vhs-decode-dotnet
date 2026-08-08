@@ -344,10 +344,10 @@ IPP-fast v0.4.0 和 IPP-fast `current`。文件名不会公开。每个 .NET 单
 <!-- LATEST_PERFORMANCE_END -->
 <!-- LATEST_PERFORMANCE_RUNS: full-refresh=90 repeats=3 mapped-ab=36 mapped-long=4 dotnet-determinism=60 -->
 
-90 个单元格全部于 2026-08-09 使用本候选重新测量；候选基于已合并的 main
-`63251d8`。每个单元格都是三次 Release 运行的中位数，三轮分别反转和混排了模式与
-profile 顺序。测试机为 Intel Core Ultra 7 265K（20 个逻辑处理器）、Windows 11
-build 26220，以及 .NET SDK/runtime `11.0.100-preview.6.26359.118`。原始运行目录
+全部 90 次运行（30 个矩阵单元，每个重复 3 次）均于 2026-08-09 使用本候选重新测量；
+候选基于已合并的 main `63251d8`。每个单元都是三次 Release 运行的中位数，三轮分别
+反转和混排了模式与 profile 顺序。测试机为 Intel Core Ultra 7 265K（20 个逻辑处理器）、
+Windows 11 build 26220，以及 .NET SDK/runtime `11.0.100-preview.6.26359.118`。原始运行目录
 含有私有夹具路径，因此只保留在本地；这些是如实报告的本地测量，不是可公开独立
 复现的 benchmark corpus。候选可执行文件的 SHA-256 为
 `808D09DD0D1B98548AB6A712BFF777E2F6192027D5943C84A9C0C7482BCF6E6B`。
@@ -361,10 +361,11 @@ FFmpeg/PyAV 模拟路径而承担了真实的性能和内存成本。下面这�
 
 raw-FLAC 解析器只会对超过有符号 32 位样本范围、metadata 链完整、使用单一固定
 block size 与 fixed blocking strategy、且没有 seektable 的 40 MHz 单声道 PCM16
-流启用映射 libsndfile 读取。映射器用整数运算重现固定 FFmpeg/PyAV 路径的首帧 PTS
-与 RF 位置舍入。该路径只用于普通并行 VHS 解码；`--threads 0/1`、debug plot、
-GNU Radio AFE 输入、重采样、variable-block 流、有 seektable 的流以及所有未知布局
-都继续使用 FFmpeg。映射、seek、读取或长度边界失败都会在相同逻辑样本处单向切换到
+流启用映射 libsndfile 读取；其首帧头部必须与 STREAMINFO 一致并通过 CRC-8。映射器用
+整数运算重现固定 FFmpeg/PyAV 路径的首帧 PTS 与 RF 位置舍入。该路径只用于普通并行
+VHS 解码；`--threads 0/1`、debug plot、GNU Radio AFE 输入、非零 `--sharpness`、重采样、
+variable-block 流、有 seektable 的流以及所有未知布局都继续使用 FFmpeg。映射、seek、
+读取或长度边界失败都会在相同逻辑样本处单向切换到
 FFmpeg。文件开头、中部、有符号 32 位边界和接近 EOF 的直接探针均与 FFmpeg 及参考
 FLAC 解码器一致。
 
@@ -1075,9 +1076,9 @@ stdout、归一化 stderr 和时间戳归一化日志全部一致。候选还在
 不能包含 SEEKTABLE，且样本数必须大于 `Int32.MaxValue`。每次 decoder 重启时，纯整数
 time-base 与 block 运算会把逻辑 RF 样本映射到固定 FFmpeg/PyAV 路径相同的首个原生
 FLAC 样本，并保留既有 2 MiB 回退窗口和 40 MiB 字节距离重启阈值。
-`--threads 0/1`、debug-plot 与 GNU Radio AFE 模式、LD、CVBS 和门禁外输入继续走
-FFmpeg。原生后端不可用或不支持、seek/decode 错误、映射或长度边界失败时，会从同一
-逻辑样本单向切回既有 FFmpeg/PyAV 兼容加载器。若未安装 FFmpeg，正常报告的 EOF 仍按
+`--threads 0/1`、debug-plot 与 GNU Radio AFE 模式、非零 `--sharpness`、LD、CVBS 和
+门禁外输入继续走 FFmpeg。原生后端不可用或不支持、seek/decode 错误、映射或长度边界
+失败时，会从同一逻辑样本单向切回既有 FFmpeg/PyAV 兼容加载器。若未安装 FFmpeg，正常报告的 EOF 仍按
 EOF 结束。默认 VHS `.flac`、Ogg/FLAC、立体声、PCM24、其他采样率、未知总数、被拒绝
 的文件头、`.vhs`、`.wav` 和 `raw.oga` 也继续走 FFmpeg。
 
@@ -2111,7 +2112,7 @@ main/候选墙钟中位数为 44.924/44.985 秒（候选增加 0.14%，吞吐 0.
 .\tools\build-ipp-native.ps1
 dotnet restore VHSDecodeDotNet.slnx
 dotnet build VHSDecodeDotNet.slnx -c Release --no-restore
-dotnet test --solution VHSDecodeDotNet.slnx -c Release --no-build --no-restore --minimum-expected-tests 1368
+dotnet test --solution VHSDecodeDotNet.slnx -c Release --no-build --no-restore --minimum-expected-tests 1376
 dotnet test --project tests\VHSDecode.Tests\VHSDecode.Tests.csproj -c Release --no-build --no-restore --coverage --coverage-output coverage.cobertura.xml --coverage-output-format cobertura
 ```
 
@@ -2123,7 +2124,7 @@ Intel oneAPI。只含二进制的单文件发布会嵌入 `vhsdecode_ipp.dll` �
 notice，不会额外生成许可证 sidecar 文件。只构建 Exact 后端时可以省略原生构建步骤。
 
 当前正式 Release 构建为零警告、零错误。xUnit v3 项目向
-`dotnet test` 和 Visual Studio Test Explorer 暴露 **1,368** 个可独立发现的测试。
+`dotnet test` 和 Visual Studio Test Explorer 暴露 **1,376** 个可独立发现的测试。
 
 <!-- SECTION: usage -->
 

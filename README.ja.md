@@ -36,7 +36,7 @@ upstream release `v0.4.0`、commit
 - VHS family には VHS/S-VHS、Betamax、Video8/Hi8、U-matic、Type C、EIAJ、
   upstream が対応する PAL/NTSC variant が含まれます。
 - TBC utility、ダブルクリック GUI、開発者向け plot window は対象外です。
-- Visual Studio 2026 の `.slnx` には **1,368** 件の標準 xUnit v3 test があり、
+- Visual Studio 2026 の `.slnx` には **1,376** 件の標準 xUnit v3 test があり、
   Test Explorer と `dotnet test` の両方で実行できます。
 
 <!-- SECTION: start -->
@@ -154,9 +154,9 @@ libsndfile を使います。通常の parallel VHS decode は、seek table の�
 gate した oversized fixed-block raw FLAC にも libsndfile を使えます。integer mapping
 は固定した FFmpeg/PyAV の frame start と rewind/restart boundary を再現し、失敗時は
 同じ logical sample から一方向に FFmpeg へ fallback します。`--threads 0/1`、
-debug-plot/GNU Radio AFE mode、他 command family、default VHS `.flac`、全 CVBS、
-Ogg/FLAC、stereo、PCM24、他 sample rate、未完了または非 eligible header は FFmpeg を
-維持します。
+debug-plot/GNU Radio AFE mode、nonzero `--sharpness`、他 command family、default VHS
+`.flac`、全 CVBS、Ogg/FLAC、stereo、PCM24、他 sample rate、未完了または非 eligible
+header は FFmpeg を維持します。
 
 <!-- SECTION: build -->
 
@@ -168,7 +168,7 @@ Ogg/FLAC、stereo、PCM24、他 sample rate、未完了または非 eligible hea
 dotnet restore VHSDecodeDotNet.slnx
 dotnet build VHSDecodeDotNet.slnx -c Release --no-restore
 dotnet test --solution VHSDecodeDotNet.slnx -c Release `
-  --no-build --no-restore --minimum-expected-tests 1368
+  --no-build --no-restore --minimum-expected-tests 1376
 ```
 
 Visual Studio 2026 で `VHSDecodeDotNet.slnx` を開くと、build、debug、

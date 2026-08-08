@@ -33,7 +33,7 @@
 - VHS 家族包括 VHS/S-VHS、Betamax、Video8/Hi8、U-matic、Type C、EIAJ
   以及上游支持的 PAL/NTSC 变体。
 - TBC 工具、双击启动的用户 GUI 和开发者绘图窗口明确不在范围内。
-- Visual Studio 2026 `.slnx` 包含 **1,368** 项标准 xUnit v3 测试；测试可在
+- Visual Studio 2026 `.slnx` 包含 **1,376** 项标准 xUnit v3 测试；测试可在
   Test Explorer 中查看，也可用 `dotnet test` 运行。
 
 <!-- SECTION: start -->
@@ -109,8 +109,8 @@ CVBS 和 HiFi 仍会拒绝 `ipp-fast`；需要 release 兼容行为时应使用 
 使用 **5 个 workers**。更早公开的表格使用另一份私有 NTSC Betamax HiFi 夹具，
 不能直接横向比较。在这份 PAL 夹具上，之前的 main 还因为超大 raw FLAC 改走 FFmpeg
 而承担了真实开销。本候选只对满足固定 block、无 seektable 等严格门禁的普通并行 VHS
-解码使用 libsndfile 映射；串行、诊断、重采样及不合格输入继续使用既有 FFmpeg 路径，
-任何原生读取失败都会在相同逻辑样本位置单向回退。
+解码使用 libsndfile 映射；串行、诊断、非零 `--sharpness`、重采样及不合格输入继续使用
+既有 FFmpeg 路径，任何原生读取失败都会在相同逻辑样本位置单向回退。
 
 严格基线/候选门禁中，Exact `current --threads 20` 的 200 帧从 14.876 降至
 11.135 秒（缩短 25.15%），1000 帧从 53.230 降至 44.055 秒（缩短 17.24%）；
@@ -141,9 +141,9 @@ TBC、色度、JSON 和日志文件允许在解码期间并发读取，兼容的
 直接 raw `fLaC` `.ldf`/`.flac` 使用内置 libsndfile。普通并行 VHS 解码还可对经过
 严格门控、无 seek table 的超大 fixed-block raw FLAC 使用 libsndfile；纯整数映射会
 复现固定 FFmpeg/PyAV 版本的帧起点与回退/重启边界，任何失败都从同一逻辑样本单向
-切回 FFmpeg。`--threads 0/1`、debug-plot 和 GNU Radio AFE 模式、其他命令族、默认 VHS
-`.flac`、全部 CVBS、Ogg/FLAC、立体声、PCM24、其他采样率以及未完成或不符合条件的
-文件头继续使用 FFmpeg。
+切回 FFmpeg。`--threads 0/1`、debug-plot 和 GNU Radio AFE 模式、非零 `--sharpness`、
+其他命令族、默认 VHS `.flac`、全部 CVBS、Ogg/FLAC、立体声、PCM24、其他采样率以及
+未完成或不符合条件的文件头继续使用 FFmpeg。
 
 <!-- SECTION: build -->
 
@@ -155,7 +155,7 @@ TBC、色度、JSON 和日志文件允许在解码期间并发读取，兼容的
 dotnet restore VHSDecodeDotNet.slnx
 dotnet build VHSDecodeDotNet.slnx -c Release --no-restore
 dotnet test --solution VHSDecodeDotNet.slnx -c Release `
-  --no-build --no-restore --minimum-expected-tests 1368
+  --no-build --no-restore --minimum-expected-tests 1376
 ```
 
 在 Visual Studio 2026 中打开 `VHSDecodeDotNet.slnx`，即可构建、调试并通过

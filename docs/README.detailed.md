@@ -423,9 +423,10 @@ speedup, and wall-time reduction against its profile-matched Python column:
 <!-- LATEST_PERFORMANCE_END -->
 <!-- LATEST_PERFORMANCE_RUNS: full-refresh=90 repeats=3 mapped-ab=36 mapped-long=4 dotnet-determinism=60 -->
 
-All 90 cells were freshly measured on 2026-08-09 from this candidate, based on
-merged main `63251d8`. Each cell is the median of three Release runs; mode and
-profile ordering was reversed and mixed across the three passes. The host was
+All 90 runs (30 matrix cells, each repeated three times) were freshly measured
+on 2026-08-09 from this candidate, based on merged main `63251d8`. Each cell is
+the median of three Release runs; mode and profile ordering was reversed and
+mixed across the three passes. The host was
 an Intel Core Ultra 7 265K with 20 logical processors, Windows 11 build 26220,
 and .NET SDK/runtime `11.0.100-preview.6.26359.118`. Raw run directories are
 retained locally because they contain the private fixture path; these are local
@@ -444,12 +445,13 @@ changing the serial oracle contract.
 
 The raw-FLAC parser now admits mapped libsndfile reads only for 40 MHz mono
 PCM16 streams that exceed the signed 32-bit sample range, have a complete
-metadata chain, use one fixed block size and fixed blocking strategy, and have
-no seektable. The mapper reproduces the first-frame PTS and RF-position
-rounding used by the pinned FFmpeg/PyAV path with integer arithmetic. It is
-enabled only for ordinary parallel VHS decode. `--threads 0/1`, debug plots,
-GNU Radio AFE input, resampling, variable-block streams, streams with a
-seektable, and all unrecognized layouts keep FFmpeg. Mapping, seek, read, or
+metadata chain, use one fixed block size and fixed blocking strategy, have a
+matching first-frame header and CRC-8, and have no seektable. The mapper
+reproduces the first-frame PTS and RF-position rounding used by the pinned
+FFmpeg/PyAV path with integer arithmetic. It is enabled only for ordinary
+parallel VHS decode. `--threads 0/1`, debug plots, GNU Radio AFE input, nonzero
+`--sharpness`, resampling, variable-block streams, streams with a seektable,
+and all unrecognized layouts keep FFmpeg. Mapping, seek, read, or
 length-boundary failure activates a one-way FFmpeg fallback at the same logical
 sample. Direct probes at the beginning, middle, signed 32-bit boundary, and
 near EOF matched both FFmpeg and the reference FLAC decoder.
@@ -1340,7 +1342,8 @@ block size, a fixed-blocking first audio frame, no SEEKTABLE, and more than
 arithmetic maps the logical RF sample to the same first native FLAC sample as
 the pinned FFmpeg/PyAV path; the established 2 MiB rewind window and 40 MiB
 byte-distance restart threshold are preserved. `--threads 0/1`, debug-plot and
-GNU Radio AFE modes, LD, CVBS, and all inputs outside this gate retain FFmpeg.
+GNU Radio AFE modes, nonzero `--sharpness`, LD, CVBS, and all inputs outside
+this gate retain FFmpeg.
 Unavailable or unsupported native opens, seek/decode errors, mapping or length
 boundary failures switch once to the established FFmpeg/PyAV-compatible loader
 at the same logical sample. A clean reported EOF remains EOF when FFmpeg is not
@@ -2649,7 +2652,7 @@ Requirements:
 .\tools\build-ipp-native.ps1
 dotnet restore VHSDecodeDotNet.slnx
 dotnet build VHSDecodeDotNet.slnx -c Release --no-restore
-dotnet test --solution VHSDecodeDotNet.slnx -c Release --no-build --no-restore --minimum-expected-tests 1368
+dotnet test --solution VHSDecodeDotNet.slnx -c Release --no-build --no-restore --minimum-expected-tests 1376
 dotnet test --project tests\VHSDecode.Tests\VHSDecode.Tests.csproj -c Release --no-build --no-restore --coverage --coverage-output coverage.cobertura.xml --coverage-output-format cobertura
 ```
 
@@ -2663,7 +2666,7 @@ deployment computer. Binary-only single-file releases embed
 sidecar license files. An Exact-only build may omit the native build step.
 
 The current formal Release build has zero warnings and errors. The xUnit v3
-project exposes **1,368** independently discoverable tests to both
+project exposes **1,376** independently discoverable tests to both
 `dotnet test` and Visual Studio Test Explorer.
 
 <!-- SECTION: usage -->

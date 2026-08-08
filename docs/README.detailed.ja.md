@@ -402,9 +402,10 @@ Python v0.4.0、merge 済みの Python PR341、Exact v0.4.0、Exact
 <!-- LATEST_PERFORMANCE_END -->
 <!-- LATEST_PERFORMANCE_RUNS: full-refresh=90 repeats=3 mapped-ab=36 mapped-long=4 dotnet-determinism=60 -->
 
-90 cell はすべて 2026-08-09 に今回の candidate で fresh measurement しました。
-candidate は merged main `63251d8` を基にしています。各 cell は 3 回の Release run
-の median で、3 pass の mode/profile order は reverse と mixed order にしました。
+全 90 run（30 matrix cell を各 3 回）は 2026-08-09 に今回の candidate で fresh
+measurement しました。candidate は merged main `63251d8` を基にしています。各 cell
+は 3 回の Release run の median で、3 pass の mode/profile order は reverse と
+mixed order にしました。
 host は Intel Core Ultra 7 265K（20 logical processor）、Windows 11 build 26220、
 .NET SDK/runtime `11.0.100-preview.6.26359.118` です。raw run directory は private
 fixture path を含むため local にのみ保持します。以下は local measurement の報告で、
@@ -421,11 +422,12 @@ cost がありました。次の変更は serial oracle contract を変えずに
 
 raw-FLAC parser は signed 32-bit sample range を超え、metadata chain が complete、
 single fixed block size と fixed blocking strategy を使い、seektable を持たない 40 MHz
-mono PCM16 stream だけを mapped libsndfile read の対象にします。mapper は pinned
-FFmpeg/PyAV path の first-frame PTS と RF-position rounding を integer arithmetic で
-再現します。この path は ordinary parallel VHS decode だけで有効です。
-`--threads 0/1`、debug plot、GNU Radio AFE input、resampling、variable-block stream、
-seektable 付き stream、unknown layout は FFmpeg のままです。mapping、seek、read、
+mono PCM16 stream だけを mapped libsndfile read の対象にします。first-frame header は
+STREAMINFO と一致し CRC-8 を通過する必要があります。mapper は pinned FFmpeg/PyAV
+path の first-frame PTS と RF-position rounding を integer arithmetic で再現します。
+この path は ordinary parallel VHS decode だけで有効です。`--threads 0/1`、debug plot、
+GNU Radio AFE input、nonzero `--sharpness`、resampling、variable-block stream、seektable
+付き stream、unknown layout は FFmpeg のままです。mapping、seek、read、
 length-boundary failure は同じ logical sample から一方向に FFmpeg fallback します。
 先頭、中間、signed 32-bit boundary、near EOF の direct probe は FFmpeg と reference
 FLAC decoder の両方に一致しました。
@@ -1263,8 +1265,8 @@ fixed-blocking、SEEKTABLE なし、sample count が `Int32.MaxValue` 超であ�
 decoder restart ごとに integer time-base/block 演算で logical RF sample を、固定した
 FFmpeg/PyAV path と同じ最初の native FLAC sample へ map します。既存の 2 MiB rewind
 window と 40 MiB byte-distance restart threshold も維持します。`--threads 0/1`、
-debug-plot/GNU Radio AFE mode、LD、CVBS、gate 外 input は FFmpeg のままです。native
-open unavailable/unsupported、seek/decode error、mapping/length boundary failure は、
+debug-plot/GNU Radio AFE mode、nonzero `--sharpness`、LD、CVBS、gate 外 input は
+FFmpeg のままです。native open unavailable/unsupported、seek/decode error、mapping/length boundary failure は、
 同じ logical sample から既存 FFmpeg/PyAV-compatible loader へ一度だけ切り替えます。
 FFmpeg 未導入時も正常な reported EOF は EOF のままです。default VHS `.flac`、
 Ogg/FLAC、stereo、PCM24、他 rate、unknown total、rejected header、`.vhs`、`.wav`、
@@ -2542,7 +2544,7 @@ focused 16 KiB unit-test threshold は warmed calling thread の allocation だ�
 .\tools\build-ipp-native.ps1
 dotnet restore VHSDecodeDotNet.slnx
 dotnet build VHSDecodeDotNet.slnx -c Release --no-restore
-dotnet test --solution VHSDecodeDotNet.slnx -c Release --no-build --no-restore --minimum-expected-tests 1368
+dotnet test --solution VHSDecodeDotNet.slnx -c Release --no-build --no-restore --minimum-expected-tests 1376
 dotnet test --project tests\VHSDecode.Tests\VHSDecode.Tests.csproj -c Release --no-build --no-restore --coverage --coverage-output coverage.cobertura.xml --coverage-output-format cobertura
 ```
 
@@ -2556,7 +2558,7 @@ third-party notice を埋め込み、license sidecar file は追加しません�
 
 現在の正式な Release build は warning 0、error 0 です。xUnit v3 project は
 `dotnet test` と Visual Studio Test Explorer の両方で個別に検出できる
-**1,368** tests を公開します。
+**1,376** tests を公開します。
 
 <!-- SECTION: usage -->
 

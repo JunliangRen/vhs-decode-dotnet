@@ -428,30 +428,61 @@ public sealed class LibsndfilePcm16SampleLoaderTests
     }
 
     [Theory(DisplayName = "raw FLAC mapped seeking requires a complete fixed-block stream without a seektable")]
-    [InlineData(2_048, 2_048, false, 0xf8, true)]
-    [InlineData(2_048, 2_048, true, 0xf8, false)]
-    [InlineData(2_048, 4_096, false, 0xf8, false)]
-    [InlineData(2_048, 2_048, false, 0xf9, false)]
+    [InlineData(2_048, 2_048, false, 0xf8, 2_048, false, true)]
+    [InlineData(192, 192, false, 0xf8, 192, false, true)]
+    [InlineData(4_608, 4_608, false, 0xf8, 4_608, false, true)]
+    [InlineData(2_048, 2_048, true, 0xf8, 2_048, false, false)]
+    [InlineData(2_048, 4_096, false, 0xf8, 2_048, false, false)]
+    [InlineData(2_048, 2_048, false, 0xf9, 2_048, false, false)]
+    [InlineData(1, 1, false, 0xf8, 2_048, false, false)]
+    [InlineData(2_048, 2_048, false, 0xf8, 4_096, false, false)]
+    [InlineData(2_048, 2_048, false, 0xf8, 2_048, true, false)]
     public void StreamInfoGatesPyAvMappedSeeking(
         int minimumBlockSize,
         int maximumBlockSize,
         bool hasSeekTable,
         byte frameHeader,
+        int frameBlockSize,
+        bool corruptHeaderCrc,
         bool expected)
     {
         using var input = new MemoryStream(BuildMappedFlacHeader(
             minimumBlockSize,
             maximumBlockSize,
             hasSeekTable,
-            frameHeader));
+            frameHeader,
+            frameBlockSize,
+            corruptHeaderCrc));
 
         Assert.True(RawFlacStreamInfo.TryRead(input, out RawFlacStreamInfo info));
         Assert.Equal(minimumBlockSize, info.MinimumBlockSize);
         Assert.Equal(maximumBlockSize, info.MaximumBlockSize);
         Assert.Equal(hasSeekTable, info.HasSeekTable);
         Assert.True(info.MetadataChainComplete);
-        Assert.Equal(frameHeader == 0xf8, info.UsesFixedBlockingStrategy);
+        bool expectedFixedBlockingStrategy = minimumBlockSize is >= 16 and <= 65_535
+            && minimumBlockSize == maximumBlockSize
+            && frameHeader == 0xf8
+            && frameBlockSize == minimumBlockSize
+            && !corruptHeaderCrc;
+        Assert.Equal(expectedFixedBlockingStrategy, info.UsesFixedBlockingStrategy);
         Assert.Equal(expected, info.SupportsPyAvMappedLibsndfileSeeking);
+    }
+
+    [Theory(DisplayName = "raw FLAC mapped seeking rejects forbidden trailing metadata types")]
+    [InlineData(0)]
+    [InlineData(127)]
+    public void StreamInfoRejectsForbiddenMappedMetadata(byte metadataBlockType)
+    {
+        using var input = new MemoryStream(BuildMappedFlacHeader(
+            minimumBlockSize: 2_048,
+            maximumBlockSize: 2_048,
+            hasSeekTable: false,
+            frameHeader: 0xf8,
+            trailingMetadataBlockType: metadataBlockType));
+
+        Assert.True(RawFlacStreamInfo.TryRead(input, out RawFlacStreamInfo info));
+        Assert.False(info.MetadataChainComplete);
+        Assert.False(info.SupportsPyAvMappedLibsndfileSeeking);
     }
 
     [Theory(DisplayName = "PyAV raw FLAC restart mapping preserves pinned FFmpeg frame starts")]
@@ -551,16 +582,18 @@ public sealed class LibsndfilePcm16SampleLoaderTests
     }
 
     [Theory(DisplayName = "VHS sessions map oversized raw FLAC only for ordinary parallel decode")]
-    [InlineData(null, false, false, true)]
-    [InlineData("0", false, false, false)]
-    [InlineData("1", false, false, false)]
-    [InlineData("2", false, false, true)]
-    [InlineData("2", true, false, false)]
-    [InlineData("2", false, true, false)]
+    [InlineData(null, false, false, null, true)]
+    [InlineData("0", false, false, null, false)]
+    [InlineData("1", false, false, null, false)]
+    [InlineData("2", false, false, null, true)]
+    [InlineData("2", true, false, null, false)]
+    [InlineData("2", false, true, null, false)]
+    [InlineData("2", false, false, "25", false)]
     public void VhsSessionKeepsMappedRawFlacOnParallelDecodeOnly(
         string? threads,
         bool debugPlot,
         bool gnrcAfe,
+        string? sharpness,
         bool expectMappedOnMulticore)
     {
         string directory = CreateTemporaryDirectory();
@@ -594,6 +627,12 @@ public sealed class LibsndfilePcm16SampleLoaderTests
             if (gnrcAfe)
             {
                 arguments.Add("--gnuradio_rf_afe");
+            }
+
+            if (sharpness is not null)
+            {
+                arguments.Add("--sharpness");
+                arguments.Add(sharpness);
             }
 
             arguments.Add(inputPath);
@@ -805,13 +844,19 @@ public sealed class LibsndfilePcm16SampleLoaderTests
         int minimumBlockSize,
         int maximumBlockSize,
         bool hasSeekTable,
-        byte frameHeader)
+        byte frameHeader,
+        int frameBlockSize = 2_048,
+        bool corruptHeaderCrc = false,
+        byte? trailingMetadataBlockType = null)
     {
         const long TotalSamples = (long)int.MaxValue + 1;
-        int metadataBytes = hasSeekTable ? 4 : 0;
-        var bytes = new byte[4 + 4 + 34 + metadataBytes + 2];
+        byte? metadataBlockType = trailingMetadataBlockType
+            ?? (hasSeekTable ? (byte)3 : null);
+        int metadataBytes = metadataBlockType.HasValue ? 4 : 0;
+        const int FrameHeaderBytes = 7;
+        var bytes = new byte[4 + 4 + 34 + metadataBytes + FrameHeaderBytes];
         "fLaC"u8.CopyTo(bytes);
-        bytes[4] = hasSeekTable ? (byte)0x00 : (byte)0x80;
+        bytes[4] = metadataBlockType.HasValue ? (byte)0x00 : (byte)0x80;
         bytes[7] = 34;
         BinaryPrimitives.WriteUInt16BigEndian(bytes.AsSpan(8, 2), checked((ushort)minimumBlockSize));
         BinaryPrimitives.WriteUInt16BigEndian(bytes.AsSpan(10, 2), checked((ushort)maximumBlockSize));
@@ -821,15 +866,57 @@ public sealed class LibsndfilePcm16SampleLoaderTests
             | (ulong)TotalSamples;
         BinaryPrimitives.WriteUInt64BigEndian(bytes.AsSpan(18, 8), packed);
         int frameOffset = 42;
-        if (hasSeekTable)
+        if (metadataBlockType.HasValue)
         {
-            bytes[frameOffset] = 0x80 | 3;
+            bytes[frameOffset] = (byte)(0x80 | metadataBlockType.Value);
             frameOffset += 4;
         }
 
         bytes[frameOffset] = 0xff;
         bytes[frameOffset + 1] = frameHeader;
+        bytes[frameOffset + 2] = (byte)((FixedBlockSizeCode(frameBlockSize) << 4) | 12);
+        bytes[frameOffset + 3] = 0x08;
+        bytes[frameOffset + 4] = 0;
+        bytes[frameOffset + 5] = 40;
+        byte crc = CalculateFlacHeaderCrc8(bytes.AsSpan(frameOffset, FrameHeaderBytes - 1));
+        bytes[frameOffset + 6] = corruptHeaderCrc ? (byte)(crc ^ 0xff) : crc;
         return bytes;
+    }
+
+    private static int FixedBlockSizeCode(int blockSize)
+        => blockSize switch
+        {
+            192 => 1,
+            576 => 2,
+            1_152 => 3,
+            2_304 => 4,
+            4_608 => 5,
+            256 => 8,
+            512 => 9,
+            1_024 => 10,
+            2_048 => 11,
+            4_096 => 12,
+            8_192 => 13,
+            16_384 => 14,
+            32_768 => 15,
+            _ => throw new ArgumentOutOfRangeException(nameof(blockSize))
+        };
+
+    private static byte CalculateFlacHeaderCrc8(ReadOnlySpan<byte> data)
+    {
+        byte crc = 0;
+        foreach (byte value in data)
+        {
+            crc ^= value;
+            for (int bit = 0; bit < 8; bit++)
+            {
+                crc = (crc & 0x80) != 0
+                    ? (byte)((crc << 1) ^ 0x07)
+                    : (byte)(crc << 1);
+            }
+        }
+
+        return crc;
     }
 
     private static string CreateTemporaryDirectory()

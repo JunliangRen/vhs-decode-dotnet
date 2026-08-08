@@ -791,7 +791,8 @@ public static class DecodeSessionFactory
     private static bool ShouldUseParallelMappedRawFlacSeeking(ParsedCommand command)
     {
         if (NullableString(command, "debug_plot") is not null
-            || BoolValueOrDefault(command, "gnrc_afe"))
+            || BoolValueOrDefault(command, "gnrc_afe")
+            || !command.Get<BigInteger>("sharpness").IsZero)
         {
             return false;
         }

@@ -16,6 +16,9 @@ internal readonly record struct RawFlacStreamInfo(
     private const int StreamInfoBlockType = 0;
     private const int StreamInfoBlockLength = 34;
     private const int SeekTableBlockType = 3;
+    private const int InvalidMetadataBlockType = 127;
+    private const int MinimumFlacBlockSize = 16;
+    private const int MaximumFlacBlockSize = 65_535;
 
     internal bool IsNativeRfPcm16
         => SampleRateHz == FfmpegPcm16SampleLoader.ContainerAudioSampleRateHz
@@ -27,7 +30,8 @@ internal readonly record struct RawFlacStreamInfo(
         => IsNativeRfPcm16 && TotalSamples <= int.MaxValue;
 
     internal int? FixedBlockSize
-        => MinimumBlockSize > 0 && MinimumBlockSize == MaximumBlockSize
+        => MinimumBlockSize is >= MinimumFlacBlockSize and <= MaximumFlacBlockSize
+            && MinimumBlockSize == MaximumBlockSize
             ? MinimumBlockSize
             : null;
 
@@ -98,11 +102,15 @@ internal readonly record struct RawFlacStreamInfo(
         bool hasSeekTable = false;
         bool metadataChainComplete = isLastMetadataBlock
             || TryScanRemainingMetadata(input, ref hasSeekTable);
-        Span<byte> frameHeader = stackalloc byte[2];
         bool usesFixedBlockingStrategy = metadataChainComplete
-            && TryReadExactly(input, frameHeader)
-            && frameHeader[0] == 0xff
-            && frameHeader[1] == 0xf8;
+            && minimumBlockSize is >= MinimumFlacBlockSize and <= MaximumFlacBlockSize
+            && minimumBlockSize == maximumBlockSize
+            && TryReadFirstFixedFrameHeader(
+                input,
+                minimumBlockSize,
+                sampleRate,
+                channels,
+                bitsPerSample);
         info = new RawFlacStreamInfo(
             sampleRate,
             channels,
@@ -127,6 +135,11 @@ internal readonly record struct RawFlacStreamInfo(
             int blockLength = (blockHeader[1] << 16)
                 | (blockHeader[2] << 8)
                 | blockHeader[3];
+            if (blockType is StreamInfoBlockType or InvalidMetadataBlockType)
+            {
+                return false;
+            }
+
             hasSeekTable |= blockType == SeekTableBlockType;
             if (!TrySkipExactly(input, blockLength, skipBuffer))
             {
@@ -140,6 +153,151 @@ internal readonly record struct RawFlacStreamInfo(
         }
 
         return false;
+    }
+
+    private static bool TryReadFirstFixedFrameHeader(
+        Stream input,
+        int expectedBlockSize,
+        int expectedSampleRate,
+        int expectedChannels,
+        int expectedBitsPerSample)
+    {
+        Span<byte> header = stackalloc byte[16];
+        if (!TryReadExactly(input, header[..4])
+            || header[0] != 0xff
+            || header[1] != 0xf8
+            || !TryDecodeFixedBlockSize(header[2] >> 4, out int blockSize)
+            || blockSize != expectedBlockSize
+            || (header[3] >> 4) != expectedChannels - 1
+            || (header[3] & 0x01) != 0)
+        {
+            return false;
+        }
+
+        int sampleSizeCode = (header[3] >> 1) & 0x07;
+        if (expectedBitsPerSample != 16 || sampleSizeCode is not (0 or 4))
+        {
+            return false;
+        }
+
+        int length = 4;
+        if (!TryAppendByte(input, header, ref length)
+            || header[length - 1] != 0)
+        {
+            return false;
+        }
+
+        if (!TryResolveFrameSampleRate(
+                input,
+                header,
+                ref length,
+                header[2] & 0x0f,
+                expectedSampleRate,
+                out int sampleRate)
+            || sampleRate != expectedSampleRate
+            || !TryAppendByte(input, header, ref length))
+        {
+            return false;
+        }
+
+        return CalculateFlacCrc8(header[..(length - 1)]) == header[length - 1];
+    }
+
+    private static bool TryDecodeFixedBlockSize(int code, out int blockSize)
+    {
+        blockSize = code switch
+        {
+            1 => 192,
+            >= 2 and <= 5 => 576 << (code - 2),
+            >= 8 and <= 15 => 256 << (code - 8),
+            _ => 0
+        };
+        return blockSize != 0;
+    }
+
+    private static bool TryResolveFrameSampleRate(
+        Stream input,
+        Span<byte> header,
+        ref int length,
+        int code,
+        int streamInfoSampleRate,
+        out int sampleRate)
+    {
+        sampleRate = code switch
+        {
+            0 => streamInfoSampleRate,
+            1 => 88_200,
+            2 => 176_400,
+            3 => 192_000,
+            4 => 8_000,
+            5 => 16_000,
+            6 => 22_050,
+            7 => 24_000,
+            8 => 32_000,
+            9 => 44_100,
+            10 => 48_000,
+            11 => 96_000,
+            _ => 0
+        };
+        if (code == 12)
+        {
+            if (!TryAppendByte(input, header, ref length))
+            {
+                return false;
+            }
+
+            sampleRate = header[length - 1] * 1_000;
+        }
+        else if (code is 13 or 14)
+        {
+            if (!TryAppendByte(input, header, ref length)
+                || !TryAppendByte(input, header, ref length))
+            {
+                return false;
+            }
+
+            sampleRate = BinaryPrimitives.ReadUInt16BigEndian(header[(length - 2)..length]);
+            if (code == 14)
+            {
+                sampleRate *= 10;
+            }
+        }
+
+        return code != 15 && sampleRate > 0;
+    }
+
+    private static bool TryAppendByte(Stream input, Span<byte> buffer, ref int length)
+    {
+        if (length >= buffer.Length)
+        {
+            return false;
+        }
+
+        int value = input.ReadByte();
+        if (value < 0)
+        {
+            return false;
+        }
+
+        buffer[length++] = checked((byte)value);
+        return true;
+    }
+
+    private static byte CalculateFlacCrc8(ReadOnlySpan<byte> data)
+    {
+        byte crc = 0;
+        foreach (byte value in data)
+        {
+            crc ^= value;
+            for (int bit = 0; bit < 8; bit++)
+            {
+                crc = (crc & 0x80) != 0
+                    ? (byte)((crc << 1) ^ 0x07)
+                    : (byte)(crc << 1);
+            }
+        }
+
+        return crc;
     }
 
     private static bool TrySkipExactly(Stream input, int count, Span<byte> buffer)
