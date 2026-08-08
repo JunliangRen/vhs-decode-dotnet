@@ -99,9 +99,9 @@ for compatibility-sensitive work.
 
 The table uses one fixed private local 40 MHz PAL VHS `.ldf` fixture and the
 same 40-frame window for every run; the filename is intentionally not
-published. The Python columns retain their audited measurements. All twenty
-.NET cells were refreshed with three Release runs from performance commit
-`f71aa0a`, based on merged main `44e0d24`.
+published. The Python and v0.4.0 .NET columns retain their audited
+measurements. The ten `current` .NET cells were refreshed with three Release
+runs from this candidate, based on merged main `cc98519`.
 This oversized raw-FLAC fixture correctly uses FFmpeg
 because it exceeds libsndfile 1.2.2's exact-seek gate, so the former
 `ced6afb`-based table is not directly comparable. Compatibility is evaluated
@@ -110,13 +110,13 @@ separately from speed.
 <!-- LATEST_PERFORMANCE_BEGIN -->
 | CLI mode (workers) | Python v0.4.0 | Python PR341 | Exact + v0.4.0 | Exact + current | IPP-fast + v0.4.0 | IPP-fast + current |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| default (5) | 15.207 s | 16.780 s | 6.875 s / 2.212x | 7.800 s / 2.151x | 5.162 s / 2.946x | 5.036 s / 3.332x |
-| `--threads 1` | 17.694 s | 19.414 s | 11.740 s / 1.507x | 13.384 s / 1.451x | 8.386 s / 2.110x | 9.587 s / 2.025x |
-| `--threads 5` | 15.719 s | 17.801 s | 6.846 s / 2.296x | 7.541 s / 2.360x | 5.150 s / 3.052x | 5.144 s / 3.460x |
-| `--threads 10` | 16.037 s | 18.266 s | 5.967 s / 2.687x | 6.787 s / 2.691x | 4.732 s / 3.389x | 4.479 s / 4.078x |
-| `--threads 20` | 16.405 s | 18.395 s | 5.381 s / 3.048x | 6.252 s / 2.942x | 4.450 s / 3.686x | 4.383 s / 4.197x |
+| default (5) | 15.207 s | 16.780 s | 6.875 s / 2.212x | 7.169 s / 2.341x | 5.162 s / 2.946x | 4.510 s / 3.721x |
+| `--threads 1` | 17.694 s | 19.414 s | 11.740 s / 1.507x | 13.167 s / 1.474x | 8.386 s / 2.110x | 9.188 s / 2.113x |
+| `--threads 5` | 15.719 s | 17.801 s | 6.846 s / 2.296x | 7.129 s / 2.497x | 5.150 s / 3.052x | 4.444 s / 4.006x |
+| `--threads 10` | 16.037 s | 18.266 s | 5.967 s / 2.687x | 6.255 s / 2.920x | 4.732 s / 3.389x | 4.032 s / 4.530x |
+| `--threads 20` | 16.405 s | 18.395 s | 5.381 s / 3.048x | 5.576 s / 3.299x | 4.450 s / 3.686x | 3.609 s / 5.098x |
 <!-- LATEST_PERFORMANCE_END -->
-<!-- LATEST_PERFORMANCE_RUNS: dotnet-full-refresh=60 repeats=3 pocketfft-pass8-long-paired=8 thread-gates=24 determinism=60 -->
+<!-- LATEST_PERFORMANCE_RUNS: current-refresh=30 repeats=3 cti-kernel-paired=16 exact-short-paired=12 exact-long-paired=4 ipp-short-paired=12 thread-gates=24 determinism=30 -->
 
 Each .NET cell shows median wall time and speedup versus its profile-matched
 Python column. The default is **5 workers**. Multi-worker compact VHS decoding
@@ -135,17 +135,20 @@ lower) while CPU time fell 4.48%. Peak working set stayed bounded. Separate
 Exact and IPP-fast gates matched both profiles at `--threads 0`, default-five,
 and `--threads 20`, including cross-thread determinism.
 
-Managed AVX now evaluates eight independent `current` CTI distance lanes while
-preserving the original float32 FMA order, scalar tail, and no-AVX fallback.
-Two reverse-order 1,000-frame Exact pairs were neutral at 50.687/50.793 s
-(baseline/candidate, -0.21%). Two IPP-fast pairs both favored the candidate:
-43.730/42.872 s (1.96% lower), with CPU time falling from 255.273 to 251.797 s
-(1.36%). IPP peak memory did not increase.
+Managed AVX now carries eight independent `current` CTI lanes through the
+existing quotient refinement, gate, weighting, and rounded output stages while
+preserving the pinned reciprocal and original float/double FMA order. The
+production-size kernel median fell 19.2%. Six 160-frame Exact pairs improved
+2.1%; two reverse-order 1,000-frame pairs moved from 54.42 to 52.76 seconds
+(3.05%) while effective cores rose from 6.94 to 7.07. Six IPP-fast pairs were
+neutral at three wins each and +0.13% paired mean wall time, so no causal IPP
+gain is claimed from this patch.
 
-All 60 refreshed matrix runs were deterministic, with one luma, chroma, raw
-JSON, stdout, normalized stderr, and normalized log hash per profile across
-default-5 and `--threads 1/5/10/20`. The long CTI gates also matched ordered
-`fileLoc` across baseline and candidate for Exact and IPP-fast.
+All 30 refreshed `current` matrix runs were deterministic, with one luma,
+chroma, raw JSON, stdout, normalized stderr, and normalized log hash per backend
+across default-5 and `--threads 1/5/10/20`. Twenty-four baseline/candidate
+gates also matched ordered `fileLoc` for both profiles and backends at
+`--threads 0`, default-five, and `--threads 20`.
 IPP-fast remains an explicit numerically close backend, so its artifacts are
 not claimed to match Exact byte for byte. Python v0.4.0 can change output hashes
 with nonzero worker counts, so Python v0.4.0 `g4315520 --threads 0` remains the

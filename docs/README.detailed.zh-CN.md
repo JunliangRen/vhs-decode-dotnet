@@ -336,24 +336,53 @@ IPP-fast v0.4.0 和 IPP-fast `current`。文件名不会公开。每个 .NET 单
 <!-- LATEST_PERFORMANCE_BEGIN -->
 | CLI 模式（workers） | Python v0.4.0 | Python PR341 | Exact + v0.4.0 | Exact + current | IPP-fast + v0.4.0 | IPP-fast + current |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| 默认（5） | 15.207 s | 16.780 s | 6.875 s / 2.212x / 54.79% | 7.800 s / 2.151x / 53.52% | 5.162 s / 2.946x / 66.06% | 5.036 s / 3.332x / 69.99% |
-| `--threads 1` | 17.694 s | 19.414 s | 11.740 s / 1.507x / 33.65% | 13.384 s / 1.451x / 31.06% | 8.386 s / 2.110x / 52.60% | 9.587 s / 2.025x / 50.62% |
-| `--threads 5` | 15.719 s | 17.801 s | 6.846 s / 2.296x / 56.45% | 7.541 s / 2.360x / 57.63% | 5.150 s / 3.052x / 67.23% | 5.144 s / 3.460x / 71.10% |
-| `--threads 10` | 16.037 s | 18.266 s | 5.967 s / 2.687x / 62.79% | 6.787 s / 2.691x / 62.84% | 4.732 s / 3.389x / 70.49% | 4.479 s / 4.078x / 75.48% |
-| `--threads 20` | 16.405 s | 18.395 s | 5.381 s / 3.048x / 67.20% | 6.252 s / 2.942x / 66.01% | 4.450 s / 3.686x / 72.87% | 4.383 s / 4.197x / 76.17% |
+| 默认（5） | 15.207 s | 16.780 s | 6.875 s / 2.212x / 54.79% | 7.169 s / 2.341x / 57.28% | 5.162 s / 2.946x / 66.06% | 4.510 s / 3.721x / 73.12% |
+| `--threads 1` | 17.694 s | 19.414 s | 11.740 s / 1.507x / 33.65% | 13.167 s / 1.474x / 32.18% | 8.386 s / 2.110x / 52.60% | 9.188 s / 2.113x / 52.67% |
+| `--threads 5` | 15.719 s | 17.801 s | 6.846 s / 2.296x / 56.45% | 7.129 s / 2.497x / 59.95% | 5.150 s / 3.052x / 67.23% | 4.444 s / 4.006x / 75.04% |
+| `--threads 10` | 16.037 s | 18.266 s | 5.967 s / 2.687x / 62.79% | 6.255 s / 2.920x / 65.76% | 4.732 s / 3.389x / 70.49% | 4.032 s / 4.530x / 77.93% |
+| `--threads 20` | 16.405 s | 18.395 s | 5.381 s / 3.048x / 67.20% | 5.576 s / 3.299x / 69.69% | 4.450 s / 3.686x / 72.87% | 3.609 s / 5.098x / 80.38% |
 <!-- LATEST_PERFORMANCE_END -->
-<!-- LATEST_PERFORMANCE_RUNS: dotnet-full-refresh=60 repeats=3 pocketfft-pass8-long-paired=8 thread-gates=24 determinism=60 -->
+<!-- LATEST_PERFORMANCE_RUNS: current-refresh=30 repeats=3 cti-kernel-paired=16 exact-short-paired=12 exact-long-paired=4 ipp-short-paired=12 thread-gates=24 determinism=30 -->
 
 Python 测量于 2026-08-02 在 main commit
-`c92af1dfd0f96cd7f2d49f3219fb428d0f4e0865` 上完成审计。性能提交 `f71aa0a`
-基于已合并的 main `44e0d24`，把 20 个 .NET 单元格各重测三次；Python 两列沿用此前
-审计数据。固定夹具
+`c92af1dfd0f96cd7f2d49f3219fb428d0f4e0865` 上完成审计。Python 两列和 v0.4.0 的
+.NET 两列沿用此前审计数据；本候选基于已合并的 main `cc98519`，把 10 个 `current`
+.NET 单元格各重测三次。固定夹具
 超过 libsndfile 1.2.2 的精确定位样本上限，现在会正确改走 FFmpeg；因此这组短窗
 数字不能与之前基于 `ced6afb`、使用 libsndfile 的表格直接比较。
 测试机为 Intel Core Ultra 7
 265K（20 个逻辑处理器）、Windows 11 build 26220，以及 .NET SDK/runtime
 `11.0.100-preview.6.26359.118`。原始运行目录含有私有夹具路径，因此只保留在本地；
-下列数字是如实报告的本地测量，不是可公开独立复现的 benchmark corpus。
+下列数字是如实报告的本地测量，不是可公开独立复现的 benchmark corpus。矩阵候选
+可执行文件的 SHA-256 为
+`81CC6E816A10C1EE61AA234194BED92658D250A2615A908844C30CCFD6067B11`。
+
+### 托管 current CTI 商值与收尾 AVX
+
+既有 8-lane AVX/FMA CTI 距离路径现在会把同一批 lane 继续带过固定倒数修正、阈值
+门控、上下半程权重、目标差值构造和舍入输出。每条 lane 都保留原有 float 减法与 FMA
+顺序、float 到 double 的转换点、double 精度权重与 FMA 顺序，以及存为 double 前的
+最终 float 舍入。标量尾部以及不支持 AVX、FMA 或 SSE4.1 的主机继续执行此前路径。
+JIT 反汇编确认两个 4-lane 收尾组会以内联的 `vfmadd*`、`vblendv*` 和转换指令进入
+热循环，而不是调用 8 次标量 `FinishSample`。
+
+八组交错的生产尺寸内核配对保持同一个 SHA-256，墙钟中位数从 416.746 降至
+336.922 ms（缩短 19.16%），进程 CPU 中位数从 2578.125 降至 1742.188 ms
+（减少 32.42%）。六组 160 帧 Exact `current --threads 20` 配对保持所有比较表面
+一致，墙钟中位数从 14.08 降至 13.78 秒（缩短 2.1%），候选五胜一负。两组反序
+1000 帧 Exact 配对的合并中位数从 54.42 降至 52.76 秒（缩短 3.05%），CPU 时间
+从 377.59 降至 373.18 秒，有效核心数从 6.94 升至 7.07。候选采样峰值工作集的
+中位数高 17.3 MiB，但始终低于 799 MiB，且没有持续增长。
+
+六组相同规格的 160 帧 IPP-fast 配对为三胜三负，配对平均墙钟变化为 +0.13%，因此
+把 IPP 路径归类为吞吐中性，不声称因本补丁获得 IPP 提速。表中更新后的 IPP 单元格
+是当前构建的新快照，不能把它们相对上一张表的全部差值归因于本补丁。
+
+24 次基线/候选真实 RF 门禁覆盖 Exact 与 IPP-fast、v0.4.0 与 `current`，以及
+`--threads 0`、默认 5 和 `--threads 20`。亮度、色度、原始 JSON、stdout、耗时
+归一化 stderr、时间戳归一化日志、有序 `fileLoc` 和跨线程确定性全部一致。全部
+1349 项 xUnit v3 测试通过；18 项固定 CTI 用例还分别在禁用 AVX 和禁用 SSE4.1 时
+通过。Release solution 零警告、零错误。
 
 ### 托管 radix-8 PocketFFT AVX 双蝶形
 
