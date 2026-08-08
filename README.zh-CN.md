@@ -90,21 +90,21 @@ CVBS 和 HiFi 仍会拒绝 `ipp-fast`；需要 release 兼容行为时应使用 
 ## 最新性能
 
 下表固定使用同一份私有本地 40 MHz PAL VHS `.ldf` 夹具和相同的 40 帧窗口，
-不会公开源文件名。Python 两列沿用已审计测量值；合并后的 main `38b7d32` 上，
-20 个 .NET 单元格均重新进行三次 Release 测量。这份超大 raw-FLAC 已超过
+不会公开源文件名。Python 两列沿用已审计测量值；性能提交 `f71aa0a` 基于已合并的
+main `44e0d24`，20 个 .NET 单元格均重新进行三次 Release 测量。这份超大 raw-FLAC 已超过
 libsndfile 1.2.2 的精确定位门禁，因此现在会正确改走 FFmpeg；新结果不能与之前基于
 `ced6afb` 的表格直接比较。兼容性结论与速度数据分开判断。
 
 <!-- LATEST_PERFORMANCE_BEGIN -->
 | CLI 模式（workers） | Python v0.4.0 | Python PR341 | Exact + v0.4.0 | Exact + current | IPP-fast + v0.4.0 | IPP-fast + current |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| 默认（5） | 15.207 s | 16.780 s | 7.533 s / 2.019x | 7.725 s / 2.172x | 5.320 s / 2.858x | 5.171 s / 3.245x |
-| `--threads 1` | 17.694 s | 19.414 s | 12.291 s / 1.440x | 14.181 s / 1.369x | 8.524 s / 2.076x | 9.719 s / 1.997x |
-| `--threads 5` | 15.719 s | 17.801 s | 7.258 s / 2.166x | 7.626 s / 2.334x | 5.299 s / 2.966x | 5.150 s / 3.457x |
-| `--threads 10` | 16.037 s | 18.266 s | 5.901 s / 2.718x | 6.861 s / 2.662x | 4.979 s / 3.221x | 4.702 s / 3.885x |
-| `--threads 20` | 16.405 s | 18.395 s | 5.852 s / 2.803x | 6.058 s / 3.036x | 4.596 s / 3.569x | 4.345 s / 4.234x |
+| 默认（5） | 15.207 s | 16.780 s | 6.875 s / 2.212x | 7.800 s / 2.151x | 5.162 s / 2.946x | 5.036 s / 3.332x |
+| `--threads 1` | 17.694 s | 19.414 s | 11.740 s / 1.507x | 13.384 s / 1.451x | 8.386 s / 2.110x | 9.587 s / 2.025x |
+| `--threads 5` | 15.719 s | 17.801 s | 6.846 s / 2.296x | 7.541 s / 2.360x | 5.150 s / 3.052x | 5.144 s / 3.460x |
+| `--threads 10` | 16.037 s | 18.266 s | 5.967 s / 2.687x | 6.787 s / 2.691x | 4.732 s / 3.389x | 4.479 s / 4.078x |
+| `--threads 20` | 16.405 s | 18.395 s | 5.381 s / 3.048x | 6.252 s / 2.942x | 4.450 s / 3.686x | 4.383 s / 4.197x |
 <!-- LATEST_PERFORMANCE_END -->
-<!-- LATEST_PERFORMANCE_RUNS: dotnet-full-refresh=60 repeats=3 cti-long-paired=8 determinism=60 -->
+<!-- LATEST_PERFORMANCE_RUNS: dotnet-full-refresh=60 repeats=3 pocketfft-pass8-long-paired=8 thread-gates=24 determinism=60 -->
 
 每个 .NET 单元格依次给出墙钟中位数和相对同 profile Python 列的倍速；默认实际
 使用 **5 个 workers**。多 worker 的紧凑 VHS 路径现在会在低通同步工作继续进行时
@@ -112,6 +112,13 @@ libsndfile 1.2.2 的精确定位门禁，因此现在会正确改走 FFmpeg；�
 有状态路径仍使用 eager 实现。1000 帧反序 Exact 配对中，v0.4.0 和 `current` 的
 墙钟分别缩短 2.66% 和 2.55%；600 帧 IPP-fast 配对中，v0.4.0 缩短 1.85%，
 `current` 基本中性（-0.03%）。
+
+托管 AVX 现在每次处理两个互相独立的 double 精度 radix-8 PocketFFT 蝶形，同时保留
+每个 lane 原有的运算顺序、标量尾部和无 AVX 回退。两组反序 1000 帧 Exact 配对中，
+v0.4.0 从 64.106 降至 63.742 秒（缩短 0.57%），CPU 时间减少 1.74%；`current`
+从 52.405 降至 52.259 秒（缩短 0.28%），CPU 时间减少 4.48%。峰值工作集保持有界。
+另行执行的 Exact 与 IPP-fast 门禁覆盖两个 profile 的 `--threads 0`、默认 5 和
+`--threads 20`，包括跨线程确定性也全部一致。
 
 托管 AVX 现在一次计算 8 个彼此独立的 `current` CTI 距离 lane，同时保留原有
 float32 FMA 顺序、标量尾部和无 AVX 回退。两组反序 1000 帧 Exact 配对基本中性，
