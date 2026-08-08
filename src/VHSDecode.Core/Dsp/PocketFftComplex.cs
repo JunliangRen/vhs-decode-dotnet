@@ -1,12 +1,24 @@
 // Radix-2/4/8 complex FFT adapted from pocketfft's BSD-3-Clause implementation.
 using System.Numerics;
 using System.Runtime.CompilerServices;
+using System.Runtime.Intrinsics;
+using System.Runtime.Intrinsics.X86;
 using System.Runtime.InteropServices;
 
 namespace VHSDecode.Core.Dsp;
 
 public static class PocketFftComplex
 {
+    private const byte SwapComplexComponents = 0b0101;
+    private const byte SelectImaginaryComponents = 0b1010;
+    private const double Pass8HalfSqrt2 = 0.707106781186547524400844362104849;
+    private static readonly Vector256<double> NegateAllComponents = Vector256.Create(-0.0);
+    private static readonly Vector256<double> NegateEvenComponents =
+        Vector256.Create(-0.0, 0.0, -0.0, 0.0);
+    private static readonly Vector256<double> NegateOddComponents =
+        Vector256.Create(0.0, -0.0, 0.0, -0.0);
+    private static readonly Vector256<double> Pass8HalfSqrt2Vector =
+        Vector256.Create(Pass8HalfSqrt2);
     private static readonly SingleCreationCache<int, Plan> Plans = new();
     private static readonly SingleCreationCache<(int Length, int RootLength), Plan> RootedPlans = new();
     private static readonly SingleCreationCache<int, SinCos2PiByN> Roots = new();
@@ -662,6 +674,7 @@ public static class PocketFftComplex
             }
         }
 
+        [MethodImpl(MethodImplOptions.AggressiveOptimization)]
         private static void Pass8Core<TDirection>(
             int ido,
             int l1,
@@ -675,30 +688,131 @@ public static class PocketFftComplex
             System.Diagnostics.Debug.Assert((long)ido * l1 * 8 <= input.Length);
             System.Diagnostics.Debug.Assert((long)ido * l1 * 8 <= output.Length);
             System.Diagnostics.Debug.Assert((long)(ido - 1) * 7 <= twiddles.Length);
+            System.Diagnostics.Debug.Assert(Unsafe.SizeOf<Value>() == 2 * sizeof(double));
             ref Value inputStart = ref MemoryMarshal.GetArrayDataReference(input);
             ref Value outputStart = ref MemoryMarshal.GetArrayDataReference(output);
             ref Value twiddleStart = ref MemoryMarshal.GetArrayDataReference(twiddles);
             for (int k = 0; k < l1; k++)
             {
+                int inputBase = ido * 8 * k;
+                int outputBase = ido * k;
                 Pass8FirstIndex<TDirection>(
                     input,
                     output,
-                    ido * 8 * k,
-                    ido * k,
+                    inputBase,
+                    outputBase,
                     ido,
                     outputStride);
-                for (int i = 1; i < ido; i++)
+                int i = 1;
+                if (Avx.IsSupported)
                 {
+                    int twiddleStride = ido - 1;
+                    for (; i + 1 < ido; i += 2)
+                    {
+                        int inputIndex = inputBase + i;
+                        Pair(
+                            out Vector256<double> a1,
+                            out Vector256<double> a5,
+                            LoadTwoValues(ref inputStart, inputIndex + ido),
+                            LoadTwoValues(ref inputStart, inputIndex + (5 * ido)));
+                        Pair(
+                            out Vector256<double> a3,
+                            out Vector256<double> a7,
+                            LoadTwoValues(ref inputStart, inputIndex + (3 * ido)),
+                            LoadTwoValues(ref inputStart, inputIndex + (7 * ido)));
+                        a7 = TDirection.RotateX90(a7);
+                        PairInPlace(ref a1, ref a3);
+                        a3 = TDirection.RotateX90(a3);
+                        PairInPlace(ref a5, ref a7);
+                        a5 = TDirection.RotateX45(a5);
+                        a7 = TDirection.RotateX135(a7);
+                        Pair(
+                            out Vector256<double> a0,
+                            out Vector256<double> a4,
+                            LoadTwoValues(ref inputStart, inputIndex),
+                            LoadTwoValues(ref inputStart, inputIndex + (4 * ido)));
+                        Pair(
+                            out Vector256<double> a2,
+                            out Vector256<double> a6,
+                            LoadTwoValues(ref inputStart, inputIndex + (2 * ido)),
+                            LoadTwoValues(ref inputStart, inputIndex + (6 * ido)));
+                        PairInPlace(ref a0, ref a2);
+
+                        int outputIndex = outputBase + i;
+                        int twiddleIndex = i - 1;
+                        StoreTwoValues(ref outputStart, outputIndex, Avx.Add(a0, a1));
+                        StoreTwoValues(
+                            ref outputStart,
+                            outputIndex + (4 * outputStride),
+                            TDirection.SpecialMultiply(
+                                Avx.Subtract(a0, a1),
+                                LoadTwoValues(
+                                    ref twiddleStart,
+                                    twiddleIndex + (3 * twiddleStride))));
+                        StoreTwoValues(
+                            ref outputStart,
+                            outputIndex + (2 * outputStride),
+                            TDirection.SpecialMultiply(
+                                Avx.Add(a2, a3),
+                                LoadTwoValues(
+                                    ref twiddleStart,
+                                    twiddleIndex + twiddleStride)));
+                        StoreTwoValues(
+                            ref outputStart,
+                            outputIndex + (6 * outputStride),
+                            TDirection.SpecialMultiply(
+                                Avx.Subtract(a2, a3),
+                                LoadTwoValues(
+                                    ref twiddleStart,
+                                    twiddleIndex + (5 * twiddleStride))));
+                        a6 = TDirection.RotateX90(a6);
+                        PairInPlace(ref a4, ref a6);
+                        StoreTwoValues(
+                            ref outputStart,
+                            outputIndex + outputStride,
+                            TDirection.SpecialMultiply(
+                                Avx.Add(a4, a5),
+                                LoadTwoValues(ref twiddleStart, twiddleIndex)));
+                        StoreTwoValues(
+                            ref outputStart,
+                            outputIndex + (5 * outputStride),
+                            TDirection.SpecialMultiply(
+                                Avx.Subtract(a4, a5),
+                                LoadTwoValues(
+                                    ref twiddleStart,
+                                    twiddleIndex + (4 * twiddleStride))));
+                        StoreTwoValues(
+                            ref outputStart,
+                            outputIndex + (3 * outputStride),
+                            TDirection.SpecialMultiply(
+                                Avx.Add(a6, a7),
+                                LoadTwoValues(
+                                    ref twiddleStart,
+                                    twiddleIndex + (2 * twiddleStride))));
+                        StoreTwoValues(
+                            ref outputStart,
+                            outputIndex + (7 * outputStride),
+                            TDirection.SpecialMultiply(
+                                Avx.Subtract(a6, a7),
+                                LoadTwoValues(
+                                    ref twiddleStart,
+                                    twiddleIndex + (6 * twiddleStride))));
+                    }
+                }
+
+                for (; i < ido; i++)
+                {
+                    int inputIndex = inputBase + i;
                     Pair(
                         out Value a1,
                         out Value a5,
-                        Unsafe.Add(ref inputStart, InputIndex(i, 1, k, ido, 8)),
-                        Unsafe.Add(ref inputStart, InputIndex(i, 5, k, ido, 8)));
+                        Unsafe.Add(ref inputStart, inputIndex + ido),
+                        Unsafe.Add(ref inputStart, inputIndex + (5 * ido)));
                     Pair(
                         out Value a3,
                         out Value a7,
-                        Unsafe.Add(ref inputStart, InputIndex(i, 3, k, ido, 8)),
-                        Unsafe.Add(ref inputStart, InputIndex(i, 7, k, ido, 8)));
+                        Unsafe.Add(ref inputStart, inputIndex + (3 * ido)),
+                        Unsafe.Add(ref inputStart, inputIndex + (7 * ido)));
                     a7 = TDirection.RotateX90(a7);
                     PairInPlace(ref a1, ref a3);
                     a3 = TDirection.RotateX90(a3);
@@ -708,36 +822,37 @@ public static class PocketFftComplex
                     Pair(
                         out Value a0,
                         out Value a4,
-                        Unsafe.Add(ref inputStart, InputIndex(i, 0, k, ido, 8)),
-                        Unsafe.Add(ref inputStart, InputIndex(i, 4, k, ido, 8)));
+                        Unsafe.Add(ref inputStart, inputIndex),
+                        Unsafe.Add(ref inputStart, inputIndex + (4 * ido)));
                     Pair(
                         out Value a2,
                         out Value a6,
-                        Unsafe.Add(ref inputStart, InputIndex(i, 2, k, ido, 8)),
-                        Unsafe.Add(ref inputStart, InputIndex(i, 6, k, ido, 8)));
+                        Unsafe.Add(ref inputStart, inputIndex + (2 * ido)),
+                        Unsafe.Add(ref inputStart, inputIndex + (6 * ido)));
                     PairInPlace(ref a0, ref a2);
-                    Unsafe.Add(ref outputStart, OutputIndex(i, k, 0, ido, l1)) = Add(a0, a1);
-                    Unsafe.Add(ref outputStart, OutputIndex(i, k, 4, ido, l1)) = TDirection.SpecialMultiply(
+                    int outputIndex = outputBase + i;
+                    Unsafe.Add(ref outputStart, outputIndex) = Add(a0, a1);
+                    Unsafe.Add(ref outputStart, outputIndex + (4 * outputStride)) = TDirection.SpecialMultiply(
                         Subtract(a0, a1),
                         Unsafe.Add(ref twiddleStart, TwiddleIndex(3, i, ido)));
-                    Unsafe.Add(ref outputStart, OutputIndex(i, k, 2, ido, l1)) = TDirection.SpecialMultiply(
+                    Unsafe.Add(ref outputStart, outputIndex + (2 * outputStride)) = TDirection.SpecialMultiply(
                         Add(a2, a3),
                         Unsafe.Add(ref twiddleStart, TwiddleIndex(1, i, ido)));
-                    Unsafe.Add(ref outputStart, OutputIndex(i, k, 6, ido, l1)) = TDirection.SpecialMultiply(
+                    Unsafe.Add(ref outputStart, outputIndex + (6 * outputStride)) = TDirection.SpecialMultiply(
                         Subtract(a2, a3),
                         Unsafe.Add(ref twiddleStart, TwiddleIndex(5, i, ido)));
                     a6 = TDirection.RotateX90(a6);
                     PairInPlace(ref a4, ref a6);
-                    Unsafe.Add(ref outputStart, OutputIndex(i, k, 1, ido, l1)) = TDirection.SpecialMultiply(
+                    Unsafe.Add(ref outputStart, outputIndex + outputStride) = TDirection.SpecialMultiply(
                         Add(a4, a5),
                         Unsafe.Add(ref twiddleStart, TwiddleIndex(0, i, ido)));
-                    Unsafe.Add(ref outputStart, OutputIndex(i, k, 5, ido, l1)) = TDirection.SpecialMultiply(
+                    Unsafe.Add(ref outputStart, outputIndex + (5 * outputStride)) = TDirection.SpecialMultiply(
                         Subtract(a4, a5),
                         Unsafe.Add(ref twiddleStart, TwiddleIndex(4, i, ido)));
-                    Unsafe.Add(ref outputStart, OutputIndex(i, k, 3, ido, l1)) = TDirection.SpecialMultiply(
+                    Unsafe.Add(ref outputStart, outputIndex + (3 * outputStride)) = TDirection.SpecialMultiply(
                         Add(a6, a7),
                         Unsafe.Add(ref twiddleStart, TwiddleIndex(2, i, ido)));
-                    Unsafe.Add(ref outputStart, OutputIndex(i, k, 7, ido, l1)) = TDirection.SpecialMultiply(
+                    Unsafe.Add(ref outputStart, outputIndex + (7 * outputStride)) = TDirection.SpecialMultiply(
                         Subtract(a6, a7),
                         Unsafe.Add(ref twiddleStart, TwiddleIndex(6, i, ido)));
                 }
@@ -897,11 +1012,21 @@ public static class PocketFftComplex
     {
         static abstract Value SpecialMultiply(Value left, Value right);
 
+        static abstract Vector256<double> SpecialMultiply(
+            Vector256<double> left,
+            Vector256<double> right);
+
         static abstract Value RotateX90(Value value);
+
+        static abstract Vector256<double> RotateX90(Vector256<double> value);
 
         static abstract Value RotateX45(Value value);
 
+        static abstract Vector256<double> RotateX45(Vector256<double> value);
+
         static abstract Value RotateX135(Value value);
+
+        static abstract Vector256<double> RotateX135(Vector256<double> value);
     }
 
     private readonly struct ForwardPass8Direction : IPass8Direction
@@ -913,25 +1038,72 @@ public static class PocketFftComplex
                 (left.Imaginary * right.Real) - (left.Real * right.Imaginary));
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static Vector256<double> SpecialMultiply(
+            Vector256<double> left,
+            Vector256<double> right)
+        {
+            Vector256<double> products = Avx.Multiply(left, right);
+            Vector256<double> real = Avx.Add(
+                products,
+                Avx.Permute(products, SwapComplexComponents));
+            Vector256<double> crossProducts = Avx.Multiply(
+                left,
+                Avx.Permute(right, SwapComplexComponents));
+            Vector256<double> imaginary = Avx.Subtract(
+                crossProducts,
+                Avx.Permute(crossProducts, SwapComplexComponents));
+            return Avx.Blend(real, imaginary, SelectImaginaryComponents);
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public static Value RotateX90(Value value)
             => new(value.Imaginary, -value.Real);
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static Vector256<double> RotateX90(Vector256<double> value)
+            => Avx.Xor(
+                Avx.Permute(value, SwapComplexComponents),
+                NegateOddComponents);
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public static Value RotateX45(Value value)
         {
-            const double HalfSqrt2 = 0.707106781186547524400844362104849;
             return new Value(
-                HalfSqrt2 * (value.Real + value.Imaginary),
-                HalfSqrt2 * (value.Imaginary - value.Real));
+                Pass8HalfSqrt2 * (value.Real + value.Imaginary),
+                Pass8HalfSqrt2 * (value.Imaginary - value.Real));
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static Vector256<double> RotateX45(Vector256<double> value)
+        {
+            Vector256<double> swapped = Avx.Permute(value, SwapComplexComponents);
+            return Avx.Multiply(
+                Avx.Blend(
+                    Avx.Add(value, swapped),
+                    Avx.Subtract(value, swapped),
+                    SelectImaginaryComponents),
+                Pass8HalfSqrt2Vector);
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public static Value RotateX135(Value value)
         {
-            const double HalfSqrt2 = 0.707106781186547524400844362104849;
             return new Value(
-                HalfSqrt2 * (value.Imaginary - value.Real),
-                HalfSqrt2 * (-value.Real - value.Imaginary));
+                Pass8HalfSqrt2 * (value.Imaginary - value.Real),
+                Pass8HalfSqrt2 * (-value.Real - value.Imaginary));
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static Vector256<double> RotateX135(Vector256<double> value)
+        {
+            Vector256<double> swapped = Avx.Permute(value, SwapComplexComponents);
+            Vector256<double> difference = Avx.Subtract(swapped, value);
+            Vector256<double> negativeSum = Avx.Subtract(
+                Avx.Xor(swapped, NegateAllComponents),
+                value);
+            return Avx.Multiply(
+                Avx.Blend(difference, negativeSum, SelectImaginaryComponents),
+                Pass8HalfSqrt2Vector);
         }
     }
 
@@ -944,25 +1116,75 @@ public static class PocketFftComplex
                 (left.Real * right.Imaginary) + (left.Imaginary * right.Real));
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static Vector256<double> SpecialMultiply(
+            Vector256<double> left,
+            Vector256<double> right)
+        {
+            Vector256<double> products = Avx.Multiply(left, right);
+            Vector256<double> real = Avx.Subtract(
+                products,
+                Avx.Permute(products, SwapComplexComponents));
+            Vector256<double> crossProducts = Avx.Multiply(
+                left,
+                Avx.Permute(right, SwapComplexComponents));
+            Vector256<double> crossSum = Avx.Add(
+                crossProducts,
+                Avx.Permute(crossProducts, SwapComplexComponents));
+            Vector256<double> imaginary = Avx.Permute(
+                crossSum,
+                SwapComplexComponents);
+            return Avx.Blend(real, imaginary, SelectImaginaryComponents);
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public static Value RotateX90(Value value)
             => new(-value.Imaginary, value.Real);
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static Vector256<double> RotateX90(Vector256<double> value)
+            => Avx.Xor(
+                Avx.Permute(value, SwapComplexComponents),
+                NegateEvenComponents);
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public static Value RotateX45(Value value)
         {
-            const double HalfSqrt2 = 0.707106781186547524400844362104849;
             return new Value(
-                HalfSqrt2 * (value.Real - value.Imaginary),
-                HalfSqrt2 * (value.Imaginary + value.Real));
+                Pass8HalfSqrt2 * (value.Real - value.Imaginary),
+                Pass8HalfSqrt2 * (value.Imaginary + value.Real));
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static Vector256<double> RotateX45(Vector256<double> value)
+        {
+            Vector256<double> swapped = Avx.Permute(value, SwapComplexComponents);
+            return Avx.Multiply(
+                Avx.Blend(
+                    Avx.Subtract(value, swapped),
+                    Avx.Add(value, swapped),
+                    SelectImaginaryComponents),
+                Pass8HalfSqrt2Vector);
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public static Value RotateX135(Value value)
         {
-            const double HalfSqrt2 = 0.707106781186547524400844362104849;
             return new Value(
-                HalfSqrt2 * (-value.Real - value.Imaginary),
-                HalfSqrt2 * (value.Real - value.Imaginary));
+                Pass8HalfSqrt2 * (-value.Real - value.Imaginary),
+                Pass8HalfSqrt2 * (value.Real - value.Imaginary));
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static Vector256<double> RotateX135(Vector256<double> value)
+        {
+            Vector256<double> swapped = Avx.Permute(value, SwapComplexComponents);
+            Vector256<double> negativeSum = Avx.Subtract(
+                Avx.Xor(value, NegateAllComponents),
+                swapped);
+            Vector256<double> difference = Avx.Subtract(swapped, value);
+            return Avx.Multiply(
+                Avx.Blend(negativeSum, difference, SelectImaginaryComponents),
+                Pass8HalfSqrt2Vector);
         }
     }
 
@@ -984,11 +1206,49 @@ public static class PocketFftComplex
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private static void Pair(
+        out Vector256<double> sum,
+        out Vector256<double> difference,
+        Vector256<double> left,
+        Vector256<double> right)
+    {
+        sum = Avx.Add(left, right);
+        difference = Avx.Subtract(left, right);
+    }
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private static void PairInPlace(ref Value left, ref Value right)
     {
         Value originalLeft = left;
         left = Add(left, right);
         right = Subtract(originalLeft, right);
+    }
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private static void PairInPlace(
+        ref Vector256<double> left,
+        ref Vector256<double> right)
+    {
+        Vector256<double> originalLeft = left;
+        left = Avx.Add(left, right);
+        right = Avx.Subtract(originalLeft, right);
+    }
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private static Vector256<double> LoadTwoValues(ref Value start, int index)
+    {
+        ref byte address = ref Unsafe.As<Value, byte>(ref Unsafe.Add(ref start, index));
+        return Unsafe.ReadUnaligned<Vector256<double>>(ref address);
+    }
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private static void StoreTwoValues(
+        ref Value start,
+        int index,
+        Vector256<double> value)
+    {
+        ref byte address = ref Unsafe.As<Value, byte>(ref Unsafe.Add(ref start, index));
+        Unsafe.WriteUnaligned(ref address, value);
     }
 
     private static Value SpecialMultiply(Value left, Value right, bool forward)

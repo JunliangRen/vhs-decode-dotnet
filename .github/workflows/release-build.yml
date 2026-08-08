@@ -147,6 +147,11 @@ jobs:
           DOTNET_EnableAVX: "0"
         run: dotnet test tests/VHSDecode.Tests/VHSDecode.Tests.csproj --configuration Release --no-build --no-restore --filter-class VHSDecode.Tests.ChromaTransientImprovementCurrentTests --minimum-expected-tests 18
 
+      - name: Run PocketFFT scalar fallback tests
+        env:
+          DOTNET_EnableAVX: "0"
+        run: dotnet test tests/VHSDecode.Tests/VHSDecode.Tests.csproj --configuration Release --no-build --no-restore --filter-method '*PocketComplexFft*' --minimum-expected-tests 2
+
       - name: Run IPP Super-Gaussian scalar fallback tests
         env:
           DOTNET_EnableHWIntrinsic: "0"
