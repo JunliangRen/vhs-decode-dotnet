@@ -394,17 +394,17 @@ Python v0.4.0、merge 済みの Python PR341、Exact v0.4.0、Exact
 <!-- LATEST_PERFORMANCE_BEGIN -->
 | CLI mode（workers） | Python v0.4.0 | Python PR341 | Exact + v0.4.0 | Exact + current | IPP-fast + v0.4.0 | IPP-fast + current |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| default（5） | 15.207 s | 16.780 s | 7.209 s / 2.109x / 52.59% | 7.914 s / 2.120x / 52.84% | 5.388 s / 2.822x / 64.57% | 5.279 s / 3.179x / 68.54% |
-| `--threads 1` | 17.694 s | 19.414 s | 12.109 s / 1.461x / 31.56% | 14.143 s / 1.373x / 27.15% | 8.568 s / 2.065x / 51.58% | 9.757 s / 1.990x / 49.74% |
-| `--threads 5` | 15.719 s | 17.801 s | 7.238 s / 2.172x / 53.95% | 7.651 s / 2.327x / 57.02% | 5.266 s / 2.985x / 66.50% | 5.125 s / 3.473x / 71.21% |
-| `--threads 10` | 16.037 s | 18.266 s | 5.862 s / 2.736x / 63.44% | 6.720 s / 2.718x / 63.21% | 4.967 s / 3.229x / 69.03% | 4.645 s / 3.933x / 74.57% |
-| `--threads 20` | 16.405 s | 18.395 s | 5.779 s / 2.839x / 64.77% | 6.323 s / 2.909x / 65.62% | 4.634 s / 3.540x / 71.75% | 4.361 s / 4.218x / 76.29% |
+| default（5） | 15.207 s | 16.780 s | 7.533 s / 2.019x / 50.46% | 7.725 s / 2.172x / 53.96% | 5.320 s / 2.858x / 65.01% | 5.171 s / 3.245x / 69.19% |
+| `--threads 1` | 17.694 s | 19.414 s | 12.291 s / 1.440x / 30.53% | 14.181 s / 1.369x / 26.95% | 8.524 s / 2.076x / 51.82% | 9.719 s / 1.997x / 49.94% |
+| `--threads 5` | 15.719 s | 17.801 s | 7.258 s / 2.166x / 53.83% | 7.626 s / 2.334x / 57.16% | 5.299 s / 2.966x / 66.29% | 5.150 s / 3.457x / 71.07% |
+| `--threads 10` | 16.037 s | 18.266 s | 5.901 s / 2.718x / 63.20% | 6.861 s / 2.662x / 62.44% | 4.979 s / 3.221x / 68.95% | 4.702 s / 3.885x / 74.26% |
+| `--threads 20` | 16.405 s | 18.395 s | 5.852 s / 2.803x / 64.33% | 6.058 s / 3.036x / 67.07% | 4.596 s / 3.569x / 71.98% | 4.345 s / 4.234x / 76.38% |
 <!-- LATEST_PERFORMANCE_END -->
 <!-- LATEST_PERFORMANCE_RUNS: dotnet-full-refresh=60 repeats=3 cti-long-paired=8 determinism=60 -->
 
 Python measurement は 2026-08-02 に main commit
-`c92af1dfd0f96cd7f2d49f3219fb428d0f4e0865` で audit しました。この candidate は
-main `aceec7e` を基点に、20 個すべての .NET cell を各 3 回再測定しました。
+`c92af1dfd0f96cd7f2d49f3219fb428d0f4e0865` で audit しました。merged main
+`38b7d32` で、20 個すべての .NET cell を各 3 回再測定しました。
 Python 列は直前の audited measurement を維持します。fixed fixture は
 libsndfile 1.2.2 の exact-seek sample limit を超えるため、現在は正しく FFmpeg を
 使用します。この short-window result は、libsndfile を使った以前の
