@@ -62,7 +62,6 @@ public sealed class CommandLineDspBackendTests
 
     [Theory(DisplayName = "IPP fast rejects commands whose accelerated kernels are not implemented")]
     [InlineData("cvbs")]
-    [InlineData("ld")]
     [InlineData("hifi")]
     public void IppFastRejectsCommandsWithoutAcceleratedKernels(string commandName)
     {
@@ -74,9 +73,11 @@ public sealed class CommandLineDspBackendTests
         DspBackendSupport.EnsureCommandSupported(DspBackend.Exact, commandName);
     }
 
-    [Fact(DisplayName = "IPP fast is enabled only for the implemented VHS RF path")]
-    public void IppFastSupportsVhsRfPath()
-        => DspBackendSupport.EnsureCommandSupported(DspBackend.IppFast, "vhs");
+    [Theory(DisplayName = "IPP fast is enabled for implemented RF paths")]
+    [InlineData("vhs")]
+    [InlineData("ld")]
+    public void IppFastSupportsImplementedRfPaths(string commandName)
+        => DspBackendSupport.EnsureCommandSupported(DspBackend.IppFast, commandName);
 
     private static ParsedCommand Parse(DecodeCommandSpec spec, params string[] options)
     {

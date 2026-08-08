@@ -11484,7 +11484,9 @@ public void TbcFieldDecodePipelineAppliesLdAgc()
             malformedVideo,
             VideoLowPass: malformedLowPass),
         agcLineLocations,
-        100.0,
+        // v0.4.0 uses the nominal 100-sample rf.linelen here. A pulse-derived
+        // mean of 90 would reject every line if it leaked into detectLevels.
+        90.0,
         true,
         100,
         converter,
@@ -13495,6 +13497,62 @@ public void TbcFieldSequenceEngineEmitsLdFrameStatus()
             firstStatus + new string(' ', 80 - firstStatus.Length) + '\r'
             + secondStatus + new string(' ', 80 - secondStatus.Length) + '\r',
             statusOutput.ToString());
+    }
+    finally
+    {
+        Directory.Delete(tempDirectory, recursive: true);
+    }
+}
+
+[Fact(DisplayName = "LD frame status uses unrounded v0.4.0 read location")]
+public void LaserDiscFrameStatusUsesUnroundedReadLocation()
+{
+    string tempDirectory = Path.Combine(Path.GetTempPath(), "vhsdecode-dotnet-tests-" + Guid.NewGuid().ToString("N"));
+    Directory.CreateDirectory(tempDirectory);
+    try
+    {
+        string outputBase = Path.Combine(tempDirectory, "ld-status-unrounded");
+        using DecodeSession session = DecodeSessionFactory.Create(Parse(CliSpecs.LaserDisc, [
+            "--PAL",
+            "--length", "1",
+            "--noEFM",
+            "--disable_analog_audio",
+            "input.s16",
+            outputBase
+        ]));
+        double framesPerSecond = session.Parameters.SysParams.GetProperty("FPS").GetDouble();
+        long samplesPerField = ((long)(session.DecodeSampleRateHz / (framesPerSecond * 2.0))) + 1;
+        long roundedBoundary = checked(samplesPerField * 1_808L);
+
+        TbcDecodedField? ReadField(DecodeSession activeSession, Stream _, long __, int ___, int fieldNumber)
+        {
+            if (fieldNumber >= 2)
+            {
+                return null;
+            }
+
+            long startSample = fieldNumber == 0
+                ? roundedBoundary - samplesPerField - 1
+                : roundedBoundary - 1;
+            return BuildSyntheticTbcField(
+                    startSample,
+                    new ushort[activeSession.TbcFrameSpec.FieldSampleCount],
+                    detectedFirstField: fieldNumber == 0)
+                with
+                {
+                    FieldPhaseId = fieldNumber + 1,
+                    NextFieldOffsetSamples = samplesPerField,
+                    VbiData = []
+                };
+        }
+
+        TbcFieldSequenceDecodeResult result = new TbcFieldSequenceDecodeEngine(
+            readField: ReadField).TryDecodeAndWrite(session, Stream.Null);
+
+        AssertTrue(result.Success);
+        string log = File.ReadAllText(outputBase + ".log");
+        AssertContains(log, "DEBUG - Frame 1/1: File Frame 903: CAV Pulldown/Telecine Frame");
+        Assert.DoesNotContain("File Frame 904:", log, StringComparison.Ordinal);
     }
     finally
     {

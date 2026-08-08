@@ -71,7 +71,8 @@ public static class DspBackendSupport
         }
 
         if (backend == DspBackend.IppFast
-            && !commandName.Equals("vhs", StringComparison.Ordinal))
+            && !commandName.Equals("vhs", StringComparison.Ordinal)
+            && !commandName.Equals("ld", StringComparison.Ordinal))
         {
             throw new NotSupportedException(
                 $"The explicit '{DspBackendParser.IppFastValue}' DSP backend does not yet contain accelerated kernels for the '{commandName}' command. "

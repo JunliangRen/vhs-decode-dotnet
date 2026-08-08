@@ -146,7 +146,11 @@ public sealed class RfBlockDecodePipeline : IDisposable
         return DecodePreparedBlock(input);
     }
 
-    internal RfPipelineBlock? DecodeStreamBlockWithInput(Stream stream, long sample, int blockLength)
+    internal RfPipelineBlock? DecodeStreamBlockWithInput(
+        Stream stream,
+        long sample,
+        int blockLength,
+        Complex[]? rfMtfOverride = null)
     {
         double[]? input = LoadStreamBlockInput(stream, sample, blockLength);
         if (input is null)
@@ -156,7 +160,7 @@ public sealed class RfBlockDecodePipeline : IDisposable
 
         try
         {
-            return DecodePreparedStreamBlock(input);
+            return DecodePreparedStreamBlock(input, rfMtfOverride: rfMtfOverride);
         }
         finally
         {
@@ -200,18 +204,23 @@ public sealed class RfBlockDecodePipeline : IDisposable
             retainRfDiagnosticChannels: true,
             reuseStreamOutputBuffers: false);
 
-    internal RfPipelineBlock DecodePreparedStreamBlock(double[] input, bool reportDiagnostics = true)
+    internal RfPipelineBlock DecodePreparedStreamBlock(
+        double[] input,
+        bool reportDiagnostics = true,
+        Complex[]? rfMtfOverride = null)
         => DecodePreparedBlockCore(
             input,
             reportDiagnostics,
             _retainRfDiagnosticChannels,
-            reuseStreamOutputBuffers: !_retainRfDiagnosticChannels);
+            reuseStreamOutputBuffers: !_retainRfDiagnosticChannels,
+            rfMtfOverride);
 
     private RfPipelineBlock DecodePreparedBlockCore(
         double[] input,
         bool reportDiagnostics,
         bool retainRfDiagnosticChannels,
-        bool reuseStreamOutputBuffers)
+        bool reuseStreamOutputBuffers,
+        Complex[]? rfMtfOverride = null)
     {
         ArgumentNullException.ThrowIfNull(input);
 
@@ -226,13 +235,13 @@ public sealed class RfBlockDecodePipeline : IDisposable
         try
         {
             Complex[]? inputSpectrum = _filters.LdEfm is not null || _filters.LdAnalogAudio is not null
-                ? PocketFftComplex.ForwardDuccRealFull(input)
+                ? _demodulator.ForwardLaserDiscFullSpectrum(input)
                 : null;
             RfDemodulatedBlock demodulated = _demodulator.DemodulateCore(
                 input,
                 _filters.RfVideo,
                 _filters.RfHighPass,
-                _filters.RfMtf,
+                rfMtfOverride ?? _filters.RfMtf,
                 _filters.Video,
                 _filters.VideoLowPass05,
                 _filters.VideoLowPass05Offset,
@@ -298,13 +307,13 @@ public sealed class RfBlockDecodePipeline : IDisposable
 
             if (_filters.LdEfm is not null)
             {
-                inputSpectrum ??= PocketFftComplex.ForwardDuccRealFull(input);
+                inputSpectrum ??= _demodulator.ForwardLaserDiscFullSpectrum(input);
                 demodulated = demodulated with { Efm = DecodeEfmBlock(inputSpectrum, _filters.LdEfm) };
             }
 
             if (_filters.LdAnalogAudio is not null)
             {
-                inputSpectrum ??= PocketFftComplex.ForwardDuccRealFull(input);
+                inputSpectrum ??= _demodulator.ForwardLaserDiscFullSpectrum(input);
                 demodulated = demodulated with { AnalogAudio = DecodeAnalogAudioBlock(inputSpectrum, _filters.LdAnalogAudio) };
             }
 
@@ -643,9 +652,9 @@ public sealed class RfBlockDecodePipeline : IDisposable
         return PocketFftComplex.InverseDuccReal(filtered, realLength);
     }
 
-    private static short[] DecodeEfmBlock(ReadOnlySpan<Complex> spectrum, ReadOnlySpan<Complex> efmFilter)
+    private short[] DecodeEfmBlock(ReadOnlySpan<Complex> spectrum, ReadOnlySpan<Complex> efmFilter)
     {
-        double[] filtered = FilterRealSignal(spectrum, efmFilter);
+        double[] filtered = FilterLaserDiscSignal(spectrum, efmFilter);
         var output = new short[filtered.Length];
         for (int i = 0; i < output.Length; i++)
         {
@@ -656,7 +665,7 @@ public sealed class RfBlockDecodePipeline : IDisposable
         return output;
     }
 
-    private static LaserDiscAnalogAudioBlock DecodeAnalogAudioBlock(
+    private LaserDiscAnalogAudioBlock DecodeAnalogAudioBlock(
         ReadOnlySpan<Complex> spectrum,
         LaserDiscAnalogAudioFilterSet filters)
     {
@@ -665,7 +674,7 @@ public sealed class RfBlockDecodePipeline : IDisposable
         return new LaserDiscAnalogAudioBlock(left, right, filters.DecimationFactor);
     }
 
-    private static double[] DecodeAnalogAudioChannel(
+    private double[] DecodeAnalogAudioChannel(
         ReadOnlySpan<Complex> spectrum,
         LaserDiscAnalogAudioChannelFilter filter)
     {
@@ -675,7 +684,9 @@ public sealed class RfBlockDecodePipeline : IDisposable
             sliced[i] *= filter.Stage1Filter[i];
         }
 
-        Complex[] analytic = PocketFftComplex.Inverse(sliced);
+        Complex[] analytic = _demodulator.InverseLaserDiscFullSpectrum(
+            sliced,
+            useDuccExact: false);
         double[] demodulated = PortedMath.UnwrapHilbert(analytic, filter.SliceSampleRateHz);
         for (int i = 0; i < demodulated.Length; i++)
         {
@@ -683,6 +694,35 @@ public sealed class RfBlockDecodePipeline : IDisposable
         }
 
         return demodulated;
+    }
+
+    private double[] FilterLaserDiscSignal(
+        ReadOnlySpan<Complex> spectrum,
+        ReadOnlySpan<Complex> filter)
+    {
+        if (filter.Length != spectrum.Length)
+        {
+            throw new ArgumentException(
+                "Frequency filter length must match input block length.",
+                nameof(filter));
+        }
+
+        var filtered = new Complex[spectrum.Length];
+        for (int i = 0; i < filtered.Length; i++)
+        {
+            filtered[i] = spectrum[i] * filter[i];
+        }
+
+        Complex[] complex = _demodulator.InverseLaserDiscFullSpectrum(
+            filtered,
+            useDuccExact: false);
+        var real = new double[complex.Length];
+        for (int i = 0; i < real.Length; i++)
+        {
+            real[i] = complex[i].Real;
+        }
+
+        return real;
     }
 
     private static void QuantizeLaserDiscVideoChannels(RfDemodulatedBlock block)

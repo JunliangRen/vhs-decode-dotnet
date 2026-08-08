@@ -6,7 +6,7 @@ namespace VHSDecode.Core.Dsp.Ipp;
 internal static partial class IppNativeMethods
 {
     internal const string LibraryName = "vhsdecode_ipp";
-    internal const uint RequiredAbiVersion = 0x0001_0002;
+    internal const uint RequiredAbiVersion = 0x0001_0003;
 
     internal static readonly string[] RequiredExports =
     [
@@ -16,6 +16,10 @@ internal static partial class IppNativeMethods
         "vhsdecode_ipp_fft64_destroy",
         "vhsdecode_ipp_fft64_forward_real",
         "vhsdecode_ipp_fft64_inverse_real",
+        "vhsdecode_ipp_cfft64_create",
+        "vhsdecode_ipp_cfft64_destroy",
+        "vhsdecode_ipp_cfft64_forward",
+        "vhsdecode_ipp_cfft64_inverse",
         "vhsdecode_ipp_dft32_create",
         "vhsdecode_ipp_dft32_destroy",
         "vhsdecode_ipp_dft32_forward_real",
@@ -75,6 +79,32 @@ internal static partial class IppNativeMethods
         IppComplex64* input,
         int inputLength,
         double* output,
+        int outputLength);
+
+    [LibraryImport(LibraryName, EntryPoint = "vhsdecode_ipp_cfft64_create")]
+    [UnmanagedCallConv(CallConvs = [typeof(CallConvCdecl)])]
+    internal static partial int ComplexFft64Create(int length, out nint context);
+
+    [LibraryImport(LibraryName, EntryPoint = "vhsdecode_ipp_cfft64_destroy")]
+    [UnmanagedCallConv(CallConvs = [typeof(CallConvCdecl)])]
+    internal static partial int ComplexFft64Destroy(nint context);
+
+    [LibraryImport(LibraryName, EntryPoint = "vhsdecode_ipp_cfft64_forward")]
+    [UnmanagedCallConv(CallConvs = [typeof(CallConvCdecl)])]
+    internal static unsafe partial int ComplexFft64Forward(
+        IppComplexFft64SafeHandle context,
+        IppComplex64* input,
+        int inputLength,
+        IppComplex64* output,
+        int outputLength);
+
+    [LibraryImport(LibraryName, EntryPoint = "vhsdecode_ipp_cfft64_inverse")]
+    [UnmanagedCallConv(CallConvs = [typeof(CallConvCdecl)])]
+    internal static unsafe partial int ComplexFft64Inverse(
+        IppComplexFft64SafeHandle context,
+        IppComplex64* input,
+        int inputLength,
+        IppComplex64* output,
         int outputLength);
 
     [LibraryImport(LibraryName, EntryPoint = "vhsdecode_ipp_dft32_create")]

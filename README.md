@@ -38,7 +38,7 @@ evidence, and remaining gaps.
   EIAJ, and supported PAL/NTSC variants.
 - TBC utility tools, the double-click GUI, and developer plotting windows are
   intentionally out of scope.
-- The Visual Studio 2026 `.slnx` solution has **1,331** standard xUnit v3 tests
+- The Visual Studio 2026 `.slnx` solution has **1,349** standard xUnit v3 tests
   that are visible in Test Explorer and runnable with `dotnet test`.
 
 <!-- SECTION: start -->
@@ -80,15 +80,16 @@ multithreaded Python runs are used for speed measurements only.
 | Value | Meaning |
 | --- | --- |
 | `exact` | Default managed path for compatibility-sensitive decoding. |
-| `ipp-fast` | Experimental Windows x64 VHS real-RF path using Intel IPP. It can change floating-point bits and never silently falls back to `exact`. |
+| `ipp-fast` | Experimental Windows x64 VHS and LaserDisc real-RF paths using Intel IPP. It can change floating-point bits and never silently falls back to `exact`. |
 
 ```powershell
 decode.exe vhs --compat-version current --dsp-backend ipp-fast `
   --threads 20 input.lds output
 ```
 
-CVBS, LaserDisc, and HiFi currently reject `ipp-fast`; use `exact` for those
-commands. See the
+LaserDisc now routes its video, EFM, and analog-audio full-complex FFT stages
+through IPP. CVBS and HiFi still reject `ipp-fast`; use `exact` whenever
+release-compatible behavior is required. See the
 [detailed backend notes](docs/README.detailed.md#performance) before using IPP
 for compatibility-sensitive work.
 
@@ -156,10 +157,12 @@ decode is running, allowing compatible preview tools to inspect partial output
 without blocking the writer.
 
 On native-input routes, direct raw `fLaC` `.ldf`/`.flac` inputs that are 40 kHz
-mono PCM16 use the bundled libsndfile reader. This includes default 40 MHz VHS
-`.ldf`, VHS `--no_resample`, and LD without `--inputfreq`; default VHS `.flac`
-and all CVBS inputs still use the FFmpeg/PyAV-compatible path. Ogg/FLAC,
-stereo, PCM24, other sample rates, and unfinished headers also retain FFmpeg.
+mono PCM16 and contain at most `Int32.MaxValue` samples use the bundled
+libsndfile reader. Larger raw-FLAC captures use FFmpeg because libsndfile 1.2.2
+cannot provide exact random access beyond that boundary. Eligible inputs can
+include default 40 MHz VHS `.ldf`, VHS `--no_resample`, and LD without
+`--inputfreq`; default VHS `.flac`, all CVBS inputs, Ogg/FLAC, stereo, PCM24,
+other sample rates, and unfinished headers retain FFmpeg.
 
 <!-- SECTION: build -->
 
@@ -171,7 +174,7 @@ The pinned SDK is .NET `11.0.100-preview.6.26359.118`.
 dotnet restore VHSDecodeDotNet.slnx
 dotnet build VHSDecodeDotNet.slnx -c Release --no-restore
 dotnet test --solution VHSDecodeDotNet.slnx -c Release `
-  --no-build --no-restore --minimum-expected-tests 1331
+  --no-build --no-restore --minimum-expected-tests 1349
 ```
 
 Open `VHSDecodeDotNet.slnx` in Visual Studio 2026 to build, debug, and run the

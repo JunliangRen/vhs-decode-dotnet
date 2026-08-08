@@ -30,6 +30,24 @@ struct vhsdecode_ipp_fft64_context {
     }
 };
 
+struct vhsdecode_ipp_cfft64_context {
+    int32_t length = 0;
+    Ipp8u* spec_storage = nullptr;
+    const IppsFFTSpec_C_64fc* spec = nullptr;
+    Ipp8u* work_buffer = nullptr;
+    std::mutex work_mutex;
+
+    ~vhsdecode_ipp_cfft64_context()
+    {
+        if (work_buffer != nullptr) {
+            ippsFree(work_buffer);
+        }
+        if (spec_storage != nullptr) {
+            ippsFree(spec_storage);
+        }
+    }
+};
+
 struct vhsdecode_ipp_dft32_context {
     int32_t length = 0;
     Ipp8u* spec_storage = nullptr;
@@ -205,6 +223,23 @@ bool is_supported_fft_length(int32_t length) noexcept
     constexpr int32_t max_fft64_length = 1 << 27;
     return length >= 2 && length <= max_fft64_length &&
         (length & (length - 1)) == 0;
+}
+
+bool byte_ranges_partially_overlap(
+    const void* first,
+    size_t first_size,
+    const void* second,
+    size_t second_size) noexcept
+{
+    if (first == second) {
+        return false;
+    }
+
+    const auto first_address = reinterpret_cast<uintptr_t>(first);
+    const auto second_address = reinterpret_cast<uintptr_t>(second);
+    return first_address < second_address
+        ? second_address - first_address < first_size
+        : first_address - second_address < second_size;
 }
 
 const Ipp64fc* as_ipp_complex(const vhsdecode_ipp_complex64* value) noexcept
@@ -611,6 +646,184 @@ vhsdecode_ipp_fft64_inverse_real(
         return static_cast<int32_t>(ippsFFTInv_CCSToR_64f(
             reinterpret_cast<const Ipp64f*>(as_ipp_complex(input)),
             output,
+            context->spec,
+            context->work_buffer));
+    }
+    catch (...) {
+        return VHSDECODE_IPP_STATUS_INTERNAL_ERROR;
+    }
+}
+
+int32_t VHSDECODE_IPP_CALL
+vhsdecode_ipp_cfft64_create(
+    int32_t length,
+    vhsdecode_ipp_cfft64_context** out_context)
+{
+    if (out_context == nullptr) {
+        return VHSDECODE_IPP_STATUS_NULL_POINTER;
+    }
+    *out_context = nullptr;
+    if (!is_supported_fft_length(length)) {
+        return VHSDECODE_IPP_STATUS_UNSUPPORTED_LENGTH;
+    }
+
+    const int32_t initialization_status = ensure_ipp_initialized();
+    if (initialization_status != VHSDECODE_IPP_STATUS_OK) {
+        return initialization_status;
+    }
+
+    try {
+        auto* context = new (std::nothrow) vhsdecode_ipp_cfft64_context();
+        if (context == nullptr) {
+            return VHSDECODE_IPP_STATUS_OUT_OF_MEMORY;
+        }
+
+        context->length = length;
+        const int order = std::countr_zero(static_cast<uint32_t>(length));
+        int spec_size = 0;
+        int init_buffer_size = 0;
+        int work_buffer_size = 0;
+        IppStatus status = ippsFFTGetSize_C_64fc(
+            order,
+            IPP_FFT_DIV_INV_BY_N,
+            ippAlgHintNone,
+            &spec_size,
+            &init_buffer_size,
+            &work_buffer_size);
+        if (status != ippStsNoErr) {
+            delete context;
+            return static_cast<int32_t>(status);
+        }
+
+        context->spec_storage = ippsMalloc_8u(spec_size);
+        if (context->spec_storage == nullptr) {
+            delete context;
+            return VHSDECODE_IPP_STATUS_OUT_OF_MEMORY;
+        }
+
+        Ipp8u* init_buffer = nullptr;
+        if (init_buffer_size > 0) {
+            init_buffer = ippsMalloc_8u(init_buffer_size);
+            if (init_buffer == nullptr) {
+                delete context;
+                return VHSDECODE_IPP_STATUS_OUT_OF_MEMORY;
+            }
+        }
+
+        IppsFFTSpec_C_64fc* initialized_spec = nullptr;
+        status = ippsFFTInit_C_64fc(
+            &initialized_spec,
+            order,
+            IPP_FFT_DIV_INV_BY_N,
+            ippAlgHintNone,
+            context->spec_storage,
+            init_buffer);
+        if (init_buffer != nullptr) {
+            ippsFree(init_buffer);
+        }
+        if (status != ippStsNoErr) {
+            delete context;
+            return static_cast<int32_t>(status);
+        }
+        context->spec = initialized_spec;
+
+        if (work_buffer_size > 0) {
+            context->work_buffer = ippsMalloc_8u(work_buffer_size);
+            if (context->work_buffer == nullptr) {
+                delete context;
+                return VHSDECODE_IPP_STATUS_OUT_OF_MEMORY;
+            }
+        }
+
+        *out_context = context;
+        return VHSDECODE_IPP_STATUS_OK;
+    }
+    catch (...) {
+        return VHSDECODE_IPP_STATUS_INTERNAL_ERROR;
+    }
+}
+
+int32_t VHSDECODE_IPP_CALL
+vhsdecode_ipp_cfft64_destroy(vhsdecode_ipp_cfft64_context* context)
+{
+    delete context;
+    return VHSDECODE_IPP_STATUS_OK;
+}
+
+int32_t VHSDECODE_IPP_CALL
+vhsdecode_ipp_cfft64_forward(
+    vhsdecode_ipp_cfft64_context* context,
+    const vhsdecode_ipp_complex64* input,
+    int32_t input_length,
+    vhsdecode_ipp_complex64* output,
+    int32_t output_length)
+{
+    if (context == nullptr || input == nullptr || output == nullptr) {
+        return VHSDECODE_IPP_STATUS_NULL_POINTER;
+    }
+    if (input_length != context->length || output_length != context->length) {
+        return VHSDECODE_IPP_STATUS_INVALID_ARGUMENT;
+    }
+    if (byte_ranges_partially_overlap(
+            input,
+            static_cast<size_t>(input_length) * sizeof(*input),
+            output,
+            static_cast<size_t>(output_length) * sizeof(*output))) {
+        return VHSDECODE_IPP_STATUS_INVALID_ARGUMENT;
+    }
+
+    try {
+        const std::lock_guard lock(context->work_mutex);
+        if (input == output) {
+            return static_cast<int32_t>(ippsFFTFwd_CToC_64fc_I(
+                as_ipp_complex(output),
+                context->spec,
+                context->work_buffer));
+        }
+        return static_cast<int32_t>(ippsFFTFwd_CToC_64fc(
+            as_ipp_complex(input),
+            as_ipp_complex(output),
+            context->spec,
+            context->work_buffer));
+    }
+    catch (...) {
+        return VHSDECODE_IPP_STATUS_INTERNAL_ERROR;
+    }
+}
+
+int32_t VHSDECODE_IPP_CALL
+vhsdecode_ipp_cfft64_inverse(
+    vhsdecode_ipp_cfft64_context* context,
+    const vhsdecode_ipp_complex64* input,
+    int32_t input_length,
+    vhsdecode_ipp_complex64* output,
+    int32_t output_length)
+{
+    if (context == nullptr || input == nullptr || output == nullptr) {
+        return VHSDECODE_IPP_STATUS_NULL_POINTER;
+    }
+    if (input_length != context->length || output_length != context->length) {
+        return VHSDECODE_IPP_STATUS_INVALID_ARGUMENT;
+    }
+    if (byte_ranges_partially_overlap(
+            input,
+            static_cast<size_t>(input_length) * sizeof(*input),
+            output,
+            static_cast<size_t>(output_length) * sizeof(*output))) {
+        return VHSDECODE_IPP_STATUS_INVALID_ARGUMENT;
+    }
+
+    try {
+        const std::lock_guard lock(context->work_mutex);
+        if (input == output) {
+            return static_cast<int32_t>(ippsFFTInv_CToC_64fc_I(
+                as_ipp_complex(output),
+                context->spec,
+                context->work_buffer));
+        }
+        return static_cast<int32_t>(ippsFFTInv_CToC_64fc(
+            as_ipp_complex(input),
+            as_ipp_complex(output),
             context->spec,
             context->work_buffer));
     }

@@ -187,10 +187,10 @@ DSP 后端通过 `--dsp-backend exact|ipp-fast` 显式选择。该参数是本 .
 best-effort 实验路径。只有 IPP 返回的特征掩码包含 SSE4.2 时，才会接受其正值
 non-Intel vendor warning。后端会加载静态链接的 `vhsdecode_ipp.dll`，报告 IPP
 版本和实际选择的 ISA，并在桥接 DLL、ABI 或 CPU 不可用时明确失败，不会静默
-回退到 `exact`。v1 的 IPP 路由仅包括 VHS real-RF FFT，以及 `current` profile 下的
-color-under Super-Gaussian DFT。CVBS、LD 和 HiFi 会明确拒绝不支持的 `ipp-fast`，
-不会悄悄改跑 Exact 内核而产生虚假基准；IIR/SOS 以及 HiFi/LD 加速仍是分阶段的
-后续工作，并非当前活动路径。
+回退到 `exact`。当前 IPP 路由包括 VHS real-RF FFT、`current` profile 下的
+color-under Super-Gaussian DFT，以及 LaserDisc 视频、EFM 和模拟音频所用的
+2 的幂长度 double-precision full-complex FFT；LD 路径使用 native bridge ABI v1.3。
+CVBS 和 HiFi 会明确拒绝不支持的 `ipp-fast`，不会悄悄改跑 Exact 内核而产生虚假基准。
 
 `ipp-fast` 是数值接近的性能模式，不是逐字节兼容模式。FFT 和向量数学求值差异
 可能改变浮点位模式，并进一步影响阈值决策、元数据、恢复、日志和输出文件。
@@ -973,15 +973,15 @@ stdout、归一化 stderr 和时间戳归一化日志全部一致。候选还在
 都与各自保存的 Python oracle 完全一致。IPP 未纳入门禁。
 
 在原生输入路径上，直接 raw `fLaC` `.ldf`/`.flac` 只在第一个元数据块是完整
-34 字节 STREAMINFO、并且声明 40 kHz、单声道、PCM16 和已知非零样本总数时使用
-内置 libsndfile。文件句柄按需打开；连续读取不做 seek，随机读取使用精确 frame
+34 字节 STREAMINFO、并且声明 40 kHz、单声道、PCM16 和不超过 `Int32.MaxValue` 的
+已知非零样本总数时使用内置 libsndfile。文件句柄按需打开；连续读取不做 seek，随机读取使用精确 frame
 seek，一个池化 PCM16 workspace 继续执行不变的 `short` 到 `double` 转换。原生
 后端不可用、不支持、发生 seek/decode 错误，或读取跨过 FLAC 报告长度时，会从同一
 请求样本尝试既有 FFmpeg/PyAV 兼容加载器，并在可用时只切换一次。若未安装 FFmpeg，
 正常的报告 EOF 仍按 EOF 结束。默认 40 MHz VHS `.ldf`、
-VHS `--no_resample` 和未指定 `--inputfreq` 的 LD 可选择此路径。默认 VHS `.flac`、
-全部 CVBS 输入、Ogg/FLAC、立体声、PCM24、其他采样率、未知总数、未通过严格门控的
-文件头、`.vhs`、`.wav` 和 `raw.oga` 继续走 FFmpeg。
+VHS `--no_resample` 和未指定 `--inputfreq` 的 LD 在总样本数满足门限时可选择此路径。
+更大的 raw-FLAC、默认 VHS `.flac`、全部 CVBS 输入、Ogg/FLAC、立体声、PCM24、
+其他采样率、未知总数、未通过严格门控的文件头、`.vhs`、`.wav` 和 `raw.oga` 继续走 FFmpeg。
 
 在同一个私有本地 RF 窗口上，Release 1.4.4 的 FFmpeg 路径与候选的 libsndfile
 路径在默认、`--threads 0` 和 `--threads 20` 下均匹配亮度、色度、原始 JSON、
@@ -2001,10 +2001,11 @@ main/候选墙钟中位数为 44.924/44.985 秒（候选增加 0.14%，吞吐 0.
 - `.NET SDK 11.0.100-preview.6.26359.118`（由 `global.json` 锁定）
 - 使用 IDE 时需要 Visual Studio 2026
 - 构建可选 Intel IPP 桥接 DLL 时需要 Visual Studio C++ Build Tools 和 Windows SDK
-- 对不属于严格门控的直接 40 kHz 单声道 PCM16 raw-FLAC 原生输入路径的容器，
+- 对不属于严格门控的直接 40 kHz 单声道 PCM16 raw-FLAC 原生输入路径的容器
+  （包括总样本数超过 `Int32.MaxValue` 的流），
   以及该路径发生原生打开/seek/decode 错误或到达报告长度边界后的恢复回退，
   需要 `ffmpeg` 和 `ffprobe` 位于 `PATH`
-- 原生输入路径上的正常且符合条件的 raw-FLAC RF、默认 HiFi FLAC 输出和 LD
+- 原生输入路径上正常且大小符合条件的 raw-FLAC RF、默认 HiFi FLAC 输出和 LD
   `--write-test-ldf` 可直接使用内置 libsndfile；各路径仍保留文档所述的回退或
   兼容边界
 
@@ -2012,7 +2013,7 @@ main/候选墙钟中位数为 44.924/44.985 秒（候选增加 0.14%，吞吐 0.
 .\tools\build-ipp-native.ps1
 dotnet restore VHSDecodeDotNet.slnx
 dotnet build VHSDecodeDotNet.slnx -c Release --no-restore
-dotnet test --solution VHSDecodeDotNet.slnx -c Release --no-build --no-restore --minimum-expected-tests 1331
+dotnet test --solution VHSDecodeDotNet.slnx -c Release --no-build --no-restore --minimum-expected-tests 1349
 dotnet test --project tests\VHSDecode.Tests\VHSDecode.Tests.csproj -c Release --no-build --no-restore --coverage --coverage-output coverage.cobertura.xml --coverage-output-format cobertura
 ```
 
@@ -2024,7 +2025,7 @@ Intel oneAPI。只含二进制的单文件发布会嵌入 `vhsdecode_ipp.dll` �
 notice，不会额外生成许可证 sidecar 文件。只构建 Exact 后端时可以省略原生构建步骤。
 
 当前正式 Release 构建为零警告、零错误。xUnit v3 项目向
-`dotnet test` 和 Visual Studio Test Explorer 暴露 **1,331** 个可独立发现的测试。
+`dotnet test` 和 Visual Studio Test Explorer 暴露 **1,349** 个可独立发现的测试。
 
 <!-- SECTION: usage -->
 

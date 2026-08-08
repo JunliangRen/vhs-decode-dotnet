@@ -33,7 +33,7 @@
 - VHS 家族包括 VHS/S-VHS、Betamax、Video8/Hi8、U-matic、Type C、EIAJ
   以及上游支持的 PAL/NTSC 变体。
 - TBC 工具、双击启动的用户 GUI 和开发者绘图窗口明确不在范围内。
-- Visual Studio 2026 `.slnx` 包含 **1,331** 项标准 xUnit v3 测试；测试可在
+- Visual Studio 2026 `.slnx` 包含 **1,349** 项标准 xUnit v3 测试；测试可在
   Test Explorer 中查看，也可用 `dotnet test` 运行。
 
 <!-- SECTION: start -->
@@ -73,14 +73,15 @@ Python 原版在不同 worker 数下的输出哈希并不稳定，因此 Python 
 | 值 | 含义 |
 | --- | --- |
 | `exact` | 默认托管路径，适合兼容性敏感的解码。 |
-| `ipp-fast` | 实验性的 Windows x64 VHS real-RF 路径，使用 Intel IPP；可能改变浮点位，并且绝不会静默回退到 `exact`。 |
+| `ipp-fast` | 实验性的 Windows x64 VHS 与 LaserDisc real-RF 路径，使用 Intel IPP；可能改变浮点位，并且绝不会静默回退到 `exact`。 |
 
 ```powershell
 decode.exe vhs --compat-version current --dsp-backend ipp-fast `
   --threads 20 input.lds output
 ```
 
-CVBS、LaserDisc 和 HiFi 当前会拒绝 `ipp-fast`，这些命令应使用 `exact`。
+LaserDisc 的视频、EFM 与模拟音频 full-complex FFT 阶段现已接入 IPP。
+CVBS 和 HiFi 仍会拒绝 `ipp-fast`；需要 release 兼容行为时应使用 `exact`。
 兼容性敏感场景启用 IPP 前请阅读
 [详细后端说明](docs/README.detailed.zh-CN.md#性能)。
 
@@ -138,10 +139,12 @@ stderr/日志和有序 `fileLoc`。IPP-fast 仍是显式启用的数值近似后
 TBC、色度、JSON 和日志文件允许在解码期间并发读取，兼容的预览工具可以检查
 部分输出而不会阻塞写入。
 
-在原生输入路径上，40 kHz、单声道 PCM16 的直接 raw `fLaC` `.ldf`/`.flac` 使用
-内置 libsndfile。这包括默认 40 MHz VHS `.ldf`、VHS `--no_resample`，以及未指定
-`--inputfreq` 的 LD；默认 VHS `.flac` 和全部 CVBS 输入仍走 FFmpeg/PyAV 兼容路径。
-Ogg/FLAC、立体声、PCM24、其他采样率和未完成的文件头也继续使用 FFmpeg。
+在原生输入路径上，40 kHz、单声道 PCM16 且总样本数不超过 `Int32.MaxValue` 的
+直接 raw `fLaC` `.ldf`/`.flac` 使用内置 libsndfile。更大的 raw-FLAC 采集会改走
+FFmpeg，因为 libsndfile 1.2.2 在该边界之后不能保证精确随机访问。符合条件的输入
+可包括默认 40 MHz VHS `.ldf`、VHS `--no_resample` 和未指定 `--inputfreq` 的 LD；
+默认 VHS `.flac`、全部 CVBS、Ogg/FLAC、立体声、PCM24、其他采样率和未完成文件头
+继续使用 FFmpeg。
 
 <!-- SECTION: build -->
 
@@ -153,7 +156,7 @@ Ogg/FLAC、立体声、PCM24、其他采样率和未完成的文件头也继续�
 dotnet restore VHSDecodeDotNet.slnx
 dotnet build VHSDecodeDotNet.slnx -c Release --no-restore
 dotnet test --solution VHSDecodeDotNet.slnx -c Release `
-  --no-build --no-restore --minimum-expected-tests 1331
+  --no-build --no-restore --minimum-expected-tests 1349
 ```
 
 在 Visual Studio 2026 中打开 `VHSDecodeDotNet.slnx`，即可构建、调试并通过

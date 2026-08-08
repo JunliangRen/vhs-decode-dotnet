@@ -349,7 +349,12 @@ public sealed class TbcFieldSequenceDecodeEngine
                 return;
             }
 
-            ApplyLaserDiscMtf(session, deferredLaserDiscMtf.Value);
+            ApplyLaserDiscMtf(
+                session,
+                deferredLaserDiscMtf.Value,
+                // v0.4.0 changes the target for newly decoded blocks but keeps
+                // already completed DemodCache blocks until a retry flushes them.
+                invalidateCachedBlocks: false);
             deferredLaserDiscMtf = null;
         }
 
@@ -430,8 +435,7 @@ public sealed class TbcFieldSequenceDecodeEngine
                 }
                 else if (firstLaserDiscField is not null)
                 {
-                    int rawFrame = checked((int)Math.Floor(
-                        ComputeFieldDiskLocation(session, completedField) / 2.0));
+                    int rawFrame = ComputeLaserDiscRawFileFrame(session, completedField);
                     int framesPerSecond = string.Equals(
                         session.System,
                         "PAL",
@@ -522,7 +526,10 @@ public sealed class TbcFieldSequenceDecodeEngine
                     {
                         if (requiresRetry)
                         {
-                            ApplyLaserDiscMtf(session, mtfUpdate.Level);
+                            ApplyLaserDiscMtf(
+                                session,
+                                mtfUpdate.Level,
+                                invalidateCachedBlocks: true);
                         }
                         else
                         {
@@ -1028,7 +1035,10 @@ public sealed class TbcFieldSequenceDecodeEngine
         }
     }
 
-    private static void ApplyLaserDiscMtf(DecodeSession session, double targetMtf)
+    private static void ApplyLaserDiscMtf(
+        DecodeSession session,
+        double targetMtf,
+        bool invalidateCachedBlocks)
     {
         Complex[] response = DecodeFilterSetBuilder.BuildLaserDiscMtf(
             session.Parameters,
@@ -1048,7 +1058,12 @@ public sealed class TbcFieldSequenceDecodeEngine
             session.Filters.RfMtfMagnitude[i] = response[i].Magnitude;
         }
 
-        session.StreamDecoder.InvalidateCachedBlocks();
+        session.StreamDecoder.UpdateLaserDiscCompatibilityMtf(response);
+
+        if (invalidateCachedBlocks)
+        {
+            session.StreamDecoder.InvalidateCachedBlocks();
+        }
     }
 
     private static TbcDecodedField? ReadFieldFromSession(
@@ -1222,7 +1237,7 @@ public sealed class TbcFieldSequenceDecodeEngine
             : DecodeStartPosition.FromInteger(targetFrame * 2 * nominalFieldSamples);
         long current = seekStart.ResolveForRead();
 
-        ApplyLaserDiscMtf(session, 0.0);
+        ApplyLaserDiscMtf(session, 0.0, invalidateCachedBlocks: true);
         try
         {
             return ResolveLaserDiscSeekStart(
@@ -1235,7 +1250,7 @@ public sealed class TbcFieldSequenceDecodeEngine
         }
         finally
         {
-            ApplyLaserDiscMtf(session, 1.0);
+            ApplyLaserDiscMtf(session, 1.0, invalidateCachedBlocks: true);
         }
     }
 
@@ -2386,6 +2401,21 @@ public sealed class TbcFieldSequenceDecodeEngine
 
         double samplesPerField = ((int)(sampleRateHz / (framesPerSecond * 2.0))) + 1;
         return checked((int)Math.Floor((startSample / samplesPerField) / 2.0));
+    }
+
+    private static int ComputeLaserDiscRawFileFrame(
+        DecodeSession session,
+        TbcDecodedField field)
+    {
+        if (field.DiskLocation.HasValue)
+        {
+            return checked((int)Math.Floor(field.DiskLocation.Value / 2.0));
+        }
+
+        return ComputeRawFileFrame(
+            field.StartSample,
+            session.DecodeSampleRateHz,
+            session.Parameters.SysParams.GetProperty("FPS").GetDouble());
     }
 
     private static int ComputeTapeRawFileFrame(

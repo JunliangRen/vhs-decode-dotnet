@@ -17,6 +17,9 @@ internal readonly record struct RawFlacStreamInfo(
             && BitsPerSample == 16
             && TotalSamples is > 0;
 
+    internal bool SupportsExactLibsndfileSeeking
+        => IsNativeRfPcm16 && TotalSamples <= int.MaxValue;
+
     internal static bool TryRead(string path, out RawFlacStreamInfo info)
     {
         try

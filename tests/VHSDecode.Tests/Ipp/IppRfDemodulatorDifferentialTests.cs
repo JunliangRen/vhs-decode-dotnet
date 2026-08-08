@@ -83,6 +83,58 @@ public sealed class IppRfDemodulatorDifferentialTests
             Hash(exact));
     }
 
+    [Fact(DisplayName = "IPP fast 32768-point LaserDisc complex RF path remains numerically close to exact")]
+    public void IppFastLaserDiscComplexRfPathRemainsNumericallyCloseToExact()
+    {
+        if (!IppRuntime.TryProbe(out _))
+        {
+            return;
+        }
+
+        double[] input = BuildPalVhsProbe();
+        Complex[] identity = RfDemodulator.IdentityFilter(Length);
+        using var exactDemodulator = new RfDemodulator(SampleRateHz, DspBackend.Exact);
+        using var ippDemodulator = new RfDemodulator(SampleRateHz, DspBackend.IppFast);
+
+        RfDemodulatedBlock exact = exactDemodulator.Demodulate(
+            input,
+            identity,
+            identity,
+            ReadOnlySpan<Complex>.Empty,
+            identity,
+            identity);
+        RfDemodulatedBlock ipp = ippDemodulator.Demodulate(
+            input,
+            identity,
+            identity,
+            ReadOnlySpan<Complex>.Empty,
+            identity,
+            identity);
+
+        Assert.False(exactDemodulator.UsesIppComplexFft);
+        Assert.True(ippDemodulator.UsesIppComplexFft);
+        DiffMetrics[] metrics =
+        [
+            Measure("Video", exact.Video, ipp.Video),
+            Measure("DemodRaw", exact.DemodRaw, ipp.DemodRaw),
+            Measure("Analytic", exact.Analytic, ipp.Analytic),
+            Measure("Envelope", exact.Envelope, ipp.Envelope),
+            Measure("VideoLowPass", exact.VideoLowPass, ipp.VideoLowPass),
+            Measure("RfHighPass", exact.RfHighPass, ipp.RfHighPass)
+        ];
+
+        Assert.All(metrics, metric => Assert.Equal(Length, metric.Length));
+        Assert.All(metrics, metric => Assert.True(metric.AllFinite, metric.ToString()));
+        bool withinTolerance = metrics.All(metric =>
+            metric.MaximumAbsoluteDelta
+                <= 2.5e-11 * Math.Max(1.0, metric.MaximumReferenceMagnitude)
+            && metric.RmsDelta
+                <= 2.5e-11 * Math.Max(1.0, metric.ReferenceRms));
+        Assert.True(
+            withinTolerance,
+            string.Join(Environment.NewLine, metrics.Select(metric => metric.ToString())));
+    }
+
     private static RfDemodulatedBlock Decode(
         RfDemodulator demodulator,
         double[] input,

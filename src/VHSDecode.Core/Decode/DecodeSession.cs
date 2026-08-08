@@ -307,7 +307,15 @@ public static class DecodeSessionFactory
                 ? RfBlockStreamDecoder.RecommendedPrefetchBlocks(
                     executionOptions.WorkerThreads,
                     Environment.ProcessorCount)
-                : 0);
+                : 0,
+            laserDiscCompatibilityPrefetchBlocks: command.Spec.Name == "ld"
+                && executionOptions.UpstreamBehaviorProfile == UpstreamBehaviorProfile.V040
+                    ? RfBlockStreamDecoder.LaserDiscCompatibilityPrefetchBlocks(
+                        sampleRateHz,
+                        JsonRequiredDouble(parameters.SysParams, "FPS"),
+                        blockLength - blockCut - blockCutEnd)
+                    : 0);
+        streamDecoder.UpdateLaserDiscCompatibilityMtf(filters.RfMtf);
         TbcFrameSpec tbcFrameSpec = TbcFrameSpec.FromParameters(parameters);
         var tbcRenderer = new TbcFieldRenderer(
             tbcFrameSpec,

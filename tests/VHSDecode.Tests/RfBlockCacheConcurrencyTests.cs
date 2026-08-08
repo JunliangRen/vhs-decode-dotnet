@@ -42,6 +42,43 @@ public sealed class RfBlockCacheConcurrencyTests
             highConcurrencyDecoder.PrefetchWorkerThreads);
     }
 
+    [Fact(DisplayName = "LD v0.4.0 MTF scheduling preserves four-field speculative blocks")]
+    public void LaserDiscCompatibilityMtfSchedulingPreservesSpeculativeBlocks()
+    {
+        Assert.Equal(
+            88,
+            RfBlockStreamDecoder.LaserDiscCompatibilityPrefetchBlocks(
+                sampleRateHz: 40_000_000.0,
+                framesPerSecond: 30_000.0 / 1_001.0,
+                blockStride: 31_712));
+
+        using var stream = new MemoryStream();
+        using var decoder = BuildDecoder(
+            new CountingSampleLoader(),
+            workerThreads: 1,
+            laserDiscCompatibilityPrefetchBlocks: 3);
+        Complex[] initial = Enumerable.Repeat(Complex.One, TestBlockLength).ToArray();
+        Complex[] updated = Enumerable.Repeat(new Complex(2.0, 0.0), TestBlockLength).ToArray();
+        decoder.UpdateLaserDiscCompatibilityMtf(initial);
+
+        _ = decoder.Read(stream, begin: 0, length: 12);
+        decoder.UpdateLaserDiscCompatibilityMtf(updated);
+        _ = decoder.Read(stream, begin: 12, length: 12);
+
+        Assert.Equal(
+            Complex.One,
+            decoder.LaserDiscCompatibilityMtfForTesting(block: 2)![0]);
+        Assert.Equal(
+            new Complex(2.0, 0.0),
+            decoder.LaserDiscCompatibilityMtfForTesting(block: 3)![0]);
+
+        decoder.InvalidateCachedBlocks();
+        _ = decoder.Read(stream, begin: 12, length: 12);
+        Assert.Equal(
+            new Complex(2.0, 0.0),
+            decoder.LaserDiscCompatibilityMtfForTesting(block: 1)![0]);
+    }
+
     [Fact(DisplayName = "Parallel RF reads reuse overlapping decoded blocks in order")]
     public void ParallelRfReadsReuseOverlappingDecodedBlocksInOrder()
     {
@@ -1119,7 +1156,8 @@ public sealed class RfBlockCacheConcurrencyTests
         bool retainRfDiagnosticChannels = true,
         bool float32Chroma = false,
         RfFmDemodulatorMode? fmDemodulatorMode = null,
-        bool analogAudio = false)
+        bool analogAudio = false,
+        int laserDiscCompatibilityPrefetchBlocks = 0)
     {
         RfBlockDecodePipeline pipeline = BuildPipeline(
             loader,
@@ -1136,7 +1174,8 @@ public sealed class RfBlockCacheConcurrencyTests
             blockCut: 2,
             blockCutEnd: 2,
             workerThreads,
-            prefetchBlocks);
+            prefetchBlocks,
+            laserDiscCompatibilityPrefetchBlocks);
     }
 
     private static RfBlockDecodePipeline BuildPipeline(

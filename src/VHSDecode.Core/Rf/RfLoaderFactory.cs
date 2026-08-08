@@ -45,7 +45,11 @@ public static class RfLoaderFactory
             if ((filename.EndsWith(".ldf", StringComparison.Ordinal)
                     || filename.EndsWith(".flac", StringComparison.Ordinal))
                 && RawFlacStreamInfo.TryRead(filename, out RawFlacStreamInfo info)
-                && info.IsNativeRfPcm16)
+                // libsndfile 1.2.2 can report a successful sf_seek while returning
+                // samples from the wrong FLAC position when the stream's total
+                // sample count exceeds the signed 32-bit range. Large RF captures
+                // must use the bit-exact FFmpeg path instead.
+                && info.SupportsExactLibsndfileSeeking)
             {
                 return new LibsndfilePcm16SampleLoader(filename);
             }
