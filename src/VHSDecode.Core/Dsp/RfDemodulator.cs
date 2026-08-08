@@ -25,6 +25,7 @@ public sealed class RfDemodulator : IDisposable
     private int _nonlinearDeemphasisFilterPlanBuildCount;
     private int _subDeemphasisFilterPlanBuildCount;
     private readonly VhsRealFftWorkspacePool _vhsRealFftWorkspacePool;
+    private readonly IppComplexFft64Pool? _ippComplexFftPool;
     private readonly bool _parallelizeVhsInverseStaging;
     private int _disposed;
 
@@ -67,6 +68,7 @@ public sealed class RfDemodulator : IDisposable
         if (dspBackend == DspBackend.IppFast)
         {
             _ = IppRuntime.RequireAvailable();
+            _ippComplexFftPool = new IppComplexFft64Pool();
         }
 
         SampleRateHz = sampleRateHz;
@@ -84,6 +86,8 @@ public sealed class RfDemodulator : IDisposable
 
     internal bool ParallelizesVhsInverseStaging => _parallelizeVhsInverseStaging;
 
+    internal bool UsesIppComplexFft => _ippComplexFftPool is not null;
+
     internal int NonlinearDeemphasisFilterPlanBuildCount =>
         Volatile.Read(ref _nonlinearDeemphasisFilterPlanBuildCount);
 
@@ -94,10 +98,62 @@ public sealed class RfDemodulator : IDisposable
     {
         if (Interlocked.Exchange(ref _disposed, 1) == 0)
         {
-            _vhsRealFftWorkspacePool.Dispose();
+            try
+            {
+                _ippComplexFftPool?.Dispose();
+            }
+            finally
+            {
+                _vhsRealFftWorkspacePool.Dispose();
+            }
         }
 
         GC.SuppressFinalize(this);
+    }
+
+    internal Complex[] ForwardLaserDiscFullSpectrum(ReadOnlySpan<double> input)
+    {
+        if (_ippComplexFftPool is null)
+        {
+            return PocketFftComplex.ForwardDuccRealFull(input);
+        }
+
+        var output = new Complex[input.Length];
+        for (int i = 0; i < output.Length; i++)
+        {
+            output[i] = new Complex(input[i], 0.0);
+        }
+
+        _ippComplexFftPool.Forward(output, output);
+        return output;
+    }
+
+    internal Complex[] InverseLaserDiscFullSpectrum(
+        ReadOnlySpan<Complex> input,
+        bool useDuccExact = true)
+    {
+        if (_ippComplexFftPool is null)
+        {
+            return useDuccExact
+                ? PocketFftComplex.InverseDucc(input)
+                : PocketFftComplex.Inverse(input);
+        }
+
+        var output = new Complex[input.Length];
+        _ippComplexFftPool.Inverse(input, output);
+        return output;
+    }
+
+    internal void InverseLaserDiscFullSpectrumInPlace(Complex[] values)
+    {
+        ArgumentNullException.ThrowIfNull(values);
+        if (_ippComplexFftPool is null)
+        {
+            PocketFftComplex.InverseDuccInPlace(values);
+            return;
+        }
+
+        _ippComplexFftPool.Inverse(values, values);
     }
 
     public RfDemodulatedBlock Demodulate(
@@ -422,7 +478,7 @@ public sealed class RfDemodulator : IDisposable
         }
         else
         {
-            Complex[] spectrum = precomputedInputSpectrum ?? PocketFftComplex.ForwardDuccRealFull(input);
+            Complex[] spectrum = precomputedInputSpectrum ?? ForwardLaserDiscFullSpectrum(input);
             if (spectrum.Length != input.Length)
             {
                 throw new ArgumentException(
@@ -433,7 +489,7 @@ public sealed class RfDemodulator : IDisposable
             if (includeRfHighPassOutput)
             {
                 Complex[] rfHighPassSpectrum = ApplyFrequencyFilter(spectrum, rfHighPassFilter);
-                PocketFftComplex.InverseDuccInPlace(rfHighPassSpectrum);
+                InverseLaserDiscFullSpectrumInPlace(rfHighPassSpectrum);
                 rfHighPass = new double[rfHighPassSpectrum.Length];
                 for (int i = 0; i < rfHighPass.Length; i++)
                 {
@@ -459,7 +515,7 @@ public sealed class RfDemodulator : IDisposable
             hilbertMultiplier = GetVhsHilbertMultiplier(rfFilteredSpectrum.Length);
             Complex[] analyticSpectrum = rfFilteredSpectrum.ToArray();
             ApplyHilbertMultiplierInPlace(analyticSpectrum, hilbertMultiplier);
-            PocketFftComplex.InverseDuccInPlace(analyticSpectrum);
+            InverseLaserDiscFullSpectrumInPlace(analyticSpectrum);
             analytic = analyticSpectrum;
         }
 
@@ -546,7 +602,7 @@ public sealed class RfDemodulator : IDisposable
         {
             Complex[] analyticSpectrum = rfFilteredSpectrum.ToArray();
             ApplyHilbertMultiplierInPlace(analyticSpectrum, hilbertMultiplier!);
-            PocketFftComplex.InverseDuccInPlace(analyticSpectrum);
+            InverseLaserDiscFullSpectrumInPlace(analyticSpectrum);
             analytic = analyticSpectrum;
         }
 
@@ -671,18 +727,18 @@ public sealed class RfDemodulator : IDisposable
         }
         else
         {
-            demodSpectrum = PocketFftComplex.ForwardDuccRealFull(demodVideoSource);
+            demodSpectrum = ForwardLaserDiscFullSpectrum(demodVideoSource);
             videoSpectrum = ApplyFrequencyFilter(demodSpectrum, videoFilter);
             activeSpectrumLength = demodSpectrum.Length;
             Complex[] videoComplex;
             if (nonlinearDeemphasis is null && subDeemphasis is null)
             {
-                PocketFftComplex.InverseDuccInPlace(videoSpectrum);
+                InverseLaserDiscFullSpectrumInPlace(videoSpectrum);
                 videoComplex = videoSpectrum;
             }
             else
             {
-                videoComplex = PocketFftComplex.InverseDucc(videoSpectrum);
+                videoComplex = InverseLaserDiscFullSpectrum(videoSpectrum);
             }
 
             video = new double[videoComplex.Length];
@@ -721,7 +777,7 @@ public sealed class RfDemodulator : IDisposable
         else
         {
             Complex[] videoLowPassSpectrum = ApplyFrequencyFilter(demodSpectrum, videoLowPassFilter);
-            PocketFftComplex.InverseDuccInPlace(videoLowPassSpectrum);
+            InverseLaserDiscFullSpectrumInPlace(videoLowPassSpectrum);
             videoLowPass = new double[videoLowPassSpectrum.Length];
             for (int i = 0; i < videoLowPass.Length; i++)
             {
@@ -1622,7 +1678,7 @@ public sealed class RfDemodulator : IDisposable
         }
     }
 
-    private static double[]? DecodeReferenceIfPresent(
+    private double[]? DecodeReferenceIfPresent(
         ReadOnlySpan<Complex> spectrum,
         Complex[]? filter,
         int offset)
@@ -1633,7 +1689,7 @@ public sealed class RfDemodulator : IDisposable
         }
 
         Complex[] filteredSpectrum = ApplyFrequencyFilter(spectrum, filter);
-        PocketFftComplex.InverseDuccInPlace(filteredSpectrum);
+        InverseLaserDiscFullSpectrumInPlace(filteredSpectrum);
         var output = new double[filteredSpectrum.Length];
         for (int i = 0; i < output.Length; i++)
         {

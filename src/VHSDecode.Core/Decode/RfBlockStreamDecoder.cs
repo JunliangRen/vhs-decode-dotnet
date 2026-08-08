@@ -1,3 +1,4 @@
+using System.Numerics;
 using System.Runtime.Intrinsics.X86;
 using VHSDecode.Core.Dsp;
 
@@ -26,6 +27,10 @@ public sealed class RfBlockStreamDecoder : IDisposable
 {
     private const int DecodedBlockCacheCapacity = 16;
     private const int ReusableSpanBufferSetCapacity = 2;
+    // Responses are shared immutable arrays; 256 block keys cover the normal
+    // 88-block NTSC lookahead plus overlapping recovery reads without retaining
+    // the corresponding decoded payloads.
+    private const int LaserDiscCompatibilityCacheBlocks = 256;
     private const int MaximumAdditionalPrefetchBlocks = 8;
     internal const int MaximumConcurrentPrefetchBlocks = 12;
     internal const int MaximumPrefetchBlocks = 32;
@@ -33,8 +38,11 @@ public sealed class RfBlockStreamDecoder : IDisposable
     private readonly Dictionary<long, RfPipelineBlock> _decodedBlockCache = [];
     private readonly Dictionary<long, RfPipelineBlock> _prefetchedBlockCache = [];
     private readonly Dictionary<long, RfPipelineBlock> _sequentialBlockCache = [];
+    private readonly Dictionary<long, Complex[]> _laserDiscCompatibilityMtfByBlock = [];
     private readonly List<RfPipelineBlock> _serialDeferredReleases = [];
     private readonly int _decodedBlockCacheCapacity;
+    private readonly int _laserDiscCompatibilityPrefetchBlocks;
+    private Complex[]? _activeLaserDiscCompatibilityMtf;
     private Stream? _decodedBlockCacheStream;
     private long? _lastReadFirstBlock;
     private long? _lastSequentialDecodedBlock;
@@ -51,7 +59,8 @@ public sealed class RfBlockStreamDecoder : IDisposable
         int blockCut,
         int blockCutEnd,
         int workerThreads = 1,
-        int prefetchBlocks = 0)
+        int prefetchBlocks = 0,
+        int laserDiscCompatibilityPrefetchBlocks = 0)
     {
         if (blockLength <= 0)
         {
@@ -73,6 +82,11 @@ public sealed class RfBlockStreamDecoder : IDisposable
             throw new ArgumentOutOfRangeException(nameof(prefetchBlocks));
         }
 
+        if (laserDiscCompatibilityPrefetchBlocks < 0)
+        {
+            throw new ArgumentOutOfRangeException(nameof(laserDiscCompatibilityPrefetchBlocks));
+        }
+
         _pipeline = pipeline;
         BlockLength = blockLength;
         BlockCut = blockCut;
@@ -86,6 +100,7 @@ public sealed class RfBlockStreamDecoder : IDisposable
             Math.Min(WorkerThreads, PrefetchBlocks),
             MaximumConcurrentPrefetchBlocks);
         _decodedBlockCacheCapacity = checked(DecodedBlockCacheCapacity + PrefetchBlocks);
+        _laserDiscCompatibilityPrefetchBlocks = laserDiscCompatibilityPrefetchBlocks;
     }
 
     public int BlockLength { get; }
@@ -105,6 +120,11 @@ public sealed class RfBlockStreamDecoder : IDisposable
     internal int PrefetchCancellationCount => Volatile.Read(ref _prefetchCancellationCount);
 
     internal int CachedDecodedBlockCount => _decodedBlockCache.Count;
+
+    internal Complex[]? LaserDiscCompatibilityMtfForTesting(long block)
+        => _laserDiscCompatibilityMtfByBlock.TryGetValue(block, out Complex[]? response)
+            ? response
+            : null;
 
     internal int CachedPrefetchedBlockCount
     {
@@ -144,6 +164,30 @@ public sealed class RfBlockStreamDecoder : IDisposable
         return (int)Math.Min(oneAdditionalWave, MaximumPrefetchBlocks);
     }
 
+    internal static int LaserDiscCompatibilityPrefetchBlocks(
+        double sampleRateHz,
+        double framesPerSecond,
+        int blockStride)
+    {
+        if (!double.IsFinite(sampleRateHz) || sampleRateHz <= 0.0)
+        {
+            throw new ArgumentOutOfRangeException(nameof(sampleRateHz));
+        }
+
+        if (!double.IsFinite(framesPerSecond) || framesPerSecond <= 0.0)
+        {
+            throw new ArgumentOutOfRangeException(nameof(framesPerSecond));
+        }
+
+        if (blockStride <= 0)
+        {
+            throw new ArgumentOutOfRangeException(nameof(blockStride));
+        }
+
+        long samplesPerField = checked((long)(sampleRateHz / (framesPerSecond * 2.0)) + 1L);
+        return checked((int)((samplesPerField * 4.0) / blockStride) + 4);
+    }
+
     internal int CachedReusableSpanBufferSetCount
     {
         get
@@ -171,6 +215,18 @@ public sealed class RfBlockStreamDecoder : IDisposable
         _decodedBlockCacheStream = null;
         _lastReadFirstBlock = null;
         _lastSequentialDecodedBlock = null;
+        _laserDiscCompatibilityMtfByBlock.Clear();
+    }
+
+    internal void UpdateLaserDiscCompatibilityMtf(Complex[] response)
+    {
+        ArgumentNullException.ThrowIfNull(response);
+        if (_laserDiscCompatibilityPrefetchBlocks == 0)
+        {
+            return;
+        }
+
+        _activeLaserDiscCompatibilityMtf = response.ToArray();
     }
 
     public RfDecodedSpan? Read(Stream stream, long begin, int length)
@@ -345,6 +401,7 @@ public sealed class RfBlockStreamDecoder : IDisposable
         long firstBlock = begin / BlockStride;
         long lastBlock = (endExclusive - 1) / BlockStride;
         PrepareDecodedBlockCache(stream, firstBlock);
+        PrepareLaserDiscCompatibilityMtf(firstBlock, lastBlock);
         int totalDecoded = checked((int)((lastBlock - firstBlock + 1) * BlockStride));
         int offset = checked((int)(begin - (firstBlock * BlockStride)));
         bool retainRfDiagnosticChannels = _pipeline.RetainsRfDiagnosticChannels;
@@ -597,7 +654,11 @@ public sealed class RfBlockStreamDecoder : IDisposable
                     {
                         StopPrefetchBeforeDirectRead();
                         long sample = checked(block * BlockStride);
-                        pipelineBlock = _pipeline.DecodeStreamBlockWithInput(stream, sample, BlockLength);
+                        pipelineBlock = _pipeline.DecodeStreamBlockWithInput(
+                            stream,
+                            sample,
+                            BlockLength,
+                            LaserDiscCompatibilityMtfForBlock(block));
                         if (pipelineBlock is not null && _pipeline.RequiresSequentialBlockDecode)
                         {
                             _sequentialBlockCache[block] = pipelineBlock;
@@ -633,6 +694,19 @@ public sealed class RfBlockStreamDecoder : IDisposable
             var missingBlocks = new int[blockCount];
             int missingBlockCount = 0;
             var decodedBlocks = new RfPipelineBlock[blockCount];
+            Complex[]?[]? laserDiscCompatibilityMtf =
+                _activeLaserDiscCompatibilityMtf is null
+                    ? null
+                    : new Complex[]?[blockCount];
+            if (laserDiscCompatibilityMtf is not null)
+            {
+                for (int i = 0; i < blockCount; i++)
+                {
+                    laserDiscCompatibilityMtf[i] =
+                        LaserDiscCompatibilityMtfForBlock(firstBlock + i);
+                }
+            }
+
             ParallelOptions? parallelOptions = null;
             bool missingBlocksDecoded = false;
             int cachedMissingBlockCount = 0;
@@ -680,7 +754,9 @@ public sealed class RfBlockStreamDecoder : IDisposable
                         missingIndex =>
                         {
                             int blockIndex = missingBlocks[missingIndex];
-                            decodedBlocks[blockIndex] = _pipeline.DecodePreparedStreamBlock(preparedInputs[blockIndex]);
+                            decodedBlocks[blockIndex] = _pipeline.DecodePreparedStreamBlock(
+                                preparedInputs[blockIndex],
+                                rfMtfOverride: laserDiscCompatibilityMtf?[blockIndex]);
                         });
                     missingBlocksDecoded = true;
                 }
@@ -757,6 +833,7 @@ public sealed class RfBlockStreamDecoder : IDisposable
         try
         {
             StartPrefetch(stream, lastBlock);
+            ScheduleLaserDiscCompatibilityPrefetch(lastBlock);
             if (stageVhsPayload)
             {
                 stagedMaterializer = new VhsPayloadMaterializer(
@@ -846,6 +923,7 @@ public sealed class RfBlockStreamDecoder : IDisposable
             ClearBlockCache(_decodedBlockCache);
             ClearBlockCache(_prefetchedBlockCache);
             ClearBlockCache(_sequentialBlockCache);
+            _laserDiscCompatibilityMtfByBlock.Clear();
             for (int i = 0; i < _reusableSpanBuffers.Length; i++)
             {
                 _ = Interlocked.Exchange(ref _reusableSpanBuffers[i], null);
@@ -956,13 +1034,18 @@ public sealed class RfBlockStreamDecoder : IDisposable
             return;
         }
 
-        bool resetCache = !ReferenceEquals(_decodedBlockCacheStream, stream)
+        bool streamChanged = !ReferenceEquals(_decodedBlockCacheStream, stream);
+        bool resetCache = streamChanged
             || (_lastReadFirstBlock.HasValue && firstBlock < _lastReadFirstBlock.Value);
         if (resetCache)
         {
             FinishPrefetch(cancel: true, suppressFailures: true);
             ClearBlockCache(_decodedBlockCache);
             ClearBlockCache(_prefetchedBlockCache);
+            if (streamChanged)
+            {
+                _laserDiscCompatibilityMtfByBlock.Clear();
+            }
         }
         else
         {
@@ -991,6 +1074,68 @@ public sealed class RfBlockStreamDecoder : IDisposable
 
         _decodedBlockCacheStream = stream;
         _lastReadFirstBlock = firstBlock;
+    }
+
+    private void PrepareLaserDiscCompatibilityMtf(long firstBlock, long lastBlock)
+    {
+        if (_activeLaserDiscCompatibilityMtf is null)
+        {
+            return;
+        }
+
+        long oldestRetainedBlock = Math.Max(
+            0L,
+            firstBlock - LaserDiscCompatibilityCacheBlocks);
+        foreach (long staleBlock in _laserDiscCompatibilityMtfByBlock.Keys
+                     .Where(block => block < oldestRetainedBlock)
+                     .ToArray())
+        {
+            _laserDiscCompatibilityMtfByBlock.Remove(staleBlock);
+        }
+
+        for (long block = firstBlock; block <= lastBlock; block++)
+        {
+            _laserDiscCompatibilityMtfByBlock.TryAdd(
+                block,
+                _activeLaserDiscCompatibilityMtf);
+        }
+    }
+
+    private Complex[]? LaserDiscCompatibilityMtfForBlock(long block)
+    {
+        if (_activeLaserDiscCompatibilityMtf is null)
+        {
+            return null;
+        }
+
+        if (_laserDiscCompatibilityMtfByBlock.TryGetValue(block, out Complex[]? response))
+        {
+            return response;
+        }
+
+        _laserDiscCompatibilityMtfByBlock.Add(block, _activeLaserDiscCompatibilityMtf);
+        return _activeLaserDiscCompatibilityMtf;
+    }
+
+    private void ScheduleLaserDiscCompatibilityPrefetch(long lastBlock)
+    {
+        if (_activeLaserDiscCompatibilityMtf is null
+            || _laserDiscCompatibilityPrefetchBlocks == 0)
+        {
+            return;
+        }
+
+        // DemodCache v0.4.0 starts its four-field speculative range at the
+        // terminal required block. That overlapping block is already cached;
+        // later blocks keep the MTF response captured when first queued.
+        long firstPrefetchedBlock = lastBlock;
+        for (int i = 0; i < _laserDiscCompatibilityPrefetchBlocks; i++)
+        {
+            long block = checked(firstPrefetchedBlock + i);
+            _laserDiscCompatibilityMtfByBlock.TryAdd(
+                block,
+                _activeLaserDiscCompatibilityMtf);
+        }
     }
 
     private void CacheDecodedBlock(

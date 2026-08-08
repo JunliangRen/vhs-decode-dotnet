@@ -2373,12 +2373,76 @@ each backend produced one luma, chroma, JSON, stdout, normalized stderr/log,
 and ordered-`fileLoc` hash set. The Release solution built with zero warnings
 or errors, and all 1,319 xUnit v3 tests passed.
 
+### Real-capture LaserDisc Exact and IPP complex FFT
+
+A 70,913,336,872-byte NTSC LaserDisc RF capture was used to replace the prior
+fixture-only LD confidence boundary. Its FLAC stream contains 2,687,500,288
+mono PCM16 samples at the 40,000-Hz container convention for 40 MS/s RF and
+reports embedded PCM MD5 `F48ADE2E10178110FDB555FB827A2B78`. Python v0.4.0
+commit `g4315520 --threads 0` remained the strict oracle.
+
+The Exact investigation found four real-file boundaries that synthetic blocks
+had not exposed:
+
+- libsndfile 1.2.2 reported successful random seeks but returned samples from
+  the wrong location once the FLAC stream exceeded `Int32.MaxValue` samples;
+  such large raw-FLAC captures now use the bit-exact FFmpeg loader;
+- Python's LD `DemodCache` captures the current MTF response for a four-field
+  speculative block range, retaining those responses across gentle MTF updates
+  until a retry flush; the streaming decoder now models that bounded schedule
+  without retaining four fields of decoded payload;
+- LD AGC wow adjustment uses fixed `rf.linelen`, not a pulse-derived per-field
+  mean line length; and
+- `File Frame` status uses the unrounded read location, avoiding a one-frame
+  logging error at values such as `1807.99` that serialize as `diskLoc: 1808.0`.
+
+Three five-frame windows beginning at requested `start_fileloc` values
+240,000,000, 1,200,000,000, and 2,200,000,000 were decoded independently by
+Python Exact, .NET Exact, and .NET IPP-fast. The first window included video,
+EFM, and analog audio; the other two isolated video while covering middle and
+late random seeks. TBC, JSON, SQLite, ordered `fileLoc`, VBI, field phase,
+normalized logs, and every enabled audio artifact matched byte for byte. The
+full-path first-window hashes were:
+
+| Artifact | SHA-256 |
+| --- | --- |
+| `.tbc` | `DB0AEBDE2E3984D930488060921A8EC3207F1329CD9D0BE95D8486721FA269CB` |
+| `.efm` | `6CC42B0295F77EBF92A6CF7EA2B59BBD61317FE104F72B6CF9CEE091E47E4120` |
+| `.pcm` | `55231F00BA69980AFA0B585F8B51848B5B4205686345B7F683F70BF4990463D7` |
+| `.tbc.json` | `E4641E46EA422FE5382C1A1641F62446D97EE7B3C0A813481112E6B90F6D558D` |
+| `.tbc.db` | `9AA32BDB3567D25C3DDBB828F7ADE0B5594F0080916ADB350CB35646DB70C34A` |
+
+The native bridge ABI is now v1.3 (`0x00010003`) and exposes reusable
+power-of-two double-precision C2C FFT contexts with unnormalized forward and
+1/N inverse transforms. LD video, EFM, and analog-audio full-complex FFT stages
+route through bounded per-length IPP context pools; Exact does not construct or
+call them. Native smoke tests cover out-of-place and in-place round trips, and
+managed tests cover numerical agreement, deterministic reuse, parallel callers,
+multiple lengths, disposal, and the 32-idle-context bound.
+
+Two balanced 100-frame, full-path, `--threads 20` Exact/IPP run pairs produced
+one TBC, EFM, PCM, JSON, SQLite, and normalized-log hash set across all four
+runs. Exact wall times were 17.127/17.387 seconds and IPP times were
+15.895/16.495 seconds: the two-run arithmetic mean fell 6.15%, with 6.56% more
+throughput. Mean process CPU time fell from 79.227 to 52.047 seconds (34.31%).
+This is a short, two-pair observation, not a universal performance claim. A
+separate 500-frame/1,000-field IPP run completed in 51.670 seconds with all
+sequential fields and audio artifacts, 1,079 MiB maximum sampled working set,
+and no OOM or progressive slowdown; it is a bounded run, not an unlimited
+duration guarantee.
+
+The isolated Release solution built with zero warnings or errors, the native
+static-link smoke test passed on IPP 2026.0 AVX2, and all 1,349 xUnit v3 tests
+passed. Despite byte identity on this capture, `ipp-fast` retains its
+numerically-close contract because other RF content can cross floating-point
+decision thresholds.
+
 `ffmpeg` and `ffprobe` must be available on `PATH` for RF container inputs
-outside the narrowly gated direct 40 kHz mono PCM16 raw-FLAC route. Direct
-raw-FLAC RF input, default HiFi FLAC output, and LD `--write-test-ldf` use the
-bundled libsndfile and do not require either tool; their documented fallback
-and compatibility boundaries remain. HiFi `.wav` and recognized raw input paths do
-not require them either.
+outside the narrowly gated direct 40 kHz mono PCM16 raw-FLAC route. That direct
+libsndfile route is additionally limited to at most `Int32.MaxValue` samples;
+larger raw-FLAC captures use FFmpeg to preserve exact random access. Default
+HiFi FLAC output and LD `--write-test-ldf` still use bundled libsndfile. HiFi
+`.wav` and recognized raw input paths do not require either FFmpeg tool.
 
 To regenerate the embedded format parameter snapshot from the checked-out
 upstream source:

@@ -2722,7 +2722,7 @@ public sealed class TbcFieldDecodePipeline : IDisposable
     private (VideoOutputConverter? Converter, bool Adjusted) ResolveLaserDiscAgcConverter(
         RfDecodedSpan span,
         IReadOnlyList<double> lineLocations,
-        double meanLineLength,
+        double _meanLineLength,
         bool isFirstField,
         int initialSyncConfidence,
         VideoOutputConverter baseConverter,
@@ -2742,7 +2742,9 @@ public sealed class TbcFieldDecodePipeline : IDisposable
         (double syncHz, double ire0Hz, double ire100Hz) = DetectLaserDiscAgcLevels(
             span,
             lineLocations,
-            meanLineLength,
+            // v0.4.0's detectLevels uses rf.linelen for wow adjustment,
+            // not the per-field pulse-derived mean line length.
+            _syncAnalyzer.NominalLineLength,
             current,
             isFirstField);
         double syncIreDiff = Math.Abs(current.HzToIre(syncHz) - current.VSyncIre);

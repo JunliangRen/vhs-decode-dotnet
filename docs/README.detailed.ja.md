@@ -204,11 +204,11 @@ experimental path です。IPP が返す feature mask に SSE4.2 が含まれる
 正の non-Intel vendor warning を受け入れます。静的 link 済みの
 `vhsdecode_ipp.dll` を load し、IPP version と選択された ISA を表示します。
 bridge、ABI、CPU が利用できない場合は明確に失敗し、`exact` へ暗黙に fallback
-しません。v1 の IPP routing は VHS real-RF FFT と、`current` profile の
-color-under Super-Gaussian DFT に限定されます。CVBS、LD、HiFi は未対応の
-`ipp-fast` を明示的に拒否し、Exact kernel を実行した結果を誤って benchmark と
-して扱うことはありません。IIR/SOS と HiFi/LD の高速化は段階的な今後の作業で
-あり、現在の active path ではありません。
+しません。現在の IPP routing は VHS real-RF FFT、`current` profile の
+color-under Super-Gaussian DFT、および LaserDisc video、EFM、analog audio が使う
+power-of-two double-precision full-complex FFT stage を含みます。LD path は native
+bridge ABI v1.3 を使用します。CVBS と HiFi は未対応の `ipp-fast` を明示的に拒否し、
+Exact kernel を実行した結果を誤って benchmark として扱うことはありません。
 
 `ipp-fast` は数値的に近い performance mode であり、byte-compatible mode では
 ありません。FFT と vector math の評価差は floating-point bit を変え、threshold
@@ -1144,17 +1144,17 @@ timestamp-normalized log はすべて一致しました。candidate は default 
 
 native-input route の direct raw `fLaC` `.ldf`/`.flac` input は、最初の metadata
 block が完全な 34-byte STREAMINFO で、40 kHz、mono、PCM16、既知の nonzero
-sample count を示す場合だけ bundled libsndfile を使います。handle は lazy-open、
+sample count が `Int32.MaxValue` 以下の場合だけ bundled libsndfile を使います。handle は lazy-open、
 sequential read は seek-free、random read は exact frame seek で、pooled PCM16
 workspace から従来どおり `short` を `double` へ変換します。native open が
 unavailable/unsupported の場合、native seek/decode error の場合、または read が
 reported FLAC length を越える場合は、同じ requested sample から既存の
 FFmpeg/PyAV-compatible loader を試し、利用可能なら一度だけ切り替えます。FFmpeg
 未導入時も正常な reported EOF は EOF のままです。default 40 MHz VHS
-`.ldf`、VHS `--no_resample`、`--inputfreq` なしの LD がこの route を選べます。
-default VHS `.flac`、全 CVBS input、Ogg/FLAC、stereo、PCM24、他の rate、unknown
-total、narrow gate で rejected された header、`.vhs`、`.wav`、`raw.oga` は FFmpeg
-を維持します。
+`.ldf`、VHS `--no_resample`、`--inputfreq` なしの LD は、reported total が gate 内なら
+この route を選べます。より大きい raw-FLAC、default VHS `.flac`、全 CVBS input、
+Ogg/FLAC、stereo、PCM24、他の rate、unknown total、narrow gate で rejected された
+header、`.vhs`、`.wav`、`raw.oga` は FFmpeg を維持します。
 
 同じ private local RF window で、Release 1.4.4 の FFmpeg path と candidate の
 libsndfile path は default、`--threads 0`、`--threads 20` の luma、chroma、raw
@@ -2416,10 +2416,11 @@ focused 16 KiB unit-test threshold は warmed calling thread の allocation だ�
 - `.NET SDK 11.0.100-preview.6.26359.118`（`global.json` で固定）
 - IDE として使用する場合は Visual Studio 2026
 - optional Intel IPP bridge の build には Visual Studio C++ Build Tools と Windows SDK
-- 厳密に限定した direct 40 kHz mono PCM16 raw-FLAC native-input route 以外の
+- 厳密に限定した direct 40 kHz mono PCM16 raw-FLAC native-input route 以外
+  （`Int32.MaxValue` samples を超える stream を含む）の
   container input、および native open/seek/decode failure または reported-length
   boundary 後の recovery fallback では `ffmpeg` と `ffprobe` が `PATH` 上に必要
-- native-input route の正常な eligible raw-FLAC RF input、default HiFi FLAC output、
+- native-input route の正常かつ size-eligible な raw-FLAC RF input、default HiFi FLAC output、
   LD `--write-test-ldf` は bundled libsndfile を直接使えます。各 path は文書化した
   fallback または compatibility boundary を維持します
 
@@ -2427,7 +2428,7 @@ focused 16 KiB unit-test threshold は warmed calling thread の allocation だ�
 .\tools\build-ipp-native.ps1
 dotnet restore VHSDecodeDotNet.slnx
 dotnet build VHSDecodeDotNet.slnx -c Release --no-restore
-dotnet test --solution VHSDecodeDotNet.slnx -c Release --no-build --no-restore --minimum-expected-tests 1331
+dotnet test --solution VHSDecodeDotNet.slnx -c Release --no-build --no-restore --minimum-expected-tests 1349
 dotnet test --project tests\VHSDecode.Tests\VHSDecode.Tests.csproj -c Release --no-build --no-restore --coverage --coverage-output coverage.cobertura.xml --coverage-output-format cobertura
 ```
 
@@ -2441,7 +2442,7 @@ third-party notice を埋め込み、license sidecar file は追加しません�
 
 現在の正式な Release build は warning 0、error 0 です。xUnit v3 project は
 `dotnet test` と Visual Studio Test Explorer の両方で個別に検出できる
-**1,331** tests を公開します。
+**1,349** tests を公開します。
 
 <!-- SECTION: usage -->
 

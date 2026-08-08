@@ -411,6 +411,21 @@ public sealed class LibsndfilePcm16SampleLoaderTests
         Assert.Equal(expectedNative, info.IsNativeRfPcm16);
     }
 
+    [Theory(DisplayName = "raw FLAC STREAMINFO limits libsndfile random access to signed 32-bit totals")]
+    [InlineData(2_147_483_647L, true)]
+    [InlineData(2_147_483_648L, false)]
+    public void StreamInfoGatesExactLibsndfileSeeking(long totalSamples, bool expected)
+    {
+        using var input = new MemoryStream(BuildFlacHeader(
+            FfmpegPcm16SampleLoader.ContainerAudioSampleRateHz,
+            channels: 1,
+            bitsPerSample: 16,
+            totalSamples));
+
+        Assert.True(RawFlacStreamInfo.TryRead(input, out RawFlacStreamInfo info));
+        Assert.Equal(expected, info.SupportsExactLibsndfileSeeking);
+    }
+
     [Theory(DisplayName = "raw FLAC STREAMINFO rejects foreign and truncated headers")]
     [MemberData(nameof(InvalidFlacHeaders))]
     public void StreamInfoRejectsInvalidHeaders(byte[] header)

@@ -36,7 +36,7 @@ upstream release `v0.4.0`、commit
 - VHS family には VHS/S-VHS、Betamax、Video8/Hi8、U-matic、Type C、EIAJ、
   upstream が対応する PAL/NTSC variant が含まれます。
 - TBC utility、ダブルクリック GUI、開発者向け plot window は対象外です。
-- Visual Studio 2026 の `.slnx` には **1,331** 件の標準 xUnit v3 test があり、
+- Visual Studio 2026 の `.slnx` には **1,349** 件の標準 xUnit v3 test があり、
   Test Explorer と `dotnet test` の両方で実行できます。
 
 <!-- SECTION: start -->
@@ -77,15 +77,16 @@ decode.exe hifi [upstream options] input.lds output.wav
 | 値 | 意味 |
 | --- | --- |
 | `exact` | default の managed path。互換性を重視する decode に使用します。 |
-| `ipp-fast` | Intel IPP を使う experimental Windows x64 VHS real-RF path。浮動小数点 bit が変化する可能性があり、`exact` へ silent fallback しません。 |
+| `ipp-fast` | Intel IPP を使う experimental Windows x64 VHS / LaserDisc real-RF path。浮動小数点 bit が変化する可能性があり、`exact` へ silent fallback しません。 |
 
 ```powershell
 decode.exe vhs --compat-version current --dsp-backend ipp-fast `
   --threads 20 input.lds output
 ```
 
-CVBS、LaserDisc、HiFi は現在 `ipp-fast` を拒否するため、これらでは `exact`
-を使用してください。互換性を重視する用途では
+LaserDisc の video、EFM、analog-audio full-complex FFT stage は IPP に接続済みです。
+CVBS と HiFi は引き続き `ipp-fast` を拒否します。release-compatible な動作が
+必要な場合は `exact` を使用してください。互換性を重視する用途では
 [backend の詳細](docs/README.detailed.ja.md#パフォーマンス)を先に確認してください。
 
 <!-- SECTION: performance -->
@@ -148,11 +149,13 @@ build success や同じ file size だけを互換性の証明とはしません�
 TBC、chroma、JSON、log は decode 中も concurrent read できるため、対応する
 preview tool は writer を止めずに partial output を確認できます。
 
-native-input route では、40 kHz mono PCM16 の direct raw `fLaC` `.ldf`/`.flac`
-input に bundled libsndfile を使います。対象は default 40 MHz VHS `.ldf`、VHS
-`--no_resample`、`--inputfreq` なしの LD です。default VHS `.flac` と全 CVBS input、
-Ogg/FLAC、stereo、PCM24、他の sample rate、未完了 header は FFmpeg/PyAV-compatible
-path を維持します。
+native-input route では、40 kHz mono PCM16 かつ total sample count が
+`Int32.MaxValue` 以下の direct raw `fLaC` `.ldf`/`.flac` input に bundled
+libsndfile を使います。それより大きい raw-FLAC capture は、libsndfile 1.2.2 が
+境界後の exact random access を保証できないため FFmpeg を使います。eligible input
+には default 40 MHz VHS `.ldf`、VHS `--no_resample`、`--inputfreq` なしの LD が
+含まれます。default VHS `.flac`、全 CVBS input、Ogg/FLAC、stereo、PCM24、他の
+sample rate、未完了 header は FFmpeg/PyAV-compatible path を維持します。
 
 <!-- SECTION: build -->
 
@@ -164,7 +167,7 @@ path を維持します。
 dotnet restore VHSDecodeDotNet.slnx
 dotnet build VHSDecodeDotNet.slnx -c Release --no-restore
 dotnet test --solution VHSDecodeDotNet.slnx -c Release `
-  --no-build --no-restore --minimum-expected-tests 1331
+  --no-build --no-restore --minimum-expected-tests 1349
 ```
 
 Visual Studio 2026 で `VHSDecodeDotNet.slnx` を開くと、build、debug、

@@ -15,7 +15,7 @@
 #  define VHSDECODE_IPP_CALL
 #endif
 
-#define VHSDECODE_IPP_ABI_VERSION 0x00010002u
+#define VHSDECODE_IPP_ABI_VERSION 0x00010003u
 #define VHSDECODE_IPP_NAME_CAPACITY 64u
 #define VHSDECODE_IPP_VERSION_CAPACITY 64u
 #define VHSDECODE_IPP_BUILD_DATE_CAPACITY 32u
@@ -89,6 +89,7 @@ typedef struct vhsdecode_ipp_runtime_info_v1 {
 } vhsdecode_ipp_runtime_info_v1;
 
 typedef struct vhsdecode_ipp_fft64_context vhsdecode_ipp_fft64_context;
+typedef struct vhsdecode_ipp_cfft64_context vhsdecode_ipp_cfft64_context;
 typedef struct vhsdecode_ipp_dft32_context vhsdecode_ipp_dft32_context;
 typedef struct vhsdecode_ipp_iir64_context vhsdecode_ipp_iir64_context;
 typedef struct vhsdecode_ipp_sos64_context vhsdecode_ipp_sos64_context;
@@ -140,6 +141,35 @@ vhsdecode_ipp_fft64_inverse_real(
     const vhsdecode_ipp_complex64* input,
     int32_t input_length,
     double* output,
+    int32_t output_length);
+
+/*
+ * Creates a power-of-two, double-precision complex FFT context. Forward is
+ * unnormalized and inverse is normalized by 1/N. Input and output may be
+ * identical, but otherwise their length-element ranges must not overlap.
+ */
+VHSDECODE_IPP_API int32_t VHSDECODE_IPP_CALL
+vhsdecode_ipp_cfft64_create(
+    int32_t length,
+    vhsdecode_ipp_cfft64_context** out_context);
+
+VHSDECODE_IPP_API int32_t VHSDECODE_IPP_CALL
+vhsdecode_ipp_cfft64_destroy(vhsdecode_ipp_cfft64_context* context);
+
+VHSDECODE_IPP_API int32_t VHSDECODE_IPP_CALL
+vhsdecode_ipp_cfft64_forward(
+    vhsdecode_ipp_cfft64_context* context,
+    const vhsdecode_ipp_complex64* input,
+    int32_t input_length,
+    vhsdecode_ipp_complex64* output,
+    int32_t output_length);
+
+VHSDECODE_IPP_API int32_t VHSDECODE_IPP_CALL
+vhsdecode_ipp_cfft64_inverse(
+    vhsdecode_ipp_cfft64_context* context,
+    const vhsdecode_ipp_complex64* input,
+    int32_t input_length,
+    vhsdecode_ipp_complex64* output,
     int32_t output_length);
 
 /*

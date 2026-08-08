@@ -58,6 +58,68 @@ bool check_round_trip(vhsdecode_ipp_fft64_context* context, int32_t length, doub
     return true;
 }
 
+bool check_complex_round_trip(
+    vhsdecode_ipp_cfft64_context* context,
+    int32_t length)
+{
+    std::vector<vhsdecode_ipp_complex64> input(static_cast<size_t>(length));
+    std::vector<vhsdecode_ipp_complex64> spectrum(static_cast<size_t>(length));
+    std::vector<vhsdecode_ipp_complex64> output(static_cast<size_t>(length));
+    for (int32_t i = 0; i < length; ++i) {
+        input[static_cast<size_t>(i)] = {
+            std::sin(static_cast<double>(i) * 0.071),
+            std::cos(static_cast<double>(i) * 0.037)};
+    }
+
+    if (!expect_status(vhsdecode_ipp_cfft64_forward(
+            context, input.data(), length, spectrum.data(), length),
+            "Complex FFT forward") ||
+        !expect_status(vhsdecode_ipp_cfft64_inverse(
+            context, spectrum.data(), length, output.data(), length),
+            "Complex FFT inverse")) {
+        return false;
+    }
+
+    double max_error = 0.0;
+    for (int32_t i = 0; i < length; ++i) {
+        const auto& expected = input[static_cast<size_t>(i)];
+        const auto& actual = output[static_cast<size_t>(i)];
+        max_error = (std::max)(max_error, std::hypot(
+            expected.real - actual.real,
+            expected.imag - actual.imag));
+    }
+    if (max_error > 1.0e-11) {
+        std::cerr << "Complex FFT round-trip error too large: " << max_error << '\n';
+        return false;
+    }
+
+    std::vector<vhsdecode_ipp_complex64> overlapping(
+        static_cast<size_t>(length) + 1u);
+    if (vhsdecode_ipp_cfft64_forward(
+            context,
+            overlapping.data(),
+            length,
+            overlapping.data() + 1,
+            length) != VHSDECODE_IPP_STATUS_INVALID_ARGUMENT ||
+        vhsdecode_ipp_cfft64_inverse(
+            context,
+            overlapping.data() + 1,
+            length,
+            overlapping.data(),
+            length) != VHSDECODE_IPP_STATUS_INVALID_ARGUMENT) {
+        std::cerr << "Complex FFT partial-overlap validation failed\n";
+        return false;
+    }
+
+    output = input;
+    return expect_status(vhsdecode_ipp_cfft64_forward(
+               context, output.data(), length, output.data(), length),
+               "Complex FFT in-place forward") &&
+        expect_status(vhsdecode_ipp_cfft64_inverse(
+            context, output.data(), length, output.data(), length),
+            "Complex FFT in-place inverse");
+}
+
 bool check_dft32_round_trip(
     vhsdecode_ipp_dft32_context* context,
     int32_t length)
@@ -665,6 +727,24 @@ int main()
 
     if (!expect_status(vhsdecode_ipp_fft64_destroy(context), "FFT destroy") ||
         !expect_status(vhsdecode_ipp_fft64_destroy(nullptr), "FFT destroy NULL")) {
+        return 1;
+    }
+
+    if (vhsdecode_ipp_cfft64_create(12, nullptr) != VHSDECODE_IPP_STATUS_NULL_POINTER) {
+        std::cerr << "Complex FFT null output-context validation failed\n";
+        return 1;
+    }
+    vhsdecode_ipp_cfft64_context* complex_context = nullptr;
+    if (!expect_status(
+            vhsdecode_ipp_cfft64_create(fft_length, &complex_context),
+            "Complex FFT create") ||
+        !check_complex_round_trip(complex_context, fft_length) ||
+        !expect_status(
+            vhsdecode_ipp_cfft64_destroy(complex_context),
+            "Complex FFT destroy") ||
+        !expect_status(
+            vhsdecode_ipp_cfft64_destroy(nullptr),
+            "Complex FFT destroy NULL")) {
         return 1;
     }
 
