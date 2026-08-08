@@ -394,17 +394,17 @@ Python v0.4.0、merge 済みの Python PR341、Exact v0.4.0、Exact
 <!-- LATEST_PERFORMANCE_BEGIN -->
 | CLI mode（workers） | Python v0.4.0 | Python PR341 | Exact + v0.4.0 | Exact + current | IPP-fast + v0.4.0 | IPP-fast + current |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| default（5） | 15.207 s | 16.780 s | 7.533 s / 2.019x / 50.46% | 7.725 s / 2.172x / 53.96% | 5.320 s / 2.858x / 65.01% | 5.171 s / 3.245x / 69.19% |
-| `--threads 1` | 17.694 s | 19.414 s | 12.291 s / 1.440x / 30.53% | 14.181 s / 1.369x / 26.95% | 8.524 s / 2.076x / 51.82% | 9.719 s / 1.997x / 49.94% |
-| `--threads 5` | 15.719 s | 17.801 s | 7.258 s / 2.166x / 53.83% | 7.626 s / 2.334x / 57.16% | 5.299 s / 2.966x / 66.29% | 5.150 s / 3.457x / 71.07% |
-| `--threads 10` | 16.037 s | 18.266 s | 5.901 s / 2.718x / 63.20% | 6.861 s / 2.662x / 62.44% | 4.979 s / 3.221x / 68.95% | 4.702 s / 3.885x / 74.26% |
-| `--threads 20` | 16.405 s | 18.395 s | 5.852 s / 2.803x / 64.33% | 6.058 s / 3.036x / 67.07% | 4.596 s / 3.569x / 71.98% | 4.345 s / 4.234x / 76.38% |
+| default（5） | 15.207 s | 16.780 s | 6.875 s / 2.212x / 54.79% | 7.800 s / 2.151x / 53.52% | 5.162 s / 2.946x / 66.06% | 5.036 s / 3.332x / 69.99% |
+| `--threads 1` | 17.694 s | 19.414 s | 11.740 s / 1.507x / 33.65% | 13.384 s / 1.451x / 31.06% | 8.386 s / 2.110x / 52.60% | 9.587 s / 2.025x / 50.62% |
+| `--threads 5` | 15.719 s | 17.801 s | 6.846 s / 2.296x / 56.45% | 7.541 s / 2.360x / 57.63% | 5.150 s / 3.052x / 67.23% | 5.144 s / 3.460x / 71.10% |
+| `--threads 10` | 16.037 s | 18.266 s | 5.967 s / 2.687x / 62.79% | 6.787 s / 2.691x / 62.84% | 4.732 s / 3.389x / 70.49% | 4.479 s / 4.078x / 75.48% |
+| `--threads 20` | 16.405 s | 18.395 s | 5.381 s / 3.048x / 67.20% | 6.252 s / 2.942x / 66.01% | 4.450 s / 3.686x / 72.87% | 4.383 s / 4.197x / 76.17% |
 <!-- LATEST_PERFORMANCE_END -->
-<!-- LATEST_PERFORMANCE_RUNS: dotnet-full-refresh=60 repeats=3 cti-long-paired=8 determinism=60 -->
+<!-- LATEST_PERFORMANCE_RUNS: dotnet-full-refresh=60 repeats=3 pocketfft-pass8-long-paired=8 thread-gates=24 determinism=60 -->
 
 Python measurement は 2026-08-02 に main commit
 `c92af1dfd0f96cd7f2d49f3219fb428d0f4e0865` で audit しました。merged main
-`38b7d32` で、20 個すべての .NET cell を各 3 回再測定しました。
+`44e0d24` を基にした performance commit `f71aa0a` で、20 個すべての .NET cell を各 3 回再測定しました。
 Python 列は直前の audited measurement を維持します。fixed fixture は
 libsndfile 1.2.2 の exact-seek sample limit を超えるため、現在は正しく FFmpeg を
 使用します。この short-window result は、libsndfile を使った以前の
@@ -414,6 +414,27 @@ Windows 11 build 26220、.NET SDK/runtime `11.0.100-preview.6.26359.118` です�
 run directory は private fixture path を含むため local にのみ保持します。以下は
 報告された local measurement であり、公開された independently reproducible
 benchmark corpus ではありません。
+
+### managed radix-8 PocketFFT AVX pair
+
+double-precision radix-8 kernel は managed AVX で独立した butterfly 2 個を同時に
+評価します。各 lane は元の add、subtract、multiply、conversion order を維持し、
+FMA と reassociated reduction は使用しません。odd tail と AVX 非対応 host は元の
+scalar path を実行します。
+
+reverse-order の 1,000-frame Exact 2 pair では、v0.4.0 が 64.106 から 63.742 秒へ
+0.57% 短縮し、CPU time は 342.547 から 336.578 秒へ 1.74% 減少しました。
+`current` は 52.405 から 52.259 秒へ 0.28% 短縮し、CPU time は 392.438 から
+374.859 秒へ 4.48% 減少しました。candidate の sampled peak working set は両
+profile とも約 778 MiB でした。short matrix は現在の throughput snapshot であり、
+この direct main/candidate long pair が変更自体の causal evidence です。
+
+1,349 個すべての xUnit v3 test は通常実行と AVX 無効実行の両方で pass しました。
+24 strict baseline/candidate run は Exact、IPP-fast、両 profile、`--threads 0`、
+default-5、`--threads 20` をカバーし、luma、chroma、raw JSON、stdout、
+timing-normalized stderr、timestamp-normalized log、ordered `fileLoc`、cross-thread
+determinism がすべて一致しました。60-run matrix executable の SHA-256 は
+`33F39E01AD16CB2053AB6A4AF1F27064D90981AD1661F315C51B86E99E9F6E79` です。
 
 最新の compact VHS path は、完全な low-pass sync reference を先に組み立て、
 low-pass のみを使う field sync work と並行して `Video`、`Envelope`、`Chroma` を

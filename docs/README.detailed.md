@@ -415,18 +415,18 @@ speedup, and wall-time reduction against its profile-matched Python column:
 <!-- LATEST_PERFORMANCE_BEGIN -->
 | CLI mode (workers) | Python v0.4.0 | Python PR341 | Exact + v0.4.0 | Exact + current | IPP-fast + v0.4.0 | IPP-fast + current |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| default (5) | 15.207 s | 16.780 s | 7.533 s / 2.019x / 50.46% | 7.725 s / 2.172x / 53.96% | 5.320 s / 2.858x / 65.01% | 5.171 s / 3.245x / 69.19% |
-| `--threads 1` | 17.694 s | 19.414 s | 12.291 s / 1.440x / 30.53% | 14.181 s / 1.369x / 26.95% | 8.524 s / 2.076x / 51.82% | 9.719 s / 1.997x / 49.94% |
-| `--threads 5` | 15.719 s | 17.801 s | 7.258 s / 2.166x / 53.83% | 7.626 s / 2.334x / 57.16% | 5.299 s / 2.966x / 66.29% | 5.150 s / 3.457x / 71.07% |
-| `--threads 10` | 16.037 s | 18.266 s | 5.901 s / 2.718x / 63.20% | 6.861 s / 2.662x / 62.44% | 4.979 s / 3.221x / 68.95% | 4.702 s / 3.885x / 74.26% |
-| `--threads 20` | 16.405 s | 18.395 s | 5.852 s / 2.803x / 64.33% | 6.058 s / 3.036x / 67.07% | 4.596 s / 3.569x / 71.98% | 4.345 s / 4.234x / 76.38% |
+| default (5) | 15.207 s | 16.780 s | 6.875 s / 2.212x / 54.79% | 7.800 s / 2.151x / 53.52% | 5.162 s / 2.946x / 66.06% | 5.036 s / 3.332x / 69.99% |
+| `--threads 1` | 17.694 s | 19.414 s | 11.740 s / 1.507x / 33.65% | 13.384 s / 1.451x / 31.06% | 8.386 s / 2.110x / 52.60% | 9.587 s / 2.025x / 50.62% |
+| `--threads 5` | 15.719 s | 17.801 s | 6.846 s / 2.296x / 56.45% | 7.541 s / 2.360x / 57.63% | 5.150 s / 3.052x / 67.23% | 5.144 s / 3.460x / 71.10% |
+| `--threads 10` | 16.037 s | 18.266 s | 5.967 s / 2.687x / 62.79% | 6.787 s / 2.691x / 62.84% | 4.732 s / 3.389x / 70.49% | 4.479 s / 4.078x / 75.48% |
+| `--threads 20` | 16.405 s | 18.395 s | 5.381 s / 3.048x / 67.20% | 6.252 s / 2.942x / 66.01% | 4.450 s / 3.686x / 72.87% | 4.383 s / 4.197x / 76.17% |
 <!-- LATEST_PERFORMANCE_END -->
-<!-- LATEST_PERFORMANCE_RUNS: dotnet-full-refresh=60 repeats=3 cti-long-paired=8 determinism=60 -->
+<!-- LATEST_PERFORMANCE_RUNS: dotnet-full-refresh=60 repeats=3 pocketfft-pass8-long-paired=8 thread-gates=24 determinism=60 -->
 
 The Python measurements were audited on 2026-08-02 using main commit
-`c92af1dfd0f96cd7f2d49f3219fb428d0f4e0865`. Merged main `38b7d32`
-remeasured all twenty .NET cells three times; the Python columns
-retain the preceding audited measurements. The fixed fixture exceeds the
+`c92af1dfd0f96cd7f2d49f3219fb428d0f4e0865`. Performance commit `f71aa0a`,
+based on merged main `44e0d24`, remeasured all twenty .NET cells three times;
+the Python columns retain the preceding audited measurements. The fixed fixture exceeds the
 libsndfile 1.2.2 exact-seek sample limit and now correctly routes through
 FFmpeg, so these short-window figures are not directly comparable with the
 former `ced6afb`-based table, which used libsndfile.
@@ -435,6 +435,28 @@ processors, Windows 11 build 26220, and .NET SDK/runtime
 `11.0.100-preview.6.26359.118`. Raw run directories are retained locally because
 they contain the private fixture path; the figures below are reported local
 measurements, not an independently reproducible public benchmark corpus.
+
+### Managed radix-8 PocketFFT AVX pairs
+
+The double-precision radix-8 kernel now evaluates two independent butterflies
+per iteration with managed AVX. Each lane retains the original add, subtract,
+multiply, and conversion order; the implementation uses no FMA or reassociated
+reduction. Odd tails and hosts without AVX execute the original scalar path.
+
+Two reverse-order 1,000-frame Exact pairs moved v0.4.0 from 64.106 to 63.742
+seconds (0.57% lower) and CPU time from 342.547 to 336.578 seconds (1.74%
+lower). `current` moved from 52.405 to 52.259 seconds (0.28% lower) while CPU
+time moved from 392.438 to 374.859 seconds (4.48% lower). Candidate sampled
+peak working sets stayed near 778 MiB in both profiles. The short matrix is a
+current throughput snapshot; these long direct main/candidate pairs are the
+causal evidence for this change.
+
+All 1,349 xUnit v3 tests passed both normally and with AVX disabled. Twenty-four
+strict baseline/candidate runs covered Exact and IPP-fast, both profiles, and
+`--threads 0`, default-five, and `--threads 20`. Luma, chroma, raw JSON,
+stdout, timing-normalized stderr, timestamp-normalized logs, ordered `fileLoc`,
+and cross-thread determinism all matched. The 60-run matrix executable had
+SHA-256 `33F39E01AD16CB2053AB6A4AF1F27064D90981AD1661F315C51B86E99E9F6E79`.
 
 The latest compact VHS path first assembles the complete low-pass sync
 reference, then materializes `Video`, `Envelope`, and `Chroma` while sync-only
