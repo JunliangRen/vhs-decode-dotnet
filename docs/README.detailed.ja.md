@@ -394,18 +394,18 @@ Python v0.4.0、merge 済みの Python PR341、Exact v0.4.0、Exact
 <!-- LATEST_PERFORMANCE_BEGIN -->
 | CLI mode（workers） | Python v0.4.0 | Python PR341 | Exact + v0.4.0 | Exact + current | IPP-fast + v0.4.0 | IPP-fast + current |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| default（5） | 15.207 s | 16.780 s | 6.875 s / 2.212x / 54.79% | 7.800 s / 2.151x / 53.52% | 5.162 s / 2.946x / 66.06% | 5.036 s / 3.332x / 69.99% |
-| `--threads 1` | 17.694 s | 19.414 s | 11.740 s / 1.507x / 33.65% | 13.384 s / 1.451x / 31.06% | 8.386 s / 2.110x / 52.60% | 9.587 s / 2.025x / 50.62% |
-| `--threads 5` | 15.719 s | 17.801 s | 6.846 s / 2.296x / 56.45% | 7.541 s / 2.360x / 57.63% | 5.150 s / 3.052x / 67.23% | 5.144 s / 3.460x / 71.10% |
-| `--threads 10` | 16.037 s | 18.266 s | 5.967 s / 2.687x / 62.79% | 6.787 s / 2.691x / 62.84% | 4.732 s / 3.389x / 70.49% | 4.479 s / 4.078x / 75.48% |
-| `--threads 20` | 16.405 s | 18.395 s | 5.381 s / 3.048x / 67.20% | 6.252 s / 2.942x / 66.01% | 4.450 s / 3.686x / 72.87% | 4.383 s / 4.197x / 76.17% |
+| default（5） | 15.207 s | 16.780 s | 6.875 s / 2.212x / 54.79% | 7.169 s / 2.341x / 57.28% | 5.162 s / 2.946x / 66.06% | 4.510 s / 3.721x / 73.12% |
+| `--threads 1` | 17.694 s | 19.414 s | 11.740 s / 1.507x / 33.65% | 13.167 s / 1.474x / 32.18% | 8.386 s / 2.110x / 52.60% | 9.188 s / 2.113x / 52.67% |
+| `--threads 5` | 15.719 s | 17.801 s | 6.846 s / 2.296x / 56.45% | 7.129 s / 2.497x / 59.95% | 5.150 s / 3.052x / 67.23% | 4.444 s / 4.006x / 75.04% |
+| `--threads 10` | 16.037 s | 18.266 s | 5.967 s / 2.687x / 62.79% | 6.255 s / 2.920x / 65.76% | 4.732 s / 3.389x / 70.49% | 4.032 s / 4.530x / 77.93% |
+| `--threads 20` | 16.405 s | 18.395 s | 5.381 s / 3.048x / 67.20% | 5.576 s / 3.299x / 69.69% | 4.450 s / 3.686x / 72.87% | 3.609 s / 5.098x / 80.38% |
 <!-- LATEST_PERFORMANCE_END -->
-<!-- LATEST_PERFORMANCE_RUNS: dotnet-full-refresh=60 repeats=3 pocketfft-pass8-long-paired=8 thread-gates=24 determinism=60 -->
+<!-- LATEST_PERFORMANCE_RUNS: current-refresh=30 repeats=3 cti-kernel-paired=16 exact-short-paired=12 exact-long-paired=4 ipp-short-paired=12 thread-gates=24 determinism=30 -->
 
 Python measurement は 2026-08-02 に main commit
-`c92af1dfd0f96cd7f2d49f3219fb428d0f4e0865` で audit しました。merged main
-`44e0d24` を基にした performance commit `f71aa0a` で、20 個すべての .NET cell を各 3 回再測定しました。
-Python 列は直前の audited measurement を維持します。fixed fixture は
+`c92af1dfd0f96cd7f2d49f3219fb428d0f4e0865` で audit しました。Python 列と
+v0.4.0 の .NET 列は直前の audited measurement を維持します。merged main
+`cc98519` を基にした今回の candidate で、10 個の `current` .NET cell を各 3 回再測定しました。fixed fixture は
 libsndfile 1.2.2 の exact-seek sample limit を超えるため、現在は正しく FFmpeg を
 使用します。この short-window result は、libsndfile を使った以前の
 `ced6afb`-based table とは直接比較できません。
@@ -413,7 +413,41 @@ host は Intel Core Ultra 7 265K（20 logical processor）、
 Windows 11 build 26220、.NET SDK/runtime `11.0.100-preview.6.26359.118` です。raw
 run directory は private fixture path を含むため local にのみ保持します。以下は
 報告された local measurement であり、公開された independently reproducible
-benchmark corpus ではありません。
+benchmark corpus ではありません。matrix candidate executable の SHA-256 は
+`81CC6E816A10C1EE61AA234194BED92658D250A2615A908844C30CCFD6067B11` です。
+
+### managed current CTI quotient/finish AVX
+
+既存の 8-lane AVX/FMA CTI distance path は、同じ lane を pinned reciprocal
+refinement、threshold gate、lower/upper weighting、target-delta construction、rounded
+output まで処理するようになりました。各 lane は元の float subtraction/FMA sequence、
+float-to-double conversion point、double-precision weighting/FMA sequence、double として
+保存する前の final float rounding を維持します。scalar tail と AVX、FMA、SSE4.1 の
+いずれかに非対応の host は以前の path を使います。JIT disassembly では 2 個の
+4-lane finish group が `vfmadd*`、`vblendv*`、conversion instruction として hot loop
+に inline され、8 回の scalar `FinishSample` call が消えたことを確認しました。
+
+production-size kernel の interleaved 8 pair は同一 SHA-256 を維持し、wall median を
+416.746 から 336.922 ms へ 19.16%、process CPU median を 2578.125 から
+1742.188 ms へ 32.42% 削減しました。160-frame Exact
+`current --threads 20` 6 pair は全 surface を一致させ、wall median を 14.08 から
+13.78 秒へ 2.1% 削減し、candidate は 5 勝しました。reverse-order 1,000-frame
+Exact 2 pair の combined median は 54.42 から 52.76 秒へ 3.05%、CPU time は
+377.59 から 373.18 秒へ減少し、effective core は 6.94 から 7.07 へ増加しました。
+candidate sampled peak working set median は 17.3 MiB 高いものの 799 MiB 未満で、
+progressive growth はありませんでした。
+
+同条件の 160-frame IPP-fast 6 pair は 3 勝 3 敗で、paired mean wall-time change は
++0.13% でした。そのため IPP path は throughput-neutral と分類し、causal IPP
+speedup は主張しません。表の新しい IPP cell は current-build snapshot であり、
+以前の表との差全体をこの patch に帰属させるものではありません。
+
+24 baseline/candidate RF gate は Exact/IPP-fast、v0.4.0/`current`、`--threads 0`、
+default-5、`--threads 20` をカバーしました。luma、chroma、raw JSON、stdout、
+timing-normalized stderr、timestamp-normalized log、ordered `fileLoc`、cross-thread
+determinism はすべて一致しました。1,349 個の xUnit v3 test はすべて pass し、
+pinned CTI 18 case は AVX 無効時と SSE4.1 無効時にも pass しました。Release solution
+は warning/error なしで build しました。
 
 ### managed radix-8 PocketFFT AVX pair
 

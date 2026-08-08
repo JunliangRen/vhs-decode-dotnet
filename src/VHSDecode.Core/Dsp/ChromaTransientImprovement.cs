@@ -189,7 +189,7 @@ public static class ChromaTransientImprovement
 
             float currentMix = parameters.MixForPass(pass);
             int sample = parameters.First;
-            if (Avx.IsSupported && Fma.IsSupported)
+            if (Avx.IsSupported && Fma.IsSupported && Sse41.IsSupported)
             {
                 sample = ProcessVectorizedDistanceRange(
                     chromaData,
@@ -250,8 +250,9 @@ public static class ChromaTransientImprovement
         CtiParameters parameters,
         float currentMix)
     {
-        Span<float> backDistances = stackalloc float[8];
+        Span<float> reciprocalEstimates = stackalloc float[8];
         Span<float> totalDistances = stackalloc float[8];
+        Vector256<float> signBits = Vector256.Create(-0.0f);
         int sample = parameters.First;
         for (; sample < parameters.VectorEnd; sample += 8)
         {
@@ -285,28 +286,41 @@ public static class ChromaTransientImprovement
             Vector256<float> totalDistance = Avx.Add(
                 distanceBack,
                 distanceForward);
-            distanceBack.CopyTo(backDistances);
             totalDistance.CopyTo(totalDistances);
 
             for (int lane = 0; lane < 8; lane++)
             {
-                float laneTotalDistance = totalDistances[lane];
-                double gate = laneTotalDistance > parameters.Threshold ? 1.0 : 0.0;
-                double progress = laneTotalDistance != 0.0f
-                    ? FastVectorizedQuotient(
-                        backDistances[lane],
-                        laneTotalDistance)
-                    : 0.0;
-                FinishSample(
-                    chromaData,
-                    lineOffset,
-                    lineBuffer,
-                    sample + lane,
-                    parameters,
-                    currentMix,
-                    progress,
-                    gate);
+                reciprocalEstimates[lane] =
+                    PinnedReciprocalEstimate(totalDistances[lane]);
             }
+
+            Vector256<float> reciprocals = LoadVector(reciprocalEstimates, 0);
+            Vector256<float> initialProgress = Avx.Multiply(
+                reciprocals,
+                distanceBack);
+            Vector256<float> residual = Fma.MultiplyAdd(
+                totalDistance,
+                initialProgress,
+                Avx.Xor(distanceBack, signBits));
+            Vector256<float> progress = Fma.MultiplyAdd(
+                Avx.Xor(residual, signBits),
+                reciprocals,
+                initialProgress);
+            Vector256<float> nonzeroDistance = Avx.Compare(
+                totalDistance,
+                Vector256<float>.Zero,
+                FloatComparisonMode.UnorderedNotEqualNonSignaling);
+            progress = Avx.And(progress, nonzeroDistance);
+            FinishVectorizedSamples(
+                chromaData,
+                lineOffset + sample,
+                currentI,
+                pastI,
+                futureI,
+                totalDistance,
+                progress,
+                parameters.Threshold,
+                currentMix);
         }
 
         return sample;
@@ -315,6 +329,106 @@ public static class ChromaTransientImprovement
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private static Vector256<float> LoadVector(Span<float> values, int index)
         => MemoryMarshal.Cast<float, Vector256<float>>(values.Slice(index, 8))[0];
+
+    private static void FinishVectorizedSamples(
+        Span<double> chromaData,
+        int outputOffset,
+        Vector256<float> current,
+        Vector256<float> past,
+        Vector256<float> future,
+        Vector256<float> totalDistance,
+        Vector256<float> progress,
+        double threshold,
+        float currentMix)
+    {
+        FinishFourVectorizedSamples(
+            chromaData,
+            outputOffset,
+            current.GetLower(),
+            past.GetLower(),
+            future.GetLower(),
+            totalDistance.GetLower(),
+            progress.GetLower(),
+            threshold,
+            currentMix);
+        FinishFourVectorizedSamples(
+            chromaData,
+            outputOffset + 4,
+            current.GetUpper(),
+            past.GetUpper(),
+            future.GetUpper(),
+            totalDistance.GetUpper(),
+            progress.GetUpper(),
+            threshold,
+            currentMix);
+    }
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private static void FinishFourVectorizedSamples(
+        Span<double> chromaData,
+        int outputOffset,
+        Vector128<float> currentFloat,
+        Vector128<float> pastFloat,
+        Vector128<float> futureFloat,
+        Vector128<float> totalDistanceFloat,
+        Vector128<float> progressFloat,
+        double threshold,
+        float currentMix)
+    {
+        Vector128<float> lowerHalfFloat = Sse.CompareLessThan(
+            progressFloat,
+            Vector128.Create(0.5f));
+        Vector128<float> anchorAFloat = Sse41.BlendVariable(
+            currentFloat,
+            pastFloat,
+            lowerHalfFloat);
+        Vector128<float> anchorBFloat = Sse41.BlendVariable(
+            futureFloat,
+            currentFloat,
+            lowerHalfFloat);
+        Vector128<float> anchorDeltaFloat = Sse.Subtract(
+            anchorBFloat,
+            anchorAFloat);
+
+        Vector256<double> current = Avx.ConvertToVector256Double(currentFloat);
+        Vector256<double> anchorA = Avx.ConvertToVector256Double(anchorAFloat);
+        Vector256<double> progress = Avx.ConvertToVector256Double(progressFloat);
+        Vector256<double> one = Vector256.Create(1.0);
+        Vector256<double> inverseProgress = Avx.Subtract(one, progress);
+        Vector256<double> lowerWeight = Avx.Multiply(
+            Vector256.Create(4.0),
+            Avx.Multiply(progress, progress));
+        Vector256<double> upperWeight = Fma.MultiplyAdd(
+            Vector256.Create(-4.0),
+            Avx.Multiply(inverseProgress, inverseProgress),
+            one);
+        Vector256<double> lowerHalf = Avx.Compare(
+            progress,
+            Vector256.Create(0.5),
+            FloatComparisonMode.OrderedLessThanNonSignaling);
+        Vector256<double> weight = Avx.BlendVariable(
+            upperWeight,
+            lowerWeight,
+            lowerHalf);
+        Vector256<double> targetDelta = Fma.MultiplyAdd(
+            weight,
+            Avx.ConvertToVector256Double(anchorDeltaFloat),
+            Avx.Subtract(anchorA, current));
+
+        Vector256<double> gateMask = Avx.Compare(
+            Avx.ConvertToVector256Double(totalDistanceFloat),
+            Vector256.Create(threshold),
+            FloatComparisonMode.OrderedGreaterThanNonSignaling);
+        Vector256<double> gate = Avx.And(gateMask, one);
+        Vector256<double> result = Fma.MultiplyAdd(
+            Avx.Multiply(Vector256.Create((double)currentMix), gate),
+            targetDelta,
+            current);
+        Vector128<float> rounded = Avx.ConvertToVector128Single(result);
+        MemoryMarshal.Cast<double, Vector256<double>>(
+            chromaData.Slice(outputOffset, 4))[0] =
+            Avx.ConvertToVector256Double(rounded);
+    }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private static void FinishSample(

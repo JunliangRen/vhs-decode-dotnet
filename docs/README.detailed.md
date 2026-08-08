@@ -415,18 +415,19 @@ speedup, and wall-time reduction against its profile-matched Python column:
 <!-- LATEST_PERFORMANCE_BEGIN -->
 | CLI mode (workers) | Python v0.4.0 | Python PR341 | Exact + v0.4.0 | Exact + current | IPP-fast + v0.4.0 | IPP-fast + current |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| default (5) | 15.207 s | 16.780 s | 6.875 s / 2.212x / 54.79% | 7.800 s / 2.151x / 53.52% | 5.162 s / 2.946x / 66.06% | 5.036 s / 3.332x / 69.99% |
-| `--threads 1` | 17.694 s | 19.414 s | 11.740 s / 1.507x / 33.65% | 13.384 s / 1.451x / 31.06% | 8.386 s / 2.110x / 52.60% | 9.587 s / 2.025x / 50.62% |
-| `--threads 5` | 15.719 s | 17.801 s | 6.846 s / 2.296x / 56.45% | 7.541 s / 2.360x / 57.63% | 5.150 s / 3.052x / 67.23% | 5.144 s / 3.460x / 71.10% |
-| `--threads 10` | 16.037 s | 18.266 s | 5.967 s / 2.687x / 62.79% | 6.787 s / 2.691x / 62.84% | 4.732 s / 3.389x / 70.49% | 4.479 s / 4.078x / 75.48% |
-| `--threads 20` | 16.405 s | 18.395 s | 5.381 s / 3.048x / 67.20% | 6.252 s / 2.942x / 66.01% | 4.450 s / 3.686x / 72.87% | 4.383 s / 4.197x / 76.17% |
+| default (5) | 15.207 s | 16.780 s | 6.875 s / 2.212x / 54.79% | 7.169 s / 2.341x / 57.28% | 5.162 s / 2.946x / 66.06% | 4.510 s / 3.721x / 73.12% |
+| `--threads 1` | 17.694 s | 19.414 s | 11.740 s / 1.507x / 33.65% | 13.167 s / 1.474x / 32.18% | 8.386 s / 2.110x / 52.60% | 9.188 s / 2.113x / 52.67% |
+| `--threads 5` | 15.719 s | 17.801 s | 6.846 s / 2.296x / 56.45% | 7.129 s / 2.497x / 59.95% | 5.150 s / 3.052x / 67.23% | 4.444 s / 4.006x / 75.04% |
+| `--threads 10` | 16.037 s | 18.266 s | 5.967 s / 2.687x / 62.79% | 6.255 s / 2.920x / 65.76% | 4.732 s / 3.389x / 70.49% | 4.032 s / 4.530x / 77.93% |
+| `--threads 20` | 16.405 s | 18.395 s | 5.381 s / 3.048x / 67.20% | 5.576 s / 3.299x / 69.69% | 4.450 s / 3.686x / 72.87% | 3.609 s / 5.098x / 80.38% |
 <!-- LATEST_PERFORMANCE_END -->
-<!-- LATEST_PERFORMANCE_RUNS: dotnet-full-refresh=60 repeats=3 pocketfft-pass8-long-paired=8 thread-gates=24 determinism=60 -->
+<!-- LATEST_PERFORMANCE_RUNS: current-refresh=30 repeats=3 cti-kernel-paired=16 exact-short-paired=12 exact-long-paired=4 ipp-short-paired=12 thread-gates=24 determinism=30 -->
 
 The Python measurements were audited on 2026-08-02 using main commit
-`c92af1dfd0f96cd7f2d49f3219fb428d0f4e0865`. Performance commit `f71aa0a`,
-based on merged main `44e0d24`, remeasured all twenty .NET cells three times;
-the Python columns retain the preceding audited measurements. The fixed fixture exceeds the
+`c92af1dfd0f96cd7f2d49f3219fb428d0f4e0865`. The Python and v0.4.0 .NET
+columns retain the preceding audited measurements. This candidate, based on
+merged main `cc98519`, remeasured all ten `current` .NET cells three times.
+The fixed fixture exceeds the
 libsndfile 1.2.2 exact-seek sample limit and now correctly routes through
 FFmpeg, so these short-window figures are not directly comparable with the
 former `ced6afb`-based table, which used libsndfile.
@@ -434,7 +435,44 @@ The host was an Intel Core Ultra 7 265K with 20 logical
 processors, Windows 11 build 26220, and .NET SDK/runtime
 `11.0.100-preview.6.26359.118`. Raw run directories are retained locally because
 they contain the private fixture path; the figures below are reported local
-measurements, not an independently reproducible public benchmark corpus.
+measurements, not an independently reproducible public benchmark corpus. The
+matrix candidate executable had SHA-256
+`81CC6E816A10C1EE61AA234194BED92658D250A2615A908844C30CCFD6067B11`.
+
+### Managed current CTI quotient and finish AVX
+
+The existing eight-lane AVX/FMA CTI distance path now carries the same lanes
+through pinned reciprocal refinement, threshold gating, lower/upper weighting,
+target-delta construction, and rounded output. Every lane retains the original
+float subtraction and FMA sequence, float-to-double conversion points,
+double-precision weighting and FMA sequence, and final float rounding before
+storage as double. The scalar tail and hosts without AVX, FMA, or SSE4.1 retain
+the preceding path. JIT disassembly confirms the two four-lane finish groups
+are inlined into the hot loop as `vfmadd*`, `vblendv*`, and conversion
+instructions rather than eight scalar `FinishSample` calls.
+
+Eight interleaved production-size kernel pairs retained one SHA-256 and moved
+median wall time from 416.746 to 336.922 ms (19.16% lower); median process CPU
+time fell from 2578.125 to 1742.188 ms (32.42%). Six 160-frame Exact
+`current --threads 20` pairs retained every compared surface and moved median
+wall time from 14.08 to 13.78 seconds (2.1% lower), with five candidate wins.
+Two reverse-order 1,000-frame Exact pairs moved the combined median from 54.42
+to 52.76 seconds (3.05% lower) and CPU time from 377.59 to 373.18 seconds;
+effective cores rose from 6.94 to 7.07. Candidate sampled peak working set had
+a 17.3 MiB higher median and stayed below 799 MiB without progressive growth.
+
+Six matching 160-frame IPP-fast pairs split three wins each. Their paired mean
+wall-time change was +0.13%, so the IPP path is classified as throughput-neutral
+and no causal IPP speedup is claimed. The newer IPP cells in the table are a
+fresh current-build snapshot, not an attribution of their full difference from
+the preceding table to this patch.
+
+Twenty-four baseline/candidate RF gates covered Exact and IPP-fast, v0.4.0 and
+`current`, and `--threads 0`, default-five, and `--threads 20`. Luma, chroma,
+raw JSON, stdout, timing-normalized stderr, timestamp-normalized logs, ordered
+`fileLoc`, and cross-thread determinism all matched. All 1,349 xUnit v3 tests
+passed; the 18 pinned CTI cases also passed with AVX disabled and with SSE4.1
+disabled. The Release solution built with no warnings or errors.
 
 ### Managed radix-8 PocketFFT AVX pairs
 
