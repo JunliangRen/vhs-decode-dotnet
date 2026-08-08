@@ -1,5 +1,6 @@
 using System.Buffers.Binary;
 using System.ComponentModel;
+using VHSDecode.Core.CommandLine;
 using VHSDecode.Core.Decode;
 using VHSDecode.Core.Rf;
 using Xunit;
@@ -426,6 +427,239 @@ public sealed class LibsndfilePcm16SampleLoaderTests
         Assert.Equal(expected, info.SupportsExactLibsndfileSeeking);
     }
 
+    [Theory(DisplayName = "raw FLAC mapped seeking requires a complete fixed-block stream without a seektable")]
+    [InlineData(2_048, 2_048, false, 0xf8, 2_048, false, true)]
+    [InlineData(192, 192, false, 0xf8, 192, false, true)]
+    [InlineData(4_608, 4_608, false, 0xf8, 4_608, false, true)]
+    [InlineData(2_048, 2_048, true, 0xf8, 2_048, false, false)]
+    [InlineData(2_048, 4_096, false, 0xf8, 2_048, false, false)]
+    [InlineData(2_048, 2_048, false, 0xf9, 2_048, false, false)]
+    [InlineData(1, 1, false, 0xf8, 2_048, false, false)]
+    [InlineData(2_048, 2_048, false, 0xf8, 4_096, false, false)]
+    [InlineData(2_048, 2_048, false, 0xf8, 2_048, true, false)]
+    public void StreamInfoGatesPyAvMappedSeeking(
+        int minimumBlockSize,
+        int maximumBlockSize,
+        bool hasSeekTable,
+        byte frameHeader,
+        int frameBlockSize,
+        bool corruptHeaderCrc,
+        bool expected)
+    {
+        using var input = new MemoryStream(BuildMappedFlacHeader(
+            minimumBlockSize,
+            maximumBlockSize,
+            hasSeekTable,
+            frameHeader,
+            frameBlockSize,
+            corruptHeaderCrc));
+
+        Assert.True(RawFlacStreamInfo.TryRead(input, out RawFlacStreamInfo info));
+        Assert.Equal(minimumBlockSize, info.MinimumBlockSize);
+        Assert.Equal(maximumBlockSize, info.MaximumBlockSize);
+        Assert.Equal(hasSeekTable, info.HasSeekTable);
+        Assert.True(info.MetadataChainComplete);
+        bool expectedFixedBlockingStrategy = minimumBlockSize is >= 16 and <= 65_535
+            && minimumBlockSize == maximumBlockSize
+            && frameHeader == 0xf8
+            && frameBlockSize == minimumBlockSize
+            && !corruptHeaderCrc;
+        Assert.Equal(expectedFixedBlockingStrategy, info.UsesFixedBlockingStrategy);
+        Assert.Equal(expected, info.SupportsPyAvMappedLibsndfileSeeking);
+    }
+
+    [Theory(DisplayName = "raw FLAC mapped seeking rejects forbidden trailing metadata types")]
+    [InlineData(0)]
+    [InlineData(127)]
+    public void StreamInfoRejectsForbiddenMappedMetadata(byte metadataBlockType)
+    {
+        using var input = new MemoryStream(BuildMappedFlacHeader(
+            minimumBlockSize: 2_048,
+            maximumBlockSize: 2_048,
+            hasSeekTable: false,
+            frameHeader: 0xf8,
+            trailingMetadataBlockType: metadataBlockType));
+
+        Assert.True(RawFlacStreamInfo.TryRead(input, out RawFlacStreamInfo info));
+        Assert.False(info.MetadataChainComplete);
+        Assert.False(info.SupportsPyAvMappedLibsndfileSeeking);
+    }
+
+    [Theory(DisplayName = "PyAV raw FLAC restart mapping preserves pinned FFmpeg frame starts")]
+    [InlineData(0, 0)]
+    [InlineData(160_788_480, 156_696_576)]
+    [InlineData(500_000_000, 483_632_384)]
+    [InlineData(1_500_000_000, 1_442_713_344)]
+    [InlineData(2_147_516_415, 2_063_632_383)]
+    [InlineData(3_700_000_000, 3_554_737_408)]
+    public void PyAvRawFlacMapperMatchesPinnedFrameStarts(
+        long logicalSample,
+        long expectedPhysicalSample)
+    {
+        var mapper = new PyAvRawFlacSampleMapper(
+            FfmpegPcm16SampleLoader.ContainerAudioSampleRateHz,
+            blockSize: 2_048);
+
+        Assert.True(mapper.TryMapRestartSample(logicalSample, out long physicalSample));
+        Assert.Equal(expectedPhysicalSample, physicalSample);
+        Assert.False(mapper.TryMapRestartSample(-1, out _));
+    }
+
+    [Fact(DisplayName = "mapped libsndfile reads retain restart offsets across the rewind window")]
+    public void MappedNativeReadsRetainRestartOffsetWithinWindow()
+    {
+        var source = new VirtualRecordingSource(4_000_000_000);
+        var fallback = new RecordingFallback();
+        using var loader = new LibsndfilePcm16SampleLoader(
+            "capture.ldf",
+            _ => source,
+            fallback,
+            new PyAvRawFlacSampleMapper(
+                FfmpegPcm16SampleLoader.ContainerAudioSampleRateHz,
+                blockSize: 2_048));
+
+        Assert.NotNull(loader.Read(Stream.Null, 500_000_000, 4));
+        Assert.NotNull(loader.Read(Stream.Null, 500_000_004, 4));
+        Assert.NotNull(loader.Read(Stream.Null, 499_999_000, 4));
+        Assert.NotNull(loader.Read(Stream.Null, 1_500_000_000, 4));
+
+        Assert.Equal(
+            [483_632_384, 483_631_384, 1_442_713_344],
+            source.SeekSamples);
+        Assert.Equal(0, fallback.ReadCount);
+    }
+
+    [Fact(DisplayName = "mapped libsndfile boundary reads preserve the logical FFmpeg fallback position")]
+    public void MappedNativeBoundaryReadUsesLogicalFallbackPosition()
+    {
+        const long LogicalSample = 500_000_000;
+        const long PhysicalSample = 483_632_384;
+        var source = new VirtualRecordingSource(PhysicalSample + 1);
+        var fallback = new RecordingFallback([71.0, 72.0]);
+        using var loader = new LibsndfilePcm16SampleLoader(
+            "capture.ldf",
+            _ => source,
+            fallback,
+            new PyAvRawFlacSampleMapper(
+                FfmpegPcm16SampleLoader.ContainerAudioSampleRateHz,
+                blockSize: 2_048));
+
+        double[]? actual = loader.Read(Stream.Null, LogicalSample, 2);
+
+        Assert.NotNull(actual);
+        Assert.Equal([71.0, 72.0], actual);
+        Assert.Equal(LogicalSample, fallback.LastSample);
+        Assert.Equal(2, fallback.LastReadLength);
+        Assert.True(source.Disposed);
+    }
+
+    [Fact(DisplayName = "parallel raw FLAC routing opts into mapped seeking without changing serial routing")]
+    public void RawFlacFactoryKeepsMappedSeekingOptIn()
+    {
+        string directory = CreateTemporaryDirectory();
+        try
+        {
+            string path = Path.Combine(directory, "large fixed capture.ldf");
+            File.WriteAllBytes(path, BuildMappedFlacHeader(
+                minimumBlockSize: 2_048,
+                maximumBlockSize: 2_048,
+                hasSeekTable: false,
+                frameHeader: 0xf8));
+
+            using IDisposable serial = (IDisposable)RfLoaderFactory.CreateNative(path);
+            using IDisposable parallel = (IDisposable)RfLoaderFactory.CreateNative(
+                path,
+                preferPyAvMappedRawFlacSeeking: true);
+
+            Assert.IsType<FfmpegPcm16SampleLoader>(serial);
+            var mapped = Assert.IsType<LibsndfilePcm16SampleLoader>(parallel);
+            Assert.True(mapped.UsesPyAvMappedSeeking);
+        }
+        finally
+        {
+            Directory.Delete(directory, recursive: true);
+        }
+    }
+
+    [Theory(DisplayName = "VHS sessions map oversized raw FLAC only for ordinary parallel decode")]
+    [InlineData(null, false, false, null, true)]
+    [InlineData("0", false, false, null, false)]
+    [InlineData("1", false, false, null, false)]
+    [InlineData("2", false, false, null, true)]
+    [InlineData("2", true, false, null, false)]
+    [InlineData("2", false, true, null, false)]
+    [InlineData("2", false, false, "25", false)]
+    public void VhsSessionKeepsMappedRawFlacOnParallelDecodeOnly(
+        string? threads,
+        bool debugPlot,
+        bool gnrcAfe,
+        string? sharpness,
+        bool expectMappedOnMulticore)
+    {
+        string directory = CreateTemporaryDirectory();
+        try
+        {
+            string inputPath = Path.Combine(directory, "large fixed capture.ldf");
+            File.WriteAllBytes(inputPath, BuildMappedFlacHeader(
+                minimumBlockSize: 2_048,
+                maximumBlockSize: 2_048,
+                hasSeekTable: false,
+                frameHeader: 0xf8));
+            var arguments = new List<string>
+            {
+                "--system",
+                "pal",
+                "--frequency",
+                "40"
+            };
+            if (threads is not null)
+            {
+                arguments.Add("--threads");
+                arguments.Add(threads);
+            }
+
+            if (debugPlot)
+            {
+                arguments.Add("--debug_plot");
+                arguments.Add(Path.Combine(directory, "plot.json"));
+            }
+
+            if (gnrcAfe)
+            {
+                arguments.Add("--gnuradio_rf_afe");
+            }
+
+            if (sharpness is not null)
+            {
+                arguments.Add("--sharpness");
+                arguments.Add(sharpness);
+            }
+
+            arguments.Add(inputPath);
+            arguments.Add(Path.Combine(directory, "output"));
+            ParsedCommand command = new CommandLineParser().Parse(
+                CliSpecs.Vhs,
+                arguments);
+            using DecodeSession session = DecodeSessionFactory.Create(command);
+
+            bool expectedMapped = expectMappedOnMulticore
+                && Environment.ProcessorCount > 1;
+            if (expectedMapped)
+            {
+                var mapped = Assert.IsType<LibsndfilePcm16SampleLoader>(session.Loader);
+                Assert.True(mapped.UsesPyAvMappedSeeking);
+            }
+            else
+            {
+                Assert.IsType<FfmpegPcm16SampleLoader>(session.Loader);
+            }
+        }
+        finally
+        {
+            Directory.Delete(directory, recursive: true);
+        }
+    }
+
     [Theory(DisplayName = "raw FLAC STREAMINFO rejects foreign and truncated headers")]
     [MemberData(nameof(InvalidFlacHeaders))]
     public void StreamInfoRejectsInvalidHeaders(byte[] header)
@@ -606,6 +840,85 @@ public sealed class LibsndfilePcm16SampleLoaderTests
         return bytes;
     }
 
+    private static byte[] BuildMappedFlacHeader(
+        int minimumBlockSize,
+        int maximumBlockSize,
+        bool hasSeekTable,
+        byte frameHeader,
+        int frameBlockSize = 2_048,
+        bool corruptHeaderCrc = false,
+        byte? trailingMetadataBlockType = null)
+    {
+        const long TotalSamples = (long)int.MaxValue + 1;
+        byte? metadataBlockType = trailingMetadataBlockType
+            ?? (hasSeekTable ? (byte)3 : null);
+        int metadataBytes = metadataBlockType.HasValue ? 4 : 0;
+        const int FrameHeaderBytes = 7;
+        var bytes = new byte[4 + 4 + 34 + metadataBytes + FrameHeaderBytes];
+        "fLaC"u8.CopyTo(bytes);
+        bytes[4] = metadataBlockType.HasValue ? (byte)0x00 : (byte)0x80;
+        bytes[7] = 34;
+        BinaryPrimitives.WriteUInt16BigEndian(bytes.AsSpan(8, 2), checked((ushort)minimumBlockSize));
+        BinaryPrimitives.WriteUInt16BigEndian(bytes.AsSpan(10, 2), checked((ushort)maximumBlockSize));
+        ulong packed = ((ulong)FfmpegPcm16SampleLoader.ContainerAudioSampleRateHz << 44)
+            | ((ulong)(1 - 1) << 41)
+            | ((ulong)(16 - 1) << 36)
+            | (ulong)TotalSamples;
+        BinaryPrimitives.WriteUInt64BigEndian(bytes.AsSpan(18, 8), packed);
+        int frameOffset = 42;
+        if (metadataBlockType.HasValue)
+        {
+            bytes[frameOffset] = (byte)(0x80 | metadataBlockType.Value);
+            frameOffset += 4;
+        }
+
+        bytes[frameOffset] = 0xff;
+        bytes[frameOffset + 1] = frameHeader;
+        bytes[frameOffset + 2] = (byte)((FixedBlockSizeCode(frameBlockSize) << 4) | 12);
+        bytes[frameOffset + 3] = 0x08;
+        bytes[frameOffset + 4] = 0;
+        bytes[frameOffset + 5] = 40;
+        byte crc = CalculateFlacHeaderCrc8(bytes.AsSpan(frameOffset, FrameHeaderBytes - 1));
+        bytes[frameOffset + 6] = corruptHeaderCrc ? (byte)(crc ^ 0xff) : crc;
+        return bytes;
+    }
+
+    private static int FixedBlockSizeCode(int blockSize)
+        => blockSize switch
+        {
+            192 => 1,
+            576 => 2,
+            1_152 => 3,
+            2_304 => 4,
+            4_608 => 5,
+            256 => 8,
+            512 => 9,
+            1_024 => 10,
+            2_048 => 11,
+            4_096 => 12,
+            8_192 => 13,
+            16_384 => 14,
+            32_768 => 15,
+            _ => throw new ArgumentOutOfRangeException(nameof(blockSize))
+        };
+
+    private static byte CalculateFlacHeaderCrc8(ReadOnlySpan<byte> data)
+    {
+        byte crc = 0;
+        foreach (byte value in data)
+        {
+            crc ^= value;
+            for (int bit = 0; bit < 8; bit++)
+            {
+                crc = (crc & 0x80) != 0
+                    ? (byte)((crc << 1) ^ 0x07)
+                    : (byte)(crc << 1);
+            }
+        }
+
+        return crc;
+    }
+
     private static string CreateTemporaryDirectory()
     {
         string directory = Path.Combine(
@@ -723,6 +1036,34 @@ public sealed class LibsndfilePcm16SampleLoaderTests
                 destination.Length,
                 Math.Min(available, MaximumFramesPerRead));
             samples.AsSpan(checked((int)_position), count).CopyTo(destination);
+            _position += count;
+            return count;
+        }
+
+        public void Dispose() => Disposed = true;
+    }
+
+    private sealed class VirtualRecordingSource(long frames) : ILibsndfilePcm16Source
+    {
+        private long _position;
+
+        public long Frames => frames;
+
+        public List<long> SeekSamples { get; } = [];
+
+        public bool Disposed { get; private set; }
+
+        public long Seek(long sample)
+        {
+            SeekSamples.Add(sample);
+            _position = sample;
+            return sample;
+        }
+
+        public long ReadFrames(Span<short> destination)
+        {
+            int count = checked((int)Math.Min(destination.Length, Frames - _position));
+            destination[..count].Clear();
             _position += count;
             return count;
         }

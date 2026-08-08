@@ -394,27 +394,60 @@ Python v0.4.0、merge 済みの Python PR341、Exact v0.4.0、Exact
 <!-- LATEST_PERFORMANCE_BEGIN -->
 | CLI mode（workers） | Python v0.4.0 | Python PR341 | Exact + v0.4.0 | Exact + current | IPP-fast + v0.4.0 | IPP-fast + current |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| default（5） | 15.207 s | 16.780 s | 6.875 s / 2.212x / 54.79% | 7.169 s / 2.341x / 57.28% | 5.162 s / 2.946x / 66.06% | 4.510 s / 3.721x / 73.12% |
-| `--threads 1` | 17.694 s | 19.414 s | 11.740 s / 1.507x / 33.65% | 13.167 s / 1.474x / 32.18% | 8.386 s / 2.110x / 52.60% | 9.188 s / 2.113x / 52.67% |
-| `--threads 5` | 15.719 s | 17.801 s | 6.846 s / 2.296x / 56.45% | 7.129 s / 2.497x / 59.95% | 5.150 s / 3.052x / 67.23% | 4.444 s / 4.006x / 75.04% |
-| `--threads 10` | 16.037 s | 18.266 s | 5.967 s / 2.687x / 62.79% | 6.255 s / 2.920x / 65.76% | 4.732 s / 3.389x / 70.49% | 4.032 s / 4.530x / 77.93% |
-| `--threads 20` | 16.405 s | 18.395 s | 5.381 s / 3.048x / 67.20% | 5.576 s / 3.299x / 69.69% | 4.450 s / 3.686x / 72.87% | 3.609 s / 5.098x / 80.38% |
+| default（5） | 17.680 s | 20.173 s | 4.096 s / 4.316x / 76.83% | 4.618 s / 4.369x / 77.11% | 3.604 s / 4.906x / 79.62% | 3.392 s / 5.948x / 83.19% |
+| `--threads 1` | 18.995 s | 21.062 s | 11.613 s / 1.636x / 38.86% | 13.183 s / 1.598x / 37.41% | 8.407 s / 2.259x / 55.74% | 9.340 s / 2.255x / 55.66% |
+| `--threads 5` | 17.599 s | 19.493 s | 4.307 s / 4.086x / 75.52% | 4.805 s / 4.057x / 75.35% | 3.525 s / 4.993x / 79.97% | 3.203 s / 6.087x / 83.57% |
+| `--threads 10` | 17.182 s | 19.727 s | 3.240 s / 5.303x / 81.14% | 3.764 s / 5.241x / 80.92% | 3.142 s / 5.468x / 81.71% | 2.830 s / 6.972x / 85.66% |
+| `--threads 20` | 17.594 s | 19.583 s | 2.730 s / 6.445x / 84.48% | 3.168 s / 6.181x / 83.82% | 2.667 s / 6.598x / 84.84% | 2.327 s / 8.416x / 88.12% |
 <!-- LATEST_PERFORMANCE_END -->
-<!-- LATEST_PERFORMANCE_RUNS: current-refresh=30 repeats=3 cti-kernel-paired=16 exact-short-paired=12 exact-long-paired=4 ipp-short-paired=12 thread-gates=24 determinism=30 -->
+<!-- LATEST_PERFORMANCE_RUNS: full-refresh=90 repeats=3 mapped-ab=36 mapped-long=4 dotnet-determinism=60 -->
 
-Python measurement は 2026-08-02 に main commit
-`c92af1dfd0f96cd7f2d49f3219fb428d0f4e0865` で audit しました。Python 列と
-v0.4.0 の .NET 列は直前の audited measurement を維持します。merged main
-`cc98519` を基にした今回の candidate で、10 個の `current` .NET cell を各 3 回再測定しました。fixed fixture は
-libsndfile 1.2.2 の exact-seek sample limit を超えるため、現在は正しく FFmpeg を
-使用します。この short-window result は、libsndfile を使った以前の
-`ced6afb`-based table とは直接比較できません。
-host は Intel Core Ultra 7 265K（20 logical processor）、
-Windows 11 build 26220、.NET SDK/runtime `11.0.100-preview.6.26359.118` です。raw
-run directory は private fixture path を含むため local にのみ保持します。以下は
-報告された local measurement であり、公開された independently reproducible
-benchmark corpus ではありません。matrix candidate executable の SHA-256 は
-`81CC6E816A10C1EE61AA234194BED92658D250A2615A908844C30CCFD6067B11` です。
+全 90 run（30 matrix cell を各 3 回）は 2026-08-09 に今回の candidate で fresh
+measurement しました。candidate は merged main `63251d8` を基にしています。各 cell
+は 3 回の Release run の median で、3 pass の mode/profile order は reverse と
+mixed order にしました。
+host は Intel Core Ultra 7 265K（20 logical processor）、Windows 11 build 26220、
+.NET SDK/runtime `11.0.100-preview.6.26359.118` です。raw run directory は private
+fixture path を含むため local にのみ保持します。以下は local measurement の報告で、
+public independently reproducible benchmark corpus ではありません。candidate
+executable の SHA-256 は
+`808D09DD0D1B98548AB6A712BFF777E2F6192027D5943C84A9C0C7482BCF6E6B` です。
+
+以前公開した table は別の private NTSC Betamax HiFi `.lds` fixture を使っているため、
+この PAL VHS matrix とは直接比較できません。同じ PAL fixture 内でも、以前の main は
+oversized raw FLAC に strict FFmpeg/PyAV-emulation path を使う実際の performance/memory
+cost がありました。次の変更は serial oracle contract を変えずにその cost を除きます。
+
+### oversized raw-FLAC mapped seeking
+
+raw-FLAC parser は signed 32-bit sample range を超え、metadata chain が complete、
+single fixed block size と fixed blocking strategy を使い、seektable を持たない 40 MHz
+mono PCM16 stream だけを mapped libsndfile read の対象にします。first-frame header は
+STREAMINFO と一致し CRC-8 を通過する必要があります。mapper は pinned FFmpeg/PyAV
+path の first-frame PTS と RF-position rounding を integer arithmetic で再現します。
+この path は ordinary parallel VHS decode だけで有効です。`--threads 0/1`、debug plot、
+GNU Radio AFE input、nonzero `--sharpness`、resampling、variable-block stream、seektable
+付き stream、unknown layout は FFmpeg のままです。mapping、seek、read、
+length-boundary failure は同じ logical sample から一方向に FFmpeg fallback します。
+先頭、中間、signed 32-bit boundary、near EOF の direct probe は FFmpeg と reference
+FLAC decoder の両方に一致しました。
+
+36 回の interleaved baseline/candidate real-RF run は luma、chroma、raw JSON、ordered
+`fileLoc`、stdout、timing-normalized stderr、timestamp-normalized log がすべて一致
+しました。Exact `current --threads 20` の 200 frames は 14.876 から 11.135 秒へ
+25.15% 短縮し、effective cores は 6.99 から 8.06、peak working set は 803.4 から
+407.0 MiB になりました。reverse-order 1,000-frame 2 pair は 53.230 から 44.055 秒へ
+17.24%、effective cores は 6.76 から 7.41、peak working set は 773.2 から
+402.4 MiB です。32 workers/100 frames は 10.030 から 6.679 秒へ 33.41% 短縮し、
+effective cores は 6.80 から 8.88 へ増えました。変更していない single-worker route
+は 13.901 対 13.877 秒で neutral です。
+
+別の 200-frame gate は Exact v0.4.0 を 22.24%、IPP-fast `current` を 24.64%
+短縮しました。six-path matrix の 60 .NET run は default-5 と
+`--threads 1/5/10/20` を通して profile ごとに 1 hash でした。merged Python PR341
+もこの bounded matrix では deterministic です。Python v0.4.0 は 15 nonzero-worker
+run で 14 luma/chroma hash を生成したため、strict oracle は引き続き Python v0.4.0
+`g4315520 --threads 0` です。
 
 ### managed current CTI quotient/finish AVX
 
@@ -1221,18 +1254,23 @@ timestamp-normalized log はすべて一致しました。candidate は default 
 すべてで保存済みの各 Python oracle と完全一致しました。IPP は gate から除外しています。
 
 native-input route の direct raw `fLaC` `.ldf`/`.flac` input は、最初の metadata
-block が完全な 34-byte STREAMINFO で、40 kHz、mono、PCM16、既知の nonzero
-sample count が `Int32.MaxValue` 以下の場合だけ bundled libsndfile を使います。handle は lazy-open、
+block が完全な 34-byte STREAMINFO で、40 kHz mono PCM16、既知の nonzero sample
+count が `Int32.MaxValue` 以下なら bundled libsndfile を使います。handle は lazy-open、
 sequential read は seek-free、random read は exact frame seek で、pooled PCM16
-workspace から従来どおり `short` を `double` へ変換します。native open が
-unavailable/unsupported の場合、native seek/decode error の場合、または read が
-reported FLAC length を越える場合は、同じ requested sample から既存の
-FFmpeg/PyAV-compatible loader を試し、利用可能なら一度だけ切り替えます。FFmpeg
-未導入時も正常な reported EOF は EOF のままです。default 40 MHz VHS
-`.ldf`、VHS `--no_resample`、`--inputfreq` なしの LD は、reported total が gate 内なら
-この route を選べます。より大きい raw-FLAC、default VHS `.flac`、全 CVBS input、
-Ogg/FLAC、stereo、PCM24、他の rate、unknown total、narrow gate で rejected された
-header、`.vhs`、`.wav`、`raw.oga` は FFmpeg を維持します。
+workspace から従来どおり `short` を `double` へ変換します。
+
+通常の parallel VHS decode に限り oversized-input gate も使えます。metadata chain が
+complete、STREAMINFO の nonzero block size が固定、最初の audio frame が
+fixed-blocking、SEEKTABLE なし、sample count が `Int32.MaxValue` 超であることが条件です。
+decoder restart ごとに integer time-base/block 演算で logical RF sample を、固定した
+FFmpeg/PyAV path と同じ最初の native FLAC sample へ map します。既存の 2 MiB rewind
+window と 40 MiB byte-distance restart threshold も維持します。`--threads 0/1`、
+debug-plot/GNU Radio AFE mode、nonzero `--sharpness`、LD、CVBS、gate 外 input は
+FFmpeg のままです。native open unavailable/unsupported、seek/decode error、mapping/length boundary failure は、
+同じ logical sample から既存 FFmpeg/PyAV-compatible loader へ一度だけ切り替えます。
+FFmpeg 未導入時も正常な reported EOF は EOF のままです。default VHS `.flac`、
+Ogg/FLAC、stereo、PCM24、他 rate、unknown total、rejected header、`.vhs`、`.wav`、
+`raw.oga` も FFmpeg を維持します。
 
 同じ private local RF window で、Release 1.4.4 の FFmpeg path と candidate の
 libsndfile path は default、`--threads 0`、`--threads 20` の luma、chroma、raw
@@ -2506,7 +2544,7 @@ focused 16 KiB unit-test threshold は warmed calling thread の allocation だ�
 .\tools\build-ipp-native.ps1
 dotnet restore VHSDecodeDotNet.slnx
 dotnet build VHSDecodeDotNet.slnx -c Release --no-restore
-dotnet test --solution VHSDecodeDotNet.slnx -c Release --no-build --no-restore --minimum-expected-tests 1349
+dotnet test --solution VHSDecodeDotNet.slnx -c Release --no-build --no-restore --minimum-expected-tests 1376
 dotnet test --project tests\VHSDecode.Tests\VHSDecode.Tests.csproj -c Release --no-build --no-restore --coverage --coverage-output coverage.cobertura.xml --coverage-output-format cobertura
 ```
 
@@ -2520,7 +2558,7 @@ third-party notice を埋め込み、license sidecar file は追加しません�
 
 現在の正式な Release build は warning 0、error 0 です。xUnit v3 project は
 `dotnet test` と Visual Studio Test Explorer の両方で個別に検出できる
-**1,349** tests を公開します。
+**1,376** tests を公開します。
 
 <!-- SECTION: usage -->
 

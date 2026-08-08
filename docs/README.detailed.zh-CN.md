@@ -336,26 +336,53 @@ IPP-fast v0.4.0 和 IPP-fast `current`。文件名不会公开。每个 .NET 单
 <!-- LATEST_PERFORMANCE_BEGIN -->
 | CLI 模式（workers） | Python v0.4.0 | Python PR341 | Exact + v0.4.0 | Exact + current | IPP-fast + v0.4.0 | IPP-fast + current |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| 默认（5） | 15.207 s | 16.780 s | 6.875 s / 2.212x / 54.79% | 7.169 s / 2.341x / 57.28% | 5.162 s / 2.946x / 66.06% | 4.510 s / 3.721x / 73.12% |
-| `--threads 1` | 17.694 s | 19.414 s | 11.740 s / 1.507x / 33.65% | 13.167 s / 1.474x / 32.18% | 8.386 s / 2.110x / 52.60% | 9.188 s / 2.113x / 52.67% |
-| `--threads 5` | 15.719 s | 17.801 s | 6.846 s / 2.296x / 56.45% | 7.129 s / 2.497x / 59.95% | 5.150 s / 3.052x / 67.23% | 4.444 s / 4.006x / 75.04% |
-| `--threads 10` | 16.037 s | 18.266 s | 5.967 s / 2.687x / 62.79% | 6.255 s / 2.920x / 65.76% | 4.732 s / 3.389x / 70.49% | 4.032 s / 4.530x / 77.93% |
-| `--threads 20` | 16.405 s | 18.395 s | 5.381 s / 3.048x / 67.20% | 5.576 s / 3.299x / 69.69% | 4.450 s / 3.686x / 72.87% | 3.609 s / 5.098x / 80.38% |
+| 默认（5） | 17.680 s | 20.173 s | 4.096 s / 4.316x / 76.83% | 4.618 s / 4.369x / 77.11% | 3.604 s / 4.906x / 79.62% | 3.392 s / 5.948x / 83.19% |
+| `--threads 1` | 18.995 s | 21.062 s | 11.613 s / 1.636x / 38.86% | 13.183 s / 1.598x / 37.41% | 8.407 s / 2.259x / 55.74% | 9.340 s / 2.255x / 55.66% |
+| `--threads 5` | 17.599 s | 19.493 s | 4.307 s / 4.086x / 75.52% | 4.805 s / 4.057x / 75.35% | 3.525 s / 4.993x / 79.97% | 3.203 s / 6.087x / 83.57% |
+| `--threads 10` | 17.182 s | 19.727 s | 3.240 s / 5.303x / 81.14% | 3.764 s / 5.241x / 80.92% | 3.142 s / 5.468x / 81.71% | 2.830 s / 6.972x / 85.66% |
+| `--threads 20` | 17.594 s | 19.583 s | 2.730 s / 6.445x / 84.48% | 3.168 s / 6.181x / 83.82% | 2.667 s / 6.598x / 84.84% | 2.327 s / 8.416x / 88.12% |
 <!-- LATEST_PERFORMANCE_END -->
-<!-- LATEST_PERFORMANCE_RUNS: current-refresh=30 repeats=3 cti-kernel-paired=16 exact-short-paired=12 exact-long-paired=4 ipp-short-paired=12 thread-gates=24 determinism=30 -->
+<!-- LATEST_PERFORMANCE_RUNS: full-refresh=90 repeats=3 mapped-ab=36 mapped-long=4 dotnet-determinism=60 -->
 
-Python 测量于 2026-08-02 在 main commit
-`c92af1dfd0f96cd7f2d49f3219fb428d0f4e0865` 上完成审计。Python 两列和 v0.4.0 的
-.NET 两列沿用此前审计数据；本候选基于已合并的 main `cc98519`，把 10 个 `current`
-.NET 单元格各重测三次。固定夹具
-超过 libsndfile 1.2.2 的精确定位样本上限，现在会正确改走 FFmpeg；因此这组短窗
-数字不能与之前基于 `ced6afb`、使用 libsndfile 的表格直接比较。
-测试机为 Intel Core Ultra 7
-265K（20 个逻辑处理器）、Windows 11 build 26220，以及 .NET SDK/runtime
-`11.0.100-preview.6.26359.118`。原始运行目录含有私有夹具路径，因此只保留在本地；
-下列数字是如实报告的本地测量，不是可公开独立复现的 benchmark corpus。矩阵候选
-可执行文件的 SHA-256 为
-`81CC6E816A10C1EE61AA234194BED92658D250A2615A908844C30CCFD6067B11`。
+全部 90 次运行（30 个矩阵单元，每个重复 3 次）均于 2026-08-09 使用本候选重新测量；
+候选基于已合并的 main `63251d8`。每个单元都是三次 Release 运行的中位数，三轮分别
+反转和混排了模式与 profile 顺序。测试机为 Intel Core Ultra 7 265K（20 个逻辑处理器）、
+Windows 11 build 26220，以及 .NET SDK/runtime `11.0.100-preview.6.26359.118`。原始运行目录
+含有私有夹具路径，因此只保留在本地；这些是如实报告的本地测量，不是可公开独立
+复现的 benchmark corpus。候选可执行文件的 SHA-256 为
+`808D09DD0D1B98548AB6A712BFF777E2F6192027D5943C84A9C0C7482BCF6E6B`。
+
+更早公开的表格使用另一份私有 NTSC Betamax HiFi `.lds` 夹具，不能与这份 PAL VHS
+矩阵直接比较。在同一份 PAL 夹具内，之前的 main 还因为超大 raw FLAC 必须走严格的
+FFmpeg/PyAV 模拟路径而承担了真实的性能和内存成本。下面这项修改在不改变串行 oracle
+契约的前提下消除了该开销。
+
+### 超大 raw-FLAC 映射定位
+
+raw-FLAC 解析器只会对超过有符号 32 位样本范围、metadata 链完整、使用单一固定
+block size 与 fixed blocking strategy、且没有 seektable 的 40 MHz 单声道 PCM16
+流启用映射 libsndfile 读取；其首帧头部必须与 STREAMINFO 一致并通过 CRC-8。映射器用
+整数运算重现固定 FFmpeg/PyAV 路径的首帧 PTS 与 RF 位置舍入。该路径只用于普通并行
+VHS 解码；`--threads 0/1`、debug plot、GNU Radio AFE 输入、非零 `--sharpness`、重采样、
+variable-block 流、有 seektable 的流以及所有未知布局都继续使用 FFmpeg。映射、seek、
+读取或长度边界失败都会在相同逻辑样本处单向切换到
+FFmpeg。文件开头、中部、有符号 32 位边界和接近 EOF 的直接探针均与 FFmpeg 及参考
+FLAC 解码器一致。
+
+36 次交错的基线/候选真实 RF 运行全部匹配亮度、色度、原始 JSON、有序 `fileLoc`、
+stdout、耗时归一化 stderr 和时间戳归一化日志。Exact
+`current --threads 20` 的 200 帧从 14.876 降至 11.135 秒（缩短 25.15%），有效
+核心数从 6.99 升至 8.06，峰值工作集从 803.4 降至 407.0 MiB。两组反序 1000 帧
+配对从 53.230 降至 44.055 秒（缩短 17.24%），有效核心数从 6.76 升至 7.41，峰值
+工作集从 773.2 降至 402.4 MiB。32 workers 的 100 帧从 10.030 降至 6.679 秒
+（缩短 33.41%），有效核心数从 6.80 升至 8.88。未改动的单 worker 路径保持中性：
+13.901 对 13.877 秒。
+
+另行执行的 200 帧门禁中，Exact v0.4.0 缩短 22.24%，IPP-fast `current` 缩短
+24.64%。六路径矩阵中的 60 次 .NET 运行在默认 5 和 `--threads 1/5/10/20` 之间，
+每个 profile 都只有一套 hash。合并后的 Python PR341 在这次有界矩阵中也保持确定性；
+Python v0.4.0 的 15 次非零 worker 运行产生了 14 套亮度/色度 hash，因此严格 oracle
+仍是 Python v0.4.0 `g4315520 --threads 0`。
 
 ### 托管 current CTI 商值与收尾 AVX
 
@@ -1038,16 +1065,22 @@ stdout、归一化 stderr 和时间戳归一化日志全部一致。候选还在
 `current` 两种配置下均不中断地完成 1,000 帧 / 2,000 fields；两者在相同六项比较中
 都与各自保存的 Python oracle 完全一致。IPP 未纳入门禁。
 
-在原生输入路径上，直接 raw `fLaC` `.ldf`/`.flac` 只在第一个元数据块是完整
-34 字节 STREAMINFO、并且声明 40 kHz、单声道、PCM16 和不超过 `Int32.MaxValue` 的
-已知非零样本总数时使用内置 libsndfile。文件句柄按需打开；连续读取不做 seek，随机读取使用精确 frame
-seek，一个池化 PCM16 workspace 继续执行不变的 `short` 到 `double` 转换。原生
-后端不可用、不支持、发生 seek/decode 错误，或读取跨过 FLAC 报告长度时，会从同一
-请求样本尝试既有 FFmpeg/PyAV 兼容加载器，并在可用时只切换一次。若未安装 FFmpeg，
-正常的报告 EOF 仍按 EOF 结束。默认 40 MHz VHS `.ldf`、
-VHS `--no_resample` 和未指定 `--inputfreq` 的 LD 在总样本数满足门限时可选择此路径。
-更大的 raw-FLAC、默认 VHS `.flac`、全部 CVBS 输入、Ogg/FLAC、立体声、PCM24、
-其他采样率、未知总数、未通过严格门控的文件头、`.vhs`、`.wav` 和 `raw.oga` 继续走 FFmpeg。
+在原生输入路径上，直接 raw `fLaC` `.ldf`/`.flac` 会在第一个元数据块是完整
+34 字节 STREAMINFO、声明 40 kHz 单声道 PCM16，且已知非零样本总数不超过
+`Int32.MaxValue` 时使用内置 libsndfile。文件句柄按需打开；连续读取不做 seek，随机
+读取使用精确 frame seek，一个池化 PCM16 workspace 继续执行不变的 `short` 到
+`double` 转换。
+
+只有普通并行 VHS 解码还能使用一项超大输入门禁：元数据链必须完整，STREAMINFO
+必须声明同一个非零固定 block size，第一个音频帧必须使用 fixed-blocking strategy，
+不能包含 SEEKTABLE，且样本数必须大于 `Int32.MaxValue`。每次 decoder 重启时，纯整数
+time-base 与 block 运算会把逻辑 RF 样本映射到固定 FFmpeg/PyAV 路径相同的首个原生
+FLAC 样本，并保留既有 2 MiB 回退窗口和 40 MiB 字节距离重启阈值。
+`--threads 0/1`、debug-plot 与 GNU Radio AFE 模式、非零 `--sharpness`、LD、CVBS 和
+门禁外输入继续走 FFmpeg。原生后端不可用或不支持、seek/decode 错误、映射或长度边界
+失败时，会从同一逻辑样本单向切回既有 FFmpeg/PyAV 兼容加载器。若未安装 FFmpeg，正常报告的 EOF 仍按
+EOF 结束。默认 VHS `.flac`、Ogg/FLAC、立体声、PCM24、其他采样率、未知总数、被拒绝
+的文件头、`.vhs`、`.wav` 和 `raw.oga` 也继续走 FFmpeg。
 
 在同一个私有本地 RF 窗口上，Release 1.4.4 的 FFmpeg 路径与候选的 libsndfile
 路径在默认、`--threads 0` 和 `--threads 20` 下均匹配亮度、色度、原始 JSON、
@@ -2079,7 +2112,7 @@ main/候选墙钟中位数为 44.924/44.985 秒（候选增加 0.14%，吞吐 0.
 .\tools\build-ipp-native.ps1
 dotnet restore VHSDecodeDotNet.slnx
 dotnet build VHSDecodeDotNet.slnx -c Release --no-restore
-dotnet test --solution VHSDecodeDotNet.slnx -c Release --no-build --no-restore --minimum-expected-tests 1349
+dotnet test --solution VHSDecodeDotNet.slnx -c Release --no-build --no-restore --minimum-expected-tests 1376
 dotnet test --project tests\VHSDecode.Tests\VHSDecode.Tests.csproj -c Release --no-build --no-restore --coverage --coverage-output coverage.cobertura.xml --coverage-output-format cobertura
 ```
 
@@ -2091,7 +2124,7 @@ Intel oneAPI。只含二进制的单文件发布会嵌入 `vhsdecode_ipp.dll` �
 notice，不会额外生成许可证 sidecar 文件。只构建 Exact 后端时可以省略原生构建步骤。
 
 当前正式 Release 构建为零警告、零错误。xUnit v3 项目向
-`dotnet test` 和 Visual Studio Test Explorer 暴露 **1,349** 个可独立发现的测试。
+`dotnet test` 和 Visual Studio Test Explorer 暴露 **1,376** 个可独立发现的测试。
 
 <!-- SECTION: usage -->
 

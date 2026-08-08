@@ -183,7 +183,11 @@ public static class DecodeSessionFactory
             && (command.InputFile.EndsWith(".lds", StringComparison.Ordinal)
                 || command.InputFile.EndsWith(".ldf", StringComparison.Ordinal));
         bool useFfmpegInputPath = !noResample && !nativeFortyMegahertzContainer;
-        IRfSampleLoader loader = CreateLoader(command.InputFile, useFfmpegInputPath, selectedSampleRateMHz);
+        IRfSampleLoader loader = CreateLoader(
+            command.InputFile,
+            useFfmpegInputPath,
+            selectedSampleRateMHz,
+            preferPyAvMappedRawFlacSeeking: ShouldUseParallelMappedRawFlacSeeking(command));
         FormatParameterSet parameters = FormatCatalog.Default.GetTapeParameters(
             system,
             command.Get<string>("tape_format"),
@@ -768,14 +772,35 @@ public static class DecodeSessionFactory
             NullableDouble(command, "agc_set_gain") ?? 0.0);
     }
 
-    private static IRfSampleLoader CreateLoader(string inputFile, bool needsResampling, double? inputFrequencyMHz = null)
+    private static IRfSampleLoader CreateLoader(
+        string inputFile,
+        bool needsResampling,
+        double? inputFrequencyMHz = null,
+        bool preferPyAvMappedRawFlacSeeking = false)
     {
         if (needsResampling)
         {
             return RfLoaderFactory.CreateResampling(inputFile, inputFrequencyMHz ?? FrequencyParser.DddMHz);
         }
 
-        return RfLoaderFactory.CreateNative(inputFile);
+        return RfLoaderFactory.CreateNative(
+            inputFile,
+            preferPyAvMappedRawFlacSeeking);
+    }
+
+    private static bool ShouldUseParallelMappedRawFlacSeeking(ParsedCommand command)
+    {
+        if (NullableString(command, "debug_plot") is not null
+            || BoolValueOrDefault(command, "gnrc_afe")
+            || !command.Get<BigInteger>("sharpness").IsZero)
+        {
+            return false;
+        }
+
+        BigInteger requestedThreads = command.Get<BigInteger>("threads");
+        return requestedThreads > BigInteger.One
+            && requestedThreads <= int.MaxValue
+            && Environment.ProcessorCount > 1;
     }
 
     private static double SelectCommonSampleFrequencyMHz(ParsedCommand command)
