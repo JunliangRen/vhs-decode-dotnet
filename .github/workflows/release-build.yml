@@ -142,6 +142,11 @@ jobs:
           DOTNET_EnableHWIntrinsic: "0"
         run: dotnet test tests/VHSDecode.Tests/VHSDecode.Tests.csproj --configuration Release --no-build --no-restore --filter-class VHSDecode.Tests.VhsSyncDetectorCurrentTests --minimum-expected-tests 25
 
+      - name: Run current CTI scalar fallback tests
+        env:
+          DOTNET_EnableAVX: "0"
+        run: dotnet test tests/VHSDecode.Tests/VHSDecode.Tests.csproj --configuration Release --no-build --no-restore --filter-class VHSDecode.Tests.ChromaTransientImprovementCurrentTests --minimum-expected-tests 18
+
       - name: Run IPP Super-Gaussian scalar fallback tests
         env:
           DOTNET_EnableHWIntrinsic: "0"

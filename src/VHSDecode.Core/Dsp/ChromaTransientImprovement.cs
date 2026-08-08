@@ -1,4 +1,8 @@
 using System.Buffers;
+using System.Runtime.CompilerServices;
+using System.Runtime.InteropServices;
+using System.Runtime.Intrinsics;
+using System.Runtime.Intrinsics.X86;
 
 namespace VHSDecode.Core.Dsp;
 
@@ -178,15 +182,25 @@ public static class ChromaTransientImprovement
         int lineOffset = checked(lineStart + (line * lineLength));
         for (int pass = 0; pass < PassCount; pass++)
         {
-            for (int sample = 0; sample < lineLength; sample++)
+            for (int copyIndex = 0; copyIndex < lineLength; copyIndex++)
             {
-                lineBuffer[sample] = (float)chromaData[lineOffset + sample];
+                lineBuffer[copyIndex] = (float)chromaData[lineOffset + copyIndex];
             }
 
             float currentMix = parameters.MixForPass(pass);
-            for (int sample = parameters.First; sample < parameters.End; sample++)
+            int sample = parameters.First;
+            if (Avx.IsSupported && Fma.IsSupported)
             {
-                int index = lineOffset + sample;
+                sample = ProcessVectorizedDistanceRange(
+                    chromaData,
+                    lineOffset,
+                    lineBuffer,
+                    parameters,
+                    currentMix);
+            }
+
+            for (; sample < parameters.End; sample++)
+            {
                 float currentI = lineBuffer[sample];
                 float currentQ = lineBuffer[sample - 1];
                 float pastI = lineBuffer[sample - parameters.Radius];
@@ -216,26 +230,124 @@ public static class ChromaTransientImprovement
                         ? FastVectorizedQuotient(distanceBack, totalDistance)
                         : distanceBack / totalDistance
                     : 0.0;
-                bool lowerHalf = progress < 0.5;
-                double inverseProgress = 1.0 - progress;
-                double lowerWeight = 4.0 * (progress * progress);
-                double upperWeight = Math.FusedMultiplyAdd(
-                    -4.0,
-                    inverseProgress * inverseProgress,
-                    1.0);
-                double weight = lowerHalf ? lowerWeight : upperWeight;
-                float anchorA = lowerHalf ? pastI : currentI;
-                float anchorB = lowerHalf ? currentI : futureI;
-                double targetDelta = Math.FusedMultiplyAdd(
-                    weight,
-                    anchorB - anchorA,
-                    (double)anchorA - currentI);
-                chromaData[index] = (float)Math.FusedMultiplyAdd(
-                    currentMix * gate,
-                    targetDelta,
-                    currentI);
+                FinishSample(
+                    chromaData,
+                    lineOffset,
+                    lineBuffer,
+                    sample,
+                    parameters,
+                    currentMix,
+                    progress,
+                    gate);
             }
         }
+    }
+
+    private static int ProcessVectorizedDistanceRange(
+        Span<double> chromaData,
+        int lineOffset,
+        Span<float> lineBuffer,
+        CtiParameters parameters,
+        float currentMix)
+    {
+        Span<float> backDistances = stackalloc float[8];
+        Span<float> totalDistances = stackalloc float[8];
+        int sample = parameters.First;
+        for (; sample < parameters.VectorEnd; sample += 8)
+        {
+            Vector256<float> currentI = LoadVector(lineBuffer, sample);
+            Vector256<float> currentQ = LoadVector(lineBuffer, sample - 1);
+            Vector256<float> pastI = LoadVector(
+                lineBuffer,
+                sample - parameters.Radius);
+            Vector256<float> pastQ = LoadVector(
+                lineBuffer,
+                sample - parameters.Radius - 1);
+            Vector256<float> futureI = LoadVector(
+                lineBuffer,
+                sample + parameters.Radius);
+            Vector256<float> futureQ = LoadVector(
+                lineBuffer,
+                sample + parameters.Radius - 1);
+
+            Vector256<float> deltaBackI = Avx.Subtract(currentI, pastI);
+            Vector256<float> deltaBackQ = Avx.Subtract(currentQ, pastQ);
+            Vector256<float> distanceBack = Avx.Sqrt(Fma.MultiplyAdd(
+                deltaBackQ,
+                deltaBackQ,
+                Avx.Multiply(deltaBackI, deltaBackI)));
+            Vector256<float> deltaForwardI = Avx.Subtract(futureI, currentI);
+            Vector256<float> deltaForwardQ = Avx.Subtract(futureQ, currentQ);
+            Vector256<float> distanceForward = Avx.Sqrt(Fma.MultiplyAdd(
+                deltaForwardQ,
+                deltaForwardQ,
+                Avx.Multiply(deltaForwardI, deltaForwardI)));
+            Vector256<float> totalDistance = Avx.Add(
+                distanceBack,
+                distanceForward);
+            distanceBack.CopyTo(backDistances);
+            totalDistance.CopyTo(totalDistances);
+
+            for (int lane = 0; lane < 8; lane++)
+            {
+                float laneTotalDistance = totalDistances[lane];
+                double gate = laneTotalDistance > parameters.Threshold ? 1.0 : 0.0;
+                double progress = laneTotalDistance != 0.0f
+                    ? FastVectorizedQuotient(
+                        backDistances[lane],
+                        laneTotalDistance)
+                    : 0.0;
+                FinishSample(
+                    chromaData,
+                    lineOffset,
+                    lineBuffer,
+                    sample + lane,
+                    parameters,
+                    currentMix,
+                    progress,
+                    gate);
+            }
+        }
+
+        return sample;
+    }
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private static Vector256<float> LoadVector(Span<float> values, int index)
+        => MemoryMarshal.Cast<float, Vector256<float>>(values.Slice(index, 8))[0];
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private static void FinishSample(
+        Span<double> chromaData,
+        int lineOffset,
+        Span<float> lineBuffer,
+        int sample,
+        CtiParameters parameters,
+        float currentMix,
+        double progress,
+        double gate)
+    {
+        float currentI = lineBuffer[sample];
+        float pastI = lineBuffer[sample - parameters.Radius];
+        float futureI = lineBuffer[sample + parameters.Radius];
+        bool lowerHalf = progress < 0.5;
+        double inverseProgress = 1.0 - progress;
+        double lowerWeight = 4.0 * (progress * progress);
+        double upperWeight = Math.FusedMultiplyAdd(
+            -4.0,
+            inverseProgress * inverseProgress,
+            1.0);
+        double weight = lowerHalf ? lowerWeight : upperWeight;
+        float anchorA = lowerHalf ? pastI : currentI;
+        float anchorB = lowerHalf ? currentI : futureI;
+        double targetDelta = Math.FusedMultiplyAdd(
+            weight,
+            anchorB - anchorA,
+            (double)anchorA - currentI);
+        chromaData[lineOffset + sample] = (float)Math.FusedMultiplyAdd(
+            currentMix * gate,
+            targetDelta,
+            currentI);
     }
 
     private readonly record struct CtiParameters(

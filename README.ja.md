@@ -95,20 +95,21 @@ CVBS と HiFi は引き続き `ipp-fast` を拒否します。release-compatible
 
 次の表は同じ private local 40 MHz PAL VHS `.ldf` fixture と同じ 40-frame
 window を使用し、source filename は公開しません。Python 列は audited measurement
-を維持します。main `ced6afb` を基にしたこの candidate では、20 個すべての .NET
-cell を各 3 回 Release 測定しました。互換性判定は速度とは別で、private fixture
-path を含む raw run directory は local にのみ保持します。
+を維持します。main `aceec7e` を基にしたこの candidate では、20 個すべての .NET
+cell を各 3 回 Release 測定しました。この oversized raw-FLAC fixture は
+libsndfile 1.2.2 の exact-seek gate を超えるため、現在は正しく FFmpeg を使用します。
+したがって、以前の `ced6afb` ベースの表とは直接比較できません。
 
 <!-- LATEST_PERFORMANCE_BEGIN -->
 | CLI mode（workers） | Python v0.4.0 | Python PR341 | Exact + v0.4.0 | Exact + current | IPP-fast + v0.4.0 | IPP-fast + current |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| default（5） | 15.207 s | 16.780 s | 4.126 s / 3.686x | 4.980 s / 3.369x | 3.480 s / 4.369x | 3.342 s / 5.021x |
-| `--threads 1` | 17.694 s | 19.414 s | 9.767 s / 1.812x | 11.844 s / 1.639x | 7.104 s / 2.491x | 7.887 s / 2.462x |
-| `--threads 5` | 15.719 s | 17.801 s | 4.221 s / 3.724x | 4.853 s / 3.668x | 3.555 s / 4.422x | 3.437 s / 5.179x |
-| `--threads 10` | 16.037 s | 18.266 s | 3.427 s / 4.680x | 4.242 s / 4.306x | 3.036 s / 5.282x | 2.565 s / 7.121x |
-| `--threads 20` | 16.405 s | 18.395 s | 2.928 s / 5.602x | 3.316 s / 5.548x | 2.601 s / 6.308x | 2.239 s / 8.217x |
+| default（5） | 15.207 s | 16.780 s | 7.209 s / 2.109x | 7.914 s / 2.120x | 5.388 s / 2.822x | 5.279 s / 3.179x |
+| `--threads 1` | 17.694 s | 19.414 s | 12.109 s / 1.461x | 14.143 s / 1.373x | 8.568 s / 2.065x | 9.757 s / 1.990x |
+| `--threads 5` | 15.719 s | 17.801 s | 7.238 s / 2.172x | 7.651 s / 2.327x | 5.266 s / 2.985x | 5.125 s / 3.473x |
+| `--threads 10` | 16.037 s | 18.266 s | 5.862 s / 2.736x | 6.720 s / 2.718x | 4.967 s / 3.229x | 4.645 s / 3.933x |
+| `--threads 20` | 16.405 s | 18.395 s | 5.779 s / 2.839x | 6.323 s / 2.909x | 4.634 s / 3.540x | 4.361 s / 4.218x |
 <!-- LATEST_PERFORMANCE_END -->
-<!-- LATEST_PERFORMANCE_RUNS: dotnet-full-refresh=60 repeats=3 long-paired=6 compat=8 determinism=12 -->
+<!-- LATEST_PERFORMANCE_RUNS: dotnet-full-refresh=60 repeats=3 cti-long-paired=8 determinism=60 -->
 
 各 .NET cell は wall-time median と profile が対応する Python 列に対する
 speedup の順で、default は **5 workers** です。multi-worker compact VHS path は
@@ -118,17 +119,17 @@ reverse-order 1,000-frame Exact pair では v0.4.0 が 2.66%、`current` が 2.5
 短縮しました。600-frame IPP-fast pair は v0.4.0 が 1.85% 改善し、`current` は
 実質 neutral（-0.03%）でした。
 
-float32 PocketFFT plan は immutable real-root table を保持し、最大 32 個の complex
-root table を root length ごとに共有します。main `ced6afb` との final 3-pair
-1,000-frame Exact `current` 比較は throughput-neutral で、1/3 pair のみ高速でした。
-main/candidate の median wall time は 44.924/44.985 秒（candidate +0.14%、0.999x）、
-median CPU time は 332.672/333.734 秒（+0.32%）です。matched final 200-frame
-allocation trace では sampled allocation amount が 579,283,536 から
-541,701,824 bytes へ 6.49% 減りました。
+managed AVX は、元の float32 FMA 順序、scalar tail、no-AVX fallback を維持したまま、
+8 個の独立した `current` CTI distance lane を評価します。reverse-order の
+1,000-frame Exact 2 pair は 50.687/50.793 秒（baseline/candidate、-0.21%）で
+neutral でした。IPP-fast の 2 pair は両方 candidate が勝ち、43.730/42.872 秒
+（1.96% 短縮）、CPU time は 255.273 から 251.797 秒へ 1.36% 減少しました。
+IPP pair の peak memory は増えていません。
 
-更新した 60 matrix run はすべて deterministic でした。別の `--threads 0`、
-default-5、`--threads 20` gate でも、両 profile/backend の luma、chroma、raw JSON、
-stdout、normalized stderr/log、ordered `fileLoc` が一致しました。
+更新した 60 matrix run はすべて deterministic でした。default-5 と
+`--threads 1/5/10/20` は、profile ごとに luma、chroma、raw JSON、stdout、
+normalized stderr/log の hash が 1 組だけでした。Exact/IPP-fast の CTI long gate
+では baseline/candidate 間の ordered `fileLoc` も一致しました。
 IPP-fast は明示的な numerically-close backend のままで、Exact と byte-for-byte
 同一とは主張しません。Python v0.4.0 は nonzero worker count で output hash が
 変わる場合があるため、strict oracle は Python v0.4.0
