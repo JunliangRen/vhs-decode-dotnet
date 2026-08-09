@@ -1,8 +1,11 @@
+using System.Buffers.Binary;
 using System.Numerics;
 using System.Runtime.InteropServices;
 using System.Security.Cryptography;
+using VHSDecode.Core.Decode;
 using VHSDecode.Core.Dsp;
 using VHSDecode.Core.Dsp.Ipp;
+using VHSDecode.Core.Rf;
 using Xunit;
 
 namespace VHSDecode.Tests.Ipp;
@@ -81,6 +84,123 @@ public sealed class IppRfDemodulatorDifferentialTests
         Assert.Equal(
             "2CE4D907DD94BE3ACB7A0412EB4921CD869DE4E56C751BB0AD498CF0028D0834",
             Hash(exact));
+    }
+
+    [Fact(DisplayName = "IPP fast RF pipeline pools and deterministically applies the VHS envelope SOS filter")]
+    public void IppFastRfPipelinePoolsVhsEnvelopeSosFilter()
+    {
+        if (!IppRuntime.TryProbe(out _))
+        {
+            return;
+        }
+
+        double[] input = BuildPalVhsProbe();
+        var bytes = new byte[input.Length * sizeof(short)];
+        for (int index = 0; index < input.Length; index++)
+        {
+            BinaryPrimitives.WriteInt16LittleEndian(
+                bytes.AsSpan(index * sizeof(short), sizeof(short)),
+                checked((short)Math.Round(input[index])));
+        }
+
+        Complex[] identity = RfDemodulator.IdentityFilter(Length);
+        double[] magnitude = Enumerable.Repeat(1.0, Length).ToArray();
+        SosSection[] envelopeSos = IirFilterDesign.ButterworthLowPass(
+            order: 1,
+            700_000.0 / (SampleRateHz / 2.0));
+        var filters = new DecodeFilterSet(
+            identity,
+            identity,
+            identity,
+            identity,
+            identity,
+            identity,
+            null,
+            magnitude,
+            magnitude,
+            magnitude,
+            magnitude,
+            magnitude,
+            magnitude,
+            null,
+            VhsEnvelopeSos: envelopeSos);
+        using var exactPipeline = new RfBlockDecodePipeline(
+            new Pcm16StreamSampleLoader(),
+            filters,
+            SampleRateHz,
+            new DecodeFilterOptions(
+                FmDemodulatorMode: RfFmDemodulatorMode.VhsRustApproximation),
+            dspBackend: DspBackend.Exact);
+        using var ippPipeline = new RfBlockDecodePipeline(
+            new Pcm16StreamSampleLoader(),
+            filters,
+            SampleRateHz,
+            new DecodeFilterOptions(
+                FmDemodulatorMode: RfFmDemodulatorMode.VhsRustApproximation),
+            dspBackend: DspBackend.IppFast);
+
+        Assert.False(exactPipeline.UsesIppVhsEnvelopeSos);
+        Assert.True(ippPipeline.UsesIppVhsEnvelopeSos);
+        using var exactInput = new MemoryStream(bytes, writable: false);
+        using var ippInput = new MemoryStream(bytes, writable: false);
+        RfDemodulatedBlock? exact = exactPipeline.DecodeBlock(
+            exactInput,
+            sample: 0,
+            Length);
+        RfDemodulatedBlock? ipp = ippPipeline.DecodeBlock(
+            ippInput,
+            sample: 0,
+            Length);
+
+        Assert.NotNull(exact);
+        Assert.NotNull(ipp);
+        Assert.Equal(exact.VhsWeakRfSignal, ipp.VhsWeakRfSignal);
+        DiffMetrics[] metrics =
+        [
+            Measure("Video", exact.Video, ipp.Video),
+            Measure("DemodRaw", exact.DemodRaw, ipp.DemodRaw),
+            Measure("Envelope", exact.Envelope, ipp.Envelope)
+        ];
+        Assert.All(metrics, metric => Assert.True(metric.AllFinite, metric.ToString()));
+        Assert.True(
+            metrics.All(metric =>
+            {
+                double scaleTolerance = metric.Name == "Envelope" ? 1e-6 : 1e-12;
+                bool maximumWithinTolerance = metric.MaximumAbsoluteDelta
+                    <= scaleTolerance * Math.Max(1.0, metric.MaximumReferenceMagnitude);
+                bool rmsWithinTolerance = metric.RmsDelta
+                    <= scaleTolerance * Math.Max(1.0, metric.ReferenceRms);
+                return maximumWithinTolerance && rmsWithinTolerance;
+            }),
+            string.Join(Environment.NewLine, metrics.Select(metric => metric.ToString())));
+
+        string expectedIppHash = Hash(ipp);
+        var parallelHashes = new string[4];
+        var parallelWeakRfSignals = new bool[parallelHashes.Length];
+        Parallel.For(0, parallelHashes.Length, index =>
+        {
+            using var inputStream = new MemoryStream(bytes, writable: false);
+            RfDemodulatedBlock? parallelBlock = ippPipeline.DecodeBlock(
+                inputStream,
+                sample: 0,
+                Length);
+            Assert.NotNull(parallelBlock);
+            parallelHashes[index] = Hash(parallelBlock);
+            parallelWeakRfSignals[index] = parallelBlock.VhsWeakRfSignal;
+        });
+        Assert.All(parallelHashes, hash => Assert.Equal(expectedIppHash, hash));
+        Assert.All(
+            parallelWeakRfSignals,
+            weakRfSignal => Assert.Equal(ipp.VhsWeakRfSignal, weakRfSignal));
+
+        Assert.True(ippPipeline.CreatedIppVhsEnvelopeSosContextCount > 0);
+        Assert.InRange(
+            ippPipeline.RetainedIppVhsEnvelopeSosContextCount,
+            1,
+            IppSos32FilterPool.DefaultMaximumRetainedContexts);
+
+        ippPipeline.Dispose();
+        Assert.Equal(0, ippPipeline.RetainedIppVhsEnvelopeSosContextCount);
     }
 
     [Fact(DisplayName = "IPP fast 32768-point LaserDisc complex RF path remains numerically close to exact")]
