@@ -93,6 +93,50 @@ public sealed class DspWorkingBufferTests
             Convert.ToHexString(SHA256.HashData(MemoryMarshal.AsBytes(inverse.AsSpan()))));
     }
 
+    [Theory(DisplayName = "Real FFT radix-4 AVX stages preserve scalar bit patterns")]
+    [InlineData(
+        16,
+        "B138A199269F41C563FC5CF09C584B8792FB2255C5D5AA0F82517795FD9CBC14",
+        "17A892D980116536E211DB46347419F590C084BE512A00FD0CA8691F4517A77D")]
+    [InlineData(
+        256,
+        "01421C0FAAFD9286D02067E9F3C996A59DA3E6284BEA8C5B428034680E8BD2CA",
+        "FD5F67136E68AA7857D2A0B256A859E7E81CCE4175536FE2D3DEEBFF9168AB6A")]
+    [InlineData(
+        4_096,
+        "0616AB25FDFE0A1A9B8227E2F2521CBEB64D32ECAD31BB16D3685F5024817EA4",
+        "A30A899F9F15AB736818EE261D7AEEAD1414105ABA74D5B0DE337C6A2716B0F3")]
+    [InlineData(
+        131_072,
+        "D9234506FCB81365E65C3EB5D5380FE6FDB804B197F54E93D0EFD3343AEE30B9",
+        "13760ACFEE099D120B06445B783D63E239E547DC229D314A9AB9949B281E3C1B")]
+    public void RealFftRadix4AvxStagesPreserveScalarBitPatterns(
+        int length,
+        string expectedForwardHash,
+        string expectedInverseHash)
+    {
+        var input = new double[length];
+        ulong state = 0xD1B54A32D192ED03UL ^ (uint)length;
+        for (int index = 0; index < input.Length; index++)
+        {
+            state ^= state >> 12;
+            state ^= state << 25;
+            state ^= state >> 27;
+            ulong random = state * 0x2545F4914F6CDD1DUL;
+            input[index] = ((long)(random >> 11) - (1L << 52)) * (1.0 / (1L << 40));
+        }
+
+        Complex[] spectrum = PocketFftReal.Forward(input);
+        double[] inverse = PocketFftReal.Inverse(spectrum, length);
+
+        Assert.Equal(
+            expectedForwardHash,
+            Convert.ToHexString(SHA256.HashData(MemoryMarshal.AsBytes(spectrum.AsSpan()))));
+        Assert.Equal(
+            expectedInverseHash,
+            Convert.ToHexString(SHA256.HashData(MemoryMarshal.AsBytes(inverse.AsSpan()))));
+    }
+
     [Fact(DisplayName = "32K complex FFT preserves signed-zero packetized hash")]
     public void ThirtyTwoKilobyteComplexFftPreservesSignedZeroPacketizedHash()
     {

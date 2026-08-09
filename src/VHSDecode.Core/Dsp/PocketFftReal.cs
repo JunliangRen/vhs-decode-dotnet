@@ -1,6 +1,9 @@
 // Radix-2/4 real FFT adapted from pocketfft's BSD-3-Clause implementation.
 using System.Buffers;
 using System.Numerics;
+using System.Runtime.CompilerServices;
+using System.Runtime.Intrinsics;
+using System.Runtime.Intrinsics.X86;
 
 namespace VHSDecode.Core.Dsp;
 
@@ -363,7 +366,58 @@ public static class PocketFftReal
                 {
                     double* inputGroup = inputPointer + (ido * k);
                     double* outputGroup = outputPointer + (outputBatchStride * k);
-                    for (int i = 2; i < ido; i += 2)
+                    int i = 2;
+                    if (Avx.IsSupported)
+                    {
+                        for (; i + 2 < ido; i += 4)
+                        {
+                            int ic = ido - i;
+                            Vector256<double> cr2Ci2 = MultiplyConjugatePair(
+                                Avx.LoadVector256(twiddlePointer + i - 2),
+                                Avx.LoadVector256(inputGroup + inputGroupStride + i - 1));
+                            Vector256<double> cr3Ci3 = MultiplyConjugatePair(
+                                Avx.LoadVector256(twiddlePointer + stride + i - 2),
+                                Avx.LoadVector256(inputGroup + (2 * inputGroupStride) + i - 1));
+                            Vector256<double> cr4Ci4 = MultiplyConjugatePair(
+                                Avx.LoadVector256(twiddlePointer + (2 * stride) + i - 2),
+                                Avx.LoadVector256(inputGroup + (3 * inputGroupStride) + i - 1));
+
+                            Vector256<double> tr1Ti1 = BlendImaginaryLanes(
+                                Avx.Add(cr4Ci4, cr2Ci2),
+                                Avx.Add(cr2Ci2, cr4Ci4));
+                            Vector256<double> tr4Ti4 = BlendImaginaryLanes(
+                                Avx.Subtract(cr4Ci4, cr2Ci2),
+                                Avx.Subtract(cr2Ci2, cr4Ci4));
+                            Vector256<double> c0 = Avx.LoadVector256(inputGroup + i - 1);
+                            Vector256<double> tr2Ti2 = Avx.Add(c0, cr3Ci3);
+                            Vector256<double> tr3Ti3 = Avx.Subtract(c0, cr3Ci3);
+
+                            Vector256<double> firstOutput = BlendImaginaryLanes(
+                                Avx.Add(tr2Ti2, tr1Ti1),
+                                Avx.Add(tr1Ti1, tr2Ti2));
+                            Vector256<double> fourthOutput = BlendImaginaryLanes(
+                                Avx.Subtract(tr2Ti2, tr1Ti1),
+                                Avx.Subtract(tr1Ti1, tr2Ti2));
+                            Vector256<double> ti4Tr4 = Avx.Permute(tr4Ti4, 0x5);
+                            Vector256<double> thirdOutput = BlendImaginaryLanes(
+                                Avx.Add(tr3Ti3, ti4Tr4),
+                                Avx.Add(ti4Tr4, tr3Ti3));
+                            Vector256<double> secondOutput = BlendImaginaryLanes(
+                                Avx.Subtract(tr3Ti3, ti4Tr4),
+                                Avx.Subtract(ti4Tr4, tr3Ti3));
+
+                            Avx.Store(outputGroup + i - 1, firstOutput);
+                            Avx.Store(outputGroup + (2 * ido) + i - 1, thirdOutput);
+                            Avx.Store(
+                                outputGroup + (3 * ido) + ic - 3,
+                                SwapComplexPairOrder(fourthOutput));
+                            Avx.Store(
+                                outputGroup + ido + ic - 3,
+                                SwapComplexPairOrder(secondOutput));
+                        }
+                    }
+
+                    for (; i < ido; i += 2)
                     {
                         int ic = ido - i;
                         MultiplyConjugate(twiddlePointer[i - 2], twiddlePointer[i - 1],
@@ -516,7 +570,74 @@ public static class PocketFftReal
                 {
                     double* inputGroup = inputPointer + (inputGroupStride * k);
                     double* outputGroup = outputPointer + (ido * k);
-                    for (int i = 2; i < ido; i += 2)
+                    int i = 2;
+                    if (Avx.IsSupported)
+                    {
+                        for (; i + 2 < ido; i += 4)
+                        {
+                            int ic = ido - i;
+                            Vector256<double> firstInput = Avx.LoadVector256(inputGroup + i - 1);
+                            Vector256<double> fourthInput = SwapComplexPairOrder(
+                                Avx.LoadVector256(inputGroup + (3 * ido) + ic - 3));
+                            Vector256<double> firstSum = Avx.Add(firstInput, fourthInput);
+                            Vector256<double> firstDifference = Avx.Subtract(firstInput, fourthInput);
+
+                            Vector256<double> thirdInput =
+                                Avx.LoadVector256(inputGroup + (2 * ido) + i - 1);
+                            Vector256<double> secondInput = SwapComplexPairOrder(
+                                Avx.LoadVector256(inputGroup + ido + ic - 3));
+                            Vector256<double> secondSum = Avx.Add(thirdInput, secondInput);
+                            Vector256<double> secondDifference = Avx.Subtract(thirdInput, secondInput);
+
+                            Vector256<double> directLeft =
+                                BlendImaginaryLanes(firstSum, firstDifference);
+                            Vector256<double> directRight =
+                                BlendImaginaryLanes(secondSum, secondDifference);
+                            Avx.Store(outputGroup + i - 1, Avx.Add(directLeft, directRight));
+
+                            Vector256<double> ti1Tr1 = BlendImaginaryLanes(
+                                Avx.Permute(firstSum, 0xF),
+                                Avx.Permute(firstDifference, 0x0));
+                            Vector256<double> ti4Tr4 = BlendImaginaryLanes(
+                                Avx.Permute(secondDifference, 0x0),
+                                Avx.Permute(secondSum, 0xF));
+                            Vector256<double> ci2Cr2 = BlendImaginaryLanes(
+                                Avx.Add(ti1Tr1, ti4Tr4),
+                                Avx.Subtract(ti1Tr1, ti4Tr4));
+                            Vector256<double> ci4Cr4 = BlendImaginaryLanes(
+                                Avx.Subtract(ti1Tr1, ti4Tr4),
+                                Avx.Add(ti1Tr1, ti4Tr4));
+
+                            Vector256<double> ti2Tr2 = BlendImaginaryLanes(
+                                Avx.Permute(firstDifference, 0xF),
+                                Avx.Permute(firstSum, 0x0));
+                            Vector256<double> ti3Tr3 = BlendImaginaryLanes(
+                                Avx.Permute(secondDifference, 0xF),
+                                Avx.Permute(secondSum, 0x0));
+                            Vector256<double> ci3Cr3 = Avx.Subtract(ti2Tr2, ti3Tr3);
+
+                            Vector256<double> secondOutput = MultiplyConjugatePair(
+                                Avx.LoadVector256(twiddlePointer + i - 2),
+                                ci2Cr2);
+                            Vector256<double> thirdOutput = MultiplyConjugatePair(
+                                Avx.LoadVector256(twiddlePointer + stride + i - 2),
+                                ci3Cr3);
+                            Vector256<double> fourthOutput = MultiplyConjugatePair(
+                                Avx.LoadVector256(twiddlePointer + (2 * stride) + i - 2),
+                                ci4Cr4);
+                            Avx.Store(
+                                outputGroup + outputGroupStride + i - 1,
+                                Avx.Permute(secondOutput, 0x5));
+                            Avx.Store(
+                                outputGroup + (2 * outputGroupStride) + i - 1,
+                                Avx.Permute(thirdOutput, 0x5));
+                            Avx.Store(
+                                outputGroup + (3 * outputGroupStride) + i - 1,
+                                Avx.Permute(fourthOutput, 0x5));
+                        }
+                    }
+
+                    for (; i < ido; i += 2)
                     {
                         int ic = ido - i;
                         double c10 = inputGroup[i - 1];
@@ -562,6 +683,31 @@ public static class PocketFftReal
                 }
             }
         }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        private static Vector256<double> BlendImaginaryLanes(
+            Vector256<double> realLanes,
+            Vector256<double> imaginaryLanes)
+            => Avx.Blend(realLanes, imaginaryLanes, 0b1010);
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        private static Vector256<double> MultiplyConjugatePair(
+            Vector256<double> twiddles,
+            Vector256<double> values)
+        {
+            Vector256<double> c = Avx.Permute(twiddles, 0x0);
+            Vector256<double> d = Avx.Permute(twiddles, 0xF);
+            Vector256<double> swappedValues = Avx.Permute(values, 0x5);
+            Vector256<double> cProduct = Avx.Multiply(c, values);
+            Vector256<double> dProduct = Avx.Multiply(d, swappedValues);
+            return BlendImaginaryLanes(
+                Avx.Add(cProduct, dProduct),
+                Avx.Subtract(cProduct, dProduct));
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        private static Vector256<double> SwapComplexPairOrder(Vector256<double> values)
+            => Avx.Permute2x128(values, values, 0x01);
 
         private static void MultiplyConjugate(
             double c,
