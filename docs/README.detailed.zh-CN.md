@@ -336,35 +336,35 @@ Exact `current`、IPP-fast v0.4.0 和 IPP-fast `current`。文件名不会公开
 <!-- LATEST_PERFORMANCE_BEGIN -->
 | CLI 模式（workers） | Python v0.4.0 | Python PR341 | Exact + v0.4.0 | Exact + current | IPP-fast + v0.4.0 | IPP-fast + current |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| 默认（5） | 49.845 s | 51.191 s | 13.095 s / 3.806x / 73.73% | 13.352 s / 3.834x / 73.92% | 11.613 s / 4.292x / 76.70% | 10.263 s / 4.988x / 79.95% |
-| `--threads 1` | 55.763 s | 55.815 s | 35.334 s / 1.578x / 36.64% | 42.759 s / 1.305x / 23.39% | 26.086 s / 2.138x / 53.22% | 29.522 s / 1.891x / 47.11% |
-| `--threads 5` | 50.124 s | 51.398 s | 13.560 s / 3.697x / 72.95% | 13.139 s / 3.912x / 74.44% | 11.911 s / 4.208x / 76.24% | 10.288 s / 4.996x / 79.98% |
-| `--threads 10` | 48.710 s | 50.833 s | 10.815 s / 4.504x / 77.80% | 10.181 s / 4.993x / 79.97% | 9.890 s / 4.925x / 79.70% | 8.168 s / 6.224x / 83.93% |
-| `--threads 20` | 48.963 s | 50.195 s | 8.547 s / 5.729x / 82.54% | 9.025 s / 5.562x / 82.02% | 8.215 s / 5.960x / 83.22% | 6.765 s / 7.420x / 86.52% |
+| 默认（5） | 49.845 s | 51.191 s | 13.095 s / 3.806x / 73.73% | 12.871 s / 3.977x / 74.86% | 11.613 s / 4.292x / 76.70% | 10.023 s / 5.107x / 80.42% |
+| `--threads 1` | 55.763 s | 55.815 s | 35.334 s / 1.578x / 36.64% | 40.319 s / 1.384x / 27.76% | 26.086 s / 2.138x / 53.22% | 27.925 s / 1.999x / 49.97% |
+| `--threads 5` | 50.124 s | 51.398 s | 13.560 s / 3.697x / 72.95% | 12.490 s / 4.115x / 75.70% | 11.911 s / 4.208x / 76.24% | 10.050 s / 5.114x / 80.45% |
+| `--threads 10` | 48.710 s | 50.833 s | 10.815 s / 4.504x / 77.80% | 10.091 s / 5.037x / 80.15% | 9.890 s / 4.925x / 79.70% | 8.153 s / 6.235x / 83.96% |
+| `--threads 20` | 48.963 s | 50.195 s | 8.547 s / 5.729x / 82.54% | 7.590 s / 6.613x / 84.88% | 8.215 s / 5.960x / 83.22% | 6.643 s / 7.556x / 86.76% |
 <!-- LATEST_PERFORMANCE_END -->
-<!-- LATEST_PERFORMANCE_RUNS: dotnet-current-refresh=30 reused-dotnet-v040-runs=30 reused-python-runs=30 repeats=3 precise-edge-ab=12 precise-edge-thread-gates=14 precise-edge-long=4 precise-edge-matrix-runs=30 python-matrix-runs=30 python-v040-runs=15 python-v040-hashes=15 python-v040-nondefault-runs=12 python-v040-nondefault-hashes=12 -->
+<!-- LATEST_PERFORMANCE_RUNS: dotnet-current-refresh=30 reused-dotnet-v040-runs=30 reused-python-runs=30 repeats=3 complex32-no-copy-short=8 complex32-no-copy-long=4 complex32-no-copy-thread-gates=24 complex32-no-copy-matrix-runs=30 python-matrix-runs=30 python-v040-runs=15 python-v040-hashes=15 python-v040-nondefault-runs=12 python-v040-nondefault-hashes=12 -->
 
 三次运行的墙钟范围如下：
 
 | CLI 模式 | Python v0.4.0 | Python PR341 | Exact + v0.4.0 | Exact + current | IPP-fast + v0.4.0 | IPP-fast + current |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| 默认（5） | 49.112-50.297 s | 51.184-51.447 s | 12.995-13.265 s | 13.300-13.447 s | 11.415-11.744 s | 10.144-10.476 s |
-| `--threads 1` | 55.575-56.091 s | 55.607-56.037 s | 34.928-35.815 s | 41.627-42.864 s | 25.156-26.281 s | 29.114-29.579 s |
-| `--threads 5` | 49.225-50.180 s | 50.995-51.436 s | 13.253-14.176 s | 13.128-13.518 s | 11.665-12.029 s | 10.175-10.311 s |
-| `--threads 10` | 48.167-48.785 s | 49.780-51.154 s | 10.766-11.193 s | 10.006-11.155 s | 9.732-10.217 s | 8.038-8.318 s |
-| `--threads 20` | 48.803-49.278 s | 50.170-50.672 s | 8.522-8.694 s | 7.906-9.046 s | 8.162-8.281 s | 6.580-6.867 s |
+| 默认（5） | 49.112-50.297 s | 51.184-51.447 s | 12.995-13.265 s | 12.651-13.085 s | 11.415-11.744 s | 9.956-10.200 s |
+| `--threads 1` | 55.575-56.091 s | 55.607-56.037 s | 34.928-35.815 s | 40.080-40.455 s | 25.156-26.281 s | 27.787-28.071 s |
+| `--threads 5` | 49.225-50.180 s | 50.995-51.436 s | 13.253-14.176 s | 12.462-12.977 s | 11.665-12.029 s | 9.991-10.431 s |
+| `--threads 10` | 48.167-48.785 s | 49.780-51.154 s | 10.766-11.193 s | 9.975-10.672 s | 9.732-10.217 s | 7.917-8.225 s |
+| `--threads 20` | 48.803-49.278 s | 50.170-50.672 s | 8.522-8.694 s | 7.343-7.611 s | 8.162-8.281 s | 6.552-6.663 s |
 
 2026-08-09 刷新了 30 次 current profile .NET Release 运行：Exact 和 IPP-fast 的五种
 worker 设置各按三种重排顺序执行。未改变的 v0.4.0 .NET 列和 30 次 Python 参考运行复用
-自此前同一主机、同一夹具的直接刷新。候选基于已合并的 main `ecf32e4`，其单文件可执行
-文件 SHA-256 为 `1FBD9ABB3BE22A0F90E3D7154CEDDE9C895633D4FCF197E1A70D13E29F13142E`。测试机为
+自此前同一主机、同一夹具的直接刷新。候选基于已合并的 main `1d5f5fd`，其单文件可执行
+文件 SHA-256 为 `380D1842C949CC6D3DF240EF5F56E5258984F4C3FDA3F4B601E048E6A2AFD9A5`。测试机为
 Intel Core Ultra 7 265K（20 个逻辑处理器）、Windows 11 build 26220，以及 .NET
 SDK/runtime `11.0.100-preview.6.26359.118`。原始运行目录含有私有夹具路径，因此只
 保留在本地；这些是如实报告的本地测量，不是可公开独立复现的 benchmark corpus。
 
 上一版 40 帧表让固定启动成本占比过大，尤其会放大 Python 的启动成本。例如默认
-IPP-fast `current` 在窗口扩到 160 帧后从 6.351x 变为 4.988x：Python 只从 19.791
-增至 51.191 秒，而 .NET 从 3.116 增至 10.263 秒。这是启动成本被摊薄，不是候选发生
+IPP-fast `current` 在窗口扩到 160 帧后从 6.351x 变为 5.107x：Python 只从 19.791
+增至 51.191 秒，而 .NET 从 3.116 增至 10.023 秒。这是启动成本被摊薄，不是候选发生
 性能回退。更早的 NTSC Betamax HiFi 表使用另一份私有夹具，完全不能直接比较。后续
 刷新将固定使用 160 帧、三轮重排方法；性能因果结论仍以更长的匹配 A/B 为准。
 
@@ -2235,6 +2235,34 @@ IPP-fast trace 中，`VhsSyncDetector.DetectFiltered` 的 sampled CPU 从 1263.3
 运行的亮度、色度、原始 JSON、stdout、归一化 stderr/日志及全部有序 `fileLoc` 均一致；
 没有渐进内存增长或 OOM，但两组配对不足以声明内存下降。刷新的 30 次 current 矩阵
 在每个后端和 worker 设置下，也都只产生一套上述七项兼容面 hash。
+
+### 直接返回 Complex32 最终 workspace
+
+float32 混合基 packet 计划会在两块 worker-local `Value[]` 数组之间交替执行各 radix
+pass。最后一遍落在 scratch 时，`Execute` 现在直接返回该数组，不再先把完整结果复制回
+输入 workspace，再执行原样不变的 `Complex32` 写回。输入装载、factor/packet 顺序、
+root、twiddle、每个算术表达式、float32 转换点、输出所有权和 thread-static workspace
+边界均未改变。一份 1000 帧 CPU trace 把 6432 个采样归因于被移除的
+`Plan.Execute` memmove，约占全部采样的 1.0%。
+
+53 项混合基 xUnit v3 用例在普通模式和禁用全部硬件 intrinsic 时均通过，覆盖 SciPy
+夹具 hash、奇偶 radix 数、串行/并行 transform、owned buffer、可重复的热态 workspace
+和 239580 点 field transform。八组正反顺序、每次 200 个 transform 的微基准只产生一套
+输出 hash，但调度噪声较大，因此判为吞吐中性，不用于端到端收益声明。
+
+四组交错的 160 帧 Exact `current --threads 20` 配对在亮度、色度、原始 JSON、stdout、
+归一化 stderr/日志和全部有序 `fileLoc` 上一致；基线和候选各赢两组，候选墙钟中位数
+缩短 1.93%，CPU 中位数减少 12.85%。最终判定使用两组正反顺序的 1000 帧配对，候选
+两组均获胜。合计墙钟从 79.767 降到 78.634 秒（缩短 1.42%，吞吐 1.0144x），合计
+进程 CPU 时间从 650.047 降到 629.078 秒（减少 3.23%）。候选峰值工作集为
+387.8-393.7 MiB，main 为 391.8-395.3 MiB，未见渐进增长或 OOM；这是内存有界证据，
+不声明常驻内存下降。
+
+24 次短门禁覆盖 Exact/IPP-fast、v0.4.0/`current` 的显式零、默认 5 和 20 workers；
+全部基线/候选以及跨线程产物和日志面均一致。刷新的 30 次 current 矩阵按三种重排顺序
+覆盖默认、1、5、10、20 workers，每个后端只产生一套确定性 hash。未改变的 Python 和
+.NET v0.4.0 列继续沿用此前同主机测量；上方两个 current 列使用本候选的单文件可执行
+文件。
 
 </details>
 

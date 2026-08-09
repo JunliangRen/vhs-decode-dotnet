@@ -416,30 +416,30 @@ profile-matched Python column:
 <!-- LATEST_PERFORMANCE_BEGIN -->
 | CLI mode (workers) | Python v0.4.0 | Python PR341 | Exact + v0.4.0 | Exact + current | IPP-fast + v0.4.0 | IPP-fast + current |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| default (5) | 49.845 s | 51.191 s | 13.095 s / 3.806x / 73.73% | 13.352 s / 3.834x / 73.92% | 11.613 s / 4.292x / 76.70% | 10.263 s / 4.988x / 79.95% |
-| `--threads 1` | 55.763 s | 55.815 s | 35.334 s / 1.578x / 36.64% | 42.759 s / 1.305x / 23.39% | 26.086 s / 2.138x / 53.22% | 29.522 s / 1.891x / 47.11% |
-| `--threads 5` | 50.124 s | 51.398 s | 13.560 s / 3.697x / 72.95% | 13.139 s / 3.912x / 74.44% | 11.911 s / 4.208x / 76.24% | 10.288 s / 4.996x / 79.98% |
-| `--threads 10` | 48.710 s | 50.833 s | 10.815 s / 4.504x / 77.80% | 10.181 s / 4.993x / 79.97% | 9.890 s / 4.925x / 79.70% | 8.168 s / 6.224x / 83.93% |
-| `--threads 20` | 48.963 s | 50.195 s | 8.547 s / 5.729x / 82.54% | 9.025 s / 5.562x / 82.02% | 8.215 s / 5.960x / 83.22% | 6.765 s / 7.420x / 86.52% |
+| default (5) | 49.845 s | 51.191 s | 13.095 s / 3.806x / 73.73% | 12.871 s / 3.977x / 74.86% | 11.613 s / 4.292x / 76.70% | 10.023 s / 5.107x / 80.42% |
+| `--threads 1` | 55.763 s | 55.815 s | 35.334 s / 1.578x / 36.64% | 40.319 s / 1.384x / 27.76% | 26.086 s / 2.138x / 53.22% | 27.925 s / 1.999x / 49.97% |
+| `--threads 5` | 50.124 s | 51.398 s | 13.560 s / 3.697x / 72.95% | 12.490 s / 4.115x / 75.70% | 11.911 s / 4.208x / 76.24% | 10.050 s / 5.114x / 80.45% |
+| `--threads 10` | 48.710 s | 50.833 s | 10.815 s / 4.504x / 77.80% | 10.091 s / 5.037x / 80.15% | 9.890 s / 4.925x / 79.70% | 8.153 s / 6.235x / 83.96% |
+| `--threads 20` | 48.963 s | 50.195 s | 8.547 s / 5.729x / 82.54% | 7.590 s / 6.613x / 84.88% | 8.215 s / 5.960x / 83.22% | 6.643 s / 7.556x / 86.76% |
 <!-- LATEST_PERFORMANCE_END -->
-<!-- LATEST_PERFORMANCE_RUNS: dotnet-current-refresh=30 reused-dotnet-v040-runs=30 reused-python-runs=30 repeats=3 precise-edge-ab=12 precise-edge-thread-gates=14 precise-edge-long=4 precise-edge-matrix-runs=30 python-matrix-runs=30 python-v040-runs=15 python-v040-hashes=15 python-v040-nondefault-runs=12 python-v040-nondefault-hashes=12 -->
+<!-- LATEST_PERFORMANCE_RUNS: dotnet-current-refresh=30 reused-dotnet-v040-runs=30 reused-python-runs=30 repeats=3 complex32-no-copy-short=8 complex32-no-copy-long=4 complex32-no-copy-thread-gates=24 complex32-no-copy-matrix-runs=30 python-matrix-runs=30 python-v040-runs=15 python-v040-hashes=15 python-v040-nondefault-runs=12 python-v040-nondefault-hashes=12 -->
 
 The three-run wall-time ranges were:
 
 | CLI mode | Python v0.4.0 | Python PR341 | Exact + v0.4.0 | Exact + current | IPP-fast + v0.4.0 | IPP-fast + current |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| default (5) | 49.112-50.297 s | 51.184-51.447 s | 12.995-13.265 s | 13.300-13.447 s | 11.415-11.744 s | 10.144-10.476 s |
-| `--threads 1` | 55.575-56.091 s | 55.607-56.037 s | 34.928-35.815 s | 41.627-42.864 s | 25.156-26.281 s | 29.114-29.579 s |
-| `--threads 5` | 49.225-50.180 s | 50.995-51.436 s | 13.253-14.176 s | 13.128-13.518 s | 11.665-12.029 s | 10.175-10.311 s |
-| `--threads 10` | 48.167-48.785 s | 49.780-51.154 s | 10.766-11.193 s | 10.006-11.155 s | 9.732-10.217 s | 8.038-8.318 s |
-| `--threads 20` | 48.803-49.278 s | 50.170-50.672 s | 8.522-8.694 s | 7.906-9.046 s | 8.162-8.281 s | 6.580-6.867 s |
+| default (5) | 49.112-50.297 s | 51.184-51.447 s | 12.995-13.265 s | 12.651-13.085 s | 11.415-11.744 s | 9.956-10.200 s |
+| `--threads 1` | 55.575-56.091 s | 55.607-56.037 s | 34.928-35.815 s | 40.080-40.455 s | 25.156-26.281 s | 27.787-28.071 s |
+| `--threads 5` | 49.225-50.180 s | 50.995-51.436 s | 13.253-14.176 s | 12.462-12.977 s | 11.665-12.029 s | 9.991-10.431 s |
+| `--threads 10` | 48.167-48.785 s | 49.780-51.154 s | 10.766-11.193 s | 9.975-10.672 s | 9.732-10.217 s | 7.917-8.225 s |
+| `--threads 20` | 48.803-49.278 s | 50.170-50.672 s | 8.522-8.694 s | 7.343-7.611 s | 8.162-8.281 s | 6.552-6.663 s |
 
 The 30 current-profile .NET Release runs were refreshed on 2026-08-09, with
 Exact and IPP-fast at all five worker settings run in three reordered passes.
 The unchanged v0.4.0 .NET columns and 30 Python reference runs are reused from
 the previous direct refresh on the same host and fixture. The candidate is
-based on merged main `ecf32e4`; its single-file executable had SHA-256
-`1FBD9ABB3BE22A0F90E3D7154CEDDE9C895633D4FCF197E1A70D13E29F13142E`.
+based on merged main `1d5f5fd`; its single-file executable had SHA-256
+`380D1842C949CC6D3DF240EF5F56E5258984F4C3FDA3F4B601E048E6A2AFD9A5`.
 The host was an Intel Core Ultra 7 265K with 20 logical processors, Windows 11
 build 26220, and .NET SDK/runtime `11.0.100-preview.6.26359.118`. Raw run
 directories remain local because they contain the private fixture path; these
@@ -447,8 +447,8 @@ are local measurements rather than an independently reproducible public corpus.
 
 The preceding 40-frame table made fixed startup cost, especially Python's,
 disproportionately large. For example, the default IPP-fast `current` ratio fell
-from 6.351x to 4.988x when the window grew to 160 frames: Python grew only from
-19.791 to 51.191 seconds while .NET grew from 3.116 to 10.263 seconds. This is
+from 6.351x to 5.107x when the window grew to 160 frames: Python grew only from
+19.791 to 51.191 seconds while .NET grew from 3.116 to 10.023 seconds. This is
 startup-cost dilution, not evidence that the candidate regressed. The older
 NTSC Betamax HiFi table used another private fixture and is not comparable at
 all. Future refreshes retain this 160-frame, three-pass method; causal claims
@@ -2818,6 +2818,42 @@ progressive memory growth or OOM occurred, although two pairs are insufficient
 for a memory-reduction claim. The refreshed 30-run current matrix also produced
 one hash for each of those seven compatibility surfaces in every backend and
 worker setting.
+
+### Direct Complex32 final-workspace return
+
+The float32 mixed-radix packet plan alternates each radix pass between two
+worker-local `Value[]` arrays. When the final pass lands in scratch, `Execute`
+now returns that array directly instead of copying the complete result back to
+the input workspace before the existing `Complex32` writeback. Input loading,
+factor and packet order, roots, twiddles, every arithmetic expression, float32
+conversion points, output ownership, and thread-static workspace bounds are
+unchanged. A 1,000-frame CPU trace attributed 6,432 samples, about 1.0% of all
+samples, to the removed `Plan.Execute` memmove.
+
+All 53 mixed-radix xUnit v3 cases passed both normally and with all hardware
+intrinsics disabled. They include SciPy fixture hashes, odd/even radix counts,
+serial/parallel transforms, owned buffers, repeatable warm workspaces, and the
+239,580-point field transform. Eight reversed-order 200-transform microbenchmark
+runs retained one output hash but were scheduling-noisy and are classified as
+throughput-neutral rather than used for the end-to-end claim.
+
+Four interleaved 160-frame Exact `current --threads 20` pairs matched luma,
+chroma, raw JSON, stdout, normalized stderr/log, and every ordered `fileLoc`;
+two pairs favored each side, while the candidate wall median was 1.93% lower
+and its CPU median was 12.85% lower. The deciding two opposite-order 1,000-frame
+pairs both favored the candidate. Combined wall time fell from 79.767 to 78.634
+seconds (1.42% lower, 1.0144x throughput), and combined process CPU time fell
+from 650.047 to 629.078 seconds (3.23%). Candidate peak working set was
+387.8-393.7 MiB versus 391.8-395.3 MiB for main, with no progressive growth or
+OOM; this is bounded-memory evidence, not a resident-memory reduction claim.
+
+Twenty-four short gates covered Exact and IPP-fast, v0.4.0 and `current`, at
+explicit zero, default-five, and 20 workers. Every baseline/candidate and
+cross-thread artifact/log surface matched. The refreshed 30-run current matrix
+used default, 1, 5, 10, and 20 workers in three reordered passes; each backend
+produced one deterministic hash set. The unchanged Python and .NET v0.4.0
+columns retain their previous same-host measurements, while the two current
+columns above use this candidate's single-file executable.
 
 </details>
 
