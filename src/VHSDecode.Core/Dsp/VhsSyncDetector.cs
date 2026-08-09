@@ -1388,17 +1388,11 @@ public sealed class VhsSyncDetector
             }
         }
 
-        for (int bucket = 0; bucket < RadixHistogramWidth; bucket++)
-        {
-            int count = 0;
-            for (int worker = 0; worker < workerThreads; worker++)
-            {
-                count += workerHistograms[
-                    (worker * RadixHistogramWidth) + bucket];
-            }
-
-            highHistogram[bucket] = count;
-        }
+        MergeWorkerHistograms(
+            workerHistograms,
+            workerThreads,
+            RadixHistogramWidth,
+            highHistogram);
 
         return true;
     }
@@ -1478,16 +1472,54 @@ public sealed class VhsSyncDetector
                 }
             });
 
-        for (int bucket = 0; bucket < middleHistogramLength; bucket++)
-        {
-            int count = 0;
-            for (int worker = 0; worker < workerThreads; worker++)
-            {
-                count += workerHistograms[
-                    (worker * middleHistogramLength) + bucket];
-            }
+        MergeWorkerHistograms(
+            workerHistograms,
+            workerThreads,
+            middleHistogramLength,
+            middleHistograms);
+    }
 
-            middleHistograms[bucket] = count;
+    private static unsafe void MergeWorkerHistograms(
+        int[] workerHistograms,
+        int workerCount,
+        int histogramLength,
+        int[] destination)
+    {
+        ArgumentNullException.ThrowIfNull(workerHistograms);
+        ArgumentNullException.ThrowIfNull(destination);
+        ArgumentOutOfRangeException.ThrowIfNegativeOrZero(workerCount);
+        ArgumentOutOfRangeException.ThrowIfNegative(histogramLength);
+        if (destination.Length < histogramLength
+            || workerHistograms.Length < checked(workerCount * histogramLength))
+        {
+            throw new ArgumentException("The histogram merge buffers are too small.");
+        }
+
+        workerHistograms.AsSpan(0, histogramLength).CopyTo(destination);
+        fixed (int* workerHistogramPointer = workerHistograms)
+        fixed (int* destinationPointer = destination)
+        {
+            for (int worker = 1; worker < workerCount; worker++)
+            {
+                int workerOffset = worker * histogramLength;
+                int bucket = 0;
+                if (Avx2.IsSupported)
+                {
+                    int vectorEnd = histogramLength & ~7;
+                    for (; bucket < vectorEnd; bucket += 8)
+                    {
+                        Vector256<int> merged = Avx2.Add(
+                            Avx.LoadVector256(destinationPointer + bucket),
+                            Avx.LoadVector256(workerHistogramPointer + workerOffset + bucket));
+                        Avx.Store(destinationPointer + bucket, merged);
+                    }
+                }
+
+                for (; bucket < histogramLength; bucket++)
+                {
+                    destinationPointer[bucket] += workerHistogramPointer[workerOffset + bucket];
+                }
+            }
         }
     }
 

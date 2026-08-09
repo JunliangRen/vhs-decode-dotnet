@@ -385,41 +385,74 @@ detector ごとに 60-line buffer 2 個までに制限されます。
 
 ### 最新の 6-path thread matrix
 
-最新の overview は、同じ private local 40 MHz PAL VHS `.ldf` fixture で
-Python v0.4.0、merge 済みの Python PR341、Exact v0.4.0、Exact
-`current`、IPP-fast v0.4.0、IPP-fast `current` を比較します。filename は
-公開しません。各 .NET cell は wall-time median、profile が対応する Python
-列に対する speedup、wall-time reduction の順です。
+最新の overview は startup cost を含む 40-frame short snapshot で、同じ private local
+40 MHz PAL VHS `.ldf` fixture 上の Python v0.4.0、merge 済みの Python PR341、Exact
+v0.4.0、Exact `current`、IPP-fast v0.4.0、IPP-fast `current` を比較します。filename は
+公開しません。各 .NET cell は wall-time median、profile が対応する Python 列に対する
+speedup、wall-time reduction の順です。
 
 <!-- LATEST_PERFORMANCE_BEGIN -->
 | CLI mode（workers） | Python v0.4.0 | Python PR341 | Exact + v0.4.0 | Exact + current | IPP-fast + v0.4.0 | IPP-fast + current |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| default（5） | 17.401 s | 19.791 s | 4.341 s / 4.008x / 75.05% | 4.302 s / 4.601x / 78.26% | 3.549 s / 4.904x / 79.61% | 3.126 s / 6.331x / 84.21% |
-| `--threads 1` | 19.177 s | 21.052 s | 11.626 s / 1.649x / 39.37% | 12.860 s / 1.637x / 38.91% | 8.361 s / 2.294x / 56.40% | 9.232 s / 2.280x / 56.15% |
-| `--threads 5` | 17.458 s | 20.209 s | 4.043 s / 4.318x / 76.84% | 4.157 s / 4.861x / 79.43% | 3.654 s / 4.778x / 79.07% | 3.111 s / 6.495x / 84.60% |
-| `--threads 10` | 17.230 s | 19.480 s | 3.526 s / 4.886x / 79.53% | 3.745 s / 5.201x / 80.77% | 2.983 s / 5.775x / 82.69% | 2.513 s / 7.751x / 87.10% |
-| `--threads 20` | 17.558 s | 19.928 s | 2.772 s / 6.334x / 84.21% | 3.298 s / 6.042x / 83.45% | 2.632 s / 6.672x / 85.01% | 2.075 s / 9.605x / 89.59% |
+| default（5） | 17.401 s | 19.791 s | 4.341 s / 4.008x / 75.05% | 4.505 s / 4.393x / 77.24% | 3.549 s / 4.904x / 79.61% | 3.116 s / 6.351x / 84.25% |
+| `--threads 1` | 19.177 s | 21.052 s | 11.626 s / 1.649x / 39.37% | 13.073 s / 1.610x / 37.90% | 8.361 s / 2.294x / 56.40% | 9.404 s / 2.239x / 55.33% |
+| `--threads 5` | 17.458 s | 20.209 s | 4.043 s / 4.318x / 76.84% | 4.257 s / 4.748x / 78.94% | 3.654 s / 4.778x / 79.07% | 3.089 s / 6.543x / 84.72% |
+| `--threads 10` | 17.230 s | 19.480 s | 3.526 s / 4.886x / 79.53% | 3.950 s / 4.932x / 79.72% | 2.983 s / 5.775x / 82.69% | 2.556 s / 7.621x / 86.88% |
+| `--threads 20` | 17.558 s | 19.928 s | 2.772 s / 6.334x / 84.21% | 3.449 s / 5.778x / 82.69% | 2.632 s / 6.672x / 85.01% | 2.038 s / 9.779x / 89.77% |
 <!-- LATEST_PERFORMANCE_END -->
-<!-- LATEST_PERFORMANCE_RUNS: full-refresh=90 repeats=3 candidate-ab=8 thread-gates=24 candidate-long=2 strict-candidate-runs=34 dotnet-determinism=60 python-v040-runs=15 python-v040-hashes=15 python-v040-nondefault-runs=12 python-v040-nondefault-hashes=12 -->
+<!-- LATEST_PERFORMANCE_RUNS: full-refresh=90 current-refresh=30 repeats=3 candidate-ab=20 thread-gates=24 candidate-long=4 strict-candidate-runs=48 current-determinism=30 python-v040-runs=15 python-v040-hashes=15 python-v040-nondefault-runs=12 python-v040-nondefault-hashes=12 -->
 
-全 90 run（30 matrix cell を各 3 回）は 2026-08-09 に今回の candidate で fresh
-measurement しました。candidate は merged main `ae3722d` を基にしています。各 cell
-は 3 回の Release run の median で、3 pass の mode/profile order は reverse と
-mixed order にしました。
+Python と v0.4.0-profile 列は、2026-08-09 の直前の 90-run full refresh から 3-run
+median を保持します。今回の candidate は `current` parallel VSync path だけを変更する
+ため、5 worker setting の 2 つの `current` .NET 列を 30 回の Release run で更新し、
+3 pass の順序を reverse/mixed にしました。candidate は merged main `845d8d1` を基にし、
+executable の SHA-256 は
+`7BAC056495F42BF4327F6E9D99AF4168F0FA585319BC9CF9F9D09E84B4A3E632` です。
 host は Intel Core Ultra 7 265K（20 logical processor）、Windows 11 build 26220、
 .NET SDK/runtime `11.0.100-preview.6.26359.118` です。raw run directory は private
 fixture path を含むため local にのみ保持します。以下は local measurement の報告で、
-public independently reproducible benchmark corpus ではありません。candidate
-executable の SHA-256 は
-`AAAB4B0A884D0F22B361E369A55A2C475DD2D042806043B25EAFB5DF188B7860` です。
+public independently reproducible benchmark corpus ではありません。
 
 以前公開した table は別の private NTSC Betamax HiFi `.lds` fixture を使っているため、
-この PAL VHS matrix とは直接比較できません。今回の refreshed table は次の
-median-selection candidate を示します。mapped raw-FLAC improvement は base main に
-すでに含まれており、その説明は release history として後に残します。
+この PAL VHS matrix とは直接比較できません。同じ fixture でも 40-frame result は
+startup と ambient load の影響が大きく、今回の Exact `current --threads 20` 3 run は
+3.280 から 3.606 秒の範囲でした。古い 3.298-second cell はその範囲内です。したがって
+short table の動きだけでは regression/optimization を示せず、下の long paired A/B が
+causal evidence です。
+
+### contiguous AVX2 VSync radix histogram merge
+
+`current` VSync quantile path は各 worker-private radix histogram を contiguous span として
+merge します。最初の worker を destination に copy し、残りを元の worker order で加算
+します。AVX2 は 8 個の exact integer bucket を一度に処理し、tail と AVX2 非対応 CPU
+では同じ順序の scalar path を使います。floating-point expression、quantile target、
+detector state、ordered commit boundary は変わりません。
+
+isolated production-size radix probe では、cache-local merge が old bucket-major merge
+との 8 pair 全てで勝ち、wall median は 1.169541 から 1.034975 秒へ 11.51% 短縮しました。
+explicit AVX2 integer loop も cache-local scalar form との 8 pair 全てで勝ち、1.043777
+から 0.971152 秒へ 6.96% 短縮し、checksum は exact でした。この kernel result は
+hotspot の確認用で、end-to-end speedup としては扱いません。
+
+stable end-to-end result は opposite-order の 1,000-frame IPP-fast
+`current --threads 20` pair 2 組です。combined wall time は 72.913607 から 71.789921 秒へ
+1.54% 短縮（1.0157x throughput）、CPU time は 426.328125 から 422.593750 秒へ 0.88%
+減少しました。peak working set は約 373 MiB で、first-/last-third sample に継続的な
+増加はありません。4 long run の luma、chroma、raw JSON、ordered `fileLoc`、normalized
+stderr、normalized log は 1 hash set でした。
+
+complete strict gate は 48 baseline/candidate run です。short interleaved 10 pair、
+opposite-order long 2 pair、そして 2 behavior profile の `--threads 0`、default-5、
+`--threads 20` を横断する 24 Exact/IPP-fast thread-matrix run を含みます。luma、chroma、
+raw JSON、ordered `fileLoc`、normalized stderr/log はすべて一致し、stdout を capture
+した short/thread-matrix gate でも一致しました。更新した 30 `current` matrix run は
+cross-thread deterministic でした。全 1,382 xUnit v3 test は native hardware、AVX2
+disabled、all hardware intrinsics disabled の各 mode で通過しました。
 
 ### deterministic PAL VSync median selection
 
+この historical candidate は merged main `ae3722d` を基にし、executable の SHA-256 は
+`AAAB4B0A884D0F22B361E369A55A2C475DD2D042806043B25EAFB5DF188B7860` です。
 `NumpyReduction` は 32,768 values まで待たず、4,096 values 以上を既存の deterministic
 introselect へ送るようになりました。これにより約 6K/15K samples の PAL VSync MAD
 group で full sort を避けます。threshold 未満の input と positive/negative zero を両方
