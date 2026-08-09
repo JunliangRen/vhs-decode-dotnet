@@ -328,36 +328,66 @@ VSync serration detector 现在会在最多两块精确形状的 workspace 中�
 
 ### 最新六路径线程矩阵
 
-最新首页摘要在同一个私有本地 40 MHz PAL VHS `.ldf` 夹具上比较
-Python v0.4.0、已合并的 Python PR341、Exact v0.4.0、Exact `current`、
-IPP-fast v0.4.0 和 IPP-fast `current`。文件名不会公开。每个 .NET 单元格依次
-给出墙钟中位数、相对同 profile Python 列的倍速和墙钟缩短比例：
+最新首页摘要是包含启动开销的 40 帧短快照，在同一个私有本地 40 MHz PAL VHS
+`.ldf` 夹具上比较 Python v0.4.0、已合并的 Python PR341、Exact v0.4.0、
+Exact `current`、IPP-fast v0.4.0 和 IPP-fast `current`。文件名不会公开。每个
+.NET 单元格依次给出墙钟中位数、相对同 profile Python 列的倍速和墙钟缩短比例：
 
 <!-- LATEST_PERFORMANCE_BEGIN -->
 | CLI 模式（workers） | Python v0.4.0 | Python PR341 | Exact + v0.4.0 | Exact + current | IPP-fast + v0.4.0 | IPP-fast + current |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| 默认（5） | 17.401 s | 19.791 s | 4.341 s / 4.008x / 75.05% | 4.302 s / 4.601x / 78.26% | 3.549 s / 4.904x / 79.61% | 3.126 s / 6.331x / 84.21% |
-| `--threads 1` | 19.177 s | 21.052 s | 11.626 s / 1.649x / 39.37% | 12.860 s / 1.637x / 38.91% | 8.361 s / 2.294x / 56.40% | 9.232 s / 2.280x / 56.15% |
-| `--threads 5` | 17.458 s | 20.209 s | 4.043 s / 4.318x / 76.84% | 4.157 s / 4.861x / 79.43% | 3.654 s / 4.778x / 79.07% | 3.111 s / 6.495x / 84.60% |
-| `--threads 10` | 17.230 s | 19.480 s | 3.526 s / 4.886x / 79.53% | 3.745 s / 5.201x / 80.77% | 2.983 s / 5.775x / 82.69% | 2.513 s / 7.751x / 87.10% |
-| `--threads 20` | 17.558 s | 19.928 s | 2.772 s / 6.334x / 84.21% | 3.298 s / 6.042x / 83.45% | 2.632 s / 6.672x / 85.01% | 2.075 s / 9.605x / 89.59% |
+| 默认（5） | 17.401 s | 19.791 s | 4.341 s / 4.008x / 75.05% | 4.505 s / 4.393x / 77.24% | 3.549 s / 4.904x / 79.61% | 3.116 s / 6.351x / 84.25% |
+| `--threads 1` | 19.177 s | 21.052 s | 11.626 s / 1.649x / 39.37% | 13.073 s / 1.610x / 37.90% | 8.361 s / 2.294x / 56.40% | 9.404 s / 2.239x / 55.33% |
+| `--threads 5` | 17.458 s | 20.209 s | 4.043 s / 4.318x / 76.84% | 4.257 s / 4.748x / 78.94% | 3.654 s / 4.778x / 79.07% | 3.089 s / 6.543x / 84.72% |
+| `--threads 10` | 17.230 s | 19.480 s | 3.526 s / 4.886x / 79.53% | 3.950 s / 4.932x / 79.72% | 2.983 s / 5.775x / 82.69% | 2.556 s / 7.621x / 86.88% |
+| `--threads 20` | 17.558 s | 19.928 s | 2.772 s / 6.334x / 84.21% | 3.449 s / 5.778x / 82.69% | 2.632 s / 6.672x / 85.01% | 2.038 s / 9.779x / 89.77% |
 <!-- LATEST_PERFORMANCE_END -->
-<!-- LATEST_PERFORMANCE_RUNS: full-refresh=90 repeats=3 candidate-ab=8 thread-gates=24 candidate-long=2 strict-candidate-runs=34 dotnet-determinism=60 python-v040-runs=15 python-v040-hashes=15 python-v040-nondefault-runs=12 python-v040-nondefault-hashes=12 -->
+<!-- LATEST_PERFORMANCE_RUNS: full-refresh=90 current-refresh=30 repeats=3 candidate-ab=20 thread-gates=24 candidate-long=4 strict-candidate-runs=48 current-determinism=30 python-v040-runs=15 python-v040-hashes=15 python-v040-nondefault-runs=12 python-v040-nondefault-hashes=12 -->
 
-全部 90 次运行（30 个矩阵单元，每个重复 3 次）均于 2026-08-09 使用本候选重新测量；
-候选基于已合并的 main `ae3722d`。每个单元都是三次 Release 运行的中位数，三轮分别
-反转和混排了模式与 profile 顺序。测试机为 Intel Core Ultra 7 265K（20 个逻辑处理器）、
-Windows 11 build 26220，以及 .NET SDK/runtime `11.0.100-preview.6.26359.118`。原始运行目录
-含有私有夹具路径，因此只保留在本地；这些是如实报告的本地测量，不是可公开独立
-复现的 benchmark corpus。候选可执行文件的 SHA-256 为
-`AAAB4B0A884D0F22B361E369A55A2C475DD2D042806043B25EAFB5DF188B7860`。
+Python 和 v0.4.0 profile 列保留 2026-08-09 紧邻上一次 90 次完整刷新中的三次中位数。
+本候选只改动 `current` 的并行 VSync 路径，因此另行执行 30 次 Release 运行，刷新
+两个 `current` .NET 列的五种 worker 设置；三轮顺序经过反转和混排。候选基于已合并的
+main `845d8d1`，其可执行文件 SHA-256 为
+`7BAC056495F42BF4327F6E9D99AF4168F0FA585319BC9CF9F9D09E84B4A3E632`。测试机为
+Intel Core Ultra 7 265K（20 个逻辑处理器）、Windows 11 build 26220，以及 .NET SDK/runtime
+`11.0.100-preview.6.26359.118`。原始运行目录含有私有夹具路径，因此只保留在本地；
+这些是如实报告的本地测量，不是可公开独立复现的 benchmark corpus。
 
 更早公开的表格使用另一份私有 NTSC Betamax HiFi `.lds` 夹具，不能与这份 PAL VHS
-矩阵直接比较。本次刷新表格描述的是下面的中位数选择候选；raw FLAC 映射定位优化
-已经包含在作为基线的 main 中，其说明作为已发布历史保留在后面。
+矩阵直接比较。即使使用当前同一夹具，40 帧结果也更容易受启动和环境负载影响：三次
+Exact `current --threads 20` 新测量范围为 3.280 到 3.606 秒，旧单元格的 3.298 秒本就
+落在这个区间内。因此单看短表变化不能证明回退或优化；下面更长的配对 A/B 才是
+因果证据。
+
+### 连续 AVX2 VSync radix histogram 合并
+
+`current` VSync 分位数路径现在按连续 span 合并每个 worker 私有的 radix histogram。
+先把第一个 worker 复制到目标，再按原 worker 顺序累加其余 worker；AVX2 每次处理八个
+完全精确的整数 bucket，尾部以及不支持 AVX2 的 CPU 保留相同顺序的标量路径。浮点
+表达式、分位数目标、detector 状态和有序提交边界均未改变。
+
+在生产尺寸的独立 radix probe 中，cache-local 合并八组全部胜过旧 bucket-major 合并，
+墙钟中位数从 1.169541 降到 1.034975 秒（缩短 11.51%）。显式 AVX2 整数循环随后又在
+八组中全部胜过 cache-local 标量形式，从 1.043777 降到 0.971152 秒（缩短 6.96%），
+checksum 完全一致。这些内核结果用于确认热点，不作为端到端倍速声明。
+
+稳定的端到端结果来自两组正反顺序的 1000 帧 IPP-fast `current --threads 20` 配对。
+合计墙钟从 72.913607 降到 71.789921 秒（缩短 1.54%，吞吐为 1.0157x），CPU 时间从
+426.328125 降到 422.593750 秒（减少 0.88%）。峰值工作集约 373 MiB，前后 1/3 采样
+未见持续增长。四次长跑只有一套亮度、色度、原始 JSON、有序 `fileLoc`、归一化 stderr
+和归一化日志 hash。
+
+完整严格门禁共 48 次基线/候选运行：十组短交错配对、两组正反顺序长配对，以及 24 次
+Exact/IPP-fast 线程矩阵，覆盖两个行为 profile 的 `--threads 0`、默认 5 和
+`--threads 20`。亮度、色度、原始 JSON、有序 `fileLoc`、归一化 stderr 和归一化日志
+全部一致；在有采集 stdout 的短配对和线程矩阵中，stdout 也一致。30 次刷新后的
+`current` 矩阵运行保持跨线程确定性。全部 1382 项 xUnit v3 测试在原生硬件、禁用
+AVX2 和禁用全部硬件 intrinsic 三种模式下均通过。
 
 ### 确定性的 PAL VSync 中位数选择
 
+这个历史候选基于已合并的 main `ae3722d`，其可执行文件 SHA-256 为
+`AAAB4B0A884D0F22B361E369A55A2C475DD2D042806043B25EAFB5DF188B7860`。
 `NumpyReduction` 现在从 4,096 个值开始使用既有的确定性 introselect，而不是等到
 32,768 个值。这让约 6K 和 15K 样本的 PAL VSync MAD 分组不再执行完整排序。低于阈值
 的输入以及同时包含正零和负零的数组仍然完整排序；NaN 仍会在选择前原样返回，偶数
