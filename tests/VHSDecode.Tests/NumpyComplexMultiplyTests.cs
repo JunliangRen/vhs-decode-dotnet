@@ -139,6 +139,96 @@ public sealed class NumpyComplexMultiplyTests
         Assert.Equal(before, after);
     }
 
+    [Fact(DisplayName = "SIMD complex-real multiply matches scalar bits")]
+    public void SimdComplexRealMultiplyMatchesScalarBits()
+    {
+        int[] lengths = [0, 1, 2, 3, 4, 5, 7, 8, 32_771];
+        foreach (int length in lengths)
+        {
+            Complex[] actual = BuildValues(length, 0xA24BAED4963EE407UL);
+            var multipliers = new double[length];
+            ulong state = 0x9FB21C651E98DF25UL;
+            for (int index = 0; index < multipliers.Length; index++)
+            {
+                state = unchecked((state * 6364136223846793005UL) + 1442695040888963407UL);
+                multipliers[index] = ((long)(state >> 11) - (1L << 52)) / (double)(1L << 25);
+            }
+
+            Complex[] expected = actual.ToArray();
+            for (int index = 0; index < expected.Length; index++)
+            {
+                expected[index] *= multipliers[index];
+            }
+
+            NumpyComplexMultiply.ApplyRealInPlace(actual, multipliers);
+
+            AssertComplexBitsEqual(expected, actual);
+        }
+
+        double positiveNan = BitConverter.UInt64BitsToDouble(0x7FF8000000000123UL);
+        double negativeNan = BitConverter.UInt64BitsToDouble(0xFFF8000000000456UL);
+        Complex[] specialValues =
+        [
+            new(1.0, -2.0),
+            new(-3.0, 4.0),
+            new(0.0, -0.0),
+            new(double.MaxValue, double.Epsilon),
+            new(double.PositiveInfinity, double.NegativeInfinity),
+            new(positiveNan, negativeNan),
+            new(double.MaxValue, double.Epsilon),
+            new(-1.0 / 3.0, 1.0 / 7.0),
+            new(double.MaxValue, double.Epsilon),
+            new(-double.MaxValue, double.MaxValue),
+            new(-0.0, 0.0),
+            new(1.0e308, -1.0e308)
+        ];
+        double[] specialMultipliers =
+        [
+            positiveNan,
+            double.PositiveInfinity,
+            double.NegativeInfinity,
+            -0.0,
+            2.0,
+            -3.0,
+            double.Epsilon,
+            double.PositiveInfinity,
+            2.0,
+            -2.0,
+            -2.0,
+            10.0
+        ];
+        Complex[] expectedSpecial = specialValues.ToArray();
+        for (int index = 0; index < expectedSpecial.Length; index++)
+        {
+            expectedSpecial[index] *= specialMultipliers[index];
+        }
+
+        NumpyComplexMultiply.ApplyRealInPlace(specialValues, specialMultipliers);
+
+        AssertComplexBitsEqual(expectedSpecial, specialValues);
+    }
+
+    [Fact(DisplayName = "SIMD complex-real multiply validates lengths and does not allocate")]
+    public void SimdComplexRealMultiplyValidatesLengthsAndDoesNotAllocate()
+    {
+        Complex[] values = BuildValues(4_096, 0xA24BAED4963EE407UL);
+        double[] multipliers = Enumerable.Range(0, values.Length)
+            .Select(index => (index - 2_048) / 257.0)
+            .ToArray();
+        NumpyComplexMultiply.ApplyRealInPlace(values, multipliers);
+
+        long before = GC.GetAllocatedBytesForCurrentThread();
+        for (int iteration = 0; iteration < 32; iteration++)
+        {
+            NumpyComplexMultiply.ApplyRealInPlace(values, multipliers);
+        }
+
+        long after = GC.GetAllocatedBytesForCurrentThread();
+        Assert.Equal(before, after);
+        Assert.Throws<ArgumentException>(
+            () => NumpyComplexMultiply.ApplyRealInPlace(values, multipliers.AsSpan(1)));
+    }
+
     private static Complex[] BuildValues(int length, ulong state)
     {
         var values = new Complex[length];

@@ -2,7 +2,7 @@
 
 **[English](README.md)** | [简体中文](README.zh-CN.md) | [日本語](README.ja.md)
 
-<!-- README_SYNC: 2026-08-04.03 -->
+<!-- README_SYNC: 2026-08-09.01 -->
 
 A .NET 11 rewrite of the decode-facing parts of
 [`oyvindln/vhs-decode`](https://github.com/oyvindln/vhs-decode), targeting
@@ -38,7 +38,7 @@ evidence, and remaining gaps.
   EIAJ, and supported PAL/NTSC variants.
 - TBC utility tools, the double-click GUI, and developer plotting windows are
   intentionally out of scope.
-- The Visual Studio 2026 `.slnx` solution has **1,394** standard xUnit v3 tests
+- The Visual Studio 2026 `.slnx` solution has **1,396** standard xUnit v3 tests
   that are visible in Test Explorer and runnable with `dotnet test`.
 
 <!-- SECTION: start -->
@@ -100,7 +100,7 @@ for compatibility-sensitive work.
 This is a startup-inclusive 160-frame snapshot on one fixed private local
 40 MHz PAL VHS `.ldf` fixture; the filename is intentionally not published.
 Exact `current` and IPP-fast `current` were refreshed in three reordered Release
-passes on this candidate, based on merged main `1d5f5fd`. The two unchanged
+passes on this candidate, based on merged main `8409b1f`. The two unchanged
 v0.4.0 .NET columns and 30 Python reference runs are reused from the previous
 direct refresh on the same host and fixture. Compatibility is evaluated
 separately from speed.
@@ -108,13 +108,13 @@ separately from speed.
 <!-- LATEST_PERFORMANCE_BEGIN -->
 | CLI mode (workers) | Python v0.4.0 | Python PR341 | Exact + v0.4.0 | Exact + current | IPP-fast + v0.4.0 | IPP-fast + current |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| default (5) | 49.845 s | 51.191 s | 13.095 s / 3.806x | 12.871 s / 3.977x | 11.613 s / 4.292x | 10.023 s / 5.107x |
-| `--threads 1` | 55.763 s | 55.815 s | 35.334 s / 1.578x | 40.319 s / 1.384x | 26.086 s / 2.138x | 27.925 s / 1.999x |
-| `--threads 5` | 50.124 s | 51.398 s | 13.560 s / 3.697x | 12.490 s / 4.115x | 11.911 s / 4.208x | 10.050 s / 5.114x |
-| `--threads 10` | 48.710 s | 50.833 s | 10.815 s / 4.504x | 10.091 s / 5.037x | 9.890 s / 4.925x | 8.153 s / 6.235x |
-| `--threads 20` | 48.963 s | 50.195 s | 8.547 s / 5.729x | 7.590 s / 6.613x | 8.215 s / 5.960x | 6.643 s / 7.556x |
+| default (5) | 49.845 s | 51.191 s | 13.095 s / 3.806x | 12.918 s / 3.963x | 11.613 s / 4.292x | 9.932 s / 5.154x |
+| `--threads 1` | 55.763 s | 55.815 s | 35.334 s / 1.578x | 40.722 s / 1.371x | 26.086 s / 2.138x | 28.671 s / 1.947x |
+| `--threads 5` | 50.124 s | 51.398 s | 13.560 s / 3.697x | 12.964 s / 3.965x | 11.911 s / 4.208x | 9.917 s / 5.183x |
+| `--threads 10` | 48.710 s | 50.833 s | 10.815 s / 4.504x | 9.742 s / 5.218x | 9.890 s / 4.925x | 8.338 s / 6.097x |
+| `--threads 20` | 48.963 s | 50.195 s | 8.547 s / 5.729x | 8.276 s / 6.065x | 8.215 s / 5.960x | 6.280 s / 7.993x |
 <!-- LATEST_PERFORMANCE_END -->
-<!-- LATEST_PERFORMANCE_RUNS: dotnet-current-refresh=30 reused-dotnet-v040-runs=30 reused-python-runs=30 repeats=3 complex32-no-copy-short=8 complex32-no-copy-long=4 complex32-no-copy-thread-gates=24 complex32-no-copy-matrix-runs=30 python-matrix-runs=30 python-v040-runs=15 python-v040-hashes=15 python-v040-nondefault-runs=12 python-v040-nondefault-hashes=12 -->
+<!-- LATEST_PERFORMANCE_RUNS: dotnet-current-refresh=30 reused-dotnet-v040-runs=30 reused-python-runs=30 repeats=3 hilbert-scale-short=8 hilbert-scale-long=8 hilbert-scale-thread-gates=24 hilbert-scale-intrinsic-gates=3 hilbert-scale-matrix-runs=30 python-matrix-runs=30 python-v040-runs=15 python-v040-hashes=15 python-v040-nondefault-runs=12 python-v040-nondefault-hashes=12 -->
 
 Each .NET cell shows median wall time and speedup versus its profile-matched
 Python column. The default is **5 workers**; three-run ranges are in the
@@ -122,15 +122,15 @@ Python column. The default is **5 workers**; three-run ranges are in the
 40-frame table amplified startup cost, especially for Python, so a lower
 speedup in this longer table is not a decoder regression.
 
-The float32 mixed-radix FFT plan now returns the worker-local array containing
-the final pass instead of copying it back before the unchanged `Complex32`
-writeback. Two opposite-order 1,000-frame Exact `current --threads 20` pairs
-both favored the candidate: combined wall time fell from 79.767 to 78.634
-seconds (1.42% lower, 1.0144x throughput) and process CPU time fell from
-650.047 to 629.078 seconds (3.23%). Peak working set stayed bounded at or below
-393.7 MiB for the candidate.
+The managed AVX2 Hilbert spectrum pass now scales four finite complex values
+at once while preserving the original `Complex * double` fallback for every
+non-finite group. Across four opposite-order 1,000-frame Exact
+`current --threads 20` pairs, total wall time fell from 159.321 to 157.883
+seconds (0.90% lower, 1.0091x throughput) and process CPU time fell from
+1,287.453 to 1,270.438 seconds (1.32%). Candidate working set stayed bounded
+at or below 424.6 MiB; no resident-memory reduction is claimed.
 
-Across 66 final candidate A/B, thread-gate, and matrix runs, every compared
+Across 73 final candidate A/B, thread-gate, intrinsic-gate, and matrix runs, every compared
 compatibility surface matched and all 30 current matrix runs were deterministic.
 Merged Python PR341 was deterministic here; Python v0.4.0 produced 15 distinct
 luma, chroma, JSON, and log hashes in 15 runs, so the strict oracle remains
@@ -173,7 +173,7 @@ The pinned SDK is .NET `11.0.100-preview.6.26359.118`.
 dotnet restore VHSDecodeDotNet.slnx
 dotnet build VHSDecodeDotNet.slnx -c Release --no-restore
 dotnet test --solution VHSDecodeDotNet.slnx -c Release `
-  --no-build --no-restore --minimum-expected-tests 1394
+  --no-build --no-restore --minimum-expected-tests 1396
 ```
 
 Open `VHSDecodeDotNet.slnx` in Visual Studio 2026 to build, debug, and run the

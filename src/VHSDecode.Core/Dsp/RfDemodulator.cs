@@ -1411,10 +1411,7 @@ public sealed class RfDemodulator : IDisposable
         }
 
         double[] hilbertMultiplier = GetVhsHilbertMultiplier(input.Length);
-        for (int i = 0; i < spectrum.Length; i++)
-        {
-            spectrum[i] *= hilbertMultiplier[i];
-        }
+        ApplyHilbertMultiplierInPlace(spectrum, hilbertMultiplier);
     }
 
     private static void CompleteNumpyVhsComplexAnalyticSignal(
@@ -2925,13 +2922,10 @@ public sealed class RfDemodulator : IDisposable
         return max;
     }
 
-    private static void ApplyHilbertMultiplierInPlace(Complex[] spectrum, ReadOnlySpan<double> hilbertMultiplier)
-    {
-        for (int i = 0; i < spectrum.Length; i++)
-        {
-            spectrum[i] *= hilbertMultiplier[i];
-        }
-    }
+    private static void ApplyHilbertMultiplierInPlace(
+        Span<Complex> spectrum,
+        ReadOnlySpan<double> hilbertMultiplier)
+        => NumpyComplexMultiply.ApplyRealInPlace(spectrum, hilbertMultiplier);
 
     private static double[] ResampleLinear(ReadOnlySpan<double> input, int outputLength)
     {
