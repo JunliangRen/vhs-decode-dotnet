@@ -2179,7 +2179,7 @@ dotnet test --solution VHSDecodeDotNet.slnx --no-build
 ```
 
 The current formal solution build completes with zero warnings and errors, and
-the xUnit v3 project exposes 1,382 independently discoverable tests
+the xUnit v3 project exposes 1,385 independently discoverable tests
 to `dotnet test` and Visual Studio Test Explorer. On the
 same Windows machine and fixtures, Release wall-clock measurements for one
 frame were 2.346 s versus 7.193 s for NTSC VHS and 1.651 s versus 5.865 s for
@@ -2258,6 +2258,29 @@ time fell from 644.594 to 640.391 seconds (0.65%). Working-set samples remained
 bounded without progressive growth or OOM. The final strict candidate gate
 comprised 44 baseline/candidate runs, and all 1,382 tests again passed under
 native, AVX2-disabled, and all-intrinsics-disabled execution.
+
+### Split-input VHS Rust phase-difference AVX
+
+The internal caller-buffer real/imaginary VHS Rust FM path processes eight
+finite float32 lanes per AVX block while preserving the existing conversion
+points, polynomial multiply/add order, floor-based tau wrapping, frequency
+scaling, and float-to-double output. A block containing any non-finite lane
+uses the scalar fallback, and four-lane/scalar tails remain in place. The
+interleaved `Complex` path stays four-wide because its eight-lane candidate
+regressed Exact `current --threads 20` wall time by 6.83% despite lower CPU
+time. JIT disassembly of the adopted path contained separate multiply and add
+instructions and no FMA.
+
+Two opposite-order 1,000-frame IPP-fast `current --threads 20` pairs reduced
+combined wall time from 71.280 to 70.645 seconds (0.89%, 1.0090x throughput),
+CPU time from 416.906 to 415.891 seconds (0.24%), and allocation from 1.326 to
+1.319 GiB. Maximum sampled working set was 383.5 MiB versus 384.6 MiB on main,
+with no progressive first-to-final-third growth. Twenty-four Exact/IPP-fast
+real-RF gates covered v0.4.0/current at zero, default-five, and 20 workers;
+every captured luma, chroma, raw JSON, stdout, normalized stderr/log, and
+ordered `fileLoc` surface matched. Thirteen focused tests passed with native
+hardware, AVX2 disabled, and all hardware intrinsics disabled; the complete
+1,385-test suite and zero-warning Release build passed.
 
 ### Decoder-owned PAL chroma upconversion
 

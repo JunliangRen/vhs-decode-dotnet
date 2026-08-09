@@ -13,6 +13,12 @@ public static class PortedMath
     private static readonly Vector128<float> VhsRustMinPositiveNormal = Vector128.Create(1.17549435E-38f);
     private static readonly Vector128<float> VhsRustMaximumFinite = Vector128.Create(float.MaxValue);
     private static readonly Vector128<float> VhsRustTau = Vector128.Create(MathF.Tau);
+    private static readonly Vector256<float> VhsRustAbsoluteValueMask256 =
+        Vector256.Create(BitConverter.UInt32BitsToSingle(0x7FFFFFFFU));
+    private static readonly Vector256<float> VhsRustSignMask256 = Vector256.Create(-0.0f);
+    private static readonly Vector256<float> VhsRustMinPositiveNormal256 = Vector256.Create(1.17549435E-38f);
+    private static readonly Vector256<float> VhsRustMaximumFinite256 = Vector256.Create(float.MaxValue);
+    private static readonly Vector256<float> VhsRustTau256 = Vector256.Create(MathF.Tau);
 
     public static double[] ComplexAngle(ReadOnlySpan<Complex> input)
     {
@@ -125,6 +131,37 @@ public static class PortedMath
             fixed (double* outputPointer = output)
             {
                 float* angles = stackalloc float[4];
+                // Wider AVX helps split workspaces; it regresses interleaved Complex at high worker counts.
+                if (Sse41.IsSupported)
+                {
+                    int avxEnd = real.Length - ((real.Length - i) % 8);
+                    for (; i < avxEnd; i += 8)
+                    {
+                        if (TryVhsRustAtan2Approximation8(
+                            realPointer + i,
+                            imaginaryPointer + i,
+                            out Vector256<float> currentAngles))
+                        {
+                            previous = StoreVhsRustFrequencyDifferences8(
+                                currentAngles,
+                                previous,
+                                frequency,
+                                outputPointer + i);
+                        }
+                        else
+                        {
+                            for (int lane = 0; lane < 8; lane++)
+                            {
+                                float current = VhsRustAtan2Approximation(
+                                    (float)imaginaryPointer[i + lane],
+                                    (float)realPointer[i + lane]);
+                                outputPointer[i + lane] = VhsRustFrequencyDifference(current, previous, frequency);
+                                previous = current;
+                            }
+                        }
+                    }
+                }
+
                 int vectorizedEnd = real.Length - ((real.Length - i) % 4);
                 for (; i < vectorizedEnd; i += 4)
                 {
@@ -532,6 +569,128 @@ public static class PortedMath
         return current.GetElement(3);
     }
 
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private static unsafe float StoreVhsRustFrequencyDifferences8(
+        Vector256<float> current,
+        float previous,
+        float frequency,
+        double* output)
+    {
+        Vector128<float> currentLower = current.GetLower();
+        Vector128<float> previousLower = Sse2.ShiftLeftLogical128BitLane(currentLower.AsByte(), 4).AsSingle();
+        previousLower = Sse.MoveScalar(previousLower, Vector128.CreateScalar(previous));
+
+        Vector128<float> currentUpper = current.GetUpper();
+        Vector128<float> previousUpper = Sse2.ShiftLeftLogical128BitLane(currentUpper.AsByte(), 4).AsSingle();
+        previousUpper = Sse.MoveScalar(previousUpper, Vector128.CreateScalar(currentLower.GetElement(3)));
+
+        Vector256<float> previousAngles = Vector256.Create(previousLower, previousUpper);
+        Vector256<float> difference = Avx.Subtract(current, previousAngles);
+        Vector256<float> periods = Avx.RoundToNegativeInfinity(Avx.Divide(difference, VhsRustTau256));
+        difference = Avx.Subtract(difference, Avx.Multiply(periods, VhsRustTau256));
+        Vector256<float> frequencies = Avx.Divide(
+            Avx.Multiply(difference, Vector256.Create(frequency)),
+            VhsRustTau256);
+        Avx.Store(output, Avx.ConvertToVector256Double(frequencies.GetLower()));
+        Avx.Store(output + 4, Avx.ConvertToVector256Double(frequencies.GetUpper()));
+        return currentUpper.GetElement(3);
+    }
+
+    private static unsafe bool TryVhsRustAtan2Approximation8(
+        double* real,
+        double* imaginary,
+        out Vector256<float> result)
+    {
+        Vector256<float> x = Vector256.Create(
+            Avx.ConvertToVector128Single(Avx.LoadVector256(real)),
+            Avx.ConvertToVector128Single(Avx.LoadVector256(real + 4)));
+        Vector256<float> y = Vector256.Create(
+            Avx.ConvertToVector128Single(Avx.LoadVector256(imaginary)),
+            Avx.ConvertToVector128Single(Avx.LoadVector256(imaginary + 4)));
+        return TryVhsRustAtan2Approximation8(x, y, out result);
+    }
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private static bool TryVhsRustAtan2Approximation8(
+        Vector256<float> x,
+        Vector256<float> y,
+        out Vector256<float> result)
+    {
+        Vector256<float> absoluteX = Avx.And(x, VhsRustAbsoluteValueMask256);
+        Vector256<float> absoluteY = Avx.And(y, VhsRustAbsoluteValueMask256);
+        Vector256<float> finite = Avx.And(
+            Avx.Compare(
+                absoluteX,
+                VhsRustMaximumFinite256,
+                FloatComparisonMode.OrderedLessThanOrEqualNonSignaling),
+            Avx.Compare(
+                absoluteY,
+                VhsRustMaximumFinite256,
+                FloatComparisonMode.OrderedLessThanOrEqualNonSignaling));
+        if (Avx.MoveMask(finite) != 0xFF)
+        {
+            result = default;
+            return false;
+        }
+
+        Vector256<float> signedMinimum = Avx.Or(
+            Avx.And(x, VhsRustSignMask256),
+            VhsRustMinPositiveNormal256);
+        x = Avx.Add(x, signedMinimum);
+        absoluteX = Avx.And(x, VhsRustAbsoluteValueMask256);
+        Vector256<float> swap = Avx.Compare(
+            absoluteX,
+            absoluteY,
+            FloatComparisonMode.OrderedLessThanNonSignaling);
+        Vector256<float> ratio = Avx.Divide(
+            Select(swap, x, y),
+            Select(swap, y, x));
+        Vector256<float> square = Avx.Multiply(ratio, ratio);
+        Vector256<float> polynomial = Avx.Add(
+            Vector256.Create(0.05265332f),
+            Avx.Multiply(square, Vector256.Create(-0.01172120f)));
+        polynomial = Avx.Add(
+            Vector256.Create(-0.11643287f),
+            Avx.Multiply(square, polynomial));
+        polynomial = Avx.Add(
+            Vector256.Create(0.19354346f),
+            Avx.Multiply(square, polynomial));
+        polynomial = Avx.Add(
+            Vector256.Create(-0.33262347f),
+            Avx.Multiply(square, polynomial));
+        result = Avx.Multiply(
+            ratio,
+            Avx.Add(
+                Vector256.Create(0.99997726f),
+                Avx.Multiply(square, polynomial)));
+
+        Vector256<float> zero = Vector256<float>.Zero;
+        Vector256<float> ratioNonNegative = Avx.Compare(
+            zero,
+            ratio,
+            FloatComparisonMode.OrderedLessThanOrEqualNonSignaling);
+        Vector256<float> halfPi = Select(
+            ratioNonNegative,
+            Vector256.Create(MathF.PI / 2.0f),
+            Vector256.Create(-MathF.PI / 2.0f));
+        result = Select(swap, Avx.Subtract(halfPi, result), result);
+
+        Vector256<float> xNonNegative = Avx.Compare(
+            zero,
+            x,
+            FloatComparisonMode.OrderedLessThanOrEqualNonSignaling);
+        Vector256<float> yNonNegative = Avx.Compare(
+            zero,
+            y,
+            FloatComparisonMode.OrderedLessThanOrEqualNonSignaling);
+        Vector256<float> quadrantOffset = Select(
+            yNonNegative,
+            Vector256.Create(MathF.PI),
+            Vector256.Create(-MathF.PI));
+        result = Select(xNonNegative, result, Avx.Add(result, quadrantOffset));
+        return true;
+    }
+
     private static unsafe bool TryVhsRustAtan2Approximation4(
         double* input,
         out Vector128<float> result)
@@ -621,4 +780,10 @@ public static class PortedMath
         Vector128<float> whenTrue,
         Vector128<float> whenFalse)
         => Sse.Or(Sse.And(mask, whenTrue), Sse.AndNot(mask, whenFalse));
+
+    private static Vector256<float> Select(
+        Vector256<float> mask,
+        Vector256<float> whenTrue,
+        Vector256<float> whenFalse)
+        => Avx.Or(Avx.And(mask, whenTrue), Avx.AndNot(mask, whenFalse));
 }
