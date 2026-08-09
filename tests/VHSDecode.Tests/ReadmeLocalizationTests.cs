@@ -14,7 +14,7 @@ public sealed partial class ReadmeLocalizationTests
 
     private const string FullCiTestCommand =
         "run: dotnet test --solution VHSDecodeDotNet.slnx --configuration Release " +
-        "--no-build --no-restore --minimum-expected-tests 1382";
+        "--no-build --no-restore --minimum-expected-tests 1385";
 
     private static readonly string[] OverviewReadmeFiles =
     [
@@ -133,7 +133,7 @@ public sealed partial class ReadmeLocalizationTests
         [
             "43155200da87c0d49eb37d8ec09b1372075ee8e4",
             "11.0.100-preview.6.26359.118",
-            "**1,382**",
+            "**1,385**",
             "--compat-version",
             "current",
             "--dsp-backend",
@@ -246,7 +246,7 @@ public sealed partial class ReadmeLocalizationTests
             "13.877",
             "22.24%",
             "24.64%",
-            "**1,382**",
+            "**1,385**",
             "416.746",
             "336.922",
             "19.16%",
