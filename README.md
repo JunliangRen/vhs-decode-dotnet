@@ -100,7 +100,7 @@ for compatibility-sensitive work.
 This is a startup-inclusive 160-frame snapshot on one fixed private local
 40 MHz PAL VHS `.ldf` fixture; the filename is intentionally not published.
 Exact `current` and IPP-fast `current` were refreshed in three reordered Release
-passes on this candidate, based on merged main `ecf32e4`. The two unchanged
+passes on this candidate, based on merged main `1d5f5fd`. The two unchanged
 v0.4.0 .NET columns and 30 Python reference runs are reused from the previous
 direct refresh on the same host and fixture. Compatibility is evaluated
 separately from speed.
@@ -108,13 +108,13 @@ separately from speed.
 <!-- LATEST_PERFORMANCE_BEGIN -->
 | CLI mode (workers) | Python v0.4.0 | Python PR341 | Exact + v0.4.0 | Exact + current | IPP-fast + v0.4.0 | IPP-fast + current |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| default (5) | 49.845 s | 51.191 s | 13.095 s / 3.806x | 13.352 s / 3.834x | 11.613 s / 4.292x | 10.263 s / 4.988x |
-| `--threads 1` | 55.763 s | 55.815 s | 35.334 s / 1.578x | 42.759 s / 1.305x | 26.086 s / 2.138x | 29.522 s / 1.891x |
-| `--threads 5` | 50.124 s | 51.398 s | 13.560 s / 3.697x | 13.139 s / 3.912x | 11.911 s / 4.208x | 10.288 s / 4.996x |
-| `--threads 10` | 48.710 s | 50.833 s | 10.815 s / 4.504x | 10.181 s / 4.993x | 9.890 s / 4.925x | 8.168 s / 6.224x |
-| `--threads 20` | 48.963 s | 50.195 s | 8.547 s / 5.729x | 9.025 s / 5.562x | 8.215 s / 5.960x | 6.765 s / 7.420x |
+| default (5) | 49.845 s | 51.191 s | 13.095 s / 3.806x | 12.871 s / 3.977x | 11.613 s / 4.292x | 10.023 s / 5.107x |
+| `--threads 1` | 55.763 s | 55.815 s | 35.334 s / 1.578x | 40.319 s / 1.384x | 26.086 s / 2.138x | 27.925 s / 1.999x |
+| `--threads 5` | 50.124 s | 51.398 s | 13.560 s / 3.697x | 12.490 s / 4.115x | 11.911 s / 4.208x | 10.050 s / 5.114x |
+| `--threads 10` | 48.710 s | 50.833 s | 10.815 s / 4.504x | 10.091 s / 5.037x | 9.890 s / 4.925x | 8.153 s / 6.235x |
+| `--threads 20` | 48.963 s | 50.195 s | 8.547 s / 5.729x | 7.590 s / 6.613x | 8.215 s / 5.960x | 6.643 s / 7.556x |
 <!-- LATEST_PERFORMANCE_END -->
-<!-- LATEST_PERFORMANCE_RUNS: dotnet-current-refresh=30 reused-dotnet-v040-runs=30 reused-python-runs=30 repeats=3 precise-edge-ab=12 precise-edge-thread-gates=14 precise-edge-long=4 precise-edge-matrix-runs=30 python-matrix-runs=30 python-v040-runs=15 python-v040-hashes=15 python-v040-nondefault-runs=12 python-v040-nondefault-hashes=12 -->
+<!-- LATEST_PERFORMANCE_RUNS: dotnet-current-refresh=30 reused-dotnet-v040-runs=30 reused-python-runs=30 repeats=3 complex32-no-copy-short=8 complex32-no-copy-long=4 complex32-no-copy-thread-gates=24 complex32-no-copy-matrix-runs=30 python-matrix-runs=30 python-v040-runs=15 python-v040-hashes=15 python-v040-nondefault-runs=12 python-v040-nondefault-hashes=12 -->
 
 Each .NET cell shows median wall time and speedup versus its profile-matched
 Python column. The default is **5 workers**; three-run ranges are in the
@@ -122,14 +122,15 @@ Python column. The default is **5 workers**; three-run ranges are in the
 40-frame table amplified startup cost, especially for Python, so a lower
 speedup in this longer table is not a decoder regression.
 
-The managed current VHS precise threshold scan now classifies four adjacent
-comparisons per AVX step, then commits crossings in the original scalar order.
-Two opposite-order 1,000-frame IPP-fast `current --threads 20` pairs reduced
-median wall time from 36.341 to 35.822 seconds (1.43% lower, 1.0145x throughput)
-and CPU time from 222.078 to 220.789 seconds (0.58% lower); active cores moved
-from 6.11 to 6.16 without another worker or retained sample buffer.
+The float32 mixed-radix FFT plan now returns the worker-local array containing
+the final pass instead of copying it back before the unchanged `Complex32`
+writeback. Two opposite-order 1,000-frame Exact `current --threads 20` pairs
+both favored the candidate: combined wall time fell from 79.767 to 78.634
+seconds (1.42% lower, 1.0144x throughput) and process CPU time fell from
+650.047 to 629.078 seconds (3.23%). Peak working set stayed bounded at or below
+393.7 MiB for the candidate.
 
-Across 56 final candidate A/B, thread-gate, and matrix runs, every compared
+Across 66 final candidate A/B, thread-gate, and matrix runs, every compared
 compatibility surface matched and all 30 current matrix runs were deterministic.
 Merged Python PR341 was deterministic here; Python v0.4.0 produced 15 distinct
 luma, chroma, JSON, and log hashes in 15 runs, so the strict oracle remains

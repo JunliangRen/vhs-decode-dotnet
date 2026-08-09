@@ -394,30 +394,30 @@ speedup、wall-time reduction の順です。
 <!-- LATEST_PERFORMANCE_BEGIN -->
 | CLI mode（workers） | Python v0.4.0 | Python PR341 | Exact + v0.4.0 | Exact + current | IPP-fast + v0.4.0 | IPP-fast + current |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| default（5） | 49.845 s | 51.191 s | 13.095 s / 3.806x / 73.73% | 13.352 s / 3.834x / 73.92% | 11.613 s / 4.292x / 76.70% | 10.263 s / 4.988x / 79.95% |
-| `--threads 1` | 55.763 s | 55.815 s | 35.334 s / 1.578x / 36.64% | 42.759 s / 1.305x / 23.39% | 26.086 s / 2.138x / 53.22% | 29.522 s / 1.891x / 47.11% |
-| `--threads 5` | 50.124 s | 51.398 s | 13.560 s / 3.697x / 72.95% | 13.139 s / 3.912x / 74.44% | 11.911 s / 4.208x / 76.24% | 10.288 s / 4.996x / 79.98% |
-| `--threads 10` | 48.710 s | 50.833 s | 10.815 s / 4.504x / 77.80% | 10.181 s / 4.993x / 79.97% | 9.890 s / 4.925x / 79.70% | 8.168 s / 6.224x / 83.93% |
-| `--threads 20` | 48.963 s | 50.195 s | 8.547 s / 5.729x / 82.54% | 9.025 s / 5.562x / 82.02% | 8.215 s / 5.960x / 83.22% | 6.765 s / 7.420x / 86.52% |
+| default（5） | 49.845 s | 51.191 s | 13.095 s / 3.806x / 73.73% | 12.871 s / 3.977x / 74.86% | 11.613 s / 4.292x / 76.70% | 10.023 s / 5.107x / 80.42% |
+| `--threads 1` | 55.763 s | 55.815 s | 35.334 s / 1.578x / 36.64% | 40.319 s / 1.384x / 27.76% | 26.086 s / 2.138x / 53.22% | 27.925 s / 1.999x / 49.97% |
+| `--threads 5` | 50.124 s | 51.398 s | 13.560 s / 3.697x / 72.95% | 12.490 s / 4.115x / 75.70% | 11.911 s / 4.208x / 76.24% | 10.050 s / 5.114x / 80.45% |
+| `--threads 10` | 48.710 s | 50.833 s | 10.815 s / 4.504x / 77.80% | 10.091 s / 5.037x / 80.15% | 9.890 s / 4.925x / 79.70% | 8.153 s / 6.235x / 83.96% |
+| `--threads 20` | 48.963 s | 50.195 s | 8.547 s / 5.729x / 82.54% | 7.590 s / 6.613x / 84.88% | 8.215 s / 5.960x / 83.22% | 6.643 s / 7.556x / 86.76% |
 <!-- LATEST_PERFORMANCE_END -->
-<!-- LATEST_PERFORMANCE_RUNS: dotnet-current-refresh=30 reused-dotnet-v040-runs=30 reused-python-runs=30 repeats=3 precise-edge-ab=12 precise-edge-thread-gates=14 precise-edge-long=4 precise-edge-matrix-runs=30 python-matrix-runs=30 python-v040-runs=15 python-v040-hashes=15 python-v040-nondefault-runs=12 python-v040-nondefault-hashes=12 -->
+<!-- LATEST_PERFORMANCE_RUNS: dotnet-current-refresh=30 reused-dotnet-v040-runs=30 reused-python-runs=30 repeats=3 complex32-no-copy-short=8 complex32-no-copy-long=4 complex32-no-copy-thread-gates=24 complex32-no-copy-matrix-runs=30 python-matrix-runs=30 python-v040-runs=15 python-v040-hashes=15 python-v040-nondefault-runs=12 python-v040-nondefault-hashes=12 -->
 
 3-run wall-time range は次のとおりです。
 
 | CLI mode | Python v0.4.0 | Python PR341 | Exact + v0.4.0 | Exact + current | IPP-fast + v0.4.0 | IPP-fast + current |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| default（5） | 49.112-50.297 s | 51.184-51.447 s | 12.995-13.265 s | 13.300-13.447 s | 11.415-11.744 s | 10.144-10.476 s |
-| `--threads 1` | 55.575-56.091 s | 55.607-56.037 s | 34.928-35.815 s | 41.627-42.864 s | 25.156-26.281 s | 29.114-29.579 s |
-| `--threads 5` | 49.225-50.180 s | 50.995-51.436 s | 13.253-14.176 s | 13.128-13.518 s | 11.665-12.029 s | 10.175-10.311 s |
-| `--threads 10` | 48.167-48.785 s | 49.780-51.154 s | 10.766-11.193 s | 10.006-11.155 s | 9.732-10.217 s | 8.038-8.318 s |
-| `--threads 20` | 48.803-49.278 s | 50.170-50.672 s | 8.522-8.694 s | 7.906-9.046 s | 8.162-8.281 s | 6.580-6.867 s |
+| default（5） | 49.112-50.297 s | 51.184-51.447 s | 12.995-13.265 s | 12.651-13.085 s | 11.415-11.744 s | 9.956-10.200 s |
+| `--threads 1` | 55.575-56.091 s | 55.607-56.037 s | 34.928-35.815 s | 40.080-40.455 s | 25.156-26.281 s | 27.787-28.071 s |
+| `--threads 5` | 49.225-50.180 s | 50.995-51.436 s | 13.253-14.176 s | 12.462-12.977 s | 11.665-12.029 s | 9.991-10.431 s |
+| `--threads 10` | 48.167-48.785 s | 49.780-51.154 s | 10.766-11.193 s | 9.975-10.672 s | 9.732-10.217 s | 7.917-8.225 s |
+| `--threads 20` | 48.803-49.278 s | 50.170-50.672 s | 8.522-8.694 s | 7.343-7.611 s | 8.162-8.281 s | 6.552-6.663 s |
 
 2026-08-09 に current profile の .NET Release run 30 回を更新しました。Exact と
 IPP-fast の 5 worker setting を、順序を入れ替えた 3 pass で実行しています。変更のない
 v0.4.0 .NET 列と 30 回の Python reference run は、同じ host と fixture で行った直前の
-direct refresh を再利用しています。candidate は merged main `ecf32e4` を基にし、
+direct refresh を再利用しています。candidate は merged main `1d5f5fd` を基にし、
 single-file executable の SHA-256 は
-`1FBD9ABB3BE22A0F90E3D7154CEDDE9C895633D4FCF197E1A70D13E29F13142E` です。
+`380D1842C949CC6D3DF240EF5F56E5258984F4C3FDA3F4B601E048E6A2AFD9A5` です。
 host は Intel Core Ultra 7 265K（20 logical processor）、Windows 11 build 26220、
 .NET SDK/runtime `11.0.100-preview.6.26359.118` です。raw run directory は private
 fixture path を含むため local にのみ保持します。これは local measurement の報告で、
@@ -425,8 +425,8 @@ public independently reproducible benchmark corpus ではありません。
 
 直前の 40-frame table は fixed startup cost、特に Python の startup cost を過大に反映
 していました。例えば default IPP-fast `current` は window を 160 frames に広げると
-6.351x から 4.988x になりました。Python は 19.791 から 51.191 秒への増加に対し、
-.NET は 3.116 から 10.263 秒へ増えています。これは startup cost の希釈であり、
+6.351x から 5.107x になりました。Python は 19.791 から 51.191 秒への増加に対し、
+.NET は 3.116 から 10.023 秒へ増えています。これは startup cost の希釈であり、
 candidate の regression ではありません。以前の NTSC Betamax HiFi table は別の private
 fixture を使うため比較できません。今後は 160-frame、3-pass method を維持し、因果的な
 性能判断には引き続き matched long A/B を使います。
@@ -2694,6 +2694,38 @@ stderr/log、すべての ordered `fileLoc` が一致し、progressive memory gr
 ありませんでした。ただし 2 pair だけでは memory reduction を主張しません。更新した
 30-run current matrix でも、各 backend と worker setting の 7 compatibility surface は
 それぞれ 1 hash のみでした。
+
+### Complex32 final workspace の直接 return
+
+float32 mixed-radix packet plan は、radix pass ごとに 2 個の worker-local `Value[]` array
+を交互に使います。最終 pass が scratch に入る場合、`Execute` はその array を直接返し、
+従来と同じ `Complex32` writeback の前に行っていた全体 copy を省きます。input load、
+factor/packet order、root、twiddle、すべての arithmetic expression、float32 conversion
+point、output ownership、thread-static workspace bound は変更していません。1,000-frame
+CPU trace では、削除した `Plan.Execute` memmove に 6,432 samples、全 sample の約 1.0%
+が帰属していました。
+
+mixed-radix xUnit v3 の 53 cases は通常実行と all hardware intrinsics disabled の両方で
+pass しました。SciPy fixture hash、奇数/偶数 radix count、serial/parallel transform、
+owned buffer、repeatable warm workspace、239,580-point field transform を含みます。順序を
+反転した 200-transform microbenchmark 8 run は 1 output hash を維持しましたが、schedule
+noise が大きいため throughput-neutral と分類し、end-to-end claim には使いません。
+
+interleaved 160-frame Exact `current --threads 20` pair 4 組は、luma、chroma、raw JSON、
+stdout、normalized stderr/log、すべての ordered `fileLoc` が一致しました。勝敗は 2 対 2
+でしたが、candidate wall median は 1.93% lower、CPU median は 12.85% lower でした。
+最終判定の opposite-order 1,000-frame pair 2 組は両方 candidate が勝ち、combined wall
+time は 79.767 から 78.634 秒へ 1.42% 短縮（1.0144x throughput）、combined process CPU
+time は 650.047 から 629.078 秒へ 3.23% 減少しました。candidate peak working set は
+387.8-393.7 MiB、main は 391.8-395.3 MiB で、progressive growth や OOM はありません。
+これは bounded-memory evidence であり、resident-memory reduction claim ではありません。
+
+short gate 24 run は Exact/IPP-fast、v0.4.0/`current`、explicit zero/default-five/20 workers
+を網羅し、baseline/candidate と cross-thread の artifact/log surface がすべて一致しました。
+更新した current matrix 30 run は default、1、5、10、20 workers を順序を入れ替えた
+3 pass で実行し、backend ごとに 1 deterministic hash set のみでした。変更のない Python
+と .NET v0.4.0 の列は以前の same-host measurement を維持し、上の 2 current 列はこの
+candidate の single-file executable を使います。
 
 </details>
 

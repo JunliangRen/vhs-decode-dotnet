@@ -8,8 +8,9 @@ public sealed partial class ReadmeLocalizationTests
     private const string LatestPerformanceRunsMarker =
         "<!-- LATEST_PERFORMANCE_RUNS: dotnet-current-refresh=30 " +
         "reused-dotnet-v040-runs=30 reused-python-runs=30 repeats=3 " +
-        "precise-edge-ab=12 precise-edge-thread-gates=14 precise-edge-long=4 " +
-        "precise-edge-matrix-runs=30 python-matrix-runs=30 python-v040-runs=15 " +
+        "complex32-no-copy-short=8 complex32-no-copy-long=4 " +
+        "complex32-no-copy-thread-gates=24 complex32-no-copy-matrix-runs=30 " +
+        "python-matrix-runs=30 python-v040-runs=15 " +
         "python-v040-hashes=15 " +
         "python-v040-nondefault-runs=12 python-v040-nondefault-hashes=12 -->";
 
@@ -115,19 +116,19 @@ public sealed partial class ReadmeLocalizationTests
         Assert.Equal(3, expectedDetailedCommands.Length);
         string[] expectedOverviewPerformanceRows =
         [
-            "49.845 s | 51.191 s | 13.095 s | 3.806x | 13.352 s | 3.834x | 11.613 s | 4.292x | 10.263 s | 4.988x",
-            "55.763 s | 55.815 s | 35.334 s | 1.578x | 42.759 s | 1.305x | 26.086 s | 2.138x | 29.522 s | 1.891x",
-            "50.124 s | 51.398 s | 13.560 s | 3.697x | 13.139 s | 3.912x | 11.911 s | 4.208x | 10.288 s | 4.996x",
-            "48.710 s | 50.833 s | 10.815 s | 4.504x | 10.181 s | 4.993x | 9.890 s | 4.925x | 8.168 s | 6.224x",
-            "48.963 s | 50.195 s | 8.547 s | 5.729x | 9.025 s | 5.562x | 8.215 s | 5.960x | 6.765 s | 7.420x"
+            "49.845 s | 51.191 s | 13.095 s | 3.806x | 12.871 s | 3.977x | 11.613 s | 4.292x | 10.023 s | 5.107x",
+            "55.763 s | 55.815 s | 35.334 s | 1.578x | 40.319 s | 1.384x | 26.086 s | 2.138x | 27.925 s | 1.999x",
+            "50.124 s | 51.398 s | 13.560 s | 3.697x | 12.490 s | 4.115x | 11.911 s | 4.208x | 10.050 s | 5.114x",
+            "48.710 s | 50.833 s | 10.815 s | 4.504x | 10.091 s | 5.037x | 9.890 s | 4.925x | 8.153 s | 6.235x",
+            "48.963 s | 50.195 s | 8.547 s | 5.729x | 7.590 s | 6.613x | 8.215 s | 5.960x | 6.643 s | 7.556x"
         ];
         string[] expectedDetailedPerformanceRows =
         [
-            "49.845 s | 51.191 s | 13.095 s | 3.806x | 73.73% | 13.352 s | 3.834x | 73.92% | 11.613 s | 4.292x | 76.70% | 10.263 s | 4.988x | 79.95%",
-            "55.763 s | 55.815 s | 35.334 s | 1.578x | 36.64% | 42.759 s | 1.305x | 23.39% | 26.086 s | 2.138x | 53.22% | 29.522 s | 1.891x | 47.11%",
-            "50.124 s | 51.398 s | 13.560 s | 3.697x | 72.95% | 13.139 s | 3.912x | 74.44% | 11.911 s | 4.208x | 76.24% | 10.288 s | 4.996x | 79.98%",
-            "48.710 s | 50.833 s | 10.815 s | 4.504x | 77.80% | 10.181 s | 4.993x | 79.97% | 9.890 s | 4.925x | 79.70% | 8.168 s | 6.224x | 83.93%",
-            "48.963 s | 50.195 s | 8.547 s | 5.729x | 82.54% | 9.025 s | 5.562x | 82.02% | 8.215 s | 5.960x | 83.22% | 6.765 s | 7.420x | 86.52%"
+            "49.845 s | 51.191 s | 13.095 s | 3.806x | 73.73% | 12.871 s | 3.977x | 74.86% | 11.613 s | 4.292x | 76.70% | 10.023 s | 5.107x | 80.42%",
+            "55.763 s | 55.815 s | 35.334 s | 1.578x | 36.64% | 40.319 s | 1.384x | 27.76% | 26.086 s | 2.138x | 53.22% | 27.925 s | 1.999x | 49.97%",
+            "50.124 s | 51.398 s | 13.560 s | 3.697x | 72.95% | 12.490 s | 4.115x | 75.70% | 11.911 s | 4.208x | 76.24% | 10.050 s | 5.114x | 80.45%",
+            "48.710 s | 50.833 s | 10.815 s | 4.504x | 77.80% | 10.091 s | 5.037x | 80.15% | 9.890 s | 4.925x | 79.70% | 8.153 s | 6.235x | 83.96%",
+            "48.963 s | 50.195 s | 8.547 s | 5.729x | 82.54% | 7.590 s | 6.613x | 84.88% | 8.215 s | 5.960x | 83.22% | 6.643 s | 7.556x | 86.76%"
         ];
 
         string[] overviewFacts =
@@ -143,22 +144,21 @@ public sealed partial class ReadmeLocalizationTests
             "Exact + current",
             "IPP-fast + v0.4.0",
             "IPP-fast + current",
-            "ecf32e4",
+            "1d5f5fd",
             "49.845 s",
             "51.191 s",
             "13.095 s",
-            "13.352 s",
-            "5.562x",
-            "7.420x",
-            "36.341",
-            "35.822",
-            "1.43%",
-            "1.0145x",
-            "222.078",
-            "220.789",
-            "0.58%",
-            "6.11",
-            "6.16",
+            "12.871 s",
+            "6.613x",
+            "7.556x",
+            "79.767",
+            "78.634",
+            "1.42%",
+            "1.0144x",
+            "650.047",
+            "629.078",
+            "3.23%",
+            "393.7 MiB",
             "g4315520",
             "--threads 0"
         ];
@@ -181,8 +181,15 @@ public sealed partial class ReadmeLocalizationTests
             "AAAB4B0A884D0F22B361E369A55A2C475DD2D042806043B25EAFB5DF188B7860",
             "845d8d1",
             "7BAC056495F42BF4327F6E9D99AF4168F0FA585319BC9CF9F9D09E84B4A3E632",
-            "ecf32e4",
-            "1FBD9ABB3BE22A0F90E3D7154CEDDE9C895633D4FCF197E1A70D13E29F13142E",
+            "1d5f5fd",
+            "380D1842C949CC6D3DF240EF5F56E5258984F4C3FDA3F4B601E048E6A2AFD9A5",
+            "79.767",
+            "78.634",
+            "1.0144x",
+            "650.047",
+            "629.078",
+            "3.23%",
+            "393.7 MiB",
             "1263.307",
             "1173.588",
             "16.98/16.47",

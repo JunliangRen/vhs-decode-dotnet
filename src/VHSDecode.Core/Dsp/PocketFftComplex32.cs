@@ -640,11 +640,13 @@ internal static class PocketFftComplex32
                 values[i] = new Value(input[i].Real, input[i].Imaginary);
             }
 
-            Execute(values);
+            Value[] transformed = Execute(values);
             var output = new Complex32[_length];
             for (int i = 0; i < output.Length; i++)
             {
-                output[i] = new Complex32(values[i].Real, values[i].Imaginary);
+                output[i] = new Complex32(
+                    transformed[i].Real,
+                    transformed[i].Imaginary);
             }
 
             return output;
@@ -661,12 +663,12 @@ internal static class PocketFftComplex32
                     values[i].Imaginary);
             }
 
-            Execute(planValues);
+            Value[] transformed = Execute(planValues);
             for (int i = 0; i < _length; i++)
             {
                 values[i] = new Complex32(
-                    planValues[i].Real,
-                    planValues[i].Imaginary);
+                    transformed[i].Real,
+                    transformed[i].Imaginary);
             }
         }
 
@@ -704,7 +706,7 @@ internal static class PocketFftComplex32
             return output;
         }
 
-        private void Execute(Value[] data)
+        private Value[] Execute(Value[] data)
         {
             Value[] scratch =
                 EnsureCapacity(ref _planScratch, _length);
@@ -745,10 +747,7 @@ internal static class PocketFftComplex32
                 l1 *= factor.Radix;
             }
 
-            if (!ReferenceEquals(source, data))
-            {
-                Array.Copy(source, data, _length);
-            }
+            return source;
         }
 
         private static void Pass2(

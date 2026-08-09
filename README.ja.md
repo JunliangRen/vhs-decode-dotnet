@@ -96,20 +96,20 @@ CVBS と HiFi は引き続き `ipp-fast` を拒否します。release-compatible
 これは同じ private local 40 MHz PAL VHS `.ldf` fixture を使う、startup cost を含む
 160-frame snapshot です。source filename は公開しません。Exact `current` と IPP-fast
 `current` を、この candidate 上で順序を入れ替えた 3 回の Release pass により更新
-しました。candidate は merged main `ecf32e4` を基にしています。影響を受けない 2 つの
+しました。candidate は merged main `1d5f5fd` を基にしています。影響を受けない 2 つの
 v0.4.0 .NET 列と 30 回の Python reference run は、同じ host と fixture で行った直前の
 direct refresh を再利用しています。互換性と速度は別々に評価します。
 
 <!-- LATEST_PERFORMANCE_BEGIN -->
 | CLI mode（workers） | Python v0.4.0 | Python PR341 | Exact + v0.4.0 | Exact + current | IPP-fast + v0.4.0 | IPP-fast + current |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| default（5） | 49.845 s | 51.191 s | 13.095 s / 3.806x | 13.352 s / 3.834x | 11.613 s / 4.292x | 10.263 s / 4.988x |
-| `--threads 1` | 55.763 s | 55.815 s | 35.334 s / 1.578x | 42.759 s / 1.305x | 26.086 s / 2.138x | 29.522 s / 1.891x |
-| `--threads 5` | 50.124 s | 51.398 s | 13.560 s / 3.697x | 13.139 s / 3.912x | 11.911 s / 4.208x | 10.288 s / 4.996x |
-| `--threads 10` | 48.710 s | 50.833 s | 10.815 s / 4.504x | 10.181 s / 4.993x | 9.890 s / 4.925x | 8.168 s / 6.224x |
-| `--threads 20` | 48.963 s | 50.195 s | 8.547 s / 5.729x | 9.025 s / 5.562x | 8.215 s / 5.960x | 6.765 s / 7.420x |
+| default（5） | 49.845 s | 51.191 s | 13.095 s / 3.806x | 12.871 s / 3.977x | 11.613 s / 4.292x | 10.023 s / 5.107x |
+| `--threads 1` | 55.763 s | 55.815 s | 35.334 s / 1.578x | 40.319 s / 1.384x | 26.086 s / 2.138x | 27.925 s / 1.999x |
+| `--threads 5` | 50.124 s | 51.398 s | 13.560 s / 3.697x | 12.490 s / 4.115x | 11.911 s / 4.208x | 10.050 s / 5.114x |
+| `--threads 10` | 48.710 s | 50.833 s | 10.815 s / 4.504x | 10.091 s / 5.037x | 9.890 s / 4.925x | 8.153 s / 6.235x |
+| `--threads 20` | 48.963 s | 50.195 s | 8.547 s / 5.729x | 7.590 s / 6.613x | 8.215 s / 5.960x | 6.643 s / 7.556x |
 <!-- LATEST_PERFORMANCE_END -->
-<!-- LATEST_PERFORMANCE_RUNS: dotnet-current-refresh=30 reused-dotnet-v040-runs=30 reused-python-runs=30 repeats=3 precise-edge-ab=12 precise-edge-thread-gates=14 precise-edge-long=4 precise-edge-matrix-runs=30 python-matrix-runs=30 python-v040-runs=15 python-v040-hashes=15 python-v040-nondefault-runs=12 python-v040-nondefault-hashes=12 -->
+<!-- LATEST_PERFORMANCE_RUNS: dotnet-current-refresh=30 reused-dotnet-v040-runs=30 reused-python-runs=30 repeats=3 complex32-no-copy-short=8 complex32-no-copy-long=4 complex32-no-copy-thread-gates=24 complex32-no-copy-matrix-runs=30 python-matrix-runs=30 python-v040-runs=15 python-v040-hashes=15 python-v040-nondefault-runs=12 python-v040-nondefault-hashes=12 -->
 
 各 .NET cell は wall-time median と profile が対応する Python 列に対する speedup の
 順で、default は **5 workers** です。3-run range は
@@ -117,14 +117,14 @@ direct refresh を再利用しています。互換性と速度は別々に評�
 40-frame table は、特に Python の startup cost を大きく反映していたため、長い window
 で speedup が低くなっても decoder regression を意味しません。
 
-managed current VHS precise threshold scan は、AVX step ごとに隣接比較 4 組を分類し、
-crossing を元の scalar 順序で commit します。opposite-order の 1,000-frame IPP-fast
-`current --threads 20` pair 2 組では、median wall time が 36.341 から 35.822 秒へ
-1.43% 短縮（1.0145x throughput）、median CPU time が 222.078 から 220.789 秒へ
-0.58% 減少しました。active core は 6.11 から 6.16 となり、worker や retained sample
-buffer は追加していません。
+float32 mixed-radix FFT plan は、最終 pass を保持する worker-local array を直接返し、
+従来と同じ `Complex32` writeback の前に行っていた全体 copy を省きます。順序を反転した
+1,000-frame Exact `current --threads 20` pair 2 組はいずれも candidate が勝ち、合計
+wall time は 79.767 から 78.634 秒へ 1.42% 短縮（1.0144x throughput）、process CPU
+time は 650.047 から 629.078 秒へ 3.23% 減少しました。candidate の peak working set
+は最大 393.7 MiB の bounded range に収まりました。
 
-最終 56 回の candidate A/B、thread gate、matrix run では、比較した compatibility
+最終 66 回の candidate A/B、thread gate、matrix run では、比較した compatibility
 surface がすべて一致し、30 回の current matrix run も deterministic でした。merged
 Python PR341 も deterministic でしたが、Python v0.4.0 は 15 run で 15 種類の luma、
 chroma、JSON、log hash を生成したため、strict oracle は引き続き Python v0.4.0

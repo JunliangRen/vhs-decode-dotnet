@@ -1918,6 +1918,22 @@ possible capture has already been proven byte-for-byte identical.
   Long-pair wall time fell 5.22%, counter allocation 9.17%, GC pause 45.49%,
   and Gen0 collections 79.5%; post-startup intervals stayed between 6.500 and
   6.860 s without progressive slowdown
+- complex PocketFFT plans now return whichever worker-local `Value[]` contains
+  the final radix pass instead of copying that buffer back into the input
+  workspace before the existing `Complex32` writeback. Radices, twiddles,
+  arithmetic order, data types, normalization, ownership, and workspace bounds
+  are unchanged. All 53 focused SciPy/ownership/large-transform xUnit v3 cases
+  passed both normally and with hardware intrinsics disabled. Four interleaved
+  160-frame Exact/current 20-worker pairs, 24 v0.4.0/current
+  serial/default/20-worker Exact and IPP-fast gates, and a reordered 30-run
+  current worker matrix matched luma, chroma, raw JSON, stdout, normalized
+  stderr/logs, and every ordered `fileLoc`. Two opposite-order 1,000-frame
+  Exact/current 20-worker pairs matched all 2,000-field surfaces while combined
+  wall time fell from 79.767 to 78.634 s (1.42%), combined process CPU time fell
+  from 650.047 to 629.078 s (3.23%), and peak working set stayed within
+  387.8-393.7 MiB without progressive growth. The isolated 239,580-point
+  microbenchmark was scheduling-noisy and is therefore treated as
+  throughput-neutral rather than independent speed evidence
 - compact complex VHS demodulation now reuses the leased worker's exact-length
   `RawEnvelope` for the non-escaping raw FM result and `Real` for the optional
   diff-demod repair result. Retained diagnostic arrays remain independently
