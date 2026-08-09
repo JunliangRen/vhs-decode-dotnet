@@ -33,7 +33,7 @@
 - VHS 家族包括 VHS/S-VHS、Betamax、Video8/Hi8、U-matic、Type C、EIAJ
   以及上游支持的 PAL/NTSC 变体。
 - TBC 工具、双击启动的用户 GUI 和开发者绘图窗口明确不在范围内。
-- Visual Studio 2026 `.slnx` 包含 **1,376** 项标准 xUnit v3 测试；测试可在
+- Visual Studio 2026 `.slnx` 包含 **1,382** 项标准 xUnit v3 测试；测试可在
   Test Explorer 中查看，也可用 `dotnet test` 运行。
 
 <!-- SECTION: start -->
@@ -91,38 +91,38 @@ CVBS 和 HiFi 仍会拒绝 `ipp-fast`；需要 release 兼容行为时应使用 
 
 下表固定使用同一份私有本地 40 MHz PAL VHS `.ldf` 夹具和相同的 40 帧窗口，
 不会公开源文件名。每个单元格都是本候选三次重新排序的 Release 测量中位数，
-候选基于已合并的 main `63251d8`；没有沿用其他夹具或构建的数据。兼容性结论与
+候选基于已合并的 main `ae3722d`；没有沿用其他夹具或构建的数据。兼容性结论与
 速度数据分开判断。
 
 <!-- LATEST_PERFORMANCE_BEGIN -->
 | CLI 模式（workers） | Python v0.4.0 | Python PR341 | Exact + v0.4.0 | Exact + current | IPP-fast + v0.4.0 | IPP-fast + current |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| 默认（5） | 17.680 s | 20.173 s | 4.096 s / 4.316x | 4.618 s / 4.369x | 3.604 s / 4.906x | 3.392 s / 5.948x |
-| `--threads 1` | 18.995 s | 21.062 s | 11.613 s / 1.636x | 13.183 s / 1.598x | 8.407 s / 2.259x | 9.340 s / 2.255x |
-| `--threads 5` | 17.599 s | 19.493 s | 4.307 s / 4.086x | 4.805 s / 4.057x | 3.525 s / 4.993x | 3.203 s / 6.087x |
-| `--threads 10` | 17.182 s | 19.727 s | 3.240 s / 5.303x | 3.764 s / 5.241x | 3.142 s / 5.468x | 2.830 s / 6.972x |
-| `--threads 20` | 17.594 s | 19.583 s | 2.730 s / 6.445x | 3.168 s / 6.181x | 2.667 s / 6.598x | 2.327 s / 8.416x |
+| 默认（5） | 17.401 s | 19.791 s | 4.341 s / 4.008x | 4.302 s / 4.601x | 3.549 s / 4.904x | 3.126 s / 6.331x |
+| `--threads 1` | 19.177 s | 21.052 s | 11.626 s / 1.649x | 12.860 s / 1.637x | 8.361 s / 2.294x | 9.232 s / 2.280x |
+| `--threads 5` | 17.458 s | 20.209 s | 4.043 s / 4.318x | 4.157 s / 4.861x | 3.654 s / 4.778x | 3.111 s / 6.495x |
+| `--threads 10` | 17.230 s | 19.480 s | 3.526 s / 4.886x | 3.745 s / 5.201x | 2.983 s / 5.775x | 2.513 s / 7.751x |
+| `--threads 20` | 17.558 s | 19.928 s | 2.772 s / 6.334x | 3.298 s / 6.042x | 2.632 s / 6.672x | 2.075 s / 9.605x |
 <!-- LATEST_PERFORMANCE_END -->
-<!-- LATEST_PERFORMANCE_RUNS: full-refresh=90 repeats=3 mapped-ab=36 mapped-long=4 dotnet-determinism=60 -->
+<!-- LATEST_PERFORMANCE_RUNS: full-refresh=90 repeats=3 candidate-ab=8 thread-gates=24 candidate-long=2 dotnet-determinism=60 -->
 
 每个 .NET 单元格依次给出墙钟中位数和相对同 profile Python 列的倍速；默认实际
 使用 **5 个 workers**。更早公开的表格使用另一份私有 NTSC Betamax HiFi 夹具，
 不能直接横向比较。在这份 PAL 夹具上，之前的 main 还因为超大 raw FLAC 改走 FFmpeg
-而承担了真实开销。本候选只对满足固定 block、无 seektable 等严格门禁的普通并行 VHS
-解码使用 libsndfile 映射；串行、诊断、非零 `--sharpness`、重采样及不合格输入继续使用
-既有 FFmpeg 路径，任何原生读取失败都会在相同逻辑样本位置单向回退。
+而承担了真实开销；该问题已在之前的 release 中修复。本候选把确定性 float64 median
+的 introselect 阈值从 32,768 降到 4,096 个样本，使约 6K 和 15K 样本的 PAL VSync
+MAD 分组不再完整排序，同时保持 NaN、正负零混合和偶数长度中位数表达式不变。
 
-严格基线/候选门禁中，Exact `current --threads 20` 的 200 帧从 14.876 降至
-11.135 秒（缩短 25.15%），1000 帧从 53.230 降至 44.055 秒（缩短 17.24%）；
-长跑有效核心数从 6.76 升至 7.41，峰值工作集从 773.2 降至 402.4 MiB。
-32 workers 的 100 帧缩短 33.41%；Exact v0.4.0 和 IPP-fast `current` 的 200 帧
-分别缩短 22.24% 和 24.64%，未改动的单 worker 路径保持中性。
+四组交错的 160 帧 IPP-fast `current --threads 20` 配对，把墙钟中位数从 7.253
+降到 6.542 秒（缩短 9.80%，吞吐提升 10.87%），CPU 中位数基本不变：39.453 对
+39.469 秒。1000 帧门禁从 38.478 降到 35.487 秒（缩短 7.77%），CPU 时间减少
+1.21%，峰值工作集保持有界：368.3 对 368.1 MiB。
 
-36 次严格 A/B 的亮度、色度、原始 JSON、有序 `fileLoc`、stdout、归一化 stderr
-和日志全部一致；60 次 .NET 矩阵运行也保持跨线程确定性。IPP-fast 仍是显式启用的
-数值近似后端，因此不声称其产物与 Exact 逐字节一致。Python v0.4.0 的 15 次非零
-worker 矩阵运行产生了 14 套亮度/色度 hash，所以严格 oracle 仍是 Python v0.4.0
-`g4315520 --threads 0`。完整命令、硬件、hash、内存边界和历史测量请查看
+34 次严格基线/候选运行的亮度、色度、原始 JSON、有序 `fileLoc`、stdout、归一化
+stderr 和日志全部一致；60 次 .NET 矩阵运行也保持跨线程确定性。IPP-fast 仍是显式
+启用的数值近似后端，因此不声称其产物与 Exact 逐字节一致。已合并的 Python PR341
+在本轮保持确定性；Python v0.4.0 的全部 15 次矩阵运行都产生了不同的亮度、色度和
+JSON hash，其中 12 次显式非默认 worker 运行也是 12 套。因此严格 oracle 仍是
+Python v0.4.0 `g4315520 --threads 0`。完整命令、硬件、hash、内存边界和历史测量请查看
 [详细性能说明](docs/README.detailed.zh-CN.md#性能)。
 
 <!-- SECTION: compatibility -->
@@ -155,7 +155,7 @@ TBC、色度、JSON 和日志文件允许在解码期间并发读取，兼容的
 dotnet restore VHSDecodeDotNet.slnx
 dotnet build VHSDecodeDotNet.slnx -c Release --no-restore
 dotnet test --solution VHSDecodeDotNet.slnx -c Release `
-  --no-build --no-restore --minimum-expected-tests 1376
+  --no-build --no-restore --minimum-expected-tests 1382
 ```
 
 在 Visual Studio 2026 中打开 `VHSDecodeDotNet.slnx`，即可构建、调试并通过

@@ -254,8 +254,8 @@ falling back to the Exact inverse FFT and reduced the paired median gain to
 - VSync envelope/minima work and harmonic power-ratio search run concurrently
   over one shared read-only padded input. Candidate arbitration and detector
   state updates remain ordered after both branches complete. NumPy-compatible
-  float64 medians retain full sorting for small inputs and use bit-exact
-  introselect from 32K samples.
+  float64 medians retain full sorting below 4K samples and use bit-exact
+  introselect from 4K samples.
 - VSync's private forward/reverse envelope and harmonic BA-IIR chains filter
   their owned arrays in place. The envelope branches write directly into the
   reduced result instead of materializing a combined padded array; public IIR
@@ -415,16 +415,16 @@ speedup, and wall-time reduction against its profile-matched Python column:
 <!-- LATEST_PERFORMANCE_BEGIN -->
 | CLI mode (workers) | Python v0.4.0 | Python PR341 | Exact + v0.4.0 | Exact + current | IPP-fast + v0.4.0 | IPP-fast + current |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| default (5) | 17.680 s | 20.173 s | 4.096 s / 4.316x / 76.83% | 4.618 s / 4.369x / 77.11% | 3.604 s / 4.906x / 79.62% | 3.392 s / 5.948x / 83.19% |
-| `--threads 1` | 18.995 s | 21.062 s | 11.613 s / 1.636x / 38.86% | 13.183 s / 1.598x / 37.41% | 8.407 s / 2.259x / 55.74% | 9.340 s / 2.255x / 55.66% |
-| `--threads 5` | 17.599 s | 19.493 s | 4.307 s / 4.086x / 75.52% | 4.805 s / 4.057x / 75.35% | 3.525 s / 4.993x / 79.97% | 3.203 s / 6.087x / 83.57% |
-| `--threads 10` | 17.182 s | 19.727 s | 3.240 s / 5.303x / 81.14% | 3.764 s / 5.241x / 80.92% | 3.142 s / 5.468x / 81.71% | 2.830 s / 6.972x / 85.66% |
-| `--threads 20` | 17.594 s | 19.583 s | 2.730 s / 6.445x / 84.48% | 3.168 s / 6.181x / 83.82% | 2.667 s / 6.598x / 84.84% | 2.327 s / 8.416x / 88.12% |
+| default (5) | 17.401 s | 19.791 s | 4.341 s / 4.008x / 75.05% | 4.302 s / 4.601x / 78.26% | 3.549 s / 4.904x / 79.61% | 3.126 s / 6.331x / 84.21% |
+| `--threads 1` | 19.177 s | 21.052 s | 11.626 s / 1.649x / 39.37% | 12.860 s / 1.637x / 38.91% | 8.361 s / 2.294x / 56.40% | 9.232 s / 2.280x / 56.15% |
+| `--threads 5` | 17.458 s | 20.209 s | 4.043 s / 4.318x / 76.84% | 4.157 s / 4.861x / 79.43% | 3.654 s / 4.778x / 79.07% | 3.111 s / 6.495x / 84.60% |
+| `--threads 10` | 17.230 s | 19.480 s | 3.526 s / 4.886x / 79.53% | 3.745 s / 5.201x / 80.77% | 2.983 s / 5.775x / 82.69% | 2.513 s / 7.751x / 87.10% |
+| `--threads 20` | 17.558 s | 19.928 s | 2.772 s / 6.334x / 84.21% | 3.298 s / 6.042x / 83.45% | 2.632 s / 6.672x / 85.01% | 2.075 s / 9.605x / 89.59% |
 <!-- LATEST_PERFORMANCE_END -->
-<!-- LATEST_PERFORMANCE_RUNS: full-refresh=90 repeats=3 mapped-ab=36 mapped-long=4 dotnet-determinism=60 -->
+<!-- LATEST_PERFORMANCE_RUNS: full-refresh=90 repeats=3 candidate-ab=8 thread-gates=24 candidate-long=2 dotnet-determinism=60 -->
 
 All 90 runs (30 matrix cells, each repeated three times) were freshly measured
-on 2026-08-09 from this candidate, based on merged main `63251d8`. Each cell is
+on 2026-08-09 from this candidate, based on merged main `ae3722d`. Each cell is
 the median of three Release runs; mode and profile ordering was reversed and
 mixed across the three passes. The host was
 an Intel Core Ultra 7 265K with 20 logical processors, Windows 11 build 26220,
@@ -432,14 +432,47 @@ and .NET SDK/runtime `11.0.100-preview.6.26359.118`. Raw run directories are
 retained locally because they contain the private fixture path; these are local
 measurements rather than an independently reproducible public corpus. The
 candidate executable had SHA-256
-`808D09DD0D1B98548AB6A712BFF777E2F6192027D5943C84A9C0C7482BCF6E6B`.
+`AAAB4B0A884D0F22B361E369A55A2C475DD2D042806043B25EAFB5DF188B7860`.
 
 An older public table used a different private NTSC Betamax HiFi `.lds`
 fixture, so its multipliers are not directly comparable with this PAL VHS
-matrix. Within this same PAL fixture, the preceding main build also paid a real
-performance and memory cost because oversized raw FLAC had to use the strict
-FFmpeg/PyAV-emulation path. The following change removes that cost without
-changing the serial oracle contract.
+matrix. This refreshed table describes the median-selection candidate below.
+The mapped raw-FLAC improvement is already part of the base main build and is
+retained afterward as release history.
+
+### Deterministic PAL VSync median selection
+
+`NumpyReduction` now sends arrays of 4,096 or more values through its existing
+deterministic introselect instead of waiting until 32,768 values. This avoids
+full sorting for the roughly 6K- and 15K-sample PAL VSync MAD groups. Inputs
+below the threshold and arrays containing both positive and negative zero keep
+full sorting. NaNs are still returned before selection, and even-length inputs
+still select the upper middle value, scan the lower partition for its maximum,
+and evaluate `(lower + upper) / 2.0` in the same order. Focused tests cover
+4,095, 4,096, and 4,097 values through both allocation and caller-scratch APIs.
+
+Four interleaved baseline/candidate pairs on the fixed 160-frame IPP-fast
+`current --threads 20` window reduced median wall time from 7.253 to 6.542
+seconds (9.80% lower, 10.87% more throughput); the candidate won all four
+pairs. Median CPU time was effectively flat at 39.453 versus 39.469 seconds.
+The fixed 1,000-frame gate moved from 38.478 to 35.487 seconds (7.77% lower),
+with CPU time falling from 215.016 to 212.422 seconds (1.21%) and peak working
+set remaining bounded at 368.3 versus 368.1 MiB. Candidate first-/last-third
+working-set medians were 361.6/366.3 MiB, with no progressive growth.
+
+Exact and IPP-fast baseline/candidate matrices covered both compatibility
+profiles at `--threads 0`, default-5, and `--threads 20`. Across those 24 runs,
+the eight short A/B runs, and the two long-gate runs, luma, chroma, raw JSON,
+ordered `fileLoc`, stdout, normalized stderr, and normalized logs all matched.
+The 60 .NET performance-matrix runs retained one hash per profile across every
+thread mode. Merged Python PR341 was deterministic here; Python v0.4.0 produced
+15 distinct luma, chroma, and JSON hashes in 15 runs, including 12 distinct
+sets in the 12 explicit non-default-worker runs. The strict oracle therefore
+remains Python v0.4.0 `g4315520 --threads 0`.
+
+The private NTSC VHS fixture previously used for the 1,000-frame
+`--fallback_vsync` gate was unavailable during this audit. That gate was not
+rerun, and no current fallback claim is inferred from its older evidence.
 
 ### Oversized raw-FLAC mapped seeking
 
@@ -468,11 +501,9 @@ effective cores rising from 6.80 to 8.88. The unchanged single-worker route
 was neutral at 13.901 versus 13.877 seconds.
 
 Separate 200-frame gates improved Exact v0.4.0 by 22.24% and IPP-fast
-`current` by 24.64%. All 60 .NET runs in the six-path matrix retained one hash
-per profile across default-5 and `--threads 1/5/10/20`. Merged Python PR341
-was also deterministic in this bounded matrix. Python v0.4.0 produced 14
-luma/chroma hashes across 15 nonzero-worker runs, so Python v0.4.0
-`g4315520 --threads 0` remains the strict oracle.
+`current` by 24.64%. This mapped-seeking change shipped in
+`v0.4.0-1.5.3`; none of these historical timings were carried into the latest
+table above.
 
 ### Managed current CTI quotient and finish AVX
 
@@ -2652,7 +2683,7 @@ Requirements:
 .\tools\build-ipp-native.ps1
 dotnet restore VHSDecodeDotNet.slnx
 dotnet build VHSDecodeDotNet.slnx -c Release --no-restore
-dotnet test --solution VHSDecodeDotNet.slnx -c Release --no-build --no-restore --minimum-expected-tests 1376
+dotnet test --solution VHSDecodeDotNet.slnx -c Release --no-build --no-restore --minimum-expected-tests 1382
 dotnet test --project tests\VHSDecode.Tests\VHSDecode.Tests.csproj -c Release --no-build --no-restore --coverage --coverage-output coverage.cobertura.xml --coverage-output-format cobertura
 ```
 
@@ -2666,7 +2697,7 @@ deployment computer. Binary-only single-file releases embed
 sidecar license files. An Exact-only build may omit the native build step.
 
 The current formal Release build has zero warnings and errors. The xUnit v3
-project exposes **1,376** independently discoverable tests to both
+project exposes **1,382** independently discoverable tests to both
 `dotnet test` and Visual Studio Test Explorer.
 
 <!-- SECTION: usage -->

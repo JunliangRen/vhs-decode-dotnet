@@ -38,7 +38,7 @@ evidence, and remaining gaps.
   EIAJ, and supported PAL/NTSC variants.
 - TBC utility tools, the double-click GUI, and developer plotting windows are
   intentionally out of scope.
-- The Visual Studio 2026 `.slnx` solution has **1,376** standard xUnit v3 tests
+- The Visual Studio 2026 `.slnx` solution has **1,382** standard xUnit v3 tests
   that are visible in Test Explorer and runnable with `dotnet test`.
 
 <!-- SECTION: start -->
@@ -100,44 +100,43 @@ for compatibility-sensitive work.
 The table uses one fixed private local 40 MHz PAL VHS `.ldf` fixture and the
 same 40-frame window for every run; the filename is intentionally not
 published. Every cell is a fresh median of three reordered Release runs from
-this candidate, based on merged main `63251d8`; no result is carried forward
+this candidate, based on merged main `ae3722d`; no result is carried forward
 from another fixture or build. Compatibility is evaluated separately from
 speed.
 
 <!-- LATEST_PERFORMANCE_BEGIN -->
 | CLI mode (workers) | Python v0.4.0 | Python PR341 | Exact + v0.4.0 | Exact + current | IPP-fast + v0.4.0 | IPP-fast + current |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| default (5) | 17.680 s | 20.173 s | 4.096 s / 4.316x | 4.618 s / 4.369x | 3.604 s / 4.906x | 3.392 s / 5.948x |
-| `--threads 1` | 18.995 s | 21.062 s | 11.613 s / 1.636x | 13.183 s / 1.598x | 8.407 s / 2.259x | 9.340 s / 2.255x |
-| `--threads 5` | 17.599 s | 19.493 s | 4.307 s / 4.086x | 4.805 s / 4.057x | 3.525 s / 4.993x | 3.203 s / 6.087x |
-| `--threads 10` | 17.182 s | 19.727 s | 3.240 s / 5.303x | 3.764 s / 5.241x | 3.142 s / 5.468x | 2.830 s / 6.972x |
-| `--threads 20` | 17.594 s | 19.583 s | 2.730 s / 6.445x | 3.168 s / 6.181x | 2.667 s / 6.598x | 2.327 s / 8.416x |
+| default (5) | 17.401 s | 19.791 s | 4.341 s / 4.008x | 4.302 s / 4.601x | 3.549 s / 4.904x | 3.126 s / 6.331x |
+| `--threads 1` | 19.177 s | 21.052 s | 11.626 s / 1.649x | 12.860 s / 1.637x | 8.361 s / 2.294x | 9.232 s / 2.280x |
+| `--threads 5` | 17.458 s | 20.209 s | 4.043 s / 4.318x | 4.157 s / 4.861x | 3.654 s / 4.778x | 3.111 s / 6.495x |
+| `--threads 10` | 17.230 s | 19.480 s | 3.526 s / 4.886x | 3.745 s / 5.201x | 2.983 s / 5.775x | 2.513 s / 7.751x |
+| `--threads 20` | 17.558 s | 19.928 s | 2.772 s / 6.334x | 3.298 s / 6.042x | 2.632 s / 6.672x | 2.075 s / 9.605x |
 <!-- LATEST_PERFORMANCE_END -->
-<!-- LATEST_PERFORMANCE_RUNS: full-refresh=90 repeats=3 mapped-ab=36 mapped-long=4 dotnet-determinism=60 -->
+<!-- LATEST_PERFORMANCE_RUNS: full-refresh=90 repeats=3 candidate-ab=8 thread-gates=24 candidate-long=2 dotnet-determinism=60 -->
 
 Each .NET cell shows median wall time and speedup versus its profile-matched
 Python column. The default is **5 workers**. An older public table used a
 different private NTSC Betamax HiFi fixture and is not directly comparable.
-On this PAL fixture, previous main also paid a real cost by routing oversized
-raw FLAC through FFmpeg. The candidate maps only narrowly eligible fixed-block,
-no-seektable files through libsndfile during ordinary parallel VHS decoding;
-serial, diagnostic, resampled, and ineligible inputs keep the established
-FFmpeg path with one-way fallback on any native-read failure.
+This candidate lowers the deterministic float64 median introselect threshold
+from 32,768 to 4,096 samples, avoiding full sorts for the roughly 6K- and
+15K-sample PAL VSync MAD groups. NaN propagation, mixed signed-zero handling,
+and the even-length median expression remain unchanged.
 
-Direct baseline/candidate gates reduced Exact `current --threads 20` wall time
-from 14.876 to 11.135 seconds over 200 frames (25.15%) and from 53.230 to
-44.055 seconds over 1,000 frames (17.24%); effective cores rose from 6.76 to
-7.41 and peak working set fell from 773.2 to 402.4 MiB in the long pair.
-At 32 workers, 100 frames fell 33.41%. Exact v0.4.0 and IPP-fast `current`
-200-frame gates improved 22.24% and 24.64% respectively, while the unchanged
-single-worker route was neutral.
+Four interleaved 160-frame IPP-fast `current --threads 20` pairs reduced median
+wall time from 7.253 to 6.542 seconds (9.80% lower, 10.87% more throughput),
+while median CPU time was effectively flat at 39.453 versus 39.469 seconds. A
+1,000-frame gate moved from 38.478 to 35.487 seconds (7.77% lower), reduced CPU
+time by 1.21%, and kept peak working set bounded at 368.3 versus 368.1 MiB.
 
-All 36 strict A/B runs matched luma, chroma, raw JSON, ordered `fileLoc`,
-stdout, normalized stderr, and normalized logs. All 60 .NET matrix runs were
-cross-thread deterministic. IPP-fast remains an explicit numerically close
-backend, so its artifacts are not claimed to match Exact byte for byte. Python
-v0.4.0 produced 14 luma/chroma hashes across its 15 nonzero-worker matrix runs,
-so Python v0.4.0 `g4315520 --threads 0` remains the strict oracle. Commands,
+All 34 strict baseline/candidate runs matched luma, chroma, raw JSON, ordered
+`fileLoc`, stdout, normalized stderr, and normalized logs. All 60 .NET matrix
+runs were cross-thread deterministic. IPP-fast remains an explicit numerically
+close backend, so its artifacts are not claimed to match Exact byte for byte.
+Merged Python PR341 was deterministic here; Python v0.4.0 produced distinct
+luma, chroma, and JSON hashes in all 15 matrix runs, including all 12 explicit
+non-default-worker runs. Python v0.4.0 `g4315520 --threads 0` therefore remains
+the strict oracle. Commands,
 hardware, hashes, memory bounds, and historical measurements are in the
 [detailed performance reference](docs/README.detailed.md#performance).
 
@@ -176,7 +175,7 @@ The pinned SDK is .NET `11.0.100-preview.6.26359.118`.
 dotnet restore VHSDecodeDotNet.slnx
 dotnet build VHSDecodeDotNet.slnx -c Release --no-restore
 dotnet test --solution VHSDecodeDotNet.slnx -c Release `
-  --no-build --no-restore --minimum-expected-tests 1376
+  --no-build --no-restore --minimum-expected-tests 1382
 ```
 
 Open `VHSDecodeDotNet.slnx` in Visual Studio 2026 to build, debug, and run the
