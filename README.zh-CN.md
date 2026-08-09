@@ -90,21 +90,21 @@ CVBS 和 HiFi 仍会拒绝 `ipp-fast`；需要 release 兼容行为时应使用 
 ## 最新性能
 
 这是同一份私有本地 40 MHz PAL VHS `.ldf` 夹具上的 160 帧快照，包含启动开销，
-且不会公开源文件名。Exact `current` 和 IPP-fast `current` 在本候选上按三种重排顺序
-重新执行了 Release 测量；候选基于已合并的 main `8409b1f`。未受影响的两条 v0.4.0
-.NET 列和 30 次 Python 参考运行复用自此前同一主机、同一夹具的直接刷新。兼容性
-结论与速度数据分开判断。
+且不会公开源文件名。Exact v0.4.0、Exact `current` 和 IPP-fast `current` 在提交
+`3740bf1` 上按三种重排顺序重新执行了 Release 测量；该提交基于已合并的 main
+`8409b1f`。未受影响的 IPP-fast v0.4.0 列和 30 次 Python 参考运行复用自此前同一
+主机、同一夹具的直接刷新。兼容性结论与速度数据分开判断。
 
 <!-- LATEST_PERFORMANCE_BEGIN -->
 | CLI 模式（workers） | Python v0.4.0 | Python PR341 | Exact + v0.4.0 | Exact + current | IPP-fast + v0.4.0 | IPP-fast + current |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| 默认（5） | 49.845 s | 51.191 s | 13.095 s / 3.806x | 12.918 s / 3.963x | 11.613 s / 4.292x | 9.932 s / 5.154x |
-| `--threads 1` | 55.763 s | 55.815 s | 35.334 s / 1.578x | 40.722 s / 1.371x | 26.086 s / 2.138x | 28.671 s / 1.947x |
-| `--threads 5` | 50.124 s | 51.398 s | 13.560 s / 3.697x | 12.964 s / 3.965x | 11.911 s / 4.208x | 9.917 s / 5.183x |
-| `--threads 10` | 48.710 s | 50.833 s | 10.815 s / 4.504x | 9.742 s / 5.218x | 9.890 s / 4.925x | 8.338 s / 6.097x |
-| `--threads 20` | 48.963 s | 50.195 s | 8.547 s / 5.729x | 8.276 s / 6.065x | 8.215 s / 5.960x | 6.280 s / 7.993x |
+| 默认（5） | 49.845 s | 51.191 s | 13.725 s / 3.632x | 13.016 s / 3.933x | 11.613 s / 4.292x | 10.061 s / 5.088x |
+| `--threads 1` | 55.763 s | 55.815 s | 36.661 s / 1.521x | 41.187 s / 1.355x | 26.086 s / 2.138x | 28.722 s / 1.943x |
+| `--threads 5` | 50.124 s | 51.398 s | 13.698 s / 3.659x | 12.571 s / 4.088x | 11.911 s / 4.208x | 10.063 s / 5.108x |
+| `--threads 10` | 48.710 s | 50.833 s | 11.079 s / 4.397x | 9.869 s / 5.151x | 9.890 s / 4.925x | 8.009 s / 6.347x |
+| `--threads 20` | 48.963 s | 50.195 s | 9.078 s / 5.394x | 7.977 s / 6.293x | 8.215 s / 5.960x | 6.573 s / 7.636x |
 <!-- LATEST_PERFORMANCE_END -->
-<!-- LATEST_PERFORMANCE_RUNS: dotnet-current-refresh=30 reused-dotnet-v040-runs=30 reused-python-runs=30 repeats=3 hilbert-scale-short=8 hilbert-scale-long=8 hilbert-scale-thread-gates=24 hilbert-scale-intrinsic-gates=3 hilbert-scale-matrix-runs=30 python-matrix-runs=30 python-v040-runs=15 python-v040-hashes=15 python-v040-nondefault-runs=12 python-v040-nondefault-hashes=12 -->
+<!-- LATEST_PERFORMANCE_RUNS: dotnet-current-refresh=30 dotnet-v040-exact-refresh=15 reused-dotnet-v040-ipp-runs=15 reused-python-runs=30 repeats=3 hilbert-scale-committed-long=4 hilbert-scale-thread-gates=24 hilbert-scale-intrinsic-gates=3 hilbert-scale-current-matrix-runs=30 hilbert-scale-v040-exact-matrix-runs=15 python-matrix-runs=30 python-v040-runs=15 python-v040-hashes=15 python-v040-nondefault-runs=12 python-v040-nondefault-hashes=12 -->
 
 每个 .NET 单元格依次给出墙钟中位数和相对同 profile Python 列的倍速；默认实际
 使用 **5 个 workers**。三次运行范围见[详细性能说明](docs/README.detailed.zh-CN.md#性能)。
@@ -112,12 +112,13 @@ CVBS 和 HiFi 仍会拒绝 `ipp-fast`；需要 release 兼容行为时应使用 
 并不表示解码器发生性能回退。
 
 托管 AVX2 Hilbert 频谱阶段现在一次缩放 4 个有限复数；任一复数分量或实数乘数为
-非有限值时，整组仍使用原来的 `Complex * double` 标量表达式。四组正反顺序的
-1000 帧 Exact `current --threads 20` 配对合计墙钟从 159.321 降到 157.883 秒
-（缩短 0.90%，吞吐 1.0091x），进程 CPU 时间从 1,287.453 降到 1,270.438 秒
-（减少 1.32%）。候选峰值工作集保持有界，最高 424.6 MiB；不宣称驻留内存下降。
+非有限值时，整组仍使用原来的 `Complex * double` 标量表达式。两组正反顺序的
+1000 帧 Exact `current --threads 20` 配对各赢一组，合计墙钟从 83.678 变为
+83.419 秒（缩短 0.31%，吞吐 1.0031x），进程 CPU 时间从 661.375 变为 660.375 秒
+（减少 0.15%），因此端到端吞吐按中性处理。候选峰值工作集保持有界，最高
+393.6 MiB；不宣称驻留内存下降。
 
-最终 73 次候选 A/B、线程门禁、Intrinsics 门禁和矩阵运行中，所有参与比较的兼容面均一致，30 次
+最终 76 次候选 A/B、线程门禁、Intrinsics 门禁和矩阵运行中，所有参与比较的兼容面均一致，30 次
 current 矩阵运行也全部确定。已合并的 Python PR341 在本轮保持确定性；Python v0.4.0
 的 15 次运行产生了 15 套亮度、色度、JSON 和日志 hash，因此严格 oracle 仍是
 Python v0.4.0 `g4315520 --threads 0`。

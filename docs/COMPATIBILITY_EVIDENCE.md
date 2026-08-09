@@ -2164,24 +2164,27 @@ production-sized and exceptional inputs, reject unequal lengths, verify warm
 zero-allocation reuse, and pass with native AVX2, AVX2 disabled, and all
 hardware intrinsics disabled.
 
-On one fixed private local 40 MHz PAL VHS `.ldf` fixture, four opposite-order
+On one fixed private local 40 MHz PAL VHS `.ldf` fixture, two opposite-order
 1,000-frame Exact `current --threads 20` pairs produced one luma, chroma, raw
 JSON, stdout, timing-normalized stderr, timestamp-normalized log, and ordered
-`fileLoc` hash set. Total wall time fell from 159.321 to 157.883 seconds
-(0.90%, 1.0091x throughput) and total process CPU time fell from 1,287.453 to
-1,270.438 seconds (1.32%). Candidate peak working set remained bounded at or
-below 424.6 MiB without progressive growth or OOM; resident-memory reduction
-is not claimed.
+`fileLoc` hash set. The pairs split one win each. Combined wall time moved from
+83.678 to 83.419 seconds (0.31%, 1.0031x throughput) and combined process CPU
+time from 661.375 to 660.375 seconds (0.15%), so end-to-end throughput is
+classified as neutral. Candidate peak working set remained bounded at or below
+393.6 MiB without progressive growth or OOM; resident-memory reduction is not
+claimed.
 
 Twenty-four baseline/candidate gates covered Exact and IPP-fast, v0.4.0 and
 `current`, at explicit zero, omitted/default-five, and 20 workers. Three final
 real-input intrinsic gates matched native AVX2 with both disabled modes. All
 seven artifact/log surfaces matched across candidate, baseline, and worker
-counts. Thirty current-profile matrix runs covered default, 1, 5, 10, and 20
-workers in three reordered passes and produced one deterministic hash set per
-backend. The candidate was based on merged main `8409b1f`; its single-file
-executable SHA-256 was
-`10172C6A0AC3A545AD7435637FE397F3394BD371EFC74A53A179EF4E682576E8`.
+counts. Forty-five candidate matrix runs refreshed Exact v0.4.0, Exact
+`current`, and IPP-fast `current` at default, 1, 5, 10, and 20 workers in three
+reordered passes and produced one deterministic hash set per profile/backend
+combination. The unaffected IPP-fast v0.4.0 measurements were retained. The
+single-file executable was built from candidate commit `3740bf1`, based on
+merged main `8409b1f`, and had SHA-256
+`0F119B82507E8ACB5FF0CF8EE4C407436671828B1981CC9FCDC824B2F34ACD19`.
 
 ### Remaining compatibility work
 

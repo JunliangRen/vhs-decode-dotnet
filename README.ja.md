@@ -94,22 +94,22 @@ CVBS と HiFi は引き続き `ipp-fast` を拒否します。release-compatible
 ## 最新の性能
 
 これは同じ private local 40 MHz PAL VHS `.ldf` fixture を使う、startup cost を含む
-160-frame snapshot です。source filename は公開しません。Exact `current` と IPP-fast
-`current` を、この candidate 上で順序を入れ替えた 3 回の Release pass により更新
-しました。candidate は merged main `8409b1f` を基にしています。影響を受けない 2 つの
-v0.4.0 .NET 列と 30 回の Python reference run は、同じ host と fixture で行った直前の
+160-frame snapshot です。source filename は公開しません。Exact v0.4.0、Exact `current`、
+IPP-fast `current` を commit `3740bf1` 上で順序を入れ替えた 3 回の Release pass により
+更新しました。この commit は merged main `8409b1f` を基にしています。影響を受けない
+IPP-fast v0.4.0 列と 30 回の Python reference run は、同じ host と fixture で行った直前の
 direct refresh を再利用しています。互換性と速度は別々に評価します。
 
 <!-- LATEST_PERFORMANCE_BEGIN -->
 | CLI mode（workers） | Python v0.4.0 | Python PR341 | Exact + v0.4.0 | Exact + current | IPP-fast + v0.4.0 | IPP-fast + current |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| default（5） | 49.845 s | 51.191 s | 13.095 s / 3.806x | 12.918 s / 3.963x | 11.613 s / 4.292x | 9.932 s / 5.154x |
-| `--threads 1` | 55.763 s | 55.815 s | 35.334 s / 1.578x | 40.722 s / 1.371x | 26.086 s / 2.138x | 28.671 s / 1.947x |
-| `--threads 5` | 50.124 s | 51.398 s | 13.560 s / 3.697x | 12.964 s / 3.965x | 11.911 s / 4.208x | 9.917 s / 5.183x |
-| `--threads 10` | 48.710 s | 50.833 s | 10.815 s / 4.504x | 9.742 s / 5.218x | 9.890 s / 4.925x | 8.338 s / 6.097x |
-| `--threads 20` | 48.963 s | 50.195 s | 8.547 s / 5.729x | 8.276 s / 6.065x | 8.215 s / 5.960x | 6.280 s / 7.993x |
+| default（5） | 49.845 s | 51.191 s | 13.725 s / 3.632x | 13.016 s / 3.933x | 11.613 s / 4.292x | 10.061 s / 5.088x |
+| `--threads 1` | 55.763 s | 55.815 s | 36.661 s / 1.521x | 41.187 s / 1.355x | 26.086 s / 2.138x | 28.722 s / 1.943x |
+| `--threads 5` | 50.124 s | 51.398 s | 13.698 s / 3.659x | 12.571 s / 4.088x | 11.911 s / 4.208x | 10.063 s / 5.108x |
+| `--threads 10` | 48.710 s | 50.833 s | 11.079 s / 4.397x | 9.869 s / 5.151x | 9.890 s / 4.925x | 8.009 s / 6.347x |
+| `--threads 20` | 48.963 s | 50.195 s | 9.078 s / 5.394x | 7.977 s / 6.293x | 8.215 s / 5.960x | 6.573 s / 7.636x |
 <!-- LATEST_PERFORMANCE_END -->
-<!-- LATEST_PERFORMANCE_RUNS: dotnet-current-refresh=30 reused-dotnet-v040-runs=30 reused-python-runs=30 repeats=3 hilbert-scale-short=8 hilbert-scale-long=8 hilbert-scale-thread-gates=24 hilbert-scale-intrinsic-gates=3 hilbert-scale-matrix-runs=30 python-matrix-runs=30 python-v040-runs=15 python-v040-hashes=15 python-v040-nondefault-runs=12 python-v040-nondefault-hashes=12 -->
+<!-- LATEST_PERFORMANCE_RUNS: dotnet-current-refresh=30 dotnet-v040-exact-refresh=15 reused-dotnet-v040-ipp-runs=15 reused-python-runs=30 repeats=3 hilbert-scale-committed-long=4 hilbert-scale-thread-gates=24 hilbert-scale-intrinsic-gates=3 hilbert-scale-current-matrix-runs=30 hilbert-scale-v040-exact-matrix-runs=15 python-matrix-runs=30 python-v040-runs=15 python-v040-hashes=15 python-v040-nondefault-runs=12 python-v040-nondefault-hashes=12 -->
 
 各 .NET cell は wall-time median と profile が対応する Python 列に対する speedup の
 順で、default は **5 workers** です。3-run range は
@@ -120,12 +120,13 @@ direct refresh を再利用しています。互換性と速度は別々に評�
 managed AVX2 Hilbert spectrum stage は、finite な complex value を 4 個ずつ scale
 します。complex component または real multiplier が non-finite の group は、従来の
 `Complex * double` scalar expression を維持します。順序を反転した 1,000-frame Exact
-`current --threads 20` pair 4 組の合計 wall time は 159.321 から 157.883 秒へ 0.90%
-短縮（1.0091x throughput）、process CPU time は 1,287.453 から 1,270.438 秒へ
-1.32% 減少しました。candidate の peak working set は最大 424.6 MiB に収まり、
-resident-memory reduction は主張しません。
+`current --threads 20` pair 2 組は 1 勝 1 敗で、combined wall time は 83.678 から
+83.419 秒へ 0.31% 短縮（1.0031x throughput）、process CPU time は 661.375 から
+660.375 秒へ 0.15% 減少したため、end-to-end throughput は neutral と分類します。
+candidate の peak working set は最大 393.6 MiB に収まり、resident-memory reduction は
+主張しません。
 
-最終 73 回の candidate A/B、thread gate、Intrinsics gate、matrix run では、比較した compatibility
+最終 76 回の candidate A/B、thread gate、Intrinsics gate、matrix run では、比較した compatibility
 surface がすべて一致し、30 回の current matrix run も deterministic でした。merged
 Python PR341 も deterministic でしたが、Python v0.4.0 は 15 run で 15 種類の luma、
 chroma、JSON、log hash を生成したため、strict oracle は引き続き Python v0.4.0
