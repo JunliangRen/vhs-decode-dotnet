@@ -270,7 +270,8 @@ public sealed class RfDemodulator : IDisposable
         bool includeAnalyticOutput,
         bool includeDemodRawOutput,
         bool useNumpyComplexVhsAnalytic,
-        RfDemodulatedBlockOutputBuffers? outputBuffers = null)
+        RfDemodulatedBlockOutputBuffers? outputBuffers = null,
+        IppSos32FilterPool? vhsEnvelopeIppFilter = null)
     {
         ObjectDisposedException.ThrowIf(Volatile.Read(ref _disposed) != 0, this);
         if (outputBuffers is not null && outputBuffers.Length != input.Length)
@@ -537,7 +538,8 @@ public sealed class RfDemodulator : IDisposable
                 vhsEnvelopeSource.AsSpan(0, input.Length),
                 vhsEnvelopeFilter,
                 vhsRealFftWorkspace!.RawEnvelope.AsSpan(0, input.Length),
-                outputBuffers?.Envelope)
+                outputBuffers?.Envelope,
+                vhsEnvelopeIppFilter)
             : vhsAnalyticComponentsReady
                 ? BuildAnalyticMagnitudeEnvelope(
                     vhsRfFilteredReal!.AsSpan(0, input.Length),
@@ -1598,7 +1600,8 @@ public sealed class RfDemodulator : IDisposable
         ReadOnlySpan<double> filteredReal,
         IReadOnlyList<SosSection> envelopeFilter,
         Span<double> rawEnvelope,
-        double[]? destination = null)
+        double[]? destination = null,
+        IppSos32FilterPool? ippFilter = null)
     {
         if (filteredReal.IsEmpty)
         {
@@ -1614,7 +1617,11 @@ public sealed class RfDemodulator : IDisposable
         }
 
         FillVhsRawEnvelope(filteredReal, rawEnvelope);
-        SosFilter.ApplyForwardBackwardFloat32(envelopeFilter, rawEnvelope, envelope);
+        SosFilter.ApplyForwardBackwardFloat32(
+            envelopeFilter,
+            rawEnvelope,
+            envelope,
+            ippFilter: ippFilter);
         return envelope;
     }
 

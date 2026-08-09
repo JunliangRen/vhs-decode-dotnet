@@ -383,6 +383,28 @@ candidate 15.303 s、main 15.385 s で、candidate の前半/後半は
 77.22/70.87 ms per frame、peak は 0.993 GiB でした。retained median storage は
 detector ごとに 60-line buffer 2 個までに制限されます。
 
+### pooled IPP VHS envelope SOS
+
+IPP-fast は full-length の one-section VHS RF envelope SOS を bounded
+`IppSos32FilterPool` で処理します。Exact は従来の managed float32 expression と
+演算順序を維持します。pool は native context を最大 12 個保持し、RF pipeline と
+ともに dispose されます。専用 xUnit v3 integration test は pipeline routing、context
+creation、retention bound、dispose を検証します。
+
+固定 private PAL VHS 200-frame trace では、RF envelope filtering に属していた約
+1.50 秒の managed SOS CPU が消え、残る約 0.44 秒は chroma processing でした。
+opposite-order 1,000-frame IPP-fast pair 2 組は全 artifact/log surface が一致しました。
+v0.4.0 profile の wall time は 46.282/46.331 秒で neutral、average CPU は
+199.695 から 198.227 秒へ 0.74% 減少しました。`current` は 34.463 から
+34.224 秒へ 0.69% 高速化し、CPU は 216.430 から 210.336 秒へ 2.82% 減少しました。
+
+別の 1,000-frame runtime-counter run は working set を 34 回 sample しました。
+first/final-third median は 386.8/387.6 MiB、peak は 390.8 MiB、total allocation は
+677.1 MiB、GC pause は合計 35 ms でした。12-run deterministic gate は Exact/
+IPP-fast、v0.4.0/`current`、`--threads 0`、default-five、`--threads 20` を網羅し、
+各 profile 内の luma、chroma、raw JSON、stdout、normalized stderr/log、ordered
+`fileLoc` はすべて一致しました。
+
 ### 最新の 6-path thread matrix
 
 最新の overview は startup cost を含む 160-frame snapshot で、同じ private local
@@ -394,30 +416,32 @@ speedup、wall-time reduction の順です。
 <!-- LATEST_PERFORMANCE_BEGIN -->
 | CLI mode（workers） | Python v0.4.0 | Python PR341 | Exact + v0.4.0 | Exact + current | IPP-fast + v0.4.0 | IPP-fast + current |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| default（5） | 49.845 s | 51.191 s | 13.725 s / 3.632x / 72.46% | 13.016 s / 3.933x / 74.57% | 11.613 s / 4.292x / 76.70% | 10.061 s / 5.088x / 80.35% |
-| `--threads 1` | 55.763 s | 55.815 s | 36.661 s / 1.521x / 34.26% | 41.187 s / 1.355x / 26.21% | 26.086 s / 2.138x / 53.22% | 28.722 s / 1.943x / 48.54% |
-| `--threads 5` | 50.124 s | 51.398 s | 13.698 s / 3.659x / 72.67% | 12.571 s / 4.088x / 75.54% | 11.911 s / 4.208x / 76.24% | 10.063 s / 5.108x / 80.42% |
-| `--threads 10` | 48.710 s | 50.833 s | 11.079 s / 4.397x / 77.26% | 9.869 s / 5.151x / 80.58% | 9.890 s / 4.925x / 79.70% | 8.009 s / 6.347x / 84.24% |
-| `--threads 20` | 48.963 s | 50.195 s | 9.078 s / 5.394x / 81.46% | 7.977 s / 6.293x / 84.11% | 8.215 s / 5.960x / 83.22% | 6.573 s / 7.636x / 86.90% |
+| default（5） | 49.845 s | 51.191 s | 13.725 s / 3.632x / 72.46% | 13.016 s / 3.933x / 74.57% | 11.793 s / 4.226x / 76.34% | 9.980 s / 5.130x / 80.51% |
+| `--threads 1` | 55.763 s | 55.815 s | 36.661 s / 1.521x / 34.26% | 41.187 s / 1.355x / 26.21% | 25.016 s / 2.229x / 55.14% | 28.344 s / 1.969x / 49.22% |
+| `--threads 5` | 50.124 s | 51.398 s | 13.698 s / 3.659x / 72.67% | 12.571 s / 4.088x / 75.54% | 11.799 s / 4.248x / 76.46% | 10.142 s / 5.068x / 80.27% |
+| `--threads 10` | 48.710 s | 50.833 s | 11.079 s / 4.397x / 77.26% | 9.869 s / 5.151x / 80.58% | 9.879 s / 4.930x / 79.72% | 8.010 s / 6.347x / 84.24% |
+| `--threads 20` | 48.963 s | 50.195 s | 9.078 s / 5.394x / 81.46% | 7.977 s / 6.293x / 84.11% | 8.404 s / 5.826x / 82.84% | 6.370 s / 7.880x / 87.31% |
 <!-- LATEST_PERFORMANCE_END -->
-<!-- LATEST_PERFORMANCE_RUNS: dotnet-current-refresh=30 dotnet-v040-exact-refresh=15 reused-dotnet-v040-ipp-runs=15 reused-python-runs=30 repeats=3 hilbert-scale-committed-long=4 hilbert-scale-thread-gates=24 hilbert-scale-intrinsic-gates=3 hilbert-scale-current-matrix-runs=30 hilbert-scale-v040-exact-matrix-runs=15 python-matrix-runs=30 python-v040-runs=15 python-v040-hashes=15 python-v040-nondefault-runs=12 python-v040-nondefault-hashes=12 -->
+<!-- LATEST_PERFORMANCE_RUNS: dotnet-ipp-refresh=30 reused-dotnet-exact-runs=30 reused-python-runs=30 repeats=3 ipp-envelope-long-ab-runs=8 ipp-envelope-thread-gates=12 ipp-envelope-memory-runs=1 hilbert-scale-current-matrix-runs=30 hilbert-scale-v040-exact-matrix-runs=15 python-matrix-runs=30 python-v040-runs=15 python-v040-hashes=15 python-v040-nondefault-runs=12 python-v040-nondefault-hashes=12 -->
 
 3-run wall-time range は次のとおりです。
 
 | CLI mode | Python v0.4.0 | Python PR341 | Exact + v0.4.0 | Exact + current | IPP-fast + v0.4.0 | IPP-fast + current |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| default（5） | 49.112-50.297 s | 51.184-51.447 s | 13.624-13.990 s | 12.422-13.412 s | 11.415-11.744 s | 9.892-10.354 s |
-| `--threads 1` | 55.575-56.091 s | 55.607-56.037 s | 36.559-37.082 s | 40.756-42.515 s | 25.156-26.281 s | 28.649-28.724 s |
-| `--threads 5` | 49.225-50.180 s | 50.995-51.436 s | 13.664-13.842 s | 12.476-12.805 s | 11.665-12.029 s | 9.943-10.068 s |
-| `--threads 10` | 48.167-48.785 s | 49.780-51.154 s | 10.873-11.719 s | 9.575-10.071 s | 9.732-10.217 s | 7.999-8.051 s |
-| `--threads 20` | 48.803-49.278 s | 50.170-50.672 s | 9.070-9.560 s | 7.938-8.174 s | 8.162-8.281 s | 6.314-6.620 s |
+| default（5） | 49.112-50.297 s | 51.184-51.447 s | 13.624-13.990 s | 12.422-13.412 s | 11.663-11.820 s | 9.933-10.092 s |
+| `--threads 1` | 55.575-56.091 s | 55.607-56.037 s | 36.559-37.082 s | 40.756-42.515 s | 24.913-25.089 s | 28.333-28.798 s |
+| `--threads 5` | 49.225-50.180 s | 50.995-51.436 s | 13.664-13.842 s | 12.476-12.805 s | 11.759-11.841 s | 9.980-10.220 s |
+| `--threads 10` | 48.167-48.785 s | 49.780-51.154 s | 10.873-11.719 s | 9.575-10.071 s | 9.831-10.135 s | 7.977-8.134 s |
+| `--threads 20` | 48.803-49.278 s | 50.170-50.672 s | 9.070-9.560 s | 7.938-8.174 s | 8.202-8.457 s | 6.293-6.545 s |
 
-2026-08-09 に .NET Release run 45 回を更新しました。Exact v0.4.0、Exact `current`、
-IPP-fast `current` の 5 worker setting を、順序を入れ替えた 3 pass で実行しています。
-影響を受けない IPP-fast v0.4.0 列と 30 回の Python reference run は、同じ host と fixture
-で行った直前の direct refresh を再利用しています。candidate commit `3740bf1` は merged
-main `8409b1f` を基にし、single-file executable の SHA-256 は
-`0F119B82507E8ACB5FF0CF8EE4C407436671828B1981CC9FCDC824B2F34ACD19` です。
+2026-08-10 に .NET IPP-fast Release run 30 回を更新しました。2 つの behavior profile の
+5 worker setting を、順序を入れ替えた 3 pass で実行しています。変更のない Exact 列と
+30 回の Python reference run は、同じ host と fixture で行った直前の direct refresh を
+再利用しています。この candidate は merged main `4b9332b` を基にし、測定した production
+source は `RfBlockDecodePipeline.cs` の Git blob
+`49c1d00f64c5b576e0605bf4384262d7d17bdf91` と `RfDemodulator.cs` の Git blob
+`5977c905124562c4ef88c8193f5fc182b551395d` に固定しています。documentation と test-only
+edit は計測対象の decoder binary に含まれません。
 host は Intel Core Ultra 7 265K（20 logical processor）、Windows 11 build 26220、
 .NET SDK/runtime `11.0.100-preview.6.26359.118` です。raw run directory は private
 fixture path を含むため local にのみ保持します。これは local measurement の報告で、
@@ -425,13 +449,13 @@ public independently reproducible benchmark corpus ではありません。
 
 直前の 40-frame table は fixed startup cost、特に Python の startup cost を過大に反映
 していました。例えば default IPP-fast `current` は window を 160 frames に広げると
-6.351x から 5.088x になりました。Python は 19.791 から 51.191 秒への増加に対し、
-.NET は 3.116 から 10.061 秒へ増えています。これは startup cost の希釈であり、
+6.351x から 5.130x になりました。Python は 19.791 から 51.191 秒への増加に対し、
+.NET は 3.116 から 9.980 秒へ増えています。これは startup cost の希釈であり、
 candidate の regression ではありません。以前の NTSC Betamax HiFi table は別の private
 fixture を使うため比較できません。今後は 160-frame、3-pass method を維持し、因果的な
 性能判断には引き続き matched long A/B を使います。
 
-更新した candidate .NET matrix run 45 回は、capture した全 surface で
+更新した IPP-fast matrix run 30 回は、capture した全 surface で
 deterministic でした。merged Python PR341 も deterministic でした。Python v0.4.0 は
 15 run で 15 種類の luma、chroma、raw JSON、normalized-log hash を生成しましたが、
 stdout、normalized stderr、ordered `fileLoc` は安定していました。したがって strict
@@ -2782,7 +2806,7 @@ luma、chroma、raw JSON、stdout、normalized stderr/log、ordered `fileLoc` �
 .\tools\build-ipp-native.ps1
 dotnet restore VHSDecodeDotNet.slnx
 dotnet build VHSDecodeDotNet.slnx -c Release --no-restore
-dotnet test --solution VHSDecodeDotNet.slnx -c Release --no-build --no-restore --minimum-expected-tests 1396
+dotnet test --solution VHSDecodeDotNet.slnx -c Release --no-build --no-restore --minimum-expected-tests 1397
 dotnet test --project tests\VHSDecode.Tests\VHSDecode.Tests.csproj -c Release --no-build --no-restore --coverage --coverage-output coverage.cobertura.xml --coverage-output-format cobertura
 ```
 
@@ -2796,7 +2820,7 @@ third-party notice を埋め込み、license sidecar file は追加しません�
 
 現在の正式な Release build は warning 0、error 0 です。xUnit v3 project は
 `dotnet test` と Visual Studio Test Explorer の両方で個別に検出できる
-**1,396** tests を公開します。
+**1,397** tests を公開します。
 
 <!-- SECTION: usage -->
 

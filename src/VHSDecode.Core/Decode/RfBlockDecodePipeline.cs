@@ -27,6 +27,7 @@ public sealed class RfBlockDecodePipeline : IDisposable
     private readonly bool _useCurrentChromaShiftDc;
     private readonly bool _useNumpyComplexVhsAnalytic;
     private readonly IppSos32FilterPool? _chromaBurstIppSos;
+    private readonly IppSos32FilterPool? _vhsEnvelopeIppSos;
     private readonly ConcurrentStack<StreamBlockOutputBuffers> _streamOutputBufferPool = new();
     private readonly ConditionalWeakTable<RfPipelineBlock, StreamBlockOutputBuffers>
         _streamOutputBufferLeases = new();
@@ -103,6 +104,7 @@ public sealed class RfBlockDecodePipeline : IDisposable
         if (dspBackend == DspBackend.IppFast)
         {
             _chromaBurstIppSos = IppSos32FilterPool.TryCreate(filters.ChromaBurstSos);
+            _vhsEnvelopeIppSos = IppSos32FilterPool.TryCreate(filters.VhsEnvelopeSos);
         }
     }
 
@@ -114,6 +116,14 @@ public sealed class RfBlockDecodePipeline : IDisposable
 
     internal bool ParallelizesVhsInverseStaging =>
         _demodulator.ParallelizesVhsInverseStaging;
+
+    internal bool UsesIppVhsEnvelopeSos => _vhsEnvelopeIppSos is not null;
+
+    internal int CreatedIppVhsEnvelopeSosContextCount =>
+        _vhsEnvelopeIppSos?.CreatedContextCount ?? 0;
+
+    internal int RetainedIppVhsEnvelopeSosContextCount =>
+        _vhsEnvelopeIppSos?.RetainedContextCount ?? 0;
 
     internal bool RequiresSequentialBlockDecode => _filterOptions.SharpnessEq is not null;
 
@@ -262,7 +272,8 @@ public sealed class RfBlockDecodePipeline : IDisposable
                 includeAnalyticOutput: retainRfDiagnosticChannels,
                 includeDemodRawOutput: retainRfDiagnosticChannels || _filterOptions.ExportRawTbc,
                 useNumpyComplexVhsAnalytic: _useNumpyComplexVhsAnalytic,
-                outputBuffers: streamOutputBuffers?.Demodulated);
+                outputBuffers: streamOutputBuffers?.Demodulated,
+                vhsEnvelopeIppFilter: _vhsEnvelopeIppSos);
             if (reportDiagnostics)
             {
                 ReportDiagnostics(demodulated);
@@ -383,7 +394,14 @@ public sealed class RfBlockDecodePipeline : IDisposable
         try
         {
             _chromaBurstIppSos?.Dispose();
-            _demodulator.Dispose();
+            try
+            {
+                _vhsEnvelopeIppSos?.Dispose();
+            }
+            finally
+            {
+                _demodulator.Dispose();
+            }
         }
         finally
         {
