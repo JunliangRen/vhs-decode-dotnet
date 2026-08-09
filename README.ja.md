@@ -94,47 +94,40 @@ CVBS と HiFi は引き続き `ipp-fast` を拒否します。release-compatible
 ## 最新の性能
 
 これは同じ private local 40 MHz PAL VHS `.ldf` fixture を使う、startup cost を含む
-40-frame の short snapshot です。source filename は公開しません。Python と
-v0.4.0-profile cell は直前の full refresh から同じ fixture/window の median を保持します。
-今回の candidate は `current` parallel VSync path だけを変更するため、2 つの
-`current` .NET 列を reordered Release pass で各 3 回再測定しました。candidate は
-merged main `845d8d1` を基にしています。互換性と速度は別々に評価します。
+160-frame snapshot です。source filename は公開しません。6 path すべてを、この
+candidate 上で順序を入れ替えた 3 回の Release pass により更新しました。candidate は
+merged main `d8b6ed1` を基にしています。互換性と速度は別々に評価します。
 
 <!-- LATEST_PERFORMANCE_BEGIN -->
 | CLI mode（workers） | Python v0.4.0 | Python PR341 | Exact + v0.4.0 | Exact + current | IPP-fast + v0.4.0 | IPP-fast + current |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| default（5） | 17.401 s | 19.791 s | 4.341 s / 4.008x | 4.505 s / 4.393x | 3.549 s / 4.904x | 3.116 s / 6.351x |
-| `--threads 1` | 19.177 s | 21.052 s | 11.626 s / 1.649x | 13.073 s / 1.610x | 8.361 s / 2.294x | 9.404 s / 2.239x |
-| `--threads 5` | 17.458 s | 20.209 s | 4.043 s / 4.318x | 4.257 s / 4.748x | 3.654 s / 4.778x | 3.089 s / 6.543x |
-| `--threads 10` | 17.230 s | 19.480 s | 3.526 s / 4.886x | 3.950 s / 4.932x | 2.983 s / 5.775x | 2.556 s / 7.621x |
-| `--threads 20` | 17.558 s | 19.928 s | 2.772 s / 6.334x | 3.449 s / 5.778x | 2.632 s / 6.672x | 2.038 s / 9.779x |
+| default（5） | 49.845 s | 51.191 s | 13.326 s / 3.740x | 12.990 s / 3.941x | 11.750 s / 4.242x | 10.318 s / 4.961x |
+| `--threads 1` | 55.763 s | 55.815 s | 35.138 s / 1.587x | 41.092 s / 1.358x | 25.607 s / 2.178x | 28.889 s / 1.932x |
+| `--threads 5` | 50.124 s | 51.398 s | 13.362 s / 3.751x | 12.655 s / 4.061x | 11.774 s / 4.257x | 10.120 s / 5.079x |
+| `--threads 10` | 48.710 s | 50.833 s | 10.777 s / 4.520x | 9.752 s / 5.213x | 9.807 s / 4.967x | 8.071 s / 6.299x |
+| `--threads 20` | 48.963 s | 50.195 s | 8.717 s / 5.617x | 7.708 s / 6.512x | 8.464 s / 5.785x | 6.402 s / 7.841x |
 <!-- LATEST_PERFORMANCE_END -->
-<!-- LATEST_PERFORMANCE_RUNS: full-refresh=90 current-refresh=30 repeats=3 candidate-ab=20 thread-gates=24 candidate-long=4 strict-candidate-runs=48 current-determinism=30 python-v040-runs=15 python-v040-hashes=15 python-v040-nondefault-runs=12 python-v040-nondefault-hashes=12 -->
+<!-- LATEST_PERFORMANCE_RUNS: full-refresh=90 repeats=3 candidate-ab=16 thread-gates=24 candidate-long=4 strict-candidate-runs=44 dotnet-matrix-runs=60 python-matrix-runs=30 python-v040-runs=15 python-v040-hashes=15 python-v040-nondefault-runs=12 python-v040-nondefault-hashes=12 -->
 
-各 .NET cell は wall-time median と profile が対応する Python 列に対する
-speedup の順で、default は **5 workers** です。以前公開した table は別の private
-NTSC Betamax HiFi fixture を使っており、直接比較できません。40-frame cell は startup
-cost と measurement noise を含むため、古い screenshot との差は regression evidence
-ではありません。今回の candidate は worker-private VSync radix histogram を worker
-ごとに連続して merge し、利用可能なら AVX2 integer add を使います。worker order と
-exact scalar fallback は維持します。
+各 .NET cell は wall-time median と profile が対応する Python 列に対する speedup の
+順で、default は **5 workers** です。3-run range は
+[詳細な性能リファレンス](docs/README.detailed.ja.md#パフォーマンス)にあります。以前の
+40-frame table は、特に Python の startup cost を大きく反映していたため、長い window
+で speedup が低くなっても decoder regression を意味しません。
 
-stable paired evidence は opposite-order の 1,000-frame IPP-fast
-`current --threads 20` comparison 2 組です。combined wall time は 72.914 から
-71.790 秒へ 1.54% 短縮（1.0157x throughput）、CPU time は 426.328 から
-422.594 秒へ 0.88% 減少し、peak working set は約 373 MiB のまま継続的な増加は
-ありません。本変更の causal performance evidence はこの long paired gate であり、
-short table の変動ではありません。
+Exact `current` は cache-sized 11+11+10-bit parallel radix stage により、同じ 32-bit
+sortable VSync prefix を選択します。compact route が IPP-fast を改善しなかったため、
+IPP-fast は以前の 16+16-bit route を維持します。opposite-order の 1,000-frame Exact
+`current --threads 20` pair 2 組では、combined wall time が 82.260 から 80.387 秒へ
+2.28% 短縮（1.0233x throughput）、CPU time が 644.594 から 640.391 秒へ 0.65%
+減少し、memory は bounded のままでした。
 
-48 回の strict baseline/candidate run は luma、chroma、raw JSON、ordered `fileLoc`、
-normalized stderr/log がすべて一致し、stdout を capture した short/thread-matrix gate
-でも一致しました。再測定した 30 回の `current` matrix run は cross-thread deterministic
-でした。IPP-fast は explicit numerically-close backend
-のままで、Exact と byte-for-byte 同一とは主張しません。merged Python PR341 は
-deterministic でしたが、Python v0.4.0 は全 15 matrix run で別々の luma、chroma、
-JSON hash を生成し、明示的 non-default worker の 12 run も 12 種類でした。そのため
-strict oracle は引き続き Python v0.4.0 `g4315520 --threads 0` です。完全な command、hardware、hash、memory bound、
-過去の測定は
+最終 44 回の baseline/candidate run は luma、chroma、raw JSON、ordered `fileLoc`、
+stdout、normalized stderr/log がすべて一致しました。60 回の .NET matrix run はすべて
+deterministic でした。merged Python PR341 も deterministic でしたが、Python v0.4.0
+は 15 run で 15 種類の luma、chroma、JSON、log hash を生成したため、strict oracle は
+引き続き Python v0.4.0 `g4315520 --threads 0` です。完全な command、hardware、hash、
+memory bound、過去の測定は
 [詳細な性能リファレンス](docs/README.detailed.ja.md#パフォーマンス)にあります。
 
 <!-- SECTION: compatibility -->

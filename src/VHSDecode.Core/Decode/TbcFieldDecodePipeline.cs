@@ -370,7 +370,8 @@ public sealed class TbcFieldDecodePipeline : IDisposable
                 checked((int)Math.Round(syncAnalyzer.NominalLineLength, MidpointRounding.ToEven)),
                 syncAnalyzer.UsecToSamples(0.22),
                 workerThreads,
-                parallelizePreciseEdgeScan: dspBackend == DspBackend.Exact);
+                parallelizePreciseEdgeScan: dspBackend == DspBackend.Exact,
+                useCompactParallelRadix: dspBackend == DspBackend.Exact);
             _vhsVSyncLevelRefiner = new VhsVSyncLevelRefiner();
         }
 

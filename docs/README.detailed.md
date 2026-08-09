@@ -406,7 +406,7 @@ two 60-line buffers per detector.
 
 ### Latest six-path thread matrix
 
-The latest public summary is a startup-inclusive 40-frame snapshot comparing
+The latest public summary is a startup-inclusive 160-frame snapshot comparing
 Python v0.4.0, merged Python PR341, Exact v0.4.0, Exact `current`, IPP-fast
 v0.4.0, and IPP-fast `current` on the same private local 40 MHz PAL VHS `.ldf`
 fixture. The source filename is intentionally not published. Each .NET cell
@@ -416,37 +416,93 @@ profile-matched Python column:
 <!-- LATEST_PERFORMANCE_BEGIN -->
 | CLI mode (workers) | Python v0.4.0 | Python PR341 | Exact + v0.4.0 | Exact + current | IPP-fast + v0.4.0 | IPP-fast + current |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| default (5) | 17.401 s | 19.791 s | 4.341 s / 4.008x / 75.05% | 4.505 s / 4.393x / 77.24% | 3.549 s / 4.904x / 79.61% | 3.116 s / 6.351x / 84.25% |
-| `--threads 1` | 19.177 s | 21.052 s | 11.626 s / 1.649x / 39.37% | 13.073 s / 1.610x / 37.90% | 8.361 s / 2.294x / 56.40% | 9.404 s / 2.239x / 55.33% |
-| `--threads 5` | 17.458 s | 20.209 s | 4.043 s / 4.318x / 76.84% | 4.257 s / 4.748x / 78.94% | 3.654 s / 4.778x / 79.07% | 3.089 s / 6.543x / 84.72% |
-| `--threads 10` | 17.230 s | 19.480 s | 3.526 s / 4.886x / 79.53% | 3.950 s / 4.932x / 79.72% | 2.983 s / 5.775x / 82.69% | 2.556 s / 7.621x / 86.88% |
-| `--threads 20` | 17.558 s | 19.928 s | 2.772 s / 6.334x / 84.21% | 3.449 s / 5.778x / 82.69% | 2.632 s / 6.672x / 85.01% | 2.038 s / 9.779x / 89.77% |
+| default (5) | 49.845 s | 51.191 s | 13.326 s / 3.740x / 73.27% | 12.990 s / 3.941x / 74.62% | 11.750 s / 4.242x / 76.43% | 10.318 s / 4.961x / 79.84% |
+| `--threads 1` | 55.763 s | 55.815 s | 35.138 s / 1.587x / 36.99% | 41.092 s / 1.358x / 26.38% | 25.607 s / 2.178x / 54.08% | 28.889 s / 1.932x / 48.24% |
+| `--threads 5` | 50.124 s | 51.398 s | 13.362 s / 3.751x / 73.34% | 12.655 s / 4.061x / 75.38% | 11.774 s / 4.257x / 76.51% | 10.120 s / 5.079x / 80.31% |
+| `--threads 10` | 48.710 s | 50.833 s | 10.777 s / 4.520x / 77.88% | 9.752 s / 5.213x / 80.82% | 9.807 s / 4.967x / 79.87% | 8.071 s / 6.299x / 84.12% |
+| `--threads 20` | 48.963 s | 50.195 s | 8.717 s / 5.617x / 82.20% | 7.708 s / 6.512x / 84.64% | 8.464 s / 5.785x / 82.71% | 6.402 s / 7.841x / 87.25% |
 <!-- LATEST_PERFORMANCE_END -->
-<!-- LATEST_PERFORMANCE_RUNS: full-refresh=90 current-refresh=30 repeats=3 candidate-ab=20 thread-gates=24 candidate-long=4 strict-candidate-runs=48 current-determinism=30 python-v040-runs=15 python-v040-hashes=15 python-v040-nondefault-runs=12 python-v040-nondefault-hashes=12 -->
+<!-- LATEST_PERFORMANCE_RUNS: full-refresh=90 repeats=3 candidate-ab=16 thread-gates=24 candidate-long=4 strict-candidate-runs=44 dotnet-matrix-runs=60 python-matrix-runs=30 python-v040-runs=15 python-v040-hashes=15 python-v040-nondefault-runs=12 python-v040-nondefault-hashes=12 -->
 
-The Python and v0.4.0-profile columns retain the three-run medians from the
-immediately preceding 90-run full refresh on 2026-08-09. Because this candidate
-changes only the `current` parallel VSync path, 30 additional Release runs
-refreshed both `current` .NET columns at all five worker settings, with ordering
-reversed and mixed across three passes. The candidate is based on merged main
-`845d8d1`; its executable had SHA-256
-`7BAC056495F42BF4327F6E9D99AF4168F0FA585319BC9CF9F9D09E84B4A3E632`.
+The three-run wall-time ranges were:
+
+| CLI mode | Python v0.4.0 | Python PR341 | Exact + v0.4.0 | Exact + current | IPP-fast + v0.4.0 | IPP-fast + current |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| default (5) | 49.112-50.297 s | 51.184-51.447 s | 13.235-13.527 s | 12.602-13.213 s | 11.652-11.788 s | 10.226-10.396 s |
+| `--threads 1` | 55.575-56.091 s | 55.607-56.037 s | 34.955-35.642 s | 40.920-41.142 s | 25.536-25.859 s | 28.845-29.114 s |
+| `--threads 5` | 49.225-50.180 s | 50.995-51.436 s | 13.114-13.760 s | 12.653-13.373 s | 11.774-11.893 s | 10.021-10.310 s |
+| `--threads 10` | 48.167-48.785 s | 49.780-51.154 s | 10.490-10.780 s | 9.725-10.400 s | 9.723-9.833 s | 8.036-8.141 s |
+| `--threads 20` | 48.803-49.278 s | 50.170-50.672 s | 8.657-8.756 s | 7.632-8.528 s | 8.252-8.534 s | 6.390-6.571 s |
+
+All 90 Release runs were refreshed on 2026-08-09, with each of the six paths at
+all five worker settings run in three reordered passes. The candidate is based
+on merged main `d8b6ed1`; its single-file executable had SHA-256
+`EAB40EF796F8DE9A885A9DC17FF1198E3685DCBDB9A24FC48FEB41CC6532B2E9`.
 The host was an Intel Core Ultra 7 265K with 20 logical processors, Windows 11
 build 26220, and .NET SDK/runtime `11.0.100-preview.6.26359.118`. Raw run
-directories are retained locally because they contain the private fixture path;
-these are local measurements rather than an independently reproducible public
-corpus.
+directories remain local because they contain the private fixture path; these
+are local measurements rather than an independently reproducible public corpus.
 
-An older public table used a different private NTSC Betamax HiFi `.lds`
-fixture, so its multipliers are not directly comparable with this PAL VHS
-matrix. Even on this same fixture, a 40-frame result is dominated more heavily
-by startup and ambient load: the three refreshed Exact `current --threads 20`
-runs ranged from 3.280 to 3.606 seconds, and the older 3.298-second cell lies
-inside that spread. Table movement by itself is therefore not a regression or
-optimization claim; the longer paired A/B below is the causal evidence.
+The preceding 40-frame table made fixed startup cost, especially Python's,
+disproportionately large. For example, the default IPP-fast `current` ratio fell
+from 6.351x to 4.961x when the window grew to 160 frames: Python grew only from
+19.791 to 51.191 seconds while .NET grew from 3.116 to 10.318 seconds. This is
+startup-cost dilution, not evidence that the candidate regressed. The older
+NTSC Betamax HiFi table used another private fixture and is not comparable at
+all. Future refreshes retain this 160-frame, three-pass method; causal claims
+still require matched longer A/B runs.
+
+All 60 .NET matrix runs were deterministic on every captured surface. Merged
+Python PR341 was also deterministic. Python v0.4.0 produced 15 distinct luma,
+chroma, raw JSON, and normalized-log hashes in 15 runs, while stdout, normalized
+stderr, and ordered `fileLoc` remained stable. The strict oracle therefore
+remains Python v0.4.0 `g4315520 --threads 0`, not an arbitrary multi-worker run.
+
+### Compact Exact VSync radix staging
+
+The Exact `current` parallel VSync quantile selector now resolves the same
+32-bit sortable prefix through 11+11+10-bit radix stages instead of two 16-bit
+stages. The final candidate prefix, source-order filter, Quickselect input,
+floating-point expressions, and detector state are unchanged. The sequential
+path is unchanged as well. Worker-private maximum histogram storage falls from
+512 KiB to 16 KiB, or from 2 MiB to 64 KiB at the detector's four-worker cap.
+
+IPP-fast explicitly keeps the previous 16+16-bit route. Applying the compact
+route to both backends initially made the four-pair IPP gate 1.6% slower in wall
+time and 1.8% higher in CPU time. After routing only Exact through the compact
+stages, the final four-pair IPP check was neutral: wall time was 1.31% lower and
+CPU time about 0.4% higher, with exact baseline/candidate artifacts within the
+IPP contract.
+
+In the fixed production-size selection probe, eight of eight paired batches
+favored the compact form. Median wall time fell from 0.966511 to 0.891624
+seconds (7.75% lower, about 1.084x throughput), with checksum
+`000000002704317B` unchanged. This is hotspot evidence, not an end-to-end claim.
+Four interleaved 160-frame Exact pairs reduced balanced total wall time from
+34.113 to 33.114 seconds (2.93%) and CPU time from 303.11 to 278.11 seconds
+(8.25%); two of four individual pairs won, so the short result remains noisy.
+
+The causal end-to-end gate was two opposite-order 1,000-frame Exact `current
+--threads 20` pairs. Combined wall time fell from 82.260 to 80.387 seconds
+(2.28% lower, 1.0233x throughput), and CPU time fell from 644.594 to 640.391
+seconds (0.65%). Candidate working-set samples stayed bounded within each run;
+placement variability moved observed peaks between 387.5 and 418.7 MiB, with no
+progressive growth or OOM behavior.
+
+The final strict gate comprised 44 baseline/candidate runs: eight short
+interleaved pairs, two opposite-order long pairs, and 24 Exact/IPP-fast thread
+runs spanning both behavior profiles at `--threads 0`, default-5, and
+`--threads 20`. Luma, chroma, raw JSON, ordered `fileLoc`, stdout, normalized
+stderr, and normalized logs matched throughout. The focused detector suite
+passed 25/25 tests; all 1,382 xUnit v3 tests passed with native hardware, AVX2
+disabled, and all hardware intrinsics disabled. The Release solution build
+completed with zero warnings and zero errors.
 
 ### Contiguous AVX2 VSync radix histogram merge
 
+This previously merged candidate was based on main `845d8d1`; its executable
+had SHA-256
+`7BAC056495F42BF4327F6E9D99AF4168F0FA585319BC9CF9F9D09E84B4A3E632`.
 The `current` VSync quantile path now merges each worker-private radix histogram
 as one contiguous span. The first worker is copied into the destination and
 later workers are added in the original worker order; AVX2 handles eight exact
