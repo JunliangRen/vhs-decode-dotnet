@@ -130,7 +130,7 @@ jobs:
         run: dotnet build VHSDecodeDotNet.slnx --configuration Release --no-restore
 
       - name: Run tests
-        run: dotnet test --solution VHSDecodeDotNet.slnx --configuration Release --no-build --no-restore --minimum-expected-tests 1385
+        run: dotnet test --solution VHSDecodeDotNet.slnx --configuration Release --no-build --no-restore --minimum-expected-tests 1394
 
       - name: Run NumPy reduction scalar fallback tests
         env:
@@ -140,7 +140,7 @@ jobs:
       - name: Run current VHS sync scalar fallback tests
         env:
           DOTNET_EnableHWIntrinsic: "0"
-        run: dotnet test tests/VHSDecode.Tests/VHSDecode.Tests.csproj --configuration Release --no-build --no-restore --filter-class VHSDecode.Tests.VhsSyncDetectorCurrentTests --minimum-expected-tests 25
+        run: dotnet test tests/VHSDecode.Tests/VHSDecode.Tests.csproj --configuration Release --no-build --no-restore --filter-class VHSDecode.Tests.VhsSyncDetectorCurrentTests --minimum-expected-tests 34
 
       - name: Run current CTI scalar fallback tests
         env:

@@ -1,5 +1,6 @@
 using System.Buffers.Binary;
 using System.Runtime.CompilerServices;
+using System.Runtime.Intrinsics.X86;
 using System.Security.Cryptography;
 using VHSDecode.Core.Dsp;
 using Xunit;
@@ -177,6 +178,124 @@ public sealed class VhsSyncDetectorCurrentTests
 
         Assert.Equal(expected, actual[..Count]);
         Assert.All(actual[Count..], value => Assert.Equal(int.MinValue, value));
+    }
+
+    [Theory(DisplayName = "AVX current VHS precise edge scanning matches the scalar oracle")]
+    [InlineData(0)]
+    [InlineData(1)]
+    [InlineData(4)]
+    [InlineData(5)]
+    [InlineData(31)]
+    [InlineData(32)]
+    [InlineData(33)]
+    [InlineData(4_099)]
+    public void AvxCurrentVhsPreciseEdgeScanningMatchesScalarOracle(int length)
+    {
+        var random = new Random(4_315_520 + length);
+        var filtered = new double[length];
+        for (int index = 0; index < filtered.Length; index++)
+        {
+            filtered[index] = (index + random.Next(11)) % 13 switch
+            {
+                0 => double.NaN,
+                1 => double.PositiveInfinity,
+                2 => double.NegativeInfinity,
+                3 => -0.0,
+                4 => 0.0,
+                5 => -2.0,
+                6 => 2.0,
+                7 => BitConverter.Int64BitsToDouble(
+                    unchecked((long)0x7FF0_0000_0000_0001UL)),
+                8 => BitConverter.Int64BitsToDouble(
+                    unchecked((long)0xFFF0_0000_0000_0001UL)),
+                _ => (random.NextDouble() * 8.0) - 4.0
+            };
+        }
+
+        int[] falls = Enumerable.Range(0, 64)
+            .Select(index => 17 + (index * 97))
+            .ToArray();
+        bool[] finalMask = Enumerable.Range(0, falls.Length)
+            .Select(index => index % 5 != 1)
+            .ToArray();
+        var scalarFalls = new List<int> { int.MinValue };
+        var scalarRises = new List<int> { int.MaxValue };
+        var avxFalls = new List<int> { int.MinValue };
+        var avxRises = new List<int> { int.MaxValue };
+
+        VhsSyncDetector.FindPreciseEdgesOnValidGrid(
+            filtered,
+            preciseMidpoint: 0.0,
+            falls,
+            finalMask,
+            falls.Length,
+            effectiveLineLength: 111.55,
+            jitterTolerance: 10.75,
+            scalarFalls,
+            scalarRises,
+            allowAvx: false);
+        VhsSyncDetector.FindPreciseEdgesOnValidGrid(
+            filtered,
+            preciseMidpoint: 0.0,
+            falls,
+            finalMask,
+            falls.Length,
+            effectiveLineLength: 111.55,
+            jitterTolerance: 10.75,
+            avxFalls,
+            avxRises,
+            allowAvx: true);
+
+        Assert.Equal(scalarFalls, avxFalls);
+        Assert.Equal(scalarRises, avxRises);
+    }
+
+    [Fact(DisplayName = "AVX current VHS precise edge scanning handles special values and its scalar tail")]
+    public void AvxCurrentVhsPreciseEdgeScanningHandlesSpecialValuesAndScalarTail()
+    {
+        Assert.SkipUnless(Avx.IsSupported, "AVX is unavailable on this host.");
+        double positiveSignalingNaN = BitConverter.Int64BitsToDouble(
+            unchecked((long)0x7FF0_0000_0000_0001UL));
+        double negativeSignalingNaN = BitConverter.Int64BitsToDouble(
+            unchecked((long)0xFFF0_0000_0000_0001UL));
+        double[] filtered =
+        [
+            double.PositiveInfinity,
+            double.NegativeInfinity,
+            -1.0,
+            -0.0,
+            double.NaN,
+            0.0,
+            -1.0,
+            negativeSignalingNaN,
+            double.NegativeInfinity,
+            double.PositiveInfinity,
+            positiveSignalingNaN,
+            0.0,
+            -1.0,
+            -1.0,
+            double.NaN,
+            -1.0,
+            -1.0,
+            1.0
+        ];
+        var fallingEdges = new List<int>();
+        var risingEdges = new List<int>();
+
+        VhsSyncDetector.FindPreciseEdgesOnValidGrid(
+            filtered,
+            preciseMidpoint: 0.0,
+            falls: [0],
+            finalMask: [true],
+            amplitudeCount: 1,
+            effectiveLineLength: 1_000.0,
+            jitterTolerance: 100.0,
+            fallingEdges,
+            risingEdges,
+            allowAvx: true);
+
+        Assert.Equal([0, 5, 11], fallingEdges);
+        Assert.Equal([2, 8, 16], risingEdges);
     }
 
     [Fact(DisplayName = "Current VHS sync detector reuses its full-field workspace")]
