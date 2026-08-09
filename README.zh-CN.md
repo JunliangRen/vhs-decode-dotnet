@@ -89,42 +89,36 @@ CVBS 和 HiFi 仍会拒绝 `ipp-fast`；需要 release 兼容行为时应使用 
 
 ## 最新性能
 
-这是同一份私有本地 40 MHz PAL VHS `.ldf` 夹具上的 40 帧短快照，包含启动开销，
-且不会公开源文件名。Python 和 v0.4.0 profile 的单元格保留紧邻上一次完整刷新中
-同夹具、同窗口的中位数。本候选只改动 `current` 的并行 VSync 路径，因此重新交错
-执行了两个 `current` .NET 列各三次 Release 测量；候选基于已合并的 main `845d8d1`。
-兼容性结论与速度数据分开判断。
+这是同一份私有本地 40 MHz PAL VHS `.ldf` 夹具上的 160 帧快照，包含启动开销，
+且不会公开源文件名。六条路径都在本候选上按三种重排顺序重新执行了 Release 测量；
+候选基于已合并的 main `d8b6ed1`。兼容性结论与速度数据分开判断。
 
 <!-- LATEST_PERFORMANCE_BEGIN -->
 | CLI 模式（workers） | Python v0.4.0 | Python PR341 | Exact + v0.4.0 | Exact + current | IPP-fast + v0.4.0 | IPP-fast + current |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| 默认（5） | 17.401 s | 19.791 s | 4.341 s / 4.008x | 4.505 s / 4.393x | 3.549 s / 4.904x | 3.116 s / 6.351x |
-| `--threads 1` | 19.177 s | 21.052 s | 11.626 s / 1.649x | 13.073 s / 1.610x | 8.361 s / 2.294x | 9.404 s / 2.239x |
-| `--threads 5` | 17.458 s | 20.209 s | 4.043 s / 4.318x | 4.257 s / 4.748x | 3.654 s / 4.778x | 3.089 s / 6.543x |
-| `--threads 10` | 17.230 s | 19.480 s | 3.526 s / 4.886x | 3.950 s / 4.932x | 2.983 s / 5.775x | 2.556 s / 7.621x |
-| `--threads 20` | 17.558 s | 19.928 s | 2.772 s / 6.334x | 3.449 s / 5.778x | 2.632 s / 6.672x | 2.038 s / 9.779x |
+| 默认（5） | 49.845 s | 51.191 s | 13.326 s / 3.740x | 12.990 s / 3.941x | 11.750 s / 4.242x | 10.318 s / 4.961x |
+| `--threads 1` | 55.763 s | 55.815 s | 35.138 s / 1.587x | 41.092 s / 1.358x | 25.607 s / 2.178x | 28.889 s / 1.932x |
+| `--threads 5` | 50.124 s | 51.398 s | 13.362 s / 3.751x | 12.655 s / 4.061x | 11.774 s / 4.257x | 10.120 s / 5.079x |
+| `--threads 10` | 48.710 s | 50.833 s | 10.777 s / 4.520x | 9.752 s / 5.213x | 9.807 s / 4.967x | 8.071 s / 6.299x |
+| `--threads 20` | 48.963 s | 50.195 s | 8.717 s / 5.617x | 7.708 s / 6.512x | 8.464 s / 5.785x | 6.402 s / 7.841x |
 <!-- LATEST_PERFORMANCE_END -->
-<!-- LATEST_PERFORMANCE_RUNS: full-refresh=90 current-refresh=30 repeats=3 candidate-ab=20 thread-gates=24 candidate-long=4 strict-candidate-runs=48 current-determinism=30 python-v040-runs=15 python-v040-hashes=15 python-v040-nondefault-runs=12 python-v040-nondefault-hashes=12 -->
+<!-- LATEST_PERFORMANCE_RUNS: full-refresh=90 repeats=3 candidate-ab=16 thread-gates=24 candidate-long=4 strict-candidate-runs=44 dotnet-matrix-runs=60 python-matrix-runs=30 python-v040-runs=15 python-v040-hashes=15 python-v040-nondefault-runs=12 python-v040-nondefault-hashes=12 -->
 
 每个 .NET 单元格依次给出墙钟中位数和相对同 profile Python 列的倍速；默认实际
-使用 **5 个 workers**。更早公开的表格使用另一份私有 NTSC Betamax HiFi 夹具，
-不能直接横向比较。40 帧单元格包含启动成本和测量噪声，相对旧截图的变化不能作为
-性能回退证据。本候选按 worker 连续合并其私有 VSync radix histogram，并在可用时使用
-AVX2 整数加法，同时保持 worker 顺序和完全一致的标量回退。
+使用 **5 个 workers**。三次运行范围见[详细性能说明](docs/README.detailed.zh-CN.md#性能)。
+旧 40 帧表会放大启动成本，尤其是 Python 的启动成本，因此新版长窗口中的较低倍速
+并不表示解码器发生性能回退。
 
-稳定配对证据来自两组正反顺序的 1000 帧 IPP-fast `current --threads 20` 比较：合计
-墙钟从 72.914 降到 71.790 秒（缩短 1.54%，吞吐为 1.0157x），CPU 时间从 426.328
-降到 422.594 秒（减少 0.88%）；峰值工作集约 373 MiB，未见持续增长。本次改动的
-因果性能证据是这项长配对，而不是短表相对旧表的波动。
+Exact `current` 现在通过适合缓存的 11+11+10 位并行 radix 阶段选择相同的 32 位
+sortable VSync prefix。IPP-fast 保留原来的 16+16 位路径，因为紧凑路径没有改善该
+后端。两组正反顺序的 1000 帧 Exact `current --threads 20` 配对将合计墙钟从
+82.260 降到 80.387 秒（缩短 2.28%，吞吐为 1.0233x），CPU 时间从 644.594 降到
+640.391 秒（减少 0.65%），内存保持有界。
 
-48 次严格基线/候选运行的亮度、色度、原始 JSON、有序 `fileLoc`、归一化 stderr 和
-日志全部一致；在有采集 stdout 的短配对和线程矩阵中，stdout 也一致。重新测量的 30 次
-`current` 矩阵运行保持跨线程确定性。IPP-fast 仍是显式启用的数值近似后端，因此不
-声称其产物与 Exact 逐字节一致。已合并的 Python PR341
-在本轮保持确定性；Python v0.4.0 的全部 15 次矩阵运行都产生了不同的亮度、色度和
-JSON hash，其中 12 次显式非默认 worker 运行也是 12 套。因此严格 oracle 仍是
-Python v0.4.0 `g4315520 --threads 0`。完整命令、硬件、hash、内存边界和历史测量请查看
-[详细性能说明](docs/README.detailed.zh-CN.md#性能)。
+最终 44 次基线/候选运行的亮度、色度、原始 JSON、有序 `fileLoc`、stdout、归一化
+stderr 和日志全部一致；60 次 .NET 矩阵运行全部确定。已合并的 Python PR341 在本轮
+保持确定性；Python v0.4.0 的 15 次运行产生了 15 套亮度、色度、JSON 和日志 hash，
+因此严格 oracle 仍是 Python v0.4.0 `g4315520 --threads 0`。
 
 <!-- SECTION: compatibility -->
 

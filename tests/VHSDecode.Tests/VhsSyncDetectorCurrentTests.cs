@@ -213,7 +213,7 @@ public sealed class VhsSyncDetectorCurrentTests
             152.0,
             2_560,
             8.8,
-            workerThreads: 4);
+            workerThreads: 20);
         _ = detector.Detect(
             signal,
             detectLevels: true,
@@ -457,10 +457,11 @@ public sealed class VhsSyncDetectorCurrentTests
                         * (1.0 + (random.NextDouble() * 10_000_000.0)))
                 .ToArray()
         ];
+        const int maximumWorkers = 20;
         var workerHistograms = Enumerable.Repeat(
             int.MinValue,
-            4 * VhsSyncDetector.RadixHistogramWidth * 2).ToArray();
-        var workerFlags = Enumerable.Repeat(int.MinValue, 4).ToArray();
+            maximumWorkers * VhsSyncDetector.RadixHistogramWidth * 2).ToArray();
+        var workerFlags = Enumerable.Repeat(int.MinValue, maximumWorkers).ToArray();
 
         foreach (double[] source in sources)
         {
@@ -488,7 +489,7 @@ public sealed class VhsSyncDetectorCurrentTests
                     syncTarget,
                     blankingTarget);
 
-            for (int workers = 2; workers <= 4; workers++)
+            foreach (int workers in new[] { 2, 3, 4, 5, 10, 20 })
             {
                 var actualScratch = new double[source.Length];
                 (double actualSync, double actualBlanking) =
@@ -510,6 +511,31 @@ public sealed class VhsSyncDetectorCurrentTests
                 Assert.Equal(
                     BitConverter.DoubleToInt64Bits(expectedBlanking),
                     BitConverter.DoubleToInt64Bits(actualBlanking));
+                Assert.All(
+                    workerFlags.AsSpan(0, workers).ToArray(),
+                    flag => Assert.Equal(0, flag));
+
+                var denseScratch = new double[source.Length];
+                (double denseSync, double denseBlanking) =
+                    VhsSyncDetector.SelectLevelQuantilesRadixParallel(
+                        backing,
+                        source.Length,
+                        denseScratch,
+                        new int[VhsSyncDetector.RadixHistogramWidth],
+                        new int[VhsSyncDetector.RadixHistogramWidth * 2],
+                        workerHistograms,
+                        workerFlags,
+                        syncTarget,
+                        blankingTarget,
+                        workers,
+                        useCompactParallelRadix: false);
+
+                Assert.Equal(
+                    BitConverter.DoubleToInt64Bits(expectedSync),
+                    BitConverter.DoubleToInt64Bits(denseSync));
+                Assert.Equal(
+                    BitConverter.DoubleToInt64Bits(expectedBlanking),
+                    BitConverter.DoubleToInt64Bits(denseBlanking));
                 Assert.All(
                     workerFlags.AsSpan(0, workers).ToArray(),
                     flag => Assert.Equal(0, flag));

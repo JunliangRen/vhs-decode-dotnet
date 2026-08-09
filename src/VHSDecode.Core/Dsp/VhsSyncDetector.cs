@@ -24,6 +24,12 @@ public sealed class VhsSyncDetector
     private const int MinimumParallelBoxcarSamples = 65_536;
     private const int MinimumParallelEdgeScanSamples = 65_536;
     private const int MinimumParallelRadixSamples = 524_288;
+    private const int ParallelRadixFirstShift = 21;
+    private const int ParallelRadixSecondShift = 10;
+    private const int ParallelRadixFirstWidth = 1 << 11;
+    private const int ParallelRadixSecondWidth = 1 << 11;
+    private const int ParallelRadixThirdWidth = 1 << 10;
+    private const int MaximumParallelRadixHistogramLength = ParallelRadixSecondWidth * 2;
     private const double SyncSpacingTolerance = 0.15;
     private const int MinimumGridLength = 8;
     private const int PartitionSortThreshold = 32;
@@ -34,6 +40,7 @@ public sealed class VhsSyncDetector
     private readonly double _approximateTransition;
     private readonly int _workerThreads;
     private readonly bool _parallelizePreciseEdgeScan;
+    private readonly bool _useCompactParallelRadix;
     private readonly ConcurrentBag<VhsSyncWorkspace> _workspaces = [];
 
     // Upstream: oyvindln/vhs-decode
@@ -60,7 +67,8 @@ public sealed class VhsSyncDetector
         int lineLength,
         double approximateTransition,
         int workerThreads,
-        bool parallelizePreciseEdgeScan = true)
+        bool parallelizePreciseEdgeScan = true,
+        bool useCompactParallelRadix = true)
     {
         _hSyncLength = double.IsFinite(hSyncLength) && hSyncLength > 0.0
             ? hSyncLength
@@ -79,6 +87,7 @@ public sealed class VhsSyncDetector
             1,
             MaximumParallelBoxcarWorkers);
         _parallelizePreciseEdgeScan = parallelizePreciseEdgeScan;
+        _useCompactParallelRadix = useCompactParallelRadix;
     }
 
     internal VhsSyncDetectionResult Detect(
@@ -128,7 +137,8 @@ public sealed class VhsSyncDetector
                         filtered,
                         filteredLength,
                         workspace,
-                        _workerThreads);
+                        _workerThreads,
+                        _useCompactParallelRadix);
             }
 
             return DetectFiltered(
@@ -1040,7 +1050,8 @@ public sealed class VhsSyncDetector
         double[] filtered,
         int filteredLength,
         VhsSyncWorkspace workspace,
-        int workerThreads)
+        int workerThreads,
+        bool useCompactParallelRadix)
     {
         if (workerThreads <= 1
             || filteredLength < MinimumParallelRadixSamples)
@@ -1058,11 +1069,14 @@ public sealed class VhsSyncDetector
             workspace.EnsurePartitionedLength(filteredLength),
             workspace.EnsureHighHistogram(),
             workspace.EnsureMiddleHistograms(),
-            workspace.EnsureWorkerHistograms(workerThreads),
+            workspace.EnsureWorkerHistograms(
+                workerThreads,
+                useCompactParallelRadix),
             workspace.EnsureWorkerFlags(workerThreads),
             syncIndex,
             blankingIndex,
-            workerThreads);
+            workerThreads,
+            useCompactParallelRadix);
     }
 
     private static double UpperMedianOfWindow(
@@ -1114,7 +1128,8 @@ public sealed class VhsSyncDetector
             workerFlags: null,
             syncTarget,
             blankingTarget,
-            workerThreads: 1);
+            workerThreads: 1,
+            useCompactParallelRadix: false);
 
     internal static (double SyncTip, double Blanking) SelectLevelQuantilesRadixParallel(
         double[] values,
@@ -1126,7 +1141,8 @@ public sealed class VhsSyncDetector
         int[] workerFlags,
         int syncTarget,
         int blankingTarget,
-        int workerThreads)
+        int workerThreads,
+        bool useCompactParallelRadix = true)
     {
         ArgumentNullException.ThrowIfNull(values);
         ArgumentOutOfRangeException.ThrowIfNegativeOrZero(valueCount);
@@ -1147,7 +1163,8 @@ public sealed class VhsSyncDetector
             workerFlags,
             syncTarget,
             blankingTarget,
-            workerThreads);
+            workerThreads,
+            useCompactParallelRadix);
     }
 
     private static (double SyncTip, double Blanking) SelectLevelQuantilesRadixCore(
@@ -1161,7 +1178,8 @@ public sealed class VhsSyncDetector
         int[]? workerFlags,
         int syncTarget,
         int blankingTarget,
-        int workerThreads)
+        int workerThreads,
+        bool useCompactParallelRadix)
     {
         if (values.IsEmpty)
         {
@@ -1182,25 +1200,37 @@ public sealed class VhsSyncDetector
             throw new ArgumentException("The radix quantile workspaces are too small.");
         }
 
-        bool finiteNonZero;
         if (parallelValues is not null)
         {
             ArgumentNullException.ThrowIfNull(workerHistograms);
             ArgumentNullException.ThrowIfNull(workerFlags);
 
-            finiteNonZero = FillHighHistogramParallel(
-                parallelValues,
-                parallelValueCount,
-                highHistogram,
-                workerHistograms,
-                workerFlags,
-                workerThreads);
-        }
-        else
-        {
-            finiteNonZero = FillHighHistogramSequential(values, highHistogram);
+            return useCompactParallelRadix
+                ? SelectLevelQuantilesRadixParallelThreeStage(
+                    parallelValues,
+                    parallelValueCount,
+                    scratch,
+                    highHistogram,
+                    middleHistograms,
+                    workerHistograms,
+                    workerFlags,
+                    syncTarget,
+                    blankingTarget,
+                    workerThreads)
+                : SelectLevelQuantilesRadixParallelTwoStage(
+                    parallelValues,
+                    parallelValueCount,
+                    scratch,
+                    highHistogram,
+                    middleHistograms,
+                    workerHistograms,
+                    workerFlags,
+                    syncTarget,
+                    blankingTarget,
+                    workerThreads);
         }
 
+        bool finiteNonZero = FillHighHistogramSequential(values, highHistogram);
         if (!finiteNonZero)
         {
             values.CopyTo(scratch);
@@ -1224,29 +1254,13 @@ public sealed class VhsSyncDetector
         int blankingHistogramOffset = syncHigh.Bucket == blankingHigh.Bucket
             ? 0
             : RadixHistogramWidth;
-        if (parallelValues is not null)
-        {
-            FillMiddleHistogramsParallel(
-                parallelValues,
-                parallelValueCount,
-                middleHistograms,
-                workerHistograms!,
-                syncHigh.Bucket,
-                blankingHigh.Bucket,
-                blankingHistogramOffset,
-                middleHistogramLength,
-                workerThreads);
-        }
-        else
-        {
-            FillMiddleHistogramsSequential(
-                values,
-                middleHistograms,
-                syncHigh.Bucket,
-                blankingHigh.Bucket,
-                blankingHistogramOffset,
-                middleHistogramLength);
-        }
+        FillMiddleHistogramsSequential(
+            values,
+            middleHistograms,
+            syncHigh.Bucket,
+            blankingHigh.Bucket,
+            blankingHistogramOffset,
+            middleHistogramLength);
 
         BucketSelection syncMiddle = LocateBucket(
             middleHistograms.AsSpan(0, RadixHistogramWidth),
@@ -1256,6 +1270,194 @@ public sealed class VhsSyncDetector
             blankingHigh.RankWithinBucket);
         uint syncPrefix = ((uint)syncHigh.Bucket << 16) | (uint)syncMiddle.Bucket;
         uint blankingPrefix = ((uint)blankingHigh.Bucket << 16) | (uint)blankingMiddle.Bucket;
+
+        return SelectLevelQuantilesFromPrefixes(
+            values,
+            scratch,
+            syncPrefix,
+            blankingPrefix,
+            syncMiddle,
+            blankingMiddle);
+    }
+
+    private static (double SyncTip, double Blanking) SelectLevelQuantilesRadixParallelThreeStage(
+        double[] values,
+        int valueCount,
+        double[] scratch,
+        int[] firstAndThirdHistograms,
+        int[] secondHistograms,
+        int[] workerHistograms,
+        int[] workerFlags,
+        int syncTarget,
+        int blankingTarget,
+        int workerThreads)
+    {
+        bool finiteNonZero = FillParallelFirstHistogram(
+            values,
+            valueCount,
+            firstAndThirdHistograms,
+            workerHistograms,
+            workerFlags,
+            workerThreads);
+        if (!finiteNonZero)
+        {
+            values.AsSpan(0, valueCount).CopyTo(scratch);
+            return SelectLevelQuantilesSequential(
+                scratch,
+                syncTarget,
+                blankingTarget,
+                valueCount);
+        }
+
+        BucketSelection syncFirst = LocateBucket(
+            firstAndThirdHistograms.AsSpan(0, ParallelRadixFirstWidth),
+            syncTarget);
+        BucketSelection blankingFirst = LocateBucket(
+            firstAndThirdHistograms.AsSpan(0, ParallelRadixFirstWidth),
+            blankingTarget);
+
+        int secondHistogramOffset = syncFirst.Bucket == blankingFirst.Bucket
+            ? 0
+            : ParallelRadixSecondWidth;
+        int secondHistogramLength = secondHistogramOffset + ParallelRadixSecondWidth;
+        FillParallelChildHistograms(
+            values,
+            valueCount,
+            secondHistograms,
+            workerHistograms,
+            syncFirst.Bucket,
+            blankingFirst.Bucket,
+            secondHistogramOffset,
+            secondHistogramLength,
+            parentShift: ParallelRadixFirstShift,
+            childShift: ParallelRadixSecondShift,
+            childMask: ParallelRadixSecondWidth - 1,
+            workerThreads);
+
+        BucketSelection syncSecond = LocateBucket(
+            secondHistograms.AsSpan(0, ParallelRadixSecondWidth),
+            syncFirst.RankWithinBucket);
+        BucketSelection blankingSecond = LocateBucket(
+            secondHistograms.AsSpan(secondHistogramOffset, ParallelRadixSecondWidth),
+            blankingFirst.RankWithinBucket);
+        int syncSecondPrefix =
+            (syncFirst.Bucket << 11) | syncSecond.Bucket;
+        int blankingSecondPrefix =
+            (blankingFirst.Bucket << 11) | blankingSecond.Bucket;
+
+        int thirdHistogramOffset = syncSecondPrefix == blankingSecondPrefix
+            ? 0
+            : ParallelRadixThirdWidth;
+        int thirdHistogramLength = thirdHistogramOffset + ParallelRadixThirdWidth;
+        FillParallelChildHistograms(
+            values,
+            valueCount,
+            firstAndThirdHistograms,
+            workerHistograms,
+            syncSecondPrefix,
+            blankingSecondPrefix,
+            thirdHistogramOffset,
+            thirdHistogramLength,
+            parentShift: ParallelRadixSecondShift,
+            childShift: 0,
+            childMask: ParallelRadixThirdWidth - 1,
+            workerThreads);
+
+        BucketSelection syncThird = LocateBucket(
+            firstAndThirdHistograms.AsSpan(0, ParallelRadixThirdWidth),
+            syncSecond.RankWithinBucket);
+        BucketSelection blankingThird = LocateBucket(
+            firstAndThirdHistograms.AsSpan(thirdHistogramOffset, ParallelRadixThirdWidth),
+            blankingSecond.RankWithinBucket);
+        uint syncPrefix = ((uint)syncSecondPrefix << 10) | (uint)syncThird.Bucket;
+        uint blankingPrefix = ((uint)blankingSecondPrefix << 10) | (uint)blankingThird.Bucket;
+
+        return SelectLevelQuantilesFromPrefixes(
+            values.AsSpan(0, valueCount),
+            scratch,
+            syncPrefix,
+            blankingPrefix,
+            syncThird,
+            blankingThird);
+    }
+
+    private static (double SyncTip, double Blanking) SelectLevelQuantilesRadixParallelTwoStage(
+        double[] values,
+        int valueCount,
+        double[] scratch,
+        int[] highHistogram,
+        int[] middleHistograms,
+        int[] workerHistograms,
+        int[] workerFlags,
+        int syncTarget,
+        int blankingTarget,
+        int workerThreads)
+    {
+        bool finiteNonZero = FillParallelHighHistogramTwoStage(
+            values,
+            valueCount,
+            highHistogram,
+            workerHistograms,
+            workerFlags,
+            workerThreads);
+        if (!finiteNonZero)
+        {
+            values.AsSpan(0, valueCount).CopyTo(scratch);
+            return SelectLevelQuantilesSequential(
+                scratch,
+                syncTarget,
+                blankingTarget,
+                valueCount);
+        }
+
+        BucketSelection syncHigh = LocateBucket(
+            highHistogram.AsSpan(0, RadixHistogramWidth),
+            syncTarget);
+        BucketSelection blankingHigh = LocateBucket(
+            highHistogram.AsSpan(0, RadixHistogramWidth),
+            blankingTarget);
+
+        int blankingHistogramOffset = syncHigh.Bucket == blankingHigh.Bucket
+            ? 0
+            : RadixHistogramWidth;
+        int middleHistogramLength = blankingHistogramOffset + RadixHistogramWidth;
+        FillParallelMiddleHistogramsTwoStage(
+            values,
+            valueCount,
+            middleHistograms,
+            workerHistograms,
+            syncHigh.Bucket,
+            blankingHigh.Bucket,
+            blankingHistogramOffset,
+            middleHistogramLength,
+            workerThreads);
+
+        BucketSelection syncMiddle = LocateBucket(
+            middleHistograms.AsSpan(0, RadixHistogramWidth),
+            syncHigh.RankWithinBucket);
+        BucketSelection blankingMiddle = LocateBucket(
+            middleHistograms.AsSpan(blankingHistogramOffset, RadixHistogramWidth),
+            blankingHigh.RankWithinBucket);
+        uint syncPrefix = ((uint)syncHigh.Bucket << 16) | (uint)syncMiddle.Bucket;
+        uint blankingPrefix = ((uint)blankingHigh.Bucket << 16) | (uint)blankingMiddle.Bucket;
+
+        return SelectLevelQuantilesFromPrefixes(
+            values.AsSpan(0, valueCount),
+            scratch,
+            syncPrefix,
+            blankingPrefix,
+            syncMiddle,
+            blankingMiddle);
+    }
+
+    private static (double SyncTip, double Blanking) SelectLevelQuantilesFromPrefixes(
+        ReadOnlySpan<double> values,
+        double[] scratch,
+        uint syncPrefix,
+        uint blankingPrefix,
+        BucketSelection syncSelection,
+        BucketSelection blankingSelection)
+    {
 
         if (syncPrefix == blankingPrefix)
         {
@@ -1269,17 +1471,17 @@ public sealed class VhsSyncDetector
                 }
             }
 
-            System.Diagnostics.Debug.Assert(write == syncMiddle.Count);
+            System.Diagnostics.Debug.Assert(write == syncSelection.Count);
             return SelectTwoInRange(
                 scratch,
                 left: 0,
                 count: write,
-                syncMiddle.RankWithinBucket,
-                blankingMiddle.RankWithinBucket);
+                syncSelection.RankWithinBucket,
+                blankingSelection.RankWithinBucket);
         }
 
         int syncWrite = 0;
-        int blankingStart = syncMiddle.Count;
+        int blankingStart = syncSelection.Count;
         int blankingWrite = blankingStart;
         for (int index = 0; index < values.Length; index++)
         {
@@ -1295,16 +1497,16 @@ public sealed class VhsSyncDetector
             }
         }
 
-        System.Diagnostics.Debug.Assert(syncWrite == syncMiddle.Count);
-        System.Diagnostics.Debug.Assert(blankingWrite - blankingStart == blankingMiddle.Count);
+        System.Diagnostics.Debug.Assert(syncWrite == syncSelection.Count);
+        System.Diagnostics.Debug.Assert(blankingWrite - blankingStart == blankingSelection.Count);
         double syncTip = SelectKth(
             scratch,
-            syncMiddle.RankWithinBucket,
+            syncSelection.RankWithinBucket,
             left: 0,
             right: syncWrite - 1,
             out _,
             out _);
-        int blankingTargetInScratch = blankingStart + blankingMiddle.RankWithinBucket;
+        int blankingTargetInScratch = blankingStart + blankingSelection.RankWithinBucket;
         double blanking = SelectKth(
             scratch,
             blankingTargetInScratch,
@@ -1335,7 +1537,70 @@ public sealed class VhsSyncDetector
         return true;
     }
 
-    private static bool FillHighHistogramParallel(
+    private static bool FillParallelFirstHistogram(
+        double[] values,
+        int valueCount,
+        int[] firstHistogram,
+        int[] workerHistograms,
+        int[] workerFlags,
+        int workerThreads)
+    {
+        int workerHistogramLength = checked(
+            workerThreads * ParallelRadixFirstWidth);
+        if (workerHistograms.Length < workerHistogramLength
+            || workerFlags.Length < workerThreads)
+        {
+            throw new ArgumentException(
+                "The parallel radix workspaces are too small.");
+        }
+
+        Array.Clear(workerHistograms, 0, workerHistogramLength);
+        Array.Clear(workerFlags, 0, workerThreads);
+        Parallel.For(
+            fromInclusive: 0,
+            toExclusive: workerThreads,
+            new ParallelOptions
+            {
+                MaxDegreeOfParallelism = workerThreads
+            },
+            worker =>
+            {
+                int start = (int)(((long)valueCount * worker) / workerThreads);
+                int end = (int)(((long)valueCount * (worker + 1)) / workerThreads);
+                int histogramOffset = worker * ParallelRadixFirstWidth;
+                for (int index = start; index < end; index++)
+                {
+                    double value = values[index];
+                    if (!double.IsFinite(value) || value == 0.0)
+                    {
+                        workerFlags[worker] = 1;
+                        continue;
+                    }
+
+                    uint prefix = SortablePrefix(value);
+                    workerHistograms[
+                        histogramOffset + (prefix >> ParallelRadixFirstShift)]++;
+                }
+            });
+
+        for (int worker = 0; worker < workerThreads; worker++)
+        {
+            if (workerFlags[worker] != 0)
+            {
+                return false;
+            }
+        }
+
+        MergeWorkerHistograms(
+            workerHistograms,
+            workerThreads,
+            ParallelRadixFirstWidth,
+            firstHistogram);
+
+        return true;
+    }
+
+    private static bool FillParallelHighHistogramTwoStage(
         double[] values,
         int valueCount,
         int[] highHistogram,
@@ -1422,7 +1687,7 @@ public sealed class VhsSyncDetector
         }
     }
 
-    private static void FillMiddleHistogramsParallel(
+    private static void FillParallelMiddleHistogramsTwoStage(
         double[] values,
         int valueCount,
         int[] middleHistograms,
@@ -1477,6 +1742,66 @@ public sealed class VhsSyncDetector
             workerThreads,
             middleHistogramLength,
             middleHistograms);
+    }
+
+    private static void FillParallelChildHistograms(
+        double[] values,
+        int valueCount,
+        int[] histograms,
+        int[] workerHistograms,
+        int firstParentBucket,
+        int secondParentBucket,
+        int secondHistogramOffset,
+        int histogramLength,
+        int parentShift,
+        int childShift,
+        int childMask,
+        int workerThreads)
+    {
+        int workerHistogramLength = checked(
+            workerThreads * histogramLength);
+        if (workerHistograms.Length < workerHistogramLength)
+        {
+            throw new ArgumentException(
+                "The parallel radix histogram workspace is too small.",
+                nameof(workerHistograms));
+        }
+
+        Array.Clear(workerHistograms, 0, workerHistogramLength);
+        Parallel.For(
+            fromInclusive: 0,
+            toExclusive: workerThreads,
+            new ParallelOptions
+            {
+                MaxDegreeOfParallelism = workerThreads
+            },
+            worker =>
+            {
+                int start = (int)(((long)valueCount * worker) / workerThreads);
+                int end = (int)(((long)valueCount * (worker + 1)) / workerThreads);
+                int workerOffset = worker * histogramLength;
+                for (int index = start; index < end; index++)
+                {
+                    uint prefix = SortablePrefix(values[index]);
+                    int parent = (int)(prefix >> parentShift);
+                    int child = (int)((prefix >> childShift) & (uint)childMask);
+                    if (parent == firstParentBucket)
+                    {
+                        workerHistograms[workerOffset + child]++;
+                    }
+                    else if (parent == secondParentBucket)
+                    {
+                        workerHistograms[
+                            workerOffset + secondHistogramOffset + child]++;
+                    }
+                }
+            });
+
+        MergeWorkerHistograms(
+            workerHistograms,
+            workerThreads,
+            histogramLength,
+            histograms);
     }
 
     private static unsafe void MergeWorkerHistograms(
@@ -1787,10 +2112,15 @@ public sealed class VhsSyncDetector
             return _middleHistograms;
         }
 
-        public int[] EnsureWorkerHistograms(int workerThreads)
+        public int[] EnsureWorkerHistograms(
+            int workerThreads,
+            bool useCompactParallelRadix)
         {
             int length = checked(
-                workerThreads * RadixHistogramWidth * 2);
+                workerThreads
+                * (useCompactParallelRadix
+                    ? MaximumParallelRadixHistogramLength
+                    : RadixHistogramWidth * 2));
             if (_workerHistograms.Length < length)
             {
                 _workerHistograms = GC.AllocateUninitializedArray<int>(length);

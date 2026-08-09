@@ -2179,7 +2179,7 @@ dotnet test --solution VHSDecodeDotNet.slnx --no-build
 ```
 
 The current formal solution build completes with zero warnings and errors, and
-the xUnit v3 project exposes 1,236 independently discoverable tests
+the xUnit v3 project exposes 1,382 independently discoverable tests
 to `dotnet test` and Visual Studio Test Explorer. On the
 same Windows machine and fixtures, Release wall-clock measurements for one
 frame were 2.346 s versus 7.193 s for NTSC VHS and 1.651 s versus 5.865 s for
@@ -2207,20 +2207,22 @@ matched luma, chroma, raw JSON, stdout, normalized stderr/log, and ordered
 
 ### Deterministic parallel current VHS sync quantiles
 
-For Exact `current` VHS fields of at least 524,288 samples, the two radix
-histogram scans used by sync-level quantile selection now use at most four
-worker-local slabs and fixed-order integer reductions. Exceptional-value
-fallback, source-order candidate collection, Quickselect, floating-point
-expressions, and cross-field state remain serial and unchanged. Each
-simultaneously active or retained parallel workspace adds at most about 2 MiB
-and is cleared before reuse; product concurrency remains bounded by the
-existing field-worker scheduler. One-worker and smaller-field calls retain the
-prior serial path.
+For Exact `current` VHS fields of at least 524,288 samples, sync-level quantile
+selection uses at most four worker-local slabs and fixed-order integer
+reductions. Its current 11+11+10-bit staging resolves the same final 32-bit
+sortable prefix as the previous 16+16-bit form. Exceptional-value fallback,
+source-order candidate collection, Quickselect, floating-point expressions,
+and cross-field state remain serial and unchanged. Maximum private histogram
+storage is 16 KiB per worker, or 64 KiB at the detector's four-worker cap, and
+is cleared before reuse; product concurrency remains bounded by the existing
+field-worker scheduler. One-worker and smaller-field calls retain the prior
+serial path. IPP-fast deliberately retains the previous dense route after the
+compact form failed its performance gate there.
 
 Three focused tests exercise serial/parallel bit identity while reusing dirty
 one-/two-bucket workspaces, exceptional values at every worker boundary,
 ignored poison values beyond the active backing-array length, and warm
-caller-thread allocation. The zero-warning Release build and all 1,234 xUnit
+caller-thread allocation. The zero-warning Release build and all 1,382 xUnit
 v3 tests passed under native, AVX2-disabled, and all-intrinsics-disabled
 execution; separate local logs retain each test summary.
 Twelve real-RF gates covered Exact v0.4.0/current at explicit zero workers,
@@ -2245,6 +2247,17 @@ moved from 16.570 to 16.661 GiB and GC pause from 0.247 to 0.259 seconds, so
 neither is claimed as an improvement. The maximum once-per-second candidate
 working-set sample was 779.98 MiB, Gen2 collections moved from 42 to 40, and
 both runs completed without progressive sampled growth or OOM.
+
+The compact-staging follow-up passed 25 focused detector tests. In eight fixed
+production-size paired probe batches, its median fell from 0.966511 to 0.891624
+seconds with checksum `000000002704317B` unchanged. Two opposite-order
+1,000-frame Exact `current --threads 20` pairs matched luma, chroma, raw JSON,
+ordered `fileLoc`, stdout, normalized stderr, and normalized logs while combined
+wall time fell from 82.260 to 80.387 seconds (2.28%, 1.0233x throughput) and CPU
+time fell from 644.594 to 640.391 seconds (0.65%). Working-set samples remained
+bounded without progressive growth or OOM. The final strict candidate gate
+comprised 44 baseline/candidate runs, and all 1,382 tests again passed under
+native, AVX2-disabled, and all-intrinsics-disabled execution.
 
 ### Decoder-owned PAL chroma upconversion
 

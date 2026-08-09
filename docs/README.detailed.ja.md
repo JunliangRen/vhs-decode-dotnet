@@ -385,7 +385,7 @@ detector ごとに 60-line buffer 2 個までに制限されます。
 
 ### 最新の 6-path thread matrix
 
-最新の overview は startup cost を含む 40-frame short snapshot で、同じ private local
+最新の overview は startup cost を含む 160-frame snapshot で、同じ private local
 40 MHz PAL VHS `.ldf` fixture 上の Python v0.4.0、merge 済みの Python PR341、Exact
 v0.4.0、Exact `current`、IPP-fast v0.4.0、IPP-fast `current` を比較します。filename は
 公開しません。各 .NET cell は wall-time median、profile が対応する Python 列に対する
@@ -394,34 +394,86 @@ speedup、wall-time reduction の順です。
 <!-- LATEST_PERFORMANCE_BEGIN -->
 | CLI mode（workers） | Python v0.4.0 | Python PR341 | Exact + v0.4.0 | Exact + current | IPP-fast + v0.4.0 | IPP-fast + current |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| default（5） | 17.401 s | 19.791 s | 4.341 s / 4.008x / 75.05% | 4.505 s / 4.393x / 77.24% | 3.549 s / 4.904x / 79.61% | 3.116 s / 6.351x / 84.25% |
-| `--threads 1` | 19.177 s | 21.052 s | 11.626 s / 1.649x / 39.37% | 13.073 s / 1.610x / 37.90% | 8.361 s / 2.294x / 56.40% | 9.404 s / 2.239x / 55.33% |
-| `--threads 5` | 17.458 s | 20.209 s | 4.043 s / 4.318x / 76.84% | 4.257 s / 4.748x / 78.94% | 3.654 s / 4.778x / 79.07% | 3.089 s / 6.543x / 84.72% |
-| `--threads 10` | 17.230 s | 19.480 s | 3.526 s / 4.886x / 79.53% | 3.950 s / 4.932x / 79.72% | 2.983 s / 5.775x / 82.69% | 2.556 s / 7.621x / 86.88% |
-| `--threads 20` | 17.558 s | 19.928 s | 2.772 s / 6.334x / 84.21% | 3.449 s / 5.778x / 82.69% | 2.632 s / 6.672x / 85.01% | 2.038 s / 9.779x / 89.77% |
+| default（5） | 49.845 s | 51.191 s | 13.326 s / 3.740x / 73.27% | 12.990 s / 3.941x / 74.62% | 11.750 s / 4.242x / 76.43% | 10.318 s / 4.961x / 79.84% |
+| `--threads 1` | 55.763 s | 55.815 s | 35.138 s / 1.587x / 36.99% | 41.092 s / 1.358x / 26.38% | 25.607 s / 2.178x / 54.08% | 28.889 s / 1.932x / 48.24% |
+| `--threads 5` | 50.124 s | 51.398 s | 13.362 s / 3.751x / 73.34% | 12.655 s / 4.061x / 75.38% | 11.774 s / 4.257x / 76.51% | 10.120 s / 5.079x / 80.31% |
+| `--threads 10` | 48.710 s | 50.833 s | 10.777 s / 4.520x / 77.88% | 9.752 s / 5.213x / 80.82% | 9.807 s / 4.967x / 79.87% | 8.071 s / 6.299x / 84.12% |
+| `--threads 20` | 48.963 s | 50.195 s | 8.717 s / 5.617x / 82.20% | 7.708 s / 6.512x / 84.64% | 8.464 s / 5.785x / 82.71% | 6.402 s / 7.841x / 87.25% |
 <!-- LATEST_PERFORMANCE_END -->
-<!-- LATEST_PERFORMANCE_RUNS: full-refresh=90 current-refresh=30 repeats=3 candidate-ab=20 thread-gates=24 candidate-long=4 strict-candidate-runs=48 current-determinism=30 python-v040-runs=15 python-v040-hashes=15 python-v040-nondefault-runs=12 python-v040-nondefault-hashes=12 -->
+<!-- LATEST_PERFORMANCE_RUNS: full-refresh=90 repeats=3 candidate-ab=16 thread-gates=24 candidate-long=4 strict-candidate-runs=44 dotnet-matrix-runs=60 python-matrix-runs=30 python-v040-runs=15 python-v040-hashes=15 python-v040-nondefault-runs=12 python-v040-nondefault-hashes=12 -->
 
-Python と v0.4.0-profile 列は、2026-08-09 の直前の 90-run full refresh から 3-run
-median を保持します。今回の candidate は `current` parallel VSync path だけを変更する
-ため、5 worker setting の 2 つの `current` .NET 列を 30 回の Release run で更新し、
-3 pass の順序を reverse/mixed にしました。candidate は merged main `845d8d1` を基にし、
-executable の SHA-256 は
-`7BAC056495F42BF4327F6E9D99AF4168F0FA585319BC9CF9F9D09E84B4A3E632` です。
+3-run wall-time range は次のとおりです。
+
+| CLI mode | Python v0.4.0 | Python PR341 | Exact + v0.4.0 | Exact + current | IPP-fast + v0.4.0 | IPP-fast + current |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| default（5） | 49.112-50.297 s | 51.184-51.447 s | 13.235-13.527 s | 12.602-13.213 s | 11.652-11.788 s | 10.226-10.396 s |
+| `--threads 1` | 55.575-56.091 s | 55.607-56.037 s | 34.955-35.642 s | 40.920-41.142 s | 25.536-25.859 s | 28.845-29.114 s |
+| `--threads 5` | 49.225-50.180 s | 50.995-51.436 s | 13.114-13.760 s | 12.653-13.373 s | 11.774-11.893 s | 10.021-10.310 s |
+| `--threads 10` | 48.167-48.785 s | 49.780-51.154 s | 10.490-10.780 s | 9.725-10.400 s | 9.723-9.833 s | 8.036-8.141 s |
+| `--threads 20` | 48.803-49.278 s | 50.170-50.672 s | 8.657-8.756 s | 7.632-8.528 s | 8.252-8.534 s | 6.390-6.571 s |
+
+2026-08-09 に 90 回すべての Release run を更新しました。6 path、5 worker setting を
+順序を入れ替えた 3 pass で実行しています。candidate は merged main `d8b6ed1` を基にし、
+single-file executable の SHA-256 は
+`EAB40EF796F8DE9A885A9DC17FF1198E3685DCBDB9A24FC48FEB41CC6532B2E9` です。
 host は Intel Core Ultra 7 265K（20 logical processor）、Windows 11 build 26220、
 .NET SDK/runtime `11.0.100-preview.6.26359.118` です。raw run directory は private
-fixture path を含むため local にのみ保持します。以下は local measurement の報告で、
+fixture path を含むため local にのみ保持します。これは local measurement の報告で、
 public independently reproducible benchmark corpus ではありません。
 
-以前公開した table は別の private NTSC Betamax HiFi `.lds` fixture を使っているため、
-この PAL VHS matrix とは直接比較できません。同じ fixture でも 40-frame result は
-startup と ambient load の影響が大きく、今回の Exact `current --threads 20` 3 run は
-3.280 から 3.606 秒の範囲でした。古い 3.298-second cell はその範囲内です。したがって
-short table の動きだけでは regression/optimization を示せず、下の long paired A/B が
-causal evidence です。
+直前の 40-frame table は fixed startup cost、特に Python の startup cost を過大に反映
+していました。例えば default IPP-fast `current` は window を 160 frames に広げると
+6.351x から 4.961x になりました。Python は 19.791 から 51.191 秒への増加に対し、
+.NET は 3.116 から 10.318 秒へ増えています。これは startup cost の希釈であり、
+candidate の regression ではありません。以前の NTSC Betamax HiFi table は別の private
+fixture を使うため比較できません。今後は 160-frame、3-pass method を維持し、因果的な
+性能判断には引き続き matched long A/B を使います。
+
+60 回の .NET matrix run は、capture した全 surface で deterministic でした。merged
+Python PR341 も deterministic でした。Python v0.4.0 は 15 run で 15 種類の luma、
+chroma、raw JSON、normalized-log hash を生成しましたが、stdout、normalized stderr、
+ordered `fileLoc` は安定していました。したがって strict oracle は任意の multi-worker
+run ではなく、Python v0.4.0 `g4315520 --threads 0` のままです。
+
+### compact Exact VSync radix staging
+
+Exact `current` の parallel VSync quantile selector は、2 段の 16-bit stage の代わりに
+11+11+10-bit radix stage で同じ 32-bit sortable prefix を決定します。最終 candidate
+prefix、source-order filter、Quickselect input、floating-point expression、detector state
+は変わらず、sequential path も変更していません。worker-private histogram の最大 storage
+は 512 KiB から 16 KiB、detector 内部の 4-worker cap では 2 MiB から 64 KiB になります。
+
+IPP-fast は以前の 16+16-bit route を明示的に維持します。両 backend に compact route を
+適用した初期候補では、IPP の 4-pair gate が wall time で 1.6% 遅く、CPU time で 1.8%
+高くなりました。Exact だけを compact stage に route した最終形では、IPP の 4-pair
+check は neutral で、wall time は 1.31% 短縮、CPU time は約 0.4% 増加しました。
+IPP contract 内の baseline/candidate artifact は exact です。
+
+fixed production-size selection probe では、8 paired batch の全てで compact form が勝ち、
+median wall time は 0.966511 から 0.891624 秒へ 7.75% 短縮（throughput 約 1.084x）、
+checksum `000000002704317B` は不変でした。これは hotspot evidence であり、end-to-end
+claim ではありません。4 組の interleaved 160-frame Exact pair は balanced total wall
+time を 34.113 から 33.114 秒へ 2.93%、CPU time を 303.11 から 278.11 秒へ 8.25%
+短縮しました。個別には 2/4 pair の勝利なので、short result には noise があります。
+
+causal end-to-end gate は opposite-order の 1,000-frame Exact `current --threads 20` pair
+2 組です。combined wall time は 82.260 から 80.387 秒へ 2.28% 短縮（1.0233x
+throughput）、CPU time は 644.594 から 640.391 秒へ 0.65% 減少しました。candidate の
+working-set sample は各 run 内で bounded でした。process placement のばらつきにより
+observed peak は 387.5 から 418.7 MiB でしたが、継続的増加や OOM behavior はありません。
+
+最終 strict gate は 44 baseline/candidate run です。8 short interleaved pair、2
+opposite-order long pair、2 behavior profile の `--threads 0`、default-5、
+`--threads 20` を横断する 24 Exact/IPP-fast thread run を含みます。luma、chroma、raw
+JSON、ordered `fileLoc`、stdout、normalized stderr/log はすべて一致しました。focused
+detector suite は 25/25、全 1,382 xUnit v3 test は native hardware、AVX2 disabled、all
+hardware intrinsics disabled の各 mode で通過しました。Release solution build は warning
+0、error 0 でした。
 
 ### contiguous AVX2 VSync radix histogram merge
 
+この merge 済み historical candidate は main `845d8d1` を基にし、executable の
+SHA-256 は `7BAC056495F42BF4327F6E9D99AF4168F0FA585319BC9CF9F9D09E84B4A3E632` です。
 `current` VSync quantile path は各 worker-private radix histogram を contiguous span として
 merge します。最初の worker を destination に copy し、残りを元の worker order で加算
 します。AVX2 は 8 個の exact integer bucket を一度に処理し、tail と AVX2 非対応 CPU
