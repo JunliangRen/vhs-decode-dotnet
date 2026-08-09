@@ -99,20 +99,22 @@ for compatibility-sensitive work.
 
 This is a startup-inclusive 160-frame snapshot on one fixed private local
 40 MHz PAL VHS `.ldf` fixture; the filename is intentionally not published.
-All six paths were refreshed in three reordered Release passes on this
-candidate, which is based on merged main `d8b6ed1`. Compatibility is evaluated
+The four .NET paths were refreshed in three reordered Release passes on this
+candidate, based on merged main `b30dd8d`. The 30 Python reference runs are
+reused from the previous direct refresh on the same host and fixture because
+this .NET-only candidate cannot affect them. Compatibility is evaluated
 separately from speed.
 
 <!-- LATEST_PERFORMANCE_BEGIN -->
 | CLI mode (workers) | Python v0.4.0 | Python PR341 | Exact + v0.4.0 | Exact + current | IPP-fast + v0.4.0 | IPP-fast + current |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| default (5) | 49.845 s | 51.191 s | 13.326 s / 3.740x | 12.990 s / 3.941x | 11.750 s / 4.242x | 10.318 s / 4.961x |
-| `--threads 1` | 55.763 s | 55.815 s | 35.138 s / 1.587x | 41.092 s / 1.358x | 25.607 s / 2.178x | 28.889 s / 1.932x |
-| `--threads 5` | 50.124 s | 51.398 s | 13.362 s / 3.751x | 12.655 s / 4.061x | 11.774 s / 4.257x | 10.120 s / 5.079x |
-| `--threads 10` | 48.710 s | 50.833 s | 10.777 s / 4.520x | 9.752 s / 5.213x | 9.807 s / 4.967x | 8.071 s / 6.299x |
-| `--threads 20` | 48.963 s | 50.195 s | 8.717 s / 5.617x | 7.708 s / 6.512x | 8.464 s / 5.785x | 6.402 s / 7.841x |
+| default (5) | 49.845 s | 51.191 s | 13.095 s / 3.806x | 12.786 s / 4.004x | 11.613 s / 4.292x | 10.045 s / 5.096x |
+| `--threads 1` | 55.763 s | 55.815 s | 35.334 s / 1.578x | 41.759 s / 1.337x | 26.086 s / 2.138x | 28.972 s / 1.927x |
+| `--threads 5` | 50.124 s | 51.398 s | 13.560 s / 3.697x | 12.878 s / 3.991x | 11.911 s / 4.208x | 10.046 s / 5.116x |
+| `--threads 10` | 48.710 s | 50.833 s | 10.815 s / 4.504x | 10.237 s / 4.966x | 9.890 s / 4.925x | 8.207 s / 6.194x |
+| `--threads 20` | 48.963 s | 50.195 s | 8.547 s / 5.729x | 8.207 s / 6.116x | 8.215 s / 5.960x | 6.478 s / 7.748x |
 <!-- LATEST_PERFORMANCE_END -->
-<!-- LATEST_PERFORMANCE_RUNS: full-refresh=90 repeats=3 candidate-ab=16 thread-gates=24 candidate-long=4 strict-candidate-runs=44 dotnet-matrix-runs=60 python-matrix-runs=30 python-v040-runs=15 python-v040-hashes=15 python-v040-nondefault-runs=12 python-v040-nondefault-hashes=12 -->
+<!-- LATEST_PERFORMANCE_RUNS: dotnet-refresh=60 reused-python-runs=30 repeats=3 candidate-ab=20 thread-gates=24 candidate-long=4 strict-candidate-runs=48 dotnet-matrix-runs=60 python-matrix-runs=30 python-v040-runs=15 python-v040-hashes=15 python-v040-nondefault-runs=12 python-v040-nondefault-hashes=12 -->
 
 Each .NET cell shows median wall time and speedup versus its profile-matched
 Python column. The default is **5 workers**; three-run ranges are in the
@@ -120,18 +122,18 @@ Python column. The default is **5 workers**; three-run ranges are in the
 40-frame table amplified startup cost, especially for Python, so a lower
 speedup in this longer table is not a decoder regression.
 
-Exact `current` now selects the same 32-bit sortable VSync prefixes through
-cache-sized 11+11+10-bit parallel radix stages. IPP-fast keeps the previous
-16+16-bit route because the compact route did not improve that backend. Two
-opposite-order 1,000-frame Exact `current --threads 20` pairs reduced combined
-wall time from 82.260 to 80.387 seconds (2.28% lower, 1.0233x throughput) and
-CPU time from 644.594 to 640.391 seconds (0.65% lower), with bounded memory.
+The caller-buffer VHS Rust FM path now processes eight finite float lanes per
+AVX block; interleaved `Complex` remains four-wide after its eight-lane trial
+regressed Exact `current --threads 20`. Two opposite-order 1,000-frame IPP-fast
+`current --threads 20` pairs reduced combined wall time from 71.280 to 70.645
+seconds (0.89% lower, 1.0090x throughput) and CPU time from 416.906 to 415.891
+seconds (0.24% lower), with slightly lower allocation and bounded memory.
 
-All 44 final baseline/candidate runs matched luma, chroma, raw JSON, ordered
-`fileLoc`, stdout, normalized stderr, and normalized logs. All 60 .NET matrix
-runs were deterministic. Merged Python PR341 was deterministic here; Python
-v0.4.0 produced 15 distinct luma, chroma, JSON, and log hashes in 15 runs, so
-the strict oracle remains Python v0.4.0 `g4315520 --threads 0`.
+Across 48 final baseline/candidate runs, every compatibility surface captured
+by each gate matched. All 60 .NET matrix runs were deterministic. Merged Python
+PR341 was deterministic here; Python v0.4.0 produced 15 distinct luma, chroma,
+JSON, and log hashes in 15 runs, so the strict oracle remains Python v0.4.0
+`g4315520 --threads 0`.
 Commands, hardware, hashes, memory bounds, and historical measurements are in the
 [detailed performance reference](docs/README.detailed.md#performance).
 
