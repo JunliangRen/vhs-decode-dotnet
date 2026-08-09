@@ -38,7 +38,7 @@ evidence, and remaining gaps.
   EIAJ, and supported PAL/NTSC variants.
 - TBC utility tools, the double-click GUI, and developer plotting windows are
   intentionally out of scope.
-- The Visual Studio 2026 `.slnx` solution has **1,397** standard xUnit v3 tests
+- The Visual Studio 2026 `.slnx` solution has **1,401** standard xUnit v3 tests
   that are visible in Test Explorer and runnable with `dotnet test`.
 
 <!-- SECTION: start -->
@@ -99,22 +99,22 @@ for compatibility-sensitive work.
 
 This is a startup-inclusive 160-frame snapshot on one fixed private local
 40 MHz PAL VHS `.ldf` fixture; the filename is intentionally not published.
-The two IPP-fast columns were refreshed in three reordered Release passes on
-this candidate, based on merged main `4b9332b`. The unchanged Exact columns and
-30 Python reference runs are reused from the preceding direct refresh on the
-same host and fixture. The measured production blobs are pinned in the detailed
-notes. Compatibility is evaluated separately from speed.
+The two Exact columns were refreshed in three reordered Release passes on this
+candidate, based on merged main `f8dcd99`. The unchanged IPP-fast columns and 30
+Python reference runs are reused from the preceding direct refresh on the same
+host and fixture. The measured production blob is pinned in the detailed notes.
+Compatibility is evaluated separately from speed.
 
 <!-- LATEST_PERFORMANCE_BEGIN -->
 | CLI mode (workers) | Python v0.4.0 | Python PR341 | Exact + v0.4.0 | Exact + current | IPP-fast + v0.4.0 | IPP-fast + current |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| default (5) | 49.845 s | 51.191 s | 13.725 s / 3.632x | 13.016 s / 3.933x | 11.793 s / 4.226x | 9.980 s / 5.130x |
-| `--threads 1` | 55.763 s | 55.815 s | 36.661 s / 1.521x | 41.187 s / 1.355x | 25.016 s / 2.229x | 28.344 s / 1.969x |
-| `--threads 5` | 50.124 s | 51.398 s | 13.698 s / 3.659x | 12.571 s / 4.088x | 11.799 s / 4.248x | 10.142 s / 5.068x |
-| `--threads 10` | 48.710 s | 50.833 s | 11.079 s / 4.397x | 9.869 s / 5.151x | 9.879 s / 4.930x | 8.010 s / 6.347x |
-| `--threads 20` | 48.963 s | 50.195 s | 9.078 s / 5.394x | 7.977 s / 6.293x | 8.404 s / 5.826x | 6.370 s / 7.880x |
+| default (5) | 49.845 s | 51.191 s | 12.974 s / 3.842x | 13.206 s / 3.876x | 11.793 s / 4.226x | 9.980 s / 5.130x |
+| `--threads 1` | 55.763 s | 55.815 s | 34.687 s / 1.608x | 40.817 s / 1.367x | 25.016 s / 2.229x | 28.344 s / 1.969x |
+| `--threads 5` | 50.124 s | 51.398 s | 13.485 s / 3.717x | 12.541 s / 4.098x | 11.799 s / 4.248x | 10.142 s / 5.068x |
+| `--threads 10` | 48.710 s | 50.833 s | 10.240 s / 4.757x | 10.033 s / 5.067x | 9.879 s / 4.930x | 8.010 s / 6.347x |
+| `--threads 20` | 48.963 s | 50.195 s | 8.526 s / 5.743x | 7.994 s / 6.279x | 8.404 s / 5.826x | 6.370 s / 7.880x |
 <!-- LATEST_PERFORMANCE_END -->
-<!-- LATEST_PERFORMANCE_RUNS: dotnet-ipp-refresh=30 reused-dotnet-exact-runs=30 reused-python-runs=30 repeats=3 ipp-envelope-long-ab-runs=8 ipp-envelope-thread-gates=12 ipp-envelope-memory-runs=1 hilbert-scale-current-matrix-runs=30 hilbert-scale-v040-exact-matrix-runs=15 python-matrix-runs=30 python-v040-runs=15 python-v040-hashes=15 python-v040-nondefault-runs=12 python-v040-nondefault-hashes=12 -->
+<!-- LATEST_PERFORMANCE_RUNS: dotnet-exact-refresh=30 reused-dotnet-ipp-runs=30 reused-python-runs=30 repeats=3 radix4-microbench-runs=12 radix4-exact-ab-runs=26 radix4-ipp-ab-runs=8 radix4-memory-runs=1 python-matrix-runs=30 python-v040-runs=15 python-v040-hashes=15 python-v040-nondefault-runs=12 python-v040-nondefault-hashes=12 -->
 
 Each .NET cell shows median wall time and speedup versus its profile-matched
 Python column. The default is **5 workers**; three-run ranges are in the
@@ -122,12 +122,12 @@ Python column. The default is **5 workers**; three-run ranges are in the
 40-frame table amplified startup cost, especially for Python, so a lower
 speedup in this longer table is not a decoder regression.
 
-IPP-fast now routes the full-length VHS RF envelope SOS through bounded pooled
-native contexts. Opposite-order 1,000-frame pairs were wall-neutral for the
-v0.4.0 profile and 0.69% faster for `current`, whose process CPU time fell by
-2.8%. A 1,000-frame counter run peaked at 390.8 MiB and its final-third median
-was only 0.8 MiB above its first third. All 30 refreshed matrix runs and the
-12-run cross-thread gate were deterministic on every captured surface.
+The Exact backend now evaluates two independent real-FFT radix-4 points per AVX
+block without FMA or reordered per-point arithmetic. The refreshed v0.4.0
+medians are 1.6-7.6% lower than the preceding table; `current` remained within
+1.7%. A 1,000-frame counter run peaked at 415.3 MiB and its final-third median
+was only 2.3 MiB above its first third. All refreshed runs and cross-thread
+gates were deterministic on every captured surface.
 
 Merged Python PR341 was deterministic here; Python v0.4.0 produced 15 distinct
 luma, chroma, JSON, and log hashes in 15 runs, so the strict oracle remains
@@ -170,7 +170,7 @@ The pinned SDK is .NET `11.0.100-preview.6.26359.118`.
 dotnet restore VHSDecodeDotNet.slnx
 dotnet build VHSDecodeDotNet.slnx -c Release --no-restore
 dotnet test --solution VHSDecodeDotNet.slnx -c Release `
-  --no-build --no-restore --minimum-expected-tests 1397
+  --no-build --no-restore --minimum-expected-tests 1401
 ```
 
 Open `VHSDecodeDotNet.slnx` in Visual Studio 2026 to build, debug, and run the
