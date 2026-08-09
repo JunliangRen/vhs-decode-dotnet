@@ -2152,6 +2152,40 @@ possible capture has already been proven byte-for-byte identical.
   and PCM
   `2E5CB3BFBD008213846433BAC078D07B1C5D79195965FBB3A4BB4C62EC152D41`
 
+### Managed AVX2 Hilbert real-spectrum scaling
+
+The VHS/LD analytic-signal spectrum pass now scales four finite
+double-precision complex values per AVX2 iteration. The two component-wise
+multiplies use no FMA or reduction. A group containing any non-finite complex
+component or real multiplier executes the original `Complex * double`
+expression for all four values; scalar tails and hosts without AVX2 use that
+same expression. Fifteen focused xUnit v3 cases compare exact bits across
+production-sized and exceptional inputs, reject unequal lengths, verify warm
+zero-allocation reuse, and pass with native AVX2, AVX2 disabled, and all
+hardware intrinsics disabled.
+
+On one fixed private local 40 MHz PAL VHS `.ldf` fixture, two opposite-order
+1,000-frame Exact `current --threads 20` pairs produced one luma, chroma, raw
+JSON, stdout, timing-normalized stderr, timestamp-normalized log, and ordered
+`fileLoc` hash set. The pairs split one win each. Combined wall time moved from
+83.678 to 83.419 seconds (0.31%, 1.0031x throughput) and combined process CPU
+time from 661.375 to 660.375 seconds (0.15%), so end-to-end throughput is
+classified as neutral. Candidate peak working set remained bounded at or below
+393.6 MiB without progressive growth or OOM; resident-memory reduction is not
+claimed.
+
+Twenty-four baseline/candidate gates covered Exact and IPP-fast, v0.4.0 and
+`current`, at explicit zero, omitted/default-five, and 20 workers. Three final
+real-input intrinsic gates matched native AVX2 with both disabled modes. All
+seven artifact/log surfaces matched across candidate, baseline, and worker
+counts. Forty-five candidate matrix runs refreshed Exact v0.4.0, Exact
+`current`, and IPP-fast `current` at default, 1, 5, 10, and 20 workers in three
+reordered passes and produced one deterministic hash set per profile/backend
+combination. The unaffected IPP-fast v0.4.0 measurements were retained. The
+single-file executable was built from candidate commit `3740bf1`, based on
+merged main `8409b1f`, and had SHA-256
+`0F119B82507E8ACB5FF0CF8EE4C407436671828B1981CC9FCDC824B2F34ACD19`.
+
 ### Remaining compatibility work
 
 These are bounded parity and verification gaps, not unimplemented top-level
@@ -2195,7 +2229,7 @@ dotnet test --solution VHSDecodeDotNet.slnx --no-build
 ```
 
 The current formal solution build completes with zero warnings and errors, and
-the xUnit v3 project exposes 1,394 independently discoverable tests
+the xUnit v3 project exposes 1,396 independently discoverable tests
 to `dotnet test` and Visual Studio Test Explorer. On the
 same Windows machine and fixtures, Release wall-clock measurements for one
 frame were 2.346 s versus 7.193 s for NTSC VHS and 1.651 s versus 5.865 s for

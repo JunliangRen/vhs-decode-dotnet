@@ -4,7 +4,7 @@
 
 **[English](README.detailed.md)** | [简体中文](README.detailed.zh-CN.md) | [日本語](README.detailed.ja.md)
 
-<!-- README_SYNC: 2026-08-04.03 -->
+<!-- README_SYNC: 2026-08-09.01 -->
 
 .NET 11 rewrite of the decode-facing parts of
 [`oyvindln/vhs-decode`](https://github.com/oyvindln/vhs-decode), focused on
@@ -416,30 +416,31 @@ profile-matched Python column:
 <!-- LATEST_PERFORMANCE_BEGIN -->
 | CLI mode (workers) | Python v0.4.0 | Python PR341 | Exact + v0.4.0 | Exact + current | IPP-fast + v0.4.0 | IPP-fast + current |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| default (5) | 49.845 s | 51.191 s | 13.095 s / 3.806x / 73.73% | 12.871 s / 3.977x / 74.86% | 11.613 s / 4.292x / 76.70% | 10.023 s / 5.107x / 80.42% |
-| `--threads 1` | 55.763 s | 55.815 s | 35.334 s / 1.578x / 36.64% | 40.319 s / 1.384x / 27.76% | 26.086 s / 2.138x / 53.22% | 27.925 s / 1.999x / 49.97% |
-| `--threads 5` | 50.124 s | 51.398 s | 13.560 s / 3.697x / 72.95% | 12.490 s / 4.115x / 75.70% | 11.911 s / 4.208x / 76.24% | 10.050 s / 5.114x / 80.45% |
-| `--threads 10` | 48.710 s | 50.833 s | 10.815 s / 4.504x / 77.80% | 10.091 s / 5.037x / 80.15% | 9.890 s / 4.925x / 79.70% | 8.153 s / 6.235x / 83.96% |
-| `--threads 20` | 48.963 s | 50.195 s | 8.547 s / 5.729x / 82.54% | 7.590 s / 6.613x / 84.88% | 8.215 s / 5.960x / 83.22% | 6.643 s / 7.556x / 86.76% |
+| default (5) | 49.845 s | 51.191 s | 13.725 s / 3.632x / 72.46% | 13.016 s / 3.933x / 74.57% | 11.613 s / 4.292x / 76.70% | 10.061 s / 5.088x / 80.35% |
+| `--threads 1` | 55.763 s | 55.815 s | 36.661 s / 1.521x / 34.26% | 41.187 s / 1.355x / 26.21% | 26.086 s / 2.138x / 53.22% | 28.722 s / 1.943x / 48.54% |
+| `--threads 5` | 50.124 s | 51.398 s | 13.698 s / 3.659x / 72.67% | 12.571 s / 4.088x / 75.54% | 11.911 s / 4.208x / 76.24% | 10.063 s / 5.108x / 80.42% |
+| `--threads 10` | 48.710 s | 50.833 s | 11.079 s / 4.397x / 77.26% | 9.869 s / 5.151x / 80.58% | 9.890 s / 4.925x / 79.70% | 8.009 s / 6.347x / 84.24% |
+| `--threads 20` | 48.963 s | 50.195 s | 9.078 s / 5.394x / 81.46% | 7.977 s / 6.293x / 84.11% | 8.215 s / 5.960x / 83.22% | 6.573 s / 7.636x / 86.90% |
 <!-- LATEST_PERFORMANCE_END -->
-<!-- LATEST_PERFORMANCE_RUNS: dotnet-current-refresh=30 reused-dotnet-v040-runs=30 reused-python-runs=30 repeats=3 complex32-no-copy-short=8 complex32-no-copy-long=4 complex32-no-copy-thread-gates=24 complex32-no-copy-matrix-runs=30 python-matrix-runs=30 python-v040-runs=15 python-v040-hashes=15 python-v040-nondefault-runs=12 python-v040-nondefault-hashes=12 -->
+<!-- LATEST_PERFORMANCE_RUNS: dotnet-current-refresh=30 dotnet-v040-exact-refresh=15 reused-dotnet-v040-ipp-runs=15 reused-python-runs=30 repeats=3 hilbert-scale-committed-long=4 hilbert-scale-thread-gates=24 hilbert-scale-intrinsic-gates=3 hilbert-scale-current-matrix-runs=30 hilbert-scale-v040-exact-matrix-runs=15 python-matrix-runs=30 python-v040-runs=15 python-v040-hashes=15 python-v040-nondefault-runs=12 python-v040-nondefault-hashes=12 -->
 
 The three-run wall-time ranges were:
 
 | CLI mode | Python v0.4.0 | Python PR341 | Exact + v0.4.0 | Exact + current | IPP-fast + v0.4.0 | IPP-fast + current |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| default (5) | 49.112-50.297 s | 51.184-51.447 s | 12.995-13.265 s | 12.651-13.085 s | 11.415-11.744 s | 9.956-10.200 s |
-| `--threads 1` | 55.575-56.091 s | 55.607-56.037 s | 34.928-35.815 s | 40.080-40.455 s | 25.156-26.281 s | 27.787-28.071 s |
-| `--threads 5` | 49.225-50.180 s | 50.995-51.436 s | 13.253-14.176 s | 12.462-12.977 s | 11.665-12.029 s | 9.991-10.431 s |
-| `--threads 10` | 48.167-48.785 s | 49.780-51.154 s | 10.766-11.193 s | 9.975-10.672 s | 9.732-10.217 s | 7.917-8.225 s |
-| `--threads 20` | 48.803-49.278 s | 50.170-50.672 s | 8.522-8.694 s | 7.343-7.611 s | 8.162-8.281 s | 6.552-6.663 s |
+| default (5) | 49.112-50.297 s | 51.184-51.447 s | 13.624-13.990 s | 12.422-13.412 s | 11.415-11.744 s | 9.892-10.354 s |
+| `--threads 1` | 55.575-56.091 s | 55.607-56.037 s | 36.559-37.082 s | 40.756-42.515 s | 25.156-26.281 s | 28.649-28.724 s |
+| `--threads 5` | 49.225-50.180 s | 50.995-51.436 s | 13.664-13.842 s | 12.476-12.805 s | 11.665-12.029 s | 9.943-10.068 s |
+| `--threads 10` | 48.167-48.785 s | 49.780-51.154 s | 10.873-11.719 s | 9.575-10.071 s | 9.732-10.217 s | 7.999-8.051 s |
+| `--threads 20` | 48.803-49.278 s | 50.170-50.672 s | 9.070-9.560 s | 7.938-8.174 s | 8.162-8.281 s | 6.314-6.620 s |
 
-The 30 current-profile .NET Release runs were refreshed on 2026-08-09, with
-Exact and IPP-fast at all five worker settings run in three reordered passes.
-The unchanged v0.4.0 .NET columns and 30 Python reference runs are reused from
-the previous direct refresh on the same host and fixture. The candidate is
-based on merged main `1d5f5fd`; its single-file executable had SHA-256
-`380D1842C949CC6D3DF240EF5F56E5258984F4C3FDA3F4B601E048E6A2AFD9A5`.
+Forty-five .NET Release runs were refreshed on 2026-08-09: Exact v0.4.0,
+Exact `current`, and IPP-fast `current` at all five worker settings in three
+reordered passes. The unaffected IPP-fast v0.4.0 column and 30 Python reference
+runs are reused from the previous direct refresh on the same host and fixture.
+The candidate commit `3740bf1` is based on merged main `8409b1f`; its
+single-file executable had SHA-256
+`0F119B82507E8ACB5FF0CF8EE4C407436671828B1981CC9FCDC824B2F34ACD19`.
 The host was an Intel Core Ultra 7 265K with 20 logical processors, Windows 11
 build 26220, and .NET SDK/runtime `11.0.100-preview.6.26359.118`. Raw run
 directories remain local because they contain the private fixture path; these
@@ -447,14 +448,14 @@ are local measurements rather than an independently reproducible public corpus.
 
 The preceding 40-frame table made fixed startup cost, especially Python's,
 disproportionately large. For example, the default IPP-fast `current` ratio fell
-from 6.351x to 5.107x when the window grew to 160 frames: Python grew only from
-19.791 to 51.191 seconds while .NET grew from 3.116 to 10.023 seconds. This is
+from 6.351x to 5.088x when the window grew to 160 frames: Python grew only from
+19.791 to 51.191 seconds while .NET grew from 3.116 to 10.061 seconds. This is
 startup-cost dilution, not evidence that the candidate regressed. The older
 NTSC Betamax HiFi table used another private fixture and is not comparable at
 all. Future refreshes retain this 160-frame, three-pass method; causal claims
 still require matched longer A/B runs.
 
-All 30 refreshed current-profile .NET matrix runs were deterministic on every
+All 45 refreshed candidate .NET matrix runs were deterministic on every
 captured surface. Merged Python PR341 was also deterministic. Python v0.4.0
 produced 15 distinct luma, chroma, raw JSON, and normalized-log hashes in 15
 runs, while stdout, normalized stderr, and ordered `fileLoc` remained stable.
@@ -2853,7 +2854,43 @@ cross-thread artifact/log surface matched. The refreshed 30-run current matrix
 used default, 1, 5, 10, and 20 workers in three reordered passes; each backend
 produced one deterministic hash set. The unchanged Python and .NET v0.4.0
 columns retain their previous same-host measurements, while the two current
-columns above use this candidate's single-file executable.
+columns at that checkpoint used that candidate's single-file executable.
+
+### AVX2 Hilbert real-spectrum scaling
+
+The VHS/LD analytic-signal preparation pass multiplies every double-precision
+complex spectrum value by a real Hilbert multiplier. Its managed AVX2 path now
+loads four multipliers, duplicates each into the matching real/imaginary lanes,
+and performs two independent four-double multiplies. It does not use FMA or a
+reduction and does not change expression order. If any complex component or
+real multiplier in the group is `NaN` or infinity, the complete four-value
+group uses the original `Complex * double` expression so .NET exceptional-value
+semantics remain exact. Hosts without AVX2 and scalar tails use that same
+expression.
+
+The final isolated 32,768-value kernel median fell from 711.718 to 47.936 ms
+across eight reversed-order trials (14.847x), with exact output bits and no
+warm allocation. The ranges were scheduling-noisy, and this remains kernel
+evidence only. Two opposite-order 1,000-frame Exact
+`current --threads 20` pairs split one win each. Combined wall time moved from
+83.678 to 83.419 seconds (0.31%, 1.0031x throughput) and combined process CPU
+time from 661.375 to 660.375 seconds (0.15%), so end-to-end throughput is
+classified as neutral. Candidate peak working set stayed bounded at or below
+393.6 MiB with no progressive growth or OOM; this does not establish a
+resident-memory reduction.
+
+Fifteen focused xUnit v3 cases passed with native AVX2, AVX2 disabled, and all
+hardware intrinsics disabled. Three final real-input intrinsic gates matched
+the native candidate against both disabled modes. Twenty-four Exact/IPP-fast
+gates covered v0.4.0/current at explicit zero, default-five, and 20 workers;
+all baseline/candidate and cross-thread luma, chroma, raw JSON, stdout,
+normalized stderr/log, and ordered `fileLoc` surfaces matched. Forty-five
+candidate matrix runs refreshed Exact v0.4.0, Exact `current`, and IPP-fast
+`current` at default, 1, 5, 10, and 20 workers in three reordered passes; each
+profile/backend set produced one deterministic hash set. IPP-fast v0.4.0 kept
+its unaffected prior measurements. The final executable was built from commit
+`3740bf1`, based on `8409b1f`, and its SHA-256 was
+`0F119B82507E8ACB5FF0CF8EE4C407436671828B1981CC9FCDC824B2F34ACD19`.
 
 </details>
 
@@ -2880,7 +2917,7 @@ Requirements:
 .\tools\build-ipp-native.ps1
 dotnet restore VHSDecodeDotNet.slnx
 dotnet build VHSDecodeDotNet.slnx -c Release --no-restore
-dotnet test --solution VHSDecodeDotNet.slnx -c Release --no-build --no-restore --minimum-expected-tests 1394
+dotnet test --solution VHSDecodeDotNet.slnx -c Release --no-build --no-restore --minimum-expected-tests 1396
 dotnet test --project tests\VHSDecode.Tests\VHSDecode.Tests.csproj -c Release --no-build --no-restore --coverage --coverage-output coverage.cobertura.xml --coverage-output-format cobertura
 ```
 
@@ -2894,7 +2931,7 @@ deployment computer. Binary-only single-file releases embed
 sidecar license files. An Exact-only build may omit the native build step.
 
 The current formal Release build has zero warnings and errors. The xUnit v3
-project exposes **1,394** independently discoverable tests to both
+project exposes **1,396** independently discoverable tests to both
 `dotnet test` and Visual Studio Test Explorer.
 
 <!-- SECTION: usage -->

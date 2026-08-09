@@ -7,6 +7,8 @@ namespace VHSDecode.Core.Dsp;
 
 internal static class NumpyComplexMultiply
 {
+    private const byte DuplicateFirstTwoLanes = 0b0101_0000;
+    private const byte DuplicateLastTwoLanes = 0b1111_1010;
     private static readonly Vector256<double> SubtractRealLanes =
         Vector256.Create(-0.0, 0.0, -0.0, 0.0);
     private static readonly Vector256<double> AbsoluteValueMask = Vector256.Create(
@@ -71,6 +73,78 @@ internal static class NumpyComplexMultiply
 
     public static void ApplyInPlace(Span<Complex> left, ReadOnlySpan<Complex> right)
         => Apply(left, right, left);
+
+    public static void ApplyRealInPlace(
+        Span<Complex> values,
+        ReadOnlySpan<double> multipliers)
+    {
+        if (multipliers.Length != values.Length)
+        {
+            throw new ArgumentException(
+                "Complex values and real multipliers must have the same length.");
+        }
+
+        int index = 0;
+        if (Avx2.IsSupported)
+        {
+            Span<double> components = MemoryMarshal.Cast<Complex, double>(values);
+            ref double componentReference = ref MemoryMarshal.GetReference(components);
+            ref double multiplierReference = ref MemoryMarshal.GetReference(multipliers);
+            int vectorizedEnd = values.Length - (values.Length % 4);
+            for (; index < vectorizedEnd; index += 4)
+            {
+                Vector256<double> multiplier = Vector256.LoadUnsafe(
+                    ref multiplierReference,
+                    (nuint)index);
+                Vector256<double> lowerMultipliers = Avx2.Permute4x64(
+                    multiplier,
+                    DuplicateFirstTwoLanes);
+                Vector256<double> upperMultipliers = Avx2.Permute4x64(
+                    multiplier,
+                    DuplicateLastTwoLanes);
+                nuint componentIndex = (nuint)(index * 2);
+                Vector256<double> lowerComponents = Vector256.LoadUnsafe(
+                    ref componentReference,
+                    componentIndex);
+                Vector256<double> upperComponents = Vector256.LoadUnsafe(
+                    ref componentReference,
+                    componentIndex + 4);
+                Vector256<double> lowerFinite = Avx.Compare(
+                    Avx.And(lowerComponents, AbsoluteValueMask),
+                    MaximumFinite,
+                    FloatComparisonMode.OrderedLessThanOrEqualNonSignaling);
+                Vector256<double> upperFinite = Avx.Compare(
+                    Avx.And(upperComponents, AbsoluteValueMask),
+                    MaximumFinite,
+                    FloatComparisonMode.OrderedLessThanOrEqualNonSignaling);
+                Vector256<double> multiplierFinite = Avx.Compare(
+                    Avx.And(multiplier, AbsoluteValueMask),
+                    MaximumFinite,
+                    FloatComparisonMode.OrderedLessThanOrEqualNonSignaling);
+                if (Avx.MoveMask(multiplierFinite) == 0b1111
+                    && Avx.MoveMask(lowerFinite) == 0b1111
+                    && Avx.MoveMask(upperFinite) == 0b1111)
+                {
+                    Avx.Multiply(lowerComponents, lowerMultipliers)
+                        .StoreUnsafe(ref componentReference, componentIndex);
+                    Avx.Multiply(upperComponents, upperMultipliers)
+                        .StoreUnsafe(ref componentReference, componentIndex + 4);
+                }
+                else
+                {
+                    for (int scalar = index; scalar < index + 4; scalar++)
+                    {
+                        values[scalar] *= multipliers[scalar];
+                    }
+                }
+            }
+        }
+
+        for (; index < values.Length; index++)
+        {
+            values[index] *= multipliers[index];
+        }
+    }
 
     private static Complex ApplyScalar(Complex left, Complex right)
     {
