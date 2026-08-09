@@ -36,7 +36,7 @@ upstream release `v0.4.0`、commit
 - VHS family には VHS/S-VHS、Betamax、Video8/Hi8、U-matic、Type C、EIAJ、
   upstream が対応する PAL/NTSC variant が含まれます。
 - TBC utility、ダブルクリック GUI、開発者向け plot window は対象外です。
-- Visual Studio 2026 の `.slnx` には **1,376** 件の標準 xUnit v3 test があり、
+- Visual Studio 2026 の `.slnx` には **1,382** 件の標準 xUnit v3 test があり、
   Test Explorer と `dotnet test` の両方で実行できます。
 
 <!-- SECTION: start -->
@@ -96,42 +96,42 @@ CVBS と HiFi は引き続き `ipp-fast` を拒否します。release-compatible
 次の表は同じ private local 40 MHz PAL VHS `.ldf` fixture と同じ 40-frame
 window を使用し、source filename は公開しません。各 cell は、この candidate を
 reordered Release run で 3 回ずつ測定した fresh median です。candidate は merged main
-`63251d8` を基にし、別 fixture/build の値は引き継いでいません。互換性と速度は
+`ae3722d` を基にし、別 fixture/build の値は引き継いでいません。互換性と速度は
 別々に評価します。
 
 <!-- LATEST_PERFORMANCE_BEGIN -->
 | CLI mode（workers） | Python v0.4.0 | Python PR341 | Exact + v0.4.0 | Exact + current | IPP-fast + v0.4.0 | IPP-fast + current |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| default（5） | 17.680 s | 20.173 s | 4.096 s / 4.316x | 4.618 s / 4.369x | 3.604 s / 4.906x | 3.392 s / 5.948x |
-| `--threads 1` | 18.995 s | 21.062 s | 11.613 s / 1.636x | 13.183 s / 1.598x | 8.407 s / 2.259x | 9.340 s / 2.255x |
-| `--threads 5` | 17.599 s | 19.493 s | 4.307 s / 4.086x | 4.805 s / 4.057x | 3.525 s / 4.993x | 3.203 s / 6.087x |
-| `--threads 10` | 17.182 s | 19.727 s | 3.240 s / 5.303x | 3.764 s / 5.241x | 3.142 s / 5.468x | 2.830 s / 6.972x |
-| `--threads 20` | 17.594 s | 19.583 s | 2.730 s / 6.445x | 3.168 s / 6.181x | 2.667 s / 6.598x | 2.327 s / 8.416x |
+| default（5） | 17.401 s | 19.791 s | 4.341 s / 4.008x | 4.302 s / 4.601x | 3.549 s / 4.904x | 3.126 s / 6.331x |
+| `--threads 1` | 19.177 s | 21.052 s | 11.626 s / 1.649x | 12.860 s / 1.637x | 8.361 s / 2.294x | 9.232 s / 2.280x |
+| `--threads 5` | 17.458 s | 20.209 s | 4.043 s / 4.318x | 4.157 s / 4.861x | 3.654 s / 4.778x | 3.111 s / 6.495x |
+| `--threads 10` | 17.230 s | 19.480 s | 3.526 s / 4.886x | 3.745 s / 5.201x | 2.983 s / 5.775x | 2.513 s / 7.751x |
+| `--threads 20` | 17.558 s | 19.928 s | 2.772 s / 6.334x | 3.298 s / 6.042x | 2.632 s / 6.672x | 2.075 s / 9.605x |
 <!-- LATEST_PERFORMANCE_END -->
-<!-- LATEST_PERFORMANCE_RUNS: full-refresh=90 repeats=3 mapped-ab=36 mapped-long=4 dotnet-determinism=60 -->
+<!-- LATEST_PERFORMANCE_RUNS: full-refresh=90 repeats=3 candidate-ab=8 thread-gates=24 candidate-long=2 strict-candidate-runs=34 dotnet-determinism=60 python-v040-runs=15 python-v040-hashes=15 python-v040-nondefault-runs=12 python-v040-nondefault-hashes=12 -->
 
 各 .NET cell は wall-time median と profile が対応する Python 列に対する
 speedup の順で、default は **5 workers** です。以前公開した table は別の private
 NTSC Betamax HiFi fixture を使っており、直接比較できません。この PAL fixture では、
-以前の main が oversized raw FLAC を FFmpeg 経由にした実コストもありました。
-candidate は fixed-block、no-seektable などの厳格な gate を満たす通常の parallel VHS
-decode だけを libsndfile mapping に切り替えます。serial、diagnostic、resampled、
-ineligible input は既存の FFmpeg path を保ち、native read failure は同じ logical sample
-から一方向に fallback します。
+以前の main が oversized raw FLAC を FFmpeg 経由にした実コストもありましたが、
+その問題は以前の release で修正済みです。今回の candidate は deterministic float64
+median の introselect threshold を 32,768 から 4,096 samples に下げ、約 6K/15K samples
+の PAL VSync MAD group で full sort を避けます。NaN、mixed signed zero、even-length
+median expression の semantics は変わりません。
 
-strict baseline/candidate gate では、Exact `current --threads 20` の 200 frames が
-14.876 から 11.135 秒へ 25.15%、1,000 frames が 53.230 から 44.055 秒へ 17.24%
-短縮しました。long pair の effective cores は 6.76 から 7.41、peak working set は
-773.2 から 402.4 MiB です。32 workers/100 frames は 33.41% 短縮し、Exact v0.4.0 と
-IPP-fast `current` の 200-frame gate はそれぞれ 22.24% と 24.64% 改善しました。
-変更していない single-worker route は neutral です。
+4 組の interleaved 160-frame IPP-fast `current --threads 20` pair は wall-time median を
+7.253 から 6.542 秒へ短縮しました（9.80% lower、10.87% higher throughput）。CPU
+median は 39.453 対 39.469 秒で実質同じです。1,000-frame gate は 38.478 から
+35.487 秒へ 7.77% 短縮し、CPU time は 1.21% 減少、peak working set は
+368.3 対 368.1 MiB で bounded のままでした。
 
-36 回の strict A/B は luma、chroma、raw JSON、ordered `fileLoc`、stdout、normalized
-stderr/log のすべてが一致し、60 回の .NET matrix run も cross-thread deterministic
-でした。IPP-fast は explicit numerically-close backend のままで、Exact と
-byte-for-byte 同一とは主張しません。Python v0.4.0 の 15 回の nonzero-worker matrix
-run は 14 個の luma/chroma hash を生成したため、strict oracle は引き続き Python
-v0.4.0 `g4315520 --threads 0` です。完全な command、hardware、hash、memory bound、
+34 回の strict baseline/candidate run は luma、chroma、raw JSON、ordered `fileLoc`、
+stdout、normalized stderr/log がすべて一致し、60 回の .NET matrix run も
+cross-thread deterministic でした。IPP-fast は explicit numerically-close backend
+のままで、Exact と byte-for-byte 同一とは主張しません。merged Python PR341 は
+deterministic でしたが、Python v0.4.0 は全 15 matrix run で別々の luma、chroma、
+JSON hash を生成し、明示的 non-default worker の 12 run も 12 種類でした。そのため
+strict oracle は引き続き Python v0.4.0 `g4315520 --threads 0` です。完全な command、hardware、hash、memory bound、
 過去の測定は
 [詳細な性能リファレンス](docs/README.detailed.ja.md#パフォーマンス)にあります。
 
@@ -168,7 +168,7 @@ header は FFmpeg を維持します。
 dotnet restore VHSDecodeDotNet.slnx
 dotnet build VHSDecodeDotNet.slnx -c Release --no-restore
 dotnet test --solution VHSDecodeDotNet.slnx -c Release `
-  --no-build --no-restore --minimum-expected-tests 1376
+  --no-build --no-restore --minimum-expected-tests 1382
 ```
 
 Visual Studio 2026 で `VHSDecodeDotNet.slnx` を開くと、build、debug、

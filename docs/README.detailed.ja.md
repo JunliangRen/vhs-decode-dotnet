@@ -250,7 +250,7 @@ FFT への fallback が必要で、paired median gain は -1.05% まで低下し
 - VSync envelope/minima 処理と harmonic power-ratio search は 1 つの read-only padded
   input 上で並行実行します。両 branch の完了後、candidate arbitration と detector
   state update は引き続き順序どおりに行います。NumPy-compatible float64 median は
-  small input で full sort を維持し、32K sample 以上で bit-exact introselect を使います。
+  4K sample 未満で full sort を維持し、4K sample 以上で bit-exact introselect を使います。
 - VSync の private forward/reverse envelope と harmonic BA-IIR chain は、それぞれが
   ownership を持つ array を in-place filter します。envelope branch は combined padded
   array を生成せず、reduced final result へ直接書き込みます。public IIR result の独立した
@@ -394,16 +394,16 @@ Python v0.4.0、merge 済みの Python PR341、Exact v0.4.0、Exact
 <!-- LATEST_PERFORMANCE_BEGIN -->
 | CLI mode（workers） | Python v0.4.0 | Python PR341 | Exact + v0.4.0 | Exact + current | IPP-fast + v0.4.0 | IPP-fast + current |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| default（5） | 17.680 s | 20.173 s | 4.096 s / 4.316x / 76.83% | 4.618 s / 4.369x / 77.11% | 3.604 s / 4.906x / 79.62% | 3.392 s / 5.948x / 83.19% |
-| `--threads 1` | 18.995 s | 21.062 s | 11.613 s / 1.636x / 38.86% | 13.183 s / 1.598x / 37.41% | 8.407 s / 2.259x / 55.74% | 9.340 s / 2.255x / 55.66% |
-| `--threads 5` | 17.599 s | 19.493 s | 4.307 s / 4.086x / 75.52% | 4.805 s / 4.057x / 75.35% | 3.525 s / 4.993x / 79.97% | 3.203 s / 6.087x / 83.57% |
-| `--threads 10` | 17.182 s | 19.727 s | 3.240 s / 5.303x / 81.14% | 3.764 s / 5.241x / 80.92% | 3.142 s / 5.468x / 81.71% | 2.830 s / 6.972x / 85.66% |
-| `--threads 20` | 17.594 s | 19.583 s | 2.730 s / 6.445x / 84.48% | 3.168 s / 6.181x / 83.82% | 2.667 s / 6.598x / 84.84% | 2.327 s / 8.416x / 88.12% |
+| default（5） | 17.401 s | 19.791 s | 4.341 s / 4.008x / 75.05% | 4.302 s / 4.601x / 78.26% | 3.549 s / 4.904x / 79.61% | 3.126 s / 6.331x / 84.21% |
+| `--threads 1` | 19.177 s | 21.052 s | 11.626 s / 1.649x / 39.37% | 12.860 s / 1.637x / 38.91% | 8.361 s / 2.294x / 56.40% | 9.232 s / 2.280x / 56.15% |
+| `--threads 5` | 17.458 s | 20.209 s | 4.043 s / 4.318x / 76.84% | 4.157 s / 4.861x / 79.43% | 3.654 s / 4.778x / 79.07% | 3.111 s / 6.495x / 84.60% |
+| `--threads 10` | 17.230 s | 19.480 s | 3.526 s / 4.886x / 79.53% | 3.745 s / 5.201x / 80.77% | 2.983 s / 5.775x / 82.69% | 2.513 s / 7.751x / 87.10% |
+| `--threads 20` | 17.558 s | 19.928 s | 2.772 s / 6.334x / 84.21% | 3.298 s / 6.042x / 83.45% | 2.632 s / 6.672x / 85.01% | 2.075 s / 9.605x / 89.59% |
 <!-- LATEST_PERFORMANCE_END -->
-<!-- LATEST_PERFORMANCE_RUNS: full-refresh=90 repeats=3 mapped-ab=36 mapped-long=4 dotnet-determinism=60 -->
+<!-- LATEST_PERFORMANCE_RUNS: full-refresh=90 repeats=3 candidate-ab=8 thread-gates=24 candidate-long=2 strict-candidate-runs=34 dotnet-determinism=60 python-v040-runs=15 python-v040-hashes=15 python-v040-nondefault-runs=12 python-v040-nondefault-hashes=12 -->
 
 全 90 run（30 matrix cell を各 3 回）は 2026-08-09 に今回の candidate で fresh
-measurement しました。candidate は merged main `63251d8` を基にしています。各 cell
+measurement しました。candidate は merged main `ae3722d` を基にしています。各 cell
 は 3 回の Release run の median で、3 pass の mode/profile order は reverse と
 mixed order にしました。
 host は Intel Core Ultra 7 265K（20 logical processor）、Windows 11 build 26220、
@@ -411,12 +411,44 @@ host は Intel Core Ultra 7 265K（20 logical processor）、Windows 11 build 26
 fixture path を含むため local にのみ保持します。以下は local measurement の報告で、
 public independently reproducible benchmark corpus ではありません。candidate
 executable の SHA-256 は
-`808D09DD0D1B98548AB6A712BFF777E2F6192027D5943C84A9C0C7482BCF6E6B` です。
+`AAAB4B0A884D0F22B361E369A55A2C475DD2D042806043B25EAFB5DF188B7860` です。
 
 以前公開した table は別の private NTSC Betamax HiFi `.lds` fixture を使っているため、
-この PAL VHS matrix とは直接比較できません。同じ PAL fixture 内でも、以前の main は
-oversized raw FLAC に strict FFmpeg/PyAV-emulation path を使う実際の performance/memory
-cost がありました。次の変更は serial oracle contract を変えずにその cost を除きます。
+この PAL VHS matrix とは直接比較できません。今回の refreshed table は次の
+median-selection candidate を示します。mapped raw-FLAC improvement は base main に
+すでに含まれており、その説明は release history として後に残します。
+
+### deterministic PAL VSync median selection
+
+`NumpyReduction` は 32,768 values まで待たず、4,096 values 以上を既存の deterministic
+introselect へ送るようになりました。これにより約 6K/15K samples の PAL VSync MAD
+group で full sort を避けます。threshold 未満の input と positive/negative zero を両方
+含む array は full sort のままです。NaN は selection 前にそのまま返し、even-length
+input は upper middle value を選択し、lower partition の maximum を scan して、同じ
+順序で `(lower + upper) / 2.0` を評価します。focused test は allocation API と
+caller-scratch API の両方で 4,095、4,096、4,097 values を検証します。
+
+固定 160-frame IPP-fast `current --threads 20` の 4 組の interleaved
+baseline/candidate pair は wall-time median を 7.253 から 6.542 秒へ短縮し
+（9.80% lower、10.87% higher throughput）、全 4 pair で candidate が勝ちました。
+CPU median は 39.453 対 39.469 秒で実質同じです。固定 1,000-frame gate は
+38.478 から 35.487 秒へ 7.77% 短縮し、CPU time は 215.016 から 212.422 秒へ
+1.21% 減少、peak working set は 368.3 対 368.1 MiB で bounded のままでした。
+candidate の first-/last-third working-set median は 361.6/366.3 MiB で、継続的な
+増加はありませんでした。
+
+Exact と IPP-fast の baseline/candidate matrix は 2 compatibility profile の
+`--threads 0`、default-5、`--threads 20` をカバーしました。その 24 run、8 short A/B
+run、2 long-gate run は luma、chroma、raw JSON、ordered `fileLoc`、stdout、normalized
+stderr/log がすべて一致しました。60 回の .NET performance-matrix run は全 thread
+mode で profile ごとに 1 hash でした。merged Python PR341 は deterministic でしたが、
+Python v0.4.0 は 15 run で 15 種類の luma、chroma、JSON hash を生成し、明示的
+non-default worker の 12 run も 12 種類でした。strict oracle は引き続き Python
+v0.4.0 `g4315520 --threads 0` です。
+
+以前 1,000-frame `--fallback_vsync` gate に使用した private NTSC VHS fixture は今回
+利用できませんでした。この gate は再実行せず、古い fallback evidence から今回の
+claim を推定していません。
 
 ### oversized raw-FLAC mapped seeking
 
@@ -443,11 +475,8 @@ effective cores は 6.80 から 8.88 へ増えました。変更していない 
 は 13.901 対 13.877 秒で neutral です。
 
 別の 200-frame gate は Exact v0.4.0 を 22.24%、IPP-fast `current` を 24.64%
-短縮しました。six-path matrix の 60 .NET run は default-5 と
-`--threads 1/5/10/20` を通して profile ごとに 1 hash でした。merged Python PR341
-もこの bounded matrix では deterministic です。Python v0.4.0 は 15 nonzero-worker
-run で 14 luma/chroma hash を生成したため、strict oracle は引き続き Python v0.4.0
-`g4315520 --threads 0` です。
+短縮しました。この mapped-seeking change は `v0.4.0-1.5.3` で release 済みで、
+これらの historical timing は上の最新 table に引き継いでいません。
 
 ### managed current CTI quotient/finish AVX
 
@@ -2544,7 +2573,7 @@ focused 16 KiB unit-test threshold は warmed calling thread の allocation だ�
 .\tools\build-ipp-native.ps1
 dotnet restore VHSDecodeDotNet.slnx
 dotnet build VHSDecodeDotNet.slnx -c Release --no-restore
-dotnet test --solution VHSDecodeDotNet.slnx -c Release --no-build --no-restore --minimum-expected-tests 1376
+dotnet test --solution VHSDecodeDotNet.slnx -c Release --no-build --no-restore --minimum-expected-tests 1382
 dotnet test --project tests\VHSDecode.Tests\VHSDecode.Tests.csproj -c Release --no-build --no-restore --coverage --coverage-output coverage.cobertura.xml --coverage-output-format cobertura
 ```
 
@@ -2558,7 +2587,7 @@ third-party notice を埋め込み、license sidecar file は追加しません�
 
 現在の正式な Release build は warning 0、error 0 です。xUnit v3 project は
 `dotnet test` と Visual Studio Test Explorer の両方で個別に検出できる
-**1,376** tests を公開します。
+**1,382** tests を公開します。
 
 <!-- SECTION: usage -->
 

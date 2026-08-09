@@ -6,7 +6,7 @@ namespace VHSDecode.Core.Dsp;
 
 internal static class NumpyReduction
 {
-    private const int IntroselectThreshold = 32 * 1024;
+    private const int IntroselectThreshold = 4 * 1024;
     private const int PartitionSortThreshold = 32;
 
     public static double MedianFloat64(ReadOnlySpan<double> values)

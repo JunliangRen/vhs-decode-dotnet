@@ -223,7 +223,7 @@ CVBS 和 HiFi 会明确拒绝不支持的 `ipp-fast`，不会悄悄改跑 Exact 
   并行写入最终 RF span 中互不重叠的裁剪区间；串行与有状态 block 路径仍按顺序组装。
 - VSync 包络/极小值计算与谐波功率比搜索会在同一个只读 padded 输入上并发执行；
   两个分支完成后，候选仲裁和 detector 状态更新仍按顺序进行。兼容 NumPy 的 float64
-  median 对小输入保留完整排序，从 32K 样本起使用位精确 introselect。
+  median 对少于 4K 的输入保留完整排序，从 4K 样本起使用位精确 introselect。
 - VSync 私有的正向/反向包络与谐波 BA-IIR 链会在各自拥有的数组上原地滤波；包络分支
   会直接写入降采样后的最终结果，不再生成组合 padded 数组。公开 IIR 结果仍独立拥有，
   并保持位精确一致。有状态 detector 会在 padded 输入不超过 1,048,576 个样本时保留
@@ -336,26 +336,51 @@ IPP-fast v0.4.0 和 IPP-fast `current`。文件名不会公开。每个 .NET 单
 <!-- LATEST_PERFORMANCE_BEGIN -->
 | CLI 模式（workers） | Python v0.4.0 | Python PR341 | Exact + v0.4.0 | Exact + current | IPP-fast + v0.4.0 | IPP-fast + current |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| 默认（5） | 17.680 s | 20.173 s | 4.096 s / 4.316x / 76.83% | 4.618 s / 4.369x / 77.11% | 3.604 s / 4.906x / 79.62% | 3.392 s / 5.948x / 83.19% |
-| `--threads 1` | 18.995 s | 21.062 s | 11.613 s / 1.636x / 38.86% | 13.183 s / 1.598x / 37.41% | 8.407 s / 2.259x / 55.74% | 9.340 s / 2.255x / 55.66% |
-| `--threads 5` | 17.599 s | 19.493 s | 4.307 s / 4.086x / 75.52% | 4.805 s / 4.057x / 75.35% | 3.525 s / 4.993x / 79.97% | 3.203 s / 6.087x / 83.57% |
-| `--threads 10` | 17.182 s | 19.727 s | 3.240 s / 5.303x / 81.14% | 3.764 s / 5.241x / 80.92% | 3.142 s / 5.468x / 81.71% | 2.830 s / 6.972x / 85.66% |
-| `--threads 20` | 17.594 s | 19.583 s | 2.730 s / 6.445x / 84.48% | 3.168 s / 6.181x / 83.82% | 2.667 s / 6.598x / 84.84% | 2.327 s / 8.416x / 88.12% |
+| 默认（5） | 17.401 s | 19.791 s | 4.341 s / 4.008x / 75.05% | 4.302 s / 4.601x / 78.26% | 3.549 s / 4.904x / 79.61% | 3.126 s / 6.331x / 84.21% |
+| `--threads 1` | 19.177 s | 21.052 s | 11.626 s / 1.649x / 39.37% | 12.860 s / 1.637x / 38.91% | 8.361 s / 2.294x / 56.40% | 9.232 s / 2.280x / 56.15% |
+| `--threads 5` | 17.458 s | 20.209 s | 4.043 s / 4.318x / 76.84% | 4.157 s / 4.861x / 79.43% | 3.654 s / 4.778x / 79.07% | 3.111 s / 6.495x / 84.60% |
+| `--threads 10` | 17.230 s | 19.480 s | 3.526 s / 4.886x / 79.53% | 3.745 s / 5.201x / 80.77% | 2.983 s / 5.775x / 82.69% | 2.513 s / 7.751x / 87.10% |
+| `--threads 20` | 17.558 s | 19.928 s | 2.772 s / 6.334x / 84.21% | 3.298 s / 6.042x / 83.45% | 2.632 s / 6.672x / 85.01% | 2.075 s / 9.605x / 89.59% |
 <!-- LATEST_PERFORMANCE_END -->
-<!-- LATEST_PERFORMANCE_RUNS: full-refresh=90 repeats=3 mapped-ab=36 mapped-long=4 dotnet-determinism=60 -->
+<!-- LATEST_PERFORMANCE_RUNS: full-refresh=90 repeats=3 candidate-ab=8 thread-gates=24 candidate-long=2 strict-candidate-runs=34 dotnet-determinism=60 python-v040-runs=15 python-v040-hashes=15 python-v040-nondefault-runs=12 python-v040-nondefault-hashes=12 -->
 
 全部 90 次运行（30 个矩阵单元，每个重复 3 次）均于 2026-08-09 使用本候选重新测量；
-候选基于已合并的 main `63251d8`。每个单元都是三次 Release 运行的中位数，三轮分别
+候选基于已合并的 main `ae3722d`。每个单元都是三次 Release 运行的中位数，三轮分别
 反转和混排了模式与 profile 顺序。测试机为 Intel Core Ultra 7 265K（20 个逻辑处理器）、
 Windows 11 build 26220，以及 .NET SDK/runtime `11.0.100-preview.6.26359.118`。原始运行目录
 含有私有夹具路径，因此只保留在本地；这些是如实报告的本地测量，不是可公开独立
 复现的 benchmark corpus。候选可执行文件的 SHA-256 为
-`808D09DD0D1B98548AB6A712BFF777E2F6192027D5943C84A9C0C7482BCF6E6B`。
+`AAAB4B0A884D0F22B361E369A55A2C475DD2D042806043B25EAFB5DF188B7860`。
 
 更早公开的表格使用另一份私有 NTSC Betamax HiFi `.lds` 夹具，不能与这份 PAL VHS
-矩阵直接比较。在同一份 PAL 夹具内，之前的 main 还因为超大 raw FLAC 必须走严格的
-FFmpeg/PyAV 模拟路径而承担了真实的性能和内存成本。下面这项修改在不改变串行 oracle
-契约的前提下消除了该开销。
+矩阵直接比较。本次刷新表格描述的是下面的中位数选择候选；raw FLAC 映射定位优化
+已经包含在作为基线的 main 中，其说明作为已发布历史保留在后面。
+
+### 确定性的 PAL VSync 中位数选择
+
+`NumpyReduction` 现在从 4,096 个值开始使用既有的确定性 introselect，而不是等到
+32,768 个值。这让约 6K 和 15K 样本的 PAL VSync MAD 分组不再执行完整排序。低于阈值
+的输入以及同时包含正零和负零的数组仍然完整排序；NaN 仍会在选择前原样返回，偶数
+长度仍选择上中位数、扫描下分区最大值，并按原顺序计算 `(lower + upper) / 2.0`。
+聚焦测试通过分配式和调用方 scratch 两个 API 覆盖 4,095、4,096、4,097 三个边界。
+
+固定 160 帧 IPP-fast `current --threads 20` 的四组交错基线/候选配对，把墙钟中位数
+从 7.253 降到 6.542 秒（缩短 9.80%，吞吐提升 10.87%），四组均由候选获胜；CPU
+中位数基本不变，为 39.453 对 39.469 秒。固定 1000 帧门禁从 38.478 降到 35.487 秒
+（缩短 7.77%），CPU 从 215.016 降到 212.422 秒（减少 1.21%），峰值工作集保持
+有界：368.3 对 368.1 MiB。候选前后 1/3 的工作集中位数为 361.6/366.3 MiB，未见
+持续增长。
+
+Exact 和 IPP-fast 的基线/候选矩阵覆盖两个兼容 profile 的 `--threads 0`、默认 5 和
+`--threads 20`。这些 24 次运行、8 次短 A/B 和 2 次长跑的亮度、色度、原始 JSON、
+有序 `fileLoc`、stdout、归一化 stderr 与日志全部一致。60 次 .NET 性能矩阵运行在
+所有线程模式下每个 profile 都只有一套 hash。已合并的 Python PR341 在本轮保持确定；
+Python v0.4.0 的 15 次运行产生了 15 套不同的亮度、色度和 JSON hash，其中 12 次显式
+非默认 worker 运行也是 12 套。因此严格 oracle 仍是 Python v0.4.0
+`g4315520 --threads 0`。
+
+过去用于 1000 帧 `--fallback_vsync` 门禁的私有 NTSC VHS 夹具在本轮不可用，因此没有
+重跑该门禁，也没有用旧的 fallback 证据推导本轮结论。
 
 ### 超大 raw-FLAC 映射定位
 
@@ -379,10 +404,8 @@ stdout、耗时归一化 stderr 和时间戳归一化日志。Exact
 13.901 对 13.877 秒。
 
 另行执行的 200 帧门禁中，Exact v0.4.0 缩短 22.24%，IPP-fast `current` 缩短
-24.64%。六路径矩阵中的 60 次 .NET 运行在默认 5 和 `--threads 1/5/10/20` 之间，
-每个 profile 都只有一套 hash。合并后的 Python PR341 在这次有界矩阵中也保持确定性；
-Python v0.4.0 的 15 次非零 worker 运行产生了 14 套亮度/色度 hash，因此严格 oracle
-仍是 Python v0.4.0 `g4315520 --threads 0`。
+24.64%。该映射定位改动已经随 `v0.4.0-1.5.3` 发布；这些历史计时均未沿用到上面的
+最新表格。
 
 ### 托管 current CTI 商值与收尾 AVX
 
@@ -2112,7 +2135,7 @@ main/候选墙钟中位数为 44.924/44.985 秒（候选增加 0.14%，吞吐 0.
 .\tools\build-ipp-native.ps1
 dotnet restore VHSDecodeDotNet.slnx
 dotnet build VHSDecodeDotNet.slnx -c Release --no-restore
-dotnet test --solution VHSDecodeDotNet.slnx -c Release --no-build --no-restore --minimum-expected-tests 1376
+dotnet test --solution VHSDecodeDotNet.slnx -c Release --no-build --no-restore --minimum-expected-tests 1382
 dotnet test --project tests\VHSDecode.Tests\VHSDecode.Tests.csproj -c Release --no-build --no-restore --coverage --coverage-output coverage.cobertura.xml --coverage-output-format cobertura
 ```
 
@@ -2124,7 +2147,7 @@ Intel oneAPI。只含二进制的单文件发布会嵌入 `vhsdecode_ipp.dll` �
 notice，不会额外生成许可证 sidecar 文件。只构建 Exact 后端时可以省略原生构建步骤。
 
 当前正式 Release 构建为零警告、零错误。xUnit v3 项目向
-`dotnet test` 和 Visual Studio Test Explorer 暴露 **1,376** 个可独立发现的测试。
+`dotnet test` 和 Visual Studio Test Explorer 暴露 **1,382** 个可独立发现的测试。
 
 <!-- SECTION: usage -->
 
