@@ -620,45 +620,17 @@ public sealed class VhsSyncDetector
 
         if (!preciseScanCompleted)
         {
-            fallingIndex = -1;
-            for (int index = 0; index < sampleCount - 1; index++)
-            {
-                if (filtered[index] >= preciseMidpoint
-                    && filtered[index + 1] < preciseMidpoint)
-                {
-                    fallingIndex = index;
-                }
-                else if (fallingIndex != -1
-                         && filtered[index] < preciseMidpoint
-                         && filtered[index + 1] >= preciseMidpoint)
-                {
-                    bool belongsToValidGrid = false;
-                    for (int candidate = 0; candidate < amplitudeCount; candidate++)
-                    {
-                        if (!finalMask[candidate])
-                        {
-                            continue;
-                        }
-
-                        int delta = Math.Abs(fallingIndex - falls[candidate]);
-                        double remainder = delta % effectiveLineLength;
-                        if (remainder < jitterTolerance
-                            || remainder > effectiveLineLength - jitterTolerance)
-                        {
-                            belongsToValidGrid = true;
-                            break;
-                        }
-                    }
-
-                    if (belongsToValidGrid)
-                    {
-                        fallingEdges.Add(fallingIndex);
-                        risingEdges.Add(index);
-                    }
-
-                    fallingIndex = -1;
-                }
-            }
+            FindPreciseEdgesOnValidGrid(
+                filtered,
+                preciseMidpoint,
+                falls,
+                finalMask,
+                amplitudeCount,
+                effectiveLineLength,
+                jitterTolerance,
+                fallingEdges,
+                risingEdges,
+                allowAvx: true);
         }
 
         if (fallingEdges.Count == 0)
@@ -901,6 +873,124 @@ public sealed class VhsSyncDetector
         }
 
         return true;
+    }
+
+    internal static unsafe void FindPreciseEdgesOnValidGrid(
+        ReadOnlySpan<double> filtered,
+        double preciseMidpoint,
+        int[] falls,
+        bool[] finalMask,
+        int amplitudeCount,
+        double effectiveLineLength,
+        double jitterTolerance,
+        List<int> fallingEdges,
+        List<int> risingEdges,
+        bool allowAvx)
+    {
+        ArgumentNullException.ThrowIfNull(falls);
+        ArgumentNullException.ThrowIfNull(finalMask);
+        ArgumentNullException.ThrowIfNull(fallingEdges);
+        ArgumentNullException.ThrowIfNull(risingEdges);
+        if ((uint)amplitudeCount > (uint)falls.Length
+            || (uint)amplitudeCount > (uint)finalMask.Length)
+        {
+            throw new ArgumentOutOfRangeException(nameof(amplitudeCount));
+        }
+
+        int comparisonCount = Math.Max(0, filtered.Length - 1);
+        int fallingIndex = -1;
+        int index = 0;
+        if (allowAvx && Avx.IsSupported && comparisonCount >= 4)
+        {
+            fixed (double* filteredPointer = filtered)
+            {
+                Vector256<double> midpoint = Vector256.Create(preciseMidpoint);
+                int vectorizedEnd = comparisonCount & ~3;
+                for (; index < vectorizedEnd; index += 4)
+                {
+                    Vector256<double> current = Avx.LoadVector256(
+                        filteredPointer + index);
+                    Vector256<double> next = Avx.LoadVector256(
+                        filteredPointer + index + 1);
+                    int fallingMask = Avx.MoveMask(Avx.And(
+                        Avx.Compare(
+                            midpoint,
+                            current,
+                            FloatComparisonMode.OrderedLessThanOrEqualNonSignaling),
+                        Avx.Compare(
+                            next,
+                            midpoint,
+                            FloatComparisonMode.OrderedLessThanNonSignaling)));
+                    int risingMask = Avx.MoveMask(Avx.And(
+                        Avx.Compare(
+                            current,
+                            midpoint,
+                            FloatComparisonMode.OrderedLessThanNonSignaling),
+                        Avx.Compare(
+                            midpoint,
+                            next,
+                            FloatComparisonMode.OrderedLessThanOrEqualNonSignaling)));
+                    int crossingMask = fallingMask | risingMask;
+                    // Commit crossings in scalar index order so pulse state is identical.
+                    while (crossingMask != 0)
+                    {
+                        int lane = BitOperations.TrailingZeroCount(
+                            (uint)crossingMask);
+                        int bit = 1 << lane;
+                        int crossingIndex = index + lane;
+                        if ((fallingMask & bit) != 0)
+                        {
+                            fallingIndex = crossingIndex;
+                        }
+                        else if (fallingIndex != -1)
+                        {
+                            if (IsOnValidGrid(
+                                fallingIndex,
+                                falls,
+                                finalMask,
+                                amplitudeCount,
+                                effectiveLineLength,
+                                jitterTolerance))
+                            {
+                                fallingEdges.Add(fallingIndex);
+                                risingEdges.Add(crossingIndex);
+                            }
+
+                            fallingIndex = -1;
+                        }
+
+                        crossingMask &= crossingMask - 1;
+                    }
+                }
+            }
+        }
+
+        for (; index < comparisonCount; index++)
+        {
+            if (filtered[index] >= preciseMidpoint
+                && filtered[index + 1] < preciseMidpoint)
+            {
+                fallingIndex = index;
+            }
+            else if (fallingIndex != -1
+                     && filtered[index] < preciseMidpoint
+                     && filtered[index + 1] >= preciseMidpoint)
+            {
+                if (IsOnValidGrid(
+                    fallingIndex,
+                    falls,
+                    finalMask,
+                    amplitudeCount,
+                    effectiveLineLength,
+                    jitterTolerance))
+                {
+                    fallingEdges.Add(fallingIndex);
+                    risingEdges.Add(index);
+                }
+
+                fallingIndex = -1;
+            }
+        }
     }
 
     private static bool IsOnValidGrid(

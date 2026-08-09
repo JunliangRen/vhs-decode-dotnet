@@ -6,15 +6,16 @@ namespace VHSDecode.Tests;
 public sealed partial class ReadmeLocalizationTests
 {
     private const string LatestPerformanceRunsMarker =
-        "<!-- LATEST_PERFORMANCE_RUNS: dotnet-refresh=60 reused-python-runs=30 repeats=3 " +
-        "candidate-ab=20 thread-gates=24 candidate-long=4 strict-candidate-runs=48 " +
-        "dotnet-matrix-runs=60 python-matrix-runs=30 python-v040-runs=15 " +
+        "<!-- LATEST_PERFORMANCE_RUNS: dotnet-current-refresh=30 " +
+        "reused-dotnet-v040-runs=30 reused-python-runs=30 repeats=3 " +
+        "precise-edge-ab=12 precise-edge-thread-gates=14 precise-edge-long=4 " +
+        "precise-edge-matrix-runs=30 python-matrix-runs=30 python-v040-runs=15 " +
         "python-v040-hashes=15 " +
         "python-v040-nondefault-runs=12 python-v040-nondefault-hashes=12 -->";
 
     private const string FullCiTestCommand =
         "run: dotnet test --solution VHSDecodeDotNet.slnx --configuration Release " +
-        "--no-build --no-restore --minimum-expected-tests 1385";
+        "--no-build --no-restore --minimum-expected-tests 1394";
 
     private static readonly string[] OverviewReadmeFiles =
     [
@@ -114,26 +115,26 @@ public sealed partial class ReadmeLocalizationTests
         Assert.Equal(3, expectedDetailedCommands.Length);
         string[] expectedOverviewPerformanceRows =
         [
-            "49.845 s | 51.191 s | 13.095 s | 3.806x | 12.786 s | 4.004x | 11.613 s | 4.292x | 10.045 s | 5.096x",
-            "55.763 s | 55.815 s | 35.334 s | 1.578x | 41.759 s | 1.337x | 26.086 s | 2.138x | 28.972 s | 1.927x",
-            "50.124 s | 51.398 s | 13.560 s | 3.697x | 12.878 s | 3.991x | 11.911 s | 4.208x | 10.046 s | 5.116x",
-            "48.710 s | 50.833 s | 10.815 s | 4.504x | 10.237 s | 4.966x | 9.890 s | 4.925x | 8.207 s | 6.194x",
-            "48.963 s | 50.195 s | 8.547 s | 5.729x | 8.207 s | 6.116x | 8.215 s | 5.960x | 6.478 s | 7.748x"
+            "49.845 s | 51.191 s | 13.095 s | 3.806x | 13.352 s | 3.834x | 11.613 s | 4.292x | 10.263 s | 4.988x",
+            "55.763 s | 55.815 s | 35.334 s | 1.578x | 42.759 s | 1.305x | 26.086 s | 2.138x | 29.522 s | 1.891x",
+            "50.124 s | 51.398 s | 13.560 s | 3.697x | 13.139 s | 3.912x | 11.911 s | 4.208x | 10.288 s | 4.996x",
+            "48.710 s | 50.833 s | 10.815 s | 4.504x | 10.181 s | 4.993x | 9.890 s | 4.925x | 8.168 s | 6.224x",
+            "48.963 s | 50.195 s | 8.547 s | 5.729x | 9.025 s | 5.562x | 8.215 s | 5.960x | 6.765 s | 7.420x"
         ];
         string[] expectedDetailedPerformanceRows =
         [
-            "49.845 s | 51.191 s | 13.095 s | 3.806x | 73.73% | 12.786 s | 4.004x | 75.02% | 11.613 s | 4.292x | 76.70% | 10.045 s | 5.096x | 80.38%",
-            "55.763 s | 55.815 s | 35.334 s | 1.578x | 36.64% | 41.759 s | 1.337x | 25.18% | 26.086 s | 2.138x | 53.22% | 28.972 s | 1.927x | 48.09%",
-            "50.124 s | 51.398 s | 13.560 s | 3.697x | 72.95% | 12.878 s | 3.991x | 74.94% | 11.911 s | 4.208x | 76.24% | 10.046 s | 5.116x | 80.46%",
-            "48.710 s | 50.833 s | 10.815 s | 4.504x | 77.80% | 10.237 s | 4.966x | 79.86% | 9.890 s | 4.925x | 79.70% | 8.207 s | 6.194x | 83.85%",
-            "48.963 s | 50.195 s | 8.547 s | 5.729x | 82.54% | 8.207 s | 6.116x | 83.65% | 8.215 s | 5.960x | 83.22% | 6.478 s | 7.748x | 87.09%"
+            "49.845 s | 51.191 s | 13.095 s | 3.806x | 73.73% | 13.352 s | 3.834x | 73.92% | 11.613 s | 4.292x | 76.70% | 10.263 s | 4.988x | 79.95%",
+            "55.763 s | 55.815 s | 35.334 s | 1.578x | 36.64% | 42.759 s | 1.305x | 23.39% | 26.086 s | 2.138x | 53.22% | 29.522 s | 1.891x | 47.11%",
+            "50.124 s | 51.398 s | 13.560 s | 3.697x | 72.95% | 13.139 s | 3.912x | 74.44% | 11.911 s | 4.208x | 76.24% | 10.288 s | 4.996x | 79.98%",
+            "48.710 s | 50.833 s | 10.815 s | 4.504x | 77.80% | 10.181 s | 4.993x | 79.97% | 9.890 s | 4.925x | 79.70% | 8.168 s | 6.224x | 83.93%",
+            "48.963 s | 50.195 s | 8.547 s | 5.729x | 82.54% | 9.025 s | 5.562x | 82.02% | 8.215 s | 5.960x | 83.22% | 6.765 s | 7.420x | 86.52%"
         ];
 
         string[] overviewFacts =
         [
             "43155200da87c0d49eb37d8ec09b1372075ee8e4",
             "11.0.100-preview.6.26359.118",
-            "**1,385**",
+            "**1,394**",
             "--compat-version",
             "current",
             "--dsp-backend",
@@ -142,20 +143,22 @@ public sealed partial class ReadmeLocalizationTests
             "Exact + current",
             "IPP-fast + v0.4.0",
             "IPP-fast + current",
-            "b30dd8d",
+            "ecf32e4",
             "49.845 s",
             "51.191 s",
             "13.095 s",
-            "12.786 s",
-            "6.116x",
-            "7.748x",
-            "71.280",
-            "70.645",
-            "0.89%",
-            "1.0090x",
-            "416.906",
-            "415.891",
-            "0.24%",
+            "13.352 s",
+            "5.562x",
+            "7.420x",
+            "36.341",
+            "35.822",
+            "1.43%",
+            "1.0145x",
+            "222.078",
+            "220.789",
+            "0.58%",
+            "6.11",
+            "6.16",
             "g4315520",
             "--threads 0"
         ];
@@ -178,8 +181,19 @@ public sealed partial class ReadmeLocalizationTests
             "AAAB4B0A884D0F22B361E369A55A2C475DD2D042806043B25EAFB5DF188B7860",
             "845d8d1",
             "7BAC056495F42BF4327F6E9D99AF4168F0FA585319BC9CF9F9D09E84B4A3E632",
-            "b30dd8d",
-            "F59BFEF5FD9B0459573AABCB1CF0912B9BDD0CB977ED7AF5C7546A58A1080BCA",
+            "ecf32e4",
+            "1FBD9ABB3BE22A0F90E3D7154CEDDE9C895633D4FCF197E1A70D13E29F13142E",
+            "1263.307",
+            "1173.588",
+            "16.98/16.47",
+            "36.341",
+            "35.822",
+            "1.0145x",
+            "222.078",
+            "220.789",
+            "0.58%",
+            "6.11",
+            "6.16",
             "1.675",
             "1.131",
             "32.5%",
@@ -265,7 +279,7 @@ public sealed partial class ReadmeLocalizationTests
             "13.877",
             "22.24%",
             "24.64%",
-            "**1,385**",
+            "**1,394**",
             "416.746",
             "336.922",
             "19.16%",
