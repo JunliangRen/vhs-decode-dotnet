@@ -113,7 +113,7 @@ speed.
 | `--threads 10` | 17.230 s | 19.480 s | 3.526 s / 4.886x | 3.745 s / 5.201x | 2.983 s / 5.775x | 2.513 s / 7.751x |
 | `--threads 20` | 17.558 s | 19.928 s | 2.772 s / 6.334x | 3.298 s / 6.042x | 2.632 s / 6.672x | 2.075 s / 9.605x |
 <!-- LATEST_PERFORMANCE_END -->
-<!-- LATEST_PERFORMANCE_RUNS: full-refresh=90 repeats=3 candidate-ab=8 thread-gates=24 candidate-long=2 dotnet-determinism=60 -->
+<!-- LATEST_PERFORMANCE_RUNS: full-refresh=90 repeats=3 candidate-ab=8 thread-gates=24 candidate-long=2 strict-candidate-runs=34 dotnet-determinism=60 python-v040-runs=15 python-v040-hashes=15 python-v040-nondefault-runs=12 python-v040-nondefault-hashes=12 -->
 
 Each .NET cell shows median wall time and speedup versus its profile-matched
 Python column. The default is **5 workers**. An older public table used a

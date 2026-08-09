@@ -103,7 +103,7 @@ CVBS 和 HiFi 仍会拒绝 `ipp-fast`；需要 release 兼容行为时应使用 
 | `--threads 10` | 17.230 s | 19.480 s | 3.526 s / 4.886x | 3.745 s / 5.201x | 2.983 s / 5.775x | 2.513 s / 7.751x |
 | `--threads 20` | 17.558 s | 19.928 s | 2.772 s / 6.334x | 3.298 s / 6.042x | 2.632 s / 6.672x | 2.075 s / 9.605x |
 <!-- LATEST_PERFORMANCE_END -->
-<!-- LATEST_PERFORMANCE_RUNS: full-refresh=90 repeats=3 candidate-ab=8 thread-gates=24 candidate-long=2 dotnet-determinism=60 -->
+<!-- LATEST_PERFORMANCE_RUNS: full-refresh=90 repeats=3 candidate-ab=8 thread-gates=24 candidate-long=2 strict-candidate-runs=34 dotnet-determinism=60 python-v040-runs=15 python-v040-hashes=15 python-v040-nondefault-runs=12 python-v040-nondefault-hashes=12 -->
 
 每个 .NET 单元格依次给出墙钟中位数和相对同 profile Python 列的倍速；默认实际
 使用 **5 个 workers**。更早公开的表格使用另一份私有 NTSC Betamax HiFi 夹具，

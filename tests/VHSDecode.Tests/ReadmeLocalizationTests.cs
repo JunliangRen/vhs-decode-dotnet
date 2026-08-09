@@ -5,6 +5,16 @@ namespace VHSDecode.Tests;
 
 public sealed partial class ReadmeLocalizationTests
 {
+    private const string LatestPerformanceRunsMarker =
+        "<!-- LATEST_PERFORMANCE_RUNS: full-refresh=90 repeats=3 candidate-ab=8 " +
+        "thread-gates=24 candidate-long=2 strict-candidate-runs=34 " +
+        "dotnet-determinism=60 python-v040-runs=15 python-v040-hashes=15 " +
+        "python-v040-nondefault-runs=12 python-v040-nondefault-hashes=12 -->";
+
+    private const string FullCiTestCommand =
+        "run: dotnet test --solution VHSDecodeDotNet.slnx --configuration Release " +
+        "--no-build --no-restore --minimum-expected-tests 1382";
+
     private static readonly string[] OverviewReadmeFiles =
     [
         "README.md",
@@ -150,10 +160,6 @@ public sealed partial class ReadmeLocalizationTests
             "1.21%",
             "368.3",
             "368.1 MiB",
-            "34",
-            "60",
-            "15",
-            "12",
             "g4315520",
             "--threads 0"
         ];
@@ -172,7 +178,6 @@ public sealed partial class ReadmeLocalizationTests
             "90.828 s",
             "7.98",
             "7.91",
-            "<!-- LATEST_PERFORMANCE_RUNS: full-refresh=90 repeats=3 candidate-ab=8 thread-gates=24 candidate-long=2 dotnet-determinism=60 -->",
             "ae3722d",
             "AAAB4B0A884D0F22B361E369A55A2C475DD2D042806043B25EAFB5DF188B7860",
             "4,095",
@@ -756,6 +761,7 @@ public sealed partial class ReadmeLocalizationTests
             Assert.True(
                 expectedOverviewPerformanceRows.SequenceEqual(PerformanceMetricRows(content)),
                 $"{filename} does not contain the expected profile-matched performance matrix.");
+            Assert.Contains(LatestPerformanceRunsMarker, content, StringComparison.Ordinal);
             foreach (string fact in overviewFacts)
             {
                 Assert.Contains(fact, content, StringComparison.Ordinal);
@@ -775,6 +781,7 @@ public sealed partial class ReadmeLocalizationTests
             Assert.True(
                 expectedDetailedPerformanceRows.SequenceEqual(PerformanceMetricRows(content)),
                 $"{filename} does not contain the expected detailed performance matrix.");
+            Assert.Contains(LatestPerformanceRunsMarker, content, StringComparison.Ordinal);
             foreach (string fact in synchronizedFacts)
             {
                 Assert.Contains(fact, content, StringComparison.Ordinal);
@@ -814,6 +821,16 @@ public sealed partial class ReadmeLocalizationTests
         Assert.True(
             File.Exists(Path.Combine(RepositoryRoot(), "docs", "COMPATIBILITY_EVIDENCE.md")),
             "The shared compatibility evidence document is missing.");
+        string workflow = File.ReadAllText(Path.Combine(
+            RepositoryRoot(),
+            ".github",
+            "workflows",
+            "release-build.yml"));
+        Assert.Contains(FullCiTestCommand, workflow, StringComparison.Ordinal);
+        Assert.DoesNotContain(
+            "--minimum-expected-tests 1376",
+            workflow,
+            StringComparison.Ordinal);
         foreach (string filename in DetailedReadmeFiles)
         {
             Assert.True(

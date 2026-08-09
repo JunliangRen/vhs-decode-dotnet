@@ -421,7 +421,7 @@ speedup, and wall-time reduction against its profile-matched Python column:
 | `--threads 10` | 17.230 s | 19.480 s | 3.526 s / 4.886x / 79.53% | 3.745 s / 5.201x / 80.77% | 2.983 s / 5.775x / 82.69% | 2.513 s / 7.751x / 87.10% |
 | `--threads 20` | 17.558 s | 19.928 s | 2.772 s / 6.334x / 84.21% | 3.298 s / 6.042x / 83.45% | 2.632 s / 6.672x / 85.01% | 2.075 s / 9.605x / 89.59% |
 <!-- LATEST_PERFORMANCE_END -->
-<!-- LATEST_PERFORMANCE_RUNS: full-refresh=90 repeats=3 candidate-ab=8 thread-gates=24 candidate-long=2 dotnet-determinism=60 -->
+<!-- LATEST_PERFORMANCE_RUNS: full-refresh=90 repeats=3 candidate-ab=8 thread-gates=24 candidate-long=2 strict-candidate-runs=34 dotnet-determinism=60 python-v040-runs=15 python-v040-hashes=15 python-v040-nondefault-runs=12 python-v040-nondefault-hashes=12 -->
 
 All 90 runs (30 matrix cells, each repeated three times) were freshly measured
 on 2026-08-09 from this candidate, based on merged main `ae3722d`. Each cell is
