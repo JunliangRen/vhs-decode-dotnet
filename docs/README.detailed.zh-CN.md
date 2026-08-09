@@ -377,8 +377,9 @@ Python v0.4.0 `g4315520 --threads 0`，而不是任意多 worker 运行。
 使用 caller buffer 的 real/imaginary VHS Rust FM 路径现在每个 AVX 块计算 8 个有限的
 float32 lane。double 到 float 转换、带符号最小正规数调整、atan 多项式乘加顺序、基于
 floor 的 tau 回绕、频率缩放以及 float 到 double 输出转换均保持不变。只要块内存在
-非有限 lane，就回退到原来的标量路径；余数和不具备所需指令的主机继续使用已有的
-4-lane 循环。interleaved `Complex` 路径特意保持 4-lane：结构相同的 8-lane 实验虽然
+非有限 lane，就回退到原来的标量路径；具备 AVX 时，余数继续使用已有的 4-lane 循环，
+不具备 AVX 的主机使用标量路径。interleaved `Complex` 路径特意保持 4-lane：结构相同
+的 8-lane 实验虽然
 降低了 CPU 时间，却让 Exact `current --threads 20` 的墙钟中位数回退 6.83%。
 
 关闭 tiered compilation 后，6 组交替进程的微基准在 32768 个样本、30000 次调用下，

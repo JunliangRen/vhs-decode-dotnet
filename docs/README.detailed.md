@@ -464,8 +464,9 @@ The caller-buffer real/imaginary VHS Rust FM path now evaluates eight finite
 float32 lanes per AVX block. The double-to-float conversion, signed-minimum
 adjustment, atan polynomial multiply/add order, floor-based tau wrapping,
 frequency scaling, and float-to-double output conversion are unchanged. A block
-with any non-finite lane takes the scalar fallback; the existing four-lane loop
-handles remainders and hosts without the required instructions. Interleaved
+with any non-finite lane takes the scalar fallback. With AVX available, the
+existing four-lane loop handles remainders; hosts without AVX use the scalar
+path. Interleaved
 `Complex` paths deliberately remain four-wide: an otherwise identical
 eight-lane experiment reduced CPU time but regressed Exact `current --threads
 20` wall-time median by 6.83%.

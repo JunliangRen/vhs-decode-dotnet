@@ -441,8 +441,9 @@ caller-buffer の real/imaginary VHS Rust FM path は、AVX block ごとに 8 �
 float32 lane を処理します。double-to-float conversion、signed-minimum adjustment、
 atan polynomial の multiply/add order、floor-based tau wrapping、frequency scaling、
 float-to-double output conversion は変更していません。non-finite lane を 1 つでも含む
-block は scalar fallback を使い、remainder と必要な instruction のない host は既存の
-4-lane loop を使います。interleaved `Complex` path は意図的に 4-lane のままです。
+block は scalar fallback を使います。AVX が利用可能な場合、remainder は既存の 4-lane
+loop を使い、AVX のない host は scalar path を使います。interleaved `Complex` path は
+意図的に 4-lane のままです。
 同じ構造の 8-lane 実験は CPU time を減らした一方、Exact `current --threads 20` の
 wall-time median を 6.83% 悪化させました。
 

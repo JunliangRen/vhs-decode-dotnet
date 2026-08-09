@@ -112,6 +112,12 @@ public sealed class VhsRustUnwrapSimdTests
                 continue;
             }
 
+            if (i == 25)
+            {
+                input[i] = new Complex(double.PositiveInfinity, -2.0);
+                continue;
+            }
+
             double amplitude = 1.0 + (i % 17);
             input[i] = new Complex(
                 Math.Cos(i * 0.0137) * amplitude,
