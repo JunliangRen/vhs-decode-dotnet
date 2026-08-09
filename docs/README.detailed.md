@@ -458,6 +458,36 @@ chroma, raw JSON, and normalized-log hashes in 15 runs, while stdout, normalized
 stderr, and ordered `fileLoc` remained stable. The strict oracle therefore
 remains Python v0.4.0 `g4315520 --threads 0`, not an arbitrary multi-worker run.
 
+### Split-input VHS Rust phase-difference AVX
+
+The caller-buffer real/imaginary VHS Rust FM path now evaluates eight finite
+float32 lanes per AVX block. The double-to-float conversion, signed-minimum
+adjustment, atan polynomial multiply/add order, floor-based tau wrapping,
+frequency scaling, and float-to-double output conversion are unchanged. A block
+with any non-finite lane takes the scalar fallback; the existing four-lane loop
+handles remainders and hosts without the required instructions. Interleaved
+`Complex` paths deliberately remain four-wide: an otherwise identical
+eight-lane experiment reduced CPU time but regressed Exact `current --threads
+20` wall-time median by 6.83%.
+
+With tiered compilation disabled, six alternating-process microbenchmark pairs
+over 32,768 samples and 30,000 calls reduced the split-kernel median from 1.675
+to 1.131 seconds (32.5% lower, 1.481x throughput) with the same checksum. A
+final split-only six-pair 160-frame IPP-fast `current --threads 20` check was
+near-neutral: the candidate won four pairs, reduced the conventional median
+from 6.541 to 6.504 seconds (0.57%), and increased median CPU time by 0.89%.
+
+The more stable two opposite-order 1,000-frame pairs reduced combined wall time
+from 71.280 to 70.645 seconds (0.89% lower, 1.0090x throughput), CPU time from
+416.906 to 415.891 seconds (0.24% lower), and allocation from 1.326 to 1.319
+GiB. Maximum sampled working set was 383.5 MiB versus 384.6 MiB on main, and
+first/final-third samples showed no progressive growth. The 24-run Exact and
+IPP-fast thread gate covered both behavior profiles at `--threads 0`, default-5,
+and `--threads 20`; every captured luma, chroma, raw JSON, stdout, normalized
+stderr/log, and ordered `fileLoc` surface matched. The 13 focused xUnit v3 cases
+passed with native hardware, AVX2 disabled, and all hardware intrinsics disabled;
+the complete 1,385-test suite and zero-warning Release build also passed.
+
 ### Compact Exact VSync radix staging
 
 The Exact `current` parallel VSync quantile selector now resolves the same
@@ -2780,7 +2810,7 @@ Requirements:
 .\tools\build-ipp-native.ps1
 dotnet restore VHSDecodeDotNet.slnx
 dotnet build VHSDecodeDotNet.slnx -c Release --no-restore
-dotnet test --solution VHSDecodeDotNet.slnx -c Release --no-build --no-restore --minimum-expected-tests 1382
+dotnet test --solution VHSDecodeDotNet.slnx -c Release --no-build --no-restore --minimum-expected-tests 1385
 dotnet test --project tests\VHSDecode.Tests\VHSDecode.Tests.csproj -c Release --no-build --no-restore --coverage --coverage-output coverage.cobertura.xml --coverage-output-format cobertura
 ```
 
@@ -2794,7 +2824,7 @@ deployment computer. Binary-only single-file releases embed
 sidecar license files. An Exact-only build may omit the native build step.
 
 The current formal Release build has zero warnings and errors. The xUnit v3
-project exposes **1,382** independently discoverable tests to both
+project exposes **1,385** independently discoverable tests to both
 `dotnet test` and Visual Studio Test Explorer.
 
 <!-- SECTION: usage -->

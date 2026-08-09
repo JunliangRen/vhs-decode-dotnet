@@ -15,6 +15,9 @@ public sealed class VhsRustUnwrapSimdTests
     [InlineData(7)]
     [InlineData(8)]
     [InlineData(9)]
+    [InlineData(12)]
+    [InlineData(16)]
+    [InlineData(17)]
     [InlineData(32_768)]
     public void VhsRustUnwrapSimdRemainsBitExact(int length)
     {

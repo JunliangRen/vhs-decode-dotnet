@@ -372,6 +372,30 @@ Python v0.4.0 的 15 次运行产生了 15 套不同的亮度、色度、原始 
 hash，但 stdout、归一化 stderr 与有序 `fileLoc` 保持稳定。因此严格 oracle 仍是
 Python v0.4.0 `g4315520 --threads 0`，而不是任意多 worker 运行。
 
+### split-input VHS Rust 相位差 AVX
+
+使用 caller buffer 的 real/imaginary VHS Rust FM 路径现在每个 AVX 块计算 8 个有限的
+float32 lane。double 到 float 转换、带符号最小正规数调整、atan 多项式乘加顺序、基于
+floor 的 tau 回绕、频率缩放以及 float 到 double 输出转换均保持不变。只要块内存在
+非有限 lane，就回退到原来的标量路径；余数和不具备所需指令的主机继续使用已有的
+4-lane 循环。interleaved `Complex` 路径特意保持 4-lane：结构相同的 8-lane 实验虽然
+降低了 CPU 时间，却让 Exact `current --threads 20` 的墙钟中位数回退 6.83%。
+
+关闭 tiered compilation 后，6 组交替进程的微基准在 32768 个样本、30000 次调用下，
+把 split 内核中位数从 1.675 降到 1.131 秒（缩短 32.5%，吞吐 1.481x），checksum
+一致。最终 split-only 的 6 组 160 帧 IPP-fast `current --threads 20` 配对接近中性：
+候选四胜二负，常规中位数从 6.541 降到 6.504 秒（缩短 0.57%），CPU 时间中位数增加
+0.89%。
+
+更稳定的两组正反顺序 1000 帧配对把合计墙钟从 71.280 降到 70.645 秒（缩短 0.89%，
+吞吐 1.0090x），CPU 时间从 416.906 降到 415.891 秒（减少 0.24%），分配量从 1.326
+降到 1.319 GiB。候选最大采样工作集为 383.5 MiB，main 为 384.6 MiB；首段和末段
+三分之一未见持续增长。24 次 Exact/IPP-fast 线程门禁覆盖两个行为 profile 的
+`--threads 0`、默认 5 和 `--threads 20`；所有已采集的亮度、色度、原始 JSON、stdout、
+归一化 stderr/log 和有序 `fileLoc` 均一致。13 项聚焦 xUnit v3 用例在原生硬件、禁用
+AVX2 和禁用全部硬件 intrinsic 三种模式下均通过；完整 1385 项测试和零警告 Release
+构建也通过。
+
 ### 紧凑的 Exact VSync radix 分阶段
 
 Exact `current` 的并行 VSync 分位数选择器现在通过 11+11+10 位 radix 阶段确定相同的
@@ -2211,7 +2235,7 @@ main/候选墙钟中位数为 44.924/44.985 秒（候选增加 0.14%，吞吐 0.
 .\tools\build-ipp-native.ps1
 dotnet restore VHSDecodeDotNet.slnx
 dotnet build VHSDecodeDotNet.slnx -c Release --no-restore
-dotnet test --solution VHSDecodeDotNet.slnx -c Release --no-build --no-restore --minimum-expected-tests 1382
+dotnet test --solution VHSDecodeDotNet.slnx -c Release --no-build --no-restore --minimum-expected-tests 1385
 dotnet test --project tests\VHSDecode.Tests\VHSDecode.Tests.csproj -c Release --no-build --no-restore --coverage --coverage-output coverage.cobertura.xml --coverage-output-format cobertura
 ```
 
@@ -2223,7 +2247,7 @@ Intel oneAPI。只含二进制的单文件发布会嵌入 `vhsdecode_ipp.dll` �
 notice，不会额外生成许可证 sidecar 文件。只构建 Exact 后端时可以省略原生构建步骤。
 
 当前正式 Release 构建为零警告、零错误。xUnit v3 项目向
-`dotnet test` 和 Visual Studio Test Explorer 暴露 **1,382** 个可独立发现的测试。
+`dotnet test` 和 Visual Studio Test Explorer 暴露 **1,385** 个可独立发现的测试。
 
 <!-- SECTION: usage -->
 

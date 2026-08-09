@@ -435,6 +435,35 @@ chroma、raw JSON、normalized-log hash を生成しましたが、stdout、norm
 ordered `fileLoc` は安定していました。したがって strict oracle は任意の multi-worker
 run ではなく、Python v0.4.0 `g4315520 --threads 0` のままです。
 
+### split-input VHS Rust phase-difference AVX
+
+caller-buffer の real/imaginary VHS Rust FM path は、AVX block ごとに 8 個の有限な
+float32 lane を処理します。double-to-float conversion、signed-minimum adjustment、
+atan polynomial の multiply/add order、floor-based tau wrapping、frequency scaling、
+float-to-double output conversion は変更していません。non-finite lane を 1 つでも含む
+block は scalar fallback を使い、remainder と必要な instruction のない host は既存の
+4-lane loop を使います。interleaved `Complex` path は意図的に 4-lane のままです。
+同じ構造の 8-lane 実験は CPU time を減らした一方、Exact `current --threads 20` の
+wall-time median を 6.83% 悪化させました。
+
+tiered compilation を無効にした 6 組の alternating-process microbenchmark では、
+32,768 samples、30,000 calls の split-kernel median が 1.675 から 1.131 秒へ短縮
+（32.5% lower、1.481x throughput）し、checksum は一致しました。final split-only
+6-pair 160-frame IPP-fast `current --threads 20` check は near-neutral で、candidate は
+4 勝 2 敗、通常の median は 6.541 から 6.504 秒へ 0.57% 短縮し、median CPU time は
+0.89% 増加しました。
+
+より安定した opposite-order 1,000-frame pair 2 組では、combined wall time が 71.280
+から 70.645 秒へ 0.89% 短縮（1.0090x throughput）、CPU time が 416.906 から
+415.891 秒へ 0.24% 減少し、allocation が 1.326 から 1.319 GiB へ減少しました。
+candidate の maximum sampled working set は 383.5 MiB、main は 384.6 MiB で、
+first/final-third sample に progressive growth はありませんでした。24-run Exact/
+IPP-fast thread gate は両 behavior profile の `--threads 0`、default-5、`--threads 20`
+を対象とし、capture した luma、chroma、raw JSON、stdout、normalized stderr/log、
+ordered `fileLoc` はすべて一致しました。focused xUnit v3 13 cases は native hardware、
+AVX2 disabled、all hardware intrinsics disabled の各 mode で通過し、全 1,385-test suite
+と warning 0 の Release build も通過しました。
+
 ### compact Exact VSync radix staging
 
 Exact `current` の parallel VSync quantile selector は、2 段の 16-bit stage の代わりに
@@ -2658,7 +2687,7 @@ focused 16 KiB unit-test threshold は warmed calling thread の allocation だ�
 .\tools\build-ipp-native.ps1
 dotnet restore VHSDecodeDotNet.slnx
 dotnet build VHSDecodeDotNet.slnx -c Release --no-restore
-dotnet test --solution VHSDecodeDotNet.slnx -c Release --no-build --no-restore --minimum-expected-tests 1382
+dotnet test --solution VHSDecodeDotNet.slnx -c Release --no-build --no-restore --minimum-expected-tests 1385
 dotnet test --project tests\VHSDecode.Tests\VHSDecode.Tests.csproj -c Release --no-build --no-restore --coverage --coverage-output coverage.cobertura.xml --coverage-output-format cobertura
 ```
 
@@ -2672,7 +2701,7 @@ third-party notice を埋め込み、license sidecar file は追加しません�
 
 現在の正式な Release build は warning 0、error 0 です。xUnit v3 project は
 `dotnet test` と Visual Studio Test Explorer の両方で個別に検出できる
-**1,382** tests を公開します。
+**1,385** tests を公開します。
 
 <!-- SECTION: usage -->
 
