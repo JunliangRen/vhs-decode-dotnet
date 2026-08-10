@@ -130,6 +130,14 @@ public sealed partial class ReadmeLocalizationTests
             "45.931 s | 47.263 s | 10.199 s | 4.504x | 77.80% | 9.663 s | 4.891x | 79.56% | 9.455 s | 4.858x | 79.42% | 7.582 s | 6.234x | 83.96%",
             "47.305 s | 47.643 s | 8.360 s | 5.659x | 82.33% | 8.040 s | 5.926x | 83.12% | 7.929 s | 5.966x | 83.24% | 5.874 s | 8.110x | 87.67%"
         ];
+        string[] expectedDetailedPerformanceRangeRows =
+        [
+            "default 5 | 45.292-45.719 s | 44.702-45.430 s | 12.872-13.038 s | 12.785-12.980 s | 11.205-11.299 s | 9.502-9.829 s",
+            "threads 1 | 53.123-55.580 s | 53.702-55.065 s | 32.908-33.664 s | 38.980-40.310 s | 23.385-23.827 s | 26.277-26.968 s",
+            "threads 5 | 44.828-48.282 s | 44.835-45.263 s | 12.836-13.760 s | 12.232-13.261 s | 11.343-11.472 s | 9.595-9.755 s",
+            "threads 10 | 45.786-46.675 s | 47.005-47.978 s | 10.098-10.905 s | 9.113-9.737 s | 9.314-9.510 s | 7.306-7.613 s",
+            "threads 20 | 46.999-48.039 s | 47.145-48.402 s | 8.187-8.412 s | 7.711-8.370 s | 7.765-8.018 s | 5.681-6.051 s"
+        ];
 
         string[] overviewFacts =
         [
@@ -932,6 +940,10 @@ public sealed partial class ReadmeLocalizationTests
             Assert.True(
                 expectedDetailedPerformanceRows.SequenceEqual(PerformanceMetricRows(content)),
                 $"{filename} does not contain the expected detailed performance matrix.");
+            Assert.True(
+                expectedDetailedPerformanceRangeRows.SequenceEqual(
+                    PerformanceRangeRows(content)),
+                $"{filename} does not contain the expected detailed performance ranges.");
             Assert.Contains(LatestPerformanceRunsMarker, content, StringComparison.Ordinal);
             foreach (string fact in synchronizedFacts)
             {
@@ -1052,6 +1064,33 @@ public sealed partial class ReadmeLocalizationTests
             .ToArray();
     }
 
+    private static string[] PerformanceRangeRows(string content)
+    {
+        string table = SingleCapture(LatestPerformanceRangesRegex(), content, "body");
+        return table.ReplaceLineEndings("\n")
+            .Split('\n', StringSplitOptions.RemoveEmptyEntries)
+            .Select(line => (Line: line, Metrics: PerformanceRangeMetricRegex().Matches(line)))
+            .Where(row => row.Metrics.Count > 0)
+            .Select(row =>
+            {
+                Match worker = WorkerCountRegex().Match(row.Line);
+                string label;
+                if (worker.Success)
+                {
+                    label = $"threads {worker.Groups["workers"].Value}";
+                }
+                else
+                {
+                    Match defaultWorker = DefaultWorkerCountRegex().Match(row.Line);
+                    Assert.True(defaultWorker.Success, "The default performance row lacks a worker count.");
+                    label = $"default {defaultWorker.Groups["workers"].Value}";
+                }
+
+                return $"{label} | {string.Join(" | ", row.Metrics.Select(match => match.Value))}";
+            })
+            .ToArray();
+    }
+
     [GeneratedRegex(@"<!-- README_SYNC: (?<version>[^ ]+) -->", RegexOptions.CultureInvariant)]
     private static partial Regex SyncMarkerRegex();
 
@@ -1068,6 +1107,20 @@ public sealed partial class ReadmeLocalizationTests
         RegexOptions.CultureInvariant | RegexOptions.Singleline)]
     private static partial Regex LatestPerformanceRegex();
 
+    [GeneratedRegex(
+        @"<!-- LATEST_PERFORMANCE_RANGES_BEGIN -->\r?\n(?<body>.*?)\r?\n<!-- LATEST_PERFORMANCE_RANGES_END -->",
+        RegexOptions.CultureInvariant | RegexOptions.Singleline)]
+    private static partial Regex LatestPerformanceRangesRegex();
+
     [GeneratedRegex(@"\d+\.\d+(?: s|x|%)", RegexOptions.CultureInvariant)]
     private static partial Regex PerformanceMetricRegex();
+
+    [GeneratedRegex(@"\d+\.\d+-\d+\.\d+ s", RegexOptions.CultureInvariant)]
+    private static partial Regex PerformanceRangeMetricRegex();
+
+    [GeneratedRegex(@"--threads\s+(?<workers>\d+)", RegexOptions.CultureInvariant)]
+    private static partial Regex WorkerCountRegex();
+
+    [GeneratedRegex(@"^\|[^|]*?(?<workers>\d+)[)）]\s*\|", RegexOptions.CultureInvariant)]
+    private static partial Regex DefaultWorkerCountRegex();
 }

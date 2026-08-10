@@ -426,6 +426,7 @@ speedup、wall-time reduction の順です。
 
 3-run wall-time range は次のとおりです。
 
+<!-- LATEST_PERFORMANCE_RANGES_BEGIN -->
 | CLI mode | Python v0.4.0 | Python PR341 | Exact + v0.4.0 | Exact + current | IPP-fast + v0.4.0 | IPP-fast + current |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
 | default（5） | 45.292-45.719 s | 44.702-45.430 s | 12.872-13.038 s | 12.785-12.980 s | 11.205-11.299 s | 9.502-9.829 s |
@@ -433,6 +434,7 @@ speedup、wall-time reduction の順です。
 | `--threads 5` | 44.828-48.282 s | 44.835-45.263 s | 12.836-13.760 s | 12.232-13.261 s | 11.343-11.472 s | 9.595-9.755 s |
 | `--threads 10` | 45.786-46.675 s | 47.005-47.978 s | 10.098-10.905 s | 9.113-9.737 s | 9.314-9.510 s | 7.306-7.613 s |
 | `--threads 20` | 46.999-48.039 s | 47.145-48.402 s | 8.187-8.412 s | 7.711-8.370 s | 7.765-8.018 s | 5.681-6.051 s |
+<!-- LATEST_PERFORMANCE_RANGES_END -->
 
 2026-08-10 に全 90 Release run を同じ batch で更新しました。6 profile の 5 worker setting を
 forward、reverse、mixed の 3 pass で interleave し、以前の Python または IPP-fast timing は
