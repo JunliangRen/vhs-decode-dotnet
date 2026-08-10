@@ -2948,6 +2948,43 @@ its unaffected prior measurements. The final executable was built from commit
 `3740bf1`, based on `8409b1f`, and its SHA-256 was
 `0F119B82507E8ACB5FF0CF8EE4C407436671828B1981CC9FCDC824B2F34ACD19`.
 
+### Current chroma-burst fitter loop fusion
+
+The opt-in `current` chroma-burst least-squares fitter now prepares cosine,
+sine, residual, and Jacobian values in one ascending-index loop instead of
+five separate passes. It also accumulates the four non-vector dot sums in
+that same original ascending order and removes the temporary theta and sine
+buffers.
+Data types, per-sample expressions, conversion points, the OpenBLAS-compatible
+dot reduction, solver order, worker boundaries, and state transitions are
+unchanged; no FMA or reassociation was introduced.
+
+Nine alternating process runs of 100,000 complete `Fit` calls reduced the
+median from 1,625.603 to 1,489.642 ms (8.36%, 1.091x throughput). Every run kept
+the same checksum and 2,080-byte process-level allocation count. This is
+isolated-kernel evidence, not the end-to-end claim.
+
+Three interleaved 1,000-frame Exact `current --threads 20` pairs on the same
+private local 40 MHz PAL VHS sample numerically favored the candidate. Mean
+wall time moved from 39.572 to 39.416 seconds (0.39% lower), but the 95%
+paired-difference interval of -0.011 to 0.322 seconds includes zero and mean
+process CPU time moved from 322.464 to 326.474 seconds (1.24% higher).
+End-to-end throughput is therefore classified as neutral, with no
+CPU-efficiency claim. Sampled peak working set remained below the previously established
+741 MiB bound and showed no unbounded allocation path; the noisy samples do
+not support a resident-memory reduction claim.
+
+All six paired long runs and one final-source confirmation run matched luma,
+chroma, raw JSON, stdout, timing-normalized stderr, timestamp-normalized logs,
+and every one of 2,000 ordered `fileLoc` values. Twelve additional short gates covered Exact v0.4.0 and `current` at
+explicit zero, default-five, and 20 workers; every baseline/candidate and
+cross-thread surface was exact. The three pinned fitter tests passed both
+normally and with AVX disabled, and the full Release suite completed with
+1,397 passes and four IPP-runtime-dependent skips. The homepage table remains
+at its last complete five-path matrix refresh because substituting this
+different 1,000-frame window would make its startup-inclusive ratios
+incomparable.
+
 </details>
 
 <!-- SECTION: build -->

@@ -99,13 +99,7 @@ internal static class CurrentChromaBurstFitter
         Span<double> time = burst.Length <= 256
             ? stackalloc double[burst.Length]
             : new double[burst.Length];
-        Span<double> theta = burst.Length <= 256
-            ? stackalloc double[burst.Length]
-            : new double[burst.Length];
         Span<double> cosine = burst.Length <= 256
-            ? stackalloc double[burst.Length]
-            : new double[burst.Length];
-        Span<double> sine = burst.Length <= 256
             ? stackalloc double[burst.Length]
             : new double[burst.Length];
         Span<double> residual = burst.Length <= 256
@@ -131,46 +125,42 @@ internal static class CurrentChromaBurstFitter
             normal.Clear();
             rhs.Clear();
             double twoPiFrequency = Math.Tau * frequency;
+            double cosineSum = 0.0;
+            double j1Sum = 0.0;
+            double j3Sum = 0.0;
+            double residualSum = 0.0;
             for (int index = 0; index < burst.Length; index++)
             {
-                theta[index] = (twoPiFrequency * time[index]) - phase;
-            }
-
-            for (int index = 0; index < burst.Length; index++)
-            {
-                cosine[index] = Math.Cos(theta[index]);
-            }
-
-            for (int index = 0; index < burst.Length; index++)
-            {
-                sine[index] = Math.Sin(theta[index]);
-            }
-
-            for (int index = 0; index < burst.Length; index++)
-            {
-                residual[index] =
-                    burst[index] - ((amplitude * cosine[index]) + dc);
-            }
-
-            for (int index = 0; index < burst.Length; index++)
-            {
-                j1[index] = amplitude * sine[index];
-                j3[index] = (-Math.Tau * time[index]) * j1[index];
+                double theta = (twoPiFrequency * time[index]) - phase;
+                double cosineValue = Math.Cos(theta);
+                double sineValue = Math.Sin(theta);
+                double residualValue =
+                    burst[index] - ((amplitude * cosineValue) + dc);
+                double j1Value = amplitude * sineValue;
+                double j3Value = (-Math.Tau * time[index]) * j1Value;
+                cosine[index] = cosineValue;
+                residual[index] = residualValue;
+                j1[index] = j1Value;
+                j3[index] = j3Value;
+                cosineSum += cosineValue;
+                j1Sum += j1Value;
+                j3Sum += j3Value;
+                residualSum += residualValue;
             }
 
             normal[0] = OpenBlasHaswellDot(cosine, cosine);
             normal[1] = OpenBlasHaswellDot(cosine, j1);
-            normal[2] = SumSequential(cosine);
+            normal[2] = cosineSum;
             normal[3] = OpenBlasHaswellDot(cosine, j3);
             normal[5] = OpenBlasHaswellDot(j1, j1);
-            normal[6] = SumSequential(j1);
+            normal[6] = j1Sum;
             normal[7] = OpenBlasHaswellDot(j1, j3);
             normal[10] = burst.Length;
-            normal[11] = SumSequential(j3);
+            normal[11] = j3Sum;
             normal[15] = OpenBlasHaswellDot(j3, j3);
             rhs[0] = OpenBlasHaswellDot(cosine, residual);
             rhs[1] = OpenBlasHaswellDot(j1, residual);
-            rhs[2] = SumSequential(residual);
+            rhs[2] = residualSum;
             rhs[3] = OpenBlasHaswellDot(j3, residual);
 
             normal[4] = normal[1];
@@ -330,17 +320,6 @@ internal static class CurrentChromaBurstFitter
         }
 
         return dot;
-    }
-
-    private static double SumSequential(ReadOnlySpan<double> values)
-    {
-        double sum = 0.0;
-        for (int index = 0; index < values.Length; index++)
-        {
-            sum += values[index];
-        }
-
-        return sum;
     }
 
     private static bool TrySolve4X4(

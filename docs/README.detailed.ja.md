@@ -2809,6 +2809,40 @@ luma、chroma、raw JSON、stdout、normalized stderr/log、ordered `fileLoc` �
 基にした commit `3740bf1` から build され、SHA-256 は
 `0F119B82507E8ACB5FF0CF8EE4C407436671828B1981CC9FCDC824B2F34ACD19` です。
 
+### current chroma-burst fitter の loop fusion
+
+opt-in `current` の chroma-burst least-squares fitter は、cosine、sine、residual、
+Jacobian を 5 pass ではなく 1 個の ascending-index loop で準備します。4 個の
+non-vector dot sum も従来と同じ昇順で同じ loop 内に蓄積し、一時 theta/sine buffer を
+削除しました。data type、sample ごとの expression、conversion point、
+OpenBLAS-compatible dot reduction、solver order、worker boundary、state transition は
+変更せず、FMA や reassociation も導入していません。
+
+complete `Fit` を 100,000 回実行する alternating process run 9 組では、median が
+1,625.603 から 1,489.642 ms へ 8.36% 短縮し、throughput は 1.091x になりました。
+全 run は同じ checksum と 2,080-byte process-level allocation count を維持しました。
+これは isolated-kernel evidence であり、end-to-end claim ではありません。
+
+同じ private local 40 MHz PAL VHS sample の 1,000-frame Exact
+`current --threads 20` interleaved pair 3 組は数値上すべて candidate が勝ちました。
+mean wall time は 39.572 から 39.416 秒へ 0.39% 短縮しましたが、paired difference の
+95% interval は -0.011 から 0.322 秒で zero を含みます。mean process CPU time も
+322.464 から 326.474 秒へ 1.24% 増加したため、end-to-end throughput は neutral と
+分類し、CPU-efficiency improvement も主張しません。
+sampled peak working set は既に確認済みの 741 MiB bound 内で、unbounded allocation
+path も追加していません。noise の大きい sample から resident-memory reduction は
+主張しません。
+
+paired long run 6 件と final-source confirmation run 1 件は luma、chroma、raw JSON、
+stdout、timing-normalized stderr、timestamp-normalized log、2,000 個すべての
+ordered `fileLoc` が一致しました。
+追加の short gate 12 件は Exact v0.4.0/current の explicit zero、default-five、
+20 workers を網羅し、baseline/candidate と cross-thread の全 surface が exact でした。
+pinned fitter test 3 件は通常実行と AVX disabled の両方で pass し、full Release suite は
+1,397 pass、IPP runtime が build directory にないための skip 4 件で完了しました。
+homepage table は前回の complete five-path matrix のままです。この異なる
+1,000-frame window を代入すると startup-inclusive ratio の比較可能性が失われるためです。
+
 </details>
 
 <!-- SECTION: build -->

@@ -89,8 +89,8 @@ public sealed class CurrentChromaBurstFitterTests
         }
     }
 
-    [Fact(DisplayName = "Current chroma burst fitting matches pinned PR 341 Numba output")]
-    public void CurrentChromaBurstFittingMatchesPinnedNumbaOutput()
+    [Fact(DisplayName = "Current chroma burst fitting matches pinned PR 341 and workspace-boundary output")]
+    public void CurrentChromaBurstFittingMatchesPinnedOutputs()
     {
         const int BurstStart = 73;
         const double FscHz = 3_579_545.0;
@@ -131,5 +131,65 @@ public sealed class CurrentChromaBurstFitterTests
         Assert.Equal(0x414B4F4C80000029UL, BitConverter.DoubleToUInt64Bits(fit.FrequencyHz));
         Assert.Equal(0x3FE75000083EFFC8UL, BitConverter.DoubleToUInt64Bits(fit.PhaseRadians));
         Assert.Equal(0x4044DED4E09B8A2DUL, BitConverter.DoubleToUInt64Bits(fit.PhaseDegrees));
+
+        (double[] boundarySine, double[] boundaryCosine) =
+            VhsChromaDecoder.BuildCarrierTables(
+                sampleCount: 512,
+                carrierMHz: FscHz / 1_000_000.0,
+                outputSampleRateMHz: (FscHz * 4.0) / 1_000_000.0);
+        AssertBoundaryFit(
+            255,
+            boundarySine,
+            boundaryCosine,
+            "40ACC1F47D39F4B2;40B0C0DE5B977319;4069114B395F1AEE;4046523B25368AC5;40B63BE8EA11543A;40505FEA6735A150;414B4F4C7FFFFDF9;3FEB2A447216DD04;404851C8ADBDDEAE");
+        AssertBoundaryFit(
+            256,
+            boundarySine,
+            boundaryCosine,
+            "40AD7FD47D39F4B2;40B0C0DE440EC559;4069214B4411010C;40465230D41B5478;40B65230D41B5478;40505FE6800000F8;414B4F4C7FFFFDE1;3FEB2A553EC5561C;404851D7B7E9794E");
+        AssertBoundaryFit(
+            257,
+            boundarySine,
+            boundaryCosine,
+            "40AD7FD4747C9B92;40B12418440EC559;4069314B65D578DC;4046525ADAD9E99C;40B668AD35B4C386;40505FF47F817C23;414B4F4C7FFFFD92;3FEB2A8A49782D8C;404852073431F542");
+    }
+
+    private static void AssertBoundaryFit(
+        int length,
+        ReadOnlySpan<double> sine,
+        ReadOnlySpan<double> cosine,
+        string expectedBits)
+    {
+        const int BurstStart = 73;
+        const double FscHz = 3_579_545.0;
+        int[] carrier = [35, -28, -32, 31];
+        var burst = new double[length];
+        for (int index = 0; index < burst.Length; index++)
+        {
+            int dither = ((index * 37) % 101) - 50;
+            burst[index] = 64.0 + carrier[index & 3] + (dither / 128.0);
+        }
+
+        CurrentChromaBurstFit fit = CurrentChromaBurstFitter.Fit(
+            burst,
+            BurstStart,
+            sine,
+            cosine,
+            FscHz);
+        ulong[] bits =
+        [
+            BitConverter.DoubleToUInt64Bits(fit.I),
+            BitConverter.DoubleToUInt64Bits(fit.Q),
+            BitConverter.DoubleToUInt64Bits(fit.Center),
+            BitConverter.DoubleToUInt64Bits(fit.Amplitude),
+            BitConverter.DoubleToUInt64Bits(fit.Magnitude),
+            BitConverter.DoubleToUInt64Bits(fit.Dc),
+            BitConverter.DoubleToUInt64Bits(fit.FrequencyHz),
+            BitConverter.DoubleToUInt64Bits(fit.PhaseRadians),
+            BitConverter.DoubleToUInt64Bits(fit.PhaseDegrees)
+        ];
+        Assert.Equal(
+            expectedBits,
+            string.Join(';', bits.Select(static value => value.ToString("X16"))));
     }
 }
