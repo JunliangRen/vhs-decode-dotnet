@@ -351,36 +351,39 @@ stdout、归一化 stderr/日志和有序 `fileLoc` 全部一致。
 最新首页摘要是包含启动开销的 `--start 100 --length 160` 快照，在同一个私有本地 40 MHz PAL VHS
 `.ldf` 夹具上比较 Python v0.4.0、已合并的 Python PR341、Exact v0.4.0、
 Exact `current`、IPP-fast v0.4.0 和 IPP-fast `current`。文件名不会公开。每个
-.NET 单元格依次给出墙钟中位数、相对同 profile Python 列的倍速和墙钟缩短比例：
+.NET 单元格依次给出墙钟中位数、相对同 profile Python 列的倍速和墙钟缩短比例；
+使用其他格式或夹具的历史矩阵不能直接横向比较：
 
 <!-- LATEST_PERFORMANCE_BEGIN -->
 | CLI 模式（workers） | Python v0.4.0 | Python PR341 | Exact + v0.4.0 | Exact + current | IPP-fast + v0.4.0 | IPP-fast + current |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| 默认（5） | 46.064 s | 45.418 s | 13.109 s / 3.514x / 71.54% | 12.868 s / 3.530x / 71.67% | 11.499 s / 4.006x / 75.04% | 9.725 s / 4.670x / 78.59% |
-| `--threads 1` | 55.170 s | 55.257 s | 33.228 s / 1.660x / 39.77% | 39.682 s / 1.393x / 28.19% | 23.625 s / 2.335x / 57.18% | 26.775 s / 2.064x / 51.54% |
-| `--threads 5` | 46.247 s | 45.834 s | 13.377 s / 3.457x / 71.07% | 12.807 s / 3.579x / 72.06% | 11.552 s / 4.003x / 75.02% | 9.842 s / 4.657x / 78.53% |
-| `--threads 10` | 47.318 s | 48.504 s | 10.567 s / 4.478x / 77.67% | 9.664 s / 5.019x / 80.08% | 9.637 s / 4.910x / 79.63% | 7.933 s / 6.114x / 83.64% |
-| `--threads 20` | 48.349 s | 48.631 s | 8.675 s / 5.574x / 82.06% | 8.134 s / 5.979x / 83.27% | 8.290 s / 5.832x / 82.85% | 6.110 s / 7.959x / 87.44% |
+| 默认（5） | 45.605 s | 45.124 s | 12.838 s / 3.552x / 71.85% | 12.749 s / 3.539x / 71.75% | 11.419 s / 3.994x / 74.96% | 9.518 s / 4.741x / 78.91% |
+| `--threads 1` | 53.818 s | 53.974 s | 33.276 s / 1.617x / 38.17% | 39.096 s / 1.381x / 27.57% | 23.695 s / 2.271x / 55.97% | 26.727 s / 2.019x / 50.48% |
+| `--threads 5` | 46.906 s | 45.771 s | 12.832 s / 3.655x / 72.64% | 12.184 s / 3.757x / 73.38% | 11.334 s / 4.139x / 75.84% | 9.742 s / 4.698x / 78.72% |
+| `--threads 10` | 46.271 s | 47.014 s | 10.500 s / 4.407x / 77.31% | 9.820 s / 4.788x / 79.11% | 9.460 s / 4.891x / 79.56% | 7.635 s / 6.158x / 83.76% |
+| `--threads 20` | 47.342 s | 47.571 s | 8.284 s / 5.715x / 82.50% | 8.215 s / 5.791x / 82.73% | 8.071 s / 5.866x / 82.95% | 5.993 s / 7.938x / 87.40% |
 <!-- LATEST_PERFORMANCE_END -->
-<!-- LATEST_PERFORMANCE_RUNS: full-interleaved-matrix-runs=90 dotnet-matrix-runs=60 python-matrix-runs=30 repeats=3 sos-state-current-160-ab-pairs=6 sos-state-default-160-ab-pairs=4 sos-state-current-1000-ab-pairs=1 sos-state-thread-gate-runs=6 sos-state-jit-disassemblies=2 sos-state-focused-test-runs=2 sos-reverse-32k-microbench-pairs=21 sos-reverse-current-160-ab-pairs=8 sos-reverse-v040-160-ab-pairs=1 sos-reverse-current-1000-ab-pairs=1 sos-reverse-thread-gate-runs=6 sos-focused-test-runs=80 python-v040-runs=15 python-v040-hashes=15 python-pr341-runs=15 python-pr341-hashes=1 -->
+<!-- LATEST_PERFORMANCE_RUNS: full-interleaved-matrix-runs=90 dotnet-matrix-runs=60 python-matrix-runs=30 repeats=3 complex32-current-160-ab-pairs=6 complex32-t1-160-ab-pairs=4 complex32-current-1000-ab-pairs=3 complex32-focused-tests=4 complex32-traces=2 python-v040-runs=15 python-v040-hashes=15 python-pr341-runs=15 python-pr341-hashes=1 -->
 
 三次运行的墙钟范围如下：
 
 <!-- LATEST_PERFORMANCE_RANGES_BEGIN -->
 | CLI 模式 | Python v0.4.0 | Python PR341 | Exact + v0.4.0 | Exact + current | IPP-fast + v0.4.0 | IPP-fast + current |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| 默认（5） | 45.911-54.463 s | 45.405-47.220 s | 13.036-13.172 s | 12.387-13.103 s | 11.483-11.612 s | 9.677-9.886 s |
-| `--threads 1` | 55.119-55.574 s | 54.950-56.213 s | 33.115-33.589 s | 39.507-39.820 s | 23.584-23.656 s | 26.577-27.093 s |
-| `--threads 5` | 45.841-47.028 s | 45.621-45.887 s | 13.031-13.743 s | 12.598-12.880 s | 11.498-11.841 s | 9.646-9.855 s |
-| `--threads 10` | 46.972-47.470 s | 48.455-48.504 s | 10.477-11.007 s | 9.590-9.704 s | 9.571-9.716 s | 7.636-7.943 s |
-| `--threads 20` | 48.179-48.460 s | 47.972-48.893 s | 8.626-8.675 s | 7.605-8.418 s | 8.202-8.381 s | 6.058-6.212 s |
+| 默认（5） | 45.163-45.618 s | 44.240-46.582 s | 12.681-13.528 s | 11.977-12.765 s | 11.214-11.730 s | 9.399-9.552 s |
+| `--threads 1` | 53.301-55.419 s | 53.859-54.840 s | 32.765-33.568 s | 38.710-40.814 s | 23.560-23.756 s | 26.515-27.306 s |
+| `--threads 5` | 46.305-46.960 s | 44.652-46.067 s | 12.764-12.846 s | 12.077-12.316 s | 11.220-11.459 s | 9.197-9.794 s |
+| `--threads 10` | 45.950-46.779 s | 46.534-47.269 s | 9.967-10.659 s | 9.421-9.884 s | 9.453-9.533 s | 7.560-7.775 s |
+| `--threads 20` | 47.274-48.600 s | 47.356-48.724 s | 8.146-8.446 s | 7.940-8.255 s | 8.028-8.101 s | 5.992-6.071 s |
 <!-- LATEST_PERFORMANCE_RANGES_END -->
 
 2026-08-11 同批刷新了全部 90 次 Release 运行：六种 profile 的五种 worker 设置各按
 正序、反序和混排三轮交错执行，没有复用旧批次的 Python 或 IPP-fast 时间。本候选基于
-已合并的 main `3e01fdd`；被测 `SosFilter.cs` 源码固定为 Git blob
-`91abe61510d3c51f3b25ae4577f47291b57fb149`，对应已合并 main 的基线 blob 为
-`c3aac76922ad525884cf26779b2035db76248547`。文档和仅测试改动不属于计时的
+已合并的 main `a059580`；计时所用 `decode.exe` 的 SHA-256 为
+`861C44780EE7DA5B27E89EC5DBE273828047C1E0F96D976AAC07FEF7126B5C81`。
+被测 `PocketFftComplex32.cs` 源码固定为 Git blob
+`3d1cab1f7e13c0527354c2a3ffc5996a12f15eaf`，对应已合并 main 的基线 blob 为
+`5f8fec56d666083b2f0cc279ac42a2b1561fe959`。文档和仅测试改动不属于计时的
 解码器二进制。
 测试机为
 Intel Core Ultra 7 265K（20 个逻辑处理器）、Windows 11 build 26220，以及 .NET
@@ -1069,6 +1072,37 @@ TBC、chroma 与 JSON SHA-256 完全一致；任务会在当前场内等待完�
 byte-array payload。xUnit v3 分配 probe 在预热后写入 400,000 个样本时，线程本地分配量
 低于 1 KiB。新的 160-frame 运行仍保持完全一致的 luma/chroma SHA-256；墙钟时间处于
 多次运行的正常波动范围内。
+
+### Complex32 第二阶段 packet 原地变换
+
+Exact float32 PocketFFT 的大变换布局在第二阶段已经独占互不重叠且连续的 source packet。
+现在直接原地变换各 source packet，再把结果 scatter 到独立 destination buffer；不再从
+堆上分配或从 `ArrayPool<Complex32>` 租用临时 packet，也不再先完整复制 source packet。并行 packet 不会
+重叠。因子分解、根表、twiddle、变换算术、归一化、scatter 顺序、数据类型和最终 buffer
+所有权均不变。
+
+三组冻结的正向/逆向基线分别覆盖长度 11,025、119,790 和 131,072，并在请求 1 与
+20 workers 时校验。第四项测试使用正负零、subnormal、最小 normal、最大有限值、无穷和
+不同 NaN payload，对比保留输入与 owned storage 路径。这 4 个可独立发现的 xUnit v3
+用例在正常硬件及禁用全部 .NET hardware intrinsics 时均通过。
+
+相对已合并 main `a059580` 的 6 组交错 160 帧 Exact
+`current --threads 20` 配对，在亮度、色度、原始 JSON、stdout、归一化 stderr/日志、
+有序 `fileLoc`、场数和退出行为上全部一致。墙钟中位数从 11.59 降至 11.27 秒
+（低 2.8%），吞吐提升 2.8%，CPU 时间下降 1.9%，候选赢得 5 组。4 组单 worker 配对
+从 69.56 降至 68.98 秒（低 0.8%），CPU 时间和峰值内存基本持平。
+
+3 组 1000 帧、20 workers 配对继续完全一致，但胜负随主机调度顺序变化。其配对墙钟
+中位变化为 +0.14%，配对 CPU 中位变化为 +1.18%，因此明确将长跑吞吐和 CPU 效率归类
+为持平。候选峰值工作集保持在约 443 MiB，没有随进度增长。
+
+辅助采样 trace 将 `MemmoveNative` 归因从 8.391 降至 5.454 CPU 秒（低 35.0%），平均
+有效核心从 7.72 升至 8.43，P90 从 9.83 升至 11.22。该 trace 的较旧基线早于
+`a059580`，所以它只用于确认热点消失和多核形态；上面的精确 main 交错 A/B 才是因果
+性能门禁。刷新后的 90 次矩阵覆盖全部 6 种 Python/.NET profile 以及默认、1、5、10、
+20 workers。60 次 .NET 和 15 次 Python PR341 运行均保持确定性。Python v0.4.0 的
+15 次运行各自产生不同的亮度、色度、JSON 和归一化日志 hash，因此严格 oracle 仍是
+`g4315520 --threads 0`。
 
 <details>
 <summary>内核与分配 benchmark 历史</summary>
@@ -2561,7 +2595,7 @@ stderr、时间戳归一化日志和全部 2,000 个有序 `fileLoc` 完全一�
 .\tools\build-ipp-native.ps1
 dotnet restore VHSDecodeDotNet.slnx
 dotnet build VHSDecodeDotNet.slnx -c Release --no-restore
-dotnet test --solution VHSDecodeDotNet.slnx -c Release --no-build --no-restore --minimum-expected-tests 1417
+dotnet test --solution VHSDecodeDotNet.slnx -c Release --no-build --no-restore --minimum-expected-tests 1421
 dotnet test --project tests\VHSDecode.Tests\VHSDecode.Tests.csproj -c Release --no-build --no-restore --coverage --coverage-output coverage.cobertura.xml --coverage-output-format cobertura
 ```
 
@@ -2573,7 +2607,7 @@ Intel oneAPI。只含二进制的单文件发布会嵌入 `vhsdecode_ipp.dll` �
 notice，不会额外生成许可证 sidecar 文件。只构建 Exact 后端时可以省略原生构建步骤。
 
 当前正式 Release 构建为零警告、零错误。xUnit v3 项目向
-`dotnet test` 和 Visual Studio Test Explorer 暴露 **1,417** 个可独立发现的测试。
+`dotnet test` 和 Visual Studio Test Explorer 暴露 **1,421** 个可独立发现的测试。
 
 <!-- SECTION: usage -->
 

@@ -157,6 +157,97 @@ public sealed class PocketFftMixedRadixCompatibilityTests
             $"Warm multipass FFT allocated {allocated:N0} bytes.");
     }
 
+    [Theory(DisplayName = "Large complex FFT matches frozen second-pass baselines")]
+    [InlineData(
+        11_025,
+        "4141ABD046B5827B5BCF8BDE2DA8BF4607A21F166E41AD90EE030E04BFF31773",
+        "5074A1AAF86DDFD514DA05B85442DA9C08346A0D4C6CF56D897D7AF54749626D")]
+    [InlineData(
+        119_790,
+        "B0D7C2AB6BBA4F5B7225175350653EBC41F7E607EDAADAA511BAD0FE0657DB0E",
+        "CD6AEB28AF3E18C0797BF37350CB5487C65D4946C19497B7FC04233058E1467D")]
+    [InlineData(
+        131_072,
+        "745A0F9C7F13C75D5064AC681ADF5FD6BAEC5F482FDE3C14AC60C8AAF22DAF3A",
+        "A8D39BD863DB639A4A3896E40B4A1756306B7836403B7238B749C2CE13CF2DE3")]
+    public void LargeComplexFftMatchesFrozenSecondPassBaselines(
+        int length,
+        string expectedForwardSha256,
+        string expectedBackwardSha256)
+    {
+        float[] values = DeterministicInput(2 * length);
+        Complex32[] input = Enumerable.Range(0, length)
+            .Select(index => new Complex32(
+                values[2 * index],
+                values[(2 * index) + 1]))
+            .ToArray();
+
+        foreach (int workerThreads in new[] { 1, 20 })
+        {
+            Complex32[] forward = PocketFftComplex32.ForwardAnyLengthDuccOwned(
+                (Complex32[])input.Clone(),
+                workerThreads);
+            Complex32[] backward = PocketFftComplex32.BackwardAnyLengthDuccOwned(
+                (Complex32[])forward.Clone(),
+                workerThreads);
+
+            Assert.Equal(
+                expectedForwardSha256,
+                Sha256(MemoryMarshal.AsBytes(forward.AsSpan())));
+            Assert.Equal(
+                expectedBackwardSha256,
+                Sha256(MemoryMarshal.AsBytes(backward.AsSpan())));
+        }
+    }
+
+    [Fact(DisplayName = "Large complex FFT storage paths preserve special-value bits")]
+    public void LargeComplexFftStoragePathsPreserveSpecialValueBits()
+    {
+        const int Length = 11_025;
+        uint[] patterns =
+        [
+            0x00000000,
+            0x80000000,
+            0x00000001,
+            0x80000001,
+            0x00800000,
+            0x80800000,
+            0x7F7FFFFF,
+            0xFF7FFFFF,
+            0x7F800000,
+            0xFF800000,
+            0x7FC00001,
+            0xFFC12345
+        ];
+        var input = new Complex32[Length];
+        for (int index = 0; index < input.Length; index++)
+        {
+            input[index] = new Complex32(
+                BitConverter.Int32BitsToSingle(unchecked((int)patterns[(2 * index) % patterns.Length])),
+                BitConverter.Int32BitsToSingle(unchecked((int)patterns[((2 * index) + 1) % patterns.Length])));
+        }
+
+        Complex32[] expectedForward = PocketFftComplex32.ForwardAnyLengthDucc(
+            input,
+            workerThreads: 1);
+        Complex32[] actualForward = PocketFftComplex32.ForwardAnyLengthDuccOwned(
+            (Complex32[])input.Clone(),
+            workerThreads: 20);
+        Assert.True(
+            MemoryMarshal.AsBytes(expectedForward.AsSpan())
+                .SequenceEqual(MemoryMarshal.AsBytes(actualForward.AsSpan())));
+
+        Complex32[] expectedBackward = PocketFftComplex32.BackwardAnyLengthDucc(
+            expectedForward,
+            workerThreads: 1);
+        Complex32[] actualBackward = PocketFftComplex32.BackwardAnyLengthDuccOwned(
+            (Complex32[])actualForward.Clone(),
+            workerThreads: 20);
+        Assert.True(
+            MemoryMarshal.AsBytes(expectedBackward.AsSpan())
+                .SequenceEqual(MemoryMarshal.AsBytes(actualBackward.AsSpan())));
+    }
+
     [Theory(DisplayName = "Real FFT plan threshold matches SciPy")]
     [InlineData(512, "2D112631FB98F4C92AA42FB93FC7356FDBEE1F4C688CED08D27E6147E3456B40")]
     [InlineData(1_024, "39C3C9BE39CC952600AFDB1ECF002BE654FEDA2A207C3E5F0D6DA943E7644F3B")]
