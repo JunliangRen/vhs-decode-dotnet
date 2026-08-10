@@ -1,3 +1,4 @@
+using System.Buffers.Binary;
 using System.Globalization;
 using System.Numerics;
 using System.Runtime.InteropServices;
@@ -1352,6 +1353,76 @@ public sealed class DspWorkingBufferTests
             Assert.Equal(
                 hash,
                 Convert.ToHexString(SHA256.HashData(MemoryMarshal.AsBytes(output.AsSpan()))));
+        }
+
+        float positiveNaN = BitConverter.Int32BitsToSingle(unchecked((int)0x7FC12345));
+        float negativeNaN = BitConverter.Int32BitsToSingle(unchecked((int)0xFFC54321));
+        float negativeZero = BitConverter.Int32BitsToSingle(unchecked((int)0x80000000));
+        float[][] edgeSignals =
+        [
+            [],
+            [negativeZero],
+            [0.0f, negativeZero],
+            [
+                positiveNaN,
+                negativeNaN,
+                float.PositiveInfinity,
+                float.NegativeInfinity,
+                0.0f,
+                negativeZero,
+                float.Epsilon,
+                -float.Epsilon,
+                1.0f,
+                -1.0f,
+                float.MaxValue,
+                float.MinValue
+            ]
+        ];
+        var identitySection = new SosSection(1.0, 0.0, 0.0, 1.0, 0.0, 0.0);
+        (int Sections, string HardwareHash, string ScalarHash)[] edgeCases =
+        [
+            (
+                0,
+                "81BC6F9D9EC8AF8B60132A164D96374E9CDBCA56AE9738E7157A648163B9097C",
+                "81BC6F9D9EC8AF8B60132A164D96374E9CDBCA56AE9738E7157A648163B9097C"),
+            (
+                1,
+                "045079F57F8866CAA969AE1E2B302D740E524DD0F88F3D472FB05E0742CDA9F4",
+                "045079F57F8866CAA969AE1E2B302D740E524DD0F88F3D472FB05E0742CDA9F4"),
+            (
+                2,
+                "34F4CE3EEBF779418344D2EC1103A0BA542AA0F685FCB2DC545913B94BA8384B",
+                "045079F57F8866CAA969AE1E2B302D740E524DD0F88F3D472FB05E0742CDA9F4"),
+            (
+                4,
+                "778176296E62ECF0836FBD71AA193690A471799A607DB5479018593E155D02CF",
+                "045079F57F8866CAA969AE1E2B302D740E524DD0F88F3D472FB05E0742CDA9F4"),
+            (
+                5,
+                "045079F57F8866CAA969AE1E2B302D740E524DD0F88F3D472FB05E0742CDA9F4",
+                "045079F57F8866CAA969AE1E2B302D740E524DD0F88F3D472FB05E0742CDA9F4")
+        ];
+        Span<byte> lengthBytes = stackalloc byte[sizeof(int)];
+        foreach ((int sectionCount, string hardwareHash, string scalarHash) in edgeCases)
+        {
+            SosSection[] edgeSections = Enumerable.Repeat(identitySection, sectionCount).ToArray();
+            using IncrementalHash aggregate = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
+            foreach (float[] edgeSignal in edgeSignals)
+            {
+                float[] preservedInput = edgeSignal.ToArray();
+                float[] edgeOutput = SosFilter.ApplyForwardBackwardFloat32(
+                    edgeSections,
+                    preservedInput,
+                    padLength: 0);
+                BinaryPrimitives.WriteInt32LittleEndian(lengthBytes, edgeOutput.Length);
+                aggregate.AppendData(lengthBytes);
+                aggregate.AppendData(MemoryMarshal.AsBytes(edgeOutput.AsSpan()));
+                AssertFloatBitsEqual(edgeSignal, preservedInput);
+            }
+
+            // The legacy reverse path preserved a different NaN payload under the scalar JIT.
+            string expectedHash = Vector.IsHardwareAccelerated ? hardwareHash : scalarHash;
+            Assert.Equal(expectedHash, Convert.ToHexString(aggregate.GetHashAndReset()));
         }
     }
 

@@ -100,20 +100,20 @@ for compatibility-sensitive work.
 This is a startup-inclusive 160-frame snapshot on one fixed private local
 40 MHz PAL VHS `.ldf` fixture; the filename is intentionally not published.
 All 90 Python and .NET Release runs were measured together in forward, reverse,
-and mixed passes on this candidate, based on merged main `5268547`. The measured
+and mixed passes on this candidate, based on merged main `73dd014`. The measured
 production blob and three-run ranges are pinned in the detailed notes.
 Compatibility is evaluated separately from speed.
 
 <!-- LATEST_PERFORMANCE_BEGIN -->
 | CLI mode (workers) | Python v0.4.0 | Python PR341 | Exact + v0.4.0 | Exact + current | IPP-fast + v0.4.0 | IPP-fast + current |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| default (5) | 44.597 s | 43.607 s | 12.620 s / 3.534x | 12.127 s / 3.596x | 11.135 s / 4.005x | 9.428 s / 4.625x |
-| `--threads 1` | 53.407 s | 53.257 s | 32.279 s / 1.655x | 38.454 s / 1.385x | 22.947 s / 2.327x | 25.978 s / 2.050x |
-| `--threads 5` | 44.637 s | 43.636 s | 12.669 s / 3.523x | 12.543 s / 3.479x | 11.139 s / 4.007x | 9.454 s / 4.616x |
-| `--threads 10` | 45.436 s | 45.897 s | 10.194 s / 4.457x | 9.478 s / 4.842x | 9.414 s / 4.827x | 7.376 s / 6.223x |
-| `--threads 20` | 46.662 s | 46.868 s | 8.187 s / 5.700x | 7.768 s / 6.034x | 7.918 s / 5.893x | 5.816 s / 8.059x |
+| default (5) | 45.606 s | 45.016 s | 13.011 s / 3.505x | 12.923 s / 3.483x | 11.258 s / 4.051x | 9.587 s / 4.696x |
+| `--threads 1` | 54.879 s | 54.384 s | 33.368 s / 1.645x | 39.728 s / 1.369x | 23.483 s / 2.337x | 26.438 s / 2.057x |
+| `--threads 5` | 45.778 s | 45.025 s | 12.904 s / 3.548x | 12.631 s / 3.565x | 11.388 s / 4.020x | 9.610 s / 4.685x |
+| `--threads 10` | 45.931 s | 47.263 s | 10.199 s / 4.504x | 9.663 s / 4.891x | 9.455 s / 4.858x | 7.582 s / 6.234x |
+| `--threads 20` | 47.305 s | 47.643 s | 8.360 s / 5.659x | 8.040 s / 5.926x | 7.929 s / 5.966x | 5.874 s / 8.110x |
 <!-- LATEST_PERFORMANCE_END -->
-<!-- LATEST_PERFORMANCE_RUNS: full-interleaved-matrix-runs=90 dotnet-matrix-runs=60 python-matrix-runs=30 repeats=3 preserving-real-fft-microbench-pairs=2 preserving-real-fft-v040-short-ab-pairs=2 preserving-real-fft-current-400-ab-pairs=1 preserving-real-fft-current-1000-ab-pairs=1 preserving-real-fft-thread-gate-runs=12 preserving-real-fft-scalar-hash-tests=4 python-v040-runs=15 python-v040-hashes=15 python-pr341-runs=15 python-pr341-hashes=1 -->
+<!-- LATEST_PERFORMANCE_RUNS: full-interleaved-matrix-runs=90 dotnet-matrix-runs=60 python-matrix-runs=30 repeats=3 sos-reverse-32k-microbench-pairs=21 sos-reverse-current-160-ab-pairs=8 sos-reverse-v040-160-ab-pairs=1 sos-reverse-current-1000-ab-pairs=1 sos-reverse-thread-gate-runs=6 sos-focused-test-runs=80 python-v040-runs=15 python-v040-hashes=15 python-pr341-runs=15 python-pr341-hashes=1 -->
 
 Each .NET cell shows median wall time and speedup versus its profile-matched
 Python column. The default is **5 workers**; three-run ranges are in the
@@ -122,14 +122,13 @@ was measured in the same interleaved batch, but a ratio still moves when its
 Python denominator moves. Same-fixture .NET revision A/B runs, not old ratio
 cells, are therefore used to judge .NET regressions.
 
-The preserving real-FFT path now executes its first radix pass directly from
-the caller span instead of copying the full input first. The arithmetic and
-pass order are unchanged. Two final 20,000-iteration pairs improved the 32K
-forward average from 111.773 to 107.062 microseconds (4.2%); complete
-forward-plus-inverse time improved 1.0%, with identical hashes. Final real-RF
-A/B runs improved v0.4.0 by 0.5% over two 160-frame pairs and `current` by 1.1%
-over one 400-frame pair. All seven artifact, metadata, console, and normalized
-log surfaces matched; the 1,000-frame gate remained bounded in memory.
+The managed Exact float32 forward/backward SOS path now runs its second pass
+backward in place instead of reversing the full work buffer twice. Filter
+expressions and recursive-state order are unchanged. Across eight interleaved
+160-frame `current` pairs, paired-median wall time fell 2.43%, throughput rose
+2.49%, and CPU time fell 2.69%; all seven artifact, metadata, console, and
+normalized-log surfaces matched. A separate 1,000-frame pair improved from
+39.242 to 37.908 seconds (3.40%) while remaining bounded in memory.
 
 Merged Python PR341 was deterministic here; Python v0.4.0 produced 15 distinct
 luma, chroma, JSON, and log hashes in 15 runs, so the strict oracle remains
