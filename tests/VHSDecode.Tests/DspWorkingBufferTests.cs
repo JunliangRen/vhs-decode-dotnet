@@ -70,6 +70,45 @@ public sealed class DspWorkingBufferTests
         Assert.All(inverseBuffer[length..], value => Assert.True(double.IsNaN(value)));
     }
 
+    [Fact(DisplayName = "Direct complex real-input staging ignores destination contents in parallel")]
+    public async Task DirectComplexRealInputStagingIgnoresDestinationContentsInParallel()
+    {
+        const int length = 4_096;
+        const int workerCount = 8;
+        double[][] inputs = Enumerable.Range(0, workerCount)
+            .Select(worker => Enumerable.Range(0, length)
+                .Select(index =>
+                    Math.Sin(index * (0.023 + (worker * 0.000_3))) +
+                    ((0.375 + (worker * 0.01)) *
+                        Math.Cos(index * (0.043 + (worker * 0.000_2)))) +
+                    (worker * 0.125))
+                .ToArray())
+            .ToArray();
+        Complex[][] expected = inputs
+            .Select(input => PocketFftComplex.Forward(
+                input.Select(value => new Complex(value, 0.0)).ToArray()))
+            .ToArray();
+        using var barrier = new Barrier(workerCount);
+        CancellationToken cancellationToken = TestContext.Current.CancellationToken;
+
+        Task[] tasks = Enumerable.Range(0, workerCount)
+            .Select(worker => Task.Factory.StartNew(
+                () =>
+                {
+                    Complex[] actual = Enumerable.Repeat(
+                        new Complex(double.NaN, double.NegativeInfinity),
+                        length).ToArray();
+                    barrier.SignalAndWait(cancellationToken);
+                    PocketFftComplex.ForwardReal(inputs[worker], actual);
+                    AssertComplexBitsEqual(expected[worker], actual);
+                },
+                cancellationToken,
+                TaskCreationOptions.LongRunning,
+                TaskScheduler.Default))
+            .ToArray();
+        await Task.WhenAll(tasks);
+    }
+
     [Fact(DisplayName = "Owned real FFT input matches the copying path exactly")]
     public void OwnedRealFftInputMatchesCopyingPathExactly()
     {
