@@ -2,7 +2,7 @@
 
 [English](README.md) | **[简体中文](README.zh-CN.md)** | [日本語](README.ja.md)
 
-<!-- README_SYNC: 2026-08-10.02 -->
+<!-- README_SYNC: 2026-08-10.04 -->
 
 这是 [`oyvindln/vhs-decode`](https://github.com/oyvindln/vhs-decode)
 中解码相关部分的 .NET 11 重写，兼容目标为上游 release `v0.4.0`、commit
@@ -91,35 +91,30 @@ CVBS 和 HiFi 仍会拒绝 `ipp-fast`；需要 release 兼容行为时应使用 
 
 这是同一份私有本地 40 MHz PAL VHS `.ldf` 夹具上的 160 帧快照，包含启动开销，
 且不会公开源文件名。全部 90 次 Python 与 .NET Release 运行都在本候选上按正序、
-反序和混排三轮交错测量；候选基于已合并的 main `0306db8`。详细说明中固定记录了
+反序和混排三轮交错测量；候选基于已合并的 main `5268547`。详细说明中固定记录了
 被测生产源码 blob 和三次运行范围；兼容性结论与速度数据分开判断。
 
 <!-- LATEST_PERFORMANCE_BEGIN -->
 | CLI 模式（workers） | Python v0.4.0 | Python PR341 | Exact + v0.4.0 | Exact + current | IPP-fast + v0.4.0 | IPP-fast + current |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| 默认（5） | 44.296 s | 43.805 s | 12.763 s / 3.471x | 11.858 s / 3.694x | 11.251 s / 3.937x | 9.487 s / 4.617x |
-| `--threads 1` | 53.404 s | 53.632 s | 32.537 s / 1.641x | 38.751 s / 1.384x | 22.896 s / 2.332x | 26.221 s / 2.045x |
-| `--threads 5` | 44.283 s | 43.593 s | 12.600 s / 3.514x | 12.468 s / 3.496x | 11.196 s / 3.955x | 9.393 s / 4.641x |
-| `--threads 10` | 45.330 s | 45.943 s | 9.941 s / 4.560x | 9.959 s / 4.613x | 9.385 s / 4.830x | 7.611 s / 6.036x |
-| `--threads 20` | 46.551 s | 46.697 s | 8.336 s / 5.584x | 7.608 s / 6.138x | 8.084 s / 5.759x | 5.806 s / 8.043x |
+| 默认（5） | 44.597 s | 43.607 s | 12.620 s / 3.534x | 12.127 s / 3.596x | 11.135 s / 4.005x | 9.428 s / 4.625x |
+| `--threads 1` | 53.407 s | 53.257 s | 32.279 s / 1.655x | 38.454 s / 1.385x | 22.947 s / 2.327x | 25.978 s / 2.050x |
+| `--threads 5` | 44.637 s | 43.636 s | 12.669 s / 3.523x | 12.543 s / 3.479x | 11.139 s / 4.007x | 9.454 s / 4.616x |
+| `--threads 10` | 45.436 s | 45.897 s | 10.194 s / 4.457x | 9.478 s / 4.842x | 9.414 s / 4.827x | 7.376 s / 6.223x |
+| `--threads 20` | 46.662 s | 46.868 s | 8.187 s / 5.700x | 7.768 s / 6.034x | 7.918 s / 5.893x | 5.816 s / 8.059x |
 <!-- LATEST_PERFORMANCE_END -->
-<!-- LATEST_PERFORMANCE_RUNS: full-interleaved-matrix-runs=90 dotnet-matrix-runs=60 python-matrix-runs=30 repeats=3 fused-spectrum-microbench-pairs=12 fused-spectrum-short-ab-pairs=8 fused-spectrum-long-ab-pairs=2 fused-spectrum-thread-gate-runs=12 fused-spectrum-scalar-runs=2 python-v040-runs=15 python-v040-hashes=15 python-pr341-runs=15 python-pr341-hashes=1 -->
+<!-- LATEST_PERFORMANCE_RUNS: full-interleaved-matrix-runs=90 dotnet-matrix-runs=60 python-matrix-runs=30 repeats=3 preserving-real-fft-microbench-pairs=2 preserving-real-fft-v040-short-ab-pairs=2 preserving-real-fft-current-400-ab-pairs=1 preserving-real-fft-current-1000-ab-pairs=1 preserving-real-fft-thread-gate-runs=12 preserving-real-fft-scalar-hash-tests=4 python-v040-runs=15 python-v040-hashes=15 python-pr341-runs=15 python-pr341-hashes=1 -->
 
 每个 .NET 单元格依次给出墙钟中位数和相对同 profile Python 列的倍速；默认实际
 使用 **5 个 workers**。三次运行范围见[详细性能说明](docs/README.detailed.zh-CN.md#性能)。
 所有列都来自同一批交错测量，但倍数仍会随作为分母的 Python 用时变化；判断 .NET 是否
-回退时，应看同夹具、同范围的 .NET 版本 A/B，而不是跨表比较旧倍率。本次刷新中每个
-.NET 中位数都比上一张表更短；部分显示倍数仍然下降，是因为对应 Python 中位数下降比例更大。
-例如默认 IPP-fast/current 的 .NET 用时从 9.778 s 降到 9.487 s，而对应 Python
-从 53.288 s 降到 43.805 s，所以即使 .NET 墙钟更短，倍率仍从 5.450x 变为 4.617x。
+回退时，应看同夹具、同范围的 .NET 版本 A/B，而不是跨表比较旧倍率。
 
-Exact VHS 现在会在一次有序频谱遍历中完成两次 complex RF 滤波和 Hilbert real 缩放。
-binary64 表达式与阶段顺序均未改变；非有限值和别名输入仍保持旧的标量/顺序行为。
-12 组交替的 1M 元素微基准把该内核从 4.280 ms 缩短到 2.976 ms（1.438x）。4 组
-400 帧配对把端到端中位数从 16.50 秒缩短到 16.33 秒；同 profile 的 1000 帧运行中，
-`current` 观察到墙钟低 0.65%，v0.4.0 观察到低 2.10%；每个 profile 只有一组配对，
-不作为持续收益声明。A/B、六种线程模式和完全标量回退的全部产物与日志表面一致；
-工作集保持有界，首段到末段三分之一只有小幅波动。
+保留输入的 real FFT 路径现在会直接从调用者 span 执行首个 radix pass，不再先复制完整
+输入；运算表达式和 pass 顺序不变。最终两组 20,000 次微基准中，32K forward 平均从
+111.773 微秒降到 107.062 微秒，快 4.2%；完整 forward+inverse 快 1.0%，hash 完全相同。
+真实 RF 最终 A/B 中，v0.4.0 两组 160 帧中位数快 0.5%，`current` 一组 400 帧快 1.1%。
+七类产物、元数据、控制台与归一化日志表面全部一致，1000 帧门禁中的内存保持有界。
 
 已合并的 Python PR341 在本轮保持确定性；Python v0.4.0
 的 15 次运行产生了 15 套亮度、色度、JSON 和日志 hash，因此严格 oracle 仍是

@@ -109,28 +109,42 @@ public sealed class DspWorkingBufferTests
         await Task.WhenAll(tasks);
     }
 
-    [Fact(DisplayName = "Owned real FFT input matches the copying path exactly")]
-    public void OwnedRealFftInputMatchesCopyingPathExactly()
+    [Fact(DisplayName = "Preserving and owned real FFT paths match exactly")]
+    public void PreservingAndOwnedRealFftPathsMatchExactly()
     {
-        const int length = 4_096;
-        double[] input = Enumerable.Range(0, length)
-            .Select(index => Math.Sin(index * 0.013) + (0.625 * Math.Cos(index * 0.041)))
-            .ToArray();
-        Complex[] expected = PocketFftReal.Forward(input);
-        double[] ownedInput = input.ToArray();
-        var actual = Enumerable.Repeat(
-            new Complex(double.NaN, double.NaN),
-            expected.Length + 11).ToArray();
-
-        PocketFftReal.ForwardOwned(ownedInput, actual);
-
-        Assert.Equal(expected, actual.AsSpan(0, expected.Length).ToArray());
-        Assert.All(actual[expected.Length..], value =>
+        foreach (int length in new[] { 2, 4, 4_096, 32_768 })
         {
-            Assert.True(double.IsNaN(value.Real));
-            Assert.True(double.IsNaN(value.Imaginary));
-        });
-        Assert.False(input.AsSpan().SequenceEqual(ownedInput));
+            double[] input = Enumerable.Range(0, length)
+                .Select(index => Math.Sin(index * 0.013) + (0.625 * Math.Cos(index * 0.041)))
+                .ToArray();
+            input[0] = -0.0;
+            double[] original = input.ToArray();
+            double[] ownedInput = input.ToArray();
+            int outputLength = (length / 2) + 1;
+            var expected = Enumerable.Repeat(
+                new Complex(double.NaN, double.NaN),
+                outputLength + 11).ToArray();
+            var actual = Enumerable.Repeat(
+                new Complex(double.NaN, double.NaN),
+                outputLength + 11).ToArray();
+
+            PocketFftReal.ForwardOwned(ownedInput, expected);
+            PocketFftReal.Forward(input, actual);
+
+            AssertComplexBitsEqual(
+                expected.AsSpan(0, outputLength),
+                actual.AsSpan(0, outputLength));
+            Assert.All(actual[outputLength..], value =>
+            {
+                Assert.True(double.IsNaN(value.Real));
+                Assert.True(double.IsNaN(value.Imaginary));
+            });
+            Assert.True(
+                MemoryMarshal.AsBytes(original.AsSpan())
+                    .SequenceEqual(MemoryMarshal.AsBytes(input.AsSpan())),
+                $"Preserving FFT input changed for length {length}.");
+            Assert.False(input.AsSpan().SequenceEqual(ownedInput));
+        }
 
         ArgumentException invalidLength = Assert.Throws<ArgumentException>(
             () => PocketFftReal.ForwardOwned(new double[6], new Complex[4]));

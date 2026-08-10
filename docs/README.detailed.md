@@ -4,7 +4,7 @@
 
 **[English](README.detailed.md)** | [简体中文](README.detailed.zh-CN.md) | [日本語](README.detailed.ja.md)
 
-<!-- README_SYNC: 2026-08-10.02 -->
+<!-- README_SYNC: 2026-08-10.04 -->
 
 .NET 11 rewrite of the decode-facing parts of
 [`oyvindln/vhs-decode`](https://github.com/oyvindln/vhs-decode), focused on
@@ -440,38 +440,70 @@ profile-matched Python column:
 <!-- LATEST_PERFORMANCE_BEGIN -->
 | CLI mode (workers) | Python v0.4.0 | Python PR341 | Exact + v0.4.0 | Exact + current | IPP-fast + v0.4.0 | IPP-fast + current |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| default (5) | 44.296 s | 43.805 s | 12.763 s / 3.471x / 71.19% | 11.858 s / 3.694x / 72.93% | 11.251 s / 3.937x / 74.60% | 9.487 s / 4.617x / 78.34% |
-| `--threads 1` | 53.404 s | 53.632 s | 32.537 s / 1.641x / 39.07% | 38.751 s / 1.384x / 27.75% | 22.896 s / 2.332x / 57.13% | 26.221 s / 2.045x / 51.11% |
-| `--threads 5` | 44.283 s | 43.593 s | 12.600 s / 3.514x / 71.55% | 12.468 s / 3.496x / 71.40% | 11.196 s / 3.955x / 74.72% | 9.393 s / 4.641x / 78.45% |
-| `--threads 10` | 45.330 s | 45.943 s | 9.941 s / 4.560x / 78.07% | 9.959 s / 4.613x / 78.32% | 9.385 s / 4.830x / 79.30% | 7.611 s / 6.036x / 83.43% |
-| `--threads 20` | 46.551 s | 46.697 s | 8.336 s / 5.584x / 82.09% | 7.608 s / 6.138x / 83.71% | 8.084 s / 5.759x / 82.63% | 5.806 s / 8.043x / 87.57% |
+| default (5) | 44.597 s | 43.607 s | 12.620 s / 3.534x / 71.70% | 12.127 s / 3.596x / 72.19% | 11.135 s / 4.005x / 75.03% | 9.428 s / 4.625x / 78.38% |
+| `--threads 1` | 53.407 s | 53.257 s | 32.279 s / 1.655x / 39.56% | 38.454 s / 1.385x / 27.80% | 22.947 s / 2.327x / 57.03% | 25.978 s / 2.050x / 51.22% |
+| `--threads 5` | 44.637 s | 43.636 s | 12.669 s / 3.523x / 71.62% | 12.543 s / 3.479x / 71.26% | 11.139 s / 4.007x / 75.04% | 9.454 s / 4.616x / 78.34% |
+| `--threads 10` | 45.436 s | 45.897 s | 10.194 s / 4.457x / 77.56% | 9.478 s / 4.842x / 79.35% | 9.414 s / 4.827x / 79.28% | 7.376 s / 6.223x / 83.93% |
+| `--threads 20` | 46.662 s | 46.868 s | 8.187 s / 5.700x / 82.46% | 7.768 s / 6.034x / 83.43% | 7.918 s / 5.893x / 83.03% | 5.816 s / 8.059x / 87.59% |
 <!-- LATEST_PERFORMANCE_END -->
-<!-- LATEST_PERFORMANCE_RUNS: full-interleaved-matrix-runs=90 dotnet-matrix-runs=60 python-matrix-runs=30 repeats=3 fused-spectrum-microbench-pairs=12 fused-spectrum-short-ab-pairs=8 fused-spectrum-long-ab-pairs=2 fused-spectrum-thread-gate-runs=12 fused-spectrum-scalar-runs=2 python-v040-runs=15 python-v040-hashes=15 python-pr341-runs=15 python-pr341-hashes=1 -->
+<!-- LATEST_PERFORMANCE_RUNS: full-interleaved-matrix-runs=90 dotnet-matrix-runs=60 python-matrix-runs=30 repeats=3 preserving-real-fft-microbench-pairs=2 preserving-real-fft-v040-short-ab-pairs=2 preserving-real-fft-current-400-ab-pairs=1 preserving-real-fft-current-1000-ab-pairs=1 preserving-real-fft-thread-gate-runs=12 preserving-real-fft-scalar-hash-tests=4 python-v040-runs=15 python-v040-hashes=15 python-pr341-runs=15 python-pr341-hashes=1 -->
 
 The three-run wall-time ranges were:
 
 | CLI mode | Python v0.4.0 | Python PR341 | Exact + v0.4.0 | Exact + current | IPP-fast + v0.4.0 | IPP-fast + current |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| default (5) | 44.111-45.124 s | 43.058-44.693 s | 12.587-13.438 s | 11.818-12.649 s | 11.139-11.278 s | 9.446-9.526 s |
-| `--threads 1` | 52.923-54.584 s | 53.140-55.384 s | 32.254-32.862 s | 38.306-38.908 s | 22.858-23.610 s | 26.093-26.502 s |
-| `--threads 5` | 44.215-46.910 s | 43.537-45.026 s | 12.498-12.749 s | 12.083-12.969 s | 11.139-11.232 s | 9.391-9.429 s |
-| `--threads 10` | 45.243-45.354 s | 45.595-45.945 s | 9.869-9.960 s | 9.621-10.172 s | 9.328-9.465 s | 7.454-7.652 s |
-| `--threads 20` | 46.428-46.728 s | 46.442-46.757 s | 8.217-8.408 s | 7.561-8.113 s | 7.952-8.242 s | 5.744-5.848 s |
+| default (5) | 44.385-44.851 s | 43.446-43.645 s | 12.540-12.622 s | 11.866-12.410 s | 11.042-11.169 s | 9.327-9.571 s |
+| `--threads 1` | 53.088-54.153 s | 53.204-53.730 s | 31.998-32.440 s | 38.212-38.483 s | 22.907-22.995 s | 25.970-26.042 s |
+| `--threads 5` | 44.539-44.661 s | 43.574-43.845 s | 12.608-12.925 s | 12.450-12.679 s | 11.079-11.283 s | 9.266-9.498 s |
+| `--threads 10` | 45.403-45.695 s | 45.684-46.257 s | 10.124-10.497 s | 9.017-10.107 s | 9.401-9.598 s | 7.316-7.508 s |
+| `--threads 20` | 46.392-46.876 s | 46.348-47.059 s | 8.043-8.315 s | 7.605-8.435 s | 7.855-7.944 s | 5.780-5.926 s |
 
 All 90 Release runs were refreshed together on 2026-08-10: six profiles at all
 five worker settings in forward, reverse, and mixed passes. No Python or
 IPP-fast timing was reused from an earlier batch. This candidate is based on
-merged main `0306db8`. The measured production source is pinned to Git blobs
-`e587a633558b404849306c29b1d0717de0960b67` for `NumpyComplexMultiply.cs` and
-`a8ad6a4cb967d8ddab524fba1f35b46a2a13b3d7` for `RfDemodulator.cs`. A
-post-measurement review added only a cross-type span-alias guard before the
-unchanged non-alias arithmetic loop; the final `NumpyComplexMultiply.cs` blob
-is `efadb6f47db53243584b93d6be81fd111115683a`. Documentation and test-only
+merged main `5268547`. The measured `PocketFftReal.cs` source is pinned to Git
+blob `b09af4c30dcb2dc48ba37ad517c59c3f86b7696a`; its merged-main baseline blob
+was `d8f202d1ba89ae90f0603b2ae49ec18b2afab98d`. Post-measurement review added
+only exception-safe cleanup if the second pooled-array rent fails; the final
+source blob is `3c11c06b545c4daa280b7a1bd3b8f5f4216ef81c`. Documentation and test-only
 edits are outside the timed decoder binary.
 The host was an Intel Core Ultra 7 265K with 20 logical processors, Windows 11
 build 26220, and .NET SDK/runtime `11.0.100-preview.6.26359.118`. Raw run
 directories remain local because they contain the private fixture path; these
 are local measurements rather than an independently reproducible public corpus.
+
+### Preserving real-FFT first pass
+
+The preserving real-FFT path previously copied the complete input into a pooled
+packed array before the first radix pass copied and transformed it into a second
+pooled array. It now rents both work arrays up front and executes that first pass
+directly from the caller's read-only span. Later radix passes, packed-spectrum
+materialization, binary64 expressions, and arithmetic order are unchanged. The
+owned-input path is unchanged. The final packed array is returned to the pool
+last to retain the previous hot-buffer reuse order.
+
+Two opposite-order final pairs ran 20,000 warmed 32K forward-plus-inverse
+iterations per process. The preserving forward average fell from 111.773 to
+107.062 microseconds, a 4.22% time reduction; complete forward-plus-inverse
+time fell from 250.744 to 248.181 microseconds, a 1.02% reduction. Forward and
+inverse SHA-256 values were identical in every run. A focused bitwise test also
+covers lengths 2, 4, 4,096, and 32,768, verifies the caller input byte-for-byte,
+checks output-tail sentinels, and compares the preserving path with the existing
+owned-input path.
+
+The final v0.4.0 two-pair 160-frame A/B moved from a baseline median of 8.282 to
+8.237 seconds, 0.54% lower. One final `current` 400-frame pair moved from 16.184
+to 16.010 seconds, 1.08% lower. Luma, chroma, raw JSON, stdout, normalized
+stderr/log, and ordered `fileLoc` matched in every pair. A separate 1,000-frame
+`current` run matched the same seven surfaces and remained bounded: baseline
+first/final-third working-set medians were 649.1/643.9 MiB with a 681.9 MiB
+peak; candidate medians were 644.3/641.5 MiB with a 686.2 MiB peak. This is not
+a general memory-reduction claim.
+
+The 12-run determinism matrix covered Exact v0.4.0 and `current` at
+`--threads 0`, default-five, `1`, `5`, `10`, and `20`; every surface was stable
+within each profile. Four fixed-hash tests also passed with AVX and AVX2
+disabled. The full Release suite passed all 1,416 xUnit v3 tests.
 
 ### Fused Exact VHS analytic-spectrum traversal
 
