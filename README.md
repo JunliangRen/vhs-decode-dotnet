@@ -120,7 +120,9 @@ Each .NET cell shows median wall time and speedup versus its profile-matched
 Python column. The default is **5 workers**; three-run ranges are in the
 [detailed performance notes](docs/README.detailed.md#performance). The previous
 40-frame table amplified startup cost, especially for Python, so a lower
-speedup in this longer table is not a decoder regression.
+speedup in this longer table is not a decoder regression. The ratio also moves
+when its Python denominator changes; same-fixture .NET revision A/B runs, not
+old ratio cells, are used to judge .NET regressions.
 
 The Exact backend now evaluates two independent real-FFT radix-4 points per AVX
 block without FMA or reordered per-point arithmetic. The refreshed v0.4.0
