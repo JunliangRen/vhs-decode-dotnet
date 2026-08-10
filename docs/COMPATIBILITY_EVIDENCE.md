@@ -2229,12 +2229,37 @@ dotnet test --solution VHSDecodeDotNet.slnx --no-build
 ```
 
 The current formal solution build completes with zero warnings and errors, and
-the xUnit v3 project exposes 1,403 independently discoverable tests
+the xUnit v3 project exposes 1,416 independently discoverable tests
 to `dotnet test` and Visual Studio Test Explorer. On the
 same Windows machine and fixtures, Release wall-clock measurements for one
 frame were 2.346 s versus 7.193 s for NTSC VHS and 1.651 s versus 5.865 s for
 NTSC LD (this port versus the v0.4.0 Python virtual environment); all output
 hashes listed above remained identical.
+
+### Fused Exact VHS analytic-spectrum traversal
+
+The Exact VHS analytic path now applies its RF video filter, MTF filter, and
+real Hilbert scale in one ordered traversal instead of three. Binary64 FMA
+expressions, rounding points, and stage order are unchanged. Non-finite pairs
+retain the scalar sequence, and aliased spans fall back to the original
+three-pass implementation.
+
+Twelve alternating 1,048,576-element pairs reduced the warmed kernel median
+from 4.280 to 2.976 ms (1.438x), with bit-identical output and zero steady-state
+allocation. Four 400-frame pairs reduced end-to-end median wall time from 16.50
+to 16.33 seconds. One profile-matched 1,000-frame Exact `--threads 20` A/B pair
+per profile measured `current` at 38.198 versus 37.951 seconds and v0.4.0 at
+48.146 versus 47.135 seconds. These are single-pair observations, not sustained
+throughput claims. First/final-third working-set medians remained bounded with
+small variation for both candidate runs.
+
+Every A/B matched luma, chroma, raw JSON, stdout, normalized stderr/log, and
+ordered `fileLoc`. A further 12-run matrix covered both Exact profiles and
+`--threads 0`, default-five, `1`, `5`, `10`, and `20`; two fully scalar runs
+matched normal `--threads 1` artifacts. The refreshed 90-run six-path batch
+kept one hash per captured surface for all 60 .NET runs, while Python v0.4.0
+again produced 15 artifact hash sets in 15 runs. The strict oracle therefore
+remains Python v0.4.0 `g4315520 --threads 0`.
 
 ### Bounded libsndfile RF input blocks
 

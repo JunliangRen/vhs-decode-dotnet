@@ -1396,7 +1396,8 @@ public sealed class RfDemodulator : IDisposable
     {
         Span<Complex> spectrum = workspace.DiffedAnalytic.AsSpan(0, input.Length);
         PocketFftComplex.ForwardReal(input, spectrum);
-        if (!rfVideoFilter.IsEmpty)
+        bool hasRfVideoFilter = !rfVideoFilter.IsEmpty;
+        if (hasRfVideoFilter)
         {
             if (rfVideoFilter.Length != input.Length)
             {
@@ -1404,11 +1405,10 @@ public sealed class RfDemodulator : IDisposable
                     "RF video filter length must match the RF block length.",
                     nameof(rfVideoFilter));
             }
-
-            NumpyComplexMultiply.ApplyInPlace(spectrum, rfVideoFilter);
         }
 
-        if (!rfMtfFilter.IsEmpty)
+        bool hasRfMtfFilter = !rfMtfFilter.IsEmpty;
+        if (hasRfMtfFilter)
         {
             if (rfMtfFilter.Length != input.Length)
             {
@@ -1416,11 +1416,29 @@ public sealed class RfDemodulator : IDisposable
                     "RF MTF filter length must match the RF block length.",
                     nameof(rfMtfFilter));
             }
-
-            NumpyComplexMultiply.ApplyInPlace(spectrum, rfMtfFilter);
         }
 
         double[] hilbertMultiplier = GetVhsHilbertMultiplier(input.Length);
+        if (hasRfVideoFilter && hasRfMtfFilter)
+        {
+            NumpyComplexMultiply.ApplyTwoComplexAndRealInPlace(
+                spectrum,
+                rfVideoFilter,
+                rfMtfFilter,
+                hilbertMultiplier);
+            return;
+        }
+
+        if (hasRfVideoFilter)
+        {
+            NumpyComplexMultiply.ApplyInPlace(spectrum, rfVideoFilter);
+        }
+
+        if (hasRfMtfFilter)
+        {
+            NumpyComplexMultiply.ApplyInPlace(spectrum, rfMtfFilter);
+        }
+
         ApplyHilbertMultiplierInPlace(spectrum, hilbertMultiplier);
     }
 
