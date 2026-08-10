@@ -2,7 +2,7 @@
 
 [English](README.md) | [简体中文](README.zh-CN.md) | **[日本語](README.ja.md)**
 
-<!-- README_SYNC: 2026-08-10.04 -->
+<!-- README_SYNC: 2026-08-11.01 -->
 
 [`oyvindln/vhs-decode`](https://github.com/oyvindln/vhs-decode) の
 デコード関連部分を .NET 11 で再実装するプロジェクトです。互換性の対象は
@@ -36,7 +36,7 @@ upstream release `v0.4.0`、commit
 - VHS family には VHS/S-VHS、Betamax、Video8/Hi8、U-matic、Type C、EIAJ、
   upstream が対応する PAL/NTSC variant が含まれます。
 - TBC utility、ダブルクリック GUI、開発者向け plot window は対象外です。
-- Visual Studio 2026 の `.slnx` には **1,416** 件の標準 xUnit v3 test があり、
+- Visual Studio 2026 の `.slnx` には **1,417** 件の標準 xUnit v3 test があり、
   Test Explorer と `dotnet test` の両方で実行できます。
 
 <!-- SECTION: start -->
@@ -94,21 +94,21 @@ CVBS と HiFi は引き続き `ipp-fast` を拒否します。release-compatible
 ## 最新の性能
 
 これは同じ private local 40 MHz PAL VHS `.ldf` fixture を使う、startup cost を含む
-160-frame snapshot です。source filename は公開しません。Python と .NET の全 90 Release
+`--start 100 --length 160` snapshot です。source filename は公開しません。Python と .NET の全 90 Release
 run を、この candidate 上で forward、reverse、mixed の 3 pass により interleave して
-測定しました。candidate は merged main `73dd014` を基にしています。測定した production
+測定しました。candidate は merged main `3e01fdd` を基にしています。測定した production
 blob と 3-run range は詳細版に固定記録しています。互換性と速度は別々に評価します。
 
 <!-- LATEST_PERFORMANCE_BEGIN -->
 | CLI mode（workers） | Python v0.4.0 | Python PR341 | Exact + v0.4.0 | Exact + current | IPP-fast + v0.4.0 | IPP-fast + current |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| default（5） | 45.606 s | 45.016 s | 13.011 s / 3.505x | 12.923 s / 3.483x | 11.258 s / 4.051x | 9.587 s / 4.696x |
-| `--threads 1` | 54.879 s | 54.384 s | 33.368 s / 1.645x | 39.728 s / 1.369x | 23.483 s / 2.337x | 26.438 s / 2.057x |
-| `--threads 5` | 45.778 s | 45.025 s | 12.904 s / 3.548x | 12.631 s / 3.565x | 11.388 s / 4.020x | 9.610 s / 4.685x |
-| `--threads 10` | 45.931 s | 47.263 s | 10.199 s / 4.504x | 9.663 s / 4.891x | 9.455 s / 4.858x | 7.582 s / 6.234x |
-| `--threads 20` | 47.305 s | 47.643 s | 8.360 s / 5.659x | 8.040 s / 5.926x | 7.929 s / 5.966x | 5.874 s / 8.110x |
+| default（5） | 46.064 s | 45.418 s | 13.109 s / 3.514x | 12.868 s / 3.530x | 11.499 s / 4.006x | 9.725 s / 4.670x |
+| `--threads 1` | 55.170 s | 55.257 s | 33.228 s / 1.660x | 39.682 s / 1.393x | 23.625 s / 2.335x | 26.775 s / 2.064x |
+| `--threads 5` | 46.247 s | 45.834 s | 13.377 s / 3.457x | 12.807 s / 3.579x | 11.552 s / 4.003x | 9.842 s / 4.657x |
+| `--threads 10` | 47.318 s | 48.504 s | 10.567 s / 4.478x | 9.664 s / 5.019x | 9.637 s / 4.910x | 7.933 s / 6.114x |
+| `--threads 20` | 48.349 s | 48.631 s | 8.675 s / 5.574x | 8.134 s / 5.979x | 8.290 s / 5.832x | 6.110 s / 7.959x |
 <!-- LATEST_PERFORMANCE_END -->
-<!-- LATEST_PERFORMANCE_RUNS: full-interleaved-matrix-runs=90 dotnet-matrix-runs=60 python-matrix-runs=30 repeats=3 sos-reverse-32k-microbench-pairs=21 sos-reverse-current-160-ab-pairs=8 sos-reverse-v040-160-ab-pairs=1 sos-reverse-current-1000-ab-pairs=1 sos-reverse-thread-gate-runs=6 sos-focused-test-runs=80 python-v040-runs=15 python-v040-hashes=15 python-pr341-runs=15 python-pr341-hashes=1 -->
+<!-- LATEST_PERFORMANCE_RUNS: full-interleaved-matrix-runs=90 dotnet-matrix-runs=60 python-matrix-runs=30 repeats=3 sos-state-current-160-ab-pairs=6 sos-state-default-160-ab-pairs=4 sos-state-current-1000-ab-pairs=1 sos-state-thread-gate-runs=6 sos-state-jit-disassemblies=2 sos-state-focused-test-runs=2 sos-reverse-32k-microbench-pairs=21 sos-reverse-current-160-ab-pairs=8 sos-reverse-v040-160-ab-pairs=1 sos-reverse-current-1000-ab-pairs=1 sos-reverse-thread-gate-runs=6 sos-focused-test-runs=80 python-v040-runs=15 python-v040-hashes=15 python-pr341-runs=15 python-pr341-hashes=1 -->
 
 各 .NET cell は wall-time median と profile が対応する Python 列に対する speedup の
 順で、default は **5 workers** です。3-run range は
@@ -117,12 +117,13 @@ interleaved batch で測定していますが、ratio は分母となる Python 
 .NET regression の判断には古い表の倍率ではなく、同じ fixture と範囲による .NET revision
 A/B を使用します。
 
-managed Exact float32 forward/backward SOS path は、work buffer 全体を 2 回 reverse せず、
-second pass を in-place の逆順 traversal で実行します。filter expression と recursive-state
-order は不変です。interleaved 160-frame `current` 8 pair の paired median では wall time が
-2.43% 減少し、throughput が 2.49% 向上、CPU time が 2.69% 減少しました。7 種類の
-artifact、metadata、console、normalized-log surface はすべて一致しました。別の
-1,000-frame pair は 39.242 から 37.908 seconds（3.40%）へ改善し、memory は bounded の
+managed Exact float32 SOS の generic kernel は、section ごとの 2 個の recursive state を
+GC-tracked span reference 経由で参照します。arithmetic order を変えず、forward と backward
+の inner loop からそれぞれ 2 個の bounds branch を除去しました。interleaved 160-frame
+`current --threads 20` 6 pair では median wall time が 11.499 から 11.373 seconds（1.10%）へ
+短縮し、throughput は 1.12% 向上、CPU time は 1.56% 減少しました。candidate は 5 pair で
+勝ち、9 種類の compatibility surface はすべて一致しました。別の 1,000-frame pair は
+42.463 から 42.221 seconds（0.57%）へ短縮し、CPU time は 1.03% 減少、memory は bounded の
 ままです。
 
 merged Python PR341 も deterministic でしたが、Python v0.4.0 は 15 run で 15 種類の luma、
@@ -163,7 +164,7 @@ header は FFmpeg を維持します。
 dotnet restore VHSDecodeDotNet.slnx
 dotnet build VHSDecodeDotNet.slnx -c Release --no-restore
 dotnet test --solution VHSDecodeDotNet.slnx -c Release `
-  --no-build --no-restore --minimum-expected-tests 1416
+  --no-build --no-restore --minimum-expected-tests 1417
 ```
 
 Visual Studio 2026 で `VHSDecodeDotNet.slnx` を開くと、build、debug、

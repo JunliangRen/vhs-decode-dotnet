@@ -1426,6 +1426,68 @@ public sealed class DspWorkingBufferTests
         }
     }
 
+    [Fact(DisplayName = "Float32 SOS generic state access matches the checked reference")]
+    public void Float32SosGenericStateAccessMatchesCheckedReference()
+    {
+        int[] inputBits =
+        [
+            0x3F400000,
+            unchecked((int)0xBE800000),
+            0x3F800000,
+            unchecked((int)0xBF800000),
+            0x00000000,
+            unchecked((int)0x80000000),
+            0x00800000,
+            unchecked((int)0x80800000),
+            0x007FFFFF,
+            unchecked((int)0x807FFFFF),
+            0x40490FDB,
+            unchecked((int)0xC02DF854),
+            0x42F6E979,
+            unchecked((int)0xBD000000),
+            0x3F000000,
+            unchecked((int)0xBF000000)
+        ];
+        float[] input = Enumerable.Range(0, 257)
+            .Select(index => BitConverter.Int32BitsToSingle(inputBits[index % inputBits.Length]))
+            .ToArray();
+        double[] widenedInput = Array.ConvertAll(input, static value => (double)value);
+        int[] sectionCounts = [5, 8, 10, 31, 32, 33, 64];
+        Span<byte> sectionCountBytes = stackalloc byte[sizeof(int)];
+        using IncrementalHash aggregate = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
+
+        foreach (int sectionCount in sectionCounts)
+        {
+            SosSection[] sections = Enumerable.Range(0, sectionCount)
+                .Select(index =>
+                {
+                    float split = (index % 5) * 0.005f;
+                    return new SosSection(
+                        0.70f + split,
+                        0.20f - split,
+                        0.02f,
+                        1.0f,
+                        -0.10f,
+                        0.02f);
+                })
+                .ToArray();
+            float[] expected = ApplyForwardBackwardFloat32CheckedReference(sections, input);
+            float[] actual = SosFilter.ApplyForwardBackwardFloat32ToSingle(
+                sections,
+                widenedInput,
+                padLength: 0);
+
+            AssertFloatBitsEqual(expected, actual);
+            BinaryPrimitives.WriteInt32LittleEndian(sectionCountBytes, sectionCount);
+            aggregate.AppendData(sectionCountBytes);
+            aggregate.AppendData(MemoryMarshal.AsBytes(actual.AsSpan()));
+        }
+
+        Assert.Equal(
+            "61A8966C55B1331509E0A60D6B731FA125F9406185C2C4AAF4E4CBC42F16C80D",
+            Convert.ToHexString(aggregate.GetHashAndReset()));
+    }
+
     [Fact(DisplayName = "In-place float32 SOS remains allocating-reference bit-exact")]
     public void InPlaceFloat32SosRemainsAllocatingReferenceBitExact()
     {
@@ -2074,6 +2136,98 @@ public sealed class DspWorkingBufferTests
             MemoryMarshal.AsBytes(expected).SequenceEqual(MemoryMarshal.AsBytes(actual)),
             "Float sequences differ at the bit level.");
     }
+
+    private static float[] ApplyForwardBackwardFloat32CheckedReference(
+        IReadOnlyList<SosSection> sections,
+        ReadOnlySpan<float> input)
+    {
+        var floatSections = new CheckedFloatSosSection[sections.Count];
+        var initialConditions = new float[checked(sections.Count * 2)];
+        float scale = 1.0f;
+        for (int sectionIndex = 0; sectionIndex < sections.Count; sectionIndex++)
+        {
+            SosSection source = sections[sectionIndex];
+            var section = new CheckedFloatSosSection(
+                (float)source.B0,
+                (float)source.B1,
+                (float)source.B2,
+                (float)source.A0,
+                (float)source.A1,
+                (float)source.A2);
+            floatSections[sectionIndex] = section;
+
+            float firstTerm = section.B1 - (section.A1 * section.B0);
+            float secondTerm = section.B2 - (section.A2 * section.B0);
+            float numeratorSum = (0.0f + firstTerm) + secondTerm;
+            float denominatorSum = (1.0f + section.A1) + section.A2;
+            float z0 = numeratorSum / denominatorSum;
+            float z1 = ((1.0f + section.A1) * z0) - firstTerm;
+            int stateOffset = sectionIndex * 2;
+            initialConditions[stateOffset] = scale * z0;
+            initialConditions[stateOffset + 1] = scale * z1;
+
+            float numeratorDc = ((0.0f + section.B0) + section.B1) + section.B2;
+            float denominatorDc = ((0.0f + section.A0) + section.A1) + section.A2;
+            scale *= numeratorDc / denominatorDc;
+        }
+
+        float[] values = input.ToArray();
+        ApplyFloat32CheckedReferencePass(
+            floatSections,
+            values,
+            initialConditions,
+            values[0],
+            backward: false);
+        ApplyFloat32CheckedReferencePass(
+            floatSections,
+            values,
+            initialConditions,
+            values[^1],
+            backward: true);
+        return values;
+    }
+
+    private static void ApplyFloat32CheckedReferencePass(
+        ReadOnlySpan<CheckedFloatSosSection> sections,
+        Span<float> values,
+        ReadOnlySpan<float> initialConditions,
+        float initialScale,
+        bool backward)
+    {
+        var states = new float[initialConditions.Length];
+        for (int stateIndex = 0; stateIndex < states.Length; stateIndex++)
+        {
+            states[stateIndex] = initialConditions[stateIndex] * initialScale;
+        }
+
+        int sample = backward ? values.Length - 1 : 0;
+        int end = backward ? -1 : values.Length;
+        int increment = backward ? -1 : 1;
+        for (; sample != end; sample += increment)
+        {
+            float value = values[sample];
+            for (int sectionIndex = 0; sectionIndex < sections.Length; sectionIndex++)
+            {
+                CheckedFloatSosSection section = sections[sectionIndex];
+                int stateOffset = sectionIndex * 2;
+                float filtered = (section.B0 * value) + states[stateOffset];
+                states[stateOffset] =
+                    (section.B1 * value) - (section.A1 * filtered) + states[stateOffset + 1];
+                states[stateOffset + 1] = (section.B2 * value) - (section.A2 * filtered);
+                value = filtered;
+            }
+
+            values[sample] = value;
+        }
+    }
+
+    private readonly record struct CheckedFloatSosSection(
+        float B0,
+        float B1,
+        float B2,
+        float A0,
+        float A1,
+        float A2);
 
     private static void AssertComplexBitsEqual(ReadOnlySpan<Complex> expected, ReadOnlySpan<Complex> actual)
     {
