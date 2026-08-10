@@ -1081,10 +1081,12 @@ Exact float32 PocketFFT 的大变换布局在第二阶段已经独占互不重�
 重叠。因子分解、根表、twiddle、变换算术、归一化、scatter 顺序、数据类型和最终 buffer
 所有权均不变。
 
-三组冻结的正向/逆向基线分别覆盖长度 11,025、119,790 和 131,072，并在请求 1 与
-20 workers 时校验。第四项测试使用正负零、subnormal、最小 normal、最大有限值、无穷和
-不同 NaN payload，对比保留输入与 owned storage 路径。这 4 个可独立发现的 xUnit v3
-用例在正常硬件及禁用全部 .NET hardware intrinsics 时均通过。
+三组冻结的正向/反向基线分别覆盖长度 11,025、119,790 和 131,072，并在请求 1 与
+20 workers 时校验。第四项测试把旧 main 的正负零、subnormal 和最小 normal 正反向 hash
+固定下来，并在 1/20 workers 下覆盖 preserving、owned 与 owned+scratch 三种存储路径；
+最大有限值、无穷和不同 NaN payload 则在同一进程内对三种路径做逐位比较，不把非有限值
+payload 选择固定成依赖机器的绝对 hash。这 4 个可独立发现的 xUnit v3 用例在正常硬件及
+禁用全部 .NET hardware intrinsics 时均通过。
 
 相对已合并 main `a059580` 的 6 组交错 160 帧 Exact
 `current --threads 20` 配对，在亮度、色度、原始 JSON、stdout、归一化 stderr/日志、

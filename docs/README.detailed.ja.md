@@ -1267,11 +1267,14 @@ allocation/rent と source packet 全体の先行 copy を除去しました。p
 factorization、root、twiddle、transform arithmetic、normalization、scatter order、data
 type、final buffer ownership は変更していません。
 
-3 組の frozen forward/inverse baseline は長さ 11,025、119,790、131,072 を、要求 worker
-数 1 と 20 で検証します。4 番目の test は正負 zero、subnormal、minimum normal、maximum
-finite、infinity、異なる NaN payload を使い、preserving/owned storage path を比較します。
-これら 4 個の independently discoverable xUnit v3 case は native hardware と全 .NET
-hardware intrinsic 無効の両方で通過します。
+3 組の frozen forward/backward baseline は長さ 11,025、119,790、131,072 を、要求 worker
+数 1 と 20 で検証します。4 番目の test は old-main の正負 zero、subnormal、minimum
+normal の forward/backward hash を固定し、1/20 workers の preserving、owned、
+owned+scratch storage path を網羅します。maximum finite、infinity、異なる NaN payload
+は同一 process 内で 3 storage path を bitwise 比較し、non-finite payload selection を
+machine-specific な absolute hash には固定しません。これら 4 個の independently
+discoverable xUnit v3 case は native hardware と全 .NET hardware intrinsic 無効の両方で
+通過します。
 
 merged main `a059580` に対する 6 組の interleaved 160-frame Exact
 `current --threads 20` pair は、luma、chroma、raw JSON、stdout、normalized

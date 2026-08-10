@@ -1369,12 +1369,15 @@ complete source packet into it first. Parallel packets do not overlap. Factoriza
 roots, twiddles, transform arithmetic, normalization, scatter order, data type,
 and final buffer ownership are unchanged.
 
-Three frozen forward/inverse baseline pairs cover lengths 11,025, 119,790, and
-131,072 with one and 20 requested workers. A fourth test compares preserving
-and owned storage paths over positive and negative zero, subnormals, minimum
-normal values, maximum finite values, infinities, and distinct NaN payloads.
-These four independently discoverable xUnit v3 cases pass both on native
-hardware and with all .NET hardware intrinsics disabled.
+Three frozen forward/backward baseline pairs cover lengths 11,025, 119,790, and
+131,072 with one and 20 requested workers. A fourth test pins old-main hashes
+for positive and negative zero, subnormals, and minimum normal values across
+preserving, owned, and owned-plus-scratch storage at one and 20 workers. It also
+compares maximum finite values, infinities, and distinct NaN payloads bit for
+bit across those storage paths in the same process; non-finite payload selection
+is not frozen to a machine-specific absolute hash. These four independently
+discoverable xUnit v3 cases pass both on native hardware and with all .NET
+hardware intrinsics disabled.
 
 Six interleaved 160-frame Exact `current --threads 20` pairs against merged
 main `a059580` matched luma, chroma, raw JSON, stdout, normalized stderr/logs,
