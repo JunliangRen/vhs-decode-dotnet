@@ -96,19 +96,19 @@ CVBS と HiFi は引き続き `ipp-fast` を拒否します。release-compatible
 これは同じ private local 40 MHz PAL VHS `.ldf` fixture を使う、startup cost を含む
 160-frame snapshot です。source filename は公開しません。Python と .NET の全 90 Release
 run を、この candidate 上で forward、reverse、mixed の 3 pass により interleave して
-測定しました。candidate は merged main `5268547` を基にしています。測定した production
+測定しました。candidate は merged main `73dd014` を基にしています。測定した production
 blob と 3-run range は詳細版に固定記録しています。互換性と速度は別々に評価します。
 
 <!-- LATEST_PERFORMANCE_BEGIN -->
 | CLI mode（workers） | Python v0.4.0 | Python PR341 | Exact + v0.4.0 | Exact + current | IPP-fast + v0.4.0 | IPP-fast + current |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| default（5） | 44.597 s | 43.607 s | 12.620 s / 3.534x | 12.127 s / 3.596x | 11.135 s / 4.005x | 9.428 s / 4.625x |
-| `--threads 1` | 53.407 s | 53.257 s | 32.279 s / 1.655x | 38.454 s / 1.385x | 22.947 s / 2.327x | 25.978 s / 2.050x |
-| `--threads 5` | 44.637 s | 43.636 s | 12.669 s / 3.523x | 12.543 s / 3.479x | 11.139 s / 4.007x | 9.454 s / 4.616x |
-| `--threads 10` | 45.436 s | 45.897 s | 10.194 s / 4.457x | 9.478 s / 4.842x | 9.414 s / 4.827x | 7.376 s / 6.223x |
-| `--threads 20` | 46.662 s | 46.868 s | 8.187 s / 5.700x | 7.768 s / 6.034x | 7.918 s / 5.893x | 5.816 s / 8.059x |
+| default（5） | 45.606 s | 45.016 s | 13.011 s / 3.505x | 12.923 s / 3.483x | 11.258 s / 4.051x | 9.587 s / 4.696x |
+| `--threads 1` | 54.879 s | 54.384 s | 33.368 s / 1.645x | 39.728 s / 1.369x | 23.483 s / 2.337x | 26.438 s / 2.057x |
+| `--threads 5` | 45.778 s | 45.025 s | 12.904 s / 3.548x | 12.631 s / 3.565x | 11.388 s / 4.020x | 9.610 s / 4.685x |
+| `--threads 10` | 45.931 s | 47.263 s | 10.199 s / 4.504x | 9.663 s / 4.891x | 9.455 s / 4.858x | 7.582 s / 6.234x |
+| `--threads 20` | 47.305 s | 47.643 s | 8.360 s / 5.659x | 8.040 s / 5.926x | 7.929 s / 5.966x | 5.874 s / 8.110x |
 <!-- LATEST_PERFORMANCE_END -->
-<!-- LATEST_PERFORMANCE_RUNS: full-interleaved-matrix-runs=90 dotnet-matrix-runs=60 python-matrix-runs=30 repeats=3 preserving-real-fft-microbench-pairs=2 preserving-real-fft-v040-short-ab-pairs=2 preserving-real-fft-current-400-ab-pairs=1 preserving-real-fft-current-1000-ab-pairs=1 preserving-real-fft-thread-gate-runs=12 preserving-real-fft-scalar-hash-tests=4 python-v040-runs=15 python-v040-hashes=15 python-pr341-runs=15 python-pr341-hashes=1 -->
+<!-- LATEST_PERFORMANCE_RUNS: full-interleaved-matrix-runs=90 dotnet-matrix-runs=60 python-matrix-runs=30 repeats=3 sos-reverse-32k-microbench-pairs=21 sos-reverse-current-160-ab-pairs=8 sos-reverse-v040-160-ab-pairs=1 sos-reverse-current-1000-ab-pairs=1 sos-reverse-thread-gate-runs=6 sos-focused-test-runs=80 python-v040-runs=15 python-v040-hashes=15 python-pr341-runs=15 python-pr341-hashes=1 -->
 
 各 .NET cell は wall-time median と profile が対応する Python 列に対する speedup の
 順で、default は **5 workers** です。3-run range は
@@ -117,13 +117,13 @@ interleaved batch で測定していますが、ratio は分母となる Python 
 .NET regression の判断には古い表の倍率ではなく、同じ fixture と範囲による .NET revision
 A/B を使用します。
 
-入力を保持する real FFT path は、入力全体を先に copy せず、caller span から直接最初の
-radix pass を実行するようになりました。arithmetic expression と pass order は不変です。
-最終 2 組の 20,000-iteration microbenchmark では、32K forward の平均が 111.773 から
-107.062 microseconds へ 4.2% 改善し、forward+inverse 全体も 1.0% 改善しました。hash は
-完全一致です。実 RF の最終 A/B は v0.4.0 の 160-frame 2 pair で 0.5%、`current` の
-400-frame 1 pair で 1.1% 改善しました。7 種類の artifact、metadata、console、normalized
-log surface はすべて一致し、1,000-frame gate の memory も bounded のままです。
+managed Exact float32 forward/backward SOS path は、work buffer 全体を 2 回 reverse せず、
+second pass を in-place の逆順 traversal で実行します。filter expression と recursive-state
+order は不変です。interleaved 160-frame `current` 8 pair の paired median では wall time が
+2.43% 減少し、throughput が 2.49% 向上、CPU time が 2.69% 減少しました。7 種類の
+artifact、metadata、console、normalized-log surface はすべて一致しました。別の
+1,000-frame pair は 39.242 から 37.908 seconds（3.40%）へ改善し、memory は bounded の
+ままです。
 
 merged Python PR341 も deterministic でしたが、Python v0.4.0 は 15 run で 15 種類の luma、
 chroma、JSON、log hash を生成したため、strict oracle は引き続き Python v0.4.0

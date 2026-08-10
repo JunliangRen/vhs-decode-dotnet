@@ -531,10 +531,8 @@ public static class SosFilter
         SteadyStateInitialConditionsFloat32(floatSections, zi);
         ScaleInitialConditionsFloat32(zi, values[0], scaledZi);
         ApplyForwardFloat32InPlace(floatSections, values, scaledZi);
-        values.Reverse();
-        ScaleInitialConditionsFloat32(zi, values[0], scaledZi);
-        ApplyForwardFloat32InPlace(floatSections, values, scaledZi);
-        values.Reverse();
+        ScaleInitialConditionsFloat32(zi, values[^1], scaledZi);
+        ApplyBackwardFloat32InPlace(floatSections, values, scaledZi);
     }
 
     public static int DefaultPadLength(IReadOnlyList<SosSection> sections)
@@ -686,6 +684,127 @@ public static class SosFilter
         }
 
         for (int sample = 0; sample < values.Length; sample++)
+        {
+            float value = values[sample];
+            for (int sectionIndex = 0; sectionIndex < sections.Length; sectionIndex++)
+            {
+                FloatSosSection section = sections[sectionIndex];
+                int stateOffset = sectionIndex * 2;
+                float filtered = (section.B0 * value) + states[stateOffset];
+                states[stateOffset] =
+                    (section.B1 * value) - (section.A1 * filtered) + states[stateOffset + 1];
+                states[stateOffset + 1] = (section.B2 * value) - (section.A2 * filtered);
+                value = filtered;
+            }
+
+            values[sample] = value;
+        }
+    }
+
+    private static void ApplyBackwardFloat32InPlace(
+        ReadOnlySpan<FloatSosSection> sections,
+        Span<float> values,
+        ReadOnlySpan<float> initialConditions)
+    {
+        if (initialConditions.Length != checked(sections.Length * 2))
+        {
+            throw new ArgumentException("Initial condition span must have shape [sections, 2].", nameof(initialConditions));
+        }
+
+        if (sections.Length == 1)
+        {
+            FloatSosSection section = sections[0];
+            float z1 = initialConditions[0];
+            float z2 = initialConditions[1];
+            for (int sample = values.Length - 1; sample >= 0; sample--)
+            {
+                float value = values[sample];
+                float filtered = (section.B0 * value) + z1;
+                z1 = (section.B1 * value) - (section.A1 * filtered) + z2;
+                z2 = (section.B2 * value) - (section.A2 * filtered);
+                values[sample] = filtered;
+            }
+
+            return;
+        }
+
+        if (sections.Length == 2)
+        {
+            FloatSosSection first = sections[0];
+            FloatSosSection second = sections[1];
+            float firstZ1 = initialConditions[0];
+            float firstZ2 = initialConditions[1];
+            float secondZ1 = initialConditions[2];
+            float secondZ2 = initialConditions[3];
+            for (int sample = values.Length - 1; sample >= 0; sample--)
+            {
+                float value = values[sample];
+                float filtered = (first.B0 * value) + firstZ1;
+                firstZ1 = (first.B1 * value) - (first.A1 * filtered) + firstZ2;
+                firstZ2 = (first.B2 * value) - (first.A2 * filtered);
+
+                value = filtered;
+                filtered = (second.B0 * value) + secondZ1;
+                secondZ1 = (second.B1 * value) - (second.A1 * filtered) + secondZ2;
+                secondZ2 = (second.B2 * value) - (second.A2 * filtered);
+                values[sample] = filtered;
+            }
+
+            return;
+        }
+
+        if (sections.Length == 4)
+        {
+            FloatSosSection first = sections[0];
+            FloatSosSection second = sections[1];
+            FloatSosSection third = sections[2];
+            FloatSosSection fourth = sections[3];
+            float firstZ1 = initialConditions[0];
+            float firstZ2 = initialConditions[1];
+            float secondZ1 = initialConditions[2];
+            float secondZ2 = initialConditions[3];
+            float thirdZ1 = initialConditions[4];
+            float thirdZ2 = initialConditions[5];
+            float fourthZ1 = initialConditions[6];
+            float fourthZ2 = initialConditions[7];
+            for (int sample = values.Length - 1; sample >= 0; sample--)
+            {
+                float value = values[sample];
+                float filtered = (first.B0 * value) + firstZ1;
+                firstZ1 = (first.B1 * value) - (first.A1 * filtered) + firstZ2;
+                firstZ2 = (first.B2 * value) - (first.A2 * filtered);
+
+                value = filtered;
+                filtered = (second.B0 * value) + secondZ1;
+                secondZ1 = (second.B1 * value) - (second.A1 * filtered) + secondZ2;
+                secondZ2 = (second.B2 * value) - (second.A2 * filtered);
+
+                value = filtered;
+                filtered = (third.B0 * value) + thirdZ1;
+                thirdZ1 = (third.B1 * value) - (third.A1 * filtered) + thirdZ2;
+                thirdZ2 = (third.B2 * value) - (third.A2 * filtered);
+
+                value = filtered;
+                filtered = (fourth.B0 * value) + fourthZ1;
+                fourthZ1 = (fourth.B1 * value) - (fourth.A1 * filtered) + fourthZ2;
+                fourthZ2 = (fourth.B2 * value) - (fourth.A2 * filtered);
+                values[sample] = filtered;
+            }
+
+            return;
+        }
+
+        Span<float> states = sections.Length <= 32
+            ? stackalloc float[sections.Length * 2]
+            : new float[sections.Length * 2];
+        for (int sectionIndex = 0; sectionIndex < sections.Length; sectionIndex++)
+        {
+            int stateOffset = sectionIndex * 2;
+            states[stateOffset] = initialConditions[stateOffset];
+            states[stateOffset + 1] = initialConditions[stateOffset + 1];
+        }
+
+        for (int sample = values.Length - 1; sample >= 0; sample--)
         {
             float value = values[sample];
             for (int sectionIndex = 0; sectionIndex < sections.Length; sectionIndex++)

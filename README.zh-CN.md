@@ -91,30 +91,30 @@ CVBS 和 HiFi 仍会拒绝 `ipp-fast`；需要 release 兼容行为时应使用 
 
 这是同一份私有本地 40 MHz PAL VHS `.ldf` 夹具上的 160 帧快照，包含启动开销，
 且不会公开源文件名。全部 90 次 Python 与 .NET Release 运行都在本候选上按正序、
-反序和混排三轮交错测量；候选基于已合并的 main `5268547`。详细说明中固定记录了
+反序和混排三轮交错测量；候选基于已合并的 main `73dd014`。详细说明中固定记录了
 被测生产源码 blob 和三次运行范围；兼容性结论与速度数据分开判断。
 
 <!-- LATEST_PERFORMANCE_BEGIN -->
 | CLI 模式（workers） | Python v0.4.0 | Python PR341 | Exact + v0.4.0 | Exact + current | IPP-fast + v0.4.0 | IPP-fast + current |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| 默认（5） | 44.597 s | 43.607 s | 12.620 s / 3.534x | 12.127 s / 3.596x | 11.135 s / 4.005x | 9.428 s / 4.625x |
-| `--threads 1` | 53.407 s | 53.257 s | 32.279 s / 1.655x | 38.454 s / 1.385x | 22.947 s / 2.327x | 25.978 s / 2.050x |
-| `--threads 5` | 44.637 s | 43.636 s | 12.669 s / 3.523x | 12.543 s / 3.479x | 11.139 s / 4.007x | 9.454 s / 4.616x |
-| `--threads 10` | 45.436 s | 45.897 s | 10.194 s / 4.457x | 9.478 s / 4.842x | 9.414 s / 4.827x | 7.376 s / 6.223x |
-| `--threads 20` | 46.662 s | 46.868 s | 8.187 s / 5.700x | 7.768 s / 6.034x | 7.918 s / 5.893x | 5.816 s / 8.059x |
+| 默认（5） | 45.606 s | 45.016 s | 13.011 s / 3.505x | 12.923 s / 3.483x | 11.258 s / 4.051x | 9.587 s / 4.696x |
+| `--threads 1` | 54.879 s | 54.384 s | 33.368 s / 1.645x | 39.728 s / 1.369x | 23.483 s / 2.337x | 26.438 s / 2.057x |
+| `--threads 5` | 45.778 s | 45.025 s | 12.904 s / 3.548x | 12.631 s / 3.565x | 11.388 s / 4.020x | 9.610 s / 4.685x |
+| `--threads 10` | 45.931 s | 47.263 s | 10.199 s / 4.504x | 9.663 s / 4.891x | 9.455 s / 4.858x | 7.582 s / 6.234x |
+| `--threads 20` | 47.305 s | 47.643 s | 8.360 s / 5.659x | 8.040 s / 5.926x | 7.929 s / 5.966x | 5.874 s / 8.110x |
 <!-- LATEST_PERFORMANCE_END -->
-<!-- LATEST_PERFORMANCE_RUNS: full-interleaved-matrix-runs=90 dotnet-matrix-runs=60 python-matrix-runs=30 repeats=3 preserving-real-fft-microbench-pairs=2 preserving-real-fft-v040-short-ab-pairs=2 preserving-real-fft-current-400-ab-pairs=1 preserving-real-fft-current-1000-ab-pairs=1 preserving-real-fft-thread-gate-runs=12 preserving-real-fft-scalar-hash-tests=4 python-v040-runs=15 python-v040-hashes=15 python-pr341-runs=15 python-pr341-hashes=1 -->
+<!-- LATEST_PERFORMANCE_RUNS: full-interleaved-matrix-runs=90 dotnet-matrix-runs=60 python-matrix-runs=30 repeats=3 sos-reverse-32k-microbench-pairs=21 sos-reverse-current-160-ab-pairs=8 sos-reverse-v040-160-ab-pairs=1 sos-reverse-current-1000-ab-pairs=1 sos-reverse-thread-gate-runs=6 sos-focused-test-runs=80 python-v040-runs=15 python-v040-hashes=15 python-pr341-runs=15 python-pr341-hashes=1 -->
 
 每个 .NET 单元格依次给出墙钟中位数和相对同 profile Python 列的倍速；默认实际
 使用 **5 个 workers**。三次运行范围见[详细性能说明](docs/README.detailed.zh-CN.md#性能)。
 所有列都来自同一批交错测量，但倍数仍会随作为分母的 Python 用时变化；判断 .NET 是否
 回退时，应看同夹具、同范围的 .NET 版本 A/B，而不是跨表比较旧倍率。
 
-保留输入的 real FFT 路径现在会直接从调用者 span 执行首个 radix pass，不再先复制完整
-输入；运算表达式和 pass 顺序不变。最终两组 20,000 次微基准中，32K forward 平均从
-111.773 微秒降到 107.062 微秒，快 4.2%；完整 forward+inverse 快 1.0%，hash 完全相同。
-真实 RF 最终 A/B 中，v0.4.0 两组 160 帧中位数快 0.5%，`current` 一组 400 帧快 1.1%。
-七类产物、元数据、控制台与归一化日志表面全部一致，1000 帧门禁中的内存保持有界。
+托管 Exact float32 前后向 SOS 路径现在会原地倒序执行第二遍滤波，不再把完整工作缓冲区
+反转两次；滤波表达式和递归状态顺序不变。8 组交错的 160 帧 `current` 配对中，配对中位
+墙钟时间下降 2.43%，吞吐提升 2.49%，CPU 时间下降 2.69%；七类产物、元数据、控制台与
+归一化日志表面全部一致。另一次 1000 帧配对从 39.242 秒降至 37.908 秒（3.40%），内存
+保持有界。
 
 已合并的 Python PR341 在本轮保持确定性；Python v0.4.0
 的 15 次运行产生了 15 套亮度、色度、JSON 和日志 hash，因此严格 oracle 仍是

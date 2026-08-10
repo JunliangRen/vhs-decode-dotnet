@@ -416,36 +416,62 @@ speedup、wall-time reduction の順です。
 <!-- LATEST_PERFORMANCE_BEGIN -->
 | CLI mode（workers） | Python v0.4.0 | Python PR341 | Exact + v0.4.0 | Exact + current | IPP-fast + v0.4.0 | IPP-fast + current |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| default（5） | 44.597 s | 43.607 s | 12.620 s / 3.534x / 71.70% | 12.127 s / 3.596x / 72.19% | 11.135 s / 4.005x / 75.03% | 9.428 s / 4.625x / 78.38% |
-| `--threads 1` | 53.407 s | 53.257 s | 32.279 s / 1.655x / 39.56% | 38.454 s / 1.385x / 27.80% | 22.947 s / 2.327x / 57.03% | 25.978 s / 2.050x / 51.22% |
-| `--threads 5` | 44.637 s | 43.636 s | 12.669 s / 3.523x / 71.62% | 12.543 s / 3.479x / 71.26% | 11.139 s / 4.007x / 75.04% | 9.454 s / 4.616x / 78.34% |
-| `--threads 10` | 45.436 s | 45.897 s | 10.194 s / 4.457x / 77.56% | 9.478 s / 4.842x / 79.35% | 9.414 s / 4.827x / 79.28% | 7.376 s / 6.223x / 83.93% |
-| `--threads 20` | 46.662 s | 46.868 s | 8.187 s / 5.700x / 82.46% | 7.768 s / 6.034x / 83.43% | 7.918 s / 5.893x / 83.03% | 5.816 s / 8.059x / 87.59% |
+| default（5） | 45.606 s | 45.016 s | 13.011 s / 3.505x / 71.47% | 12.923 s / 3.483x / 71.29% | 11.258 s / 4.051x / 75.32% | 9.587 s / 4.696x / 78.70% |
+| `--threads 1` | 54.879 s | 54.384 s | 33.368 s / 1.645x / 39.20% | 39.728 s / 1.369x / 26.95% | 23.483 s / 2.337x / 57.21% | 26.438 s / 2.057x / 51.39% |
+| `--threads 5` | 45.778 s | 45.025 s | 12.904 s / 3.548x / 71.81% | 12.631 s / 3.565x / 71.95% | 11.388 s / 4.020x / 75.12% | 9.610 s / 4.685x / 78.66% |
+| `--threads 10` | 45.931 s | 47.263 s | 10.199 s / 4.504x / 77.80% | 9.663 s / 4.891x / 79.56% | 9.455 s / 4.858x / 79.42% | 7.582 s / 6.234x / 83.96% |
+| `--threads 20` | 47.305 s | 47.643 s | 8.360 s / 5.659x / 82.33% | 8.040 s / 5.926x / 83.12% | 7.929 s / 5.966x / 83.24% | 5.874 s / 8.110x / 87.67% |
 <!-- LATEST_PERFORMANCE_END -->
-<!-- LATEST_PERFORMANCE_RUNS: full-interleaved-matrix-runs=90 dotnet-matrix-runs=60 python-matrix-runs=30 repeats=3 preserving-real-fft-microbench-pairs=2 preserving-real-fft-v040-short-ab-pairs=2 preserving-real-fft-current-400-ab-pairs=1 preserving-real-fft-current-1000-ab-pairs=1 preserving-real-fft-thread-gate-runs=12 preserving-real-fft-scalar-hash-tests=4 python-v040-runs=15 python-v040-hashes=15 python-pr341-runs=15 python-pr341-hashes=1 -->
+<!-- LATEST_PERFORMANCE_RUNS: full-interleaved-matrix-runs=90 dotnet-matrix-runs=60 python-matrix-runs=30 repeats=3 sos-reverse-32k-microbench-pairs=21 sos-reverse-current-160-ab-pairs=8 sos-reverse-v040-160-ab-pairs=1 sos-reverse-current-1000-ab-pairs=1 sos-reverse-thread-gate-runs=6 sos-focused-test-runs=80 python-v040-runs=15 python-v040-hashes=15 python-pr341-runs=15 python-pr341-hashes=1 -->
 
 3-run wall-time range は次のとおりです。
 
 | CLI mode | Python v0.4.0 | Python PR341 | Exact + v0.4.0 | Exact + current | IPP-fast + v0.4.0 | IPP-fast + current |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| default（5） | 44.385-44.851 s | 43.446-43.645 s | 12.540-12.622 s | 11.866-12.410 s | 11.042-11.169 s | 9.327-9.571 s |
-| `--threads 1` | 53.088-54.153 s | 53.204-53.730 s | 31.998-32.440 s | 38.212-38.483 s | 22.907-22.995 s | 25.970-26.042 s |
-| `--threads 5` | 44.539-44.661 s | 43.574-43.845 s | 12.608-12.925 s | 12.450-12.679 s | 11.079-11.283 s | 9.266-9.498 s |
-| `--threads 10` | 45.403-45.695 s | 45.684-46.257 s | 10.124-10.497 s | 9.017-10.107 s | 9.401-9.598 s | 7.316-7.508 s |
-| `--threads 20` | 46.392-46.876 s | 46.348-47.059 s | 8.043-8.315 s | 7.605-8.435 s | 7.855-7.944 s | 5.780-5.926 s |
+| default（5） | 45.292-45.719 s | 44.702-45.430 s | 12.872-13.038 s | 12.785-12.980 s | 11.205-11.299 s | 9.502-9.829 s |
+| `--threads 1` | 53.123-55.580 s | 53.702-55.065 s | 32.908-33.664 s | 38.980-40.310 s | 23.385-23.827 s | 26.277-26.968 s |
+| `--threads 5` | 44.828-48.282 s | 44.835-45.263 s | 12.836-13.760 s | 12.232-13.261 s | 11.343-11.472 s | 9.595-9.755 s |
+| `--threads 10` | 45.786-46.675 s | 47.005-47.978 s | 10.098-10.905 s | 9.113-9.737 s | 9.314-9.510 s | 7.306-7.613 s |
+| `--threads 20` | 46.999-48.039 s | 47.145-48.402 s | 8.187-8.412 s | 7.711-8.370 s | 7.765-8.018 s | 5.681-6.051 s |
 
 2026-08-10 に全 90 Release run を同じ batch で更新しました。6 profile の 5 worker setting を
 forward、reverse、mixed の 3 pass で interleave し、以前の Python または IPP-fast timing は
-再利用していません。この candidate は merged main `5268547` を基にしています。測定した
-`PocketFftReal.cs` source は Git blob `b09af4c30dcb2dc48ba37ad517c59c3f86b7696a`、
-merged-main baseline blob は `d8f202d1ba89ae90f0603b2ae49ec18b2afab98d` に固定しています。
-計測後の review では、2 回目の pooled-array rent が失敗した場合の exception-safe cleanup だけを
-追加しました。最終 source blob は `3c11c06b545c4daa280b7a1bd3b8f5f4216ef81c` です。
+再利用していません。この candidate は merged main `73dd014` を基にしています。測定した
+`SosFilter.cs` source は Git blob `c3aac76922ad525884cf26779b2035db76248547`、
+merged-main baseline blob は `766e0926fec7c07bb2bc0a20c0c39824b8f05996` に固定しています。
 documentation と test-only edit は計測対象の decoder binary に含まれません。
 host は Intel Core Ultra 7 265K（20 logical processor）、Windows 11 build 26220、
 .NET SDK/runtime `11.0.100-preview.6.26359.118` です。raw run directory は private
 fixture path を含むため local にのみ保持します。これは local measurement の報告で、
 public independently reproducible benchmark corpus ではありません。
+
+### Full-span reverse を除いた managed float32 SOS second pass
+
+managed Exact float32 forward/backward SOS path は以前、forward filter、work span 全体の
+reverse、再度の forward filter、最後の reverse を順に実行していました。現在の second
+pass は元の span の最後の sample から最初へ進み、結果を同じ index に書き戻します。
+したがって同じ sample sequence と endpoint initial condition を観測しつつ、2 回の full-buffer
+reverse を除去します。1、2、4 section および generic kernel は per-sample section order、
+expression、conversion point、recursive-state update を維持し、FMA、SIMD reassociation、
+precision change は導入していません。
+
+2、4、5 SOS section を対象に、opposite-order の 32K microbenchmark を 21 pair 実行しました。
+baseline/candidate median はそれぞれ 154.540/151.793 microseconds（1.78% lower）、
+195.178/190.025 microseconds（2.64% lower）、278.516/275.540 microseconds（1.07% lower）で、
+全 output SHA-256 が一致しました。40 件の focused DSP test は通常時と全 .NET hardware
+intrinsics 無効時に各 1 回通過し、標準 xUnit v3 execution は合計 80 件です。
+
+interleaved 160-frame Exact `current` 8 pair では candidate が 6 pair で勝ち、paired-median
+wall time は 2.43% 減少、throughput は 2.49% 向上、CPU time は 2.69% 減少しました。
+別の Exact v0.4.0 160-frame pair も一致しました。全 pair で luma、chroma、raw JSON、
+stdout、normalized stderr/log、ordered `fileLoc` が同一です。
+
+1,000-frame Exact `current` pair は 39.242 から 37.908 seconds へ短縮し、wall time は
+3.40%、CPU time は 330.656 から 310.141 seconds へ 6.20% 減少しました。baseline の
+first/final-third working-set median は 385.7/387.7 MiB、peak 391.3 MiB、candidate は
+380.9/384.2 MiB、peak 387.8 MiB です。これはこの gate で bounded behavior を示すもので、
+一般的な memory reduction は主張しません。6-run thread gate は `--threads 0`、default-five、
+`1`、`5`、`10`、`20` を対象とし、全 mode の 7 compatibility surface が完全一致しました。
 
 ### 入力を保持する real FFT first pass
 
