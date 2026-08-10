@@ -157,6 +157,212 @@ public sealed class PocketFftMixedRadixCompatibilityTests
             $"Warm multipass FFT allocated {allocated:N0} bytes.");
     }
 
+    [Theory(DisplayName = "Large complex FFT matches frozen second-pass baselines")]
+    [InlineData(
+        11_025,
+        "4141ABD046B5827B5BCF8BDE2DA8BF4607A21F166E41AD90EE030E04BFF31773",
+        "5074A1AAF86DDFD514DA05B85442DA9C08346A0D4C6CF56D897D7AF54749626D")]
+    [InlineData(
+        119_790,
+        "B0D7C2AB6BBA4F5B7225175350653EBC41F7E607EDAADAA511BAD0FE0657DB0E",
+        "CD6AEB28AF3E18C0797BF37350CB5487C65D4946C19497B7FC04233058E1467D")]
+    [InlineData(
+        131_072,
+        "745A0F9C7F13C75D5064AC681ADF5FD6BAEC5F482FDE3C14AC60C8AAF22DAF3A",
+        "A8D39BD863DB639A4A3896E40B4A1756306B7836403B7238B749C2CE13CF2DE3")]
+    public void LargeComplexFftMatchesFrozenSecondPassBaselines(
+        int length,
+        string expectedForwardSha256,
+        string expectedBackwardSha256)
+    {
+        float[] values = DeterministicInput(2 * length);
+        Complex32[] input = Enumerable.Range(0, length)
+            .Select(index => new Complex32(
+                values[2 * index],
+                values[(2 * index) + 1]))
+            .ToArray();
+
+        foreach (int workerThreads in new[] { 1, 20 })
+        {
+            Complex32[] forward = PocketFftComplex32.ForwardAnyLengthDuccOwned(
+                (Complex32[])input.Clone(),
+                workerThreads);
+            Complex32[] backward = PocketFftComplex32.BackwardAnyLengthDuccOwned(
+                (Complex32[])forward.Clone(),
+                workerThreads);
+
+            Assert.Equal(
+                expectedForwardSha256,
+                Sha256(MemoryMarshal.AsBytes(forward.AsSpan())));
+            Assert.Equal(
+                expectedBackwardSha256,
+                Sha256(MemoryMarshal.AsBytes(backward.AsSpan())));
+        }
+    }
+
+    [Fact(DisplayName = "Large complex FFT storage paths preserve special-value bits")]
+    public void LargeComplexFftStoragePathsPreserveSpecialValueBits()
+    {
+        const int Length = 11_025;
+        const string ExpectedForwardSha256 =
+            "55057746D544F537A77791E102D68A503B505D0627304CCA59A07DFB9BB0A50E";
+        const string ExpectedBackwardSha256 =
+            "CE20534B78F85A0596C0E16BF6CA76393360D302EB1FD22D7373350ECE343A2F";
+        Complex32[] finiteInput = BuildBitPatternInput(
+            Length,
+            [
+                0x00000000,
+                0x80000000,
+                0x00000001,
+                0x80000001,
+                0x00800000,
+                0x80800000
+            ]);
+        Complex32[] nonFiniteInput = BuildBitPatternInput(
+            Length,
+            [
+                0x00000000,
+                0x80000000,
+                0x7F7FFFFF,
+                0xFF7FFFFF,
+                0x7F800000,
+                0xFF800000,
+                0x7FC00001,
+                0xFFC12345
+            ]);
+
+        foreach (int workerThreads in new[] { 1, 20 })
+        {
+            Complex32[] preservingForward =
+                PocketFftComplex32.ForwardAnyLengthDucc(
+                    finiteInput,
+                    workerThreads);
+            AssertTransformHashes(
+                $"preserving-{workerThreads}",
+                preservingForward,
+                PocketFftComplex32.BackwardAnyLengthDucc(
+                    preservingForward,
+                    workerThreads),
+                ExpectedForwardSha256,
+                ExpectedBackwardSha256);
+
+            Complex32[] ownedForward =
+                PocketFftComplex32.ForwardAnyLengthDuccOwned(
+                    (Complex32[])finiteInput.Clone(),
+                    workerThreads);
+            AssertTransformHashes(
+                $"owned-{workerThreads}",
+                ownedForward,
+                PocketFftComplex32.BackwardAnyLengthDuccOwned(
+                    (Complex32[])ownedForward.Clone(),
+                    workerThreads),
+                ExpectedForwardSha256,
+                ExpectedBackwardSha256);
+
+            var forwardScratch = new Complex32[Length];
+            Complex32[] scratchForward =
+                PocketFftComplex32.ForwardAnyLengthDuccOwned(
+                    (Complex32[])finiteInput.Clone(),
+                    forwardScratch,
+                    workerThreads);
+            var backwardScratch = new Complex32[Length];
+            AssertTransformHashes(
+                $"scratch-{workerThreads}",
+                scratchForward,
+                PocketFftComplex32.BackwardAnyLengthDuccOwned(
+                    (Complex32[])scratchForward.Clone(),
+                    backwardScratch,
+                    workerThreads),
+                ExpectedForwardSha256,
+                ExpectedBackwardSha256);
+
+            Complex32[] nonFiniteForward =
+                PocketFftComplex32.ForwardAnyLengthDucc(
+                    nonFiniteInput,
+                    workerThreads);
+            Complex32[] nonFiniteBackward =
+                PocketFftComplex32.BackwardAnyLengthDucc(
+                    nonFiniteForward,
+                    workerThreads);
+            string nonFiniteForwardSha256 =
+                Sha256(MemoryMarshal.AsBytes(nonFiniteForward.AsSpan()));
+            string nonFiniteBackwardSha256 =
+                Sha256(MemoryMarshal.AsBytes(nonFiniteBackward.AsSpan()));
+
+            Complex32[] nonFiniteOwnedForward =
+                PocketFftComplex32.ForwardAnyLengthDuccOwned(
+                    (Complex32[])nonFiniteInput.Clone(),
+                    workerThreads);
+            AssertTransformHashes(
+                $"nonfinite-owned-{workerThreads}",
+                nonFiniteOwnedForward,
+                PocketFftComplex32.BackwardAnyLengthDuccOwned(
+                    (Complex32[])nonFiniteOwnedForward.Clone(),
+                    workerThreads),
+                nonFiniteForwardSha256,
+                nonFiniteBackwardSha256);
+
+            var nonFiniteForwardScratch = new Complex32[Length];
+            Complex32[] nonFiniteScratchForward =
+                PocketFftComplex32.ForwardAnyLengthDuccOwned(
+                    (Complex32[])nonFiniteInput.Clone(),
+                    nonFiniteForwardScratch,
+                    workerThreads);
+            var nonFiniteBackwardScratch = new Complex32[Length];
+            AssertTransformHashes(
+                $"nonfinite-scratch-{workerThreads}",
+                nonFiniteScratchForward,
+                PocketFftComplex32.BackwardAnyLengthDuccOwned(
+                    (Complex32[])nonFiniteScratchForward.Clone(),
+                    nonFiniteBackwardScratch,
+                    workerThreads),
+                nonFiniteForwardSha256,
+                nonFiniteBackwardSha256);
+        }
+    }
+
+    private static Complex32[] BuildBitPatternInput(
+        int length,
+        uint[] patterns)
+    {
+        var input = new Complex32[length];
+        for (int index = 0; index < input.Length; index++)
+        {
+            input[index] = new Complex32(
+                BitConverter.Int32BitsToSingle(
+                    unchecked((int)patterns[(2 * index) % patterns.Length])),
+                BitConverter.Int32BitsToSingle(
+                    unchecked((int)patterns[((2 * index) + 1) % patterns.Length])));
+        }
+
+        return input;
+    }
+
+    private static void AssertTransformHashes(
+        string label,
+        Complex32[] forward,
+        Complex32[] backward,
+        string expectedForwardSha256,
+        string expectedBackwardSha256)
+    {
+        string actualForwardSha256 =
+            Sha256(MemoryMarshal.AsBytes(forward.AsSpan()));
+        string actualBackwardSha256 =
+            Sha256(MemoryMarshal.AsBytes(backward.AsSpan()));
+        Assert.True(
+            string.Equals(
+                expectedForwardSha256,
+                actualForwardSha256,
+                StringComparison.Ordinal),
+            $"{label} forward hash was {actualForwardSha256}.");
+        Assert.True(
+            string.Equals(
+                expectedBackwardSha256,
+                actualBackwardSha256,
+                StringComparison.Ordinal),
+            $"{label} backward hash was {actualBackwardSha256}.");
+    }
+
     [Theory(DisplayName = "Real FFT plan threshold matches SciPy")]
     [InlineData(512, "2D112631FB98F4C92AA42FB93FC7356FDBEE1F4C688CED08D27E6147E3456B40")]
     [InlineData(1_024, "39C3C9BE39CC952600AFDB1ECF002BE654FEDA2A207C3E5F0D6DA943E7644F3B")]

@@ -371,24 +371,16 @@ internal static class PocketFftComplex32
                         {
                             MaxDegreeOfParallelism = parallelWorkers
                         },
-                        () => ArrayPool<Complex32>.Shared.Rent(packetLength),
-                        (n, _, packet) =>
-                        {
-                            TransformSecondPassPacket(
-                                source,
-                                destination,
-                                n,
-                                l1,
-                                packetLength,
-                                packetPlan,
-                                packet.AsSpan(0, packetLength));
-                            return packet;
-                        },
-                        packet => ArrayPool<Complex32>.Shared.Return(packet));
+                        n => TransformSecondPassPacket(
+                            source,
+                            destination,
+                            n,
+                            l1,
+                            packetLength,
+                            packetPlan));
                 }
                 else
                 {
-                    var packet = new Complex32[packetLength];
                     for (int n = 0; n < l1; n++)
                     {
                         TransformSecondPassPacket(
@@ -397,8 +389,7 @@ internal static class PocketFftComplex32
                             n,
                             l1,
                             packetLength,
-                            packetPlan,
-                            packet);
+                            packetPlan);
                     }
                 }
 
@@ -474,11 +465,10 @@ internal static class PocketFftComplex32
         int packetIndex,
         int packetStride,
         int packetLength,
-        Plan packetPlan,
-        Span<Complex32> packet)
+        Plan packetPlan)
     {
         int inputOffset = packetIndex * packetLength;
-        source.AsSpan(inputOffset, packetLength).CopyTo(packet);
+        Span<Complex32> packet = source.AsSpan(inputOffset, packetLength);
         packetPlan.TransformInPlace(packet);
         for (int m = 0; m < packetLength; m++)
         {
