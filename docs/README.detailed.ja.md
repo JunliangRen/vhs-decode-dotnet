@@ -2843,6 +2843,49 @@ pinned fitter test 3 件は通常実行と AVX disabled の両方で pass し、
 homepage table は前回の complete five-path matrix のままです。この異なる
 1,000-frame window を代入すると startup-inclusive ratio の比較可能性が失われるためです。
 
+### Bounded sync と chroma phase container
+
+sync analyzer は、既知の input/slice bound から 4 個の
+`List<ClassifiedSyncPulse>`/`List<double>` capacity を設定するようになりました。
+pulse order、filter、VBlank state、数値式は変更していません。initial capacity は
+65,536 entry を上限とし、malformed high-noise input が全 raw pulse 数に比例した
+classified-pulse backing array を先に確保することを防ぎます。実際に大きい accepted
+result は通常どおり grow します。既存の focused xUnit v3 case は 100 万 rejected pulse
+を入力し、classification を 2 MiB 未満、必要な raw-pulse copy を含む refinement を
+12 MiB 未満に gate します。`current` chroma phase
+builder は final `ChromaPhaseLine[]` を 1 回だけ確保し、独立な parallel prefix をその
+配列へ直接書いた後、元の ordered state machine が同じ配列を継続して埋めます。以前の
+prefix array、List backing array、最後の `ToArray()` copy はなくなりました。parallel
+probe の exception slot は実際に例外が起きた場合だけ作成され、最小 input-line の例外を
+再送出する順序も維持します。
+
+10,000 iteration の sync microbenchmark 7 組では、median wall time が 264.306 から
+251.985 ms（4.66%）へ、allocation が 739,600,040 から 401,680,040 bytes
+（45.69%）へ減少し、全 run の checksum は 1 種類でした。順序を入れ替えた 1,000-frame
+Exact `current --threads 20` 3 組は scheduling noise が大きいため、end-to-end throughput
+は neutral と分類します。chroma phase の 100,000-call microbenchmark 5 組では median
+allocation が 6,547,233,136 から 5,881,975,184 bytes（10.16%）へ減り、candidate は
+3/5 組で勝ち、paired median wall-time は 1.23% 低下しました。
+
+順序を逆にした 1,000-frame chroma pair 2 組は両方 candidate が勝ち、combined wall
+time は 79.645 から 79.056 秒（0.74% 低下）でした。combined CPU time は 0.43%
+増えたため CPU-efficiency claim は行いません。全 long run で luma、chroma、raw JSON、
+stdout、normalized stderr/log、2,000 個の ordered `fileLoc` が一致しました。補助的な
+12-second fixed-duration steady trace では sampled allocation amount が 247,776,232 から
+228,539,336 bytes（7.76%）へ減り、classified-pulse `AddWithResize` leaf も主要 site
+から消えました。ただし trace window は同一 field count に正規化していないため、この
+割合を complete-pipeline allocation claim には使いません。
+
+より広い sync scratch-workspace 実験は microbenchmark allocation を 36.62% 減らした
+一方、逆順の real pair 2 組で 1.02% と 1.74% 遅くなったため、完全に revert しました。
+allocation だけを良く見せるために throughput を交換していません。今回の小幅な
+same-revision 結果は full 5-profile refresh ではないため、homepage の Python comparison
+matrix は変更しません。
+
+final Release build は warning/error ともに 0 でした。標準の xUnit v3/
+Microsoft.Testing.Platform run は全 1,401 test を検出し、1,397 pass、0 fail、IPP runtime
+依存の 4 case のみ explicit skip でした。
+
 </details>
 
 <!-- SECTION: build -->

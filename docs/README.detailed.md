@@ -2985,6 +2985,52 @@ at its last complete five-path matrix refresh because substituting this
 different 1,000-frame window would make its startup-inclusive ratios
 incomparable.
 
+### Bounded sync and chroma phase containers
+
+The sync analyzer now seeds four `List<ClassifiedSyncPulse>`/`List<double>`
+instances from already known input or slice bounds. Pulse order, filtering,
+VBlank state, and every numerical expression are unchanged. Initial capacity is
+capped at 65,536 entries, so malformed high-noise input cannot reserve an
+unbounded classified-pulse backing array up front; a genuinely larger accepted
+result grows normally. The existing focused xUnit v3 case now feeds one million
+rejected pulses and gates classification below 2 MiB and refinement, including
+its required raw-pulse copy, below 12 MiB. The `current`
+chroma phase builder now allocates its final `ChromaPhaseLine[]` once and fills
+the independent prefix directly in parallel before the original ordered state
+machine continues in that same array. The former prefix array, list backing
+array, and final `ToArray()` copy are gone. Parallel probe exception slots are
+created only after an exception and still rethrow the lowest input-line failure.
+
+In seven alternating 10,000-iteration sync microbenchmark pairs, median wall
+time fell from 264.306 to 251.985 ms (4.66%) and allocation from 739,600,040 to
+401,680,040 bytes (45.69%), with one checksum in all runs. Three reordered
+1,000-frame Exact `current --threads 20` pairs were scheduling-noisy and are
+classified as end-to-end throughput-neutral. The chroma phase microbenchmark's
+five 100,000-call pairs reduced median allocation from 6,547,233,136 to
+5,881,975,184 bytes (10.16%); three pairs favored the candidate and the paired
+median wall-time change was 1.23% lower.
+
+Two opposite-order 1,000-frame chroma pairs both favored the candidate. Combined
+wall time moved from 79.645 to 79.056 seconds (0.74% lower), while combined CPU
+time rose 0.43%, so no CPU-efficiency claim is made. Every long run matched luma,
+chroma, raw JSON, stdout, normalized stderr/log, and all 2,000 ordered `fileLoc`
+values. A supporting fixed-duration 12-second steady trace reduced sampled
+allocation amount from 247,776,232 to 228,539,336 bytes (7.76%) and removed the
+former classified-pulse `AddWithResize` leaf from the leading sites; because the
+trace windows were not normalized to an identical field count, that percentage
+is not presented as a complete-pipeline allocation claim.
+
+A broader sync scratch-workspace experiment was rejected despite 36.62% lower
+microbenchmark allocation: its two opposite-order real pairs were 1.02% and
+1.74% slower. That code was fully reverted rather than trading throughput for a
+better allocation-only number. The public Python comparison matrix remains
+unchanged because these modest same-revision results do not constitute a full
+five-profile refresh.
+
+The final Release build completed with zero warnings and errors. The standard
+xUnit v3/Microsoft.Testing.Platform run discovered all 1,401 tests: 1,397 passed,
+none failed, and four IPP-runtime-dependent cases were explicitly skipped.
+
 </details>
 
 <!-- SECTION: build -->

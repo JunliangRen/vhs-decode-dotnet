@@ -3577,7 +3577,8 @@ public static class VhsChromaDecoder
             trackRotation = startingIndex;
         }
 
-        ChromaPhaseLine[]? parallelPrefix = TryProbePhasePrefixParallel(
+        var phaseSequence = new ChromaPhaseLine[Math.Max(0, lastLine - lineOffset)];
+        int parallelPrefixLength = FillPhasePrefixParallel(
             lineLocations,
             lineOffset,
             inputLineLength,
@@ -3585,17 +3586,17 @@ public static class VhsChromaDecoder
             burstProbe,
             doPhaseRotationCheck ? rotationCheckStartLine : lastLine,
             trackRotation,
-            workerThreads);
-        var phaseSequence = new List<ChromaPhaseLine>(Math.Max(0, lastLine - lineOffset));
+            workerThreads,
+            phaseSequence);
         int currentPhase = 0;
         ChromaPhaseLine? nextLine = null;
         for (int lineNumber = lineOffset; lineNumber < lastLine; lineNumber++)
         {
             ChromaPhaseLine currentLine;
             int prefixIndex = lineNumber - lineOffset;
-            if (parallelPrefix is not null && prefixIndex < parallelPrefix.Length)
+            if (prefixIndex < parallelPrefixLength)
             {
-                currentLine = parallelPrefix[prefixIndex];
+                currentLine = phaseSequence[prefixIndex];
                 currentPhase = currentLine.PhaseRotation;
             }
             else if (nextLine is not null)
@@ -3626,9 +3627,9 @@ public static class VhsChromaDecoder
                     burstProbe);
                 double comparisonBurst = IsNtsc(colorSystem)
                     ? currentLine.BurstPhaseDegrees
-                    : phaseSequence.Count == 0
+                    : prefixIndex == 0
                         ? currentLine.BurstPhaseDegrees
-                        : phaseSequence[^1].BurstPhaseDegrees;
+                        : phaseSequence[prefixIndex - 1].BurstPhaseDegrees;
                 double phaseDeltaQuadrant = Math.Abs(SignedPhaseDeltaDegrees(probedNextLine.BurstPhaseDegrees, comparisonBurst));
                 if (phaseDeltaQuadrant > TrackChangeThresholdDegrees)
                 {
@@ -3641,7 +3642,7 @@ public static class VhsChromaDecoder
                 }
             }
 
-            phaseSequence.Add(currentLine);
+            phaseSequence[prefixIndex] = currentLine;
         }
 
         if (hasRotation && chromaRotationIndex == startingIndex)
@@ -3649,10 +3650,10 @@ public static class VhsChromaDecoder
             chromaRotationIndex = PositiveModulo(chromaRotationIndex + 1, 2);
         }
 
-        return (chromaRotationIndex, phaseSequence.ToArray());
+        return (chromaRotationIndex, phaseSequence);
     }
 
-    private static ChromaPhaseLine[]? TryProbePhasePrefixParallel(
+    private static int FillPhasePrefixParallel(
         IReadOnlyList<double> lineLocations,
         int lineOffset,
         int inputLineLength,
@@ -3660,7 +3661,8 @@ public static class VhsChromaDecoder
         ChromaBurstProbe burstProbe,
         int prefixEnd,
         int trackRotation,
-        int workerThreads)
+        int workerThreads,
+        ChromaPhaseLine[] destination)
     {
         int prefixLength = Math.Clamp(prefixEnd, lineOffset, lastLine) - lineOffset;
         int workerCount = Math.Min(
@@ -3668,11 +3670,10 @@ public static class VhsChromaDecoder
             MaximumBurstProbeWorkers);
         if (workerCount <= 1 || prefixLength < workerCount * 2)
         {
-            return null;
+            return 0;
         }
 
-        var prefix = new ChromaPhaseLine[prefixLength];
-        var failures = new ExceptionDispatchInfo?[prefixLength];
+        ExceptionDispatchInfo?[]? failures = null;
         Parallel.For(
             0,
             workerCount,
@@ -3689,7 +3690,7 @@ public static class VhsChromaDecoder
                         int phaseRotation = PositiveModulo(
                             trackRotation * (prefixIndex + 1),
                             4);
-                        prefix[prefixIndex] = ProbePhaseLine(
+                        destination[prefixIndex] = ProbePhaseLine(
                             lineNumber,
                             phaseRotation,
                             ComputeLineScale(
@@ -3701,17 +3702,26 @@ public static class VhsChromaDecoder
                     }
                     catch (Exception exception)
                     {
-                        failures[prefixIndex] = ExceptionDispatchInfo.Capture(exception);
+                        ExceptionDispatchInfo?[] failureBuffer = Volatile.Read(ref failures)
+                            ?? Interlocked.CompareExchange(
+                                ref failures,
+                                new ExceptionDispatchInfo?[prefixLength],
+                                null)
+                            ?? failures;
+                        failureBuffer[prefixIndex] = ExceptionDispatchInfo.Capture(exception);
                     }
                 }
             });
 
-        for (int prefixIndex = 0; prefixIndex < failures.Length; prefixIndex++)
+        if (failures is not null)
         {
-            failures[prefixIndex]?.Throw();
+            for (int prefixIndex = 0; prefixIndex < failures.Length; prefixIndex++)
+            {
+                failures[prefixIndex]?.Throw();
+            }
         }
 
-        return prefix;
+        return prefixLength;
     }
 
     private static ChromaPhaseLine ProbePhaseLine(

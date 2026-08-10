@@ -5,8 +5,8 @@ namespace VHSDecode.Tests;
 
 public sealed class PulseDetectionReuseTests
 {
-    [Fact(DisplayName = "Classified sync pulses retain values without per-pulse object allocation")]
-    public void ClassifiedSyncPulsesAreImmutableValues()
+    [Fact(DisplayName = "Classified sync pulses retain values with bounded list allocation")]
+    public void ClassifiedSyncPulsesAreImmutableValuesWithBoundedListAllocation()
     {
         var pulse = new ClassifiedSyncPulse(
             SyncPulseKind.EqualizingSecond,
@@ -17,6 +17,39 @@ public sealed class PulseDetectionReuseTests
         Assert.Equal(SyncPulseKind.EqualizingSecond, pulse.Kind);
         Assert.Equal(new Pulse(123, 45), pulse.Pulse);
         Assert.True(pulse.InOrder);
+
+        const int PulseCount = 1_000_000;
+        Pulse[] noisePulses = Enumerable.Range(0, PulseCount)
+            .Select(static index => new Pulse(index * 2, 1_000))
+            .ToArray();
+        var analyzer = new SyncAnalyzer(
+            sampleRateHz: 1_000_000.0,
+            linePeriodUs: 100.0,
+            hsyncPulseUs: 10.0,
+            equalizingPulseUs: 5.0,
+            vsyncPulseUs: 20.0);
+        SyncTiming timing = analyzer.EstimateTiming([]);
+        _ = analyzer.ClassifyPulses([], timing);
+        _ = analyzer.RefinePulses([], timing);
+
+        long classificationStart = GC.GetAllocatedBytesForCurrentThread();
+        IReadOnlyList<ClassifiedSyncPulse> classified = analyzer.ClassifyPulses(
+            noisePulses,
+            timing);
+        long classificationAllocation = GC.GetAllocatedBytesForCurrentThread()
+            - classificationStart;
+
+        long refinementStart = GC.GetAllocatedBytesForCurrentThread();
+        IReadOnlyList<ClassifiedSyncPulse> refined = analyzer.RefinePulses(
+            noisePulses,
+            timing);
+        long refinementAllocation = GC.GetAllocatedBytesForCurrentThread()
+            - refinementStart;
+
+        Assert.Empty(classified);
+        Assert.Empty(refined);
+        Assert.InRange(classificationAllocation, 0, 2 * 1024 * 1024);
+        Assert.InRange(refinementAllocation, 0, 12 * 1024 * 1024);
     }
 
     [Fact(DisplayName = "Reusable pulse detection matches the v0.4.0 scalar state machine")]

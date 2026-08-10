@@ -30,6 +30,8 @@ public sealed record LineLocationResult(double[] Locations, bool[] Filled);
 
 public sealed class SyncAnalyzer
 {
+    private const int MaximumInitialSyncListCapacity = 65_536;
+
     public SyncAnalyzer(
         double sampleRateHz,
         double linePeriodUs,
@@ -165,7 +167,7 @@ public sealed class SyncAnalyzer
 
     public IReadOnlyList<ClassifiedSyncPulse> ClassifyPulses(IReadOnlyList<Pulse> rawPulses, SyncTiming timing)
     {
-        var classified = new List<ClassifiedSyncPulse>();
+        var classified = new List<ClassifiedSyncPulse>(BoundedInitialCapacity(rawPulses.Count));
         foreach (Pulse pulse in rawPulses)
         {
             SyncPulseKind? kind = ClassifyPulse(pulse, timing);
@@ -207,7 +209,7 @@ public sealed class SyncAnalyzer
         out Pulse[] updatedRawPulses)
     {
         Pulse[] workingPulses = rawPulses.ToArray();
-        var refined = new List<ClassifiedSyncPulse>();
+        var refined = new List<ClassifiedSyncPulse>(BoundedInitialCapacity(workingPulses.Length));
         int index = 0;
         while (index < workingPulses.Length)
         {
@@ -302,7 +304,7 @@ public sealed class SyncAnalyzer
         int start,
         int endExclusive)
     {
-        var valid = new List<ClassifiedSyncPulse>();
+        var valid = new List<ClassifiedSyncPulse>(BoundedInitialCapacity(endExclusive - start));
         SyncPulseKind? state = null;
         double stateEnd = 0.0;
         double? stateLength = null;
@@ -473,7 +475,7 @@ public sealed class SyncAnalyzer
             runLength = currentLength;
         }
 
-        var lineLengths = new List<double>();
+        var lineLengths = new List<double>(BoundedInitialCapacity(runLength - 1));
         for (int i = runStart + 1; i < runStart + runLength; i++)
         {
             double lineLength = validPulses[i].Pulse.Start - validPulses[i - 1].Pulse.Start;
@@ -709,4 +711,7 @@ public sealed class SyncAnalyzer
 
     private static double Median(List<double> values)
         => NumpyReduction.MedianFloat64(values.ToArray());
+
+    private static int BoundedInitialCapacity(int count)
+        => Math.Clamp(count, 0, MaximumInitialSyncListCapacity);
 }

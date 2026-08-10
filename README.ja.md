@@ -116,7 +116,9 @@ reference run は、同じ host と fixture で行った直前の direct refresh
 順で、default は **5 workers** です。3-run range は
 [詳細な性能リファレンス](docs/README.detailed.ja.md#パフォーマンス)にあります。以前の
 40-frame table は、特に Python の startup cost を大きく反映していたため、長い window
-で speedup が低くなっても decoder regression を意味しません。
+で speedup が低くなっても decoder regression を意味しません。ratio は分母となる Python
+時間でも変動するため、.NET regression の判断には古い表の倍率ではなく、同じ fixture と
+範囲による .NET revision A/B を使用します。
 
 Exact backend は、FMA や point 内の演算順序変更を使わず、AVX block ごとに独立した
 real-FFT radix-4 point を 2 つ処理します。更新後の v0.4.0 median は前の表より
