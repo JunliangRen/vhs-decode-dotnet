@@ -2,7 +2,7 @@
 
 **[English](README.md)** | [简体中文](README.zh-CN.md) | [日本語](README.ja.md)
 
-<!-- README_SYNC: 2026-08-09.01 -->
+<!-- README_SYNC: 2026-08-10.02 -->
 
 A .NET 11 rewrite of the decode-facing parts of
 [`oyvindln/vhs-decode`](https://github.com/oyvindln/vhs-decode), targeting
@@ -38,7 +38,7 @@ evidence, and remaining gaps.
   EIAJ, and supported PAL/NTSC variants.
 - TBC utility tools, the double-click GUI, and developer plotting windows are
   intentionally out of scope.
-- The Visual Studio 2026 `.slnx` solution has **1,403** standard xUnit v3 tests
+- The Visual Studio 2026 `.slnx` solution has **1,416** standard xUnit v3 tests
   that are visible in Test Explorer and runnable with `dotnet test`.
 
 <!-- SECTION: start -->
@@ -100,36 +100,43 @@ for compatibility-sensitive work.
 This is a startup-inclusive 160-frame snapshot on one fixed private local
 40 MHz PAL VHS `.ldf` fixture; the filename is intentionally not published.
 All 90 Python and .NET Release runs were measured together in forward, reverse,
-and mixed passes on this candidate, based on merged main `0761c1c`. The measured
+and mixed passes on this candidate, based on merged main `0306db8`. The measured
 production blob and three-run ranges are pinned in the detailed notes.
 Compatibility is evaluated separately from speed.
 
 <!-- LATEST_PERFORMANCE_BEGIN -->
 | CLI mode (workers) | Python v0.4.0 | Python PR341 | Exact + v0.4.0 | Exact + current | IPP-fast + v0.4.0 | IPP-fast + current |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| default (5) | 47.326 s | 53.288 s | 13.304 s / 3.557x | 13.528 s / 3.939x | 11.635 s / 4.068x | 9.778 s / 5.450x |
-| `--threads 1` | 56.571 s | 56.267 s | 34.682 s / 1.631x | 41.016 s / 1.372x | 24.563 s / 2.303x | 27.732 s / 2.029x |
-| `--threads 5` | 50.395 s | 52.484 s | 13.551 s / 3.719x | 13.015 s / 4.033x | 11.616 s / 4.338x | 9.744 s / 5.387x |
-| `--threads 10` | 48.775 s | 51.376 s | 10.825 s / 4.506x | 10.068 s / 5.103x | 9.674 s / 5.042x | 7.884 s / 6.516x |
-| `--threads 20` | 50.079 s | 51.327 s | 8.690 s / 5.763x | 8.091 s / 6.344x | 8.224 s / 6.089x | 6.045 s / 8.490x |
+| default (5) | 44.296 s | 43.805 s | 12.763 s / 3.471x | 11.858 s / 3.694x | 11.251 s / 3.937x | 9.487 s / 4.617x |
+| `--threads 1` | 53.404 s | 53.632 s | 32.537 s / 1.641x | 38.751 s / 1.384x | 22.896 s / 2.332x | 26.221 s / 2.045x |
+| `--threads 5` | 44.283 s | 43.593 s | 12.600 s / 3.514x | 12.468 s / 3.496x | 11.196 s / 3.955x | 9.393 s / 4.641x |
+| `--threads 10` | 45.330 s | 45.943 s | 9.941 s / 4.560x | 9.959 s / 4.613x | 9.385 s / 4.830x | 7.611 s / 6.036x |
+| `--threads 20` | 46.551 s | 46.697 s | 8.336 s / 5.584x | 7.608 s / 6.138x | 8.084 s / 5.759x | 5.806 s / 8.043x |
 <!-- LATEST_PERFORMANCE_END -->
-<!-- LATEST_PERFORMANCE_RUNS: full-interleaved-matrix-runs=90 dotnet-matrix-runs=60 python-matrix-runs=30 repeats=3 complex-real-staging-microbench-pairs=8 complex-real-staging-short-ab-pairs=4 complex-real-staging-long-ab-pairs=2 complex-real-staging-thread-gate-runs=24 hwintrinsic-variants=4 python-v040-runs=15 python-v040-hashes=15 python-pr341-runs=15 python-pr341-hashes=1 -->
+<!-- LATEST_PERFORMANCE_RUNS: full-interleaved-matrix-runs=90 dotnet-matrix-runs=60 python-matrix-runs=30 repeats=3 fused-spectrum-microbench-pairs=12 fused-spectrum-short-ab-pairs=8 fused-spectrum-long-ab-pairs=2 fused-spectrum-thread-gate-runs=12 fused-spectrum-scalar-runs=2 python-v040-runs=15 python-v040-hashes=15 python-pr341-runs=15 python-pr341-hashes=1 -->
 
 Each .NET cell shows median wall time and speedup versus its profile-matched
 Python column. The default is **5 workers**; three-run ranges are in the
 [detailed performance notes](docs/README.detailed.md#performance). Every column
 was measured in the same interleaved batch, but a ratio still moves when its
 Python denominator moves. Same-fixture .NET revision A/B runs, not old ratio
-cells, are therefore used to judge .NET regressions.
+cells, are therefore used to judge .NET regressions. Every .NET median in this
+refresh is lower than in the previous table; several displayed speedups still
+fell because the corresponding Python median fell by a larger fraction.
+For example, default IPP-fast/current improved from 9.778 s to 9.487 s while
+its Python median moved from 53.288 s to 43.805 s, so the ratio moved from
+5.450x to 4.617x despite the lower .NET wall time.
 
-The managed complex FFT real-input entry point now stages doubles directly into
-its thread-local PocketFFT workspace instead of filling a `Complex` destination
-that would immediately be copied again. FFT factors, butterfly order,
-normalization, and output conversion are unchanged. Eight opposite-order 32K
-microbenchmark pairs improved the kernel median by 3.14%. Two opposite-order
-1,000-frame pairs reduced median wall time by 1.45% and median CPU time by 1.72%;
-sampled memory remained bounded. The 24-run backend/profile/thread gate and four
-hardware-intrinsic variants matched every captured output and log surface.
+Exact VHS now applies its two complex RF filters and Hilbert real scale in one
+ordered spectrum traversal. The binary64 expressions and stage order are
+unchanged; non-finite and aliased inputs retain the old scalar/sequential
+behavior. Twelve alternating 1M-element microbenchmark pairs improved this
+kernel from 4.280 to 2.976 ms (1.438x). Four 400-frame pairs improved the
+end-to-end median from 16.50 to 16.33 seconds; profile-matched 1,000-frame runs
+observed 0.65% lower wall time for `current` and 2.10% lower wall time for
+v0.4.0, one pair each rather than a sustained claim. Every artifact and log
+surface matched across the A/B, six thread modes, and fully scalar fallback;
+working set remained bounded with small first-to-final-third variation.
 
 Merged Python PR341 was deterministic here; Python v0.4.0 produced 15 distinct
 luma, chroma, JSON, and log hashes in 15 runs, so the strict oracle remains
@@ -172,7 +179,7 @@ The pinned SDK is .NET `11.0.100-preview.6.26359.118`.
 dotnet restore VHSDecodeDotNet.slnx
 dotnet build VHSDecodeDotNet.slnx -c Release --no-restore
 dotnet test --solution VHSDecodeDotNet.slnx -c Release `
-  --no-build --no-restore --minimum-expected-tests 1403
+  --no-build --no-restore --minimum-expected-tests 1416
 ```
 
 Open `VHSDecodeDotNet.slnx` in Visual Studio 2026 to build, debug, and run the

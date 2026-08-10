@@ -1,4 +1,5 @@
 using System.Numerics;
+using System.Runtime.InteropServices;
 using VHSDecode.Core.Dsp;
 using Xunit;
 
@@ -229,6 +230,147 @@ public sealed class NumpyComplexMultiplyTests
             () => NumpyComplexMultiply.ApplyRealInPlace(values, multipliers.AsSpan(1)));
     }
 
+    [Theory(DisplayName = "Fused spectrum multiply matches the three NumPy passes bit for bit")]
+    [InlineData(0)]
+    [InlineData(1)]
+    [InlineData(2)]
+    [InlineData(3)]
+    [InlineData(4)]
+    [InlineData(5)]
+    [InlineData(7)]
+    [InlineData(8)]
+    [InlineData(32_771)]
+    public void FusedSpectrumMultiplyMatchesThreeNumpyPasses(int length)
+    {
+        Complex[] actual = BuildValues(length, 0xA24BAED4963EE407UL);
+        Complex[] first = BuildValues(length, 0x9FB21C651E98DF25UL);
+        Complex[] second = BuildValues(length, 0xD1B54A32D192ED03UL);
+        double[] real = BuildRealValues(length, 0x94D049BB133111EBUL);
+        Complex[] expected = actual.ToArray();
+        NumpyComplexMultiply.ApplyInPlace(expected, first);
+        NumpyComplexMultiply.ApplyInPlace(expected, second);
+        NumpyComplexMultiply.ApplyRealInPlace(expected, real);
+
+        NumpyComplexMultiply.ApplyTwoComplexAndRealInPlace(actual, first, second, real);
+
+        AssertComplexBitsEqual(expected, actual);
+    }
+
+    [Fact(DisplayName = "Fused spectrum multiply preserves sequential special-value semantics")]
+    public void FusedSpectrumMultiplyPreservesSequentialSpecialValueSemantics()
+    {
+        double[] components =
+        [
+            0.0,
+            -0.0,
+            double.Epsilon,
+            -double.Epsilon,
+            1.0,
+            -1.0,
+            double.MaxValue,
+            -double.MaxValue,
+            double.PositiveInfinity,
+            double.NegativeInfinity,
+            BitConverter.UInt64BitsToDouble(0x7FF8000000000123UL),
+            BitConverter.UInt64BitsToDouble(0xFFF8000000000456UL)
+        ];
+        int length = components.Length * components.Length;
+        var actual = new Complex[length];
+        var first = new Complex[length];
+        var second = new Complex[length];
+        var real = new double[length];
+        int index = 0;
+        foreach (double realComponent in components)
+        {
+            foreach (double imaginaryComponent in components)
+            {
+                actual[index] = new Complex(realComponent, imaginaryComponent);
+                first[index] = new Complex(
+                    components[(index * 5 + 1) % components.Length],
+                    components[(index * 7 + 3) % components.Length]);
+                second[index] = new Complex(
+                    components[(index * 11 + 5) % components.Length],
+                    components[(index * 13 + 7) % components.Length]);
+                real[index] = components[(index * 17 + 9) % components.Length];
+                index++;
+            }
+        }
+
+        Complex[] expected = actual.ToArray();
+        NumpyComplexMultiply.ApplyInPlace(expected, first);
+        NumpyComplexMultiply.ApplyInPlace(expected, second);
+        NumpyComplexMultiply.ApplyRealInPlace(expected, real);
+
+        NumpyComplexMultiply.ApplyTwoComplexAndRealInPlace(actual, first, second, real);
+
+        AssertComplexBitsEqual(expected, actual);
+    }
+
+    [Fact(DisplayName = "Fused spectrum multiply validates lengths and does not allocate")]
+    public void FusedSpectrumMultiplyValidatesLengthsAndDoesNotAllocate()
+    {
+        Complex[] values = BuildValues(4_096, 0xA24BAED4963EE407UL);
+        Complex[] first = BuildValues(values.Length, 0x9FB21C651E98DF25UL);
+        Complex[] second = BuildValues(values.Length, 0xD1B54A32D192ED03UL);
+        double[] real = BuildRealValues(values.Length, 0x94D049BB133111EBUL);
+        NumpyComplexMultiply.ApplyTwoComplexAndRealInPlace(values, first, second, real);
+
+        long before = GC.GetAllocatedBytesForCurrentThread();
+        for (int iteration = 0; iteration < 32; iteration++)
+        {
+            NumpyComplexMultiply.ApplyTwoComplexAndRealInPlace(values, first, second, real);
+        }
+
+        long after = GC.GetAllocatedBytesForCurrentThread();
+        Assert.Equal(before, after);
+        Assert.Throws<ArgumentException>(
+            () => NumpyComplexMultiply.ApplyTwoComplexAndRealInPlace(
+                values,
+                first.AsSpan(1),
+                second,
+                real));
+    }
+
+    [Fact(DisplayName = "Fused spectrum multiply preserves overlapping span semantics")]
+    public void FusedSpectrumMultiplyPreservesOverlappingSpanSemantics()
+    {
+        Complex[] actual = BuildValues(17, 0xA24BAED4963EE407UL);
+        Complex[] second = BuildValues(actual.Length, 0xD1B54A32D192ED03UL);
+        double[] real = BuildRealValues(actual.Length, 0x94D049BB133111EBUL);
+        Complex[] expected = actual.ToArray();
+        NumpyComplexMultiply.ApplyInPlace(expected, expected);
+        NumpyComplexMultiply.ApplyInPlace(expected, second);
+        NumpyComplexMultiply.ApplyRealInPlace(expected, real);
+
+        NumpyComplexMultiply.ApplyTwoComplexAndRealInPlace(actual, actual, second, real);
+
+        AssertComplexBitsEqual(expected, actual);
+    }
+
+    [Fact(DisplayName = "Fused spectrum multiply preserves real-multiplier overlap semantics")]
+    public void FusedSpectrumMultiplyPreservesRealMultiplierOverlapSemantics()
+    {
+        Complex[] actual = BuildValues(17, 0xA24BAED4963EE407UL);
+        Complex[] first = BuildValues(actual.Length, 0x9FB21C651E98DF25UL);
+        Complex[] second = BuildValues(actual.Length, 0xD1B54A32D192ED03UL);
+        Complex[] expected = actual.ToArray();
+        ReadOnlySpan<double> expectedReal =
+            MemoryMarshal.Cast<Complex, double>(expected)[..expected.Length];
+        NumpyComplexMultiply.ApplyInPlace(expected, first);
+        NumpyComplexMultiply.ApplyInPlace(expected, second);
+        NumpyComplexMultiply.ApplyRealInPlace(expected, expectedReal);
+        ReadOnlySpan<double> actualReal =
+            MemoryMarshal.Cast<Complex, double>(actual)[..actual.Length];
+
+        NumpyComplexMultiply.ApplyTwoComplexAndRealInPlace(
+            actual,
+            first,
+            second,
+            actualReal);
+
+        AssertComplexBitsEqual(expected, actual);
+    }
+
     private static Complex[] BuildValues(int length, ulong state)
     {
         var values = new Complex[length];
@@ -239,6 +381,18 @@ public sealed class NumpyComplexMultiplyTests
             state = unchecked((state * 6364136223846793005UL) + 1442695040888963407UL);
             double imaginary = ((long)(state >> 11) - (1L << 52)) / (double)(1L << 24);
             values[index] = new Complex(real, imaginary);
+        }
+
+        return values;
+    }
+
+    private static double[] BuildRealValues(int length, ulong state)
+    {
+        var values = new double[length];
+        for (int index = 0; index < values.Length; index++)
+        {
+            state = unchecked((state * 6364136223846793005UL) + 1442695040888963407UL);
+            values[index] = ((long)(state >> 11) - (1L << 52)) / (double)(1L << 25);
         }
 
         return values;

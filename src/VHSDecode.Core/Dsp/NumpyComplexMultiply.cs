@@ -74,6 +74,129 @@ internal static class NumpyComplexMultiply
     public static void ApplyInPlace(Span<Complex> left, ReadOnlySpan<Complex> right)
         => Apply(left, right, left);
 
+    public static unsafe void ApplyTwoComplexAndRealInPlace(
+        Span<Complex> values,
+        ReadOnlySpan<Complex> firstComplexMultipliers,
+        ReadOnlySpan<Complex> secondComplexMultipliers,
+        ReadOnlySpan<double> realMultipliers)
+    {
+        if (firstComplexMultipliers.Length != values.Length
+            || secondComplexMultipliers.Length != values.Length
+            || realMultipliers.Length != values.Length)
+        {
+            throw new ArgumentException(
+                "Complex values and all multiplier spans must have the same length.");
+        }
+
+        if (values.Overlaps(firstComplexMultipliers)
+            || values.Overlaps(secondComplexMultipliers)
+            || MemoryMarshal.AsBytes(values).Overlaps(MemoryMarshal.AsBytes(realMultipliers)))
+        {
+            ApplyInPlace(values, firstComplexMultipliers);
+            ApplyInPlace(values, secondComplexMultipliers);
+            ApplyRealInPlace(values, realMultipliers);
+            return;
+        }
+
+        int index = 0;
+        if (Avx.IsSupported && Fma.IsSupported)
+        {
+            Span<double> valueComponents = MemoryMarshal.Cast<Complex, double>(values);
+            ReadOnlySpan<double> firstComponents =
+                MemoryMarshal.Cast<Complex, double>(firstComplexMultipliers);
+            ReadOnlySpan<double> secondComponents =
+                MemoryMarshal.Cast<Complex, double>(secondComplexMultipliers);
+            fixed (double* valuePointer = valueComponents)
+            fixed (double* firstPointer = firstComponents)
+            fixed (double* secondPointer = secondComponents)
+            {
+                int vectorizedEnd = values.Length - (values.Length % 2);
+                for (; index < vectorizedEnd; index += 2)
+                {
+                    int componentIndex = index * 2;
+                    Vector256<double> valueVector = Avx.LoadVector256(valuePointer + componentIndex);
+                    Vector256<double> firstVector = Avx.LoadVector256(firstPointer + componentIndex);
+                    Vector256<double> firstProducts = Avx.Multiply(
+                        Avx.Permute(valueVector, 0b1111),
+                        Avx.Permute(firstVector, 0b0101));
+                    Vector256<double> firstResult = Fma.MultiplyAdd(
+                        Avx.Permute(valueVector, 0b0000),
+                        firstVector,
+                        Avx.Xor(firstProducts, SubtractRealLanes));
+                    Vector256<double> firstFinite = Avx.Compare(
+                        Avx.And(firstResult, AbsoluteValueMask),
+                        MaximumFinite,
+                        FloatComparisonMode.OrderedLessThanOrEqualNonSignaling);
+                    if (Avx.MoveMask(firstFinite) != 0b1111)
+                    {
+                        ApplyThreeScalarMultipliers(
+                            values,
+                            firstComplexMultipliers,
+                            secondComplexMultipliers,
+                            realMultipliers,
+                            index);
+                        continue;
+                    }
+
+                    Vector256<double> secondVector = Avx.LoadVector256(secondPointer + componentIndex);
+                    Vector256<double> secondProducts = Avx.Multiply(
+                        Avx.Permute(firstResult, 0b1111),
+                        Avx.Permute(secondVector, 0b0101));
+                    Vector256<double> secondResult = Fma.MultiplyAdd(
+                        Avx.Permute(firstResult, 0b0000),
+                        secondVector,
+                        Avx.Xor(secondProducts, SubtractRealLanes));
+                    Vector256<double> secondFinite = Avx.Compare(
+                        Avx.And(secondResult, AbsoluteValueMask),
+                        MaximumFinite,
+                        FloatComparisonMode.OrderedLessThanOrEqualNonSignaling);
+                    if (Avx.MoveMask(secondFinite) != 0b1111)
+                    {
+                        ApplyThreeScalarMultipliers(
+                            values,
+                            firstComplexMultipliers,
+                            secondComplexMultipliers,
+                            realMultipliers,
+                            index);
+                        continue;
+                    }
+
+                    Vector256<double> realVector = Vector256.Create(
+                        realMultipliers[index],
+                        realMultipliers[index],
+                        realMultipliers[index + 1],
+                        realMultipliers[index + 1]);
+                    Vector256<double> realFinite = Avx.Compare(
+                        Avx.And(realVector, AbsoluteValueMask),
+                        MaximumFinite,
+                        FloatComparisonMode.OrderedLessThanOrEqualNonSignaling);
+                    if (Avx.MoveMask(realFinite) == 0b1111)
+                    {
+                        Avx.Store(
+                            valuePointer + componentIndex,
+                            Avx.Multiply(secondResult, realVector));
+                    }
+                    else
+                    {
+                        ApplyThreeScalarMultipliers(
+                            values,
+                            firstComplexMultipliers,
+                            secondComplexMultipliers,
+                            realMultipliers,
+                            index);
+                    }
+                }
+            }
+        }
+
+        for (; index < values.Length; index++)
+        {
+            Complex value = ApplyScalar(values[index], firstComplexMultipliers[index]);
+            value = ApplyScalar(value, secondComplexMultipliers[index]);
+            values[index] = value * realMultipliers[index];
+        }
+    }
+
     public static void ApplyRealInPlace(
         Span<Complex> values,
         ReadOnlySpan<double> multipliers)
@@ -157,5 +280,20 @@ internal static class NumpyComplexMultiply
                 left.Real,
                 right.Imaginary,
                 left.Imaginary * right.Real));
+    }
+
+    private static void ApplyThreeScalarMultipliers(
+        Span<Complex> values,
+        ReadOnlySpan<Complex> firstComplexMultipliers,
+        ReadOnlySpan<Complex> secondComplexMultipliers,
+        ReadOnlySpan<double> realMultipliers,
+        int index)
+    {
+        for (int scalar = index; scalar < index + 2; scalar++)
+        {
+            Complex value = ApplyScalar(values[scalar], firstComplexMultipliers[scalar]);
+            value = ApplyScalar(value, secondComplexMultipliers[scalar]);
+            values[scalar] = value * realMultipliers[scalar];
+        }
     }
 }
