@@ -2,7 +2,7 @@
 
 **[English](README.md)** | [简体中文](README.zh-CN.md) | [日本語](README.ja.md)
 
-<!-- README_SYNC: 2026-08-10.02 -->
+<!-- README_SYNC: 2026-08-10.04 -->
 
 A .NET 11 rewrite of the decode-facing parts of
 [`oyvindln/vhs-decode`](https://github.com/oyvindln/vhs-decode), targeting
@@ -100,43 +100,36 @@ for compatibility-sensitive work.
 This is a startup-inclusive 160-frame snapshot on one fixed private local
 40 MHz PAL VHS `.ldf` fixture; the filename is intentionally not published.
 All 90 Python and .NET Release runs were measured together in forward, reverse,
-and mixed passes on this candidate, based on merged main `0306db8`. The measured
+and mixed passes on this candidate, based on merged main `5268547`. The measured
 production blob and three-run ranges are pinned in the detailed notes.
 Compatibility is evaluated separately from speed.
 
 <!-- LATEST_PERFORMANCE_BEGIN -->
 | CLI mode (workers) | Python v0.4.0 | Python PR341 | Exact + v0.4.0 | Exact + current | IPP-fast + v0.4.0 | IPP-fast + current |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| default (5) | 44.296 s | 43.805 s | 12.763 s / 3.471x | 11.858 s / 3.694x | 11.251 s / 3.937x | 9.487 s / 4.617x |
-| `--threads 1` | 53.404 s | 53.632 s | 32.537 s / 1.641x | 38.751 s / 1.384x | 22.896 s / 2.332x | 26.221 s / 2.045x |
-| `--threads 5` | 44.283 s | 43.593 s | 12.600 s / 3.514x | 12.468 s / 3.496x | 11.196 s / 3.955x | 9.393 s / 4.641x |
-| `--threads 10` | 45.330 s | 45.943 s | 9.941 s / 4.560x | 9.959 s / 4.613x | 9.385 s / 4.830x | 7.611 s / 6.036x |
-| `--threads 20` | 46.551 s | 46.697 s | 8.336 s / 5.584x | 7.608 s / 6.138x | 8.084 s / 5.759x | 5.806 s / 8.043x |
+| default (5) | 44.597 s | 43.607 s | 12.620 s / 3.534x | 12.127 s / 3.596x | 11.135 s / 4.005x | 9.428 s / 4.625x |
+| `--threads 1` | 53.407 s | 53.257 s | 32.279 s / 1.655x | 38.454 s / 1.385x | 22.947 s / 2.327x | 25.978 s / 2.050x |
+| `--threads 5` | 44.637 s | 43.636 s | 12.669 s / 3.523x | 12.543 s / 3.479x | 11.139 s / 4.007x | 9.454 s / 4.616x |
+| `--threads 10` | 45.436 s | 45.897 s | 10.194 s / 4.457x | 9.478 s / 4.842x | 9.414 s / 4.827x | 7.376 s / 6.223x |
+| `--threads 20` | 46.662 s | 46.868 s | 8.187 s / 5.700x | 7.768 s / 6.034x | 7.918 s / 5.893x | 5.816 s / 8.059x |
 <!-- LATEST_PERFORMANCE_END -->
-<!-- LATEST_PERFORMANCE_RUNS: full-interleaved-matrix-runs=90 dotnet-matrix-runs=60 python-matrix-runs=30 repeats=3 fused-spectrum-microbench-pairs=12 fused-spectrum-short-ab-pairs=8 fused-spectrum-long-ab-pairs=2 fused-spectrum-thread-gate-runs=12 fused-spectrum-scalar-runs=2 python-v040-runs=15 python-v040-hashes=15 python-pr341-runs=15 python-pr341-hashes=1 -->
+<!-- LATEST_PERFORMANCE_RUNS: full-interleaved-matrix-runs=90 dotnet-matrix-runs=60 python-matrix-runs=30 repeats=3 preserving-real-fft-microbench-pairs=2 preserving-real-fft-v040-short-ab-pairs=2 preserving-real-fft-current-400-ab-pairs=1 preserving-real-fft-current-1000-ab-pairs=1 preserving-real-fft-thread-gate-runs=12 preserving-real-fft-scalar-hash-tests=4 python-v040-runs=15 python-v040-hashes=15 python-pr341-runs=15 python-pr341-hashes=1 -->
 
 Each .NET cell shows median wall time and speedup versus its profile-matched
 Python column. The default is **5 workers**; three-run ranges are in the
 [detailed performance notes](docs/README.detailed.md#performance). Every column
 was measured in the same interleaved batch, but a ratio still moves when its
 Python denominator moves. Same-fixture .NET revision A/B runs, not old ratio
-cells, are therefore used to judge .NET regressions. Every .NET median in this
-refresh is lower than in the previous table; several displayed speedups still
-fell because the corresponding Python median fell by a larger fraction.
-For example, default IPP-fast/current improved from 9.778 s to 9.487 s while
-its Python median moved from 53.288 s to 43.805 s, so the ratio moved from
-5.450x to 4.617x despite the lower .NET wall time.
+cells, are therefore used to judge .NET regressions.
 
-Exact VHS now applies its two complex RF filters and Hilbert real scale in one
-ordered spectrum traversal. The binary64 expressions and stage order are
-unchanged; non-finite and aliased inputs retain the old scalar/sequential
-behavior. Twelve alternating 1M-element microbenchmark pairs improved this
-kernel from 4.280 to 2.976 ms (1.438x). Four 400-frame pairs improved the
-end-to-end median from 16.50 to 16.33 seconds; profile-matched 1,000-frame runs
-observed 0.65% lower wall time for `current` and 2.10% lower wall time for
-v0.4.0, one pair each rather than a sustained claim. Every artifact and log
-surface matched across the A/B, six thread modes, and fully scalar fallback;
-working set remained bounded with small first-to-final-third variation.
+The preserving real-FFT path now executes its first radix pass directly from
+the caller span instead of copying the full input first. The arithmetic and
+pass order are unchanged. Two final 20,000-iteration pairs improved the 32K
+forward average from 111.773 to 107.062 microseconds (4.2%); complete
+forward-plus-inverse time improved 1.0%, with identical hashes. Final real-RF
+A/B runs improved v0.4.0 by 0.5% over two 160-frame pairs and `current` by 1.1%
+over one 400-frame pair. All seven artifact, metadata, console, and normalized
+log surfaces matched; the 1,000-frame gate remained bounded in memory.
 
 Merged Python PR341 was deterministic here; Python v0.4.0 produced 15 distinct
 luma, chroma, JSON, and log hashes in 15 runs, so the strict oracle remains

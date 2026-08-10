@@ -4,7 +4,7 @@
 
 [English](README.detailed.md) | **[简体中文](README.detailed.zh-CN.md)** | [日本語](README.detailed.ja.md)
 
-<!-- README_SYNC: 2026-08-10.02 -->
+<!-- README_SYNC: 2026-08-10.04 -->
 
 这是 [`oyvindln/vhs-decode`](https://github.com/oyvindln/vhs-decode)
 中解码相关部分的 .NET 11 重写，当前以 release `v0.4.0`、commit
@@ -356,35 +356,58 @@ Exact `current`、IPP-fast v0.4.0 和 IPP-fast `current`。文件名不会公开
 <!-- LATEST_PERFORMANCE_BEGIN -->
 | CLI 模式（workers） | Python v0.4.0 | Python PR341 | Exact + v0.4.0 | Exact + current | IPP-fast + v0.4.0 | IPP-fast + current |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| 默认（5） | 44.296 s | 43.805 s | 12.763 s / 3.471x / 71.19% | 11.858 s / 3.694x / 72.93% | 11.251 s / 3.937x / 74.60% | 9.487 s / 4.617x / 78.34% |
-| `--threads 1` | 53.404 s | 53.632 s | 32.537 s / 1.641x / 39.07% | 38.751 s / 1.384x / 27.75% | 22.896 s / 2.332x / 57.13% | 26.221 s / 2.045x / 51.11% |
-| `--threads 5` | 44.283 s | 43.593 s | 12.600 s / 3.514x / 71.55% | 12.468 s / 3.496x / 71.40% | 11.196 s / 3.955x / 74.72% | 9.393 s / 4.641x / 78.45% |
-| `--threads 10` | 45.330 s | 45.943 s | 9.941 s / 4.560x / 78.07% | 9.959 s / 4.613x / 78.32% | 9.385 s / 4.830x / 79.30% | 7.611 s / 6.036x / 83.43% |
-| `--threads 20` | 46.551 s | 46.697 s | 8.336 s / 5.584x / 82.09% | 7.608 s / 6.138x / 83.71% | 8.084 s / 5.759x / 82.63% | 5.806 s / 8.043x / 87.57% |
+| 默认（5） | 44.597 s | 43.607 s | 12.620 s / 3.534x / 71.70% | 12.127 s / 3.596x / 72.19% | 11.135 s / 4.005x / 75.03% | 9.428 s / 4.625x / 78.38% |
+| `--threads 1` | 53.407 s | 53.257 s | 32.279 s / 1.655x / 39.56% | 38.454 s / 1.385x / 27.80% | 22.947 s / 2.327x / 57.03% | 25.978 s / 2.050x / 51.22% |
+| `--threads 5` | 44.637 s | 43.636 s | 12.669 s / 3.523x / 71.62% | 12.543 s / 3.479x / 71.26% | 11.139 s / 4.007x / 75.04% | 9.454 s / 4.616x / 78.34% |
+| `--threads 10` | 45.436 s | 45.897 s | 10.194 s / 4.457x / 77.56% | 9.478 s / 4.842x / 79.35% | 9.414 s / 4.827x / 79.28% | 7.376 s / 6.223x / 83.93% |
+| `--threads 20` | 46.662 s | 46.868 s | 8.187 s / 5.700x / 82.46% | 7.768 s / 6.034x / 83.43% | 7.918 s / 5.893x / 83.03% | 5.816 s / 8.059x / 87.59% |
 <!-- LATEST_PERFORMANCE_END -->
-<!-- LATEST_PERFORMANCE_RUNS: full-interleaved-matrix-runs=90 dotnet-matrix-runs=60 python-matrix-runs=30 repeats=3 fused-spectrum-microbench-pairs=12 fused-spectrum-short-ab-pairs=8 fused-spectrum-long-ab-pairs=2 fused-spectrum-thread-gate-runs=12 fused-spectrum-scalar-runs=2 python-v040-runs=15 python-v040-hashes=15 python-pr341-runs=15 python-pr341-hashes=1 -->
+<!-- LATEST_PERFORMANCE_RUNS: full-interleaved-matrix-runs=90 dotnet-matrix-runs=60 python-matrix-runs=30 repeats=3 preserving-real-fft-microbench-pairs=2 preserving-real-fft-v040-short-ab-pairs=2 preserving-real-fft-current-400-ab-pairs=1 preserving-real-fft-current-1000-ab-pairs=1 preserving-real-fft-thread-gate-runs=12 preserving-real-fft-scalar-hash-tests=4 python-v040-runs=15 python-v040-hashes=15 python-pr341-runs=15 python-pr341-hashes=1 -->
 
 三次运行的墙钟范围如下：
 
 | CLI 模式 | Python v0.4.0 | Python PR341 | Exact + v0.4.0 | Exact + current | IPP-fast + v0.4.0 | IPP-fast + current |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| 默认（5） | 44.111-45.124 s | 43.058-44.693 s | 12.587-13.438 s | 11.818-12.649 s | 11.139-11.278 s | 9.446-9.526 s |
-| `--threads 1` | 52.923-54.584 s | 53.140-55.384 s | 32.254-32.862 s | 38.306-38.908 s | 22.858-23.610 s | 26.093-26.502 s |
-| `--threads 5` | 44.215-46.910 s | 43.537-45.026 s | 12.498-12.749 s | 12.083-12.969 s | 11.139-11.232 s | 9.391-9.429 s |
-| `--threads 10` | 45.243-45.354 s | 45.595-45.945 s | 9.869-9.960 s | 9.621-10.172 s | 9.328-9.465 s | 7.454-7.652 s |
-| `--threads 20` | 46.428-46.728 s | 46.442-46.757 s | 8.217-8.408 s | 7.561-8.113 s | 7.952-8.242 s | 5.744-5.848 s |
+| 默认（5） | 44.385-44.851 s | 43.446-43.645 s | 12.540-12.622 s | 11.866-12.410 s | 11.042-11.169 s | 9.327-9.571 s |
+| `--threads 1` | 53.088-54.153 s | 53.204-53.730 s | 31.998-32.440 s | 38.212-38.483 s | 22.907-22.995 s | 25.970-26.042 s |
+| `--threads 5` | 44.539-44.661 s | 43.574-43.845 s | 12.608-12.925 s | 12.450-12.679 s | 11.079-11.283 s | 9.266-9.498 s |
+| `--threads 10` | 45.403-45.695 s | 45.684-46.257 s | 10.124-10.497 s | 9.017-10.107 s | 9.401-9.598 s | 7.316-7.508 s |
+| `--threads 20` | 46.392-46.876 s | 46.348-47.059 s | 8.043-8.315 s | 7.605-8.435 s | 7.855-7.944 s | 5.780-5.926 s |
 
 2026-08-10 同批刷新了全部 90 次 Release 运行：六种 profile 的五种 worker 设置各按
 正序、反序和混排三轮交错执行，没有复用旧批次的 Python 或 IPP-fast 时间。本候选基于
-已合并的 main `0306db8`；被测生产源码固定为 `NumpyComplexMultiply.cs` 的 Git blob
-`e587a633558b404849306c29b1d0717de0960b67` 和 `RfDemodulator.cs` 的 Git blob
-`a8ad6a4cb967d8ddab524fba1f35b46a2a13b3d7`。计时后审阅只在未改变的非别名运算循环前
-增加了跨类型 Span 别名保护；最终 `NumpyComplexMultiply.cs` blob 为
-`efadb6f47db53243584b93d6be81fd111115683a`。文档和仅测试改动不属于计时的解码器二进制。
+已合并的 main `5268547`；被测 `PocketFftReal.cs` 源码固定为 Git blob
+`b09af4c30dcb2dc48ba37ad517c59c3f86b7696a`，对应已合并 main 的基线 blob 为
+`d8f202d1ba89ae90f0603b2ae49ec18b2afab98d`。计时后的审查只增加了第二次池化数组租用
+失败时的异常安全清理；最终源码 blob 为 `3c11c06b545c4daa280b7a1bd3b8f5f4216ef81c`。
+文档和仅测试改动不属于计时的解码器二进制。
 测试机为
 Intel Core Ultra 7 265K（20 个逻辑处理器）、Windows 11 build 26220，以及 .NET
 SDK/runtime `11.0.100-preview.6.26359.118`。原始运行目录含有私有夹具路径，因此只
 保留在本地；这些是如实报告的本地测量，不是可公开独立复现的 benchmark corpus。
+
+### 保留输入的 real FFT 首遍
+
+保留输入的 real FFT 路径原先会先把完整输入复制到池化 packed 数组，再由首个 radix pass
+复制并变换到第二个池化数组。现在会预先租用两个工作数组，并直接从调用者的只读 span
+执行首遍。后续 radix pass、packed spectrum 输出、binary64 表达式和运算顺序均未改变；
+owned-input 路径也未改变。最终 packed 数组最后归还到池，以保持旧路径的热 buffer 复用顺序。
+
+最终两组正反顺序配对中，每个进程执行 20,000 次已预热的 32K forward+inverse。保留输入的
+forward 平均从 111.773 微秒降到 107.062 微秒，时间减少 4.22%；完整 forward+inverse 从
+250.744 微秒降到 248.181 微秒，减少 1.02%。每次运行的 forward 与 inverse SHA-256 均完全
+相同。聚焦逐位测试还覆盖长度 2、4、4096 和 32768，逐字节验证调用者输入、检查输出尾部
+哨兵，并把保留输入路径与现有 owned-input 路径比较。
+
+最终 v0.4.0 两组 160 帧 A/B 的基线中位数从 8.282 降到 8.237 秒，低 0.54%；最终一组
+`current` 400 帧从 16.184 降到 16.010 秒，低 1.08%。每组的亮度、色度、原始 JSON、stdout、
+归一化 stderr/日志和有序 `fileLoc` 均一致。另一次 1000 帧 `current` 运行同样匹配七个表面，
+且内存保持有界：基线首段/末段三分之一工作集中位数为 649.1/643.9 MiB，峰值 681.9 MiB；
+候选为 644.3/641.5 MiB，峰值 686.2 MiB。这不构成普遍内存降低声明。
+
+12-run 确定性矩阵覆盖 Exact v0.4.0 与 `current` 的 `--threads 0`、默认 5、`1`、`5`、`10`、
+`20`，每个 profile 内全部表面稳定。禁用 AVX 与 AVX2 后的 4 项固定 hash 测试也通过。
+完整 Release 套件通过全部 1416 项 xUnit v3 测试。
 
 ### 融合 Exact VHS 解析频谱遍历
 

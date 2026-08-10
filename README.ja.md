@@ -2,7 +2,7 @@
 
 [English](README.md) | [简体中文](README.zh-CN.md) | **[日本語](README.ja.md)**
 
-<!-- README_SYNC: 2026-08-10.02 -->
+<!-- README_SYNC: 2026-08-10.04 -->
 
 [`oyvindln/vhs-decode`](https://github.com/oyvindln/vhs-decode) の
 デコード関連部分を .NET 11 で再実装するプロジェクトです。互換性の対象は
@@ -96,40 +96,34 @@ CVBS と HiFi は引き続き `ipp-fast` を拒否します。release-compatible
 これは同じ private local 40 MHz PAL VHS `.ldf` fixture を使う、startup cost を含む
 160-frame snapshot です。source filename は公開しません。Python と .NET の全 90 Release
 run を、この candidate 上で forward、reverse、mixed の 3 pass により interleave して
-測定しました。candidate は merged main `0306db8` を基にしています。測定した production
+測定しました。candidate は merged main `5268547` を基にしています。測定した production
 blob と 3-run range は詳細版に固定記録しています。互換性と速度は別々に評価します。
 
 <!-- LATEST_PERFORMANCE_BEGIN -->
 | CLI mode（workers） | Python v0.4.0 | Python PR341 | Exact + v0.4.0 | Exact + current | IPP-fast + v0.4.0 | IPP-fast + current |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| default（5） | 44.296 s | 43.805 s | 12.763 s / 3.471x | 11.858 s / 3.694x | 11.251 s / 3.937x | 9.487 s / 4.617x |
-| `--threads 1` | 53.404 s | 53.632 s | 32.537 s / 1.641x | 38.751 s / 1.384x | 22.896 s / 2.332x | 26.221 s / 2.045x |
-| `--threads 5` | 44.283 s | 43.593 s | 12.600 s / 3.514x | 12.468 s / 3.496x | 11.196 s / 3.955x | 9.393 s / 4.641x |
-| `--threads 10` | 45.330 s | 45.943 s | 9.941 s / 4.560x | 9.959 s / 4.613x | 9.385 s / 4.830x | 7.611 s / 6.036x |
-| `--threads 20` | 46.551 s | 46.697 s | 8.336 s / 5.584x | 7.608 s / 6.138x | 8.084 s / 5.759x | 5.806 s / 8.043x |
+| default（5） | 44.597 s | 43.607 s | 12.620 s / 3.534x | 12.127 s / 3.596x | 11.135 s / 4.005x | 9.428 s / 4.625x |
+| `--threads 1` | 53.407 s | 53.257 s | 32.279 s / 1.655x | 38.454 s / 1.385x | 22.947 s / 2.327x | 25.978 s / 2.050x |
+| `--threads 5` | 44.637 s | 43.636 s | 12.669 s / 3.523x | 12.543 s / 3.479x | 11.139 s / 4.007x | 9.454 s / 4.616x |
+| `--threads 10` | 45.436 s | 45.897 s | 10.194 s / 4.457x | 9.478 s / 4.842x | 9.414 s / 4.827x | 7.376 s / 6.223x |
+| `--threads 20` | 46.662 s | 46.868 s | 8.187 s / 5.700x | 7.768 s / 6.034x | 7.918 s / 5.893x | 5.816 s / 8.059x |
 <!-- LATEST_PERFORMANCE_END -->
-<!-- LATEST_PERFORMANCE_RUNS: full-interleaved-matrix-runs=90 dotnet-matrix-runs=60 python-matrix-runs=30 repeats=3 fused-spectrum-microbench-pairs=12 fused-spectrum-short-ab-pairs=8 fused-spectrum-long-ab-pairs=2 fused-spectrum-thread-gate-runs=12 fused-spectrum-scalar-runs=2 python-v040-runs=15 python-v040-hashes=15 python-pr341-runs=15 python-pr341-hashes=1 -->
+<!-- LATEST_PERFORMANCE_RUNS: full-interleaved-matrix-runs=90 dotnet-matrix-runs=60 python-matrix-runs=30 repeats=3 preserving-real-fft-microbench-pairs=2 preserving-real-fft-v040-short-ab-pairs=2 preserving-real-fft-current-400-ab-pairs=1 preserving-real-fft-current-1000-ab-pairs=1 preserving-real-fft-thread-gate-runs=12 preserving-real-fft-scalar-hash-tests=4 python-v040-runs=15 python-v040-hashes=15 python-pr341-runs=15 python-pr341-hashes=1 -->
 
 各 .NET cell は wall-time median と profile が対応する Python 列に対する speedup の
 順で、default は **5 workers** です。3-run range は
 [詳細な性能リファレンス](docs/README.detailed.ja.md#パフォーマンス)にあります。全列を同じ
 interleaved batch で測定していますが、ratio は分母となる Python 時間でも変動します。
 .NET regression の判断には古い表の倍率ではなく、同じ fixture と範囲による .NET revision
-A/B を使用します。今回の refresh では全 .NET median が以前の表より短くなりましたが、
-対応する Python median の低下率がさらに大きい cell では表示 speedup が下がっています。
-たとえば default IPP-fast/current の .NET は 9.778 s から 9.487 s に短縮しましたが、
-対応する Python は 53.288 s から 43.805 s になったため、.NET wall time が短くても ratio は
-5.450x から 4.617x に変化しました。
+A/B を使用します。
 
-Exact VHS は 2 回の complex RF filter と Hilbert real scale を、1 回の ordered spectrum
-traversal で実行します。binary64 expression と stage order は変更せず、non-finite value と
-alias input は従来の scalar/sequential behavior を維持します。12 alternating 1M-element
-microbenchmark pair で kernel は 4.280 ms から 2.976 ms（1.438x）へ改善しました。4 組の
-400-frame pair は end-to-end median を 16.50 から 16.33 秒へ短縮し、profile-matched の
-1,000-frame run は `current` で 0.65%、v0.4.0 で 2.10% lower wall time を観測しました。
-各 profile 1 pair の観測であり、sustained gain の claim ではありません。A/B、6 thread mode、
-fully scalar fallback の全 artifact/log surface が一致し、working set は bounded のまま、
-最初と最後の 3 分の 1 の間では小幅な変動に留まりました。
+入力を保持する real FFT path は、入力全体を先に copy せず、caller span から直接最初の
+radix pass を実行するようになりました。arithmetic expression と pass order は不変です。
+最終 2 組の 20,000-iteration microbenchmark では、32K forward の平均が 111.773 から
+107.062 microseconds へ 4.2% 改善し、forward+inverse 全体も 1.0% 改善しました。hash は
+完全一致です。実 RF の最終 A/B は v0.4.0 の 160-frame 2 pair で 0.5%、`current` の
+400-frame 1 pair で 1.1% 改善しました。7 種類の artifact、metadata、console、normalized
+log surface はすべて一致し、1,000-frame gate の memory も bounded のままです。
 
 merged Python PR341 も deterministic でしたが、Python v0.4.0 は 15 run で 15 種類の luma、
 chroma、JSON、log hash を生成したため、strict oracle は引き続き Python v0.4.0

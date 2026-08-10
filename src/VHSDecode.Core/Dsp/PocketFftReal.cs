@@ -113,15 +113,37 @@ public static class PocketFftReal
 
         public void Forward(ReadOnlySpan<double> input, Complex[] output)
         {
-            double[] packed = ArrayPool<double>.Shared.Rent(_length);
+            double[] first = ArrayPool<double>.Shared.Rent(_length);
+            double[] second;
             try
             {
-                input.CopyTo(packed);
-                ForwardOwnedCore(packed, output);
+                second = ArrayPool<double>.Shared.Rent(_length);
+            }
+            catch
+            {
+                ArrayPool<double>.Shared.Return(first);
+                throw;
+            }
+
+            double[]? packed = null;
+            try
+            {
+                packed = ExecuteForward(input, first, second);
+                WriteForwardOutput(packed, output);
             }
             finally
             {
-                ArrayPool<double>.Shared.Return(packed);
+                // Return the final, recently read buffer last to preserve the prior pool/cache order.
+                if (ReferenceEquals(packed, second))
+                {
+                    ArrayPool<double>.Shared.Return(first);
+                    ArrayPool<double>.Shared.Return(second);
+                }
+                else
+                {
+                    ArrayPool<double>.Shared.Return(second);
+                    ArrayPool<double>.Shared.Return(first);
+                }
             }
         }
 
@@ -131,6 +153,11 @@ public static class PocketFftReal
         private void ForwardOwnedCore(double[] packed, Complex[] output)
         {
             ExecuteForward(packed);
+            WriteForwardOutput(packed, output);
+        }
+
+        private void WriteForwardOutput(ReadOnlySpan<double> packed, Complex[] output)
+        {
             output[0] = new Complex(packed[0], 0.0);
             int outputLength = (_length / 2) + 1;
             for (int i = 1; i < outputLength - 1; i++)
@@ -139,6 +166,45 @@ public static class PocketFftReal
             }
 
             output[outputLength - 1] = new Complex(packed[_length - 1], 0.0);
+        }
+
+        private double[] ExecuteForward(
+            ReadOnlySpan<double> input,
+            double[] first,
+            double[] second)
+        {
+            int l1 = _length;
+            Factor firstFactor = _factors[^1];
+            l1 /= firstFactor.Radix;
+            if (firstFactor.Radix == 4)
+            {
+                Radix4ForwardFirstPass(input, l1, first);
+            }
+            else
+            {
+                Radix2ForwardFirstPass(input, l1, first);
+            }
+
+            double[] source = first;
+            double[] destination = second;
+            for (int pass = 1; pass < _factors.Length; pass++)
+            {
+                Factor factor = _factors[_factors.Length - pass - 1];
+                int ido = _length / l1;
+                l1 /= factor.Radix;
+                if (factor.Radix == 4)
+                {
+                    Radix4Forward(ido, l1, source, destination, factor.Twiddles);
+                }
+                else
+                {
+                    Radix2Forward(ido, l1, source, destination, factor.Twiddles);
+                }
+
+                (source, destination) = (destination, source);
+            }
+
+            return source;
         }
 
         public void Inverse(ReadOnlySpan<Complex> input, double[] output)
@@ -329,6 +395,50 @@ public static class PocketFftReal
                     double imaginary = input[ForwardInput(i, k, 0, ido, l1)];
                     output[ForwardOutput(i, 0, k, ido, 2)] = ti2 + imaginary;
                     output[ForwardOutput(ic, 1, k, ido, 2)] = ti2 - imaginary;
+                }
+            }
+        }
+
+        private static unsafe void Radix2ForwardFirstPass(
+            ReadOnlySpan<double> input,
+            int l1,
+            double[] output)
+        {
+            fixed (double* inputPointer = input)
+            fixed (double* outputPointer = output)
+            {
+                for (int k = 0; k < l1; k++)
+                {
+                    double left = inputPointer[k];
+                    double right = inputPointer[k + l1];
+                    int outputBase = 2 * k;
+                    outputPointer[outputBase] = left + right;
+                    outputPointer[outputBase + 1] = left - right;
+                }
+            }
+        }
+
+        private static unsafe void Radix4ForwardFirstPass(
+            ReadOnlySpan<double> input,
+            int l1,
+            double[] output)
+        {
+            fixed (double* inputPointer = input)
+            fixed (double* outputPointer = output)
+            {
+                for (int k = 0; k < l1; k++)
+                {
+                    double c3 = inputPointer[k + (3 * l1)];
+                    double c1 = inputPointer[k + l1];
+                    double tr1 = c3 + c1;
+                    double c0 = inputPointer[k];
+                    double c2 = inputPointer[k + (2 * l1)];
+                    double tr2 = c0 + c2;
+                    int outputBase = 4 * k;
+                    outputPointer[outputBase] = tr2 + tr1;
+                    outputPointer[outputBase + 1] = c0 - c2;
+                    outputPointer[outputBase + 2] = c3 - c1;
+                    outputPointer[outputBase + 3] = tr2 - tr1;
                 }
             }
         }
