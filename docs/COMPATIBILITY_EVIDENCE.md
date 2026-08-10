@@ -2459,6 +2459,36 @@ each backend produced one luma, chroma, JSON, stdout, normalized stderr/log,
 and ordered-`fileLoc` hash set. The Release solution built with zero warnings
 or errors, and all 1,319 xUnit v3 tests passed.
 
+### Current chroma-burst fitter preparation fusion
+
+The `current` chroma-burst fitter now prepares cosine, sine, residual, and
+Jacobian values in one ascending-index pass, accumulates its four sequential
+sums in that same original order, and omits the temporary theta and sine
+buffers. It
+does not change data types, per-sample expressions, the pinned dot reduction,
+solver order, worker boundaries, or decoder state transitions, and it adds no
+FMA or reassociation.
+
+Nine alternating 100,000-call process runs moved the complete-`Fit` median
+from 1,625.603 to 1,489.642 ms (8.36%, 1.091x throughput) with one checksum and an
+unchanged 2,080-byte allocation count. Three interleaved 1,000-frame Exact
+`current --threads 20` pairs on the same private local 40 MHz PAL VHS sample
+numerically favored the candidate: mean wall time moved from 39.572 to 39.416
+seconds (0.39%). The 95% paired-difference interval of -0.011 to 0.322 seconds
+includes zero, and mean process CPU time increased 1.24%; end-to-end
+throughput is therefore classified as neutral, without a CPU-efficiency
+claim. Sampled working set remained
+below the established 741 MiB bound, without a resident-memory reduction
+claim.
+
+All six paired long runs and one final-source confirmation run matched luma,
+chroma, raw JSON, stdout, normalized stderr/log, and all 2,000 ordered
+`fileLoc` values. Twelve additional gates covered Exact
+v0.4.0/current at zero, default-five, and 20 workers, with exact baseline,
+candidate, and cross-thread surfaces. The three pinned fitter tests passed
+with native instructions and with AVX disabled. The full Release suite
+completed with 1,397 passes and four IPP-runtime-dependent skips.
+
 ### Real-capture LaserDisc Exact and IPP complex FFT
 
 A 70,913,336,872-byte NTSC LaserDisc RF capture was used to replace the prior
