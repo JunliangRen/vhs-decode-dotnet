@@ -70,6 +70,37 @@ public sealed class DspWorkingBufferTests
         Assert.All(inverseBuffer[length..], value => Assert.True(double.IsNaN(value)));
     }
 
+    [Fact(DisplayName = "Owned real FFT input matches the copying path exactly")]
+    public void OwnedRealFftInputMatchesCopyingPathExactly()
+    {
+        const int length = 4_096;
+        double[] input = Enumerable.Range(0, length)
+            .Select(index => Math.Sin(index * 0.013) + (0.625 * Math.Cos(index * 0.041)))
+            .ToArray();
+        Complex[] expected = PocketFftReal.Forward(input);
+        double[] ownedInput = input.ToArray();
+        var actual = Enumerable.Repeat(
+            new Complex(double.NaN, double.NaN),
+            expected.Length + 11).ToArray();
+
+        PocketFftReal.ForwardOwned(ownedInput, actual);
+
+        Assert.Equal(expected, actual.AsSpan(0, expected.Length).ToArray());
+        Assert.All(actual[expected.Length..], value =>
+        {
+            Assert.True(double.IsNaN(value.Real));
+            Assert.True(double.IsNaN(value.Imaginary));
+        });
+        Assert.False(input.AsSpan().SequenceEqual(ownedInput));
+
+        ArgumentException invalidLength = Assert.Throws<ArgumentException>(
+            () => PocketFftReal.ForwardOwned(new double[6], new Complex[4]));
+        Assert.Equal("input", invalidLength.ParamName);
+        ArgumentException shortOutput = Assert.Throws<ArgumentException>(
+            () => PocketFftReal.ForwardOwned(new double[8], new Complex[4]));
+        Assert.Equal("output", shortOutput.ParamName);
+    }
+
     [Fact(DisplayName = "32K real FFT radix stages remain bit-exact")]
     public void ThirtyTwoKilobyteRealFftRadixStagesRemainBitExact()
     {

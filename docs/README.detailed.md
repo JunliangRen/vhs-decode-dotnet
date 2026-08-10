@@ -440,35 +440,64 @@ profile-matched Python column:
 <!-- LATEST_PERFORMANCE_BEGIN -->
 | CLI mode (workers) | Python v0.4.0 | Python PR341 | Exact + v0.4.0 | Exact + current | IPP-fast + v0.4.0 | IPP-fast + current |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| default (5) | 49.845 s | 51.191 s | 12.974 s / 3.842x / 73.97% | 13.206 s / 3.876x / 74.20% | 11.793 s / 4.226x / 76.34% | 9.980 s / 5.130x / 80.51% |
-| `--threads 1` | 55.763 s | 55.815 s | 34.687 s / 1.608x / 37.80% | 40.817 s / 1.367x / 26.87% | 25.016 s / 2.229x / 55.14% | 28.344 s / 1.969x / 49.22% |
-| `--threads 5` | 50.124 s | 51.398 s | 13.485 s / 3.717x / 73.10% | 12.541 s / 4.098x / 75.60% | 11.799 s / 4.248x / 76.46% | 10.142 s / 5.068x / 80.27% |
-| `--threads 10` | 48.710 s | 50.833 s | 10.240 s / 4.757x / 78.98% | 10.033 s / 5.067x / 80.26% | 9.879 s / 4.930x / 79.72% | 8.010 s / 6.347x / 84.24% |
-| `--threads 20` | 48.963 s | 50.195 s | 8.526 s / 5.743x / 82.59% | 7.994 s / 6.279x / 84.07% | 8.404 s / 5.826x / 82.84% | 6.370 s / 7.880x / 87.31% |
+| default (5) | 49.845 s | 51.191 s | 13.538 s / 3.682x / 72.84% | 12.825 s / 3.992x / 74.95% | 11.793 s / 4.226x / 76.34% | 9.980 s / 5.130x / 80.51% |
+| `--threads 1` | 55.763 s | 55.815 s | 34.888 s / 1.598x / 37.44% | 40.487 s / 1.379x / 27.46% | 25.016 s / 2.229x / 55.14% | 28.344 s / 1.969x / 49.22% |
+| `--threads 5` | 50.124 s | 51.398 s | 13.403 s / 3.740x / 73.26% | 12.593 s / 4.081x / 75.50% | 11.799 s / 4.248x / 76.46% | 10.142 s / 5.068x / 80.27% |
+| `--threads 10` | 48.710 s | 50.833 s | 10.619 s / 4.587x / 78.20% | 9.982 s / 5.092x / 80.36% | 9.879 s / 4.930x / 79.72% | 8.010 s / 6.347x / 84.24% |
+| `--threads 20` | 48.963 s | 50.195 s | 8.702 s / 5.626x / 82.23% | 7.919 s / 6.338x / 84.22% | 8.404 s / 5.826x / 82.84% | 6.370 s / 7.880x / 87.31% |
 <!-- LATEST_PERFORMANCE_END -->
-<!-- LATEST_PERFORMANCE_RUNS: dotnet-exact-refresh=30 reused-dotnet-ipp-runs=30 reused-python-runs=30 repeats=3 radix4-microbench-runs=12 radix4-exact-ab-runs=26 radix4-ipp-ab-runs=8 radix4-memory-runs=1 python-matrix-runs=30 python-v040-runs=15 python-v040-hashes=15 python-v040-nondefault-runs=12 python-v040-nondefault-hashes=12 -->
+<!-- LATEST_PERFORMANCE_RUNS: dotnet-exact-refresh=30 reused-dotnet-ipp-runs=30 reused-python-runs=30 repeats=3 owned-realfft-microbench-pairs=12 owned-realfft-short-ab-pairs=4 owned-realfft-long-ab-pairs=2 owned-realfft-thread-gate-runs=24 python-matrix-runs=30 python-v040-runs=15 python-v040-hashes=15 python-v040-nondefault-runs=12 python-v040-nondefault-hashes=12 -->
 
 The three-run wall-time ranges were:
 
 | CLI mode | Python v0.4.0 | Python PR341 | Exact + v0.4.0 | Exact + current | IPP-fast + v0.4.0 | IPP-fast + current |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| default (5) | 49.112-50.297 s | 51.184-51.447 s | 12.963-13.195 s | 13.153-13.245 s | 11.663-11.820 s | 9.933-10.092 s |
-| `--threads 1` | 55.575-56.091 s | 55.607-56.037 s | 34.508-35.225 s | 40.635-41.144 s | 24.913-25.089 s | 28.333-28.798 s |
-| `--threads 5` | 49.225-50.180 s | 50.995-51.436 s | 13.338-13.559 s | 12.343-12.999 s | 11.759-11.841 s | 9.980-10.220 s |
-| `--threads 10` | 48.167-48.785 s | 49.780-51.154 s | 10.181-10.496 s | 9.994-10.131 s | 9.831-10.135 s | 7.977-8.134 s |
-| `--threads 20` | 48.803-49.278 s | 50.170-50.672 s | 8.358-9.025 s | 7.760-8.136 s | 8.202-8.457 s | 6.293-6.545 s |
+| default (5) | 49.112-50.297 s | 51.184-51.447 s | 13.527-13.666 s | 12.580-13.301 s | 11.663-11.820 s | 9.933-10.092 s |
+| `--threads 1` | 55.575-56.091 s | 55.607-56.037 s | 34.412-35.343 s | 40.428-40.525 s | 24.913-25.089 s | 28.333-28.798 s |
+| `--threads 5` | 49.225-50.180 s | 50.995-51.436 s | 13.297-13.445 s | 12.560-12.681 s | 11.759-11.841 s | 9.980-10.220 s |
+| `--threads 10` | 48.167-48.785 s | 49.780-51.154 s | 10.414-11.488 s | 9.697-10.131 s | 9.831-10.135 s | 7.977-8.134 s |
+| `--threads 20` | 48.803-49.278 s | 50.170-50.672 s | 8.622-8.773 s | 7.902-8.575 s | 8.202-8.457 s | 6.293-6.545 s |
 
 Thirty .NET Exact Release runs were refreshed on 2026-08-10: both behavior
 profiles at all five worker settings in three reordered passes. The unchanged
 IPP-fast columns and 30 Python reference runs are reused from the preceding
 direct refresh on the same host and fixture. This candidate is based on merged
-main `f8dcd99`. The measured production source is pinned to Git blob
-`947c44391453588062c4e0bdc9985bbe7893fe5a` for `PocketFftReal.cs`;
+main `baa2dea`. The measured production source is pinned to Git blobs
+`d8f202d1ba89ae90f0603b2ae49ec18b2afab98d` for `PocketFftReal.cs` and
+`7ed6045b9d4e3e81c7dbbb00fe6abc804406903f` for `RfDemodulator.cs`;
 documentation and test-only edits are outside the timed decoder binary.
 The host was an Intel Core Ultra 7 265K with 20 logical processors, Windows 11
 build 26220, and .NET SDK/runtime `11.0.100-preview.6.26359.118`. Raw run
 directories remain local because they contain the private fixture path; these
 are local measurements rather than an independently reproducible public corpus.
+
+### Owned managed real-FFT input
+
+Compact VHS blocks do not expose raw demodulation output. After sharpness,
+chroma-trap, and optional video clipping have selected the final source, the
+managed Exact real FFT now consumes that exclusively owned array in place. The
+arithmetic, packing, spectrum write order, filters, and inverse transforms are
+unchanged. Diagnostic/raw-output calls retain the copying API, and IPP-fast
+still invokes the same native forward FFT.
+
+Twelve alternating microbenchmark pairs transformed 512 independent 32K input
+arrays exactly once per measured batch. The owned path won 11 pairs and reduced
+the median from 54.953 to 53.732 ms (2.22%). Four 160-frame end-to-end pairs were
+throughput-neutral. The sustained gate used two opposite-order 1,000-frame
+Exact `current --threads 20` pairs: combined wall time fell from 79.259 to
+78.562 seconds (0.88% lower, 1.0089x throughput), with both candidate runs
+winning. Combined CPU time rose 0.63%, so this is not a CPU-efficiency claim.
+
+All four long runs produced 2,000 ordered fields and identical luma, chroma,
+raw JSON, stdout, normalized stderr/log, and ordered `fileLoc` surfaces. The
+candidate's first/final-third working-set medians were 441.6/443.7 MiB and
+579.7/563.4 MiB in the two runs. Peaks varied substantially with process
+placement, so no memory-reduction claim is made; neither run showed progressive
+growth. A separate 24-run gate covered Exact/IPP-fast, both behavior profiles,
+and `--threads 0`, default-five, and `--threads 20`, with every captured surface
+matching the baseline and remaining deterministic across thread settings.
+The native bridge smoke passed with only system DLL dependencies, and all 1,402
+xUnit v3 tests passed with the IPP cases executing rather than skipping.
 
 ### Managed AVX real radix-4 FFT
 
@@ -3056,7 +3085,7 @@ Requirements:
 .\tools\build-ipp-native.ps1
 dotnet restore VHSDecodeDotNet.slnx
 dotnet build VHSDecodeDotNet.slnx -c Release --no-restore
-dotnet test --solution VHSDecodeDotNet.slnx -c Release --no-build --no-restore --minimum-expected-tests 1401
+dotnet test --solution VHSDecodeDotNet.slnx -c Release --no-build --no-restore --minimum-expected-tests 1402
 dotnet test --project tests\VHSDecode.Tests\VHSDecode.Tests.csproj -c Release --no-build --no-restore --coverage --coverage-output coverage.cobertura.xml --coverage-output-format cobertura
 ```
 
@@ -3070,7 +3099,7 @@ deployment computer. Binary-only single-file releases embed
 sidecar license files. An Exact-only build may omit the native build step.
 
 The current formal Release build has zero warnings and errors. The xUnit v3
-project exposes **1,401** independently discoverable tests to both
+project exposes **1,402** independently discoverable tests to both
 `dotnet test` and Visual Studio Test Explorer.
 
 <!-- SECTION: usage -->

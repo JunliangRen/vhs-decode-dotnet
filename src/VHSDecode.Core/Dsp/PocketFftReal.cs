@@ -40,6 +40,24 @@ public static class PocketFftReal
         Plans.GetOrAdd(input.Length, static length => new Plan(length)).Forward(input, output);
     }
 
+    internal static void ForwardOwned(double[] input, Complex[] output)
+    {
+        ArgumentNullException.ThrowIfNull(input);
+        if (input.Length < 2 || (input.Length & (input.Length - 1)) != 0)
+        {
+            throw new ArgumentException("Real FFT length must be a power of two of at least two.", nameof(input));
+        }
+
+        ArgumentNullException.ThrowIfNull(output);
+        int outputLength = (input.Length / 2) + 1;
+        if (output.Length < outputLength)
+        {
+            throw new ArgumentException("Output buffer is shorter than the real half-spectrum.", nameof(output));
+        }
+
+        Plans.GetOrAdd(input.Length, static length => new Plan(length)).ForwardOwned(input, output);
+    }
+
     public static double[] Inverse(ReadOnlySpan<Complex> input, int outputLength)
     {
         if (outputLength < 2 || (outputLength & (outputLength - 1)) != 0)
@@ -99,20 +117,28 @@ public static class PocketFftReal
             try
             {
                 input.CopyTo(packed);
-                ExecuteForward(packed);
-                output[0] = new Complex(packed[0], 0.0);
-                int outputLength = (_length / 2) + 1;
-                for (int i = 1; i < outputLength - 1; i++)
-                {
-                    output[i] = new Complex(packed[(2 * i) - 1], packed[2 * i]);
-                }
-
-                output[outputLength - 1] = new Complex(packed[_length - 1], 0.0);
+                ForwardOwnedCore(packed, output);
             }
             finally
             {
                 ArrayPool<double>.Shared.Return(packed);
             }
+        }
+
+        public void ForwardOwned(double[] input, Complex[] output)
+            => ForwardOwnedCore(input, output);
+
+        private void ForwardOwnedCore(double[] packed, Complex[] output)
+        {
+            ExecuteForward(packed);
+            output[0] = new Complex(packed[0], 0.0);
+            int outputLength = (_length / 2) + 1;
+            for (int i = 1; i < outputLength - 1; i++)
+            {
+                output[i] = new Complex(packed[(2 * i) - 1], packed[2 * i]);
+            }
+
+            output[outputLength - 1] = new Complex(packed[_length - 1], 0.0);
         }
 
         public void Inverse(ReadOnlySpan<Complex> input, double[] output)

@@ -715,7 +715,15 @@ public sealed class RfDemodulator : IDisposable
             demodSpectrum = workspace.First;
             videoSpectrum = workspace.Second;
             activeSpectrumLength = vhsRealSpectrumLength;
-            workspace.Forward(demodVideoSource, demodSpectrum);
+            if (includeDemodRawOutput)
+            {
+                workspace.Forward(demodVideoSource, demodSpectrum);
+            }
+            else
+            {
+                workspace.ForwardOwned(clippedDemod ?? demodRaw, demodSpectrum);
+            }
+
             ApplyNumpyRealFrequencyFilter(
                 demodSpectrum.AsSpan(0, activeSpectrumLength),
                 videoFilter,
@@ -1868,6 +1876,17 @@ public sealed class RfDemodulator : IDisposable
             if (_ippFft is null)
             {
                 PocketFftReal.Forward(input, output);
+                return;
+            }
+
+            _ippFft.Forward(input, output.AsSpan(0, _ippFft.SpectrumLength));
+        }
+
+        public void ForwardOwned(double[] input, Complex[] output)
+        {
+            if (_ippFft is null)
+            {
+                PocketFftReal.ForwardOwned(input, output);
                 return;
             }
 
