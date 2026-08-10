@@ -4,7 +4,7 @@
 
 **[English](README.detailed.md)** | [简体中文](README.detailed.zh-CN.md) | [日本語](README.detailed.ja.md)
 
-<!-- README_SYNC: 2026-08-10.04 -->
+<!-- README_SYNC: 2026-08-11.01 -->
 
 .NET 11 rewrite of the decode-facing parts of
 [`oyvindln/vhs-decode`](https://github.com/oyvindln/vhs-decode), focused on
@@ -430,7 +430,8 @@ stderr/logs, and ordered `fileLoc` matched within every profile.
 
 ### Latest six-path thread matrix
 
-The latest public summary is a startup-inclusive 160-frame snapshot comparing
+The latest public summary is a startup-inclusive `--start 100 --length 160`
+snapshot comparing
 Python v0.4.0, merged Python PR341, Exact v0.4.0, Exact `current`, IPP-fast
 v0.4.0, and IPP-fast `current` on the same private local 40 MHz PAL VHS `.ldf`
 fixture. The source filename is intentionally not published. Each .NET cell
@@ -440,37 +441,68 @@ profile-matched Python column:
 <!-- LATEST_PERFORMANCE_BEGIN -->
 | CLI mode (workers) | Python v0.4.0 | Python PR341 | Exact + v0.4.0 | Exact + current | IPP-fast + v0.4.0 | IPP-fast + current |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| default (5) | 45.606 s | 45.016 s | 13.011 s / 3.505x / 71.47% | 12.923 s / 3.483x / 71.29% | 11.258 s / 4.051x / 75.32% | 9.587 s / 4.696x / 78.70% |
-| `--threads 1` | 54.879 s | 54.384 s | 33.368 s / 1.645x / 39.20% | 39.728 s / 1.369x / 26.95% | 23.483 s / 2.337x / 57.21% | 26.438 s / 2.057x / 51.39% |
-| `--threads 5` | 45.778 s | 45.025 s | 12.904 s / 3.548x / 71.81% | 12.631 s / 3.565x / 71.95% | 11.388 s / 4.020x / 75.12% | 9.610 s / 4.685x / 78.66% |
-| `--threads 10` | 45.931 s | 47.263 s | 10.199 s / 4.504x / 77.80% | 9.663 s / 4.891x / 79.56% | 9.455 s / 4.858x / 79.42% | 7.582 s / 6.234x / 83.96% |
-| `--threads 20` | 47.305 s | 47.643 s | 8.360 s / 5.659x / 82.33% | 8.040 s / 5.926x / 83.12% | 7.929 s / 5.966x / 83.24% | 5.874 s / 8.110x / 87.67% |
+| default (5) | 46.064 s | 45.418 s | 13.109 s / 3.514x / 71.54% | 12.868 s / 3.530x / 71.67% | 11.499 s / 4.006x / 75.04% | 9.725 s / 4.670x / 78.59% |
+| `--threads 1` | 55.170 s | 55.257 s | 33.228 s / 1.660x / 39.77% | 39.682 s / 1.393x / 28.19% | 23.625 s / 2.335x / 57.18% | 26.775 s / 2.064x / 51.54% |
+| `--threads 5` | 46.247 s | 45.834 s | 13.377 s / 3.457x / 71.07% | 12.807 s / 3.579x / 72.06% | 11.552 s / 4.003x / 75.02% | 9.842 s / 4.657x / 78.53% |
+| `--threads 10` | 47.318 s | 48.504 s | 10.567 s / 4.478x / 77.67% | 9.664 s / 5.019x / 80.08% | 9.637 s / 4.910x / 79.63% | 7.933 s / 6.114x / 83.64% |
+| `--threads 20` | 48.349 s | 48.631 s | 8.675 s / 5.574x / 82.06% | 8.134 s / 5.979x / 83.27% | 8.290 s / 5.832x / 82.85% | 6.110 s / 7.959x / 87.44% |
 <!-- LATEST_PERFORMANCE_END -->
-<!-- LATEST_PERFORMANCE_RUNS: full-interleaved-matrix-runs=90 dotnet-matrix-runs=60 python-matrix-runs=30 repeats=3 sos-reverse-32k-microbench-pairs=21 sos-reverse-current-160-ab-pairs=8 sos-reverse-v040-160-ab-pairs=1 sos-reverse-current-1000-ab-pairs=1 sos-reverse-thread-gate-runs=6 sos-focused-test-runs=80 python-v040-runs=15 python-v040-hashes=15 python-pr341-runs=15 python-pr341-hashes=1 -->
+<!-- LATEST_PERFORMANCE_RUNS: full-interleaved-matrix-runs=90 dotnet-matrix-runs=60 python-matrix-runs=30 repeats=3 sos-state-current-160-ab-pairs=6 sos-state-default-160-ab-pairs=4 sos-state-current-1000-ab-pairs=1 sos-state-thread-gate-runs=6 sos-state-jit-disassemblies=2 sos-state-focused-test-runs=2 sos-reverse-32k-microbench-pairs=21 sos-reverse-current-160-ab-pairs=8 sos-reverse-v040-160-ab-pairs=1 sos-reverse-current-1000-ab-pairs=1 sos-reverse-thread-gate-runs=6 sos-focused-test-runs=80 python-v040-runs=15 python-v040-hashes=15 python-pr341-runs=15 python-pr341-hashes=1 -->
 
 The three-run wall-time ranges were:
 
 <!-- LATEST_PERFORMANCE_RANGES_BEGIN -->
 | CLI mode | Python v0.4.0 | Python PR341 | Exact + v0.4.0 | Exact + current | IPP-fast + v0.4.0 | IPP-fast + current |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| default (5) | 45.292-45.719 s | 44.702-45.430 s | 12.872-13.038 s | 12.785-12.980 s | 11.205-11.299 s | 9.502-9.829 s |
-| `--threads 1` | 53.123-55.580 s | 53.702-55.065 s | 32.908-33.664 s | 38.980-40.310 s | 23.385-23.827 s | 26.277-26.968 s |
-| `--threads 5` | 44.828-48.282 s | 44.835-45.263 s | 12.836-13.760 s | 12.232-13.261 s | 11.343-11.472 s | 9.595-9.755 s |
-| `--threads 10` | 45.786-46.675 s | 47.005-47.978 s | 10.098-10.905 s | 9.113-9.737 s | 9.314-9.510 s | 7.306-7.613 s |
-| `--threads 20` | 46.999-48.039 s | 47.145-48.402 s | 8.187-8.412 s | 7.711-8.370 s | 7.765-8.018 s | 5.681-6.051 s |
+| default (5) | 45.911-54.463 s | 45.405-47.220 s | 13.036-13.172 s | 12.387-13.103 s | 11.483-11.612 s | 9.677-9.886 s |
+| `--threads 1` | 55.119-55.574 s | 54.950-56.213 s | 33.115-33.589 s | 39.507-39.820 s | 23.584-23.656 s | 26.577-27.093 s |
+| `--threads 5` | 45.841-47.028 s | 45.621-45.887 s | 13.031-13.743 s | 12.598-12.880 s | 11.498-11.841 s | 9.646-9.855 s |
+| `--threads 10` | 46.972-47.470 s | 48.455-48.504 s | 10.477-11.007 s | 9.590-9.704 s | 9.571-9.716 s | 7.636-7.943 s |
+| `--threads 20` | 48.179-48.460 s | 47.972-48.893 s | 8.626-8.675 s | 7.605-8.418 s | 8.202-8.381 s | 6.058-6.212 s |
 <!-- LATEST_PERFORMANCE_RANGES_END -->
 
-All 90 Release runs were refreshed together on 2026-08-10: six profiles at all
+All 90 Release runs were refreshed together on 2026-08-11: six profiles at all
 five worker settings in forward, reverse, and mixed passes. No Python or
 IPP-fast timing was reused from an earlier batch. This candidate is based on
-merged main `73dd014`. The measured `SosFilter.cs` source is pinned to Git blob
-`c3aac76922ad525884cf26779b2035db76248547`; its merged-main baseline blob was
-`766e0926fec7c07bb2bc0a20c0c39824b8f05996`. Documentation and test-only edits
+merged main `3e01fdd`. The measured `SosFilter.cs` source is pinned to Git blob
+`91abe61510d3c51f3b25ae4577f47291b57fb149`; its merged-main baseline blob was
+`c3aac76922ad525884cf26779b2035db76248547`. Documentation and test-only edits
 are outside the timed decoder binary.
 The host was an Intel Core Ultra 7 265K with 20 logical processors, Windows 11
 build 26220, and .NET SDK/runtime `11.0.100-preview.6.26359.118`. Raw run
 directories remain local because they contain the private fixture path; these
 are local measurements rather than an independently reproducible public corpus.
+
+### Bounds-check-free managed float32 SOS state access
+
+The generic managed Exact float32 SOS kernels retain the validated two-floats-
+per-section state shape but address recursive state through a tracked span
+reference. JIT disassembly confirms that the two state bounds branches are gone
+from both forward and backward inner loops while scalar multiply, add, and
+subtract order remains unchanged. There is no FMA, SIMD reassociation,
+conversion, padding, lifetime, or ownership change.
+
+Six interleaved 160-frame Exact `current --threads 20` pairs matched all nine
+artifact, metadata, console, and normalized-log surfaces. The candidate won five
+pairs. Median wall time moved from 11.499 to 11.373 seconds, 1.10% lower;
+throughput rose 1.12%, and CPU time moved from 92.133 to 90.695 seconds, 1.56%
+lower. Four default-five pairs moved from 21.651 to 21.555 seconds, 0.44% lower,
+with three candidate wins; the 0.74% CPU increase and working-set movement were
+within the short-run noise floor.
+These A/B scripts omit `--start` and therefore use the CLI default `--start 0`;
+their 160-frame times must not be compared directly with the frame-100 matrix.
+
+The 1,000-frame Exact `current --threads 20` pair moved from 42.463 to 42.221
+seconds, a 0.57% wall-time reduction. CPU time moved from 351.297 to 347.672
+seconds, 1.03% lower, and peak working set moved from 439.2 to 437.7 MiB. This
+establishes bounded behavior for this gate, not a general memory-reduction claim.
+Six baseline/candidate thread-gate runs covered `--threads 0`, default-five, and
+`--threads 32`; all nine surfaces matched.
+
+An independent checked-index float32 reference test covers 5, 8, 10, 31, 32,
+33, and 64 sections with a fixed input bit pattern. Its aggregate SHA-256 is
+`61A8966C55B1331509E0A60D6B731FA125F9406185C2C4AAF4E4CBC42F16C80D`, and it
+passes both normally and with all .NET hardware intrinsics disabled.
 
 ### Reverse-free managed float32 SOS second pass
 
@@ -482,6 +514,9 @@ the identical sample sequence and initial endpoint while removing two complete
 buffer reversals. The one-, two-, four-, and generic-section kernels retain the
 same per-sample section order, expressions, conversions, and recursive-state
 updates; no FMA, SIMD reassociation, or precision change was introduced.
+This earlier candidate was based on merged main `73dd014`; its measured source
+blob was `c3aac76922ad525884cf26779b2035db76248547`, and its baseline blob was
+`766e0926fec7c07bb2bc0a20c0c39824b8f05996`.
 
 Twenty-one opposite-order 32K microbenchmark pairs covered two, four, and five
 SOS sections. Baseline/candidate medians were 154.540/151.793 microseconds
@@ -3217,7 +3252,7 @@ Requirements:
 .\tools\build-ipp-native.ps1
 dotnet restore VHSDecodeDotNet.slnx
 dotnet build VHSDecodeDotNet.slnx -c Release --no-restore
-dotnet test --solution VHSDecodeDotNet.slnx -c Release --no-build --no-restore --minimum-expected-tests 1416
+dotnet test --solution VHSDecodeDotNet.slnx -c Release --no-build --no-restore --minimum-expected-tests 1417
 dotnet test --project tests\VHSDecode.Tests\VHSDecode.Tests.csproj -c Release --no-build --no-restore --coverage --coverage-output coverage.cobertura.xml --coverage-output-format cobertura
 ```
 
@@ -3231,7 +3266,7 @@ deployment computer. Binary-only single-file releases embed
 sidecar license files. An Exact-only build may omit the native build step.
 
 The current formal Release build has zero warnings and errors. The xUnit v3
-project exposes **1,416** independently discoverable tests to both
+project exposes **1,417** independently discoverable tests to both
 `dotnet test` and Visual Studio Test Explorer.
 
 <!-- SECTION: usage -->

@@ -8,6 +8,9 @@ public sealed partial class ReadmeLocalizationTests
     private const string LatestPerformanceRunsMarker =
         "<!-- LATEST_PERFORMANCE_RUNS: full-interleaved-matrix-runs=90 " +
         "dotnet-matrix-runs=60 python-matrix-runs=30 repeats=3 " +
+        "sos-state-current-160-ab-pairs=6 sos-state-default-160-ab-pairs=4 " +
+        "sos-state-current-1000-ab-pairs=1 sos-state-thread-gate-runs=6 " +
+        "sos-state-jit-disassemblies=2 sos-state-focused-test-runs=2 " +
         "sos-reverse-32k-microbench-pairs=21 sos-reverse-current-160-ab-pairs=8 " +
         "sos-reverse-v040-160-ab-pairs=1 sos-reverse-current-1000-ab-pairs=1 " +
         "sos-reverse-thread-gate-runs=6 sos-focused-test-runs=80 " +
@@ -16,7 +19,7 @@ public sealed partial class ReadmeLocalizationTests
 
     private const string FullCiTestCommand =
         "run: dotnet test --solution VHSDecodeDotNet.slnx --configuration Release " +
-        "--no-build --no-restore --minimum-expected-tests 1416";
+        "--no-build --no-restore --minimum-expected-tests 1417";
 
     private static readonly string[] OverviewReadmeFiles =
     [
@@ -116,34 +119,34 @@ public sealed partial class ReadmeLocalizationTests
         Assert.Equal(3, expectedDetailedCommands.Length);
         string[] expectedOverviewPerformanceRows =
         [
-            "45.606 s | 45.016 s | 13.011 s | 3.505x | 12.923 s | 3.483x | 11.258 s | 4.051x | 9.587 s | 4.696x",
-            "54.879 s | 54.384 s | 33.368 s | 1.645x | 39.728 s | 1.369x | 23.483 s | 2.337x | 26.438 s | 2.057x",
-            "45.778 s | 45.025 s | 12.904 s | 3.548x | 12.631 s | 3.565x | 11.388 s | 4.020x | 9.610 s | 4.685x",
-            "45.931 s | 47.263 s | 10.199 s | 4.504x | 9.663 s | 4.891x | 9.455 s | 4.858x | 7.582 s | 6.234x",
-            "47.305 s | 47.643 s | 8.360 s | 5.659x | 8.040 s | 5.926x | 7.929 s | 5.966x | 5.874 s | 8.110x"
+            "46.064 s | 45.418 s | 13.109 s | 3.514x | 12.868 s | 3.530x | 11.499 s | 4.006x | 9.725 s | 4.670x",
+            "55.170 s | 55.257 s | 33.228 s | 1.660x | 39.682 s | 1.393x | 23.625 s | 2.335x | 26.775 s | 2.064x",
+            "46.247 s | 45.834 s | 13.377 s | 3.457x | 12.807 s | 3.579x | 11.552 s | 4.003x | 9.842 s | 4.657x",
+            "47.318 s | 48.504 s | 10.567 s | 4.478x | 9.664 s | 5.019x | 9.637 s | 4.910x | 7.933 s | 6.114x",
+            "48.349 s | 48.631 s | 8.675 s | 5.574x | 8.134 s | 5.979x | 8.290 s | 5.832x | 6.110 s | 7.959x"
         ];
         string[] expectedDetailedPerformanceRows =
         [
-            "45.606 s | 45.016 s | 13.011 s | 3.505x | 71.47% | 12.923 s | 3.483x | 71.29% | 11.258 s | 4.051x | 75.32% | 9.587 s | 4.696x | 78.70%",
-            "54.879 s | 54.384 s | 33.368 s | 1.645x | 39.20% | 39.728 s | 1.369x | 26.95% | 23.483 s | 2.337x | 57.21% | 26.438 s | 2.057x | 51.39%",
-            "45.778 s | 45.025 s | 12.904 s | 3.548x | 71.81% | 12.631 s | 3.565x | 71.95% | 11.388 s | 4.020x | 75.12% | 9.610 s | 4.685x | 78.66%",
-            "45.931 s | 47.263 s | 10.199 s | 4.504x | 77.80% | 9.663 s | 4.891x | 79.56% | 9.455 s | 4.858x | 79.42% | 7.582 s | 6.234x | 83.96%",
-            "47.305 s | 47.643 s | 8.360 s | 5.659x | 82.33% | 8.040 s | 5.926x | 83.12% | 7.929 s | 5.966x | 83.24% | 5.874 s | 8.110x | 87.67%"
+            "46.064 s | 45.418 s | 13.109 s | 3.514x | 71.54% | 12.868 s | 3.530x | 71.67% | 11.499 s | 4.006x | 75.04% | 9.725 s | 4.670x | 78.59%",
+            "55.170 s | 55.257 s | 33.228 s | 1.660x | 39.77% | 39.682 s | 1.393x | 28.19% | 23.625 s | 2.335x | 57.18% | 26.775 s | 2.064x | 51.54%",
+            "46.247 s | 45.834 s | 13.377 s | 3.457x | 71.07% | 12.807 s | 3.579x | 72.06% | 11.552 s | 4.003x | 75.02% | 9.842 s | 4.657x | 78.53%",
+            "47.318 s | 48.504 s | 10.567 s | 4.478x | 77.67% | 9.664 s | 5.019x | 80.08% | 9.637 s | 4.910x | 79.63% | 7.933 s | 6.114x | 83.64%",
+            "48.349 s | 48.631 s | 8.675 s | 5.574x | 82.06% | 8.134 s | 5.979x | 83.27% | 8.290 s | 5.832x | 82.85% | 6.110 s | 7.959x | 87.44%"
         ];
         string[] expectedDetailedPerformanceRangeRows =
         [
-            "default 5 | 45.292-45.719 s | 44.702-45.430 s | 12.872-13.038 s | 12.785-12.980 s | 11.205-11.299 s | 9.502-9.829 s",
-            "threads 1 | 53.123-55.580 s | 53.702-55.065 s | 32.908-33.664 s | 38.980-40.310 s | 23.385-23.827 s | 26.277-26.968 s",
-            "threads 5 | 44.828-48.282 s | 44.835-45.263 s | 12.836-13.760 s | 12.232-13.261 s | 11.343-11.472 s | 9.595-9.755 s",
-            "threads 10 | 45.786-46.675 s | 47.005-47.978 s | 10.098-10.905 s | 9.113-9.737 s | 9.314-9.510 s | 7.306-7.613 s",
-            "threads 20 | 46.999-48.039 s | 47.145-48.402 s | 8.187-8.412 s | 7.711-8.370 s | 7.765-8.018 s | 5.681-6.051 s"
+            "default 5 | 45.911-54.463 s | 45.405-47.220 s | 13.036-13.172 s | 12.387-13.103 s | 11.483-11.612 s | 9.677-9.886 s",
+            "threads 1 | 55.119-55.574 s | 54.950-56.213 s | 33.115-33.589 s | 39.507-39.820 s | 23.584-23.656 s | 26.577-27.093 s",
+            "threads 5 | 45.841-47.028 s | 45.621-45.887 s | 13.031-13.743 s | 12.598-12.880 s | 11.498-11.841 s | 9.646-9.855 s",
+            "threads 10 | 46.972-47.470 s | 48.455-48.504 s | 10.477-11.007 s | 9.590-9.704 s | 9.571-9.716 s | 7.636-7.943 s",
+            "threads 20 | 48.179-48.460 s | 47.972-48.893 s | 8.626-8.675 s | 7.605-8.418 s | 8.202-8.381 s | 6.058-6.212 s"
         ];
 
         string[] overviewFacts =
         [
             "43155200da87c0d49eb37d8ec09b1372075ee8e4",
             "11.0.100-preview.6.26359.118",
-            "**1,416**",
+            "**1,417**",
             "--compat-version",
             "current",
             "--dsp-backend",
@@ -152,19 +155,20 @@ public sealed partial class ReadmeLocalizationTests
             "Exact + current",
             "IPP-fast + v0.4.0",
             "IPP-fast + current",
-            "73dd014",
-            "45.606 s",
-            "45.016 s",
-            "13.011 s",
-            "12.923 s",
-            "4.696x",
-            "8.110x",
-            "2.43%",
-            "2.49%",
-            "2.69%",
-            "39.242",
-            "37.908",
-            "3.40%",
+            "--start 100",
+            "3e01fdd",
+            "46.064 s",
+            "45.418 s",
+            "13.109 s",
+            "12.868 s",
+            "4.670x",
+            "7.959x",
+            "1.10%",
+            "1.12%",
+            "1.56%",
+            "42.463",
+            "42.221",
+            "0.57%",
             "g4315520",
             "--threads 0"
         ];
@@ -198,6 +202,29 @@ public sealed partial class ReadmeLocalizationTests
             "0.63%",
             "441.6/443.7 MiB",
             "579.7/563.4 MiB",
+            "--start 100",
+            "--start 0",
+            "3e01fdd",
+            "91abe61510d3c51f3b25ae4577f47291b57fb149",
+            "11.499",
+            "11.373",
+            "1.10%",
+            "1.12%",
+            "92.133",
+            "90.695",
+            "1.56%",
+            "21.651",
+            "21.555",
+            "0.44%",
+            "42.463",
+            "42.221",
+            "0.57%",
+            "351.297",
+            "347.672",
+            "1.03%",
+            "439.2",
+            "437.7 MiB",
+            "61A8966C55B1331509E0A60D6B731FA125F9406185C2C4AAF4E4CBC42F16C80D",
             "73dd014",
             "c3aac76922ad525884cf26779b2035db76248547",
             "766e0926fec7c07bb2bc0a20c0c39824b8f05996",
@@ -256,7 +283,7 @@ public sealed partial class ReadmeLocalizationTests
             "1.72%",
             "444.3 MiB",
             "406.0 MiB",
-            "**1,416**",
+            "**1,417**",
             "3.7935",
             "3.6182",
             "4.62%",
@@ -990,7 +1017,7 @@ public sealed partial class ReadmeLocalizationTests
             "The shared compatibility evidence document is missing.");
         string compatibilityEvidence = File.ReadAllText(compatibilityEvidencePath);
         Assert.Contains(
-            "1,416 independently discoverable tests",
+            "1,417 independently discoverable tests",
             compatibilityEvidence,
             StringComparison.Ordinal);
         Assert.DoesNotContain(

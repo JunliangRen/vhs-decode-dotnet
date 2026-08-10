@@ -1,4 +1,6 @@
 using System.Buffers;
+using System.Runtime.CompilerServices;
+using System.Runtime.InteropServices;
 using System.Runtime.Intrinsics.X86;
 
 namespace VHSDecode.Core.Dsp;
@@ -683,6 +685,7 @@ public static class SosFilter
             states[stateOffset + 1] = initialConditions[stateOffset + 1];
         }
 
+        ref float stateReference = ref MemoryMarshal.GetReference(states);
         for (int sample = 0; sample < values.Length; sample++)
         {
             float value = values[sample];
@@ -690,10 +693,13 @@ public static class SosFilter
             {
                 FloatSosSection section = sections[sectionIndex];
                 int stateOffset = sectionIndex * 2;
-                float filtered = (section.B0 * value) + states[stateOffset];
-                states[stateOffset] =
-                    (section.B1 * value) - (section.A1 * filtered) + states[stateOffset + 1];
-                states[stateOffset + 1] = (section.B2 * value) - (section.A2 * filtered);
+                float filtered =
+                    (section.B0 * value) + Unsafe.Add(ref stateReference, stateOffset);
+                Unsafe.Add(ref stateReference, stateOffset) =
+                    (section.B1 * value) - (section.A1 * filtered) +
+                    Unsafe.Add(ref stateReference, stateOffset + 1);
+                Unsafe.Add(ref stateReference, stateOffset + 1) =
+                    (section.B2 * value) - (section.A2 * filtered);
                 value = filtered;
             }
 
@@ -804,6 +810,7 @@ public static class SosFilter
             states[stateOffset + 1] = initialConditions[stateOffset + 1];
         }
 
+        ref float stateReference = ref MemoryMarshal.GetReference(states);
         for (int sample = values.Length - 1; sample >= 0; sample--)
         {
             float value = values[sample];
@@ -811,10 +818,13 @@ public static class SosFilter
             {
                 FloatSosSection section = sections[sectionIndex];
                 int stateOffset = sectionIndex * 2;
-                float filtered = (section.B0 * value) + states[stateOffset];
-                states[stateOffset] =
-                    (section.B1 * value) - (section.A1 * filtered) + states[stateOffset + 1];
-                states[stateOffset + 1] = (section.B2 * value) - (section.A2 * filtered);
+                float filtered =
+                    (section.B0 * value) + Unsafe.Add(ref stateReference, stateOffset);
+                Unsafe.Add(ref stateReference, stateOffset) =
+                    (section.B1 * value) - (section.A1 * filtered) +
+                    Unsafe.Add(ref stateReference, stateOffset + 1);
+                Unsafe.Add(ref stateReference, stateOffset + 1) =
+                    (section.B2 * value) - (section.A2 * filtered);
                 value = filtered;
             }
 
