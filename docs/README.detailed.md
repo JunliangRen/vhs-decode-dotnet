@@ -2989,7 +2989,12 @@ incomparable.
 
 The sync analyzer now seeds four `List<ClassifiedSyncPulse>`/`List<double>`
 instances from already known input or slice bounds. Pulse order, filtering,
-VBlank state, and every numerical expression are unchanged. The `current`
+VBlank state, and every numerical expression are unchanged. Initial capacity is
+capped at 65,536 entries, so malformed high-noise input cannot reserve an
+unbounded classified-pulse backing array up front; a genuinely larger accepted
+result grows normally. The existing focused xUnit v3 case now feeds one million
+rejected pulses and gates classification below 2 MiB and refinement, including
+its required raw-pulse copy, below 12 MiB. The `current`
 chroma phase builder now allocates its final `ChromaPhaseLine[]` once and fills
 the independent prefix directly in parallel before the original ordered state
 machine continues in that same array. The former prefix array, list backing

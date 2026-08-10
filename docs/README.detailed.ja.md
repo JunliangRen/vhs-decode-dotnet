@@ -2847,7 +2847,12 @@ homepage table は前回の complete five-path matrix のままです。この�
 
 sync analyzer は、既知の input/slice bound から 4 個の
 `List<ClassifiedSyncPulse>`/`List<double>` capacity を設定するようになりました。
-pulse order、filter、VBlank state、数値式は変更していません。`current` chroma phase
+pulse order、filter、VBlank state、数値式は変更していません。initial capacity は
+65,536 entry を上限とし、malformed high-noise input が全 raw pulse 数に比例した
+classified-pulse backing array を先に確保することを防ぎます。実際に大きい accepted
+result は通常どおり grow します。既存の focused xUnit v3 case は 100 万 rejected pulse
+を入力し、classification を 2 MiB 未満、必要な raw-pulse copy を含む refinement を
+12 MiB 未満に gate します。`current` chroma phase
 builder は final `ChromaPhaseLine[]` を 1 回だけ確保し、独立な parallel prefix をその
 配列へ直接書いた後、元の ordered state machine が同じ配列を継続して埋めます。以前の
 prefix array、List backing array、最後の `ToArray()` copy はなくなりました。parallel

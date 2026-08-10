@@ -2364,7 +2364,10 @@ stderr、时间戳归一化日志和全部 2,000 个有序 `fileLoc` 完全一�
 
 同步分析器现在按已经明确的输入或切片上限，为四个
 `List<ClassifiedSyncPulse>`/`List<double>` 预设容量；脉冲顺序、筛选、VBlank 状态和
-全部数值表达式均未改变。`current` 色度相位构建器只分配一次最终
+全部数值表达式均未改变。初始容量最多为 65,536 项，因此异常高噪声输入不会按全部
+原始脉冲数预留无界的 classified-pulse backing array；确实需要更多有效结果时仍可正常
+增长。现有聚焦 xUnit v3 用例加入一百万个被拒绝脉冲，将分类分配限制在 2 MiB 以内，
+并将含必要原始脉冲副本的 refine 分配限制在 12 MiB 以内。`current` 色度相位构建器只分配一次最终
 `ChromaPhaseLine[]`，并行前缀直接写入该数组，随后原有有序状态机继续写同一数组。
 此前的前缀数组、List backing array 与最终 `ToArray()` 复制均被移除。并行 probe 的
 异常槽仅在真正发生异常时创建，并仍按最低输入行号重新抛出。
