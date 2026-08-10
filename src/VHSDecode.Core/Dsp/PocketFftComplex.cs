@@ -373,14 +373,10 @@ public static class PocketFftComplex
     public static Complex[] ForwardReal(ReadOnlySpan<double> input)
     {
         ValidateLength(input.Length, nameof(input));
-        var values = new Complex[input.Length];
-        for (int i = 0; i < values.Length; i++)
-        {
-            values[i] = new Complex(input[i], 0.0);
-        }
-
-        return Plans.GetOrAdd(input.Length, static length => new Plan(length))
-            .Transform(values, forward: true);
+        var output = new Complex[input.Length];
+        Plans.GetOrAdd(input.Length, static length => new Plan(length))
+            .TransformReal(input, output);
+        return output;
     }
 
     internal static void ForwardReal(
@@ -395,13 +391,8 @@ public static class PocketFftComplex
                 nameof(output));
         }
 
-        for (int i = 0; i < output.Length; i++)
-        {
-            output[i] = new Complex(input[i], 0.0);
-        }
-
         Plans.GetOrAdd(input.Length, static length => new Plan(length))
-            .Transform(output, output, forward: true);
+            .TransformReal(input, output);
     }
 
     public static Complex[] Inverse(ReadOnlySpan<Complex> input)
@@ -506,6 +497,36 @@ public static class PocketFftComplex
                 scratch,
                 forward,
                 forward ? 1.0 : 1.0 / _length);
+            for (int i = 0; i < output.Length; i++)
+            {
+                output[i] = new Complex(transformed[i].Real, transformed[i].Imaginary);
+            }
+        }
+
+        public void TransformReal(ReadOnlySpan<double> input, Span<Complex> output)
+        {
+            if (input.Length != _length)
+            {
+                throw new ArgumentException("FFT input length does not match the plan length.", nameof(input));
+            }
+
+            if (output.Length != _length)
+            {
+                throw new ArgumentException("FFT output length does not match the plan length.", nameof(output));
+            }
+
+            Value[] values = EnsureCapacity(ref _planValues, _length);
+            Value[] scratch = EnsureCapacity(ref _planScratch, _length);
+            for (int i = 0; i < _length; i++)
+            {
+                values[i] = new Value(input[i], 0.0);
+            }
+
+            Value[] transformed = Execute(
+                values,
+                scratch,
+                forward: true,
+                normalization: 1.0);
             for (int i = 0; i < output.Length; i++)
             {
                 output[i] = new Complex(transformed[i].Real, transformed[i].Imaginary);
