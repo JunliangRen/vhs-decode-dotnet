@@ -187,6 +187,36 @@ public sealed class VhsChromaAutomaticGainCurrentTests
                     actual.Select(BitConverter.DoubleToUInt64Bits));
             }
         }
+
+        foreach (double zeroGain in new[] { 0.0, -0.0 })
+        {
+            double[] expected =
+            [
+                double.MaxValue,
+                -double.MaxValue,
+                double.MaxValue / 2.0,
+                -double.MaxValue / 2.0
+            ];
+            for (int index = 0; index < expected.Length; index++)
+            {
+                expected[index] = (float)((float)expected[index] * zeroGain);
+            }
+
+            double[] actual =
+            [
+                double.MaxValue,
+                -double.MaxValue,
+                double.MaxValue / 2.0,
+                -double.MaxValue / 2.0
+            ];
+            VhsChromaDecoder.ApplyCurrentAutomaticChromaGainSegmentInPlace(
+                actual,
+                zeroGain,
+                gainIncrement: 0.0);
+            Assert.Equal(
+                expected.Select(BitConverter.DoubleToUInt64Bits),
+                actual.Select(BitConverter.DoubleToUInt64Bits));
+        }
     }
 
     [Fact(DisplayName = "Parallel current chroma ACC preserves non-monotonic fallback behavior")]

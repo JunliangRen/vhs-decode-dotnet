@@ -1404,6 +1404,7 @@ public sealed class DspWorkingBufferTests
                 "045079F57F8866CAA969AE1E2B302D740E524DD0F88F3D472FB05E0742CDA9F4")
         ];
         Span<byte> lengthBytes = stackalloc byte[sizeof(int)];
+        var hashMismatches = new List<string>();
         foreach ((int sectionCount, string hardwareHash, string scalarHash) in edgeCases)
         {
             SosSection[] edgeSections = Enumerable.Repeat(identitySection, sectionCount).ToArray();
@@ -1423,8 +1424,17 @@ public sealed class DspWorkingBufferTests
 
             // The AVX and non-AVX JITs preserve different legacy NaN payloads.
             string expectedHash = Avx.IsSupported ? hardwareHash : scalarHash;
-            Assert.Equal(expectedHash, Convert.ToHexString(aggregate.GetHashAndReset()));
+            string actualHash = Convert.ToHexString(aggregate.GetHashAndReset());
+            if (!string.Equals(expectedHash, actualHash, StringComparison.Ordinal))
+            {
+                hashMismatches.Add(
+                    $"sections={sectionCount}: expected {expectedHash}, actual {actualHash}");
+            }
         }
+
+        Assert.True(
+            hashMismatches.Count == 0,
+            string.Join(Environment.NewLine, hashMismatches));
     }
 
     [Fact(DisplayName = "Float32 SOS generic state access matches the checked reference")]

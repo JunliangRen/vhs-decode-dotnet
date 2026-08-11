@@ -119,8 +119,8 @@ default は **5 workers** です。3-run range は
 revision A/B で判断します。
 
 最新の isolated change は、独立した `current` chroma ACC sample scaling を managed AVX で
-処理します。scalar gain recurrence、float32 conversion point、non-finite fallback、operation
-order は維持し、FMA は使いません。interleaved 1,000-frame Exact
+処理します。scalar gain recurrence order、per-sample expression、float32 conversion point、
+non-finite fallback は維持し、FMA は使いません。interleaved 1,000-frame Exact
 `current --threads 20` 5 pair のうち candidate は 4 pair で勝ち、独立した 2 session の wall
 median は 0.97% と 0.57% 改善しました。IPP-fast 2 pair は 1.63% 高速で CPU time は 3.44%
 減少しました。全 compatibility surface は一致し、thread gate は通過し、memory は既存の

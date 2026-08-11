@@ -123,8 +123,8 @@ using another fixture or window are not directly comparable. Same-moment .NET
 revision A/B runs, rather than old ratio cells, determine causal regressions.
 
 The latest isolated change uses managed AVX for independent `current` chroma
-ACC sample scaling. The scalar gain recurrence, float32 conversion points,
-non-finite fallback, and operation order are unchanged, with no FMA. Across
+ACC sample scaling. The scalar gain recurrence order, per-sample expression,
+float32 conversion points, and non-finite fallback are unchanged, with no FMA. Across
 five interleaved 1,000-frame Exact `current --threads 20` pairs, the candidate
 won four; two independent session medians were 0.97% and 0.57% faster. Two
 IPP-fast pairs were 1.63% faster with 3.44% less CPU time. All compatibility
