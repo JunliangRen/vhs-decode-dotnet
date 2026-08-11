@@ -2229,7 +2229,7 @@ dotnet test --solution VHSDecodeDotNet.slnx --no-build
 ```
 
 The current formal solution build completes with zero warnings and errors, and
-the xUnit v3 project exposes 1,424 independently discoverable tests
+the xUnit v3 project exposes 1,425 independently discoverable tests
 to `dotnet test` and Visual Studio Test Explorer. On the
 same Windows machine and fixtures, Release wall-clock measurements for one
 frame were 2.346 s versus 7.193 s for NTSC VHS and 1.651 s versus 5.865 s for
@@ -2584,6 +2584,60 @@ libsndfile route is additionally limited to at most `Int32.MaxValue` samples;
 larger raw-FLAC captures use FFmpeg to preserve exact random access. Default
 HiFi FLAC output and LD `--write-test-ldf` still use bundled libsndfile. HiFi
 `.wav` and recognized raw input paths do not require either FFmpeg tool.
+
+### Direct segmented VHS envelope analysis
+
+For requests of 20 or more workers, staged VHS payload materialization now
+keeps the retained decoder blocks as the envelope source instead of first
+copying the complete RF envelope into the span workspace. The exact mean keeps
+the existing 128-sample recursive split, eight-lane float32 leaf reduction,
+conversion points, and addition order. Dropout detection keeps source index
+order, thresholds, hysteresis, merge distance, minimum length, and final range
+order. Lower worker counts retain the previous contiguous path, and explicit
+full materialization remains available to existing callers. A shared atomic
+idle/ordinary/staged state prevents ordinary cache operations and staged
+acquisition from entering together. Ordinary reads and explicit invalidation
+are rejected until the staged lease is disposed, so cache eviction cannot return
+referenced pooled block arrays prematurely.
+
+The high-worker xUnit test crosses block boundaries, proves that payload
+assembly leaves the destination envelope deferred, compares mean bits and
+several dropout windows against the contiguous implementation, then verifies
+the eventual full materialization. It also verifies cache-mutating operations
+are rejected while the lease is active and resume after disposal. A blocking
+loader regression starts an ordinary read first, proves staged acquisition is
+rejected, and holds maximum loader concurrency at one. A separate
+test fixes the prior path at one
+worker below the gate. All 1,425 standard xUnit v3 tests passed. The 13
+reduction and 34 block-cache tests also passed with all .NET hardware
+intrinsics disabled.
+
+Two opposite-order 1,000-frame Exact `current --threads 20` pairs each produced
+2,000 ordered fields. Exit status, luma, chroma, raw JSON, stdout, normalized
+stderr/log, and ordered `fileLoc` matched. Median wall time moved from 43.001 to
+42.880 seconds (0.28% lower), CPU time from 342.50 to 324.50 seconds (5.26%
+lower), and peak working set from 753.0 to 721.2 MiB. Two 160-frame v0.4.0
+pairs moved median wall time from 10.893 to 10.670 seconds (2.05% lower), CPU
+time from 78.44 to 77.49 seconds, and peak working set from 795.1 to 752.9 MiB.
+
+Read-only local review found the cache-ownership race before publication. Four
+opposite-order 1,000-frame pre/post-gate pairs matched all nine compatibility
+surfaces. Baseline/candidate wall medians were 39.770/39.932 seconds; paired
+changes were +0.94%, +1.15%, -1.04%, and -0.03%, splitting two wins each.
+Median CPU time moved from 320.23 to 314.67 seconds (1.74% lower), and median
+peak working set from 405.25 to 399.84 MiB. The final atomic gate is classified
+as performance-neutral. The final CRLF-normalized 103,562,852-byte executable
+has SHA-256 `17A2A5306BD2DA34B92D5FF19ECA68D91B7B9BE450A37A09E6A628AB5CFD455D`.
+
+Four separately packaged 160-frame Exact `current` pairs split two wins each.
+Their baseline/candidate wall medians were 7.691/7.909 seconds and CPU medians
+were 67.50/68.02 seconds, with contradictory pair directions. That short-window
+result is classified as inconclusive, not a speedup or regression. The final
+90-run overview matrix started from zero with one candidate binary and three
+complete measurements per cell. All 60 .NET runs and all 15 Python PR341 runs
+were deterministic within each profile; Python v0.4.0 again produced 15
+different luma, chroma, JSON, and normalized-log hash sets in 15 runs. The
+strict oracle therefore remains Python v0.4.0 `g4315520 --threads 0`.
 
 ### Direct-output managed double PocketFFT
 

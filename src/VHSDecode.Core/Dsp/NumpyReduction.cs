@@ -203,6 +203,9 @@ internal static class NumpyReduction
         return PairwiseSumFloat32(values) / values.Length;
     }
 
+    internal static float SumFloat32(ReadOnlySpan<double> values)
+        => PairwiseSumFloat32(values);
+
     public static (float Mean, float StandardDeviation) MeanStandardDeviationFloat32(
         ReadOnlySpan<float> values)
     {
