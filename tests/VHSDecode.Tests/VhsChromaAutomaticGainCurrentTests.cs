@@ -190,6 +190,7 @@ public sealed class VhsChromaAutomaticGainCurrentTests
 
         foreach (double zeroGain in new[] { 0.0, -0.0 })
         {
+            double expectedGain = zeroGain;
             double[] expected =
             [
                 double.MaxValue,
@@ -199,7 +200,8 @@ public sealed class VhsChromaAutomaticGainCurrentTests
             ];
             for (int index = 0; index < expected.Length; index++)
             {
-                expected[index] = (float)((float)expected[index] * zeroGain);
+                expected[index] = (float)((float)expected[index] * expectedGain);
+                expectedGain += 0.0;
             }
 
             double[] actual =
