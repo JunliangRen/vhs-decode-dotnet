@@ -328,6 +328,9 @@ public static class VhsChromaDecoder
         VhsChromaCarrierTableCache.BurstProbeBufferCapacity;
     private const double TrackChangeThresholdDegrees = 90.0;
     private const double S16AbsMax = 32767.0;
+    private static readonly Vector256<double> DoubleAbsoluteValueMask = Vector256.Create(
+        BitConverter.UInt64BitsToDouble(0x7FFF_FFFF_FFFF_FFFFUL));
+    private static readonly Vector256<double> DoubleMaximumFinite = Vector256.Create(double.MaxValue);
 
     public static ushort[] ChromaToU16(ReadOnlySpan<double> chroma)
     {
@@ -2675,12 +2678,10 @@ public static class VhsChromaDecoder
             }
 
             double gainIncrement = (gainEnd - gainStart) / length;
-            double gain = gainStart;
-            for (int sample = segmentStart; sample < segmentEnd; sample++)
-            {
-                chroma[sample] = (float)((float)chroma[sample] * gain);
-                gain += gainIncrement;
-            }
+            ApplyCurrentAutomaticChromaGainSegmentInPlace(
+                chroma[segmentStart..segmentEnd],
+                gainStart,
+                gainIncrement);
 
             (int syncStart, int syncEnd) = GetNumpySliceRange(
                 chroma.Length,
@@ -2792,12 +2793,12 @@ public static class VhsChromaDecoder
                                 }
 
                                 double gainIncrement = (gainEnd - gainStart) / length;
-                                double gain = gainStart;
-                                for (int sample = segmentStart; sample < segmentEnd; sample++)
-                                {
-                                    workerChroma[sample] = (float)((float)workerChroma[sample] * gain);
-                                    gain += gainIncrement;
-                                }
+                                ApplyCurrentAutomaticChromaGainSegmentInPlace(
+                                    new Span<double>(
+                                        workerChroma + segmentStart,
+                                        segmentEnd - segmentStart),
+                                    gainStart,
+                                    gainIncrement);
 
                                 (int syncStart, int syncEnd) = GetNumpySliceRange(
                                     chromaLength,
@@ -2946,6 +2947,69 @@ public static class VhsChromaDecoder
         }
 
         return true;
+    }
+
+    internal static void ApplyCurrentAutomaticChromaGainSegmentInPlace(
+        Span<double> chroma,
+        double gainStart,
+        double gainIncrement)
+    {
+        int sample = 0;
+        double gain = gainStart;
+        if (Avx.IsSupported)
+        {
+            ref double chromaReference = ref MemoryMarshal.GetReference(chroma);
+            int vectorizedEnd = chroma.Length & ~3;
+            for (; sample < vectorizedEnd; sample += 4)
+            {
+                double gain0 = gain;
+                gain += gainIncrement;
+                double gain1 = gain;
+                gain += gainIncrement;
+                double gain2 = gain;
+                gain += gainIncrement;
+                double gain3 = gain;
+                gain += gainIncrement;
+
+                Vector256<double> values = Vector256.LoadUnsafe(
+                    ref chromaReference,
+                    (nuint)sample);
+                Vector256<double> gains = Vector256.Create(
+                    gain0,
+                    gain1,
+                    gain2,
+                    gain3);
+                Vector256<double> finiteValues = Avx.Compare(
+                    Avx.And(values, DoubleAbsoluteValueMask),
+                    DoubleMaximumFinite,
+                    FloatComparisonMode.OrderedLessThanOrEqualNonSignaling);
+                Vector256<double> finiteGains = Avx.Compare(
+                    Avx.And(gains, DoubleAbsoluteValueMask),
+                    DoubleMaximumFinite,
+                    FloatComparisonMode.OrderedLessThanOrEqualNonSignaling);
+                if (Avx.MoveMask(Avx.And(finiteValues, finiteGains)) == 0b1111)
+                {
+                    Vector256<double> float32Values = Avx.ConvertToVector256Double(
+                        Avx.ConvertToVector128Single(values));
+                    Vector256<double> scaled = Avx.Multiply(float32Values, gains);
+                    Avx.ConvertToVector256Double(
+                            Avx.ConvertToVector128Single(scaled))
+                        .StoreUnsafe(ref chromaReference, (nuint)sample);
+                    continue;
+                }
+
+                chroma[sample] = (float)((float)chroma[sample] * gain0);
+                chroma[sample + 1] = (float)((float)chroma[sample + 1] * gain1);
+                chroma[sample + 2] = (float)((float)chroma[sample + 2] * gain2);
+                chroma[sample + 3] = (float)((float)chroma[sample + 3] * gain3);
+            }
+        }
+
+        for (; sample < chroma.Length; sample++)
+        {
+            chroma[sample] = (float)((float)chroma[sample] * gain);
+            gain += gainIncrement;
+        }
     }
 
     internal static ushort[] ApplyAutomaticChromaGainToU16(

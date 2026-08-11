@@ -2,7 +2,7 @@
 
 **[English](README.md)** | [简体中文](README.zh-CN.md) | [日本語](README.ja.md)
 
-<!-- README_SYNC: 2026-08-12.01 -->
+<!-- README_SYNC: 2026-08-12.02 -->
 
 A .NET 11 rewrite of the decode-facing parts of
 [`oyvindln/vhs-decode`](https://github.com/oyvindln/vhs-decode), targeting
@@ -38,7 +38,7 @@ evidence, and remaining gaps.
   EIAJ, and supported PAL/NTSC variants.
 - TBC utility tools, the double-click GUI, and developer plotting windows are
   intentionally out of scope.
-- The Visual Studio 2026 `.slnx` solution has **1,425** standard xUnit v3 tests
+- The Visual Studio 2026 `.slnx` solution has **1,426** standard xUnit v3 tests
   that are visible in Test Explorer and runnable with `dotnet test`.
 
 <!-- SECTION: start -->
@@ -99,21 +99,21 @@ for compatibility-sensitive work.
 
 This startup-inclusive `--start 100 --length 160` snapshot uses one fixed private
 local 40 MHz PAL VHS `.ldf` fixture; its filename is intentionally not published.
-The unchanged Python reference columns are the pinned 2026-08-11 three-pass
-measurements. The 60 .NET Release measurements were refreshed on 2026-08-12
-with the performance candidate based on main `22b7750`, using the same forward,
+The Python reference and .NET v0.4.0 columns retain their pinned three-pass
+measurements. The 30 `current` .NET Release measurements were refreshed on
+2026-08-12 with the candidate based on main `fa869a6`, using the same forward,
 reverse, and mixed plan. Compatibility is evaluated separately from speed.
 
 <!-- LATEST_PERFORMANCE_BEGIN -->
 | CLI mode (workers) | Python v0.4.0 | Python PR341 | Exact + v0.4.0 | Exact + current | IPP-fast + v0.4.0 | IPP-fast + current |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| default (5) | 45.414 s | 45.060 s | 12.780 s / 3.553x | 12.004 s / 3.754x | 11.331 s / 4.008x | 9.489 s / 4.748x |
-| `--threads 1` | 52.323 s | 52.579 s | 32.579 s / 1.606x | 38.046 s / 1.382x | 23.712 s / 2.207x | 26.139 s / 2.011x |
-| `--threads 5` | 45.991 s | 44.990 s | 12.575 s / 3.658x | 11.984 s / 3.754x | 11.387 s / 4.039x | 9.556 s / 4.708x |
-| `--threads 10` | 47.385 s | 47.713 s | 10.006 s / 4.736x | 9.988 s / 4.777x | 9.540 s / 4.967x | 7.520 s / 6.344x |
-| `--threads 20` | 48.459 s | 47.490 s | 8.263 s / 5.864x | 7.666 s / 6.195x | 7.933 s / 6.109x | 5.802 s / 8.185x |
+| default (5) | 45.414 s | 45.060 s | 12.780 s / 3.553x | 12.235 s / 3.683x | 11.331 s / 4.008x | 9.521 s / 4.733x |
+| `--threads 1` | 52.323 s | 52.579 s | 32.579 s / 1.606x | 36.713 s / 1.432x | 23.712 s / 2.207x | 25.404 s / 2.070x |
+| `--threads 5` | 45.991 s | 44.990 s | 12.575 s / 3.658x | 11.828 s / 3.804x | 11.387 s / 4.039x | 9.353 s / 4.810x |
+| `--threads 10` | 47.385 s | 47.713 s | 10.006 s / 4.736x | 9.734 s / 4.902x | 9.540 s / 4.967x | 7.609 s / 6.271x |
+| `--threads 20` | 48.459 s | 47.490 s | 8.263 s / 5.864x | 7.715 s / 6.156x | 7.933 s / 6.109x | 5.852 s / 8.115x |
 <!-- LATEST_PERFORMANCE_END -->
-<!-- LATEST_PERFORMANCE_RUNS: performance-snapshot-runs=90 dotnet-matrix-runs=60 python-reference-runs=30 dotnet-repeats=3 python-reference-date=2026-08-11 dotnet-matrix-date=2026-08-12 radix-pointer-current-320-ab-pairs=4 radix-pointer-current-1000-ab-pairs=2 radix-pointer-default-320-ab-pairs=1 radix-pointer-sync-tests=34 radix-pointer-intrinsic-modes=2 python-v040-runs=15 python-v040-hashes=15 python-pr341-runs=15 python-pr341-hashes=1 -->
+<!-- LATEST_PERFORMANCE_RUNS: performance-snapshot-runs=90 dotnet-matrix-runs=60 python-reference-runs=30 dotnet-repeats=3 python-reference-date=2026-08-11 dotnet-v040-date=2026-08-12 dotnet-current-date=2026-08-12 current-acc-matrix-runs=30 current-acc-exact-1000-ab-pairs=5 current-acc-ipp-1000-ab-pairs=2 current-acc-thread-gates=4 current-acc-tests=15 current-acc-intrinsic-modes=3 python-v040-runs=15 python-v040-hashes=15 python-pr341-runs=15 python-pr341-hashes=1 -->
 
 Each .NET cell shows median wall time and speedup versus its profile-matched
 Python column. The default is **5 workers**; three-run ranges are in the
@@ -122,13 +122,14 @@ when either the .NET time or its Python denominator moves, and historical tables
 using another fixture or window are not directly comparable. Same-moment .NET
 revision A/B runs, rather than old ratio cells, determine causal regressions.
 
-The latest isolated change removes checked array addressing from worker-private
-`current` VHS radix histogram scans without changing partitions, sortable keys,
-exceptional-value fallback, or integer counts. Four interleaved 320-frame Exact
-`current --threads 20` pairs moved median wall time from 16.491 to 16.228 seconds
-and CPU time from 132.99 to 127.28 seconds. Two 1,000-frame pairs moved wall time
-from 40.321 to 39.842 seconds (1.19% lower) and CPU time from 325.28 to 317.73
-seconds; all nine compatibility surfaces matched and memory remained bounded.
+The latest isolated change uses managed AVX for independent `current` chroma
+ACC sample scaling. The scalar gain recurrence order, per-sample expression,
+float32 conversion points, and non-finite fallback are unchanged, with no FMA. Across
+five interleaved 1,000-frame Exact `current --threads 20` pairs, the candidate
+won four; two independent session medians were 0.97% and 0.57% faster. Two
+IPP-fast pairs were 1.63% faster with 3.44% less CPU time. All compatibility
+surfaces matched, thread gates passed, and memory remained within the existing
+bounded process window.
 
 Every .NET profile/thread cell was deterministic across its three refreshed
 runs. Merged Python PR341 was deterministic in its pinned reference set; Python
@@ -172,7 +173,7 @@ The pinned SDK is .NET `11.0.100-preview.6.26359.118`.
 dotnet restore VHSDecodeDotNet.slnx
 dotnet build VHSDecodeDotNet.slnx -c Release --no-restore
 dotnet test --solution VHSDecodeDotNet.slnx -c Release `
-  --no-build --no-restore --minimum-expected-tests 1425
+  --no-build --no-restore --minimum-expected-tests 1426
 ```
 
 Open `VHSDecodeDotNet.slnx` in Visual Studio 2026 to build, debug, and run the

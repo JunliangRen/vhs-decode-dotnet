@@ -143,6 +143,84 @@ public sealed class VhsChromaAutomaticGainCurrentTests
             BitConverter.DoubleToInt64Bits(actual.NoiseFloor));
     }
 
+    [Fact(DisplayName = "Current chroma ACC gain segment SIMD preserves scalar float32 bits")]
+    public void CurrentChromaAccGainSegmentSimdPreservesScalarFloat32Bits()
+    {
+        int[] lengths = [0, 1, 3, 4, 5, 7, 8, 9, 15, 16, 17, 255, 256, 257];
+        (double Gain, double Increment)[] gainCases =
+        [
+            (0.0, 0.0),
+            (-0.0, double.Epsilon),
+            (0.125, -0.000_031_25),
+            (1e20, -1e12),
+            (double.MaxValue, double.MaxValue),
+            (double.PositiveInfinity, 1.0),
+            (BitConverter.UInt64BitsToDouble(0x7FF8_0000_0000_0341UL), 0.5)
+        ];
+        var random = new Random(341);
+        foreach (int length in lengths)
+        {
+            var source = new double[length];
+            for (int index = 0; index < source.Length; index++)
+            {
+                source[index] = (float)((random.NextDouble() - 0.5) * 1e30);
+            }
+
+            SetExceptionalValues(source);
+            foreach ((double gainStart, double gainIncrement) in gainCases)
+            {
+                double[] expected = source.ToArray();
+                double gain = gainStart;
+                for (int index = 0; index < expected.Length; index++)
+                {
+                    expected[index] = (float)((float)expected[index] * gain);
+                    gain += gainIncrement;
+                }
+
+                double[] actual = source.ToArray();
+                VhsChromaDecoder.ApplyCurrentAutomaticChromaGainSegmentInPlace(
+                    actual,
+                    gainStart,
+                    gainIncrement);
+                Assert.Equal(
+                    expected.Select(BitConverter.DoubleToUInt64Bits),
+                    actual.Select(BitConverter.DoubleToUInt64Bits));
+            }
+        }
+
+        foreach (double zeroGain in new[] { 0.0, -0.0 })
+        {
+            double expectedGain = zeroGain;
+            double[] expected =
+            [
+                double.MaxValue,
+                -double.MaxValue,
+                double.MaxValue / 2.0,
+                -double.MaxValue / 2.0
+            ];
+            for (int index = 0; index < expected.Length; index++)
+            {
+                expected[index] = (float)((float)expected[index] * expectedGain);
+                expectedGain += 0.0;
+            }
+
+            double[] actual =
+            [
+                double.MaxValue,
+                -double.MaxValue,
+                double.MaxValue / 2.0,
+                -double.MaxValue / 2.0
+            ];
+            VhsChromaDecoder.ApplyCurrentAutomaticChromaGainSegmentInPlace(
+                actual,
+                zeroGain,
+                gainIncrement: 0.0);
+            Assert.Equal(
+                expected.Select(BitConverter.DoubleToUInt64Bits),
+                actual.Select(BitConverter.DoubleToUInt64Bits));
+        }
+    }
+
     [Fact(DisplayName = "Parallel current chroma ACC preserves non-monotonic fallback behavior")]
     public void ParallelCurrentChromaAccPreservesNonMonotonicFallbackBehavior()
     {
@@ -306,6 +384,30 @@ public sealed class VhsChromaAutomaticGainCurrentTests
         }
 
         return NumpyReduction.MedianFloat64(values);
+    }
+
+    private static void SetExceptionalValues(Span<double> values)
+    {
+        ulong[] bits =
+        [
+            0x0000_0000_0000_0000UL,
+            0x8000_0000_0000_0000UL,
+            0x0000_0000_0000_0001UL,
+            0x8000_0000_0000_0001UL,
+            0x7FEF_FFFF_FFFF_FFFFUL,
+            0xFFEF_FFFF_FFFF_FFFFUL,
+            0x7FF0_0000_0000_0000UL,
+            0xFFF0_0000_0000_0000UL,
+            0x7FF0_0000_0000_0341UL,
+            0xFFF0_0000_0000_0341UL,
+            0x7FF8_0000_0000_0341UL,
+            0xFFF8_0000_0000_0341UL
+        ];
+        int count = Math.Min(values.Length, bits.Length);
+        for (int index = 0; index < count; index++)
+        {
+            values[index] = BitConverter.UInt64BitsToDouble(bits[index]);
+        }
     }
 
     private static double CalculateMedian(ReadOnlySpan<double> samples)

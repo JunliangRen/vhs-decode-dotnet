@@ -2229,12 +2229,37 @@ dotnet test --solution VHSDecodeDotNet.slnx --no-build
 ```
 
 The current formal solution build completes with zero warnings and errors, and
-the xUnit v3 project exposes 1,425 independently discoverable tests
+the xUnit v3 project exposes 1,426 independently discoverable tests
 to `dotnet test` and Visual Studio Test Explorer. On the
 same Windows machine and fixtures, Release wall-clock measurements for one
 frame were 2.346 s versus 7.193 s for NTSC VHS and 1.651 s versus 5.865 s for
 NTSC LD (this port versus the v0.4.0 Python virtual environment); all output
 hashes listed above remained identical.
+
+### AVX current chroma ACC segment scaling
+
+The `current` VHS automatic chroma gain segment now scales four independent
+samples with managed AVX while preserving the scalar gain recurrence, float32
+conversion points, multiply order, and non-finite fallback. AVX-disabled hosts
+run the original scalar expressions. The path introduces no FMA, reduction,
+new array, pooled-buffer lifetime, or cross-field state change.
+
+All 15 focused xUnit v3 tests passed with normal intrinsics, AVX disabled, and
+all hardware intrinsics disabled. Bit-pattern coverage includes vector tails,
+signed zero, subnormals, maximum finite values, infinities, and distinct NaN
+payloads. JIT inspection confirmed scalar gain additions, AVX conversion and
+multiply instructions, and no FMA instruction.
+
+Five interleaved 1,000-frame Exact `current --threads 20` pairs across two
+independent sessions favored the candidate in four pairs. Session wall medians
+improved by 0.97% and 0.57%; the first session reduced CPU time by 1.24%, while
+the second had a noisy 2.20% CPU increase and therefore supports no Exact CPU
+efficiency claim. Two IPP-fast pairs reduced wall time by 1.63% and CPU time by
+3.44%. Every paired run matched exit status, luma, chroma, raw JSON, stdout,
+normalized stderr/logs, and ordered `fileLoc`. Additional Exact and IPP-fast
+gates covered one worker, explicit zero, default five, and 20 workers. Baseline
+and candidate memory peaks remained inside the existing roughly 715 MiB
+observed process window with no progressive growth or OOM.
 
 ### Fused Exact VHS analytic-spectrum traversal
 

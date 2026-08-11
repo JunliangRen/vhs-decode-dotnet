@@ -2,7 +2,6 @@ using System.Buffers.Binary;
 using System.Globalization;
 using System.Numerics;
 using System.Runtime.InteropServices;
-using System.Runtime.Intrinsics.X86;
 using System.Security.Cryptography;
 using VHSDecode.Core.CommandLine;
 using VHSDecode.Core.Decode;
@@ -1380,51 +1379,48 @@ public sealed class DspWorkingBufferTests
             ]
         ];
         var identitySection = new SosSection(1.0, 0.0, 0.0, 1.0, 0.0, 0.0);
-        (int Sections, string HardwareHash, string ScalarHash)[] edgeCases =
+        (int Sections, string CanonicalHash)[] edgeCases =
         [
-            (
-                0,
-                "81BC6F9D9EC8AF8B60132A164D96374E9CDBCA56AE9738E7157A648163B9097C",
-                "81BC6F9D9EC8AF8B60132A164D96374E9CDBCA56AE9738E7157A648163B9097C"),
-            (
-                1,
-                "045079F57F8866CAA969AE1E2B302D740E524DD0F88F3D472FB05E0742CDA9F4",
-                "045079F57F8866CAA969AE1E2B302D740E524DD0F88F3D472FB05E0742CDA9F4"),
-            (
-                2,
-                "34F4CE3EEBF779418344D2EC1103A0BA542AA0F685FCB2DC545913B94BA8384B",
-                "045079F57F8866CAA969AE1E2B302D740E524DD0F88F3D472FB05E0742CDA9F4"),
-            (
-                4,
-                "778176296E62ECF0836FBD71AA193690A471799A607DB5479018593E155D02CF",
-                "045079F57F8866CAA969AE1E2B302D740E524DD0F88F3D472FB05E0742CDA9F4"),
-            (
-                5,
-                "045079F57F8866CAA969AE1E2B302D740E524DD0F88F3D472FB05E0742CDA9F4",
-                "045079F57F8866CAA969AE1E2B302D740E524DD0F88F3D472FB05E0742CDA9F4")
+            (0, "1FE6CAB79FDD6935F787BD2A85A2738E55EDF352BE32901A226857D79C7AD945"),
+            (1, "808592402A6E84115BAB994C1C55504A34C21F1290523D36A9766FEAB98F5E3E"),
+            (2, "808592402A6E84115BAB994C1C55504A34C21F1290523D36A9766FEAB98F5E3E"),
+            (4, "808592402A6E84115BAB994C1C55504A34C21F1290523D36A9766FEAB98F5E3E"),
+            (5, "808592402A6E84115BAB994C1C55504A34C21F1290523D36A9766FEAB98F5E3E")
         ];
         Span<byte> lengthBytes = stackalloc byte[sizeof(int)];
-        foreach ((int sectionCount, string hardwareHash, string scalarHash) in edgeCases)
+        var hashMismatches = new List<string>();
+        foreach ((int sectionCount, string canonicalHash) in edgeCases)
         {
             SosSection[] edgeSections = Enumerable.Repeat(identitySection, sectionCount).ToArray();
             using IncrementalHash aggregate = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
             foreach (float[] edgeSignal in edgeSignals)
             {
                 float[] preservedInput = edgeSignal.ToArray();
+                float[] expectedOutput = ApplyForwardBackwardFloat32CheckedReference(
+                    edgeSections,
+                    edgeSignal);
                 float[] edgeOutput = SosFilter.ApplyForwardBackwardFloat32(
                     edgeSections,
                     preservedInput,
                     padLength: 0);
                 BinaryPrimitives.WriteInt32LittleEndian(lengthBytes, edgeOutput.Length);
                 aggregate.AppendData(lengthBytes);
-                aggregate.AppendData(MemoryMarshal.AsBytes(edgeOutput.AsSpan()));
+                AppendCanonicalFloat32(aggregate, edgeOutput);
                 AssertFloatBitsEqual(edgeSignal, preservedInput);
+                AssertFloatBitsEqualIgnoringNaNPayload(expectedOutput, edgeOutput);
             }
 
-            // The AVX and non-AVX JITs preserve different legacy NaN payloads.
-            string expectedHash = Avx.IsSupported ? hardwareHash : scalarHash;
-            Assert.Equal(expectedHash, Convert.ToHexString(aggregate.GetHashAndReset()));
+            string actualHash = Convert.ToHexString(aggregate.GetHashAndReset());
+            if (!string.Equals(canonicalHash, actualHash, StringComparison.Ordinal))
+            {
+                hashMismatches.Add(
+                    $"sections={sectionCount}: expected {canonicalHash}, actual {actualHash}");
+            }
         }
+
+        Assert.True(
+            hashMismatches.Count == 0,
+            string.Join(Environment.NewLine, hashMismatches));
     }
 
     [Fact(DisplayName = "Float32 SOS generic state access matches the checked reference")]
@@ -2138,10 +2134,48 @@ public sealed class DspWorkingBufferTests
             "Float sequences differ at the bit level.");
     }
 
+    private static void AssertFloatBitsEqualIgnoringNaNPayload(
+        ReadOnlySpan<float> expected,
+        ReadOnlySpan<float> actual)
+    {
+        Assert.Equal(expected.Length, actual.Length);
+        for (int index = 0; index < expected.Length; index++)
+        {
+            if (float.IsNaN(expected[index]) && float.IsNaN(actual[index]))
+            {
+                continue;
+            }
+
+            Assert.Equal(
+                BitConverter.SingleToInt32Bits(expected[index]),
+                BitConverter.SingleToInt32Bits(actual[index]));
+        }
+    }
+
+    private static void AppendCanonicalFloat32(
+        IncrementalHash aggregate,
+        ReadOnlySpan<float> values)
+    {
+        Span<byte> valueBytes = stackalloc byte[sizeof(int)];
+        foreach (float value in values)
+        {
+            int bits = float.IsNaN(value)
+                ? unchecked((int)0x7FC0_0000)
+                : BitConverter.SingleToInt32Bits(value);
+            BinaryPrimitives.WriteInt32LittleEndian(valueBytes, bits);
+            aggregate.AppendData(valueBytes);
+        }
+    }
+
     private static float[] ApplyForwardBackwardFloat32CheckedReference(
         IReadOnlyList<SosSection> sections,
         ReadOnlySpan<float> input)
     {
+        if (input.IsEmpty)
+        {
+            return [];
+        }
+
         var floatSections = new CheckedFloatSosSection[sections.Count];
         var initialConditions = new float[checked(sections.Count * 2)];
         float scale = 1.0f;
