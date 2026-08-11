@@ -38,7 +38,7 @@ evidence, and remaining gaps.
   EIAJ, and supported PAL/NTSC variants.
 - TBC utility tools, the double-click GUI, and developer plotting windows are
   intentionally out of scope.
-- The Visual Studio 2026 `.slnx` solution has **1,421** standard xUnit v3 tests
+- The Visual Studio 2026 `.slnx` solution has **1,424** standard xUnit v3 tests
   that are visible in Test Explorer and runnable with `dotnet test`.
 
 <!-- SECTION: start -->
@@ -97,47 +97,52 @@ for compatibility-sensitive work.
 
 ## Latest performance
 
-This is a startup-inclusive `--start 100 --length 160` snapshot on one fixed
-private local 40 MHz PAL VHS `.ldf` fixture; its filename is intentionally not
-published. All 90 Python and .NET Release runs were measured together in
-forward, reverse, and mixed passes on this candidate, based on merged main
-`a059580`. The measured binary and three-run ranges are pinned in the detailed
-notes. Compatibility is evaluated separately from speed.
+This startup-inclusive `--start 100 --length 160` snapshot uses one fixed private
+local 40 MHz PAL VHS `.ldf` fixture; its filename is intentionally not published.
+The 90 Python and .NET Release measurements use the same forward, reverse, and
+mixed three-pass plan on this candidate, based on merged main `d1df109`. The
+measured binary, three-run ranges, and one keyed resume after a host-session
+interruption are recorded in the detailed notes. Compatibility is evaluated
+separately from speed.
 
 <!-- LATEST_PERFORMANCE_BEGIN -->
 | CLI mode (workers) | Python v0.4.0 | Python PR341 | Exact + v0.4.0 | Exact + current | IPP-fast + v0.4.0 | IPP-fast + current |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| default (5) | 45.605 s | 45.124 s | 12.838 s / 3.552x | 12.749 s / 3.539x | 11.419 s / 3.994x | 9.518 s / 4.741x |
-| `--threads 1` | 53.818 s | 53.974 s | 33.276 s / 1.617x | 39.096 s / 1.381x | 23.695 s / 2.271x | 26.727 s / 2.019x |
-| `--threads 5` | 46.906 s | 45.771 s | 12.832 s / 3.655x | 12.184 s / 3.757x | 11.334 s / 4.139x | 9.742 s / 4.698x |
-| `--threads 10` | 46.271 s | 47.014 s | 10.500 s / 4.407x | 9.820 s / 4.788x | 9.460 s / 4.891x | 7.635 s / 6.158x |
-| `--threads 20` | 47.342 s | 47.571 s | 8.284 s / 5.715x | 8.215 s / 5.791x | 8.071 s / 5.866x | 5.993 s / 7.938x |
+| default (5) | 47.529 s | 45.027 s | 12.934 s / 3.675x | 12.838 s / 3.507x | 11.304 s / 4.205x | 9.680 s / 4.652x |
+| `--threads 1` | 54.069 s | 54.163 s | 32.305 s / 1.674x | 38.309 s / 1.414x | 23.480 s / 2.303x | 26.640 s / 2.033x |
+| `--threads 5` | 45.789 s | 44.758 s | 13.125 s / 3.489x | 12.721 s / 3.518x | 11.632 s / 3.937x | 9.731 s / 4.599x |
+| `--threads 10` | 47.344 s | 47.884 s | 10.047 s / 4.712x | 9.589 s / 4.993x | 9.638 s / 4.912x | 7.799 s / 6.140x |
+| `--threads 20` | 48.659 s | 48.408 s | 8.445 s / 5.762x | 7.688 s / 6.297x | 8.053 s / 6.042x | 6.160 s / 7.858x |
 <!-- LATEST_PERFORMANCE_END -->
-<!-- LATEST_PERFORMANCE_RUNS: full-interleaved-matrix-runs=90 dotnet-matrix-runs=60 python-matrix-runs=30 repeats=3 complex32-current-160-ab-pairs=6 complex32-t1-160-ab-pairs=4 complex32-current-1000-ab-pairs=3 complex32-focused-tests=4 complex32-traces=2 python-v040-runs=15 python-v040-hashes=15 python-pr341-runs=15 python-pr341-hashes=1 -->
+<!-- LATEST_PERFORMANCE_RUNS: full-interleaved-matrix-runs=90 dotnet-matrix-runs=60 python-matrix-runs=30 repeats=3 resumed-after-complete=69 complex64-final-t5-160-ab-pairs=4 complex64-current-1000-ab-pairs=2 complex64-storage-tests=3 complex64-intrinsic-modes=3 python-v040-runs=15 python-v040-hashes=15 python-pr341-runs=15 python-pr341-hashes=1 -->
 
 Each .NET cell shows median wall time and speedup versus its profile-matched
 Python column. The default is **5 workers**; three-run ranges are in the
-[detailed performance notes](docs/README.detailed.md#performance). Every column
-was measured in the same interleaved batch, but a ratio still moves when its
-Python denominator moves. Ratios from historical matrices that used another
-format or fixture are not directly comparable. Same-fixture .NET revision A/B
-runs, not old ratio cells, are therefore used to judge .NET regressions.
+[detailed performance notes](docs/README.detailed.md#performance). A ratio moves
+when either the .NET time or its Python denominator moves, and historical tables
+using another fixture or window are not directly comparable. The new 5-worker
+ratios are lower than the preceding table, but a same-moment four-pair .NET A/B
+made this candidate 1.73% faster than main; the ratio change is not evidence of a
+causal .NET regression.
 
-The Exact float32 PocketFFT second pass now transforms each already contiguous,
-owned packet in place, removing its temporary packet allocation or rental and
-full packet copy.
-Factorization, roots, arithmetic, and scatter order are unchanged. Across six
-interleaved 160-frame `current --threads 20` pairs, median wall time fell from
-11.59 to 11.27 seconds (2.8%), throughput rose 2.8%, and CPU time fell 1.9%; the
-candidate won five pairs and all nine compatibility surfaces matched. Four
-one-worker pairs improved 0.8% with neutral CPU and peak memory. Three
-1,000-frame pairs were scheduling-noisy and throughput-neutral (+0.14% paired
-median); peak working set remained bounded near 443 MiB.
+The managed double PocketFFT plan now chooses its initial staging buffer from
+the FFT pass parity so the final pass lands directly in caller output. This
+removes one full-array copy and one worker-local retained buffer without changing
+factorization, twiddles, normalization, data type, or arithmetic order. Exact and
+shifted overlapping callers retain their prior behavior through a guarded
+fallback.
+
+Four final 160-frame Exact `current` 5-worker pairs moved median wall time from
+20.72 to 20.36 seconds (1.73% lower), with three candidate wins, 0.8% lower CPU
+time, and about 6 MiB lower median peak working set. Two order-reversed
+1,000-frame `current --threads 20` pairs on the normal production path moved
+median wall time from 41.10 to 40.12 seconds (2.38% lower), CPU time 2.33% lower,
+and peak working set about 23 MiB lower. All nine compatibility surfaces matched.
 
 Merged Python PR341 was deterministic here; Python v0.4.0 produced 15 distinct
-luma, chroma, JSON, and log hashes in 15 runs, so the strict oracle remains
-Python v0.4.0 `g4315520 --threads 0`.
-Commands, hardware, hashes, memory bounds, and historical measurements are in the
+luma, chroma, JSON, and normalized-log hashes in 15 runs, so the strict oracle
+remains Python v0.4.0 `g4315520 --threads 0`. Commands, hardware, hashes, memory
+bounds, and historical measurements are in the
 [detailed performance reference](docs/README.detailed.md#performance).
 
 <!-- SECTION: compatibility -->
@@ -175,7 +180,7 @@ The pinned SDK is .NET `11.0.100-preview.6.26359.118`.
 dotnet restore VHSDecodeDotNet.slnx
 dotnet build VHSDecodeDotNet.slnx -c Release --no-restore
 dotnet test --solution VHSDecodeDotNet.slnx -c Release `
-  --no-build --no-restore --minimum-expected-tests 1421
+  --no-build --no-restore --minimum-expected-tests 1424
 ```
 
 Open `VHSDecodeDotNet.slnx` in Visual Studio 2026 to build, debug, and run the

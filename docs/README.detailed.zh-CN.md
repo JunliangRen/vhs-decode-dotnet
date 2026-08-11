@@ -357,38 +357,72 @@ Exact `current`、IPP-fast v0.4.0 和 IPP-fast `current`。文件名不会公开
 <!-- LATEST_PERFORMANCE_BEGIN -->
 | CLI 模式（workers） | Python v0.4.0 | Python PR341 | Exact + v0.4.0 | Exact + current | IPP-fast + v0.4.0 | IPP-fast + current |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| 默认（5） | 45.605 s | 45.124 s | 12.838 s / 3.552x / 71.85% | 12.749 s / 3.539x / 71.75% | 11.419 s / 3.994x / 74.96% | 9.518 s / 4.741x / 78.91% |
-| `--threads 1` | 53.818 s | 53.974 s | 33.276 s / 1.617x / 38.17% | 39.096 s / 1.381x / 27.57% | 23.695 s / 2.271x / 55.97% | 26.727 s / 2.019x / 50.48% |
-| `--threads 5` | 46.906 s | 45.771 s | 12.832 s / 3.655x / 72.64% | 12.184 s / 3.757x / 73.38% | 11.334 s / 4.139x / 75.84% | 9.742 s / 4.698x / 78.72% |
-| `--threads 10` | 46.271 s | 47.014 s | 10.500 s / 4.407x / 77.31% | 9.820 s / 4.788x / 79.11% | 9.460 s / 4.891x / 79.56% | 7.635 s / 6.158x / 83.76% |
-| `--threads 20` | 47.342 s | 47.571 s | 8.284 s / 5.715x / 82.50% | 8.215 s / 5.791x / 82.73% | 8.071 s / 5.866x / 82.95% | 5.993 s / 7.938x / 87.40% |
+| 默认（5） | 47.529 s | 45.027 s | 12.934 s / 3.675x / 72.79% | 12.838 s / 3.507x / 71.49% | 11.304 s / 4.205x / 76.22% | 9.680 s / 4.652x / 78.50% |
+| `--threads 1` | 54.069 s | 54.163 s | 32.305 s / 1.674x / 40.25% | 38.309 s / 1.414x / 29.27% | 23.480 s / 2.303x / 56.57% | 26.640 s / 2.033x / 50.81% |
+| `--threads 5` | 45.789 s | 44.758 s | 13.125 s / 3.489x / 71.34% | 12.721 s / 3.518x / 71.58% | 11.632 s / 3.937x / 74.60% | 9.731 s / 4.599x / 78.26% |
+| `--threads 10` | 47.344 s | 47.884 s | 10.047 s / 4.712x / 78.78% | 9.589 s / 4.993x / 79.97% | 9.638 s / 4.912x / 79.64% | 7.799 s / 6.140x / 83.71% |
+| `--threads 20` | 48.659 s | 48.408 s | 8.445 s / 5.762x / 82.64% | 7.688 s / 6.297x / 84.12% | 8.053 s / 6.042x / 83.45% | 6.160 s / 7.858x / 87.27% |
 <!-- LATEST_PERFORMANCE_END -->
-<!-- LATEST_PERFORMANCE_RUNS: full-interleaved-matrix-runs=90 dotnet-matrix-runs=60 python-matrix-runs=30 repeats=3 complex32-current-160-ab-pairs=6 complex32-t1-160-ab-pairs=4 complex32-current-1000-ab-pairs=3 complex32-focused-tests=4 complex32-traces=2 python-v040-runs=15 python-v040-hashes=15 python-pr341-runs=15 python-pr341-hashes=1 -->
+<!-- LATEST_PERFORMANCE_RUNS: full-interleaved-matrix-runs=90 dotnet-matrix-runs=60 python-matrix-runs=30 repeats=3 resumed-after-complete=69 complex64-final-t5-160-ab-pairs=4 complex64-current-1000-ab-pairs=2 complex64-storage-tests=3 complex64-intrinsic-modes=3 python-v040-runs=15 python-v040-hashes=15 python-pr341-runs=15 python-pr341-hashes=1 -->
 
 三次运行的墙钟范围如下：
 
 <!-- LATEST_PERFORMANCE_RANGES_BEGIN -->
 | CLI 模式 | Python v0.4.0 | Python PR341 | Exact + v0.4.0 | Exact + current | IPP-fast + v0.4.0 | IPP-fast + current |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| 默认（5） | 45.163-45.618 s | 44.240-46.582 s | 12.681-13.528 s | 11.977-12.765 s | 11.214-11.730 s | 9.399-9.552 s |
-| `--threads 1` | 53.301-55.419 s | 53.859-54.840 s | 32.765-33.568 s | 38.710-40.814 s | 23.560-23.756 s | 26.515-27.306 s |
-| `--threads 5` | 46.305-46.960 s | 44.652-46.067 s | 12.764-12.846 s | 12.077-12.316 s | 11.220-11.459 s | 9.197-9.794 s |
-| `--threads 10` | 45.950-46.779 s | 46.534-47.269 s | 9.967-10.659 s | 9.421-9.884 s | 9.453-9.533 s | 7.560-7.775 s |
-| `--threads 20` | 47.274-48.600 s | 47.356-48.724 s | 8.146-8.446 s | 7.940-8.255 s | 8.028-8.101 s | 5.992-6.071 s |
+| 默认（5） | 45.831-49.190 s | 44.310-45.876 s | 12.543-13.108 s | 12.792-12.846 s | 11.122-11.551 s | 9.667-9.855 s |
+| `--threads 1` | 53.048-54.777 s | 53.465-54.696 s | 31.797-32.649 s | 38.284-38.465 s | 23.424-23.675 s | 26.224-26.700 s |
+| `--threads 5` | 45.617-47.106 s | 44.673-48.770 s | 12.663-13.327 s | 12.417-12.744 s | 11.379-11.862 s | 9.578-10.699 s |
+| `--threads 10` | 45.553-47.348 s | 46.317-48.402 s | 10.031-10.073 s | 9.067-10.556 s | 9.333-9.651 s | 7.427-7.801 s |
+| `--threads 20` | 46.760-48.938 s | 47.185-48.517 s | 8.183-8.650 s | 7.619-8.143 s | 8.048-8.444 s | 5.794-6.161 s |
 <!-- LATEST_PERFORMANCE_RANGES_END -->
 
-2026-08-11 同批刷新了全部 90 次 Release 运行：六种 profile 的五种 worker 设置各按
-正序、反序和混排三轮交错执行，没有复用旧批次的 Python 或 IPP-fast 时间。本候选基于
-已合并的 main `a059580`；计时所用 `decode.exe` 的 SHA-256 为
-`861C44780EE7DA5B27E89EC5DBE273828047C1E0F96D976AAC07FEF7126B5C81`。
-被测 `PocketFftComplex32.cs` 源码固定为 Git blob
-`3d1cab1f7e13c0527354c2a3ffc5996a12f15eaf`，对应已合并 main 的基线 blob 为
-`5f8fec56d666083b2f0cc279ac42a2b1561fe959`。文档和仅测试改动不属于计时的
-解码器二进制。
-测试机为
-Intel Core Ultra 7 265K（20 个逻辑处理器）、Windows 11 build 26220，以及 .NET
-SDK/runtime `11.0.100-preview.6.26359.118`。原始运行目录含有私有夹具路径，因此只
-保留在本地；这些是如实报告的本地测量，不是可公开独立复现的 benchmark corpus。
+2026-08-11 同批刷新了全部 90 次 Release 测量：六种 profile 的五种 worker 设置使用正序、
+反序和混排三轮。宿主执行会话在 69 条完整 JSONL 结果后结束；被中断项目没有结果记录。
+恢复脚本按 profile、mode、轮次组成的唯一键跳过这 69 条完整结果并执行剩余 21 条，因此
+每个单元格仍恰好包含三次完整测量，没有接纳任何半成品。
+
+本候选基于已合并的 main `d1df109`。计时用单文件 `decode.exe` 的 SHA-256 为
+`B41F01E85C20A21EEC81C2F356F3E6CBE06D84F86A4A77CEEB75D48654349D00`。
+被测 `PocketFftComplex.cs` 源码是 Git blob
+`7fbb2675835f01d6fdb7d9fc8d784dc9866c69a5`，对应已合并 main 的基线 blob 为
+`37d7fb38005c5b755716bf291090a073522be368`；文档和仅测试改动不属于计时二进制。
+测试机为 Intel Core Ultra 7 265K（20 个逻辑处理器）、Windows 11 build 26220，以及
+.NET SDK/runtime `11.0.100-preview.6.26359.118`。原始目录含私有夹具路径，只保留在
+本地；这些是如实报告的本地测量，不是可公开独立复现的 benchmark corpus。
+
+### 直接输出的托管 double PocketFFT
+
+托管 double 精度 complex FFT plan 现在根据 factor pass 的奇偶，把调用者输出或 worker-local
+scratch 选为初始 source。每一遍仍在相同两个 span 之间交替，但最后一遍必定落到调用者输出，
+从而移除原来的最终整数组复制和第二个 worker-local `Value[]` buffer。因子分解、twiddle、
+radix 顺序、数据类型、归一化和每个浮点表达式均未改变，也没有引入 FMA 或重结合。
+complex 输入/输出重叠继续采用等价于 memmove 的 span copy；real 输入存储与 complex 输出
+重叠时走原来的双 buffer 结果路径，并在全部输入消费后才复制。
+
+3 项标准 xUnit v3 测试冻结长度 2、4、8、64、512、32768 和 131072 的 forward、inverse、
+real-forward hash；固定正负零、subnormal、最大有限值、无穷和 NaN payload 行为；并覆盖
+长度 8、64、512 的完全重叠及前后偏移重叠。测试在原生硬件、禁用 AVX 和禁用全部 .NET
+hardware intrinsic 三种模式均通过。既有 AVX 与标量路径的非有限值 hash 本来就不同，因此
+测试分别冻结各自已有模式，不宣称跨硬件模式相等。
+
+默认 32768-sample RF block 的 10 组生产形状微基准把 real-forward 加 complex-inverse
+中位数从 1768.90 降到 1515.88 ms（低 14.30%，吞吐 1.167x），候选 10 组全胜且 hash
+一致。之后带重叠保护的最终 build 测得 1498.46、1516.92、1560.97 ms，覆盖此前候选
+中位数，确认正常非重叠热路径保留了收益。
+
+最终候选的 4 组 160 帧 Exact `current` 5-workers 配对在退出状态、field 数、亮度、色度、
+原始 JSON、stdout、归一化 stderr/log 和有序 `fileLoc` 上全部一致，候选赢 3 组。墙钟
+中位数从 20.72 降至 20.36 秒（低 1.73%），进程 CPU 时间从 84.20 降至 83.51 秒
+（低 0.83%），峰值工作集中位数从 370.5 降至 364.2 MiB。该同一时刻 A/B 是 5-workers
+路径的因果门禁；刷新后的公开表中倍率较低来自跨批分母/计时变化，不是候选回退。
+
+正常生产路径的两组正反顺序 1000 帧 Exact `current --threads 20` 配对各产生 2000 个
+有序 field。墙钟中位数从 41.10 降至 40.12 秒（低 2.38%），CPU 时间从 336.77 降至
+328.91 秒（低 2.33%），峰值工作集从约 439.8 降至 416.7 MiB；九类兼容表面全部一致。
+公开 90-run 矩阵中，每种 .NET profile/mode 和 Python PR341 profile/mode 也都只有一套
+hash。Python v0.4.0 的 15 次运行每次都产生不同的亮度、色度、JSON 和归一化日志 hash，
+因此严格 oracle 仍是 `g4315520 --threads 0`。
 
 ### 无边界检查的托管 float32 SOS 状态访问
 
@@ -2597,7 +2631,7 @@ stderr、时间戳归一化日志和全部 2,000 个有序 `fileLoc` 完全一�
 .\tools\build-ipp-native.ps1
 dotnet restore VHSDecodeDotNet.slnx
 dotnet build VHSDecodeDotNet.slnx -c Release --no-restore
-dotnet test --solution VHSDecodeDotNet.slnx -c Release --no-build --no-restore --minimum-expected-tests 1421
+dotnet test --solution VHSDecodeDotNet.slnx -c Release --no-build --no-restore --minimum-expected-tests 1424
 dotnet test --project tests\VHSDecode.Tests\VHSDecode.Tests.csproj -c Release --no-build --no-restore --coverage --coverage-output coverage.cobertura.xml --coverage-output-format cobertura
 ```
 
@@ -2609,7 +2643,7 @@ Intel oneAPI。只含二进制的单文件发布会嵌入 `vhsdecode_ipp.dll` �
 notice，不会额外生成许可证 sidecar 文件。只构建 Exact 后端时可以省略原生构建步骤。
 
 当前正式 Release 构建为零警告、零错误。xUnit v3 项目向
-`dotnet test` 和 Visual Studio Test Explorer 暴露 **1,421** 个可独立发现的测试。
+`dotnet test` 和 Visual Studio Test Explorer 暴露 **1,424** 个可独立发现的测试。
 
 <!-- SECTION: usage -->
 

@@ -31,8 +31,6 @@ public static class PocketFftComplex
     [ThreadStatic]
     private static Complex[]? _realInput;
     [ThreadStatic]
-    private static Value[]? _planValues;
-    [ThreadStatic]
     private static Value[]? _planScratch;
 
     public static Complex[] Forward(ReadOnlySpan<Complex> input)
@@ -485,22 +483,25 @@ public static class PocketFftComplex
                 throw new ArgumentException("FFT output length does not match the plan length.", nameof(output));
             }
 
-            Value[] values = EnsureCapacity(ref _planValues, _length);
-            Value[] scratch = EnsureCapacity(ref _planScratch, _length);
-            for (int i = 0; i < _length; i++)
-            {
-                values[i] = new Value(input[i].Real, input[i].Imaginary);
-            }
+            Value[] scratchBuffer = EnsureCapacity(ref _planScratch, _length);
+            System.Diagnostics.Debug.Assert(
+                Unsafe.SizeOf<Complex>() == Unsafe.SizeOf<Value>());
+            Span<Value> outputValues = MemoryMarshal.Cast<Complex, Value>(output);
+            Span<Value> scratch = scratchBuffer.AsSpan(0, _length);
+            bool evenPassCount = (_factors.Length & 1) == 0;
+            Span<Value> source = evenPassCount ? outputValues : scratch;
+            Span<Value> destination = evenPassCount ? scratch : outputValues;
+            MemoryMarshal.Cast<Complex, Value>(input).CopyTo(source);
 
-            Value[] transformed = Execute(
-                values,
-                scratch,
+            Span<Value> transformed = Execute(
+                source,
+                destination,
                 forward,
                 forward ? 1.0 : 1.0 / _length);
-            for (int i = 0; i < output.Length; i++)
-            {
-                output[i] = new Complex(transformed[i].Real, transformed[i].Imaginary);
-            }
+            System.Diagnostics.Debug.Assert(
+                transformed.Overlaps(outputValues, out int outputOffset)
+                && outputOffset == 0
+                && transformed.Length == outputValues.Length);
         }
 
         public void TransformReal(ReadOnlySpan<double> input, Span<Complex> output)
@@ -515,32 +516,54 @@ public static class PocketFftComplex
                 throw new ArgumentException("FFT output length does not match the plan length.", nameof(output));
             }
 
-            Value[] values = EnsureCapacity(ref _planValues, _length);
-            Value[] scratch = EnsureCapacity(ref _planScratch, _length);
+            Value[] scratchBuffer = EnsureCapacity(ref _planScratch, _length);
+            System.Diagnostics.Debug.Assert(
+                Unsafe.SizeOf<Complex>() == Unsafe.SizeOf<Value>());
+            Span<Value> outputValues = MemoryMarshal.Cast<Complex, Value>(output);
+            Span<Value> scratch = scratchBuffer.AsSpan(0, _length);
+            bool evenPassCount = (_factors.Length & 1) == 0;
+            bool overlappingRealStorage = evenPassCount
+                && MemoryMarshal.AsBytes(input).Overlaps(MemoryMarshal.AsBytes(output));
+            Span<Value> source = evenPassCount && !overlappingRealStorage
+                ? outputValues
+                : scratch;
+            Span<Value> destination = source.Overlaps(outputValues)
+                ? scratch
+                : outputValues;
             for (int i = 0; i < _length; i++)
             {
-                values[i] = new Value(input[i], 0.0);
+                source[i] = new Value(input[i], 0.0);
             }
 
-            Value[] transformed = Execute(
-                values,
-                scratch,
+            Span<Value> transformed = Execute(
+                source,
+                destination,
                 forward: true,
                 normalization: 1.0);
-            for (int i = 0; i < output.Length; i++)
+            if (overlappingRealStorage)
             {
-                output[i] = new Complex(transformed[i].Real, transformed[i].Imaginary);
+                transformed.CopyTo(outputValues);
+            }
+            else
+            {
+                System.Diagnostics.Debug.Assert(
+                    transformed.Overlaps(outputValues, out int outputOffset)
+                    && outputOffset == 0
+                    && transformed.Length == outputValues.Length);
             }
         }
 
-        private Value[] Execute(
-            Value[] data,
-            Value[] scratch,
+        private Span<Value> Execute(
+            Span<Value> data,
+            Span<Value> scratch,
             bool forward,
             double normalization)
         {
-            Value[] source = data;
-            Value[] destination = scratch;
+            System.Diagnostics.Debug.Assert(data.Length == _length);
+            System.Diagnostics.Debug.Assert(scratch.Length == _length);
+            System.Diagnostics.Debug.Assert(!data.Overlaps(scratch));
+            Span<Value> source = data;
+            Span<Value> destination = scratch;
             int l1 = 1;
             foreach (Factor factor in _factors)
             {
@@ -560,7 +583,9 @@ public static class PocketFftComplex
                         throw new InvalidOperationException($"Unsupported complex FFT radix {factor.Radix}.");
                 }
 
-                (source, destination) = (destination, source);
+                Span<Value> previousSource = source;
+                source = destination;
+                destination = previousSource;
                 l1 *= factor.Radix;
             }
 
@@ -578,8 +603,8 @@ public static class PocketFftComplex
         private static void Pass2(
             int ido,
             int l1,
-            Value[] input,
-            Value[] output,
+            ReadOnlySpan<Value> input,
+            Span<Value> output,
             Value[] twiddles,
             bool forward)
         {
@@ -606,8 +631,8 @@ public static class PocketFftComplex
         private static void Pass4(
             int ido,
             int l1,
-            Value[] input,
-            Value[] output,
+            ReadOnlySpan<Value> input,
+            Span<Value> output,
             Value[] twiddles,
             bool forward)
         {
@@ -643,8 +668,8 @@ public static class PocketFftComplex
         private static void Pass4FirstIndex(
             int ido,
             int l1,
-            Value[] input,
-            Value[] output,
+            ReadOnlySpan<Value> input,
+            Span<Value> output,
             int k,
             bool forward)
         {
@@ -670,8 +695,8 @@ public static class PocketFftComplex
         private static void Pass8(
             int ido,
             int l1,
-            Value[] input,
-            Value[] output,
+            ReadOnlySpan<Value> input,
+            Span<Value> output,
             Value[] twiddles,
             bool forward)
         {
@@ -699,8 +724,8 @@ public static class PocketFftComplex
         private static void Pass8Core<TDirection>(
             int ido,
             int l1,
-            Value[] input,
-            Value[] output,
+            ReadOnlySpan<Value> input,
+            Span<Value> output,
             Value[] twiddles)
             where TDirection : struct, IPass8Direction
         {
@@ -710,8 +735,8 @@ public static class PocketFftComplex
             System.Diagnostics.Debug.Assert((long)ido * l1 * 8 <= output.Length);
             System.Diagnostics.Debug.Assert((long)(ido - 1) * 7 <= twiddles.Length);
             System.Diagnostics.Debug.Assert(Unsafe.SizeOf<Value>() == 2 * sizeof(double));
-            ref Value inputStart = ref MemoryMarshal.GetArrayDataReference(input);
-            ref Value outputStart = ref MemoryMarshal.GetArrayDataReference(output);
+            ref Value inputStart = ref MemoryMarshal.GetReference(input);
+            ref Value outputStart = ref MemoryMarshal.GetReference(output);
             ref Value twiddleStart = ref MemoryMarshal.GetArrayDataReference(twiddles);
             for (int k = 0; k < l1; k++)
             {
@@ -881,8 +906,8 @@ public static class PocketFftComplex
         }
 
         private static void Pass8FirstIndex<TDirection>(
-            Value[] input,
-            Value[] output,
+            ReadOnlySpan<Value> input,
+            Span<Value> output,
             int inputBase,
             int outputBase,
             int inputStride,
@@ -1027,6 +1052,7 @@ public static class PocketFftComplex
 
     private readonly record struct Factor(int Radix, Value[] Twiddles);
 
+    [StructLayout(LayoutKind.Sequential)]
     private readonly record struct Value(double Real, double Imaginary);
 
     private interface IPass8Direction
