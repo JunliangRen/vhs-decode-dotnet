@@ -2229,7 +2229,7 @@ dotnet test --solution VHSDecodeDotNet.slnx --no-build
 ```
 
 The current formal solution build completes with zero warnings and errors, and
-the xUnit v3 project exposes 1,421 independently discoverable tests
+the xUnit v3 project exposes 1,424 independently discoverable tests
 to `dotnet test` and Visual Studio Test Explorer. On the
 same Windows machine and fixtures, Release wall-clock measurements for one
 frame were 2.346 s versus 7.193 s for NTSC VHS and 1.651 s versus 5.865 s for
@@ -2584,6 +2584,40 @@ libsndfile route is additionally limited to at most `Int32.MaxValue` samples;
 larger raw-FLAC captures use FFmpeg to preserve exact random access. Default
 HiFi FLAC output and LD `--write-test-ldf` still use bundled libsndfile. HiFi
 `.wav` and recognized raw input paths do not require either FFmpeg tool.
+
+### Direct-output managed double PocketFFT
+
+The double-precision managed complex FFT plan now chooses caller output or one
+worker-local scratch buffer as its initial source from pass parity, so the final
+pass lands directly in caller output. The former final full-array copy and second
+retained `Value[]` buffer are removed. Factorization, twiddles, radix order,
+normalization, data type, and floating-point expression order are unchanged.
+Complex overlap preserves memmove-equivalent behavior; overlapping real input
+uses a guarded two-buffer fallback until all input has been consumed.
+
+Three xUnit v3 tests freeze power-of-two forward/inverse/real hashes, repeated
+small transforms after large scratch growth, and exact plus shifted overlap. A
+special-value path-consistency case compares signed zero, subnormal, maximum
+finite, infinity, and distinct NaN payloads bit for bit across repeated,
+caller-output, and in-place storage paths; the real case also crosses the guarded
+two-buffer overlap fallback. It is intentionally not a machine-specific absolute
+special-value oracle. The class passes on native hardware, with AVX disabled, and
+with all .NET hardware intrinsics disabled.
+
+Four final 160-frame Exact `current` 5-worker pairs matched exit status, field
+count, luma, chroma, raw JSON, stdout, normalized stderr/log, and every ordered
+`fileLoc`. The candidate won three pairs; median wall time moved from 20.72 to
+20.36 seconds (1.73% lower), CPU time from 84.20 to 83.51 seconds (0.83% lower),
+and median peak working set from 370.5 to 364.2 MiB. Two order-reversed
+1,000-frame `current --threads 20` pairs on the normal production path moved
+median wall time from 41.10 to 40.12 seconds (2.38% lower), CPU time 2.33% lower,
+and peak working set about 23 MiB lower. All nine compatibility surfaces matched.
+
+The refreshed 90-run public matrix uses the same private local PAL VHS `.ldf`
+fixture without publishing its filename. All 60 .NET runs and all 15 Python
+PR341 runs were deterministic within their profile/mode. Python v0.4.0 produced
+15 distinct luma, chroma, JSON, and normalized-log hash sets, so the strict
+oracle remains `g4315520 --threads 0`.
 
 To regenerate the embedded format parameter snapshot from the checked-out
 upstream source:
