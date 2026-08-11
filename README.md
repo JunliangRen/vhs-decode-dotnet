@@ -2,7 +2,7 @@
 
 **[English](README.md)** | [简体中文](README.zh-CN.md) | [日本語](README.ja.md)
 
-<!-- README_SYNC: 2026-08-11.01 -->
+<!-- README_SYNC: 2026-08-12.01 -->
 
 A .NET 11 rewrite of the decode-facing parts of
 [`oyvindln/vhs-decode`](https://github.com/oyvindln/vhs-decode), targeting
@@ -99,22 +99,21 @@ for compatibility-sensitive work.
 
 This startup-inclusive `--start 100 --length 160` snapshot uses one fixed private
 local 40 MHz PAL VHS `.ldf` fixture; its filename is intentionally not published.
-The 90 Python and .NET Release measurements use the same forward, reverse, and
-mixed three-pass plan on the performance candidate based on merged main
-`cefdbaf`. The final ownership gate is measured separately below. Both binary
-identities and the three-run ranges are recorded in the detailed notes.
-Compatibility is evaluated separately from speed.
+The unchanged Python reference columns are the pinned 2026-08-11 three-pass
+measurements. The 60 .NET Release measurements were refreshed on 2026-08-12
+with the performance candidate based on main `22b7750`, using the same forward,
+reverse, and mixed plan. Compatibility is evaluated separately from speed.
 
 <!-- LATEST_PERFORMANCE_BEGIN -->
 | CLI mode (workers) | Python v0.4.0 | Python PR341 | Exact + v0.4.0 | Exact + current | IPP-fast + v0.4.0 | IPP-fast + current |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| default (5) | 45.414 s | 45.060 s | 12.483 s / 3.638x | 12.231 s / 3.684x | 11.235 s / 4.042x | 9.442 s / 4.772x |
-| `--threads 1` | 52.323 s | 52.579 s | 32.014 s / 1.634x | 37.531 s / 1.401x | 23.312 s / 2.244x | 25.972 s / 2.024x |
-| `--threads 5` | 45.991 s | 44.990 s | 12.606 s / 3.648x | 12.044 s / 3.736x | 11.247 s / 4.089x | 9.407 s / 4.783x |
-| `--threads 10` | 47.385 s | 47.713 s | 10.257 s / 4.620x | 9.923 s / 4.808x | 9.499 s / 4.988x | 7.519 s / 6.346x |
-| `--threads 20` | 48.459 s | 47.490 s | 8.309 s / 5.832x | 8.284 s / 5.733x | 8.045 s / 6.024x | 5.823 s / 8.155x |
+| default (5) | 45.414 s | 45.060 s | 12.780 s / 3.553x | 12.004 s / 3.754x | 11.331 s / 4.008x | 9.489 s / 4.748x |
+| `--threads 1` | 52.323 s | 52.579 s | 32.579 s / 1.606x | 38.046 s / 1.382x | 23.712 s / 2.207x | 26.139 s / 2.011x |
+| `--threads 5` | 45.991 s | 44.990 s | 12.575 s / 3.658x | 11.984 s / 3.754x | 11.387 s / 4.039x | 9.556 s / 4.708x |
+| `--threads 10` | 47.385 s | 47.713 s | 10.006 s / 4.736x | 9.988 s / 4.777x | 9.540 s / 4.967x | 7.520 s / 6.344x |
+| `--threads 20` | 48.459 s | 47.490 s | 8.263 s / 5.864x | 7.666 s / 6.195x | 7.933 s / 6.109x | 5.802 s / 8.185x |
 <!-- LATEST_PERFORMANCE_END -->
-<!-- LATEST_PERFORMANCE_RUNS: full-interleaved-matrix-runs=90 dotnet-matrix-runs=60 python-matrix-runs=30 repeats=3 segmented-envelope-release-ab-pairs=4 segmented-envelope-current-1000-ab-pairs=2 segmented-envelope-v040-160-ab-pairs=2 segmented-envelope-safety-ab-pairs=4 segmented-envelope-tests=2 segmented-envelope-intrinsic-modes=2 python-v040-runs=15 python-v040-hashes=15 python-pr341-runs=15 python-pr341-hashes=1 -->
+<!-- LATEST_PERFORMANCE_RUNS: performance-snapshot-runs=90 dotnet-matrix-runs=60 python-reference-runs=30 dotnet-repeats=3 python-reference-date=2026-08-11 dotnet-matrix-date=2026-08-12 radix-pointer-current-320-ab-pairs=4 radix-pointer-current-1000-ab-pairs=2 radix-pointer-default-320-ab-pairs=1 radix-pointer-sync-tests=34 radix-pointer-intrinsic-modes=2 python-v040-runs=15 python-v040-hashes=15 python-pr341-runs=15 python-pr341-hashes=1 -->
 
 Each .NET cell shows median wall time and speedup versus its profile-matched
 Python column. The default is **5 workers**; three-run ranges are in the
@@ -123,32 +122,19 @@ when either the .NET time or its Python denominator moves, and historical tables
 using another fixture or window are not directly comparable. Same-moment .NET
 revision A/B runs, rather than old ratio cells, determine causal regressions.
 
-At 20 or more workers, the staged VHS path now scans retained block-local RF
-envelopes directly for the exact float32 mean and dropout ranges instead of first
-copying the complete envelope. Lower worker counts retain the contiguous path.
-Arithmetic order, threshold and hysteresis behavior, block lifetime, and output
-ordering are unchanged. One atomic cache-operation gate prevents ordinary reads,
-cache invalidation, and staged acquisition from overlapping; while a staged
-lease is active, cache-mutating operations are rejected so pooled block storage
-cannot be reused prematurely.
+The latest isolated change removes checked array addressing from worker-private
+`current` VHS radix histogram scans without changing partitions, sortable keys,
+exceptional-value fallback, or integer counts. Four interleaved 320-frame Exact
+`current --threads 20` pairs moved median wall time from 16.491 to 16.228 seconds
+and CPU time from 132.99 to 127.28 seconds. Two 1,000-frame pairs moved wall time
+from 40.321 to 39.842 seconds (1.19% lower) and CPU time from 325.28 to 317.73
+seconds; all nine compatibility surfaces matched and memory remained bounded.
 
-Two order-reversed 1,000-frame Exact `current --threads 20` pairs moved median
-wall time from 43.00 to 42.88 seconds, CPU time from 342.50 to 324.50 seconds
-(5.3% lower), and peak working set from about 753 to 721 MiB. A separate
-release-like 160-frame four-pair A/B split two wins each and was inconclusive for
-wall time and CPU, so no short-window speedup is claimed. All nine compatibility
-surfaces matched.
-
-Local read-only review found and fixed that cache-ownership race before
-publication. Four opposite-order 1,000-frame pre/post-fix pairs matched all nine
-surfaces. Wall medians were 39.770/39.932 seconds; pair changes split
-+0.94%/+1.15%/-1.04%/-0.03%, while CPU median fell 1.74%. The final atomic gate
-is therefore classified as performance-neutral.
-
-Merged Python PR341 was deterministic here; Python v0.4.0 produced 15 distinct
-luma, chroma, JSON, and normalized-log hashes in 15 runs, so the strict oracle
-remains Python v0.4.0 `g4315520 --threads 0`. Commands, hardware, hashes, memory
-bounds, and historical measurements are in the
+Every .NET profile/thread cell was deterministic across its three refreshed
+runs. Merged Python PR341 was deterministic in its pinned reference set; Python
+v0.4.0 produced 15 distinct luma, chroma, JSON, and normalized-log hashes in 15
+runs, so the strict oracle remains Python v0.4.0 `g4315520 --threads 0`.
+Commands, ranges, binary hashes, memory bounds, and historical measurements are in the
 [detailed performance reference](docs/README.detailed.md#performance).
 
 <!-- SECTION: compatibility -->
