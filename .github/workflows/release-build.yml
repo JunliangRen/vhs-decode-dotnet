@@ -187,6 +187,11 @@ jobs:
           DOTNET_EnableAVX: "0"
         run: dotnet test tests/VHSDecode.Tests/VHSDecode.Tests.csproj --configuration Release --no-build --no-restore --filter-method '*RealFftRadix4AvxStagesPreserveScalarBitPatterns*' --minimum-expected-tests 4
 
+      - name: Run Float32 SOS common-section AVX-disabled hash test
+        env:
+          DOTNET_EnableAVX: "0"
+        run: dotnet test tests/VHSDecode.Tests/VHSDecode.Tests.csproj --configuration Release --no-build --no-restore --filter-method '*Float32SosCommonSectionKernelsRemainBitExact*' --minimum-expected-tests 1
+
       - name: Run Float32 SOS checked-reference scalar fallback test
         env:
           DOTNET_EnableHWIntrinsic: "0"

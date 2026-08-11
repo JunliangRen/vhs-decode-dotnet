@@ -2,6 +2,7 @@ using System.Buffers.Binary;
 using System.Globalization;
 using System.Numerics;
 using System.Runtime.InteropServices;
+using System.Runtime.Intrinsics.X86;
 using System.Security.Cryptography;
 using VHSDecode.Core.CommandLine;
 using VHSDecode.Core.Decode;
@@ -1420,8 +1421,8 @@ public sealed class DspWorkingBufferTests
                 AssertFloatBitsEqual(edgeSignal, preservedInput);
             }
 
-            // The legacy reverse path preserved a different NaN payload under the scalar JIT.
-            string expectedHash = Vector.IsHardwareAccelerated ? hardwareHash : scalarHash;
+            // The AVX and non-AVX JITs preserve different legacy NaN payloads.
+            string expectedHash = Avx.IsSupported ? hardwareHash : scalarHash;
             Assert.Equal(expectedHash, Convert.ToHexString(aggregate.GetHashAndReset()));
         }
     }
