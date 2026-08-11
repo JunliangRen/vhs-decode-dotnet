@@ -2,7 +2,7 @@
 
 [English](README.md) | **[简体中文](README.zh-CN.md)** | [日本語](README.ja.md)
 
-<!-- README_SYNC: 2026-08-12.01 -->
+<!-- README_SYNC: 2026-08-12.02 -->
 
 这是 [`oyvindln/vhs-decode`](https://github.com/oyvindln/vhs-decode)
 中解码相关部分的 .NET 11 重写，兼容目标为上游 release `v0.4.0`、commit
@@ -33,7 +33,7 @@
 - VHS 家族包括 VHS/S-VHS、Betamax、Video8/Hi8、U-matic、Type C、EIAJ
   以及上游支持的 PAL/NTSC 变体。
 - TBC 工具、双击启动的用户 GUI 和开发者绘图窗口明确不在范围内。
-- Visual Studio 2026 `.slnx` 包含 **1,425** 项标准 xUnit v3 测试；测试可在
+- Visual Studio 2026 `.slnx` 包含 **1,426** 项标准 xUnit v3 测试；测试可在
   Test Explorer 中查看，也可用 `dotnet test` 运行。
 
 <!-- SECTION: start -->
@@ -91,31 +91,31 @@ CVBS 和 HiFi 仍会拒绝 `ipp-fast`；需要 release 兼容行为时应使用 
 
 这是同一份私有本地 40 MHz PAL VHS `.ldf` 夹具上使用
 `--start 100 --length 160` 的含启动开销快照，且不会公开源文件名。Python 两列沿用
-2026-08-11 固定版本的三轮参考数据；60 次 .NET Release 测量于 2026-08-12 使用基于
-main `22b7750` 的性能候选重新完成，并保持相同的正序、反序和混排方案。兼容性结论与
-速度数据分开判断。
+固定的三轮参考数据；30 次 `current` .NET Release 测量于 2026-08-12 使用基于
+main `fa869a6` 的性能候选重新完成，并保持相同的正序、反序和混排方案。Python 与
+.NET v0.4.0 列继续沿用固定数据；兼容性结论与速度数据分开判断。
 
 <!-- LATEST_PERFORMANCE_BEGIN -->
 | CLI 模式（workers） | Python v0.4.0 | Python PR341 | Exact + v0.4.0 | Exact + current | IPP-fast + v0.4.0 | IPP-fast + current |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| 默认（5） | 45.414 s | 45.060 s | 12.780 s / 3.553x | 12.004 s / 3.754x | 11.331 s / 4.008x | 9.489 s / 4.748x |
-| `--threads 1` | 52.323 s | 52.579 s | 32.579 s / 1.606x | 38.046 s / 1.382x | 23.712 s / 2.207x | 26.139 s / 2.011x |
-| `--threads 5` | 45.991 s | 44.990 s | 12.575 s / 3.658x | 11.984 s / 3.754x | 11.387 s / 4.039x | 9.556 s / 4.708x |
-| `--threads 10` | 47.385 s | 47.713 s | 10.006 s / 4.736x | 9.988 s / 4.777x | 9.540 s / 4.967x | 7.520 s / 6.344x |
-| `--threads 20` | 48.459 s | 47.490 s | 8.263 s / 5.864x | 7.666 s / 6.195x | 7.933 s / 6.109x | 5.802 s / 8.185x |
+| 默认（5） | 45.414 s | 45.060 s | 12.780 s / 3.553x | 12.235 s / 3.683x | 11.331 s / 4.008x | 9.521 s / 4.733x |
+| `--threads 1` | 52.323 s | 52.579 s | 32.579 s / 1.606x | 36.713 s / 1.432x | 23.712 s / 2.207x | 25.404 s / 2.070x |
+| `--threads 5` | 45.991 s | 44.990 s | 12.575 s / 3.658x | 11.828 s / 3.804x | 11.387 s / 4.039x | 9.353 s / 4.810x |
+| `--threads 10` | 47.385 s | 47.713 s | 10.006 s / 4.736x | 9.734 s / 4.902x | 9.540 s / 4.967x | 7.609 s / 6.271x |
+| `--threads 20` | 48.459 s | 47.490 s | 8.263 s / 5.864x | 7.715 s / 6.156x | 7.933 s / 6.109x | 5.852 s / 8.115x |
 <!-- LATEST_PERFORMANCE_END -->
-<!-- LATEST_PERFORMANCE_RUNS: performance-snapshot-runs=90 dotnet-matrix-runs=60 python-reference-runs=30 dotnet-repeats=3 python-reference-date=2026-08-11 dotnet-matrix-date=2026-08-12 radix-pointer-current-320-ab-pairs=4 radix-pointer-current-1000-ab-pairs=2 radix-pointer-default-320-ab-pairs=1 radix-pointer-sync-tests=34 radix-pointer-intrinsic-modes=2 python-v040-runs=15 python-v040-hashes=15 python-pr341-runs=15 python-pr341-hashes=1 -->
+<!-- LATEST_PERFORMANCE_RUNS: performance-snapshot-runs=90 dotnet-matrix-runs=60 python-reference-runs=30 dotnet-repeats=3 python-reference-date=2026-08-11 dotnet-v040-date=2026-08-12 dotnet-current-date=2026-08-12 current-acc-matrix-runs=30 current-acc-exact-1000-ab-pairs=5 current-acc-ipp-1000-ab-pairs=2 current-acc-thread-gates=4 current-acc-tests=15 current-acc-intrinsic-modes=3 python-v040-runs=15 python-v040-hashes=15 python-pr341-runs=15 python-pr341-hashes=1 -->
 
 每个 .NET 单元格依次给出墙钟中位数和相对同 profile Python 列的倍速；默认实际
 使用 **5 个 workers**。三次运行范围见[详细性能说明](docs/README.detailed.zh-CN.md#性能)。
 倍数会随 .NET 绝对时间和作为分母的 Python 时间一起变化，使用其他夹具或窗口的历史表格
 也不能直接横向比较。判断因果回退时使用同一时刻的 .NET 版本配对 A/B，而不是旧表倍数。
 
-最新的隔离改动只移除 worker 私有 `current` VHS radix 直方图扫描中的受检数组寻址，
-不改变分区、sortable key、异常值回退或整数计数。四组交错的 320 帧 Exact
-`current --threads 20` 配对把墙钟中位数从 16.491 降到 16.228 秒，CPU 时间从
-132.99 降到 127.28 秒；两组 1000 帧配对把墙钟从 40.321 降到 39.842 秒
-（低 1.19%），CPU 从 325.28 降到 317.73 秒。九类兼容表面全部一致，内存保持有界。
+最新的隔离改动用托管 AVX 加速相互独立的 `current` 色度 ACC 样本缩放。标量 gain
+递推、float32 转换点、非有限值回退和运算顺序均不改变，也不使用 FMA。五组交错的
+1000 帧 Exact `current --threads 20` 配对中候选四组获胜，两次独立会话的墙钟中位数
+分别快 0.97% 和 0.57%；两组 IPP-fast 配对快 1.63%，CPU 时间减少 3.44%。全部兼容
+表面一致，线程门禁通过，内存保持在原有的有界进程窗口内。
 
 刷新后的每个 .NET profile/线程单元格在三轮内都保持确定性。固定参考集中的 Python
 PR341 保持确定；Python v0.4.0 的 15 次运行产生了 15 套不同的亮度、色度、JSON 和
@@ -153,7 +153,7 @@ TBC、色度、JSON 和日志文件允许在解码期间并发读取，兼容的
 dotnet restore VHSDecodeDotNet.slnx
 dotnet build VHSDecodeDotNet.slnx -c Release --no-restore
 dotnet test --solution VHSDecodeDotNet.slnx -c Release `
-  --no-build --no-restore --minimum-expected-tests 1425
+  --no-build --no-restore --minimum-expected-tests 1426
 ```
 
 在 Visual Studio 2026 中打开 `VHSDecodeDotNet.slnx`，即可构建、调试并通过
