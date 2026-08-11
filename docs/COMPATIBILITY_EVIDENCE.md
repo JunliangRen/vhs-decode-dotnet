@@ -2255,7 +2255,9 @@ mean wall time moved from 36.800 to 36.149 seconds (1.77% lower), and CPU time
 from 308.508 to 298.828 seconds (3.14% lower). The 30-run current matrix was
 deterministic across the same seven surfaces at default, 1, 5, 10, and 20
 workers for Exact and IPP-fast. Opposite-order zero- and one-worker gates were
-output-exact and performance-neutral; memory remained bounded without OOM.
+output-exact. Paired serial CPU time was effectively flat, but wall timing was
+inconclusive, so no serial speedup is claimed. Memory remained bounded without
+OOM.
 
 ### AVX current chroma ACC segment scaling
 

@@ -129,8 +129,9 @@ Across two opposite-order 1,000-frame Exact `current --threads 20` pairs, mean
 wall time moved from 36.800 to 36.149 seconds (1.77% lower) and CPU time from
 308.508 to 298.828 seconds (3.14% lower). IPP-fast remained neutral in its
 paired screen. All 30 refreshed matrix runs were deterministic across seven
-compatibility surfaces, single-thread paired performance was neutral, and
-memory remained bounded.
+compatibility surfaces, and serial gates were output-exact. Paired serial CPU
+time was effectively flat but wall timing was inconclusive, so no serial
+speedup is claimed. Memory remained bounded.
 
 Every .NET profile/thread cell was deterministic across its three refreshed
 runs. Merged Python PR341 was deterministic in its pinned reference set; Python

@@ -124,7 +124,8 @@ reduction、reassociation は使いません。順序を反転した 1,000-frame
 `current --threads 20` 2 pair の平均は、wall time が 36.800 から 36.149 seconds（1.77% 減）、
 CPU time が 308.508 から 298.828 seconds（3.14% 減）になりました。IPP-fast の paired
 screen は neutral でした。更新した 30 matrix run は 7 compatibility surface ですべて
-deterministic、single-thread paired performance は neutral、memory は bounded でした。
+deterministic で、serial gate の output は exact でした。paired serial CPU time は実質 flat ですが
+wall timing は inconclusive だったため、serial speedup は claim しません。memory は bounded でした。
 
 更新した各 .NET profile/thread cell は 3 run 内で deterministic でした。固定 reference の
 merged Python PR341 も deterministic でした。Python v0.4.0 は 15 run で 15 種類の luma、
