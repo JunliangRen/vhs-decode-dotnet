@@ -830,7 +830,7 @@ public sealed class TbcFieldDecodePipeline : IDisposable
         }
         catch
         {
-            deferredVhsPayload?.EnsureMaterialized();
+            deferredVhsPayload?.EnsurePayloadMaterialized();
             throw;
         }
     }
@@ -1101,7 +1101,7 @@ public sealed class TbcFieldDecodePipeline : IDisposable
 
         if (span.DeferredVhsPayload is { } deferredVhsPayload)
         {
-            deferredVhsPayload.EnsureMaterialized();
+            deferredVhsPayload.EnsurePayloadMaterialized();
             if (prepared.DeferredVideoDcOffset != 0.0)
             {
                 span = span with
@@ -5941,14 +5941,26 @@ public sealed class TbcFieldDecodePipeline : IDisposable
             return TbcDropoutMap.Empty;
         }
 
+        RfBlockStreamDecoder.VhsPayloadMaterializer? deferredEnvelope =
+            span.DeferredVhsPayload is { UsesSegmentedEnvelope: true } materializer
+                ? materializer
+                : null;
         double threshold = _dropoutOptions.AbsoluteThreshold
-            ?? NumpyReduction.MeanFloat32(envelope) * (float)_dropoutOptions.ThresholdFraction;
-        IReadOnlyList<RfDropoutRange> ranges = RfDropoutDetector.FindDropouts(
-            envelope,
-            startSample,
-            endSample,
-            threshold,
-            _dropoutOptions.Hysteresis);
+            ?? (deferredEnvelope?.MeanEnvelopeFloat32()
+                ?? NumpyReduction.MeanFloat32(envelope))
+            * (float)_dropoutOptions.ThresholdFraction;
+        IReadOnlyList<RfDropoutRange> ranges = deferredEnvelope is null
+            ? RfDropoutDetector.FindDropouts(
+                envelope,
+                startSample,
+                endSample,
+                threshold,
+                _dropoutOptions.Hysteresis)
+            : deferredEnvelope.FindEnvelopeDropouts(
+                startSample,
+                endSample,
+                threshold,
+                _dropoutOptions.Hysteresis);
         return TbcDropoutMapper.MapTapeRfToTbc(
             ranges,
             lineLocations.Locations,

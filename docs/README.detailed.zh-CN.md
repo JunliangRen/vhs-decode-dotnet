@@ -357,39 +357,81 @@ Exact `current`、IPP-fast v0.4.0 和 IPP-fast `current`。文件名不会公开
 <!-- LATEST_PERFORMANCE_BEGIN -->
 | CLI 模式（workers） | Python v0.4.0 | Python PR341 | Exact + v0.4.0 | Exact + current | IPP-fast + v0.4.0 | IPP-fast + current |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| 默认（5） | 47.529 s | 45.027 s | 12.934 s / 3.675x / 72.79% | 12.838 s / 3.507x / 71.49% | 11.304 s / 4.205x / 76.22% | 9.680 s / 4.652x / 78.50% |
-| `--threads 1` | 54.069 s | 54.163 s | 32.305 s / 1.674x / 40.25% | 38.309 s / 1.414x / 29.27% | 23.480 s / 2.303x / 56.57% | 26.640 s / 2.033x / 50.81% |
-| `--threads 5` | 45.789 s | 44.758 s | 13.125 s / 3.489x / 71.34% | 12.721 s / 3.518x / 71.58% | 11.632 s / 3.937x / 74.60% | 9.731 s / 4.599x / 78.26% |
-| `--threads 10` | 47.344 s | 47.884 s | 10.047 s / 4.712x / 78.78% | 9.589 s / 4.993x / 79.97% | 9.638 s / 4.912x / 79.64% | 7.799 s / 6.140x / 83.71% |
-| `--threads 20` | 48.659 s | 48.408 s | 8.445 s / 5.762x / 82.64% | 7.688 s / 6.297x / 84.12% | 8.053 s / 6.042x / 83.45% | 6.160 s / 7.858x / 87.27% |
+| 默认（5） | 45.414 s | 45.060 s | 12.483 s / 3.638x / 72.51% | 12.231 s / 3.684x / 72.86% | 11.235 s / 4.042x / 75.26% | 9.442 s / 4.772x / 79.04% |
+| `--threads 1` | 52.323 s | 52.579 s | 32.014 s / 1.634x / 38.81% | 37.531 s / 1.401x / 28.62% | 23.312 s / 2.244x / 55.45% | 25.972 s / 2.024x / 50.60% |
+| `--threads 5` | 45.991 s | 44.990 s | 12.606 s / 3.648x / 72.59% | 12.044 s / 3.736x / 73.23% | 11.247 s / 4.089x / 75.54% | 9.407 s / 4.783x / 79.09% |
+| `--threads 10` | 47.385 s | 47.713 s | 10.257 s / 4.620x / 78.35% | 9.923 s / 4.808x / 79.20% | 9.499 s / 4.988x / 79.95% | 7.519 s / 6.346x / 84.24% |
+| `--threads 20` | 48.459 s | 47.490 s | 8.309 s / 5.832x / 82.85% | 8.284 s / 5.733x / 82.56% | 8.045 s / 6.024x / 83.40% | 5.823 s / 8.155x / 87.74% |
 <!-- LATEST_PERFORMANCE_END -->
-<!-- LATEST_PERFORMANCE_RUNS: full-interleaved-matrix-runs=90 dotnet-matrix-runs=60 python-matrix-runs=30 repeats=3 resumed-after-complete=69 complex64-final-t5-160-ab-pairs=4 complex64-current-1000-ab-pairs=2 complex64-storage-tests=3 complex64-intrinsic-modes=3 python-v040-runs=15 python-v040-hashes=15 python-pr341-runs=15 python-pr341-hashes=1 -->
+<!-- LATEST_PERFORMANCE_RUNS: full-interleaved-matrix-runs=90 dotnet-matrix-runs=60 python-matrix-runs=30 repeats=3 segmented-envelope-release-ab-pairs=4 segmented-envelope-current-1000-ab-pairs=2 segmented-envelope-v040-160-ab-pairs=2 segmented-envelope-safety-ab-pairs=4 segmented-envelope-tests=2 segmented-envelope-intrinsic-modes=2 python-v040-runs=15 python-v040-hashes=15 python-pr341-runs=15 python-pr341-hashes=1 -->
 
 三次运行的墙钟范围如下：
 
 <!-- LATEST_PERFORMANCE_RANGES_BEGIN -->
 | CLI 模式 | Python v0.4.0 | Python PR341 | Exact + v0.4.0 | Exact + current | IPP-fast + v0.4.0 | IPP-fast + current |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| 默认（5） | 45.831-49.190 s | 44.310-45.876 s | 12.543-13.108 s | 12.792-12.846 s | 11.122-11.551 s | 9.667-9.855 s |
-| `--threads 1` | 53.048-54.777 s | 53.465-54.696 s | 31.797-32.649 s | 38.284-38.465 s | 23.424-23.675 s | 26.224-26.700 s |
-| `--threads 5` | 45.617-47.106 s | 44.673-48.770 s | 12.663-13.327 s | 12.417-12.744 s | 11.379-11.862 s | 9.578-10.699 s |
-| `--threads 10` | 45.553-47.348 s | 46.317-48.402 s | 10.031-10.073 s | 9.067-10.556 s | 9.333-9.651 s | 7.427-7.801 s |
-| `--threads 20` | 46.760-48.938 s | 47.185-48.517 s | 8.183-8.650 s | 7.619-8.143 s | 8.048-8.444 s | 5.794-6.161 s |
+| 默认（5） | 45.414-46.131 s | 44.868-45.586 s | 12.475-12.687 s | 12.077-12.841 s | 11.183-11.241 s | 9.346-9.460 s |
+| `--threads 1` | 51.717-53.065 s | 51.773-52.927 s | 31.851-32.299 s | 37.395-37.607 s | 23.165-23.692 s | 25.651-26.544 s |
+| `--threads 5` | 45.332-47.649 s | 44.045-46.375 s | 12.582-12.819 s | 12.026-12.425 s | 11.076-11.255 s | 9.143-9.423 s |
+| `--threads 10` | 46.748-48.421 s | 46.921-47.898 s | 9.878-10.501 s | 9.834-10.741 s | 9.417-9.722 s | 7.474-7.635 s |
+| `--threads 20` | 47.718-48.912 s | 47.427-47.687 s | 8.200-8.325 s | 7.628-8.304 s | 8.031-8.149 s | 5.818-5.970 s |
 <!-- LATEST_PERFORMANCE_RANGES_END -->
 
 2026-08-11 同批刷新了全部 90 次 Release 测量：六种 profile 的五种 worker 设置使用正序、
-反序和混排三轮。宿主执行会话在 69 条完整 JSONL 结果后结束；被中断项目没有结果记录。
-恢复脚本按 profile、mode、轮次组成的唯一键跳过这 69 条完整结果并执行剩余 21 条，因此
-每个单元格仍恰好包含三次完整测量，没有接纳任何半成品。
+反序和混排三轮。一个早期 Exact-only 包在首个不可用 IPP 单元停止，已完成的四条结果
+没有复用。最终矩阵换成包含 IPP 的正式打包二进制并从零开始，全部 90 条均自然完成，
+因此每个单元格恰好包含同一二进制的三次完整测量。
 
-本候选基于已合并的 main `d1df109`。计时用单文件 `decode.exe` 的 SHA-256 为
-`B41F01E85C20A21EEC81C2F356F3E6CBE06D84F86A4A77CEEB75D48654349D00`。
-被测 `PocketFftComplex.cs` 源码是 Git blob
-`7fbb2675835f01d6fdb7d9fc8d784dc9866c69a5`，对应已合并 main 的基线 blob 为
-`37d7fb38005c5b755716bf291090a073522be368`；文档和仅测试改动不属于计时二进制。
+本候选基于已合并的 main `cefdbaf`。90-run 矩阵使用 103,561,828 字节单文件
+`decode.exe`，SHA-256 为 `9E8DCFB22E14E1F8C4BDBEFF6B11237108F1CD158D31941A3DABF083F9313C55`。
+被测源码 Git blob 分别为：`RfBlockStreamDecoder.cs`
+`69a1d6eced820eb2df0005701677a22ddf242da8`、`TbcFieldDecodePipeline.cs`
+`fbd518520eb620b094e78977313a736281926e71`、`NumpyReduction.cs`
+`2e25e1652f53325759101be0686afc3e69ee960b`。本地审查随后增加下述共享原子缓存操作门。
+最终 CRLF 归一化的 103,562,852 字节单文件 SHA-256 为
+`17A2A5306BD2DA34B92D5FF19ECA68D91B7B9BE450A37A09E6A628AB5CFD455D`；其中
+`RfBlockStreamDecoder.cs` Git blob 为 `8bffb0c6a2901d3ec6c202388549c3ab5a14aff0`，
+另外两个源码 blob 未变。文档和仅测试改动不属于二进制。
 测试机为 Intel Core Ultra 7 265K（20 个逻辑处理器）、Windows 11 build 26220，以及
 .NET SDK/runtime `11.0.100-preview.6.26359.118`。原始目录含私有夹具路径，只保留在
 本地；这些是如实报告的本地测量，不是可公开独立复现的 benchmark corpus。
+
+### 直接分段扫描 VHS Envelope
+
+请求 20 个及以上 workers 时，分阶段 VHS payload 组装不再先把完整 RF Envelope 复制到
+span workspace；materializer 保持已有 decoder blocks 存活，并直接读取其 Envelope 分段。
+均值仍采用原有 128-sample 递归切分、8-lane float32 叶节点求和、转换点和加法顺序；
+dropout 扫描仍保持索引顺序、阈值、迟滞、合并距离、最小长度和最终范围顺序。低线程
+保留原有连续复制与扫描；现有调用者仍可显式触发完整 materialization。共享的
+idle/ordinary/staged 原子状态会阻止普通缓存操作与 staged 获取同时进入。staged lease 释放前
+拒绝普通读取和显式缓存失效，避免仍被分段分析引用的池化 block 被驱逐并提前归还。
+
+高线程测试跨越 block 边界，在 payload 组装期间保持目标 Envelope 未初始化，逐位比较均值，
+并用多个窗口和阈值与连续 detector 对照，最后验证延迟完整 materialization。它还验证活动
+lease 期间普通读取与缓存失效会被拒绝，并在释放后恢复。另一个阻塞 loader 回归先启动普通
+读取，再确认 staged 获取被拒绝、loader 最大并发保持 1，直到普通操作结束。低边界测试
+使用门槛下一个 worker，固定原连续行为。完整 1,425 项测试通过；禁用全部 .NET hardware
+intrinsic 后，13 项 reduction 和 34 项 block-cache 测试也全部通过。
+
+两组正反顺序 1000 帧 Exact `current --threads 20` 配对各产生 2000 个有序 field，退出状态、
+亮度、色度、原始 JSON、stdout、归一化 stderr/log 和有序 `fileLoc` 全部一致。墙钟中位数
+从 43.001 降到 42.880 秒，CPU 从 342.50 降到 324.50 秒（低 5.26%），峰值工作集从
+753.0 降到 721.2 MiB。两组墙钟变化均为负，但只宣称 0.28% 的中位数提升。两组 160 帧
+v0.4.0 配对把墙钟中位数从 10.893 降到 10.670 秒（低 2.05%），CPU 从 78.44 降到
+77.49 秒，峰值工作集从 795.1 降到 752.9 MiB。
+
+本地只读审查在发布前发现了缓存所有权竞态。四组正反顺序 1000 帧原子门前后配对的九类
+兼容表面全部一致。baseline/candidate 墙钟中位数为 39.770/39.932 秒，各组变化为
++0.94%、+1.15%、-1.04%、-0.03%，各胜两组。CPU 中位数从 320.23 降到 314.67 秒
+（低 1.74%），峰值工作集中位数从 405.25 降到 399.84 MiB。因此最终原子门归类为性能
+中性，不宣称墙钟加速或回退。
+
+另一个正式打包方式的 160 帧 Exact `current` 四组 A/B 各胜两组。baseline/candidate 的
+墙钟中位数为 7.691/7.909 秒，CPU 为 67.50/68.02 秒，各组变化方向互相矛盾，因此归类为
+不确定，不宣称短窗口加速或回退。公开矩阵如实列出其 Exact `current --threads 20` 中位数，
+但不把跨批单元格当作因果证据。60 次 .NET 与 15 次 Python PR341 测量均在各 profile 内
+只有一套 hash；Python v0.4.0 的 15 次运行产生 15 套不同的亮度、色度、JSON 和归一化日志
+hash，因此严格 oracle 仍是 `g4315520 --threads 0`。
 
 ### 直接输出的托管 double PocketFFT
 
@@ -2632,7 +2674,7 @@ stderr、时间戳归一化日志和全部 2,000 个有序 `fileLoc` 完全一�
 .\tools\build-ipp-native.ps1
 dotnet restore VHSDecodeDotNet.slnx
 dotnet build VHSDecodeDotNet.slnx -c Release --no-restore
-dotnet test --solution VHSDecodeDotNet.slnx -c Release --no-build --no-restore --minimum-expected-tests 1424
+dotnet test --solution VHSDecodeDotNet.slnx -c Release --no-build --no-restore --minimum-expected-tests 1425
 dotnet test --project tests\VHSDecode.Tests\VHSDecode.Tests.csproj -c Release --no-build --no-restore --coverage --coverage-output coverage.cobertura.xml --coverage-output-format cobertura
 ```
 
@@ -2644,7 +2686,7 @@ Intel oneAPI。只含二进制的单文件发布会嵌入 `vhsdecode_ipp.dll` �
 notice，不会额外生成许可证 sidecar 文件。只构建 Exact 后端时可以省略原生构建步骤。
 
 当前正式 Release 构建为零警告、零错误。xUnit v3 项目向
-`dotnet test` 和 Visual Studio Test Explorer 暴露 **1,424** 个可独立发现的测试。
+`dotnet test` 和 Visual Studio Test Explorer 暴露 **1,425** 个可独立发现的测试。
 
 <!-- SECTION: usage -->
 

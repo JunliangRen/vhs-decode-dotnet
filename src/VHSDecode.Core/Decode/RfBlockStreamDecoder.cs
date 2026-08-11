@@ -32,6 +32,9 @@ public sealed class RfBlockStreamDecoder : IDisposable
     // the corresponding decoded payloads.
     private const int LaserDiscCompatibilityCacheBlocks = 256;
     private const int MaximumAdditionalPrefetchBlocks = 8;
+    private const int CacheOperationIdle = 0;
+    private const int CacheOperationOrdinary = 1;
+    private const int CacheOperationStagedVhs = 2;
     internal const int MaximumConcurrentPrefetchBlocks = 12;
     internal const int MaximumPrefetchBlocks = 32;
     private readonly RfBlockDecodePipeline _pipeline;
@@ -48,7 +51,7 @@ public sealed class RfBlockStreamDecoder : IDisposable
     private long? _lastSequentialDecodedBlock;
     private PrefetchOperation? _prefetchOperation;
     private VhsPayloadMaterializer? _activeVhsPayload;
-    private int _stagedVhsReadActive;
+    private int _cacheOperationState;
     private int _prefetchCancellationCount;
     private readonly ReusableSpanBuffers?[] _reusableSpanBuffers = new ReusableSpanBuffers?[ReusableSpanBufferSetCapacity];
     private bool _disposed;
@@ -208,14 +211,22 @@ public sealed class RfBlockStreamDecoder : IDisposable
     internal void InvalidateCachedBlocks()
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
-        FinishPrefetch(cancel: true, suppressFailures: true);
-        ClearBlockCache(_decodedBlockCache);
-        ClearBlockCache(_prefetchedBlockCache);
-        ClearBlockCache(_sequentialBlockCache);
-        _decodedBlockCacheStream = null;
-        _lastReadFirstBlock = null;
-        _lastSequentialDecodedBlock = null;
-        _laserDiscCompatibilityMtfByBlock.Clear();
+        EnterOrdinaryCacheOperation();
+        try
+        {
+            FinishPrefetch(cancel: true, suppressFailures: true);
+            ClearBlockCache(_decodedBlockCache);
+            ClearBlockCache(_prefetchedBlockCache);
+            ClearBlockCache(_sequentialBlockCache);
+            _decodedBlockCacheStream = null;
+            _lastReadFirstBlock = null;
+            _lastSequentialDecodedBlock = null;
+            _laserDiscCompatibilityMtfByBlock.Clear();
+        }
+        finally
+        {
+            ExitOrdinaryCacheOperation();
+        }
     }
 
     internal void UpdateLaserDiscCompatibilityMtf(Complex[] response)
@@ -230,17 +241,41 @@ public sealed class RfBlockStreamDecoder : IDisposable
     }
 
     public RfDecodedSpan? Read(Stream stream, long begin, int length)
-        => ReadCore(
-            stream,
-            begin,
-            length,
-            reusableBuffers: null,
-            stageVhsPayload: false,
-            out _);
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+        EnterOrdinaryCacheOperation();
+        try
+        {
+            return ReadCore(
+                stream,
+                begin,
+                length,
+                reusableBuffers: null,
+                stageVhsPayload: false,
+                out _);
+        }
+        finally
+        {
+            ExitOrdinaryCacheOperation();
+        }
+    }
 
     internal RfDecodedSpanLease? ReadLeased(Stream stream, long begin, int length)
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
+        EnterOrdinaryCacheOperation();
+        try
+        {
+            return ReadLeasedCore(stream, begin, length);
+        }
+        finally
+        {
+            ExitOrdinaryCacheOperation();
+        }
+    }
+
+    private RfDecodedSpanLease? ReadLeasedCore(Stream stream, long begin, int length)
+    {
         if (begin < 0)
         {
             throw new ArgumentOutOfRangeException(nameof(begin));
@@ -319,11 +354,17 @@ public sealed class RfBlockStreamDecoder : IDisposable
         }
 
         ReusableSpanBuffers buffers = TakeReusableSpanBuffers(length);
-        if (Interlocked.CompareExchange(ref _stagedVhsReadActive, 1, 0) != 0)
+        int activeCacheOperation = Interlocked.CompareExchange(
+            ref _cacheOperationState,
+            CacheOperationStagedVhs,
+            CacheOperationIdle);
+        if (activeCacheOperation != CacheOperationIdle)
         {
             ReturnReusableSpanBuffers(buffers);
             throw new InvalidOperationException(
-                "Only one staged VHS span can be active per RF stream decoder.");
+                activeCacheOperation == CacheOperationStagedVhs
+                    ? "Only one staged VHS span can be active per RF stream decoder."
+                    : "A staged VHS span cannot start while another RF block cache operation is active.");
         }
 
         VhsPayloadMaterializer? materializer = null;
@@ -941,7 +982,31 @@ public sealed class RfBlockStreamDecoder : IDisposable
     }
 
     private void ReleaseStagedVhsRead()
-        => Volatile.Write(ref _stagedVhsReadActive, 0);
+        => Volatile.Write(ref _cacheOperationState, CacheOperationIdle);
+
+    private void EnterOrdinaryCacheOperation()
+    {
+        int activeCacheOperation = Interlocked.CompareExchange(
+            ref _cacheOperationState,
+            CacheOperationOrdinary,
+            CacheOperationIdle);
+        if (activeCacheOperation == CacheOperationIdle)
+        {
+            return;
+        }
+
+        if (activeCacheOperation == CacheOperationStagedVhs)
+        {
+            throw new InvalidOperationException(
+                "The RF block cache cannot change while a staged VHS span is active.");
+        }
+
+        throw new InvalidOperationException(
+            "Only one RF block cache operation can be active per stream decoder.");
+    }
+
+    private void ExitOrdinaryCacheOperation()
+        => Volatile.Write(ref _cacheOperationState, CacheOperationIdle);
 
     private ReusableSpanBuffers TakeReusableSpanBuffers(int length)
     {
@@ -1694,6 +1759,9 @@ public sealed class RfBlockStreamDecoder : IDisposable
 
     internal sealed class VhsPayloadMaterializer : IDisposable
     {
+        // Lower worker counts favor one contiguous copy; segmented scans pay off at high concurrency.
+        internal const int MinimumSegmentedEnvelopeWorkerThreads = 20;
+        private const int PairwiseBlockSize = 128;
         private readonly object _gate = new();
         private readonly RfBlockStreamDecoder _owner;
         private readonly RfPipelineBlock[] _blocks;
@@ -1703,7 +1771,9 @@ public sealed class RfBlockStreamDecoder : IDisposable
         private readonly double[]? _chroma;
         private readonly int _windowOffset;
         private readonly int _workerThreads;
-        private Task? _materialization;
+        private readonly bool _useSegmentedEnvelope;
+        private Task? _payloadMaterialization;
+        private Task? _envelopeMaterialization;
         private bool _disposed;
 
         internal VhsPayloadMaterializer(
@@ -1724,7 +1794,10 @@ public sealed class RfBlockStreamDecoder : IDisposable
             _chroma = chroma;
             _windowOffset = windowOffset;
             _workerThreads = workerThreads;
+            _useSegmentedEnvelope = workerThreads >= MinimumSegmentedEnvelopeWorkerThreads;
         }
+
+        internal bool UsesSegmentedEnvelope => _useSegmentedEnvelope;
 
         internal bool MaterializationStarted
         {
@@ -1732,7 +1805,21 @@ public sealed class RfBlockStreamDecoder : IDisposable
             {
                 lock (_gate)
                 {
-                    return _materialization is not null;
+                    return _payloadMaterialization is not null
+                        || _envelopeMaterialization is not null;
+                }
+            }
+        }
+
+        internal bool EnvelopeMaterializationStarted
+        {
+            get
+            {
+                lock (_gate)
+                {
+                    return _useSegmentedEnvelope
+                        ? _envelopeMaterialization is not null
+                        : _payloadMaterialization is not null;
                 }
             }
         }
@@ -1742,16 +1829,126 @@ public sealed class RfBlockStreamDecoder : IDisposable
             lock (_gate)
             {
                 ObjectDisposedException.ThrowIf(_disposed, this);
-                return _materialization ??= Task.Run(Materialize);
+                return _payloadMaterialization ??= Task.Run(MaterializePayload);
             }
         }
 
-        internal void EnsureMaterialized()
+        internal void EnsurePayloadMaterialized()
             => BeginMaterialization().GetAwaiter().GetResult();
+
+        internal void EnsureMaterialized()
+        {
+            Task payloadMaterialization;
+            Task? envelopeMaterialization;
+            lock (_gate)
+            {
+                ObjectDisposedException.ThrowIf(_disposed, this);
+                payloadMaterialization = _payloadMaterialization ??= Task.Run(MaterializePayload);
+                envelopeMaterialization = _useSegmentedEnvelope
+                    ? _envelopeMaterialization ??= Task.Run(MaterializeEnvelope)
+                    : null;
+            }
+
+            payloadMaterialization.GetAwaiter().GetResult();
+            envelopeMaterialization?.GetAwaiter().GetResult();
+        }
+
+        internal float MeanEnvelopeFloat32()
+        {
+            lock (_gate)
+            {
+                ObjectDisposedException.ThrowIf(_disposed, this);
+                return _envelope.Length == 0
+                    ? float.NaN
+                    : _useSegmentedEnvelope
+                        ? PairwiseEnvelopeSumFloat32(0, _envelope.Length) / _envelope.Length
+                        : NumpyReduction.MeanFloat32(_envelope);
+            }
+        }
+
+        internal IReadOnlyList<RfDropoutRange> FindEnvelopeDropouts(
+            int start,
+            int end,
+            double threshold,
+            double hysteresis,
+            int mergeThreshold = RfDropoutDetector.DefaultMergeThreshold,
+            int minimumLength = RfDropoutDetector.DefaultMinimumLength)
+        {
+            lock (_gate)
+            {
+                ObjectDisposedException.ThrowIf(_disposed, this);
+                if (start < 0 || end < start || end > _envelope.Length)
+                {
+                    throw new ArgumentOutOfRangeException(nameof(start));
+                }
+
+                if (threshold < 0 || hysteresis <= 0 || mergeThreshold < 0 || minimumLength < 0)
+                {
+                    throw new ArgumentOutOfRangeException(nameof(threshold));
+                }
+
+                if (!_useSegmentedEnvelope)
+                {
+                    return RfDropoutDetector.FindDropouts(
+                        _envelope,
+                        start,
+                        end,
+                        threshold,
+                        hysteresis,
+                        mergeThreshold,
+                        minimumLength);
+                }
+
+                double downThreshold = threshold;
+                double upThreshold = threshold * hysteresis;
+                var rawRanges = new List<(int Start, int End)>();
+                int dropoutIndex = -1;
+                int index = start;
+                while (index < end)
+                {
+                    GetEnvelopeSegment(index, end, out double[] source, out int sourceStart, out int count);
+                    for (int sourceIndex = 0; sourceIndex < count; sourceIndex++)
+                    {
+                        int logicalIndex = index + sourceIndex;
+                        double value = source[sourceStart + sourceIndex];
+                        if (value <= downThreshold)
+                        {
+                            bool dropoutEnded = dropoutIndex >= 0
+                                && rawRanges[dropoutIndex].End != -1
+                                && logicalIndex - rawRanges[dropoutIndex].End > mergeThreshold;
+                            if (dropoutIndex == -1 || dropoutEnded)
+                            {
+                                dropoutIndex++;
+                                rawRanges.Add((logicalIndex, -1));
+                            }
+                        }
+                        else if (value >= upThreshold
+                            && dropoutIndex != -1
+                            && rawRanges[dropoutIndex].End == -1)
+                        {
+                            rawRanges[dropoutIndex] = (rawRanges[dropoutIndex].Start, logicalIndex);
+                        }
+                    }
+
+                    index += count;
+                }
+
+                if (dropoutIndex != -1 && rawRanges[dropoutIndex].End == -1)
+                {
+                    rawRanges[dropoutIndex] = (rawRanges[dropoutIndex].Start, end);
+                }
+
+                return rawRanges
+                    .Where(range => range.End - range.Start > minimumLength)
+                    .Select(range => new RfDropoutRange(range.Start, range.End))
+                    .ToArray();
+            }
+        }
 
         public void Dispose()
         {
-            Task? materialization;
+            Task? payloadMaterialization;
+            Task? envelopeMaterialization;
             lock (_gate)
             {
                 if (_disposed)
@@ -1760,20 +1957,12 @@ public sealed class RfBlockStreamDecoder : IDisposable
                 }
 
                 _disposed = true;
-                materialization = _materialization;
+                payloadMaterialization = _payloadMaterialization;
+                envelopeMaterialization = _envelopeMaterialization;
             }
 
-            if (materialization is not null)
-            {
-                try
-                {
-                    materialization.GetAwaiter().GetResult();
-                }
-                catch
-                {
-                    // DecodeCore observes materialization failures before lease release.
-                }
-            }
+            ObserveTaskFailure(payloadMaterialization);
+            ObserveTaskFailure(envelopeMaterialization);
 
             foreach (RfPipelineBlock block in _deferredBlocks)
             {
@@ -1783,7 +1972,24 @@ public sealed class RfBlockStreamDecoder : IDisposable
             _owner.ReleaseActiveVhsPayload(this);
         }
 
-        private void Materialize()
+        private static void ObserveTaskFailure(Task? materialization)
+        {
+            if (materialization is null)
+            {
+                return;
+            }
+
+            try
+            {
+                materialization.GetAwaiter().GetResult();
+            }
+            catch
+            {
+                // The caller that started materialization observes its failure.
+            }
+        }
+
+        private void MaterializePayload()
         {
             Parallel.For(
                 0,
@@ -1796,16 +2002,20 @@ public sealed class RfBlockStreamDecoder : IDisposable
                 {
                     int blockDestination = checked(blockIndex * _owner.BlockStride);
                     RfDemodulatedBlock demodulated = _blocks[blockIndex].Demodulated;
+                    ValidateEnvelopeLength(demodulated.Envelope);
                     _owner.CopyTrimmedWindow(
                         demodulated.Video,
                         _video,
                         blockDestination,
                         _windowOffset);
-                    _owner.CopyTrimmedWindow(
-                        demodulated.Envelope,
-                        _envelope,
-                        blockDestination,
-                        _windowOffset);
+                    if (!_useSegmentedEnvelope)
+                    {
+                        _owner.CopyTrimmedWindow(
+                            demodulated.Envelope,
+                            _envelope,
+                            blockDestination,
+                            _windowOffset);
+                    }
                     if (_chroma is not null && demodulated.Chroma is { } blockChroma)
                     {
                         _owner.CopyTrimmedWindow(
@@ -1824,6 +2034,104 @@ public sealed class RfBlockStreamDecoder : IDisposable
                             _windowOffset);
                     }
                 });
+        }
+
+        private void MaterializeEnvelope()
+        {
+            Parallel.For(
+                0,
+                _blocks.Length,
+                new ParallelOptions
+                {
+                    MaxDegreeOfParallelism = Math.Min(_workerThreads, _blocks.Length)
+                },
+                blockIndex =>
+                {
+                    int blockDestination = checked(blockIndex * _owner.BlockStride);
+                    _owner.CopyTrimmedWindow(
+                        _blocks[blockIndex].Demodulated.Envelope,
+                        _envelope,
+                        blockDestination,
+                        _windowOffset);
+                });
+        }
+
+        private float PairwiseEnvelopeSumFloat32(int start, int length)
+        {
+            if (length > PairwiseBlockSize)
+            {
+                int split = length / 2;
+                split -= split % 8;
+                return PairwiseEnvelopeSumFloat32(start, split)
+                    + PairwiseEnvelopeSumFloat32(start + split, length - split);
+            }
+
+            if (TryGetContiguousEnvelope(start, length, out double[] source, out int sourceStart))
+            {
+                return NumpyReduction.SumFloat32(source.AsSpan(sourceStart, length));
+            }
+
+            Span<double> scratch = stackalloc double[length];
+            CopyEnvelopeSamples(start, scratch);
+            return NumpyReduction.SumFloat32(scratch);
+        }
+
+        private bool TryGetContiguousEnvelope(
+            int logicalStart,
+            int length,
+            out double[] source,
+            out int sourceStart)
+        {
+            int absolute = checked(_windowOffset + logicalStart);
+            int blockIndex = absolute / _owner.BlockStride;
+            int blockOffset = absolute - (blockIndex * _owner.BlockStride);
+            source = _blocks[blockIndex].Demodulated.Envelope;
+            ValidateEnvelopeLength(source);
+            sourceStart = _owner.BlockCut + blockOffset;
+            return blockOffset + length <= _owner.BlockStride;
+        }
+
+        private void CopyEnvelopeSamples(int logicalStart, Span<double> destination)
+        {
+            int destinationIndex = 0;
+            while (destinationIndex < destination.Length)
+            {
+                int logicalIndex = logicalStart + destinationIndex;
+                GetEnvelopeSegment(
+                    logicalIndex,
+                    logicalStart + destination.Length,
+                    out double[] source,
+                    out int sourceStart,
+                    out int count);
+                source.AsSpan(sourceStart, count).CopyTo(destination[destinationIndex..]);
+                destinationIndex += count;
+            }
+        }
+
+        private void GetEnvelopeSegment(
+            int logicalStart,
+            int logicalEnd,
+            out double[] source,
+            out int sourceStart,
+            out int count)
+        {
+            int absolute = checked(_windowOffset + logicalStart);
+            int blockIndex = absolute / _owner.BlockStride;
+            int blockOffset = absolute - (blockIndex * _owner.BlockStride);
+            source = _blocks[blockIndex].Demodulated.Envelope;
+            ValidateEnvelopeLength(source);
+            sourceStart = _owner.BlockCut + blockOffset;
+            count = Math.Min(logicalEnd - logicalStart, _owner.BlockStride - blockOffset);
+        }
+
+        private void ValidateEnvelopeLength(double[] source)
+        {
+            if (source.Length != _owner.BlockLength)
+            {
+                throw new ArgumentException(
+                    "Decoded block length did not match the configured block length.",
+                    nameof(source));
+            }
         }
     }
 
