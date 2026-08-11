@@ -2,7 +2,7 @@
 
 [English](README.md) | **[简体中文](README.zh-CN.md)** | [日本語](README.ja.md)
 
-<!-- README_SYNC: 2026-08-11.01 -->
+<!-- README_SYNC: 2026-08-12.01 -->
 
 这是 [`oyvindln/vhs-decode`](https://github.com/oyvindln/vhs-decode)
 中解码相关部分的 .NET 11 重写，兼容目标为上游 release `v0.4.0`、commit
@@ -90,45 +90,37 @@ CVBS 和 HiFi 仍会拒绝 `ipp-fast`；需要 release 兼容行为时应使用 
 ## 最新性能
 
 这是同一份私有本地 40 MHz PAL VHS `.ldf` 夹具上使用
-`--start 100 --length 160` 的含启动开销快照，且不会公开源文件名。全部 90 次
-Python 与 .NET Release 测量使用相同的正序、反序和混排三轮方案；性能候选基于已合并的
-main `cefdbaf`，最终所有权原子门在下方单独测量。详细说明固定记录了两种被测二进制和
-三次运行范围；兼容性结论与速度数据分开判断。
+`--start 100 --length 160` 的含启动开销快照，且不会公开源文件名。Python 两列沿用
+2026-08-11 固定版本的三轮参考数据；60 次 .NET Release 测量于 2026-08-12 使用基于
+main `22b7750` 的性能候选重新完成，并保持相同的正序、反序和混排方案。兼容性结论与
+速度数据分开判断。
 
 <!-- LATEST_PERFORMANCE_BEGIN -->
 | CLI 模式（workers） | Python v0.4.0 | Python PR341 | Exact + v0.4.0 | Exact + current | IPP-fast + v0.4.0 | IPP-fast + current |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| 默认（5） | 45.414 s | 45.060 s | 12.483 s / 3.638x | 12.231 s / 3.684x | 11.235 s / 4.042x | 9.442 s / 4.772x |
-| `--threads 1` | 52.323 s | 52.579 s | 32.014 s / 1.634x | 37.531 s / 1.401x | 23.312 s / 2.244x | 25.972 s / 2.024x |
-| `--threads 5` | 45.991 s | 44.990 s | 12.606 s / 3.648x | 12.044 s / 3.736x | 11.247 s / 4.089x | 9.407 s / 4.783x |
-| `--threads 10` | 47.385 s | 47.713 s | 10.257 s / 4.620x | 9.923 s / 4.808x | 9.499 s / 4.988x | 7.519 s / 6.346x |
-| `--threads 20` | 48.459 s | 47.490 s | 8.309 s / 5.832x | 8.284 s / 5.733x | 8.045 s / 6.024x | 5.823 s / 8.155x |
+| 默认（5） | 45.414 s | 45.060 s | 12.780 s / 3.553x | 12.004 s / 3.754x | 11.331 s / 4.008x | 9.489 s / 4.748x |
+| `--threads 1` | 52.323 s | 52.579 s | 32.579 s / 1.606x | 38.046 s / 1.382x | 23.712 s / 2.207x | 26.139 s / 2.011x |
+| `--threads 5` | 45.991 s | 44.990 s | 12.575 s / 3.658x | 11.984 s / 3.754x | 11.387 s / 4.039x | 9.556 s / 4.708x |
+| `--threads 10` | 47.385 s | 47.713 s | 10.006 s / 4.736x | 9.988 s / 4.777x | 9.540 s / 4.967x | 7.520 s / 6.344x |
+| `--threads 20` | 48.459 s | 47.490 s | 8.263 s / 5.864x | 7.666 s / 6.195x | 7.933 s / 6.109x | 5.802 s / 8.185x |
 <!-- LATEST_PERFORMANCE_END -->
-<!-- LATEST_PERFORMANCE_RUNS: full-interleaved-matrix-runs=90 dotnet-matrix-runs=60 python-matrix-runs=30 repeats=3 segmented-envelope-release-ab-pairs=4 segmented-envelope-current-1000-ab-pairs=2 segmented-envelope-v040-160-ab-pairs=2 segmented-envelope-safety-ab-pairs=4 segmented-envelope-tests=2 segmented-envelope-intrinsic-modes=2 python-v040-runs=15 python-v040-hashes=15 python-pr341-runs=15 python-pr341-hashes=1 -->
+<!-- LATEST_PERFORMANCE_RUNS: performance-snapshot-runs=90 dotnet-matrix-runs=60 python-reference-runs=30 dotnet-repeats=3 python-reference-date=2026-08-11 dotnet-matrix-date=2026-08-12 radix-pointer-current-320-ab-pairs=4 radix-pointer-current-1000-ab-pairs=2 radix-pointer-default-320-ab-pairs=1 radix-pointer-sync-tests=34 radix-pointer-intrinsic-modes=2 python-v040-runs=15 python-v040-hashes=15 python-pr341-runs=15 python-pr341-hashes=1 -->
 
 每个 .NET 单元格依次给出墙钟中位数和相对同 profile Python 列的倍速；默认实际
 使用 **5 个 workers**。三次运行范围见[详细性能说明](docs/README.detailed.zh-CN.md#性能)。
 倍数会随 .NET 绝对时间和作为分母的 Python 时间一起变化，使用其他夹具或窗口的历史表格
 也不能直接横向比较。判断因果回退时使用同一时刻的 .NET 版本配对 A/B，而不是旧表倍数。
 
-在 20 个及以上 workers 时，分阶段 VHS 路径现在直接扫描保留在 block 内的 RF Envelope，
-以完全相同的 float32 顺序计算均值和 dropout 范围，不再先复制整段 Envelope。低线程继续
-使用连续数组路径；算术顺序、阈值、迟滞、block 生命周期和输出顺序均未改变。一个原子缓存
-操作门会阻止普通读取、缓存失效与 staged 获取互相重叠；活动 staged lease 存在期间拒绝缓存
-变更操作，避免池化 block 存储被提前复用。
+最新的隔离改动只移除 worker 私有 `current` VHS radix 直方图扫描中的受检数组寻址，
+不改变分区、sortable key、异常值回退或整数计数。四组交错的 320 帧 Exact
+`current --threads 20` 配对把墙钟中位数从 16.491 降到 16.228 秒，CPU 时间从
+132.99 降到 127.28 秒；两组 1000 帧配对把墙钟从 40.321 降到 39.842 秒
+（低 1.19%），CPU 从 325.28 降到 317.73 秒。九类兼容表面全部一致，内存保持有界。
 
-两组正反顺序 1000 帧 Exact `current --threads 20` 配对把墙钟中位数从 43.00 降到
-42.88 秒，CPU 时间从 342.50 降到 324.50 秒（低 5.3%），峰值工作集约从 753 降到
-721 MiB。另一个正式打包方式的 160 帧四组 A/B 各胜两组，墙钟与 CPU 结论不确定，
-因此不宣称短窗口加速；九类兼容表面全部一致。
-
-本地只读审查在发布前发现并修复了这处缓存所有权竞态。四组正反顺序 1000 帧修复前后
-配对的九类表面全部一致；墙钟中位数为 39.770/39.932 秒，各组变化为
-+0.94%/+1.15%/-1.04%/-0.03%，CPU 中位数降低 1.74%，因此最终原子门归类为性能中性。
-
-已合并的 Python PR341 在本轮保持确定性；Python v0.4.0 的 15 次运行产生了 15 套不同的
-亮度、色度、JSON 和归一化日志 hash，因此严格 oracle 仍是 Python v0.4.0
-`g4315520 --threads 0`。命令、硬件、hash、内存边界和历史测量见
+刷新后的每个 .NET profile/线程单元格在三轮内都保持确定性。固定参考集中的 Python
+PR341 保持确定；Python v0.4.0 的 15 次运行产生了 15 套不同的亮度、色度、JSON 和
+归一化日志 hash，因此严格 oracle 仍是 Python v0.4.0 `g4315520 --threads 0`。
+命令、范围、二进制 hash、内存边界和历史测量见
 [详细性能说明](docs/README.detailed.zh-CN.md#性能)。
 
 <!-- SECTION: compatibility -->

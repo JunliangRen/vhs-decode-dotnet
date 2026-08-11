@@ -4,7 +4,7 @@
 
 **[English](README.detailed.md)** | [简体中文](README.detailed.zh-CN.md) | [日本語](README.detailed.ja.md)
 
-<!-- README_SYNC: 2026-08-11.01 -->
+<!-- README_SYNC: 2026-08-12.01 -->
 
 .NET 11 rewrite of the decode-facing parts of
 [`oyvindln/vhs-decode`](https://github.com/oyvindln/vhs-decode), focused on
@@ -442,51 +442,68 @@ fixture are not directly comparable:
 <!-- LATEST_PERFORMANCE_BEGIN -->
 | CLI mode (workers) | Python v0.4.0 | Python PR341 | Exact + v0.4.0 | Exact + current | IPP-fast + v0.4.0 | IPP-fast + current |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| default (5) | 45.414 s | 45.060 s | 12.483 s / 3.638x / 72.51% | 12.231 s / 3.684x / 72.86% | 11.235 s / 4.042x / 75.26% | 9.442 s / 4.772x / 79.04% |
-| `--threads 1` | 52.323 s | 52.579 s | 32.014 s / 1.634x / 38.81% | 37.531 s / 1.401x / 28.62% | 23.312 s / 2.244x / 55.45% | 25.972 s / 2.024x / 50.60% |
-| `--threads 5` | 45.991 s | 44.990 s | 12.606 s / 3.648x / 72.59% | 12.044 s / 3.736x / 73.23% | 11.247 s / 4.089x / 75.54% | 9.407 s / 4.783x / 79.09% |
-| `--threads 10` | 47.385 s | 47.713 s | 10.257 s / 4.620x / 78.35% | 9.923 s / 4.808x / 79.20% | 9.499 s / 4.988x / 79.95% | 7.519 s / 6.346x / 84.24% |
-| `--threads 20` | 48.459 s | 47.490 s | 8.309 s / 5.832x / 82.85% | 8.284 s / 5.733x / 82.56% | 8.045 s / 6.024x / 83.40% | 5.823 s / 8.155x / 87.74% |
+| default (5) | 45.414 s | 45.060 s | 12.780 s / 3.553x / 71.86% | 12.004 s / 3.754x / 73.36% | 11.331 s / 4.008x / 75.05% | 9.489 s / 4.748x / 78.94% |
+| `--threads 1` | 52.323 s | 52.579 s | 32.579 s / 1.606x / 37.74% | 38.046 s / 1.382x / 27.64% | 23.712 s / 2.207x / 54.68% | 26.139 s / 2.011x / 50.29% |
+| `--threads 5` | 45.991 s | 44.990 s | 12.575 s / 3.658x / 72.66% | 11.984 s / 3.754x / 73.36% | 11.387 s / 4.039x / 75.24% | 9.556 s / 4.708x / 78.76% |
+| `--threads 10` | 47.385 s | 47.713 s | 10.006 s / 4.736x / 78.88% | 9.988 s / 4.777x / 79.07% | 9.540 s / 4.967x / 79.87% | 7.520 s / 6.344x / 84.24% |
+| `--threads 20` | 48.459 s | 47.490 s | 8.263 s / 5.864x / 82.95% | 7.666 s / 6.195x / 83.86% | 7.933 s / 6.109x / 83.63% | 5.802 s / 8.185x / 87.78% |
 <!-- LATEST_PERFORMANCE_END -->
-<!-- LATEST_PERFORMANCE_RUNS: full-interleaved-matrix-runs=90 dotnet-matrix-runs=60 python-matrix-runs=30 repeats=3 segmented-envelope-release-ab-pairs=4 segmented-envelope-current-1000-ab-pairs=2 segmented-envelope-v040-160-ab-pairs=2 segmented-envelope-safety-ab-pairs=4 segmented-envelope-tests=2 segmented-envelope-intrinsic-modes=2 python-v040-runs=15 python-v040-hashes=15 python-pr341-runs=15 python-pr341-hashes=1 -->
+<!-- LATEST_PERFORMANCE_RUNS: performance-snapshot-runs=90 dotnet-matrix-runs=60 python-reference-runs=30 dotnet-repeats=3 python-reference-date=2026-08-11 dotnet-matrix-date=2026-08-12 radix-pointer-current-320-ab-pairs=4 radix-pointer-current-1000-ab-pairs=2 radix-pointer-default-320-ab-pairs=1 radix-pointer-sync-tests=34 radix-pointer-intrinsic-modes=2 python-v040-runs=15 python-v040-hashes=15 python-pr341-runs=15 python-pr341-hashes=1 -->
 
 The three-run wall-time ranges were:
 
 <!-- LATEST_PERFORMANCE_RANGES_BEGIN -->
 | CLI mode | Python v0.4.0 | Python PR341 | Exact + v0.4.0 | Exact + current | IPP-fast + v0.4.0 | IPP-fast + current |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| default (5) | 45.414-46.131 s | 44.868-45.586 s | 12.475-12.687 s | 12.077-12.841 s | 11.183-11.241 s | 9.346-9.460 s |
-| `--threads 1` | 51.717-53.065 s | 51.773-52.927 s | 31.851-32.299 s | 37.395-37.607 s | 23.165-23.692 s | 25.651-26.544 s |
-| `--threads 5` | 45.332-47.649 s | 44.045-46.375 s | 12.582-12.819 s | 12.026-12.425 s | 11.076-11.255 s | 9.143-9.423 s |
-| `--threads 10` | 46.748-48.421 s | 46.921-47.898 s | 9.878-10.501 s | 9.834-10.741 s | 9.417-9.722 s | 7.474-7.635 s |
-| `--threads 20` | 47.718-48.912 s | 47.427-47.687 s | 8.200-8.325 s | 7.628-8.304 s | 8.031-8.149 s | 5.818-5.970 s |
+| default (5) | 45.414-46.131 s | 44.868-45.586 s | 12.481-12.798 s | 11.890-12.113 s | 11.317-11.459 s | 9.441-9.765 s |
+| `--threads 1` | 51.717-53.065 s | 51.773-52.927 s | 32.324-32.590 s | 37.674-38.049 s | 23.577-23.797 s | 25.829-26.441 s |
+| `--threads 5` | 45.332-47.649 s | 44.045-46.375 s | 12.476-12.591 s | 11.962-12.351 s | 11.339-11.463 s | 9.487-9.649 s |
+| `--threads 10` | 46.748-48.421 s | 46.921-47.898 s | 9.949-10.398 s | 9.535-10.128 s | 9.467-9.543 s | 7.473-7.906 s |
+| `--threads 20` | 47.718-48.912 s | 47.427-47.687 s | 8.157-8.284 s | 7.098-8.196 s | 7.923-7.946 s | 5.744-5.842 s |
 <!-- LATEST_PERFORMANCE_RANGES_END -->
 
-All 90 Release measurements were refreshed on 2026-08-11: six profiles at all
-five worker settings using forward, reverse, and mixed passes. A preliminary
-Exact-only package stopped at its first unavailable IPP cell; none of those four
-results was reused. The final matrix restarted from zero with the release-like
-IPP-capable binary and completed all 90 items, so every cell contains exactly
-three complete measurements from one binary.
+The pinned Python reference columns retain the 30 measurements completed on
+2026-08-11 because the source, environment, fixture, and pass plan did not
+change. The 60 .NET measurements were refreshed from zero on 2026-08-12: four
+profiles at all five worker settings using forward, reverse, and mixed passes.
+Every .NET profile/thread cell contains three complete runs and one hash for
+each captured output and log surface.
 
-This candidate is based on merged main `cefdbaf`. The 90-run matrix used the
-103,561,828-byte single-file `decode.exe` with SHA-256
-`9E8DCFB22E14E1F8C4BDBEFF6B11237108F1CD158D31941A3DABF083F9313C55`.
-The measured source Git blobs are `69a1d6eced820eb2df0005701677a22ddf242da8`
-for `RfBlockStreamDecoder.cs`, `fbd518520eb620b094e78977313a736281926e71`
-for `TbcFieldDecodePipeline.cs`, and
-`2e25e1652f53325759101be0686afc3e69ee960b` for `NumpyReduction.cs`.
-Local review then added the shared atomic cache-operation gate described below.
-The final CRLF-normalized 103,562,852-byte executable has SHA-256
-`17A2A5306BD2DA34B92D5FF19ECA68D91B7B9BE450A37A09E6A628AB5CFD455D`;
-its `RfBlockStreamDecoder.cs` Git blob is
-`8bffb0c6a2901d3ec6c202388549c3ab5a14aff0`, while the other two measured
-source blobs above are unchanged. Documentation and test-only edits are outside
-the binaries. The host was an
+The refreshed .NET candidate is based on merged main `22b7750` plus the isolated
+radix scan change below. Its 103,563,364-byte single-file `decode.exe` has
+SHA-256 `64D9D48400C5CB317EAAD6D890150E5108651B131518B9E595C9D435CE0BED1D`.
+Documentation and test-only edits are outside the binary. The host was an
 Intel Core Ultra 7 265K with 20 logical processors, Windows 11 build 26220, and
 .NET SDK/runtime `11.0.100-preview.6.26359.118`. Raw directories stay local
 because they contain the private fixture path; these are reported local
 measurements, not an independently reproducible public corpus.
+
+### Worker-local current VHS radix scans
+
+The three-stage `current` VHS level quantile path now scans each worker's private
+radix histogram through fixed source and histogram pointers. Worker partitions,
+sortable-prefix conversion, exceptional-value fallback, bucket selection, and
+integer increments are unchanged; the candidate removes only repeated managed
+array bounds checks and address calculations.
+
+Six long-process microbenchmark pairs over 1,048,576 values and four workers
+moved the median scan from 1.2953 to 1.1646 ms (10.1% lower), with the same
+result bits. Four interleaved 320-frame Exact `current --threads 20` pairs all
+favored the candidate: median wall time moved from 16.4905 to 16.2279 seconds
+(1.59% lower), CPU time from 132.99 to 127.28 seconds (4.29% lower), and median
+peak working set from 403.6 to 401.4 MiB. Two order-reversed 1,000-frame pairs
+also both favored the candidate: wall time moved from 40.321 to 39.842 seconds
+(1.19% lower), CPU time from 325.28 to 317.73 seconds (2.32% lower), and candidate
+peak working set remained bounded at about 406 MiB. A default-five 320-frame
+pair was wall-neutral at 31.483/31.506 seconds while CPU time fell 2.50%.
+
+All paired runs matched exit status, luma, chroma, raw JSON, stdout, normalized
+stderr/logs, and ordered `fileLoc`. All 34 focused xUnit v3 tests passed with
+hardware intrinsics enabled. With intrinsics disabled, 33 passed and the one
+AVX-specific edge-scan test was skipped by design. Baseline/candidate checks covered `--threads 0`,
+default-five, and `--threads 20`; repeated high-worker runs were deterministic
+within that mode. Different requested worker modes are not treated as one shared
+hash oracle.
 
 ### Direct segmented VHS envelope analysis
 

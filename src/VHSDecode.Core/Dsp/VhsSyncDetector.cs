@@ -1658,18 +1658,14 @@ public sealed class VhsSyncDetector
                 int start = (int)(((long)valueCount * worker) / workerThreads);
                 int end = (int)(((long)valueCount * (worker + 1)) / workerThreads);
                 int histogramOffset = worker * ParallelRadixFirstWidth;
-                for (int index = start; index < end; index++)
+                if (FillFirstHistogramRange(
+                        values,
+                        start,
+                        end,
+                        workerHistograms,
+                        histogramOffset))
                 {
-                    double value = values[index];
-                    if (!double.IsFinite(value) || value == 0.0)
-                    {
-                        workerFlags[worker] = 1;
-                        continue;
-                    }
-
-                    uint prefix = SortablePrefix(value);
-                    workerHistograms[
-                        histogramOffset + (prefix >> ParallelRadixFirstShift)]++;
+                    workerFlags[worker] = 1;
                 }
             });
 
@@ -1688,6 +1684,37 @@ public sealed class VhsSyncDetector
             firstHistogram);
 
         return true;
+    }
+
+    private static unsafe bool FillFirstHistogramRange(
+        double[] values,
+        int start,
+        int end,
+        int[] workerHistograms,
+        int histogramOffset)
+    {
+        bool exceptionalValueFound = false;
+        fixed (double* valuesPointer = values)
+        fixed (int* histogramPointer = workerHistograms)
+        {
+            int* workerHistogram = histogramPointer + histogramOffset;
+            for (double* valuePointer = valuesPointer + start;
+                valuePointer < valuesPointer + end;
+                valuePointer++)
+            {
+                double value = *valuePointer;
+                if (!double.IsFinite(value) || value == 0.0)
+                {
+                    exceptionalValueFound = true;
+                    continue;
+                }
+
+                uint prefix = SortablePrefix(value);
+                workerHistogram[prefix >> ParallelRadixFirstShift]++;
+            }
+        }
+
+        return exceptionalValueFound;
     }
 
     private static bool FillParallelHighHistogramTwoStage(
@@ -1870,21 +1897,18 @@ public sealed class VhsSyncDetector
                 int start = (int)(((long)valueCount * worker) / workerThreads);
                 int end = (int)(((long)valueCount * (worker + 1)) / workerThreads);
                 int workerOffset = worker * histogramLength;
-                for (int index = start; index < end; index++)
-                {
-                    uint prefix = SortablePrefix(values[index]);
-                    int parent = (int)(prefix >> parentShift);
-                    int child = (int)((prefix >> childShift) & (uint)childMask);
-                    if (parent == firstParentBucket)
-                    {
-                        workerHistograms[workerOffset + child]++;
-                    }
-                    else if (parent == secondParentBucket)
-                    {
-                        workerHistograms[
-                            workerOffset + secondHistogramOffset + child]++;
-                    }
-                }
+                FillChildHistogramRange(
+                    values,
+                    start,
+                    end,
+                    workerHistograms,
+                    workerOffset,
+                    firstParentBucket,
+                    secondParentBucket,
+                    secondHistogramOffset,
+                    parentShift,
+                    childShift,
+                    childMask);
             });
 
         MergeWorkerHistograms(
@@ -1892,6 +1916,42 @@ public sealed class VhsSyncDetector
             workerThreads,
             histogramLength,
             histograms);
+    }
+
+    private static unsafe void FillChildHistogramRange(
+        double[] values,
+        int start,
+        int end,
+        int[] workerHistograms,
+        int workerOffset,
+        int firstParentBucket,
+        int secondParentBucket,
+        int secondHistogramOffset,
+        int parentShift,
+        int childShift,
+        int childMask)
+    {
+        fixed (double* valuesPointer = values)
+        fixed (int* histogramPointer = workerHistograms)
+        {
+            int* workerHistogram = histogramPointer + workerOffset;
+            for (double* valuePointer = valuesPointer + start;
+                valuePointer < valuesPointer + end;
+                valuePointer++)
+            {
+                uint prefix = SortablePrefix(*valuePointer);
+                int parent = (int)(prefix >> parentShift);
+                int child = (int)((prefix >> childShift) & (uint)childMask);
+                if (parent == firstParentBucket)
+                {
+                    workerHistogram[child]++;
+                }
+                else if (parent == secondParentBucket)
+                {
+                    workerHistogram[secondHistogramOffset + child]++;
+                }
+            }
+        }
     }
 
     private static unsafe void MergeWorkerHistograms(

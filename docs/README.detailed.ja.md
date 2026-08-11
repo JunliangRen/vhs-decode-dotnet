@@ -4,7 +4,7 @@
 
 [English](README.detailed.md) | [简体中文](README.detailed.zh-CN.md) | **[日本語](README.detailed.ja.md)**
 
-<!-- README_SYNC: 2026-08-11.01 -->
+<!-- README_SYNC: 2026-08-12.01 -->
 
 [`oyvindln/vhs-decode`](https://github.com/oyvindln/vhs-decode) の
 デコード関連部分を .NET 11 で再実装するプロジェクトです。現在は release
@@ -417,47 +417,62 @@ speedup、wall-time reduction の順です。別の format や fixture を使っ
 <!-- LATEST_PERFORMANCE_BEGIN -->
 | CLI mode（workers） | Python v0.4.0 | Python PR341 | Exact + v0.4.0 | Exact + current | IPP-fast + v0.4.0 | IPP-fast + current |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| default（5） | 45.414 s | 45.060 s | 12.483 s / 3.638x / 72.51% | 12.231 s / 3.684x / 72.86% | 11.235 s / 4.042x / 75.26% | 9.442 s / 4.772x / 79.04% |
-| `--threads 1` | 52.323 s | 52.579 s | 32.014 s / 1.634x / 38.81% | 37.531 s / 1.401x / 28.62% | 23.312 s / 2.244x / 55.45% | 25.972 s / 2.024x / 50.60% |
-| `--threads 5` | 45.991 s | 44.990 s | 12.606 s / 3.648x / 72.59% | 12.044 s / 3.736x / 73.23% | 11.247 s / 4.089x / 75.54% | 9.407 s / 4.783x / 79.09% |
-| `--threads 10` | 47.385 s | 47.713 s | 10.257 s / 4.620x / 78.35% | 9.923 s / 4.808x / 79.20% | 9.499 s / 4.988x / 79.95% | 7.519 s / 6.346x / 84.24% |
-| `--threads 20` | 48.459 s | 47.490 s | 8.309 s / 5.832x / 82.85% | 8.284 s / 5.733x / 82.56% | 8.045 s / 6.024x / 83.40% | 5.823 s / 8.155x / 87.74% |
+| default（5） | 45.414 s | 45.060 s | 12.780 s / 3.553x / 71.86% | 12.004 s / 3.754x / 73.36% | 11.331 s / 4.008x / 75.05% | 9.489 s / 4.748x / 78.94% |
+| `--threads 1` | 52.323 s | 52.579 s | 32.579 s / 1.606x / 37.74% | 38.046 s / 1.382x / 27.64% | 23.712 s / 2.207x / 54.68% | 26.139 s / 2.011x / 50.29% |
+| `--threads 5` | 45.991 s | 44.990 s | 12.575 s / 3.658x / 72.66% | 11.984 s / 3.754x / 73.36% | 11.387 s / 4.039x / 75.24% | 9.556 s / 4.708x / 78.76% |
+| `--threads 10` | 47.385 s | 47.713 s | 10.006 s / 4.736x / 78.88% | 9.988 s / 4.777x / 79.07% | 9.540 s / 4.967x / 79.87% | 7.520 s / 6.344x / 84.24% |
+| `--threads 20` | 48.459 s | 47.490 s | 8.263 s / 5.864x / 82.95% | 7.666 s / 6.195x / 83.86% | 7.933 s / 6.109x / 83.63% | 5.802 s / 8.185x / 87.78% |
 <!-- LATEST_PERFORMANCE_END -->
-<!-- LATEST_PERFORMANCE_RUNS: full-interleaved-matrix-runs=90 dotnet-matrix-runs=60 python-matrix-runs=30 repeats=3 segmented-envelope-release-ab-pairs=4 segmented-envelope-current-1000-ab-pairs=2 segmented-envelope-v040-160-ab-pairs=2 segmented-envelope-safety-ab-pairs=4 segmented-envelope-tests=2 segmented-envelope-intrinsic-modes=2 python-v040-runs=15 python-v040-hashes=15 python-pr341-runs=15 python-pr341-hashes=1 -->
+<!-- LATEST_PERFORMANCE_RUNS: performance-snapshot-runs=90 dotnet-matrix-runs=60 python-reference-runs=30 dotnet-repeats=3 python-reference-date=2026-08-11 dotnet-matrix-date=2026-08-12 radix-pointer-current-320-ab-pairs=4 radix-pointer-current-1000-ab-pairs=2 radix-pointer-default-320-ab-pairs=1 radix-pointer-sync-tests=34 radix-pointer-intrinsic-modes=2 python-v040-runs=15 python-v040-hashes=15 python-pr341-runs=15 python-pr341-hashes=1 -->
 
 3-run wall-time range は次のとおりです。
 
 <!-- LATEST_PERFORMANCE_RANGES_BEGIN -->
 | CLI mode | Python v0.4.0 | Python PR341 | Exact + v0.4.0 | Exact + current | IPP-fast + v0.4.0 | IPP-fast + current |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| default（5） | 45.414-46.131 s | 44.868-45.586 s | 12.475-12.687 s | 12.077-12.841 s | 11.183-11.241 s | 9.346-9.460 s |
-| `--threads 1` | 51.717-53.065 s | 51.773-52.927 s | 31.851-32.299 s | 37.395-37.607 s | 23.165-23.692 s | 25.651-26.544 s |
-| `--threads 5` | 45.332-47.649 s | 44.045-46.375 s | 12.582-12.819 s | 12.026-12.425 s | 11.076-11.255 s | 9.143-9.423 s |
-| `--threads 10` | 46.748-48.421 s | 46.921-47.898 s | 9.878-10.501 s | 9.834-10.741 s | 9.417-9.722 s | 7.474-7.635 s |
-| `--threads 20` | 47.718-48.912 s | 47.427-47.687 s | 8.200-8.325 s | 7.628-8.304 s | 8.031-8.149 s | 5.818-5.970 s |
+| default（5） | 45.414-46.131 s | 44.868-45.586 s | 12.481-12.798 s | 11.890-12.113 s | 11.317-11.459 s | 9.441-9.765 s |
+| `--threads 1` | 51.717-53.065 s | 51.773-52.927 s | 32.324-32.590 s | 37.674-38.049 s | 23.577-23.797 s | 25.829-26.441 s |
+| `--threads 5` | 45.332-47.649 s | 44.045-46.375 s | 12.476-12.591 s | 11.962-12.351 s | 11.339-11.463 s | 9.487-9.649 s |
+| `--threads 10` | 46.748-48.421 s | 46.921-47.898 s | 9.949-10.398 s | 9.535-10.128 s | 9.467-9.543 s | 7.473-7.906 s |
+| `--threads 20` | 47.718-48.912 s | 47.427-47.687 s | 8.157-8.284 s | 7.098-8.196 s | 7.923-7.946 s | 5.744-5.842 s |
 <!-- LATEST_PERFORMANCE_RANGES_END -->
 
-2026-08-11 に全 90 Release measurement を同じ batch で更新しました。6 profile の 5 worker
-setting を forward、reverse、mixed の 3 pass で測定しています。IPP を含まない初期 package は
-最初の IPP cell で停止したため、完了済みの 4 result も再利用していません。IPP を含む正式な
-single-file binary に切り替えてゼロから再実行し、90 result はすべて自然に完了しました。
-したがって各 cell は同じ binary による完全な measurement を正確に 3 個持ちます。
+Python の 2 列は source、environment、fixture、pass plan が変わっていないため、2026-08-11 に
+完了した 30 measurement を固定 reference として維持します。60 回の .NET measurement は
+2026-08-12 にゼロから更新しました。4 profile、5 worker setting を forward、reverse、mixed の
+3 pass で測定し、各 .NET profile/thread cell は完全な 3 run と、capture した各 output/log
+surface ごとに 1 つの hash を持ちます。
 
-candidate は merged main `cefdbaf` を基にしています。90-run matrix は 103,561,828-byte の
-single-file `decode.exe` を使い、その SHA-256 は
-`9E8DCFB22E14E1F8C4BDBEFF6B11237108F1CD158D31941A3DABF083F9313C55` です。測定した source の
-Git blob は `RfBlockStreamDecoder.cs` が `69a1d6eced820eb2df0005701677a22ddf242da8`、
-`TbcFieldDecodePipeline.cs` が `fbd518520eb620b094e78977313a736281926e71`、
-`NumpyReduction.cs` が `2e25e1652f53325759101be0686afc3e69ee960b` です。local review では
-後述する shared atomic cache-operation gate を追加しました。final CRLF-normalized
-103,562,852-byte executable の SHA-256 は
-`17A2A5306BD2DA34B92D5FF19ECA68D91B7B9BE450A37A09E6A628AB5CFD455D` です。
-`RfBlockStreamDecoder.cs` Git blob は `8bffb0c6a2901d3ec6c202388549c3ab5a14aff0` で、他の
-2 source blob は変わりません。documentation と test-only edit は binary の外です。
+更新した .NET candidate は merged main `22b7750` と、後述する isolated radix scan change を
+基にしています。103,563,364-byte single-file `decode.exe` の SHA-256 は
+`64D9D48400C5CB317EAAD6D890150E5108651B131518B9E595C9D435CE0BED1D` です。
+documentation と test-only edit は binary の外です。
 host は Intel Core Ultra 7 265K（20 logical
 processor）、Windows 11 build 26220、.NET SDK/runtime `11.0.100-preview.6.26359.118` です。
 raw directory は private fixture path を含むため local にのみ保持し、public に独立再現可能な
 benchmark corpus とは主張しません。
+
+### Worker-local current VHS radix scan
+
+3-stage `current` VHS level-quantile path は、各 worker の private radix histogram を fixed source/
+histogram pointer で scan します。worker partition、sortable-prefix conversion、exceptional-value
+fallback、bucket selection、integer increment は変えず、candidate は managed array の bounds
+check と address calculation の繰り返しだけを除去します。
+
+1,048,576 value と 4 worker の long-process microbenchmark 6 pair は、scan median を 1.2953 から
+1.1646 ms（10.1% 低下）へ移動し、result bit は一致しました。interleaved 320-frame Exact
+`current --threads 20` 4 pair はすべて candidate が勝ち、wall median は 16.4905 から
+16.2279 seconds（1.59% 低下）、CPU は 132.99 から 127.28 seconds（4.29% 低下）、median
+peak working set は 403.6 から 401.4 MiB へ移動しました。opposite-order 1,000-frame 2 pair も
+両方 candidate が勝ち、wall は 40.321 から 39.842 seconds（1.19% 低下）、CPU は 325.28 から
+317.73 seconds（2.32% 低下）、candidate peak working set は約 406 MiB に bounded でした。
+default-five の 320-frame 1 pair は 31.483/31.506 seconds で wall-neutral、CPU は 2.50% 低下です。
+
+全 pair の exit status、luma、chroma、raw JSON、stdout、normalized stderr/log、ordered `fileLoc` は
+一致しました。hardware intrinsic enabled では 34 focused xUnit v3 test がすべて通過しました。
+disabled では 33 test が通過し、AVX-specific edge-scan test 1 件を設計どおり skip しました。baseline/candidate gate は
+`--threads 0`、default-five、`--threads 20` を含み、repeated high-worker run はその mode 内で
+deterministic でした。異なる requested worker mode を 1 つの shared hash oracle とは扱いません。
 
 ### VHS Envelope の直接 segmented scan
 
