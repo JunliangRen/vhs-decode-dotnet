@@ -2229,12 +2229,33 @@ dotnet test --solution VHSDecodeDotNet.slnx --no-build
 ```
 
 The current formal solution build completes with zero warnings and errors, and
-the xUnit v3 project exposes 1,426 independently discoverable tests
+the xUnit v3 project exposes 1,427 independently discoverable tests
 to `dotnet test` and Visual Studio Test Explorer. On the
 same Windows machine and fixtures, Release wall-clock measurements for one
 frame were 2.346 s versus 7.193 s for NTSC VHS and 1.651 s versus 5.865 s for
 NTSC LD (this port versus the v0.4.0 Python virtual environment); all output
 hashes listed above remained identical.
+
+### Managed AVX radix-8 PocketFFT butterflies
+
+The managed float32 PocketFFT radix-8 pass processes four independent complex
+indices with `Vector256<float>` while retaining each scalar lane's add,
+subtract, multiply, rotate, and twiddle order. The implementation does not use
+FMA, reductions, reassociation, shared scratch state, or new allocations; tails
+and AVX-disabled hosts retain the scalar loop.
+
+All 58 mixed-radix tests passed with normal intrinsics, AVX disabled, and all
+hardware intrinsics disabled. A frozen 3,840-value scalar-oracle test covers
+signed zero, minimum subnormal and normal values, signed one third, and signed
+one in both forward and backward transforms.
+
+Two opposite-order 1,000-frame Exact `current --threads 20` pairs matched luma,
+chroma, raw JSON, stdout, normalized stderr/logs, and ordered `fileLoc`. Combined
+mean wall time moved from 36.800 to 36.149 seconds (1.77% lower), and CPU time
+from 308.508 to 298.828 seconds (3.14% lower). The 30-run current matrix was
+deterministic across the same seven surfaces at default, 1, 5, 10, and 20
+workers for Exact and IPP-fast. Opposite-order zero- and one-worker gates were
+output-exact and performance-neutral; memory remained bounded without OOM.
 
 ### AVX current chroma ACC segment scaling
 

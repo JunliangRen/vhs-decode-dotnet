@@ -1,5 +1,9 @@
 // Float32 mixed-radix complex FFT adapted from pocketfft/DUCC's BSD-3-Clause implementation.
 using System.Buffers;
+using System.Runtime.CompilerServices;
+using System.Runtime.InteropServices;
+using System.Runtime.Intrinsics;
+using System.Runtime.Intrinsics.X86;
 
 namespace VHSDecode.Core.Dsp;
 
@@ -1212,7 +1216,24 @@ internal static class PocketFftComplex32
             for (int k = 0; k < l1; k++)
             {
                 Pass8FirstIndex(ido, l1, input, output, k);
-                for (int i = 1; i < ido; i++)
+                int i = 1;
+                if (Avx.IsSupported)
+                {
+                    int vectorizedEnd = 1 + ((ido - 1) & ~3);
+                    for (; i < vectorizedEnd; i += 4)
+                    {
+                        Pass8VectorIndex(
+                            ido,
+                            l1,
+                            input,
+                            output,
+                            twiddles,
+                            k,
+                            i);
+                    }
+                }
+
+                for (; i < ido; i++)
                 {
                     Pair(
                         out Value a1,
@@ -1267,6 +1288,109 @@ internal static class PocketFftComplex32
                         Twiddle(twiddles, 6, i, ido));
                 }
             }
+        }
+
+        private static void Pass8VectorIndex(
+            int ido,
+            int l1,
+            Value[] input,
+            Value[] output,
+            Value[] twiddles,
+            int k,
+            int i)
+        {
+            int inputBase = i + (ido * 8 * k);
+            PairVector(
+                out Vector256<float> a1,
+                out Vector256<float> a5,
+                LoadValueVector(input, inputBase + ido),
+                LoadValueVector(input, inputBase + (5 * ido)));
+            PairVector(
+                out Vector256<float> a3,
+                out Vector256<float> a7,
+                LoadValueVector(input, inputBase + (3 * ido)),
+                LoadValueVector(input, inputBase + (7 * ido)));
+            a7 = RotateX90Vector(a7);
+            PairVectorInPlace(ref a1, ref a3);
+            a3 = RotateX90Vector(a3);
+            PairVectorInPlace(ref a5, ref a7);
+            a5 = RotateX45Vector(a5);
+            a7 = RotateX135Vector(a7);
+            PairVector(
+                out Vector256<float> a0,
+                out Vector256<float> a4,
+                LoadValueVector(input, inputBase),
+                LoadValueVector(input, inputBase + (4 * ido)));
+            PairVector(
+                out Vector256<float> a2,
+                out Vector256<float> a6,
+                LoadValueVector(input, inputBase + (2 * ido)),
+                LoadValueVector(input, inputBase + (6 * ido)));
+            PairVectorInPlace(ref a0, ref a2);
+
+            int outputBase = i + (ido * k);
+            int outputStride = ido * l1;
+            int twiddleStride = ido - 1;
+            StoreValueVector(
+                output,
+                outputBase,
+                Avx.Add(a0, a1));
+            StoreValueVector(
+                output,
+                outputBase + (4 * outputStride),
+                SpecialMultiplyVector(
+                    Avx.Subtract(a0, a1),
+                    LoadValueVector(
+                        twiddles,
+                        (i - 1) + (3 * twiddleStride))));
+            StoreValueVector(
+                output,
+                outputBase + (2 * outputStride),
+                SpecialMultiplyVector(
+                    Avx.Add(a2, a3),
+                    LoadValueVector(
+                        twiddles,
+                        (i - 1) + twiddleStride)));
+            StoreValueVector(
+                output,
+                outputBase + (6 * outputStride),
+                SpecialMultiplyVector(
+                    Avx.Subtract(a2, a3),
+                    LoadValueVector(
+                        twiddles,
+                        (i - 1) + (5 * twiddleStride))));
+            a6 = RotateX90Vector(a6);
+            PairVectorInPlace(ref a4, ref a6);
+            StoreValueVector(
+                output,
+                outputBase + outputStride,
+                SpecialMultiplyVector(
+                    Avx.Add(a4, a5),
+                    LoadValueVector(twiddles, i - 1)));
+            StoreValueVector(
+                output,
+                outputBase + (5 * outputStride),
+                SpecialMultiplyVector(
+                    Avx.Subtract(a4, a5),
+                    LoadValueVector(
+                        twiddles,
+                        (i - 1) + (4 * twiddleStride))));
+            StoreValueVector(
+                output,
+                outputBase + (3 * outputStride),
+                SpecialMultiplyVector(
+                    Avx.Add(a6, a7),
+                    LoadValueVector(
+                        twiddles,
+                        (i - 1) + (2 * twiddleStride))));
+            StoreValueVector(
+                output,
+                outputBase + (7 * outputStride),
+                SpecialMultiplyVector(
+                    Avx.Subtract(a6, a7),
+                    LoadValueVector(
+                        twiddles,
+                        (i - 1) + (6 * twiddleStride))));
         }
 
         private static void Pass8FirstIndex(
@@ -1602,6 +1726,108 @@ internal static class PocketFftComplex32
     private readonly record struct Factor(int Radix, Value[] Twiddles);
 
     private readonly record struct Value(float Real, float Imaginary);
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private static Vector256<float> LoadValueVector(Value[] values, int index)
+    {
+        ref Value valueReference = ref MemoryMarshal.GetArrayDataReference(values);
+        ref float componentReference = ref Unsafe.As<Value, float>(ref valueReference);
+        return Vector256.LoadUnsafe(
+            ref componentReference,
+            (nuint)(index * 2));
+    }
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private static void StoreValueVector(
+        Value[] values,
+        int index,
+        Vector256<float> vector)
+    {
+        ref Value valueReference = ref MemoryMarshal.GetArrayDataReference(values);
+        ref float componentReference = ref Unsafe.As<Value, float>(ref valueReference);
+        vector.StoreUnsafe(
+            ref componentReference,
+            (nuint)(index * 2));
+    }
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private static void PairVector(
+        out Vector256<float> sum,
+        out Vector256<float> difference,
+        Vector256<float> left,
+        Vector256<float> right)
+    {
+        sum = Avx.Add(left, right);
+        difference = Avx.Subtract(left, right);
+    }
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private static void PairVectorInPlace(
+        ref Vector256<float> left,
+        ref Vector256<float> right)
+    {
+        Vector256<float> originalLeft = left;
+        left = Avx.Add(left, right);
+        right = Avx.Subtract(originalLeft, right);
+    }
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private static Vector256<float> SpecialMultiplyVector(
+        Vector256<float> left,
+        Vector256<float> right)
+    {
+        Vector256<float> leftReal = Avx.Permute(left, 0xA0);
+        Vector256<float> leftImaginary = Avx.Permute(left, 0xF5);
+        Vector256<float> rightReal = Avx.Permute(right, 0xA0);
+        Vector256<float> rightImaginary = Avx.Permute(right, 0xF5);
+        Vector256<float> real = Avx.Add(
+            Avx.Multiply(leftReal, rightReal),
+            Avx.Multiply(leftImaginary, rightImaginary));
+        Vector256<float> imaginary = Avx.Subtract(
+            Avx.Multiply(leftImaginary, rightReal),
+            Avx.Multiply(leftReal, rightImaginary));
+        return Avx.Blend(real, imaginary, 0xAA);
+    }
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private static Vector256<float> RotateX90Vector(Vector256<float> value)
+    {
+        Vector256<float> swapped = Avx.Permute(value, 0xB1);
+        return Avx.Xor(
+            swapped,
+            Vector256.Create(
+                0.0f, -0.0f,
+                0.0f, -0.0f,
+                0.0f, -0.0f,
+                0.0f, -0.0f));
+    }
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private static Vector256<float> RotateX45Vector(Vector256<float> value)
+    {
+        const float HalfSqrt2 = 0.707106781186547524400844362104849f;
+        Vector256<float> swapped = Avx.Permute(value, 0xB1);
+        Vector256<float> combined = Avx.Blend(
+            Avx.Add(value, swapped),
+            Avx.Subtract(value, swapped),
+            0xAA);
+        return Avx.Multiply(Vector256.Create(HalfSqrt2), combined);
+    }
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private static Vector256<float> RotateX135Vector(Vector256<float> value)
+    {
+        const float HalfSqrt2 = 0.707106781186547524400844362104849f;
+        Vector256<float> swapped = Avx.Permute(value, 0xB1);
+        Vector256<float> negated = Avx.Xor(
+            value,
+            Vector256.Create(-0.0f));
+        Vector256<float> combined = Avx.Blend(
+            Avx.Subtract(swapped, value),
+            Avx.Subtract(Avx.Permute(negated, 0xB1), value),
+            0xAA);
+        return Avx.Multiply(Vector256.Create(HalfSqrt2), combined);
+    }
 
     private static Value Add(Value left, Value right)
         => new(left.Real + right.Real, left.Imaginary + right.Imaginary);

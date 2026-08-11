@@ -321,6 +321,40 @@ public sealed class PocketFftMixedRadixCompatibilityTests
         }
     }
 
+    [Fact(DisplayName = "AVX radix-8 stages preserve scalar special-value bits")]
+    public void AvxRadix8StagesPreserveScalarSpecialValueBits()
+    {
+        const int Length = 3_840;
+        const string ExpectedForwardSha256 =
+            "E37F806955C8BCC535C31B08DD83BBAD999684C87A133846F9AC20C5E1806C8C";
+        const string ExpectedBackwardSha256 =
+            "2F5F40671A75FBCD3F8997292469C956F3F0C80B372B78A483DD203368D4E2BC";
+        Complex32[] input = BuildBitPatternInput(
+            Length,
+            [
+                0x00000000,
+                0x80000000,
+                0x00000001,
+                0x80000001,
+                0x00800000,
+                0x80800000,
+                0x3EAAAAAB,
+                0xBEAAAAAB,
+                0x3F800000,
+                0xBF800000
+            ]);
+
+        Complex32[] forward = PocketFftComplex32.ForwardAnyLengthDucc(input);
+        Complex32[] backward = PocketFftComplex32.BackwardAnyLengthDucc(forward);
+
+        AssertTransformHashes(
+            "radix8-avx",
+            forward,
+            backward,
+            ExpectedForwardSha256,
+            ExpectedBackwardSha256);
+    }
+
     private static Complex32[] BuildBitPatternInput(
         int length,
         uint[] patterns)
