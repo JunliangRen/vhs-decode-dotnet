@@ -2595,10 +2595,14 @@ normalization, data type, and floating-point expression order are unchanged.
 Complex overlap preserves memmove-equivalent behavior; overlapping real input
 uses a guarded two-buffer fallback until all input has been consumed.
 
-Three xUnit v3 tests freeze power-of-two forward/inverse/real hashes, signed zero,
-subnormal, non-finite and NaN-payload behavior, repeated small transforms after
-large scratch growth, and exact plus shifted overlap. The class passes on native
-hardware, with AVX disabled, and with all .NET hardware intrinsics disabled.
+Three xUnit v3 tests freeze power-of-two forward/inverse/real hashes, repeated
+small transforms after large scratch growth, and exact plus shifted overlap. A
+special-value path-consistency case compares signed zero, subnormal, maximum
+finite, infinity, and distinct NaN payloads bit for bit across repeated,
+caller-output, and in-place storage paths; the real case also crosses the guarded
+two-buffer overlap fallback. It is intentionally not a machine-specific absolute
+special-value oracle. The class passes on native hardware, with AVX disabled, and
+with all .NET hardware intrinsics disabled.
 
 Four final 160-frame Exact `current` 5-worker pairs matched exit status, field
 count, luma, chroma, raw JSON, stdout, normalized stderr/log, and every ordered

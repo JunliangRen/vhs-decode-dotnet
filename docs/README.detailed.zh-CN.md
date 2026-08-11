@@ -401,10 +401,11 @@ complex 输入/输出重叠继续采用等价于 memmove 的 span copy；real �
 重叠时走原来的双 buffer 结果路径，并在全部输入消费后才复制。
 
 3 项标准 xUnit v3 测试冻结长度 2、4、8、64、512、32768 和 131072 的 forward、inverse、
-real-forward hash；固定正负零、subnormal、最大有限值、无穷和 NaN payload 行为；并覆盖
-长度 8、64、512 的完全重叠及前后偏移重叠。测试在原生硬件、禁用 AVX 和禁用全部 .NET
-hardware intrinsic 三种模式均通过。既有 AVX 与标量路径的非有限值 hash 本来就不同，因此
-测试分别冻结各自已有模式，不宣称跨硬件模式相等。
+real-forward hash，并覆盖长度 8、64、512 的完全重叠及前后偏移重叠。特殊值路径一致性用例
+把正负零、subnormal、最大有限值、无穷和不同 NaN payload 在重复执行、caller-output 与原地
+存储路径间逐位比较，real 用例还会经过受保护的双 buffer 重叠 fallback。由于 NaN payload
+选择可能因 CPU 而异，该用例明确不是依赖机器的特殊值绝对 oracle。测试在原生硬件、禁用
+AVX 和禁用全部 .NET hardware intrinsic 三种模式均通过。
 
 默认 32768-sample RF block 的 10 组生产形状微基准把 real-forward 加 complex-inverse
 中位数从 1768.90 降到 1515.88 ms（低 14.30%，吞吐 1.167x），候选 10 组全胜且 hash

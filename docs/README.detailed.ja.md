@@ -466,11 +466,12 @@ real input storage と complex output が overlap する場合は旧 2-buffer re
 全 input 消費後にのみ copy します。
 
 標準 xUnit v3 test 3 件は length 2、4、8、64、512、32768、131072 の forward、inverse、
-real-forward hash、signed zero、subnormal、maximum finite、infinity、NaN payload、および
-length 8、64、512 の exact/forward-shifted/backward-shifted overlap を固定します。native
-hardware、AVX disabled、全 .NET hardware intrinsic disabled の 3 mode で通過します。
-既存 AVX/scalar path の non-finite hash は元から異なるため、各 supported hardware mode を
-個別に固定し、cross-mode equality は主張しません。
+real-forward hash と、length 8、64、512 の exact/forward-shifted/backward-shifted overlap を
+固定します。special-value path-consistency case は signed zero、subnormal、maximum finite、
+infinity、異なる NaN payload を repeated、caller-output、in-place storage path 間で bitwise
+比較し、real case は guarded 2-buffer overlap fallback も通過します。NaN payload selection は
+CPU 間で変わり得るため、これは machine-specific な absolute special-value oracle では
+ありません。native hardware、AVX disabled、全 .NET hardware intrinsic disabled で通過します。
 
 default 32768-sample RF block の product-shape microbenchmark 10 pair は real-forward と
 complex-inverse の median を 1768.90 から 1515.88 ms（14.30% 低下、1.167x throughput）へ

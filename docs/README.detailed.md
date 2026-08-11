@@ -495,12 +495,14 @@ output uses the old two-buffer result path and copies only after all input has
 been consumed.
 
 Three standard xUnit v3 tests freeze forward, inverse, and real-forward hashes at
-lengths 2, 4, 8, 64, 512, 32768, and 131072; pin signed zero, subnormal, maximum
-finite, infinity, and NaN-payload behavior; and cover exact plus forward/backward
-shifted overlap at lengths 8, 64, and 512. They pass on native hardware, with AVX
-disabled, and with every .NET hardware intrinsic disabled. The existing AVX and
-scalar non-finite hashes differ, so each already-supported hardware mode is
-frozen independently rather than claiming cross-mode equality.
+lengths 2, 4, 8, 64, 512, 32768, and 131072 and cover exact plus forward/backward
+shifted overlap at lengths 8, 64, and 512. Their special-value path-consistency
+case compares signed zero, subnormal, maximum finite, infinity, and distinct NaN
+payloads bit for bit across repeated, caller-output, and in-place storage paths;
+the real case also crosses the guarded two-buffer overlap fallback. Because NaN
+payload selection can vary between CPUs, this is intentionally not a
+machine-specific absolute special-value oracle. The class passes on native
+hardware, with AVX disabled, and with every .NET hardware intrinsic disabled.
 
 Ten paired product-shape microbenchmarks at the default 32768-sample RF block
 moved the real-forward plus complex-inverse median from 1768.90 to 1515.88 ms

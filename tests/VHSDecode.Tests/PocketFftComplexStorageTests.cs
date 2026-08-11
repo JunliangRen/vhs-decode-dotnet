@@ -1,6 +1,5 @@
 using System.Numerics;
 using System.Runtime.InteropServices;
-using System.Runtime.Intrinsics.X86;
 using System.Security.Cryptography;
 using VHSDecode.Core.Dsp;
 using Xunit;
@@ -60,8 +59,8 @@ public sealed class PocketFftComplexStorageTests
         Assert.Equal(cases[0].Forward, Hash(repeatedSmall));
     }
 
-    [Fact(DisplayName = "Complex FFT direct output preserves special-value hashes")]
-    public void ComplexFftDirectOutputPreservesSpecialValueHashes()
+    [Fact(DisplayName = "Complex FFT direct output preserves special-value bits")]
+    public void ComplexFftDirectOutputPreservesSpecialValueBits()
     {
         ulong[] patterns =
         [
@@ -78,28 +77,41 @@ public sealed class PocketFftComplexStorageTests
             0x7FF8_0000_0000_0042UL,
             0xFFF8_0000_0000_0199UL
         ];
-        var input = new Complex[64];
-        for (int index = 0; index < input.Length; index++)
+        for (int index = 0; index < patterns.Length; index++)
         {
-            input[index] = new Complex(
-                BitConverter.UInt64BitsToDouble(patterns[(2 * index) % patterns.Length]),
-                BitConverter.UInt64BitsToDouble(
-                    patterns[((2 * index) + 1) % patterns.Length]));
-        }
+            double value = BitConverter.UInt64BitsToDouble(patterns[index]);
+            double pairedValue = BitConverter.UInt64BitsToDouble(
+                patterns[(index + 1) % patterns.Length]);
+            var complexInput = new Complex[64];
+            complexInput[0] = new Complex(value, pairedValue);
+            Complex[] forward = PocketFftComplex.Forward(complexInput);
+            Assert.Equal(Hash(forward), Hash(PocketFftComplex.Forward(complexInput)));
 
-        Complex[] forward = PocketFftComplex.Forward(input);
-        string expectedForward = Avx.IsSupported
-            ? "6F4474A6B9158AC2CB07A1C99E2550398D0FE05DD1C04097966328C58CE9A341"
-            : "637FC69B9A8119B464A2EE4E52EF8773B11CFC844F6EAF5310829CEB5D4A6261";
-        string expectedInverse = Avx.IsSupported
-            ? "EDA5E3990E79E4113CDEAFE4FD092FFF56CF703CAAD6DF4F7B7C4F2C934BA984"
-            : "8F616732D06F9BFB007070645C190473CE47BBF142EDEEC41A4F2B79673F96A7";
-        Assert.Equal(
-            expectedForward,
-            Hash(forward));
-        Assert.Equal(
-            expectedInverse,
-            Hash(PocketFftComplex.Inverse(forward)));
+            Complex[] expectedInverse = PocketFftComplex.Inverse(forward);
+            Complex[] callerOutput = new Complex[forward.Length];
+            PocketFftComplex.Inverse(forward, callerOutput);
+            Assert.Equal(Hash(expectedInverse), Hash(callerOutput));
+
+            Complex[] inPlace = forward.ToArray();
+            PocketFftComplex.Inverse(inPlace, inPlace);
+            Assert.Equal(Hash(expectedInverse), Hash(inPlace));
+
+            var realInput = new double[64];
+            realInput[0] = value;
+            Complex[] expectedReal = PocketFftComplex.ForwardReal(realInput);
+            var realCallerOutput = new Complex[realInput.Length];
+            PocketFftComplex.ForwardReal(realInput, realCallerOutput);
+            Assert.Equal(Hash(expectedReal), Hash(realCallerOutput));
+
+            var overlappingStorage = new double[2 * realInput.Length];
+            realInput.CopyTo(overlappingStorage, 0);
+            Span<Complex> overlappingOutput = MemoryMarshal.Cast<double, Complex>(
+                overlappingStorage);
+            PocketFftComplex.ForwardReal(
+                overlappingStorage.AsSpan(0, realInput.Length),
+                overlappingOutput);
+            Assert.Equal(Hash(expectedReal), Hash(overlappingOutput));
+        }
     }
 
     [Fact(DisplayName = "Complex FFT direct output preserves overlapping storage semantics")]
