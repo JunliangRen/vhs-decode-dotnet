@@ -431,59 +431,89 @@ stderr/logs, and ordered `fileLoc` matched within every profile.
 ### Latest six-path thread matrix
 
 The latest public summary is a startup-inclusive `--start 100 --length 160`
-snapshot comparing
-Python v0.4.0, merged Python PR341, Exact v0.4.0, Exact `current`, IPP-fast
-v0.4.0, and IPP-fast `current` on the same private local 40 MHz PAL VHS `.ldf`
-fixture. The source filename is intentionally not published. Each .NET cell
-gives the median wall time, speedup, and wall-time reduction against its
-profile-matched Python column. Historical matrices that used another format or
-fixture are not directly comparable:
+snapshot comparing Python v0.4.0, merged Python PR341, Exact v0.4.0, Exact
+`current`, IPP-fast v0.4.0, and IPP-fast `current` on the same private local
+40 MHz PAL VHS `.ldf` fixture. The source filename is intentionally not
+published. All 90 measurements were completed in one 2026-08-12 batch. Each
+.NET cell gives the median wall time, speedup, and wall-time reduction against
+its profile-matched Python column. Historical matrices that used another batch,
+format, or fixture are not directly comparable:
 
 <!-- LATEST_PERFORMANCE_BEGIN -->
 | CLI mode (workers) | Python v0.4.0 | Python PR341 | Exact + v0.4.0 | Exact + current | IPP-fast + v0.4.0 | IPP-fast + current |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| default (5) | 45.414 s | 45.060 s | 12.780 s / 3.553x / 71.86% | 12.467 s / 3.614x / 72.33% | 11.331 s / 4.008x / 75.05% | 9.615 s / 4.686x / 78.66% |
-| `--threads 1` | 52.323 s | 52.579 s | 32.579 s / 1.606x / 37.74% | 37.845 s / 1.389x / 28.02% | 23.712 s / 2.207x / 54.68% | 26.105 s / 2.014x / 50.35% |
-| `--threads 5` | 45.991 s | 44.990 s | 12.575 s / 3.658x / 72.66% | 12.810 s / 3.512x / 71.53% | 11.387 s / 4.039x / 75.24% | 9.680 s / 4.648x / 78.48% |
-| `--threads 10` | 47.385 s | 47.713 s | 10.006 s / 4.736x / 78.88% | 9.843 s / 4.847x / 79.37% | 9.540 s / 4.967x / 79.87% | 7.664 s / 6.225x / 83.94% |
-| `--threads 20` | 48.459 s | 47.490 s | 8.263 s / 5.864x / 82.95% | 7.096 s / 6.693x / 85.06% | 7.933 s / 6.109x / 83.63% | 6.086 s / 7.803x / 87.18% |
+| default (5) | 47.039 s | 47.613 s | 13.895 s / 3.385x / 70.46% | 13.290 s / 3.583x / 72.09% | 11.942 s / 3.939x / 74.61% | 9.868 s / 4.825x / 79.27% |
+| `--threads 1` | 56.448 s | 57.923 s | 37.293 s / 1.514x / 33.93% | 41.786 s / 1.386x / 27.86% | 24.533 s / 2.301x / 56.54% | 27.795 s / 2.084x / 52.01% |
+| `--threads 5` | 48.105 s | 47.568 s | 13.596 s / 3.538x / 71.74% | 13.310 s / 3.574x / 72.02% | 11.910 s / 4.039x / 75.24% | 9.953 s / 4.779x / 79.08% |
+| `--threads 10` | 48.819 s | 49.473 s | 10.781 s / 4.528x / 77.92% | 9.490 s / 5.213x / 80.82% | 9.972 s / 4.896x / 79.57% | 7.808 s / 6.336x / 84.22% |
+| `--threads 20` | 50.003 s | 50.116 s | 8.616 s / 5.803x / 82.77% | 8.101 s / 6.187x / 83.84% | 8.439 s / 5.926x / 83.12% | 5.976 s / 8.387x / 88.08% |
 <!-- LATEST_PERFORMANCE_END -->
-<!-- LATEST_PERFORMANCE_RUNS: performance-snapshot-runs=90 dotnet-matrix-runs=60 python-reference-runs=30 dotnet-repeats=3 python-reference-date=2026-08-11 dotnet-v040-date=2026-08-12 dotnet-current-date=2026-08-12 radix8-avx-matrix-runs=30 radix8-avx-exact-1000-ab-pairs=2 radix8-avx-exact-160-ab-pairs=2 radix8-avx-ipp-160-ab-pairs=2 radix8-avx-thread-order-pairs=4 radix8-avx-tests=58 radix8-avx-intrinsic-modes=3 python-v040-runs=15 python-v040-hashes=15 python-pr341-runs=15 python-pr341-hashes=1 -->
+<!-- LATEST_PERFORMANCE_RUNS: performance-snapshot-runs=90 dotnet-matrix-runs=60 python-reference-runs=30 dotnet-repeats=3 python-reference-date=2026-08-12 dotnet-v040-date=2026-08-12 dotnet-current-date=2026-08-12 radix5-avx-matrix-runs=90 radix5-avx-exact-1000-ab-pairs=2 radix5-avx-kernel-iterations=128 radix5-avx-tests=59 radix5-avx-intrinsic-modes=3 python-v040-runs=15 python-v040-hashes=15 python-pr341-runs=15 python-pr341-hashes=1 -->
 
 The three-run wall-time ranges were:
 
 <!-- LATEST_PERFORMANCE_RANGES_BEGIN -->
 | CLI mode | Python v0.4.0 | Python PR341 | Exact + v0.4.0 | Exact + current | IPP-fast + v0.4.0 | IPP-fast + current |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| default (5) | 45.414-46.131 s | 44.868-45.586 s | 12.481-12.798 s | 12.224-12.664 s | 11.317-11.459 s | 9.590-9.854 s |
-| `--threads 1` | 51.717-53.065 s | 51.773-52.927 s | 32.324-32.590 s | 37.825-37.896 s | 23.577-23.797 s | 25.994-26.284 s |
-| `--threads 5` | 45.332-47.649 s | 44.045-46.375 s | 12.476-12.591 s | 12.378-13.001 s | 11.339-11.463 s | 9.667-9.800 s |
-| `--threads 10` | 46.748-48.421 s | 46.921-47.898 s | 9.949-10.398 s | 9.712-10.117 s | 9.467-9.543 s | 7.593-7.900 s |
-| `--threads 20` | 47.718-48.912 s | 47.427-47.687 s | 8.157-8.284 s | 6.722-7.903 s | 7.923-7.946 s | 5.925-6.434 s |
+| default (5) | 46.835-59.276 s | 46.529-51.039 s | 13.179-13.965 s | 12.407-13.694 s | 11.723-12.277 s | 9.866-10.486 s |
+| `--threads 1` | 55.951-57.227 s | 56.820-58.347 s | 36.511-37.425 s | 41.290-42.603 s | 24.440-24.988 s | 27.242-27.855 s |
+| `--threads 5` | 47.073-48.851 s | 46.653-48.435 s | 13.250-13.683 s | 13.295-13.395 s | 11.818-12.013 s | 9.812-10.297 s |
+| `--threads 10` | 48.105-50.526 s | 48.492-51.450 s | 10.604-10.887 s | 9.320-9.619 s | 9.899-10.102 s | 7.795-7.835 s |
+| `--threads 20` | 49.390-50.916 s | 49.155-50.271 s | 8.591-8.783 s | 7.787-8.604 s | 8.272-8.495 s | 5.973-6.110 s |
 <!-- LATEST_PERFORMANCE_RANGES_END -->
 
-The pinned Python reference columns retain the 30 measurements completed on
-2026-08-11 because the source, environment, fixture, and pass plan did not
-change. The 30 .NET v0.4.0 measurements also retain their prior values because
-those code paths and the pass plan did not change. The 30 `current` measurements
-were refreshed from zero on 2026-08-12: Exact and IPP-fast at all five worker
-settings using forward, reverse, and mixed passes. Every refreshed cell contains
-three complete runs and one hash for each captured output and log surface.
+All six paths were measured from zero in the same batch at all five worker
+settings using forward, reverse, and mixed passes. Every cell contains three
+complete runs. All 60 .NET runs and all 15 Python PR341 runs produced one hash
+set per profile/mode across luma, chroma, JSON, stdout, normalized stderr/logs,
+and ordered `fileLoc`. Python v0.4.0 produced 15 distinct luma, chroma, JSON,
+and normalized-log hash sets in 15 runs; its strict oracle therefore remains
+`g4315520 --threads 0`.
 
-The refreshed .NET candidate is based on merged main `e977dd1` plus the isolated
-radix-8 AVX change below. Its 103,565,924-byte single-file `decode.exe` has
-SHA-256 `D339F869F19A28EADAD1A4106A1EA93E98EC307C56508C013B54C1002260EEDE`.
-Documentation and test-only edits are outside the binary. The host was an
-Intel Core Ultra 7 265K with 20 logical processors, Windows 11 build 26220, and
-.NET SDK/runtime `11.0.100-preview.6.26359.118`. Raw directories stay local
-because they contain the private fixture path; these are reported local
-measurements, not an independently reproducible public corpus.
+The .NET candidate is based on merged main `bc73fa7` plus the isolated radix-5
+AVX change and radix-8 exceptional-value hardening below. The host was an Intel
+Core Ultra 7 265K with 20 logical processors, Windows 11 build 26220, and .NET
+SDK/runtime `11.0.100-preview.6.26359.118`. Raw directories stay local because
+they contain the private fixture path; these are reported local measurements,
+not an independently reproducible public corpus.
 
-Small cross-batch changes in ratio cells include ordinary thermal, scheduler,
-and system variation. They are not used to attribute a regression or speedup;
-the same-moment interleaved revision A/B evidence below is the causal gate.
+The three-run ranges expose ordinary startup, thermal, scheduler, and system
+variation. Ratio cells move when either the .NET numerator or Python denominator
+moves. They are not used to attribute a revision regression or speedup; the
+same-moment interleaved revision A/B evidence below is the causal gate.
 
-### Managed AVX radix-8 PocketFFT butterflies
+### Managed AVX radix-5 PocketFFT butterflies
+
+The managed float32 PocketFFT radix-5 pass now evaluates four independent
+complex indices in one `Vector256<float>`. Each lane retains the scalar add,
+subtract, coefficient multiply, complex twiddle, and conversion order. Packets
+containing non-finite values or magnitudes above the conservative overflow bound
+use four scalar indices. Tails and hosts without AVX also retain the scalar
+path. There is no FMA, reduction, reassociation, shared scratch state, new
+allocation, or cross-transform state.
+
+All 59 mixed-radix compatibility tests passed with normal intrinsics, AVX
+disabled, and all hardware intrinsics disabled. The dedicated scalar-reference
+test uses a direct length-55 plan and separately covers AVX-safe signed zero,
+subnormal, minimum-normal, and signed-one inputs plus scalar-fallback maximum
+finite, infinity, and distinct NaN payloads in forward and backward transforms.
+The existing double radix-8 AVX path also preflights its input against a
+plan-specific overflow bound and falls back for extreme/non-finite values; four
+storage/overlap tests cover its vector and fallback paths in all three intrinsic
+modes. JIT disassembly of the radix-5 storage butterfly contained four
+`vmulps`, four `vaddps`, one `vsubps`, and no FMA instruction.
+
+A 128-iteration production-size forward/back kernel loop moved from 757.745 to
+600.026 ms (20.8% lower wall time) and from 765.625 to 671.875 ms CPU (12.2%
+lower), with identical hashes and no GC. Two opposite-order 1,000-frame Exact
+`current --threads 20` pairs matched all nine compatibility surfaces. Mean wall
+time moved from 38.483 to 37.800 seconds (1.78% lower), CPU time was effectively
+flat at 308.664 versus 308.188 seconds, average active cores moved from 8.02 to
+8.15, and average peak working set moved from 361.6 to 353.1 MiB. The two pair
+directions were -0.54% and -3.01% wall time, so the conservative end-to-end
+claim is the aggregate 1.78% result. Memory remained bounded without OOM.
+
+### Previous managed AVX radix-8 PocketFFT butterflies
 
 The managed float32 PocketFFT radix-8 pass now evaluates four independent
 complex indices in one `Vector256<float>`. Each lane retains the scalar add,
@@ -3495,7 +3525,7 @@ Requirements:
 .\tools\build-ipp-native.ps1
 dotnet restore VHSDecodeDotNet.slnx
 dotnet build VHSDecodeDotNet.slnx -c Release --no-restore
-dotnet test --solution VHSDecodeDotNet.slnx -c Release --no-build --no-restore --minimum-expected-tests 1427
+dotnet test --solution VHSDecodeDotNet.slnx -c Release --no-build --no-restore --minimum-expected-tests 1429
 dotnet test --project tests\VHSDecode.Tests\VHSDecode.Tests.csproj -c Release --no-build --no-restore --coverage --coverage-output coverage.cobertura.xml --coverage-output-format cobertura
 ```
 
@@ -3509,7 +3539,7 @@ deployment computer. Binary-only single-file releases embed
 sidecar license files. An Exact-only build may omit the native build step.
 
 The current formal Release build has zero warnings and errors. The xUnit v3
-project exposes **1,427** independently discoverable tests to both
+project exposes **1,429** independently discoverable tests to both
 `dotnet test` and Visual Studio Test Explorer.
 
 <!-- SECTION: usage -->

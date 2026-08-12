@@ -114,6 +114,61 @@ public sealed class PocketFftComplexStorageTests
         }
     }
 
+    [Fact(DisplayName = "Complex FFT radix-8 AVX lanes preserve scalar special-value bits")]
+    public void ComplexFftRadix8AvxLanesPreserveScalarSpecialValueBits()
+    {
+        ulong[][] patternSets =
+        [
+            [
+                0x3FF0_0000_0000_0000UL,
+                0xBFF0_0000_0000_0000UL,
+                0x0000_0000_0000_0000UL,
+                0x8000_0000_0000_0000UL,
+                0x0000_0000_0000_0001UL,
+                0x8000_0000_0000_0001UL,
+                0x0010_0000_0000_0000UL,
+                0x8010_0000_0000_0000UL
+            ],
+            [
+                0x3FF0_0000_0000_0000UL,
+                0xBFF0_0000_0000_0000UL,
+                0x7FEF_FFFF_FFFF_FFFFUL,
+                0xFFEF_FFFF_FFFF_FFFFUL,
+                0x7FF0_0000_0000_0000UL,
+                0xFFF0_0000_0000_0000UL,
+                0x7FF8_0000_0000_0042UL,
+                0xFFF8_0000_0000_0199UL
+            ]
+        ];
+        foreach (int length in new[] { 32, 64, 512 })
+        {
+            foreach (ulong[] patterns in patternSets)
+            {
+                var input = new Complex[length];
+                for (int index = 0; index < input.Length; index++)
+                {
+                    input[index] = new Complex(
+                        BitConverter.UInt64BitsToDouble(
+                            patterns[(2 * index) % patterns.Length]),
+                        BitConverter.UInt64BitsToDouble(
+                            patterns[((2 * index) + 1) % patterns.Length]));
+                }
+
+                Complex[] expectedForward = PocketFftComplex.TransformScalarReference(
+                    input,
+                    forward: true);
+                Complex[] actualForward = PocketFftComplex.Forward(input);
+                Assert.Equal(Hash(expectedForward), Hash(actualForward));
+
+                Complex[] expectedInverse = PocketFftComplex.TransformScalarReference(
+                    expectedForward,
+                    forward: false);
+                Complex[] actualInverse = PocketFftComplex.Inverse(actualForward);
+                Assert.Equal(Hash(expectedInverse), Hash(actualInverse));
+            }
+        }
+    }
+
     [Fact(DisplayName = "Complex FFT direct output preserves overlapping storage semantics")]
     public void ComplexFftDirectOutputPreservesOverlappingStorageSemantics()
     {

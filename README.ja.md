@@ -36,7 +36,7 @@ upstream release `v0.4.0`、commit
 - VHS family には VHS/S-VHS、Betamax、Video8/Hi8、U-matic、Type C、EIAJ、
   upstream が対応する PAL/NTSC variant が含まれます。
 - TBC utility、ダブルクリック GUI、開発者向け plot window は対象外です。
-- Visual Studio 2026 の `.slnx` には **1,427** 件の標準 xUnit v3 test があり、
+- Visual Studio 2026 の `.slnx` には **1,429** 件の標準 xUnit v3 test があり、
   Test Explorer と `dotnet test` の両方で実行できます。
 
 <!-- SECTION: start -->
@@ -94,22 +94,21 @@ CVBS と HiFi は引き続き `ipp-fast` を拒否します。release-compatible
 ## 最新の性能
 
 これは同じ private local 40 MHz PAL VHS `.ldf` fixture を使う、startup cost を含む
-`--start 100 --length 160` snapshot です。source filename は公開しません。Python の
-reference と .NET v0.4.0 列は固定した 3-pass measurement を維持しています。30 回の
-`current` .NET Release measurement は、main `e977dd1` を基にした performance candidate
-で 2026-08-12 に更新し、同じ forward、reverse、mixed plan を使用しました。互換性と
-速度は別々に評価します。
+`--start 100 --length 160` snapshot です。source filename は公開しません。Python と
+.NET Release の全 90 measurement は、main `bc73fa7` を基にした candidate を使い、
+forward、reverse、mixed pass を含む同じ 2026-08-12 batch で完了しました。以前の
+mixed-batch snapshot は本表で置き換えます。互換性と速度は別々に評価します。
 
 <!-- LATEST_PERFORMANCE_BEGIN -->
 | CLI mode（workers） | Python v0.4.0 | Python PR341 | Exact + v0.4.0 | Exact + current | IPP-fast + v0.4.0 | IPP-fast + current |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| default（5） | 45.414 s | 45.060 s | 12.780 s / 3.553x | 12.467 s / 3.614x | 11.331 s / 4.008x | 9.615 s / 4.686x |
-| `--threads 1` | 52.323 s | 52.579 s | 32.579 s / 1.606x | 37.845 s / 1.389x | 23.712 s / 2.207x | 26.105 s / 2.014x |
-| `--threads 5` | 45.991 s | 44.990 s | 12.575 s / 3.658x | 12.810 s / 3.512x | 11.387 s / 4.039x | 9.680 s / 4.648x |
-| `--threads 10` | 47.385 s | 47.713 s | 10.006 s / 4.736x | 9.843 s / 4.847x | 9.540 s / 4.967x | 7.664 s / 6.225x |
-| `--threads 20` | 48.459 s | 47.490 s | 8.263 s / 5.864x | 7.096 s / 6.693x | 7.933 s / 6.109x | 6.086 s / 7.803x |
+| default（5） | 47.039 s | 47.613 s | 13.895 s / 3.385x | 13.290 s / 3.583x | 11.942 s / 3.939x | 9.868 s / 4.825x |
+| `--threads 1` | 56.448 s | 57.923 s | 37.293 s / 1.514x | 41.786 s / 1.386x | 24.533 s / 2.301x | 27.795 s / 2.084x |
+| `--threads 5` | 48.105 s | 47.568 s | 13.596 s / 3.538x | 13.310 s / 3.574x | 11.910 s / 4.039x | 9.953 s / 4.779x |
+| `--threads 10` | 48.819 s | 49.473 s | 10.781 s / 4.528x | 9.490 s / 5.213x | 9.972 s / 4.896x | 7.808 s / 6.336x |
+| `--threads 20` | 50.003 s | 50.116 s | 8.616 s / 5.803x | 8.101 s / 6.187x | 8.439 s / 5.926x | 5.976 s / 8.387x |
 <!-- LATEST_PERFORMANCE_END -->
-<!-- LATEST_PERFORMANCE_RUNS: performance-snapshot-runs=90 dotnet-matrix-runs=60 python-reference-runs=30 dotnet-repeats=3 python-reference-date=2026-08-11 dotnet-v040-date=2026-08-12 dotnet-current-date=2026-08-12 radix8-avx-matrix-runs=30 radix8-avx-exact-1000-ab-pairs=2 radix8-avx-exact-160-ab-pairs=2 radix8-avx-ipp-160-ab-pairs=2 radix8-avx-thread-order-pairs=4 radix8-avx-tests=58 radix8-avx-intrinsic-modes=3 python-v040-runs=15 python-v040-hashes=15 python-pr341-runs=15 python-pr341-hashes=1 -->
+<!-- LATEST_PERFORMANCE_RUNS: performance-snapshot-runs=90 dotnet-matrix-runs=60 python-reference-runs=30 dotnet-repeats=3 python-reference-date=2026-08-12 dotnet-v040-date=2026-08-12 dotnet-current-date=2026-08-12 radix5-avx-matrix-runs=90 radix5-avx-exact-1000-ab-pairs=2 radix5-avx-kernel-iterations=128 radix5-avx-tests=59 radix5-avx-intrinsic-modes=3 python-v040-runs=15 python-v040-hashes=15 python-pr341-runs=15 python-pr341-hashes=1 -->
 
 各 .NET cell は wall-time median と profile が対応する Python 列に対する speedup の順で、
 default は **5 workers** です。3-run range は
@@ -118,14 +117,17 @@ default は **5 workers** です。3-run range は
 直接比較できません。causal regression は、過去の ratio cell ではなく同時刻の .NET
 revision A/B で判断します。
 
-最新の isolated change は、4 個の独立した radix-8 PocketFFT index を managed AVX で同時に
-処理します。各 complex lane は scalar の add、subtract、multiply order を維持し、FMA、
-reduction、reassociation は使いません。順序を反転した 1,000-frame Exact
-`current --threads 20` 2 pair の平均は、wall time が 36.800 から 36.149 seconds（1.77% 減）、
-CPU time が 308.508 から 298.828 seconds（3.14% 減）になりました。IPP-fast の paired
-screen は neutral でした。更新した 30 matrix run は 7 compatibility surface ですべて
-deterministic で、serial gate の output は exact でした。paired serial CPU time は実質 flat ですが
-wall timing は inconclusive だったため、serial speedup は claim しません。memory は bounded でした。
+最新の isolated change は、4 個の独立した float32 radix-5 PocketFFT index を managed AVX
+で同時に処理します。各 complex lane は scalar expression order を維持し、unsafe magnitude
+または non-finite packet は scalar path を使います。FMA、reduction、reassociation はありません。
+production-size forward/back kernel loop 128 iteration は、wall time が 757.745 から
+600.026 ms（20.8% 減）、CPU が 765.625 から 671.875 ms（12.2% 減）となり、hash は
+一致し GC はありませんでした。順序を反転した 1,000-frame Exact
+`current --threads 20` 2 pair の平均は、wall time が 38.483 から 37.800 seconds（1.78% 減）、
+CPU は 308.664 と 308.188 seconds で実質 flat、average active core は 8.02 から 8.15 でした。
+9 compatibility surface はすべて一致し、memory は bounded でした。既存の double radix-8
+AVX path にも extreme/non-finite scalar fallback を追加しましたが、この compatibility
+hardening に speedup は帰属させません。
 
 更新した各 .NET profile/thread cell は 3 run 内で deterministic でした。固定 reference の
 merged Python PR341 も deterministic でした。Python v0.4.0 は 15 run で 15 種類の luma、
@@ -166,7 +168,7 @@ header は FFmpeg を維持します。
 dotnet restore VHSDecodeDotNet.slnx
 dotnet build VHSDecodeDotNet.slnx -c Release --no-restore
 dotnet test --solution VHSDecodeDotNet.slnx -c Release `
-  --no-build --no-restore --minimum-expected-tests 1427
+  --no-build --no-restore --minimum-expected-tests 1429
 ```
 
 Visual Studio 2026 で `VHSDecodeDotNet.slnx` を開くと、build、debug、

@@ -2229,14 +2229,45 @@ dotnet test --solution VHSDecodeDotNet.slnx --no-build
 ```
 
 The current formal solution build completes with zero warnings and errors, and
-the xUnit v3 project exposes 1,427 independently discoverable tests
+the xUnit v3 project exposes 1,429 independently discoverable tests
 to `dotnet test` and Visual Studio Test Explorer. On the
 same Windows machine and fixtures, Release wall-clock measurements for one
 frame were 2.346 s versus 7.193 s for NTSC VHS and 1.651 s versus 5.865 s for
 NTSC LD (this port versus the v0.4.0 Python virtual environment); all output
 hashes listed above remained identical.
 
-### Managed AVX radix-8 PocketFFT butterflies
+### Managed AVX radix-5 PocketFFT butterflies
+
+The managed float32 radix-5 pass evaluates four independent complex indices in
+one `Vector256<float>` while retaining each scalar lane's expression and twiddle
+order. Packets with non-finite values or magnitudes above a conservative
+overflow bound execute the four original scalar indices. Tails and AVX-disabled
+hosts also retain scalar execution; the vector path introduces no FMA,
+reduction, reassociation, allocation, shared scratch, or cross-transform state.
+
+All 59 mixed-radix tests pass with normal intrinsics, AVX disabled, and all
+hardware intrinsics disabled. A direct length-55 scalar-reference test separately
+covers AVX-safe signed zero, subnormal, minimum-normal, and signed-one patterns,
+plus scalar-fallback maximum finite, infinity, and distinct NaN payloads in
+forward and backward transforms. The double radix-8 path now also preflights a
+plan-specific safe magnitude and falls back for extreme/non-finite inputs. Its
+four storage/overlap tests pass in the same three intrinsic modes. JIT
+disassembly of the radix-5 storage butterfly contained four `vmulps`, four
+`vaddps`, one `vsubps`, and no FMA instruction.
+
+Two opposite-order 1,000-frame Exact `current --threads 20` pairs matched exit
+status, field count, luma, chroma, raw JSON, stdout, normalized stderr/logs, and
+ordered `fileLoc`. Mean wall time moved from 38.483 to 37.800 seconds (1.78%
+lower), CPU time was effectively flat at 308.664 versus 308.188 seconds, average
+active cores moved from 8.02 to 8.15, and average peak working set moved from
+361.6 to 353.1 MiB. The same-batch 90-run public matrix covers Python v0.4.0,
+Python PR341, Exact v0.4.0/current, and IPP-fast v0.4.0/current at default, 1, 5,
+10, and 20 workers. All 60 .NET and 15 Python PR341 runs were deterministic
+within profile/mode; Python v0.4.0 again produced 15 distinct luma, chroma,
+JSON, and normalized-log hash sets, so the strict oracle remains
+`g4315520 --threads 0`.
+
+### Prior managed AVX radix-8 PocketFFT butterflies
 
 The managed float32 PocketFFT radix-8 pass processes four independent complex
 indices with `Vector256<float>` while retaining each scalar lane's add,
