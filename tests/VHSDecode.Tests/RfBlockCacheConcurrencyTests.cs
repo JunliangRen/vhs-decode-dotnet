@@ -7,6 +7,13 @@ using Xunit;
 
 namespace VHSDecode.Tests;
 
+[CollectionDefinition(Name, DisableParallelization = true)]
+public sealed class RfBlockCacheConcurrencyCollection
+{
+    public const string Name = "RF block cache concurrency";
+}
+
+[Collection(RfBlockCacheConcurrencyCollection.Name)]
 public sealed class RfBlockCacheConcurrencyTests
 {
     private const int TestBlockLength = 16;

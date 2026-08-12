@@ -85,23 +85,25 @@ public sealed class PocketFftComplexStorageTests
             var complexInput = new Complex[64];
             complexInput[0] = new Complex(value, pairedValue);
             Complex[] forward = PocketFftComplex.Forward(complexInput);
-            Assert.Equal(Hash(forward), Hash(PocketFftComplex.Forward(complexInput)));
+            AssertDefinedSpecialValueBitsEqual(
+                forward,
+                PocketFftComplex.Forward(complexInput));
 
             Complex[] expectedInverse = PocketFftComplex.Inverse(forward);
             Complex[] callerOutput = new Complex[forward.Length];
             PocketFftComplex.Inverse(forward, callerOutput);
-            Assert.Equal(Hash(expectedInverse), Hash(callerOutput));
+            AssertDefinedSpecialValueBitsEqual(expectedInverse, callerOutput);
 
             Complex[] inPlace = forward.ToArray();
             PocketFftComplex.Inverse(inPlace, inPlace);
-            Assert.Equal(Hash(expectedInverse), Hash(inPlace));
+            AssertDefinedSpecialValueBitsEqual(expectedInverse, inPlace);
 
             var realInput = new double[64];
             realInput[0] = value;
             Complex[] expectedReal = PocketFftComplex.ForwardReal(realInput);
             var realCallerOutput = new Complex[realInput.Length];
             PocketFftComplex.ForwardReal(realInput, realCallerOutput);
-            Assert.Equal(Hash(expectedReal), Hash(realCallerOutput));
+            AssertDefinedSpecialValueBitsEqual(expectedReal, realCallerOutput);
 
             var overlappingStorage = new double[2 * realInput.Length];
             realInput.CopyTo(overlappingStorage, 0);
@@ -110,7 +112,7 @@ public sealed class PocketFftComplexStorageTests
             PocketFftComplex.ForwardReal(
                 overlappingStorage.AsSpan(0, realInput.Length),
                 overlappingOutput);
-            Assert.Equal(Hash(expectedReal), Hash(overlappingOutput));
+            AssertDefinedSpecialValueBitsEqual(expectedReal, overlappingOutput);
         }
     }
 
@@ -263,4 +265,40 @@ public sealed class PocketFftComplexStorageTests
 
     private static string Hash(ReadOnlySpan<Complex> values)
         => Convert.ToHexString(SHA256.HashData(MemoryMarshal.AsBytes(values)));
+
+    private static void AssertDefinedSpecialValueBitsEqual(
+        ReadOnlySpan<Complex> expected,
+        ReadOnlySpan<Complex> actual)
+    {
+        Assert.Equal(expected.Length, actual.Length);
+        for (int index = 0; index < expected.Length; index++)
+        {
+            AssertDefinedSpecialValueBitsEqual(
+                expected[index].Real,
+                actual[index].Real,
+                $"[{index}].Real");
+            AssertDefinedSpecialValueBitsEqual(
+                expected[index].Imaginary,
+                actual[index].Imaginary,
+                $"[{index}].Imaginary");
+        }
+    }
+
+    private static void AssertDefinedSpecialValueBitsEqual(
+        double expected,
+        double actual,
+        string component)
+    {
+        // NaN sign and payload propagation may change across JIT tiers.
+        if (double.IsNaN(expected) && double.IsNaN(actual))
+        {
+            return;
+        }
+
+        ulong expectedBits = BitConverter.DoubleToUInt64Bits(expected);
+        ulong actualBits = BitConverter.DoubleToUInt64Bits(actual);
+        Assert.True(
+            expectedBits == actualBits,
+            $"{component} differed: {expectedBits:X16} != {actualBits:X16}.");
+    }
 }
