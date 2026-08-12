@@ -3,6 +3,7 @@ using System.Buffers.Binary;
 using System.Collections.Concurrent;
 using System.IO.Compression;
 using System.Reflection;
+using System.Runtime.CompilerServices;
 using System.Runtime.Intrinsics;
 using System.Runtime.Intrinsics.X86;
 using System.Text;
@@ -1242,6 +1243,8 @@ public sealed class TbcLineResampler
         return Math.Clamp(index, 0, length - 1);
     }
 
+    [MethodImpl(MethodImplOptions.AggressiveOptimization)]
+    [SkipLocalsInit]
     private static unsafe double SampleSincInteriorAvxFma(
         double* source,
         float* startWeights,
@@ -1270,10 +1273,22 @@ public sealed class TbcLineResampler
         Avx.Store(products + 8, Avx.Multiply(source1, weight1));
 
         double result = 0.0;
-        for (int tap = 0; tap < SincTapCount; tap++)
-        {
-            result += products[tap];
-        }
+        result += products[0];
+        result += products[1];
+        result += products[2];
+        result += products[3];
+        result += products[4];
+        result += products[5];
+        result += products[6];
+        result += products[7];
+        result += products[8];
+        result += products[9];
+        result += products[10];
+        result += products[11];
+        result += products[12];
+        result += products[13];
+        result += products[14];
+        result += products[15];
 
         return result;
     }
