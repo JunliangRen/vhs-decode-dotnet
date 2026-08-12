@@ -38,7 +38,7 @@ evidence, and remaining gaps.
   EIAJ, and supported PAL/NTSC variants.
 - TBC utility tools, the double-click GUI, and developer plotting windows are
   intentionally out of scope.
-- The Visual Studio 2026 `.slnx` solution has **1,430** standard xUnit v3 tests
+- The Visual Studio 2026 `.slnx` solution has **1,431** standard xUnit v3 tests
   that are visible in Test Explorer and runnable with `dotnet test`.
 
 <!-- SECTION: start -->
@@ -100,20 +100,20 @@ for compatibility-sensitive work.
 This startup-inclusive `--start 100 --length 160` snapshot uses one fixed private
 local 40 MHz PAL VHS `.ldf` fixture; its filename is intentionally not published.
 All 90 Python and .NET Release measurements were completed in the same
-2026-08-12 batch with the candidate based on main `ea1bb8e`, using forward,
-reverse, and mixed passes. This replaces the prior mixed-batch snapshot.
+2026-08-12 batch with candidate commit `c8c2835`, based on main `1b6f315`,
+using forward, reverse, and mixed passes. This replaces the prior snapshot.
 Compatibility is evaluated separately from speed.
 
 <!-- LATEST_PERFORMANCE_BEGIN -->
 | CLI mode (workers) | Python v0.4.0 | Python PR341 | Exact + v0.4.0 | Exact + current | IPP-fast + v0.4.0 | IPP-fast + current |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| default (5) | 46.187 s | 45.565 s | 13.559 s / 3.406x | 12.283 s / 3.710x | 11.723 s / 3.940x | 9.783 s / 4.658x |
-| `--threads 1` | 55.254 s | 55.352 s | 34.689 s / 1.593x | 40.203 s / 1.377x | 24.301 s / 2.274x | 27.102 s / 2.042x |
-| `--threads 5` | 45.877 s | 45.743 s | 13.156 s / 3.487x | 13.192 s / 3.468x | 11.712 s / 3.917x | 9.918 s / 4.612x |
-| `--threads 10` | 47.055 s | 48.114 s | 10.665 s / 4.412x | 9.610 s / 5.006x | 9.816 s / 4.794x | 7.869 s / 6.114x |
-| `--threads 20` | 50.062 s | 50.428 s | 8.822 s / 5.674x | 8.055 s / 6.260x | 8.435 s / 5.935x | 6.086 s / 8.285x |
+| default (5) | 46.165 s | 45.821 s | 13.780 s / 3.350x | 12.896 s / 3.553x | 11.739 s / 3.933x | 9.869 s / 4.643x |
+| `--threads 1` | 56.050 s | 55.754 s | 34.138 s / 1.642x | 39.839 s / 1.399x | 24.408 s / 2.296x | 26.950 s / 2.069x |
+| `--threads 5` | 46.278 s | 45.804 s | 13.277 s / 3.486x | 12.726 s / 3.599x | 11.659 s / 3.969x | 9.859 s / 4.646x |
+| `--threads 10` | 47.111 s | 48.017 s | 10.526 s / 4.476x | 9.648 s / 4.977x | 9.858 s / 4.779x | 7.744 s / 6.200x |
+| `--threads 20` | 48.283 s | 48.622 s | 8.441 s / 5.720x | 7.787 s / 6.244x | 8.284 s / 5.829x | 6.018 s / 8.079x |
 <!-- LATEST_PERFORMANCE_END -->
-<!-- LATEST_PERFORMANCE_RUNS: performance-snapshot-runs=90 dotnet-matrix-runs=60 python-reference-runs=30 dotnet-repeats=3 python-reference-date=2026-08-12 dotnet-v040-date=2026-08-12 dotnet-current-date=2026-08-12 complex-normalization-avx-matrix-runs=90 complex-normalization-avx-exact-1000-ab-pairs=3 complex-normalization-avx-kernel-pairs=8 complex-normalization-avx-tests=5 complex-normalization-avx-intrinsic-modes=3 python-v040-runs=15 python-v040-hashes=15 python-pr341-runs=15 python-pr341-hashes=1 -->
+<!-- LATEST_PERFORMANCE_RUNS: performance-snapshot-runs=90 dotnet-matrix-runs=60 python-reference-runs=30 dotnet-repeats=3 python-reference-date=2026-08-12 dotnet-v040-date=2026-08-12 dotnet-current-date=2026-08-12 radix3-avx-matrix-runs=90 radix3-avx-exact-1000-ab-pairs=3 radix3-avx-kernel-pairs=12 radix3-avx-tests=60 radix3-avx-intrinsic-modes=3 python-v040-runs=15 python-v040-hashes=15 python-pr341-runs=15 python-pr341-hashes=1 -->
 
 Each .NET cell shows median wall time and speedup versus its profile-matched
 Python column. The default is **5 workers**; three-run ranges are in the
@@ -122,14 +122,14 @@ when either the .NET time or its Python denominator moves, and historical tables
 using another fixture or window are not directly comparable. Same-moment .NET
 revision A/B runs, rather than old ratio cells, determine causal regressions.
 
-The latest isolated change uses managed AVX for double-complex inverse FFT
-normalization while preserving the scalar multiply order and avoiding FMA or
-reassociation. Eight opposite-order kernel pairs reduced median wall time by
-26.2% and CPU time by 25.0%, with identical hashes and allocations. Across
-three opposite-order 1,000-frame Exact `current --threads 20` pairs, mean wall
-time moved from 39.867 to 39.515 seconds (0.88% lower) and CPU time from 315.260
-to 305.969 seconds (2.95% lower). All nine compatibility surfaces matched in
-every pair, and memory remained bounded.
+The latest isolated change evaluates four independent float32 radix-3 PocketFFT
+indices with managed AVX while preserving scalar operation and twiddle order and
+avoiding FMA or reassociation. Six opposite-order pairs per production plan
+reduced mean kernel time by 0.94% at length 726 and 4.18% at length 990 with
+identical hashes. Three opposite-order 1,000-frame Exact
+`current --threads 20` pairs matched all nine compatibility surfaces; mean wall
+time moved from 37.288 to 36.909 seconds (1.02% lower), CPU time from 301.984 to
+292.766 seconds (3.05% lower), and memory remained bounded.
 
 Every .NET profile/thread cell was deterministic across its three refreshed
 runs. Merged Python PR341 was deterministic in its pinned reference set; Python
@@ -173,7 +173,7 @@ The pinned SDK is .NET `11.0.100-preview.6.26359.118`.
 dotnet restore VHSDecodeDotNet.slnx
 dotnet build VHSDecodeDotNet.slnx -c Release --no-restore
 dotnet test --solution VHSDecodeDotNet.slnx -c Release `
-  --no-build --no-restore --minimum-expected-tests 1430
+  --no-build --no-restore --minimum-expected-tests 1431
 ```
 
 Open `VHSDecodeDotNet.slnx` in Visual Studio 2026 to build, debug, and run the

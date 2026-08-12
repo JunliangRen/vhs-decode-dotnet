@@ -1,4 +1,5 @@
 using System.Runtime.InteropServices;
+using System.Runtime.Intrinsics.X86;
 using System.Security.Cryptography;
 using VHSDecode.Core.Dsp;
 using Xunit;
@@ -397,6 +398,66 @@ public sealed class PocketFftMixedRadixCompatibilityTests
             Assert.True(
                 MemoryMarshal.AsBytes(expectedBackward.AsSpan())
                     .SequenceEqual(MemoryMarshal.AsBytes(actualBackward.AsSpan())));
+        }
+    }
+
+    [Fact(DisplayName = "AVX radix-3 stages preserve scalar special-value bits")]
+    public void AvxRadix3StagesPreserveScalarSpecialValueBits()
+    {
+        if (string.Equals(
+                Environment.GetEnvironmentVariable("VHSDECODE_REQUIRE_AVX_RADIX3"),
+                "1",
+                StringComparison.Ordinal))
+        {
+            Assert.True(
+                Avx.IsSupported,
+                "The CI radix-3 vector-coverage run requires AVX support.");
+        }
+
+        uint[][] patternSets =
+        [
+            [
+                0x3F800000,
+                0xBF800000,
+                0x00000000,
+                0x80000000,
+                0x00000001,
+                0x80000001,
+                0x00800000,
+                0x80800000
+            ],
+            [
+                0x3F800000,
+                0xBF800000,
+                0x7F7FFFFF,
+                0xFF7FFFFF,
+                0x7F800000,
+                0xFF800000,
+                0x7FC00001,
+                0xFFC12345
+            ]
+        ];
+        foreach (int length in new[] { 33, 726, 990 })
+        {
+            foreach (uint[] patterns in patternSets)
+            {
+                Complex32[] input = BuildBitPatternInput(length, patterns);
+                Complex32[] expectedForward =
+                    PocketFftComplex32.TransformDirectScalarReference(input);
+                Complex32[] actualForward =
+                    PocketFftComplex32.ForwardAnyLengthDucc(input);
+                Assert.True(
+                    MemoryMarshal.AsBytes(expectedForward.AsSpan())
+                        .SequenceEqual(MemoryMarshal.AsBytes(actualForward.AsSpan())));
+
+                Complex32[] expectedBackward =
+                    BackwardDirectScalarReference(expectedForward);
+                Complex32[] actualBackward =
+                    PocketFftComplex32.BackwardAnyLengthDucc(actualForward);
+                Assert.True(
+                    MemoryMarshal.AsBytes(expectedBackward.AsSpan())
+                        .SequenceEqual(MemoryMarshal.AsBytes(actualBackward.AsSpan())));
+            }
         }
     }
 

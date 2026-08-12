@@ -417,24 +417,24 @@ wall-time median、profile が対応する Python 列に対する speedup、wall
 <!-- LATEST_PERFORMANCE_BEGIN -->
 | CLI mode（workers） | Python v0.4.0 | Python PR341 | Exact + v0.4.0 | Exact + current | IPP-fast + v0.4.0 | IPP-fast + current |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| default（5） | 46.187 s | 45.565 s | 13.559 s / 3.406x / 70.64% | 12.283 s / 3.710x / 73.04% | 11.723 s / 3.940x / 74.62% | 9.783 s / 4.658x / 78.53% |
-| `--threads 1` | 55.254 s | 55.352 s | 34.689 s / 1.593x / 37.22% | 40.203 s / 1.377x / 27.37% | 24.301 s / 2.274x / 56.02% | 27.102 s / 2.042x / 51.04% |
-| `--threads 5` | 45.877 s | 45.743 s | 13.156 s / 3.487x / 71.32% | 13.192 s / 3.468x / 71.16% | 11.712 s / 3.917x / 74.47% | 9.918 s / 4.612x / 78.32% |
-| `--threads 10` | 47.055 s | 48.114 s | 10.665 s / 4.412x / 77.33% | 9.610 s / 5.006x / 80.03% | 9.816 s / 4.794x / 79.14% | 7.869 s / 6.114x / 83.65% |
-| `--threads 20` | 50.062 s | 50.428 s | 8.822 s / 5.674x / 82.38% | 8.055 s / 6.260x / 84.03% | 8.435 s / 5.935x / 83.15% | 6.086 s / 8.285x / 87.93% |
+| default（5） | 46.165 s | 45.821 s | 13.780 s / 3.350x / 70.15% | 12.896 s / 3.553x / 71.86% | 11.739 s / 3.933x / 74.57% | 9.869 s / 4.643x / 78.46% |
+| `--threads 1` | 56.050 s | 55.754 s | 34.138 s / 1.642x / 39.09% | 39.839 s / 1.399x / 28.55% | 24.408 s / 2.296x / 56.45% | 26.950 s / 2.069x / 51.66% |
+| `--threads 5` | 46.278 s | 45.804 s | 13.277 s / 3.486x / 71.31% | 12.726 s / 3.599x / 72.22% | 11.659 s / 3.969x / 74.81% | 9.859 s / 4.646x / 78.48% |
+| `--threads 10` | 47.111 s | 48.017 s | 10.526 s / 4.476x / 77.66% | 9.648 s / 4.977x / 79.91% | 9.858 s / 4.779x / 79.07% | 7.744 s / 6.200x / 83.87% |
+| `--threads 20` | 48.283 s | 48.622 s | 8.441 s / 5.720x / 82.52% | 7.787 s / 6.244x / 83.98% | 8.284 s / 5.829x / 82.84% | 6.018 s / 8.079x / 87.62% |
 <!-- LATEST_PERFORMANCE_END -->
-<!-- LATEST_PERFORMANCE_RUNS: performance-snapshot-runs=90 dotnet-matrix-runs=60 python-reference-runs=30 dotnet-repeats=3 python-reference-date=2026-08-12 dotnet-v040-date=2026-08-12 dotnet-current-date=2026-08-12 complex-normalization-avx-matrix-runs=90 complex-normalization-avx-exact-1000-ab-pairs=3 complex-normalization-avx-kernel-pairs=8 complex-normalization-avx-tests=5 complex-normalization-avx-intrinsic-modes=3 python-v040-runs=15 python-v040-hashes=15 python-pr341-runs=15 python-pr341-hashes=1 -->
+<!-- LATEST_PERFORMANCE_RUNS: performance-snapshot-runs=90 dotnet-matrix-runs=60 python-reference-runs=30 dotnet-repeats=3 python-reference-date=2026-08-12 dotnet-v040-date=2026-08-12 dotnet-current-date=2026-08-12 radix3-avx-matrix-runs=90 radix3-avx-exact-1000-ab-pairs=3 radix3-avx-kernel-pairs=12 radix3-avx-tests=60 radix3-avx-intrinsic-modes=3 python-v040-runs=15 python-v040-hashes=15 python-pr341-runs=15 python-pr341-hashes=1 -->
 
 3-run wall-time range は次のとおりです。
 
 <!-- LATEST_PERFORMANCE_RANGES_BEGIN -->
 | CLI mode | Python v0.4.0 | Python PR341 | Exact + v0.4.0 | Exact + current | IPP-fast + v0.4.0 | IPP-fast + current |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| default（5） | 45.543-47.231 s | 45.318-46.067 s | 13.293-13.914 s | 12.034-13.131 s | 11.349-11.947 s | 9.454-9.937 s |
-| `--threads 1` | 55.201-57.086 s | 55.146-57.320 s | 34.415-35.682 s | 38.686-40.774 s | 24.070-25.685 s | 26.821-28.114 s |
-| `--threads 5` | 45.719-49.991 s | 45.057-48.743 s | 13.041-13.487 s | 12.350-13.595 s | 11.610-11.888 s | 9.788-9.942 s |
-| `--threads 10` | 46.627-49.268 s | 47.909-48.954 s | 10.305-10.684 s | 8.798-10.033 s | 9.778-9.981 s | 7.615-7.999 s |
-| `--threads 20` | 48.529-50.200 s | 48.555-50.526 s | 8.748-8.952 s | 7.990-8.370 s | 8.310-8.559 s | 5.822-6.123 s |
+| default（5） | 46.115-46.402 s | 45.632-45.887 s | 13.587-14.153 s | 12.666-13.392 s | 11.722-11.870 s | 9.833-9.943 s |
+| `--threads 1` | 55.709-57.791 s | 55.049-56.196 s | 33.956-34.548 s | 39.014-40.722 s | 24.220-24.767 s | 26.947-27.140 s |
+| `--threads 5` | 45.804-46.596 s | 45.330-45.911 s | 13.125-13.318 s | 12.317-13.055 s | 11.608-11.728 s | 9.791-9.881 s |
+| `--threads 10` | 46.914-47.200 s | 47.823-48.326 s | 10.482-10.733 s | 9.505-9.850 s | 9.804-9.874 s | 7.670-7.887 s |
+| `--threads 20` | 48.029-48.490 s | 48.360-48.986 s | 8.369-8.702 s | 7.535-7.874 s | 8.188-8.416 s | 5.894-6.102 s |
 <!-- LATEST_PERFORMANCE_RANGES_END -->
 
 6 path は同じ batch でゼロから測定し、5 worker setting と forward、reverse、mixed の 3 pass
@@ -443,17 +443,20 @@ profile/mode ごとに luma、chroma、JSON、stdout、normalized stderr/log、o
 hash set が 1 つでした。Python v0.4.0 は 15 run で 15 種類の luma、chroma、JSON、
 normalized-log hash set を生成したため、strict oracle は `g4315520 --threads 0` のままです。
 
-.NET candidate は merged main `ea1bb8e` と、後述する isolated double-complex inverse
-normalization AVX change を基にしています。host は Intel Core Ultra 7 265K（20 logical
-processor）、Windows 11 build 26220、.NET SDK/runtime `11.0.100-preview.6.26359.118` です。
-raw directory は private fixture path を含むため local にのみ保持し、public に独立再現可能な
-benchmark corpus とは主張しません。
+.NET candidate は merged main `1b6f315` を基にした commit `c8c2835` で、後述する
+isolated managed radix-3 AVX change を含みます。matrix の self-contained `decode.exe` の
+SHA-256 は `C514BC8C6204D41986574FBC627081D3B30D87BB7A85FF8C9CA5D2FED6827E5F` です。
+host は Intel Core Ultra 7 265K（20 logical processor）、Windows 11 build 26220、.NET
+SDK/runtime `11.0.100-preview.6.26359.118` です。raw directory は private fixture path を
+含むため local にのみ保持し、public に独立再現可能な benchmark corpus とは主張しません。
 
 3-run range は通常の startup、thermal、scheduler、system variation を示します。ratio cell は
 .NET numerator と Python denominator の両方で動きます。revision の因果的な regression/speedup
 判断には使わず、以下の同時刻 interleaved revision A/B を gate とします。
 
-### Managed AVX double-complex inverse FFT normalization
+### 以前の managed AVX double-complex inverse FFT normalization
+
+この retained historical candidate は merged main `ea1bb8e` を基にしています。
 
 inverse transform は各 real/imaginary component に同じ double-precision normalization factor
 を乗算します。candidate は scalar operand order を維持しながら、2 個の独立した complex value
@@ -478,6 +481,32 @@ CPU time は 315.260 から 305.969 seconds（2.95% 減）でした。3 pair の
 -2.10%、-0.20%、-0.35% です。average active core は 7.91 から 7.74 となり、これは local
 compute reduction であって multicore scaling の claim ではありません。peak working set は
 bounded で、observed maximum は baseline 650.6 MiB、candidate 396.2 MiB、OOM はありません。
+
+### managed AVX radix-3 PocketFFT butterfly
+
+managed float32 PocketFFT の radix-3 pass は、4 個の独立した complex index を 1 つの
+`Vector256<float>` で処理します。各 lane は元の scalar pair、coefficient multiply、
+add/subtract、complex twiddle order を維持します。non-finite value または conservative
+overflow bound を超える magnitude を含む packet は元の 4 scalar index を実行し、tail と
+AVX-disabled host も scalar path を維持します。vector path に FMA、reduction、
+reassociation、shared scratch state、allocation、cross-transform state はありません。
+
+60 mixed-radix compatibility test は通常 intrinsic、AVX disabled、全 hardware intrinsic
+disabled で通過しました。専用 direct-plan test は forward/backward の両方で length 33、
+726、990 を検証します。AVX-safe な signed zero、subnormal、minimum normal、signed one と、
+scalar fallback を起動する maximum finite、infinity、異なる NaN payload を個別に含みます。
+optimized JIT disassembly の butterfly/twiddle arithmetic は分離した `vmulps`、`vaddps`、
+`vsubps` のみで、FMA instruction はありません。
+
+順序を反転した 6 kernel pair では、length-726 の mean time が 712.391 から 705.693 ms
+（0.94% 減）、length-990 が 740.479 から 709.507 ms（4.18% 減）となり、output hash は
+一致しました。順序を反転した 1,000-frame Exact `current --threads 20` 3 pair は 9
+compatibility surface ですべて一致しました。mean wall time は 37.288 から 36.909 seconds
+（1.02% 減）、CPU は 301.984 から 292.766 seconds（3.05% 減）、average active core は
+8.10 から 7.93 でした。各 pair の wall direction は -0.79%、+0.21%、-2.46%、bounded
+maximum working set は baseline 443.4 MiB、candidate 355.6 MiB です。3 `--threads 0` pair
+も全 surface で一致し、mean wall time は 41.030 から 40.219 seconds になりました。
+v0.4.0 と IPP-fast profile はこの managed current-profile FFT path を呼びません。
 
 ### 以前の managed AVX radix-5 PocketFFT butterfly
 
@@ -3332,7 +3361,7 @@ Microsoft.Testing.Platform run は全 1,401 test を検出し、1,397 pass、0 f
 .\tools\build-ipp-native.ps1
 dotnet restore VHSDecodeDotNet.slnx
 dotnet build VHSDecodeDotNet.slnx -c Release --no-restore
-dotnet test --solution VHSDecodeDotNet.slnx -c Release --no-build --no-restore --minimum-expected-tests 1430
+dotnet test --solution VHSDecodeDotNet.slnx -c Release --no-build --no-restore --minimum-expected-tests 1431
 dotnet test --project tests\VHSDecode.Tests\VHSDecode.Tests.csproj -c Release --no-build --no-restore --coverage --coverage-output coverage.cobertura.xml --coverage-output-format cobertura
 ```
 
@@ -3346,7 +3375,7 @@ third-party notice を埋め込み、license sidecar file は追加しません�
 
 現在の正式な Release build は warning 0、error 0 です。xUnit v3 project は
 `dotnet test` と Visual Studio Test Explorer の両方で個別に検出できる
-**1,430** tests を公開します。
+**1,431** tests を公開します。
 
 <!-- SECTION: usage -->
 

@@ -2229,12 +2229,35 @@ dotnet test --solution VHSDecodeDotNet.slnx --no-build
 ```
 
 The current formal solution build completes with zero warnings and errors, and
-the xUnit v3 project exposes 1,430 independently discoverable tests
+the xUnit v3 project exposes 1,431 independently discoverable tests
 to `dotnet test` and Visual Studio Test Explorer. On the
 same Windows machine and fixtures, Release wall-clock measurements for one
 frame were 2.346 s versus 7.193 s for NTSC VHS and 1.651 s versus 5.865 s for
 NTSC LD (this port versus the v0.4.0 Python virtual environment); all output
 hashes listed above remained identical.
+
+### Managed AVX radix-3 PocketFFT butterflies
+
+The managed float32 radix-3 pass processes four independent complex indices per
+`Vector256<float>` while preserving the scalar expression and twiddle order in
+each lane. Non-finite or conservatively overflow-prone packets, tails, and
+AVX-disabled hosts execute the original scalar indices. There is no FMA,
+reduction, reassociation, shared scratch state, allocation, or cross-transform
+state. Optimized JIT disassembly contains separate `vmulps`, `vaddps`, and
+`vsubps` instructions and no FMA.
+
+All 60 mixed-radix tests pass with normal intrinsics, AVX disabled, and all
+hardware intrinsics disabled. A dedicated scalar-reference test checks lengths
+33, 726, and 990, AVX-safe signed-zero/subnormal/minimum-normal patterns, and
+fallback maximum-finite/infinity/distinct-NaN patterns in forward and backward
+directions. Three opposite-order 1,000-frame Exact `current --threads 20` pairs
+matched exit status, field count, luma, chroma, raw JSON, stdout, normalized
+stderr/logs, and ordered `fileLoc`. Mean wall time moved from 37.288 to 36.909
+seconds (1.02% lower), CPU from 301.984 to 292.766 seconds (3.05% lower), and
+average active cores from 8.10 to 7.93. Pair wall directions were -0.79%, +0.21%,
+and -2.46%; memory remained bounded. Three `--threads 0` pairs matched the same
+surfaces and moved mean wall time from 41.030 to 40.219 seconds. v0.4.0 and
+IPP-fast do not enter this managed current-profile FFT path.
 
 ### Managed AVX radix-5 PocketFFT butterflies
 
