@@ -11,6 +11,10 @@ internal static class PocketFftComplex32
 {
     private static readonly SingleCreationCache<int, SinCos2PiByN> Roots = new(capacity: 32);
     private static readonly SingleCreationCache<(int Length, int RootLength), Plan> RootedPlans = new();
+    private static readonly Vector256<float> FloatAbsoluteValueMask =
+        Vector256.Create(BitConverter.UInt32BitsToSingle(0x7FFFFFFFU));
+    private static readonly Vector256<float> FloatPass5MaximumSafeMagnitude =
+        Vector256.Create(float.MaxValue / 16.0f);
     [ThreadStatic]
     private static Value[]? _planValues;
     [ThreadStatic]
@@ -91,6 +95,14 @@ internal static class PocketFftComplex32
             input,
             input.Length,
             workerThreads);
+    }
+
+    internal static Complex32[] TransformDirectScalarReference(
+        ReadOnlySpan<Complex32> input)
+    {
+        ValidateSupportedLength(input.Length, nameof(input));
+        return new Plan(input.Length, input.Length)
+            .Transform(input, permitPass5Avx: false);
     }
 
     internal static Complex32[] ForwardAnyLengthDuccOwned(
@@ -626,6 +638,11 @@ internal static class PocketFftComplex32
         }
 
         internal Complex32[] Transform(ReadOnlySpan<Complex32> input)
+            => Transform(input, permitPass5Avx: true);
+
+        internal Complex32[] Transform(
+            ReadOnlySpan<Complex32> input,
+            bool permitPass5Avx)
         {
             Value[] values =
                 EnsureCapacity(ref _planValues, _length);
@@ -634,7 +651,7 @@ internal static class PocketFftComplex32
                 values[i] = new Value(input[i].Real, input[i].Imaginary);
             }
 
-            Value[] transformed = Execute(values);
+            Value[] transformed = Execute(values, permitPass5Avx);
             var output = new Complex32[_length];
             for (int i = 0; i < output.Length; i++)
             {
@@ -657,7 +674,7 @@ internal static class PocketFftComplex32
                     values[i].Imaginary);
             }
 
-            Value[] transformed = Execute(planValues);
+            Value[] transformed = Execute(planValues, permitPass5Avx: true);
             for (int i = 0; i < _length; i++)
             {
                 values[i] = new Complex32(
@@ -700,7 +717,7 @@ internal static class PocketFftComplex32
             return output;
         }
 
-        private Value[] Execute(Value[] data)
+        private Value[] Execute(Value[] data, bool permitPass5Avx)
         {
             Value[] scratch =
                 EnsureCapacity(ref _planScratch, _length);
@@ -725,7 +742,13 @@ internal static class PocketFftComplex32
                         Pass3(ido, l1, source, destination, factor.Twiddles);
                         break;
                     case 5:
-                        Pass5(ido, l1, source, destination, factor.Twiddles);
+                        Pass5(
+                            ido,
+                            l1,
+                            source,
+                            destination,
+                            factor.Twiddles,
+                            permitPass5Avx);
                         break;
                     case 7:
                         Pass7(ido, l1, source, destination, factor.Twiddles);
@@ -909,7 +932,8 @@ internal static class PocketFftComplex32
             int l1,
             Value[] input,
             Value[] output,
-            Value[] twiddles)
+            Value[] twiddles,
+            bool permitPass5Avx)
         {
             for (int k = 0; k < l1; k++)
             {
@@ -922,7 +946,38 @@ internal static class PocketFftComplex32
                     output,
                     twiddles,
                     applyTwiddle: false);
-                for (int i = 1; i < ido; i++)
+                int i = 1;
+                if (permitPass5Avx && Avx.IsSupported)
+                {
+                    int vectorizedEnd = 1 + ((ido - 1) & ~3);
+                    for (; i < vectorizedEnd; i += 4)
+                    {
+                        if (!Pass5VectorIndex(
+                                ido,
+                                l1,
+                                input,
+                                output,
+                                twiddles,
+                                k,
+                                i))
+                        {
+                            for (int scalar = i; scalar < i + 4; scalar++)
+                            {
+                                Pass5Index(
+                                    scalar,
+                                    k,
+                                    ido,
+                                    l1,
+                                    input,
+                                    output,
+                                    twiddles,
+                                    applyTwiddle: true);
+                            }
+                        }
+                    }
+                }
+
+                for (; i < ido; i++)
                 {
                     Pass5Index(
                         i,
@@ -935,6 +990,158 @@ internal static class PocketFftComplex32
                         applyTwiddle: true);
                 }
             }
+        }
+
+        private static bool Pass5VectorIndex(
+            int ido,
+            int l1,
+            Value[] input,
+            Value[] output,
+            Value[] twiddles,
+            int k,
+            int i)
+        {
+            const float Twiddle1Real =
+                0.3090169943749474241022934171828191f;
+            const float Twiddle1Imaginary =
+                -0.9510565162951535721164393333793821f;
+            const float Twiddle2Real =
+                -0.8090169943749474241022934171828191f;
+            const float Twiddle2Imaginary =
+                -0.5877852522924731291687059546390728f;
+
+            int inputBase = i + (ido * 5 * k);
+            Vector256<float> t0 = LoadValueVector(input, inputBase);
+            Vector256<float> input1 =
+                LoadValueVector(input, inputBase + ido);
+            Vector256<float> input4 =
+                LoadValueVector(input, inputBase + (4 * ido));
+            Vector256<float> input2 =
+                LoadValueVector(input, inputBase + (2 * ido));
+            Vector256<float> input3 =
+                LoadValueVector(input, inputBase + (3 * ido));
+            if (!AreSafeForPass5Vector(t0, input1, input2, input3, input4))
+            {
+                return false;
+            }
+
+            PairVector(
+                out Vector256<float> t1,
+                out Vector256<float> t4,
+                input1,
+                input4);
+            PairVector(
+                out Vector256<float> t2,
+                out Vector256<float> t3,
+                input2,
+                input3);
+
+            int outputBase = i + (ido * k);
+            int outputStride = ido * l1;
+            int twiddleStride = ido - 1;
+            StoreValueVector(
+                output,
+                outputBase,
+                Avx.Add(Avx.Add(t0, t1), t2));
+            StorePass5VectorPair(
+                output,
+                twiddles,
+                outputBase,
+                outputStride,
+                twiddleStride,
+                i,
+                t0,
+                t1,
+                t2,
+                t3,
+                t4,
+                1,
+                4,
+                Twiddle1Real,
+                Twiddle2Real,
+                Twiddle1Imaginary,
+                Twiddle2Imaginary);
+            StorePass5VectorPair(
+                output,
+                twiddles,
+                outputBase,
+                outputStride,
+                twiddleStride,
+                i,
+                t0,
+                t1,
+                t2,
+                t3,
+                t4,
+                2,
+                3,
+                Twiddle2Real,
+                Twiddle1Real,
+                Twiddle2Imaginary,
+                -Twiddle1Imaginary);
+            return true;
+        }
+
+        private static void StorePass5VectorPair(
+            Value[] output,
+            Value[] twiddles,
+            int outputBase,
+            int outputStride,
+            int twiddleStride,
+            int i,
+            Vector256<float> t0,
+            Vector256<float> t1,
+            Vector256<float> t2,
+            Vector256<float> t3,
+            Vector256<float> t4,
+            int firstOutput,
+            int secondOutput,
+            float firstRealCoefficient,
+            float secondRealCoefficient,
+            float firstImaginaryCoefficient,
+            float secondImaginaryCoefficient)
+        {
+            Vector256<float> ca = Avx.Add(
+                Avx.Add(
+                    t0,
+                    Avx.Multiply(
+                        Vector256.Create(firstRealCoefficient),
+                        t1)),
+                Avx.Multiply(
+                    Vector256.Create(secondRealCoefficient),
+                    t2));
+            Vector256<float> imaginarySum = Avx.Add(
+                Avx.Multiply(
+                    Vector256.Create(firstImaginaryCoefficient),
+                    t4),
+                Avx.Multiply(
+                    Vector256.Create(secondImaginaryCoefficient),
+                    t3));
+            Vector256<float> cb = Avx.Xor(
+                Avx.Permute(imaginarySum, 0xB1),
+                Vector256.Create(
+                    -0.0f, 0.0f,
+                    -0.0f, 0.0f,
+                    -0.0f, 0.0f,
+                    -0.0f, 0.0f));
+            Vector256<float> first = Avx.Add(ca, cb);
+            Vector256<float> second = Avx.Subtract(ca, cb);
+            StoreValueVector(
+                output,
+                outputBase + (firstOutput * outputStride),
+                SpecialMultiplyVector(
+                    first,
+                    LoadValueVector(
+                        twiddles,
+                        (i - 1) + ((firstOutput - 1) * twiddleStride))));
+            StoreValueVector(
+                output,
+                outputBase + (secondOutput * outputStride),
+                SpecialMultiplyVector(
+                    second,
+                    LoadValueVector(
+                        twiddles,
+                        (i - 1) + ((secondOutput - 1) * twiddleStride))));
         }
 
         private static void Pass5Index(
@@ -1748,6 +1955,44 @@ internal static class PocketFftComplex32
         vector.StoreUnsafe(
             ref componentReference,
             (nuint)(index * 2));
+    }
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private static bool AreSafeForPass5Vector(
+        Vector256<float> first,
+        Vector256<float> second,
+        Vector256<float> third,
+        Vector256<float> fourth,
+        Vector256<float> fifth)
+    {
+        Vector256<float> finite = Avx.And(
+            Avx.Compare(
+                Avx.And(first, FloatAbsoluteValueMask),
+                FloatPass5MaximumSafeMagnitude,
+                FloatComparisonMode.OrderedLessThanOrEqualNonSignaling),
+            Avx.Compare(
+                Avx.And(second, FloatAbsoluteValueMask),
+                FloatPass5MaximumSafeMagnitude,
+                FloatComparisonMode.OrderedLessThanOrEqualNonSignaling));
+        finite = Avx.And(
+            finite,
+            Avx.Compare(
+                Avx.And(third, FloatAbsoluteValueMask),
+                FloatPass5MaximumSafeMagnitude,
+                FloatComparisonMode.OrderedLessThanOrEqualNonSignaling));
+        finite = Avx.And(
+            finite,
+            Avx.Compare(
+                Avx.And(fourth, FloatAbsoluteValueMask),
+                FloatPass5MaximumSafeMagnitude,
+                FloatComparisonMode.OrderedLessThanOrEqualNonSignaling));
+        finite = Avx.And(
+            finite,
+            Avx.Compare(
+                Avx.And(fifth, FloatAbsoluteValueMask),
+                FloatPass5MaximumSafeMagnitude,
+                FloatComparisonMode.OrderedLessThanOrEqualNonSignaling));
+        return Avx.MoveMask(finite) == 0xFF;
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]

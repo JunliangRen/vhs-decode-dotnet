@@ -19,6 +19,8 @@ public static class PocketFftComplex
         Vector256.Create(0.0, -0.0, 0.0, -0.0);
     private static readonly Vector256<double> Pass8HalfSqrt2Vector =
         Vector256.Create(Pass8HalfSqrt2);
+    private static readonly Vector256<double> DoubleAbsoluteValueMask =
+        Vector256.Create(BitConverter.UInt64BitsToDouble(0x7FFFFFFFFFFFFFFFUL));
     private static readonly SingleCreationCache<int, Plan> Plans = new();
     private static readonly SingleCreationCache<(int Length, int RootLength), Plan> RootedPlans = new();
     private static readonly SingleCreationCache<int, SinCos2PiByN> Roots = new();
@@ -396,6 +398,15 @@ public static class PocketFftComplex
     public static Complex[] Inverse(ReadOnlySpan<Complex> input)
         => Transform(input, forward: false);
 
+    internal static Complex[] TransformScalarReference(
+        ReadOnlySpan<Complex> input,
+        bool forward)
+    {
+        ValidateLength(input.Length, nameof(input));
+        return Plans.GetOrAdd(input.Length, static length => new Plan(length))
+            .Transform(input, forward, permitPass8Avx: false);
+    }
+
     internal static void Inverse(
         ReadOnlySpan<Complex> input,
         Span<Complex> output)
@@ -443,6 +454,8 @@ public static class PocketFftComplex
     {
         private readonly int _length;
         private readonly Factor[] _factors;
+        private readonly bool _hasVectorizedPass8;
+        private readonly double _maximumPass8AvxInputMagnitude;
 
         public Plan(int length)
             : this(length, length)
@@ -462,16 +475,42 @@ public static class PocketFftComplex
                 Factorize(length),
                 new SinCos2PiByN(rootLength),
                 rootLength / length);
+            int l1 = 1;
+            bool hasVectorizedPass8 = false;
+            double maximumPass8AvxInputMagnitude = double.MaxValue;
+            foreach (Factor factor in _factors)
+            {
+                int ido = length / (factor.Radix * l1);
+                hasVectorizedPass8 |= factor.Radix == 8 && ido >= 3;
+                maximumPass8AvxInputMagnitude /= 4.0 * factor.Radix;
+                l1 *= factor.Radix;
+            }
+
+            _hasVectorizedPass8 = hasVectorizedPass8;
+            _maximumPass8AvxInputMagnitude = maximumPass8AvxInputMagnitude;
         }
 
         public Complex[] Transform(ReadOnlySpan<Complex> input, bool forward)
+            => Transform(input, forward, permitPass8Avx: true);
+
+        public Complex[] Transform(
+            ReadOnlySpan<Complex> input,
+            bool forward,
+            bool permitPass8Avx)
         {
             var output = new Complex[_length];
-            Transform(input, output, forward);
+            Transform(input, output, forward, permitPass8Avx);
             return output;
         }
 
         public void Transform(ReadOnlySpan<Complex> input, Span<Complex> output, bool forward)
+            => Transform(input, output, forward, permitPass8Avx: true);
+
+        private void Transform(
+            ReadOnlySpan<Complex> input,
+            Span<Complex> output,
+            bool forward,
+            bool permitPass8Avx)
         {
             if (input.Length != _length)
             {
@@ -497,7 +536,8 @@ public static class PocketFftComplex
                 source,
                 destination,
                 forward,
-                forward ? 1.0 : 1.0 / _length);
+                forward ? 1.0 : 1.0 / _length,
+                permitPass8Avx);
             System.Diagnostics.Debug.Assert(
                 transformed.Overlaps(outputValues, out int outputOffset)
                 && outputOffset == 0
@@ -539,7 +579,8 @@ public static class PocketFftComplex
                 source,
                 destination,
                 forward: true,
-                normalization: 1.0);
+                normalization: 1.0,
+                permitPass8Avx: true);
             if (overlappingRealStorage)
             {
                 transformed.CopyTo(outputValues);
@@ -557,13 +598,15 @@ public static class PocketFftComplex
             Span<Value> data,
             Span<Value> scratch,
             bool forward,
-            double normalization)
+            double normalization,
+            bool permitPass8Avx)
         {
             System.Diagnostics.Debug.Assert(data.Length == _length);
             System.Diagnostics.Debug.Assert(scratch.Length == _length);
             System.Diagnostics.Debug.Assert(!data.Overlaps(scratch));
             Span<Value> source = data;
             Span<Value> destination = scratch;
+            bool allowPass8Avx = permitPass8Avx && CanUsePass8Avx(data);
             int l1 = 1;
             foreach (Factor factor in _factors)
             {
@@ -577,7 +620,14 @@ public static class PocketFftComplex
                         Pass4(ido, l1, source, destination, factor.Twiddles, forward);
                         break;
                     case 8:
-                        Pass8(ido, l1, source, destination, factor.Twiddles, forward);
+                        Pass8(
+                            ido,
+                            l1,
+                            source,
+                            destination,
+                            factor.Twiddles,
+                            forward,
+                            allowPass8Avx);
                         break;
                     default:
                         throw new InvalidOperationException($"Unsupported complex FFT radix {factor.Radix}.");
@@ -598,6 +648,64 @@ public static class PocketFftComplex
             }
 
             return source;
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveOptimization)]
+        private bool CanUsePass8Avx(ReadOnlySpan<Value> input)
+        {
+            if (!Avx.IsSupported || !_hasVectorizedPass8)
+            {
+                return false;
+            }
+
+            ReadOnlySpan<double> components = MemoryMarshal.Cast<Value, double>(input);
+            ref double componentStart = ref MemoryMarshal.GetReference(components);
+            Vector256<double> maximumMagnitude =
+                Vector256.Create(_maximumPass8AvxInputMagnitude);
+            int index = 0;
+            for (; index + 15 < components.Length; index += 16)
+            {
+                Vector256<double> finite0 = Avx.Compare(
+                    Avx.And(
+                        Vector256.LoadUnsafe(ref componentStart, (nuint)index),
+                        DoubleAbsoluteValueMask),
+                    maximumMagnitude,
+                    FloatComparisonMode.OrderedLessThanOrEqualNonSignaling);
+                Vector256<double> finite1 = Avx.Compare(
+                    Avx.And(
+                        Vector256.LoadUnsafe(ref componentStart, (nuint)(index + 4)),
+                        DoubleAbsoluteValueMask),
+                    maximumMagnitude,
+                    FloatComparisonMode.OrderedLessThanOrEqualNonSignaling);
+                Vector256<double> finite2 = Avx.Compare(
+                    Avx.And(
+                        Vector256.LoadUnsafe(ref componentStart, (nuint)(index + 8)),
+                        DoubleAbsoluteValueMask),
+                    maximumMagnitude,
+                    FloatComparisonMode.OrderedLessThanOrEqualNonSignaling);
+                Vector256<double> finite3 = Avx.Compare(
+                    Avx.And(
+                        Vector256.LoadUnsafe(ref componentStart, (nuint)(index + 12)),
+                        DoubleAbsoluteValueMask),
+                    maximumMagnitude,
+                    FloatComparisonMode.OrderedLessThanOrEqualNonSignaling);
+                if (Avx.MoveMask(
+                        Avx.And(Avx.And(finite0, finite1), Avx.And(finite2, finite3)))
+                    != 0b1111)
+                {
+                    return false;
+                }
+            }
+
+            for (; index < components.Length; index++)
+            {
+                if (!(Math.Abs(components[index]) <= _maximumPass8AvxInputMagnitude))
+                {
+                    return false;
+                }
+            }
+
+            return true;
         }
 
         private static void Pass2(
@@ -698,7 +806,8 @@ public static class PocketFftComplex
             ReadOnlySpan<Value> input,
             Span<Value> output,
             Value[] twiddles,
-            bool forward)
+            bool forward,
+            bool allowAvx)
         {
             if (forward)
             {
@@ -707,7 +816,8 @@ public static class PocketFftComplex
                     l1,
                     input,
                     output,
-                    twiddles);
+                    twiddles,
+                    allowAvx);
             }
             else
             {
@@ -716,7 +826,8 @@ public static class PocketFftComplex
                     l1,
                     input,
                     output,
-                    twiddles);
+                    twiddles,
+                    allowAvx);
             }
         }
 
@@ -726,7 +837,8 @@ public static class PocketFftComplex
             int l1,
             ReadOnlySpan<Value> input,
             Span<Value> output,
-            Value[] twiddles)
+            Value[] twiddles,
+            bool allowAvx)
             where TDirection : struct, IPass8Direction
         {
             int outputStride = ido * l1;
@@ -750,22 +862,38 @@ public static class PocketFftComplex
                     ido,
                     outputStride);
                 int i = 1;
-                if (Avx.IsSupported)
+                if (allowAvx)
                 {
                     int twiddleStride = ido - 1;
                     for (; i + 1 < ido; i += 2)
                     {
                         int inputIndex = inputBase + i;
+                        Vector256<double> input1 =
+                            LoadTwoValues(ref inputStart, inputIndex + ido);
+                        Vector256<double> input5 =
+                            LoadTwoValues(ref inputStart, inputIndex + (5 * ido));
+                        Vector256<double> input3 =
+                            LoadTwoValues(ref inputStart, inputIndex + (3 * ido));
+                        Vector256<double> input7 =
+                            LoadTwoValues(ref inputStart, inputIndex + (7 * ido));
+                        Vector256<double> input0 =
+                            LoadTwoValues(ref inputStart, inputIndex);
+                        Vector256<double> input4 =
+                            LoadTwoValues(ref inputStart, inputIndex + (4 * ido));
+                        Vector256<double> input2 =
+                            LoadTwoValues(ref inputStart, inputIndex + (2 * ido));
+                        Vector256<double> input6 =
+                            LoadTwoValues(ref inputStart, inputIndex + (6 * ido));
                         Pair(
                             out Vector256<double> a1,
                             out Vector256<double> a5,
-                            LoadTwoValues(ref inputStart, inputIndex + ido),
-                            LoadTwoValues(ref inputStart, inputIndex + (5 * ido)));
+                            input1,
+                            input5);
                         Pair(
                             out Vector256<double> a3,
                             out Vector256<double> a7,
-                            LoadTwoValues(ref inputStart, inputIndex + (3 * ido)),
-                            LoadTwoValues(ref inputStart, inputIndex + (7 * ido)));
+                            input3,
+                            input7);
                         a7 = TDirection.RotateX90(a7);
                         PairInPlace(ref a1, ref a3);
                         a3 = TDirection.RotateX90(a3);
@@ -775,13 +903,13 @@ public static class PocketFftComplex
                         Pair(
                             out Vector256<double> a0,
                             out Vector256<double> a4,
-                            LoadTwoValues(ref inputStart, inputIndex),
-                            LoadTwoValues(ref inputStart, inputIndex + (4 * ido)));
+                            input0,
+                            input4);
                         Pair(
                             out Vector256<double> a2,
                             out Vector256<double> a6,
-                            LoadTwoValues(ref inputStart, inputIndex + (2 * ido)),
-                            LoadTwoValues(ref inputStart, inputIndex + (6 * ido)));
+                            input2,
+                            input6);
                         PairInPlace(ref a0, ref a2);
 
                         int outputIndex = outputBase + i;
@@ -848,61 +976,91 @@ public static class PocketFftComplex
 
                 for (; i < ido; i++)
                 {
-                    int inputIndex = inputBase + i;
-                    Pair(
-                        out Value a1,
-                        out Value a5,
-                        Unsafe.Add(ref inputStart, inputIndex + ido),
-                        Unsafe.Add(ref inputStart, inputIndex + (5 * ido)));
-                    Pair(
-                        out Value a3,
-                        out Value a7,
-                        Unsafe.Add(ref inputStart, inputIndex + (3 * ido)),
-                        Unsafe.Add(ref inputStart, inputIndex + (7 * ido)));
-                    a7 = TDirection.RotateX90(a7);
-                    PairInPlace(ref a1, ref a3);
-                    a3 = TDirection.RotateX90(a3);
-                    PairInPlace(ref a5, ref a7);
-                    a5 = TDirection.RotateX45(a5);
-                    a7 = TDirection.RotateX135(a7);
-                    Pair(
-                        out Value a0,
-                        out Value a4,
-                        Unsafe.Add(ref inputStart, inputIndex),
-                        Unsafe.Add(ref inputStart, inputIndex + (4 * ido)));
-                    Pair(
-                        out Value a2,
-                        out Value a6,
-                        Unsafe.Add(ref inputStart, inputIndex + (2 * ido)),
-                        Unsafe.Add(ref inputStart, inputIndex + (6 * ido)));
-                    PairInPlace(ref a0, ref a2);
-                    int outputIndex = outputBase + i;
-                    Unsafe.Add(ref outputStart, outputIndex) = Add(a0, a1);
-                    Unsafe.Add(ref outputStart, outputIndex + (4 * outputStride)) = TDirection.SpecialMultiply(
-                        Subtract(a0, a1),
-                        Unsafe.Add(ref twiddleStart, TwiddleIndex(3, i, ido)));
-                    Unsafe.Add(ref outputStart, outputIndex + (2 * outputStride)) = TDirection.SpecialMultiply(
-                        Add(a2, a3),
-                        Unsafe.Add(ref twiddleStart, TwiddleIndex(1, i, ido)));
-                    Unsafe.Add(ref outputStart, outputIndex + (6 * outputStride)) = TDirection.SpecialMultiply(
-                        Subtract(a2, a3),
-                        Unsafe.Add(ref twiddleStart, TwiddleIndex(5, i, ido)));
-                    a6 = TDirection.RotateX90(a6);
-                    PairInPlace(ref a4, ref a6);
-                    Unsafe.Add(ref outputStart, outputIndex + outputStride) = TDirection.SpecialMultiply(
-                        Add(a4, a5),
-                        Unsafe.Add(ref twiddleStart, TwiddleIndex(0, i, ido)));
-                    Unsafe.Add(ref outputStart, outputIndex + (5 * outputStride)) = TDirection.SpecialMultiply(
-                        Subtract(a4, a5),
-                        Unsafe.Add(ref twiddleStart, TwiddleIndex(4, i, ido)));
-                    Unsafe.Add(ref outputStart, outputIndex + (3 * outputStride)) = TDirection.SpecialMultiply(
-                        Add(a6, a7),
-                        Unsafe.Add(ref twiddleStart, TwiddleIndex(2, i, ido)));
-                    Unsafe.Add(ref outputStart, outputIndex + (7 * outputStride)) = TDirection.SpecialMultiply(
-                        Subtract(a6, a7),
-                        Unsafe.Add(ref twiddleStart, TwiddleIndex(6, i, ido)));
+                    Pass8ScalarIndex<TDirection>(
+                        i,
+                        inputBase,
+                        outputBase,
+                        ido,
+                        outputStride,
+                        ref inputStart,
+                        ref outputStart,
+                        ref twiddleStart);
                 }
             }
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        private static void Pass8ScalarIndex<TDirection>(
+            int i,
+            int inputBase,
+            int outputBase,
+            int ido,
+            int outputStride,
+            ref Value inputStart,
+            ref Value outputStart,
+            ref Value twiddleStart)
+            where TDirection : struct, IPass8Direction
+        {
+            int inputIndex = inputBase + i;
+            Pair(
+                out Value a1,
+                out Value a5,
+                Unsafe.Add(ref inputStart, inputIndex + ido),
+                Unsafe.Add(ref inputStart, inputIndex + (5 * ido)));
+            Pair(
+                out Value a3,
+                out Value a7,
+                Unsafe.Add(ref inputStart, inputIndex + (3 * ido)),
+                Unsafe.Add(ref inputStart, inputIndex + (7 * ido)));
+            a7 = TDirection.RotateX90(a7);
+            PairInPlace(ref a1, ref a3);
+            a3 = TDirection.RotateX90(a3);
+            PairInPlace(ref a5, ref a7);
+            a5 = TDirection.RotateX45(a5);
+            a7 = TDirection.RotateX135(a7);
+            Pair(
+                out Value a0,
+                out Value a4,
+                Unsafe.Add(ref inputStart, inputIndex),
+                Unsafe.Add(ref inputStart, inputIndex + (4 * ido)));
+            Pair(
+                out Value a2,
+                out Value a6,
+                Unsafe.Add(ref inputStart, inputIndex + (2 * ido)),
+                Unsafe.Add(ref inputStart, inputIndex + (6 * ido)));
+            PairInPlace(ref a0, ref a2);
+            int outputIndex = outputBase + i;
+            Unsafe.Add(ref outputStart, outputIndex) = Add(a0, a1);
+            Unsafe.Add(ref outputStart, outputIndex + (4 * outputStride)) =
+                TDirection.SpecialMultiply(
+                    Subtract(a0, a1),
+                    Unsafe.Add(ref twiddleStart, TwiddleIndex(3, i, ido)));
+            Unsafe.Add(ref outputStart, outputIndex + (2 * outputStride)) =
+                TDirection.SpecialMultiply(
+                    Add(a2, a3),
+                    Unsafe.Add(ref twiddleStart, TwiddleIndex(1, i, ido)));
+            Unsafe.Add(ref outputStart, outputIndex + (6 * outputStride)) =
+                TDirection.SpecialMultiply(
+                    Subtract(a2, a3),
+                    Unsafe.Add(ref twiddleStart, TwiddleIndex(5, i, ido)));
+            a6 = TDirection.RotateX90(a6);
+            PairInPlace(ref a4, ref a6);
+            Unsafe.Add(ref outputStart, outputIndex + outputStride) =
+                TDirection.SpecialMultiply(
+                    Add(a4, a5),
+                    Unsafe.Add(ref twiddleStart, TwiddleIndex(0, i, ido)));
+            Unsafe.Add(ref outputStart, outputIndex + (5 * outputStride)) =
+                TDirection.SpecialMultiply(
+                    Subtract(a4, a5),
+                    Unsafe.Add(ref twiddleStart, TwiddleIndex(4, i, ido)));
+            Unsafe.Add(ref outputStart, outputIndex + (3 * outputStride)) =
+                TDirection.SpecialMultiply(
+                    Add(a6, a7),
+                    Unsafe.Add(ref twiddleStart, TwiddleIndex(2, i, ido)));
+            Unsafe.Add(ref outputStart, outputIndex + (7 * outputStride)) =
+                TDirection.SpecialMultiply(
+                    Subtract(a6, a7),
+                    Unsafe.Add(ref twiddleStart, TwiddleIndex(6, i, ido)));
         }
 
         private static void Pass8FirstIndex<TDirection>(
@@ -1125,11 +1283,11 @@ public static class PocketFftComplex
         {
             Vector256<double> swapped = Avx.Permute(value, SwapComplexComponents);
             return Avx.Multiply(
+                Pass8HalfSqrt2Vector,
                 Avx.Blend(
                     Avx.Add(value, swapped),
                     Avx.Subtract(value, swapped),
-                    SelectImaginaryComponents),
-                Pass8HalfSqrt2Vector);
+                    SelectImaginaryComponents));
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -1149,8 +1307,8 @@ public static class PocketFftComplex
                 Avx.Xor(swapped, NegateAllComponents),
                 value);
             return Avx.Multiply(
-                Avx.Blend(difference, negativeSum, SelectImaginaryComponents),
-                Pass8HalfSqrt2Vector);
+                Pass8HalfSqrt2Vector,
+                Avx.Blend(difference, negativeSum, SelectImaginaryComponents));
         }
     }
 
@@ -1206,11 +1364,11 @@ public static class PocketFftComplex
         {
             Vector256<double> swapped = Avx.Permute(value, SwapComplexComponents);
             return Avx.Multiply(
+                Pass8HalfSqrt2Vector,
                 Avx.Blend(
                     Avx.Subtract(value, swapped),
                     Avx.Add(value, swapped),
-                    SelectImaginaryComponents),
-                Pass8HalfSqrt2Vector);
+                    SelectImaginaryComponents));
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -1230,8 +1388,8 @@ public static class PocketFftComplex
                 swapped);
             Vector256<double> difference = Avx.Subtract(swapped, value);
             return Avx.Multiply(
-                Avx.Blend(negativeSum, difference, SelectImaginaryComponents),
-                Pass8HalfSqrt2Vector);
+                Pass8HalfSqrt2Vector,
+                Avx.Blend(negativeSum, difference, SelectImaginaryComponents));
         }
     }
 
