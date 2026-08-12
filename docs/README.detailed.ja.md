@@ -4,7 +4,7 @@
 
 [English](README.detailed.md) | [简体中文](README.detailed.zh-CN.md) | **[日本語](README.detailed.ja.md)**
 
-<!-- README_SYNC: 2026-08-12.03 -->
+<!-- README_SYNC: 2026-08-13.01 -->
 
 [`oyvindln/vhs-decode`](https://github.com/oyvindln/vhs-decode) の
 デコード関連部分を .NET 11 で再実装するプロジェクトです。現在は release
@@ -410,9 +410,10 @@ IPP-fast、v0.4.0/`current`、`--threads 0`、default-five、`--threads 20` を�
 最新の overview は startup cost を含む `--start 100 --length 160` snapshot で、同じ private
 local 40 MHz PAL VHS `.ldf` fixture 上の Python v0.4.0、merge 済みの Python PR341、Exact
 v0.4.0、Exact `current`、IPP-fast v0.4.0、IPP-fast `current` を比較します。filename は
-公開しません。全 90 measurement は同じ 2026-08-12 batch で完了しました。各 .NET cell は
-wall-time median、profile が対応する Python 列に対する speedup、wall-time reduction の順です。
-別 batch、format、fixture を使った過去の matrix とは直接比較できません。
+公開しません。active table は 2026-08-12 の固定条件 measurement を 84 run 保持し、影響を
+受ける 2 つの `current --threads 20` cell を 2026-08-13 の 6 run で更新しました。各 .NET
+cell は wall-time median、profile が対応する Python 列に対する speedup、wall-time reduction
+の順です。別 batch、format、fixture を使った過去の matrix とは直接比較できません。
 
 <!-- LATEST_PERFORMANCE_BEGIN -->
 | CLI mode（workers） | Python v0.4.0 | Python PR341 | Exact + v0.4.0 | Exact + current | IPP-fast + v0.4.0 | IPP-fast + current |
@@ -421,9 +422,9 @@ wall-time median、profile が対応する Python 列に対する speedup、wall
 | `--threads 1` | 57.067 s | 56.762 s | 31.701 s / 1.800x / 44.45% | 36.035 s / 1.575x / 36.52% | 22.907 s / 2.491x / 59.86% | 25.402 s / 2.235x / 55.25% |
 | `--threads 5` | 52.920 s | 55.722 s | 13.009 s / 4.068x / 75.42% | 11.803 s / 4.721x / 78.82% | 11.489 s / 4.606x / 78.29% | 9.433 s / 5.907x / 83.07% |
 | `--threads 10` | 52.965 s | 54.949 s | 10.266 s / 5.159x / 80.62% | 9.335 s / 5.886x / 83.01% | 9.766 s / 5.424x / 81.56% | 7.727 s / 7.111x / 85.94% |
-| `--threads 20` | 53.555 s | 54.842 s | 8.578 s / 6.244x / 83.98% | 7.468 s / 7.343x / 86.38% | 8.127 s / 6.590x / 84.83% | 5.911 s / 9.279x / 89.22% |
+| `--threads 20` | 53.555 s | 54.842 s | 8.578 s / 6.244x / 83.98% | 7.325 s / 7.487x / 86.64% | 8.127 s / 6.590x / 84.83% | 5.863 s / 9.355x / 89.31% |
 <!-- LATEST_PERFORMANCE_END -->
-<!-- LATEST_PERFORMANCE_RUNS: performance-snapshot-runs=90 dotnet-matrix-runs=60 python-reference-runs=30 dotnet-repeats=3 python-reference-date=2026-08-12 dotnet-v040-date=2026-08-12 dotnet-current-date=2026-08-12 sinc-unroll-matrix-runs=90 sinc-unroll-exact-1000-ab-pairs=3 sinc-unroll-kernel-pairs=8 sinc-unroll-thread-profile-runs=24 sinc-unroll-memory-frames=2000 sinc-unroll-tests=34 sinc-unroll-intrinsic-modes=4 python-v040-runs=15 python-v040-hashes=15 python-pr341-runs=15 python-pr341-hashes=1 -->
+<!-- LATEST_PERFORMANCE_RUNS: performance-snapshot-runs=90 dotnet-matrix-runs=60 python-reference-runs=30 dotnet-repeats=3 python-reference-date=2026-08-12 dotnet-v040-date=2026-08-12 dotnet-current-date=2026-08-12 dotnet-current-t20-date=2026-08-13 phase18-table-runs=6 phase18-exact-200-ab-pairs=3 phase18-exact-1000-ab-pairs=1 phase18-ipp-200-ab-pairs=1 phase18-thread-gate-modes=2 phase18-tests=1433 sinc-unroll-matrix-runs=90 sinc-unroll-exact-1000-ab-pairs=3 sinc-unroll-kernel-pairs=8 sinc-unroll-thread-profile-runs=24 sinc-unroll-memory-frames=2000 sinc-unroll-tests=34 sinc-unroll-intrinsic-modes=4 python-v040-runs=15 python-v040-hashes=15 python-pr341-runs=15 python-pr341-hashes=1 -->
 
 3-run wall-time range は次のとおりです。
 
@@ -434,19 +435,21 @@ wall-time median、profile が対応する Python 列に対する speedup、wall
 | `--threads 1` | 56.709-60.521 s | 56.335-58.991 s | 31.472-32.001 s | 35.830-36.567 s | 22.846-22.995 s | 25.313-25.736 s |
 | `--threads 5` | 52.845-53.977 s | 53.696-58.437 s | 12.827-13.605 s | 11.635-11.924 s | 11.398-11.609 s | 9.344-9.596 s |
 | `--threads 10` | 51.797-53.088 s | 52.649-56.775 s | 10.244-10.380 s | 8.774-9.874 s | 9.698-9.918 s | 7.669-8.132 s |
-| `--threads 20` | 52.967-55.987 s | 53.005-55.618 s | 8.445-8.686 s | 6.826-7.725 s | 8.084-8.282 s | 5.869-6.076 s |
+| `--threads 20` | 52.967-55.987 s | 53.005-55.618 s | 8.445-8.686 s | 6.839-7.564 s | 8.084-8.282 s | 5.815-5.863 s |
 <!-- LATEST_PERFORMANCE_RANGES_END -->
 
-6 path は 2026-08-12 の 2 phase で同じ固定条件を使い、5 worker setting と forward、reverse、mixed の 3 pass
-を網羅しました。各 cell は完全な 3 run を持ちます。60 .NET run と 15 Python PR341 run は
-profile/mode ごとに luma、chroma、JSON、stdout、normalized stderr/log、ordered `fileLoc` の
-hash set が 1 つでした。Python v0.4.0 は 15 run で 15 種類の luma、chroma、JSON、
-normalized-log hash set を生成したため、strict oracle は `g4315520 --threads 0` のままです。
+active な 84 measurement は 2026-08-12 の固定条件 campaign から保持し、6 つの
+`current --threads 20` .NET run は 2026-08-13 に更新しました。各 active cell は完全な
+3 run を維持します。60 active .NET run と 15 Python PR341 run は profile/mode ごとに
+luma、chroma、JSON、stdout、normalized stderr/log、ordered `fileLoc` の hash set が
+1 つでした。Python v0.4.0 は 15 run で 15 種類の luma、chroma、JSON、normalized-log
+hash set を生成したため、strict oracle は `g4315520 --threads 0` のままです。
 
-.NET candidate は merged main `2d6d5ce` を基にした commit `8a37251` で、後述する
-ordered AVX TBC sinc accumulation change を含みます。matrix candidate の
-`VHSDecode.Core.dll` SHA-256 は
-`9427725DC8162D9082ACBE5DDD17D2CC9B78513D2FA7028C45670B96BCD5315C` です。
+更新した `current --threads 20` cell は merged main `4416aaa` を基にした commit
+`e89df85` を使い、`VHSDecode.Core.dll` SHA-256 は
+`D972E049351F687F8B265C58239E23ED035AC7A6950EE45E0C7CE74CEAFFFE94` です。
+影響を受けない .NET cell は main `2d6d5ce` を基にした commit `8a37251` と core hash
+`9427725DC8162D9082ACBE5DDD17D2CC9B78513D2FA7028C45670B96BCD5315C` を保持します。
 host は Intel Core Ultra 7 265K（20 logical processor）、Windows 11 build 26220、.NET
 SDK/runtime `11.0.100-preview.6.26359.118` です。raw directory は private fixture path を
 含むため local にのみ保持し、public に独立再現可能な benchmark corpus とは主張しません。
@@ -454,6 +457,30 @@ SDK/runtime `11.0.100-preview.6.26359.118` です。raw directory は private fi
 3-run range は通常の startup、thermal、scheduler、system variation を示します。ratio cell は
 Python numerator と .NET denominator の両方で動きます。revision の因果的な regression/speedup
 判断には使わず、以下の同時刻 interleaved revision A/B を gate とします。
+
+### bounded current VHS companion inverse scheduling
+
+high-worker VHS `current` は以前、各 RF block worker から `Task.Run` で analytic
+companion inverse を起動し、その後同期的に待機していました。sampling では nested
+ThreadPool scheduling と block された outer worker が確認されました。この isolated
+change は decoder-owned bounded queue と固定 background worker を使い、2 つの inverse
+FFT implementation、expression、buffer、exception precedence、ordered commit は変更しません。
+input processor がなく、既存の 12-block prefetch cap を超える場合だけ有効になるため、
+`--threads 20` は 8 companion worker を使います。queue/worker creation が失敗した場合は、
+元の serial real-then-companion order を維持します。
+
+interleaved 200-frame Exact `current --threads 20` 3 A/B pair は exit status、luma、chroma、
+raw JSON、stdout、normalized stderr/log、すべての ordered `fileLoc` で一致しました。paired
+wall-time change の median は 1.61% 減少しました。別の 1,000-frame pair も同じ surface
+で一致し、34.732 から 34.000 秒へ 2.11% 高速化しました（1.022x）。CPU time は
+284.766 から 279.500 秒、effective core は 8.199 から 8.221 へ移りました。candidate の
+first/second-half working-set maximum は 352.2/351.4 MiB で、progressive growth や OOM
+はありませんでした。
+
+default-five と `--threads 0` の Exact run も全 surface で一致しました。200-frame
+IPP-fast pair は全 surface で一致し、7.137 から 7.102 秒へ移りました。この 0.49% の
+screening delta は noise とみなし、IPP speedup には帰属しません。native IPP runtime を
+利用した状態で xUnit v3 1,433 test がすべて成功しました。
 
 ### ordered AVX TBC sinc accumulation
 

@@ -9,7 +9,11 @@ public sealed partial class ReadmeLocalizationTests
         "<!-- LATEST_PERFORMANCE_RUNS: performance-snapshot-runs=90 " +
         "dotnet-matrix-runs=60 python-reference-runs=30 dotnet-repeats=3 " +
         "python-reference-date=2026-08-12 dotnet-v040-date=2026-08-12 " +
-        "dotnet-current-date=2026-08-12 sinc-unroll-matrix-runs=90 " +
+        "dotnet-current-date=2026-08-12 dotnet-current-t20-date=2026-08-13 " +
+        "phase18-table-runs=6 phase18-exact-200-ab-pairs=3 " +
+        "phase18-exact-1000-ab-pairs=1 phase18-ipp-200-ab-pairs=1 " +
+        "phase18-thread-gate-modes=2 phase18-tests=1433 " +
+        "sinc-unroll-matrix-runs=90 " +
         "sinc-unroll-exact-1000-ab-pairs=3 sinc-unroll-kernel-pairs=8 " +
         "sinc-unroll-thread-profile-runs=24 sinc-unroll-memory-frames=2000 " +
         "sinc-unroll-tests=34 sinc-unroll-intrinsic-modes=4 " +
@@ -179,7 +183,7 @@ public sealed partial class ReadmeLocalizationTests
             "57.067 s | 56.762 s | 31.701 s | 1.800x | 36.035 s | 1.575x | 22.907 s | 2.491x | 25.402 s | 2.235x",
             "52.920 s | 55.722 s | 13.009 s | 4.068x | 11.803 s | 4.721x | 11.489 s | 4.606x | 9.433 s | 5.907x",
             "52.965 s | 54.949 s | 10.266 s | 5.159x | 9.335 s | 5.886x | 9.766 s | 5.424x | 7.727 s | 7.111x",
-            "53.555 s | 54.842 s | 8.578 s | 6.244x | 7.468 s | 7.343x | 8.127 s | 6.590x | 5.911 s | 9.279x"
+            "53.555 s | 54.842 s | 8.578 s | 6.244x | 7.325 s | 7.487x | 8.127 s | 6.590x | 5.863 s | 9.355x"
         ];
         string[] expectedDetailedPerformanceRows =
         [
@@ -187,7 +191,7 @@ public sealed partial class ReadmeLocalizationTests
             "57.067 s | 56.762 s | 31.701 s | 1.800x | 44.45% | 36.035 s | 1.575x | 36.52% | 22.907 s | 2.491x | 59.86% | 25.402 s | 2.235x | 55.25%",
             "52.920 s | 55.722 s | 13.009 s | 4.068x | 75.42% | 11.803 s | 4.721x | 78.82% | 11.489 s | 4.606x | 78.29% | 9.433 s | 5.907x | 83.07%",
             "52.965 s | 54.949 s | 10.266 s | 5.159x | 80.62% | 9.335 s | 5.886x | 83.01% | 9.766 s | 5.424x | 81.56% | 7.727 s | 7.111x | 85.94%",
-            "53.555 s | 54.842 s | 8.578 s | 6.244x | 83.98% | 7.468 s | 7.343x | 86.38% | 8.127 s | 6.590x | 84.83% | 5.911 s | 9.279x | 89.22%"
+            "53.555 s | 54.842 s | 8.578 s | 6.244x | 83.98% | 7.325 s | 7.487x | 86.64% | 8.127 s | 6.590x | 84.83% | 5.863 s | 9.355x | 89.31%"
         ];
         string[] expectedDetailedPerformanceRangeRows =
         [
@@ -195,7 +199,7 @@ public sealed partial class ReadmeLocalizationTests
             "threads 1 | 56.709-60.521 s | 56.335-58.991 s | 31.472-32.001 s | 35.830-36.567 s | 22.846-22.995 s | 25.313-25.736 s",
             "threads 5 | 52.845-53.977 s | 53.696-58.437 s | 12.827-13.605 s | 11.635-11.924 s | 11.398-11.609 s | 9.344-9.596 s",
             "threads 10 | 51.797-53.088 s | 52.649-56.775 s | 10.244-10.380 s | 8.774-9.874 s | 9.698-9.918 s | 7.669-8.132 s",
-            "threads 20 | 52.967-55.987 s | 53.005-55.618 s | 8.445-8.686 s | 6.826-7.725 s | 8.084-8.282 s | 5.869-6.076 s"
+            "threads 20 | 52.967-55.987 s | 53.005-55.618 s | 8.445-8.686 s | 6.839-7.564 s | 8.084-8.282 s | 5.815-5.863 s"
         ];
 
         string[] overviewFacts =
@@ -212,18 +216,20 @@ public sealed partial class ReadmeLocalizationTests
             "IPP-fast + v0.4.0",
             "IPP-fast + current",
             "--start 100",
-            "8a37251",
-            "2d6d5ce",
+            "e89df85",
+            "4416aaa",
             "52.811 s",
             "54.243 s",
             "12.930 s",
             "12.477 s",
             "5.607x",
-            "9.279x",
-            "0.18%",
-            "0.37%",
-            "353.1 MiB",
-            "359.6 MiB",
+            "9.355x",
+            "1.61%",
+            "34.732",
+            "34.000",
+            "2.11%",
+            "352.2 MiB",
+            "351.4 MiB",
             "g4315520",
             "--threads 0"
         ];
@@ -234,6 +240,27 @@ public sealed partial class ReadmeLocalizationTests
             "2f21e8ed6018b14561396cc95f1f6828054470b8",
             "v0.4.0-40-g2f21e8ed",
             "11.0.100-preview.6.26359.118",
+            "e89df85",
+            "4416aaa",
+            "D972E049351F687F8B265C58239E23ED035AC7A6950EE45E0C7CE74CEAFFFE94",
+            "7.325 s",
+            "7.487x",
+            "5.863 s",
+            "9.355x",
+            "6.839-7.564 s",
+            "5.815-5.863 s",
+            "34.732",
+            "34.000",
+            "2.11%",
+            "1.022x",
+            "284.766",
+            "279.500",
+            "8.199",
+            "8.221",
+            "352.2/351.4 MiB",
+            "7.137",
+            "7.102",
+            "0.49%",
             "8a37251",
             "2d6d5ce",
             "9427725DC8162D9082ACBE5DDD17D2CC9B78513D2FA7028C45670B96BCD5315C",
@@ -242,10 +269,6 @@ public sealed partial class ReadmeLocalizationTests
             "4.348x",
             "9.673 s",
             "5.607x",
-            "7.468 s",
-            "7.343x",
-            "5.911 s",
-            "9.279x",
             "35.242",
             "35.179",
             "0.18%",

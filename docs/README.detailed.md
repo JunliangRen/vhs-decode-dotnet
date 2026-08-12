@@ -4,7 +4,7 @@
 
 **[English](README.detailed.md)** | [简体中文](README.detailed.zh-CN.md) | [日本語](README.detailed.ja.md)
 
-<!-- README_SYNC: 2026-08-12.03 -->
+<!-- README_SYNC: 2026-08-13.01 -->
 
 .NET 11 rewrite of the decode-facing parts of
 [`oyvindln/vhs-decode`](https://github.com/oyvindln/vhs-decode), focused on
@@ -434,10 +434,11 @@ The latest public summary is a startup-inclusive `--start 100 --length 160`
 snapshot comparing Python v0.4.0, merged Python PR341, Exact v0.4.0, Exact
 `current`, IPP-fast v0.4.0, and IPP-fast `current` on the same private local
 40 MHz PAL VHS `.ldf` fixture. The source filename is intentionally not
-published. All 90 measurements were completed in one 2026-08-12 batch. Each
-.NET cell gives the median wall time, speedup, and wall-time reduction against
-its profile-matched Python column. Historical matrices that used another batch,
-format, or fixture are not directly comparable:
+published. The active table retains 84 fixed-condition measurements from
+2026-08-12 and refreshes the two affected `current --threads 20` cells with six
+runs from 2026-08-13. Each .NET cell gives the median wall time, speedup, and
+wall-time reduction against its profile-matched Python column. Historical
+matrices that used another batch, format, or fixture are not directly comparable:
 
 <!-- LATEST_PERFORMANCE_BEGIN -->
 | CLI mode (workers) | Python v0.4.0 | Python PR341 | Exact + v0.4.0 | Exact + current | IPP-fast + v0.4.0 | IPP-fast + current |
@@ -446,9 +447,9 @@ format, or fixture are not directly comparable:
 | `--threads 1` | 57.067 s | 56.762 s | 31.701 s / 1.800x / 44.45% | 36.035 s / 1.575x / 36.52% | 22.907 s / 2.491x / 59.86% | 25.402 s / 2.235x / 55.25% |
 | `--threads 5` | 52.920 s | 55.722 s | 13.009 s / 4.068x / 75.42% | 11.803 s / 4.721x / 78.82% | 11.489 s / 4.606x / 78.29% | 9.433 s / 5.907x / 83.07% |
 | `--threads 10` | 52.965 s | 54.949 s | 10.266 s / 5.159x / 80.62% | 9.335 s / 5.886x / 83.01% | 9.766 s / 5.424x / 81.56% | 7.727 s / 7.111x / 85.94% |
-| `--threads 20` | 53.555 s | 54.842 s | 8.578 s / 6.244x / 83.98% | 7.468 s / 7.343x / 86.38% | 8.127 s / 6.590x / 84.83% | 5.911 s / 9.279x / 89.22% |
+| `--threads 20` | 53.555 s | 54.842 s | 8.578 s / 6.244x / 83.98% | 7.325 s / 7.487x / 86.64% | 8.127 s / 6.590x / 84.83% | 5.863 s / 9.355x / 89.31% |
 <!-- LATEST_PERFORMANCE_END -->
-<!-- LATEST_PERFORMANCE_RUNS: performance-snapshot-runs=90 dotnet-matrix-runs=60 python-reference-runs=30 dotnet-repeats=3 python-reference-date=2026-08-12 dotnet-v040-date=2026-08-12 dotnet-current-date=2026-08-12 sinc-unroll-matrix-runs=90 sinc-unroll-exact-1000-ab-pairs=3 sinc-unroll-kernel-pairs=8 sinc-unroll-thread-profile-runs=24 sinc-unroll-memory-frames=2000 sinc-unroll-tests=34 sinc-unroll-intrinsic-modes=4 python-v040-runs=15 python-v040-hashes=15 python-pr341-runs=15 python-pr341-hashes=1 -->
+<!-- LATEST_PERFORMANCE_RUNS: performance-snapshot-runs=90 dotnet-matrix-runs=60 python-reference-runs=30 dotnet-repeats=3 python-reference-date=2026-08-12 dotnet-v040-date=2026-08-12 dotnet-current-date=2026-08-12 dotnet-current-t20-date=2026-08-13 phase18-table-runs=6 phase18-exact-200-ab-pairs=3 phase18-exact-1000-ab-pairs=1 phase18-ipp-200-ab-pairs=1 phase18-thread-gate-modes=2 phase18-tests=1433 sinc-unroll-matrix-runs=90 sinc-unroll-exact-1000-ab-pairs=3 sinc-unroll-kernel-pairs=8 sinc-unroll-thread-profile-runs=24 sinc-unroll-memory-frames=2000 sinc-unroll-tests=34 sinc-unroll-intrinsic-modes=4 python-v040-runs=15 python-v040-hashes=15 python-pr341-runs=15 python-pr341-hashes=1 -->
 
 The three-run wall-time ranges were:
 
@@ -459,21 +460,22 @@ The three-run wall-time ranges were:
 | `--threads 1` | 56.709-60.521 s | 56.335-58.991 s | 31.472-32.001 s | 35.830-36.567 s | 22.846-22.995 s | 25.313-25.736 s |
 | `--threads 5` | 52.845-53.977 s | 53.696-58.437 s | 12.827-13.605 s | 11.635-11.924 s | 11.398-11.609 s | 9.344-9.596 s |
 | `--threads 10` | 51.797-53.088 s | 52.649-56.775 s | 10.244-10.380 s | 8.774-9.874 s | 9.698-9.918 s | 7.669-8.132 s |
-| `--threads 20` | 52.967-55.987 s | 53.005-55.618 s | 8.445-8.686 s | 6.826-7.725 s | 8.084-8.282 s | 5.869-6.076 s |
+| `--threads 20` | 52.967-55.987 s | 53.005-55.618 s | 8.445-8.686 s | 6.839-7.564 s | 8.084-8.282 s | 5.815-5.863 s |
 <!-- LATEST_PERFORMANCE_RANGES_END -->
 
-All six paths were measured under the same fixed conditions in a two-phase
-2026-08-12 campaign at all five worker settings. Every cell contains forward,
-reverse, and mixed complete runs. All 60 .NET runs and all 15 Python PR341 runs produced one hash
-set per profile/mode across luma, chroma, JSON, stdout, normalized stderr/logs,
-and ordered `fileLoc`. Python v0.4.0 produced 15 distinct luma, chroma, JSON,
-and normalized-log hash sets in 15 runs; its strict oracle therefore remains
-`g4315520 --threads 0`.
+The 84 retained active measurements came from the fixed-condition 2026-08-12
+campaign; six `current --threads 20` .NET runs were refreshed on 2026-08-13.
+Every active cell still contains three complete runs. All 60 active .NET runs
+and all 15 Python PR341 runs produced one hash set per profile/mode across luma,
+chroma, JSON, stdout, normalized stderr/logs, and ordered `fileLoc`. Python
+v0.4.0 produced 15 distinct luma, chroma, JSON, and normalized-log hash sets in
+15 runs; its strict oracle therefore remains `g4315520 --threads 0`.
 
-The .NET candidate was commit `8a37251`, based on merged main `2d6d5ce`, with
-the isolated ordered AVX TBC sinc accumulation change described below. The
-matrix candidate `VHSDecode.Core.dll` had SHA-256
-`9427725DC8162D9082ACBE5DDD17D2CC9B78513D2FA7028C45670B96BCD5315C`.
+The refreshed `current --threads 20` cells use commit `e89df85`, based on merged
+main `4416aaa`; its `VHSDecode.Core.dll` SHA-256 is
+`D972E049351F687F8B265C58239E23ED035AC7A6950EE45E0C7CE74CEAFFFE94`.
+The unaffected .NET cells retain commit `8a37251`, based on main `2d6d5ce`, and
+core hash `9427725DC8162D9082ACBE5DDD17D2CC9B78513D2FA7028C45670B96BCD5315C`.
 The host was an Intel Core Ultra 7 265K with 20 logical processors, Windows 11
 build 26220, and .NET SDK/runtime `11.0.100-preview.6.26359.118`. Raw directories
 stay local because they contain the private fixture path; these are reported
@@ -483,6 +485,32 @@ The three-run ranges expose ordinary startup, thermal, scheduler, and system
 variation. Ratio cells move when either the Python numerator or .NET denominator
 moves. They are not used to attribute a revision regression or speedup; the
 same-moment interleaved revision A/B evidence below is the causal gate.
+
+### Bounded current VHS inverse companion scheduling
+
+High-worker VHS `current` previously launched each analytic companion inverse
+with `Task.Run` from an RF block worker and then synchronously waited. Sampling
+showed nested ThreadPool scheduling and blocked outer workers. The isolated
+change uses a decoder-owned bounded queue with fixed background workers while
+keeping both inverse FFT implementations, expressions, buffers, exception
+precedence, and ordered commits unchanged. It activates only without an input
+processor and above the existing 12-block prefetch cap; `--threads 20` therefore
+uses eight companion workers. Queue or worker creation failure preserves the
+original serial real-then-companion order.
+
+Three interleaved 200-frame Exact `current --threads 20` A/B pairs matched exit
+status, luma, chroma, raw JSON, stdout, normalized stderr/logs, and every ordered
+`fileLoc`. The paired wall-time-change median was 1.61% lower. A separate
+1,000-frame pair matched the same surfaces and moved from 34.732 to 34.000
+seconds (2.11%, 1.022x); CPU time moved from 284.766 to 279.500 seconds and
+effective cores from 8.199 to 8.221. Candidate working-set maxima were
+352.2/351.4 MiB in the first/second half, so the bounded scheduler showed no
+progressive growth or OOM.
+
+Default-five and `--threads 0` Exact runs also matched every surface. A
+200-frame IPP-fast pair matched every surface and moved from 7.137 to 7.102
+seconds; that 0.49% screening delta is treated as noise, not an attributed IPP
+speedup. All 1,433 xUnit v3 tests passed with the native IPP runtime available.
 
 ### Ordered AVX TBC sinc accumulation
 

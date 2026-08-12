@@ -2,7 +2,7 @@
 
 [English](README.md) | [简体中文](README.zh-CN.md) | **[日本語](README.ja.md)**
 
-<!-- README_SYNC: 2026-08-12.03 -->
+<!-- README_SYNC: 2026-08-13.01 -->
 
 [`oyvindln/vhs-decode`](https://github.com/oyvindln/vhs-decode) の
 デコード関連部分を .NET 11 で再実装するプロジェクトです。互換性の対象は
@@ -94,11 +94,11 @@ CVBS と HiFi は引き続き `ipp-fast` を拒否します。release-compatible
 ## 最新の性能
 
 これは同じ private local 40 MHz PAL VHS `.ldf` fixture を使う、startup cost を含む
-`--start 100 --length 160` snapshot です。source filename は公開しません。30 Python
-reference run と 60 final-candidate .NET Release run は、同じ固定条件の 2026-08-12
-measurement campaign で完了しました。candidate commit `8a37251` は main `2d6d5ce`
-を基にし、各 cell は forward、reverse、mixed pass を持ちます。以前の snapshot は
-本表で置き換え、互換性と速度は別々に評価します。
+`--start 100 --length 160` snapshot です。source filename は公開しません。
+2026-08-12 の固定条件測定を 84 run 保持し、影響を受ける 2 つの
+`current --threads 20` cell を 2026-08-13 の 6 run で更新しました。これらの cell は
+main `4416aaa` を基にした commit `e89df85` を使い、各 cell は 3 complete run を
+持ちます。互換性と速度は別々に評価します。
 
 <!-- LATEST_PERFORMANCE_BEGIN -->
 | CLI mode（workers） | Python v0.4.0 | Python PR341 | Exact + v0.4.0 | Exact + current | IPP-fast + v0.4.0 | IPP-fast + current |
@@ -107,9 +107,9 @@ measurement campaign で完了しました。candidate commit `8a37251` は main
 | `--threads 1` | 57.067 s | 56.762 s | 31.701 s / 1.800x | 36.035 s / 1.575x | 22.907 s / 2.491x | 25.402 s / 2.235x |
 | `--threads 5` | 52.920 s | 55.722 s | 13.009 s / 4.068x | 11.803 s / 4.721x | 11.489 s / 4.606x | 9.433 s / 5.907x |
 | `--threads 10` | 52.965 s | 54.949 s | 10.266 s / 5.159x | 9.335 s / 5.886x | 9.766 s / 5.424x | 7.727 s / 7.111x |
-| `--threads 20` | 53.555 s | 54.842 s | 8.578 s / 6.244x | 7.468 s / 7.343x | 8.127 s / 6.590x | 5.911 s / 9.279x |
+| `--threads 20` | 53.555 s | 54.842 s | 8.578 s / 6.244x | 7.325 s / 7.487x | 8.127 s / 6.590x | 5.863 s / 9.355x |
 <!-- LATEST_PERFORMANCE_END -->
-<!-- LATEST_PERFORMANCE_RUNS: performance-snapshot-runs=90 dotnet-matrix-runs=60 python-reference-runs=30 dotnet-repeats=3 python-reference-date=2026-08-12 dotnet-v040-date=2026-08-12 dotnet-current-date=2026-08-12 sinc-unroll-matrix-runs=90 sinc-unroll-exact-1000-ab-pairs=3 sinc-unroll-kernel-pairs=8 sinc-unroll-thread-profile-runs=24 sinc-unroll-memory-frames=2000 sinc-unroll-tests=34 sinc-unroll-intrinsic-modes=4 python-v040-runs=15 python-v040-hashes=15 python-pr341-runs=15 python-pr341-hashes=1 -->
+<!-- LATEST_PERFORMANCE_RUNS: performance-snapshot-runs=90 dotnet-matrix-runs=60 python-reference-runs=30 dotnet-repeats=3 python-reference-date=2026-08-12 dotnet-v040-date=2026-08-12 dotnet-current-date=2026-08-12 dotnet-current-t20-date=2026-08-13 phase18-table-runs=6 phase18-exact-200-ab-pairs=3 phase18-exact-1000-ab-pairs=1 phase18-ipp-200-ab-pairs=1 phase18-thread-gate-modes=2 phase18-tests=1433 sinc-unroll-matrix-runs=90 sinc-unroll-exact-1000-ab-pairs=3 sinc-unroll-kernel-pairs=8 sinc-unroll-thread-profile-runs=24 sinc-unroll-memory-frames=2000 sinc-unroll-tests=34 sinc-unroll-intrinsic-modes=4 python-v040-runs=15 python-v040-hashes=15 python-pr341-runs=15 python-pr341-hashes=1 -->
 
 各 .NET cell は wall-time median と profile が対応する Python 列に対する speedup の順で、
 default は **5 workers** です。3-run range は
@@ -118,13 +118,13 @@ default は **5 workers** です。3-run range は
 直接比較できません。causal regression は、過去の ratio cell ではなく同時刻の .NET
 revision A/B で判断します。
 
-最新の isolated change は固定 16-step AVX/FMA TBC sinc accumulation を直接展開し、
-baseline と同じ operand と NaN payload order を固定します。interleaved 1,000-frame
-Exact `current --threads 20` 3 pair は 9 compatibility surface ですべて一致し、mean wall
-time は 35.242 から 35.179 秒へ 0.18% 減少しました。別の 2,000-frame gate は全
-4,000 field を完全一致で完了し、68.724 から 68.473 秒へ 0.37% 高速化しました。
-working set は median 353.1 MiB、maximum 359.6 MiB で、progressive slowdown や
-OOM はありませんでした。
+最新の isolated change は、nested ThreadPool companion inverse を decoder-owned の
+bounded queue に置き換えます。`--threads 20` では、8 fixed companion worker が既存の
+12-block prefetch cap を超える worker budget だけを使用します。interleaved 200-frame
+Exact `current` 3 A/B pair は全 compatibility surface で一致し、paired wall-time change
+の median は 1.61% 減少しました。1,000-frame pair は 34.732 から 34.000 秒へ
+2.11% 高速化し、candidate working-set maximum は前半 352.2 MiB から後半
+351.4 MiB へ微減しました。growth や OOM はありません。
 
 更新した各 .NET profile/thread cell は 3 run 内で deterministic でした。固定 reference の
 merged Python PR341 も deterministic でした。Python v0.4.0 は 15 run で 15 種類の luma、
