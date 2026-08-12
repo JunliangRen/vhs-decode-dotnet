@@ -182,10 +182,9 @@ public static class ChromaTransientImprovement
         int lineOffset = checked(lineStart + (line * lineLength));
         for (int pass = 0; pass < PassCount; pass++)
         {
-            for (int copyIndex = 0; copyIndex < lineLength; copyIndex++)
-            {
-                lineBuffer[copyIndex] = (float)chromaData[lineOffset + copyIndex];
-            }
+            ChromaSuperGaussianFinalFilter.CopyFloat64ToFloat32(
+                chromaData.Slice(lineOffset, lineLength),
+                lineBuffer);
 
             float currentMix = parameters.MixForPass(pass);
             int sample = parameters.First;
