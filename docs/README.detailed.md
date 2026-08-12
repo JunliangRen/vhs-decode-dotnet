@@ -404,6 +404,42 @@ and `--threads 20`. A matched 200-frame default-worker check completed in
 per frame, and peaked at 0.993 GiB; retained median storage remains bounded to
 two 60-line buffers per detector.
 
+### VHS sync-analysis workspace reuse
+
+Each exclusive VHS sync-detector workspace now retains five non-escaping
+scratch arrays: sync and porch candidates, one shared statistics buffer used
+sequentially for sorting, MAD, and slopes, grid-support counts, and the final
+mask. Every sort is limited to the current logical length, grid counts are
+fully initialized, and the mask is cleared before reuse. Arithmetic order,
+thresholds, pulse ownership, and the independently owned result array are
+unchanged.
+
+A valid-pulse allocation benchmark moved from 46,362.2 to 28,642.2 bytes per
+call, a 38.2% reduction. In matched 200-frame `gc-verbose` traces, main sampled
+7.71 MiB over 76 recurring `double[]` ticks and 0.20 MiB over two `bool[]` ticks
+directly in `DetectFiltered`; the candidate removed both recurring call sites.
+The retained workspace arrays appeared only as initial capacity growth at
+second zero. Escaping edge and pulse result arrays remain independently owned.
+
+Three interleaved 200-frame Exact `current --threads 20` pairs and two
+opposite-order 1,000-frame pairs matched luma, chroma, raw JSON, stdout,
+normalized stderr/logs, field count, and every ordered `fileLoc`. Across the
+two long pairs, main/candidate wall time was 67.258/67.004 seconds, a neutral
+0.38% reduction; CPU time was 569.563/578.985 seconds, so no CPU or fixed
+throughput improvement is claimed. Candidate peak working set stayed between
+355.1 and 357.0 MiB in both long runs.
+
+An additional 24-run screen covered Exact and IPP-fast, both v0.4.0 and
+`current`, and `--threads 0`, default-five, and `--threads 20`. Every candidate
+matched main in the same configuration for luma, chroma, raw JSON, stdout,
+normalized stderr/logs, and ordered `fileLoc`; Exact also remained identical
+to its profile's main `--threads 0` oracle across all three thread modes. The
+full xUnit v3 suite exposes 1,437 tests, including dirty large-small-large
+workspace reuse, shared-detector concurrency, and valid-pulse warm-allocation
+coverage. The public six-path table is not refreshed by this pass because an
+unrelated foreground CPU load was active during the gate and the matched long
+result was throughput-neutral.
+
 ### Pooled IPP VHS envelope SOS
 
 IPP-fast now routes the full-length, one-section VHS RF envelope SOS through a
@@ -3727,7 +3763,7 @@ Requirements:
 .\tools\build-ipp-native.ps1
 dotnet restore VHSDecodeDotNet.slnx
 dotnet build VHSDecodeDotNet.slnx -c Release --no-restore
-dotnet test --solution VHSDecodeDotNet.slnx -c Release --no-build --no-restore --minimum-expected-tests 1435
+dotnet test --solution VHSDecodeDotNet.slnx -c Release --no-build --no-restore --minimum-expected-tests 1437
 dotnet test --project tests\VHSDecode.Tests\VHSDecode.Tests.csproj -c Release --no-build --no-restore --coverage --coverage-output coverage.cobertura.xml --coverage-output-format cobertura
 ```
 
@@ -3741,7 +3777,7 @@ deployment computer. Binary-only single-file releases embed
 sidecar license files. An Exact-only build may omit the native build step.
 
 The current formal Release build has zero warnings and errors. The xUnit v3
-project exposes **1,435** independently discoverable tests to both
+project exposes **1,437** independently discoverable tests to both
 `dotnet test` and Visual Studio Test Explorer.
 
 <!-- SECTION: usage -->

@@ -145,9 +145,9 @@ public sealed class VhsSyncDetector
                 filtered.AsSpan(0, filteredLength),
                 syncTipEstimate,
                 blankingEstimate,
+                workspace,
                 filtered,
-                _workerThreads,
-                workspace);
+                _workerThreads);
         }
         finally
         {
@@ -194,7 +194,8 @@ public sealed class VhsSyncDetector
             return DetectFiltered(
                 filtered.AsSpan(0, filteredLength),
                 syncTipEstimate,
-                blankingEstimate);
+                blankingEstimate,
+                workspace);
         }
         finally
         {
@@ -410,9 +411,9 @@ public sealed class VhsSyncDetector
         ReadOnlySpan<double> filtered,
         double syncTipEstimate,
         double blankingEstimate,
+        VhsSyncWorkspace workspace,
         double[]? parallelFiltered = null,
-        int parallelWorkerThreads = 1,
-        VhsSyncWorkspace? parallelWorkspace = null)
+        int parallelWorkerThreads = 1)
     {
         int sampleCount = filtered.Length;
         double slicerLevelEstimate = (syncTipEstimate + blankingEstimate) / 2.0;
@@ -472,8 +473,8 @@ public sealed class VhsSyncDetector
         }
 
         int candidateCount = falls.Length;
-        var candidateSyncLevels = new double[candidateCount];
-        var candidatePorchLevels = new double[candidateCount];
+        double[] candidateSyncLevels = workspace.EnsureCandidateSyncLevels(candidateCount);
+        double[] candidatePorchLevels = workspace.EnsureCandidatePorchLevels(candidateCount);
         for (int candidate = 0; candidate < candidateCount; candidate++)
         {
             int middle = (falls[candidate] + rises[candidate]) / 2;
@@ -491,17 +492,25 @@ public sealed class VhsSyncDetector
                 blankingEstimate);
         }
 
-        double[] sortedSync = candidateSyncLevels.ToArray();
-        Array.Sort(sortedSync, NumpyDoubleComparer.Instance);
-        double medianSync = sortedSync[candidateCount / 2];
-        var absoluteDeviations = new double[candidateCount];
-        for (int index = 0; index < absoluteDeviations.Length; index++)
+        double[] statisticsScratch = workspace.EnsureStatisticsScratch(candidateCount);
+        candidateSyncLevels.AsSpan(0, candidateCount).CopyTo(statisticsScratch);
+        Array.Sort(
+            statisticsScratch,
+            0,
+            candidateCount,
+            NumpyDoubleComparer.Instance);
+        double medianSync = statisticsScratch[candidateCount / 2];
+        for (int index = 0; index < candidateCount; index++)
         {
-            absoluteDeviations[index] = Math.Abs(candidateSyncLevels[index] - medianSync);
+            statisticsScratch[index] = Math.Abs(candidateSyncLevels[index] - medianSync);
         }
 
-        Array.Sort(absoluteDeviations, NumpyDoubleComparer.Instance);
-        double medianAbsoluteDeviation = absoluteDeviations[candidateCount / 2];
+        Array.Sort(
+            statisticsScratch,
+            0,
+            candidateCount,
+            NumpyDoubleComparer.Instance);
+        double medianAbsoluteDeviation = statisticsScratch[candidateCount / 2];
         if (!(medianAbsoluteDeviation > 0.0))
         {
             medianAbsoluteDeviation = 1.0;
@@ -528,7 +537,7 @@ public sealed class VhsSyncDetector
 
         double effectiveLineLength = _lineLength * (1.0 + SyncSpacingTolerance);
         double jitterTolerance = _lineLength * 0.1;
-        var gridSupportCount = new int[amplitudeCount];
+        int[] gridSupportCount = workspace.EnsureGridSupportCounts(amplitudeCount);
         FillOrderedGridSupportCounts(
             falls,
             amplitudeCount,
@@ -536,7 +545,7 @@ public sealed class VhsSyncDetector
             jitterTolerance,
             gridSupportCount);
 
-        var finalMask = new bool[amplitudeCount];
+        bool[] finalMask = workspace.PrepareFinalMask(amplitudeCount);
         int hSyncFitCount = 0;
         for (int index = 0; index < amplitudeCount; index++)
         {
@@ -581,7 +590,7 @@ public sealed class VhsSyncDetector
                     preciseMidpoint,
                     parallelWorkerThreads,
                     initialCapacity,
-                    parallelWorkspace!);
+                    workspace);
             if (!overflowed)
             {
                 fallingIndex = -1;
@@ -638,7 +647,7 @@ public sealed class VhsSyncDetector
             return new VhsSyncDetectionResult([], syncTipLevel, backPorchLevel);
         }
 
-        var slopes = new double[fallingEdges.Count];
+        double[] slopes = workspace.EnsureStatisticsScratch(fallingEdges.Count);
         int slopeCount = 0;
         for (int index = 0; index < fallingEdges.Count; index++)
         {
@@ -2214,8 +2223,13 @@ public sealed class VhsSyncDetector
     {
         private double[] _filtered = [];
         private double[] _partitioned = [];
+        private double[] _candidateSyncLevels = [];
+        private double[] _candidatePorchLevels = [];
+        private double[] _statisticsScratch = [];
         private int[] _highHistogram = [];
         private int[] _middleHistograms = [];
+        private int[] _gridSupportCounts = [];
+        private bool[] _finalMask = [];
         private int[] _workerHistograms = [];
         private int[] _workerFlags = [];
         private List<int>[] _thresholdCrossingsByWorker = [];
@@ -2239,6 +2253,57 @@ public sealed class VhsSyncDetector
             }
 
             return _partitioned;
+        }
+
+        public double[] EnsureCandidateSyncLevels(int length)
+        {
+            if (_candidateSyncLevels.Length < length)
+            {
+                _candidateSyncLevels = GC.AllocateUninitializedArray<double>(length);
+            }
+
+            return _candidateSyncLevels;
+        }
+
+        public double[] EnsureCandidatePorchLevels(int length)
+        {
+            if (_candidatePorchLevels.Length < length)
+            {
+                _candidatePorchLevels = GC.AllocateUninitializedArray<double>(length);
+            }
+
+            return _candidatePorchLevels;
+        }
+
+        public double[] EnsureStatisticsScratch(int length)
+        {
+            if (_statisticsScratch.Length < length)
+            {
+                _statisticsScratch = GC.AllocateUninitializedArray<double>(length);
+            }
+
+            return _statisticsScratch;
+        }
+
+        public int[] EnsureGridSupportCounts(int length)
+        {
+            if (_gridSupportCounts.Length < length)
+            {
+                _gridSupportCounts = GC.AllocateUninitializedArray<int>(length);
+            }
+
+            return _gridSupportCounts;
+        }
+
+        public bool[] PrepareFinalMask(int length)
+        {
+            if (_finalMask.Length < length)
+            {
+                _finalMask = GC.AllocateUninitializedArray<bool>(length);
+            }
+
+            Array.Clear(_finalMask, 0, length);
+            return _finalMask;
         }
 
         public int[] EnsureHighHistogram()

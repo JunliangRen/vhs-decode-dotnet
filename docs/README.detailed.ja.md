@@ -383,6 +383,36 @@ candidate 15.303 s、main 15.385 s で、candidate の前半/後半は
 77.22/70.87 ms per frame、peak は 0.993 GiB でした。retained median storage は
 detector ごとに 60-line buffer 2 個までに制限されます。
 
+### VHS sync-analysis workspace reuse
+
+exclusive な VHS sync-detector workspace は、escape しない scratch array 5 個を保持する
+ようになりました。sync/porch candidate、sort/MAD/slope に順番に使う 1 個の共有
+statistics buffer、grid-support count、final mask です。sort は現在の logical length
+だけを処理し、grid count は全要素を初期化し、mask は reuse 前に clear します。
+演算順序、threshold、pulse ownership、独立した result array ownership は変わりません。
+
+valid-pulse allocation benchmark は 1 call あたり 46,362.2 から 28,642.2 bytes へ
+38.2% 減少しました。matched 200-frame `gc-verbose` trace では、main の
+`DetectFiltered` に recurring `double[]` tick 76 回、合計 7.71 MiB と、`bool[]` tick
+2 回、合計 0.20 MiB がありましたが、candidate は両方の recurring call site を除去
+しました。retained workspace array は second zero の初回 capacity growth にだけ現れ、
+escape する edge/pulse result array は独立 ownership を維持します。
+
+interleaved 200-frame Exact `current --threads 20` 3 pair と opposite-order 1,000-frame
+2 pair は、luma、chroma、raw JSON、stdout、normalized stderr/log、field count、すべての
+ordered `fileLoc` で一致しました。long pair 2 組の main/candidate wall time 合計は
+67.258/67.004 秒で 0.38% 減少にとどまり throughput-neutral、CPU time は
+569.563/578.985 秒だったため、CPU reduction や固定 speedup は主張しません。
+candidate の peak working set は両方の long run で 355.1-357.0 MiB に収まりました。
+
+追加の 24-run gate は Exact/IPP-fast、v0.4.0/`current`、`--threads 0`、default-five、
+`--threads 20` を網羅しました。candidate は同じ configuration の main と luma、chroma、
+raw JSON、stdout、normalized stderr/log、ordered `fileLoc` が一致し、Exact の 3 thread
+mode は各 profile の main `--threads 0` oracle とも一致しました。full xUnit v3 suite は
+1,437 tests を公開し、dirty large-small-large workspace reuse、shared-detector concurrency、
+valid-pulse warm-allocation test を含みます。gate 中は無関係な foreground CPU load があり、
+matched long result も throughput-neutral だったため、public 6-path table は更新しません。
+
 ### pooled IPP VHS envelope SOS
 
 IPP-fast は full-length の one-section VHS RF envelope SOS を bounded
@@ -3487,7 +3517,7 @@ Microsoft.Testing.Platform run は全 1,401 test を検出し、1,397 pass、0 f
 .\tools\build-ipp-native.ps1
 dotnet restore VHSDecodeDotNet.slnx
 dotnet build VHSDecodeDotNet.slnx -c Release --no-restore
-dotnet test --solution VHSDecodeDotNet.slnx -c Release --no-build --no-restore --minimum-expected-tests 1435
+dotnet test --solution VHSDecodeDotNet.slnx -c Release --no-build --no-restore --minimum-expected-tests 1437
 dotnet test --project tests\VHSDecode.Tests\VHSDecode.Tests.csproj -c Release --no-build --no-restore --coverage --coverage-output coverage.cobertura.xml --coverage-output-format cobertura
 ```
 
@@ -3501,7 +3531,7 @@ third-party notice を埋め込み、license sidecar file は追加しません�
 
 現在の正式な Release build は warning 0、error 0 です。xUnit v3 project は
 `dotnet test` と Visual Studio Test Explorer の両方で個別に検出できる
-**1,435** tests を公開します。
+**1,437** tests を公開します。
 
 <!-- SECTION: usage -->
 

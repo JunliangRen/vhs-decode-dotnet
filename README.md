@@ -38,7 +38,7 @@ evidence, and remaining gaps.
   EIAJ, and supported PAL/NTSC variants.
 - TBC utility tools, the double-click GUI, and developer plotting windows are
   intentionally out of scope.
-- The Visual Studio 2026 `.slnx` solution has **1,435** standard xUnit v3 tests
+- The Visual Studio 2026 `.slnx` solution has **1,437** standard xUnit v3 tests
   that are visible in Test Explorer and runnable with `dotnet test`.
 
 <!-- SECTION: start -->
@@ -122,7 +122,7 @@ when either the Python numerator or .NET denominator moves, and historical table
 using another fixture or window are not directly comparable. Same-moment .NET
 revision A/B runs, rather than old ratio cells, determine causal regressions.
 
-The latest isolated change replaces nested ThreadPool companion inverses with a
+The previous isolated change replaced nested ThreadPool companion inverses with a
 bounded decoder-owned queue. At `--threads 20`, eight fixed companion workers use
 only the budget above the existing 12-block prefetch cap. Three interleaved
 200-frame Exact `current` A/B pairs matched every compatibility surface and had a
@@ -132,6 +132,18 @@ only the budget above the existing 12-block prefetch cap. Three interleaved
 The final lifecycle follow-up matched all surfaces in three more interleaved
 pairs and a 1,000-frame run; its first/second-half peaks were 355.2/353.8 MiB.
 Its non-idle timings are intentionally excluded from the table.
+
+The latest allocation pass keeps five non-escaping VHS sync-analysis scratch
+arrays in each exclusive detector workspace. A valid-pulse allocation benchmark
+fell by 38.2%, and a matched GC trace removed the detector's recurring
+`double[]` and `bool[]` allocation ticks after startup. The combined wall time of
+two opposite-order 1,000-frame Exact `current --threads 20` pairs changed by
+-0.38%, which is throughput-neutral; CPU changed by +1.65%, so no CPU or speedup
+claim is made. Exact and IPP-fast each passed 12 main/candidate profile-thread
+runs across v0.4.0/`current` and `--threads 0`/default-five/`--threads 20`, with
+identical luma, chroma, raw JSON, stdout, normalized diagnostics, and ordered
+`fileLoc`. The table remains the latest controlled throughput snapshot because
+the current machine had an unrelated foreground CPU load during this gate.
 
 Every .NET profile/thread cell was deterministic across its three refreshed
 runs. Merged Python PR341 was deterministic in its pinned reference set; Python
@@ -175,7 +187,7 @@ The pinned SDK is .NET `11.0.100-preview.6.26359.118`.
 dotnet restore VHSDecodeDotNet.slnx
 dotnet build VHSDecodeDotNet.slnx -c Release --no-restore
 dotnet test --solution VHSDecodeDotNet.slnx -c Release `
-  --no-build --no-restore --minimum-expected-tests 1435
+  --no-build --no-restore --minimum-expected-tests 1437
 ```
 
 Open `VHSDecodeDotNet.slnx` in Visual Studio 2026 to build, debug, and run the
