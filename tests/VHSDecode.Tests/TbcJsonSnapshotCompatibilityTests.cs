@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using System.Text.Json.Nodes;
 using VHSDecode.Core.CommandLine;
 using VHSDecode.Core.Decode;
@@ -351,10 +352,21 @@ public sealed class TbcJsonSnapshotCompatibilityTests
         {
             string jsonPath = Path.Combine(tempDirectory, "shared.tbc.json");
             using DecodeSession session = CreateSession(Path.Combine(tempDirectory, "shared"));
-            var writer = new TbcOutputMetadataWriter.StreamingWriter(
+            DisposeTrackingFileStream? fieldsOutput = null;
+            var fieldsInputs = new ConcurrentBag<DisposeTrackingFileStream>();
+            using var writer = new TbcOutputMetadataWriter.StreamingWriter(
                 session,
                 jsonPath,
-                delaySnapshotRetry: _ => { });
+                delaySnapshotRetry: _ => { },
+                createFieldsOutput: path =>
+                    fieldsOutput = DisposeTrackingFileStream.CreateWriter(path),
+                openFieldsInput: path =>
+                {
+                    DisposeTrackingFileStream input =
+                        DisposeTrackingFileStream.CreateReader(path);
+                    fieldsInputs.Add(input);
+                    return input;
+                });
 
             writer.Add(BuildField(startSample: 0, detectedFirstField: true), BuildDecision(1, true));
             Assert.True(SpinWait.SpinUntil(
@@ -365,11 +377,7 @@ public sealed class TbcJsonSnapshotCompatibilityTests
                 },
                 TimeSpan.FromSeconds(10)));
 
-            using (var heldJson = new FileStream(
-                jsonPath,
-                FileMode.Open,
-                FileAccess.Read,
-                FileShare.Read))
+            using (FileStream heldJson = OpenWindowsSharedReadStream(jsonPath))
             {
                 writer.Add(BuildField(startSample: 100, detectedFirstField: false), BuildDecision(2, false));
                 IOException exception = Assert.ThrowsAny<IOException>(writer.Complete);
@@ -380,6 +388,10 @@ public sealed class TbcJsonSnapshotCompatibilityTests
             }
 
             writer.Dispose();
+            Assert.NotNull(fieldsOutput);
+            Assert.True(fieldsOutput.DisposeObserved);
+            Assert.NotEmpty(fieldsInputs);
+            Assert.All(fieldsInputs, input => Assert.True(input.DisposeObserved));
             Assert.True(File.Exists(jsonPath + ".fields.tmp"));
             Assert.True(File.Exists(jsonPath + ".final"));
         }
@@ -671,6 +683,30 @@ public sealed class TbcJsonSnapshotCompatibilityTests
         }
     }
 
+    private sealed class DisposeTrackingFileStream(
+        string path,
+        FileMode mode,
+        FileAccess access)
+        : FileStream(path, mode, access, FileShare.ReadWrite)
+    {
+        public bool DisposeObserved { get; private set; }
+
+        public static DisposeTrackingFileStream CreateReader(string path)
+            => new(path, FileMode.Open, FileAccess.Read);
+
+        public static DisposeTrackingFileStream CreateWriter(string path)
+            => new(path, FileMode.Create, FileAccess.Write);
+
+        protected override void Dispose(bool disposing)
+        {
+            base.Dispose(disposing);
+            if (disposing)
+            {
+                DisposeObserved = true;
+            }
+        }
+    }
+
     private static string CreateTempDirectory()
     {
         string path = Path.Combine(
@@ -691,12 +727,43 @@ public sealed class TbcJsonSnapshotCompatibilityTests
                 return;
             }
             catch (Exception exception) when (
-                OperatingSystem.IsWindows()
-                && attempt < MaximumAttempts
-                && exception is IOException or UnauthorizedAccessException)
+                IsWindowsSharingOrLockViolation(exception))
+            {
+                if (attempt == MaximumAttempts)
+                {
+                    // The writer stream disposal is asserted separately. Hosted-runner
+                    // scanners can retain a transient read handle beyond this cleanup window.
+                    return;
+                }
+
+                Thread.Sleep(TimeSpan.FromMilliseconds(100));
+            }
+        }
+    }
+
+    private static FileStream OpenWindowsSharedReadStream(string path)
+    {
+        const int MaximumAttempts = 50;
+        for (int attempt = 1; ; attempt++)
+        {
+            try
+            {
+                return new FileStream(
+                    path,
+                    FileMode.Open,
+                    FileAccess.Read,
+                    FileShare.Read);
+            }
+            catch (Exception exception) when (
+                attempt < MaximumAttempts
+                && IsWindowsSharingOrLockViolation(exception))
             {
                 Thread.Sleep(TimeSpan.FromMilliseconds(100));
             }
         }
     }
+
+    private static bool IsWindowsSharingOrLockViolation(Exception exception)
+        => OperatingSystem.IsWindows()
+            && (exception.HResult & 0xFFFF) is 32 or 33;
 }
