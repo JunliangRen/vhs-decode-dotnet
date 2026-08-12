@@ -326,6 +326,32 @@ VSync serration detector 现在会在最多两块精确形状的 workspace 中�
 15.303 s，main 为 15.385 s；候选前后半程分别为 77.22/70.87 ms 每帧，峰值为
 0.993 GiB；每个 detector 最多只保留两块 60 行中位数缓冲。
 
+### VHS 同步分析 workspace 复用
+
+每个独占的 VHS 同步检测 workspace 现在会保留 5 块不会逃逸的 scratch 数组：同步电平
+候选、后沿平台电平候选、一块依次用于排序/MAD/斜率的共享统计缓冲、网格支持计数以及
+最终 mask。每次排序都只处理当前逻辑长度，网格计数会完整初始化，mask 也会在复用前
+清零。运算顺序、阈值、脉冲所有权以及结果数组的独立所有权均未改变。
+
+有效脉冲分配基准从每次调用 46,362.2 字节降到 28,642.2 字节，减少 38.2%。在配对的
+200 帧 `gc-verbose` trace 中，main 在 `DetectFiltered` 内持续采样到 76 次、合计
+7.71 MiB 的 `double[]` 分配，以及 2 次、合计 0.20 MiB 的 `bool[]` 分配；候选消除了
+这两类持续调用点。保留的 workspace 数组只在第 0 秒首次扩容。会逃逸的边缘和脉冲
+结果数组仍保持独立所有权。
+
+三组交错 200 帧 Exact `current --threads 20` 配对和两组正反顺序 1000 帧配对，在
+亮度、色度、原始 JSON、stdout、归一化 stderr/日志、场数及全部有序 `fileLoc` 上
+一致。两组长配对合计的 main/候选墙钟为 67.258/67.004 秒，减少 0.38%，属于中性；
+CPU 时间为 569.563/578.985 秒，因此不宣称 CPU 或固定吞吐提升。两次候选长运行的
+工作集峰值都保持在 355.1 至 357.0 MiB。
+
+另有 24 次配置门禁覆盖 Exact/IPP-fast、v0.4.0/`current` 以及 `--threads 0`、默认 5、
+`--threads 20`。每个候选都在同配置下与 main 的亮度、色度、原始 JSON、stdout、
+归一化 stderr/日志和有序 `fileLoc` 一致；Exact 的三种线程模式还都与各 profile 的
+main `--threads 0` oracle 一致。完整 xUnit v3 测试集现在暴露 1437 项测试，包括脏的
+大-小-大 workspace 复用、共享 detector 并发以及有效脉冲预热后分配测试。本轮存在
+无关前台 CPU 负载，且配对长运行吞吐中性，因此不使用本轮时间刷新公开六路径表格。
+
 ### 池化 IPP VHS envelope SOS
 
 IPP-fast 现在通过有界的 `IppSos32FilterPool` 处理完整的一阶 VHS RF envelope SOS；
@@ -2921,7 +2947,7 @@ stderr、时间戳归一化日志和全部 2,000 个有序 `fileLoc` 完全一�
 .\tools\build-ipp-native.ps1
 dotnet restore VHSDecodeDotNet.slnx
 dotnet build VHSDecodeDotNet.slnx -c Release --no-restore
-dotnet test --solution VHSDecodeDotNet.slnx -c Release --no-build --no-restore --minimum-expected-tests 1435
+dotnet test --solution VHSDecodeDotNet.slnx -c Release --no-build --no-restore --minimum-expected-tests 1437
 dotnet test --project tests\VHSDecode.Tests\VHSDecode.Tests.csproj -c Release --no-build --no-restore --coverage --coverage-output coverage.cobertura.xml --coverage-output-format cobertura
 ```
 
@@ -2933,7 +2959,7 @@ Intel oneAPI。只含二进制的单文件发布会嵌入 `vhsdecode_ipp.dll` �
 notice，不会额外生成许可证 sidecar 文件。只构建 Exact 后端时可以省略原生构建步骤。
 
 当前正式 Release 构建为零警告、零错误。xUnit v3 项目向
-`dotnet test` 和 Visual Studio Test Explorer 暴露 **1,435** 个可独立发现的测试。
+`dotnet test` 和 Visual Studio Test Explorer 暴露 **1,437** 个可独立发现的测试。
 
 <!-- SECTION: usage -->
 

@@ -301,32 +301,142 @@ public sealed class VhsSyncDetectorCurrentTests
     [Fact(DisplayName = "Current VHS sync detector reuses its full-field workspace")]
     public void CurrentVhsSyncDetectorReusesFullFieldWorkspace()
     {
-        var signal = new double[1_000_000];
-        Array.Fill(signal, 42.0);
-        var detector = new VhsSyncDetector(188.0, 152.0, 2560, 8.8);
-        _ = detector.Detect(
-            signal,
-            detectLevels: true,
-            syncTipEstimate: 3_800_000.0,
-            blankingEstimate: 4_100_000.0);
+        const int MeasurementIterations = 8;
+        double[] signal = BuildPeriodicSignal(1_000_000, 2_560, 188);
+        var detector = new VhsSyncDetector(188.0, 152.0, 2_560, 8.8);
+        for (int iteration = 0; iteration < 3; iteration++)
+        {
+            _ = detector.Detect(
+                signal,
+                detectLevels: false,
+                syncTipEstimate: -2.0,
+                blankingEstimate: 100.0);
+        }
 
         long before = GC.GetAllocatedBytesForCurrentThread();
-        VhsSyncDetectionResult result = detector.Detect(
-            signal,
-            detectLevels: true,
-            syncTipEstimate: 3_800_000.0,
-            blankingEstimate: 4_100_000.0);
-        long allocated = GC.GetAllocatedBytesForCurrentThread() - before;
+        VhsSyncDetectionResult? result = null;
+        for (int iteration = 0; iteration < MeasurementIterations; iteration++)
+        {
+            result = detector.Detect(
+                signal,
+                detectLevels: false,
+                syncTipEstimate: -2.0,
+                blankingEstimate: 100.0);
+        }
 
-        Assert.Empty(result.Pulses);
-        Assert.InRange(allocated, 0, 64 * 1024);
+        long allocatedPerCall =
+            (GC.GetAllocatedBytesForCurrentThread() - before) / MeasurementIterations;
+
+        Assert.NotNull(result);
+        Assert.NotEmpty(result.Pulses);
+        Assert.InRange(allocatedPerCall, 0, 40 * 1024);
+    }
+
+    [Fact(DisplayName = "Current VHS sync workspace survives dirty large-small-large reuse")]
+    public void CurrentVhsSyncWorkspaceSurvivesDirtyLargeSmallLargeReuse()
+    {
+        double[] large = BuildPeriodicSignal(1_000_000, 2_560, 188);
+        double[] small = BuildPeriodicSignal(150_000, 2_560, 188);
+        var shared = new VhsSyncDetector(188.0, 152.0, 2_560, 8.8);
+        VhsSyncDetectionResult expectedLarge = new VhsSyncDetector(
+            188.0,
+            152.0,
+            2_560,
+            8.8).Detect(
+            large,
+            detectLevels: false,
+            syncTipEstimate: -2.0,
+            blankingEstimate: 100.0);
+        VhsSyncDetectionResult expectedSmall = new VhsSyncDetector(
+            188.0,
+            152.0,
+            2_560,
+            8.8).Detect(
+            small,
+            detectLevels: false,
+            syncTipEstimate: -2.0,
+            blankingEstimate: 100.0);
+
+        AssertDetectionBitsEqual(expectedLarge, shared.Detect(
+            large,
+            detectLevels: false,
+            syncTipEstimate: -2.0,
+            blankingEstimate: 100.0));
+        AssertDetectionBitsEqual(expectedSmall, shared.Detect(
+            small,
+            detectLevels: false,
+            syncTipEstimate: -2.0,
+            blankingEstimate: 100.0));
+        AssertDetectionBitsEqual(expectedLarge, shared.Detect(
+            large,
+            detectLevels: false,
+            syncTipEstimate: -2.0,
+            blankingEstimate: 100.0));
+    }
+
+    [Fact(DisplayName = "Current VHS sync workspaces remain call-local under concurrency")]
+    public async Task CurrentVhsSyncWorkspacesRemainCallLocalUnderConcurrency()
+    {
+        double[][] signals = Enumerable.Range(0, 6)
+            .Select(index => BuildPeriodicSignal(
+                300_000 + (index * 47_123),
+                2_560,
+                180 + (index * 3),
+                phaseOffset: index * 29,
+                noiseMultiplier: 37 + (index * 2)))
+            .ToArray();
+        VhsSyncDetectionResult[] expected = signals
+            .Select(signal => new VhsSyncDetector(
+                188.0,
+                152.0,
+                2_560,
+                8.8).Detect(
+                    signal,
+                    detectLevels: false,
+                    syncTipEstimate: -2.0,
+                    blankingEstimate: 100.0))
+            .ToArray();
+        var shared = new VhsSyncDetector(188.0, 152.0, 2_560, 8.8);
+        CancellationToken cancellationToken = TestContext.Current.CancellationToken;
+        _ = shared.Detect(
+            signals[^1],
+            detectLevels: false,
+            syncTipEstimate: -2.0,
+            blankingEstimate: 100.0);
+
+        for (int round = 0; round < 2; round++)
+        {
+            using var startBarrier = new Barrier(signals.Length + 1);
+            Task<VhsSyncDetectionResult>[] tasks = signals
+                .Select(signal => Task.Factory.StartNew(
+                    () =>
+                    {
+                        startBarrier.SignalAndWait(cancellationToken);
+                        return shared.Detect(
+                            signal,
+                            detectLevels: false,
+                            syncTipEstimate: -2.0,
+                            blankingEstimate: 100.0);
+                    },
+                    cancellationToken,
+                    TaskCreationOptions.LongRunning,
+                    TaskScheduler.Default))
+                .ToArray();
+
+            startBarrier.SignalAndWait(cancellationToken);
+            VhsSyncDetectionResult[] actual = await Task.WhenAll(tasks);
+
+            for (int index = 0; index < actual.Length; index++)
+            {
+                AssertDetectionBitsEqual(expected[index], actual[index]);
+            }
+        }
     }
 
     [Fact(DisplayName = "Parallel current VHS sync detector reuses radix workspaces without caller allocation")]
     public void ParallelCurrentVhsSyncDetectorReusesRadixWorkspacesWithoutCallerAllocation()
     {
-        var signal = new double[1_000_000];
-        Array.Fill(signal, 42.0);
+        double[] signal = BuildPeriodicSignal(1_000_000, 2_560, 188);
         var detector = new VhsSyncDetector(
             188.0,
             152.0,
@@ -347,7 +457,7 @@ public sealed class VhsSyncDetectorCurrentTests
             blankingEstimate: 4_100_000.0);
         long allocated = GC.GetAllocatedBytesForCurrentThread() - before;
 
-        Assert.Empty(result.Pulses);
+        Assert.NotEmpty(result.Pulses);
         Assert.InRange(allocated, 0, 256 * 1024);
     }
 
@@ -1033,8 +1143,61 @@ public sealed class VhsSyncDetectorCurrentTests
         return signal;
     }
 
+    private static double[] BuildPeriodicSignal(
+        int length,
+        int lineLength,
+        int pulseLength,
+        int phaseOffset = 0,
+        int noiseMultiplier = 37)
+    {
+        var signal = new double[length];
+        for (int index = 0; index < signal.Length; index++)
+        {
+            signal[index] =
+                100.0 + ((((index * noiseMultiplier) % 17) - 8) * 0.125);
+        }
+
+        for (int start = lineLength - 123 + phaseOffset;
+            start + pulseLength < signal.Length;
+            start += lineLength)
+        {
+            PaintPulse(signal, start, pulseLength, -2.0);
+        }
+
+        return signal;
+    }
+
     private static void PaintPulse(double[] signal, int start, int length, double level)
         => Array.Fill(signal, level, start, length);
+
+    private static void AssertDetectionBitsEqual(
+        VhsSyncDetectionResult expected,
+        VhsSyncDetectionResult actual)
+    {
+        Assert.Equal(
+            BitConverter.DoubleToInt64Bits(expected.SyncTipLevel),
+            BitConverter.DoubleToInt64Bits(actual.SyncTipLevel));
+        Assert.Equal(
+            BitConverter.DoubleToInt64Bits(expected.BlankLevel),
+            BitConverter.DoubleToInt64Bits(actual.BlankLevel));
+        Assert.Equal(expected.Pulses.Count, actual.Pulses.Count);
+        for (int index = 0; index < expected.Pulses.Count; index++)
+        {
+            VhsMeasuredSyncPulse expectedPulse = expected.Pulses[index];
+            VhsMeasuredSyncPulse actualPulse = actual.Pulses[index];
+            Assert.Equal(expectedPulse.Start, actualPulse.Start);
+            Assert.Equal(expectedPulse.Length, actualPulse.Length);
+            Assert.Equal(
+                BitConverter.DoubleToInt64Bits(expectedPulse.Transition),
+                BitConverter.DoubleToInt64Bits(actualPulse.Transition));
+            Assert.Equal(
+                BitConverter.DoubleToInt64Bits(expectedPulse.SyncLevel),
+                BitConverter.DoubleToInt64Bits(actualPulse.SyncLevel));
+            Assert.Equal(
+                BitConverter.DoubleToInt64Bits(expectedPulse.BlankLevel),
+                BitConverter.DoubleToInt64Bits(actualPulse.BlankLevel));
+        }
+    }
 
     private static int[] CountGridSupportOrderedPairReference(
         IReadOnlyList<int> falls,

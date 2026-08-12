@@ -36,7 +36,7 @@ upstream release `v0.4.0`、commit
 - VHS family には VHS/S-VHS、Betamax、Video8/Hi8、U-matic、Type C、EIAJ、
   upstream が対応する PAL/NTSC variant が含まれます。
 - TBC utility、ダブルクリック GUI、開発者向け plot window は対象外です。
-- Visual Studio 2026 の `.slnx` には **1,435** 件の標準 xUnit v3 test があり、
+- Visual Studio 2026 の `.slnx` には **1,437** 件の標準 xUnit v3 test があり、
   Test Explorer と `dotnet test` の両方で実行できます。
 
 <!-- SECTION: start -->
@@ -118,7 +118,7 @@ default は **5 workers** です。3-run range は
 直接比較できません。causal regression は、過去の ratio cell ではなく同時刻の .NET
 revision A/B で判断します。
 
-最新の isolated change は、nested ThreadPool companion inverse を decoder-owned の
+直前の isolated change は、nested ThreadPool companion inverse を decoder-owned の
 bounded queue に置き換えます。`--threads 20` では、8 fixed companion worker が既存の
 12-block prefetch cap を超える worker budget だけを使用します。interleaved 200-frame
 Exact `current` 3 A/B pair は全 compatibility surface で一致し、paired wall-time change
@@ -128,6 +128,17 @@ Exact `current` 3 A/B pair は全 compatibility surface で一致し、paired wa
 final lifecycle follow-up も 3 interleaved pair と 1,000-frame run の全 surface で一致し、
 first/second-half peak は 355.2/353.8 MiB でした。machine が idle ではなかったため、
 その wall time は table から意図的に除外しています。
+
+最新の allocation pass は、VHS sync analysis の escape しない scratch array 5 個を
+exclusive detector workspace ごとに保持します。valid-pulse allocation benchmark は
+38.2% 減少し、matched GC trace でも startup 後の detector 由来の recurring
+`double[]` と `bool[]` allocation tick が消えました。opposite-order 1,000-frame Exact
+`current --threads 20` 2 pair の combined wall time は -0.38% で throughput-neutral、
+CPU は +1.65% だったため、CPU reduction や speedup は主張しません。Exact と
+IPP-fast はそれぞれ、v0.4.0/`current` と `--threads 0`/default-five/`--threads 20` を
+網羅する main/candidate 12 run を通過し、luma、chroma、raw JSON、stdout、normalized
+diagnostic、ordered `fileLoc` が一致しました。今回の gate 中は無関係な foreground CPU
+load があったため、table は最新の controlled throughput snapshot を維持します。
 
 更新した各 .NET profile/thread cell は 3 run 内で deterministic でした。固定 reference の
 merged Python PR341 も deterministic でした。Python v0.4.0 は 15 run で 15 種類の luma、
@@ -168,7 +179,7 @@ header は FFmpeg を維持します。
 dotnet restore VHSDecodeDotNet.slnx
 dotnet build VHSDecodeDotNet.slnx -c Release --no-restore
 dotnet test --solution VHSDecodeDotNet.slnx -c Release `
-  --no-build --no-restore --minimum-expected-tests 1435
+  --no-build --no-restore --minimum-expected-tests 1437
 ```
 
 Visual Studio 2026 で `VHSDecodeDotNet.slnx` を開くと、build、debug、

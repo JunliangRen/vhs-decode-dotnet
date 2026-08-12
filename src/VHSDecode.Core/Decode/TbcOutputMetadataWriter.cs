@@ -51,6 +51,7 @@ public static class TbcOutputMetadataWriter
         private readonly bool _verbose;
         private readonly FieldObjectBuilder _fieldBuilder;
         private readonly Func<string, Stream> _createSnapshotOutput;
+        private readonly Func<string, Stream> _openFieldsInput;
         private readonly Action<string, string> _publishSnapshot;
         private readonly Action<TimeSpan> _delaySnapshotRetry;
         private readonly BlockingCollection<SnapshotWorkItem> _snapshotQueue = new(boundedCapacity: 1);
@@ -72,7 +73,8 @@ public static class TbcOutputMetadataWriter
             Func<string, Stream>? createSnapshotOutput = null,
             Action<string, string>? publishSnapshot = null,
             Action<TimeSpan>? delaySnapshotRetry = null,
-            Func<string, Stream>? createFieldsOutput = null)
+            Func<string, Stream>? createFieldsOutput = null,
+            Func<string, Stream>? openFieldsInput = null)
         {
             ArgumentException.ThrowIfNullOrWhiteSpace(jsonPath);
             _session = session;
@@ -81,6 +83,12 @@ public static class TbcOutputMetadataWriter
             _verbose = session.ExecutionOptions.VerboseVits;
             _fieldBuilder = new FieldObjectBuilder(session);
             _createSnapshotOutput = createSnapshotOutput ?? DecodeOutputFile.Create;
+            _openFieldsInput = openFieldsInput
+                ?? (static path => new FileStream(
+                    path,
+                    FileMode.Open,
+                    FileAccess.Read,
+                    FileShare.ReadWrite));
             _publishSnapshot = publishSnapshot
                 ?? (static (source, destination) => File.Move(source, destination, overwrite: true));
             _delaySnapshotRetry = delaySnapshotRetry ?? Thread.Sleep;
@@ -350,11 +358,7 @@ public static class TbcOutputMetadataWriter
             using (Stream output = _createSnapshotOutput(tempPath))
             {
                 WriteUtf8(output, snapshot.Prefix);
-                using (var fields = new FileStream(
-                    _fieldsPath,
-                    FileMode.Open,
-                    FileAccess.Read,
-                    FileShare.ReadWrite))
+                using (Stream fields = _openFieldsInput(_fieldsPath))
                 {
                     long remaining = snapshot.FieldsByteCount;
                     while (remaining > 0)

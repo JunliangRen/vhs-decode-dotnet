@@ -33,7 +33,7 @@
 - VHS 家族包括 VHS/S-VHS、Betamax、Video8/Hi8、U-matic、Type C、EIAJ
   以及上游支持的 PAL/NTSC 变体。
 - TBC 工具、双击启动的用户 GUI 和开发者绘图窗口明确不在范围内。
-- Visual Studio 2026 `.slnx` 包含 **1,435** 项标准 xUnit v3 测试；测试可在
+- Visual Studio 2026 `.slnx` 包含 **1,437** 项标准 xUnit v3 测试；测试可在
   Test Explorer 中查看，也可用 `dotnet test` 运行。
 
 <!-- SECTION: start -->
@@ -111,13 +111,22 @@ CVBS 和 HiFi 仍会拒绝 `ipp-fast`；需要 release 兼容行为时应使用 
 倍数会随作为分子的 Python 时间和作为分母的 .NET 时间一起变化，使用其他夹具或窗口的历史表格
 也不能直接横向比较。判断因果回退时使用同一时刻的 .NET 版本配对 A/B，而不是旧表倍数。
 
-最新的隔离改动用解码器自有的有界队列替换嵌套 ThreadPool companion inverse。
+上一项隔离改动用解码器自有的有界队列替换嵌套 ThreadPool companion inverse。
 在 `--threads 20` 下，8 个固定 companion workers 只使用现有 12-block 预取上限之外的
 worker 配额。三组交错 200 帧 Exact `current` A/B 在所有兼容表面上都一致，配对墙钟
 变化的中位数减少 1.61%。一次 1000 帧配对从 34.732 降至 34.000 秒（减少 2.11%）；
 候选工作集峰值从前半程 352.2 MiB 微降到后半程 351.4 MiB，没有增长或 OOM。
 最终生命周期补丁又通过三组交错配对和一次 1000 帧运行的全部兼容表面；前/后半程
 峰值为 355.2/353.8 MiB。由于当时机器并非空闲，其墙钟数据特意不计入表格。
+
+最新一轮分配优化把 VHS 同步分析中 5 块不会逃逸的 scratch 数组保留在各自独占的
+detector workspace 中。有效脉冲分配基准下降 38.2%，配对 GC trace 也确认启动后不再
+出现该 detector 的重复 `double[]` 和 `bool[]` 分配。两组正反顺序的 1000 帧 Exact
+`current --threads 20` 配对合计墙钟变化为 -0.38%，属于吞吐中性；CPU 变化为
++1.65%，因此不宣称 CPU 或速度提升。Exact 与 IPP-fast 各完成 12 次 main/候选门禁，
+覆盖 v0.4.0/`current` 与 `--threads 0`/默认 5/`--threads 20`；亮度、色度、原始
+JSON、stdout、归一化诊断和有序 `fileLoc` 全部一致。由于本轮机器存在无关前台 CPU
+负载，表格保留最近一次受控吞吐快照，不用受干扰的时间替换它。
 
 刷新后的每个 .NET profile/线程单元格在三轮内都保持确定性。固定参考集中的 Python
 PR341 保持确定；Python v0.4.0 的 15 次运行产生了 15 套不同的亮度、色度、JSON 和
@@ -155,7 +164,7 @@ TBC、色度、JSON 和日志文件允许在解码期间并发读取，兼容的
 dotnet restore VHSDecodeDotNet.slnx
 dotnet build VHSDecodeDotNet.slnx -c Release --no-restore
 dotnet test --solution VHSDecodeDotNet.slnx -c Release `
-  --no-build --no-restore --minimum-expected-tests 1435
+  --no-build --no-restore --minimum-expected-tests 1437
 ```
 
 在 Visual Studio 2026 中打开 `VHSDecodeDotNet.slnx`，即可构建、调试并通过
