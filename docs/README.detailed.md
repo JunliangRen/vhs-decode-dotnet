@@ -442,24 +442,24 @@ format, or fixture are not directly comparable:
 <!-- LATEST_PERFORMANCE_BEGIN -->
 | CLI mode (workers) | Python v0.4.0 | Python PR341 | Exact + v0.4.0 | Exact + current | IPP-fast + v0.4.0 | IPP-fast + current |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| default (5) | 46.187 s | 45.565 s | 13.559 s / 3.406x / 70.64% | 12.283 s / 3.710x / 73.04% | 11.723 s / 3.940x / 74.62% | 9.783 s / 4.658x / 78.53% |
-| `--threads 1` | 55.254 s | 55.352 s | 34.689 s / 1.593x / 37.22% | 40.203 s / 1.377x / 27.37% | 24.301 s / 2.274x / 56.02% | 27.102 s / 2.042x / 51.04% |
-| `--threads 5` | 45.877 s | 45.743 s | 13.156 s / 3.487x / 71.32% | 13.192 s / 3.468x / 71.16% | 11.712 s / 3.917x / 74.47% | 9.918 s / 4.612x / 78.32% |
-| `--threads 10` | 47.055 s | 48.114 s | 10.665 s / 4.412x / 77.33% | 9.610 s / 5.006x / 80.03% | 9.816 s / 4.794x / 79.14% | 7.869 s / 6.114x / 83.65% |
-| `--threads 20` | 50.062 s | 50.428 s | 8.822 s / 5.674x / 82.38% | 8.055 s / 6.260x / 84.03% | 8.435 s / 5.935x / 83.15% | 6.086 s / 8.285x / 87.93% |
+| default (5) | 46.165 s | 45.821 s | 13.780 s / 3.350x / 70.15% | 12.896 s / 3.553x / 71.86% | 11.739 s / 3.933x / 74.57% | 9.869 s / 4.643x / 78.46% |
+| `--threads 1` | 56.050 s | 55.754 s | 34.138 s / 1.642x / 39.09% | 39.839 s / 1.399x / 28.55% | 24.408 s / 2.296x / 56.45% | 26.950 s / 2.069x / 51.66% |
+| `--threads 5` | 46.278 s | 45.804 s | 13.277 s / 3.486x / 71.31% | 12.726 s / 3.599x / 72.22% | 11.659 s / 3.969x / 74.81% | 9.859 s / 4.646x / 78.48% |
+| `--threads 10` | 47.111 s | 48.017 s | 10.526 s / 4.476x / 77.66% | 9.648 s / 4.977x / 79.91% | 9.858 s / 4.779x / 79.07% | 7.744 s / 6.200x / 83.87% |
+| `--threads 20` | 48.283 s | 48.622 s | 8.441 s / 5.720x / 82.52% | 7.787 s / 6.244x / 83.98% | 8.284 s / 5.829x / 82.84% | 6.018 s / 8.079x / 87.62% |
 <!-- LATEST_PERFORMANCE_END -->
-<!-- LATEST_PERFORMANCE_RUNS: performance-snapshot-runs=90 dotnet-matrix-runs=60 python-reference-runs=30 dotnet-repeats=3 python-reference-date=2026-08-12 dotnet-v040-date=2026-08-12 dotnet-current-date=2026-08-12 complex-normalization-avx-matrix-runs=90 complex-normalization-avx-exact-1000-ab-pairs=3 complex-normalization-avx-kernel-pairs=8 complex-normalization-avx-tests=5 complex-normalization-avx-intrinsic-modes=3 python-v040-runs=15 python-v040-hashes=15 python-pr341-runs=15 python-pr341-hashes=1 -->
+<!-- LATEST_PERFORMANCE_RUNS: performance-snapshot-runs=90 dotnet-matrix-runs=60 python-reference-runs=30 dotnet-repeats=3 python-reference-date=2026-08-12 dotnet-v040-date=2026-08-12 dotnet-current-date=2026-08-12 radix3-avx-matrix-runs=90 radix3-avx-exact-1000-ab-pairs=3 radix3-avx-kernel-pairs=12 radix3-avx-tests=60 radix3-avx-intrinsic-modes=3 python-v040-runs=15 python-v040-hashes=15 python-pr341-runs=15 python-pr341-hashes=1 -->
 
 The three-run wall-time ranges were:
 
 <!-- LATEST_PERFORMANCE_RANGES_BEGIN -->
 | CLI mode | Python v0.4.0 | Python PR341 | Exact + v0.4.0 | Exact + current | IPP-fast + v0.4.0 | IPP-fast + current |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| default (5) | 45.543-47.231 s | 45.318-46.067 s | 13.293-13.914 s | 12.034-13.131 s | 11.349-11.947 s | 9.454-9.937 s |
-| `--threads 1` | 55.201-57.086 s | 55.146-57.320 s | 34.415-35.682 s | 38.686-40.774 s | 24.070-25.685 s | 26.821-28.114 s |
-| `--threads 5` | 45.719-49.991 s | 45.057-48.743 s | 13.041-13.487 s | 12.350-13.595 s | 11.610-11.888 s | 9.788-9.942 s |
-| `--threads 10` | 46.627-49.268 s | 47.909-48.954 s | 10.305-10.684 s | 8.798-10.033 s | 9.778-9.981 s | 7.615-7.999 s |
-| `--threads 20` | 48.529-50.200 s | 48.555-50.526 s | 8.748-8.952 s | 7.990-8.370 s | 8.310-8.559 s | 5.822-6.123 s |
+| default (5) | 46.115-46.402 s | 45.632-45.887 s | 13.587-14.153 s | 12.666-13.392 s | 11.722-11.870 s | 9.833-9.943 s |
+| `--threads 1` | 55.709-57.791 s | 55.049-56.196 s | 33.956-34.548 s | 39.014-40.722 s | 24.220-24.767 s | 26.947-27.140 s |
+| `--threads 5` | 45.804-46.596 s | 45.330-45.911 s | 13.125-13.318 s | 12.317-13.055 s | 11.608-11.728 s | 9.791-9.881 s |
+| `--threads 10` | 46.914-47.200 s | 47.823-48.326 s | 10.482-10.733 s | 9.505-9.850 s | 9.804-9.874 s | 7.670-7.887 s |
+| `--threads 20` | 48.029-48.490 s | 48.360-48.986 s | 8.369-8.702 s | 7.535-7.874 s | 8.188-8.416 s | 5.894-6.102 s |
 <!-- LATEST_PERFORMANCE_RANGES_END -->
 
 All six paths were measured from zero in the same batch at all five worker
@@ -470,19 +470,23 @@ and ordered `fileLoc`. Python v0.4.0 produced 15 distinct luma, chroma, JSON,
 and normalized-log hash sets in 15 runs; its strict oracle therefore remains
 `g4315520 --threads 0`.
 
-The .NET candidate is based on merged main `ea1bb8e` plus the isolated
-double-complex inverse-normalization AVX change below. The host was an Intel
-Core Ultra 7 265K with 20 logical processors, Windows 11 build 26220, and .NET
-SDK/runtime `11.0.100-preview.6.26359.118`. Raw directories stay local because
-they contain the private fixture path; these are reported local measurements,
-not an independently reproducible public corpus.
+The .NET candidate was commit `c8c2835`, based on merged main `1b6f315`, with
+the isolated managed radix-3 AVX change described below. The self-contained
+matrix `decode.exe` had SHA-256
+`C514BC8C6204D41986574FBC627081D3B30D87BB7A85FF8C9CA5D2FED6827E5F`.
+The host was an Intel Core Ultra 7 265K with 20 logical processors, Windows 11
+build 26220, and .NET SDK/runtime `11.0.100-preview.6.26359.118`. Raw directories
+stay local because they contain the private fixture path; these are reported
+local measurements, not an independently reproducible public corpus.
 
 The three-run ranges expose ordinary startup, thermal, scheduler, and system
 variation. Ratio cells move when either the .NET numerator or Python denominator
 moves. They are not used to attribute a revision regression or speedup; the
 same-moment interleaved revision A/B evidence below is the causal gate.
 
-### Managed AVX double-complex inverse normalization
+### Previous managed AVX double-complex inverse normalization
+
+This retained historical candidate was based on merged main `ea1bb8e`.
 
 Inverse transforms multiply every real and imaginary component by the same
 double-precision normalization factor. The candidate processes two independent
@@ -537,7 +541,7 @@ to 705.693 ms (0.94% lower) and the mean length-990 transform from 740.479 to
 surfaces. Mean wall time moved from 37.288 to 36.909 seconds (1.02% lower), CPU
 time from 301.984 to 292.766 seconds (3.05% lower), and average active cores from
 8.10 to 7.93. Pair wall directions were -0.79%, +0.21%, and -2.46%; the bounded
-maximum working sets were 443.4 and 355.6 MiB for baseline and candidate. Three
+maximum working sets were 443.4 MiB and 355.6 MiB for baseline and candidate. Three
 `--threads 0` pairs also matched all surfaces and moved mean wall time from
 41.030 to 40.219 seconds. The v0.4.0 and IPP-fast profiles do not call this
 managed current-profile FFT path.

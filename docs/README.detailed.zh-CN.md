@@ -358,24 +358,24 @@ v0.4.0、Exact `current`、IPP-fast v0.4.0 和 IPP-fast `current`。文件名不
 <!-- LATEST_PERFORMANCE_BEGIN -->
 | CLI 模式（workers） | Python v0.4.0 | Python PR341 | Exact + v0.4.0 | Exact + current | IPP-fast + v0.4.0 | IPP-fast + current |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| 默认（5） | 46.187 s | 45.565 s | 13.559 s / 3.406x / 70.64% | 12.283 s / 3.710x / 73.04% | 11.723 s / 3.940x / 74.62% | 9.783 s / 4.658x / 78.53% |
-| `--threads 1` | 55.254 s | 55.352 s | 34.689 s / 1.593x / 37.22% | 40.203 s / 1.377x / 27.37% | 24.301 s / 2.274x / 56.02% | 27.102 s / 2.042x / 51.04% |
-| `--threads 5` | 45.877 s | 45.743 s | 13.156 s / 3.487x / 71.32% | 13.192 s / 3.468x / 71.16% | 11.712 s / 3.917x / 74.47% | 9.918 s / 4.612x / 78.32% |
-| `--threads 10` | 47.055 s | 48.114 s | 10.665 s / 4.412x / 77.33% | 9.610 s / 5.006x / 80.03% | 9.816 s / 4.794x / 79.14% | 7.869 s / 6.114x / 83.65% |
-| `--threads 20` | 50.062 s | 50.428 s | 8.822 s / 5.674x / 82.38% | 8.055 s / 6.260x / 84.03% | 8.435 s / 5.935x / 83.15% | 6.086 s / 8.285x / 87.93% |
+| 默认（5） | 46.165 s | 45.821 s | 13.780 s / 3.350x / 70.15% | 12.896 s / 3.553x / 71.86% | 11.739 s / 3.933x / 74.57% | 9.869 s / 4.643x / 78.46% |
+| `--threads 1` | 56.050 s | 55.754 s | 34.138 s / 1.642x / 39.09% | 39.839 s / 1.399x / 28.55% | 24.408 s / 2.296x / 56.45% | 26.950 s / 2.069x / 51.66% |
+| `--threads 5` | 46.278 s | 45.804 s | 13.277 s / 3.486x / 71.31% | 12.726 s / 3.599x / 72.22% | 11.659 s / 3.969x / 74.81% | 9.859 s / 4.646x / 78.48% |
+| `--threads 10` | 47.111 s | 48.017 s | 10.526 s / 4.476x / 77.66% | 9.648 s / 4.977x / 79.91% | 9.858 s / 4.779x / 79.07% | 7.744 s / 6.200x / 83.87% |
+| `--threads 20` | 48.283 s | 48.622 s | 8.441 s / 5.720x / 82.52% | 7.787 s / 6.244x / 83.98% | 8.284 s / 5.829x / 82.84% | 6.018 s / 8.079x / 87.62% |
 <!-- LATEST_PERFORMANCE_END -->
-<!-- LATEST_PERFORMANCE_RUNS: performance-snapshot-runs=90 dotnet-matrix-runs=60 python-reference-runs=30 dotnet-repeats=3 python-reference-date=2026-08-12 dotnet-v040-date=2026-08-12 dotnet-current-date=2026-08-12 complex-normalization-avx-matrix-runs=90 complex-normalization-avx-exact-1000-ab-pairs=3 complex-normalization-avx-kernel-pairs=8 complex-normalization-avx-tests=5 complex-normalization-avx-intrinsic-modes=3 python-v040-runs=15 python-v040-hashes=15 python-pr341-runs=15 python-pr341-hashes=1 -->
+<!-- LATEST_PERFORMANCE_RUNS: performance-snapshot-runs=90 dotnet-matrix-runs=60 python-reference-runs=30 dotnet-repeats=3 python-reference-date=2026-08-12 dotnet-v040-date=2026-08-12 dotnet-current-date=2026-08-12 radix3-avx-matrix-runs=90 radix3-avx-exact-1000-ab-pairs=3 radix3-avx-kernel-pairs=12 radix3-avx-tests=60 radix3-avx-intrinsic-modes=3 python-v040-runs=15 python-v040-hashes=15 python-pr341-runs=15 python-pr341-hashes=1 -->
 
 三次运行的墙钟范围如下：
 
 <!-- LATEST_PERFORMANCE_RANGES_BEGIN -->
 | CLI 模式 | Python v0.4.0 | Python PR341 | Exact + v0.4.0 | Exact + current | IPP-fast + v0.4.0 | IPP-fast + current |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| 默认（5） | 45.543-47.231 s | 45.318-46.067 s | 13.293-13.914 s | 12.034-13.131 s | 11.349-11.947 s | 9.454-9.937 s |
-| `--threads 1` | 55.201-57.086 s | 55.146-57.320 s | 34.415-35.682 s | 38.686-40.774 s | 24.070-25.685 s | 26.821-28.114 s |
-| `--threads 5` | 45.719-49.991 s | 45.057-48.743 s | 13.041-13.487 s | 12.350-13.595 s | 11.610-11.888 s | 9.788-9.942 s |
-| `--threads 10` | 46.627-49.268 s | 47.909-48.954 s | 10.305-10.684 s | 8.798-10.033 s | 9.778-9.981 s | 7.615-7.999 s |
-| `--threads 20` | 48.529-50.200 s | 48.555-50.526 s | 8.748-8.952 s | 7.990-8.370 s | 8.310-8.559 s | 5.822-6.123 s |
+| 默认（5） | 46.115-46.402 s | 45.632-45.887 s | 13.587-14.153 s | 12.666-13.392 s | 11.722-11.870 s | 9.833-9.943 s |
+| `--threads 1` | 55.709-57.791 s | 55.049-56.196 s | 33.956-34.548 s | 39.014-40.722 s | 24.220-24.767 s | 26.947-27.140 s |
+| `--threads 5` | 45.804-46.596 s | 45.330-45.911 s | 13.125-13.318 s | 12.317-13.055 s | 11.608-11.728 s | 9.791-9.881 s |
+| `--threads 10` | 46.914-47.200 s | 47.823-48.326 s | 10.482-10.733 s | 9.505-9.850 s | 9.804-9.874 s | 7.670-7.887 s |
+| `--threads 20` | 48.029-48.490 s | 48.360-48.986 s | 8.369-8.702 s | 7.535-7.874 s | 8.188-8.416 s | 5.894-6.102 s |
 <!-- LATEST_PERFORMANCE_RANGES_END -->
 
 六条路径均在同一批次从零测量，覆盖五种 worker 设置以及正序、反序和混排三轮；每个
@@ -384,16 +384,20 @@ v0.4.0、Exact `current`、IPP-fast v0.4.0 和 IPP-fast `current`。文件名不
 Python v0.4.0 的 15 次运行产生了 15 套不同的亮度、色度、JSON 和归一化日志 hash，
 因此严格 oracle 仍为 `g4315520 --threads 0`。
 
-.NET 候选基于已合并 main `ea1bb8e`，再加入下述隔离 double-complex 逆变换归一化
-AVX 改动。测试机为 Intel Core Ultra 7 265K（20 个逻辑处理器）、Windows 11 build 26220，以及
-.NET SDK/runtime `11.0.100-preview.6.26359.118`。原始目录含私有夹具路径，只保留在
-本地；这些是如实报告的本地测量，不是可公开独立复现的 benchmark corpus。
+.NET 候选提交为 `c8c2835`，基于已合并 main `1b6f315`，并包含下述隔离托管
+radix-3 AVX 改动。矩阵使用的自包含 `decode.exe` SHA-256 为
+`C514BC8C6204D41986574FBC627081D3B30D87BB7A85FF8C9CA5D2FED6827E5F`。
+测试机为 Intel Core Ultra 7 265K（20 个逻辑处理器）、Windows 11 build 26220，以及 .NET
+SDK/runtime `11.0.100-preview.6.26359.118`。原始目录含私有夹具路径，只保留在本地；
+这些是如实报告的本地测量，不是可公开独立复现的 benchmark corpus。
 
 三轮范围展示了正常的启动、温度、调度和系统波动。倍数会同时随 .NET 分子和 Python
 分母变化，不能用于判断版本因果回退或提升；下方同一时刻交错执行的版本 A/B 才是
 本候选的因果门禁。
 
-### 托管 AVX double-complex 逆 FFT 归一化
+### 之前的托管 AVX double-complex 逆 FFT 归一化
+
+这个保留的历史候选基于已合并 main `ea1bb8e`。
 
 逆变换会把每个实部和虚部乘以同一个双精度归一化因子。候选使用一个
 `Vector256<double>` 同时处理两个相互独立的复数值，并保持标量操作数顺序。它不使用
@@ -435,7 +439,7 @@ normal、正负一、最大有限值、无穷以及不同 NaN payload。五项�
 三组顺序相反的 1000 帧 Exact `current --threads 20` 配对在九个兼容表面上全部一致：
 平均墙钟从 37.288 降到 36.909 秒（减少 1.02%），CPU 从 301.984 降到 292.766 秒
 （减少 3.05%），平均活跃核心数从 8.10 变为 7.93。三组墙钟方向为 -0.79%、+0.21%
-和 -2.46%；基线和候选的有界最大工作集分别为 443.4 与 355.6 MiB。三组
+和 -2.46%；基线和候选的有界最大工作集分别为 443.4 MiB 与 355.6 MiB。三组
 `--threads 0` 配对也在全部兼容表面上一致，平均墙钟从 41.030 降到 40.219 秒。
 v0.4.0 与 IPP-fast profile 不会调用这条托管 current-profile FFT 路径。
 
