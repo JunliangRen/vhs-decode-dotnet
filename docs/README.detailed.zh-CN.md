@@ -365,7 +365,7 @@ v0.4.0、Exact `current`、IPP-fast v0.4.0 和 IPP-fast `current`。文件名不
 | `--threads 10` | 52.965 s | 54.949 s | 10.266 s / 5.159x / 80.62% | 9.335 s / 5.886x / 83.01% | 9.766 s / 5.424x / 81.56% | 7.727 s / 7.111x / 85.94% |
 | `--threads 20` | 53.555 s | 54.842 s | 8.578 s / 6.244x / 83.98% | 7.325 s / 7.487x / 86.64% | 8.127 s / 6.590x / 84.83% | 5.863 s / 9.355x / 89.31% |
 <!-- LATEST_PERFORMANCE_END -->
-<!-- LATEST_PERFORMANCE_RUNS: performance-snapshot-runs=90 dotnet-matrix-runs=60 python-reference-runs=30 dotnet-repeats=3 python-reference-date=2026-08-12 dotnet-v040-date=2026-08-12 dotnet-current-date=2026-08-12 dotnet-current-t20-date=2026-08-13 phase18-table-runs=6 phase18-exact-200-ab-pairs=3 phase18-exact-1000-ab-pairs=1 phase18-ipp-200-ab-pairs=1 phase18-thread-gate-modes=2 phase18-tests=1433 sinc-unroll-matrix-runs=90 sinc-unroll-exact-1000-ab-pairs=3 sinc-unroll-kernel-pairs=8 sinc-unroll-thread-profile-runs=24 sinc-unroll-memory-frames=2000 sinc-unroll-tests=34 sinc-unroll-intrinsic-modes=4 python-v040-runs=15 python-v040-hashes=15 python-pr341-runs=15 python-pr341-hashes=1 -->
+<!-- LATEST_PERFORMANCE_RUNS: performance-snapshot-runs=90 dotnet-matrix-runs=60 python-reference-runs=30 dotnet-repeats=3 python-reference-date=2026-08-12 dotnet-v040-date=2026-08-12 dotnet-current-date=2026-08-12 dotnet-current-t20-date=2026-08-13 phase18-table-runs=6 phase18-exact-200-ab-pairs=3 phase18-exact-1000-ab-pairs=1 phase18-ipp-200-ab-pairs=1 phase18-thread-gate-modes=2 phase18-tests=1435 phase18-final-signal-ab-pairs=3 phase18-final-memory-frames=1000 sinc-unroll-matrix-runs=90 sinc-unroll-exact-1000-ab-pairs=3 sinc-unroll-kernel-pairs=8 sinc-unroll-thread-profile-runs=24 sinc-unroll-memory-frames=2000 sinc-unroll-tests=34 sinc-unroll-intrinsic-modes=4 python-v040-runs=15 python-v040-hashes=15 python-pr341-runs=15 python-pr341-hashes=1 -->
 
 三次运行的墙钟范围如下：
 
@@ -406,8 +406,9 @@ companion inverse，随后同步等待。采样显示存在嵌套 ThreadPool 调
 workers。本次隔离改动改用解码器自有的有界队列及固定后台 workers，同时保持两种
 inverse FFT 实现、表达式、缓冲区、异常优先级和有序提交不变。它只在没有 input
 processor 且 worker 数超过现有 12-block 预取上限时启用，因此 `--threads 20` 使用
-8 个 companion workers。队列或 worker 创建失败时仍按原来的 real-then-companion
-串行顺序执行。
+8 个 companion workers；它们在第一次符合条件的 inverse 时才启动，而有状态
+sharpness 会把串行 block 路径限制为 1 个。队列或 worker 创建失败时仍按原来的
+real-then-companion 串行顺序执行。
 
 三组交错 200 帧 Exact `current --threads 20` A/B 在退出状态、亮度、色度、原始
 JSON、stdout、归一化 stderr/日志和全部有序 `fileLoc` 上一致；配对墙钟变化中位数
@@ -418,7 +419,14 @@ JSON、stdout、归一化 stderr/日志和全部有序 `fileLoc` 上一致；配
 
 默认 5 workers 和 `--threads 0` Exact 运行也在全部表面上一致。200 帧 IPP-fast
 配对全部一致，墙钟从 7.137 降至 7.102 秒；该 0.49% 筛查差异视为噪声，不归因
-为 IPP 提速。加载原生 IPP runtime 后，全部 1433 项 xUnit v3 测试通过。
+为 IPP 提速。加载原生 IPP runtime 后，全部 1435 项 xUnit v3 测试通过。
+
+最终审阅补丁把 worker 改为延迟创建，将有状态 sharpness 限制为 1 个 companion，
+并在销毁每个完成信号前等待 `Set` 完全返回。与表格候选交错执行的三组 200 帧配对
+再次在全部表面上一致，墙钟变化为 -4.47%、+2.53%、-2.31%。由于当时另一个前台
+负载正在运行，这些时间只用于排除回退，不计入表格。最终一次 1000 帧运行与保存的
+全部产物和归一化诊断一致；前/后半程工作集峰值为 355.2/353.8 MiB，末尾样本为
+353.6 MiB。
 
 ### 有序 AVX TBC sinc 累加
 
@@ -2913,7 +2921,7 @@ stderr、时间戳归一化日志和全部 2,000 个有序 `fileLoc` 完全一�
 .\tools\build-ipp-native.ps1
 dotnet restore VHSDecodeDotNet.slnx
 dotnet build VHSDecodeDotNet.slnx -c Release --no-restore
-dotnet test --solution VHSDecodeDotNet.slnx -c Release --no-build --no-restore --minimum-expected-tests 1433
+dotnet test --solution VHSDecodeDotNet.slnx -c Release --no-build --no-restore --minimum-expected-tests 1435
 dotnet test --project tests\VHSDecode.Tests\VHSDecode.Tests.csproj -c Release --no-build --no-restore --coverage --coverage-output coverage.cobertura.xml --coverage-output-format cobertura
 ```
 
@@ -2925,7 +2933,7 @@ Intel oneAPI。只含二进制的单文件发布会嵌入 `vhsdecode_ipp.dll` �
 notice，不会额外生成许可证 sidecar 文件。只构建 Exact 后端时可以省略原生构建步骤。
 
 当前正式 Release 构建为零警告、零错误。xUnit v3 项目向
-`dotnet test` 和 Visual Studio Test Explorer 暴露 **1,433** 个可独立发现的测试。
+`dotnet test` 和 Visual Studio Test Explorer 暴露 **1,435** 个可独立发现的测试。
 
 <!-- SECTION: usage -->
 

@@ -449,7 +449,7 @@ matrices that used another batch, format, or fixture are not directly comparable
 | `--threads 10` | 52.965 s | 54.949 s | 10.266 s / 5.159x / 80.62% | 9.335 s / 5.886x / 83.01% | 9.766 s / 5.424x / 81.56% | 7.727 s / 7.111x / 85.94% |
 | `--threads 20` | 53.555 s | 54.842 s | 8.578 s / 6.244x / 83.98% | 7.325 s / 7.487x / 86.64% | 8.127 s / 6.590x / 84.83% | 5.863 s / 9.355x / 89.31% |
 <!-- LATEST_PERFORMANCE_END -->
-<!-- LATEST_PERFORMANCE_RUNS: performance-snapshot-runs=90 dotnet-matrix-runs=60 python-reference-runs=30 dotnet-repeats=3 python-reference-date=2026-08-12 dotnet-v040-date=2026-08-12 dotnet-current-date=2026-08-12 dotnet-current-t20-date=2026-08-13 phase18-table-runs=6 phase18-exact-200-ab-pairs=3 phase18-exact-1000-ab-pairs=1 phase18-ipp-200-ab-pairs=1 phase18-thread-gate-modes=2 phase18-tests=1433 sinc-unroll-matrix-runs=90 sinc-unroll-exact-1000-ab-pairs=3 sinc-unroll-kernel-pairs=8 sinc-unroll-thread-profile-runs=24 sinc-unroll-memory-frames=2000 sinc-unroll-tests=34 sinc-unroll-intrinsic-modes=4 python-v040-runs=15 python-v040-hashes=15 python-pr341-runs=15 python-pr341-hashes=1 -->
+<!-- LATEST_PERFORMANCE_RUNS: performance-snapshot-runs=90 dotnet-matrix-runs=60 python-reference-runs=30 dotnet-repeats=3 python-reference-date=2026-08-12 dotnet-v040-date=2026-08-12 dotnet-current-date=2026-08-12 dotnet-current-t20-date=2026-08-13 phase18-table-runs=6 phase18-exact-200-ab-pairs=3 phase18-exact-1000-ab-pairs=1 phase18-ipp-200-ab-pairs=1 phase18-thread-gate-modes=2 phase18-tests=1435 phase18-final-signal-ab-pairs=3 phase18-final-memory-frames=1000 sinc-unroll-matrix-runs=90 sinc-unroll-exact-1000-ab-pairs=3 sinc-unroll-kernel-pairs=8 sinc-unroll-thread-profile-runs=24 sinc-unroll-memory-frames=2000 sinc-unroll-tests=34 sinc-unroll-intrinsic-modes=4 python-v040-runs=15 python-v040-hashes=15 python-pr341-runs=15 python-pr341-hashes=1 -->
 
 The three-run wall-time ranges were:
 
@@ -495,8 +495,10 @@ change uses a decoder-owned bounded queue with fixed background workers while
 keeping both inverse FFT implementations, expressions, buffers, exception
 precedence, and ordered commits unchanged. It activates only without an input
 processor and above the existing 12-block prefetch cap; `--threads 20` therefore
-uses eight companion workers. Queue or worker creation failure preserves the
-original serial real-then-companion order.
+configures eight companion workers. They start lazily on the first eligible
+inverse, while stateful sharpness clamps the sequential block path to one.
+Queue or worker creation failure preserves the original serial
+real-then-companion order.
 
 Three interleaved 200-frame Exact `current --threads 20` A/B pairs matched exit
 status, luma, chroma, raw JSON, stdout, normalized stderr/logs, and every ordered
@@ -510,7 +512,16 @@ progressive growth or OOM.
 Default-five and `--threads 0` Exact runs also matched every surface. A
 200-frame IPP-fast pair matched every surface and moved from 7.137 to 7.102
 seconds; that 0.49% screening delta is treated as noise, not an attributed IPP
-speedup. All 1,433 xUnit v3 tests passed with the native IPP runtime available.
+speedup. All 1,435 xUnit v3 tests passed with the native IPP runtime available.
+
+The final review follow-up made worker creation lazy, clamped stateful sharpness
+to one companion, and waited for completion signaling to return before disposing
+each signal. Three interleaved 200-frame pairs against the table candidate again
+matched every surface. Their wall deltas were -4.47%, +2.53%, and -2.31%; because
+another foreground workload was active, these timings are used only to reject a
+regression and are excluded from the table. A final 1,000-frame run matched all
+saved artifacts and normalized diagnostics; first/second-half working-set peaks
+were 355.2/353.8 MiB and the final sample was 353.6 MiB.
 
 ### Ordered AVX TBC sinc accumulation
 
@@ -3716,7 +3727,7 @@ Requirements:
 .\tools\build-ipp-native.ps1
 dotnet restore VHSDecodeDotNet.slnx
 dotnet build VHSDecodeDotNet.slnx -c Release --no-restore
-dotnet test --solution VHSDecodeDotNet.slnx -c Release --no-build --no-restore --minimum-expected-tests 1433
+dotnet test --solution VHSDecodeDotNet.slnx -c Release --no-build --no-restore --minimum-expected-tests 1435
 dotnet test --project tests\VHSDecode.Tests\VHSDecode.Tests.csproj -c Release --no-build --no-restore --coverage --coverage-output coverage.cobertura.xml --coverage-output-format cobertura
 ```
 
@@ -3730,7 +3741,7 @@ deployment computer. Binary-only single-file releases embed
 sidecar license files. An Exact-only build may omit the native build step.
 
 The current formal Release build has zero warnings and errors. The xUnit v3
-project exposes **1,433** independently discoverable tests to both
+project exposes **1,435** independently discoverable tests to both
 `dotnet test` and Visual Studio Test Explorer.
 
 <!-- SECTION: usage -->

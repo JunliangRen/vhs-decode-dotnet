@@ -123,6 +123,9 @@ public sealed class RfBlockDecodePipeline : IDisposable
     internal int VhsInverseCompanionWorkerThreads =>
         _demodulator.VhsInverseCompanionWorkerThreads;
 
+    internal bool IsVhsInverseCompanionSchedulerCreated =>
+        _demodulator.IsVhsInverseCompanionSchedulerCreated;
+
     internal bool UsesIppVhsEnvelopeSos => _vhsEnvelopeIppSos is not null;
 
     internal int CreatedIppVhsEnvelopeSosContextCount =>

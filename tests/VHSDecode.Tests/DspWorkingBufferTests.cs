@@ -1037,18 +1037,21 @@ public sealed class DspWorkingBufferTests
     }
 
     [Theory(DisplayName = "VHS inverse staging follows the bounded current-profile policy")]
-    [InlineData(12, "current", false, false, "exact")]
-    [InlineData(20, "current", false, true, "exact")]
-    [InlineData(20, "v0.4.0", false, false, "exact")]
-    [InlineData(20, "current", true, false, "exact")]
-    [InlineData(12, "current", false, false, "ipp-fast")]
-    [InlineData(20, "current", false, true, "ipp-fast")]
+    [InlineData(12, "current", false, false, false, "exact", 0)]
+    [InlineData(20, "current", false, false, true, "exact", 8)]
+    [InlineData(20, "current", false, true, true, "exact", 1)]
+    [InlineData(20, "v0.4.0", false, false, false, "exact", 0)]
+    [InlineData(20, "current", true, false, false, "exact", 0)]
+    [InlineData(12, "current", false, false, false, "ipp-fast", 0)]
+    [InlineData(20, "current", false, false, true, "ipp-fast", 8)]
     public void VhsInverseStagingFollowsHighWorkerPolicy(
         int workerThreads,
         string profile,
         bool useGnrc,
+        bool useSharpness,
         bool expected,
-        string backend)
+        string backend,
+        int expectedCompanionWorkers)
     {
         Assert.SkipUnless(
             backend != "ipp-fast" || IppRuntime.TryProbe(out _),
@@ -1070,6 +1073,12 @@ public sealed class DspWorkingBufferTests
             arguments.Add("--gnrc");
         }
 
+        if (useSharpness)
+        {
+            arguments.Add("--sharpness");
+            arguments.Add("1");
+        }
+
         arguments.Add("probe.s16");
         arguments.Add("probe-output");
         ParsedCommand command = new CommandLineParser().Parse(
@@ -1080,15 +1089,76 @@ public sealed class DspWorkingBufferTests
             DecodeSessionFactory.DefaultBlockLength);
 
         Assert.Equal(expected, session.Pipeline.ParallelizesVhsInverseStaging);
-        int expectedCompanionWorkers = expected
-            ? Math.Min(
-                workerThreads
-                    - RfBlockStreamDecoder.MaximumConcurrentPrefetchBlocks,
-                RfBlockStreamDecoder.MaximumConcurrentPrefetchBlocks)
-            : 0;
         Assert.Equal(
             expectedCompanionWorkers,
             session.Pipeline.VhsInverseCompanionWorkerThreads);
+        Assert.False(session.Pipeline.IsVhsInverseCompanionSchedulerCreated);
+    }
+
+    [Fact(DisplayName = "VHS inverse companion scheduler drains bounded work and propagates failures")]
+    public async Task VhsInverseCompanionSchedulerDrainsBoundedWorkAndPropagatesFailures()
+    {
+        using var started = new ManualResetEventSlim(false);
+        using var release = new ManualResetEventSlim(false);
+        var scheduler = new RfDemodulator.VhsInverseCompanionScheduler(
+            workerCount: 1);
+        var order = new List<int>();
+        var injected = new InvalidOperationException("injected companion failure");
+        CancellationToken cancellationToken = TestContext.Current.CancellationToken;
+        RfDemodulator.VhsInverseCompanionWorkItem first = null!;
+        RfDemodulator.VhsInverseCompanionWorkItem failing = null!;
+        RfDemodulator.VhsInverseCompanionWorkItem third = null!;
+
+        try
+        {
+            Assert.True(scheduler.TryQueue(
+                () =>
+                {
+                    order.Add(1);
+                    started.Set();
+                    release.Wait(cancellationToken);
+                },
+                out first));
+            Assert.True(started.Wait(TimeSpan.FromSeconds(5), cancellationToken));
+            Assert.True(scheduler.TryQueue(
+                () =>
+                {
+                    order.Add(2);
+                    throw injected;
+                },
+                out failing));
+            Assert.True(scheduler.TryQueue(
+                () => order.Add(3),
+                out third));
+            Assert.False(scheduler.TryQueue(
+                () => order.Add(4),
+                out _));
+
+            Task disposeTask = Task.Run(scheduler.Dispose, cancellationToken);
+            await Task.Delay(
+                TimeSpan.FromMilliseconds(50),
+                cancellationToken);
+            Assert.False(disposeTask.IsCompleted);
+            release.Set();
+            await disposeTask.WaitAsync(
+                TimeSpan.FromSeconds(5),
+                cancellationToken);
+
+            first.Wait();
+            InvalidOperationException actual = Assert.Throws<InvalidOperationException>(
+                failing.Wait);
+            Assert.Same(injected, actual);
+            third.Wait();
+            Assert.Equal([1, 2, 3], order);
+        }
+        finally
+        {
+            release.Set();
+            scheduler.Dispose();
+            first?.Dispose();
+            failing?.Dispose();
+            third?.Dispose();
+        }
     }
 
     [Fact(DisplayName = "RF constructors retain their public binary signatures")]

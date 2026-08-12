@@ -12,7 +12,8 @@ public sealed partial class ReadmeLocalizationTests
         "dotnet-current-date=2026-08-12 dotnet-current-t20-date=2026-08-13 " +
         "phase18-table-runs=6 phase18-exact-200-ab-pairs=3 " +
         "phase18-exact-1000-ab-pairs=1 phase18-ipp-200-ab-pairs=1 " +
-        "phase18-thread-gate-modes=2 phase18-tests=1433 " +
+        "phase18-thread-gate-modes=2 phase18-tests=1435 " +
+        "phase18-final-signal-ab-pairs=3 phase18-final-memory-frames=1000 " +
         "sinc-unroll-matrix-runs=90 " +
         "sinc-unroll-exact-1000-ab-pairs=3 sinc-unroll-kernel-pairs=8 " +
         "sinc-unroll-thread-profile-runs=24 sinc-unroll-memory-frames=2000 " +
@@ -22,7 +23,7 @@ public sealed partial class ReadmeLocalizationTests
 
     private const string FullCiTestCommand =
         "run: dotnet test --solution VHSDecodeDotNet.slnx --configuration Release " +
-        "--no-build --no-restore --minimum-expected-tests 1433";
+        "--no-build --no-restore --minimum-expected-tests 1435";
 
     private const string CurrentChromaAccAvxDisabledTestCommand =
         "run: dotnet test tests/VHSDecode.Tests/VHSDecode.Tests.csproj " +
@@ -206,7 +207,7 @@ public sealed partial class ReadmeLocalizationTests
         [
             "43155200da87c0d49eb37d8ec09b1372075ee8e4",
             "11.0.100-preview.6.26359.118",
-            "**1,433**",
+            "**1,435**",
             "--compat-version",
             "current",
             "--dsp-backend",
@@ -527,7 +528,7 @@ public sealed partial class ReadmeLocalizationTests
             "1.72%",
             "444.3 MiB",
             "406.0 MiB",
-            "**1,433**",
+            "**1,435**",
             "3.7935",
             "3.6182",
             "4.62%",
@@ -1261,7 +1262,7 @@ public sealed partial class ReadmeLocalizationTests
             "The shared compatibility evidence document is missing.");
         string compatibilityEvidence = File.ReadAllText(compatibilityEvidencePath);
         Assert.Contains(
-            "1,433 independently discoverable tests",
+            "1,435 independently discoverable tests",
             compatibilityEvidence,
             StringComparison.Ordinal);
         Assert.DoesNotContain(

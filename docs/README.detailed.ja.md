@@ -424,7 +424,7 @@ cell は wall-time median、profile が対応する Python 列に対する speed
 | `--threads 10` | 52.965 s | 54.949 s | 10.266 s / 5.159x / 80.62% | 9.335 s / 5.886x / 83.01% | 9.766 s / 5.424x / 81.56% | 7.727 s / 7.111x / 85.94% |
 | `--threads 20` | 53.555 s | 54.842 s | 8.578 s / 6.244x / 83.98% | 7.325 s / 7.487x / 86.64% | 8.127 s / 6.590x / 84.83% | 5.863 s / 9.355x / 89.31% |
 <!-- LATEST_PERFORMANCE_END -->
-<!-- LATEST_PERFORMANCE_RUNS: performance-snapshot-runs=90 dotnet-matrix-runs=60 python-reference-runs=30 dotnet-repeats=3 python-reference-date=2026-08-12 dotnet-v040-date=2026-08-12 dotnet-current-date=2026-08-12 dotnet-current-t20-date=2026-08-13 phase18-table-runs=6 phase18-exact-200-ab-pairs=3 phase18-exact-1000-ab-pairs=1 phase18-ipp-200-ab-pairs=1 phase18-thread-gate-modes=2 phase18-tests=1433 sinc-unroll-matrix-runs=90 sinc-unroll-exact-1000-ab-pairs=3 sinc-unroll-kernel-pairs=8 sinc-unroll-thread-profile-runs=24 sinc-unroll-memory-frames=2000 sinc-unroll-tests=34 sinc-unroll-intrinsic-modes=4 python-v040-runs=15 python-v040-hashes=15 python-pr341-runs=15 python-pr341-hashes=1 -->
+<!-- LATEST_PERFORMANCE_RUNS: performance-snapshot-runs=90 dotnet-matrix-runs=60 python-reference-runs=30 dotnet-repeats=3 python-reference-date=2026-08-12 dotnet-v040-date=2026-08-12 dotnet-current-date=2026-08-12 dotnet-current-t20-date=2026-08-13 phase18-table-runs=6 phase18-exact-200-ab-pairs=3 phase18-exact-1000-ab-pairs=1 phase18-ipp-200-ab-pairs=1 phase18-thread-gate-modes=2 phase18-tests=1435 phase18-final-signal-ab-pairs=3 phase18-final-memory-frames=1000 sinc-unroll-matrix-runs=90 sinc-unroll-exact-1000-ab-pairs=3 sinc-unroll-kernel-pairs=8 sinc-unroll-thread-profile-runs=24 sinc-unroll-memory-frames=2000 sinc-unroll-tests=34 sinc-unroll-intrinsic-modes=4 python-v040-runs=15 python-v040-hashes=15 python-pr341-runs=15 python-pr341-hashes=1 -->
 
 3-run wall-time range は次のとおりです。
 
@@ -466,8 +466,9 @@ ThreadPool scheduling と block された outer worker が確認されました�
 change は decoder-owned bounded queue と固定 background worker を使い、2 つの inverse
 FFT implementation、expression、buffer、exception precedence、ordered commit は変更しません。
 input processor がなく、既存の 12-block prefetch cap を超える場合だけ有効になるため、
-`--threads 20` は 8 companion worker を使います。queue/worker creation が失敗した場合は、
-元の serial real-then-companion order を維持します。
+`--threads 20` は 8 companion worker を設定します。worker は最初の eligible inverse で
+lazy start し、stateful sharpness の sequential block path では 1 worker に制限します。
+queue/worker creation が失敗した場合は、元の serial real-then-companion order を維持します。
 
 interleaved 200-frame Exact `current --threads 20` 3 A/B pair は exit status、luma、chroma、
 raw JSON、stdout、normalized stderr/log、すべての ordered `fileLoc` で一致しました。paired
@@ -480,7 +481,15 @@ first/second-half working-set maximum は 352.2/351.4 MiB で、progressive grow
 default-five と `--threads 0` の Exact run も全 surface で一致しました。200-frame
 IPP-fast pair は全 surface で一致し、7.137 から 7.102 秒へ移りました。この 0.49% の
 screening delta は noise とみなし、IPP speedup には帰属しません。native IPP runtime を
-利用した状態で xUnit v3 1,433 test がすべて成功しました。
+利用した状態で xUnit v3 1,435 test がすべて成功しました。
+
+final review follow-up は worker creation を lazy にし、stateful sharpness を 1 companion
+に制限し、各 completion signal を dispose する前に `Set` の return を待ちます。table
+candidate に対する interleaved 200-frame 3 pair は再び全 surface で一致し、wall delta は
+-4.47%、+2.53%、-2.31% でした。別の foreground workload が active だったため、これらの
+time は regression の否定だけに使い、table から除外します。final 1,000-frame run は保存済み
+artifact と normalized diagnostic のすべてに一致し、first/second-half working-set peak は
+355.2/353.8 MiB、final sample は 353.6 MiB でした。
 
 ### ordered AVX TBC sinc accumulation
 
@@ -3478,7 +3487,7 @@ Microsoft.Testing.Platform run は全 1,401 test を検出し、1,397 pass、0 f
 .\tools\build-ipp-native.ps1
 dotnet restore VHSDecodeDotNet.slnx
 dotnet build VHSDecodeDotNet.slnx -c Release --no-restore
-dotnet test --solution VHSDecodeDotNet.slnx -c Release --no-build --no-restore --minimum-expected-tests 1433
+dotnet test --solution VHSDecodeDotNet.slnx -c Release --no-build --no-restore --minimum-expected-tests 1435
 dotnet test --project tests\VHSDecode.Tests\VHSDecode.Tests.csproj -c Release --no-build --no-restore --coverage --coverage-output coverage.cobertura.xml --coverage-output-format cobertura
 ```
 
@@ -3492,7 +3501,7 @@ third-party notice を埋め込み、license sidecar file は追加しません�
 
 現在の正式な Release build は warning 0、error 0 です。xUnit v3 project は
 `dotnet test` と Visual Studio Test Explorer の両方で個別に検出できる
-**1,433** tests を公開します。
+**1,435** tests を公開します。
 
 <!-- SECTION: usage -->
 

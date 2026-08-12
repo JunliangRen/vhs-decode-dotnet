@@ -26,7 +26,8 @@ public sealed class RfDemodulator : IDisposable
     private int _subDeemphasisFilterPlanBuildCount;
     private readonly VhsRealFftWorkspacePool _vhsRealFftWorkspacePool;
     private readonly IppComplexFft64Pool? _ippComplexFftPool;
-    private readonly VhsInverseCompanionScheduler? _vhsInverseCompanionScheduler;
+    private readonly Lazy<VhsInverseCompanionScheduler?>? _vhsInverseCompanionScheduler;
+    private readonly int _vhsInverseCompanionWorkerThreads;
     private readonly bool _parallelizeVhsInverseStaging;
     private int _disposed;
 
@@ -85,14 +86,19 @@ public sealed class RfDemodulator : IDisposable
         SampleRateHz = sampleRateHz;
         DspBackend = dspBackend;
         _parallelizeVhsInverseStaging = parallelizeVhsInverseStaging;
-        _vhsInverseCompanionScheduler = parallelizeVhsInverseStaging
-            ? VhsInverseCompanionScheduler.TryCreate(
-                vhsInverseCompanionWorkerThreads)
-            : null;
         _vhsRealFftWorkspacePool = new VhsRealFftWorkspacePool(
             dspBackend,
             parallelizeVhsInverseStaging,
             companionIppFftFactory);
+        _vhsInverseCompanionWorkerThreads = parallelizeVhsInverseStaging
+            ? vhsInverseCompanionWorkerThreads
+            : 0;
+        _vhsInverseCompanionScheduler = parallelizeVhsInverseStaging
+            ? new Lazy<VhsInverseCompanionScheduler?>(
+                () => VhsInverseCompanionScheduler.TryCreate(
+                    vhsInverseCompanionWorkerThreads),
+                LazyThreadSafetyMode.ExecutionAndPublication)
+            : null;
     }
 
     public double SampleRateHz { get; }
@@ -102,7 +108,13 @@ public sealed class RfDemodulator : IDisposable
     internal bool ParallelizesVhsInverseStaging => _parallelizeVhsInverseStaging;
 
     internal int VhsInverseCompanionWorkerThreads =>
-        _vhsInverseCompanionScheduler?.WorkerCount ?? 0;
+        _vhsInverseCompanionScheduler is { IsValueCreated: true }
+            ? _vhsInverseCompanionScheduler.Value?.WorkerCount ?? 0
+            : _vhsInverseCompanionWorkerThreads;
+
+    internal bool IsVhsInverseCompanionSchedulerCreated =>
+        _vhsInverseCompanionScheduler is { IsValueCreated: true }
+            && _vhsInverseCompanionScheduler.Value is not null;
 
     internal bool UsesIppComplexFft => _ippComplexFftPool is not null;
 
@@ -118,7 +130,10 @@ public sealed class RfDemodulator : IDisposable
         {
             try
             {
-                _vhsInverseCompanionScheduler?.Dispose();
+                if (_vhsInverseCompanionScheduler is { IsValueCreated: true })
+                {
+                    _vhsInverseCompanionScheduler.Value?.Dispose();
+                }
             }
             finally
             {
@@ -1485,8 +1500,10 @@ public sealed class RfDemodulator : IDisposable
         VhsInverseCompanionWorkItem analyticInverse;
         try
         {
-            if (_vhsInverseCompanionScheduler is null
-                || !_vhsInverseCompanionScheduler.TryQueue(
+            VhsInverseCompanionScheduler? scheduler =
+                _vhsInverseCompanionScheduler?.Value;
+            if (scheduler is null
+                || !scheduler.TryQueue(
                     () => CompleteNumpyVhsComplexAnalyticSignal(
                         workspace,
                         inputLength),
@@ -1510,7 +1527,7 @@ public sealed class RfDemodulator : IDisposable
             return;
         }
 
-        using (analyticInverse)
+        try
         {
             ExceptionDispatchInfo? realInverseFailure = null;
             try
@@ -1535,6 +1552,10 @@ public sealed class RfDemodulator : IDisposable
 
             realInverseFailure?.Throw();
         }
+        finally
+        {
+            analyticInverse.Dispose();
+        }
     }
 
     private void RunParallelIppVhsInverseStaging(
@@ -1545,8 +1566,10 @@ public sealed class RfDemodulator : IDisposable
         VhsInverseCompanionWorkItem analyticInverse;
         try
         {
-            if (_vhsInverseCompanionScheduler is null
-                || !_vhsInverseCompanionScheduler.TryQueue(
+            VhsInverseCompanionScheduler? scheduler =
+                _vhsInverseCompanionScheduler?.Value;
+            if (scheduler is null
+                || !scheduler.TryQueue(
                     () => workspace.InverseCompanion(
                         workspace.HilbertHalf.AsSpan(0, spectrumLength),
                         workspace.Imaginary),
@@ -1574,7 +1597,7 @@ public sealed class RfDemodulator : IDisposable
             return;
         }
 
-        using (analyticInverse)
+        try
         {
             ExceptionDispatchInfo? realInverseFailure = null;
             try
@@ -1598,6 +1621,10 @@ public sealed class RfDemodulator : IDisposable
             }
 
             realInverseFailure?.Throw();
+        }
+        finally
+        {
+            analyticInverse.Dispose();
         }
     }
 
@@ -1877,7 +1904,7 @@ public sealed class RfDemodulator : IDisposable
         return true;
     }
 
-    private sealed class VhsInverseCompanionScheduler : IDisposable
+    internal sealed class VhsInverseCompanionScheduler : IDisposable
     {
         private readonly BlockingCollection<VhsInverseCompanionWorkItem> _queue;
         private readonly Thread[] _workers;
@@ -1987,12 +2014,13 @@ public sealed class RfDemodulator : IDisposable
         }
     }
 
-    private sealed class VhsInverseCompanionWorkItem : IDisposable
+    internal sealed class VhsInverseCompanionWorkItem : IDisposable
     {
         private readonly ManualResetEventSlim _completion = new(
             initialState: false,
             spinCount: 0);
         private Action? _action;
+        private int _setCompleted;
         private ExceptionDispatchInfo? _failure;
 
         internal VhsInverseCompanionWorkItem(Action action)
@@ -2013,12 +2041,19 @@ public sealed class RfDemodulator : IDisposable
             finally
             {
                 _completion.Set();
+                Volatile.Write(ref _setCompleted, 1);
             }
         }
 
         internal void Wait()
         {
             _completion.Wait();
+            SpinWait spinner = default;
+            while (Volatile.Read(ref _setCompleted) == 0)
+            {
+                spinner.SpinOnce();
+            }
+
             _failure?.Throw();
         }
 

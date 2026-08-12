@@ -290,10 +290,12 @@ public static class DecodeSessionFactory
             && executionOptions.WorkerThreads
                 > RfBlockStreamDecoder.MaximumConcurrentPrefetchBlocks;
         int vhsInverseCompanionWorkerThreads = parallelizeVhsInverseStaging
-            ? Math.Min(
-                executionOptions.WorkerThreads
-                    - RfBlockStreamDecoder.MaximumConcurrentPrefetchBlocks,
-                RfBlockStreamDecoder.MaximumConcurrentPrefetchBlocks)
+            ? filterOptions.SharpnessEq is not null
+                ? 1
+                : Math.Min(
+                    executionOptions.WorkerThreads
+                        - RfBlockStreamDecoder.MaximumConcurrentPrefetchBlocks,
+                    RfBlockStreamDecoder.MaximumConcurrentPrefetchBlocks)
             : 0;
         var pipeline = new RfBlockDecodePipeline(
             loader,
