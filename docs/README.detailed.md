@@ -442,38 +442,38 @@ format, or fixture are not directly comparable:
 <!-- LATEST_PERFORMANCE_BEGIN -->
 | CLI mode (workers) | Python v0.4.0 | Python PR341 | Exact + v0.4.0 | Exact + current | IPP-fast + v0.4.0 | IPP-fast + current |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| default (5) | 52.811 s | 54.243 s | 13.595 s / 3.885x / 74.26% | 12.368 s / 4.386x / 77.20% | 11.754 s / 4.493x / 77.74% | 9.768 s / 5.553x / 81.99% |
-| `--threads 1` | 57.067 s | 56.762 s | 34.582 s / 1.650x / 39.40% | 37.922 s / 1.497x / 33.19% | 25.260 s / 2.259x / 55.74% | 27.644 s / 2.053x / 51.30% |
-| `--threads 5` | 52.920 s | 55.722 s | 13.453 s / 3.934x / 74.58% | 12.366 s / 4.506x / 77.81% | 11.868 s / 4.459x / 77.57% | 9.867 s / 5.647x / 82.29% |
-| `--threads 10` | 52.965 s | 54.949 s | 10.689 s / 4.955x / 79.82% | 9.629 s / 5.707x / 82.48% | 10.178 s / 5.204x / 80.78% | 8.055 s / 6.821x / 85.34% |
-| `--threads 20` | 53.555 s | 54.842 s | 8.654 s / 6.188x / 83.84% | 7.545 s / 7.269x / 86.24% | 8.409 s / 6.369x / 84.30% | 6.257 s / 8.764x / 88.59% |
+| default (5) | 52.811 s | 54.243 s | 12.930 s / 4.084x / 75.52% | 12.477 s / 4.348x / 77.00% | 11.493 s / 4.595x / 78.24% | 9.673 s / 5.607x / 82.17% |
+| `--threads 1` | 57.067 s | 56.762 s | 31.701 s / 1.800x / 44.45% | 36.035 s / 1.575x / 36.52% | 22.907 s / 2.491x / 59.86% | 25.402 s / 2.235x / 55.25% |
+| `--threads 5` | 52.920 s | 55.722 s | 13.009 s / 4.068x / 75.42% | 11.803 s / 4.721x / 78.82% | 11.489 s / 4.606x / 78.29% | 9.433 s / 5.907x / 83.07% |
+| `--threads 10` | 52.965 s | 54.949 s | 10.266 s / 5.159x / 80.62% | 9.335 s / 5.886x / 83.01% | 9.766 s / 5.424x / 81.56% | 7.727 s / 7.111x / 85.94% |
+| `--threads 20` | 53.555 s | 54.842 s | 8.578 s / 6.244x / 83.98% | 7.468 s / 7.343x / 86.38% | 8.127 s / 6.590x / 84.83% | 5.911 s / 9.279x / 89.22% |
 <!-- LATEST_PERFORMANCE_END -->
-<!-- LATEST_PERFORMANCE_RUNS: performance-snapshot-runs=90 dotnet-matrix-runs=60 python-reference-runs=30 dotnet-repeats=3 python-reference-date=2026-08-12 dotnet-v040-date=2026-08-12 dotnet-current-date=2026-08-12 sinc-unroll-matrix-runs=90 sinc-unroll-exact-1000-ab-pairs=3 sinc-unroll-kernel-pairs=8 sinc-unroll-thread-profile-runs=24 sinc-unroll-memory-frames=2000 sinc-unroll-tests=33 sinc-unroll-intrinsic-modes=4 python-v040-runs=15 python-v040-hashes=15 python-pr341-runs=15 python-pr341-hashes=1 -->
+<!-- LATEST_PERFORMANCE_RUNS: performance-snapshot-runs=90 dotnet-matrix-runs=60 python-reference-runs=30 dotnet-repeats=3 python-reference-date=2026-08-12 dotnet-v040-date=2026-08-12 dotnet-current-date=2026-08-12 sinc-unroll-matrix-runs=90 sinc-unroll-exact-1000-ab-pairs=3 sinc-unroll-kernel-pairs=8 sinc-unroll-thread-profile-runs=24 sinc-unroll-memory-frames=2000 sinc-unroll-tests=34 sinc-unroll-intrinsic-modes=4 python-v040-runs=15 python-v040-hashes=15 python-pr341-runs=15 python-pr341-hashes=1 -->
 
 The three-run wall-time ranges were:
 
 <!-- LATEST_PERFORMANCE_RANGES_BEGIN -->
 | CLI mode | Python v0.4.0 | Python PR341 | Exact + v0.4.0 | Exact + current | IPP-fast + v0.4.0 | IPP-fast + current |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| default (5) | 52.583-62.222 s | 53.893-58.195 s | 13.223-13.828 s | 12.282-12.420 s | 11.695-11.982 s | 9.753-9.776 s |
-| `--threads 1` | 56.709-60.521 s | 56.335-58.991 s | 34.566-35.013 s | 37.877-38.373 s | 25.173-25.672 s | 27.535-27.890 s |
-| `--threads 5` | 52.845-53.977 s | 53.696-58.437 s | 13.310-13.507 s | 12.179-13.083 s | 11.824-12.011 s | 9.849-9.953 s |
-| `--threads 10` | 51.797-53.088 s | 52.649-56.775 s | 10.671-11.035 s | 9.440-10.021 s | 9.912-10.745 s | 7.886-8.064 s |
-| `--threads 20` | 52.967-55.987 s | 53.005-55.618 s | 8.527-8.677 s | 7.388-7.994 s | 8.394-8.571 s | 6.136-6.297 s |
+| default (5) | 52.583-62.222 s | 53.893-58.195 s | 12.764-13.102 s | 12.123-12.608 s | 11.419-11.667 s | 9.670-9.830 s |
+| `--threads 1` | 56.709-60.521 s | 56.335-58.991 s | 31.472-32.001 s | 35.830-36.567 s | 22.846-22.995 s | 25.313-25.736 s |
+| `--threads 5` | 52.845-53.977 s | 53.696-58.437 s | 12.827-13.605 s | 11.635-11.924 s | 11.398-11.609 s | 9.344-9.596 s |
+| `--threads 10` | 51.797-53.088 s | 52.649-56.775 s | 10.244-10.380 s | 8.774-9.874 s | 9.698-9.918 s | 7.669-8.132 s |
+| `--threads 20` | 52.967-55.987 s | 53.005-55.618 s | 8.445-8.686 s | 6.826-7.725 s | 8.084-8.282 s | 5.869-6.076 s |
 <!-- LATEST_PERFORMANCE_RANGES_END -->
 
-All six paths were measured from zero in the same batch at all five worker
-settings using forward, reverse, and mixed passes. Every cell contains three
-complete runs. All 60 .NET runs and all 15 Python PR341 runs produced one hash
+All six paths were measured under the same fixed conditions in a two-phase
+2026-08-12 campaign at all five worker settings. Every cell contains forward,
+reverse, and mixed complete runs. All 60 .NET runs and all 15 Python PR341 runs produced one hash
 set per profile/mode across luma, chroma, JSON, stdout, normalized stderr/logs,
 and ordered `fileLoc`. Python v0.4.0 produced 15 distinct luma, chroma, JSON,
 and normalized-log hash sets in 15 runs; its strict oracle therefore remains
 `g4315520 --threads 0`.
 
-The .NET candidate was commit `3f075f4`, based on merged main `2d6d5ce`, with
+The .NET candidate was commit `8a37251`, based on merged main `2d6d5ce`, with
 the isolated ordered AVX TBC sinc accumulation change described below. The
 matrix candidate `VHSDecode.Core.dll` had SHA-256
-`CCDBEDC17CB0AFF52E2E0FD2088D160C9B0B934586221A01F71FC94DCC44B1E8`.
+`9427725DC8162D9082ACBE5DDD17D2CC9B78513D2FA7028C45670B96BCD5315C`.
 The host was an Intel Core Ultra 7 265K with 20 logical processors, Windows 11
 build 26220, and .NET SDK/runtime `11.0.100-preview.6.26359.118`. Raw directories
 stay local because they contain the private fixture path; these are reported
@@ -488,32 +488,37 @@ same-moment interleaved revision A/B evidence below is the causal gate.
 
 The 16-tap interior TBC sinc path already computes its interpolated weights and
 products with AVX/FMA. The isolated change keeps those instructions, float32
-products, double accumulation, cast points, and left-to-right addition order,
-but emits all 16 additions directly and suppresses redundant clearing of the
-fully overwritten stack buffer. The scalar and boundary paths are unchanged.
+products, double accumulation, cast points, and left-to-right addition order.
+It emits all 16 additions through scalar SSE2 intrinsics with each new tap as
+the left operand, matching the baseline NaN-payload order, and suppresses
+redundant clearing of the fully overwritten stack buffer. The scalar and
+boundary paths are unchanged.
 
-Two single-thread kernel pairs kept the same SHA-256 and improved by
-5.7%-6.2%; six 20-worker kernel pairs were noisier and favored the candidate
-4/6. The product decision therefore uses full-decoder evidence: three
+Eight interleaved single-thread kernel pairs kept the same SHA-256 and moved
+median batch time from 259.624 to 233.064 ms (10.23%, 1.114x); the candidate won
+8/8. The product decision still uses full-decoder evidence: three
 interleaved 1,000-frame Exact `current --threads 20` pairs matched exit status,
 field count, luma, chroma, raw JSON, stdout, normalized stderr/logs, and ordered
-`fileLoc`. Mean wall time moved from 36.081 to 35.752 seconds (0.91%, 1.009x),
-while mean CPU time was effectively unchanged at 286.61/286.58 seconds.
+`fileLoc`. The candidate won 3/3; mean wall time moved from 35.242 to 35.179
+seconds (0.18%, 1.002x), while mean CPU time rose 1.55% from 281.84 to 286.22
+seconds and mean active cores moved from 8.00 to 8.14.
 
 The 24-run deterministic gate covered Exact and IPP-fast, v0.4.0 and `current`,
 and `--threads 0`, default-five, and `--threads 20`; every product surface
 matched baseline and every thread mode. Default, no-FMA, no-AVX, and fully
-scalar real-RF runs also matched exactly. All 33 focused TBC tests passed with
+scalar real-RF runs also matched exactly. Distinct positive/negative NaN
+payloads, infinities, and signed zero matched the saved main binary bit for bit.
+All 34 focused TBC tests passed with
 normal intrinsics, AVX disabled, and every hardware intrinsic disabled. The
-full xUnit v3 suite passed 1,428 tests with four expected local IPP-runtime
+full xUnit v3 suite passed 1,429 tests with four expected local IPP-runtime
 skips.
 
 A separate 2,000-frame counter gate completed all 4,000 fields exactly and
-improved wall time from 72.019 to 70.859 seconds (1.61%, 1.016x). Candidate
-working set was 353.8 MiB median and 360.3 MiB maximum; first/final-third
-medians were 352.8/354.1 MiB. Its nine post-startup 200-frame intervals stayed
-between 6.853 and 6.931 seconds, so neither memory nor per-frame time grew
-progressively. Total allocation was 1,291.1 MiB and GC pause time was 73 ms.
+improved wall time from 68.724 to 68.473 seconds (0.37%, 1.004x). Candidate
+working set was 353.1 MiB median and 359.6 MiB maximum; first/final-third
+medians were 352.0/357.2 MiB. Its nine post-startup 200-frame intervals stayed
+between 6.446 and 6.699 seconds, so throughput did not decay progressively.
+Total allocation was 1,302.4 MiB and GC pause time was 73 ms.
 
 ### Managed AVX CTI line snapshots
 

@@ -2811,25 +2811,30 @@ oracle remains `g4315520 --threads 0`.
 
 ### Ordered AVX TBC sinc accumulation
 
-Commit `3f075f4` keeps the existing AVX/FMA weight and product expressions,
+Commit `8a37251` keeps the existing AVX/FMA weight and product expressions,
 float32 products, double accumulation, casts, and left-to-right 16-tap addition
-order. It emits the fixed additions directly and suppresses redundant clearing
-of the fully overwritten stack buffer; scalar and boundary paths are unchanged.
+order. It emits the fixed additions through scalar SSE2 intrinsics with every
+new tap as the left operand, matching the baseline NaN-payload order, and
+suppresses redundant clearing of the fully overwritten stack buffer; scalar
+and boundary paths are unchanged.
 
 Three interleaved 1,000-frame Exact `current --threads 20` pairs matched exit
 status, field count, luma, chroma, raw JSON, stdout, normalized stderr/logs, and
-ordered `fileLoc`. Mean wall time moved from 36.081 to 35.752 seconds (0.91%
-lower), with mean CPU effectively unchanged at 286.61/286.58 seconds. A 24-run
+ordered `fileLoc`. The candidate won 3/3; mean wall time moved from 35.242 to
+35.179 seconds (0.18% lower), while mean CPU moved from 281.84 to 286.22 seconds
+(1.55% higher) and mean active cores from 8.00 to 8.14. A 24-run
 gate covered Exact/IPP-fast, v0.4.0/`current`, and serial/default/20-worker modes.
-Four real-RF intrinsic variants and 33 focused TBC tests under normal, no-AVX,
-and fully scalar execution were exact. The full xUnit v3 suite reported 1,428
+Four real-RF intrinsic variants and 34 focused TBC tests under normal, no-AVX,
+and fully scalar execution were exact. Distinct positive/negative NaN payloads,
+infinities, and signed zero also matched the saved main binary bit for bit. The
+full xUnit v3 suite reported 1,429
 passes and four expected local IPP-runtime skips.
 
 A separate 2,000-frame counter gate completed 4,000 fields exactly and moved
-wall time from 72.019 to 70.859 seconds (1.61% lower). Candidate working set was
-353.8 MiB median and 360.3 MiB maximum, with 352.8/354.1 MiB first/final-third
-medians. Nine post-startup 200-frame intervals stayed within 6.853-6.931 seconds,
-showing no progressive memory growth or throughput decay.
+wall time from 68.724 to 68.473 seconds (0.37% lower). Candidate working set was
+353.1 MiB median and 359.6 MiB maximum, with 352.0/357.2 MiB first/final-third
+medians. Nine post-startup 200-frame intervals stayed within 6.446-6.699 seconds,
+showing no progressive throughput decay or OOM trend.
 
 To regenerate the embedded format parameter snapshot from the checked-out
 upstream source:

@@ -90,33 +90,32 @@ CVBS 和 HiFi 仍会拒绝 `ipp-fast`；需要 release 兼容行为时应使用 
 ## 最新性能
 
 这是同一份私有本地 40 MHz PAL VHS `.ldf` 夹具上使用
-`--start 100 --length 160` 的含启动开销快照，且不会公开源文件名。全部 90 次 Python
-与 .NET Release 测量均在 2026-08-12 的同一批次完成；候选提交为 `3f075f4`，基于
-main `2d6d5ce`，并采用正序、反序和混排方案。本表取代此前快照；兼容性结论与
-速度数据分开判断。
+`--start 100 --length 160` 的含启动开销快照，且不会公开源文件名。30 次 Python
+参考运行和 60 次最终候选 .NET Release 运行均属于同一套固定条件下的 2026-08-12
+测量活动；候选提交 `8a37251` 基于 main `2d6d5ce`，每个单元格均采用正序、反序和
+混排方案。本表取代此前快照；兼容性结论与速度数据分开判断。
 
 <!-- LATEST_PERFORMANCE_BEGIN -->
 | CLI 模式（workers） | Python v0.4.0 | Python PR341 | Exact + v0.4.0 | Exact + current | IPP-fast + v0.4.0 | IPP-fast + current |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| 默认（5） | 52.811 s | 54.243 s | 13.595 s / 3.885x | 12.368 s / 4.386x | 11.754 s / 4.493x | 9.768 s / 5.553x |
-| `--threads 1` | 57.067 s | 56.762 s | 34.582 s / 1.650x | 37.922 s / 1.497x | 25.260 s / 2.259x | 27.644 s / 2.053x |
-| `--threads 5` | 52.920 s | 55.722 s | 13.453 s / 3.934x | 12.366 s / 4.506x | 11.868 s / 4.459x | 9.867 s / 5.647x |
-| `--threads 10` | 52.965 s | 54.949 s | 10.689 s / 4.955x | 9.629 s / 5.707x | 10.178 s / 5.204x | 8.055 s / 6.821x |
-| `--threads 20` | 53.555 s | 54.842 s | 8.654 s / 6.188x | 7.545 s / 7.269x | 8.409 s / 6.369x | 6.257 s / 8.764x |
+| 默认（5） | 52.811 s | 54.243 s | 12.930 s / 4.084x | 12.477 s / 4.348x | 11.493 s / 4.595x | 9.673 s / 5.607x |
+| `--threads 1` | 57.067 s | 56.762 s | 31.701 s / 1.800x | 36.035 s / 1.575x | 22.907 s / 2.491x | 25.402 s / 2.235x |
+| `--threads 5` | 52.920 s | 55.722 s | 13.009 s / 4.068x | 11.803 s / 4.721x | 11.489 s / 4.606x | 9.433 s / 5.907x |
+| `--threads 10` | 52.965 s | 54.949 s | 10.266 s / 5.159x | 9.335 s / 5.886x | 9.766 s / 5.424x | 7.727 s / 7.111x |
+| `--threads 20` | 53.555 s | 54.842 s | 8.578 s / 6.244x | 7.468 s / 7.343x | 8.127 s / 6.590x | 5.911 s / 9.279x |
 <!-- LATEST_PERFORMANCE_END -->
-<!-- LATEST_PERFORMANCE_RUNS: performance-snapshot-runs=90 dotnet-matrix-runs=60 python-reference-runs=30 dotnet-repeats=3 python-reference-date=2026-08-12 dotnet-v040-date=2026-08-12 dotnet-current-date=2026-08-12 sinc-unroll-matrix-runs=90 sinc-unroll-exact-1000-ab-pairs=3 sinc-unroll-kernel-pairs=8 sinc-unroll-thread-profile-runs=24 sinc-unroll-memory-frames=2000 sinc-unroll-tests=33 sinc-unroll-intrinsic-modes=4 python-v040-runs=15 python-v040-hashes=15 python-pr341-runs=15 python-pr341-hashes=1 -->
+<!-- LATEST_PERFORMANCE_RUNS: performance-snapshot-runs=90 dotnet-matrix-runs=60 python-reference-runs=30 dotnet-repeats=3 python-reference-date=2026-08-12 dotnet-v040-date=2026-08-12 dotnet-current-date=2026-08-12 sinc-unroll-matrix-runs=90 sinc-unroll-exact-1000-ab-pairs=3 sinc-unroll-kernel-pairs=8 sinc-unroll-thread-profile-runs=24 sinc-unroll-memory-frames=2000 sinc-unroll-tests=34 sinc-unroll-intrinsic-modes=4 python-v040-runs=15 python-v040-hashes=15 python-pr341-runs=15 python-pr341-hashes=1 -->
 
 每个 .NET 单元格依次给出墙钟中位数和相对同 profile Python 列的倍速；默认实际
 使用 **5 个 workers**。三次运行范围见[详细性能说明](docs/README.detailed.zh-CN.md#性能)。
 倍数会随作为分子的 Python 时间和作为分母的 .NET 时间一起变化，使用其他夹具或窗口的历史表格
 也不能直接横向比较。判断因果回退时使用同一时刻的 .NET 版本配对 A/B，而不是旧表倍数。
 
-最新的隔离改动直接展开固定 16 步 AVX/FMA TBC sinc 累加，并省去冗余的栈清零；
-乘积、cast 和累加顺序保持不变。三组交错执行的 1000 帧 Exact
-`current --threads 20` 配对在九个兼容表面上全部一致；平均墙钟从 36.081 降至
-35.752 秒（减少 0.91%），CPU 时间基本不变。另一次 2000 帧门禁精确完成全部
-4000 个 fields，墙钟从 72.019 降至 70.859 秒（减少 1.61%）；工作集中位数
-353.8 MiB、最大 360.3 MiB，且没有持续增长或逐段变慢。
+最新的隔离改动直接展开固定 16 步 AVX/FMA TBC sinc 累加，同时固定与基线相同的
+操作数和 NaN payload 顺序。三组交错执行的 1000 帧 Exact `current --threads 20`
+配对在九个兼容表面上全部一致；平均墙钟从 35.242 降至 35.179 秒（减少 0.18%）。
+另一次 2000 帧门禁精确完成全部 4000 个 fields，墙钟从 68.724 降至 68.473 秒
+（减少 0.37%）；工作集中位数 353.1 MiB、最大 359.6 MiB，且没有逐段变慢或 OOM。
 
 刷新后的每个 .NET profile/线程单元格在三轮内都保持确定性。固定参考集中的 Python
 PR341 保持确定；Python v0.4.0 的 15 次运行产生了 15 套不同的亮度、色度、JSON 和
