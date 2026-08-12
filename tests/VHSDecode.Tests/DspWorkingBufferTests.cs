@@ -1143,6 +1143,9 @@ public sealed class DspWorkingBufferTests
             await disposeTask.WaitAsync(
                 TimeSpan.FromSeconds(5),
                 cancellationToken);
+            Assert.False(scheduler.TryQueue(
+                () => order.Add(4),
+                out _));
 
             first.Wait();
             InvalidOperationException actual = Assert.Throws<InvalidOperationException>(

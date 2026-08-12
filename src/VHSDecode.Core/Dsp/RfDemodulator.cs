@@ -1497,29 +1497,15 @@ public sealed class RfDemodulator : IDisposable
         int spectrumLength,
         int inputLength)
     {
-        VhsInverseCompanionWorkItem analyticInverse;
-        try
+        VhsInverseCompanionScheduler? scheduler =
+            _vhsInverseCompanionScheduler?.Value;
+        if (scheduler is null
+            || !scheduler.TryQueue(
+                () => CompleteNumpyVhsComplexAnalyticSignal(
+                    workspace,
+                    inputLength),
+                out VhsInverseCompanionWorkItem analyticInverse))
         {
-            VhsInverseCompanionScheduler? scheduler =
-                _vhsInverseCompanionScheduler?.Value;
-            if (scheduler is null
-                || !scheduler.TryQueue(
-                    () => CompleteNumpyVhsComplexAnalyticSignal(
-                        workspace,
-                        inputLength),
-                    out analyticInverse))
-            {
-                workspace.Inverse(
-                    rfFilteredHalf.AsSpan(0, spectrumLength),
-                    workspace.Real);
-                CompleteNumpyVhsComplexAnalyticSignal(workspace, inputLength);
-                return;
-            }
-        }
-        catch (Exception)
-        {
-            // Concurrency is optional; preserve the original serial behavior if
-            // the runtime cannot schedule the companion transform.
             workspace.Inverse(
                 rfFilteredHalf.AsSpan(0, spectrumLength),
                 workspace.Real);
@@ -1563,31 +1549,15 @@ public sealed class RfDemodulator : IDisposable
         Complex[] rfFilteredHalf,
         int spectrumLength)
     {
-        VhsInverseCompanionWorkItem analyticInverse;
-        try
-        {
-            VhsInverseCompanionScheduler? scheduler =
-                _vhsInverseCompanionScheduler?.Value;
-            if (scheduler is null
-                || !scheduler.TryQueue(
-                    () => workspace.InverseCompanion(
-                        workspace.HilbertHalf.AsSpan(0, spectrumLength),
-                        workspace.Imaginary),
-                    out analyticInverse))
-            {
-                workspace.Inverse(
-                    rfFilteredHalf.AsSpan(0, spectrumLength),
-                    workspace.Real);
-                workspace.InverseCompanion(
+        VhsInverseCompanionScheduler? scheduler =
+            _vhsInverseCompanionScheduler?.Value;
+        if (scheduler is null
+            || !scheduler.TryQueue(
+                () => workspace.InverseCompanion(
                     workspace.HilbertHalf.AsSpan(0, spectrumLength),
-                    workspace.Imaginary);
-                return;
-            }
-        }
-        catch (Exception)
+                    workspace.Imaginary),
+                out VhsInverseCompanionWorkItem analyticInverse))
         {
-            // Concurrency is optional; preserve the original serial behavior if
-            // the runtime cannot schedule the companion transform.
             workspace.Inverse(
                 rfFilteredHalf.AsSpan(0, spectrumLength),
                 workspace.Real);
