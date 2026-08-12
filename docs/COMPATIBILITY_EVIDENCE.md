@@ -2229,7 +2229,7 @@ dotnet test --solution VHSDecodeDotNet.slnx --no-build
 ```
 
 The current formal solution build completes with zero warnings and errors, and
-the xUnit v3 project exposes 1,432 independently discoverable tests
+the xUnit v3 project exposes 1,433 independently discoverable tests
 to `dotnet test` and Visual Studio Test Explorer. On the
 same Windows machine and fixtures, Release wall-clock measurements for one
 frame were 2.346 s versus 7.193 s for NTSC VHS and 1.651 s versus 5.865 s for
@@ -2808,6 +2808,33 @@ fixture without publishing its filename. All 60 .NET runs and all 15 Python
 PR341 runs were deterministic within their profile/mode. Python v0.4.0 produced
 15 distinct luma, chroma, JSON, and normalized-log hash sets, so the strict
 oracle remains `g4315520 --threads 0`.
+
+### Ordered AVX TBC sinc accumulation
+
+Commit `8a37251` keeps the existing AVX/FMA weight and product expressions,
+float32 products, double accumulation, casts, and left-to-right 16-tap addition
+order. It emits the fixed additions through scalar SSE2 intrinsics with every
+new tap as the left operand, matching the baseline NaN-payload order, and
+suppresses redundant clearing of the fully overwritten stack buffer; scalar
+and boundary paths are unchanged.
+
+Three interleaved 1,000-frame Exact `current --threads 20` pairs matched exit
+status, field count, luma, chroma, raw JSON, stdout, normalized stderr/logs, and
+ordered `fileLoc`. The candidate won 3/3; mean wall time moved from 35.242 to
+35.179 seconds (0.18% lower), while mean CPU moved from 281.84 to 286.22 seconds
+(1.55% higher) and mean active cores from 8.00 to 8.14. A 24-run
+gate covered Exact/IPP-fast, v0.4.0/`current`, and serial/default/20-worker modes.
+Four real-RF intrinsic variants and 34 focused TBC tests under normal, no-AVX,
+and fully scalar execution were exact. Distinct positive/negative NaN payloads,
+infinities, and signed zero also matched the saved main binary bit for bit. The
+full xUnit v3 suite reported 1,429
+passes and four expected local IPP-runtime skips.
+
+A separate 2,000-frame counter gate completed 4,000 fields exactly and moved
+wall time from 68.724 to 68.473 seconds (0.37% lower). Candidate working set was
+353.1 MiB median and 359.6 MiB maximum, with 352.0/357.2 MiB first/final-third
+medians. Nine post-startup 200-frame intervals stayed within 6.446-6.699 seconds,
+showing no progressive throughput decay or OOM trend.
 
 To regenerate the embedded format parameter snapshot from the checked-out
 upstream source:
