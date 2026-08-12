@@ -442,24 +442,24 @@ format, or fixture are not directly comparable:
 <!-- LATEST_PERFORMANCE_BEGIN -->
 | CLI mode (workers) | Python v0.4.0 | Python PR341 | Exact + v0.4.0 | Exact + current | IPP-fast + v0.4.0 | IPP-fast + current |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| default (5) | 46.165 s | 45.821 s | 13.780 s / 3.350x / 70.15% | 12.896 s / 3.553x / 71.86% | 11.739 s / 3.933x / 74.57% | 9.869 s / 4.643x / 78.46% |
-| `--threads 1` | 56.050 s | 55.754 s | 34.138 s / 1.642x / 39.09% | 39.839 s / 1.399x / 28.55% | 24.408 s / 2.296x / 56.45% | 26.950 s / 2.069x / 51.66% |
-| `--threads 5` | 46.278 s | 45.804 s | 13.277 s / 3.486x / 71.31% | 12.726 s / 3.599x / 72.22% | 11.659 s / 3.969x / 74.81% | 9.859 s / 4.646x / 78.48% |
-| `--threads 10` | 47.111 s | 48.017 s | 10.526 s / 4.476x / 77.66% | 9.648 s / 4.977x / 79.91% | 9.858 s / 4.779x / 79.07% | 7.744 s / 6.200x / 83.87% |
-| `--threads 20` | 48.283 s | 48.622 s | 8.441 s / 5.720x / 82.52% | 7.787 s / 6.244x / 83.98% | 8.284 s / 5.829x / 82.84% | 6.018 s / 8.079x / 87.62% |
+| default (5) | 46.443 s | 45.912 s | 13.423 s / 3.460x / 71.10% | 12.761 s / 3.598x / 72.21% | 11.597 s / 4.005x / 75.03% | 10.095 s / 4.548x / 78.01% |
+| `--threads 1` | 55.414 s | 55.728 s | 34.575 s / 1.603x / 37.61% | 39.144 s / 1.424x / 29.76% | 24.200 s / 2.290x / 56.33% | 27.412 s / 2.033x / 50.81% |
+| `--threads 5` | 46.172 s | 45.842 s | 13.512 s / 3.417x / 70.73% | 12.766 s / 3.591x / 72.15% | 11.582 s / 3.987x / 74.92% | 10.019 s / 4.576x / 78.15% |
+| `--threads 10` | 47.333 s | 48.328 s | 10.819 s / 4.375x / 77.14% | 9.286 s / 5.204x / 80.79% | 9.883 s / 4.790x / 79.12% | 7.680 s / 6.293x / 84.11% |
+| `--threads 20` | 48.563 s | 48.600 s | 8.410 s / 5.774x / 82.68% | 7.042 s / 6.902x / 85.51% | 8.296 s / 5.854x / 82.92% | 6.007 s / 8.090x / 87.64% |
 <!-- LATEST_PERFORMANCE_END -->
-<!-- LATEST_PERFORMANCE_RUNS: performance-snapshot-runs=90 dotnet-matrix-runs=60 python-reference-runs=30 dotnet-repeats=3 python-reference-date=2026-08-12 dotnet-v040-date=2026-08-12 dotnet-current-date=2026-08-12 radix3-avx-matrix-runs=90 radix3-avx-exact-1000-ab-pairs=3 radix3-avx-kernel-pairs=12 radix3-avx-tests=60 radix3-avx-intrinsic-modes=3 python-v040-runs=15 python-v040-hashes=15 python-pr341-runs=15 python-pr341-hashes=1 -->
+<!-- LATEST_PERFORMANCE_RUNS: performance-snapshot-runs=90 dotnet-matrix-runs=60 python-reference-runs=30 dotnet-repeats=3 python-reference-date=2026-08-12 dotnet-v040-date=2026-08-12 dotnet-current-date=2026-08-12 radix11-avx-matrix-runs=90 radix11-avx-exact-1000-ab-pairs=3 radix11-avx-kernel-pairs=20 radix11-avx-tests=61 radix11-avx-intrinsic-modes=4 python-v040-runs=15 python-v040-hashes=15 python-pr341-runs=15 python-pr341-hashes=1 -->
 
 The three-run wall-time ranges were:
 
 <!-- LATEST_PERFORMANCE_RANGES_BEGIN -->
 | CLI mode | Python v0.4.0 | Python PR341 | Exact + v0.4.0 | Exact + current | IPP-fast + v0.4.0 | IPP-fast + current |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| default (5) | 46.115-46.402 s | 45.632-45.887 s | 13.587-14.153 s | 12.666-13.392 s | 11.722-11.870 s | 9.833-9.943 s |
-| `--threads 1` | 55.709-57.791 s | 55.049-56.196 s | 33.956-34.548 s | 39.014-40.722 s | 24.220-24.767 s | 26.947-27.140 s |
-| `--threads 5` | 45.804-46.596 s | 45.330-45.911 s | 13.125-13.318 s | 12.317-13.055 s | 11.608-11.728 s | 9.791-9.881 s |
-| `--threads 10` | 46.914-47.200 s | 47.823-48.326 s | 10.482-10.733 s | 9.505-9.850 s | 9.804-9.874 s | 7.670-7.887 s |
-| `--threads 20` | 48.029-48.490 s | 48.360-48.986 s | 8.369-8.702 s | 7.535-7.874 s | 8.188-8.416 s | 5.894-6.102 s |
+| default (5) | 46.087-46.466 s | 45.688-46.167 s | 13.259-13.590 s | 12.353-13.032 s | 11.595-11.762 s | 9.898-10.128 s |
+| `--threads 1` | 55.208-56.203 s | 55.121-56.034 s | 34.540-35.247 s | 38.637-39.309 s | 24.136-24.489 s | 27.328-27.531 s |
+| `--threads 5` | 45.875-46.580 s | 45.565-46.081 s | 12.949-14.077 s | 12.654-12.818 s | 11.549-11.591 s | 9.944-10.160 s |
+| `--threads 10` | 47.287-47.634 s | 48.062-48.660 s | 10.421-10.908 s | 8.920-9.863 s | 9.792-9.907 s | 7.654-7.892 s |
+| `--threads 20` | 48.502-48.740 s | 48.460-48.826 s | 8.392-8.670 s | 6.896-7.439 s | 8.145-8.410 s | 5.893-6.082 s |
 <!-- LATEST_PERFORMANCE_RANGES_END -->
 
 All six paths were measured from zero in the same batch at all five worker
@@ -470,10 +470,10 @@ and ordered `fileLoc`. Python v0.4.0 produced 15 distinct luma, chroma, JSON,
 and normalized-log hash sets in 15 runs; its strict oracle therefore remains
 `g4315520 --threads 0`.
 
-The .NET candidate was commit `c8c2835`, based on merged main `1b6f315`, with
-the isolated managed radix-3 AVX change described below. The self-contained
+The .NET candidate was commit `2d4b2e9`, based on merged main `dbc617e`, with
+the isolated managed radix-11 AVX/AVX2 change described below. The self-contained
 matrix `decode.exe` had SHA-256
-`C514BC8C6204D41986574FBC627081D3B30D87BB7A85FF8C9CA5D2FED6827E5F`.
+`259BCD77F395D723181260C58569B1FE0C5170DF5EA89D904469ECA63A51E60D`.
 The host was an Intel Core Ultra 7 265K with 20 logical processors, Windows 11
 build 26220, and .NET SDK/runtime `11.0.100-preview.6.26359.118`. Raw directories
 stay local because they contain the private fixture path; these are reported
@@ -516,7 +516,36 @@ candidate (-2.10%, -0.20%, and -0.35%). Average active cores moved from 7.91 to
 claim. Peak working set remained bounded, with observed maxima of 650.6 MiB for
 the baseline and 396.2 MiB for the candidate, and no OOM.
 
-### Managed AVX radix-3 PocketFFT butterflies
+### Managed AVX/AVX2 radix-11 PocketFFT butterflies
+
+The managed float32 PocketFFT radix-11 pass now evaluates four contiguous
+frequency indices with AVX. When radix 11 is the final stage, AVX2 gathers four
+independent packets and writes their outputs contiguously. Every lane preserves
+the scalar pair, coefficient multiply, add/subtract, complex twiddle, and
+conversion order. Finite inputs above a conservative overflow bound, non-finite
+inputs, scalar tails, and hosts without the required ISA execute the original
+scalar path. No FMA, reduction, reassociation, shared state, or new sample-sized
+allocation was introduced; unsafe code is limited to pinned packet gather/store.
+
+All 61 mixed-radix compatibility tests pass with normal intrinsics, AVX2
+disabled, AVX disabled, and all hardware intrinsics disabled. The dedicated
+direct-plan test covers lengths 55, 121, and 363 in both directions, including
+signed zero, subnormal, minimum-normal, maximum-finite, infinity, and distinct
+NaN payload patterns. Two independent 10-pair length-363 kernel processes kept
+identical output bits and moved the median-of-medians from 103.415 to 34.925 ms
+(66.23% lower). This is isolated-kernel evidence, not an end-to-end claim.
+
+Three opposite-order 1,000-frame Exact `current --threads 20` pairs against
+main `dbc617e` matched all nine compatibility surfaces and favored the candidate
+3/3. Mean wall time moved from 37.328 to 36.734 seconds (1.59% lower, 1.016x
+throughput), process CPU time from 295.823 to 293.208 seconds (0.88% lower), and
+average active cores from 7.925 to 7.982. A separate 2,000-frame candidate run
+completed all 4,000 fields with 4,000 unique ordered `fileLoc` values in 70.139
+seconds. Peak working set was 647.43 MiB, final working set was 604.34 MiB, the
+three working-set means were 590.37/598.75/601.05 MiB, and the post-20% linear
+slope was -24.81 MiB/min; no progressive growth or OOM was observed.
+
+### Previous managed AVX radix-3 PocketFFT butterflies
 
 The managed float32 PocketFFT radix-3 pass now evaluates four independent
 complex indices in one `Vector256<float>`. Each lane retains the scalar pair,
@@ -3589,7 +3618,7 @@ Requirements:
 .\tools\build-ipp-native.ps1
 dotnet restore VHSDecodeDotNet.slnx
 dotnet build VHSDecodeDotNet.slnx -c Release --no-restore
-dotnet test --solution VHSDecodeDotNet.slnx -c Release --no-build --no-restore --minimum-expected-tests 1431
+dotnet test --solution VHSDecodeDotNet.slnx -c Release --no-build --no-restore --minimum-expected-tests 1432
 dotnet test --project tests\VHSDecode.Tests\VHSDecode.Tests.csproj -c Release --no-build --no-restore --coverage --coverage-output coverage.cobertura.xml --coverage-output-format cobertura
 ```
 
@@ -3603,7 +3632,7 @@ deployment computer. Binary-only single-file releases embed
 sidecar license files. An Exact-only build may omit the native build step.
 
 The current formal Release build has zero warnings and errors. The xUnit v3
-project exposes **1,431** independently discoverable tests to both
+project exposes **1,432** independently discoverable tests to both
 `dotnet test` and Visual Studio Test Explorer.
 
 <!-- SECTION: usage -->

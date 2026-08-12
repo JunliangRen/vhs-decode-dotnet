@@ -2229,12 +2229,46 @@ dotnet test --solution VHSDecodeDotNet.slnx --no-build
 ```
 
 The current formal solution build completes with zero warnings and errors, and
-the xUnit v3 project exposes 1,431 independently discoverable tests
+the xUnit v3 project exposes 1,432 independently discoverable tests
 to `dotnet test` and Visual Studio Test Explorer. On the
 same Windows machine and fixtures, Release wall-clock measurements for one
 frame were 2.346 s versus 7.193 s for NTSC VHS and 1.651 s versus 5.865 s for
 NTSC LD (this port versus the v0.4.0 Python virtual environment); all output
 hashes listed above remained identical.
+
+### Managed AVX/AVX2 radix-11 PocketFFT butterflies
+
+The managed float32 radix-11 pass evaluates four contiguous frequency indices
+with AVX and, for the final stage, four independent packets with AVX2 gather.
+Every lane retains scalar coefficient, add/subtract, twiddle, and conversion
+order. Non-finite or conservatively overflow-prone groups, scalar tails, and
+hosts without the required ISA execute the original scalar path. No FMA,
+reduction, reassociation, shared state, or sample-sized allocation was added;
+unsafe code is limited to pinned packet gather/store.
+
+All 61 mixed-radix tests pass with normal intrinsics, AVX2 disabled, AVX
+disabled, and all hardware intrinsics disabled. A dedicated scalar-reference
+test covers lengths 55, 121, and 363 in both directions with signed zero,
+subnormal, minimum-normal, maximum-finite, infinity, and distinct NaN payloads.
+Two independent 10-pair length-363 kernel processes retained exact output bits
+and moved the median-of-medians from 103.415 to 34.925 ms (66.23% lower).
+
+Three opposite-order 1,000-frame Exact `current --threads 20` pairs against
+main `dbc617e` matched exit status, field count, luma, chroma, raw JSON, stdout,
+normalized stderr/logs, and ordered `fileLoc`. The candidate won 3/3; mean wall
+time moved from 37.328 to 36.734 seconds (1.59% lower, 1.016x throughput), CPU
+time from 295.823 to 293.208 seconds (0.88% lower), and average active cores
+from 7.925 to 7.982. A separate 2,000-frame run completed 4,000 fields with
+4,000 unique `fileLoc` values. Peak/final working set was 647.43/604.34 MiB,
+the three section means were 590.37/598.75/601.05 MiB, and the post-20% slope
+was -24.81 MiB/min, with no progressive growth or OOM.
+
+The refreshed same-batch 90-run public matrix uses candidate commit `2d4b2e9`
+and a self-contained binary with SHA-256
+`259BCD77F395D723181260C58569B1FE0C5170DF5EA89D904469ECA63A51E60D`.
+All 60 .NET runs and all 15 Python PR341 runs were deterministic within each
+profile/mode. Python v0.4.0 again produced 15 distinct luma, chroma, JSON, and
+normalized-log hash sets, so the strict oracle remains `g4315520 --threads 0`.
 
 ### Managed AVX radix-3 PocketFFT butterflies
 

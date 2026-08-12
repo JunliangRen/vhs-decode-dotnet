@@ -33,7 +33,7 @@
 - VHS 家族包括 VHS/S-VHS、Betamax、Video8/Hi8、U-matic、Type C、EIAJ
   以及上游支持的 PAL/NTSC 变体。
 - TBC 工具、双击启动的用户 GUI 和开发者绘图窗口明确不在范围内。
-- Visual Studio 2026 `.slnx` 包含 **1,431** 项标准 xUnit v3 测试；测试可在
+- Visual Studio 2026 `.slnx` 包含 **1,432** 项标准 xUnit v3 测试；测试可在
   Test Explorer 中查看，也可用 `dotnet test` 运行。
 
 <!-- SECTION: start -->
@@ -91,32 +91,33 @@ CVBS 和 HiFi 仍会拒绝 `ipp-fast`；需要 release 兼容行为时应使用 
 
 这是同一份私有本地 40 MHz PAL VHS `.ldf` 夹具上使用
 `--start 100 --length 160` 的含启动开销快照，且不会公开源文件名。全部 90 次 Python
-与 .NET Release 测量均在 2026-08-12 的同一批次完成；候选提交为 `c8c2835`，基于
-main `1b6f315`，并采用正序、反序和混排方案。本表取代此前快照；兼容性结论与
+与 .NET Release 测量均在 2026-08-12 的同一批次完成；候选提交为 `2d4b2e9`，基于
+main `dbc617e`，并采用正序、反序和混排方案。本表取代此前快照；兼容性结论与
 速度数据分开判断。
 
 <!-- LATEST_PERFORMANCE_BEGIN -->
 | CLI 模式（workers） | Python v0.4.0 | Python PR341 | Exact + v0.4.0 | Exact + current | IPP-fast + v0.4.0 | IPP-fast + current |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| 默认（5） | 46.165 s | 45.821 s | 13.780 s / 3.350x | 12.896 s / 3.553x | 11.739 s / 3.933x | 9.869 s / 4.643x |
-| `--threads 1` | 56.050 s | 55.754 s | 34.138 s / 1.642x | 39.839 s / 1.399x | 24.408 s / 2.296x | 26.950 s / 2.069x |
-| `--threads 5` | 46.278 s | 45.804 s | 13.277 s / 3.486x | 12.726 s / 3.599x | 11.659 s / 3.969x | 9.859 s / 4.646x |
-| `--threads 10` | 47.111 s | 48.017 s | 10.526 s / 4.476x | 9.648 s / 4.977x | 9.858 s / 4.779x | 7.744 s / 6.200x |
-| `--threads 20` | 48.283 s | 48.622 s | 8.441 s / 5.720x | 7.787 s / 6.244x | 8.284 s / 5.829x | 6.018 s / 8.079x |
+| 默认（5） | 46.443 s | 45.912 s | 13.423 s / 3.460x | 12.761 s / 3.598x | 11.597 s / 4.005x | 10.095 s / 4.548x |
+| `--threads 1` | 55.414 s | 55.728 s | 34.575 s / 1.603x | 39.144 s / 1.424x | 24.200 s / 2.290x | 27.412 s / 2.033x |
+| `--threads 5` | 46.172 s | 45.842 s | 13.512 s / 3.417x | 12.766 s / 3.591x | 11.582 s / 3.987x | 10.019 s / 4.576x |
+| `--threads 10` | 47.333 s | 48.328 s | 10.819 s / 4.375x | 9.286 s / 5.204x | 9.883 s / 4.790x | 7.680 s / 6.293x |
+| `--threads 20` | 48.563 s | 48.600 s | 8.410 s / 5.774x | 7.042 s / 6.902x | 8.296 s / 5.854x | 6.007 s / 8.090x |
 <!-- LATEST_PERFORMANCE_END -->
-<!-- LATEST_PERFORMANCE_RUNS: performance-snapshot-runs=90 dotnet-matrix-runs=60 python-reference-runs=30 dotnet-repeats=3 python-reference-date=2026-08-12 dotnet-v040-date=2026-08-12 dotnet-current-date=2026-08-12 radix3-avx-matrix-runs=90 radix3-avx-exact-1000-ab-pairs=3 radix3-avx-kernel-pairs=12 radix3-avx-tests=60 radix3-avx-intrinsic-modes=3 python-v040-runs=15 python-v040-hashes=15 python-pr341-runs=15 python-pr341-hashes=1 -->
+<!-- LATEST_PERFORMANCE_RUNS: performance-snapshot-runs=90 dotnet-matrix-runs=60 python-reference-runs=30 dotnet-repeats=3 python-reference-date=2026-08-12 dotnet-v040-date=2026-08-12 dotnet-current-date=2026-08-12 radix11-avx-matrix-runs=90 radix11-avx-exact-1000-ab-pairs=3 radix11-avx-kernel-pairs=20 radix11-avx-tests=61 radix11-avx-intrinsic-modes=4 python-v040-runs=15 python-v040-hashes=15 python-pr341-runs=15 python-pr341-hashes=1 -->
 
 每个 .NET 单元格依次给出墙钟中位数和相对同 profile Python 列的倍速；默认实际
 使用 **5 个 workers**。三次运行范围见[详细性能说明](docs/README.detailed.zh-CN.md#性能)。
 倍数会随 .NET 绝对时间和作为分母的 Python 时间一起变化，使用其他夹具或窗口的历史表格
 也不能直接横向比较。判断因果回退时使用同一时刻的 .NET 版本配对 A/B，而不是旧表倍数。
 
-最新的隔离改动使用托管 AVX 同时计算四个相互独立的 float32 radix-3 PocketFFT 索引，
-并保持标量操作与 twiddle 顺序，不使用 FMA 或重结合。两个生产 plan 各六组顺序相反的
-内核配对中，长度 726 和 990 的平均用时分别减少 0.94% 和 4.18%，hash 完全一致。
-三组顺序相反的 1000 帧 Exact `current --threads 20` 配对在九个兼容表面上全部一致；
-平均墙钟从 37.288 降到 36.909 秒（减少 1.02%），CPU 从 301.984 降到 292.766 秒
-（减少 3.05%），内存保持有界。
+最新的隔离改动使用托管 AVX 同时计算四个相互独立的 float32 radix-11 PocketFFT
+索引，并用 AVX2 gather 同时处理四个最终 packet；标量操作数与 twiddle 顺序保持不变，
+不使用 FMA 或重结合。两次独立的长度 363、每次 10 组配对内核测试保持输出 bit 完全
+一致，中位数的中位数从 103.415 降到 34.925 ms（减少 66.23%）。三组顺序相反的
+1000 帧 Exact `current --threads 20` 配对在九个兼容表面上全部一致，候选 3/3 胜出；
+平均墙钟从 37.328 降到 36.734 秒（减少 1.59%），CPU 从 295.823 降到 293.208 秒
+（减少 0.88%）。另一次 2000 帧运行也在有界内存下完成。
 
 刷新后的每个 .NET profile/线程单元格在三轮内都保持确定性。固定参考集中的 Python
 PR341 保持确定；Python v0.4.0 的 15 次运行产生了 15 套不同的亮度、色度、JSON 和
@@ -154,7 +155,7 @@ TBC、色度、JSON 和日志文件允许在解码期间并发读取，兼容的
 dotnet restore VHSDecodeDotNet.slnx
 dotnet build VHSDecodeDotNet.slnx -c Release --no-restore
 dotnet test --solution VHSDecodeDotNet.slnx -c Release `
-  --no-build --no-restore --minimum-expected-tests 1431
+  --no-build --no-restore --minimum-expected-tests 1432
 ```
 
 在 Visual Studio 2026 中打开 `VHSDecodeDotNet.slnx`，即可构建、调试并通过
