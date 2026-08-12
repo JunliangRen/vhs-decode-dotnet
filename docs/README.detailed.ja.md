@@ -417,24 +417,24 @@ wall-time median、profile が対応する Python 列に対する speedup、wall
 <!-- LATEST_PERFORMANCE_BEGIN -->
 | CLI mode（workers） | Python v0.4.0 | Python PR341 | Exact + v0.4.0 | Exact + current | IPP-fast + v0.4.0 | IPP-fast + current |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| default（5） | 46.165 s | 45.821 s | 13.780 s / 3.350x / 70.15% | 12.896 s / 3.553x / 71.86% | 11.739 s / 3.933x / 74.57% | 9.869 s / 4.643x / 78.46% |
-| `--threads 1` | 56.050 s | 55.754 s | 34.138 s / 1.642x / 39.09% | 39.839 s / 1.399x / 28.55% | 24.408 s / 2.296x / 56.45% | 26.950 s / 2.069x / 51.66% |
-| `--threads 5` | 46.278 s | 45.804 s | 13.277 s / 3.486x / 71.31% | 12.726 s / 3.599x / 72.22% | 11.659 s / 3.969x / 74.81% | 9.859 s / 4.646x / 78.48% |
-| `--threads 10` | 47.111 s | 48.017 s | 10.526 s / 4.476x / 77.66% | 9.648 s / 4.977x / 79.91% | 9.858 s / 4.779x / 79.07% | 7.744 s / 6.200x / 83.87% |
-| `--threads 20` | 48.283 s | 48.622 s | 8.441 s / 5.720x / 82.52% | 7.787 s / 6.244x / 83.98% | 8.284 s / 5.829x / 82.84% | 6.018 s / 8.079x / 87.62% |
+| default（5） | 46.443 s | 45.912 s | 13.423 s / 3.460x / 71.10% | 12.761 s / 3.598x / 72.21% | 11.597 s / 4.005x / 75.03% | 10.095 s / 4.548x / 78.01% |
+| `--threads 1` | 55.414 s | 55.728 s | 34.575 s / 1.603x / 37.61% | 39.144 s / 1.424x / 29.76% | 24.200 s / 2.290x / 56.33% | 27.412 s / 2.033x / 50.81% |
+| `--threads 5` | 46.172 s | 45.842 s | 13.512 s / 3.417x / 70.73% | 12.766 s / 3.591x / 72.15% | 11.582 s / 3.987x / 74.92% | 10.019 s / 4.576x / 78.15% |
+| `--threads 10` | 47.333 s | 48.328 s | 10.819 s / 4.375x / 77.14% | 9.286 s / 5.204x / 80.79% | 9.883 s / 4.790x / 79.12% | 7.680 s / 6.293x / 84.11% |
+| `--threads 20` | 48.563 s | 48.600 s | 8.410 s / 5.774x / 82.68% | 7.042 s / 6.902x / 85.51% | 8.296 s / 5.854x / 82.92% | 6.007 s / 8.090x / 87.64% |
 <!-- LATEST_PERFORMANCE_END -->
-<!-- LATEST_PERFORMANCE_RUNS: performance-snapshot-runs=90 dotnet-matrix-runs=60 python-reference-runs=30 dotnet-repeats=3 python-reference-date=2026-08-12 dotnet-v040-date=2026-08-12 dotnet-current-date=2026-08-12 radix3-avx-matrix-runs=90 radix3-avx-exact-1000-ab-pairs=3 radix3-avx-kernel-pairs=12 radix3-avx-tests=60 radix3-avx-intrinsic-modes=3 python-v040-runs=15 python-v040-hashes=15 python-pr341-runs=15 python-pr341-hashes=1 -->
+<!-- LATEST_PERFORMANCE_RUNS: performance-snapshot-runs=90 dotnet-matrix-runs=60 python-reference-runs=30 dotnet-repeats=3 python-reference-date=2026-08-12 dotnet-v040-date=2026-08-12 dotnet-current-date=2026-08-12 radix11-avx-matrix-runs=90 radix11-avx-exact-1000-ab-pairs=3 radix11-avx-kernel-pairs=20 radix11-avx-tests=61 radix11-avx-intrinsic-modes=4 python-v040-runs=15 python-v040-hashes=15 python-pr341-runs=15 python-pr341-hashes=1 -->
 
 3-run wall-time range は次のとおりです。
 
 <!-- LATEST_PERFORMANCE_RANGES_BEGIN -->
 | CLI mode | Python v0.4.0 | Python PR341 | Exact + v0.4.0 | Exact + current | IPP-fast + v0.4.0 | IPP-fast + current |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| default（5） | 46.115-46.402 s | 45.632-45.887 s | 13.587-14.153 s | 12.666-13.392 s | 11.722-11.870 s | 9.833-9.943 s |
-| `--threads 1` | 55.709-57.791 s | 55.049-56.196 s | 33.956-34.548 s | 39.014-40.722 s | 24.220-24.767 s | 26.947-27.140 s |
-| `--threads 5` | 45.804-46.596 s | 45.330-45.911 s | 13.125-13.318 s | 12.317-13.055 s | 11.608-11.728 s | 9.791-9.881 s |
-| `--threads 10` | 46.914-47.200 s | 47.823-48.326 s | 10.482-10.733 s | 9.505-9.850 s | 9.804-9.874 s | 7.670-7.887 s |
-| `--threads 20` | 48.029-48.490 s | 48.360-48.986 s | 8.369-8.702 s | 7.535-7.874 s | 8.188-8.416 s | 5.894-6.102 s |
+| default（5） | 46.087-46.466 s | 45.688-46.167 s | 13.259-13.590 s | 12.353-13.032 s | 11.595-11.762 s | 9.898-10.128 s |
+| `--threads 1` | 55.208-56.203 s | 55.121-56.034 s | 34.540-35.247 s | 38.637-39.309 s | 24.136-24.489 s | 27.328-27.531 s |
+| `--threads 5` | 45.875-46.580 s | 45.565-46.081 s | 12.949-14.077 s | 12.654-12.818 s | 11.549-11.591 s | 9.944-10.160 s |
+| `--threads 10` | 47.287-47.634 s | 48.062-48.660 s | 10.421-10.908 s | 8.920-9.863 s | 9.792-9.907 s | 7.654-7.892 s |
+| `--threads 20` | 48.502-48.740 s | 48.460-48.826 s | 8.392-8.670 s | 6.896-7.439 s | 8.145-8.410 s | 5.893-6.082 s |
 <!-- LATEST_PERFORMANCE_RANGES_END -->
 
 6 path は同じ batch でゼロから測定し、5 worker setting と forward、reverse、mixed の 3 pass
@@ -443,9 +443,10 @@ profile/mode ごとに luma、chroma、JSON、stdout、normalized stderr/log、o
 hash set が 1 つでした。Python v0.4.0 は 15 run で 15 種類の luma、chroma、JSON、
 normalized-log hash set を生成したため、strict oracle は `g4315520 --threads 0` のままです。
 
-.NET candidate は merged main `1b6f315` を基にした commit `c8c2835` で、後述する
-isolated managed radix-3 AVX change を含みます。matrix の self-contained `decode.exe` の
-SHA-256 は `C514BC8C6204D41986574FBC627081D3B30D87BB7A85FF8C9CA5D2FED6827E5F` です。
+.NET candidate は merged main `dbc617e` を基にした commit `2d4b2e9` で、後述する
+isolated managed radix-11 AVX/AVX2 change を含みます。matrix の self-contained
+`decode.exe` の SHA-256 は
+`259BCD77F395D723181260C58569B1FE0C5170DF5EA89D904469ECA63A51E60D` です。
 host は Intel Core Ultra 7 265K（20 logical processor）、Windows 11 build 26220、.NET
 SDK/runtime `11.0.100-preview.6.26359.118` です。raw directory は private fixture path を
 含むため local にのみ保持し、public に独立再現可能な benchmark corpus とは主張しません。
@@ -482,7 +483,34 @@ CPU time は 315.260 から 305.969 seconds（2.95% 減）でした。3 pair の
 compute reduction であって multicore scaling の claim ではありません。peak working set は
 bounded で、observed maximum は baseline 650.6 MiB、candidate 396.2 MiB、OOM はありません。
 
-### managed AVX radix-3 PocketFFT butterfly
+### managed AVX/AVX2 radix-11 PocketFFT butterfly
+
+managed float32 PocketFFT の radix-11 pass は、4 個の contiguous frequency index を
+AVX で同時に処理します。radix 11 が final stage の場合、AVX2 gather で 4 個の独立した
+packet を読み、output を contiguous に書きます。各 lane は元の scalar pair、coefficient
+multiply、add/subtract、complex twiddle、conversion order を維持します。conservative
+overflow bound を超える finite input、non-finite input、scalar tail、必要な ISA がない host
+は元の scalar path を実行します。FMA、reduction、reassociation、shared state、新しい
+sample-sized allocation はなく、unsafe code は pinned packet gather/store に限定します。
+
+61 mixed-radix compatibility test は通常 intrinsic、AVX2 disabled、AVX disabled、全 hardware
+intrinsic disabled で通過しました。専用 direct-plan test は forward/backward の両方で
+length 55、121、363 を網羅し、signed zero、subnormal、minimum normal、maximum finite、
+infinity、異なる NaN payload を含みます。独立した 2 回の length-363 kernel process
+（各 10 pair）は output bit を完全に維持し、median-of-medians を 103.415 から 34.925 ms
+（66.23% 減）へ短縮しました。これは isolated-kernel evidence であり end-to-end claim では
+ありません。
+
+main `dbc617e` に対する順序を反転した 1,000-frame Exact `current --threads 20` 3 pair は
+9 compatibility surface ですべて一致し、candidate が 3/3 で高速でした。mean wall time は
+37.328 から 36.734 seconds（1.59% 減、1.016x throughput）、process CPU time は 295.823
+から 293.208 seconds（0.88% 減）、average active core は 7.925 から 7.982 になりました。
+別の candidate 2,000-frame run は 70.139 seconds で 4,000 field と 4,000 unique ordered
+`fileLoc` を完了しました。peak working set は 647.43 MiB、final は 604.34 MiB、3 区間の
+working-set mean は 590.37/598.75/601.05 MiB、先頭 20% を除いた linear slope は
+-24.81 MiB/min で、progressive growth や OOM はありませんでした。
+
+### 以前の managed AVX radix-3 PocketFFT butterfly
 
 managed float32 PocketFFT の radix-3 pass は、4 個の独立した complex index を 1 つの
 `Vector256<float>` で処理します。各 lane は元の scalar pair、coefficient multiply、
@@ -3361,7 +3389,7 @@ Microsoft.Testing.Platform run は全 1,401 test を検出し、1,397 pass、0 f
 .\tools\build-ipp-native.ps1
 dotnet restore VHSDecodeDotNet.slnx
 dotnet build VHSDecodeDotNet.slnx -c Release --no-restore
-dotnet test --solution VHSDecodeDotNet.slnx -c Release --no-build --no-restore --minimum-expected-tests 1431
+dotnet test --solution VHSDecodeDotNet.slnx -c Release --no-build --no-restore --minimum-expected-tests 1432
 dotnet test --project tests\VHSDecode.Tests\VHSDecode.Tests.csproj -c Release --no-build --no-restore --coverage --coverage-output coverage.cobertura.xml --coverage-output-format cobertura
 ```
 
@@ -3375,7 +3403,7 @@ third-party notice を埋め込み、license sidecar file は追加しません�
 
 現在の正式な Release build は warning 0、error 0 です。xUnit v3 project は
 `dotnet test` と Visual Studio Test Explorer の両方で個別に検出できる
-**1,431** tests を公開します。
+**1,432** tests を公開します。
 
 <!-- SECTION: usage -->
 

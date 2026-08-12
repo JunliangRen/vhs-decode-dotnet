@@ -401,6 +401,93 @@ public sealed class PocketFftMixedRadixCompatibilityTests
         }
     }
 
+    [Fact(DisplayName = "AVX2 radix-11 packet stages preserve scalar special-value bits")]
+    public void Avx2Radix11PacketStagesPreserveScalarSpecialValueBits()
+    {
+        if (string.Equals(
+                Environment.GetEnvironmentVariable("VHSDECODE_REQUIRE_AVX_RADIX11"),
+                "1",
+                StringComparison.Ordinal))
+        {
+            Assert.True(
+                Avx2.IsSupported,
+                "The CI radix-11 vector-coverage run requires AVX2 support.");
+        }
+
+        uint[][] patternSets =
+        [
+            [
+                0x3F800000,
+                0xBF800000,
+                0x00000000,
+                0x80000000,
+                0x00000001,
+                0x80000001,
+                0x00800000,
+                0x80800000
+            ],
+            [
+                0x3F800000,
+                0xBF800000,
+                0x7F7FFFFF,
+                0xFF7FFFFF,
+                0x7F800000,
+                0xFF800000,
+                0x7FC00001,
+                0xFFC12345
+            ]
+        ];
+        for (int patternSet = 0; patternSet < patternSets.Length; patternSet++)
+        {
+            foreach (int length in new[] { 55, 121, 363 })
+            {
+                uint[] patterns = patternSets[patternSet];
+                Complex32[] input = BuildBitPatternInput(length, patterns);
+                Complex32[] expectedForward =
+                    PocketFftComplex32.TransformDirectPass11ScalarReference(input);
+                Complex32[] actualForward =
+                    PocketFftComplex32.ForwardAnyLengthDucc(input);
+                Assert.True(
+                    MemoryMarshal.AsBytes(expectedForward.AsSpan())
+                        .SequenceEqual(MemoryMarshal.AsBytes(actualForward.AsSpan())),
+                    $"Forward mismatch for length {length}, pattern set {patternSet}.");
+
+                Complex32[] expectedBackward =
+                    BackwardDirectPass11ScalarReference(expectedForward);
+                Complex32[] actualBackward =
+                    PocketFftComplex32.BackwardAnyLengthDucc(actualForward);
+                Assert.True(
+                    MemoryMarshal.AsBytes(expectedBackward.AsSpan())
+                        .SequenceEqual(MemoryMarshal.AsBytes(actualBackward.AsSpan())),
+                    $"Backward mismatch for length {length}, pattern set {patternSet}.");
+            }
+        }
+    }
+
+    private static Complex32[] BackwardDirectPass11ScalarReference(
+        ReadOnlySpan<Complex32> input)
+    {
+        var conjugated = new Complex32[input.Length];
+        for (int index = 0; index < input.Length; index++)
+        {
+            conjugated[index] = new Complex32(
+                input[index].Real,
+                -input[index].Imaginary);
+        }
+
+        Complex32[] transformed =
+            PocketFftComplex32.TransformDirectPass11ScalarReference(conjugated);
+        for (int index = 0; index < transformed.Length; index++)
+        {
+            float imaginary = transformed[index].Imaginary;
+            transformed[index] = new Complex32(
+                transformed[index].Real,
+                imaginary == 0.0f ? 0.0f : -imaginary);
+        }
+
+        return transformed;
+    }
+
     [Fact(DisplayName = "AVX radix-3 stages preserve scalar special-value bits")]
     public void AvxRadix3StagesPreserveScalarSpecialValueBits()
     {
