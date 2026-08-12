@@ -891,7 +891,9 @@ public sealed class DspWorkingBufferTests
         using var parallel = new RfDemodulator(
             sampleRateHz,
             DspBackend.Exact,
-            parallelizeVhsInverseStaging: true);
+            parallelizeVhsInverseStaging: true,
+            companionIppFftFactory: null,
+            vhsInverseCompanionWorkerThreads: 4);
 
         RfDemodulatedBlock expected = DecodeComplexVhsProbe(
             serial,
@@ -924,6 +926,7 @@ public sealed class DspWorkingBufferTests
             });
 
         Assert.True(parallel.ParallelizesVhsInverseStaging);
+        Assert.Equal(4, parallel.VhsInverseCompanionWorkerThreads);
         Assert.All(hashes, hash => Assert.Equal(expectedHash, hash));
     }
 
@@ -943,7 +946,9 @@ public sealed class DspWorkingBufferTests
         using var parallel = new RfDemodulator(
             sampleRateHz,
             DspBackend.IppFast,
-            parallelizeVhsInverseStaging: true);
+            parallelizeVhsInverseStaging: true,
+            companionIppFftFactory: null,
+            vhsInverseCompanionWorkerThreads: 4);
 
         RfDemodulatedBlock expected = DecodeComplexVhsProbe(
             serial,
@@ -976,6 +981,7 @@ public sealed class DspWorkingBufferTests
             });
 
         Assert.True(parallel.ParallelizesVhsInverseStaging);
+        Assert.Equal(4, parallel.VhsInverseCompanionWorkerThreads);
         Assert.All(hashes, hash => Assert.Equal(expectedHash, hash));
     }
 
@@ -997,14 +1003,15 @@ public sealed class DspWorkingBufferTests
             sampleRateHz,
             DspBackend.IppFast,
             parallelizeVhsInverseStaging: true,
-            _ =>
+            companionIppFftFactory: _ =>
             {
                 companionCreationAttempts++;
                 throw new IppNativeException(
                     "fft64_create",
                     -1,
                     "injected companion allocation failure");
-            });
+            },
+            vhsInverseCompanionWorkerThreads: 2);
 
         RfDemodulatedBlock expected = DecodeComplexVhsProbe(
             serial,
@@ -1073,6 +1080,15 @@ public sealed class DspWorkingBufferTests
             DecodeSessionFactory.DefaultBlockLength);
 
         Assert.Equal(expected, session.Pipeline.ParallelizesVhsInverseStaging);
+        int expectedCompanionWorkers = expected
+            ? Math.Min(
+                workerThreads
+                    - RfBlockStreamDecoder.MaximumConcurrentPrefetchBlocks,
+                RfBlockStreamDecoder.MaximumConcurrentPrefetchBlocks)
+            : 0;
+        Assert.Equal(
+            expectedCompanionWorkers,
+            session.Pipeline.VhsInverseCompanionWorkerThreads);
     }
 
     [Fact(DisplayName = "RF constructors retain their public binary signatures")]

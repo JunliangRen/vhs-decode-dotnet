@@ -73,7 +73,8 @@ public sealed class RfBlockDecodePipeline : IDisposable
         bool retainRfDiagnosticChannels,
         DspBackend dspBackend,
         UpstreamBehaviorProfile upstreamBehaviorProfile,
-        bool parallelizeVhsInverseStaging)
+        bool parallelizeVhsInverseStaging,
+        int vhsInverseCompanionWorkerThreads = 1)
     {
         _loader = loader;
         _filters = filters;
@@ -81,7 +82,9 @@ public sealed class RfBlockDecodePipeline : IDisposable
         _demodulator = new RfDemodulator(
             sampleRateHz,
             dspBackend,
-            parallelizeVhsInverseStaging);
+            parallelizeVhsInverseStaging,
+            companionIppFftFactory: null,
+            vhsInverseCompanionWorkerThreads);
         _referenceFilters = filters.LdVideoBurst is null && filters.LdVideoPilot is null && !_filterOptions.LdClipDemodForVideo
             ? null
             : new RfVideoReferenceFilterSet(
@@ -116,6 +119,9 @@ public sealed class RfBlockDecodePipeline : IDisposable
 
     internal bool ParallelizesVhsInverseStaging =>
         _demodulator.ParallelizesVhsInverseStaging;
+
+    internal int VhsInverseCompanionWorkerThreads =>
+        _demodulator.VhsInverseCompanionWorkerThreads;
 
     internal bool UsesIppVhsEnvelopeSos => _vhsEnvelopeIppSos is not null;
 

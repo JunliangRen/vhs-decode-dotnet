@@ -26,6 +26,7 @@ public sealed class RfDemodulator : IDisposable
     private int _subDeemphasisFilterPlanBuildCount;
     private readonly VhsRealFftWorkspacePool _vhsRealFftWorkspacePool;
     private readonly IppComplexFft64Pool? _ippComplexFftPool;
+    private readonly VhsInverseCompanionScheduler? _vhsInverseCompanionScheduler;
     private readonly bool _parallelizeVhsInverseStaging;
     private int _disposed;
 
@@ -45,7 +46,9 @@ public sealed class RfDemodulator : IDisposable
         : this(
             sampleRateHz,
             dspBackend,
-            parallelizeVhsInverseStaging: false)
+            parallelizeVhsInverseStaging: false,
+            companionIppFftFactory: null,
+            vhsInverseCompanionWorkerThreads: 0)
     {
     }
 
@@ -53,7 +56,8 @@ public sealed class RfDemodulator : IDisposable
         double sampleRateHz,
         DspBackend dspBackend,
         bool parallelizeVhsInverseStaging,
-        Func<int, IppRealFft>? companionIppFftFactory = null)
+        Func<int, IppRealFft>? companionIppFftFactory = null,
+        int vhsInverseCompanionWorkerThreads = 1)
     {
         if (sampleRateHz <= 0)
         {
@@ -65,6 +69,13 @@ public sealed class RfDemodulator : IDisposable
             throw new ArgumentOutOfRangeException(nameof(dspBackend));
         }
 
+        if (parallelizeVhsInverseStaging
+            && vhsInverseCompanionWorkerThreads <= 0)
+        {
+            throw new ArgumentOutOfRangeException(
+                nameof(vhsInverseCompanionWorkerThreads));
+        }
+
         if (dspBackend == DspBackend.IppFast)
         {
             _ = IppRuntime.RequireAvailable();
@@ -74,6 +85,10 @@ public sealed class RfDemodulator : IDisposable
         SampleRateHz = sampleRateHz;
         DspBackend = dspBackend;
         _parallelizeVhsInverseStaging = parallelizeVhsInverseStaging;
+        _vhsInverseCompanionScheduler = parallelizeVhsInverseStaging
+            ? VhsInverseCompanionScheduler.TryCreate(
+                vhsInverseCompanionWorkerThreads)
+            : null;
         _vhsRealFftWorkspacePool = new VhsRealFftWorkspacePool(
             dspBackend,
             parallelizeVhsInverseStaging,
@@ -85,6 +100,9 @@ public sealed class RfDemodulator : IDisposable
     public DspBackend DspBackend { get; }
 
     internal bool ParallelizesVhsInverseStaging => _parallelizeVhsInverseStaging;
+
+    internal int VhsInverseCompanionWorkerThreads =>
+        _vhsInverseCompanionScheduler?.WorkerCount ?? 0;
 
     internal bool UsesIppComplexFft => _ippComplexFftPool is not null;
 
@@ -100,11 +118,18 @@ public sealed class RfDemodulator : IDisposable
         {
             try
             {
-                _ippComplexFftPool?.Dispose();
+                _vhsInverseCompanionScheduler?.Dispose();
             }
             finally
             {
-                _vhsRealFftWorkspacePool.Dispose();
+                try
+                {
+                    _ippComplexFftPool?.Dispose();
+                }
+                finally
+                {
+                    _vhsRealFftWorkspacePool.Dispose();
+                }
             }
         }
 
@@ -1451,17 +1476,28 @@ public sealed class RfDemodulator : IDisposable
             workspace.FullAnalytic.AsSpan(0, inputLength));
     }
 
-    private static void RunParallelVhsInverseStaging(
+    private void RunParallelVhsInverseStaging(
         VhsRealFftWorkspace workspace,
         Complex[] rfFilteredHalf,
         int spectrumLength,
         int inputLength)
     {
-        Task analyticInverse;
+        VhsInverseCompanionWorkItem analyticInverse;
         try
         {
-            analyticInverse = Task.Run(
-                () => CompleteNumpyVhsComplexAnalyticSignal(workspace, inputLength));
+            if (_vhsInverseCompanionScheduler is null
+                || !_vhsInverseCompanionScheduler.TryQueue(
+                    () => CompleteNumpyVhsComplexAnalyticSignal(
+                        workspace,
+                        inputLength),
+                    out analyticInverse))
+            {
+                workspace.Inverse(
+                    rfFilteredHalf.AsSpan(0, spectrumLength),
+                    workspace.Real);
+                CompleteNumpyVhsComplexAnalyticSignal(workspace, inputLength);
+                return;
+            }
         }
         catch (Exception)
         {
@@ -1474,41 +1510,56 @@ public sealed class RfDemodulator : IDisposable
             return;
         }
 
-        ExceptionDispatchInfo? realInverseFailure = null;
-        try
+        using (analyticInverse)
         {
-            workspace.Inverse(
-                rfFilteredHalf.AsSpan(0, spectrumLength),
-                workspace.Real);
-        }
-        catch (Exception exception)
-        {
-            realInverseFailure = ExceptionDispatchInfo.Capture(exception);
-        }
+            ExceptionDispatchInfo? realInverseFailure = null;
+            try
+            {
+                workspace.Inverse(
+                    rfFilteredHalf.AsSpan(0, spectrumLength),
+                    workspace.Real);
+            }
+            catch (Exception exception)
+            {
+                realInverseFailure = ExceptionDispatchInfo.Capture(exception);
+            }
 
-        try
-        {
-            analyticInverse.GetAwaiter().GetResult();
-        }
-        catch when (realInverseFailure is not null)
-        {
-            // Serial execution would surface the real inverse failure first.
-        }
+            try
+            {
+                analyticInverse.Wait();
+            }
+            catch when (realInverseFailure is not null)
+            {
+                // Serial execution would surface the real inverse failure first.
+            }
 
-        realInverseFailure?.Throw();
+            realInverseFailure?.Throw();
+        }
     }
 
-    private static void RunParallelIppVhsInverseStaging(
+    private void RunParallelIppVhsInverseStaging(
         VhsRealFftWorkspace workspace,
         Complex[] rfFilteredHalf,
         int spectrumLength)
     {
-        Task analyticInverse;
+        VhsInverseCompanionWorkItem analyticInverse;
         try
         {
-            analyticInverse = Task.Run(() => workspace.InverseCompanion(
-                workspace.HilbertHalf.AsSpan(0, spectrumLength),
-                workspace.Imaginary));
+            if (_vhsInverseCompanionScheduler is null
+                || !_vhsInverseCompanionScheduler.TryQueue(
+                    () => workspace.InverseCompanion(
+                        workspace.HilbertHalf.AsSpan(0, spectrumLength),
+                        workspace.Imaginary),
+                    out analyticInverse))
+            {
+                workspace.Inverse(
+                    rfFilteredHalf.AsSpan(0, spectrumLength),
+                    workspace.Real);
+                workspace.InverseCompanion(
+                    workspace.HilbertHalf.AsSpan(0, spectrumLength),
+                    workspace.Imaginary);
+                return;
+            }
         }
         catch (Exception)
         {
@@ -1523,28 +1574,31 @@ public sealed class RfDemodulator : IDisposable
             return;
         }
 
-        ExceptionDispatchInfo? realInverseFailure = null;
-        try
+        using (analyticInverse)
         {
-            workspace.Inverse(
-                rfFilteredHalf.AsSpan(0, spectrumLength),
-                workspace.Real);
-        }
-        catch (Exception exception)
-        {
-            realInverseFailure = ExceptionDispatchInfo.Capture(exception);
-        }
+            ExceptionDispatchInfo? realInverseFailure = null;
+            try
+            {
+                workspace.Inverse(
+                    rfFilteredHalf.AsSpan(0, spectrumLength),
+                    workspace.Real);
+            }
+            catch (Exception exception)
+            {
+                realInverseFailure = ExceptionDispatchInfo.Capture(exception);
+            }
 
-        try
-        {
-            analyticInverse.GetAwaiter().GetResult();
-        }
-        catch when (realInverseFailure is not null)
-        {
-            // Serial execution would surface the real inverse failure first.
-        }
+            try
+            {
+                analyticInverse.Wait();
+            }
+            catch when (realInverseFailure is not null)
+            {
+                // Serial execution would surface the real inverse failure first.
+            }
 
-        realInverseFailure?.Throw();
+            realInverseFailure?.Throw();
+        }
     }
 
     private static double[] GetVhsHilbertMultiplier(int fftSize)
@@ -1821,6 +1875,155 @@ public sealed class RfDemodulator : IDisposable
         }
 
         return true;
+    }
+
+    private sealed class VhsInverseCompanionScheduler : IDisposable
+    {
+        private readonly BlockingCollection<VhsInverseCompanionWorkItem> _queue;
+        private readonly Thread[] _workers;
+        private int _disposed;
+
+        internal VhsInverseCompanionScheduler(int workerCount)
+        {
+            ArgumentOutOfRangeException.ThrowIfNegativeOrZero(workerCount);
+            WorkerCount = workerCount;
+            _queue = new BlockingCollection<VhsInverseCompanionWorkItem>(
+                boundedCapacity: checked(workerCount * 2));
+            _workers = new Thread[workerCount];
+            int startedWorkers = 0;
+            try
+            {
+                for (int i = 0; i < _workers.Length; i++)
+                {
+                    var worker = new Thread(ProcessQueue)
+                    {
+                        IsBackground = true,
+                        Name = $"VHS inverse companion {i + 1}"
+                    };
+                    _workers[i] = worker;
+                    worker.Start();
+                    startedWorkers++;
+                }
+            }
+            catch
+            {
+                _queue.CompleteAdding();
+                for (int i = 0; i < startedWorkers; i++)
+                {
+                    _workers[i].Join();
+                }
+
+                _queue.Dispose();
+                throw;
+            }
+        }
+
+        internal int WorkerCount { get; }
+
+        internal static VhsInverseCompanionScheduler? TryCreate(
+            int workerCount)
+        {
+            try
+            {
+                return new VhsInverseCompanionScheduler(workerCount);
+            }
+            catch (Exception exception) when (
+                exception is not OutOfMemoryException
+                    and not AccessViolationException)
+            {
+                // Optional concurrency must not change decode startup behavior.
+                return null;
+            }
+        }
+
+        internal bool TryQueue(
+            Action action,
+            out VhsInverseCompanionWorkItem workItem)
+        {
+            ArgumentNullException.ThrowIfNull(action);
+            var candidate = new VhsInverseCompanionWorkItem(action);
+            try
+            {
+                if (Volatile.Read(ref _disposed) == 0
+                    && _queue.TryAdd(candidate))
+                {
+                    workItem = candidate;
+                    return true;
+                }
+            }
+            catch (InvalidOperationException)
+            {
+                // Disposal completed or disposed the bounded queue between the state check and add.
+            }
+
+            candidate.Dispose();
+            workItem = null!;
+            return false;
+        }
+
+        public void Dispose()
+        {
+            if (Interlocked.Exchange(ref _disposed, 1) != 0)
+            {
+                return;
+            }
+
+            _queue.CompleteAdding();
+            foreach (Thread worker in _workers)
+            {
+                worker.Join();
+            }
+
+            _queue.Dispose();
+        }
+
+        private void ProcessQueue()
+        {
+            foreach (VhsInverseCompanionWorkItem workItem in
+                     _queue.GetConsumingEnumerable())
+            {
+                workItem.Execute();
+            }
+        }
+    }
+
+    private sealed class VhsInverseCompanionWorkItem : IDisposable
+    {
+        private readonly ManualResetEventSlim _completion = new(
+            initialState: false,
+            spinCount: 0);
+        private Action? _action;
+        private ExceptionDispatchInfo? _failure;
+
+        internal VhsInverseCompanionWorkItem(Action action)
+        {
+            _action = action;
+        }
+
+        internal void Execute()
+        {
+            try
+            {
+                Interlocked.Exchange(ref _action, null)?.Invoke();
+            }
+            catch (Exception exception)
+            {
+                _failure = ExceptionDispatchInfo.Capture(exception);
+            }
+            finally
+            {
+                _completion.Set();
+            }
+        }
+
+        internal void Wait()
+        {
+            _completion.Wait();
+            _failure?.Throw();
+        }
+
+        public void Dispose()
+            => _completion.Dispose();
     }
 
     private sealed class VhsRealFftWorkspace : IDisposable
