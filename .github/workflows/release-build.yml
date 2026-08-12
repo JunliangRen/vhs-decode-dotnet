@@ -130,7 +130,7 @@ jobs:
         run: dotnet build VHSDecodeDotNet.slnx --configuration Release --no-restore
 
       - name: Run tests
-        run: dotnet test --solution VHSDecodeDotNet.slnx --configuration Release --no-build --no-restore --minimum-expected-tests 1429
+        run: dotnet test --solution VHSDecodeDotNet.slnx --configuration Release --no-build --no-restore --minimum-expected-tests 1430
 
       - name: Run NumPy reduction scalar fallback tests
         env:
@@ -175,12 +175,12 @@ jobs:
       - name: Run complex FFT direct-output AVX-disabled tests
         env:
           DOTNET_EnableAVX: "0"
-        run: dotnet test tests/VHSDecode.Tests/VHSDecode.Tests.csproj --configuration Release --no-build --no-restore --filter-class VHSDecode.Tests.PocketFftComplexStorageTests --minimum-expected-tests 4
+        run: dotnet test tests/VHSDecode.Tests/VHSDecode.Tests.csproj --configuration Release --no-build --no-restore --filter-class VHSDecode.Tests.PocketFftComplexStorageTests --minimum-expected-tests 5
 
       - name: Run complex FFT direct-output scalar fallback tests
         env:
           DOTNET_EnableHWIntrinsic: "0"
-        run: dotnet test tests/VHSDecode.Tests/VHSDecode.Tests.csproj --configuration Release --no-build --no-restore --filter-class VHSDecode.Tests.PocketFftComplexStorageTests --minimum-expected-tests 4
+        run: dotnet test tests/VHSDecode.Tests/VHSDecode.Tests.csproj --configuration Release --no-build --no-restore --filter-class VHSDecode.Tests.PocketFftComplexStorageTests --minimum-expected-tests 5
 
       - name: Run large PocketFFT second-pass scalar fallback tests
         env:

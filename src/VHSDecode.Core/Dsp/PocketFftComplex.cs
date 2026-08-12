@@ -404,7 +404,7 @@ public static class PocketFftComplex
     {
         ValidateLength(input.Length, nameof(input));
         return Plans.GetOrAdd(input.Length, static length => new Plan(length))
-            .Transform(input, forward, permitPass8Avx: false);
+            .Transform(input, forward, permitAvx: false);
     }
 
     internal static void Inverse(
@@ -491,26 +491,26 @@ public static class PocketFftComplex
         }
 
         public Complex[] Transform(ReadOnlySpan<Complex> input, bool forward)
-            => Transform(input, forward, permitPass8Avx: true);
+            => Transform(input, forward, permitAvx: true);
 
         public Complex[] Transform(
             ReadOnlySpan<Complex> input,
             bool forward,
-            bool permitPass8Avx)
+            bool permitAvx)
         {
             var output = new Complex[_length];
-            Transform(input, output, forward, permitPass8Avx);
+            Transform(input, output, forward, permitAvx);
             return output;
         }
 
         public void Transform(ReadOnlySpan<Complex> input, Span<Complex> output, bool forward)
-            => Transform(input, output, forward, permitPass8Avx: true);
+            => Transform(input, output, forward, permitAvx: true);
 
         private void Transform(
             ReadOnlySpan<Complex> input,
             Span<Complex> output,
             bool forward,
-            bool permitPass8Avx)
+            bool permitAvx)
         {
             if (input.Length != _length)
             {
@@ -537,7 +537,7 @@ public static class PocketFftComplex
                 destination,
                 forward,
                 forward ? 1.0 : 1.0 / _length,
-                permitPass8Avx);
+                permitAvx);
             System.Diagnostics.Debug.Assert(
                 transformed.Overlaps(outputValues, out int outputOffset)
                 && outputOffset == 0
@@ -580,7 +580,7 @@ public static class PocketFftComplex
                 destination,
                 forward: true,
                 normalization: 1.0,
-                permitPass8Avx: true);
+                permitAvx: true);
             if (overlappingRealStorage)
             {
                 transformed.CopyTo(outputValues);
@@ -599,14 +599,14 @@ public static class PocketFftComplex
             Span<Value> scratch,
             bool forward,
             double normalization,
-            bool permitPass8Avx)
+            bool permitAvx)
         {
             System.Diagnostics.Debug.Assert(data.Length == _length);
             System.Diagnostics.Debug.Assert(scratch.Length == _length);
             System.Diagnostics.Debug.Assert(!data.Overlaps(scratch));
             Span<Value> source = data;
             Span<Value> destination = scratch;
-            bool allowPass8Avx = permitPass8Avx && CanUsePass8Avx(data);
+            bool allowPass8Avx = permitAvx && CanUsePass8Avx(data);
             int l1 = 1;
             foreach (Factor factor in _factors)
             {
@@ -641,13 +641,40 @@ public static class PocketFftComplex
 
             if (normalization != 1.0)
             {
-                for (int i = 0; i < _length; i++)
-                {
-                    source[i] = Scale(source[i], normalization);
-                }
+                ScaleInPlace(source, normalization, permitAvx);
             }
 
             return source;
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveOptimization)]
+        private static void ScaleInPlace(
+            Span<Value> values,
+            double scale,
+            bool permitAvx)
+        {
+            ref Value valueStart = ref MemoryMarshal.GetReference(values);
+            int index = 0;
+            if (permitAvx && Avx.IsSupported)
+            {
+                Vector256<double> scaleVector = Vector256.Create(scale);
+                int vectorizedEnd = values.Length & ~1;
+                for (; index < vectorizedEnd; index += 2)
+                {
+                    StoreTwoValues(
+                        ref valueStart,
+                        index,
+                        Avx.Multiply(
+                            LoadTwoValues(ref valueStart, index),
+                            scaleVector));
+                }
+            }
+
+            for (; index < values.Length; index++)
+            {
+                ref Value value = ref Unsafe.Add(ref valueStart, index);
+                value = Scale(value, scale);
+            }
         }
 
         [MethodImpl(MethodImplOptions.AggressiveOptimization)]
