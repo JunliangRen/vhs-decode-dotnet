@@ -130,7 +130,7 @@ jobs:
         run: dotnet build VHSDecodeDotNet.slnx --configuration Release --no-restore
 
       - name: Run tests
-        run: dotnet test --solution VHSDecodeDotNet.slnx --configuration Release --no-build --no-restore --minimum-expected-tests 1431
+        run: dotnet test --solution VHSDecodeDotNet.slnx --configuration Release --no-build --no-restore --minimum-expected-tests 1432
 
       - name: Run NumPy reduction scalar fallback tests
         env:
@@ -221,6 +221,21 @@ jobs:
         env:
           DOTNET_EnableHWIntrinsic: "0"
         run: dotnet test tests/VHSDecode.Tests/VHSDecode.Tests.csproj --configuration Release --no-build --no-restore --filter-method '*AvxRadix3StagesPreserveScalarSpecialValueBits*' --minimum-expected-tests 1
+
+      - name: Run PocketFFT radix-11 AVX2 equivalence test
+        env:
+          VHSDECODE_REQUIRE_AVX_RADIX11: "1"
+        run: dotnet test tests/VHSDecode.Tests/VHSDecode.Tests.csproj --configuration Release --no-build --no-restore --filter-method '*Avx2Radix11PacketStagesPreserveScalarSpecialValueBits*' --minimum-expected-tests 1
+
+      - name: Run PocketFFT radix-11 AVX2-disabled equivalence test
+        env:
+          DOTNET_EnableAVX2: "0"
+        run: dotnet test tests/VHSDecode.Tests/VHSDecode.Tests.csproj --configuration Release --no-build --no-restore --filter-method '*Avx2Radix11PacketStagesPreserveScalarSpecialValueBits*' --minimum-expected-tests 1
+
+      - name: Run PocketFFT radix-11 scalar fallback equivalence test
+        env:
+          DOTNET_EnableHWIntrinsic: "0"
+        run: dotnet test tests/VHSDecode.Tests/VHSDecode.Tests.csproj --configuration Release --no-build --no-restore --filter-method '*Avx2Radix11PacketStagesPreserveScalarSpecialValueBits*' --minimum-expected-tests 1
 
       - name: Run Float32 SOS common-section AVX-disabled hash test
         env:

@@ -17,6 +17,12 @@ internal static class PocketFftComplex32
         Vector256.Create(float.MaxValue / 16.0f);
     private static readonly Vector256<float> FloatPass5MaximumSafeMagnitude =
         Vector256.Create(float.MaxValue / 16.0f);
+    private static readonly Vector256<float> FloatPass11MaximumSafeMagnitude =
+        Vector256.Create(float.MaxValue / 64.0f);
+    private static readonly Vector256<int> Pass11PacketGatherIndices =
+        Vector256.Create(0, 1, 22, 23, 44, 45, 66, 67);
+    private static readonly Vector256<float> NegateEvenComponents =
+        Vector256.Create(-0.0f, 0.0f, -0.0f, 0.0f, -0.0f, 0.0f, -0.0f, 0.0f);
     [ThreadStatic]
     private static Value[]? _planValues;
     [ThreadStatic]
@@ -107,7 +113,22 @@ internal static class PocketFftComplex32
             .Transform(
                 input,
                 permitPass3Avx: false,
-                permitPass5Avx: false);
+                permitPass5Avx: false,
+                permitPass11Avx: false);
+    }
+
+    internal static Complex32[] TransformDirectPass11ScalarReference(
+        ReadOnlySpan<Complex32> input)
+    {
+        ValidateSupportedLength(input.Length, nameof(input));
+        return RootedPlans.GetOrAdd(
+                (input.Length, input.Length),
+                static key => new Plan(key.Length, key.RootLength))
+            .Transform(
+                input,
+                permitPass3Avx: true,
+                permitPass5Avx: true,
+                permitPass11Avx: false);
     }
 
     internal static Complex32[] ForwardAnyLengthDuccOwned(
@@ -646,12 +667,14 @@ internal static class PocketFftComplex32
             => Transform(
                 input,
                 permitPass3Avx: true,
-                permitPass5Avx: true);
+                permitPass5Avx: true,
+                permitPass11Avx: true);
 
         internal Complex32[] Transform(
             ReadOnlySpan<Complex32> input,
             bool permitPass3Avx,
-            bool permitPass5Avx)
+            bool permitPass5Avx,
+            bool permitPass11Avx)
         {
             Value[] values =
                 EnsureCapacity(ref _planValues, _length);
@@ -663,7 +686,8 @@ internal static class PocketFftComplex32
             Value[] transformed = Execute(
                 values,
                 permitPass3Avx,
-                permitPass5Avx);
+                permitPass5Avx,
+                permitPass11Avx);
             var output = new Complex32[_length];
             for (int i = 0; i < output.Length; i++)
             {
@@ -689,7 +713,8 @@ internal static class PocketFftComplex32
             Value[] transformed = Execute(
                 planValues,
                 permitPass3Avx: true,
-                permitPass5Avx: true);
+                permitPass5Avx: true,
+                permitPass11Avx: true);
             for (int i = 0; i < _length; i++)
             {
                 values[i] = new Complex32(
@@ -735,7 +760,8 @@ internal static class PocketFftComplex32
         private Value[] Execute(
             Value[] data,
             bool permitPass3Avx,
-            bool permitPass5Avx)
+            bool permitPass5Avx,
+            bool permitPass11Avx)
         {
             Value[] scratch =
                 EnsureCapacity(ref _planScratch, _length);
@@ -778,7 +804,13 @@ internal static class PocketFftComplex32
                         Pass7(ido, l1, source, destination, factor.Twiddles);
                         break;
                     case 11:
-                        Pass11(ido, l1, source, destination, factor.Twiddles);
+                        Pass11(
+                            ido,
+                            l1,
+                            source,
+                            destination,
+                            factor.Twiddles,
+                            permitPass11Avx);
                         break;
                     default:
                         throw new InvalidOperationException($"Unsupported complex FFT radix {factor.Radix}.");
@@ -1777,9 +1809,34 @@ internal static class PocketFftComplex32
             int l1,
             Value[] input,
             Value[] output,
-            Value[] twiddles)
+            Value[] twiddles,
+            bool permitPass11Avx)
         {
-            for (int k = 0; k < l1; k++)
+            int k = 0;
+            if (permitPass11Avx && ido == 1 && Avx2.IsSupported)
+            {
+                int vectorizedEnd = l1 & ~3;
+                for (; k < vectorizedEnd; k += 4)
+                {
+                    if (!TryPass11FinalPacketVector(k, l1, input, output))
+                    {
+                        for (int scalar = k; scalar < k + 4; scalar++)
+                        {
+                            Pass11Index(
+                                0,
+                                scalar,
+                                ido,
+                                l1,
+                                input,
+                                output,
+                                twiddles,
+                                applyTwiddle: false);
+                        }
+                    }
+                }
+            }
+
+            for (; k < l1; k++)
             {
                 Pass11Index(
                     0,
@@ -1790,7 +1847,38 @@ internal static class PocketFftComplex32
                     output,
                     twiddles,
                     applyTwiddle: false);
-                for (int i = 1; i < ido; i++)
+                int i = 1;
+                if (permitPass11Avx && Avx.IsSupported)
+                {
+                    int vectorizedEnd = 1 + ((ido - 1) & ~3);
+                    for (; i < vectorizedEnd; i += 4)
+                    {
+                        if (!TryPass11IndexVector(
+                                i,
+                                k,
+                                ido,
+                                l1,
+                                input,
+                                output,
+                                twiddles))
+                        {
+                            for (int scalar = i; scalar < i + 4; scalar++)
+                            {
+                                Pass11Index(
+                                    scalar,
+                                    k,
+                                    ido,
+                                    l1,
+                                    input,
+                                    output,
+                                    twiddles,
+                                    applyTwiddle: true);
+                            }
+                        }
+                    }
+                }
+
+                for (; i < ido; i++)
                 {
                     Pass11Index(
                         i,
@@ -1803,6 +1891,411 @@ internal static class PocketFftComplex32
                         applyTwiddle: true);
                 }
             }
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveOptimization)]
+        private static bool TryPass11IndexVector(
+            int i,
+            int k,
+            int ido,
+            int l1,
+            Value[] input,
+            Value[] output,
+            Value[] twiddles)
+        {
+            const float R1 = 0.8412535328311811688618116489193677f;
+            const float I1 = -0.5406408174555975821076359543186917f;
+            const float R2 = 0.4154150130018864255292741492296232f;
+            const float I2 = -0.9096319953545183714117153830790285f;
+            const float R3 = -0.1423148382732851404437926686163697f;
+            const float I3 = -0.9898214418809327323760920377767188f;
+            const float R4 = -0.6548607339452850640569250724662936f;
+            const float I4 = -0.7557495743542582837740358439723444f;
+            const float R5 = -0.9594929736144973898903680570663277f;
+            const float I5 = -0.2817325568414296977114179153466169f;
+
+            int inputBase = i + (ido * 11 * k);
+            Vector256<float> t1 = LoadValueVector(input, inputBase);
+            Vector256<float> safe = Pass11SafeMask(t1);
+            Vector256<float> input2 = LoadValueVector(input, inputBase + ido);
+            Vector256<float> input11 = LoadValueVector(input, inputBase + (10 * ido));
+            safe = Avx.And(safe, Pass11SafeMask(input2));
+            safe = Avx.And(safe, Pass11SafeMask(input11));
+            PairVector(
+                out Vector256<float> t2,
+                out Vector256<float> t11,
+                input2,
+                input11);
+            Vector256<float> input3 = LoadValueVector(input, inputBase + (2 * ido));
+            Vector256<float> input10 = LoadValueVector(input, inputBase + (9 * ido));
+            safe = Avx.And(safe, Pass11SafeMask(input3));
+            safe = Avx.And(safe, Pass11SafeMask(input10));
+            PairVector(
+                out Vector256<float> t3,
+                out Vector256<float> t10,
+                input3,
+                input10);
+            Vector256<float> input4 = LoadValueVector(input, inputBase + (3 * ido));
+            Vector256<float> input9 = LoadValueVector(input, inputBase + (8 * ido));
+            safe = Avx.And(safe, Pass11SafeMask(input4));
+            safe = Avx.And(safe, Pass11SafeMask(input9));
+            PairVector(
+                out Vector256<float> t4,
+                out Vector256<float> t9,
+                input4,
+                input9);
+            Vector256<float> input5 = LoadValueVector(input, inputBase + (4 * ido));
+            Vector256<float> input8 = LoadValueVector(input, inputBase + (7 * ido));
+            safe = Avx.And(safe, Pass11SafeMask(input5));
+            safe = Avx.And(safe, Pass11SafeMask(input8));
+            PairVector(
+                out Vector256<float> t5,
+                out Vector256<float> t8,
+                input5,
+                input8);
+            Vector256<float> input6 = LoadValueVector(input, inputBase + (5 * ido));
+            Vector256<float> input7 = LoadValueVector(input, inputBase + (6 * ido));
+            safe = Avx.And(safe, Pass11SafeMask(input6));
+            safe = Avx.And(safe, Pass11SafeMask(input7));
+            if (Avx.MoveMask(safe) != 0xFF)
+            {
+                return false;
+            }
+
+            PairVector(
+                out Vector256<float> t6,
+                out Vector256<float> t7,
+                input6,
+                input7);
+            int outputBase = i + (ido * k);
+            int outputStride = ido * l1;
+            int twiddleStride = ido - 1;
+            Vector256<float> output0 = Avx.Add(t1, t2);
+            output0 = Avx.Add(output0, t3);
+            output0 = Avx.Add(output0, t4);
+            output0 = Avx.Add(output0, t5);
+            output0 = Avx.Add(output0, t6);
+            StoreValueVector(output, outputBase, output0);
+
+            StorePass11IndexPairVector(
+                i, outputBase, outputStride, twiddleStride, output, twiddles,
+                t1, t2, t3, t4, t5, t6, t7, t8, t9, t10, t11,
+                1, 10,
+                R1, R2, R3, R4, R5,
+                I1, I2, I3, I4, I5);
+            StorePass11IndexPairVector(
+                i, outputBase, outputStride, twiddleStride, output, twiddles,
+                t1, t2, t3, t4, t5, t6, t7, t8, t9, t10, t11,
+                2, 9,
+                R2, R4, R5, R3, R1,
+                I2, I4, -I5, -I3, -I1);
+            StorePass11IndexPairVector(
+                i, outputBase, outputStride, twiddleStride, output, twiddles,
+                t1, t2, t3, t4, t5, t6, t7, t8, t9, t10, t11,
+                3, 8,
+                R3, R5, R2, R1, R4,
+                I3, -I5, -I2, I1, I4);
+            StorePass11IndexPairVector(
+                i, outputBase, outputStride, twiddleStride, output, twiddles,
+                t1, t2, t3, t4, t5, t6, t7, t8, t9, t10, t11,
+                4, 7,
+                R4, R3, R1, R5, R2,
+                I4, -I3, I1, I5, -I2);
+            StorePass11IndexPairVector(
+                i, outputBase, outputStride, twiddleStride, output, twiddles,
+                t1, t2, t3, t4, t5, t6, t7, t8, t9, t10, t11,
+                5, 6,
+                R5, R1, R4, R2, R3,
+                I5, -I1, I4, -I2, I3);
+            return true;
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        private static void StorePass11IndexPairVector(
+            int i,
+            int outputBase,
+            int outputStride,
+            int twiddleStride,
+            Value[] output,
+            Value[] twiddles,
+            Vector256<float> t1,
+            Vector256<float> t2,
+            Vector256<float> t3,
+            Vector256<float> t4,
+            Vector256<float> t5,
+            Vector256<float> t6,
+            Vector256<float> t7,
+            Vector256<float> t8,
+            Vector256<float> t9,
+            Vector256<float> t10,
+            Vector256<float> t11,
+            int firstOutput,
+            int secondOutput,
+            float real1,
+            float real2,
+            float real3,
+            float real4,
+            float real5,
+            float imaginary1,
+            float imaginary2,
+            float imaginary3,
+            float imaginary4,
+            float imaginary5)
+        {
+            Vector256<float> ca = Avx.Add(t1, Avx.Multiply(t2, Vector256.Create(real1)));
+            ca = Avx.Add(ca, Avx.Multiply(t3, Vector256.Create(real2)));
+            ca = Avx.Add(ca, Avx.Multiply(t4, Vector256.Create(real3)));
+            ca = Avx.Add(ca, Avx.Multiply(t5, Vector256.Create(real4)));
+            ca = Avx.Add(ca, Avx.Multiply(t6, Vector256.Create(real5)));
+
+            Vector256<float> weighted = Avx.Multiply(Vector256.Create(imaginary1), t11);
+            weighted = Avx.Add(
+                weighted,
+                Avx.Multiply(Vector256.Create(imaginary2), t10));
+            weighted = Avx.Add(
+                weighted,
+                Avx.Multiply(Vector256.Create(imaginary3), t9));
+            weighted = Avx.Add(
+                weighted,
+                Avx.Multiply(Vector256.Create(imaginary4), t8));
+            weighted = Avx.Add(
+                weighted,
+                Avx.Multiply(Vector256.Create(imaginary5), t7));
+            Vector256<float> cb = Avx.Xor(
+                Avx.Permute(weighted, 0xB1),
+                NegateEvenComponents);
+            Vector256<float> first = Avx.Add(ca, cb);
+            Vector256<float> second = Avx.Subtract(ca, cb);
+            StoreValueVector(
+                output,
+                outputBase + (firstOutput * outputStride),
+                SpecialMultiplyVector(
+                    first,
+                    LoadValueVector(
+                        twiddles,
+                        (i - 1) + ((firstOutput - 1) * twiddleStride))));
+            StoreValueVector(
+                output,
+                outputBase + (secondOutput * outputStride),
+                SpecialMultiplyVector(
+                    second,
+                    LoadValueVector(
+                        twiddles,
+                        (i - 1) + ((secondOutput - 1) * twiddleStride))));
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveOptimization)]
+        private static unsafe bool TryPass11FinalPacketVector(
+            int k,
+            int l1,
+            Value[] input,
+            Value[] output)
+        {
+            const float R1 = 0.8412535328311811688618116489193677f;
+            const float I1 = -0.5406408174555975821076359543186917f;
+            const float R2 = 0.4154150130018864255292741492296232f;
+            const float I2 = -0.9096319953545183714117153830790285f;
+            const float R3 = -0.1423148382732851404437926686163697f;
+            const float I3 = -0.9898214418809327323760920377767188f;
+            const float R4 = -0.6548607339452850640569250724662936f;
+            const float I4 = -0.7557495743542582837740358439723444f;
+            const float R5 = -0.9594929736144973898903680570663277f;
+            const float I5 = -0.2817325568414296977114179153466169f;
+
+            fixed (Value* inputPointer = input)
+            fixed (Value* outputPointer = output)
+            {
+                float* inputComponents = (float*)inputPointer;
+                float* outputComponents = (float*)outputPointer;
+                int inputBase = 11 * k;
+                Vector256<float> t1 = GatherPass11Packets(inputComponents, inputBase);
+                Vector256<float> safe = Pass11SafeMask(t1);
+                Vector256<float> input2 =
+                    GatherPass11Packets(inputComponents, inputBase + 1);
+                Vector256<float> input11 =
+                    GatherPass11Packets(inputComponents, inputBase + 10);
+                safe = Avx.And(safe, Pass11SafeMask(input2));
+                safe = Avx.And(safe, Pass11SafeMask(input11));
+                PairVector(
+                    out Vector256<float> t2,
+                    out Vector256<float> t11,
+                    input2,
+                    input11);
+                Vector256<float> input3 =
+                    GatherPass11Packets(inputComponents, inputBase + 2);
+                Vector256<float> input10 =
+                    GatherPass11Packets(inputComponents, inputBase + 9);
+                safe = Avx.And(safe, Pass11SafeMask(input3));
+                safe = Avx.And(safe, Pass11SafeMask(input10));
+                PairVector(
+                    out Vector256<float> t3,
+                    out Vector256<float> t10,
+                    input3,
+                    input10);
+                Vector256<float> input4 =
+                    GatherPass11Packets(inputComponents, inputBase + 3);
+                Vector256<float> input9 =
+                    GatherPass11Packets(inputComponents, inputBase + 8);
+                safe = Avx.And(safe, Pass11SafeMask(input4));
+                safe = Avx.And(safe, Pass11SafeMask(input9));
+                PairVector(
+                    out Vector256<float> t4,
+                    out Vector256<float> t9,
+                    input4,
+                    input9);
+                Vector256<float> input5 =
+                    GatherPass11Packets(inputComponents, inputBase + 4);
+                Vector256<float> input8 =
+                    GatherPass11Packets(inputComponents, inputBase + 7);
+                safe = Avx.And(safe, Pass11SafeMask(input5));
+                safe = Avx.And(safe, Pass11SafeMask(input8));
+                PairVector(
+                    out Vector256<float> t5,
+                    out Vector256<float> t8,
+                    input5,
+                    input8);
+                Vector256<float> input6 =
+                    GatherPass11Packets(inputComponents, inputBase + 5);
+                Vector256<float> input7 =
+                    GatherPass11Packets(inputComponents, inputBase + 6);
+                safe = Avx.And(safe, Pass11SafeMask(input6));
+                safe = Avx.And(safe, Pass11SafeMask(input7));
+                if (Avx.MoveMask(safe) != 0xFF)
+                {
+                    return false;
+                }
+
+                PairVector(
+                    out Vector256<float> t6,
+                    out Vector256<float> t7,
+                    input6,
+                    input7);
+
+                Vector256<float> output0 = Avx.Add(t1, t2);
+                output0 = Avx.Add(output0, t3);
+                output0 = Avx.Add(output0, t4);
+                output0 = Avx.Add(output0, t5);
+                output0 = Avx.Add(output0, t6);
+                Avx.Store(outputComponents + (2 * k), output0);
+
+                StorePass11PacketPairVector(
+                    outputComponents,
+                    k,
+                    l1,
+                    t1, t2, t3, t4, t5, t6, t7, t8, t9, t10, t11,
+                    1, 10,
+                    R1, R2, R3, R4, R5,
+                    I1, I2, I3, I4, I5);
+                StorePass11PacketPairVector(
+                    outputComponents,
+                    k,
+                    l1,
+                    t1, t2, t3, t4, t5, t6, t7, t8, t9, t10, t11,
+                    2, 9,
+                    R2, R4, R5, R3, R1,
+                    I2, I4, -I5, -I3, -I1);
+                StorePass11PacketPairVector(
+                    outputComponents,
+                    k,
+                    l1,
+                    t1, t2, t3, t4, t5, t6, t7, t8, t9, t10, t11,
+                    3, 8,
+                    R3, R5, R2, R1, R4,
+                    I3, -I5, -I2, I1, I4);
+                StorePass11PacketPairVector(
+                    outputComponents,
+                    k,
+                    l1,
+                    t1, t2, t3, t4, t5, t6, t7, t8, t9, t10, t11,
+                    4, 7,
+                    R4, R3, R1, R5, R2,
+                    I4, -I3, I1, I5, -I2);
+                StorePass11PacketPairVector(
+                    outputComponents,
+                    k,
+                    l1,
+                    t1, t2, t3, t4, t5, t6, t7, t8, t9, t10, t11,
+                    5, 6,
+                    R5, R1, R4, R2, R3,
+                    I5, -I1, I4, -I2, I3);
+                return true;
+            }
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        private static unsafe Vector256<float> GatherPass11Packets(
+            float* input,
+            int valueIndex)
+            => Avx2.GatherVector256(
+                input + (2 * valueIndex),
+                Pass11PacketGatherIndices,
+                4);
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        private static Vector256<float> Pass11SafeMask(Vector256<float> value)
+            => Avx.Compare(
+                Avx.And(value, FloatAbsoluteValueMask),
+                FloatPass11MaximumSafeMagnitude,
+                FloatComparisonMode.OrderedLessThanOrEqualNonSignaling);
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        private static unsafe void StorePass11PacketPairVector(
+            float* output,
+            int k,
+            int l1,
+            Vector256<float> t1,
+            Vector256<float> t2,
+            Vector256<float> t3,
+            Vector256<float> t4,
+            Vector256<float> t5,
+            Vector256<float> t6,
+            Vector256<float> t7,
+            Vector256<float> t8,
+            Vector256<float> t9,
+            Vector256<float> t10,
+            Vector256<float> t11,
+            int firstOutput,
+            int secondOutput,
+            float real1,
+            float real2,
+            float real3,
+            float real4,
+            float real5,
+            float imaginary1,
+            float imaginary2,
+            float imaginary3,
+            float imaginary4,
+            float imaginary5)
+        {
+            Vector256<float> ca = Avx.Add(t1, Avx.Multiply(t2, Vector256.Create(real1)));
+            ca = Avx.Add(ca, Avx.Multiply(t3, Vector256.Create(real2)));
+            ca = Avx.Add(ca, Avx.Multiply(t4, Vector256.Create(real3)));
+            ca = Avx.Add(ca, Avx.Multiply(t5, Vector256.Create(real4)));
+            ca = Avx.Add(ca, Avx.Multiply(t6, Vector256.Create(real5)));
+
+            Vector256<float> weighted = Avx.Multiply(Vector256.Create(imaginary1), t11);
+            weighted = Avx.Add(
+                weighted,
+                Avx.Multiply(Vector256.Create(imaginary2), t10));
+            weighted = Avx.Add(
+                weighted,
+                Avx.Multiply(Vector256.Create(imaginary3), t9));
+            weighted = Avx.Add(
+                weighted,
+                Avx.Multiply(Vector256.Create(imaginary4), t8));
+            weighted = Avx.Add(
+                weighted,
+                Avx.Multiply(Vector256.Create(imaginary5), t7));
+            Vector256<float> cb = Avx.Xor(
+                Avx.Permute(weighted, 0xB1),
+                NegateEvenComponents);
+
+            Avx.Store(
+                output + (2 * (k + (l1 * firstOutput))),
+                Avx.Add(ca, cb));
+            Avx.Store(
+                output + (2 * (k + (l1 * secondOutput))),
+                Avx.Subtract(ca, cb));
         }
 
         private static void Pass11Index(
