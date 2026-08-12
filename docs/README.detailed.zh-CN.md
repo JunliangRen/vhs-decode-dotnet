@@ -416,6 +416,29 @@ normal、正负一、最大有限值、无穷以及不同 NaN payload。五项�
 变为 7.74；这是局部计算量下降，不作为多核扩展能力提升的结论。峰值工作集保持有界，
 基线和候选观察到的最大值分别为 650.6 MiB 与 396.2 MiB，未发生 OOM。
 
+### 托管 AVX radix-3 PocketFFT butterfly
+
+托管 float32 PocketFFT 的 radix-3 pass 现在用一个 `Vector256<float>` 同时计算四个相互
+独立的复数索引。每个 lane 保留原标量 pair、系数乘法、加减和复数 twiddle 顺序。包含
+非有限值或超过保守溢出界限的数据包继续执行原来的四个标量索引；尾部和禁用 AVX 的
+主机也保留标量路径。向量路径没有引入 FMA、归约、重结合、共享 scratch 状态、分配或
+跨 transform 状态。
+
+60 项 mixed-radix 兼容测试在正常 intrinsic、禁用 AVX 和禁用全部硬件 intrinsic 下均
+通过。专用直接 plan 测试在 forward/backward 两个方向覆盖长度 33、726 和 990，并分别
+验证会进入 AVX 的正负零、subnormal、最小 normal、正负一，以及触发标量回退的最大
+有限值、无穷和不同 NaN payload。优化后的 JIT 汇编只包含分离的 `vmulps`、`vaddps` 和
+`vsubps` 蝶形与 twiddle 运算，没有 FMA 指令。
+
+六组顺序相反的内核配对中，长度 726 的平均用时从 712.391 降到 705.693 ms（减少
+0.94%），长度 990 从 740.479 降到 709.507 ms（减少 4.18%），输出 hash 完全一致。
+三组顺序相反的 1000 帧 Exact `current --threads 20` 配对在九个兼容表面上全部一致：
+平均墙钟从 37.288 降到 36.909 秒（减少 1.02%），CPU 从 301.984 降到 292.766 秒
+（减少 3.05%），平均活跃核心数从 8.10 变为 7.93。三组墙钟方向为 -0.79%、+0.21%
+和 -2.46%；基线和候选的有界最大工作集分别为 443.4 与 355.6 MiB。三组
+`--threads 0` 配对也在全部兼容表面上一致，平均墙钟从 41.030 降到 40.219 秒。
+v0.4.0 与 IPP-fast profile 不会调用这条托管 current-profile FFT 路径。
+
 ### 之前的托管 AVX radix-5 PocketFFT butterfly
 
 托管 float32 PocketFFT 的 radix-5 pass 现在使用一个 `Vector256<float>` 同时计算四个
@@ -2783,7 +2806,7 @@ stderr、时间戳归一化日志和全部 2,000 个有序 `fileLoc` 完全一�
 .\tools\build-ipp-native.ps1
 dotnet restore VHSDecodeDotNet.slnx
 dotnet build VHSDecodeDotNet.slnx -c Release --no-restore
-dotnet test --solution VHSDecodeDotNet.slnx -c Release --no-build --no-restore --minimum-expected-tests 1430
+dotnet test --solution VHSDecodeDotNet.slnx -c Release --no-build --no-restore --minimum-expected-tests 1431
 dotnet test --project tests\VHSDecode.Tests\VHSDecode.Tests.csproj -c Release --no-build --no-restore --coverage --coverage-output coverage.cobertura.xml --coverage-output-format cobertura
 ```
 
@@ -2795,7 +2818,7 @@ Intel oneAPI。只含二进制的单文件发布会嵌入 `vhsdecode_ipp.dll` �
 notice，不会额外生成许可证 sidecar 文件。只构建 Exact 后端时可以省略原生构建步骤。
 
 当前正式 Release 构建为零警告、零错误。xUnit v3 项目向
-`dotnet test` 和 Visual Studio Test Explorer 暴露 **1,430** 个可独立发现的测试。
+`dotnet test` 和 Visual Studio Test Explorer 暴露 **1,431** 个可独立发现的测试。
 
 <!-- SECTION: usage -->
 

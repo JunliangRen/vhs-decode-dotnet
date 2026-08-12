@@ -400,6 +400,56 @@ public sealed class PocketFftMixedRadixCompatibilityTests
         }
     }
 
+    [Fact(DisplayName = "AVX radix-3 stages preserve scalar special-value bits")]
+    public void AvxRadix3StagesPreserveScalarSpecialValueBits()
+    {
+        uint[][] patternSets =
+        [
+            [
+                0x3F800000,
+                0xBF800000,
+                0x00000000,
+                0x80000000,
+                0x00000001,
+                0x80000001,
+                0x00800000,
+                0x80800000
+            ],
+            [
+                0x3F800000,
+                0xBF800000,
+                0x7F7FFFFF,
+                0xFF7FFFFF,
+                0x7F800000,
+                0xFF800000,
+                0x7FC00001,
+                0xFFC12345
+            ]
+        ];
+        foreach (int length in new[] { 33, 726, 990 })
+        {
+            foreach (uint[] patterns in patternSets)
+            {
+                Complex32[] input = BuildBitPatternInput(length, patterns);
+                Complex32[] expectedForward =
+                    PocketFftComplex32.TransformDirectScalarReference(input);
+                Complex32[] actualForward =
+                    PocketFftComplex32.ForwardAnyLengthDucc(input);
+                Assert.True(
+                    MemoryMarshal.AsBytes(expectedForward.AsSpan())
+                        .SequenceEqual(MemoryMarshal.AsBytes(actualForward.AsSpan())));
+
+                Complex32[] expectedBackward =
+                    BackwardDirectScalarReference(expectedForward);
+                Complex32[] actualBackward =
+                    PocketFftComplex32.BackwardAnyLengthDucc(actualForward);
+                Assert.True(
+                    MemoryMarshal.AsBytes(expectedBackward.AsSpan())
+                        .SequenceEqual(MemoryMarshal.AsBytes(actualBackward.AsSpan())));
+            }
+        }
+    }
+
     private static Complex32[] BackwardDirectScalarReference(
         ReadOnlySpan<Complex32> input)
     {

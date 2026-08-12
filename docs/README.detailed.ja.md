@@ -479,6 +479,32 @@ CPU time は 315.260 から 305.969 seconds（2.95% 減）でした。3 pair の
 compute reduction であって multicore scaling の claim ではありません。peak working set は
 bounded で、observed maximum は baseline 650.6 MiB、candidate 396.2 MiB、OOM はありません。
 
+### managed AVX radix-3 PocketFFT butterfly
+
+managed float32 PocketFFT の radix-3 pass は、4 個の独立した complex index を 1 つの
+`Vector256<float>` で処理します。各 lane は元の scalar pair、coefficient multiply、
+add/subtract、complex twiddle order を維持します。non-finite value または conservative
+overflow bound を超える magnitude を含む packet は元の 4 scalar index を実行し、tail と
+AVX-disabled host も scalar path を維持します。vector path に FMA、reduction、
+reassociation、shared scratch state、allocation、cross-transform state はありません。
+
+60 mixed-radix compatibility test は通常 intrinsic、AVX disabled、全 hardware intrinsic
+disabled で通過しました。専用 direct-plan test は forward/backward の両方で length 33、
+726、990 を検証します。AVX-safe な signed zero、subnormal、minimum normal、signed one と、
+scalar fallback を起動する maximum finite、infinity、異なる NaN payload を個別に含みます。
+optimized JIT disassembly の butterfly/twiddle arithmetic は分離した `vmulps`、`vaddps`、
+`vsubps` のみで、FMA instruction はありません。
+
+順序を反転した 6 kernel pair では、length-726 の mean time が 712.391 から 705.693 ms
+（0.94% 減）、length-990 が 740.479 から 709.507 ms（4.18% 減）となり、output hash は
+一致しました。順序を反転した 1,000-frame Exact `current --threads 20` 3 pair は 9
+compatibility surface ですべて一致しました。mean wall time は 37.288 から 36.909 seconds
+（1.02% 減）、CPU は 301.984 から 292.766 seconds（3.05% 減）、average active core は
+8.10 から 7.93 でした。各 pair の wall direction は -0.79%、+0.21%、-2.46%、bounded
+maximum working set は baseline 443.4 MiB、candidate 355.6 MiB です。3 `--threads 0` pair
+も全 surface で一致し、mean wall time は 41.030 から 40.219 seconds になりました。
+v0.4.0 と IPP-fast profile はこの managed current-profile FFT path を呼びません。
+
 ### 以前の managed AVX radix-5 PocketFFT butterfly
 
 managed float32 PocketFFT の radix-5 pass は、4 個の独立した complex index を 1 つの
@@ -3332,7 +3358,7 @@ Microsoft.Testing.Platform run は全 1,401 test を検出し、1,397 pass、0 f
 .\tools\build-ipp-native.ps1
 dotnet restore VHSDecodeDotNet.slnx
 dotnet build VHSDecodeDotNet.slnx -c Release --no-restore
-dotnet test --solution VHSDecodeDotNet.slnx -c Release --no-build --no-restore --minimum-expected-tests 1430
+dotnet test --solution VHSDecodeDotNet.slnx -c Release --no-build --no-restore --minimum-expected-tests 1431
 dotnet test --project tests\VHSDecode.Tests\VHSDecode.Tests.csproj -c Release --no-build --no-restore --coverage --coverage-output coverage.cobertura.xml --coverage-output-format cobertura
 ```
 
@@ -3346,7 +3372,7 @@ third-party notice を埋め込み、license sidecar file は追加しません�
 
 現在の正式な Release build は warning 0、error 0 です。xUnit v3 project は
 `dotnet test` と Visual Studio Test Explorer の両方で個別に検出できる
-**1,430** tests を公開します。
+**1,431** tests を公開します。
 
 <!-- SECTION: usage -->
 

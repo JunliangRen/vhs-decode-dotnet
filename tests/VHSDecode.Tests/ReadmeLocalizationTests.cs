@@ -18,7 +18,7 @@ public sealed partial class ReadmeLocalizationTests
 
     private const string FullCiTestCommand =
         "run: dotnet test --solution VHSDecodeDotNet.slnx --configuration Release " +
-        "--no-build --no-restore --minimum-expected-tests 1430";
+        "--no-build --no-restore --minimum-expected-tests 1431";
 
     private const string CurrentChromaAccAvxDisabledTestCommand =
         "run: dotnet test tests/VHSDecode.Tests/VHSDecode.Tests.csproj " +
@@ -40,6 +40,15 @@ public sealed partial class ReadmeLocalizationTests
 
     private const string PocketFftRadix5ScalarFallbackTestName =
         "Run PocketFFT radix-5 scalar fallback equivalence test";
+
+    private const string PocketFftRadix3AvxDisabledTestCommand =
+        "run: dotnet test tests/VHSDecode.Tests/VHSDecode.Tests.csproj " +
+        "--configuration Release --no-build --no-restore --filter-method " +
+        "'*AvxRadix3StagesPreserveScalarSpecialValueBits*' " +
+        "--minimum-expected-tests 1";
+
+    private const string PocketFftRadix3ScalarFallbackTestName =
+        "Run PocketFFT radix-3 scalar fallback equivalence test";
 
     private static readonly string[] OverviewReadmeFiles =
     [
@@ -166,7 +175,7 @@ public sealed partial class ReadmeLocalizationTests
         [
             "43155200da87c0d49eb37d8ec09b1372075ee8e4",
             "11.0.100-preview.6.26359.118",
-            "**1,430**",
+            "**1,431**",
             "--compat-version",
             "current",
             "--dsp-backend",
@@ -409,7 +418,7 @@ public sealed partial class ReadmeLocalizationTests
             "1.72%",
             "444.3 MiB",
             "406.0 MiB",
-            "**1,430**",
+            "**1,431**",
             "3.7935",
             "3.6182",
             "4.62%",
@@ -1143,7 +1152,7 @@ public sealed partial class ReadmeLocalizationTests
             "The shared compatibility evidence document is missing.");
         string compatibilityEvidence = File.ReadAllText(compatibilityEvidencePath);
         Assert.Contains(
-            "1,430 independently discoverable tests",
+            "1,431 independently discoverable tests",
             compatibilityEvidence,
             StringComparison.Ordinal);
         Assert.DoesNotContain(
@@ -1152,6 +1161,10 @@ public sealed partial class ReadmeLocalizationTests
             StringComparison.Ordinal);
         Assert.DoesNotContain(
             "1,429 independently discoverable tests",
+            compatibilityEvidence,
+            StringComparison.Ordinal);
+        Assert.DoesNotContain(
+            "1,430 independently discoverable tests",
             compatibilityEvidence,
             StringComparison.Ordinal);
         string workflow = File.ReadAllText(Path.Combine(
@@ -1174,6 +1187,14 @@ public sealed partial class ReadmeLocalizationTests
             StringComparison.Ordinal);
         Assert.Contains(
             PocketFftRadix5ScalarFallbackTestName,
+            workflow,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            PocketFftRadix3AvxDisabledTestCommand,
+            workflow,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            PocketFftRadix3ScalarFallbackTestName,
             workflow,
             StringComparison.Ordinal);
         Assert.DoesNotContain(

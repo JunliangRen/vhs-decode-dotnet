@@ -512,6 +512,36 @@ candidate (-2.10%, -0.20%, and -0.35%). Average active cores moved from 7.91 to
 claim. Peak working set remained bounded, with observed maxima of 650.6 MiB for
 the baseline and 396.2 MiB for the candidate, and no OOM.
 
+### Managed AVX radix-3 PocketFFT butterflies
+
+The managed float32 PocketFFT radix-3 pass now evaluates four independent
+complex indices in one `Vector256<float>`. Each lane retains the scalar pair,
+coefficient multiply, add/subtract, and complex-twiddle order. Packets containing
+non-finite values or magnitudes above a conservative overflow bound execute the
+four original scalar indices; tails and AVX-disabled hosts also retain scalar
+execution. The vector path introduces no FMA, reduction, reassociation, shared
+scratch state, allocation, or cross-transform state.
+
+All 60 mixed-radix compatibility tests pass with normal intrinsics, AVX disabled,
+and all hardware intrinsics disabled. The dedicated direct-plan test covers
+lengths 33, 726, and 990 in both directions. It separately exercises AVX-safe
+signed zero, subnormal, minimum-normal, and signed-one patterns plus
+scalar-fallback maximum finite, infinity, and distinct NaN payloads. Optimized
+JIT disassembly contains only separate `vmulps`, `vaddps`, and `vsubps`
+arithmetic for the butterfly and twiddles, with no FMA instruction.
+
+Six opposite-order kernel pairs moved the mean length-726 transform from 712.391
+to 705.693 ms (0.94% lower) and the mean length-990 transform from 740.479 to
+709.507 ms (4.18% lower), with identical output hashes. Three opposite-order
+1,000-frame Exact `current --threads 20` pairs matched all nine compatibility
+surfaces. Mean wall time moved from 37.288 to 36.909 seconds (1.02% lower), CPU
+time from 301.984 to 292.766 seconds (3.05% lower), and average active cores from
+8.10 to 7.93. Pair wall directions were -0.79%, +0.21%, and -2.46%; the bounded
+maximum working sets were 443.4 and 355.6 MiB for baseline and candidate. Three
+`--threads 0` pairs also matched all surfaces and moved mean wall time from
+41.030 to 40.219 seconds. The v0.4.0 and IPP-fast profiles do not call this
+managed current-profile FFT path.
+
 ### Previous managed AVX radix-5 PocketFFT butterflies
 
 The managed float32 PocketFFT radix-5 pass now evaluates four independent
@@ -3555,7 +3585,7 @@ Requirements:
 .\tools\build-ipp-native.ps1
 dotnet restore VHSDecodeDotNet.slnx
 dotnet build VHSDecodeDotNet.slnx -c Release --no-restore
-dotnet test --solution VHSDecodeDotNet.slnx -c Release --no-build --no-restore --minimum-expected-tests 1430
+dotnet test --solution VHSDecodeDotNet.slnx -c Release --no-build --no-restore --minimum-expected-tests 1431
 dotnet test --project tests\VHSDecode.Tests\VHSDecode.Tests.csproj -c Release --no-build --no-restore --coverage --coverage-output coverage.cobertura.xml --coverage-output-format cobertura
 ```
 
@@ -3569,7 +3599,7 @@ deployment computer. Binary-only single-file releases embed
 sidecar license files. An Exact-only build may omit the native build step.
 
 The current formal Release build has zero warnings and errors. The xUnit v3
-project exposes **1,430** independently discoverable tests to both
+project exposes **1,431** independently discoverable tests to both
 `dotnet test` and Visual Studio Test Explorer.
 
 <!-- SECTION: usage -->
