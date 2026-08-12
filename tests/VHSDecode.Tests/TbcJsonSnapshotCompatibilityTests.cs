@@ -385,7 +385,7 @@ public sealed class TbcJsonSnapshotCompatibilityTests
         }
         finally
         {
-            Directory.Delete(tempDirectory, recursive: true);
+            DeleteWindowsSharedTempDirectory(tempDirectory);
         }
     }
 
@@ -678,5 +678,25 @@ public sealed class TbcJsonSnapshotCompatibilityTests
             "vhsdecode-dotnet-tests-" + Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(path);
         return path;
+    }
+
+    private static void DeleteWindowsSharedTempDirectory(string path)
+    {
+        const int MaximumAttempts = 50;
+        for (int attempt = 1; ; attempt++)
+        {
+            try
+            {
+                Directory.Delete(path, recursive: true);
+                return;
+            }
+            catch (Exception exception) when (
+                OperatingSystem.IsWindows()
+                && attempt < MaximumAttempts
+                && exception is IOException or UnauthorizedAccessException)
+            {
+                Thread.Sleep(TimeSpan.FromMilliseconds(100));
+            }
+        }
     }
 }
