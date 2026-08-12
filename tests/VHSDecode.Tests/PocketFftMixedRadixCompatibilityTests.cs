@@ -1,4 +1,5 @@
 using System.Runtime.InteropServices;
+using System.Runtime.Intrinsics.X86;
 using System.Security.Cryptography;
 using VHSDecode.Core.Dsp;
 using Xunit;
@@ -403,6 +404,16 @@ public sealed class PocketFftMixedRadixCompatibilityTests
     [Fact(DisplayName = "AVX radix-3 stages preserve scalar special-value bits")]
     public void AvxRadix3StagesPreserveScalarSpecialValueBits()
     {
+        if (string.Equals(
+                Environment.GetEnvironmentVariable("VHSDECODE_REQUIRE_AVX_RADIX3"),
+                "1",
+                StringComparison.Ordinal))
+        {
+            Assert.True(
+                Avx.IsSupported,
+                "The CI radix-3 vector-coverage run requires AVX support.");
+        }
+
         uint[][] patternSets =
         [
             [

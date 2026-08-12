@@ -46,6 +46,12 @@ public sealed partial class ReadmeLocalizationTests
         "'*AvxRadix3StagesPreserveScalarSpecialValueBits*' " +
         "--minimum-expected-tests 1";
 
+    private const string PocketFftRadix3AvxTestName =
+        "Run PocketFFT radix-3 AVX equivalence test";
+
+    private const string PocketFftRadix3AvxRequirement =
+        "VHSDECODE_REQUIRE_AVX_RADIX3: \"1\"";
+
     private const string PocketFftRadix3ScalarFallbackTestName =
         "Run PocketFFT radix-3 scalar fallback equivalence test";
 
@@ -1209,6 +1215,14 @@ public sealed partial class ReadmeLocalizationTests
             StringComparison.Ordinal);
         Assert.Contains(
             PocketFftRadix3AvxDisabledTestCommand,
+            workflow,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            PocketFftRadix3AvxTestName,
+            workflow,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            PocketFftRadix3AvxRequirement,
             workflow,
             StringComparison.Ordinal);
         Assert.Contains(
