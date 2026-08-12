@@ -2809,6 +2809,28 @@ PR341 runs were deterministic within their profile/mode. Python v0.4.0 produced
 15 distinct luma, chroma, JSON, and normalized-log hash sets, so the strict
 oracle remains `g4315520 --threads 0`.
 
+### Ordered AVX TBC sinc accumulation
+
+Commit `3f075f4` keeps the existing AVX/FMA weight and product expressions,
+float32 products, double accumulation, casts, and left-to-right 16-tap addition
+order. It emits the fixed additions directly and suppresses redundant clearing
+of the fully overwritten stack buffer; scalar and boundary paths are unchanged.
+
+Three interleaved 1,000-frame Exact `current --threads 20` pairs matched exit
+status, field count, luma, chroma, raw JSON, stdout, normalized stderr/logs, and
+ordered `fileLoc`. Mean wall time moved from 36.081 to 35.752 seconds (0.91%
+lower), with mean CPU effectively unchanged at 286.61/286.58 seconds. A 24-run
+gate covered Exact/IPP-fast, v0.4.0/`current`, and serial/default/20-worker modes.
+Four real-RF intrinsic variants and 33 focused TBC tests under normal, no-AVX,
+and fully scalar execution were exact. The full xUnit v3 suite reported 1,428
+passes and four expected local IPP-runtime skips.
+
+A separate 2,000-frame counter gate completed 4,000 fields exactly and moved
+wall time from 72.019 to 70.859 seconds (1.61% lower). Candidate working set was
+353.8 MiB median and 360.3 MiB maximum, with 352.8/354.1 MiB first/final-third
+medians. Ten steady-state 200-frame intervals stayed within 6.853-6.931 seconds,
+showing no progressive memory growth or throughput decay.
+
 To regenerate the embedded format parameter snapshot from the checked-out
 upstream source:
 

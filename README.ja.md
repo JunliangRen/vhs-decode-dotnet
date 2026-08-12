@@ -95,20 +95,20 @@ CVBS と HiFi は引き続き `ipp-fast` を拒否します。release-compatible
 
 これは同じ private local 40 MHz PAL VHS `.ldf` fixture を使う、startup cost を含む
 `--start 100 --length 160` snapshot です。source filename は公開しません。Python と
-.NET Release の全 90 measurement は、main `8b67746` を基にした candidate commit
-`6676a86` を使い、forward、reverse、mixed pass を含む同じ 2026-08-12 batch で
+.NET Release の全 90 measurement は、main `2d6d5ce` を基にした candidate commit
+`3f075f4` を使い、forward、reverse、mixed pass を含む同じ 2026-08-12 batch で
 完了しました。以前の snapshot は本表で置き換えます。互換性と速度は別々に評価します。
 
 <!-- LATEST_PERFORMANCE_BEGIN -->
 | CLI mode（workers） | Python v0.4.0 | Python PR341 | Exact + v0.4.0 | Exact + current | IPP-fast + v0.4.0 | IPP-fast + current |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| default（5） | 46.771 s | 46.239 s | 13.374 s / 3.497x | 12.987 s / 3.560x | 11.746 s / 3.982x | 9.781 s / 4.727x |
-| `--threads 1` | 55.491 s | 56.259 s | 34.673 s / 1.600x | 39.249 s / 1.433x | 24.116 s / 2.301x | 26.910 s / 2.091x |
-| `--threads 5` | 46.692 s | 46.044 s | 13.286 s / 3.514x | 12.448 s / 3.699x | 11.637 s / 4.013x | 9.850 s / 4.675x |
-| `--threads 10` | 47.616 s | 48.335 s | 10.504 s / 4.533x | 9.638 s / 5.015x | 9.852 s / 4.833x | 7.736 s / 6.248x |
-| `--threads 20` | 48.784 s | 48.726 s | 8.371 s / 5.828x | 7.074 s / 6.888x | 8.207 s / 5.944x | 6.074 s / 8.022x |
+| default（5） | 52.811 s | 54.243 s | 13.595 s / 3.885x | 12.368 s / 4.386x | 11.754 s / 4.493x | 9.768 s / 5.553x |
+| `--threads 1` | 57.067 s | 56.762 s | 34.582 s / 1.650x | 37.922 s / 1.497x | 25.260 s / 2.259x | 27.644 s / 2.053x |
+| `--threads 5` | 52.920 s | 55.722 s | 13.453 s / 3.934x | 12.366 s / 4.506x | 11.868 s / 4.459x | 9.867 s / 5.647x |
+| `--threads 10` | 52.965 s | 54.949 s | 10.689 s / 4.955x | 9.629 s / 5.707x | 10.178 s / 5.204x | 8.055 s / 6.821x |
+| `--threads 20` | 53.555 s | 54.842 s | 8.654 s / 6.188x | 7.545 s / 7.269x | 8.409 s / 6.369x | 6.257 s / 8.764x |
 <!-- LATEST_PERFORMANCE_END -->
-<!-- LATEST_PERFORMANCE_RUNS: performance-snapshot-runs=90 dotnet-matrix-runs=60 python-reference-runs=30 dotnet-repeats=3 python-reference-date=2026-08-12 dotnet-v040-date=2026-08-12 dotnet-current-date=2026-08-12 cti-snapshot-matrix-runs=90 cti-snapshot-exact-1000-ab-pairs=3 cti-snapshot-kernel-pairs=8 cti-snapshot-thread-profile-runs=24 cti-snapshot-memory-frames=2000 cti-snapshot-tests=18 cti-snapshot-intrinsic-modes=3 python-v040-runs=15 python-v040-hashes=15 python-pr341-runs=15 python-pr341-hashes=1 -->
+<!-- LATEST_PERFORMANCE_RUNS: performance-snapshot-runs=90 dotnet-matrix-runs=60 python-reference-runs=30 dotnet-repeats=3 python-reference-date=2026-08-12 dotnet-v040-date=2026-08-12 dotnet-current-date=2026-08-12 sinc-unroll-matrix-runs=90 sinc-unroll-exact-1000-ab-pairs=3 sinc-unroll-kernel-pairs=8 sinc-unroll-thread-profile-runs=24 sinc-unroll-memory-frames=2000 sinc-unroll-tests=33 sinc-unroll-intrinsic-modes=4 python-v040-runs=15 python-v040-hashes=15 python-pr341-runs=15 python-pr341-hashes=1 -->
 
 各 .NET cell は wall-time median と profile が対応する Python 列に対する speedup の順で、
 default は **5 workers** です。3-run range は
@@ -117,13 +117,13 @@ default は **5 workers** です。3-run range は
 直接比較できません。causal regression は、過去の ratio cell ではなく同時刻の .NET
 revision A/B で判断します。
 
-最新の isolated change は managed AVX で CTI の pass ごとの line snapshot conversion を
-行い、従来の scalar cast point、tail、state、scheduling を維持します。interleaved kernel
-8 pair は bit と allocation を完全に保ち、wall-time median を 4.99% 短縮しました。順序を
-反転した 1,000-frame Exact `current --threads 20` 3 pair は 9 compatibility surface で
-すべて一致し、candidate が 3/3 で高速でした。mean wall time は 2.66%、CPU time は 4.62%
-減少しました。別の 2,000-frame run は全 4,000 field を完了し、peak working set は
-355.75 MiB で、progressive peak growth はありませんでした。
+最新の isolated change は固定 16-step AVX/FMA TBC sinc accumulation を直接展開し、
+冗長な stack clear を省きます。product、cast、accumulation order は変わりません。
+interleaved 1,000-frame Exact `current --threads 20` 3 pair は 9 compatibility surface で
+すべて一致し、mean wall time は 36.081 から 35.752 秒へ 0.91% 減少、CPU time は実質
+不変でした。別の 2,000-frame gate は全 4,000 field を完全一致で完了し、72.019 から
+70.859 秒へ 1.61% 高速化しました。working set は median 353.8 MiB、maximum
+360.3 MiB で、progressive growth や slowdown はありませんでした。
 
 更新した各 .NET profile/thread cell は 3 run 内で deterministic でした。固定 reference の
 merged Python PR341 も deterministic でした。Python v0.4.0 は 15 run で 15 種類の luma、

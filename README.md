@@ -100,20 +100,20 @@ for compatibility-sensitive work.
 This startup-inclusive `--start 100 --length 160` snapshot uses one fixed private
 local 40 MHz PAL VHS `.ldf` fixture; its filename is intentionally not published.
 All 90 Python and .NET Release measurements were completed in the same
-2026-08-12 batch with candidate commit `6676a86`, based on main `8b67746`,
+2026-08-12 batch with candidate commit `3f075f4`, based on main `2d6d5ce`,
 using forward, reverse, and mixed passes. This replaces the prior snapshot.
 Compatibility is evaluated separately from speed.
 
 <!-- LATEST_PERFORMANCE_BEGIN -->
 | CLI mode (workers) | Python v0.4.0 | Python PR341 | Exact + v0.4.0 | Exact + current | IPP-fast + v0.4.0 | IPP-fast + current |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| default (5) | 46.771 s | 46.239 s | 13.374 s / 3.497x | 12.987 s / 3.560x | 11.746 s / 3.982x | 9.781 s / 4.727x |
-| `--threads 1` | 55.491 s | 56.259 s | 34.673 s / 1.600x | 39.249 s / 1.433x | 24.116 s / 2.301x | 26.910 s / 2.091x |
-| `--threads 5` | 46.692 s | 46.044 s | 13.286 s / 3.514x | 12.448 s / 3.699x | 11.637 s / 4.013x | 9.850 s / 4.675x |
-| `--threads 10` | 47.616 s | 48.335 s | 10.504 s / 4.533x | 9.638 s / 5.015x | 9.852 s / 4.833x | 7.736 s / 6.248x |
-| `--threads 20` | 48.784 s | 48.726 s | 8.371 s / 5.828x | 7.074 s / 6.888x | 8.207 s / 5.944x | 6.074 s / 8.022x |
+| default (5) | 52.811 s | 54.243 s | 13.595 s / 3.885x | 12.368 s / 4.386x | 11.754 s / 4.493x | 9.768 s / 5.553x |
+| `--threads 1` | 57.067 s | 56.762 s | 34.582 s / 1.650x | 37.922 s / 1.497x | 25.260 s / 2.259x | 27.644 s / 2.053x |
+| `--threads 5` | 52.920 s | 55.722 s | 13.453 s / 3.934x | 12.366 s / 4.506x | 11.868 s / 4.459x | 9.867 s / 5.647x |
+| `--threads 10` | 52.965 s | 54.949 s | 10.689 s / 4.955x | 9.629 s / 5.707x | 10.178 s / 5.204x | 8.055 s / 6.821x |
+| `--threads 20` | 53.555 s | 54.842 s | 8.654 s / 6.188x | 7.545 s / 7.269x | 8.409 s / 6.369x | 6.257 s / 8.764x |
 <!-- LATEST_PERFORMANCE_END -->
-<!-- LATEST_PERFORMANCE_RUNS: performance-snapshot-runs=90 dotnet-matrix-runs=60 python-reference-runs=30 dotnet-repeats=3 python-reference-date=2026-08-12 dotnet-v040-date=2026-08-12 dotnet-current-date=2026-08-12 cti-snapshot-matrix-runs=90 cti-snapshot-exact-1000-ab-pairs=3 cti-snapshot-kernel-pairs=8 cti-snapshot-thread-profile-runs=24 cti-snapshot-memory-frames=2000 cti-snapshot-tests=18 cti-snapshot-intrinsic-modes=3 python-v040-runs=15 python-v040-hashes=15 python-pr341-runs=15 python-pr341-hashes=1 -->
+<!-- LATEST_PERFORMANCE_RUNS: performance-snapshot-runs=90 dotnet-matrix-runs=60 python-reference-runs=30 dotnet-repeats=3 python-reference-date=2026-08-12 dotnet-v040-date=2026-08-12 dotnet-current-date=2026-08-12 sinc-unroll-matrix-runs=90 sinc-unroll-exact-1000-ab-pairs=3 sinc-unroll-kernel-pairs=8 sinc-unroll-thread-profile-runs=24 sinc-unroll-memory-frames=2000 sinc-unroll-tests=33 sinc-unroll-intrinsic-modes=4 python-v040-runs=15 python-v040-hashes=15 python-pr341-runs=15 python-pr341-hashes=1 -->
 
 Each .NET cell shows median wall time and speedup versus its profile-matched
 Python column. The default is **5 workers**; three-run ranges are in the
@@ -122,14 +122,14 @@ when either the Python numerator or .NET denominator moves, and historical table
 using another fixture or window are not directly comparable. Same-moment .NET
 revision A/B runs, rather than old ratio cells, determine causal regressions.
 
-The latest isolated change uses managed AVX for CTI's per-pass line snapshot
-conversion while retaining the scalar cast points, tails, state, and scheduling.
-Eight interleaved kernel pairs kept identical bits and allocations while reducing
-median wall time by 4.99%. Three reverse-order 1,000-frame Exact
-`current --threads 20` pairs matched all nine compatibility surfaces and favored
-the candidate 3/3; mean wall time fell by 2.66% and CPU time by 4.62%. A separate
-2,000-frame run completed all 4,000 fields with a 355.75 MiB peak working set and
-no progressive peak growth.
+The latest isolated change emits the fixed 16-step AVX/FMA TBC sinc accumulation
+directly and suppresses redundant stack clearing, without changing products,
+casts, or accumulation order. Three interleaved 1,000-frame Exact
+`current --threads 20` pairs matched all nine compatibility surfaces; mean wall
+time fell from 36.081 to 35.752 seconds (0.91%) with effectively unchanged CPU
+time. A separate 2,000-frame gate completed all 4,000 fields exactly, improved
+72.019 to 70.859 seconds (1.61%), and held working set to a 353.8 MiB median and
+360.3 MiB maximum without progressive growth or slowdown.
 
 Every .NET profile/thread cell was deterministic across its three refreshed
 runs. Merged Python PR341 was deterministic in its pinned reference set; Python
