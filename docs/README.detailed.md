@@ -511,7 +511,7 @@ skips.
 A separate 2,000-frame counter gate completed all 4,000 fields exactly and
 improved wall time from 72.019 to 70.859 seconds (1.61%, 1.016x). Candidate
 working set was 353.8 MiB median and 360.3 MiB maximum; first/final-third
-medians were 352.8/354.1 MiB. Its ten 200-frame steady-state intervals stayed
+medians were 352.8/354.1 MiB. Its nine post-startup 200-frame intervals stayed
 between 6.853 and 6.931 seconds, so neither memory nor per-frame time grew
 progressively. Total allocation was 1,291.1 MiB and GC pause time was 73 ms.
 
@@ -3683,7 +3683,7 @@ Requirements:
 .\tools\build-ipp-native.ps1
 dotnet restore VHSDecodeDotNet.slnx
 dotnet build VHSDecodeDotNet.slnx -c Release --no-restore
-dotnet test --solution VHSDecodeDotNet.slnx -c Release --no-build --no-restore --minimum-expected-tests 1432
+dotnet test --solution VHSDecodeDotNet.slnx -c Release --no-build --no-restore --minimum-expected-tests 1433
 dotnet test --project tests\VHSDecode.Tests\VHSDecode.Tests.csproj -c Release --no-build --no-restore --coverage --coverage-output coverage.cobertura.xml --coverage-output-format cobertura
 ```
 
@@ -3697,7 +3697,7 @@ deployment computer. Binary-only single-file releases embed
 sidecar license files. An Exact-only build may omit the native build step.
 
 The current formal Release build has zero warnings and errors. The xUnit v3
-project exposes **1,432** independently discoverable tests to both
+project exposes **1,433** independently discoverable tests to both
 `dotnet test` and Visual Studio Test Explorer.
 
 <!-- SECTION: usage -->

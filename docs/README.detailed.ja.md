@@ -478,7 +478,7 @@ full xUnit v3 suite は 1,428 test が pass し、local IPP runtime に依存す
 
 別の 2,000-frame counter gate は 4,000 field を完全一致で完了し、wall time は 72.019 から
 70.859 秒へ 1.61% 改善しました（1.016x）。candidate working set は median 353.8 MiB、
-maximum 360.3 MiB、first/final-third median は 352.8/354.1 MiB でした。10 個の steady-state
+maximum 360.3 MiB、first/final-third median は 352.8/354.1 MiB でした。startup 後の 9 個の
 200-frame interval は 6.853-6.931 秒に収まり、memory も per-frame time も progressive に
 増えませんでした。total allocation は 1,291.1 MiB、GC pause は 73 ms でした。
 
@@ -3448,7 +3448,7 @@ Microsoft.Testing.Platform run は全 1,401 test を検出し、1,397 pass、0 f
 .\tools\build-ipp-native.ps1
 dotnet restore VHSDecodeDotNet.slnx
 dotnet build VHSDecodeDotNet.slnx -c Release --no-restore
-dotnet test --solution VHSDecodeDotNet.slnx -c Release --no-build --no-restore --minimum-expected-tests 1432
+dotnet test --solution VHSDecodeDotNet.slnx -c Release --no-build --no-restore --minimum-expected-tests 1433
 dotnet test --project tests\VHSDecode.Tests\VHSDecode.Tests.csproj -c Release --no-build --no-restore --coverage --coverage-output coverage.cobertura.xml --coverage-output-format cobertura
 ```
 
@@ -3462,7 +3462,7 @@ third-party notice を埋め込み、license sidecar file は追加しません�
 
 現在の正式な Release build は warning 0、error 0 です。xUnit v3 project は
 `dotnet test` と Visual Studio Test Explorer の両方で個別に検出できる
-**1,432** tests を公開します。
+**1,433** tests を公開します。
 
 <!-- SECTION: usage -->
 

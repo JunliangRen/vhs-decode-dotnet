@@ -417,8 +417,8 @@ intrinsic、禁用 AVX 和禁用全部硬件 intrinsic 下通过。完整 xUnit 
 
 另一次 2000 帧计数器门禁精确完成全部 4000 个 fields，墙钟从 72.019 降至
 70.859 秒（减少 1.61%，吞吐 1.016x）。候选工作集中位数 353.8 MiB、最大
-360.3 MiB，首段/末段三分之一中位数为 352.8/354.1 MiB。十个稳态 200 帧区间
-保持在 6.853-6.931 秒，因此内存和逐帧耗时都没有持续增长。总分配 1291.1 MiB，
+360.3 MiB，首段/末段三分之一中位数为 352.8/354.1 MiB。九个启动后的
+200 帧区间保持在 6.853-6.931 秒，因此内存和逐帧耗时都没有持续增长。总分配 1291.1 MiB，
 GC 暂停合计 73 ms。
 
 ### 托管 AVX CTI 行快照
@@ -2886,7 +2886,7 @@ stderr、时间戳归一化日志和全部 2,000 个有序 `fileLoc` 完全一�
 .\tools\build-ipp-native.ps1
 dotnet restore VHSDecodeDotNet.slnx
 dotnet build VHSDecodeDotNet.slnx -c Release --no-restore
-dotnet test --solution VHSDecodeDotNet.slnx -c Release --no-build --no-restore --minimum-expected-tests 1432
+dotnet test --solution VHSDecodeDotNet.slnx -c Release --no-build --no-restore --minimum-expected-tests 1433
 dotnet test --project tests\VHSDecode.Tests\VHSDecode.Tests.csproj -c Release --no-build --no-restore --coverage --coverage-output coverage.cobertura.xml --coverage-output-format cobertura
 ```
 
@@ -2898,7 +2898,7 @@ Intel oneAPI。只含二进制的单文件发布会嵌入 `vhsdecode_ipp.dll` �
 notice，不会额外生成许可证 sidecar 文件。只构建 Exact 后端时可以省略原生构建步骤。
 
 当前正式 Release 构建为零警告、零错误。xUnit v3 项目向
-`dotnet test` 和 Visual Studio Test Explorer 暴露 **1,432** 个可独立发现的测试。
+`dotnet test` 和 Visual Studio Test Explorer 暴露 **1,433** 个可独立发现的测试。
 
 <!-- SECTION: usage -->
 

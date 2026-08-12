@@ -2229,7 +2229,7 @@ dotnet test --solution VHSDecodeDotNet.slnx --no-build
 ```
 
 The current formal solution build completes with zero warnings and errors, and
-the xUnit v3 project exposes 1,432 independently discoverable tests
+the xUnit v3 project exposes 1,433 independently discoverable tests
 to `dotnet test` and Visual Studio Test Explorer. On the
 same Windows machine and fixtures, Release wall-clock measurements for one
 frame were 2.346 s versus 7.193 s for NTSC VHS and 1.651 s versus 5.865 s for
@@ -2828,7 +2828,7 @@ passes and four expected local IPP-runtime skips.
 A separate 2,000-frame counter gate completed 4,000 fields exactly and moved
 wall time from 72.019 to 70.859 seconds (1.61% lower). Candidate working set was
 353.8 MiB median and 360.3 MiB maximum, with 352.8/354.1 MiB first/final-third
-medians. Ten steady-state 200-frame intervals stayed within 6.853-6.931 seconds,
+medians. Nine post-startup 200-frame intervals stayed within 6.853-6.931 seconds,
 showing no progressive memory growth or throughput decay.
 
 To regenerate the embedded format parameter snapshot from the checked-out

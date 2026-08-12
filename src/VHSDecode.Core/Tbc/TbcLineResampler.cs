@@ -1272,25 +1272,26 @@ public sealed class TbcLineResampler
         Avx.Store(products, Avx.Multiply(source0, weight0));
         Avx.Store(products + 8, Avx.Multiply(source1, weight1));
 
-        double result = 0.0;
-        result += products[0];
-        result += products[1];
-        result += products[2];
-        result += products[3];
-        result += products[4];
-        result += products[5];
-        result += products[6];
-        result += products[7];
-        result += products[8];
-        result += products[9];
-        result += products[10];
-        result += products[11];
-        result += products[12];
-        result += products[13];
-        result += products[14];
-        result += products[15];
+        // Keep each new tap as the left scalar operand, matching the baseline NaN payload order.
+        Vector128<double> result = Vector128<double>.Zero;
+        result = Sse2.AddScalar(Vector128.CreateScalarUnsafe((double)products[0]), result);
+        result = Sse2.AddScalar(Vector128.CreateScalarUnsafe((double)products[1]), result);
+        result = Sse2.AddScalar(Vector128.CreateScalarUnsafe((double)products[2]), result);
+        result = Sse2.AddScalar(Vector128.CreateScalarUnsafe((double)products[3]), result);
+        result = Sse2.AddScalar(Vector128.CreateScalarUnsafe((double)products[4]), result);
+        result = Sse2.AddScalar(Vector128.CreateScalarUnsafe((double)products[5]), result);
+        result = Sse2.AddScalar(Vector128.CreateScalarUnsafe((double)products[6]), result);
+        result = Sse2.AddScalar(Vector128.CreateScalarUnsafe((double)products[7]), result);
+        result = Sse2.AddScalar(Vector128.CreateScalarUnsafe((double)products[8]), result);
+        result = Sse2.AddScalar(Vector128.CreateScalarUnsafe((double)products[9]), result);
+        result = Sse2.AddScalar(Vector128.CreateScalarUnsafe((double)products[10]), result);
+        result = Sse2.AddScalar(Vector128.CreateScalarUnsafe((double)products[11]), result);
+        result = Sse2.AddScalar(Vector128.CreateScalarUnsafe((double)products[12]), result);
+        result = Sse2.AddScalar(Vector128.CreateScalarUnsafe((double)products[13]), result);
+        result = Sse2.AddScalar(Vector128.CreateScalarUnsafe((double)products[14]), result);
+        result = Sse2.AddScalar(Vector128.CreateScalarUnsafe((double)products[15]), result);
 
-        return result;
+        return result.ToScalar();
     }
 
     private static float[] BuildKaiserSincLookup()

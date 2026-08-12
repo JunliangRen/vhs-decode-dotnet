@@ -1,4 +1,5 @@
 using System.Runtime.InteropServices;
+using System.Runtime.Intrinsics.X86;
 using System.Security.Cryptography;
 using VHSDecode.Core.Tbc;
 using Xunit;
@@ -85,6 +86,70 @@ public sealed class TbcParallelResamplerTests
         Assert.Equal(
             "7E3B3F5DCF0E5C38FB7C46E6E5CF362D596F9DECD7416445247F0A4C4878F33C",
             Convert.ToHexString(SHA256.HashData(MemoryMarshal.AsBytes(output.AsSpan()))));
+    }
+
+    [Fact(DisplayName = "AVX TBC sinc interior preserves baseline special-value bits")]
+    public void AvxTbcSincInteriorPreservesBaselineSpecialValueBits()
+    {
+        if (!Avx.IsSupported || !Fma.IsSupported)
+        {
+            return;
+        }
+
+        double[] finiteSource = Enumerable.Range(0, 4_096)
+            .Select(index => Math.Sin(index * 0.0031) + Math.Cos(index * 0.0007))
+            .ToArray();
+        float positiveNaN = BitConverter.Int32BitsToSingle(unchecked((int)0x7FC1_2345));
+        float negativeNaN = BitConverter.Int32BitsToSingle(unchecked((int)0xFFC5_4321));
+        var scenarios = new (Action<double[]> Mutate, string Hash, ulong FirstBits)[]
+        {
+            (
+                source => { source[993] = positiveNaN; source[994] = negativeNaN; },
+                "6988C63B251226B8CCB1F26C93AC8B7D1026F954F65B6CF7B99339AD9FA6D573",
+                0xFFF8_A864_2000_0000UL),
+            (
+                source => { source[993] = negativeNaN; source[994] = positiveNaN; },
+                "D849E74D2A52D9C9E9777B22FAE5AA4D239330505DD90128CDF1687FB8B784AD",
+                0x7FF8_2468_A000_0000UL),
+            (
+                static source =>
+                {
+                    source[993] = double.PositiveInfinity;
+                    source[994] = double.NegativeInfinity;
+                },
+                "374D71C421F1738DDC02A924C9EA4D3DC80319D3008F0F77EB7E9F70EE45119F",
+                0xFFF0_0000_0000_0000UL),
+            (
+                static source =>
+                {
+                    for (int tap = 0; tap < 16; tap++)
+                    {
+                        source[993 + tap] = (tap & 1) == 0 ? 0.0 : -0.0;
+                    }
+                },
+                "41267CF226CA5DD39BB245A02726A3862B35DABD1DF2F3C14CF150B46E808B05",
+                0x0000_0000_0000_0000UL)
+        };
+        var resampler = new TbcLineResampler(
+            outputLineLength: 16,
+            nominalInputLineLength: 1_000.0,
+            workerThreads: 1);
+
+        foreach ((Action<double[]> mutate, string hash, ulong firstBits) in scenarios)
+        {
+            double[] source = finiteSource.ToArray();
+            mutate(source);
+            double[] output = resampler.ResampleLines(
+                source,
+                [1_000.25, 2_000.25],
+                firstLine: 0,
+                lineCount: 1);
+
+            Assert.Equal(
+                hash,
+                Convert.ToHexString(SHA256.HashData(MemoryMarshal.AsBytes(output.AsSpan()))));
+            Assert.Equal(firstBits, BitConverter.DoubleToUInt64Bits(output[0]));
+        }
     }
 
     [Fact(DisplayName = "TBC sinc negative coordinates match NumPy wrapped indexing")]
