@@ -15,7 +15,8 @@ internal sealed class LibsndfilePcm16SampleLoader : IReusableRfSampleLoader, IDi
 
     internal const int MaximumRetainedDecodedBufferLength = 32 * 1024;
     internal const int MaximumRetainedDecodedBufferCount = 48;
-    private const int RewindCapacityFrames = FfmpegPcm16SampleLoader.DefaultRewindSize / sizeof(short);
+    internal const int NativeRewindCapacityFrames =
+        FfmpegPcm16SampleLoader.DefaultRewindSize / sizeof(short);
     private const int SeekThresholdFrames = FfmpegPcm16SampleLoader.DefaultSeekThreshold / sizeof(short);
     private readonly string _filename;
     private readonly Func<string, ILibsndfilePcm16Source> _openSource;
@@ -27,11 +28,14 @@ internal sealed class LibsndfilePcm16SampleLoader : IReusableRfSampleLoader, IDi
         new double[]?[MaximumRetainedDecodedBufferCount];
 
     private ILibsndfilePcm16Source? _source;
+    private short[]? _nativeRewindBuffer;
     private long _positionFrames;
     private long _logicalPositionFrames;
     private long _rewindStartFrames;
     private long _physicalOffsetFrames;
     private int _decodedBufferCount;
+    private int _nativeRewindStart;
+    private int _nativeRewindCount;
     private bool _mappedDecoderStarted;
     private bool _fallbackActive;
     private bool _disposed;
@@ -89,6 +93,17 @@ internal sealed class LibsndfilePcm16SampleLoader : IReusableRfSampleLoader, IDi
             lock (_decodedBufferLock)
             {
                 return _decodedBufferCount;
+            }
+        }
+    }
+
+    internal int CachedNativeRewindFrameCount
+    {
+        get
+        {
+            lock (_gate)
+            {
+                return _nativeRewindCount;
             }
         }
     }
@@ -243,29 +258,16 @@ internal sealed class LibsndfilePcm16SampleLoader : IReusableRfSampleLoader, IDi
         int readLength,
         bool reuseDecodedBuffer)
     {
-        if (sample != _positionFrames)
-        {
-            long position = source.Seek(sample);
-            if (position != sample)
-            {
-                throw new LibsndfilePcm16FallbackException(
-                    $"libsndfile sought to RF sample {position} instead of {sample}.");
-            }
-
-            _positionFrames = position;
-        }
-
         short[] samples = ArrayPool<short>.Shared.Rent(readLength);
         try
         {
-            long framesRead = source.ReadFrames(samples.AsSpan(0, readLength));
-            if (framesRead < 0 || framesRead > readLength)
-            {
-                throw new LibsndfilePcm16FallbackException(
-                    $"libsndfile returned an invalid RF frame count of {framesRead} for a {readLength}-frame read.");
-            }
-
-            _positionFrames += framesRead;
+            long framesRead = ReadNativeFrames(
+                source,
+                sample,
+                samples.AsSpan(0, readLength),
+                reuseDecodedBuffer,
+                resetRewind: false,
+                seekTarget: "RF");
             if (framesRead != readLength)
             {
                 return null;
@@ -291,18 +293,6 @@ internal sealed class LibsndfilePcm16SampleLoader : IReusableRfSampleLoader, IDi
         bool reuseDecodedBuffer,
         MappedReadPlan mappedRead)
     {
-        if (mappedRead.PhysicalSample != _positionFrames)
-        {
-            long position = source.Seek(mappedRead.PhysicalSample);
-            if (position != mappedRead.PhysicalSample)
-            {
-                throw new LibsndfilePcm16FallbackException(
-                    $"libsndfile sought to FLAC sample {position} instead of {mappedRead.PhysicalSample}.");
-            }
-
-            _positionFrames = position;
-        }
-
         if (mappedRead.Restart)
         {
             _mappedDecoderStarted = true;
@@ -314,14 +304,13 @@ internal sealed class LibsndfilePcm16SampleLoader : IReusableRfSampleLoader, IDi
         short[] samples = ArrayPool<short>.Shared.Rent(readLength);
         try
         {
-            long framesRead = source.ReadFrames(samples.AsSpan(0, readLength));
-            if (framesRead < 0 || framesRead > readLength)
-            {
-                throw new LibsndfilePcm16FallbackException(
-                    $"libsndfile returned an invalid RF frame count of {framesRead} for a {readLength}-frame read.");
-            }
-
-            _positionFrames += framesRead;
+            long framesRead = ReadNativeFrames(
+                source,
+                mappedRead.PhysicalSample,
+                samples.AsSpan(0, readLength),
+                reuseDecodedBuffer,
+                resetRewind: mappedRead.Restart,
+                seekTarget: "FLAC");
             UpdateMappedDecoderWindow(logicalSample, framesRead);
             if (framesRead != readLength)
             {
@@ -340,6 +329,133 @@ internal sealed class LibsndfilePcm16SampleLoader : IReusableRfSampleLoader, IDi
         }
     }
 
+    private long ReadNativeFrames(
+        ILibsndfilePcm16Source source,
+        long physicalSample,
+        Span<short> destination,
+        bool useRewind,
+        bool resetRewind,
+        string seekTarget)
+    {
+        if (!useRewind || resetRewind)
+        {
+            ClearNativeRewind();
+        }
+
+        int bufferedFrames = useRewind
+            ? CopyNativeRewindPrefix(physicalSample, destination)
+            : 0;
+        if (bufferedFrames == destination.Length)
+        {
+            return bufferedFrames;
+        }
+
+        long freshSample = checked(physicalSample + bufferedFrames);
+        if (freshSample != _positionFrames)
+        {
+            long position = source.Seek(freshSample);
+            if (position != freshSample)
+            {
+                throw new LibsndfilePcm16FallbackException(
+                    $"libsndfile sought to {seekTarget} sample {position} instead of {freshSample}.");
+            }
+
+            _positionFrames = position;
+            ClearNativeRewind();
+        }
+
+        Span<short> freshDestination = destination[bufferedFrames..];
+        long freshFrames = source.ReadFrames(freshDestination);
+        if (freshFrames < 0 || freshFrames > freshDestination.Length)
+        {
+            throw new LibsndfilePcm16FallbackException(
+                $"libsndfile returned an invalid RF frame count of {freshFrames} for a {destination.Length}-frame read.");
+        }
+
+        _positionFrames += freshFrames;
+        if (useRewind && freshFrames > 0)
+        {
+            AppendNativeRewind(freshDestination[..checked((int)freshFrames)]);
+        }
+
+        return bufferedFrames + freshFrames;
+    }
+
+    private int CopyNativeRewindPrefix(
+        long physicalSample,
+        Span<short> destination)
+    {
+        if (_nativeRewindBuffer is null
+            || _nativeRewindCount == 0
+            || physicalSample >= _positionFrames)
+        {
+            return 0;
+        }
+
+        long rewindStartFrame = _positionFrames - _nativeRewindCount;
+        if (physicalSample < rewindStartFrame)
+        {
+            return 0;
+        }
+
+        int offset = checked((int)(physicalSample - rewindStartFrame));
+        int count = Math.Min(destination.Length, _nativeRewindCount - offset);
+        int sourceStart = (_nativeRewindStart + offset) % _nativeRewindBuffer.Length;
+        int firstCount = Math.Min(count, _nativeRewindBuffer.Length - sourceStart);
+        _nativeRewindBuffer.AsSpan(sourceStart, firstCount).CopyTo(destination);
+        if (firstCount < count)
+        {
+            _nativeRewindBuffer.AsSpan(0, count - firstCount).CopyTo(destination[firstCount..]);
+        }
+
+        return count;
+    }
+
+    private void AppendNativeRewind(ReadOnlySpan<short> samples)
+    {
+        if (samples.IsEmpty)
+        {
+            return;
+        }
+
+        _nativeRewindBuffer ??=
+            GC.AllocateUninitializedArray<short>(NativeRewindCapacityFrames);
+        if (samples.Length >= _nativeRewindBuffer.Length)
+        {
+            samples[^_nativeRewindBuffer.Length..].CopyTo(_nativeRewindBuffer);
+            _nativeRewindStart = 0;
+            _nativeRewindCount = _nativeRewindBuffer.Length;
+            return;
+        }
+
+        int writeStart = (_nativeRewindStart + _nativeRewindCount) % _nativeRewindBuffer.Length;
+        int firstCount = Math.Min(samples.Length, _nativeRewindBuffer.Length - writeStart);
+        samples[..firstCount].CopyTo(_nativeRewindBuffer.AsSpan(writeStart));
+        if (firstCount < samples.Length)
+        {
+            samples[firstCount..].CopyTo(_nativeRewindBuffer);
+        }
+
+        int combinedCount = _nativeRewindCount + samples.Length;
+        if (combinedCount > _nativeRewindBuffer.Length)
+        {
+            int overwritten = combinedCount - _nativeRewindBuffer.Length;
+            _nativeRewindStart =
+                (_nativeRewindStart + overwritten) % _nativeRewindBuffer.Length;
+            _nativeRewindCount = _nativeRewindBuffer.Length;
+        }
+        else
+        {
+            _nativeRewindCount = combinedCount;
+        }
+    }
+
+    private void ClearNativeRewind()
+    {
+        _nativeRewindStart = 0;
+        _nativeRewindCount = 0;
+    }
+
     private void UpdateMappedDecoderWindow(long logicalSample, long framesRead)
     {
         long end = checked(logicalSample + framesRead);
@@ -348,7 +464,7 @@ internal sealed class LibsndfilePcm16SampleLoader : IReusableRfSampleLoader, IDi
             _logicalPositionFrames = end;
             _rewindStartFrames = Math.Max(
                 _rewindStartFrames,
-                _logicalPositionFrames - RewindCapacityFrames);
+                _logicalPositionFrames - NativeRewindCapacityFrames);
         }
     }
 
@@ -479,6 +595,9 @@ internal sealed class LibsndfilePcm16SampleLoader : IReusableRfSampleLoader, IDi
                     Array.Clear(_decodedBuffers);
                     _decodedBufferCount = 0;
                 }
+
+                _nativeRewindBuffer = null;
+                ClearNativeRewind();
             }
         }
     }
@@ -492,6 +611,8 @@ internal sealed class LibsndfilePcm16SampleLoader : IReusableRfSampleLoader, IDi
         _rewindStartFrames = 0;
         _physicalOffsetFrames = 0;
         _mappedDecoderStarted = false;
+        _nativeRewindBuffer = null;
+        ClearNativeRewind();
         _fallbackActive = true;
     }
 }

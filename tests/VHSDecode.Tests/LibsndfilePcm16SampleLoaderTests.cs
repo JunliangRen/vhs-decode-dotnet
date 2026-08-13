@@ -144,6 +144,77 @@ public sealed class LibsndfilePcm16SampleLoaderTests
         loader.ReturnReusable(second);
     }
 
+    [Fact(DisplayName = "libsndfile reusable reads decode only the fresh tail of overlapping blocks")]
+    public void NativeReusableReadsUseBoundedRewindForOverlappingBlocks()
+    {
+        var source = new RecordingSource([10, 20, 30, 40, 50, 60, 70, 80, 90, 100]);
+        using var loader = new LibsndfilePcm16SampleLoader(
+            "capture.flac",
+            _ => source,
+            new RecordingFallback());
+
+        double[] first = loader.ReadReusable(Stream.Null, 0, 6)!;
+        double[] second = loader.ReadReusable(Stream.Null, 4, 6)!;
+
+        Assert.Equal([10.0, 20.0, 30.0, 40.0, 50.0, 60.0], first);
+        Assert.Equal([50.0, 60.0, 70.0, 80.0, 90.0, 100.0], second);
+        Assert.Empty(source.SeekSamples);
+        Assert.Equal([6, 4], source.ReadLengths);
+        Assert.Equal(10, loader.CachedNativeRewindFrameCount);
+        loader.ReturnReusable(first);
+        loader.ReturnReusable(second);
+    }
+
+    [Fact(DisplayName = "ordinary libsndfile reads keep seek semantics after reusable rewind")]
+    public void OrdinaryNativeReadDoesNotConsumeReusableRewind()
+    {
+        var source = new RecordingSource([10, 20, 30, 40, 50, 60, 70, 80]);
+        using var loader = new LibsndfilePcm16SampleLoader(
+            "capture.flac",
+            _ => source,
+            new RecordingFallback());
+
+        Assert.NotNull(loader.ReadReusable(Stream.Null, 0, 6));
+        double[] ordinary = loader.Read(Stream.Null, 4, 2)!;
+
+        Assert.Equal([50.0, 60.0], ordinary);
+        Assert.Equal([4], source.SeekSamples);
+        Assert.Equal([6, 2], source.ReadLengths);
+        Assert.Equal(0, loader.CachedNativeRewindFrameCount);
+    }
+
+    [Fact(DisplayName = "libsndfile reusable rewind remains bounded and seeks outside its window")]
+    public void NativeReusableRewindRemainsBoundedAndSeeksOutsideWindow()
+    {
+        int capacity = LibsndfilePcm16SampleLoader.NativeRewindCapacityFrames;
+        short[] samples = CreateNativeSamples(capacity + 16);
+        var source = new RecordingSource(samples);
+        using var loader = new LibsndfilePcm16SampleLoader(
+            "capture.flac",
+            _ => source,
+            new RecordingFallback());
+
+        Assert.NotNull(loader.ReadReusable(Stream.Null, 0, capacity));
+        Assert.NotNull(loader.ReadReusable(Stream.Null, capacity, 8));
+        Assert.Equal(capacity, loader.CachedNativeRewindFrameCount);
+        double[] wrapped = loader.ReadReusable(Stream.Null, capacity - 4L, 12)!;
+
+        Assert.Equal(
+            samples.AsSpan(capacity - 4, 12).ToArray().Select(static sample => (double)sample),
+            wrapped);
+        Assert.Empty(source.SeekSamples);
+        Assert.Equal([capacity, 8], source.ReadLengths);
+
+        double[] rewindMiss = loader.ReadReusable(Stream.Null, 0, 2)!;
+
+        Assert.Equal([(double)samples[0], (double)samples[1]], rewindMiss);
+        Assert.Equal([0], source.SeekSamples);
+        Assert.Equal([capacity, 8, 2], source.ReadLengths);
+        Assert.Equal(2, loader.CachedNativeRewindFrameCount);
+        loader.ReturnReusable(wrapped);
+        loader.ReturnReusable(rewindMiss);
+    }
+
     [Fact(DisplayName = "libsndfile reusable fallback copies into loader-owned storage")]
     public void NativeReusableFallbackCopiesIntoLoaderOwnedStorage()
     {
@@ -527,6 +598,33 @@ public sealed class LibsndfilePcm16SampleLoaderTests
             [483_632_384, 483_631_384, 1_442_713_344],
             source.SeekSamples);
         Assert.Equal(0, fallback.ReadCount);
+    }
+
+    [Fact(DisplayName = "mapped reusable libsndfile reads reuse overlap and clear it on restart")]
+    public void MappedReusableReadsReuseOverlapAndClearItOnRestart()
+    {
+        const long FirstLogicalSample = 500_000_000;
+        const long FirstPhysicalSample = 483_632_384;
+        const long SecondLogicalSample = 1_500_000_000;
+        const long SecondPhysicalSample = 1_442_713_344;
+        var source = new VirtualRecordingSource(4_000_000_000);
+        using var loader = new LibsndfilePcm16SampleLoader(
+            "capture.ldf",
+            _ => source,
+            new RecordingFallback(),
+            new PyAvRawFlacSampleMapper(
+                FfmpegPcm16SampleLoader.ContainerAudioSampleRateHz,
+                blockSize: 2_048));
+
+        Assert.NotNull(loader.ReadReusable(Stream.Null, FirstLogicalSample, 8));
+        Assert.NotNull(loader.ReadReusable(Stream.Null, FirstLogicalSample + 6, 8));
+        Assert.NotNull(loader.ReadReusable(Stream.Null, SecondLogicalSample, 4));
+
+        Assert.Equal(
+            [FirstPhysicalSample, SecondPhysicalSample],
+            source.SeekSamples);
+        Assert.Equal([8, 6, 4], source.ReadLengths);
+        Assert.Equal(4, loader.CachedNativeRewindFrameCount);
     }
 
     [Fact(DisplayName = "mapped libsndfile boundary reads preserve the logical FFmpeg fallback position")]
@@ -1001,6 +1099,8 @@ public sealed class LibsndfilePcm16SampleLoaderTests
 
         public List<long> SeekSamples { get; } = [];
 
+        public List<int> ReadLengths { get; } = [];
+
         public long? SeekResultOverride { get; init; }
 
         public int MaximumFramesPerRead { get; set; } = int.MaxValue;
@@ -1021,6 +1121,7 @@ public sealed class LibsndfilePcm16SampleLoaderTests
 
         public long ReadFrames(Span<short> destination)
         {
+            ReadLengths.Add(destination.Length);
             if (ReadException is not null)
             {
                 throw ReadException;
@@ -1051,6 +1152,8 @@ public sealed class LibsndfilePcm16SampleLoaderTests
 
         public List<long> SeekSamples { get; } = [];
 
+        public List<int> ReadLengths { get; } = [];
+
         public bool Disposed { get; private set; }
 
         public long Seek(long sample)
@@ -1062,6 +1165,7 @@ public sealed class LibsndfilePcm16SampleLoaderTests
 
         public long ReadFrames(Span<short> destination)
         {
+            ReadLengths.Add(destination.Length);
             int count = checked((int)Math.Min(destination.Length, Frames - _position));
             destination[..count].Clear();
             _position += count;
