@@ -401,19 +401,25 @@ IPP-fast 配对在全部已采集产物和日志表面上保持一致。v0.4.0 p
 `--threads 0`、默认 5、`--threads 20`；每个 profile 内的亮度、色度、原始 JSON、
 stdout、归一化 stderr/日志和有序 `fileLoc` 全部一致。
 
-### 无堆分配的 VHS burst-probe 结果
+### 无堆分配的内部 VHS burst-probe 结果
 
-Phase 22 候选把短生命周期的 `ChromaBurstDemodulationResult` 从堆 record 改为只读
-record struct。11 个标量字段、精确 double 位模式、delegate 签名、探测顺序、异常顺序
-和 phase-line 实体化均保持不变。聚焦 xUnit 测试锁定了值语义、正负零、NaN payload、
-无穷值、init-only 字段以及非破坏性的 `with` 行为。
+Phase 22 候选保留公开 `ChromaBurstDemodulationResult` 原有的 sealed record class。
+审查否决了直接公开 class-to-struct 的原型，因为它会改变 CLR 签名、二进制绑定、
+`null`/`default`、对象身份、装箱和泛型行为。最终路径为 11 个标量字段使用独立的内部
+readonly record struct，仅在真正的公开 API 边界转换回公开 class。聚焦 xUnit 测试锁定
+两种类型类别、正负零、NaN payload、无穷值、init-only 字段、精确转换和非破坏性的
+`with` 行为。
 
-七组反向 phase-sequence 微基准配对把串行分配量从 391,392,000 降到 211,104,000
-bytes（46.1%），四 worker 分配量下降 44.8%。端到端 GC trace 中也不再出现采样到的
-`ChromaBurstDemodulationResult` 堆对象。10 组反向 200 帧配对、8 组正反顺序 1000 帧
-配对和下方 60 次矩阵的亮度、色度、原始 JSON、stdout、归一化 stderr/日志及有序
-`fileLoc` 均完全一致。长跑墙钟变化从慢 4.59% 到快 1.79%，工作集峰值变化也有升有降，
-因此这是分配和 GC 压力优化，不宣称端到端吞吐或内存提升。
+七组反向聚焦配对保持精确 checksum，同时把串行分配量中位数从 114,244,800 降到
+67,256,448 bytes（41.13%），四 worker 从 183,595,176 降到 137,502,920 bytes
+（25.11%）。匹配的 200 帧 Exact `current --threads 20` GC trace 把总分配 tick 从
+2,099 降到 1,998（4.81%），采样到的 `ChromaBurstDemodulationResult` tick 从 108
+降为零；该 trace 的亮度、色度、原始 JSON、stdout、归一化 stderr/日志和有序
+`fileLoc` 也全部一致。
+
+20 组反向 200 帧配对、8 组正反顺序 1000 帧配对和下方 60 次矩阵的所有已采集表面
+均完全一致。长跑配对墙钟变化范围为快 0.37% 到慢 1.01%，因此保留它作为分配和
+GC 压力优化，不宣称端到端吞吐或峰值内存提升。
 
 ### 最新六路径线程矩阵
 
@@ -428,24 +434,24 @@ v0.4.0、Exact `current`、IPP-fast v0.4.0 和 IPP-fast `current`。文件名不
 <!-- LATEST_PERFORMANCE_BEGIN -->
 | CLI 模式（workers） | Python v0.4.0 | Python PR341 | Exact + v0.4.0 | Exact + current | IPP-fast + v0.4.0 | IPP-fast + current |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| 默认（5） | 52.811 s | 54.243 s | 13.119 s / 4.026x / 75.16% | 12.078 s / 4.491x / 77.73% | 11.388 s / 4.637x / 78.44% | 9.662 s / 5.614x / 82.19% |
-| `--threads 1` | 57.067 s | 56.762 s | 33.420 s / 1.708x / 41.44% | 36.993 s / 1.534x / 34.83% | 23.069 s / 2.474x / 59.58% | 25.760 s / 2.203x / 54.62% |
-| `--threads 5` | 52.920 s | 55.722 s | 13.058 s / 4.053x / 75.32% | 11.475 s / 4.856x / 79.41% | 11.356 s / 4.660x / 78.54% | 9.513 s / 5.857x / 82.93% |
-| `--threads 10` | 52.965 s | 54.949 s | 10.310 s / 5.137x / 80.53% | 8.889 s / 6.182x / 83.82% | 9.529 s / 5.559x / 82.01% | 7.458 s / 7.368x / 86.43% |
-| `--threads 20` | 53.555 s | 54.842 s | 8.391 s / 6.382x / 84.33% | 6.759 s / 8.114x / 87.67% | 8.061 s / 6.643x / 84.95% | 6.088 s / 9.008x / 88.90% |
+| 默认（5） | 52.811 s | 54.243 s | 12.780 s / 4.132x / 75.80% | 12.127 s / 4.473x / 77.64% | 11.240 s / 4.698x / 78.72% | 9.488 s / 5.717x / 82.51% |
+| `--threads 1` | 57.067 s | 56.762 s | 31.677 s / 1.802x / 44.49% | 35.077 s / 1.618x / 38.20% | 22.852 s / 2.497x / 59.96% | 24.790 s / 2.290x / 56.33% |
+| `--threads 5` | 52.920 s | 55.722 s | 12.773 s / 4.143x / 75.86% | 11.726 s / 4.752x / 78.96% | 11.328 s / 4.671x / 78.59% | 9.362 s / 5.952x / 83.20% |
+| `--threads 10` | 52.965 s | 54.949 s | 10.460 s / 5.064x / 80.25% | 9.039 s / 6.079x / 83.55% | 9.658 s / 5.484x / 81.77% | 7.621 s / 7.210x / 86.13% |
+| `--threads 20` | 53.555 s | 54.842 s | 8.421 s / 6.359x / 84.28% | 6.707 s / 8.177x / 87.77% | 8.215 s / 6.519x / 84.66% | 5.967 s / 9.191x / 89.12% |
 <!-- LATEST_PERFORMANCE_END -->
-<!-- LATEST_PERFORMANCE_RUNS: performance-snapshot-runs=90 dotnet-matrix-runs=60 dotnet-current-runs=30 python-reference-runs=30 dotnet-repeats=3 python-reference-date=2026-08-12 dotnet-v040-date=2026-08-13 dotnet-current-date=2026-08-13 phase22-200-ab-pairs=10 phase22-long-ab-pairs=8 phase22-thread-backend-runs=60 phase22-gc-traces=2 phase22-tests=1438 python-v040-runs=15 python-v040-hashes=15 python-pr341-runs=15 python-pr341-hashes=1 -->
+<!-- LATEST_PERFORMANCE_RUNS: performance-snapshot-runs=90 dotnet-matrix-runs=60 dotnet-current-runs=30 python-reference-runs=30 dotnet-repeats=3 python-reference-date=2026-08-12 dotnet-v040-date=2026-08-13 dotnet-current-date=2026-08-13 phase22-200-ab-pairs=20 phase22-long-ab-pairs=8 phase22-thread-backend-runs=60 phase22-gc-traces=2 phase22-tests=1438 python-v040-runs=15 python-v040-hashes=15 python-pr341-runs=15 python-pr341-hashes=1 -->
 
 三次运行的墙钟范围如下：
 
 <!-- LATEST_PERFORMANCE_RANGES_BEGIN -->
 | CLI 模式 | Python v0.4.0 | Python PR341 | Exact + v0.4.0 | Exact + current | IPP-fast + v0.4.0 | IPP-fast + current |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| 默认（5） | 52.583-62.222 s | 53.893-58.195 s | 12.992-13.691 s | 11.754-12.255 s | 11.196-11.458 s | 9.422-10.097 s |
-| `--threads 1` | 56.709-60.521 s | 56.335-58.991 s | 32.465-34.144 s | 36.710-38.190 s | 22.966-23.144 s | 25.530-25.825 s |
-| `--threads 5` | 52.845-53.977 s | 53.696-58.437 s | 12.727-13.130 s | 11.466-11.771 s | 11.188-11.647 s | 9.326-9.519 s |
-| `--threads 10` | 51.797-53.088 s | 52.649-56.775 s | 10.132-10.495 s | 8.470-8.986 s | 9.389-9.948 s | 7.302-7.669 s |
-| `--threads 20` | 52.967-55.987 s | 53.005-55.618 s | 8.024-8.637 s | 6.729-7.527 s | 7.939-8.208 s | 6.008-6.099 s |
+| 默认（5） | 52.583-62.222 s | 53.893-58.195 s | 12.401-13.004 s | 11.778-12.320 s | 11.150-11.347 s | 9.256-9.514 s |
+| `--threads 1` | 56.709-60.521 s | 56.335-58.991 s | 31.044-32.351 s | 33.968-35.628 s | 22.618-23.435 s | 24.703-25.137 s |
+| `--threads 5` | 52.845-53.977 s | 53.696-58.437 s | 12.696-12.950 s | 11.195-12.230 s | 11.285-11.414 s | 9.328-9.567 s |
+| `--threads 10` | 51.797-53.088 s | 52.649-56.775 s | 10.271-11.139 s | 8.848-9.074 s | 9.618-9.703 s | 7.506-7.653 s |
+| `--threads 20` | 52.967-55.987 s | 53.005-55.618 s | 8.285-8.490 s | 6.581-7.365 s | 8.143-8.240 s | 5.899-6.091 s |
 <!-- LATEST_PERFORMANCE_RANGES_END -->
 
 保留的 30 次测量是 2026-08-12 固定条件活动中的 Python 参考。全部 60 次 .NET 运行于
@@ -456,7 +462,7 @@ hash；独立 A/B 门禁还匹配有序 `fileLoc`。Python v0.4.0 的 15 次运�
 
 刷新的全部 .NET 单元格使用基于已合并 main `af2dfe5` 的 Phase 22 候选；其
 `VHSDecode.Core.dll` SHA-256 为
-`AA2CDA546F1DA4B8CF3DE6599F8AB7481EE43AB81FED2C36FB6E2A018F9CDF6E`。
+`116530667C9CA5941E6BB65305686C7D44C2B5CBC01A6DA90B1D7FCCD70A8863`。
 测试机为 Intel Core Ultra 7 265K（20 个逻辑处理器）、Windows 11 build 26220，以及 .NET
 SDK/runtime `11.0.100-preview.6.26359.118`。原始目录含私有夹具路径，只保留在本地；
 这些是如实报告的本地测量，不是可公开独立复现的 benchmark corpus。

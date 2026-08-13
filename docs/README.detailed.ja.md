@@ -468,22 +468,26 @@ IPP-fast、v0.4.0/`current`、`--threads 0`、default-five、`--threads 20` を�
 各 profile 内の luma、chroma、raw JSON、stdout、normalized stderr/log、ordered
 `fileLoc` はすべて一致しました。
 
-### allocation-free VHS burst-probe result
+### allocation-free internal VHS burst-probe result
 
-Phase 22 candidate は短命な `ChromaBurstDemodulationResult` を heap record から readonly
-record struct に変更します。11 scalar field、正確な double bit pattern、delegate signature、
-probe order、exception order、phase-line materialization はすべて不変です。focused xUnit test
-は value semantics、signed zero、NaN payload、infinity、init-only field、非破壊的な `with`
-behavior を固定します。
+Phase 22 candidate は public `ChromaBurstDemodulationResult` を従来の sealed record class の
+まま保ちます。direct public class-to-struct prototype は CLR signature、binary binding、
+`null`/`default`、identity、boxing、generic behavior を変えるため review で却下しました。
+final path は 11 scalar field に別の internal readonly record struct を使い、実際の public API
+boundary だけで public class に変換します。focused xUnit test は両 type category、signed zero、
+NaN payload、infinity、init-only field、exact conversion、非破壊的な `with` behavior を固定します。
 
-reverse-order phase-sequence microbenchmark 7 pair で allocated bytes は serial 時に
-391,392,000 から 211,104,000（46.1%）、4-worker 時に 44.8% 減りました。end-to-end GC
-trace からも sampled `ChromaBurstDemodulationResult` heap object が消えました。reverse-order
-200-frame 10 pair、opposite-order 1,000-frame 8 pair、以下の 60-run matrix では luma、chroma、
-raw JSON、stdout、normalized stderr/log、ordered `fileLoc` が完全一致しました。long-run wall
-change は 4.59% slower から 1.79% faster、peak working-set change も混在しました。したがって
-これは allocation/GC-pressure improvement であり、end-to-end throughput や memory win は
-主張しません。
+reverse-order focused 7 pair は exact checksum を維持し、median allocated bytes を serial で
+114,244,800 から 67,256,448（41.13%）、4-worker で 183,595,176 から 137,502,920
+（25.11%）へ削減しました。matched 200-frame Exact `current --threads 20` GC trace では total
+allocation tick が 2,099 から 1,998（4.81%）、sampled
+`ChromaBurstDemodulationResult` tick が 108 から 0 になりました。この trace でも luma、
+chroma、raw JSON、stdout、normalized stderr/log、ordered `fileLoc` は一致しました。
+
+reverse-order 200-frame 20 pair、opposite-order 1,000-frame 8 pair、以下の 60-run matrix は
+captured surface がすべて exact でした。long-run paired wall change は 0.37% faster から
+1.01% slower の範囲だったため、allocation/GC-pressure improvement として採用し、
+end-to-end throughput や peak-memory win は主張しません。
 
 ### 最新の 6-path thread matrix
 
@@ -498,24 +502,24 @@ cell は wall-time median、profile が対応する Python 列に対する speed
 <!-- LATEST_PERFORMANCE_BEGIN -->
 | CLI mode（workers） | Python v0.4.0 | Python PR341 | Exact + v0.4.0 | Exact + current | IPP-fast + v0.4.0 | IPP-fast + current |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| default（5） | 52.811 s | 54.243 s | 13.119 s / 4.026x / 75.16% | 12.078 s / 4.491x / 77.73% | 11.388 s / 4.637x / 78.44% | 9.662 s / 5.614x / 82.19% |
-| `--threads 1` | 57.067 s | 56.762 s | 33.420 s / 1.708x / 41.44% | 36.993 s / 1.534x / 34.83% | 23.069 s / 2.474x / 59.58% | 25.760 s / 2.203x / 54.62% |
-| `--threads 5` | 52.920 s | 55.722 s | 13.058 s / 4.053x / 75.32% | 11.475 s / 4.856x / 79.41% | 11.356 s / 4.660x / 78.54% | 9.513 s / 5.857x / 82.93% |
-| `--threads 10` | 52.965 s | 54.949 s | 10.310 s / 5.137x / 80.53% | 8.889 s / 6.182x / 83.82% | 9.529 s / 5.559x / 82.01% | 7.458 s / 7.368x / 86.43% |
-| `--threads 20` | 53.555 s | 54.842 s | 8.391 s / 6.382x / 84.33% | 6.759 s / 8.114x / 87.67% | 8.061 s / 6.643x / 84.95% | 6.088 s / 9.008x / 88.90% |
+| default（5） | 52.811 s | 54.243 s | 12.780 s / 4.132x / 75.80% | 12.127 s / 4.473x / 77.64% | 11.240 s / 4.698x / 78.72% | 9.488 s / 5.717x / 82.51% |
+| `--threads 1` | 57.067 s | 56.762 s | 31.677 s / 1.802x / 44.49% | 35.077 s / 1.618x / 38.20% | 22.852 s / 2.497x / 59.96% | 24.790 s / 2.290x / 56.33% |
+| `--threads 5` | 52.920 s | 55.722 s | 12.773 s / 4.143x / 75.86% | 11.726 s / 4.752x / 78.96% | 11.328 s / 4.671x / 78.59% | 9.362 s / 5.952x / 83.20% |
+| `--threads 10` | 52.965 s | 54.949 s | 10.460 s / 5.064x / 80.25% | 9.039 s / 6.079x / 83.55% | 9.658 s / 5.484x / 81.77% | 7.621 s / 7.210x / 86.13% |
+| `--threads 20` | 53.555 s | 54.842 s | 8.421 s / 6.359x / 84.28% | 6.707 s / 8.177x / 87.77% | 8.215 s / 6.519x / 84.66% | 5.967 s / 9.191x / 89.12% |
 <!-- LATEST_PERFORMANCE_END -->
-<!-- LATEST_PERFORMANCE_RUNS: performance-snapshot-runs=90 dotnet-matrix-runs=60 dotnet-current-runs=30 python-reference-runs=30 dotnet-repeats=3 python-reference-date=2026-08-12 dotnet-v040-date=2026-08-13 dotnet-current-date=2026-08-13 phase22-200-ab-pairs=10 phase22-long-ab-pairs=8 phase22-thread-backend-runs=60 phase22-gc-traces=2 phase22-tests=1438 python-v040-runs=15 python-v040-hashes=15 python-pr341-runs=15 python-pr341-hashes=1 -->
+<!-- LATEST_PERFORMANCE_RUNS: performance-snapshot-runs=90 dotnet-matrix-runs=60 dotnet-current-runs=30 python-reference-runs=30 dotnet-repeats=3 python-reference-date=2026-08-12 dotnet-v040-date=2026-08-13 dotnet-current-date=2026-08-13 phase22-200-ab-pairs=20 phase22-long-ab-pairs=8 phase22-thread-backend-runs=60 phase22-gc-traces=2 phase22-tests=1438 python-v040-runs=15 python-v040-hashes=15 python-pr341-runs=15 python-pr341-hashes=1 -->
 
 3-run wall-time range は次のとおりです。
 
 <!-- LATEST_PERFORMANCE_RANGES_BEGIN -->
 | CLI mode | Python v0.4.0 | Python PR341 | Exact + v0.4.0 | Exact + current | IPP-fast + v0.4.0 | IPP-fast + current |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| default（5） | 52.583-62.222 s | 53.893-58.195 s | 12.992-13.691 s | 11.754-12.255 s | 11.196-11.458 s | 9.422-10.097 s |
-| `--threads 1` | 56.709-60.521 s | 56.335-58.991 s | 32.465-34.144 s | 36.710-38.190 s | 22.966-23.144 s | 25.530-25.825 s |
-| `--threads 5` | 52.845-53.977 s | 53.696-58.437 s | 12.727-13.130 s | 11.466-11.771 s | 11.188-11.647 s | 9.326-9.519 s |
-| `--threads 10` | 51.797-53.088 s | 52.649-56.775 s | 10.132-10.495 s | 8.470-8.986 s | 9.389-9.948 s | 7.302-7.669 s |
-| `--threads 20` | 52.967-55.987 s | 53.005-55.618 s | 8.024-8.637 s | 6.729-7.527 s | 7.939-8.208 s | 6.008-6.099 s |
+| default（5） | 52.583-62.222 s | 53.893-58.195 s | 12.401-13.004 s | 11.778-12.320 s | 11.150-11.347 s | 9.256-9.514 s |
+| `--threads 1` | 56.709-60.521 s | 56.335-58.991 s | 31.044-32.351 s | 33.968-35.628 s | 22.618-23.435 s | 24.703-25.137 s |
+| `--threads 5` | 52.845-53.977 s | 53.696-58.437 s | 12.696-12.950 s | 11.195-12.230 s | 11.285-11.414 s | 9.328-9.567 s |
+| `--threads 10` | 51.797-53.088 s | 52.649-56.775 s | 10.271-11.139 s | 8.848-9.074 s | 9.618-9.703 s | 7.506-7.653 s |
+| `--threads 20` | 52.967-55.987 s | 53.005-55.618 s | 8.285-8.490 s | 6.581-7.365 s | 8.143-8.240 s | 5.899-6.091 s |
 <!-- LATEST_PERFORMANCE_RANGES_END -->
 
 保持する 30 measurement は 2026-08-12 固定条件 campaign の Python reference です。
@@ -528,7 +532,7 @@ Python v0.4.0 は 15 run で 15 種類の luma、chroma、JSON、normalized-log 
 
 更新した全 .NET cell は merged main `af2dfe5` を基にした Phase 22 candidate を使い、
 `VHSDecode.Core.dll` SHA-256 は
-`AA2CDA546F1DA4B8CF3DE6599F8AB7481EE43AB81FED2C36FB6E2A018F9CDF6E` です。
+`116530667C9CA5941E6BB65305686C7D44C2B5CBC01A6DA90B1D7FCCD70A8863` です。
 host は Intel Core Ultra 7 265K（20 logical processor）、Windows 11 build 26220、.NET
 SDK/runtime `11.0.100-preview.6.26359.118` です。raw directory は private fixture path を
 含むため local にのみ保持し、public に独立再現可能な benchmark corpus とは主張しません。

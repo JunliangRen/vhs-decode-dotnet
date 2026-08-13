@@ -98,24 +98,26 @@ CVBS 和 HiFi 仍会拒绝 `ipp-fast`；需要 release 兼容行为时应使用 
 <!-- LATEST_PERFORMANCE_BEGIN -->
 | CLI 模式（workers） | Python v0.4.0 | Python PR341 | Exact + v0.4.0 | Exact + current | IPP-fast + v0.4.0 | IPP-fast + current |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| 默认（5） | 52.811 s | 54.243 s | 13.119 s / 4.026x | 12.078 s / 4.491x | 11.388 s / 4.637x | 9.662 s / 5.614x |
-| `--threads 1` | 57.067 s | 56.762 s | 33.420 s / 1.708x | 36.993 s / 1.534x | 23.069 s / 2.474x | 25.760 s / 2.203x |
-| `--threads 5` | 52.920 s | 55.722 s | 13.058 s / 4.053x | 11.475 s / 4.856x | 11.356 s / 4.660x | 9.513 s / 5.857x |
-| `--threads 10` | 52.965 s | 54.949 s | 10.310 s / 5.137x | 8.889 s / 6.182x | 9.529 s / 5.559x | 7.458 s / 7.368x |
-| `--threads 20` | 53.555 s | 54.842 s | 8.391 s / 6.382x | 6.759 s / 8.114x | 8.061 s / 6.643x | 6.088 s / 9.008x |
+| 默认（5） | 52.811 s | 54.243 s | 12.780 s / 4.132x | 12.127 s / 4.473x | 11.240 s / 4.698x | 9.488 s / 5.717x |
+| `--threads 1` | 57.067 s | 56.762 s | 31.677 s / 1.802x | 35.077 s / 1.618x | 22.852 s / 2.497x | 24.790 s / 2.290x |
+| `--threads 5` | 52.920 s | 55.722 s | 12.773 s / 4.143x | 11.726 s / 4.752x | 11.328 s / 4.671x | 9.362 s / 5.952x |
+| `--threads 10` | 52.965 s | 54.949 s | 10.460 s / 5.064x | 9.039 s / 6.079x | 9.658 s / 5.484x | 7.621 s / 7.210x |
+| `--threads 20` | 53.555 s | 54.842 s | 8.421 s / 6.359x | 6.707 s / 8.177x | 8.215 s / 6.519x | 5.967 s / 9.191x |
 <!-- LATEST_PERFORMANCE_END -->
-<!-- LATEST_PERFORMANCE_RUNS: performance-snapshot-runs=90 dotnet-matrix-runs=60 dotnet-current-runs=30 python-reference-runs=30 dotnet-repeats=3 python-reference-date=2026-08-12 dotnet-v040-date=2026-08-13 dotnet-current-date=2026-08-13 phase22-200-ab-pairs=10 phase22-long-ab-pairs=8 phase22-thread-backend-runs=60 phase22-gc-traces=2 phase22-tests=1438 python-v040-runs=15 python-v040-hashes=15 python-pr341-runs=15 python-pr341-hashes=1 -->
+<!-- LATEST_PERFORMANCE_RUNS: performance-snapshot-runs=90 dotnet-matrix-runs=60 dotnet-current-runs=30 python-reference-runs=30 dotnet-repeats=3 python-reference-date=2026-08-12 dotnet-v040-date=2026-08-13 dotnet-current-date=2026-08-13 phase22-200-ab-pairs=20 phase22-long-ab-pairs=8 phase22-thread-backend-runs=60 phase22-gc-traces=2 phase22-tests=1438 python-v040-runs=15 python-v040-hashes=15 python-pr341-runs=15 python-pr341-hashes=1 -->
 
 每个 .NET 单元格依次给出墙钟中位数和相对同 profile Python 列的倍速；默认实际
 使用 **5 个 workers**。三次运行范围见[详细性能说明](docs/README.detailed.zh-CN.md#性能)。
 倍数会随作为分子的 Python 时间和作为分母的 .NET 时间一起变化，使用其他夹具或窗口的历史表格
 也不能直接横向比较。判断因果回退时使用同一时刻的 .NET 版本配对 A/B，而不是旧表倍数。
 
-最新分配优化把临时 VHS burst-probe 结果改为只读值类型，同时保留全部字段和位模式。
-七组反向微基准配对把串行/四 worker 分配量降低了 46.1%/44.8%。10 组 200 帧 A/B、
-8 组 1000 帧 A/B 和完整 60 次线程矩阵的所有产物与诊断面均完全一致。长跑墙钟变化
-从慢 4.59% 到快 1.79%，因此不宣称吞吐或峰值内存提升。跨线程确定性和全部 1438 项
-xUnit v3 测试均通过；完整门禁与范围见详细说明。
+最新分配优化保留公开 VHS burst-probe 结果原有的 sealed record class，只在 field analysis
+内部使用只读值类型。公开 delegate、方法、`null`、对象身份和二进制契约均不变，同时移除
+临时的内部结果对象。七组反向聚焦配对把串行/四 worker 分配量中位数降低了
+41.1%/25.1%；匹配的真实 RF trace 把总分配 tick 降低 4.81%，burst-result tick 从
+108 降为零。20 组 200 帧 A/B、8 组 1000 帧 A/B 和完整 60 次线程矩阵的所有产物与
+诊断面均完全一致。长跑墙钟变化从快 0.37% 到慢 1.01%，因此不宣称吞吐或峰值内存
+提升。跨线程确定性和全部 1438 项 xUnit v3 测试均通过；完整证据见详细说明。
 
 刷新后的每个 .NET profile/线程单元格在三轮内都保持确定性。固定参考集中的 Python
 PR341 保持确定；Python v0.4.0 的 15 次运行产生了 15 套不同的亮度、色度、JSON 和

@@ -102,13 +102,13 @@ Phase 22 candidate で 2026-08-13 に .NET の全 60 measurement を更新しま
 <!-- LATEST_PERFORMANCE_BEGIN -->
 | CLI mode（workers） | Python v0.4.0 | Python PR341 | Exact + v0.4.0 | Exact + current | IPP-fast + v0.4.0 | IPP-fast + current |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| default（5） | 52.811 s | 54.243 s | 13.119 s / 4.026x | 12.078 s / 4.491x | 11.388 s / 4.637x | 9.662 s / 5.614x |
-| `--threads 1` | 57.067 s | 56.762 s | 33.420 s / 1.708x | 36.993 s / 1.534x | 23.069 s / 2.474x | 25.760 s / 2.203x |
-| `--threads 5` | 52.920 s | 55.722 s | 13.058 s / 4.053x | 11.475 s / 4.856x | 11.356 s / 4.660x | 9.513 s / 5.857x |
-| `--threads 10` | 52.965 s | 54.949 s | 10.310 s / 5.137x | 8.889 s / 6.182x | 9.529 s / 5.559x | 7.458 s / 7.368x |
-| `--threads 20` | 53.555 s | 54.842 s | 8.391 s / 6.382x | 6.759 s / 8.114x | 8.061 s / 6.643x | 6.088 s / 9.008x |
+| default（5） | 52.811 s | 54.243 s | 12.780 s / 4.132x | 12.127 s / 4.473x | 11.240 s / 4.698x | 9.488 s / 5.717x |
+| `--threads 1` | 57.067 s | 56.762 s | 31.677 s / 1.802x | 35.077 s / 1.618x | 22.852 s / 2.497x | 24.790 s / 2.290x |
+| `--threads 5` | 52.920 s | 55.722 s | 12.773 s / 4.143x | 11.726 s / 4.752x | 11.328 s / 4.671x | 9.362 s / 5.952x |
+| `--threads 10` | 52.965 s | 54.949 s | 10.460 s / 5.064x | 9.039 s / 6.079x | 9.658 s / 5.484x | 7.621 s / 7.210x |
+| `--threads 20` | 53.555 s | 54.842 s | 8.421 s / 6.359x | 6.707 s / 8.177x | 8.215 s / 6.519x | 5.967 s / 9.191x |
 <!-- LATEST_PERFORMANCE_END -->
-<!-- LATEST_PERFORMANCE_RUNS: performance-snapshot-runs=90 dotnet-matrix-runs=60 dotnet-current-runs=30 python-reference-runs=30 dotnet-repeats=3 python-reference-date=2026-08-12 dotnet-v040-date=2026-08-13 dotnet-current-date=2026-08-13 phase22-200-ab-pairs=10 phase22-long-ab-pairs=8 phase22-thread-backend-runs=60 phase22-gc-traces=2 phase22-tests=1438 python-v040-runs=15 python-v040-hashes=15 python-pr341-runs=15 python-pr341-hashes=1 -->
+<!-- LATEST_PERFORMANCE_RUNS: performance-snapshot-runs=90 dotnet-matrix-runs=60 dotnet-current-runs=30 python-reference-runs=30 dotnet-repeats=3 python-reference-date=2026-08-12 dotnet-v040-date=2026-08-13 dotnet-current-date=2026-08-13 phase22-200-ab-pairs=20 phase22-long-ab-pairs=8 phase22-thread-backend-runs=60 phase22-gc-traces=2 phase22-tests=1438 python-v040-runs=15 python-v040-hashes=15 python-pr341-runs=15 python-pr341-hashes=1 -->
 
 各 .NET cell は wall-time median と profile が対応する Python 列に対する speedup の順で、
 default は **5 workers** です。3-run range は
@@ -117,12 +117,15 @@ default は **5 workers** です。3-run range は
 直接比較できません。causal regression は、過去の ratio cell ではなく同時刻の .NET
 revision A/B で判断します。
 
-最新の allocation pass は transient VHS burst-probe result を readonly value にし、全 field と
-bit pattern を維持します。reverse-order microbenchmark 7 pair で serial/4-worker allocation は
-46.1%/44.8% 減りました。200-frame A/B 10 pair、1,000-frame A/B 8 pair、60-run thread matrix
-では全 artifact と diagnostic surface が一致しました。long gate の wall change は 4.59% slower
-から 1.79% faster まで混在したため、throughput や peak-memory improvement は主張しません。
-cross-thread determinism と xUnit v3 の全 1,438 tests が通過しました。
+最新の allocation pass は public VHS burst-probe result を従来の sealed record class のまま保ち、
+field analysis 内部だけで readonly value を使います。public delegate、method、`null`、identity、
+binary contract を維持しながら transient internal result object を除去します。reverse-order
+focused 7 pair で serial/4-worker allocation median は 41.1%/25.1% 減り、matched real-RF
+trace では total allocation tick が 4.81% 減り、burst-result tick は 108 から 0 になりました。
+200-frame A/B 20 pair、1,000-frame A/B 8 pair、60-run thread matrix では全 artifact と
+diagnostic surface が一致しました。long-run wall change は 0.37% faster から 1.01% slower の
+範囲だったため、throughput/peak-memory improvement は主張しません。cross-thread
+determinism と xUnit v3 の全 1,438 tests が通過しました。
 
 更新した各 .NET profile/thread cell は 3 run 内で deterministic でした。固定 reference の
 merged Python PR341 も deterministic でした。Python v0.4.0 は 15 run で 15 種類の luma、

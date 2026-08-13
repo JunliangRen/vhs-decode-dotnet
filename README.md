@@ -107,13 +107,13 @@ Compatibility is evaluated separately from speed.
 <!-- LATEST_PERFORMANCE_BEGIN -->
 | CLI mode (workers) | Python v0.4.0 | Python PR341 | Exact + v0.4.0 | Exact + current | IPP-fast + v0.4.0 | IPP-fast + current |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| default (5) | 52.811 s | 54.243 s | 13.119 s / 4.026x | 12.078 s / 4.491x | 11.388 s / 4.637x | 9.662 s / 5.614x |
-| `--threads 1` | 57.067 s | 56.762 s | 33.420 s / 1.708x | 36.993 s / 1.534x | 23.069 s / 2.474x | 25.760 s / 2.203x |
-| `--threads 5` | 52.920 s | 55.722 s | 13.058 s / 4.053x | 11.475 s / 4.856x | 11.356 s / 4.660x | 9.513 s / 5.857x |
-| `--threads 10` | 52.965 s | 54.949 s | 10.310 s / 5.137x | 8.889 s / 6.182x | 9.529 s / 5.559x | 7.458 s / 7.368x |
-| `--threads 20` | 53.555 s | 54.842 s | 8.391 s / 6.382x | 6.759 s / 8.114x | 8.061 s / 6.643x | 6.088 s / 9.008x |
+| default (5) | 52.811 s | 54.243 s | 12.780 s / 4.132x | 12.127 s / 4.473x | 11.240 s / 4.698x | 9.488 s / 5.717x |
+| `--threads 1` | 57.067 s | 56.762 s | 31.677 s / 1.802x | 35.077 s / 1.618x | 22.852 s / 2.497x | 24.790 s / 2.290x |
+| `--threads 5` | 52.920 s | 55.722 s | 12.773 s / 4.143x | 11.726 s / 4.752x | 11.328 s / 4.671x | 9.362 s / 5.952x |
+| `--threads 10` | 52.965 s | 54.949 s | 10.460 s / 5.064x | 9.039 s / 6.079x | 9.658 s / 5.484x | 7.621 s / 7.210x |
+| `--threads 20` | 53.555 s | 54.842 s | 8.421 s / 6.359x | 6.707 s / 8.177x | 8.215 s / 6.519x | 5.967 s / 9.191x |
 <!-- LATEST_PERFORMANCE_END -->
-<!-- LATEST_PERFORMANCE_RUNS: performance-snapshot-runs=90 dotnet-matrix-runs=60 dotnet-current-runs=30 python-reference-runs=30 dotnet-repeats=3 python-reference-date=2026-08-12 dotnet-v040-date=2026-08-13 dotnet-current-date=2026-08-13 phase22-200-ab-pairs=10 phase22-long-ab-pairs=8 phase22-thread-backend-runs=60 phase22-gc-traces=2 phase22-tests=1438 python-v040-runs=15 python-v040-hashes=15 python-pr341-runs=15 python-pr341-hashes=1 -->
+<!-- LATEST_PERFORMANCE_RUNS: performance-snapshot-runs=90 dotnet-matrix-runs=60 dotnet-current-runs=30 python-reference-runs=30 dotnet-repeats=3 python-reference-date=2026-08-12 dotnet-v040-date=2026-08-13 dotnet-current-date=2026-08-13 phase22-200-ab-pairs=20 phase22-long-ab-pairs=8 phase22-thread-backend-runs=60 phase22-gc-traces=2 phase22-tests=1438 python-v040-runs=15 python-v040-hashes=15 python-pr341-runs=15 python-pr341-hashes=1 -->
 
 Each .NET cell shows median wall time and speedup versus its profile-matched
 Python column. The default is **5 workers**; three-run ranges are in the
@@ -122,15 +122,17 @@ when either the Python numerator or .NET denominator moves, and historical table
 using another fixture or window are not directly comparable. Same-moment .NET
 revision A/B runs, rather than old ratio cells, determine causal regressions.
 
-The latest allocation pass makes the transient VHS burst-probe result a readonly
-value while preserving every field and bit pattern. Seven reverse-order
-microbenchmark pairs reduced allocation by 46.1% serially and 44.8% with four
-workers. Ten 200-frame A/B pairs, eight 1,000-frame A/B pairs, and the complete
+The latest allocation pass keeps the public VHS burst-probe result as its original
+sealed record class while using a readonly value only inside field analysis. This
+preserves the public delegate, method, `null`, identity, and binary contracts while
+removing the transient internal result object. Seven reverse-order focused pairs
+reduced median allocation by 41.1% serially and 25.1% with four workers; a matched
+real-RF trace reduced total allocation ticks by 4.81% and burst-result ticks from
+108 to zero. Twenty 200-frame A/B pairs, eight 1,000-frame A/B pairs, and the complete
 60-run thread matrix kept all captured output and diagnostic surfaces exact.
-End-to-end wall changes were mixed, from 4.59% slower to 1.79% faster in the long
-gate, so no throughput or peak-memory improvement is attributed to this change.
-Cross-thread determinism and all 1,438 xUnit v3 tests passed; the detailed notes
-contain the complete gates and ranges.
+Long-run wall changes ranged from 0.37% faster to 1.01% slower, so no throughput
+or peak-memory improvement is attributed to this change. Cross-thread determinism
+and all 1,438 xUnit v3 tests passed; the detailed notes contain the full evidence.
 
 Every .NET profile/thread cell was deterministic across its three refreshed
 runs. Merged Python PR341 was deterministic in its pinned reference set; Python
