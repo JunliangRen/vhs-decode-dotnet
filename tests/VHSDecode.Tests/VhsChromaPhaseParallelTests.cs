@@ -7,6 +7,47 @@ namespace VHSDecode.Tests;
 
 public sealed class VhsChromaPhaseParallelTests
 {
+    [Fact(DisplayName = "Chroma burst probes return immutable values with exact fields")]
+    public void ChromaBurstProbesReturnImmutableValuesWithExactFields()
+    {
+        var result = new ChromaBurstDemodulationResult(
+            PhaseDegrees: -0.0,
+            PhaseOffsetDegrees: BitConverter.Int64BitsToDouble(
+                unchecked((long)0x7FF8_0000_0000_1234UL)),
+            Magnitude: double.PositiveInfinity,
+            I: -123.5,
+            Q: 456.25)
+        {
+            Start = 17,
+            End = 41,
+            Center = 29.25,
+            Amplitude = 98.75,
+            Dc = -7.5,
+            FrequencyHz = 3_580_000.125
+        };
+
+        Assert.True(typeof(ChromaBurstDemodulationResult).IsValueType);
+        Assert.Equal(
+            unchecked((long)0x8000_0000_0000_0000UL),
+            BitConverter.DoubleToInt64Bits(result.PhaseDegrees));
+        Assert.Equal(
+            unchecked((long)0x7FF8_0000_0000_1234UL),
+            BitConverter.DoubleToInt64Bits(result.PhaseOffsetDegrees));
+        Assert.Equal(double.PositiveInfinity, result.Magnitude);
+        Assert.Equal(-123.5, result.I);
+        Assert.Equal(456.25, result.Q);
+        Assert.Equal(17, result.Start);
+        Assert.Equal(41, result.End);
+        Assert.Equal(29.25, result.Center);
+        Assert.Equal(98.75, result.Amplitude);
+        Assert.Equal(-7.5, result.Dc);
+        Assert.Equal(3_580_000.125, result.FrequencyHz);
+
+        ChromaBurstDemodulationResult changed = result with { Amplitude = 12.5 };
+        Assert.Equal(98.75, result.Amplitude);
+        Assert.Equal(12.5, changed.Amplitude);
+    }
+
     [Fact(DisplayName = "Current burst probes reuse four exact-length decoder buffers")]
     public void CurrentBurstProbesReuseFourExactLengthDecoderBuffers()
     {

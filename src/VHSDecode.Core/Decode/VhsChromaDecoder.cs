@@ -15,7 +15,7 @@ public sealed record CurrentAutomaticChromaGainResult(
     double MeanBurstAmplitude,
     double NoiseFloor);
 
-public sealed record ChromaBurstDemodulationResult(
+public readonly record struct ChromaBurstDemodulationResult(
     double PhaseDegrees,
     double PhaseOffsetDegrees,
     double Magnitude,
