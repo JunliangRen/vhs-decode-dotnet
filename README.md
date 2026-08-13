@@ -38,7 +38,7 @@ evidence, and remaining gaps.
   EIAJ, and supported PAL/NTSC variants.
 - TBC utility tools, the double-click GUI, and developer plotting windows are
   intentionally out of scope.
-- The Visual Studio 2026 `.slnx` solution has **1,443** standard xUnit v3 tests
+- The Visual Studio 2026 `.slnx` solution has **1,446** standard xUnit v3 tests
   that are visible in Test Explorer and runnable with `dotnet test`.
 
 <!-- SECTION: start -->
@@ -99,22 +99,22 @@ for compatibility-sensitive work.
 
 This startup-inclusive `--start 100 --length 160` snapshot uses one fixed private
 local 40 MHz PAL VHS `.ldf` fixture; its filename is intentionally not published.
-It retains 30 fixed Python reference measurements from 2026-08-12 and 57
-unaffected .NET measurements from the 2026-08-13 Phase 24 matrix. The three
-Exact `current --threads 20` runs were refreshed on 2026-08-14 with the latest
-candidate based on main `bdccd58`. Every cell has three complete runs.
-Compatibility is evaluated separately from speed.
+It retains 30 fixed Python reference measurements from 2026-08-12 and 45
+unaffected .NET measurements from the 2026-08-13 Phase 24 matrix. All 15 Exact
+`current` runs were refreshed on 2026-08-14 with the latest candidate based on
+main `c47cffc`. Every cell has three complete runs. Compatibility is evaluated
+separately from speed.
 
 <!-- LATEST_PERFORMANCE_BEGIN -->
 | CLI mode (workers) | Python v0.4.0 | Python PR341 | Exact + v0.4.0 | Exact + current | IPP-fast + v0.4.0 | IPP-fast + current |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| default (5) | 52.811 s | 54.243 s | 12.095 s / 4.366x | 11.445 s / 4.740x | 10.797 s / 4.891x | 9.222 s / 5.882x |
-| `--threads 1` | 57.067 s | 56.762 s | 31.017 s / 1.840x | 34.873 s / 1.628x | 21.913 s / 2.604x | 24.653 s / 2.302x |
-| `--threads 5` | 52.920 s | 55.722 s | 12.116 s / 4.368x | 11.445 s / 4.868x | 10.817 s / 4.892x | 8.871 s / 6.282x |
-| `--threads 10` | 52.965 s | 54.949 s | 9.743 s / 5.436x | 8.755 s / 6.276x | 9.133 s / 5.800x | 7.060 s / 7.783x |
-| `--threads 20` | 53.555 s | 54.842 s | 7.907 s / 6.773x | 6.782 s / 8.086x | 7.730 s / 6.929x | 5.765 s / 9.513x |
+| default (5) | 52.811 s | 54.243 s | 12.095 s / 4.366x | 12.427 s / 4.365x | 10.797 s / 4.891x | 9.222 s / 5.882x |
+| `--threads 1` | 57.067 s | 56.762 s | 31.017 s / 1.840x | 39.687 s / 1.430x | 21.913 s / 2.604x | 24.653 s / 2.302x |
+| `--threads 5` | 52.920 s | 55.722 s | 12.116 s / 4.368x | 12.373 s / 4.503x | 10.817 s / 4.892x | 8.871 s / 6.282x |
+| `--threads 10` | 52.965 s | 54.949 s | 9.743 s / 5.436x | 8.921 s / 6.160x | 9.133 s / 5.800x | 7.060 s / 7.783x |
+| `--threads 20` | 53.555 s | 54.842 s | 7.907 s / 6.773x | 7.979 s / 6.874x | 7.730 s / 6.929x | 5.765 s / 9.513x |
 <!-- LATEST_PERFORMANCE_END -->
-<!-- LATEST_PERFORMANCE_RUNS: performance-snapshot-runs=90 dotnet-matrix-runs=60 dotnet-current-runs=30 python-reference-runs=30 dotnet-repeats=3 python-reference-date=2026-08-12 dotnet-v040-date=2026-08-13 dotnet-current-t20-date=2026-08-14 phase22-200-ab-pairs=20 phase22-long-ab-pairs=8 phase22-thread-backend-runs=60 phase22-gc-traces=2 phase22-tests=1438 phase24-short-ab-pairs=6 phase24-long-ab-pairs=4 phase24-thread-gate-runs=12 phase24-tests=1442 phase25-public-cell-runs=3 phase25-public-ab-pairs=3 phase25-long-ab-pairs=3 phase25-thread-gate-runs=12 phase25-tests=1443 python-v040-runs=15 python-v040-hashes=15 python-pr341-runs=15 python-pr341-hashes=1 -->
+<!-- LATEST_PERFORMANCE_RUNS: performance-snapshot-runs=90 dotnet-matrix-runs=60 dotnet-current-runs=30 python-reference-runs=30 dotnet-repeats=3 python-reference-date=2026-08-12 dotnet-v040-date=2026-08-13 dotnet-exact-current-date=2026-08-14 phase22-200-ab-pairs=20 phase22-long-ab-pairs=8 phase22-thread-backend-runs=60 phase22-gc-traces=2 phase22-tests=1438 phase24-short-ab-pairs=6 phase24-long-ab-pairs=4 phase24-thread-gate-runs=12 phase24-tests=1442 phase25-public-cell-runs=15 phase25-public-ab-pairs=15 phase25-long-ab-pairs=3 phase25-thread-gate-runs=12 phase25-tests=1446 python-v040-runs=15 python-v040-hashes=15 python-pr341-runs=15 python-pr341-hashes=1 -->
 
 Each .NET cell shows median wall time and speedup versus its profile-matched
 Python column. The default is **5 workers**; three-run ranges are in the
@@ -123,17 +123,23 @@ when either the Python numerator or .NET denominator moves, and historical table
 using another fixture or window are not directly comparable. Same-moment .NET
 revision A/B runs, rather than old ratio cells, determine causal regressions.
 
-The latest Exact `current` pass starts its existing strict full-complex analytic
-preparation on a bounded companion before the real RF FFT finishes. It changes
-only the timing of disjoint workspace operations above 12 workers; algorithms,
-data types, expressions, exception priority, and ordered commits are unchanged.
-Three 1,000-frame interleaved pairs kept every captured surface exact and moved
-median wall time from 37.876 to 37.403 seconds (1.25%). Median CPU time rose from
-301.375 to 319.250 seconds (5.93%) as effective core use moved from 7.96 to 8.54;
-peak working set fell 2.55% and peak private bytes fell 2.71%. The matching
-160-frame A/B had overlapping ranges and a 7.30% slower candidate median, so no
-startup-window speedup is claimed. A 12-run worker-mode gate remained
-deterministic and all 1,443 xUnit v3 tests passed.
+The latest Exact `current` pass prepares independent conjugate pairs in the
+large managed real-FFT inverse in parallel. It retains the same float32 values,
+twiddle lookups, expression order, center-bin overwrite, FFT, and bounded
+worker-owned workspace. Three interleaved 1,000-frame release-binary pairs kept
+every captured surface exact and moved median wall time from 35.822 to 33.715
+seconds (5.88%, 1.063x). Median CPU time fell from 298.891 to 284.063 seconds
+(4.96%) while effective core use moved from 8.34 to 8.43; median peak working
+set and private bytes fell 3.01% and 3.71%.
+
+The startup-heavy 160-frame apphost matrix was mixed: candidate medians were
+0.08%, 0.44%, 1.85%, and 2.59% faster at default, 1, 5, and 10 workers, but
+4.14% slower at 20 workers. A same-moment three-pair audit put the old
+`bdccd58` one-worker binary at 41.77 seconds and current main at 41.04 seconds;
+the lower ratios than the previous snapshot therefore reflect cross-date host
+state, not a revision regression. A 12-run worker-mode gate remained
+deterministic, and the 1,446-test xUnit v3 suite gate passed: 1,442 tests passed,
+zero failed, and four local IPP-only cases were skipped without the native runtime.
 
 Every .NET profile/thread cell was deterministic across its three refreshed
 runs. Merged Python PR341 was deterministic in its pinned reference set; Python
@@ -177,7 +183,7 @@ The pinned SDK is .NET `11.0.100-preview.6.26359.118`.
 dotnet restore VHSDecodeDotNet.slnx
 dotnet build VHSDecodeDotNet.slnx -c Release --no-restore
 dotnet test --solution VHSDecodeDotNet.slnx -c Release `
-  --no-build --no-restore --minimum-expected-tests 1443
+  --no-build --no-restore --minimum-expected-tests 1446
 ```
 
 Open `VHSDecodeDotNet.slnx` in Visual Studio 2026 to build, debug, and run the

@@ -5,6 +5,7 @@ namespace VHSDecode.Core.Dsp;
 
 internal static class PocketFftReal32
 {
+    private const int MinimumParallelComplexifiedPairs = 8 * 1024;
     private static readonly SingleCreationCache<int, Plan> Plans = new();
 
     internal static Complex32[] Forward(ReadOnlySpan<float> input)
@@ -109,13 +110,14 @@ internal static class PocketFftReal32
     }
 
     internal static void InverseAnyLength(
-        ReadOnlySpan<Complex32> input,
+        Complex32[] input,
         int outputLength,
         Complex32[] complexInput,
         Complex32[] transformScratch,
         Span<float> output,
         int workerThreads = 1)
     {
+        ArgumentNullException.ThrowIfNull(input);
         ArgumentNullException.ThrowIfNull(complexInput);
         ArgumentNullException.ThrowIfNull(transformScratch);
         ValidateSupportedEvenLength(outputLength, nameof(outputLength));
@@ -406,7 +408,7 @@ internal static class PocketFftReal32
                 : Inverse(input);
 
         internal void InverseDucc(
-            ReadOnlySpan<Complex32> input,
+            Complex32[] input,
             Complex32[] complexInput,
             Complex32[] transformScratch,
             Span<float> output,
@@ -483,7 +485,7 @@ internal static class PocketFftReal32
         }
 
         private void InverseComplexified(
-            ReadOnlySpan<Complex32> input,
+            Complex32[] input,
             Complex32[] complexInput,
             Complex32[] transformScratch,
             Span<float> output,
@@ -494,33 +496,35 @@ internal static class PocketFftReal32
                 input[0].Real + input[^1].Real,
                 input[0].Real - input[^1].Real);
 
-            for (int i = 1, inverseIndex = complexLength - 1;
-                i <= inverseIndex;
-                i++, inverseIndex--)
+            int pairEndExclusive = (complexLength / 2) + 1;
+            int pairCount = pairEndExclusive - 1;
+            int parallelWorkers = Math.Min(workerThreads, pairCount);
+            if (parallelWorkers > 1
+                && pairCount >= MinimumParallelComplexifiedPairs)
             {
-                Complex32 first = input[i];
-                Complex32 second = new(
-                    input[inverseIndex].Real,
-                    -input[inverseIndex].Imaginary);
-                float evenReal = first.Real + second.Real;
-                float evenImaginary =
-                    first.Imaginary + second.Imaginary;
-                float oddReal = first.Real - second.Real;
-                float oddImaginary =
-                    first.Imaginary - second.Imaginary;
-                FloatTwiddle root = _roots.Get(i);
-                float rotatedReal =
-                    (oddReal * root.Real)
-                    - (oddImaginary * root.Imaginary);
-                float rotatedImaginary =
-                    (oddReal * root.Imaginary)
-                    + (oddImaginary * root.Real);
-                complexInput[i] = new Complex32(
-                    evenReal - rotatedImaginary,
-                    evenImaginary + rotatedReal);
-                complexInput[inverseIndex] = new Complex32(
-                    evenReal + rotatedImaginary,
-                    -evenImaginary + rotatedReal);
+                Parallel.For(
+                    fromInclusive: 1,
+                    toExclusive: pairEndExclusive,
+                    new ParallelOptions
+                    {
+                        MaxDegreeOfParallelism = parallelWorkers
+                    },
+                    i => PrepareInverseComplexPair(
+                        input,
+                        complexInput,
+                        complexLength,
+                        i));
+            }
+            else
+            {
+                for (int i = 1; i < pairEndExclusive; i++)
+                {
+                    PrepareInverseComplexPair(
+                        input,
+                        complexInput,
+                        complexLength,
+                        i);
+                }
             }
 
             Complex32[] transformed =
@@ -536,6 +540,38 @@ internal static class PocketFftReal32
                 output[(2 * i) + 1] =
                     transformed[i].Imaginary * normalization;
             }
+        }
+
+        private void PrepareInverseComplexPair(
+            Complex32[] input,
+            Complex32[] complexInput,
+            int complexLength,
+            int index)
+        {
+            int inverseIndex = complexLength - index;
+            Complex32 first = input[index];
+            Complex32 second = new(
+                input[inverseIndex].Real,
+                -input[inverseIndex].Imaginary);
+            float evenReal = first.Real + second.Real;
+            float evenImaginary =
+                first.Imaginary + second.Imaginary;
+            float oddReal = first.Real - second.Real;
+            float oddImaginary =
+                first.Imaginary - second.Imaginary;
+            FloatTwiddle root = _roots.Get(index);
+            float rotatedReal =
+                (oddReal * root.Real)
+                - (oddImaginary * root.Imaginary);
+            float rotatedImaginary =
+                (oddReal * root.Imaginary)
+                + (oddImaginary * root.Real);
+            complexInput[index] = new Complex32(
+                evenReal - rotatedImaginary,
+                evenImaginary + rotatedReal);
+            complexInput[inverseIndex] = new Complex32(
+                evenReal + rotatedImaginary,
+                -evenImaginary + rotatedReal);
         }
 
         private void ExecuteForward(float[] data)
