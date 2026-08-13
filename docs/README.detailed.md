@@ -559,6 +559,36 @@ matched main and each profile remained deterministic across worker counts. The
 zero-warning Release build, all 1,442 standard xUnit v3 tests, the 64-test
 libsndfile class, and the 15-test native IPP smoke gate passed.
 
+### Early strict analytic preparation staging
+
+For Exact VHS `current` above the existing 12-worker threshold, the decoder now
+queues the strict NumPy-compatible full-complex analytic preparation before the
+main worker starts its real RF FFT. The companion and main paths use disjoint
+workspace arrays and the same existing FFT plans, data types, expressions,
+padding, and conversion points. The join still preserves real-inverse exception
+priority and ordered block commit. v0.4.0, default-five, `--threads 1/5/10`,
+GNRC, sharpness, and IPP-fast retain their prior paths.
+
+Three interleaved 1,000-frame Exact `current --threads 20` pairs matched exit
+status, luma, chroma, raw JSON, stdout, normalized stderr/logs, every ordered
+`fileLoc`, and the other saved metadata. Baseline/candidate medians were
+37.047/36.645 seconds, a 1.08% wall-time reduction; median CPU time was
+302.734/294.172 seconds, 2.83% lower. Median peak working set moved from
+354.57 to 345.47 MiB and median peak private bytes from 366.71 to 357.51 MiB.
+The candidate remained bounded and did not add a per-block allocation.
+
+The startup-heavy public 160-frame window was neutral: three interleaved pairs
+had baseline/candidate medians of 7.763/7.786 seconds, 0.30% slower. A separate
+candidate-only three-run refresh measured 7.461-7.659 seconds with a 7.499-second
+median and one hash for each of the seven captured compatibility surfaces. The
+absolute ratio in the table therefore falls versus the prior day's run even
+though the same-moment long A/B improved; cross-date host state is not treated
+as a causal regression. Another 12-run gate covered Exact v0.4.0 and `current`
+at `--threads 0`, default-five, and `--threads 20`, with all surfaces matching
+and each profile deterministic. The zero-warning Release build and all 1,443
+standard xUnit v3 tests passed; four local IPP-only cases were skipped because
+that test output intentionally lacked the native runtime.
+
 ### Latest six-path thread matrix
 
 The latest public summary is a startup-inclusive `--start 100 --length 160`
@@ -566,8 +596,9 @@ snapshot comparing Python v0.4.0, merged Python PR341, Exact v0.4.0, Exact
 `current`, IPP-fast v0.4.0, and IPP-fast `current` on the same private local
 40 MHz PAL VHS `.ldf` fixture. The source filename is intentionally not
 published. The active table retains 30 fixed Python reference measurements from
-2026-08-12 and refreshes all 60 .NET measurements with the Phase 24 candidate
-on 2026-08-13. Each .NET cell gives the median wall time, speedup, and
+2026-08-12 and 57 unaffected .NET measurements from the 2026-08-13 Phase 24
+matrix. The three Exact `current --threads 20` runs were refreshed on 2026-08-14
+with the latest candidate. Each .NET cell gives the median wall time, speedup, and
 wall-time reduction against its profile-matched Python column. Historical
 matrices that used another batch, format, or fixture are not directly comparable:
 
@@ -578,9 +609,9 @@ matrices that used another batch, format, or fixture are not directly comparable
 | `--threads 1` | 57.067 s | 56.762 s | 31.017 s / 1.840x / 45.65% | 34.873 s / 1.628x / 38.56% | 21.913 s / 2.604x / 61.60% | 24.653 s / 2.302x / 56.57% |
 | `--threads 5` | 52.920 s | 55.722 s | 12.116 s / 4.368x / 77.11% | 11.445 s / 4.868x / 79.46% | 10.817 s / 4.892x / 79.56% | 8.871 s / 6.282x / 84.08% |
 | `--threads 10` | 52.965 s | 54.949 s | 9.743 s / 5.436x / 81.60% | 8.755 s / 6.276x / 84.07% | 9.133 s / 5.800x / 82.76% | 7.060 s / 7.783x / 87.15% |
-| `--threads 20` | 53.555 s | 54.842 s | 7.907 s / 6.773x / 85.24% | 7.126 s / 7.696x / 87.01% | 7.730 s / 6.929x / 85.57% | 5.765 s / 9.513x / 89.49% |
+| `--threads 20` | 53.555 s | 54.842 s | 7.907 s / 6.773x / 85.24% | 7.499 s / 7.314x / 86.33% | 7.730 s / 6.929x / 85.57% | 5.765 s / 9.513x / 89.49% |
 <!-- LATEST_PERFORMANCE_END -->
-<!-- LATEST_PERFORMANCE_RUNS: performance-snapshot-runs=90 dotnet-matrix-runs=60 dotnet-current-runs=30 python-reference-runs=30 dotnet-repeats=3 python-reference-date=2026-08-12 dotnet-v040-date=2026-08-13 dotnet-current-date=2026-08-13 phase22-200-ab-pairs=20 phase22-long-ab-pairs=8 phase22-thread-backend-runs=60 phase22-gc-traces=2 phase22-tests=1438 phase24-short-ab-pairs=6 phase24-long-ab-pairs=4 phase24-thread-gate-runs=12 phase24-tests=1442 python-v040-runs=15 python-v040-hashes=15 python-pr341-runs=15 python-pr341-hashes=1 -->
+<!-- LATEST_PERFORMANCE_RUNS: performance-snapshot-runs=90 dotnet-matrix-runs=60 dotnet-current-runs=30 python-reference-runs=30 dotnet-repeats=3 python-reference-date=2026-08-12 dotnet-v040-date=2026-08-13 dotnet-current-t20-date=2026-08-14 phase22-200-ab-pairs=20 phase22-long-ab-pairs=8 phase22-thread-backend-runs=60 phase22-gc-traces=2 phase22-tests=1438 phase24-short-ab-pairs=6 phase24-long-ab-pairs=4 phase24-thread-gate-runs=12 phase24-tests=1442 phase25-public-cell-runs=3 phase25-public-ab-pairs=3 phase25-long-ab-pairs=3 phase25-thread-gate-runs=12 phase25-tests=1443 python-v040-runs=15 python-v040-hashes=15 python-pr341-runs=15 python-pr341-hashes=1 -->
 
 The three-run wall-time ranges were:
 
@@ -591,21 +622,23 @@ The three-run wall-time ranges were:
 | `--threads 1` | 56.709-60.521 s | 56.335-58.991 s | 30.682-33.565 s | 34.868-34.940 s | 21.871-22.008 s | 24.522-25.012 s |
 | `--threads 5` | 52.845-53.977 s | 53.696-58.437 s | 11.990-12.514 s | 11.086-12.076 s | 10.692-10.853 s | 8.777-9.030 s |
 | `--threads 10` | 51.797-53.088 s | 52.649-56.775 s | 9.615-9.743 s | 8.380-9.074 s | 9.025-9.289 s | 6.983-7.458 s |
-| `--threads 20` | 52.967-55.987 s | 53.005-55.618 s | 7.836-8.322 s | 6.438-7.251 s | 7.660-7.873 s | 5.662-6.102 s |
+| `--threads 20` | 52.967-55.987 s | 53.005-55.618 s | 7.836-8.322 s | 7.461-7.659 s | 7.660-7.873 s | 5.662-6.102 s |
 <!-- LATEST_PERFORMANCE_RANGES_END -->
 
-The 30 retained measurements are the Python references from the fixed-condition
-2026-08-12 campaign. All 60 .NET runs were refreshed on 2026-08-13, and every
-active cell contains three complete measurements. The refreshed runs produced
+The 30 retained Python measurements come from the fixed-condition 2026-08-12
+campaign. Nineteen unaffected .NET cells retain their 2026-08-13 Phase 24 runs;
+the Exact `current --threads 20` cell contains three complete 2026-08-14 runs.
+The active runs produced
 one luma, chroma, raw-JSON, stdout, normalized-stderr, and normalized-log hash
 set per backend/profile across all thread modes. The separate A/B gates also
 matched ordered `fileLoc`.
 Python v0.4.0 produced 15 distinct luma, chroma, JSON, and normalized-log hash
 sets in 15 runs; its strict oracle therefore remains `g4315520 --threads 0`.
 
-All refreshed .NET cells use the Phase 24 candidate based on main `0b99402`;
-its `VHSDecode.Core.dll` SHA-256 is
-`F73F7D351F922C4A664EC4C66F39224EED312C5B585084B0745FEC615A33B3BC`.
+The 19 retained .NET cells use the Phase 24 candidate based on main `0b99402`.
+The refreshed Exact `current --threads 20` cell uses the latest candidate based
+on main `bdccd58`; its `VHSDecode.Core.dll` SHA-256 is
+`ABA80ED407795BC17E87339C44EE84AF165F185646B8A6B35162379CCD28912D`.
 The host was an Intel Core Ultra 7 265K with 20 logical processors, Windows 11
 build 26220, and .NET SDK/runtime `11.0.100-preview.6.26359.118`. Raw directories
 stay local because they contain the private fixture path; these are reported
@@ -3857,7 +3890,7 @@ Requirements:
 .\tools\build-ipp-native.ps1
 dotnet restore VHSDecodeDotNet.slnx
 dotnet build VHSDecodeDotNet.slnx -c Release --no-restore
-dotnet test --solution VHSDecodeDotNet.slnx -c Release --no-build --no-restore --minimum-expected-tests 1442
+dotnet test --solution VHSDecodeDotNet.slnx -c Release --no-build --no-restore --minimum-expected-tests 1443
 dotnet test --project tests\VHSDecode.Tests\VHSDecode.Tests.csproj -c Release --no-build --no-restore --coverage --coverage-output coverage.cobertura.xml --coverage-output-format cobertura
 ```
 
@@ -3871,7 +3904,7 @@ deployment computer. Binary-only single-file releases embed
 sidecar license files. An Exact-only build may omit the native build step.
 
 The current formal Release build has zero warnings and errors. The xUnit v3
-project exposes **1,442** independently discoverable tests to both
+project exposes **1,443** independently discoverable tests to both
 `dotnet test` and Visual Studio Test Explorer.
 
 <!-- SECTION: usage -->

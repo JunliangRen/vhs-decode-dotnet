@@ -282,7 +282,10 @@ public sealed class RfBlockDecodePipeline : IDisposable
                 includeDemodRawOutput: retainRfDiagnosticChannels || _filterOptions.ExportRawTbc,
                 useNumpyComplexVhsAnalytic: _useNumpyComplexVhsAnalytic,
                 outputBuffers: streamOutputBuffers?.Demodulated,
-                vhsEnvelopeIppFilter: _vhsEnvelopeIppSos);
+                vhsEnvelopeIppFilter: _vhsEnvelopeIppSos,
+                ownedInput: input,
+                ownedRfVideoFilter: _filters.RfVideo,
+                ownedRfMtfFilter: rfMtfOverride ?? _filters.RfMtf);
             if (reportDiagnostics)
             {
                 ReportDiagnostics(demodulated);
