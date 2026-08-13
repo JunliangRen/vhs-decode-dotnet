@@ -285,15 +285,22 @@ public static class ChromaTransientImprovement
             Vector256<float> totalDistance = Avx.Add(
                 distanceBack,
                 distanceForward);
-            totalDistance.CopyTo(totalDistances);
-
-            for (int lane = 0; lane < 8; lane++)
+            Vector256<float> reciprocals;
+            if (Avx2.IsSupported)
             {
-                reciprocalEstimates[lane] =
-                    PinnedReciprocalEstimate(totalDistances[lane]);
+                reciprocals = PinnedReciprocalEstimateVector(totalDistance);
             }
+            else
+            {
+                totalDistance.CopyTo(totalDistances);
+                for (int lane = 0; lane < 8; lane++)
+                {
+                    reciprocalEstimates[lane] =
+                        PinnedReciprocalEstimate(totalDistances[lane]);
+                }
 
-            Vector256<float> reciprocals = LoadVector(reciprocalEstimates, 0);
+                reciprocals = LoadVector(reciprocalEstimates, 0);
+            }
             Vector256<float> initialProgress = Avx.Multiply(
                 reciprocals,
                 distanceBack);
@@ -535,6 +542,100 @@ public static class ChromaTransientImprovement
         return BitConverter.UInt32BitsToSingle(
             sign | resultExponent | resultMantissa);
     }
+
+    internal static void PinnedReciprocalEstimatesForTesting(
+        ReadOnlySpan<float> input,
+        Span<float> output,
+        bool permitAvx2)
+    {
+        if (output.Length != input.Length)
+        {
+            throw new ArgumentException(
+                "Output length must match the reciprocal input length.",
+                nameof(output));
+        }
+
+        int index = 0;
+        if (permitAvx2 && Avx2.IsSupported)
+        {
+            int vectorizedEnd = input.Length & ~7;
+            for (; index < vectorizedEnd; index += 8)
+            {
+                Vector256<float> values =
+                    MemoryMarshal.Cast<float, Vector256<float>>(input.Slice(index, 8))[0];
+                MemoryMarshal.Cast<float, Vector256<float>>(output.Slice(index, 8))[0] =
+                    PinnedReciprocalEstimateVector(values);
+            }
+        }
+
+        for (; index < input.Length; index++)
+        {
+            output[index] = PinnedReciprocalEstimate(input[index]);
+        }
+    }
+
+    private static unsafe Vector256<float> PinnedReciprocalEstimateVector(
+        Vector256<float> values)
+    {
+        Vector256<int> bits = values.AsInt32();
+        Vector256<int> sign = Avx2.And(
+            bits,
+            Vector256.Create(unchecked((int)0x8000_0000u)));
+        Vector256<int> mantissa = Avx2.And(bits, Vector256.Create(0x007F_FFFF));
+        Vector256<int> exponent = Avx2.And(
+            Avx2.ShiftRightLogical(bits.AsUInt32(), 23).AsInt32(),
+            Vector256.Create(0xFF));
+        Vector256<int> buckets =
+            Avx2.ShiftRightLogical(mantissa.AsUInt32(), 12).AsInt32();
+
+        Vector256<int> resultMantissas;
+        fixed (uint* table = PinnedReciprocalMantissas)
+        {
+            resultMantissas = Avx2.GatherVector256(table, buckets, 4).AsInt32();
+        }
+
+        Vector256<int> resultExponents = Avx2.ShiftLeftLogical(
+            Avx2.Subtract(Vector256.Create(253), exponent).AsUInt32(),
+            23).AsInt32();
+        Vector256<int> result = Avx2.Or(
+            sign,
+            Avx2.Or(resultExponents, resultMantissas));
+
+        Vector256<int> zeroExponent = Avx2.CompareEqual(
+            exponent,
+            Vector256<int>.Zero);
+        result = SelectBits(
+            result,
+            Avx2.Or(sign, Vector256.Create(0x7F80_0000)),
+            zeroExponent);
+
+        Vector256<int> highExponent = Avx2.CompareGreaterThan(
+            exponent,
+            Vector256.Create(252));
+        result = SelectBits(result, sign, highExponent);
+
+        Vector256<int> exponent255 = Avx2.CompareEqual(
+            exponent,
+            Vector256.Create(255));
+        Vector256<int> nonzeroMantissa = Avx2.Xor(
+            Avx2.CompareEqual(mantissa, Vector256<int>.Zero),
+            Vector256.Create(-1));
+        Vector256<int> nan = Avx2.And(exponent255, nonzeroMantissa);
+        result = SelectBits(
+            result,
+            Avx2.Or(bits, Vector256.Create(0x0040_0000)),
+            nan);
+        return result.AsSingle();
+    }
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private static Vector256<int> SelectBits(
+        Vector256<int> falseValue,
+        Vector256<int> trueValue,
+        Vector256<int> mask)
+        => Avx2.Xor(
+            falseValue,
+            Avx2.And(mask, Avx2.Xor(falseValue, trueValue)));
 
     private static uint[] CreatePinnedReciprocalMantissas()
     {

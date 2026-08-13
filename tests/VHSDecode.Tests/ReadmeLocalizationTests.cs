@@ -10,20 +10,37 @@ public sealed partial class ReadmeLocalizationTests
         "dotnet-matrix-runs=60 dotnet-current-runs=30 " +
         "python-reference-runs=30 dotnet-repeats=3 " +
         "python-reference-date=2026-08-12 dotnet-v040-date=2026-08-13 " +
-        "dotnet-exact-current-date=2026-08-14 phase22-200-ab-pairs=20 " +
+        "dotnet-current-date=2026-08-14 phase22-200-ab-pairs=20 " +
         "phase22-long-ab-pairs=8 phase22-thread-backend-runs=60 " +
         "phase22-gc-traces=2 phase22-tests=1438 " +
         "phase24-short-ab-pairs=6 phase24-long-ab-pairs=4 " +
         "phase24-thread-gate-runs=12 phase24-tests=1442 " +
         "phase25-public-cell-runs=15 phase25-public-ab-pairs=15 " +
         "phase25-long-ab-pairs=3 phase25-thread-gate-runs=12 " +
-        "phase25-tests=1446 " +
+        "phase25-tests=1446 phase26-kernel-ab-pairs=8 " +
+        "phase26-long-ab-pairs=4 phase26-thread-backend-runs=36 " +
+        "phase26-public-cell-runs=30 phase26-tests=1447 " +
         "python-v040-runs=15 python-v040-hashes=15 " +
         "python-pr341-runs=15 python-pr341-hashes=1 -->";
 
     private const string FullCiTestCommand =
         "run: dotnet test --solution VHSDecodeDotNet.slnx --configuration Release " +
-        "--no-build --no-restore --minimum-expected-tests 1446";
+        "--no-build --no-restore --minimum-expected-tests 1447";
+
+    private const string CurrentCtiAvx2GatherTestCommand =
+        "run: dotnet test tests/VHSDecode.Tests/VHSDecode.Tests.csproj " +
+        "--configuration Release --no-build --no-restore --filter-method " +
+        "'*PinnedCurrentCtiAvx2ReciprocalGatherPreservesScalarBits*' " +
+        "--minimum-expected-tests 1";
+
+    private const string CurrentCtiAvx2GatherRequirement =
+        "VHSDECODE_REQUIRE_AVX_CTI_GATHER: \"1\"";
+
+    private const string CurrentCtiScalarFallbackTestCommand =
+        "run: dotnet test tests/VHSDecode.Tests/VHSDecode.Tests.csproj " +
+        "--configuration Release --no-build --no-restore --filter-class " +
+        "VHSDecode.Tests.ChromaTransientImprovementCurrentTests " +
+        "--minimum-expected-tests 19";
 
     private const string CurrentVhsSyncScalarFallbackTestCommand =
         "run: dotnet test tests/VHSDecode.Tests/VHSDecode.Tests.csproj " +
@@ -186,34 +203,34 @@ public sealed partial class ReadmeLocalizationTests
         Assert.Equal(3, expectedDetailedCommands.Length);
         string[] expectedOverviewPerformanceRows =
         [
-            "52.811 s | 54.243 s | 12.095 s | 4.366x | 12.427 s | 4.365x | 10.797 s | 4.891x | 9.222 s | 5.882x",
-            "57.067 s | 56.762 s | 31.017 s | 1.840x | 39.687 s | 1.430x | 21.913 s | 2.604x | 24.653 s | 2.302x",
-            "52.920 s | 55.722 s | 12.116 s | 4.368x | 12.373 s | 4.503x | 10.817 s | 4.892x | 8.871 s | 6.282x",
-            "52.965 s | 54.949 s | 9.743 s | 5.436x | 8.921 s | 6.160x | 9.133 s | 5.800x | 7.060 s | 7.783x",
-            "53.555 s | 54.842 s | 7.907 s | 6.773x | 7.979 s | 6.874x | 7.730 s | 6.929x | 5.765 s | 9.513x"
+            "52.811 s | 54.243 s | 12.095 s | 4.366x | 12.169 s | 4.458x | 10.797 s | 4.891x | 9.551 s | 5.679x",
+            "57.067 s | 56.762 s | 31.017 s | 1.840x | 39.276 s | 1.445x | 21.913 s | 2.604x | 26.960 s | 2.105x",
+            "52.920 s | 55.722 s | 12.116 s | 4.368x | 11.895 s | 4.684x | 10.817 s | 4.892x | 9.597 s | 5.806x",
+            "52.965 s | 54.949 s | 9.743 s | 5.436x | 8.773 s | 6.264x | 9.133 s | 5.800x | 7.400 s | 7.426x",
+            "53.555 s | 54.842 s | 7.907 s | 6.773x | 6.768 s | 8.103x | 7.730 s | 6.929x | 5.749 s | 9.539x"
         ];
         string[] expectedDetailedPerformanceRows =
         [
-            "52.811 s | 54.243 s | 12.095 s | 4.366x | 77.10% | 12.427 s | 4.365x | 77.09% | 10.797 s | 4.891x | 79.56% | 9.222 s | 5.882x | 83.00%",
-            "57.067 s | 56.762 s | 31.017 s | 1.840x | 45.65% | 39.687 s | 1.430x | 30.08% | 21.913 s | 2.604x | 61.60% | 24.653 s | 2.302x | 56.57%",
-            "52.920 s | 55.722 s | 12.116 s | 4.368x | 77.11% | 12.373 s | 4.503x | 77.79% | 10.817 s | 4.892x | 79.56% | 8.871 s | 6.282x | 84.08%",
-            "52.965 s | 54.949 s | 9.743 s | 5.436x | 81.60% | 8.921 s | 6.160x | 83.77% | 9.133 s | 5.800x | 82.76% | 7.060 s | 7.783x | 87.15%",
-            "53.555 s | 54.842 s | 7.907 s | 6.773x | 85.24% | 7.979 s | 6.874x | 85.45% | 7.730 s | 6.929x | 85.57% | 5.765 s | 9.513x | 89.49%"
+            "52.811 s | 54.243 s | 12.095 s | 4.366x | 77.10% | 12.169 s | 4.458x | 77.57% | 10.797 s | 4.891x | 79.56% | 9.551 s | 5.679x | 82.39%",
+            "57.067 s | 56.762 s | 31.017 s | 1.840x | 45.65% | 39.276 s | 1.445x | 30.81% | 21.913 s | 2.604x | 61.60% | 26.960 s | 2.105x | 52.50%",
+            "52.920 s | 55.722 s | 12.116 s | 4.368x | 77.11% | 11.895 s | 4.684x | 78.65% | 10.817 s | 4.892x | 79.56% | 9.597 s | 5.806x | 82.78%",
+            "52.965 s | 54.949 s | 9.743 s | 5.436x | 81.60% | 8.773 s | 6.264x | 84.03% | 9.133 s | 5.800x | 82.76% | 7.400 s | 7.426x | 86.53%",
+            "53.555 s | 54.842 s | 7.907 s | 6.773x | 85.24% | 6.768 s | 8.103x | 87.66% | 7.730 s | 6.929x | 85.57% | 5.749 s | 9.539x | 89.52%"
         ];
         string[] expectedDetailedPerformanceRangeRows =
         [
-            "default 5 | 52.583-62.222 s | 53.893-58.195 s | 12.010-12.980 s | 12.404-12.431 s | 10.716-11.439 s | 8.872-9.624 s",
-            "threads 1 | 56.709-60.521 s | 56.335-58.991 s | 30.682-33.565 s | 39.463-40.157 s | 21.871-22.008 s | 24.522-25.012 s",
-            "threads 5 | 52.845-53.977 s | 53.696-58.437 s | 11.990-12.514 s | 12.322-12.555 s | 10.692-10.853 s | 8.777-9.030 s",
-            "threads 10 | 51.797-53.088 s | 52.649-56.775 s | 9.615-9.743 s | 8.553-9.452 s | 9.025-9.289 s | 6.983-7.458 s",
-            "threads 20 | 52.967-55.987 s | 53.005-55.618 s | 7.836-8.322 s | 7.867-8.575 s | 7.660-7.873 s | 5.662-6.102 s"
+            "default 5 | 52.583-62.222 s | 53.893-58.195 s | 12.010-12.980 s | 12.118-12.413 s | 10.716-11.439 s | 9.390-9.679 s",
+            "threads 1 | 56.709-60.521 s | 56.335-58.991 s | 30.682-33.565 s | 37.323-39.757 s | 21.871-22.008 s | 25.429-26.995 s",
+            "threads 5 | 52.845-53.977 s | 53.696-58.437 s | 11.990-12.514 s | 11.882-12.203 s | 10.692-10.853 s | 9.262-9.664 s",
+            "threads 10 | 51.797-53.088 s | 52.649-56.775 s | 9.615-9.743 s | 8.646-9.471 s | 9.025-9.289 s | 7.339-7.549 s",
+            "threads 20 | 52.967-55.987 s | 53.005-55.618 s | 7.836-8.322 s | 6.590-7.500 s | 7.660-7.873 s | 5.693-6.100 s"
         ];
 
         string[] overviewFacts =
         [
             "43155200da87c0d49eb37d8ec09b1372075ee8e4",
             "11.0.100-preview.6.26359.118",
-            "**1,446**",
+            "**1,447**",
             "--compat-version",
             "current",
             "--dsp-backend",
@@ -223,27 +240,27 @@ public sealed partial class ReadmeLocalizationTests
             "IPP-fast + v0.4.0",
             "IPP-fast + current",
             "--start 100",
-            "c47cffc",
-            "bdccd58",
+            "f165014",
             "52.811 s",
             "54.243 s",
             "12.095 s",
-            "12.427 s",
-            "6.282x",
-            "9.513x",
-            "35.822",
-            "33.715",
-            "5.88%",
-            "1.063x",
-            "298.891",
-            "284.063",
-            "4.96%",
-            "8.34",
-            "8.43",
-            "3.01%",
-            "3.71%",
-            "41.77",
-            "41.04",
+            "12.169 s",
+            "8.103x",
+            "9.539x",
+            "912.073",
+            "48.28%",
+            "1.933x",
+            "34.068",
+            "33.462",
+            "1.78%",
+            "1.018x",
+            "291.781",
+            "286.734",
+            "1.73%",
+            "8.56",
+            "8.57",
+            "345.9",
+            "347.4",
             "g4315520",
             "--threads 0"
         ];
@@ -256,8 +273,17 @@ public sealed partial class ReadmeLocalizationTests
             "11.0.100-preview.6.26359.118",
             "0b99402",
             "bdccd58",
-            "c47cffc",
-            "B9DD67A156745AA8A93216F3C5411107CA5AB6B1B5D177788C19389DEBBE8D2B",
+            "f165014",
+            "E252A25D4DC6AF7B7B891C51044A32DD3B9FAE316CBF096F0D96C6F17D05239D",
+            "912.073",
+            "48.28%",
+            "1.933x",
+            "34.068",
+            "33.462",
+            "291.781",
+            "286.734",
+            "345.9",
+            "347.4",
             "33.715",
             "1.063x",
             "284.063",
@@ -281,9 +307,6 @@ public sealed partial class ReadmeLocalizationTests
             "197.367/196.844",
             "353.0-357.5 MiB",
             "366.9-371.5 MiB",
-            "5.765 s",
-            "9.513x",
-            "5.662-6.102 s",
             "114,244,800",
             "67,256,448",
             "183,595,176",
@@ -564,7 +587,7 @@ public sealed partial class ReadmeLocalizationTests
             "1.72%",
             "444.3 MiB",
             "406.0 MiB",
-            "**1,446**",
+            "**1,447**",
             "3.7935",
             "3.6182",
             "4.62%",
@@ -1319,6 +1342,18 @@ public sealed partial class ReadmeLocalizationTests
             "workflows",
             "release-build.yml"));
         Assert.Contains(FullCiTestCommand, workflow, StringComparison.Ordinal);
+        Assert.Contains(
+            CurrentCtiAvx2GatherTestCommand,
+            workflow,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            CurrentCtiAvx2GatherRequirement,
+            workflow,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            CurrentCtiScalarFallbackTestCommand,
+            workflow,
+            StringComparison.Ordinal);
         Assert.Contains(
             CurrentVhsSyncScalarFallbackTestCommand,
             workflow,

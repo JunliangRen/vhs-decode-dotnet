@@ -1,4 +1,5 @@
 using System.Buffers.Binary;
+using System.Runtime.Intrinsics.X86;
 using System.Security.Cryptography;
 using VHSDecode.Core.Dsp;
 using Xunit;
@@ -170,6 +171,76 @@ public sealed class ChromaTransientImprovementCurrentTests
 
             Assert.Equal(expectedBits, BitConverter.SingleToUInt32Bits(actual));
         }
+    }
+
+    [Fact(DisplayName = "Pinned CTI AVX2 reciprocal gather preserves scalar bits")]
+    public void PinnedCurrentCtiAvx2ReciprocalGatherPreservesScalarBits()
+    {
+        if (string.Equals(
+                Environment.GetEnvironmentVariable("VHSDECODE_REQUIRE_AVX_CTI_GATHER"),
+                "1",
+                StringComparison.Ordinal))
+        {
+            Assert.True(
+                Avx2.IsSupported,
+                "The CI CTI reciprocal-gather run requires AVX2 support.");
+        }
+
+        var inputBits = new List<uint>(2_080);
+        for (uint bucket = 0; bucket < 2_048; bucket++)
+        {
+            uint sign = (bucket & 1u) == 0u ? 0u : 0x8000_0000u;
+            inputBits.Add(sign | (127u << 23) | (bucket << 12));
+        }
+
+        inputBits.AddRange(
+        [
+            0x0000_0000u,
+            0x8000_0000u,
+            0x0000_0001u,
+            0x8000_0001u,
+            0x007F_FFFFu,
+            0x807F_FFFFu,
+            0x7E80_0000u,
+            0xFE80_0000u,
+            0x7F00_0000u,
+            0xFF00_0000u,
+            0x7F7F_FFFFu,
+            0xFF7F_FFFFu,
+            0x7F80_0000u,
+            0xFF80_0000u,
+            0x7F80_0001u,
+            0xFF80_0001u,
+            0x7FC1_2345u,
+            0xFFC1_2345u,
+            0x3F80_0000u,
+            0xBF80_0000u,
+            0x3F80_1000u,
+            0xBF80_1000u,
+            0x4000_0000u,
+            0xC000_0000u,
+            0x3F12_3456u,
+            0xBF12_3456u,
+            0x3EAA_AAABu
+        ]);
+
+        float[] input = inputBits
+            .Select(BitConverter.UInt32BitsToSingle)
+            .ToArray();
+        var expected = new float[input.Length];
+        var actual = new float[input.Length];
+        ChromaTransientImprovement.PinnedReciprocalEstimatesForTesting(
+            input,
+            expected,
+            permitAvx2: false);
+        ChromaTransientImprovement.PinnedReciprocalEstimatesForTesting(
+            input,
+            actual,
+            permitAvx2: true);
+
+        Assert.Equal(
+            expected.Select(BitConverter.SingleToUInt32Bits),
+            actual.Select(BitConverter.SingleToUInt32Bits));
     }
 
     private static double[] BuildInput()
