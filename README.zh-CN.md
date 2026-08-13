@@ -33,7 +33,7 @@
 - VHS 家族包括 VHS/S-VHS、Betamax、Video8/Hi8、U-matic、Type C、EIAJ
   以及上游支持的 PAL/NTSC 变体。
 - TBC 工具、双击启动的用户 GUI 和开发者绘图窗口明确不在范围内。
-- Visual Studio 2026 `.slnx` 包含 **1,438** 项标准 xUnit v3 测试；测试可在
+- Visual Studio 2026 `.slnx` 包含 **1,442** 项标准 xUnit v3 测试；测试可在
   Test Explorer 中查看，也可用 `dotnet test` 运行。
 
 <!-- SECTION: start -->
@@ -91,33 +91,34 @@ CVBS 和 HiFi 仍会拒绝 `ipp-fast`；需要 release 兼容行为时应使用 
 
 这是同一份私有本地 40 MHz PAL VHS `.ldf` 夹具上使用
 `--start 100 --length 160` 的含启动开销快照，且不会公开源文件名。表中保留了
-2026-08-12 的 30 次固定 Python 参考测量，并用基于 main `af2dfe5` 的 Phase 22
+2026-08-12 的 30 次固定 Python 参考测量，并用基于 main `0b99402` 的 Phase 24
 候选刷新了 2026-08-13 的全部 60 次 .NET 测量。每个单元格均有
 三次完整运行。兼容性结论与速度数据分开判断。
 
 <!-- LATEST_PERFORMANCE_BEGIN -->
 | CLI 模式（workers） | Python v0.4.0 | Python PR341 | Exact + v0.4.0 | Exact + current | IPP-fast + v0.4.0 | IPP-fast + current |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| 默认（5） | 52.811 s | 54.243 s | 12.780 s / 4.132x | 12.127 s / 4.473x | 11.240 s / 4.698x | 9.488 s / 5.717x |
-| `--threads 1` | 57.067 s | 56.762 s | 31.677 s / 1.802x | 35.077 s / 1.618x | 22.852 s / 2.497x | 24.790 s / 2.290x |
-| `--threads 5` | 52.920 s | 55.722 s | 12.773 s / 4.143x | 11.726 s / 4.752x | 11.328 s / 4.671x | 9.362 s / 5.952x |
-| `--threads 10` | 52.965 s | 54.949 s | 10.460 s / 5.064x | 9.039 s / 6.079x | 9.658 s / 5.484x | 7.621 s / 7.210x |
-| `--threads 20` | 53.555 s | 54.842 s | 8.421 s / 6.359x | 6.707 s / 8.177x | 8.215 s / 6.519x | 5.967 s / 9.191x |
+| 默认（5） | 52.811 s | 54.243 s | 12.095 s / 4.366x | 11.445 s / 4.740x | 10.797 s / 4.891x | 9.222 s / 5.882x |
+| `--threads 1` | 57.067 s | 56.762 s | 31.017 s / 1.840x | 34.873 s / 1.628x | 21.913 s / 2.604x | 24.653 s / 2.302x |
+| `--threads 5` | 52.920 s | 55.722 s | 12.116 s / 4.368x | 11.445 s / 4.868x | 10.817 s / 4.892x | 8.871 s / 6.282x |
+| `--threads 10` | 52.965 s | 54.949 s | 9.743 s / 5.436x | 8.755 s / 6.276x | 9.133 s / 5.800x | 7.060 s / 7.783x |
+| `--threads 20` | 53.555 s | 54.842 s | 7.907 s / 6.773x | 7.126 s / 7.696x | 7.730 s / 6.929x | 5.765 s / 9.513x |
 <!-- LATEST_PERFORMANCE_END -->
-<!-- LATEST_PERFORMANCE_RUNS: performance-snapshot-runs=90 dotnet-matrix-runs=60 dotnet-current-runs=30 python-reference-runs=30 dotnet-repeats=3 python-reference-date=2026-08-12 dotnet-v040-date=2026-08-13 dotnet-current-date=2026-08-13 phase22-200-ab-pairs=20 phase22-long-ab-pairs=8 phase22-thread-backend-runs=60 phase22-gc-traces=2 phase22-tests=1438 python-v040-runs=15 python-v040-hashes=15 python-pr341-runs=15 python-pr341-hashes=1 -->
+<!-- LATEST_PERFORMANCE_RUNS: performance-snapshot-runs=90 dotnet-matrix-runs=60 dotnet-current-runs=30 python-reference-runs=30 dotnet-repeats=3 python-reference-date=2026-08-12 dotnet-v040-date=2026-08-13 dotnet-current-date=2026-08-13 phase22-200-ab-pairs=20 phase22-long-ab-pairs=8 phase22-thread-backend-runs=60 phase22-gc-traces=2 phase22-tests=1438 phase24-short-ab-pairs=6 phase24-long-ab-pairs=4 phase24-thread-gate-runs=12 phase24-tests=1442 python-v040-runs=15 python-v040-hashes=15 python-pr341-runs=15 python-pr341-hashes=1 -->
 
 每个 .NET 单元格依次给出墙钟中位数和相对同 profile Python 列的倍速；默认实际
 使用 **5 个 workers**。三次运行范围见[详细性能说明](docs/README.detailed.zh-CN.md#性能)。
 倍数会随作为分子的 Python 时间和作为分母的 .NET 时间一起变化，使用其他夹具或窗口的历史表格
 也不能直接横向比较。判断因果回退时使用同一时刻的 .NET 版本配对 A/B，而不是旧表倍数。
 
-最新分配优化保留公开 VHS burst-probe 结果原有的 sealed record class，只在 field analysis
-内部使用只读值类型。公开 delegate、方法、`null`、对象身份和二进制契约均不变，同时移除
-临时的内部结果对象。七组反向聚焦配对把串行/四 worker 分配量中位数降低了
-41.1%/25.1%；匹配的真实 RF trace 把总分配 tick 降低 4.81%，burst-result tick 从
-108 降为零。20 组 200 帧 A/B、8 组 1000 帧 A/B 和完整 60 次线程矩阵的所有产物与
-诊断面均完全一致。长跑墙钟变化从快 0.37% 到慢 1.01%，因此不宣称吞吐或峰值内存
-提升。跨线程确定性和全部 1438 项 xUnit v3 测试均通过；完整证据见详细说明。
+最新输入优化为并行 libsndfile 路径加入懒分配、有界的 2 MiB PCM16 回退环。
+重叠 RF block 会复制缓存前缀，只让 libsndfile 解码新尾部；普通读取、映射重启、
+真实 seek、fallback、dispose 以及原 PCM16-to-double 表达式的语义均保持不变。
+Exact `current` 与 IPP-fast `current` 共四组相反顺序的 1000 帧配对在全部产物与
+诊断面上严格一致，平均墙钟分别降低 1.00% 和 0.85%，平均 CPU 时间分别降低
+1.28% 和 0.27%。候选工作集保持在 353.0-357.5 MiB。另一个 12 次门禁确认
+v0.4.0/current 在 `--threads 0`、默认五 worker 和 `--threads 20` 下均保持确定；
+全部 1442 项 xUnit v3 测试通过，完整证据与边界见详细说明。
 
 刷新后的每个 .NET profile/线程单元格在三轮内都保持确定性。固定参考集中的 Python
 PR341 保持确定；Python v0.4.0 的 15 次运行产生了 15 套不同的亮度、色度、JSON 和
@@ -155,7 +156,7 @@ TBC、色度、JSON 和日志文件允许在解码期间并发读取，兼容的
 dotnet restore VHSDecodeDotNet.slnx
 dotnet build VHSDecodeDotNet.slnx -c Release --no-restore
 dotnet test --solution VHSDecodeDotNet.slnx -c Release `
-  --no-build --no-restore --minimum-expected-tests 1438
+  --no-build --no-restore --minimum-expected-tests 1442
 ```
 
 在 Visual Studio 2026 中打开 `VHSDecodeDotNet.slnx`，即可构建、调试并通过

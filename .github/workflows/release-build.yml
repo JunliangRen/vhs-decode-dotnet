@@ -130,7 +130,7 @@ jobs:
         run: dotnet build VHSDecodeDotNet.slnx --configuration Release --no-restore
 
       - name: Run tests
-        run: dotnet test --solution VHSDecodeDotNet.slnx --configuration Release --no-build --no-restore --minimum-expected-tests 1438
+        run: dotnet test --solution VHSDecodeDotNet.slnx --configuration Release --no-build --no-restore --minimum-expected-tests 1442
 
       - name: Run NumPy reduction scalar fallback tests
         env:
@@ -260,7 +260,7 @@ jobs:
       - name: Run PCM16 scalar fallback tests
         env:
           DOTNET_EnableAVX2: "0"
-        run: dotnet test tests/VHSDecode.Tests/VHSDecode.Tests.csproj --configuration Release --no-build --no-restore --filter FullyQualifiedName~LibsndfilePcm16SampleLoaderTests --minimum-expected-tests 60
+        run: dotnet test tests/VHSDecode.Tests/VHSDecode.Tests.csproj --configuration Release --no-build --no-restore --filter FullyQualifiedName~LibsndfilePcm16SampleLoaderTests --minimum-expected-tests 64
 
       - name: Restore Windows x64 publish assets
         run: dotnet restore src/VHSDecode.Cli/VHSDecode.Cli.csproj --runtime win-x64

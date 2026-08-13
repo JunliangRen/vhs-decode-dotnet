@@ -38,7 +38,7 @@ evidence, and remaining gaps.
   EIAJ, and supported PAL/NTSC variants.
 - TBC utility tools, the double-click GUI, and developer plotting windows are
   intentionally out of scope.
-- The Visual Studio 2026 `.slnx` solution has **1,438** standard xUnit v3 tests
+- The Visual Studio 2026 `.slnx` solution has **1,442** standard xUnit v3 tests
   that are visible in Test Explorer and runnable with `dotnet test`.
 
 <!-- SECTION: start -->
@@ -100,20 +100,20 @@ for compatibility-sensitive work.
 This startup-inclusive `--start 100 --length 160` snapshot uses one fixed private
 local 40 MHz PAL VHS `.ldf` fixture; its filename is intentionally not published.
 It retains 30 fixed Python reference measurements from 2026-08-12 and refreshes
-all 60 .NET measurements on 2026-08-13 with the Phase 22 candidate based on main
-`af2dfe5`. Every cell has three complete runs.
+all 60 .NET measurements on 2026-08-13 with the Phase 24 candidate based on main
+`0b99402`. Every cell has three complete runs.
 Compatibility is evaluated separately from speed.
 
 <!-- LATEST_PERFORMANCE_BEGIN -->
 | CLI mode (workers) | Python v0.4.0 | Python PR341 | Exact + v0.4.0 | Exact + current | IPP-fast + v0.4.0 | IPP-fast + current |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| default (5) | 52.811 s | 54.243 s | 12.780 s / 4.132x | 12.127 s / 4.473x | 11.240 s / 4.698x | 9.488 s / 5.717x |
-| `--threads 1` | 57.067 s | 56.762 s | 31.677 s / 1.802x | 35.077 s / 1.618x | 22.852 s / 2.497x | 24.790 s / 2.290x |
-| `--threads 5` | 52.920 s | 55.722 s | 12.773 s / 4.143x | 11.726 s / 4.752x | 11.328 s / 4.671x | 9.362 s / 5.952x |
-| `--threads 10` | 52.965 s | 54.949 s | 10.460 s / 5.064x | 9.039 s / 6.079x | 9.658 s / 5.484x | 7.621 s / 7.210x |
-| `--threads 20` | 53.555 s | 54.842 s | 8.421 s / 6.359x | 6.707 s / 8.177x | 8.215 s / 6.519x | 5.967 s / 9.191x |
+| default (5) | 52.811 s | 54.243 s | 12.095 s / 4.366x | 11.445 s / 4.740x | 10.797 s / 4.891x | 9.222 s / 5.882x |
+| `--threads 1` | 57.067 s | 56.762 s | 31.017 s / 1.840x | 34.873 s / 1.628x | 21.913 s / 2.604x | 24.653 s / 2.302x |
+| `--threads 5` | 52.920 s | 55.722 s | 12.116 s / 4.368x | 11.445 s / 4.868x | 10.817 s / 4.892x | 8.871 s / 6.282x |
+| `--threads 10` | 52.965 s | 54.949 s | 9.743 s / 5.436x | 8.755 s / 6.276x | 9.133 s / 5.800x | 7.060 s / 7.783x |
+| `--threads 20` | 53.555 s | 54.842 s | 7.907 s / 6.773x | 7.126 s / 7.696x | 7.730 s / 6.929x | 5.765 s / 9.513x |
 <!-- LATEST_PERFORMANCE_END -->
-<!-- LATEST_PERFORMANCE_RUNS: performance-snapshot-runs=90 dotnet-matrix-runs=60 dotnet-current-runs=30 python-reference-runs=30 dotnet-repeats=3 python-reference-date=2026-08-12 dotnet-v040-date=2026-08-13 dotnet-current-date=2026-08-13 phase22-200-ab-pairs=20 phase22-long-ab-pairs=8 phase22-thread-backend-runs=60 phase22-gc-traces=2 phase22-tests=1438 python-v040-runs=15 python-v040-hashes=15 python-pr341-runs=15 python-pr341-hashes=1 -->
+<!-- LATEST_PERFORMANCE_RUNS: performance-snapshot-runs=90 dotnet-matrix-runs=60 dotnet-current-runs=30 python-reference-runs=30 dotnet-repeats=3 python-reference-date=2026-08-12 dotnet-v040-date=2026-08-13 dotnet-current-date=2026-08-13 phase22-200-ab-pairs=20 phase22-long-ab-pairs=8 phase22-thread-backend-runs=60 phase22-gc-traces=2 phase22-tests=1438 phase24-short-ab-pairs=6 phase24-long-ab-pairs=4 phase24-thread-gate-runs=12 phase24-tests=1442 python-v040-runs=15 python-v040-hashes=15 python-pr341-runs=15 python-pr341-hashes=1 -->
 
 Each .NET cell shows median wall time and speedup versus its profile-matched
 Python column. The default is **5 workers**; three-run ranges are in the
@@ -122,17 +122,17 @@ when either the Python numerator or .NET denominator moves, and historical table
 using another fixture or window are not directly comparable. Same-moment .NET
 revision A/B runs, rather than old ratio cells, determine causal regressions.
 
-The latest allocation pass keeps the public VHS burst-probe result as its original
-sealed record class while using a readonly value only inside field analysis. This
-preserves the public delegate, method, `null`, identity, and binary contracts while
-removing the transient internal result object. Seven reverse-order focused pairs
-reduced median allocation by 41.1% serially and 25.1% with four workers; a matched
-real-RF trace reduced total allocation ticks by 4.81% and burst-result ticks from
-108 to zero. Twenty 200-frame A/B pairs, eight 1,000-frame A/B pairs, and the complete
-60-run thread matrix kept all captured output and diagnostic surfaces exact.
-Long-run wall changes ranged from 0.37% faster to 1.01% slower, so no throughput
-or peak-memory improvement is attributed to this change. Cross-thread determinism
-and all 1,438 xUnit v3 tests passed; the detailed notes contain the full evidence.
+The latest input pass gives the parallel libsndfile path a lazy, bounded 2 MiB
+PCM16 rewind ring. Overlapping RF blocks copy their cached prefix and ask
+libsndfile only for the fresh tail; ordinary reads, mapped restarts, real seeks,
+fallback, disposal, and the existing PCM16-to-double expression keep their prior
+semantics. Four opposite-order 1,000-frame pairs kept every captured output and
+diagnostic surface exact. Mean wall time fell by 1.00% for Exact `current` and
+0.85% for IPP-fast `current`; mean CPU time fell by 1.28% and 0.27% respectively.
+The candidate working set stayed within 353.0-357.5 MiB. A separate 12-run gate
+kept v0.4.0/current output deterministic at `--threads 0`, default-five, and
+`--threads 20`; all 1,442 xUnit v3 tests passed. Detailed notes contain the full
+evidence and bounds.
 
 Every .NET profile/thread cell was deterministic across its three refreshed
 runs. Merged Python PR341 was deterministic in its pinned reference set; Python
@@ -176,7 +176,7 @@ The pinned SDK is .NET `11.0.100-preview.6.26359.118`.
 dotnet restore VHSDecodeDotNet.slnx
 dotnet build VHSDecodeDotNet.slnx -c Release --no-restore
 dotnet test --solution VHSDecodeDotNet.slnx -c Release `
-  --no-build --no-restore --minimum-expected-tests 1438
+  --no-build --no-restore --minimum-expected-tests 1442
 ```
 
 Open `VHSDecodeDotNet.slnx` in Visual Studio 2026 to build, debug, and run the
