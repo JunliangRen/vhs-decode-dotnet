@@ -95,21 +95,20 @@ CVBS と HiFi は引き続き `ipp-fast` を拒否します。release-compatible
 
 これは同じ private local 40 MHz PAL VHS `.ldf` fixture を使う、startup cost を含む
 `--start 100 --length 160` snapshot です。source filename は公開しません。
-2026-08-12 の固定条件測定を 84 run 保持し、影響を受ける 2 つの
-`current --threads 20` cell を 2026-08-13 の 6 run で更新しました。これらの cell は
-main `4416aaa` を基にした commit `e89df85` を使い、各 cell は 3 complete run を
-持ちます。互換性と速度は別々に評価します。
+2026-08-12 の影響を受けない固定条件測定 60 run を保持し、main `9ae279f` を基にした
+Phase 20 candidate で 2026-08-13 に .NET `current` の全 30 measurement を更新しました。
+各 cell は 3 complete run を持ちます。互換性と速度は別々に評価します。
 
 <!-- LATEST_PERFORMANCE_BEGIN -->
 | CLI mode（workers） | Python v0.4.0 | Python PR341 | Exact + v0.4.0 | Exact + current | IPP-fast + v0.4.0 | IPP-fast + current |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| default（5） | 52.811 s | 54.243 s | 12.930 s / 4.084x | 12.477 s / 4.348x | 11.493 s / 4.595x | 9.673 s / 5.607x |
-| `--threads 1` | 57.067 s | 56.762 s | 31.701 s / 1.800x | 36.035 s / 1.575x | 22.907 s / 2.491x | 25.402 s / 2.235x |
-| `--threads 5` | 52.920 s | 55.722 s | 13.009 s / 4.068x | 11.803 s / 4.721x | 11.489 s / 4.606x | 9.433 s / 5.907x |
-| `--threads 10` | 52.965 s | 54.949 s | 10.266 s / 5.159x | 9.335 s / 5.886x | 9.766 s / 5.424x | 7.727 s / 7.111x |
-| `--threads 20` | 53.555 s | 54.842 s | 8.578 s / 6.244x | 7.325 s / 7.487x | 8.127 s / 6.590x | 5.863 s / 9.355x |
+| default（5） | 52.811 s | 54.243 s | 12.930 s / 4.084x | 11.620 s / 4.668x | 11.493 s / 4.595x | 9.232 s / 5.875x |
+| `--threads 1` | 57.067 s | 56.762 s | 31.701 s / 1.800x | 37.330 s / 1.521x | 22.907 s / 2.491x | 26.052 s / 2.179x |
+| `--threads 5` | 52.920 s | 55.722 s | 13.009 s / 4.068x | 11.312 s / 4.926x | 11.489 s / 4.606x | 9.484 s / 5.875x |
+| `--threads 10` | 52.965 s | 54.949 s | 10.266 s / 5.159x | 9.017 s / 6.094x | 9.766 s / 5.424x | 7.467 s / 7.359x |
+| `--threads 20` | 53.555 s | 54.842 s | 8.578 s / 6.244x | 7.155 s / 7.665x | 8.127 s / 6.590x | 5.759 s / 9.522x |
 <!-- LATEST_PERFORMANCE_END -->
-<!-- LATEST_PERFORMANCE_RUNS: performance-snapshot-runs=90 dotnet-matrix-runs=60 python-reference-runs=30 dotnet-repeats=3 python-reference-date=2026-08-12 dotnet-v040-date=2026-08-12 dotnet-current-date=2026-08-12 dotnet-current-t20-date=2026-08-13 phase18-table-runs=6 phase18-exact-200-ab-pairs=3 phase18-exact-1000-ab-pairs=1 phase18-ipp-200-ab-pairs=1 phase18-thread-gate-modes=2 phase18-tests=1435 phase18-final-signal-ab-pairs=3 phase18-final-memory-frames=1000 sinc-unroll-matrix-runs=90 sinc-unroll-exact-1000-ab-pairs=3 sinc-unroll-kernel-pairs=8 sinc-unroll-thread-profile-runs=24 sinc-unroll-memory-frames=2000 sinc-unroll-tests=34 sinc-unroll-intrinsic-modes=4 python-v040-runs=15 python-v040-hashes=15 python-pr341-runs=15 python-pr341-hashes=1 -->
+<!-- LATEST_PERFORMANCE_RUNS: performance-snapshot-runs=90 dotnet-matrix-runs=60 dotnet-current-runs=30 python-reference-runs=30 dotnet-repeats=3 python-reference-date=2026-08-12 dotnet-v040-date=2026-08-12 dotnet-current-date=2026-08-13 phase20-exact-200-ab-pairs=3 phase20-exact-1000-ab-pairs=2 phase20-thread-backend-runs=24 phase20-memory-frames=2000 phase20-tests=1437 python-v040-runs=15 python-v040-hashes=15 python-pr341-runs=15 python-pr341-hashes=1 -->
 
 各 .NET cell は wall-time median と profile が対応する Python 列に対する speedup の順で、
 default は **5 workers** です。3-run range は
@@ -118,27 +117,15 @@ default は **5 workers** です。3-run range は
 直接比較できません。causal regression は、過去の ratio cell ではなく同時刻の .NET
 revision A/B で判断します。
 
-直前の isolated change は、nested ThreadPool companion inverse を decoder-owned の
-bounded queue に置き換えます。`--threads 20` では、8 fixed companion worker が既存の
-12-block prefetch cap を超える worker budget だけを使用します。interleaved 200-frame
-Exact `current` 3 A/B pair は全 compatibility surface で一致し、paired wall-time change
-の median は 1.61% 減少しました。1,000-frame pair は 34.732 から 34.000 秒へ
-2.11% 高速化し、candidate working-set maximum は前半 352.2 MiB から後半
-351.4 MiB へ微減しました。growth や OOM はありません。
-final lifecycle follow-up も 3 interleaved pair と 1,000-frame run の全 surface で一致し、
-first/second-half peak は 355.2/353.8 MiB でした。machine が idle ではなかったため、
-その wall time は table から意図的に除外しています。
-
-最新の allocation pass は、VHS sync analysis の escape しない scratch array 5 個を
-exclusive detector workspace ごとに保持します。valid-pulse allocation benchmark は
-38.2% 減少し、matched GC trace でも startup 後の detector 由来の recurring
-`double[]` と `bool[]` allocation tick が消えました。opposite-order 1,000-frame Exact
-`current --threads 20` 2 pair の combined wall time は -0.38% で throughput-neutral、
-CPU は +1.65% だったため、CPU reduction や speedup は主張しません。Exact と
-IPP-fast はそれぞれ、v0.4.0/`current` と `--threads 0`/default-five/`--threads 20` を
-網羅する main/candidate 12 run を通過し、luma、chroma、raw JSON、stdout、normalized
-diagnostic、ordered `fileLoc` が一致しました。今回の gate 中は無関係な foreground CPU
-load があったため、table は最新の controlled throughput snapshot を維持します。
+最新の multicore pass は final worker-local VHS radix histogram を再利用し、serial source
+order を厳密に保ちながら対象 level bucket 2 個を parallel に収集します。
+opposite-order の 1,000-frame Exact `current --threads 20` 2 pair は wall time を
+4.96% と 3.49% 短縮し、別の 2,000-frame gate は 1.08% 高速で 4,000 field を完了しました。
+average useful core occupancy は増加しましたが、2,000-frame candidate の private-memory
+peak は 890.5 MiB、main は 425.8 MiB でした。candidate の quarter median は単調増加せず、
+終了時も peak 未満だったため、この測定は OOM なしで bounded です。memory reduction は
+主張しません。Exact/IPP-fast compatibility、cross-thread determinism、xUnit v3 の全
+1,437 tests が通過しました。完全な gate と range は詳細説明を参照してください。
 
 更新した各 .NET profile/thread cell は 3 run 内で deterministic でした。固定 reference の
 merged Python PR341 も deterministic でした。Python v0.4.0 は 15 run で 15 種類の luma、

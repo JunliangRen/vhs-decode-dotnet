@@ -670,8 +670,30 @@ public sealed class VhsSyncDetectorCurrentTests
     [Fact(DisplayName = "Parallel current VHS radix quantiles match serial bit for bit")]
     public void ParallelCurrentVhsRadixQuantilesMatchSerialBitForBit()
     {
+        static uint SortablePrefix(double value)
+        {
+            ulong bits = BitConverter.DoubleToUInt64Bits(value);
+            ulong key = (bits & 0x8000_0000_0000_0000UL) != 0
+                ? ~bits
+                : bits ^ 0x8000_0000_0000_0000UL;
+            return (uint)(key >> 32);
+        }
+
         const int length = 600_013;
         var random = new Random(34_104_315);
+        double[] sharedSecondPrefixSource = Enumerable.Range(0, length)
+            .Select(index =>
+            {
+                uint prefix = (index % 10) switch
+                {
+                    0 => 0xBFF0_0040U,
+                    1 or 2 => 0xBFF0_0180U,
+                    _ => 0xBFF0_0800U
+                };
+                ulong bits = ((ulong)(prefix ^ 0x8000_0000U) << 32) | (uint)index;
+                return BitConverter.UInt64BitsToDouble(bits);
+            })
+            .ToArray();
         double[][] sources =
         [
             Enumerable.Range(0, length)
@@ -684,7 +706,8 @@ public sealed class VhsSyncDetectorCurrentTests
                     ? -7_500_000.0
                     : (random.Next(2) == 0 ? -1.0 : 1.0)
                         * (1.0 + (random.NextDouble() * 10_000_000.0)))
-                .ToArray()
+                .ToArray(),
+            sharedSecondPrefixSource
         ];
         const int maximumWorkers = 20;
         var workerHistograms = Enumerable.Repeat(
@@ -718,6 +741,14 @@ public sealed class VhsSyncDetectorCurrentTests
                     syncTarget,
                     blankingTarget);
 
+            if (ReferenceEquals(source, sharedSecondPrefixSource))
+            {
+                uint syncPrefix = SortablePrefix(expectedSync);
+                uint blankingPrefix = SortablePrefix(expectedBlanking);
+                Assert.NotEqual(syncPrefix, blankingPrefix);
+                Assert.Equal(syncPrefix >> 10, blankingPrefix >> 10);
+            }
+
             foreach (int workers in new[] { 2, 3, 4, 5, 10, 20 })
             {
                 var actualScratch = new double[source.Length];
@@ -740,6 +771,9 @@ public sealed class VhsSyncDetectorCurrentTests
                 Assert.Equal(
                     BitConverter.DoubleToInt64Bits(expectedBlanking),
                     BitConverter.DoubleToInt64Bits(actualBlanking));
+                Assert.Equal(
+                    expectedScratch.Select(BitConverter.DoubleToInt64Bits),
+                    actualScratch.Select(BitConverter.DoubleToInt64Bits));
                 Assert.All(
                     workerFlags.AsSpan(0, workers).ToArray(),
                     flag => Assert.Equal(0, flag));
