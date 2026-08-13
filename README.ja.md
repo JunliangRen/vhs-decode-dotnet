@@ -96,20 +96,20 @@ CVBS と HiFi は引き続き `ipp-fast` を拒否します。release-compatible
 これは同じ private local 40 MHz PAL VHS `.ldf` fixture を使う、startup cost を含む
 `--start 100 --length 160` snapshot です。source filename は公開しません。
 2026-08-12 の固定 Python reference 30 run と、2026-08-13 Phase 24 matrix のうち
-今回の変更に影響されない .NET 57 run を保持します。Exact `current --threads 20` の
-3 run は main `bdccd58` を基にした最新 candidate で 2026-08-14 に更新しました。
+今回の変更に影響されない .NET 45 run を保持します。Exact `current` の全 15 run は
+main `c47cffc` を基にした最新 candidate で 2026-08-14 に更新しました。
 各 cell は 3 complete run を持ち、互換性と速度は別々に評価します。
 
 <!-- LATEST_PERFORMANCE_BEGIN -->
 | CLI mode（workers） | Python v0.4.0 | Python PR341 | Exact + v0.4.0 | Exact + current | IPP-fast + v0.4.0 | IPP-fast + current |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| default（5） | 52.811 s | 54.243 s | 12.095 s / 4.366x | 11.445 s / 4.740x | 10.797 s / 4.891x | 9.222 s / 5.882x |
-| `--threads 1` | 57.067 s | 56.762 s | 31.017 s / 1.840x | 34.873 s / 1.628x | 21.913 s / 2.604x | 24.653 s / 2.302x |
-| `--threads 5` | 52.920 s | 55.722 s | 12.116 s / 4.368x | 11.445 s / 4.868x | 10.817 s / 4.892x | 8.871 s / 6.282x |
-| `--threads 10` | 52.965 s | 54.949 s | 9.743 s / 5.436x | 8.755 s / 6.276x | 9.133 s / 5.800x | 7.060 s / 7.783x |
-| `--threads 20` | 53.555 s | 54.842 s | 7.907 s / 6.773x | 6.782 s / 8.086x | 7.730 s / 6.929x | 5.765 s / 9.513x |
+| default（5） | 52.811 s | 54.243 s | 12.095 s / 4.366x | 12.427 s / 4.365x | 10.797 s / 4.891x | 9.222 s / 5.882x |
+| `--threads 1` | 57.067 s | 56.762 s | 31.017 s / 1.840x | 39.687 s / 1.430x | 21.913 s / 2.604x | 24.653 s / 2.302x |
+| `--threads 5` | 52.920 s | 55.722 s | 12.116 s / 4.368x | 12.373 s / 4.503x | 10.817 s / 4.892x | 8.871 s / 6.282x |
+| `--threads 10` | 52.965 s | 54.949 s | 9.743 s / 5.436x | 8.921 s / 6.160x | 9.133 s / 5.800x | 7.060 s / 7.783x |
+| `--threads 20` | 53.555 s | 54.842 s | 7.907 s / 6.773x | 7.979 s / 6.874x | 7.730 s / 6.929x | 5.765 s / 9.513x |
 <!-- LATEST_PERFORMANCE_END -->
-<!-- LATEST_PERFORMANCE_RUNS: performance-snapshot-runs=90 dotnet-matrix-runs=60 dotnet-current-runs=30 python-reference-runs=30 dotnet-repeats=3 python-reference-date=2026-08-12 dotnet-v040-date=2026-08-13 dotnet-current-t20-date=2026-08-14 phase22-200-ab-pairs=20 phase22-long-ab-pairs=8 phase22-thread-backend-runs=60 phase22-gc-traces=2 phase22-tests=1438 phase24-short-ab-pairs=6 phase24-long-ab-pairs=4 phase24-thread-gate-runs=12 phase24-tests=1442 phase25-public-cell-runs=3 phase25-public-ab-pairs=3 phase25-long-ab-pairs=3 phase25-thread-gate-runs=12 phase25-tests=1443 python-v040-runs=15 python-v040-hashes=15 python-pr341-runs=15 python-pr341-hashes=1 -->
+<!-- LATEST_PERFORMANCE_RUNS: performance-snapshot-runs=90 dotnet-matrix-runs=60 dotnet-current-runs=30 python-reference-runs=30 dotnet-repeats=3 python-reference-date=2026-08-12 dotnet-v040-date=2026-08-13 dotnet-exact-current-date=2026-08-14 phase22-200-ab-pairs=20 phase22-long-ab-pairs=8 phase22-thread-backend-runs=60 phase22-gc-traces=2 phase22-tests=1438 phase24-short-ab-pairs=6 phase24-long-ab-pairs=4 phase24-thread-gate-runs=12 phase24-tests=1442 phase25-public-cell-runs=15 phase25-public-ab-pairs=15 phase25-long-ab-pairs=3 phase25-thread-gate-runs=12 phase25-tests=1443 python-v040-runs=15 python-v040-hashes=15 python-pr341-runs=15 python-pr341-hashes=1 -->
 
 各 .NET cell は wall-time median と profile が対応する Python 列に対する speedup の順で、
 default は **5 workers** です。3-run range は
@@ -118,15 +118,21 @@ default は **5 workers** です。3-run range は
 直接比較できません。causal regression は、過去の ratio cell ではなく同時刻の .NET
 revision A/B で判断します。
 
-最新の Exact `current` pass は、real RF FFT の完了前に既存の strict full-complex analytic
-preparation を bounded companion で開始します。12 workers を超える場合の disjoint workspace
-operation の timing だけを変え、algorithm、data type、expression、exception priority、ordered
-commit は変えません。1,000-frame interleaved pair 3 組は全 captured surface が一致し、wall-time
-median は 37.876 から 37.403 秒へ 1.25% 減りました。CPU-time median は 301.375 から
-319.250 秒へ 5.93% 増え、effective core use は 7.96 から 8.54 へ増えました。peak working
-set は 2.55%、peak private bytes は 2.71% 減りました。対応する 160-frame A/B は range が
-重なり、candidate median は 7.30% 遅いため、startup-window speedup は主張しません。
-12-run worker-mode gate は deterministic のままで、xUnit v3 の全 1,443 tests が通過しました。
+最新の Exact `current` pass は、大きな managed real-FFT inverse の独立した conjugate pair
+preparation を並行実行します。同じ float32 value、twiddle lookup、expression order、center-bin
+overwrite、FFT、bounded worker-owned workspace を保持します。release binary の interleaved
+1,000-frame pair 3 組は全 captured surface が一致し、wall-time median は 35.822 から
+33.715 秒へ 5.88% 減りました（1.063x）。CPU-time median は 298.891 から 284.063 秒へ
+4.96% 減り、effective core use は 8.34 から 8.43 へ増えました。median peak working set と
+private bytes は 3.01% と 3.71% 減りました。
+
+startup-heavy な 160-frame apphost matrix は mixed でした。candidate median は default、1、5、
+10 workers で 0.08%、0.44%、1.85%、2.59% 高速でしたが、20 workers では 4.14% 遅くなりました。
+同時刻の 3-pair audit では旧 `bdccd58` single-worker binary が 41.77 秒、current main が
+41.04 秒でした。したがって前回 snapshot より低い ratio は cross-date host state によるもので、
+revision regression ではありません。12-run worker-mode gate は deterministic のままで、
+1,443-test xUnit v3 suite gate も通過しました。1,439 tests が pass、failure は 0、local の
+IPP-only 4 cases は native runtime がないため skip されました。
 
 更新した各 .NET profile/thread cell は 3 run 内で deterministic でした。固定 reference の
 merged Python PR341 も deterministic でした。Python v0.4.0 は 15 run で 15 種類の luma、
