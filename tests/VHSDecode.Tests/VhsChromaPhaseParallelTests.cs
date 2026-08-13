@@ -7,10 +7,10 @@ namespace VHSDecode.Tests;
 
 public sealed class VhsChromaPhaseParallelTests
 {
-    [Fact(DisplayName = "Chroma burst probes return immutable values with exact fields")]
-    public void ChromaBurstProbesReturnImmutableValuesWithExactFields()
+    [Fact(DisplayName = "Public burst results stay classes while internal values preserve exact fields")]
+    public void PublicBurstResultsStayClassesWhileInternalValuesPreserveExactFields()
     {
-        var result = new ChromaBurstDemodulationResult(
+        var value = new ChromaBurstDemodulationValue(
             PhaseDegrees: -0.0,
             PhaseOffsetDegrees: BitConverter.Int64BitsToDouble(
                 unchecked((long)0x7FF8_0000_0000_1234UL)),
@@ -25,8 +25,11 @@ public sealed class VhsChromaPhaseParallelTests
             Dc = -7.5,
             FrequencyHz = 3_580_000.125
         };
+        ChromaBurstDemodulationResult result = value.ToPublicResult();
 
-        Assert.True(typeof(ChromaBurstDemodulationResult).IsValueType);
+        Assert.False(typeof(ChromaBurstDemodulationResult).IsValueType);
+        Assert.True(typeof(ChromaBurstDemodulationResult).IsSealed);
+        Assert.True(typeof(ChromaBurstDemodulationValue).IsValueType);
         Assert.Equal(
             unchecked((long)0x8000_0000_0000_0000UL),
             BitConverter.DoubleToInt64Bits(result.PhaseDegrees));
@@ -43,9 +46,13 @@ public sealed class VhsChromaPhaseParallelTests
         Assert.Equal(-7.5, result.Dc);
         Assert.Equal(3_580_000.125, result.FrequencyHz);
 
+        ChromaBurstDemodulationValue changedValue = value with { Amplitude = 12.5 };
         ChromaBurstDemodulationResult changed = result with { Amplitude = 12.5 };
+        Assert.Equal(98.75, value.Amplitude);
+        Assert.Equal(12.5, changedValue.Amplitude);
         Assert.Equal(98.75, result.Amplitude);
         Assert.Equal(12.5, changed.Amplitude);
+        Assert.NotSame(result, changed);
     }
 
     [Fact(DisplayName = "Current burst probes reuse four exact-length decoder buffers")]

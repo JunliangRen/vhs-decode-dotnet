@@ -15,7 +15,7 @@ public sealed record CurrentAutomaticChromaGainResult(
     double MeanBurstAmplitude,
     double NoiseFloor);
 
-public readonly record struct ChromaBurstDemodulationResult(
+public sealed record ChromaBurstDemodulationResult(
     double PhaseDegrees,
     double PhaseOffsetDegrees,
     double Magnitude,
@@ -33,6 +33,42 @@ public readonly record struct ChromaBurstDemodulationResult(
     public double Dc { get; init; }
 
     public double FrequencyHz { get; init; }
+}
+
+internal readonly record struct ChromaBurstDemodulationValue(
+    double PhaseDegrees,
+    double PhaseOffsetDegrees,
+    double Magnitude,
+    double I,
+    double Q)
+{
+    public int Start { get; init; }
+
+    public int End { get; init; }
+
+    public double Center { get; init; }
+
+    public double Amplitude { get; init; }
+
+    public double Dc { get; init; }
+
+    public double FrequencyHz { get; init; }
+
+    public ChromaBurstDemodulationResult ToPublicResult()
+        => new(
+            PhaseDegrees,
+            PhaseOffsetDegrees,
+            Magnitude,
+            I,
+            Q)
+        {
+            Start = Start,
+            End = End,
+            Center = Center,
+            Amplitude = Amplitude,
+            Dc = Dc,
+            FrequencyHz = FrequencyHz
+        };
 }
 
 public sealed record ChromaPhaseLine(
@@ -317,6 +353,11 @@ public delegate ChromaBurstDemodulationResult ChromaBurstProbe(
 
 public static class VhsChromaDecoder
 {
+    private delegate ChromaPhaseLine ChromaPhaseLineProbe(
+        int lineNumber,
+        int phaseRotation,
+        double lineScale);
+
     private const int CurrentAccParallelSampleThreshold = 64 * 1024;
     private const int MaximumCurrentAccParallelWorkers = 8;
     private const int MaximumCurrentAccParallelScratchLength = 4 * 1024;
@@ -523,7 +564,7 @@ public static class VhsChromaDecoder
                 options.FscMHz,
                 outputSampleRateMHz,
                 options.WorkerThreads);
-        ChromaPhaseSequenceResult result = GetPhaseRotationSequence(
+        ChromaPhaseSequenceResult result = GetPhaseRotationSequenceCore(
             options.ChromaRotation,
             chromaRotationIndex,
             lineLocations,
@@ -531,7 +572,8 @@ public static class VhsChromaDecoder
             options.OutputLineCount,
             inputLineLength,
             (lineNumber, phaseRotation, lineScale) =>
-                options.UseCurrentChromaProcessing
+            {
+                ChromaBurstDemodulationValue burst = options.UseCurrentChromaProcessing
                     ? ProbeUpconvertedBurstCurrentCore(
                         chromaField,
                         heterodyne,
@@ -547,7 +589,7 @@ public static class VhsChromaDecoder
                         effectiveBurstFilter,
                         useFloat32Samples,
                         burstFilter is null ? carrierTableCache : null)
-                    : ProbeUpconvertedBurst(
+                    : ProbeUpconvertedBurstValue(
                         chromaField,
                         heterodyne,
                         phaseRotation,
@@ -560,7 +602,12 @@ public static class VhsChromaDecoder
                         lineOffset,
                         options.OutputLineLength,
                         effectiveBurstFilter,
-                        useFloat32Samples),
+                        useFloat32Samples);
+                return CreateChromaPhaseLine(
+                    lineNumber,
+                    phaseRotation,
+                    in burst);
+            },
             options.DetectChromaTrackPhase,
             rotationCheckStartLine: Math.Max(lineOffset, lineOffset + options.OutputLineCount - BurstCheckSkipLines),
             options.EnableColorKiller,
@@ -1195,6 +1242,23 @@ public static class VhsChromaDecoder
         ReadOnlySpan<double> burstSin,
         ReadOnlySpan<double> burstCos,
         bool useFloat32Samples = false)
+        => DemodBurstValue(
+            burst,
+            lineScale,
+            lineStart,
+            burstStart,
+            burstSin,
+            burstCos,
+            useFloat32Samples).ToPublicResult();
+
+    private static ChromaBurstDemodulationValue DemodBurstValue(
+        ReadOnlySpan<double> burst,
+        double lineScale,
+        int lineStart,
+        int burstStart,
+        ReadOnlySpan<double> burstSin,
+        ReadOnlySpan<double> burstCos,
+        bool useFloat32Samples)
     {
         if (burstStart < 0 || burstStart + burst.Length > burstSin.Length || burstStart + burst.Length > burstCos.Length)
         {
@@ -1264,7 +1328,7 @@ public static class VhsChromaDecoder
         double phaseDegrees = PositiveDegrees(Math.Atan2(qComponent, iComponent) * (180.0 / Math.PI));
         double phaseOffsetDegrees = PositiveDegrees(
             (burstStart - lineStart) * Math.FusedMultiplyAdd(-lineScale, 90.0, 90.0));
-        return new ChromaBurstDemodulationResult(
+        return new ChromaBurstDemodulationValue(
             phaseDegrees,
             phaseOffsetDegrees,
             NumpyHypot(iComponent, qComponent),
@@ -1272,7 +1336,7 @@ public static class VhsChromaDecoder
             qComponent);
     }
 
-    private static ChromaBurstDemodulationResult DemodBurstFloat32(
+    private static ChromaBurstDemodulationValue DemodBurstFloat32(
         ReadOnlySpan<double> burst,
         double lineScale,
         int lineStart,
@@ -1343,7 +1407,7 @@ public static class VhsChromaDecoder
         double phaseDegrees = PositiveDegrees(Math.Atan2(qComponent, iComponent) * (180.0 / Math.PI));
         double phaseOffsetDegrees = PositiveDegrees(
             (burstStart - lineStart) * Math.FusedMultiplyAdd(-lineScale, 90.0, 90.0));
-        return new ChromaBurstDemodulationResult(
+        return new ChromaBurstDemodulationValue(
             phaseDegrees,
             phaseOffsetDegrees,
             NumpyHypot(iComponent, qComponent),
@@ -1394,6 +1458,35 @@ public static class VhsChromaDecoder
         int lineLength,
         Func<double[], double[]>? burstFilter = null,
         bool useFloat32Samples = false)
+        => ProbeUpconvertedBurstValue(
+            chroma,
+            chromaHeterodyne,
+            phaseRotation,
+            burstStart,
+            burstEnd,
+            burstSin,
+            burstCos,
+            lineScale,
+            lineNumber,
+            lineOffset,
+            lineLength,
+            burstFilter,
+            useFloat32Samples).ToPublicResult();
+
+    private static ChromaBurstDemodulationValue ProbeUpconvertedBurstValue(
+        ReadOnlySpan<double> chroma,
+        IReadOnlyList<double[]> chromaHeterodyne,
+        int phaseRotation,
+        int burstStart,
+        int burstEnd,
+        ReadOnlySpan<double> burstSin,
+        ReadOnlySpan<double> burstCos,
+        double lineScale,
+        int lineNumber,
+        int lineOffset,
+        int lineLength,
+        Func<double[], double[]>? burstFilter,
+        bool useFloat32Samples)
     {
         ArgumentOutOfRangeException.ThrowIfNegative(lineOffset);
         ValidateBurstRange(burstStart, burstEnd, lineLength);
@@ -1425,7 +1518,7 @@ public static class VhsChromaDecoder
         double[] filteredPadded = burstFilter?.Invoke(paddedBurst) ?? paddedBurst;
         int filteredStart = Math.Min(burstPadding, filteredPadded.Length);
         int filteredEnd = Math.Max(filteredStart, filteredPadded.Length - burstPadding);
-        return DemodBurst(
+        return DemodBurstValue(
             filteredPadded.AsSpan(filteredStart, filteredEnd - filteredStart),
             lineScale,
             lineStart,
@@ -1463,9 +1556,9 @@ public static class VhsChromaDecoder
             fscHz,
             burstFilter,
             useFloat32Samples,
-            carrierTableCache: null);
+            carrierTableCache: null).ToPublicResult();
 
-    private static ChromaBurstDemodulationResult ProbeUpconvertedBurstCurrentCore(
+    private static ChromaBurstDemodulationValue ProbeUpconvertedBurstCurrentCore(
         ReadOnlySpan<double> chroma,
         IReadOnlyList<double[]> chromaHeterodyne,
         int phaseRotation,
@@ -1535,7 +1628,7 @@ public static class VhsChromaDecoder
                 burstSin,
                 burstCos,
                 fscHz);
-            return new ChromaBurstDemodulationResult(
+            return new ChromaBurstDemodulationValue(
                 fit.PhaseDegrees,
                 PhaseOffsetDegrees: 0.0,
                 fit.Magnitude,
@@ -1604,6 +1697,46 @@ public static class VhsChromaDecoder
         ArgumentOutOfRangeException.ThrowIfNegativeOrZero(inputLineLength);
         ArgumentNullException.ThrowIfNull(burstProbe);
 
+        return GetPhaseRotationSequenceCore(
+            chromaRotation,
+            chromaRotationIndex,
+            lineLocations,
+            lineOffset,
+            linesOut,
+            inputLineLength,
+            (lineNumber, phaseRotation, lineScale) => ProbePhaseLine(
+                lineNumber,
+                phaseRotation,
+                lineScale,
+                burstProbe),
+            detectChromaTrackPhase,
+            rotationCheckStartLine,
+            enableColorKiller,
+            prevBurstDetectedLine,
+            colorSystem,
+            workerThreads);
+    }
+
+    private static ChromaPhaseSequenceResult GetPhaseRotationSequenceCore(
+        IReadOnlyList<int>? chromaRotation,
+        int? chromaRotationIndex,
+        IReadOnlyList<double> lineLocations,
+        int lineOffset,
+        int linesOut,
+        int inputLineLength,
+        ChromaPhaseLineProbe phaseLineProbe,
+        bool detectChromaTrackPhase,
+        int rotationCheckStartLine,
+        bool enableColorKiller,
+        int prevBurstDetectedLine,
+        string colorSystem,
+        int workerThreads)
+    {
+        ArgumentOutOfRangeException.ThrowIfNegative(lineOffset);
+        ArgumentOutOfRangeException.ThrowIfNegative(linesOut);
+        ArgumentOutOfRangeException.ThrowIfNegativeOrZero(inputLineLength);
+        ArgumentNullException.ThrowIfNull(phaseLineProbe);
+
         int end = checked(linesOut + lineOffset);
         if (lineLocations.Count <= end)
         {
@@ -1617,7 +1750,7 @@ public static class VhsChromaDecoder
             lineOffset,
             inputLineLength,
             end,
-            burstProbe,
+            phaseLineProbe,
             detectChromaTrackPhase,
             rotationCheckStartLine,
             colorSystem,
@@ -1632,7 +1765,7 @@ public static class VhsChromaDecoder
                 lineOffset,
                 inputLineLength,
                 end,
-                burstProbe,
+                phaseLineProbe,
                 detectChromaTrackPhase,
                 rotationCheckStartLine,
                 colorSystem,
@@ -3614,7 +3747,7 @@ public static class VhsChromaDecoder
         int lineOffset,
         int inputLineLength,
         int lastLine,
-        ChromaBurstProbe burstProbe,
+        ChromaPhaseLineProbe phaseLineProbe,
         bool detectChromaTrackPhase,
         int rotationCheckStartLine,
         string colorSystem,
@@ -3647,7 +3780,7 @@ public static class VhsChromaDecoder
             lineOffset,
             inputLineLength,
             lastLine,
-            burstProbe,
+            phaseLineProbe,
             doPhaseRotationCheck ? rotationCheckStartLine : lastLine,
             trackRotation,
             workerThreads,
@@ -3672,11 +3805,10 @@ public static class VhsChromaDecoder
             else
             {
                 currentPhase = PositiveModulo(currentPhase + trackRotation, 4);
-                currentLine = ProbePhaseLine(
+                currentLine = phaseLineProbe(
                     lineNumber,
                     currentPhase,
-                    ComputeLineScale(lineLocations, lineNumber, inputLineLength, lastLine),
-                    burstProbe);
+                    ComputeLineScale(lineLocations, lineNumber, inputLineLength, lastLine));
             }
 
             if (doPhaseRotationCheck
@@ -3684,11 +3816,10 @@ public static class VhsChromaDecoder
                 && lineNumber < lastLine - 1)
             {
                 int nextPhase = PositiveModulo(currentPhase + trackRotation, 4);
-                ChromaPhaseLine probedNextLine = ProbePhaseLine(
+                ChromaPhaseLine probedNextLine = phaseLineProbe(
                     lineNumber + 1,
                     nextPhase,
-                    ComputeLineScale(lineLocations, lineNumber + 1, inputLineLength, lastLine),
-                    burstProbe);
+                    ComputeLineScale(lineLocations, lineNumber + 1, inputLineLength, lastLine));
                 double comparisonBurst = IsNtsc(colorSystem)
                     ? currentLine.BurstPhaseDegrees
                     : prefixIndex == 0
@@ -3722,7 +3853,7 @@ public static class VhsChromaDecoder
         int lineOffset,
         int inputLineLength,
         int lastLine,
-        ChromaBurstProbe burstProbe,
+        ChromaPhaseLineProbe phaseLineProbe,
         int prefixEnd,
         int trackRotation,
         int workerThreads,
@@ -3754,15 +3885,14 @@ public static class VhsChromaDecoder
                         int phaseRotation = PositiveModulo(
                             trackRotation * (prefixIndex + 1),
                             4);
-                        destination[prefixIndex] = ProbePhaseLine(
+                        destination[prefixIndex] = phaseLineProbe(
                             lineNumber,
                             phaseRotation,
                             ComputeLineScale(
                                 lineLocations,
                                 lineNumber,
                                 inputLineLength,
-                                lastLine),
-                            burstProbe);
+                                lastLine));
                     }
                     catch (Exception exception)
                     {
@@ -3795,6 +3925,29 @@ public static class VhsChromaDecoder
         ChromaBurstProbe burstProbe)
     {
         ChromaBurstDemodulationResult burst = burstProbe(lineNumber, currentPhase, lineScale);
+        return new ChromaPhaseLine(
+            lineNumber,
+            currentPhase,
+            burst.PhaseDegrees,
+            burst.PhaseOffsetDegrees,
+            burst.Magnitude,
+            burst.I,
+            burst.Q)
+        {
+            BurstStart = burst.Start,
+            BurstEnd = burst.End,
+            BurstCenter = burst.Center,
+            BurstAmplitude = burst.Amplitude,
+            BurstDc = burst.Dc,
+            BurstFrequencyHz = burst.FrequencyHz
+        };
+    }
+
+    private static ChromaPhaseLine CreateChromaPhaseLine(
+        int lineNumber,
+        int currentPhase,
+        in ChromaBurstDemodulationValue burst)
+    {
         return new ChromaPhaseLine(
             lineNumber,
             currentPhase,
