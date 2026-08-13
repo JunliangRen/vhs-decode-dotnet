@@ -656,7 +656,8 @@ interleaved 1,000-frame Exact `current --threads 20` release-binary 4 pair は�
 `fileLoc` で一致し、candidate が 4/4 で高速でした。wall-time median は 34.068 から
 33.462 秒へ 1.78% 減少（1.018x）、CPU time は 291.781 から 286.734 秒へ 1.73% 減少し、
 effective core は 8.56 から 8.57 へ移りました。median peak working set は 345.9 から
-347.4 MiB、private bytes は 358.1 から 359.1 MiB で、progressive growth はありませんでした。
+347.4 MiB、private bytes は 358.1 から 359.1 MiB で、4 independent run の observed peak は
+bounded でした。
 
 final release-binary matrix は Exact/IPP-fast、v0.4.0/`current`、`--threads 0`、default-five、
 `--threads 20` を native/forced AVX2-disabled candidate path の両方で検証しました。36 run

@@ -711,7 +711,7 @@ stderr/logs, and every ordered `fileLoc`; the candidate won all four. Median wal
 time moved from 34.068 to 33.462 seconds (1.78%, 1.018x), CPU time from 291.781
 to 286.734 seconds (1.73%), and effective cores from 8.56 to 8.57. Median peak
 working set moved from 345.9 to 347.4 MiB and private bytes from 358.1 to
-359.1 MiB, with no progressive growth.
+359.1 MiB; observed peaks stayed bounded across the four independent runs.
 
 The final release-binary matrix added Exact and IPP-fast, v0.4.0 and `current`,
 `--threads 0`, default-five, and `--threads 20`, each on native and forced

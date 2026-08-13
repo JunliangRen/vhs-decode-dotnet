@@ -36,6 +36,12 @@ public sealed partial class ReadmeLocalizationTests
     private const string CurrentCtiAvx2GatherRequirement =
         "VHSDECODE_REQUIRE_AVX_CTI_GATHER: \"1\"";
 
+    private const string CurrentCtiAvx2DisabledTestName =
+        "Run current CTI AVX2-disabled tests";
+
+    private const string CurrentCtiAvx2DisabledRequirement =
+        "DOTNET_EnableAVX2: \"0\"";
+
     private const string CurrentCtiScalarFallbackTestCommand =
         "run: dotnet test tests/VHSDecode.Tests/VHSDecode.Tests.csproj " +
         "--configuration Release --no-build --no-restore --filter-class " +
@@ -1348,6 +1354,14 @@ public sealed partial class ReadmeLocalizationTests
             StringComparison.Ordinal);
         Assert.Contains(
             CurrentCtiAvx2GatherRequirement,
+            workflow,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            CurrentCtiAvx2DisabledTestName,
+            workflow,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            CurrentCtiAvx2DisabledRequirement,
             workflow,
             StringComparison.Ordinal);
         Assert.Contains(
