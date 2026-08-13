@@ -457,15 +457,16 @@ v0.4.0、默认五 worker、`--threads 1/5/10`、GNRC、sharpness 和 IPP-fast �
 
 三组交错的 1000 帧 Exact `current --threads 20` 配对在退出状态、亮度、色度、原始
 JSON、stdout、归一化 stderr/日志、每个有序 `fileLoc` 及其他保存的元数据上均一致。
-基线/候选墙钟中位数为 37.047/36.645 秒，降低 1.08%；CPU 时间中位数为
-302.734/294.172 秒，降低 2.83%。峰值工作集中位数从 354.57 降至 345.47 MiB，
-峰值 private bytes 中位数从 366.71 降至 357.51 MiB。候选内存保持有界，未加入
-逐 block 分配。
+基线/候选墙钟中位数为 37.876/37.403 秒，降低 1.25%。CPU 时间中位数从
+301.375 增至 319.250 秒，即增加 5.93%，同时有效核心占用从 7.96 增至 8.54。
+峰值工作集中位数从 402.34 降至 392.10 MiB，峰值 private bytes 中位数从
+414.81 降至 403.58 MiB。候选内存保持有界，未加入逐 block 分配。
 
-含启动开销较高的公开 160 帧窗口为中性：三组交错配对的基线/候选中位数为
-7.763/7.786 秒，候选慢 0.30%。另一次仅候选三轮刷新范围为 7.461-7.659 秒，
-中位数 7.499 秒，七类采集兼容面各自只有一个 hash。因此表格中的绝对倍数相对前一日
-有所下降，但同一时刻的长窗口 A/B 仍有提升；跨日期主机状态不会被当作代码因果回退。
+含启动开销较高的公开 160 帧窗口仍有较大噪声：三组交错配对的基线/候选中位数为
+6.930/7.437 秒，候选慢 7.30%，但两者 6.598-7.618 与 6.635-7.467 秒的范围重叠，
+各配对方向也不一致。另一次仅候选三轮刷新范围为 6.710-7.900 秒，中位数 6.782 秒，
+七类采集兼容面各自只有一个 hash。表格使用这次刷新，但跨日期主机状态不作为因果证据；
+同一时刻的长窗口 A/B 才是候选门禁。
 另一个 12 次门禁覆盖 Exact v0.4.0/current 的 `--threads 0`、默认五 worker 和
 `--threads 20`，全部表面一致且每个 profile 保持确定。零警告 Release build 和全部
 1443 项标准 xUnit v3 测试通过；4 项仅 IPP 测试因该测试输出未携带原生运行库而跳过。
@@ -488,7 +489,7 @@ v0.4.0、Exact `current`、IPP-fast v0.4.0 和 IPP-fast `current`。文件名不
 | `--threads 1` | 57.067 s | 56.762 s | 31.017 s / 1.840x / 45.65% | 34.873 s / 1.628x / 38.56% | 21.913 s / 2.604x / 61.60% | 24.653 s / 2.302x / 56.57% |
 | `--threads 5` | 52.920 s | 55.722 s | 12.116 s / 4.368x / 77.11% | 11.445 s / 4.868x / 79.46% | 10.817 s / 4.892x / 79.56% | 8.871 s / 6.282x / 84.08% |
 | `--threads 10` | 52.965 s | 54.949 s | 9.743 s / 5.436x / 81.60% | 8.755 s / 6.276x / 84.07% | 9.133 s / 5.800x / 82.76% | 7.060 s / 7.783x / 87.15% |
-| `--threads 20` | 53.555 s | 54.842 s | 7.907 s / 6.773x / 85.24% | 7.499 s / 7.314x / 86.33% | 7.730 s / 6.929x / 85.57% | 5.765 s / 9.513x / 89.49% |
+| `--threads 20` | 53.555 s | 54.842 s | 7.907 s / 6.773x / 85.24% | 6.782 s / 8.086x / 87.63% | 7.730 s / 6.929x / 85.57% | 5.765 s / 9.513x / 89.49% |
 <!-- LATEST_PERFORMANCE_END -->
 <!-- LATEST_PERFORMANCE_RUNS: performance-snapshot-runs=90 dotnet-matrix-runs=60 dotnet-current-runs=30 python-reference-runs=30 dotnet-repeats=3 python-reference-date=2026-08-12 dotnet-v040-date=2026-08-13 dotnet-current-t20-date=2026-08-14 phase22-200-ab-pairs=20 phase22-long-ab-pairs=8 phase22-thread-backend-runs=60 phase22-gc-traces=2 phase22-tests=1438 phase24-short-ab-pairs=6 phase24-long-ab-pairs=4 phase24-thread-gate-runs=12 phase24-tests=1442 phase25-public-cell-runs=3 phase25-public-ab-pairs=3 phase25-long-ab-pairs=3 phase25-thread-gate-runs=12 phase25-tests=1443 python-v040-runs=15 python-v040-hashes=15 python-pr341-runs=15 python-pr341-hashes=1 -->
 
@@ -501,7 +502,7 @@ v0.4.0、Exact `current`、IPP-fast v0.4.0 和 IPP-fast `current`。文件名不
 | `--threads 1` | 56.709-60.521 s | 56.335-58.991 s | 30.682-33.565 s | 34.868-34.940 s | 21.871-22.008 s | 24.522-25.012 s |
 | `--threads 5` | 52.845-53.977 s | 53.696-58.437 s | 11.990-12.514 s | 11.086-12.076 s | 10.692-10.853 s | 8.777-9.030 s |
 | `--threads 10` | 51.797-53.088 s | 52.649-56.775 s | 9.615-9.743 s | 8.380-9.074 s | 9.025-9.289 s | 6.983-7.458 s |
-| `--threads 20` | 52.967-55.987 s | 53.005-55.618 s | 7.836-8.322 s | 7.461-7.659 s | 7.660-7.873 s | 5.662-6.102 s |
+| `--threads 20` | 52.967-55.987 s | 53.005-55.618 s | 7.836-8.322 s | 6.710-7.900 s | 7.660-7.873 s | 5.662-6.102 s |
 <!-- LATEST_PERFORMANCE_RANGES_END -->
 
 保留的 30 次 Python 测量来自 2026-08-12 固定条件活动。19 个不受影响的 .NET 单元格
@@ -514,7 +515,7 @@ hash；独立 A/B 门禁还匹配有序 `fileLoc`。Python v0.4.0 的 15 次运�
 保留的 19 个 .NET 单元格使用基于 main `0b99402` 的 Phase 24 候选。刷新的 Exact
 `current --threads 20` 单元格使用基于 main `bdccd58` 的最新候选；其
 `VHSDecode.Core.dll` SHA-256 为
-`ABA80ED407795BC17E87339C44EE84AF165F185646B8A6B35162379CCD28912D`。
+`943DD84DC67B2144B6BC4F24C9E9BFE5EBCC2E98B9090CA6ED2047BFB18F5EE0`。
 测试机为 Intel Core Ultra 7 265K（20 个逻辑处理器）、Windows 11 build 26220，以及 .NET
 SDK/runtime `11.0.100-preview.6.26359.118`。原始目录含私有夹具路径，只保留在本地；
 这些是如实报告的本地测量，不是可公开独立复现的 benchmark corpus。

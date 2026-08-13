@@ -103,7 +103,7 @@ CVBS 和 HiFi 仍会拒绝 `ipp-fast`；需要 release 兼容行为时应使用 
 | `--threads 1` | 57.067 s | 56.762 s | 31.017 s / 1.840x | 34.873 s / 1.628x | 21.913 s / 2.604x | 24.653 s / 2.302x |
 | `--threads 5` | 52.920 s | 55.722 s | 12.116 s / 4.368x | 11.445 s / 4.868x | 10.817 s / 4.892x | 8.871 s / 6.282x |
 | `--threads 10` | 52.965 s | 54.949 s | 9.743 s / 5.436x | 8.755 s / 6.276x | 9.133 s / 5.800x | 7.060 s / 7.783x |
-| `--threads 20` | 53.555 s | 54.842 s | 7.907 s / 6.773x | 7.499 s / 7.314x | 7.730 s / 6.929x | 5.765 s / 9.513x |
+| `--threads 20` | 53.555 s | 54.842 s | 7.907 s / 6.773x | 6.782 s / 8.086x | 7.730 s / 6.929x | 5.765 s / 9.513x |
 <!-- LATEST_PERFORMANCE_END -->
 <!-- LATEST_PERFORMANCE_RUNS: performance-snapshot-runs=90 dotnet-matrix-runs=60 dotnet-current-runs=30 python-reference-runs=30 dotnet-repeats=3 python-reference-date=2026-08-12 dotnet-v040-date=2026-08-13 dotnet-current-t20-date=2026-08-14 phase22-200-ab-pairs=20 phase22-long-ab-pairs=8 phase22-thread-backend-runs=60 phase22-gc-traces=2 phase22-tests=1438 phase24-short-ab-pairs=6 phase24-long-ab-pairs=4 phase24-thread-gate-runs=12 phase24-tests=1442 phase25-public-cell-runs=3 phase25-public-ab-pairs=3 phase25-long-ab-pairs=3 phase25-thread-gate-runs=12 phase25-tests=1443 python-v040-runs=15 python-v040-hashes=15 python-pr341-runs=15 python-pr341-hashes=1 -->
 
@@ -115,10 +115,11 @@ CVBS 和 HiFi 仍会拒绝 `ipp-fast`；需要 release 兼容行为时应使用 
 最新 Exact `current` 优化会在真实 RF FFT 结束前，由有界 companion 提前执行既有的
 严格 full-complex analytic 准备。它只改变 12 worker 以上的无共享缓冲调度；算法、
 数据类型、表达式、异常优先级和有序提交均不变。三组 1000 帧交错配对在全部采集面
-严格一致，墙钟中位数从 37.047 降至 36.645 秒（1.08%），CPU 时间中位数从
-302.734 降至 294.172 秒（2.83%），峰值工作集降低 2.57%。对应的 160 帧 A/B
-慢 0.30%，属于中性，因此不宣称短窗口提速。另一个 12 次线程门禁保持确定，全部
-1443 项 xUnit v3 测试通过。
+严格一致，墙钟中位数从 37.876 降至 37.403 秒（1.25%）。CPU 时间中位数从
+301.375 增至 319.250 秒（5.93%），有效核心占用从 7.96 增至 8.54；峰值工作集降低
+2.55%，峰值 private bytes 降低 2.71%。对应的 160 帧 A/B 范围重叠，候选中位数慢
+7.30%，因此不宣称短窗口提速。另一个 12 次线程门禁保持确定，全部 1443 项 xUnit v3
+测试通过。
 
 刷新后的每个 .NET profile/线程单元格在三轮内都保持确定性。固定参考集中的 Python
 PR341 保持确定；Python v0.4.0 的 15 次运行产生了 15 套不同的亮度、色度、JSON 和

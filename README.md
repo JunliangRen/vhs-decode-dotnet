@@ -112,7 +112,7 @@ Compatibility is evaluated separately from speed.
 | `--threads 1` | 57.067 s | 56.762 s | 31.017 s / 1.840x | 34.873 s / 1.628x | 21.913 s / 2.604x | 24.653 s / 2.302x |
 | `--threads 5` | 52.920 s | 55.722 s | 12.116 s / 4.368x | 11.445 s / 4.868x | 10.817 s / 4.892x | 8.871 s / 6.282x |
 | `--threads 10` | 52.965 s | 54.949 s | 9.743 s / 5.436x | 8.755 s / 6.276x | 9.133 s / 5.800x | 7.060 s / 7.783x |
-| `--threads 20` | 53.555 s | 54.842 s | 7.907 s / 6.773x | 7.499 s / 7.314x | 7.730 s / 6.929x | 5.765 s / 9.513x |
+| `--threads 20` | 53.555 s | 54.842 s | 7.907 s / 6.773x | 6.782 s / 8.086x | 7.730 s / 6.929x | 5.765 s / 9.513x |
 <!-- LATEST_PERFORMANCE_END -->
 <!-- LATEST_PERFORMANCE_RUNS: performance-snapshot-runs=90 dotnet-matrix-runs=60 dotnet-current-runs=30 python-reference-runs=30 dotnet-repeats=3 python-reference-date=2026-08-12 dotnet-v040-date=2026-08-13 dotnet-current-t20-date=2026-08-14 phase22-200-ab-pairs=20 phase22-long-ab-pairs=8 phase22-thread-backend-runs=60 phase22-gc-traces=2 phase22-tests=1438 phase24-short-ab-pairs=6 phase24-long-ab-pairs=4 phase24-thread-gate-runs=12 phase24-tests=1442 phase25-public-cell-runs=3 phase25-public-ab-pairs=3 phase25-long-ab-pairs=3 phase25-thread-gate-runs=12 phase25-tests=1443 python-v040-runs=15 python-v040-hashes=15 python-pr341-runs=15 python-pr341-hashes=1 -->
 
@@ -128,11 +128,12 @@ preparation on a bounded companion before the real RF FFT finishes. It changes
 only the timing of disjoint workspace operations above 12 workers; algorithms,
 data types, expressions, exception priority, and ordered commits are unchanged.
 Three 1,000-frame interleaved pairs kept every captured surface exact and moved
-median wall time from 37.047 to 36.645 seconds (1.08%) and median CPU time from
-302.734 to 294.172 seconds (2.83%). Peak working set fell 2.57%. The matching
-160-frame A/B was neutral at 0.30% slower, so no startup-window speedup is
-claimed. A 12-run worker-mode gate remained deterministic and all 1,443 xUnit v3
-tests passed.
+median wall time from 37.876 to 37.403 seconds (1.25%). Median CPU time rose from
+301.375 to 319.250 seconds (5.93%) as effective core use moved from 7.96 to 8.54;
+peak working set fell 2.55% and peak private bytes fell 2.71%. The matching
+160-frame A/B had overlapping ranges and a 7.30% slower candidate median, so no
+startup-window speedup is claimed. A 12-run worker-mode gate remained
+deterministic and all 1,443 xUnit v3 tests passed.
 
 Every .NET profile/thread cell was deterministic across its three refreshed
 runs. Merged Python PR341 was deterministic in its pinned reference set; Python

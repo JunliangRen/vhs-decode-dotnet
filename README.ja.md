@@ -107,7 +107,7 @@ CVBS と HiFi は引き続き `ipp-fast` を拒否します。release-compatible
 | `--threads 1` | 57.067 s | 56.762 s | 31.017 s / 1.840x | 34.873 s / 1.628x | 21.913 s / 2.604x | 24.653 s / 2.302x |
 | `--threads 5` | 52.920 s | 55.722 s | 12.116 s / 4.368x | 11.445 s / 4.868x | 10.817 s / 4.892x | 8.871 s / 6.282x |
 | `--threads 10` | 52.965 s | 54.949 s | 9.743 s / 5.436x | 8.755 s / 6.276x | 9.133 s / 5.800x | 7.060 s / 7.783x |
-| `--threads 20` | 53.555 s | 54.842 s | 7.907 s / 6.773x | 7.499 s / 7.314x | 7.730 s / 6.929x | 5.765 s / 9.513x |
+| `--threads 20` | 53.555 s | 54.842 s | 7.907 s / 6.773x | 6.782 s / 8.086x | 7.730 s / 6.929x | 5.765 s / 9.513x |
 <!-- LATEST_PERFORMANCE_END -->
 <!-- LATEST_PERFORMANCE_RUNS: performance-snapshot-runs=90 dotnet-matrix-runs=60 dotnet-current-runs=30 python-reference-runs=30 dotnet-repeats=3 python-reference-date=2026-08-12 dotnet-v040-date=2026-08-13 dotnet-current-t20-date=2026-08-14 phase22-200-ab-pairs=20 phase22-long-ab-pairs=8 phase22-thread-backend-runs=60 phase22-gc-traces=2 phase22-tests=1438 phase24-short-ab-pairs=6 phase24-long-ab-pairs=4 phase24-thread-gate-runs=12 phase24-tests=1442 phase25-public-cell-runs=3 phase25-public-ab-pairs=3 phase25-long-ab-pairs=3 phase25-thread-gate-runs=12 phase25-tests=1443 python-v040-runs=15 python-v040-hashes=15 python-pr341-runs=15 python-pr341-hashes=1 -->
 
@@ -122,10 +122,11 @@ revision A/B で判断します。
 preparation を bounded companion で開始します。12 workers を超える場合の disjoint workspace
 operation の timing だけを変え、algorithm、data type、expression、exception priority、ordered
 commit は変えません。1,000-frame interleaved pair 3 組は全 captured surface が一致し、wall-time
-median は 37.047 から 36.645 秒へ 1.08%、CPU-time median は 302.734 から 294.172 秒へ
-2.83% 減り、peak working set は 2.57% 減りました。対応する 160-frame A/B は 0.30% 遅い
-neutral result なので startup-window speedup は主張しません。12-run worker-mode gate は
-deterministic のままで、xUnit v3 の全 1,443 tests が通過しました。
+median は 37.876 から 37.403 秒へ 1.25% 減りました。CPU-time median は 301.375 から
+319.250 秒へ 5.93% 増え、effective core use は 7.96 から 8.54 へ増えました。peak working
+set は 2.55%、peak private bytes は 2.71% 減りました。対応する 160-frame A/B は range が
+重なり、candidate median は 7.30% 遅いため、startup-window speedup は主張しません。
+12-run worker-mode gate は deterministic のままで、xUnit v3 の全 1,443 tests が通過しました。
 
 更新した各 .NET profile/thread cell は 3 run 内で deterministic でした。固定 reference の
 merged Python PR341 も deterministic でした。Python v0.4.0 は 15 run で 15 種類の luma、

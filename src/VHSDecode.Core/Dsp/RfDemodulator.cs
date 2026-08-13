@@ -403,6 +403,7 @@ public sealed class RfDemodulator : IDisposable
             VhsInverseCompanionWorkItem? stagedNumpyAnalytic = null;
             if (useNumpyComplexVhsAnalytic
                 && _parallelizeVhsInverseStaging
+                && sharpnessEq is null
                 && ownedInput is not null
                 && ownedRfVideoFilter is not null
                 && ownedRfMtfFilter is not null
