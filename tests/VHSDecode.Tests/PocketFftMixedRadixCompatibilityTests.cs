@@ -935,6 +935,36 @@ public sealed class PocketFftMixedRadixCompatibilityTests
         }
     }
 
+    [Theory(DisplayName = "Real FFT inverse preparation threshold matches serial output")]
+    [InlineData(32_256)]
+    [InlineData(32_768)]
+    [InlineData(33_600)]
+    public void RealFftInversePreparationThresholdMatchesSerialOutput(int length)
+    {
+        float[] input = DeterministicInput(length);
+        Complex32[] spectrum =
+            PocketFftReal32.ForwardAnyLength(input, workerThreads: 1);
+        float[] expected = PocketFftReal32.InverseAnyLength(
+            spectrum,
+            length,
+            workerThreads: 1);
+        var complexInput = new Complex32[length / 2];
+        var transformScratch = new Complex32[length / 2];
+        var actual = new float[length];
+
+        PocketFftReal32.InverseAnyLength(
+            spectrum,
+            length,
+            complexInput,
+            transformScratch,
+            actual,
+            workerThreads: 20);
+
+        Assert.Equal(
+            MemoryMarshal.AsBytes(expected.AsSpan()).ToArray(),
+            MemoryMarshal.AsBytes(actual.AsSpan()).ToArray());
+    }
+
     [Theory(DisplayName = "Next fast FFT length matches SciPy")]
     [InlineData(1, 1)]
     [InlineData(13, 14)]

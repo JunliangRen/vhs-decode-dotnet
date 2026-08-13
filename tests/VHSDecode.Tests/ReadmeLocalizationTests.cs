@@ -17,13 +17,13 @@ public sealed partial class ReadmeLocalizationTests
         "phase24-thread-gate-runs=12 phase24-tests=1442 " +
         "phase25-public-cell-runs=15 phase25-public-ab-pairs=15 " +
         "phase25-long-ab-pairs=3 phase25-thread-gate-runs=12 " +
-        "phase25-tests=1443 " +
+        "phase25-tests=1446 " +
         "python-v040-runs=15 python-v040-hashes=15 " +
         "python-pr341-runs=15 python-pr341-hashes=1 -->";
 
     private const string FullCiTestCommand =
         "run: dotnet test --solution VHSDecodeDotNet.slnx --configuration Release " +
-        "--no-build --no-restore --minimum-expected-tests 1443";
+        "--no-build --no-restore --minimum-expected-tests 1446";
 
     private const string CurrentVhsSyncScalarFallbackTestCommand =
         "run: dotnet test tests/VHSDecode.Tests/VHSDecode.Tests.csproj " +
@@ -213,7 +213,7 @@ public sealed partial class ReadmeLocalizationTests
         [
             "43155200da87c0d49eb37d8ec09b1372075ee8e4",
             "11.0.100-preview.6.26359.118",
-            "**1,443**",
+            "**1,446**",
             "--compat-version",
             "current",
             "--dsp-backend",
@@ -564,7 +564,7 @@ public sealed partial class ReadmeLocalizationTests
             "1.72%",
             "444.3 MiB",
             "406.0 MiB",
-            "**1,443**",
+            "**1,446**",
             "3.7935",
             "3.6182",
             "4.62%",
