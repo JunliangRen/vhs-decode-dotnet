@@ -7,6 +7,61 @@ namespace VHSDecode.Tests;
 
 public sealed class VhsChromaPhaseParallelTests
 {
+    [Fact(DisplayName = "Public burst results stay classes while internal values preserve exact fields")]
+    public void PublicBurstResultsStayClassesWhileInternalValuesPreserveExactFields()
+    {
+        const long NegativeZeroBits = unchecked((long)0x8000_0000_0000_0000UL);
+        const long NanPayloadBits = unchecked((long)0x7FF8_0000_0000_1234UL);
+        const long PositiveInfinityBits = unchecked((long)0x7FF0_0000_0000_0000UL);
+        const long NegativeInfinityBits = unchecked((long)0xFFF0_0000_0000_0000UL);
+        const long PositiveSubnormalBits = 0x0000_0000_0000_0001L;
+        const long NegativeSubnormalBits = unchecked((long)0x8000_0000_0000_0001UL);
+        const long MaximumFiniteBits = 0x7FEF_FFFF_FFFF_FFFFL;
+        const long NegativeFiniteBits = unchecked((long)0xC01E_0000_0000_0000UL);
+        const long FrequencyBits = 0x414B_50B0_1000_0000L;
+        var value = new ChromaBurstDemodulationValue(
+            PhaseDegrees: BitConverter.Int64BitsToDouble(NegativeZeroBits),
+            PhaseOffsetDegrees: BitConverter.Int64BitsToDouble(NanPayloadBits),
+            Magnitude: BitConverter.Int64BitsToDouble(PositiveInfinityBits),
+            I: BitConverter.Int64BitsToDouble(NegativeInfinityBits),
+            Q: BitConverter.Int64BitsToDouble(PositiveSubnormalBits))
+        {
+            Start = 17,
+            End = 41,
+            Center = BitConverter.Int64BitsToDouble(NegativeSubnormalBits),
+            Amplitude = BitConverter.Int64BitsToDouble(MaximumFiniteBits),
+            Dc = BitConverter.Int64BitsToDouble(NegativeFiniteBits),
+            FrequencyHz = BitConverter.Int64BitsToDouble(FrequencyBits)
+        };
+        ChromaBurstDemodulationResult result = value.ToPublicResult();
+
+        Assert.False(typeof(ChromaBurstDemodulationResult).IsValueType);
+        Assert.True(typeof(ChromaBurstDemodulationResult).IsSealed);
+        Assert.True(typeof(ChromaBurstDemodulationValue).IsValueType);
+        Assert.Equal(
+            typeof(ChromaBurstDemodulationResult),
+            typeof(ChromaBurstProbe).GetMethod("Invoke")!.ReturnType);
+        Assert.Equal(NegativeZeroBits, BitConverter.DoubleToInt64Bits(result.PhaseDegrees));
+        Assert.Equal(NanPayloadBits, BitConverter.DoubleToInt64Bits(result.PhaseOffsetDegrees));
+        Assert.Equal(PositiveInfinityBits, BitConverter.DoubleToInt64Bits(result.Magnitude));
+        Assert.Equal(NegativeInfinityBits, BitConverter.DoubleToInt64Bits(result.I));
+        Assert.Equal(PositiveSubnormalBits, BitConverter.DoubleToInt64Bits(result.Q));
+        Assert.Equal(17, result.Start);
+        Assert.Equal(41, result.End);
+        Assert.Equal(NegativeSubnormalBits, BitConverter.DoubleToInt64Bits(result.Center));
+        Assert.Equal(MaximumFiniteBits, BitConverter.DoubleToInt64Bits(result.Amplitude));
+        Assert.Equal(NegativeFiniteBits, BitConverter.DoubleToInt64Bits(result.Dc));
+        Assert.Equal(FrequencyBits, BitConverter.DoubleToInt64Bits(result.FrequencyHz));
+
+        ChromaBurstDemodulationValue changedValue = value with { Amplitude = 12.5 };
+        ChromaBurstDemodulationResult changed = result with { Amplitude = 12.5 };
+        Assert.Equal(MaximumFiniteBits, BitConverter.DoubleToInt64Bits(value.Amplitude));
+        Assert.Equal(12.5, changedValue.Amplitude);
+        Assert.Equal(MaximumFiniteBits, BitConverter.DoubleToInt64Bits(result.Amplitude));
+        Assert.Equal(12.5, changed.Amplitude);
+        Assert.NotSame(result, changed);
+    }
+
     [Fact(DisplayName = "Current burst probes reuse four exact-length decoder buffers")]
     public void CurrentBurstProbesReuseFourExactLengthDecoderBuffers()
     {

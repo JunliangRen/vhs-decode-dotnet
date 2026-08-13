@@ -5,6 +5,7 @@ using Xunit;
 
 namespace VHSDecode.Tests;
 
+[Collection(DspWorkingBufferCollection.Name)]
 public sealed class TbcDirectConversionTests
 {
     [Theory(DisplayName = "Prepared TBC direct conversion is bit-exact")]
