@@ -311,7 +311,10 @@ public sealed class RfDemodulator : IDisposable
         bool includeDemodRawOutput,
         bool useNumpyComplexVhsAnalytic,
         RfDemodulatedBlockOutputBuffers? outputBuffers = null,
-        IppSos32FilterPool? vhsEnvelopeIppFilter = null)
+        IppSos32FilterPool? vhsEnvelopeIppFilter = null,
+        double[]? ownedInput = null,
+        Complex[]? ownedRfVideoFilter = null,
+        Complex[]? ownedRfMtfFilter = null)
     {
         ObjectDisposedException.ThrowIf(Volatile.Read(ref _disposed) != 0, this);
         if (outputBuffers is not null && outputBuffers.Length != input.Length)
@@ -397,76 +400,117 @@ public sealed class RfDemodulator : IDisposable
         else if (useVhsRealRfPath)
         {
             VhsRealFftWorkspace workspace = vhsRealFftWorkspace!;
-            workspace.Forward(input, workspace.First);
-            Span<Complex> inputSpectrum = workspace.First.AsSpan(0, vhsRealSpectrumLength);
-            if (includeRfHighPassOutput)
+            VhsInverseCompanionWorkItem? stagedNumpyAnalytic = null;
+            if (useNumpyComplexVhsAnalytic
+                && _parallelizeVhsInverseStaging
+                && sharpnessEq is null
+                && ownedInput is not null
+                && ownedRfVideoFilter is not null
+                && ownedRfMtfFilter is not null
+                && _vhsInverseCompanionScheduler?.Value is { } analyticScheduler
+                && analyticScheduler.TryQueue(
+                    () => BuildNumpyVhsComplexAnalyticSignal(
+                        ownedInput,
+                        ownedRfVideoFilter,
+                        ownedRfMtfFilter,
+                        workspace),
+                    out VhsInverseCompanionWorkItem analyticWorkItem))
             {
-                Span<Complex> rfHighPassSpectrum = workspace.Second.AsSpan(0, vhsRealSpectrumLength);
-                ApplyNumpyRealFrequencyFilter(
-                    inputSpectrum,
-                    rfHighPassFilter,
-                    input.Length,
-                    rfHighPassSpectrum,
-                    workspace);
-                rfHighPass = new double[input.Length];
-                workspace.Inverse(rfHighPassSpectrum, rfHighPass);
-            }
-            else
-            {
-                rfHighPass = [];
+                stagedNumpyAnalytic = analyticWorkItem;
             }
 
-            vhsRfFilteredHalf = workspace.Third;
-            Span<Complex> rfFilteredHalf = vhsRfFilteredHalf.AsSpan(0, vhsRealSpectrumLength);
-            ApplyNumpyRealFrequencyFilter(
-                inputSpectrum,
-                rfVideoFilter,
-                input.Length,
-                rfFilteredHalf,
-                workspace);
-            if (!rfMtfFilter.IsEmpty)
+            try
             {
-                Complex[] mtfOutput = ReferenceEquals(vhsRfFilteredHalf, workspace.Third)
-                    ? workspace.Second
-                    : workspace.Third;
-                workspace.Multiply(
-                    rfFilteredHalf,
-                    rfMtfFilter[..vhsRealSpectrumLength],
-                    mtfOutput.AsSpan(0, vhsRealSpectrumLength));
-                vhsRfFilteredHalf = mtfOutput;
-                rfFilteredHalf = vhsRfFilteredHalf.AsSpan(0, vhsRealSpectrumLength);
+                workspace.Forward(input, workspace.First);
+                Span<Complex> inputSpectrum = workspace.First.AsSpan(0, vhsRealSpectrumLength);
+                if (includeRfHighPassOutput)
+                {
+                    Span<Complex> rfHighPassSpectrum = workspace.Second.AsSpan(0, vhsRealSpectrumLength);
+                    ApplyNumpyRealFrequencyFilter(
+                        inputSpectrum,
+                        rfHighPassFilter,
+                        input.Length,
+                        rfHighPassSpectrum,
+                        workspace);
+                    rfHighPass = new double[input.Length];
+                    workspace.Inverse(rfHighPassSpectrum, rfHighPass);
+                }
+                else
+                {
+                    rfHighPass = [];
+                }
+
+                vhsRfFilteredHalf = workspace.Third;
+                Span<Complex> initialRfFilteredHalf =
+                    vhsRfFilteredHalf.AsSpan(0, vhsRealSpectrumLength);
+                ApplyNumpyRealFrequencyFilter(
+                    inputSpectrum,
+                    rfVideoFilter,
+                    input.Length,
+                    initialRfFilteredHalf,
+                    workspace);
+                if (!rfMtfFilter.IsEmpty)
+                {
+                    Complex[] mtfOutput = ReferenceEquals(vhsRfFilteredHalf, workspace.Third)
+                        ? workspace.Second
+                        : workspace.Third;
+                    workspace.Multiply(
+                        initialRfFilteredHalf,
+                        rfMtfFilter[..vhsRealSpectrumLength],
+                        mtfOutput.AsSpan(0, vhsRealSpectrumLength));
+                    vhsRfFilteredHalf = mtfOutput;
+                }
             }
+            catch
+            {
+                DrainSpeculativeVhsAnalytic(stagedNumpyAnalytic);
+                throw;
+            }
+
+            Span<Complex> rfFilteredHalf = vhsRfFilteredHalf.AsSpan(0, vhsRealSpectrumLength);
 
             vhsRfFilteredReal = workspace.Real;
             vhsEnvelopeSource = vhsRfFilteredReal;
             if (useNumpyComplexVhsAnalytic && _parallelizeVhsInverseStaging)
             {
-                ExceptionDispatchInfo? preparationFailure = null;
-                try
+                if (stagedNumpyAnalytic is not null)
                 {
-                    PrepareNumpyVhsComplexAnalyticSpectrum(
-                        input,
-                        rfVideoFilter,
-                        rfMtfFilter,
-                        workspace);
+                    CompleteParallelVhsInverseStaging(
+                        workspace,
+                        vhsRfFilteredHalf,
+                        vhsRealSpectrumLength,
+                        stagedNumpyAnalytic);
                 }
-                catch (Exception exception)
+                else
                 {
-                    preparationFailure = ExceptionDispatchInfo.Capture(exception);
+                    ExceptionDispatchInfo? preparationFailure = null;
+                    try
+                    {
+                        PrepareNumpyVhsComplexAnalyticSpectrum(
+                            input,
+                            rfVideoFilter,
+                            rfMtfFilter,
+                            workspace);
+                    }
+                    catch (Exception exception)
+                    {
+                        preparationFailure = ExceptionDispatchInfo.Capture(exception);
+                    }
+
+                    if (preparationFailure is not null)
+                    {
+                        // Preserve the serial path's real-inverse exception priority.
+                        workspace.Inverse(rfFilteredHalf, vhsRfFilteredReal);
+                        preparationFailure.Throw();
+                    }
+
+                    RunParallelVhsInverseStaging(
+                        workspace,
+                        vhsRfFilteredHalf,
+                        vhsRealSpectrumLength,
+                        input.Length);
                 }
 
-                if (preparationFailure is not null)
-                {
-                    // Preserve the serial path's real-inverse exception priority.
-                    workspace.Inverse(rfFilteredHalf, vhsRfFilteredReal);
-                    preparationFailure.Throw();
-                }
-
-                RunParallelVhsInverseStaging(
-                    workspace,
-                    vhsRfFilteredHalf,
-                    vhsRealSpectrumLength,
-                    input.Length);
                 analytic = workspace.FullAnalytic;
                 vhsWorkspaceComplexAnalyticReady = true;
             }
@@ -1513,6 +1557,19 @@ public sealed class RfDemodulator : IDisposable
             return;
         }
 
+        CompleteParallelVhsInverseStaging(
+            workspace,
+            rfFilteredHalf,
+            spectrumLength,
+            analyticInverse);
+    }
+
+    private static void CompleteParallelVhsInverseStaging(
+        VhsRealFftWorkspace workspace,
+        Complex[] rfFilteredHalf,
+        int spectrumLength,
+        VhsInverseCompanionWorkItem analyticTransform)
+    {
         try
         {
             ExceptionDispatchInfo? realInverseFailure = null;
@@ -1529,7 +1586,7 @@ public sealed class RfDemodulator : IDisposable
 
             try
             {
-                analyticInverse.Wait();
+                analyticTransform.Wait();
             }
             catch when (realInverseFailure is not null)
             {
@@ -1540,7 +1597,29 @@ public sealed class RfDemodulator : IDisposable
         }
         finally
         {
-            analyticInverse.Dispose();
+            analyticTransform.Dispose();
+        }
+    }
+
+    private static void DrainSpeculativeVhsAnalytic(
+        VhsInverseCompanionWorkItem? analyticTransform)
+    {
+        if (analyticTransform is null)
+        {
+            return;
+        }
+
+        try
+        {
+            analyticTransform.Wait();
+        }
+        catch
+        {
+            // An earlier primary-path failure retains serial exception priority.
+        }
+        finally
+        {
+            analyticTransform.Dispose();
         }
     }
 

@@ -38,7 +38,7 @@ evidence, and remaining gaps.
   EIAJ, and supported PAL/NTSC variants.
 - TBC utility tools, the double-click GUI, and developer plotting windows are
   intentionally out of scope.
-- The Visual Studio 2026 `.slnx` solution has **1,442** standard xUnit v3 tests
+- The Visual Studio 2026 `.slnx` solution has **1,443** standard xUnit v3 tests
   that are visible in Test Explorer and runnable with `dotnet test`.
 
 <!-- SECTION: start -->
@@ -99,9 +99,10 @@ for compatibility-sensitive work.
 
 This startup-inclusive `--start 100 --length 160` snapshot uses one fixed private
 local 40 MHz PAL VHS `.ldf` fixture; its filename is intentionally not published.
-It retains 30 fixed Python reference measurements from 2026-08-12 and refreshes
-all 60 .NET measurements on 2026-08-13 with the Phase 24 candidate based on main
-`0b99402`. Every cell has three complete runs.
+It retains 30 fixed Python reference measurements from 2026-08-12 and 57
+unaffected .NET measurements from the 2026-08-13 Phase 24 matrix. The three
+Exact `current --threads 20` runs were refreshed on 2026-08-14 with the latest
+candidate based on main `bdccd58`. Every cell has three complete runs.
 Compatibility is evaluated separately from speed.
 
 <!-- LATEST_PERFORMANCE_BEGIN -->
@@ -111,9 +112,9 @@ Compatibility is evaluated separately from speed.
 | `--threads 1` | 57.067 s | 56.762 s | 31.017 s / 1.840x | 34.873 s / 1.628x | 21.913 s / 2.604x | 24.653 s / 2.302x |
 | `--threads 5` | 52.920 s | 55.722 s | 12.116 s / 4.368x | 11.445 s / 4.868x | 10.817 s / 4.892x | 8.871 s / 6.282x |
 | `--threads 10` | 52.965 s | 54.949 s | 9.743 s / 5.436x | 8.755 s / 6.276x | 9.133 s / 5.800x | 7.060 s / 7.783x |
-| `--threads 20` | 53.555 s | 54.842 s | 7.907 s / 6.773x | 7.126 s / 7.696x | 7.730 s / 6.929x | 5.765 s / 9.513x |
+| `--threads 20` | 53.555 s | 54.842 s | 7.907 s / 6.773x | 6.782 s / 8.086x | 7.730 s / 6.929x | 5.765 s / 9.513x |
 <!-- LATEST_PERFORMANCE_END -->
-<!-- LATEST_PERFORMANCE_RUNS: performance-snapshot-runs=90 dotnet-matrix-runs=60 dotnet-current-runs=30 python-reference-runs=30 dotnet-repeats=3 python-reference-date=2026-08-12 dotnet-v040-date=2026-08-13 dotnet-current-date=2026-08-13 phase22-200-ab-pairs=20 phase22-long-ab-pairs=8 phase22-thread-backend-runs=60 phase22-gc-traces=2 phase22-tests=1438 phase24-short-ab-pairs=6 phase24-long-ab-pairs=4 phase24-thread-gate-runs=12 phase24-tests=1442 python-v040-runs=15 python-v040-hashes=15 python-pr341-runs=15 python-pr341-hashes=1 -->
+<!-- LATEST_PERFORMANCE_RUNS: performance-snapshot-runs=90 dotnet-matrix-runs=60 dotnet-current-runs=30 python-reference-runs=30 dotnet-repeats=3 python-reference-date=2026-08-12 dotnet-v040-date=2026-08-13 dotnet-current-t20-date=2026-08-14 phase22-200-ab-pairs=20 phase22-long-ab-pairs=8 phase22-thread-backend-runs=60 phase22-gc-traces=2 phase22-tests=1438 phase24-short-ab-pairs=6 phase24-long-ab-pairs=4 phase24-thread-gate-runs=12 phase24-tests=1442 phase25-public-cell-runs=3 phase25-public-ab-pairs=3 phase25-long-ab-pairs=3 phase25-thread-gate-runs=12 phase25-tests=1443 python-v040-runs=15 python-v040-hashes=15 python-pr341-runs=15 python-pr341-hashes=1 -->
 
 Each .NET cell shows median wall time and speedup versus its profile-matched
 Python column. The default is **5 workers**; three-run ranges are in the
@@ -122,17 +123,17 @@ when either the Python numerator or .NET denominator moves, and historical table
 using another fixture or window are not directly comparable. Same-moment .NET
 revision A/B runs, rather than old ratio cells, determine causal regressions.
 
-The latest input pass gives the parallel libsndfile path a lazy, bounded 2 MiB
-PCM16 rewind ring. Overlapping RF blocks copy their cached prefix and ask
-libsndfile only for the fresh tail; ordinary reads, mapped restarts, real seeks,
-fallback, disposal, and the existing PCM16-to-double expression keep their prior
-semantics. Four opposite-order 1,000-frame pairs kept every captured output and
-diagnostic surface exact. Mean wall time fell by 1.00% for Exact `current` and
-0.85% for IPP-fast `current`; mean CPU time fell by 1.28% and 0.27% respectively.
-The candidate working set stayed within 353.0-357.5 MiB. A separate 12-run gate
-kept v0.4.0/current output deterministic at `--threads 0`, default-five, and
-`--threads 20`; all 1,442 xUnit v3 tests passed. Detailed notes contain the full
-evidence and bounds.
+The latest Exact `current` pass starts its existing strict full-complex analytic
+preparation on a bounded companion before the real RF FFT finishes. It changes
+only the timing of disjoint workspace operations above 12 workers; algorithms,
+data types, expressions, exception priority, and ordered commits are unchanged.
+Three 1,000-frame interleaved pairs kept every captured surface exact and moved
+median wall time from 37.876 to 37.403 seconds (1.25%). Median CPU time rose from
+301.375 to 319.250 seconds (5.93%) as effective core use moved from 7.96 to 8.54;
+peak working set fell 2.55% and peak private bytes fell 2.71%. The matching
+160-frame A/B had overlapping ranges and a 7.30% slower candidate median, so no
+startup-window speedup is claimed. A 12-run worker-mode gate remained
+deterministic and all 1,443 xUnit v3 tests passed.
 
 Every .NET profile/thread cell was deterministic across its three refreshed
 runs. Merged Python PR341 was deterministic in its pinned reference set; Python
@@ -176,7 +177,7 @@ The pinned SDK is .NET `11.0.100-preview.6.26359.118`.
 dotnet restore VHSDecodeDotNet.slnx
 dotnet build VHSDecodeDotNet.slnx -c Release --no-restore
 dotnet test --solution VHSDecodeDotNet.slnx -c Release `
-  --no-build --no-restore --minimum-expected-tests 1442
+  --no-build --no-restore --minimum-expected-tests 1443
 ```
 
 Open `VHSDecodeDotNet.slnx` in Visual Studio 2026 to build, debug, and run the

@@ -905,6 +905,17 @@ public sealed class DspWorkingBufferTests
             retainDiagnosticOutputs: false,
             useNumpyComplexVhsAnalytic: true);
         string expectedHash = Hash(expected);
+        RfDemodulatedBlock fallback = DecodeComplexVhsProbe(
+            parallel,
+            input,
+            identity,
+            identitySos,
+            highBoost: null,
+            diffRepair: new DiffDemodRepairOptions(double.NegativeInfinity),
+            retainDiagnosticOutputs: false,
+            useNumpyComplexVhsAnalytic: true,
+            enableOwnedAnalyticStaging: false);
+        Assert.Equal(expectedHash, Hash(fallback));
         var hashes = new string[16];
 
         Parallel.For(
@@ -928,6 +939,99 @@ public sealed class DspWorkingBufferTests
         Assert.True(parallel.ParallelizesVhsInverseStaging);
         Assert.Equal(4, parallel.VhsInverseCompanionWorkerThreads);
         Assert.All(hashes, hash => Assert.Equal(expectedHash, hash));
+    }
+
+    [Fact(DisplayName = "Early VHS analytic staging propagates failures and remains reusable")]
+    public void EarlyVhsAnalyticStagingPropagatesFailuresAndRemainsReusable()
+    {
+        const int length = DecodeSessionFactory.DefaultBlockLength;
+        const double sampleRateHz = 40_000_000.0;
+        double[] input = BuildPalVhsProbe(length, sampleRateHz);
+        Complex[] identity = RfDemodulator.IdentityFilter(length);
+        SosSection[] identitySos = [new SosSection(1.0, 0.0, 0.0, 1.0, 0.0, 0.0)];
+        using var serial = new RfDemodulator(sampleRateHz);
+        using var parallel = new RfDemodulator(
+            sampleRateHz,
+            DspBackend.Exact,
+            parallelizeVhsInverseStaging: true,
+            companionIppFftFactory: null,
+            vhsInverseCompanionWorkerThreads: 2);
+
+        ArgumentException exception = Assert.Throws<ArgumentException>(() =>
+            DecodeComplexVhsProbe(
+                parallel,
+                input,
+                identity,
+                identitySos,
+                highBoost: null,
+                diffRepair: new DiffDemodRepairOptions(double.NegativeInfinity),
+                retainDiagnosticOutputs: false,
+                useNumpyComplexVhsAnalytic: true,
+                ownedRfVideoFilterOverride: new Complex[length - 1]));
+        Assert.Equal("rfVideoFilter", exception.ParamName);
+
+        ArgumentException primaryFailure = Assert.Throws<ArgumentException>(() =>
+            DecodeComplexVhsProbe(
+                parallel,
+                input,
+                identity,
+                identitySos,
+                highBoost: null,
+                diffRepair: new DiffDemodRepairOptions(double.NegativeInfinity),
+                retainDiagnosticOutputs: false,
+                useNumpyComplexVhsAnalytic: true,
+                rfVideoFilterOverride: new Complex[length - 1],
+                ownedRfMtfFilterOverride: new Complex[length - 1]));
+        Assert.Equal("filter", primaryFailure.ParamName);
+
+        RfDemodulatedBlock expected = DecodeComplexVhsProbe(
+            serial,
+            input,
+            identity,
+            identitySos,
+            highBoost: null,
+            diffRepair: new DiffDemodRepairOptions(double.NegativeInfinity),
+            retainDiagnosticOutputs: false,
+            useNumpyComplexVhsAnalytic: true);
+        RfDemodulatedBlock actual = DecodeComplexVhsProbe(
+            parallel,
+            input,
+            identity,
+            identitySos,
+            highBoost: null,
+            diffRepair: new DiffDemodRepairOptions(double.NegativeInfinity),
+            retainDiagnosticOutputs: false,
+            useNumpyComplexVhsAnalytic: true);
+
+        Assert.Equal(Hash(expected), Hash(actual));
+
+        var sharpness = new SharpnessEqOptions(
+            Level: 0.5,
+            CornerHz: 2_620_000.0,
+            TransitionHz: 500_000.0,
+            OrderLimit: 20);
+        RfDemodulatedBlock expectedSharpness = DecodeComplexVhsProbe(
+            serial,
+            input,
+            identity,
+            identitySos,
+            highBoost: null,
+            diffRepair: new DiffDemodRepairOptions(double.NegativeInfinity),
+            retainDiagnosticOutputs: false,
+            useNumpyComplexVhsAnalytic: true,
+            sharpnessEq: sharpness);
+        RfDemodulatedBlock actualSharpness = DecodeComplexVhsProbe(
+            parallel,
+            input,
+            identity,
+            identitySos,
+            highBoost: null,
+            diffRepair: new DiffDemodRepairOptions(double.NegativeInfinity),
+            retainDiagnosticOutputs: false,
+            useNumpyComplexVhsAnalytic: true,
+            sharpnessEq: sharpness,
+            ownedRfVideoFilterOverride: new Complex[length - 1]);
+        Assert.Equal(Hash(expectedSharpness), Hash(actualSharpness));
     }
 
     [Fact(DisplayName = "Parallel IPP VHS inverse staging remains bit-exact under load")]
@@ -2425,11 +2529,16 @@ public sealed class DspWorkingBufferTests
         RfHighBoostOptions? highBoost,
         DiffDemodRepairOptions? diffRepair,
         bool retainDiagnosticOutputs,
-        bool useNumpyComplexVhsAnalytic = false)
+        bool useNumpyComplexVhsAnalytic = false,
+        bool enableOwnedAnalyticStaging = true,
+        SharpnessEqOptions? sharpnessEq = null,
+        Complex[]? rfVideoFilterOverride = null,
+        Complex[]? ownedRfVideoFilterOverride = null,
+        Complex[]? ownedRfMtfFilterOverride = null)
     {
         return demodulator.DemodulateCore(
             input,
-            identity,
+            rfVideoFilterOverride ?? identity,
             identity,
             ReadOnlySpan<Complex>.Empty,
             identity,
@@ -2439,7 +2548,7 @@ public sealed class DspWorkingBufferTests
             rfHighBoost: highBoost,
             diffDemodRepair: diffRepair,
             chromaTrap: null,
-            sharpnessEq: null,
+            sharpnessEq,
             nonlinearDeemphasis: null,
             subDeemphasis: null,
             betamaxFscNotchHz: null,
@@ -2451,7 +2560,14 @@ public sealed class DspWorkingBufferTests
             includeRfHighPassOutput: false,
             includeAnalyticOutput: retainDiagnosticOutputs,
             includeDemodRawOutput: retainDiagnosticOutputs,
-            useNumpyComplexVhsAnalytic);
+            useNumpyComplexVhsAnalytic,
+            ownedInput: enableOwnedAnalyticStaging ? input : null,
+            ownedRfVideoFilter: enableOwnedAnalyticStaging
+                ? ownedRfVideoFilterOverride ?? identity
+                : null,
+            ownedRfMtfFilter: enableOwnedAnalyticStaging
+                ? ownedRfMtfFilterOverride ?? Array.Empty<Complex>()
+                : null);
     }
 
     private static RfDemodulatedBlock DecodeDeemphasisProbe(
