@@ -434,8 +434,8 @@ mode 間でも deterministic でした。
 
 interleaved 200-frame Exact `current --threads 20` 3 pair の wall-time change は -4.54%、
 -3.51%、+0.36% で、paired reduction median は 3.51% でした。opposite-order の
-1,000-frame 2 pair は 34.911 から 33.180 秒、34.461 から 33.260 秒へ移動し、4.96% と
-3.49% 高速化しました。long pair 全体の average active core は 8.34 から 8.87 へ増え、
+1,000-frame 2 pair は 34.911 から 33.184 秒、34.461 から 33.263 秒へ移動し、4.95% と
+3.48% 高速化しました。long pair 全体の average active core は 8.34 から 8.87 へ増え、
 aggregate CPU time は 1.9% 増加しました。すべての output/diagnostic surface は exact です。
 
 別の 2,000-frame baseline/candidate resource gate は 4,000 field を完了し、luma、chroma、

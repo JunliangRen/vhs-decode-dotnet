@@ -463,8 +463,8 @@ candidate profile remained deterministic across its three thread modes.
 
 Three interleaved 200-frame Exact `current --threads 20` pairs changed wall time
 by -4.54%, -3.51%, and +0.36%, for a 3.51% median reduction. Two opposite-order
-1,000-frame pairs moved from 34.911 to 33.180 seconds and from 34.461 to 33.260
-seconds, reductions of 4.96% and 3.49%. Across those long pairs, average active
+1,000-frame pairs moved from 34.911 to 33.184 seconds and from 34.461 to 33.263
+seconds, reductions of 4.95% and 3.48%. Across those long pairs, average active
 cores rose from 8.34 to 8.87 while aggregate CPU time increased by 1.9%; every
 captured output and diagnostic surface remained exact.
 
