@@ -91,42 +91,33 @@ CVBS 和 HiFi 仍会拒绝 `ipp-fast`；需要 release 兼容行为时应使用 
 
 这是同一份私有本地 40 MHz PAL VHS `.ldf` 夹具上使用
 `--start 100 --length 160` 的含启动开销快照，且不会公开源文件名。表中保留了
-2026-08-12 固定条件下的 84 次测量，并用 2026-08-13 的 6 次运行刷新了受影响的两个
-`current --threads 20` 单元格。这两格使用基于 main `4416aaa` 的提交 `e89df85`；
-每个单元格均有三次完整运行。兼容性结论与速度数据分开判断。
+2026-08-12 固定条件下未受影响的 60 次测量，并用 2026-08-13 的 Phase 20 候选
+刷新全部 30 次 .NET `current` 测量；候选基于 main `9ae279f`。每个单元格均有
+三次完整运行。兼容性结论与速度数据分开判断。
 
 <!-- LATEST_PERFORMANCE_BEGIN -->
 | CLI 模式（workers） | Python v0.4.0 | Python PR341 | Exact + v0.4.0 | Exact + current | IPP-fast + v0.4.0 | IPP-fast + current |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| 默认（5） | 52.811 s | 54.243 s | 12.930 s / 4.084x | 12.477 s / 4.348x | 11.493 s / 4.595x | 9.673 s / 5.607x |
-| `--threads 1` | 57.067 s | 56.762 s | 31.701 s / 1.800x | 36.035 s / 1.575x | 22.907 s / 2.491x | 25.402 s / 2.235x |
-| `--threads 5` | 52.920 s | 55.722 s | 13.009 s / 4.068x | 11.803 s / 4.721x | 11.489 s / 4.606x | 9.433 s / 5.907x |
-| `--threads 10` | 52.965 s | 54.949 s | 10.266 s / 5.159x | 9.335 s / 5.886x | 9.766 s / 5.424x | 7.727 s / 7.111x |
-| `--threads 20` | 53.555 s | 54.842 s | 8.578 s / 6.244x | 7.325 s / 7.487x | 8.127 s / 6.590x | 5.863 s / 9.355x |
+| 默认（5） | 52.811 s | 54.243 s | 12.930 s / 4.084x | 11.620 s / 4.668x | 11.493 s / 4.595x | 9.232 s / 5.875x |
+| `--threads 1` | 57.067 s | 56.762 s | 31.701 s / 1.800x | 37.330 s / 1.521x | 22.907 s / 2.491x | 26.052 s / 2.179x |
+| `--threads 5` | 52.920 s | 55.722 s | 13.009 s / 4.068x | 11.312 s / 4.926x | 11.489 s / 4.606x | 9.484 s / 5.875x |
+| `--threads 10` | 52.965 s | 54.949 s | 10.266 s / 5.159x | 9.017 s / 6.094x | 9.766 s / 5.424x | 7.467 s / 7.359x |
+| `--threads 20` | 53.555 s | 54.842 s | 8.578 s / 6.244x | 7.155 s / 7.665x | 8.127 s / 6.590x | 5.759 s / 9.522x |
 <!-- LATEST_PERFORMANCE_END -->
-<!-- LATEST_PERFORMANCE_RUNS: performance-snapshot-runs=90 dotnet-matrix-runs=60 python-reference-runs=30 dotnet-repeats=3 python-reference-date=2026-08-12 dotnet-v040-date=2026-08-12 dotnet-current-date=2026-08-12 dotnet-current-t20-date=2026-08-13 phase18-table-runs=6 phase18-exact-200-ab-pairs=3 phase18-exact-1000-ab-pairs=1 phase18-ipp-200-ab-pairs=1 phase18-thread-gate-modes=2 phase18-tests=1435 phase18-final-signal-ab-pairs=3 phase18-final-memory-frames=1000 sinc-unroll-matrix-runs=90 sinc-unroll-exact-1000-ab-pairs=3 sinc-unroll-kernel-pairs=8 sinc-unroll-thread-profile-runs=24 sinc-unroll-memory-frames=2000 sinc-unroll-tests=34 sinc-unroll-intrinsic-modes=4 python-v040-runs=15 python-v040-hashes=15 python-pr341-runs=15 python-pr341-hashes=1 -->
+<!-- LATEST_PERFORMANCE_RUNS: performance-snapshot-runs=90 dotnet-matrix-runs=60 dotnet-current-runs=30 python-reference-runs=30 dotnet-repeats=3 python-reference-date=2026-08-12 dotnet-v040-date=2026-08-12 dotnet-current-date=2026-08-13 phase20-exact-200-ab-pairs=3 phase20-exact-1000-ab-pairs=2 phase20-thread-backend-runs=24 phase20-memory-frames=2000 phase20-tests=1437 python-v040-runs=15 python-v040-hashes=15 python-pr341-runs=15 python-pr341-hashes=1 -->
 
 每个 .NET 单元格依次给出墙钟中位数和相对同 profile Python 列的倍速；默认实际
 使用 **5 个 workers**。三次运行范围见[详细性能说明](docs/README.detailed.zh-CN.md#性能)。
 倍数会随作为分子的 Python 时间和作为分母的 .NET 时间一起变化，使用其他夹具或窗口的历史表格
 也不能直接横向比较。判断因果回退时使用同一时刻的 .NET 版本配对 A/B，而不是旧表倍数。
 
-上一项隔离改动用解码器自有的有界队列替换嵌套 ThreadPool companion inverse。
-在 `--threads 20` 下，8 个固定 companion workers 只使用现有 12-block 预取上限之外的
-worker 配额。三组交错 200 帧 Exact `current` A/B 在所有兼容表面上都一致，配对墙钟
-变化的中位数减少 1.61%。一次 1000 帧配对从 34.732 降至 34.000 秒（减少 2.11%）；
-候选工作集峰值从前半程 352.2 MiB 微降到后半程 351.4 MiB，没有增长或 OOM。
-最终生命周期补丁又通过三组交错配对和一次 1000 帧运行的全部兼容表面；前/后半程
-峰值为 355.2/353.8 MiB。由于当时机器并非空闲，其墙钟数据特意不计入表格。
-
-最新一轮分配优化把 VHS 同步分析中 5 块不会逃逸的 scratch 数组保留在各自独占的
-detector workspace 中。有效脉冲分配基准下降 38.2%，配对 GC trace 也确认启动后不再
-出现该 detector 的重复 `double[]` 和 `bool[]` 分配。两组正反顺序的 1000 帧 Exact
-`current --threads 20` 配对合计墙钟变化为 -0.38%，属于吞吐中性；CPU 变化为
-+1.65%，因此不宣称 CPU 或速度提升。Exact 与 IPP-fast 各完成 12 次 main/候选门禁，
-覆盖 v0.4.0/`current` 与 `--threads 0`/默认 5/`--threads 20`；亮度、色度、原始
-JSON、stdout、归一化诊断和有序 `fileLoc` 全部一致。由于本轮机器存在无关前台 CPU
-负载，表格保留最近一次受控吞吐快照，不用受干扰的时间替换它。
+最新多核优化复用最终阶段的 worker-local VHS radix histogram，在严格保持串行源顺序的
+前提下并行收集两个目标电平桶。两组正反顺序的 1000 帧 Exact
+`current --threads 20` 配对分别缩短 4.96% 和 3.49%；另一次 2000 帧门禁快 1.08%，
+并完整写出 4000 个场。平均有效核心占用有所提高，但 2000 帧候选的私有内存峰值为
+890.5 MiB，main 为 425.8 MiB。候选四段中位数并非单调增长，结束时也低于峰值，
+因此本次实测有界且没有 OOM，但不宣称内存降低。Exact/IPP-fast 兼容性、跨线程
+确定性和全部 1437 项 xUnit v3 测试均通过；完整门禁与范围见详细说明。
 
 刷新后的每个 .NET profile/线程单元格在三轮内都保持确定性。固定参考集中的 Python
 PR341 保持确定；Python v0.4.0 的 15 次运行产生了 15 套不同的亮度、色度、JSON 和

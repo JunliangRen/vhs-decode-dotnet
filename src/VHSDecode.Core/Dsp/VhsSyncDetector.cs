@@ -1471,13 +1471,17 @@ public sealed class VhsSyncDetector
         uint syncPrefix = ((uint)syncSecondPrefix << 10) | (uint)syncThird.Bucket;
         uint blankingPrefix = ((uint)blankingSecondPrefix << 10) | (uint)blankingThird.Bucket;
 
-        return SelectLevelQuantilesFromPrefixes(
-            values.AsSpan(0, valueCount),
+        return SelectLevelQuantilesFromPrefixesParallel(
+            values,
+            valueCount,
             scratch,
             syncPrefix,
             blankingPrefix,
             syncThird,
-            blankingThird);
+            blankingThird,
+            workerHistograms,
+            thirdHistogramLength,
+            workerThreads);
     }
 
     private static (double SyncTip, double Blanking) SelectLevelQuantilesRadixParallelTwoStage(
@@ -1610,6 +1614,111 @@ public sealed class VhsSyncDetector
             scratch,
             blankingTargetInScratch,
             left: blankingStart,
+            right: blankingWrite - 1,
+            out _,
+            out _);
+        return (syncTip, blanking);
+    }
+
+    private static (double SyncTip, double Blanking) SelectLevelQuantilesFromPrefixesParallel(
+        double[] values,
+        int valueCount,
+        double[] scratch,
+        uint syncPrefix,
+        uint blankingPrefix,
+        BucketSelection syncSelection,
+        BucketSelection blankingSelection,
+        int[] workerHistograms,
+        int workerHistogramLength,
+        int workerThreads)
+    {
+        int syncBucket = (int)(syncPrefix & (ParallelRadixThirdWidth - 1));
+        int blankingBucket = (int)(blankingPrefix & (ParallelRadixThirdWidth - 1));
+        if (syncPrefix != blankingPrefix
+            && (syncPrefix >> 10) != (blankingPrefix >> 10))
+        {
+            blankingBucket += ParallelRadixThirdWidth;
+        }
+
+        int syncWrite = 0;
+        int blankingWrite = syncPrefix == blankingPrefix
+            ? 0
+            : syncSelection.Count;
+        for (int worker = 0; worker < workerThreads; worker++)
+        {
+            int workerOffset = worker * workerHistogramLength;
+            int syncEntry = workerOffset + syncBucket;
+            int syncCount = workerHistograms[syncEntry];
+            workerHistograms[syncEntry] = syncWrite;
+            syncWrite += syncCount;
+
+            if (syncPrefix != blankingPrefix)
+            {
+                int blankingEntry = workerOffset + blankingBucket;
+                int blankingCount = workerHistograms[blankingEntry];
+                workerHistograms[blankingEntry] = blankingWrite;
+                blankingWrite += blankingCount;
+            }
+        }
+
+        System.Diagnostics.Debug.Assert(syncWrite == syncSelection.Count);
+        System.Diagnostics.Debug.Assert(
+            syncPrefix == blankingPrefix
+                || blankingWrite - syncSelection.Count == blankingSelection.Count);
+        Parallel.For(
+            fromInclusive: 0,
+            toExclusive: workerThreads,
+            new ParallelOptions
+            {
+                MaxDegreeOfParallelism = workerThreads
+            },
+            worker =>
+            {
+                int start = (int)(((long)valueCount * worker) / workerThreads);
+                int end = (int)(((long)valueCount * (worker + 1)) / workerThreads);
+                int workerOffset = worker * workerHistogramLength;
+                int syncDestination = workerHistograms[workerOffset + syncBucket];
+                int blankingDestination = syncPrefix == blankingPrefix
+                    ? 0
+                    : workerHistograms[workerOffset + blankingBucket];
+                for (int index = start; index < end; index++)
+                {
+                    double value = values[index];
+                    uint prefix = SortablePrefix(value);
+                    if (prefix == syncPrefix)
+                    {
+                        scratch[syncDestination++] = value;
+                    }
+                    else if (prefix == blankingPrefix)
+                    {
+                        scratch[blankingDestination++] = value;
+                    }
+                }
+            });
+
+        if (syncPrefix == blankingPrefix)
+        {
+            return SelectTwoInRange(
+                scratch,
+                left: 0,
+                count: syncWrite,
+                syncSelection.RankWithinBucket,
+                blankingSelection.RankWithinBucket);
+        }
+
+        double syncTip = SelectKth(
+            scratch,
+            syncSelection.RankWithinBucket,
+            left: 0,
+            right: syncWrite - 1,
+            out _,
+            out _);
+        int blankingTargetInScratch =
+            syncSelection.Count + blankingSelection.RankWithinBucket;
+        double blanking = SelectKth(
+            scratch,
+            blankingTargetInScratch,
+            left: syncSelection.Count,
             right: blankingWrite - 1,
             out _,
             out _);

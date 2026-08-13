@@ -740,6 +740,9 @@ public sealed class VhsSyncDetectorCurrentTests
                 Assert.Equal(
                     BitConverter.DoubleToInt64Bits(expectedBlanking),
                     BitConverter.DoubleToInt64Bits(actualBlanking));
+                Assert.Equal(
+                    expectedScratch.Select(BitConverter.DoubleToInt64Bits),
+                    actualScratch.Select(BitConverter.DoubleToInt64Bits));
                 Assert.All(
                     workerFlags.AsSpan(0, workers).ToArray(),
                     flag => Assert.Equal(0, flag));

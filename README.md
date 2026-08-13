@@ -99,21 +99,21 @@ for compatibility-sensitive work.
 
 This startup-inclusive `--start 100 --length 160` snapshot uses one fixed private
 local 40 MHz PAL VHS `.ldf` fixture; its filename is intentionally not published.
-It retains 84 fixed-condition measurements from 2026-08-12 and refreshes the two
-affected `current --threads 20` cells with six runs from 2026-08-13. Those cells
-use commit `e89df85`, based on main `4416aaa`; every cell has three complete runs.
+It retains 60 unaffected fixed-condition measurements from 2026-08-12 and
+refreshes all 30 .NET `current` measurements on 2026-08-13 with the Phase 20
+candidate based on main `9ae279f`. Every cell has three complete runs.
 Compatibility is evaluated separately from speed.
 
 <!-- LATEST_PERFORMANCE_BEGIN -->
 | CLI mode (workers) | Python v0.4.0 | Python PR341 | Exact + v0.4.0 | Exact + current | IPP-fast + v0.4.0 | IPP-fast + current |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| default (5) | 52.811 s | 54.243 s | 12.930 s / 4.084x | 12.477 s / 4.348x | 11.493 s / 4.595x | 9.673 s / 5.607x |
-| `--threads 1` | 57.067 s | 56.762 s | 31.701 s / 1.800x | 36.035 s / 1.575x | 22.907 s / 2.491x | 25.402 s / 2.235x |
-| `--threads 5` | 52.920 s | 55.722 s | 13.009 s / 4.068x | 11.803 s / 4.721x | 11.489 s / 4.606x | 9.433 s / 5.907x |
-| `--threads 10` | 52.965 s | 54.949 s | 10.266 s / 5.159x | 9.335 s / 5.886x | 9.766 s / 5.424x | 7.727 s / 7.111x |
-| `--threads 20` | 53.555 s | 54.842 s | 8.578 s / 6.244x | 7.325 s / 7.487x | 8.127 s / 6.590x | 5.863 s / 9.355x |
+| default (5) | 52.811 s | 54.243 s | 12.930 s / 4.084x | 11.620 s / 4.668x | 11.493 s / 4.595x | 9.232 s / 5.875x |
+| `--threads 1` | 57.067 s | 56.762 s | 31.701 s / 1.800x | 37.330 s / 1.521x | 22.907 s / 2.491x | 26.052 s / 2.179x |
+| `--threads 5` | 52.920 s | 55.722 s | 13.009 s / 4.068x | 11.312 s / 4.926x | 11.489 s / 4.606x | 9.484 s / 5.875x |
+| `--threads 10` | 52.965 s | 54.949 s | 10.266 s / 5.159x | 9.017 s / 6.094x | 9.766 s / 5.424x | 7.467 s / 7.359x |
+| `--threads 20` | 53.555 s | 54.842 s | 8.578 s / 6.244x | 7.155 s / 7.665x | 8.127 s / 6.590x | 5.759 s / 9.522x |
 <!-- LATEST_PERFORMANCE_END -->
-<!-- LATEST_PERFORMANCE_RUNS: performance-snapshot-runs=90 dotnet-matrix-runs=60 python-reference-runs=30 dotnet-repeats=3 python-reference-date=2026-08-12 dotnet-v040-date=2026-08-12 dotnet-current-date=2026-08-12 dotnet-current-t20-date=2026-08-13 phase18-table-runs=6 phase18-exact-200-ab-pairs=3 phase18-exact-1000-ab-pairs=1 phase18-ipp-200-ab-pairs=1 phase18-thread-gate-modes=2 phase18-tests=1435 phase18-final-signal-ab-pairs=3 phase18-final-memory-frames=1000 sinc-unroll-matrix-runs=90 sinc-unroll-exact-1000-ab-pairs=3 sinc-unroll-kernel-pairs=8 sinc-unroll-thread-profile-runs=24 sinc-unroll-memory-frames=2000 sinc-unroll-tests=34 sinc-unroll-intrinsic-modes=4 python-v040-runs=15 python-v040-hashes=15 python-pr341-runs=15 python-pr341-hashes=1 -->
+<!-- LATEST_PERFORMANCE_RUNS: performance-snapshot-runs=90 dotnet-matrix-runs=60 dotnet-current-runs=30 python-reference-runs=30 dotnet-repeats=3 python-reference-date=2026-08-12 dotnet-v040-date=2026-08-12 dotnet-current-date=2026-08-13 phase20-exact-200-ab-pairs=3 phase20-exact-1000-ab-pairs=2 phase20-thread-backend-runs=24 phase20-memory-frames=2000 phase20-tests=1437 python-v040-runs=15 python-v040-hashes=15 python-pr341-runs=15 python-pr341-hashes=1 -->
 
 Each .NET cell shows median wall time and speedup versus its profile-matched
 Python column. The default is **5 workers**; three-run ranges are in the
@@ -122,28 +122,16 @@ when either the Python numerator or .NET denominator moves, and historical table
 using another fixture or window are not directly comparable. Same-moment .NET
 revision A/B runs, rather than old ratio cells, determine causal regressions.
 
-The previous isolated change replaced nested ThreadPool companion inverses with a
-bounded decoder-owned queue. At `--threads 20`, eight fixed companion workers use
-only the budget above the existing 12-block prefetch cap. Three interleaved
-200-frame Exact `current` A/B pairs matched every compatibility surface and had a
-1.61% median paired wall-time reduction. A 1,000-frame pair moved from 34.732 to
-34.000 seconds (2.11% lower); its candidate working-set maxima changed from
-352.2 MiB in the first half to 351.4 MiB in the second half, with no growth or OOM.
-The final lifecycle follow-up matched all surfaces in three more interleaved
-pairs and a 1,000-frame run; its first/second-half peaks were 355.2/353.8 MiB.
-Its non-idle timings are intentionally excluded from the table.
-
-The latest allocation pass keeps five non-escaping VHS sync-analysis scratch
-arrays in each exclusive detector workspace. A valid-pulse allocation benchmark
-fell by 38.2%, and a matched GC trace removed the detector's recurring
-`double[]` and `bool[]` allocation ticks after startup. The combined wall time of
-two opposite-order 1,000-frame Exact `current --threads 20` pairs changed by
--0.38%, which is throughput-neutral; CPU changed by +1.65%, so no CPU or speedup
-claim is made. Exact and IPP-fast each passed 12 main/candidate profile-thread
-runs across v0.4.0/`current` and `--threads 0`/default-five/`--threads 20`, with
-identical luma, chroma, raw JSON, stdout, normalized diagnostics, and ordered
-`fileLoc`. The table remains the latest controlled throughput snapshot because
-the current machine had an unrelated foreground CPU load during this gate.
+The latest multicore pass reuses the final worker-local VHS radix histograms to
+collect the two selected level buckets in parallel while preserving the serial
+source order exactly. Two opposite-order 1,000-frame Exact `current --threads 20`
+pairs reduced wall time by 4.96% and 3.49%; a separate 2,000-frame gate was 1.08%
+faster and completed all 4,000 fields. Average useful core occupancy increased,
+but the 2,000-frame candidate reached 890.5 MiB private memory versus 425.8 MiB
+on main. Its quarter medians were non-monotonic and it finished below its peak,
+so the measured run was bounded without OOM; no memory-reduction claim is made.
+Exact and IPP-fast compatibility, cross-thread determinism, and all 1,437 xUnit
+v3 tests passed. See the detailed notes for the complete gates and ranges.
 
 Every .NET profile/thread cell was deterministic across its three refreshed
 runs. Merged Python PR341 was deterministic in its pinned reference set; Python
