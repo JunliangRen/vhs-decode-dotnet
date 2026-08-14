@@ -36,7 +36,7 @@ upstream release `v0.4.0`、commit
 - VHS family には VHS/S-VHS、Betamax、Video8/Hi8、U-matic、Type C、EIAJ、
   upstream が対応する PAL/NTSC variant が含まれます。
 - TBC utility、ダブルクリック GUI、開発者向け plot window は対象外です。
-- Visual Studio 2026 の `.slnx` には **1,460** 件の標準 xUnit v3 test があり、
+- Visual Studio 2026 の `.slnx` には **1,463** 件の標準 xUnit v3 test があり、
   Test Explorer と `dotnet test` の両方で実行できます。
 
 <!-- SECTION: start -->
@@ -96,19 +96,19 @@ CVBS と HiFi は引き続き `ipp-fast` を拒否します。release-compatible
 これは同じ private local 40 MHz PAL VHS `.ldf` fixture を使う、startup cost を含む
 `--start 100 --length 160` snapshot です。source filename は公開しません。
 2026-08-12 の固定 Python reference 30 run を保持します。全 60 回の .NET 測定は
-main `e606262` を基にした最新 candidate で 2026-08-14 にまとめて更新しました。
+main `508b4f6` を基にした最新 candidate で 2026-08-15 にまとめて更新しました。
 各 cell は 3 complete run を持ち、互換性と速度は別々に評価します。
 
 <!-- LATEST_PERFORMANCE_BEGIN -->
 | CLI mode（workers） | Python v0.4.0 | Python PR341 | Exact + v0.4.0 | Exact + current | IPP-fast + v0.4.0 | IPP-fast + current |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| default（5） | 52.811 s | 54.243 s | 12.550 s / 4.208x | 11.088 s / 4.892x | 10.761 s / 4.908x | 8.273 s / 6.556x |
-| `--threads 1` | 57.067 s | 56.762 s | 31.646 s / 1.803x | 34.146 s / 1.662x | 22.784 s / 2.505x | 24.472 s / 2.319x |
-| `--threads 5` | 52.920 s | 55.722 s | 12.038 s / 4.396x | 11.242 s / 4.957x | 10.671 s / 4.959x | 8.282 s / 6.728x |
-| `--threads 10` | 52.965 s | 54.949 s | 9.820 s / 5.394x | 9.006 s / 6.102x | 8.995 s / 5.888x | 6.412 s / 8.569x |
-| `--threads 20` | 53.555 s | 54.842 s | 7.770 s / 6.893x | 7.301 s / 7.511x | 7.656 s / 6.995x | 4.998 s / 10.973x |
+| default（5） | 52.811 s | 54.243 s | 12.625 s / 4.183x | 11.841 s / 4.581x | 11.140 s / 4.741x | 8.530 s / 6.359x |
+| `--threads 1` | 57.067 s | 56.762 s | 32.879 s / 1.736x | 36.092 s / 1.573x | 23.205 s / 2.459x | 25.135 s / 2.258x |
+| `--threads 5` | 52.920 s | 55.722 s | 12.842 s / 4.121x | 11.720 s / 4.754x | 11.120 s / 4.759x | 8.489 s / 6.564x |
+| `--threads 10` | 52.965 s | 54.949 s | 10.233 s / 5.176x | 8.783 s / 6.256x | 9.137 s / 5.797x | 6.473 s / 8.488x |
+| `--threads 20` | 53.555 s | 54.842 s | 8.183 s / 6.545x | 7.624 s / 7.194x | 7.890 s / 6.788x | 5.220 s / 10.507x |
 <!-- LATEST_PERFORMANCE_END -->
-<!-- LATEST_PERFORMANCE_RUNS: performance-snapshot-runs=90 dotnet-matrix-runs=60 dotnet-current-runs=30 python-reference-runs=30 dotnet-repeats=3 python-reference-date=2026-08-12 dotnet-v040-date=2026-08-14 dotnet-current-date=2026-08-14 phase22-200-ab-pairs=20 phase22-long-ab-pairs=8 phase22-thread-backend-runs=60 phase22-gc-traces=2 phase22-tests=1438 phase24-short-ab-pairs=6 phase24-long-ab-pairs=4 phase24-thread-gate-runs=12 phase24-tests=1442 phase25-public-cell-runs=15 phase25-public-ab-pairs=15 phase25-long-ab-pairs=3 phase25-thread-gate-runs=12 phase25-tests=1446 phase26-kernel-ab-pairs=8 phase26-long-ab-pairs=4 phase26-thread-backend-runs=36 phase26-public-cell-runs=30 phase26-tests=1447 phase27-kernel-ab-pairs=8 phase27-long-ab-pairs=8 phase27-thread-backend-runs=24 phase27-public-cell-runs=60 phase27-tests=1448 phase28-kernel-ab-pairs=8 phase28-long-ab-pairs=6 phase28-thread-backend-runs=24 phase28-intrinsic-runs=3 phase28-public-cell-runs=60 phase28-tests=1448 phase30-burst-kernel-runs=14 phase30-long-ab-pairs=3 phase30-thread-gate-runs=6 phase30-memory-runs=2 phase30-public-cell-runs=60 phase30-tests=1448 phase31-interleaved-ab-pairs=9 phase31-long-gate-runs=8 phase31-thread-backend-runs=24 phase31-memory-runs=4 phase31-public-cell-runs=60 phase31-tests=1459 phase32-vblank-short-ab-pairs=6 phase32-vblank-long-ab-pairs=2 phase32-thread-backend-runs=24 phase32-gc-traces=2 phase32-counter-runs=2 phase32-tests=1460 python-v040-runs=15 python-v040-hashes=15 python-pr341-runs=15 python-pr341-hashes=1 -->
+<!-- LATEST_PERFORMANCE_RUNS: performance-snapshot-runs=90 dotnet-matrix-runs=60 dotnet-current-runs=30 python-reference-runs=30 dotnet-repeats=3 python-reference-date=2026-08-12 dotnet-v040-date=2026-08-15 dotnet-current-date=2026-08-15 phase22-200-ab-pairs=20 phase22-long-ab-pairs=8 phase22-thread-backend-runs=60 phase22-gc-traces=2 phase22-tests=1438 phase24-short-ab-pairs=6 phase24-long-ab-pairs=4 phase24-thread-gate-runs=12 phase24-tests=1442 phase25-public-cell-runs=15 phase25-public-ab-pairs=15 phase25-long-ab-pairs=3 phase25-thread-gate-runs=12 phase25-tests=1446 phase26-kernel-ab-pairs=8 phase26-long-ab-pairs=4 phase26-thread-backend-runs=36 phase26-public-cell-runs=30 phase26-tests=1447 phase27-kernel-ab-pairs=8 phase27-long-ab-pairs=8 phase27-thread-backend-runs=24 phase27-public-cell-runs=60 phase27-tests=1448 phase28-kernel-ab-pairs=8 phase28-long-ab-pairs=6 phase28-thread-backend-runs=24 phase28-intrinsic-runs=3 phase28-public-cell-runs=60 phase28-tests=1448 phase30-burst-kernel-runs=14 phase30-long-ab-pairs=3 phase30-thread-gate-runs=6 phase30-memory-runs=2 phase30-public-cell-runs=60 phase30-tests=1448 phase31-interleaved-ab-pairs=9 phase31-long-gate-runs=8 phase31-thread-backend-runs=24 phase31-memory-runs=4 phase31-public-cell-runs=60 phase31-tests=1459 phase32-vblank-short-ab-pairs=6 phase32-vblank-long-ab-pairs=2 phase32-thread-backend-runs=24 phase32-gc-traces=2 phase32-counter-runs=2 phase32-tests=1460 phase33-sync-list-short-ab-pairs=6 phase33-sync-list-long-ab-pairs=2 phase33-thread-backend-runs=24 phase33-gc-traces=1 phase33-memory-runs=4 phase33-public-cell-runs=60 phase33-tests=1463 python-v040-runs=15 python-v040-hashes=15 python-pr341-runs=15 python-pr341-hashes=1 -->
 
 各 .NET cell は wall-time median と profile が対応する Python 列に対する speedup の順で、
 default は **5 workers** です。3-run range は
@@ -134,9 +134,15 @@ sync-analysis 変更は throughput-neutral ですが、同じ 500-frame counter 
 allocation を 46.0% 削減し、Gen0 collection を 60 から 30、GC pause を 44.4 から
 24.2 ms へ減らしました。そのため public speed table は変更していません。
 
+次の Exact-current pass は field-local な classified/refined pulse list を再利用し、public
+API の ownership semantics は維持します。順序を逆にした 1,000-frame 2 pair で wall-time
+median は 32.95 から 32.11 秒、CPU time は 298.40 から 288.02 秒へ短縮し、sampled
+allocation は 8.65% 減りました。保守的な reverse-order memory pair では peak working
+set が 390.8 から 360.5 MiB、private bytes が 409.9 から 374.4 MiB へ減少しました。
+
 `--threads 0`、default-five、20-worker の 24-run gate と、更新した 60-run Exact/IPP-fast
 matrix は、luma、chroma、raw JSON、stdout、normalized stderr/log、ordered `fileLoc` の
-各 surface で 1 hash を維持しました。標準 xUnit v3 suite の **1,460** tests も成功しました。
+各 surface で 1 hash を維持しました。標準 xUnit v3 suite の **1,463** tests も成功しました。
 
 更新した各 .NET profile/thread cell は 3 run 内で deterministic でした。固定 reference の
 merged Python PR341 も deterministic でした。Python v0.4.0 は 15 run で 15 種類の luma、
@@ -177,7 +183,7 @@ header は FFmpeg を維持します。
 dotnet restore VHSDecodeDotNet.slnx
 dotnet build VHSDecodeDotNet.slnx -c Release --no-restore
 dotnet test --solution VHSDecodeDotNet.slnx -c Release `
-  --no-build --no-restore --minimum-expected-tests 1460
+  --no-build --no-restore --minimum-expected-tests 1463
 ```
 
 Visual Studio 2026 で `VHSDecodeDotNet.slnx` を開くと、build、debug、

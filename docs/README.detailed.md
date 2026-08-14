@@ -687,6 +687,39 @@ A 24-run release-binary gate covered Exact/IPP-fast, v0.4.0/`current`, and
 The focused 10,000-rejected-candidate allocation test and all 1,460 standard
 xUnit v3 tests passed.
 
+### Field-local sync-pulse workspace reuse
+
+The next Exact-current pass keeps caller-owned classified and refined pulse
+lists on `TbcFieldDecodePipeline`. The public `SyncAnalyzer` methods retain
+their existing owned-result behavior; only the internal sequential field path
+clears and reuses its two lists. Pulse order and values, rescue mutation,
+VBlank state, diagnostics, and every cross-field transition are unchanged.
+If a damaged field grows a backing array beyond 65,536 entries, the next
+normal-sized field releases that oversized retention before reuse.
+
+A worker-local PocketFFT scratch prototype was rejected before this change.
+It remained bit-exact, but two opposite-order 1,000-frame pairs measured
+32.62/32.64-second baseline/candidate group medians and 297.09/299.14 seconds
+of CPU time, so the extra API surface had no stable end-to-end value.
+
+For the retained pulse-list change, a matched 160-frame `gc-verbose` trace
+reduced sampled managed allocation from 680,536,552 to 621,643,144 bytes
+(8.65%) and removed the 65,614,400-byte sampled `ClassifiedSyncPulse[]`
+hotspot. Six short pairs were scheduling-noisy, but two opposite-order
+1,000-frame `--threads 20` pairs reduced median wall time from 32.95 to 32.11
+seconds (2.55%) and CPU time from 298.40 to 288.02 seconds (3.48%); effective
+core use moved from 9.06 to 8.97.
+
+Both opposite-order memory pairs gave the candidate a lower peak. The
+conservative reverse-order comparison measured baseline/candidate peak working
+set at 390.8/360.5 MiB and private bytes at 409.9/374.4 MiB.
+The baseline-first pair contained a 628.7 MiB baseline GC peak, so that larger
+difference is reported as an outlier rather than a percentage claim. A 24-run
+release-binary gate covered all four backend/profile combinations at
+`--threads 0`, default-five, and 20 workers; every captured surface matched.
+The refreshed 60-run public matrix retained one hash per surface in every cell,
+and all 1,463 standard xUnit v3 tests passed.
+
 ### Latest six-path thread matrix
 
 The latest public summary is a startup-inclusive `--start 100 --length 160`
@@ -694,8 +727,8 @@ snapshot comparing Python v0.4.0, merged Python PR341, Exact v0.4.0, Exact
 `current`, IPP-fast v0.4.0, and IPP-fast `current` on the same private local
 40 MHz PAL VHS `.ldf` fixture. The source filename is intentionally not
 published. The active table retains 30 fixed Python reference measurements from
-2026-08-12. All 60 .NET measurements were refreshed together on 2026-08-14
-with the latest candidate based on main `e606262`. Each .NET cell gives the
+2026-08-12. All 60 .NET measurements were refreshed together on 2026-08-15
+with the latest candidate based on main `508b4f6`. Each .NET cell gives the
 median wall time, speedup, and wall-time reduction against its profile-matched
 Python column. Historical
 matrices that used another batch, format, or fixture are not directly comparable:
@@ -703,28 +736,28 @@ matrices that used another batch, format, or fixture are not directly comparable
 <!-- LATEST_PERFORMANCE_BEGIN -->
 | CLI mode (workers) | Python v0.4.0 | Python PR341 | Exact + v0.4.0 | Exact + current | IPP-fast + v0.4.0 | IPP-fast + current |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| default (5) | 52.811 s | 54.243 s | 12.550 s / 4.208x / 76.24% | 11.088 s / 4.892x / 79.56% | 10.761 s / 4.908x / 79.62% | 8.273 s / 6.556x / 84.75% |
-| `--threads 1` | 57.067 s | 56.762 s | 31.646 s / 1.803x / 44.55% | 34.146 s / 1.662x / 39.84% | 22.784 s / 2.505x / 60.08% | 24.472 s / 2.319x / 56.89% |
-| `--threads 5` | 52.920 s | 55.722 s | 12.038 s / 4.396x / 77.25% | 11.242 s / 4.957x / 79.83% | 10.671 s / 4.959x / 79.84% | 8.282 s / 6.728x / 85.14% |
-| `--threads 10` | 52.965 s | 54.949 s | 9.820 s / 5.394x / 81.46% | 9.006 s / 6.102x / 83.61% | 8.995 s / 5.888x / 83.02% | 6.412 s / 8.569x / 88.33% |
-| `--threads 20` | 53.555 s | 54.842 s | 7.770 s / 6.893x / 85.49% | 7.301 s / 7.511x / 86.69% | 7.656 s / 6.995x / 85.70% | 4.998 s / 10.973x / 90.89% |
+| default (5) | 52.811 s | 54.243 s | 12.625 s / 4.183x / 76.09% | 11.841 s / 4.581x / 78.17% | 11.140 s / 4.741x / 78.91% | 8.530 s / 6.359x / 84.27% |
+| `--threads 1` | 57.067 s | 56.762 s | 32.879 s / 1.736x / 42.39% | 36.092 s / 1.573x / 36.42% | 23.205 s / 2.459x / 59.34% | 25.135 s / 2.258x / 55.72% |
+| `--threads 5` | 52.920 s | 55.722 s | 12.842 s / 4.121x / 75.73% | 11.720 s / 4.754x / 78.97% | 11.120 s / 4.759x / 78.99% | 8.489 s / 6.564x / 84.77% |
+| `--threads 10` | 52.965 s | 54.949 s | 10.233 s / 5.176x / 80.68% | 8.783 s / 6.256x / 84.02% | 9.137 s / 5.797x / 82.75% | 6.473 s / 8.488x / 88.22% |
+| `--threads 20` | 53.555 s | 54.842 s | 8.183 s / 6.545x / 84.72% | 7.624 s / 7.194x / 86.10% | 7.890 s / 6.788x / 85.27% | 5.220 s / 10.507x / 90.48% |
 <!-- LATEST_PERFORMANCE_END -->
-<!-- LATEST_PERFORMANCE_RUNS: performance-snapshot-runs=90 dotnet-matrix-runs=60 dotnet-current-runs=30 python-reference-runs=30 dotnet-repeats=3 python-reference-date=2026-08-12 dotnet-v040-date=2026-08-14 dotnet-current-date=2026-08-14 phase22-200-ab-pairs=20 phase22-long-ab-pairs=8 phase22-thread-backend-runs=60 phase22-gc-traces=2 phase22-tests=1438 phase24-short-ab-pairs=6 phase24-long-ab-pairs=4 phase24-thread-gate-runs=12 phase24-tests=1442 phase25-public-cell-runs=15 phase25-public-ab-pairs=15 phase25-long-ab-pairs=3 phase25-thread-gate-runs=12 phase25-tests=1446 phase26-kernel-ab-pairs=8 phase26-long-ab-pairs=4 phase26-thread-backend-runs=36 phase26-public-cell-runs=30 phase26-tests=1447 phase27-kernel-ab-pairs=8 phase27-long-ab-pairs=8 phase27-thread-backend-runs=24 phase27-public-cell-runs=60 phase27-tests=1448 phase28-kernel-ab-pairs=8 phase28-long-ab-pairs=6 phase28-thread-backend-runs=24 phase28-intrinsic-runs=3 phase28-public-cell-runs=60 phase28-tests=1448 phase30-burst-kernel-runs=14 phase30-long-ab-pairs=3 phase30-thread-gate-runs=6 phase30-memory-runs=2 phase30-public-cell-runs=60 phase30-tests=1448 phase31-interleaved-ab-pairs=9 phase31-long-gate-runs=8 phase31-thread-backend-runs=24 phase31-memory-runs=4 phase31-public-cell-runs=60 phase31-tests=1459 phase32-vblank-short-ab-pairs=6 phase32-vblank-long-ab-pairs=2 phase32-thread-backend-runs=24 phase32-gc-traces=2 phase32-counter-runs=2 phase32-tests=1460 python-v040-runs=15 python-v040-hashes=15 python-pr341-runs=15 python-pr341-hashes=1 -->
+<!-- LATEST_PERFORMANCE_RUNS: performance-snapshot-runs=90 dotnet-matrix-runs=60 dotnet-current-runs=30 python-reference-runs=30 dotnet-repeats=3 python-reference-date=2026-08-12 dotnet-v040-date=2026-08-15 dotnet-current-date=2026-08-15 phase22-200-ab-pairs=20 phase22-long-ab-pairs=8 phase22-thread-backend-runs=60 phase22-gc-traces=2 phase22-tests=1438 phase24-short-ab-pairs=6 phase24-long-ab-pairs=4 phase24-thread-gate-runs=12 phase24-tests=1442 phase25-public-cell-runs=15 phase25-public-ab-pairs=15 phase25-long-ab-pairs=3 phase25-thread-gate-runs=12 phase25-tests=1446 phase26-kernel-ab-pairs=8 phase26-long-ab-pairs=4 phase26-thread-backend-runs=36 phase26-public-cell-runs=30 phase26-tests=1447 phase27-kernel-ab-pairs=8 phase27-long-ab-pairs=8 phase27-thread-backend-runs=24 phase27-public-cell-runs=60 phase27-tests=1448 phase28-kernel-ab-pairs=8 phase28-long-ab-pairs=6 phase28-thread-backend-runs=24 phase28-intrinsic-runs=3 phase28-public-cell-runs=60 phase28-tests=1448 phase30-burst-kernel-runs=14 phase30-long-ab-pairs=3 phase30-thread-gate-runs=6 phase30-memory-runs=2 phase30-public-cell-runs=60 phase30-tests=1448 phase31-interleaved-ab-pairs=9 phase31-long-gate-runs=8 phase31-thread-backend-runs=24 phase31-memory-runs=4 phase31-public-cell-runs=60 phase31-tests=1459 phase32-vblank-short-ab-pairs=6 phase32-vblank-long-ab-pairs=2 phase32-thread-backend-runs=24 phase32-gc-traces=2 phase32-counter-runs=2 phase32-tests=1460 phase33-sync-list-short-ab-pairs=6 phase33-sync-list-long-ab-pairs=2 phase33-thread-backend-runs=24 phase33-gc-traces=1 phase33-memory-runs=4 phase33-public-cell-runs=60 phase33-tests=1463 python-v040-runs=15 python-v040-hashes=15 python-pr341-runs=15 python-pr341-hashes=1 -->
 
 The three-run wall-time ranges were:
 
 <!-- LATEST_PERFORMANCE_RANGES_BEGIN -->
 | CLI mode | Python v0.4.0 | Python PR341 | Exact + v0.4.0 | Exact + current | IPP-fast + v0.4.0 | IPP-fast + current |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| default (5) | 52.583-62.222 s | 53.893-58.195 s | 12.410-12.819 s | 10.793-11.122 s | 10.637-10.830 s | 8.248-8.400 s |
-| `--threads 1` | 56.709-60.521 s | 56.335-58.991 s | 31.375-32.736 s | 34.008-35.080 s | 22.598-23.670 s | 24.416-24.568 s |
-| `--threads 5` | 52.845-53.977 s | 53.696-58.437 s | 11.932-12.396 s | 11.088-11.406 s | 10.642-10.765 s | 8.279-8.354 s |
-| `--threads 10` | 51.797-53.088 s | 52.649-56.775 s | 9.548-9.918 s | 8.276-9.051 s | 8.962-9.173 s | 6.253-6.570 s |
-| `--threads 20` | 52.967-55.987 s | 53.005-55.618 s | 7.693-8.026 s | 6.209-7.601 s | 7.477-7.847 s | 4.970-5.038 s |
+| default (5) | 52.583-62.222 s | 53.893-58.195 s | 12.300-13.214 s | 10.791-11.889 s | 10.821-11.256 s | 8.493-8.553 s |
+| `--threads 1` | 56.709-60.521 s | 56.335-58.991 s | 31.842-32.947 s | 35.314-36.434 s | 22.932-23.407 s | 25.057-25.195 s |
+| `--threads 5` | 52.845-53.977 s | 53.696-58.437 s | 12.468-12.960 s | 11.554-12.030 s | 11.002-11.184 s | 8.444-8.590 s |
+| `--threads 10` | 51.797-53.088 s | 52.649-56.775 s | 10.115-10.315 s | 8.690-9.143 s | 9.134-9.154 s | 6.387-6.524 s |
+| `--threads 20` | 52.967-55.987 s | 53.005-55.618 s | 8.080-8.198 s | 7.528-7.879 s | 7.694-7.908 s | 5.202-5.406 s |
 <!-- LATEST_PERFORMANCE_RANGES_END -->
 
 The 30 retained Python measurements come from the fixed-condition 2026-08-12
-campaign. All twenty .NET cells contain 60 complete 2026-08-14 runs from one
+campaign. All twenty .NET cells contain 60 complete 2026-08-15 runs from one
 candidate binary. The active runs produced
 one luma, chroma, raw-JSON, stdout, normalized-stderr, and normalized-log hash
 set per backend/profile across all thread modes. The separate A/B gates also
@@ -732,9 +765,9 @@ matched ordered `fileLoc`.
 Python v0.4.0 produced 15 distinct luma, chroma, JSON, and normalized-log hash
 sets in 15 runs; its strict oracle therefore remains `g4315520 --threads 0`.
 
-All refreshed .NET cells use the latest candidate based on main `e606262`; its
+All refreshed .NET cells use the latest candidate based on main `508b4f6`; its
 single-file `decode.exe` SHA-256 is
-`0A9CE1ED44F4C04D2688ADADCE65DFA7FCB93839AFD7828EF3F812C318D31715`.
+`3ACDAEC6E641D4ED81E649BCE0C9EA4BFBCAF551860543BA2A5026FBF4E2DA27`.
 The host was an Intel Core Ultra 7 265K with 20 logical processors, Windows 11
 build 26220, and .NET SDK/runtime `11.0.100-preview.6.26359.118`. Raw directories
 stay local because they contain the private fixture path; these are reported
@@ -4129,7 +4162,7 @@ Requirements:
 .\tools\build-ipp-native.ps1
 dotnet restore VHSDecodeDotNet.slnx
 dotnet build VHSDecodeDotNet.slnx -c Release --no-restore
-dotnet test --solution VHSDecodeDotNet.slnx -c Release --no-build --no-restore --minimum-expected-tests 1460
+dotnet test --solution VHSDecodeDotNet.slnx -c Release --no-build --no-restore --minimum-expected-tests 1463
 dotnet test --project tests\VHSDecode.Tests\VHSDecode.Tests.csproj -c Release --no-build --no-restore --coverage --coverage-output coverage.cobertura.xml --coverage-output-format cobertura
 ```
 
@@ -4143,7 +4176,7 @@ deployment computer. Binary-only single-file releases embed
 sidecar license files. An Exact-only build may omit the native build step.
 
 The current formal Release build has zero warnings and errors. The xUnit v3
-project exposes **1,460** independently discoverable tests to both
+project exposes **1,463** independently discoverable tests to both
 `dotnet test` and Visual Studio Test Explorer.
 
 <!-- SECTION: usage -->

@@ -168,6 +168,15 @@ public sealed class SyncAnalyzer
     public IReadOnlyList<ClassifiedSyncPulse> ClassifyPulses(IReadOnlyList<Pulse> rawPulses, SyncTiming timing)
     {
         var classified = new List<ClassifiedSyncPulse>(BoundedInitialCapacity(rawPulses.Count));
+        return ClassifyPulses(rawPulses, timing, classified);
+    }
+
+    internal IReadOnlyList<ClassifiedSyncPulse> ClassifyPulses(
+        IReadOnlyList<Pulse> rawPulses,
+        SyncTiming timing,
+        List<ClassifiedSyncPulse> destination)
+    {
+        PreparePulseDestination(destination, rawPulses.Count);
         foreach (Pulse pulse in rawPulses)
         {
             SyncPulseKind? kind = ClassifyPulse(pulse, timing);
@@ -177,11 +186,12 @@ public sealed class SyncAnalyzer
                 continue;
             }
 
-            bool inOrder = classified.Count > 0 && PulseQualityCheck(classified[^1], kind.Value, pulse);
-            classified.Add(new ClassifiedSyncPulse(kind.Value, pulse, inOrder));
+            bool inOrder = destination.Count > 0
+                && PulseQualityCheck(destination[^1], kind.Value, pulse);
+            destination.Add(new ClassifiedSyncPulse(kind.Value, pulse, inOrder));
         }
 
-        return classified;
+        return destination;
     }
 
     public IReadOnlyList<ClassifiedSyncPulse> RefinePulses(
@@ -208,17 +218,47 @@ public sealed class SyncAnalyzer
         double hsyncRescueStepHz,
         out Pulse[] updatedRawPulses)
     {
+        var refined = new List<ClassifiedSyncPulse>(BoundedInitialCapacity(rawPulses.Count));
+        return RefinePulses(
+            rawPulses,
+            timing,
+            syncReference,
+            hsyncRescueStepHz,
+            refined,
+            out updatedRawPulses);
+    }
+
+    internal IReadOnlyList<ClassifiedSyncPulse> RefinePulses(
+        IReadOnlyList<Pulse> rawPulses,
+        SyncTiming timing,
+        List<ClassifiedSyncPulse> destination)
+        => RefinePulses(
+            rawPulses,
+            timing,
+            [],
+            0.0,
+            destination,
+            out _);
+
+    internal IReadOnlyList<ClassifiedSyncPulse> RefinePulses(
+        IReadOnlyList<Pulse> rawPulses,
+        SyncTiming timing,
+        ReadOnlySpan<double> syncReference,
+        double hsyncRescueStepHz,
+        List<ClassifiedSyncPulse> destination,
+        out Pulse[] updatedRawPulses)
+    {
         Pulse[] workingPulses = rawPulses.ToArray();
-        var refined = new List<ClassifiedSyncPulse>(BoundedInitialCapacity(workingPulses.Length));
+        PreparePulseDestination(destination, workingPulses.Length);
         int index = 0;
         while (index < workingPulses.Length)
         {
             Pulse pulse = workingPulses[index];
             if (timing.HSync.Contains(pulse.Length))
             {
-                bool inOrder = refined.Count > 0
-                    && PulseQualityCheck(refined[^1], SyncPulseKind.HSync, pulse);
-                refined.Add(new ClassifiedSyncPulse(SyncPulseKind.HSync, pulse, inOrder));
+                bool inOrder = destination.Count > 0
+                    && PulseQualityCheck(destination[^1], SyncPulseKind.HSync, pulse);
+                destination.Add(new ClassifiedSyncPulse(SyncPulseKind.HSync, pulse, inOrder));
                 index++;
                 continue;
             }
@@ -246,8 +286,8 @@ public sealed class SyncAnalyzer
 
             bool canStartVBlank = index > 2
                 && timing.Equalizing.Contains(pulse.Length)
-                && refined.Count > 0
-                && refined[^1].Kind == SyncPulseKind.HSync;
+                && destination.Count > 0
+                && destination[^1].Kind == SyncPulseKind.HSync;
             if (!canStartVBlank)
             {
                 index++;
@@ -259,7 +299,7 @@ public sealed class SyncAnalyzer
                     timing,
                     index - 2,
                     Math.Min(workingPulses.Length, index + 24),
-                    refined,
+                    destination,
                     out int vBlankPulseCount))
             {
                 index++;
@@ -270,7 +310,7 @@ public sealed class SyncAnalyzer
         }
 
         updatedRawPulses = workingPulses;
-        return refined;
+        return destination;
     }
 
     private Pulse? TryRescueLongHSync(
@@ -723,4 +763,23 @@ public sealed class SyncAnalyzer
 
     private static int BoundedInitialCapacity(int count)
         => Math.Clamp(count, 0, MaximumInitialSyncListCapacity);
+
+    private static void PreparePulseDestination(
+        List<ClassifiedSyncPulse> destination,
+        int sourceCount)
+    {
+        ArgumentNullException.ThrowIfNull(destination);
+        destination.Clear();
+        int requiredCapacity = BoundedInitialCapacity(sourceCount);
+        if (destination.Capacity > MaximumInitialSyncListCapacity
+            && sourceCount <= MaximumInitialSyncListCapacity)
+        {
+            destination.Capacity = requiredCapacity;
+        }
+
+        if (destination.Capacity < requiredCapacity)
+        {
+            destination.Capacity = requiredCapacity;
+        }
+    }
 }

@@ -9,8 +9,8 @@ public sealed partial class ReadmeLocalizationTests
         "<!-- LATEST_PERFORMANCE_RUNS: performance-snapshot-runs=90 " +
         "dotnet-matrix-runs=60 dotnet-current-runs=30 " +
         "python-reference-runs=30 dotnet-repeats=3 " +
-        "python-reference-date=2026-08-12 dotnet-v040-date=2026-08-14 " +
-        "dotnet-current-date=2026-08-14 phase22-200-ab-pairs=20 " +
+        "python-reference-date=2026-08-12 dotnet-v040-date=2026-08-15 " +
+        "dotnet-current-date=2026-08-15 phase22-200-ab-pairs=20 " +
         "phase22-long-ab-pairs=8 phase22-thread-backend-runs=60 " +
         "phase22-gc-traces=2 phase22-tests=1438 " +
         "phase24-short-ab-pairs=6 phase24-long-ab-pairs=4 " +
@@ -35,12 +35,16 @@ public sealed partial class ReadmeLocalizationTests
         "phase32-vblank-short-ab-pairs=6 phase32-vblank-long-ab-pairs=2 " +
         "phase32-thread-backend-runs=24 phase32-gc-traces=2 " +
         "phase32-counter-runs=2 phase32-tests=1460 " +
+        "phase33-sync-list-short-ab-pairs=6 phase33-sync-list-long-ab-pairs=2 " +
+        "phase33-thread-backend-runs=24 phase33-gc-traces=1 " +
+        "phase33-memory-runs=4 phase33-public-cell-runs=60 " +
+        "phase33-tests=1463 " +
         "python-v040-runs=15 python-v040-hashes=15 " +
         "python-pr341-runs=15 python-pr341-hashes=1 -->";
 
     private const string FullCiTestCommand =
         "run: dotnet test --solution VHSDecodeDotNet.slnx --configuration Release " +
-        "--no-build --no-restore --minimum-expected-tests 1460";
+        "--no-build --no-restore --minimum-expected-tests 1463";
 
     private const string FinalRealRadix4AvxTestCommand =
         "run: dotnet test tests/VHSDecode.Tests/VHSDecode.Tests.csproj " +
@@ -248,34 +252,34 @@ public sealed partial class ReadmeLocalizationTests
         Assert.Equal(3, expectedDetailedCommands.Length);
         string[] expectedOverviewPerformanceRows =
         [
-            "52.811 s | 54.243 s | 12.550 s | 4.208x | 11.088 s | 4.892x | 10.761 s | 4.908x | 8.273 s | 6.556x",
-            "57.067 s | 56.762 s | 31.646 s | 1.803x | 34.146 s | 1.662x | 22.784 s | 2.505x | 24.472 s | 2.319x",
-            "52.920 s | 55.722 s | 12.038 s | 4.396x | 11.242 s | 4.957x | 10.671 s | 4.959x | 8.282 s | 6.728x",
-            "52.965 s | 54.949 s | 9.820 s | 5.394x | 9.006 s | 6.102x | 8.995 s | 5.888x | 6.412 s | 8.569x",
-            "53.555 s | 54.842 s | 7.770 s | 6.893x | 7.301 s | 7.511x | 7.656 s | 6.995x | 4.998 s | 10.973x"
+            "52.811 s | 54.243 s | 12.625 s | 4.183x | 11.841 s | 4.581x | 11.140 s | 4.741x | 8.530 s | 6.359x",
+            "57.067 s | 56.762 s | 32.879 s | 1.736x | 36.092 s | 1.573x | 23.205 s | 2.459x | 25.135 s | 2.258x",
+            "52.920 s | 55.722 s | 12.842 s | 4.121x | 11.720 s | 4.754x | 11.120 s | 4.759x | 8.489 s | 6.564x",
+            "52.965 s | 54.949 s | 10.233 s | 5.176x | 8.783 s | 6.256x | 9.137 s | 5.797x | 6.473 s | 8.488x",
+            "53.555 s | 54.842 s | 8.183 s | 6.545x | 7.624 s | 7.194x | 7.890 s | 6.788x | 5.220 s | 10.507x"
         ];
         string[] expectedDetailedPerformanceRows =
         [
-            "52.811 s | 54.243 s | 12.550 s | 4.208x | 76.24% | 11.088 s | 4.892x | 79.56% | 10.761 s | 4.908x | 79.62% | 8.273 s | 6.556x | 84.75%",
-            "57.067 s | 56.762 s | 31.646 s | 1.803x | 44.55% | 34.146 s | 1.662x | 39.84% | 22.784 s | 2.505x | 60.08% | 24.472 s | 2.319x | 56.89%",
-            "52.920 s | 55.722 s | 12.038 s | 4.396x | 77.25% | 11.242 s | 4.957x | 79.83% | 10.671 s | 4.959x | 79.84% | 8.282 s | 6.728x | 85.14%",
-            "52.965 s | 54.949 s | 9.820 s | 5.394x | 81.46% | 9.006 s | 6.102x | 83.61% | 8.995 s | 5.888x | 83.02% | 6.412 s | 8.569x | 88.33%",
-            "53.555 s | 54.842 s | 7.770 s | 6.893x | 85.49% | 7.301 s | 7.511x | 86.69% | 7.656 s | 6.995x | 85.70% | 4.998 s | 10.973x | 90.89%"
+            "52.811 s | 54.243 s | 12.625 s | 4.183x | 76.09% | 11.841 s | 4.581x | 78.17% | 11.140 s | 4.741x | 78.91% | 8.530 s | 6.359x | 84.27%",
+            "57.067 s | 56.762 s | 32.879 s | 1.736x | 42.39% | 36.092 s | 1.573x | 36.42% | 23.205 s | 2.459x | 59.34% | 25.135 s | 2.258x | 55.72%",
+            "52.920 s | 55.722 s | 12.842 s | 4.121x | 75.73% | 11.720 s | 4.754x | 78.97% | 11.120 s | 4.759x | 78.99% | 8.489 s | 6.564x | 84.77%",
+            "52.965 s | 54.949 s | 10.233 s | 5.176x | 80.68% | 8.783 s | 6.256x | 84.02% | 9.137 s | 5.797x | 82.75% | 6.473 s | 8.488x | 88.22%",
+            "53.555 s | 54.842 s | 8.183 s | 6.545x | 84.72% | 7.624 s | 7.194x | 86.10% | 7.890 s | 6.788x | 85.27% | 5.220 s | 10.507x | 90.48%"
         ];
         string[] expectedDetailedPerformanceRangeRows =
         [
-            "default 5 | 52.583-62.222 s | 53.893-58.195 s | 12.410-12.819 s | 10.793-11.122 s | 10.637-10.830 s | 8.248-8.400 s",
-            "threads 1 | 56.709-60.521 s | 56.335-58.991 s | 31.375-32.736 s | 34.008-35.080 s | 22.598-23.670 s | 24.416-24.568 s",
-            "threads 5 | 52.845-53.977 s | 53.696-58.437 s | 11.932-12.396 s | 11.088-11.406 s | 10.642-10.765 s | 8.279-8.354 s",
-            "threads 10 | 51.797-53.088 s | 52.649-56.775 s | 9.548-9.918 s | 8.276-9.051 s | 8.962-9.173 s | 6.253-6.570 s",
-            "threads 20 | 52.967-55.987 s | 53.005-55.618 s | 7.693-8.026 s | 6.209-7.601 s | 7.477-7.847 s | 4.970-5.038 s"
+            "default 5 | 52.583-62.222 s | 53.893-58.195 s | 12.300-13.214 s | 10.791-11.889 s | 10.821-11.256 s | 8.493-8.553 s",
+            "threads 1 | 56.709-60.521 s | 56.335-58.991 s | 31.842-32.947 s | 35.314-36.434 s | 22.932-23.407 s | 25.057-25.195 s",
+            "threads 5 | 52.845-53.977 s | 53.696-58.437 s | 12.468-12.960 s | 11.554-12.030 s | 11.002-11.184 s | 8.444-8.590 s",
+            "threads 10 | 51.797-53.088 s | 52.649-56.775 s | 10.115-10.315 s | 8.690-9.143 s | 9.134-9.154 s | 6.387-6.524 s",
+            "threads 20 | 52.967-55.987 s | 53.005-55.618 s | 8.080-8.198 s | 7.528-7.879 s | 7.694-7.908 s | 5.202-5.406 s"
         ];
 
         string[] overviewFacts =
         [
             "43155200da87c0d49eb37d8ec09b1372075ee8e4",
             "11.0.100-preview.6.26359.118",
-            "**1,460**",
+            "**1,463**",
             "--compat-version",
             "current",
             "--dsp-backend",
@@ -285,13 +289,13 @@ public sealed partial class ReadmeLocalizationTests
             "IPP-fast + v0.4.0",
             "IPP-fast + current",
             "--start 100",
-            "e606262",
+            "508b4f6",
             "52.811 s",
             "54.243 s",
-            "12.550 s",
-            "11.088 s",
-            "7.511x",
-            "10.973x",
+            "12.625 s",
+            "11.841 s",
+            "7.194x",
+            "10.507x",
             "46.047",
             "42.575",
             "44.980",
@@ -304,6 +308,11 @@ public sealed partial class ReadmeLocalizationTests
             "46.0%",
             "44.4",
             "24.2",
+            "32.95",
+            "32.11",
+            "8.65%",
+            "390.8",
+            "360.5",
             "g4315520",
             "--threads 0"
         ];
@@ -362,7 +371,6 @@ public sealed partial class ReadmeLocalizationTests
             "46.0%",
             "44.4",
             "24.2",
-            "1,460",
             "41.77",
             "41.04",
             "Phase 24",
@@ -662,7 +670,7 @@ public sealed partial class ReadmeLocalizationTests
             "1.72%",
             "444.3 MiB",
             "406.0 MiB",
-            "**1,460**",
+            "**1,463**",
             "3.7935",
             "3.6182",
             "4.62%",
@@ -1314,8 +1322,8 @@ public sealed partial class ReadmeLocalizationTests
             "382.9/383.0 MiB",
             "1,295",
             "--use_saved_levels",
-            "e606262",
-            "0A9CE1ED44F4C04D2688ADADCE65DFA7FCB93839AFD7828EF3F812C318D31715",
+            "508b4f6",
+            "3ACDAEC6E641D4ED81E649BCE0C9EA4BFBCAF551860543BA2A5026FBF4E2DA27",
             "354.4/473.2 MiB",
             "353.6/468.9 MiB",
             "19.74/19.86",
@@ -1345,6 +1353,16 @@ public sealed partial class ReadmeLocalizationTests
             "275.297",
             "9.24",
             "9.60",
+            "680,536,552",
+            "621,643,144",
+            "65,614,400",
+            "32.95",
+            "32.11",
+            "298.40",
+            "288.02",
+            "390.8/360.5 MiB",
+            "409.9/374.4 MiB",
+            "1,463",
             "COMPATIBILITY_EVIDENCE.md"
         ];
 
@@ -1427,7 +1445,7 @@ public sealed partial class ReadmeLocalizationTests
             "The shared compatibility evidence document is missing.");
         string compatibilityEvidence = File.ReadAllText(compatibilityEvidencePath);
         Assert.Contains(
-            "1,460 independently discoverable tests",
+            "1,463 independently discoverable tests",
             compatibilityEvidence,
             StringComparison.Ordinal);
         Assert.DoesNotContain(
