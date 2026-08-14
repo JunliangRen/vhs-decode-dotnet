@@ -32,12 +32,15 @@ public sealed partial class ReadmeLocalizationTests
         "phase31-long-gate-runs=8 phase31-thread-backend-runs=24 " +
         "phase31-memory-runs=4 phase31-public-cell-runs=60 " +
         "phase31-tests=1459 " +
+        "phase32-vblank-short-ab-pairs=6 phase32-vblank-long-ab-pairs=2 " +
+        "phase32-thread-backend-runs=24 phase32-gc-traces=2 " +
+        "phase32-counter-runs=2 phase32-tests=1460 " +
         "python-v040-runs=15 python-v040-hashes=15 " +
         "python-pr341-runs=15 python-pr341-hashes=1 -->";
 
     private const string FullCiTestCommand =
         "run: dotnet test --solution VHSDecodeDotNet.slnx --configuration Release " +
-        "--no-build --no-restore --minimum-expected-tests 1459";
+        "--no-build --no-restore --minimum-expected-tests 1460";
 
     private const string FinalRealRadix4AvxTestCommand =
         "run: dotnet test tests/VHSDecode.Tests/VHSDecode.Tests.csproj " +
@@ -272,7 +275,7 @@ public sealed partial class ReadmeLocalizationTests
         [
             "43155200da87c0d49eb37d8ec09b1372075ee8e4",
             "11.0.100-preview.6.26359.118",
-            "**1,459**",
+            "**1,460**",
             "--compat-version",
             "current",
             "--dsp-backend",
@@ -297,6 +300,10 @@ public sealed partial class ReadmeLocalizationTests
             "25.260",
             "473/469 MiB",
             "354/354 MiB",
+            "6.05%",
+            "46.0%",
+            "44.4",
+            "24.2",
             "g4315520",
             "--threads 0"
         ];
@@ -346,6 +353,16 @@ public sealed partial class ReadmeLocalizationTests
             "1.063x",
             "284.063",
             "3.71%",
+            "33.91/35.96",
+            "6.05%",
+            "6.13%",
+            "8.51/8.52",
+            "1,058,682,656",
+            "572,202,104",
+            "46.0%",
+            "44.4",
+            "24.2",
+            "1,460",
             "41.77",
             "41.04",
             "Phase 24",
@@ -645,7 +662,7 @@ public sealed partial class ReadmeLocalizationTests
             "1.72%",
             "444.3 MiB",
             "406.0 MiB",
-            "**1,448**",
+            "**1,460**",
             "3.7935",
             "3.6182",
             "4.62%",
@@ -1410,7 +1427,7 @@ public sealed partial class ReadmeLocalizationTests
             "The shared compatibility evidence document is missing.");
         string compatibilityEvidence = File.ReadAllText(compatibilityEvidencePath);
         Assert.Contains(
-            "1,448 independently discoverable tests",
+            "1,460 independently discoverable tests",
             compatibilityEvidence,
             StringComparison.Ordinal);
         Assert.DoesNotContain(
