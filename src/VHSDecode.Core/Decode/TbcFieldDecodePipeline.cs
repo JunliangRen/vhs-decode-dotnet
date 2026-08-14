@@ -697,7 +697,8 @@ public sealed class TbcFieldDecodePipeline : IDisposable
                         .EnumerateArray()
                         .First()
                         .GetDouble()
-                    : null);
+                    : null,
+            dspBackend: session.ExecutionOptions.DspBackend);
     }
 
     public int EstimateReadSampleCount(int extraLines = 3)
@@ -1926,56 +1927,74 @@ public sealed class TbcFieldDecodePipeline : IDisposable
             throw;
         }
 
-        bool parallelizeVhsDropoutDetection = _dropoutOptions is
+        Task<TbcDropoutMap?>? dropoutDetectionTask = null;
+        bool tailTransferred = false;
+        try
         {
-            Enabled: true,
-            Mode: TbcDropoutDetectionMode.TapeEnvelope
-        }
-            && span.Envelope is { Length: > 0 };
-        Task<TbcDropoutMap?>? dropoutDetectionTask = parallelizeVhsDropoutDetection
-            ? Task.Run(() => DetectDropouts(
-                span,
-                lineLocations,
-                timing,
-                parity.IsFirstField,
-                fieldConverter ?? _videoOutput))
-            : null;
-        TbcDropoutMap? completedDropouts = dropoutDetectionTask is null
-            ? DetectDropouts(
-                span,
-                lineLocations,
-                timing,
-                parity.IsFirstField,
-                fieldConverter ?? _videoOutput)
-            : null;
-        Task inputDependentWork = dropoutDetectionTask is null
-            ? renderTask
-            : Task.WhenAll(renderTask, dropoutDetectionTask);
+            bool parallelizeVhsDropoutDetection = _dropoutOptions is
+            {
+                Enabled: true,
+                Mode: TbcDropoutDetectionMode.TapeEnvelope
+            }
+                && span.Envelope is { Length: > 0 };
+            dropoutDetectionTask = parallelizeVhsDropoutDetection
+                ? Task.Run(() => DetectDropouts(
+                    span,
+                    lineLocations,
+                    timing,
+                    parity.IsFirstField,
+                    fieldConverter ?? _videoOutput))
+                : null;
+            TbcDropoutMap? completedDropouts = dropoutDetectionTask is null
+                ? DetectDropouts(
+                    span,
+                    lineLocations,
+                    timing,
+                    parity.IsFirstField,
+                    fieldConverter ?? _videoOutput)
+                : null;
+            Task inputDependentWork = dropoutDetectionTask is null
+                ? renderTask
+                : Task.WhenAll(renderTask, dropoutDetectionTask);
 
-        return new PendingVhsField(
-            span.StartSample,
-            nextFieldOffsetSamples,
-            () => CompleteVhsWavefrontTail(
+            var pending = new PendingVhsField(
                 span.StartSample,
-                lineLocations,
-                timing,
-                parity,
-                renderTask,
-                chromaDecodeTask,
-                dropoutDetectionTask,
-                completedDropouts,
-                fieldNumber,
-                fieldConverter,
-                outputBufferLease,
-                syncConfidence,
                 nextFieldOffsetSamples,
-                currentFieldLineCount,
-                threshold,
-                meanLineLength,
-                rawPulseCount,
-                classifiedPulseCount,
-                laserDiscAgcAdjusted),
-            inputDependentWork);
+                () => CompleteVhsWavefrontTail(
+                    span.StartSample,
+                    lineLocations,
+                    timing,
+                    parity,
+                    renderTask,
+                    chromaDecodeTask,
+                    dropoutDetectionTask,
+                    completedDropouts,
+                    fieldNumber,
+                    fieldConverter,
+                    outputBufferLease,
+                    syncConfidence,
+                    nextFieldOffsetSamples,
+                    currentFieldLineCount,
+                    threshold,
+                    meanLineLength,
+                    rawPulseCount,
+                    classifiedPulseCount,
+                    laserDiscAgcAdjusted),
+                inputDependentWork);
+            tailTransferred = true;
+            return pending;
+        }
+        finally
+        {
+            if (!tailTransferred)
+            {
+                // The caller still owns the pooled buffers. Finish every task that
+                // can reference them before its outer finally returns those buffers.
+                DrainTask(renderTask);
+                DrainTask(chromaDecodeTask);
+                DrainTask(dropoutDetectionTask);
+            }
+        }
     }
 
     private TbcDecodedField CompleteVhsWavefrontTail(

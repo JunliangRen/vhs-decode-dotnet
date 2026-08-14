@@ -57,6 +57,20 @@ public sealed class VhsSessionReaderOutputBufferPoolIntegrationTests
                 expectedActive: compatibility == "v0.4.0");
             Assert.Same(stagedFieldLogger, stagedSession.TbcFieldDecoder.DiagnosticLogger);
             Assert.Same(stagedRenderLogger, stagedSession.TbcRenderer.DiagnosticLogger);
+
+            using TbcFieldDecodePipeline exactFromSession =
+                TbcFieldDecodePipeline.FromSession(stagedSession);
+            Assert.Equal(
+                compatibility == "v0.4.0",
+                exactFromSession.CanUseVhsWavefront);
+            using DecodeSession ippSession = CreateSession(
+                stagedOutput + "-ipp-profile",
+                compatibility,
+                threads: 20,
+                dspBackend: "ipp-fast");
+            using TbcFieldDecodePipeline ippFromSession =
+                TbcFieldDecodePipeline.FromSession(ippSession);
+            Assert.True(ippFromSession.CanUseVhsWavefront);
         }
         finally
         {
@@ -376,7 +390,8 @@ public sealed class VhsSessionReaderOutputBufferPoolIntegrationTests
         string outputBase,
         string compatibility,
         int threads,
-        int? requestedFields = null)
+        int? requestedFields = null,
+        string? dspBackend = null)
     {
         List<string> arguments =
         [
@@ -391,6 +406,12 @@ public sealed class VhsSessionReaderOutputBufferPoolIntegrationTests
             "--compat-version", compatibility,
             "--threads", threads.ToString(System.Globalization.CultureInfo.InvariantCulture),
         ];
+        if (dspBackend is not null)
+        {
+            arguments.Add("--dsp-backend");
+            arguments.Add(dspBackend);
+        }
+
         if (requestedFields.HasValue)
         {
             arguments.Add("--length");
