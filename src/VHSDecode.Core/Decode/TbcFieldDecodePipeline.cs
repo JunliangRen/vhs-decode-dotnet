@@ -229,6 +229,8 @@ public sealed class TbcFieldDecodePipeline : IDisposable
     private const int VhsWavefrontWorkspaceCapacity = 2;
     private static readonly Action<string, string> IgnoreDiagnostic = static (_, _) => { };
     private readonly SyncAnalyzer _syncAnalyzer;
+    private readonly List<ClassifiedSyncPulse> _classifiedPulseWorkspace = [];
+    private readonly List<ClassifiedSyncPulse> _refinedPulseWorkspace = [];
     private readonly TbcFieldRenderer _renderer;
     private readonly VideoOutputConverter _videoOutput;
     private readonly string _system;
@@ -1174,7 +1176,10 @@ public sealed class TbcFieldDecodePipeline : IDisposable
         SyncTiming timing = _syncAnalyzer.EstimateTiming(
             rawPulses,
             preserveVhsEmptyHSyncMedianUnits: isVhs);
-        IReadOnlyList<ClassifiedSyncPulse> classified = _syncAnalyzer.ClassifyPulses(rawPulses, timing);
+        IReadOnlyList<ClassifiedSyncPulse> classified = _syncAnalyzer.ClassifyPulses(
+            rawPulses,
+            timing,
+            _classifiedPulseWorkspace);
         if (classified.Count == 0 && !isVhs)
         {
             throw BuildRecoveryException(
@@ -1194,6 +1199,7 @@ public sealed class TbcFieldDecodePipeline : IDisposable
                 timing,
                 span.VideoLowPass ?? span.Video,
                 10.0 * _videoOutput.HzIre,
+                _refinedPulseWorkspace,
                 out Pulse[] updatedRawPulses);
             // v0.4.0 mutates overlong HSync pulses during rescue, and its
             // fallback VSync search observes those replacements.
@@ -1201,7 +1207,10 @@ public sealed class TbcFieldDecodePipeline : IDisposable
         }
         else
         {
-            refinedPulses = _syncAnalyzer.RefinePulses(rawPulses, timing);
+            refinedPulses = _syncAnalyzer.RefinePulses(
+                rawPulses,
+                timing,
+                _refinedPulseWorkspace);
         }
 
         double meanLineLength = _syncAnalyzer.ComputeMeanLineLength(refinedPulses);

@@ -52,6 +52,57 @@ public sealed class PulseDetectionReuseTests
         Assert.InRange(refinementAllocation, 0, 12 * 1024 * 1024);
     }
 
+    [Fact(DisplayName = "Caller-owned classified pulse lists preserve values with bounded warm allocation")]
+    public void CallerOwnedClassifiedPulseListsPreserveValuesWithBoundedWarmAllocation()
+    {
+        const int PulseCount = 4_096;
+        Pulse[] pulses = Enumerable.Range(0, PulseCount)
+            .Select(static index => new Pulse(index * 100, 10))
+            .ToArray();
+        var analyzer = new SyncAnalyzer(
+            sampleRateHz: 1_000_000.0,
+            linePeriodUs: 100.0,
+            hsyncPulseUs: 10.0,
+            equalizingPulseUs: 5.0,
+            vsyncPulseUs: 20.0);
+        SyncTiming timing = analyzer.EstimateTiming(pulses);
+        ClassifiedSyncPulse[] expectedClassified = analyzer.ClassifyPulses(pulses, timing).ToArray();
+        ClassifiedSyncPulse[] expectedRefined = analyzer.RefinePulses(pulses, timing).ToArray();
+        var classified = new List<ClassifiedSyncPulse> { default };
+        var refined = new List<ClassifiedSyncPulse> { default };
+
+        Assert.Same(classified, analyzer.ClassifyPulses(pulses, timing, classified));
+        Assert.Same(refined, analyzer.RefinePulses(pulses, timing, refined));
+        Assert.Equal(expectedClassified, classified);
+        Assert.Equal(expectedRefined, refined);
+
+        long classificationStart = GC.GetAllocatedBytesForCurrentThread();
+        for (int iteration = 0; iteration < 32; iteration++)
+        {
+            analyzer.ClassifyPulses(pulses, timing, classified);
+        }
+
+        long classificationAllocation = GC.GetAllocatedBytesForCurrentThread()
+            - classificationStart;
+        long refinementStart = GC.GetAllocatedBytesForCurrentThread();
+        for (int iteration = 0; iteration < 16; iteration++)
+        {
+            analyzer.RefinePulses(pulses, timing, refined);
+        }
+
+        long refinementAllocation = GC.GetAllocatedBytesForCurrentThread()
+            - refinementStart;
+
+        Assert.Equal(expectedClassified, classified);
+        Assert.Equal(expectedRefined, refined);
+        Assert.InRange(classificationAllocation, 0, 1_024);
+        Assert.InRange(refinementAllocation, 0, 600 * 1_024);
+
+        classified.Capacity = 131_072;
+        analyzer.ClassifyPulses(pulses, timing, classified);
+        Assert.InRange(classified.Capacity, PulseCount, 65_536);
+    }
+
     [Fact(DisplayName = "Rejected VBlank candidates use bounded stack scratch")]
     public void RejectedVBlankCandidatesUseBoundedStackScratch()
     {
