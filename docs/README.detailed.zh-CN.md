@@ -500,37 +500,63 @@ workspace 均不变；小型变换和单 worker 调用仍走串行路径。
 在三种长度下都与串行结果逐字节一致。完整本地套件发现 1446 项测试：1442 项通过、
 0 项失败，4 项仅 IPP 测试因缺少原生运行库而跳过。
 
+### 有界的跨场 VHS wavefront
+
+最新候选在生产 VHS 序列解码中加入容量为 2 的 wavefront。同步与有序状态规划仍在
+序列线程执行；亮度渲染、已准备色度的完成阶段和磁带 dropout 映射可以并行，但只有
+仍引用当前 RF span 的任务全部结束后才会开始下一场 RF 读取。输出、JSON、`fileLoc`、
+恢复和诊断始终按输入顺序提交；逐场诊断捕获也会在下一次有序提交前恢复。
+
+大型租赁 RF span 会在 lookahead 前归还，跨越场边界的只有独立拥有的色度尾部和小型
+池化场输出。色度、渲染和输出池的容量均为 2。500 帧内存配对中，基线/候选峰值工作集
+为 354.4/473.2 MiB，private bytes 为 365.7/525.0 MiB；1000 帧时分别为
+353.6/468.9 MiB 和 367.2/502.8 MiB，证明这是固定窗口而非逐场增长。首版原型曾同时
+保留两个完整 RF span，峰值接近 884 MiB；该版本在发布前已被淘汰。
+
+Exact `current` 被明确排除在此 wavefront 外：门控后的三对交错 500 帧运行中位数为
+19.74/19.86 秒，没有有效收益。保留路径则有稳定提升：Exact v0.4.0 从 33.55 降至
+32.31 秒（墙钟缩短 3.7%）；IPP-fast `current` 从 19.77 降至 17.26 秒（缩短 12.7%），
+后者有效核心数从 5.66 升到 6.58，而 CPU 时间仅增加约 1.5%。
+
+最终 1000 帧 `--threads 20` release 二进制门禁在四种 Exact/IPP-fast 与
+v0.4.0/`current` 组合中均匹配亮度、色度、原始 JSON、有序 `fileLoc`、stdout、归一化
+stderr 和归一化日志。Exact v0.4.0 从 46.047 降至 42.575 秒，IPP-fast v0.4.0 从
+44.980 降至 42.084 秒，IPP-fast `current` 从 31.009 降至 25.260 秒。最后一条路径的
+CPU 时间从 188.20 变为 197.34 秒，有效核心数从 6.07 升到 7.81。另有 24 次门禁覆盖
+`--threads 0`、省略参数的默认五 worker 和 20 workers；标准 xUnit v3 的 1459 项测试
+全部通过。
+
 ### 最新六路径线程矩阵
 
 最新首页摘要是包含启动开销的 `--start 100 --length 160` 快照，在同一个私有本地
 40 MHz PAL VHS `.ldf` 夹具上比较 Python v0.4.0、已合并的 Python PR341、Exact
 v0.4.0、Exact `current`、IPP-fast v0.4.0 和 IPP-fast `current`。文件名不会公开。
 当前表格保留了 2026-08-12 的 30 次固定 Python 参考测量。全部 60 次 .NET 测量已在
-2026-08-14 用基于 main `2b35b9e` 的最新候选同时刷新。每个 .NET 单元格依次给出墙钟
+2026-08-14 用基于 main `e606262` 的最新候选同时刷新。每个 .NET 单元格依次给出墙钟
 中位数、相对同 profile Python 列的倍速和墙钟缩短比例；使用其他批次、格式或夹具
 的历史矩阵不能直接横向比较：
 
 <!-- LATEST_PERFORMANCE_BEGIN -->
 | CLI 模式（workers） | Python v0.4.0 | Python PR341 | Exact + v0.4.0 | Exact + current | IPP-fast + v0.4.0 | IPP-fast + current |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| 默认（5） | 52.811 s | 54.243 s | 12.320 s / 4.287x / 76.67% | 10.717 s / 5.062x / 80.24% | 10.776 s / 4.901x / 79.60% | 8.822 s / 6.148x / 83.74% |
-| `--threads 1` | 57.067 s | 56.762 s | 31.391 s / 1.818x / 44.99% | 34.196 s / 1.660x / 39.76% | 22.631 s / 2.522x / 60.34% | 24.331 s / 2.333x / 57.14% |
-| `--threads 5` | 52.920 s | 55.722 s | 12.226 s / 4.328x / 76.90% | 10.690 s / 5.212x / 80.81% | 11.012 s / 4.805x / 79.19% | 8.607 s / 6.474x / 84.55% |
-| `--threads 10` | 52.965 s | 54.949 s | 10.030 s / 5.281x / 81.06% | 8.164 s / 6.731x / 85.14% | 9.406 s / 5.631x / 82.24% | 6.936 s / 7.922x / 87.38% |
-| `--threads 20` | 53.555 s | 54.842 s | 8.062 s / 6.643x / 84.95% | 6.810 s / 8.053x / 87.58% | 8.017 s / 6.680x / 85.03% | 5.290 s / 10.366x / 90.35% |
+| 默认（5） | 52.811 s | 54.243 s | 12.550 s / 4.208x / 76.24% | 11.088 s / 4.892x / 79.56% | 10.761 s / 4.908x / 79.62% | 8.273 s / 6.556x / 84.75% |
+| `--threads 1` | 57.067 s | 56.762 s | 31.646 s / 1.803x / 44.55% | 34.146 s / 1.662x / 39.84% | 22.784 s / 2.505x / 60.08% | 24.472 s / 2.319x / 56.89% |
+| `--threads 5` | 52.920 s | 55.722 s | 12.038 s / 4.396x / 77.25% | 11.242 s / 4.957x / 79.83% | 10.671 s / 4.959x / 79.84% | 8.282 s / 6.728x / 85.14% |
+| `--threads 10` | 52.965 s | 54.949 s | 9.820 s / 5.394x / 81.46% | 9.006 s / 6.102x / 83.61% | 8.995 s / 5.888x / 83.02% | 6.412 s / 8.569x / 88.33% |
+| `--threads 20` | 53.555 s | 54.842 s | 7.770 s / 6.893x / 85.49% | 7.301 s / 7.511x / 86.69% | 7.656 s / 6.995x / 85.70% | 4.998 s / 10.973x / 90.89% |
 <!-- LATEST_PERFORMANCE_END -->
-<!-- LATEST_PERFORMANCE_RUNS: performance-snapshot-runs=90 dotnet-matrix-runs=60 dotnet-current-runs=30 python-reference-runs=30 dotnet-repeats=3 python-reference-date=2026-08-12 dotnet-v040-date=2026-08-14 dotnet-current-date=2026-08-14 phase22-200-ab-pairs=20 phase22-long-ab-pairs=8 phase22-thread-backend-runs=60 phase22-gc-traces=2 phase22-tests=1438 phase24-short-ab-pairs=6 phase24-long-ab-pairs=4 phase24-thread-gate-runs=12 phase24-tests=1442 phase25-public-cell-runs=15 phase25-public-ab-pairs=15 phase25-long-ab-pairs=3 phase25-thread-gate-runs=12 phase25-tests=1446 phase26-kernel-ab-pairs=8 phase26-long-ab-pairs=4 phase26-thread-backend-runs=36 phase26-public-cell-runs=30 phase26-tests=1447 phase27-kernel-ab-pairs=8 phase27-long-ab-pairs=8 phase27-thread-backend-runs=24 phase27-public-cell-runs=60 phase27-tests=1448 phase28-kernel-ab-pairs=8 phase28-long-ab-pairs=6 phase28-thread-backend-runs=24 phase28-intrinsic-runs=3 phase28-public-cell-runs=60 phase28-tests=1448 phase30-burst-kernel-runs=14 phase30-long-ab-pairs=3 phase30-thread-gate-runs=6 phase30-memory-runs=2 phase30-public-cell-runs=60 phase30-tests=1448 python-v040-runs=15 python-v040-hashes=15 python-pr341-runs=15 python-pr341-hashes=1 -->
+<!-- LATEST_PERFORMANCE_RUNS: performance-snapshot-runs=90 dotnet-matrix-runs=60 dotnet-current-runs=30 python-reference-runs=30 dotnet-repeats=3 python-reference-date=2026-08-12 dotnet-v040-date=2026-08-14 dotnet-current-date=2026-08-14 phase22-200-ab-pairs=20 phase22-long-ab-pairs=8 phase22-thread-backend-runs=60 phase22-gc-traces=2 phase22-tests=1438 phase24-short-ab-pairs=6 phase24-long-ab-pairs=4 phase24-thread-gate-runs=12 phase24-tests=1442 phase25-public-cell-runs=15 phase25-public-ab-pairs=15 phase25-long-ab-pairs=3 phase25-thread-gate-runs=12 phase25-tests=1446 phase26-kernel-ab-pairs=8 phase26-long-ab-pairs=4 phase26-thread-backend-runs=36 phase26-public-cell-runs=30 phase26-tests=1447 phase27-kernel-ab-pairs=8 phase27-long-ab-pairs=8 phase27-thread-backend-runs=24 phase27-public-cell-runs=60 phase27-tests=1448 phase28-kernel-ab-pairs=8 phase28-long-ab-pairs=6 phase28-thread-backend-runs=24 phase28-intrinsic-runs=3 phase28-public-cell-runs=60 phase28-tests=1448 phase30-burst-kernel-runs=14 phase30-long-ab-pairs=3 phase30-thread-gate-runs=6 phase30-memory-runs=2 phase30-public-cell-runs=60 phase30-tests=1448 phase31-interleaved-ab-pairs=9 phase31-long-gate-runs=8 phase31-thread-backend-runs=24 phase31-memory-runs=4 phase31-public-cell-runs=60 phase31-tests=1459 python-v040-runs=15 python-v040-hashes=15 python-pr341-runs=15 python-pr341-hashes=1 -->
 
 三次运行的墙钟范围如下：
 
 <!-- LATEST_PERFORMANCE_RANGES_BEGIN -->
 | CLI 模式 | Python v0.4.0 | Python PR341 | Exact + v0.4.0 | Exact + current | IPP-fast + v0.4.0 | IPP-fast + current |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| 默认（5） | 52.583-62.222 s | 53.893-58.195 s | 12.112-12.408 s | 10.712-10.949 s | 10.767-11.013 s | 8.799-8.864 s |
-| `--threads 1` | 56.709-60.521 s | 56.335-58.991 s | 30.368-32.607 s | 33.439-34.554 s | 22.071-23.345 s | 23.849-25.567 s |
-| `--threads 5` | 52.845-53.977 s | 53.696-58.437 s | 12.183-12.232 s | 10.612-10.873 s | 10.802-11.149 s | 8.541-8.708 s |
-| `--threads 10` | 51.797-53.088 s | 52.649-56.775 s | 9.991-10.215 s | 7.893-8.435 s | 9.324-9.592 s | 6.871-7.179 s |
-| `--threads 20` | 52.967-55.987 s | 53.005-55.618 s | 8.029-8.072 s | 6.663-6.865 s | 7.723-8.087 s | 5.272-5.417 s |
+| 默认（5） | 52.583-62.222 s | 53.893-58.195 s | 12.410-12.819 s | 10.793-11.122 s | 10.637-10.830 s | 8.248-8.400 s |
+| `--threads 1` | 56.709-60.521 s | 56.335-58.991 s | 31.375-32.736 s | 34.008-35.080 s | 22.598-23.670 s | 24.416-24.568 s |
+| `--threads 5` | 52.845-53.977 s | 53.696-58.437 s | 11.932-12.396 s | 11.088-11.406 s | 10.642-10.765 s | 8.279-8.354 s |
+| `--threads 10` | 51.797-53.088 s | 52.649-56.775 s | 9.548-9.918 s | 8.276-9.051 s | 8.962-9.173 s | 6.253-6.570 s |
+| `--threads 20` | 52.967-55.987 s | 53.005-55.618 s | 7.693-8.026 s | 6.209-7.601 s | 7.477-7.847 s | 4.970-5.038 s |
 <!-- LATEST_PERFORMANCE_RANGES_END -->
 
 保留的 30 次 Python 测量来自 2026-08-12 固定条件活动。全部二十个 .NET 单元格来自
@@ -539,9 +565,9 @@ v0.4.0、Exact `current`、IPP-fast v0.4.0 和 IPP-fast `current`。文件名不
 hash；独立 A/B 门禁还匹配有序 `fileLoc`。Python v0.4.0 的 15 次运行产生了 15 套不同的亮度、色度、JSON 和
 归一化日志 hash，因此严格 oracle 仍为 `g4315520 --threads 0`。
 
-全部刷新的 .NET 单元格都使用基于 main `2b35b9e` 的最新候选；其单文件
+全部刷新的 .NET 单元格都使用基于 main `e606262` 的最新候选；其单文件
 `decode.exe` SHA-256 为
-`478D4CA77777B569273CF2846E7383C3FD38AE5E9B4B5D497DAB1280D611DF7D`。
+`0A9CE1ED44F4C04D2688ADADCE65DFA7FCB93839AFD7828EF3F812C318D31715`。
 测试机为 Intel Core Ultra 7 265K（20 个逻辑处理器）、Windows 11 build 26220，以及 .NET
 SDK/runtime `11.0.100-preview.6.26359.118`。原始目录含私有夹具路径，只保留在本地；
 这些是如实报告的本地测量，不是可公开独立复现的 benchmark corpus。
@@ -3185,7 +3211,7 @@ destination API，把最终 burst SOS 写回这块独占 buffer，从而在该 A
 .\tools\build-ipp-native.ps1
 dotnet restore VHSDecodeDotNet.slnx
 dotnet build VHSDecodeDotNet.slnx -c Release --no-restore
-dotnet test --solution VHSDecodeDotNet.slnx -c Release --no-build --no-restore --minimum-expected-tests 1448
+dotnet test --solution VHSDecodeDotNet.slnx -c Release --no-build --no-restore --minimum-expected-tests 1459
 dotnet test --project tests\VHSDecode.Tests\VHSDecode.Tests.csproj -c Release --no-build --no-restore --coverage --coverage-output coverage.cobertura.xml --coverage-output-format cobertura
 ```
 

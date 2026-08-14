@@ -12089,7 +12089,9 @@ public void NtscSequenceCompactChromaMatchesRetainedStorageBitExactly(
             "NTSC",
             TbcDropoutDetectionOptions.Disabled,
             chromaFieldOptions: chromaOptions with { WorkerThreads = workerThreads },
-            decodeType: "vhs");
+            decodeType: "vhs",
+            workerThreads: workerThreads,
+            dspBackend: useCurrentProcessing ? DspBackend.IppFast : DspBackend.Exact);
     }
 
     double[] video = Enumerable.Repeat(0.0, 6_500).ToArray();
@@ -12132,6 +12134,7 @@ public void NtscSequenceCompactChromaMatchesRetainedStorageBitExactly(
     TbcFieldDecodePipeline compactPipeline = CreatePipeline(workerThreads: 4);
     TbcFieldDecodePipeline retainedPipeline = CreatePipeline(workerThreads: 1);
     TbcFieldDecodePipeline pooledPipeline = CreatePipeline(workerThreads: 4);
+    TbcFieldDecodePipeline wavefrontPipeline = CreatePipeline(workerThreads: 4);
 
     TbcDecodedField compactFirst = compactPipeline.DecodeVhsForSequence(
         firstSpan,
@@ -12163,6 +12166,12 @@ public void NtscSequenceCompactChromaMatchesRetainedStorageBitExactly(
         fieldNumber: 1,
         retainChromaBurstSamples: false,
         usePooledOutputBuffers: true);
+    using TbcFieldDecodePipeline.PendingVhsField pendingWavefrontFirst =
+        wavefrontPipeline.BeginDecodeVhsForSequence(firstSpan, fieldNumber: 0);
+    using TbcFieldDecodePipeline.PendingVhsField pendingWavefrontSecond =
+        wavefrontPipeline.BeginDecodeVhsForSequence(secondSpan, fieldNumber: 1);
+    TbcDecodedField wavefrontFirst = pendingWavefrontFirst.Complete();
+    TbcDecodedField wavefrontSecond = pendingWavefrontSecond.Complete();
 
     try
     {
@@ -12193,11 +12202,25 @@ public void NtscSequenceCompactChromaMatchesRetainedStorageBitExactly(
         Assert.Equal<ushort>(compactFirst.ChromaSamples!, pooledFirst.ChromaSamples!);
         Assert.Equal<ushort>(compactSecond.Samples, pooledSecond.Samples);
         Assert.Equal<ushort>(compactSecond.ChromaSamples!, pooledSecond.ChromaSamples!);
+        Assert.NotSame(wavefrontFirst.Samples, wavefrontSecond.Samples);
+        Assert.NotSame(wavefrontFirst.ChromaSamples, wavefrontSecond.ChromaSamples);
+        Assert.Equal<ushort>(retainedFirst.Samples, wavefrontFirst.Samples);
+        Assert.Equal<ushort>(retainedFirst.ChromaSamples!, wavefrontFirst.ChromaSamples!);
+        Assert.Equal(retainedFirst.FieldPhaseId, wavefrontFirst.FieldPhaseId);
+        Assert.Equal(retainedFirst.BurstStartLine, wavefrontFirst.BurstStartLine);
+        Assert.Equal<ushort>(retainedSecond.Samples, wavefrontSecond.Samples);
+        Assert.Equal<ushort>(retainedSecond.ChromaSamples!, wavefrontSecond.ChromaSamples!);
+        Assert.Equal(retainedSecond.FieldPhaseId, wavefrontSecond.FieldPhaseId);
+        Assert.Equal(retainedSecond.BurstStartLine, wavefrontSecond.BurstStartLine);
+        Assert.Equal(wavefrontFirst.NextFieldOffsetSamples, pendingWavefrontFirst.NextFieldOffsetSamples);
+        Assert.Equal(wavefrontSecond.NextFieldOffsetSamples, pendingWavefrontSecond.NextFieldOffsetSamples);
     }
     finally
     {
         pooledFirst.ReleaseOutputBuffers();
         pooledSecond.ReleaseOutputBuffers();
+        wavefrontFirst.ReleaseOutputBuffers();
+        wavefrontSecond.ReleaseOutputBuffers();
     }
 }
 

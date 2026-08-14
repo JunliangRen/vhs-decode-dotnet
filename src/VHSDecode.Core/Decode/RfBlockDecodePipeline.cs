@@ -23,6 +23,7 @@ public sealed class RfBlockDecodePipeline : IDisposable
     private readonly IRfInputProcessor? _inputProcessor;
     private readonly IReusableRfSampleLoader? _reusableStreamInputLoader;
     private readonly Action<string, string>? _diagnosticLogger;
+    private readonly AsyncLocal<Action<string, string>?> _diagnosticLoggerOverride = new();
     private readonly bool _retainRfDiagnosticChannels;
     private readonly bool _useCurrentChromaShiftDc;
     private readonly bool _useNumpyComplexVhsAnalytic;
@@ -141,6 +142,14 @@ public sealed class RfBlockDecodePipeline : IDisposable
 
     internal int CreatedStreamOutputBufferSetCount =>
         Volatile.Read(ref _createdStreamOutputBufferSetCount);
+
+    internal IDisposable PushDiagnosticLogger(Action<string, string> diagnosticLogger)
+    {
+        ArgumentNullException.ThrowIfNull(diagnosticLogger);
+        Action<string, string>? previous = _diagnosticLoggerOverride.Value;
+        _diagnosticLoggerOverride.Value = diagnosticLogger;
+        return new DiagnosticLoggerScope(this, previous);
+    }
 
     public RfDemodulatedBlock? DecodeBlock(Stream stream, long sample, int blockLength)
     {
@@ -462,9 +471,25 @@ public sealed class RfBlockDecodePipeline : IDisposable
     {
         if (demodulated.VhsWeakRfSignal)
         {
-            _diagnosticLogger?.Invoke(
+            (_diagnosticLoggerOverride.Value ?? _diagnosticLogger)?.Invoke(
                 "WARNING",
                 "RF signal is weak. Is your deck tracking properly?");
+        }
+    }
+
+    private sealed class DiagnosticLoggerScope(
+        RfBlockDecodePipeline owner,
+        Action<string, string>? previous) : IDisposable
+    {
+        private RfBlockDecodePipeline? _owner = owner;
+
+        public void Dispose()
+        {
+            RfBlockDecodePipeline? currentOwner = Interlocked.Exchange(ref _owner, null);
+            if (currentOwner is not null)
+            {
+                currentOwner._diagnosticLoggerOverride.Value = previous;
+            }
         }
     }
 

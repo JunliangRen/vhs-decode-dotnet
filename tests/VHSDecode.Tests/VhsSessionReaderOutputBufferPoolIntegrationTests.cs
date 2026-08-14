@@ -25,7 +25,9 @@ public sealed class VhsSessionReaderOutputBufferPoolIntegrationTests
             using DecodeSession stagedSession = CreateSession(
                 stagedOutput,
                 compatibility,
-                threads: 2);
+                threads: 20);
+            Action<string, string>? stagedFieldLogger = stagedSession.TbcFieldDecoder.DiagnosticLogger;
+            Action<string, string>? stagedRenderLogger = stagedSession.TbcRenderer.DiagnosticLogger;
             using var eagerInput = new MemoryStream(inputBytes, writable: false);
             using var stagedInput = new MemoryStream(inputBytes, writable: false);
 
@@ -50,6 +52,140 @@ public sealed class VhsSessionReaderOutputBufferPoolIntegrationTests
             Assert.Equal(
                 NormalizeLog(File.ReadAllText(eagerOutput + ".log")),
                 NormalizeLog(File.ReadAllText(stagedOutput + ".log")));
+            AssertWavefrontWorkspacesReturned(
+                stagedSession,
+                expectedActive: compatibility == "v0.4.0");
+            Assert.Same(stagedFieldLogger, stagedSession.TbcFieldDecoder.DiagnosticLogger);
+            Assert.Same(stagedRenderLogger, stagedSession.TbcRenderer.DiagnosticLogger);
+
+            using TbcFieldDecodePipeline exactFromSession =
+                TbcFieldDecodePipeline.FromSession(stagedSession);
+            Assert.Equal(
+                compatibility == "v0.4.0",
+                exactFromSession.CanUseVhsWavefront);
+            using DecodeSession ippSession = CreateSession(
+                stagedOutput + "-ipp-profile",
+                compatibility,
+                threads: 20,
+                dspBackend: "ipp-fast");
+            using TbcFieldDecodePipeline ippFromSession =
+                TbcFieldDecodePipeline.FromSession(ippSession);
+            Assert.True(ippFromSession.CanUseVhsWavefront);
+        }
+        finally
+        {
+            Directory.Delete(tempDirectory, recursive: true);
+        }
+    }
+
+    [Theory(DisplayName = "Wavefront VHS terminal lookahead matches serial output and diagnostics")]
+    [InlineData("v0.4.0")]
+    [InlineData("current")]
+    public void WavefrontVhsTerminalLookaheadMatchesSerialOutputAndDiagnostics(
+        string compatibility)
+    {
+        string tempDirectory = CreateTempDirectory();
+        try
+        {
+            string serialOutput = Path.Combine(tempDirectory, "serial-terminal");
+            string wavefrontOutput = Path.Combine(tempDirectory, "wavefront-terminal");
+            using DecodeSession serialSession = CreateSession(
+                serialOutput,
+                compatibility,
+                threads: 1,
+                requestedFields: 2);
+            byte[] inputBytes = BuildPalVhsRf(serialSession);
+            using DecodeSession wavefrontSession = CreateSession(
+                wavefrontOutput,
+                compatibility,
+                threads: 2,
+                requestedFields: 2);
+            using var serialInput = new MemoryStream(inputBytes, writable: false);
+            using var wavefrontInput = new MemoryStream(inputBytes, writable: false);
+
+            TbcFieldSequenceDecodeResult serial = new TbcFieldSequenceDecodeEngine()
+                .TryDecodeAndWrite(serialSession, serialInput);
+            TbcFieldSequenceDecodeResult wavefront = new TbcFieldSequenceDecodeEngine()
+                .TryDecodeAndWrite(wavefrontSession, wavefrontInput);
+
+            Assert.True(serial.Success, serial.Message);
+            Assert.True(wavefront.Success, wavefront.Message);
+            Assert.Equal(2, serial.WrittenFieldCount);
+            Assert.Equal(serial.WrittenFieldCount, wavefront.WrittenFieldCount);
+            Assert.Equal(
+                File.ReadAllBytes(serialOutput + ".tbc"),
+                File.ReadAllBytes(wavefrontOutput + ".tbc"));
+            Assert.Equal(
+                File.ReadAllBytes(serialOutput + "_chroma.tbc"),
+                File.ReadAllBytes(wavefrontOutput + "_chroma.tbc"));
+            Assert.Equal(
+                File.ReadAllText(serialOutput + ".tbc.json"),
+                File.ReadAllText(wavefrontOutput + ".tbc.json"));
+            Assert.Equal(
+                NormalizeLog(File.ReadAllText(serialOutput + ".log")),
+                NormalizeLog(File.ReadAllText(wavefrontOutput + ".log")));
+            AssertWavefrontWorkspacesReturned(
+                wavefrontSession,
+                expectedActive: compatibility == "v0.4.0");
+        }
+        finally
+        {
+            Directory.Delete(tempDirectory, recursive: true);
+        }
+    }
+
+    [Theory(DisplayName = "Wavefront defers terminal failure until prior VHS output commits")]
+    [InlineData("v0.4.0")]
+    [InlineData("current")]
+    public void WavefrontDefersTerminalRecoveryUntilPriorVhsOutputCommits(
+        string compatibility)
+    {
+        string tempDirectory = CreateTempDirectory();
+        try
+        {
+            string serialOutput = Path.Combine(tempDirectory, "serial-recovery");
+            string wavefrontOutput = Path.Combine(tempDirectory, "wavefront-recovery");
+            using DecodeSession serialSession = CreateSession(
+                serialOutput,
+                compatibility,
+                threads: 1,
+                requestedFields: 1);
+            byte[] inputBytes = BuildPalVhsRf(
+                serialSession,
+                paintSecondField: false,
+                paintTerminalLookahead: false);
+            using DecodeSession wavefrontSession = CreateSession(
+                wavefrontOutput,
+                compatibility,
+                threads: 2,
+                requestedFields: 1);
+            using var serialInput = new MemoryStream(inputBytes, writable: false);
+            using var wavefrontInput = new MemoryStream(inputBytes, writable: false);
+
+            TbcFieldSequenceDecodeResult serial = new TbcFieldSequenceDecodeEngine()
+                .TryDecodeAndWrite(serialSession, serialInput);
+            TbcFieldSequenceDecodeResult wavefront = new TbcFieldSequenceDecodeEngine()
+                .TryDecodeAndWrite(wavefrontSession, wavefrontInput);
+
+            Assert.True(serial.Success, serial.Message);
+            Assert.True(wavefront.Success, wavefront.Message);
+            Assert.True(serial.WrittenFieldCount >= 1);
+            Assert.Equal(serial.WrittenFieldCount, wavefront.WrittenFieldCount);
+            Assert.Equal(
+                File.ReadAllBytes(serialOutput + ".tbc"),
+                File.ReadAllBytes(wavefrontOutput + ".tbc"));
+            Assert.Equal(
+                File.ReadAllBytes(serialOutput + "_chroma.tbc"),
+                File.ReadAllBytes(wavefrontOutput + "_chroma.tbc"));
+            Assert.Equal(
+                File.ReadAllText(serialOutput + ".tbc.json"),
+                File.ReadAllText(wavefrontOutput + ".tbc.json"));
+            string serialLog = NormalizeLog(File.ReadAllText(serialOutput + ".log"));
+            string wavefrontLog = NormalizeLog(File.ReadAllText(wavefrontOutput + ".log"));
+            Assert.Equal(serialLog, wavefrontLog);
+            AssertWavefrontWorkspacesReturned(
+                wavefrontSession,
+                expectedActive: compatibility == "v0.4.0");
         }
         finally
         {
@@ -109,6 +245,8 @@ public sealed class VhsSessionReaderOutputBufferPoolIntegrationTests
                 Assert.Equal(0, session.TbcFieldDecoder.CreatedFieldOutputChromaBufferCount);
                 Assert.Equal(0, session.TbcFieldDecoder.RetainedFieldOutputChromaBufferCount);
                 Assert.False(File.Exists(outputBase + "_chroma.tbc"));
+                Assert.Equal(0, session.TbcFieldDecoder.CreatedVhsWavefrontChromaWorkspaceCount);
+                Assert.Equal(0, session.TbcFieldDecoder.CreatedVhsWavefrontVideoWorkspaceCount);
             }
             else
             {
@@ -127,7 +265,10 @@ public sealed class VhsSessionReaderOutputBufferPoolIntegrationTests
         }
     }
 
-    private static byte[] BuildPalVhsRf(DecodeSession session)
+    private static byte[] BuildPalVhsRf(
+        DecodeSession session,
+        bool paintSecondField = true,
+        bool paintTerminalLookahead = true)
     {
         const int LineSamples = 2_560;
         const int FieldSamples = 800_000;
@@ -135,8 +276,15 @@ public sealed class VhsSessionReaderOutputBufferPoolIntegrationTests
         const int SampleCount = 2_700_000;
         var ire = new double[SampleCount];
         PaintField(ire, FirstFieldStart, isFirstField: false);
-        PaintField(ire, FirstFieldStart + FieldSamples, isFirstField: true);
-        PaintField(ire, FirstFieldStart + (2 * FieldSamples), isFirstField: false);
+        if (paintSecondField)
+        {
+            PaintField(ire, FirstFieldStart + FieldSamples, isFirstField: true);
+        }
+
+        if (paintSecondField && paintTerminalLookahead)
+        {
+            PaintField(ire, FirstFieldStart + (2 * FieldSamples), isFirstField: false);
+        }
 
         var samples = new short[SampleCount];
         double phase = 0.0;
@@ -209,12 +357,43 @@ public sealed class VhsSessionReaderOutputBufferPoolIntegrationTests
         return path;
     }
 
+    private static void AssertWavefrontWorkspacesReturned(
+        DecodeSession session,
+        bool expectedActive)
+    {
+        if (!expectedActive)
+        {
+            Assert.Equal(0, session.TbcFieldDecoder.CreatedVhsWavefrontChromaWorkspaceCount);
+            Assert.Equal(0, session.TbcFieldDecoder.RetainedVhsWavefrontChromaWorkspaceCount);
+            Assert.Equal(0, session.TbcFieldDecoder.CreatedVhsWavefrontVideoWorkspaceCount);
+            Assert.Equal(0, session.TbcFieldDecoder.RetainedVhsWavefrontVideoWorkspaceCount);
+            return;
+        }
+
+        Assert.InRange(
+            session.TbcFieldDecoder.CreatedVhsWavefrontChromaWorkspaceCount,
+            1,
+            2);
+        Assert.Equal(
+            session.TbcFieldDecoder.CreatedVhsWavefrontChromaWorkspaceCount,
+            session.TbcFieldDecoder.RetainedVhsWavefrontChromaWorkspaceCount);
+        Assert.InRange(
+            session.TbcFieldDecoder.CreatedVhsWavefrontVideoWorkspaceCount,
+            1,
+            2);
+        Assert.Equal(
+            session.TbcFieldDecoder.CreatedVhsWavefrontVideoWorkspaceCount,
+            session.TbcFieldDecoder.RetainedVhsWavefrontVideoWorkspaceCount);
+    }
+
     private static DecodeSession CreateSession(
         string outputBase,
         string compatibility,
-        int threads)
+        int threads,
+        int? requestedFields = null,
+        string? dspBackend = null)
     {
-        string[] arguments =
+        List<string> arguments =
         [
             "--pal",
             "--frequency", "40",
@@ -226,9 +405,21 @@ public sealed class VhsSessionReaderOutputBufferPoolIntegrationTests
             "--ire0_adjust",
             "--compat-version", compatibility,
             "--threads", threads.ToString(System.Globalization.CultureInfo.InvariantCulture),
-            "input.s16",
-            outputBase
         ];
+        if (dspBackend is not null)
+        {
+            arguments.Add("--dsp-backend");
+            arguments.Add(dspBackend);
+        }
+
+        if (requestedFields.HasValue)
+        {
+            arguments.Add("--length");
+            arguments.Add(requestedFields.Value.ToString(System.Globalization.CultureInfo.InvariantCulture));
+        }
+
+        arguments.Add("input.s16");
+        arguments.Add(outputBase);
         ParsedCommand command = new CommandLineParser().Parse(CliSpecs.Vhs, arguments);
         return DecodeSessionFactory.Create(command);
     }

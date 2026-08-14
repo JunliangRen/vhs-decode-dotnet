@@ -1,4 +1,5 @@
 using System.Numerics;
+using System.Runtime.ExceptionServices;
 using System.Runtime.InteropServices;
 using System.Security.Cryptography;
 using System.Text.Json;
@@ -225,6 +226,8 @@ public sealed class TbcFieldDecodePipeline : IDisposable
     private const int LineLocationLookahead = 10;
     private const int VhsChromaPhaseAnalysisFirstLine = 1;
     private const int DcOffsetLowPassWorkspaceCapacity = 2;
+    private const int VhsWavefrontWorkspaceCapacity = 2;
+    private static readonly Action<string, string> IgnoreDiagnostic = static (_, _) => { };
     private readonly SyncAnalyzer _syncAnalyzer;
     private readonly TbcFieldRenderer _renderer;
     private readonly VideoOutputConverter _videoOutput;
@@ -250,11 +253,16 @@ public sealed class TbcFieldDecodePipeline : IDisposable
     private readonly VhsVSyncLevelRefiner? _vhsVSyncLevelRefiner;
     private readonly VhsFieldLevelState? _vhsFieldLevelState;
     private readonly UpstreamBehaviorProfile _upstreamBehaviorProfile;
+    private readonly DspBackend _dspBackend;
     private readonly ExactLengthDoubleWorkspaceCache _dcOffsetLowPassWorkspaces =
         new(DcOffsetLowPassWorkspaceCapacity);
     private readonly ExactLengthDoubleWorkspaceCache _chromaPhaseAnalysisWorkspaces = new(1);
     private readonly ExactLengthDoubleWorkspaceCache _chromaFieldResamplingWorkspaces = new(1);
     private readonly ExactLengthDoubleWorkspaceCache _videoFieldResamplingWorkspaces = new(1);
+    private readonly ExactLengthDoubleWorkspacePool _vhsWavefrontChromaWorkspaces =
+        new(VhsWavefrontWorkspaceCapacity);
+    private readonly ExactLengthDoubleWorkspacePool _vhsWavefrontVideoWorkspaces =
+        new(VhsWavefrontWorkspaceCapacity);
     private readonly TbcFieldOutputBufferPool? _fieldOutputBufferPool;
     private readonly string? _decodeType;
     private readonly double? _framesPerSecond;
@@ -291,6 +299,79 @@ public sealed class TbcFieldDecodePipeline : IDisposable
     private bool _vhsPulseSearchInitialized;
     private int? _previousVhsFieldNumber;
     private long? _previousVhsFieldReadLocation;
+
+    internal sealed class PendingVhsField : IDisposable
+    {
+        private Func<TbcDecodedField>? _complete;
+        private readonly Task? _inputDependentWork;
+
+        internal PendingVhsField(
+            long startSample,
+            double? nextFieldOffsetSamples,
+            Func<TbcDecodedField> complete,
+            Task? inputDependentWork = null)
+        {
+            ArgumentNullException.ThrowIfNull(complete);
+            StartSample = startSample;
+            NextFieldOffsetSamples = nextFieldOffsetSamples;
+            _complete = complete;
+            _inputDependentWork = inputDependentWork;
+        }
+
+        internal long StartSample { get; }
+
+        internal double? NextFieldOffsetSamples { get; }
+
+        internal void PrepareNextRead()
+            => DrainTask(_inputDependentWork);
+
+        internal TbcDecodedField Complete()
+        {
+            Func<TbcDecodedField>? complete = Interlocked.Exchange(ref _complete, null);
+            if (complete is null)
+            {
+                throw new InvalidOperationException("Pending VHS field has already been completed or discarded.");
+            }
+
+            PrepareNextRead();
+            return complete();
+        }
+
+        public void Dispose()
+        {
+            Func<TbcDecodedField>? complete = Interlocked.Exchange(ref _complete, null);
+            if (complete is null)
+            {
+                return;
+            }
+
+            PrepareNextRead();
+            try
+            {
+                TbcDecodedField field = complete();
+                field.ReleaseOutputBuffers();
+            }
+            catch
+            {
+                // A discarded speculative field cannot replace the earlier outcome.
+            }
+        }
+    }
+
+    private sealed record FieldDecodeStart(
+        TbcDecodedField? CompletedField,
+        PendingVhsField? PendingField)
+    {
+        internal static FieldDecodeStart Completed(TbcDecodedField field)
+            => new(field, null);
+
+        internal static FieldDecodeStart Pending(PendingVhsField field)
+            => new(null, field);
+
+        internal TbcDecodedField Complete()
+            => CompletedField ?? PendingField?.Complete()
+                ?? throw new InvalidOperationException("Field decode did not produce a result.");
+    }
 
     public TbcFieldDecodePipeline(
         SyncAnalyzer syncAnalyzer,
@@ -359,6 +440,7 @@ public sealed class TbcFieldDecodePipeline : IDisposable
         _vsyncSerrationDetector = vsyncSerrationDetector;
         _decodeType = decodeType;
         _upstreamBehaviorProfile = upstreamBehaviorProfile;
+        _dspBackend = dspBackend;
         if (upstreamBehaviorProfile == UpstreamBehaviorProfile.Current
             && string.Equals(decodeType, "vhs", StringComparison.Ordinal))
         {
@@ -398,6 +480,10 @@ public sealed class TbcFieldDecodePipeline : IDisposable
     internal int WorkerThreads => _workerThreads;
 
     internal UpstreamBehaviorProfile UpstreamBehaviorProfile => _upstreamBehaviorProfile;
+
+    internal bool CanUseVhsWavefront
+        => _upstreamBehaviorProfile != UpstreamBehaviorProfile.Current
+            || _dspBackend != DspBackend.Exact;
 
     internal bool CurrentVhsVSyncLevelRefinementEnabled
         => _vhsVSyncLevelRefiner is not null
@@ -466,6 +552,18 @@ public sealed class TbcFieldDecodePipeline : IDisposable
 
     internal int RetainedFieldOutputChromaBufferCount
         => _fieldOutputBufferPool?.RetainedChromaBufferCount ?? 0;
+
+    internal int CreatedVhsWavefrontChromaWorkspaceCount
+        => _vhsWavefrontChromaWorkspaces.CreatedCount;
+
+    internal int RetainedVhsWavefrontChromaWorkspaceCount
+        => _vhsWavefrontChromaWorkspaces.RetainedCount;
+
+    internal int CreatedVhsWavefrontVideoWorkspaceCount
+        => _vhsWavefrontVideoWorkspaces.CreatedCount;
+
+    internal int RetainedVhsWavefrontVideoWorkspaceCount
+        => _vhsWavefrontVideoWorkspaces.RetainedCount;
 
     internal void RestoreStateForRetry(TbcFieldDecodeState state)
     {
@@ -599,7 +697,8 @@ public sealed class TbcFieldDecodePipeline : IDisposable
                         .EnumerateArray()
                         .First()
                         .GetDouble()
-                    : null);
+                    : null,
+            dspBackend: session.ExecutionOptions.DspBackend);
     }
 
     public int EstimateReadSampleCount(int extraLines = 3)
@@ -793,6 +892,46 @@ public sealed class TbcFieldDecodePipeline : IDisposable
             retainChromaBurstSamples,
             usePooledOutputBuffers);
 
+    internal PendingVhsField BeginDecodeVhsForSequence(
+        RfDecodedSpan span,
+        int fieldNumber,
+        bool usePooledOutputBuffers = true)
+    {
+        int effectiveFieldNumber = ResolveVhsFieldNumber(
+            _previousVhsFieldNumber,
+            _previousVhsFieldReadLocation,
+            span.StartSample);
+        try
+        {
+            FieldDecodeStart started = BeginDecodeCore(
+                span,
+                syncThresholdHz: null,
+                effectiveFieldNumber,
+                retainChromaBurstSamples: false,
+                usePooledOutputBuffers);
+            _previousVhsFieldNumber = effectiveFieldNumber;
+            _previousVhsFieldReadLocation = span.StartSample;
+            if (started.PendingField is { } pending)
+            {
+                return pending;
+            }
+
+            TbcDecodedField completed = started.CompletedField
+                ?? throw new InvalidOperationException("VHS field decode did not produce a result.");
+            return new PendingVhsField(
+                completed.StartSample,
+                completed.NextFieldOffsetSamples,
+                () => completed);
+        }
+        catch (TbcFieldDecodeRecoveryException)
+        {
+            _previousVhsFieldNumber = null;
+            _previousVhsFieldReadLocation = null;
+            _previousBurstDetectedLine = 0;
+            throw;
+        }
+    }
+
     internal bool CanDeferCvbsOutputConversion
         => string.Equals(_decodeType, "cvbs", StringComparison.Ordinal)
             && _syncDetectionOptions.CvbsAutoSync
@@ -835,6 +974,33 @@ public sealed class TbcFieldDecodePipeline : IDisposable
         }
     }
 
+    private FieldDecodeStart BeginDecodeCore(
+        RfDecodedSpan span,
+        double? syncThresholdHz,
+        int fieldNumber,
+        bool retainChromaBurstSamples,
+        bool usePooledOutputBuffers)
+    {
+        RfBlockStreamDecoder.VhsPayloadMaterializer? deferredVhsPayload = span.DeferredVhsPayload;
+        _ = deferredVhsPayload?.BeginMaterialization();
+        try
+        {
+            return StartDecodeCoreAfterPayloadStart(
+                span,
+                syncThresholdHz,
+                fieldNumber,
+                deferCvbsOutputConversion: false,
+                retainChromaBurstSamples,
+                usePooledOutputBuffers,
+                deferVhsTail: true);
+        }
+        catch
+        {
+            deferredVhsPayload?.EnsurePayloadMaterialized();
+            throw;
+        }
+    }
+
     private TbcDecodedField DecodeCoreAfterPayloadStart(
         RfDecodedSpan span,
         double? syncThresholdHz,
@@ -842,10 +1008,27 @@ public sealed class TbcFieldDecodePipeline : IDisposable
         bool deferCvbsOutputConversion,
         bool retainChromaBurstSamples,
         bool usePooledOutputBuffers)
+        => StartDecodeCoreAfterPayloadStart(
+            span,
+            syncThresholdHz,
+            fieldNumber,
+            deferCvbsOutputConversion,
+            retainChromaBurstSamples,
+            usePooledOutputBuffers,
+            deferVhsTail: false).Complete();
+
+    private FieldDecodeStart StartDecodeCoreAfterPayloadStart(
+        RfDecodedSpan span,
+        double? syncThresholdHz,
+        int fieldNumber,
+        bool deferCvbsOutputConversion,
+        bool retainChromaBurstSamples,
+        bool usePooledOutputBuffers,
+        bool deferVhsTail)
     {
         (double SyncLevel, double BlankLevel)? previouslyRenderedCvbsLevels = _renderer.LastCvbsSyncLevels;
         SyncPreparedSpan prepared = PrepareSyncSpan(span, syncThresholdHz);
-        TbcDecodedField decoded;
+        FieldDecodeStart decoded;
         try
         {
             decoded = DecodePrepared(
@@ -853,7 +1036,8 @@ public sealed class TbcFieldDecodePipeline : IDisposable
                 fieldNumber,
                 deferCvbsOutputConversion && CanDeferCvbsOutputConversion,
                 retainChromaBurstSamples,
-                usePooledOutputBuffers);
+                usePooledOutputBuffers,
+                deferVhsTail);
         }
         catch (InvalidOperationException ex) when (prepared.UsedSavedLevels && IsSyncLocationFailure(ex))
         {
@@ -868,7 +1052,8 @@ public sealed class TbcFieldDecodePipeline : IDisposable
                 fieldNumber,
                 deferCvbsOutputConversion && CanDeferCvbsOutputConversion,
                 retainChromaBurstSamples,
-                usePooledOutputBuffers);
+                usePooledOutputBuffers,
+                deferVhsTail);
         }
 
         if (_syncDetectionOptions.CvbsAutoSync && _renderer.CvbsClampAgc is not null)
@@ -881,12 +1066,13 @@ public sealed class TbcFieldDecodePipeline : IDisposable
         return decoded;
     }
 
-    private TbcDecodedField DecodePrepared(
+    private FieldDecodeStart DecodePrepared(
         SyncPreparedSpan prepared,
         int fieldNumber,
         bool deferCvbsOutputConversion,
         bool retainChromaBurstSamples,
-        bool usePooledOutputBuffers)
+        bool usePooledOutputBuffers,
+        bool deferVhsTail)
     {
         RfDecodedSpan span = prepared.Span;
         bool isVhs = string.Equals(_decodeType, "vhs", StringComparison.Ordinal);
@@ -1227,115 +1413,531 @@ public sealed class TbcFieldDecodePipeline : IDisposable
             renderLineLocations = RenderLineLocations(lineLocations, outputFirstLine);
         }
 
-        using TbcLineResampler.ResamplingPlan? renderResamplingPlan =
+        TbcLineResampler.ResamplingPlan? renderResamplingPlan =
             span.Chroma is { Length: > 0 }
                 ? _renderer.PrepareFieldResampling(renderLineLocations, outputFirstLine)
                 : null;
-        double chromaSourcePositionShift =
-            CurrentVhsChromaGroupDelayEnabled
-            && chromaAnalysis?.Phase.BurstDetectedLine != -1
-                ? VhsChromaDecoder.CurrentNtscChromaGroupDelayShiftSamples(
-                    _chromaFieldOptions!,
-                    parity.IsFirstField,
-                    fieldNumber)
-                : 0.0;
-        double[]? chromaBurstSamples = null;
-        bool ownsChromaBurstSamples = false;
-        if (renderResamplingPlan is not null)
-        {
-            if (retainChromaBurstSamples)
-            {
-                chromaBurstSamples = _renderer.ResamplePreparedField(
-                    span.Chroma!,
-                    renderResamplingPlan,
-                    chromaSourcePositionShift);
-            }
-            else
-            {
-                // Sequence decoding consumes this buffer before returning and
-                // omits it from TbcDecodedField, so the next field may reuse it.
-                chromaBurstSamples = _chromaFieldResamplingWorkspaces.Get(
-                    renderResamplingPlan.DestinationLength);
-                _renderer.ResamplePreparedField(
-                    span.Chroma!,
-                    renderResamplingPlan,
-                    chromaBurstSamples,
-                    chromaSourcePositionShift);
-                ownsChromaBurstSamples = true;
-            }
-        }
-
-        int syncConfidence = SyncConfidenceCalculator.Compute(
-            lineLocations.Locations,
-            currentFieldLineCount,
-            initialConfidence: line0.InitialSyncConfidence,
-            lineOffset: Math.Max(0, outputFirstLine - 1));
-        (VideoOutputConverter? agcConverter, bool laserDiscAgcAdjusted) = ResolveLaserDiscAgcConverter(
-            span,
-            lineLocations.Locations,
-            meanLineLength,
-            parity.IsFirstField,
-            line0.InitialSyncConfidence,
-            activeVideoOutput,
-            fieldNumber);
-        VideoOutputConverter? fieldConverter = agcConverter
-            ?? (_vhsSyncDetector is not null && !prepared.ExplicitThreshold
-                ? activeVideoOutput
-                : null)
-            ?? prepared.ConverterOverride
-            ?? _laserDiscAgcConverter
-            ?? _laserDiscSyncConverter;
-        if (_decodeLaserDiscVbi)
-        {
-            _previousLaserDiscSkipCheckScore = LaserDiscPlayerSkipDetector.ScorePreviousFieldEnd(
-                span.Video,
-                lineLocations.Locations,
-                _renderer.FrameSpec.OutputLineCount,
-                LaserDiscLineOffset(parity.IsFirstField),
-                _syncAnalyzer.NominalLineLength,
-                fieldConverter ?? _videoOutput);
-        }
-
-        TbcDeferredRenderSource? deferredRenderSource = deferCvbsOutputConversion
-            ? new TbcDeferredRenderSource(
-                span.Video,
-                renderLineLocations,
-                outputFirstLine,
-                fieldNumber)
-            : null;
-        TbcFieldOutputBufferPool.TbcFieldOutputBufferLease? outputBufferLease =
-            usePooledOutputBuffers && renderResamplingPlan is not null
-                ? (_fieldOutputBufferPool
-                    ?? throw new InvalidOperationException("Pooled field output is only available for VHS decoding."))
-                    .Rent()
-                : null;
+        bool renderResamplingPlanTransferred = false;
+        ExactLengthDoubleWorkspacePool.Lease? wavefrontChromaWorkspaceLease = null;
         try
         {
-            bool parallelizeVhsChroma = string.Equals(_decodeType, "vhs", StringComparison.Ordinal)
-                && deferredRenderSource is null
+            double chromaSourcePositionShift =
+                CurrentVhsChromaGroupDelayEnabled
+                && chromaAnalysis?.Phase.BurstDetectedLine != -1
+                    ? VhsChromaDecoder.CurrentNtscChromaGroupDelayShiftSamples(
+                        _chromaFieldOptions!,
+                        parity.IsFirstField,
+                        fieldNumber)
+                    : 0.0;
+            bool useVhsWavefront = deferVhsTail
+                && CanUseVhsWavefront
+                && isTape
+                && !_preserveRawMetricSources
+                && span.Efm is null
+                && span.AnalogAudio is null
+                && (_rfTbcOptions is null || !_rfTbcOptions.WriteRfTbc)
+                && !_decodeVbiData
+                && !_decodeLaserDiscVbi
+                && !retainChromaBurstSamples
+                && usePooledOutputBuffers
+                && renderResamplingPlan is not null
+                && chromaAnalysis is not null
                 && _chromaFieldOptions is { WorkerThreads: > 1 }
-                && chromaBurstSamples is not null
-                && chromaAnalysis is not null;
-            bool parallelizeVhsDropoutDetection = isTape
-                && deferredRenderSource is null
-                && _workerThreads > 1
-                && _dropoutOptions is
+                && _workerThreads > 1;
+            double[]? chromaBurstSamples = null;
+            bool ownsChromaBurstSamples = false;
+            if (renderResamplingPlan is not null)
+            {
+                if (retainChromaBurstSamples)
                 {
-                    Enabled: true,
-                    Mode: TbcDropoutDetectionMode.TapeEnvelope
+                    chromaBurstSamples = _renderer.ResamplePreparedField(
+                        span.Chroma!,
+                        renderResamplingPlan,
+                        chromaSourcePositionShift);
                 }
-                && span.Envelope is { Length: > 0 };
-            Task<VhsChromaFieldResult?>? chromaDecodeTask = parallelizeVhsChroma
-                ? Task.Run(() => DecodeChromaField(
-                    chromaBurstSamples!,
-                    chromaAnalysis!,
-                    parity.IsFirstField,
-                    fieldNumber,
+                else
+                {
+                    if (useVhsWavefront)
+                    {
+                        wavefrontChromaWorkspaceLease = _vhsWavefrontChromaWorkspaces.Rent(
+                            renderResamplingPlan.DestinationLength);
+                        chromaBurstSamples = wavefrontChromaWorkspaceLease.Buffer;
+                    }
+                    else
+                    {
+                        // Sequence decoding consumes this buffer before returning and
+                        // omits it from TbcDecodedField, so the next field may reuse it.
+                        chromaBurstSamples = _chromaFieldResamplingWorkspaces.Get(
+                            renderResamplingPlan.DestinationLength);
+                    }
+
+                    _renderer.ResamplePreparedField(
+                        span.Chroma!,
+                        renderResamplingPlan,
+                        chromaBurstSamples,
+                        chromaSourcePositionShift);
+                    ownsChromaBurstSamples = true;
+                }
+            }
+
+            int syncConfidence = SyncConfidenceCalculator.Compute(
+                lineLocations.Locations,
+                currentFieldLineCount,
+                initialConfidence: line0.InitialSyncConfidence,
+                lineOffset: Math.Max(0, outputFirstLine - 1));
+            (VideoOutputConverter? agcConverter, bool laserDiscAgcAdjusted) = ResolveLaserDiscAgcConverter(
+                span,
+                lineLocations.Locations,
+                meanLineLength,
+                parity.IsFirstField,
+                line0.InitialSyncConfidence,
+                activeVideoOutput,
+                fieldNumber);
+            VideoOutputConverter? fieldConverter = agcConverter
+                ?? (_vhsSyncDetector is not null && !prepared.ExplicitThreshold
+                    ? activeVideoOutput
+                    : null)
+                ?? prepared.ConverterOverride
+                ?? _laserDiscAgcConverter
+                ?? _laserDiscSyncConverter;
+            if (_decodeLaserDiscVbi)
+            {
+                _previousLaserDiscSkipCheckScore = LaserDiscPlayerSkipDetector.ScorePreviousFieldEnd(
+                    span.Video,
+                    lineLocations.Locations,
+                    _renderer.FrameSpec.OutputLineCount,
+                    LaserDiscLineOffset(parity.IsFirstField),
+                    _syncAnalyzer.NominalLineLength,
+                    fieldConverter ?? _videoOutput);
+            }
+
+            TbcDeferredRenderSource? deferredRenderSource = deferCvbsOutputConversion
+                ? new TbcDeferredRenderSource(
+                    span.Video,
+                    renderLineLocations,
                     outputFirstLine,
-                    ownsChromaBuffer: ownsChromaBurstSamples,
-                    outputDestination: outputBufferLease?.Chroma))
+                    fieldNumber)
                 : null;
-            Task<TbcDropoutMap?>? dropoutDetectionTask = parallelizeVhsDropoutDetection
+            TbcFieldOutputBufferPool.TbcFieldOutputBufferLease? outputBufferLease =
+                usePooledOutputBuffers && renderResamplingPlan is not null
+                    ? (_fieldOutputBufferPool
+                        ?? throw new InvalidOperationException("Pooled field output is only available for VHS decoding."))
+                        .Rent()
+                    : null;
+            try
+            {
+                if (useVhsWavefront)
+                {
+                    PendingVhsField pending = BeginVhsWavefrontTail(
+                        span,
+                        lineLocations,
+                        timing,
+                        parity,
+                        renderResamplingPlan!,
+                        chromaBurstSamples!,
+                        chromaAnalysis!,
+                        chromaPhase,
+                        fieldNumber,
+                        outputFirstLine,
+                        fieldConverter,
+                        outputBufferLease
+                            ?? throw new InvalidOperationException("Wavefront VHS output requires pooled buffers."),
+                        wavefrontChromaWorkspaceLease
+                            ?? throw new InvalidOperationException("Wavefront VHS chroma workspace was not rented."),
+                        syncConfidence,
+                        nextFieldOffsetSamples,
+                        currentFieldLineCount,
+                        threshold,
+                        meanLineLength,
+                        rawPulses.Count,
+                        classified.Count,
+                        laserDiscAgcAdjusted);
+                    outputBufferLease = null;
+                    wavefrontChromaWorkspaceLease = null;
+                    renderResamplingPlanTransferred = true;
+                    return FieldDecodeStart.Pending(pending);
+                }
+
+                bool parallelizeVhsChroma = string.Equals(_decodeType, "vhs", StringComparison.Ordinal)
+                    && deferredRenderSource is null
+                    && _chromaFieldOptions is { WorkerThreads: > 1 }
+                    && chromaBurstSamples is not null
+                    && chromaAnalysis is not null;
+                bool parallelizeVhsDropoutDetection = isTape
+                    && deferredRenderSource is null
+                    && _workerThreads > 1
+                    && _dropoutOptions is
+                    {
+                        Enabled: true,
+                        Mode: TbcDropoutDetectionMode.TapeEnvelope
+                    }
+                    && span.Envelope is { Length: > 0 };
+                Task<VhsChromaFieldResult?>? chromaDecodeTask = parallelizeVhsChroma
+                    ? Task.Run(() => DecodeChromaField(
+                        chromaBurstSamples!,
+                        chromaAnalysis!,
+                        parity.IsFirstField,
+                        fieldNumber,
+                        outputFirstLine,
+                        ownsChromaBuffer: ownsChromaBurstSamples,
+                        outputDestination: outputBufferLease?.Chroma))
+                    : null;
+                Task<TbcDropoutMap?>? dropoutDetectionTask = parallelizeVhsDropoutDetection
+                    ? Task.Run(() => DetectDropouts(
+                        span,
+                        lineLocations,
+                        timing,
+                        parity.IsFirstField,
+                        fieldConverter ?? _videoOutput))
+                    : null;
+                VhsChromaFieldResult? chroma = null;
+                TbcDropoutMap? dropouts = null;
+                TbcRenderedField rendered;
+                try
+                {
+                    if (deferredRenderSource is not null)
+                    {
+                        rendered = new TbcRenderedField([]);
+                    }
+                    else if (renderResamplingPlan is not null)
+                    {
+                        double[]? videoResamplingWorkspace =
+                            _renderer.CanConvertPreparedFieldDirectly()
+                                ? null
+                                : _videoFieldResamplingWorkspaces.Get(
+                                    renderResamplingPlan.DestinationLength);
+                        rendered = _renderer.RenderPreparedFieldPayload(
+                            span.Video,
+                            renderResamplingPlan,
+                            fieldNumber,
+                            fieldConverter,
+                            chromaPhase?.NextChromaRotationIndex,
+                            videoResamplingWorkspace,
+                            outputBufferLease?.Luma);
+                    }
+                    else
+                    {
+                        rendered = _renderer.RenderFieldPayload(
+                            span.Video,
+                            renderLineLocations,
+                            firstLine: outputFirstLine,
+                            fieldNumber: fieldNumber,
+                            converterOverride: fieldConverter,
+                            trackPhaseOverride: chromaPhase?.NextChromaRotationIndex);
+                    }
+
+                    if (chromaDecodeTask is not null)
+                    {
+                        chroma = chromaDecodeTask.GetAwaiter().GetResult();
+                    }
+
+                    if (dropoutDetectionTask is not null)
+                    {
+                        dropouts = dropoutDetectionTask.GetAwaiter().GetResult();
+                    }
+                }
+                catch
+                {
+                    if (chromaDecodeTask is not null)
+                    {
+                        try
+                        {
+                            _ = chromaDecodeTask.GetAwaiter().GetResult();
+                        }
+                        catch
+                        {
+                            // Preserve the earlier render failure, matching the serial path.
+                        }
+                    }
+
+                    if (dropoutDetectionTask is not null)
+                    {
+                        try
+                        {
+                            _ = dropoutDetectionTask.GetAwaiter().GetResult();
+                        }
+                        catch
+                        {
+                            // Preserve the earlier render or chroma failure.
+                        }
+                    }
+
+                    throw;
+                }
+                finally
+                {
+                    renderResamplingPlan?.Dispose();
+                }
+
+                double? blackToWhiteRfRatio = ComputeLaserDiscBlackToWhiteRfRatio(
+                    span.Input,
+                    rendered.Samples,
+                    lineLocations.Locations,
+                    parity.IsFirstField == true,
+                    fieldConverter ?? _videoOutput);
+                if (dropoutDetectionTask is null)
+                {
+                    dropouts = DetectDropouts(
+                        span,
+                        lineLocations,
+                        timing,
+                        parity.IsFirstField,
+                        fieldConverter ?? _videoOutput);
+                }
+                short[]? efm = SliceFieldEfm(span.Efm, lineLocations.Locations, currentFieldLineCount);
+                short[]? audioPcm = DownscaleAnalogAudio(
+                    span.AnalogAudio,
+                    lineLocations.Locations,
+                    currentFieldLineCount,
+                    span.StartSample,
+                    fieldNumber,
+                    parity.IsFirstField);
+                short[]? rfTbc = BuildRfTbc(
+                    span.Input,
+                    lineLocations.Locations,
+                    currentFieldLineCount);
+                int[]? vbiData = DecodeLaserDiscVbiData(span.Video, lineLocations, parity.IsFirstField);
+                IReadOnlyList<double> burstLevelLineLocations = _decodeLaserDiscVbi
+                    && FormatCatalog.ParentSystem(_system) == "NTSC"
+                        ? laserDiscHSyncLineLocations.Locations
+                        : lineLocations.Locations;
+                double? medianBurstIre = ComputeLaserDiscMedianBurstIre(
+                    span.Video,
+                    burstLevelLineLocations,
+                    parity.IsFirstField,
+                    fieldConverter ?? _videoOutput);
+                laserDiscFieldPhaseId ??= DetermineLaserDiscPalFieldPhase(
+                    span,
+                    lineLocations,
+                    parity.IsFirstField,
+                    medianBurstIre,
+                    fieldConverter ?? _videoOutput);
+                laserDiscFieldPhaseId ??= CvbsFallbackFieldPhaseId(_decodeType, _system, fieldNumber);
+                if (chromaDecodeTask is null)
+                {
+                    chroma = DecodeChromaField(
+                        chromaBurstSamples,
+                        chromaAnalysis,
+                        parity.IsFirstField,
+                        fieldNumber,
+                        outputFirstLine,
+                        ownsChromaBuffer: ownsChromaBurstSamples,
+                        outputDestination: outputBufferLease?.Chroma);
+                }
+
+                if (chroma is not null)
+                {
+                    CommitChromaState(chroma);
+                }
+
+                if (!isTape)
+                {
+                    UpdateSyncHistory(span.StartSample, line0, meanLineLength, parity);
+                }
+
+                _previousSyncConfidence = syncConfidence;
+                UpdatePalLaserDiscEndLineHistory(span.StartSample, lineLocations, currentFieldLineCount);
+                UpdateCvbsEndLineHistory(span.StartSample, lineLocations, currentFieldLineCount);
+
+                TbcDecodedField decodedField = new(
+                    span.StartSample,
+                    rendered.Samples,
+                    lineLocations,
+                    timing,
+                    threshold,
+                    meanLineLength,
+                    rawPulses.Count,
+                    classified.Count,
+                    parity.IsFirstField,
+                    parity.Confidence,
+                    dropouts,
+                    rendered.OutputPayload,
+                    efm,
+                    audioPcm,
+                    rfTbc,
+                    FieldPhaseId: chroma?.FieldPhaseId ?? laserDiscFieldPhaseId,
+                    MedianBurstIre: medianBurstIre,
+                    VbiData: vbiData,
+                    ChromaBurstSamples: retainChromaBurstSamples ? chromaBurstSamples : null,
+                    ChromaSamples: chroma?.Samples,
+                    BurstStartLine: chroma?.BurstDetectedLine,
+                    RawInputSamples: _preserveRawMetricSources ? span.Input : null,
+                    PreTbcVideoSamples: _preserveRawMetricSources ? span.Video : null,
+                    NextFieldOffsetSamples: nextFieldOffsetSamples,
+                    NominalFieldLengthSamples: currentFieldLineCount * meanLineLength,
+                    SyncConfidence: syncConfidence,
+                    OutputConverter: fieldConverter,
+                    BlackToWhiteRfRatio: blackToWhiteRfRatio,
+                    LaserDiscAgcAdjusted: laserDiscAgcAdjusted)
+                {
+                    DeferredRenderSource = deferredRenderSource
+                };
+                if (outputBufferLease is not null)
+                {
+                    decodedField.AttachOutputBuffers(outputBufferLease);
+                    outputBufferLease = null;
+                }
+
+                return FieldDecodeStart.Completed(decodedField);
+            }
+            finally
+            {
+                outputBufferLease?.Dispose();
+            }
+        }
+        finally
+        {
+            wavefrontChromaWorkspaceLease?.Dispose();
+            if (!renderResamplingPlanTransferred)
+            {
+                renderResamplingPlan?.Dispose();
+            }
+        }
+    }
+
+    private PendingVhsField BeginVhsWavefrontTail(
+        RfDecodedSpan span,
+        LineLocationResult lineLocations,
+        SyncTiming timing,
+        FieldParityDetection parity,
+        TbcLineResampler.ResamplingPlan renderResamplingPlan,
+        double[] chromaBurstSamples,
+        VhsChromaPhaseAnalysis chromaAnalysis,
+        ChromaPhaseSequenceResult? chromaPhase,
+        int fieldNumber,
+        int outputFirstLine,
+        VideoOutputConverter? fieldConverter,
+        TbcFieldOutputBufferPool.TbcFieldOutputBufferLease outputBufferLease,
+        ExactLengthDoubleWorkspacePool.Lease chromaWorkspaceLease,
+        int syncConfidence,
+        double nextFieldOffsetSamples,
+        int currentFieldLineCount,
+        double threshold,
+        double meanLineLength,
+        int rawPulseCount,
+        int classifiedPulseCount,
+        bool laserDiscAgcAdjusted)
+    {
+        ExactLengthDoubleWorkspacePool.Lease? videoWorkspaceLease =
+            _renderer.CanConvertPreparedFieldDirectly()
+                ? null
+                : _vhsWavefrontVideoWorkspaces.Rent(renderResamplingPlan.DestinationLength);
+        Action<string, string> renderDiagnosticLogger =
+            _renderer.DiagnosticLogger ?? IgnoreDiagnostic;
+        Task<TbcRenderedField> renderTask;
+        try
+        {
+            renderTask = Task.Run(() =>
+            {
+                try
+                {
+                    return _renderer.RenderPreparedFieldPayloadWithDiagnosticLogger(
+                        span.Video,
+                        renderResamplingPlan,
+                        fieldNumber,
+                        fieldConverter,
+                        chromaPhase?.NextChromaRotationIndex,
+                        videoWorkspaceLease?.Buffer,
+                        outputBufferLease.Luma,
+                        renderDiagnosticLogger);
+                }
+                finally
+                {
+                    videoWorkspaceLease?.Dispose();
+                    renderResamplingPlan.Dispose();
+                }
+            });
+        }
+        catch
+        {
+            videoWorkspaceLease?.Dispose();
+            renderResamplingPlan.Dispose();
+            chromaWorkspaceLease.Dispose();
+            outputBufferLease.Dispose();
+            throw;
+        }
+
+        VhsChromaDecoder.PreparedOwnedField preparedChroma;
+        try
+        {
+            preparedChroma = VhsChromaDecoder.PrepareOwnedFieldWithPhase(
+                chromaBurstSamples,
+                _chromaFieldOptions!,
+                chromaAnalysis,
+                parity.IsFirstField,
+                fieldNumber,
+                lineOffset: outputFirstLine,
+                previousChromaAfcCarrierHz: _chromaAfcCarrierHz,
+                previousChromaAfcPhaseRadians: _chromaAfcPhaseRadians,
+                outputDestination: outputBufferLease.Chroma);
+        }
+        catch (Exception preparationException)
+        {
+            ExceptionDispatchInfo preparationFailure = ExceptionDispatchInfo.Capture(preparationException);
+            try
+            {
+                _ = renderTask.GetAwaiter().GetResult();
+            }
+            catch
+            {
+                chromaWorkspaceLease.Dispose();
+                outputBufferLease.Dispose();
+                throw;
+            }
+
+            chromaWorkspaceLease.Dispose();
+            outputBufferLease.Dispose();
+            preparationFailure.Throw();
+            throw;
+        }
+
+        CommitPreparedChromaState(preparedChroma);
+        _previousSyncConfidence = syncConfidence;
+
+        Task<VhsChromaFieldResult> chromaDecodeTask;
+        try
+        {
+            chromaDecodeTask = Task.Run(() =>
+            {
+                try
+                {
+                    return preparedChroma.Complete();
+                }
+                finally
+                {
+                    chromaWorkspaceLease.Dispose();
+                }
+            });
+        }
+        catch
+        {
+            try
+            {
+                _ = renderTask.GetAwaiter().GetResult();
+            }
+            catch
+            {
+                // Preserve the render failure, which precedes chroma completion.
+                outputBufferLease.Dispose();
+                throw;
+            }
+
+            chromaWorkspaceLease.Dispose();
+            outputBufferLease.Dispose();
+            throw;
+        }
+
+        Task<TbcDropoutMap?>? dropoutDetectionTask = null;
+        bool tailTransferred = false;
+        try
+        {
+            bool parallelizeVhsDropoutDetection = _dropoutOptions is
+            {
+                Enabled: true,
+                Mode: TbcDropoutDetectionMode.TapeEnvelope
+            }
+                && span.Envelope is { Length: > 0 };
+            dropoutDetectionTask = parallelizeVhsDropoutDetection
                 ? Task.Run(() => DetectDropouts(
                     span,
                     lineLocations,
@@ -1343,199 +1945,170 @@ public sealed class TbcFieldDecodePipeline : IDisposable
                     parity.IsFirstField,
                     fieldConverter ?? _videoOutput))
                 : null;
-            VhsChromaFieldResult? chroma = null;
-            TbcDropoutMap? dropouts = null;
-            TbcRenderedField rendered;
-            try
-            {
-                if (deferredRenderSource is not null)
-                {
-                    rendered = new TbcRenderedField([]);
-                }
-                else if (renderResamplingPlan is not null)
-                {
-                    double[]? videoResamplingWorkspace =
-                        _renderer.CanConvertPreparedFieldDirectly()
-                            ? null
-                            : _videoFieldResamplingWorkspaces.Get(
-                                renderResamplingPlan.DestinationLength);
-                    rendered = _renderer.RenderPreparedFieldPayload(
-                        span.Video,
-                        renderResamplingPlan,
-                        fieldNumber,
-                        fieldConverter,
-                        chromaPhase?.NextChromaRotationIndex,
-                        videoResamplingWorkspace,
-                        outputBufferLease?.Luma);
-                }
-                else
-                {
-                    rendered = _renderer.RenderFieldPayload(
-                        span.Video,
-                        renderLineLocations,
-                        firstLine: outputFirstLine,
-                        fieldNumber: fieldNumber,
-                        converterOverride: fieldConverter,
-                        trackPhaseOverride: chromaPhase?.NextChromaRotationIndex);
-                }
-
-                if (chromaDecodeTask is not null)
-                {
-                    chroma = chromaDecodeTask.GetAwaiter().GetResult();
-                }
-
-                if (dropoutDetectionTask is not null)
-                {
-                    dropouts = dropoutDetectionTask.GetAwaiter().GetResult();
-                }
-            }
-            catch
-            {
-                if (chromaDecodeTask is not null)
-                {
-                    try
-                    {
-                        _ = chromaDecodeTask.GetAwaiter().GetResult();
-                    }
-                    catch
-                    {
-                        // Preserve the earlier render failure, matching the serial path.
-                    }
-                }
-
-                if (dropoutDetectionTask is not null)
-                {
-                    try
-                    {
-                        _ = dropoutDetectionTask.GetAwaiter().GetResult();
-                    }
-                    catch
-                    {
-                        // Preserve the earlier render or chroma failure.
-                    }
-                }
-
-                throw;
-            }
-            finally
-            {
-                renderResamplingPlan?.Dispose();
-            }
-
-            double? blackToWhiteRfRatio = ComputeLaserDiscBlackToWhiteRfRatio(
-                span.Input,
-                rendered.Samples,
-                lineLocations.Locations,
-                parity.IsFirstField == true,
-                fieldConverter ?? _videoOutput);
-            if (dropoutDetectionTask is null)
-            {
-                dropouts = DetectDropouts(
+            TbcDropoutMap? completedDropouts = dropoutDetectionTask is null
+                ? DetectDropouts(
                     span,
                     lineLocations,
                     timing,
                     parity.IsFirstField,
-                    fieldConverter ?? _videoOutput);
-            }
-            short[]? efm = SliceFieldEfm(span.Efm, lineLocations.Locations, currentFieldLineCount);
-            short[]? audioPcm = DownscaleAnalogAudio(
-                span.AnalogAudio,
-                lineLocations.Locations,
-                currentFieldLineCount,
+                    fieldConverter ?? _videoOutput)
+                : null;
+            Task inputDependentWork = dropoutDetectionTask is null
+                ? renderTask
+                : Task.WhenAll(renderTask, dropoutDetectionTask);
+
+            var pending = new PendingVhsField(
                 span.StartSample,
-                fieldNumber,
-                parity.IsFirstField);
-            short[]? rfTbc = BuildRfTbc(
-                span.Input,
-                lineLocations.Locations,
-                currentFieldLineCount);
-            int[]? vbiData = DecodeLaserDiscVbiData(span.Video, lineLocations, parity.IsFirstField);
-            IReadOnlyList<double> burstLevelLineLocations = _decodeLaserDiscVbi
-                && FormatCatalog.ParentSystem(_system) == "NTSC"
-                    ? laserDiscHSyncLineLocations.Locations
-                    : lineLocations.Locations;
-            double? medianBurstIre = ComputeLaserDiscMedianBurstIre(
-                span.Video,
-                burstLevelLineLocations,
-                parity.IsFirstField,
-                fieldConverter ?? _videoOutput);
-            laserDiscFieldPhaseId ??= DetermineLaserDiscPalFieldPhase(
-                span,
-                lineLocations,
-                parity.IsFirstField,
-                medianBurstIre,
-                fieldConverter ?? _videoOutput);
-            laserDiscFieldPhaseId ??= CvbsFallbackFieldPhaseId(_decodeType, _system, fieldNumber);
-            if (chromaDecodeTask is null)
-            {
-                chroma = DecodeChromaField(
-                    chromaBurstSamples,
-                    chromaAnalysis,
-                    parity.IsFirstField,
+                nextFieldOffsetSamples,
+                () => CompleteVhsWavefrontTail(
+                    span.StartSample,
+                    lineLocations,
+                    timing,
+                    parity,
+                    renderTask,
+                    chromaDecodeTask,
+                    dropoutDetectionTask,
+                    completedDropouts,
                     fieldNumber,
-                    outputFirstLine,
-                    ownsChromaBuffer: ownsChromaBurstSamples,
-                    outputDestination: outputBufferLease?.Chroma);
-            }
-
-            if (chroma is not null)
+                    fieldConverter,
+                    outputBufferLease,
+                    syncConfidence,
+                    nextFieldOffsetSamples,
+                    currentFieldLineCount,
+                    threshold,
+                    meanLineLength,
+                    rawPulseCount,
+                    classifiedPulseCount,
+                    laserDiscAgcAdjusted),
+                inputDependentWork);
+            tailTransferred = true;
+            return pending;
+        }
+        finally
+        {
+            if (!tailTransferred)
             {
-                CommitChromaState(chroma);
+                // The caller still owns the pooled buffers. Finish every task that
+                // can reference them before its outer finally returns those buffers.
+                DrainTask(renderTask);
+                DrainTask(chromaDecodeTask);
+                DrainTask(dropoutDetectionTask);
             }
+        }
+    }
 
-            if (!isTape)
+    private TbcDecodedField CompleteVhsWavefrontTail(
+        long startSample,
+        LineLocationResult lineLocations,
+        SyncTiming timing,
+        FieldParityDetection parity,
+        Task<TbcRenderedField> renderTask,
+        Task<VhsChromaFieldResult> chromaDecodeTask,
+        Task<TbcDropoutMap?>? dropoutDetectionTask,
+        TbcDropoutMap? completedDropouts,
+        int fieldNumber,
+        VideoOutputConverter? fieldConverter,
+        TbcFieldOutputBufferPool.TbcFieldOutputBufferLease outputBufferLease,
+        int syncConfidence,
+        double nextFieldOffsetSamples,
+        int currentFieldLineCount,
+        double threshold,
+        double meanLineLength,
+        int rawPulseCount,
+        int classifiedPulseCount,
+        bool laserDiscAgcAdjusted)
+    {
+        TbcRenderedField rendered;
+        try
+        {
+            rendered = renderTask.GetAwaiter().GetResult();
+        }
+        catch
+        {
+            DrainTask(chromaDecodeTask);
+            DrainTask(dropoutDetectionTask);
+            outputBufferLease.Dispose();
+            throw;
+        }
+
+        VhsChromaFieldResult chroma;
+        try
+        {
+            chroma = chromaDecodeTask.GetAwaiter().GetResult();
+        }
+        catch
+        {
+            DrainTask(dropoutDetectionTask);
+            outputBufferLease.Dispose();
+            throw;
+        }
+
+        TbcDropoutMap? dropouts = completedDropouts;
+        try
+        {
+            if (dropoutDetectionTask is not null)
             {
-                UpdateSyncHistory(span.StartSample, line0, meanLineLength, parity);
+                dropouts = dropoutDetectionTask.GetAwaiter().GetResult();
             }
+        }
+        catch
+        {
+            outputBufferLease.Dispose();
+            throw;
+        }
 
-            _previousSyncConfidence = syncConfidence;
-            UpdatePalLaserDiscEndLineHistory(span.StartSample, lineLocations, currentFieldLineCount);
-            UpdateCvbsEndLineHistory(span.StartSample, lineLocations, currentFieldLineCount);
+        try
+        {
+            int? fieldPhaseId = CvbsFallbackFieldPhaseId(_decodeType, _system, fieldNumber);
 
-            TbcDecodedField decodedField = new(
-                span.StartSample,
+            var decodedField = new TbcDecodedField(
+                startSample,
                 rendered.Samples,
                 lineLocations,
                 timing,
                 threshold,
                 meanLineLength,
-                rawPulses.Count,
-                classified.Count,
+                rawPulseCount,
+                classifiedPulseCount,
                 parity.IsFirstField,
                 parity.Confidence,
                 dropouts,
                 rendered.OutputPayload,
-                efm,
-                audioPcm,
-                rfTbc,
-                FieldPhaseId: chroma?.FieldPhaseId ?? laserDiscFieldPhaseId,
-                MedianBurstIre: medianBurstIre,
-                VbiData: vbiData,
-                ChromaBurstSamples: retainChromaBurstSamples ? chromaBurstSamples : null,
-                ChromaSamples: chroma?.Samples,
-                BurstStartLine: chroma?.BurstDetectedLine,
-                RawInputSamples: _preserveRawMetricSources ? span.Input : null,
-                PreTbcVideoSamples: _preserveRawMetricSources ? span.Video : null,
+                Efm: null,
+                AudioPcm: null,
+                RfTbc: null,
+                FieldPhaseId: chroma.FieldPhaseId ?? fieldPhaseId,
+                ChromaSamples: chroma.Samples,
+                BurstStartLine: chroma.BurstDetectedLine,
                 NextFieldOffsetSamples: nextFieldOffsetSamples,
                 NominalFieldLengthSamples: currentFieldLineCount * meanLineLength,
                 SyncConfidence: syncConfidence,
                 OutputConverter: fieldConverter,
-                BlackToWhiteRfRatio: blackToWhiteRfRatio,
-                LaserDiscAgcAdjusted: laserDiscAgcAdjusted)
-            {
-                DeferredRenderSource = deferredRenderSource
-            };
-            if (outputBufferLease is not null)
-            {
-                decodedField.AttachOutputBuffers(outputBufferLease);
-                outputBufferLease = null;
-            }
-
+                LaserDiscAgcAdjusted: laserDiscAgcAdjusted);
+            decodedField.AttachOutputBuffers(outputBufferLease);
             return decodedField;
         }
-        finally
+        catch
         {
-            outputBufferLease?.Dispose();
+            outputBufferLease.Dispose();
+            throw;
+        }
+    }
+
+    private static void DrainTask(Task? task)
+    {
+        if (task is null)
+        {
+            return;
+        }
+
+        try
+        {
+            task.GetAwaiter().GetResult();
+        }
+        catch
+        {
+            // A prior stage failure has precedence over later task failures.
         }
     }
 
@@ -2014,10 +2587,25 @@ public sealed class TbcFieldDecodePipeline : IDisposable
     }
 
     private void CommitChromaState(VhsChromaFieldResult chroma)
+        => CommitChromaStateCore(
+            chroma.NextChromaRotationIndex,
+            chroma.BurstDetectedLine,
+            chroma.CarrierEstimate);
+
+    private void CommitPreparedChromaState(VhsChromaDecoder.PreparedOwnedField chroma)
+        => CommitChromaStateCore(
+            chroma.NextChromaRotationIndex,
+            chroma.BurstDetectedLine,
+            chroma.CarrierEstimate);
+
+    private void CommitChromaStateCore(
+        int nextChromaRotationIndex,
+        int burstDetectedLine,
+        ChromaCarrierEstimate? carrierEstimate)
     {
-        _chromaRotationIndex = chroma.NextChromaRotationIndex;
-        _previousBurstDetectedLine = chroma.BurstDetectedLine;
-        if (chroma.CarrierEstimate is { } carrier)
+        _chromaRotationIndex = nextChromaRotationIndex;
+        _previousBurstDetectedLine = burstDetectedLine;
+        if (carrierEstimate is { } carrier)
         {
             _chromaAfcPhaseCarrierHz = _chromaAfcCarrierHz;
             _chromaAfcPhaseCarrierRadians = _chromaAfcPhaseRadians;
@@ -2714,6 +3302,85 @@ public sealed class TbcFieldDecodePipeline : IDisposable
             int replacement = _nextReplacement;
             _nextReplacement = (_nextReplacement + 1) % _buffers.Length;
             return _buffers[replacement] = new double[length];
+        }
+    }
+
+    private sealed class ExactLengthDoubleWorkspacePool
+    {
+        private readonly Lock _gate = new();
+        private readonly List<double[]> _retained = [];
+        private readonly int _maximumRetained;
+        private int _createdCount;
+
+        internal ExactLengthDoubleWorkspacePool(int maximumRetained)
+        {
+            _maximumRetained = maximumRetained > 0
+                ? maximumRetained
+                : throw new ArgumentOutOfRangeException(nameof(maximumRetained));
+        }
+
+        internal int CreatedCount => Volatile.Read(ref _createdCount);
+
+        internal int RetainedCount
+        {
+            get
+            {
+                lock (_gate)
+                {
+                    return _retained.Count;
+                }
+            }
+        }
+
+        internal Lease Rent(int length)
+        {
+            if (length < 0)
+            {
+                throw new ArgumentOutOfRangeException(nameof(length));
+            }
+
+            lock (_gate)
+            {
+                for (int index = _retained.Count - 1; index >= 0; index--)
+                {
+                    double[] buffer = _retained[index];
+                    if (buffer.Length == length)
+                    {
+                        _retained.RemoveAt(index);
+                        return new Lease(this, buffer);
+                    }
+                }
+            }
+
+            Interlocked.Increment(ref _createdCount);
+            return new Lease(this, new double[length]);
+        }
+
+        private void Return(double[] buffer)
+        {
+            lock (_gate)
+            {
+                if (_retained.Count < _maximumRetained)
+                {
+                    _retained.Add(buffer);
+                }
+            }
+        }
+
+        internal sealed class Lease : IDisposable
+        {
+            private ExactLengthDoubleWorkspacePool? _owner;
+
+            internal Lease(ExactLengthDoubleWorkspacePool owner, double[] buffer)
+            {
+                _owner = owner;
+                Buffer = buffer;
+            }
+
+            internal double[] Buffer { get; }
+
+            public void Dispose()
+                => Interlocked.Exchange(ref _owner, null)?.Return(Buffer);
         }
     }
 

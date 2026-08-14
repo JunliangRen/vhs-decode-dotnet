@@ -124,6 +124,9 @@ public sealed class RfBlockStreamDecoder : IDisposable
 
     internal int CachedDecodedBlockCount => _decodedBlockCache.Count;
 
+    internal IDisposable PushDiagnosticLogger(Action<string, string> diagnosticLogger)
+        => _pipeline.PushDiagnosticLogger(diagnosticLogger);
+
     internal Complex[]? LaserDiscCompatibilityMtfForTesting(long block)
         => _laserDiscCompatibilityMtfByBlock.TryGetValue(block, out Complex[]? response)
             ? response
@@ -974,11 +977,14 @@ public sealed class RfBlockStreamDecoder : IDisposable
 
     private void ReleaseActiveVhsPayload(VhsPayloadMaterializer materializer)
     {
-        _ = Interlocked.CompareExchange(
+        VhsPayloadMaterializer? released = Interlocked.CompareExchange(
             ref _activeVhsPayload,
             null,
             materializer);
-        ReleaseStagedVhsRead();
+        if (ReferenceEquals(released, materializer))
+        {
+            ReleaseStagedVhsRead();
+        }
     }
 
     private void ReleaseStagedVhsRead()
@@ -1744,6 +1750,9 @@ public sealed class RfBlockStreamDecoder : IDisposable
 
         internal RfDecodedSpan Span { get; }
 
+        internal void ReleaseReadReservation()
+            => Volatile.Read(ref _materializer)?.ReleaseReadReservation();
+
         public void Dispose()
         {
             RfBlockStreamDecoder? owner = Interlocked.Exchange(ref _owner, null);
@@ -1774,6 +1783,7 @@ public sealed class RfBlockStreamDecoder : IDisposable
         private readonly bool _useSegmentedEnvelope;
         private Task? _payloadMaterialization;
         private Task? _envelopeMaterialization;
+        private int _ownsReadReservation = 1;
         private bool _disposed;
 
         internal VhsPayloadMaterializer(
@@ -1851,6 +1861,14 @@ public sealed class RfBlockStreamDecoder : IDisposable
 
             payloadMaterialization.GetAwaiter().GetResult();
             envelopeMaterialization?.GetAwaiter().GetResult();
+        }
+
+        internal void ReleaseReadReservation()
+        {
+            if (Interlocked.Exchange(ref _ownsReadReservation, 0) != 0)
+            {
+                _owner.ReleaseActiveVhsPayload(this);
+            }
         }
 
         internal float MeanEnvelopeFloat32()
@@ -1969,7 +1987,7 @@ public sealed class RfBlockStreamDecoder : IDisposable
                 _owner._pipeline.ReleaseStreamBlock(block);
             }
 
-            _owner.ReleaseActiveVhsPayload(this);
+            ReleaseReadReservation();
         }
 
         private static void ObserveTaskFailure(Task? materialization)
