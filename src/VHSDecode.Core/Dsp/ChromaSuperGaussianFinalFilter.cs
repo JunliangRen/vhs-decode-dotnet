@@ -1,3 +1,4 @@
+using System.Runtime.CompilerServices;
 using System.Runtime.Intrinsics;
 using System.Runtime.Intrinsics.X86;
 using VHSDecode.Core.Dsp.Ipp;
@@ -133,14 +134,7 @@ internal sealed class ChromaSuperGaussianFinalFilter : IDisposable
             transformScratch,
             spectrum,
             workerThreads);
-        for (int i = 0; i < spectrum.Length; i++)
-        {
-            double real = spectrum[i].Real;
-            double imaginary = spectrum[i].Imaginary;
-            spectrum[i] = new Complex32(
-                (float)((real * _mask[i]) - (imaginary * 0.0)),
-                (float)((real * 0.0) + (imaginary * _mask[i])));
-        }
+        ApplyManagedMask(spectrum, _mask);
 
         PocketFftReal32.InverseAnyLength(
             spectrum,
@@ -216,6 +210,119 @@ internal sealed class ChromaSuperGaussianFinalFilter : IDisposable
                 (float)((real * mask[index]) - (imaginary * 0.0)),
                 (float)((real * 0.0) + (imaginary * mask[index])));
         }
+    }
+
+    internal static unsafe int ApplyManagedMask(
+        Span<Complex32> spectrum,
+        ReadOnlySpan<double> mask)
+    {
+        if (spectrum.Length != mask.Length)
+        {
+            throw new ArgumentException(
+                "Managed spectrum and Super-Gaussian mask lengths must match.",
+                nameof(mask));
+        }
+
+        int index = 0;
+        if (Avx.IsSupported)
+        {
+            fixed (Complex32* spectrumPointer = spectrum)
+            fixed (double* maskPointer = mask)
+            {
+                index = ApplyMaskAvx(
+                    (float*)spectrumPointer,
+                    maskPointer,
+                    spectrum.Length);
+            }
+        }
+
+        int vectorizedPrefixLength = index;
+        if (index < spectrum.Length)
+        {
+            ApplyManagedMaskScalar(
+                spectrum[index..],
+                mask[index..]);
+        }
+
+        return vectorizedPrefixLength;
+    }
+
+    // Keep exceptional-value fallback and its oracle on one JIT shape.
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    internal static void ApplyManagedMaskScalar(
+        Span<Complex32> spectrum,
+        ReadOnlySpan<double> mask)
+    {
+        if (spectrum.Length != mask.Length)
+        {
+            throw new ArgumentException(
+                "Managed spectrum and Super-Gaussian mask lengths must match.",
+                nameof(mask));
+        }
+
+        for (int index = 0; index < spectrum.Length; index++)
+        {
+            double real = spectrum[index].Real;
+            double imaginary = spectrum[index].Imaginary;
+            spectrum[index] = new Complex32(
+                (float)((real * mask[index]) - (imaginary * 0.0)),
+                (float)((real * 0.0) + (imaginary * mask[index])));
+        }
+    }
+
+    private static unsafe int ApplyMaskAvx(
+        float* components,
+        double* mask,
+        int length)
+    {
+        int vectorizedEnd = length - (length % 4);
+        Vector256<double> zero = Vector256<double>.Zero;
+        Vector256<double> absoluteValueMask = Vector256.Create(
+            BitConverter.UInt64BitsToDouble(0x7FFF_FFFF_FFFF_FFFF));
+        Vector256<double> maximumFinite = Vector256.Create(double.MaxValue);
+        int index = 0;
+        for (; index < vectorizedEnd; index += 4)
+        {
+            Vector128<float> first = Sse.LoadVector128(components + (index * 2));
+            Vector128<float> second = Sse.LoadVector128(components + (index * 2) + 4);
+            Vector256<double> real = Avx.ConvertToVector256Double(
+                Sse.Shuffle(first, second, 0x88));
+            Vector256<double> imaginary = Avx.ConvertToVector256Double(
+                Sse.Shuffle(first, second, 0xDD));
+            Vector256<double> factors = Avx.LoadVector256(mask + index);
+            Vector256<double> filteredRealDouble = Avx.Subtract(
+                Avx.Multiply(real, factors),
+                Avx.Multiply(imaginary, zero));
+            Vector256<double> filteredImaginaryDouble = Avx.Add(
+                Avx.Multiply(real, zero),
+                Avx.Multiply(imaginary, factors));
+            Vector256<double> finite = Avx.And(
+                Avx.Compare(
+                    Avx.And(filteredRealDouble, absoluteValueMask),
+                    maximumFinite,
+                    FloatComparisonMode.OrderedLessThanOrEqualNonSignaling),
+                Avx.Compare(
+                    Avx.And(filteredImaginaryDouble, absoluteValueMask),
+                    maximumFinite,
+                    FloatComparisonMode.OrderedLessThanOrEqualNonSignaling));
+            if (Avx.MoveMask(finite) != 0b1111)
+            {
+                return index;
+            }
+
+            Vector128<float> filteredReal = Avx.ConvertToVector128Single(
+                filteredRealDouble);
+            Vector128<float> filteredImaginary = Avx.ConvertToVector128Single(
+                filteredImaginaryDouble);
+            Sse.Store(
+                components + (index * 2),
+                Sse.UnpackLow(filteredReal, filteredImaginary));
+            Sse.Store(
+                components + (index * 2) + 4,
+                Sse.UnpackHigh(filteredReal, filteredImaginary));
+        }
+
+        return index;
     }
 
     internal static int NextFastLength(int minimumLength)

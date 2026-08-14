@@ -2836,6 +2836,46 @@ wall time from 68.724 to 68.473 seconds (0.37% lower). Candidate working set was
 medians. Nine post-startup 200-frame intervals stayed within 6.446-6.699 seconds,
 showing no progressive throughput decay or OOM trend.
 
+### Managed AVX Super-Gaussian spectrum mask
+
+The managed Exact chroma final filter applies its Super-Gaussian spectrum mask
+to four `Complex32` values at a time on AVX hardware. Components are widened
+from float to double before preserving the original lane-local multiply,
+subtract/add, and double-to-float conversion points. The loop contains no FMA,
+horizontal reduction, or reassociation. It checks both double results before
+storing a vector; a NaN or infinity returns that vector and the remaining tail
+to the original no-inline scalar JIT shape. Unaligned spans, scalar tails, and
+the IPP implementation retain their prior behavior.
+
+Eight alternating process-level kernel pairs each applied a 178,201-point mask
+2,000 times. All 16 runs produced SHA-256
+`71D268BFA031E0E6321CD5E3067D340DF5CF3338326947539F171D9B2C42ECF3`.
+Scalar/AVX wall-time medians were 1,210.850/167.083 ms, an 86.20% reduction and
+7.247x throughput gain; median CPU time fell 86.18%. Release disassembly used
+`vmulpd`, `vsubpd`, and `vaddpd` without fused multiply-add. Focused xUnit v3
+coverage includes 539 finite combinations, every vector-tail length, unaligned
+slices with sentinels, and the complete 12-by-12-by-12 exceptional-value cross.
+Default JIT, `TieredCompilation=0`, forced AVX-off, and fully disabled hardware
+intrinsics matched the corresponding saved-main scalar behavior.
+
+Six interleaved 1,000-frame Exact `current --threads 20` release-binary pairs
+matched exit status, luma, chroma, raw JSON, stdout, normalized stderr/logs, and
+all 2,000 ordered `fileLoc` values. The candidate won five pairs; the remaining
+pair was 0.03% slower. Independent wall-time medians moved from 35.879 to
+35.608 seconds (0.76%, 1.008x), CPU time from 298.148 to 295.141 seconds
+(1.01%), and effective cores from 8.18 to 8.38 (2.43%). Median peak working set
+moved from 352.5 to 345.9 MiB and private bytes from 364.8 to 357.9 MiB.
+
+The final candidate based on main `1b97a24` passed 12 Exact and 12 IPP-fast
+profile/thread release gates plus native, AVX-disabled, and all-intrinsics-off
+Exact gates. All seven artifact/log surfaces and ordered `fileLoc` matched.
+The accepted 60-run public matrix performed three complete runs for every
+backend/profile/thread cell and retained one hash set per cell. A prior batch
+was discarded when unrelated high-CPU processes appeared; each accepted run
+required a low external-CPU sample before launch. All 1,448 xUnit v3 tests
+passed. The final 103,591,012-byte single-file executable has SHA-256
+`CFC47ADC6BF8B1EA5999EFC24D959AB3F85C4D67F2060CC87E304BFC80C4740C`.
+
 To regenerate the embedded format parameter snapshot from the checked-out
 upstream source:
 

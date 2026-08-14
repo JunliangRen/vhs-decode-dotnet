@@ -1,3 +1,5 @@
+using System.Runtime.CompilerServices;
+using System.Runtime.Intrinsics.X86;
 using VHSDecode.Core.Decode;
 using VHSDecode.Core.Dsp;
 using VHSDecode.Core.Dsp.Ipp;
@@ -173,13 +175,21 @@ public sealed class IppRealDft32Tests
         }
     }
 
-    [Fact(DisplayName = "IPP Super-Gaussian mask SIMD preserves scalar complex bits")]
+    [Fact(DisplayName = "Super-Gaussian mask SIMD preserves scalar complex bits")]
     public void SuperGaussianMaskSimdPreservesScalarComplexBits()
     {
+        Assert.Equal(2 * sizeof(float), Unsafe.SizeOf<Complex32>());
+        if (Environment.GetEnvironmentVariable(
+                "VHSDECODE_REQUIRE_AVX_SUPER_GAUSSIAN_MASK") == "1")
+        {
+            Assert.True(Avx.IsSupported, "The AVX Super-Gaussian mask path is required by this test run.");
+        }
+
         double[] values = BuildStagingDoubleValues();
         var mask = new double[values.Length];
         var expected = new IppComplex32[values.Length];
         var actual = new IppComplex32[values.Length];
+        var actualManaged = new Complex32[values.Length];
         for (int index = 0; index < values.Length; index++)
         {
             float real = (float)values[index];
@@ -188,9 +198,11 @@ public sealed class IppRealDft32Tests
             mask[index] = factor;
             expected[index] = ApplyScalarMask(real, imaginary, factor);
             actual[index] = new IppComplex32(real, imaginary);
+            actualManaged[index] = new Complex32(real, imaginary);
         }
 
         ChromaSuperGaussianFinalFilter.ApplyIppMask(actual, mask);
+        ChromaSuperGaussianFinalFilter.ApplyManagedMask(actualManaged, mask);
 
         for (int index = 0; index < expected.Length; index++)
         {
@@ -200,7 +212,33 @@ public sealed class IppRealDft32Tests
             Assert.Equal(
                 BitConverter.SingleToUInt32Bits(expected[index].Imaginary),
                 BitConverter.SingleToUInt32Bits(actual[index].Imaginary));
+            Assert.Equal(
+                BitConverter.SingleToUInt32Bits(expected[index].Real),
+                BitConverter.SingleToUInt32Bits(actualManaged[index].Real));
+            Assert.Equal(
+                BitConverter.SingleToUInt32Bits(expected[index].Imaginary),
+                BitConverter.SingleToUInt32Bits(actualManaged[index].Imaginary));
         }
+
+        (float Real, float Imaginary, double Factor)[] finiteCases =
+            BuildFiniteMaskCases();
+        AssertManagedMaskMatchesScalar(finiteCases);
+        AssertManagedMaskMatchesScalar(finiteCases[..^1]);
+        AssertManagedMaskMatchesScalar(finiteCases[..^2]);
+        AssertManagedMaskMatchesScalar(finiteCases[..^3]);
+        AssertManagedMaskMatchesScalar(finiteCases[..1]);
+        AssertManagedMaskMatchesScalar(finiteCases[..2]);
+        AssertManagedMaskMatchesScalar(finiteCases[..3]);
+        AssertManagedMaskMatchesScalar(
+            BuildMaskCases(),
+            exceptionalVectorIndex: 8);
+        Assert.Equal(
+            0,
+            ChromaSuperGaussianFinalFilter.ApplyManagedMask([], []));
+        Assert.Throws<ArgumentException>(
+            () => ChromaSuperGaussianFinalFilter.ApplyManagedMask(
+                new Complex32[1],
+                []));
     }
 
     [Theory(DisplayName = "Super-Gaussian reflect padding preserves scalar layout")]
@@ -302,6 +340,186 @@ public sealed class IppRealDft32Tests
         }
 
         return values;
+    }
+
+    private static (float Real, float Imaginary, double Factor)[] BuildMaskCases()
+    {
+        double[] values = BuildStagingDoubleValues();
+        const int EdgeValueCount = 12;
+        var cases = new List<(float Real, float Imaginary, double Factor)>(
+            (EdgeValueCount * EdgeValueCount * EdgeValueCount) + values.Length);
+        for (int realIndex = 0; realIndex < EdgeValueCount; realIndex++)
+        {
+            for (int imaginaryIndex = 0;
+                imaginaryIndex < EdgeValueCount;
+                imaginaryIndex++)
+            {
+                for (int factorIndex = 0;
+                    factorIndex < EdgeValueCount;
+                    factorIndex++)
+                {
+                    cases.Add((
+                        (float)values[realIndex],
+                        (float)values[imaginaryIndex],
+                        values[factorIndex]));
+                }
+            }
+        }
+
+        for (int index = 0; index < values.Length; index++)
+        {
+            cases.Add((
+                (float)values[index],
+                (float)values[(index * 7 + 3) % values.Length],
+                values[(index * 5 + 1) % values.Length]));
+        }
+
+        return cases.ToArray();
+    }
+
+    private static (float Real, float Imaginary, double Factor)[]
+        BuildFiniteMaskCases()
+    {
+        double[] values = BuildStagingDoubleValues();
+        const int FiniteEdgeValueCount = 8;
+        var cases = new List<(float Real, float Imaginary, double Factor)>(539);
+        for (int realIndex = 0;
+            realIndex < FiniteEdgeValueCount;
+            realIndex++)
+        {
+            for (int imaginaryIndex = 0;
+                imaginaryIndex < FiniteEdgeValueCount;
+                imaginaryIndex++)
+            {
+                for (int factorIndex = 0;
+                    factorIndex < FiniteEdgeValueCount;
+                    factorIndex++)
+                {
+                    cases.Add((
+                        (float)values[realIndex],
+                        (float)values[imaginaryIndex],
+                        values[factorIndex]));
+                }
+            }
+        }
+
+        for (int index = 12; index < values.Length; index++)
+        {
+            cases.Add((
+                (float)values[index],
+                (float)values[12 + ((index * 7 + 3) % 25)],
+                values[12 + ((index * 5 + 1) % 25)]));
+        }
+
+        cases.Add((float.Epsilon, -float.Epsilon, double.Epsilon));
+        cases.Add((-float.Epsilon, float.Epsilon, -double.Epsilon));
+        return cases.ToArray();
+    }
+
+    private static void AssertManagedMaskMatchesScalar(
+        (float Real, float Imaginary, double Factor)[] cases,
+        int? exceptionalVectorIndex = null)
+    {
+        double maskStartSentinel = BitConverter.UInt64BitsToDouble(
+            0x7FF8_1357_2468_ACE0UL);
+        double maskEndSentinel = BitConverter.UInt64BitsToDouble(
+            0xFFF8_0246_8ACE_1357UL);
+        var maskStorage = new double[cases.Length + 2];
+        maskStorage[0] = maskStartSentinel;
+        maskStorage[^1] = maskEndSentinel;
+        Span<double> mask = maskStorage.AsSpan(1, cases.Length);
+
+        var expectedStorage = new Complex32[cases.Length + 2];
+        var actualStorage = new Complex32[cases.Length + 2];
+        var startSentinel = new Complex32(
+            BitConverter.UInt32BitsToSingle(0x7FC1_3579U),
+            BitConverter.UInt32BitsToSingle(0xFFC2_468AU));
+        var endSentinel = new Complex32(
+            BitConverter.UInt32BitsToSingle(0x7FC3_579BU),
+            BitConverter.UInt32BitsToSingle(0xFFC4_68ACU));
+        expectedStorage[0] = actualStorage[0] = startSentinel;
+        expectedStorage[^1] = actualStorage[^1] = endSentinel;
+        Span<Complex32> expected = expectedStorage.AsSpan(1, cases.Length);
+        Span<Complex32> actual = actualStorage.AsSpan(1, cases.Length);
+        for (int index = 0; index < cases.Length; index++)
+        {
+            (float real, float imaginary, double factor) = cases[index];
+            mask[index] = factor;
+            if (exceptionalVectorIndex is null)
+            {
+                IppComplex32 scalar = ApplyScalarMask(
+                    real,
+                    imaginary,
+                    factor);
+                expected[index] = new Complex32(
+                    scalar.Real,
+                    scalar.Imaginary);
+            }
+            else
+            {
+                expected[index] = new Complex32(real, imaginary);
+            }
+            actual[index] = new Complex32(real, imaginary);
+        }
+
+        if (exceptionalVectorIndex is not null)
+        {
+            // NaN payload bits vary across JIT shapes, so exercise the exact
+            // production scalar fallback for exceptional lanes.
+            ChromaSuperGaussianFinalFilter.ApplyManagedMaskScalar(
+                expected,
+                mask);
+        }
+        int vectorizedPrefixLength =
+            ChromaSuperGaussianFinalFilter.ApplyManagedMask(actual, mask);
+        int expectedVectorizedPrefixLength = Avx.IsSupported
+            ? exceptionalVectorIndex
+                ?? (cases.Length - (cases.Length % 4))
+            : 0;
+        Assert.Equal(
+            expectedVectorizedPrefixLength,
+            vectorizedPrefixLength);
+        for (int index = 0; index < expected.Length; index++)
+        {
+            uint expectedReal = BitConverter.SingleToUInt32Bits(
+                expected[index].Real);
+            uint actualReal = BitConverter.SingleToUInt32Bits(
+                actual[index].Real);
+            Assert.True(
+                expectedReal == actualReal,
+                $"Real lane {index} differed: expected {expectedReal:X8}, actual {actualReal:X8}.");
+
+            uint expectedImaginary = BitConverter.SingleToUInt32Bits(
+                expected[index].Imaginary);
+            uint actualImaginary = BitConverter.SingleToUInt32Bits(
+                actual[index].Imaginary);
+            Assert.True(
+                expectedImaginary == actualImaginary,
+                $"Imaginary lane {index} differed: expected {expectedImaginary:X8}, actual {actualImaginary:X8}.");
+        }
+
+        AssertComplexBitsEqual(startSentinel, expectedStorage[0]);
+        AssertComplexBitsEqual(endSentinel, expectedStorage[^1]);
+        AssertComplexBitsEqual(startSentinel, actualStorage[0]);
+        AssertComplexBitsEqual(endSentinel, actualStorage[^1]);
+        Assert.Equal(
+            BitConverter.DoubleToUInt64Bits(maskStartSentinel),
+            BitConverter.DoubleToUInt64Bits(maskStorage[0]));
+        Assert.Equal(
+            BitConverter.DoubleToUInt64Bits(maskEndSentinel),
+            BitConverter.DoubleToUInt64Bits(maskStorage[^1]));
+    }
+
+    private static void AssertComplexBitsEqual(
+        Complex32 expected,
+        Complex32 actual)
+    {
+        Assert.Equal(
+            BitConverter.SingleToUInt32Bits(expected.Real),
+            BitConverter.SingleToUInt32Bits(actual.Real));
+        Assert.Equal(
+            BitConverter.SingleToUInt32Bits(expected.Imaginary),
+            BitConverter.SingleToUInt32Bits(actual.Imaginary));
     }
 
     private static IppComplex32 ApplyScalarMask(
