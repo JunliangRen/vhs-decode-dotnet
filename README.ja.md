@@ -125,7 +125,7 @@ SHA-256 を保ち、wall-time median は 1,210.850 から 167.083 ms へ減少�
 （86.20%、7.247x）。
 
 interleaved 1,000-frame Exact `current --threads 20` release 6 pair は全 compatibility surface
-で一致しました。candidate は 5 pair で高速、残る 1 pair も -0.03% だけでした。独立 median
+で一致しました。candidate は 5 pair で高速、残る 1 pair は 0.03% だけ低速でした。独立 median
 は wall time 35.879 から 35.608 秒（0.76%、1.008x）、CPU time 298.148 から
 295.141 秒（1.01%）、effective core 8.18 から 8.38（2.43%）へ移り、peak working set と
 private bytes の median も低下しました。Exact/IPP-fast の 24 release-binary gate、3 intrinsic

@@ -131,8 +131,8 @@ one SHA-256 and moved median wall time from 1,210.850 to 167.083 ms (86.20%,
 7.247x).
 
 Six interleaved 1,000-frame Exact `current --threads 20` release pairs matched
-all compatibility surfaces. The candidate won five pairs; the sixth differed
-by only -0.03%. Independent median wall time moved from 35.879 to 35.608 seconds
+all compatibility surfaces. The candidate won five pairs; the sixth was only
+0.03% slower. Independent median wall time moved from 35.879 to 35.608 seconds
 (0.76%, 1.008x), CPU time from 298.148 to 295.141 seconds (1.01%), and effective
 cores from 8.18 to 8.38 (2.43%); median peak working set and private bytes also
 fell. Exact and IPP-fast passed 24 release-binary gates, three intrinsic-mode

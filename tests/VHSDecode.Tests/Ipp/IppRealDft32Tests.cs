@@ -229,9 +229,7 @@ public sealed class IppRealDft32Tests
         AssertManagedMaskMatchesScalar(finiteCases[..1]);
         AssertManagedMaskMatchesScalar(finiteCases[..2]);
         AssertManagedMaskMatchesScalar(finiteCases[..3]);
-        AssertManagedMaskMatchesScalar(
-            BuildMaskCases(),
-            exceptionalVectorIndex: 8);
+        AssertExceptionalMaskGroupsMatchOriginalScalar(BuildMaskCases());
         Assert.Equal(
             0,
             ChromaSuperGaussianFinalFilter.ApplyManagedMask([], []));
@@ -418,7 +416,7 @@ public sealed class IppRealDft32Tests
 
     private static void AssertManagedMaskMatchesScalar(
         (float Real, float Imaginary, double Factor)[] cases,
-        int? exceptionalVectorIndex = null)
+        int? expectedVectorizedPrefixLength = null)
     {
         double maskStartSentinel = BitConverter.UInt64BitsToDouble(
             0x7FF8_1357_2468_ACE0UL);
@@ -445,39 +443,19 @@ public sealed class IppRealDft32Tests
         {
             (float real, float imaginary, double factor) = cases[index];
             mask[index] = factor;
-            if (exceptionalVectorIndex is null)
-            {
-                IppComplex32 scalar = ApplyScalarMask(
-                    real,
-                    imaginary,
-                    factor);
-                expected[index] = new Complex32(
-                    scalar.Real,
-                    scalar.Imaginary);
-            }
-            else
-            {
-                expected[index] = new Complex32(real, imaginary);
-            }
+            expected[index] = new Complex32(real, imaginary);
             actual[index] = new Complex32(real, imaginary);
         }
 
-        if (exceptionalVectorIndex is not null)
-        {
-            // NaN payload bits vary across JIT shapes, so exercise the exact
-            // production scalar fallback for exceptional lanes.
-            ChromaSuperGaussianFinalFilter.ApplyManagedMaskScalar(
-                expected,
-                mask);
-        }
+        ApplyOriginalManagedMaskOracle(expected, mask);
         int vectorizedPrefixLength =
             ChromaSuperGaussianFinalFilter.ApplyManagedMask(actual, mask);
-        int expectedVectorizedPrefixLength = Avx.IsSupported
-            ? exceptionalVectorIndex
+        int expectedPrefix = Avx.IsSupported
+            ? expectedVectorizedPrefixLength
                 ?? (cases.Length - (cases.Length % 4))
             : 0;
         Assert.Equal(
-            expectedVectorizedPrefixLength,
+            expectedPrefix,
             vectorizedPrefixLength);
         for (int index = 0; index < expected.Length; index++)
         {
@@ -508,6 +486,75 @@ public sealed class IppRealDft32Tests
         Assert.Equal(
             BitConverter.DoubleToUInt64Bits(maskEndSentinel),
             BitConverter.DoubleToUInt64Bits(maskStorage[^1]));
+    }
+
+    private static void AssertExceptionalMaskGroupsMatchOriginalScalar(
+        (float Real, float Imaginary, double Factor)[] cases)
+    {
+        int nonFiniteLaneMask = 0;
+        int finiteVectorCount = 0;
+        int fallbackVectorCount = 0;
+        for (int offset = 0; offset < cases.Length; offset += 4)
+        {
+            int count = Math.Min(4, cases.Length - offset);
+            var group = new (float Real, float Imaginary, double Factor)[count];
+            Array.Copy(cases, offset, group, 0, count);
+
+            bool containsNonFiniteResult = false;
+            for (int lane = 0; lane < group.Length; lane++)
+            {
+                (float realValue, float imaginaryValue, double factor) = group[lane];
+                double real = realValue;
+                double imaginary = imaginaryValue;
+                double filteredReal =
+                    (real * factor) - (imaginary * 0.0);
+                double filteredImaginary =
+                    (real * 0.0) + (imaginary * factor);
+                if (!double.IsFinite(filteredReal)
+                    || !double.IsFinite(filteredImaginary))
+                {
+                    containsNonFiniteResult = true;
+                    nonFiniteLaneMask |= 1 << lane;
+                }
+            }
+
+            int expectedPrefix = count == 4 && !containsNonFiniteResult
+                ? 4
+                : 0;
+            if (count == 4)
+            {
+                if (containsNonFiniteResult)
+                {
+                    fallbackVectorCount++;
+                }
+                else
+                {
+                    finiteVectorCount++;
+                }
+            }
+
+            AssertManagedMaskMatchesScalar(group, expectedPrefix);
+        }
+
+        Assert.Equal(0b1111, nonFiniteLaneMask);
+        Assert.True(finiteVectorCount > 0);
+        Assert.True(fallbackVectorCount > 0);
+    }
+
+    // Independent copy of the pre-vectorization managed loop.
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private static void ApplyOriginalManagedMaskOracle(
+        Span<Complex32> spectrum,
+        ReadOnlySpan<double> mask)
+    {
+        for (int index = 0; index < spectrum.Length; index++)
+        {
+            double real = spectrum[index].Real;
+            double imaginary = spectrum[index].Imaginary;
+            spectrum[index] = new Complex32(
+                (float)((real * mask[index]) - (imaginary * 0.0)),
+                (float)((real * 0.0) + (imaginary * mask[index])));
+        }
     }
 
     private static void AssertComplexBitsEqual(

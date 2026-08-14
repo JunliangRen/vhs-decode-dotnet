@@ -54,6 +54,9 @@ public sealed partial class ReadmeLocalizationTests
     private const string SuperGaussianMaskAvxRequirement =
         "VHSDECODE_REQUIRE_AVX_SUPER_GAUSSIAN_MASK: \"1\"";
 
+    private const string SuperGaussianMaskAvxDisabledTestName =
+        "Run managed Super-Gaussian mask AVX-disabled equivalence test";
+
     private const string CurrentCtiAvx2GatherTestCommand =
         "run: dotnet test tests/VHSDecode.Tests/VHSDecode.Tests.csproj " +
         "--configuration Release --no-build --no-restore --filter-method " +
@@ -1411,6 +1414,10 @@ public sealed partial class ReadmeLocalizationTests
             StringComparison.Ordinal);
         Assert.Contains(
             SuperGaussianMaskAvxRequirement,
+            workflow,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            SuperGaussianMaskAvxDisabledTestName,
             workflow,
             StringComparison.Ordinal);
         Assert.Contains(
