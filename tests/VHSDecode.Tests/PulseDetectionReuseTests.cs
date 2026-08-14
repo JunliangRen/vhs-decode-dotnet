@@ -52,6 +52,39 @@ public sealed class PulseDetectionReuseTests
         Assert.InRange(refinementAllocation, 0, 12 * 1024 * 1024);
     }
 
+    [Fact(DisplayName = "Rejected VBlank candidates use bounded stack scratch")]
+    public void RejectedVBlankCandidatesUseBoundedStackScratch()
+    {
+        const int CandidateCount = 10_000;
+        var pulses = new Pulse[CandidateCount * 4];
+        for (int candidate = 0; candidate < CandidateCount; candidate++)
+        {
+            int offset = candidate * 4;
+            int start = offset * 100;
+            pulses[offset] = new Pulse(start, 10);
+            pulses[offset + 1] = new Pulse(start + 100, 10);
+            pulses[offset + 2] = new Pulse(start + 200, 10);
+            pulses[offset + 3] = new Pulse(start + 300, 5);
+        }
+
+        var analyzer = new SyncAnalyzer(
+            sampleRateHz: 1_000_000.0,
+            linePeriodUs: 100.0,
+            hsyncPulseUs: 10.0,
+            equalizingPulseUs: 5.0,
+            vsyncPulseUs: 20.0,
+            numPulses: 6);
+        SyncTiming timing = analyzer.EstimateTiming(pulses);
+        _ = analyzer.RefinePulses([], timing);
+
+        long allocationStart = GC.GetAllocatedBytesForCurrentThread();
+        IReadOnlyList<ClassifiedSyncPulse> refined = analyzer.RefinePulses(pulses, timing);
+        long allocation = GC.GetAllocatedBytesForCurrentThread() - allocationStart;
+
+        Assert.Equal(CandidateCount * 3, refined.Count);
+        Assert.InRange(allocation, 0, 2 * 1024 * 1024);
+    }
+
     [Fact(DisplayName = "Reusable pulse detection matches the v0.4.0 scalar state machine")]
     public void ReusablePulseDetectionMatchesScalarStateMachine()
     {

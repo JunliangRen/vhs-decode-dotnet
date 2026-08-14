@@ -254,20 +254,19 @@ public sealed class SyncAnalyzer
                 continue;
             }
 
-            (IReadOnlyList<ClassifiedSyncPulse> Pulses, int EndIndex)? vBlank =
-                TryReadVBlank(workingPulses, timing, index - 2, Math.Min(workingPulses.Length, index + 24));
-            if (!vBlank.HasValue)
+            if (!TryReadVBlank(
+                    workingPulses,
+                    timing,
+                    index - 2,
+                    Math.Min(workingPulses.Length, index + 24),
+                    refined,
+                    out int vBlankPulseCount))
             {
                 index++;
                 continue;
             }
 
-            foreach (ClassifiedSyncPulse validPulse in vBlank.Value.Pulses.Skip(2))
-            {
-                refined.Add(validPulse);
-            }
-
-            index += Math.Max(1, vBlank.Value.Pulses.Count - 2);
+            index += Math.Max(1, vBlankPulseCount - 2);
         }
 
         updatedRawPulses = workingPulses;
@@ -298,13 +297,16 @@ public sealed class SyncAnalyzer
             : null;
     }
 
-    private (IReadOnlyList<ClassifiedSyncPulse> Pulses, int EndIndex)? TryReadVBlank(
+    private bool TryReadVBlank(
         IReadOnlyList<Pulse> rawPulses,
         SyncTiming timing,
         int start,
-        int endExclusive)
+        int endExclusive,
+        List<ClassifiedSyncPulse> destination,
+        out int pulseCount)
     {
-        var valid = new List<ClassifiedSyncPulse>(BoundedInitialCapacity(endExclusive - start));
+        Span<ClassifiedSyncPulse> valid = stackalloc ClassifiedSyncPulse[endExclusive - Math.Max(0, start)];
+        int validCount = 0;
         SyncPulseKind? state = null;
         double stateEnd = 0.0;
         double? stateLength = null;
@@ -406,19 +408,26 @@ public sealed class SyncAnalyzer
 
             if (accepted.HasValue)
             {
-                bool inOrder = valid.Count > 0
-                    && PulseQualityCheck(valid[^1], accepted.Value, pulse);
-                valid.Add(new ClassifiedSyncPulse(accepted.Value, pulse, inOrder));
+                bool inOrder = validCount > 0
+                    && PulseQualityCheck(valid[validCount - 1], accepted.Value, pulse);
+                valid[validCount++] = new ClassifiedSyncPulse(accepted.Value, pulse, inOrder);
                 state = accepted;
             }
 
             if (done)
             {
-                return (valid, index);
+                for (int validIndex = 2; validIndex < validCount; validIndex++)
+                {
+                    destination.Add(valid[validIndex]);
+                }
+
+                pulseCount = validCount;
+                return true;
             }
         }
 
-        return null;
+        pulseCount = 0;
+        return false;
     }
 
     private static SyncPulseKind? ClassifyPulse(Pulse pulse, SyncTiming timing)
