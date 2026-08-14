@@ -99,6 +99,26 @@ public static class PocketFftReal
         Plans.GetOrAdd(outputLength, static length => new Plan(length)).Inverse(input, output);
     }
 
+    internal static double[] InverseScalarReference(
+        ReadOnlySpan<Complex> input,
+        int outputLength)
+    {
+        if (outputLength < 2 || (outputLength & (outputLength - 1)) != 0)
+        {
+            throw new ArgumentException("Real FFT length must be a power of two of at least two.", nameof(outputLength));
+        }
+
+        if (input.Length != (outputLength / 2) + 1)
+        {
+            throw new ArgumentException("Half-spectrum length does not match the requested real output length.", nameof(input));
+        }
+
+        var output = new double[outputLength];
+        Plans.GetOrAdd(outputLength, static length => new Plan(length))
+            .Inverse(input, output, permitAvx: false);
+        return output;
+    }
+
     private sealed class Plan
     {
         private readonly int _length;
@@ -208,6 +228,12 @@ public static class PocketFftReal
         }
 
         public void Inverse(ReadOnlySpan<Complex> input, double[] output)
+            => Inverse(input, output, permitAvx: true);
+
+        public void Inverse(
+            ReadOnlySpan<Complex> input,
+            double[] output,
+            bool permitAvx)
         {
             output[0] = input[0].Real;
             for (int i = 1; i < input.Length - 1; i++)
@@ -217,7 +243,7 @@ public static class PocketFftReal
             }
 
             output[_length - 1] = input[^1].Real;
-            ExecuteBackward(output, 1.0 / _length);
+            ExecuteBackward(output, 1.0 / _length, permitAvx);
         }
 
         private void ExecuteForward(double[] data)
@@ -256,7 +282,10 @@ public static class PocketFftReal
             }
         }
 
-        private void ExecuteBackward(double[] data, double normalization)
+        private void ExecuteBackward(
+            double[] data,
+            double normalization,
+            bool permitAvx)
         {
             double[] scratch = ArrayPool<double>.Shared.Rent(_length);
             try
@@ -269,7 +298,13 @@ public static class PocketFftReal
                     int ido = _length / (factor.Radix * l1);
                     if (factor.Radix == 4)
                     {
-                        Radix4Backward(ido, l1, source, destination, factor.Twiddles);
+                        Radix4Backward(
+                            ido,
+                            l1,
+                            source,
+                            destination,
+                            factor.Twiddles,
+                            permitAvx);
                     }
                     else
                     {
@@ -650,7 +685,8 @@ public static class PocketFftReal
             int l1,
             double[] input,
             double[] output,
-            double[] twiddles)
+            double[] twiddles,
+            bool permitAvx)
         {
             const double Sqrt2 = 1.414213562373095048801688724209698;
             fixed (double* inputPointer = input)
@@ -659,7 +695,44 @@ public static class PocketFftReal
             {
                 int inputGroupStride = 4 * ido;
                 int outputGroupStride = ido * l1;
-                for (int k = 0; k < l1; k++)
+                int firstGroup = 0;
+                if (ido == 1 && permitAvx && Avx.IsSupported)
+                {
+                    Vector256<double> two = Vector256.Create(2.0);
+                    int vectorizedEnd = l1 & ~(Vector256<double>.Count - 1);
+                    for (; firstGroup < vectorizedEnd; firstGroup += Vector256<double>.Count)
+                    {
+                        double* inputBatch = inputPointer + (4 * firstGroup);
+                        Vector256<double> row0 = Avx.LoadVector256(inputBatch);
+                        Vector256<double> row1 = Avx.LoadVector256(inputBatch + 4);
+                        Vector256<double> row2 = Avx.LoadVector256(inputBatch + 8);
+                        Vector256<double> row3 = Avx.LoadVector256(inputBatch + 12);
+                        Vector256<double> even01 = Avx.UnpackLow(row0, row1);
+                        Vector256<double> odd01 = Avx.UnpackHigh(row0, row1);
+                        Vector256<double> even23 = Avx.UnpackLow(row2, row3);
+                        Vector256<double> odd23 = Avx.UnpackHigh(row2, row3);
+                        Vector256<double> c0 = Avx.Permute2x128(even01, even23, 0x20);
+                        Vector256<double> c1 = Avx.Permute2x128(odd01, odd23, 0x20);
+                        Vector256<double> c2 = Avx.Permute2x128(even01, even23, 0x31);
+                        Vector256<double> c3 = Avx.Permute2x128(odd01, odd23, 0x31);
+                        Vector256<double> tr2 = Avx.Add(c0, c3);
+                        Vector256<double> tr1 = Avx.Subtract(c0, c3);
+                        Vector256<double> tr3 = Avx.Multiply(two, c1);
+                        Vector256<double> tr4 = Avx.Multiply(two, c2);
+                        Avx.Store(outputPointer + firstGroup, Avx.Add(tr2, tr3));
+                        Avx.Store(
+                            outputPointer + l1 + firstGroup,
+                            Avx.Subtract(tr1, tr4));
+                        Avx.Store(
+                            outputPointer + (2 * l1) + firstGroup,
+                            Avx.Subtract(tr2, tr3));
+                        Avx.Store(
+                            outputPointer + (3 * l1) + firstGroup,
+                            Avx.Add(tr1, tr4));
+                    }
+                }
+
+                for (int k = firstGroup; k < l1; k++)
                 {
                     double* inputGroup = inputPointer + (inputGroupStride * k);
                     double* outputGroup = outputPointer + (ido * k);
@@ -707,7 +780,7 @@ public static class PocketFftReal
                     double* inputGroup = inputPointer + (inputGroupStride * k);
                     double* outputGroup = outputPointer + (ido * k);
                     int i = 2;
-                    if (Avx.IsSupported)
+                    if (permitAvx && Avx.IsSupported)
                     {
                         for (; i + 2 < ido; i += 4)
                         {

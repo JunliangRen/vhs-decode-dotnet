@@ -2556,10 +2556,10 @@ public sealed class RfDemodulator : IDisposable
             ? diffedWorkspace
             : new Complex[analytic.Length];
         Span<Complex> activeDiffed = diffed.AsSpan(0, analytic.Length);
-        analytic.CopyTo(activeDiffed);
+        // Descending traversal keeps this safe even if the source and workspace alias.
         for (int i = activeDiffed.Length - 1; i >= 1; i--)
         {
-            activeDiffed[i] -= activeDiffed[i - 1];
+            activeDiffed[i] = analytic[i] - analytic[i - 1];
         }
 
         activeDiffed[0] = Complex.Zero;

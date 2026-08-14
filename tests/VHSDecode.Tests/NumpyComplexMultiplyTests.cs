@@ -216,7 +216,10 @@ public sealed class NumpyComplexMultiplyTests
         double[] multipliers = Enumerable.Range(0, values.Length)
             .Select(index => (index - 2_048) / 257.0)
             .ToArray();
-        NumpyComplexMultiply.ApplyRealInPlace(values, multipliers);
+        for (int warmup = 0; warmup < 128; warmup++)
+        {
+            NumpyComplexMultiply.ApplyRealInPlace(values, multipliers);
+        }
 
         long before = GC.GetAllocatedBytesForCurrentThread();
         for (int iteration = 0; iteration < 32; iteration++)

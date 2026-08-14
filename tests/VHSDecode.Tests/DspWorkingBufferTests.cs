@@ -2,6 +2,7 @@ using System.Buffers.Binary;
 using System.Globalization;
 using System.Numerics;
 using System.Runtime.InteropServices;
+using System.Runtime.Intrinsics.X86;
 using System.Security.Cryptography;
 using VHSDecode.Core.CommandLine;
 using VHSDecode.Core.Decode;
@@ -220,6 +221,48 @@ public sealed class DspWorkingBufferTests
         Assert.Equal(
             expectedInverseHash,
             Convert.ToHexString(SHA256.HashData(MemoryMarshal.AsBytes(inverse.AsSpan()))));
+    }
+
+    [Fact(DisplayName = "Real inverse FFT final radix-4 AVX stage preserves scalar special-value bits")]
+    public void RealInverseFftFinalRadix4AvxStagePreservesScalarSpecialValueBits()
+    {
+        if (Environment.GetEnvironmentVariable("VHSDECODE_REQUIRE_AVX_REAL_RADIX4") == "1")
+        {
+            Assert.True(Avx.IsSupported, "The CI final real-radix-4 run requires AVX support.");
+        }
+
+        const int outputLength = 32_768;
+        ulong[] patterns =
+        [
+            0x0000_0000_0000_0000UL,
+            0x8000_0000_0000_0000UL,
+            0x0000_0000_0000_0001UL,
+            0x8000_0000_0000_0001UL,
+            0x0010_0000_0000_0000UL,
+            0x8010_0000_0000_0000UL,
+            0x3FF0_0000_0000_0000UL,
+            0xBFF0_0000_0000_0000UL,
+            0x7FEF_FFFF_FFFF_FFFFUL,
+            0xFFEF_FFFF_FFFF_FFFFUL,
+            0x7FF0_0000_0000_0000UL,
+            0xFFF0_0000_0000_0000UL,
+            0x7FF8_0000_0000_0042UL,
+            0xFFF8_0000_0000_0199UL
+        ];
+        var spectrum = new Complex[(outputLength / 2) + 1];
+        for (int index = 0; index < spectrum.Length; index++)
+        {
+            spectrum[index] = new Complex(
+                BitConverter.UInt64BitsToDouble(patterns[(2 * index) % patterns.Length]),
+                BitConverter.UInt64BitsToDouble(patterns[((2 * index) + 1) % patterns.Length]));
+        }
+
+        double[] expected = PocketFftReal.InverseScalarReference(spectrum, outputLength);
+        double[] actual = PocketFftReal.Inverse(spectrum, outputLength);
+
+        Assert.Equal(
+            Convert.ToHexString(SHA256.HashData(MemoryMarshal.AsBytes(expected.AsSpan()))),
+            Convert.ToHexString(SHA256.HashData(MemoryMarshal.AsBytes(actual.AsSpan()))));
     }
 
     [Fact(DisplayName = "32K complex FFT preserves signed-zero packetized hash")]
