@@ -103,6 +103,92 @@ public sealed class PulseDetectionReuseTests
         Assert.InRange(classified.Capacity, PulseCount, 65_536);
     }
 
+    [Fact(DisplayName = "Caller-owned sync lists preserve rescue output without mutating input")]
+    public void CallerOwnedSyncListsPreserveRescueOutputWithoutMutatingInput()
+    {
+        var analyzer = new SyncAnalyzer(
+            sampleRateHz: 1_000_000.0,
+            linePeriodUs: 100.0,
+            hsyncPulseUs: 10.0,
+            equalizingPulseUs: 5.0,
+            vsyncPulseUs: 20.0,
+            numPulses: 6);
+        Pulse[] rawPulses = [new(0, 10), new(100, 20), new(200, 10)];
+        SyncTiming timing = analyzer.EstimateTiming(rawPulses);
+        double[] syncReference = new double[240];
+        Array.Fill(syncReference, -20.0, 100, 20);
+        Array.Fill(syncReference, -40.0, 104, 10);
+        var destination = new List<ClassifiedSyncPulse>
+        {
+            new(SyncPulseKind.VSync, new Pulse(999, 999), InOrder: true)
+        };
+        ClassifiedSyncPulse[] expected =
+        [
+            new(SyncPulseKind.HSync, new Pulse(0, 10), InOrder: false),
+            new(SyncPulseKind.HSync, new Pulse(104, 10), InOrder: true),
+            new(SyncPulseKind.HSync, new Pulse(200, 10), InOrder: true)
+        ];
+
+        IReadOnlyList<ClassifiedSyncPulse> refined = analyzer.RefinePulses(
+            rawPulses,
+            timing,
+            syncReference,
+            hsyncRescueStepHz: 10.0,
+            destination,
+            out Pulse[] updatedRawPulses);
+
+        Assert.Same(destination, refined);
+        Assert.Equal(expected, refined);
+        Assert.Equal([new Pulse(0, 10), new Pulse(100, 20), new Pulse(200, 10)], rawPulses);
+        Assert.Equal([new Pulse(0, 10), new Pulse(104, 10), new Pulse(200, 10)], updatedRawPulses);
+    }
+
+    [Fact(DisplayName = "Caller-owned sync list retention honors the 65536 pulse boundary")]
+    public void CallerOwnedSyncListRetentionHonorsMaximumBoundary()
+    {
+        const int MaximumRetainedCapacity = 65_536;
+        var analyzer = new SyncAnalyzer(
+            sampleRateHz: 1_000_000.0,
+            linePeriodUs: 100.0,
+            hsyncPulseUs: 10.0,
+            equalizingPulseUs: 5.0,
+            vsyncPulseUs: 20.0);
+        var timing = new SyncTiming(
+            NominalLineLength: 100.0,
+            HSyncMedian: 10.0,
+            HSyncOffset: 0.0,
+            HSync: new SyncRange(9.0, 11.0),
+            Equalizing: new SyncRange(4.0, 6.0),
+            VSync: new SyncRange(19.0, 21.0));
+        Pulse[] boundaryPulses = Enumerable.Range(0, MaximumRetainedCapacity)
+            .Select(static index => new Pulse(index * 100, 10))
+            .ToArray();
+        Pulse[] overBoundaryPulses = Enumerable.Range(0, MaximumRetainedCapacity + 1)
+            .Select(static index => new Pulse(index * 100, 10))
+            .ToArray();
+
+        var exactBoundary = new List<ClassifiedSyncPulse>(MaximumRetainedCapacity);
+        analyzer.ClassifyPulses([], timing, exactBoundary);
+        Assert.Empty(exactBoundary);
+        Assert.Equal(MaximumRetainedCapacity, exactBoundary.Capacity);
+
+        var oneOverBoundary = new List<ClassifiedSyncPulse>(MaximumRetainedCapacity + 1);
+        analyzer.ClassifyPulses(boundaryPulses, timing, oneOverBoundary);
+        Assert.Equal(MaximumRetainedCapacity, oneOverBoundary.Count);
+        Assert.Equal(MaximumRetainedCapacity, oneOverBoundary.Capacity);
+        Assert.Equal(new Pulse(0, 10), oneOverBoundary[0].Pulse);
+        Assert.Equal(new Pulse((MaximumRetainedCapacity - 1) * 100, 10), oneOverBoundary[^1].Pulse);
+
+        analyzer.ClassifyPulses(overBoundaryPulses, timing, oneOverBoundary);
+        Assert.Equal(MaximumRetainedCapacity + 1, oneOverBoundary.Count);
+        Assert.True(oneOverBoundary.Capacity > MaximumRetainedCapacity);
+        Assert.Equal(new Pulse(MaximumRetainedCapacity * 100, 10), oneOverBoundary[^1].Pulse);
+
+        analyzer.ClassifyPulses([], timing, oneOverBoundary);
+        Assert.Empty(oneOverBoundary);
+        Assert.Equal(0, oneOverBoundary.Capacity);
+    }
+
     [Fact(DisplayName = "Rejected VBlank candidates use bounded stack scratch")]
     public void RejectedVBlankCandidatesUseBoundedStackScratch()
     {
