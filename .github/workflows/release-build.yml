@@ -130,7 +130,7 @@ jobs:
         run: dotnet build VHSDecodeDotNet.slnx --configuration Release --no-restore
 
       - name: Run tests
-        run: dotnet test --solution VHSDecodeDotNet.slnx --configuration Release --no-build --no-restore --minimum-expected-tests 1447
+        run: dotnet test --solution VHSDecodeDotNet.slnx --configuration Release --no-build --no-restore --minimum-expected-tests 1448
 
       - name: Run NumPy reduction scalar fallback tests
         env:
@@ -201,6 +201,16 @@ jobs:
         env:
           DOTNET_EnableAVX: "0"
         run: dotnet test tests/VHSDecode.Tests/VHSDecode.Tests.csproj --configuration Release --no-build --no-restore --filter-method '*RealFftRadix4AvxStagesPreserveScalarBitPatterns*' --minimum-expected-tests 4
+
+      - name: Run final real PocketFFT radix-4 AVX equivalence test
+        env:
+          VHSDECODE_REQUIRE_AVX_REAL_RADIX4: "1"
+        run: dotnet test tests/VHSDecode.Tests/VHSDecode.Tests.csproj --configuration Release --no-build --no-restore --filter-method '*RealInverseFftFinalRadix4AvxStagePreservesScalarSpecialValueBits*' --minimum-expected-tests 1
+
+      - name: Run final real PocketFFT radix-4 scalar fallback test
+        env:
+          DOTNET_EnableAVX: "0"
+        run: dotnet test tests/VHSDecode.Tests/VHSDecode.Tests.csproj --configuration Release --no-build --no-restore --filter-method '*RealInverseFftFinalRadix4AvxStagePreservesScalarSpecialValueBits*' --minimum-expected-tests 1
 
       - name: Run PocketFFT radix-8 AVX-disabled hash test
         env:
