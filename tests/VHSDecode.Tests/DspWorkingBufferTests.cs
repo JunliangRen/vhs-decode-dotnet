@@ -1903,6 +1903,11 @@ public sealed class DspWorkingBufferTests
             AssertDoubleBitsEqual(
                 ApplyForwardBackwardSectionMajorReference(sections, input),
                 destination);
+            double[] aliased = input.ToArray();
+            SosFilter.ApplyForwardBackwardTo(sections, aliased, aliased);
+            AssertDoubleBitsEqual(
+                ApplyForwardBackwardSectionMajorReference(sections, input),
+                aliased);
             SosFilter.ApplyForwardBackwardTo(sections, input, destination, padLength: 0);
             AssertDoubleBitsEqual(
                 ApplyForwardBackwardSectionMajorReference(sections, input, padLength: 0),

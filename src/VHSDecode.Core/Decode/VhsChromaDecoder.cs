@@ -196,7 +196,7 @@ internal sealed record VhsChromaPhaseAnalysis(
 
 internal sealed class VhsChromaCarrierTableCache
 {
-    internal const int BurstProbeBufferCapacity = 4;
+    internal const int BurstProbeBufferCapacity = 8;
     private readonly Lock _gate = new();
     private readonly double[]?[] _burstProbeBuffers =
         new double[BurstProbeBufferCapacity][];
@@ -533,7 +533,14 @@ public static class VhsChromaDecoder
                     SosFilter.ApplyForwardBackwardFloat32InPlace(options.FinalSosFilter, values);
                     return values;
                 }
-            : values => SosFilter.ApplyForwardBackward(options.FinalSosFilter, values);
+                : values =>
+                {
+                    SosFilter.ApplyForwardBackwardTo(
+                        options.FinalSosFilter,
+                        values,
+                        values);
+                    return values;
+                };
         }
         else if (effectiveBurstFilter is null && options.FinalFilter is not null)
         {

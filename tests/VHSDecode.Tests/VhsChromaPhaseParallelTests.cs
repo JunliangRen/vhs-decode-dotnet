@@ -62,8 +62,8 @@ public sealed class VhsChromaPhaseParallelTests
         Assert.NotSame(result, changed);
     }
 
-    [Fact(DisplayName = "Current burst probes reuse four exact-length decoder buffers")]
-    public void CurrentBurstProbesReuseFourExactLengthDecoderBuffers()
+    [Fact(DisplayName = "Current burst probes reuse eight exact-length decoder buffers")]
+    public void CurrentBurstProbesReuseEightExactLengthDecoderBuffers()
     {
         const int LineLength = 64;
         const int LineCount = 80;
@@ -193,11 +193,11 @@ public sealed class VhsChromaPhaseParallelTests
         }
     }
 
-    [Fact(DisplayName = "Current burst probe buffer retention stays bounded at four")]
-    public void CurrentBurstProbeBufferRetentionStaysBoundedAtFour()
+    [Fact(DisplayName = "Current burst probe buffer retention stays bounded at eight")]
+    public void CurrentBurstProbeBufferRetentionStaysBoundedAtEight()
     {
         var cache = new VhsChromaCarrierTableCache();
-        double[][] buffers = Enumerable.Range(0, 8)
+        double[][] buffers = Enumerable.Range(0, 16)
             .Select(index => cache.RentBurstProbeBuffer(32 + index))
             .ToArray();
 
@@ -206,8 +206,8 @@ public sealed class VhsChromaPhaseParallelTests
             cache.ReturnBurstProbeBuffer(buffer);
         }
 
-        Assert.Equal(8, cache.BurstProbeBufferCreationCount);
-        Assert.Equal(4, cache.RetainedBurstProbeBufferCount);
+        Assert.Equal(16, cache.BurstProbeBufferCreationCount);
+        Assert.Equal(8, cache.RetainedBurstProbeBufferCount);
     }
 
     [Fact(DisplayName = "Current phase analysis reads only resampled line prefixes")]
