@@ -586,6 +586,42 @@ public sealed class RfBlockCacheConcurrencyTests
         second.Span.DeferredVhsPayload!.EnsureMaterialized();
     }
 
+    [Fact(DisplayName = "A materialized VHS span can release its read reservation while retaining buffers")]
+    public void MaterializedVhsSpanCanReleaseReadReservationWhileRetainingBuffers()
+    {
+        using var stream = new MemoryStream();
+        using var decoder = BuildDecoder(
+            new CountingSampleLoader(),
+            workerThreads: 4,
+            retainRfDiagnosticChannels: false,
+            float32Chroma: true);
+        using RfBlockStreamDecoder.RfDecodedSpanLease first = Assert.IsType<
+            RfBlockStreamDecoder.RfDecodedSpanLease>(
+            decoder.ReadVhsStagedLeased(stream, begin: 0, length: 24));
+        first.Span.DeferredVhsPayload!.EnsureMaterialized();
+        double[] firstVideo = first.Span.Video.ToArray();
+
+        first.ReleaseReadReservation();
+        first.ReleaseReadReservation();
+        using RfBlockStreamDecoder.RfDecodedSpanLease second = Assert.IsType<
+            RfBlockStreamDecoder.RfDecodedSpanLease>(
+            decoder.ReadVhsStagedLeased(stream, begin: 12, length: 24));
+        Assert.NotSame(first.Span.Video, second.Span.Video);
+        second.Span.DeferredVhsPayload!.EnsureMaterialized();
+        AssertDoubleBitsEqual(firstVideo, first.Span.Video);
+
+        first.Dispose();
+        InvalidOperationException exception = Assert.Throws<InvalidOperationException>(() =>
+            decoder.ReadVhsStagedLeased(stream, begin: 24, length: 24));
+        Assert.Contains("Only one staged VHS span", exception.Message, StringComparison.Ordinal);
+
+        second.Dispose();
+        using RfBlockStreamDecoder.RfDecodedSpanLease third = Assert.IsType<
+            RfBlockStreamDecoder.RfDecodedSpanLease>(
+            decoder.ReadVhsStagedLeased(stream, begin: 24, length: 24));
+        third.Span.DeferredVhsPayload!.EnsureMaterialized();
+    }
+
     [Fact(DisplayName = "A staged VHS read reserves its slot before RF loading")]
     public async Task StagedVhsReadReservesItsSlotBeforeRfLoading()
     {

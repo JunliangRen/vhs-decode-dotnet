@@ -139,6 +139,133 @@ public sealed class VhsChromaCurrentProcessingIntegrationTests
         Assert.Equal(expected.BurstDetectedLine, actual.BurstDetectedLine);
     }
 
+    [Theory(DisplayName = "Prepared owned chroma completion matches synchronous decode bit-exactly")]
+    [InlineData(false, false)]
+    [InlineData(false, true)]
+    [InlineData(true, false)]
+    [InlineData(true, true)]
+    public void PreparedOwnedChromaCompletionMatchesSynchronousDecodeBitExactly(
+        bool useCurrentProcessing,
+        bool trackCarrier)
+    {
+        const int LineLength = 64;
+        const int LineCount = 48;
+        double[] chroma = BuildInput(LineLength * LineCount);
+        VhsChromaFieldOptions options = CreateOptions(ctiMix: useCurrentProcessing ? 0.75 : 0.0) with
+        {
+            UseCurrentChromaProcessing = useCurrentProcessing,
+            ChromaAfcTrackCarrier = trackCarrier,
+            ChromaAfcLineFrequencyHz = 15_625.0,
+            ChromaAfcFineTuneStepHz = 100.0
+        };
+        ChromaPhaseLine[] phaseLines = Enumerable.Range(0, LineCount)
+            .Select(line => new ChromaPhaseLine(
+                LineNumber: line,
+                PhaseRotation: line & 3,
+                BurstPhaseDegrees: (line & 1) == 0 ? 12.5 : -7.25)
+            {
+                BurstStart = line * LineLength,
+                BurstAmplitude = 72.0,
+                BurstDc = (line % 5) * 0.125,
+                BurstFrequencyHz = options.FscMHz * 1_000_000.0
+            })
+            .ToArray();
+        var phase = new ChromaPhaseSequenceResult(
+            NextChromaRotationIndex: 3,
+            PhaseSequence: phaseLines,
+            BurstDetectedLine: 2,
+            BurstMagnitudeAverage: 72.0,
+            BurstPhaseAverageDegrees: 0.0,
+            EvenBurstPhaseAverageDegrees: 12.5,
+            OddBurstPhaseAverageDegrees: -7.25);
+        var analysis = new VhsChromaPhaseAnalysis(
+            phase,
+            VhsChromaDecoder.BuildHeterodyneTable(
+                chroma.Length,
+                options.FscMHz,
+                options.ColorUnderCarrierHz / 1_000_000.0,
+                options.FscMHz * 4.0,
+                phaseDriftRadians: 0.125,
+                workerThreads: options.WorkerThreads),
+            options.ColorUnderCarrierHz,
+            HeterodynePhaseRadians: 0.125);
+        var expectedDestination = new ushort[chroma.Length];
+        VhsChromaFieldResult expected = VhsChromaDecoder.DecodeOwnedFieldWithPhase(
+            chroma.ToArray(),
+            options,
+            analysis,
+            isFirstField: true,
+            fieldNumber: 7,
+            previousChromaAfcCarrierHz: 249_500.0,
+            previousChromaAfcPhaseRadians: 0.125,
+            outputDestination: expectedDestination);
+        var actualDestination = new ushort[chroma.Length];
+        VhsChromaDecoder.PreparedOwnedField prepared =
+            VhsChromaDecoder.PrepareOwnedFieldWithPhase(
+                chroma.ToArray(),
+                options,
+                analysis,
+                isFirstField: true,
+                fieldNumber: 7,
+                previousChromaAfcCarrierHz: 249_500.0,
+                previousChromaAfcPhaseRadians: 0.125,
+                outputDestination: actualDestination);
+
+        Assert.Equal(expected.BurstDetectedLine, prepared.BurstDetectedLine);
+        Assert.Equal(expected.NextChromaRotationIndex, prepared.NextChromaRotationIndex);
+        Assert.Equal(expected.CarrierEstimate, prepared.CarrierEstimate);
+
+        VhsChromaFieldResult actual = prepared.Complete();
+
+        Assert.Same(actualDestination, actual.Samples);
+        Assert.Equal(expected.Samples, actual.Samples);
+        Assert.Equal(expected.FieldPhaseId, actual.FieldPhaseId);
+        Assert.Equal(expected.BurstDetectedLine, actual.BurstDetectedLine);
+        Assert.Equal(expected.NextChromaRotationIndex, actual.NextChromaRotationIndex);
+        Assert.Equal(expected.CarrierEstimate, actual.CarrierEstimate);
+        Assert.Throws<InvalidOperationException>(() => prepared.Complete());
+    }
+
+    [Fact(DisplayName = "Prepared color-killer field defers neutral output until completion")]
+    public void PreparedColorKillerFieldDefersNeutralOutputUntilCompletion()
+    {
+        const int LineLength = 64;
+        const int LineCount = 48;
+        double[] chroma = BuildInput(LineLength * LineCount);
+        VhsChromaFieldOptions options = CreateOptions(ctiMix: 0.0);
+        var phase = new ChromaPhaseSequenceResult(
+            NextChromaRotationIndex: 2,
+            PhaseSequence: [],
+            BurstDetectedLine: -1,
+            BurstMagnitudeAverage: 0.0,
+            BurstPhaseAverageDegrees: 0.0,
+            EvenBurstPhaseAverageDegrees: 0.0,
+            OddBurstPhaseAverageDegrees: 0.0);
+        var analysis = new VhsChromaPhaseAnalysis(
+            phase,
+            [[], [], [], []],
+            options.ColorUnderCarrierHz,
+            HeterodynePhaseRadians: 0.0);
+        var destination = Enumerable.Repeat((ushort)123, chroma.Length).ToArray();
+
+        VhsChromaDecoder.PreparedOwnedField prepared =
+            VhsChromaDecoder.PrepareOwnedFieldWithPhase(
+                chroma,
+                options,
+                analysis,
+                outputDestination: destination);
+
+        Assert.All(destination, sample => Assert.Equal((ushort)123, sample));
+        Assert.Equal(-1, prepared.BurstDetectedLine);
+        Assert.Equal(2, prepared.NextChromaRotationIndex);
+        Assert.Null(prepared.CarrierEstimate);
+
+        VhsChromaFieldResult actual = prepared.Complete();
+
+        Assert.Same(destination, actual.Samples);
+        Assert.All(actual.Samples, sample => Assert.Equal((ushort)32_767, sample));
+    }
+
     [Fact(DisplayName = "Owned PAL chroma upconversion matches the copying path bit-exactly")]
     public void OwnedPalChromaUpconversionMatchesCopyingPathBitExactly()
     {

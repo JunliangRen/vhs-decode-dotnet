@@ -97,6 +97,136 @@ public sealed class TbcFieldSequenceDecodeEngine
         }
     }
 
+    private sealed class VhsWavefrontReadSlot : IDisposable
+    {
+        private TbcFieldDecodePipeline.PendingVhsField? _pendingField;
+        private RfBlockStreamDecoder.RfDecodedSpanLease? _spanLease;
+        private readonly ExceptionDispatchInfo? _failure;
+
+        private VhsWavefrontReadSlot(
+            long requestedBegin,
+            TbcFieldDecodePipeline.PendingVhsField? pendingField,
+            RfBlockStreamDecoder.RfDecodedSpanLease? spanLease,
+            DeferredDiagnosticBatch? diagnostics,
+            ExceptionDispatchInfo? failure,
+            bool endOfInput)
+        {
+            RequestedBegin = requestedBegin;
+            _pendingField = pendingField;
+            _spanLease = spanLease;
+            Diagnostics = diagnostics;
+            _failure = failure;
+            EndOfInput = endOfInput;
+        }
+
+        internal long RequestedBegin { get; }
+
+        internal DeferredDiagnosticBatch? Diagnostics { get; }
+
+        internal bool EndOfInput { get; }
+
+        internal static VhsWavefrontReadSlot Pending(
+            long requestedBegin,
+            TbcFieldDecodePipeline.PendingVhsField pendingField,
+            RfBlockStreamDecoder.RfDecodedSpanLease? spanLease,
+            DeferredDiagnosticBatch? diagnostics)
+            => new(requestedBegin, pendingField, spanLease, diagnostics, null, endOfInput: false);
+
+        internal static VhsWavefrontReadSlot Failure(
+            long requestedBegin,
+            DeferredDiagnosticBatch? diagnostics,
+            Exception exception)
+            => new(
+                requestedBegin,
+                null,
+                null,
+                diagnostics,
+                ExceptionDispatchInfo.Capture(exception),
+                endOfInput: false);
+
+        internal static VhsWavefrontReadSlot Eof(
+            long requestedBegin,
+            DeferredDiagnosticBatch? diagnostics)
+            => new(requestedBegin, null, null, diagnostics, null, endOfInput: true);
+
+        internal bool TryEstimateNextBegin(out long nextBegin)
+        {
+            TbcFieldDecodePipeline.PendingVhsField? pending = Volatile.Read(ref _pendingField);
+            double? offset = pending?.NextFieldOffsetSamples;
+            if (pending is null || !offset.HasValue || !ValidPositive(offset.Value))
+            {
+                nextBegin = 0;
+                return false;
+            }
+
+            long advance = Math.Max(
+                1L,
+                (long)Math.Round(offset.Value, MidpointRounding.AwayFromZero));
+            nextBegin = checked(pending.StartSample + advance);
+            return true;
+        }
+
+        internal TbcDecodedField? Complete()
+        {
+            _failure?.Throw();
+            if (EndOfInput)
+            {
+                return null;
+            }
+
+            TbcFieldDecodePipeline.PendingVhsField? pending =
+                Interlocked.Exchange(ref _pendingField, null);
+            if (pending is null)
+            {
+                throw new InvalidOperationException("VHS wavefront slot has already been completed or discarded.");
+            }
+
+            try
+            {
+                return pending.Complete();
+            }
+            finally
+            {
+                Interlocked.Exchange(ref _spanLease, null)?.Dispose();
+                pending.Dispose();
+            }
+        }
+
+        public void Dispose()
+        {
+            Interlocked.Exchange(ref _pendingField, null)?.Dispose();
+            Interlocked.Exchange(ref _spanLease, null)?.Dispose();
+        }
+    }
+
+    private sealed class VhsWavefrontSlotHolder : IDisposable
+    {
+        internal VhsWavefrontReadSlot? Current { get; private set; }
+
+        internal void Set(VhsWavefrontReadSlot slot)
+        {
+            ArgumentNullException.ThrowIfNull(slot);
+            if (Current is not null)
+            {
+                throw new InvalidOperationException("A VHS wavefront lookahead field is already active.");
+            }
+
+            Current = slot;
+        }
+
+        internal VhsWavefrontReadSlot? Take()
+        {
+            VhsWavefrontReadSlot? slot = Current;
+            Current = null;
+            return slot;
+        }
+
+        public void Dispose()
+        {
+            Take()?.Dispose();
+        }
+    }
+
     private sealed class DeferredDiagnosticBatch(
         Action<string, string> sink,
         List<(string Level, string Message)> fieldMessages,
@@ -337,6 +467,13 @@ public sealed class TbcFieldSequenceDecodeEngine
         bool pendingCvbsEndOfInputCheckpoint = false;
         bool useCvbsWorkerPrefetch = ShouldUseCvbsWorkerPrefetch(session);
         using var cvbsPrefetch = new CvbsPrefetchSlot();
+        bool useVhsWavefront = _usesSessionReader
+            && !retainFields
+            && input.CanSeek
+            && session.Spec.Name == "vhs"
+            && session.TbcFieldDecoder.CanUseVhsWavefront
+            && session.StreamDecoder.WorkerThreads > 1;
+        using var vhsWavefront = new VhsWavefrontSlotHolder();
         LaserDiscAutoMtfController? autoMtf = session.Spec.Name == "ld"
             ? new LaserDiscAutoMtfController()
             : null;
@@ -478,6 +615,7 @@ public sealed class TbcFieldSequenceDecodeEngine
             using var fieldOutputOwner = new PooledFieldOutputOwner();
             TbcDecodedField? field;
             DeferredDiagnosticBatch? deferredVhsFieldDiagnostics = null;
+            long? vhsSpeculativeNextBegin = null;
             TbcFieldDecodeState? fieldState = autoMtf is null
                 ? null
                 : session.TbcFieldDecoder.CaptureState();
@@ -487,7 +625,41 @@ public sealed class TbcFieldSequenceDecodeEngine
                 int initialReadWrittenFieldCount = session.Spec.Name == "ld"
                     ? laserDiscSpeculativeWrittenFieldCount
                     : writePlanner.WrittenFieldCount;
-                if (prefetchedField is null)
+                if (useVhsWavefront)
+                {
+                    using VhsWavefrontReadSlot currentVhsSlot = vhsWavefront.Take()
+                        ?? BeginVhsWavefrontRead(
+                            session,
+                            input,
+                            begin,
+                            readLength,
+                            decodedFieldCount);
+                    if (currentVhsSlot.RequestedBegin != begin)
+                    {
+                        throw new InvalidOperationException(
+                            "VHS wavefront field did not match the expected input position.");
+                    }
+
+                    deferredVhsFieldDiagnostics = currentVhsSlot.Diagnostics;
+                    bool mayStartNextVhsField = !maxFields.HasValue
+                        || decodedFieldCount + 1 < requestedFields;
+                    if (mayStartNextVhsField
+                        && currentVhsSlot.TryEstimateNextBegin(out long estimatedNextBegin)
+                        && estimatedNextBegin > begin)
+                    {
+                        vhsWavefront.Set(BeginVhsWavefrontRead(
+                            session,
+                            input,
+                            estimatedNextBegin,
+                            readLength,
+                            fieldNumber: decodedFieldCount + 1));
+                        vhsSpeculativeNextBegin = estimatedNextBegin;
+                    }
+
+                    _cancellationToken.ThrowIfCancellationRequested();
+                    field = fieldOutputOwner.Replace(currentVhsSlot.Complete());
+                }
+                else if (prefetchedField is null)
                 {
                     field = fieldOutputOwner.Replace(ReadFieldWithDeferredVhsFieldDiagnostics(
                         session,
@@ -657,6 +829,14 @@ public sealed class TbcFieldSequenceDecodeEngine
                 throw new InvalidOperationException("Decoded field did not advance the input position.");
             }
 
+            if (vhsSpeculativeNextBegin.HasValue
+                && vhsSpeculativeNextBegin.Value != nextBegin)
+            {
+                vhsWavefront.Take()?.Dispose();
+                throw new InvalidOperationException(
+                    "Speculative VHS field start did not match the completed field result.");
+            }
+
             bool mayPrefetchNextField = !maxFields.HasValue || decodedFieldCount < requestedFields;
             if (useCvbsWorkerPrefetch && mayPrefetchNextField)
             {
@@ -796,15 +976,37 @@ public sealed class TbcFieldSequenceDecodeEngine
             try
             {
                 _cancellationToken.ThrowIfCancellationRequested();
-                _ = terminalFieldOutputOwner.Replace(ReadFieldWithDeferredVhsFieldDiagnostics(
-                    session,
-                    input,
-                    begin,
-                    readLength,
-                    decodedFieldCount,
-                    writePlanner.WrittenFieldCount,
-                    retainVhsChromaBurstSamples: false,
-                    out terminalLookaheadDiagnostics));
+                if (useVhsWavefront)
+                {
+                    using VhsWavefrontReadSlot terminalSlot = vhsWavefront.Take()
+                        ?? BeginVhsWavefrontRead(
+                            session,
+                            input,
+                            begin,
+                            readLength,
+                            decodedFieldCount);
+                    if (terminalSlot.RequestedBegin != begin)
+                    {
+                        throw new InvalidOperationException(
+                            "Terminal VHS lookahead did not match the expected input position.");
+                    }
+
+                    terminalLookaheadDiagnostics = terminalSlot.Diagnostics;
+                    _ = terminalFieldOutputOwner.Replace(terminalSlot.Complete());
+                }
+                else
+                {
+                    _ = terminalFieldOutputOwner.Replace(ReadFieldWithDeferredVhsFieldDiagnostics(
+                        session,
+                        input,
+                        begin,
+                        readLength,
+                        decodedFieldCount,
+                        writePlanner.WrittenFieldCount,
+                        retainVhsChromaBurstSamples: false,
+                        out terminalLookaheadDiagnostics));
+                }
+
                 terminalLookaheadDiagnostics?.FlushFieldDiagnostics();
                 _cancellationToken.ThrowIfCancellationRequested();
             }
@@ -1101,6 +1303,96 @@ public sealed class TbcFieldSequenceDecodeEngine
             : session.TbcFieldDecoder.Decode(span, fieldNumber: fieldNumber);
     }
 
+    private VhsWavefrontReadSlot BeginVhsWavefrontRead(
+        DecodeSession session,
+        Stream input,
+        long begin,
+        int readLength,
+        int fieldNumber)
+    {
+        Action<string, string>? diagnosticSink = session.TbcFieldDecoder.DiagnosticLogger;
+        Action<string, string>? renderDiagnosticSink = session.TbcRenderer.DiagnosticLogger;
+        DeferredDiagnosticBatch? diagnostics = null;
+        IDisposable? rfDiagnosticScope = null;
+        if (diagnosticSink is not null)
+        {
+            var fieldMessages = new List<(string Level, string Message)>();
+            var renderMessages = new List<(string Level, string Message)>();
+            diagnostics = new DeferredDiagnosticBatch(diagnosticSink, fieldMessages, renderMessages);
+            Action<string, string> fieldDiagnosticLogger = (level, message) =>
+            {
+                lock (fieldMessages)
+                {
+                    fieldMessages.Add((level, message));
+                }
+            };
+            session.TbcFieldDecoder.DiagnosticLogger = fieldDiagnosticLogger;
+            session.TbcRenderer.DiagnosticLogger = (level, message) =>
+            {
+                lock (renderMessages)
+                {
+                    renderMessages.Add((level, message));
+                }
+            };
+            rfDiagnosticScope = session.StreamDecoder.PushDiagnosticLogger(fieldDiagnosticLogger);
+        }
+
+        RfBlockStreamDecoder.RfDecodedSpanLease? lease = null;
+        TbcFieldDecodePipeline.PendingVhsField? pending = null;
+        try
+        {
+            _cancellationToken.ThrowIfCancellationRequested();
+            DecodeReadWindow window = DecodeReadWindowPlanner.Resolve(session, begin, readLength);
+            lease = session.StreamDecoder.ReadVhsStagedLeased(
+                input,
+                window.StartSample,
+                window.SampleCount);
+            if (lease is null)
+            {
+                return VhsWavefrontReadSlot.Eof(begin, diagnostics);
+            }
+
+            pending =
+                session.TbcFieldDecoder.BeginDecodeVhsForSequence(
+                    lease.Span,
+                    fieldNumber,
+                    usePooledOutputBuffers: true);
+            pending.PrepareNextRead();
+            lease.ReleaseReadReservation();
+            lease.Dispose();
+            lease = null;
+            VhsWavefrontReadSlot slot = VhsWavefrontReadSlot.Pending(
+                begin,
+                pending,
+                spanLease: null,
+                diagnostics);
+            pending = null;
+            return slot;
+        }
+        catch (Exception ex)
+        {
+            pending?.Dispose();
+            lease?.Dispose();
+            Exception failure = ex switch
+            {
+                TbcFieldDecodeRecoveryException => ex,
+                OperationCanceledException when _cancellationToken.IsCancellationRequested => ex,
+                DecodeFieldReadException => ex,
+                _ => new DecodeFieldReadException(begin, ex)
+            };
+            return VhsWavefrontReadSlot.Failure(begin, diagnostics, failure);
+        }
+        finally
+        {
+            rfDiagnosticScope?.Dispose();
+            if (diagnosticSink is not null)
+            {
+                session.TbcFieldDecoder.DiagnosticLogger = diagnosticSink;
+                session.TbcRenderer.DiagnosticLogger = renderDiagnosticSink;
+            }
+        }
+    }
+
     private TbcDecodedField? ReadFieldWithContext(
         DecodeSession session,
         Stream input,
@@ -1170,10 +1462,23 @@ public sealed class TbcFieldSequenceDecodeEngine
         var fieldMessages = new List<(string Level, string Message)>();
         var renderMessages = new List<(string Level, string Message)>();
         diagnostics = new DeferredDiagnosticBatch(diagnosticSink, fieldMessages, renderMessages);
-        session.TbcFieldDecoder.DiagnosticLogger =
-            (level, message) => fieldMessages.Add((level, message));
-        session.TbcRenderer.DiagnosticLogger =
-            (level, message) => renderMessages.Add((level, message));
+        Action<string, string> fieldDiagnosticLogger = (level, message) =>
+        {
+            lock (fieldMessages)
+            {
+                fieldMessages.Add((level, message));
+            }
+        };
+        session.TbcFieldDecoder.DiagnosticLogger = fieldDiagnosticLogger;
+        session.TbcRenderer.DiagnosticLogger = (level, message) =>
+        {
+            lock (renderMessages)
+            {
+                renderMessages.Add((level, message));
+            }
+        };
+        using IDisposable rfDiagnosticScope =
+            session.StreamDecoder.PushDiagnosticLogger(fieldDiagnosticLogger);
         try
         {
             return ReadFieldWithContext(

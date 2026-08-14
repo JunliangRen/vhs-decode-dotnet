@@ -353,6 +353,79 @@ public delegate ChromaBurstDemodulationResult ChromaBurstProbe(
 
 public static class VhsChromaDecoder
 {
+    internal sealed record ChromaFieldPreparation(
+        double[]? MutableChromaField,
+        ChromaCarrierEstimate? CarrierEstimate,
+        double TrackedCarrierHz,
+        double PhaseDriftRadians,
+        bool IsNeutral);
+
+    internal sealed class PreparedOwnedField
+    {
+        private readonly double[] _chroma;
+        private readonly VhsChromaFieldOptions _options;
+        private readonly ChromaPhaseSequenceResult _phase;
+        private readonly bool? _isFirstField;
+        private readonly int _fieldNumber;
+        private readonly Func<double[], double[]>? _finalFilter;
+        private readonly int _lineOffset;
+        private readonly VhsChromaPhaseAnalysis? _preparedAnalysis;
+        private readonly ushort[]? _outputDestination;
+        private readonly ChromaFieldPreparation _preparation;
+        private int _completionState;
+
+        internal PreparedOwnedField(
+            double[] chroma,
+            VhsChromaFieldOptions options,
+            ChromaPhaseSequenceResult phase,
+            bool? isFirstField,
+            int fieldNumber,
+            Func<double[], double[]>? finalFilter,
+            int lineOffset,
+            VhsChromaPhaseAnalysis? preparedAnalysis,
+            ushort[]? outputDestination,
+            ChromaFieldPreparation preparation)
+        {
+            _chroma = chroma;
+            _options = options;
+            _phase = phase;
+            _isFirstField = isFirstField;
+            _fieldNumber = fieldNumber;
+            _finalFilter = finalFilter;
+            _lineOffset = lineOffset;
+            _preparedAnalysis = preparedAnalysis;
+            _outputDestination = outputDestination;
+            _preparation = preparation;
+        }
+
+        internal int BurstDetectedLine => _phase.BurstDetectedLine;
+
+        internal int NextChromaRotationIndex => _phase.NextChromaRotationIndex;
+
+        internal ChromaCarrierEstimate? CarrierEstimate => _preparation.CarrierEstimate;
+
+        internal VhsChromaFieldResult Complete()
+        {
+            if (Interlocked.Exchange(ref _completionState, 1) != 0)
+            {
+                throw new InvalidOperationException("Prepared chroma field has already been completed.");
+            }
+
+            return CompleteFieldWithPhaseCore(
+                _chroma,
+                _options,
+                _phase,
+                _isFirstField,
+                _fieldNumber,
+                _finalFilter,
+                _lineOffset,
+                _preparedAnalysis,
+                _preparation,
+                ownedChromaInput: _chroma,
+                outputDestination: _outputDestination);
+        }
+    }
+
     private delegate ChromaPhaseLine ChromaPhaseLineProbe(
         int lineNumber,
         int phaseRotation,
@@ -533,14 +606,14 @@ public static class VhsChromaDecoder
                     SosFilter.ApplyForwardBackwardFloat32InPlace(options.FinalSosFilter, values);
                     return values;
                 }
-                : values =>
-                {
-                    SosFilter.ApplyForwardBackwardTo(
-                        options.FinalSosFilter,
-                        values,
-                        values);
-                    return values;
-                };
+            : values =>
+            {
+                SosFilter.ApplyForwardBackwardTo(
+                    options.FinalSosFilter,
+                    values,
+                    values);
+                return values;
+            };
         }
         else if (effectiveBurstFilter is null && options.FinalFilter is not null)
         {
@@ -729,6 +802,41 @@ public static class VhsChromaDecoder
             outputDestination: outputDestination);
     }
 
+    internal static PreparedOwnedField PrepareOwnedFieldWithPhase(
+        double[] chroma,
+        VhsChromaFieldOptions options,
+        VhsChromaPhaseAnalysis analysis,
+        bool? isFirstField = null,
+        int fieldNumber = 0,
+        Func<double[], double[]>? finalFilter = null,
+        int lineOffset = 0,
+        double? previousChromaAfcCarrierHz = null,
+        double previousChromaAfcPhaseRadians = 0.0,
+        ushort[]? outputDestination = null)
+    {
+        ArgumentNullException.ThrowIfNull(chroma);
+        ArgumentNullException.ThrowIfNull(analysis);
+        ChromaFieldPreparation preparation = PrepareFieldWithPhaseCore(
+            chroma,
+            options,
+            analysis.Phase,
+            previousChromaAfcCarrierHz,
+            previousChromaAfcPhaseRadians,
+            ownedChromaInput: chroma,
+            outputDestination: outputDestination);
+        return new PreparedOwnedField(
+            chroma,
+            options,
+            analysis.Phase,
+            isFirstField,
+            fieldNumber,
+            finalFilter,
+            lineOffset,
+            analysis,
+            outputDestination,
+            preparation);
+    }
+
     private static VhsChromaFieldResult DecodeFieldWithPhaseCore(
         ReadOnlySpan<double> chroma,
         VhsChromaFieldOptions options,
@@ -743,6 +851,37 @@ public static class VhsChromaDecoder
         double[]? ownedChromaInput = null,
         ushort[]? outputDestination = null)
     {
+        ChromaFieldPreparation preparation = PrepareFieldWithPhaseCore(
+            chroma,
+            options,
+            phase,
+            previousChromaAfcCarrierHz,
+            previousChromaAfcPhaseRadians,
+            ownedChromaInput,
+            outputDestination);
+        return CompleteFieldWithPhaseCore(
+            chroma,
+            options,
+            phase,
+            isFirstField,
+            fieldNumber,
+            finalFilter,
+            lineOffset,
+            preparedAnalysis,
+            preparation,
+            ownedChromaInput,
+            outputDestination);
+    }
+
+    private static ChromaFieldPreparation PrepareFieldWithPhaseCore(
+        ReadOnlySpan<double> chroma,
+        VhsChromaFieldOptions options,
+        ChromaPhaseSequenceResult phase,
+        double? previousChromaAfcCarrierHz,
+        double previousChromaAfcPhaseRadians,
+        double[]? ownedChromaInput,
+        ushort[]? outputDestination)
+    {
         ArgumentNullException.ThrowIfNull(options);
         ArgumentNullException.ThrowIfNull(phase);
         ValidateLineShape(chroma.Length, options.OutputLineCount, options.OutputLineLength);
@@ -756,14 +895,12 @@ public static class VhsChromaDecoder
 
         if (phase.BurstDetectedLine == -1)
         {
-            ushort[] neutral = outputDestination ?? new ushort[chroma.Length];
-            neutral.AsSpan().Fill((ushort)S16AbsMax);
-            return new VhsChromaFieldResult(
-                neutral,
-                phase.BurstDetectedLine,
-                null,
-                phase.NextChromaRotationIndex,
-                phase);
+            return new ChromaFieldPreparation(
+                MutableChromaField: null,
+                CarrierEstimate: null,
+                TrackedCarrierHz: 0.0,
+                PhaseDriftRadians: 0.0,
+                IsNeutral: true);
         }
 
         double[]? mutableChromaField = ApplyConfiguredChromaPreFilter(
@@ -774,7 +911,6 @@ public static class VhsChromaDecoder
         ReadOnlySpan<double> chromaField = mutableChromaField is null
             ? chroma
             : mutableChromaField;
-        double outputSampleRateMHz = options.FscMHz * 4.0;
         ReadOnlySpan<double> carrierProbe = chromaField;
         if (options.ChromaAfcTrackCarrier && options.ChromaAfcMeasurementFilters is { } measurementFilters)
         {
@@ -800,6 +936,47 @@ public static class VhsChromaDecoder
             ?? options.ColorUnderCarrierHz;
         double phaseDriftRadians = carrierEstimate?.PhaseRadians
             ?? previousChromaAfcPhaseRadians;
+        return new ChromaFieldPreparation(
+            mutableChromaField,
+            carrierEstimate,
+            trackedCarrierHz,
+            phaseDriftRadians,
+            IsNeutral: false);
+    }
+
+    private static VhsChromaFieldResult CompleteFieldWithPhaseCore(
+        ReadOnlySpan<double> chroma,
+        VhsChromaFieldOptions options,
+        ChromaPhaseSequenceResult phase,
+        bool? isFirstField,
+        int fieldNumber,
+        Func<double[], double[]>? finalFilter,
+        int lineOffset,
+        VhsChromaPhaseAnalysis? preparedAnalysis,
+        ChromaFieldPreparation preparation,
+        double[]? ownedChromaInput,
+        ushort[]? outputDestination)
+    {
+        if (preparation.IsNeutral)
+        {
+            ushort[] neutral = outputDestination ?? new ushort[chroma.Length];
+            neutral.AsSpan().Fill((ushort)S16AbsMax);
+            return new VhsChromaFieldResult(
+                neutral,
+                phase.BurstDetectedLine,
+                null,
+                phase.NextChromaRotationIndex,
+                phase);
+        }
+
+        double[]? mutableChromaField = preparation.MutableChromaField;
+        ReadOnlySpan<double> chromaField = mutableChromaField is null
+            ? chroma
+            : mutableChromaField;
+        double outputSampleRateMHz = options.FscMHz * 4.0;
+        ChromaCarrierEstimate? carrierEstimate = preparation.CarrierEstimate;
+        double trackedCarrierHz = preparation.TrackedCarrierHz;
+        double phaseDriftRadians = preparation.PhaseDriftRadians;
         bool usePhaseCompensation = IsNtsc(options.ColorSystem)
             && !options.DisablePhaseCorrection
             && isFirstField.HasValue;

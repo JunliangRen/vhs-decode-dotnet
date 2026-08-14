@@ -47,6 +47,46 @@ public sealed class VhsWeakRfWarningCompatibilityTests : IDisposable
             StringComparison.Ordinal);
     }
 
+    [Fact(DisplayName = "RF diagnostic scope captures warnings and restores the session logger")]
+    public async Task DiagnosticScopeCapturesWarningsAndRestoresSessionLogger()
+    {
+        const int blockLength = 4_096;
+        string outputBase = Path.Combine(_tempDirectory, "scoped-weak-rf");
+        ParsedCommand command = new CommandLineParser().Parse(CliSpecs.Vhs, [
+            "--pal",
+            "-f",
+            "40",
+            "--no_resample",
+            "input.s16",
+            outputBase
+        ]);
+        using DecodeSession session = DecodeSessionFactory.Create(command, blockLength);
+        var error = new StringWriter();
+        session.RuntimeReporter = new DecodeRuntimeReporter(TextWriter.Null, error);
+        DecodeSessionLogWriter.Write(session);
+        var scopedMessages = new List<(string Level, string Message)>();
+
+        using (session.Pipeline.PushDiagnosticLogger(
+                   (level, message) => scopedMessages.Add((level, message))))
+        {
+            RfDemodulatedBlock? scopedBlock = await Task.Run(() =>
+            {
+                using var scopedInput = new MemoryStream(new byte[blockLength * sizeof(short)]);
+                return session.Pipeline.DecodeBlock(scopedInput, sample: 0, blockLength);
+            });
+            _ = Assert.IsType<RfDemodulatedBlock>(scopedBlock);
+        }
+
+        Assert.Equal([("WARNING", Warning)], scopedMessages);
+        Assert.Empty(error.ToString());
+
+        using var restoredInput = new MemoryStream(new byte[blockLength * sizeof(short)]);
+        _ = Assert.IsType<RfDemodulatedBlock>(
+            session.Pipeline.DecodeBlock(restoredInput, sample: 0, blockLength));
+
+        Assert.Equal(Warning + Environment.NewLine, error.ToString());
+    }
+
     public void Dispose()
     {
         Directory.Delete(_tempDirectory, recursive: true);

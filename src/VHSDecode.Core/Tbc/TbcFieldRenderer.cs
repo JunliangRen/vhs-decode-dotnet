@@ -338,6 +338,50 @@ public sealed class TbcFieldRenderer
             outputDestination);
     }
 
+    internal TbcRenderedField RenderPreparedFieldPayloadWithDiagnosticLogger(
+        ReadOnlySpan<double> videoHz,
+        TbcLineResampler.ResamplingPlan plan,
+        int fieldNumber,
+        VideoOutputConverter? converterOverride,
+        int? trackPhaseOverride,
+        double[]? resamplingWorkspace,
+        ushort[]? outputDestination,
+        Action<string, string> diagnosticLogger)
+    {
+        ArgumentNullException.ThrowIfNull(diagnosticLogger);
+        if (CanConvertPreparedFieldDirectly())
+        {
+            return RenderPreparedFieldPayload(
+                videoHz,
+                plan,
+                fieldNumber,
+                converterOverride,
+                trackPhaseOverride,
+                resamplingWorkspace,
+                outputDestination);
+        }
+
+        double[] resampled;
+        if (resamplingWorkspace is null)
+        {
+            resampled = ResamplePreparedField(videoHz, plan);
+        }
+        else
+        {
+            ResamplePreparedField(videoHz, plan, resamplingWorkspace);
+            resampled = resamplingWorkspace;
+        }
+
+        return RenderResampledFieldPayload(
+            resampled,
+            fieldNumber,
+            converterOverride,
+            converterProvider: null,
+            trackPhaseOverride,
+            outputDestination,
+            diagnosticLogger);
+    }
+
     internal bool CanConvertPreparedFieldDirectly()
         => YCombLimitHz == 0.0
             && !ExportRawTbc
@@ -351,7 +395,8 @@ public sealed class TbcFieldRenderer
         VideoOutputConverter? converterOverride,
         Func<VideoOutputConverter?>? converterProvider,
         int? trackPhaseOverride,
-        ushort[]? outputDestination = null)
+        ushort[]? outputDestination = null,
+        Action<string, string>? diagnosticLogger = null)
     {
         if (YCombLimitHz != 0.0)
         {
@@ -372,11 +417,18 @@ public sealed class TbcFieldRenderer
         VideoOutputConverter activeConverter = converterProvider?.Invoke()
             ?? converterOverride
             ?? _converter;
-        VideoOutputConverter fieldConverter = BuildFieldConverter(
-            resampled,
-            fieldNumber,
-            activeConverter,
-            trackPhaseOverride);
+        VideoOutputConverter fieldConverter = diagnosticLogger is null
+            ? BuildFieldConverter(
+                resampled,
+                fieldNumber,
+                activeConverter,
+                trackPhaseOverride)
+            : BuildFieldConverterWithDiagnosticLogger(
+                resampled,
+                fieldNumber,
+                activeConverter,
+                trackPhaseOverride,
+                diagnosticLogger);
         if (outputDestination is not null)
         {
             fieldConverter.ConvertHz(resampled, outputDestination);
@@ -455,6 +507,32 @@ public sealed class TbcFieldRenderer
         int fieldNumber,
         VideoOutputConverter? converterOverride,
         int? trackPhaseOverride = null)
+        => BuildFieldConverterCore(
+            resampled,
+            fieldNumber,
+            converterOverride,
+            trackPhaseOverride,
+            DiagnosticLogger);
+
+    private VideoOutputConverter BuildFieldConverterWithDiagnosticLogger(
+        double[] resampled,
+        int fieldNumber,
+        VideoOutputConverter? converterOverride,
+        int? trackPhaseOverride,
+        Action<string, string> diagnosticLogger)
+        => BuildFieldConverterCore(
+            resampled,
+            fieldNumber,
+            converterOverride,
+            trackPhaseOverride,
+            diagnosticLogger);
+
+    private VideoOutputConverter BuildFieldConverterCore(
+        double[] resampled,
+        int fieldNumber,
+        VideoOutputConverter? converterOverride,
+        int? trackPhaseOverride,
+        Action<string, string>? diagnosticLogger)
     {
         VideoOutputConverter baseConverter = converterOverride ?? _converter;
         if (Ire0Adjust is null && TrackPhaseIre0Offset is null)
@@ -473,7 +551,7 @@ public sealed class TbcFieldRenderer
                 ire0 = MeanMiddleThirdFloat32(LineMediansFloat32(resampled, backPorchStart, backPorchEnd));
                 if (!ExportRawTbc)
                 {
-                    DiagnosticLogger?.Invoke(
+                    diagnosticLogger?.Invoke(
                         "DEBUG",
                         FormattableString.Invariant($"calculated ire0: {ire0:F2}"));
                 }
@@ -488,7 +566,7 @@ public sealed class TbcFieldRenderer
                     ((float)ire0 - (float)hsyncLevel) / (float)-baseConverter.VSyncIre);
                 if (!ExportRawTbc)
                 {
-                    DiagnosticLogger?.Invoke(
+                    diagnosticLogger?.Invoke(
                         "DEBUG",
                         FormattableString.Invariant($"calculated hz_ire: {measuredHzIre:F2}"));
                 }
