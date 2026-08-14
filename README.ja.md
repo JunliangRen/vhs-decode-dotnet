@@ -118,9 +118,11 @@ default は **5 workers** です。3-run range は
 revision A/B で判断します。
 
 最新 candidate は独立した `current` chroma burst prefix の上限を 4 から 8 workers に
-引き上げ、decoder-owned Exact padded-burst buffer を in-place で filter します。SOS 係数、
-odd padding、演算順序、output order、cross-field state は変わりません。保持する exact-length
-burst buffer は最大 8 個です。
+引き上げます。以下の CLI 実測 gain はこの bounded scheduling change によるものです。
+別の改善として、double-precision Exact `AnalyzeFieldPhase` path は exclusive ownership の
+padded-burst buffer を in-place で filter します。実測した CLI path は以前から float32 の
+in-place filter を使用していました。SOS 係数、odd padding、演算順序、output order、
+cross-field state は変わらず、保持する exact-length burst buffer は最大 8 個です。
 
 interleaved 1,000-frame Exact `current --threads 20` release-binary 3 pair は全 compatibility
 surface で一致し、3 pair とも candidate が高速でした。独立 median wall time は 29.576 から

@@ -3132,21 +3132,23 @@ stderr、时间戳归一化日志和全部 2,000 个有序 `fileLoc` 完全一�
 最终 Release 构建为 0 warning、0 error。标准 xUnit v3/Microsoft.Testing.Platform 运行发现
 全部 1,401 项测试：1,397 项通过、0 项失败，4 项仅因缺少 IPP runtime 而明确跳过。
 
-### 八路 current burst 探测与 Exact burst SOS 原地处理
+### 八路 current burst 探测与 double 路径 Exact SOS 复用
 
 最新的 `current` 色度相位前缀最多可使用八个相互独立的 burst worker，不再限制为四个。
 decoder 私有的精确长度 burst 缓存同样有八槽硬上限；每次使用前会覆盖全部有效样本，
-所有退出路径都会归还 buffer，保留空间不会随文件长度增长。Exact 最终 burst SOS 通过
-现有 destination API 写回这块独占 buffer。系数、奇数延拓、正反向顺序、浮点表达式、
-拟合器顺序、异常优先级和全部跨场状态转换均未改变。float32 IPP-fast 路径原本就会
-在自有 buffer 上原地滤波。
+所有退出路径都会归还 buffer，保留空间不会随文件长度增长。下方 CLI 实测提升来自这项
+有界 worker 上限变化；生产 CLI 在本阶段之前已经会在自有 float32 burst buffer 上原地
+滤波。另有一项独立优化：公开的 double 精度 Exact `AnalyzeFieldPhase` 路径通过现有
+destination API，把最终 burst SOS 写回这块独占 buffer，从而在该 API 路径上避免一份
+临时结果分配；本次不把任何 CLI 速度或内存结论归因于 double 路径改动。系数、奇数
+延拓、正反向顺序、浮点表达式、拟合器顺序、异常优先级和全部跨场状态转换均未改变。
 
 两个 build 各进行了七次进程级 burst-prefix 测试，全部保留同一 checksum。墙钟中位数
-从 197.780 降至 153.813 ms，缩短 22.2%。最初保留逐行分配 Exact SOS 结果的八 worker
-版本被拒绝：一组 1,000 帧配对只获得很小墙钟收益，却使峰值工作集从 345.9 增至
-617.3 MiB。移除该临时结果后，接受版本的基线/候选峰值工作集为 382.6/400.7 MiB，
-峰值 private bytes 为 398.9/405.9 MiB，墙钟从 30.169 降至 28.426 秒。约 7 MiB 的
-private-byte 增量是有界内存权衡，不声明为内存下降。
+从 197.780 降至 153.813 ms，缩短 22.2%。一轮早期八 worker 内存测量达到 617.3 MiB
+峰值工作集；该结果在受控的最终源码下未能复现，因此作为非代表性数据丢弃。接受的
+基线/候选采样配对峰值工作集为 382.6/400.7 MiB，峰值 private bytes 为
+398.9/405.9 MiB，墙钟从 30.169 降至 28.426 秒。约 7 MiB 的 private-byte 增量是
+有界调度权衡，不声明为内存下降。
 
 三组交错的 1,000 帧 Exact `current --threads 20` release 二进制配对全部由候选胜出。
 独立中位数的墙钟从 29.576 降至 28.673 秒（3.05%，吞吐 1.031x），进程 CPU 时间从

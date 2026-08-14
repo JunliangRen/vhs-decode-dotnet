@@ -123,10 +123,12 @@ using another fixture or window are not directly comparable. Same-moment .NET
 revision A/B runs, rather than old ratio cells, determine causal regressions.
 
 The latest candidate raises the independent `current` chroma burst-prefix cap
-from four to eight workers and filters each decoder-owned Exact padded-burst
-buffer in place. SOS coefficients, odd padding, arithmetic order, output order,
-and cross-field state are unchanged. At most eight exact-length burst buffers
-remain retained.
+from four to eight workers; this bounded scheduling change accounts for the
+measured CLI gain below. Separately, the double-precision Exact
+`AnalyzeFieldPhase` path now filters its exclusively owned padded-burst buffer
+in place. The measured CLI path already used its float32 in-place filter. SOS
+coefficients, odd padding, arithmetic order, output order, and cross-field state
+are unchanged. At most eight exact-length burst buffers remain retained.
 
 Three interleaved 1,000-frame Exact `current --threads 20` release-binary pairs
 matched every compatibility surface and all favored the candidate. Independent

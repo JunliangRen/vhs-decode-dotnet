@@ -3733,25 +3733,27 @@ final Release build は warning/error ともに 0 でした。標準の xUnit v3
 Microsoft.Testing.Platform run は全 1,401 test を検出し、1,397 pass、0 fail、IPP runtime
 依存の 4 case のみ explicit skip でした。
 
-### 8-way current burst probe と Exact burst SOS の in-place 化
+### 8-way current burst probe と double path の Exact SOS reuse
 
 最新の `current` chroma phase prefix は、独立した burst worker を 4 個ではなく最大 8 個
 使用できます。decoder-local の exact-length burst cache も hard bound は 8 slot です。
 使用前に active sample をすべて上書きし、全 exit path で buffer を返却するため、保持領域は
-file length に比例して増えません。Exact final burst SOS は既存の destination API を通じて、
-exclusive ownership の buffer へ書き戻します。coefficient、odd extension、forward/reverse
-order、floating-point expression、fitter order、exception priority、すべての cross-field state
-transition は変更していません。float32 IPP-fast path は以前から owned buffer を in-place
-filter していました。
+file length に比例して増えません。以下の CLI 実測 gain はこの bounded worker-cap change
+によるものです。production CLI は本 phase より前から owned float32 burst buffer を
+in-place filter していました。別の改善として、public double-precision Exact
+`AnalyzeFieldPhase` path は既存の destination API を通じて final burst SOS を exclusive
+ownership の buffer へ書き戻し、その API path の temporary result allocation を 1 個
+避けます。double-path change に CLI speed/memory claim は帰属しません。coefficient、odd
+extension、forward/reverse order、floating-point expression、fitter order、exception
+priority、すべての cross-field state transition は変更していません。
 
 build ごとの process-level burst-prefix trial 7 回は同じ checksum を維持しました。median wall
-time は 197.780 から 153.813 ms へ 22.2% 短縮しました。Exact SOS result を line ごとに
-allocate したままの最初の 8-worker build は却下しました。1,000-frame pair の wall-time gain は
-小さい一方、peak working set が 345.9 から 617.3 MiB へ増えたためです。その temporary result
-を除去した accepted build では、baseline/candidate の sampled peak working set は
-382.6/400.7 MiB、peak private bytes は 398.9/405.9 MiB、wall time は 30.169 から
-28.426 秒でした。約 7 MiB の private-byte 増加は bounded memory tradeoff であり、memory
-reduction claim ではありません。
+time は 197.780 から 153.813 ms へ 22.2% 短縮しました。初期の 8-worker memory run 1 件は
+peak working set 617.3 MiB に達しましたが、controlled final source では再現しなかったため
+non-representative として破棄しました。採用した baseline/candidate sampled pair は peak
+working set 382.6/400.7 MiB、peak private bytes 398.9/405.9 MiB、wall time 30.169 から
+28.426 秒でした。約 7 MiB の private-byte 増加は bounded scheduling tradeoff であり、
+memory reduction claim ではありません。
 
 interleaved 1,000-frame Exact `current --threads 20` release-binary pair 3 組はすべて candidate
 が勝ちました。独立 median は wall time が 29.576 から 28.673 秒（3.05%、throughput

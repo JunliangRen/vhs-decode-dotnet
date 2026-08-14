@@ -4004,27 +4004,30 @@ The final Release build completed with zero warnings and errors. The standard
 xUnit v3/Microsoft.Testing.Platform run discovered all 1,401 tests: 1,397 passed,
 none failed, and four IPP-runtime-dependent cases were explicitly skipped.
 
-### Eight-way current burst probing and in-place Exact burst SOS
+### Eight-way current burst probing and double-path Exact SOS reuse
 
 The latest `current` chroma phase prefix can use up to eight independent burst
 workers instead of four. The decoder-local exact-length burst cache has the
 same eight-slot hard bound; every active sample is overwritten before use, all
 buffers are returned on every exit, and retained storage cannot grow with file
-length. The Exact final burst SOS now writes back into that exclusively owned
-buffer through the existing destination API. Coefficients, odd extension,
+length. This bounded worker-cap change accounts for the measured CLI gain
+below. The production CLI already filtered its owned float32 burst buffer in
+place before this phase. Separately, the public double-precision Exact
+`AnalyzeFieldPhase` path now writes its final burst SOS back into that
+exclusively owned buffer through the existing destination API, avoiding one
+temporary result allocation in that API path. No CLI speed or memory claim is
+attributed to the double-path change. Coefficients, odd extension,
 forward/reverse order, floating-point expressions, fitter order, exception
-priority, and every cross-field state transition are unchanged. The float32
-IPP-fast path already filtered its owned buffer in place.
+priority, and every cross-field state transition are unchanged.
 
 Seven process-level burst-prefix trials per build retained one checksum. Median
-wall time moved from 197.780 to 153.813 ms, a 22.2% reduction. An initial
-eight-worker build that kept allocating one Exact SOS result per line was
-rejected: a 1,000-frame pair raised peak working set from 345.9 to 617.3 MiB
-for only a small wall-time gain. Removing that temporary result changed the
-accepted sampled pair to 382.6/400.7 MiB peak working set and 398.9/405.9 MiB
-peak private bytes for baseline/candidate, while wall time moved from 30.169 to
-28.426 seconds. The roughly 7 MiB private-byte increase is a bounded memory
-tradeoff rather than a memory-reduction claim.
+wall time moved from 197.780 to 153.813 ms, a 22.2% reduction. One preliminary
+eight-worker memory run reached 617.3 MiB peak working set and was rejected as
+non-representative after it did not reproduce under the controlled final
+source. The accepted sampled baseline/candidate pair measured 382.6/400.7 MiB
+peak working set and 398.9/405.9 MiB peak private bytes, while wall time moved
+from 30.169 to 28.426 seconds. The roughly 7 MiB private-byte increase is a
+bounded scheduling tradeoff rather than a memory-reduction claim.
 
 Three interleaved 1,000-frame Exact `current --threads 20` release-binary pairs
 all favored the candidate. Independent medians moved from 29.576 to 28.673

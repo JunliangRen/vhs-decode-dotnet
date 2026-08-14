@@ -62,7 +62,7 @@ public sealed class VhsChromaPhaseParallelTests
         Assert.NotSame(result, changed);
     }
 
-    [Fact(DisplayName = "Current burst probes reuse eight exact-length decoder buffers")]
+    [Fact(DisplayName = "Current burst probes reuse eight decoder buffers after filter failures")]
     public void CurrentBurstProbesReuseEightExactLengthDecoderBuffers()
     {
         const int LineLength = 64;
@@ -96,7 +96,7 @@ public sealed class VhsChromaPhaseParallelTests
             .ToArray();
         var cache = new VhsChromaCarrierTableCache();
 
-        VhsChromaPhaseAnalysis first = Analyze();
+        VhsChromaPhaseAnalysis first = Analyze(options);
         int firstAnalysisCreationCount = cache.BurstProbeBufferCreationCount;
         double[][] dirtyBuffers = Enumerable
             .Range(0, VhsChromaCarrierTableCache.BurstProbeBufferCapacity)
@@ -109,7 +109,20 @@ public sealed class VhsChromaPhaseParallelTests
         }
 
         int seededCreationCount = cache.BurstProbeBufferCreationCount;
-        VhsChromaPhaseAnalysis second = Analyze();
+        VhsChromaFieldOptions invalidOptions = options with
+        {
+            FinalSosFilter = Enumerable.Repeat(
+                    new SosSection(1.0, 0.0, 0.0, 1.0, 0.0, 0.0),
+                    16)
+                .ToArray()
+        };
+        Assert.Throws<ArgumentException>(() => Analyze(invalidOptions));
+        Assert.Equal(seededCreationCount, cache.BurstProbeBufferCreationCount);
+        Assert.Equal(
+            VhsChromaCarrierTableCache.BurstProbeBufferCapacity,
+            cache.RetainedBurstProbeBufferCount);
+
+        VhsChromaPhaseAnalysis second = Analyze(options);
 
         Assert.InRange(
             firstAnalysisCreationCount,
@@ -124,10 +137,10 @@ public sealed class VhsChromaPhaseParallelTests
             cache.RetainedBurstProbeBufferCount);
         AssertPhaseAnalysisEqual(first.Phase, second.Phase);
 
-        VhsChromaPhaseAnalysis Analyze()
+        VhsChromaPhaseAnalysis Analyze(VhsChromaFieldOptions selectedOptions)
             => VhsChromaDecoder.AnalyzeFieldPhaseWithWorkspace(
                 chroma,
-                options,
+                selectedOptions,
                 lineLocations,
                 inputLineLength: LineLength,
                 carrierTableCache: cache,
