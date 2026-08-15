@@ -9,7 +9,8 @@ public static class RfLoaderFactory
 
     internal static IRfSampleLoader CreateNative(
         string filename,
-        bool preferPyAvMappedRawFlacSeeking)
+        bool preferPyAvMappedRawFlacSeeking,
+        bool fastContainerSeeking = false)
     {
         if (filename.EndsWith(".lds", StringComparison.Ordinal))
         {
@@ -51,6 +52,11 @@ public static class RfLoaderFactory
                     || filename.EndsWith(".flac", StringComparison.Ordinal))
                 && RawFlacStreamInfo.TryRead(filename, out RawFlacStreamInfo info))
             {
+                if (fastContainerSeeking)
+                {
+                    return new FfmpegPcm16SampleLoader(filename, fastInputSeek: true);
+                }
+
                 if (info.SupportsExactLibsndfileSeeking)
                 {
                     return new LibsndfilePcm16SampleLoader(filename);
@@ -67,7 +73,7 @@ public static class RfLoaderFactory
                 }
             }
 
-            return new FfmpegPcm16SampleLoader(filename);
+            return new FfmpegPcm16SampleLoader(filename, fastContainerSeeking);
         }
 
         return new FfmpegStreamSampleLoader([], []);

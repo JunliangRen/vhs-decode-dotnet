@@ -19,7 +19,11 @@ public sealed class FfmpegPcm16SampleLoader : IRfSampleLoader, IDisposable
     private readonly Func<string, long, Stream>? _openOutput;
     private readonly Func<int?>? _exitCodeAfterOutputEnd;
     private readonly Func<string>? _stderrProvider;
+    private readonly bool _fastInputSeek;
     private readonly FfmpegDiagnosticTailBuffer _stderr = new();
+    private CancellationTokenSource? _rawFlacPumpCancellation;
+    private Task? _rawFlacPumpTask;
+    private Exception? _rawFlacPumpException;
     private ContainerAudioInfo? _containerAudioInfo;
     private Stream? _output;
     private Process? _process;
@@ -31,6 +35,11 @@ public sealed class FfmpegPcm16SampleLoader : IRfSampleLoader, IDisposable
     private bool _disposed;
 
     public FfmpegPcm16SampleLoader(string filename)
+        : this(filename, fastInputSeek: false)
+    {
+    }
+
+    internal FfmpegPcm16SampleLoader(string filename, bool fastInputSeek)
     {
         if (string.IsNullOrWhiteSpace(filename))
         {
@@ -39,6 +48,7 @@ public sealed class FfmpegPcm16SampleLoader : IRfSampleLoader, IDisposable
 
         _filename = filename;
         _openOutput = OpenFfmpegOutput;
+        _fastInputSeek = fastInputSeek;
         RewindSize = DefaultRewindSize;
         SeekThreshold = DefaultSeekThreshold;
     }
@@ -146,19 +156,33 @@ public sealed class FfmpegPcm16SampleLoader : IRfSampleLoader, IDisposable
     public static IReadOnlyList<string> BuildFfmpegArguments(
         string filename,
         long sample,
-        int containerAudioSampleRateHz = ContainerAudioSampleRateHz)
+        int containerAudioSampleRateHz = ContainerAudioSampleRateHz,
+        bool fastInputSeek = false)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(filename);
-        return
-        [
+        var arguments = new List<string>
+        {
             "-hide_banner",
             "-loglevel",
             "error",
-            "-nostdin",
-            "-i",
-            filename,
-            "-ss",
-            FormatSeekSeconds(sample, containerAudioSampleRateHz),
+            "-nostdin"
+        };
+        if (fastInputSeek)
+        {
+            arguments.Add("-ss");
+            arguments.Add(FormatSeekSeconds(sample, containerAudioSampleRateHz));
+        }
+
+        arguments.Add("-i");
+        arguments.Add(filename);
+        if (!fastInputSeek)
+        {
+            arguments.Add("-ss");
+            arguments.Add(FormatSeekSeconds(sample, containerAudioSampleRateHz));
+        }
+
+        arguments.AddRange(
+        [
             "-map",
             "0:a:0",
             "-f",
@@ -168,7 +192,8 @@ public sealed class FfmpegPcm16SampleLoader : IRfSampleLoader, IDisposable
             "-ac",
             "1",
             "-"
-        ];
+        ]);
+        return arguments;
     }
 
     internal static IReadOnlyList<string> BuildPyAvFramedFfmpegArguments(
@@ -331,6 +356,11 @@ public sealed class FfmpegPcm16SampleLoader : IRfSampleLoader, IDisposable
     private Stream OpenFfmpegOutput(string filename, long sample)
     {
         _stderr.Clear();
+        if (_fastInputSeek)
+        {
+            return OpenFastFfmpegOutput(filename, sample);
+        }
+
         if (ImaWavPcm16Stream.TryOpen(filename, out ImaWavPcm16Stream? imaWav)
             && imaWav is not null)
         {
@@ -405,6 +435,173 @@ public sealed class FfmpegPcm16SampleLoader : IRfSampleLoader, IDisposable
             () => ReadNextFrameGeometry(frameGeometry.Reader),
             sample,
             audioInfo.RequiresPyAvPlanePadding);
+    }
+
+    private Stream OpenFastFfmpegOutput(string filename, long sample)
+    {
+        if (RawFlacFrameIndex.TryOpen(filename, out RawFlacFrameIndex? frameIndex)
+            && frameIndex is not null)
+        {
+            return OpenIndexedRawFlacOutput(filename, sample, frameIndex);
+        }
+
+        var startInfo = new ProcessStartInfo("ffmpeg")
+        {
+            UseShellExecute = false,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            CreateNoWindow = true
+        };
+        foreach (string argument in BuildFfmpegArguments(
+            filename,
+            sample,
+            fastInputSeek: true))
+        {
+            startInfo.ArgumentList.Add(argument);
+        }
+
+        _process = new Process { StartInfo = startInfo };
+        _process.ErrorDataReceived += (_, args) =>
+        {
+            if (args.Data is { Length: > 0 })
+            {
+                _stderr.AppendLine(args.Data);
+            }
+        };
+        try
+        {
+            if (!_process.Start())
+            {
+                throw new InvalidOperationException("Failed to start ffmpeg.");
+            }
+        }
+        catch (Win32Exception ex)
+        {
+            throw new NotSupportedException(
+                "FFmpeg is required to decode .ldf/.flac/.vhs/raw.oga RF inputs.",
+                ex);
+        }
+
+        _process.BeginErrorReadLine();
+        return _process.StandardOutput.BaseStream;
+    }
+
+    private Stream OpenIndexedRawFlacOutput(
+        string filename,
+        long sample,
+        RawFlacFrameIndex frameIndex)
+    {
+        RawFlacFrameIndex.FramePoint frame = frameIndex.LocateFrameAtOrBefore(sample);
+        long initialSkipSamples = checked(sample - frame.StartSample);
+        var startInfo = new ProcessStartInfo("ffmpeg")
+        {
+            UseShellExecute = false,
+            RedirectStandardInput = true,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            CreateNoWindow = true
+        };
+        foreach (string argument in new[]
+        {
+            "-hide_banner",
+            "-loglevel", "error",
+            "-nostdin",
+            "-f", "flac",
+            "-i", "pipe:0",
+            "-map", "0:a:0",
+            "-f", "s16le",
+            "-acodec", "pcm_s16le",
+            "-ac", "1",
+            "-"
+        })
+        {
+            startInfo.ArgumentList.Add(argument);
+        }
+
+        _process = new Process { StartInfo = startInfo };
+        _process.ErrorDataReceived += (_, args) =>
+        {
+            if (args.Data is { Length: > 0 })
+            {
+                _stderr.AppendLine(args.Data);
+            }
+        };
+        try
+        {
+            if (!_process.Start())
+            {
+                throw new InvalidOperationException("Failed to start ffmpeg.");
+            }
+        }
+        catch (Win32Exception ex)
+        {
+            throw new NotSupportedException(
+                "FFmpeg is required to decode .ldf/.flac/.vhs/raw.oga RF inputs.",
+                ex);
+        }
+
+        _process.BeginErrorReadLine();
+        _rawFlacPumpCancellation = new CancellationTokenSource();
+        _rawFlacPumpException = null;
+        _rawFlacPumpTask = PumpRawFlacAsync(
+            filename,
+            frameIndex.Metadata,
+            frame.ByteOffset,
+            _process.StandardInput.BaseStream,
+            _rawFlacPumpCancellation.Token);
+        return initialSkipSamples == 0
+            ? _process.StandardOutput.BaseStream
+            : new PrefixSkippingStream(
+                _process.StandardOutput.BaseStream,
+                checked(initialSkipSamples * sizeof(short)));
+    }
+
+    private async Task PumpRawFlacAsync(
+        string filename,
+        byte[] metadata,
+        long frameOffset,
+        Stream processInput,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            await processInput.WriteAsync(metadata, cancellationToken).ConfigureAwait(false);
+            await using var input = new FileStream(
+                filename,
+                FileMode.Open,
+                FileAccess.Read,
+                FileShare.ReadWrite | FileShare.Delete,
+                bufferSize: 1024 * 1024,
+                FileOptions.Asynchronous | FileOptions.SequentialScan);
+            input.Position = frameOffset;
+            await input.CopyToAsync(
+                processInput,
+                bufferSize: 1024 * 1024,
+                cancellationToken).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+        }
+        catch (IOException) when (cancellationToken.IsCancellationRequested)
+        {
+        }
+        catch (ObjectDisposedException) when (cancellationToken.IsCancellationRequested)
+        {
+        }
+        catch (Exception ex)
+        {
+            _rawFlacPumpException = ex;
+        }
+        finally
+        {
+            try
+            {
+                await processInput.DisposeAsync().ConfigureAwait(false);
+            }
+            catch (Exception ex) when (ex is IOException or ObjectDisposedException)
+            {
+            }
+        }
     }
 
     internal static bool TryParsePyAvAudioFrameGeometry(
@@ -702,6 +899,11 @@ public sealed class FfmpegPcm16SampleLoader : IRfSampleLoader, IDisposable
 
     private string ErrorOutput()
     {
+        if (_rawFlacPumpException is not null)
+        {
+            return $"raw FLAC input pump failed: {_rawFlacPumpException.Message}";
+        }
+
         string? external = _stderrProvider?.Invoke();
         if (!string.IsNullOrWhiteSpace(external))
         {
@@ -716,6 +918,7 @@ public sealed class FfmpegPcm16SampleLoader : IRfSampleLoader, IDisposable
     {
         try
         {
+            _rawFlacPumpCancellation?.Cancel();
             _output?.Dispose();
             if (_process is { HasExited: false })
             {
@@ -723,13 +926,34 @@ public sealed class FfmpegPcm16SampleLoader : IRfSampleLoader, IDisposable
             }
 
             _process?.WaitForExit();
+            try
+            {
+                _rawFlacPumpTask?.GetAwaiter().GetResult();
+            }
+            catch (OperationCanceledException)
+            {
+            }
             _process?.Dispose();
         }
-        catch (InvalidOperationException)
+        catch (Exception ex) when (ex is InvalidOperationException
+            or ObjectDisposedException
+            or IOException)
         {
         }
         finally
         {
+            try
+            {
+                _process?.Dispose();
+            }
+            catch (InvalidOperationException)
+            {
+            }
+
+            _rawFlacPumpCancellation?.Dispose();
+            _rawFlacPumpCancellation = null;
+            _rawFlacPumpTask = null;
+            _rawFlacPumpException = null;
             _process = null;
             _output = null;
             _positionBytes = 0;
@@ -822,6 +1046,91 @@ public sealed class FfmpegPcm16SampleLoader : IRfSampleLoader, IDisposable
         public static ContainerAudioInfo Default { get; } = new(
             ContainerAudioSampleRateHz,
             false);
+    }
+}
+
+internal sealed class PrefixSkippingStream : Stream
+{
+    private readonly Stream _source;
+    private long _remainingBytes;
+    private byte[]? _discardBuffer;
+    private bool _disposed;
+
+    internal PrefixSkippingStream(Stream source, long bytesToSkip)
+    {
+        ArgumentNullException.ThrowIfNull(source);
+        ArgumentOutOfRangeException.ThrowIfNegative(bytesToSkip);
+        if (!source.CanRead)
+        {
+            throw new ArgumentException("Source stream must be readable.", nameof(source));
+        }
+
+        _source = source;
+        _remainingBytes = bytesToSkip;
+    }
+
+    public override bool CanRead => !_disposed;
+
+    public override bool CanSeek => false;
+
+    public override bool CanWrite => false;
+
+    public override long Length => throw new NotSupportedException();
+
+    public override long Position
+    {
+        get => throw new NotSupportedException();
+        set => throw new NotSupportedException();
+    }
+
+    public override int Read(byte[] buffer, int offset, int count)
+        => Read(buffer.AsSpan(offset, count));
+
+    public override int Read(Span<byte> buffer)
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+        while (_remainingBytes > 0)
+        {
+            int discardLength = checked((int)Math.Min(_remainingBytes, 64 * 1024));
+            _discardBuffer ??= GC.AllocateUninitializedArray<byte>(64 * 1024);
+            int read = _source.Read(_discardBuffer, 0, discardLength);
+            if (read == 0)
+            {
+                return 0;
+            }
+
+            _remainingBytes -= read;
+        }
+
+        return _source.Read(buffer);
+    }
+
+    public override void Flush()
+        => throw new NotSupportedException();
+
+    public override long Seek(long offset, SeekOrigin origin)
+        => throw new NotSupportedException();
+
+    public override void SetLength(long value)
+        => throw new NotSupportedException();
+
+    public override void Write(byte[] buffer, int offset, int count)
+        => throw new NotSupportedException();
+
+    protected override void Dispose(bool disposing)
+    {
+        if (_disposed)
+        {
+            return;
+        }
+
+        _disposed = true;
+        if (disposing)
+        {
+            _source.Dispose();
+        }
+
+        base.Dispose(disposing);
     }
 }
 

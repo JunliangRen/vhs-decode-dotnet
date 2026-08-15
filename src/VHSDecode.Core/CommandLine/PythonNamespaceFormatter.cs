@@ -19,7 +19,13 @@ internal static class PythonNamespaceFormatter
 
         foreach (OptionSpec option in command.Spec.Options)
         {
-            if (option.Destination is "help" or "version" or "dsp_backend" or "compat_version")
+            if (option.Destination is "help"
+                or "version"
+                or "dsp_backend"
+                or "compat_version"
+                or "preview_server"
+                or "preview_port"
+                or "preview_crf")
             {
                 continue;
             }

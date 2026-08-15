@@ -1,7 +1,8 @@
-﻿<Project Sdk="Microsoft.NET.Sdk">
+<Project Sdk="Microsoft.NET.Sdk">
 
   <ItemGroup>
     <ProjectReference Include="..\VHSDecode.Core\VHSDecode.Core.csproj" />
+    <ProjectReference Include="..\VHSDecode.Preview\VHSDecode.Preview.csproj" />
   </ItemGroup>
 
   <PropertyGroup>

@@ -6,6 +6,25 @@ namespace VHSDecode.Tests;
 
 public sealed class FfmpegPcm16SampleLoaderTests
 {
+    [Fact(DisplayName = "Preview fast seek moves FFmpeg seek before the input only when requested")]
+    public void PreviewFastSeekMovesSeekBeforeInputOnlyWhenRequested()
+    {
+        List<string> normal = FfmpegPcm16SampleLoader.BuildFfmpegArguments(
+                "capture.ldf",
+                80_000)
+            .ToList();
+        List<string> fast = FfmpegPcm16SampleLoader.BuildFfmpegArguments(
+                "capture.ldf",
+                80_000,
+                fastInputSeek: true)
+            .ToList();
+
+        Assert.True(normal.IndexOf("-ss") > normal.IndexOf("-i"));
+        Assert.True(fast.IndexOf("-ss") < fast.IndexOf("-i"));
+        Assert.Equal("2", normal[normal.IndexOf("-ss") + 1]);
+        Assert.Equal("2", fast[fast.IndexOf("-ss") + 1]);
+    }
+
     [Fact(DisplayName = "FFmpeg PCM16 rewind remains exact across circular wrap and restart")]
     public void RewindRemainsExactAcrossCircularWrapAndRestart()
     {

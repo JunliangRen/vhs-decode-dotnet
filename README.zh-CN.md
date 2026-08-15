@@ -33,7 +33,7 @@
 - VHS 家族包括 VHS/S-VHS、Betamax、Video8/Hi8、U-matic、Type C、EIAJ
   以及上游支持的 PAL/NTSC 变体。
 - TBC 工具、双击启动的用户 GUI 和开发者绘图窗口明确不在范围内。
-- Visual Studio 2026 `.slnx` 包含 **1,463** 项标准 xUnit v3 测试；测试可在
+- Visual Studio 2026 `.slnx` 包含 **1,485** 项标准 xUnit v3 测试；测试可在
   Test Explorer 中查看，也可用 `dotnet test` 运行。
 
 <!-- SECTION: start -->
@@ -52,6 +52,21 @@ decode.exe hifi [upstream options] input.lds output.wav
 
 同时支持 `vhs-decode.exe`、`ld-decode.exe` 等独立命令别名。使用
 `decode.exe <command> --help` 查看完整兼容参数。
+
+### 可拖动的 RF 预览服务器
+
+VHS 可运行 `decode.exe vhs --preview-server --pal input.lds`，LaserDisc
+可运行 `decode.exe ld --preview-server --pal input.ldf`。命令会输出仅监听
+loopback 的网页播放器地址，以及标准 HLS/fMP4 播放列表地址；不需要输出基名，
+也不会生成 TBC、JSON、SQLite、EFM、音频或解码日志文件。
+
+这是用于定位内容的低精度模式：通过轻量 4fSC 一维解调保留彩色，默认执行快速
+dropout 遮盖，跳过音频以及正式导出使用的高成本 comb/修复阶段；每个 2 秒窗口只
+实际解码 4 个源帧。NTSC 固定输出 top-field-first 的 640x480、30000/1001 fps，
+PAL 固定输出 top-field-first 的 768x576、25 fps。`--preview-crf` 接受 0 到 51，
+默认 31；值越低，画质和码率越高。IPP 可用时会自动选用 `ipp-fast`，否则回退到
+可移植的托管后端。系统需要能找到带 `libx264` 的 FFmpeg；也可通过
+`VHSDECODE_FFMPEG` 和 `VHSDECODE_FFPROBE` 指定路径。
 
 <!-- SECTION: profiles -->
 
@@ -134,7 +149,7 @@ CVBS 和 HiFi 仍会拒绝 `ipp-fast`；需要 release 兼容行为时应使用 
 覆盖 `--threads 0`、默认 5 workers 和 20 workers 的 24 次门禁，以及刷新后的
 60 次 Exact/IPP-fast 矩阵，都在亮度、色度、原始 JSON、stdout、归一化
 stderr/日志和有序 `fileLoc` 上只产生一个 hash。标准 xUnit v3 套件的
-**1,463** 项测试全部通过。
+**1,485** 项测试全部通过。
 
 刷新后的每个 .NET profile/线程单元格在三轮内都保持确定性。固定参考集中的 Python
 PR341 保持确定；Python v0.4.0 的 15 次运行产生了 15 套不同的亮度、色度、JSON 和
@@ -172,7 +187,7 @@ TBC、色度、JSON 和日志文件允许在解码期间并发读取，兼容的
 dotnet restore VHSDecodeDotNet.slnx
 dotnet build VHSDecodeDotNet.slnx -c Release --no-restore
 dotnet test --solution VHSDecodeDotNet.slnx -c Release `
-  --no-build --no-restore --minimum-expected-tests 1463
+  --no-build --no-restore --minimum-expected-tests 1485
 ```
 
 在 Visual Studio 2026 中打开 `VHSDecodeDotNet.slnx`，即可构建、调试并通过

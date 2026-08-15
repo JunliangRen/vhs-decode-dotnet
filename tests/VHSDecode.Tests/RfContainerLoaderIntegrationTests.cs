@@ -73,6 +73,44 @@ public sealed class RfContainerLoaderIntegrationTests
         new(1_199_980, 30, "347903A86072AB2FE31C061E2AFBD0F94C334C81E8E807EEF81E75E39D82DC08")
     ];
 
+    [Fact(DisplayName = "Preview indexed raw FLAC seek starts at the target frame")]
+    public void PreviewIndexedRawFlacSeekStartsAtTargetFrame()
+    {
+        Assert.SkipUnless(
+            CommandIsAvailable("ffmpeg"),
+            "ffmpeg must be available on PATH.");
+
+        string directory = CreateTestDirectory();
+        try
+        {
+            short[] samples = CreateSamples();
+            string wavePath = Path.Combine(directory, "indexed source.wav");
+            string flacPath = Path.Combine(directory, "indexed source.flac");
+            WriteWave(wavePath, samples);
+            EncodeFlac(
+                wavePath,
+                flacPath,
+                oggContainer: false,
+                frameSize: 2_048);
+
+            Assert.True(RawFlacFrameIndex.TryOpen(flacPath, out RawFlacFrameIndex? index));
+            Assert.NotNull(index);
+            RawFlacFrameIndex.FramePoint frame = index.LocateFrameAtOrBefore(1_100_000);
+            Assert.InRange(1_100_000 - frame.StartSample, 0, frame.BlockSize - 1);
+
+            using var loader = new FfmpegPcm16SampleLoader(flacPath, fastInputSeek: true);
+            using FileStream input = File.OpenRead(flacPath);
+            double[] actual = Assert.IsType<double[]>(loader.Read(input, 1_100_000, 31));
+            Assert.Equal(
+                samples.AsSpan(1_100_000, 31).ToArray().Select(static value => (double)value),
+                actual);
+        }
+        finally
+        {
+            Directory.Delete(directory, recursive: true);
+        }
+    }
+
     [Fact(DisplayName = "RF WAV FLAC and LDF random access matches Release 4.0")]
     public void RfWaveFlacAndLdfRandomAccessMatchesRelease40()
     {
@@ -910,7 +948,11 @@ public sealed class RfContainerLoaderIntegrationTests
         output.Write((byte)(value >> 16));
     }
 
-    private static void EncodeFlac(string inputPath, string outputPath, bool oggContainer)
+    private static void EncodeFlac(
+        string inputPath,
+        string outputPath,
+        bool oggContainer,
+        int? frameSize = null)
     {
         var arguments = new List<string>
         {
@@ -927,6 +969,14 @@ public sealed class RfContainerLoaderIntegrationTests
         if (oggContainer)
         {
             arguments.AddRange(["-f", "ogg", "-compression_level", "6"]);
+        }
+
+        if (frameSize.HasValue)
+        {
+            arguments.AddRange([
+                "-frame_size",
+                frameSize.Value.ToString(System.Globalization.CultureInfo.InvariantCulture)
+            ]);
         }
 
         arguments.Add(outputPath);

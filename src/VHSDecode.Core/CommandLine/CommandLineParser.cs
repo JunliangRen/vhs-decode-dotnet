@@ -86,7 +86,12 @@ public sealed class CommandLineParser
             }
         }
 
-        if (diagnosticOutput is not null && spec.Name is "vhs" or "cvbs")
+        bool previewServer = IsPreviewServer(spec, values);
+        int minimumPositionals = previewServer ? 1 : spec.MinimumPositionals;
+        int maximumPositionals = previewServer ? 1 : spec.MaximumPositionals;
+        if (diagnosticOutput is not null
+            && !previewServer
+            && spec.Name is "vhs" or "cvbs")
         {
             while (positionals.Count < spec.MaximumPositionals)
             {
@@ -94,13 +99,15 @@ public sealed class CommandLineParser
             }
         }
 
-        if (positionals.Count < spec.MinimumPositionals)
+        if (positionals.Count < minimumPositionals)
         {
-            throw new CommandLineParseException("the following arguments are required: infile, outfile");
+            throw new CommandLineParseException(previewServer
+                ? "the following argument is required: infile"
+                : "the following arguments are required: infile, outfile");
         }
 
         unknown.AddRange(positionals
-            .Skip(spec.MaximumPositionals)
+            .Skip(maximumPositionals)
             .Select(item => (item.Index, item.Value)));
         if (unknown.Count > 0)
         {
@@ -110,8 +117,20 @@ public sealed class CommandLineParser
             throw new CommandLineParseException($"unrecognized arguments: {arguments}");
         }
 
-        return BuildResult(spec, values, optionSources, positionals, programName);
+        return BuildResult(
+            spec,
+            values,
+            optionSources,
+            positionals.Take(maximumPositionals).ToList(),
+            programName);
     }
+
+    private static bool IsPreviewServer(
+        DecodeCommandSpec spec,
+        IReadOnlyDictionary<string, object?> values)
+        => spec.Name is "vhs" or "ld"
+            && values.TryGetValue("preview_server", out object? value)
+            && value is true;
 
     private static void AddPositional(
         DecodeCommandSpec spec,

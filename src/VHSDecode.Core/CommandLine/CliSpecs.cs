@@ -99,6 +99,9 @@ public static class CliSpecs
 
     private static IEnumerable<OptionSpec> VhsOptions()
     {
+        yield return Flag("preview_server", ["--preview-server"]);
+        yield return Int("preview_port", ["--preview-port"], 0);
+        yield return Int("preview_crf", ["--preview-crf"], 31);
         yield return CompatibilityVersion();
         yield return Str("tape_format", ["--tf", "--tape_format"], "VHS", SupportedTapeFormats, Upper);
         yield return Str("tape_speed", ["--ts", "--tape_speed"], "sp", TapeSpeeds, Lower);
@@ -175,6 +178,9 @@ public static class CliSpecs
     {
         yield return Flag("help", ["-h", "--help"]);
         yield return Flag("version", ["--version", "-v"], hidden: true);
+        yield return Flag("preview_server", ["--preview-server"]);
+        yield return Int("preview_port", ["--preview-port"], 0);
+        yield return Int("preview_crf", ["--preview-crf"], 31);
         yield return Dbl("start", ["--start", "-s"], 0.0, pythonDefaultValue: 0);
         yield return Int("length", ["--length", "-l"], 110000);
         yield return Int("seek", ["--seek", "-S"], -1);
