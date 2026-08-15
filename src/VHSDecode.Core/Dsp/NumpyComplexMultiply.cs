@@ -1,4 +1,5 @@
 using System.Numerics;
+using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using System.Runtime.Intrinsics;
 using System.Runtime.Intrinsics.X86;
@@ -129,12 +130,13 @@ internal static class NumpyComplexMultiply
                         FloatComparisonMode.OrderedLessThanOrEqualNonSignaling);
                     if (Avx.MoveMask(firstFinite) != 0b1111)
                     {
-                        ApplyThreeScalarMultipliers(
+                        ApplyThreeSequentialPasses(
                             values,
                             firstComplexMultipliers,
                             secondComplexMultipliers,
                             realMultipliers,
-                            index);
+                            index,
+                            2);
                         continue;
                     }
 
@@ -152,12 +154,13 @@ internal static class NumpyComplexMultiply
                         FloatComparisonMode.OrderedLessThanOrEqualNonSignaling);
                     if (Avx.MoveMask(secondFinite) != 0b1111)
                     {
-                        ApplyThreeScalarMultipliers(
+                        ApplyThreeSequentialPasses(
                             values,
                             firstComplexMultipliers,
                             secondComplexMultipliers,
                             realMultipliers,
-                            index);
+                            index,
+                            2);
                         continue;
                     }
 
@@ -178,12 +181,13 @@ internal static class NumpyComplexMultiply
                     }
                     else
                     {
-                        ApplyThreeScalarMultipliers(
+                        ApplyThreeSequentialPasses(
                             values,
                             firstComplexMultipliers,
                             secondComplexMultipliers,
                             realMultipliers,
-                            index);
+                            index,
+                            2);
                     }
                 }
             }
@@ -191,9 +195,33 @@ internal static class NumpyComplexMultiply
 
         for (; index < values.Length; index++)
         {
-            Complex value = ApplyScalar(values[index], firstComplexMultipliers[index]);
-            value = ApplyScalar(value, secondComplexMultipliers[index]);
-            values[index] = value * realMultipliers[index];
+            Complex firstValue = ApplyScalar(values[index], firstComplexMultipliers[index]);
+            if (!IsFinite(firstValue))
+            {
+                ApplyThreeSequentialPasses(
+                    values,
+                    firstComplexMultipliers,
+                    secondComplexMultipliers,
+                    realMultipliers,
+                    index,
+                    1);
+                continue;
+            }
+
+            Complex secondValue = ApplyScalar(firstValue, secondComplexMultipliers[index]);
+            if (!IsFinite(secondValue) || !double.IsFinite(realMultipliers[index]))
+            {
+                ApplyThreeSequentialPasses(
+                    values,
+                    firstComplexMultipliers,
+                    secondComplexMultipliers,
+                    realMultipliers,
+                    index,
+                    1);
+                continue;
+            }
+
+            values[index] = secondValue * realMultipliers[index];
         }
     }
 
@@ -282,18 +310,21 @@ internal static class NumpyComplexMultiply
                 left.Imaginary * right.Real));
     }
 
-    private static void ApplyThreeScalarMultipliers(
+    private static bool IsFinite(Complex value)
+        => double.IsFinite(value.Real) && double.IsFinite(value.Imaginary);
+
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private static void ApplyThreeSequentialPasses(
         Span<Complex> values,
         ReadOnlySpan<Complex> firstComplexMultipliers,
         ReadOnlySpan<Complex> secondComplexMultipliers,
         ReadOnlySpan<double> realMultipliers,
-        int index)
+        int index,
+        int length)
     {
-        for (int scalar = index; scalar < index + 2; scalar++)
-        {
-            Complex value = ApplyScalar(values[scalar], firstComplexMultipliers[scalar]);
-            value = ApplyScalar(value, secondComplexMultipliers[scalar]);
-            values[scalar] = value * realMultipliers[scalar];
-        }
+        Span<Complex> valueSlice = values.Slice(index, length);
+        ApplyInPlace(valueSlice, firstComplexMultipliers.Slice(index, length));
+        ApplyInPlace(valueSlice, secondComplexMultipliers.Slice(index, length));
+        ApplyRealInPlace(valueSlice, realMultipliers.Slice(index, length));
     }
 }
