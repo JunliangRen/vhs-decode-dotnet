@@ -56,27 +56,6 @@ internal static class PreviewSourceProbe
             cancellationToken).ConfigureAwait(false);
     }
 
-    internal static async Task VerifyFfmpegAsync(
-        string ffmpegPath,
-        CancellationToken cancellationToken)
-    {
-        ProcessResult result = await RunAsync(
-            ffmpegPath,
-            ["-hide_banner", "-encoders"],
-            cancellationToken).ConfigureAwait(false);
-        if (result.ExitCode != 0)
-        {
-            throw new InvalidOperationException(
-                $"FFmpeg probe failed with exit code {result.ExitCode}: {result.StandardError.Trim()}");
-        }
-
-        if (!result.StandardOutput.Contains("libx264", StringComparison.Ordinal))
-        {
-            throw new InvalidOperationException(
-                "FFmpeg does not provide the libx264 encoder required by the portable HLS preview backend.");
-        }
-    }
-
     private static async Task<double> ProbeContainerDurationAsync(
         string path,
         double inputSampleRateHz,

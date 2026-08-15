@@ -27,11 +27,19 @@ internal sealed class PreviewFieldRenderer
     private readonly int[] _sourceColumns;
     private readonly int[] _chromaStarts;
     private readonly int[] _chromaEnds;
+    private readonly int _chromaPrefixStart;
+    private readonly int _chromaPrefixEnd;
     private readonly int _burstStart;
     private readonly int _burstEnd;
     private readonly byte[] _lumaLut;
     private readonly bool _palChroma;
     private readonly bool _ntscChroma;
+    private readonly int[] _realPrefix0;
+    private readonly int[] _imaginaryPrefix0;
+    private readonly int[] _realPrefix1;
+    private readonly int[] _imaginaryPrefix1;
+    private readonly BurstVector[] _burstVectors;
+    private readonly BurstRotation[] _burstRotations;
 
     internal PreviewFieldRenderer(
         DecodeSession session,
@@ -73,6 +81,8 @@ internal sealed class PreviewFieldRenderer
             _chromaWidth,
             activeStart,
             activeEnd);
+        _chromaPrefixStart = _chromaStarts[0];
+        _chromaPrefixEnd = _chromaEnds[^1];
         _burstStart = Math.Clamp(
             session.TbcFrameSpec.ColourBurstStart ?? 0,
             2,
@@ -85,6 +95,14 @@ internal sealed class PreviewFieldRenderer
 
         _palChroma = normalizedSystem.StartsWith("PAL", StringComparison.Ordinal);
         _ntscChroma = !_palChroma && ntscGeometry;
+        int prefixLength = checked(_sourceLineLength + 1);
+        _realPrefix0 = new int[prefixLength];
+        _imaginaryPrefix0 = new int[prefixLength];
+        _realPrefix1 = new int[prefixLength];
+        _imaginaryPrefix1 = new int[prefixLength];
+        int burstStorageLineCount = checked(_sourceLines[^1] + 3);
+        _burstVectors = new BurstVector[burstStorageLineCount];
+        _burstRotations = new BurstRotation[burstStorageLineCount];
     }
 
     internal PreviewRenderedField Render(TbcDecodedField field, bool isFirstField)
@@ -127,6 +145,12 @@ internal sealed class PreviewFieldRenderer
         bool separateChroma,
         Span<byte> destination)
     {
+        if (separateChroma)
+        {
+            RenderSeparateLuma(samples, destination);
+            return;
+        }
+
         for (int y = 0; y < _halfHeight; y++)
         {
             int sourceOffset = checked(_sourceLines[y] * _sourceLineLength);
@@ -142,7 +166,7 @@ internal sealed class PreviewFieldRenderer
                 }
 
                 ushort value = samples[index];
-                if (!separateChroma && sourceColumn >= 2)
+                if (sourceColumn >= 2)
                 {
                     int previous = index - 2;
                     if ((uint)previous < (uint)samples.Length)
@@ -156,6 +180,24 @@ internal sealed class PreviewFieldRenderer
         }
     }
 
+    private void RenderSeparateLuma(
+        ReadOnlySpan<ushort> samples,
+        Span<byte> destination)
+    {
+        for (int y = 0; y < _halfHeight; y++)
+        {
+            int sourceOffset = checked(_sourceLines[y] * _sourceLineLength);
+            int destinationOffset = checked(y * _width);
+            for (int x = 0; x < _width; x++)
+            {
+                int index = sourceOffset + _sourceColumns[x];
+                destination[destinationOffset + x] = (uint)index < (uint)samples.Length
+                    ? _lumaLut[samples[index]]
+                    : (byte)16;
+            }
+        }
+    }
+
     private void RenderChroma(
         ReadOnlySpan<ushort> samples,
         bool separateChroma,
@@ -164,43 +206,54 @@ internal sealed class PreviewFieldRenderer
         Span<byte> destinationU,
         Span<byte> destinationV)
     {
+        BurstRotation[] bursts = BuildBurstRotations(samples, separateChroma);
         for (int y = 0; y < _chromaHeight; y++)
         {
             int fieldY0 = y * 2;
             int fieldY1 = Math.Min(_halfHeight - 1, fieldY0 + 1);
             int sourceLine0 = _sourceLines[fieldY0];
             int sourceLine1 = _sourceLines[fieldY1];
-            BurstRotation burst0 = DetectBurst(
+            BurstRotation burst0 = bursts[sourceLine0];
+            BurstRotation burst1 = bursts[sourceLine1];
+            bool validPrefix0 = BuildDemodulatedPrefixes(
                 samples,
                 sourceLine0,
-                separateChroma);
-            BurstRotation burst1 = DetectBurst(
+                separateChroma,
+                _realPrefix0,
+                _imaginaryPrefix0);
+            bool validPrefix1 = BuildDemodulatedPrefixes(
                 samples,
                 sourceLine1,
-                separateChroma);
+                separateChroma,
+                _realPrefix1,
+                _imaginaryPrefix1);
             int destinationOffset = y * _chromaWidth;
             for (int x = 0; x < _chromaWidth; x++)
             {
-                bool valid0 = TryDecodeChroma(
-                    samples,
+                double u0 = 128.0;
+                double v0 = 128.0;
+                bool valid0 = validPrefix0 && TryDecodeChroma(
+                    _realPrefix0,
+                    _imaginaryPrefix0,
                     sourceLine0,
-                    separateChroma,
                     burst0,
                     isFirstField,
                     fieldPhaseId,
                     x,
-                    out double u0,
-                    out double v0);
-                bool valid1 = TryDecodeChroma(
-                    samples,
+                    out u0,
+                    out v0);
+                double u1 = 128.0;
+                double v1 = 128.0;
+                bool valid1 = validPrefix1 && TryDecodeChroma(
+                    _realPrefix1,
+                    _imaginaryPrefix1,
                     sourceLine1,
-                    separateChroma,
                     burst1,
                     isFirstField,
                     fieldPhaseId,
                     x,
-                    out double u1,
-                    out double v1);
+                    out u1,
+                    out v1);
                 if (!valid0 && !valid1)
                 {
                     continue;
@@ -214,7 +267,81 @@ internal sealed class PreviewFieldRenderer
         }
     }
 
-    private BurstRotation DetectBurst(
+    private BurstRotation[] BuildBurstRotations(
+        ReadOnlySpan<ushort> samples,
+        bool separateChroma)
+    {
+        int lineCount = samples.Length / _sourceLineLength;
+        int firstActiveLine = _sourceLines[0];
+        int lastActiveLine = _sourceLines[^1];
+        Array.Clear(_burstRotations, firstActiveLine, lastActiveLine - firstActiveLine + 1);
+        int firstBurstLine = _palChroma
+            ? Math.Max(0, firstActiveLine - 2)
+            : firstActiveLine;
+        int lastBurstLine = _palChroma
+            ? Math.Min(lineCount - 1, lastActiveLine + 2)
+            : lastActiveLine;
+        for (int sourceLine = firstBurstLine; sourceLine <= lastBurstLine; sourceLine++)
+        {
+            _burstVectors[sourceLine] = DetectBurstVector(
+                samples,
+                sourceLine,
+                separateChroma);
+        }
+
+        int lastAvailableActiveLine = Math.Min(lastActiveLine, lineCount - 1);
+        for (int sourceLine = firstActiveLine; sourceLine <= lastAvailableActiveLine; sourceLine++)
+        {
+            BurstVector vector = _burstVectors[sourceLine];
+            double magnitude = Math.Sqrt(
+                (vector.Real * vector.Real)
+                + (vector.Imaginary * vector.Imaginary));
+            if (magnitude < MinimumBurstMagnitude)
+            {
+                continue;
+            }
+
+            _burstRotations[sourceLine] = new BurstRotation(
+                vector.Real / magnitude,
+                vector.Imaginary / magnitude,
+                _palChroma ? DetectPalVSwitch(_burstVectors, sourceLine, lineCount) : 0,
+                true);
+        }
+
+        return _burstRotations;
+    }
+
+    private bool BuildDemodulatedPrefixes(
+        ReadOnlySpan<ushort> samples,
+        int sourceLine,
+        bool separateChroma,
+        Span<int> realPrefix,
+        Span<int> imaginaryPrefix)
+    {
+        int lineOffset = checked(sourceLine * _sourceLineLength);
+        if (lineOffset < 0
+            || lineOffset + _sourceLineLength > samples.Length
+            || (!separateChroma && _chromaPrefixStart < 2))
+        {
+            return false;
+        }
+
+        int real = 0;
+        int imaginary = 0;
+        realPrefix[_chromaPrefixStart] = 0;
+        imaginaryPrefix[_chromaPrefixStart] = 0;
+        for (int x = _chromaPrefixStart; x < _chromaPrefixEnd; x++)
+        {
+            int value = ChromaSampleScaledByTwo(samples, lineOffset, x, separateChroma);
+            AccumulateDemodulated(value, x, ref real, ref imaginary);
+            realPrefix[x + 1] = real;
+            imaginaryPrefix[x + 1] = imaginary;
+        }
+
+        return true;
+    }
+
+    private BurstVector DetectBurstVector(
         ReadOnlySpan<ushort> samples,
         int sourceLine,
         bool separateChroma)
@@ -227,31 +354,62 @@ internal sealed class PreviewFieldRenderer
 
         double real = 0.0;
         double imaginary = 0.0;
-        int count = 0;
-        for (int x = _burstStart; x < _burstEnd; x++)
-        {
-            double value = ChromaSample(samples, lineOffset, x, separateChroma);
-            AccumulateDemodulated(value, x, ref real, ref imaginary);
-            count++;
-        }
-
+        int count = _burstEnd - _burstStart;
         if (count == 0)
         {
             return default;
         }
 
-        real /= count;
-        imaginary /= count;
-        double magnitude = Math.Sqrt((real * real) + (imaginary * imaginary));
-        return magnitude >= MinimumBurstMagnitude
-            ? new BurstRotation(real / magnitude, imaginary / magnitude, true)
-            : default;
+        for (int x = _burstStart; x < _burstEnd; x++)
+        {
+            double value = ChromaSample(samples, lineOffset, x, separateChroma);
+            AccumulateDemodulated(value, x, ref real, ref imaginary);
+        }
+
+        return new BurstVector(real / count, imaginary / count);
+    }
+
+    private static int DetectPalVSwitch(
+        ReadOnlySpan<BurstVector> vectors,
+        int sourceLine,
+        int availableLineCount)
+    {
+        if (sourceLine < 2 || sourceLine + 2 >= availableLineCount)
+        {
+            return 0;
+        }
+
+        BurstVector current = vectors[sourceLine];
+        BurstVector delayed = vectors[sourceLine - 2];
+        BurstVector advanced = vectors[sourceLine + 2];
+        BurstVector previous = vectors[sourceLine - 1];
+        BurstVector next = vectors[sourceLine + 1];
+        double currentReal =
+            (current.Real - ((delayed.Real + advanced.Real) * 0.5)) * 0.5;
+        double currentImaginary =
+            (current.Imaginary - ((delayed.Imaginary + advanced.Imaginary) * 0.5)) * 0.5;
+        double oppositeReal = (next.Real - previous.Real) * 0.5;
+        double oppositeImaginary = (next.Imaginary - previous.Imaginary) * 0.5;
+
+        double currentMagnitudeSquared =
+            (currentReal * currentReal) + (currentImaginary * currentImaginary);
+        if (currentMagnitudeSquared == 0.0)
+        {
+            return 0;
+        }
+
+        double realDifference = currentReal - oppositeReal;
+        double imaginaryDifference = currentImaginary - oppositeImaginary;
+        double differenceMagnitudeSquared =
+            (realDifference * realDifference)
+            + (imaginaryDifference * imaginaryDifference);
+        return differenceMagnitudeSquared < currentMagnitudeSquared * 2.0 ? 1 : -1;
     }
 
     private bool TryDecodeChroma(
-        ReadOnlySpan<ushort> samples,
+        ReadOnlySpan<int> realPrefix,
+        ReadOnlySpan<int> imaginaryPrefix,
         int sourceLine,
-        bool separateChroma,
         BurstRotation burst,
         bool isFirstField,
         int? fieldPhaseId,
@@ -266,30 +424,16 @@ internal sealed class PreviewFieldRenderer
             return false;
         }
 
-        int lineOffset = checked(sourceLine * _sourceLineLength);
-        if (lineOffset < 0 || lineOffset + _sourceLineLength > samples.Length)
-        {
-            return false;
-        }
-
-        double real = 0.0;
-        double imaginary = 0.0;
         int start = _chromaStarts[destinationX];
         int end = _chromaEnds[destinationX];
-        for (int x = start; x < end; x++)
-        {
-            double value = ChromaSample(samples, lineOffset, x, separateChroma);
-            AccumulateDemodulated(value, x, ref real, ref imaginary);
-        }
-
         int count = end - start;
         if (count <= 0)
         {
             return false;
         }
 
-        real /= count;
-        imaginary /= count;
+        double real = ((realPrefix[end] - realPrefix[start]) * 0.5) / count;
+        double imaginary = ((imaginaryPrefix[end] - imaginaryPrefix[start]) * 0.5) / count;
         double rotatedReal = (real * burst.Real) + (imaginary * burst.Imaginary);
         double rotatedImaginary = (imaginary * burst.Real) - (real * burst.Imaginary);
         if (_ntscChroma)
@@ -299,11 +443,15 @@ internal sealed class PreviewFieldRenderer
             return true;
         }
 
-        double switchSign = isFirstField == ((sourceLine & 1) == 0) ? 1.0 : -1.0;
-        int phase = Math.Clamp(fieldPhaseId ?? 1, 1, 8);
-        if (phase is 3 or 4 or 7 or 8)
+        double switchSign = burst.VSwitch;
+        if (switchSign == 0.0)
         {
-            switchSign = -switchSign;
+            switchSign = isFirstField == ((sourceLine & 1) == 0) ? 1.0 : -1.0;
+            int phase = Math.Clamp(fieldPhaseId ?? 1, 1, 8);
+            if (phase is 3 or 4 or 7 or 8)
+            {
+                switchSign = -switchSign;
+            }
         }
 
         u += (rotatedReal + (switchSign * rotatedImaginary)) * PalUScale;
@@ -375,11 +523,46 @@ internal sealed class PreviewFieldRenderer
         return ((int)samples[index] - samples[index - 2]) * 0.5;
     }
 
+    private static int ChromaSampleScaledByTwo(
+        ReadOnlySpan<ushort> samples,
+        int lineOffset,
+        int x,
+        bool separateChroma)
+    {
+        int index = lineOffset + x;
+        return separateChroma
+            ? checked(((int)samples[index] - 32767) * 2)
+            : (int)samples[index] - samples[index - 2];
+    }
+
     private static void AccumulateDemodulated(
         double value,
         int x,
         ref double real,
         ref double imaginary)
+    {
+        switch (x & 3)
+        {
+            case 0:
+                real += value;
+                break;
+            case 1:
+                imaginary -= value;
+                break;
+            case 2:
+                real -= value;
+                break;
+            default:
+                imaginary += value;
+                break;
+        }
+    }
+
+    private static void AccumulateDemodulated(
+        int value,
+        int x,
+        ref int real,
+        ref int imaginary)
     {
         switch (x & 3)
         {
@@ -465,5 +648,10 @@ internal sealed class PreviewFieldRenderer
     private readonly record struct BurstRotation(
         double Real,
         double Imaginary,
+        int VSwitch,
         bool Valid);
+
+    private readonly record struct BurstVector(
+        double Real,
+        double Imaginary);
 }

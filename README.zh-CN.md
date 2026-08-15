@@ -2,13 +2,13 @@
 
 [English](README.md) | **[简体中文](README.zh-CN.md)** | [日本語](README.ja.md)
 
-<!-- README_SYNC: 2026-08-15.01 -->
+<!-- README_SYNC: 2026-08-16.01 -->
 
 这是 [`oyvindln/vhs-decode`](https://github.com/oyvindln/vhs-decode)
 中解码相关部分的 .NET 11 重写，兼容目标为上游 release `v0.4.0`、commit
 `43155200da87c0d49eb37d8ec09b1372075ee8e4`。
 
-当前 .NET 移植版发布为 `v0.4.0-2.1.0`（应用版本 `2.1.0`）。
+当前 .NET 移植版发布为 `v0.4.0-2.2.0`（应用版本 `2.2.0`）。
 
 > [!IMPORTANT]
 > 这仍是持续进行中的兼容性移植。顶层解码路径已经实现并经过大量测试，但尚未声称
@@ -35,7 +35,7 @@
 - VHS 家族包括 VHS/S-VHS、Betamax、Video8/Hi8、U-matic、Type C、EIAJ
   以及上游支持的 PAL/NTSC 变体。
 - TBC 工具、双击启动的用户 GUI 和开发者绘图窗口明确不在范围内。
-- Visual Studio 2026 `.slnx` 包含 **1,485** 项标准 xUnit v3 测试；测试可在
+- Visual Studio 2026 `.slnx` 包含 **1,500** 项标准 xUnit v3 测试；测试可在
   Test Explorer 中查看，也可用 `dotnet test` 运行。
 
 <!-- SECTION: start -->
@@ -62,13 +62,23 @@ VHS 可运行 `decode.exe vhs --preview-server --pal input.lds`，LaserDisc
 loopback 的网页播放器地址，以及标准 HLS/fMP4 播放列表地址；不需要输出基名，
 也不会生成 TBC、JSON、SQLite、EFM、音频或解码日志文件。
 
-这是用于定位内容的低精度模式：通过轻量 4fSC 一维解调保留彩色，默认执行快速
-dropout 遮盖，跳过音频以及正式导出使用的高成本 comb/修复阶段；每个 2 秒窗口只
-实际解码 4 个源帧。NTSC 固定输出 top-field-first 的 640x480、30000/1001 fps，
-PAL 固定输出 top-field-first 的 768x576、25 fps。`--preview-crf` 接受 0 到 51，
-默认 31；值越低，画质和码率越高。IPP 可用时会自动选用 `ipp-fast`，否则回退到
-可移植的托管后端。系统需要能找到带 `libx264` 的 FFmpeg；也可通过
-`VHSDECODE_FFMPEG` 和 `VHSDECODE_FFPROBE` 指定路径。
+这是用于定位内容的低精度模式：通过轻量 4fSC 一维解调保留彩色，并从相邻 burst
+行检测 PAL V-switch，以避免四场色相闪烁；默认执行快速 dropout 遮盖，跳过音频以及
+正式导出使用的高成本 comb/修复阶段；每个 2 秒窗口会
+连续解码完整的时间轴帧数。静音网页播放器会自动开始播放，并维持两个窗口的前瞻
+缓冲。输入的 top-field-first 场会按场率反交错：NTSC 固定输出逐行 640x480、
+60000/1001 fps，PAL 固定输出逐行 768x576、50 fps。启动时会依次实际验证完整的
+fMP4 管线：CUDA YADIF + NVENC、QSV advanced VPP + QSV、CPU YADIF + AMF，最后
+是 CPU YADIF + libx264。`--preview-crf` 接受 0 到 51，默认 31；硬件编码器会映射到
+最接近的质量/QP 控制，因此不同后端的码率并不完全相同。IPP 可用时会自动选用
+`ipp-fast`，否则回退到可移植的托管后端。标准 40 MSPS VHS 预览还会先经过固定的
+抗混叠滤波，再以内部 20 MSPS RF 解码；原生 20 MSPS VHS 输入保持 20 MSPS，
+S-VHS、其他磁带格式、LaserDisc 以及全部普通解码/导出路径都维持原有采样率行为。
+这项优化自动启用，不增加用户参数。启动输出会明确显示所选视频管线、
+IPP-FAST 是否初始化成功、实际解码线程数，并分别用窗口编号行与实时 FPS 行原地刷新。
+系统需要
+能找到具有至少一条可用管线的 FFmpeg；也可通过 `VHSDECODE_FFMPEG` 和
+`VHSDECODE_FFPROBE` 指定路径。
 
 <!-- SECTION: profiles -->
 
@@ -151,7 +161,7 @@ CVBS 和 HiFi 仍会拒绝 `ipp-fast`；需要 release 兼容行为时应使用 
 覆盖 `--threads 0`、默认 5 workers 和 20 workers 的 24 次门禁，以及刷新后的
 60 次 Exact/IPP-fast 矩阵，都在亮度、色度、原始 JSON、stdout、归一化
 stderr/日志和有序 `fileLoc` 上只产生一个 hash。标准 xUnit v3 套件的
-**1,485** 项测试全部通过。
+**1,500** 项测试全部通过。
 
 刷新后的每个 .NET profile/线程单元格在三轮内都保持确定性。固定参考集中的 Python
 PR341 保持确定；Python v0.4.0 的 15 次运行产生了 15 套不同的亮度、色度、JSON 和
@@ -189,7 +199,7 @@ TBC、色度、JSON 和日志文件允许在解码期间并发读取，兼容的
 dotnet restore VHSDecodeDotNet.slnx
 dotnet build VHSDecodeDotNet.slnx -c Release --no-restore
 dotnet test --solution VHSDecodeDotNet.slnx -c Release `
-  --no-build --no-restore --minimum-expected-tests 1485
+  --no-build --no-restore --minimum-expected-tests 1512
 ```
 
 在 Visual Studio 2026 中打开 `VHSDecodeDotNet.slnx`，即可构建、调试并通过

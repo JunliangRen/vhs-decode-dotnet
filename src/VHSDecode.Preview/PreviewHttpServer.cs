@@ -91,6 +91,7 @@ public sealed class PreviewHttpServer : IAsyncDisposable
             provider.MediaInfo.Interlaced,
             provider.MediaInfo.DecodeBackend,
             provider.MediaInfo.AccuracyProfile,
+            provider.MediaInfo.EncodeBackend,
             provider.Timeline.SegmentCount,
             provider.Timeline.WindowCount,
             WindowSeconds = provider.Timeline.WindowCount > 1
@@ -208,7 +209,7 @@ public sealed class PreviewHttpServer : IAsyncDisposable
         <body>
           <main>
             <h1>VHS Decode Preview</h1>
-            <video id="preview" controls preload="none"></video>
+            <video id="preview" controls autoplay muted playsinline preload="none"></video>
             <div class="timeline">
               <input id="timeline" type="range" min="0" max="0" step="0.1" value="0" aria-label="Preview position">
               <output id="time">00:00 / 00:00</output>
@@ -236,7 +237,16 @@ public sealed class PreviewHttpServer : IAsyncDisposable
             let appendQueue = [];
             let dragging = false;
             let nativeSeekTimer;
+            let initialPlaybackAttempted = false;
             const windowRequests = new Map();
+
+            const startInitialPlayback = () => {
+              if (initialPlaybackAttempted) return;
+              initialPlaybackAttempted = true;
+              video.play().catch(() => {
+                status.textContent = 'Ready. Press Play to start the preview.';
+              });
+            };
 
             const formatTime = value => {
               const seconds = Math.max(0, Math.floor(Number.isFinite(value) ? value : 0));
@@ -277,6 +287,7 @@ public sealed class PreviewHttpServer : IAsyncDisposable
                   diagnostics.requestCompletedAt = performance.now();
                   diagnostics.ready = true;
                   status.textContent = `Ready at ${formatTime(item.windowIndex * info.windowSeconds)}. Drag either progress bar to seek.`;
+                  startInitialPlayback();
                 }
                 appendNext();
               };
@@ -350,6 +361,12 @@ public sealed class PreviewHttpServer : IAsyncDisposable
               info.windowCount - 1,
               Math.max(0, Math.floor(value / info.windowSeconds)));
 
+            const ensurePlaybackWindows = windowIndex => {
+              ensureWindow(windowIndex);
+              ensureWindow(windowIndex + 1);
+              ensureWindow(windowIndex + 2);
+            };
+
             const seekTo = value => {
               const target = Math.min(info.durationSeconds - 0.001, Math.max(0, value));
               const targetWindow = windowForTime(target);
@@ -374,20 +391,16 @@ public sealed class PreviewHttpServer : IAsyncDisposable
             });
             video.addEventListener('play', () => {
               const currentWindow = windowForTime(video.currentTime);
-              ensureWindow(currentWindow);
-              ensureWindow(currentWindow + 1);
+              ensurePlaybackWindows(currentWindow);
             });
             video.addEventListener('timeupdate', () => {
               if (!dragging) timeline.value = String(video.currentTime);
               updateClock(video.currentTime);
               if (video.seeking) return;
               const currentWindow = windowForTime(video.currentTime);
-              ensureWindow(currentWindow);
-              if (video.currentTime >= ((currentWindow + 1) * info.windowSeconds) - 0.5) {
-                ensureWindow(currentWindow + 1);
-              }
+              ensurePlaybackWindows(currentWindow);
             });
-            video.addEventListener('waiting', () => ensureWindow(windowForTime(video.currentTime)));
+            video.addEventListener('waiting', () => ensurePlaybackWindows(windowForTime(video.currentTime)));
 
             (async () => {
               try {
@@ -412,6 +425,7 @@ public sealed class PreviewHttpServer : IAsyncDisposable
                   video.src = '/hls/index.m3u8';
                   diagnostics.ready = true;
                   status.textContent = 'Ready. Use the native progress bar to seek.';
+                  startInitialPlayback();
                 } else {
                   status.textContent = 'This browser has no fMP4/HLS support. Open the playlist link in mpv or VLC.';
                 }

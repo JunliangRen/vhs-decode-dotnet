@@ -14,7 +14,6 @@ internal sealed class PreviewFrameAssembler
     private readonly long _targetStartSample;
     private readonly long _halfFrameSamples;
     private readonly int _outputFrameCount;
-    private readonly int _sampledFrameLimit;
     private PreviewRenderedField? _firstField;
     private long _firstFieldStart;
     private byte[]? _lastFrame;
@@ -25,18 +24,12 @@ internal sealed class PreviewFrameAssembler
         int width,
         int height,
         long targetStartSample,
-        int outputFrameCount,
-        int sampledFrameLimit)
+        int outputFrameCount)
     {
         ArgumentNullException.ThrowIfNull(session);
         if (outputFrameCount <= 0)
         {
             throw new ArgumentOutOfRangeException(nameof(outputFrameCount));
-        }
-
-        if (sampledFrameLimit <= 0 || sampledFrameLimit > outputFrameCount)
-        {
-            throw new ArgumentOutOfRangeException(nameof(sampledFrameLimit));
         }
 
         _output = output ?? throw new ArgumentNullException(nameof(output));
@@ -54,7 +47,6 @@ internal sealed class PreviewFrameAssembler
                 session.DecodeSampleRateHz / (framesPerSecond * 2.0),
                 MidpointRounding.AwayFromZero)));
         _outputFrameCount = outputFrameCount;
-        _sampledFrameLimit = sampledFrameLimit;
     }
 
     internal int WrittenFrameCount { get; private set; }
@@ -66,7 +58,7 @@ internal sealed class PreviewFrameAssembler
     {
         foreach ((TbcDecodedField field, TbcFieldOrderDecision decision) in writes)
         {
-            if (SampledFrameCount >= _sampledFrameLimit)
+            if (SampledFrameCount >= _outputFrameCount)
             {
                 return;
             }
@@ -203,4 +195,5 @@ internal sealed class PreviewFrameAssembler
             second.Slice(source, width).CopyTo(destination.Slice(((line * 2) + 1) * width, width));
         }
     }
+
 }

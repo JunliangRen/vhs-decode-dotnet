@@ -12,6 +12,7 @@ internal sealed class FfmpegHlsWindowEncoder
     private readonly int _crf;
     private readonly bool _isPalColorSystem;
     private readonly PreviewTimeline _timeline;
+    private readonly PreviewEncoderBackend _encoderBackend;
 
     internal FfmpegHlsWindowEncoder(
         string ffmpegPath,
@@ -19,7 +20,8 @@ internal sealed class FfmpegHlsWindowEncoder
         int height,
         int crf,
         string system,
-        PreviewTimeline timeline)
+        PreviewTimeline timeline,
+        PreviewEncoderBackend encoderBackend)
     {
         _ffmpegPath = ffmpegPath;
         _width = width;
@@ -29,6 +31,7 @@ internal sealed class FfmpegHlsWindowEncoder
             "PAL",
             StringComparison.Ordinal);
         _timeline = timeline;
+        _encoderBackend = encoderBackend;
     }
 
     internal PreviewSegmentWindow Encode(
@@ -186,12 +189,24 @@ internal sealed class FfmpegHlsWindowEncoder
         string segmentDuration)
     {
         string colorStandard = _isPalColorSystem ? "bt470bg" : "smpte170m";
-        string x264Parameters = "tff=1"
-            + $":colorprim={colorStandard}"
+        int colorCode = _isPalColorSystem ? 5 : 6;
+        string x264Parameters = $"colorprim={colorStandard}"
             + ":transfer=bt709"
             + $":colormatrix={colorStandard}"
             + ":fullrange=off";
-        return
+        int outputFrameCount = checked(frameCount * 2);
+        int outputKeyFrameInterval = checked(keyFrameInterval * 2);
+        var arguments = new List<string>();
+        if (_encoderBackend == PreviewEncoderBackend.Qsv)
+        {
+            arguments.AddRange(
+            [
+                "-init_hw_device", "qsv=preview_qsv",
+                "-filter_hw_device", "preview_qsv"
+            ]);
+        }
+
+        arguments.AddRange(
         [
             "-hide_banner",
             "-loglevel", "warning",
@@ -200,27 +215,21 @@ internal sealed class FfmpegHlsWindowEncoder
             "-video_size", $"{_width}x{_height}",
             "-framerate", frameRate,
             "-i", "pipe:0",
-            "-an",
-            "-c:v", "libx264",
-            "-preset", "ultrafast",
-            "-tune", "zerolatency",
-            "-crf", _crf.ToString(CultureInfo.InvariantCulture),
-            "-threads", "2",
-            "-vf", "setfield=tff",
-            "-flags", "+ildct+ilme",
-            "-top", "1",
+            "-an"
+        ]);
+        arguments.AddRange(BuildBackendArguments(x264Parameters));
+        arguments.AddRange(
+        [
             "-profile:v", "main",
             "-level:v", "3.1",
-            "-x264-params", x264Parameters,
-            "-g", keyFrameInterval.ToString(CultureInfo.InvariantCulture),
-            "-keyint_min", keyFrameInterval.ToString(CultureInfo.InvariantCulture),
-            "-sc_threshold", "0",
-            "-pix_fmt", "yuv420p",
+            "-g", outputKeyFrameInterval.ToString(CultureInfo.InvariantCulture),
+            "-keyint_min", outputKeyFrameInterval.ToString(CultureInfo.InvariantCulture),
             "-color_primaries", colorStandard,
             "-color_trc", "bt709",
             "-colorspace", colorStandard,
             "-color_range", "tv",
-            "-frames:v", frameCount.ToString(CultureInfo.InvariantCulture),
+            "-bsf:v", $"h264_metadata=video_full_range_flag=0:colour_primaries={colorCode}:transfer_characteristics=1:matrix_coefficients={colorCode}",
+            "-frames:v", outputFrameCount.ToString(CultureInfo.InvariantCulture),
             "-f", "hls",
             "-hls_time", segmentDuration,
             "-hls_list_size", "0",
@@ -230,8 +239,63 @@ internal sealed class FfmpegHlsWindowEncoder
             "-hls_fmp4_init_filename", initPath,
             "-hls_segment_filename", segmentPattern,
             playlistPath
-        ];
+        ]);
+        return [.. arguments];
     }
+
+    private string[] BuildBackendArguments(string x264Parameters)
+        => _encoderBackend switch
+        {
+            PreviewEncoderBackend.Nvenc =>
+            [
+                "-vf", "setfield=tff,format=nv12,hwupload_cuda,yadif_cuda=mode=send_field:parity=tff:deint=all",
+                "-c:v", "h264_nvenc",
+                "-preset", "p1",
+                "-tune", "ull",
+                "-rc", "constqp",
+                "-qp", _crf.ToString(CultureInfo.InvariantCulture),
+                "-bf", "0",
+                "-pix_fmt", "cuda"
+            ],
+            PreviewEncoderBackend.Qsv =>
+            [
+                "-vf", "setfield=tff,tpad=stop_mode=clone:stop=1,format=nv12,hwupload=extra_hw_frames=64,vpp_qsv=deinterlace=advanced:rate=field",
+                "-c:v", "h264_qsv",
+                "-preset", "veryfast",
+                "-global_quality", Math.Max(1, _crf).ToString(CultureInfo.InvariantCulture),
+                "-look_ahead", "0",
+                "-async_depth", "1",
+                "-forced_idr", "1",
+                "-bf", "0",
+                "-pix_fmt", "qsv"
+            ],
+            PreviewEncoderBackend.Amf =>
+            [
+                "-vf", "setfield=tff,yadif=mode=send_field:parity=tff:deint=all",
+                "-c:v", "h264_amf",
+                "-usage", "ultralowlatency",
+                "-quality", "speed",
+                "-rc", "cqp",
+                "-qp_i", _crf.ToString(CultureInfo.InvariantCulture),
+                "-qp_p", _crf.ToString(CultureInfo.InvariantCulture),
+                "-qp_b", _crf.ToString(CultureInfo.InvariantCulture),
+                "-bf", "0",
+                "-pix_fmt", "yuv420p"
+            ],
+            PreviewEncoderBackend.Libx264 =>
+            [
+                "-vf", "setfield=tff,yadif=mode=send_field:parity=tff:deint=all",
+                "-c:v", "libx264",
+                "-preset", "ultrafast",
+                "-tune", "zerolatency",
+                "-crf", _crf.ToString(CultureInfo.InvariantCulture),
+                "-threads", "2",
+                "-x264-params", x264Parameters,
+                "-sc_threshold", "0",
+                "-pix_fmt", "yuv420p"
+            ],
+            _ => throw new ArgumentOutOfRangeException(nameof(_encoderBackend))
+        };
 
     private static void TryKill(Process process)
     {

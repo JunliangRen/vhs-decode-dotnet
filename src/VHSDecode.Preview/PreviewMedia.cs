@@ -10,7 +10,8 @@ public sealed record PreviewMediaInfo(
     int Crf,
     bool Interlaced,
     string DecodeBackend,
-    string AccuracyProfile);
+    string AccuracyProfile,
+    string EncodeBackend = "unspecified");
 
 public sealed record PreviewMediaSegment(
     int GlobalIndex,

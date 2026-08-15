@@ -29,22 +29,43 @@ public sealed class PreviewCommandRunner
                 command,
                 options,
                 cancellationToken).ConfigureAwait(false);
-            await using PreviewHttpServer server = await PreviewHttpServer.StartAsync(
-                provider,
-                options,
-                cancellationToken).ConfigureAwait(false);
-            output.WriteLine($"Preview server: {server.BaseAddress}");
-            output.WriteLine($"HLS playlist: {server.PlaylistAddress}");
-            output.WriteLine(
-                $"Mode: {server.MediaInfo.SourceKind} {server.MediaInfo.System}, "
-                + $"{server.MediaInfo.Width}x{server.MediaInfo.Height} "
-                + $"{server.MediaInfo.FramesPerSecond:0.###} fps interlaced, "
-                + $"CRF {server.MediaInfo.Crf}, "
-                + $"{server.MediaInfo.DecodeBackend}, {server.MediaInfo.AccuracyProfile}");
-            output.WriteLine("Press Ctrl+C to stop. Preview mode does not create TBC, JSON, SQLite, EFM, or audio outputs.");
-            await output.FlushAsync(cancellationToken).ConfigureAwait(false);
-            await server.WaitForShutdownAsync(cancellationToken).ConfigureAwait(false);
-            return 0;
+            var fpsDisplay = new PreviewRealtimeFpsDisplay(
+                output,
+                provider.Timeline.FramesPerSecond);
+            provider.WindowGenerationUpdated += fpsDisplay.Report;
+            try
+            {
+                await using PreviewHttpServer server = await PreviewHttpServer.StartAsync(
+                    provider,
+                    options,
+                    cancellationToken).ConfigureAwait(false);
+                output.WriteLine($"Preview server: {server.BaseAddress}");
+                output.WriteLine($"HLS playlist: {server.PlaylistAddress}");
+                output.WriteLine(
+                    $"Mode: {server.MediaInfo.SourceKind} {server.MediaInfo.System}, "
+                    + $"{server.MediaInfo.Width}x{server.MediaInfo.Height} "
+                    + $"{server.MediaInfo.FramesPerSecond:0.###} fps progressive, "
+                    + $"CRF {server.MediaInfo.Crf}, "
+                    + $"{server.MediaInfo.DecodeBackend}, {server.MediaInfo.AccuracyProfile}");
+                output.WriteLine($"Preview encoder: {server.MediaInfo.EncodeBackend}");
+                output.WriteLine(provider.IppFastEnabled
+                    ? "IPP-FAST: enabled (runtime initialization succeeded)"
+                    : "IPP-FAST: disabled (Exact backend active)");
+                output.WriteLine(
+                    $"Preview RF rate: {provider.SourceSampleRateHz / 1_000_000.0:0.###}"
+                    + $" -> {provider.DecodeSampleRateHz / 1_000_000.0:0.###} MSPS");
+                output.WriteLine($"Decoder threads: {provider.DecoderThreads}");
+                output.WriteLine("Press Ctrl+C to stop. Preview mode does not create TBC, JSON, SQLite, EFM, or audio outputs.");
+                await output.FlushAsync(cancellationToken).ConfigureAwait(false);
+                fpsDisplay.Start();
+                await server.WaitForShutdownAsync(cancellationToken).ConfigureAwait(false);
+                return 0;
+            }
+            finally
+            {
+                provider.WindowGenerationUpdated -= fpsDisplay.Report;
+                fpsDisplay.Complete();
+            }
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
