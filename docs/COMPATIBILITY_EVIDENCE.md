@@ -2899,11 +2899,12 @@ passed. The final 103,591,012-byte single-file executable has SHA-256
 
 ### .NET 11 Preview 7 toolchain and release-path gate
 
-The 2026-08-15 toolchain refresh uses SDK/runtime
-`11.0.100-preview.7.26381.103`. It pins the SDK through `global.json` and keeps
-the three overview READMEs, three detailed READMEs, project guidance, and release
-workflow aligned. CI installs from `global.json` and fails if `dotnet --version`
-does not exactly match the pin. A Preview 7 top-level package audit with prereleases enabled
+The 2026-08-15 toolchain refresh uses SDK
+`11.0.100-preview.7.26381.103` and runtime `11.0.0-preview.7.26381.103`. It pins
+the SDK through `global.json` and keeps the three overview READMEs, three detailed
+READMEs, project guidance, and release workflow aligned. CI installs from
+`global.json` and fails if `dotnet --version` does not exactly match the pin. A
+Preview 7 top-level package audit with prereleases enabled
 reported no available updates in any of the four solution projects.
 
 The first Preview 7 full-suite run exposed one real runtime-semantic difference:
