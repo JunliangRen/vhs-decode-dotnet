@@ -4,13 +4,13 @@
 
 [English](README.detailed.md) | **[简体中文](README.detailed.zh-CN.md)** | [日本語](README.detailed.ja.md)
 
-<!-- README_SYNC: 2026-08-15.01 -->
+<!-- README_SYNC: 2026-08-16.01 -->
 
 这是 [`oyvindln/vhs-decode`](https://github.com/oyvindln/vhs-decode)
 中解码相关部分的 .NET 11 重写，当前以 release `v0.4.0`、commit
 `43155200da87c0d49eb37d8ec09b1372075ee8e4` 为兼容基线。
 
-当前 .NET 移植版发布为 `v0.4.0-2.1.0`（应用版本 `2.1.0`）。
+当前 .NET 移植版发布为 `v0.4.0-2.2.0`（应用版本 `2.2.0`）。
 
 > [!IMPORTANT]
 > 这是仍在进行中的兼容性移植。顶层解码路径已经实现并经过大量测试，
@@ -572,7 +572,7 @@ JSON、有序 `fileLoc`、stdout、归一化 stderr 和日志均一致。新增�
 一组出现 628.7 MiB 的基线 GC 峰值，因此只把它标为离群点，不据此宣称更大比例。
 另有 24 次 release 二进制门禁覆盖四种 backend/profile 组合以及 `--threads 0`、
 默认五 worker、20 workers，全部采集面均一致；刷新的 Preview 7 候选 60 次公开矩阵每格也只有
-一套 hash，全部 1485 项标准 xUnit v3 测试通过。
+一套 hash，全部 1,500 项标准 xUnit v3 测试通过。
 
 ### 最新六路径线程矩阵
 
@@ -3265,7 +3265,7 @@ destination API，把最终 burst SOS 写回这块独占 buffer，从而在该 A
 .\tools\build-ipp-native.ps1
 dotnet restore VHSDecodeDotNet.slnx
 dotnet build VHSDecodeDotNet.slnx -c Release --no-restore
-dotnet test --solution VHSDecodeDotNet.slnx -c Release --no-build --no-restore --minimum-expected-tests 1485
+dotnet test --solution VHSDecodeDotNet.slnx -c Release --no-build --no-restore --minimum-expected-tests 1512
 dotnet test --project tests\VHSDecode.Tests\VHSDecode.Tests.csproj -c Release --no-build --no-restore --coverage --coverage-output coverage.cobertura.xml --coverage-output-format cobertura
 ```
 
@@ -3277,7 +3277,7 @@ Intel oneAPI。只含二进制的单文件发布会嵌入 `vhsdecode_ipp.dll` �
 notice，不会额外生成许可证 sidecar 文件。只构建 Exact 后端时可以省略原生构建步骤。
 
 当前正式 Release 构建为零警告、零错误。xUnit v3 项目向
-`dotnet test` 和 Visual Studio Test Explorer 暴露 **1,485** 个可独立发现的测试。
+`dotnet test` 和 Visual Studio Test Explorer 暴露 **1,500** 个可独立发现的测试。
 
 <!-- SECTION: usage -->
 

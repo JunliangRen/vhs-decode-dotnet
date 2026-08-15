@@ -4,14 +4,14 @@
 
 [English](README.detailed.md) | [简体中文](README.detailed.zh-CN.md) | **[日本語](README.detailed.ja.md)**
 
-<!-- README_SYNC: 2026-08-15.01 -->
+<!-- README_SYNC: 2026-08-16.01 -->
 
 [`oyvindln/vhs-decode`](https://github.com/oyvindln/vhs-decode) の
 デコード関連部分を .NET 11 で再実装するプロジェクトです。現在は release
 `v0.4.0`、commit `43155200da87c0d49eb37d8ec09b1372075ee8e4`
 を互換性の基準としています。
 
-現在の .NET port release は `v0.4.0-2.1.0`（application version `2.1.0`）です。
+現在の .NET port release は `v0.4.0-2.2.0`（application version `2.2.0`）です。
 
 > [!IMPORTANT]
 > この互換移植は現在も開発中です。トップレベルのデコード経路は実装済みで
@@ -663,7 +663,7 @@ reverse-order comparison では peak working set の baseline/candidate が
 baseline には 628.7 MiB の GC peak があったため、大きい差は percentage claim に使いません。
 24-run release-binary gate は 4 backend/profile と `--threads 0`、default-five、20 workers
 を網羅し、全 surface が一致しました。更新した Preview 7 candidate の 60-run public matrix は全 cell で surface
-ごとに 1 hash を維持し、standard xUnit v3 1,485 tests はすべて成功しました。
+ごとに 1 hash を維持し、standard xUnit v3 1,500 tests はすべて成功しました。
 
 ### 最新の 6-path thread matrix
 
@@ -3880,7 +3880,7 @@ suite は全 1,448 test に成功しました。
 .\tools\build-ipp-native.ps1
 dotnet restore VHSDecodeDotNet.slnx
 dotnet build VHSDecodeDotNet.slnx -c Release --no-restore
-dotnet test --solution VHSDecodeDotNet.slnx -c Release --no-build --no-restore --minimum-expected-tests 1485
+dotnet test --solution VHSDecodeDotNet.slnx -c Release --no-build --no-restore --minimum-expected-tests 1512
 dotnet test --project tests\VHSDecode.Tests\VHSDecode.Tests.csproj -c Release --no-build --no-restore --coverage --coverage-output coverage.cobertura.xml --coverage-output-format cobertura
 ```
 
@@ -3894,7 +3894,7 @@ third-party notice を埋め込み、license sidecar file は追加しません�
 
 現在の正式な Release build は warning 0、error 0 です。xUnit v3 project は
 `dotnet test` と Visual Studio Test Explorer の両方で個別に検出できる
-**1,485** tests を公開します。
+**1,500** tests を公開します。
 
 <!-- SECTION: usage -->
 

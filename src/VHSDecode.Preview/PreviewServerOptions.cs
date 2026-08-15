@@ -8,8 +8,6 @@ public sealed record PreviewServerOptions
 
     public int SegmentsPerWindow { get; init; } = 1;
 
-    public int DecodedFramesPerWindow { get; init; } = 4;
-
     public int CacheWindowCount { get; init; } = 3;
 
     public int MaximumConcurrentWindowBuilds { get; init; } = 2;
@@ -41,13 +39,6 @@ public sealed record PreviewServerOptions
             throw new ArgumentOutOfRangeException(
                 nameof(SegmentsPerWindow),
                 "Preview windows must contain between 1 and 16 segments.");
-        }
-
-        if (DecodedFramesPerWindow is < 1 or > 30)
-        {
-            throw new ArgumentOutOfRangeException(
-                nameof(DecodedFramesPerWindow),
-                "Preview windows must decode between 1 and 30 source frames.");
         }
 
         if (CacheWindowCount is < 1 or > 32)

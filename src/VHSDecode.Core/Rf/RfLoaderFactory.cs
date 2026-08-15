@@ -79,6 +79,26 @@ public static class RfLoaderFactory
         return new FfmpegStreamSampleLoader([], []);
     }
 
+    internal static IRfSampleLoader CreatePreviewHalfRateSource(
+        string filename,
+        bool fastContainerSeeking)
+    {
+        if (filename.EndsWith(".raw", StringComparison.Ordinal))
+        {
+            return new Int16SampleLoader();
+        }
+
+        if (filename.EndsWith(".s8", StringComparison.Ordinal))
+        {
+            return new Int8SampleLoader();
+        }
+
+        return CreateNative(
+            filename,
+            preferPyAvMappedRawFlacSeeking: false,
+            fastContainerSeeking);
+    }
+
     public static IRfSampleLoader CreateResampling(string filename, double inputFrequencyMHz)
     {
         if (filename.EndsWith(".lds", StringComparison.Ordinal) || filename.EndsWith(".r30", StringComparison.Ordinal))

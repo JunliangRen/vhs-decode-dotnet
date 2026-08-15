@@ -2229,7 +2229,7 @@ dotnet test --solution VHSDecodeDotNet.slnx --no-build
 ```
 
 The current formal solution build completes with zero warnings and errors, and
-the xUnit v3 project exposes 1,485 independently discoverable tests
+the xUnit v3 project exposes 1,500 independently discoverable tests
 to `dotnet test` and Visual Studio Test Explorer. On the
 same Windows machine and fixtures, Release wall-clock measurements for one
 frame were 2.346 s versus 7.193 s for NTSC VHS and 1.651 s versus 5.865 s for
@@ -2725,22 +2725,129 @@ HiFi FLAC output and LD `--write-test-ldf` still use bundled libsndfile. HiFi
 
 VHS and LaserDisc now provide an opt-in loopback HLS/fMP4 preview server that
 accepts only the RF input path and suppresses TBC, chroma-TBC, JSON, SQLite,
-EFM, audio, and decoder-log output. Each two-second window retains up to four
-decoded source frames on demand, derives low-cost colour with a 4fSC one-dimensional
-demodulator, repeats the last sampled frame to preserve the source timeline,
-and applies lightweight paired-line/same-field dropout concealment. This is a
-navigation contract, not a substitute for the export chroma comb or a
-multi-frame dropout-repair pass.
+EFM, audio, and decoder-log output. Each two-second window now requests the full
+continuous timeline frame count, derives low-cost colour with a 4fSC
+one-dimensional demodulator whose PAL V-switch follows the measured burst on
+neighbouring lines, and applies lightweight paired-line/same-field
+dropout concealment. The muted browser player starts automatically and keeps
+two future windows requested as lookahead. Startup separately reports the
+initialized DSP backend, decoder worker count, and separate in-place window-ID
+and per-window plus aggregate generation-FPS lines. This is a navigation contract, not a substitute
+for the export chroma comb or a multi-frame dropout-repair pass.
 
-A local Release/Exact/CRF-31 validation used one private 40 MHz PAL VHS raw-FLAC
-capture and one private 40 MHz NTSC LaserDisc raw-FLAC capture. The generated
-PAL and NTSC frames retained visible colour. FFprobe reported H.264 Main level
-3.1, limited-range YUV420P, PAL BT.470BG or NTSC SMPTE 170M colour metadata,
-and every inspected frame was interlaced top-field-first. PAL was fixed at
-768x576/25 fps and NTSC at 640x480/30000/1001 fps. The strict four-frame
-sampling cap and seek-lifecycle fixes landed after those private-capture
-measurements, so this entry makes no final-source throughput or bitrate claim.
-No decoder output artifacts were created beside either source.
+An earlier pre-deinterlacing Release/Exact/CRF-31 validation used one private
+40 MHz PAL VHS raw-FLAC capture and one private 40 MHz NTSC LaserDisc raw-FLAC
+capture. Both retained visible colour. Those historical files used the former
+top-field-first 25/30000/1001 fps encoder path and are not evidence for the
+current progressive output contract.
+
+A final 2026-08-16 local Release/IPP-fast/CRF-31 validation used the private
+21,389,175,871-byte `test.ldf` PAL VHS 40 MHz raw-FLAC capture with 20 decoder
+workers. Startup selected `NVENC + CUDA YADIF x2` on an RTX 4070. FFprobe
+reported H.264 Main level 3.1, limited-range YUV420P, progressive 768x576/50
+fps, BT.470BG primaries/matrix, and BT.709 transfer. Window 5 began at the
+expected global PTS of 10.000000 seconds; FFprobe counted 100 frames and
+framemd5 found 100 unique hashes. Warm uncached sequential windows completed
+HTTP delivery in 2.241-2.321 seconds, with a 2.274-second median (21.99 source
+frames/s). Two uncached windows requested concurrently completed in 3.090
+seconds total (32.36 aggregate source frames/s). These measurements include RF
+decode, CUDA upload/deinterlacing, NVENC, fMP4 packaging, and HTTP delivery.
+
+A subsequent optimization pass froze that pre-pass Release build, then ran four
+balanced interleaved A/B rounds on the same capture and machine. Each process
+warmed window 79, measured window 80 alone, and then measured windows 81/82
+concurrently. Stopping the sink as soon as the requested full-motion frames were
+assembled, replacing per-pixel colour range rescans with scaled-integer prefix
+sums, and specializing the separate-chroma luma loop reduced mean single-window
+HTTP wall time from 2.277 to 1.972 seconds (13.37% less wall time, 15.44% more
+throughput). Mean parent-process CPU time was unchanged at 12.621 seconds. Mean
+two-window wall time fell from 2.463 to 2.190 seconds (11.09%, 12.48% more
+throughput), while parent-process CPU time fell from 23.664 to 21.684 seconds
+(8.37%). PAL window 82 retained the same 993,062-byte media fragment and SHA-256
+`2692B7C083B3526225E86D3FA8613421BD587AA52A9CB40E40B3A04F315CD806`;
+FFmpeg framemd5 reported 100 frames and zero differing lines, with first PTS
+164.000000 seconds. A real NTSC LaserDisc preview at window 5 likewise retained
+the same 10,991-byte fragment and SHA-256
+`EB3BBAD3BF5199763DA83887898C7AFFE68CDF950AEC87A49E9990412DCC2CF2`;
+its 120 framemd5 lines matched and first PTS remained 10.010000 seconds.
+
+The standard-VHS preview path now adds one further automatic optimization for
+declared 40 MSPS input: a fixed 31-tap half-band anti-alias FIR maps source
+coordinates to an internal 20 MSPS RF stream before the decoder hot path. The
+route has no public option. Native 20 MSPS VHS input remains native, while
+S-VHS, every other tape format, LaserDisc, and non-preview decode/export retain
+their previous sample-rate and loader behavior. Unit coverage locks DC gain,
+the 5.78 MHz VHS passband, rejection of a 15 MHz alias component, source-position
+mapping, raw/packed-loader selection, `start_fileloc` time conversion, format
+gating, and resistance to a programmatically spoofed preview-only flag in a
+normal decode session.
+
+The initial same-machine 2026-08-16 half-rate A/B froze the preceding 40 MSPS preview build
+at SHA-256
+`BBEF8B513ED68E4EB6E868E5F2B3DCB53457E70D5517914DD734D34F5A29DAB8`.
+Three balanced fresh-process window-40 pairs on the same private PAL VHS
+capture reduced mean end-to-end HTTP wall time from 2.19 to 2.06 seconds
+(5.92% less, 6.30% more source-frame throughput) and mean parent-process CPU
+time from 14.29 to 11.79 seconds (17.46% less). Every run within each variant
+reproduced one media-fragment hash.
+
+The retained loader-buffer reuse subpass then reduced the four-window candidate
+mean from 6.66 to 6.50 seconds (2.40%) and parent-process CPU time from 38.17
+to 35.20 seconds (7.78%); mean peak working set fell from 1,467.50 to 995.30
+MiB (32.18%). Its window-40 media SHA-256 remained exactly
+`D711387CC73D3675F39819A15246FBB00B75C2EE248E3A284BB92F9E8DB1F445`.
+The final two balanced five-window process pairs over windows 0/40/80/160/300
+reduced mean total wall time from 12.155 to 9.539 seconds (21.52%, 27.43% more
+throughput), parent-process CPU time from 66.289 to 47.391 seconds (28.51%), and
+mean peak working set from 1,706.29 to 1,407.09 MiB (17.54%). These
+process-memory readings include runtime GC and the server's retained media cache
+and therefore describe these runs, not a universal peak-memory guarantee.
+
+Against the frozen 40 MSPS preview output, windows 20/40/80 measured all-plane
+SSIM 0.975058/0.967491/0.959524 and average PSNR
+39.268701/38.422357/33.980897 dB. All produced 100 progressive PAL frames with
+stable colour and motion in manual inspection. A matched two-frame normal
+IPP-fast decode retained byte-identical luma TBC, chroma TBC, and JSON; its logs
+also matched after timestamp normalization. The complete .NET 11 Preview 7
+suite executed 1,512 cases: 1,510 passed and the two unavailable AMF device
+cases skipped; test discovery listed 1,500 cases.
+
+A separate 10 MSPS feasibility experiment was rejected. The retained VHS RF
+parameters extend to 5.78-5.91 MHz, above a 10 MSPS stream's 5 MHz Nyquist
+limit. A preview-only prototype clipped those filters and the resampling
+passband to 4.75 MHz; it ran at 30.62 source frames/s, essentially no faster
+than the unmodified 12 MSPS trial at 30.83, while falling to all-plane SSIM
+0.933773 and 22.475608 dB luma PSNR and showing visible horizontal tearing and
+ghosting. None of the 10 MSPS clipping code is retained. Real-capture evidence
+for this rate reduction is PAL VHS only; NTSC and routing boundaries are covered
+by automated contracts but are not claimed as a real-NTSC-VHS certification.
+
+An isolated two-segment/four-second prototype decoded adjacent windows in one
+session. Against two independent concurrent windows, its two-run mean
+parent-process CPU time was 21.54% lower (19.008 versus 24.227 seconds), but wall
+time was 11.25% higher (3.299 versus 2.966 seconds) and a requested first segment
+would wait for the whole batch. It was therefore not enabled on the interactive
+seek path. These short local measurements establish the tested capture and
+machine only; they are not universal throughput or power claims.
+
+The same capture exposed a pre-existing PAL preview defect at window 82: the
+former field-parity heuristic selected the wrong V-switch on every other source
+frame, visibly alternating red/teal content with yellow/blue. The replacement
+classifies the switch from current and neighbouring +/-1/2-line burst vectors.
+Across the 100 encoded frames, mean adjacent `signalstats` hue movement fell
+from 16.681 to 0.364 degrees and the maximum from 35.254 to 1.439 degrees;
+mean U/V differences fell from 3.628/2.394 to 1.020/0.827. Matched uncached
+windows 80-82 took 7.99 seconds before and 7.92 seconds after, while their
+combined fMP4 media size fell from 3,555,968 to 3,231,639 bytes. This is one
+local PAL capture and is not a universal colour-accuracy certification.
+
+The local backend matrix also produced compliant PAL 50p and NTSC
+60000/1001p fMP4 through NVENC, QSV advanced VPP, and libx264 CPU fallback;
+AMF was skipped because no AMD runtime/device was installed. In the in-app
+Chromium player, muted autoplay advanced beyond 20 seconds while buffering
+grew to 24 seconds. A seek to 180 seconds continued to 184.71 seconds with a
+180-188 second buffered range, readyState 4, and no recorded browser error. No
+decoder output artifacts were created beside the source.
 
 ### Direct segmented VHS envelope analysis
 
@@ -2911,7 +3018,7 @@ The first Preview 7 full-suite run exposed one real runtime-semantic difference:
 `Enumerable.Min(double)` now preserves the first NaN payload in an all-NaN
 sequence. The zero-copy serration helper was updated to the same behavior; the
 focused normal and all-hardware-intrinsics-disabled gates then passed, followed
-by all 1,485 xUnit v3 tests. The IPP AVX2 native bridge build and smoke test also
+by all 1,500 xUnit v3 tests. The IPP AVX2 native bridge build and smoke test also
 passed, and the Release win-x64 self-contained single-file publish completed
 without warnings or errors.
 

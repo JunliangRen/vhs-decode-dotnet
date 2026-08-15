@@ -1,6 +1,10 @@
 using System.Diagnostics;
+using System.Security.Cryptography;
+using System.Text.Json;
 using VHSDecode.Core.CommandLine;
 using VHSDecode.Core.Decode;
+using VHSDecode.Core.Dsp;
+using VHSDecode.Core.Rf;
 using VHSDecode.Preview;
 using Xunit;
 
@@ -55,16 +59,202 @@ public sealed class PreviewServerTests
         Assert.True(laserDiscTemplate.Get<bool>("noefm"));
     }
 
-    [Fact(DisplayName = "Preview CRF validates the x264 range")]
-    public void PreviewCrfValidatesTheX264Range()
+    [Fact(DisplayName = "Preview template halves only standard 40 MSPS VHS RF")]
+    public void PreviewTemplateHalvesOnlyStandardFortyMspsVhsRf()
+    {
+        ParsedCommand defaultVhs = new CommandLineParser().Parse(
+            CliSpecs.Vhs,
+            ["--preview-server", "capture.lds"]);
+        ParsedCommand defaultTemplate = PreviewDecodeCommandFactory.CreateFastTemplate(defaultVhs);
+        Assert.True(defaultTemplate.Get<bool>(PreviewDecodeCommandFactory.HalfRateRfOption));
+
+        ParsedCommand nativeTwenty = new CommandLineParser().Parse(
+            CliSpecs.Vhs,
+            ["--preview-server", "--frequency", "20", "capture.s16"]);
+        ParsedCommand nativeTwentyTemplate = PreviewDecodeCommandFactory.CreateFastTemplate(nativeTwenty);
+        Assert.False(nativeTwentyTemplate.Values.ContainsKey(
+            PreviewDecodeCommandFactory.HalfRateRfOption));
+        Assert.True(nativeTwentyTemplate.Get<bool>("no_resample"));
+        using (DecodeSession nativeTwentySession = DecodeSessionFactory.Create(nativeTwentyTemplate))
+        {
+            Assert.Equal(20_000_000.0, nativeTwentySession.DecodeSampleRateHz);
+            Assert.IsType<Int16SampleLoader>(nativeTwentySession.Loader);
+        }
+
+        ParsedCommand superVhs = new CommandLineParser().Parse(
+            CliSpecs.Vhs,
+            ["--preview-server", "--tape_format", "SVHS", "capture.lds"]);
+        ParsedCommand superVhsTemplate = PreviewDecodeCommandFactory.CreateFastTemplate(superVhs);
+        Assert.False(superVhsTemplate.Values.ContainsKey(
+            PreviewDecodeCommandFactory.HalfRateRfOption));
+
+        ParsedCommand laserDisc = new CommandLineParser().Parse(
+            CliSpecs.LaserDisc,
+            ["--preview-server", "--pal", "capture.ldf"]);
+        ParsedCommand laserDiscTemplate = PreviewDecodeCommandFactory.CreateFastTemplate(laserDisc);
+        Assert.False(laserDiscTemplate.Values.ContainsKey(
+            PreviewDecodeCommandFactory.HalfRateRfOption));
+    }
+
+    [Fact(DisplayName = "Preview half-rate RF loader filters aliases and maps source positions")]
+    public void PreviewHalfRateRfLoaderFiltersAliasesAndMapsSourcePositions()
+    {
+        using var stream = new MemoryStream([0]);
+        var constantSource = new GeneratedSampleLoader((_) => 1_000.0);
+        using var constantLoader = new PreviewHalfRateSampleLoader(constantSource);
+
+        double[] constant = Assert.IsType<double[]>(constantLoader.Read(stream, 100, 16));
+
+        Assert.Equal(185, constantSource.LastSample);
+        Assert.Equal(61, constantSource.LastReadLength);
+        Assert.All(constant, value => Assert.InRange(value, 999.99, 1_000.01));
+
+        var nyquistSource = new GeneratedSampleLoader(
+            sample => (sample & 1L) == 0L ? 1_000.0 : -1_000.0);
+        using var nyquistLoader = new PreviewHalfRateSampleLoader(nyquistSource);
+
+        double[] suppressed = Assert.IsType<double[]>(nyquistLoader.Read(stream, 100, 16));
+
+        Assert.All(suppressed, value => Assert.InRange(value, -0.02, 0.02));
+
+        const double sourceSampleRateHz = 40_000_000.0;
+        var vhsPassbandSource = new GeneratedSampleLoader(sample =>
+            Math.Sin(2.0 * Math.PI * 5_780_000.0 * sample / sourceSampleRateHz));
+        using var vhsPassbandLoader = new PreviewHalfRateSampleLoader(vhsPassbandSource);
+        double[] vhsPassband = Assert.IsType<double[]>(
+            vhsPassbandLoader.Read(stream, 200, 512));
+        double vhsPassbandAmplitude = Math.Sqrt(
+            2.0 * vhsPassband.Average(value => value * value));
+        Assert.InRange(vhsPassbandAmplitude, 0.995, 1.005);
+
+        var aliasBandSource = new GeneratedSampleLoader(sample =>
+            Math.Sin(2.0 * Math.PI * 15_000_000.0 * sample / sourceSampleRateHz));
+        using var aliasBandLoader = new PreviewHalfRateSampleLoader(aliasBandSource);
+        double[] aliasBand = Assert.IsType<double[]>(
+            aliasBandLoader.Read(stream, 200, 512));
+        double aliasBandAmplitude = Math.Sqrt(
+            2.0 * aliasBand.Average(value => value * value));
+        Assert.InRange(aliasBandAmplitude, 0.0, 0.001);
+
+        using var pooledLoader = new PreviewHalfRateSampleLoader(
+            new GeneratedSampleLoader(sample => sample));
+        IReusableRfSampleLoader reusableLoader = pooledLoader;
+        double[] firstBuffer = Assert.IsType<double[]>(
+            reusableLoader.ReadReusable(stream, 300, 32));
+        reusableLoader.ReturnReusable(firstBuffer);
+        double[] secondBuffer = Assert.IsType<double[]>(
+            reusableLoader.ReadReusable(stream, 400, 32));
+        Assert.Same(firstBuffer, secondBuffer);
+        reusableLoader.ReturnReusable(secondBuffer);
+    }
+
+    [Fact(DisplayName = "Preview half-rate routing cannot alter normal VHS sessions")]
+    public void PreviewHalfRateRoutingCannotAlterNormalVhsSessions()
+    {
+        ParsedCommand preview = new CommandLineParser().Parse(
+            CliSpecs.Vhs,
+            ["--preview-server", "--pal", "capture.lds"]);
+        ParsedCommand previewTemplate = PreviewDecodeCommandFactory.CreateFastTemplate(preview);
+        using DecodeSession previewSession = DecodeSessionFactory.Create(previewTemplate);
+
+        Assert.Equal(20_000_000.0, previewSession.DecodeSampleRateHz);
+        PreviewHalfRateSampleLoader previewLoader = Assert.IsType<PreviewHalfRateSampleLoader>(
+            previewSession.Loader);
+        Assert.IsType<PackedDdD4To40SampleLoader>(previewLoader.Source);
+
+        ParsedCommand rawPreview = new CommandLineParser().Parse(
+            CliSpecs.Vhs,
+            ["--preview-server", "--pal", "capture.raw"]);
+        using DecodeSession rawPreviewSession = DecodeSessionFactory.Create(
+            PreviewDecodeCommandFactory.CreateFastTemplate(rawPreview));
+        PreviewHalfRateSampleLoader rawPreviewLoader = Assert.IsType<PreviewHalfRateSampleLoader>(
+            rawPreviewSession.Loader);
+        Assert.IsType<Int16SampleLoader>(rawPreviewLoader.Source);
+
+        ParsedCommand signedBytePreview = new CommandLineParser().Parse(
+            CliSpecs.Vhs,
+            ["--preview-server", "--pal", "capture.s8"]);
+        using DecodeSession signedBytePreviewSession = DecodeSessionFactory.Create(
+            PreviewDecodeCommandFactory.CreateFastTemplate(signedBytePreview));
+        PreviewHalfRateSampleLoader signedBytePreviewLoader = Assert.IsType<PreviewHalfRateSampleLoader>(
+            signedBytePreviewSession.Loader);
+        Assert.IsType<Int8SampleLoader>(signedBytePreviewLoader.Source);
+
+        ParsedCommand normal = new CommandLineParser().Parse(
+            CliSpecs.Vhs,
+            ["--pal", "capture.lds", "normal-output"]);
+        var values = new Dictionary<string, object?>(normal.Values)
+        {
+            [PreviewDecodeCommandFactory.HalfRateRfOption] = true
+        };
+        var spoofedNormal = new ParsedCommand(
+            normal.Spec,
+            values,
+            ["capture.lds", "normal-output"],
+            normal.ProgramName,
+            normal.OptionSources);
+        using DecodeSession normalSession = DecodeSessionFactory.Create(spoofedNormal);
+
+        Assert.Equal(40_000_000.0, normalSession.DecodeSampleRateHz);
+        Assert.IsType<PackedDdD4To40SampleLoader>(normalSession.Loader);
+
+        ParsedCommand sourcePositionedPreview = new CommandLineParser().Parse(
+            CliSpecs.Vhs,
+            ["--preview-server", "--pal", "--start_fileloc", "40000000", "capture.lds"]);
+        Assert.Equal(
+            1.0,
+            DecodePreviewSegmentProvider.ResolveBaseStartSeconds(
+                sourcePositionedPreview,
+                framesPerSecond: 25.0,
+                sourceSampleRateHz: 40_000_000.0));
+    }
+
+    [Fact(DisplayName = "Preview options and realtime FPS display validate their contracts")]
+    public void PreviewOptionsAndRealtimeFpsDisplayValidateTheirContracts()
     {
         new PreviewServerOptions { Crf = 0 }.Validate();
         new PreviewServerOptions { Crf = 51 }.Validate();
         Assert.Throws<ArgumentOutOfRangeException>(() =>
             new PreviewServerOptions { Crf = 52 }.Validate());
+
+        using var output = new StringWriter();
+        var display = new PreviewRealtimeFpsDisplay(output, 25.0);
+        display.Start();
+        long second = Stopwatch.Frequency;
+        display.Report(PreviewWindowGenerationUpdate.Started(3, startedTimestamp: 0));
+        display.Report(PreviewWindowGenerationUpdate.Started(4, startedTimestamp: 0));
+        display.Report(PreviewWindowGenerationUpdate.Completed(
+            windowIndex: 3,
+            frameCount: 50,
+            startedTimestamp: 0,
+            completedTimestamp: second * 2));
+        display.Report(PreviewWindowGenerationUpdate.Completed(
+            windowIndex: 4,
+            frameCount: 50,
+            startedTimestamp: 0,
+            completedTimestamp: second * 5 / 2));
+        display.Complete();
+        display.Complete();
+
+        string progress = output.ToString();
+        Assert.StartsWith(
+            $"Preview windows: waiting for the first preview window...{Environment.NewLine}"
+            + "Realtime FPS: pending",
+            progress);
+        Assert.Contains("\r\u001b[1APreview windows: W3 | W4", progress);
+        Assert.Contains(
+            "\r\u001b[1BRealtime FPS: decoding... | decoding... | Total pending",
+            progress);
+        Assert.Contains(
+            "\r\u001b[1BRealtime FPS: 25.00 | decoding... | Total pending",
+            progress);
+        Assert.Contains(
+            "\r\u001b[1BRealtime FPS: 25.00 | 20.00 | Total 40.00 (1.60x source)",
+            progress);
+        Assert.Equal(2, progress.Count(character => character == '\n'));
     }
 
-    [Theory(DisplayName = "Preview dimensions follow the requested interlaced standards")]
+    [Theory(DisplayName = "Preview dimensions follow the requested video standards")]
     [InlineData("NTSC", 640, 480)]
     [InlineData("NTSC-J", 640, 480)]
     [InlineData("PAL_M", 640, 480)]
@@ -79,9 +269,29 @@ public sealed class PreviewServerTests
             DecodePreviewSegmentProvider.PreviewDimensions(system));
     }
 
-    [Fact(DisplayName = "Preview encoder emits configurable top-field-first H.264")]
-    public void PreviewEncoderEmitsConfigurableTopFieldFirstH264()
+    [Theory(DisplayName = "Preview encoders deinterlace to twice-rate progressive H.264")]
+    [InlineData(
+        "Nvenc",
+        "h264_nvenc",
+        "setfield=tff,format=nv12,hwupload_cuda,yadif_cuda=mode=send_field:parity=tff:deint=all")]
+    [InlineData(
+        "Qsv",
+        "h264_qsv",
+        "setfield=tff,tpad=stop_mode=clone:stop=1,format=nv12,hwupload=extra_hw_frames=64,vpp_qsv=deinterlace=advanced:rate=field")]
+    [InlineData(
+        "Amf",
+        "h264_amf",
+        "setfield=tff,yadif=mode=send_field:parity=tff:deint=all")]
+    [InlineData(
+        "Libx264",
+        "libx264",
+        "setfield=tff,yadif=mode=send_field:parity=tff:deint=all")]
+    public void PreviewEncodersDeinterlaceToTwiceRateProgressiveH264(
+        string backendName,
+        string expectedEncoder,
+        string expectedFilter)
     {
+        PreviewEncoderBackend backend = Enum.Parse<PreviewEncoderBackend>(backendName);
         var timeline = new PreviewTimeline(2.0, 30_000.0 / 1_001.0, 2.0, 1);
         var encoder = new FfmpegHlsWindowEncoder(
             "ffmpeg",
@@ -89,7 +299,8 @@ public sealed class PreviewServerTests
             480,
             23,
             "NTSC",
-            timeline);
+            timeline,
+            backend);
 
         string[] arguments = encoder.BuildArguments(
             "index.m3u8",
@@ -101,27 +312,243 @@ public sealed class PreviewServerTests
             "2.002");
 
         AssertOption(arguments, "-pixel_format", "yuv420p");
-        AssertOption(arguments, "-crf", "23");
-        AssertOption(arguments, "-vf", "setfield=tff");
-        AssertOption(arguments, "-flags", "+ildct+ilme");
-        AssertOption(arguments, "-top", "1");
+        AssertOption(arguments, "-c:v", expectedEncoder);
+        AssertOption(arguments, "-vf", expectedFilter);
+        AssertOption(
+            arguments,
+            "-frames:v",
+            checked(timeline.FrameCountInWindow(0) * 2).ToString(
+                System.Globalization.CultureInfo.InvariantCulture));
+        AssertOption(
+            arguments,
+            "-g",
+            checked(timeline.FramesPerSegment * 2).ToString(
+                System.Globalization.CultureInfo.InvariantCulture));
         AssertOption(arguments, "-profile:v", "main");
-        string x264Parameters = arguments[Array.IndexOf(arguments, "-x264-params") + 1];
-        Assert.Contains("tff=1", x264Parameters);
-        Assert.Contains("colorprim=smpte170m", x264Parameters);
-        Assert.Contains("fullrange=off", x264Parameters);
+        AssertOption(
+            arguments,
+            "-bsf:v",
+            "h264_metadata=video_full_range_flag=0:colour_primaries=6:transfer_characteristics=1:matrix_coefficients=6");
+        Assert.DoesNotContain("-flags", arguments);
+        Assert.DoesNotContain("-top", arguments);
         Assert.DoesNotContain("-output_ts_offset", arguments);
 
-        AssertEncodedWindowStartsAtGlobalTimelinePosition();
+        if (backend == PreviewEncoderBackend.Qsv)
+        {
+            AssertOption(arguments, "-init_hw_device", "qsv=preview_qsv");
+            AssertOption(arguments, "-filter_hw_device", "preview_qsv");
+        }
+        else
+        {
+            Assert.DoesNotContain("-init_hw_device", arguments);
+        }
+
+        if (backend == PreviewEncoderBackend.Libx264)
+        {
+            AssertOption(arguments, "-crf", "23");
+            string x264Parameters = arguments[Array.IndexOf(arguments, "-x264-params") + 1];
+            Assert.DoesNotContain("tff=1", x264Parameters);
+            Assert.Contains("colorprim=smpte170m", x264Parameters);
+            Assert.Contains("fullrange=off", x264Parameters);
+            AssertEncodedWindowStartsAtGlobalTimelinePosition();
+        }
     }
 
-    [Fact(DisplayName = "Preview windows retain only the configured source-frame samples")]
-    public void PreviewWindowsRetainOnlyTheConfiguredSourceFrameSamples()
+    [Theory(DisplayName = "Preview encoder selection follows the hardware priority order")]
+    [InlineData("Nvenc", 1)]
+    [InlineData("Qsv", 2)]
+    [InlineData("Amf", 3)]
+    [InlineData("Libx264", 4)]
+    public async Task PreviewEncoderSelectionFollowsTheHardwarePriorityOrder(
+        string successfulBackendName,
+        int expectedAttemptCount)
+    {
+        PreviewEncoderBackend successfulBackend = Enum.Parse<PreviewEncoderBackend>(
+            successfulBackendName);
+        var attempts = new List<PreviewEncoderBackend>();
+        PreviewEncoderBackend selected = await PreviewEncoderSelector.SelectAsync(
+            (candidate, _) =>
+            {
+                attempts.Add(candidate);
+                return candidate == successfulBackend
+                    ? Task.CompletedTask
+                    : Task.FromException(new InvalidOperationException("unavailable"));
+            },
+            TestContext.Current.CancellationToken);
+
+        Assert.Equal(successfulBackend, selected);
+        Assert.Equal(expectedAttemptCount, attempts.Count);
+        Assert.Equal(
+            PreviewEncoderSelector.CandidateOrder.Take(expectedAttemptCount),
+            attempts);
+    }
+
+    [Fact(DisplayName = "Preview encoder selection reports every failed backend")]
+    public async Task PreviewEncoderSelectionReportsEveryFailedBackend()
+    {
+        InvalidOperationException error = await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            PreviewEncoderSelector.SelectAsync(
+                (candidate, _) => Task.FromException(
+                    new InvalidOperationException($"{candidate} rejected")),
+                TestContext.Current.CancellationToken));
+
+        foreach (PreviewEncoderBackend candidate in PreviewEncoderSelector.CandidateOrder)
+        {
+            Assert.Contains(PreviewEncoderSelector.DisplayName(candidate), error.Message);
+            Assert.Contains($"{candidate} rejected", error.Message);
+        }
+    }
+
+    [Fact(DisplayName = "Preview encoder selection propagates cancellation without fallback")]
+    public async Task PreviewEncoderSelectionPropagatesCancellationWithoutFallback()
+    {
+        using var cancellation = new CancellationTokenSource();
+        cancellation.Cancel();
+        int attempts = 0;
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() =>
+            PreviewEncoderSelector.SelectAsync(
+                (_, _) =>
+                {
+                    attempts++;
+                    return Task.CompletedTask;
+                },
+                cancellation.Token));
+        Assert.Equal(0, attempts);
+    }
+
+    [Fact(DisplayName = "Preview encoder selection validates a real local FFmpeg pipeline")]
+    public async Task PreviewEncoderSelectionValidatesARealLocalFfmpegPipeline()
+    {
+        Assert.SkipUnless(
+            CommandIsAvailable("ffmpeg"),
+            "ffmpeg must be available on PATH.");
+
+        PreviewEncoderBackend selected = await PreviewEncoderSelector.SelectAsync(
+            "ffmpeg",
+            width: 768,
+            height: 576,
+            crf: 31,
+            system: "PAL",
+            framesPerSecond: 25.0,
+            TestContext.Current.CancellationToken);
+
+        Assert.Contains(selected, PreviewEncoderSelector.CandidateOrder);
+    }
+
+    [Theory(DisplayName = "Available preview encoder backends produce compliant progressive fMP4")]
+    [InlineData("Nvenc", "PAL", 25.0, 768, 576, "50/1", "bt470bg")]
+    [InlineData("Nvenc", "NTSC", 29.97002997002997, 640, 480, "60000/1001", "smpte170m")]
+    [InlineData("Qsv", "PAL", 25.0, 768, 576, "50/1", "bt470bg")]
+    [InlineData("Qsv", "NTSC", 29.97002997002997, 640, 480, "60000/1001", "smpte170m")]
+    [InlineData("Amf", "PAL", 25.0, 768, 576, "50/1", "bt470bg")]
+    [InlineData("Amf", "NTSC", 29.97002997002997, 640, 480, "60000/1001", "smpte170m")]
+    [InlineData("Libx264", "PAL", 25.0, 768, 576, "50/1", "bt470bg")]
+    [InlineData("Libx264", "NTSC", 29.97002997002997, 640, 480, "60000/1001", "smpte170m")]
+    public void AvailablePreviewEncoderBackendsProduceCompliantProgressiveFmp4(
+        string backendName,
+        string system,
+        double sourceFramesPerSecond,
+        int width,
+        int height,
+        string expectedOutputFrameRate,
+        string expectedColorStandard)
+    {
+        Assert.SkipUnless(
+            CommandIsAvailable("ffmpeg") && CommandIsAvailable("ffprobe"),
+            "ffmpeg and ffprobe must be available on PATH.");
+
+        const int windowIndex = 3;
+        PreviewEncoderBackend backend = Enum.Parse<PreviewEncoderBackend>(backendName);
+        var timeline = new PreviewTimeline(1.0, sourceFramesPerSecond, 0.2, 1);
+        var encoder = new FfmpegHlsWindowEncoder(
+            "ffmpeg",
+            width,
+            height,
+            31,
+            system,
+            timeline,
+            backend);
+        byte[] frame = new byte[width * height * 3 / 2];
+        Array.Fill(frame, (byte)16, 0, width * height);
+        Array.Fill(frame, (byte)128, width * height, frame.Length - (width * height));
+        PreviewSegmentWindow? encoded = null;
+        string unavailableReason = string.Empty;
+        try
+        {
+            encoded = EncodeSyntheticWindow(encoder, timeline, windowIndex, frame);
+        }
+        catch (Exception ex) when (ex is InvalidOperationException or IOException)
+        {
+            unavailableReason = ex.Message;
+        }
+
+        Assert.SkipUnless(
+            encoded is not null,
+            $"{backendName} is unavailable on this machine: {unavailableReason}");
+        Assert.NotNull(encoded);
+
+        string directory = Path.Combine(
+            Path.GetTempPath(),
+            "vhsdecode-preview-backend-tests-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(directory);
+        try
+        {
+            string mediaPath = Path.Combine(directory, "window.mp4");
+            WriteCombinedWindow(mediaPath, encoded);
+            IReadOnlyDictionary<string, string> metadata = ProbeVideoStreamMetadata(mediaPath);
+            Assert.Equal("progressive", metadata["field_order"]);
+            Assert.Equal(expectedOutputFrameRate, metadata["avg_frame_rate"]);
+            Assert.Equal(expectedColorStandard, metadata["color_primaries"]);
+            Assert.Equal("bt709", metadata["color_transfer"]);
+            Assert.Equal(expectedColorStandard, metadata["color_space"]);
+            Assert.Equal("tv", metadata["color_range"]);
+            Assert.Equal(
+                checked(timeline.FrameCountInWindow(windowIndex) * 2).ToString(
+                    System.Globalization.CultureInfo.InvariantCulture),
+                metadata["nb_read_frames"]);
+            double firstPacketTimestamp = ProbeFirstVideoPacketTimestamp(mediaPath);
+            double expected = timeline.WindowStartSeconds(windowIndex);
+            Assert.InRange(firstPacketTimestamp, expected, expected + 0.05);
+
+            double tailDuration = 1.25 / sourceFramesPerSecond;
+            var tailTimeline = new PreviewTimeline(
+                tailDuration,
+                sourceFramesPerSecond,
+                1.0 / sourceFramesPerSecond,
+                segmentsPerWindow: 1);
+            var tailEncoder = new FfmpegHlsWindowEncoder(
+                "ffmpeg",
+                width,
+                height,
+                31,
+                system,
+                tailTimeline,
+                backend);
+            PreviewSegmentWindow tail = EncodeSyntheticWindow(
+                tailEncoder,
+                tailTimeline,
+                windowIndex: 0,
+                frame);
+            string tailPath = Path.Combine(directory, "tail.mp4");
+            WriteCombinedWindow(tailPath, tail);
+            IReadOnlyDictionary<string, string> tailMetadata = ProbeVideoStreamMetadata(tailPath);
+            Assert.Equal("progressive", tailMetadata["field_order"]);
+            Assert.Equal(expectedOutputFrameRate, tailMetadata["avg_frame_rate"]);
+            Assert.Equal("2", tailMetadata["nb_read_frames"]);
+        }
+        finally
+        {
+            Directory.Delete(directory, recursive: true);
+        }
+    }
+
+    [Fact(DisplayName = "Preview windows retain continuous source frames")]
+    public void PreviewWindowsRetainContinuousSourceFrames()
     {
         const int width = 64;
         const int height = 48;
         const int outputFrameCount = 10;
-        const int sampledFrameLimit = 4;
         ParsedCommand command = new CommandLineParser().Parse(
             CliSpecs.Vhs,
             ["--pal", "capture.lds", "output"]);
@@ -133,19 +560,20 @@ public sealed class PreviewServerTests
             width,
             height,
             targetStartSample: 0,
-            outputFrameCount,
-            sampledFrameLimit);
-        ushort neutralLuma = session.VideoOutput.ConvertHz(session.VideoOutput.IreToHz(50.0));
-        ushort[] luma = Enumerable.Repeat(
-            neutralLuma,
-            session.TbcFrameSpec.FieldSampleCount).ToArray();
+            outputFrameCount);
         ushort[] chroma = Enumerable.Repeat(
             (ushort)32767,
             session.TbcFrameSpec.FieldSampleCount).ToArray();
         var writes = new List<(TbcDecodedField, TbcFieldOrderDecision)>();
-        for (int fieldIndex = 0; fieldIndex < 12; fieldIndex++)
+        for (int fieldIndex = 0; fieldIndex < outputFrameCount * 2; fieldIndex++)
         {
             bool isFirstField = (fieldIndex & 1) == 0;
+            int frameIndex = fieldIndex / 2;
+            ushort frameLuma = session.VideoOutput.ConvertHz(
+                session.VideoOutput.IreToHz(10.0 + (frameIndex * 7.0)));
+            ushort[] luma = Enumerable.Repeat(
+                frameLuma,
+                session.TbcFrameSpec.FieldSampleCount).ToArray();
             writes.Add((
                 new TbcDecodedField(
                     fieldIndex + 1,
@@ -171,9 +599,174 @@ public sealed class PreviewServerTests
         assembler.Accept(writes);
         assembler.Complete();
 
-        Assert.Equal(sampledFrameLimit, assembler.SampledFrameCount);
+        Assert.Equal(outputFrameCount, assembler.SampledFrameCount);
         Assert.Equal(outputFrameCount, assembler.WrittenFrameCount);
         Assert.Equal(outputFrameCount * width * height * 3 / 2, output.Length);
+        byte[] rawFrames = output.ToArray();
+        int frameBytes = width * height * 3 / 2;
+        string[] frameHashes = Enumerable.Range(0, outputFrameCount)
+            .Select(index => Convert.ToHexString(SHA256.HashData(
+                rawFrames.AsSpan(index * frameBytes, frameBytes))))
+            .ToArray();
+        Assert.Equal(outputFrameCount, frameHashes.Distinct().Count());
+    }
+
+    [Fact(DisplayName = "Preview sink stops decoding when the requested frames are complete")]
+    public void PreviewSinkStopsDecodingWhenTheRequestedFramesAreComplete()
+    {
+        ParsedCommand command = new CommandLineParser().Parse(
+            CliSpecs.Vhs,
+            ["--pal", "--threads", "1", "capture.lds", "output"]);
+        using DecodeSession session = DecodeSessionFactory.Create(command);
+        int readCount = 0;
+        int writtenCount = 0;
+        var engine = new TbcFieldSequenceDecodeEngine(
+            readField: (activeSession, _, begin, _, _) =>
+            {
+                int fieldIndex = readCount++;
+                ushort[] samples = Enumerable.Repeat(
+                    checked((ushort)(0x1200 + fieldIndex)),
+                    activeSession.TbcFrameSpec.FieldSampleCount).ToArray();
+                return new TbcDecodedField(
+                    StartSample: begin,
+                    Samples: samples,
+                    LineLocations: new LineLocationResult([], []),
+                    Timing: new SyncTiming(
+                        0,
+                        0,
+                        0,
+                        new SyncRange(0, 0),
+                        new SyncRange(0, 0),
+                        new SyncRange(0, 0)),
+                    SyncThresholdHz: 0,
+                    MeanLineLength: 0,
+                    RawPulseCount: 0,
+                    ClassifiedPulseCount: 0,
+                    DetectedFirstField: (fieldIndex & 1) == 0,
+                    DetectedFirstFieldConfidence: 100,
+                    NextFieldOffsetSamples: 100,
+                    NominalFieldLengthSamples: 100);
+            });
+
+        TbcFieldStreamDecodeResult result = engine.DecodeToSink(
+            session,
+            Stream.Null,
+            writes => writtenCount += writes.Count,
+            () => writtenCount >= 2,
+            maxFields: 10);
+
+        Assert.Equal(2, writtenCount);
+        Assert.Equal(2, result.WrittenFieldCount);
+        Assert.InRange(readCount, 2, 3);
+        Assert.True(result.DecodedFieldCount < 10);
+    }
+
+    [Theory(DisplayName = "Separate-chroma preview luma matches the composite fast path")]
+    [InlineData("PAL", 768, 576)]
+    [InlineData("NTSC", 640, 480)]
+    public void SeparateChromaPreviewLumaMatchesTheCompositeFastPath(
+        string system,
+        int width,
+        int height)
+    {
+        string standard = system == "PAL" ? "--pal" : "--ntsc";
+        ParsedCommand command = new CommandLineParser().Parse(
+            CliSpecs.Vhs,
+            [standard, "capture.lds", "output"]);
+        using DecodeSession session = DecodeSessionFactory.Create(command);
+        var renderer = new PreviewFieldRenderer(session, width, height);
+        ushort neutralLuma = session.VideoOutput.ConvertHz(session.VideoOutput.IreToHz(50.0));
+        ushort[] luma = Enumerable.Repeat(
+            neutralLuma,
+            session.TbcFrameSpec.FieldSampleCount).ToArray();
+        ushort[] chroma = Enumerable.Repeat(
+            (ushort)32767,
+            session.TbcFrameSpec.FieldSampleCount).ToArray();
+        var composite = new TbcDecodedField(
+            0,
+            luma,
+            null!,
+            null!,
+            0.0,
+            0.0,
+            0,
+            0);
+        var separate = composite with { ChromaSamples = chroma };
+
+        PreviewRenderedField compositeRendered = renderer.Render(
+            composite,
+            isFirstField: true);
+        PreviewRenderedField separateRendered = renderer.Render(
+            separate,
+            isFirstField: true);
+
+        Assert.Equal(compositeRendered.Luma, separateRendered.Luma);
+    }
+
+    [Theory(DisplayName = "Preview chroma prefix buffers are deterministic across reused renders")]
+    [InlineData("PAL", 768, 576)]
+    [InlineData("NTSC", 640, 480)]
+    public void PreviewChromaPrefixBuffersAreDeterministicAcrossReusedRenders(
+        string system,
+        int width,
+        int height)
+    {
+        string standard = system == "PAL" ? "--pal" : "--ntsc";
+        ParsedCommand command = new CommandLineParser().Parse(
+            CliSpecs.Vhs,
+            [standard, "capture.lds", "output"]);
+        using DecodeSession session = DecodeSessionFactory.Create(command);
+        var renderer = new PreviewFieldRenderer(session, width, height);
+        ushort neutralLuma = session.VideoOutput.ConvertHz(session.VideoOutput.IreToHz(50.0));
+        ushort[] luma = Enumerable.Repeat(
+            neutralLuma,
+            session.TbcFrameSpec.FieldSampleCount).ToArray();
+        ushort[] firstChroma = Enumerable.Repeat(
+            (ushort)32767,
+            session.TbcFrameSpec.FieldSampleCount).ToArray();
+        ushort[] interveningChroma = (ushort[])firstChroma.Clone();
+        AddFourFscCarrier(
+            firstChroma,
+            session.TbcFrameSpec.OutputLineLength,
+            session.TbcFrameSpec.OutputLineCount,
+            session.TbcFrameSpec.ColourBurstStart!.Value,
+            session.TbcFrameSpec.ColourBurstEnd!.Value,
+            session.TbcFrameSpec.ActiveVideoStart!.Value,
+            session.TbcFrameSpec.ActiveVideoEnd!.Value,
+            amplitude: 6000,
+            centered: true);
+        AddFourFscCarrier(
+            interveningChroma,
+            session.TbcFrameSpec.OutputLineLength,
+            session.TbcFrameSpec.OutputLineCount,
+            session.TbcFrameSpec.ColourBurstStart!.Value,
+            session.TbcFrameSpec.ColourBurstEnd!.Value,
+            session.TbcFrameSpec.ActiveVideoStart!.Value,
+            session.TbcFrameSpec.ActiveVideoEnd!.Value,
+            amplitude: 3000,
+            centered: true);
+        var firstField = new TbcDecodedField(
+            0,
+            luma,
+            null!,
+            null!,
+            0.0,
+            0.0,
+            0,
+            0,
+            FieldPhaseId: 1,
+            ChromaSamples: firstChroma);
+        var interveningField = firstField with { ChromaSamples = interveningChroma };
+
+        PreviewRenderedField first = renderer.Render(firstField, isFirstField: true);
+        _ = renderer.Render(interveningField, isFirstField: false);
+        PreviewRenderedField repeated = renderer.Render(firstField, isFirstField: true);
+
+        Assert.Equal(first.Luma, repeated.Luma);
+        Assert.Equal(first.ChromaU, repeated.ChromaU);
+        Assert.Equal(first.ChromaV, repeated.ChromaV);
+        Assert.Equal(first.LumaDropouts, repeated.LumaDropouts);
+        Assert.Equal(first.ChromaDropouts, repeated.ChromaDropouts);
     }
 
     [Fact(DisplayName = "Preview colour renderer recovers PAL colour-under chroma")]
@@ -217,6 +810,51 @@ public sealed class PreviewServerTests
 
         Assert.Contains(rendered.ChromaU, value => value < 120);
         Assert.Contains(rendered.ChromaV, value => value > 135);
+    }
+
+    [Fact(DisplayName = "PAL preview V-switch follows burst phase instead of field parity")]
+    public void PalPreviewVSwitchFollowsBurstPhaseInsteadOfFieldParity()
+    {
+        ParsedCommand command = new CommandLineParser().Parse(
+            CliSpecs.Vhs,
+            ["--pal", "capture.lds", "output"]);
+        using DecodeSession session = DecodeSessionFactory.Create(command);
+        var renderer = new PreviewFieldRenderer(session, 768, 576);
+        ushort neutralLuma = session.VideoOutput.ConvertHz(session.VideoOutput.IreToHz(50.0));
+        ushort[] luma = Enumerable.Repeat(
+            neutralLuma,
+            session.TbcFrameSpec.FieldSampleCount).ToArray();
+        ushort[] chroma = Enumerable.Repeat(
+            (ushort)32767,
+            session.TbcFrameSpec.FieldSampleCount).ToArray();
+        AddPalPhaseAlternatingCarrier(
+            chroma,
+            session.TbcFrameSpec.OutputLineLength,
+            session.TbcFrameSpec.OutputLineCount,
+            session.TbcFrameSpec.ColourBurstStart!.Value,
+            session.TbcFrameSpec.ColourBurstEnd!.Value,
+            session.TbcFrameSpec.ActiveVideoStart!.Value,
+            session.TbcFrameSpec.ActiveVideoEnd!.Value,
+            burstAmplitude: 6000,
+            activeAmplitude: 4000);
+        var field = new TbcDecodedField(
+            0,
+            luma,
+            null!,
+            null!,
+            0.0,
+            0.0,
+            0,
+            0,
+            ChromaSamples: chroma);
+
+        PreviewRenderedField firstField = renderer.Render(field, isFirstField: true);
+        PreviewRenderedField secondField = renderer.Render(field, isFirstField: false);
+
+        Assert.Equal(firstField.ChromaU, secondField.ChromaU);
+        Assert.Equal(firstField.ChromaV, secondField.ChromaV);
+        Assert.Contains(firstField.ChromaU, value => value != 128);
+        Assert.Contains(firstField.ChromaV, value => value != 128);
     }
 
     [Fact(DisplayName = "Preview colour renderer recovers NTSC composite chroma")]
@@ -365,10 +1003,17 @@ public sealed class PreviewServerTests
 
         string manifest = await client.GetStringAsync("hls/index.m3u8", cancellationToken);
         string master = await client.GetStringAsync("hls/master.m3u8", cancellationToken);
+        using JsonDocument info = JsonDocument.Parse(
+            await client.GetStringAsync("api/info", cancellationToken));
         int targetWindow = timeline.WindowCount - 1;
         Assert.Contains($"window/{targetWindow}/segment/0.m4s", manifest);
         Assert.Contains("CODECS=\"avc1.4d401f\"", master);
         Assert.Contains("RESOLUTION=640x480", master);
+        Assert.Equal(50.0, info.RootElement.GetProperty("framesPerSecond").GetDouble());
+        Assert.False(info.RootElement.GetProperty("interlaced").GetBoolean());
+        Assert.Equal(
+            "test encoder",
+            info.RootElement.GetProperty("encodeBackend").GetString());
         Assert.Empty(provider.GeneratedWindows);
 
         byte[] segment = await client.GetByteArrayAsync(
@@ -393,6 +1038,9 @@ public sealed class PreviewServerTests
         Assert.Contains("avc1.4d401f", player);
         Assert.Contains("new AbortController()", player);
         Assert.Contains("sourceBuffer.buffered", player);
+        Assert.Contains("controls autoplay muted playsinline", player);
+        Assert.Contains("video.play().catch", player);
+        Assert.Contains("ensureWindow(windowIndex + 2)", player);
         Assert.DoesNotContain("timestampOffset", player);
         Assert.DoesNotContain("requestedWindows", player);
         Assert.DoesNotContain("cdn.jsdelivr.net", player);
@@ -539,7 +1187,8 @@ public sealed class PreviewServerTests
             height,
             31,
             "PAL",
-            timeline);
+            timeline,
+            PreviewEncoderBackend.Libx264);
         byte[] frame = new byte[width * height * 3 / 2];
         Array.Fill(frame, (byte)16, 0, width * height);
         Array.Fill(frame, (byte)128, width * height, frame.Length - (width * height));
@@ -555,18 +1204,22 @@ public sealed class PreviewServerTests
         try
         {
             string mediaPath = Path.Combine(directory, "window.mp4");
-            using (FileStream media = File.Create(mediaPath))
-            {
-                media.Write(encoded.InitializationSegment);
-                foreach (PreviewMediaSegment segment in encoded.Segments)
-                {
-                    media.Write(segment.Data);
-                }
-            }
+            WriteCombinedWindow(mediaPath, encoded);
 
             double firstPacketTimestamp = ProbeFirstVideoPacketTimestamp(mediaPath);
             double expected = timeline.WindowStartSeconds(windowIndex);
             Assert.InRange(firstPacketTimestamp, expected, expected + 0.05);
+            IReadOnlyDictionary<string, string> metadata = ProbeVideoStreamMetadata(mediaPath);
+            Assert.Equal("progressive", metadata["field_order"]);
+            Assert.Equal("50/1", metadata["avg_frame_rate"]);
+            Assert.Equal("bt470bg", metadata["color_primaries"]);
+            Assert.Equal("bt709", metadata["color_transfer"]);
+            Assert.Equal("bt470bg", metadata["color_space"]);
+            Assert.Equal("tv", metadata["color_range"]);
+            Assert.Equal(
+                checked(timeline.FrameCountInWindow(windowIndex) * 2).ToString(
+                    System.Globalization.CultureInfo.InvariantCulture),
+                metadata["nb_read_frames"]);
         }
         finally
         {
@@ -591,6 +1244,18 @@ public sealed class PreviewServerTests
                 }
             },
             TestContext.Current.CancellationToken);
+
+    private static void WriteCombinedWindow(
+        string mediaPath,
+        PreviewSegmentWindow window)
+    {
+        using FileStream media = File.Create(mediaPath);
+        media.Write(window.InitializationSegment);
+        foreach (PreviewMediaSegment segment in window.Segments)
+        {
+            media.Write(segment.Data);
+        }
+    }
 
     private static double ProbeFirstVideoPacketTimestamp(string mediaPath)
     {
@@ -628,6 +1293,44 @@ public sealed class PreviewServerTests
         return double.Parse(
             firstTimestamp,
             System.Globalization.CultureInfo.InvariantCulture);
+    }
+
+    private static IReadOnlyDictionary<string, string> ProbeVideoStreamMetadata(string mediaPath)
+    {
+        var startInfo = new ProcessStartInfo("ffprobe")
+        {
+            UseShellExecute = false,
+            CreateNoWindow = true,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true
+        };
+        foreach (string argument in new[]
+        {
+            "-v", "error",
+            "-count_frames",
+            "-select_streams", "v:0",
+            "-show_entries", "stream=avg_frame_rate,field_order,nb_read_frames,color_range,color_space,color_transfer,color_primaries",
+            "-of", "default=noprint_wrappers=1",
+            mediaPath
+        })
+        {
+            startInfo.ArgumentList.Add(argument);
+        }
+
+        using Process process = Process.Start(startInfo)
+            ?? throw new InvalidOperationException("Failed to start ffprobe.");
+        Task<string> output = process.StandardOutput.ReadToEndAsync();
+        Task<string> error = process.StandardError.ReadToEndAsync();
+        process.WaitForExit();
+        Task.WhenAll(output, error).GetAwaiter().GetResult();
+        Assert.True(
+            process.ExitCode == 0,
+            $"ffprobe exited with {process.ExitCode}: {error.Result}");
+        return output.Result.Split(
+                ['\r', '\n'],
+                StringSplitOptions.RemoveEmptyEntries)
+            .Select(line => line.Split('=', 2))
+            .ToDictionary(parts => parts[0], parts => parts[1], StringComparer.Ordinal);
     }
 
     private static bool CommandIsAvailable(string command)
@@ -689,6 +1392,39 @@ public sealed class PreviewServerTests
         }
     }
 
+    private static void AddPalPhaseAlternatingCarrier(
+        ushort[] samples,
+        int lineLength,
+        int lineCount,
+        int burstStart,
+        int burstEnd,
+        int activeStart,
+        int activeEnd,
+        int burstAmplitude,
+        int activeAmplitude)
+    {
+        for (int line = 0; line < lineCount; line++)
+        {
+            AddRange(burstStart, burstEnd, line & 3, burstAmplitude);
+            AddRange(activeStart, activeEnd, (line + 1) & 3, activeAmplitude);
+
+            void AddRange(int start, int end, int phase, int amplitude)
+            {
+                for (int x = start; x < end; x++)
+                {
+                    int carrier = ((x + phase) & 3) switch
+                    {
+                        0 => amplitude,
+                        2 => -amplitude,
+                        _ => 0
+                    };
+                    int index = (line * lineLength) + x;
+                    samples[index] = (ushort)Math.Clamp(32767 + carrier, 0, ushort.MaxValue);
+                }
+            }
+        }
+    }
+
     private sealed class FakeProvider : IPreviewSegmentProvider
     {
         private readonly TimeSpan _delay;
@@ -702,14 +1438,15 @@ public sealed class PreviewServerTests
             MediaInfo = new PreviewMediaInfo(
                 "VHS",
                 "NTSC",
-                timeline.FramesPerSecond,
+                timeline.FramesPerSecond * 2.0,
                 timeline.DurationSeconds,
                 640,
                 480,
                 31,
-                true,
+                false,
                 "test",
-                "test");
+                "test",
+                "test encoder");
         }
 
         public PreviewMediaInfo MediaInfo { get; }
@@ -774,14 +1511,15 @@ public sealed class PreviewServerTests
             MediaInfo = new PreviewMediaInfo(
                 "VHS",
                 "PAL",
-                timeline.FramesPerSecond,
+                timeline.FramesPerSecond * 2.0,
                 timeline.DurationSeconds,
                 768,
                 576,
                 31,
-                true,
+                false,
                 "test",
-                "test");
+                "test",
+                "test encoder");
         }
 
         internal TaskCompletionSource<int> GenerationStarted { get; } = new(
@@ -827,5 +1565,22 @@ public sealed class PreviewServerTests
         }
 
         public ValueTask DisposeAsync() => ValueTask.CompletedTask;
+    }
+
+    private sealed class GeneratedSampleLoader(Func<long, double> sampleGenerator)
+        : IRfSampleLoader
+    {
+        internal long LastSample { get; private set; }
+
+        internal int LastReadLength { get; private set; }
+
+        public double[] Read(Stream stream, long sample, int readLength)
+        {
+            LastSample = sample;
+            LastReadLength = readLength;
+            return Enumerable.Range(0, readLength)
+                .Select(index => sampleGenerator(sample + index))
+                .ToArray();
+        }
     }
 }

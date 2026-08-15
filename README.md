@@ -2,14 +2,14 @@
 
 **[English](README.md)** | [简体中文](README.zh-CN.md) | [日本語](README.ja.md)
 
-<!-- README_SYNC: 2026-08-15.01 -->
+<!-- README_SYNC: 2026-08-16.01 -->
 
 A .NET 11 rewrite of the decode-facing parts of
 [`oyvindln/vhs-decode`](https://github.com/oyvindln/vhs-decode), targeting
 upstream release `v0.4.0` at commit
 `43155200da87c0d49eb37d8ec09b1372075ee8e4`.
 
-The current .NET port release is `v0.4.0-2.1.0` (application version `2.1.0`).
+The current .NET port release is `v0.4.0-2.2.0` (application version `2.2.0`).
 
 > [!IMPORTANT]
 > This remains a compatibility work in progress. The top-level decode paths are
@@ -40,7 +40,7 @@ evidence, and remaining gaps.
   EIAJ, and supported PAL/NTSC variants.
 - TBC utility tools, the double-click GUI, and developer plotting windows are
   intentionally out of scope.
-- The Visual Studio 2026 `.slnx` solution has **1,485** standard xUnit v3 tests
+- The Visual Studio 2026 `.slnx` solution has **1,500** standard xUnit v3 tests
   that are visible in Test Explorer and runnable with `dotnet test`.
 
 <!-- SECTION: start -->
@@ -76,15 +76,28 @@ an external player needs a stable URL. Preview mode creates no TBC, JSON,
 SQLite, EFM, audio, or decoder log artifacts.
 
 This is intentionally a low-accuracy navigation mode. It retains colour through
-a cheap 4fSC one-dimensional demodulator, applies lightweight dropout
+a cheap 4fSC one-dimensional demodulator, derives the PAL V-switch from
+neighbouring burst lines to avoid four-field hue flicker, applies lightweight dropout
 concealment, skips audio and the expensive export comb/repair stages, and
-samples four decoded source frames per two-second preview window. NTSC is
-served as top-field-first 640x480 at 30000/1001 fps; PAL is top-field-first
-768x576 at 25 fps. `--preview-crf` accepts 0 through 51 and defaults to 31;
-lower values trade bitrate and encode time for quality. The preview
-automatically uses `ipp-fast` when available and otherwise remains portable
-through the managed backend. FFmpeg with `libx264` is required on `PATH`;
-`VHSDECODE_FFMPEG` and `VHSDECODE_FFPROBE` can select explicit binaries.
+decodes the full continuous frame count for every two-second preview window.
+The muted web player starts automatically and keeps two windows of lookahead
+buffered. Top-field-first source fields are deinterlaced at field rate: NTSC is
+served as progressive 640x480 at 60000/1001 fps and PAL as progressive 768x576
+at 50 fps. At startup the preview validates complete fMP4 pipelines in this
+order: NVENC with CUDA YADIF, QSV with advanced VPP deinterlacing, AMF with CPU
+YADIF, then libx264 with CPU YADIF. `--preview-crf` accepts 0 through 51 and
+defaults to 31; hardware encoders map it to their closest quality/QP control,
+so bitrate is not identical across backends. The preview automatically uses
+`ipp-fast` when available and otherwise remains portable through the managed
+backend. Standard 40 MSPS VHS preview also applies a fixed anti-alias filter and
+decodes its internal RF stream at 20 MSPS. Native 20 MSPS VHS input stays at
+20 MSPS; S-VHS, other tape formats, LaserDisc, and every normal decode/export
+path retain their existing sample-rate behavior. This is automatic and adds no
+user-facing option. Startup reports the selected video pipeline, IPP-FAST initialization,
+active decoder thread count, and separate in-place window-ID and real-time-FPS
+lines. A matching
+FFmpeg build is required on `PATH`; `VHSDECODE_FFMPEG` and `VHSDECODE_FFPROBE`
+can select explicit binaries.
 
 <!-- SECTION: profiles -->
 
@@ -178,7 +191,7 @@ from 409.9 to 374.4 MiB.
 A 24-run `--threads 0`/default-five/20-worker gate and the refreshed 60-run
 Exact/IPP-fast matrix each retained one hash for luma, chroma, raw JSON, stdout,
 normalized stderr/logs, and ordered `fileLoc`. The standard xUnit v3 suite
-passed all **1,485** tests.
+passed all **1,500** tests.
 
 Every .NET profile/thread cell was deterministic across its three refreshed
 runs. Merged Python PR341 was deterministic in its pinned reference set; Python
@@ -222,7 +235,7 @@ The pinned SDK is .NET `11.0.100-preview.7.26381.103`.
 dotnet restore VHSDecodeDotNet.slnx
 dotnet build VHSDecodeDotNet.slnx -c Release --no-restore
 dotnet test --solution VHSDecodeDotNet.slnx -c Release `
-  --no-build --no-restore --minimum-expected-tests 1485
+  --no-build --no-restore --minimum-expected-tests 1512
 ```
 
 Open `VHSDecodeDotNet.slnx` in Visual Studio 2026 to build, debug, and run the

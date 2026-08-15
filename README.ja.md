@@ -2,14 +2,14 @@
 
 [English](README.md) | [简体中文](README.zh-CN.md) | **[日本語](README.ja.md)**
 
-<!-- README_SYNC: 2026-08-15.01 -->
+<!-- README_SYNC: 2026-08-16.01 -->
 
 [`oyvindln/vhs-decode`](https://github.com/oyvindln/vhs-decode) の
 デコード関連部分を .NET 11 で再実装するプロジェクトです。互換性の対象は
 upstream release `v0.4.0`、commit
 `43155200da87c0d49eb37d8ec09b1372075ee8e4` です。
 
-現在の .NET port release は `v0.4.0-2.1.0`（application version `2.1.0`）です。
+現在の .NET port release は `v0.4.0-2.2.0`（application version `2.2.0`）です。
 
 > [!IMPORTANT]
 > この互換移植は現在も開発中です。トップレベルのデコード経路は実装済みで
@@ -38,7 +38,7 @@ upstream release `v0.4.0`、commit
 - VHS family には VHS/S-VHS、Betamax、Video8/Hi8、U-matic、Type C、EIAJ、
   upstream が対応する PAL/NTSC variant が含まれます。
 - TBC utility、ダブルクリック GUI、開発者向け plot window は対象外です。
-- Visual Studio 2026 の `.slnx` には **1,485** 件の標準 xUnit v3 test があり、
+- Visual Studio 2026 の `.slnx` には **1,500** 件の標準 xUnit v3 test があり、
   Test Explorer と `dotnet test` の両方で実行できます。
 
 <!-- SECTION: start -->
@@ -67,13 +67,24 @@ loopback の web player URL と標準 HLS/fMP4 playlist URL を表示します�
 base は不要で、TBC、JSON、SQLite、EFM、audio、decode log を生成しません。
 
 これは位置確認用の低精度 mode です。軽量な 4fSC 1D demodulator で colour を
-維持し、dropout concealment を常時適用します。audio と正式 export 用の重い
-comb/repair stage は省略し、2 秒 window ごとに source frame を 4 枚だけ decode
-します。NTSC は top-field-first 640x480、30000/1001 fps、PAL は
-top-field-first 768x576、25 fps です。`--preview-crf` は 0 から 51 を受け付け、
-default は 31 です。値を下げると画質と bitrate が上がります。IPP が利用可能なら
-`ipp-fast` を自動選択し、それ以外では portable な managed backend に戻ります。
-`libx264` を含む FFmpeg が必要で、`VHSDECODE_FFMPEG` と
+維持し、隣接する burst line から PAL V-switch を検出して 4-field hue flicker を
+防ぎ、dropout concealment を常時適用します。audio と正式 export 用の重い
+comb/repair stage は省略し、2 秒 window ごとに timeline 上の連続した全 frame を
+decode します。muted web player は自動再生し、2 window 分を先読みします。
+top-field-first の入力 field は field rate で deinterlace され、NTSC は progressive
+640x480、60000/1001 fps、PAL は progressive 768x576、50 fps で配信されます。
+起動時に完全な fMP4 pipeline を CUDA YADIF + NVENC、QSV advanced VPP + QSV、
+CPU YADIF + AMF、CPU YADIF + libx264 の順に実際に検証します。
+`--preview-crf` は 0 から 51 を受け付け、default は 31 です。hardware encoder では
+最も近い quality/QP control に対応付けるため、backend 間で bitrate は一致しません。
+IPP が利用可能なら `ipp-fast` を自動選択し、それ以外では portable な managed
+backend に戻ります。標準 40 MSPS VHS preview は固定 anti-alias filter を通した後、
+内部 RF を 20 MSPS で decode します。native 20 MSPS VHS input は 20 MSPS のままで、
+S-VHS、その他の tape format、LaserDisc、通常の decode/export path は従来の
+sample-rate behavior を維持します。この最適化は自動で、user-facing option は追加しません。
+起動時には選択した video pipeline、IPP-FAST の初期化成否、
+実際の decode thread 数、別々の行で更新される window ID と realtime FPS を表示します。少なくとも
+1 つの pipeline が利用できる FFmpeg が必要で、`VHSDECODE_FFMPEG` と
 `VHSDECODE_FFPROBE` で path を明示できます。
 
 <!-- SECTION: profiles -->
@@ -162,7 +173,7 @@ set が 390.8 から 360.5 MiB、private bytes が 409.9 から 374.4 MiB へ減
 
 `--threads 0`、default-five、20-worker の 24-run gate と、更新した 60-run Exact/IPP-fast
 matrix は、luma、chroma、raw JSON、stdout、normalized stderr/log、ordered `fileLoc` の
-各 surface で 1 hash を維持しました。標準 xUnit v3 suite の **1,485** tests も成功しました。
+各 surface で 1 hash を維持しました。標準 xUnit v3 suite の **1,500** tests も成功しました。
 
 更新した各 .NET profile/thread cell は 3 run 内で deterministic でした。固定 reference の
 merged Python PR341 も deterministic でした。Python v0.4.0 は 15 run で 15 種類の luma、
@@ -203,7 +214,7 @@ header は FFmpeg を維持します。
 dotnet restore VHSDecodeDotNet.slnx
 dotnet build VHSDecodeDotNet.slnx -c Release --no-restore
 dotnet test --solution VHSDecodeDotNet.slnx -c Release `
-  --no-build --no-restore --minimum-expected-tests 1485
+  --no-build --no-restore --minimum-expected-tests 1512
 ```
 
 Visual Studio 2026 で `VHSDecodeDotNet.slnx` を開くと、build、debug、

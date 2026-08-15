@@ -432,6 +432,35 @@ public sealed class TbcFieldSequenceDecodeEngine
         Stream input,
         Action<IReadOnlyList<(TbcDecodedField Field, TbcFieldOrderDecision Decision)>> fieldSink,
         int? maxFields = null)
+        => DecodeToSinkCore(
+            session,
+            input,
+            fieldSink,
+            stopRequested: null,
+            maxFields);
+
+    public TbcFieldStreamDecodeResult DecodeToSink(
+        DecodeSession session,
+        Stream input,
+        Action<IReadOnlyList<(TbcDecodedField Field, TbcFieldOrderDecision Decision)>> fieldSink,
+        Func<bool> stopRequested,
+        int? maxFields = null)
+    {
+        ArgumentNullException.ThrowIfNull(stopRequested);
+        return DecodeToSinkCore(
+            session,
+            input,
+            fieldSink,
+            stopRequested,
+            maxFields);
+    }
+
+    private TbcFieldStreamDecodeResult DecodeToSinkCore(
+        DecodeSession session,
+        Stream input,
+        Action<IReadOnlyList<(TbcDecodedField Field, TbcFieldOrderDecision Decision)>> fieldSink,
+        Func<bool>? stopRequested,
+        int? maxFields)
     {
         ArgumentNullException.ThrowIfNull(session);
         ArgumentNullException.ThrowIfNull(input);
@@ -447,7 +476,8 @@ public sealed class TbcFieldSequenceDecodeEngine
                 fieldSink(writes);
                 writtenFieldCount = checked(writtenFieldCount + writes.Count);
             },
-            writeMetadataSnapshot: null);
+            writeMetadataSnapshot: null,
+            stopRequested);
         return new TbcFieldStreamDecodeResult(
             summary.DecodedFieldCount,
             writtenFieldCount,
@@ -461,7 +491,8 @@ public sealed class TbcFieldSequenceDecodeEngine
         int? maxFields,
         bool retainFields,
         Action<IReadOnlyList<(TbcDecodedField Field, TbcFieldOrderDecision Decision)>>? writeFields,
-        Action? writeMetadataSnapshot)
+        Action? writeMetadataSnapshot,
+        Func<bool>? stopRequested = null)
     {
         BigInteger requestedFields = maxFields.HasValue
             ? new BigInteger(maxFields.Value)
@@ -963,6 +994,12 @@ public sealed class TbcFieldSequenceDecodeEngine
             else if (completedCurrentField)
             {
                 CheckpointOutput(writePlanner.WrittenFieldCount);
+            }
+
+            if (stopRequested?.Invoke() == true)
+            {
+                begin = nextBegin;
+                break;
             }
 
             if (session.Spec.Name == "ld"

@@ -6,6 +6,8 @@ namespace VHSDecode.Preview;
 
 internal static class PreviewDecodeCommandFactory
 {
+    internal const string HalfRateRfOption = "preview_half_rate_rf";
+
     internal static ParsedCommand CreateFastTemplate(ParsedCommand command)
     {
         ArgumentNullException.ThrowIfNull(command);
@@ -49,6 +51,31 @@ internal static class PreviewDecodeCommandFactory
             if (command.GetSource("compat_version") == ParsedOptionSource.Default)
             {
                 Set(values, sources, "compat_version", "current");
+            }
+
+            double inputSampleRateMHz = command.Get<bool>("cxadc")
+                ? FrequencyParser.CxAdcMHz
+                : command.Values.TryGetValue("inputfreq", out object? inputFrequency)
+                    && inputFrequency is double parsedInputFrequency
+                    && parsedInputFrequency > 0.0
+                        ? parsedInputFrequency
+                        : FrequencyParser.DddMHz;
+            if (string.Equals(
+                    command.Get<string>("tape_format"),
+                    "VHS",
+                    StringComparison.Ordinal)
+                && Math.Abs(inputSampleRateMHz - FrequencyParser.DddMHz) <= 1e-9)
+            {
+                values[HalfRateRfOption] = true;
+                sources[HalfRateRfOption] = ParsedOptionSource.Default;
+            }
+            else if (string.Equals(
+                    command.Get<string>("tape_format"),
+                    "VHS",
+                    StringComparison.Ordinal)
+                && Math.Abs(inputSampleRateMHz - (FrequencyParser.DddMHz / 2.0)) <= 1e-9)
+            {
+                Set(values, sources, "no_resample", true);
             }
         }
         else

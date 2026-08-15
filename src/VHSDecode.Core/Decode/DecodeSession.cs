@@ -183,17 +183,36 @@ public static class DecodeSessionFactory
         string system = VideoSystemSelector.Select(command);
         double selectedSampleRateMHz = SelectCommonSampleFrequencyMHz(command);
         bool noResample = command.Get<bool>("no_resample");
-        double decodeSampleRateMHz = noResample ? selectedSampleRateMHz : FrequencyParser.DddMHz;
+        bool previewHalfRate = IsPreviewServer(command)
+            && command.Values.TryGetValue("preview_half_rate_rf", out object? halfRateValue)
+            && halfRateValue is true
+            && Math.Abs(selectedSampleRateMHz - FrequencyParser.DddMHz) <= 1e-9;
+        double decodeSampleRateMHz = previewHalfRate
+            ? FrequencyParser.DddMHz / 2.0
+            : noResample
+                ? selectedSampleRateMHz
+                : FrequencyParser.DddMHz;
         bool nativeFortyMegahertzContainer = Math.Abs(selectedSampleRateMHz - FrequencyParser.DddMHz) <= 1e-9
             && (command.InputFile.EndsWith(".lds", StringComparison.Ordinal)
                 || command.InputFile.EndsWith(".ldf", StringComparison.Ordinal));
         bool useFfmpegInputPath = !noResample && !nativeFortyMegahertzContainer;
-        IRfSampleLoader loader = CreateLoader(
-            command.InputFile,
-            useFfmpegInputPath,
-            selectedSampleRateMHz,
-            preferPyAvMappedRawFlacSeeking: ShouldUseParallelMappedRawFlacSeeking(command),
-            fastContainerSeeking: IsPreviewServer(command));
+        IRfSampleLoader loader;
+        if (previewHalfRate)
+        {
+            IRfSampleLoader sourceLoader = RfLoaderFactory.CreatePreviewHalfRateSource(
+                command.InputFile,
+                fastContainerSeeking: true);
+            loader = new PreviewHalfRateSampleLoader(sourceLoader);
+        }
+        else
+        {
+            loader = CreateLoader(
+                command.InputFile,
+                useFfmpegInputPath,
+                selectedSampleRateMHz,
+                preferPyAvMappedRawFlacSeeking: ShouldUseParallelMappedRawFlacSeeking(command),
+                fastContainerSeeking: IsPreviewServer(command));
+        }
         FormatParameterSet parameters = FormatCatalog.Default.GetTapeParameters(
             system,
             command.Get<string>("tape_format"),

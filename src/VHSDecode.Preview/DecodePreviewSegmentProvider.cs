@@ -1,7 +1,9 @@
+using System.Diagnostics;
 using System.Globalization;
 using System.Numerics;
 using VHSDecode.Core.CommandLine;
 using VHSDecode.Core.Decode;
+using VHSDecode.Core.Dsp;
 using VHSDecode.Core.Formats;
 using VHSDecode.Core.Rf;
 
@@ -14,6 +16,7 @@ public sealed class DecodePreviewSegmentProvider : IPreviewSegmentProvider
     private readonly PreviewServerOptions _options;
     private readonly double _baseStartSeconds;
     private readonly double _decodeSampleRateHz;
+    private readonly PreviewEncoderBackend _encoderBackend;
     private readonly SemaphoreSlim _windowConcurrency;
     private bool _disposed;
 
@@ -23,14 +26,23 @@ public sealed class DecodePreviewSegmentProvider : IPreviewSegmentProvider
         double baseStartSeconds,
         double decodeSampleRateHz,
         PreviewTimeline timeline,
-        PreviewMediaInfo mediaInfo)
+        PreviewMediaInfo mediaInfo,
+        PreviewEncoderBackend encoderBackend,
+        int decoderThreads,
+        bool ippFastEnabled,
+        double sourceSampleRateHz)
     {
         _template = template;
         _options = options;
         _baseStartSeconds = baseStartSeconds;
         _decodeSampleRateHz = decodeSampleRateHz;
+        _encoderBackend = encoderBackend;
         Timeline = timeline;
         MediaInfo = mediaInfo;
+        DecoderThreads = decoderThreads;
+        IppFastEnabled = ippFastEnabled;
+        SourceSampleRateHz = sourceSampleRateHz;
+        DecodeSampleRateHz = decodeSampleRateHz;
         _windowConcurrency = new SemaphoreSlim(
             options.MaximumConcurrentWindowBuilds,
             options.MaximumConcurrentWindowBuilds);
@@ -39,6 +51,16 @@ public sealed class DecodePreviewSegmentProvider : IPreviewSegmentProvider
     public PreviewMediaInfo MediaInfo { get; }
 
     public PreviewTimeline Timeline { get; }
+
+    public int DecoderThreads { get; }
+
+    public bool IppFastEnabled { get; }
+
+    public double SourceSampleRateHz { get; }
+
+    public double DecodeSampleRateHz { get; }
+
+    internal event Action<PreviewWindowGenerationUpdate>? WindowGenerationUpdated;
 
     public static async Task<DecodePreviewSegmentProvider> CreateAsync(
         ParsedCommand command,
@@ -49,9 +71,6 @@ public sealed class DecodePreviewSegmentProvider : IPreviewSegmentProvider
         ArgumentNullException.ThrowIfNull(options);
         options.Validate();
         ParsedCommand template = PreviewDecodeCommandFactory.CreateFastTemplate(command);
-        await PreviewSourceProbe.VerifyFfmpegAsync(
-            options.FfmpegPath,
-            cancellationToken).ConfigureAwait(false);
 
         using DecodeSession session = DecodeSessionFactory.Create(template);
         double framesPerSecond = session.Parameters.SysParams.GetProperty("FPS").GetDouble();
@@ -61,7 +80,7 @@ public sealed class DecodePreviewSegmentProvider : IPreviewSegmentProvider
             inputSampleRateHz,
             options.FfprobePath,
             cancellationToken).ConfigureAwait(false);
-        double baseStartSeconds = ResolveBaseStartSeconds(command, framesPerSecond, session.DecodeSampleRateHz);
+        double baseStartSeconds = ResolveBaseStartSeconds(command, framesPerSecond, inputSampleRateHz);
         if (baseStartSeconds >= sourceDuration)
         {
             throw new ArgumentException(
@@ -87,25 +106,42 @@ public sealed class DecodePreviewSegmentProvider : IPreviewSegmentProvider
             options.SegmentSeconds,
             options.SegmentsPerWindow);
         (int width, int height) = PreviewDimensions(session.System);
-        string backend = template.Get<string>("dsp_backend");
+        PreviewEncoderBackend encoderBackend = await PreviewEncoderSelector.SelectAsync(
+            options.FfmpegPath,
+            width,
+            height,
+            options.Crf,
+            session.System,
+            framesPerSecond,
+            cancellationToken).ConfigureAwait(false);
+        string backend = DspBackendParser.ToCommandLineValue(
+            session.ExecutionOptions.DspBackend);
+        bool twentyMspsRf = Math.Abs(
+            session.DecodeSampleRateHz - 20_000_000.0) <= 1e-6;
         var mediaInfo = new PreviewMediaInfo(
             command.Spec.Name == "ld" ? "LaserDisc" : "VHS",
             session.System,
-            framesPerSecond,
+            framesPerSecond * 2.0,
             timeline.DurationSeconds,
             width,
             height,
             options.Crf,
-            Interlaced: true,
+            Interlaced: false,
             backend,
-            $"low-accuracy-color/{options.DecodedFramesPerWindow}-frame-sampling/dropout-conceal/no-audio");
+            (twentyMspsRf ? "20-msps-rf/" : string.Empty)
+                + "fast-color/full-frame-motion/dropout-conceal/no-audio",
+            PreviewEncoderSelector.DisplayName(encoderBackend));
         return new DecodePreviewSegmentProvider(
             template,
             options,
             baseStartSeconds,
             session.DecodeSampleRateHz,
             timeline,
-            mediaInfo);
+            mediaInfo,
+            encoderBackend,
+            session.ExecutionOptions.WorkerThreads,
+            session.ExecutionOptions.DspBackend == DspBackend.IppFast,
+            inputSampleRateHz);
     }
 
     public async Task<PreviewSegmentWindow> GenerateWindowAsync(
@@ -119,15 +155,49 @@ public sealed class DecodePreviewSegmentProvider : IPreviewSegmentProvider
         }
 
         await _windowConcurrency.WaitAsync(cancellationToken).ConfigureAwait(false);
+        long startedTimestamp = Stopwatch.GetTimestamp();
+        NotifyWindowGenerationUpdated(
+            PreviewWindowGenerationUpdate.Started(windowIndex, startedTimestamp));
         try
         {
-            return await Task.Run(
-                () => GenerateWindow(windowIndex, cancellationToken),
-                cancellationToken).ConfigureAwait(false);
+            PreviewSegmentWindow window;
+            try
+            {
+                window = await Task.Run(
+                    () => GenerateWindow(windowIndex, cancellationToken),
+                    cancellationToken).ConfigureAwait(false);
+            }
+            catch
+            {
+                NotifyWindowGenerationUpdated(
+                    PreviewWindowGenerationUpdate.Abandoned(windowIndex, startedTimestamp));
+                throw;
+            }
+
+            NotifyWindowGenerationUpdated(PreviewWindowGenerationUpdate.Completed(
+                windowIndex,
+                Timeline.FrameCountInWindow(windowIndex),
+                startedTimestamp,
+                Stopwatch.GetTimestamp()));
+            return window;
         }
         finally
         {
             _windowConcurrency.Release();
+        }
+    }
+
+    private void NotifyWindowGenerationUpdated(PreviewWindowGenerationUpdate update)
+    {
+        try
+        {
+            WindowGenerationUpdated?.Invoke(update);
+        }
+        catch (Exception ex) when (ex is IOException
+            or InvalidOperationException
+            or ObjectDisposedException)
+        {
+            // Console progress is observational and must not fail a media request.
         }
     }
 
@@ -146,9 +216,7 @@ public sealed class DecodePreviewSegmentProvider : IPreviewSegmentProvider
             targetSeconds * _decodeSampleRateHz,
             MidpointRounding.AwayFromZero));
         int outputFrameCount = Timeline.FrameCountInWindow(windowIndex);
-        int decodedFrameCount = Math.Min(
-            outputFrameCount,
-            _options.DecodedFramesPerWindow);
+        int decodedFrameCount = outputFrameCount;
         int prerollFieldCount = checked((int)Math.Ceiling(
             (targetSeconds - decodeStartSeconds) * Timeline.FramesPerSecond * 2.0));
         int prerollFrameCount = (prerollFieldCount + 1) / 2;
@@ -169,7 +237,8 @@ public sealed class DecodePreviewSegmentProvider : IPreviewSegmentProvider
             MediaInfo.Height,
             MediaInfo.Crf,
             MediaInfo.System,
-            Timeline);
+            Timeline,
+            _encoderBackend);
         return encoder.Encode(
             windowIndex,
             rawVideo =>
@@ -180,13 +249,13 @@ public sealed class DecodePreviewSegmentProvider : IPreviewSegmentProvider
                     MediaInfo.Width,
                     MediaInfo.Height,
                     targetSample,
-                    outputFrameCount,
-                    decodedFrameCount);
+                    outputFrameCount);
                 var engine = new TbcFieldSequenceDecodeEngine(cancellationToken: cancellationToken);
                 _ = engine.DecodeToSink(
                     session,
                     input,
                     assembler.Accept,
+                    () => assembler.SampledFrameCount >= outputFrameCount,
                     maximumFields);
                 assembler.Complete();
             },
@@ -225,15 +294,15 @@ public sealed class DecodePreviewSegmentProvider : IPreviewSegmentProvider
             ? (640, 480)
             : (768, 576);
 
-    private static double ResolveBaseStartSeconds(
+    internal static double ResolveBaseStartSeconds(
         ParsedCommand command,
         double framesPerSecond,
-        double decodeSampleRateHz)
+        double sourceSampleRateHz)
     {
         double startFileLocation = command.Get<double>("start_fileloc");
         if (startFileLocation != -1.0)
         {
-            return Math.Max(0.0, startFileLocation / decodeSampleRateHz);
+            return Math.Max(0.0, startFileLocation / sourceSampleRateHz);
         }
 
         object? start = command.Values.TryGetValue("start", out object? value) ? value : null;

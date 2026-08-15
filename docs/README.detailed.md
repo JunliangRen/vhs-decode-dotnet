@@ -4,14 +4,14 @@
 
 **[English](README.detailed.md)** | [简体中文](README.detailed.zh-CN.md) | [日本語](README.detailed.ja.md)
 
-<!-- README_SYNC: 2026-08-15.01 -->
+<!-- README_SYNC: 2026-08-16.01 -->
 
 .NET 11 rewrite of the decode-facing parts of
 [`oyvindln/vhs-decode`](https://github.com/oyvindln/vhs-decode), focused on
 release `v0.4.0` at commit
 `43155200da87c0d49eb37d8ec09b1372075ee8e4`.
 
-The current .NET port release is `v0.4.0-2.1.0` (application version `2.1.0`).
+The current .NET port release is `v0.4.0-2.2.0` (application version `2.2.0`).
 
 > [!IMPORTANT]
 > This is a work-in-progress compatibility port. The top-level decode paths are
@@ -720,7 +720,7 @@ difference is reported as an outlier rather than a percentage claim. A 24-run
 release-binary gate covered all four backend/profile combinations at
 `--threads 0`, default-five, and 20 workers; every captured surface matched.
 The refreshed .NET 11 Preview 7 candidate 60-run public matrix retained one hash per surface
-in every cell, and all 1,485 standard xUnit v3 tests passed.
+in every cell, and all 1,500 standard xUnit v3 tests passed.
 
 ### Latest six-path thread matrix
 
@@ -4172,7 +4172,7 @@ Requirements:
 .\tools\build-ipp-native.ps1
 dotnet restore VHSDecodeDotNet.slnx
 dotnet build VHSDecodeDotNet.slnx -c Release --no-restore
-dotnet test --solution VHSDecodeDotNet.slnx -c Release --no-build --no-restore --minimum-expected-tests 1485
+dotnet test --solution VHSDecodeDotNet.slnx -c Release --no-build --no-restore --minimum-expected-tests 1512
 dotnet test --project tests\VHSDecode.Tests\VHSDecode.Tests.csproj -c Release --no-build --no-restore --coverage --coverage-output coverage.cobertura.xml --coverage-output-format cobertura
 ```
 
@@ -4186,7 +4186,7 @@ deployment computer. Binary-only single-file releases embed
 sidecar license files. An Exact-only build may omit the native build step.
 
 The current formal Release build has zero warnings and errors. The xUnit v3
-project exposes **1,485** independently discoverable tests to both
+project exposes **1,500** independently discoverable tests to both
 `dotnet test` and Visual Studio Test Explorer.
 
 <!-- SECTION: usage -->
