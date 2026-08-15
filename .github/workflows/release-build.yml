@@ -33,6 +33,17 @@ jobs:
         with:
           global-json-file: global.json
 
+      - name: Verify pinned .NET SDK
+        shell: pwsh
+        run: |
+          $expected = (Get-Content -LiteralPath global.json -Raw |
+            ConvertFrom-Json).sdk.version
+          $actual = dotnet --version
+          if ($actual -cne $expected) {
+            throw "Expected .NET SDK $expected, but dotnet resolved $actual."
+          }
+          dotnet --info
+
       - name: Install pinned FFmpeg test dependency
         shell: pwsh
         run: |

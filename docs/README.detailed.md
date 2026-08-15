@@ -719,7 +719,7 @@ The baseline-first pair contained a 628.7 MiB baseline GC peak, so that larger
 difference is reported as an outlier rather than a percentage claim. A 24-run
 release-binary gate covered all four backend/profile combinations at
 `--threads 0`, default-five, and 20 workers; every captured surface matched.
-The refreshed `v0.4.0-2.1.0` 60-run public matrix retained one hash per surface
+The refreshed .NET 11 Preview 7 candidate 60-run public matrix retained one hash per surface
 in every cell, and all 1,485 standard xUnit v3 tests passed.
 
 ### Latest six-path thread matrix
@@ -730,19 +730,20 @@ snapshot comparing Python v0.4.0, merged Python PR341, Exact v0.4.0, Exact
 40 MHz PAL VHS `.ldf` fixture. The source filename is intentionally not
 published. The active table retains 30 fixed Python reference measurements from
 2026-08-12. All 60 .NET measurements were refreshed together on 2026-08-15
-with the published `v0.4.0-2.1.0` release binary from main `94504dc`. Each .NET cell gives the
-median wall time, speedup, and wall-time reduction against its profile-matched
-Python column. Historical
+with a self-contained .NET 11 Preview 7 candidate built from commit `21b8b01`.
+This documentation/toolchain refresh does not publish a new tag or release. Each
+.NET cell gives the median wall time, speedup, and wall-time reduction against
+its profile-matched Python column. Historical
 matrices that used another batch, format, or fixture are not directly comparable:
 
 <!-- LATEST_PERFORMANCE_BEGIN -->
 | CLI mode (workers) | Python v0.4.0 | Python PR341 | Exact + v0.4.0 | Exact + current | IPP-fast + v0.4.0 | IPP-fast + current |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| default (5) | 52.811 s | 54.243 s | 13.716 s / 3.850x / 74.03% | 12.758 s / 4.252x / 76.48% | 11.976 s / 4.410x / 77.32% | 9.003 s / 6.025x / 83.40% |
-| `--threads 1` | 57.067 s | 56.762 s | 35.444 s / 1.610x / 37.89% | 39.498 s / 1.437x / 30.41% | 25.376 s / 2.249x / 55.53% | 28.158 s / 2.016x / 50.39% |
-| `--threads 5` | 52.920 s | 55.722 s | 13.631 s / 3.882x / 74.24% | 12.943 s / 4.305x / 76.77% | 12.114 s / 4.368x / 77.11% | 9.320 s / 5.979x / 83.27% |
-| `--threads 10` | 52.965 s | 54.949 s | 11.127 s / 4.760x / 78.99% | 9.704 s / 5.663x / 82.34% | 10.093 s / 5.248x / 80.94% | 7.174 s / 7.659x / 86.94% |
-| `--threads 20` | 53.555 s | 54.842 s | 9.745 s / 5.495x / 81.80% | 8.382 s / 6.543x / 84.72% | 8.903 s / 6.016x / 83.38% | 6.093 s / 9.000x / 88.89% |
+| default (5) | 52.811 s | 54.243 s | 13.977 s / 3.778x / 73.53% | 12.556 s / 4.320x / 76.85% | 12.214 s / 4.324x / 76.87% | 9.419 s / 5.759x / 82.64% |
+| `--threads 1` | 57.067 s | 56.762 s | 36.434 s / 1.566x / 36.16% | 40.155 s / 1.414x / 29.26% | 25.468 s / 2.241x / 55.37% | 27.561 s / 2.060x / 51.45% |
+| `--threads 5` | 52.920 s | 55.722 s | 14.055 s / 3.765x / 73.44% | 12.655 s / 4.403x / 77.29% | 12.244 s / 4.322x / 76.86% | 9.104 s / 6.121x / 83.66% |
+| `--threads 10` | 52.965 s | 54.949 s | 11.795 s / 4.491x / 77.73% | 10.198 s / 5.388x / 81.44% | 10.535 s / 5.027x / 80.11% | 7.467 s / 7.359x / 86.41% |
+| `--threads 20` | 53.555 s | 54.842 s | 10.667 s / 5.021x / 80.08% | 9.533 s / 5.753x / 82.62% | 9.216 s / 5.811x / 82.79% | 6.991 s / 7.845x / 87.25% |
 <!-- LATEST_PERFORMANCE_END -->
 <!-- LATEST_PERFORMANCE_RUNS: performance-snapshot-runs=90 dotnet-matrix-runs=60 dotnet-current-runs=30 python-reference-runs=30 dotnet-repeats=3 python-reference-date=2026-08-12 dotnet-v040-date=2026-08-15 dotnet-current-date=2026-08-15 phase22-200-ab-pairs=20 phase22-long-ab-pairs=8 phase22-thread-backend-runs=60 phase22-gc-traces=2 phase22-tests=1438 phase24-short-ab-pairs=6 phase24-long-ab-pairs=4 phase24-thread-gate-runs=12 phase24-tests=1442 phase25-public-cell-runs=15 phase25-public-ab-pairs=15 phase25-long-ab-pairs=3 phase25-thread-gate-runs=12 phase25-tests=1446 phase26-kernel-ab-pairs=8 phase26-long-ab-pairs=4 phase26-thread-backend-runs=36 phase26-public-cell-runs=30 phase26-tests=1447 phase27-kernel-ab-pairs=8 phase27-long-ab-pairs=8 phase27-thread-backend-runs=24 phase27-public-cell-runs=60 phase27-tests=1448 phase28-kernel-ab-pairs=8 phase28-long-ab-pairs=6 phase28-thread-backend-runs=24 phase28-intrinsic-runs=3 phase28-public-cell-runs=60 phase28-tests=1448 phase30-burst-kernel-runs=14 phase30-long-ab-pairs=3 phase30-thread-gate-runs=6 phase30-memory-runs=2 phase30-public-cell-runs=60 phase30-tests=1448 phase31-interleaved-ab-pairs=9 phase31-long-gate-runs=8 phase31-thread-backend-runs=24 phase31-memory-runs=4 phase31-public-cell-runs=60 phase31-tests=1459 phase32-vblank-short-ab-pairs=6 phase32-vblank-long-ab-pairs=2 phase32-thread-backend-runs=24 phase32-gc-traces=2 phase32-counter-runs=2 phase32-tests=1460 phase33-sync-list-short-ab-pairs=6 phase33-sync-list-long-ab-pairs=2 phase33-thread-backend-runs=24 phase33-gc-traces=1 phase33-memory-runs=4 phase33-public-cell-runs=60 phase33-tests=1463 python-v040-runs=15 python-v040-hashes=15 python-pr341-runs=15 python-pr341-hashes=1 -->
 
@@ -751,31 +752,36 @@ The three-run wall-time ranges were:
 <!-- LATEST_PERFORMANCE_RANGES_BEGIN -->
 | CLI mode | Python v0.4.0 | Python PR341 | Exact + v0.4.0 | Exact + current | IPP-fast + v0.4.0 | IPP-fast + current |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| default (5) | 52.583-62.222 s | 53.893-58.195 s | 13.692-14.151 s | 12.582-12.806 s | 11.642-12.174 s | 8.991-9.139 s |
-| `--threads 1` | 56.709-60.521 s | 56.335-58.991 s | 35.442-35.683 s | 38.595-39.668 s | 24.990-25.697 s | 26.918-28.357 s |
-| `--threads 5` | 52.845-53.977 s | 53.696-58.437 s | 13.444-13.793 s | 12.390-13.157 s | 12.054-12.898 s | 9.015-9.457 s |
-| `--threads 10` | 51.797-53.088 s | 52.649-56.775 s | 10.792-11.239 s | 9.620-10.359 s | 9.914-10.120 s | 7.160-7.235 s |
-| `--threads 20` | 52.967-55.987 s | 53.005-55.618 s | 9.226-10.188 s | 8.170-9.610 s | 8.737-9.431 s | 5.804-6.115 s |
+| default (5) | 52.583-62.222 s | 53.893-58.195 s | 13.935-14.207 s | 12.236-13.228 s | 12.100-13.038 s | 9.255-10.015 s |
+| `--threads 1` | 56.709-60.521 s | 56.335-58.991 s | 35.013-38.936 s | 39.121-41.993 s | 25.070-25.741 s | 27.009-28.035 s |
+| `--threads 5` | 52.845-53.977 s | 53.696-58.437 s | 13.713-14.517 s | 12.153-13.959 s | 12.130-12.540 s | 8.997-10.933 s |
+| `--threads 10` | 51.797-53.088 s | 52.649-56.775 s | 11.687-11.808 s | 9.358-11.685 s | 10.010-11.632 s | 7.166-8.026 s |
+| `--threads 20` | 52.967-55.987 s | 53.005-55.618 s | 9.375-11.492 s | 8.772-10.610 s | 8.393-9.501 s | 6.108-7.452 s |
 <!-- LATEST_PERFORMANCE_RANGES_END -->
 
 The 30 retained Python measurements come from the fixed-condition 2026-08-12
 campaign. All twenty .NET cells contain 60 complete 2026-08-15 runs from the
-same `v0.4.0-2.1.0` release binary. Within every three-run cell, the active runs
+same .NET 11 Preview 7 candidate. Within every three-run cell, the active runs
 produced one luma, chroma, raw-JSON, stdout, normalized-stderr, normalized-log,
 and ordered-`fileLoc` hash set.
 Python v0.4.0 produced 15 distinct luma, chroma, JSON, and normalized-log hash
 sets in 15 runs; its strict oracle therefore remains `g4315520 --threads 0`.
 
-All refreshed .NET cells use the published `v0.4.0-2.1.0` release binary from
-main `94504dc`. Its product version is
-`2.1.0+94504dc6696f0aacccac88541b3197dff8a69585`, and its single-file
+All refreshed .NET cells use the self-contained Preview 7 candidate built from
+commit `21b8b01`. Its product version is
+`2.1.0+21b8b01998fb7519cf3616820e181dba93f23d10`, and its single-file
 `decode.exe` SHA-256 is
-`878C9EBBD73CB5471F58BE8C8634C0B2FFD3EA70B9AF00CC4E80358A7E9039E7`.
+`9426C7693B63BCB7661946BD856B790EA0207A48AD8257791197AC450DF3161B`.
 The host was an Intel Core Ultra 7 265K with 20 logical processors, Windows 11
 build 26220, and the repository-pinned and host CLI .NET SDK
-`11.0.100-preview.6.26359.118`. Raw directories stay local because they contain
+`11.0.100-preview.7.26381.103`. Raw directories stay local because they contain
 the private fixture path; these are reported local measurements, not an
 independently reproducible public corpus.
+
+The preceding Preview 6 release snapshot and this Preview 7 candidate were
+measured in separate campaigns. Their differences are descriptive only: run
+order, thermal/scheduler state, and background load were not controlled as a
+same-moment A/B, so no runtime-caused speedup or regression is claimed.
 
 The three-run ranges expose ordinary startup, thermal, scheduler, and system
 variation. Ratio cells move when either the Python numerator or .NET denominator

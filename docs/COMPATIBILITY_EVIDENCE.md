@@ -2897,6 +2897,40 @@ required a low external-CPU sample before launch. All 1,448 xUnit v3 tests
 passed. The final 103,591,012-byte single-file executable has SHA-256
 `CFC47ADC6BF8B1EA5999EFC24D959AB3F85C4D67F2060CC87E304BFC80C4740C`.
 
+### .NET 11 Preview 7 toolchain and release-path gate
+
+The 2026-08-15 toolchain refresh uses SDK/runtime
+`11.0.100-preview.7.26381.103`. It pins the SDK through `global.json` and keeps
+the three overview READMEs, three detailed READMEs, project guidance, and release
+workflow aligned. CI installs from `global.json` and fails if `dotnet --version`
+does not exactly match the pin. A Preview 7 top-level package audit with prereleases enabled
+reported no available updates in any of the four solution projects.
+
+The first Preview 7 full-suite run exposed one real runtime-semantic difference:
+`Enumerable.Min(double)` now preserves the first NaN payload in an all-NaN
+sequence. The zero-copy serration helper was updated to the same behavior; the
+focused normal and all-hardware-intrinsics-disabled gates then passed, followed
+by all 1,485 xUnit v3 tests. The IPP AVX2 native bridge build and smoke test also
+passed, and the Release win-x64 self-contained single-file publish completed
+without warnings or errors.
+
+The performance candidate was built from commit `21b8b01`. Its product version
+is `2.1.0+21b8b01998fb7519cf3616820e181dba93f23d10`; the 135,168,326-byte
+`decode.exe` SHA-256 is
+`9426C7693B63BCB7661946BD856B790EA0207A48AD8257791197AC450DF3161B`.
+The binary contains Preview 7 runtime identifiers and no Preview 6 identifier.
+
+The refreshed startup-inclusive PAL VHS matrix used one fixed private 40 MHz
+`.ldf` input (21,389,175,871 bytes; SHA-256
+`B05B76CCE4F3CA825587477AEFC0FB6225C5B955D8C13335C05BCBFD75EE99FD`),
+`--start 100 --length 160`, Exact/IPP-fast, v0.4.0/`current`, and
+default/1/5/10/20-worker modes. All 60 runs exited successfully. Every one of
+the twenty three-run cells retained exactly one luma, chroma, raw-JSON, stdout,
+normalized-stderr, normalized-log, and ordered-`fileLoc` hash set. The detailed
+READMEs record all medians and ranges. The preceding Preview 6 release snapshot
+was a separate campaign, so differences between the two snapshots are
+descriptive and are not attributed causally to the runtime.
+
 To regenerate the embedded format parameter snapshot from the checked-out
 upstream source:
 
