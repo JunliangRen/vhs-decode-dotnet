@@ -33,6 +33,16 @@ public static class DecodeSessionLogWriter
         ArgumentNullException.ThrowIfNull(session);
         ArgumentNullException.ThrowIfNull(diagnostics);
         string path = session.OutputBase + ".log";
+        if (session.ExecutionOptions.SuppressFileOutputs)
+        {
+            foreach (DecodeInitializationDiagnostic diagnostic in diagnostics)
+            {
+                session.RuntimeReporter?.Log(diagnostic.Level, diagnostic.Message);
+            }
+
+            return string.Empty;
+        }
+
         var builder = new StringBuilder();
         foreach (DecodeInitializationDiagnostic diagnostic in diagnostics)
         {
@@ -74,6 +84,12 @@ public static class DecodeSessionLogWriter
         ArgumentNullException.ThrowIfNull(session);
         ArgumentException.ThrowIfNullOrWhiteSpace(level);
         ArgumentNullException.ThrowIfNull(message);
+        if (session.ExecutionOptions.SuppressFileOutputs)
+        {
+            session.RuntimeReporter?.Log(level, message);
+            return;
+        }
+
         var builder = new StringBuilder();
         AppendRecord(builder, level, message);
         lock (WriteLock)
@@ -87,6 +103,12 @@ public static class DecodeSessionLogWriter
     {
         ArgumentNullException.ThrowIfNull(session);
         ArgumentNullException.ThrowIfNull(message);
+        if (session.ExecutionOptions.SuppressFileOutputs)
+        {
+            session.RuntimeReporter?.Status(message);
+            return;
+        }
+
         var builder = new StringBuilder();
         AppendRecord(builder, "DEBUG", message);
         lock (WriteLock)

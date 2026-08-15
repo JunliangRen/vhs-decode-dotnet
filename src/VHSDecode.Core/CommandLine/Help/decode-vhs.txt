@@ -1,4 +1,5 @@
-usage: decode.py [-h] [--system system] [-s start]
+usage: decode.py [-h] [--preview-server] [--preview-port port] [--preview-crf crf]
+                 [--system system] [-s start]
                  [--start_fileloc start_fileloc] [-l length] [--overwrite]
                  [--write_db] [-f FREQ] [-t threads]
                  [--dsp-backend {exact,ipp-fast}]
@@ -29,6 +30,10 @@ positional arguments:
 
 options:
   -h, --help            show this help message and exit
+  --preview-server      start a loopback HTTP HLS/fMP4 preview server; accepts
+                        infile only and writes no decoder output artifacts
+  --preview-port port   preview server port (default: 0 selects a free port)
+  --preview-crf crf     H.264 quality from 0 to 51 (default: 31; lower is higher quality)
   --system system       video system (overriden by individual options)
   -t threads, --threads threads
                         number of CPU threads to use

@@ -14,6 +14,12 @@ public sealed record TbcFieldSequenceDecodeResult(
     int WrittenFieldCount = 0,
     LdTestLdfWriteResult? TestLdf = null);
 
+public readonly record struct TbcFieldStreamDecodeResult(
+    int DecodedFieldCount,
+    int WrittenFieldCount,
+    long StartSample,
+    long EndSample);
+
 public delegate TbcDecodedField? TbcFieldSequenceReadField(
     DecodeSession session,
     Stream input,
@@ -421,6 +427,34 @@ public sealed class TbcFieldSequenceDecodeEngine
             writeFields: null,
             writeMetadataSnapshot: null).Fields;
 
+    public TbcFieldStreamDecodeResult DecodeToSink(
+        DecodeSession session,
+        Stream input,
+        Action<IReadOnlyList<(TbcDecodedField Field, TbcFieldOrderDecision Decision)>> fieldSink,
+        int? maxFields = null)
+    {
+        ArgumentNullException.ThrowIfNull(session);
+        ArgumentNullException.ThrowIfNull(input);
+        ArgumentNullException.ThrowIfNull(fieldSink);
+        int writtenFieldCount = 0;
+        SequenceDecodeSummary summary = DecodeSequence(
+            session,
+            input,
+            maxFields,
+            retainFields: false,
+            writeFields: writes =>
+            {
+                fieldSink(writes);
+                writtenFieldCount = checked(writtenFieldCount + writes.Count);
+            },
+            writeMetadataSnapshot: null);
+        return new TbcFieldStreamDecodeResult(
+            summary.DecodedFieldCount,
+            writtenFieldCount,
+            summary.StartSample,
+            summary.EndSample);
+    }
+
     private SequenceDecodeSummary DecodeSequence(
         DecodeSession session,
         Stream input,
@@ -497,6 +531,11 @@ public sealed class TbcFieldSequenceDecodeEngine
 
         void CheckpointOutput(int fieldsWritten)
         {
+            if (session.ExecutionOptions.SuppressFileOutputs)
+            {
+                return;
+            }
+
             if (!TbcOutputMetadataWriter.ShouldWriteRecoverySnapshot(fieldsWritten))
             {
                 return;

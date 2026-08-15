@@ -38,7 +38,7 @@ evidence, and remaining gaps.
   EIAJ, and supported PAL/NTSC variants.
 - TBC utility tools, the double-click GUI, and developer plotting windows are
   intentionally out of scope.
-- The Visual Studio 2026 `.slnx` solution has **1,463** standard xUnit v3 tests
+- The Visual Studio 2026 `.slnx` solution has **1,482** standard xUnit v3 tests
   that are visible in Test Explorer and runnable with `dotnet test`.
 
 <!-- SECTION: start -->
@@ -59,6 +59,30 @@ decode.exe hifi [upstream options] input.lds output.wav
 Standalone command aliases such as `vhs-decode.exe` and `ld-decode.exe` are
 also supported. Use `decode.exe <command> --help` for the complete compatible
 option set.
+
+### Seekable RF preview server
+
+VHS and LaserDisc can expose a local, seekable HTTP preview without an output
+base name:
+
+Run `decode.exe vhs --preview-server --pal input.lds` for tape RF, or
+`decode.exe ld --preview-server --pal input.ldf` for LaserDisc RF.
+
+The command prints a loopback player URL and a standard HLS/fMP4 playlist URL.
+`--preview-port 0` (the default) selects a free port; specify another port when
+an external player needs a stable URL. Preview mode creates no TBC, JSON,
+SQLite, EFM, audio, or decoder log artifacts.
+
+This is intentionally a low-accuracy navigation mode. It retains colour through
+a cheap 4fSC one-dimensional demodulator, applies lightweight dropout
+concealment, skips audio and the expensive export comb/repair stages, and
+samples four decoded source frames per two-second preview window. NTSC is
+served as top-field-first 640x480 at 30000/1001 fps; PAL is top-field-first
+768x576 at 25 fps. `--preview-crf` accepts 0 through 51 and defaults to 31;
+lower values trade bitrate and encode time for quality. The preview
+automatically uses `ipp-fast` when available and otherwise remains portable
+through the managed backend. FFmpeg with `libx264` is required on `PATH`;
+`VHSDECODE_FFMPEG` and `VHSDECODE_FFPROBE` can select explicit binaries.
 
 <!-- SECTION: profiles -->
 
@@ -151,7 +175,7 @@ from 409.9 to 374.4 MiB.
 A 24-run `--threads 0`/default-five/20-worker gate and the refreshed 60-run
 Exact/IPP-fast matrix each retained one hash for luma, chroma, raw JSON, stdout,
 normalized stderr/logs, and ordered `fileLoc`. The standard xUnit v3 suite
-passed all **1,463** tests.
+passed all **1,482** tests.
 
 Every .NET profile/thread cell was deterministic across its three refreshed
 runs. Merged Python PR341 was deterministic in its pinned reference set; Python
@@ -195,7 +219,7 @@ The pinned SDK is .NET `11.0.100-preview.6.26359.118`.
 dotnet restore VHSDecodeDotNet.slnx
 dotnet build VHSDecodeDotNet.slnx -c Release --no-restore
 dotnet test --solution VHSDecodeDotNet.slnx -c Release `
-  --no-build --no-restore --minimum-expected-tests 1463
+  --no-build --no-restore --minimum-expected-tests 1482
 ```
 
 Open `VHSDecodeDotNet.slnx` in Visual Studio 2026 to build, debug, and run the

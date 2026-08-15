@@ -36,7 +36,7 @@ upstream release `v0.4.0`、commit
 - VHS family には VHS/S-VHS、Betamax、Video8/Hi8、U-matic、Type C、EIAJ、
   upstream が対応する PAL/NTSC variant が含まれます。
 - TBC utility、ダブルクリック GUI、開発者向け plot window は対象外です。
-- Visual Studio 2026 の `.slnx` には **1,463** 件の標準 xUnit v3 test があり、
+- Visual Studio 2026 の `.slnx` には **1,482** 件の標準 xUnit v3 test があり、
   Test Explorer と `dotnet test` の両方で実行できます。
 
 <!-- SECTION: start -->
@@ -56,6 +56,23 @@ decode.exe hifi [upstream options] input.lds output.wav
 
 `vhs-decode.exe`、`ld-decode.exe` などの standalone alias も使用できます。
 完全な互換 option は `decode.exe <command> --help` で確認してください。
+
+### Seek 可能な RF preview server
+
+VHS は `decode.exe vhs --preview-server --pal input.lds`、LaserDisc は
+`decode.exe ld --preview-server --pal input.ldf` で起動できます。command は
+loopback の web player URL と標準 HLS/fMP4 playlist URL を表示します。output
+base は不要で、TBC、JSON、SQLite、EFM、audio、decode log を生成しません。
+
+これは位置確認用の低精度 mode です。軽量な 4fSC 1D demodulator で colour を
+維持し、dropout concealment を常時適用します。audio と正式 export 用の重い
+comb/repair stage は省略し、2 秒 window ごとに source frame を 4 枚だけ decode
+します。NTSC は top-field-first 640x480、30000/1001 fps、PAL は
+top-field-first 768x576、25 fps です。`--preview-crf` は 0 から 51 を受け付け、
+default は 31 です。値を下げると画質と bitrate が上がります。IPP が利用可能なら
+`ipp-fast` を自動選択し、それ以外では portable な managed backend に戻ります。
+`libx264` を含む FFmpeg が必要で、`VHSDECODE_FFMPEG` と
+`VHSDECODE_FFPROBE` で path を明示できます。
 
 <!-- SECTION: profiles -->
 
@@ -142,7 +159,7 @@ set が 390.8 から 360.5 MiB、private bytes が 409.9 から 374.4 MiB へ減
 
 `--threads 0`、default-five、20-worker の 24-run gate と、更新した 60-run Exact/IPP-fast
 matrix は、luma、chroma、raw JSON、stdout、normalized stderr/log、ordered `fileLoc` の
-各 surface で 1 hash を維持しました。標準 xUnit v3 suite の **1,463** tests も成功しました。
+各 surface で 1 hash を維持しました。標準 xUnit v3 suite の **1,482** tests も成功しました。
 
 更新した各 .NET profile/thread cell は 3 run 内で deterministic でした。固定 reference の
 merged Python PR341 も deterministic でした。Python v0.4.0 は 15 run で 15 種類の luma、
@@ -183,7 +200,7 @@ header は FFmpeg を維持します。
 dotnet restore VHSDecodeDotNet.slnx
 dotnet build VHSDecodeDotNet.slnx -c Release --no-restore
 dotnet test --solution VHSDecodeDotNet.slnx -c Release `
-  --no-build --no-restore --minimum-expected-tests 1463
+  --no-build --no-restore --minimum-expected-tests 1482
 ```
 
 Visual Studio 2026 で `VHSDecodeDotNet.slnx` を開くと、build、debug、

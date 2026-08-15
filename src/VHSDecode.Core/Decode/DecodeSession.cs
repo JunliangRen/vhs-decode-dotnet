@@ -109,6 +109,8 @@ public sealed record DecodeExecutionOptions(
     UpstreamBehaviorProfile UpstreamBehaviorProfile)
 {
     public BigInteger RequestedThreadsInteger { get; init; } = new(RequestedThreads);
+
+    public bool SuppressFileOutputs { get; init; }
 }
 
 internal sealed class DecodeThreadInitializationException(string message) : ArgumentException(message);
@@ -144,9 +146,12 @@ public static class DecodeSessionFactory
         int blockLength,
         bool enforceVhsFieldClass)
     {
-        if (command.Positionals.Count < 2)
+        bool previewServer = IsPreviewServer(command);
+        if (command.Positionals.Count < (previewServer ? 1 : 2))
         {
-            throw new ArgumentException("the following arguments are required: infile, outfile");
+            throw new ArgumentException(previewServer
+                ? "the following argument is required: infile"
+                : "the following arguments are required: infile, outfile");
         }
 
         if (blockLength <= 0 || blockLength % 2 != 0)
@@ -187,7 +192,8 @@ public static class DecodeSessionFactory
             command.InputFile,
             useFfmpegInputPath,
             selectedSampleRateMHz,
-            preferPyAvMappedRawFlacSeeking: ShouldUseParallelMappedRawFlacSeeking(command));
+            preferPyAvMappedRawFlacSeeking: ShouldUseParallelMappedRawFlacSeeking(command),
+            fastContainerSeeking: IsPreviewServer(command));
         FormatParameterSet parameters = FormatCatalog.Default.GetTapeParameters(
             system,
             command.Get<string>("tape_format"),
@@ -246,7 +252,12 @@ public static class DecodeSessionFactory
         }
 
         double? inputFrequencyMHz = NullableDouble(command, "inputfreq");
-        IRfSampleLoader loader = CreateLoader(command.InputFile, inputFrequencyMHz.HasValue, inputFrequencyMHz);
+        IRfSampleLoader loader = CreateLoader(
+            command.InputFile,
+            inputFrequencyMHz.HasValue,
+            inputFrequencyMHz,
+            preferPyAvMappedRawFlacSeeking: IsPreviewServer(command),
+            fastContainerSeeking: IsPreviewServer(command));
         string system = pal ? "PAL" : "NTSC";
         FormatParameterSet parameters = FormatCatalog.Default.GetLaserDiscParameters(system, command.Get<bool>("lowband"));
         parameters = ApplyLaserDiscOverrides(parameters, command);
@@ -264,9 +275,16 @@ public static class DecodeSessionFactory
         IRfSampleLoader loader)
     {
         double sampleRateHz = sampleRateMHz * 1_000_000.0;
+        bool suppressFileOutputs = IsPreviewServer(command);
         DecodeSession? activeSession = null;
         void WriteDiagnostic(string level, string message)
         {
+            if (suppressFileOutputs)
+            {
+                activeSession?.RuntimeReporter?.Log(level, message);
+                return;
+            }
+
             if (activeSession is null)
             {
                 DecodeSessionLogWriter.Append(command.OutputBase + ".log", level, message);
@@ -641,9 +659,14 @@ public static class DecodeSessionFactory
             DspBackend: DspBackendParser.Parse(command.Get<string>("dsp_backend")),
             UpstreamBehaviorProfile: SelectedUpstreamBehaviorProfile(command))
         {
-            RequestedThreadsInteger = requestedThreadsInteger
+            RequestedThreadsInteger = requestedThreadsInteger,
+            SuppressFileOutputs = IsPreviewServer(command)
         };
     }
+
+    private static bool IsPreviewServer(ParsedCommand command)
+        => command.Spec.Name is "vhs" or "ld"
+            && BoolValueOrDefault(command, "preview_server");
 
     private static UpstreamBehaviorProfile SelectedUpstreamBehaviorProfile(
         ParsedCommand command)
@@ -785,7 +808,8 @@ public static class DecodeSessionFactory
         string inputFile,
         bool needsResampling,
         double? inputFrequencyMHz = null,
-        bool preferPyAvMappedRawFlacSeeking = false)
+        bool preferPyAvMappedRawFlacSeeking = false,
+        bool fastContainerSeeking = false)
     {
         if (needsResampling)
         {
@@ -794,7 +818,8 @@ public static class DecodeSessionFactory
 
         return RfLoaderFactory.CreateNative(
             inputFile,
-            preferPyAvMappedRawFlacSeeking);
+            preferPyAvMappedRawFlacSeeking,
+            fastContainerSeeking);
     }
 
     private static bool ShouldUseParallelMappedRawFlacSeeking(ParsedCommand command)

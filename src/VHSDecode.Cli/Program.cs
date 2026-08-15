@@ -1,5 +1,6 @@
 using VHSDecode.Core.CommandLine;
 using VHSDecode.Core.Decode;
+using VHSDecode.Preview;
 
 namespace VHSDecode.Cli
 {
@@ -67,6 +68,15 @@ namespace VHSDecode.Cli
 
             try
             {
+                if (PreviewCommandRunner.IsRequested(command))
+                {
+                    return new PreviewCommandRunner().RunAsync(
+                        command,
+                        output,
+                        error,
+                        cancellationToken).GetAwaiter().GetResult();
+                }
+
                 return new DecodeRunner().Run(command, output, error, cancellationToken);
             }
             catch (Exception ex) when (ex is ArgumentException or FormatException or OverflowException)

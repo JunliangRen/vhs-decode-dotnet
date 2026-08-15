@@ -1,7 +1,8 @@
-﻿<Project Sdk="Microsoft.NET.Sdk">
+<Project Sdk="Microsoft.NET.Sdk">
 
   <ItemGroup>
     <ProjectReference Include="..\..\src\VHSDecode.Core\VHSDecode.Core.csproj" />
+    <ProjectReference Include="..\..\src\VHSDecode.Preview\VHSDecode.Preview.csproj" />
     <EmbeddedResource Include="Fixtures\tape-family-v0.4.0.json" />
   </ItemGroup>
 
