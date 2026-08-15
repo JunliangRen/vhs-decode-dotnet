@@ -216,7 +216,7 @@ other sample rates, and unfinished or ineligible headers retain FFmpeg.
 
 ## Build and test
 
-The pinned SDK is .NET `11.0.100-preview.6.26359.118`.
+The pinned SDK is .NET `11.0.100-preview.7.26381.103`.
 
 ```powershell
 dotnet restore VHSDecodeDotNet.slnx

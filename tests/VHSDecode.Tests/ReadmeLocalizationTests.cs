@@ -5,6 +5,10 @@ namespace VHSDecode.Tests;
 
 public sealed partial class ReadmeLocalizationTests
 {
+    private const string PinnedDotNetSdkVersion = "11.0.100-preview.7.26381.103";
+
+    private const string SetupDotNetStepName = "Set up .NET 11 Preview 7";
+
     private const string LatestPerformanceRunsMarker =
         "<!-- LATEST_PERFORMANCE_RUNS: performance-snapshot-runs=90 " +
         "dotnet-matrix-runs=60 dotnet-current-runs=30 " +
@@ -278,7 +282,7 @@ public sealed partial class ReadmeLocalizationTests
         string[] overviewFacts =
         [
             "43155200da87c0d49eb37d8ec09b1372075ee8e4",
-            "11.0.100-preview.6.26359.118",
+            PinnedDotNetSdkVersion,
             "**1,485**",
             "--compat-version",
             "current",
@@ -323,7 +327,7 @@ public sealed partial class ReadmeLocalizationTests
             "v0.4.0-2.1.0",
             "2f21e8ed6018b14561396cc95f1f6828054470b8",
             "v0.4.0-40-g2f21e8ed",
-            "11.0.100-preview.6.26359.118",
+            PinnedDotNetSdkVersion,
             "bdccd58",
             "1,210.850",
             "167.083",
@@ -1462,11 +1466,25 @@ public sealed partial class ReadmeLocalizationTests
             "1,430 independently discoverable tests",
             compatibilityEvidence,
             StringComparison.Ordinal);
+        string globalJson = File.ReadAllText(Path.Combine(
+            RepositoryRoot(),
+            "global.json"));
+        Assert.Contains(
+            $"\"version\": \"{PinnedDotNetSdkVersion}\"",
+            globalJson,
+            StringComparison.Ordinal);
+        Assert.DoesNotContain("preview.6", globalJson, StringComparison.OrdinalIgnoreCase);
         string workflow = File.ReadAllText(Path.Combine(
             RepositoryRoot(),
             ".github",
             "workflows",
             "release-build.yml"));
+        Assert.Contains(SetupDotNetStepName, workflow, StringComparison.Ordinal);
+        Assert.Contains("global-json-file: global.json", workflow, StringComparison.Ordinal);
+        Assert.DoesNotContain(
+            "Set up .NET 11 Preview 6",
+            workflow,
+            StringComparison.Ordinal);
         Assert.Contains(FullCiTestCommand, workflow, StringComparison.Ordinal);
         Assert.Contains(FinalRealRadix4AvxTestCommand, workflow, StringComparison.Ordinal);
         Assert.Contains(FinalRealRadix4AvxRequirement, workflow, StringComparison.Ordinal);

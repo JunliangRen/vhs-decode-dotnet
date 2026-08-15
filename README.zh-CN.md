@@ -183,7 +183,7 @@ TBC、色度、JSON 和日志文件允许在解码期间并发读取，兼容的
 
 ## 构建与测试
 
-项目固定使用 .NET SDK `11.0.100-preview.6.26359.118`。
+项目固定使用 .NET SDK `11.0.100-preview.7.26381.103`。
 
 ```powershell
 dotnet restore VHSDecodeDotNet.slnx

@@ -4149,7 +4149,7 @@ v3 suite passed all 1,448 tests.
 
 Requirements:
 
-- .NET SDK `11.0.100-preview.6.26359.118` (pinned by `global.json`)
+- .NET SDK `11.0.100-preview.7.26381.103` (pinned by `global.json`)
 - Visual Studio 2026 for IDE use
 - Visual Studio C++ Build Tools and a Windows SDK when building the optional
   Intel IPP bridge

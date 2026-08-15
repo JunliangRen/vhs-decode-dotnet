@@ -28,7 +28,7 @@ jobs:
       - name: Set up MSBuild
         uses: microsoft/setup-msbuild@v3
 
-      - name: Set up .NET 11 Preview 6
+      - name: Set up .NET 11 Preview 7
         uses: actions/setup-dotnet@v5
         with:
           global-json-file: global.json

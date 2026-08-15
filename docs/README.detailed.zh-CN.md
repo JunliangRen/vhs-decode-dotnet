@@ -3245,7 +3245,7 @@ destination API，把最终 burst SOS 写回这块独占 buffer，从而在该 A
 
 要求：
 
-- `.NET SDK 11.0.100-preview.6.26359.118`（由 `global.json` 锁定）
+- `.NET SDK 11.0.100-preview.7.26381.103`（由 `global.json` 锁定）
 - 使用 IDE 时需要 Visual Studio 2026
 - 构建可选 Intel IPP 桥接 DLL 时需要 Visual Studio C++ Build Tools 和 Windows SDK
 - 对不属于严格门控的直接 40 kHz 单声道 PCM16 raw-FLAC 原生输入路径的容器

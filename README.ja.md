@@ -196,7 +196,7 @@ header は FFmpeg を維持します。
 
 ## Build と test
 
-固定 SDK は .NET `11.0.100-preview.6.26359.118` です。
+固定 SDK は .NET `11.0.100-preview.7.26381.103` です。
 
 ```powershell
 dotnet restore VHSDecodeDotNet.slnx
