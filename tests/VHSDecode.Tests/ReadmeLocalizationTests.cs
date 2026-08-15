@@ -44,7 +44,7 @@ public sealed partial class ReadmeLocalizationTests
 
     private const string FullCiTestCommand =
         "run: dotnet test --solution VHSDecodeDotNet.slnx --configuration Release " +
-        "--no-build --no-restore --minimum-expected-tests 1482";
+        "--no-build --no-restore --minimum-expected-tests 1485";
 
     private const string FinalRealRadix4AvxTestCommand =
         "run: dotnet test tests/VHSDecode.Tests/VHSDecode.Tests.csproj " +
@@ -279,7 +279,7 @@ public sealed partial class ReadmeLocalizationTests
         [
             "43155200da87c0d49eb37d8ec09b1372075ee8e4",
             "11.0.100-preview.6.26359.118",
-            "**1,482**",
+            "**1,485**",
             "--compat-version",
             "current",
             "--dsp-backend",
@@ -670,7 +670,7 @@ public sealed partial class ReadmeLocalizationTests
             "1.72%",
             "444.3 MiB",
             "406.0 MiB",
-            "**1,482**",
+            "**1,485**",
             "3.7935",
             "3.6182",
             "4.62%",
@@ -1362,7 +1362,7 @@ public sealed partial class ReadmeLocalizationTests
             "288.02",
             "390.8/360.5 MiB",
             "409.9/374.4 MiB",
-            "1,482",
+            "1,485",
             "COMPATIBILITY_EVIDENCE.md"
         ];
 
@@ -1445,7 +1445,7 @@ public sealed partial class ReadmeLocalizationTests
             "The shared compatibility evidence document is missing.");
         string compatibilityEvidence = File.ReadAllText(compatibilityEvidencePath);
         Assert.Contains(
-            "1,482 independently discoverable tests",
+            "1,485 independently discoverable tests",
             compatibilityEvidence,
             StringComparison.Ordinal);
         Assert.DoesNotContain(

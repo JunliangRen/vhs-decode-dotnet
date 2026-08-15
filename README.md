@@ -38,7 +38,7 @@ evidence, and remaining gaps.
   EIAJ, and supported PAL/NTSC variants.
 - TBC utility tools, the double-click GUI, and developer plotting windows are
   intentionally out of scope.
-- The Visual Studio 2026 `.slnx` solution has **1,482** standard xUnit v3 tests
+- The Visual Studio 2026 `.slnx` solution has **1,485** standard xUnit v3 tests
   that are visible in Test Explorer and runnable with `dotnet test`.
 
 <!-- SECTION: start -->
@@ -175,7 +175,7 @@ from 409.9 to 374.4 MiB.
 A 24-run `--threads 0`/default-five/20-worker gate and the refreshed 60-run
 Exact/IPP-fast matrix each retained one hash for luma, chroma, raw JSON, stdout,
 normalized stderr/logs, and ordered `fileLoc`. The standard xUnit v3 suite
-passed all **1,482** tests.
+passed all **1,485** tests.
 
 Every .NET profile/thread cell was deterministic across its three refreshed
 runs. Merged Python PR341 was deterministic in its pinned reference set; Python
@@ -219,7 +219,7 @@ The pinned SDK is .NET `11.0.100-preview.6.26359.118`.
 dotnet restore VHSDecodeDotNet.slnx
 dotnet build VHSDecodeDotNet.slnx -c Release --no-restore
 dotnet test --solution VHSDecodeDotNet.slnx -c Release `
-  --no-build --no-restore --minimum-expected-tests 1482
+  --no-build --no-restore --minimum-expected-tests 1485
 ```
 
 Open `VHSDecodeDotNet.slnx` in Visual Studio 2026 to build, debug, and run the

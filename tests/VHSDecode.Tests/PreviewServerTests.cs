@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using VHSDecode.Core.CommandLine;
 using VHSDecode.Core.Decode;
 using VHSDecode.Preview;
@@ -97,8 +98,7 @@ public sealed class PreviewServerTests
             timeline.FrameCountInWindow(0),
             timeline.FramesPerSegment,
             timeline.FramesPerSecond.ToString("R", System.Globalization.CultureInfo.InvariantCulture),
-            "2.002",
-            "0");
+            "2.002");
 
         AssertOption(arguments, "-pixel_format", "yuv420p");
         AssertOption(arguments, "-crf", "23");
@@ -110,6 +110,70 @@ public sealed class PreviewServerTests
         Assert.Contains("tff=1", x264Parameters);
         Assert.Contains("colorprim=smpte170m", x264Parameters);
         Assert.Contains("fullrange=off", x264Parameters);
+        Assert.DoesNotContain("-output_ts_offset", arguments);
+
+        AssertEncodedWindowStartsAtGlobalTimelinePosition();
+    }
+
+    [Fact(DisplayName = "Preview windows retain only the configured source-frame samples")]
+    public void PreviewWindowsRetainOnlyTheConfiguredSourceFrameSamples()
+    {
+        const int width = 64;
+        const int height = 48;
+        const int outputFrameCount = 10;
+        const int sampledFrameLimit = 4;
+        ParsedCommand command = new CommandLineParser().Parse(
+            CliSpecs.Vhs,
+            ["--pal", "capture.lds", "output"]);
+        using DecodeSession session = DecodeSessionFactory.Create(command);
+        using var output = new MemoryStream();
+        var assembler = new PreviewFrameAssembler(
+            session,
+            output,
+            width,
+            height,
+            targetStartSample: 0,
+            outputFrameCount,
+            sampledFrameLimit);
+        ushort neutralLuma = session.VideoOutput.ConvertHz(session.VideoOutput.IreToHz(50.0));
+        ushort[] luma = Enumerable.Repeat(
+            neutralLuma,
+            session.TbcFrameSpec.FieldSampleCount).ToArray();
+        ushort[] chroma = Enumerable.Repeat(
+            (ushort)32767,
+            session.TbcFrameSpec.FieldSampleCount).ToArray();
+        var writes = new List<(TbcDecodedField, TbcFieldOrderDecision)>();
+        for (int fieldIndex = 0; fieldIndex < 12; fieldIndex++)
+        {
+            bool isFirstField = (fieldIndex & 1) == 0;
+            writes.Add((
+                new TbcDecodedField(
+                    fieldIndex + 1,
+                    luma,
+                    null!,
+                    null!,
+                    0.0,
+                    0.0,
+                    0,
+                    0,
+                    FieldPhaseId: (fieldIndex % 4) + 1,
+                    ChromaSamples: chroma),
+                new TbcFieldOrderDecision(
+                    fieldIndex + 1,
+                    isFirstField,
+                    isFirstField,
+                    IsDuplicateField: false,
+                    WriteField: true,
+                    SyncConfidence: 100,
+                    DecodeFaults: 0)));
+        }
+
+        assembler.Accept(writes);
+        assembler.Complete();
+
+        Assert.Equal(sampledFrameLimit, assembler.SampledFrameCount);
+        Assert.Equal(outputFrameCount, assembler.WrittenFrameCount);
+        Assert.Equal(outputFrameCount * width * height * 3 / 2, output.Length);
     }
 
     [Fact(DisplayName = "Preview colour renderer recovers PAL colour-under chroma")]
@@ -327,6 +391,10 @@ public sealed class PreviewServerTests
         Assert.Contains("aria-label=\"Preview position\"", player);
         Assert.Contains("MediaSource", player);
         Assert.Contains("avc1.4d401f", player);
+        Assert.Contains("new AbortController()", player);
+        Assert.Contains("sourceBuffer.buffered", player);
+        Assert.DoesNotContain("timestampOffset", player);
+        Assert.DoesNotContain("requestedWindows", player);
         Assert.DoesNotContain("cdn.jsdelivr.net", player);
     }
 
@@ -357,6 +425,84 @@ public sealed class PreviewServerTests
         Assert.Equal([0], provider.GeneratedWindows);
     }
 
+    [Fact(DisplayName = "Abandoned preview waiters cancel their shared window generation")]
+    public async Task AbandonedPreviewWaitersCancelTheirSharedWindowGeneration()
+    {
+        CancellationToken cancellationToken = TestContext.Current.CancellationToken;
+        var provider = new BlockingProvider(
+            new PreviewTimeline(8.0, 25.0, 2.0, 1),
+            completeSubsequentGenerations: true);
+        await using var cache = new PreviewSegmentCache(provider, capacity: 2);
+        using var firstCancellation = new CancellationTokenSource();
+        using var secondCancellation = new CancellationTokenSource();
+
+        Task<PreviewSegmentWindow> first = cache.GetWindowAsync(
+            1,
+            firstCancellation.Token);
+        Task<PreviewSegmentWindow> second = cache.GetWindowAsync(
+            1,
+            secondCancellation.Token);
+        await provider.GenerationStarted.Task.WaitAsync(
+            TimeSpan.FromSeconds(5),
+            cancellationToken);
+
+        firstCancellation.Cancel();
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => first);
+        Assert.False(provider.GenerationCancelled.Task.IsCompleted);
+
+        secondCancellation.Cancel();
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => second);
+        int cancelledWindow = await provider.GenerationCancelled.Task.WaitAsync(
+            TimeSpan.FromSeconds(5),
+            cancellationToken);
+
+        Assert.Equal(1, cancelledWindow);
+        PreviewSegmentWindow retry = await cache.GetWindowAsync(1, cancellationToken);
+        Assert.Equal(1, retry.WindowIndex);
+        Assert.Equal(2, provider.GenerationCount);
+    }
+
+    [Fact(DisplayName = "Preview server shutdown cancels an active window build")]
+    public async Task PreviewServerShutdownCancelsAnActiveWindowBuild()
+    {
+        CancellationToken cancellationToken = TestContext.Current.CancellationToken;
+        var provider = new BlockingProvider(new PreviewTimeline(8.0, 25.0, 2.0, 1));
+        PreviewHttpServer server = await PreviewHttpServer.StartAsync(
+            provider,
+            new PreviewServerOptions { Port = 0 },
+            cancellationToken);
+        using var client = new HttpClient { BaseAddress = server.BaseAddress };
+        Task<HttpResponseMessage> request = client.GetAsync(
+            "hls/window/1/segment/0.m4s",
+            HttpCompletionOption.ResponseHeadersRead,
+            cancellationToken);
+        try
+        {
+            await provider.GenerationStarted.Task.WaitAsync(
+                TimeSpan.FromSeconds(5),
+                cancellationToken);
+            Task shutdown = server.DisposeAsync().AsTask();
+            Assert.Equal(
+                1,
+                await provider.GenerationCancelled.Task.WaitAsync(
+                    TimeSpan.FromSeconds(5),
+                    cancellationToken));
+            await shutdown.WaitAsync(TimeSpan.FromSeconds(5), cancellationToken);
+            try
+            {
+                using HttpResponseMessage response = await request;
+            }
+            catch (Exception ex) when (ex is HttpRequestException or OperationCanceledException)
+            {
+                // Either a closed connection or a cancelled response is valid during shutdown.
+            }
+        }
+        finally
+        {
+            await server.DisposeAsync();
+        }
+    }
+
     private static int Count(string text, string value)
     {
         int count = 0;
@@ -375,6 +521,138 @@ public sealed class PreviewServerTests
         int index = Array.IndexOf(arguments, option);
         Assert.True(index >= 0 && index + 1 < arguments.Length, $"Missing encoder option {option}.");
         Assert.Equal(expectedValue, arguments[index + 1]);
+    }
+
+    private static void AssertEncodedWindowStartsAtGlobalTimelinePosition()
+    {
+        Assert.SkipUnless(
+            CommandIsAvailable("ffmpeg") && CommandIsAvailable("ffprobe"),
+            "ffmpeg and ffprobe must be available on PATH.");
+
+        const int width = 64;
+        const int height = 48;
+        const int windowIndex = 3;
+        var timeline = new PreviewTimeline(8.0, 25.0, 2.0, 1);
+        var encoder = new FfmpegHlsWindowEncoder(
+            "ffmpeg",
+            width,
+            height,
+            31,
+            "PAL",
+            timeline);
+        byte[] frame = new byte[width * height * 3 / 2];
+        Array.Fill(frame, (byte)16, 0, width * height);
+        Array.Fill(frame, (byte)128, width * height, frame.Length - (width * height));
+
+        PreviewSegmentWindow encoded = EncodeSyntheticWindow(encoder, timeline, windowIndex, frame);
+        PreviewSegmentWindow origin = EncodeSyntheticWindow(encoder, timeline, 0, frame);
+        Assert.Equal(origin.InitializationSegment, encoded.InitializationSegment);
+
+        string directory = Path.Combine(
+            Path.GetTempPath(),
+            "vhsdecode-preview-timestamp-tests-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(directory);
+        try
+        {
+            string mediaPath = Path.Combine(directory, "window.mp4");
+            using (FileStream media = File.Create(mediaPath))
+            {
+                media.Write(encoded.InitializationSegment);
+                foreach (PreviewMediaSegment segment in encoded.Segments)
+                {
+                    media.Write(segment.Data);
+                }
+            }
+
+            double firstPacketTimestamp = ProbeFirstVideoPacketTimestamp(mediaPath);
+            double expected = timeline.WindowStartSeconds(windowIndex);
+            Assert.InRange(firstPacketTimestamp, expected, expected + 0.05);
+        }
+        finally
+        {
+            Directory.Delete(directory, recursive: true);
+        }
+    }
+
+    private static PreviewSegmentWindow EncodeSyntheticWindow(
+        FfmpegHlsWindowEncoder encoder,
+        PreviewTimeline timeline,
+        int windowIndex,
+        byte[] frame)
+        => encoder.Encode(
+            windowIndex,
+            stream =>
+            {
+                for (int frameIndex = 0;
+                     frameIndex < timeline.FrameCountInWindow(windowIndex);
+                     frameIndex++)
+                {
+                    stream.Write(frame);
+                }
+            },
+            TestContext.Current.CancellationToken);
+
+    private static double ProbeFirstVideoPacketTimestamp(string mediaPath)
+    {
+        var startInfo = new ProcessStartInfo("ffprobe")
+        {
+            UseShellExecute = false,
+            CreateNoWindow = true,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true
+        };
+        foreach (string argument in new[]
+        {
+            "-v", "error",
+            "-select_streams", "v:0",
+            "-show_entries", "packet=pts_time",
+            "-of", "default=noprint_wrappers=1:nokey=1",
+            mediaPath
+        })
+        {
+            startInfo.ArgumentList.Add(argument);
+        }
+
+        using Process process = Process.Start(startInfo)
+            ?? throw new InvalidOperationException("Failed to start ffprobe.");
+        Task<string> output = process.StandardOutput.ReadToEndAsync();
+        Task<string> error = process.StandardError.ReadToEndAsync();
+        process.WaitForExit();
+        Task.WhenAll(output, error).GetAwaiter().GetResult();
+        Assert.True(
+            process.ExitCode == 0,
+            $"ffprobe exited with {process.ExitCode}: {error.Result}");
+        string firstTimestamp = output.Result.Split(
+            ['\r', '\n'],
+            StringSplitOptions.RemoveEmptyEntries)[0];
+        return double.Parse(
+            firstTimestamp,
+            System.Globalization.CultureInfo.InvariantCulture);
+    }
+
+    private static bool CommandIsAvailable(string command)
+    {
+        var startInfo = new ProcessStartInfo(command)
+        {
+            UseShellExecute = false,
+            CreateNoWindow = true,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true
+        };
+        startInfo.ArgumentList.Add("-version");
+        try
+        {
+            using Process process = Process.Start(startInfo)!;
+            Task<string> output = process.StandardOutput.ReadToEndAsync();
+            Task<string> error = process.StandardError.ReadToEndAsync();
+            process.WaitForExit();
+            Task.WhenAll(output, error).GetAwaiter().GetResult();
+            return process.ExitCode == 0;
+        }
+        catch (System.ComponentModel.Win32Exception)
+        {
+            return false;
+        }
     }
 
     private static void AddFourFscCarrier(
@@ -477,6 +755,75 @@ public sealed class PreviewServerTests
                 windowIndex,
                 [(byte)windowIndex, 0x49],
                 segments);
+        }
+
+        public ValueTask DisposeAsync() => ValueTask.CompletedTask;
+    }
+
+    private sealed class BlockingProvider : IPreviewSegmentProvider
+    {
+        private readonly bool _completeSubsequentGenerations;
+        private int _generationCount;
+
+        internal BlockingProvider(
+            PreviewTimeline timeline,
+            bool completeSubsequentGenerations = false)
+        {
+            Timeline = timeline;
+            _completeSubsequentGenerations = completeSubsequentGenerations;
+            MediaInfo = new PreviewMediaInfo(
+                "VHS",
+                "PAL",
+                timeline.FramesPerSecond,
+                timeline.DurationSeconds,
+                768,
+                576,
+                31,
+                true,
+                "test",
+                "test");
+        }
+
+        internal TaskCompletionSource<int> GenerationStarted { get; } = new(
+            TaskCreationOptions.RunContinuationsAsynchronously);
+
+        internal TaskCompletionSource<int> GenerationCancelled { get; } = new(
+            TaskCreationOptions.RunContinuationsAsynchronously);
+
+        internal int GenerationCount => Volatile.Read(ref _generationCount);
+
+        public PreviewMediaInfo MediaInfo { get; }
+
+        public PreviewTimeline Timeline { get; }
+
+        public async Task<PreviewSegmentWindow> GenerateWindowAsync(
+            int windowIndex,
+            CancellationToken cancellationToken)
+        {
+            int generation = Interlocked.Increment(ref _generationCount);
+            if (generation > 1 && _completeSubsequentGenerations)
+            {
+                return new PreviewSegmentWindow(
+                    windowIndex,
+                    [(byte)windowIndex, 0x49],
+                    [new PreviewMediaSegment(
+                        Timeline.FirstSegmentInWindow(windowIndex),
+                        0,
+                        Timeline.WindowDurationSeconds(windowIndex),
+                        [(byte)windowIndex, 0x5A])]);
+            }
+
+            GenerationStarted.TrySetResult(windowIndex);
+            try
+            {
+                await Task.Delay(Timeout.InfiniteTimeSpan, cancellationToken);
+                throw new InvalidOperationException("The blocking provider unexpectedly resumed.");
+            }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            {
+                GenerationCancelled.TrySetResult(windowIndex);
+                throw;
+            }
         }
 
         public ValueTask DisposeAsync() => ValueTask.CompletedTask;

@@ -13,7 +13,8 @@ internal sealed class PreviewFrameAssembler
     private readonly PreviewFieldRenderer _renderer;
     private readonly long _targetStartSample;
     private readonly long _halfFrameSamples;
-    private readonly int _requestedFrames;
+    private readonly int _outputFrameCount;
+    private readonly int _sampledFrameLimit;
     private PreviewRenderedField? _firstField;
     private long _firstFieldStart;
     private byte[]? _lastFrame;
@@ -24,9 +25,20 @@ internal sealed class PreviewFrameAssembler
         int width,
         int height,
         long targetStartSample,
-        int requestedFrames)
+        int outputFrameCount,
+        int sampledFrameLimit)
     {
         ArgumentNullException.ThrowIfNull(session);
+        if (outputFrameCount <= 0)
+        {
+            throw new ArgumentOutOfRangeException(nameof(outputFrameCount));
+        }
+
+        if (sampledFrameLimit <= 0 || sampledFrameLimit > outputFrameCount)
+        {
+            throw new ArgumentOutOfRangeException(nameof(sampledFrameLimit));
+        }
+
         _output = output ?? throw new ArgumentNullException(nameof(output));
         _width = width;
         _height = height;
@@ -41,17 +53,20 @@ internal sealed class PreviewFrameAssembler
             checked((long)Math.Round(
                 session.DecodeSampleRateHz / (framesPerSecond * 2.0),
                 MidpointRounding.AwayFromZero)));
-        _requestedFrames = requestedFrames;
+        _outputFrameCount = outputFrameCount;
+        _sampledFrameLimit = sampledFrameLimit;
     }
 
     internal int WrittenFrameCount { get; private set; }
+
+    internal int SampledFrameCount { get; private set; }
 
     internal void Accept(
         IReadOnlyList<(TbcDecodedField Field, TbcFieldOrderDecision Decision)> writes)
     {
         foreach ((TbcDecodedField field, TbcFieldOrderDecision decision) in writes)
         {
-            if (WrittenFrameCount >= _requestedFrames)
+            if (SampledFrameCount >= _sampledFrameLimit)
             {
                 return;
             }
@@ -79,13 +94,14 @@ internal sealed class PreviewFrameAssembler
             }
 
             WriteFrame(frame);
+            SampledFrameCount++;
         }
     }
 
     internal void Complete()
     {
         byte[] fill = _lastFrame ?? CreateBlackFrame();
-        while (WrittenFrameCount < _requestedFrames)
+        while (WrittenFrameCount < _outputFrameCount)
         {
             WriteFrame(fill);
         }

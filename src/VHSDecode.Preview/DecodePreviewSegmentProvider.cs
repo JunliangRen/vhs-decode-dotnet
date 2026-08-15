@@ -180,7 +180,8 @@ public sealed class DecodePreviewSegmentProvider : IPreviewSegmentProvider
                     MediaInfo.Width,
                     MediaInfo.Height,
                     targetSample,
-                    outputFrameCount);
+                    outputFrameCount,
+                    decodedFrameCount);
                 var engine = new TbcFieldSequenceDecodeEngine(cancellationToken: cancellationToken);
                 _ = engine.DecodeToSink(
                     session,

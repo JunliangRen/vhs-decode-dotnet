@@ -2229,7 +2229,7 @@ dotnet test --solution VHSDecodeDotNet.slnx --no-build
 ```
 
 The current formal solution build completes with zero warnings and errors, and
-the xUnit v3 project exposes 1,482 independently discoverable tests
+the xUnit v3 project exposes 1,485 independently discoverable tests
 to `dotnet test` and Visual Studio Test Explorer. On the
 same Windows machine and fixtures, Release wall-clock measurements for one
 frame were 2.346 s versus 7.193 s for NTSC VHS and 1.651 s versus 5.865 s for
@@ -2725,8 +2725,8 @@ HiFi FLAC output and LD `--write-test-ldf` still use bundled libsndfile. HiFi
 
 VHS and LaserDisc now provide an opt-in loopback HLS/fMP4 preview server that
 accepts only the RF input path and suppresses TBC, chroma-TBC, JSON, SQLite,
-EFM, audio, and decoder-log output. Each two-second window decodes four source
-frames on demand, derives low-cost colour with a 4fSC one-dimensional
+EFM, audio, and decoder-log output. Each two-second window retains up to four
+decoded source frames on demand, derives low-cost colour with a 4fSC one-dimensional
 demodulator, repeats the last sampled frame to preserve the source timeline,
 and applies lightweight paired-line/same-field dropout concealment. This is a
 navigation contract, not a substitute for the export chroma comb or a
@@ -2737,13 +2737,10 @@ capture and one private 40 MHz NTSC LaserDisc raw-FLAC capture. The generated
 PAL and NTSC frames retained visible colour. FFprobe reported H.264 Main level
 3.1, limited-range YUV420P, PAL BT.470BG or NTSC SMPTE 170M colour metadata,
 and every inspected frame was interlaced top-field-first. PAL was fixed at
-768x576/25 fps and NTSC at 640x480/30000/1001 fps. After server startup, the
-first requested window completed in 1.295 s for PAL and 2.204 s for NTSC; an
-uncached window 50 completed in 0.909 s and 1.023 s respectively. The sampled
-two-second segments were approximately 954 kbit/s for this noisy PAL scene and
-228 kbit/s for the less complex NTSC scene. These are single local navigation
-measurements rather than general throughput or bitrate guarantees. No decoder
-output artifacts were created beside either source.
+768x576/25 fps and NTSC at 640x480/30000/1001 fps. The strict four-frame
+sampling cap and seek-lifecycle fixes landed after those private-capture
+measurements, so this entry makes no final-source throughput or bitrate claim.
+No decoder output artifacts were created beside either source.
 
 ### Direct segmented VHS envelope analysis
 

@@ -174,14 +174,15 @@ public sealed class PreviewHttpServer : IAsyncDisposable
         }
 
         _disposed = true;
+        Task stopTask = _application.StopAsync();
+        Task cacheDisposeTask = _cache.DisposeAsync().AsTask();
         try
         {
-            await _application.StopAsync().ConfigureAwait(false);
+            await Task.WhenAll(stopTask, cacheDisposeTask).ConfigureAwait(false);
         }
         finally
         {
             await _application.DisposeAsync().ConfigureAwait(false);
-            await _cache.DisposeAsync().ConfigureAwait(false);
         }
     }
 
@@ -235,8 +236,7 @@ public sealed class PreviewHttpServer : IAsyncDisposable
             let appendQueue = [];
             let dragging = false;
             let nativeSeekTimer;
-            const requestedWindows = new Set();
-            const loadedWindows = new Set();
+            const windowRequests = new Map();
 
             const formatTime = value => {
               const seconds = Math.max(0, Math.floor(Number.isFinite(value) ? value : 0));
@@ -256,41 +256,91 @@ public sealed class PreviewHttpServer : IAsyncDisposable
             const appendNext = () => {
               if (!sourceBuffer || sourceBuffer.updating || appendQueue.length === 0) return;
               const item = appendQueue.shift();
-              sourceBuffer.timestampOffset = item.windowIndex * info.windowSeconds;
-              sourceBuffer.appendBuffer(item.data);
-              sourceBuffer.addEventListener('updateend', () => {
+              const failAppend = error => {
+                sourceBuffer.removeEventListener('updateend', completeAppend);
+                sourceBuffer.removeEventListener('error', failAppend);
+                if (windowRequests.get(item.windowIndex) === item.controller) {
+                  windowRequests.delete(item.windowIndex);
+                }
+                appendQueue = appendQueue.filter(queued => queued.windowIndex !== item.windowIndex);
+                diagnostics.errors.push(String(error));
+                status.textContent = `Preview buffer error: ${error}`;
+                appendNext();
+              };
+              const completeAppend = () => {
+                sourceBuffer.removeEventListener('error', failAppend);
                 if (item.kind === 'media') {
-                  loadedWindows.add(item.windowIndex);
+                  if (windowRequests.get(item.windowIndex) === item.controller) {
+                    windowRequests.delete(item.windowIndex);
+                  }
                   diagnostics.lastLoadedWindow = item.windowIndex;
                   diagnostics.requestCompletedAt = performance.now();
                   diagnostics.ready = true;
                   status.textContent = `Ready at ${formatTime(item.windowIndex * info.windowSeconds)}. Drag either progress bar to seek.`;
                 }
                 appendNext();
-              }, { once: true });
+              };
+              sourceBuffer.addEventListener('updateend', completeAppend, { once: true });
+              sourceBuffer.addEventListener('error', failAppend, { once: true });
+              try {
+                sourceBuffer.appendBuffer(item.data);
+              } catch (error) {
+                failAppend(error);
+              }
+            };
+
+            const isWindowBuffered = windowIndex => {
+              if (!sourceBuffer || !info) return false;
+              const start = windowIndex * info.windowSeconds;
+              const end = Math.min(info.durationSeconds, start + info.windowSeconds);
+              const probe = Math.min(end - 0.001, start + Math.min(0.05, info.windowSeconds / 2));
+              for (let range = 0; range < sourceBuffer.buffered.length; range++) {
+                if (sourceBuffer.buffered.start(range) <= probe
+                    && sourceBuffer.buffered.end(range) > probe) return true;
+              }
+              return false;
+            };
+
+            const prioritizeWindow = windowIndex => {
+              for (const [requestedWindow, controller] of windowRequests) {
+                if (requestedWindow === windowIndex) continue;
+                controller.abort();
+                windowRequests.delete(requestedWindow);
+              }
+              appendQueue = appendQueue.filter(item => item.windowIndex === windowIndex);
             };
 
             const ensureWindow = async windowIndex => {
-              if (!info || windowIndex < 0 || windowIndex >= info.windowCount
-                  || loadedWindows.has(windowIndex) || requestedWindows.has(windowIndex)) return;
-              requestedWindows.add(windowIndex);
+              if (!info || !sourceBuffer || windowIndex < 0 || windowIndex >= info.windowCount
+                  || windowRequests.has(windowIndex) || isWindowBuffered(windowIndex)) return;
+              const controller = new AbortController();
+              windowRequests.set(windowIndex, controller);
               diagnostics.lastRequestedWindow = windowIndex;
               diagnostics.requestStartedAt = performance.now();
               status.textContent = `Decoding preview at ${formatTime(windowIndex * info.windowSeconds)}...`;
               try {
                 const [initResponse, mediaResponse] = await Promise.all([
-                  fetch(`/hls/window/${windowIndex}/init.mp4`),
-                  fetch(`/hls/window/${windowIndex}/segment/0.m4s`)
+                  fetch(`/hls/window/${windowIndex}/init.mp4`, { signal: controller.signal }),
+                  fetch(`/hls/window/${windowIndex}/segment/0.m4s`, { signal: controller.signal })
                 ]);
                 if (!initResponse.ok || !mediaResponse.ok) {
                   throw new Error(`HTTP ${initResponse.status}/${mediaResponse.status}`);
                 }
+                const [initData, mediaData] = await Promise.all([
+                  initResponse.arrayBuffer(),
+                  mediaResponse.arrayBuffer()
+                ]);
+                if (controller.signal.aborted
+                    || windowRequests.get(windowIndex) !== controller) return;
                 appendQueue.push(
-                  { kind: 'init', windowIndex, data: await initResponse.arrayBuffer() },
-                  { kind: 'media', windowIndex, data: await mediaResponse.arrayBuffer() });
+                  { kind: 'init', windowIndex, controller, data: initData },
+                  { kind: 'media', windowIndex, controller, data: mediaData });
                 appendNext();
               } catch (error) {
-                requestedWindows.delete(windowIndex);
+                if (windowRequests.get(windowIndex) === controller) {
+                  windowRequests.delete(windowIndex);
+                }
+                if (error?.name === 'AbortError') return;
                 diagnostics.errors.push(String(error));
                 status.textContent = `Preview error: ${error}`;
               }
@@ -302,10 +352,12 @@ public sealed class PreviewHttpServer : IAsyncDisposable
 
             const seekTo = value => {
               const target = Math.min(info.durationSeconds - 0.001, Math.max(0, value));
+              const targetWindow = windowForTime(target);
+              prioritizeWindow(targetWindow);
               video.currentTime = target;
               timeline.value = String(target);
               updateClock(target);
-              ensureWindow(windowForTime(target));
+              ensureWindow(targetWindow);
             };
 
             timeline.addEventListener('pointerdown', () => { dragging = true; });
@@ -314,9 +366,11 @@ public sealed class PreviewHttpServer : IAsyncDisposable
             timeline.addEventListener('change', () => seekTo(Number(timeline.value)));
             video.addEventListener('seeking', () => {
               clearTimeout(nativeSeekTimer);
-              nativeSeekTimer = setTimeout(
-                () => ensureWindow(windowForTime(video.currentTime)),
-                150);
+              nativeSeekTimer = setTimeout(() => {
+                const targetWindow = windowForTime(video.currentTime);
+                prioritizeWindow(targetWindow);
+                ensureWindow(targetWindow);
+              }, 150);
             });
             video.addEventListener('play', () => {
               const currentWindow = windowForTime(video.currentTime);

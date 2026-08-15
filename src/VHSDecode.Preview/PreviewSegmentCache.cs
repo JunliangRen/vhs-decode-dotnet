@@ -6,7 +6,7 @@ public sealed class PreviewSegmentCache : IAsyncDisposable
     private readonly int _capacity;
     private readonly object _gate = new();
     private readonly Dictionary<int, CacheEntry> _entries = [];
-    private readonly Dictionary<int, Task<PreviewSegmentWindow>> _inflight = [];
+    private readonly Dictionary<int, InflightEntry> _inflight = [];
     private readonly LinkedList<int> _lru = [];
     private readonly CancellationTokenSource _shutdown = new();
     private bool _disposed;
@@ -21,33 +21,80 @@ public sealed class PreviewSegmentCache : IAsyncDisposable
         int windowIndex,
         CancellationToken cancellationToken = default)
     {
-        Task<PreviewSegmentWindow> task;
-        lock (_gate)
+        while (true)
         {
-            ObjectDisposedException.ThrowIf(_disposed, this);
-            if (_entries.TryGetValue(windowIndex, out CacheEntry? cached))
+            InflightEntry? entry = null;
+            Task<PreviewSegmentWindow>? abandonedGeneration = null;
+            lock (_gate)
             {
-                Touch(cached);
-                return cached.Window;
+                ObjectDisposedException.ThrowIf(_disposed, this);
+                if (_entries.TryGetValue(windowIndex, out CacheEntry? cached))
+                {
+                    Touch(cached);
+                    return cached.Window;
+                }
+
+                if (_inflight.TryGetValue(windowIndex, out entry))
+                {
+                    if (entry.Abandoned)
+                    {
+                        abandonedGeneration = entry.GenerationTask;
+                    }
+                    else
+                    {
+                        entry.WaiterCount++;
+                    }
+                }
+                else
+                {
+                    var generationCancellation = CancellationTokenSource
+                        .CreateLinkedTokenSource(_shutdown.Token);
+                    entry = new InflightEntry(generationCancellation)
+                    {
+                        WaiterCount = 1
+                    };
+                    _inflight.Add(windowIndex, entry);
+                    entry.GenerationTask = GenerateAndStoreAsync(windowIndex, entry);
+                }
             }
 
-            if (!_inflight.TryGetValue(windowIndex, out task!))
+            if (abandonedGeneration is not null)
             {
-                task = GenerateAndStoreAsync(windowIndex);
-                _inflight.Add(windowIndex, task);
+                try
+                {
+                    await abandonedGeneration.ConfigureAwait(false);
+                }
+                catch (Exception)
+                {
+                    // A new waiter retries after the abandoned generation drains.
+                }
+
+                cancellationToken.ThrowIfCancellationRequested();
+                continue;
+            }
+
+            try
+            {
+                return await entry!.GenerationTask
+                    .WaitAsync(cancellationToken)
+                    .ConfigureAwait(false);
+            }
+            finally
+            {
+                ReleaseWaiter(windowIndex, entry!);
             }
         }
-
-        return await task.WaitAsync(cancellationToken).ConfigureAwait(false);
     }
 
-    private async Task<PreviewSegmentWindow> GenerateAndStoreAsync(int windowIndex)
+    private async Task<PreviewSegmentWindow> GenerateAndStoreAsync(
+        int windowIndex,
+        InflightEntry entry)
     {
         try
         {
             PreviewSegmentWindow window = await _provider.GenerateWindowAsync(
                 windowIndex,
-                _shutdown.Token).ConfigureAwait(false);
+                entry.GenerationCancellation.Token).ConfigureAwait(false);
             lock (_gate)
             {
                 if (_disposed)
@@ -74,7 +121,44 @@ public sealed class PreviewSegmentCache : IAsyncDisposable
         {
             lock (_gate)
             {
-                _inflight.Remove(windowIndex);
+                if (_inflight.TryGetValue(windowIndex, out InflightEntry? current)
+                    && ReferenceEquals(current, entry))
+                {
+                    _inflight.Remove(windowIndex);
+                }
+            }
+
+            entry.GenerationCancellation.Dispose();
+        }
+    }
+
+    private void ReleaseWaiter(int windowIndex, InflightEntry entry)
+    {
+        bool cancelGeneration = false;
+        lock (_gate)
+        {
+            if (_inflight.TryGetValue(windowIndex, out InflightEntry? current)
+                && ReferenceEquals(current, entry))
+            {
+                entry.WaiterCount--;
+                cancelGeneration = entry.WaiterCount == 0
+                    && !entry.GenerationTask.IsCompleted;
+                if (cancelGeneration)
+                {
+                    entry.Abandoned = true;
+                }
+            }
+        }
+
+        if (cancelGeneration)
+        {
+            try
+            {
+                entry.GenerationCancellation.Cancel();
+            }
+            catch (ObjectDisposedException)
+            {
+                // The generation completed between the waiter release and cancellation.
             }
         }
     }
@@ -96,7 +180,7 @@ public sealed class PreviewSegmentCache : IAsyncDisposable
             }
 
             _disposed = true;
-            inflight = [.. _inflight.Values];
+            inflight = [.. _inflight.Values.Select(entry => entry.GenerationTask)];
             _entries.Clear();
             _lru.Clear();
         }
@@ -121,4 +205,15 @@ public sealed class PreviewSegmentCache : IAsyncDisposable
     private sealed record CacheEntry(
         PreviewSegmentWindow Window,
         LinkedListNode<int> Node);
+
+    private sealed class InflightEntry(CancellationTokenSource generationCancellation)
+    {
+        internal CancellationTokenSource GenerationCancellation { get; } = generationCancellation;
+
+        internal Task<PreviewSegmentWindow> GenerationTask { get; set; } = null!;
+
+        internal int WaiterCount { get; set; }
+
+        internal bool Abandoned { get; set; }
+    }
 }

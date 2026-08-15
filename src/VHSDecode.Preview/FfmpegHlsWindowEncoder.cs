@@ -103,11 +103,15 @@ internal sealed class FfmpegHlsWindowEncoder
                 }
 
                 int global = firstGlobal + local;
+                byte[] data = File.ReadAllBytes(segmentPath);
+                Fmp4TimelineRebaser.RebaseInPlace(
+                    data,
+                    _timeline.WindowStartSeconds(windowIndex));
                 segments.Add(new PreviewMediaSegment(
                     global,
                     local,
                     _timeline.SegmentDurationSeconds(global),
-                    File.ReadAllBytes(segmentPath)));
+                    data));
             }
 
             return new PreviewSegmentWindow(
@@ -132,8 +136,6 @@ internal sealed class FfmpegHlsWindowEncoder
         string frameRate = _timeline.FramesPerSecond.ToString("R", CultureInfo.InvariantCulture);
         string segmentDuration = (keyFrameInterval / _timeline.FramesPerSecond)
             .ToString("R", CultureInfo.InvariantCulture);
-        string timestampOffset = _timeline.WindowStartSeconds(windowIndex)
-            .ToString("R", CultureInfo.InvariantCulture);
         var startInfo = new ProcessStartInfo
         {
             FileName = _ffmpegPath,
@@ -149,8 +151,7 @@ internal sealed class FfmpegHlsWindowEncoder
             frameCount,
             keyFrameInterval,
             frameRate,
-            segmentDuration,
-            timestampOffset);
+            segmentDuration);
         foreach (string argument in arguments)
         {
             startInfo.ArgumentList.Add(argument);
@@ -182,8 +183,7 @@ internal sealed class FfmpegHlsWindowEncoder
         int frameCount,
         int keyFrameInterval,
         string frameRate,
-        string segmentDuration,
-        string timestampOffset)
+        string segmentDuration)
     {
         string colorStandard = _isPalColorSystem ? "bt470bg" : "smpte170m";
         string x264Parameters = "tff=1"
@@ -221,7 +221,6 @@ internal sealed class FfmpegHlsWindowEncoder
             "-colorspace", colorStandard,
             "-color_range", "tv",
             "-frames:v", frameCount.ToString(CultureInfo.InvariantCulture),
-            "-output_ts_offset", timestampOffset,
             "-f", "hls",
             "-hls_time", segmentDuration,
             "-hls_list_size", "0",
