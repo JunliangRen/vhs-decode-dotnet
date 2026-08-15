@@ -4,12 +4,14 @@
 
 **[English](README.detailed.md)** | [简体中文](README.detailed.zh-CN.md) | [日本語](README.detailed.ja.md)
 
-<!-- README_SYNC: 2026-08-13.01 -->
+<!-- README_SYNC: 2026-08-15.01 -->
 
 .NET 11 rewrite of the decode-facing parts of
 [`oyvindln/vhs-decode`](https://github.com/oyvindln/vhs-decode), focused on
 release `v0.4.0` at commit
 `43155200da87c0d49eb37d8ec09b1372075ee8e4`.
+
+The current .NET port release is `v0.4.0-2.1.0` (application version `2.1.0`).
 
 > [!IMPORTANT]
 > This is a work-in-progress compatibility port. The top-level decode paths are
@@ -629,7 +631,7 @@ IPP-only cases skipped without the native runtime.
 
 ### Bounded cross-field VHS wavefront
 
-The latest candidate adds a capacity-two wavefront to production VHS sequence
+The 2.1.0 release adds a capacity-two wavefront to production VHS sequence
 decoding. Ordered sync/state planning still runs on the sequence thread. Luma
 rendering, prepared chroma completion, and tape-dropout mapping may finish in
 parallel, while the next field's RF read begins only after every task that still
@@ -717,8 +719,8 @@ The baseline-first pair contained a 628.7 MiB baseline GC peak, so that larger
 difference is reported as an outlier rather than a percentage claim. A 24-run
 release-binary gate covered all four backend/profile combinations at
 `--threads 0`, default-five, and 20 workers; every captured surface matched.
-The refreshed 60-run public matrix retained one hash per surface in every cell,
-and all 1,463 standard xUnit v3 tests passed.
+The refreshed `v0.4.0-2.1.0` 60-run public matrix retained one hash per surface
+in every cell, and all 1,485 standard xUnit v3 tests passed.
 
 ### Latest six-path thread matrix
 
@@ -728,7 +730,7 @@ snapshot comparing Python v0.4.0, merged Python PR341, Exact v0.4.0, Exact
 40 MHz PAL VHS `.ldf` fixture. The source filename is intentionally not
 published. The active table retains 30 fixed Python reference measurements from
 2026-08-12. All 60 .NET measurements were refreshed together on 2026-08-15
-with the latest candidate based on main `508b4f6`. Each .NET cell gives the
+with the published `v0.4.0-2.1.0` release binary from main `94504dc`. Each .NET cell gives the
 median wall time, speedup, and wall-time reduction against its profile-matched
 Python column. Historical
 matrices that used another batch, format, or fixture are not directly comparable:
@@ -736,11 +738,11 @@ matrices that used another batch, format, or fixture are not directly comparable
 <!-- LATEST_PERFORMANCE_BEGIN -->
 | CLI mode (workers) | Python v0.4.0 | Python PR341 | Exact + v0.4.0 | Exact + current | IPP-fast + v0.4.0 | IPP-fast + current |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| default (5) | 52.811 s | 54.243 s | 12.625 s / 4.183x / 76.09% | 11.841 s / 4.581x / 78.17% | 11.140 s / 4.741x / 78.91% | 8.530 s / 6.359x / 84.27% |
-| `--threads 1` | 57.067 s | 56.762 s | 32.879 s / 1.736x / 42.39% | 36.092 s / 1.573x / 36.42% | 23.205 s / 2.459x / 59.34% | 25.135 s / 2.258x / 55.72% |
-| `--threads 5` | 52.920 s | 55.722 s | 12.842 s / 4.121x / 75.73% | 11.720 s / 4.754x / 78.97% | 11.120 s / 4.759x / 78.99% | 8.489 s / 6.564x / 84.77% |
-| `--threads 10` | 52.965 s | 54.949 s | 10.233 s / 5.176x / 80.68% | 8.783 s / 6.256x / 84.02% | 9.137 s / 5.797x / 82.75% | 6.473 s / 8.488x / 88.22% |
-| `--threads 20` | 53.555 s | 54.842 s | 8.183 s / 6.545x / 84.72% | 7.624 s / 7.194x / 86.10% | 7.890 s / 6.788x / 85.27% | 5.220 s / 10.507x / 90.48% |
+| default (5) | 52.811 s | 54.243 s | 13.716 s / 3.850x / 74.03% | 12.758 s / 4.252x / 76.48% | 11.976 s / 4.410x / 77.32% | 9.003 s / 6.025x / 83.40% |
+| `--threads 1` | 57.067 s | 56.762 s | 35.444 s / 1.610x / 37.89% | 39.498 s / 1.437x / 30.41% | 25.376 s / 2.249x / 55.53% | 28.158 s / 2.016x / 50.39% |
+| `--threads 5` | 52.920 s | 55.722 s | 13.631 s / 3.882x / 74.24% | 12.943 s / 4.305x / 76.77% | 12.114 s / 4.368x / 77.11% | 9.320 s / 5.979x / 83.27% |
+| `--threads 10` | 52.965 s | 54.949 s | 11.127 s / 4.760x / 78.99% | 9.704 s / 5.663x / 82.34% | 10.093 s / 5.248x / 80.94% | 7.174 s / 7.659x / 86.94% |
+| `--threads 20` | 53.555 s | 54.842 s | 9.745 s / 5.495x / 81.80% | 8.382 s / 6.543x / 84.72% | 8.903 s / 6.016x / 83.38% | 6.093 s / 9.000x / 88.89% |
 <!-- LATEST_PERFORMANCE_END -->
 <!-- LATEST_PERFORMANCE_RUNS: performance-snapshot-runs=90 dotnet-matrix-runs=60 dotnet-current-runs=30 python-reference-runs=30 dotnet-repeats=3 python-reference-date=2026-08-12 dotnet-v040-date=2026-08-15 dotnet-current-date=2026-08-15 phase22-200-ab-pairs=20 phase22-long-ab-pairs=8 phase22-thread-backend-runs=60 phase22-gc-traces=2 phase22-tests=1438 phase24-short-ab-pairs=6 phase24-long-ab-pairs=4 phase24-thread-gate-runs=12 phase24-tests=1442 phase25-public-cell-runs=15 phase25-public-ab-pairs=15 phase25-long-ab-pairs=3 phase25-thread-gate-runs=12 phase25-tests=1446 phase26-kernel-ab-pairs=8 phase26-long-ab-pairs=4 phase26-thread-backend-runs=36 phase26-public-cell-runs=30 phase26-tests=1447 phase27-kernel-ab-pairs=8 phase27-long-ab-pairs=8 phase27-thread-backend-runs=24 phase27-public-cell-runs=60 phase27-tests=1448 phase28-kernel-ab-pairs=8 phase28-long-ab-pairs=6 phase28-thread-backend-runs=24 phase28-intrinsic-runs=3 phase28-public-cell-runs=60 phase28-tests=1448 phase30-burst-kernel-runs=14 phase30-long-ab-pairs=3 phase30-thread-gate-runs=6 phase30-memory-runs=2 phase30-public-cell-runs=60 phase30-tests=1448 phase31-interleaved-ab-pairs=9 phase31-long-gate-runs=8 phase31-thread-backend-runs=24 phase31-memory-runs=4 phase31-public-cell-runs=60 phase31-tests=1459 phase32-vblank-short-ab-pairs=6 phase32-vblank-long-ab-pairs=2 phase32-thread-backend-runs=24 phase32-gc-traces=2 phase32-counter-runs=2 phase32-tests=1460 phase33-sync-list-short-ab-pairs=6 phase33-sync-list-long-ab-pairs=2 phase33-thread-backend-runs=24 phase33-gc-traces=1 phase33-memory-runs=4 phase33-public-cell-runs=60 phase33-tests=1463 python-v040-runs=15 python-v040-hashes=15 python-pr341-runs=15 python-pr341-hashes=1 -->
 
@@ -749,29 +751,31 @@ The three-run wall-time ranges were:
 <!-- LATEST_PERFORMANCE_RANGES_BEGIN -->
 | CLI mode | Python v0.4.0 | Python PR341 | Exact + v0.4.0 | Exact + current | IPP-fast + v0.4.0 | IPP-fast + current |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| default (5) | 52.583-62.222 s | 53.893-58.195 s | 12.300-13.214 s | 10.791-11.889 s | 10.821-11.256 s | 8.493-8.553 s |
-| `--threads 1` | 56.709-60.521 s | 56.335-58.991 s | 31.842-32.947 s | 35.314-36.434 s | 22.932-23.407 s | 25.057-25.195 s |
-| `--threads 5` | 52.845-53.977 s | 53.696-58.437 s | 12.468-12.960 s | 11.554-12.030 s | 11.002-11.184 s | 8.444-8.590 s |
-| `--threads 10` | 51.797-53.088 s | 52.649-56.775 s | 10.115-10.315 s | 8.690-9.143 s | 9.134-9.154 s | 6.387-6.524 s |
-| `--threads 20` | 52.967-55.987 s | 53.005-55.618 s | 8.080-8.198 s | 7.528-7.879 s | 7.694-7.908 s | 5.202-5.406 s |
+| default (5) | 52.583-62.222 s | 53.893-58.195 s | 13.692-14.151 s | 12.582-12.806 s | 11.642-12.174 s | 8.991-9.139 s |
+| `--threads 1` | 56.709-60.521 s | 56.335-58.991 s | 35.442-35.683 s | 38.595-39.668 s | 24.990-25.697 s | 26.918-28.357 s |
+| `--threads 5` | 52.845-53.977 s | 53.696-58.437 s | 13.444-13.793 s | 12.390-13.157 s | 12.054-12.898 s | 9.015-9.457 s |
+| `--threads 10` | 51.797-53.088 s | 52.649-56.775 s | 10.792-11.239 s | 9.620-10.359 s | 9.914-10.120 s | 7.160-7.235 s |
+| `--threads 20` | 52.967-55.987 s | 53.005-55.618 s | 9.226-10.188 s | 8.170-9.610 s | 8.737-9.431 s | 5.804-6.115 s |
 <!-- LATEST_PERFORMANCE_RANGES_END -->
 
 The 30 retained Python measurements come from the fixed-condition 2026-08-12
-campaign. All twenty .NET cells contain 60 complete 2026-08-15 runs from one
-candidate binary. The active runs produced
-one luma, chroma, raw-JSON, stdout, normalized-stderr, and normalized-log hash
-set per backend/profile across all thread modes. The separate A/B gates also
-matched ordered `fileLoc`.
+campaign. All twenty .NET cells contain 60 complete 2026-08-15 runs from the
+same `v0.4.0-2.1.0` release binary. Within every three-run cell, the active runs
+produced one luma, chroma, raw-JSON, stdout, normalized-stderr, normalized-log,
+and ordered-`fileLoc` hash set.
 Python v0.4.0 produced 15 distinct luma, chroma, JSON, and normalized-log hash
 sets in 15 runs; its strict oracle therefore remains `g4315520 --threads 0`.
 
-All refreshed .NET cells use the latest candidate based on main `508b4f6`; its
-single-file `decode.exe` SHA-256 is
-`3ACDAEC6E641D4ED81E649BCE0C9EA4BFBCAF551860543BA2A5026FBF4E2DA27`.
+All refreshed .NET cells use the published `v0.4.0-2.1.0` release binary from
+main `94504dc`. Its product version is
+`2.1.0+94504dc6696f0aacccac88541b3197dff8a69585`, and its single-file
+`decode.exe` SHA-256 is
+`878C9EBBD73CB5471F58BE8C8634C0B2FFD3EA70B9AF00CC4E80358A7E9039E7`.
 The host was an Intel Core Ultra 7 265K with 20 logical processors, Windows 11
-build 26220, and .NET SDK/runtime `11.0.100-preview.6.26359.118`. Raw directories
-stay local because they contain the private fixture path; these are reported
-local measurements, not an independently reproducible public corpus.
+build 26220, and the repository-pinned and host CLI .NET SDK
+`11.0.100-preview.6.26359.118`. Raw directories stay local because they contain
+the private fixture path; these are reported local measurements, not an
+independently reproducible public corpus.
 
 The three-run ranges expose ordinary startup, thermal, scheduler, and system
 variation. Ratio cells move when either the Python numerator or .NET denominator
