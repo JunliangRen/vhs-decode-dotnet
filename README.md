@@ -126,19 +126,19 @@ for compatibility-sensitive work.
 This startup-inclusive `--start 100 --length 160` snapshot uses one fixed private
 local 40 MHz PAL VHS `.ldf` fixture; its filename is intentionally not published.
 It retains 30 fixed Python reference measurements from 2026-08-12. All 60 .NET
-measurements were refreshed together on 2026-08-15 with the published
-`v0.4.0-2.1.0` release binary from main `94504dc`. Every cell has three complete
-runs.
+measurements were refreshed together on 2026-08-15 with a self-contained .NET
+11 Preview 7 candidate built from commit `21b8b01`. Every cell has three complete
+runs; this documentation/toolchain refresh does not publish a new tag or release.
 Compatibility is evaluated separately from speed.
 
 <!-- LATEST_PERFORMANCE_BEGIN -->
 | CLI mode (workers) | Python v0.4.0 | Python PR341 | Exact + v0.4.0 | Exact + current | IPP-fast + v0.4.0 | IPP-fast + current |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| default (5) | 52.811 s | 54.243 s | 13.716 s / 3.850x | 12.758 s / 4.252x | 11.976 s / 4.410x | 9.003 s / 6.025x |
-| `--threads 1` | 57.067 s | 56.762 s | 35.444 s / 1.610x | 39.498 s / 1.437x | 25.376 s / 2.249x | 28.158 s / 2.016x |
-| `--threads 5` | 52.920 s | 55.722 s | 13.631 s / 3.882x | 12.943 s / 4.305x | 12.114 s / 4.368x | 9.320 s / 5.979x |
-| `--threads 10` | 52.965 s | 54.949 s | 11.127 s / 4.760x | 9.704 s / 5.663x | 10.093 s / 5.248x | 7.174 s / 7.659x |
-| `--threads 20` | 53.555 s | 54.842 s | 9.745 s / 5.495x | 8.382 s / 6.543x | 8.903 s / 6.016x | 6.093 s / 9.000x |
+| default (5) | 52.811 s | 54.243 s | 13.977 s / 3.778x | 12.556 s / 4.320x | 12.214 s / 4.324x | 9.419 s / 5.759x |
+| `--threads 1` | 57.067 s | 56.762 s | 36.434 s / 1.566x | 40.155 s / 1.414x | 25.468 s / 2.241x | 27.561 s / 2.060x |
+| `--threads 5` | 52.920 s | 55.722 s | 14.055 s / 3.765x | 12.655 s / 4.403x | 12.244 s / 4.322x | 9.104 s / 6.121x |
+| `--threads 10` | 52.965 s | 54.949 s | 11.795 s / 4.491x | 10.198 s / 5.388x | 10.535 s / 5.027x | 7.467 s / 7.359x |
+| `--threads 20` | 53.555 s | 54.842 s | 10.667 s / 5.021x | 9.533 s / 5.753x | 9.216 s / 5.811x | 6.991 s / 7.845x |
 <!-- LATEST_PERFORMANCE_END -->
 <!-- LATEST_PERFORMANCE_RUNS: performance-snapshot-runs=90 dotnet-matrix-runs=60 dotnet-current-runs=30 python-reference-runs=30 dotnet-repeats=3 python-reference-date=2026-08-12 dotnet-v040-date=2026-08-15 dotnet-current-date=2026-08-15 phase22-200-ab-pairs=20 phase22-long-ab-pairs=8 phase22-thread-backend-runs=60 phase22-gc-traces=2 phase22-tests=1438 phase24-short-ab-pairs=6 phase24-long-ab-pairs=4 phase24-thread-gate-runs=12 phase24-tests=1442 phase25-public-cell-runs=15 phase25-public-ab-pairs=15 phase25-long-ab-pairs=3 phase25-thread-gate-runs=12 phase25-tests=1446 phase26-kernel-ab-pairs=8 phase26-long-ab-pairs=4 phase26-thread-backend-runs=36 phase26-public-cell-runs=30 phase26-tests=1447 phase27-kernel-ab-pairs=8 phase27-long-ab-pairs=8 phase27-thread-backend-runs=24 phase27-public-cell-runs=60 phase27-tests=1448 phase28-kernel-ab-pairs=8 phase28-long-ab-pairs=6 phase28-thread-backend-runs=24 phase28-intrinsic-runs=3 phase28-public-cell-runs=60 phase28-tests=1448 phase30-burst-kernel-runs=14 phase30-long-ab-pairs=3 phase30-thread-gate-runs=6 phase30-memory-runs=2 phase30-public-cell-runs=60 phase30-tests=1448 phase31-interleaved-ab-pairs=9 phase31-long-gate-runs=8 phase31-thread-backend-runs=24 phase31-memory-runs=4 phase31-public-cell-runs=60 phase31-tests=1459 phase32-vblank-short-ab-pairs=6 phase32-vblank-long-ab-pairs=2 phase32-thread-backend-runs=24 phase32-gc-traces=2 phase32-counter-runs=2 phase32-tests=1460 phase33-sync-list-short-ab-pairs=6 phase33-sync-list-long-ab-pairs=2 phase33-thread-backend-runs=24 phase33-gc-traces=1 phase33-memory-runs=4 phase33-public-cell-runs=60 phase33-tests=1463 python-v040-runs=15 python-v040-hashes=15 python-pr341-runs=15 python-pr341-hashes=1 -->
 
@@ -216,7 +216,7 @@ other sample rates, and unfinished or ineligible headers retain FFmpeg.
 
 ## Build and test
 
-The pinned SDK is .NET `11.0.100-preview.6.26359.118`.
+The pinned SDK is .NET `11.0.100-preview.7.26381.103`.
 
 ```powershell
 dotnet restore VHSDecodeDotNet.slnx

@@ -670,19 +670,13 @@ public sealed class VsyncSerrationDetector
             throw new InvalidOperationException("Sequence contains no elements");
         }
 
-        int index = 0;
-        double minimum = values[index++];
-        while (double.IsNaN(minimum))
+        double minimum = values[0];
+        if (double.IsNaN(minimum))
         {
-            if (index >= values.Length)
-            {
-                return minimum;
-            }
-
-            minimum = values[index++];
+            return minimum;
         }
 
-        for (; index < values.Length; index++)
+        for (int index = 1; index < values.Length; index++)
         {
             double value = values[index];
             if (double.IsNaN(value))

@@ -5,6 +5,12 @@ namespace VHSDecode.Tests;
 
 public sealed partial class ReadmeLocalizationTests
 {
+    private const string PinnedDotNetSdkVersion = "11.0.100-preview.7.26381.103";
+
+    private const string SetupDotNetStepName = "Set up .NET 11 Preview 7";
+
+    private const string VerifyPinnedDotNetSdkStepName = "Verify pinned .NET SDK";
+
     private const string LatestPerformanceRunsMarker =
         "<!-- LATEST_PERFORMANCE_RUNS: performance-snapshot-runs=90 " +
         "dotnet-matrix-runs=60 dotnet-current-runs=30 " +
@@ -252,33 +258,33 @@ public sealed partial class ReadmeLocalizationTests
         Assert.Equal(3, expectedDetailedCommands.Length);
         string[] expectedOverviewPerformanceRows =
         [
-            "52.811 s | 54.243 s | 13.716 s | 3.850x | 12.758 s | 4.252x | 11.976 s | 4.410x | 9.003 s | 6.025x",
-            "57.067 s | 56.762 s | 35.444 s | 1.610x | 39.498 s | 1.437x | 25.376 s | 2.249x | 28.158 s | 2.016x",
-            "52.920 s | 55.722 s | 13.631 s | 3.882x | 12.943 s | 4.305x | 12.114 s | 4.368x | 9.320 s | 5.979x",
-            "52.965 s | 54.949 s | 11.127 s | 4.760x | 9.704 s | 5.663x | 10.093 s | 5.248x | 7.174 s | 7.659x",
-            "53.555 s | 54.842 s | 9.745 s | 5.495x | 8.382 s | 6.543x | 8.903 s | 6.016x | 6.093 s | 9.000x"
+            "52.811 s | 54.243 s | 13.977 s | 3.778x | 12.556 s | 4.320x | 12.214 s | 4.324x | 9.419 s | 5.759x",
+            "57.067 s | 56.762 s | 36.434 s | 1.566x | 40.155 s | 1.414x | 25.468 s | 2.241x | 27.561 s | 2.060x",
+            "52.920 s | 55.722 s | 14.055 s | 3.765x | 12.655 s | 4.403x | 12.244 s | 4.322x | 9.104 s | 6.121x",
+            "52.965 s | 54.949 s | 11.795 s | 4.491x | 10.198 s | 5.388x | 10.535 s | 5.027x | 7.467 s | 7.359x",
+            "53.555 s | 54.842 s | 10.667 s | 5.021x | 9.533 s | 5.753x | 9.216 s | 5.811x | 6.991 s | 7.845x"
         ];
         string[] expectedDetailedPerformanceRows =
         [
-            "52.811 s | 54.243 s | 13.716 s | 3.850x | 74.03% | 12.758 s | 4.252x | 76.48% | 11.976 s | 4.410x | 77.32% | 9.003 s | 6.025x | 83.40%",
-            "57.067 s | 56.762 s | 35.444 s | 1.610x | 37.89% | 39.498 s | 1.437x | 30.41% | 25.376 s | 2.249x | 55.53% | 28.158 s | 2.016x | 50.39%",
-            "52.920 s | 55.722 s | 13.631 s | 3.882x | 74.24% | 12.943 s | 4.305x | 76.77% | 12.114 s | 4.368x | 77.11% | 9.320 s | 5.979x | 83.27%",
-            "52.965 s | 54.949 s | 11.127 s | 4.760x | 78.99% | 9.704 s | 5.663x | 82.34% | 10.093 s | 5.248x | 80.94% | 7.174 s | 7.659x | 86.94%",
-            "53.555 s | 54.842 s | 9.745 s | 5.495x | 81.80% | 8.382 s | 6.543x | 84.72% | 8.903 s | 6.016x | 83.38% | 6.093 s | 9.000x | 88.89%"
+            "52.811 s | 54.243 s | 13.977 s | 3.778x | 73.53% | 12.556 s | 4.320x | 76.85% | 12.214 s | 4.324x | 76.87% | 9.419 s | 5.759x | 82.64%",
+            "57.067 s | 56.762 s | 36.434 s | 1.566x | 36.16% | 40.155 s | 1.414x | 29.26% | 25.468 s | 2.241x | 55.37% | 27.561 s | 2.060x | 51.45%",
+            "52.920 s | 55.722 s | 14.055 s | 3.765x | 73.44% | 12.655 s | 4.403x | 77.29% | 12.244 s | 4.322x | 76.86% | 9.104 s | 6.121x | 83.66%",
+            "52.965 s | 54.949 s | 11.795 s | 4.491x | 77.73% | 10.198 s | 5.388x | 81.44% | 10.535 s | 5.027x | 80.11% | 7.467 s | 7.359x | 86.41%",
+            "53.555 s | 54.842 s | 10.667 s | 5.021x | 80.08% | 9.533 s | 5.753x | 82.62% | 9.216 s | 5.811x | 82.79% | 6.991 s | 7.845x | 87.25%"
         ];
         string[] expectedDetailedPerformanceRangeRows =
         [
-            "default 5 | 52.583-62.222 s | 53.893-58.195 s | 13.692-14.151 s | 12.582-12.806 s | 11.642-12.174 s | 8.991-9.139 s",
-            "threads 1 | 56.709-60.521 s | 56.335-58.991 s | 35.442-35.683 s | 38.595-39.668 s | 24.990-25.697 s | 26.918-28.357 s",
-            "threads 5 | 52.845-53.977 s | 53.696-58.437 s | 13.444-13.793 s | 12.390-13.157 s | 12.054-12.898 s | 9.015-9.457 s",
-            "threads 10 | 51.797-53.088 s | 52.649-56.775 s | 10.792-11.239 s | 9.620-10.359 s | 9.914-10.120 s | 7.160-7.235 s",
-            "threads 20 | 52.967-55.987 s | 53.005-55.618 s | 9.226-10.188 s | 8.170-9.610 s | 8.737-9.431 s | 5.804-6.115 s"
+            "default 5 | 52.583-62.222 s | 53.893-58.195 s | 13.935-14.207 s | 12.236-13.228 s | 12.100-13.038 s | 9.255-10.015 s",
+            "threads 1 | 56.709-60.521 s | 56.335-58.991 s | 35.013-38.936 s | 39.121-41.993 s | 25.070-25.741 s | 27.009-28.035 s",
+            "threads 5 | 52.845-53.977 s | 53.696-58.437 s | 13.713-14.517 s | 12.153-13.959 s | 12.130-12.540 s | 8.997-10.933 s",
+            "threads 10 | 51.797-53.088 s | 52.649-56.775 s | 11.687-11.808 s | 9.358-11.685 s | 10.010-11.632 s | 7.166-8.026 s",
+            "threads 20 | 52.967-55.987 s | 53.005-55.618 s | 9.375-11.492 s | 8.772-10.610 s | 8.393-9.501 s | 6.108-7.452 s"
         ];
 
         string[] overviewFacts =
         [
             "43155200da87c0d49eb37d8ec09b1372075ee8e4",
-            "11.0.100-preview.6.26359.118",
+            PinnedDotNetSdkVersion,
             "**1,485**",
             "--compat-version",
             "current",
@@ -292,10 +298,10 @@ public sealed partial class ReadmeLocalizationTests
             "v0.4.0-2.1.0",
             "52.811 s",
             "54.243 s",
-            "13.716 s",
-            "12.758 s",
-            "6.543x",
-            "9.000x",
+            "13.977 s",
+            "12.556 s",
+            "5.753x",
+            "7.845x",
             "46.047",
             "42.575",
             "44.980",
@@ -323,7 +329,7 @@ public sealed partial class ReadmeLocalizationTests
             "v0.4.0-2.1.0",
             "2f21e8ed6018b14561396cc95f1f6828054470b8",
             "v0.4.0-40-g2f21e8ed",
-            "11.0.100-preview.6.26359.118",
+            PinnedDotNetSdkVersion,
             "bdccd58",
             "1,210.850",
             "167.083",
@@ -1323,9 +1329,9 @@ public sealed partial class ReadmeLocalizationTests
             "382.9/383.0 MiB",
             "1,295",
             "--use_saved_levels",
-            "94504dc",
-            "2.1.0+94504dc6696f0aacccac88541b3197dff8a69585",
-            "878C9EBBD73CB5471F58BE8C8634C0B2FFD3EA70B9AF00CC4E80358A7E9039E7",
+            "21b8b01",
+            "2.1.0+21b8b01998fb7519cf3616820e181dba93f23d10",
+            "9426C7693B63BCB7661946BD856B790EA0207A48AD8257791197AC450DF3161B",
             "354.4/473.2 MiB",
             "353.6/468.9 MiB",
             "19.74/19.86",
@@ -1462,11 +1468,28 @@ public sealed partial class ReadmeLocalizationTests
             "1,430 independently discoverable tests",
             compatibilityEvidence,
             StringComparison.Ordinal);
+        string globalJson = File.ReadAllText(Path.Combine(
+            RepositoryRoot(),
+            "global.json"));
+        Assert.Contains(
+            $"\"version\": \"{PinnedDotNetSdkVersion}\"",
+            globalJson,
+            StringComparison.Ordinal);
+        Assert.DoesNotContain("preview.6", globalJson, StringComparison.OrdinalIgnoreCase);
         string workflow = File.ReadAllText(Path.Combine(
             RepositoryRoot(),
             ".github",
             "workflows",
             "release-build.yml"));
+        Assert.Contains(SetupDotNetStepName, workflow, StringComparison.Ordinal);
+        Assert.Contains("uses: actions/setup-dotnet@v5", workflow, StringComparison.Ordinal);
+        Assert.Contains("global-json-file: global.json", workflow, StringComparison.Ordinal);
+        Assert.Contains(VerifyPinnedDotNetSdkStepName, workflow, StringComparison.Ordinal);
+        Assert.Contains("$actual = dotnet --version", workflow, StringComparison.Ordinal);
+        Assert.DoesNotContain(
+            "Set up .NET 11 Preview 6",
+            workflow,
+            StringComparison.Ordinal);
         Assert.Contains(FullCiTestCommand, workflow, StringComparison.Ordinal);
         Assert.Contains(FinalRealRadix4AvxTestCommand, workflow, StringComparison.Ordinal);
         Assert.Contains(FinalRealRadix4AvxRequirement, workflow, StringComparison.Ordinal);
