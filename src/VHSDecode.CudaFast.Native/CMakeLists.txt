@@ -3079,6 +3079,9 @@ string(REPLACE
                   &chroma_state,
                   raw_offset)) {
         fprintf(stderr, "CUDA-fast chroma decode failed\n");
+        delete[] h_k3_debug;
+        if (d_k3_debug) cudaFree(d_k3_debug);
+        cudaFree(d_field_offsets);
         return -1;
     }]=]
     CUVHS_PIPELINE_SOURCE
