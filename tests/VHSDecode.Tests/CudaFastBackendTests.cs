@@ -119,12 +119,13 @@ public sealed class CudaFastBackendTests
         Assert.Contains("chroma_state_release(&chroma_state);", cmake, StringComparison.Ordinal);
         Assert.Contains("bool chroma_decode(", cmake, StringComparison.Ordinal);
         Assert.Contains("if (!chroma_decode(", cmake, StringComparison.Ordinal);
+        string normalizedCmake = cmake.Replace("\r\n", "\n", StringComparison.Ordinal);
         Assert.Contains(
-            "CUDA-fast chroma decode failed\\n\");\r\n"
-                + "        delete[] h_k3_debug;\r\n"
-                + "        if (d_k3_debug) cudaFree(d_k3_debug);\r\n"
+            "CUDA-fast chroma decode failed\\n\");\n"
+                + "        delete[] h_k3_debug;\n"
+                + "        if (d_k3_debug) cudaFree(d_k3_debug);\n"
                 + "        cudaFree(d_field_offsets);",
-            cmake,
+            normalizedCmake,
             StringComparison.Ordinal);
         Assert.Contains(
             "CUVHS_FORCE_CHROMA_WORKSPACE_FAILURE",
