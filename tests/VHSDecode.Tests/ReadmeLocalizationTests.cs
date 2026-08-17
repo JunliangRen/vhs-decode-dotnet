@@ -1489,7 +1489,7 @@ public sealed partial class ReadmeLocalizationTests
         Assert.Contains("uses: Jimver/cuda-toolkit@v0.2.36", workflow, StringComparison.Ordinal);
         Assert.Contains("cuda: '13.0.3'", workflow, StringComparison.Ordinal);
         Assert.Contains(
-            "sub-packages: '[\"nvcc\", \"crt\", \"cudart\", \"cufft\", \"cufft_dev\", \"visual_studio_integration\"]'",
+            "sub-packages: '[\"nvcc\", \"crt\", \"nvvm\", \"cudart\", \"cufft\", \"cufft_dev\", \"visual_studio_integration\"]'",
             workflow,
             StringComparison.Ordinal);
         Assert.Contains("cufft_dev", workflow, StringComparison.Ordinal);
