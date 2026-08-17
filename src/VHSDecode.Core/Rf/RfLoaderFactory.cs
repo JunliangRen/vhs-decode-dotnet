@@ -10,46 +10,52 @@ public static class RfLoaderFactory
     internal static IRfSampleLoader CreateNative(
         string filename,
         bool preferPyAvMappedRawFlacSeeking,
-        bool fastContainerSeeking = false)
+        bool fastContainerSeeking = false,
+        bool ignoreExtensionCase = false)
     {
-        if (filename.EndsWith(".lds", StringComparison.Ordinal))
+        string routingFilename = ignoreExtensionCase
+            ? filename.ToLowerInvariant()
+            : filename;
+        if (routingFilename.EndsWith(".lds", StringComparison.Ordinal))
         {
             return new PackedDdD4To40SampleLoader();
         }
 
-        if (filename.EndsWith(".r30", StringComparison.Ordinal))
+        if (routingFilename.EndsWith(".r30", StringComparison.Ordinal))
         {
             return new Packed3To32SampleLoader();
         }
 
-        if (filename.EndsWith(".rf", StringComparison.Ordinal))
+        if (routingFilename.EndsWith(".rf", StringComparison.Ordinal))
         {
             return new Float32SampleLoader();
         }
 
-        if (filename.EndsWith(".s16", StringComparison.Ordinal))
+        if (routingFilename.EndsWith(".s16", StringComparison.Ordinal))
         {
             return new Int16SampleLoader();
         }
 
-        if (filename.EndsWith(".r16", StringComparison.Ordinal) || filename.EndsWith(".u16", StringComparison.Ordinal))
+        if (routingFilename.EndsWith(".r16", StringComparison.Ordinal)
+            || routingFilename.EndsWith(".u16", StringComparison.Ordinal))
         {
             return new UInt16SampleLoader();
         }
 
-        if (filename.EndsWith(".r8", StringComparison.Ordinal) || filename.EndsWith(".u8", StringComparison.Ordinal))
+        if (routingFilename.EndsWith(".r8", StringComparison.Ordinal)
+            || routingFilename.EndsWith(".u8", StringComparison.Ordinal))
         {
             return new UInt8SampleLoader();
         }
 
-        if (filename.EndsWith(".ldf", StringComparison.Ordinal)
-            || filename.EndsWith(".flac", StringComparison.Ordinal)
-            || filename.EndsWith(".vhs", StringComparison.Ordinal)
-            || filename.EndsWith(".wav", StringComparison.Ordinal)
-            || filename.EndsWith("raw.oga", StringComparison.Ordinal))
+        if (routingFilename.EndsWith(".ldf", StringComparison.Ordinal)
+            || routingFilename.EndsWith(".flac", StringComparison.Ordinal)
+            || routingFilename.EndsWith(".vhs", StringComparison.Ordinal)
+            || routingFilename.EndsWith(".wav", StringComparison.Ordinal)
+            || routingFilename.EndsWith("raw.oga", StringComparison.Ordinal))
         {
-            if ((filename.EndsWith(".ldf", StringComparison.Ordinal)
-                    || filename.EndsWith(".flac", StringComparison.Ordinal))
+            if ((routingFilename.EndsWith(".ldf", StringComparison.Ordinal)
+                    || routingFilename.EndsWith(".flac", StringComparison.Ordinal))
                 && RawFlacStreamInfo.TryRead(filename, out RawFlacStreamInfo info))
             {
                 if (fastContainerSeeking)

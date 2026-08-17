@@ -497,7 +497,7 @@ public sealed class CudaFastBackendTests
         string directory = CreateTemporaryDirectory();
         try
         {
-            string inputPath = Path.Combine(directory, "input.u8");
+            string inputPath = Path.Combine(directory, "input.U8");
             string outputBase = Path.Combine(directory, "output");
             File.WriteAllBytes(inputPath, Enumerable.Range(0, 64).Select(value => (byte)value).ToArray());
             ParsedCommand command = Parse(
@@ -522,6 +522,9 @@ public sealed class CudaFastBackendTests
             Assert.Equal(40.0, nativeRuntime.SampleRateMhz);
             Assert.Equal(CudaFastProfile.Ntsc, nativeRuntime.Profile);
             Assert.Equal(CudaFastInputSampleFormat.Float32, nativeRuntime.InputSampleFormat);
+            Assert.Equal(
+                Enumerable.Range(0, 16).Select(value => (float)value).ToArray(),
+                nativeRuntime.Float32Samples);
             Assert.Equal(64UL, nativeRuntime.TotalSamples);
             Assert.Equal(2U, nativeRuntime.MaximumOutputFields);
         }
@@ -772,6 +775,8 @@ public sealed class CudaFastBackendTests
 
         internal short[] Int16Samples { get; private set; } = [];
 
+        internal float[] Float32Samples { get; private set; } = [];
+
         public CudaFastRuntimeInfo GetRuntimeInfo(int deviceId = 0)
             => new(
                 CudaFastNativeRuntime.AbiVersion,
@@ -806,6 +811,11 @@ public sealed class CudaFastBackendTests
                 {
                     Int16Samples = new short[ReadSampleCount];
                     Marshal.Copy(buffer, Int16Samples, 0, ReadSampleCount);
+                }
+                else
+                {
+                    Float32Samples = new float[ReadSampleCount];
+                    Marshal.Copy(buffer, Float32Samples, 0, ReadSampleCount);
                 }
             }
             finally

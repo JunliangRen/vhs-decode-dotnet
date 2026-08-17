@@ -1488,6 +1488,7 @@ public sealed partial class ReadmeLocalizationTests
         Assert.Contains("$actual = dotnet --version", workflow, StringComparison.Ordinal);
         Assert.Contains("uses: Jimver/cuda-toolkit@v0.2.36", workflow, StringComparison.Ordinal);
         Assert.Contains("cuda: '13.0.3'", workflow, StringComparison.Ordinal);
+        Assert.Contains("cufft_dev", workflow, StringComparison.Ordinal);
         Assert.Contains(
             "./tools/build-cuda-fast-native.ps1 -SkipRuntimeTests",
             workflow,

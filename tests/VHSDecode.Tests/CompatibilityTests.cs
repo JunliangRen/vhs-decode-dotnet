@@ -17243,6 +17243,14 @@ public void RfLoaderFactoryMapsNativeExtensions()
     AssertEqual(0, fallback.InputArguments.Count);
     AssertEqual(0, fallback.OutputArguments.Count);
     AssertType<FfmpegStreamSampleLoader>(RfLoaderFactory.CreateNative("capture.LDS"));
+    AssertType<UInt8SampleLoader>(RfLoaderFactory.CreateNative(
+        "capture.U8",
+        preferPyAvMappedRawFlacSeeking: false,
+        ignoreExtensionCase: true));
+    AssertType<FfmpegPcm16SampleLoader>(RfLoaderFactory.CreateNative(
+        "capture.LDF",
+        preferPyAvMappedRawFlacSeeking: false,
+        ignoreExtensionCase: true));
 }
 
 static ParsedCommand Parse(DecodeCommandSpec spec, string[] args) => new CommandLineParser().Parse(spec, args);

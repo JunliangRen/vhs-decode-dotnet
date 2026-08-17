@@ -442,7 +442,11 @@ internal sealed class CudaFastDecodeRunner : ICudaFastDecodeRunner
         {
             ".raw" or ".s16" => new DirectInt16SampleLoader(),
             ".s8" => new Int8SampleLoader(),
-            _ => RfLoaderFactory.CreateNative(path)
+            _ => RfLoaderFactory.CreateNative(
+                path,
+                preferPyAvMappedRawFlacSeeking: false,
+                fastContainerSeeking: false,
+                ignoreExtensionCase: true)
         };
         return loader is FfmpegPcm16SampleLoader ffmpeg
             ? new FfmpegPcm16InputAdapter(ffmpeg)
