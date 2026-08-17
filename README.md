@@ -2,14 +2,14 @@
 
 **[English](README.md)** | [简体中文](README.zh-CN.md) | [日本語](README.ja.md)
 
-<!-- README_SYNC: 2026-08-17.02 -->
+<!-- README_SYNC: 2026-08-18.01 -->
 
 A .NET 11 rewrite of the decode-facing parts of
 [`oyvindln/vhs-decode`](https://github.com/oyvindln/vhs-decode), targeting
 upstream release `v0.4.0` at commit
 `43155200da87c0d49eb37d8ec09b1372075ee8e4`.
 
-The current .NET port release is `v0.4.0-2.3.0` (application version `2.3.0`).
+The current .NET port release is `v0.4.0-2.3.1` (application version `2.3.1`).
 
 > [!IMPORTANT]
 > This remains a compatibility work in progress. The top-level decode paths are
@@ -40,7 +40,7 @@ evidence, and remaining gaps.
   EIAJ, and supported PAL/NTSC variants.
 - TBC utility tools, the double-click GUI, and developer plotting windows are
   intentionally out of scope.
-- The Visual Studio 2026 `.slnx` solution has **1,550** standard xUnit v3 tests
+- The Visual Studio 2026 `.slnx` solution has **1,562** standard xUnit v3 tests
   that are visible in Test Explorer and runnable with `dotnet test`.
 
 <!-- SECTION: start -->
@@ -128,6 +128,16 @@ decode.exe vhs --compat-version current --dsp-backend ipp-fast `
 decode.exe vhs --dsp-backend cuda-fast --pal `
   --start 100 --length 20 input.ldf output
 ```
+
+The default Windows release includes the small CUDA-fast bridge but does not
+embed the 271 MiB cuFFT DLL. Only an explicit `--dsp-backend cuda-fast` request
+searches for a compatible CUDA 13/cuFFT 12 installation. If none is available,
+it verifies the NVIDIA driver first, downloads the pinned 202.2 MiB NVIDIA
+redistributable, validates both the archive and DLL with SHA-256, and installs
+it once under `%LOCALAPPDATA%\vhs-decode-dotnet\cuda\cufft`. Exact, IPP, and
+preview runs never access the network. Set `VHSDECODE_CUDA_RUNTIME_PATH` for an
+offline/system runtime, `VHSDECODE_CUDA_CACHE_PATH` for a different cache root,
+or `VHSDECODE_CUDA_AUTO_DOWNLOAD=0` to disable automatic downloads.
 
 LaserDisc now routes its video, EFM, and analog-audio full-complex FFT stages
 through IPP. CVBS and HiFi still reject `ipp-fast`; use `exact` whenever
@@ -255,7 +265,7 @@ The pinned SDK is .NET `11.0.100-preview.7.26381.103`.
 dotnet restore VHSDecodeDotNet.slnx
 dotnet build VHSDecodeDotNet.slnx -c Release --no-restore
 dotnet test --solution VHSDecodeDotNet.slnx -c Release `
-  --no-build --no-restore --minimum-expected-tests 1550
+  --no-build --no-restore --minimum-expected-tests 1562
 ```
 
 Open `VHSDecodeDotNet.slnx` in Visual Studio 2026 to build, debug, and run the

@@ -2,13 +2,13 @@
 
 [English](README.md) | **[简体中文](README.zh-CN.md)** | [日本語](README.ja.md)
 
-<!-- README_SYNC: 2026-08-17.02 -->
+<!-- README_SYNC: 2026-08-18.01 -->
 
 这是 [`oyvindln/vhs-decode`](https://github.com/oyvindln/vhs-decode)
 中解码相关部分的 .NET 11 重写，兼容目标为上游 release `v0.4.0`、commit
 `43155200da87c0d49eb37d8ec09b1372075ee8e4`。
 
-当前 .NET 移植版发布为 `v0.4.0-2.3.0`（应用版本 `2.3.0`）。
+当前 .NET 移植版发布为 `v0.4.0-2.3.1`（应用版本 `2.3.1`）。
 
 > [!IMPORTANT]
 > 这仍是持续进行中的兼容性移植。顶层解码路径已经实现并经过大量测试，但尚未声称
@@ -35,7 +35,7 @@
 - VHS 家族包括 VHS/S-VHS、Betamax、Video8/Hi8、U-matic、Type C、EIAJ
   以及上游支持的 PAL/NTSC 变体。
 - TBC 工具、双击启动的用户 GUI 和开发者绘图窗口明确不在范围内。
-- Visual Studio 2026 `.slnx` 包含 **1,550** 项标准 xUnit v3 测试；测试可在
+- Visual Studio 2026 `.slnx` 包含 **1,562** 项标准 xUnit v3 测试；测试可在
   Test Explorer 中查看，也可用 `dotnet test` 运行。
 
 <!-- SECTION: start -->
@@ -109,6 +109,15 @@ decode.exe vhs --compat-version current --dsp-backend ipp-fast `
 decode.exe vhs --dsp-backend cuda-fast --pal `
   --start 100 --length 20 input.ldf output
 ```
+
+默认 Windows 发布包保留小型 CUDA-fast 桥接，但不再内嵌 271 MiB 的 cuFFT DLL。
+只有显式使用 `--dsp-backend cuda-fast` 时才会查找兼容的 CUDA 13/cuFFT 12；若本机
+没有，程序会先确认 NVIDIA 驱动可用，再下载 NVIDIA 固定的 202.2 MiB 可再分发包，
+对压缩包和 DLL 分别做 SHA-256 校验，并只安装一次到
+`%LOCALAPPDATA%\vhs-decode-dotnet\cuda\cufft`。Exact、IPP 和 preview 路径绝不会访问
+网络。离线/系统 runtime 可用 `VHSDECODE_CUDA_RUNTIME_PATH` 指定；
+`VHSDECODE_CUDA_CACHE_PATH` 可更改缓存根目录，
+`VHSDECODE_CUDA_AUTO_DOWNLOAD=0` 可关闭自动下载。
 
 LaserDisc 的视频、EFM 与模拟音频 full-complex FFT 阶段现已接入 IPP。
 CVBS 和 HiFi 仍会拒绝 `ipp-fast`；需要 release 兼容行为时应使用 `exact`。
@@ -214,7 +223,7 @@ TBC、色度、JSON 和日志文件允许在解码期间并发读取，兼容的
 dotnet restore VHSDecodeDotNet.slnx
 dotnet build VHSDecodeDotNet.slnx -c Release --no-restore
 dotnet test --solution VHSDecodeDotNet.slnx -c Release `
-  --no-build --no-restore --minimum-expected-tests 1550
+  --no-build --no-restore --minimum-expected-tests 1562
 ```
 
 在 Visual Studio 2026 中打开 `VHSDecodeDotNet.slnx`，即可构建、调试并通过

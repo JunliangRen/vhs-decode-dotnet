@@ -150,7 +150,6 @@ jobs:
         run: |
           $artifacts = @(
             'artifacts/native/Release/win-x64/vhsdecode_cuda_fast.dll',
-            'artifacts/native/Release/win-x64/cufft64_12.dll',
             'artifacts/native/Release/win-x64/THIRD-PARTY-NOTICES-CUDA-FAST.md'
           )
           foreach ($artifact in $artifacts) {
@@ -167,7 +166,7 @@ jobs:
         run: dotnet build VHSDecodeDotNet.slnx --configuration Release --no-restore
 
       - name: Run tests
-        run: dotnet test --solution VHSDecodeDotNet.slnx --configuration Release --no-build --no-restore --minimum-expected-tests 1550
+        run: dotnet test --solution VHSDecodeDotNet.slnx --configuration Release --no-build --no-restore --minimum-expected-tests 1562
 
       - name: Run NumPy reduction scalar fallback tests
         env:
@@ -334,6 +333,21 @@ jobs:
 
       - name: Publish self-contained single-file release
         run: dotnet publish src/VHSDecode.Cli/VHSDecode.Cli.csproj --configuration Release --runtime win-x64 --self-contained true --no-restore --property:PublishProfile=FolderProfile --output artifacts/publish/win-x64
+
+      - name: Verify lean CUDA runtime packaging
+        shell: pwsh
+        run: |
+          $publishDirectory = 'artifacts/publish/win-x64'
+          $bundledCuFft = Get-ChildItem -LiteralPath $publishDirectory -Filter 'cufft64_12.dll' -File -Recurse
+          if ($bundledCuFft.Count -ne 0) {
+            throw "The lean release unexpectedly bundled cuFFT: $($bundledCuFft.FullName -join ', ')"
+          }
+          $decode = Get-Item -LiteralPath (Join-Path $publishDirectory 'decode.exe')
+          $maximumLeanBytes = 200MB
+          if ($decode.Length -gt $maximumLeanBytes) {
+            throw "The lean decode.exe is $($decode.Length) bytes; expected at most $maximumLeanBytes bytes without cuFFT."
+          }
+          Write-Host "Verified lean decode.exe ($($decode.Length) bytes); cuFFT will be resolved or downloaded only for cuda-fast."
 
       - name: Upload release build artifact
         if: github.event_name == 'push'

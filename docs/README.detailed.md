@@ -4,14 +4,14 @@
 
 **[English](README.detailed.md)** | [简体中文](README.detailed.zh-CN.md) | [日本語](README.detailed.ja.md)
 
-<!-- README_SYNC: 2026-08-17.02 -->
+<!-- README_SYNC: 2026-08-18.01 -->
 
 .NET 11 rewrite of the decode-facing parts of
 [`oyvindln/vhs-decode`](https://github.com/oyvindln/vhs-decode), focused on
 release `v0.4.0` at commit
 `43155200da87c0d49eb37d8ec09b1372075ee8e4`.
 
-The current .NET port release is `v0.4.0-2.3.0` (application version `2.3.0`).
+The current .NET port release is `v0.4.0-2.3.1` (application version `2.3.1`).
 
 > [!IMPORTANT]
 > This is a work-in-progress compatibility port. The top-level decode paths are
@@ -242,6 +242,21 @@ never select another DSP backend. The initial contract is native-rate 40 MSPS
 PAL/NTSC VHS SP/LP/EP on Windows x64; CVBS, LaserDisc, HiFi, S-VHS, other video
 systems, packed `.lds`, preview-server routing, and explicit compatibility
 profile selection are not approximated.
+
+Binary releases keep the approximately 1.2 MiB CUDA-fast bridge but no longer
+embed the 271 MiB `cufft64_12.dll`. The first explicit `cuda-fast` request
+searches the configured runtime path, bridge directory, CUDA 13 Toolkit
+locations, process `PATH`, and the versioned user cache. If no compatible
+cuFFT 12 runtime is found, it first requires a working CUDA 13 driver/device,
+then downloads NVIDIA's pinned 12.0.0.15 Windows redistributable (202.2 MiB),
+validates the archive and extracted DLL against fixed SHA-256 values, and
+atomically installs it under
+`%LOCALAPPDATA%\vhs-decode-dotnet\cuda\cufft\12.0.0.15`. A cross-process lock
+prevents duplicate first-use downloads. Exact, IPP, and preview execution do
+not enter this resolver and never access the network. Offline deployments can
+set `VHSDECODE_CUDA_RUNTIME_PATH`; `VHSDECODE_CUDA_CACHE_PATH` changes the cache
+root, and `VHSDECODE_CUDA_AUTO_DOWNLOAD=0` disables downloading. A download or
+load failure remains explicit and never falls back to a CPU backend.
 
 This backend has its own numerical contract; neither `v0.4.0` nor `current`
 hash compatibility is claimed. On the local RTX 4070 12 GiB development
@@ -4309,7 +4324,7 @@ Requirements:
 .\tools\build-cuda-fast-native.ps1
 dotnet restore VHSDecodeDotNet.slnx
 dotnet build VHSDecodeDotNet.slnx -c Release --no-restore
-dotnet test --solution VHSDecodeDotNet.slnx -c Release --no-build --no-restore --minimum-expected-tests 1550
+dotnet test --solution VHSDecodeDotNet.slnx -c Release --no-build --no-restore --minimum-expected-tests 1562
 dotnet test --project tests\VHSDecode.Tests\VHSDecode.Tests.csproj -c Release --no-build --no-restore --coverage --coverage-output coverage.cobertura.xml --coverage-output-format cobertura
 ```
 
@@ -4326,17 +4341,20 @@ The second command builds the optional `cuda-fast` bridge. It requires the
 CUDA 13 Toolkit, an NVIDIA GPU/driver, CMake/Ninja, and an MSVC 14.44-or-earlier
 host toolset. The script verifies the pristine pinned cuVHS commit when a local
 checkout is supplied, compiles and smoke-tests the bridge, then stages
-`vhsdecode_cuda_fast.dll`, the cuFFT runtime, and its third-party notice. Omit
+`vhsdecode_cuda_fast.dll` and its third-party notice. cuFFT is used from the
+build host for native tests but is intentionally not staged into the managed
+release. Omit
 either native command when that backend is not required; an Exact-only build
 may omit both. The bridge statically links the MSVC and CUDA runtimes; its
 dependency audit rejects accidental dynamic CRT or cudart dependencies. The
-staged cuFFT sidecar and a compatible NVIDIA driver remain required.
+runtime resolver uses an installed compatible cuFFT or the pinned, verified
+first-use download; a compatible NVIDIA driver remains required.
 The default command runs every native GPU test. GPU-less CI may pass
 `-SkipRuntimeTests`; that mode still compiles, audits, and stages the bridge,
 but is not GPU runtime validation.
 
 The current formal Release build has zero warnings and errors. The xUnit v3
-project exposes **1,550** independently discoverable tests to both
+project exposes **1,562** independently discoverable tests to both
 `dotnet test` and Visual Studio Test Explorer.
 
 <!-- SECTION: usage -->

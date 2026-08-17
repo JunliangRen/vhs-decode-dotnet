@@ -50,7 +50,7 @@ public sealed partial class ReadmeLocalizationTests
 
     private const string FullCiTestCommand =
         "run: dotnet test --solution VHSDecodeDotNet.slnx --configuration Release " +
-        "--no-build --no-restore --minimum-expected-tests 1550";
+        "--no-build --no-restore --minimum-expected-tests 1562";
 
     private const string FinalRealRadix4AvxTestCommand =
         "run: dotnet test tests/VHSDecode.Tests/VHSDecode.Tests.csproj " +
@@ -285,7 +285,7 @@ public sealed partial class ReadmeLocalizationTests
         [
             "43155200da87c0d49eb37d8ec09b1372075ee8e4",
             PinnedDotNetSdkVersion,
-            "**1,550**",
+            "**1,562**",
             "--compat-version",
             "current",
             "--dsp-backend",
@@ -295,7 +295,7 @@ public sealed partial class ReadmeLocalizationTests
             "IPP-fast + v0.4.0",
             "IPP-fast + current",
             "--start 100",
-            "v0.4.0-2.3.0",
+            "v0.4.0-2.3.1",
             "52.811 s",
             "54.243 s",
             "13.977 s",
@@ -326,7 +326,7 @@ public sealed partial class ReadmeLocalizationTests
         string[] synchronizedFacts =
         [
             "43155200da87c0d49eb37d8ec09b1372075ee8e4",
-            "v0.4.0-2.3.0",
+            "v0.4.0-2.3.1",
             "2f21e8ed6018b14561396cc95f1f6828054470b8",
             "v0.4.0-40-g2f21e8ed",
             PinnedDotNetSdkVersion,
@@ -677,7 +677,7 @@ public sealed partial class ReadmeLocalizationTests
             "1.72%",
             "444.3 MiB",
             "406.0 MiB",
-            "**1,550**",
+            "**1,562**",
             "3.7935",
             "3.6182",
             "4.62%",
@@ -1453,7 +1453,7 @@ public sealed partial class ReadmeLocalizationTests
             "The shared compatibility evidence document is missing.");
         string compatibilityEvidence = File.ReadAllText(compatibilityEvidencePath);
         Assert.Contains(
-            "1,550 independently discoverable tests",
+            "1,562 independently discoverable tests",
             compatibilityEvidence,
             StringComparison.Ordinal);
         Assert.DoesNotContain(
@@ -1499,6 +1499,12 @@ public sealed partial class ReadmeLocalizationTests
             StringComparison.Ordinal);
         Assert.Contains("vhsdecode_cuda_fast.dll", workflow, StringComparison.Ordinal);
         Assert.Contains("cufft64_12.dll", workflow, StringComparison.Ordinal);
+        Assert.Contains("Verify lean CUDA runtime packaging", workflow, StringComparison.Ordinal);
+        Assert.Contains("$maximumLeanBytes = 200MB", workflow, StringComparison.Ordinal);
+        Assert.DoesNotContain(
+            "'artifacts/native/Release/win-x64/cufft64_12.dll'",
+            workflow,
+            StringComparison.Ordinal);
         Assert.DoesNotContain(
             "Set up .NET 11 Preview 6",
             workflow,

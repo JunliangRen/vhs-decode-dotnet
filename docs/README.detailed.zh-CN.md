@@ -4,13 +4,13 @@
 
 [English](README.detailed.md) | **[简体中文](README.detailed.zh-CN.md)** | [日本語](README.detailed.ja.md)
 
-<!-- README_SYNC: 2026-08-17.02 -->
+<!-- README_SYNC: 2026-08-18.01 -->
 
 这是 [`oyvindln/vhs-decode`](https://github.com/oyvindln/vhs-decode)
 中解码相关部分的 .NET 11 重写，当前以 release `v0.4.0`、commit
 `43155200da87c0d49eb37d8ec09b1372075ee8e4` 为兼容基线。
 
-当前 .NET 移植版发布为 `v0.4.0-2.3.0`（应用版本 `2.3.0`）。
+当前 .NET 移植版发布为 `v0.4.0-2.3.1`（应用版本 `2.3.1`）。
 
 > [!IMPORTANT]
 > 这是仍在进行中的兼容性移植。顶层解码路径已经实现并经过大量测试，
@@ -213,6 +213,19 @@ K4 source reconstruction 已在编译期关闭，因此该路径始终使用 GPU
 仅为 Windows x64 上原生采样率 40 MSPS 的 PAL/NTSC VHS SP/LP/EP；CVBS、LaserDisc、
 HiFi、S-VHS、其他制式、packed `.lds`、preview-server 路由以及显式兼容 profile
 都不会被近似处理。
+
+二进制发布仍包含约 1.2 MiB 的 CUDA-fast 桥接，但不再内嵌 271 MiB 的
+`cufft64_12.dll`。只有首次显式选择 `cuda-fast` 时，程序才会依次检查指定的 runtime
+目录、桥接同目录、CUDA 13 Toolkit、进程 `PATH` 和带版本号的用户缓存。如果没有找到
+兼容的 cuFFT 12，程序会先确认 CUDA 13 驱动和设备可用，再下载 NVIDIA 固定版本
+12.0.0.15 的 Windows 可再分发包（202.2 MiB），对压缩包和解出的 DLL 分别执行固定
+SHA-256 校验，并原子安装到
+`%LOCALAPPDATA%\vhs-decode-dotnet\cuda\cufft\12.0.0.15`。跨进程文件锁保证多个解码
+进程首次启动时只下载一次。Exact、IPP 和 preview 路径不会进入此解析器，也不会访问
+网络。离线部署可设置 `VHSDECODE_CUDA_RUNTIME_PATH`；
+`VHSDECODE_CUDA_CACHE_PATH` 可更改缓存根目录，
+`VHSDECODE_CUDA_AUTO_DOWNLOAD=0` 可禁止自动下载。下载或加载失败会明确报错，绝不会
+静默回退 CPU 后端。
 
 该后端采用独立数值契约，不声明兼容 `v0.4.0` 或 `current` 的哈希。本地 RTX 4070
 12 GiB 开发机上，本轮同一时段的交错对照使用同一固定私有 40 MHz 真实 PAL `.ldf`
@@ -3361,7 +3374,7 @@ destination API，把最终 burst SOS 写回这块独占 buffer，从而在该 A
 .\tools\build-cuda-fast-native.ps1
 dotnet restore VHSDecodeDotNet.slnx
 dotnet build VHSDecodeDotNet.slnx -c Release --no-restore
-dotnet test --solution VHSDecodeDotNet.slnx -c Release --no-build --no-restore --minimum-expected-tests 1550
+dotnet test --solution VHSDecodeDotNet.slnx -c Release --no-build --no-restore --minimum-expected-tests 1562
 dotnet test --project tests\VHSDecode.Tests\VHSDecode.Tests.csproj -c Release --no-build --no-restore --coverage --coverage-output coverage.cobertura.xml --coverage-output-format cobertura
 ```
 
@@ -3375,15 +3388,16 @@ notice，不会额外生成许可证 sidecar 文件。
 第二条命令构建可选的 `cuda-fast` 桥接，需要 CUDA 13 Toolkit、NVIDIA GPU/driver、
 CMake/Ninja 以及 MSVC 14.44 或更早的 host toolset。传入本地 checkout 时，脚本会
 验证其为干净且固定的 cuVHS commit，然后编译并执行 smoke test，最后暂存
-`vhsdecode_cuda_fast.dll`、cuFFT runtime 与第三方 notice。不需要某一后端时可省略
+`vhsdecode_cuda_fast.dll` 与第三方 notice。原生测试仍使用构建机上的 cuFFT，但不会
+再把它暂存进托管发布包。不需要某一后端时可省略
 对应原生命令；只构建 Exact 时两条都可省略。桥接会静态链接 MSVC 与 CUDA runtime，
-依赖审计会拒绝意外出现的动态 CRT 或 cudart 依赖；部署时仍需暂存的 cuFFT sidecar
-以及兼容的 NVIDIA 驱动。
+依赖审计会拒绝意外出现的动态 CRT 或 cudart 依赖；运行时解析器会使用已安装的兼容
+cuFFT，或采用固定且经过校验的首次下载；兼容的 NVIDIA 驱动仍然必需。
 默认命令会运行全部原生 GPU 测试。没有 GPU 的 CI 可传入 `-SkipRuntimeTests`；该模式
 仍会编译、审计并暂存桥接，但不能算作 GPU runtime 验证。
 
 当前正式 Release 构建为零警告、零错误。xUnit v3 项目向
-`dotnet test` 和 Visual Studio Test Explorer 暴露 **1,550** 个可独立发现的测试。
+`dotnet test` 和 Visual Studio Test Explorer 暴露 **1,562** 个可独立发现的测试。
 
 <!-- SECTION: usage -->
 

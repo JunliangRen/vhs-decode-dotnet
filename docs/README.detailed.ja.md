@@ -4,14 +4,14 @@
 
 [English](README.detailed.md) | [简体中文](README.detailed.zh-CN.md) | **[日本語](README.detailed.ja.md)**
 
-<!-- README_SYNC: 2026-08-17.02 -->
+<!-- README_SYNC: 2026-08-18.01 -->
 
 [`oyvindln/vhs-decode`](https://github.com/oyvindln/vhs-decode) の
 デコード関連部分を .NET 11 で再実装するプロジェクトです。現在は release
 `v0.4.0`、commit `43155200da87c0d49eb37d8ec09b1372075ee8e4`
 を互換性の基準としています。
 
-現在の .NET port release は `v0.4.0-2.3.0`（application version `2.3.0`）です。
+現在の .NET port release は `v0.4.0-2.3.1`（application version `2.3.1`）です。
 
 > [!IMPORTANT]
 > この互換移植は現在も開発中です。トップレベルのデコード経路は実装済みで
@@ -236,6 +236,19 @@ backend へ fallback しません。初期 contract は Windows x64 の native-r
 PAL/NTSC VHS SP/LP/EP のみです。CVBS、LaserDisc、HiFi、S-VHS、その他の video
 system、packed `.lds`、preview-server routing、明示的な compatibility profile
 selection は近似処理しません。
+
+binary release は約 1.2 MiB の CUDA-fast bridge を保持しますが、271 MiB の
+`cufft64_12.dll` は埋め込みません。最初に `cuda-fast` を明示的に選んだときだけ、
+指定 runtime path、bridge directory、CUDA 13 Toolkit、process `PATH`、versioned user
+cache の順に compatible cuFFT 12 を検索します。見つからない場合は CUDA 13 driver と
+device を先に確認し、NVIDIA の pinned 12.0.0.15 Windows redistributable（202.2 MiB）を
+download します。archive と抽出 DLL の両方を固定 SHA-256 で検証し、
+`%LOCALAPPDATA%\vhs-decode-dotnet\cuda\cufft\12.0.0.15` へ atomic に install します。
+cross-process lock により同時の初回実行でも download は 1 回だけです。Exact、IPP、
+preview path は resolver に入らず network access もしません。offline deployment は
+`VHSDECODE_CUDA_RUNTIME_PATH`、cache root の変更は `VHSDECODE_CUDA_CACHE_PATH`、
+automatic download の無効化は `VHSDECODE_CUDA_AUTO_DOWNLOAD=0` を使用できます。
+download/load failure は明示的に報告され、CPU backend へ fallback しません。
 
 この backend は独自の numerical contract を持ち、`v0.4.0` または `current` の hash
 compatibility を主張しません。local RTX 4070 12 GiB development machine の current
@@ -4002,7 +4015,7 @@ suite は全 1,448 test に成功しました。
 .\tools\build-cuda-fast-native.ps1
 dotnet restore VHSDecodeDotNet.slnx
 dotnet build VHSDecodeDotNet.slnx -c Release --no-restore
-dotnet test --solution VHSDecodeDotNet.slnx -c Release --no-build --no-restore --minimum-expected-tests 1550
+dotnet test --solution VHSDecodeDotNet.slnx -c Release --no-build --no-restore --minimum-expected-tests 1562
 dotnet test --project tests\VHSDecode.Tests\VHSDecode.Tests.csproj -c Release --no-build --no-restore --coverage --coverage-output coverage.cobertura.xml --coverage-output-format cobertura
 ```
 
@@ -4017,18 +4030,20 @@ third-party notice を埋め込み、license sidecar file は追加しません�
 2 番目の command は optional `cuda-fast` bridge を build します。CUDA 13 Toolkit、
 NVIDIA GPU/driver、CMake/Ninja、MSVC 14.44 以前の host toolset が必要です。local
 checkout を指定した場合、script は clean な pinned cuVHS commit であることを確認し、
-bridge を compile/smoke-test してから `vhsdecode_cuda_fast.dll`、cuFFT runtime、
-third-party notice を stage します。不要な native backend の command は省略でき、
+bridge を compile/smoke-test してから `vhsdecode_cuda_fast.dll` と third-party notice を
+stage します。native test は build host の cuFFT を使用しますが、managed release には
+stage しません。不要な native backend の command は省略でき、
 Exact-only build では両方を省略できます。bridge は MSVC runtime と CUDA runtime を
 static link し、dependency audit は意図しない dynamic CRT/cudart dependency を拒否します。
-deployment には staged cuFFT sidecar と compatible NVIDIA driver が引き続き必要です。
+runtime resolver は installed compatible cuFFT または pinned/verified first-use download を
+使用し、compatible NVIDIA driver は引き続き必要です。
 default command はすべての native GPU test を実行します。GPU のない CI では
 `-SkipRuntimeTests` を指定できます。この mode でも bridge の compile、audit、stage は
 行いますが、GPU runtime validation にはなりません。
 
 現在の正式な Release build は warning 0、error 0 です。xUnit v3 project は
 `dotnet test` と Visual Studio Test Explorer の両方で個別に検出できる
-**1,550** tests を公開します。
+**1,562** tests を公開します。
 
 <!-- SECTION: usage -->
 

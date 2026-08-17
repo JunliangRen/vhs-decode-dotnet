@@ -88,20 +88,23 @@ internal sealed class CudaFastNativeRuntime : ICudaFastNativeRuntime
     private const int StatusCudaUnavailable = -20002;
     private const int StatusCancelled = -20006;
     private const int DeviceNameCapacity = 128;
+    private const int MinimumCuFftVersion = 12_000;
+    private const int MaximumCuFftVersionExclusive = 13_000;
 
-    private static readonly Lazy<CudaFastNativeRuntime> Shared = new(
-        Load,
-        LazyThreadSafetyMode.ExecutionAndPublication);
+    private static readonly SemaphoreSlim LoadGate = new(1, 1);
+    private static CudaFastNativeRuntime? _shared;
 
     private readonly nint _libraryHandle;
+    private readonly nint _cuFftHandle;
     private readonly GetAbiVersionDelegate _getAbiVersion;
     private readonly GetRuntimeInfoDelegate _getRuntimeInfo;
     private readonly RunDelegate _run;
     private readonly GetLastErrorDelegate _getLastError;
 
-    private CudaFastNativeRuntime(nint libraryHandle)
+    private CudaFastNativeRuntime(nint libraryHandle, nint cuFftHandle)
     {
         _libraryHandle = libraryHandle;
+        _cuFftHandle = cuFftHandle;
         _getAbiVersion = GetExport<GetAbiVersionDelegate>(
             libraryHandle,
             "vhsdecode_cuda_fast_get_abi_version");
@@ -121,7 +124,19 @@ internal sealed class CudaFastNativeRuntime : ICudaFastNativeRuntime
         }
     }
 
-    internal static ICudaFastNativeRuntime RequireAvailable() => Shared.Value;
+    internal static ICudaFastNativeRuntime RequireAvailable()
+        => RequireAvailableCore(
+            TextWriter.Null,
+            CancellationToken.None,
+            allowDownload: false);
+
+    internal static ICudaFastNativeRuntime RequireAvailable(
+        TextWriter output,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(output);
+        return RequireAvailableCore(output, cancellationToken, allowDownload: true);
+    }
 
     internal static unsafe int RuntimeInfoStructureSize => sizeof(NativeRuntimeInfo);
 
@@ -204,7 +219,40 @@ internal sealed class CudaFastNativeRuntime : ICudaFastNativeRuntime
         }
     }
 
-    private static CudaFastNativeRuntime Load()
+    private static CudaFastNativeRuntime RequireAvailableCore(
+        TextWriter output,
+        CancellationToken cancellationToken,
+        bool allowDownload)
+    {
+        CudaFastNativeRuntime? existing = Volatile.Read(ref _shared);
+        if (existing is not null)
+        {
+            return existing;
+        }
+
+        LoadGate.Wait(cancellationToken);
+        try
+        {
+            existing = _shared;
+            if (existing is not null)
+            {
+                return existing;
+            }
+
+            existing = Load(output, cancellationToken, allowDownload);
+            Volatile.Write(ref _shared, existing);
+            return existing;
+        }
+        finally
+        {
+            LoadGate.Release();
+        }
+    }
+
+    private static CudaFastNativeRuntime Load(
+        TextWriter output,
+        CancellationToken cancellationToken,
+        bool allowDownload)
     {
         if (!OperatingSystem.IsWindows())
         {
@@ -212,36 +260,203 @@ internal sealed class CudaFastNativeRuntime : ICudaFastNativeRuntime
                 "the first CUDA-full implementation currently supports win-x64 only.");
         }
 
-        IReadOnlyList<string> candidates = BuildCandidatePaths();
-        List<string> loadFailures = [];
-        foreach (string candidate in candidates)
+        IReadOnlyList<string> bridgeCandidates = BuildCandidatePaths();
+        if (!bridgeCandidates.Any(File.Exists))
         {
+            string searchedBridges = string.Join(
+                Environment.NewLine,
+                bridgeCandidates.Select(path => "  " + path));
+            throw new CudaFastBackendUnavailableException(
+                $"'{NativeLibraryName}' was not found. Searched:{Environment.NewLine}{searchedBridges}");
+        }
+
+        CudaFastRuntimeProvisioner provisioner = CudaFastRuntimeProvisioner.CreateProduction();
+        IReadOnlyList<string> cuFftCandidates = CudaFastRuntimeProvisioner.BuildCandidatePaths(
+            CudaFastRuntimeProvisioner.CaptureSearchEnvironment(
+                provisioner.CacheLibraryPath));
+        List<string> loadFailures = [];
+        foreach (string candidate in cuFftCandidates)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
             if (!File.Exists(candidate))
             {
                 continue;
             }
 
-            try
+            if (Path.GetFullPath(candidate).Equals(
+                    Path.GetFullPath(provisioner.CacheLibraryPath),
+                    StringComparison.OrdinalIgnoreCase)
+                && !provisioner.IsPinnedLibraryValid(candidate))
             {
-                return new CudaFastNativeRuntime(NativeLibrary.Load(candidate));
+                loadFailures.Add($"{candidate}: cached runtime failed pinned size or SHA-256 validation.");
+                continue;
             }
-            catch (Exception ex) when (ex is DllNotFoundException
-                or BadImageFormatException
-                or EntryPointNotFoundException
-                or CudaFastBackendUnavailableException)
+
+            if (TryLoadWithCuFft(
+                    candidate,
+                    bridgeCandidates,
+                    out CudaFastNativeRuntime? runtime,
+                    out string failure))
             {
-                loadFailures.Add($"{candidate}: {ex.Message}");
+                output.WriteLine(
+                    $"CUDA-fast cuFFT {FormatCuFftVersion(runtime!.CuFftVersion)} loaded from '{runtime.CuFftPath}'.");
+                return runtime;
             }
+
+            loadFailures.Add($"{candidate}: {failure}");
         }
 
-        string searched = string.Join(Environment.NewLine, candidates.Select(path => "  " + path));
+        bool downloadEnabled = allowDownload
+            && CudaFastRuntimeProvisioner.IsAutoDownloadEnabled(
+                Environment.GetEnvironmentVariable(
+                    CudaFastRuntimeProvisioner.AutoDownloadEnvironmentVariable));
+        if (downloadEnabled)
+        {
+            string downloadedPath;
+            try
+            {
+                downloadedPath = provisioner.EnsureDownloadedAsync(output, cancellationToken)
+                    .GetAwaiter()
+                    .GetResult();
+            }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            {
+                throw;
+            }
+            catch (CudaFastBackendUnavailableException)
+            {
+                throw;
+            }
+            catch (Exception ex) when (ex is HttpRequestException
+                or InvalidDataException
+                or IOException
+                or UnauthorizedAccessException)
+            {
+                throw new CudaFastBackendUnavailableException(
+                    $"the pinned cuFFT runtime could not be downloaded from NVIDIA. "
+                    + $"Download '{CudaFastRuntimeProvisioner.PinnedPackage.DownloadUri}' manually or set "
+                    + $"{CudaFastRuntimeProvisioner.RuntimePathEnvironmentVariable} to a compatible runtime directory. {ex.Message}",
+                    ex);
+            }
+
+            if (TryLoadWithCuFft(
+                    downloadedPath,
+                    bridgeCandidates,
+                    out CudaFastNativeRuntime? runtime,
+                    out string failure))
+            {
+                output.WriteLine(
+                    $"CUDA-fast cuFFT {FormatCuFftVersion(runtime!.CuFftVersion)} loaded from '{runtime.CuFftPath}'.");
+                return runtime;
+            }
+
+            loadFailures.Add($"{downloadedPath}: {failure}");
+        }
+
+        string searched = string.Join(
+            Environment.NewLine,
+            cuFftCandidates.Select(path => "  " + path));
         string failures = loadFailures.Count == 0
             ? string.Empty
             : Environment.NewLine + "Load failures:" + Environment.NewLine
                 + string.Join(Environment.NewLine, loadFailures.Select(message => "  " + message));
+        string downloadStatus = allowDownload && !downloadEnabled
+            ? Environment.NewLine
+                + $"Automatic download is disabled by {CudaFastRuntimeProvisioner.AutoDownloadEnvironmentVariable}."
+            : string.Empty;
         throw new CudaFastBackendUnavailableException(
-            $"'{NativeLibraryName}' and its CUDA 13 runtime dependencies could not be loaded. Searched:{Environment.NewLine}{searched}{failures}");
+            $"'{CudaFastRuntimeProvisioner.CuFftLibraryName}' could not be loaded for '{NativeLibraryName}'. "
+            + $"Searched:{Environment.NewLine}{searched}{failures}{downloadStatus}{Environment.NewLine}"
+            + $"Pinned NVIDIA package: {CudaFastRuntimeProvisioner.PinnedPackage.DownloadUri}");
     }
+
+    private static bool TryLoadWithCuFft(
+        string cuFftPath,
+        IReadOnlyList<string> bridgeCandidates,
+        out CudaFastNativeRuntime? runtime,
+        out string failure)
+    {
+        runtime = null;
+        nint cuFftHandle = 0;
+        try
+        {
+            cuFftHandle = NativeLibrary.Load(cuFftPath);
+            var getVersion = GetExport<CuFftGetVersionDelegate>(
+                cuFftHandle,
+                "cufftGetVersion");
+            int status = getVersion(out int version);
+            if (status != 0)
+            {
+                failure = $"cufftGetVersion failed with cuFFT status {status}.";
+                return false;
+            }
+            if (version < MinimumCuFftVersion || version >= MaximumCuFftVersionExclusive)
+            {
+                failure = $"cuFFT version {version} is outside the supported 12.x ABI range.";
+                return false;
+            }
+
+            var bridgeFailures = new List<string>();
+            foreach (string bridgePath in bridgeCandidates)
+            {
+                if (!File.Exists(bridgePath))
+                {
+                    continue;
+                }
+
+                nint bridgeHandle = 0;
+                try
+                {
+                    bridgeHandle = NativeLibrary.Load(bridgePath);
+                    runtime = new CudaFastNativeRuntime(bridgeHandle, cuFftHandle)
+                    {
+                        CuFftPath = Path.GetFullPath(cuFftPath),
+                        CuFftVersion = version
+                    };
+                    bridgeHandle = 0;
+                    cuFftHandle = 0;
+                    failure = string.Empty;
+                    return true;
+                }
+                catch (Exception ex) when (ex is DllNotFoundException
+                    or BadImageFormatException
+                    or EntryPointNotFoundException
+                    or CudaFastBackendUnavailableException)
+                {
+                    bridgeFailures.Add($"{bridgePath}: {ex.Message}");
+                }
+                finally
+                {
+                    if (bridgeHandle != 0)
+                    {
+                        NativeLibrary.Free(bridgeHandle);
+                    }
+                }
+            }
+
+            failure = bridgeFailures.Count == 0
+                ? $"'{NativeLibraryName}' was not found."
+                : string.Join(" | ", bridgeFailures);
+            return false;
+        }
+        catch (Exception ex) when (ex is DllNotFoundException
+            or BadImageFormatException
+            or EntryPointNotFoundException)
+        {
+            failure = ex.Message;
+            return false;
+        }
+        finally
+        {
+            if (cuFftHandle != 0)
+            {
+                NativeLibrary.Free(cuFftHandle);
+            }
+        }
+    }
+
+    private static string FormatCuFftVersion(int version)
+        => $"{version / 1000}.{(version % 1000) / 100}.{version % 100}";
 
     internal static IReadOnlyList<string> BuildCandidatePaths()
     {
@@ -297,8 +512,15 @@ internal sealed class CudaFastNativeRuntime : ICudaFastNativeRuntime
         => Marshal.GetDelegateForFunctionPointer<TDelegate>(
             NativeLibrary.GetExport(libraryHandle, name));
 
+    private string CuFftPath { get; init; } = string.Empty;
+
+    private int CuFftVersion { get; init; }
+
     [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
     private delegate uint GetAbiVersionDelegate();
+
+    [UnmanagedFunctionPointer(CallingConvention.Winapi)]
+    private delegate int CuFftGetVersionDelegate(out int version);
 
     [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
     private delegate int GetRuntimeInfoDelegate(int deviceId, ref NativeRuntimeInfo info);
