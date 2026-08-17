@@ -2,6 +2,7 @@ using System.Buffers.Binary;
 using System.ComponentModel;
 using VHSDecode.Core.CommandLine;
 using VHSDecode.Core.Decode;
+using VHSDecode.Core.Dsp.CudaFast;
 using VHSDecode.Core.Rf;
 using Xunit;
 
@@ -427,11 +428,16 @@ public sealed class LibsndfilePcm16SampleLoaderTests
             fallback);
         using var input = new MemoryStream();
 
-        double[]? firstRead = loader.Read(input, 4, 2);
+        var firstRead = new short[2];
+        int firstReadCount = CudaFastDecodeRunner.ReadInt16WithFallback(
+            loader,
+            input,
+            sample: 4,
+            firstRead);
         double[]? secondRead = loader.Read(input, 8, 2);
-        Assert.NotNull(firstRead);
+        Assert.Equal(2, firstReadCount);
         Assert.NotNull(secondRead);
-        Assert.Equal([71.0, 72.0], firstRead);
+        Assert.Equal([(short)71, (short)72], firstRead);
         Assert.Equal([71.0, 72.0], secondRead);
         Assert.Equal(1, openCount);
         Assert.Equal(2, fallback.ReadCount);

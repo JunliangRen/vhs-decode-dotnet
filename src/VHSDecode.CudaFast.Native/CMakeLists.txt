@@ -496,12 +496,39 @@ void chroma_state_release(ChromaState* state);
 // Kernel 6: Chroma Decode]=]
     CUVHS_CHROMA_HEADER_SOURCE
     "${CUVHS_CHROMA_HEADER_SOURCE}")
+set(CUVHS_CHROMA_DECODE_DECLARATION "void chroma_decode(")
+string(FIND
+    "${CUVHS_CHROMA_HEADER_SOURCE}"
+    "${CUVHS_CHROMA_DECODE_DECLARATION}"
+    CUVHS_CHROMA_DECODE_DECLARATION_INDEX)
+if(CUVHS_CHROMA_DECODE_DECLARATION_INDEX EQUAL -1)
+    message(FATAL_ERROR
+        "Pinned cuVHS chroma header no longer has the expected decode declaration")
+endif()
+string(REPLACE
+    "${CUVHS_CHROMA_DECODE_DECLARATION}"
+    "bool chroma_decode("
+    CUVHS_CHROMA_HEADER_SOURCE
+    "${CUVHS_CHROMA_HEADER_SOURCE}")
 file(WRITE "${CUVHS_CHROMA_HEADER_PATH}" "${CUVHS_CHROMA_HEADER_SOURCE}")
 vhsdecode_cuda_fast_generate_fp32_source(
     "${CMAKE_CURRENT_BINARY_DIR}/generated/include/pipeline/dropout_detect.h"
     "${CMAKE_CURRENT_SOURCE_DIR}/overlay/pipeline/dropout_detect.h")
 
 file(READ "${cuvhs_SOURCE_DIR}/src/pipeline/fm_demod.cu" CUVHS_FM_DEMOD_SOURCE)
+# The pinned source has trailing horizontal whitespace in this kernel. Normalize
+# that non-semantic whitespace so exact overlay guards work identically with
+# LF and CRLF checkouts.
+string(REGEX REPLACE
+    "[ \t]+\r\n"
+    "\r\n"
+    CUVHS_FM_DEMOD_SOURCE
+    "${CUVHS_FM_DEMOD_SOURCE}")
+string(REGEX REPLACE
+    "[ \t]+\n"
+    "\n"
+    CUVHS_FM_DEMOD_SOURCE
+    "${CUVHS_FM_DEMOD_SOURCE}")
 string(REPLACE
     "static const double TAU = 2.0 * PI;"
     "static constexpr double TAU = 6.28318530717958647692;"
@@ -631,6 +658,14 @@ string(REPLACE
 vhsdecode_cuda_fast_protect_fm_filter_design(CUVHS_FM_DEMOD_SOURCE)
 vhsdecode_cuda_fast_convert_pipeline_to_fp32(CUVHS_FM_DEMOD_SOURCE)
 vhsdecode_cuda_fast_finish_fm_mixed_precision(CUVHS_FM_DEMOD_SOURCE)
+string(REPLACE
+    [=[        while (delta > TAU) delta -= TAU;
+
+        out[i] = delta * scale;]=]
+    [=[        while (delta > TAU) delta -= TAU;
+        out[i] = delta * scale;]=]
+    CUVHS_FM_DEMOD_SOURCE
+    "${CUVHS_FM_DEMOD_SOURCE}")
 
 # Phase differences are sample-local; the upstream kernel assigned an entire
 # ~850k-sample field to one CUDA thread.  Map one output sample to one thread
@@ -1505,6 +1540,20 @@ string(REPLACE
 vhsdecode_cuda_fast_protect_chroma_filter_design(CUVHS_CHROMA_SOURCE)
 vhsdecode_cuda_fast_convert_pipeline_to_fp32(CUVHS_CHROMA_SOURCE)
 vhsdecode_cuda_fast_finish_chroma_mixed_precision(CUVHS_CHROMA_SOURCE)
+set(CUVHS_CHROMA_DECODE_DEFINITION "void chroma_decode(")
+string(FIND
+    "${CUVHS_CHROMA_SOURCE}"
+    "${CUVHS_CHROMA_DECODE_DEFINITION}"
+    CUVHS_CHROMA_DECODE_DEFINITION_INDEX)
+if(CUVHS_CHROMA_DECODE_DEFINITION_INDEX EQUAL -1)
+    message(FATAL_ERROR
+        "Pinned cuVHS chroma source no longer has the expected decode definition")
+endif()
+string(REPLACE
+    "${CUVHS_CHROMA_DECODE_DEFINITION}"
+    "bool chroma_decode("
+    CUVHS_CHROMA_SOURCE
+    "${CUVHS_CHROMA_SOURCE}")
 
 # Match Exact's field-dependent source-line origin.  The pinned cuVHS source
 # starts every format at physical line 2; Exact starts NTSC at line 1 and PAL
@@ -1699,6 +1748,9 @@ static bool ensure_chroma_workspace(
     int field_fft_size,
     int field_freq_bins)
 {
+    if (env_flag_enabled_local("CUVHS_FORCE_CHROMA_WORKSPACE_FAILURE")) {
+        return false;
+    }
     if (workspace.compatible(fft_size, field_fft_size, output_field_lines)) {
         return true;
     }
@@ -2030,7 +2082,7 @@ set(CUVHS_CHROMA_WORKSPACE_REPLACEMENT [=[    const bool persistent_workspace =
         cudaFree(d_source_coords_post);
         cudaFree(d_source_level_adjust_post);
         cudaFree(d_final_bpf_filter);
-        return;
+        return false;
     }
 
     const int fields_per_chunk = workspace->fields_per_chunk;
@@ -2128,6 +2180,29 @@ string(REPLACE
     [=[    stage_mark("workspace-and-plans");
 
     const char* dump_k4_dir = env_string_local("CUVHS_K4_DUMP_DIR");]=]
+    CUVHS_CHROMA_SOURCE
+    "${CUVHS_CHROMA_SOURCE}")
+set(CUVHS_CHROMA_SUCCESS_TAIL [=[        state->cycle_start = uses_ntsc_family_phase
+            ? (cycle_start + num_fields) % 8
+            : 0;
+    }
+}]=])
+string(FIND
+    "${CUVHS_CHROMA_SOURCE}"
+    "${CUVHS_CHROMA_SUCCESS_TAIL}"
+    CUVHS_CHROMA_SUCCESS_TAIL_INDEX)
+if(CUVHS_CHROMA_SUCCESS_TAIL_INDEX EQUAL -1)
+    message(FATAL_ERROR
+        "Pinned cuVHS chroma source no longer has the expected success tail")
+endif()
+string(REPLACE
+    "${CUVHS_CHROMA_SUCCESS_TAIL}"
+    [=[        state->cycle_start = uses_ntsc_family_phase
+            ? (cycle_start + num_fields) % 8
+            : 0;
+    }
+    return true;
+}]=]
     CUVHS_CHROMA_SOURCE
     "${CUVHS_CHROMA_SOURCE}")
 file(WRITE
@@ -2972,6 +3047,42 @@ string(REPLACE
     CUVHS_PIPELINE_SOURCE
     "${CUVHS_PIPELINE_SOURCE}")
 vhsdecode_cuda_fast_convert_pipeline_to_fp32(CUVHS_PIPELINE_SOURCE)
+
+set(CUVHS_CHROMA_DECODE_CALL [=[    chroma_decode(static_cast<float*>(d_demod_burst),
+                  static_cast<float*>(d_linelocs),
+                  static_cast<int*>(d_is_first_field),
+                  static_cast<uint16_t*>(d_tbc_chroma),
+                  fields_loaded,
+                  demod_fields_loaded * (int)spf_padded,
+                  fmt,
+                  field_phase_ids,
+                  &chroma_state,
+                  raw_offset);]=])
+string(FIND
+    "${CUVHS_PIPELINE_SOURCE}"
+    "${CUVHS_CHROMA_DECODE_CALL}"
+    CUVHS_CHROMA_DECODE_CALL_INDEX)
+if(CUVHS_CHROMA_DECODE_CALL_INDEX EQUAL -1)
+    message(FATAL_ERROR
+        "Pinned cuVHS pipeline no longer has the expected chroma decode call")
+endif()
+string(REPLACE
+    "${CUVHS_CHROMA_DECODE_CALL}"
+    [=[    if (!chroma_decode(static_cast<float*>(d_demod_burst),
+                  static_cast<float*>(d_linelocs),
+                  static_cast<int*>(d_is_first_field),
+                  static_cast<uint16_t*>(d_tbc_chroma),
+                  fields_loaded,
+                  demod_fields_loaded * (int)spf_padded,
+                  fmt,
+                  field_phase_ids,
+                  &chroma_state,
+                  raw_offset)) {
+        fprintf(stderr, "CUDA-fast chroma decode failed\n");
+        return -1;
+    }]=]
+    CUVHS_PIPELINE_SOURCE
+    "${CUVHS_PIPELINE_SOURCE}")
 
 # The managed FLAC reader can now return libsndfile's native PCM16 samples.
 # Upload those two-byte values directly and perform the exact int16-to-FP32

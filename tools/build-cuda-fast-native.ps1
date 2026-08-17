@@ -253,6 +253,30 @@ if (-not $SkipRuntimeTests) {
         throw "CUDA-fast synthetic NTSC test failed with exit code $LASTEXITCODE."
     }
 
+    # Force the rare one-field chroma-workspace allocation failure and require
+    # the native ABI to fail closed instead of reporting unwritten chroma as a
+    # successful decode.
+    $previousForcedChromaWorkspaceFailure = [Environment]::GetEnvironmentVariable(
+        'CUVHS_FORCE_CHROMA_WORKSPACE_FAILURE',
+        [EnvironmentVariableTarget]::Process)
+    try {
+        [Environment]::SetEnvironmentVariable(
+            'CUVHS_FORCE_CHROMA_WORKSPACE_FAILURE',
+            '1',
+            [EnvironmentVariableTarget]::Process)
+        Write-Host "Running $syntheticNtscTestOutputPath with forced chroma-workspace failure"
+        & $syntheticNtscTestOutputPath
+        if ($LASTEXITCODE -eq 0) {
+            throw 'CUDA-fast accepted a forced chroma-workspace failure.'
+        }
+    }
+    finally {
+        [Environment]::SetEnvironmentVariable(
+            'CUVHS_FORCE_CHROMA_WORKSPACE_FAILURE',
+            $previousForcedChromaWorkspaceFailure,
+            [EnvironmentVariableTarget]::Process)
+    }
+
     # A five-field batch crosses both odd head-track parity and the NTSC
     # four/eight-field colour sequence at non-aligned boundaries. Run the same
     # end-to-end cadence/phase assertions under that diagnostic size as well as

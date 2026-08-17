@@ -4,6 +4,7 @@ using VHSDecode.Core.CommandLine;
 using VHSDecode.Core.Decode;
 using VHSDecode.Core.Dsp.CudaFast;
 using VHSDecode.Core.HiFi;
+using VHSDecode.Core.Rf;
 using Xunit;
 
 namespace VHSDecode.Tests;
@@ -106,6 +107,8 @@ public sealed class CudaFastBackendTests
     public void NativeBuildReusesAndReleasesPersistentChromaWorkspace()
     {
         string cmake = ReadNativeBuildDefinition();
+        string nativeBuildScript = File.ReadAllText(
+            Path.Combine(RepositoryRoot(), "tools", "build-cuda-fast-native.ps1"));
 
         Assert.Contains("struct CudaFastChromaWorkspace", cmake, StringComparison.Ordinal);
         Assert.Contains("ensure_chroma_workspace(", cmake, StringComparison.Ordinal);
@@ -114,6 +117,20 @@ public sealed class CudaFastBackendTests
             cmake,
             StringComparison.Ordinal);
         Assert.Contains("chroma_state_release(&chroma_state);", cmake, StringComparison.Ordinal);
+        Assert.Contains("bool chroma_decode(", cmake, StringComparison.Ordinal);
+        Assert.Contains("if (!chroma_decode(", cmake, StringComparison.Ordinal);
+        Assert.Contains(
+            "CUVHS_FORCE_CHROMA_WORKSPACE_FAILURE",
+            cmake,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "CUVHS_FORCE_CHROMA_WORKSPACE_FAILURE",
+            nativeBuildScript,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "CUDA-fast accepted a forced chroma-workspace failure.",
+            nativeBuildScript,
+            StringComparison.Ordinal);
         Assert.Contains(
             "if (!persistent_workspace) local_workspace.release();",
             cmake,
@@ -567,6 +584,21 @@ public sealed class CudaFastBackendTests
             Assert.Equal(CudaFastInputSampleFormat.Int16, nativeRuntime.InputSampleFormat);
             Assert.Equal(16, nativeRuntime.ReadSampleCount);
             Assert.Equal(samples.AsSpan(0, 16).ToArray(), nativeRuntime.Int16Samples);
+
+            var fallbackLoader = new FallbackOnlyInt16Loader(
+                [short.MinValue, -1.0, 0.0, short.MaxValue]);
+            var fallbackDestination = new short[4];
+            int fallbackRead = CudaFastDecodeRunner.ReadInt16WithFallback(
+                fallbackLoader,
+                Stream.Null,
+                sample: 0,
+                fallbackDestination);
+            Assert.Equal(4, fallbackRead);
+            Assert.Equal(
+                [short.MinValue, (short)-1, (short)0, short.MaxValue],
+                fallbackDestination);
+            Assert.Equal(1, fallbackLoader.DirectReadCount);
+            Assert.Equal(1, fallbackLoader.FallbackReadCount);
         }
         finally
         {
@@ -831,6 +863,32 @@ public sealed class CudaFastBackendTests
                 OutputLineLength: 1,
                 OutputFieldLines: 1,
                 ElapsedSeconds: 0.01);
+        }
+    }
+
+    private sealed class FallbackOnlyInt16Loader(double[] samples) : IInt16RfSampleLoader
+    {
+        private readonly double[] _samples = samples;
+
+        internal int DirectReadCount { get; private set; }
+
+        internal int FallbackReadCount { get; private set; }
+
+        public bool TryReadInt16(
+            Stream stream,
+            long sample,
+            Span<short> destination,
+            out int samplesRead)
+        {
+            DirectReadCount++;
+            samplesRead = 0;
+            return false;
+        }
+
+        public double[]? Read(Stream stream, long sample, int readLength)
+        {
+            FallbackReadCount++;
+            return _samples.AsSpan(checked((int)sample), readLength).ToArray();
         }
     }
 

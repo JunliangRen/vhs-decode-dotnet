@@ -453,6 +453,65 @@ internal sealed class CudaFastDecodeRunner : ICudaFastDecodeRunner
             : loader;
     }
 
+    internal static int ReadInt16WithFallback(
+        IRfSampleLoader loader,
+        Stream stream,
+        long sample,
+        Span<short> destination)
+    {
+        ArgumentNullException.ThrowIfNull(loader);
+        ArgumentNullException.ThrowIfNull(stream);
+        ArgumentOutOfRangeException.ThrowIfNegative(sample);
+        if (loader is not IInt16RfSampleLoader int16Loader)
+        {
+            throw new IOException(
+                "The selected CUDA-fast PCM16 input loader does not expose native-width samples.");
+        }
+
+        if (int16Loader.TryReadInt16(
+                stream,
+                sample,
+                destination,
+                out int directRead))
+        {
+            if ((uint)directRead > (uint)destination.Length)
+            {
+                throw new IOException(
+                    $"The PCM16 RF loader returned {directRead} samples for a {destination.Length}-sample request.");
+            }
+
+            return directRead;
+        }
+
+        double[]? fallback = loader.Read(stream, sample, destination.Length);
+        if (fallback is null)
+        {
+            return 0;
+        }
+        if (fallback.Length > destination.Length)
+        {
+            throw new IOException(
+                $"The fallback PCM16 RF loader returned {fallback.Length} samples for a {destination.Length}-sample request.");
+        }
+
+        for (int i = 0; i < fallback.Length; i++)
+        {
+            double value = fallback[i];
+            if (!double.IsFinite(value)
+                || value < short.MinValue
+                || value > short.MaxValue
+                || value != Math.Truncate(value))
+            {
+                throw new IOException(
+                    $"The fallback PCM16 RF loader returned invalid sample {value:R} at index {i}.");
+            }
+
+            destination[i] = (short)value;
+        }
+
+        return fallback.Length;
+    }
+
     private static void WriteDiagnostic(
         TextWriter output,
         string logPath,
@@ -647,22 +706,11 @@ internal sealed class CudaFastDecodeRunner : ICudaFastDecodeRunner
                         var directDestination = new Span<short>(
                             (void*)(destination + checked((nint)(written * sizeof(short)))),
                             count);
-                        if (_loader is not IInt16RfSampleLoader int16Loader
-                            || !int16Loader.TryReadInt16(
-                                _input,
-                                absoluteSample,
-                                directDestination,
-                                out int directRead))
-                        {
-                            throw new IOException(
-                                "The selected PCM16 CUDA-fast input path became unavailable during decode. "
-                                + "Set VHSDECODE_CUDA_FAST_FORCE_FP32_INPUT=1 to use the FP32 callback path.");
-                        }
-                        if ((uint)directRead > (uint)count)
-                        {
-                            throw new IOException(
-                                $"The PCM16 RF loader returned {directRead} samples for a {count}-sample request.");
-                        }
+                        int directRead = ReadInt16WithFallback(
+                            _loader,
+                            _input,
+                            absoluteSample,
+                            directDestination);
 
                         written += checked((uint)directRead);
                         if (directRead < count)
