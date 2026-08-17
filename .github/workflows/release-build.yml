@@ -49,7 +49,7 @@ jobs:
         with:
           cuda: '13.0.3'
           method: network
-          sub-packages: '["nvcc", "cudart", "cufft", "cufft_dev", "visual_studio_integration"]'
+          sub-packages: '["nvcc", "crt", "cudart", "cufft", "cufft_dev", "visual_studio_integration"]'
 
       - name: Install pinned FFmpeg test dependency
         shell: pwsh
