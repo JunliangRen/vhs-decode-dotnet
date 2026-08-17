@@ -2229,7 +2229,7 @@ dotnet test --solution VHSDecodeDotNet.slnx --no-build
 ```
 
 The current formal solution build completes with zero warnings and errors, and
-the xUnit v3 project exposes 1,550 independently discoverable tests
+the xUnit v3 project exposes 1,562 independently discoverable tests
 to `dotnet test` and Visual Studio Test Explorer. On the
 same Windows machine and fixtures, Release wall-clock measurements for one
 frame were 2.346 s versus 7.193 s for NTSC VHS and 1.651 s versus 5.865 s for
@@ -3100,9 +3100,12 @@ parallel-pulse, direct Exact-style dropout, and synthetic NTSC pipeline tests
 on an RTX 4070 (compute 8.9, 12 GiB VRAM).
 The Windows release workflow separately installs pinned CUDA 13.0.3 and uses
 `-SkipRuntimeTests` on the GPU-less hosted runner. That gate still compiles the
-bridge and native tests, audits dependencies, stages cuFFT/notices, and embeds
-the result in the managed build; it does not replace the preceding real-GPU
-runtime evidence.
+bridge and native tests, audits dependencies, and stages the bridge/notices.
+The managed release deliberately excludes cuFFT and enforces a 200 MiB maximum
+single-file size; an explicit first `cuda-fast` use resolves an installed
+compatible runtime or downloads NVIDIA's pinned package with fixed archive and
+DLL SHA-256 validation. This packaging gate does not replace the preceding
+real-GPU runtime evidence.
 
 Two current same-session interleaved runs per backend used the same fixed private
 local PAL 40 MHz `.ldf` request,
@@ -3170,7 +3173,7 @@ across non-aligned boundaries. This covers NTSC geometry, lifecycle, and
 determinism only; no real NTSC VHS capture was locally available for
 color/quality certification.
 
-The final .NET 11 Preview 7 xUnit v3 run discovered all 1,550 tests: 1,548
+The final .NET 11 Preview 7 xUnit v3 run discovered all 1,562 tests: 1,560
 passed, none failed, and two PAL/NTSC AMF encoder cases were skipped because the
 AMD runtime is unavailable on the NVIDIA development machine. The CUDA-focused
 coverage includes parser/backend isolation, ABI and real native probing,
@@ -3178,7 +3181,11 @@ unsupported-surface rejection, no-fallback behavior, managed random-read
 callbacks, cancellation, output trimming, global metadata rebasing, direct
 DecodeRunner routing that bypasses managed session construction, deterministic
 parallel sync semantics, bounded leader scanning and exact output length, and
-the synthetic NTSC full-pipeline gate. The direct GPU dropout test additionally
+the synthetic NTSC full-pipeline gate. Twelve runtime-provisioning tests cover
+official package pins, trusted search order, opt-out, verified cache reuse,
+download progress, archive/DLL hashes, license extraction, driver preflight,
+cross-process single-download semantics, cancellation, and lean publish gates.
+The direct GPU dropout test additionally
 covers dynamic source offsets, parity geometry, hysteresis, merging, and the
 strict minimum-run contract.
 

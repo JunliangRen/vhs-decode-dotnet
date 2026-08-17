@@ -22,10 +22,15 @@ public sealed class CudaFastBackendTests
     [Fact(DisplayName = "CUDA-fast staged native bridge loads with the pinned ABI")]
     public void StagedNativeBridgeLoadsWithPinnedAbi()
     {
+        CudaFastRuntimeProvisioner provisioner = CudaFastRuntimeProvisioner.CreateProduction();
         Assert.SkipUnless(
             OperatingSystem.IsWindows()
-                && CudaFastNativeRuntime.BuildCandidatePaths().Any(File.Exists),
-            "The optional CUDA-fast bridge was not staged for this test build.");
+                && CudaFastNativeRuntime.BuildCandidatePaths().Any(File.Exists)
+                && CudaFastRuntimeProvisioner.BuildCandidatePaths(
+                        CudaFastRuntimeProvisioner.CaptureSearchEnvironment(
+                            provisioner.CacheLibraryPath))
+                    .Any(File.Exists),
+            "The optional CUDA-fast bridge or a local cuFFT runtime was not staged for this test build.");
 
         // Loading the bridge validates its exported ABI in the runtime constructor.
         // Do not require a physical CUDA device on hosted build runners for this ABI check.

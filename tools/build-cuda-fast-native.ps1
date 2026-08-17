@@ -311,11 +311,13 @@ if (-not $artifactDirectoryFullPath.StartsWith($repositoryPrefix, [StringCompari
     throw "Refusing to write an artifact directory outside the repository: $artifactDirectoryFullPath"
 }
 New-Item -ItemType Directory -Path $artifactDirectoryFullPath -Force | Out-Null
+$staleCuFftArtifactPath = Join-Path $artifactDirectoryFullPath $cuFftName
+if (Test-Path -LiteralPath $staleCuFftArtifactPath -PathType Leaf) {
+    Remove-Item -LiteralPath $staleCuFftArtifactPath -Force
+}
 Copy-Item -LiteralPath $nativeOutputPath -Destination (Join-Path $artifactDirectoryFullPath $nativeName) -Force
-Copy-Item -LiteralPath $cuFftPath -Destination (Join-Path $artifactDirectoryFullPath $cuFftName) -Force
 Copy-Item -LiteralPath (Join-Path $sourceDirectory 'THIRD-PARTY-NOTICES-CUDA-FAST.md') -Destination $artifactDirectoryFullPath -Force
 
 $nativeArtifact = Get-Item -LiteralPath (Join-Path $artifactDirectoryFullPath $nativeName)
-$cuFftArtifact = Get-Item -LiteralPath (Join-Path $artifactDirectoryFullPath $cuFftName)
 Write-Host "Verified $($nativeArtifact.FullName) ($($nativeArtifact.Length) bytes)."
-Write-Host "Bundled cuFFT runtime: $($cuFftArtifact.FullName) ($($cuFftArtifact.Length) bytes)."
+Write-Host 'cuFFT is intentionally not staged for publishing; cuda-fast resolves a compatible system runtime or downloads the pinned NVIDIA package on first use.'

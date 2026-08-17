@@ -2,7 +2,7 @@
 
 [English](README.md) | [简体中文](README.zh-CN.md) | **[日本語](README.ja.md)**
 
-<!-- README_SYNC: 2026-08-17.02 -->
+<!-- README_SYNC: 2026-08-18.01 -->
 
 [`oyvindln/vhs-decode`](https://github.com/oyvindln/vhs-decode) の
 デコード関連部分を .NET 11 で再実装するプロジェクトです。互換性の対象は
@@ -38,7 +38,7 @@ upstream release `v0.4.0`、commit
 - VHS family には VHS/S-VHS、Betamax、Video8/Hi8、U-matic、Type C、EIAJ、
   upstream が対応する PAL/NTSC variant が含まれます。
 - TBC utility、ダブルクリック GUI、開発者向け plot window は対象外です。
-- Visual Studio 2026 の `.slnx` には **1,550** 件の標準 xUnit v3 test があり、
+- Visual Studio 2026 の `.slnx` には **1,562** 件の標準 xUnit v3 test があり、
   Test Explorer と `dotnet test` の両方で実行できます。
 
 <!-- SECTION: start -->
@@ -116,6 +116,15 @@ decode.exe vhs --compat-version current --dsp-backend ipp-fast `
 decode.exe vhs --dsp-backend cuda-fast --pal `
   --start 100 --length 20 input.ldf output
 ```
+
+default Windows release は小型 CUDA-fast bridge を保持しますが、271 MiB の cuFFT DLL
+は埋め込みません。`--dsp-backend cuda-fast` を明示したときだけ compatible CUDA 13/
+cuFFT 12 を検索し、見つからない場合は NVIDIA driver を先に確認してから NVIDIA の
+pinned 202.2 MiB redistributable を download します。archive と DLL を個別に
+SHA-256 検証し、`%LOCALAPPDATA%\vhs-decode-dotnet\cuda\cufft` へ一度だけ install
+します。Exact、IPP、preview path は network access しません。offline/system runtime
+は `VHSDECODE_CUDA_RUNTIME_PATH`、cache root は `VHSDECODE_CUDA_CACHE_PATH`、automatic
+download の無効化は `VHSDECODE_CUDA_AUTO_DOWNLOAD=0` で指定できます。
 
 LaserDisc の video、EFM、analog-audio full-complex FFT stage は IPP に接続済みです。
 CVBS と HiFi は引き続き `ipp-fast` を拒否します。release-compatible な動作が
@@ -233,7 +242,7 @@ header は FFmpeg を維持します。
 dotnet restore VHSDecodeDotNet.slnx
 dotnet build VHSDecodeDotNet.slnx -c Release --no-restore
 dotnet test --solution VHSDecodeDotNet.slnx -c Release `
-  --no-build --no-restore --minimum-expected-tests 1550
+  --no-build --no-restore --minimum-expected-tests 1562
 ```
 
 Visual Studio 2026 で `VHSDecodeDotNet.slnx` を開くと、build、debug、

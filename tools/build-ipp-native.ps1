@@ -137,7 +137,6 @@ if ($nonSystemDependencies.Count -gt 0) {
 $allowedArtifactNames = @(
     'vhsdecode_ipp.dll',
     'vhsdecode_cuda_fast.dll',
-    'cufft64_12.dll',
     'THIRD-PARTY-NOTICES-CUDA-FAST.md'
 )
 $unexpectedArtifacts = @(

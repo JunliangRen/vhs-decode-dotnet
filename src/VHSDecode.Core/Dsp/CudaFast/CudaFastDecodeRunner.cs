@@ -42,17 +42,17 @@ internal sealed class CudaFastDecodeRunner : ICudaFastDecodeRunner
         "threads"
     };
 
-    private readonly Func<ICudaFastNativeRuntime> _runtimeFactory;
+    private readonly Func<TextWriter, CancellationToken, ICudaFastNativeRuntime> _runtimeFactory;
 
     internal CudaFastDecodeRunner()
-        : this(CudaFastNativeRuntime.RequireAvailable)
     {
+        _runtimeFactory = CudaFastNativeRuntime.RequireAvailable;
     }
 
     internal CudaFastDecodeRunner(Func<ICudaFastNativeRuntime> runtimeFactory)
     {
-        _runtimeFactory = runtimeFactory
-            ?? throw new ArgumentNullException(nameof(runtimeFactory));
+        ArgumentNullException.ThrowIfNull(runtimeFactory);
+        _runtimeFactory = (_, _) => runtimeFactory();
     }
 
     public TbcFieldSequenceDecodeResult TryDecodeAndWrite(
@@ -99,7 +99,7 @@ internal sealed class CudaFastDecodeRunner : ICudaFastDecodeRunner
                     "CUDA-fast requires at least one field of RF samples after the selected start position.");
             }
 
-            ICudaFastNativeRuntime runtime = _runtimeFactory();
+            ICudaFastNativeRuntime runtime = _runtimeFactory(output, cancellationToken);
             CudaFastRuntimeInfo runtimeInfo = runtime.GetRuntimeInfo(DeviceId);
             string runtimeDiagnostic = FormatRuntimeDiagnostic(runtimeInfo);
             string logPath = command.OutputBase + ".log";

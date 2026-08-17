@@ -36,3 +36,9 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 The backend statically links the NVIDIA CUDA Runtime and dynamically links
 cuFFT. Their use and redistribution are governed by the NVIDIA CUDA Toolkit
 license.
+
+Lean binary releases resolve a compatible system cuFFT 12 runtime or download
+the pinned NVIDIA cuFFT 12.0.0.15 Windows redistributable from
+<https://developer.download.nvidia.com/compute/cuda/redist/libcufft/windows-x86_64/libcufft-windows-x86_64-12.0.0.15-archive.zip>.
+The NVIDIA CUDA Toolkit license and official redistributable manifest apply to
+that downloaded runtime.
