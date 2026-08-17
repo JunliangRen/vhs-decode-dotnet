@@ -170,8 +170,15 @@ public static class TbcSqliteMetadataWriter
                 Directory.CreateDirectory(directory);
             }
 
+            // e_sqlite3 enables foreign keys by default; disable enforcement to preserve
+            // the upstream-compatible SQLite behavior.
             _connection = new SqliteConnection(
-                new SqliteConnectionStringBuilder { DataSource = dbPath, Pooling = false }.ToString());
+                new SqliteConnectionStringBuilder
+                {
+                    DataSource = dbPath,
+                    ForeignKeys = false,
+                    Pooling = false
+                }.ToString());
             _connection.Open();
             try
             {
