@@ -13,3 +13,21 @@ internal interface IReusableRfSampleLoader : IRfSampleLoader
 
     void ReturnReusable(double[] buffer);
 }
+
+internal interface IFloat32RfSampleLoader : IRfSampleLoader
+{
+    bool TryReadFloat32(
+        Stream stream,
+        long sample,
+        Span<float> destination,
+        out int samplesRead);
+}
+
+internal interface IInt16RfSampleLoader : IRfSampleLoader
+{
+    bool TryReadInt16(
+        Stream stream,
+        long sample,
+        Span<short> destination,
+        out int samplesRead);
+}

@@ -32,7 +32,7 @@ public static class CliSpecs
 
     public static readonly string[] VideoSystems = ["PAL", "PAL_M", "PALM", "NTSC", "MESECAM", "405", "819", "NLINHA"];
 
-    public static readonly string[] DspBackends = ["exact", "ipp-fast"];
+    public static readonly string[] DspBackends = ["exact", "ipp-fast", "cuda-fast"];
 
     public static readonly string[] CompatibilityVersions = ["v0.4.0", "current"];
 

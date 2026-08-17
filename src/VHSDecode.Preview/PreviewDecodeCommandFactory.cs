@@ -24,6 +24,13 @@ internal static class PreviewDecodeCommandFactory
             throw new ArgumentException("Preview mode requires exactly one RF input file.");
         }
 
+        if (DspBackendParser.Parse(command.Get<string>("dsp_backend"))
+            == DspBackend.CudaFast)
+        {
+            throw new NotSupportedException(
+                "The independent 'cuda-fast' full-signal backend is not routed through preview mode; no preview or CPU backend fallback was performed.");
+        }
+
         var values = new Dictionary<string, object?>(command.Values, StringComparer.Ordinal);
         var sources = new Dictionary<string, ParsedOptionSource>(command.OptionSources, StringComparer.Ordinal);
         Set(values, sources, "write_db", false);

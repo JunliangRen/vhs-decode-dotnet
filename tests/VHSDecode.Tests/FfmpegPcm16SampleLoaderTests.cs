@@ -50,6 +50,34 @@ public sealed class FfmpegPcm16SampleLoaderTests
         Assert.Equal([0L, 4L], opens);
     }
 
+    [Fact(DisplayName = "CUDA-fast FFmpeg PCM16 reads preserve native samples and rewind")]
+    public void DirectInt16ReadsPreserveNativeSamplesAndRewind()
+    {
+        short[] source =
+        [
+            short.MinValue, -20_000, -1, 0, 1, 12_345, short.MaxValue, 77, 88, 99
+        ];
+        byte[] pcm = BuildPcm16Bytes(source);
+        using var loader = new FfmpegPcm16SampleLoader(
+            "capture.ldf",
+            (_, startSample) =>
+            {
+                int byteOffset = checked((int)(startSample * sizeof(short)));
+                return new MemoryStream(pcm[byteOffset..]);
+            },
+            rewindSize: 8);
+        var first = new short[6];
+        var rewind = new short[4];
+
+        Assert.True(loader.TryReadInt16(Stream.Null, 0, first, out int firstRead));
+        Assert.True(loader.TryReadInt16(Stream.Null, 2, rewind, out int rewindRead));
+
+        Assert.Equal(6, firstRead);
+        Assert.Equal(4, rewindRead);
+        Assert.Equal(source.AsSpan(0, 6).ToArray(), first);
+        Assert.Equal(source.AsSpan(2, 4).ToArray(), rewind);
+    }
+
     [Fact(DisplayName = "FFmpeg PCM16 forward skip keeps an odd-byte rewind window exact")]
     public void ForwardSkipKeepsAnOddByteRewindWindowExact()
     {

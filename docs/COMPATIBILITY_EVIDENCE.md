@@ -2229,7 +2229,7 @@ dotnet test --solution VHSDecodeDotNet.slnx --no-build
 ```
 
 The current formal solution build completes with zero warnings and errors, and
-the xUnit v3 project exposes 1,500 independently discoverable tests
+the xUnit v3 project exposes 1,550 independently discoverable tests
 to `dotnet test` and Visual Studio Test Explorer. On the
 same Windows machine and fixtures, Release wall-clock measurements for one
 frame were 2.346 s versus 7.193 s for NTSC VHS and 1.651 s versus 5.865 s for
@@ -3038,6 +3038,149 @@ normalized-stderr, normalized-log, and ordered-`fileLoc` hash set. The detailed
 READMEs record all medians and ranges. The preceding Preview 6 release snapshot
 was a separate campaign, so differences between the two snapshots are
 descriptive and are not attributed causally to the runtime.
+
+### Experimental CUDA-fast full-signal backend
+
+The opt-in `--dsp-backend cuda-fast` path is separate from the managed Exact
+and IPP-fast field engines. Its native bridge pins cuVHS commit
+`c55e72073f44b27e8839efb842e4345af39887f7`, uses CUDA 13 and cuFFT, and
+accepts managed random-read callbacks so raw FLAC input does not require a
+temporary unpacked capture. Unsupported formats, rates, options, GPUs, or
+missing native components fail explicitly; the route never silently changes
+to a CPU backend. Its initial contract is Windows x64, NVIDIA compute 7.5 or
+newer, and native-rate 40 MSPS PAL/NTSC VHS SP/LP/EP. It has an independent
+numerical contract and does not claim Exact, IPP-fast, `v0.4.0`, or `current`
+hash compatibility.
+
+Static review of the pinned source found GPU ordering hazards in FM analytic
+differencing and chroma burst accumulation. The bridge applies guarded source
+patches that respectively use an out-of-place analytic buffer and a fixed-order
+burst reduction. Writer parity is pipeline-owned instead of process-static, so
+two decodes in one process retain identical field order. The upstream
+in-decode dropout concealment is replaced by a maintained Exact-style metadata
+detector. It consumes dynamic field offsets and means, implements the 0.18
+threshold, 1.25 hysteresis, 30-sample merge gap, strict greater-than-10 minimum
+run, and Exact PAL parity geometry, and does not modify pixels. Configuration
+fails if the pinned source no longer matches those guards. The full GPU signal
+plane is FP32, including cuFFT storage and transforms; only one-time high-order
+host filter design stays FP64 before explicit coefficient quantization. Native
+bridge ABI v4 accepts direct PCM16 from raw signed-16, eligible libsndfile, and
+FFmpeg PCM16 loaders, halves host-to-device input bytes, and converts exactly
+representable signed-16 values into the FP32 signal plane on GPU. The managed
+FP32 callback remains available as a fallback. Persistent chroma workspace, a
+16-field automatic batch cap, and a parallel deterministic sync-pulse kernel
+remove the largest avoidable setup, transfer, and serial-scan costs. ABI v4
+also separates the requested output-field cap from available RF input. The
+native pipeline can scan past weak/no-signal leaders, requires stable
+horizontal cadence before fallback field-order seeding, rejects invalid fields
+and a leading second field, and terminates after exactly the requested number
+of complete alternating fields. The detector classifies 32-sample warp masks
+with ballot operations, then runs the unchanged Exact state machine over only
+the transition bits. An isolated 500-frame A-B-B-A reduced median wall time by
+13.64% and increased throughput by 15.79%; its 16-field detector stage fell
+from about 43.22 to 7.41 ms with byte-identical luma/chroma/JSON.
+
+A deterministic fixed-tree FP64 burst-mean reduction precedes the
+sample-parallel roll. This changed raw chroma bits from the prior serial order,
+but final runs remained repeatable, old/new lossless rendered output measured
+SSIM 1.000000, displayed Exact-aligned SSIM values were unchanged, and average
+PSNR moved from 35.699052 to 35.699053 dB. A one-batch pageable PCM16 prefetch
+overlaps RF input with the current GPU/output tail and overlaps the initial
+read with CUDA/cuFFT setup. Its internal 500-frame A-B-B-A reduced the median
+from 11.649328 to 9.175967 seconds (21.24% less wall time and 26.96% more
+throughput) without changing final files. One-second JSON checkpoint throttling
+improved a paired median by 2.96%, with the explicit tradeoff that crash
+recovery metadata can be roughly one second stale; finalization always writes
+the complete JSON. Four-MiB TBC stdio buffers improved a four-run median by
+1.68%. Shared burst FFT storage (-0.48%), a neutral/noisy 16-Msample managed
+read block, page-locked input (-0.84%), and asynchronous dropout allocation
+(about -12%) were rejected.
+A CUDA 13.0.88 Release build using MSVC 14.44 passed its native smoke,
+parallel-pulse, direct Exact-style dropout, and synthetic NTSC pipeline tests
+on an RTX 4070 (compute 8.9, 12 GiB VRAM).
+The Windows release workflow separately installs pinned CUDA 13.0.3 and uses
+`-SkipRuntimeTests` on the GPU-less hosted runner. That gate still compiles the
+bridge and native tests, audits dependencies, stages cuFFT/notices, and embeds
+the result in the managed build; it does not replace the preceding real-GPU
+runtime evidence.
+
+Two current same-session interleaved runs per backend used the same fixed private
+local PAL 40 MHz `.ldf` request,
+`--start_fileloc 320000000 --length 500`. CUDA completed in
+15.605154/15.747770 seconds, while `ipp-fast --threads 20` completed in
+14.108349/14.064289 seconds. The two-run medians are 15.676462 and 14.086319
+seconds (31.8950 and 35.4954 output fps), respectively: CUDA takes 11.29% more
+wall time and provides 0.8986x the IPP throughput on this capture and machine.
+Both paths emitted exactly 1,000 ordered alternating 1135-by-313 fields with
+identical 14,745.6/59,417.6 black/white metadata levels. Their first
+synchronized `fileLoc` values are 322,212,917 and 320,563,200 because the
+independent sync/TBC algorithms select different boundaries. This is a
+same-request speed measurement, not output-equivalence evidence or a
+cross-capture/GPU guarantee.
+
+A separate startup-inclusive A-B-B-A against the immediately preceding CUDA
+executable measured old-build runs of 22.083587/21.753076 seconds and final
+runs of 16.355230/15.758866 seconds. The medians, 21.918332 and 16.057048
+seconds, establish 26.74% less wall time, 36.50% more throughput, and 22.812
+versus 31.139 output fps. Machine throughput changed between the two benchmark
+sequences, so these results are not combined with the CPU comparison above.
+
+A second resource-sampled A-B-B-A measured old/new wall medians of
+20.765240/15.313171 seconds (26.26% less wall time and 35.60% more throughput)
+and CPU medians of 36.3125/33.0000 seconds (9.12% less). Median peak working
+set rose from 246.34 to 256.38 MiB. Old-control peak private bytes were noisy
+at 4,449.98-4,586.33 MiB; descriptive medians rose from 4,518.16 to 4,616.46
+MiB, while final runs were stable at 4,617.25/4,615.67 MiB. The additional
+PCM16 prefetch is limited to one batch, so this is bounded-memory evidence,
+not evidence for an unbounded queue or a long-duration soak.
+
+Two final CUDA runs of the fixed window produced byte-identical
+luma/chroma/raw-JSON files, each containing 40,705 dropout segments. Their
+SHA-256 values are
+`647967E99822994A69DBDEB0E0B5824755FE204F650277106D2B4F234109C456`,
+`CBC40C00452C3AFA8CE15CAEB97DBDD009ED2FA7803AAA3D51813B2F498E6E99`, and
+`745F4F570D8EB2D480FBB38BFD4513EA17F3D28583553BB69CF120EE7D27DB3D`.
+All 1,000 `fileLoc` values increase strictly from 322,212,917 to 1,121,408,422.
+This establishes same-machine repeatability, not universal determinism across
+NVIDIA GPU and driver versions.
+
+An 80-frame Exact/CUDA quality comparison used the same fixed RF request. CUDA
+selected a boundary approximately one frame later, so the lossless FFV1
+exports were aligned by omitting the first Exact frame and comparing 79 frame
+pairs. With default export-side dropout correction, SSIM Y/U/V/All was
+0.954905/0.988109/0.991285/0.972301 and PSNR Y/U/V/average was
+33.196867/41.243137/43.586266/35.699053 dB. Without that correction, SSIM was
+0.949393/0.987529/0.990573/0.969222 and PSNR was
+31.286140/41.027876/43.313528/33.944493 dB. Across all 158 aligned fields, the
+active-picture dropout masks measured 97.512% precision, 99.818% recall, and
+97.339% intersection-over-union against Exact; whole-field IoU was 94.186%.
+Manual contact-sheet inspection retained closely matching scene content,
+color, and motion and no longer showed the earlier severe diagonal/rainbow
+phase failure. A bypass of refined K4 horizontal sync reduced luma SSIM from
+0.949393 to 0.942450 and was rejected. Sync/TBC and pixel differences remain,
+so this is a viewing-quality gate, not Exact or IPP compatibility evidence.
+
+The native integration test feeds one 48-field synthetic NTSC source through
+FP32 once and PCM16 twice and requires all 45 emitted 910-by-263 fields plus
+JSON metadata to be byte-identical. It also requires alternating parity,
+increasing `fileLoc`, and a parity-consistent cyclic rotation of the `1,4,3,2`
+NTSC `fieldPhaseID` sequence. The build runs this test at normal 16-field
+batches and forced five-field batches, exercising phase/head-track continuity
+across non-aligned boundaries. This covers NTSC geometry, lifecycle, and
+determinism only; no real NTSC VHS capture was locally available for
+color/quality certification.
+
+The final .NET 11 Preview 7 xUnit v3 run discovered all 1,550 tests: 1,548
+passed, none failed, and two PAL/NTSC AMF encoder cases were skipped because the
+AMD runtime is unavailable on the NVIDIA development machine. The CUDA-focused
+coverage includes parser/backend isolation, ABI and real native probing,
+unsupported-surface rejection, no-fallback behavior, managed random-read
+callbacks, cancellation, output trimming, global metadata rebasing, direct
+DecodeRunner routing that bypasses managed session construction, deterministic
+parallel sync semantics, bounded leader scanning and exact output length, and
+the synthetic NTSC full-pipeline gate. The direct GPU dropout test additionally
+covers dynamic source offsets, parity geometry, hysteresis, merging, and the
+strict minimum-run contract.
 
 To regenerate the embedded format parameter snapshot from the checked-out
 upstream source:

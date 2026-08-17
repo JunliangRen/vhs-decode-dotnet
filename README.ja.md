@@ -2,14 +2,14 @@
 
 [English](README.md) | [简体中文](README.zh-CN.md) | **[日本語](README.ja.md)**
 
-<!-- README_SYNC: 2026-08-16.01 -->
+<!-- README_SYNC: 2026-08-17.02 -->
 
 [`oyvindln/vhs-decode`](https://github.com/oyvindln/vhs-decode) の
 デコード関連部分を .NET 11 で再実装するプロジェクトです。互換性の対象は
 upstream release `v0.4.0`、commit
 `43155200da87c0d49eb37d8ec09b1372075ee8e4` です。
 
-現在の .NET port release は `v0.4.0-2.2.0`（application version `2.2.0`）です。
+現在の .NET port release は `v0.4.0-2.3.0`（application version `2.3.0`）です。
 
 > [!IMPORTANT]
 > この互換移植は現在も開発中です。トップレベルのデコード経路は実装済みで
@@ -38,7 +38,7 @@ upstream release `v0.4.0`、commit
 - VHS family には VHS/S-VHS、Betamax、Video8/Hi8、U-matic、Type C、EIAJ、
   upstream が対応する PAL/NTSC variant が含まれます。
 - TBC utility、ダブルクリック GUI、開発者向け plot window は対象外です。
-- Visual Studio 2026 の `.slnx` には **1,500** 件の標準 xUnit v3 test があり、
+- Visual Studio 2026 の `.slnx` には **1,550** 件の標準 xUnit v3 test があり、
   Test Explorer と `dotnet test` の両方で実行できます。
 
 <!-- SECTION: start -->
@@ -108,16 +108,35 @@ sample-rate behavior を維持します。この最適化は自動で、user-fac
 | --- | --- |
 | `exact` | default の managed path。互換性を重視する decode に使用します。 |
 | `ipp-fast` | Intel IPP を使う experimental Windows x64 VHS / LaserDisc real-RF path。浮動小数点 bit が変化する可能性があり、`exact` へ silent fallback しません。 |
+| `cuda-fast` | NVIDIA CUDA 13 を使う experimental Windows x64 full-signal VHS path。独立した numerical contract を持ち、現時点では native-rate 40 MSPS PAL/NTSC VHS のみを support し、CPU backend へ silent fallback しません。 |
 
 ```powershell
 decode.exe vhs --compat-version current --dsp-backend ipp-fast `
   --threads 20 input.lds output
+decode.exe vhs --dsp-backend cuda-fast --pal `
+  --start 100 --length 20 input.ldf output
 ```
 
 LaserDisc の video、EFM、analog-audio full-complex FFT stage は IPP に接続済みです。
 CVBS と HiFi は引き続き `ipp-fast` を拒否します。release-compatible な動作が
 必要な場合は `exact` を使用してください。互換性を重視する用途では
 [backend の詳細](docs/README.detailed.ja.md#パフォーマンス)を先に確認してください。
+tested RTX 4070 と 1 本の real PAL capture では、画質修正後の FP32 CUDA-full path は
+Exact の見え方に大幅に近づきましたが、measured CPU throughput は上回りません。同じ
+`--start_fileloc 320000000 --length 500` request の current same-session interleaved
+comparison では、CUDA は 15.605/15.748 秒、`ipp-fast --threads 20` は
+14.108/14.064 秒でした。median は 15.676/14.086 秒（31.895/35.495 fps）で、CUDA は
+wall time が 11.29% 長く、IPP throughput の 0.8986x です。別の隣接 A-B-B-A comparison
+では CUDA の median が直前 build の 21.918 秒から 16.057 秒へ短縮されました
+（wall time 26.74% 減、throughput 36.50% 増）。final CUDA run 2 回の
+luma/chroma/JSON は byte-identical でした。default の export-side dropout correction
+を使い Exact と alignment した
+79-frame lossless comparison の SSIM Y/U/V/All は
+0.954905/0.988109/0.991285/0.972301、PSNR Y/U/V/average は
+33.196867/41.243137/43.586266/35.699053 dB でした。manual inspection でも scene
+content、colour、motion は非常に近く見えましたが、numerical equality は主張しません。
+この結果は当該 hardware/capture に限定され、`cuda-fast` は experimental のままで CPU
+numerical contract とも異なります。
 
 <!-- SECTION: performance -->
 
@@ -214,7 +233,7 @@ header は FFmpeg を維持します。
 dotnet restore VHSDecodeDotNet.slnx
 dotnet build VHSDecodeDotNet.slnx -c Release --no-restore
 dotnet test --solution VHSDecodeDotNet.slnx -c Release `
-  --no-build --no-restore --minimum-expected-tests 1512
+  --no-build --no-restore --minimum-expected-tests 1550
 ```
 
 Visual Studio 2026 で `VHSDecodeDotNet.slnx` を開くと、build、debug、

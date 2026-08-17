@@ -3,7 +3,7 @@ usage: vhs-decode [-h] [--preview-server] [--preview-port port]
                   [--system system] [-s start]
                   [--start_fileloc start_fileloc] [-l length] [--overwrite]
                   [--write_db] [-f FREQ] [-t threads]
-                  [--dsp-backend {exact,ipp-fast}]
+                  [--dsp-backend {exact,ipp-fast,cuda-fast}]
                   [--compat-version {v0.4.0,current}] [--ct] [--sl sharpness]
                   [--notch notch] [--notch_q notch_q] [-p] [-n] [--pm]
                   [--NTSCJ] [--debug] [--skip_hsync_refine] [--tf tape_format]
@@ -39,7 +39,7 @@ options:
   --system system       video system (overriden by individual options)
   -t threads, --threads threads
                         number of CPU threads to use
-  --dsp-backend {exact,ipp-fast}
+  --dsp-backend {exact,ipp-fast,cuda-fast}
                         DSP implementation to use (default: exact)
   --compat-version {v0.4.0,current}
                         upstream behavior profile (default: v0.4.0; current

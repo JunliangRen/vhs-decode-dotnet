@@ -2,6 +2,7 @@ using System.Buffers.Binary;
 using System.ComponentModel;
 using System.Diagnostics;
 using System.Globalization;
+using System.Runtime.InteropServices;
 using System.Text;
 using System.Text.Json;
 using System.Threading.Channels;
@@ -120,6 +121,46 @@ public sealed class FfmpegPcm16SampleLoader : IRfSampleLoader, IDisposable
         }
 
         return ReadStreaming(sample, readLength);
+    }
+
+    internal bool TryReadInt16(
+        Stream stream,
+        long sample,
+        Span<short> destination,
+        out int samplesRead)
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+        ArgumentNullException.ThrowIfNull(stream);
+        ArgumentOutOfRangeException.ThrowIfNegative(sample);
+        samplesRead = 0;
+        if (destination.IsEmpty)
+        {
+            return true;
+        }
+        if (!BitConverter.IsLittleEndian)
+        {
+            return false;
+        }
+
+        Span<byte> destinationBytes = MemoryMarshal.AsBytes(destination);
+        if (_readSegment is not null)
+        {
+            byte[]? segment = _readSegment(_filename, sample, destination.Length);
+            if (segment is null)
+            {
+                return true;
+            }
+
+            int completeBytes = Math.Min(segment.Length, destinationBytes.Length)
+                & ~(sizeof(short) - 1);
+            segment.AsSpan(0, completeBytes).CopyTo(destinationBytes);
+            samplesRead = completeBytes / sizeof(short);
+            return true;
+        }
+
+        int bytesRead = ReadStreamingPcm16Bytes(sample, destinationBytes);
+        samplesRead = bytesRead / sizeof(short);
+        return true;
     }
 
     public void Dispose()
@@ -260,9 +301,20 @@ public sealed class FfmpegPcm16SampleLoader : IRfSampleLoader, IDisposable
 
     private double[]? ReadStreaming(long sample, int readLength)
     {
+        byte[] data = GC.AllocateUninitializedArray<byte>(checked(readLength * sizeof(short)));
+        int bytesRead = ReadStreamingPcm16Bytes(sample, data);
+        if (bytesRead < data.Length)
+        {
+            return null;
+        }
+
+        return DecodePcm16(data, readLength);
+    }
+
+    private int ReadStreamingPcm16Bytes(long sample, Span<byte> destination)
+    {
         long sampleBytes = checked(sample * 2);
-        int totalBytes = checked(readLength * 2);
-        int remainingBytes = totalBytes;
+        int remainingBytes = destination.Length;
         EnsureStarted(sample);
         int rewindOffset = 0;
         int bufferedBytes = 0;
@@ -297,23 +349,17 @@ public sealed class FfmpegPcm16SampleLoader : IRfSampleLoader, IDisposable
                     int discardCount = checked((int)Math.Min(sampleBytes - _positionBytes, RewindSize));
                     if (DiscardData(discardCount) == 0)
                     {
-                        return null;
+                        return 0;
                     }
                 }
             }
         }
 
-        byte[] data = GC.AllocateUninitializedArray<byte>(totalBytes);
-        CopyRewind(rewindOffset, data.AsSpan(0, bufferedBytes));
+        CopyRewind(rewindOffset, destination[..bufferedBytes]);
         int freshBytes = remainingBytes > 0
-            ? ReadData(data.AsSpan(bufferedBytes, remainingBytes))
+            ? ReadData(destination.Slice(bufferedBytes, remainingBytes))
             : 0;
-        if (freshBytes < remainingBytes)
-        {
-            return null;
-        }
-
-        return DecodePcm16(data, readLength);
+        return bufferedBytes + freshBytes;
     }
 
     private static double[] DecodePcm16(byte[] buffer, int sampleCount)

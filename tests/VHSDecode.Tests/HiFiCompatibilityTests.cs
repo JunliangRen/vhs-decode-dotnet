@@ -273,8 +273,8 @@ public sealed class HiFiCompatibilityTests
         Assert.StartsWith("usage: decode.py ", facade, StringComparison.Ordinal);
         Assert.Contains("Expander tuning options (advanced):", standalone, StringComparison.Ordinal);
         Assert.Contains("Deemphasis tuning options (advanced):", standalone, StringComparison.Ordinal);
-        Assert.Equal("C7EC13F3C5619879D049C4B655A39C3E085BD632D2CABDB3D0B6DA4EE89DCE28", Utf8LfSha256(standalone));
-        Assert.Equal("CD3FAC32B261F10F765D4B403FD36E35615981539EF32AB7E2AF67028462A0D8", Utf8LfSha256(facade));
+        Assert.Equal("D7AEBC4B2CA236292979EBD92CA38454ECE0C2049C3E49A8F5E4E91397ACB658", Utf8LfSha256(standalone));
+        Assert.Equal("3089FE4A8CE563A00F082770194434DF6629EE98C633664EF8DEB170A5C74D84", Utf8LfSha256(facade));
     }
 
     [Theory(DisplayName = "HiFi AFE standards match v0.4.0")]

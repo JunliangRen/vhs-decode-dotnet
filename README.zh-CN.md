@@ -2,13 +2,13 @@
 
 [English](README.md) | **[简体中文](README.zh-CN.md)** | [日本語](README.ja.md)
 
-<!-- README_SYNC: 2026-08-16.01 -->
+<!-- README_SYNC: 2026-08-17.02 -->
 
 这是 [`oyvindln/vhs-decode`](https://github.com/oyvindln/vhs-decode)
 中解码相关部分的 .NET 11 重写，兼容目标为上游 release `v0.4.0`、commit
 `43155200da87c0d49eb37d8ec09b1372075ee8e4`。
 
-当前 .NET 移植版发布为 `v0.4.0-2.2.0`（应用版本 `2.2.0`）。
+当前 .NET 移植版发布为 `v0.4.0-2.3.0`（应用版本 `2.3.0`）。
 
 > [!IMPORTANT]
 > 这仍是持续进行中的兼容性移植。顶层解码路径已经实现并经过大量测试，但尚未声称
@@ -35,7 +35,7 @@
 - VHS 家族包括 VHS/S-VHS、Betamax、Video8/Hi8、U-matic、Type C、EIAJ
   以及上游支持的 PAL/NTSC 变体。
 - TBC 工具、双击启动的用户 GUI 和开发者绘图窗口明确不在范围内。
-- Visual Studio 2026 `.slnx` 包含 **1,500** 项标准 xUnit v3 测试；测试可在
+- Visual Studio 2026 `.slnx` 包含 **1,550** 项标准 xUnit v3 测试；测试可在
   Test Explorer 中查看，也可用 `dotnet test` 运行。
 
 <!-- SECTION: start -->
@@ -101,16 +101,31 @@ Python 原版在不同 worker 数下的输出哈希并不稳定，因此 Python 
 | --- | --- |
 | `exact` | 默认托管路径，适合兼容性敏感的解码。 |
 | `ipp-fast` | 实验性的 Windows x64 VHS 与 LaserDisc real-RF 路径，使用 Intel IPP；可能改变浮点位，并且绝不会静默回退到 `exact`。 |
+| `cuda-fast` | 实验性的 Windows x64 NVIDIA CUDA 13 全信号 VHS 路径；采用独立数值契约，目前仅支持原生采样率 40 MSPS 的 PAL/NTSC VHS，并且绝不会静默回退到 CPU 后端。 |
 
 ```powershell
 decode.exe vhs --compat-version current --dsp-backend ipp-fast `
   --threads 20 input.lds output
+decode.exe vhs --dsp-backend cuda-fast --pal `
+  --start 100 --length 20 input.ldf output
 ```
 
 LaserDisc 的视频、EFM 与模拟音频 full-complex FFT 阶段现已接入 IPP。
 CVBS 和 HiFi 仍会拒绝 `ipp-fast`；需要 release 兼容行为时应使用 `exact`。
-兼容性敏感场景启用 IPP 前请阅读
-[详细后端说明](docs/README.detailed.zh-CN.md#性能)。
+兼容性敏感场景启用 IPP 或 CUDA 前请阅读
+[详细后端说明](docs/README.detailed.zh-CN.md#性能)。在本机 RTX 4070 和一份真实 PAL
+采集上，修正画质后的 FP32 CUDA-full 路径在观感上已明显接近 Exact，但没有超过实测
+CPU 吞吐。对于同一个 `--start_fileloc 320000000 --length 500` 请求，本轮同一时段的
+交错对照中 CUDA 分别用时 15.605/15.748 秒，`ipp-fast --threads 20` 为
+14.108/14.064 秒；中位数为 15.676 与 14.086 秒（31.895 与 35.495 fps），即 CUDA
+墙钟时间长 11.29%，吞吐为 IPP 的 0.8986x。另一组相邻 A-B-B-A 对照把 CUDA 相对前一
+构建的中位数从 21.918 降至 16.057 秒（墙钟减少 26.74%，吞吐提高 36.50%）。最终两次
+CUDA 输出的亮度、色度和 JSON 逐字节相同。采用默认导出侧 dropout 补偿后，与 Exact
+对齐的 79 帧无损比较得到 SSIM
+Y/U/V/All = 0.954905/0.988109/0.991285/0.972301，PSNR Y/U/V/平均值为
+33.196867/41.243137/43.586266/35.699053 dB；人工检查确认场景内容、色彩和运动观感
+非常接近，但不声明数值相等。这个结果只适用于该硬件与采集；`cuda-fast` 仍是实验后端，
+也不采用 CPU 路径的数值契约。
 
 <!-- SECTION: performance -->
 
@@ -199,7 +214,7 @@ TBC、色度、JSON 和日志文件允许在解码期间并发读取，兼容的
 dotnet restore VHSDecodeDotNet.slnx
 dotnet build VHSDecodeDotNet.slnx -c Release --no-restore
 dotnet test --solution VHSDecodeDotNet.slnx -c Release `
-  --no-build --no-restore --minimum-expected-tests 1512
+  --no-build --no-restore --minimum-expected-tests 1550
 ```
 
 在 Visual Studio 2026 中打开 `VHSDecodeDotNet.slnx`，即可构建、调试并通过

@@ -4,14 +4,14 @@
 
 **[English](README.detailed.md)** | [简体中文](README.detailed.zh-CN.md) | [日本語](README.detailed.ja.md)
 
-<!-- README_SYNC: 2026-08-16.01 -->
+<!-- README_SYNC: 2026-08-17.02 -->
 
 .NET 11 rewrite of the decode-facing parts of
 [`oyvindln/vhs-decode`](https://github.com/oyvindln/vhs-decode), focused on
 release `v0.4.0` at commit
 `43155200da87c0d49eb37d8ec09b1372075ee8e4`.
 
-The current .NET port release is `v0.4.0-2.2.0` (application version `2.2.0`).
+The current .NET port release is `v0.4.0-2.3.0` (application version `2.3.0`).
 
 > [!IMPORTANT]
 > This is a work-in-progress compatibility port. The top-level decode paths are
@@ -199,7 +199,7 @@ Performance work is part of the implementation, while deterministic output and
 release compatibility remain the first constraint.
 
 The DSP backend is selected explicitly with
-`--dsp-backend exact|ipp-fast`. This option is an experimental extension in
+`--dsp-backend exact|ipp-fast|cuda-fast`. This option is an experimental extension in
 this .NET port and is not part of the upstream `oyvindln/vhs-decode` v0.4.0
 CLI. `exact` is the default and retains the existing managed compatibility
 path without probing or loading Intel IPP. `ipp-fast` is an opt-in Windows x64
@@ -214,6 +214,142 @@ color-under Super-Gaussian DFT, and the power-of-two double-precision
 full-complex FFT stages used by LaserDisc video, EFM, and analog audio. The LD
 route uses native bridge ABI v1.3. CVBS and HiFi reject `ipp-fast` as unsupported
 instead of quietly benchmarking their Exact kernels.
+
+`cuda-fast` is a separate Windows x64 NVIDIA CUDA 13 full-signal VHS backend.
+It loads `vhsdecode_cuda_fast.dll` and cuFFT, then runs the RF demodulation,
+sync/line-location, time-base correction, color-under, and dropout graph from
+cuVHS commit `c55e72073f44b27e8839efb842e4345af39887f7`. CPU code still owns
+input callbacks, small control/metadata work, and output publication; it does
+not run the Exact or IPP field engine. RF samples, cuFFT R2C/C2C/C2R storage,
+demodulation, geometry, color, and dropout image data use FP32. Only the
+one-time high-order host filter design remains double precision because direct
+FP32 coefficient construction was unstable; its completed coefficients are
+explicitly quantized before GPU upload. Native bridge ABI v4 prefers direct
+PCM16 callbacks for raw signed-16, eligible libsndfile, and FFmpeg PCM16 input.
+Those samples upload at half the FP32 transfer size and a deterministic GPU
+kernel converts every exactly representable signed-16 value into the FP32
+signal plane; the managed FP32 callback remains as a fallback. The bridge also
+uses a persistent chroma workspace, an automatically bounded 16-field batch,
+and a parallel deterministic sync-pulse scan. ABI v4 carries the requested
+output-field limit independently from the amount of RF available to scan. The
+native pipeline can therefore pass a weak/no-signal leader, requires stable
+horizontal cadence before seeding fallback field order, rejects invalid fields
+and a leading second field, and stops after exactly the requested number of
+complete alternating fields. The optional cuVHS host-side K4 source
+reconstruction is compiled out so this route always uses the GPU source.
+Unsupported options, profiles, or missing CUDA components fail explicitly and
+never select another DSP backend. The initial contract is native-rate 40 MSPS
+PAL/NTSC VHS SP/LP/EP on Windows x64; CVBS, LaserDisc, HiFi, S-VHS, other video
+systems, packed `.lds`, preview-server routing, and explicit compatibility
+profile selection are not approximated.
+
+This backend has its own numerical contract; neither `v0.4.0` nor `current`
+hash compatibility is claimed. On the local RTX 4070 12 GiB development
+machine, a current same-session interleaved comparison used the same fixed
+private 40 MHz real PAL `.ldf` request,
+`--start_fileloc 320000000 --length 500`. CUDA completed in 15.605154 and
+15.747770 seconds; `ipp-fast --threads 20` completed in 14.108349 and
+14.064289 seconds. The medians are 15.676462 versus 14.086319 seconds (31.8950
+versus 35.4954 output fps): CUDA takes 11.29% more wall time and provides
+0.8986x the IPP throughput in this narrow comparison. Both paths emitted
+exactly 1,000 ordered, alternating 1135-by-313 fields with the same
+14,745.6/59,417.6 black/white metadata levels. Their first synchronized field
+locations are 322,212,917 and 320,563,200 because the independent sync/TBC
+algorithms select different boundaries. This is a same-request performance
+comparison rather than an output-equality claim, and it is not a general speed
+guarantee across tapes, systems, drivers, or NVIDIA models.
+
+A separate startup-inclusive A-B-B-A comparison against the immediately
+preceding CUDA executable measured 22.083587/21.753076 seconds for the old
+build and 16.355230/15.758866 seconds for the final build. Their medians are
+21.918332 and 16.057048 seconds: 26.74% less wall time, 36.50% more throughput,
+and 22.812 versus 31.139 output fps. These figures are deliberately kept
+separate from the CPU comparison because overall machine throughput changed
+between measurement sequences.
+
+A second A-B-B-A with process sampling confirmed the direction: old/new wall
+medians were 20.765240/15.313171 seconds (26.26% less, 35.60% more throughput)
+and CPU medians were 36.3125/33.0000 seconds (9.12% less). Median peak working
+set rose from 246.34 to 256.38 MiB. Peak private bytes were noisy even in the
+old controls (4,449.98-4,586.33 MiB); their descriptive medians rose from
+4,518.16 to 4,616.46 MiB, while the two final runs were stable at
+4,617.25/4,615.67 MiB. The retained prefetch is bounded to one PCM16 batch;
+this is a measured memory tradeoff rather than an unbounded lookahead queue.
+
+Two final CUDA runs of that fixed window produced byte-identical luma, chroma,
+and JSON, each with 40,705 dropout segments. Their SHA-256 values are
+`647967E99822994A69DBDEB0E0B5824755FE204F650277106D2B4F234109C456`,
+`CBC40C00452C3AFA8CE15CAEB97DBDD009ED2FA7803AAA3D51813B2F498E6E99`, and
+`745F4F570D8EB2D480FBB38BFD4513EA17F3D28583553BB69CF120EE7D27DB3D`.
+Their global `fileLoc` values run strictly upward from 322,212,917 to
+1,121,408,422. This is repeatability evidence on one GPU/driver, not universal
+cross-device determinism.
+
+An 80-frame Exact/CUDA comparison used the same fixed RF request. Because CUDA
+selected a boundary approximately one frame later, the lossless FFV1 exports
+were aligned by omitting the first Exact frame and comparing 79 frame pairs.
+With default export-side dropout correction, SSIM Y/U/V/All was
+0.954905/0.988109/0.991285/0.972301 and PSNR Y/U/V/average was
+33.196867/41.243137/43.586266/35.699053 dB. Without export-side dropout
+correction, SSIM was 0.949393/0.987529/0.990573/0.969222 and PSNR was
+31.286140/41.027876/43.313528/33.944493 dB. Across all 158 aligned fields, the
+active-picture dropout masks measured 97.512% precision, 99.818% recall, and
+97.339% intersection-over-union against Exact; whole-field IoU was 94.186%.
+Manual contact-sheet review retained closely matching scene content, color,
+and motion and no longer showed the previous severe diagonal/rainbow phase
+failure. The remaining synchronization, TBC geometry, and pixel differences
+mean this is a viewing-quality gate, not Exact compatibility. A bypass of the
+refined K4 horizontal-sync stage reduced luma SSIM from 0.949393 to 0.942450,
+so that lower-cost experiment was rejected.
+
+The pinned CUDA graph is patched at build time to remove upstream ordering and
+lifecycle hazards: FM analytic differencing uses a separate destination,
+chroma burst accumulation is reduced in a fixed order, and writer parity
+belongs to each pipeline instance rather than leaking between decodes. The
+upstream in-decode dropout concealment is replaced by a maintained Exact-style
+metadata detector. It consumes dynamic per-field source offsets and field
+means, uses the 0.18 threshold, 1.25 hysteresis, 30-sample merge gap, and strict
+greater-than-10 minimum run, and maps PAL parity geometry like Exact. The
+decoder records metadata only; optional correction remains an export-side
+operation. The GPU now classifies 32-sample warp masks with ballot operations;
+the serial Exact state machine then consumes only transition bits, retaining
+threshold precedence, merge distance, minimum length, and sample positions. On
+the real 500-frame window, an isolated A-B-B-A comparison reduced median wall
+time by 13.64% and increased throughput by 15.79%; the 16-field dropout stage
+itself fell from about 43.22 to 7.41 ms. Luma, chroma, and JSON remained
+byte-identical for this change.
+
+The burst-source DC mean is also computed with a deterministic fixed-tree FP64
+reduction before the sample-parallel roll. This intentionally changes raw CUDA
+chroma bits from the previous serial accumulation order, but two final runs are
+byte-identical, the old/new lossless rendered output measured SSIM 1.000000,
+and the Exact-aligned displayed SSIM values were unchanged. Average PSNR moved
+from 35.699052 to 35.699053 dB. A bounded pageable host buffer prefetches only
+the next PCM16 RF batch while the current GPU/output tail runs; the first read
+also overlaps CUDA/cuFFT initialization. Its internal A-B-B-A control reduced
+the 500-frame median from 11.649328 to 9.175967 seconds (21.24% less wall time
+and 26.96% more throughput), with identical final files. JSON recovery
+checkpoints are now limited to about once per second while final publication
+always writes the complete document; this improved a paired 500-frame median
+by 2.96%, at the cost of a crash snapshot being roughly one second stale.
+Four-MiB luma/chroma stdio buffers added a further measured 1.68% median
+wall-time reduction. Shared burst FFT storage regressed by 0.48%; a 16-Msample
+managed read block was neutral/noisy; page-locked input regressed by 0.84%; and
+asynchronous dropout allocation regressed by about 12%. None was retained.
+
+The parallel pulse kernel has GPU tests for boundary, NaN, variable-offset,
+and overflow semantics. A direct GPU dropout test covers dynamic offsets,
+field parity, hysteresis, merging, and minimum-run semantics. A full in-process
+synthetic NTSC pipeline test decodes one 48-field RF source through FP32 once
+and PCM16 twice, requiring byte-identical luma, chroma, and JSON for all 45
+emitted 910-by-263 fields. It verifies alternating field parity, strictly
+increasing `fileLoc`, and a parity-consistent cyclic rotation of the `1,4,3,2`
+NTSC `fieldPhaseID` sequence. The native build runs that contract with both the
+normal 16-field batch and a forced five-field batch, so phase/head-track state
+crosses non-aligned batch boundaries. This NTSC evidence covers geometry,
+lifecycle, and determinism only; no local real NTSC VHS capture was available
+for color/quality certification. None of these results guarantees universal
+determinism across GPU/driver versions.
 
 `ipp-fast` is a numerically close performance mode, not a byte-compatibility
 mode. Different FFT and vector-math evaluation can change floating-point bits
@@ -4170,23 +4306,37 @@ Requirements:
 
 ```powershell
 .\tools\build-ipp-native.ps1
+.\tools\build-cuda-fast-native.ps1
 dotnet restore VHSDecodeDotNet.slnx
 dotnet build VHSDecodeDotNet.slnx -c Release --no-restore
-dotnet test --solution VHSDecodeDotNet.slnx -c Release --no-build --no-restore --minimum-expected-tests 1512
+dotnet test --solution VHSDecodeDotNet.slnx -c Release --no-build --no-restore --minimum-expected-tests 1550
 dotnet test --project tests\VHSDecode.Tests\VHSDecode.Tests.csproj -c Release --no-build --no-restore --coverage --coverage-output coverage.cobertura.xml --coverage-output-format cobertura
 ```
 
-The first command includes the optional `ipp-fast` native artifact; omit it for
-an Exact-only build. The script uses `vswhere` to locate MSBuild, restores the pinned
+The first command includes the optional `ipp-fast` native artifact. It uses
+`vswhere` to locate MSBuild and restores the pinned
 `intelipp.static.win-x64` NuGet package, builds the sequential static bridge,
 and rejects external IPP, OpenMP, oneTBB, or Visual C++ runtime DLL
 dependencies. Intel oneAPI does not need to be installed on the development or
 deployment computer. Binary-only single-file releases embed
 `vhsdecode_ipp.dll` and the applicable third-party notices without adding
-sidecar license files. An Exact-only build may omit the native build step.
+sidecar license files.
+
+The second command builds the optional `cuda-fast` bridge. It requires the
+CUDA 13 Toolkit, an NVIDIA GPU/driver, CMake/Ninja, and an MSVC 14.44-or-earlier
+host toolset. The script verifies the pristine pinned cuVHS commit when a local
+checkout is supplied, compiles and smoke-tests the bridge, then stages
+`vhsdecode_cuda_fast.dll`, the cuFFT runtime, and its third-party notice. Omit
+either native command when that backend is not required; an Exact-only build
+may omit both. The bridge statically links the MSVC and CUDA runtimes; its
+dependency audit rejects accidental dynamic CRT or cudart dependencies. The
+staged cuFFT sidecar and a compatible NVIDIA driver remain required.
+The default command runs every native GPU test. GPU-less CI may pass
+`-SkipRuntimeTests`; that mode still compiles, audits, and stages the bridge,
+but is not GPU runtime validation.
 
 The current formal Release build has zero warnings and errors. The xUnit v3
-project exposes **1,500** independently discoverable tests to both
+project exposes **1,550** independently discoverable tests to both
 `dotnet test` and Visual Studio Test Explorer.
 
 <!-- SECTION: usage -->
@@ -4208,10 +4358,12 @@ After a Release build, use either facade dispatch or an apphost alias:
 src\VHSDecode.Cli\bin\Release\net11.0\decode.exe vhs [upstream options] input output
 src\VHSDecode.Cli\bin\Release\net11.0\vhs-decode.exe [upstream options] input output
 decode.exe vhs --dsp-backend ipp-fast [upstream options] input output
+decode.exe vhs --dsp-backend cuda-fast --pal [supported options] input.ldf output
 ```
 
-The last form selects the optional fast backend explicitly when approximate
-output is acceptable.
+The last two forms select optional independent numerical backends explicitly.
+`cuda-fast` accepts only its documented subset and fails instead of ignoring
+an unsupported option.
 
 Use the matching `cvbs`, `ld`, or `hifi` command and its upstream v0.4.0
 arguments. Run `--help` for the exact accepted surface.

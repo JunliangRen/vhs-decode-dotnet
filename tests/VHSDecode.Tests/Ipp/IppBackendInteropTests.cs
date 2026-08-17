@@ -10,11 +10,13 @@ namespace VHSDecode.Tests.Ipp;
 
 public sealed class IppBackendInteropTests
 {
-    [Theory(DisplayName = "DSP backend parser recognizes exact and explicit IPP fast values")]
+    [Theory(DisplayName = "DSP backend parser recognizes all explicit stable values")]
     [InlineData("exact", DspBackend.Exact)]
     [InlineData("EXACT", DspBackend.Exact)]
     [InlineData("ipp-fast", DspBackend.IppFast)]
     [InlineData("IPP-FAST", DspBackend.IppFast)]
+    [InlineData("cuda-fast", DspBackend.CudaFast)]
+    [InlineData("CUDA-FAST", DspBackend.CudaFast)]
     public void DspBackendParserRecognizesSupportedValues(
         string value,
         DspBackend expected)
@@ -22,9 +24,14 @@ public sealed class IppBackendInteropTests
         Assert.Equal(expected, DspBackendParser.Parse(value));
         Assert.True(DspBackendParser.TryParse(value, out DspBackend parsed));
         Assert.Equal(expected, parsed);
-        Assert.Equal(
-            expected == DspBackend.Exact ? "exact" : "ipp-fast",
-            DspBackendParser.ToCommandLineValue(expected));
+        string expectedValue = expected switch
+        {
+            DspBackend.Exact => "exact",
+            DspBackend.IppFast => "ipp-fast",
+            DspBackend.CudaFast => "cuda-fast",
+            _ => throw new ArgumentOutOfRangeException(nameof(expected))
+        };
+        Assert.Equal(expectedValue, DspBackendParser.ToCommandLineValue(expected));
     }
 
     [Fact(DisplayName = "DSP backend parser rejects values outside the stable CLI contract")]
@@ -37,6 +44,7 @@ public sealed class IppBackendInteropTests
             () => DspBackendParser.Parse("native"));
         Assert.Contains("exact", exception.Message, StringComparison.Ordinal);
         Assert.Contains("ipp-fast", exception.Message, StringComparison.Ordinal);
+        Assert.Contains("cuda-fast", exception.Message, StringComparison.Ordinal);
     }
 
     [Fact(DisplayName = "Selecting exact in an isolated core assembly performs no native load")]

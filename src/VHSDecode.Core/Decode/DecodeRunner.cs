@@ -1,5 +1,6 @@
 using VHSDecode.Core.CommandLine;
 using VHSDecode.Core.Dsp;
+using VHSDecode.Core.Dsp.CudaFast;
 using VHSDecode.Core.Dsp.Ipp;
 using VHSDecode.Core.Formats;
 using VHSDecode.Core.HiFi;
@@ -13,28 +14,40 @@ public sealed class DecodeRunner
 {
     private readonly Func<CancellationToken, TbcFieldSequenceDecodeEngine> _engineFactory;
     private readonly IHiFiCommandRunner _hiFiRunner;
+    private readonly ICudaFastDecodeRunner _cudaFastRunner;
 
     public DecodeRunner()
         : this(
             cancellationToken => new TbcFieldSequenceDecodeEngine(
                 cancellationToken: cancellationToken),
-            new HiFiDecodeRunner())
+            new HiFiDecodeRunner(),
+            new CudaFastDecodeRunner())
     {
     }
 
     internal DecodeRunner(Func<CancellationToken, TbcFieldSequenceDecodeEngine> engineFactory)
-        : this(engineFactory, new HiFiDecodeRunner())
+        : this(engineFactory, new HiFiDecodeRunner(), new CudaFastDecodeRunner())
     {
     }
 
     internal DecodeRunner(
         Func<CancellationToken, TbcFieldSequenceDecodeEngine> engineFactory,
         IHiFiCommandRunner hiFiRunner)
+        : this(engineFactory, hiFiRunner, new CudaFastDecodeRunner())
+    {
+    }
+
+    internal DecodeRunner(
+        Func<CancellationToken, TbcFieldSequenceDecodeEngine> engineFactory,
+        IHiFiCommandRunner hiFiRunner,
+        ICudaFastDecodeRunner cudaFastRunner)
     {
         ArgumentNullException.ThrowIfNull(engineFactory);
         ArgumentNullException.ThrowIfNull(hiFiRunner);
+        ArgumentNullException.ThrowIfNull(cudaFastRunner);
         _engineFactory = engineFactory;
         _hiFiRunner = hiFiRunner;
+        _cudaFastRunner = cudaFastRunner;
     }
 
     public int Run(
@@ -128,26 +141,41 @@ public sealed class DecodeRunner
             }
 
             var runtimeReporter = new DecodeRuntimeReporter(output, error);
-            DecodeSession session = DecodeSessionFactory.Create(command);
-            session.RuntimeReporter = runtimeReporter;
+            DecodeSession? session = null;
             try
             {
-                DecodeSessionLogWriter.Write(
-                    session,
-                    VhsInitializationDiagnostics.Build(command, session));
-                if (session.ExecutionOptions.DspBackend == DspBackend.IppFast)
+                DspBackend dspBackend = DspBackendParser.Parse(
+                    command.Get<string>("dsp_backend"));
+                TbcFieldSequenceDecodeResult result;
+                if (dspBackend == DspBackend.CudaFast)
                 {
-                    DecodeSessionLogWriter.Append(
+                    result = _cudaFastRunner.TryDecodeAndWrite(
+                        command,
+                        output,
+                        cancellationToken);
+                }
+                else
+                {
+                    session = DecodeSessionFactory.Create(command);
+                    session.RuntimeReporter = runtimeReporter;
+                    DecodeSessionLogWriter.Write(
                         session,
-                        "INFO",
-                        FormatIppDiagnostic(IppRuntime.RequireAvailable()));
+                        VhsInitializationDiagnostics.Build(command, session));
+                    if (dspBackend == DspBackend.IppFast)
+                    {
+                        DecodeSessionLogWriter.Append(
+                            session,
+                            "INFO",
+                            FormatIppDiagnostic(IppRuntime.RequireAvailable()));
+                    }
+
+                    result = _engineFactory(cancellationToken).TryDecodeAndWrite(session);
                 }
 
-                TbcFieldSequenceDecodeResult result = _engineFactory(cancellationToken)
-                    .TryDecodeAndWrite(session);
                 if (result.Success && command.Spec == CliSpecs.Cvbs)
                 {
-                    runtimeReporter.WriteCvbsCompletion(session.TbcRenderer.CvbsAgcStatistics);
+                    runtimeReporter.WriteCvbsCompletion(
+                        session!.TbcRenderer.CvbsAgcStatistics);
                 }
                 else if (result.Success)
                 {
@@ -176,7 +204,7 @@ public sealed class DecodeRunner
             }
             finally
             {
-                session.Dispose();
+                session?.Dispose();
                 runtimeReporter.WriteStatistics();
             }
         }
