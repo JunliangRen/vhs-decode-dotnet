@@ -2,14 +2,14 @@
 
 **[English](README.md)** | [简体中文](README.zh-CN.md) | [日本語](README.ja.md)
 
-<!-- README_SYNC: 2026-08-16.01 -->
+<!-- README_SYNC: 2026-08-17.02 -->
 
 A .NET 11 rewrite of the decode-facing parts of
 [`oyvindln/vhs-decode`](https://github.com/oyvindln/vhs-decode), targeting
 upstream release `v0.4.0` at commit
 `43155200da87c0d49eb37d8ec09b1372075ee8e4`.
 
-The current .NET port release is `v0.4.0-2.2.0` (application version `2.2.0`).
+The current .NET port release is `v0.4.0-2.3.0` (application version `2.3.0`).
 
 > [!IMPORTANT]
 > This remains a compatibility work in progress. The top-level decode paths are
@@ -40,7 +40,7 @@ evidence, and remaining gaps.
   EIAJ, and supported PAL/NTSC variants.
 - TBC utility tools, the double-click GUI, and developer plotting windows are
   intentionally out of scope.
-- The Visual Studio 2026 `.slnx` solution has **1,500** standard xUnit v3 tests
+- The Visual Studio 2026 `.slnx` solution has **1,550** standard xUnit v3 tests
   that are visible in Test Explorer and runnable with `dotnet test`.
 
 <!-- SECTION: start -->
@@ -120,17 +120,37 @@ multithreaded Python runs are used for speed measurements only.
 | --- | --- |
 | `exact` | Default managed path for compatibility-sensitive decoding. |
 | `ipp-fast` | Experimental Windows x64 VHS and LaserDisc real-RF paths using Intel IPP. It can change floating-point bits and never silently falls back to `exact`. |
+| `cuda-fast` | Experimental Windows x64 NVIDIA CUDA 13 full-signal VHS path. It has an independent numerical contract, currently supports native-rate 40 MSPS PAL/NTSC VHS only, and never silently falls back to a CPU backend. |
 
 ```powershell
 decode.exe vhs --compat-version current --dsp-backend ipp-fast `
   --threads 20 input.lds output
+decode.exe vhs --dsp-backend cuda-fast --pal `
+  --start 100 --length 20 input.ldf output
 ```
 
 LaserDisc now routes its video, EFM, and analog-audio full-complex FFT stages
 through IPP. CVBS and HiFi still reject `ipp-fast`; use `exact` whenever
 release-compatible behavior is required. See the
 [detailed backend notes](docs/README.detailed.md#performance) before using IPP
-for compatibility-sensitive work.
+or CUDA for compatibility-sensitive work. On the tested RTX 4070 and one real
+PAL capture, the quality-corrected FP32 CUDA-full path is now visually much
+closer to Exact, but it does not exceed the measured CPU throughput. For the
+same `--start_fileloc 320000000 --length 500` request, a current same-session
+interleaved comparison completed CUDA runs in 15.605/15.748 seconds and
+`ipp-fast --threads 20` runs in 14.108/14.064 seconds. The medians are 15.676
+and 14.086 seconds (31.895 and 35.495 output fps): CUDA takes 11.29% more wall
+time and provides 0.8986x the IPP throughput. Against the immediately preceding
+CUDA build, a separate A-B-B-A comparison reduced the CUDA median from 21.918
+to 16.057 seconds (26.74% less wall time and 36.50% more throughput). Two final
+CUDA outputs were byte-identical.
+An aligned 79-frame lossless comparison with Exact using the default
+export-side dropout correction measured SSIM Y/U/V/All of
+0.954905/0.988109/0.991285/0.972301 and PSNR Y/U/V/average of
+33.196867/41.243137/43.586266/35.699053 dB. Manual inspection retained closely
+matching scene content, colour, and motion, while numerical equality is not
+claimed. This narrow result is hardware- and capture-specific; `cuda-fast`
+remains experimental and does not share the CPU numerical contract.
 
 <!-- SECTION: performance -->
 
@@ -235,7 +255,7 @@ The pinned SDK is .NET `11.0.100-preview.7.26381.103`.
 dotnet restore VHSDecodeDotNet.slnx
 dotnet build VHSDecodeDotNet.slnx -c Release --no-restore
 dotnet test --solution VHSDecodeDotNet.slnx -c Release `
-  --no-build --no-restore --minimum-expected-tests 1512
+  --no-build --no-restore --minimum-expected-tests 1550
 ```
 
 Open `VHSDecodeDotNet.slnx` in Visual Studio 2026 to build, debug, and run the

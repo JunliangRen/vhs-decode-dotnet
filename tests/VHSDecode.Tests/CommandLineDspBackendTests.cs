@@ -24,12 +24,13 @@ public sealed class CommandLineDspBackendTests
         Assert.Equal(ParsedOptionSource.Default, command.GetSource("dsp_backend"));
     }
 
-    [Theory(DisplayName = "DSP backend accepts exact and ipp-fast case-insensitively")]
+    [Theory(DisplayName = "DSP backend accepts exact, ipp-fast, and cuda-fast case-insensitively")]
     [MemberData(nameof(Commands))]
     public void DspBackendAcceptsSupportedValues(DecodeCommandSpec spec)
     {
         Assert.Equal("exact", Parse(spec, "--dsp-backend", "EXACT").Get<string>("dsp_backend"));
         Assert.Equal("ipp-fast", Parse(spec, "--dsp-backend=IPP-FAST").Get<string>("dsp_backend"));
+        Assert.Equal("cuda-fast", Parse(spec, "--dsp-backend", "CUDA-FAST").Get<string>("dsp_backend"));
     }
 
     [Theory(DisplayName = "DSP backend rejects auto and unknown values")]
@@ -42,10 +43,10 @@ public sealed class CommandLineDspBackendTests
             () => Parse(spec, "--dsp-backend", "cuda"));
 
         Assert.Equal(
-            "argument --dsp-backend: invalid choice: 'auto' (choose from exact, ipp-fast)",
+            "argument --dsp-backend: invalid choice: 'auto' (choose from exact, ipp-fast, cuda-fast)",
             auto.Message);
         Assert.Equal(
-            "argument --dsp-backend: invalid choice: 'cuda' (choose from exact, ipp-fast)",
+            "argument --dsp-backend: invalid choice: 'cuda' (choose from exact, ipp-fast, cuda-fast)",
             unknown.Message);
     }
 
@@ -55,8 +56,10 @@ public sealed class CommandLineDspBackendTests
     {
         string exact = PythonNamespaceFormatter.Format(Parse(spec, "--dsp-backend", "exact"));
         string ippFast = PythonNamespaceFormatter.Format(Parse(spec, "--dsp-backend", "ipp-fast"));
+        string cudaFast = PythonNamespaceFormatter.Format(Parse(spec, "--dsp-backend", "cuda-fast"));
 
         Assert.Equal(exact, ippFast);
+        Assert.Equal(exact, cudaFast);
         Assert.DoesNotContain("dsp_backend", exact, StringComparison.Ordinal);
     }
 
@@ -78,6 +81,20 @@ public sealed class CommandLineDspBackendTests
     [InlineData("ld")]
     public void IppFastSupportsImplementedRfPaths(string commandName)
         => DspBackendSupport.EnsureCommandSupported(DspBackend.IppFast, commandName);
+
+    [Theory(DisplayName = "CUDA fast is isolated to the VHS command")]
+    [InlineData("cvbs")]
+    [InlineData("ld")]
+    [InlineData("hifi")]
+    public void CudaFastRejectsOtherCommandsWithoutFallback(string commandName)
+    {
+        NotSupportedException exception = Assert.Throws<NotSupportedException>(
+            () => DspBackendSupport.EnsureCommandSupported(DspBackend.CudaFast, commandName));
+
+        Assert.Contains("supports only the 'vhs' command", exception.Message, StringComparison.Ordinal);
+        Assert.Contains("no silent fallback", exception.Message, StringComparison.OrdinalIgnoreCase);
+        DspBackendSupport.EnsureCommandSupported(DspBackend.CudaFast, "vhs");
+    }
 
     private static ParsedCommand Parse(DecodeCommandSpec spec, params string[] options)
     {

@@ -1,4 +1,5 @@
 using System.Buffers.Binary;
+using System.Runtime.InteropServices;
 
 namespace VHSDecode.Core.Rf;
 
@@ -79,6 +80,43 @@ public sealed class Int16SampleLoader : IRfSampleLoader
         }
 
         return output;
+    }
+}
+
+internal sealed class DirectInt16SampleLoader : IInt16RfSampleLoader
+{
+    private readonly Int16SampleLoader _fallback = new();
+
+    public double[]? Read(Stream stream, long sample, int readLength)
+        => _fallback.Read(stream, sample, readLength);
+
+    public bool TryReadInt16(
+        Stream stream,
+        long sample,
+        Span<short> destination,
+        out int samplesRead)
+    {
+        ArgumentNullException.ThrowIfNull(stream);
+        ArgumentOutOfRangeException.ThrowIfNegative(sample);
+        samplesRead = 0;
+        if (destination.IsEmpty)
+        {
+            return true;
+        }
+        if (!BitConverter.IsLittleEndian)
+        {
+            return false;
+        }
+
+        long byteOffset = checked(sample * sizeof(short));
+        stream.Seek(byteOffset, SeekOrigin.Begin);
+        Span<byte> bytes = MemoryMarshal.AsBytes(destination);
+        int bytesRead = stream.ReadAtLeast(
+            bytes,
+            bytes.Length,
+            throwOnEndOfStream: false);
+        samplesRead = bytesRead / sizeof(short);
+        return true;
     }
 }
 

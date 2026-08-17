@@ -4,13 +4,13 @@
 
 [English](README.detailed.md) | **[简体中文](README.detailed.zh-CN.md)** | [日本語](README.detailed.ja.md)
 
-<!-- README_SYNC: 2026-08-16.01 -->
+<!-- README_SYNC: 2026-08-17.02 -->
 
 这是 [`oyvindln/vhs-decode`](https://github.com/oyvindln/vhs-decode)
 中解码相关部分的 .NET 11 重写，当前以 release `v0.4.0`、commit
 `43155200da87c0d49eb37d8ec09b1372075ee8e4` 为兼容基线。
 
-当前 .NET 移植版发布为 `v0.4.0-2.2.0`（应用版本 `2.2.0`）。
+当前 .NET 移植版发布为 `v0.4.0-2.3.0`（应用版本 `2.3.0`）。
 
 > [!IMPORTANT]
 > 这是仍在进行中的兼容性移植。顶层解码路径已经实现并经过大量测试，
@@ -182,7 +182,7 @@ stderr 只去除耗时行后逐行一致，日志去除时间戳后逐行一致�
 
 性能优化是实现的一部分，但确定性输出和 release 兼容性始终是首要约束。
 
-DSP 后端通过 `--dsp-backend exact|ipp-fast` 显式选择。该参数是本 .NET 移植
+DSP 后端通过 `--dsp-backend exact|ipp-fast|cuda-fast` 显式选择。该参数是本 .NET 移植
 新增的实验扩展，不属于上游 `oyvindln/vhs-decode` v0.4.0 CLI。`exact` 是默认值，
 保留现有托管兼容路径，并且不会探测或加载 Intel IPP。`ipp-fast` 是 Windows x64
 可选后端：Intel CPU 是官方支持目标，兼容的非 Intel x64 CPU 则是本项目的
@@ -193,6 +193,101 @@ non-Intel vendor warning。后端会加载静态链接的 `vhsdecode_ipp.dll`，
 color-under Super-Gaussian DFT，以及 LaserDisc 视频、EFM 和模拟音频所用的
 2 的幂长度 double-precision full-complex FFT；LD 路径使用 native bridge ABI v1.3。
 CVBS 和 HiFi 会明确拒绝不支持的 `ipp-fast`，不会悄悄改跑 Exact 内核而产生虚假基准。
+
+`cuda-fast` 是独立的 Windows x64 NVIDIA CUDA 13 全信号 VHS 后端。它加载
+`vhsdecode_cuda_fast.dll` 与 cuFFT，并运行固定在 cuVHS commit
+`c55e72073f44b27e8839efb842e4345af39887f7` 的 RF 解调、同步/行定位、时基校正、
+color-under 和 dropout 图。CPU 仍负责输入回调、少量控制/元数据工作与输出发布，
+但不会运行 Exact 或 IPP 场解码引擎。RF 样本、cuFFT R2C/C2C/C2R 存储、解调、
+几何、色彩以及 dropout 图像数据均使用 FP32。只有一次性的高阶 host 滤波器设计
+保留 double precision，因为直接用 FP32 构造系数会数值不稳定；完成后的系数会在
+上传 GPU 前显式量化。原生桥接 ABI v4 会优先让 raw signed-16、符合条件的 libsndfile
+以及 FFmpeg PCM16 输入使用直接 PCM16 回调；上传量只有 FP32 的一半，随后由确定性的
+GPU 内核把每个可在 FP32 中精确表示的 signed-16 值转换进 FP32 信号面，并保留托管
+FP32 回调作为回退。桥接还采用持久色度工作区、自动限制为 16 场的批次，以及并行且
+确定性的同步脉冲扫描。ABI v4 将请求的输出场数上限与可供扫描的 RF 长度分开，因此原生
+管线可越过弱信号或无信号片头，仅在水平同步节奏连续稳定后建立备用场序，丢弃无效场和
+开头不完整的第二场，并在恰好输出请求数量的完整交替场后停止。cuVHS 可选的 host-side
+K4 source reconstruction 已在编译期关闭，因此该路径始终使用 GPU source。不支持的
+参数、profile 或缺失的 CUDA 组件都会明确失败，绝不会切换到其他 DSP 后端。首版契约
+仅为 Windows x64 上原生采样率 40 MSPS 的 PAL/NTSC VHS SP/LP/EP；CVBS、LaserDisc、
+HiFi、S-VHS、其他制式、packed `.lds`、preview-server 路由以及显式兼容 profile
+都不会被近似处理。
+
+该后端采用独立数值契约，不声明兼容 `v0.4.0` 或 `current` 的哈希。本地 RTX 4070
+12 GiB 开发机上，本轮同一时段的交错对照使用同一固定私有 40 MHz 真实 PAL `.ldf`
+请求：`--start_fileloc 320000000 --length 500`。CUDA 分别用时 15.605154 和
+15.747770 秒；`ipp-fast --threads 20` 分别为 14.108349 和 14.064289 秒。中位数为
+15.676462 对 14.086319 秒（31.8950 对 35.4954 输出 fps）：这个窄范围对比中 CUDA
+墙钟时间长 11.29%，吞吐为 IPP 的 0.8986x。两条路径都输出恰好 1,000 个有序交替的
+1135x313 场，并具有相同的 14,745.6/59,417.6 黑白电平元数据。首个同步 `fileLoc`
+分别为 322,212,917 和 320,563,200，因为独立的同步/TBC 算法会选择不同场边界；因此
+这是同请求性能对比，而不是输出相等声明，也不构成跨磁带、制式、驱动或 NVIDIA 型号的
+普遍速度保证。
+
+另一组包含启动开销的 A-B-B-A 对照以紧邻的上一版 CUDA 可执行文件为基线：旧版为
+22.083587/21.753076 秒，最终版为 16.355230/15.758866 秒；中位数为 21.918332 和
+16.057048 秒，即墙钟减少 26.74%、吞吐提高 36.50%，输出速度从 22.812 提高到
+31.139 fps。由于两组测量之间本机整体吞吐发生变化，这些数字与 CPU 对照分开记录。
+
+第二组带进程资源采样的 A-B-B-A 再次确认了同一方向：旧/新墙钟中位数为
+20.765240/15.313171 秒（减少 26.26%，吞吐提高 35.60%），CPU 中位数为
+36.3125/33.0000 秒（减少 9.12%）。峰值工作集中位数从 246.34 增至 256.38 MiB。
+旧版对照自身的峰值 private bytes 就在 4,449.98-4,586.33 MiB 间波动；描述性中位数
+从 4,518.16 增至 4,616.46 MiB，而两次最终运行稳定在 4,617.25/4,615.67 MiB。保留的
+预取严格限制为一个 PCM16 批次；这是已测得的有界内存代价，不是无限向前读取的队列。
+
+最终固定窗口的两次 CUDA 运行生成了逐字节相同的亮度、色度和 JSON，并且各有 40,705
+个 dropout 段；SHA-256 分别为
+`647967E99822994A69DBDEB0E0B5824755FE204F650277106D2B4F234109C456`、
+`CBC40C00452C3AFA8CE15CAEB97DBDD009ED2FA7803AAA3D51813B2F498E6E99` 与
+`745F4F570D8EB2D480FBB38BFD4513EA17F3D28583553BB69CF120EE7D27DB3D`。
+全局 `fileLoc` 从 322,212,917 严格递增到 1,121,408,422。这只能证明同一 GPU/驱动上的
+重复性，不能保证跨设备普遍确定。
+
+80 帧 Exact/CUDA 对比使用同一固定 RF 请求。CUDA 选择的边界约晚一帧，因此 FFV1
+无损导出跳过 Exact 的第一帧后对齐比较 79 对帧。启用默认导出侧 dropout 补偿时，SSIM
+Y/U/V/All 为 0.954905/0.988109/0.991285/0.972301，PSNR Y/U/V/平均值为
+33.196867/41.243137/43.586266/35.699053 dB；不使用导出侧补偿时，SSIM 为
+0.949393/0.987529/0.990573/0.969222，PSNR 为
+31.286140/41.027876/43.313528/33.944493 dB。全部 158 个对齐场的活动画面 dropout
+掩码相对 Exact 达到 97.512% precision、99.818% recall 和 97.339% IoU；全场 IoU 为
+94.186%。人工检查联系表确认场景内容、色彩和运动观感非常接近，且此前严重的对角彩虹/
+相位错误已经消失。同步、TBC 几何和像素仍有差异，因此这是观感质量门禁，不是 Exact
+兼容证明。跳过精细 K4 水平同步阶段的低成本试验让亮度 SSIM 从 0.949393 降至
+0.942450，因此没有保留。
+
+构建时会对固定版本的 CUDA 图应用受源码匹配保护的补丁，消除上游顺序与生命周期隐患：
+FM 解析信号差分改用独立目标缓冲区，色度 burst 累加按固定顺序归约，而 writer 场序属于
+各自 pipeline 实例，不会泄漏到下一次解码。上游解码内 dropout 补偿被替换成维护于本项目
+且遵循 Exact 状态机的元数据检测器：它使用每场动态源 offset 和场均值，采用 0.18 阈值、
+1.25 滞回、30 样本合并间隔、严格大于 10 的最短长度，并按 Exact 规则映射 PAL 奇偶场
+几何。解码器只记录元数据；可选修复仍由导出侧执行。GPU 现在用 ballot 操作并行分类
+32 样本 warp 掩码，再由串行 Exact 状态机只消费状态转换位，保留阈值优先级、合并距离、
+最短长度和样本位置。真实 500 帧窗口的独立 A-B-B-A 对照把墙钟中位数缩短 13.64%、
+吞吐提高 15.79%；16 场批次的 dropout 阶段本身从约 43.22 降至 7.41 ms。该变化的
+亮度、色度和 JSON 保持逐字节相同。
+
+burst-source DC 均值也改为确定性的固定树 FP64 归约，再执行样本并行滚动。相对旧串行
+累加顺序，这会有意改变 CUDA 原始色度位模式，但最终两次运行互相逐字节相同；新旧无损
+渲染输出的 SSIM 为 1.000000，与 Exact 对齐后显示精度的各项 SSIM 不变，平均 PSNR
+从 35.699052 微升到 35.699053 dB。有界的普通分页主机缓冲区只预取下一批 PCM16 RF，
+使其与当前 GPU/输出尾部重叠；第一次读取也与 CUDA/cuFFT 初始化重叠。内部 A-B-B-A
+控制把 500 帧中位数从 11.649328 降至 9.175967 秒（墙钟减少 21.24%、吞吐提高
+26.96%），最终文件完全相同。JSON 恢复检查点现在约每秒最多写一次，而最终发布始终
+写入完整文档；配对的 500 帧中位数因此改善 2.96%，代价是崩溃时的快照可能滞后约一秒。
+亮度/色度各 4 MiB 的 stdio 缓冲又带来 1.68% 的墙钟中位数提升。共享 burst FFT 存储
+慢 0.48%，16M 样本托管读块处于噪声范围，页锁定输入慢 0.84%，异步 dropout 分配慢约
+12%，因此这些试验均未保留。
+
+并行脉冲内核具有覆盖边界、NaN、可变 offset 和溢出语义的真实 GPU 测试；直接 GPU
+dropout 测试覆盖动态 offset、场序、滞回、合并和最短长度语义。完整的进程内合成 NTSC
+管线会把同一份 48 场 RF 分别通过一次 FP32 与两次 PCM16 路径解码，并要求全部 45 个
+910x263 输出场的亮度、色度和 JSON 逐字节相同。测试还逐场验证奇偶交替、严格递增的
+`fileLoc`，以及与奇偶场一致的 `1,4,3,2` NTSC `fieldPhaseID` 循环旋转。原生构建会
+分别以正常 16 场批次和强制 5 场批次运行该契约，让相位/磁头轨道状态跨过非对齐批次
+边界。这部分 NTSC 证据仅覆盖几何、生命周期和确定性；本机没有真实 NTSC VHS 采集可
+用于色彩/画质认证。以上结果也不保证不同 GPU/驱动版本之间普遍确定。
 
 `ipp-fast` 是数值接近的性能模式，不是逐字节兼容模式。FFT 和向量数学求值差异
 可能改变浮点位模式，并进一步影响阈值决策、元数据、恢复、日志和输出文件。
@@ -3263,21 +3358,32 @@ destination API，把最终 burst SOS 写回这块独占 buffer，从而在该 A
 
 ```powershell
 .\tools\build-ipp-native.ps1
+.\tools\build-cuda-fast-native.ps1
 dotnet restore VHSDecodeDotNet.slnx
 dotnet build VHSDecodeDotNet.slnx -c Release --no-restore
-dotnet test --solution VHSDecodeDotNet.slnx -c Release --no-build --no-restore --minimum-expected-tests 1512
+dotnet test --solution VHSDecodeDotNet.slnx -c Release --no-build --no-restore --minimum-expected-tests 1550
 dotnet test --project tests\VHSDecode.Tests\VHSDecode.Tests.csproj -c Release --no-build --no-restore --coverage --coverage-output coverage.cobertura.xml --coverage-output-format cobertura
 ```
 
-第一条命令用于包含可选的 `ipp-fast` 原生产物；只构建 Exact 时可以省略。
-该脚本通过 `vswhere` 定位 MSBuild，还原锁定版本的
+第一条命令用于包含可选的 `ipp-fast` 原生产物。该脚本通过 `vswhere` 定位
+MSBuild，还原锁定版本的
 `intelipp.static.win-x64` NuGet 包，构建顺序执行的静态桥接，并拒绝任何外部 IPP、
 OpenMP、oneTBB 或 Visual C++ runtime DLL 依赖。开发机和部署电脑都不需要安装
 Intel oneAPI。只含二进制的单文件发布会嵌入 `vhsdecode_ipp.dll` 和适用的第三方
-notice，不会额外生成许可证 sidecar 文件。只构建 Exact 后端时可以省略原生构建步骤。
+notice，不会额外生成许可证 sidecar 文件。
+
+第二条命令构建可选的 `cuda-fast` 桥接，需要 CUDA 13 Toolkit、NVIDIA GPU/driver、
+CMake/Ninja 以及 MSVC 14.44 或更早的 host toolset。传入本地 checkout 时，脚本会
+验证其为干净且固定的 cuVHS commit，然后编译并执行 smoke test，最后暂存
+`vhsdecode_cuda_fast.dll`、cuFFT runtime 与第三方 notice。不需要某一后端时可省略
+对应原生命令；只构建 Exact 时两条都可省略。桥接会静态链接 MSVC 与 CUDA runtime，
+依赖审计会拒绝意外出现的动态 CRT 或 cudart 依赖；部署时仍需暂存的 cuFFT sidecar
+以及兼容的 NVIDIA 驱动。
+默认命令会运行全部原生 GPU 测试。没有 GPU 的 CI 可传入 `-SkipRuntimeTests`；该模式
+仍会编译、审计并暂存桥接，但不能算作 GPU runtime 验证。
 
 当前正式 Release 构建为零警告、零错误。xUnit v3 项目向
-`dotnet test` 和 Visual Studio Test Explorer 暴露 **1,500** 个可独立发现的测试。
+`dotnet test` 和 Visual Studio Test Explorer 暴露 **1,550** 个可独立发现的测试。
 
 <!-- SECTION: usage -->
 
@@ -3298,9 +3404,11 @@ Release 构建后，可以使用 facade 分发或 apphost 别名：
 src\VHSDecode.Cli\bin\Release\net11.0\decode.exe vhs [upstream options] input output
 src\VHSDecode.Cli\bin\Release\net11.0\vhs-decode.exe [upstream options] input output
 decode.exe vhs --dsp-backend ipp-fast [upstream options] input output
+decode.exe vhs --dsp-backend cuda-fast --pal [supported options] input.ldf output
 ```
 
-最后一种形式会在接受近似输出时显式选择可选快速后端。
+最后两种形式会显式选择采用独立数值契约的可选后端。`cuda-fast` 只接受文档列出的
+参数子集；遇到不支持的参数会失败，而不是忽略。
 
 将命令替换为对应的 `cvbs`、`ld` 或 `hifi`，并使用上游 v0.4.0
 参数。运行 `--help` 可查看精确的可接受参数面。

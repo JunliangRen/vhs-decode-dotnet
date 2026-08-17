@@ -87,11 +87,10 @@ if (-not $artifactDirectoryFullPath.StartsWith($repositoryPrefix, [StringCompari
     throw "Refusing to replace an artifact directory outside the repository: $artifactDirectoryFullPath"
 }
 
-if (Test-Path -LiteralPath $artifactDirectoryFullPath) {
-    Remove-Item -LiteralPath $artifactDirectoryFullPath -Recurse -Force
-}
-
 New-Item -ItemType Directory -Path $artifactDirectoryFullPath -Force | Out-Null
+if (Test-Path -LiteralPath $artifactPath -PathType Leaf) {
+    Remove-Item -LiteralPath $artifactPath -Force
+}
 Copy-Item -LiteralPath $nativeOutputPath -Destination $artifactPath
 
 Write-Host "Checking native dependencies in $artifactPath"
@@ -135,7 +134,16 @@ if ($nonSystemDependencies.Count -gt 0) {
     throw "The IPP bridge has non-system DLL dependencies: $($nonSystemDependencies -join ', ')"
 }
 
-$unexpectedArtifacts = @(Get-ChildItem -LiteralPath $artifactDirectoryFullPath -Force | Where-Object { $_.Name -ne 'vhsdecode_ipp.dll' })
+$allowedArtifactNames = @(
+    'vhsdecode_ipp.dll',
+    'vhsdecode_cuda_fast.dll',
+    'cufft64_12.dll',
+    'THIRD-PARTY-NOTICES-CUDA-FAST.md'
+)
+$unexpectedArtifacts = @(
+    Get-ChildItem -LiteralPath $artifactDirectoryFullPath -Force |
+        Where-Object { $_.Name -notin $allowedArtifactNames }
+)
 if ($unexpectedArtifacts.Count -gt 0) {
     throw "The native artifact directory contains unexpected files: $($unexpectedArtifacts.Name -join ', ')"
 }

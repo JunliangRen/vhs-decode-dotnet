@@ -6,7 +6,11 @@ using System.Runtime.InteropServices;
 
 namespace VHSDecode.Core.Rf;
 
-internal sealed class LibsndfilePcm16SampleLoader : IReusableRfSampleLoader, IDisposable
+internal sealed class LibsndfilePcm16SampleLoader :
+    IReusableRfSampleLoader,
+    IFloat32RfSampleLoader,
+    IInt16RfSampleLoader,
+    IDisposable
 {
     private readonly record struct MappedReadPlan(
         long PhysicalSample,
@@ -126,6 +130,129 @@ internal sealed class LibsndfilePcm16SampleLoader : IReusableRfSampleLoader, IDi
 
     void IReusableRfSampleLoader.ReturnReusable(double[] buffer)
         => ReturnReusable(buffer);
+
+    bool IFloat32RfSampleLoader.TryReadFloat32(
+        Stream stream,
+        long sample,
+        Span<float> destination,
+        out int samplesRead)
+        => TryReadFloat32(stream, sample, destination, out samplesRead);
+
+    internal bool TryReadFloat32(
+        Stream stream,
+        long sample,
+        Span<float> destination,
+        out int samplesRead)
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+        ArgumentNullException.ThrowIfNull(stream);
+        ArgumentOutOfRangeException.ThrowIfNegative(sample);
+        samplesRead = 0;
+        if (destination.IsEmpty)
+        {
+            return true;
+        }
+
+        lock (_gate)
+        {
+            ObjectDisposedException.ThrowIf(_disposed, this);
+            if (_fallbackActive || _sampleMapper is not null)
+            {
+                return false;
+            }
+
+            try
+            {
+                ILibsndfilePcm16Source source = _source ??= _openSource(_filename);
+                if (sample > source.Frames || destination.Length > source.Frames - sample)
+                {
+                    return false;
+                }
+
+                short[] nativeSamples = ArrayPool<short>.Shared.Rent(destination.Length);
+                try
+                {
+                    long framesRead = ReadNativeFrames(
+                        source,
+                        sample,
+                        nativeSamples.AsSpan(0, destination.Length),
+                        useRewind: false,
+                        resetRewind: true,
+                        seekTarget: "sample");
+                    samplesRead = checked((int)framesRead);
+                    ConvertPcm16ToFloat(
+                        nativeSamples.AsSpan(0, samplesRead),
+                        destination);
+                    return true;
+                }
+                finally
+                {
+                    ArrayPool<short>.Shared.Return(nativeSamples);
+                }
+            }
+            catch (LibsndfilePcm16FallbackException)
+            {
+                ActivateFallback();
+                return false;
+            }
+        }
+    }
+
+    bool IInt16RfSampleLoader.TryReadInt16(
+        Stream stream,
+        long sample,
+        Span<short> destination,
+        out int samplesRead)
+        => TryReadInt16(stream, sample, destination, out samplesRead);
+
+    internal bool TryReadInt16(
+        Stream stream,
+        long sample,
+        Span<short> destination,
+        out int samplesRead)
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+        ArgumentNullException.ThrowIfNull(stream);
+        ArgumentOutOfRangeException.ThrowIfNegative(sample);
+        samplesRead = 0;
+        if (destination.IsEmpty)
+        {
+            return true;
+        }
+
+        lock (_gate)
+        {
+            ObjectDisposedException.ThrowIf(_disposed, this);
+            if (_fallbackActive || _sampleMapper is not null)
+            {
+                return false;
+            }
+
+            try
+            {
+                ILibsndfilePcm16Source source = _source ??= _openSource(_filename);
+                if (sample > source.Frames || destination.Length > source.Frames - sample)
+                {
+                    return false;
+                }
+
+                long framesRead = ReadNativeFrames(
+                    source,
+                    sample,
+                    destination,
+                    useRewind: false,
+                    resetRewind: true,
+                    seekTarget: "sample");
+                samplesRead = checked((int)framesRead);
+                return true;
+            }
+            catch (LibsndfilePcm16FallbackException)
+            {
+                ActivateFallback();
+                return false;
+            }
+        }
+    }
 
     private double[]? ReadCore(
         Stream stream,
@@ -496,6 +623,41 @@ internal sealed class LibsndfilePcm16SampleLoader : IReusableRfSampleLoader, IDi
                     Avx.Store(
                         destinationPointer + index + 4,
                         Avx.ConvertToVector256Double(integers.GetUpper()));
+                }
+            }
+        }
+
+        for (; index < source.Length; index++)
+        {
+            destination[index] = source[index];
+        }
+    }
+
+    internal static unsafe void ConvertPcm16ToFloat(
+        ReadOnlySpan<short> source,
+        Span<float> destination)
+    {
+        if (destination.Length < source.Length)
+        {
+            throw new ArgumentException(
+                "PCM16 conversion destination is shorter than the source.",
+                nameof(destination));
+        }
+
+        int index = 0;
+        if (Avx2.IsSupported)
+        {
+            fixed (short* sourcePointer = source)
+            fixed (float* destinationPointer = destination)
+            {
+                int vectorizedEnd = source.Length - (source.Length % 8);
+                for (; index < vectorizedEnd; index += 8)
+                {
+                    Vector256<int> integers = Avx2.ConvertToVector256Int32(
+                        Sse2.LoadVector128(sourcePointer + index));
+                    Avx.Store(
+                        destinationPointer + index,
+                        Avx.ConvertToVector256Single(integers));
                 }
             }
         }

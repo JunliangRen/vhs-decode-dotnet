@@ -494,6 +494,12 @@ public sealed class TbcFieldSequenceDecodeEngine
         Action? writeMetadataSnapshot,
         Func<bool>? stopRequested = null)
     {
+        if (session.ExecutionOptions.DspBackend == DspBackend.CudaFast)
+        {
+            throw new NotSupportedException(
+                "The explicit 'cuda-fast' backend must be executed by DecodeRunner's independent full-CUDA path; no managed CPU decode fallback was performed.");
+        }
+
         BigInteger requestedFields = maxFields.HasValue
             ? new BigInteger(maxFields.Value)
             : session.RunBounds.RequestedFieldCount;

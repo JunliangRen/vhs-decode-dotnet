@@ -2,6 +2,7 @@ using System.Buffers.Binary;
 using System.ComponentModel;
 using VHSDecode.Core.CommandLine;
 using VHSDecode.Core.Decode;
+using VHSDecode.Core.Dsp.CudaFast;
 using VHSDecode.Core.Rf;
 using Xunit;
 
@@ -85,6 +86,127 @@ public sealed class LibsndfilePcm16SampleLoaderTests
                 Assert.Equal((double)source[i], actual[i]);
             }
         }
+    }
+
+    [Fact(DisplayName = "libsndfile PCM16 to FP32 conversion is exact for every value and vector tail")]
+    public void Pcm16ToFloatConversionMatchesScalarForEveryValueAndTail()
+    {
+        const int ValueCount = 1 << 16;
+        var source = new short[ValueCount + 7];
+        for (int i = 0; i < source.Length; i++)
+        {
+            source[i] = unchecked((short)(short.MinValue + i));
+        }
+
+        for (int tail = 0; tail < 8; tail++)
+        {
+            int length = ValueCount + tail;
+            var actual = new float[length];
+            LibsndfilePcm16SampleLoader.ConvertPcm16ToFloat(
+                source.AsSpan(0, length),
+                actual);
+
+            for (int i = 0; i < actual.Length; i++)
+            {
+                Assert.Equal((float)source[i], actual[i]);
+            }
+        }
+    }
+
+    [Fact(DisplayName = "libsndfile CUDA FP32 reads write caller memory without decoded double buffers")]
+    public void NativeFloat32ReadsWriteCallerDestinationDirectly()
+    {
+        var source = new RecordingSource([10, -20, 30, short.MinValue, short.MaxValue, 60]);
+        var fallback = new RecordingFallback();
+        using var loader = new LibsndfilePcm16SampleLoader(
+            "capture.flac",
+            _ => source,
+            fallback);
+        var first = new float[3];
+        var second = new float[3];
+
+        Assert.True(loader.TryReadFloat32(Stream.Null, 0, first, out int firstRead));
+        Assert.True(loader.TryReadFloat32(Stream.Null, 3, second, out int secondRead));
+
+        Assert.Equal(3, firstRead);
+        Assert.Equal(3, secondRead);
+        Assert.Equal([10.0f, -20.0f, 30.0f], first);
+        Assert.Equal([(float)short.MinValue, (float)short.MaxValue, 60.0f], second);
+        Assert.Empty(source.SeekSamples);
+        Assert.Equal([3, 3], source.ReadLengths);
+        Assert.Equal(0, fallback.ReadCount);
+    }
+
+    [Fact(DisplayName = "libsndfile CUDA PCM16 reads write caller memory without CPU conversion")]
+    public void NativeInt16ReadsWriteCallerDestinationDirectly()
+    {
+        var source = new RecordingSource([10, -20, 30, short.MinValue, short.MaxValue, 60]);
+        var fallback = new RecordingFallback();
+        using var loader = new LibsndfilePcm16SampleLoader(
+            "capture.flac",
+            _ => source,
+            fallback);
+        var first = new short[3];
+        var second = new short[3];
+
+        Assert.True(loader.TryReadInt16(Stream.Null, 0, first, out int firstRead));
+        Assert.True(loader.TryReadInt16(Stream.Null, 3, second, out int secondRead));
+
+        Assert.Equal(3, firstRead);
+        Assert.Equal(3, secondRead);
+        Assert.Equal([10, -20, 30], first);
+        Assert.Equal([short.MinValue, short.MaxValue, 60], second);
+        Assert.Empty(source.SeekSamples);
+        Assert.Equal([3, 3], source.ReadLengths);
+        Assert.Equal(0, fallback.ReadCount);
+    }
+
+    [Fact(DisplayName = "mapped libsndfile input declines the direct FP32 path")]
+    public void MappedNativeReadsDeclineDirectFloat32Path()
+    {
+        var source = new RecordingSource([10, 20, 30, 40]);
+        using var loader = new LibsndfilePcm16SampleLoader(
+            "capture.ldf",
+            _ => source,
+            new RecordingFallback(),
+            new PyAvRawFlacSampleMapper(
+                FfmpegPcm16SampleLoader.ContainerAudioSampleRateHz,
+                blockSize: 2_048));
+        var destination = new float[2];
+
+        Assert.False(loader.TryReadFloat32(
+            Stream.Null,
+            0,
+            destination,
+            out int samplesRead));
+
+        Assert.Equal(0, samplesRead);
+        Assert.Equal([0.0f, 0.0f], destination);
+        Assert.Empty(source.ReadLengths);
+    }
+
+    [Fact(DisplayName = "mapped libsndfile input declines the direct PCM16 path")]
+    public void MappedNativeReadsDeclineDirectInt16Path()
+    {
+        var source = new RecordingSource([10, 20, 30, 40]);
+        using var loader = new LibsndfilePcm16SampleLoader(
+            "capture.ldf",
+            _ => source,
+            new RecordingFallback(),
+            new PyAvRawFlacSampleMapper(
+                FfmpegPcm16SampleLoader.ContainerAudioSampleRateHz,
+                blockSize: 2_048));
+        var destination = new short[2];
+
+        Assert.False(loader.TryReadInt16(
+            Stream.Null,
+            0,
+            destination,
+            out int samplesRead));
+
+        Assert.Equal(0, samplesRead);
+        Assert.Equal([0, 0], destination);
+        Assert.Empty(source.ReadLengths);
     }
 
     [Fact(DisplayName = "libsndfile PCM16 conversion preserves short-span boundaries")]
@@ -306,11 +428,16 @@ public sealed class LibsndfilePcm16SampleLoaderTests
             fallback);
         using var input = new MemoryStream();
 
-        double[]? firstRead = loader.Read(input, 4, 2);
+        var firstRead = new short[2];
+        int firstReadCount = CudaFastDecodeRunner.ReadInt16WithFallback(
+            loader,
+            input,
+            sample: 4,
+            firstRead);
         double[]? secondRead = loader.Read(input, 8, 2);
-        Assert.NotNull(firstRead);
+        Assert.Equal(2, firstReadCount);
         Assert.NotNull(secondRead);
-        Assert.Equal([71.0, 72.0], firstRead);
+        Assert.Equal([(short)71, (short)72], firstRead);
         Assert.Equal([71.0, 72.0], secondRead);
         Assert.Equal(1, openCount);
         Assert.Equal(2, fallback.ReadCount);

@@ -1,5 +1,5 @@
 usage: decode.py [-h] [--frequency ] [--overwrite] [--threads ]
-                 [--dsp-backend {exact,ipp-fast}] [--preview]
+                 [--dsp-backend {exact,ipp-fast,cuda-fast}] [--preview]
                  [--gui] [--gnuradio] [--raw_format ] [--pal] [--ntsc] [--8mm]
                  [--demod ] [--bias_guess] [--auto_fine_tune ]
                  [--AFE_left_carrier ] [--AFE_left_carrier_deviation ]
@@ -30,7 +30,7 @@ options:
   --frequency, -f       RF sampling frequency in source file (default is 40MHz)
   --overwrite           Overwrite existing decode files.
   --threads, -t         number of CPU threads to use
-  --dsp-backend {exact,ipp-fast}
+  --dsp-backend {exact,ipp-fast,cuda-fast}
                         DSP implementation to use (default: exact)
   --preview             Preview the audio through your speakers as it decodes. Uses preview quality (faster and noisier)
   --gui                 Opens hifi-decode GUI graphical user interface

@@ -45,6 +45,7 @@ internal sealed class ChromaSuperGaussianFinalFilter : IDisposable
         {
             DspBackend.Exact => null,
             DspBackend.IppFast => new IppRealDft32(_paddedLength),
+            DspBackend.CudaFast => null,
             _ => throw new ArgumentOutOfRangeException(
                 nameof(dspBackend),
                 dspBackend,

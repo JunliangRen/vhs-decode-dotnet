@@ -59,6 +59,20 @@ public sealed class PreviewServerTests
         Assert.True(laserDiscTemplate.Get<bool>("noefm"));
     }
 
+    [Fact(DisplayName = "Preview template rejects the independent CUDA-fast full path")]
+    public void PreviewTemplateRejectsCudaFastFullPath()
+    {
+        ParsedCommand parsed = new CommandLineParser().Parse(
+            CliSpecs.Vhs,
+            ["--preview-server", "--dsp-backend", "cuda-fast", "capture.ldf"]);
+
+        NotSupportedException exception = Assert.Throws<NotSupportedException>(
+            () => PreviewDecodeCommandFactory.CreateFastTemplate(parsed));
+
+        Assert.Contains("not routed through preview mode", exception.Message, StringComparison.Ordinal);
+        Assert.Contains("no preview or CPU backend fallback", exception.Message, StringComparison.Ordinal);
+    }
+
     [Fact(DisplayName = "Preview template halves only standard 40 MSPS VHS RF")]
     public void PreviewTemplateHalvesOnlyStandardFortyMspsVhsRf()
     {

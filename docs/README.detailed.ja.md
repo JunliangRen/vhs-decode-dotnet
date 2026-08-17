@@ -4,14 +4,14 @@
 
 [English](README.detailed.md) | [简体中文](README.detailed.zh-CN.md) | **[日本語](README.detailed.ja.md)**
 
-<!-- README_SYNC: 2026-08-16.01 -->
+<!-- README_SYNC: 2026-08-17.02 -->
 
 [`oyvindln/vhs-decode`](https://github.com/oyvindln/vhs-decode) の
 デコード関連部分を .NET 11 で再実装するプロジェクトです。現在は release
 `v0.4.0`、commit `43155200da87c0d49eb37d8ec09b1372075ee8e4`
 を互換性の基準としています。
 
-現在の .NET port release は `v0.4.0-2.2.0`（application version `2.2.0`）です。
+現在の .NET port release は `v0.4.0-2.3.0`（application version `2.3.0`）です。
 
 > [!IMPORTANT]
 > この互換移植は現在も開発中です。トップレベルのデコード経路は実装済みで
@@ -196,7 +196,7 @@ extended oracle を使用しました。この release gate では IPP を除外
 
 性能改善は実装の一部ですが、決定的な出力と release 互換性を最優先します。
 
-DSP backend は `--dsp-backend exact|ipp-fast` で明示的に選択します。この
+DSP backend は `--dsp-backend exact|ipp-fast|cuda-fast` で明示的に選択します。この
 parameter はこの .NET port の experimental extension であり、upstream
 `oyvindln/vhs-decode` v0.4.0 CLI には含まれません。`exact` が default で、
 既存の managed 互換経路を維持し、Intel IPP の probe や load は行いません。
@@ -211,6 +211,127 @@ color-under Super-Gaussian DFT、および LaserDisc video、EFM、analog audio 
 power-of-two double-precision full-complex FFT stage を含みます。LD path は native
 bridge ABI v1.3 を使用します。CVBS と HiFi は未対応の `ipp-fast` を明示的に拒否し、
 Exact kernel を実行した結果を誤って benchmark として扱うことはありません。
+
+`cuda-fast` は独立した Windows x64 NVIDIA CUDA 13 full-signal VHS backend です。
+`vhsdecode_cuda_fast.dll` と cuFFT を load し、cuVHS commit
+`c55e72073f44b27e8839efb842e4345af39887f7` に固定した RF demodulation、
+sync/line location、time-base correction、color-under、dropout graph を実行します。
+CPU code は input callback、少量の control/metadata work、output publication を担当しますが、
+Exact または IPP field engine は実行しません。RF sample、cuFFT R2C/C2C/C2R storage、
+demodulation、geometry、colour、dropout image data は FP32 です。直接 FP32 で係数を
+構築すると不安定だったため、1 回だけ行う high-order host filter design のみ double
+precision を保ち、完成した係数を GPU upload 前に明示的に量子化します。native bridge
+ABI v4 は raw signed-16、eligible libsndfile、FFmpeg PCM16 input で direct PCM16 callback
+を優先します。FP32 の半分の transfer size で upload し、deterministic GPU kernel が
+FP32 で正確に表現できる各 signed-16 value を FP32 signal plane へ変換します。managed
+FP32 callback は fallback として維持します。bridge は persistent chroma workspace、
+自動的に 16 field に制限する batch、parallel deterministic sync-pulse scan も使用します。
+ABI v4 は要求 output-field limit と scan 可能な RF 量を分離します。そのため native
+pipeline は weak/no-signal leader を通過し、horizontal cadence が連続して安定してから
+fallback field order を開始し、invalid field と先頭の不完全な second field を捨て、
+要求された完全な alternating field 数で正確に停止します。cuVHS の optional host-side
+K4 source reconstruction は compile 時に無効化され、この route は常に GPU source を
+使います。未対応 option/profile や CUDA component 不足は明示的に失敗し、別 DSP
+backend へ fallback しません。初期 contract は Windows x64 の native-rate 40 MSPS
+PAL/NTSC VHS SP/LP/EP のみです。CVBS、LaserDisc、HiFi、S-VHS、その他の video
+system、packed `.lds`、preview-server routing、明示的な compatibility profile
+selection は近似処理しません。
+
+この backend は独自の numerical contract を持ち、`v0.4.0` または `current` の hash
+compatibility を主張しません。local RTX 4070 12 GiB development machine の current
+same-session interleaved comparison では、同じ fixed private 40 MHz real PAL `.ldf`
+request `--start_fileloc 320000000 --length 500` を使いました。CUDA は
+15.605154/15.747770 秒、`ipp-fast --threads 20` は 14.108349/14.064289 秒でした。
+median は 15.676462 対 14.086319 秒（31.8950 対 35.4954 output fps）で、この限定比較
+では CUDA の wall time が 11.29% 長く、throughput は IPP の 0.8986x です。両 path
+とも同じ
+14,745.6/59,417.6 black/white metadata level を持つ、exactly 1,000 個の ordered
+alternating 1135x313 field を出力しました。最初の synchronized `fileLoc` は
+322,212,917 と 320,563,200 です。独立した sync/TBC algorithm が異なる field boundary
+を選ぶためです。これは same-request performance comparison であり、output equality の
+主張でも、tape、system、driver、NVIDIA model をまたぐ一般的な speed guarantee でも
+ありません。
+
+別の startup-inclusive A-B-B-A comparison は直前の CUDA executable を baseline にし、
+old build 22.083587/21.753076 秒、final build 16.355230/15.758866 秒を測定しました。
+median は 21.918332/16.057048 秒で、wall time は 26.74% 減、throughput は 36.50% 増、
+output speed は 22.812 から 31.139 fps へ上昇しました。2 つの measurement sequence 間で
+machine 全体の throughput が変化したため、この数値は CPU comparison と分けて記録します。
+
+process resource sampling 付きの 2 回目の A-B-B-A でも同じ方向を確認しました。old/new
+wall median は 20.765240/15.313171 秒（26.26% 減、throughput 35.60% 増）、CPU median
+は 36.3125/33.0000 秒（9.12% 減）でした。median peak working set は 246.34 から
+256.38 MiB へ増加しました。old control 自体の peak private bytes は
+4,449.98-4,586.33 MiB と noisy で、descriptive median は 4,518.16 から 4,616.46 MiB、
+final run 2 回は 4,617.25/4,615.67 MiB でした。retained prefetch は PCM16 batch 1 個に
+bounded です。これは measured memory tradeoff であり、unbounded lookahead queue では
+ありません。
+
+final fixed window を使った CUDA run 2 回の luma/chroma/JSON は byte-identical で、
+それぞれ 40,705 dropout segment を持ちます。SHA-256 は
+`647967E99822994A69DBDEB0E0B5824755FE204F650277106D2B4F234109C456`、
+`CBC40C00452C3AFA8CE15CAEB97DBDD009ED2FA7803AAA3D51813B2F498E6E99`、
+`745F4F570D8EB2D480FBB38BFD4513EA17F3D28583553BB69CF120EE7D27DB3D` です。
+global `fileLoc` は 322,212,917 から 1,121,408,422 まで strictly increasing でした。
+これは 1 台の GPU/driver 上の repeatability evidence で、cross-device determinism を
+保証しません。
+
+80-frame Exact/CUDA comparison は同じ fixed RF request を使いました。CUDA が約 1 frame
+遅い boundary を選んだため、lossless FFV1 export は Exact の最初の frame を除いて
+79 pair を alignment しました。default の export-side dropout correction 使用時の
+SSIM Y/U/V/All は 0.954905/0.988109/0.991285/0.972301、PSNR Y/U/V/average は
+33.196867/41.243137/43.586266/35.699053 dB でした。export-side correction なしでは
+SSIM は 0.949393/0.987529/0.990573/0.969222、PSNR は
+31.286140/41.027876/43.313528/33.944493 dB でした。alignment した全 158 field の
+active-picture dropout mask は Exact に対し precision 97.512%、recall 99.818%、IoU
+97.339% で、whole-field IoU は 94.186% でした。contact sheet の manual review でも
+scene content、colour、motion は非常に近く、従来の重大な diagonal/rainbow phase
+failure は解消しました。sync、TBC geometry、pixel には差が残るため、これは
+viewing-quality gate であり Exact compatibility ではありません。refined K4 horizontal-
+sync stage を bypass する低コスト実験は luma SSIM を 0.949393 から 0.942450 に下げた
+ため、採用しませんでした。
+
+pinned CUDA graph には build 時に source-match guard 付き patch を適用し、upstream の
+ordering/lifecycle hazard を除去します。FM analytic difference は別 destination を使い、
+chroma burst accumulation は固定順序で reduction し、writer parity は decode 間で漏れず
+各 pipeline instance に属します。upstream の in-decode dropout concealment は、この
+project で保守する Exact-style metadata detector に置き換えます。dynamic per-field source
+offset と field mean を使い、0.18 threshold、1.25 hysteresis、30-sample merge gap、strict
+greater-than-10 minimum run を適用し、PAL parity geometry を Exact と同様に map します。
+decoder は metadata のみを記録し、optional correction は export-side operation のままです。
+GPU は ballot operation で 32-sample warp mask を parallel classification し、その後 serial
+Exact state machine が transition bit のみを消費します。threshold precedence、merge
+distance、minimum length、sample position は維持されます。real 500-frame window の独立
+A-B-B-A comparison は median wall time を 13.64% 短縮し、throughput を 15.79% 増加させ、
+16-field dropout stage 自体は約 43.22 から 7.41 ms へ低下しました。この変更では
+luma/chroma/JSON が byte-identical のままです。
+
+burst-source DC mean も deterministic fixed-tree FP64 reduction の後に sample-parallel roll
+を行います。旧 serial accumulation order から raw CUDA chroma bit は意図的に変わりますが、
+final run 2 回は相互に byte-identical で、old/new lossless rendered output の SSIM は
+1.000000、Exact-aligned の表示精度で各 SSIM 値は不変でした。average PSNR は
+35.699052 から 35.699053 dB です。bounded pageable host buffer は次の PCM16 RF batch
+1 個だけを prefetch し、current GPU/output tail と overlap します。最初の read も
+CUDA/cuFFT initialization と overlap します。internal A-B-B-A control は 500-frame median
+を 11.649328 から 9.175967 秒へ短縮しました（wall time 21.24% 減、throughput 26.96%
+増）。final file は同一です。JSON recovery checkpoint は約 1 秒に 1 回までに制限し、
+final publication は常に complete document を書きます。paired 500-frame median は 2.96%
+改善し、crash snapshot が約 1 秒 stale になる可能性があります。luma/chroma の 4 MiB
+stdio buffer はさらに median wall time を 1.68% 改善しました。shared burst FFT storage
+は 0.48% slower、16M-sample managed read block は noise range、page-locked input は
+0.84% slower、asynchronous dropout allocation は約 12% slower だったため採用しません。
+
+parallel pulse kernel の real-GPU test は boundary、NaN、variable offset、overflow semantics
+を含みます。direct GPU dropout test は dynamic offset、field parity、hysteresis、merge、
+minimum-run semantics を含みます。full in-process synthetic NTSC pipeline test は同じ
+48-field RF source を FP32 で 1 回、PCM16 で 2 回 decode し、45 個すべての 910x263
+output field について luma/chroma/JSON の byte equality を要求します。alternating field
+parity、strictly increasing `fileLoc`、parity と整合する `1,4,3,2` NTSC `fieldPhaseID` の
+cyclic rotation も検証します。native build は normal 16-field batch と forced five-field
+batch の両方でこの contract を実行し、phase/head-track state を non-aligned batch boundary
+の先まで運びます。NTSC evidence は geometry、lifecycle、determinism のみを対象とし、
+real NTSC VHS capture は local にないため colour/quality certification は未実施です。
+これらの結果も GPU/driver 間の universal determinism を保証しません。
 
 `ipp-fast` は数値的に近い performance mode であり、byte-compatible mode では
 ありません。FFT と vector math の評価差は floating-point bit を変え、threshold
@@ -3878,23 +3999,36 @@ suite は全 1,448 test に成功しました。
 
 ```powershell
 .\tools\build-ipp-native.ps1
+.\tools\build-cuda-fast-native.ps1
 dotnet restore VHSDecodeDotNet.slnx
 dotnet build VHSDecodeDotNet.slnx -c Release --no-restore
-dotnet test --solution VHSDecodeDotNet.slnx -c Release --no-build --no-restore --minimum-expected-tests 1512
+dotnet test --solution VHSDecodeDotNet.slnx -c Release --no-build --no-restore --minimum-expected-tests 1550
 dotnet test --project tests\VHSDecode.Tests\VHSDecode.Tests.csproj -c Release --no-build --no-restore --coverage --coverage-output coverage.cobertura.xml --coverage-output-format cobertura
 ```
 
 最初の command は optional `ipp-fast` native artifact を含めるためのものです。
-Exact-only build では省略できます。この script は `vswhere` で MSBuild を検出し、
+この script は `vswhere` で MSBuild を検出し、
 固定した `intelipp.static.win-x64` NuGet package を restore して sequential static
 bridge を build します。外部 IPP、OpenMP、oneTBB、Visual C++ runtime DLL 依存が
 あれば失敗します。development/deployment PC のどちらにも Intel oneAPI の install
 は不要です。binary-only single-file release は `vhsdecode_ipp.dll` と必要な
 third-party notice を埋め込み、license sidecar file は追加しません。
 
+2 番目の command は optional `cuda-fast` bridge を build します。CUDA 13 Toolkit、
+NVIDIA GPU/driver、CMake/Ninja、MSVC 14.44 以前の host toolset が必要です。local
+checkout を指定した場合、script は clean な pinned cuVHS commit であることを確認し、
+bridge を compile/smoke-test してから `vhsdecode_cuda_fast.dll`、cuFFT runtime、
+third-party notice を stage します。不要な native backend の command は省略でき、
+Exact-only build では両方を省略できます。bridge は MSVC runtime と CUDA runtime を
+static link し、dependency audit は意図しない dynamic CRT/cudart dependency を拒否します。
+deployment には staged cuFFT sidecar と compatible NVIDIA driver が引き続き必要です。
+default command はすべての native GPU test を実行します。GPU のない CI では
+`-SkipRuntimeTests` を指定できます。この mode でも bridge の compile、audit、stage は
+行いますが、GPU runtime validation にはなりません。
+
 現在の正式な Release build は warning 0、error 0 です。xUnit v3 project は
 `dotnet test` と Visual Studio Test Explorer の両方で個別に検出できる
-**1,500** tests を公開します。
+**1,550** tests を公開します。
 
 <!-- SECTION: usage -->
 
@@ -3915,10 +4049,11 @@ Release build 後は facade dispatch または apphost alias を使用できま�
 src\VHSDecode.Cli\bin\Release\net11.0\decode.exe vhs [upstream options] input output
 src\VHSDecode.Cli\bin\Release\net11.0\vhs-decode.exe [upstream options] input output
 decode.exe vhs --dsp-backend ipp-fast [upstream options] input output
+decode.exe vhs --dsp-backend cuda-fast --pal [supported options] input.ldf output
 ```
 
-最後の形式は approximate output を許容できる場合に optional fast backend を
-明示的に選択します。
+最後の 2 形式は独立した numerical contract の optional backend を明示的に選択します。
+`cuda-fast` は文書化した subset だけを受け付け、未対応 option を無視せず失敗します。
 
 対応する `cvbs`、`ld`、`hifi` command と上流 v0.4.0 の引数を使用します。
 正確な引数一覧は `--help` で確認してください。

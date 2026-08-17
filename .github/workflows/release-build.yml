@@ -19,7 +19,7 @@ jobs:
   build:
     name: Build and test Windows release
     runs-on: windows-latest
-    timeout-minutes: 30
+    timeout-minutes: 60
 
     steps:
       - name: Check out repository
@@ -43,6 +43,13 @@ jobs:
             throw "Expected .NET SDK $expected, but dotnet resolved $actual."
           }
           dotnet --info
+
+      - name: Install pinned CUDA 13 toolkit
+        uses: Jimver/cuda-toolkit@v0.2.36
+        with:
+          cuda: '13.0.3'
+          method: network
+          sub-packages: '["nvcc", "cudart", "cufft", "cufft_dev", "visual_studio_integration"]'
 
       - name: Install pinned FFmpeg test dependency
         shell: pwsh
@@ -134,6 +141,25 @@ jobs:
           }
           Get-Item -LiteralPath $artifact
 
+      - name: Build and verify CUDA-fast native bridge
+        shell: pwsh
+        run: ./tools/build-cuda-fast-native.ps1 -SkipRuntimeTests
+
+      - name: Verify CUDA-fast artifacts
+        shell: pwsh
+        run: |
+          $artifacts = @(
+            'artifacts/native/Release/win-x64/vhsdecode_cuda_fast.dll',
+            'artifacts/native/Release/win-x64/cufft64_12.dll',
+            'artifacts/native/Release/win-x64/THIRD-PARTY-NOTICES-CUDA-FAST.md'
+          )
+          foreach ($artifact in $artifacts) {
+            if (-not (Test-Path -LiteralPath $artifact -PathType Leaf)) {
+              throw "Missing CUDA-fast artifact: $artifact"
+            }
+            Get-Item -LiteralPath $artifact
+          }
+
       - name: Restore dependencies
         run: dotnet restore VHSDecodeDotNet.slnx
 
@@ -141,7 +167,7 @@ jobs:
         run: dotnet build VHSDecodeDotNet.slnx --configuration Release --no-restore
 
       - name: Run tests
-        run: dotnet test --solution VHSDecodeDotNet.slnx --configuration Release --no-build --no-restore --minimum-expected-tests 1512
+        run: dotnet test --solution VHSDecodeDotNet.slnx --configuration Release --no-build --no-restore --minimum-expected-tests 1550
 
       - name: Run NumPy reduction scalar fallback tests
         env:

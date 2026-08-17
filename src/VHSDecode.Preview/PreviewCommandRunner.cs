@@ -74,6 +74,7 @@ public sealed class PreviewCommandRunner
         catch (Exception ex) when (ex is ArgumentException
             or IOException
             or InvalidOperationException
+            or NotSupportedException
             or UnauthorizedAccessException)
         {
             error.WriteLine($"Preview server failed: {ex.Message}");
