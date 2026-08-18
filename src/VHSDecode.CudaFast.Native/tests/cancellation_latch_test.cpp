@@ -74,6 +74,33 @@ int main() {
         return 3;
     }
 
+    // Model cancellation arriving inside a managed RF read: the callback's
+    // entry poll saw false, the read then returned zero after observing its
+    // token, and the bridge must refresh that token after pipeline teardown
+    // instead of reporting the short read as a decode error.
+    CancellationLatch read_latch;
+    std::atomic_bool cancelled_during_read{false};
+    if (read_latch.poll([&]() {
+        return cancelled_during_read.load(std::memory_order_acquire);
+    })) {
+        std::fprintf(stderr, "The late-read test started in a cancelled state.\n");
+        return 4;
+    }
+    const size_t samples_read = [&]() {
+        cancelled_during_read.store(true, std::memory_order_release);
+        return size_t{0};
+    }();
+    if (samples_read != 0 || read_latch.requested()) {
+        std::fprintf(stderr, "The late-read test did not reproduce an unlatched short read.\n");
+        return 5;
+    }
+    if (!read_latch.poll([&]() {
+        return cancelled_during_read.load(std::memory_order_acquire);
+    })) {
+        std::fprintf(stderr, "Post-pipeline cancellation refresh missed a token set during read.\n");
+        return 6;
+    }
+
     std::printf("Parallel preview/prefetch cancellation latch test passed.\n");
     return 0;
 }

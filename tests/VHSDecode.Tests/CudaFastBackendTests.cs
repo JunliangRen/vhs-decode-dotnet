@@ -112,6 +112,8 @@ public sealed class CudaFastBackendTests
     {
         string cmake = ReadNativeBuildDefinition();
         string normalizedCmake = cmake.Replace("\r\n", "\n", StringComparison.Ordinal);
+        string bridge = ReadNativeSource("src", "vhsdecode_cuda_fast.cpp");
+        string normalizedBridge = bridge.Replace("\r\n", "\n", StringComparison.Ordinal);
         string cancellation = ReadNativeSource("src", "cancellation_latch.h");
         string cancellationTest = ReadNativeSource("tests", "cancellation_latch_test.cpp");
         string decimator = ReadNativeSource("src", "cuda_fast_decimator.cu");
@@ -139,6 +141,25 @@ public sealed class CudaFastBackendTests
         Assert.Contains(
             "Parallel preview/prefetch cancellation latch test passed.",
             cancellationTest,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "Post-pipeline cancellation refresh missed a token set during read.",
+            cancellationTest,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "writer.close();\n\n        // A managed read can observe cancellation after its entry poll and\n"
+                + "        // return a short read. Refresh the external token after the pipeline\n"
+                + "        // has joined its prefetch worker before classifying that failure.\n"
+                + "        if (cancellation_requested(callback_context))",
+            normalizedBridge,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "std::chrono::duration<double>(completed - started).count();\n\n"
+                + "        // A managed read can observe cancellation after its entry poll and\n"
+                + "        // return a short read. Refresh the external token after the pipeline\n"
+                + "        // has joined its prefetch worker before classifying that failure.\n"
+                + "        if (preview_cancellation_requested(callback_context))",
+            normalizedBridge,
             StringComparison.Ordinal);
         Assert.Contains(
             "vhsdecode_cuda_fast_cancellation_test",

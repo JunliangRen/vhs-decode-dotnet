@@ -328,7 +328,10 @@ vhsdecode_cuda_fast_run(
         const auto completed = std::chrono::steady_clock::now();
         writer.close();
 
-        if (callback_context.cancellation.requested()) {
+        // A managed read can observe cancellation after its entry poll and
+        // return a short read. Refresh the external token after the pipeline
+        // has joined its prefetch worker before classifying that failure.
+        if (cancellation_requested(callback_context)) {
             return fail(
                 VHSDECODE_CUDA_FAST_STATUS_CANCELLED,
                 "CUDA-fast decode was cancelled.");
@@ -533,7 +536,10 @@ vhsdecode_cuda_fast_preview_decode_window(
         result->elapsed_seconds =
             std::chrono::duration<double>(completed - started).count();
 
-        if (callback_context.cancellation.requested()) {
+        // A managed read can observe cancellation after its entry poll and
+        // return a short read. Refresh the external token after the pipeline
+        // has joined its prefetch worker before classifying that failure.
+        if (preview_cancellation_requested(callback_context)) {
             return fail(
                 VHSDECODE_CUDA_FAST_STATUS_CANCELLED,
                 "CUDA-fast preview window was cancelled.");
