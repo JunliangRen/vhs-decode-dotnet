@@ -11,7 +11,7 @@
 release `v0.4.0` at commit
 `43155200da87c0d49eb37d8ec09b1372075ee8e4`.
 
-The current .NET port release is `v0.4.0-2.3.1` (application version `2.3.1`).
+The current .NET port release is `v0.4.0-2.4.0` (application version `2.4.0`).
 
 > [!IMPORTANT]
 > This is a work-in-progress compatibility port. The top-level decode paths are
@@ -224,13 +224,13 @@ not run the Exact or IPP field engine. RF samples, cuFFT R2C/C2C/C2R storage,
 demodulation, geometry, color, and dropout image data use FP32. Only the
 one-time high-order host filter design remains double precision because direct
 FP32 coefficient construction was unstable; its completed coefficients are
-explicitly quantized before GPU upload. Native bridge ABI v4 prefers direct
+explicitly quantized before GPU upload. Native bridge ABI v5 prefers direct
 PCM16 callbacks for raw signed-16, eligible libsndfile, and FFmpeg PCM16 input.
 Those samples upload at half the FP32 transfer size and a deterministic GPU
 kernel converts every exactly representable signed-16 value into the FP32
 signal plane; the managed FP32 callback remains as a fallback. The bridge also
 uses a persistent chroma workspace, an automatically bounded 16-field batch,
-and a parallel deterministic sync-pulse scan. ABI v4 carries the requested
+and a parallel deterministic sync-pulse scan. ABI v5 carries the requested
 output-field limit independently from the amount of RF available to scan. The
 native pipeline can therefore pass a weak/no-signal leader, requires stable
 horizontal cadence before seeding fallback field order, rejects invalid fields
@@ -238,10 +238,39 @@ and a leading second field, and stops after exactly the requested number of
 complete alternating fields. The optional cuVHS host-side K4 source
 reconstruction is compiled out so this route always uses the GPU source.
 Unsupported options, profiles, or missing CUDA components fail explicitly and
-never select another DSP backend. The initial contract is native-rate 40 MSPS
-PAL/NTSC VHS SP/LP/EP on Windows x64; CVBS, LaserDisc, HiFi, S-VHS, other video
-systems, packed `.lds`, preview-server routing, and explicit compatibility
-profile selection are not approximated.
+never select another DSP backend. The full-decode contract is native-rate
+40 MSPS PAL/NTSC VHS SP/LP/EP on Windows x64; CVBS, LaserDisc, HiFi, S-VHS,
+other video systems, packed `.lds`, and explicit compatibility profile
+selection are not approximated.
+
+Combining `--preview-server` with an explicit `--dsp-backend cuda-fast` selects
+the ABI v5 GPU preview route for native-rate 40 MSPS PAL/NTSC VHS. One native
+decode context persists across requested windows. A deterministic 15-tap CUDA
+FIR performs the anti-aliased 2:1 reduction to 20 MSPS before the persistent
+GPU sync, FM, time-base, chroma, and dropout graph. A CUDA output stage renders
+field-rate bob directly into NV12 device memory; NVENC registers that device
+pointer and emits H.264 without downloading full luma, chroma, or NV12 frames.
+Each bounded RF batch crosses once on upload; thereafter only small sync/field-order control
+metadata and compressed packets cross the host/device boundary. The compressed
+packets enter managed memory, and FFmpeg uses `-c:v copy` solely to form the
+HLS/fMP4 timeline. This explicit route requires NVENC and fails
+closed instead of probing QSV, AMF, libx264, IPP, or Exact. Normal decode/export
+sample-rate behavior is unchanged.
+
+On the local RTX 4070 and one real 631.452-second PAL 40 MSPS capture, the same
+current executable served steady windows W15/W25/W30/W35 in an average 1.142
+seconds with CUDA and 1.528 seconds with the default 20-thread IPP preview.
+That is 25.3% lower wall time and about 32.8% greater source-frame throughput
+(43.8 versus 33.0 fps). `decode.exe` process CPU averaged 0.914 versus 8.719
+seconds, but that CPU metric excludes each FFmpeg child. The first cold window
+favoured IPP, 2.153 versus 2.447 seconds, because the CUDA route allocates and
+plans persistent CUDA/cuFFT/NVENC state once. Both outputs were H.264 Main,
+768x576, progressive 50 fps with the expected PAL colour tags. CUDA begins
+about one output field earlier; after aligning that 20 ms offset, rendered
+SSIM Y/U/V/All was 0.907542/0.964438/0.972597/0.927867 and manual inspection
+retained the same scene, colour, and motion. This is preview-quality evidence,
+not Exact parity or a cross-GPU guarantee; real NTSC capture quality remains
+uncertified, although the synthetic NTSC native pipeline passes.
 
 Binary releases keep the approximately 1.2 MiB CUDA-fast bridge but no longer
 embed the 271 MiB `cufft64_12.dll`. The first explicit `cuda-fast` request
@@ -252,8 +281,9 @@ then downloads NVIDIA's pinned 12.0.0.15 Windows redistributable (202.2 MiB),
 validates the archive and extracted DLL against fixed SHA-256 values, and
 atomically installs it under
 `%LOCALAPPDATA%\vhs-decode-dotnet\cuda\cufft\12.0.0.15`. A cross-process lock
-prevents duplicate first-use downloads. Exact, IPP, and preview execution do
-not enter this resolver and never access the network. Offline deployments can
+prevents duplicate first-use downloads. Exact, IPP, and preview execution that
+does not explicitly select `cuda-fast` never enters this resolver or accesses
+the network. Offline deployments can
 set `VHSDECODE_CUDA_RUNTIME_PATH`; `VHSDECODE_CUDA_CACHE_PATH` changes the cache
 root, and `VHSDECODE_CUDA_AUTO_DOWNLOAD=0` disables downloading. A download or
 load failure remains explicit and never falls back to a CPU backend.
@@ -4324,7 +4354,7 @@ Requirements:
 .\tools\build-cuda-fast-native.ps1
 dotnet restore VHSDecodeDotNet.slnx
 dotnet build VHSDecodeDotNet.slnx -c Release --no-restore
-dotnet test --solution VHSDecodeDotNet.slnx -c Release --no-build --no-restore --minimum-expected-tests 1562
+dotnet test --solution VHSDecodeDotNet.slnx -c Release --no-build --no-restore --minimum-expected-tests 1569
 dotnet test --project tests\VHSDecode.Tests\VHSDecode.Tests.csproj -c Release --no-build --no-restore --coverage --coverage-output coverage.cobertura.xml --coverage-output-format cobertura
 ```
 
@@ -4354,7 +4384,7 @@ The default command runs every native GPU test. GPU-less CI may pass
 but is not GPU runtime validation.
 
 The current formal Release build has zero warnings and errors. The xUnit v3
-project exposes **1,562** independently discoverable tests to both
+project exposes **1,569** independently discoverable tests to both
 `dotnet test` and Visual Studio Test Explorer.
 
 <!-- SECTION: usage -->
@@ -4377,9 +4407,10 @@ src\VHSDecode.Cli\bin\Release\net11.0\decode.exe vhs [upstream options] input ou
 src\VHSDecode.Cli\bin\Release\net11.0\vhs-decode.exe [upstream options] input output
 decode.exe vhs --dsp-backend ipp-fast [upstream options] input output
 decode.exe vhs --dsp-backend cuda-fast --pal [supported options] input.ldf output
+decode.exe vhs --preview-server --dsp-backend cuda-fast --pal input.ldf
 ```
 
-The last two forms select optional independent numerical backends explicitly.
+The last three forms select optional independent numerical backends explicitly.
 `cuda-fast` accepts only its documented subset and fails instead of ignoring
 an unsupported option.
 

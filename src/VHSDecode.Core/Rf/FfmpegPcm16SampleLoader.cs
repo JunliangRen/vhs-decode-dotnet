@@ -97,6 +97,8 @@ public sealed class FfmpegPcm16SampleLoader : IRfSampleLoader, IDisposable
 
     public int SeekThreshold { get; }
 
+    internal bool FastInputSeek => _fastInputSeek;
+
     public double[]? Read(Stream stream, long sample, int readLength)
     {
         ObjectDisposedException.ThrowIf(_disposed, this);

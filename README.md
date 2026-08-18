@@ -9,7 +9,7 @@ A .NET 11 rewrite of the decode-facing parts of
 upstream release `v0.4.0` at commit
 `43155200da87c0d49eb37d8ec09b1372075ee8e4`.
 
-The current .NET port release is `v0.4.0-2.3.1` (application version `2.3.1`).
+The current .NET port release is `v0.4.0-2.4.0` (application version `2.4.0`).
 
 > [!IMPORTANT]
 > This remains a compatibility work in progress. The top-level decode paths are
@@ -40,7 +40,7 @@ evidence, and remaining gaps.
   EIAJ, and supported PAL/NTSC variants.
 - TBC utility tools, the double-click GUI, and developer plotting windows are
   intentionally out of scope.
-- The Visual Studio 2026 `.slnx` solution has **1,562** standard xUnit v3 tests
+- The Visual Studio 2026 `.slnx` solution has **1,569** standard xUnit v3 tests
   that are visible in Test Explorer and runnable with `dotnet test`.
 
 <!-- SECTION: start -->
@@ -99,6 +99,29 @@ lines. A matching
 FFmpeg build is required on `PATH`; `VHSDECODE_FFMPEG` and `VHSDECODE_FFPROBE`
 can select explicit binaries.
 
+Native-rate 40 MSPS PAL/NTSC VHS can instead select the independent GPU preview
+path explicitly:
+
+```powershell
+decode.exe vhs --preview-server --dsp-backend cuda-fast --pal input.ldf
+```
+
+This keeps one CUDA context across windows, performs the anti-aliased 40-to-20
+MSPS reduction, sync, FM/chroma/dropout processing, NV12 bob rendering, and
+NVENC H.264 encoding on the GPU. NVENC registers the CUDA device pointer
+directly. Each bounded RF batch is uploaded once, while full luma, chroma, and NV12 frames are
+never downloaded; only small sync/field-order control metadata and compressed
+H.264 packets cross the host/device boundary. FFmpeg only copy-muxes the H.264
+into HLS/fMP4. It requires a compatible NVIDIA GPU and never
+falls back to the CPU preview or another encoder. On the tested RTX 4070 and one
+real PAL capture, four steady two-second windows averaged 1.142 seconds versus
+1.528 seconds for the default 20-thread IPP preview: 25.3% less wall time and
+32.8% more source-frame throughput. The first cold CUDA window was slower
+(2.447 versus 2.153 seconds) because it creates persistent CUDA/cuFFT/NVENC
+state. The two previews were visually close; after accounting for a one-field
+timing offset, the rendered comparison measured SSIM 0.927867. These are
+capture- and hardware-specific preview results, not Exact-equivalence claims.
+
 <!-- SECTION: profiles -->
 
 ## Profiles and backends
@@ -135,7 +158,8 @@ searches for a compatible CUDA 13/cuFFT 12 installation. If none is available,
 it verifies the NVIDIA driver first, downloads the pinned 202.2 MiB NVIDIA
 redistributable, validates both the archive and DLL with SHA-256, and installs
 it once under `%LOCALAPPDATA%\vhs-decode-dotnet\cuda\cufft`. Exact, IPP, and
-preview runs never access the network. Set `VHSDECODE_CUDA_RUNTIME_PATH` for an
+preview runs that do not explicitly select `cuda-fast` never access the
+network. Set `VHSDECODE_CUDA_RUNTIME_PATH` for an
 offline/system runtime, `VHSDECODE_CUDA_CACHE_PATH` for a different cache root,
 or `VHSDECODE_CUDA_AUTO_DOWNLOAD=0` to disable automatic downloads.
 
@@ -265,7 +289,7 @@ The pinned SDK is .NET `11.0.100-preview.7.26381.103`.
 dotnet restore VHSDecodeDotNet.slnx
 dotnet build VHSDecodeDotNet.slnx -c Release --no-restore
 dotnet test --solution VHSDecodeDotNet.slnx -c Release `
-  --no-build --no-restore --minimum-expected-tests 1562
+  --no-build --no-restore --minimum-expected-tests 1569
 ```
 
 Open `VHSDecodeDotNet.slnx` in Visual Studio 2026 to build, debug, and run the

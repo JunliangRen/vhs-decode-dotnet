@@ -253,13 +253,21 @@ internal sealed class CudaFastDecodeRunner : ICudaFastDecodeRunner
     internal static bool TryGetInputSampleCount(string path, out long sampleCount)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(path);
-        if ((path.EndsWith(".ldf", StringComparison.OrdinalIgnoreCase)
-                || path.EndsWith(".flac", StringComparison.OrdinalIgnoreCase))
-            && RawFlacStreamInfo.TryRead(path, out RawFlacStreamInfo info)
-            && info.TotalSamples is > 0 and long totalSamples)
+        if (path.EndsWith(".ldf", StringComparison.OrdinalIgnoreCase)
+            || path.EndsWith(".flac", StringComparison.OrdinalIgnoreCase))
         {
-            sampleCount = totalSamples;
-            return true;
+            if (RawFlacFrameIndex.TryOpen(path, out RawFlacFrameIndex? index)
+                && index is not null)
+            {
+                sampleCount = index.TotalSamples;
+                return true;
+            }
+            if (RawFlacStreamInfo.TryRead(path, out RawFlacStreamInfo info)
+                && info.TotalSamples is > 0 and long headerTotalSamples)
+            {
+                sampleCount = headerTotalSamples;
+                return true;
+            }
         }
 
         int bytesPerSample = Path.GetExtension(path).ToLowerInvariant() switch
@@ -436,7 +444,9 @@ internal sealed class CudaFastDecodeRunner : ICudaFastDecodeRunner
         return checked((int)(40_000_000.0 / (framesPerSecond * 2.0)) + 1);
     }
 
-    private static IRfSampleLoader CreateInputLoader(string path)
+    internal static IRfSampleLoader CreateInputLoader(
+        string path,
+        bool fastContainerSeeking = false)
     {
         IRfSampleLoader loader = Path.GetExtension(path).ToLowerInvariant() switch
         {
@@ -445,7 +455,7 @@ internal sealed class CudaFastDecodeRunner : ICudaFastDecodeRunner
             _ => RfLoaderFactory.CreateNative(
                 path,
                 preferPyAvMappedRawFlacSeeking: false,
-                fastContainerSeeking: false,
+                fastContainerSeeking,
                 ignoreExtensionCase: true)
         };
         return loader is FfmpegPcm16SampleLoader ffmpeg
@@ -521,7 +531,7 @@ internal sealed class CudaFastDecodeRunner : ICudaFastDecodeRunner
         DecodeSessionLogWriter.Append(logPath, "INFO", message);
     }
 
-    private static CudaFastProfile ResolveProfile(string system)
+    internal static CudaFastProfile ResolveProfile(string system)
     {
         return FormatCatalog.NormalizeSystem(system) switch
         {
@@ -532,7 +542,7 @@ internal sealed class CudaFastDecodeRunner : ICudaFastDecodeRunner
         };
     }
 
-    private static CudaFastTapeSpeed ResolveTapeSpeed(string tapeSpeed)
+    internal static CudaFastTapeSpeed ResolveTapeSpeed(string tapeSpeed)
     {
         return FormatCatalog.NormalizeTapeSpeedName(tapeSpeed) switch
         {
@@ -608,7 +618,7 @@ internal sealed class CudaFastDecodeRunner : ICudaFastDecodeRunner
         int WrittenFields,
         TbcOutputPaths Paths);
 
-    private sealed class FfmpegPcm16InputAdapter(
+    internal sealed class FfmpegPcm16InputAdapter(
         FfmpegPcm16SampleLoader loader) : IInt16RfSampleLoader, IDisposable
     {
         private readonly FfmpegPcm16SampleLoader _loader = loader;
@@ -623,10 +633,12 @@ internal sealed class CudaFastDecodeRunner : ICudaFastDecodeRunner
             out int samplesRead)
             => _loader.TryReadInt16(stream, sample, destination, out samplesRead);
 
+        internal bool FastInputSeek => _loader.FastInputSeek;
+
         public void Dispose() => _loader.Dispose();
     }
 
-    private sealed class ManagedReadContext : IDisposable
+    internal sealed class ManagedReadContext : IDisposable
     {
         private readonly IRfSampleLoader _loader;
         private readonly FileStream _input;

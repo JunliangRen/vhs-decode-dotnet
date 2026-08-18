@@ -1,6 +1,7 @@
 [CmdletBinding()]
 param(
     [string]$CuVhsSourceDirectory,
+    [string]$NvCodecHeadersSourceDirectory,
     [string]$CudaToolkitDirectory,
     [switch]$SkipRuntimeTests
 )
@@ -15,11 +16,13 @@ $buildDirectory = Join-Path $repositoryRoot '.artifacts\cuda-fast-native'
 $artifactDirectory = Join-Path $repositoryRoot 'artifacts\native\Release\win-x64'
 $nativeName = 'vhsdecode_cuda_fast.dll'
 $smokeName = 'vhsdecode_cuda_fast_smoke.exe'
+$cancellationTestName = 'vhsdecode_cuda_fast_cancellation_test.exe'
 $syncPulseTestName = 'vhsdecode_cuda_fast_sync_pulses_test.exe'
 $dropoutTestName = 'vhsdecode_cuda_fast_dropout_test.exe'
 $syntheticNtscTestName = 'vhsdecode_cuda_fast_synthetic_ntsc_test.exe'
 $cuFftName = 'cufft64_12.dll'
 $pinnedCuVhsCommit = 'c55e72073f44b27e8839efb842e4345af39887f7'
+$pinnedNvCodecHeadersCommit = '1889e62e2d35ff7aa9baca2bceb14f053785e6f1'
 
 if (-not (Test-Path -LiteralPath (Join-Path $sourceDirectory 'CMakeLists.txt') -PathType Leaf)) {
     throw "CUDA-fast native project was not found: $sourceDirectory"
@@ -169,6 +172,29 @@ if (-not [string]::IsNullOrWhiteSpace($CuVhsSourceDirectory)) {
     $configureArguments += '-DVHSDECODE_CUVHS_SOURCE_DIR=' + (Quote-CmdArgument $CuVhsSourceDirectory)
 }
 
+if (-not [string]::IsNullOrWhiteSpace($NvCodecHeadersSourceDirectory)) {
+    $NvCodecHeadersSourceDirectory = [System.IO.Path]::GetFullPath($NvCodecHeadersSourceDirectory)
+    if (-not (Test-Path -LiteralPath (Join-Path $NvCodecHeadersSourceDirectory 'include\ffnvcodec\nvEncodeAPI.h') -PathType Leaf)) {
+        throw "-NvCodecHeadersSourceDirectory is not an nv-codec-headers source tree: $NvCodecHeadersSourceDirectory"
+    }
+
+    $gitCommand = Get-Command git.exe -ErrorAction SilentlyContinue
+    if ($null -eq $gitCommand) {
+        throw 'git.exe is required to validate a local nv-codec-headers source checkout.'
+    }
+    $safeDirectory = 'safe.directory=' + $NvCodecHeadersSourceDirectory.Replace('\', '/')
+    [string]$localCommit = (& $gitCommand.Source -c $safeDirectory -C $NvCodecHeadersSourceDirectory rev-parse HEAD).Trim()
+    if ($LASTEXITCODE -ne 0 -or $localCommit -ne $pinnedNvCodecHeadersCommit) {
+        throw "Local nv-codec-headers checkout must be pinned to $pinnedNvCodecHeadersCommit; found '$localCommit'."
+    }
+    & $gitCommand.Source -c $safeDirectory -C $NvCodecHeadersSourceDirectory diff --quiet --
+    if ($LASTEXITCODE -ne 0) {
+        throw 'Local nv-codec-headers checkout has tracked modifications; use the pristine pinned source.'
+    }
+
+    $configureArguments += '-DVHSDECODE_NV_CODEC_HEADERS_SOURCE_DIR=' + (Quote-CmdArgument $NvCodecHeadersSourceDirectory)
+}
+
 $configureCommand = (Quote-CmdArgument $vsDevCmdPath) + " -arch=x64 -vcvars_ver=$hostToolsetSelector && " +
     (Quote-CmdArgument $cmakePath) + ' ' + ($configureArguments -join ' ')
 Write-Host "Configuring CUDA-fast with CUDA $CudaToolkitDirectory and MSVC $hostToolsetVersion"
@@ -187,11 +213,13 @@ if ($LASTEXITCODE -ne 0) {
 
 $nativeOutputPath = Join-Path $buildDirectoryFullPath $nativeName
 $smokeOutputPath = Join-Path $buildDirectoryFullPath $smokeName
+$cancellationTestOutputPath = Join-Path $buildDirectoryFullPath $cancellationTestName
 $syncPulseTestOutputPath = Join-Path $buildDirectoryFullPath $syncPulseTestName
 $dropoutTestOutputPath = Join-Path $buildDirectoryFullPath $dropoutTestName
 $syntheticNtscTestOutputPath = Join-Path $buildDirectoryFullPath $syntheticNtscTestName
 if (-not (Test-Path -LiteralPath $nativeOutputPath -PathType Leaf) -or
     -not (Test-Path -LiteralPath $smokeOutputPath -PathType Leaf) -or
+    -not (Test-Path -LiteralPath $cancellationTestOutputPath -PathType Leaf) -or
     -not (Test-Path -LiteralPath $syncPulseTestOutputPath -PathType Leaf) -or
     -not (Test-Path -LiteralPath $dropoutTestOutputPath -PathType Leaf) -or
     -not (Test-Path -LiteralPath $syntheticNtscTestOutputPath -PathType Leaf)) {
@@ -225,6 +253,12 @@ if ($dependencyNames -notcontains $cuFftName.ToUpperInvariant()) {
 )
 if ($forbiddenDependencies.Count -gt 0) {
     throw "The CUDA-fast bridge has unstaged CUDA Runtime or Visual C++ runtime DLL dependencies: $($forbiddenDependencies -join ', ')"
+}
+
+Write-Host "Running $cancellationTestOutputPath"
+& $cancellationTestOutputPath
+if ($LASTEXITCODE -ne 0) {
+    throw "CUDA-fast parallel cancellation test failed with exit code $LASTEXITCODE."
 }
 
 Copy-Item -LiteralPath $cuFftPath -Destination (Join-Path $buildDirectoryFullPath $cuFftName) -Force

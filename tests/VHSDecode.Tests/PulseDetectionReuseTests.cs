@@ -76,6 +76,13 @@ public sealed class PulseDetectionReuseTests
         Assert.Equal(expectedClassified, classified);
         Assert.Equal(expectedRefined, refined);
 
+        // Exercise enough calls for tiered PGO to promote the interface-backed
+        // array enumeration before measuring the steady-state allocation bound.
+        for (int iteration = 0; iteration < 64; iteration++)
+        {
+            analyzer.ClassifyPulses(pulses, timing, classified);
+        }
+
         long classificationStart = GC.GetAllocatedBytesForCurrentThread();
         for (int iteration = 0; iteration < 32; iteration++)
         {

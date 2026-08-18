@@ -10,7 +10,7 @@
 中解码相关部分的 .NET 11 重写，当前以 release `v0.4.0`、commit
 `43155200da87c0d49eb37d8ec09b1372075ee8e4` 为兼容基线。
 
-当前 .NET 移植版发布为 `v0.4.0-2.3.1`（应用版本 `2.3.1`）。
+当前 .NET 移植版发布为 `v0.4.0-2.4.0`（应用版本 `2.4.0`）。
 
 > [!IMPORTANT]
 > 这是仍在进行中的兼容性移植。顶层解码路径已经实现并经过大量测试，
@@ -201,18 +201,38 @@ color-under 和 dropout 图。CPU 仍负责输入回调、少量控制/元数据
 但不会运行 Exact 或 IPP 场解码引擎。RF 样本、cuFFT R2C/C2C/C2R 存储、解调、
 几何、色彩以及 dropout 图像数据均使用 FP32。只有一次性的高阶 host 滤波器设计
 保留 double precision，因为直接用 FP32 构造系数会数值不稳定；完成后的系数会在
-上传 GPU 前显式量化。原生桥接 ABI v4 会优先让 raw signed-16、符合条件的 libsndfile
+上传 GPU 前显式量化。原生桥接 ABI v5 会优先让 raw signed-16、符合条件的 libsndfile
 以及 FFmpeg PCM16 输入使用直接 PCM16 回调；上传量只有 FP32 的一半，随后由确定性的
 GPU 内核把每个可在 FP32 中精确表示的 signed-16 值转换进 FP32 信号面，并保留托管
 FP32 回调作为回退。桥接还采用持久色度工作区、自动限制为 16 场的批次，以及并行且
-确定性的同步脉冲扫描。ABI v4 将请求的输出场数上限与可供扫描的 RF 长度分开，因此原生
+确定性的同步脉冲扫描。ABI v5 将请求的输出场数上限与可供扫描的 RF 长度分开，因此原生
 管线可越过弱信号或无信号片头，仅在水平同步节奏连续稳定后建立备用场序，丢弃无效场和
 开头不完整的第二场，并在恰好输出请求数量的完整交替场后停止。cuVHS 可选的 host-side
 K4 source reconstruction 已在编译期关闭，因此该路径始终使用 GPU source。不支持的
-参数、profile 或缺失的 CUDA 组件都会明确失败，绝不会切换到其他 DSP 后端。首版契约
-仅为 Windows x64 上原生采样率 40 MSPS 的 PAL/NTSC VHS SP/LP/EP；CVBS、LaserDisc、
-HiFi、S-VHS、其他制式、packed `.lds`、preview-server 路由以及显式兼容 profile
-都不会被近似处理。
+参数、profile 或缺失的 CUDA 组件都会明确失败，绝不会切换到其他 DSP 后端。完整解码
+契约仅为 Windows x64 上原生采样率 40 MSPS 的 PAL/NTSC VHS SP/LP/EP；CVBS、
+LaserDisc、HiFi、S-VHS、其他制式、packed `.lds` 以及显式兼容 profile 都不会被近似处理。
+
+将 `--preview-server` 与显式 `--dsp-backend cuda-fast` 组合，会为原生 40 MSPS
+PAL/NTSC VHS 选择 ABI v5 GPU 预览路径。一个原生解码上下文会跨请求窗口持久复用；
+确定性的 15-tap CUDA FIR 先完成带抗混叠的 2:1 降采样至 20 MSPS，再进入持久 GPU
+同步、FM、时基、色度和 dropout 图。CUDA 输出阶段直接在 NV12 显存中按场率执行 bob；
+NVENC 注册该 device pointer 并输出 H.264，不会下载整帧亮度、色度或 NV12。每个有界
+RF 批次只上传一次；此后跨越主机/显存边界的只有少量同步/场序控制元数据和压缩 packet。压缩 packet
+进入托管内存，FFmpeg 仅使用 `-c:v copy` 组成 HLS/fMP4 时间轴。这条显式路径
+要求 NVENC，失败时不会尝试 QSV、AMF、libx264、IPP 或 Exact。普通解码/导出的采样率
+行为保持不变。
+
+在本机 RTX 4070 和一份真实的 631.452 秒 PAL 40 MSPS 采集上，同一当前版本的
+W15/W25/W30/W35 稳态窗口中，CUDA 平均 1.142 秒，默认 20-thread IPP 预览平均
+1.528 秒，即墙钟降低 25.3%，源帧吞吐约提高 32.8%（43.8 对 33.0 fps）。
+`decode.exe` 进程 CPU 时间平均为 0.914 对 8.719 秒，但该指标不含各自的 FFmpeg
+子进程。首个冷启动窗口因 CUDA 一次性创建持久 CUDA/cuFFT/NVENC 状态而由 IPP 胜出：
+2.153 对 2.447 秒。两边输出均为 H.264 Main、768x576、逐行 50 fps，并带预期 PAL
+色彩标记。CUDA 起点约早一输出场；对齐这 20 ms 后，渲染 SSIM Y/U/V/All 为
+0.907542/0.964438/0.972597/0.927867，人工检查保留相同场景、色彩和运动。这是预览
+画质证据，不代表 Exact 一致或跨 GPU 保证；虽然合成 NTSC 原生管线已通过，真实 NTSC
+采集画质仍未认证。
 
 二进制发布仍包含约 1.2 MiB 的 CUDA-fast 桥接，但不再内嵌 271 MiB 的
 `cufft64_12.dll`。只有首次显式选择 `cuda-fast` 时，程序才会依次检查指定的 runtime
@@ -221,8 +241,8 @@ HiFi、S-VHS、其他制式、packed `.lds`、preview-server 路由以及显式�
 12.0.0.15 的 Windows 可再分发包（202.2 MiB），对压缩包和解出的 DLL 分别执行固定
 SHA-256 校验，并原子安装到
 `%LOCALAPPDATA%\vhs-decode-dotnet\cuda\cufft\12.0.0.15`。跨进程文件锁保证多个解码
-进程首次启动时只下载一次。Exact、IPP 和 preview 路径不会进入此解析器，也不会访问
-网络。离线部署可设置 `VHSDECODE_CUDA_RUNTIME_PATH`；
+进程首次启动时只下载一次。Exact、IPP，以及未显式选择 `cuda-fast` 的 preview 路径
+不会进入此解析器，也不会访问网络。离线部署可设置 `VHSDECODE_CUDA_RUNTIME_PATH`；
 `VHSDECODE_CUDA_CACHE_PATH` 可更改缓存根目录，
 `VHSDECODE_CUDA_AUTO_DOWNLOAD=0` 可禁止自动下载。下载或加载失败会明确报错，绝不会
 静默回退 CPU 后端。
@@ -3374,7 +3394,7 @@ destination API，把最终 burst SOS 写回这块独占 buffer，从而在该 A
 .\tools\build-cuda-fast-native.ps1
 dotnet restore VHSDecodeDotNet.slnx
 dotnet build VHSDecodeDotNet.slnx -c Release --no-restore
-dotnet test --solution VHSDecodeDotNet.slnx -c Release --no-build --no-restore --minimum-expected-tests 1562
+dotnet test --solution VHSDecodeDotNet.slnx -c Release --no-build --no-restore --minimum-expected-tests 1569
 dotnet test --project tests\VHSDecode.Tests\VHSDecode.Tests.csproj -c Release --no-build --no-restore --coverage --coverage-output coverage.cobertura.xml --coverage-output-format cobertura
 ```
 
@@ -3397,7 +3417,7 @@ cuFFT，或采用固定且经过校验的首次下载；兼容的 NVIDIA 驱动�
 仍会编译、审计并暂存桥接，但不能算作 GPU runtime 验证。
 
 当前正式 Release 构建为零警告、零错误。xUnit v3 项目向
-`dotnet test` 和 Visual Studio Test Explorer 暴露 **1,562** 个可独立发现的测试。
+`dotnet test` 和 Visual Studio Test Explorer 暴露 **1,569** 个可独立发现的测试。
 
 <!-- SECTION: usage -->
 
@@ -3419,9 +3439,10 @@ src\VHSDecode.Cli\bin\Release\net11.0\decode.exe vhs [upstream options] input ou
 src\VHSDecode.Cli\bin\Release\net11.0\vhs-decode.exe [upstream options] input output
 decode.exe vhs --dsp-backend ipp-fast [upstream options] input output
 decode.exe vhs --dsp-backend cuda-fast --pal [supported options] input.ldf output
+decode.exe vhs --preview-server --dsp-backend cuda-fast --pal input.ldf
 ```
 
-最后两种形式会显式选择采用独立数值契约的可选后端。`cuda-fast` 只接受文档列出的
+最后三种形式会显式选择采用独立数值契约的可选后端。`cuda-fast` 只接受文档列出的
 参数子集；遇到不支持的参数会失败，而不是忽略。
 
 将命令替换为对应的 `cvbs`、`ld` 或 `hifi`，并使用上游 v0.4.0

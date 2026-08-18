@@ -16,7 +16,7 @@
 #  define VHSDECODE_CUDA_FAST_CALL
 #endif
 
-#define VHSDECODE_CUDA_FAST_ABI_VERSION 0x00040000u
+#define VHSDECODE_CUDA_FAST_ABI_VERSION 0x00050000u
 #define VHSDECODE_CUDA_FAST_NAME_CAPACITY 128u
 
 #ifdef __cplusplus
@@ -61,6 +61,13 @@ typedef size_t (VHSDECODE_CUDA_FAST_CALL *vhsdecode_cuda_fast_read_callback)(
 typedef int32_t (VHSDECODE_CUDA_FAST_CALL *vhsdecode_cuda_fast_cancel_callback)(
     void* user_data);
 
+typedef int32_t (VHSDECODE_CUDA_FAST_CALL *vhsdecode_cuda_fast_bitstream_callback)(
+    void* user_data,
+    const uint8_t* data,
+    size_t byte_count);
+
+typedef struct vhsdecode_cuda_fast_preview_context vhsdecode_cuda_fast_preview_context;
+
 typedef struct vhsdecode_cuda_fast_runtime_info_v1 {
     uint32_t struct_size;
     uint32_t abi_version;
@@ -97,6 +104,43 @@ typedef struct vhsdecode_cuda_fast_result_v1 {
     double elapsed_seconds;
 } vhsdecode_cuda_fast_result_v1;
 
+typedef struct vhsdecode_cuda_fast_preview_config_v1 {
+    uint32_t struct_size;
+    uint32_t profile;
+    uint32_t tape_speed;
+    int32_t device_id;
+    double source_sample_rate_mhz;
+    double decode_sample_rate_mhz;
+    uint32_t output_width;
+    uint32_t output_height;
+    uint32_t frame_rate_numerator;
+    uint32_t frame_rate_denominator;
+    uint32_t constant_qp;
+    uint32_t gop_length;
+} vhsdecode_cuda_fast_preview_config_v1;
+
+typedef struct vhsdecode_cuda_fast_preview_window_v1 {
+    uint32_t struct_size;
+    uint32_t input_sample_format;
+    uint64_t total_source_samples;
+    uint64_t target_source_sample;
+    uint32_t requested_output_frames;
+    uint32_t reserved;
+    vhsdecode_cuda_fast_read_callback read_callback;
+    vhsdecode_cuda_fast_cancel_callback cancel_callback;
+    vhsdecode_cuda_fast_bitstream_callback bitstream_callback;
+    void* user_data;
+} vhsdecode_cuda_fast_preview_window_v1;
+
+typedef struct vhsdecode_cuda_fast_preview_result_v1 {
+    uint32_t struct_size;
+    uint32_t frames_encoded;
+    uint32_t fields_scanned;
+    uint32_t reserved;
+    uint64_t encoded_bytes;
+    double elapsed_seconds;
+} vhsdecode_cuda_fast_preview_result_v1;
+
 VHSDECODE_CUDA_FAST_API uint32_t VHSDECODE_CUDA_FAST_CALL
 vhsdecode_cuda_fast_get_abi_version(void);
 
@@ -109,6 +153,21 @@ VHSDECODE_CUDA_FAST_API int32_t VHSDECODE_CUDA_FAST_CALL
 vhsdecode_cuda_fast_run(
     const vhsdecode_cuda_fast_config_v1* config,
     vhsdecode_cuda_fast_result_v1* result);
+
+VHSDECODE_CUDA_FAST_API int32_t VHSDECODE_CUDA_FAST_CALL
+vhsdecode_cuda_fast_preview_create(
+    const vhsdecode_cuda_fast_preview_config_v1* config,
+    vhsdecode_cuda_fast_preview_context** context);
+
+VHSDECODE_CUDA_FAST_API int32_t VHSDECODE_CUDA_FAST_CALL
+vhsdecode_cuda_fast_preview_decode_window(
+    vhsdecode_cuda_fast_preview_context* context,
+    const vhsdecode_cuda_fast_preview_window_v1* window,
+    vhsdecode_cuda_fast_preview_result_v1* result);
+
+VHSDECODE_CUDA_FAST_API void VHSDECODE_CUDA_FAST_CALL
+vhsdecode_cuda_fast_preview_destroy(
+    vhsdecode_cuda_fast_preview_context* context);
 
 VHSDECODE_CUDA_FAST_API const char* VHSDECODE_CUDA_FAST_CALL
 vhsdecode_cuda_fast_get_last_error(void);

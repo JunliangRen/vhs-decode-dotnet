@@ -92,7 +92,11 @@ bool TBCWriter::open(
     const std::string& output_base,
     const VideoFormat& format,
     bool overwrite) {
+    close();
     fmt = format;
+    field_count = 0;
+    field_meta.clear();
+    current_field = FieldMeta{};
     luma_path = output_base + ".tbc";
     chroma_path = output_base + "_chroma.tbc";
     json_path = output_base + ".tbc.json";
@@ -132,7 +136,30 @@ bool TBCWriter::open(
     return true;
 }
 
+bool TBCWriter::open_preview(
+    const VideoFormat& format,
+    const CudaPreviewOutputSettings& settings) {
+    if (luma_fp != nullptr || chroma_fp != nullptr) {
+        return false;
+    }
+    fmt = format;
+    field_count = 0;
+    field_meta.clear();
+    current_field = FieldMeta{};
+    if (preview_output == nullptr) {
+        preview_output = std::make_unique<CudaPreviewOutput>();
+    }
+    if (!preview_output->open(format, settings)) {
+        return false;
+    }
+    return true;
+}
+
 void TBCWriter::close() {
+    if (preview_output != nullptr) {
+        preview_output->close();
+        preview_output.reset();
+    }
     if (luma_fp != nullptr) {
         std::fclose(luma_fp);
         luma_fp = nullptr;
@@ -180,6 +207,9 @@ void TBCWriter::finish_field() {
 }
 
 bool TBCWriter::write_json() {
+    if (preview_output != nullptr) {
+        return true;
+    }
     const std::string temporary_path = json_path + ".tmp";
     std::FILE* output = open_utf8(temporary_path, "wb");
     if (output == nullptr) {
@@ -282,6 +312,9 @@ bool TBCWriter::write_json() {
 }
 
 bool TBCWriter::finalize() {
+    if (preview_output != nullptr) {
+        return preview_output->finalize();
+    }
     const bool luma_flushed = luma_fp == nullptr || std::fflush(luma_fp) == 0;
     const bool chroma_flushed =
         chroma_fp == nullptr || std::fflush(chroma_fp) == 0;
@@ -289,4 +322,52 @@ bool TBCWriter::finalize() {
         return false;
     }
     return write_json();
+}
+
+bool TBCWriter::write_preview_device_fields(
+    const uint16_t* d_luma,
+    const uint16_t* d_chroma,
+    const int* d_dropout_lines,
+    const int* d_dropout_starts,
+    const int* d_dropout_ends,
+    const int* d_dropout_counts,
+    const int* host_is_first_field,
+    const size_t* host_field_offsets,
+    const int* host_field_phase_ids,
+    size_t raw_offset,
+    int fields) {
+    return preview_output != nullptr
+        && preview_output->write_device_fields(
+            d_luma,
+            d_chroma,
+            d_dropout_lines,
+            d_dropout_starts,
+            d_dropout_ends,
+            d_dropout_counts,
+            host_is_first_field,
+            host_field_offsets,
+            host_field_phase_ids,
+            raw_offset,
+            fields);
+}
+
+bool TBCWriter::output_complete() const {
+    return preview_output != nullptr && preview_output->complete();
+}
+
+uint32_t TBCWriter::preview_frames_encoded() const {
+    return preview_output != nullptr ? preview_output->frames_encoded() : 0;
+}
+
+uint32_t TBCWriter::preview_fields_scanned() const {
+    return preview_output != nullptr ? preview_output->fields_scanned() : 0;
+}
+
+uint64_t TBCWriter::preview_encoded_bytes() const {
+    return preview_output != nullptr ? preview_output->encoded_bytes() : 0;
+}
+
+const std::string& TBCWriter::preview_error() const {
+    static const std::string empty;
+    return preview_output != nullptr ? preview_output->error() : empty;
 }
