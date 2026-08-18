@@ -241,9 +241,11 @@ video system、packed `.lds`、明示的な compatibility profile selection は�
 decode context を request window 間で保持し、deterministic 15-tap CUDA FIR が
 anti-alias 付き 2:1 reduction で 20 MSPS にしてから、persistent GPU sync、FM、
 time-base、chroma、dropout graph へ渡します。CUDA output stage は field-rate bob を
-NV12 device memory へ直接描画し、NVENC はその device pointer を register して、luma、
-chroma、NV12 frame を download せず H.264 を出力します。managed memory に渡るのは
-圧縮 packet だけで、FFmpeg は `-c:v copy` により HLS/fMP4 timeline を構成するだけです。
+NV12 device memory へ直接描画し、NVENC はその device pointer を register して、full
+luma/chroma/NV12 frame を download せず H.264 を出力します。各 bounded RF batch は一度だけ upload し、
+その後 host/device 境界を通るのは少量の sync/field-order control metadata と圧縮 packet
+だけです。圧縮 packet は managed memory に渡され、FFmpeg は `-c:v copy` により
+HLS/fMP4 timeline を構成するだけです。
 この明示 route は NVENC 必須で、失敗時に QSV、AMF、libx264、IPP、Exact を試しません。
 通常の decode/export の sample-rate behavior は変わりません。
 

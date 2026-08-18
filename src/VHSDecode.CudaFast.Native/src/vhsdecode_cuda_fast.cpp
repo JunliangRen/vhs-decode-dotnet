@@ -1,5 +1,6 @@
 #include "vhsdecode_cuda_fast.h"
 
+#include "cancellation_latch.h"
 #include "format/video_format.h"
 #include "gpu/device.h"
 #include "io/raw_reader.h"
@@ -54,23 +55,23 @@ TapeSpeed map_tape_speed(uint32_t speed) {
 
 struct CallbackContext {
     const vhsdecode_cuda_fast_config_v1* config;
-    bool cancelled = false;
+    vhsdecode::cuda_fast::detail::CancellationLatch cancellation;
 };
 
 struct PreviewCallbackContext {
     const vhsdecode_cuda_fast_preview_window_v1* window = nullptr;
     uint64_t source_base = 0;
-    bool cancelled = false;
-    bool sink_failed = false;
+    vhsdecode::cuda_fast::detail::CancellationLatch cancellation;
+    std::atomic_bool sink_failed{false};
 };
 
 bool cancellation_requested(CallbackContext& context) {
     if (context.config->cancel_callback == nullptr) {
-        return false;
+        return context.cancellation.requested();
     }
-    context.cancelled = context.cancelled
-        || context.config->cancel_callback(context.config->user_data) != 0;
-    return context.cancelled;
+    return context.cancellation.poll([&context]() {
+        return context.config->cancel_callback(context.config->user_data) != 0;
+    });
 }
 
 size_t callback_read(
@@ -91,11 +92,11 @@ size_t callback_read(
 
 bool preview_cancellation_requested(PreviewCallbackContext& context) {
     if (context.window->cancel_callback == nullptr) {
-        return false;
+        return context.cancellation.requested();
     }
-    context.cancelled = context.cancelled
-        || context.window->cancel_callback(context.window->user_data) != 0;
-    return context.cancelled;
+    return context.cancellation.poll([&context]() {
+        return context.window->cancel_callback(context.window->user_data) != 0;
+    });
 }
 
 size_t preview_callback_read(
@@ -130,7 +131,9 @@ int32_t preview_callback_bitstream(
         context.window->user_data,
         data,
         byte_count);
-    context.sink_failed = context.sink_failed || status != 0;
+    if (status != 0) {
+        context.sink_failed.store(true, std::memory_order_release);
+    }
     return status;
 }
 
@@ -325,7 +328,7 @@ vhsdecode_cuda_fast_run(
         const auto completed = std::chrono::steady_clock::now();
         writer.close();
 
-        if (callback_context.cancelled) {
+        if (callback_context.cancellation.requested()) {
             return fail(
                 VHSDECODE_CUDA_FAST_STATUS_CANCELLED,
                 "CUDA-fast decode was cancelled.");
@@ -530,12 +533,12 @@ vhsdecode_cuda_fast_preview_decode_window(
         result->elapsed_seconds =
             std::chrono::duration<double>(completed - started).count();
 
-        if (callback_context.cancelled) {
+        if (callback_context.cancellation.requested()) {
             return fail(
                 VHSDECODE_CUDA_FAST_STATUS_CANCELLED,
                 "CUDA-fast preview window was cancelled.");
         }
-        if (callback_context.sink_failed) {
+        if (callback_context.sink_failed.load(std::memory_order_acquire)) {
             return fail(
                 VHSDECODE_CUDA_FAST_STATUS_OUTPUT_ERROR,
                 "The CUDA-fast preview H.264 sink rejected NVENC output.");

@@ -88,8 +88,9 @@ decode.exe vhs --preview-server --dsp-backend cuda-fast --pal input.ldf
 
 这条路径会在多个窗口间复用同一个 CUDA 上下文，并在 GPU 上完成带抗混叠的
 40→20 MSPS 降采样、同步、FM/色度/dropout 处理、NV12 bob 反交错和 NVENC H.264
-编码。NVENC 直接注册 CUDA device pointer；只有压缩后的 H.264 packet 回到主存，
-FFmpeg 仅负责 copy-mux 为 HLS/fMP4。它要求兼容的 NVIDIA GPU，失败时不会回退到
+编码。NVENC 直接注册 CUDA device pointer。每个有界 RF 批次只上传一次，整帧亮度、色度和 NV12
+不会下载回主存；跨越主机/显存边界的只有少量同步/场序控制元数据和压缩 H.264 packet。
+FFmpeg 仅负责将 H.264 copy-mux 为 HLS/fMP4。它要求兼容的 NVIDIA GPU，失败时不会回退到
 CPU 预览或其他编码器。本机 RTX 4070 和一份真实 PAL 采集的四个稳态 2 秒窗口中，
 CUDA 平均用时 1.142 秒，默认 20-thread IPP 预览为 1.528 秒，即墙钟减少 25.3%、
 源帧吞吐提高 32.8%。首个冷启动 CUDA 窗口因创建持久 CUDA/cuFFT/NVENC 状态而较慢

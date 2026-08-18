@@ -217,8 +217,9 @@ LaserDisc、HiFi、S-VHS、其他制式、packed `.lds` 以及显式兼容 profi
 PAL/NTSC VHS 选择 ABI v5 GPU 预览路径。一个原生解码上下文会跨请求窗口持久复用；
 确定性的 15-tap CUDA FIR 先完成带抗混叠的 2:1 降采样至 20 MSPS，再进入持久 GPU
 同步、FM、时基、色度和 dropout 图。CUDA 输出阶段直接在 NV12 显存中按场率执行 bob；
-NVENC 注册该 device pointer 并输出 H.264，无需下载亮度、色度或 NV12 帧。只有压缩
-packet 跨到托管内存，FFmpeg 仅使用 `-c:v copy` 组成 HLS/fMP4 时间轴。这条显式路径
+NVENC 注册该 device pointer 并输出 H.264，不会下载整帧亮度、色度或 NV12。每个有界
+RF 批次只上传一次；此后跨越主机/显存边界的只有少量同步/场序控制元数据和压缩 packet。压缩 packet
+进入托管内存，FFmpeg 仅使用 `-c:v copy` 组成 HLS/fMP4 时间轴。这条显式路径
 要求 NVENC，失败时不会尝试 QSV、AMF、libx264、IPP 或 Exact。普通解码/导出的采样率
 行为保持不变。
 

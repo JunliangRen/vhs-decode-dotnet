@@ -3105,9 +3105,11 @@ PAL/NTSC input, one native context persists across windows. A deterministic
 15-tap CUDA FIR reduces RF to 20 MSPS with anti-aliasing before the existing GPU
 sync, FM, time-base, chroma, and dropout stages. A new device-side output stage
 renders field-rate bob directly into NV12. NVENC registers the CUDA device
-pointer and produces H.264 without downloading decoded image planes; only the
-compressed packets cross to managed memory, where FFmpeg copy-muxes them into
-HLS/fMP4. The explicit path fails closed if CUDA, cuFFT, or NVENC is unavailable
+pointer and produces H.264 without downloading full decoded image planes. Each
+bounded RF batch crosses once on upload; thereafter only small sync/field-order control metadata
+and compressed packets cross the host/device boundary. Compressed packets enter
+managed memory, where FFmpeg copy-muxes them into HLS/fMP4. The explicit path
+fails closed if CUDA, cuFFT, or NVENC is unavailable
 and does not fall back to IPP, Exact, QSV, AMF, or libx264. Native runtime tests
 passed on the RTX 4070, and prefetch enabled/disabled A/B outputs had identical
 init fragments, media segments, and decoded 100-frame SHA-256 values.
@@ -3121,8 +3123,9 @@ the last point only from at least three exactly sequential fixed-block frame
 headers so an isolated CRC8-valid false header cannot inflate duration. A
 synthetic wrapped-count regression includes both a valid three-frame tail and
 an isolated high false header. The real server reports 631.44 seconds and 316
-windows; random W70 and final W315 both completed. Four canceled W80-W83
-requests left the process healthy and a following W90 request returned 200.
+windows; random W70 and final W315 both completed. On the final atomic-
+cancellation build, four timed-out W80-W83 requests left the process healthy
+and a following W90 request returned 200.
 
 Using the same current executable and capture, steady two-second windows
 W15/W25/W30/W35 averaged 1.14225 seconds for CUDA and 1.52818 seconds for the
@@ -3225,7 +3228,10 @@ parallel sync semantics, bounded leader scanning and exact output length, and
 the synthetic NTSC full-pipeline gate. Preview coverage additionally checks
 the ABI v5 contract, persistent-session lifecycle, explicit VHS-only routing,
 40-to-20 MSPS GPU decimation, direct NVENC/copy-mux arguments, cancellation,
-wrapped FLAC duration recovery, and real FFmpeg fragment compliance. Twelve
+wrapped FLAC duration recovery, and real FFmpeg fragment compliance. A native
+24-thread stress gate exercises the monotonic atomic cancellation latch shared
+by the output and overlapping RF-prefetch paths; it runs even when GPU runtime
+tests are skipped on CI. Twelve
 runtime-provisioning tests cover
 official package pins, trusted search order, opt-out, verified cache reuse,
 download progress, archive/DLL hashes, license extraction, driver preflight,

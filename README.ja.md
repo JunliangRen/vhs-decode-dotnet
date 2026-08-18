@@ -97,8 +97,10 @@ decode.exe vhs --preview-server --dsp-backend cuda-fast --pal input.ldf
 この path は 1 つの CUDA context を window 間で再利用し、anti-alias 付き 40→20
 MSPS decimation、sync、FM/chroma/dropout processing、NV12 bob rendering、NVENC
 H.264 encode を GPU 上で実行します。NVENC は CUDA device pointer を直接 register
-するため、host memory に戻るのは圧縮済み H.264 packet だけで、FFmpeg は HLS/fMP4
-への copy-mux のみを担当します。compatible NVIDIA GPU が必須で、CPU preview や
+します。各 bounded RF batch は一度だけ upload し、full luma/chroma/NV12 frame は host memory へ
+download しません。host/device 境界を通るのは少量の sync/field-order control metadata
+と圧縮済み H.264 packet だけで、FFmpeg は HLS/fMP4 への copy-mux のみを担当します。
+compatible NVIDIA GPU が必須で、CPU preview や
 別 encoder へ fallback しません。tested RTX 4070 と 1 本の real PAL capture の
 steady-state 2 秒 window 4 個では、CUDA の平均は 1.142 秒、default 20-thread IPP
 preview は 1.528 秒でした。wall time は 25.3% 少なく、source-frame throughput は

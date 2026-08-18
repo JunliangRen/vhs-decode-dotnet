@@ -4357,6 +4357,18 @@ target_include_directories(vhsdecode_cuda_fast_smoke PRIVATE
     "${CMAKE_CURRENT_SOURCE_DIR}/include")
 target_link_libraries(vhsdecode_cuda_fast_smoke PRIVATE vhsdecode_cuda_fast)
 
+add_executable(
+    vhsdecode_cuda_fast_cancellation_test
+    tests/cancellation_latch_test.cpp)
+target_include_directories(vhsdecode_cuda_fast_cancellation_test PRIVATE
+    "${CMAKE_CURRENT_SOURCE_DIR}/src")
+if(MSVC)
+    target_compile_options(vhsdecode_cuda_fast_cancellation_test PRIVATE
+        /O2 /W4 /permissive- /utf-8)
+else()
+    target_compile_options(vhsdecode_cuda_fast_cancellation_test PRIVATE -O3)
+endif()
+
 add_executable(vhsdecode_cuda_fast_sync_pulses_test
     tests/sync_pulses_test.cu
     "${CMAKE_CURRENT_SOURCE_DIR}/overlay/pipeline/sync_pulses.cu"
@@ -4406,6 +4418,9 @@ target_link_libraries(
 
 enable_testing()
 add_test(NAME cuda_fast_probe COMMAND vhsdecode_cuda_fast_smoke)
+add_test(
+    NAME cuda_fast_parallel_preview_cancellation
+    COMMAND vhsdecode_cuda_fast_cancellation_test)
 add_test(
     NAME cuda_fast_parallel_sync_pulses
     COMMAND vhsdecode_cuda_fast_sync_pulses_test)

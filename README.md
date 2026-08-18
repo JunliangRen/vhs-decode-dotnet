@@ -109,8 +109,10 @@ decode.exe vhs --preview-server --dsp-backend cuda-fast --pal input.ldf
 This keeps one CUDA context across windows, performs the anti-aliased 40-to-20
 MSPS reduction, sync, FM/chroma/dropout processing, NV12 bob rendering, and
 NVENC H.264 encoding on the GPU. NVENC registers the CUDA device pointer
-directly; only compressed H.264 packets return to host memory, and FFmpeg only
-copy-muxes them into HLS/fMP4. It requires a compatible NVIDIA GPU and never
+directly. Each bounded RF batch is uploaded once, while full luma, chroma, and NV12 frames are
+never downloaded; only small sync/field-order control metadata and compressed
+H.264 packets cross the host/device boundary. FFmpeg only copy-muxes the H.264
+into HLS/fMP4. It requires a compatible NVIDIA GPU and never
 falls back to the CPU preview or another encoder. On the tested RTX 4070 and one
 real PAL capture, four steady two-second windows averaged 1.142 seconds versus
 1.528 seconds for the default 20-thread IPP preview: 25.3% less wall time and

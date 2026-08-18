@@ -112,6 +112,8 @@ public sealed class CudaFastBackendTests
     {
         string cmake = ReadNativeBuildDefinition();
         string normalizedCmake = cmake.Replace("\r\n", "\n", StringComparison.Ordinal);
+        string cancellation = ReadNativeSource("src", "cancellation_latch.h");
+        string cancellationTest = ReadNativeSource("tests", "cancellation_latch_test.cpp");
         string decimator = ReadNativeSource("src", "cuda_fast_decimator.cu");
         string output = ReadNativeSource("src", "cuda_preview_output.cu");
         string writer = ReadNativeSource("overlay", "io", "tbc_writer.h");
@@ -131,6 +133,17 @@ public sealed class CudaFastBackendTests
         Assert.Contains("NV_ENC_BUFFER_FORMAT_NV12", output, StringComparison.Ordinal);
         Assert.DoesNotContain("cudaMemcpyDeviceToHost", output, StringComparison.Ordinal);
         Assert.Contains("accepts_device_fields()", writer, StringComparison.Ordinal);
+        Assert.Contains("std::atomic_bool requested_{false};", cancellation, StringComparison.Ordinal);
+        Assert.Contains("std::memory_order_acquire", cancellation, StringComparison.Ordinal);
+        Assert.Contains("std::memory_order_release", cancellation, StringComparison.Ordinal);
+        Assert.Contains(
+            "Parallel preview/prefetch cancellation latch test passed.",
+            cancellationTest,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "vhsdecode_cuda_fast_cancellation_test",
+            cmake,
+            StringComparison.Ordinal);
         Assert.Contains(
             "[=[    if (!writer.accepts_device_fields()) {\n"
                 + "        // Progress display",

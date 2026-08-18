@@ -249,9 +249,11 @@ decode context persists across requested windows. A deterministic 15-tap CUDA
 FIR performs the anti-aliased 2:1 reduction to 20 MSPS before the persistent
 GPU sync, FM, time-base, chroma, and dropout graph. A CUDA output stage renders
 field-rate bob directly into NV12 device memory; NVENC registers that device
-pointer and emits H.264 without downloading luma, chroma, or NV12 frames. Only
-compressed packets cross to managed memory, and FFmpeg uses `-c:v copy` solely
-to form the HLS/fMP4 timeline. This explicit route requires NVENC and fails
+pointer and emits H.264 without downloading full luma, chroma, or NV12 frames.
+Each bounded RF batch crosses once on upload; thereafter only small sync/field-order control
+metadata and compressed packets cross the host/device boundary. The compressed
+packets enter managed memory, and FFmpeg uses `-c:v copy` solely to form the
+HLS/fMP4 timeline. This explicit route requires NVENC and fails
 closed instead of probing QSV, AMF, libx264, IPP, or Exact. Normal decode/export
 sample-rate behavior is unchanged.
 
