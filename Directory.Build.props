@@ -1,6 +1,6 @@
 <Project>
   <PropertyGroup>
     <Features>runtime-async=on</Features>
-    <Version>2.3.1</Version>
+    <Version>2.4.0</Version>
   </PropertyGroup>
 </Project>

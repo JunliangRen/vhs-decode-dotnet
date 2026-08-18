@@ -8,7 +8,7 @@
 中解码相关部分的 .NET 11 重写，兼容目标为上游 release `v0.4.0`、commit
 `43155200da87c0d49eb37d8ec09b1372075ee8e4`。
 
-当前 .NET 移植版发布为 `v0.4.0-2.3.1`（应用版本 `2.3.1`）。
+当前 .NET 移植版发布为 `v0.4.0-2.4.0`（应用版本 `2.4.0`）。
 
 > [!IMPORTANT]
 > 这仍是持续进行中的兼容性移植。顶层解码路径已经实现并经过大量测试，但尚未声称
@@ -35,7 +35,7 @@
 - VHS 家族包括 VHS/S-VHS、Betamax、Video8/Hi8、U-matic、Type C、EIAJ
   以及上游支持的 PAL/NTSC 变体。
 - TBC 工具、双击启动的用户 GUI 和开发者绘图窗口明确不在范围内。
-- Visual Studio 2026 `.slnx` 包含 **1,562** 项标准 xUnit v3 测试；测试可在
+- Visual Studio 2026 `.slnx` 包含 **1,569** 项标准 xUnit v3 测试；测试可在
   Test Explorer 中查看，也可用 `dotnet test` 运行。
 
 <!-- SECTION: start -->
@@ -80,6 +80,22 @@ IPP-FAST 是否初始化成功、实际解码线程数，并分别用窗口编�
 能找到具有至少一条可用管线的 FFmpeg；也可通过 `VHSDECODE_FFMPEG` 和
 `VHSDECODE_FFPROBE` 指定路径。
 
+原生采样率为 40 MSPS 的 PAL/NTSC VHS 也可以显式选择独立 GPU 预览路径：
+
+```powershell
+decode.exe vhs --preview-server --dsp-backend cuda-fast --pal input.ldf
+```
+
+这条路径会在多个窗口间复用同一个 CUDA 上下文，并在 GPU 上完成带抗混叠的
+40→20 MSPS 降采样、同步、FM/色度/dropout 处理、NV12 bob 反交错和 NVENC H.264
+编码。NVENC 直接注册 CUDA device pointer；只有压缩后的 H.264 packet 回到主存，
+FFmpeg 仅负责 copy-mux 为 HLS/fMP4。它要求兼容的 NVIDIA GPU，失败时不会回退到
+CPU 预览或其他编码器。本机 RTX 4070 和一份真实 PAL 采集的四个稳态 2 秒窗口中，
+CUDA 平均用时 1.142 秒，默认 20-thread IPP 预览为 1.528 秒，即墙钟减少 25.3%、
+源帧吞吐提高 32.8%。首个冷启动 CUDA 窗口因创建持久 CUDA/cuFFT/NVENC 状态而较慢
+（2.447 对 2.153 秒）。两种预览的观感接近；计入一场时间偏移后，渲染对比 SSIM 为
+0.927867。这些数字只适用于该采集与硬件，不代表与 Exact 等价。
+
 <!-- SECTION: profiles -->
 
 ## 行为配置与后端
@@ -114,8 +130,9 @@ decode.exe vhs --dsp-backend cuda-fast --pal `
 只有显式使用 `--dsp-backend cuda-fast` 时才会查找兼容的 CUDA 13/cuFFT 12；若本机
 没有，程序会先确认 NVIDIA 驱动可用，再下载 NVIDIA 固定的 202.2 MiB 可再分发包，
 对压缩包和 DLL 分别做 SHA-256 校验，并只安装一次到
-`%LOCALAPPDATA%\vhs-decode-dotnet\cuda\cufft`。Exact、IPP 和 preview 路径绝不会访问
-网络。离线/系统 runtime 可用 `VHSDECODE_CUDA_RUNTIME_PATH` 指定；
+`%LOCALAPPDATA%\vhs-decode-dotnet\cuda\cufft`。Exact、IPP，以及未显式选择
+`cuda-fast` 的 preview 路径绝不会访问网络。离线/系统 runtime 可用
+`VHSDECODE_CUDA_RUNTIME_PATH` 指定；
 `VHSDECODE_CUDA_CACHE_PATH` 可更改缓存根目录，
 `VHSDECODE_CUDA_AUTO_DOWNLOAD=0` 可关闭自动下载。
 
@@ -223,7 +240,7 @@ TBC、色度、JSON 和日志文件允许在解码期间并发读取，兼容的
 dotnet restore VHSDecodeDotNet.slnx
 dotnet build VHSDecodeDotNet.slnx -c Release --no-restore
 dotnet test --solution VHSDecodeDotNet.slnx -c Release `
-  --no-build --no-restore --minimum-expected-tests 1562
+  --no-build --no-restore --minimum-expected-tests 1569
 ```
 
 在 Visual Studio 2026 中打开 `VHSDecodeDotNet.slnx`，即可构建、调试并通过

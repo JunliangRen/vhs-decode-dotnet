@@ -12,6 +12,7 @@ if(NOT DEFINED CMAKE_CUDA_ARCHITECTURES)
 endif()
 
 find_package(CUDAToolkit 13.0 REQUIRED)
+include(FetchContent)
 
 set(VHSDECODE_CUVHS_COMMIT "c55e72073f44b27e8839efb842e4345af39887f7"
     CACHE STRING "Pinned cuVHS source commit")
@@ -24,12 +25,35 @@ if(VHSDECODE_CUVHS_SOURCE_DIR)
         message(FATAL_ERROR "VHSDECODE_CUVHS_SOURCE_DIR is not a cuVHS source tree: ${cuvhs_SOURCE_DIR}")
     endif()
 else()
-    include(FetchContent)
     FetchContent_Declare(cuvhs
         GIT_REPOSITORY https://github.com/hunterschuler/cuVHS.git
         GIT_TAG ${VHSDECODE_CUVHS_COMMIT}
         EXCLUDE_FROM_ALL)
     FetchContent_MakeAvailable(cuvhs)
+endif()
+
+set(VHSDECODE_NV_CODEC_HEADERS_COMMIT
+    "1889e62e2d35ff7aa9baca2bceb14f053785e6f1"
+    CACHE STRING "Pinned nv-codec-headers source commit")
+set(VHSDECODE_NV_CODEC_HEADERS_SOURCE_DIR "" CACHE PATH
+    "Existing nv-codec-headers checkout; when empty the pinned source is fetched")
+
+if(VHSDECODE_NV_CODEC_HEADERS_SOURCE_DIR)
+    get_filename_component(
+        nv_codec_headers_SOURCE_DIR
+        "${VHSDECODE_NV_CODEC_HEADERS_SOURCE_DIR}"
+        ABSOLUTE)
+    if(NOT EXISTS
+        "${nv_codec_headers_SOURCE_DIR}/include/ffnvcodec/nvEncodeAPI.h")
+        message(FATAL_ERROR
+            "VHSDECODE_NV_CODEC_HEADERS_SOURCE_DIR is not an nv-codec-headers source tree: ${nv_codec_headers_SOURCE_DIR}")
+    endif()
+else()
+    FetchContent_Declare(nv_codec_headers
+        GIT_REPOSITORY https://github.com/FFmpeg/nv-codec-headers.git
+        GIT_TAG ${VHSDECODE_NV_CODEC_HEADERS_COMMIT}
+        EXCLUDE_FROM_ALL)
+    FetchContent_MakeAvailable(nv_codec_headers)
 endif()
 
 function(vhsdecode_cuda_fast_convert_pipeline_to_fp32 variable_name)
@@ -426,7 +450,10 @@ endif()
 string(REPLACE
     "${CUVHS_PIPELINE_RAW_BUFFER_STATE}"
     [=[    void* d_raw = nullptr;         // FP32 raw input samples (batch)
-    void* d_raw_s16 = nullptr;     // optional direct-upload PCM16 staging
+    void* d_raw_s16 = nullptr;     // optional native-rate PCM16 staging
+    void* d_raw_source_f32 = nullptr; // optional native-rate FP32 staging
+    std::vector<int16_t> h_half_rate_raw_s16;
+    std::vector<float> h_half_rate_raw_f32;
 
     // The next seekable PCM16 batch is read while the current batch finishes
     // its GPU and output stages. This remains pageable memory because the
@@ -441,6 +468,9 @@ string(REPLACE
     size_t prefetch_tail_samples = 0;
     size_t prefetch_n_read = 0;
     size_t prefetch_tail_read = 0;
+    size_t prefetch_half_rate_logical_samples_read = 0;
+    bool prefetch_half_rate = false;
+    bool prefetch_half_rate_read_ok = false;
     bool prefetch_valid = false;]=]
     CUVHS_PIPELINE_HEADER_SOURCE
     "${CUVHS_PIPELINE_HEADER_SOURCE}")
@@ -2826,14 +2856,16 @@ if(CUVHS_PIPELINE_PROGRESS_START_INDEX EQUAL -1)
 endif()
 string(REPLACE
     "${CUVHS_PIPELINE_PROGRESS_START}"
-    [=[    if (maximum_output_fields > 0) {
-        fprintf(stderr, "Starting decode: target %u output fields in chunks of %d\n",
-                maximum_output_fields, batch_size);
-    } else if (streaming) {
-        fprintf(stderr, "Starting decode: streaming mode, chunks of %d fields\n", batch_size);
-    } else {
-        fprintf(stderr, "Starting decode: ~%d fields in chunks of %d\n",
-                total_fields_est, batch_size);
+    [=[    if (!writer.accepts_device_fields()) {
+        if (maximum_output_fields > 0) {
+            fprintf(stderr, "Starting decode: target %u output fields in chunks of %d\n",
+                    maximum_output_fields, batch_size);
+        } else if (streaming) {
+            fprintf(stderr, "Starting decode: streaming mode, chunks of %d fields\n", batch_size);
+        } else {
+            fprintf(stderr, "Starting decode: ~%d fields in chunks of %d\n",
+                    total_fields_est, batch_size);
+        }
     }]=]
     CUVHS_PIPELINE_SOURCE
     "${CUVHS_PIPELINE_SOURCE}")
@@ -2914,6 +2946,105 @@ string(REPLACE
         fprintf(stderr, "Decode complete: %d fields in %.1f seconds (%.1f FPS)\n\033[K\n",
                 total_fields, total_time, (total_fields / 2.0) / total_time);
     }]=]
+    CUVHS_PIPELINE_SOURCE
+    "${CUVHS_PIPELINE_SOURCE}")
+
+set(CUVHS_PREVIEW_PROGRESS_PRIMER [=[    // Progress display: print two lines initially so \033[A can move up
+    fprintf(stderr, "\n\n");
+    fflush(stderr);]=])
+string(FIND
+    "${CUVHS_PIPELINE_SOURCE}"
+    "${CUVHS_PREVIEW_PROGRESS_PRIMER}"
+    CUVHS_PREVIEW_PROGRESS_PRIMER_INDEX)
+if(CUVHS_PREVIEW_PROGRESS_PRIMER_INDEX EQUAL -1)
+    message(FATAL_ERROR
+        "Pinned cuVHS pipeline no longer has the expected progress primer")
+endif()
+string(REPLACE
+    "${CUVHS_PREVIEW_PROGRESS_PRIMER}"
+    [=[    if (!writer.accepts_device_fields()) {
+        // Progress display: print two lines initially so \033[A can move up
+        fprintf(stderr, "\n\n");
+        fflush(stderr);
+    }]=]
+    CUVHS_PIPELINE_SOURCE
+    "${CUVHS_PIPELINE_SOURCE}")
+
+set(CUVHS_PREVIEW_PROGRESS_BODY_BEGIN
+    "        // Progress dashboard (two lines, rewritten in-place)")
+string(FIND
+    "${CUVHS_PIPELINE_SOURCE}"
+    "${CUVHS_PREVIEW_PROGRESS_BODY_BEGIN}"
+    CUVHS_PREVIEW_PROGRESS_BODY_BEGIN_INDEX)
+if(CUVHS_PREVIEW_PROGRESS_BODY_BEGIN_INDEX EQUAL -1)
+    message(FATAL_ERROR
+        "Pinned cuVHS pipeline no longer has the expected progress-dashboard start")
+endif()
+string(REPLACE
+    "${CUVHS_PREVIEW_PROGRESS_BODY_BEGIN}"
+    [=[        if (!writer.accepts_device_fields()) {
+        // Progress dashboard (two lines, rewritten in-place)]=]
+    CUVHS_PIPELINE_SOURCE
+    "${CUVHS_PIPELINE_SOURCE}")
+
+set(CUVHS_PREVIEW_PROGRESS_BODY_END [=[        fflush(stderr);
+    }
+
+    auto t_end = std::chrono::steady_clock::now();]=])
+string(FIND
+    "${CUVHS_PIPELINE_SOURCE}"
+    "${CUVHS_PREVIEW_PROGRESS_BODY_END}"
+    CUVHS_PREVIEW_PROGRESS_BODY_END_INDEX)
+if(CUVHS_PREVIEW_PROGRESS_BODY_END_INDEX EQUAL -1)
+    message(FATAL_ERROR
+        "Pinned cuVHS pipeline no longer has the expected progress-dashboard end")
+endif()
+string(REPLACE
+    "${CUVHS_PREVIEW_PROGRESS_BODY_END}"
+    [=[        fflush(stderr);
+        }
+    }
+
+    auto t_end = std::chrono::steady_clock::now();]=]
+    CUVHS_PIPELINE_SOURCE
+    "${CUVHS_PIPELINE_SOURCE}")
+
+set(CUVHS_PREVIEW_PROGRESS_SUMMARY_BEGIN
+    "    // Final summary (overwrite the progress lines)")
+string(FIND
+    "${CUVHS_PIPELINE_SOURCE}"
+    "${CUVHS_PREVIEW_PROGRESS_SUMMARY_BEGIN}"
+    CUVHS_PREVIEW_PROGRESS_SUMMARY_BEGIN_INDEX)
+if(CUVHS_PREVIEW_PROGRESS_SUMMARY_BEGIN_INDEX EQUAL -1)
+    message(FATAL_ERROR
+        "Pinned cuVHS pipeline no longer has the expected progress-summary start")
+endif()
+string(REPLACE
+    "${CUVHS_PREVIEW_PROGRESS_SUMMARY_BEGIN}"
+    [=[    if (!writer.accepts_device_fields()) {
+    // Final summary (overwrite the progress lines)]=]
+    CUVHS_PIPELINE_SOURCE
+    "${CUVHS_PIPELINE_SOURCE}")
+
+set(CUVHS_PREVIEW_PROGRESS_SUMMARY_END [=[    fflush(stderr);
+
+    writer.finalize();
+    return true;]=])
+string(FIND
+    "${CUVHS_PIPELINE_SOURCE}"
+    "${CUVHS_PREVIEW_PROGRESS_SUMMARY_END}"
+    CUVHS_PREVIEW_PROGRESS_SUMMARY_END_INDEX)
+if(CUVHS_PREVIEW_PROGRESS_SUMMARY_END_INDEX EQUAL -1)
+    message(FATAL_ERROR
+        "Pinned cuVHS pipeline no longer has the expected progress-summary end")
+endif()
+string(REPLACE
+    "${CUVHS_PREVIEW_PROGRESS_SUMMARY_END}"
+    [=[    fflush(stderr);
+    }
+
+    writer.finalize();
+    return true;]=]
     CUVHS_PIPELINE_SOURCE
     "${CUVHS_PIPELINE_SOURCE}")
 
@@ -3103,8 +3234,15 @@ endif()
 string(REPLACE
     "${CUVHS_RAW_ESTIMATE_LINE}"
     [=[    size_t raw = (spf_padded + FM_DEMOD_OVERLAP_SAMPLES) * sizeof(float);  // FP32 input + lead context
+    const size_t source_staging_samples = reader.device_decimation_factor() == 2
+        ? 2 * (spf_padded + FM_DEMOD_OVERLAP_SAMPLES) + 30
+        : spf_padded + FM_DEMOD_OVERLAP_SAMPLES;
     size_t raw_s16 = reader.callback_returns_int16()
-        ? (spf_padded + FM_DEMOD_OVERLAP_SAMPLES) * sizeof(int16_t)
+        ? source_staging_samples * sizeof(int16_t)
+        : 0;
+    size_t raw_source_f32 = !reader.callback_returns_int16()
+            && reader.device_decimation_factor() == 2
+        ? source_staging_samples * sizeof(float)
         : 0;]=]
     CUVHS_PIPELINE_SOURCE
     "${CUVHS_PIPELINE_SOURCE}")
@@ -3119,7 +3257,7 @@ if(CUVHS_RAW_ESTIMATED_TOTAL_INDEX EQUAL -1)
 endif()
 string(REPLACE
     "${CUVHS_RAW_ESTIMATED_TOTAL}"
-    "        raw + raw_s16 + demod + demod_05 + demod + envelope + pulses + linelocs + tbc + chroma +"
+    "        raw + raw_s16 + raw_source_f32 + demod + demod_05 + demod + envelope + pulses + linelocs + tbc + chroma +"
     CUVHS_PIPELINE_SOURCE
     "${CUVHS_PIPELINE_SOURCE}")
 
@@ -3135,8 +3273,15 @@ endif()
 string(REPLACE
     "${CUVHS_RAW_DEVICE_ALLOCATION}"
     [=[        alloc(&d_raw,        (n * spf_padded + 2 * FM_DEMOD_OVERLAP_SAMPLES) * sizeof(float));
+        const size_t raw_logical_capacity =
+            n * spf_padded + 2 * FM_DEMOD_OVERLAP_SAMPLES;
+        const size_t raw_source_capacity = reader.device_decimation_factor() == 2
+            ? 2 * raw_logical_capacity + 30
+            : raw_logical_capacity;
         if (reader.callback_returns_int16()) {
-            alloc(&d_raw_s16, (n * spf_padded + 2 * FM_DEMOD_OVERLAP_SAMPLES) * sizeof(int16_t));
+            alloc(&d_raw_s16, raw_source_capacity * sizeof(int16_t));
+        } else if (reader.device_decimation_factor() == 2) {
+            alloc(&d_raw_source_f32, raw_source_capacity * sizeof(float));
         }]=]
     CUVHS_PIPELINE_SOURCE
     "${CUVHS_PIPELINE_SOURCE}")
@@ -3155,7 +3300,10 @@ string(REPLACE
     h_prefetch_raw_s16 = nullptr;
     h_prefetch_capacity_samples = 0;
     safe_free(&d_raw);
-    safe_free(&d_raw_s16);]=]
+    safe_free(&d_raw_s16);
+    safe_free(&d_raw_source_f32);
+    h_half_rate_raw_s16.clear();
+    h_half_rate_raw_f32.clear();]=]
     CUVHS_PIPELINE_SOURCE
     "${CUVHS_PIPELINE_SOURCE}")
 
@@ -3414,6 +3562,90 @@ string(REPLACE
     CUVHS_PIPELINE_SOURCE
     "${CUVHS_PIPELINE_SOURCE}")
 
+set(CUVHS_HALF_RATE_READ_ENTRY [=[    size_t tail_read = 0;
+
+    if (reader.callback_returns_int16()) {]=])
+string(FIND
+    "${CUVHS_PIPELINE_SOURCE}"
+    "${CUVHS_HALF_RATE_READ_ENTRY}"
+    CUVHS_HALF_RATE_READ_ENTRY_INDEX)
+if(CUVHS_HALF_RATE_READ_ENTRY_INDEX EQUAL -1)
+    message(FATAL_ERROR
+        "Pinned cuVHS pipeline no longer has the expected preview half-rate read insertion point")
+endif()
+string(REPLACE
+    "${CUVHS_HALF_RATE_READ_ENTRY}"
+    [=[    size_t tail_read = 0;
+    const bool gpu_half_rate_input = reader.device_decimation_factor() == 2;
+
+    if (gpu_half_rate_input) {
+        size_t logical_samples_read = 0;
+        const bool use_half_rate_prefetch = prefetch_valid
+            && prefetch_half_rate
+            && prefetch_raw_offset == raw_offset
+            && prefetch_num_fields == num_fields
+            && prefetch_lead_samples == lead_samples
+            && prefetch_total_samples == total_samples
+            && prefetch_tail_samples == tail_samples;
+        if (use_half_rate_prefetch) {
+            if (raw_prefetch_thread.joinable()) raw_prefetch_thread.join();
+            if (!prefetch_half_rate_read_ok
+                || !cuda_fast_upload_half_rate_s16(
+                    h_half_rate_raw_s16,
+                    raw_sample_count,
+                    static_cast<int16_t*>(d_raw_s16),
+                    static_cast<float*>(d_raw))) {
+                return -1;
+            }
+            logical_samples_read = prefetch_half_rate_logical_samples_read;
+            prefetch_valid = false;
+            prefetch_half_rate = false;
+            prefetch_half_rate_read_ok = false;
+        } else {
+            stop_raw_prefetch();
+            if (!cuda_fast_read_upload_half_rate(
+                    reader,
+                    raw_offset - lead_samples,
+                    raw_sample_count,
+                    static_cast<int16_t*>(d_raw_s16),
+                    static_cast<float*>(d_raw_source_f32),
+                    static_cast<float*>(d_raw),
+                    h_half_rate_raw_s16,
+                    h_half_rate_raw_f32,
+                    &logical_samples_read)) {
+                return -1;
+            }
+        }
+        const size_t available = raw_offset < reader.total_samples()
+            ? reader.total_samples() - raw_offset
+            : 0;
+        n_read = std::min(total_samples, available);
+        tail_read = logical_samples_read > lead_samples + n_read
+            ? std::min(tail_samples, logical_samples_read - lead_samples - n_read)
+            : 0;
+    } else if (reader.callback_returns_int16()) {]=]
+    CUVHS_PIPELINE_SOURCE
+    "${CUVHS_PIPELINE_SOURCE}")
+
+set(CUVHS_HALF_RATE_UPLOAD_ENTRY [=[    cudaError_t raw_upload_status;
+    if (h_raw_s16 != nullptr) {]=])
+string(FIND
+    "${CUVHS_PIPELINE_SOURCE}"
+    "${CUVHS_HALF_RATE_UPLOAD_ENTRY}"
+    CUVHS_HALF_RATE_UPLOAD_ENTRY_INDEX)
+if(CUVHS_HALF_RATE_UPLOAD_ENTRY_INDEX EQUAL -1)
+    message(FATAL_ERROR
+        "Pinned cuVHS pipeline no longer has the expected preview half-rate upload insertion point")
+endif()
+string(REPLACE
+    "${CUVHS_HALF_RATE_UPLOAD_ENTRY}"
+    [=[    cudaError_t raw_upload_status = cudaSuccess;
+    if (gpu_half_rate_input) {
+        // The native-rate RF was uploaded and decimated directly into d_raw.
+    } else if (h_raw_s16 != nullptr) {]=]
+    CUVHS_PIPELINE_SOURCE
+    "${CUVHS_PIPELINE_SOURCE}")
+
 set(CUVHS_PROCESS_CHUNK_ENTRY
     "int Pipeline::process_chunk(size_t raw_offset, int num_fields, size_t& next_raw_offset) {")
 string(FIND
@@ -3428,6 +3660,8 @@ string(REPLACE
     "${CUVHS_PROCESS_CHUNK_ENTRY}"
     [=[void Pipeline::stop_raw_prefetch() {
     if (raw_prefetch_thread.joinable()) raw_prefetch_thread.join();
+    prefetch_half_rate = false;
+    prefetch_half_rate_read_ok = false;
     prefetch_valid = false;
 }
 
@@ -3447,11 +3681,6 @@ void Pipeline::start_raw_prefetch(size_t raw_offset, int num_fields) {
     const size_t total_samples = static_cast<size_t>(num_fields) * spf_padded;
     const size_t tail_samples = static_cast<size_t>(FM_DEMOD_OVERLAP_SAMPLES);
     const size_t raw_sample_count = lead_samples + total_samples + tail_samples;
-    if (h_prefetch_capacity_samples < raw_sample_count) {
-        delete[] h_prefetch_raw_s16;
-        h_prefetch_raw_s16 = new int16_t[raw_sample_count];
-        h_prefetch_capacity_samples = raw_sample_count;
-    }
 
     prefetch_raw_offset = raw_offset;
     prefetch_num_fields = num_fields;
@@ -3460,7 +3689,27 @@ void Pipeline::start_raw_prefetch(size_t raw_offset, int num_fields) {
     prefetch_tail_samples = tail_samples;
     prefetch_n_read = 0;
     prefetch_tail_read = 0;
+    prefetch_half_rate_logical_samples_read = 0;
+    prefetch_half_rate = reader.device_decimation_factor() == 2;
+    prefetch_half_rate_read_ok = false;
     prefetch_valid = true;
+    if (prefetch_half_rate) {
+        raw_prefetch_thread = std::thread([this, raw_sample_count]() {
+            prefetch_half_rate_read_ok = cuda_fast_read_half_rate_s16(
+                reader,
+                prefetch_raw_offset - prefetch_lead_samples,
+                raw_sample_count,
+                h_half_rate_raw_s16,
+                &prefetch_half_rate_logical_samples_read);
+        });
+        return;
+    }
+
+    if (h_prefetch_capacity_samples < raw_sample_count) {
+        delete[] h_prefetch_raw_s16;
+        h_prefetch_raw_s16 = new int16_t[raw_sample_count];
+        h_prefetch_capacity_samples = raw_sample_count;
+    }
     raw_prefetch_thread = std::thread([this]() {
         if (prefetch_lead_samples > 0) {
             reader.read_raw_at(
@@ -3543,7 +3792,8 @@ string(REPLACE
     "${CUVHS_PIPELINE_SOURCE}")
 
 set(CUVHS_PIPELINE_RUN_ENTRY [=[bool Pipeline::run() {
-    if (!allocate_buffers())]=])
+    if (!allocate_buffers())
+        return false;]=])
 string(FIND
     "${CUVHS_PIPELINE_SOURCE}"
     "${CUVHS_PIPELINE_RUN_ENTRY}"
@@ -3555,6 +3805,22 @@ endif()
 string(REPLACE
     "${CUVHS_PIPELINE_RUN_ENTRY}"
     [=[bool Pipeline::run() {
+    stop_raw_prefetch();
+    field_offsets.clear();
+    k2b_prev_first_field = -1;
+    k2b_startup_hsync_streak = 0;
+    output_have_parity = false;
+    output_last_parity = false;
+    k2b_prev_progressive_field = -1;
+    k2b_prev_first_hsync_readloc = -1;
+    k2b_prev_first_hsync_loc = -1.0f;
+    k2b_prev_first_hsync_diff = -1.0f;
+    chroma_state.valid = false;
+    chroma_state.current_track = 0;
+    chroma_state.good_metric_threshold = 0.0f;
+    chroma_state.cycle_start = 0;
+    chroma_state.prev_quadrant = -1;
+
     // The first managed FLAC read and CUDA/cuFFT initialization are both
     // substantial one-time costs. Start the bounded read first so device
     // allocation and plan construction can overlap it. The normal batch is
@@ -3565,7 +3831,68 @@ string(REPLACE
         initial_prefetch_fields = std::max(1, atoi(initial_batch_override));
     }
     start_raw_prefetch(0, initial_prefetch_fields);
-    if (!allocate_buffers())]=]
+    if (d_raw == nullptr && !allocate_buffers()) {
+        stop_raw_prefetch();
+        return false;
+    }]=]
+    CUVHS_PIPELINE_SOURCE
+    "${CUVHS_PIPELINE_SOURCE}")
+
+set(CUVHS_PIPELINE_RUN_LOOP [=[    while (true) {
+        int fields_this_chunk = batch_size;]=])
+string(FIND
+    "${CUVHS_PIPELINE_SOURCE}"
+    "${CUVHS_PIPELINE_RUN_LOOP}"
+    CUVHS_PIPELINE_RUN_LOOP_INDEX)
+if(CUVHS_PIPELINE_RUN_LOOP_INDEX EQUAL -1)
+    message(FATAL_ERROR
+        "Pinned cuVHS pipeline no longer has the expected output-completion loop")
+endif()
+string(REPLACE
+    "${CUVHS_PIPELINE_RUN_LOOP}"
+    [=[    while (true) {
+        if (writer.output_complete()) break;
+        int fields_this_chunk = batch_size;]=]
+    CUVHS_PIPELINE_SOURCE
+    "${CUVHS_PIPELINE_SOURCE}")
+
+set(CUVHS_PIPELINE_PROCESS_FAILURE [=[        if (processed < 0) {
+            free_buffers();
+            return false;
+        }]=])
+string(FIND
+    "${CUVHS_PIPELINE_SOURCE}"
+    "${CUVHS_PIPELINE_PROCESS_FAILURE}"
+    CUVHS_PIPELINE_PROCESS_FAILURE_INDEX)
+if(CUVHS_PIPELINE_PROCESS_FAILURE_INDEX EQUAL -1)
+    message(FATAL_ERROR
+        "Pinned cuVHS pipeline no longer has the expected process failure cleanup")
+endif()
+string(REPLACE
+    "${CUVHS_PIPELINE_PROCESS_FAILURE}"
+    [=[        if (processed < 0) {
+            stop_raw_prefetch();
+            demod_state.destroy();
+            chroma_state_release(&chroma_state);
+            free_buffers();
+            return false;
+        }]=]
+    CUVHS_PIPELINE_SOURCE
+    "${CUVHS_PIPELINE_SOURCE}")
+
+set(CUVHS_PIPELINE_FINALIZE [=[    return writer.finalize();]=])
+string(FIND
+    "${CUVHS_PIPELINE_SOURCE}"
+    "${CUVHS_PIPELINE_FINALIZE}"
+    CUVHS_PIPELINE_FINALIZE_INDEX)
+if(CUVHS_PIPELINE_FINALIZE_INDEX EQUAL -1)
+    message(FATAL_ERROR
+        "Pinned cuVHS pipeline no longer has the expected finalization return")
+endif()
+string(REPLACE
+    "${CUVHS_PIPELINE_FINALIZE}"
+    [=[    stop_raw_prefetch();
+    return writer.finalize();]=]
     CUVHS_PIPELINE_SOURCE
     "${CUVHS_PIPELINE_SOURCE}")
 
@@ -3672,6 +3999,37 @@ string(REPLACE
     [=[    // Download TBC results + dropout metadata and write to disk]=]
     [=[    stage_mark("dropout");
 
+    if (writer.accepts_device_fields()) {
+        std::vector<int> h_preview_is_first(static_cast<size_t>(fields_loaded));
+        const cudaError_t parity_status = cudaMemcpy(
+            h_preview_is_first.data(),
+            d_is_first_field,
+            static_cast<size_t>(fields_loaded) * sizeof(int),
+            cudaMemcpyDeviceToHost);
+        const int* h_preview_phase_ids =
+            field_phase_ids.size() >= static_cast<size_t>(fields_loaded)
+            ? field_phase_ids.data()
+            : nullptr;
+        const bool output_ok = parity_status == cudaSuccess
+            && writer.write_preview_device_fields(
+                static_cast<const uint16_t*>(d_tbc_luma),
+                static_cast<const uint16_t*>(d_tbc_chroma),
+                static_cast<const int*>(d_do_lines),
+                static_cast<const int*>(d_do_starts),
+                static_cast<const int*>(d_do_ends),
+                static_cast<const int*>(d_do_count),
+                h_preview_is_first.data(),
+                chunk_field_offsets.data(),
+                h_preview_phase_ids,
+                raw_offset,
+                fields_loaded);
+        delete[] h_k3_debug;
+        if (d_k3_debug) cudaFree(d_k3_debug);
+        cudaFree(d_field_offsets);
+        stage_mark("gpu-preview-render-and-encode");
+        return output_ok ? fields_loaded : -1;
+    }
+
     // Download TBC results + dropout metadata and write to disk]=]
     CUVHS_PIPELINE_SOURCE
     "${CUVHS_PIPELINE_SOURCE}")
@@ -3701,6 +4059,7 @@ string(REPLACE
 string(REPLACE
     [=[#include "pipeline/pipeline.h"]=]
     [=[#include "pipeline/pipeline.h"
+#include "cuda_fast_decimator.h"
 #include "cuda_fast_geometry.h"]=]
     CUVHS_PIPELINE_SOURCE
     "${CUVHS_PIPELINE_SOURCE}")
@@ -3957,6 +4316,8 @@ set(CUVHS_SOURCES
 
 add_library(vhsdecode_cuda_fast SHARED
     src/vhsdecode_cuda_fast.cpp
+    src/cuda_fast_decimator.cu
+    src/cuda_preview_output.cu
     src/raw_reader.cpp
     src/tbc_writer.cpp
     ${CUVHS_SOURCES})
@@ -3970,8 +4331,11 @@ target_include_directories(vhsdecode_cuda_fast PRIVATE
     "${CMAKE_CURRENT_SOURCE_DIR}/include"
     "${CMAKE_CURRENT_BINARY_DIR}/generated/include"
     "${CMAKE_CURRENT_SOURCE_DIR}/overlay"
-    "${cuvhs_SOURCE_DIR}/src")
-target_link_libraries(vhsdecode_cuda_fast PRIVATE CUDA::cudart CUDA::cufft)
+    "${cuvhs_SOURCE_DIR}/src"
+    "${nv_codec_headers_SOURCE_DIR}/include")
+target_link_libraries(
+    vhsdecode_cuda_fast
+    PRIVATE CUDA::cudart CUDA::cuda_driver CUDA::cufft)
 
 if(MSVC)
     set_property(TARGET vhsdecode_cuda_fast PROPERTY

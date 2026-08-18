@@ -9,7 +9,7 @@
 upstream release `v0.4.0`、commit
 `43155200da87c0d49eb37d8ec09b1372075ee8e4` です。
 
-現在の .NET port release は `v0.4.0-2.3.1`（application version `2.3.1`）です。
+現在の .NET port release は `v0.4.0-2.4.0`（application version `2.4.0`）です。
 
 > [!IMPORTANT]
 > この互換移植は現在も開発中です。トップレベルのデコード経路は実装済みで
@@ -38,7 +38,7 @@ upstream release `v0.4.0`、commit
 - VHS family には VHS/S-VHS、Betamax、Video8/Hi8、U-matic、Type C、EIAJ、
   upstream が対応する PAL/NTSC variant が含まれます。
 - TBC utility、ダブルクリック GUI、開発者向け plot window は対象外です。
-- Visual Studio 2026 の `.slnx` には **1,562** 件の標準 xUnit v3 test があり、
+- Visual Studio 2026 の `.slnx` には **1,569** 件の標準 xUnit v3 test があり、
   Test Explorer と `dotnet test` の両方で実行できます。
 
 <!-- SECTION: start -->
@@ -87,6 +87,26 @@ sample-rate behavior を維持します。この最適化は自動で、user-fac
 1 つの pipeline が利用できる FFmpeg が必要で、`VHSDECODE_FFMPEG` と
 `VHSDECODE_FFPROBE` で path を明示できます。
 
+native-rate 40 MSPS PAL/NTSC VHS では、独立した GPU preview path を明示的に
+選択することもできます。
+
+```powershell
+decode.exe vhs --preview-server --dsp-backend cuda-fast --pal input.ldf
+```
+
+この path は 1 つの CUDA context を window 間で再利用し、anti-alias 付き 40→20
+MSPS decimation、sync、FM/chroma/dropout processing、NV12 bob rendering、NVENC
+H.264 encode を GPU 上で実行します。NVENC は CUDA device pointer を直接 register
+するため、host memory に戻るのは圧縮済み H.264 packet だけで、FFmpeg は HLS/fMP4
+への copy-mux のみを担当します。compatible NVIDIA GPU が必須で、CPU preview や
+別 encoder へ fallback しません。tested RTX 4070 と 1 本の real PAL capture の
+steady-state 2 秒 window 4 個では、CUDA の平均は 1.142 秒、default 20-thread IPP
+preview は 1.528 秒でした。wall time は 25.3% 少なく、source-frame throughput は
+32.8% 高くなりました。最初の cold CUDA window は persistent CUDA/cuFFT/NVENC
+state の作成により遅く、2.447 秒対 2.153 秒でした。両 preview の見え方は近く、
+1 field の timing offset を補正した rendered SSIM は 0.927867 です。これは当該
+capture/hardware に限定した preview 結果であり、Exact equivalence ではありません。
+
 <!-- SECTION: profiles -->
 
 ## Behavior profile と backend
@@ -122,8 +142,9 @@ default Windows release は小型 CUDA-fast bridge を保持しますが、271 M
 cuFFT 12 を検索し、見つからない場合は NVIDIA driver を先に確認してから NVIDIA の
 pinned 202.2 MiB redistributable を download します。archive と DLL を個別に
 SHA-256 検証し、`%LOCALAPPDATA%\vhs-decode-dotnet\cuda\cufft` へ一度だけ install
-します。Exact、IPP、preview path は network access しません。offline/system runtime
-は `VHSDECODE_CUDA_RUNTIME_PATH`、cache root は `VHSDECODE_CUDA_CACHE_PATH`、automatic
+します。Exact、IPP、および `cuda-fast` を明示していない preview path は network
+access しません。offline/system runtime は `VHSDECODE_CUDA_RUNTIME_PATH`、cache root は
+`VHSDECODE_CUDA_CACHE_PATH`、automatic
 download の無効化は `VHSDECODE_CUDA_AUTO_DOWNLOAD=0` で指定できます。
 
 LaserDisc の video、EFM、analog-audio full-complex FFT stage は IPP に接続済みです。
@@ -242,7 +263,7 @@ header は FFmpeg を維持します。
 dotnet restore VHSDecodeDotNet.slnx
 dotnet build VHSDecodeDotNet.slnx -c Release --no-restore
 dotnet test --solution VHSDecodeDotNet.slnx -c Release `
-  --no-build --no-restore --minimum-expected-tests 1562
+  --no-build --no-restore --minimum-expected-tests 1569
 ```
 
 Visual Studio 2026 で `VHSDecodeDotNet.slnx` を開くと、build、debug、

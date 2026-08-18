@@ -2229,7 +2229,7 @@ dotnet test --solution VHSDecodeDotNet.slnx --no-build
 ```
 
 The current formal solution build completes with zero warnings and errors, and
-the xUnit v3 project exposes 1,562 independently discoverable tests
+the xUnit v3 project exposes 1,569 independently discoverable tests
 to `dotnet test` and Visual Studio Test Explorer. On the
 same Windows machine and fixtures, Release wall-clock measurements for one
 frame were 2.346 s versus 7.193 s for NTSC VHS and 1.651 s versus 5.865 s for
@@ -3064,12 +3064,12 @@ run, and Exact PAL parity geometry, and does not modify pixels. Configuration
 fails if the pinned source no longer matches those guards. The full GPU signal
 plane is FP32, including cuFFT storage and transforms; only one-time high-order
 host filter design stays FP64 before explicit coefficient quantization. Native
-bridge ABI v4 accepts direct PCM16 from raw signed-16, eligible libsndfile, and
+bridge ABI v5 accepts direct PCM16 from raw signed-16, eligible libsndfile, and
 FFmpeg PCM16 loaders, halves host-to-device input bytes, and converts exactly
 representable signed-16 values into the FP32 signal plane on GPU. The managed
 FP32 callback remains available as a fallback. Persistent chroma workspace, a
 16-field automatic batch cap, and a parallel deterministic sync-pulse kernel
-remove the largest avoidable setup, transfer, and serial-scan costs. ABI v4
+remove the largest avoidable setup, transfer, and serial-scan costs. ABI v5
 also separates the requested output-field cap from available RF input. The
 native pipeline can scan past weak/no-signal leaders, requires stable
 horizontal cadence before fallback field-order seeding, rejects invalid fields
@@ -3098,6 +3098,47 @@ read block, page-locked input (-0.84%), and asynchronous dropout allocation
 A CUDA 13.0.88 Release build using MSVC 14.44 passed its native smoke,
 parallel-pulse, direct Exact-style dropout, and synthetic NTSC pipeline tests
 on an RTX 4070 (compute 8.9, 12 GiB VRAM).
+
+ABI v5 also adds an explicit VHS preview route selected only by combining
+`--preview-server` with `--dsp-backend cuda-fast`. For native-rate 40 MSPS
+PAL/NTSC input, one native context persists across windows. A deterministic
+15-tap CUDA FIR reduces RF to 20 MSPS with anti-aliasing before the existing GPU
+sync, FM, time-base, chroma, and dropout stages. A new device-side output stage
+renders field-rate bob directly into NV12. NVENC registers the CUDA device
+pointer and produces H.264 without downloading decoded image planes; only the
+compressed packets cross to managed memory, where FFmpeg copy-muxes them into
+HLS/fMP4. The explicit path fails closed if CUDA, cuFFT, or NVENC is unavailable
+and does not fall back to IPP, Exact, QSV, AMF, or libx264. Native runtime tests
+passed on the RTX 4070, and prefetch enabled/disabled A/B outputs had identical
+init fragments, media segments, and decoded 100-frame SHA-256 values.
+
+The fixed real PAL `.ldf` exposed a duration-probe defect during this gate. Its
+FLAC STREAMINFO total, 3,783,262,208 samples, represents only 94.5815552 seconds
+at 40 MSPS because the capture count wrapped by five 32-bit periods. A tail
+frame index recovered 25,258,098,688 samples, or 631.4524672 seconds. Preview
+and CUDA sample-count routing now prefer the indexed tail, and the index accepts
+the last point only from at least three exactly sequential fixed-block frame
+headers so an isolated CRC8-valid false header cannot inflate duration. A
+synthetic wrapped-count regression includes both a valid three-frame tail and
+an isolated high false header. The real server reports 631.44 seconds and 316
+windows; random W70 and final W315 both completed. Four canceled W80-W83
+requests left the process healthy and a following W90 request returned 200.
+
+Using the same current executable and capture, steady two-second windows
+W15/W25/W30/W35 averaged 1.14225 seconds for CUDA and 1.52818 seconds for the
+default 20-thread IPP preview. Equivalent throughput was about 43.8 versus
+33.0 source fps: CUDA used 25.3% less wall time and delivered about 32.8% more
+throughput. `decode.exe` process CPU averaged 0.914 versus 8.719 seconds, but
+that metric excludes the FFmpeg child in both paths. Cold W5 was 2.4468 seconds
+for CUDA and 2.1526 seconds for IPP because CUDA creates persistent
+CUDA/cuFFT/NVENC state once. Both outputs probed as H.264 Main, 768x576,
+progressive 50 fps, yuv420p with the expected PAL tags. CUDA begins about one
+output field earlier; aligning CUDA frames 0-98 with IPP frames 1-99 produced
+SSIM Y/U/V/All of 0.907542/0.964438/0.972597/0.927867. Manual inspection found
+closely matching scene content, colour, and motion with small line/dropout
+differences. This is real-PAL preview evidence only; it neither establishes
+Exact compatibility nor certifies real-NTSC preview quality.
+
 The Windows release workflow separately installs pinned CUDA 13.0.3 and uses
 `-SkipRuntimeTests` on the GPU-less hosted runner. That gate still compiles the
 bridge and native tests, audits dependencies, and stages the bridge/notices.
@@ -3173,7 +3214,7 @@ across non-aligned boundaries. This covers NTSC geometry, lifecycle, and
 determinism only; no real NTSC VHS capture was locally available for
 color/quality certification.
 
-The final .NET 11 Preview 7 xUnit v3 run discovered all 1,562 tests: 1,560
+The final .NET 11 Preview 7 xUnit v3 run discovered all 1,569 tests: 1,567
 passed, none failed, and two PAL/NTSC AMF encoder cases were skipped because the
 AMD runtime is unavailable on the NVIDIA development machine. The CUDA-focused
 coverage includes parser/backend isolation, ABI and real native probing,
@@ -3181,7 +3222,11 @@ unsupported-surface rejection, no-fallback behavior, managed random-read
 callbacks, cancellation, output trimming, global metadata rebasing, direct
 DecodeRunner routing that bypasses managed session construction, deterministic
 parallel sync semantics, bounded leader scanning and exact output length, and
-the synthetic NTSC full-pipeline gate. Twelve runtime-provisioning tests cover
+the synthetic NTSC full-pipeline gate. Preview coverage additionally checks
+the ABI v5 contract, persistent-session lifecycle, explicit VHS-only routing,
+40-to-20 MSPS GPU decimation, direct NVENC/copy-mux arguments, cancellation,
+wrapped FLAC duration recovery, and real FFmpeg fragment compliance. Twelve
+runtime-provisioning tests cover
 official package pins, trusted search order, opt-out, verified cache reuse,
 download progress, archive/DLL hashes, license extraction, driver preflight,
 cross-process single-download semantics, cancellation, and lean publish gates.

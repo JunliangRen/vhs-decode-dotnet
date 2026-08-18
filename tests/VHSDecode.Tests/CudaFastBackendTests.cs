@@ -11,12 +11,15 @@ namespace VHSDecode.Tests;
 
 public sealed class CudaFastBackendTests
 {
-    [Fact(DisplayName = "CUDA-fast managed structures match native ABI v4")]
+    [Fact(DisplayName = "CUDA-fast managed structures match native ABI v5")]
     public void ManagedStructuresMatchNativeAbi()
     {
         Assert.Equal(168, CudaFastNativeRuntime.RuntimeInfoStructureSize);
         Assert.Equal(80, CudaFastNativeRuntime.ConfigurationStructureSize);
         Assert.Equal(24, CudaFastNativeRuntime.ResultStructureSize);
+        Assert.Equal(56, CudaFastNativeRuntime.PreviewConfigurationStructureSize);
+        Assert.Equal(64, CudaFastNativeRuntime.PreviewWindowStructureSize);
+        Assert.Equal(32, CudaFastNativeRuntime.PreviewResultStructureSize);
     }
 
     [Fact(DisplayName = "CUDA-fast staged native bridge loads with the pinned ABI")]
@@ -55,7 +58,7 @@ public sealed class CudaFastBackendTests
         Assert.Contains("Test GPU", diagnostic, StringComparison.Ordinal);
         Assert.Contains("compute 8.9", diagnostic, StringComparison.Ordinal);
         Assert.Contains("12.0 GiB", diagnostic, StringComparison.Ordinal);
-        Assert.Contains("0x00040000", diagnostic, StringComparison.Ordinal);
+        Assert.Contains("0x00050000", diagnostic, StringComparison.Ordinal);
     }
 
     [Fact(DisplayName = "CUDA-fast native build pins the signal data plane to FP32")]
@@ -102,6 +105,70 @@ public sealed class CudaFastBackendTests
         Assert.Contains("convert_s16_to_float<<<", geometry, StringComparison.Ordinal);
         Assert.Contains("RawReaderCallbackFormat::Int16", rawReader, StringComparison.Ordinal);
         Assert.Contains("read_raw_at", rawReader, StringComparison.Ordinal);
+    }
+
+    [Fact(DisplayName = "CUDA preview keeps the 40-to-20 MSPS and NVENC data plane on the GPU")]
+    public void NativePreviewKeepsDownsampledFramesOnTheGpu()
+    {
+        string cmake = ReadNativeBuildDefinition();
+        string normalizedCmake = cmake.Replace("\r\n", "\n", StringComparison.Ordinal);
+        string decimator = ReadNativeSource("src", "cuda_fast_decimator.cu");
+        string output = ReadNativeSource("src", "cuda_preview_output.cu");
+        string writer = ReadNativeSource("overlay", "io", "tbc_writer.h");
+
+        Assert.Contains("reader.device_decimation_factor() == 2", cmake, StringComparison.Ordinal);
+        Assert.Contains("cuda_fast_read_upload_half_rate(", cmake, StringComparison.Ordinal);
+        Assert.Contains("cuda_fast_read_half_rate_s16(", cmake, StringComparison.Ordinal);
+        Assert.Contains("cuda_fast_upload_half_rate_s16(", cmake, StringComparison.Ordinal);
+        Assert.Contains("prefetch_half_rate_read_ok", cmake, StringComparison.Ordinal);
+        Assert.Contains("CUVHS_DISABLE_RF_PREFETCH", cmake, StringComparison.Ordinal);
+        Assert.Contains("constexpr int kHalfWidth = 15;", decimator, StringComparison.Ordinal);
+        Assert.Contains("0.5000046374907835f", decimator, StringComparison.Ordinal);
+        Assert.Contains("source_buffer_count * sizeof(int16_t)", decimator, StringComparison.Ordinal);
+        Assert.Contains("cudaMemcpyHostToDevice", decimator, StringComparison.Ordinal);
+        Assert.Contains("NV_ENC_INPUT_RESOURCE_TYPE_CUDADEVICEPTR", output, StringComparison.Ordinal);
+        Assert.Contains("registration.resourceToRegister = d_nv12;", output, StringComparison.Ordinal);
+        Assert.Contains("NV_ENC_BUFFER_FORMAT_NV12", output, StringComparison.Ordinal);
+        Assert.DoesNotContain("cudaMemcpyDeviceToHost", output, StringComparison.Ordinal);
+        Assert.Contains("accepts_device_fields()", writer, StringComparison.Ordinal);
+        Assert.Contains(
+            "[=[    if (!writer.accepts_device_fields()) {\n"
+                + "        // Progress display",
+            normalizedCmake,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "[=[        if (!writer.accepts_device_fields()) {\n"
+                + "        // Progress dashboard",
+            normalizedCmake,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "[=[    if (!writer.accepts_device_fields()) {\n"
+                + "    // Final summary",
+            normalizedCmake,
+            StringComparison.Ordinal);
+
+        int directOutput = cmake.IndexOf(
+            "writer.write_preview_device_fields(",
+            StringComparison.Ordinal);
+        int regularDownload = cmake.IndexOf(
+            "// Download TBC results + dropout metadata and write to disk]=]",
+            directOutput,
+            StringComparison.Ordinal);
+        Assert.True(directOutput >= 0 && regularDownload > directOutput);
+    }
+
+    [Fact(DisplayName = "CUDA preview uses fast container seeking without changing full decode")]
+    public void PreviewInputLoaderUsesFastContainerSeekingOnlyWhenRequested()
+    {
+        using var full = Assert.IsType<CudaFastDecodeRunner.FfmpegPcm16InputAdapter>(
+            CudaFastDecodeRunner.CreateInputLoader("capture.ldf"));
+        using var preview = Assert.IsType<CudaFastDecodeRunner.FfmpegPcm16InputAdapter>(
+            CudaFastDecodeRunner.CreateInputLoader(
+                "capture.ldf",
+                fastContainerSeeking: true));
+
+        Assert.False(full.FastInputSeek);
+        Assert.True(preview.FastInputSeek);
     }
 
     [Fact(DisplayName = "CUDA-fast reuses and releases its persistent chroma workspace")]
@@ -309,7 +376,10 @@ public sealed class CudaFastBackendTests
         Assert.Contains("prefetch_num_fields >= num_fields", cmake, StringComparison.Ordinal);
         Assert.Contains("CUVHS_FORCE_JSON_EVERY_CHUNK", cmake, StringComparison.Ordinal);
         Assert.Contains("std::chrono::seconds(1)", cmake, StringComparison.Ordinal);
-        Assert.Contains("return writer.finalize();", cmake, StringComparison.Ordinal);
+        Assert.Contains(
+            "stop_raw_prefetch();\n    return writer.finalize();",
+            cmake.Replace("\r\n", "\n", StringComparison.Ordinal),
+            StringComparison.Ordinal);
         Assert.Contains("constexpr size_t kOutputBufferBytes = 4U * 1024U * 1024U;", writer, StringComparison.Ordinal);
         Assert.Contains("std::setvbuf(luma_fp, nullptr, _IOFBF, kOutputBufferBytes);", writer, StringComparison.Ordinal);
         Assert.Contains("std::setvbuf(chroma_fp, nullptr, _IOFBF, kOutputBufferBytes);", writer, StringComparison.Ordinal);
@@ -709,6 +779,111 @@ public sealed class CudaFastBackendTests
         }
     }
 
+    [Fact(DisplayName = "CUDA preview reuses its native session and streams compressed packets")]
+    public void PreviewSessionReusesNativeContextAndStreamsPackets()
+    {
+        string directory = CreateTemporaryDirectory();
+        try
+        {
+            string inputPath = Path.Combine(directory, "input.s16");
+            short[] source = [10, 20, 30, 40, 50, 60, 70, 80];
+            byte[] input = new byte[source.Length * sizeof(short)];
+            Buffer.BlockCopy(source, 0, input, 0, input.Length);
+            File.WriteAllBytes(inputPath, input);
+            IRfSampleLoader loader = CudaFastDecodeRunner.CreateInputLoader(inputPath);
+            var native = new RecordingPreviewNativeSession();
+            var runtimeInfo = new CudaFastRuntimeInfo(
+                CudaFastNativeRuntime.AbiVersion,
+                0,
+                8,
+                9,
+                46,
+                12UL * 1024 * 1024 * 1024,
+                8UL * 1024 * 1024 * 1024,
+                "Test GPU");
+
+            using (var session = new CudaFastPreviewDecodeSession(
+                inputPath,
+                source.Length,
+                loader,
+                native,
+                runtimeInfo))
+            {
+                using var firstOutput = new MemoryStream();
+                using var secondOutput = new MemoryStream();
+                CudaFastPreviewNativeResult first = session.DecodeWindow(
+                    targetSourceSample: 2,
+                    requestedOutputFrames: 4,
+                    firstOutput,
+                    CancellationToken.None);
+                CudaFastPreviewNativeResult second = session.DecodeWindow(
+                    targetSourceSample: 4,
+                    requestedOutputFrames: 4,
+                    secondOutput,
+                    CancellationToken.None);
+
+                Assert.Equal(4U, first.FramesEncoded);
+                Assert.Equal(4U, second.FramesEncoded);
+                Assert.Equal([2UL, 4UL], native.TargetSamples);
+                Assert.Equal([30, 40, 50], native.ReadSamples[0]);
+                Assert.Equal([50, 60, 70], native.ReadSamples[1]);
+                Assert.Equal([0, 0, 1, 1], firstOutput.ToArray());
+                Assert.Equal([0, 0, 1, 2], secondOutput.ToArray());
+                Assert.All(
+                    native.InputFormats,
+                    format => Assert.Equal(CudaFastInputSampleFormat.Int16, format));
+                Assert.Same(runtimeInfo, session.RuntimeInfo);
+            }
+
+            Assert.Equal(2, native.CallCount);
+            Assert.True(native.Disposed);
+        }
+        finally
+        {
+            Directory.Delete(directory, recursive: true);
+        }
+    }
+
+    [Fact(DisplayName = "CUDA preview cancellation stops before entering the persistent native session")]
+    public void PreviewSessionHonorsCancellationBeforeNativeDecode()
+    {
+        string directory = CreateTemporaryDirectory();
+        try
+        {
+            string inputPath = Path.Combine(directory, "input.s16");
+            File.WriteAllBytes(inputPath, new byte[32]);
+            IRfSampleLoader loader = CudaFastDecodeRunner.CreateInputLoader(inputPath);
+            var native = new RecordingPreviewNativeSession();
+            using var session = new CudaFastPreviewDecodeSession(
+                inputPath,
+                totalSourceSamples: 16,
+                loader,
+                native,
+                new CudaFastRuntimeInfo(
+                    CudaFastNativeRuntime.AbiVersion,
+                    0,
+                    8,
+                    9,
+                    46,
+                    12UL * 1024 * 1024 * 1024,
+                    8UL * 1024 * 1024 * 1024,
+                    "Test GPU"));
+            using var cancellation = new CancellationTokenSource();
+            cancellation.Cancel();
+
+            Assert.Throws<OperationCanceledException>(() => session.DecodeWindow(
+                targetSourceSample: 0,
+                requestedOutputFrames: 4,
+                Stream.Null,
+                cancellation.Token));
+            Assert.Equal(0, native.CallCount);
+        }
+        finally
+        {
+            Directory.Delete(directory, recursive: true);
+        }
+    }
+
     private static ParsedCommand Parse(
         string inputPath,
         string outputBase,
@@ -873,6 +1048,66 @@ public sealed class CudaFastBackendTests
                 OutputFieldLines: 1,
                 ElapsedSeconds: 0.01);
         }
+    }
+
+    private sealed class RecordingPreviewNativeSession : ICudaFastPreviewNativeSession
+    {
+        internal int CallCount { get; private set; }
+
+        internal bool Disposed { get; private set; }
+
+        internal List<ulong> TargetSamples { get; } = [];
+
+        internal List<short[]> ReadSamples { get; } = [];
+
+        internal List<CudaFastInputSampleFormat> InputFormats { get; } = [];
+
+        public CudaFastPreviewNativeResult DecodeWindow(
+            CudaFastPreviewWindowConfiguration configuration)
+        {
+            CallCount++;
+            TargetSamples.Add(configuration.TargetSourceSample);
+            InputFormats.Add(configuration.InputSampleFormat);
+            nint input = Marshal.AllocHGlobal(3 * sizeof(short));
+            try
+            {
+                int read = checked((int)configuration.ReadCallback(
+                    configuration.UserData,
+                    input,
+                    configuration.TargetSourceSample,
+                    sampleCount: 3));
+                var samples = new short[read];
+                Marshal.Copy(input, samples, 0, read);
+                ReadSamples.Add(samples);
+            }
+            finally
+            {
+                Marshal.FreeHGlobal(input);
+            }
+
+            byte[] packet = [0, 0, 1, checked((byte)CallCount)];
+            nint packetMemory = Marshal.AllocHGlobal(packet.Length);
+            try
+            {
+                Marshal.Copy(packet, 0, packetMemory, packet.Length);
+                Assert.Equal(0, configuration.BitstreamCallback(
+                    configuration.UserData,
+                    packetMemory,
+                    checked((nuint)packet.Length)));
+            }
+            finally
+            {
+                Marshal.FreeHGlobal(packetMemory);
+            }
+
+            return new CudaFastPreviewNativeResult(
+                configuration.RequestedOutputFrames,
+                configuration.RequestedOutputFrames + 1,
+                checked((ulong)packet.Length),
+                0.01);
+        }
+
+        public void Dispose() => Disposed = true;
     }
 
     private sealed class FallbackOnlyInt16Loader(double[] samples) : IInt16RfSampleLoader

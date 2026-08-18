@@ -38,12 +38,23 @@ struct RawReader {
         RawReaderCallbackFormat callback_format);
     void close();
 
+    // Preview CUDA keeps the managed source at its native rate and performs
+    // anti-aliased decimation after the one host-to-device RF upload.  The
+    // regular full decode always leaves this at one.
+    bool set_device_decimation_factor(int factor);
+    int device_decimation_factor() const { return decimation_factor; }
+
     size_t read_at(float* destination, size_t offset, size_t sample_count);
     size_t read_raw_at(void* destination, size_t offset, size_t sample_count);
     size_t read_next(float* destination, size_t sample_count);
     size_t read_next_raw(void* destination, size_t sample_count);
 
-    size_t total_samples() const { return total_sample_count; }
+    size_t total_samples() const {
+        return decimation_factor > 1
+            ? total_sample_count / static_cast<size_t>(decimation_factor)
+            : total_sample_count;
+    }
+    size_t source_total_samples() const { return total_sample_count; }
     size_t size_bytes() const { return file_size; }
     InputFormat format() const { return fmt; }
     bool is_stream() const { return streaming; }
@@ -65,6 +76,7 @@ private:
     RawReaderCallback callback = nullptr;
     void* callback_user_data = nullptr;
     RawReaderCallbackFormat callback_format = RawReaderCallbackFormat::Float32;
+    int decimation_factor = 1;
 
     void condition(float* destination, size_t sample_count) const;
     void convert(const void* source, float* destination, size_t sample_count) const;

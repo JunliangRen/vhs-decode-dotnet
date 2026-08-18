@@ -4,6 +4,7 @@ using System.Numerics;
 using VHSDecode.Core.CommandLine;
 using VHSDecode.Core.Decode;
 using VHSDecode.Core.Dsp;
+using VHSDecode.Core.Dsp.CudaFast;
 using VHSDecode.Core.Formats;
 using VHSDecode.Core.Rf;
 
@@ -17,6 +18,7 @@ public sealed class DecodePreviewSegmentProvider : IPreviewSegmentProvider
     private readonly double _baseStartSeconds;
     private readonly double _decodeSampleRateHz;
     private readonly PreviewEncoderBackend _encoderBackend;
+    private readonly CudaFastPreviewDecodeSession? _cudaSession;
     private readonly SemaphoreSlim _windowConcurrency;
     private bool _disposed;
 
@@ -28,6 +30,7 @@ public sealed class DecodePreviewSegmentProvider : IPreviewSegmentProvider
         PreviewTimeline timeline,
         PreviewMediaInfo mediaInfo,
         PreviewEncoderBackend encoderBackend,
+        CudaFastPreviewDecodeSession? cudaSession,
         int decoderThreads,
         bool ippFastEnabled,
         double sourceSampleRateHz)
@@ -37,6 +40,7 @@ public sealed class DecodePreviewSegmentProvider : IPreviewSegmentProvider
         _baseStartSeconds = baseStartSeconds;
         _decodeSampleRateHz = decodeSampleRateHz;
         _encoderBackend = encoderBackend;
+        _cudaSession = cudaSession;
         Timeline = timeline;
         MediaInfo = mediaInfo;
         DecoderThreads = decoderThreads;
@@ -44,8 +48,8 @@ public sealed class DecodePreviewSegmentProvider : IPreviewSegmentProvider
         SourceSampleRateHz = sourceSampleRateHz;
         DecodeSampleRateHz = decodeSampleRateHz;
         _windowConcurrency = new SemaphoreSlim(
-            options.MaximumConcurrentWindowBuilds,
-            options.MaximumConcurrentWindowBuilds);
+            cudaSession is null ? options.MaximumConcurrentWindowBuilds : 1,
+            cudaSession is null ? options.MaximumConcurrentWindowBuilds : 1);
     }
 
     public PreviewMediaInfo MediaInfo { get; }
@@ -56,6 +60,8 @@ public sealed class DecodePreviewSegmentProvider : IPreviewSegmentProvider
 
     public bool IppFastEnabled { get; }
 
+    public bool CudaFastEnabled => _cudaSession is not null;
+
     public double SourceSampleRateHz { get; }
 
     public double DecodeSampleRateHz { get; }
@@ -65,7 +71,8 @@ public sealed class DecodePreviewSegmentProvider : IPreviewSegmentProvider
     public static async Task<DecodePreviewSegmentProvider> CreateAsync(
         ParsedCommand command,
         PreviewServerOptions options,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default,
+        TextWriter? diagnosticOutput = null)
     {
         ArgumentNullException.ThrowIfNull(command);
         ArgumentNullException.ThrowIfNull(options);
@@ -106,14 +113,46 @@ public sealed class DecodePreviewSegmentProvider : IPreviewSegmentProvider
             options.SegmentSeconds,
             options.SegmentsPerWindow);
         (int width, int height) = PreviewDimensions(session.System);
-        PreviewEncoderBackend encoderBackend = await PreviewEncoderSelector.SelectAsync(
-            options.FfmpegPath,
-            width,
-            height,
-            options.Crf,
-            session.System,
-            framesPerSecond,
-            cancellationToken).ConfigureAwait(false);
+        bool cudaPreview = session.ExecutionOptions.DspBackend == DspBackend.CudaFast;
+        PreviewEncoderBackend encoderBackend = cudaPreview
+            ? PreviewEncoderBackend.Nvenc
+            : await PreviewEncoderSelector.SelectAsync(
+                options.FfmpegPath,
+                width,
+                height,
+                options.Crf,
+                session.System,
+                framesPerSecond,
+                cancellationToken).ConfigureAwait(false);
+        CudaFastPreviewDecodeSession? cudaSession = null;
+        if (cudaPreview)
+        {
+            if (command.Spec.Name != "vhs"
+                || Math.Abs(inputSampleRateHz - 40_000_000.0) > 0.5)
+            {
+                throw new NotSupportedException(
+                    "CUDA-fast preview requires the VHS command with native 40 MSPS RF input; no CPU preview fallback was performed.");
+            }
+            if (!CudaFastDecodeRunner.TryGetInputSampleCount(
+                    command.InputFile,
+                    out long totalSourceSamples))
+            {
+                throw new NotSupportedException(
+                    $"CUDA-fast preview cannot determine the RF sample count for '{command.InputFile}'.");
+            }
+            cudaSession = CudaFastPreviewDecodeSession.Create(
+                command.InputFile,
+                totalSourceSamples,
+                session.System,
+                command.Get<string>("tape_speed"),
+                width,
+                height,
+                framesPerSecond * 2.0,
+                options.Crf,
+                checked(timeline.FramesPerSegment * 2),
+                diagnosticOutput ?? TextWriter.Null,
+                cancellationToken);
+        }
         string backend = DspBackendParser.ToCommandLineValue(
             session.ExecutionOptions.DspBackend);
         bool twentyMspsRf = Math.Abs(
@@ -128,9 +167,13 @@ public sealed class DecodePreviewSegmentProvider : IPreviewSegmentProvider
             options.Crf,
             Interlaced: false,
             backend,
-            (twentyMspsRf ? "20-msps-rf/" : string.Empty)
-                + "fast-color/full-frame-motion/dropout-conceal/no-audio",
-            PreviewEncoderSelector.DisplayName(encoderBackend));
+            cudaPreview
+                ? "40-to-20-msps-gpu/fast-color/gpu-bob/dropout-conceal/no-audio"
+                : (twentyMspsRf ? "20-msps-rf/" : string.Empty)
+                    + "fast-color/full-frame-motion/dropout-conceal/no-audio",
+            cudaPreview
+                ? "NVENC direct CUDA surface + FFmpeg copy-mux"
+                : PreviewEncoderSelector.DisplayName(encoderBackend));
         return new DecodePreviewSegmentProvider(
             template,
             options,
@@ -139,6 +182,7 @@ public sealed class DecodePreviewSegmentProvider : IPreviewSegmentProvider
             timeline,
             mediaInfo,
             encoderBackend,
+            cudaSession,
             session.ExecutionOptions.WorkerThreads,
             session.ExecutionOptions.DspBackend == DspBackend.IppFast,
             inputSampleRateHz);
@@ -205,6 +249,11 @@ public sealed class DecodePreviewSegmentProvider : IPreviewSegmentProvider
         int windowIndex,
         CancellationToken cancellationToken)
     {
+        if (_cudaSession is not null)
+        {
+            return GenerateCudaWindow(windowIndex, cancellationToken);
+        }
+
         double targetSeconds = _baseStartSeconds + Timeline.WindowStartSeconds(windowIndex);
         double decodeStartSeconds = Math.Max(
             _baseStartSeconds,
@@ -262,6 +311,28 @@ public sealed class DecodePreviewSegmentProvider : IPreviewSegmentProvider
             cancellationToken);
     }
 
+    private PreviewSegmentWindow GenerateCudaWindow(
+        int windowIndex,
+        CancellationToken cancellationToken)
+    {
+        CudaFastPreviewDecodeSession cudaSession = _cudaSession
+            ?? throw new InvalidOperationException("CUDA preview session was not initialized.");
+        double targetSeconds = _baseStartSeconds + Timeline.WindowStartSeconds(windowIndex);
+        long targetSourceSample = checked((long)Math.Round(
+            targetSeconds * SourceSampleRateHz,
+            MidpointRounding.AwayFromZero));
+        int outputFrameCount = checked(Timeline.FrameCountInWindow(windowIndex) * 2);
+        var muxer = new FfmpegH264HlsWindowMuxer(_options.FfmpegPath, Timeline);
+        return muxer.Mux(
+            windowIndex,
+            h264 => cudaSession.DecodeWindow(
+                targetSourceSample,
+                outputFrameCount,
+                h264,
+                cancellationToken),
+            cancellationToken);
+    }
+
     public ValueTask DisposeAsync()
     {
         if (_disposed)
@@ -270,6 +341,7 @@ public sealed class DecodePreviewSegmentProvider : IPreviewSegmentProvider
         }
 
         _disposed = true;
+        _cudaSession?.Dispose();
         _windowConcurrency.Dispose();
         return ValueTask.CompletedTask;
     }

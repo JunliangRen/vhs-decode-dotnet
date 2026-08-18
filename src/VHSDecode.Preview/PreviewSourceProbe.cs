@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using System.Globalization;
 using System.Text.Json;
+using VHSDecode.Core.Rf;
 
 namespace VHSDecode.Preview;
 
@@ -42,6 +43,12 @@ internal static class PreviewSourceProbe
         if (sampleCount.HasValue)
         {
             return sampleCount.Value / inputSampleRateHz;
+        }
+
+        if (RawFlacFrameIndex.TryOpen(path, out RawFlacFrameIndex? frameIndex)
+            && frameIndex is not null)
+        {
+            return frameIndex.TotalSamples / inputSampleRateHz;
         }
 
         if (RawFlacSampleCountProbe.TryGetTotalSamples(path, out long flacSamples))

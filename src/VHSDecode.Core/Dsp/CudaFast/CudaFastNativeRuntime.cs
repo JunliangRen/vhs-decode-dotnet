@@ -49,6 +49,12 @@ internal delegate nuint CudaFastReadCallback(
 [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
 internal delegate int CudaFastCancelCallback(nint userData);
 
+[UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+internal delegate int CudaFastBitstreamCallback(
+    nint userData,
+    nint data,
+    nuint byteCount);
+
 internal sealed record CudaFastNativeRunConfiguration(
     CudaFastProfile Profile,
     CudaFastTapeSpeed TapeSpeed,
@@ -70,6 +76,47 @@ internal interface ICudaFastNativeRuntime
     CudaFastNativeResult Run(CudaFastNativeRunConfiguration configuration);
 }
 
+internal sealed record CudaFastPreviewNativeConfiguration(
+    CudaFastProfile Profile,
+    CudaFastTapeSpeed TapeSpeed,
+    int DeviceId,
+    double SourceSampleRateMhz,
+    double DecodeSampleRateMhz,
+    uint OutputWidth,
+    uint OutputHeight,
+    uint FrameRateNumerator,
+    uint FrameRateDenominator,
+    uint ConstantQp,
+    uint GopLength);
+
+internal sealed record CudaFastPreviewWindowConfiguration(
+    CudaFastInputSampleFormat InputSampleFormat,
+    ulong TotalSourceSamples,
+    ulong TargetSourceSample,
+    uint RequestedOutputFrames,
+    CudaFastReadCallback ReadCallback,
+    CudaFastCancelCallback CancelCallback,
+    CudaFastBitstreamCallback BitstreamCallback,
+    nint UserData);
+
+internal sealed record CudaFastPreviewNativeResult(
+    uint FramesEncoded,
+    uint FieldsScanned,
+    ulong EncodedBytes,
+    double ElapsedSeconds);
+
+internal interface ICudaFastPreviewNativeSession : IDisposable
+{
+    CudaFastPreviewNativeResult DecodeWindow(
+        CudaFastPreviewWindowConfiguration configuration);
+}
+
+internal interface ICudaFastPreviewNativeRuntime
+{
+    ICudaFastPreviewNativeSession CreatePreview(
+        CudaFastPreviewNativeConfiguration configuration);
+}
+
 internal sealed class CudaFastBackendUnavailableException : NotSupportedException
 {
     internal CudaFastBackendUnavailableException(string message, Exception? innerException = null)
@@ -80,9 +127,9 @@ internal sealed class CudaFastBackendUnavailableException : NotSupportedExceptio
     }
 }
 
-internal sealed class CudaFastNativeRuntime : ICudaFastNativeRuntime
+internal sealed class CudaFastNativeRuntime : ICudaFastNativeRuntime, ICudaFastPreviewNativeRuntime
 {
-    internal const uint AbiVersion = 0x00040000;
+    internal const uint AbiVersion = 0x00050000;
     internal const string NativeLibraryName = "vhsdecode_cuda_fast.dll";
     private const int StatusOk = 0;
     private const int StatusCudaUnavailable = -20002;
@@ -99,6 +146,9 @@ internal sealed class CudaFastNativeRuntime : ICudaFastNativeRuntime
     private readonly GetAbiVersionDelegate _getAbiVersion;
     private readonly GetRuntimeInfoDelegate _getRuntimeInfo;
     private readonly RunDelegate _run;
+    private readonly PreviewCreateDelegate _previewCreate;
+    private readonly PreviewDecodeWindowDelegate _previewDecodeWindow;
+    private readonly PreviewDestroyDelegate _previewDestroy;
     private readonly GetLastErrorDelegate _getLastError;
 
     private CudaFastNativeRuntime(nint libraryHandle, nint cuFftHandle)
@@ -112,6 +162,15 @@ internal sealed class CudaFastNativeRuntime : ICudaFastNativeRuntime
             libraryHandle,
             "vhsdecode_cuda_fast_get_runtime_info");
         _run = GetExport<RunDelegate>(libraryHandle, "vhsdecode_cuda_fast_run");
+        _previewCreate = GetExport<PreviewCreateDelegate>(
+            libraryHandle,
+            "vhsdecode_cuda_fast_preview_create");
+        _previewDecodeWindow = GetExport<PreviewDecodeWindowDelegate>(
+            libraryHandle,
+            "vhsdecode_cuda_fast_preview_decode_window");
+        _previewDestroy = GetExport<PreviewDestroyDelegate>(
+            libraryHandle,
+            "vhsdecode_cuda_fast_preview_destroy");
         _getLastError = GetExport<GetLastErrorDelegate>(
             libraryHandle,
             "vhsdecode_cuda_fast_get_last_error");
@@ -138,11 +197,28 @@ internal sealed class CudaFastNativeRuntime : ICudaFastNativeRuntime
         return RequireAvailableCore(output, cancellationToken, allowDownload: true);
     }
 
+    internal static ICudaFastPreviewNativeRuntime RequirePreviewAvailable(
+        TextWriter output,
+        CancellationToken cancellationToken)
+        => (ICudaFastPreviewNativeRuntime)RequireAvailableCore(
+            output,
+            cancellationToken,
+            allowDownload: true);
+
     internal static unsafe int RuntimeInfoStructureSize => sizeof(NativeRuntimeInfo);
 
     internal static unsafe int ConfigurationStructureSize => sizeof(NativeConfiguration);
 
     internal static unsafe int ResultStructureSize => sizeof(NativeResult);
+
+    internal static unsafe int PreviewConfigurationStructureSize
+        => sizeof(NativePreviewConfiguration);
+
+    internal static unsafe int PreviewWindowStructureSize
+        => sizeof(NativePreviewWindow);
+
+    internal static unsafe int PreviewResultStructureSize
+        => sizeof(NativePreviewResult);
 
     public unsafe CudaFastRuntimeInfo GetRuntimeInfo(int deviceId = 0)
     {
@@ -217,6 +293,36 @@ internal sealed class CudaFastNativeRuntime : ICudaFastNativeRuntime
         {
             Marshal.FreeCoTaskMem(outputBaseUtf8);
         }
+    }
+
+    public unsafe ICudaFastPreviewNativeSession CreatePreview(
+        CudaFastPreviewNativeConfiguration configuration)
+    {
+        ArgumentNullException.ThrowIfNull(configuration);
+        var nativeConfiguration = new NativePreviewConfiguration
+        {
+            StructSize = checked((uint)sizeof(NativePreviewConfiguration)),
+            Profile = (uint)configuration.Profile,
+            TapeSpeed = (uint)configuration.TapeSpeed,
+            DeviceId = configuration.DeviceId,
+            SourceSampleRateMhz = configuration.SourceSampleRateMhz,
+            DecodeSampleRateMhz = configuration.DecodeSampleRateMhz,
+            OutputWidth = configuration.OutputWidth,
+            OutputHeight = configuration.OutputHeight,
+            FrameRateNumerator = configuration.FrameRateNumerator,
+            FrameRateDenominator = configuration.FrameRateDenominator,
+            ConstantQp = configuration.ConstantQp,
+            GopLength = configuration.GopLength
+        };
+        int status = _previewCreate(ref nativeConfiguration, out nint context);
+        ThrowForStatus(status, "preview initialization");
+        if (context == 0)
+        {
+            throw new InvalidOperationException(
+                "CUDA-fast preview initialization returned a null native context.");
+        }
+
+        return new NativePreviewSession(this, context);
     }
 
     private static CudaFastNativeRuntime RequireAvailableCore(
@@ -531,6 +637,20 @@ internal sealed class CudaFastNativeRuntime : ICudaFastNativeRuntime
         ref NativeResult result);
 
     [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+    private delegate int PreviewCreateDelegate(
+        ref NativePreviewConfiguration configuration,
+        out nint context);
+
+    [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+    private delegate int PreviewDecodeWindowDelegate(
+        nint context,
+        ref NativePreviewWindow window,
+        ref NativePreviewResult result);
+
+    [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+    private delegate void PreviewDestroyDelegate(nint context);
+
+    [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
     private delegate nint GetLastErrorDelegate();
 
     [StructLayout(LayoutKind.Sequential)]
@@ -573,5 +693,105 @@ internal sealed class CudaFastNativeRuntime : ICudaFastNativeRuntime
         public uint OutputLineLength;
         public uint OutputFieldLines;
         public double ElapsedSeconds;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct NativePreviewConfiguration
+    {
+        public uint StructSize;
+        public uint Profile;
+        public uint TapeSpeed;
+        public int DeviceId;
+        public double SourceSampleRateMhz;
+        public double DecodeSampleRateMhz;
+        public uint OutputWidth;
+        public uint OutputHeight;
+        public uint FrameRateNumerator;
+        public uint FrameRateDenominator;
+        public uint ConstantQp;
+        public uint GopLength;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct NativePreviewWindow
+    {
+        public uint StructSize;
+        public uint InputSampleFormat;
+        public ulong TotalSourceSamples;
+        public ulong TargetSourceSample;
+        public uint RequestedOutputFrames;
+        public uint Reserved;
+        public nint ReadCallback;
+        public nint CancelCallback;
+        public nint BitstreamCallback;
+        public nint UserData;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct NativePreviewResult
+    {
+        public uint StructSize;
+        public uint FramesEncoded;
+        public uint FieldsScanned;
+        public uint Reserved;
+        public ulong EncodedBytes;
+        public double ElapsedSeconds;
+    }
+
+    private sealed class NativePreviewSession(
+        CudaFastNativeRuntime runtime,
+        nint context) : ICudaFastPreviewNativeSession
+    {
+        private readonly CudaFastNativeRuntime _runtime = runtime;
+        private nint _context = context;
+
+        public unsafe CudaFastPreviewNativeResult DecodeWindow(
+            CudaFastPreviewWindowConfiguration configuration)
+        {
+            ArgumentNullException.ThrowIfNull(configuration);
+            ArgumentNullException.ThrowIfNull(configuration.ReadCallback);
+            ArgumentNullException.ThrowIfNull(configuration.CancelCallback);
+            ArgumentNullException.ThrowIfNull(configuration.BitstreamCallback);
+            nint current = Volatile.Read(ref _context);
+            ObjectDisposedException.ThrowIf(current == 0, this);
+            var nativeWindow = new NativePreviewWindow
+            {
+                StructSize = checked((uint)sizeof(NativePreviewWindow)),
+                InputSampleFormat = (uint)configuration.InputSampleFormat,
+                TotalSourceSamples = configuration.TotalSourceSamples,
+                TargetSourceSample = configuration.TargetSourceSample,
+                RequestedOutputFrames = configuration.RequestedOutputFrames,
+                ReadCallback = Marshal.GetFunctionPointerForDelegate(configuration.ReadCallback),
+                CancelCallback = Marshal.GetFunctionPointerForDelegate(configuration.CancelCallback),
+                BitstreamCallback = Marshal.GetFunctionPointerForDelegate(configuration.BitstreamCallback),
+                UserData = configuration.UserData
+            };
+            var nativeResult = new NativePreviewResult
+            {
+                StructSize = checked((uint)sizeof(NativePreviewResult))
+            };
+            int status = _runtime._previewDecodeWindow(
+                current,
+                ref nativeWindow,
+                ref nativeResult);
+            GC.KeepAlive(configuration.ReadCallback);
+            GC.KeepAlive(configuration.CancelCallback);
+            GC.KeepAlive(configuration.BitstreamCallback);
+            _runtime.ThrowForStatus(status, "preview window decode");
+            return new CudaFastPreviewNativeResult(
+                nativeResult.FramesEncoded,
+                nativeResult.FieldsScanned,
+                nativeResult.EncodedBytes,
+                nativeResult.ElapsedSeconds);
+        }
+
+        public void Dispose()
+        {
+            nint current = Interlocked.Exchange(ref _context, 0);
+            if (current != 0)
+            {
+                _runtime._previewDestroy(current);
+            }
+        }
     }
 }

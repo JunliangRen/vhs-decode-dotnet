@@ -219,7 +219,13 @@ internal sealed class RawFlacFrameIndex
         }
 
         FramePoint first = firstPoints.MinBy(static point => point.StartSample);
-        FramePoint last = lastPoints.MaxBy(static point => point.StartSample);
+        if (!TrySelectLastSequentialFrame(
+                lastPoints,
+                streamInfo.MinimumBlockSize,
+                out FramePoint last))
+        {
+            return null;
+        }
         if (first.StartSample != 0
             || last.StartSample <= first.StartSample
             || last.ByteOffset <= first.ByteOffset)
@@ -234,6 +240,39 @@ internal sealed class RawFlacFrameIndex
             streamInfo,
             first,
             last);
+    }
+
+    private static bool TrySelectLastSequentialFrame(
+        IReadOnlyList<FramePoint> points,
+        int fixedBlockSize,
+        out FramePoint last)
+    {
+        last = default;
+        if (points.Count < 3 || fixedBlockSize <= 0)
+        {
+            return false;
+        }
+
+        FramePoint previous = points[0];
+        int runLength = 1;
+        bool found = false;
+        for (int index = 1; index < points.Count; index++)
+        {
+            FramePoint current = points[index];
+            bool sequential = previous.StartSample <= long.MaxValue - fixedBlockSize
+                && current.ByteOffset > previous.ByteOffset
+                && current.BlockSize == fixedBlockSize
+                && current.StartSample == previous.StartSample + fixedBlockSize;
+            runLength = sequential ? runLength + 1 : 1;
+            if (runLength >= 3)
+            {
+                last = current;
+                found = true;
+            }
+            previous = current;
+        }
+
+        return found;
     }
 
     private bool TryProbeAround(

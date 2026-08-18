@@ -24,11 +24,12 @@ internal static class PreviewDecodeCommandFactory
             throw new ArgumentException("Preview mode requires exactly one RF input file.");
         }
 
-        if (DspBackendParser.Parse(command.Get<string>("dsp_backend"))
-            == DspBackend.CudaFast)
+        bool cudaFast = DspBackendParser.Parse(command.Get<string>("dsp_backend"))
+            == DspBackend.CudaFast;
+        if (cudaFast && command.Spec.Name != "vhs")
         {
             throw new NotSupportedException(
-                "The independent 'cuda-fast' full-signal backend is not routed through preview mode; no preview or CPU backend fallback was performed.");
+                "CUDA-fast preview currently supports the VHS command only; no CPU preview fallback was performed.");
         }
 
         var values = new Dictionary<string, object?>(command.Values, StringComparer.Ordinal);

@@ -126,6 +126,15 @@ bool RawReader::open_callback(
     return true;
 }
 
+bool RawReader::set_device_decimation_factor(int factor) {
+    if (factor != 1 && factor != 2) {
+        return false;
+    }
+    decimation_factor = factor;
+    sequential_sample = 0;
+    return true;
+}
+
 void RawReader::close() {
     if (file != nullptr && owns_file) {
         std::fclose(file);
@@ -140,6 +149,7 @@ void RawReader::close() {
     callback = nullptr;
     callback_user_data = nullptr;
     callback_format = RawReaderCallbackFormat::Float32;
+    decimation_factor = 1;
 }
 
 void RawReader::condition(float* destination, size_t sample_count) const {

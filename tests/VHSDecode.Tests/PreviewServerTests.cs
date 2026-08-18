@@ -1,9 +1,11 @@
+using System.Buffers.Binary;
 using System.Diagnostics;
 using System.Security.Cryptography;
 using System.Text.Json;
 using VHSDecode.Core.CommandLine;
 using VHSDecode.Core.Decode;
 using VHSDecode.Core.Dsp;
+using VHSDecode.Core.Dsp.CudaFast;
 using VHSDecode.Core.Rf;
 using VHSDecode.Preview;
 using Xunit;
@@ -12,6 +14,124 @@ namespace VHSDecode.Tests;
 
 public sealed class PreviewServerTests
 {
+    [Fact(DisplayName = "Preview and CUDA recover wrapped FLAC STREAMINFO sample totals")]
+    public async Task PreviewAndCudaRecoverWrappedFlacSampleTotals()
+    {
+        const long HeaderSamples = 3_783_262_208;
+        const long ExpectedSamples = HeaderSamples + (5L * 4_294_967_296L);
+        const ulong LastFrameNumber = (ulong)(ExpectedSamples / 4_096L) - 1UL;
+        string path = Path.Combine(
+            Path.GetTempPath(),
+            $"vhsdecode-preview-wrapped-streaminfo-{Guid.NewGuid():N}.ldf");
+        try
+        {
+            byte[] firstFrame = BuildFixedFlacFrameHeader(0);
+            byte[][] tailFrames =
+            [
+                BuildFixedFlacFrameHeader(LastFrameNumber - 2),
+                BuildFixedFlacFrameHeader(LastFrameNumber - 1),
+                BuildFixedFlacFrameHeader(LastFrameNumber),
+                BuildFixedFlacFrameHeader(LastFrameNumber + 1_000_000)
+            ];
+            int tailBytes = tailFrames.Sum(static frame => frame.Length);
+            var bytes = new byte[42 + firstFrame.Length + 32 + tailBytes];
+            "fLaC"u8.CopyTo(bytes);
+            bytes[4] = 0x80;
+            bytes[7] = 34;
+            BinaryPrimitives.WriteUInt16BigEndian(bytes.AsSpan(8, 2), 4_096);
+            BinaryPrimitives.WriteUInt16BigEndian(bytes.AsSpan(10, 2), 4_096);
+            ulong packed = (40_000UL << 44)
+                | (15UL << 36)
+                | (ulong)HeaderSamples;
+            BinaryPrimitives.WriteUInt64BigEndian(bytes.AsSpan(18, 8), packed);
+            firstFrame.CopyTo(bytes, 42);
+            int tailOffset = 42 + firstFrame.Length + 32;
+            foreach (byte[] frame in tailFrames)
+            {
+                frame.CopyTo(bytes, tailOffset);
+                tailOffset += frame.Length;
+            }
+            File.WriteAllBytes(path, bytes);
+
+            double previewDuration = await PreviewSourceProbe.GetDurationSecondsAsync(
+                path,
+                40_000_000.0,
+                "ffprobe-must-not-run",
+                CancellationToken.None);
+            Assert.True(CudaFastDecodeRunner.TryGetInputSampleCount(
+                path,
+                out long cudaSamples));
+            Assert.Equal(
+                ExpectedSamples,
+                checked((long)Math.Round(previewDuration * 40_000_000.0)));
+            Assert.Equal(ExpectedSamples, cudaSamples);
+        }
+        finally
+        {
+            File.Delete(path);
+        }
+    }
+
+    private static byte[] BuildFixedFlacFrameHeader(ulong frameNumber)
+    {
+        byte[] codedNumber = EncodeFlacUtf8Integer(frameNumber);
+        var header = new byte[4 + codedNumber.Length + 1];
+        header[0] = 0xff;
+        header[1] = 0xf8;
+        header[2] = 0xc0;
+        header[3] = 0x08;
+        codedNumber.CopyTo(header, 4);
+        header[^1] = CalculateFlacHeaderCrc8(header.AsSpan(0, header.Length - 1));
+        return header;
+    }
+
+    private static byte[] EncodeFlacUtf8Integer(ulong value)
+    {
+        int length = value switch
+        {
+            <= 0x7fUL => 1,
+            <= 0x7ffUL => 2,
+            <= 0xffffUL => 3,
+            <= 0x1fffffUL => 4,
+            <= 0x3ffffffUL => 5,
+            <= 0x7fffffffUL => 6,
+            _ => 7
+        };
+        if (length == 1)
+        {
+            return [(byte)value];
+        }
+
+        var result = new byte[length];
+        ulong remaining = value;
+        for (int index = length - 1; index > 0; index--)
+        {
+            result[index] = (byte)(0x80 | (remaining & 0x3f));
+            remaining >>= 6;
+        }
+        int payloadBits = 7 - length;
+        byte prefix = (byte)(0xff << (8 - length));
+        result[0] = (byte)(prefix
+            | (payloadBits == 0 ? 0UL : remaining & ((1UL << payloadBits) - 1UL)));
+        return result;
+    }
+
+    private static byte CalculateFlacHeaderCrc8(ReadOnlySpan<byte> data)
+    {
+        byte crc = 0;
+        foreach (byte value in data)
+        {
+            crc ^= value;
+            for (int bit = 0; bit < 8; bit++)
+            {
+                crc = (crc & 0x80) != 0
+                    ? (byte)((crc << 1) ^ 0x07)
+                    : (byte)(crc << 1);
+            }
+        }
+        return crc;
+    }
+
     [Theory(DisplayName = "Preview server accepts one RF input only for VHS and LD")]
     [InlineData("vhs")]
     [InlineData("ld")]
@@ -59,18 +179,26 @@ public sealed class PreviewServerTests
         Assert.True(laserDiscTemplate.Get<bool>("noefm"));
     }
 
-    [Fact(DisplayName = "Preview template rejects the independent CUDA-fast full path")]
-    public void PreviewTemplateRejectsCudaFastFullPath()
+    [Fact(DisplayName = "Preview template routes CUDA-fast only for native-rate VHS")]
+    public void PreviewTemplateRoutesCudaFastOnlyForVhs()
     {
-        ParsedCommand parsed = new CommandLineParser().Parse(
+        ParsedCommand vhs = new CommandLineParser().Parse(
             CliSpecs.Vhs,
+            ["--preview-server", "--dsp-backend", "cuda-fast", "capture.ldf"]);
+        ParsedCommand template = PreviewDecodeCommandFactory.CreateFastTemplate(vhs);
+
+        Assert.Equal("cuda-fast", template.Get<string>("dsp_backend"));
+        Assert.True(template.Get<bool>(PreviewDecodeCommandFactory.HalfRateRfOption));
+
+        ParsedCommand laserDisc = new CommandLineParser().Parse(
+            CliSpecs.LaserDisc,
             ["--preview-server", "--dsp-backend", "cuda-fast", "capture.ldf"]);
 
         NotSupportedException exception = Assert.Throws<NotSupportedException>(
-            () => PreviewDecodeCommandFactory.CreateFastTemplate(parsed));
+            () => PreviewDecodeCommandFactory.CreateFastTemplate(laserDisc));
 
-        Assert.Contains("not routed through preview mode", exception.Message, StringComparison.Ordinal);
-        Assert.Contains("no preview or CPU backend fallback", exception.Message, StringComparison.Ordinal);
+        Assert.Contains("VHS command only", exception.Message, StringComparison.Ordinal);
+        Assert.Contains("no CPU preview fallback", exception.Message, StringComparison.Ordinal);
     }
 
     [Fact(DisplayName = "Preview template halves only standard 40 MSPS VHS RF")]
@@ -365,6 +493,72 @@ public sealed class PreviewServerTests
             Assert.Contains("colorprim=smpte170m", x264Parameters);
             Assert.Contains("fullrange=off", x264Parameters);
             AssertEncodedWindowStartsAtGlobalTimelinePosition();
+        }
+    }
+
+    [Fact(DisplayName = "CUDA preview FFmpeg stage copy-muxes H264 without CPU video filters")]
+    public void CudaPreviewFfmpegStageOnlyCopyMuxesH264()
+    {
+        var timeline = new PreviewTimeline(2.0, 25.0, 2.0, 1);
+        var muxer = new FfmpegH264HlsWindowMuxer("ffmpeg", timeline);
+
+        string[] arguments = muxer.BuildArguments(
+            "index.m3u8",
+            "init.mp4",
+            "segment-%03d.m4s",
+            windowIndex: 0);
+
+        AssertOption(arguments, "-r", "50");
+        AssertOption(arguments, "-f", "h264");
+        AssertOption(arguments, "-i", "pipe:0");
+        AssertOption(arguments, "-c:v", "copy");
+        AssertOption(arguments, "-frames:v", "100");
+        Assert.DoesNotContain("-vf", arguments);
+        Assert.DoesNotContain("rawvideo", arguments);
+        Assert.DoesNotContain("h264_nvenc", arguments);
+        Assert.DoesNotContain("-pix_fmt", arguments);
+        Assert.DoesNotContain("-output_ts_offset", arguments);
+    }
+
+    [Fact(DisplayName = "CUDA preview H264 copy-mux produces seekable progressive fMP4")]
+    public void CudaPreviewH264CopyMuxProducesSeekableProgressiveFmp4()
+    {
+        Assert.SkipUnless(
+            CommandIsAvailable("ffmpeg") && CommandIsAvailable("ffprobe"),
+            "ffmpeg and ffprobe must be available on PATH.");
+
+        string directory = Path.Combine(
+            Path.GetTempPath(),
+            "vhsdecode-cuda-preview-mux-tests-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(directory);
+        try
+        {
+            string h264Path = Path.Combine(directory, "input.h264");
+            GenerateSyntheticH264(h264Path);
+            var timeline = new PreviewTimeline(2.0, 25.0, 2.0, 1);
+            var muxer = new FfmpegH264HlsWindowMuxer("ffmpeg", timeline);
+            PreviewSegmentWindow window = muxer.Mux(
+                windowIndex: 0,
+                destination =>
+                {
+                    using FileStream input = File.OpenRead(h264Path);
+                    input.CopyTo(destination);
+                },
+                TestContext.Current.CancellationToken);
+
+            Assert.NotEmpty(window.InitializationSegment);
+            Assert.Single(window.Segments);
+            string mediaPath = Path.Combine(directory, "window.mp4");
+            WriteCombinedWindow(mediaPath, window);
+            IReadOnlyDictionary<string, string> metadata = ProbeVideoStreamMetadata(mediaPath);
+            Assert.Equal("progressive", metadata["field_order"]);
+            Assert.Equal("50/1", metadata["avg_frame_rate"]);
+            Assert.Equal("100", metadata["nb_read_frames"]);
+            Assert.InRange(ProbeFirstVideoPacketTimestamp(mediaPath), 0.0, 0.02);
+        }
+        finally
+        {
+            Directory.Delete(directory, recursive: true);
         }
     }
 
@@ -1345,6 +1539,46 @@ public sealed class PreviewServerTests
                 StringSplitOptions.RemoveEmptyEntries)
             .Select(line => line.Split('=', 2))
             .ToDictionary(parts => parts[0], parts => parts[1], StringComparer.Ordinal);
+    }
+
+    private static void GenerateSyntheticH264(string outputPath)
+    {
+        var startInfo = new ProcessStartInfo("ffmpeg")
+        {
+            UseShellExecute = false,
+            CreateNoWindow = true,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true
+        };
+        foreach (string argument in new[]
+        {
+            "-hide_banner", "-loglevel", "error",
+            "-f", "lavfi",
+            "-i", "color=c=black:s=64x48:r=50:d=2",
+            "-an",
+            "-c:v", "libx264",
+            "-preset", "ultrafast",
+            "-tune", "zerolatency",
+            "-profile:v", "main",
+            "-pix_fmt", "yuv420p",
+            "-g", "100",
+            "-bf", "0",
+            "-f", "h264",
+            "-y", outputPath
+        })
+        {
+            startInfo.ArgumentList.Add(argument);
+        }
+
+        using Process process = Process.Start(startInfo)
+            ?? throw new InvalidOperationException("Failed to start ffmpeg.");
+        Task<string> output = process.StandardOutput.ReadToEndAsync();
+        Task<string> error = process.StandardError.ReadToEndAsync();
+        process.WaitForExit();
+        Task.WhenAll(output, error).GetAwaiter().GetResult();
+        Assert.True(
+            process.ExitCode == 0,
+            $"ffmpeg exited with {process.ExitCode}: {error.Result}");
     }
 
     private static bool CommandIsAvailable(string command)

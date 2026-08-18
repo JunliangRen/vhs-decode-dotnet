@@ -28,7 +28,8 @@ public sealed class PreviewCommandRunner
             DecodePreviewSegmentProvider provider = await DecodePreviewSegmentProvider.CreateAsync(
                 command,
                 options,
-                cancellationToken).ConfigureAwait(false);
+                cancellationToken,
+                output).ConfigureAwait(false);
             var fpsDisplay = new PreviewRealtimeFpsDisplay(
                 output,
                 provider.Timeline.FramesPerSecond);
@@ -48,13 +49,23 @@ public sealed class PreviewCommandRunner
                     + $"CRF {server.MediaInfo.Crf}, "
                     + $"{server.MediaInfo.DecodeBackend}, {server.MediaInfo.AccuracyProfile}");
                 output.WriteLine($"Preview encoder: {server.MediaInfo.EncodeBackend}");
-                output.WriteLine(provider.IppFastEnabled
-                    ? "IPP-FAST: enabled (runtime initialization succeeded)"
-                    : "IPP-FAST: disabled (Exact backend active)");
+                if (provider.CudaFastEnabled)
+                {
+                    output.WriteLine(
+                        "CUDA-FAST preview: persistent 40 -> 20 MSPS GPU DSP, direct NV12/NVENC, FFmpeg copy-mux.");
+                }
+                else
+                {
+                    output.WriteLine(provider.IppFastEnabled
+                        ? "IPP-FAST: enabled (runtime initialization succeeded)"
+                        : "IPP-FAST: disabled (Exact backend active)");
+                }
                 output.WriteLine(
                     $"Preview RF rate: {provider.SourceSampleRateHz / 1_000_000.0:0.###}"
                     + $" -> {provider.DecodeSampleRateHz / 1_000_000.0:0.###} MSPS");
-                output.WriteLine($"Decoder threads: {provider.DecoderThreads}");
+                output.WriteLine(provider.CudaFastEnabled
+                    ? "Decoder threads: GPU-managed (one persistent CUDA preview context)"
+                    : $"Decoder threads: {provider.DecoderThreads}");
                 output.WriteLine("Press Ctrl+C to stop. Preview mode does not create TBC, JSON, SQLite, EFM, or audio outputs.");
                 await output.FlushAsync(cancellationToken).ConfigureAwait(false);
                 fpsDisplay.Start();
