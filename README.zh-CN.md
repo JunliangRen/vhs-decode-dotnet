@@ -89,14 +89,22 @@ decode.exe vhs --preview-server --dsp-backend cuda-fast --pal input.ldf
 
 这条路径会在多个窗口间复用同一个 CUDA 上下文，并在 GPU 上完成带抗混叠的
 40→20 MSPS 降采样、同步、FM/色度/dropout 处理、NV12 bob 反交错和 NVENC H.264
-编码。NVENC 直接注册 CUDA device pointer。每个有界 RF 批次只上传一次，整帧亮度、色度和 NV12
+编码。渲染器直接写入 block-linear NV12 CUDA array，NVENC 注册该 array，省去 pitch-linear
+转换。每个有界 RF 批次只上传一次，整帧亮度、色度和 NV12
 不会下载回主存；跨越主机/显存边界的只有少量同步/场序控制元数据和压缩 H.264 packet。
 FFmpeg 仅负责将 H.264 copy-mux 为 HLS/fMP4。它要求兼容的 NVIDIA GPU，失败时不会回退到
-CPU 预览或其他编码器。本机 RTX 4070 和一份真实 PAL 采集的四个稳态 2 秒窗口中，
-CUDA 平均用时 1.142 秒，默认 20-thread IPP 预览为 1.528 秒，即墙钟减少 25.3%、
-源帧吞吐提高 32.8%。首个冷启动 CUDA 窗口因创建持久 CUDA/cuFFT/NVENC 状态而较慢
-（2.447 对 2.153 秒）。两种预览的观感接近；计入一场时间偏移后，渲染对比 SSIM 为
-0.927867。这些数字只适用于该采集与硬件，不代表与 Exact 等价。
+CPU 预览或其他编码器。现有 GPU bob 反交错逻辑保持不变；仅预览路径会在同一有界批次内
+用干净的异奇偶场替换 dropout，并使用每次 seek 窗口都会重置的一场 75/25 当前/前场色度
+混合。
+
+本机 RTX 4070 和一份真实 PAL 采集上，最终可执行文件为每个后端各启动两次、合计各八个
+稳态 2 秒窗口后，CUDA 平均 0.588 秒，默认 20-thread IPP 预览为 1.479 秒，即墙钟
+减少 60.2%，源帧吞吐达到 2.52 倍（85.0 对 33.8 fps）。`decode.exe` 进程 CPU 时间
+平均为 0.701 对 8.156 秒；该指标不含各自的 FFmpeg 子进程。冷启动 W5 平均为
+1.593 对 1.830 秒。计入一场时间偏移后，五个渲染窗口的平均 SSIM Y/U/V/All 为
+0.916844/0.957443/0.966783/0.931934；相对采用相同同步策略但未启用新 dropout/色度处理
+的 CUDA 输出，五个窗口全部改善。另一组 A-B-B-A 测得 CUDA 墙钟代价为 1.2%。这些
+数字只适用于该采集与硬件，不代表与 Exact 等价。
 
 <!-- SECTION: profiles -->
 

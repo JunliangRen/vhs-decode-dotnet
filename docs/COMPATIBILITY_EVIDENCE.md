@@ -3070,7 +3070,8 @@ bridge ABI v6 accepts direct PCM16 from raw signed-16, eligible libsndfile, and
 FFmpeg PCM16 loaders, halves host-to-device input bytes, and converts exactly
 representable signed-16 values into the FP32 signal plane on GPU. The managed
 FP32 callback remains available as a fallback. Persistent chroma workspace, a
-16-field automatic batch cap, and a parallel deterministic sync-pulse kernel
+16-field full-decode cap, a measured 12-field device-preview cap, and a
+parallel deterministic sync-pulse kernel
 remove the largest avoidable setup, transfer, and serial-scan costs. ABI v6
 also separates the requested output-field cap from available RF input. The
 native pipeline can scan past weak/no-signal leaders, requires stable
@@ -3125,8 +3126,9 @@ ABI v6 also exposes the explicit VHS preview route selected only by combining
 PAL/NTSC input, one native context persists across windows. A deterministic
 15-tap CUDA FIR reduces RF to 20 MSPS with anti-aliasing before the existing GPU
 sync, FM, time-base, chroma, and dropout stages. A new device-side output stage
-renders field-rate bob directly into NV12. NVENC registers the CUDA device
-pointer and produces H.264 without downloading full decoded image planes. Each
+renders field-rate bob directly into a block-linear NV12 CUDA array. NVENC
+registers that array and bypasses its pitch-linear conversion while producing
+H.264 without downloading full decoded image planes. Each
 bounded RF batch crosses once on upload; thereafter only small sync/field-order control metadata
 and compressed packets cross the host/device boundary. Compressed packets enter
 managed memory, where FFmpeg copy-muxes them into HLS/fMP4. The explicit path
@@ -3148,20 +3150,104 @@ windows; random W70 and final W315 both completed. On the final atomic-
 cancellation build, four timed-out W80-W83 requests left the process healthy
 and a following W90 request returned 200.
 
-Using the same current executable and capture, steady two-second windows
-W15/W25/W30/W35 averaged 1.14225 seconds for CUDA and 1.52818 seconds for the
-default 20-thread IPP preview. Equivalent throughput was about 43.8 versus
-33.0 source fps: CUDA used 25.3% less wall time and delivered about 32.8% more
-throughput. `decode.exe` process CPU averaged 0.914 versus 8.719 seconds, but
-that metric excludes the FFmpeg child in both paths. Cold W5 was 2.4468 seconds
-for CUDA and 2.1526 seconds for IPP because CUDA creates persistent
-CUDA/cuFFT/NVENC state once. Both outputs probed as H.264 Main, 768x576,
-progressive 50 fps, yuv420p with the expected PAL tags. CUDA begins about one
-output field earlier; aligning CUDA frames 0-98 with IPP frames 1-99 produced
-SSIM Y/U/V/All of 0.907542/0.964438/0.972597/0.927867. Manual inspection found
-closely matching scene content, colour, and motion with small line/dropout
-differences. This is real-PAL preview evidence only; it neither establishes
+Using the final current executable and capture, two launches per backend served
+steady two-second windows W15/W25/W30/W35, giving eight observations per
+backend. CUDA averaged 0.588094 seconds and the default 20-thread IPP preview
+averaged 1.479124 seconds. Equivalent throughput was 85.020 versus 33.804 source
+fps: CUDA used 60.24% less wall time and delivered 2.515x throughput.
+`decode.exe` process CPU averaged 0.701172 versus 8.156250 seconds, but that
+metric excludes the FFmpeg child in both paths. Cold W5 averaged 1.592767
+seconds for CUDA and 1.829743 seconds for IPP. Both outputs probed as H.264
+Main, 768x576, progressive 50 fps, yuv420p with the expected PAL tags. CUDA
+begins about one output field earlier. The final A-B-B-A produced one unique
+segment hash for each backend/window pair across both launches.
+
+The existing CUDA bob equations and field cadence remain unchanged. Preview
+dropout concealment now first uses the nearest clean opposite-parity field
+available inside the current bounded device batch, then retains the previous
+same-field fallback at paired-dropout and batch boundaries. Chroma retains one
+raw previous field and emits a non-recursive 75/25 current/previous blend; the
+history flag resets on every preview-window `open`, preserving random-seek
+independence. Full CUDA decode does not enter either output-only path. A
+five-window weak-signal sweep also found that bypassing the full-decode
+line-phase snap improved IPP-aligned combined SSIM on every tested window with
+no measured speed loss. Device preview therefore skips that guard by default,
+while full decode retains it and
+`CUVHS_FORCE_PREVIEW_LINE_PHASE_GUARD=1` restores it diagnostically. Removing
+stable-line selection, VSync gap fill, K4 source selection, or device geometry
+did not improve the evidence and was rejected.
+
+After the 20 ms field alignment, W5/W15/W25/W30/W35 final rendered SSIM
+Y/U/V/All averaged 0.916844/0.957443/0.966783/0.931934. The same line-phase
+policy with cross-field dropout and chroma stabilization disabled averaged
+0.906637/0.952453/0.964071/0.923845; combined SSIM increased on all five
+windows. A consecutive-frame absolute-difference proxy across 495 frames fell
+from 2.013002 to 1.535143 for U and from 1.815299 to 1.512891 for V, reductions
+of 23.74% and 16.66% toward the IPP values of 1.334075 and 1.240639. This proxy
+includes real motion and is not a pure stationary-patch flicker measurement.
+A 0.375 previous-field chroma weight had a slightly higher aggregate result
+but regressed W15 V and carried greater motion-smear risk, so 0.25 was retained.
+An independent default/composed/composed/default run over eight steady windows
+measured 0.597190 versus 0.604505 seconds: a 1.23% wall-time cost and 1.21%
+throughput loss. This is real-PAL preview evidence only; it neither establishes
 Exact compatibility nor certifies real-NTSC preview quality.
+
+The automatic preview batch cap was selected by an interleaved
+16/8/12/12/8/16 real-capture sweep after a warm-up window. Twelve fields
+averaged 83.64 source fps versus 76.29 at 16 fields and 80.24 at eight fields;
+relative to 16, it increased throughput by 9.6%, reduced request wall time by
+8.6%, and reduced `decode.exe` CPU by 7.4%. Five windows comparing 12 against
+16 fields averaged 0.9716 rendered SSIM, with a 0.960934 minimum and no
+one-frame cadence offset. Same-cap reruns were byte-identical; changing the cap
+can change compressed output and field-boundary decisions, so this is a
+preview-quality rather than hash-compatibility choice. Full CUDA decode retains
+the 16-field cap, and `CUVHS_BATCH_SIZE` remains an explicit diagnostic
+override.
+
+The CUDA preview FFmpeg reader now retains a bounded 32 MiB rewind window per
+session instead of the generic 2 MiB default. An isolated A-B-B-A using the
+same batch-12 binary compared the default with a 64 MiB proof: adjacent W6-W9
+mean wall time fell from 0.776756 to 0.542365 seconds (30.18%), throughput rose
+43.22%, and process CPU fell from 0.785156 to 0.593750 seconds, with identical
+segment hashes. A capacity sweep found 16 MiB insufficient and 32 MiB sufficient
+for the measured preroll/batch overlap; the retained 32 MiB build served W6-W9
+in a final 0.476633-second mean with the same hashes. This cache is limited to
+CUDA preview and does not read ahead or generate windows by itself.
+
+The retained preview output now writes through CUDA surface objects into a
+block-linear NV12 CUDA array registered directly with NVENC. Two
+stage-instrumented runs per layout provided 180 render/encode batch observations
+per path: block-linear averaged 8.325 ms versus 8.970 ms for pitch-linear, a
+7.2% reduction in that stage. A separate uninstrumented 40-window A-B-B-A gave
+0.495435 versus 0.503680 seconds per window, while the instrumented reverse
+pair favored pitch-linear by 2.2%; whole-window impact is therefore neutral at
+the present noise level, not a claimed end-to-end speedup. Same-window media
+bytes and all 100 decoded frames were identical (SSIM 1.0). The array path is
+retained for its repeatable local-stage reduction and lower NVENC preprocessing
+SM/bandwidth demand. A zero-copy one-dimensional luma texture was 2.0% slower
+end to end with no stage benefit; a pitched-copy/two-dimensional-filtering
+variant was 1.8% slower, used 3.4% more process CPU, and changed decoded output
+(SSIM 0.968883). Both texture variants were rejected.
+
+Asynchronous NVENC output (-0.8%), cross-batch CUDA front-end overlap (-2.7%),
+a fused trim/roll/copy kernel (about -2.9% and +14% CPU), CUDA Graph replay
+(+0.4%, within pair-order noise), preview-only post-FM 10 MSPS chroma (+2.1%
+with an NTSC sampling-risk tradeoff), and skipping PAL's unused NTSC detector
+buffers (about -3%) were all rejected. Their output checks either remained
+identical or passed the stated quality comparison, but none delivered a robust
+end-to-end win. No new asynchronous scheduling path was retained.
+
+After these changes were ported onto the ABI v6 full-decode-rate branch, a
+fresh current-tree real-PAL A-B-B-A again selected 12 fields by default and 16
+under the diagnostic override. Excluding cold W5, the means were 0.602675 and
+0.646305 seconds: 6.75% less wall time, 7.24% more throughput, and 8.16% less
+`decode.exe` CPU for the retained 12-field cap. The default W5/W15/W25/W30/W35
+segments matched the isolated final build 5/5 by SHA-256; disabling the three
+quality steps changed all five and reproduced the earlier batch-12 baseline.
+Adjacent W6-W9 averaged 0.505155 seconds, stderr confirmed batch 12, startup
+confirmed 40-to-20 MSPS and the block-linear array route, and FFprobe confirmed
+H.264 768x576 progressive 50 fps. This integration check does not replace the
+paired quality and layout experiments above.
 
 The Windows release workflow separately installs pinned CUDA 13.0.3 and uses
 `-SkipRuntimeTests` on the GPU-less hosted runner. That gate still compiles the

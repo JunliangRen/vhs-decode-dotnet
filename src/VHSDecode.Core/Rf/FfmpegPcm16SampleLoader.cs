@@ -40,7 +40,10 @@ public sealed class FfmpegPcm16SampleLoader : IRfSampleLoader, IDisposable
     {
     }
 
-    internal FfmpegPcm16SampleLoader(string filename, bool fastInputSeek)
+    internal FfmpegPcm16SampleLoader(
+        string filename,
+        bool fastInputSeek,
+        int rewindSize = DefaultRewindSize)
     {
         if (string.IsNullOrWhiteSpace(filename))
         {
@@ -50,7 +53,9 @@ public sealed class FfmpegPcm16SampleLoader : IRfSampleLoader, IDisposable
         _filename = filename;
         _openOutput = OpenFfmpegOutput;
         _fastInputSeek = fastInputSeek;
-        RewindSize = DefaultRewindSize;
+        RewindSize = rewindSize > 0
+            ? rewindSize
+            : throw new ArgumentOutOfRangeException(nameof(rewindSize));
         SeekThreshold = DefaultSeekThreshold;
     }
 

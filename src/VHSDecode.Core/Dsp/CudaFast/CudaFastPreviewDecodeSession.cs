@@ -8,6 +8,10 @@ internal sealed class CudaFastPreviewDecodeSession : IDisposable
 {
     private const int DeviceId = 0;
 
+    // A two-second 40 MSPS PCM16 preview window carries preroll and batch
+    // overscan across the following seek. Keep that bounded overlap in memory.
+    internal const int FastContainerRewindSize = 32 * 1024 * 1024;
+
     private readonly string _inputPath;
     private readonly long _totalSourceSamples;
     private readonly IRfSampleLoader _loader;
@@ -82,9 +86,7 @@ internal sealed class CudaFastPreviewDecodeSession : IDisposable
                     frameRateDenominator,
                     checked((uint)constantQp),
                     checked((uint)gopLength)));
-            loader = CudaFastDecodeRunner.CreateInputLoader(
-                inputPath,
-                fastContainerSeeking: true);
+            loader = CreatePreviewInputLoader(inputPath);
             return new CudaFastPreviewDecodeSession(
                 inputPath,
                 totalSourceSamples,
@@ -99,6 +101,12 @@ internal sealed class CudaFastPreviewDecodeSession : IDisposable
             throw;
         }
     }
+
+    internal static IRfSampleLoader CreatePreviewInputLoader(string inputPath)
+        => CudaFastDecodeRunner.CreateInputLoader(
+            inputPath,
+            fastContainerSeeking: true,
+            fastContainerRewindSize: FastContainerRewindSize);
 
     internal CudaFastPreviewNativeResult DecodeWindow(
         long targetSourceSample,

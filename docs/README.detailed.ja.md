@@ -242,7 +242,8 @@ ABI v6 は raw signed-16、eligible libsndfile、FFmpeg PCM16 input で direct P
 を優先します。FP32 の半分の transfer size で upload し、deterministic GPU kernel が
 FP32 で正確に表現できる各 signed-16 value を FP32 signal plane へ変換します。managed
 FP32 callback は fallback として維持します。bridge は persistent chroma workspace、
-自動的に 16 field に制限する batch、parallel deterministic sync-pulse scan も使用します。
+full decode の 16-field batch cap、測定済み direct-device preview の 12-field cap、
+parallel deterministic sync-pulse scan も使用します。
 ABI v6 は要求 output-field limit と scan 可能な RF 量を分離します。そのため native
 pipeline は weak/no-signal leader を通過し、horizontal cadence が連続して安定してから
 fallback field order を開始し、invalid field と先頭の不完全な second field を捨て、
@@ -259,8 +260,8 @@ video system、packed `.lds`、明示的な compatibility profile selection は�
 decode context を request window 間で保持し、deterministic 15-tap CUDA FIR が
 anti-alias 付き 2:1 reduction で 20 MSPS にしてから、persistent GPU sync、FM、
 time-base、chroma、dropout graph へ渡します。CUDA output stage は field-rate bob を
-NV12 device memory へ直接描画し、NVENC はその device pointer を register して、full
-luma/chroma/NV12 frame を download せず H.264 を出力します。各 bounded RF batch は一度だけ upload し、
+block-linear NV12 CUDA array へ直接描画し、NVENC はその array を register して
+pitch-linear conversion を省き、full luma/chroma/NV12 frame を download せず H.264 を出力します。各 bounded RF batch は一度だけ upload し、
 その後 host/device 境界を通るのは少量の sync/field-order control metadata と圧縮 packet
 だけです。圧縮 packet は managed memory に渡され、FFmpeg は `-c:v copy` により
 HLS/fMP4 timeline を構成するだけです。
@@ -268,18 +269,42 @@ HLS/fMP4 timeline を構成するだけです。
 これは preview が `--decode-at-20msps` を強制する形で、full decode は switch を明示した
 場合だけ rate を変更します。
 
-local RTX 4070 と real 631.452-second PAL 40 MSPS capture 1 本で、同じ current executable
-の steady W15/W25/W30/W35 window は CUDA が平均 1.142 秒、default 20-thread IPP
-preview が 1.528 秒でした。wall time は 25.3% 少なく、source-frame throughput は約
-32.8% 高い 43.8 対 33.0 fps です。`decode.exe` process CPU は平均 0.914 対 8.719 秒
-ですが、各 FFmpeg child はこの CPU metric に含まれません。最初の cold window は
-persistent CUDA/cuFFT/NVENC state の一度きりの作成により IPP が速く、2.153 対
-2.447 秒でした。両 output は H.264 Main、768x576、progressive 50 fps で、期待する
-PAL colour tag を保持しました。CUDA は約 1 output field 早く始まり、この 20 ms を
-align した rendered SSIM Y/U/V/All は 0.907542/0.964438/0.972597/0.927867 でした。
-manual inspection でも scene、colour、motion は近い状態です。これは preview-quality
-evidence であり、Exact parity や cross-GPU guarantee ではありません。synthetic NTSC
-native pipeline は pass していますが、real NTSC capture quality は未認証です。
+この CUDA preview route だけが FFmpeg PCM16 rewind window を汎用 default の 2 MiB
+から session ごとに bounded 32 MiB へ拡大します。隣接する 2 秒 window が共有する
+preroll と batch overlap を保持し、通常の forward playback で container reader の
+restart を避けます。unbounded read-ahead queue ではなく、Exact、IPP、通常の CUDA
+full decode は変更しません。
+
+既存の CUDA bob の式と field cadence は意図的に変更していません。preview のみ、
+dropout pixel は current bounded device batch 内で最も近い clean な opposite-parity
+field を利用でき、paired field も dropout の場合や batch edge では既存の same-field
+concealment に戻ります。chroma は非再帰の 75/25 current/previous-field blend を使い、
+各 seek window の `open` で history を reset するため、random seek が別 window の色を
+引き継ぎません。通常の CUDA full decode は変わりません。5-window weak-signal sweep
+では full-decode line-phase snap が preview agreement を一貫して下げたため、device
+preview は default でこの guard を skip し、full decode は保持します。診断では
+`CUVHS_FORCE_PREVIEW_LINE_PHASE_GUARD=1` で復元できます。
+
+local RTX 4070 と real 631.452-second PAL 40 MSPS capture 1 本で、同じ final executable
+を backend ごとに 2 回起動し、それぞれ W15/W25/W30/W35 を request したため、backend
+ごとに 8 個の steady 2-second observation があります。CUDA は平均 0.588094 秒、
+default 20-thread IPP preview は 1.479124 秒で、wall time は 60.24% 少なく、
+source-frame throughput は 2.515x（85.020 対 33.804 fps）です。`decode.exe` process CPU
+は平均 0.701172 対 8.156250 秒ですが、各 FFmpeg child は含みません。cold W5 は
+CUDA が平均 1.592767 秒、IPP が 1.829743 秒でした。両 output は H.264 Main、
+768x576、progressive 50 fps で期待する PAL colour tag を保持しました。CUDA は約
+1 output field 早く始まり、この 20 ms を align した W5/W15/W25/W30/W35 の rendered
+SSIM Y/U/V/All 平均は 0.916844/0.957443/0.966783/0.931934 です。同じ sync policy で
+cross-field dropout と chroma stabilization を無効にすると
+0.906637/0.952453/0.964071/0.923845 で、全 5 window の combined SSIM が改善しました。
+motion を含む flicker proxy として、consecutive-frame chroma mean absolute difference
+は U/V で 23.74%/16.66% 減り IPP に近づきましたが、pure stationary-patch metric
+ではありません。別の A-B-B-A では 2 つの output step の前後が
+0.597190/0.604505 秒で、wall-time cost 1.23%、throughput reduction 1.21% でした。
+別の 5-window CUDA 12-field 対 16-field 比較は平均 SSIM 0.9716、最低 0.960934 で、
+1-frame cadence offset はありませんでした。これは preview-quality evidence であり、
+Exact parity や cross-GPU guarantee ではありません。synthetic NTSC native pipeline
+は pass していますが、real NTSC capture quality は未認証です。
 
 binary release は約 1.2 MiB の CUDA-fast bridge を保持しますが、271 MiB の
 `cufft64_12.dll` は埋め込みません。最初に `cuda-fast` を明示的に選んだときだけ、

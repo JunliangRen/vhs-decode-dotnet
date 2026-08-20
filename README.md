@@ -109,19 +109,28 @@ decode.exe vhs --preview-server --dsp-backend cuda-fast --pal input.ldf
 
 This keeps one CUDA context across windows, performs the anti-aliased 40-to-20
 MSPS reduction, sync, FM/chroma/dropout processing, NV12 bob rendering, and
-NVENC H.264 encoding on the GPU. NVENC registers the CUDA device pointer
-directly. Each bounded RF batch is uploaded once, while full luma, chroma, and NV12 frames are
+NVENC H.264 encoding on the GPU. The renderer writes a block-linear NV12 CUDA
+array that NVENC registers directly, avoiding its pitch-linear conversion. Each bounded RF batch is uploaded once, while full luma, chroma, and NV12 frames are
 never downloaded; only small sync/field-order control metadata and compressed
 H.264 packets cross the host/device boundary. FFmpeg only copy-muxes the H.264
 into HLS/fMP4. It requires a compatible NVIDIA GPU and never
-falls back to the CPU preview or another encoder. On the tested RTX 4070 and one
-real PAL capture, four steady two-second windows averaged 1.142 seconds versus
-1.528 seconds for the default 20-thread IPP preview: 25.3% less wall time and
-32.8% more source-frame throughput. The first cold CUDA window was slower
-(2.447 versus 2.153 seconds) because it creates persistent CUDA/cuFFT/NVENC
-state. The two previews were visually close; after accounting for a one-field
-timing offset, the rendered comparison measured SSIM 0.927867. These are
-capture- and hardware-specific preview results, not Exact-equivalence claims.
+falls back to the CPU preview or another encoder. The existing GPU bob
+deinterlacer is unchanged. Preview-only cross-field dropout substitution uses a
+clean opposite-parity field when one exists in the bounded batch, and a
+one-field 75/25 current/previous chroma blend resets at every seek window.
+
+On the tested RTX 4070 and one real PAL capture, the final executable was
+launched twice per backend and eight steady two-second windows averaged
+0.588 seconds for CUDA versus 1.479 seconds for the default 20-thread IPP
+preview: 60.2% less wall time and 2.52x source-frame throughput (85.0 versus
+33.8 fps). `decode.exe` process CPU averaged 0.701 versus 8.156 seconds; that
+metric excludes each FFmpeg child. Cold W5 averaged 1.593 versus 1.830 seconds.
+After accounting for the one-field timing offset, five rendered window
+comparisons averaged SSIM Y/U/V/All of
+0.916844/0.957443/0.966783/0.931934. Every tested window improved over the same
+CUDA sync policy without the new dropout/chroma steps; a separate A-B-B-A found
+a 1.2% CUDA wall-time cost. These are capture- and hardware-specific preview
+results, not Exact-equivalence claims.
 
 <!-- SECTION: profiles -->
 

@@ -141,7 +141,7 @@ public sealed class CudaFastBackendTests
             StringComparison.Ordinal);
     }
 
-    [Fact(DisplayName = "CUDA preview keeps the 40-to-20 MSPS and NVENC data plane on the GPU")]
+    [Fact(DisplayName = "CUDA preview keeps the 40-to-20 MSPS and block-linear NVENC data plane on the GPU")]
     public void NativePreviewKeepsDownsampledFramesOnTheGpu()
     {
         string cmake = ReadNativeBuildDefinition();
@@ -164,11 +164,68 @@ public sealed class CudaFastBackendTests
         Assert.Contains("0.5000046374907835f", decimator, StringComparison.Ordinal);
         Assert.Contains("source_buffer_count * sizeof(int16_t)", decimator, StringComparison.Ordinal);
         Assert.Contains("cudaMemcpyHostToDevice", decimator, StringComparison.Ordinal);
-        Assert.Contains("NV_ENC_INPUT_RESOURCE_TYPE_CUDADEVICEPTR", output, StringComparison.Ordinal);
-        Assert.Contains("registration.resourceToRegister = d_nv12;", output, StringComparison.Ordinal);
+        Assert.Contains("nv12_descriptor.Format = CU_AD_FORMAT_NV12;", output, StringComparison.Ordinal);
+        Assert.Contains("nv12_descriptor.NumChannels = 3;", output, StringComparison.Ordinal);
+        Assert.Contains("CUDA_ARRAY3D_SURFACE_LDST", output, StringComparison.Ordinal);
+        Assert.Contains("CUDA_ARRAY3D_VIDEO_ENCODE_DECODE", output, StringComparison.Ordinal);
+        Assert.Contains("cuArrayGetPlane(&nv12_luma_plane, nv12_array, 0)", output, StringComparison.Ordinal);
+        Assert.Contains("cuArrayGetPlane(&nv12_chroma_plane, nv12_array, 1)", output, StringComparison.Ordinal);
+        Assert.Contains("cudaCreateSurfaceObject(&nv12_luma_surface", output, StringComparison.Ordinal);
+        Assert.Contains("cudaCreateSurfaceObject(&nv12_chroma_surface", output, StringComparison.Ordinal);
+        Assert.Contains("NV_ENC_INPUT_RESOURCE_TYPE_CUDAARRAY", output, StringComparison.Ordinal);
+        Assert.Contains("nv12_allocation_width = settings.width;", output, StringComparison.Ordinal);
+        Assert.Contains(
+            "registration.resourceToRegister = reinterpret_cast<void*>(nv12_array);",
+            output,
+            StringComparison.Ordinal);
+        Assert.Contains("surf2Dwrite(clamp_video_luma(value)", output, StringComparison.Ordinal);
+        Assert.Contains("surf2Dwrite(output, destination_uv", output, StringComparison.Ordinal);
+        Assert.DoesNotContain("NV_ENC_INPUT_RESOURCE_TYPE_CUDADEVICEPTR", output, StringComparison.Ordinal);
         Assert.Contains("NV_ENC_BUFFER_FORMAT_NV12", output, StringComparison.Ordinal);
         Assert.DoesNotContain("cudaMemcpyDeviceToHost", output, StringComparison.Ordinal);
         Assert.Contains("accepts_device_fields()", writer, StringComparison.Ordinal);
+        Assert.Contains(
+            "const bool direct_line = (y & 1) == (is_first_field != 0 ? 0 : 1);",
+            output,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "field_y1 = min(height / 2 - 1, field_y + 1);",
+            output,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "field_y0 = max(0, field_y - 1);",
+            output,
+            StringComparison.Ordinal);
+        Assert.DoesNotContain("yadif", output, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains(
+            "CUVHS_DISABLE_PREVIEW_CROSS_FIELD_DROPOUT",
+            output,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "dropout && paired_source != nullptr",
+            output,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "previous_chroma[chroma_index] = current;",
+            output,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "CUVHS_PREVIEW_CHROMA_TEMPORAL_WEIGHT",
+            output,
+            StringComparison.Ordinal);
+        Assert.Contains("0.25f", output, StringComparison.Ordinal);
+        Assert.Contains(
+            "impl_->have_previous_chroma = false;",
+            output,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "env_flag_enabled(\"CUVHS_FORCE_PREVIEW_LINE_PHASE_GUARD\")",
+            cmake,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "(!writer.accepts_device_fields()",
+            cmake,
+            StringComparison.Ordinal);
         Assert.Contains("std::atomic_bool requested_{false};", cancellation, StringComparison.Ordinal);
         Assert.Contains("std::memory_order_acquire", cancellation, StringComparison.Ordinal);
         Assert.Contains("std::memory_order_release", cancellation, StringComparison.Ordinal);
@@ -231,12 +288,17 @@ public sealed class CudaFastBackendTests
         using var full = Assert.IsType<CudaFastDecodeRunner.FfmpegPcm16InputAdapter>(
             CudaFastDecodeRunner.CreateInputLoader("capture.ldf"));
         using var preview = Assert.IsType<CudaFastDecodeRunner.FfmpegPcm16InputAdapter>(
-            CudaFastDecodeRunner.CreateInputLoader(
-                "capture.ldf",
-                fastContainerSeeking: true));
+            CudaFastPreviewDecodeSession.CreatePreviewInputLoader("capture.ldf"));
 
         Assert.False(full.FastInputSeek);
         Assert.True(preview.FastInputSeek);
+        Assert.Equal(FfmpegPcm16SampleLoader.DefaultRewindSize, full.RewindSize);
+        Assert.Equal(CudaFastPreviewDecodeSession.FastContainerRewindSize, preview.RewindSize);
+        Assert.Throws<ArgumentOutOfRangeException>(() =>
+            CudaFastDecodeRunner.CreateInputLoader(
+                "capture.ldf",
+                fastContainerSeeking: true,
+                fastContainerRewindSize: 0));
     }
 
     [Fact(DisplayName = "CUDA-fast reuses and releases its persistent chroma workspace")]
@@ -281,13 +343,26 @@ public sealed class CudaFastBackendTests
             StringComparison.Ordinal);
     }
 
-    [Fact(DisplayName = "CUDA-fast caps automatic FP32 batches while preserving diagnostics override")]
+    [Fact(DisplayName = "CUDA-fast uses the measured preview batch cap without changing full decode")]
     public void NativeBuildCapsAutomaticFp32BatchSize()
     {
         string cmake = ReadNativeBuildDefinition();
 
         Assert.Contains("if (batch_override <= 0)", cmake, StringComparison.Ordinal);
-        Assert.Contains("batch_size = std::min(batch_size, 16);", cmake, StringComparison.Ordinal);
+        Assert.Contains(
+            "const int automatic_batch_cap = writer.accepts_device_fields()",
+            cmake,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "&& reader.device_decimation_factor() == 2",
+            cmake,
+            StringComparison.Ordinal);
+        Assert.Contains("? 12", cmake, StringComparison.Ordinal);
+        Assert.Contains(": 16;", cmake, StringComparison.Ordinal);
+        Assert.Contains(
+            "batch_size = std::min(batch_size, automatic_batch_cap);",
+            cmake,
+            StringComparison.Ordinal);
         Assert.Contains(
             "batch_size = batch_override > 0 ? batch_override",
             cmake,

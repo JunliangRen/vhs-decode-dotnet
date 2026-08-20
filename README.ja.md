@@ -98,18 +98,25 @@ decode.exe vhs --preview-server --dsp-backend cuda-fast --pal input.ldf
 
 この path は 1 つの CUDA context を window 間で再利用し、anti-alias 付き 40→20
 MSPS decimation、sync、FM/chroma/dropout processing、NV12 bob rendering、NVENC
-H.264 encode を GPU 上で実行します。NVENC は CUDA device pointer を直接 register
-します。各 bounded RF batch は一度だけ upload し、full luma/chroma/NV12 frame は host memory へ
+H.264 encode を GPU 上で実行します。renderer は block-linear NV12 CUDA array へ直接
+書き込み、NVENC はその array を register して pitch-linear conversion を省きます。各 bounded RF batch は一度だけ upload し、full luma/chroma/NV12 frame は host memory へ
 download しません。host/device 境界を通るのは少量の sync/field-order control metadata
 と圧縮済み H.264 packet だけで、FFmpeg は HLS/fMP4 への copy-mux のみを担当します。
 compatible NVIDIA GPU が必須で、CPU preview や
-別 encoder へ fallback しません。tested RTX 4070 と 1 本の real PAL capture の
-steady-state 2 秒 window 4 個では、CUDA の平均は 1.142 秒、default 20-thread IPP
-preview は 1.528 秒でした。wall time は 25.3% 少なく、source-frame throughput は
-32.8% 高くなりました。最初の cold CUDA window は persistent CUDA/cuFFT/NVENC
-state の作成により遅く、2.447 秒対 2.153 秒でした。両 preview の見え方は近く、
-1 field の timing offset を補正した rendered SSIM は 0.927867 です。これは当該
-capture/hardware に限定した preview 結果であり、Exact equivalence ではありません。
+別 encoder へ fallback しません。既存の GPU bob deinterlacer は変更していません。
+preview のみ、bounded batch 内の clean な opposite-parity field で dropout を置換し、
+seek window ごとに reset する 1-field 75/25 current/previous chroma blend を使います。
+
+tested RTX 4070 と 1 本の real PAL capture で final executable を backend ごとに 2 回
+起動し、それぞれ 8 個の steady-state 2 秒 window を測ると、CUDA は平均 0.588 秒、
+default 20-thread IPP preview は 1.479 秒でした。wall time は 60.2% 少なく、
+source-frame throughput は 2.52x（85.0 対 33.8 fps）です。`decode.exe` process CPU
+は平均 0.701 対 8.156 秒ですが、各 FFmpeg child は含みません。cold W5 は平均
+1.593 対 1.830 秒でした。1 field の timing offset を補正した 5 window の rendered
+SSIM Y/U/V/All 平均は 0.916844/0.957443/0.966783/0.931934 で、同じ sync policy から
+新しい dropout/chroma 処理だけを外した CUDA output より全 window で改善しました。
+別の A-B-B-A で CUDA wall-time cost は 1.2% でした。これは当該 capture/hardware に
+限定した preview 結果であり、Exact equivalence ではありません。
 
 <!-- SECTION: profiles -->
 

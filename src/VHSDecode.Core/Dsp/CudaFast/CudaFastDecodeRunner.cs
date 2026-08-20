@@ -484,7 +484,8 @@ internal sealed class CudaFastDecodeRunner : ICudaFastDecodeRunner
 
     internal static IRfSampleLoader CreateInputLoader(
         string path,
-        bool fastContainerSeeking = false)
+        bool fastContainerSeeking = false,
+        int fastContainerRewindSize = FfmpegPcm16SampleLoader.DefaultRewindSize)
     {
         IRfSampleLoader loader = Path.GetExtension(path).ToLowerInvariant() switch
         {
@@ -493,8 +494,9 @@ internal sealed class CudaFastDecodeRunner : ICudaFastDecodeRunner
             _ => RfLoaderFactory.CreateNative(
                 path,
                 preferPyAvMappedRawFlacSeeking: false,
-                fastContainerSeeking,
-                ignoreExtensionCase: true)
+                fastContainerSeeking: fastContainerSeeking,
+                ignoreExtensionCase: true,
+                fastContainerRewindSize: fastContainerRewindSize)
         };
         return loader is FfmpegPcm16SampleLoader ffmpeg
             ? new FfmpegPcm16InputAdapter(ffmpeg)
@@ -672,6 +674,8 @@ internal sealed class CudaFastDecodeRunner : ICudaFastDecodeRunner
             => _loader.TryReadInt16(stream, sample, destination, out samplesRead);
 
         internal bool FastInputSeek => _loader.FastInputSeek;
+
+        internal int RewindSize => _loader.RewindSize;
 
         public void Dispose() => _loader.Dispose();
     }

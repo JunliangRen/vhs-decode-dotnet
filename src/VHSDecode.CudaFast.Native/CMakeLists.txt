@@ -2749,6 +2749,8 @@ string(REPLACE
                 }
             }
             if (anchor.valid
+                && (!writer.accepts_device_fields()
+                    || env_flag_enabled("CUVHS_FORCE_PREVIEW_LINE_PHASE_GUARD"))
                 && !env_flag_enabled("CUVHS_DISABLE_LINE_PHASE_GUARD")) {
                 // A real VHS time-base error moves gradually. A sudden
                 // quarter/half-line phase switch is a false sync train in the
@@ -3076,12 +3078,17 @@ if(CUVHS_BATCH_SELECTION_INDEX EQUAL -1)
 endif()
 set(CUVHS_BATCH_CAP [=[
 
-        // FP32 field FFTs are fastest and most stable at 16 fields per batch
-        // on the validated PAL workload. Larger batches also let the opposite
+        // Preview windows run faster at 12 fields on the validated PAL GPU
+        // workload while using less host CPU. Full CUDA-fast decode retains
+        // the validated 16-field cap. Larger batches also let the opposite
         // VBlank train influence one geometry solve and can produce chroma
         // discontinuities. Keep an explicit diagnostic override available.
         if (batch_override <= 0) {
-            batch_size = std::min(batch_size, 16);
+            const int automatic_batch_cap = writer.accepts_device_fields()
+                    && reader.device_decimation_factor() == 2
+                ? 12
+                : 16;
+            batch_size = std::min(batch_size, automatic_batch_cap);
         }
 
         // A very short managed window does not need a full-device allocation.

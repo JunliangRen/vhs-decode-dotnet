@@ -52,7 +52,7 @@ public sealed class PreviewCommandRunner
                 if (provider.CudaFastEnabled)
                 {
                     output.WriteLine(
-                        "CUDA-FAST preview: persistent 40 -> 20 MSPS GPU DSP, direct NV12/NVENC, FFmpeg copy-mux.");
+                        "CUDA-FAST preview: persistent 40 -> 20 MSPS GPU DSP, block-linear NV12/NVENC, FFmpeg copy-mux.");
                 }
                 else
                 {

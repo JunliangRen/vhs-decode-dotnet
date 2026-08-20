@@ -168,11 +168,11 @@ public sealed class DecodePreviewSegmentProvider : IPreviewSegmentProvider
             Interlaced: false,
             backend,
             cudaPreview
-                ? "40-to-20-msps-gpu/fast-color/gpu-bob/dropout-conceal/no-audio"
+                ? "40-to-20-msps-gpu/fast-color/gpu-bob/cross-field-dropout/chroma-stabilized/no-audio"
                 : (twentyMspsRf ? "20-msps-rf/" : string.Empty)
                     + "fast-color/full-frame-motion/dropout-conceal/no-audio",
             cudaPreview
-                ? "NVENC direct CUDA surface + FFmpeg copy-mux"
+                ? "NVENC block-linear CUDA array + FFmpeg copy-mux"
                 : PreviewEncoderSelector.DisplayName(encoderBackend));
         return new DecodePreviewSegmentProvider(
             template,
