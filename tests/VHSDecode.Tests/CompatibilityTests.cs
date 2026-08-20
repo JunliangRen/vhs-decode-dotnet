@@ -17156,6 +17156,10 @@ public void PackedLdsReusableReadsHandleExactEofBeforeRenting()
 {
     byte[] exact = Pack4x10(Enumerable.Range(0, 8).ToArray());
     var exactLoader = new PackedDdD4To40SampleLoader();
+    Assert.Empty(exactLoader.Read(
+        new MemoryStream([], writable: false),
+        sample: 1,
+        readLength: 0)!);
     double[] final = Assert.IsType<double[]>(exactLoader.ReadReusable(
         new MemoryStream(exact, writable: false),
         sample: 0,

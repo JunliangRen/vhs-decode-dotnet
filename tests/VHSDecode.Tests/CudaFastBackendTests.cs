@@ -152,7 +152,6 @@ public sealed class CudaFastBackendTests
         string cancellationTest = ReadNativeSource("tests", "cancellation_latch_test.cpp");
         string decimator = ReadNativeSource("src", "cuda_fast_decimator.cu");
         string output = ReadNativeSource("src", "cuda_preview_output.cu");
-        string normalizedOutput = output.Replace("\r\n", "\n", StringComparison.Ordinal);
         string writer = ReadNativeSource("overlay", "io", "tbc_writer.h");
 
         Assert.Contains("reader.device_decimation_factor() == 2", cmake, StringComparison.Ordinal);
@@ -174,18 +173,26 @@ public sealed class CudaFastBackendTests
         Assert.Contains("cudaCreateSurfaceObject(&nv12_luma_surface", output, StringComparison.Ordinal);
         Assert.Contains("cudaCreateSurfaceObject(&nv12_chroma_surface", output, StringComparison.Ordinal);
         Assert.Contains("NV_ENC_INPUT_RESOURCE_TYPE_CUDAARRAY", output, StringComparison.Ordinal);
-        Assert.Contains("nv12_allocation_width = settings.width;", output, StringComparison.Ordinal);
+        Assert.Contains("cuArray3DGetDescriptor(", output, StringComparison.Ordinal);
+        Assert.Contains("&nv12_luma_descriptor", output, StringComparison.Ordinal);
         Assert.Contains(
-            "static_cast<uint64_t>(nv12_descriptor.Width)\n"
-            + "            * nv12_descriptor.NumChannels",
-            normalizedOutput,
+            "nv12_luma_descriptor.Format != CU_AD_FORMAT_UNSIGNED_INT8",
+            output,
             StringComparison.Ordinal);
         Assert.Contains(
-            "registration.pitch = static_cast<uint32_t>(nv12_registration_pitch);",
+            "nv12_luma_descriptor.NumChannels != 1",
+            output,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "nv12_allocation_width = static_cast<uint32_t>(nv12_luma_descriptor.Width);",
+            output,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "registration.pitch = nv12_allocation_width;",
             output,
             StringComparison.Ordinal);
         Assert.DoesNotContain(
-            "registration.pitch = nv12_allocation_width;",
+            "static_cast<uint64_t>(nv12_descriptor.Width)",
             output,
             StringComparison.Ordinal);
         Assert.Contains(

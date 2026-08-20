@@ -55,6 +55,14 @@ public sealed class PackedDdD4To40SampleLoader : IReusableRfSampleLoader
 
     private double[]? ReadCore(Stream stream, long sample, int readLength, bool reuseDecodedBuffer)
     {
+        ArgumentNullException.ThrowIfNull(stream);
+        ArgumentOutOfRangeException.ThrowIfNegative(sample);
+        ArgumentOutOfRangeException.ThrowIfNegative(readLength);
+        if (readLength == 0)
+        {
+            return [];
+        }
+
         long start = (sample / 4) * 5;
         int offset = (int)(sample % 4);
         int groups = checked((offset + readLength + 3) / 4);
