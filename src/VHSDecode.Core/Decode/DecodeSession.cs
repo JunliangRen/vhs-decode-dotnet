@@ -44,6 +44,19 @@ public sealed record DecodeSession(
     internal DecodeRuntimeReporter? RuntimeReporter { get; set; }
     internal IReadOnlyList<DecodeInitializationDiagnostic> VhsParamsFileDiagnostics { get; set; } = [];
 
+    public int SourceSamplesPerDecodeSample { get; init; } = 1;
+
+    internal long ToSourceSampleLocation(long decodeSample)
+    {
+        if (SourceSamplesPerDecodeSample <= 0)
+        {
+            throw new InvalidOperationException(
+                "The source/decode sample location scale must be positive.");
+        }
+
+        return checked(decodeSample * SourceSamplesPerDecodeSample);
+    }
+
     public void Dispose()
     {
         try
@@ -183,11 +196,18 @@ public static class DecodeSessionFactory
         string system = VideoSystemSelector.Select(command);
         double selectedSampleRateMHz = SelectCommonSampleFrequencyMHz(command);
         bool noResample = command.Get<bool>("no_resample");
-        bool previewHalfRate = IsPreviewServer(command)
-            && command.Values.TryGetValue("preview_half_rate_rf", out object? halfRateValue)
-            && halfRateValue is true
+        bool decodeAt20Msps = BoolValueOrDefault(
+            command,
+            CliSpecs.DecodeAt20MspsDestination);
+        DspBackend dspBackend = DspBackendParser.Parse(command.Get<string>("dsp_backend"));
+        if (decodeAt20Msps)
+        {
+            ValidateTwentyMspsVhsMode(command, selectedSampleRateMHz, dspBackend);
+        }
+
+        bool halfRateInput = decodeAt20Msps
             && Math.Abs(selectedSampleRateMHz - FrequencyParser.DddMHz) <= 1e-9;
-        double decodeSampleRateMHz = previewHalfRate
+        double decodeSampleRateMHz = decodeAt20Msps
             ? FrequencyParser.DddMHz / 2.0
             : noResample
                 ? selectedSampleRateMHz
@@ -197,12 +217,18 @@ public static class DecodeSessionFactory
                 || command.InputFile.EndsWith(".ldf", StringComparison.Ordinal));
         bool useFfmpegInputPath = !noResample && !nativeFortyMegahertzContainer;
         IRfSampleLoader loader;
-        if (previewHalfRate)
+        if (halfRateInput)
         {
-            IRfSampleLoader sourceLoader = RfLoaderFactory.CreatePreviewHalfRateSource(
+            IRfSampleLoader sourceLoader = RfLoaderFactory.CreateVhsNativeSource(
                 command.InputFile,
-                fastContainerSeeking: true);
-            loader = new PreviewHalfRateSampleLoader(sourceLoader);
+                fastContainerSeeking: IsPreviewServer(command));
+            loader = new HalfRateSampleLoader(sourceLoader);
+        }
+        else if (decodeAt20Msps)
+        {
+            loader = RfLoaderFactory.CreateVhsNativeSource(
+                command.InputFile,
+                fastContainerSeeking: IsPreviewServer(command));
         }
         else
         {
@@ -232,7 +258,8 @@ public static class DecodeSessionFactory
             blockLength,
             blockCut: 1024,
             blockCutEnd: 1024,
-            loader);
+            loader,
+            sourceSamplesPerDecodeSample: halfRateInput ? 2 : 1);
         session.VhsParamsFileDiagnostics = paramsOverride.Diagnostics;
         if (!enforceFieldClass
             || !VhsInitializationDiagnostics.IsUnsupportedFieldClassCombination(system, parameters.TapeFormat))
@@ -291,7 +318,8 @@ public static class DecodeSessionFactory
         int blockLength,
         int blockCut,
         int blockCutEnd,
-        IRfSampleLoader loader)
+        IRfSampleLoader loader,
+        int sourceSamplesPerDecodeSample = 1)
     {
         double sampleRateHz = sampleRateMHz * 1_000_000.0;
         bool suppressFileOutputs = IsPreviewServer(command);
@@ -452,7 +480,8 @@ public static class DecodeSessionFactory
             dspBackend: executionOptions.DspBackend);
         DecodeRunBounds runBounds = DecodeRunBounds.FromCommand(
             command,
-            tbcFieldDecoder.EstimateNominalFieldSampleCount());
+            tbcFieldDecoder.EstimateNominalFieldSampleCount(),
+            sourceSamplesPerDecodeSample);
         activeSession = new DecodeSession(
             command.Spec,
             command.InputFile,
@@ -482,8 +511,43 @@ public static class DecodeSessionFactory
             runBounds,
             chromaOptions,
             laserDiscAudioOptions,
-            NullableString(command, "write_test_ldf"));
+            NullableString(command, "write_test_ldf"))
+        {
+            SourceSamplesPerDecodeSample = sourceSamplesPerDecodeSample
+        };
         return activeSession;
+    }
+
+    private static void ValidateTwentyMspsVhsMode(
+        ParsedCommand command,
+        double selectedSampleRateMHz,
+        DspBackend dspBackend)
+    {
+        if (!string.Equals(
+                command.Get<string>("tape_format"),
+                "VHS",
+                StringComparison.OrdinalIgnoreCase))
+        {
+            throw new NotSupportedException(
+                "--decode-at-20msps currently supports the VHS tape format only.");
+        }
+
+        if (!IsPreviewServer(command)
+            && dspBackend is not (DspBackend.IppFast or DspBackend.CudaFast))
+        {
+            throw new NotSupportedException(
+                "--decode-at-20msps is available for complete ipp-fast and cuda-fast VHS decode; Exact complete decode was not changed.");
+        }
+
+        bool supportedInputRate = Math.Abs(
+                selectedSampleRateMHz - FrequencyParser.DddMHz) <= 1e-9
+            || Math.Abs(
+                selectedSampleRateMHz - (FrequencyParser.DddMHz / 2.0)) <= 1e-9;
+        if (!supportedInputRate)
+        {
+            throw new NotSupportedException(
+                $"--decode-at-20msps requires 40 or native 20 MSPS VHS input; selected input rate was {selectedSampleRateMHz:R} MSPS.");
+        }
     }
 
     private static double BuildLevelAdjust(ParsedCommand command)

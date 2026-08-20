@@ -40,7 +40,7 @@ evidence, and remaining gaps.
   EIAJ, and supported PAL/NTSC variants.
 - TBC utility tools, the double-click GUI, and developer plotting windows are
   intentionally out of scope.
-- The Visual Studio 2026 `.slnx` solution has **1,569** standard xUnit v3 tests
+- The Visual Studio 2026 `.slnx` solution has **1,577** standard xUnit v3 tests
   that are visible in Test Explorer and runnable with `dotnet test`.
 
 <!-- SECTION: start -->
@@ -91,9 +91,10 @@ so bitrate is not identical across backends. The preview automatically uses
 `ipp-fast` when available and otherwise remains portable through the managed
 backend. Standard 40 MSPS VHS preview also applies a fixed anti-alias filter and
 decodes its internal RF stream at 20 MSPS. Native 20 MSPS VHS input stays at
-20 MSPS; S-VHS, other tape formats, LaserDisc, and every normal decode/export
-path retain their existing sample-rate behavior. This is automatic and adds no
-user-facing option. Startup reports the selected video pipeline, IPP-FAST initialization,
+20 MSPS. In other words, supported VHS preview routes force the same behavior as
+the full-decode `--decode-at-20msps` switch. Full VHS decode can opt into that
+switch with `ipp-fast` or `cuda-fast`; Exact, S-VHS, other tape formats, and
+LaserDisc retain their existing sample-rate behavior. Startup reports the selected video pipeline, IPP-FAST initialization,
 active decoder thread count, and separate in-place window-ID and real-time-FPS
 lines. A matching
 FFmpeg build is required on `PATH`; `VHSDECODE_FFMPEG` and `VHSDECODE_FFPROBE`
@@ -143,14 +144,24 @@ multithreaded Python runs are used for speed measurements only.
 | --- | --- |
 | `exact` | Default managed path for compatibility-sensitive decoding. |
 | `ipp-fast` | Experimental Windows x64 VHS and LaserDisc real-RF paths using Intel IPP. It can change floating-point bits and never silently falls back to `exact`. |
-| `cuda-fast` | Experimental Windows x64 NVIDIA CUDA 13 full-signal VHS path. It has an independent numerical contract, currently supports native-rate 40 MSPS PAL/NTSC VHS only, and never silently falls back to a CPU backend. |
+| `cuda-fast` | Experimental Windows x64 NVIDIA CUDA 13 full-signal VHS path. It has an independent numerical contract, supports PAL/NTSC VHS at 40 MSPS normally or GPU 40-to-20/native-20 MSPS with `--decode-at-20msps`, and never silently falls back to a CPU backend. |
 
 ```powershell
 decode.exe vhs --compat-version current --dsp-backend ipp-fast `
   --threads 20 input.lds output
+decode.exe vhs --dsp-backend ipp-fast --decode-at-20msps `
+  --pal input.lds output-20msps
 decode.exe vhs --dsp-backend cuda-fast --pal `
-  --start 100 --length 20 input.ldf output
+  --decode-at-20msps --start 100 --length 20 input.ldf output
 ```
+
+`--decode-at-20msps` is a VHS preview-quality mode, not an Exact-equivalence
+mode. A 40 MSPS source is anti-alias filtered and decoded internally at 20
+MSPS; native 20 MSPS input is decoded without another reduction. TBC metadata
+`fileLoc` remains in original input-sample coordinates.
+This is a preview-quality rate choice, not a universal throughput switch. On
+the current local real-PAL gate it made CUDA modestly faster but IPP modestly
+slower, so benchmark the intended capture before selecting it for full decode.
 
 The default Windows release includes the small CUDA-fast bridge but does not
 embed the 271 MiB cuFFT DLL. Only an explicit `--dsp-backend cuda-fast` request
@@ -289,7 +300,7 @@ The pinned SDK is .NET `11.0.100-preview.7.26381.103`.
 dotnet restore VHSDecodeDotNet.slnx
 dotnet build VHSDecodeDotNet.slnx -c Release --no-restore
 dotnet test --solution VHSDecodeDotNet.slnx -c Release `
-  --no-build --no-restore --minimum-expected-tests 1569
+  --no-build --no-restore --minimum-expected-tests 1577
 ```
 
 Open `VHSDecodeDotNet.slnx` in Visual Studio 2026 to build, debug, and run the

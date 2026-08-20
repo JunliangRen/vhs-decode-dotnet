@@ -952,7 +952,7 @@ public static class TbcOutputMetadataWriter
                     ["syncConf"] = syncConfidence,
                     ["seqNo"] = decision.SeqNo,
                     ["diskLoc"] = field.DiskLocation ?? ComputeLaserDiscDiskLocation(session, field),
-                    ["fileLoc"] = field.StartSample,
+                    ["fileLoc"] = session.ToSourceSampleLocation(field.StartSample),
                     ["medianBurstIRE"] = RoundMetadataFloat(field.MedianBurstIre ?? 0.0, 3)
                 };
                 AddDropouts(session, field, fieldInfo);
@@ -1018,7 +1018,7 @@ public static class TbcOutputMetadataWriter
                     ["syncConf"] = syncConfidence,
                     ["seqNo"] = decision.SeqNo,
                     ["diskLoc"] = field.DiskLocation ?? ComputeTapeDiskLocation(session, field),
-                    ["fileLoc"] = field.StartSample,
+                    ["fileLoc"] = session.ToSourceSampleLocation(field.StartSample),
                     ["fieldPhaseID"] = field.FieldPhaseId ?? EstimateTapeFieldPhase(session, decision)
                 };
                 AddDropouts(session, field, fieldInfo);

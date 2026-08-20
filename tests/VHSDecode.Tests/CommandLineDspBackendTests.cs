@@ -63,6 +63,29 @@ public sealed class CommandLineDspBackendTests
         Assert.DoesNotContain("dsp_backend", exact, StringComparison.Ordinal);
     }
 
+    [Fact(DisplayName = "20 MSPS decode switch accepts both spellings and stays out of Python namespaces")]
+    public void TwentyMspsDecodeSwitchIsDotNetOnly()
+    {
+        ParsedCommand dashed = Parse(CliSpecs.Vhs, "--decode-at-20msps");
+        ParsedCommand underscored = Parse(CliSpecs.Vhs, "--decode_at_20msps");
+        ParsedCommand disabled = Parse(CliSpecs.Vhs);
+
+        Assert.True(dashed.Get<bool>(CliSpecs.DecodeAt20MspsDestination));
+        Assert.True(underscored.Get<bool>(CliSpecs.DecodeAt20MspsDestination));
+        Assert.False(disabled.Get<bool>(CliSpecs.DecodeAt20MspsDestination));
+        Assert.Equal(
+            PythonNamespaceFormatter.Format(disabled),
+            PythonNamespaceFormatter.Format(dashed));
+        Assert.DoesNotContain(
+            CliSpecs.DecodeAt20MspsDestination,
+            PythonNamespaceFormatter.Format(dashed),
+            StringComparison.Ordinal);
+        string help = CommandHelpFormatter.Format(CliSpecs.Vhs, "decode.py");
+        Assert.Contains("--decode-at-20msps", help, StringComparison.Ordinal);
+        Assert.Contains("--decode_at_20msps", help, StringComparison.Ordinal);
+        Assert.Contains("preview enables this automatically", help, StringComparison.Ordinal);
+    }
+
     [Theory(DisplayName = "IPP fast rejects commands whose accelerated kernels are not implemented")]
     [InlineData("cvbs")]
     [InlineData("hifi")]

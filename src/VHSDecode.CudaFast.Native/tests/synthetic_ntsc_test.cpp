@@ -273,18 +273,22 @@ bool run_once(
     SyntheticRf& source,
     const std::string& output_base,
     vhsdecode_cuda_fast_input_sample_format input_format,
-    vhsdecode_cuda_fast_result_v1& result)
+    vhsdecode_cuda_fast_result_v1& result,
+    uint32_t device_decimation_factor = 1,
+    uint32_t maximum_output_fields = 0)
 {
     vhsdecode_cuda_fast_config_v1 config{};
     config.struct_size = sizeof(config);
     config.profile = VHSDECODE_CUDA_FAST_PROFILE_NTSC;
     config.tape_speed = VHSDECODE_CUDA_FAST_TAPE_SPEED_SP;
     config.device_id = 0;
-    config.sample_rate_mhz = 40.0;
+    config.sample_rate_mhz = device_decimation_factor == 2 ? 20.0 : 40.0;
     config.total_samples = source.samples.size();
     config.output_base_utf8 = output_base.c_str();
     config.overwrite = 1;
     config.input_sample_format = input_format;
+    config.maximum_output_fields = maximum_output_fields;
+    config.device_decimation_factor = device_decimation_factor;
     config.read_callback = input_format == VHSDECODE_CUDA_FAST_INPUT_INT16
         ? read_samples_int16
         : read_samples;
@@ -331,13 +335,17 @@ int main()
         std::filesystem::temp_directory_path() / ("vhsdecode-cuda-ntsc-s16-a-" + suffix);
     const std::filesystem::path int16_second_base =
         std::filesystem::temp_directory_path() / ("vhsdecode-cuda-ntsc-s16-b-" + suffix);
+    const std::filesystem::path half_rate_base =
+        std::filesystem::temp_directory_path() / ("vhsdecode-cuda-ntsc-s16-20msps-" + suffix);
     remove_outputs(float_base);
     remove_outputs(int16_first_base);
     remove_outputs(int16_second_base);
+    remove_outputs(half_rate_base);
 
     vhsdecode_cuda_fast_result_v1 float_result{};
     vhsdecode_cuda_fast_result_v1 int16_first_result{};
     vhsdecode_cuda_fast_result_v1 int16_second_result{};
+    vhsdecode_cuda_fast_result_v1 half_rate_result{};
     const bool decoded =
         run_once(
             source,
@@ -353,7 +361,14 @@ int main()
             source,
             int16_second_base.string(),
             VHSDECODE_CUDA_FAST_INPUT_INT16,
-            int16_second_result);
+            int16_second_result) &&
+        run_once(
+            source,
+            half_rate_base.string(),
+            VHSDECODE_CUDA_FAST_INPUT_INT16,
+            half_rate_result,
+            2,
+            40);
 
     const uintmax_t bytes_per_field =
         static_cast<uintmax_t>(910) * 263 * sizeof(uint16_t);
@@ -391,7 +406,10 @@ int main()
             int16_first_result.fields_written) &&
         metadata_sequence_valid(
             int16_second_base.string() + ".tbc.json",
-            int16_second_result.fields_written);
+            int16_second_result.fields_written) &&
+        metadata_sequence_valid(
+            half_rate_base.string() + ".tbc.json",
+            half_rate_result.fields_written);
     const bool valid_contract =
         decoded &&
         !size_error &&
@@ -400,6 +418,9 @@ int main()
         int16_first_result.fields_written == int16_second_result.fields_written &&
         int16_first_result.output_line_length == 910 &&
         int16_first_result.output_field_lines == 263 &&
+        half_rate_result.fields_written == 40 &&
+        half_rate_result.output_line_length == 910 &&
+        half_rate_result.output_field_lines == 263 &&
         luma_size == bytes_per_field * int16_first_result.fields_written &&
         same_luma &&
         same_chroma &&
@@ -411,14 +432,17 @@ int main()
         std::fprintf(
             stderr,
             "Synthetic NTSC output contract or determinism failed: "
-            "decoded=%d fields=%u/%u/%u geometry=%ux%u bytes=%llu/%llu "
+            "decoded=%d fields=%u/%u/%u/half:%u geometry=%ux%u half:%ux%u bytes=%llu/%llu "
             "luma=%d chroma=%d json=%d metadata=%d.\n",
             decoded ? 1 : 0,
             float_result.fields_written,
             int16_first_result.fields_written,
             int16_second_result.fields_written,
+            half_rate_result.fields_written,
             int16_first_result.output_line_length,
             int16_first_result.output_field_lines,
+            half_rate_result.output_line_length,
+            half_rate_result.output_field_lines,
             static_cast<unsigned long long>(luma_size),
             static_cast<unsigned long long>(
                 bytes_per_field * int16_first_result.fields_written),
@@ -428,16 +452,18 @@ int main()
             valid_metadata ? 1 : 0);
         std::fprintf(
             stderr,
-            "Synthetic NTSC diagnostic outputs retained at %s, %s, and %s.\n",
+            "Synthetic NTSC diagnostic outputs retained at %s, %s, %s, and %s.\n",
             float_base.string().c_str(),
             int16_first_base.string().c_str(),
-            int16_second_base.string().c_str());
+            int16_second_base.string().c_str(),
+            half_rate_base.string().c_str());
         return 2;
     }
 
     remove_outputs(float_base);
     remove_outputs(int16_first_base);
     remove_outputs(int16_second_base);
+    remove_outputs(half_rate_base);
     std::printf(
         "Synthetic NTSC CUDA pipeline passed with %u fields.\n",
         int16_first_result.fields_written);

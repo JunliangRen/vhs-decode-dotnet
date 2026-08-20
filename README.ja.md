@@ -38,7 +38,7 @@ upstream release `v0.4.0`、commit
 - VHS family には VHS/S-VHS、Betamax、Video8/Hi8、U-matic、Type C、EIAJ、
   upstream が対応する PAL/NTSC variant が含まれます。
 - TBC utility、ダブルクリック GUI、開発者向け plot window は対象外です。
-- Visual Studio 2026 の `.slnx` には **1,569** 件の標準 xUnit v3 test があり、
+- Visual Studio 2026 の `.slnx` には **1,577** 件の標準 xUnit v3 test があり、
   Test Explorer と `dotnet test` の両方で実行できます。
 
 <!-- SECTION: start -->
@@ -80,8 +80,10 @@ CPU YADIF + AMF、CPU YADIF + libx264 の順に実際に検証します。
 IPP が利用可能なら `ipp-fast` を自動選択し、それ以外では portable な managed
 backend に戻ります。標準 40 MSPS VHS preview は固定 anti-alias filter を通した後、
 内部 RF を 20 MSPS で decode します。native 20 MSPS VHS input は 20 MSPS のままで、
-S-VHS、その他の tape format、LaserDisc、通常の decode/export path は従来の
-sample-rate behavior を維持します。この最適化は自動で、user-facing option は追加しません。
+supported VHS preview route は full decode の `--decode-at-20msps` を強制した場合と
+同じ behavior です。full VHS decode では `ipp-fast` または `cuda-fast` でこの option を
+明示的に選べます。Exact、S-VHS、その他の tape format、LaserDisc は従来の
+sample-rate behavior を維持します。
 起動時には選択した video pipeline、IPP-FAST の初期化成否、
 実際の decode thread 数、別々の行で更新される window ID と realtime FPS を表示します。少なくとも
 1 つの pipeline が利用できる FFmpeg が必要で、`VHSDECODE_FFMPEG` と
@@ -130,14 +132,24 @@ capture/hardware に限定した preview 結果であり、Exact equivalence で
 | --- | --- |
 | `exact` | default の managed path。互換性を重視する decode に使用します。 |
 | `ipp-fast` | Intel IPP を使う experimental Windows x64 VHS / LaserDisc real-RF path。浮動小数点 bit が変化する可能性があり、`exact` へ silent fallback しません。 |
-| `cuda-fast` | NVIDIA CUDA 13 を使う experimental Windows x64 full-signal VHS path。独立した numerical contract を持ち、現時点では native-rate 40 MSPS PAL/NTSC VHS のみを support し、CPU backend へ silent fallback しません。 |
+| `cuda-fast` | NVIDIA CUDA 13 を使う experimental Windows x64 full-signal VHS path。独立した numerical contract を持ち、PAL/NTSC VHS を通常は 40 MSPS、`--decode-at-20msps` 指定時は GPU 40→20 または native 20 MSPS で decode し、CPU backend へ silent fallback しません。 |
 
 ```powershell
 decode.exe vhs --compat-version current --dsp-backend ipp-fast `
   --threads 20 input.lds output
+decode.exe vhs --dsp-backend ipp-fast --decode-at-20msps `
+  --pal input.lds output-20msps
 decode.exe vhs --dsp-backend cuda-fast --pal `
-  --start 100 --length 20 input.ldf output
+  --decode-at-20msps --start 100 --length 20 input.ldf output
 ```
+
+`--decode-at-20msps` は VHS preview-quality mode で、Exact equivalence は保証しません。
+40 MSPS source は anti-alias filter 後に内部 20 MSPS で decode し、native 20 MSPS
+input は再度 decimate しません。TBC metadata の `fileLoc` は元の input sample 座標を
+維持します。
+これは preview-quality の sample-rate 選択であり、常に高速化する switch ではありません。
+現在の local real-PAL gate では CUDA は少し速くなりましたが、IPP は少し遅くなったため、
+full decode で使う前に対象 capture を benchmark してください。
 
 default Windows release は小型 CUDA-fast bridge を保持しますが、271 MiB の cuFFT DLL
 は埋め込みません。`--dsp-backend cuda-fast` を明示したときだけ compatible CUDA 13/
@@ -265,7 +277,7 @@ header は FFmpeg を維持します。
 dotnet restore VHSDecodeDotNet.slnx
 dotnet build VHSDecodeDotNet.slnx -c Release --no-restore
 dotnet test --solution VHSDecodeDotNet.slnx -c Release `
-  --no-build --no-restore --minimum-expected-tests 1569
+  --no-build --no-restore --minimum-expected-tests 1577
 ```
 
 Visual Studio 2026 で `VHSDecodeDotNet.slnx` を開くと、build、debug、

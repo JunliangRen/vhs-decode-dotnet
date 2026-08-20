@@ -6,7 +6,7 @@ namespace VHSDecode.Preview;
 
 internal static class PreviewDecodeCommandFactory
 {
-    internal const string HalfRateRfOption = "preview_half_rate_rf";
+    internal const string DecodeAt20MspsOption = CliSpecs.DecodeAt20MspsDestination;
 
     internal static ParsedCommand CreateFastTemplate(ParsedCommand command)
     {
@@ -74,8 +74,7 @@ internal static class PreviewDecodeCommandFactory
                     StringComparison.Ordinal)
                 && Math.Abs(inputSampleRateMHz - FrequencyParser.DddMHz) <= 1e-9)
             {
-                values[HalfRateRfOption] = true;
-                sources[HalfRateRfOption] = ParsedOptionSource.Default;
+                Set(values, sources, DecodeAt20MspsOption, true);
             }
             else if (string.Equals(
                     command.Get<string>("tape_format"),
@@ -83,6 +82,7 @@ internal static class PreviewDecodeCommandFactory
                     StringComparison.Ordinal)
                 && Math.Abs(inputSampleRateMHz - (FrequencyParser.DddMHz / 2.0)) <= 1e-9)
             {
+                Set(values, sources, DecodeAt20MspsOption, true);
                 Set(values, sources, "no_resample", true);
             }
         }

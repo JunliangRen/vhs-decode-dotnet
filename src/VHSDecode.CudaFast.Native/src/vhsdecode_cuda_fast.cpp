@@ -210,7 +210,7 @@ vhsdecode_cuda_fast_get_runtime_info(
     if (info->struct_size != sizeof(vhsdecode_cuda_fast_runtime_info_v1)) {
         return fail(
             VHSDECODE_CUDA_FAST_STATUS_INVALID_ARGUMENT,
-            "CUDA-fast runtime-info structure size did not match ABI v5.");
+            "CUDA-fast runtime-info structure size did not match ABI v6.");
     }
 
     try {
@@ -250,20 +250,29 @@ vhsdecode_cuda_fast_run(
         || result->struct_size != sizeof(vhsdecode_cuda_fast_result_v1)) {
         return fail(
             VHSDECODE_CUDA_FAST_STATUS_INVALID_ARGUMENT,
-            "CUDA-fast structure size did not match ABI v5.");
+            "CUDA-fast structure size did not match ABI v6.");
     }
+    const bool decode_rate_matches_decimation =
+        (config->device_decimation_factor == 1
+            && (std::abs(config->sample_rate_mhz - 40.0) <= 0.0000005
+                || std::abs(config->sample_rate_mhz - 20.0) <= 0.0000005))
+        || (config->device_decimation_factor == 2
+            && std::abs(config->sample_rate_mhz - 20.0) <= 0.0000005);
     if (config->read_callback == nullptr
         || config->output_base_utf8 == nullptr
         || config->output_base_utf8[0] == '\0'
         || config->total_samples == 0
         || config->total_samples > std::numeric_limits<size_t>::max()
         || config->input_sample_format > VHSDECODE_CUDA_FAST_INPUT_INT16
+        || (config->device_decimation_factor != 1
+            && config->device_decimation_factor != 2)
         || !std::isfinite(config->sample_rate_mhz)
         || config->sample_rate_mhz < 8.0
-        || config->sample_rate_mhz > 100.0) {
+        || config->sample_rate_mhz > 100.0
+        || !decode_rate_matches_decimation) {
         return fail(
             VHSDECODE_CUDA_FAST_STATUS_INVALID_ARGUMENT,
-            "CUDA-fast configuration contained an invalid callback, path, sample count, or sample rate.");
+            "CUDA-fast configuration contained an invalid callback, path, sample count, decode rate, or decimation factor.");
     }
 
     try {
@@ -302,6 +311,12 @@ vhsdecode_cuda_fast_run(
             return fail(
                 VHSDECODE_CUDA_FAST_STATUS_INPUT_ERROR,
                 "CUDA-fast could not initialize its managed RF reader.");
+        }
+        if (!reader.set_device_decimation_factor(
+                static_cast<int>(config->device_decimation_factor))) {
+            return fail(
+                VHSDECODE_CUDA_FAST_STATUS_INPUT_ERROR,
+                "CUDA-fast could not configure its RF decimation factor.");
         }
 
         TBCWriter writer;
@@ -375,7 +390,7 @@ vhsdecode_cuda_fast_preview_create(
     if (config->struct_size != sizeof(vhsdecode_cuda_fast_preview_config_v1)) {
         return fail(
             VHSDECODE_CUDA_FAST_STATUS_INVALID_ARGUMENT,
-            "CUDA-fast preview configuration size did not match ABI v5.");
+            "CUDA-fast preview configuration size did not match ABI v6.");
     }
     const bool ntsc = config->profile == VHSDECODE_CUDA_FAST_PROFILE_NTSC;
     const bool pal = config->profile == VHSDECODE_CUDA_FAST_PROFILE_PAL;

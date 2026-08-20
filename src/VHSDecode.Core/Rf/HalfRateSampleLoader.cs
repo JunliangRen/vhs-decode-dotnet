@@ -1,6 +1,11 @@
+using System.Buffers;
+using System.Runtime.InteropServices;
+using System.Runtime.Intrinsics;
+using System.Runtime.Intrinsics.X86;
+
 namespace VHSDecode.Core.Rf;
 
-internal sealed class PreviewHalfRateSampleLoader : IReusableRfSampleLoader, IDisposable
+internal sealed class HalfRateSampleLoader : IReusableRfSampleLoader, IDisposable
 {
     private const int HalfWidth = 15;
     private const int MaximumRetainedOutputLength = 1024 * 1024;
@@ -24,7 +29,7 @@ internal sealed class PreviewHalfRateSampleLoader : IReusableRfSampleLoader, IDi
     private int _outputBufferCount;
     private bool _disposed;
 
-    internal PreviewHalfRateSampleLoader(IRfSampleLoader source)
+    internal HalfRateSampleLoader(IRfSampleLoader source)
     {
         _source = source ?? throw new ArgumentNullException(nameof(source));
     }
@@ -85,19 +90,7 @@ internal sealed class PreviewHalfRateSampleLoader : IReusableRfSampleLoader, IDi
                 ? TakeOutputBuffer(readLength)
                 : new double[readLength];
             int firstCenterOffset = checked((int)(firstCenter - sourceStart));
-            for (int outputIndex = 0; outputIndex < output.Length; outputIndex++)
-            {
-                int center = checked(firstCenterOffset + (outputIndex * 2));
-                double value = CenterCoefficient * SampleOrZero(source, center);
-                foreach ((int offset, double coefficient) in SymmetricCoefficients)
-                {
-                    value += coefficient
-                        * (SampleOrZero(source, center - offset)
-                            + SampleOrZero(source, center + offset));
-                }
-
-                output[outputIndex] = value;
-            }
+            Filter(source, firstCenterOffset, output);
 
             completed = true;
             return output;
@@ -169,6 +162,117 @@ internal sealed class PreviewHalfRateSampleLoader : IReusableRfSampleLoader, IDi
             {
                 _outputBuffers[_outputBufferCount++] = buffer;
             }
+        }
+    }
+
+    private static void Filter(
+        ReadOnlySpan<double> source,
+        int firstCenterOffset,
+        Span<double> output)
+    {
+        if (!Avx.IsSupported || output.Length < 64)
+        {
+            FilterScalar(source, firstCenterOffset, output);
+            return;
+        }
+
+        double[] centers = ArrayPool<double>.Shared.Rent(output.Length);
+        double[] neighbors = ArrayPool<double>.Shared.Rent(
+            checked(output.Length + (SymmetricCoefficients.Length * 2) - 1));
+        try
+        {
+            for (int index = 0; index < output.Length; index++)
+            {
+                centers[index] = SampleOrZero(
+                    source,
+                    checked(firstCenterOffset + (index * 2)));
+            }
+
+            // All non-zero half-band side taps address the opposite source
+            // parity. Split that parity into one contiguous sequence so AVX
+            // can filter four output samples at a time without gathers.
+            int neighborPadding = SymmetricCoefficients.Length;
+            int neighborCount = checked(
+                output.Length + (SymmetricCoefficients.Length * 2) - 1);
+            for (int index = 0; index < neighborCount; index++)
+            {
+                int logicalNeighbor = index - neighborPadding;
+                neighbors[index] = SampleOrZero(
+                    source,
+                    checked(firstCenterOffset + (logicalNeighbor * 2) + 1));
+            }
+
+            ref double centerReference = ref MemoryMarshal.GetArrayDataReference(centers);
+            ref double neighborReference = ref MemoryMarshal.GetArrayDataReference(neighbors);
+            ref double outputReference = ref MemoryMarshal.GetReference(output);
+            int vectorizedLength = output.Length & ~3;
+            Vector256<double> centerCoefficient = Vector256.Create(CenterCoefficient);
+            for (int index = 0; index < vectorizedLength; index += 4)
+            {
+                Vector256<double> value = Avx.Multiply(
+                    Vector256.LoadUnsafe(ref centerReference, (nuint)index),
+                    centerCoefficient);
+                for (int coefficientIndex = 0;
+                    coefficientIndex < SymmetricCoefficients.Length;
+                    coefficientIndex++)
+                {
+                    Vector256<double> pair = Avx.Add(
+                        Vector256.LoadUnsafe(
+                            ref neighborReference,
+                            (nuint)(index + neighborPadding - coefficientIndex - 1)),
+                        Vector256.LoadUnsafe(
+                            ref neighborReference,
+                            (nuint)(index + neighborPadding + coefficientIndex)));
+                    value = Avx.Add(
+                        value,
+                        Avx.Multiply(
+                            pair,
+                            Vector256.Create(
+                                SymmetricCoefficients[coefficientIndex].Coefficient)));
+                }
+
+                value.StoreUnsafe(ref outputReference, (nuint)index);
+            }
+
+            for (int index = vectorizedLength; index < output.Length; index++)
+            {
+                double value = CenterCoefficient * centers[index];
+                for (int coefficientIndex = 0;
+                    coefficientIndex < SymmetricCoefficients.Length;
+                    coefficientIndex++)
+                {
+                    value += SymmetricCoefficients[coefficientIndex].Coefficient
+                        * (neighbors[index + neighborPadding - coefficientIndex - 1]
+                            + neighbors[index + neighborPadding + coefficientIndex]);
+                }
+
+                output[index] = value;
+            }
+        }
+        finally
+        {
+            ArrayPool<double>.Shared.Return(centers);
+            ArrayPool<double>.Shared.Return(neighbors);
+        }
+    }
+
+    private static void FilterScalar(
+        ReadOnlySpan<double> source,
+        int firstCenterOffset,
+        Span<double> output)
+    {
+        for (int outputIndex = 0; outputIndex < output.Length; outputIndex++)
+        {
+            int center = checked(firstCenterOffset + (outputIndex * 2));
+            double value = CenterCoefficient * SampleOrZero(source, center);
+            foreach ((int offset, double coefficient) in SymmetricCoefficients)
+            {
+                value += coefficient
+                    * (SampleOrZero(source, center - offset)
+                        + SampleOrZero(source, center + offset));
+            }
+
+            output[outputIndex] = value;
         }
     }
 

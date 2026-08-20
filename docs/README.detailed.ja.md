@@ -212,6 +212,23 @@ power-of-two double-precision full-complex FFT stage を含みます。LD path �
 bridge ABI v1.3 を使用します。CVBS と HiFi は未対応の `ipp-fast` を明示的に拒否し、
 Exact kernel を実行した結果を誤って benchmark として扱うことはありません。
 
+PAL/NTSC VHS の full `ipp-fast` と `cuda-fast` decode は
+`--decode-at-20msps`（alias `--decode_at_20msps`）も受け付けます。40 MSPS input は
+固定 anti-alias 2:1 filter を通してから downstream DSP を 20 MSPS で実行し、native
+20 MSPS input はその DSP rate に直接入ります。IPP は input loader、CUDA は full
+signal graph の前段 GPU で reduction を行います。Exact full decode はこの switch を
+拒否します。supported VHS preview route は同じ mode を自動的に強制し、output metadata
+の `fileLoc` は元の source-sample 座標を維持します。
+
+この switch は preview-quality sample rate を選ぶものであり、すべての backend での
+高速化を保証しません。同じ real PAL 100-frame window を startup 込みで各 variant 2 回
+測定した gate では、CUDA 40/20 MSPS median は 2.880/2.685 秒（20 MSPS で wall time
+6.77% 減）、20-thread IPP median は 4.830/5.160 秒（wall time 6.83% 増）でした。
+同一 backend の 40 対 20 MSPS raw luma/chroma TBC SSIM は CUDA が
+0.978718/0.991624、IPP が 0.977307/0.995722 です。4 output はすべて厳密に増加する
+200 field と source-coordinate `fileLoc` を保持しました。これは local short-run の
+方向性 evidence であり、capture をまたぐ保証ではありません。
+
 `cuda-fast` は独立した Windows x64 NVIDIA CUDA 13 full-signal VHS backend です。
 `vhsdecode_cuda_fast.dll` と cuFFT を load し、cuVHS commit
 `c55e72073f44b27e8839efb842e4345af39887f7` に固定した RF demodulation、
@@ -221,23 +238,24 @@ Exact または IPP field engine は実行しません。RF sample、cuFFT R2C/C
 demodulation、geometry、colour、dropout image data は FP32 です。直接 FP32 で係数を
 構築すると不安定だったため、1 回だけ行う high-order host filter design のみ double
 precision を保ち、完成した係数を GPU upload 前に明示的に量子化します。native bridge
-ABI v5 は raw signed-16、eligible libsndfile、FFmpeg PCM16 input で direct PCM16 callback
+ABI v6 は raw signed-16、eligible libsndfile、FFmpeg PCM16 input で direct PCM16 callback
 を優先します。FP32 の半分の transfer size で upload し、deterministic GPU kernel が
 FP32 で正確に表現できる各 signed-16 value を FP32 signal plane へ変換します。managed
 FP32 callback は fallback として維持します。bridge は persistent chroma workspace、
 自動的に 16 field に制限する batch、parallel deterministic sync-pulse scan も使用します。
-ABI v5 は要求 output-field limit と scan 可能な RF 量を分離します。そのため native
+ABI v6 は要求 output-field limit と scan 可能な RF 量を分離します。そのため native
 pipeline は weak/no-signal leader を通過し、horizontal cadence が連続して安定してから
 fallback field order を開始し、invalid field と先頭の不完全な second field を捨て、
 要求された完全な alternating field 数で正確に停止します。cuVHS の optional host-side
 K4 source reconstruction は compile 時に無効化され、この route は常に GPU source を
 使います。未対応 option/profile や CUDA component 不足は明示的に失敗し、別 DSP
-backend へ fallback しません。full-decode contract は Windows x64 の native-rate
-40 MSPS PAL/NTSC VHS SP/LP/EP のみです。CVBS、LaserDisc、HiFi、S-VHS、その他の
+backend へ fallback しません。full-decode contract は Windows x64 の PAL/NTSC VHS
+SP/LP/EP を通常の native 40 MSPS、または明示 switch により 40/native-20 MSPS input
+から内部 20 MSPS で処理するものです。CVBS、LaserDisc、HiFi、S-VHS、その他の
 video system、packed `.lds`、明示的な compatibility profile selection は近似処理しません。
 
 `--preview-server` と明示的な `--dsp-backend cuda-fast` を組み合わせると、native-rate
-40 MSPS PAL/NTSC VHS 用の ABI v5 GPU preview route を選択します。1 つの native
+40 MSPS PAL/NTSC VHS 用の ABI v6 GPU preview route を選択します。1 つの native
 decode context を request window 間で保持し、deterministic 15-tap CUDA FIR が
 anti-alias 付き 2:1 reduction で 20 MSPS にしてから、persistent GPU sync、FM、
 time-base、chroma、dropout graph へ渡します。CUDA output stage は field-rate bob を
@@ -247,7 +265,8 @@ luma/chroma/NV12 frame を download せず H.264 を出力します。各 bounde
 だけです。圧縮 packet は managed memory に渡され、FFmpeg は `-c:v copy` により
 HLS/fMP4 timeline を構成するだけです。
 この明示 route は NVENC 必須で、失敗時に QSV、AMF、libx264、IPP、Exact を試しません。
-通常の decode/export の sample-rate behavior は変わりません。
+これは preview が `--decode-at-20msps` を強制する形で、full decode は switch を明示した
+場合だけ rate を変更します。
 
 local RTX 4070 と real 631.452-second PAL 40 MSPS capture 1 本で、同じ current executable
 の steady W15/W25/W30/W35 window は CUDA が平均 1.142 秒、default 20-thread IPP
@@ -4041,7 +4060,7 @@ suite は全 1,448 test に成功しました。
 .\tools\build-cuda-fast-native.ps1
 dotnet restore VHSDecodeDotNet.slnx
 dotnet build VHSDecodeDotNet.slnx -c Release --no-restore
-dotnet test --solution VHSDecodeDotNet.slnx -c Release --no-build --no-restore --minimum-expected-tests 1569
+dotnet test --solution VHSDecodeDotNet.slnx -c Release --no-build --no-restore --minimum-expected-tests 1577
 dotnet test --project tests\VHSDecode.Tests\VHSDecode.Tests.csproj -c Release --no-build --no-restore --coverage --coverage-output coverage.cobertura.xml --coverage-output-format cobertura
 ```
 
@@ -4069,7 +4088,7 @@ default command はすべての native GPU test を実行します。GPU のな�
 
 現在の正式な Release build は warning 0、error 0 です。xUnit v3 project は
 `dotnet test` と Visual Studio Test Explorer の両方で個別に検出できる
-**1,569** tests を公開します。
+**1,577** tests を公開します。
 
 <!-- SECTION: usage -->
 
@@ -4089,8 +4108,8 @@ Release build 後は facade dispatch または apphost alias を使用できま�
 ```powershell
 src\VHSDecode.Cli\bin\Release\net11.0\decode.exe vhs [upstream options] input output
 src\VHSDecode.Cli\bin\Release\net11.0\vhs-decode.exe [upstream options] input output
-decode.exe vhs --dsp-backend ipp-fast [upstream options] input output
-decode.exe vhs --dsp-backend cuda-fast --pal [supported options] input.ldf output
+decode.exe vhs --dsp-backend ipp-fast [--decode-at-20msps] [upstream options] input output
+decode.exe vhs --dsp-backend cuda-fast --pal [--decode-at-20msps] [supported options] input.ldf output
 decode.exe vhs --preview-server --dsp-backend cuda-fast --pal input.ldf
 ```
 

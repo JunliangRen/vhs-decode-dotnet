@@ -16,7 +16,7 @@
 #  define VHSDECODE_CUDA_FAST_CALL
 #endif
 
-#define VHSDECODE_CUDA_FAST_ABI_VERSION 0x00050000u
+#define VHSDECODE_CUDA_FAST_ABI_VERSION 0x00060000u
 #define VHSDECODE_CUDA_FAST_NAME_CAPACITY 128u
 
 #ifdef __cplusplus
@@ -91,6 +91,7 @@ typedef struct vhsdecode_cuda_fast_config_v1 {
     int32_t overwrite;
     uint32_t input_sample_format;
     uint32_t maximum_output_fields;
+    uint32_t device_decimation_factor;
     vhsdecode_cuda_fast_read_callback read_callback;
     vhsdecode_cuda_fast_cancel_callback cancel_callback;
     void* user_data;

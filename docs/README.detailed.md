@@ -215,6 +215,25 @@ full-complex FFT stages used by LaserDisc video, EFM, and analog audio. The LD
 route uses native bridge ABI v1.3. CVBS and HiFi reject `ipp-fast` as unsupported
 instead of quietly benchmarking their Exact kernels.
 
+For PAL/NTSC VHS, complete `ipp-fast` and `cuda-fast` decode also accept
+`--decode-at-20msps` (alias `--decode_at_20msps`). A 40 MSPS input is passed
+through the fixed anti-alias 2:1 filter before the downstream DSP runs at 20
+MSPS; native 20 MSPS input enters that DSP rate directly. IPP performs the
+reduction in its input loader, while CUDA performs it on the GPU before the
+full signal graph. Exact complete decode rejects the switch. Supported VHS
+preview routes force the same mode automatically, and output metadata keeps
+`fileLoc` in original source-sample coordinates.
+
+This switch selects a preview-quality sampling rate; it does not promise a
+speedup on every backend. In a startup-inclusive, two-run-per-variant gate on
+the same 100-frame real PAL window, CUDA 40/20 MSPS medians were 2.880/2.685
+seconds (6.77% less wall time at 20 MSPS), while 20-thread IPP medians were
+4.830/5.160 seconds (6.83% more wall time). Raw luma/chroma TBC SSIM between
+each backend's 40 and 20 MSPS output was 0.978718/0.991624 for CUDA and
+0.977307/0.995722 for IPP. All four outputs contained 200 strictly ordered
+fields and source-coordinate `fileLoc` values. These are local, short-run
+directional results, not cross-capture guarantees.
+
 `cuda-fast` is a separate Windows x64 NVIDIA CUDA 13 full-signal VHS backend.
 It loads `vhsdecode_cuda_fast.dll` and cuFFT, then runs the RF demodulation,
 sync/line-location, time-base correction, color-under, and dropout graph from
@@ -224,13 +243,13 @@ not run the Exact or IPP field engine. RF samples, cuFFT R2C/C2C/C2R storage,
 demodulation, geometry, color, and dropout image data use FP32. Only the
 one-time high-order host filter design remains double precision because direct
 FP32 coefficient construction was unstable; its completed coefficients are
-explicitly quantized before GPU upload. Native bridge ABI v5 prefers direct
+explicitly quantized before GPU upload. Native bridge ABI v6 prefers direct
 PCM16 callbacks for raw signed-16, eligible libsndfile, and FFmpeg PCM16 input.
 Those samples upload at half the FP32 transfer size and a deterministic GPU
 kernel converts every exactly representable signed-16 value into the FP32
 signal plane; the managed FP32 callback remains as a fallback. The bridge also
 uses a persistent chroma workspace, an automatically bounded 16-field batch,
-and a parallel deterministic sync-pulse scan. ABI v5 carries the requested
+and a parallel deterministic sync-pulse scan. ABI v6 carries the requested
 output-field limit independently from the amount of RF available to scan. The
 native pipeline can therefore pass a weak/no-signal leader, requires stable
 horizontal cadence before seeding fallback field order, rejects invalid fields
@@ -238,13 +257,14 @@ and a leading second field, and stops after exactly the requested number of
 complete alternating fields. The optional cuVHS host-side K4 source
 reconstruction is compiled out so this route always uses the GPU source.
 Unsupported options, profiles, or missing CUDA components fail explicitly and
-never select another DSP backend. The full-decode contract is native-rate
-40 MSPS PAL/NTSC VHS SP/LP/EP on Windows x64; CVBS, LaserDisc, HiFi, S-VHS,
+never select another DSP backend. The full-decode contract is PAL/NTSC VHS
+SP/LP/EP on Windows x64 at native 40 MSPS, or at internal 20 MSPS through the
+explicit switch from 40/native-20 MSPS input; CVBS, LaserDisc, HiFi, S-VHS,
 other video systems, packed `.lds`, and explicit compatibility profile
 selection are not approximated.
 
 Combining `--preview-server` with an explicit `--dsp-backend cuda-fast` selects
-the ABI v5 GPU preview route for native-rate 40 MSPS PAL/NTSC VHS. One native
+the ABI v6 GPU preview route for native-rate 40 MSPS PAL/NTSC VHS. One native
 decode context persists across requested windows. A deterministic 15-tap CUDA
 FIR performs the anti-aliased 2:1 reduction to 20 MSPS before the persistent
 GPU sync, FM, time-base, chroma, and dropout graph. A CUDA output stage renders
@@ -254,8 +274,9 @@ Each bounded RF batch crosses once on upload; thereafter only small sync/field-o
 metadata and compressed packets cross the host/device boundary. The compressed
 packets enter managed memory, and FFmpeg uses `-c:v copy` solely to form the
 HLS/fMP4 timeline. This explicit route requires NVENC and fails
-closed instead of probing QSV, AMF, libx264, IPP, or Exact. Normal decode/export
-sample-rate behavior is unchanged.
+closed instead of probing QSV, AMF, libx264, IPP, or Exact. It is the forced
+preview form of `--decode-at-20msps`; complete decode changes rate only when
+that switch is explicitly present.
 
 On the local RTX 4070 and one real 631.452-second PAL 40 MSPS capture, the same
 current executable served steady windows W15/W25/W30/W35 in an average 1.142
@@ -4354,7 +4375,7 @@ Requirements:
 .\tools\build-cuda-fast-native.ps1
 dotnet restore VHSDecodeDotNet.slnx
 dotnet build VHSDecodeDotNet.slnx -c Release --no-restore
-dotnet test --solution VHSDecodeDotNet.slnx -c Release --no-build --no-restore --minimum-expected-tests 1569
+dotnet test --solution VHSDecodeDotNet.slnx -c Release --no-build --no-restore --minimum-expected-tests 1577
 dotnet test --project tests\VHSDecode.Tests\VHSDecode.Tests.csproj -c Release --no-build --no-restore --coverage --coverage-output coverage.cobertura.xml --coverage-output-format cobertura
 ```
 
@@ -4384,7 +4405,7 @@ The default command runs every native GPU test. GPU-less CI may pass
 but is not GPU runtime validation.
 
 The current formal Release build has zero warnings and errors. The xUnit v3
-project exposes **1,569** independently discoverable tests to both
+project exposes **1,577** independently discoverable tests to both
 `dotnet test` and Visual Studio Test Explorer.
 
 <!-- SECTION: usage -->
@@ -4405,8 +4426,8 @@ After a Release build, use either facade dispatch or an apphost alias:
 ```powershell
 src\VHSDecode.Cli\bin\Release\net11.0\decode.exe vhs [upstream options] input output
 src\VHSDecode.Cli\bin\Release\net11.0\vhs-decode.exe [upstream options] input output
-decode.exe vhs --dsp-backend ipp-fast [upstream options] input output
-decode.exe vhs --dsp-backend cuda-fast --pal [supported options] input.ldf output
+decode.exe vhs --dsp-backend ipp-fast [--decode-at-20msps] [upstream options] input output
+decode.exe vhs --dsp-backend cuda-fast --pal [--decode-at-20msps] [supported options] input.ldf output
 decode.exe vhs --preview-server --dsp-backend cuda-fast --pal input.ldf
 ```
 

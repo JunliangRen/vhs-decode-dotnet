@@ -3,6 +3,7 @@ usage: decode.py [-h] [--preview-server] [--preview-port port] [--preview-crf cr
                  [--start_fileloc start_fileloc] [-l length] [--overwrite]
                  [--write_db] [-f FREQ] [-t threads]
                  [--dsp-backend {exact,ipp-fast,cuda-fast}]
+                 [--decode-at-20msps]
                  [--compat-version {v0.4.0,current}] [--ct] [--sl sharpness]
                  [--notch notch] [--notch_q notch_q] [-p] [-n] [--pm]
                  [--NTSCJ] [--debug] [--skip_hsync_refine] [--tf tape_format]
@@ -39,6 +40,9 @@ options:
                         number of CPU threads to use
   --dsp-backend {exact,ipp-fast,cuda-fast}
                         DSP implementation to use (default: exact)
+  --decode-at-20msps, --decode_at_20msps
+                        decode PAL/NTSC VHS internally at 20 MSPS with ipp-fast
+                        or cuda-fast (preview enables this automatically)
   --compat-version {v0.4.0,current}
                         upstream behavior profile (default: v0.4.0; current
                         selects staged PR 341 HSync, VSync-level, and NTSC

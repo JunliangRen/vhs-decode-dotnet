@@ -35,7 +35,7 @@
 - VHS 家族包括 VHS/S-VHS、Betamax、Video8/Hi8、U-matic、Type C、EIAJ
   以及上游支持的 PAL/NTSC 变体。
 - TBC 工具、双击启动的用户 GUI 和开发者绘图窗口明确不在范围内。
-- Visual Studio 2026 `.slnx` 包含 **1,569** 项标准 xUnit v3 测试；测试可在
+- Visual Studio 2026 `.slnx` 包含 **1,577** 项标准 xUnit v3 测试；测试可在
   Test Explorer 中查看，也可用 `dotnet test` 运行。
 
 <!-- SECTION: start -->
@@ -73,8 +73,9 @@ fMP4 管线：CUDA YADIF + NVENC、QSV advanced VPP + QSV、CPU YADIF + AMF，�
 最接近的质量/QP 控制，因此不同后端的码率并不完全相同。IPP 可用时会自动选用
 `ipp-fast`，否则回退到可移植的托管后端。标准 40 MSPS VHS 预览还会先经过固定的
 抗混叠滤波，再以内部 20 MSPS RF 解码；原生 20 MSPS VHS 输入保持 20 MSPS，
-S-VHS、其他磁带格式、LaserDisc 以及全部普通解码/导出路径都维持原有采样率行为。
-这项优化自动启用，不增加用户参数。启动输出会明确显示所选视频管线、
+也就是说，受支持的 VHS preview 路径等价于强制启用完整解码的
+`--decode-at-20msps`。完整 VHS 解码可在 `ipp-fast` 或 `cuda-fast` 下显式启用该参数；
+Exact、S-VHS、其他磁带格式与 LaserDisc 仍维持原有采样率行为。启动输出会明确显示所选视频管线、
 IPP-FAST 是否初始化成功、实际解码线程数，并分别用窗口编号行与实时 FPS 行原地刷新。
 系统需要
 能找到具有至少一条可用管线的 FFmpeg；也可通过 `VHSDECODE_FFMPEG` 和
@@ -118,14 +119,22 @@ Python 原版在不同 worker 数下的输出哈希并不稳定，因此 Python 
 | --- | --- |
 | `exact` | 默认托管路径，适合兼容性敏感的解码。 |
 | `ipp-fast` | 实验性的 Windows x64 VHS 与 LaserDisc real-RF 路径，使用 Intel IPP；可能改变浮点位，并且绝不会静默回退到 `exact`。 |
-| `cuda-fast` | 实验性的 Windows x64 NVIDIA CUDA 13 全信号 VHS 路径；采用独立数值契约，目前仅支持原生采样率 40 MSPS 的 PAL/NTSC VHS，并且绝不会静默回退到 CPU 后端。 |
+| `cuda-fast` | 实验性的 Windows x64 NVIDIA CUDA 13 全信号 VHS 路径；采用独立数值契约，PAL/NTSC VHS 默认按 40 MSPS 解码，也可用 `--decode-at-20msps` 在 GPU 上执行 40→20 或直接解码原生 20 MSPS 输入，并且绝不会静默回退到 CPU 后端。 |
 
 ```powershell
 decode.exe vhs --compat-version current --dsp-backend ipp-fast `
   --threads 20 input.lds output
+decode.exe vhs --dsp-backend ipp-fast --decode-at-20msps `
+  --pal input.lds output-20msps
 decode.exe vhs --dsp-backend cuda-fast --pal `
-  --start 100 --length 20 input.ldf output
+  --decode-at-20msps --start 100 --length 20 input.ldf output
 ```
+
+`--decode-at-20msps` 是面向 VHS 预览画质的模式，不保证与 Exact 等价。40 MSPS
+源会先经过抗混叠滤波，再按内部 20 MSPS 解码；原生 20 MSPS 输入不会再次降采样。
+TBC 元数据的 `fileLoc` 仍使用原始输入采样点坐标。
+这是预览画质级的采样率选择，不是保证提速的开关。本机当前的真实 PAL 门禁中，CUDA
+有小幅提速，而 IPP 有小幅变慢；完整解码前应先用目标采集做基准。
 
 默认 Windows 发布包保留小型 CUDA-fast 桥接，但不再内嵌 271 MiB 的 cuFFT DLL。
 只有显式使用 `--dsp-backend cuda-fast` 时才会查找兼容的 CUDA 13/cuFFT 12；若本机
@@ -241,7 +250,7 @@ TBC、色度、JSON 和日志文件允许在解码期间并发读取，兼容的
 dotnet restore VHSDecodeDotNet.slnx
 dotnet build VHSDecodeDotNet.slnx -c Release --no-restore
 dotnet test --solution VHSDecodeDotNet.slnx -c Release `
-  --no-build --no-restore --minimum-expected-tests 1569
+  --no-build --no-restore --minimum-expected-tests 1577
 ```
 
 在 Visual Studio 2026 中打开 `VHSDecodeDotNet.slnx`，即可构建、调试并通过

@@ -2229,7 +2229,7 @@ dotnet test --solution VHSDecodeDotNet.slnx --no-build
 ```
 
 The current formal solution build completes with zero warnings and errors, and
-the xUnit v3 project exposes 1,569 independently discoverable tests
+the xUnit v3 project exposes 1,577 independently discoverable tests
 to `dotnet test` and Visual Studio Test Explorer. On the
 same Windows machine and fixtures, Release wall-clock measurements for one
 frame were 2.346 s versus 7.193 s for NTSC VHS and 1.651 s versus 5.865 s for
@@ -2774,13 +2774,14 @@ its 120 framemd5 lines matched and first PTS remained 10.010000 seconds.
 The standard-VHS preview path now adds one further automatic optimization for
 declared 40 MSPS input: a fixed 31-tap half-band anti-alias FIR maps source
 coordinates to an internal 20 MSPS RF stream before the decoder hot path. The
-route has no public option. Native 20 MSPS VHS input remains native, while
-S-VHS, every other tape format, LaserDisc, and non-preview decode/export retain
-their previous sample-rate and loader behavior. Unit coverage locks DC gain,
+preview route still needs no extra option and now behaves as if the public
+`--decode-at-20msps` switch were forced. Native 20 MSPS VHS input remains native.
+Complete IPP-fast and CUDA-fast VHS decode can opt into the same rate explicitly,
+while Exact, S-VHS, every other tape format, and LaserDisc retain their previous
+sample-rate and loader behavior. Unit coverage locks DC gain,
 the 5.78 MHz VHS passband, rejection of a 15 MHz alias component, source-position
 mapping, raw/packed-loader selection, `start_fileloc` time conversion, format
-gating, and resistance to a programmatically spoofed preview-only flag in a
-normal decode session.
+and backend gating, source-coordinate metadata, and both public option spellings.
 
 The initial same-machine 2026-08-16 half-rate A/B froze the preceding 40 MSPS preview build
 at SHA-256
@@ -3047,8 +3048,9 @@ and IPP-fast field engines. Its native bridge pins cuVHS commit
 accepts managed random-read callbacks so raw FLAC input does not require a
 temporary unpacked capture. Unsupported formats, rates, options, GPUs, or
 missing native components fail explicitly; the route never silently changes
-to a CPU backend. Its initial contract is Windows x64, NVIDIA compute 7.5 or
-newer, and native-rate 40 MSPS PAL/NTSC VHS SP/LP/EP. It has an independent
+to a CPU backend. Its contract is Windows x64, NVIDIA compute 7.5 or newer,
+and PAL/NTSC VHS SP/LP/EP at native 40 MSPS, or at internal 20 MSPS from
+40/native-20 MSPS input when `--decode-at-20msps` is explicit. It has an independent
 numerical contract and does not claim Exact, IPP-fast, `v0.4.0`, or `current`
 hash compatibility.
 
@@ -3064,12 +3066,12 @@ run, and Exact PAL parity geometry, and does not modify pixels. Configuration
 fails if the pinned source no longer matches those guards. The full GPU signal
 plane is FP32, including cuFFT storage and transforms; only one-time high-order
 host filter design stays FP64 before explicit coefficient quantization. Native
-bridge ABI v5 accepts direct PCM16 from raw signed-16, eligible libsndfile, and
+bridge ABI v6 accepts direct PCM16 from raw signed-16, eligible libsndfile, and
 FFmpeg PCM16 loaders, halves host-to-device input bytes, and converts exactly
 representable signed-16 values into the FP32 signal plane on GPU. The managed
 FP32 callback remains available as a fallback. Persistent chroma workspace, a
 16-field automatic batch cap, and a parallel deterministic sync-pulse kernel
-remove the largest avoidable setup, transfer, and serial-scan costs. ABI v5
+remove the largest avoidable setup, transfer, and serial-scan costs. ABI v6
 also separates the requested output-field cap from available RF input. The
 native pipeline can scan past weak/no-signal leaders, requires stable
 horizontal cadence before fallback field-order seeding, rejects invalid fields
@@ -3097,9 +3099,28 @@ read block, page-locked input (-0.84%), and asynchronous dropout allocation
 (about -12%) were rejected.
 A CUDA 13.0.88 Release build using MSVC 14.44 passed its native smoke,
 parallel-pulse, direct Exact-style dropout, and synthetic NTSC pipeline tests
-on an RTX 4070 (compute 8.9, 12 GiB VRAM).
+on an RTX 4070 (compute 8.9, 12 GiB VRAM). ABI v6 adds a validated full-decode
+device-decimation factor: factor two uses the existing anti-alias CUDA FIR,
+then runs the complete sync/FM/TBC/chroma/dropout graph at 20 MSPS. Factor one
+retains normal 40 MSPS or accepts native 20 MSPS. Invalid rate/factor pairs
+fail at the native boundary.
 
-ABI v5 also adds an explicit VHS preview route selected only by combining
+A final startup-inclusive interleaved gate used the same current executable,
+the fixed private real PAL 40 MHz `.ldf`, `--start_fileloc 320000000`, and
+`--length 100`, with two runs per backend/rate. CUDA 40 MSPS completed in
+2.91/2.85 seconds and CUDA 20 MSPS in 2.66/2.71 seconds; the 2.880/2.685-second
+medians establish 6.77% less wall time and 7.26% more throughput for this short
+CUDA request. Twenty-thread IPP 40 MSPS completed in 4.84/4.82 seconds and IPP
+20 MSPS in 5.17/5.15 seconds; the 4.830/5.160-second medians instead show 6.83%
+more wall time and 6.40% less throughput. Thus the public switch is a
+preview-quality rate selection, not a universal performance promise. Every
+variant emitted exactly 200 ordered 1135-by-313 luma/chroma fields with
+strictly increasing source-coordinate `fileLoc`. FFmpeg raw-plane SSIM for
+40-versus-20 MSPS luma/chroma was 0.978718/0.991624 on CUDA and
+0.977307/0.995722 on IPP. This is a startup-dominated short-window observation,
+not a long-run, cross-capture, or cross-machine guarantee.
+
+ABI v6 also exposes the explicit VHS preview route selected only by combining
 `--preview-server` with `--dsp-backend cuda-fast`. For native-rate 40 MSPS
 PAL/NTSC input, one native context persists across windows. A deterministic
 15-tap CUDA FIR reduces RF to 20 MSPS with anti-aliasing before the existing GPU
@@ -3208,8 +3229,10 @@ phase failure. A bypass of refined K4 horizontal sync reduced luma SSIM from
 so this is a viewing-quality gate, not Exact or IPP compatibility evidence.
 
 The native integration test feeds one 48-field synthetic NTSC source through
-FP32 once and PCM16 twice and requires all 45 emitted 910-by-263 fields plus
-JSON metadata to be byte-identical. It also requires alternating parity,
+40 MSPS FP32 once and PCM16 twice, then through the new PCM16 40-to-20 MSPS
+full-decode path. The three 40 MSPS outputs must be byte-identical, while all
+four routes must emit at least 40 valid 910-by-263 fields and valid JSON metadata.
+It also requires alternating parity,
 increasing `fileLoc`, and a parity-consistent cyclic rotation of the `1,4,3,2`
 NTSC `fieldPhaseID` sequence. The build runs this test at normal 16-field
 batches and forced five-field batches, exercising phase/head-track continuity
@@ -3217,7 +3240,7 @@ across non-aligned boundaries. This covers NTSC geometry, lifecycle, and
 determinism only; no real NTSC VHS capture was locally available for
 color/quality certification.
 
-The final .NET 11 Preview 7 xUnit v3 run discovered all 1,569 tests: 1,567
+The final .NET 11 Preview 7 xUnit v3 run discovered all 1,577 tests: 1,575
 passed, none failed, and two PAL/NTSC AMF encoder cases were skipped because the
 AMD runtime is unavailable on the NVIDIA development machine. The CUDA-focused
 coverage includes parser/backend isolation, ABI and real native probing,
@@ -3225,8 +3248,11 @@ unsupported-surface rejection, no-fallback behavior, managed random-read
 callbacks, cancellation, output trimming, global metadata rebasing, direct
 DecodeRunner routing that bypasses managed session construction, deterministic
 parallel sync semantics, bounded leader scanning and exact output length, and
-the synthetic NTSC full-pipeline gate. Preview coverage additionally checks
-the ABI v5 contract, persistent-session lifecycle, explicit VHS-only routing,
+the synthetic NTSC full-pipeline gate. New coverage checks both public flag
+spellings, Exact/format/rate rejection, IPP loader and source-coordinate mapping,
+native-20 input, CUDA ABI v6 factor propagation, and the full GPU factor-two run.
+Preview coverage additionally checks
+the ABI v6 contract, persistent-session lifecycle, explicit VHS-only routing,
 40-to-20 MSPS GPU decimation, direct NVENC/copy-mux arguments, cancellation,
 wrapped FLAC duration recovery, and real FFmpeg fragment compliance. A native
 24-thread stress gate exercises the monotonic atomic cancellation latch shared

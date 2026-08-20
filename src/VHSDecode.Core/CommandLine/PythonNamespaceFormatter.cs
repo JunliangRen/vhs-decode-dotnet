@@ -25,7 +25,8 @@ internal static class PythonNamespaceFormatter
                 or "compat_version"
                 or "preview_server"
                 or "preview_port"
-                or "preview_crf")
+                or "preview_crf"
+                or CliSpecs.DecodeAt20MspsDestination)
             {
                 continue;
             }

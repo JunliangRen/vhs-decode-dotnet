@@ -3571,7 +3571,7 @@ string(FIND
     CUVHS_HALF_RATE_READ_ENTRY_INDEX)
 if(CUVHS_HALF_RATE_READ_ENTRY_INDEX EQUAL -1)
     message(FATAL_ERROR
-        "Pinned cuVHS pipeline no longer has the expected preview half-rate read insertion point")
+        "Pinned cuVHS pipeline no longer has the expected GPU half-rate read insertion point")
 endif()
 string(REPLACE
     "${CUVHS_HALF_RATE_READ_ENTRY}"
@@ -3583,9 +3583,9 @@ string(REPLACE
         const bool use_half_rate_prefetch = prefetch_valid
             && prefetch_half_rate
             && prefetch_raw_offset == raw_offset
-            && prefetch_num_fields == num_fields
+            && prefetch_num_fields >= num_fields
             && prefetch_lead_samples == lead_samples
-            && prefetch_total_samples == total_samples
+            && prefetch_total_samples >= total_samples
             && prefetch_tail_samples == tail_samples;
         if (use_half_rate_prefetch) {
             if (raw_prefetch_thread.joinable()) raw_prefetch_thread.join();
@@ -3597,7 +3597,9 @@ string(REPLACE
                     static_cast<float*>(d_raw))) {
                 return -1;
             }
-            logical_samples_read = prefetch_half_rate_logical_samples_read;
+            logical_samples_read = std::min(
+                prefetch_half_rate_logical_samples_read,
+                raw_sample_count);
             prefetch_valid = false;
             prefetch_half_rate = false;
             prefetch_half_rate_read_ok = false;
@@ -3635,7 +3637,7 @@ string(FIND
     CUVHS_HALF_RATE_UPLOAD_ENTRY_INDEX)
 if(CUVHS_HALF_RATE_UPLOAD_ENTRY_INDEX EQUAL -1)
     message(FATAL_ERROR
-        "Pinned cuVHS pipeline no longer has the expected preview half-rate upload insertion point")
+        "Pinned cuVHS pipeline no longer has the expected GPU half-rate upload insertion point")
 endif()
 string(REPLACE
     "${CUVHS_HALF_RATE_UPLOAD_ENTRY}"

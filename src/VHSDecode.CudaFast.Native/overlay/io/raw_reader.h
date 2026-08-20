@@ -38,9 +38,9 @@ struct RawReader {
         RawReaderCallbackFormat callback_format);
     void close();
 
-    // Preview CUDA keeps the managed source at its native rate and performs
-    // anti-aliased decimation after the one host-to-device RF upload.  The
-    // regular full decode always leaves this at one.
+    // A 20-MSPS CUDA decode keeps a 40-MSPS managed source at its native rate
+    // and performs anti-aliased decimation after the one host-to-device RF
+    // upload. Native-rate decode leaves this at one.
     bool set_device_decimation_factor(int factor);
     int device_decimation_factor() const { return decimation_factor; }
 

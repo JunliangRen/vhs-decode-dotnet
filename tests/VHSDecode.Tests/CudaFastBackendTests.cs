@@ -11,7 +11,7 @@ namespace VHSDecode.Tests;
 
 public sealed class CudaFastBackendTests
 {
-    [Fact(DisplayName = "CUDA-fast managed structures match native ABI v5")]
+    [Fact(DisplayName = "CUDA-fast managed structures match native ABI v6")]
     public void ManagedStructuresMatchNativeAbi()
     {
         Assert.Equal(168, CudaFastNativeRuntime.RuntimeInfoStructureSize);
@@ -58,7 +58,7 @@ public sealed class CudaFastBackendTests
         Assert.Contains("Test GPU", diagnostic, StringComparison.Ordinal);
         Assert.Contains("compute 8.9", diagnostic, StringComparison.Ordinal);
         Assert.Contains("12.0 GiB", diagnostic, StringComparison.Ordinal);
-        Assert.Contains("0x00050000", diagnostic, StringComparison.Ordinal);
+        Assert.Contains("0x00060000", diagnostic, StringComparison.Ordinal);
     }
 
     [Fact(DisplayName = "CUDA-fast native build pins the signal data plane to FP32")]
@@ -105,6 +105,40 @@ public sealed class CudaFastBackendTests
         Assert.Contains("convert_s16_to_float<<<", geometry, StringComparison.Ordinal);
         Assert.Contains("RawReaderCallbackFormat::Int16", rawReader, StringComparison.Ordinal);
         Assert.Contains("read_raw_at", rawReader, StringComparison.Ordinal);
+    }
+
+    [Fact(DisplayName = "CUDA-fast native full decode honors the ABI decimation factor")]
+    public void NativeFullDecodeHonorsDeviceDecimationFactor()
+    {
+        string cmake = ReadNativeBuildDefinition();
+        string header = ReadNativeSource("include", "vhsdecode_cuda_fast.h");
+        string bridge = ReadNativeSource("src", "vhsdecode_cuda_fast.cpp");
+        string reader = ReadNativeSource("overlay", "io", "raw_reader.h");
+
+        Assert.Contains(
+            "uint32_t device_decimation_factor;",
+            header,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "reader.set_device_decimation_factor(",
+            bridge,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "config->device_decimation_factor",
+            bridge,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "decode_rate_matches_decimation",
+            bridge,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "prefetch_num_fields >= num_fields",
+            cmake,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "total_sample_count / static_cast<size_t>(decimation_factor)",
+            reader,
+            StringComparison.Ordinal);
     }
 
     [Fact(DisplayName = "CUDA preview keeps the 40-to-20 MSPS and NVENC data plane on the GPU")]
@@ -657,6 +691,93 @@ public sealed class CudaFastBackendTests
                 nativeRuntime.Float32Samples);
             Assert.Equal(64UL, nativeRuntime.TotalSamples);
             Assert.Equal(2U, nativeRuntime.MaximumOutputFields);
+            Assert.Equal(1U, nativeRuntime.DeviceDecimationFactor);
+        }
+        finally
+        {
+            Directory.Delete(directory, recursive: true);
+        }
+    }
+
+    [Fact(DisplayName = "CUDA-fast complete decode can opt into GPU 40-to-20 MSPS")]
+    public void RunnerCanDecodeFortyMspsAtTwentyMsps()
+    {
+        string directory = CreateTemporaryDirectory();
+        try
+        {
+            string inputPath = Path.Combine(directory, "input.s16");
+            string outputBase = Path.Combine(directory, "output");
+            short[] samples = Enumerable.Range(0, 64)
+                .Select(value => checked((short)(value + 100)))
+                .ToArray();
+            var bytes = new byte[samples.Length * sizeof(short)];
+            Buffer.BlockCopy(samples, 0, bytes, 0, bytes.Length);
+            File.WriteAllBytes(inputPath, bytes);
+            ParsedCommand command = Parse(
+                inputPath,
+                outputBase,
+                "--decode-at-20msps",
+                "--start_fileloc",
+                "1",
+                "--length",
+                "1",
+                "--overwrite");
+            var nativeRuntime = new RecordingNativeRuntime();
+            var runner = new CudaFastDecodeRunner(() => nativeRuntime);
+
+            TbcFieldSequenceDecodeResult result = runner.TryDecodeAndWrite(
+                command,
+                TextWriter.Null,
+                CancellationToken.None);
+
+            Assert.True(result.Success, result.Message);
+            Assert.Equal(20.0, nativeRuntime.SampleRateMhz);
+            Assert.Equal(2U, nativeRuntime.DeviceDecimationFactor);
+            Assert.Equal(63UL, nativeRuntime.TotalSamples);
+            Assert.Equal(samples.AsSpan(1, 16).ToArray(), nativeRuntime.Int16Samples);
+            using JsonDocument metadata = JsonDocument.Parse(
+                File.ReadAllText(outputBase + ".tbc.json"));
+            Assert.Equal(
+                21,
+                metadata.RootElement.GetProperty("fields")[0]
+                    .GetProperty("fileLoc")
+                    .GetInt64());
+        }
+        finally
+        {
+            Directory.Delete(directory, recursive: true);
+        }
+    }
+
+    [Fact(DisplayName = "CUDA-fast 20 MSPS mode accepts native 20 MSPS input")]
+    public void RunnerAcceptsNativeTwentyMspsInput()
+    {
+        string directory = CreateTemporaryDirectory();
+        try
+        {
+            string inputPath = Path.Combine(directory, "input.s16");
+            string outputBase = Path.Combine(directory, "output");
+            File.WriteAllBytes(inputPath, new byte[128]);
+            ParsedCommand command = Parse(
+                inputPath,
+                outputBase,
+                "--decode_at_20msps",
+                "--frequency",
+                "20",
+                "--length",
+                "1",
+                "--overwrite");
+            var nativeRuntime = new RecordingNativeRuntime();
+            var runner = new CudaFastDecodeRunner(() => nativeRuntime);
+
+            TbcFieldSequenceDecodeResult result = runner.TryDecodeAndWrite(
+                command,
+                TextWriter.Null,
+                CancellationToken.None);
+
+            Assert.True(result.Success, result.Message);
+            Assert.Equal(20.0, nativeRuntime.SampleRateMhz);
+            Assert.Equal(1U, nativeRuntime.DeviceDecimationFactor);
         }
         finally
         {
@@ -1023,6 +1144,8 @@ public sealed class CudaFastBackendTests
 
         internal uint MaximumOutputFields { get; private set; }
 
+        internal uint DeviceDecimationFactor { get; private set; }
+
         internal short[] Int16Samples { get; private set; } = [];
 
         internal float[] Float32Samples { get; private set; } = [];
@@ -1046,6 +1169,7 @@ public sealed class CudaFastBackendTests
             InputSampleFormat = configuration.InputSampleFormat;
             TotalSamples = configuration.TotalSamples;
             MaximumOutputFields = configuration.MaximumOutputFields;
+            DeviceDecimationFactor = configuration.DeviceDecimationFactor;
             int bytesPerSample = configuration.InputSampleFormat == CudaFastInputSampleFormat.Int16
                 ? sizeof(short)
                 : sizeof(float);

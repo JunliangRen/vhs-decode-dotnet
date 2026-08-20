@@ -28,6 +28,7 @@ internal sealed class CudaFastDecodeRunner : ICudaFastDecodeRunner
         StringComparer.Ordinal)
     {
         "dsp_backend",
+        CliSpecs.DecodeAt20MspsDestination,
         "inputfreq",
         "length",
         "no_resample",
@@ -68,7 +69,17 @@ internal sealed class CudaFastDecodeRunner : ICudaFastDecodeRunner
         {
             cancellationToken.ThrowIfCancellationRequested();
             CudaFastProfile profile = ValidateCommand(command);
-            int nominalFieldSamples = EstimateNominalFieldSampleCount(profile);
+            double sourceSampleRateMhz = ResolveInputSampleRateMhz(command);
+            bool decodeAt20Msps = command.Get<bool>(CliSpecs.DecodeAt20MspsDestination);
+            double decodeSampleRateMhz = decodeAt20Msps
+                ? FrequencyParser.DddMHz / 2.0
+                : FrequencyParser.DddMHz;
+            uint deviceDecimationFactor = checked((uint)Math.Round(
+                sourceSampleRateMhz / decodeSampleRateMhz,
+                MidpointRounding.AwayFromZero));
+            int nominalFieldSamples = EstimateNominalFieldSampleCount(
+                profile,
+                sourceSampleRateMhz);
             DecodeRunBounds runBounds = DecodeRunBounds.FromCommand(
                 command,
                 nominalFieldSamples);
@@ -126,6 +137,15 @@ internal sealed class CudaFastDecodeRunner : ICudaFastDecodeRunner
                 callbackContext.InputSampleFormat == CudaFastInputSampleFormat.Int16
                     ? "CUDA-fast RF input: PCM16 direct upload with GPU FP32 conversion."
                     : "CUDA-fast RF input: managed FP32 upload.");
+            if (decodeAt20Msps)
+            {
+                WriteDiagnostic(
+                    output,
+                    logPath,
+                    deviceDecimationFactor == 2
+                        ? "CUDA-fast decode rate: GPU anti-aliased 40-to-20 MSPS."
+                        : "CUDA-fast decode rate: native 20 MSPS input.");
+            }
             GCHandle contextHandle = GCHandle.Alloc(callbackContext);
             try
             {
@@ -136,11 +156,12 @@ internal sealed class CudaFastDecodeRunner : ICudaFastDecodeRunner
                         profile,
                         ResolveTapeSpeed(command.Get<string>("tape_speed")),
                         DeviceId,
-                        40.0,
+                        decodeSampleRateMhz,
                         checked((ulong)decodeSampleCount),
                         requestedFields.HasValue
                             ? checked((uint)requestedFields.Value)
                             : 0U,
+                        deviceDecimationFactor,
                         command.OutputBase,
                         command.Get<bool>("overwrite"),
                         callbackContext.InputSampleFormat,
@@ -154,7 +175,8 @@ internal sealed class CudaFastDecodeRunner : ICudaFastDecodeRunner
                     command.OutputBase,
                     sourceStart,
                     requestedFields,
-                    nativeResult);
+                    nativeResult,
+                    checked((int)deviceDecimationFactor));
                 string message = string.Create(
                     CultureInfo.InvariantCulture,
                     $"CUDA-fast wrote {summary.WrittenFields} TBC fields in {nativeResult.ElapsedSeconds:F3} seconds.");
@@ -241,10 +263,16 @@ internal sealed class CudaFastDecodeRunner : ICudaFastDecodeRunner
         _ = ResolveTapeSpeed(command.Get<string>("tape_speed"));
 
         double inputSampleRateMhz = ResolveInputSampleRateMhz(command);
-        if (Math.Abs(inputSampleRateMhz - 40.0) > 0.0000005)
+        bool decodeAt20Msps = command.Get<bool>(CliSpecs.DecodeAt20MspsDestination);
+        bool supportedInputRate = Math.Abs(inputSampleRateMhz - 40.0) <= 0.0000005
+            || decodeAt20Msps
+                && Math.Abs(inputSampleRateMhz - 20.0) <= 0.0000005;
+        if (!supportedInputRate)
         {
             throw new NotSupportedException(
-                $"'{DspBackendParser.CudaFastValue}' currently accepts native-rate 40 MSPS input only; selected input rate was {inputSampleRateMhz:R} MSPS.");
+                decodeAt20Msps
+                    ? $"'{DspBackendParser.CudaFastValue}' --decode-at-20msps accepts 40 or native 20 MSPS input only; selected input rate was {inputSampleRateMhz:R} MSPS."
+                    : $"'{DspBackendParser.CudaFastValue}' currently accepts native-rate 40 MSPS input only; selected input rate was {inputSampleRateMhz:R} MSPS.");
         }
 
         return profile;
@@ -305,9 +333,14 @@ internal sealed class CudaFastDecodeRunner : ICudaFastDecodeRunner
         string outputBase,
         long sourceStart,
         int? requestedFields,
-        CudaFastNativeResult nativeResult)
+        CudaFastNativeResult nativeResult,
+        int sourceSamplesPerDecodeSample = 1)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(outputBase);
+        if (sourceSamplesPerDecodeSample <= 0)
+        {
+            throw new ArgumentOutOfRangeException(nameof(sourceSamplesPerDecodeSample));
+        }
         string lumaPath = outputBase + ".tbc";
         string chromaPath = outputBase + "_chroma.tbc";
         string jsonPath = outputBase + ".tbc.json";
@@ -377,7 +410,9 @@ internal sealed class CudaFastDecodeRunner : ICudaFastDecodeRunner
                     $"CUDA-fast metadata field {index} omitted an integer fileLoc.");
             }
 
-            field["fileLoc"] = checked(sourceStart + relativeFileLocation);
+            field["fileLoc"] = checked(
+                sourceStart
+                + checked(relativeFileLocation * sourceSamplesPerDecodeSample));
         }
 
         videoParameters["numberOfSequentialFields"] = writtenFields;
@@ -433,7 +468,9 @@ internal sealed class CudaFastDecodeRunner : ICudaFastDecodeRunner
         return Convert.ToDouble(value, CultureInfo.InvariantCulture);
     }
 
-    private static int EstimateNominalFieldSampleCount(CudaFastProfile profile)
+    private static int EstimateNominalFieldSampleCount(
+        CudaFastProfile profile,
+        double sourceSampleRateMhz)
     {
         double framesPerSecond = profile switch
         {
@@ -441,7 +478,8 @@ internal sealed class CudaFastDecodeRunner : ICudaFastDecodeRunner
             CudaFastProfile.Ntsc => 30_000.0 / 1_001.0,
             _ => throw new ArgumentOutOfRangeException(nameof(profile))
         };
-        return checked((int)(40_000_000.0 / (framesPerSecond * 2.0)) + 1);
+        return checked((int)(
+            (sourceSampleRateMhz * 1_000_000.0) / (framesPerSecond * 2.0)) + 1);
     }
 
     internal static IRfSampleLoader CreateInputLoader(

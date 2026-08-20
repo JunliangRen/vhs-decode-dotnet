@@ -4,6 +4,8 @@ namespace VHSDecode.Core.CommandLine;
 
 public static class CliSpecs
 {
+    public const string DecodeAt20MspsDestination = "decode_at_20msps";
+
     public static readonly string[] SupportedTapeFormats =
     [
         "TYPEC",
@@ -102,6 +104,9 @@ public static class CliSpecs
         yield return Flag("preview_server", ["--preview-server"]);
         yield return Int("preview_port", ["--preview-port"], 0);
         yield return Int("preview_crf", ["--preview-crf"], 31);
+        yield return Flag(
+            DecodeAt20MspsDestination,
+            ["--decode-at-20msps", "--decode_at_20msps"]);
         yield return CompatibilityVersion();
         yield return Str("tape_format", ["--tf", "--tape_format"], "VHS", SupportedTapeFormats, Upper);
         yield return Str("tape_speed", ["--ts", "--tape_speed"], "sp", TapeSpeeds, Lower);
