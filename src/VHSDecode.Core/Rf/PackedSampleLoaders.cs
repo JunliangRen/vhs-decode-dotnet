@@ -57,7 +57,8 @@ public sealed class PackedDdD4To40SampleLoader : IReusableRfSampleLoader
     {
         long start = (sample / 4) * 5;
         int offset = (int)(sample % 4);
-        int needed = checked(((readLength * 5) / 4) + 5);
+        int groups = checked((offset + readLength + 3) / 4);
+        int needed = checked(groups * 5);
 
         stream.Seek(start, SeekOrigin.Begin);
         byte[] buffer = TakeReadBuffer(needed);
@@ -74,9 +75,7 @@ public sealed class PackedDdD4To40SampleLoader : IReusableRfSampleLoader
                 return null;
             }
 
-            int fullGroups = needed / 5;
-            int partialGroupSamples = Math.Max(0, (needed % 5) - 1);
-            int availableSamples = checked((fullGroups * 4) + partialGroupSamples);
+            int availableSamples = checked(groups * 4);
             if (offset + readLength > availableSamples)
             {
                 return null;

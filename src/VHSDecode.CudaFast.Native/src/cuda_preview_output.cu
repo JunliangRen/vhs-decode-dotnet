@@ -617,6 +617,12 @@ struct CudaPreviewOutput::Impl {
         nv12_descriptor.NumChannels = 3;
         nv12_descriptor.Flags = CUDA_ARRAY3D_SURFACE_LDST
             | CUDA_ARRAY3D_VIDEO_ENCODE_DECODE;
+        const uint64_t nv12_registration_pitch =
+            static_cast<uint64_t>(nv12_descriptor.Width)
+            * nv12_descriptor.NumChannels;
+        if (nv12_registration_pitch > std::numeric_limits<uint32_t>::max()) {
+            return fail("CUDA preview NV12 array pitch exceeds the NVENC ABI limit.");
+        }
         if (cuArray3DCreate(&nv12_array, &nv12_descriptor) != CUDA_SUCCESS
             || cuArrayGetPlane(&nv12_luma_plane, nv12_array, 0) != CUDA_SUCCESS
             || cuArrayGetPlane(&nv12_chroma_plane, nv12_array, 1) != CUDA_SUCCESS) {
@@ -658,7 +664,7 @@ struct CudaPreviewOutput::Impl {
         registration.resourceType = NV_ENC_INPUT_RESOURCE_TYPE_CUDAARRAY;
         registration.width = settings.width;
         registration.height = settings.height;
-        registration.pitch = nv12_allocation_width;
+        registration.pitch = static_cast<uint32_t>(nv12_registration_pitch);
         registration.resourceToRegister = reinterpret_cast<void*>(nv12_array);
         registration.bufferFormat = NV_ENC_BUFFER_FORMAT_NV12;
         registration.bufferUsage = NV_ENC_INPUT_IMAGE;

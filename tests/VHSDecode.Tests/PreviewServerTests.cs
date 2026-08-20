@@ -1,5 +1,6 @@
 using System.Buffers.Binary;
 using System.Diagnostics;
+using System.Runtime.InteropServices;
 using System.Security.Cryptography;
 using System.Text.Json;
 using VHSDecode.Core.CommandLine;
@@ -307,6 +308,46 @@ public sealed class PreviewServerTests
             reusableLoader.ReadReusable(stream, 400, 32));
         Assert.Same(firstBuffer, secondBuffer);
         reusableLoader.ReturnReusable(secondBuffer);
+
+        var finiteSamples = new short[100];
+        for (short index = 0; index < finiteSamples.Length; index++)
+        {
+            finiteSamples[index] = index;
+        }
+        using var finiteStream = new MemoryStream(
+            MemoryMarshal.AsBytes(finiteSamples.AsSpan()).ToArray());
+        using var finiteLoader = new HalfRateSampleLoader(new Int16SampleLoader());
+        using var zeroPaddedReference = new HalfRateSampleLoader(
+            new GeneratedSampleLoader(sample => sample < finiteSamples.Length ? sample : 0.0));
+
+        double[] expectedFinalBlock = Assert.IsType<double[]>(
+            zeroPaddedReference.Read(stream, 0, 50));
+        double[] actualFinalBlock = Assert.IsType<double[]>(
+            finiteLoader.Read(finiteStream, 0, 50));
+
+        Assert.Equal(expectedFinalBlock, actualFinalBlock);
+        Assert.NotEqual(0.0, actualFinalBlock[^1]);
+        Assert.Null(finiteLoader.Read(finiteStream, 1, 50));
+
+        int[] packedSamples = Enumerable.Range(0, 100)
+            .Select(index => (index * 73) & 0x3FF)
+            .ToArray();
+        using var packedStream = new MemoryStream(Pack4x10(packedSamples));
+        using var packedLoader = new HalfRateSampleLoader(
+            new PackedDdD4To40SampleLoader());
+        using var packedReference = new HalfRateSampleLoader(
+            new GeneratedSampleLoader(sample => sample < packedSamples.Length
+                ? (short)((packedSamples[sample] - 512) << 6)
+                : 0.0));
+
+        double[] expectedPackedFinalBlock = Assert.IsType<double[]>(
+            packedReference.Read(stream, 0, 50));
+        double[] actualPackedFinalBlock = Assert.IsType<double[]>(
+            packedLoader.Read(packedStream, 0, 50));
+
+        Assert.Equal(expectedPackedFinalBlock, actualPackedFinalBlock);
+        Assert.NotEqual(0.0, actualPackedFinalBlock[^1]);
+        Assert.Null(packedLoader.Read(packedStream, 1, 50));
     }
 
     [Fact(DisplayName = "Preview 20 MSPS routing cannot alter normal VHS sessions")]
@@ -1946,5 +1987,30 @@ public sealed class PreviewServerTests
                 .Select(index => sampleGenerator(sample + index))
                 .ToArray();
         }
+    }
+
+    private static byte[] Pack4x10(int[] samples)
+    {
+        if (samples.Length % 4 != 0)
+        {
+            throw new ArgumentException("Sample count must be divisible by four.");
+        }
+
+        byte[] output = new byte[(samples.Length / 4) * 5];
+        for (int group = 0; group < samples.Length / 4; group++)
+        {
+            int s0 = samples[group * 4] & 0x3FF;
+            int s1 = samples[(group * 4) + 1] & 0x3FF;
+            int s2 = samples[(group * 4) + 2] & 0x3FF;
+            int s3 = samples[(group * 4) + 3] & 0x3FF;
+            int index = group * 5;
+            output[index] = (byte)(s0 >> 2);
+            output[index + 1] = (byte)(((s0 & 0x03) << 6) | (s1 >> 4));
+            output[index + 2] = (byte)(((s1 & 0x0F) << 4) | (s2 >> 6));
+            output[index + 3] = (byte)(((s2 & 0x3F) << 2) | (s3 >> 8));
+            output[index + 4] = (byte)(s3 & 0xFF);
+        }
+
+        return output;
     }
 }

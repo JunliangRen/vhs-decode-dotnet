@@ -77,6 +77,43 @@ internal sealed class HalfRateSampleLoader : IReusableRfSampleLoader, IDisposabl
         double[]? source = reusableSource is null
             ? _source.Read(stream, sourceStart, sourceLength)
             : reusableSource.ReadReusable(stream, sourceStart, sourceLength);
+        bool sourceUsesReusableBuffer = source is not null && reusableSource is not null;
+        if (source is null)
+        {
+            // Exact-read sources reject a request whose right FIR halo crosses
+            // physical EOF even when every requested output center still
+            // exists. Locate the longest available prefix within the 15-sample
+            // halo, then let Filter supply only the unavailable future taps as
+            // zero. If the final center is also beyond EOF, preserve the source
+            // loader's null/end-of-stream contract. This rare boundary search
+            // intentionally uses owned buffers so reusable source buffers are
+            // never held across another probe.
+            int centeredSourceLength = checked((int)(lastCenter - sourceStart + 1L));
+            source = _source.Read(stream, sourceStart, centeredSourceLength);
+            sourceUsesReusableBuffer = false;
+            if (source is not null)
+            {
+                int low = centeredSourceLength + 1;
+                int high = sourceLength - 1;
+                while (low <= high)
+                {
+                    int candidateLength = low + ((high - low) / 2);
+                    double[]? candidate = _source.Read(
+                        stream,
+                        sourceStart,
+                        candidateLength);
+                    if (candidate is null)
+                    {
+                        high = candidateLength - 1;
+                    }
+                    else
+                    {
+                        source = candidate;
+                        low = candidateLength + 1;
+                    }
+                }
+            }
+        }
         if (source is null)
         {
             return null;
@@ -97,9 +134,9 @@ internal sealed class HalfRateSampleLoader : IReusableRfSampleLoader, IDisposabl
         }
         finally
         {
-            if (reusableSource is not null)
+            if (sourceUsesReusableBuffer)
             {
-                reusableSource.ReturnReusable(source);
+                reusableSource!.ReturnReusable(source);
             }
 
             if (reuseBuffers && output is not null && !completed)

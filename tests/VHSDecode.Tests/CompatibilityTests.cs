@@ -17151,19 +17151,28 @@ public void PackedLdsReusableReadsAllocateNoDecodedArrayAfterWarmup()
         $"Warm reusable 32K packed LDS read allocated {allocated:N0} bytes.");
 }
 
-[Fact(DisplayName = "packed LDS reusable reads do not rent output before EOF validation")]
-public void PackedLdsReusableReadsDoNotRentOutputBeforeEofValidation()
+[Fact(DisplayName = "packed LDS reusable reads accept exact EOF and validate impossible reads before renting")]
+public void PackedLdsReusableReadsHandleExactEofBeforeRenting()
 {
-    byte[] incomplete = Pack4x10(Enumerable.Range(0, 8).ToArray());
-    var loader = new PackedDdD4To40SampleLoader();
-
-    double[]? actual = loader.ReadReusable(
-        new MemoryStream(incomplete, writable: false),
+    byte[] exact = Pack4x10(Enumerable.Range(0, 8).ToArray());
+    var exactLoader = new PackedDdD4To40SampleLoader();
+    double[] final = Assert.IsType<double[]>(exactLoader.ReadReusable(
+        new MemoryStream(exact, writable: false),
         sample: 0,
-        readLength: 8);
+        readLength: 8));
+    Assert.Equal(
+        Enumerable.Range(0, 8).Select(value => (double)(short)((value - 512) << 6)),
+        final);
+
+    var beyondEofLoader = new PackedDdD4To40SampleLoader();
+
+    double[]? actual = beyondEofLoader.ReadReusable(
+        new MemoryStream(exact, writable: false),
+        sample: 0,
+        readLength: 9);
 
     Assert.Null(actual);
-    Assert.Equal(0, loader.CachedReusableDecodedBufferCount);
+    Assert.Equal(0, beyondEofLoader.CachedReusableDecodedBufferCount);
 }
 
 [Fact(DisplayName = "packed LDS reusable decoded buffer retention is bounded")]
