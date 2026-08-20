@@ -119,11 +119,11 @@ deinterlacer is unchanged. Preview-only cross-field dropout substitution uses a
 clean opposite-parity field when one exists in the bounded batch, and a
 one-field 75/25 current/previous chroma blend resets at every seek window.
 
-A sustained local resource matrix on 2026-08-20 used a fresh build of source
-commit `41bfd92`, the
-same real 40 MSPS PAL capture, an Intel Core Ultra 7 265K (20 logical
-processors), and an RTX 4070. Each row is the mean of two independent process
-launches; ranges are the two observed source-frame rates.
+A sustained local resource matrix on 2026-08-20 used the same real 40 MSPS PAL
+capture, an Intel Core Ultra 7 265K (20 logical processors), and an RTX 4070.
+The first five rows came from source commit `41bfd92`; the corrected IPP
+preview row came from `1fb1455`. Each row is the mean of two independent
+process launches; ranges are the two observed source-frame rates.
 
 | Path | Source fps (range) | `decode.exe` CPU | Whole-system CPU | GPU SM avg/peak | NVENC avg/peak | Peak GPU FB |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
@@ -132,25 +132,27 @@ launches; ranges are the two observed source-frame rates.
 | Full, CUDA 20 MSPS | 35.80 (35.60-35.99) | 10.92% / 2.18 cores | 34.74% | 27.67% / 54% | 0% / 0% | 5,288 MiB |
 | Full, IPP 20 MSPS | 26.86 (26.25-27.48) | 24.19% / 4.84 cores | 48.39% | 0% / 0% | 0% / 0% | 3,102 MiB |
 | Preview, CUDA 20 MSPS | 47.03 (46.59-47.48) | 4.06% / 0.81 cores | 24.75% | 26.91% / 61% | 3.12% / 8% | 4,795 MiB |
-| Preview, IPP 20 MSPS | 30.56 (30.48-30.63) | 22.99% / 4.60 cores | 40.09% | 1.40% / 13% | 1.52% / 23% | 3,283 MiB |
+| Preview, IPP 20 MSPS | 34.33 (34.05-34.61) | 24.66% / 4.93 cores | 43.85% | 1.52% / 9% | 1.48% / 4% | 3,292 MiB |
 
 Full runs requested 500 source frames and verified exactly 1,000 output fields.
 Preview runs requested 20 distinct two-second windows, or 1,000 source frames,
 after a separate cold W5. Source fps does not count the two output fields/bob
 frames as two source frames. Process CPU is normalized against all 20 logical
 processors; whole-system CPU includes FFmpeg, drivers, the sampler, and other
-machine work. GPU values are global 100 ms NVML samples. The immediately
-preceding idle baseline was 5.05% system CPU, 0% GPU SM, 0% NVENC, and
-3,103 MiB GPU FB. CUDA delivered 1.48x/1.33x/1.54x the IPP source throughput in
+machine work. GPU values are global 100 ms NVML samples. The first five rows'
+idle baseline was 5.05% system CPU, 0% GPU SM, 0% NVENC, and 3,103 MiB GPU FB;
+the separately corrected IPP preview row used 6.85% system CPU and 3,110 MiB
+GPU FB. CUDA delivered 1.48x/1.33x/1.37x the IPP source throughput in
 full-40/full-20/preview-20 respectively. See the
 [detailed method and evidence](docs/README.detailed.md#current-ippcuda-resource-matrix).
 
-The earlier five-window rendered quality comparison remains separate from this
-throughput gate. After accounting for a one-field timing offset, it averaged
-SSIM Y/U/V/All of 0.916844/0.957443/0.966783/0.931934. Every tested window
-improved over the same CUDA sync policy without the new dropout/chroma steps;
-a separate A-B-B-A found a 1.2% CUDA wall-time cost. These are capture- and
-hardware-specific preview results, not Exact-equivalence claims.
+The final-source five-window quality recheck used corrected IPP coordinates.
+After trimming the first IPP output frame for one-field alignment, default CUDA
+preview averaged SSIM Y/U/V/All of 0.914657/0.957361/0.966698/0.930448. The
+forced line-phase guard averaged 0.926692 combined and disabling cross-field
+dropout plus chroma stabilization averaged 0.922357; default was higher on
+every tested window. These are capture- and hardware-specific preview results,
+not Exact-equivalence claims.
 
 <!-- SECTION: profiles -->
 

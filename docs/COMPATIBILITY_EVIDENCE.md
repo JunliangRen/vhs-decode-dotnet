@@ -3150,17 +3150,12 @@ windows; random W70 and final W315 both completed. On the final atomic-
 cancellation build, four timed-out W80-W83 requests left the process healthy
 and a following W90 request returned 200.
 
-Using the final current executable and capture, two launches per backend served
-steady two-second windows W15/W25/W30/W35, giving eight observations per
-backend. CUDA averaged 0.588094 seconds and the default 20-thread IPP preview
-averaged 1.479124 seconds. Equivalent throughput was 85.020 versus 33.804 source
-fps: CUDA used 60.24% less wall time and delivered 2.515x throughput.
-`decode.exe` process CPU averaged 0.701172 versus 8.156250 seconds, but that
-metric excludes the FFmpeg child in both paths. Cold W5 averaged 1.592767
-seconds for CUDA and 1.829743 seconds for IPP. Both outputs probed as H.264
-Main, 768x576, progressive 50 fps, yuv420p with the expected PAL tags. CUDA
-begins about one output field earlier. The final A-B-B-A produced one unique
-segment hash for each backend/window pair across both launches.
+At the corrected coordinates, the sustained resource matrix detailed below
+measured 47.032 CUDA versus 34.332 default 20-thread IPP source fps across two
+20-window runs per backend, or 1.370x. Cold W5 averaged 1.158 seconds for CUDA
+and 1.913 seconds for IPP. Both outputs probed as H.264 Main, 768x576,
+progressive 50 fps, yuv420p with the expected PAL tags. Each backend/build
+configuration produced repeatable hashes across its two launches.
 
 The existing CUDA bob equations and field cadence remain unchanged. Preview
 dropout concealment now first uses the nearest clean opposite-parity field
@@ -3168,29 +3163,32 @@ available inside the current bounded device batch, then retains the previous
 same-field fallback at paired-dropout and batch boundaries. Chroma retains one
 raw previous field and emits a non-recursive 75/25 current/previous blend; the
 history flag resets on every preview-window `open`, preserving random-seek
-independence. Full CUDA decode does not enter either output-only path. A
-five-window weak-signal sweep also found that bypassing the full-decode
-line-phase snap improved IPP-aligned combined SSIM on every tested window with
-no measured speed loss. Device preview therefore skips that guard by default,
-while full decode retains it and
-`CUVHS_FORCE_PREVIEW_LINE_PHASE_GUARD=1` restores it diagnostically. Removing
-stable-line selection, VSync gap fill, K4 source selection, or device geometry
-did not improve the evidence and was rejected.
+independence. Full CUDA decode does not enter either output-only path.
 
-After the 20 ms field alignment, W5/W15/W25/W30/W35 final rendered SSIM
-Y/U/V/All averaged 0.916844/0.957443/0.966783/0.931934. The same line-phase
-policy with cross-field dropout and chroma stabilization disabled averaged
-0.906637/0.952453/0.964071/0.923845; combined SSIM increased on all five
-windows. A consecutive-frame absolute-difference proxy across 495 frames fell
-from 2.013002 to 1.535143 for U and from 1.815299 to 1.512891 for V, reductions
-of 23.74% and 16.66% toward the IPP values of 1.334075 and 1.240639. This proxy
-includes real motion and is not a pure stationary-patch flicker measurement.
-A 0.375 previous-field chroma weight had a slightly higher aggregate result
-but regressed W15 V and carried greater motion-smear risk, so 0.25 was retained.
-An independent default/composed/composed/default run over eight steady windows
-measured 0.597190 versus 0.604505 seconds: a 1.23% wall-time cost and 1.21%
-throughput loss. This is real-PAL preview evidence only; it neither establishes
-Exact compatibility nor certifies real-NTSC preview quality.
+The final-source quality recheck served W5/W15/W20/W25/W30/W35 in the same
+order as the resource matrix. W20 was an untallied bridge so the persistent
+encoder saw the same request sequence. W5/W15/W25/W30/W35 were compared after
+trimming the first IPP output frame for one-field alignment. Default CUDA
+preview rendered SSIM Y/U/V/All averaged
+0.914657/0.957361/0.966698/0.930448. Forcing the full-decode line-phase guard
+averaged 0.910581/0.954161/0.963665/0.926692; disabling cross-field dropout and
+chroma stabilization averaged 0.904516/0.952275/0.963803/0.922357. Default
+combined SSIM exceeded both alternatives on every tested window. This
+revalidates the default guard bypass and output-quality steps at corrected IPP
+coordinates; full CUDA decode still retains the guard.
+
+The recheck used `.artifacts/publish-lumaplane/decode.exe`, 138,638,751 bytes,
+SHA-256 `DF1C7FAC017CF77AA27921D8D315BA2370ED2E2B898AE410FD106C212E062056`.
+Its ProductVersion records `e846379` because it was published before the luma-
+plane patch was committed, but its preview data-path source is content-
+equivalent to commit `23365e6`. Result media, decoded planes, logs, and SSIM CSV
+are retained under
+`.artifacts/cuda-preview-current-validation-20260820-203748/`. The final
+default segment hashes for W5/W15/W20/W25/W30/W35 exactly matched the original
+correct CUDA matrix. An earlier 0.375 previous-field chroma candidate regressed
+W15 V and carried greater motion-smear risk, so 0.25 remains selected. This is
+real-PAL preview evidence only; it neither establishes Exact compatibility nor
+certifies real-NTSC preview quality.
 
 The automatic preview batch cap was selected by an interleaved
 16/8/12/12/8/16 real-capture sweep after a warm-up window. Twelve fields
@@ -3329,10 +3327,14 @@ color/quality certification.
 
 ### 2026-08-20 current-machine IPP/CUDA resource matrix
 
-The current sustained resource measurement used a fresh build of source commit
+The full-decode rows and CUDA preview row used a fresh build of source commit
 `41bfd923e2a47f926db3d4ea3c3ff70adbecaa48` and the locally built 2.4.0.0
 `decode.exe` whose SHA-256 was
 `EF07E96D224A4BBEADBDE44EAEDB439C50D1646FA173FD57479255367B9A8868`.
+The IPP preview row was remeasured after its 20 MSPS coordinate fix at commit
+`1fb1455ec6feceeb5c3a95f882b01ebbac61306c`, using the 2.5.0.0 executable whose
+SHA-256 was
+`CE054C2CD9EA1793080F39121C2AA154130FDF5F75C14F07667DD3F214435C6F`.
 The host was Windows build 26220, an Intel Core Ultra 7 265K with 20 physical
 and logical processors, and an RTX 4070 with 12,282 MiB on driver 581.57. The
 SDK was .NET 11.0.100-preview.7.26381.103. Input was the private real 40 MSPS
@@ -3372,20 +3374,24 @@ The full-output SHA-256 triples, in luma/chroma/raw-JSON order, were:
   `316AC709353E81277A6A0E4A3FBD9895A08DB9CEFEA6F80138770299C1922112` /
   `AF67E1B70F8F22EF452C30DF2C4AA721D8713EB4E82DB177F9EADACB55E45B67`.
 
-Preview launched a fresh server twice per backend in CUDA, IPP, IPP, CUDA
-order. A separate cold W5 was followed by W15 through W110 in five-window
-increments. Timing included both init and media requests for all 20 distinct
-two-second PAL windows, or 1,000 source frames per run. CUDA used
-`NVENC block-linear CUDA array + FFmpeg copy-mux`; IPP used
-`NVENC + CUDA YADIF x2`. The CUDA runs took 21.464149/21.063888 seconds
-(46.589/47.475 source fps), and IPP took 32.807366/32.645838 seconds
-(30.481/30.632 source fps). Cold W5 was 1.152384/1.164395 seconds for CUDA and
-2.121960/2.125360 seconds for IPP. Concatenated per-window segment-hash
-aggregates repeated as
-`EA299713B1B8E8A44238EECAC7F4772A0BE1E3457B06D27B8D39528DA427A1E9`
-for CUDA and
-`8144E5C27CC1021EBAD6BB5BF5D101BE786144A604367FEAD31567EFDEA125B3`
-for IPP.
+Preview launched a fresh server twice per backend. A separate cold W5 was
+followed by W15 through W110 in five-window increments. Timing included both
+init and media requests for all 20 distinct two-second PAL windows, or 1,000
+source frames per run. CUDA used `NVENC block-linear CUDA array + FFmpeg
+copy-mux`; IPP used `NVENC + CUDA YADIF x2`. The CUDA runs took
+21.464149/21.063888 seconds (46.589/47.475 source fps), and cold W5 took
+1.152384/1.164395 seconds. Their concatenated per-window segment-hash aggregate
+repeated as
+`EA299713B1B8E8A44238EECAC7F4772A0BE1E3457B06D27B8D39528DA427A1E9`.
+
+The original IPP preview numbers from that matrix are invalid: the internal
+20 MSPS window coordinate was divided by two twice, so later windows sampled
+the wrong time. After the fix, two equivalent IPP runs took
+29.367024/28.892341 seconds (34.052/34.611 source fps), and cold W5 took
+1.899294/1.926396 seconds. Their aggregate repeated as
+`C1A91E1709BA857843F0790BC61B42BB7C8AACD3A95E28804AF29E2ECDAD1A30`.
+This corrected evidence is under
+`.artifacts/current-resource-matrix-20260820-200449/`.
 
 Process CPU is `decode.exe` processor time divided by wall time; equivalent
 cores and percent are normalized to 20 logical processors. It excludes each
@@ -3394,9 +3400,10 @@ drivers, the harness, background work, and the decoder. GPU utilization and
 frame-buffer figures are global NVML samples at 100 ms; encoder utilization is
 reported separately from SM. A preliminary one-second `nvidia-smi dmon` pass
 was excluded from the final GPU table because it aliased the short NVENC bursts.
-Peak values below are the maximum from either final run. The immediately
-preceding ten-second idle baseline was 5.05% system CPU, 0% GPU SM, 0%
-NVENC, and 3,102.7 MiB GPU FB.
+Peak values below are the maximum from either final run. The 5.05% system CPU,
+0% GPU SM, 0% NVENC, and 3,102.7 MiB GPU FB idle baseline applies to the first
+five rows. The separately corrected IPP preview row had a 6.85% system CPU and
+3,109.9 MiB GPU FB idle baseline; its parenthesized FB delta uses that baseline.
 
 | Path | Source fps | `decode.exe` cores / machine % | System CPU avg / peak | GPU SM avg / peak | GPU memory-controller avg / peak | NVENC avg / peak | Peak GPU FB |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
@@ -3405,9 +3412,9 @@ NVENC, and 3,102.7 MiB GPU FB.
 | Full CUDA 20 | 35.797 | 2.184 / 10.92% | 34.74% / 45.42% | 27.67% / 54% | 12.02% / 24% | 0% / 0% | 5,288.3 MiB |
 | Full IPP 20 | 26.864 | 4.839 / 24.19% | 48.39% / 67.84% | 0% / 0% | 0% / 0% | 0% / 0% | 3,102.4 MiB |
 | Preview CUDA 20 | 47.032 | 0.810 / 4.06% | 24.75% / 31.00% | 26.91% / 61% | 9.92% / 23% | 3.12% / 8% | 4,795.0 MiB |
-| Preview IPP 20 | 30.556 | 4.598 / 22.99% | 40.09% / 52.71% | 1.40% / 13% | 0.08% / 1% | 1.52% / 23% | 3,283.0 MiB |
+| Preview IPP 20 | 34.332 | 4.933 / 24.66% | 43.85% / 58.82% | 1.52% / 9% | 0.07% / 1% | 1.48% / 4% | 3,292.0 MiB |
 
-Thus CUDA delivered 1.484x, 1.333x, and 1.539x the IPP source-frame throughput
+Thus CUDA delivered 1.484x, 1.333x, and 1.370x the IPP source-frame throughput
 for full 40, full 20, and preview 20 respectively. Changing full decode from 40
 to 20 MSPS increased CUDA throughput by 1.40% and IPP by 12.91% on this
 500-frame gate. That IPP direction differs from the earlier 100-frame quality
@@ -3415,12 +3422,14 @@ gate because the longer run amortizes startup and reduction setup; neither
 result is a cross-capture guarantee. `Source fps` deliberately counts source
 frames rather than doubling TBC fields or bob output frames. Raw result CSV,
 per-run logs, hashes, typeperf data, and 100 ms NVML samples are retained locally
-under `.artifacts/current-resource-matrix-20260820-192956/`; the private capture
-means this is auditable local evidence rather than a public benchmark corpus.
+under `.artifacts/current-resource-matrix-20260820-192956/` and the corrected
+IPP root named above; the private capture means this is auditable local evidence
+rather than a public benchmark corpus.
 
 Absolute CUDA throughput was not stable across same-day sessions. A separate
 fresh-build full-40 A-B-B-A immediately before this sustained matrix measured
-62.24 CUDA versus 24.51 IPP source fps with identical output hashes. Rebuilding
+62.24 CUDA versus 24.51 IPP source fps, with repeatable hashes within each
+backend/build configuration. Rebuilding
 the original `d913457` CUDA implementation in the current toolchain measured
 61.07 fps versus 62.27 fps for the current source, only a 1.98% current-code
 throughput gain; equivalent old/current IPP runs were 24.81/24.50 fps. The

@@ -107,10 +107,10 @@ compatible NVIDIA GPU が必須で、CPU preview や
 preview のみ、bounded batch 内の clean な opposite-parity field で dropout を置換し、
 seek window ごとに reset する 1-field 75/25 current/previous chroma blend を使います。
 
-2026-08-20 の sustained local resource matrix は source commit `41bfd92` の fresh build、同じ real
-40 MSPS PAL capture、Intel Core Ultra 7 265K（20 logical processor）、RTX 4070 を
-使用しました。各 row は独立 process launch 2 回の平均で、括弧内は 2 回の
-source-frame rate range です。
+2026-08-20 の sustained local resource matrix は同じ real 40 MSPS PAL capture、Intel Core
+Ultra 7 265K（20 logical processor）、RTX 4070 を使用しました。最初の 5 行は source
+commit `41bfd92`、修正済み IPP preview 行は `1fb1455` から取得しました。各 row は独立
+process launch 2 回の平均で、括弧内は 2 回の source-frame rate range です。
 
 | Path | Source fps（range） | `decode.exe` CPU | System CPU | GPU SM avg/peak | NVENC avg/peak | Peak GPU FB |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
@@ -119,25 +119,26 @@ source-frame rate range です。
 | Full CUDA 20 MSPS | 35.80（35.60-35.99） | 10.92% / 2.18 cores | 34.74% | 27.67% / 54% | 0% / 0% | 5,288 MiB |
 | Full IPP 20 MSPS | 26.86（26.25-27.48） | 24.19% / 4.84 cores | 48.39% | 0% / 0% | 0% / 0% | 3,102 MiB |
 | Preview CUDA 20 MSPS | 47.03（46.59-47.48） | 4.06% / 0.81 cores | 24.75% | 26.91% / 61% | 3.12% / 8% | 4,795 MiB |
-| Preview IPP 20 MSPS | 30.56（30.48-30.63） | 22.99% / 4.60 cores | 40.09% | 1.40% / 13% | 1.52% / 23% | 3,283 MiB |
+| Preview IPP 20 MSPS | 34.33（34.05-34.61） | 24.66% / 4.93 cores | 43.85% | 1.52% / 9% | 1.48% / 4% | 3,292 MiB |
 
 Full run は source frame 500 を要求し、exactly 1,000 output field を検証しました。
 Preview run は別の cold W5 後に 20 個の異なる 2-second window、つまり source frame
 1,000 を要求しました。fps は source-frame rate であり、2 output field/bob frame を
 二重に数えません。process CPU は 20 logical processor 全体で正規化し、system CPU
 には FFmpeg、driver、sampler、その他 machine work も含みます。GPU は global 100 ms
-NVML sample です。直前の idle baseline は system CPU 5.05%、GPU SM 0%、NVENC
-0%、GPU FB 3,103 MiB でした。CUDA の IPP 比 source throughput は full-40/full-20/
-preview-20 で 1.48x/1.33x/1.54x です。詳細は
+NVML sample です。最初の 5 行の idle baseline は system CPU 5.05%、GPU SM 0%、
+NVENC 0%、GPU FB 3,103 MiB で、別途修正した IPP preview 行は system CPU 6.85%、
+GPU FB 3,110 MiB を使用しました。CUDA の IPP 比 source throughput は full-40/full-20/
+preview-20 で 1.48x/1.33x/1.37x です。詳細は
 [performance reference](docs/README.detailed.ja.md#current-ippcuda-resource-matrix)を
 参照してください。
 
-以前の 5-window rendered quality comparison は、この throughput gate と分けて保持します。
-1 field の timing offset を補正した SSIM Y/U/V/All 平均は
-0.916844/0.957443/0.966783/0.931934 で、同じ sync policy から新しい dropout/chroma
-処理だけを外した CUDA output より全 window で改善しました。別の A-B-B-A で CUDA
-wall-time cost は 1.2% でした。これは当該 capture/hardware に限定した preview 結果で、
-Exact equivalence ではありません。
+final source の 5-window quality recheck は、修正済み IPP coordinate を使用しました。
+1 field alignment のため IPP の最初の output frame を除くと、default CUDA preview の
+SSIM Y/U/V/All 平均は 0.914657/0.957361/0.966698/0.930448 でした。強制
+line-phase guard の combined 平均は 0.926692、cross-field dropout と chroma
+stabilization を同時に無効化した場合は 0.922357 で、default は全 window で上回りました。
+これは当該 capture/hardware に限定した preview 結果で、Exact equivalence ではありません。
 
 <!-- SECTION: profiles -->
 

@@ -327,13 +327,16 @@ public sealed partial class ReadmeLocalizationTests
             "35.80",
             "26.86",
             "47.03",
-            "30.56",
+            "34.33",
             "10.81%",
             "26.91%",
             "3.12%",
             "1.40%",
             "12.91%",
-            "5.05%"
+            "5.05%",
+            "0.930448",
+            "0.926692",
+            "0.922357"
         ];
 
         string[] synchronizedFacts =
@@ -350,7 +353,7 @@ public sealed partial class ReadmeLocalizationTests
             "35.80",
             "26.86",
             "47.03",
-            "30.56",
+            "34.33",
             "10.81%",
             "26.91%",
             "3.12%",
@@ -358,6 +361,14 @@ public sealed partial class ReadmeLocalizationTests
             "12.91%",
             "5.05%",
             "current-resource-matrix-20260820-192956",
+            "1fb1455ec6feceeb5c3a95f882b01ebbac61306c",
+            "CE054C2CD9EA1793080F39121C2AA154130FDF5F75C14F07667DD3F214435C6F",
+            "current-resource-matrix-20260820-200449",
+            "C1A91E1709BA857843F0790BC61B42BB7C8AACD3A95E28804AF29E2ECDAD1A30",
+            "cuda-preview-current-validation-20260820-203748",
+            "0.930448",
+            "0.926692",
+            "0.922357",
             "bdccd58",
             "1,210.850",
             "167.083",

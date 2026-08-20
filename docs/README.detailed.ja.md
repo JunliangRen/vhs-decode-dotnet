@@ -255,23 +255,37 @@ Windows Task Manager と同じ averaging window/engine label ではありませ�
 | Full CUDA 20 MSPS | 35.80（35.60-35.99） | 2.18 cores / 10.92% | 34.74% / 45.42% | 27.67% / 54% | 12.02% / 24% | 0% / 0% | 5,288.3 MiB（+2,185.6） |
 | Full IPP 20 MSPS | 26.86（26.25-27.48） | 4.84 cores / 24.19% | 48.39% / 67.84% | 0% / 0% | 0% / 0% | 0% / 0% | 3,102.4 MiB（+0） |
 | Preview CUDA 20 MSPS | 47.03（46.59-47.48） | 0.81 cores / 4.06% | 24.75% / 31.00% | 26.91% / 61% | 9.92% / 23% | 3.12% / 8% | 4,795.0 MiB（+1,692.3） |
-| Preview IPP 20 MSPS | 30.56（30.48-30.63） | 4.60 cores / 22.99% | 40.09% / 52.71% | 1.40% / 13% | 0.08% / 1% | 1.52% / 23% | 3,283.0 MiB（+180.3） |
+| Preview IPP 20 MSPS | 34.33（34.05-34.61） | 4.93 cores / 24.66% | 43.85% / 58.82% | 1.52% / 9% | 0.07% / 1% | 1.48% / 4% | 3,292.0 MiB（+182.1） |
 
-直前の 10-second idle baseline は system CPU 5.05%、GPU SM 0%、NVENC 0%、GPU FB
-3,102.7 MiB でした。表の system mean はこの noisy baseline を差し引かない raw value です。
+最初の 5 行の直前 10-second idle baseline は system CPU 5.05%、GPU SM 0%、NVENC 0%、
+GPU FB 3,102.7 MiB でした。別途修正した IPP preview 行は system CPU 6.85%、GPU FB
+3,109.9 MiB の baseline を使用し、+182.1 MiB はこれを基準にしています。表の system
+mean はいずれも noisy baseline を差し引かない raw value です。
 CUDA の IPP 比 source throughput は full 40 MSPS で 1.484x、full 20 MSPS で 1.333x、
-20 MSPS preview で 1.539x です。この長い gate で full decode を 40 から 20 MSPS にすると、
+20 MSPS preview で 1.370x です。この長い gate で full decode を 40 から 20 MSPS にすると、
 CUDA throughput は 1.40%、IPP は 12.91% 上がりました。cold W5 平均は CUDA 1.158 秒、
-IPP 2.124 秒です。full decode は video encode を行わないため NVENC は zero です。CUDA
+IPP 1.913 秒です。full decode は video encode を行わないため NVENC は zero です。CUDA
 preview は block-linear NV12/NVENC、IPP preview は `NVENC + CUDA YADIF x2` を使用しました。
-6 configuration はそれぞれ 2 run で 1 個の repeatable output hash を保持しました。これは
-当該 capture、machine、driver、current build に限定した結果で、cross-hardware または
-quality-equivalence guarantee ではありません。raw CSV、log、100 ms sample は local の
-`.artifacts/current-resource-matrix-20260820-192956/` に保持しています。
+各 configuration は、それぞれの backend/build 内で repeatable output hash を保持しました。
+これは当該 capture、machine、driver、測定した build に限定した結果で、cross-hardware
+または quality-equivalence guarantee ではありません。
+
+full/CUDA の 5 行は commit
+`41bfd923e2a47f926db3d4ea3c3ff70adbecaa48`、executable SHA-256
+`EF07E96D224A4BBEADBDE44EAEDB439C50D1646FA173FD57479255367B9A8868` で測定し、raw
+CSV、log、hash、100 ms sample を
+`.artifacts/current-resource-matrix-20260820-192956/` に保持しています。この run の元の
+IPP preview 行は、20 MSPS window coordinate を二重に 2 で割っていたため無効です。
+修正した IPP 行は commit `1fb1455ec6feceeb5c3a95f882b01ebbac61306c`、executable
+SHA-256 `CE054C2CD9EA1793080F39121C2AA154130FDF5F75C14F07667DD3F214435C6F` で再測定し、
+`.artifacts/current-resource-matrix-20260820-200449/` に保持しています。20-window run
+2 回の aggregate hash はともに
+`C1A91E1709BA857843F0790BC61B42BB7C8AACD3A95E28804AF29E2ECDAD1A30` でした。
 
 同日の session 間で CUDA absolute throughput は安定しませんでした。この sustained
-matrix 直前の別の fresh-build full-40 A-B-B-A は、同じ output hash で CUDA 62.24、
-IPP 24.51 source fps を測定しました。current toolchain で最初の `d913457` CUDA 実装を
+matrix 直前の別の fresh-build full-40 A-B-B-A は CUDA 62.24、IPP 24.51 source fps を
+測定し、hash は各 backend/build configuration 内で repeatable でした。current toolchain
+で最初の `d913457` CUDA 実装を
 rebuild すると 61.07 fps、current source は 62.27 fps で、current-code throughput gain は
 1.98% に過ぎません。対応する old/current IPP は 24.81/24.50 fps でした。したがって
 historical CUDA-slower result と current CUDA-faster snapshot の両方を保持しますが、
@@ -343,22 +357,23 @@ concealment に戻ります。chroma は非再帰の 75/25 current/previous-fiel
 preview は default でこの guard を skip し、full decode は保持します。診断では
 `CUVHS_FORCE_PREVIEW_LINE_PHASE_GUARD=1` で復元できます。
 
-local RTX 4070 と real 631.452-second PAL 40 MSPS capture 1 本で、同じ final executable
-を backend ごとに 2 回起動し、それぞれ W15/W25/W30/W35 を request したため、backend
-ごとに 8 個の steady 2-second observation があります。CUDA は平均 0.588094 秒、
-default 20-thread IPP preview は 1.479124 秒で、wall time は 60.24% 少なく、
-source-frame throughput は 2.515x（85.020 対 33.804 fps）です。`decode.exe` process CPU
-は平均 0.701172 対 8.156250 秒ですが、各 FFmpeg child は含みません。cold W5 は
-CUDA が平均 1.592767 秒、IPP が 1.829743 秒でした。両 output は H.264 Main、
-768x576、progressive 50 fps で期待する PAL colour tag を保持しました。CUDA は約
-1 output field 早く始まり、この 20 ms を align した W5/W15/W25/W30/W35 の rendered
-SSIM Y/U/V/All 平均は 0.916844/0.957443/0.966783/0.931934 です。同じ sync policy で
-cross-field dropout と chroma stabilization を無効にすると
-0.906637/0.952453/0.964071/0.923845 で、全 5 window の combined SSIM が改善しました。
-motion を含む flicker proxy として、consecutive-frame chroma mean absolute difference
-は U/V で 23.74%/16.66% 減り IPP に近づきましたが、pure stationary-patch metric
-ではありません。別の A-B-B-A では 2 つの output step の前後が
-0.597190/0.604505 秒で、wall-time cost 1.23%、throughput reduction 1.21% でした。
+local RTX 4070 と real 631.452-second PAL 40 MSPS capture 1 本で、修正済み sustained
+matrix は backend ごとに 20-window run を 2 回行い、CUDA 47.032、IPP 34.332 source
+fps、つまり 1.370x を測定しました。cold W5 平均は CUDA 1.158 秒、IPP 1.913 秒です。
+両 output は H.264 Main、768x576、progressive 50 fps で期待する PAL colour tag を
+保持しました。
+
+final-source quality recheck は matrix と同じ順序で W5/W15/W20/W25/W30/W35 を request
+しました。persistent encoder に同じ request sequence を与えるため、W20 は集計しない
+bridge としました。1 field alignment のため IPP の最初の output frame を除き、
+W5/W15/W25/W30/W35 を比較しました。default CUDA preview の rendered SSIM
+Y/U/V/All 平均は 0.914657/0.957361/0.966698/0.930448 でした。full-decode line-phase
+guard を強制すると 0.910581/0.954161/0.963665/0.926692、cross-field dropout と chroma
+stabilization を無効化すると 0.904516/0.952275/0.963803/0.922357 でした。default の
+combined SSIM は全 window で両 alternative より高く、修正済み coordinate でも 2 つの
+preview-only choice を再検証しました。結果は
+`.artifacts/cuda-preview-current-validation-20260820-203748/` に保持しています。
+
 別の 5-window CUDA 12-field 対 16-field 比較は平均 SSIM 0.9716、最低 0.960934 で、
 1-frame cadence offset はありませんでした。これは preview-quality evidence であり、
 Exact parity や cross-GPU guarantee ではありません。synthetic NTSC native pipeline
