@@ -224,8 +224,64 @@ full signal graph. Exact complete decode rejects the switch. Supported VHS
 preview routes force the same mode automatically, and output metadata keeps
 `fileLoc` in original source-sample coordinates.
 
+### Current IPP/CUDA resource matrix
+
+The current local matrix was measured on 2026-08-20 from source commit
+`42674ca15c1bdcd35acd04758ab8595f35e28c5c`. The tested `decode.exe` reported
+file version 2.4.0.0 and SHA-256
+`BB44E4ED4D1FFCFA88F7296F6D683829D25AAB35C3D0B0365F94D2B7A6C06D28`.
+The host was Windows build 26220, an Intel Core Ultra 7 265K with 20 physical
+and 20 logical processors, and an NVIDIA GeForce RTX 4070 with 12,282 MiB,
+driver 581.57. The SDK was .NET 11.0.100-preview.7.26381.103. The input was the
+same private real PAL 40 MSPS `F:\BmdFiles\DDD\test.ldf` capture (21,389,175,871
+bytes, approximately 631 seconds).
+
+The full-decode gate was startup-inclusive and requested
+`--start_fileloc 320000000 --length 500`. IPP also used explicit `--threads 20`.
+Each run had to emit exactly 1,000 fields; luma, chroma, and raw-JSON SHA-256
+values had to agree across the two runs of that exact backend/rate. Run order
+was CUDA40, IPP40, IPP20, CUDA20, CUDA20, IPP20, IPP40, CUDA40. The preview
+gate launched a fresh server twice per backend in CUDA, IPP, IPP, CUDA order,
+first requested a separate cold W5, then timed both init and media requests for
+W15, W20, ... W110. Those 20 unique two-second PAL windows represent 1,000
+source frames per run. Preview forces internal 20 MSPS in both backends.
+
+`Source fps` below counts input video frames, not the two output TBC fields or
+field-rate bob frames. `decode.exe` CPU is process CPU time divided by wall time
+and normalized to all 20 logical processors; it excludes a preview FFmpeg
+child. Whole-system CPU includes that child, drivers, the measurement harness,
+background work, and the decode process. GPU SM, memory-controller, NVENC, and
+frame-buffer use are global NVML samples taken every 100 ms; these are not the
+same averaging window or engine label as Windows Task Manager. Results are the
+mean of two runs, while parenthesized fps is the observed range and peak values
+are the maximum of either run.
+
+| Path | Source fps (range) | `decode.exe` CPU | System CPU avg/peak | GPU SM avg/peak | GPU memory-controller avg/peak | NVENC avg/peak | Peak GPU FB (above idle) |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| Full, CUDA 40 MSPS | 62.90 (62.36-63.43) | 2.72 cores / 13.62% | 38.84% / 52.09% | 37.01% / 65% | 16.96% / 30% | 0% / 0% | 7,076 MiB (+3,935) |
+| Full, IPP 40 MSPS | 24.74 (24.67-24.81) | 4.63 cores / 23.16% | 29.00% / 38.85% | 0.08% / 3% | 0.03% / 1% | 0% / 0% | 3,141 MiB (+0) |
+| Full, CUDA 20 MSPS | 69.72 (69.51-69.93) | 2.83 cores / 14.13% | 41.42% / 49.60% | 27.38% / 58% | 10.42% / 23% | 0% / 0% | 5,328 MiB (+2,187) |
+| Full, IPP 20 MSPS | 32.89 (32.60-33.17) | 5.46 cores / 27.28% | 44.24% / 62.69% | 0.04% / 1% | 0% / 0% | 0% / 0% | 3,141 MiB (+0) |
+| Preview, CUDA 20 MSPS | 84.19 (83.04-85.33) | 1.10 cores / 5.52% | 30.36% / 36.76% | 41.99% / 63% | 12.05% / 19% | 5.70% / 14% | 4,835 MiB (+1,694) |
+| Preview, IPP 20 MSPS | 33.00 (32.91-33.09) | 4.69 cores / 23.44% | 36.15% / 50.61% | 1.25% / 11% | 0.07% / 1% | 0.48% / 11% | 3,323 MiB (+182) |
+
+The immediately preceding 10-second idle baseline averaged 7.32% whole-system
+CPU, 0.32% GPU SM, 0% NVENC, and 3,141 MiB GPU FB; the table reports raw system
+means rather than subtracting that noisy baseline. CUDA provided 2.542x the IPP
+source throughput at full 40 MSPS, 2.120x at full 20 MSPS, and 2.551x in 20 MSPS
+preview. Moving full decode from 40 to 20 MSPS raised CUDA throughput by 10.85%
+and IPP by 32.94% on this longer gate. Cold W5 averaged 0.722 seconds for CUDA
+and 2.028 seconds for IPP. Full decode does not encode video, hence zero NVENC;
+the CUDA preview uses block-linear NV12/NVENC, while IPP preview used
+`NVENC + CUDA YADIF x2`. All six configurations retained one repeatable output
+hash per configuration. These results are specific to this capture, machine,
+driver, and current build; they are not a cross-hardware or quality-equivalence
+promise. Raw CSV, logs, and 100 ms samples are retained locally under
+`.artifacts/current-resource-matrix-20260820-183311/`.
+
 This switch selects a preview-quality sampling rate; it does not promise a
-speedup on every backend. In a startup-inclusive, two-run-per-variant gate on
+speedup on every backend. In an earlier pre-optimization, startup-inclusive,
+two-run-per-variant quality gate on
 the same 100-frame real PAL window, CUDA 40/20 MSPS medians were 2.880/2.685
 seconds (6.77% less wall time at 20 MSPS), while 20-thread IPP medians were
 4.830/5.160 seconds (6.83% more wall time). Raw luma/chroma TBC SSIM between
@@ -338,8 +394,8 @@ root, and `VHSDECODE_CUDA_AUTO_DOWNLOAD=0` disables downloading. A download or
 load failure remains explicit and never falls back to a CPU backend.
 
 This backend has its own numerical contract; neither `v0.4.0` nor `current`
-hash compatibility is claimed. On the local RTX 4070 12 GiB development
-machine, a current same-session interleaved comparison used the same fixed
+hash compatibility is claimed. An earlier pre-optimization same-session
+interleaved comparison on the local RTX 4070 12 GiB development machine used the same fixed
 private 40 MHz real PAL `.ldf` request,
 `--start_fileloc 320000000 --length 500`. CUDA completed in 15.605154 and
 15.747770 seconds; `ipp-fast --threads 20` completed in 14.108349 and
@@ -351,7 +407,9 @@ exactly 1,000 ordered, alternating 1135-by-313 fields with the same
 locations are 322,212,917 and 320,563,200 because the independent sync/TBC
 algorithms select different boundaries. This is a same-request performance
 comparison rather than an output-equality claim, and it is not a general speed
-guarantee across tapes, systems, drivers, or NVIDIA models.
+guarantee across tapes, systems, drivers, or NVIDIA models. It is retained for
+provenance but is superseded for current throughput by the resource matrix
+above.
 
 A separate startup-inclusive A-B-B-A comparison against the immediately
 preceding CUDA executable measured 22.083587/21.753076 seconds for the old

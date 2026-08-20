@@ -220,8 +220,58 @@ signal graph の前段 GPU で reduction を行います。Exact full decode は
 拒否します。supported VHS preview route は同じ mode を自動的に強制し、output metadata
 の `fileLoc` は元の source-sample 座標を維持します。
 
+### Current IPP/CUDA resource matrix
+
+current local matrix は 2026-08-20 に source commit
+`42674ca15c1bdcd35acd04758ab8595f35e28c5c` から測定しました。tested `decode.exe`
+の file version は 2.4.0.0、SHA-256 は
+`BB44E4ED4D1FFCFA88F7296F6D683829D25AAB35C3D0B0365F94D2B7A6C06D28` です。
+host は Windows build 26220、Intel Core Ultra 7 265K（20 physical/20 logical
+processor）、NVIDIA GeForce RTX 4070（12,282 MiB、driver 581.57）、SDK は
+.NET 11.0.100-preview.7.26381.103 です。input は同じ private real PAL 40 MSPS
+`F:\BmdFiles\DDD\test.ldf` capture（21,389,175,871 bytes、約 631 秒）です。
+
+full-decode gate は startup-inclusive で、`--start_fileloc 320000000 --length 500` を
+要求し、IPP は `--threads 20` も明示しました。各 run は exactly 1,000 field を出力し、
+同じ backend/rate の 2 run で luma、chroma、raw-JSON SHA-256 が一致する必要があります。
+run order は CUDA40、IPP40、IPP20、CUDA20、CUDA20、IPP20、IPP40、CUDA40 です。
+Preview gate は CUDA、IPP、IPP、CUDA の順に backend ごとに fresh server を 2 回起動し、
+別の cold W5 後に W15、W20、...、W110 の init/media request を計測しました。この 20 個の
+unique 2-second PAL window は run ごとに source frame 1,000 です。両 preview backend は
+internal 20 MSPS を強制します。
+
+下表の `Source fps` は input video frame を数え、2 output TBC field または field-rate bob
+frame を二重に数えません。`decode.exe` CPU は process CPU time / wall time を 20 logical
+processor 全体で正規化し、preview FFmpeg child を含みません。system CPU はその child、
+driver、measurement harness、background work、decode process を含みます。GPU SM、
+memory-controller、NVENC、frame-buffer は 100 ms ごとの global NVML sample であり、
+Windows Task Manager と同じ averaging window/engine label ではありません。値は 2 run
+平均、括弧内 fps は observed range、peak はどちらかの run の最大値です。
+
+| Path | Source fps（range） | `decode.exe` CPU | System CPU avg/peak | GPU SM avg/peak | GPU memory-controller avg/peak | NVENC avg/peak | Peak GPU FB（above idle） |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| Full CUDA 40 MSPS | 62.90（62.36-63.43） | 2.72 cores / 13.62% | 38.84% / 52.09% | 37.01% / 65% | 16.96% / 30% | 0% / 0% | 7,076 MiB（+3,935） |
+| Full IPP 40 MSPS | 24.74（24.67-24.81） | 4.63 cores / 23.16% | 29.00% / 38.85% | 0.08% / 3% | 0.03% / 1% | 0% / 0% | 3,141 MiB（+0） |
+| Full CUDA 20 MSPS | 69.72（69.51-69.93） | 2.83 cores / 14.13% | 41.42% / 49.60% | 27.38% / 58% | 10.42% / 23% | 0% / 0% | 5,328 MiB（+2,187） |
+| Full IPP 20 MSPS | 32.89（32.60-33.17） | 5.46 cores / 27.28% | 44.24% / 62.69% | 0.04% / 1% | 0% / 0% | 0% / 0% | 3,141 MiB（+0） |
+| Preview CUDA 20 MSPS | 84.19（83.04-85.33） | 1.10 cores / 5.52% | 30.36% / 36.76% | 41.99% / 63% | 12.05% / 19% | 5.70% / 14% | 4,835 MiB（+1,694） |
+| Preview IPP 20 MSPS | 33.00（32.91-33.09） | 4.69 cores / 23.44% | 36.15% / 50.61% | 1.25% / 11% | 0.07% / 1% | 0.48% / 11% | 3,323 MiB（+182） |
+
+直前の 10-second idle baseline は system CPU 7.32%、GPU SM 0.32%、NVENC 0%、GPU FB
+3,141 MiB でした。表の system mean はこの noisy baseline を差し引かない raw value です。
+CUDA の IPP 比 source throughput は full 40 MSPS で 2.542x、full 20 MSPS で 2.120x、
+20 MSPS preview で 2.551x です。この長い gate で full decode を 40 から 20 MSPS にすると、
+CUDA throughput は 10.85%、IPP は 32.94% 上がりました。cold W5 平均は CUDA 0.722 秒、
+IPP 2.028 秒です。full decode は video encode を行わないため NVENC は zero です。CUDA
+preview は block-linear NV12/NVENC、IPP preview は `NVENC + CUDA YADIF x2` を使用しました。
+6 configuration はそれぞれ 2 run で 1 個の repeatable output hash を保持しました。これは
+当該 capture、machine、driver、current build に限定した結果で、cross-hardware または
+quality-equivalence guarantee ではありません。raw CSV、log、100 ms sample は local の
+`.artifacts/current-resource-matrix-20260820-183311/` に保持しています。
+
 この switch は preview-quality sample rate を選ぶものであり、すべての backend での
-高速化を保証しません。同じ real PAL 100-frame window を startup 込みで各 variant 2 回
+高速化を保証しません。以前の pre-optimization quality gate で、同じ real PAL
+100-frame window を startup 込みで各 variant 2 回
 測定した gate では、CUDA 40/20 MSPS median は 2.880/2.685 秒（20 MSPS で wall time
 6.77% 減）、20-thread IPP median は 4.830/5.160 秒（wall time 6.83% 増）でした。
 同一 backend の 40 対 20 MSPS raw luma/chroma TBC SSIM は CUDA が
@@ -321,8 +371,9 @@ automatic download の無効化は `VHSDECODE_CUDA_AUTO_DOWNLOAD=0` を使用で
 download/load failure は明示的に報告され、CPU backend へ fallback しません。
 
 この backend は独自の numerical contract を持ち、`v0.4.0` または `current` の hash
-compatibility を主張しません。local RTX 4070 12 GiB development machine の current
-same-session interleaved comparison では、同じ fixed private 40 MHz real PAL `.ldf`
+compatibility を主張しません。以前の pre-optimization same-session interleaved
+comparison は、local RTX 4070 12 GiB development machine で同じ fixed private
+40 MHz real PAL `.ldf`
 request `--start_fileloc 320000000 --length 500` を使いました。CUDA は
 15.605154/15.747770 秒、`ipp-fast --threads 20` は 14.108349/14.064289 秒でした。
 median は 15.676462 対 14.086319 秒（31.8950 対 35.4954 output fps）で、この限定比較
@@ -333,7 +384,8 @@ alternating 1135x313 field を出力しました。最初の synchronized `fileL
 322,212,917 と 320,563,200 です。独立した sync/TBC algorithm が異なる field boundary
 を選ぶためです。これは same-request performance comparison であり、output equality の
 主張でも、tape、system、driver、NVIDIA model をまたぐ一般的な speed guarantee でも
-ありません。
+ありません。provenance のため保持しますが、current throughput は上の resource matrix
+を使用します。
 
 別の startup-inclusive A-B-B-A comparison は直前の CUDA executable を baseline にし、
 old build 22.083587/21.753076 秒、final build 16.355230/15.758866 秒を測定しました。

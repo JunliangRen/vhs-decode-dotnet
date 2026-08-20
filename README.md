@@ -119,18 +119,37 @@ deinterlacer is unchanged. Preview-only cross-field dropout substitution uses a
 clean opposite-parity field when one exists in the bounded batch, and a
 one-field 75/25 current/previous chroma blend resets at every seek window.
 
-On the tested RTX 4070 and one real PAL capture, the final executable was
-launched twice per backend and eight steady two-second windows averaged
-0.588 seconds for CUDA versus 1.479 seconds for the default 20-thread IPP
-preview: 60.2% less wall time and 2.52x source-frame throughput (85.0 versus
-33.8 fps). `decode.exe` process CPU averaged 0.701 versus 8.156 seconds; that
-metric excludes each FFmpeg child. Cold W5 averaged 1.593 versus 1.830 seconds.
-After accounting for the one-field timing offset, five rendered window
-comparisons averaged SSIM Y/U/V/All of
-0.916844/0.957443/0.966783/0.931934. Every tested window improved over the same
-CUDA sync policy without the new dropout/chroma steps; a separate A-B-B-A found
-a 1.2% CUDA wall-time cost. These are capture- and hardware-specific preview
-results, not Exact-equivalence claims.
+A fresh local resource matrix on 2026-08-20 used source commit `42674ca`, the
+same real 40 MSPS PAL capture, an Intel Core Ultra 7 265K (20 logical
+processors), and an RTX 4070. Each row is the mean of two independent process
+launches; ranges are the two observed source-frame rates.
+
+| Path | Source fps (range) | `decode.exe` CPU | Whole-system CPU | GPU SM avg/peak | NVENC avg/peak | Peak GPU FB |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| Full, CUDA 40 MSPS | 62.90 (62.36-63.43) | 13.62% / 2.72 cores | 38.84% | 37.01% / 65% | 0% / 0% | 7,076 MiB |
+| Full, IPP 40 MSPS | 24.74 (24.67-24.81) | 23.16% / 4.63 cores | 29.00% | 0.08% / 3% | 0% / 0% | 3,141 MiB |
+| Full, CUDA 20 MSPS | 69.72 (69.51-69.93) | 14.13% / 2.83 cores | 41.42% | 27.38% / 58% | 0% / 0% | 5,328 MiB |
+| Full, IPP 20 MSPS | 32.89 (32.60-33.17) | 27.28% / 5.46 cores | 44.24% | 0.04% / 1% | 0% / 0% | 3,141 MiB |
+| Preview, CUDA 20 MSPS | 84.19 (83.04-85.33) | 5.52% / 1.10 cores | 30.36% | 41.99% / 63% | 5.70% / 14% | 4,835 MiB |
+| Preview, IPP 20 MSPS | 33.00 (32.91-33.09) | 23.44% / 4.69 cores | 36.15% | 1.25% / 11% | 0.48% / 11% | 3,323 MiB |
+
+Full runs requested 500 source frames and verified exactly 1,000 output fields.
+Preview runs requested 20 distinct two-second windows, or 1,000 source frames,
+after a separate cold W5. Source fps does not count the two output fields/bob
+frames as two source frames. Process CPU is normalized against all 20 logical
+processors; whole-system CPU includes FFmpeg, drivers, the sampler, and other
+machine work. GPU values are global 100 ms NVML samples. The immediately
+preceding idle baseline was 7.32% system CPU, 0.32% GPU SM, 0% NVENC, and
+3,141 MiB GPU FB. CUDA delivered 2.54x/2.12x/2.55x the IPP source throughput in
+full-40/full-20/preview-20 respectively. See the
+[detailed method and evidence](docs/README.detailed.md#current-ippcuda-resource-matrix).
+
+The earlier five-window rendered quality comparison remains separate from this
+throughput gate. After accounting for a one-field timing offset, it averaged
+SSIM Y/U/V/All of 0.916844/0.957443/0.966783/0.931934. Every tested window
+improved over the same CUDA sync policy without the new dropout/chroma steps;
+a separate A-B-B-A found a 1.2% CUDA wall-time cost. These are capture- and
+hardware-specific preview results, not Exact-equivalence claims.
 
 <!-- SECTION: profiles -->
 
@@ -168,9 +187,12 @@ decode.exe vhs --dsp-backend cuda-fast --pal `
 mode. A 40 MSPS source is anti-alias filtered and decoded internally at 20
 MSPS; native 20 MSPS input is decoded without another reduction. TBC metadata
 `fileLoc` remains in original input-sample coordinates.
-This is a preview-quality rate choice, not a universal throughput switch. On
-the current local real-PAL gate it made CUDA modestly faster but IPP modestly
-slower, so benchmark the intended capture before selecting it for full decode.
+This is a preview-quality rate choice, not a universal throughput switch. In
+the current startup-inclusive 500-frame gate it raised CUDA throughput by
+10.85% and IPP throughput by 32.94%. An earlier 100-frame gate showed IPP 6.83%
+slower because fixed startup and reduction costs dominated that short request;
+benchmark the intended capture and run length before selecting it for full
+decode.
 
 The default Windows release includes the small CUDA-fast bridge but does not
 embed the 271 MiB cuFFT DLL. Only an explicit `--dsp-backend cuda-fast` request
@@ -189,15 +211,10 @@ release-compatible behavior is required. See the
 [detailed backend notes](docs/README.detailed.md#performance) before using IPP
 or CUDA for compatibility-sensitive work. On the tested RTX 4070 and one real
 PAL capture, the quality-corrected FP32 CUDA-full path is now visually much
-closer to Exact, but it does not exceed the measured CPU throughput. For the
-same `--start_fileloc 320000000 --length 500` request, a current same-session
-interleaved comparison completed CUDA runs in 15.605/15.748 seconds and
-`ipp-fast --threads 20` runs in 14.108/14.064 seconds. The medians are 15.676
-and 14.086 seconds (31.895 and 35.495 output fps): CUDA takes 11.29% more wall
-time and provides 0.8986x the IPP throughput. Against the immediately preceding
-CUDA build, a separate A-B-B-A comparison reduced the CUDA median from 21.918
-to 16.057 seconds (26.74% less wall time and 36.50% more throughput). Two final
-CUDA outputs were byte-identical.
+closer to Exact. The fresh matrix above supersedes the older pre-optimization
+timing comparison: at 40 MSPS CUDA measured 62.90 source fps versus IPP's 24.74
+(2.54x), and at 20 MSPS it measured 69.72 versus 32.89 (2.12x). Each variant's
+two luma/chroma/JSON output sets were byte-identical within that variant.
 An aligned 79-frame lossless comparison with Exact using the default
 export-side dropout correction measured SSIM Y/U/V/All of
 0.954905/0.988109/0.991285/0.972301 and PSNR Y/U/V/average of
