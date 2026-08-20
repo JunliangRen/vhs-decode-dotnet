@@ -9,7 +9,7 @@ A .NET 11 rewrite of the decode-facing parts of
 upstream release `v0.4.0` at commit
 `43155200da87c0d49eb37d8ec09b1372075ee8e4`.
 
-The current .NET port release is `v0.4.0-2.4.0` (application version `2.4.0`).
+The current .NET port release is `v0.4.0-2.5.0` (application version `2.5.0`).
 
 > [!IMPORTANT]
 > This remains a compatibility work in progress. The top-level decode paths are
@@ -119,19 +119,20 @@ deinterlacer is unchanged. Preview-only cross-field dropout substitution uses a
 clean opposite-parity field when one exists in the bounded batch, and a
 one-field 75/25 current/previous chroma blend resets at every seek window.
 
-A fresh local resource matrix on 2026-08-20 used source commit `42674ca`, the
+A sustained local resource matrix on 2026-08-20 used a fresh build of source
+commit `41bfd92`, the
 same real 40 MSPS PAL capture, an Intel Core Ultra 7 265K (20 logical
 processors), and an RTX 4070. Each row is the mean of two independent process
 launches; ranges are the two observed source-frame rates.
 
 | Path | Source fps (range) | `decode.exe` CPU | Whole-system CPU | GPU SM avg/peak | NVENC avg/peak | Peak GPU FB |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| Full, CUDA 40 MSPS | 62.90 (62.36-63.43) | 13.62% / 2.72 cores | 38.84% | 37.01% / 65% | 0% / 0% | 7,076 MiB |
-| Full, IPP 40 MSPS | 24.74 (24.67-24.81) | 23.16% / 4.63 cores | 29.00% | 0.08% / 3% | 0% / 0% | 3,141 MiB |
-| Full, CUDA 20 MSPS | 69.72 (69.51-69.93) | 14.13% / 2.83 cores | 41.42% | 27.38% / 58% | 0% / 0% | 5,328 MiB |
-| Full, IPP 20 MSPS | 32.89 (32.60-33.17) | 27.28% / 5.46 cores | 44.24% | 0.04% / 1% | 0% / 0% | 3,141 MiB |
-| Preview, CUDA 20 MSPS | 84.19 (83.04-85.33) | 5.52% / 1.10 cores | 30.36% | 41.99% / 63% | 5.70% / 14% | 4,835 MiB |
-| Preview, IPP 20 MSPS | 33.00 (32.91-33.09) | 23.44% / 4.69 cores | 36.15% | 1.25% / 11% | 0.48% / 11% | 3,323 MiB |
+| Full, CUDA 40 MSPS | 35.30 (35.28-35.33) | 10.81% / 2.16 cores | 33.89% | 32.44% / 72% | 0% / 0% | 7,038 MiB |
+| Full, IPP 40 MSPS | 23.79 (23.71-23.87) | 22.15% / 4.43 cores | 28.76% | 0.10% / 4% | 0% / 0% | 3,102 MiB |
+| Full, CUDA 20 MSPS | 35.80 (35.60-35.99) | 10.92% / 2.18 cores | 34.74% | 27.67% / 54% | 0% / 0% | 5,288 MiB |
+| Full, IPP 20 MSPS | 26.86 (26.25-27.48) | 24.19% / 4.84 cores | 48.39% | 0% / 0% | 0% / 0% | 3,102 MiB |
+| Preview, CUDA 20 MSPS | 47.03 (46.59-47.48) | 4.06% / 0.81 cores | 24.75% | 26.91% / 61% | 3.12% / 8% | 4,795 MiB |
+| Preview, IPP 20 MSPS | 30.56 (30.48-30.63) | 22.99% / 4.60 cores | 40.09% | 1.40% / 13% | 1.52% / 23% | 3,283 MiB |
 
 Full runs requested 500 source frames and verified exactly 1,000 output fields.
 Preview runs requested 20 distinct two-second windows, or 1,000 source frames,
@@ -139,8 +140,8 @@ after a separate cold W5. Source fps does not count the two output fields/bob
 frames as two source frames. Process CPU is normalized against all 20 logical
 processors; whole-system CPU includes FFmpeg, drivers, the sampler, and other
 machine work. GPU values are global 100 ms NVML samples. The immediately
-preceding idle baseline was 7.32% system CPU, 0.32% GPU SM, 0% NVENC, and
-3,141 MiB GPU FB. CUDA delivered 2.54x/2.12x/2.55x the IPP source throughput in
+preceding idle baseline was 5.05% system CPU, 0% GPU SM, 0% NVENC, and
+3,103 MiB GPU FB. CUDA delivered 1.48x/1.33x/1.54x the IPP source throughput in
 full-40/full-20/preview-20 respectively. See the
 [detailed method and evidence](docs/README.detailed.md#current-ippcuda-resource-matrix).
 
@@ -189,7 +190,7 @@ MSPS; native 20 MSPS input is decoded without another reduction. TBC metadata
 `fileLoc` remains in original input-sample coordinates.
 This is a preview-quality rate choice, not a universal throughput switch. In
 the current startup-inclusive 500-frame gate it raised CUDA throughput by
-10.85% and IPP throughput by 32.94%. An earlier 100-frame gate showed IPP 6.83%
+1.40% and IPP throughput by 12.91%. An earlier 100-frame gate showed IPP 6.83%
 slower because fixed startup and reduction costs dominated that short request;
 benchmark the intended capture and run length before selecting it for full
 decode.
@@ -211,9 +212,11 @@ release-compatible behavior is required. See the
 [detailed backend notes](docs/README.detailed.md#performance) before using IPP
 or CUDA for compatibility-sensitive work. On the tested RTX 4070 and one real
 PAL capture, the quality-corrected FP32 CUDA-full path is now visually much
-closer to Exact. The fresh matrix above supersedes the older pre-optimization
-timing comparison: at 40 MSPS CUDA measured 62.90 source fps versus IPP's 24.74
-(2.54x), and at 20 MSPS it measured 69.72 versus 32.89 (2.12x). Each variant's
+closer to Exact. In the sustained matrix above, CUDA measured 35.30 source fps
+versus IPP's 23.79 (1.48x) at 40 MSPS, and 35.80 versus 26.86 (1.33x) at
+20 MSPS. A separate short same-source session measured materially higher CUDA
+throughput, so these figures are descriptive snapshots rather than evidence
+that later code alone reversed the older CUDA/IPP result. Each variant's
 two luma/chroma/JSON output sets were byte-identical within that variant.
 An aligned 79-frame lossless comparison with Exact using the default
 export-side dropout correction measured SSIM Y/U/V/All of

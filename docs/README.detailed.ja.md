@@ -11,7 +11,7 @@
 `v0.4.0`、commit `43155200da87c0d49eb37d8ec09b1372075ee8e4`
 を互換性の基準としています。
 
-現在の .NET port release は `v0.4.0-2.4.0`（application version `2.4.0`）です。
+現在の .NET port release は `v0.4.0-2.5.0`（application version `2.5.0`）です。
 
 > [!IMPORTANT]
 > この互換移植は現在も開発中です。トップレベルのデコード経路は実装済みで
@@ -222,10 +222,10 @@ signal graph の前段 GPU で reduction を行います。Exact full decode は
 
 ### Current IPP/CUDA resource matrix
 
-current local matrix は 2026-08-20 に source commit
-`42674ca15c1bdcd35acd04758ab8595f35e28c5c` から測定しました。tested `decode.exe`
+current sustained local matrix は 2026-08-20 に source commit
+`41bfd923e2a47f926db3d4ea3c3ff70adbecaa48` の fresh build から測定しました。tested `decode.exe`
 の file version は 2.4.0.0、SHA-256 は
-`BB44E4ED4D1FFCFA88F7296F6D683829D25AAB35C3D0B0365F94D2B7A6C06D28` です。
+`EF07E96D224A4BBEADBDE44EAEDB439C50D1646FA173FD57479255367B9A8868` です。
 host は Windows build 26220、Intel Core Ultra 7 265K（20 physical/20 logical
 processor）、NVIDIA GeForce RTX 4070（12,282 MiB、driver 581.57）、SDK は
 .NET 11.0.100-preview.7.26381.103 です。input は同じ private real PAL 40 MSPS
@@ -250,24 +250,32 @@ Windows Task Manager と同じ averaging window/engine label ではありませ�
 
 | Path | Source fps（range） | `decode.exe` CPU | System CPU avg/peak | GPU SM avg/peak | GPU memory-controller avg/peak | NVENC avg/peak | Peak GPU FB（above idle） |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
-| Full CUDA 40 MSPS | 62.90（62.36-63.43） | 2.72 cores / 13.62% | 38.84% / 52.09% | 37.01% / 65% | 16.96% / 30% | 0% / 0% | 7,076 MiB（+3,935） |
-| Full IPP 40 MSPS | 24.74（24.67-24.81） | 4.63 cores / 23.16% | 29.00% / 38.85% | 0.08% / 3% | 0.03% / 1% | 0% / 0% | 3,141 MiB（+0） |
-| Full CUDA 20 MSPS | 69.72（69.51-69.93） | 2.83 cores / 14.13% | 41.42% / 49.60% | 27.38% / 58% | 10.42% / 23% | 0% / 0% | 5,328 MiB（+2,187） |
-| Full IPP 20 MSPS | 32.89（32.60-33.17） | 5.46 cores / 27.28% | 44.24% / 62.69% | 0.04% / 1% | 0% / 0% | 0% / 0% | 3,141 MiB（+0） |
-| Preview CUDA 20 MSPS | 84.19（83.04-85.33） | 1.10 cores / 5.52% | 30.36% / 36.76% | 41.99% / 63% | 12.05% / 19% | 5.70% / 14% | 4,835 MiB（+1,694） |
-| Preview IPP 20 MSPS | 33.00（32.91-33.09） | 4.69 cores / 23.44% | 36.15% / 50.61% | 1.25% / 11% | 0.07% / 1% | 0.48% / 11% | 3,323 MiB（+182） |
+| Full CUDA 40 MSPS | 35.30（35.28-35.33） | 2.16 cores / 10.81% | 33.89% / 42.05% | 32.44% / 72% | 16.16% / 49% | 0% / 0% | 7,037.5 MiB（+3,934.8） |
+| Full IPP 40 MSPS | 23.79（23.71-23.87） | 4.43 cores / 22.15% | 28.76% / 39.20% | 0.10% / 4% | 0.02% / 1% | 0% / 0% | 3,102.4 MiB（+0） |
+| Full CUDA 20 MSPS | 35.80（35.60-35.99） | 2.18 cores / 10.92% | 34.74% / 45.42% | 27.67% / 54% | 12.02% / 24% | 0% / 0% | 5,288.3 MiB（+2,185.6） |
+| Full IPP 20 MSPS | 26.86（26.25-27.48） | 4.84 cores / 24.19% | 48.39% / 67.84% | 0% / 0% | 0% / 0% | 0% / 0% | 3,102.4 MiB（+0） |
+| Preview CUDA 20 MSPS | 47.03（46.59-47.48） | 0.81 cores / 4.06% | 24.75% / 31.00% | 26.91% / 61% | 9.92% / 23% | 3.12% / 8% | 4,795.0 MiB（+1,692.3） |
+| Preview IPP 20 MSPS | 30.56（30.48-30.63） | 4.60 cores / 22.99% | 40.09% / 52.71% | 1.40% / 13% | 0.08% / 1% | 1.52% / 23% | 3,283.0 MiB（+180.3） |
 
-直前の 10-second idle baseline は system CPU 7.32%、GPU SM 0.32%、NVENC 0%、GPU FB
-3,141 MiB でした。表の system mean はこの noisy baseline を差し引かない raw value です。
-CUDA の IPP 比 source throughput は full 40 MSPS で 2.542x、full 20 MSPS で 2.120x、
-20 MSPS preview で 2.551x です。この長い gate で full decode を 40 から 20 MSPS にすると、
-CUDA throughput は 10.85%、IPP は 32.94% 上がりました。cold W5 平均は CUDA 0.722 秒、
-IPP 2.028 秒です。full decode は video encode を行わないため NVENC は zero です。CUDA
+直前の 10-second idle baseline は system CPU 5.05%、GPU SM 0%、NVENC 0%、GPU FB
+3,102.7 MiB でした。表の system mean はこの noisy baseline を差し引かない raw value です。
+CUDA の IPP 比 source throughput は full 40 MSPS で 1.484x、full 20 MSPS で 1.333x、
+20 MSPS preview で 1.539x です。この長い gate で full decode を 40 から 20 MSPS にすると、
+CUDA throughput は 1.40%、IPP は 12.91% 上がりました。cold W5 平均は CUDA 1.158 秒、
+IPP 2.124 秒です。full decode は video encode を行わないため NVENC は zero です。CUDA
 preview は block-linear NV12/NVENC、IPP preview は `NVENC + CUDA YADIF x2` を使用しました。
 6 configuration はそれぞれ 2 run で 1 個の repeatable output hash を保持しました。これは
 当該 capture、machine、driver、current build に限定した結果で、cross-hardware または
 quality-equivalence guarantee ではありません。raw CSV、log、100 ms sample は local の
-`.artifacts/current-resource-matrix-20260820-183311/` に保持しています。
+`.artifacts/current-resource-matrix-20260820-192956/` に保持しています。
+
+同日の session 間で CUDA absolute throughput は安定しませんでした。この sustained
+matrix 直前の別の fresh-build full-40 A-B-B-A は、同じ output hash で CUDA 62.24、
+IPP 24.51 source fps を測定しました。current toolchain で最初の `d913457` CUDA 実装を
+rebuild すると 61.07 fps、current source は 62.27 fps で、current-code throughput gain は
+1.98% に過ぎません。対応する old/current IPP は 24.81/24.50 fps でした。したがって
+historical CUDA-slower result と current CUDA-faster snapshot の両方を保持しますが、
+reversal を後続 code だけに帰属させません。
 
 この switch は preview-quality sample rate を選ぶものであり、すべての backend での
 高速化を保証しません。以前の pre-optimization quality gate で、同じ real PAL
@@ -371,7 +379,7 @@ automatic download の無効化は `VHSDECODE_CUDA_AUTO_DOWNLOAD=0` を使用で
 download/load failure は明示的に報告され、CPU backend へ fallback しません。
 
 この backend は独自の numerical contract を持ち、`v0.4.0` または `current` の hash
-compatibility を主張しません。以前の pre-optimization same-session interleaved
+compatibility を主張しません。以前の same-session interleaved
 comparison は、local RTX 4070 12 GiB development machine で同じ fixed private
 40 MHz real PAL `.ldf`
 request `--start_fileloc 320000000 --length 500` を使いました。CUDA は
@@ -384,8 +392,8 @@ alternating 1135x313 field を出力しました。最初の synchronized `fileL
 322,212,917 と 320,563,200 です。独立した sync/TBC algorithm が異なる field boundary
 を選ぶためです。これは same-request performance comparison であり、output equality の
 主張でも、tape、system、driver、NVIDIA model をまたぐ一般的な speed guarantee でも
-ありません。provenance のため保持しますが、current throughput は上の resource matrix
-を使用します。
+ありません。provenance のため保持します。上の resource matrix は新しい environment
+snapshot であり、後続 source change だけがこの結果を逆転した証拠ではありません。
 
 別の startup-inclusive A-B-B-A comparison は直前の CUDA executable を baseline にし、
 old build 22.083587/21.753076 秒、final build 16.355230/15.758866 秒を測定しました。

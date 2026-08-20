@@ -3329,10 +3329,10 @@ color/quality certification.
 
 ### 2026-08-20 current-machine IPP/CUDA resource matrix
 
-The current resource measurement used source commit
-`42674ca15c1bdcd35acd04758ab8595f35e28c5c` and the locally built 2.4.0.0
+The current sustained resource measurement used a fresh build of source commit
+`41bfd923e2a47f926db3d4ea3c3ff70adbecaa48` and the locally built 2.4.0.0
 `decode.exe` whose SHA-256 was
-`BB44E4ED4D1FFCFA88F7296F6D683829D25AAB35C3D0B0365F94D2B7A6C06D28`.
+`EF07E96D224A4BBEADBDE44EAEDB439C50D1646FA173FD57479255367B9A8868`.
 The host was Windows build 26220, an Intel Core Ultra 7 265K with 20 physical
 and logical processors, and an RTX 4070 with 12,282 MiB on driver 581.57. The
 SDK was .NET 11.0.100-preview.7.26381.103. Input was the private real 40 MSPS
@@ -3348,10 +3348,10 @@ luma, chroma, and raw-JSON files. Their startup-inclusive wall times were:
 
 | Full configuration | Run 1 | Run 2 | Mean source fps |
 | --- | ---: | ---: | ---: |
-| CUDA 40 MSPS | 8.018089 s | 7.882251 s | 62.896 |
-| IPP 40 MSPS | 20.155022 s | 20.268786 s | 24.738 |
-| CUDA 20 MSPS | 7.149850 s | 7.193578 s | 69.719 |
-| IPP 20 MSPS | 15.336048 s | 15.073498 s | 32.887 |
+| CUDA 40 MSPS | 14.173090 s | 14.152980 s | 35.303 |
+| IPP 40 MSPS | 20.943246 s | 21.088140 s | 23.792 |
+| CUDA 20 MSPS | 13.892451 s | 14.043603 s | 35.797 |
+| IPP 20 MSPS | 19.045306 s | 18.197606 s | 26.864 |
 
 The full-output SHA-256 triples, in luma/chroma/raw-JSON order, were:
 
@@ -3377,10 +3377,10 @@ order. A separate cold W5 was followed by W15 through W110 in five-window
 increments. Timing included both init and media requests for all 20 distinct
 two-second PAL windows, or 1,000 source frames per run. CUDA used
 `NVENC block-linear CUDA array + FFmpeg copy-mux`; IPP used
-`NVENC + CUDA YADIF x2`. The CUDA runs took 12.042045/11.718817 seconds
-(83.042/85.333 source fps), and IPP took 30.383970/30.219847 seconds
-(32.912/33.091 source fps). Cold W5 was 0.719933/0.724213 seconds for CUDA and
-1.989163/2.066978 seconds for IPP. Concatenated per-window segment-hash
+`NVENC + CUDA YADIF x2`. The CUDA runs took 21.464149/21.063888 seconds
+(46.589/47.475 source fps), and IPP took 32.807366/32.645838 seconds
+(30.481/30.632 source fps). Cold W5 was 1.152384/1.164395 seconds for CUDA and
+2.121960/2.125360 seconds for IPP. Concatenated per-window segment-hash
 aggregates repeated as
 `EA299713B1B8E8A44238EECAC7F4772A0BE1E3457B06D27B8D39528DA427A1E9`
 for CUDA and
@@ -3395,28 +3395,38 @@ frame-buffer figures are global NVML samples at 100 ms; encoder utilization is
 reported separately from SM. A preliminary one-second `nvidia-smi dmon` pass
 was excluded from the final GPU table because it aliased the short NVENC bursts.
 Peak values below are the maximum from either final run. The immediately
-preceding ten-second idle baseline was 7.32% system CPU, 0.32% GPU SM, 0%
-NVENC, and 3,141.1 MiB GPU FB.
+preceding ten-second idle baseline was 5.05% system CPU, 0% GPU SM, 0%
+NVENC, and 3,102.7 MiB GPU FB.
 
 | Path | Source fps | `decode.exe` cores / machine % | System CPU avg / peak | GPU SM avg / peak | GPU memory-controller avg / peak | NVENC avg / peak | Peak GPU FB |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
-| Full CUDA 40 | 62.896 | 2.722 / 13.62% | 38.84% / 52.09% | 37.01% / 65% | 16.96% / 30% | 0% / 0% | 7,076.0 MiB |
-| Full IPP 40 | 24.738 | 4.631 / 23.16% | 29.00% / 38.85% | 0.08% / 3% | 0.03% / 1% | 0% / 0% | 3,141.1 MiB |
-| Full CUDA 20 | 69.719 | 2.826 / 14.13% | 41.42% / 49.60% | 27.38% / 58% | 10.42% / 23% | 0% / 0% | 5,328.0 MiB |
-| Full IPP 20 | 32.887 | 5.457 / 27.28% | 44.24% / 62.69% | 0.04% / 1% | 0% / 0% | 0% / 0% | 3,141.1 MiB |
-| Preview CUDA 20 | 84.188 | 1.104 / 5.52% | 30.36% / 36.76% | 41.99% / 63% | 12.05% / 19% | 5.70% / 14% | 4,835.3 MiB |
-| Preview IPP 20 | 33.002 | 4.688 / 23.44% | 36.15% / 50.61% | 1.25% / 11% | 0.07% / 1% | 0.48% / 11% | 3,323.3 MiB |
+| Full CUDA 40 | 35.303 | 2.162 / 10.81% | 33.89% / 42.05% | 32.44% / 72% | 16.16% / 49% | 0% / 0% | 7,037.5 MiB |
+| Full IPP 40 | 23.792 | 4.429 / 22.15% | 28.76% / 39.20% | 0.10% / 4% | 0.02% / 1% | 0% / 0% | 3,102.4 MiB |
+| Full CUDA 20 | 35.797 | 2.184 / 10.92% | 34.74% / 45.42% | 27.67% / 54% | 12.02% / 24% | 0% / 0% | 5,288.3 MiB |
+| Full IPP 20 | 26.864 | 4.839 / 24.19% | 48.39% / 67.84% | 0% / 0% | 0% / 0% | 0% / 0% | 3,102.4 MiB |
+| Preview CUDA 20 | 47.032 | 0.810 / 4.06% | 24.75% / 31.00% | 26.91% / 61% | 9.92% / 23% | 3.12% / 8% | 4,795.0 MiB |
+| Preview IPP 20 | 30.556 | 4.598 / 22.99% | 40.09% / 52.71% | 1.40% / 13% | 0.08% / 1% | 1.52% / 23% | 3,283.0 MiB |
 
-Thus CUDA delivered 2.542x, 2.120x, and 2.551x the IPP source-frame throughput
+Thus CUDA delivered 1.484x, 1.333x, and 1.539x the IPP source-frame throughput
 for full 40, full 20, and preview 20 respectively. Changing full decode from 40
-to 20 MSPS increased CUDA throughput by 10.85% and IPP by 32.94% on this
+to 20 MSPS increased CUDA throughput by 1.40% and IPP by 12.91% on this
 500-frame gate. That IPP direction differs from the earlier 100-frame quality
 gate because the longer run amortizes startup and reduction setup; neither
 result is a cross-capture guarantee. `Source fps` deliberately counts source
 frames rather than doubling TBC fields or bob output frames. Raw result CSV,
 per-run logs, hashes, typeperf data, and 100 ms NVML samples are retained locally
-under `.artifacts/current-resource-matrix-20260820-183311/`; the private capture
+under `.artifacts/current-resource-matrix-20260820-192956/`; the private capture
 means this is auditable local evidence rather than a public benchmark corpus.
+
+Absolute CUDA throughput was not stable across same-day sessions. A separate
+fresh-build full-40 A-B-B-A immediately before this sustained matrix measured
+62.24 CUDA versus 24.51 IPP source fps with identical output hashes. Rebuilding
+the original `d913457` CUDA implementation in the current toolchain measured
+61.07 fps versus 62.27 fps for the current source, only a 1.98% current-code
+throughput gain; equivalent old/current IPP runs were 24.81/24.50 fps. The
+historical CUDA-slower result and current CUDA-faster snapshots are both valid
+descriptions of their sessions, but their reversal is not attributed to later
+source changes alone.
 
 The final .NET 11 Preview 7 xUnit v3 run discovered all 1,577 tests: 1,575
 passed, none failed, and two PAL/NTSC AMF encoder cases were skipped because the

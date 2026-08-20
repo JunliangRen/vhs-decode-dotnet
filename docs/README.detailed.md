@@ -11,7 +11,7 @@
 release `v0.4.0` at commit
 `43155200da87c0d49eb37d8ec09b1372075ee8e4`.
 
-The current .NET port release is `v0.4.0-2.4.0` (application version `2.4.0`).
+The current .NET port release is `v0.4.0-2.5.0` (application version `2.5.0`).
 
 > [!IMPORTANT]
 > This is a work-in-progress compatibility port. The top-level decode paths are
@@ -226,10 +226,10 @@ preview routes force the same mode automatically, and output metadata keeps
 
 ### Current IPP/CUDA resource matrix
 
-The current local matrix was measured on 2026-08-20 from source commit
-`42674ca15c1bdcd35acd04758ab8595f35e28c5c`. The tested `decode.exe` reported
+The current sustained local matrix was measured on 2026-08-20 from a fresh build
+of source commit `41bfd923e2a47f926db3d4ea3c3ff70adbecaa48`. The tested `decode.exe` reported
 file version 2.4.0.0 and SHA-256
-`BB44E4ED4D1FFCFA88F7296F6D683829D25AAB35C3D0B0365F94D2B7A6C06D28`.
+`EF07E96D224A4BBEADBDE44EAEDB439C50D1646FA173FD57479255367B9A8868`.
 The host was Windows build 26220, an Intel Core Ultra 7 265K with 20 physical
 and 20 logical processors, and an NVIDIA GeForce RTX 4070 with 12,282 MiB,
 driver 581.57. The SDK was .NET 11.0.100-preview.7.26381.103. The input was the
@@ -258,26 +258,35 @@ are the maximum of either run.
 
 | Path | Source fps (range) | `decode.exe` CPU | System CPU avg/peak | GPU SM avg/peak | GPU memory-controller avg/peak | NVENC avg/peak | Peak GPU FB (above idle) |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
-| Full, CUDA 40 MSPS | 62.90 (62.36-63.43) | 2.72 cores / 13.62% | 38.84% / 52.09% | 37.01% / 65% | 16.96% / 30% | 0% / 0% | 7,076 MiB (+3,935) |
-| Full, IPP 40 MSPS | 24.74 (24.67-24.81) | 4.63 cores / 23.16% | 29.00% / 38.85% | 0.08% / 3% | 0.03% / 1% | 0% / 0% | 3,141 MiB (+0) |
-| Full, CUDA 20 MSPS | 69.72 (69.51-69.93) | 2.83 cores / 14.13% | 41.42% / 49.60% | 27.38% / 58% | 10.42% / 23% | 0% / 0% | 5,328 MiB (+2,187) |
-| Full, IPP 20 MSPS | 32.89 (32.60-33.17) | 5.46 cores / 27.28% | 44.24% / 62.69% | 0.04% / 1% | 0% / 0% | 0% / 0% | 3,141 MiB (+0) |
-| Preview, CUDA 20 MSPS | 84.19 (83.04-85.33) | 1.10 cores / 5.52% | 30.36% / 36.76% | 41.99% / 63% | 12.05% / 19% | 5.70% / 14% | 4,835 MiB (+1,694) |
-| Preview, IPP 20 MSPS | 33.00 (32.91-33.09) | 4.69 cores / 23.44% | 36.15% / 50.61% | 1.25% / 11% | 0.07% / 1% | 0.48% / 11% | 3,323 MiB (+182) |
+| Full, CUDA 40 MSPS | 35.30 (35.28-35.33) | 2.16 cores / 10.81% | 33.89% / 42.05% | 32.44% / 72% | 16.16% / 49% | 0% / 0% | 7,037.5 MiB (+3,934.8) |
+| Full, IPP 40 MSPS | 23.79 (23.71-23.87) | 4.43 cores / 22.15% | 28.76% / 39.20% | 0.10% / 4% | 0.02% / 1% | 0% / 0% | 3,102.4 MiB (+0) |
+| Full, CUDA 20 MSPS | 35.80 (35.60-35.99) | 2.18 cores / 10.92% | 34.74% / 45.42% | 27.67% / 54% | 12.02% / 24% | 0% / 0% | 5,288.3 MiB (+2,185.6) |
+| Full, IPP 20 MSPS | 26.86 (26.25-27.48) | 4.84 cores / 24.19% | 48.39% / 67.84% | 0% / 0% | 0% / 0% | 0% / 0% | 3,102.4 MiB (+0) |
+| Preview, CUDA 20 MSPS | 47.03 (46.59-47.48) | 0.81 cores / 4.06% | 24.75% / 31.00% | 26.91% / 61% | 9.92% / 23% | 3.12% / 8% | 4,795.0 MiB (+1,692.3) |
+| Preview, IPP 20 MSPS | 30.56 (30.48-30.63) | 4.60 cores / 22.99% | 40.09% / 52.71% | 1.40% / 13% | 0.08% / 1% | 1.52% / 23% | 3,283.0 MiB (+180.3) |
 
-The immediately preceding 10-second idle baseline averaged 7.32% whole-system
-CPU, 0.32% GPU SM, 0% NVENC, and 3,141 MiB GPU FB; the table reports raw system
-means rather than subtracting that noisy baseline. CUDA provided 2.542x the IPP
-source throughput at full 40 MSPS, 2.120x at full 20 MSPS, and 2.551x in 20 MSPS
-preview. Moving full decode from 40 to 20 MSPS raised CUDA throughput by 10.85%
-and IPP by 32.94% on this longer gate. Cold W5 averaged 0.722 seconds for CUDA
-and 2.028 seconds for IPP. Full decode does not encode video, hence zero NVENC;
+The immediately preceding 10-second idle baseline averaged 5.05% whole-system
+CPU, 0% GPU SM, 0% NVENC, and 3,102.7 MiB GPU FB; the table reports raw system
+means rather than subtracting that noisy baseline. CUDA provided 1.484x the IPP
+source throughput at full 40 MSPS, 1.333x at full 20 MSPS, and 1.539x in 20 MSPS
+preview. Moving full decode from 40 to 20 MSPS raised CUDA throughput by 1.40%
+and IPP by 12.91% on this longer gate. Cold W5 averaged 1.158 seconds for CUDA
+and 2.124 seconds for IPP. Full decode does not encode video, hence zero NVENC;
 the CUDA preview uses block-linear NV12/NVENC, while IPP preview used
 `NVENC + CUDA YADIF x2`. All six configurations retained one repeatable output
 hash per configuration. These results are specific to this capture, machine,
 driver, and current build; they are not a cross-hardware or quality-equivalence
 promise. Raw CSV, logs, and 100 ms samples are retained locally under
-`.artifacts/current-resource-matrix-20260820-183311/`.
+`.artifacts/current-resource-matrix-20260820-192956/`.
+
+Absolute CUDA throughput was not stable across same-day sessions. A separate
+fresh-build full-40 A-B-B-A immediately before this sustained matrix measured
+62.24 CUDA versus 24.51 IPP source fps with the same output hashes. Rebuilding
+the original `d913457` CUDA implementation in the current toolchain then
+measured 61.07 fps versus 62.27 fps for this source, only a 1.98% current-code
+throughput gain; equivalent old/current IPP runs were 24.81/24.50 fps. The
+historical CUDA-slower result and current CUDA-faster snapshots are therefore
+both retained, but the reversal is not attributed to later code alone.
 
 This switch selects a preview-quality sampling rate; it does not promise a
 speedup on every backend. In an earlier pre-optimization, startup-inclusive,
@@ -394,7 +403,7 @@ root, and `VHSDECODE_CUDA_AUTO_DOWNLOAD=0` disables downloading. A download or
 load failure remains explicit and never falls back to a CPU backend.
 
 This backend has its own numerical contract; neither `v0.4.0` nor `current`
-hash compatibility is claimed. An earlier pre-optimization same-session
+hash compatibility is claimed. An earlier same-session
 interleaved comparison on the local RTX 4070 12 GiB development machine used the same fixed
 private 40 MHz real PAL `.ldf` request,
 `--start_fileloc 320000000 --length 500`. CUDA completed in 15.605154 and
@@ -408,8 +417,8 @@ locations are 322,212,917 and 320,563,200 because the independent sync/TBC
 algorithms select different boundaries. This is a same-request performance
 comparison rather than an output-equality claim, and it is not a general speed
 guarantee across tapes, systems, drivers, or NVIDIA models. It is retained for
-provenance but is superseded for current throughput by the resource matrix
-above.
+provenance; the resource matrix above is a newer environment snapshot rather
+than proof that later source changes alone reversed this result.
 
 A separate startup-inclusive A-B-B-A comparison against the immediately
 preceding CUDA executable measured 22.083587/21.753076 seconds for the old

@@ -9,7 +9,7 @@
 upstream release `v0.4.0`、commit
 `43155200da87c0d49eb37d8ec09b1372075ee8e4` です。
 
-現在の .NET port release は `v0.4.0-2.4.0`（application version `2.4.0`）です。
+現在の .NET port release は `v0.4.0-2.5.0`（application version `2.5.0`）です。
 
 > [!IMPORTANT]
 > この互換移植は現在も開発中です。トップレベルのデコード経路は実装済みで
@@ -107,28 +107,28 @@ compatible NVIDIA GPU が必須で、CPU preview や
 preview のみ、bounded batch 内の clean な opposite-parity field で dropout を置換し、
 seek window ごとに reset する 1-field 75/25 current/previous chroma blend を使います。
 
-2026-08-20 の fresh local resource matrix は source commit `42674ca`、同じ real
+2026-08-20 の sustained local resource matrix は source commit `41bfd92` の fresh build、同じ real
 40 MSPS PAL capture、Intel Core Ultra 7 265K（20 logical processor）、RTX 4070 を
 使用しました。各 row は独立 process launch 2 回の平均で、括弧内は 2 回の
 source-frame rate range です。
 
 | Path | Source fps（range） | `decode.exe` CPU | System CPU | GPU SM avg/peak | NVENC avg/peak | Peak GPU FB |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| Full CUDA 40 MSPS | 62.90（62.36-63.43） | 13.62% / 2.72 cores | 38.84% | 37.01% / 65% | 0% / 0% | 7,076 MiB |
-| Full IPP 40 MSPS | 24.74（24.67-24.81） | 23.16% / 4.63 cores | 29.00% | 0.08% / 3% | 0% / 0% | 3,141 MiB |
-| Full CUDA 20 MSPS | 69.72（69.51-69.93） | 14.13% / 2.83 cores | 41.42% | 27.38% / 58% | 0% / 0% | 5,328 MiB |
-| Full IPP 20 MSPS | 32.89（32.60-33.17） | 27.28% / 5.46 cores | 44.24% | 0.04% / 1% | 0% / 0% | 3,141 MiB |
-| Preview CUDA 20 MSPS | 84.19（83.04-85.33） | 5.52% / 1.10 cores | 30.36% | 41.99% / 63% | 5.70% / 14% | 4,835 MiB |
-| Preview IPP 20 MSPS | 33.00（32.91-33.09） | 23.44% / 4.69 cores | 36.15% | 1.25% / 11% | 0.48% / 11% | 3,323 MiB |
+| Full CUDA 40 MSPS | 35.30（35.28-35.33） | 10.81% / 2.16 cores | 33.89% | 32.44% / 72% | 0% / 0% | 7,038 MiB |
+| Full IPP 40 MSPS | 23.79（23.71-23.87） | 22.15% / 4.43 cores | 28.76% | 0.10% / 4% | 0% / 0% | 3,102 MiB |
+| Full CUDA 20 MSPS | 35.80（35.60-35.99） | 10.92% / 2.18 cores | 34.74% | 27.67% / 54% | 0% / 0% | 5,288 MiB |
+| Full IPP 20 MSPS | 26.86（26.25-27.48） | 24.19% / 4.84 cores | 48.39% | 0% / 0% | 0% / 0% | 3,102 MiB |
+| Preview CUDA 20 MSPS | 47.03（46.59-47.48） | 4.06% / 0.81 cores | 24.75% | 26.91% / 61% | 3.12% / 8% | 4,795 MiB |
+| Preview IPP 20 MSPS | 30.56（30.48-30.63） | 22.99% / 4.60 cores | 40.09% | 1.40% / 13% | 1.52% / 23% | 3,283 MiB |
 
 Full run は source frame 500 を要求し、exactly 1,000 output field を検証しました。
 Preview run は別の cold W5 後に 20 個の異なる 2-second window、つまり source frame
 1,000 を要求しました。fps は source-frame rate であり、2 output field/bob frame を
 二重に数えません。process CPU は 20 logical processor 全体で正規化し、system CPU
 には FFmpeg、driver、sampler、その他 machine work も含みます。GPU は global 100 ms
-NVML sample です。直前の idle baseline は system CPU 7.32%、GPU SM 0.32%、NVENC
-0%、GPU FB 3,141 MiB でした。CUDA の IPP 比 source throughput は full-40/full-20/
-preview-20 で 2.54x/2.12x/2.55x です。詳細は
+NVML sample です。直前の idle baseline は system CPU 5.05%、GPU SM 0%、NVENC
+0%、GPU FB 3,103 MiB でした。CUDA の IPP 比 source throughput は full-40/full-20/
+preview-20 で 1.48x/1.33x/1.54x です。詳細は
 [performance reference](docs/README.detailed.ja.md#current-ippcuda-resource-matrix)を
 参照してください。
 
@@ -176,7 +176,7 @@ decode.exe vhs --dsp-backend cuda-fast --pal `
 input は再度 decimate しません。TBC metadata の `fileLoc` は元の input sample 座標を
 維持します。
 これは preview-quality の sample-rate 選択であり、常に高速化する switch ではありません。
-現在の startup-inclusive 500-frame gate では CUDA throughput が 10.85%、IPP が 32.94%
+現在の startup-inclusive 500-frame gate では CUDA throughput が 1.40%、IPP が 12.91%
 上がりました。以前の 100-frame short gate では fixed startup/reduction cost が支配し、
 IPP は 6.83% 遅く見えました。full decode で使う前に対象 capture と実際の run length を
 benchmark してください。
@@ -196,9 +196,10 @@ CVBS と HiFi は引き続き `ipp-fast` を拒否します。release-compatible
 必要な場合は `exact` を使用してください。互換性を重視する用途では
 [backend の詳細](docs/README.detailed.ja.md#パフォーマンス)を先に確認してください。
 tested RTX 4070 と 1 本の real PAL capture では、画質修正後の FP32 CUDA-full path は
-Exact の見え方に大幅に近づきました。上の fresh matrix は pre-optimization の古い
-timing comparison を置き換えます。40 MSPS は CUDA 62.90 source fps、IPP 24.74
-（2.54x）、20 MSPS は 69.72 対 32.89（2.12x）でした。各 variant の 2 回の
+Exact の見え方に大幅に近づきました。上の sustained matrix では、40 MSPS は CUDA
+35.30 source fps、IPP 23.79（1.48x）、20 MSPS は 35.80 対 26.86（1.33x）でした。
+同じ source を使った別の短い session では CUDA throughput が大幅に高かったため、
+これは environment snapshot であり、後続 code だけが以前の CUDA/IPP 結果を逆転した証拠ではありません。各 variant の 2 回の
 luma/chroma/JSON output は、その variant 内で byte-identical でした。default の
 export-side dropout correction
 を使い Exact と alignment した
