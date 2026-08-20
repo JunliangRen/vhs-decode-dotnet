@@ -168,11 +168,11 @@ public sealed class DecodePreviewSegmentProvider : IPreviewSegmentProvider
             Interlaced: false,
             backend,
             cudaPreview
-                ? "40-to-20-msps-gpu/fast-color/gpu-bob/dropout-conceal/no-audio"
+                ? "40-to-20-msps-gpu/fast-color/gpu-bob/cross-field-dropout/chroma-stabilized/no-audio"
                 : (twentyMspsRf ? "20-msps-rf/" : string.Empty)
                     + "fast-color/full-frame-motion/dropout-conceal/no-audio",
             cudaPreview
-                ? "NVENC direct CUDA surface + FFmpeg copy-mux"
+                ? "NVENC block-linear CUDA array + FFmpeg copy-mux"
                 : PreviewEncoderSelector.DisplayName(encoderBackend));
         return new DecodePreviewSegmentProvider(
             template,
@@ -258,9 +258,6 @@ public sealed class DecodePreviewSegmentProvider : IPreviewSegmentProvider
         double decodeStartSeconds = Math.Max(
             _baseStartSeconds,
             targetSeconds - PrerollSeconds);
-        long decodeStartSample = checked((long)Math.Round(
-            decodeStartSeconds * _decodeSampleRateHz,
-            MidpointRounding.AwayFromZero));
         long targetSample = checked((long)Math.Round(
             targetSeconds * _decodeSampleRateHz,
             MidpointRounding.AwayFromZero));
@@ -272,7 +269,8 @@ public sealed class DecodePreviewSegmentProvider : IPreviewSegmentProvider
         int maximumFields = checked((decodedFrameCount * 2) + prerollFieldCount + 8);
         ParsedCommand windowCommand = PreviewDecodeCommandFactory.ForWindow(
             _template,
-            decodeStartSample,
+            decodeStartSeconds,
+            SourceSampleRateHz,
             decodedFrameCount + prerollFrameCount + 8);
         using DecodeSession session = DecodeSessionFactory.Create(windowCommand);
         using FileStream input = new(

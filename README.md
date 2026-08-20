@@ -9,7 +9,7 @@ A .NET 11 rewrite of the decode-facing parts of
 upstream release `v0.4.0` at commit
 `43155200da87c0d49eb37d8ec09b1372075ee8e4`.
 
-The current .NET port release is `v0.4.0-2.4.0` (application version `2.4.0`).
+The current .NET port release is `v0.4.0-2.5.0` (application version `2.5.0`).
 
 > [!IMPORTANT]
 > This remains a compatibility work in progress. The top-level decode paths are
@@ -40,7 +40,7 @@ evidence, and remaining gaps.
   EIAJ, and supported PAL/NTSC variants.
 - TBC utility tools, the double-click GUI, and developer plotting windows are
   intentionally out of scope.
-- The Visual Studio 2026 `.slnx` solution has **1,569** standard xUnit v3 tests
+- The Visual Studio 2026 `.slnx` solution has **1,577** standard xUnit v3 tests
   that are visible in Test Explorer and runnable with `dotnet test`.
 
 <!-- SECTION: start -->
@@ -91,9 +91,10 @@ so bitrate is not identical across backends. The preview automatically uses
 `ipp-fast` when available and otherwise remains portable through the managed
 backend. Standard 40 MSPS VHS preview also applies a fixed anti-alias filter and
 decodes its internal RF stream at 20 MSPS. Native 20 MSPS VHS input stays at
-20 MSPS; S-VHS, other tape formats, LaserDisc, and every normal decode/export
-path retain their existing sample-rate behavior. This is automatic and adds no
-user-facing option. Startup reports the selected video pipeline, IPP-FAST initialization,
+20 MSPS. In other words, supported VHS preview routes force the same behavior as
+the full-decode `--decode-at-20msps` switch. Full VHS decode can opt into that
+switch with `ipp-fast` or `cuda-fast`; Exact, S-VHS, other tape formats, and
+LaserDisc retain their existing sample-rate behavior. Startup reports the selected video pipeline, IPP-FAST initialization,
 active decoder thread count, and separate in-place window-ID and real-time-FPS
 lines. A matching
 FFmpeg build is required on `PATH`; `VHSDECODE_FFMPEG` and `VHSDECODE_FFPROBE`
@@ -108,19 +109,50 @@ decode.exe vhs --preview-server --dsp-backend cuda-fast --pal input.ldf
 
 This keeps one CUDA context across windows, performs the anti-aliased 40-to-20
 MSPS reduction, sync, FM/chroma/dropout processing, NV12 bob rendering, and
-NVENC H.264 encoding on the GPU. NVENC registers the CUDA device pointer
-directly. Each bounded RF batch is uploaded once, while full luma, chroma, and NV12 frames are
+NVENC H.264 encoding on the GPU. The renderer writes a block-linear NV12 CUDA
+array that NVENC registers directly, avoiding its pitch-linear conversion. Each bounded RF batch is uploaded once, while full luma, chroma, and NV12 frames are
 never downloaded; only small sync/field-order control metadata and compressed
 H.264 packets cross the host/device boundary. FFmpeg only copy-muxes the H.264
 into HLS/fMP4. It requires a compatible NVIDIA GPU and never
-falls back to the CPU preview or another encoder. On the tested RTX 4070 and one
-real PAL capture, four steady two-second windows averaged 1.142 seconds versus
-1.528 seconds for the default 20-thread IPP preview: 25.3% less wall time and
-32.8% more source-frame throughput. The first cold CUDA window was slower
-(2.447 versus 2.153 seconds) because it creates persistent CUDA/cuFFT/NVENC
-state. The two previews were visually close; after accounting for a one-field
-timing offset, the rendered comparison measured SSIM 0.927867. These are
-capture- and hardware-specific preview results, not Exact-equivalence claims.
+falls back to the CPU preview or another encoder. The existing GPU bob
+deinterlacer is unchanged. Preview-only cross-field dropout substitution uses a
+clean opposite-parity field when one exists in the bounded batch, and a
+one-field 75/25 current/previous chroma blend resets at every seek window.
+
+A sustained local resource matrix on 2026-08-20 used the same real 40 MSPS PAL
+capture, an Intel Core Ultra 7 265K (20 logical processors), and an RTX 4070.
+The first five rows came from source commit `41bfd92`; the corrected IPP
+preview row came from `1fb1455`. Each row is the mean of two independent
+process launches; ranges are the two observed source-frame rates.
+
+| Path | Source fps (range) | `decode.exe` CPU | Whole-system CPU | GPU SM avg/peak | NVENC avg/peak | Peak GPU FB |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| Full, CUDA 40 MSPS | 35.30 (35.28-35.33) | 10.81% / 2.16 cores | 33.89% | 32.44% / 72% | 0% / 0% | 7,038 MiB |
+| Full, IPP 40 MSPS | 23.79 (23.71-23.87) | 22.15% / 4.43 cores | 28.76% | 0.10% / 4% | 0% / 0% | 3,102 MiB |
+| Full, CUDA 20 MSPS | 35.80 (35.60-35.99) | 10.92% / 2.18 cores | 34.74% | 27.67% / 54% | 0% / 0% | 5,288 MiB |
+| Full, IPP 20 MSPS | 26.86 (26.25-27.48) | 24.19% / 4.84 cores | 48.39% | 0% / 0% | 0% / 0% | 3,102 MiB |
+| Preview, CUDA 20 MSPS | 47.03 (46.59-47.48) | 4.06% / 0.81 cores | 24.75% | 26.91% / 61% | 3.12% / 8% | 4,795 MiB |
+| Preview, IPP 20 MSPS | 34.33 (34.05-34.61) | 24.66% / 4.93 cores | 43.85% | 1.52% / 9% | 1.48% / 4% | 3,292 MiB |
+
+Full runs requested 500 source frames and verified exactly 1,000 output fields.
+Preview runs requested 20 distinct two-second windows, or 1,000 source frames,
+after a separate cold W5. Source fps does not count the two output fields/bob
+frames as two source frames. Process CPU is normalized against all 20 logical
+processors; whole-system CPU includes FFmpeg, drivers, the sampler, and other
+machine work. GPU values are global 100 ms NVML samples. The first five rows'
+idle baseline was 5.05% system CPU, 0% GPU SM, 0% NVENC, and 3,103 MiB GPU FB;
+the separately corrected IPP preview row used 6.85% system CPU and 3,110 MiB
+GPU FB. CUDA delivered 1.48x/1.33x/1.37x the IPP source throughput in
+full-40/full-20/preview-20 respectively. See the
+[detailed method and evidence](docs/README.detailed.md#current-ippcuda-resource-matrix).
+
+The final-source five-window quality recheck used corrected IPP coordinates.
+After trimming the first IPP output frame for one-field alignment, default CUDA
+preview averaged SSIM Y/U/V/All of 0.914657/0.957361/0.966698/0.930448. The
+forced line-phase guard averaged 0.926692 combined and disabling cross-field
+dropout plus chroma stabilization averaged 0.922357; default was higher on
+every tested window. These are capture- and hardware-specific preview results,
+not Exact-equivalence claims.
 
 <!-- SECTION: profiles -->
 
@@ -143,14 +175,27 @@ multithreaded Python runs are used for speed measurements only.
 | --- | --- |
 | `exact` | Default managed path for compatibility-sensitive decoding. |
 | `ipp-fast` | Experimental Windows x64 VHS and LaserDisc real-RF paths using Intel IPP. It can change floating-point bits and never silently falls back to `exact`. |
-| `cuda-fast` | Experimental Windows x64 NVIDIA CUDA 13 full-signal VHS path. It has an independent numerical contract, currently supports native-rate 40 MSPS PAL/NTSC VHS only, and never silently falls back to a CPU backend. |
+| `cuda-fast` | Experimental Windows x64 NVIDIA CUDA 13 full-signal VHS path. It has an independent numerical contract, supports PAL/NTSC VHS at 40 MSPS normally or GPU 40-to-20/native-20 MSPS with `--decode-at-20msps`, and never silently falls back to a CPU backend. |
 
 ```powershell
 decode.exe vhs --compat-version current --dsp-backend ipp-fast `
   --threads 20 input.lds output
+decode.exe vhs --dsp-backend ipp-fast --decode-at-20msps `
+  --pal input.lds output-20msps
 decode.exe vhs --dsp-backend cuda-fast --pal `
-  --start 100 --length 20 input.ldf output
+  --decode-at-20msps --start 100 --length 20 input.ldf output
 ```
+
+`--decode-at-20msps` is a VHS preview-quality mode, not an Exact-equivalence
+mode. A 40 MSPS source is anti-alias filtered and decoded internally at 20
+MSPS; native 20 MSPS input is decoded without another reduction. TBC metadata
+`fileLoc` remains in original input-sample coordinates.
+This is a preview-quality rate choice, not a universal throughput switch. In
+the current startup-inclusive 500-frame gate it raised CUDA throughput by
+1.40% and IPP throughput by 12.91%. An earlier 100-frame gate showed IPP 6.83%
+slower because fixed startup and reduction costs dominated that short request;
+benchmark the intended capture and run length before selecting it for full
+decode.
 
 The default Windows release includes the small CUDA-fast bridge but does not
 embed the 271 MiB cuFFT DLL. Only an explicit `--dsp-backend cuda-fast` request
@@ -169,15 +214,12 @@ release-compatible behavior is required. See the
 [detailed backend notes](docs/README.detailed.md#performance) before using IPP
 or CUDA for compatibility-sensitive work. On the tested RTX 4070 and one real
 PAL capture, the quality-corrected FP32 CUDA-full path is now visually much
-closer to Exact, but it does not exceed the measured CPU throughput. For the
-same `--start_fileloc 320000000 --length 500` request, a current same-session
-interleaved comparison completed CUDA runs in 15.605/15.748 seconds and
-`ipp-fast --threads 20` runs in 14.108/14.064 seconds. The medians are 15.676
-and 14.086 seconds (31.895 and 35.495 output fps): CUDA takes 11.29% more wall
-time and provides 0.8986x the IPP throughput. Against the immediately preceding
-CUDA build, a separate A-B-B-A comparison reduced the CUDA median from 21.918
-to 16.057 seconds (26.74% less wall time and 36.50% more throughput). Two final
-CUDA outputs were byte-identical.
+closer to Exact. In the sustained matrix above, CUDA measured 35.30 source fps
+versus IPP's 23.79 (1.48x) at 40 MSPS, and 35.80 versus 26.86 (1.33x) at
+20 MSPS. A separate short same-source session measured materially higher CUDA
+throughput, so these figures are descriptive snapshots rather than evidence
+that later code alone reversed the older CUDA/IPP result. Each variant's
+two luma/chroma/JSON output sets were byte-identical within that variant.
 An aligned 79-frame lossless comparison with Exact using the default
 export-side dropout correction measured SSIM Y/U/V/All of
 0.954905/0.988109/0.991285/0.972301 and PSNR Y/U/V/average of
@@ -289,7 +331,7 @@ The pinned SDK is .NET `11.0.100-preview.7.26381.103`.
 dotnet restore VHSDecodeDotNet.slnx
 dotnet build VHSDecodeDotNet.slnx -c Release --no-restore
 dotnet test --solution VHSDecodeDotNet.slnx -c Release `
-  --no-build --no-restore --minimum-expected-tests 1569
+  --no-build --no-restore --minimum-expected-tests 1577
 ```
 
 Open `VHSDecodeDotNet.slnx` in Visual Studio 2026 to build, debug, and run the

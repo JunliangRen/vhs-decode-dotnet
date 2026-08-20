@@ -9,6 +9,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
+#include <cstdlib>
 #include <cstring>
 #include <limits>
 #include <sstream>
@@ -25,6 +26,22 @@ constexpr float kNtscUScale = -3.8f / 256.0f;
 constexpr float kNtscVScale = -2.75f / 256.0f;
 constexpr float kPalUScale = -2.445f / 256.0f;
 constexpr float kPalVScale = 1.733f / 256.0f;
+
+bool preview_env_enabled(const char* name)
+{
+    const char* value = std::getenv(name);
+    return value != nullptr && value[0] != '\0' && value[0] != '0';
+}
+
+float preview_env_weight(const char* name, float default_value)
+{
+    const char* value = std::getenv(name);
+    if (value == nullptr || value[0] == '\0') return default_value;
+    char* end = nullptr;
+    const float parsed = std::strtof(value, &end);
+    if (end == value || !std::isfinite(parsed)) return 0.0f;
+    return std::clamp(parsed, 0.0f, 0.5f);
+}
 
 __device__ __forceinline__ uint8_t clamp_video_luma(float value)
 {
@@ -88,9 +105,10 @@ __global__ void mark_preview_dropouts(
 
 __global__ void render_preview_luma(
     const uint16_t* __restrict__ source,
-    uint8_t* __restrict__ destination,
-    size_t destination_pitch,
+    const uint16_t* __restrict__ paired_source,
+    cudaSurfaceObject_t destination,
     const uint8_t* __restrict__ dropout_mask,
+    const uint8_t* __restrict__ paired_dropout_mask,
     int width,
     int height,
     int source_line_length,
@@ -111,6 +129,26 @@ __global__ void render_preview_luma(
     const int source_x = active_start
         + static_cast<int>((static_cast<long long>(x) * active_width) / width);
     int field_y = y / 2;
+    const size_t output_index = static_cast<size_t>(y) * width + x;
+    const bool dropout = dropout_mask[output_index] != 0;
+    if (dropout && paired_source != nullptr
+        && (paired_dropout_mask == nullptr || paired_dropout_mask[output_index] == 0)) {
+        const int paired_source_y = min(
+            source_line_count - 1,
+            source_first_line + field_y);
+        const uint16_t paired_sample = paired_source[
+            static_cast<size_t>(paired_source_y) * source_line_length + source_x];
+        surf2Dwrite(
+            clamp_video_luma(luma_to_video_range(
+                paired_sample,
+                output_zero,
+                output_scale,
+                vsync_ire)),
+            destination,
+            x * sizeof(uint8_t),
+            y);
+        return;
+    }
     const bool direct_line = (y & 1) == (is_first_field != 0 ? 0 : 1);
     int field_y0 = field_y;
     int field_y1 = field_y;
@@ -122,7 +160,7 @@ __global__ void render_preview_luma(
         }
     }
 
-    if (dropout_mask[static_cast<size_t>(y) * width + x] != 0) {
+    if (dropout) {
         const int previous = field_y0 - 1;
         const int next = field_y1 + 1;
         if (previous >= 0) {
@@ -141,7 +179,7 @@ __global__ void render_preview_luma(
     const float value = 0.5f
         * (luma_to_video_range(sample0, output_zero, output_scale, vsync_ire)
             + luma_to_video_range(sample1, output_zero, output_scale, vsync_ire));
-    destination[static_cast<size_t>(y) * destination_pitch + x] = clamp_video_luma(value);
+    surf2Dwrite(clamp_video_luma(value), destination, x * sizeof(uint8_t), y);
 }
 
 __global__ void detect_preview_bursts(
@@ -255,9 +293,12 @@ __device__ bool decode_preview_chroma_line(
 __global__ void render_preview_chroma(
     const uint16_t* __restrict__ source,
     const float2* __restrict__ bursts,
-    uint8_t* __restrict__ destination_uv,
-    size_t destination_pitch,
+    const uint16_t* __restrict__ paired_source,
+    const float2* __restrict__ paired_bursts,
+    cudaSurfaceObject_t destination_uv,
     const uint8_t* __restrict__ dropout_mask,
+    const uint8_t* __restrict__ paired_dropout_mask,
+    uchar2* __restrict__ previous_chroma,
     int width,
     int height,
     int source_line_length,
@@ -267,7 +308,11 @@ __global__ void render_preview_chroma(
     int active_end,
     int is_first_field,
     int field_phase_id,
-    int pal)
+    int paired_is_first_field,
+    int paired_field_phase_id,
+    int pal,
+    int have_previous_chroma,
+    float temporal_weight)
 {
     const int chroma_x = blockIdx.x * blockDim.x + threadIdx.x;
     const int chroma_y = blockIdx.y * blockDim.y + threadIdx.y;
@@ -276,14 +321,30 @@ __global__ void render_preview_chroma(
     if (chroma_x >= chroma_width || chroma_y >= chroma_height) return;
 
     const int field_chroma_y = chroma_y / 2;
-    int source_line0 = source_first_line + field_chroma_y * 2;
-    int source_line1 = min(source_line_count - 1, source_line0 + 1);
     const int luma_x = min(width - 1, chroma_x * 2);
     const int luma_y = min(height - 1, chroma_y * 2);
     const bool dropout = dropout_mask[static_cast<size_t>(luma_y) * width + luma_x] != 0
         || dropout_mask[static_cast<size_t>(luma_y) * width + min(width - 1, luma_x + 1)] != 0
         || dropout_mask[static_cast<size_t>(min(height - 1, luma_y + 1)) * width + luma_x] != 0;
-    if (dropout) {
+    const bool paired_dropout = paired_dropout_mask != nullptr
+        && (paired_dropout_mask[static_cast<size_t>(luma_y) * width + luma_x] != 0
+            || paired_dropout_mask[static_cast<size_t>(luma_y) * width
+                + min(width - 1, luma_x + 1)] != 0
+            || paired_dropout_mask[static_cast<size_t>(min(height - 1, luma_y + 1))
+                * width + luma_x] != 0);
+    const bool use_paired = dropout && paired_source != nullptr
+        && paired_bursts != nullptr && !paired_dropout;
+    const uint16_t* selected_source = use_paired ? paired_source : source;
+    const float2* selected_bursts = use_paired ? paired_bursts : bursts;
+    const int selected_first_field = use_paired
+        ? paired_is_first_field
+        : is_first_field;
+    const int selected_phase_id = use_paired
+        ? paired_field_phase_id
+        : field_phase_id;
+    int source_line0 = source_first_line + field_chroma_y * 2;
+    int source_line1 = min(source_line_count - 1, source_line0 + 1);
+    if (dropout && !use_paired) {
         if (source_line0 >= source_first_line + 2) {
             source_line0 -= 2;
             source_line1 -= 2;
@@ -304,29 +365,29 @@ __global__ void render_preview_chroma(
     float u1 = 128.0f;
     float v1 = 128.0f;
     const bool valid0 = decode_preview_chroma_line(
-        source,
-        bursts,
+        selected_source,
+        selected_bursts,
         source_line0,
         source_line_count,
         source_line_length,
         start,
         end,
         pal != 0,
-        is_first_field != 0,
-        field_phase_id,
+        selected_first_field != 0,
+        selected_phase_id,
         &u0,
         &v0);
     const bool valid1 = decode_preview_chroma_line(
-        source,
-        bursts,
+        selected_source,
+        selected_bursts,
         source_line1,
         source_line_count,
         source_line_length,
         start,
         end,
         pal != 0,
-        is_first_field != 0,
-        field_phase_id,
+        selected_first_field != 0,
+        selected_phase_id,
         &u1,
         &v1);
     float u = 128.0f;
@@ -342,9 +403,23 @@ __global__ void render_preview_chroma(
         v = v1;
     }
 
-    uint8_t* row = destination_uv + static_cast<size_t>(chroma_y) * destination_pitch;
-    row[chroma_x * 2] = clamp_video_chroma(u);
-    row[chroma_x * 2 + 1] = clamp_video_chroma(v);
+    const uchar2 current = make_uchar2(clamp_video_chroma(u), clamp_video_chroma(v));
+    uchar2 output = current;
+    const size_t chroma_index = static_cast<size_t>(chroma_y) * chroma_width + chroma_x;
+    if (previous_chroma != nullptr) {
+        if (have_previous_chroma != 0 && temporal_weight > 0.0f) {
+            const uchar2 previous = previous_chroma[chroma_index];
+            output = make_uchar2(
+                clamp_video_chroma(
+                    static_cast<float>(current.x) * (1.0f - temporal_weight)
+                        + static_cast<float>(previous.x) * temporal_weight),
+                clamp_video_chroma(
+                    static_cast<float>(current.y) * (1.0f - temporal_weight)
+                        + static_cast<float>(previous.y) * temporal_weight));
+        }
+        previous_chroma[chroma_index] = current;
+    }
+    surf2Dwrite(output, destination_uv, chroma_x * sizeof(uchar2), chroma_y);
 }
 
 std::string nvenc_status_message(const char* operation, NVENCSTATUS status)
@@ -373,10 +448,20 @@ struct CudaPreviewOutput::Impl {
 #endif
     NV_ENCODE_API_FUNCTION_LIST api{};
     void* encoder = nullptr;
-    void* d_nv12 = nullptr;
-    size_t nv12_pitch = 0;
+    CUarray nv12_array = nullptr;
+    CUarray nv12_luma_plane = nullptr;
+    CUarray nv12_chroma_plane = nullptr;
+    cudaSurfaceObject_t nv12_luma_surface = 0;
+    cudaSurfaceObject_t nv12_chroma_surface = 0;
+    uint32_t nv12_allocation_width = 0;
     float2* d_bursts = nullptr;
+    float2* d_paired_bursts = nullptr;
     uint8_t* d_dropout_mask = nullptr;
+    uint8_t* d_paired_dropout_mask = nullptr;
+    uchar2* d_previous_chroma = nullptr;
+    bool cross_field_dropout = false;
+    bool have_previous_chroma = false;
+    float chroma_temporal_weight = 0.0f;
     NV_ENC_REGISTERED_PTR registered_input = nullptr;
     NV_ENC_INPUT_PTR mapped_input = nullptr;
     NV_ENC_OUTPUT_PTR bitstream = nullptr;
@@ -525,32 +610,72 @@ struct CudaPreviewOutput::Impl {
             return false;
         }
 
-        if (cudaMallocPitch(
-                &d_nv12,
-                &nv12_pitch,
-                settings.width,
-                settings.height + settings.height / 2) != cudaSuccess) {
-            return fail("CUDA preview could not allocate its persistent NV12 surface.");
+        CUDA_ARRAY3D_DESCRIPTOR nv12_descriptor{};
+        nv12_descriptor.Width = settings.width;
+        nv12_descriptor.Height = settings.height;
+        nv12_descriptor.Format = CU_AD_FORMAT_NV12;
+        nv12_descriptor.NumChannels = 3;
+        nv12_descriptor.Flags = CUDA_ARRAY3D_SURFACE_LDST
+            | CUDA_ARRAY3D_VIDEO_ENCODE_DECODE;
+        CUDA_ARRAY3D_DESCRIPTOR nv12_luma_descriptor{};
+        if (cuArray3DCreate(&nv12_array, &nv12_descriptor) != CUDA_SUCCESS
+            || cuArrayGetPlane(&nv12_luma_plane, nv12_array, 0) != CUDA_SUCCESS
+            || cuArrayGetPlane(&nv12_chroma_plane, nv12_array, 1) != CUDA_SUCCESS
+            || cuArray3DGetDescriptor(
+                &nv12_luma_descriptor,
+                nv12_luma_plane) != CUDA_SUCCESS) {
+            return fail("CUDA preview could not allocate its block-linear NV12 array.");
         }
-        if (nv12_pitch > std::numeric_limits<uint32_t>::max()) {
-            return fail("CUDA preview NV12 pitch exceeded the NVENC ABI range.");
+        // CU_AD_FORMAT_NV12 is a special multi-planar array: NumChannels=3 on
+        // the parent describes its Y/U/V content, not three packed bytes per
+        // luma pixel. NVENC therefore needs the byte width of the luma plane,
+        // as also used by FFmpeg's CUDA-array registration path. Derive that
+        // width from the actual plane descriptor instead of multiplying the
+        // parent descriptor by three.
+        if (nv12_luma_descriptor.Format != CU_AD_FORMAT_UNSIGNED_INT8
+            || nv12_luma_descriptor.NumChannels != 1
+            || nv12_luma_descriptor.Width < settings.width
+            || nv12_luma_descriptor.Width > std::numeric_limits<uint32_t>::max()) {
+            return fail("CUDA preview returned an invalid NV12 luma-plane descriptor.");
+        }
+        nv12_allocation_width = static_cast<uint32_t>(nv12_luma_descriptor.Width);
+
+        cudaResourceDesc luma_resource{};
+        luma_resource.resType = cudaResourceTypeArray;
+        luma_resource.res.array.array = reinterpret_cast<cudaArray_t>(nv12_luma_plane);
+        cudaResourceDesc chroma_resource{};
+        chroma_resource.resType = cudaResourceTypeArray;
+        chroma_resource.res.array.array = reinterpret_cast<cudaArray_t>(nv12_chroma_plane);
+        if (cudaCreateSurfaceObject(&nv12_luma_surface, &luma_resource) != cudaSuccess
+            || cudaCreateSurfaceObject(&nv12_chroma_surface, &chroma_resource) != cudaSuccess) {
+            return fail("CUDA preview could not create its block-linear NV12 surfaces.");
         }
         if (cudaMalloc(
                 &d_bursts,
                 static_cast<size_t>(format.output_field_lines) * sizeof(float2)) != cudaSuccess
             || cudaMalloc(
+                &d_paired_bursts,
+                static_cast<size_t>(format.output_field_lines) * sizeof(float2)) != cudaSuccess
+            || cudaMalloc(
                 &d_dropout_mask,
-                static_cast<size_t>(settings.width) * settings.height) != cudaSuccess) {
+                static_cast<size_t>(settings.width) * settings.height) != cudaSuccess
+            || cudaMalloc(
+                &d_paired_dropout_mask,
+                static_cast<size_t>(settings.width) * settings.height) != cudaSuccess
+            || cudaMalloc(
+                &d_previous_chroma,
+                static_cast<size_t>(settings.width / 2)
+                    * (settings.height / 2) * sizeof(uchar2)) != cudaSuccess) {
             return fail("CUDA preview could not allocate persistent renderer buffers.");
         }
 
         NV_ENC_REGISTER_RESOURCE registration{};
         registration.version = NV_ENC_REGISTER_RESOURCE_VER;
-        registration.resourceType = NV_ENC_INPUT_RESOURCE_TYPE_CUDADEVICEPTR;
+        registration.resourceType = NV_ENC_INPUT_RESOURCE_TYPE_CUDAARRAY;
         registration.width = settings.width;
         registration.height = settings.height;
-        registration.pitch = static_cast<uint32_t>(nv12_pitch);
-        registration.resourceToRegister = d_nv12;
+        registration.pitch = nv12_allocation_width;
+        registration.resourceToRegister = reinterpret_cast<void*>(nv12_array);
         registration.bufferFormat = NV_ENC_BUFFER_FORMAT_NV12;
         registration.bufferUsage = NV_ENC_INPUT_IMAGE;
         if (!nvenc_ok(
@@ -575,12 +700,20 @@ struct CudaPreviewOutput::Impl {
     bool render_field(
         const uint16_t* d_luma,
         const uint16_t* d_chroma,
+        const uint16_t* d_paired_luma,
+        const uint16_t* d_paired_chroma,
         const int* d_dropout_lines,
         const int* d_dropout_starts,
         const int* d_dropout_ends,
         const int* d_dropout_count,
+        const int* d_paired_dropout_lines,
+        const int* d_paired_dropout_starts,
+        const int* d_paired_dropout_ends,
+        const int* d_paired_dropout_count,
         bool first_field,
-        int phase_id)
+        int phase_id,
+        bool paired_first_field,
+        int paired_phase_id)
     {
         if (cudaMemset(
                 d_dropout_mask,
@@ -605,6 +738,32 @@ struct CudaPreviewOutput::Impl {
                 d_dropout_ends,
                 d_dropout_count);
         }
+        const bool use_paired = cross_field_dropout
+            && d_paired_luma != nullptr && d_paired_chroma != nullptr;
+        if (use_paired) {
+            if (cudaMemset(
+                    d_paired_dropout_mask,
+                    0,
+                    static_cast<size_t>(settings.width) * settings.height) != cudaSuccess) {
+                return fail("CUDA preview could not clear its paired dropout mask.");
+            }
+            if (d_paired_dropout_count != nullptr) {
+                const dim3 paired_dropout_grid(
+                    (settings.width + 255) / 256,
+                    MAX_DROPOUTS_PER_FIELD);
+                mark_preview_dropouts<<<paired_dropout_grid, 256>>>(
+                    d_paired_dropout_mask,
+                    static_cast<int>(settings.width),
+                    static_cast<int>(settings.height),
+                    source_first_line,
+                    active_start,
+                    active_end,
+                    d_paired_dropout_lines,
+                    d_paired_dropout_starts,
+                    d_paired_dropout_ends,
+                    d_paired_dropout_count);
+            }
+        }
 
         const dim3 luma_block(32, 8);
         const dim3 luma_grid(
@@ -612,9 +771,10 @@ struct CudaPreviewOutput::Impl {
             (settings.height + luma_block.y - 1) / luma_block.y);
         render_preview_luma<<<luma_grid, luma_block>>>(
             d_luma,
-            static_cast<uint8_t*>(d_nv12),
-            nv12_pitch,
+            use_paired ? d_paired_luma : nullptr,
+            nv12_luma_surface,
             d_dropout_mask,
+            use_paired ? d_paired_dropout_mask : nullptr,
             static_cast<int>(settings.width),
             static_cast<int>(settings.height),
             format.output_line_len,
@@ -640,19 +800,29 @@ struct CudaPreviewOutput::Impl {
             format.output_field_lines,
             burst_start,
             burst_end);
+        if (use_paired) {
+            detect_preview_bursts<<<burst_blocks, burst_threads>>>(
+                d_paired_chroma,
+                d_paired_bursts,
+                format.output_line_len,
+                format.output_field_lines,
+                burst_start,
+                burst_end);
+        }
 
         const dim3 chroma_block(32, 8);
         const dim3 chroma_grid(
             (settings.width / 2 + chroma_block.x - 1) / chroma_block.x,
             (settings.height / 2 + chroma_block.y - 1) / chroma_block.y);
-        uint8_t* d_uv = static_cast<uint8_t*>(d_nv12)
-            + nv12_pitch * settings.height;
         render_preview_chroma<<<chroma_grid, chroma_block>>>(
             d_chroma,
             d_bursts,
-            d_uv,
-            nv12_pitch,
+            use_paired ? d_paired_chroma : nullptr,
+            use_paired ? d_paired_bursts : nullptr,
+            nv12_chroma_surface,
             d_dropout_mask,
+            use_paired ? d_paired_dropout_mask : nullptr,
+            chroma_temporal_weight > 0.0f ? d_previous_chroma : nullptr,
             static_cast<int>(settings.width),
             static_cast<int>(settings.height),
             format.output_line_len,
@@ -662,7 +832,15 @@ struct CudaPreviewOutput::Impl {
             active_end,
             first_field ? 1 : 0,
             phase_id,
-            format.system == VideoSystem::PAL ? 1 : 0);
+            paired_first_field ? 1 : 0,
+            paired_phase_id,
+            format.system == VideoSystem::PAL ? 1 : 0,
+            have_previous_chroma ? 1 : 0,
+            chroma_temporal_weight);
+
+        if (chroma_temporal_weight > 0.0f) {
+            have_previous_chroma = true;
+        }
 
         const cudaError_t launch_status = cudaGetLastError();
         if (launch_status != cudaSuccess) {
@@ -693,7 +871,7 @@ struct CudaPreviewOutput::Impl {
         picture.bufferFmt = mapping.mappedBufferFmt;
         picture.inputWidth = settings.width;
         picture.inputHeight = settings.height;
-        picture.inputPitch = static_cast<uint32_t>(nv12_pitch);
+        picture.inputPitch = nv12_allocation_width;
         picture.outputBitstream = bitstream;
         picture.pictureStruct = NV_ENC_PIC_STRUCT_FRAME;
         picture.inputTimeStamp = frames_encoded;
@@ -771,13 +949,35 @@ struct CudaPreviewOutput::Impl {
             cudaFree(d_dropout_mask);
             d_dropout_mask = nullptr;
         }
+        if (d_paired_dropout_mask != nullptr) {
+            cudaFree(d_paired_dropout_mask);
+            d_paired_dropout_mask = nullptr;
+        }
+        if (d_previous_chroma != nullptr) {
+            cudaFree(d_previous_chroma);
+            d_previous_chroma = nullptr;
+        }
         if (d_bursts != nullptr) {
             cudaFree(d_bursts);
             d_bursts = nullptr;
         }
-        if (d_nv12 != nullptr) {
-            cudaFree(d_nv12);
-            d_nv12 = nullptr;
+        if (d_paired_bursts != nullptr) {
+            cudaFree(d_paired_bursts);
+            d_paired_bursts = nullptr;
+        }
+        if (nv12_chroma_surface != 0) {
+            cudaDestroySurfaceObject(nv12_chroma_surface);
+            nv12_chroma_surface = 0;
+        }
+        if (nv12_luma_surface != 0) {
+            cudaDestroySurfaceObject(nv12_luma_surface);
+            nv12_luma_surface = 0;
+        }
+        if (nv12_array != nullptr) {
+            cuArrayDestroy(nv12_array);
+            nv12_array = nullptr;
+            nv12_luma_plane = nullptr;
+            nv12_chroma_plane = nullptr;
         }
 #if defined(_WIN32)
         if (nvenc_module != nullptr) {
@@ -832,6 +1032,12 @@ bool CudaPreviewOutput::open(
         impl_->finalized = false;
         impl_->have_parity = false;
         impl_->last_parity = false;
+        impl_->cross_field_dropout = !preview_env_enabled(
+            "CUVHS_DISABLE_PREVIEW_CROSS_FIELD_DROPOUT");
+        impl_->chroma_temporal_weight = preview_env_weight(
+            "CUVHS_PREVIEW_CHROMA_TEMPORAL_WEIGHT",
+            0.25f);
+        impl_->have_previous_chroma = false;
         return true;
     }
 
@@ -839,6 +1045,12 @@ bool CudaPreviewOutput::open(
     impl_ = std::make_unique<Impl>();
     impl_->format = format;
     impl_->settings = settings;
+    impl_->cross_field_dropout = !preview_env_enabled(
+        "CUVHS_DISABLE_PREVIEW_CROSS_FIELD_DROPOUT");
+    impl_->chroma_temporal_weight = preview_env_weight(
+        "CUVHS_PREVIEW_CHROMA_TEMPORAL_WEIGHT",
+        0.25f);
+    impl_->have_previous_chroma = false;
     if (!impl_->initialize_nvenc()) {
         impl_->release();
         return false;
@@ -888,17 +1100,58 @@ bool CudaPreviewOutput::write_device_fields(
         const int phase_id = host_field_phase_ids != nullptr
             ? host_field_phase_ids[field]
             : 1;
+        int paired_field = -1;
+        if (impl_->cross_field_dropout) {
+            const int step = first_field ? 1 : -1;
+            for (int candidate = field + step;
+                 candidate >= 0 && candidate < field_count;
+                 candidate += step) {
+                if (host_is_first_field[candidate] < 0) continue;
+                const bool candidate_first = host_is_first_field[candidate] == 1;
+                if (candidate_first != first_field) {
+                    paired_field = candidate;
+                    break;
+                }
+            }
+        }
         const size_t dropout_base = static_cast<size_t>(field)
             * MAX_DROPOUTS_PER_FIELD;
+        const size_t paired_dropout_base = paired_field >= 0
+            ? static_cast<size_t>(paired_field) * MAX_DROPOUTS_PER_FIELD
+            : 0;
+        const int paired_phase_id = paired_field >= 0
+            && host_field_phase_ids != nullptr
+                ? host_field_phase_ids[paired_field]
+                : 1;
         if (!impl_->render_field(
                 d_luma + static_cast<size_t>(field) * field_samples,
                 d_chroma + static_cast<size_t>(field) * field_samples,
+                paired_field >= 0
+                    ? d_luma + static_cast<size_t>(paired_field) * field_samples
+                    : nullptr,
+                paired_field >= 0
+                    ? d_chroma + static_cast<size_t>(paired_field) * field_samples
+                    : nullptr,
                 d_dropout_lines != nullptr ? d_dropout_lines + dropout_base : nullptr,
                 d_dropout_starts != nullptr ? d_dropout_starts + dropout_base : nullptr,
                 d_dropout_ends != nullptr ? d_dropout_ends + dropout_base : nullptr,
                 d_dropout_counts != nullptr ? d_dropout_counts + field : nullptr,
+                paired_field >= 0 && d_dropout_lines != nullptr
+                    ? d_dropout_lines + paired_dropout_base
+                    : nullptr,
+                paired_field >= 0 && d_dropout_starts != nullptr
+                    ? d_dropout_starts + paired_dropout_base
+                    : nullptr,
+                paired_field >= 0 && d_dropout_ends != nullptr
+                    ? d_dropout_ends + paired_dropout_base
+                    : nullptr,
+                paired_field >= 0 && d_dropout_counts != nullptr
+                    ? d_dropout_counts + paired_field
+                    : nullptr,
                 first_field,
-                phase_id)
+                phase_id,
+                paired_field >= 0 && host_is_first_field[paired_field] == 1,
+                paired_phase_id)
             || !impl_->encode_current_surface()) {
             return false;
         }

@@ -314,14 +314,14 @@ public void DecodeRunnerPrintsCommandHelpBeforeValidation()
 {
     var standaloneHashes = new Dictionary<string, string>(StringComparer.Ordinal)
     {
-        ["vhs"] = "B4CF8D9A6A481FF0E5BF6B47621A90ECAB894CD0B8E9D0D33B1E50314EFE24B0",
+        ["vhs"] = "022F7BD2B63A819F629CDB4FF5D0ECE89E64B68710A0C7E1101A650B84371A52",
         ["cvbs"] = "F036A673C78445AB14039B0EE2F59E219D756EFFE6C0D8EB1872CAAEF71E9B7A",
         ["ld"] = "9916635440C1BC2A4113527F99D75B0EF1A06060A871F83F4CCEB235141B4166",
         ["hifi"] = "D7AEBC4B2CA236292979EBD92CA38454ECE0C2049C3E49A8F5E4E91397ACB658"
     };
     var facadeHashes = new Dictionary<string, string>(StringComparer.Ordinal)
     {
-        ["vhs"] = "8FFD182DD64161EEE4436608D37D82900663942A7F6140CDDB15D53139138418",
+        ["vhs"] = "E27145398EF3CF2EB45F0737AEF8AB6575A7DBF8EA600969804ACA3AC9B96F43",
         ["cvbs"] = "A585456B93F91B40313AEE069314AA448B43E97F6E94B0307F7F3926F234FFA3",
         ["ld"] = "F20AD9B0BAB11557BE8C9EC7CF9C0C0524C9909209A87A7FFA41D0FA1ED6D4C6",
         ["hifi"] = "3089FE4A8CE563A00F082770194434DF6629EE98C633664EF8DEB170A5C74D84"
@@ -17151,19 +17151,32 @@ public void PackedLdsReusableReadsAllocateNoDecodedArrayAfterWarmup()
         $"Warm reusable 32K packed LDS read allocated {allocated:N0} bytes.");
 }
 
-[Fact(DisplayName = "packed LDS reusable reads do not rent output before EOF validation")]
-public void PackedLdsReusableReadsDoNotRentOutputBeforeEofValidation()
+[Fact(DisplayName = "packed LDS reusable reads accept exact EOF and validate impossible reads before renting")]
+public void PackedLdsReusableReadsHandleExactEofBeforeRenting()
 {
-    byte[] incomplete = Pack4x10(Enumerable.Range(0, 8).ToArray());
-    var loader = new PackedDdD4To40SampleLoader();
-
-    double[]? actual = loader.ReadReusable(
-        new MemoryStream(incomplete, writable: false),
+    byte[] exact = Pack4x10(Enumerable.Range(0, 8).ToArray());
+    var exactLoader = new PackedDdD4To40SampleLoader();
+    Assert.Empty(exactLoader.Read(
+        new MemoryStream([], writable: false),
+        sample: 1,
+        readLength: 0)!);
+    double[] final = Assert.IsType<double[]>(exactLoader.ReadReusable(
+        new MemoryStream(exact, writable: false),
         sample: 0,
-        readLength: 8);
+        readLength: 8));
+    Assert.Equal(
+        Enumerable.Range(0, 8).Select(value => (double)(short)((value - 512) << 6)),
+        final);
+
+    var beyondEofLoader = new PackedDdD4To40SampleLoader();
+
+    double[]? actual = beyondEofLoader.ReadReusable(
+        new MemoryStream(exact, writable: false),
+        sample: 0,
+        readLength: 9);
 
     Assert.Null(actual);
-    Assert.Equal(0, loader.CachedReusableDecodedBufferCount);
+    Assert.Equal(0, beyondEofLoader.CachedReusableDecodedBufferCount);
 }
 
 [Fact(DisplayName = "packed LDS reusable decoded buffer retention is bounded")]

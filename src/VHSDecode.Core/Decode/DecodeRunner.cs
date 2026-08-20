@@ -161,6 +161,16 @@ public sealed class DecodeRunner
                     DecodeSessionLogWriter.Write(
                         session,
                         VhsInitializationDiagnostics.Build(command, session));
+                    if (command.Spec == CliSpecs.Vhs
+                        && command.Get<bool>(CliSpecs.DecodeAt20MspsDestination))
+                    {
+                        DecodeSessionLogWriter.Append(
+                            session,
+                            "INFO",
+                            session.SourceSamplesPerDecodeSample == 2
+                                ? "VHS decode rate: anti-aliased 40-to-20 MSPS."
+                                : "VHS decode rate: native 20 MSPS input.");
+                    }
                     if (dspBackend == DspBackend.IppFast)
                     {
                         DecodeSessionLogWriter.Append(

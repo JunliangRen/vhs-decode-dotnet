@@ -10,7 +10,7 @@
 中解码相关部分的 .NET 11 重写，当前以 release `v0.4.0`、commit
 `43155200da87c0d49eb37d8ec09b1372075ee8e4` 为兼容基线。
 
-当前 .NET 移植版发布为 `v0.4.0-2.4.0`（应用版本 `2.4.0`）。
+当前 .NET 移植版发布为 `v0.4.0-2.5.0`（应用版本 `2.5.0`）。
 
 > [!IMPORTANT]
 > 这是仍在进行中的兼容性移植。顶层解码路径已经实现并经过大量测试，
@@ -194,6 +194,85 @@ color-under Super-Gaussian DFT，以及 LaserDisc 视频、EFM 和模拟音频�
 2 的幂长度 double-precision full-complex FFT；LD 路径使用 native bridge ABI v1.3。
 CVBS 和 HiFi 会明确拒绝不支持的 `ipp-fast`，不会悄悄改跑 Exact 内核而产生虚假基准。
 
+对于 PAL/NTSC VHS，完整 `ipp-fast` 与 `cuda-fast` 解码还接受
+`--decode-at-20msps`（别名 `--decode_at_20msps`）。40 MSPS 输入会先经过固定的
+抗混叠 2:1 滤波，再让后续 DSP 以 20 MSPS 工作；原生 20 MSPS 输入则直接进入该
+DSP 速率。IPP 在输入 loader 中降采样，CUDA 在完整信号图之前于 GPU 上降采样。
+Exact 完整解码会拒绝该参数；受支持的 VHS preview 路径会自动强制同一模式。
+输出元数据中的 `fileLoc` 仍保留原始输入采样点坐标。
+
+### 当前 IPP/CUDA 资源矩阵
+
+当前本机持续矩阵于 2026-08-20 使用源提交
+`41bfd923e2a47f926db3d4ea3c3ff70adbecaa48` 的全新构建测得。被测 `decode.exe` 的文件版本为
+2.4.0.0，SHA-256 为
+`EF07E96D224A4BBEADBDE44EAEDB439C50D1646FA173FD57479255367B9A8868`。
+测试机为 Windows build 26220、Intel Core Ultra 7 265K（20 个物理核、20 个逻辑
+处理器）与 NVIDIA GeForce RTX 4070（12,282 MiB，驱动 581.57），SDK 为
+.NET 11.0.100-preview.7.26381.103。输入是同一份私有的真实 PAL 40 MSPS
+`F:\BmdFiles\DDD\test.ldf`（21,389,175,871 字节，约 631 秒）。
+
+完整解码门禁包含启动时间，请求 `--start_fileloc 320000000 --length 500`；IPP 还显式
+使用 `--threads 20`。每轮必须恰好输出 1,000 场，并要求相同后端/速率的两轮亮度、
+色度与 raw JSON SHA-256 一致。运行顺序为 CUDA40、IPP40、IPP20、CUDA20、CUDA20、
+IPP20、IPP40、CUDA40。Preview 则按 CUDA、IPP、IPP、CUDA 顺序为每个后端启动两个
+新服务器；先单独请求冷启动 W5，再计时请求 W15、W20、...、W110 的 init 和 media。
+这 20 个不同的两秒 PAL 窗口每轮代表 1,000 个源帧；两个 preview 后端都强制内部
+20 MSPS。
+
+下表 `源 fps` 统计输入视频帧，不会把两个输出 TBC 场或场率 bob 帧重复计算。
+`decode.exe` CPU 是进程 CPU 时间除以墙钟时间，并按 20 个逻辑处理器归一化；它不含
+preview 的 FFmpeg 子进程。整机 CPU 包含该子进程、驱动、测量脚本、后台负载与解码
+进程。GPU SM、显存控制器、NVENC 和 frame-buffer 使用量来自每 100 ms 一次的全局
+NVML 采样，其平均窗口与引擎名称不等同于 Windows 任务管理器。表中为两轮平均，括号
+内 fps 是实测范围，峰值则取两轮中的最大值。
+
+| 路径 | 源 fps（范围） | `decode.exe` CPU | 整机 CPU 平均/峰值 | GPU SM 平均/峰值 | GPU 显存控制器平均/峰值 | NVENC 平均/峰值 | GPU 显存峰值（高于空闲） |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| 完整 CUDA 40 MSPS | 35.30（35.28-35.33） | 2.16 核 / 10.81% | 33.89% / 42.05% | 32.44% / 72% | 16.16% / 49% | 0% / 0% | 7,037.5 MiB（+3,934.8） |
+| 完整 IPP 40 MSPS | 23.79（23.71-23.87） | 4.43 核 / 22.15% | 28.76% / 39.20% | 0.10% / 4% | 0.02% / 1% | 0% / 0% | 3,102.4 MiB（+0） |
+| 完整 CUDA 20 MSPS | 35.80（35.60-35.99） | 2.18 核 / 10.92% | 34.74% / 45.42% | 27.67% / 54% | 12.02% / 24% | 0% / 0% | 5,288.3 MiB（+2,185.6） |
+| 完整 IPP 20 MSPS | 26.86（26.25-27.48） | 4.84 核 / 24.19% | 48.39% / 67.84% | 0% / 0% | 0% / 0% | 0% / 0% | 3,102.4 MiB（+0） |
+| 预览 CUDA 20 MSPS | 47.03（46.59-47.48） | 0.81 核 / 4.06% | 24.75% / 31.00% | 26.91% / 61% | 9.92% / 23% | 3.12% / 8% | 4,795.0 MiB（+1,692.3） |
+| 预览 IPP 20 MSPS | 34.33（34.05-34.61） | 4.93 核 / 24.66% | 43.85% / 58.82% | 1.52% / 9% | 0.07% / 1% | 1.48% / 4% | 3,292.0 MiB（+182.1） |
+
+前五行紧邻测试前的 10 秒空闲基线平均为整机 CPU 5.05%、GPU SM 0%、NVENC 0%、
+GPU 显存 3,102.7 MiB。单独修正的 IPP preview 行使用整机 CPU 6.85%、GPU 显存
+3,109.9 MiB 的基线，表中 +182.1 MiB 以此计算；整机均值均为未减基线的原始值。CUDA 在
+完整 40 MSPS、完整 20 MSPS 与 20 MSPS preview 中的源帧吞吐分别为 IPP 的
+1.484x、1.333x、1.370x。在这份较长门禁中，完整解码从 40 降到 20 MSPS 后，CUDA
+吞吐提高 1.40%，IPP 提高 12.91%。冷启动 W5 平均为 CUDA 1.158 秒、IPP 1.913 秒。
+完整解码不编码视频，所以 NVENC 为零；CUDA preview 使用 block-linear NV12/NVENC，
+IPP preview 则选择 `NVENC + CUDA YADIF x2`。每种配置都在各自后端与构建内产生可重复
+哈希。这些结果只对应本采集、本机、当前驱动与实测构建，不是跨硬件或画质等价保证。
+
+五条完整解码/CUDA 数据来自提交
+`41bfd923e2a47f926db3d4ea3c3ff70adbecaa48`，可执行文件 SHA-256 为
+`EF07E96D224A4BBEADBDE44EAEDB439C50D1646FA173FD57479255367B9A8868`；原始 CSV、日志、
+哈希与 100 ms 采样保存在
+`.artifacts/current-resource-matrix-20260820-192956/`。其中原 IPP preview 行因 20 MSPS
+窗口坐标被重复除以二而失效。修正后的 IPP 行在提交
+`1fb1455ec6feceeb5c3a95f882b01ebbac61306c` 重新测量，可执行文件 SHA-256 为
+`CE054C2CD9EA1793080F39121C2AA154130FDF5F75C14F07667DD3F214435C6F`，证据位于
+`.artifacts/current-resource-matrix-20260820-200449/`；两轮各 20 窗口的聚合哈希均为
+`C1A91E1709BA857843F0790BC61B42BB7C8AACD3A95E28804AF29E2ECDAD1A30`。
+
+同一天不同测试序列的 CUDA 绝对吞吐并不稳定。紧邻这份持续矩阵之前，另一组全新构建的
+完整 40 MSPS A-B-B-A 测得 CUDA 62.24、IPP 24.51 源 fps；哈希只在各自后端/构建配置
+内部保持可重复。
+用当前工具链重建最初的 `d913457` CUDA 实现后，它为 61.07 fps，当前源码为 62.27 fps，
+当前源码吞吐只高 1.98%；对应的旧版/当前 IPP 为 24.81/24.50 fps。因此历史上的 CUDA
+较慢结果与当前 CUDA 较快快照都会保留，但不会把反转归因于后续代码本身。
+
+这个开关选择的是预览画质级采样率，并不保证每个后端都会提速。在较早的优化前画质
+门禁中，同一段 100 帧真实
+PAL 窗口上做包含启动时间、每种变体两次的门禁后，CUDA 40/20 MSPS 中位数为
+2.880/2.685 秒（20 MSPS 墙钟时间减少 6.77%），20 线程 IPP 中位数为
+4.830/5.160 秒（墙钟时间增加 6.83%）。同一后端 40 与 20 MSPS 原始亮度/色度 TBC
+SSIM：CUDA 为 0.978718/0.991624，IPP 为 0.977307/0.995722。四组输出都包含
+200 个严格递增的场，`fileLoc` 保持源采样点坐标。这只是本机短片段的方向性结果，
+不是跨采集保证。
+
 `cuda-fast` 是独立的 Windows x64 NVIDIA CUDA 13 全信号 VHS 后端。它加载
 `vhsdecode_cuda_fast.dll` 与 cuFFT，并运行固定在 cuVHS commit
 `c55e72073f44b27e8839efb842e4345af39887f7` 的 RF 解调、同步/行定位、时基校正、
@@ -201,38 +280,60 @@ color-under 和 dropout 图。CPU 仍负责输入回调、少量控制/元数据
 但不会运行 Exact 或 IPP 场解码引擎。RF 样本、cuFFT R2C/C2C/C2R 存储、解调、
 几何、色彩以及 dropout 图像数据均使用 FP32。只有一次性的高阶 host 滤波器设计
 保留 double precision，因为直接用 FP32 构造系数会数值不稳定；完成后的系数会在
-上传 GPU 前显式量化。原生桥接 ABI v5 会优先让 raw signed-16、符合条件的 libsndfile
+上传 GPU 前显式量化。原生桥接 ABI v6 会优先让 raw signed-16、符合条件的 libsndfile
 以及 FFmpeg PCM16 输入使用直接 PCM16 回调；上传量只有 FP32 的一半，随后由确定性的
 GPU 内核把每个可在 FP32 中精确表示的 signed-16 值转换进 FP32 信号面，并保留托管
-FP32 回调作为回退。桥接还采用持久色度工作区、自动限制为 16 场的批次，以及并行且
-确定性的同步脉冲扫描。ABI v5 将请求的输出场数上限与可供扫描的 RF 长度分开，因此原生
+FP32 回调作为回退。桥接还采用持久色度工作区、完整解码的 16 场批次上限、实测的
+direct-device-preview 12 场上限，以及并行且确定性的同步脉冲扫描。ABI v6 将请求的
+输出场数上限与可供扫描的 RF 长度分开，因此原生
 管线可越过弱信号或无信号片头，仅在水平同步节奏连续稳定后建立备用场序，丢弃无效场和
 开头不完整的第二场，并在恰好输出请求数量的完整交替场后停止。cuVHS 可选的 host-side
 K4 source reconstruction 已在编译期关闭，因此该路径始终使用 GPU source。不支持的
 参数、profile 或缺失的 CUDA 组件都会明确失败，绝不会切换到其他 DSP 后端。完整解码
-契约仅为 Windows x64 上原生采样率 40 MSPS 的 PAL/NTSC VHS SP/LP/EP；CVBS、
+契约为 Windows x64 上默认按原生 40 MSPS 解码的 PAL/NTSC VHS SP/LP/EP，或通过
+显式参数从 40/原生 20 MSPS 输入按内部 20 MSPS 解码；CVBS、
 LaserDisc、HiFi、S-VHS、其他制式、packed `.lds` 以及显式兼容 profile 都不会被近似处理。
 
 将 `--preview-server` 与显式 `--dsp-backend cuda-fast` 组合，会为原生 40 MSPS
-PAL/NTSC VHS 选择 ABI v5 GPU 预览路径。一个原生解码上下文会跨请求窗口持久复用；
+PAL/NTSC VHS 选择 ABI v6 GPU 预览路径。一个原生解码上下文会跨请求窗口持久复用；
 确定性的 15-tap CUDA FIR 先完成带抗混叠的 2:1 降采样至 20 MSPS，再进入持久 GPU
-同步、FM、时基、色度和 dropout 图。CUDA 输出阶段直接在 NV12 显存中按场率执行 bob；
-NVENC 注册该 device pointer 并输出 H.264，不会下载整帧亮度、色度或 NV12。每个有界
+同步、FM、时基、色度和 dropout 图。CUDA 输出阶段直接向 block-linear NV12 CUDA array
+按场率执行 bob；NVENC 注册该 array
+并绕过 pitch-linear 转换后输出 H.264，不会下载整帧亮度、色度或 NV12。每个有界
 RF 批次只上传一次；此后跨越主机/显存边界的只有少量同步/场序控制元数据和压缩 packet。压缩 packet
 进入托管内存，FFmpeg 仅使用 `-c:v copy` 组成 HLS/fMP4 时间轴。这条显式路径
-要求 NVENC，失败时不会尝试 QSV、AMF、libx264、IPP 或 Exact。普通解码/导出的采样率
-行为保持不变。
+要求 NVENC，失败时不会尝试 QSV、AMF、libx264、IPP 或 Exact。这就是 preview
+强制启用 `--decode-at-20msps` 的形式；完整解码只有显式传入该参数才会改变速率。
 
-在本机 RTX 4070 和一份真实的 631.452 秒 PAL 40 MSPS 采集上，同一当前版本的
-W15/W25/W30/W35 稳态窗口中，CUDA 平均 1.142 秒，默认 20-thread IPP 预览平均
-1.528 秒，即墙钟降低 25.3%，源帧吞吐约提高 32.8%（43.8 对 33.0 fps）。
-`decode.exe` 进程 CPU 时间平均为 0.914 对 8.719 秒，但该指标不含各自的 FFmpeg
-子进程。首个冷启动窗口因 CUDA 一次性创建持久 CUDA/cuFFT/NVENC 状态而由 IPP 胜出：
-2.153 对 2.447 秒。两边输出均为 H.264 Main、768x576、逐行 50 fps，并带预期 PAL
-色彩标记。CUDA 起点约早一输出场；对齐这 20 ms 后，渲染 SSIM Y/U/V/All 为
-0.907542/0.964438/0.972597/0.927867，人工检查保留相同场景、色彩和运动。这是预览
-画质证据，不代表 Exact 一致或跨 GPU 保证；虽然合成 NTSC 原生管线已通过，真实 NTSC
-采集画质仍未认证。
+只有这条 CUDA 预览路径会把 FFmpeg PCM16 回读窗口从通用默认的 2 MiB 增至每会话固定
+32 MiB，用来保留相邻两秒窗口共享的 preroll 与批次重叠，避免正常顺播时重启容器读取器。
+它不是无限预读队列，也不改变 Exact、IPP 或普通 CUDA 全量解码。
+
+现有 CUDA bob 算式与场 cadence 有意保持不变。仅在预览中，dropout 像素可以借用当前
+有界显存批次内最近的干净异奇偶场；如果配对场同样 dropout 或位于批次边界，则回退现有
+同场补偿。色度采用非递归的 75/25 当前场/前场混合，并在每次 seek 窗口 `open` 时重置
+历史，因此随机跳转不会继承另一个窗口的色彩。普通 CUDA 全量解码不受影响。五窗口
+弱信号扫测还发现全量解码的 line-phase snap 会持续降低预览对齐度，所以显存预览默认
+跳过该 guard，而全量解码仍保留；诊断时可用
+`CUVHS_FORCE_PREVIEW_LINE_PHASE_GUARD=1` 恢复。
+
+在本机 RTX 4070 和一份真实的 631.452 秒 PAL 40 MSPS 采集上，修正后的持续矩阵在每个
+后端各两轮、每轮 20 个窗口中测得 CUDA 47.032、IPP 34.332 源 fps，即 1.370x。冷启动
+W5 平均为 CUDA 1.158 秒、IPP 1.913 秒。两边输出均为 H.264 Main、768x576、逐行
+50 fps，并带预期 PAL 色彩标记。
+
+最终源码的画质复测按矩阵顺序请求 W5/W15/W20/W25/W30/W35；W20 只作为不计分的桥接
+窗口，以便持久化编码器看到相同请求序列。为一场对齐而裁掉 IPP 的首个输出帧后，比较
+W5/W15/W25/W30/W35。默认 CUDA preview 的平均渲染 SSIM Y/U/V/All 为
+0.914657/0.957361/0.966698/0.930448。强制采用完整解码的 line-phase guard 时为
+0.910581/0.954161/0.963665/0.926692，同时关闭跨场 dropout 与色度稳定时为
+0.904516/0.952275/0.963803/0.922357。默认方案的综合 SSIM 在每个测试窗口中都高于这两种
+替代方案，因此在修正坐标后重新验证了两项 preview 专用选择。证据保存在
+`.artifacts/cuda-preview-current-validation-20260820-203748/`。
+
+另一组五窗口 CUDA 12 场对 16 场比较的平均 SSIM 为 0.9716，最低为 0.960934，且没有
+一帧 cadence 偏移。这是预览画质证据，不代表 Exact 一致或跨 GPU 保证；虽然合成 NTSC
+原生管线已通过，真实 NTSC 采集画质仍未认证。
 
 二进制发布仍包含约 1.2 MiB 的 CUDA-fast 桥接，但不再内嵌 271 MiB 的
 `cufft64_12.dll`。只有首次显式选择 `cuda-fast` 时，程序才会依次检查指定的 runtime
@@ -247,8 +348,8 @@ SHA-256 校验，并原子安装到
 `VHSDECODE_CUDA_AUTO_DOWNLOAD=0` 可禁止自动下载。下载或加载失败会明确报错，绝不会
 静默回退 CPU 后端。
 
-该后端采用独立数值契约，不声明兼容 `v0.4.0` 或 `current` 的哈希。本地 RTX 4070
-12 GiB 开发机上，本轮同一时段的交错对照使用同一固定私有 40 MHz 真实 PAL `.ldf`
+该后端采用独立数值契约，不声明兼容 `v0.4.0` 或 `current` 的哈希。较早的
+交错对照在本地 RTX 4070 12 GiB 开发机上使用同一固定私有 40 MHz 真实 PAL `.ldf`
 请求：`--start_fileloc 320000000 --length 500`。CUDA 分别用时 15.605154 和
 15.747770 秒；`ipp-fast --threads 20` 分别为 14.108349 和 14.064289 秒。中位数为
 15.676462 对 14.086319 秒（31.8950 对 35.4954 输出 fps）：这个窄范围对比中 CUDA
@@ -256,7 +357,8 @@ SHA-256 校验，并原子安装到
 1135x313 场，并具有相同的 14,745.6/59,417.6 黑白电平元数据。首个同步 `fileLoc`
 分别为 322,212,917 和 320,563,200，因为独立的同步/TBC 算法会选择不同场边界；因此
 这是同请求性能对比，而不是输出相等声明，也不构成跨磁带、制式、驱动或 NVIDIA 型号的
-普遍速度保证。
+普遍速度保证。保留这组数据是为了追溯历史；上面的资源矩阵是较新的环境快照，而不是
+后续源码本身逆转这一结果的证明。
 
 另一组包含启动开销的 A-B-B-A 对照以紧邻的上一版 CUDA 可执行文件为基线：旧版为
 22.083587/21.753076 秒，最终版为 16.355230/15.758866 秒；中位数为 21.918332 和
@@ -3394,7 +3496,7 @@ destination API，把最终 burst SOS 写回这块独占 buffer，从而在该 A
 .\tools\build-cuda-fast-native.ps1
 dotnet restore VHSDecodeDotNet.slnx
 dotnet build VHSDecodeDotNet.slnx -c Release --no-restore
-dotnet test --solution VHSDecodeDotNet.slnx -c Release --no-build --no-restore --minimum-expected-tests 1569
+dotnet test --solution VHSDecodeDotNet.slnx -c Release --no-build --no-restore --minimum-expected-tests 1577
 dotnet test --project tests\VHSDecode.Tests\VHSDecode.Tests.csproj -c Release --no-build --no-restore --coverage --coverage-output coverage.cobertura.xml --coverage-output-format cobertura
 ```
 
@@ -3417,7 +3519,7 @@ cuFFT，或采用固定且经过校验的首次下载；兼容的 NVIDIA 驱动�
 仍会编译、审计并暂存桥接，但不能算作 GPU runtime 验证。
 
 当前正式 Release 构建为零警告、零错误。xUnit v3 项目向
-`dotnet test` 和 Visual Studio Test Explorer 暴露 **1,569** 个可独立发现的测试。
+`dotnet test` 和 Visual Studio Test Explorer 暴露 **1,577** 个可独立发现的测试。
 
 <!-- SECTION: usage -->
 
@@ -3437,8 +3539,8 @@ Release 构建后，可以使用 facade 分发或 apphost 别名：
 ```powershell
 src\VHSDecode.Cli\bin\Release\net11.0\decode.exe vhs [upstream options] input output
 src\VHSDecode.Cli\bin\Release\net11.0\vhs-decode.exe [upstream options] input output
-decode.exe vhs --dsp-backend ipp-fast [upstream options] input output
-decode.exe vhs --dsp-backend cuda-fast --pal [supported options] input.ldf output
+decode.exe vhs --dsp-backend ipp-fast [--decode-at-20msps] [upstream options] input output
+decode.exe vhs --dsp-backend cuda-fast --pal [--decode-at-20msps] [supported options] input.ldf output
 decode.exe vhs --preview-server --dsp-backend cuda-fast --pal input.ldf
 ```
 

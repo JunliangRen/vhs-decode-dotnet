@@ -50,7 +50,7 @@ public sealed partial class ReadmeLocalizationTests
 
     private const string FullCiTestCommand =
         "run: dotnet test --solution VHSDecodeDotNet.slnx --configuration Release " +
-        "--no-build --no-restore --minimum-expected-tests 1569";
+        "--no-build --no-restore --minimum-expected-tests 1577";
 
     private const string FinalRealRadix4AvxTestCommand =
         "run: dotnet test tests/VHSDecode.Tests/VHSDecode.Tests.csproj " +
@@ -285,7 +285,7 @@ public sealed partial class ReadmeLocalizationTests
         [
             "43155200da87c0d49eb37d8ec09b1372075ee8e4",
             PinnedDotNetSdkVersion,
-            "**1,569**",
+            "**1,577**",
             "--compat-version",
             "current",
             "--dsp-backend",
@@ -295,7 +295,7 @@ public sealed partial class ReadmeLocalizationTests
             "IPP-fast + v0.4.0",
             "IPP-fast + current",
             "--start 100",
-            "v0.4.0-2.4.0",
+            "v0.4.0-2.5.0",
             "52.811 s",
             "54.243 s",
             "13.977 s",
@@ -320,16 +320,55 @@ public sealed partial class ReadmeLocalizationTests
             "390.8",
             "360.5",
             "g4315520",
-            "--threads 0"
+            "--threads 0",
+            "41bfd92",
+            "35.30",
+            "23.79",
+            "35.80",
+            "26.86",
+            "47.03",
+            "34.33",
+            "10.81%",
+            "26.91%",
+            "3.12%",
+            "1.40%",
+            "12.91%",
+            "5.05%",
+            "0.930448",
+            "0.926692",
+            "0.922357"
         ];
 
         string[] synchronizedFacts =
         [
             "43155200da87c0d49eb37d8ec09b1372075ee8e4",
-            "v0.4.0-2.4.0",
+            "v0.4.0-2.5.0",
             "2f21e8ed6018b14561396cc95f1f6828054470b8",
             "v0.4.0-40-g2f21e8ed",
             PinnedDotNetSdkVersion,
+            "41bfd923e2a47f926db3d4ea3c3ff70adbecaa48",
+            "EF07E96D224A4BBEADBDE44EAEDB439C50D1646FA173FD57479255367B9A8868",
+            "35.30",
+            "23.79",
+            "35.80",
+            "26.86",
+            "47.03",
+            "34.33",
+            "10.81%",
+            "26.91%",
+            "3.12%",
+            "1.40%",
+            "12.91%",
+            "5.05%",
+            "current-resource-matrix-20260820-192956",
+            "1fb1455ec6feceeb5c3a95f882b01ebbac61306c",
+            "CE054C2CD9EA1793080F39121C2AA154130FDF5F75C14F07667DD3F214435C6F",
+            "current-resource-matrix-20260820-200449",
+            "C1A91E1709BA857843F0790BC61B42BB7C8AACD3A95E28804AF29E2ECDAD1A30",
+            "cuda-preview-current-validation-20260820-203748",
+            "0.930448",
+            "0.926692",
+            "0.922357",
             "bdccd58",
             "1,210.850",
             "167.083",
@@ -677,7 +716,7 @@ public sealed partial class ReadmeLocalizationTests
             "1.72%",
             "444.3 MiB",
             "406.0 MiB",
-            "**1,569**",
+            "**1,577**",
             "3.7935",
             "3.6182",
             "4.62%",
@@ -1453,7 +1492,7 @@ public sealed partial class ReadmeLocalizationTests
             "The shared compatibility evidence document is missing.");
         string compatibilityEvidence = File.ReadAllText(compatibilityEvidencePath);
         Assert.Contains(
-            "1,569 independently discoverable tests",
+            "1,577 independently discoverable tests",
             compatibilityEvidence,
             StringComparison.Ordinal);
         Assert.DoesNotContain(

@@ -8,7 +8,7 @@
 中解码相关部分的 .NET 11 重写，兼容目标为上游 release `v0.4.0`、commit
 `43155200da87c0d49eb37d8ec09b1372075ee8e4`。
 
-当前 .NET 移植版发布为 `v0.4.0-2.4.0`（应用版本 `2.4.0`）。
+当前 .NET 移植版发布为 `v0.4.0-2.5.0`（应用版本 `2.5.0`）。
 
 > [!IMPORTANT]
 > 这仍是持续进行中的兼容性移植。顶层解码路径已经实现并经过大量测试，但尚未声称
@@ -35,7 +35,7 @@
 - VHS 家族包括 VHS/S-VHS、Betamax、Video8/Hi8、U-matic、Type C、EIAJ
   以及上游支持的 PAL/NTSC 变体。
 - TBC 工具、双击启动的用户 GUI 和开发者绘图窗口明确不在范围内。
-- Visual Studio 2026 `.slnx` 包含 **1,569** 项标准 xUnit v3 测试；测试可在
+- Visual Studio 2026 `.slnx` 包含 **1,577** 项标准 xUnit v3 测试；测试可在
   Test Explorer 中查看，也可用 `dotnet test` 运行。
 
 <!-- SECTION: start -->
@@ -73,8 +73,9 @@ fMP4 管线：CUDA YADIF + NVENC、QSV advanced VPP + QSV、CPU YADIF + AMF，�
 最接近的质量/QP 控制，因此不同后端的码率并不完全相同。IPP 可用时会自动选用
 `ipp-fast`，否则回退到可移植的托管后端。标准 40 MSPS VHS 预览还会先经过固定的
 抗混叠滤波，再以内部 20 MSPS RF 解码；原生 20 MSPS VHS 输入保持 20 MSPS，
-S-VHS、其他磁带格式、LaserDisc 以及全部普通解码/导出路径都维持原有采样率行为。
-这项优化自动启用，不增加用户参数。启动输出会明确显示所选视频管线、
+也就是说，受支持的 VHS preview 路径等价于强制启用完整解码的
+`--decode-at-20msps`。完整 VHS 解码可在 `ipp-fast` 或 `cuda-fast` 下显式启用该参数；
+Exact、S-VHS、其他磁带格式与 LaserDisc 仍维持原有采样率行为。启动输出会明确显示所选视频管线、
 IPP-FAST 是否初始化成功、实际解码线程数，并分别用窗口编号行与实时 FPS 行原地刷新。
 系统需要
 能找到具有至少一条可用管线的 FFmpeg；也可通过 `VHSDECODE_FFMPEG` 和
@@ -88,14 +89,41 @@ decode.exe vhs --preview-server --dsp-backend cuda-fast --pal input.ldf
 
 这条路径会在多个窗口间复用同一个 CUDA 上下文，并在 GPU 上完成带抗混叠的
 40→20 MSPS 降采样、同步、FM/色度/dropout 处理、NV12 bob 反交错和 NVENC H.264
-编码。NVENC 直接注册 CUDA device pointer。每个有界 RF 批次只上传一次，整帧亮度、色度和 NV12
+编码。渲染器直接写入 block-linear NV12 CUDA array，NVENC 注册该 array，省去 pitch-linear
+转换。每个有界 RF 批次只上传一次，整帧亮度、色度和 NV12
 不会下载回主存；跨越主机/显存边界的只有少量同步/场序控制元数据和压缩 H.264 packet。
 FFmpeg 仅负责将 H.264 copy-mux 为 HLS/fMP4。它要求兼容的 NVIDIA GPU，失败时不会回退到
-CPU 预览或其他编码器。本机 RTX 4070 和一份真实 PAL 采集的四个稳态 2 秒窗口中，
-CUDA 平均用时 1.142 秒，默认 20-thread IPP 预览为 1.528 秒，即墙钟减少 25.3%、
-源帧吞吐提高 32.8%。首个冷启动 CUDA 窗口因创建持久 CUDA/cuFFT/NVENC 状态而较慢
-（2.447 对 2.153 秒）。两种预览的观感接近；计入一场时间偏移后，渲染对比 SSIM 为
-0.927867。这些数字只适用于该采集与硬件，不代表与 Exact 等价。
+CPU 预览或其他编码器。现有 GPU bob 反交错逻辑保持不变；仅预览路径会在同一有界批次内
+用干净的异奇偶场替换 dropout，并使用每次 seek 窗口都会重置的一场 75/25 当前/前场色度
+混合。
+
+2026-08-20 的本机持续资源矩阵使用同一份真实 40 MSPS PAL 采集、Intel Core Ultra 7 265K
+（20 个逻辑处理器）与 RTX 4070。前五行来自源提交 `41bfd92`，修正后的 IPP preview 行来自
+`1fb1455`。每行是两次独立启动进程的平均值，括号内为两次实测源帧率范围。
+
+| 路径 | 源 fps（范围） | `decode.exe` CPU | 整机 CPU | GPU SM 平均/峰值 | NVENC 平均/峰值 | GPU 显存峰值 |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| 完整 CUDA 40 MSPS | 35.30（35.28-35.33） | 10.81% / 2.16 核 | 33.89% | 32.44% / 72% | 0% / 0% | 7,038 MiB |
+| 完整 IPP 40 MSPS | 23.79（23.71-23.87） | 22.15% / 4.43 核 | 28.76% | 0.10% / 4% | 0% / 0% | 3,102 MiB |
+| 完整 CUDA 20 MSPS | 35.80（35.60-35.99） | 10.92% / 2.18 核 | 34.74% | 27.67% / 54% | 0% / 0% | 5,288 MiB |
+| 完整 IPP 20 MSPS | 26.86（26.25-27.48） | 24.19% / 4.84 核 | 48.39% | 0% / 0% | 0% / 0% | 3,102 MiB |
+| 预览 CUDA 20 MSPS | 47.03（46.59-47.48） | 4.06% / 0.81 核 | 24.75% | 26.91% / 61% | 3.12% / 8% | 4,795 MiB |
+| 预览 IPP 20 MSPS | 34.33（34.05-34.61） | 24.66% / 4.93 核 | 43.85% | 1.52% / 9% | 1.48% / 4% | 3,292 MiB |
+
+完整解码每轮请求 500 个源帧，并核对输出恰好 1,000 场；预览在单独冷启动 W5 后，
+每轮请求 20 个不同的两秒窗口，即 1,000 个源帧。这里的 fps 是源帧率，不会把两个输出
+场或 bob 帧重复计数。进程 CPU 按 20 个逻辑处理器归一化；整机 CPU 还包含 FFmpeg、
+驱动、采样器与其他系统负载。GPU 数据来自全局 100 ms NVML 采样。前五行的空闲基线为
+整机 CPU 5.05%、GPU SM 0%、NVENC 0%、显存 3,103 MiB；单独修正的 IPP preview 行
+使用整机 CPU 6.85%、显存 3,110 MiB 的基线。CUDA 在完整
+40、完整 20 与预览 20 中的源帧吞吐分别为 IPP 的 1.48x、1.33x 与 1.37x。完整方法见
+[详细性能说明](docs/README.detailed.zh-CN.md#当前-ippcuda-资源矩阵)。
+
+最终源码的五窗口画质复测使用了修正后的 IPP 坐标。为一场对齐而裁掉 IPP 的首个输出帧
+后，默认 CUDA preview 的平均 SSIM Y/U/V/All 为
+0.914657/0.957361/0.966698/0.930448。强制 line-phase guard 的综合平均为 0.926692，
+同时关闭跨场 dropout 与色度稳定时为 0.922357；默认方案在每个测试窗口中都更高。
+这些数字只适用于该采集与硬件，不代表与 Exact 等价。
 
 <!-- SECTION: profiles -->
 
@@ -118,14 +146,24 @@ Python 原版在不同 worker 数下的输出哈希并不稳定，因此 Python 
 | --- | --- |
 | `exact` | 默认托管路径，适合兼容性敏感的解码。 |
 | `ipp-fast` | 实验性的 Windows x64 VHS 与 LaserDisc real-RF 路径，使用 Intel IPP；可能改变浮点位，并且绝不会静默回退到 `exact`。 |
-| `cuda-fast` | 实验性的 Windows x64 NVIDIA CUDA 13 全信号 VHS 路径；采用独立数值契约，目前仅支持原生采样率 40 MSPS 的 PAL/NTSC VHS，并且绝不会静默回退到 CPU 后端。 |
+| `cuda-fast` | 实验性的 Windows x64 NVIDIA CUDA 13 全信号 VHS 路径；采用独立数值契约，PAL/NTSC VHS 默认按 40 MSPS 解码，也可用 `--decode-at-20msps` 在 GPU 上执行 40→20 或直接解码原生 20 MSPS 输入，并且绝不会静默回退到 CPU 后端。 |
 
 ```powershell
 decode.exe vhs --compat-version current --dsp-backend ipp-fast `
   --threads 20 input.lds output
+decode.exe vhs --dsp-backend ipp-fast --decode-at-20msps `
+  --pal input.lds output-20msps
 decode.exe vhs --dsp-backend cuda-fast --pal `
-  --start 100 --length 20 input.ldf output
+  --decode-at-20msps --start 100 --length 20 input.ldf output
 ```
+
+`--decode-at-20msps` 是面向 VHS 预览画质的模式，不保证与 Exact 等价。40 MSPS
+源会先经过抗混叠滤波，再按内部 20 MSPS 解码；原生 20 MSPS 输入不会再次降采样。
+TBC 元数据的 `fileLoc` 仍使用原始输入采样点坐标。
+这是预览画质级的采样率选择，不是保证提速的开关。本机当前包含启动开销的 500 帧
+门禁中，20 MSPS 让 CUDA 吞吐提高 1.40%、IPP 提高 12.91%。较早的 100 帧短门禁
+曾测得 IPP 变慢 6.83%，原因是固定启动与降采样开销在短请求中占主导；完整解码前仍应
+按目标采集与实际任务长度做基准。
 
 默认 Windows 发布包保留小型 CUDA-fast 桥接，但不再内嵌 271 MiB 的 cuFFT DLL。
 只有显式使用 `--dsp-backend cuda-fast` 时才会查找兼容的 CUDA 13/cuFFT 12；若本机
@@ -141,13 +179,11 @@ LaserDisc 的视频、EFM 与模拟音频 full-complex FFT 阶段现已接入 IP
 CVBS 和 HiFi 仍会拒绝 `ipp-fast`；需要 release 兼容行为时应使用 `exact`。
 兼容性敏感场景启用 IPP 或 CUDA 前请阅读
 [详细后端说明](docs/README.detailed.zh-CN.md#性能)。在本机 RTX 4070 和一份真实 PAL
-采集上，修正画质后的 FP32 CUDA-full 路径在观感上已明显接近 Exact，但没有超过实测
-CPU 吞吐。对于同一个 `--start_fileloc 320000000 --length 500` 请求，本轮同一时段的
-交错对照中 CUDA 分别用时 15.605/15.748 秒，`ipp-fast --threads 20` 为
-14.108/14.064 秒；中位数为 15.676 与 14.086 秒（31.895 与 35.495 fps），即 CUDA
-墙钟时间长 11.29%，吞吐为 IPP 的 0.8986x。另一组相邻 A-B-B-A 对照把 CUDA 相对前一
-构建的中位数从 21.918 降至 16.057 秒（墙钟减少 26.74%，吞吐提高 36.50%）。最终两次
-CUDA 输出的亮度、色度和 JSON 逐字节相同。采用默认导出侧 dropout 补偿后，与 Exact
+采集上，修正画质后的 FP32 CUDA-full 路径在观感上已明显接近 Exact。上面的持续矩阵中，
+40 MSPS 下 CUDA 为 35.30 源 fps、IPP 为 23.79（1.48x）；20 MSPS 下为 35.80 对
+26.86（1.33x）。另一次使用相同源码的短时测试得到明显更高的 CUDA 吞吐，因此这些数字
+只是环境快照，不能证明后续代码本身逆转了较早的 CUDA/IPP 结果。每个变体各自两次生成的亮度、色度和 JSON
+都逐字节相同。采用默认导出侧 dropout 补偿后，与 Exact
 对齐的 79 帧无损比较得到 SSIM
 Y/U/V/All = 0.954905/0.988109/0.991285/0.972301，PSNR Y/U/V/平均值为
 33.196867/41.243137/43.586266/35.699053 dB；人工检查确认场景内容、色彩和运动观感
@@ -241,7 +277,7 @@ TBC、色度、JSON 和日志文件允许在解码期间并发读取，兼容的
 dotnet restore VHSDecodeDotNet.slnx
 dotnet build VHSDecodeDotNet.slnx -c Release --no-restore
 dotnet test --solution VHSDecodeDotNet.slnx -c Release `
-  --no-build --no-restore --minimum-expected-tests 1569
+  --no-build --no-restore --minimum-expected-tests 1577
 ```
 
 在 Visual Studio 2026 中打开 `VHSDecodeDotNet.slnx`，即可构建、调试并通过

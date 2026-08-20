@@ -1,5 +1,6 @@
 using System.Buffers.Binary;
 using System.Diagnostics;
+using System.Runtime.InteropServices;
 using System.Security.Cryptography;
 using System.Text.Json;
 using VHSDecode.Core.CommandLine;
@@ -188,7 +189,7 @@ public sealed class PreviewServerTests
         ParsedCommand template = PreviewDecodeCommandFactory.CreateFastTemplate(vhs);
 
         Assert.Equal("cuda-fast", template.Get<string>("dsp_backend"));
-        Assert.True(template.Get<bool>(PreviewDecodeCommandFactory.HalfRateRfOption));
+        Assert.True(template.Get<bool>(PreviewDecodeCommandFactory.DecodeAt20MspsOption));
 
         ParsedCommand laserDisc = new CommandLineParser().Parse(
             CliSpecs.LaserDisc,
@@ -201,21 +202,21 @@ public sealed class PreviewServerTests
         Assert.Contains("no CPU preview fallback", exception.Message, StringComparison.Ordinal);
     }
 
-    [Fact(DisplayName = "Preview template halves only standard 40 MSPS VHS RF")]
-    public void PreviewTemplateHalvesOnlyStandardFortyMspsVhsRf()
+    [Fact(DisplayName = "Preview template forces 20 MSPS decode for supported VHS RF")]
+    public void PreviewTemplateForcesTwentyMspsForSupportedVhsRf()
     {
         ParsedCommand defaultVhs = new CommandLineParser().Parse(
             CliSpecs.Vhs,
             ["--preview-server", "capture.lds"]);
         ParsedCommand defaultTemplate = PreviewDecodeCommandFactory.CreateFastTemplate(defaultVhs);
-        Assert.True(defaultTemplate.Get<bool>(PreviewDecodeCommandFactory.HalfRateRfOption));
+        Assert.True(defaultTemplate.Get<bool>(PreviewDecodeCommandFactory.DecodeAt20MspsOption));
 
         ParsedCommand nativeTwenty = new CommandLineParser().Parse(
             CliSpecs.Vhs,
             ["--preview-server", "--frequency", "20", "capture.s16"]);
         ParsedCommand nativeTwentyTemplate = PreviewDecodeCommandFactory.CreateFastTemplate(nativeTwenty);
-        Assert.False(nativeTwentyTemplate.Values.ContainsKey(
-            PreviewDecodeCommandFactory.HalfRateRfOption));
+        Assert.True(nativeTwentyTemplate.Get<bool>(
+            PreviewDecodeCommandFactory.DecodeAt20MspsOption));
         Assert.True(nativeTwentyTemplate.Get<bool>("no_resample"));
         using (DecodeSession nativeTwentySession = DecodeSessionFactory.Create(nativeTwentyTemplate))
         {
@@ -227,23 +228,23 @@ public sealed class PreviewServerTests
             CliSpecs.Vhs,
             ["--preview-server", "--tape_format", "SVHS", "capture.lds"]);
         ParsedCommand superVhsTemplate = PreviewDecodeCommandFactory.CreateFastTemplate(superVhs);
-        Assert.False(superVhsTemplate.Values.ContainsKey(
-            PreviewDecodeCommandFactory.HalfRateRfOption));
+        Assert.False(superVhsTemplate.Get<bool>(
+            PreviewDecodeCommandFactory.DecodeAt20MspsOption));
 
         ParsedCommand laserDisc = new CommandLineParser().Parse(
             CliSpecs.LaserDisc,
             ["--preview-server", "--pal", "capture.ldf"]);
         ParsedCommand laserDiscTemplate = PreviewDecodeCommandFactory.CreateFastTemplate(laserDisc);
         Assert.False(laserDiscTemplate.Values.ContainsKey(
-            PreviewDecodeCommandFactory.HalfRateRfOption));
+            PreviewDecodeCommandFactory.DecodeAt20MspsOption));
     }
 
-    [Fact(DisplayName = "Preview half-rate RF loader filters aliases and maps source positions")]
-    public void PreviewHalfRateRfLoaderFiltersAliasesAndMapsSourcePositions()
+    [Fact(DisplayName = "Half-rate RF loader filters aliases and maps source positions")]
+    public void HalfRateRfLoaderFiltersAliasesAndMapsSourcePositions()
     {
         using var stream = new MemoryStream([0]);
         var constantSource = new GeneratedSampleLoader((_) => 1_000.0);
-        using var constantLoader = new PreviewHalfRateSampleLoader(constantSource);
+        using var constantLoader = new HalfRateSampleLoader(constantSource);
 
         double[] constant = Assert.IsType<double[]>(constantLoader.Read(stream, 100, 16));
 
@@ -253,7 +254,7 @@ public sealed class PreviewServerTests
 
         var nyquistSource = new GeneratedSampleLoader(
             sample => (sample & 1L) == 0L ? 1_000.0 : -1_000.0);
-        using var nyquistLoader = new PreviewHalfRateSampleLoader(nyquistSource);
+        using var nyquistLoader = new HalfRateSampleLoader(nyquistSource);
 
         double[] suppressed = Assert.IsType<double[]>(nyquistLoader.Read(stream, 100, 16));
 
@@ -262,7 +263,7 @@ public sealed class PreviewServerTests
         const double sourceSampleRateHz = 40_000_000.0;
         var vhsPassbandSource = new GeneratedSampleLoader(sample =>
             Math.Sin(2.0 * Math.PI * 5_780_000.0 * sample / sourceSampleRateHz));
-        using var vhsPassbandLoader = new PreviewHalfRateSampleLoader(vhsPassbandSource);
+        using var vhsPassbandLoader = new HalfRateSampleLoader(vhsPassbandSource);
         double[] vhsPassband = Assert.IsType<double[]>(
             vhsPassbandLoader.Read(stream, 200, 512));
         double vhsPassbandAmplitude = Math.Sqrt(
@@ -271,14 +272,33 @@ public sealed class PreviewServerTests
 
         var aliasBandSource = new GeneratedSampleLoader(sample =>
             Math.Sin(2.0 * Math.PI * 15_000_000.0 * sample / sourceSampleRateHz));
-        using var aliasBandLoader = new PreviewHalfRateSampleLoader(aliasBandSource);
+        using var aliasBandLoader = new HalfRateSampleLoader(aliasBandSource);
         double[] aliasBand = Assert.IsType<double[]>(
             aliasBandLoader.Read(stream, 200, 512));
         double aliasBandAmplitude = Math.Sqrt(
             2.0 * aliasBand.Average(value => value * value));
         Assert.InRange(aliasBandAmplitude, 0.0, 0.001);
 
-        using var pooledLoader = new PreviewHalfRateSampleLoader(
+        static double ComparisonWave(long sample)
+            => Math.Sin(sample * 0.017)
+                + (0.25 * Math.Cos(sample * 0.071));
+        using var scalarComparisonLoader = new HalfRateSampleLoader(
+            new GeneratedSampleLoader(ComparisonWave));
+        using var vectorComparisonLoader = new HalfRateSampleLoader(
+            new GeneratedSampleLoader(ComparisonWave));
+        double[] scalarComparison = Assert.IsType<double[]>(
+            scalarComparisonLoader.Read(stream, 100, 63));
+        double[] vectorComparison = Assert.IsType<double[]>(
+            vectorComparisonLoader.Read(stream, 100, 128));
+        for (int index = 0; index < scalarComparison.Length; index++)
+        {
+            Assert.InRange(
+                Math.Abs(scalarComparison[index] - vectorComparison[index]),
+                0.0,
+                1e-12);
+        }
+
+        using var pooledLoader = new HalfRateSampleLoader(
             new GeneratedSampleLoader(sample => sample));
         IReusableRfSampleLoader reusableLoader = pooledLoader;
         double[] firstBuffer = Assert.IsType<double[]>(
@@ -288,10 +308,50 @@ public sealed class PreviewServerTests
             reusableLoader.ReadReusable(stream, 400, 32));
         Assert.Same(firstBuffer, secondBuffer);
         reusableLoader.ReturnReusable(secondBuffer);
+
+        var finiteSamples = new short[100];
+        for (short index = 0; index < finiteSamples.Length; index++)
+        {
+            finiteSamples[index] = index;
+        }
+        using var finiteStream = new MemoryStream(
+            MemoryMarshal.AsBytes(finiteSamples.AsSpan()).ToArray());
+        using var finiteLoader = new HalfRateSampleLoader(new Int16SampleLoader());
+        using var zeroPaddedReference = new HalfRateSampleLoader(
+            new GeneratedSampleLoader(sample => sample < finiteSamples.Length ? sample : 0.0));
+
+        double[] expectedFinalBlock = Assert.IsType<double[]>(
+            zeroPaddedReference.Read(stream, 0, 50));
+        double[] actualFinalBlock = Assert.IsType<double[]>(
+            finiteLoader.Read(finiteStream, 0, 50));
+
+        Assert.Equal(expectedFinalBlock, actualFinalBlock);
+        Assert.NotEqual(0.0, actualFinalBlock[^1]);
+        Assert.Null(finiteLoader.Read(finiteStream, 1, 50));
+
+        int[] packedSamples = Enumerable.Range(0, 100)
+            .Select(index => (index * 73) & 0x3FF)
+            .ToArray();
+        using var packedStream = new MemoryStream(Pack4x10(packedSamples));
+        using var packedLoader = new HalfRateSampleLoader(
+            new PackedDdD4To40SampleLoader());
+        using var packedReference = new HalfRateSampleLoader(
+            new GeneratedSampleLoader(sample => sample < packedSamples.Length
+                ? (short)((packedSamples[sample] - 512) << 6)
+                : 0.0));
+
+        double[] expectedPackedFinalBlock = Assert.IsType<double[]>(
+            packedReference.Read(stream, 0, 50));
+        double[] actualPackedFinalBlock = Assert.IsType<double[]>(
+            packedLoader.Read(packedStream, 0, 50));
+
+        Assert.Equal(expectedPackedFinalBlock, actualPackedFinalBlock);
+        Assert.NotEqual(0.0, actualPackedFinalBlock[^1]);
+        Assert.Null(packedLoader.Read(packedStream, 1, 50));
     }
 
-    [Fact(DisplayName = "Preview half-rate routing cannot alter normal VHS sessions")]
-    public void PreviewHalfRateRoutingCannotAlterNormalVhsSessions()
+    [Fact(DisplayName = "Preview 20 MSPS routing cannot alter normal VHS sessions")]
+    public void PreviewTwentyMspsRoutingCannotAlterNormalVhsSessions()
     {
         ParsedCommand preview = new CommandLineParser().Parse(
             CliSpecs.Vhs,
@@ -300,7 +360,7 @@ public sealed class PreviewServerTests
         using DecodeSession previewSession = DecodeSessionFactory.Create(previewTemplate);
 
         Assert.Equal(20_000_000.0, previewSession.DecodeSampleRateHz);
-        PreviewHalfRateSampleLoader previewLoader = Assert.IsType<PreviewHalfRateSampleLoader>(
+        HalfRateSampleLoader previewLoader = Assert.IsType<HalfRateSampleLoader>(
             previewSession.Loader);
         Assert.IsType<PackedDdD4To40SampleLoader>(previewLoader.Source);
 
@@ -309,7 +369,7 @@ public sealed class PreviewServerTests
             ["--preview-server", "--pal", "capture.raw"]);
         using DecodeSession rawPreviewSession = DecodeSessionFactory.Create(
             PreviewDecodeCommandFactory.CreateFastTemplate(rawPreview));
-        PreviewHalfRateSampleLoader rawPreviewLoader = Assert.IsType<PreviewHalfRateSampleLoader>(
+        HalfRateSampleLoader rawPreviewLoader = Assert.IsType<HalfRateSampleLoader>(
             rawPreviewSession.Loader);
         Assert.IsType<Int16SampleLoader>(rawPreviewLoader.Source);
 
@@ -318,24 +378,14 @@ public sealed class PreviewServerTests
             ["--preview-server", "--pal", "capture.s8"]);
         using DecodeSession signedBytePreviewSession = DecodeSessionFactory.Create(
             PreviewDecodeCommandFactory.CreateFastTemplate(signedBytePreview));
-        PreviewHalfRateSampleLoader signedBytePreviewLoader = Assert.IsType<PreviewHalfRateSampleLoader>(
+        HalfRateSampleLoader signedBytePreviewLoader = Assert.IsType<HalfRateSampleLoader>(
             signedBytePreviewSession.Loader);
         Assert.IsType<Int8SampleLoader>(signedBytePreviewLoader.Source);
 
         ParsedCommand normal = new CommandLineParser().Parse(
             CliSpecs.Vhs,
             ["--pal", "capture.lds", "normal-output"]);
-        var values = new Dictionary<string, object?>(normal.Values)
-        {
-            [PreviewDecodeCommandFactory.HalfRateRfOption] = true
-        };
-        var spoofedNormal = new ParsedCommand(
-            normal.Spec,
-            values,
-            ["capture.lds", "normal-output"],
-            normal.ProgramName,
-            normal.OptionSources);
-        using DecodeSession normalSession = DecodeSessionFactory.Create(spoofedNormal);
+        using DecodeSession normalSession = DecodeSessionFactory.Create(normal);
 
         Assert.Equal(40_000_000.0, normalSession.DecodeSampleRateHz);
         Assert.IsType<PackedDdD4To40SampleLoader>(normalSession.Loader);
@@ -349,6 +399,113 @@ public sealed class PreviewServerTests
                 sourcePositionedPreview,
                 framesPerSecond: 25.0,
                 sourceSampleRateHz: 40_000_000.0));
+
+        ParsedCommand fortyMspsWindow = PreviewDecodeCommandFactory.ForWindow(
+            previewTemplate,
+            startSeconds: 1.88,
+            sourceSampleRateHz: 40_000_000.0,
+            requestedFrames: 58);
+        Assert.Equal(75_200_000.0, fortyMspsWindow.Get<double>("start_fileloc"));
+        using (DecodeSession fortyMspsWindowSession = DecodeSessionFactory.Create(
+            fortyMspsWindow))
+        {
+            Assert.Equal(37_600_000L, fortyMspsWindowSession.RunBounds.StartSample);
+            Assert.Equal(75_200_000L, fortyMspsWindowSession.ToSourceSampleLocation(
+                fortyMspsWindowSession.RunBounds.StartSample));
+        }
+
+        ParsedCommand nativeTwentyPreview = new CommandLineParser().Parse(
+            CliSpecs.Vhs,
+            ["--preview-server", "--frequency", "20", "capture.s16"]);
+        ParsedCommand nativeTwentyWindowTemplate =
+            PreviewDecodeCommandFactory.CreateFastTemplate(nativeTwentyPreview);
+        ParsedCommand nativeTwentyWindow = PreviewDecodeCommandFactory.ForWindow(
+            nativeTwentyWindowTemplate,
+            startSeconds: 1.88,
+            sourceSampleRateHz: 20_000_000.0,
+            requestedFrames: 58);
+        Assert.Equal(37_600_000.0, nativeTwentyWindow.Get<double>("start_fileloc"));
+        using DecodeSession nativeTwentyWindowSession = DecodeSessionFactory.Create(
+            nativeTwentyWindow);
+        Assert.Equal(37_600_000L, nativeTwentyWindowSession.RunBounds.StartSample);
+        Assert.Equal(37_600_000L, nativeTwentyWindowSession.ToSourceSampleLocation(
+            nativeTwentyWindowSession.RunBounds.StartSample));
+    }
+
+    [Fact(DisplayName = "IPP complete decode can opt into 20 MSPS with source-coordinate metadata")]
+    public void IppCompleteDecodeCanOptIntoTwentyMsps()
+    {
+        Assert.SkipUnless(
+            IppRuntime.TryProbe(out _),
+            "The optional IPP runtime was not staged for this test build.");
+
+        ParsedCommand fortyMsps = new CommandLineParser().Parse(
+            CliSpecs.Vhs,
+            [
+                "--dsp-backend", "ipp-fast",
+                "--decode-at-20msps",
+                "--pal",
+                "--start_fileloc", "40000001",
+                "capture.s16",
+                "output"
+            ]);
+        using (DecodeSession session = DecodeSessionFactory.Create(fortyMsps))
+        {
+            Assert.Equal(20_000_000.0, session.DecodeSampleRateHz);
+            Assert.Equal(2, session.SourceSamplesPerDecodeSample);
+            Assert.Equal(20_000_000L, session.RunBounds.StartSample);
+            Assert.Equal(40_000_000L, session.ToSourceSampleLocation(
+                session.RunBounds.StartSample));
+            HalfRateSampleLoader loader = Assert.IsType<HalfRateSampleLoader>(session.Loader);
+            Assert.IsType<Int16SampleLoader>(loader.Source);
+        }
+
+        ParsedCommand nativeTwenty = new CommandLineParser().Parse(
+            CliSpecs.Vhs,
+            [
+                "--dsp-backend", "ipp-fast",
+                "--decode_at_20msps",
+                "--frequency", "20",
+                "capture.RAW",
+                "output"
+            ]);
+        using DecodeSession nativeSession = DecodeSessionFactory.Create(nativeTwenty);
+        Assert.Equal(20_000_000.0, nativeSession.DecodeSampleRateHz);
+        Assert.Equal(1, nativeSession.SourceSamplesPerDecodeSample);
+        Assert.IsType<Int16SampleLoader>(nativeSession.Loader);
+    }
+
+    [Theory(DisplayName = "20 MSPS complete decode rejects unsupported CPU routes")]
+    [InlineData("exact", "VHS", "40", "Exact complete decode")]
+    [InlineData("ipp-fast", "SVHS", "40", "VHS tape format only")]
+    [InlineData("ipp-fast", "VHS", "28.6", "40 or native 20 MSPS")]
+    public void TwentyMspsCompleteDecodeRejectsUnsupportedCpuRoutes(
+        string backend,
+        string tapeFormat,
+        string inputRate,
+        string expectedMessage)
+    {
+        if (backend == "ipp-fast")
+        {
+            Assert.SkipUnless(
+                IppRuntime.TryProbe(out _),
+                "The optional IPP runtime was not staged for this test build.");
+        }
+
+        ParsedCommand command = new CommandLineParser().Parse(
+            CliSpecs.Vhs,
+            [
+                "--dsp-backend", backend,
+                "--decode-at-20msps",
+                "--tape_format", tapeFormat,
+                "--frequency", inputRate,
+                "capture.s16",
+                "output"
+            ]);
+
+        NotSupportedException exception = Assert.Throws<NotSupportedException>(
+            () => DecodeSessionFactory.Create(command));
+        Assert.Contains(expectedMessage, exception.Message, StringComparison.Ordinal);
     }
 
     [Fact(DisplayName = "Preview options and realtime FPS display validate their contracts")]
@@ -1830,5 +1987,30 @@ public sealed class PreviewServerTests
                 .Select(index => sampleGenerator(sample + index))
                 .ToArray();
         }
+    }
+
+    private static byte[] Pack4x10(int[] samples)
+    {
+        if (samples.Length % 4 != 0)
+        {
+            throw new ArgumentException("Sample count must be divisible by four.");
+        }
+
+        byte[] output = new byte[(samples.Length / 4) * 5];
+        for (int group = 0; group < samples.Length / 4; group++)
+        {
+            int s0 = samples[group * 4] & 0x3FF;
+            int s1 = samples[(group * 4) + 1] & 0x3FF;
+            int s2 = samples[(group * 4) + 2] & 0x3FF;
+            int s3 = samples[(group * 4) + 3] & 0x3FF;
+            int index = group * 5;
+            output[index] = (byte)(s0 >> 2);
+            output[index + 1] = (byte)(((s0 & 0x03) << 6) | (s1 >> 4));
+            output[index + 2] = (byte)(((s1 & 0x0F) << 4) | (s2 >> 6));
+            output[index + 3] = (byte)(((s2 & 0x3F) << 2) | (s3 >> 8));
+            output[index + 4] = (byte)(s3 & 0xFF);
+        }
+
+        return output;
     }
 }

@@ -2749,6 +2749,8 @@ string(REPLACE
                 }
             }
             if (anchor.valid
+                && (!writer.accepts_device_fields()
+                    || env_flag_enabled("CUVHS_FORCE_PREVIEW_LINE_PHASE_GUARD"))
                 && !env_flag_enabled("CUVHS_DISABLE_LINE_PHASE_GUARD")) {
                 // A real VHS time-base error moves gradually. A sudden
                 // quarter/half-line phase switch is a false sync train in the
@@ -3076,12 +3078,17 @@ if(CUVHS_BATCH_SELECTION_INDEX EQUAL -1)
 endif()
 set(CUVHS_BATCH_CAP [=[
 
-        // FP32 field FFTs are fastest and most stable at 16 fields per batch
-        // on the validated PAL workload. Larger batches also let the opposite
+        // Preview windows run faster at 12 fields on the validated PAL GPU
+        // workload while using less host CPU. Full CUDA-fast decode retains
+        // the validated 16-field cap. Larger batches also let the opposite
         // VBlank train influence one geometry solve and can produce chroma
         // discontinuities. Keep an explicit diagnostic override available.
         if (batch_override <= 0) {
-            batch_size = std::min(batch_size, 16);
+            const int automatic_batch_cap = writer.accepts_device_fields()
+                    && reader.device_decimation_factor() == 2
+                ? 12
+                : 16;
+            batch_size = std::min(batch_size, automatic_batch_cap);
         }
 
         // A very short managed window does not need a full-device allocation.
@@ -3571,7 +3578,7 @@ string(FIND
     CUVHS_HALF_RATE_READ_ENTRY_INDEX)
 if(CUVHS_HALF_RATE_READ_ENTRY_INDEX EQUAL -1)
     message(FATAL_ERROR
-        "Pinned cuVHS pipeline no longer has the expected preview half-rate read insertion point")
+        "Pinned cuVHS pipeline no longer has the expected GPU half-rate read insertion point")
 endif()
 string(REPLACE
     "${CUVHS_HALF_RATE_READ_ENTRY}"
@@ -3583,9 +3590,9 @@ string(REPLACE
         const bool use_half_rate_prefetch = prefetch_valid
             && prefetch_half_rate
             && prefetch_raw_offset == raw_offset
-            && prefetch_num_fields == num_fields
+            && prefetch_num_fields >= num_fields
             && prefetch_lead_samples == lead_samples
-            && prefetch_total_samples == total_samples
+            && prefetch_total_samples >= total_samples
             && prefetch_tail_samples == tail_samples;
         if (use_half_rate_prefetch) {
             if (raw_prefetch_thread.joinable()) raw_prefetch_thread.join();
@@ -3597,7 +3604,9 @@ string(REPLACE
                     static_cast<float*>(d_raw))) {
                 return -1;
             }
-            logical_samples_read = prefetch_half_rate_logical_samples_read;
+            logical_samples_read = std::min(
+                prefetch_half_rate_logical_samples_read,
+                raw_sample_count);
             prefetch_valid = false;
             prefetch_half_rate = false;
             prefetch_half_rate_read_ok = false;
@@ -3635,7 +3644,7 @@ string(FIND
     CUVHS_HALF_RATE_UPLOAD_ENTRY_INDEX)
 if(CUVHS_HALF_RATE_UPLOAD_ENTRY_INDEX EQUAL -1)
     message(FATAL_ERROR
-        "Pinned cuVHS pipeline no longer has the expected preview half-rate upload insertion point")
+        "Pinned cuVHS pipeline no longer has the expected GPU half-rate upload insertion point")
 endif()
 string(REPLACE
     "${CUVHS_HALF_RATE_UPLOAD_ENTRY}"

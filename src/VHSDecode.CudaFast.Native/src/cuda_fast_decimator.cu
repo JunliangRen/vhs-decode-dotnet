@@ -212,7 +212,7 @@ bool cuda_fast_upload_half_rate_s16(
     if (status != cudaSuccess) {
         std::fprintf(
             stderr,
-            "CUDA-fast preview RF upload/20-MSPS decimation failed: %s\n",
+            "CUDA-fast RF upload/20-MSPS decimation failed: %s\n",
             cudaGetErrorString(status));
         return false;
     }
@@ -308,7 +308,7 @@ bool cuda_fast_read_upload_half_rate(
         if (upload_status != cudaSuccess) {
             std::fprintf(
                 stderr,
-                "CUDA-fast preview RF upload/20-MSPS decimation failed: %s\n",
+                "CUDA-fast RF upload/20-MSPS decimation failed: %s\n",
                 cudaGetErrorString(upload_status));
             return false;
         }

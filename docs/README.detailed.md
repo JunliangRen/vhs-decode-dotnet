@@ -11,7 +11,7 @@
 release `v0.4.0` at commit
 `43155200da87c0d49eb37d8ec09b1372075ee8e4`.
 
-The current .NET port release is `v0.4.0-2.4.0` (application version `2.4.0`).
+The current .NET port release is `v0.4.0-2.5.0` (application version `2.5.0`).
 
 > [!IMPORTANT]
 > This is a work-in-progress compatibility port. The top-level decode paths are
@@ -215,6 +215,105 @@ full-complex FFT stages used by LaserDisc video, EFM, and analog audio. The LD
 route uses native bridge ABI v1.3. CVBS and HiFi reject `ipp-fast` as unsupported
 instead of quietly benchmarking their Exact kernels.
 
+For PAL/NTSC VHS, complete `ipp-fast` and `cuda-fast` decode also accept
+`--decode-at-20msps` (alias `--decode_at_20msps`). A 40 MSPS input is passed
+through the fixed anti-alias 2:1 filter before the downstream DSP runs at 20
+MSPS; native 20 MSPS input enters that DSP rate directly. IPP performs the
+reduction in its input loader, while CUDA performs it on the GPU before the
+full signal graph. Exact complete decode rejects the switch. Supported VHS
+preview routes force the same mode automatically, and output metadata keeps
+`fileLoc` in original source-sample coordinates.
+
+### Current IPP/CUDA resource matrix
+
+The current sustained local matrix was measured on 2026-08-20 from a fresh build
+of source commit `41bfd923e2a47f926db3d4ea3c3ff70adbecaa48`. The tested `decode.exe` reported
+file version 2.4.0.0 and SHA-256
+`EF07E96D224A4BBEADBDE44EAEDB439C50D1646FA173FD57479255367B9A8868`.
+The host was Windows build 26220, an Intel Core Ultra 7 265K with 20 physical
+and 20 logical processors, and an NVIDIA GeForce RTX 4070 with 12,282 MiB,
+driver 581.57. The SDK was .NET 11.0.100-preview.7.26381.103. The input was the
+same private real PAL 40 MSPS `F:\BmdFiles\DDD\test.ldf` capture (21,389,175,871
+bytes, approximately 631 seconds).
+
+The full-decode gate was startup-inclusive and requested
+`--start_fileloc 320000000 --length 500`. IPP also used explicit `--threads 20`.
+Each run had to emit exactly 1,000 fields; luma, chroma, and raw-JSON SHA-256
+values had to agree across the two runs of that exact backend/rate. Run order
+was CUDA40, IPP40, IPP20, CUDA20, CUDA20, IPP20, IPP40, CUDA40. The preview
+gate launched a fresh server twice per backend in CUDA, IPP, IPP, CUDA order,
+first requested a separate cold W5, then timed both init and media requests for
+W15, W20, ... W110. Those 20 unique two-second PAL windows represent 1,000
+source frames per run. Preview forces internal 20 MSPS in both backends.
+
+`Source fps` below counts input video frames, not the two output TBC fields or
+field-rate bob frames. `decode.exe` CPU is process CPU time divided by wall time
+and normalized to all 20 logical processors; it excludes a preview FFmpeg
+child. Whole-system CPU includes that child, drivers, the measurement harness,
+background work, and the decode process. GPU SM, memory-controller, NVENC, and
+frame-buffer use are global NVML samples taken every 100 ms; these are not the
+same averaging window or engine label as Windows Task Manager. Results are the
+mean of two runs, while parenthesized fps is the observed range and peak values
+are the maximum of either run.
+
+| Path | Source fps (range) | `decode.exe` CPU | System CPU avg/peak | GPU SM avg/peak | GPU memory-controller avg/peak | NVENC avg/peak | Peak GPU FB (above idle) |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| Full, CUDA 40 MSPS | 35.30 (35.28-35.33) | 2.16 cores / 10.81% | 33.89% / 42.05% | 32.44% / 72% | 16.16% / 49% | 0% / 0% | 7,037.5 MiB (+3,934.8) |
+| Full, IPP 40 MSPS | 23.79 (23.71-23.87) | 4.43 cores / 22.15% | 28.76% / 39.20% | 0.10% / 4% | 0.02% / 1% | 0% / 0% | 3,102.4 MiB (+0) |
+| Full, CUDA 20 MSPS | 35.80 (35.60-35.99) | 2.18 cores / 10.92% | 34.74% / 45.42% | 27.67% / 54% | 12.02% / 24% | 0% / 0% | 5,288.3 MiB (+2,185.6) |
+| Full, IPP 20 MSPS | 26.86 (26.25-27.48) | 4.84 cores / 24.19% | 48.39% / 67.84% | 0% / 0% | 0% / 0% | 0% / 0% | 3,102.4 MiB (+0) |
+| Preview, CUDA 20 MSPS | 47.03 (46.59-47.48) | 0.81 cores / 4.06% | 24.75% / 31.00% | 26.91% / 61% | 9.92% / 23% | 3.12% / 8% | 4,795.0 MiB (+1,692.3) |
+| Preview, IPP 20 MSPS | 34.33 (34.05-34.61) | 4.93 cores / 24.66% | 43.85% / 58.82% | 1.52% / 9% | 0.07% / 1% | 1.48% / 4% | 3,292.0 MiB (+182.1) |
+
+The first five rows' immediately preceding 10-second idle baseline averaged
+5.05% whole-system CPU, 0% GPU SM, 0% NVENC, and 3,102.7 MiB GPU FB. The
+separately corrected IPP preview row used a 6.85% system CPU and 3,109.9 MiB
+GPU FB baseline; its +182.1 MiB delta uses that baseline. The table reports raw
+system means rather than subtracting either noisy baseline. CUDA provided 1.484x the IPP
+source throughput at full 40 MSPS, 1.333x at full 20 MSPS, and 1.370x in 20 MSPS
+preview. Moving full decode from 40 to 20 MSPS raised CUDA throughput by 1.40%
+and IPP by 12.91% on this longer gate. Cold W5 averaged 1.158 seconds for CUDA
+and 1.913 seconds for IPP. Full decode does not encode video, hence zero NVENC;
+the CUDA preview uses block-linear NV12/NVENC, while IPP preview used
+`NVENC + CUDA YADIF x2`. Each configuration retained a repeatable output hash
+within its backend and build. These results are specific to this capture,
+machine, driver, and measured builds; they are not a cross-hardware or
+quality-equivalence promise.
+
+The five full/CUDA rows came from commit
+`41bfd923e2a47f926db3d4ea3c3ff70adbecaa48`, executable SHA-256
+`EF07E96D224A4BBEADBDE44EAEDB439C50D1646FA173FD57479255367B9A8868`, with raw
+CSV, logs, hashes, and 100 ms samples under
+`.artifacts/current-resource-matrix-20260820-192956/`. The original IPP preview
+row from that run was invalid because its 20 MSPS window coordinate was divided
+by two twice. The corrected IPP row was remeasured at commit
+`1fb1455ec6feceeb5c3a95f882b01ebbac61306c`, executable SHA-256
+`CE054C2CD9EA1793080F39121C2AA154130FDF5F75C14F07667DD3F214435C6F`, under
+`.artifacts/current-resource-matrix-20260820-200449/`; both 20-window runs
+produced aggregate hash
+`C1A91E1709BA857843F0790BC61B42BB7C8AACD3A95E28804AF29E2ECDAD1A30`.
+
+Absolute CUDA throughput was not stable across same-day sessions. A separate
+fresh-build full-40 A-B-B-A immediately before this sustained matrix measured
+62.24 CUDA versus 24.51 IPP source fps, with repeatable hashes within each
+backend/build configuration. Rebuilding
+the original `d913457` CUDA implementation in the current toolchain then
+measured 61.07 fps versus 62.27 fps for this source, only a 1.98% current-code
+throughput gain; equivalent old/current IPP runs were 24.81/24.50 fps. The
+historical CUDA-slower result and current CUDA-faster snapshots are therefore
+both retained, but the reversal is not attributed to later code alone.
+
+This switch selects a preview-quality sampling rate; it does not promise a
+speedup on every backend. In an earlier pre-optimization, startup-inclusive,
+two-run-per-variant quality gate on
+the same 100-frame real PAL window, CUDA 40/20 MSPS medians were 2.880/2.685
+seconds (6.77% less wall time at 20 MSPS), while 20-thread IPP medians were
+4.830/5.160 seconds (6.83% more wall time). Raw luma/chroma TBC SSIM between
+each backend's 40 and 20 MSPS output was 0.978718/0.991624 for CUDA and
+0.977307/0.995722 for IPP. All four outputs contained 200 strictly ordered
+fields and source-coordinate `fileLoc` values. These are local, short-run
+directional results, not cross-capture guarantees.
+
 `cuda-fast` is a separate Windows x64 NVIDIA CUDA 13 full-signal VHS backend.
 It loads `vhsdecode_cuda_fast.dll` and cuFFT, then runs the RF demodulation,
 sync/line-location, time-base correction, color-under, and dropout graph from
@@ -224,13 +323,14 @@ not run the Exact or IPP field engine. RF samples, cuFFT R2C/C2C/C2R storage,
 demodulation, geometry, color, and dropout image data use FP32. Only the
 one-time high-order host filter design remains double precision because direct
 FP32 coefficient construction was unstable; its completed coefficients are
-explicitly quantized before GPU upload. Native bridge ABI v5 prefers direct
+explicitly quantized before GPU upload. Native bridge ABI v6 prefers direct
 PCM16 callbacks for raw signed-16, eligible libsndfile, and FFmpeg PCM16 input.
 Those samples upload at half the FP32 transfer size and a deterministic GPU
 kernel converts every exactly representable signed-16 value into the FP32
 signal plane; the managed FP32 callback remains as a fallback. The bridge also
-uses a persistent chroma workspace, an automatically bounded 16-field batch,
-and a parallel deterministic sync-pulse scan. ABI v5 carries the requested
+uses a persistent chroma workspace, a 16-field full-decode batch cap, a
+measured 12-field direct-device-preview cap, and a parallel deterministic
+sync-pulse scan. ABI v6 carries the requested
 output-field limit independently from the amount of RF available to scan. The
 native pipeline can therefore pass a weak/no-signal leader, requires stable
 horizontal cadence before seeding fallback field order, rejects invalid fields
@@ -238,39 +338,68 @@ and a leading second field, and stops after exactly the requested number of
 complete alternating fields. The optional cuVHS host-side K4 source
 reconstruction is compiled out so this route always uses the GPU source.
 Unsupported options, profiles, or missing CUDA components fail explicitly and
-never select another DSP backend. The full-decode contract is native-rate
-40 MSPS PAL/NTSC VHS SP/LP/EP on Windows x64; CVBS, LaserDisc, HiFi, S-VHS,
+never select another DSP backend. The full-decode contract is PAL/NTSC VHS
+SP/LP/EP on Windows x64 at native 40 MSPS, or at internal 20 MSPS through the
+explicit switch from 40/native-20 MSPS input; CVBS, LaserDisc, HiFi, S-VHS,
 other video systems, packed `.lds`, and explicit compatibility profile
 selection are not approximated.
 
 Combining `--preview-server` with an explicit `--dsp-backend cuda-fast` selects
-the ABI v5 GPU preview route for native-rate 40 MSPS PAL/NTSC VHS. One native
+the ABI v6 GPU preview route for native-rate 40 MSPS PAL/NTSC VHS. One native
 decode context persists across requested windows. A deterministic 15-tap CUDA
 FIR performs the anti-aliased 2:1 reduction to 20 MSPS before the persistent
 GPU sync, FM, time-base, chroma, and dropout graph. A CUDA output stage renders
-field-rate bob directly into NV12 device memory; NVENC registers that device
-pointer and emits H.264 without downloading full luma, chroma, or NV12 frames.
+field-rate bob directly into a block-linear NV12 CUDA array; NVENC registers
+that array and bypasses its pitch-linear conversion while emitting H.264
+without downloading full luma, chroma, or NV12 frames.
 Each bounded RF batch crosses once on upload; thereafter only small sync/field-order control
 metadata and compressed packets cross the host/device boundary. The compressed
 packets enter managed memory, and FFmpeg uses `-c:v copy` solely to form the
 HLS/fMP4 timeline. This explicit route requires NVENC and fails
-closed instead of probing QSV, AMF, libx264, IPP, or Exact. Normal decode/export
-sample-rate behavior is unchanged.
+closed instead of probing QSV, AMF, libx264, IPP, or Exact. It is the forced
+preview form of `--decode-at-20msps`; complete decode changes rate only when
+that switch is explicitly present.
 
-On the local RTX 4070 and one real 631.452-second PAL 40 MSPS capture, the same
-current executable served steady windows W15/W25/W30/W35 in an average 1.142
-seconds with CUDA and 1.528 seconds with the default 20-thread IPP preview.
-That is 25.3% lower wall time and about 32.8% greater source-frame throughput
-(43.8 versus 33.0 fps). `decode.exe` process CPU averaged 0.914 versus 8.719
-seconds, but that CPU metric excludes each FFmpeg child. The first cold window
-favoured IPP, 2.153 versus 2.447 seconds, because the CUDA route allocates and
-plans persistent CUDA/cuFFT/NVENC state once. Both outputs were H.264 Main,
-768x576, progressive 50 fps with the expected PAL colour tags. CUDA begins
-about one output field earlier; after aligning that 20 ms offset, rendered
-SSIM Y/U/V/All was 0.907542/0.964438/0.972597/0.927867 and manual inspection
-retained the same scene, colour, and motion. This is preview-quality evidence,
-not Exact parity or a cross-GPU guarantee; real NTSC capture quality remains
-uncertified, although the synthetic NTSC native pipeline passes.
+Only this CUDA preview route enlarges the FFmpeg PCM16 rewind window from the
+generic 2 MiB default to a bounded 32 MiB per session. That retains the preroll
+and batch overlap shared by adjacent two-second windows, avoiding a container
+restart during normal forward playback. It is neither an unbounded read-ahead
+queue nor a change to Exact, IPP, or normal CUDA-full decoding.
+
+The existing CUDA bob equations and field cadence are intentionally unchanged.
+For preview only, a dropout pixel may borrow the nearest clean opposite-parity
+field available in the current bounded device batch; a paired dropout or batch
+edge falls back to the existing same-field concealment. Chroma uses a
+non-recursive 75/25 current/previous-field blend, and its history resets on
+every seek-window `open`, so random seeks do not inherit another window's
+colour. Full CUDA decode is unaffected. A five-window weak-signal sweep also
+found that the full-decode line-phase snap consistently reduced preview
+agreement, so device preview skips that guard by default while full decode
+retains it; `CUVHS_FORCE_PREVIEW_LINE_PHASE_GUARD=1` restores it for diagnosis.
+
+On the local RTX 4070 and one real 631.452-second PAL 40 MSPS capture, the
+corrected sustained matrix measured 47.032 CUDA versus 34.332 IPP source fps,
+or 1.370x, across two 20-window runs per backend. Cold W5 averaged 1.158 seconds
+for CUDA and 1.913 seconds for IPP. Both outputs were H.264 Main, 768x576,
+progressive 50 fps with the expected PAL colour tags.
+
+The final-source quality recheck served W5/W15/W20/W25/W30/W35 in matrix order;
+W20 was an untallied bridge so the persistent encoder saw the same request
+sequence. W5/W15/W25/W30/W35 were compared after trimming the first IPP output
+frame for one-field alignment. Default CUDA preview averaged rendered SSIM
+Y/U/V/All of 0.914657/0.957361/0.966698/0.930448. Forcing the full-decode
+line-phase guard averaged 0.910581/0.954161/0.963665/0.926692, while disabling
+cross-field dropout and chroma stabilization averaged
+0.904516/0.952275/0.963803/0.922357. Default combined SSIM was higher than both
+alternatives on every tested window, revalidating both preview-only choices at
+the corrected coordinates. The results are retained under
+`.artifacts/cuda-preview-current-validation-20260820-203748/`.
+
+A separate five-window 12-versus-16-field CUDA comparison averaged 0.9716 SSIM,
+never fell below 0.960934, and showed no one-frame cadence offset. This is
+preview-quality evidence, not Exact parity or a cross-GPU guarantee; real NTSC
+capture quality remains uncertified, although the synthetic NTSC native
+pipeline passes.
 
 Binary releases keep the approximately 1.2 MiB CUDA-fast bridge but no longer
 embed the 271 MiB `cufft64_12.dll`. The first explicit `cuda-fast` request
@@ -289,8 +418,8 @@ root, and `VHSDECODE_CUDA_AUTO_DOWNLOAD=0` disables downloading. A download or
 load failure remains explicit and never falls back to a CPU backend.
 
 This backend has its own numerical contract; neither `v0.4.0` nor `current`
-hash compatibility is claimed. On the local RTX 4070 12 GiB development
-machine, a current same-session interleaved comparison used the same fixed
+hash compatibility is claimed. An earlier same-session
+interleaved comparison on the local RTX 4070 12 GiB development machine used the same fixed
 private 40 MHz real PAL `.ldf` request,
 `--start_fileloc 320000000 --length 500`. CUDA completed in 15.605154 and
 15.747770 seconds; `ipp-fast --threads 20` completed in 14.108349 and
@@ -302,7 +431,9 @@ exactly 1,000 ordered, alternating 1135-by-313 fields with the same
 locations are 322,212,917 and 320,563,200 because the independent sync/TBC
 algorithms select different boundaries. This is a same-request performance
 comparison rather than an output-equality claim, and it is not a general speed
-guarantee across tapes, systems, drivers, or NVIDIA models.
+guarantee across tapes, systems, drivers, or NVIDIA models. It is retained for
+provenance; the resource matrix above is a newer environment snapshot rather
+than proof that later source changes alone reversed this result.
 
 A separate startup-inclusive A-B-B-A comparison against the immediately
 preceding CUDA executable measured 22.083587/21.753076 seconds for the old
@@ -4354,7 +4485,7 @@ Requirements:
 .\tools\build-cuda-fast-native.ps1
 dotnet restore VHSDecodeDotNet.slnx
 dotnet build VHSDecodeDotNet.slnx -c Release --no-restore
-dotnet test --solution VHSDecodeDotNet.slnx -c Release --no-build --no-restore --minimum-expected-tests 1569
+dotnet test --solution VHSDecodeDotNet.slnx -c Release --no-build --no-restore --minimum-expected-tests 1577
 dotnet test --project tests\VHSDecode.Tests\VHSDecode.Tests.csproj -c Release --no-build --no-restore --coverage --coverage-output coverage.cobertura.xml --coverage-output-format cobertura
 ```
 
@@ -4384,7 +4515,7 @@ The default command runs every native GPU test. GPU-less CI may pass
 but is not GPU runtime validation.
 
 The current formal Release build has zero warnings and errors. The xUnit v3
-project exposes **1,569** independently discoverable tests to both
+project exposes **1,577** independently discoverable tests to both
 `dotnet test` and Visual Studio Test Explorer.
 
 <!-- SECTION: usage -->
@@ -4405,8 +4536,8 @@ After a Release build, use either facade dispatch or an apphost alias:
 ```powershell
 src\VHSDecode.Cli\bin\Release\net11.0\decode.exe vhs [upstream options] input output
 src\VHSDecode.Cli\bin\Release\net11.0\vhs-decode.exe [upstream options] input output
-decode.exe vhs --dsp-backend ipp-fast [upstream options] input output
-decode.exe vhs --dsp-backend cuda-fast --pal [supported options] input.ldf output
+decode.exe vhs --dsp-backend ipp-fast [--decode-at-20msps] [upstream options] input output
+decode.exe vhs --dsp-backend cuda-fast --pal [--decode-at-20msps] [supported options] input.ldf output
 decode.exe vhs --preview-server --dsp-backend cuda-fast --pal input.ldf
 ```
 

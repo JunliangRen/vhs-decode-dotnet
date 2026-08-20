@@ -11,7 +11,8 @@ public static class RfLoaderFactory
         string filename,
         bool preferPyAvMappedRawFlacSeeking,
         bool fastContainerSeeking = false,
-        bool ignoreExtensionCase = false)
+        bool ignoreExtensionCase = false,
+        int fastContainerRewindSize = FfmpegPcm16SampleLoader.DefaultRewindSize)
     {
         string routingFilename = ignoreExtensionCase
             ? filename.ToLowerInvariant()
@@ -60,7 +61,10 @@ public static class RfLoaderFactory
             {
                 if (fastContainerSeeking)
                 {
-                    return new FfmpegPcm16SampleLoader(filename, fastInputSeek: true);
+                    return new FfmpegPcm16SampleLoader(
+                        filename,
+                        fastInputSeek: true,
+                        rewindSize: fastContainerRewindSize);
                 }
 
                 if (info.SupportsExactLibsndfileSeeking)
@@ -79,22 +83,25 @@ public static class RfLoaderFactory
                 }
             }
 
-            return new FfmpegPcm16SampleLoader(filename, fastContainerSeeking);
+            return new FfmpegPcm16SampleLoader(
+                filename,
+                fastInputSeek: fastContainerSeeking,
+                rewindSize: fastContainerRewindSize);
         }
 
         return new FfmpegStreamSampleLoader([], []);
     }
 
-    internal static IRfSampleLoader CreatePreviewHalfRateSource(
+    internal static IRfSampleLoader CreateVhsNativeSource(
         string filename,
         bool fastContainerSeeking)
     {
-        if (filename.EndsWith(".raw", StringComparison.Ordinal))
+        if (filename.EndsWith(".raw", StringComparison.OrdinalIgnoreCase))
         {
             return new Int16SampleLoader();
         }
 
-        if (filename.EndsWith(".s8", StringComparison.Ordinal))
+        if (filename.EndsWith(".s8", StringComparison.OrdinalIgnoreCase))
         {
             return new Int8SampleLoader();
         }
@@ -102,7 +109,8 @@ public static class RfLoaderFactory
         return CreateNative(
             filename,
             preferPyAvMappedRawFlacSeeking: false,
-            fastContainerSeeking);
+            fastContainerSeeking,
+            ignoreExtensionCase: true);
     }
 
     public static IRfSampleLoader CreateResampling(string filename, double inputFrequencyMHz)

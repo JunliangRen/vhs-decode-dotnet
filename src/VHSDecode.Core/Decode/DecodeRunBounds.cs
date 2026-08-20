@@ -74,11 +74,18 @@ public readonly record struct DecodeRunBounds(
 {
     public long StartSample => StartPosition.Sample;
 
-    public static DecodeRunBounds FromCommand(ParsedCommand command, int nominalFieldSampleCount)
+    public static DecodeRunBounds FromCommand(
+        ParsedCommand command,
+        int nominalFieldSampleCount,
+        int sourceSamplesPerDecodeSample = 1)
     {
         if (nominalFieldSampleCount <= 0)
         {
             throw new ArgumentOutOfRangeException(nameof(nominalFieldSampleCount));
+        }
+        if (sourceSamplesPerDecodeSample <= 0)
+        {
+            throw new ArgumentOutOfRangeException(nameof(sourceSamplesPerDecodeSample));
         }
 
         object? startValue = command.Values.TryGetValue("start", out object? parsedStart)
@@ -89,7 +96,8 @@ public readonly record struct DecodeRunBounds(
             nominalFieldSampleCount);
         double startFileLocation = command.Get<double>("start_fileloc");
         DecodeStartPosition startPosition = startFileLocation != -1.0
-            ? DecodeStartPosition.FromFloat(startFileLocation)
+            ? DecodeStartPosition.FromFloat(
+                startFileLocation / sourceSamplesPerDecodeSample)
             : startFramePosition;
 
         BigInteger frames = BigInteger.Max(BigInteger.Zero, command.Get<BigInteger>("length"));

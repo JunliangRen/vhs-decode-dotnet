@@ -9,7 +9,7 @@
 upstream release `v0.4.0`、commit
 `43155200da87c0d49eb37d8ec09b1372075ee8e4` です。
 
-現在の .NET port release は `v0.4.0-2.4.0`（application version `2.4.0`）です。
+現在の .NET port release は `v0.4.0-2.5.0`（application version `2.5.0`）です。
 
 > [!IMPORTANT]
 > この互換移植は現在も開発中です。トップレベルのデコード経路は実装済みで
@@ -38,7 +38,7 @@ upstream release `v0.4.0`、commit
 - VHS family には VHS/S-VHS、Betamax、Video8/Hi8、U-matic、Type C、EIAJ、
   upstream が対応する PAL/NTSC variant が含まれます。
 - TBC utility、ダブルクリック GUI、開発者向け plot window は対象外です。
-- Visual Studio 2026 の `.slnx` には **1,569** 件の標準 xUnit v3 test があり、
+- Visual Studio 2026 の `.slnx` には **1,577** 件の標準 xUnit v3 test があり、
   Test Explorer と `dotnet test` の両方で実行できます。
 
 <!-- SECTION: start -->
@@ -80,8 +80,10 @@ CPU YADIF + AMF、CPU YADIF + libx264 の順に実際に検証します。
 IPP が利用可能なら `ipp-fast` を自動選択し、それ以外では portable な managed
 backend に戻ります。標準 40 MSPS VHS preview は固定 anti-alias filter を通した後、
 内部 RF を 20 MSPS で decode します。native 20 MSPS VHS input は 20 MSPS のままで、
-S-VHS、その他の tape format、LaserDisc、通常の decode/export path は従来の
-sample-rate behavior を維持します。この最適化は自動で、user-facing option は追加しません。
+supported VHS preview route は full decode の `--decode-at-20msps` を強制した場合と
+同じ behavior です。full VHS decode では `ipp-fast` または `cuda-fast` でこの option を
+明示的に選べます。Exact、S-VHS、その他の tape format、LaserDisc は従来の
+sample-rate behavior を維持します。
 起動時には選択した video pipeline、IPP-FAST の初期化成否、
 実際の decode thread 数、別々の行で更新される window ID と realtime FPS を表示します。少なくとも
 1 つの pipeline が利用できる FFmpeg が必要で、`VHSDECODE_FFMPEG` と
@@ -96,18 +98,47 @@ decode.exe vhs --preview-server --dsp-backend cuda-fast --pal input.ldf
 
 この path は 1 つの CUDA context を window 間で再利用し、anti-alias 付き 40→20
 MSPS decimation、sync、FM/chroma/dropout processing、NV12 bob rendering、NVENC
-H.264 encode を GPU 上で実行します。NVENC は CUDA device pointer を直接 register
-します。各 bounded RF batch は一度だけ upload し、full luma/chroma/NV12 frame は host memory へ
+H.264 encode を GPU 上で実行します。renderer は block-linear NV12 CUDA array へ直接
+書き込み、NVENC はその array を register して pitch-linear conversion を省きます。各 bounded RF batch は一度だけ upload し、full luma/chroma/NV12 frame は host memory へ
 download しません。host/device 境界を通るのは少量の sync/field-order control metadata
 と圧縮済み H.264 packet だけで、FFmpeg は HLS/fMP4 への copy-mux のみを担当します。
 compatible NVIDIA GPU が必須で、CPU preview や
-別 encoder へ fallback しません。tested RTX 4070 と 1 本の real PAL capture の
-steady-state 2 秒 window 4 個では、CUDA の平均は 1.142 秒、default 20-thread IPP
-preview は 1.528 秒でした。wall time は 25.3% 少なく、source-frame throughput は
-32.8% 高くなりました。最初の cold CUDA window は persistent CUDA/cuFFT/NVENC
-state の作成により遅く、2.447 秒対 2.153 秒でした。両 preview の見え方は近く、
-1 field の timing offset を補正した rendered SSIM は 0.927867 です。これは当該
-capture/hardware に限定した preview 結果であり、Exact equivalence ではありません。
+別 encoder へ fallback しません。既存の GPU bob deinterlacer は変更していません。
+preview のみ、bounded batch 内の clean な opposite-parity field で dropout を置換し、
+seek window ごとに reset する 1-field 75/25 current/previous chroma blend を使います。
+
+2026-08-20 の sustained local resource matrix は同じ real 40 MSPS PAL capture、Intel Core
+Ultra 7 265K（20 logical processor）、RTX 4070 を使用しました。最初の 5 行は source
+commit `41bfd92`、修正済み IPP preview 行は `1fb1455` から取得しました。各 row は独立
+process launch 2 回の平均で、括弧内は 2 回の source-frame rate range です。
+
+| Path | Source fps（range） | `decode.exe` CPU | System CPU | GPU SM avg/peak | NVENC avg/peak | Peak GPU FB |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| Full CUDA 40 MSPS | 35.30（35.28-35.33） | 10.81% / 2.16 cores | 33.89% | 32.44% / 72% | 0% / 0% | 7,038 MiB |
+| Full IPP 40 MSPS | 23.79（23.71-23.87） | 22.15% / 4.43 cores | 28.76% | 0.10% / 4% | 0% / 0% | 3,102 MiB |
+| Full CUDA 20 MSPS | 35.80（35.60-35.99） | 10.92% / 2.18 cores | 34.74% | 27.67% / 54% | 0% / 0% | 5,288 MiB |
+| Full IPP 20 MSPS | 26.86（26.25-27.48） | 24.19% / 4.84 cores | 48.39% | 0% / 0% | 0% / 0% | 3,102 MiB |
+| Preview CUDA 20 MSPS | 47.03（46.59-47.48） | 4.06% / 0.81 cores | 24.75% | 26.91% / 61% | 3.12% / 8% | 4,795 MiB |
+| Preview IPP 20 MSPS | 34.33（34.05-34.61） | 24.66% / 4.93 cores | 43.85% | 1.52% / 9% | 1.48% / 4% | 3,292 MiB |
+
+Full run は source frame 500 を要求し、exactly 1,000 output field を検証しました。
+Preview run は別の cold W5 後に 20 個の異なる 2-second window、つまり source frame
+1,000 を要求しました。fps は source-frame rate であり、2 output field/bob frame を
+二重に数えません。process CPU は 20 logical processor 全体で正規化し、system CPU
+には FFmpeg、driver、sampler、その他 machine work も含みます。GPU は global 100 ms
+NVML sample です。最初の 5 行の idle baseline は system CPU 5.05%、GPU SM 0%、
+NVENC 0%、GPU FB 3,103 MiB で、別途修正した IPP preview 行は system CPU 6.85%、
+GPU FB 3,110 MiB を使用しました。CUDA の IPP 比 source throughput は full-40/full-20/
+preview-20 で 1.48x/1.33x/1.37x です。詳細は
+[performance reference](docs/README.detailed.ja.md#current-ippcuda-resource-matrix)を
+参照してください。
+
+final source の 5-window quality recheck は、修正済み IPP coordinate を使用しました。
+1 field alignment のため IPP の最初の output frame を除くと、default CUDA preview の
+SSIM Y/U/V/All 平均は 0.914657/0.957361/0.966698/0.930448 でした。強制
+line-phase guard の combined 平均は 0.926692、cross-field dropout と chroma
+stabilization を同時に無効化した場合は 0.922357 で、default は全 window で上回りました。
+これは当該 capture/hardware に限定した preview 結果で、Exact equivalence ではありません。
 
 <!-- SECTION: profiles -->
 
@@ -130,14 +161,26 @@ capture/hardware に限定した preview 結果であり、Exact equivalence で
 | --- | --- |
 | `exact` | default の managed path。互換性を重視する decode に使用します。 |
 | `ipp-fast` | Intel IPP を使う experimental Windows x64 VHS / LaserDisc real-RF path。浮動小数点 bit が変化する可能性があり、`exact` へ silent fallback しません。 |
-| `cuda-fast` | NVIDIA CUDA 13 を使う experimental Windows x64 full-signal VHS path。独立した numerical contract を持ち、現時点では native-rate 40 MSPS PAL/NTSC VHS のみを support し、CPU backend へ silent fallback しません。 |
+| `cuda-fast` | NVIDIA CUDA 13 を使う experimental Windows x64 full-signal VHS path。独立した numerical contract を持ち、PAL/NTSC VHS を通常は 40 MSPS、`--decode-at-20msps` 指定時は GPU 40→20 または native 20 MSPS で decode し、CPU backend へ silent fallback しません。 |
 
 ```powershell
 decode.exe vhs --compat-version current --dsp-backend ipp-fast `
   --threads 20 input.lds output
+decode.exe vhs --dsp-backend ipp-fast --decode-at-20msps `
+  --pal input.lds output-20msps
 decode.exe vhs --dsp-backend cuda-fast --pal `
-  --start 100 --length 20 input.ldf output
+  --decode-at-20msps --start 100 --length 20 input.ldf output
 ```
+
+`--decode-at-20msps` は VHS preview-quality mode で、Exact equivalence は保証しません。
+40 MSPS source は anti-alias filter 後に内部 20 MSPS で decode し、native 20 MSPS
+input は再度 decimate しません。TBC metadata の `fileLoc` は元の input sample 座標を
+維持します。
+これは preview-quality の sample-rate 選択であり、常に高速化する switch ではありません。
+現在の startup-inclusive 500-frame gate では CUDA throughput が 1.40%、IPP が 12.91%
+上がりました。以前の 100-frame short gate では fixed startup/reduction cost が支配し、
+IPP は 6.83% 遅く見えました。full decode で使う前に対象 capture と実際の run length を
+benchmark してください。
 
 default Windows release は小型 CUDA-fast bridge を保持しますが、271 MiB の cuFFT DLL
 は埋め込みません。`--dsp-backend cuda-fast` を明示したときだけ compatible CUDA 13/
@@ -154,14 +197,12 @@ CVBS と HiFi は引き続き `ipp-fast` を拒否します。release-compatible
 必要な場合は `exact` を使用してください。互換性を重視する用途では
 [backend の詳細](docs/README.detailed.ja.md#パフォーマンス)を先に確認してください。
 tested RTX 4070 と 1 本の real PAL capture では、画質修正後の FP32 CUDA-full path は
-Exact の見え方に大幅に近づきましたが、measured CPU throughput は上回りません。同じ
-`--start_fileloc 320000000 --length 500` request の current same-session interleaved
-comparison では、CUDA は 15.605/15.748 秒、`ipp-fast --threads 20` は
-14.108/14.064 秒でした。median は 15.676/14.086 秒（31.895/35.495 fps）で、CUDA は
-wall time が 11.29% 長く、IPP throughput の 0.8986x です。別の隣接 A-B-B-A comparison
-では CUDA の median が直前 build の 21.918 秒から 16.057 秒へ短縮されました
-（wall time 26.74% 減、throughput 36.50% 増）。final CUDA run 2 回の
-luma/chroma/JSON は byte-identical でした。default の export-side dropout correction
+Exact の見え方に大幅に近づきました。上の sustained matrix では、40 MSPS は CUDA
+35.30 source fps、IPP 23.79（1.48x）、20 MSPS は 35.80 対 26.86（1.33x）でした。
+同じ source を使った別の短い session では CUDA throughput が大幅に高かったため、
+これは environment snapshot であり、後続 code だけが以前の CUDA/IPP 結果を逆転した証拠ではありません。各 variant の 2 回の
+luma/chroma/JSON output は、その variant 内で byte-identical でした。default の
+export-side dropout correction
 を使い Exact と alignment した
 79-frame lossless comparison の SSIM Y/U/V/All は
 0.954905/0.988109/0.991285/0.972301、PSNR Y/U/V/average は
@@ -265,7 +306,7 @@ header は FFmpeg を維持します。
 dotnet restore VHSDecodeDotNet.slnx
 dotnet build VHSDecodeDotNet.slnx -c Release --no-restore
 dotnet test --solution VHSDecodeDotNet.slnx -c Release `
-  --no-build --no-restore --minimum-expected-tests 1569
+  --no-build --no-restore --minimum-expected-tests 1577
 ```
 
 Visual Studio 2026 で `VHSDecodeDotNet.slnx` を開くと、build、debug、

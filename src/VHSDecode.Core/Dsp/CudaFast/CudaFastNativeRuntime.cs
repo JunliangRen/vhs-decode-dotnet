@@ -62,6 +62,7 @@ internal sealed record CudaFastNativeRunConfiguration(
     double SampleRateMhz,
     ulong TotalSamples,
     uint MaximumOutputFields,
+    uint DeviceDecimationFactor,
     string OutputBase,
     bool Overwrite,
     CudaFastInputSampleFormat InputSampleFormat,
@@ -129,7 +130,7 @@ internal sealed class CudaFastBackendUnavailableException : NotSupportedExceptio
 
 internal sealed class CudaFastNativeRuntime : ICudaFastNativeRuntime, ICudaFastPreviewNativeRuntime
 {
-    internal const uint AbiVersion = 0x00050000;
+    internal const uint AbiVersion = 0x00060000;
     internal const string NativeLibraryName = "vhsdecode_cuda_fast.dll";
     private const int StatusOk = 0;
     private const int StatusCudaUnavailable = -20002;
@@ -270,6 +271,7 @@ internal sealed class CudaFastNativeRuntime : ICudaFastNativeRuntime, ICudaFastP
                 Overwrite = configuration.Overwrite ? 1 : 0,
                 InputSampleFormat = (uint)configuration.InputSampleFormat,
                 MaximumOutputFields = configuration.MaximumOutputFields,
+                DeviceDecimationFactor = configuration.DeviceDecimationFactor,
                 ReadCallback = Marshal.GetFunctionPointerForDelegate(configuration.ReadCallback),
                 CancelCallback = Marshal.GetFunctionPointerForDelegate(configuration.CancelCallback),
                 UserData = configuration.UserData
@@ -680,6 +682,7 @@ internal sealed class CudaFastNativeRuntime : ICudaFastNativeRuntime, ICudaFastP
         public int Overwrite;
         public uint InputSampleFormat;
         public uint MaximumOutputFields;
+        public uint DeviceDecimationFactor;
         public nint ReadCallback;
         public nint CancelCallback;
         public nint UserData;
