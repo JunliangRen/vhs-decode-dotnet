@@ -358,6 +358,37 @@ public sealed class PreviewServerTests
                 sourcePositionedPreview,
                 framesPerSecond: 25.0,
                 sourceSampleRateHz: 40_000_000.0));
+
+        ParsedCommand fortyMspsWindow = PreviewDecodeCommandFactory.ForWindow(
+            previewTemplate,
+            startSeconds: 1.88,
+            sourceSampleRateHz: 40_000_000.0,
+            requestedFrames: 58);
+        Assert.Equal(75_200_000.0, fortyMspsWindow.Get<double>("start_fileloc"));
+        using (DecodeSession fortyMspsWindowSession = DecodeSessionFactory.Create(
+            fortyMspsWindow))
+        {
+            Assert.Equal(37_600_000L, fortyMspsWindowSession.RunBounds.StartSample);
+            Assert.Equal(75_200_000L, fortyMspsWindowSession.ToSourceSampleLocation(
+                fortyMspsWindowSession.RunBounds.StartSample));
+        }
+
+        ParsedCommand nativeTwentyPreview = new CommandLineParser().Parse(
+            CliSpecs.Vhs,
+            ["--preview-server", "--frequency", "20", "capture.s16"]);
+        ParsedCommand nativeTwentyWindowTemplate =
+            PreviewDecodeCommandFactory.CreateFastTemplate(nativeTwentyPreview);
+        ParsedCommand nativeTwentyWindow = PreviewDecodeCommandFactory.ForWindow(
+            nativeTwentyWindowTemplate,
+            startSeconds: 1.88,
+            sourceSampleRateHz: 20_000_000.0,
+            requestedFrames: 58);
+        Assert.Equal(37_600_000.0, nativeTwentyWindow.Get<double>("start_fileloc"));
+        using DecodeSession nativeTwentyWindowSession = DecodeSessionFactory.Create(
+            nativeTwentyWindow);
+        Assert.Equal(37_600_000L, nativeTwentyWindowSession.RunBounds.StartSample);
+        Assert.Equal(37_600_000L, nativeTwentyWindowSession.ToSourceSampleLocation(
+            nativeTwentyWindowSession.RunBounds.StartSample));
     }
 
     [Fact(DisplayName = "IPP complete decode can opt into 20 MSPS with source-coordinate metadata")]

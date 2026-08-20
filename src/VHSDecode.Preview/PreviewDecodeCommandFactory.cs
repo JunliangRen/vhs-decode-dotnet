@@ -117,12 +117,18 @@ internal static class PreviewDecodeCommandFactory
 
     internal static ParsedCommand ForWindow(
         ParsedCommand template,
-        long startSample,
+        double startSeconds,
+        double sourceSampleRateHz,
         int requestedFrames)
     {
-        if (startSample < 0)
+        if (!double.IsFinite(startSeconds) || startSeconds < 0.0)
         {
-            throw new ArgumentOutOfRangeException(nameof(startSample));
+            throw new ArgumentOutOfRangeException(nameof(startSeconds));
+        }
+
+        if (!double.IsFinite(sourceSampleRateHz) || sourceSampleRateHz <= 0.0)
+        {
+            throw new ArgumentOutOfRangeException(nameof(sourceSampleRateHz));
         }
 
         if (requestedFrames <= 0)
@@ -130,9 +136,14 @@ internal static class PreviewDecodeCommandFactory
             throw new ArgumentOutOfRangeException(nameof(requestedFrames));
         }
 
+        long startSourceSample = checked((long)Math.Round(
+            startSeconds * sourceSampleRateHz,
+            MidpointRounding.AwayFromZero));
         var values = new Dictionary<string, object?>(template.Values, StringComparer.Ordinal)
         {
-            ["start_fileloc"] = (double)startSample,
+            // start_fileloc is always expressed in original input coordinates.
+            // DecodeRunBounds maps it to the reduced decode timeline exactly once.
+            ["start_fileloc"] = (double)startSourceSample,
             ["length"] = new BigInteger(requestedFrames),
             ["start"] = template.Spec.Name == "ld" ? 0.0 : BigInteger.Zero
         };

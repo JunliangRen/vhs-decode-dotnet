@@ -258,9 +258,6 @@ public sealed class DecodePreviewSegmentProvider : IPreviewSegmentProvider
         double decodeStartSeconds = Math.Max(
             _baseStartSeconds,
             targetSeconds - PrerollSeconds);
-        long decodeStartSample = checked((long)Math.Round(
-            decodeStartSeconds * _decodeSampleRateHz,
-            MidpointRounding.AwayFromZero));
         long targetSample = checked((long)Math.Round(
             targetSeconds * _decodeSampleRateHz,
             MidpointRounding.AwayFromZero));
@@ -272,7 +269,8 @@ public sealed class DecodePreviewSegmentProvider : IPreviewSegmentProvider
         int maximumFields = checked((decodedFrameCount * 2) + prerollFieldCount + 8);
         ParsedCommand windowCommand = PreviewDecodeCommandFactory.ForWindow(
             _template,
-            decodeStartSample,
+            decodeStartSeconds,
+            SourceSampleRateHz,
             decodedFrameCount + prerollFrameCount + 8);
         using DecodeSession session = DecodeSessionFactory.Create(windowCommand);
         using FileStream input = new(
