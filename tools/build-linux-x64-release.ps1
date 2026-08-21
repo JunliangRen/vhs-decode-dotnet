@@ -891,9 +891,11 @@ if ($sourceCommitOutput.Count -ne 1 -or
     throw "Could not resolve one full source commit from $repositoryRoot."
 }
 $sourceCommit = $sourceCommitOutput[0]
-[string[]]$workingTreeStatus = Invoke-Native git @(
-    '-c', "safe.directory=$repositoryRoot",
-    '-C', $repositoryRoot, 'status', '--porcelain', '--untracked-files=normal') -CaptureOutput
+[string[]]$workingTreeStatus = @(
+    Invoke-Native git @(
+        '-c', "safe.directory=$repositoryRoot",
+        '-C', $repositoryRoot, 'status', '--porcelain', '--untracked-files=normal') -CaptureOutput
+)
 $workingTreeDirty = $workingTreeStatus.Count -ne 0
 
 $workRoot = Reset-Directory $workRoot
