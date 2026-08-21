@@ -854,10 +854,17 @@ foreach ($command in @(
 }
 
 [string[]]$glibcOutput = Invoke-Native getconf @('GNU_LIBC_VERSION') -CaptureOutput
-if ($glibcOutput.Count -ne 1 -or $glibcOutput[0] -notmatch '^glibc\s+(\d+\.\d+)$') {
+if ($glibcOutput.Count -ne 1) {
     throw "This release builder requires glibc; getconf returned '$($glibcOutput -join ' ')'."
 }
-$hostGlibc = [Version]$Matches[1]
+$glibcMatch = [System.Text.RegularExpressions.Regex]::Match(
+    $glibcOutput[0],
+    '^glibc\s+(\d+\.\d+)$',
+    [System.Text.RegularExpressions.RegexOptions]::CultureInvariant)
+if (-not $glibcMatch.Success) {
+    throw "This release builder requires glibc; getconf returned '$($glibcOutput -join ' ')'."
+}
+$hostGlibc = [Version]$glibcMatch.Groups[1].Value
 if (-not $AllowNewerGlibc -and $hostGlibc -gt $maximumReleaseGlibc) {
     throw "Host glibc $hostGlibc is newer than the release ceiling $maximumReleaseGlibc. Use Ubuntu 22.04, or -AllowNewerGlibc only for non-release validation."
 }
