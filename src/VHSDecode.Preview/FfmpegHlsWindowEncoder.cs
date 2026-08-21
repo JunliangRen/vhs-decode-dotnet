@@ -23,7 +23,7 @@ internal sealed class FfmpegHlsWindowEncoder
         PreviewTimeline timeline,
         PreviewEncoderBackend encoderBackend)
     {
-        _ffmpegPath = ffmpegPath;
+        _ffmpegPath = PreviewServerOptions.NormalizeExecutablePath(ffmpegPath);
         _width = width;
         _height = height;
         _crf = crf;
@@ -142,6 +142,8 @@ internal sealed class FfmpegHlsWindowEncoder
         var startInfo = new ProcessStartInfo
         {
             FileName = _ffmpegPath,
+            WorkingDirectory = Path.GetDirectoryName(playlistPath)
+                ?? throw new InvalidOperationException("Playlist path has no parent directory."),
             UseShellExecute = false,
             CreateNoWindow = true,
             RedirectStandardInput = true,
@@ -236,7 +238,9 @@ internal sealed class FfmpegHlsWindowEncoder
             "-hls_playlist_type", "vod",
             "-hls_segment_type", "fmp4",
             "-hls_flags", "independent_segments",
-            "-hls_fmp4_init_filename", initPath,
+            // FFmpeg versions disagree on whether this is relative to the
+            // playlist or process directory. StartProcess pins both together.
+            "-hls_fmp4_init_filename", Path.GetFileName(initPath),
             "-hls_segment_filename", segmentPattern,
             playlistPath
         ]);

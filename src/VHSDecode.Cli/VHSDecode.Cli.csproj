@@ -21,4 +21,16 @@
     <Copy SourceFiles="$(TargetDir)$(AssemblyName).exe" DestinationFiles="$(TargetDir)hifi-decode.exe" />
   </Target>
 
+  <Target Name="CreateLinuxDecodeAliases" AfterTargets="Publish" Condition="'$(RuntimeIdentifier)' == 'linux-x64' And Exists('$(PublishDir)$(AssemblyName)')">
+    <Copy SourceFiles="$(PublishDir)$(AssemblyName)" DestinationFiles="$(PublishDir)vhs-decode" />
+    <Copy SourceFiles="$(PublishDir)$(AssemblyName)" DestinationFiles="$(PublishDir)cvbs-decode" />
+    <Copy SourceFiles="$(PublishDir)$(AssemblyName)" DestinationFiles="$(PublishDir)ld-decode" />
+    <Copy SourceFiles="$(PublishDir)$(AssemblyName)" DestinationFiles="$(PublishDir)hifi-decode" />
+  </Target>
+
+  <Target Name="ValidateLinuxX64NativeAssets" BeforeTargets="Publish" Condition="'$(RuntimeIdentifier)' == 'linux-x64'">
+    <Error Condition="!Exists('..\..\artifacts\native\Release\linux-x64\libsndfile.so')" Text="Missing Linux x64 libsndfile sidecar. Run tools/build-linux-x64-release.ps1 on glibc Linux before publishing." />
+    <Error Condition="!Exists('..\..\artifacts\native\Release\linux-x64\libsoxr.so')" Text="Missing Linux x64 libsoxr sidecar. Run tools/build-linux-x64-release.ps1 on glibc Linux before publishing." />
+  </Target>
+
 </Project>

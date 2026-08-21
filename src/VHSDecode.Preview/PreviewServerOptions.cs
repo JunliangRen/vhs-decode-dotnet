@@ -26,6 +26,16 @@ public sealed record PreviewServerOptions
     public string FfprobePath { get; init; } =
         Environment.GetEnvironmentVariable("VHSDECODE_FFPROBE") ?? "ffprobe";
 
+    internal static string NormalizeExecutablePath(string path)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(path);
+        bool containsDirectory = path.Contains(Path.DirectorySeparatorChar)
+            || path.Contains(Path.AltDirectorySeparatorChar);
+        return containsDirectory && !Path.IsPathFullyQualified(path)
+            ? Path.GetFullPath(path, Environment.CurrentDirectory)
+            : path;
+    }
+
     public void Validate()
     {
         if (Port is < 0 or > 65_535)

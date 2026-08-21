@@ -31,12 +31,17 @@
     <PackageReference Include="System.Security.Cryptography.Xml" Version="11.0.0-preview.7.26381.103" />
   </ItemGroup>
 
-  <ItemGroup>
+  <ItemGroup Condition="'$(RuntimeIdentifier)' == 'win-x64' Or ('$(RuntimeIdentifier)' == '' And $([MSBuild]::IsOSPlatform('Windows')))">
     <None Include="runtimes\win-x64\native\sndfile.dll" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" TargetPath="sndfile.dll" />
     <None Include="runtimes\win-x64\native\soxr.dll" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" TargetPath="soxr.dll" />
     <None Include="..\..\artifacts\native\Release\win-x64\vhsdecode_ipp.dll" Condition="Exists('..\..\artifacts\native\Release\win-x64\vhsdecode_ipp.dll')" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" Link="vhsdecode_ipp.dll" TargetPath="vhsdecode_ipp.dll" />
     <None Include="..\..\artifacts\native\Release\win-x64\vhsdecode_cuda_fast.dll" Condition="Exists('..\..\artifacts\native\Release\win-x64\vhsdecode_cuda_fast.dll')" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" Link="vhsdecode_cuda_fast.dll" TargetPath="vhsdecode_cuda_fast.dll" />
     <None Include="..\..\artifacts\native\Release\win-x64\THIRD-PARTY-NOTICES-CUDA-FAST.md" Condition="Exists('..\..\artifacts\native\Release\win-x64\THIRD-PARTY-NOTICES-CUDA-FAST.md')" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" Link="THIRD-PARTY-NOTICES-CUDA-FAST.md" TargetPath="THIRD-PARTY-NOTICES-CUDA-FAST.md" />
+  </ItemGroup>
+
+  <ItemGroup Condition="'$(RuntimeIdentifier)' == 'linux-x64' Or ('$(RuntimeIdentifier)' == '' And $([MSBuild]::IsOSPlatform('Linux')))">
+    <None Include="..\..\artifacts\native\Release\linux-x64\libsndfile.so" Condition="Exists('..\..\artifacts\native\Release\linux-x64\libsndfile.so')" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" Link="libsndfile.so" TargetPath="libsndfile.so" />
+    <None Include="..\..\artifacts\native\Release\linux-x64\libsoxr.so" Condition="Exists('..\..\artifacts\native\Release\linux-x64\libsoxr.so')" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" Link="libsoxr.so" TargetPath="libsoxr.so" />
   </ItemGroup>
 
 </Project>

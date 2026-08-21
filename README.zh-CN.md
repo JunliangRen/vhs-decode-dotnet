@@ -2,7 +2,7 @@
 
 [English](README.md) | **[简体中文](README.zh-CN.md)** | [日本語](README.ja.md)
 
-<!-- README_SYNC: 2026-08-18.01 -->
+<!-- README_SYNC: 2026-08-21.01 -->
 
 这是 [`oyvindln/vhs-decode`](https://github.com/oyvindln/vhs-decode)
 中解码相关部分的 .NET 11 重写，兼容目标为上游 release `v0.4.0`、commit
@@ -35,7 +35,7 @@
 - VHS 家族包括 VHS/S-VHS、Betamax、Video8/Hi8、U-matic、Type C、EIAJ
   以及上游支持的 PAL/NTSC 变体。
 - TBC 工具、双击启动的用户 GUI 和开发者绘图窗口明确不在范围内。
-- Visual Studio 2026 `.slnx` 包含 **1,591** 项标准 xUnit v3 测试；测试可在
+- Visual Studio 2026 `.slnx` 包含 **1,592** 项标准 xUnit v3 测试；测试可在
   Test Explorer 中查看，也可用 `dotnet test` 运行。
 
 <!-- SECTION: start -->
@@ -54,6 +54,19 @@ decode.exe hifi [upstream options] input.lds output.wav
 
 同时支持 `vhs-decode.exe`、`ld-decode.exe` 等独立命令别名。使用
 `decode.exe <command> --help` 查看完整兼容参数。
+
+发布工作流还会生成自包含、多文件的 glibc `linux-x64` tar。Linux 包只支持可移植的
+`exact` 后端，内置 Linux 版 SQLite、libsndfile 和 libsoxr 原生资产，并明确排除
+Windows IPP/CUDA DLL。安装 FFmpeg 与文档列出的系统库后即可运行：
+
+```bash
+tar -xzf vhs-decode-dotnet-linux-x64.tar.gz
+cd vhs-decode-dotnet-linux-x64
+./vhs-decode --pal --dsp-backend exact input.lds output
+```
+
+Ubuntu 22.04/glibc 2.35 基线、运行依赖、校验值、构建来源和发布门禁见
+[Linux x64 发布说明](docs/LINUX_X64.md)。不支持 32 位 x86、ARM/ARM64 或 musl。
 
 ### 可拖动的 RF 预览服务器
 
@@ -286,11 +299,18 @@ TBC、色度、JSON 和日志文件允许在解码期间并发读取，兼容的
 dotnet restore VHSDecodeDotNet.slnx
 dotnet build VHSDecodeDotNet.slnx -c Release --no-restore
 dotnet test --solution VHSDecodeDotNet.slnx -c Release `
-  --no-build --no-restore --minimum-expected-tests 1591
+  --no-build --no-restore --minimum-expected-tests 1592
 ```
 
 在 Visual Studio 2026 中打开 `VHSDecodeDotNet.slnx`，即可构建、调试并通过
 Test Explorer 运行 xUnit v3 测试。
+
+在 Ubuntu 22.04 x64 上，原生库构建、全量测试、多文件发布、可复现 tar 和最终解包
+smoke 的完整流水线为：
+
+```bash
+pwsh ./tools/build-linux-x64-release.ps1
+```
 
 <!-- SECTION: detail -->
 

@@ -48,10 +48,10 @@ public sealed class LaserDiscAudioNumericsCompatibilityTests
             filters);
 
         Assert.True(output.UsesFloat32Storage);
-        Assert.Equal(
+        WindowsFrozenBitOracle.Equal(
             "68CB22D86AD3C6C85FFE3986CB2DC197C9DE6EA9ECF308E926E3480BC627C8DE",
             Sha256Float32(output.Left));
-        Assert.Equal(
+        WindowsFrozenBitOracle.Equal(
             "0A4B5F027D0072C3F50527544744A516336A1D9701438B32A953564064FE3091",
             Sha256Float32(output.Right));
     }

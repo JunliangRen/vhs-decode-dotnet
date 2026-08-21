@@ -104,12 +104,13 @@ The Microsoft C++ Standard Library is distributed under the Apache License
 
 `VHSDecode.Core.Dsp.SoxrQuickResampler` contains a C# adaptation of
 libsoxr's quick-quality fixed-point clock and `cubic_stage_fn` interpolation
-formula. The HiFi decoder also dynamically loads an unmodified Windows x64
-build of libsoxr commit `a66f3eeeeb62a32403ff143b756eed92b1ec6b62`, the
+formula. The HiFi decoder also dynamically loads an unmodified Windows x64 or
+glibc Linux x64 build of libsoxr commit
+`a66f3eeeeb62a32403ff143b756eed92b1ec6b62`, the
 revision embedded by python-soxr 1.1.0 and used by vhs-decode v0.4.0. Build
 provenance, the complete corresponding source archive, and license texts are
-kept under `third_party/libsoxr` and embedded as resources in binary-only
-single-file releases.
+kept under `third_party/libsoxr`. They are embedded as resources in Windows
+single-file releases and copied into the Linux multi-file tar.
 
 Copyright (c) 2007-2018 robs@users.sourceforge.net
 
@@ -121,13 +122,16 @@ license text.
 
 ## libsndfile
 
-The HiFi decoder dynamically loads the unmodified `sndfile.dll` from the
-official libsndfile 1.2.2 Windows x64 release and uses its libFLAC-backed
-PCM24 writer. It reproduces Python SoundFile's clipping and compression
-initialization sequence and replaces the previous FFmpeg output process.
-Binary provenance, checksums, corresponding source links, bundled-codec
-notices, and the complete LGPL 2.1 text are under `third_party/libsndfile` and
-are embedded as resources in binary-only single-file releases.
+The HiFi decoder dynamically loads libsndfile 1.2.2 and uses its libFLAC-backed
+PCM24 writer. Windows uses the unmodified official x64 `sndfile.dll`; glibc
+Linux x64 builds the unmodified source as an app-local `libsndfile.so`, with
+verified PIC static builds of libogg 1.3.5, libvorbis 1.3.7, opus 1.4, and FLAC
+1.4.2 linked into it and MPEG disabled. It reproduces Python SoundFile's
+clipping and compression initialization sequence and replaces the previous
+FFmpeg output process. Binary/build provenance, checksums, corresponding source
+links, bundled-codec notices, and the complete LGPL 2.1 text are under
+`third_party/libsndfile`; the Linux tar additionally carries all corresponding
+source archives and hashes.
 
 Copyright (C) 1999-2023 Erik de Castro Lopo
 Copyright (C) 2012-2023 libsndfile contributors
@@ -137,6 +141,43 @@ the terms of the GNU Lesser General Public License as published by the Free
 Software Foundation; either version 2.1 of the License, or (at your option)
 any later version. See `third_party/libsndfile/COPYING.LGPL` for the complete
 license text.
+
+## Microsoft .NET and ASP.NET Core runtimes
+
+The glibc Linux x64 archive is self-contained and carries the pinned Microsoft
+.NET and ASP.NET Core runtime packs used by the application. Their complete
+license and third-party notice files are copied from the exact restored runtime
+packs to `licenses/dotnet-runtime` and `licenses/aspnetcore-runtime` in that
+archive.
+
+## NetMQ, AsyncIO, and NaCl.Net
+
+The GNU Radio RF AFE and HiFi transport paths use NetMQ 4.0.4.3 as a separate
+managed assembly, from source commit
+`ca87d32d5ca5d8a2675fb7a9925e4b3dc8c35010`. NetMQ is licensed under
+the GNU Lesser General Public License version 3 with the NetMQ static-linking
+exception. The Linux archive carries the complete license and exception text at
+`licenses/managed-nuget/NetMQ-4.0.4.3-COPYING.LESSER`; the project's GPLv3
+license is at the archive root. The complete corresponding source for the exact
+NetMQ commit is included beside its license as
+`NetMQ-ca87d32d5ca5d8a2675fb7a9925e4b3dc8c35010-source.tar.gz`.
+
+NetMQ depends on AsyncIO 0.1.69 and NaCl.Net 0.1.13. Both are licensed under
+the Mozilla Public License 2.0. The Linux archive records their exact source
+identities in `licenses/managed-nuget/MANIFEST.txt` and provides the complete
+MPL 2.0 text at `licenses/managed-nuget/MPL-2.0.txt`.
+
+The Linux archive's SQLite provider graph also includes SQLitePCLRaw 3.0.5,
+licensed under Apache-2.0, and SQLite 3.53.4, dedicated to the public domain.
+Their complete license/notice files are under `licenses/managed-nuget`.
+
+Microsoft.Data.Sqlite.Core, Microsoft.Extensions.ObjectPool,
+System.Security.Cryptography.Pkcs, System.Security.Cryptography.Xml, and
+System.ServiceModel.Primitives are licensed under MIT. Package-specific
+third-party notices, the complete MIT text, exact versions, and source commits
+are included under `licenses/managed-nuget`. The build fails if the restored
+application NuGet graph drifts from that manifest, so newly introduced package
+licenses cannot be omitted silently.
 
 ## FFmpeg
 

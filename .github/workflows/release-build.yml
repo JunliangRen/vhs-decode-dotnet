@@ -166,7 +166,7 @@ jobs:
         run: dotnet build VHSDecodeDotNet.slnx --configuration Release --no-restore
 
       - name: Run tests
-        run: dotnet test --solution VHSDecodeDotNet.slnx --configuration Release --no-build --no-restore --minimum-expected-tests 1591
+        run: dotnet test --solution VHSDecodeDotNet.slnx --configuration Release --no-build --no-restore --minimum-expected-tests 1592
 
       - name: Run NumPy reduction scalar fallback tests
         env:
@@ -355,5 +355,53 @@ jobs:
         with:
           name: vhs-decode-dotnet-windows-${{ github.sha }}
           path: artifacts/publish/win-x64/
+          if-no-files-found: error
+          retention-days: 30
+
+  linux-x64:
+    name: Build, test, and package Linux x64 release
+    runs-on: ubuntu-22.04
+    timeout-minutes: 90
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+
+      - name: Set up .NET 11 Preview 7
+        uses: actions/setup-dotnet@v5
+        with:
+          global-json-file: global.json
+
+      - name: Verify pinned .NET SDK
+        shell: pwsh
+        run: |
+          $expected = (Get-Content -LiteralPath global.json -Raw |
+            ConvertFrom-Json).sdk.version
+          $actual = dotnet --version
+          if ($actual -cne $expected) {
+            throw "Expected .NET SDK $expected, but dotnet resolved $actual."
+          }
+          dotnet --info
+
+      - name: Install Linux native build and runtime dependencies
+        shell: bash
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            build-essential ca-certificates cmake ninja-build pkg-config python3 \
+            xz-utils binutils ffmpeg libicu-dev
+
+      - name: Build, test, and verify final Linux x64 tar
+        shell: pwsh
+        run: ./tools/build-linux-x64-release.ps1
+
+      - name: Upload Linux x64 release archive
+        if: github.event_name == 'push'
+        uses: actions/upload-artifact@v7
+        with:
+          name: vhs-decode-dotnet-linux-x64-${{ github.sha }}
+          path: |
+            artifacts/release/vhs-decode-dotnet-linux-x64.tar.gz
+            artifacts/release/vhs-decode-dotnet-linux-x64.tar.gz.sha256
           if-no-files-found: error
           retention-days: 30

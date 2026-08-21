@@ -1,12 +1,13 @@
 # Bundled libsoxr
 
-The Windows x64 `soxr.dll` used by the HiFi decoder is built without source
-changes from:
+The Windows x64 `soxr.dll` and glibc Linux x64 `libsoxr.so` used by the HiFi
+decoder are built without source changes from:
 
 - Repository: https://github.com/dofuuz/soxr
 - Commit: `a66f3eeeeb62a32403ff143b756eed92b1ec6b62`
 - Reported version: `libsoxr-0.1.3`
-- DLL SHA-256: `1708DC9BEB53B050EFCF77C5F758DC23658B055BA79ABB01C2D8DB872ECA6BBE`
+- Windows DLL SHA-256:
+  `1708DC9BEB53B050EFCF77C5F758DC23658B055BA79ABB01C2D8DB872ECA6BBE`
 
 This is the same libsoxr revision embedded by python-soxr 1.1.0, which is used
 by vhs-decode v0.4.0. The library was built with Visual Studio 2026 using:
@@ -20,10 +21,15 @@ cmake -S . -B build-vs -G "Visual Studio 18 2026" -A x64 `
 cmake --build build-vs --config Release --target soxr
 ```
 
+The Linux release builder uses CMake/Ninja on the Ubuntu 22.04 glibc baseline
+with the same shared-library, no-tests, and no-OpenMP options. It validates the
+ELF64 x86-64 ABI, exports, `NEEDED` entries, and maximum GLIBC symbol version
+before packaging.
+
 `soxr-a66f3ee-source.zip` is a complete `git archive` of that revision. Its
 SHA-256 is
 `D43F523965810AB91337D86DA2ECBFFAAEDA0001609E48A14BB1FCC8E864D4D2`.
-The application loads `soxr.dll` dynamically, so recipients can rebuild and
-replace the library without rebuilding the managed decoder.
+The application loads the platform libsoxr sidecar dynamically, so recipients
+can rebuild and replace it without rebuilding the managed decoder.
 
 See `LICENCE` and `COPYING.LGPL` for the applicable LGPL 2.1-or-later terms.

@@ -37,7 +37,7 @@ internal sealed partial class HiFiOutputWriter
             catch (DllNotFoundException ex)
             {
                 throw new NotSupportedException(
-                    "sndfile.dll is required to write HiFi FLAC output.",
+                    "The libsndfile native library is required to write HiFi FLAC output.",
                     ex);
             }
 
@@ -171,11 +171,28 @@ internal sealed partial class HiFiOutputWriter
         {
             private const string LibraryName = "sndfile";
 
+            internal static nint Open(
+                string path,
+                int mode,
+                ref SoundFileInfo info)
+                => OperatingSystem.IsWindows()
+                    ? OpenWindows(path, mode, ref info)
+                    : OpenUnix(path, mode, ref info);
+
             [LibraryImport(
                 LibraryName,
                 EntryPoint = "sf_wchar_open",
                 StringMarshalling = StringMarshalling.Utf16)]
-            internal static partial nint Open(
+            private static partial nint OpenWindows(
+                string path,
+                int mode,
+                ref SoundFileInfo info);
+
+            [LibraryImport(
+                LibraryName,
+                EntryPoint = "sf_open",
+                StringMarshalling = StringMarshalling.Utf8)]
+            private static partial nint OpenUnix(
                 string path,
                 int mode,
                 ref SoundFileInfo info);

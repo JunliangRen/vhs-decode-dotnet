@@ -77,19 +77,19 @@ public sealed class LaserDiscVideoFilterCompatibilityTests
 
         Assert.Equal(1.0 / 1_500_000.0, timeConstants[0]);
         Assert.Equal(1.0 / 250_000.0, timeConstants[1]);
-        Assert.Equal(
+        WindowsFrozenBitOracle.Equal(
             "1F429F9C96D0519F6E166F7BDD9CB273265E774FF097F775248DD58FD773722C",
             ComplexBitsSha256(deemphasis));
-        Assert.Equal(
+        WindowsFrozenBitOracle.Equal(
             "0914E9CAB94F9C9CEEA3FC628FBE8B27E6881F393C45636B8664BE6C52B51C84",
             ComplexBitsSha256(poweredDeemphasis));
-        Assert.Equal(
+        WindowsFrozenBitOracle.Equal(
             "117E917EFACCF2211FE4CE705D02D472530B8752CEF95FC462E7AC3F7D100C69",
             ComplexBitsSha256(session.Filters.VideoLowPass));
-        Assert.Equal(
+        WindowsFrozenBitOracle.Equal(
             "84982593560F77DABD49FE5455A1ECFDBEACA8B11BC23D4DEAA6D27A32DD2FA8",
             ComplexBitsSha256(preGroupDelayVideo));
-        Assert.Equal(
+        WindowsFrozenBitOracle.Equal(
             "FB5512BB4674D49E1D0932AAEFB13E09D277293519F361CEE1085803D6ECBC0C",
             ComplexBitsSha256(session.Filters.VideoLowPass05));
 
@@ -116,19 +116,19 @@ public sealed class LaserDiscVideoFilterCompatibilityTests
             referenceFilters: references,
             fmDemodulatorMode: session.FilterOptions.FmDemodulatorMode);
 
-        Assert.Equal(
+        WindowsFrozenBitOracle.Equal(
             "5081BDE4C57623E1254A6FFB27E306215691829A1667BCF04FEC710A12B01C34",
             FloatBitsSha256(block.Video));
-        Assert.Equal(
+        WindowsFrozenBitOracle.Equal(
             "E4AC0D4BB8769F27761AFEF067E3F935919E53707AA0C06D08988FD24E1C8CD2",
             FloatBitsSha256(block.DemodRaw));
-        Assert.Equal(
+        WindowsFrozenBitOracle.Equal(
             "B24DE7F7A6DB3769580318592F21A421DCF5811FDC64AEB81382333EB52DED33",
             FloatBitsSha256(block.VideoLowPass));
-        Assert.Equal(
+        WindowsFrozenBitOracle.Equal(
             "7692477D87E9238C11FA71DF4E3546EBFE0418EA265DF14BC37AA67A3E2AB617",
             FloatBitsSha256(block.VideoBurst!));
-        Assert.Equal(
+        WindowsFrozenBitOracle.Equal(
             "8AA6600E865D36EECE881C6C8FB8D7DB01778D66C674A3C9B26F3A159E3F576D",
             FloatBitsSha256(block.VideoPilot!));
     }

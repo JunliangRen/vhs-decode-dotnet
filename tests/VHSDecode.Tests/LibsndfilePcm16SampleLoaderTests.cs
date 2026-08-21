@@ -1,5 +1,6 @@
 using System.Buffers.Binary;
 using System.ComponentModel;
+using System.Runtime.InteropServices;
 using VHSDecode.Core.CommandLine;
 using VHSDecode.Core.Decode;
 using VHSDecode.Core.Dsp.CudaFast;
@@ -897,12 +898,15 @@ public sealed class LibsndfilePcm16SampleLoaderTests
     [Fact(DisplayName = "bundled libsndfile reads direct raw FLAC without invoking FFmpeg fallback")]
     public void BundledLibsndfileReadsDirectRawFlacWithoutFallback()
     {
-        Assert.SkipUnless(OperatingSystem.IsWindows(), "The bundled sndfile.dll is a Windows runtime asset.");
+        Assert.SkipUnless(
+            RuntimeInformation.ProcessArchitecture == Architecture.X64
+                && (OperatingSystem.IsWindows() || OperatingSystem.IsLinux()),
+            "Bundled libsndfile is available only on Windows x64 and Linux x64 test hosts.");
         string directory = CreateTemporaryDirectory();
         try
         {
             short[] expected = CreateNativeSamples(32_768);
-            string path = Path.Combine(directory, "native round trip.ldf");
+            string path = Path.Combine(directory, "原生 native round trip.ldf");
             WriteDirectRawFlac(path, expected);
             var fallback = new RecordingFallback();
             using var loader = new LibsndfilePcm16SampleLoader(
@@ -925,7 +929,10 @@ public sealed class LibsndfilePcm16SampleLoaderTests
     [Fact(DisplayName = "corrupted direct raw FLAC retries through the established fallback")]
     public void CorruptedDirectRawFlacActivatesFallback()
     {
-        Assert.SkipUnless(OperatingSystem.IsWindows(), "The bundled sndfile.dll is a Windows runtime asset.");
+        Assert.SkipUnless(
+            RuntimeInformation.ProcessArchitecture == Architecture.X64
+                && (OperatingSystem.IsWindows() || OperatingSystem.IsLinux()),
+            "Bundled libsndfile is available only on Windows x64 and Linux x64 test hosts.");
         string directory = CreateTemporaryDirectory();
         try
         {
@@ -961,7 +968,10 @@ public sealed class LibsndfilePcm16SampleLoaderTests
     [Fact(DisplayName = "underreported FLAC totals retry the boundary read through fallback")]
     public void UnderreportedFlacTotalActivatesFallback()
     {
-        Assert.SkipUnless(OperatingSystem.IsWindows(), "The bundled sndfile.dll is a Windows runtime asset.");
+        Assert.SkipUnless(
+            RuntimeInformation.ProcessArchitecture == Architecture.X64
+                && (OperatingSystem.IsWindows() || OperatingSystem.IsLinux()),
+            "Bundled libsndfile is available only on Windows x64 and Linux x64 test hosts.");
         string directory = CreateTemporaryDirectory();
         try
         {

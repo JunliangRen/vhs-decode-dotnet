@@ -2,7 +2,7 @@
 
 **[English](README.md)** | [简体中文](README.zh-CN.md) | [日本語](README.ja.md)
 
-<!-- README_SYNC: 2026-08-18.01 -->
+<!-- README_SYNC: 2026-08-21.01 -->
 
 A .NET 11 rewrite of the decode-facing parts of
 [`oyvindln/vhs-decode`](https://github.com/oyvindln/vhs-decode), targeting
@@ -40,7 +40,7 @@ evidence, and remaining gaps.
   EIAJ, and supported PAL/NTSC variants.
 - TBC utility tools, the double-click GUI, and developer plotting windows are
   intentionally out of scope.
-- The Visual Studio 2026 `.slnx` solution has **1,591** standard xUnit v3 tests
+- The Visual Studio 2026 `.slnx` solution has **1,592** standard xUnit v3 tests
   that are visible in Test Explorer and runnable with `dotnet test`.
 
 <!-- SECTION: start -->
@@ -61,6 +61,20 @@ decode.exe hifi [upstream options] input.lds output.wav
 Standalone command aliases such as `vhs-decode.exe` and `ld-decode.exe` are
 also supported. Use `decode.exe <command> --help` for the complete compatible
 option set.
+
+The release workflow also builds a self-contained, multi-file glibc
+`linux-x64` tar. It supports only the portable `exact` backend and bundles the
+Linux SQLite, libsndfile, and libsoxr native assets; Windows IPP/CUDA DLLs are
+excluded. After installing FFmpeg and the documented OS libraries:
+
+```bash
+tar -xzf vhs-decode-dotnet-linux-x64.tar.gz
+cd vhs-decode-dotnet-linux-x64
+./vhs-decode --pal --dsp-backend exact input.lds output
+```
+
+See [Linux x64 release](docs/LINUX_X64.md) for the Ubuntu 22.04/glibc 2.35
+baseline, runtime packages, checksums, build provenance, and release gates.
 
 ### Seekable RF preview server
 
@@ -340,11 +354,18 @@ The pinned SDK is .NET `11.0.100-preview.7.26381.103`.
 dotnet restore VHSDecodeDotNet.slnx
 dotnet build VHSDecodeDotNet.slnx -c Release --no-restore
 dotnet test --solution VHSDecodeDotNet.slnx -c Release `
-  --no-build --no-restore --minimum-expected-tests 1591
+  --no-build --no-restore --minimum-expected-tests 1592
 ```
 
 Open `VHSDecodeDotNet.slnx` in Visual Studio 2026 to build, debug, and run the
 xUnit v3 suite through Test Explorer.
+
+On Ubuntu 22.04 x64, the complete native-build, test, multi-file publish,
+reproducible-tar, and final extracted-tar smoke pipeline is:
+
+```bash
+pwsh ./tools/build-linux-x64-release.ps1
+```
 
 <!-- SECTION: detail -->
 

@@ -552,9 +552,13 @@ public sealed class HiFiCompatibilityTests
 
         discriminator.Demodulate(input, output);
 
-        Assert.Equal(expectedInPhaseHash, BinarySha256(discriminator.InPhaseOscillator.Span));
-        Assert.Equal(expectedQuadratureHash, BinarySha256(discriminator.QuadratureOscillator.Span));
-        Assert.Equal(expectedOutputHash, BinarySha256(output));
+        WindowsFrozenBitOracle.Equal(
+            expectedInPhaseHash,
+            BinarySha256(discriminator.InPhaseOscillator.Span));
+        WindowsFrozenBitOracle.Equal(
+            expectedQuadratureHash,
+            BinarySha256(discriminator.QuadratureOscillator.Span));
+        WindowsFrozenBitOracle.Equal(expectedOutputHash, BinarySha256(output));
         Assert.Equal(123.25f, output[^1]);
     }
 
@@ -708,14 +712,14 @@ public sealed class HiFiCompatibilityTests
 
         Assert.True(resampler.Ended);
         Assert.Equal(expectedOutputLength, firstOutput.Length);
-        Assert.Equal(expectedOutputHash, BinarySha256(firstOutput));
+        WindowsFrozenBitOracle.Equal(expectedOutputHash, BinarySha256(firstOutput));
         Assert.Throws<InvalidOperationException>(() => resampler.Process(input));
 
         resampler.Clear();
         float[] repeatedOutput = resampler.Process(input, last: true);
 
         Assert.Equal(firstOutput, repeatedOutput);
-        Assert.Equal(expectedOutputHash, BinarySha256(repeatedOutput));
+        WindowsFrozenBitOracle.Equal(expectedOutputHash, BinarySha256(repeatedOutput));
     }
 
     [Fact(DisplayName = "HiFi bundled libsoxr version matches v0.4.0")]
@@ -791,8 +795,12 @@ public sealed class HiFiCompatibilityTests
         Assert.NotNull(block.Right);
         Assert.Equal(2517, block.Left.Length);
         Assert.Equal(2517, block.Right.Length);
-        Assert.Equal(expectedLeftDcBits, BitConverter.SingleToUInt32Bits(block.LeftDc).ToString("X8"));
-        Assert.Equal(expectedRightDcBits, BitConverter.SingleToUInt32Bits(block.RightDc).ToString("X8"));
+        Assert.Equal(
+            expectedLeftDcBits,
+            BitConverter.SingleToUInt32Bits(block.LeftDc).ToString("X8"));
+        Assert.Equal(
+            expectedRightDcBits,
+            BitConverter.SingleToUInt32Bits(block.RightDc).ToString("X8"));
         Assert.Equal(expectedLeftHash, BinarySha256(block.Left));
         Assert.Equal(expectedRightHash, BinarySha256(block.Right));
     }
@@ -834,10 +842,14 @@ public sealed class HiFiCompatibilityTests
         Assert.Equal(expectedLength, block.Left.Length);
         Assert.Equal(expectedLength, block.Right.Length);
         Assert.Equal(expectedAlias, ReferenceEquals(block.Left, block.Right));
-        Assert.Equal(expectedLeftDcBits, BitConverter.SingleToUInt32Bits(block.LeftDc).ToString("X8"));
-        Assert.Equal(expectedRightDcBits, BitConverter.SingleToUInt32Bits(block.RightDc).ToString("X8"));
-        Assert.Equal(expectedLeftHash, BinarySha256(block.Left));
-        Assert.Equal(expectedRightHash, BinarySha256(block.Right));
+        WindowsFrozenBitOracle.Equal(
+            expectedLeftDcBits,
+            BitConverter.SingleToUInt32Bits(block.LeftDc).ToString("X8"));
+        WindowsFrozenBitOracle.Equal(
+            expectedRightDcBits,
+            BitConverter.SingleToUInt32Bits(block.RightDc).ToString("X8"));
+        WindowsFrozenBitOracle.Equal(expectedLeftHash, BinarySha256(block.Left));
+        WindowsFrozenBitOracle.Equal(expectedRightHash, BinarySha256(block.Right));
     }
 
     [Fact(DisplayName = "HiFi automatic fine tuning updates the next v0.4.0 block")]
