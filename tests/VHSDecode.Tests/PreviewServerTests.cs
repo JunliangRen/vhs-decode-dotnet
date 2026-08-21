@@ -751,6 +751,18 @@ public sealed class PreviewServerTests
         Assert.Equal(2, progress.Count(character => character == '\n'));
     }
 
+    [Fact(DisplayName = "Preview executable paths preserve PATH commands and pin relative directories")]
+    public void PreviewExecutablePathsPreservePathCommandsAndPinRelativeDirectories()
+    {
+        const string BareCommand = "ffmpeg";
+        string relativePath = Path.Combine("tools", "ffmpeg-custom");
+        string absolutePath = Path.GetFullPath(relativePath, Environment.CurrentDirectory);
+
+        Assert.Equal(BareCommand, PreviewServerOptions.NormalizeExecutablePath(BareCommand));
+        Assert.Equal(absolutePath, PreviewServerOptions.NormalizeExecutablePath(relativePath));
+        Assert.Equal(absolutePath, PreviewServerOptions.NormalizeExecutablePath(absolutePath));
+    }
+
     [Theory(DisplayName = "Preview dimensions follow the requested video standards")]
     [InlineData("NTSC", 640, 480)]
     [InlineData("NTSC-J", 640, 480)]
@@ -906,7 +918,7 @@ public sealed class PreviewServerTests
             string mediaPath = Path.Combine(directory, "window.mp4");
             WriteCombinedWindow(mediaPath, window);
             IReadOnlyDictionary<string, string> metadata = ProbeVideoStreamMetadata(mediaPath);
-            Assert.Equal("progressive", metadata["field_order"]);
+            AssertProgressiveVideo(mediaPath, metadata);
             Assert.Equal("50/1", metadata["avg_frame_rate"]);
             Assert.Equal("100", metadata["nb_read_frames"]);
             Assert.InRange(ProbeFirstVideoPacketTimestamp(mediaPath), 0.0, 0.02);
@@ -1060,7 +1072,7 @@ public sealed class PreviewServerTests
             string mediaPath = Path.Combine(directory, "window.mp4");
             WriteCombinedWindow(mediaPath, encoded);
             IReadOnlyDictionary<string, string> metadata = ProbeVideoStreamMetadata(mediaPath);
-            Assert.Equal("progressive", metadata["field_order"]);
+            AssertProgressiveVideo(mediaPath, metadata);
             Assert.Equal(expectedOutputFrameRate, metadata["avg_frame_rate"]);
             Assert.Equal(expectedColorStandard, metadata["color_primaries"]);
             Assert.Equal("bt709", metadata["color_transfer"]);
@@ -1096,7 +1108,7 @@ public sealed class PreviewServerTests
             string tailPath = Path.Combine(directory, "tail.mp4");
             WriteCombinedWindow(tailPath, tail);
             IReadOnlyDictionary<string, string> tailMetadata = ProbeVideoStreamMetadata(tailPath);
-            Assert.Equal("progressive", tailMetadata["field_order"]);
+            AssertProgressiveVideo(tailPath, tailMetadata);
             Assert.Equal(expectedOutputFrameRate, tailMetadata["avg_frame_rate"]);
             Assert.Equal("2", tailMetadata["nb_read_frames"]);
         }
@@ -1838,7 +1850,7 @@ public sealed class PreviewServerTests
             double expected = timeline.WindowStartSeconds(windowIndex);
             Assert.InRange(firstPacketTimestamp, expected, expected + 0.05);
             IReadOnlyDictionary<string, string> metadata = ProbeVideoStreamMetadata(mediaPath);
-            Assert.Equal("progressive", metadata["field_order"]);
+            AssertProgressiveVideo(mediaPath, metadata);
             Assert.Equal("50/1", metadata["avg_frame_rate"]);
             Assert.Equal("bt470bg", metadata["color_primaries"]);
             Assert.Equal("bt709", metadata["color_transfer"]);
@@ -1959,6 +1971,51 @@ public sealed class PreviewServerTests
                 StringSplitOptions.RemoveEmptyEntries)
             .Select(line => line.Split('=', 2))
             .ToDictionary(parts => parts[0], parts => parts[1], StringComparer.Ordinal);
+    }
+
+    private static void AssertProgressiveVideo(
+        string mediaPath,
+        IReadOnlyDictionary<string, string> metadata)
+    {
+        string fieldOrder = metadata["field_order"];
+        Assert.True(
+            string.Equals(fieldOrder, "progressive", StringComparison.Ordinal)
+            || string.Equals(fieldOrder, "unknown", StringComparison.Ordinal),
+            $"Expected progressive video, but ffprobe reported field_order={fieldOrder}.");
+
+        var startInfo = new ProcessStartInfo("ffprobe")
+        {
+            UseShellExecute = false,
+            CreateNoWindow = true,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true
+        };
+        foreach (string argument in new[]
+        {
+            "-v", "error",
+            "-select_streams", "v:0",
+            "-show_entries", "frame=interlaced_frame",
+            "-of", "default=noprint_wrappers=1:nokey=1",
+            mediaPath
+        })
+        {
+            startInfo.ArgumentList.Add(argument);
+        }
+
+        using Process process = Process.Start(startInfo)
+            ?? throw new InvalidOperationException("Failed to start ffprobe.");
+        Task<string> output = process.StandardOutput.ReadToEndAsync();
+        Task<string> error = process.StandardError.ReadToEndAsync();
+        process.WaitForExit();
+        Task.WhenAll(output, error).GetAwaiter().GetResult();
+        Assert.True(
+            process.ExitCode == 0,
+            $"ffprobe exited with {process.ExitCode}: {error.Result}");
+        string[] interlacedFrameFlags = output.Result.Split(
+            ['\r', '\n'],
+            StringSplitOptions.RemoveEmptyEntries);
+        Assert.NotEmpty(interlacedFrameFlags);
+        Assert.All(interlacedFrameFlags, value => Assert.Equal("0", value));
     }
 
     private static void GenerateSyntheticH264(string outputPath)

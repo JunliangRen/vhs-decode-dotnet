@@ -1659,7 +1659,7 @@ public void DecodeSessionFactoryAppliesLdAudioOptions()
         defaults.TbcFieldDecoder,
         "_analogAudioOptions")!;
     AssertClose(JsonDouble(defaults.Parameters.SysParams, "FPS"), analogOutput.FramesPerSecond, 1e-12);
-    AssertEqual(
+    WindowsFrozenBitOracle.Equal(
         "D3311591D460B00BBC7CA2401EE502637BCEBF2F666D7D124B2B3D1EE29F53DA",
         ComplexBitsSha256(defaults.Filters.LdAnalogAudio!.Left.Stage2Filter));
 
@@ -2304,8 +2304,8 @@ public void FftRoundTripsComplexSamples()
     ];
     for (int i = 0; i < pocketSpectrum.Length; i++)
     {
-        AssertEqual(expectedSpectrumBits[2 * i], BitConverter.DoubleToUInt64Bits(pocketSpectrum[i].Real));
-        AssertEqual(expectedSpectrumBits[(2 * i) + 1], BitConverter.DoubleToUInt64Bits(pocketSpectrum[i].Imaginary));
+        WindowsFrozenBitOracle.Equal(expectedSpectrumBits[2 * i], BitConverter.DoubleToUInt64Bits(pocketSpectrum[i].Real));
+        WindowsFrozenBitOracle.Equal(expectedSpectrumBits[(2 * i) + 1], BitConverter.DoubleToUInt64Bits(pocketSpectrum[i].Imaginary));
     }
 
     double[] pocketInverse = PocketFftReal.Inverse(pocketSpectrum, pocketInput.Length);
@@ -2330,7 +2330,7 @@ public void FftRoundTripsComplexSamples()
     ];
     for (int i = 0; i < pocketInverse.Length; i++)
     {
-        AssertEqual(expectedInverseBits[i], BitConverter.DoubleToUInt64Bits(pocketInverse[i]));
+        WindowsFrozenBitOracle.Equal(expectedInverseBits[i], BitConverter.DoubleToUInt64Bits(pocketInverse[i]));
     }
 
     AssertThrows<ArgumentException>(() => PocketFftReal.Forward([1.0, 2.0, 3.0]));
@@ -2347,10 +2347,10 @@ public void PocketComplexFftMatchesNumpyBitPatterns()
         .ToArray();
 
     Complex[] spectrum = PocketFftComplex.Forward(input);
-    AssertEqual(
+    WindowsFrozenBitOracle.Equal(
         "A61BAE490D21D7C0FA7F931044D220A1CEF8C0B15F21852F4323B7A0E48EFA1B",
         ComplexBitsSha256(spectrum));
-    AssertEqual(
+    WindowsFrozenBitOracle.Equal(
         "FCB55A58B16247A7213A85788A7D0B21B2C9B2428AAED5826783C31C45E25EDE",
         ComplexBitsSha256(PocketFftComplex.Inverse(spectrum)));
 
@@ -2574,10 +2574,10 @@ public void RfDemodulatorAppliesRfHighBoost()
         fmDemodulatorMode: RfFmDemodulatorMode.VhsRustApproximation,
         vhsEnvelopeFilter: identitySos,
         vhsRfTopFilter: identitySos);
-    AssertEqual(
+    WindowsFrozenBitOracle.Equal(
         "AB36B5F97FDEDD310957AD99B664A50A36CA6C602571B3C3FDE1FE719E3B1921",
         DoubleBitsSha256(vhsBoosted.Envelope));
-    AssertEqual(
+    WindowsFrozenBitOracle.Equal(
         "717670CF99BE6928A0DF9CA1097A275AA4EEF584ED5F0E1E2F69AE943B32FEDF",
         ComplexBitsSha256(vhsBoosted.Analytic));
 
@@ -3208,7 +3208,7 @@ public void PalVhsChromaBurstProbeMatchesReleaseBits()
 
     AssertEqual(94, options.BurstStart);
     AssertEqual(150, options.BurstEnd);
-    AssertEqual(
+    WindowsFrozenBitOracle.Equal(
         "E2A9F54E967697937EBE3D44357B8805D0740FBC6C7651C8B596CC4A69992E86",
         DoubleBitsSha256(options.FinalSosFilter!.SelectMany(section => new[]
         {
@@ -3254,17 +3254,17 @@ public void PalVhsChromaBurstProbeMatchesReleaseBits()
             return capturedFiltered;
         });
 
-    AssertEqual(
+    WindowsFrozenBitOracle.Equal(
         "330869D467CD9D3DBB93F7CF5898D8565F75FFE0C646AA91FF19F272E7147C02",
         DoubleBitsSha256(capturedMixed!));
-    AssertEqual(
+    WindowsFrozenBitOracle.Equal(
         "25B6D459D47519976AB97BBBED41FFA88AA1E9F4038ACDF246959264BB827929",
         DoubleBitsSha256(capturedFiltered!));
-    AssertEqual(0x4064C329592D3C5FUL, BitConverter.DoubleToUInt64Bits(result.PhaseDegrees));
-    AssertEqual(0x4021518B70A91DA9UL, BitConverter.DoubleToUInt64Bits(result.PhaseOffsetDegrees));
-    AssertEqual(0x402B4FBACBBD83FCUL, BitConverter.DoubleToUInt64Bits(result.Magnitude));
-    AssertEqual(0xC02A82F3B467500FUL, BitConverter.DoubleToUInt64Bits(result.I));
-    AssertEqual(0x400A3F02088DC1E6UL, BitConverter.DoubleToUInt64Bits(result.Q));
+    WindowsFrozenBitOracle.Equal(0x4064C329592D3C5FUL, BitConverter.DoubleToUInt64Bits(result.PhaseDegrees));
+    WindowsFrozenBitOracle.Equal(0x4021518B70A91DA9UL, BitConverter.DoubleToUInt64Bits(result.PhaseOffsetDegrees));
+    WindowsFrozenBitOracle.Equal(0x402B4FBACBBD83FCUL, BitConverter.DoubleToUInt64Bits(result.Magnitude));
+    WindowsFrozenBitOracle.Equal(0xC02A82F3B467500FUL, BitConverter.DoubleToUInt64Bits(result.I));
+    WindowsFrozenBitOracle.Equal(0x400A3F02088DC1E6UL, BitConverter.DoubleToUInt64Bits(result.Q));
 }
 
 [Fact(DisplayName = "PAL VHS chroma phase sequence matches v0.4.0 float64 bits")]
@@ -3314,19 +3314,19 @@ public void PalVhsChromaPhaseSequenceMatchesReleaseBits()
     ChromaPhaseLine first = result.PhaseSequence[0];
     AssertEqual(3, first.LineNumber);
     AssertEqual(0, first.PhaseRotation);
-    AssertEqual(0x4073B300258A63F3UL, BitConverter.DoubleToUInt64Bits(first.BurstPhaseDegrees));
-    AssertEqual(0UL, BitConverter.DoubleToUInt64Bits(first.BurstPhaseOffsetDegrees));
-    AssertEqual(0x403C5B2A5B4885C9UL, BitConverter.DoubleToUInt64Bits(first.BurstMagnitude));
-    AssertEqual(0x40341DC74D25B16AUL, BitConverter.DoubleToUInt64Bits(first.I));
-    AssertEqual(0xC033FC2D3DEDF498UL, BitConverter.DoubleToUInt64Bits(first.Q));
+    WindowsFrozenBitOracle.Equal(0x4073B300258A63F3UL, BitConverter.DoubleToUInt64Bits(first.BurstPhaseDegrees));
+    WindowsFrozenBitOracle.Equal(0UL, BitConverter.DoubleToUInt64Bits(first.BurstPhaseOffsetDegrees));
+    WindowsFrozenBitOracle.Equal(0x403C5B2A5B4885C9UL, BitConverter.DoubleToUInt64Bits(first.BurstMagnitude));
+    WindowsFrozenBitOracle.Equal(0x40341DC74D25B16AUL, BitConverter.DoubleToUInt64Bits(first.I));
+    WindowsFrozenBitOracle.Equal(0xC033FC2D3DEDF498UL, BitConverter.DoubleToUInt64Bits(first.Q));
     ChromaPhaseLine last = result.PhaseSequence[^1];
     AssertEqual(315, last.LineNumber);
     AssertEqual(0, last.PhaseRotation);
-    AssertEqual(0x405E9C37E95E4BDAUL, BitConverter.DoubleToUInt64Bits(last.BurstPhaseDegrees));
-    AssertEqual(0UL, BitConverter.DoubleToUInt64Bits(last.BurstPhaseOffsetDegrees));
-    AssertEqual(0xC02FDC176ECE9795UL, BitConverter.DoubleToUInt64Bits(last.I));
-    AssertEqual(0x40390FD7498989E1UL, BitConverter.DoubleToUInt64Bits(last.Q));
-    AssertEqual(0x403DB233AAC37DF0UL, BitConverter.DoubleToUInt64Bits(last.BurstMagnitude));
+    WindowsFrozenBitOracle.Equal(0x405E9C37E95E4BDAUL, BitConverter.DoubleToUInt64Bits(last.BurstPhaseDegrees));
+    WindowsFrozenBitOracle.Equal(0UL, BitConverter.DoubleToUInt64Bits(last.BurstPhaseOffsetDegrees));
+    WindowsFrozenBitOracle.Equal(0xC02FDC176ECE9795UL, BitConverter.DoubleToUInt64Bits(last.I));
+    WindowsFrozenBitOracle.Equal(0x40390FD7498989E1UL, BitConverter.DoubleToUInt64Bits(last.Q));
+    WindowsFrozenBitOracle.Equal(0x403DB233AAC37DF0UL, BitConverter.DoubleToUInt64Bits(last.BurstMagnitude));
     double[] flattened = result.PhaseSequence
         .SelectMany(line => new[]
         {
@@ -3339,13 +3339,13 @@ public void PalVhsChromaPhaseSequenceMatchesReleaseBits()
             line.Q
         })
         .ToArray();
-    AssertEqual(
+    WindowsFrozenBitOracle.Equal(
         "8BFBCFFD123B67693FA6EC24B9EFD91A5D90A9BF38BA1BA8926B41F24B9754FB",
         DoubleBitsSha256(flattened));
-    AssertEqual(0x4037E9036918DF9AUL, BitConverter.DoubleToUInt64Bits(result.BurstMagnitudeAverage));
-    AssertEqual(0x40749879C9CA5F7FUL, BitConverter.DoubleToUInt64Bits(result.BurstPhaseAverageDegrees));
-    AssertEqual(0x4074978FCAA356D3UL, BitConverter.DoubleToUInt64Bits(result.EvenBurstPhaseAverageDegrees));
-    AssertEqual(0x4074997460E7FB3BUL, BitConverter.DoubleToUInt64Bits(result.OddBurstPhaseAverageDegrees));
+    WindowsFrozenBitOracle.Equal(0x4037E9036918DF9AUL, BitConverter.DoubleToUInt64Bits(result.BurstMagnitudeAverage));
+    WindowsFrozenBitOracle.Equal(0x40749879C9CA5F7FUL, BitConverter.DoubleToUInt64Bits(result.BurstPhaseAverageDegrees));
+    WindowsFrozenBitOracle.Equal(0x4074978FCAA356D3UL, BitConverter.DoubleToUInt64Bits(result.EvenBurstPhaseAverageDegrees));
+    WindowsFrozenBitOracle.Equal(0x4074997460E7FB3BUL, BitConverter.DoubleToUInt64Bits(result.OddBurstPhaseAverageDegrees));
 }
 
 [Fact(DisplayName = "PAL VHS chroma track-phase sequence matches v0.4.0 float64 bits")]
@@ -3398,9 +3398,9 @@ public void PalVhsChromaTrackPhaseSequenceMatchesReleaseBits()
     ChromaPhaseLine last = result.PhaseSequence[^1];
     AssertEqual(315, last.LineNumber);
     AssertEqual(1, last.PhaseRotation);
-    AssertEqual(0x406601C518E0EA83UL, BitConverter.DoubleToUInt64Bits(last.BurstPhaseDegrees));
-    AssertEqual(0UL, BitConverter.DoubleToUInt64Bits(last.BurstPhaseOffsetDegrees));
-    AssertEqual(0x403352BDFF350DC5UL, BitConverter.DoubleToUInt64Bits(last.BurstMagnitude));
+    WindowsFrozenBitOracle.Equal(0x406601C518E0EA83UL, BitConverter.DoubleToUInt64Bits(last.BurstPhaseDegrees));
+    WindowsFrozenBitOracle.Equal(0UL, BitConverter.DoubleToUInt64Bits(last.BurstPhaseOffsetDegrees));
+    WindowsFrozenBitOracle.Equal(0x403352BDFF350DC5UL, BitConverter.DoubleToUInt64Bits(last.BurstMagnitude));
     double[] flattened = result.PhaseSequence
         .SelectMany(line => new[]
         {
@@ -3413,13 +3413,13 @@ public void PalVhsChromaTrackPhaseSequenceMatchesReleaseBits()
             line.Q
         })
         .ToArray();
-    AssertEqual(
+    WindowsFrozenBitOracle.Equal(
         "1D46B6D78C7F04A749AF47146EFB5A8075917825520B80047D6DF6904D02BAD4",
         DoubleBitsSha256(flattened));
-    AssertEqual(0x4037E9036918DF9AUL, BitConverter.DoubleToUInt64Bits(result.BurstMagnitudeAverage));
-    AssertEqual(0x40749879C9CA5F7FUL, BitConverter.DoubleToUInt64Bits(result.BurstPhaseAverageDegrees));
-    AssertEqual(0x4074978FCAA356D3UL, BitConverter.DoubleToUInt64Bits(result.EvenBurstPhaseAverageDegrees));
-    AssertEqual(0x4074997460E7FB3BUL, BitConverter.DoubleToUInt64Bits(result.OddBurstPhaseAverageDegrees));
+    WindowsFrozenBitOracle.Equal(0x4037E9036918DF9AUL, BitConverter.DoubleToUInt64Bits(result.BurstMagnitudeAverage));
+    WindowsFrozenBitOracle.Equal(0x40749879C9CA5F7FUL, BitConverter.DoubleToUInt64Bits(result.BurstPhaseAverageDegrees));
+    WindowsFrozenBitOracle.Equal(0x4074978FCAA356D3UL, BitConverter.DoubleToUInt64Bits(result.EvenBurstPhaseAverageDegrees));
+    WindowsFrozenBitOracle.Equal(0x4074997460E7FB3BUL, BitConverter.DoubleToUInt64Bits(result.OddBurstPhaseAverageDegrees));
 }
 
 [Fact(DisplayName = "VHS chroma carrier matches NumPy float32 trigonometry")]
@@ -4045,11 +4045,11 @@ public void PalVideo8ChromaAfcNotchStagesMatchReleaseBits()
     double[] chroma = Enumerable.Range(0, frameSpec.FieldSampleCount)
         .Select(index => (((index * 37) % 1009 - 504) / 16.0) + Math.ScaleB(index + 1.0, -38))
         .ToArray();
-    AssertEqual(
+    WindowsFrozenBitOracle.Equal(
         "B6E7F9D11E7590251DF679134348A993A965100237785106073111D30426D661",
         DoubleBitsSha256(chroma));
     AssertEqual(4, options.ChromaPreFilterMoveSamples);
-    AssertEqual(
+    WindowsFrozenBitOracle.Equal(
         "C1B4827F13A540C821CE52B1B7949ED0CC8DD353948F23202AFF291CAD14DEAE",
         DoubleBitsSha256(options.ChromaPreSosFilter!.SelectMany(section => new[]
         {
@@ -4061,38 +4061,38 @@ public void PalVideo8ChromaAfcNotchStagesMatchReleaseBits()
             section.A2
         }).ToArray()));
     double[] prefiltered = SosFilter.ApplyForwardBackward(options.ChromaPreSosFilter!, chroma);
-    AssertEqual(
+    WindowsFrozenBitOracle.Equal(
         "8DCADDC1D99E48EF097E27C2A6ABDE576716E2E4CB6B242311C8C5BB9E216BED",
         DoubleBitsSha256(prefiltered));
 
     TransferFunction audioNotch = options.ChromaAudioNotchFilter
         ?? throw new InvalidOperationException("PAL Video8 chroma audio notch was not built.");
-    AssertEqual(
+    WindowsFrozenBitOracle.Equal(
         "EBD8C993F4A13029975F960A48757CDB900D794B5C480AC552753A362F50D164",
         DoubleBitsSha256(audioNotch.Numerator));
-    AssertEqual(
+    WindowsFrozenBitOracle.Equal(
         "DD55346011633A862B26189FEDFAC818E3C7F6DBB5918E7530FDC93FA676B2C6",
         DoubleBitsSha256(audioNotch.Denominator));
     double[] afterAudio = IirFilter.ApplyForwardBackward(audioNotch, prefiltered);
-    AssertEqual(
+    WindowsFrozenBitOracle.Equal(
         "3A000F5F90DF82BDBEE492186E79316E09D9D910DCD41F94CA6D56F7B49304EE",
         DoubleBitsSha256(afterAudio));
 
     TransferFunction videoNotch = options.ChromaVideoNotchFilter
         ?? throw new InvalidOperationException("PAL Video8 chroma video notch was not built.");
-    AssertEqual(
+    WindowsFrozenBitOracle.Equal(
         "B430632801F26DE0FE7A47C64AD1F21BA473E4AB6804623E9F780D7B1E05D284",
         DoubleBitsSha256(videoNotch.Numerator));
-    AssertEqual(
+    WindowsFrozenBitOracle.Equal(
         "D9361FA6F897C3E657C2F2949E847FAA1B66FCC03A1415CA37CB08F666D16084",
         DoubleBitsSha256(videoNotch.Denominator));
     double[] afterVideo = IirFilter.ApplyForwardBackward(videoNotch, afterAudio);
-    AssertEqual(
+    WindowsFrozenBitOracle.Equal(
         "D610B01E5B9063DA016A038154DEBB2F7C623498EAE71512515A18F9CE42A1DC",
         DoubleBitsSha256(afterVideo));
 
     double[] shifted = VhsChromaDecoder.ApplyChromaPreFilter(chroma, options);
-    AssertEqual(
+    WindowsFrozenBitOracle.Equal(
         "8850F30E8DCCA202ACE4FF9ED1FB27E3A84625979B39FED8575D6724C1D43231",
         DoubleBitsSha256(shifted));
 
@@ -4128,10 +4128,10 @@ public void PalVideo8ChromaAfcNotchStagesMatchReleaseBits()
         lineOffset: LineOffset);
     ChromaCarrierEstimate carrier = result.CarrierEstimate
         ?? throw new InvalidOperationException("PAL Video8 chroma AFC did not estimate a carrier.");
-    AssertEqual(0x41265A0BC0000000UL, BitConverter.DoubleToUInt64Bits(carrier.NominalCarrierHz));
-    AssertEqual(0x41265970D7EDC111UL, BitConverter.DoubleToUInt64Bits(carrier.CarrierHz));
-    AssertEqual(0xC0535D0247DDE000UL, BitConverter.DoubleToUInt64Bits(carrier.OffsetHz));
-    AssertEqual(0UL, BitConverter.DoubleToUInt64Bits(carrier.PhaseRadians));
+    WindowsFrozenBitOracle.Equal(0x41265A0BC0000000UL, BitConverter.DoubleToUInt64Bits(carrier.NominalCarrierHz));
+    WindowsFrozenBitOracle.Equal(0x41265970D7EDC111UL, BitConverter.DoubleToUInt64Bits(carrier.CarrierHz));
+    WindowsFrozenBitOracle.Equal(0xC0535D0247DDE000UL, BitConverter.DoubleToUInt64Bits(carrier.OffsetHz));
+    WindowsFrozenBitOracle.Equal(0UL, BitConverter.DoubleToUInt64Bits(carrier.PhaseRadians));
 
     double[] upconverted = VhsChromaDecoder.UpconvertChroma(
         shifted,
@@ -4144,31 +4144,31 @@ public void PalVideo8ChromaAfcNotchStagesMatchReleaseBits()
             carrier.CarrierHz / 1_000_000.0,
             options.FscMHz * 4.0,
             carrier.PhaseRadians));
-    AssertEqual(
+    WindowsFrozenBitOracle.Equal(
         "041DF1E00CF5B76A566AD045AF96BF0E266782BE583AAC6583116BCFDB0D0EEE",
         FloatBitsSha256(upconverted));
     double[] final = SosFilter.ApplyForwardBackwardFloat32(options.FinalSosFilter!, upconverted);
-    AssertEqual(
+    WindowsFrozenBitOracle.Equal(
         "2D98CAD5F0FC9798C48F7C46B988CF352568BE5646D9287912900F7DD12D9B81",
         FloatBitsSha256(final));
 
     TransferFunction deemphasis = options.ChromaDeemphasisFilter
         ?? throw new InvalidOperationException("PAL Video8 chroma deemphasis was not built.");
-    AssertEqual(
+    WindowsFrozenBitOracle.Equal(
         "EE08B71006DADC75E379AF7D3BDE25DA4CB5260F31A68642DB3D6552B784D708",
         DoubleBitsSha256(deemphasis.Numerator));
-    AssertEqual(
+    WindowsFrozenBitOracle.Equal(
         "A8E9E38D1AB7F9FCAA428AF95168A8A1C5C9576681DE8F5A34D415E27572CD47",
         DoubleBitsSha256(deemphasis.Denominator));
     double[] deemphasized = IirFilter.ApplyForward(deemphasis, final);
-    AssertEqual(
+    WindowsFrozenBitOracle.Equal(
         "DA42D875C0FBDFE4E7E390103F9B3F647C3FD2908EDC82EB8A931B6E0893AAB0",
         DoubleBitsSha256(deemphasized));
     double[] combined = VhsChromaDecoder.ApplyPalComb(
         deemphasized,
         frameSpec.OutputLineLength,
         retainFloat32: false);
-    AssertEqual(
+    WindowsFrozenBitOracle.Equal(
         "C884AA2F0882D5A3FB6697766C5AE1622D29C33473BA93641E1E4DAC4D39D97F",
         DoubleBitsSha256(combined));
     AutomaticChromaGainResult gained = VhsChromaDecoder.ApplyAutomaticChromaGain(
@@ -4181,13 +4181,13 @@ public void PalVideo8ChromaAfcNotchStagesMatchReleaseBits()
         burstDetectedLine: 0,
         useFloat32Rms: false);
     int line16Start = 16 * options.OutputLineLength;
-    AssertEqual(0x3FB55C4B60C8F0D5UL, BitConverter.DoubleToUInt64Bits(combined[line16Start]));
-    AssertEqual(0x40B181A0E988718EUL, BitConverter.DoubleToUInt64Bits(gained.Samples[line16Start]));
-    AssertEqual(0x3FC431611A5BC9C4UL, BitConverter.DoubleToUInt64Bits(gained.MeanBurstRms));
-    AssertEqual(
+    WindowsFrozenBitOracle.Equal(0x3FB55C4B60C8F0D5UL, BitConverter.DoubleToUInt64Bits(combined[line16Start]));
+    WindowsFrozenBitOracle.Equal(0x40B181A0E988718EUL, BitConverter.DoubleToUInt64Bits(gained.Samples[line16Start]));
+    WindowsFrozenBitOracle.Equal(0x3FC431611A5BC9C4UL, BitConverter.DoubleToUInt64Bits(gained.MeanBurstRms));
+    WindowsFrozenBitOracle.Equal(
         "9BA09CDA0429425FA616D47ADDEE36420305E77ACB1C7590B3EE810A5F665482",
         DoubleBitsSha256(gained.Samples));
-    AssertEqual(
+    WindowsFrozenBitOracle.Equal(
         "7E2DC277018708D982DF3C518807118D8E30CF0597661B2B16D0DB042A2CDED0",
         Convert.ToHexString(SHA256.HashData(TbcOutputWriter.ToLittleEndianBytes(result.Samples))));
 }
@@ -4231,10 +4231,10 @@ public void NtscVideo8ChromaAfcNotchFieldMatchesReleaseBits()
     double[] chroma = Enumerable.Range(0, frameSpec.FieldSampleCount)
         .Select(index => (((index * 37) % 1009 - 504) / 16.0) + Math.ScaleB(index + 1.0, -38))
         .ToArray();
-    AssertEqual(
+    WindowsFrozenBitOracle.Equal(
         "0DEC95390F9EA9D4C5D107BE5735DB6D4F388A328DE359000BC9B23535111F26",
         DoubleBitsSha256(chroma));
-    AssertEqual(
+    WindowsFrozenBitOracle.Equal(
         "C1B4827F13A540C821CE52B1B7949ED0CC8DD353948F23202AFF291CAD14DEAE",
         DoubleBitsSha256(options.ChromaPreSosFilter!.SelectMany(section => new[]
         {
@@ -4246,28 +4246,28 @@ public void NtscVideo8ChromaAfcNotchFieldMatchesReleaseBits()
             section.A2
         }).ToArray()));
     double[] rawPrefiltered = SosFilter.ApplyForwardBackward(options.ChromaPreSosFilter!, chroma);
-    AssertEqual(
+    WindowsFrozenBitOracle.Equal(
         "7B1DF5C0A54B4E19AC3358B433DA17090F0B087AD5E871C478EFE4E645206DEC",
         DoubleBitsSha256(rawPrefiltered));
 
     TransferFunction audioNotch = options.ChromaAudioNotchFilter
         ?? throw new InvalidOperationException("NTSC Video8 chroma audio notch was not built.");
-    AssertEqual(
+    WindowsFrozenBitOracle.Equal(
         "536717C5CDBBD6D3156A8F6AE9206E84A83AB7D7BDC52BD683E263646C5BBF07",
         DoubleBitsSha256(audioNotch.Numerator));
-    AssertEqual(
+    WindowsFrozenBitOracle.Equal(
         "0D879E20592216C09AC2C00CDC93ACAF1F7E0FC72B7B12EFD77AB54984F72B53",
         DoubleBitsSha256(audioNotch.Denominator));
     TransferFunction videoNotch = options.ChromaVideoNotchFilter
         ?? throw new InvalidOperationException("NTSC Video8 chroma video notch was not built.");
-    AssertEqual(
+    WindowsFrozenBitOracle.Equal(
         "7BB4EEB22A771B14DDA878BA3DE8FC6C58FF5B85BD2006633380BC4C983CC8AA",
         DoubleBitsSha256(videoNotch.Numerator));
-    AssertEqual(
+    WindowsFrozenBitOracle.Equal(
         "7E240C5672C10A594698EF75390D2C61AB541AC278E620241FED5189849D9703",
         DoubleBitsSha256(videoNotch.Denominator));
     double[] shifted = VhsChromaDecoder.ApplyChromaPreFilter(chroma, options);
-    AssertEqual(
+    WindowsFrozenBitOracle.Equal(
         "5A58E5EBCB401031D876E98D7C17F475CE32D217304F2556E0EBDEC0939C511A",
         DoubleBitsSha256(shifted));
 
@@ -4304,9 +4304,9 @@ public void NtscVideo8ChromaAfcNotchFieldMatchesReleaseBits()
     AssertEqual(1, result.FieldPhaseId);
     ChromaCarrierEstimate carrier = result.CarrierEstimate
         ?? throw new InvalidOperationException("NTSC Video8 chroma AFC did not estimate a carrier.");
-    AssertEqual(0x4126A389808FC2E8UL, BitConverter.DoubleToUInt64Bits(carrier.CarrierHz));
-    AssertEqual(0xC0993D3829E03C00UL, BitConverter.DoubleToUInt64Bits(carrier.OffsetHz));
-    AssertEqual(0UL, BitConverter.DoubleToUInt64Bits(carrier.PhaseRadians));
+    WindowsFrozenBitOracle.Equal(0x4126A389808FC2E8UL, BitConverter.DoubleToUInt64Bits(carrier.CarrierHz));
+    WindowsFrozenBitOracle.Equal(0xC0993D3829E03C00UL, BitConverter.DoubleToUInt64Bits(carrier.OffsetHz));
+    WindowsFrozenBitOracle.Equal(0UL, BitConverter.DoubleToUInt64Bits(carrier.PhaseRadians));
 
     double[] burstDeemphasized = VhsChromaDecoder.ApplyBurstDeemphasis(
         shifted,
@@ -4315,7 +4315,7 @@ public void NtscVideo8ChromaAfcNotchFieldMatchesReleaseBits()
         frameSpec.OutputLineLength,
         options.BurstStart,
         options.BurstEnd);
-    AssertEqual(
+    WindowsFrozenBitOracle.Equal(
         "7402948922F352B6F278BC5C3A2AAC75F3BC0DAF05C7D844C1AAFF93C1A0218D",
         DoubleBitsSha256(burstDeemphasized));
     double[] upconverted = VhsChromaDecoder.UpconvertChromaPhaseCompensated(
@@ -4327,31 +4327,31 @@ public void NtscVideo8ChromaAfcNotchFieldMatchesReleaseBits()
         options.FscMHz,
         targetPhaseEvenDegrees: -33.0,
         targetPhaseOddDegrees: -33.0);
-    AssertEqual(
+    WindowsFrozenBitOracle.Equal(
         "A4A6D4BB874F1581F783562FB3A5158859A3A1EF126E0694B14CE97CCB938109",
         FloatBitsSha256(upconverted));
     double[] final = SosFilter.ApplyForwardBackwardFloat32(options.FinalSosFilter!, upconverted);
-    AssertEqual(
+    WindowsFrozenBitOracle.Equal(
         "4298B29BBCBEFAD3FA65827DBE0F64CE307C9DFB04BCE0EEF74D47799B0FD9D5",
         FloatBitsSha256(final));
 
     TransferFunction deemphasis = options.ChromaDeemphasisFilter
         ?? throw new InvalidOperationException("NTSC Video8 chroma deemphasis was not built.");
-    AssertEqual(
+    WindowsFrozenBitOracle.Equal(
         "CB8C8CE40001180E6B0FC224AB24715F674BD9352567822238CDC26B1C449FB4",
         DoubleBitsSha256(deemphasis.Numerator));
-    AssertEqual(
+    WindowsFrozenBitOracle.Equal(
         "13D6AA3FC2CA709B0BE2F47F5852C312E62ED577151DA9049925A4F2C5E4CB36",
         DoubleBitsSha256(deemphasis.Denominator));
     double[] deemphasized = IirFilter.ApplyForward(deemphasis, final);
-    AssertEqual(
+    WindowsFrozenBitOracle.Equal(
         "312339E85BACF17572EF28914B49C8AEE43DA03CCD2E49B530AA367673B77391",
         DoubleBitsSha256(deemphasized));
     double[] combined = VhsChromaDecoder.ApplyNtscComb(
         deemphasized,
         frameSpec.OutputLineLength,
         retainFloat32: false);
-    AssertEqual(
+    WindowsFrozenBitOracle.Equal(
         "0BBCE9403D67AAEF2C9463192EEB8245AAEDF106D21FA3FC37A32BD0984175DC",
         DoubleBitsSha256(combined));
     AutomaticChromaGainResult gained = VhsChromaDecoder.ApplyAutomaticChromaGain(
@@ -4363,11 +4363,11 @@ public void NtscVideo8ChromaAfcNotchFieldMatchesReleaseBits()
         options.OutputLineCount,
         burstDetectedLine: 0,
         useFloat32Rms: false);
-    AssertEqual(0x3FC4DCC0311381E5UL, BitConverter.DoubleToUInt64Bits(gained.MeanBurstRms));
-    AssertEqual(
+    WindowsFrozenBitOracle.Equal(0x3FC4DCC0311381E5UL, BitConverter.DoubleToUInt64Bits(gained.MeanBurstRms));
+    WindowsFrozenBitOracle.Equal(
         "30817DCD29D76CFE8C3BB4024519DB6EF3FB80F0B9626925F9FA2796B009BF67",
         DoubleBitsSha256(gained.Samples));
-    AssertEqual(
+    WindowsFrozenBitOracle.Equal(
         "A639D0AD8D38590162FDF8D5345A5F06FE5DB90BAD5B4B36A9CE5E195A74C183",
         Convert.ToHexString(SHA256.HashData(TbcOutputWriter.ToLittleEndianBytes(result.Samples))));
 }
@@ -4495,17 +4495,17 @@ public void RfDemodulatorAppliesSharpnessEq()
         3.0,
         30.0);
     AssertEqual(17, vhs17Point9Order);
-    AssertEqual(4598945745717935080L, BitConverter.DoubleToInt64Bits(vhs17Point9Cutoff));
+    WindowsFrozenBitOracle.Equal(4598945745717935080L, BitConverter.DoubleToInt64Bits(vhs17Point9Cutoff));
     TransferFunction vhs17Point9Filter = IirFilterDesign.ButterworthHighPassTransferFunction(
         vhs17Point9Order,
         vhs17Point9Cutoff);
-    AssertEqual(
+    WindowsFrozenBitOracle.Equal(
         "36079D664FA54271CD212A1CE5C8297565B6CB1713D2EE18977FEF15CEADEB74",
         DoubleBitsSha256(vhs17Point9Filter.Numerator));
-    AssertEqual(
+    WindowsFrozenBitOracle.Equal(
         "C93A519F4E268ABB2E9155B67093F001A2360F3C9DBB3726F5F1960E21266572",
         DoubleBitsSha256(vhs17Point9Filter.Denominator));
-    AssertEqual(
+    WindowsFrozenBitOracle.Equal(
         "CB44D5BE6BFC51F6B3EE6F192A995724A766111574C16CE70E9BF9FAB9F0A3D0",
         DoubleBitsSha256(IirFilter.SteadyStateInitialConditions(vhs17Point9Filter)));
 
@@ -4517,13 +4517,13 @@ public void RfDemodulatorAppliesSharpnessEq()
         3.0,
         30.0);
     TransferFunction vhsFilter = IirFilterDesign.ButterworthHighPassTransferFunction(vhsOrder, vhsCutoff);
-    AssertEqual(
+    WindowsFrozenBitOracle.Equal(
         "D341D4551C29058C87B5EA724290B02B44DEDBCAC39573DEA73D003757979401",
         DoubleBitsSha256(vhsFilter.Numerator));
-    AssertEqual(
+    WindowsFrozenBitOracle.Equal(
         "697B2DAF9C1DBDE7DB4B15E2EFA9CB177214A37369F6250CAC9C84F9DAF3A158",
         DoubleBitsSha256(vhsFilter.Denominator));
-    AssertEqual(
+    WindowsFrozenBitOracle.Equal(
         "CF47B3A6CCA5F62A2DEA8D5037E2250775AD778630C00A8779059FA6DA599F30",
         DoubleBitsSha256(IirFilter.SteadyStateInitialConditions(vhsFilter)));
 
@@ -4534,7 +4534,7 @@ public void RfDemodulatorAppliesSharpnessEq()
         vhsInput,
         vhsSampleRate,
         new SharpnessEqOptions(0.5, 2_620_000.0, 500_000.0, 20));
-    AssertEqual(
+    WindowsFrozenBitOracle.Equal(
         "CC66AFB0124BAFA71F6606042456182217602B640B095F6C5D36A5E24EBF9A63",
         DoubleBitsSha256(vhsSharpened));
 }
@@ -5207,9 +5207,8 @@ public void SubDeemphasisAnalyticMagnitudeMatchesScipyHilbertBits()
 
     const string expectedSha256 =
         "2AD6816EF4E085A2C65950897ACD97863248F3152377DE6F17322CB38AA9ED13";
-    AssertEqual(
-        expectedSha256,
-        DoubleBitsSha256(RfDemodulator.BuildAnalyticMagnitude(input)));
+    double[] allocatingMagnitude = RfDemodulator.BuildAnalyticMagnitude(input);
+    WindowsFrozenBitOracle.Equal(expectedSha256, DoubleBitsSha256(allocatingMagnitude));
 
     var magnitude = new double[length];
     var spectrum = new Complex[length];
@@ -5219,7 +5218,8 @@ public void SubDeemphasisAnalyticMagnitudeMatchesScipyHilbertBits()
         magnitude,
         spectrum,
         transformScratch);
-    AssertEqual(expectedSha256, DoubleBitsSha256(magnitude));
+    AssertSequence(allocatingMagnitude, magnitude);
+    WindowsFrozenBitOracle.Equal(expectedSha256, DoubleBitsSha256(magnitude));
 }
 
 [Fact(DisplayName = "complex FFT matches SciPy DUCC packet transforms")]
@@ -5285,22 +5285,23 @@ public void RealFullFftMatchesScipyDuccPacketTransform()
     Complex[] spectrum = PocketFftComplex.ForwardDuccRealFull(input);
     const string expectedSha256 =
         "5ED16316814D498111E0A6EE33EDED7E0862CBD7ACBACD9D00DA13C8125FACF4";
-    AssertEqual(expectedSha256, ComplexBitsSha256(spectrum));
-    AssertEqual(
+    WindowsFrozenBitOracle.Equal(expectedSha256, ComplexBitsSha256(spectrum));
+    WindowsFrozenBitOracle.Equal(
         BitConverter.DoubleToInt64Bits(-0.0),
         BitConverter.DoubleToInt64Bits(spectrum[0].Imaginary));
-    AssertEqual(
+    WindowsFrozenBitOracle.Equal(
         BitConverter.DoubleToInt64Bits(-0.0),
         BitConverter.DoubleToInt64Bits(spectrum[length / 2].Imaginary));
 
     var preallocated = new Complex[length];
     var transformScratch = new Complex[length];
     PocketFftComplex.ForwardDuccRealFull(input, preallocated, transformScratch);
-    AssertEqual(expectedSha256, ComplexBitsSha256(preallocated));
-    AssertEqual(
+    AssertEqual(ComplexBitsSha256(spectrum), ComplexBitsSha256(preallocated));
+    WindowsFrozenBitOracle.Equal(expectedSha256, ComplexBitsSha256(preallocated));
+    WindowsFrozenBitOracle.Equal(
         BitConverter.DoubleToInt64Bits(-0.0),
         BitConverter.DoubleToInt64Bits(preallocated[0].Imaginary));
-    AssertEqual(
+    WindowsFrozenBitOracle.Equal(
         BitConverter.DoubleToInt64Bits(-0.0),
         BitConverter.DoubleToInt64Bits(preallocated[length / 2].Imaginary));
 
@@ -5702,7 +5703,7 @@ public void DecodeFilterSetBuilderAppliesFmAudioNotchOptions()
         q: 10.0,
         nyquistHz: 17_900_000.0 / 2.0,
         blockLength: 32_768);
-    AssertEqual(
+    WindowsFrozenBitOracle.Equal(
         "E03D50C2898303E53A1A5870578AACFE38F0838CFF3A613285B5C8BFB6A46ADB",
         DoubleBitsSha256(vhs17Point9Magnitude));
 }
@@ -6523,6 +6524,9 @@ public async Task GnuRadioRfAfeBridgeMatchesUpstreamZmqProtocol()
         ?? throw new InvalidOperationException("No test ZMQ send port was available.");
     int receivePort = GnuRadioRfAfeBridge.FindAvailablePort(sendPort + 1, 25_999)
         ?? throw new InvalidOperationException("No test ZMQ receive port was available.");
+    AssertEqual<int?>(
+        receivePort,
+        GnuRadioRfAfeBridge.FindAvailablePort(sendPort, receivePort, sendPort));
     var log = new StringWriter();
     using var bridge = new GnuRadioRfAfeBridge(sendPort, receivePort, log);
 
@@ -6565,7 +6569,6 @@ public async Task GnuRadioRfAfeBridgeMatchesUpstreamZmqProtocol()
     AssertTrue(log.ToString().Contains($"tcp://localhost:{sendPort}", StringComparison.Ordinal));
     AssertTrue(log.ToString().Contains($"tcp://*:{receivePort}", StringComparison.Ordinal));
 
-    AssertEqual<int?>(sendPort + 1, GnuRadioRfAfeBridge.FindAvailablePort(sendPort, sendPort + 1, sendPort));
     AssertThrows<ArgumentOutOfRangeException>(() => GnuRadioRfAfeBridge.FindAvailablePort(10, 9));
 
     const int blockLength = 8;
@@ -6814,7 +6817,7 @@ public void CvbsDuccRealFftFilteringMatchesScipyDoubleBits()
         input[i] = value == 0 ? 1 : value;
     }
 
-    AssertEqual(
+    WindowsFrozenBitOracle.Equal(
         "A8B3FFBA42B93344094A5BD9B3056EE8E1358FC589EAB1AB0F9C47C634E71560",
         DoubleBitsSha256(input));
 
@@ -6822,20 +6825,20 @@ public void CvbsDuccRealFftFilteringMatchesScipyDoubleBits()
         FormatCatalog.Default.GetCvbsParameters("NTSC"),
         40_000_000.0,
         blockLength);
-    AssertEqual(
+    WindowsFrozenBitOracle.Equal(
         "7E0AA1AB29320D3DFDB5C8C5843274C57611EB30434335A32EE61775DDCF1E35",
         ComplexBitsSha256(filters.VideoLowPass05));
 
     Complex[] halfSpectrum = PocketFftComplex.ForwardDuccReal(input);
-    AssertEqual(
+    WindowsFrozenBitOracle.Equal(
         "14467469A931E878E066F4E9F7CB04950D951A32DD5FFB7A6BD9B4BF693F1768",
         ComplexBitsSha256(halfSpectrum));
     double[] reconstructed = PocketFftComplex.InverseDuccReal(halfSpectrum, blockLength);
-    AssertEqual(
+    WindowsFrozenBitOracle.Equal(
         "3DAE4DFDEA2CB35381BAB7FA78905D9AB0DFD534CABD834F7805724CA69441D0",
         DoubleBitsSha256(reconstructed));
     Complex[] reconstructedSpectrum = PocketFftComplex.ForwardDuccReal(reconstructed);
-    AssertEqual(
+    WindowsFrozenBitOracle.Equal(
         "4536090FA1058E7761561A0A2377188ED1A9F96167F6C746C5D26E48740F1D01",
         ComplexBitsSha256(reconstructedSpectrum));
 
@@ -6855,17 +6858,17 @@ public void CvbsDuccRealFftFilteringMatchesScipyDoubleBits()
                 value.Imaginary * coefficient.Real));
     }
 
-    AssertEqual(
+    WindowsFrozenBitOracle.Equal(
         "8B98C81888AC03D255815CA8043790BD502890A4CD68541DCC9FDE80E5922339",
         ComplexBitsSha256(filteredSpectrum));
-    AssertEqual(
+    WindowsFrozenBitOracle.Equal(
         "40B996E074F1A1CD7A8F9989864CD61F4457CCFCFAC5C1B4B62629A307D83593",
         DoubleBitsSha256(PocketFftComplex.InverseDuccReal(filteredSpectrum, blockLength)));
 
     double[] secondRoundTrip = PocketFftComplex.InverseDuccReal(
         reconstructedSpectrum,
         blockLength);
-    AssertEqual(
+    WindowsFrozenBitOracle.Equal(
         "5347913DE0967DB8EB0605C4603769AA2150CBB8CF03103BA3A7334C39CE5855",
         DoubleBitsSha256(secondRoundTrip));
     AssertThrows<ArgumentException>(() => PocketFftComplex.InverseDuccReal(halfSpectrum, 1024));
@@ -16720,7 +16723,8 @@ public void TapeFamilyBlocksMatchUpstreamChannels()
 static void AssertNamedHash(string label, string channel, JsonElement expectedCase, string actual)
 {
     string expected = expectedCase.GetProperty(channel).GetString()!;
-    if (!string.Equals(expected, actual, StringComparison.Ordinal))
+    if (OperatingSystem.IsWindows() &&
+        !string.Equals(expected, actual, StringComparison.Ordinal))
     {
         throw new Exception($"{label} {channel}: expected {expected}, got {actual}.");
     }

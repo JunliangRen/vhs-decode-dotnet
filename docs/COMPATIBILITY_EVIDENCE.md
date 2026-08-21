@@ -2229,7 +2229,7 @@ dotnet test --solution VHSDecodeDotNet.slnx --no-build
 ```
 
 The current formal solution build completes with zero warnings and errors, and
-the xUnit v3 project exposes 1,591 independently discoverable tests
+the xUnit v3 project exposes 1,592 independently discoverable tests
 to `dotnet test` and Visual Studio Test Explorer. On the
 same Windows machine and fixtures, Release wall-clock measurements for one
 frame were 2.346 s versus 7.193 s for NTSC VHS and 1.651 s versus 5.865 s for
@@ -3450,7 +3450,7 @@ historical CUDA-slower result and current CUDA-faster snapshots are both valid
 descriptions of their sessions, but their reversal is not attributed to later
 source changes alone.
 
-The current .NET 11 Preview 7 xUnit v3 run discovered all 1,591 tests: 1,589
+The current .NET 11 Preview 7 xUnit v3 run discovered all 1,592 tests: 1,590
 passed, none failed, and two PAL/NTSC AMF encoder cases were skipped because the
 AMD runtime is unavailable on the NVIDIA development machine. The CUDA-focused
 coverage includes parser/backend isolation, ABI and real native probing,

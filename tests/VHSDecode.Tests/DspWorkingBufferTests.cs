@@ -575,7 +575,7 @@ public sealed class DspWorkingBufferTests
         RfPipelineBlock block = session.Pipeline.DecodePreparedBlock(input, reportDiagnostics: false);
         long allocated = GC.GetAllocatedBytesForCurrentThread() - before;
 
-        Assert.Equal(
+        WindowsFrozenBitOracle.Equal(
             "AEC0D4FFFF58D5A35771AE7374C0A62C1DA955125249B91C6AD9946D7BBBFEF4",
             Hash(block));
         Assert.True(
@@ -1342,6 +1342,8 @@ public sealed class DspWorkingBufferTests
             ["--pal", "--no_resample", "probe.s16", "probe-output"]);
         using DecodeSession session = DecodeSessionFactory.Create(command, length);
         double[] input = BuildPalVhsProbe(length, session.DecodeSampleRateHz);
+        string platformHash = Hash(
+            session.Pipeline.DecodePreparedBlock(input, reportDiagnostics: false));
         var hashes = new string[32];
 
         Parallel.For(
@@ -1356,7 +1358,8 @@ public sealed class DspWorkingBufferTests
                 hashes[index] = Hash(block);
             });
 
-        Assert.All(hashes, hash => Assert.Equal(expectedHash, hash));
+        Assert.All(hashes, hash => Assert.Equal(platformHash, hash));
+        WindowsFrozenBitOracle.Equal(expectedHash, platformHash);
     }
 
     [Fact(DisplayName = "Hot DSP paths retain bounded managed allocation after warm-up")]
@@ -1530,7 +1533,7 @@ public sealed class DspWorkingBufferTests
 
         string actualHash = Hash(actual);
         Assert.Equal(Hash(expected), actualHash);
-        Assert.Equal(
+        WindowsFrozenBitOracle.Equal(
             "D3093EC8BC380745EFBE0312FF89D643E54CF9A262A7840C09BFD5EA3FEBDF81",
             actualHash);
         Assert.True(

@@ -45,7 +45,7 @@ public static class DecodeDispatcher
 
     public static string[] NormalizeInvocation(IReadOnlyList<string> args, string? executableName)
     {
-        string name = Path.GetFileNameWithoutExtension(executableName ?? string.Empty);
+        string name = PortableExecutableStem(executableName);
         if (!StandaloneCommands.TryGetValue(name, out string? command))
         {
             return args.ToArray();
@@ -63,7 +63,15 @@ public static class DecodeDispatcher
 
     public static string InvocationProgramName(string? executableName)
     {
-        string name = Path.GetFileNameWithoutExtension(executableName ?? string.Empty);
+        string name = PortableExecutableStem(executableName);
         return StandaloneCommands.ContainsKey(name) ? name : "decode.py";
+    }
+
+    private static string PortableExecutableStem(string? executableName)
+    {
+        string normalized = (executableName ?? string.Empty).Replace('\\', '/');
+        int separator = normalized.LastIndexOf('/');
+        string fileName = separator >= 0 ? normalized[(separator + 1)..] : normalized;
+        return Path.GetFileNameWithoutExtension(fileName);
     }
 }

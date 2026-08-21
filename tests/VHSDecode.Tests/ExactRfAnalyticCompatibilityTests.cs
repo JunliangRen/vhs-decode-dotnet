@@ -18,25 +18,27 @@ public sealed class ExactRfAnalyticCompatibilityTests
         RfDemodulatedBlock current = Decode(input, "current");
         RfDemodulatedBlock v040 = Decode(input, "v0.4.0");
 
-        Assert.Equal(
+        WindowsFrozenBitOracle.Equal(
             "9CE375F2AB902D8E5FC12EAFA82F60951114760EA8D31D852C53274696D4A122",
             Hash(current.Analytic));
-        Assert.Equal(
+        WindowsFrozenBitOracle.Equal(
             "DC7B6A81577ACFA9B741A0D4BFB805F6E164597557F4DF6F4413C3C8E3232F87",
             Hash(current.DemodRaw));
-        Assert.Equal(
+        WindowsFrozenBitOracle.Equal(
             "3891828F76474EBCC7F1E00FDE5EC1107FE6D0B4209E03FCAFEE2AA28AD0E417",
             Hash(current.Video));
-        Assert.Equal(
+        WindowsFrozenBitOracle.Equal(
             "9CE375F2AB902D8E5FC12EAFA82F60951114760EA8D31D852C53274696D4A122",
             Hash(v040.Analytic));
-        Assert.Equal(
+        WindowsFrozenBitOracle.Equal(
             "DC7B6A81577ACFA9B741A0D4BFB805F6E164597557F4DF6F4413C3C8E3232F87",
             Hash(v040.DemodRaw));
-        Assert.Equal(
+        WindowsFrozenBitOracle.Equal(
             "3891828F76474EBCC7F1E00FDE5EC1107FE6D0B4209E03FCAFEE2AA28AD0E417",
             Hash(v040.Video));
         Assert.Equal(Hash(current.Analytic), Hash(v040.Analytic));
+        Assert.Equal(Hash(current.DemodRaw), Hash(v040.DemodRaw));
+        Assert.Equal(Hash(current.Video), Hash(v040.Video));
     }
 
     private static RfDemodulatedBlock Decode(

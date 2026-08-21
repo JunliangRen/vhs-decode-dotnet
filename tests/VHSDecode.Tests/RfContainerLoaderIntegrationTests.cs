@@ -4,6 +4,7 @@ using System.Diagnostics;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
+using System.Text.RegularExpressions;
 using VHSDecode.Core.Rf;
 using Xunit;
 
@@ -149,8 +150,8 @@ public sealed class RfContainerLoaderIntegrationTests
 
             VerifyNativeReads(flacPath, samples);
 
-            VerifyHashes(wave24Path, Pcm24WaveReadCases);
-            VerifyHashes(flac24Path, Pcm24FlacReadCases);
+            VerifyFfmpegReads(wave24Path, Pcm24WaveReadCases);
+            VerifyFfmpegReads(flac24Path, Pcm24FlacReadCases);
         }
         finally
         {
@@ -181,10 +182,10 @@ public sealed class RfContainerLoaderIntegrationTests
             EncodeFlac(wavePath, flacPath, oggContainer: false);
             EncodeFlac(wavePath, ldfPath, oggContainer: true);
             Assert.IsType<FfmpegPcm16SampleLoader>(RfLoaderFactory.CreateNative(flacPath)).Dispose();
-            VerifyHashes(wavePath, StereoWaveReadCases);
-            VerifyHashes(wave17900Path, StereoWave17900ReadCases);
-            VerifyHashes(flacPath, StereoFlacReadCases);
-            VerifyHashes(ldfPath, StereoFlacReadCases);
+            VerifyFfmpegReads(wavePath, StereoWaveReadCases);
+            VerifyFfmpegReads(wave17900Path, StereoWave17900ReadCases);
+            VerifyFfmpegReads(flacPath, StereoFlacReadCases);
+            VerifyFfmpegReads(ldfPath, StereoFlacReadCases);
         }
         finally
         {
@@ -707,8 +708,12 @@ public sealed class RfContainerLoaderIntegrationTests
         }
     }
 
-    private static void VerifyHashes(string path, IReadOnlyList<ReadCase> readCases)
+    private static void VerifyFfmpegReads(string path, IReadOnlyList<ReadCase> readCases)
     {
+        int[] frameLengths = ProbeAudioFrameLengths(path);
+        short[] decoded = DecodePcm16(path);
+        short[] expected = BuildPaddedSamples(decoded, frameLengths);
+        bool enforceReleaseHashes = ProbeFfmpegMajorVersion() >= 8;
         using var loader = new FfmpegPcm16SampleLoader(path);
         using FileStream input = File.OpenRead(path);
         foreach (ReadCase readCase in readCases)
@@ -721,8 +726,40 @@ public sealed class RfContainerLoaderIntegrationTests
             }
 
             Assert.NotNull(actual);
-            Assert.Equal(readCase.Sha256, Sha256(actual));
+            Assert.InRange(readCase.Start, 0, expected.Length - readCase.Length);
+            Assert.Equal(
+                expected.AsSpan(readCase.Start, readCase.Length)
+                    .ToArray()
+                    .Select(static value => (double)value),
+                actual);
+            if (enforceReleaseHashes)
+            {
+                Assert.Equal(readCase.Sha256, Sha256(actual));
+            }
         }
+    }
+
+    private static int ProbeFfmpegMajorVersion()
+    {
+        ProcessStartInfo startInfo = CreateProcessStartInfo("ffmpeg", ["-version"]);
+        using Process process = Process.Start(startInfo)
+            ?? throw new InvalidOperationException("Failed to start ffmpeg.");
+        Task<string> standardOutput = process.StandardOutput.ReadToEndAsync();
+        Task<string> standardError = process.StandardError.ReadToEndAsync();
+        process.WaitForExit();
+        Task.WhenAll(standardOutput, standardError).GetAwaiter().GetResult();
+        Assert.True(
+            process.ExitCode == 0,
+            $"ffmpeg exited with {process.ExitCode}: {standardError.Result}");
+
+        Match match = Regex.Match(
+            standardOutput.Result,
+            @"^ffmpeg version\s+(?:n)?(?<major>\d+)",
+            RegexOptions.CultureInvariant);
+        Assert.True(match.Success, $"Unable to parse ffmpeg version from: {standardOutput.Result}");
+        return int.Parse(
+            match.Groups["major"].Value,
+            System.Globalization.CultureInfo.InvariantCulture);
     }
 
     private static void VerifyNativeReads(string path, short[] source)

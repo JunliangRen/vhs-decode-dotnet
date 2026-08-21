@@ -6,6 +6,11 @@
     <EmbeddedResource Include="Fixtures\tape-family-v0.4.0.json" />
   </ItemGroup>
 
+  <Target Name="ValidateLinuxX64NativeTestAssets" BeforeTargets="Build" Condition="$([MSBuild]::IsOSPlatform('Linux')) And '$(RuntimeIdentifier)' != 'linux-arm64'">
+    <Error Condition="!Exists('..\..\artifacts\native\Release\linux-x64\libsndfile.so')" Text="Missing Linux x64 libsndfile test sidecar. Run tools/build-linux-x64-release.ps1 before testing." />
+    <Error Condition="!Exists('..\..\artifacts\native\Release\linux-x64\libsoxr.so')" Text="Missing Linux x64 libsoxr test sidecar. Run tools/build-linux-x64-release.ps1 before testing." />
+  </Target>
+
   <ItemGroup>
     <PackageReference Include="Microsoft.NET.Test.Sdk" Version="18.9.0" />
     <PackageReference Include="Microsoft.Testing.Extensions.CodeCoverage" Version="18.10.0" />

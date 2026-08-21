@@ -2,7 +2,7 @@
 
 [English](README.md) | [简体中文](README.zh-CN.md) | **[日本語](README.ja.md)**
 
-<!-- README_SYNC: 2026-08-18.01 -->
+<!-- README_SYNC: 2026-08-21.01 -->
 
 [`oyvindln/vhs-decode`](https://github.com/oyvindln/vhs-decode) の
 デコード関連部分を .NET 11 で再実装するプロジェクトです。互換性の対象は
@@ -38,7 +38,7 @@ upstream release `v0.4.0`、commit
 - VHS family には VHS/S-VHS、Betamax、Video8/Hi8、U-matic、Type C、EIAJ、
   upstream が対応する PAL/NTSC variant が含まれます。
 - TBC utility、ダブルクリック GUI、開発者向け plot window は対象外です。
-- Visual Studio 2026 の `.slnx` には **1,591** 件の標準 xUnit v3 test があり、
+- Visual Studio 2026 の `.slnx` には **1,592** 件の標準 xUnit v3 test があり、
   Test Explorer と `dotnet test` の両方で実行できます。
 
 <!-- SECTION: start -->
@@ -58,6 +58,21 @@ decode.exe hifi [upstream options] input.lds output.wav
 
 `vhs-decode.exe`、`ld-decode.exe` などの standalone alias も使用できます。
 完全な互換 option は `decode.exe <command> --help` で確認してください。
+
+release workflow は self-contained、multi-file の glibc `linux-x64` tar も
+生成します。Linux package は portable `exact` backend のみを対象とし、Linux 用
+SQLite、libsndfile、libsoxr native asset を同梱して Windows IPP/CUDA DLL を除外します。
+FFmpeg と文書化された OS library をインストールした後に実行できます。
+
+```bash
+tar -xzf vhs-decode-dotnet-linux-x64.tar.gz
+cd vhs-decode-dotnet-linux-x64
+./vhs-decode --pal --dsp-backend exact input.lds output
+```
+
+Ubuntu 22.04/glibc 2.35 baseline、runtime package、checksum、build provenance、
+release gate は [Linux x64 release](docs/LINUX_X64.md) を参照してください。
+32-bit x86、ARM/ARM64、musl は対象外です。
 
 ### Seek 可能な RF preview server
 
@@ -315,11 +330,18 @@ header は FFmpeg を維持します。
 dotnet restore VHSDecodeDotNet.slnx
 dotnet build VHSDecodeDotNet.slnx -c Release --no-restore
 dotnet test --solution VHSDecodeDotNet.slnx -c Release `
-  --no-build --no-restore --minimum-expected-tests 1591
+  --no-build --no-restore --minimum-expected-tests 1592
 ```
 
 Visual Studio 2026 で `VHSDecodeDotNet.slnx` を開くと、build、debug、
 Test Explorer からの xUnit v3 実行ができます。
+
+Ubuntu 22.04 x64 で native build、全 test、multi-file publish、reproducible tar、
+最終展開 tar smoke を一括実行する command は次のとおりです。
+
+```bash
+pwsh ./tools/build-linux-x64-release.ps1
+```
 
 <!-- SECTION: detail -->
 

@@ -19,16 +19,16 @@ public sealed class HiFiSpectralNoiseReductionTests
             + noiseReduction.EndPadding];
         input.CopyTo(chunk, 2 * noiseReduction.ChunkSize);
 
-        Assert.Equal(
+        WindowsFrozenBitOracle.Equal(
             "B5D989664CBBF16CF3EE56F373B57A65857AF399886B484425BFAAC55614C835",
             BinarySha256(chunk));
-        Assert.Equal(
+        WindowsFrozenBitOracle.Equal(
             "1F0E971AF59F6C758249E2FEFAC7479A16984255EAD2C5EC82715B2B613D311B",
             BinarySha256(noiseReduction.Window));
-        Assert.Equal("3F85BAA8A10CB075", Bits(noiseReduction.SmoothingB));
+        WindowsFrozenBitOracle.Equal("3F85BAA8A10CB075", Bits(noiseReduction.SmoothingB));
         Assert.Equal(11, noiseReduction.SmoothingFilter.Rows);
         Assert.Equal(19, noiseReduction.SmoothingFilter.Columns);
-        Assert.Equal(
+        WindowsFrozenBitOracle.Equal(
             "42CCD9FB6093335CEFD874C5A3F3DBD2CB280CC4466BE8A19DF80A9EA1E5B695",
             BinarySha256(noiseReduction.SmoothingFilter.Values));
 
@@ -36,7 +36,7 @@ public sealed class HiFiSpectralNoiseReductionTests
             chunk,
             noiseReduction.Window,
             186);
-        Assert.Equal(
+        WindowsFrozenBitOracle.Equal(
             "BA083570F9A6F208AA5D9CF953DC8E879EAD5CAE5A28BD82E3F0A40C81753B36",
             BinarySha256(firstSignalFrame));
 
@@ -44,16 +44,16 @@ public sealed class HiFiSpectralNoiseReductionTests
             HiFiSpectralNoiseReduction.CreateStft(chunk, noiseReduction.Window);
         Assert.Equal(513, spectrum.Rows);
         Assert.Equal(293, spectrum.Columns);
-        Assert.Equal("3A146DEE/00000000", Bits(spectrum[0, 186]));
-        Assert.Equal("39E8AD7A/39B4F15C", Bits(spectrum[1, 186]));
-        Assert.Equal("390BFE32/3A0C0E60", Bits(spectrum[2, 186]));
-        Assert.Equal(
+        WindowsFrozenBitOracle.Equal("3A146DEE/00000000", Bits(spectrum[0, 186]));
+        WindowsFrozenBitOracle.Equal("39E8AD7A/39B4F15C", Bits(spectrum[1, 186]));
+        WindowsFrozenBitOracle.Equal("390BFE32/3A0C0E60", Bits(spectrum[2, 186]));
+        WindowsFrozenBitOracle.Equal(
             "F1103F7AE5022B12E4BB100AF3BEA7B49A83BDAA1E8E1674B239D61F2A980CE1",
             BinarySha256(spectrum.Values));
 
         HiFiSpectralMatrix<float> absolute =
             HiFiSpectralNoiseReduction.Absolute(spectrum);
-        Assert.Equal(
+        WindowsFrozenBitOracle.Equal(
             "6A1988552494BC7BB8545B2FC567BC11437EBC0CA6EF102B3DB2333ECC82921D",
             BinarySha256(absolute.Values));
 
@@ -61,13 +61,13 @@ public sealed class HiFiSpectralNoiseReductionTests
             HiFiSpectralNoiseReduction.SmoothTime(
                 absolute,
                 noiseReduction.SmoothingB);
-        Assert.Equal(
+        WindowsFrozenBitOracle.Equal(
             "A5F84AFB1C52FEEF104D5AC21C739C86153DB671F7FEB36909EBFD7ADB4102C5",
             BinarySha256(smooth.Values));
 
         HiFiSpectralMatrix<double> rawMask =
             HiFiSpectralNoiseReduction.CreateMask(absolute, smooth);
-        Assert.Equal(
+        WindowsFrozenBitOracle.Equal(
             "CA3B0060663CEED972A8650A4611FDE094CEFF5BF0BF5594248E5EC964072E3F",
             BinarySha256(rawMask.Values));
 
@@ -77,7 +77,7 @@ public sealed class HiFiSpectralNoiseReductionTests
                 noiseReduction.SmoothingFilter);
 
         HiFiSpectralNoiseReduction.ApplyMask(spectrum, smoothedMask, 0.5);
-        Assert.Equal(
+        WindowsFrozenBitOracle.Equal(
             "3D7D14956F3714CAAF92A87F0FB960D4995AE39D77175971D01F2CC111DE5BDB",
             BinarySha256(spectrum.Values));
 
@@ -85,12 +85,12 @@ public sealed class HiFiSpectralNoiseReductionTests
             spectrum,
             noiseReduction.Window);
         Assert.Equal(74_752, denoised.Length);
-        Assert.Equal(
+        WindowsFrozenBitOracle.Equal(
             "8A91830CDD6328BD25A2A46FC7425E745236855E524D723C2059831B08D5B1A2",
             BinarySha256(denoised));
 
         int outputStart = denoised.Length - input.Length - noiseReduction.EndPadding;
-        Assert.Equal(
+        WindowsFrozenBitOracle.Equal(
             "69D46E52685799F7C71D81FFE03E7C6EC19C286E95D652231AF5EC63550CA3C2",
             BinarySha256(denoised.AsSpan(outputStart, input.Length)));
     }

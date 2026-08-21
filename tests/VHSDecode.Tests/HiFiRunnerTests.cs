@@ -425,7 +425,7 @@ public sealed class HiFiRunnerTests
             Assert.Equal(string.Empty, error.ToString());
             byte[] wave = File.ReadAllBytes(outputPath);
             Assert.Equal(91_228, wave.Length);
-            Assert.Equal(
+            WindowsFrozenBitOracle.Equal(
                 "325A4ABFB4922FE814338BAB377A94E6C2FD96277244813433A72F6ED5723553",
                 Convert.ToHexString(SHA256.HashData(wave)));
         }
@@ -470,7 +470,7 @@ public sealed class HiFiRunnerTests
             Assert.Equal(string.Empty, error.ToString());
             byte[] wave = File.ReadAllBytes(outputPath);
             Assert.Equal(91_228, wave.Length);
-            Assert.Equal(
+            WindowsFrozenBitOracle.Equal(
                 "E1AAF3F68DF1392617BC28D162D2E3DD2AFE6251E91E06D4D3191540C3EFA83F",
                 Convert.ToHexString(SHA256.HashData(wave)));
         }

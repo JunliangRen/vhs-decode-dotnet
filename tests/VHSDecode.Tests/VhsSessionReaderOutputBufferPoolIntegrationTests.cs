@@ -1,5 +1,6 @@
 using VHSDecode.Core.CommandLine;
 using VHSDecode.Core.Decode;
+using VHSDecode.Core.Dsp;
 using Xunit;
 
 namespace VHSDecode.Tests;
@@ -63,14 +64,18 @@ public sealed class VhsSessionReaderOutputBufferPoolIntegrationTests
             Assert.Equal(
                 compatibility == "v0.4.0",
                 exactFromSession.CanUseVhsWavefront);
-            using DecodeSession ippSession = CreateSession(
-                stagedOutput + "-ipp-profile",
-                compatibility,
-                threads: 20,
-                dspBackend: "ipp-fast");
-            using TbcFieldDecodePipeline ippFromSession =
-                TbcFieldDecodePipeline.FromSession(ippSession);
-            Assert.True(ippFromSession.CanUseVhsWavefront);
+            if (OperatingSystem.IsWindows())
+            {
+                _ = IppRuntime.ProbeRequired();
+                using DecodeSession ippSession = CreateSession(
+                    stagedOutput + "-ipp-profile",
+                    compatibility,
+                    threads: 20,
+                    dspBackend: "ipp-fast");
+                using TbcFieldDecodePipeline ippFromSession =
+                    TbcFieldDecodePipeline.FromSession(ippSession);
+                Assert.True(ippFromSession.CanUseVhsWavefront);
+            }
         }
         finally
         {
