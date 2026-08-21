@@ -35,7 +35,7 @@
 - VHS 家族包括 VHS/S-VHS、Betamax、Video8/Hi8、U-matic、Type C、EIAJ
   以及上游支持的 PAL/NTSC 变体。
 - TBC 工具、双击启动的用户 GUI 和开发者绘图窗口明确不在范围内。
-- Visual Studio 2026 `.slnx` 包含 **1,577** 项标准 xUnit v3 测试；测试可在
+- Visual Studio 2026 `.slnx` 包含 **1,591** 项标准 xUnit v3 测试；测试可在
   Test Explorer 中查看，也可用 `dotnet test` 运行。
 
 <!-- SECTION: start -->
@@ -59,7 +59,9 @@ decode.exe hifi [upstream options] input.lds output.wav
 
 VHS 可运行 `decode.exe vhs --preview-server --pal input.lds`，LaserDisc
 可运行 `decode.exe ld --preview-server --pal input.ldf`。命令会输出仅监听
-loopback 的网页播放器地址，以及标准 HLS/fMP4 播放列表地址；不需要输出基名，
+loopback 的网页播放器地址，以及标准 HLS/fMP4 播放列表地址。默认从
+`127.0.0.1:8080` 开始，若被占用则逐一尝试到 `8180`；显式 `--preview-port` 会严格使用
+指定端口，而 `--preview-port 0` 仍表示由系统分配动态端口。不需要输出基名，
 也不会生成 TBC、JSON、SQLite、EFM、音频或解码日志文件。
 
 这是用于定位内容的低精度模式：通过轻量 4fSC 一维解调保留彩色，并从相邻 burst
@@ -70,8 +72,11 @@ loopback 的网页播放器地址，以及标准 HLS/fMP4 播放列表地址；�
 60000/1001 fps，PAL 固定输出逐行 768x576、50 fps。启动时会依次实际验证完整的
 fMP4 管线：CUDA YADIF + NVENC、QSV advanced VPP + QSV、CPU YADIF + AMF，最后
 是 CPU YADIF + libx264。`--preview-crf` 接受 0 到 51，默认 31；硬件编码器会映射到
-最接近的质量/QP 控制，因此不同后端的码率并不完全相同。IPP 可用时会自动选用
-`ipp-fast`，否则回退到可移植的托管后端。标准 40 MSPS VHS 预览还会先经过固定的
+最接近的质量/QP 控制，因此不同后端的码率并不完全相同。符合条件的原生 40 MSPS
+PAL/NTSC VHS 预览会先做轻量 CUDA 驱动/设备探测；这一步不会加载 cuFFT、创建 CUDA
+上下文或初始化 NVENC。设备通过后才尝试一次完整 CUDA/cuFFT/NVENC 初始化。探测或完整
+启动不可用时，依次回退到 `ipp-fast` 和可移植托管后端；其他预览输入直接采用同一套
+IPP→托管 CPU 顺序。标准 40 MSPS VHS 预览还会先经过固定的
 抗混叠滤波，再以内部 20 MSPS RF 解码；原生 20 MSPS VHS 输入保持 20 MSPS，
 也就是说，受支持的 VHS preview 路径等价于强制启用完整解码的
 `--decode-at-20msps`。完整 VHS 解码可在 `ipp-fast` 或 `cuda-fast` 下显式启用该参数；
@@ -81,7 +86,8 @@ IPP-FAST 是否初始化成功、实际解码线程数，并分别用窗口编�
 能找到具有至少一条可用管线的 FFmpeg；也可通过 `VHSDECODE_FFMPEG` 和
 `VHSDECODE_FFPROBE` 指定路径。
 
-原生采样率为 40 MSPS 的 PAL/NTSC VHS 也可以显式选择独立 GPU 预览路径：
+因此，兼容机器上的原生 40 MSPS PAL/NTSC VHS 会自动选择独立 GPU 预览路径；也可用
+下面的写法显式锁定该路径：
 
 ```powershell
 decode.exe vhs --preview-server --dsp-backend cuda-fast --pal input.ldf
@@ -92,8 +98,10 @@ decode.exe vhs --preview-server --dsp-backend cuda-fast --pal input.ldf
 编码。渲染器直接写入 block-linear NV12 CUDA array，NVENC 注册该 array，省去 pitch-linear
 转换。每个有界 RF 批次只上传一次，整帧亮度、色度和 NV12
 不会下载回主存；跨越主机/显存边界的只有少量同步/场序控制元数据和压缩 H.264 packet。
-FFmpeg 仅负责将 H.264 copy-mux 为 HLS/fMP4。它要求兼容的 NVIDIA GPU，失败时不会回退到
-CPU 预览或其他编码器。现有 GPU bob 反交错逻辑保持不变；仅预览路径会在同一有界批次内
+FFmpeg 仅负责将 H.264 copy-mux 为 HLS/fMP4。显式指定
+`--dsp-backend cuda-fast` 时要求兼容的 NVIDIA GPU，失败不会回退到 CPU 预览或其他编码器；
+默认自动选择只在 GPU 启动失败时回退，预览会话启动后不会中途切换后端。现有 GPU bob
+反交错逻辑保持不变；仅预览路径会在同一有界批次内
 用干净的异奇偶场替换 dropout，并使用每次 seek 窗口都会重置的一场 75/25 当前/前场色度
 混合。
 
@@ -166,11 +174,12 @@ TBC 元数据的 `fileLoc` 仍使用原始输入采样点坐标。
 按目标采集与实际任务长度做基准。
 
 默认 Windows 发布包保留小型 CUDA-fast 桥接，但不再内嵌 271 MiB 的 cuFFT DLL。
-只有显式使用 `--dsp-backend cuda-fast` 时才会查找兼容的 CUDA 13/cuFFT 12；若本机
+显式使用 `--dsp-backend cuda-fast`，或符合条件的默认 VHS 预览通过轻量驱动/设备探测后，
+才会查找兼容的 CUDA 13/cuFFT 12；若本机
 没有，程序会先确认 NVIDIA 驱动可用，再下载 NVIDIA 固定的 202.2 MiB 可再分发包，
 对压缩包和 DLL 分别做 SHA-256 校验，并只安装一次到
-`%LOCALAPPDATA%\vhs-decode-dotnet\cuda\cufft`。Exact、IPP，以及未显式选择
-`cuda-fast` 的 preview 路径绝不会访问网络。离线/系统 runtime 可用
+`%LOCALAPPDATA%\vhs-decode-dotnet\cuda\cufft`。轻量探测失败时不会进入 runtime 解析器或
+访问网络；Exact、IPP 以及自动 CUDA 支持面之外的 preview 输入同样保持离线。离线/系统 runtime 可用
 `VHSDECODE_CUDA_RUNTIME_PATH` 指定；
 `VHSDECODE_CUDA_CACHE_PATH` 可更改缓存根目录，
 `VHSDECODE_CUDA_AUTO_DOWNLOAD=0` 可关闭自动下载。
@@ -277,7 +286,7 @@ TBC、色度、JSON 和日志文件允许在解码期间并发读取，兼容的
 dotnet restore VHSDecodeDotNet.slnx
 dotnet build VHSDecodeDotNet.slnx -c Release --no-restore
 dotnet test --solution VHSDecodeDotNet.slnx -c Release `
-  --no-build --no-restore --minimum-expected-tests 1577
+  --no-build --no-restore --minimum-expected-tests 1591
 ```
 
 在 Visual Studio 2026 中打开 `VHSDecodeDotNet.slnx`，即可构建、调试并通过

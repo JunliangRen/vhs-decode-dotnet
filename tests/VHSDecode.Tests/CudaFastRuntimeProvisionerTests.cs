@@ -80,6 +80,31 @@ public sealed class CudaFastRuntimeProvisionerTests
         Assert.False(CudaFastRuntimeProvisioner.IsAutoDownloadEnabled("off"));
     }
 
+    [Theory(DisplayName = "CUDA preview preflight enforces driver, device, and compute capability")]
+    [InlineData(12_900, 1, 8, 9, false, "CUDA 13")]
+    [InlineData(13_000, 0, 8, 9, false, "no CUDA devices")]
+    [InlineData(13_000, 1, 7, 4, false, "requires 7.5")]
+    [InlineData(13_000, 1, 7, 5, true, "compute capability 7.5")]
+    [InlineData(13_100, 2, 8, 9, true, "compute capability 8.9")]
+    public void DriverCapabilityEvaluationRejectsUnsupportedDevices(
+        int driverVersion,
+        int deviceCount,
+        int computeMajor,
+        int computeMinor,
+        bool expectedAvailable,
+        string expectedDiagnostic)
+    {
+        CudaFastDriverProbeResult result =
+            CudaFastRuntimeProvisioner.EvaluateCudaDriverCapabilities(
+                driverVersion,
+                deviceCount,
+                computeMajor,
+                computeMinor);
+
+        Assert.Equal(expectedAvailable, result.IsAvailable);
+        Assert.Contains(expectedDiagnostic, result.Diagnostic, StringComparison.Ordinal);
+    }
+
     [Fact(DisplayName = "Release publishing excludes cuFFT and enforces a lean size gate")]
     public void ReleasePublishingExcludesCuFft()
     {

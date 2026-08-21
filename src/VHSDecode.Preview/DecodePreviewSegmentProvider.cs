@@ -77,7 +77,31 @@ public sealed class DecodePreviewSegmentProvider : IPreviewSegmentProvider
         ArgumentNullException.ThrowIfNull(command);
         ArgumentNullException.ThrowIfNull(options);
         options.Validate();
-        ParsedCommand template = PreviewDecodeCommandFactory.CreateFastTemplate(command);
+        TextWriter output = diagnosticOutput ?? TextWriter.Null;
+        return await PreviewBackendSelector.SelectAsync(
+            command,
+            (backend, token) => CreateForBackendAsync(
+                command,
+                options,
+                backend,
+                output,
+                token),
+            output,
+            cancellationToken).ConfigureAwait(false);
+    }
+
+    private static async Task<DecodePreviewSegmentProvider> CreateForBackendAsync(
+        ParsedCommand command,
+        PreviewServerOptions options,
+        DspBackend backend,
+        TextWriter diagnosticOutput,
+        CancellationToken cancellationToken)
+    {
+        bool automaticCuda = command.GetSource("dsp_backend") == ParsedOptionSource.Default
+            && backend == DspBackend.CudaFast;
+        ParsedCommand template = PreviewDecodeCommandFactory.CreateFastTemplate(
+            command,
+            backend);
 
         using DecodeSession session = DecodeSessionFactory.Create(template);
         double framesPerSecond = session.Parameters.SysParams.GetProperty("FPS").GetDouble();
@@ -128,32 +152,49 @@ public sealed class DecodePreviewSegmentProvider : IPreviewSegmentProvider
         if (cudaPreview)
         {
             if (command.Spec.Name != "vhs"
+                || !string.Equals(
+                    command.Get<string>("tape_format"),
+                    "VHS",
+                    StringComparison.OrdinalIgnoreCase)
                 || Math.Abs(inputSampleRateHz - 40_000_000.0) > 0.5)
             {
                 throw new NotSupportedException(
-                    "CUDA-fast preview requires the VHS command with native 40 MSPS RF input; no CPU preview fallback was performed.");
+                    "CUDA-fast preview requires the VHS command, VHS tape format, and native 40 MSPS RF input; no CPU preview fallback was performed.");
             }
             if (!CudaFastDecodeRunner.TryGetInputSampleCount(
                     command.InputFile,
                     out long totalSourceSamples))
             {
-                throw new NotSupportedException(
-                    $"CUDA-fast preview cannot determine the RF sample count for '{command.InputFile}'.");
+                string message =
+                    $"CUDA-fast preview cannot determine the RF sample count for '{command.InputFile}'.";
+                if (automaticCuda)
+                {
+                    throw new AutomaticCudaPreviewUnavailableException(message);
+                }
+
+                throw new NotSupportedException(message);
             }
-            cudaSession = CudaFastPreviewDecodeSession.Create(
-                command.InputFile,
-                totalSourceSamples,
-                session.System,
-                command.Get<string>("tape_speed"),
-                width,
-                height,
-                framesPerSecond * 2.0,
-                options.Crf,
-                checked(timeline.FramesPerSegment * 2),
-                diagnosticOutput ?? TextWriter.Null,
-                cancellationToken);
+            try
+            {
+                cudaSession = CudaFastPreviewDecodeSession.Create(
+                    command.InputFile,
+                    totalSourceSamples,
+                    session.System,
+                    command.Get<string>("tape_speed"),
+                    width,
+                    height,
+                    framesPerSecond * 2.0,
+                    options.Crf,
+                    checked(timeline.FramesPerSegment * 2),
+                    diagnosticOutput,
+                    cancellationToken);
+            }
+            catch (Exception ex) when (automaticCuda && IsCudaStartupFailure(ex))
+            {
+                throw new AutomaticCudaPreviewUnavailableException(ex.Message, ex);
+            }
         }
-        string backend = DspBackendParser.ToCommandLineValue(
+        string backendValue = DspBackendParser.ToCommandLineValue(
             session.ExecutionOptions.DspBackend);
         bool twentyMspsRf = Math.Abs(
             session.DecodeSampleRateHz - 20_000_000.0) <= 1e-6;
@@ -166,7 +207,7 @@ public sealed class DecodePreviewSegmentProvider : IPreviewSegmentProvider
             height,
             options.Crf,
             Interlaced: false,
-            backend,
+            backendValue,
             cudaPreview
                 ? "40-to-20-msps-gpu/fast-color/gpu-bob/cross-field-dropout/chroma-stabilized/no-audio"
                 : (twentyMspsRf ? "20-msps-rf/" : string.Empty)
@@ -187,6 +228,15 @@ public sealed class DecodePreviewSegmentProvider : IPreviewSegmentProvider
             session.ExecutionOptions.DspBackend == DspBackend.IppFast,
             inputSampleRateHz);
     }
+
+    private static bool IsCudaStartupFailure(Exception exception)
+        => exception is DllNotFoundException
+            or BadImageFormatException
+            or EntryPointNotFoundException
+            or InvalidOperationException
+            or NotSupportedException
+            or IOException
+            or UnauthorizedAccessException;
 
     public async Task<PreviewSegmentWindow> GenerateWindowAsync(
         int windowIndex,

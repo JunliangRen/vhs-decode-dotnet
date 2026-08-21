@@ -38,7 +38,7 @@ upstream release `v0.4.0`、commit
 - VHS family には VHS/S-VHS、Betamax、Video8/Hi8、U-matic、Type C、EIAJ、
   upstream が対応する PAL/NTSC variant が含まれます。
 - TBC utility、ダブルクリック GUI、開発者向け plot window は対象外です。
-- Visual Studio 2026 の `.slnx` には **1,577** 件の標準 xUnit v3 test があり、
+- Visual Studio 2026 の `.slnx` には **1,591** 件の標準 xUnit v3 test があり、
   Test Explorer と `dotnet test` の両方で実行できます。
 
 <!-- SECTION: start -->
@@ -63,7 +63,9 @@ decode.exe hifi [upstream options] input.lds output.wav
 
 VHS は `decode.exe vhs --preview-server --pal input.lds`、LaserDisc は
 `decode.exe ld --preview-server --pal input.ldf` で起動できます。command は
-loopback の web player URL と標準 HLS/fMP4 playlist URL を表示します。output
+loopback の web player URL と標準 HLS/fMP4 playlist URL を表示します。default は
+`127.0.0.1:8080` から開始し、使用中なら `8180` まで 1 ずつ増やします。明示的な
+`--preview-port` は指定値を厳守し、`--preview-port 0` は OS の dynamic port を使います。output
 base は不要で、TBC、JSON、SQLite、EFM、audio、decode log を生成しません。
 
 これは位置確認用の低精度 mode です。軽量な 4fSC 1D demodulator で colour を
@@ -77,8 +79,12 @@ top-field-first の入力 field は field rate で deinterlace され、NTSC は
 CPU YADIF + AMF、CPU YADIF + libx264 の順に実際に検証します。
 `--preview-crf` は 0 から 51 を受け付け、default は 31 です。hardware encoder では
 最も近い quality/QP control に対応付けるため、backend 間で bitrate は一致しません。
-IPP が利用可能なら `ipp-fast` を自動選択し、それ以外では portable な managed
-backend に戻ります。標準 40 MSPS VHS preview は固定 anti-alias filter を通した後、
+対象となる native-rate 40 MSPS PAL/NTSC VHS preview は、まず軽量な CUDA driver/device
+preflight を行います。この段階では cuFFT の load、CUDA context の作成、NVENC の初期化を
+行いません。device が通過した場合だけ CUDA/cuFFT/NVENC の完全初期化を一度試し、
+preflight または完全起動が利用できなければ `ipp-fast`、portable managed backend の順に
+fallback します。その他の preview input は同じ IPP→managed CPU 順序から始めます。
+標準 40 MSPS VHS preview は固定 anti-alias filter を通した後、
 内部 RF を 20 MSPS で decode します。native 20 MSPS VHS input は 20 MSPS のままで、
 supported VHS preview route は full decode の `--decode-at-20msps` を強制した場合と
 同じ behavior です。full VHS decode では `ipp-fast` または `cuda-fast` でこの option を
@@ -89,8 +95,8 @@ sample-rate behavior を維持します。
 1 つの pipeline が利用できる FFmpeg が必要で、`VHSDECODE_FFMPEG` と
 `VHSDECODE_FFPROBE` で path を明示できます。
 
-native-rate 40 MSPS PAL/NTSC VHS では、独立した GPU preview path を明示的に
-選択することもできます。
+したがって compatible machine の native-rate 40 MSPS PAL/NTSC VHS は独立 GPU preview
+path を自動選択します。次の形式で明示的に固定することもできます。
 
 ```powershell
 decode.exe vhs --preview-server --dsp-backend cuda-fast --pal input.ldf
@@ -102,8 +108,9 @@ H.264 encode を GPU 上で実行します。renderer は block-linear NV12 CUDA
 書き込み、NVENC はその array を register して pitch-linear conversion を省きます。各 bounded RF batch は一度だけ upload し、full luma/chroma/NV12 frame は host memory へ
 download しません。host/device 境界を通るのは少量の sync/field-order control metadata
 と圧縮済み H.264 packet だけで、FFmpeg は HLS/fMP4 への copy-mux のみを担当します。
-compatible NVIDIA GPU が必須で、CPU preview や
-別 encoder へ fallback しません。既存の GPU bob deinterlacer は変更していません。
+明示的な `--dsp-backend cuda-fast` では compatible NVIDIA GPU が必須で、CPU preview や
+別 encoder へ fallback しません。default の自動選択は GPU 起動失敗時だけ fallback し、
+preview session 起動後に backend を途中変更しません。既存の GPU bob deinterlacer は変更していません。
 preview のみ、bounded batch 内の clean な opposite-parity field で dropout を置換し、
 seek window ごとに reset する 1-field 75/25 current/previous chroma blend を使います。
 
@@ -183,12 +190,14 @@ IPP は 6.83% 遅く見えました。full decode で使う前に対象 capture 
 benchmark してください。
 
 default Windows release は小型 CUDA-fast bridge を保持しますが、271 MiB の cuFFT DLL
-は埋め込みません。`--dsp-backend cuda-fast` を明示したときだけ compatible CUDA 13/
-cuFFT 12 を検索し、見つからない場合は NVIDIA driver を先に確認してから NVIDIA の
+は埋め込みません。明示的な `--dsp-backend cuda-fast`、または対象 default VHS preview
+が軽量 driver/device preflight を通過した場合だけ compatible CUDA 13/cuFFT 12 を検索し、
+見つからない場合は NVIDIA driver を先に確認してから NVIDIA の
 pinned 202.2 MiB redistributable を download します。archive と DLL を個別に
 SHA-256 検証し、`%LOCALAPPDATA%\vhs-decode-dotnet\cuda\cufft` へ一度だけ install
-します。Exact、IPP、および `cuda-fast` を明示していない preview path は network
-access しません。offline/system runtime は `VHSDECODE_CUDA_RUNTIME_PATH`、cache root は
+します。軽量 preflight が失敗した場合は resolver に入らず network access しません。
+Exact、IPP、および自動 CUDA support surface 外の preview input も offline のままです。
+offline/system runtime は `VHSDECODE_CUDA_RUNTIME_PATH`、cache root は
 `VHSDECODE_CUDA_CACHE_PATH`、automatic
 download の無効化は `VHSDECODE_CUDA_AUTO_DOWNLOAD=0` で指定できます。
 
@@ -306,7 +315,7 @@ header は FFmpeg を維持します。
 dotnet restore VHSDecodeDotNet.slnx
 dotnet build VHSDecodeDotNet.slnx -c Release --no-restore
 dotnet test --solution VHSDecodeDotNet.slnx -c Release `
-  --no-build --no-restore --minimum-expected-tests 1577
+  --no-build --no-restore --minimum-expected-tests 1591
 ```
 
 Visual Studio 2026 で `VHSDecodeDotNet.slnx` を開くと、build、debug、

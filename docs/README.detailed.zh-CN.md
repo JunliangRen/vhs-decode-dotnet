@@ -294,16 +294,23 @@ K4 source reconstruction 已在编译期关闭，因此该路径始终使用 GPU
 显式参数从 40/原生 20 MSPS 输入按内部 20 MSPS 解码；CVBS、
 LaserDisc、HiFi、S-VHS、其他制式、packed `.lds` 以及显式兼容 profile 都不会被近似处理。
 
-将 `--preview-server` 与显式 `--dsp-backend cuda-fast` 组合，会为原生 40 MSPS
-PAL/NTSC VHS 选择 ABI v6 GPU 预览路径。一个原生解码上下文会跨请求窗口持久复用；
+默认的原生 40 MSPS PAL/NTSC VHS 预览会先做轻量探测：只加载 NVIDIA driver API，调用
+`cuInit`，并检查 CUDA 13、设备 0 与 compute capability 7.5+；不会加载 cuFFT、创建
+CUDA 上下文或初始化 NVENC。设备通过后才尝试一次 ABI v6 GPU 预览完整启动；探测或完整
+启动不可用时依次回退 IPP、Exact。将 `--preview-server` 与显式
+`--dsp-backend cuda-fast` 组合会锁定同一 GPU 路径，并继续保持失败即报错。一个原生解码上下文会跨请求窗口持久复用；
 确定性的 15-tap CUDA FIR 先完成带抗混叠的 2:1 降采样至 20 MSPS，再进入持久 GPU
 同步、FM、时基、色度和 dropout 图。CUDA 输出阶段直接向 block-linear NV12 CUDA array
 按场率执行 bob；NVENC 注册该 array
 并绕过 pitch-linear 转换后输出 H.264，不会下载整帧亮度、色度或 NV12。每个有界
 RF 批次只上传一次；此后跨越主机/显存边界的只有少量同步/场序控制元数据和压缩 packet。压缩 packet
-进入托管内存，FFmpeg 仅使用 `-c:v copy` 组成 HLS/fMP4 时间轴。这条显式路径
-要求 NVENC，失败时不会尝试 QSV、AMF、libx264、IPP 或 Exact。这就是 preview
+进入托管内存，FFmpeg 仅使用 `-c:v copy` 组成 HLS/fMP4 时间轴。显式路径
+要求 NVENC，失败时不会尝试 QSV、AMF、libx264、IPP 或 Exact；默认自动选择只在启动期
+使用 CPU 回退，运行中的预览会话不会切换后端。这就是 preview
 强制启用 `--decode-at-20msps` 的形式；完整解码只有显式传入该参数才会改变速率。
+
+loopback HTTP 监听默认使用 8080；仅在地址已占用时才依次尝试 8081 至 8180。显式
+`--preview-port` 会关闭递增，值为 0 时仍由操作系统分配动态端口。
 
 只有这条 CUDA 预览路径会把 FFmpeg PCM16 回读窗口从通用默认的 2 MiB 增至每会话固定
 32 MiB，用来保留相邻两秒窗口共享的 preroll 与批次重叠，避免正常顺播时重启容器读取器。
@@ -336,17 +343,18 @@ W5/W15/W25/W30/W35。默认 CUDA preview 的平均渲染 SSIM Y/U/V/All 为
 原生管线已通过，真实 NTSC 采集画质仍未认证。
 
 二进制发布仍包含约 1.2 MiB 的 CUDA-fast 桥接，但不再内嵌 271 MiB 的
-`cufft64_12.dll`。只有首次显式选择 `cuda-fast` 时，程序才会依次检查指定的 runtime
+`cufft64_12.dll`。首次显式选择 `cuda-fast`，或符合条件的默认预览通过轻量探测后，
+程序才会依次检查指定的 runtime
 目录、桥接同目录、CUDA 13 Toolkit、进程 `PATH` 和带版本号的用户缓存。如果没有找到
 兼容的 cuFFT 12，程序会先确认 CUDA 13 驱动和设备可用，再下载 NVIDIA 固定版本
 12.0.0.15 的 Windows 可再分发包（202.2 MiB），对压缩包和解出的 DLL 分别执行固定
 SHA-256 校验，并原子安装到
 `%LOCALAPPDATA%\vhs-decode-dotnet\cuda\cufft\12.0.0.15`。跨进程文件锁保证多个解码
-进程首次启动时只下载一次。Exact、IPP，以及未显式选择 `cuda-fast` 的 preview 路径
-不会进入此解析器，也不会访问网络。离线部署可设置 `VHSDECODE_CUDA_RUNTIME_PATH`；
+进程首次启动时只下载一次。轻量探测失败时不会进入解析器或访问网络；Exact、IPP 以及
+自动 CUDA 支持面之外的 preview 输入也保持离线。离线部署可设置 `VHSDECODE_CUDA_RUNTIME_PATH`；
 `VHSDECODE_CUDA_CACHE_PATH` 可更改缓存根目录，
-`VHSDECODE_CUDA_AUTO_DOWNLOAD=0` 可禁止自动下载。下载或加载失败会明确报错，绝不会
-静默回退 CPU 后端。
+`VHSDECODE_CUDA_AUTO_DOWNLOAD=0` 可禁止自动下载。显式 CUDA 请求的下载或加载失败会明确
+报错且不回退；默认自动预览会报告启动失败，再回退到 IPP 或 Exact。
 
 该后端采用独立数值契约，不声明兼容 `v0.4.0` 或 `current` 的哈希。较早的
 交错对照在本地 RTX 4070 12 GiB 开发机上使用同一固定私有 40 MHz 真实 PAL `.ldf`
@@ -3496,7 +3504,7 @@ destination API，把最终 burst SOS 写回这块独占 buffer，从而在该 A
 .\tools\build-cuda-fast-native.ps1
 dotnet restore VHSDecodeDotNet.slnx
 dotnet build VHSDecodeDotNet.slnx -c Release --no-restore
-dotnet test --solution VHSDecodeDotNet.slnx -c Release --no-build --no-restore --minimum-expected-tests 1577
+dotnet test --solution VHSDecodeDotNet.slnx -c Release --no-build --no-restore --minimum-expected-tests 1591
 dotnet test --project tests\VHSDecode.Tests\VHSDecode.Tests.csproj -c Release --no-build --no-restore --coverage --coverage-output coverage.cobertura.xml --coverage-output-format cobertura
 ```
 
@@ -3519,7 +3527,7 @@ cuFFT，或采用固定且经过校验的首次下载；兼容的 NVIDIA 驱动�
 仍会编译、审计并暂存桥接，但不能算作 GPU runtime 验证。
 
 当前正式 Release 构建为零警告、零错误。xUnit v3 项目向
-`dotnet test` 和 Visual Studio Test Explorer 暴露 **1,577** 个可独立发现的测试。
+`dotnet test` 和 Visual Studio Test Explorer 暴露 **1,591** 个可独立发现的测试。
 
 <!-- SECTION: usage -->
 

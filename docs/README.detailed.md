@@ -344,8 +344,13 @@ explicit switch from 40/native-20 MSPS input; CVBS, LaserDisc, HiFi, S-VHS,
 other video systems, packed `.lds`, and explicit compatibility profile
 selection are not approximated.
 
-Combining `--preview-server` with an explicit `--dsp-backend cuda-fast` selects
-the ABI v6 GPU preview route for native-rate 40 MSPS PAL/NTSC VHS. One native
+For a default native-rate 40 MSPS PAL/NTSC VHS preview, a lightweight preflight
+first loads only the NVIDIA driver API, calls `cuInit`, and checks CUDA 13,
+device 0, and compute capability 7.5 or newer. It does not load cuFFT, create a
+CUDA context, or initialize NVENC. A passing device gets one attempt to start
+the ABI v6 GPU preview route; an unavailable preflight or full startup falls
+back to IPP and then Exact. Combining `--preview-server` with an explicit
+`--dsp-backend cuda-fast` pins the same GPU route and remains fail-closed. One native
 decode context persists across requested windows. A deterministic 15-tap CUDA
 FIR performs the anti-aliased 2:1 reduction to 20 MSPS before the persistent
 GPU sync, FM, time-base, chroma, and dropout graph. A CUDA output stage renders
@@ -355,10 +360,15 @@ without downloading full luma, chroma, or NV12 frames.
 Each bounded RF batch crosses once on upload; thereafter only small sync/field-order control
 metadata and compressed packets cross the host/device boundary. The compressed
 packets enter managed memory, and FFmpeg uses `-c:v copy` solely to form the
-HLS/fMP4 timeline. This explicit route requires NVENC and fails
-closed instead of probing QSV, AMF, libx264, IPP, or Exact. It is the forced
+HLS/fMP4 timeline. The explicit route requires NVENC and fails
+closed instead of probing QSV, AMF, libx264, IPP, or Exact; automatic selection
+uses the CPU fallback only during startup and never switches a live session. It is the forced
 preview form of `--decode-at-20msps`; complete decode changes rate only when
 that switch is explicitly present.
+
+The loopback HTTP listener defaults to port 8080 and retries 8081 through 8180
+only when an address is already in use. An explicit `--preview-port` disables
+that sequence; zero retains the operating-system-assigned dynamic-port mode.
 
 Only this CUDA preview route enlarges the FFmpeg PCM16 rewind window from the
 generic 2 MiB default to a bounded 32 MiB per session. That retains the preroll
@@ -402,20 +412,22 @@ capture quality remains uncertified, although the synthetic NTSC native
 pipeline passes.
 
 Binary releases keep the approximately 1.2 MiB CUDA-fast bridge but no longer
-embed the 271 MiB `cufft64_12.dll`. The first explicit `cuda-fast` request
-searches the configured runtime path, bridge directory, CUDA 13 Toolkit
+embed the 271 MiB `cufft64_12.dll`. The first explicit `cuda-fast` request, or
+an eligible automatic preview after the lightweight preflight passes, searches
+the configured runtime path, bridge directory, CUDA 13 Toolkit
 locations, process `PATH`, and the versioned user cache. If no compatible
 cuFFT 12 runtime is found, it first requires a working CUDA 13 driver/device,
 then downloads NVIDIA's pinned 12.0.0.15 Windows redistributable (202.2 MiB),
 validates the archive and extracted DLL against fixed SHA-256 values, and
 atomically installs it under
 `%LOCALAPPDATA%\vhs-decode-dotnet\cuda\cufft\12.0.0.15`. A cross-process lock
-prevents duplicate first-use downloads. Exact, IPP, and preview execution that
-does not explicitly select `cuda-fast` never enters this resolver or accesses
-the network. Offline deployments can
+prevents duplicate first-use downloads. A failed lightweight preflight never
+enters this resolver or accesses the network. Exact, IPP, and preview inputs
+outside the automatic CUDA support surface also remain offline. Offline deployments can
 set `VHSDECODE_CUDA_RUNTIME_PATH`; `VHSDECODE_CUDA_CACHE_PATH` changes the cache
 root, and `VHSDECODE_CUDA_AUTO_DOWNLOAD=0` disables downloading. A download or
-load failure remains explicit and never falls back to a CPU backend.
+load failure remains explicit for explicit CUDA requests; automatic default
+preview reports the startup failure and falls back to IPP or Exact.
 
 This backend has its own numerical contract; neither `v0.4.0` nor `current`
 hash compatibility is claimed. An earlier same-session
@@ -4485,7 +4497,7 @@ Requirements:
 .\tools\build-cuda-fast-native.ps1
 dotnet restore VHSDecodeDotNet.slnx
 dotnet build VHSDecodeDotNet.slnx -c Release --no-restore
-dotnet test --solution VHSDecodeDotNet.slnx -c Release --no-build --no-restore --minimum-expected-tests 1577
+dotnet test --solution VHSDecodeDotNet.slnx -c Release --no-build --no-restore --minimum-expected-tests 1591
 dotnet test --project tests\VHSDecode.Tests\VHSDecode.Tests.csproj -c Release --no-build --no-restore --coverage --coverage-output coverage.cobertura.xml --coverage-output-format cobertura
 ```
 
@@ -4515,7 +4527,7 @@ The default command runs every native GPU test. GPU-less CI may pass
 but is not GPU runtime validation.
 
 The current formal Release build has zero warnings and errors. The xUnit v3
-project exposes **1,577** independently discoverable tests to both
+project exposes **1,591** independently discoverable tests to both
 `dotnet test` and Visual Studio Test Explorer.
 
 <!-- SECTION: usage -->

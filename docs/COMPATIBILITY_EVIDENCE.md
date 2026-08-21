@@ -2229,7 +2229,7 @@ dotnet test --solution VHSDecodeDotNet.slnx --no-build
 ```
 
 The current formal solution build completes with zero warnings and errors, and
-the xUnit v3 project exposes 1,577 independently discoverable tests
+the xUnit v3 project exposes 1,591 independently discoverable tests
 to `dotnet test` and Visual Studio Test Explorer. On the
 same Windows machine and fixtures, Release wall-clock measurements for one
 frame were 2.346 s versus 7.193 s for NTSC VHS and 1.651 s versus 5.865 s for
@@ -3121,9 +3121,14 @@ strictly increasing source-coordinate `fileLoc`. FFmpeg raw-plane SSIM for
 0.977307/0.995722 on IPP. This is a startup-dominated short-window observation,
 not a long-run, cross-capture, or cross-machine guarantee.
 
-ABI v6 also exposes the explicit VHS preview route selected only by combining
-`--preview-server` with `--dsp-backend cuda-fast`. For native-rate 40 MSPS
-PAL/NTSC input, one native context persists across windows. A deterministic
+ABI v6 also exposes the VHS GPU preview route. Eligible default native-rate
+40 MSPS PAL/NTSC VHS first performs a driver-only preflight (`cuInit`, CUDA 13,
+device 0, and compute capability 7.5+) without loading cuFFT, creating a CUDA
+context, or initializing NVENC. A passing device receives one complete GPU
+startup attempt; an unavailable preflight or startup falls back to IPP and then
+Exact. Combining `--preview-server` with explicit `--dsp-backend cuda-fast`
+pins the same route and remains fail-closed. For native-rate 40 MSPS PAL/NTSC
+input, one native context persists across windows. A deterministic
 15-tap CUDA FIR reduces RF to 20 MSPS with anti-aliasing before the existing GPU
 sync, FM, time-base, chroma, and dropout stages. A new device-side output stage
 renders field-rate bob directly into a block-linear NV12 CUDA array. NVENC
@@ -3133,9 +3138,17 @@ bounded RF batch crosses once on upload; thereafter only small sync/field-order 
 and compressed packets cross the host/device boundary. Compressed packets enter
 managed memory, where FFmpeg copy-muxes them into HLS/fMP4. The explicit path
 fails closed if CUDA, cuFFT, or NVENC is unavailable
-and does not fall back to IPP, Exact, QSV, AMF, or libx264. Native runtime tests
+and does not fall back to IPP, Exact, QSV, AMF, or libx264. Automatic selection
+uses CPU fallback only during startup and never changes a running preview
+session. Native runtime tests
 passed on the RTX 4070, and prefetch enabled/disabled A/B outputs had identical
 init fragments, media segments, and decoded 100-frame SHA-256 values.
+
+The default loopback listener now starts at port 8080 and retries sequentially
+through 8180 only after an address-in-use bind failure. Explicit ports remain
+strict, and explicit zero retains Kestrel's dynamic-port mode. A live-socket
+regression occupies the requested port, verifies the next available port and
+health endpoint, then verifies that a strict explicit port still fails closed.
 
 The fixed real PAL `.ldf` exposed a duration-probe defect during this gate. Its
 FLAC STREAMINFO total, 3,783,262,208 samples, represents only 94.5815552 seconds
@@ -3437,7 +3450,7 @@ historical CUDA-slower result and current CUDA-faster snapshots are both valid
 descriptions of their sessions, but their reversal is not attributed to later
 source changes alone.
 
-The final .NET 11 Preview 7 xUnit v3 run discovered all 1,577 tests: 1,575
+The current .NET 11 Preview 7 xUnit v3 run discovered all 1,591 tests: 1,589
 passed, none failed, and two PAL/NTSC AMF encoder cases were skipped because the
 AMD runtime is unavailable on the NVIDIA development machine. The CUDA-focused
 coverage includes parser/backend isolation, ABI and real native probing,
