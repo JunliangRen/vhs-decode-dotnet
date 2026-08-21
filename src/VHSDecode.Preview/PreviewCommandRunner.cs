@@ -23,6 +23,9 @@ public sealed class PreviewCommandRunner
             var options = new PreviewServerOptions
             {
                 Port = command.Get<int>("preview_port"),
+                PortFallbackCount = command.GetSource("preview_port") == ParsedOptionSource.Default
+                    ? PreviewServerOptions.DefaultPortFallbackCount
+                    : 0,
                 Crf = command.Get<int>("preview_crf")
             };
             DecodePreviewSegmentProvider provider = await DecodePreviewSegmentProvider.CreateAsync(

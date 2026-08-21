@@ -40,7 +40,7 @@ evidence, and remaining gaps.
   EIAJ, and supported PAL/NTSC variants.
 - TBC utility tools, the double-click GUI, and developer plotting windows are
   intentionally out of scope.
-- The Visual Studio 2026 `.slnx` solution has **1,577** standard xUnit v3 tests
+- The Visual Studio 2026 `.slnx` solution has **1,591** standard xUnit v3 tests
   that are visible in Test Explorer and runnable with `dotnet test`.
 
 <!-- SECTION: start -->
@@ -71,8 +71,9 @@ Run `decode.exe vhs --preview-server --pal input.lds` for tape RF, or
 `decode.exe ld --preview-server --pal input.ldf` for LaserDisc RF.
 
 The command prints a loopback player URL and a standard HLS/fMP4 playlist URL.
-`--preview-port 0` (the default) selects a free port; specify another port when
-an external player needs a stable URL. Preview mode creates no TBC, JSON,
+The default address starts at `127.0.0.1:8080`; if occupied, startup increments
+the port through `8180` until one binds. An explicit `--preview-port` is strict,
+while `--preview-port 0` asks the operating system for a dynamic port. Preview mode creates no TBC, JSON,
 SQLite, EFM, audio, or decoder log artifacts.
 
 This is intentionally a low-accuracy navigation mode. It retains colour through
@@ -87,9 +88,13 @@ at 50 fps. At startup the preview validates complete fMP4 pipelines in this
 order: NVENC with CUDA YADIF, QSV with advanced VPP deinterlacing, AMF with CPU
 YADIF, then libx264 with CPU YADIF. `--preview-crf` accepts 0 through 51 and
 defaults to 31; hardware encoders map it to their closest quality/QP control,
-so bitrate is not identical across backends. The preview automatically uses
-`ipp-fast` when available and otherwise remains portable through the managed
-backend. Standard 40 MSPS VHS preview also applies a fixed anti-alias filter and
+so bitrate is not identical across backends. Eligible native-rate 40 MSPS
+PAL/NTSC VHS preview first performs a lightweight CUDA-driver/device preflight;
+this does not load cuFFT, create a CUDA context, or initialize NVENC. A passing
+device then gets one full CUDA/cuFFT/NVENC initialization attempt. If preflight
+or full startup is unavailable, preview falls back to `ipp-fast` when available,
+then to the portable managed backend. Other preview inputs start with that same
+IPP-to-managed CPU order. Standard 40 MSPS VHS preview also applies a fixed anti-alias filter and
 decodes its internal RF stream at 20 MSPS. Native 20 MSPS VHS input stays at
 20 MSPS. In other words, supported VHS preview routes force the same behavior as
 the full-decode `--decode-at-20msps` switch. Full VHS decode can opt into that
@@ -100,8 +105,8 @@ lines. A matching
 FFmpeg build is required on `PATH`; `VHSDECODE_FFMPEG` and `VHSDECODE_FFPROBE`
 can select explicit binaries.
 
-Native-rate 40 MSPS PAL/NTSC VHS can instead select the independent GPU preview
-path explicitly:
+Native-rate 40 MSPS PAL/NTSC VHS therefore selects the independent GPU preview
+path automatically on a compatible machine. The same path can be pinned explicitly:
 
 ```powershell
 decode.exe vhs --preview-server --dsp-backend cuda-fast --pal input.ldf
@@ -113,8 +118,10 @@ NVENC H.264 encoding on the GPU. The renderer writes a block-linear NV12 CUDA
 array that NVENC registers directly, avoiding its pitch-linear conversion. Each bounded RF batch is uploaded once, while full luma, chroma, and NV12 frames are
 never downloaded; only small sync/field-order control metadata and compressed
 H.264 packets cross the host/device boundary. FFmpeg only copy-muxes the H.264
-into HLS/fMP4. It requires a compatible NVIDIA GPU and never
-falls back to the CPU preview or another encoder. The existing GPU bob
+into HLS/fMP4. An explicit `--dsp-backend cuda-fast` request requires a compatible
+NVIDIA GPU and never falls back to the CPU preview or another encoder. Automatic
+default selection falls back only if GPU startup fails; it never changes backend
+after a preview session has started. The existing GPU bob
 deinterlacer is unchanged. Preview-only cross-field dropout substitution uses a
 clean opposite-parity field when one exists in the bounded batch, and a
 one-field 75/25 current/previous chroma blend resets at every seek window.
@@ -198,13 +205,15 @@ benchmark the intended capture and run length before selecting it for full
 decode.
 
 The default Windows release includes the small CUDA-fast bridge but does not
-embed the 271 MiB cuFFT DLL. Only an explicit `--dsp-backend cuda-fast` request
-searches for a compatible CUDA 13/cuFFT 12 installation. If none is available,
+embed the 271 MiB cuFFT DLL. An explicit `--dsp-backend cuda-fast` request, or
+an eligible automatic VHS preview after its lightweight driver/device preflight
+passes, searches for a compatible CUDA 13/cuFFT 12 installation. If none is available,
 it verifies the NVIDIA driver first, downloads the pinned 202.2 MiB NVIDIA
 redistributable, validates both the archive and DLL with SHA-256, and installs
-it once under `%LOCALAPPDATA%\vhs-decode-dotnet\cuda\cufft`. Exact, IPP, and
-preview runs that do not explicitly select `cuda-fast` never access the
-network. Set `VHSDECODE_CUDA_RUNTIME_PATH` for an
+it once under `%LOCALAPPDATA%\vhs-decode-dotnet\cuda\cufft`. A failed lightweight
+preflight never enters the resolver or accesses the network. Exact, IPP, and
+preview inputs outside the automatic CUDA support surface also remain offline.
+Set `VHSDECODE_CUDA_RUNTIME_PATH` for an
 offline/system runtime, `VHSDECODE_CUDA_CACHE_PATH` for a different cache root,
 or `VHSDECODE_CUDA_AUTO_DOWNLOAD=0` to disable automatic downloads.
 
@@ -331,7 +340,7 @@ The pinned SDK is .NET `11.0.100-preview.7.26381.103`.
 dotnet restore VHSDecodeDotNet.slnx
 dotnet build VHSDecodeDotNet.slnx -c Release --no-restore
 dotnet test --solution VHSDecodeDotNet.slnx -c Release `
-  --no-build --no-restore --minimum-expected-tests 1577
+  --no-build --no-restore --minimum-expected-tests 1591
 ```
 
 Open `VHSDecodeDotNet.slnx` in Visual Studio 2026 to build, debug, and run the

@@ -102,7 +102,7 @@ public static class CliSpecs
     private static IEnumerable<OptionSpec> VhsOptions()
     {
         yield return Flag("preview_server", ["--preview-server"]);
-        yield return Int("preview_port", ["--preview-port"], 0);
+        yield return Int("preview_port", ["--preview-port"], 8080);
         yield return Int("preview_crf", ["--preview-crf"], 31);
         yield return Flag(
             DecodeAt20MspsDestination,
@@ -184,7 +184,7 @@ public static class CliSpecs
         yield return Flag("help", ["-h", "--help"]);
         yield return Flag("version", ["--version", "-v"], hidden: true);
         yield return Flag("preview_server", ["--preview-server"]);
-        yield return Int("preview_port", ["--preview-port"], 0);
+        yield return Int("preview_port", ["--preview-port"], 8080);
         yield return Int("preview_crf", ["--preview-crf"], 31);
         yield return Dbl("start", ["--start", "-s"], 0.0, pythonDefaultValue: 0);
         yield return Int("length", ["--length", "-l"], 110000);

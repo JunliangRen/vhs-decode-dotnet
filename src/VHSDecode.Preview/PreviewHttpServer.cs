@@ -1,6 +1,8 @@
 using System.Net;
+using System.Net.Sockets;
 using System.Text;
 using Microsoft.AspNetCore.Builder;
+using Microsoft.AspNetCore.Connections;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Hosting.Server;
 using Microsoft.AspNetCore.Hosting.Server.Features;
@@ -47,121 +49,159 @@ public sealed class PreviewHttpServer : IAsyncDisposable
         options.Validate();
 
         var cache = new PreviewSegmentCache(provider, options.CacheWindowCount);
-        var builder = WebApplication.CreateSlimBuilder(new WebApplicationOptions
-        {
-            ApplicationName = typeof(PreviewHttpServer).Assembly.FullName,
-            Args = []
-        });
-        builder.Logging.ClearProviders();
-        builder.WebHost.ConfigureKestrel(server =>
-            server.Listen(IPAddress.Loopback, options.Port));
-        WebApplication app = builder.Build();
-
-        app.Use(async (context, next) =>
-        {
-            context.Response.Headers.CacheControl = "no-store";
-            try
-            {
-                await next(context).ConfigureAwait(false);
-            }
-            catch (OperationCanceledException) when (context.RequestAborted.IsCancellationRequested)
-            {
-                // The media player abandoned this request, usually after a seek.
-            }
-            catch (Exception ex) when (!context.Response.HasStarted)
-            {
-                context.Response.StatusCode = StatusCodes.Status500InternalServerError;
-                await context.Response.WriteAsJsonAsync(
-                    new { error = ex.Message },
-                    context.RequestAborted).ConfigureAwait(false);
-            }
-        });
-
-        app.MapGet("/", () => Results.Content(PlayerHtml, "text/html", Encoding.UTF8));
-        app.MapGet("/health", () => Results.Json(new { status = "ok" }));
-        app.MapGet("/api/info", () => Results.Json(new
-        {
-            provider.MediaInfo.SourceKind,
-            provider.MediaInfo.System,
-            provider.MediaInfo.FramesPerSecond,
-            provider.MediaInfo.DurationSeconds,
-            provider.MediaInfo.Width,
-            provider.MediaInfo.Height,
-            provider.MediaInfo.Crf,
-            provider.MediaInfo.Interlaced,
-            provider.MediaInfo.DecodeBackend,
-            provider.MediaInfo.AccuracyProfile,
-            provider.MediaInfo.EncodeBackend,
-            provider.Timeline.SegmentCount,
-            provider.Timeline.WindowCount,
-            WindowSeconds = provider.Timeline.WindowCount > 1
-                ? provider.Timeline.WindowStartSeconds(1)
-                : provider.Timeline.DurationSeconds
-        }));
-        app.MapGet("/hls/master.m3u8", () => Results.Text(
-            HlsPlaylistBuilder.BuildMaster(provider.MediaInfo),
-            HlsContentType,
-            Encoding.UTF8));
-        app.MapGet("/hls/index.m3u8", () => Results.Text(
-            HlsPlaylistBuilder.BuildMedia(provider.Timeline),
-            HlsContentType,
-            Encoding.UTF8));
-        app.MapGet("/hls/window/{windowIndex:int}/init.mp4", async (
-            int windowIndex,
-            HttpContext context) =>
-        {
-            if ((uint)windowIndex >= (uint)provider.Timeline.WindowCount)
-            {
-                return Results.NotFound();
-            }
-
-            PreviewSegmentWindow window = await cache.GetWindowAsync(
-                windowIndex,
-                context.RequestAborted).ConfigureAwait(false);
-            return Results.Bytes(window.InitializationSegment, Fmp4ContentType);
-        });
-        app.MapGet("/hls/window/{windowIndex:int}/segment/{localIndex:int}.m4s", async (
-            int windowIndex,
-            int localIndex,
-            HttpContext context) =>
-        {
-            if ((uint)windowIndex >= (uint)provider.Timeline.WindowCount
-                || (uint)localIndex >= (uint)provider.Timeline.SegmentCountInWindow(windowIndex))
-            {
-                return Results.NotFound();
-            }
-
-            PreviewSegmentWindow window = await cache.GetWindowAsync(
-                windowIndex,
-                context.RequestAborted).ConfigureAwait(false);
-            PreviewMediaSegment? segment = window.Segments.FirstOrDefault(item =>
-                item.LocalIndex == localIndex);
-            return segment is null
-                ? Results.NotFound()
-                : Results.Bytes(segment.Data, Fmp4ContentType);
-        });
-
         try
         {
-            await app.StartAsync(cancellationToken).ConfigureAwait(false);
-            IServer server = app.Services.GetRequiredService<IServer>();
-            IServerAddressesFeature addresses = server.Features
-                .Get<IServerAddressesFeature>()
-                ?? throw new InvalidOperationException("Kestrel did not publish a preview address.");
-            Uri baseAddress = addresses.Addresses
-                .Select(address => new Uri(address.EndsWith('/', StringComparison.Ordinal)
-                    ? address
-                    : address + "/"))
-                .First(address => IPAddress.TryParse(address.Host, out IPAddress? ip)
-                    && IPAddress.IsLoopback(ip));
-            return new PreviewHttpServer(app, cache, baseAddress, provider.MediaInfo);
+            int lastPort = options.Port == 0
+                ? 0
+                : (int)Math.Min(
+                    IPEndPoint.MaxPort,
+                    (long)options.Port + options.PortFallbackCount);
+            for (int candidatePort = options.Port;
+                 candidatePort <= lastPort;
+                 candidatePort++)
+            {
+                var builder = WebApplication.CreateSlimBuilder(new WebApplicationOptions
+                {
+                    ApplicationName = typeof(PreviewHttpServer).Assembly.FullName,
+                    Args = []
+                });
+                builder.Logging.ClearProviders();
+                builder.WebHost.ConfigureKestrel(server =>
+                    server.Listen(IPAddress.Loopback, candidatePort));
+                WebApplication app = builder.Build();
+
+                app.Use(async (context, next) =>
+                {
+                    context.Response.Headers.CacheControl = "no-store";
+                    try
+                    {
+                        await next(context).ConfigureAwait(false);
+                    }
+                    catch (OperationCanceledException) when (context.RequestAborted.IsCancellationRequested)
+                    {
+                        // The media player abandoned this request, usually after a seek.
+                    }
+                    catch (Exception ex) when (!context.Response.HasStarted)
+                    {
+                        context.Response.StatusCode = StatusCodes.Status500InternalServerError;
+                        await context.Response.WriteAsJsonAsync(
+                            new { error = ex.Message },
+                            context.RequestAborted).ConfigureAwait(false);
+                    }
+                });
+
+                app.MapGet("/", () => Results.Content(PlayerHtml, "text/html", Encoding.UTF8));
+                app.MapGet("/health", () => Results.Json(new { status = "ok" }));
+                app.MapGet("/api/info", () => Results.Json(new
+                {
+                    provider.MediaInfo.SourceKind,
+                    provider.MediaInfo.System,
+                    provider.MediaInfo.FramesPerSecond,
+                    provider.MediaInfo.DurationSeconds,
+                    provider.MediaInfo.Width,
+                    provider.MediaInfo.Height,
+                    provider.MediaInfo.Crf,
+                    provider.MediaInfo.Interlaced,
+                    provider.MediaInfo.DecodeBackend,
+                    provider.MediaInfo.AccuracyProfile,
+                    provider.MediaInfo.EncodeBackend,
+                    provider.Timeline.SegmentCount,
+                    provider.Timeline.WindowCount,
+                    WindowSeconds = provider.Timeline.WindowCount > 1
+                        ? provider.Timeline.WindowStartSeconds(1)
+                        : provider.Timeline.DurationSeconds
+                }));
+                app.MapGet("/hls/master.m3u8", () => Results.Text(
+                    HlsPlaylistBuilder.BuildMaster(provider.MediaInfo),
+                    HlsContentType,
+                    Encoding.UTF8));
+                app.MapGet("/hls/index.m3u8", () => Results.Text(
+                    HlsPlaylistBuilder.BuildMedia(provider.Timeline),
+                    HlsContentType,
+                    Encoding.UTF8));
+                app.MapGet("/hls/window/{windowIndex:int}/init.mp4", async (
+                    int windowIndex,
+                    HttpContext context) =>
+                {
+                    if ((uint)windowIndex >= (uint)provider.Timeline.WindowCount)
+                    {
+                        return Results.NotFound();
+                    }
+
+                    PreviewSegmentWindow window = await cache.GetWindowAsync(
+                        windowIndex,
+                        context.RequestAborted).ConfigureAwait(false);
+                    return Results.Bytes(window.InitializationSegment, Fmp4ContentType);
+                });
+                app.MapGet("/hls/window/{windowIndex:int}/segment/{localIndex:int}.m4s", async (
+                    int windowIndex,
+                    int localIndex,
+                    HttpContext context) =>
+                {
+                    if ((uint)windowIndex >= (uint)provider.Timeline.WindowCount
+                        || (uint)localIndex >= (uint)provider.Timeline.SegmentCountInWindow(windowIndex))
+                    {
+                        return Results.NotFound();
+                    }
+
+                    PreviewSegmentWindow window = await cache.GetWindowAsync(
+                        windowIndex,
+                        context.RequestAborted).ConfigureAwait(false);
+                    PreviewMediaSegment? segment = window.Segments.FirstOrDefault(item =>
+                        item.LocalIndex == localIndex);
+                    return segment is null
+                        ? Results.NotFound()
+                        : Results.Bytes(segment.Data, Fmp4ContentType);
+                });
+
+                try
+                {
+                    await app.StartAsync(cancellationToken).ConfigureAwait(false);
+                    IServer server = app.Services.GetRequiredService<IServer>();
+                    IServerAddressesFeature addresses = server.Features
+                        .Get<IServerAddressesFeature>()
+                        ?? throw new InvalidOperationException("Kestrel did not publish a preview address.");
+                    Uri baseAddress = addresses.Addresses
+                        .Select(address => new Uri(address.EndsWith('/', StringComparison.Ordinal)
+                            ? address
+                            : address + "/"))
+                        .First(address => IPAddress.TryParse(address.Host, out IPAddress? ip)
+                            && IPAddress.IsLoopback(ip));
+                    return new PreviewHttpServer(app, cache, baseAddress, provider.MediaInfo);
+                }
+                catch (Exception ex) when (candidatePort < lastPort && IsAddressInUse(ex))
+                {
+                    await app.DisposeAsync().ConfigureAwait(false);
+                }
+                catch
+                {
+                    await app.DisposeAsync().ConfigureAwait(false);
+                    throw;
+                }
+            }
+
+            throw new IOException("No preview server port candidate could be started.");
         }
         catch
         {
-            await app.DisposeAsync().ConfigureAwait(false);
             await cache.DisposeAsync().ConfigureAwait(false);
             throw;
         }
+    }
+
+    private static bool IsAddressInUse(Exception exception)
+    {
+        for (Exception? current = exception; current is not null; current = current.InnerException)
+        {
+            if (current is AddressInUseException
+                || current is SocketException socket
+                    && socket.SocketErrorCode == SocketError.AddressAlreadyInUse)
+            {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     public Task WaitForShutdownAsync(CancellationToken cancellationToken = default)

@@ -1,5 +1,7 @@
 using System.Buffers.Binary;
 using System.Diagnostics;
+using System.Net;
+using System.Net.Sockets;
 using System.Runtime.InteropServices;
 using System.Security.Cryptography;
 using System.Text.Json;
@@ -145,6 +147,7 @@ public sealed class PreviewServerTests
 
         Assert.True(parsed.Get<bool>("preview_server"));
         Assert.Equal(23, parsed.Get<int>("preview_crf"));
+        Assert.Equal(PreviewServerOptions.DefaultPort, parsed.Get<int>("preview_port"));
         Assert.Equal("capture.lds", parsed.InputFile);
         Assert.Empty(parsed.OutputBase);
 
@@ -152,6 +155,14 @@ public sealed class PreviewServerTests
             spec,
             ["--preview-server", "capture.lds"]);
         Assert.Equal(31, defaultCrf.Get<int>("preview_crf"));
+
+        ParsedCommand dynamicPort = new CommandLineParser().Parse(
+            spec,
+            ["--preview-server", "--preview-port", "0", "capture.lds"]);
+        Assert.Equal(0, dynamicPort.Get<int>("preview_port"));
+        Assert.NotEqual(
+            ParsedOptionSource.Default,
+            dynamicPort.GetSource("preview_port"));
 
         Assert.Throws<CommandLineParseException>(() => new CommandLineParser().Parse(
             spec,
@@ -200,6 +211,189 @@ public sealed class PreviewServerTests
 
         Assert.Contains("VHS command only", exception.Message, StringComparison.Ordinal);
         Assert.Contains("no CPU preview fallback", exception.Message, StringComparison.Ordinal);
+    }
+
+    [Fact(DisplayName = "Default VHS preview preflights CUDA before full initialization")]
+    public async Task DefaultPreviewPreflightsCudaBeforeInitialization()
+    {
+        ParsedCommand command = new CommandLineParser().Parse(
+            CliSpecs.Vhs,
+            ["--preview-server", "--pal", "capture.ldf"]);
+        var attempted = new List<DspBackend>();
+        int preflightCalls = 0;
+        int ippProbeCalls = 0;
+
+        DspBackend selected = await PreviewBackendSelector.SelectAsync(
+            command,
+            (backend, _) =>
+            {
+                attempted.Add(backend);
+                return Task.FromResult(backend);
+            },
+            TextWriter.Null,
+            CancellationToken.None,
+            () =>
+            {
+                preflightCalls++;
+                return new(true, "test CUDA device 8.9");
+            },
+            () =>
+            {
+                ippProbeCalls++;
+                return true;
+            });
+
+        Assert.Equal(DspBackend.CudaFast, selected);
+        Assert.Equal([DspBackend.CudaFast], attempted);
+        Assert.Equal(1, preflightCalls);
+        Assert.Equal(0, ippProbeCalls);
+
+        ParsedCommand compatibilityPinned = new CommandLineParser().Parse(
+            CliSpecs.Vhs,
+            ["--preview-server", "--compat-version", "current", "capture.ldf"]);
+        Assert.False(PreviewBackendSelector.IsAutomaticCudaCandidate(compatibilityPinned));
+    }
+
+    [Fact(DisplayName = "Default VHS preview falls back to IPP after lightweight CUDA rejection")]
+    public async Task DefaultPreviewFallsBackToIppAfterPreflightRejection()
+    {
+        ParsedCommand command = new CommandLineParser().Parse(
+            CliSpecs.Vhs,
+            ["--preview-server", "--ntsc", "capture.ldf"]);
+        var attempted = new List<DspBackend>();
+        using var output = new StringWriter();
+
+        DspBackend selected = await PreviewBackendSelector.SelectAsync(
+            command,
+            (backend, _) =>
+            {
+                attempted.Add(backend);
+                return Task.FromResult(backend);
+            },
+            output,
+            CancellationToken.None,
+            () => new(false, "no compatible CUDA device"),
+            () => true);
+
+        Assert.Equal(DspBackend.IppFast, selected);
+        Assert.Equal([DspBackend.IppFast], attempted);
+        Assert.Contains("preflight unavailable", output.ToString(), StringComparison.Ordinal);
+        Assert.Contains("falling back to IPP-fast", output.ToString(), StringComparison.Ordinal);
+    }
+
+    [Fact(DisplayName = "Default VHS preview falls back after CUDA full initialization failure")]
+    public async Task DefaultPreviewFallsBackAfterCudaInitializationFailure()
+    {
+        ParsedCommand command = new CommandLineParser().Parse(
+            CliSpecs.Vhs,
+            ["--preview-server", "--pal", "capture.ldf"]);
+        var attempted = new List<DspBackend>();
+        using var output = new StringWriter();
+
+        DspBackend selected = await PreviewBackendSelector.SelectAsync(
+            command,
+            (backend, _) =>
+            {
+                attempted.Add(backend);
+                return backend == DspBackend.CudaFast
+                    ? Task.FromException<DspBackend>(
+                        new AutomaticCudaPreviewUnavailableException("NVENC unavailable"))
+                    : Task.FromResult(backend);
+            },
+            output,
+            CancellationToken.None,
+            () => new(true, "test CUDA device 8.9"),
+            () => true);
+
+        Assert.Equal(DspBackend.IppFast, selected);
+        Assert.Equal([DspBackend.CudaFast, DspBackend.IppFast], attempted);
+        Assert.Contains("initialization was unavailable", output.ToString(), StringComparison.Ordinal);
+        Assert.Contains("NVENC unavailable", output.ToString(), StringComparison.Ordinal);
+    }
+
+    [Fact(DisplayName = "Default VHS preview falls back to Exact when IPP is unavailable")]
+    public async Task DefaultPreviewFallsBackToExactWhenIppIsUnavailable()
+    {
+        ParsedCommand command = new CommandLineParser().Parse(
+            CliSpecs.Vhs,
+            ["--preview-server", "--pal", "capture.ldf"]);
+
+        DspBackend selected = await PreviewBackendSelector.SelectAsync(
+            command,
+            (backend, _) => Task.FromResult(backend),
+            TextWriter.Null,
+            CancellationToken.None,
+            () => new(false, "no CUDA device"),
+            () => false);
+
+        Assert.Equal(DspBackend.Exact, selected);
+    }
+
+    [Fact(DisplayName = "Explicit CUDA preview remains fail-closed without fallback")]
+    public async Task ExplicitCudaPreviewRemainsFailClosed()
+    {
+        ParsedCommand command = new CommandLineParser().Parse(
+            CliSpecs.Vhs,
+            ["--preview-server", "--dsp-backend", "cuda-fast", "capture.ldf"]);
+        int preflightCalls = 0;
+        int ippProbeCalls = 0;
+
+        InvalidOperationException exception = await Assert.ThrowsAsync<InvalidOperationException>(
+            () => PreviewBackendSelector.SelectAsync(
+                command,
+                (backend, _) => Task.FromException<DspBackend>(
+                    new InvalidOperationException($"{backend} failed")),
+                TextWriter.Null,
+                CancellationToken.None,
+                () =>
+                {
+                    preflightCalls++;
+                    return new(true, "unused");
+                },
+                () =>
+                {
+                    ippProbeCalls++;
+                    return true;
+                }));
+
+        Assert.Contains("CudaFast failed", exception.Message, StringComparison.Ordinal);
+        Assert.Equal(0, preflightCalls);
+        Assert.Equal(0, ippProbeCalls);
+    }
+
+    [Theory(DisplayName = "Automatic CUDA preview ignores unsupported command surfaces")]
+    [InlineData("ld", "VHS", "40")]
+    [InlineData("vhs", "SVHS", "40")]
+    [InlineData("vhs", "VHS", "20")]
+    public async Task AutomaticCudaPreviewIgnoresUnsupportedSurfaces(
+        string commandName,
+        string tapeFormat,
+        string inputRate)
+    {
+        DecodeCommandSpec spec = commandName == "vhs" ? CliSpecs.Vhs : CliSpecs.LaserDisc;
+        var arguments = new List<string> { "--preview-server" };
+        if (commandName == "vhs")
+        {
+            arguments.AddRange(["--tape_format", tapeFormat, "--frequency", inputRate]);
+        }
+        arguments.Add("capture.ldf");
+        ParsedCommand command = new CommandLineParser().Parse(spec, arguments);
+        int preflightCalls = 0;
+
+        DspBackend selected = await PreviewBackendSelector.SelectAsync(
+            command,
+            (backend, _) => Task.FromResult(backend),
+            TextWriter.Null,
+            CancellationToken.None,
+            () =>
+            {
+                preflightCalls++;
+                return new(true, "unused");
+            },
+            () => true);
+
+        Assert.Equal(DspBackend.IppFast, selected);
+        Assert.Equal(0, preflightCalls);
     }
 
     [Fact(DisplayName = "Preview template forces 20 MSPS decode for supported VHS RF")]
@@ -515,6 +709,10 @@ public sealed class PreviewServerTests
         new PreviewServerOptions { Crf = 51 }.Validate();
         Assert.Throws<ArgumentOutOfRangeException>(() =>
             new PreviewServerOptions { Crf = 52 }.Validate());
+        Assert.Throws<ArgumentOutOfRangeException>(() =>
+            new PreviewServerOptions { PortFallbackCount = -1 }.Validate());
+        Assert.Throws<ArgumentOutOfRangeException>(() =>
+            new PreviewServerOptions { PortFallbackCount = 1_001 }.Validate());
 
         using var output = new StringWriter();
         var display = new PreviewRealtimeFpsDisplay(output, 25.0);
@@ -1409,6 +1607,71 @@ public sealed class PreviewServerTests
         Assert.DoesNotContain("timestampOffset", player);
         Assert.DoesNotContain("requestedWindows", player);
         Assert.DoesNotContain("cdn.jsdelivr.net", player);
+    }
+
+    [Fact(DisplayName = "Default preview port increments only when its fixed port is occupied")]
+    public async Task DefaultPreviewPortIncrementsWhenOccupied()
+    {
+        CancellationToken cancellationToken = TestContext.Current.CancellationToken;
+        TcpListener? blocker = null;
+        int occupiedPort = 0;
+        try
+        {
+            for (int attempt = 0; attempt < 10; attempt++)
+            {
+                blocker = new TcpListener(IPAddress.Loopback, 0)
+                {
+                    ExclusiveAddressUse = true
+                };
+                blocker.Start();
+                occupiedPort = ((IPEndPoint)blocker.LocalEndpoint).Port;
+                if (occupiedPort <= IPEndPoint.MaxPort - 100)
+                {
+                    break;
+                }
+
+                blocker.Stop();
+                blocker = null;
+            }
+
+            Assert.NotNull(blocker);
+            Assert.InRange(occupiedPort, IPEndPoint.MinPort + 1, IPEndPoint.MaxPort - 100);
+
+            var fallbackProvider = new FakeProvider(
+                new PreviewTimeline(4.0, 25.0, 2.0, 1));
+            await using PreviewHttpServer fallbackServer = await PreviewHttpServer.StartAsync(
+                fallbackProvider,
+                new PreviewServerOptions
+                {
+                    Port = occupiedPort,
+                    PortFallbackCount = 100
+                },
+                cancellationToken);
+
+            Assert.InRange(fallbackServer.BaseAddress.Port, occupiedPort + 1, occupiedPort + 100);
+            using (var client = new HttpClient { BaseAddress = fallbackServer.BaseAddress })
+            {
+                Assert.Contains(
+                    "ok",
+                    await client.GetStringAsync("health", cancellationToken),
+                    StringComparison.Ordinal);
+            }
+
+            var exactProvider = new FakeProvider(
+                new PreviewTimeline(4.0, 25.0, 2.0, 1));
+            await Assert.ThrowsAnyAsync<IOException>(() => PreviewHttpServer.StartAsync(
+                exactProvider,
+                new PreviewServerOptions
+                {
+                    Port = occupiedPort,
+                    PortFallbackCount = 0
+                },
+                cancellationToken));
+        }
+        finally
+        {
+            blocker?.Stop();
+        }
     }
 
     [Fact(DisplayName = "Concurrent HLS requests share one window generation")]

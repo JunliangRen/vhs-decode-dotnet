@@ -2,7 +2,13 @@ namespace VHSDecode.Preview;
 
 public sealed record PreviewServerOptions
 {
-    public int Port { get; init; }
+    public const int DefaultPort = 8080;
+
+    public const int DefaultPortFallbackCount = 100;
+
+    public int Port { get; init; } = DefaultPort;
+
+    public int PortFallbackCount { get; init; } = DefaultPortFallbackCount;
 
     public double SegmentSeconds { get; init; } = 2.0;
 
@@ -25,6 +31,13 @@ public sealed record PreviewServerOptions
         if (Port is < 0 or > 65_535)
         {
             throw new ArgumentOutOfRangeException(nameof(Port), "Preview port must be between 0 and 65535.");
+        }
+
+        if (PortFallbackCount is < 0 or > 1_000)
+        {
+            throw new ArgumentOutOfRangeException(
+                nameof(PortFallbackCount),
+                "Preview port fallback count must be between 0 and 1000.");
         }
 
         if (!double.IsFinite(SegmentSeconds) || SegmentSeconds is < 0.5 or > 10.0)

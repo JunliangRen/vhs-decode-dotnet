@@ -8,7 +8,9 @@ internal static class PreviewDecodeCommandFactory
 {
     internal const string DecodeAt20MspsOption = CliSpecs.DecodeAt20MspsDestination;
 
-    internal static ParsedCommand CreateFastTemplate(ParsedCommand command)
+    internal static ParsedCommand CreateFastTemplate(
+        ParsedCommand command,
+        DspBackend? automaticBackend = null)
     {
         ArgumentNullException.ThrowIfNull(command);
         if (command.Spec.Name is not ("vhs" or "ld")
@@ -24,8 +26,12 @@ internal static class PreviewDecodeCommandFactory
             throw new ArgumentException("Preview mode requires exactly one RF input file.");
         }
 
-        bool cudaFast = DspBackendParser.Parse(command.Get<string>("dsp_backend"))
-            == DspBackend.CudaFast;
+        DspBackend selectedBackend = command.GetSource("dsp_backend") == ParsedOptionSource.Default
+            ? automaticBackend ?? (IppRuntime.TryProbe(out _)
+                ? DspBackend.IppFast
+                : DspBackend.Exact)
+            : DspBackendParser.Parse(command.Get<string>("dsp_backend"));
+        bool cudaFast = selectedBackend == DspBackend.CudaFast;
         if (cudaFast && command.Spec.Name != "vhs")
         {
             throw new NotSupportedException(
@@ -41,10 +47,13 @@ internal static class PreviewDecodeCommandFactory
             Set(values, sources, "threads", Math.Max(1, Environment.ProcessorCount));
         }
 
-        if (command.GetSource("dsp_backend") == ParsedOptionSource.Default
-            && IppRuntime.TryProbe(out _))
+        if (command.GetSource("dsp_backend") == ParsedOptionSource.Default)
         {
-            Set(values, sources, "dsp_backend", "ipp-fast");
+            Set(
+                values,
+                sources,
+                "dsp_backend",
+                DspBackendParser.ToCommandLineValue(selectedBackend));
         }
 
         if (command.Spec.Name == "vhs")

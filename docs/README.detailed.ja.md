@@ -327,8 +327,13 @@ SP/LP/EP を通常の native 40 MSPS、または明示 switch により 40/nativ
 から内部 20 MSPS で処理するものです。CVBS、LaserDisc、HiFi、S-VHS、その他の
 video system、packed `.lds`、明示的な compatibility profile selection は近似処理しません。
 
-`--preview-server` と明示的な `--dsp-backend cuda-fast` を組み合わせると、native-rate
-40 MSPS PAL/NTSC VHS 用の ABI v6 GPU preview route を選択します。1 つの native
+default native-rate 40 MSPS PAL/NTSC VHS preview は、まず NVIDIA driver API だけを
+load して `cuInit` を呼び、CUDA 13、device 0、compute capability 7.5+ を確認します。
+この軽量 preflight は cuFFT を load せず、CUDA context や NVENC も初期化しません。
+通過した device だけが ABI v6 GPU preview route の完全起動を一度試し、preflight または
+完全起動が利用できない場合は IPP、Exact の順に fallback します。`--preview-server` と
+明示的な `--dsp-backend cuda-fast` の組み合わせは同じ GPU route を固定し、fail-closed を
+維持します。1 つの native
 decode context を request window 間で保持し、deterministic 15-tap CUDA FIR が
 anti-alias 付き 2:1 reduction で 20 MSPS にしてから、persistent GPU sync、FM、
 time-base、chroma、dropout graph へ渡します。CUDA output stage は field-rate bob を
@@ -337,9 +342,14 @@ pitch-linear conversion を省き、full luma/chroma/NV12 frame を download せ
 その後 host/device 境界を通るのは少量の sync/field-order control metadata と圧縮 packet
 だけです。圧縮 packet は managed memory に渡され、FFmpeg は `-c:v copy` により
 HLS/fMP4 timeline を構成するだけです。
-この明示 route は NVENC 必須で、失敗時に QSV、AMF、libx264、IPP、Exact を試しません。
+明示 route は NVENC 必須で、失敗時に QSV、AMF、libx264、IPP、Exact を試しません。
+default 自動選択は起動時だけ CPU fallback を使い、実行中の preview session は切り替えません。
 これは preview が `--decode-at-20msps` を強制する形で、full decode は switch を明示した
 場合だけ rate を変更します。
+
+loopback HTTP listener は default で port 8080 を使い、address 使用中の場合だけ 8081
+から 8180 まで順に試します。明示的な `--preview-port` は increment を無効にし、0 は
+OS-assigned dynamic port mode を維持します。
 
 この CUDA preview route だけが FFmpeg PCM16 rewind window を汎用 default の 2 MiB
 から session ごとに bounded 32 MiB へ拡大します。隣接する 2 秒 window が共有する
@@ -380,18 +390,20 @@ Exact parity や cross-GPU guarantee ではありません。synthetic NTSC nati
 は pass していますが、real NTSC capture quality は未認証です。
 
 binary release は約 1.2 MiB の CUDA-fast bridge を保持しますが、271 MiB の
-`cufft64_12.dll` は埋め込みません。最初に `cuda-fast` を明示的に選んだときだけ、
+`cufft64_12.dll` は埋め込みません。最初の明示的な `cuda-fast`、または対象 default
+preview が軽量 preflight を通過した場合だけ、
 指定 runtime path、bridge directory、CUDA 13 Toolkit、process `PATH`、versioned user
 cache の順に compatible cuFFT 12 を検索します。見つからない場合は CUDA 13 driver と
 device を先に確認し、NVIDIA の pinned 12.0.0.15 Windows redistributable（202.2 MiB）を
 download します。archive と抽出 DLL の両方を固定 SHA-256 で検証し、
 `%LOCALAPPDATA%\vhs-decode-dotnet\cuda\cufft\12.0.0.15` へ atomic に install します。
-cross-process lock により同時の初回実行でも download は 1 回だけです。Exact、IPP、
-および `cuda-fast` を明示していない preview path は resolver に入らず network access
-もしません。offline deployment は
+cross-process lock により同時の初回実行でも download は 1 回だけです。軽量 preflight
+失敗時は resolver に入らず network access しません。Exact、IPP、および自動 CUDA
+support surface 外の preview input も offline のままです。offline deployment は
 `VHSDECODE_CUDA_RUNTIME_PATH`、cache root の変更は `VHSDECODE_CUDA_CACHE_PATH`、
 automatic download の無効化は `VHSDECODE_CUDA_AUTO_DOWNLOAD=0` を使用できます。
-download/load failure は明示的に報告され、CPU backend へ fallback しません。
+明示 CUDA request の download/load failure は報告して fallback せず、default 自動 preview
+は startup failure を報告した後に IPP または Exact へ fallback します。
 
 この backend は独自の numerical contract を持ち、`v0.4.0` または `current` の hash
 compatibility を主張しません。以前の same-session interleaved
@@ -4160,7 +4172,7 @@ suite は全 1,448 test に成功しました。
 .\tools\build-cuda-fast-native.ps1
 dotnet restore VHSDecodeDotNet.slnx
 dotnet build VHSDecodeDotNet.slnx -c Release --no-restore
-dotnet test --solution VHSDecodeDotNet.slnx -c Release --no-build --no-restore --minimum-expected-tests 1577
+dotnet test --solution VHSDecodeDotNet.slnx -c Release --no-build --no-restore --minimum-expected-tests 1591
 dotnet test --project tests\VHSDecode.Tests\VHSDecode.Tests.csproj -c Release --no-build --no-restore --coverage --coverage-output coverage.cobertura.xml --coverage-output-format cobertura
 ```
 
@@ -4188,7 +4200,7 @@ default command はすべての native GPU test を実行します。GPU のな�
 
 現在の正式な Release build は warning 0、error 0 です。xUnit v3 project は
 `dotnet test` と Visual Studio Test Explorer の両方で個別に検出できる
-**1,577** tests を公開します。
+**1,591** tests を公開します。
 
 <!-- SECTION: usage -->
 

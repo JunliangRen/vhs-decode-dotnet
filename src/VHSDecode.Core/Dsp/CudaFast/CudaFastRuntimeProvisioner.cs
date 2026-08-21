@@ -527,11 +527,16 @@ internal sealed class CudaFastRuntimeProvisioner
         }
     }
 
-    private static CudaFastDriverProbeResult ProbeCuda13Driver()
+    internal static CudaFastDriverProbeResult ProbeCuda13Driver()
     {
         if (!OperatingSystem.IsWindows())
         {
             return new(false, "CUDA-fast currently supports Windows x64 only.");
+        }
+
+        if (!Environment.Is64BitProcess)
+        {
+            return new(false, "CUDA-fast requires a 64-bit process.");
         }
 
         string driverPath = Path.Combine(Environment.SystemDirectory, "nvcuda.dll");
@@ -551,6 +556,10 @@ internal sealed class CudaFastRuntimeProvisioner
             var getDeviceCount = GetDriverExport<CuDeviceGetCountDelegate>(
                 handle,
                 "cuDeviceGetCount");
+            var getDevice = GetDriverExport<CuDeviceGetDelegate>(handle, "cuDeviceGet");
+            var getDeviceAttribute = GetDriverExport<CuDeviceGetAttributeDelegate>(
+                handle,
+                "cuDeviceGetAttribute");
             int status = initialize(0);
             if (status != 0)
             {
@@ -577,7 +586,40 @@ internal sealed class CudaFastRuntimeProvisioner
                         : $"cuDeviceGetCount failed with CUDA status {status}.");
             }
 
-            return new(true, $"CUDA driver {version} reported {count} device(s).");
+            status = getDevice(out int device, 0);
+            if (status != 0)
+            {
+                return new(false, $"cuDeviceGet(0) failed with CUDA status {status}.");
+            }
+
+            const int ComputeCapabilityMajorAttribute = 75;
+            const int ComputeCapabilityMinorAttribute = 76;
+            status = getDeviceAttribute(
+                out int computeMajor,
+                ComputeCapabilityMajorAttribute,
+                device);
+            if (status != 0)
+            {
+                return new(
+                    false,
+                    $"reading CUDA device 0 compute-capability major failed with status {status}.");
+            }
+            status = getDeviceAttribute(
+                out int computeMinor,
+                ComputeCapabilityMinorAttribute,
+                device);
+            if (status != 0)
+            {
+                return new(
+                    false,
+                    $"reading CUDA device 0 compute-capability minor failed with status {status}.");
+            }
+
+            return EvaluateCudaDriverCapabilities(
+                version,
+                count,
+                computeMajor,
+                computeMinor);
         }
         catch (Exception ex) when (ex is DllNotFoundException
             or BadImageFormatException
@@ -592,6 +634,36 @@ internal sealed class CudaFastRuntimeProvisioner
                 NativeLibrary.Free(handle);
             }
         }
+    }
+
+    internal static CudaFastDriverProbeResult EvaluateCudaDriverCapabilities(
+        int driverVersion,
+        int deviceCount,
+        int computeMajor,
+        int computeMinor)
+    {
+        if (driverVersion < 13_000)
+        {
+            return new(
+                false,
+                $"the installed NVIDIA driver exposes CUDA {driverVersion / 1000}.{(driverVersion % 1000) / 10}, but CUDA 13 or newer is required.");
+        }
+
+        if (deviceCount <= 0)
+        {
+            return new(false, "the NVIDIA driver reported no CUDA devices.");
+        }
+
+        if (computeMajor < 7 || (computeMajor == 7 && computeMinor < 5))
+        {
+            return new(
+                false,
+                $"CUDA device 0 has compute capability {computeMajor}.{computeMinor}; CUDA-fast requires 7.5 or newer.");
+        }
+
+        return new(
+            true,
+            $"CUDA driver {driverVersion / 1000}.{(driverVersion % 1000) / 10} reported {deviceCount} device(s); device 0 has compute capability {computeMajor}.{computeMinor}.");
     }
 
     private static TDelegate GetDriverExport<TDelegate>(nint handle, string name)
@@ -687,4 +759,13 @@ internal sealed class CudaFastRuntimeProvisioner
 
     [UnmanagedFunctionPointer(CallingConvention.Winapi)]
     private delegate int CuDeviceGetCountDelegate(out int count);
+
+    [UnmanagedFunctionPointer(CallingConvention.Winapi)]
+    private delegate int CuDeviceGetDelegate(out int device, int ordinal);
+
+    [UnmanagedFunctionPointer(CallingConvention.Winapi)]
+    private delegate int CuDeviceGetAttributeDelegate(
+        out int value,
+        int attribute,
+        int device);
 }
