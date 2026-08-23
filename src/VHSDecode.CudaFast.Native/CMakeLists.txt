@@ -339,6 +339,31 @@ foreach(header_name IN LISTS CUVHS_FP32_PIPELINE_HEADERS)
         "${cuvhs_SOURCE_DIR}/src/pipeline/${header_name}")
 endforeach()
 
+# Preview can use the PAL profile's actual post-demodulation filter shape
+# without changing full CUDA-fast decode.  The pinned cuVHS implementation
+# otherwise treats every profile's video_lpf_freq as a Super-Gaussian width,
+# while PAL VHS specifies a Butterworth corner frequency.
+set(CUVHS_FM_DEMOD_HEADER_PATH
+    "${CMAKE_CURRENT_BINARY_DIR}/generated/include/pipeline/fm_demod.h")
+file(READ "${CUVHS_FM_DEMOD_HEADER_PATH}" CUVHS_FM_DEMOD_HEADER_SOURCE)
+set(CUVHS_FM_DEMOD_INIT_DECL [=[    bool init(const VideoFormat& fmt, int max_batch_size, int samples_per_field_override = 0);]=])
+string(FIND
+    "${CUVHS_FM_DEMOD_HEADER_SOURCE}"
+    "${CUVHS_FM_DEMOD_INIT_DECL}"
+    CUVHS_FM_DEMOD_INIT_DECL_INDEX)
+if(CUVHS_FM_DEMOD_INIT_DECL_INDEX EQUAL -1)
+    message(FATAL_ERROR
+        "Pinned cuVHS FM demod header no longer has the expected init declaration")
+endif()
+string(REPLACE
+    "${CUVHS_FM_DEMOD_INIT_DECL}"
+    [=[    bool init(const VideoFormat& fmt, int max_batch_size,
+              int samples_per_field_override = 0,
+              bool preview_profile_filter = false);]=]
+    CUVHS_FM_DEMOD_HEADER_SOURCE
+    "${CUVHS_FM_DEMOD_HEADER_SOURCE}")
+file(WRITE "${CUVHS_FM_DEMOD_HEADER_PATH}" "${CUVHS_FM_DEMOD_HEADER_SOURCE}")
+
 # PAL fields do not share the same first output line: Exact starts the first
 # field at line 3 and the second field at line 4. Pass the already detected
 # parity into K5 instead of using cuVHS's fixed line-1 origin.
@@ -616,6 +641,79 @@ string(REPLACE
     double rf_peak_freq     = 4300000.0;
     double rf_peak_gain     = 4.0;
     double rf_peak_bw       = 10000000.0;]=]
+    CUVHS_FM_DEMOD_SOURCE
+    "${CUVHS_FM_DEMOD_SOURCE}")
+
+set(CUVHS_FM_DEMOD_INIT_DEFINITION [=[bool FMDemodState::init(const VideoFormat& fmt, int max_batch_size, int samples_per_field_override) {]=])
+string(FIND
+    "${CUVHS_FM_DEMOD_SOURCE}"
+    "${CUVHS_FM_DEMOD_INIT_DEFINITION}"
+    CUVHS_FM_DEMOD_INIT_DEFINITION_INDEX)
+if(CUVHS_FM_DEMOD_INIT_DEFINITION_INDEX EQUAL -1)
+    message(FATAL_ERROR
+        "Pinned cuVHS FM demod source no longer has the expected init definition")
+endif()
+string(REPLACE
+    "${CUVHS_FM_DEMOD_INIT_DEFINITION}"
+    [=[bool FMDemodState::init(const VideoFormat& fmt, int max_batch_size,
+                        int samples_per_field_override,
+                        bool preview_profile_filter) {]=]
+    CUVHS_FM_DEMOD_SOURCE
+    "${CUVHS_FM_DEMOD_SOURCE}")
+
+set(CUVHS_FM_DEMOD_VIDEO_FILTER_SETUP [=[    std::vector<cufftDoubleComplex> h_fv(freq_bins), h_fv05(freq_bins);
+    const auto filter_deemp_ref = freqz_ba_cpp(
+        make_fm_deemphasis_b_cpp(fs, deemph_gain, deemph_mid, deemph_q),
+        static_cast<std::size_t>(reference_freq_bins),
+        false);
+    std::vector<std::complex<double>> ref_fv(reference_freq_bins);]=])
+string(FIND
+    "${CUVHS_FM_DEMOD_SOURCE}"
+    "${CUVHS_FM_DEMOD_VIDEO_FILTER_SETUP}"
+    CUVHS_FM_DEMOD_VIDEO_FILTER_SETUP_INDEX)
+if(CUVHS_FM_DEMOD_VIDEO_FILTER_SETUP_INDEX EQUAL -1)
+    message(FATAL_ERROR
+        "Pinned cuVHS FM demod source no longer has the expected video filter setup")
+endif()
+string(REPLACE
+    "${CUVHS_FM_DEMOD_VIDEO_FILTER_SETUP}"
+    [=[    std::vector<cufftDoubleComplex> h_fv(freq_bins), h_fv05(freq_bins);
+    const auto filter_deemp_ref = freqz_ba_cpp(
+        make_fm_deemphasis_b_cpp(fs, deemph_gain, deemph_mid, deemph_q),
+        static_cast<std::size_t>(reference_freq_bins),
+        false);
+    const bool use_preview_pal_butterworth = preview_profile_filter
+        && fmt.profile == VideoProfile::PAL_625_50_VHS;
+    std::vector<std::complex<double>> preview_pal_video_lpf;
+    if (use_preview_pal_butterworth) {
+        preview_pal_video_lpf = zpk_freqz_cpp(
+            butter_digital_lowpass_zpk_cpp(video_lpf_order, video_lpf_freq, fs),
+            static_cast<std::size_t>(reference_fft_size),
+            true);
+        fprintf(stderr,
+                "  [FM demod] PAL preview luma LPF: %.3f MHz, Butterworth order %d\n",
+                video_lpf_freq / 1.0e6,
+                video_lpf_order);
+    }
+    std::vector<std::complex<double>> ref_fv(reference_freq_bins);]=]
+    CUVHS_FM_DEMOD_SOURCE
+    "${CUVHS_FM_DEMOD_SOURCE}")
+
+set(CUVHS_FM_DEMOD_VIDEO_FILTER_MAGNITUDE
+    "        double vlpf = supergauss_mag(f_hz, video_lpf_freq, video_lpf_order);")
+string(FIND
+    "${CUVHS_FM_DEMOD_SOURCE}"
+    "${CUVHS_FM_DEMOD_VIDEO_FILTER_MAGNITUDE}"
+    CUVHS_FM_DEMOD_VIDEO_FILTER_MAGNITUDE_INDEX)
+if(CUVHS_FM_DEMOD_VIDEO_FILTER_MAGNITUDE_INDEX EQUAL -1)
+    message(FATAL_ERROR
+        "Pinned cuVHS FM demod source no longer has the expected video filter magnitude")
+endif()
+string(REPLACE
+    "${CUVHS_FM_DEMOD_VIDEO_FILTER_MAGNITUDE}"
+    [=[        double vlpf = use_preview_pal_butterworth
+            ? std::abs(preview_pal_video_lpf[static_cast<std::size_t>(k)])
+            : supergauss_mag(f_hz, video_lpf_freq, video_lpf_order);]=]
     CUVHS_FM_DEMOD_SOURCE
     "${CUVHS_FM_DEMOD_SOURCE}")
 
@@ -4186,6 +4284,26 @@ string(REPLACE
                      static_cast<float*>(d_linelocs_coarse),
                      static_cast<int*>(d_is_first_field),
                      static_cast<float*>(d_k5_level_adjust),]=]
+    CUVHS_PIPELINE_SOURCE
+    "${CUVHS_PIPELINE_SOURCE}")
+
+set(CUVHS_FM_DEMOD_PIPELINE_INIT
+    "        if (ok) ok = demod_state.init(fmt, batch_size, (int)spf_padded);")
+string(FIND
+    "${CUVHS_PIPELINE_SOURCE}"
+    "${CUVHS_FM_DEMOD_PIPELINE_INIT}"
+    CUVHS_FM_DEMOD_PIPELINE_INIT_INDEX)
+if(CUVHS_FM_DEMOD_PIPELINE_INIT_INDEX EQUAL -1)
+    message(FATAL_ERROR
+        "Pinned cuVHS pipeline no longer has the expected FM demod init call")
+endif()
+string(REPLACE
+    "${CUVHS_FM_DEMOD_PIPELINE_INIT}"
+    [=[        if (ok) ok = demod_state.init(
+            fmt,
+            batch_size,
+            (int)spf_padded,
+            writer.accepts_device_fields());]=]
     CUVHS_PIPELINE_SOURCE
     "${CUVHS_PIPELINE_SOURCE}")
 file(WRITE
