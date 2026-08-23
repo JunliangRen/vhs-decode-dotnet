@@ -17,6 +17,7 @@ $artifactDirectory = Join-Path $repositoryRoot 'artifacts\native\Release\win-x64
 $nativeName = 'vhsdecode_cuda_fast.dll'
 $smokeName = 'vhsdecode_cuda_fast_smoke.exe'
 $cancellationTestName = 'vhsdecode_cuda_fast_cancellation_test.exe'
+$fmVideoLpfResponseTestName = 'vhsdecode_cuda_fast_fm_video_lpf_response_test.exe'
 $syncPulseTestName = 'vhsdecode_cuda_fast_sync_pulses_test.exe'
 $dropoutTestName = 'vhsdecode_cuda_fast_dropout_test.exe'
 $syntheticNtscTestName = 'vhsdecode_cuda_fast_synthetic_ntsc_test.exe'
@@ -214,12 +215,14 @@ if ($LASTEXITCODE -ne 0) {
 $nativeOutputPath = Join-Path $buildDirectoryFullPath $nativeName
 $smokeOutputPath = Join-Path $buildDirectoryFullPath $smokeName
 $cancellationTestOutputPath = Join-Path $buildDirectoryFullPath $cancellationTestName
+$fmVideoLpfResponseTestOutputPath = Join-Path $buildDirectoryFullPath $fmVideoLpfResponseTestName
 $syncPulseTestOutputPath = Join-Path $buildDirectoryFullPath $syncPulseTestName
 $dropoutTestOutputPath = Join-Path $buildDirectoryFullPath $dropoutTestName
 $syntheticNtscTestOutputPath = Join-Path $buildDirectoryFullPath $syntheticNtscTestName
 if (-not (Test-Path -LiteralPath $nativeOutputPath -PathType Leaf) -or
     -not (Test-Path -LiteralPath $smokeOutputPath -PathType Leaf) -or
     -not (Test-Path -LiteralPath $cancellationTestOutputPath -PathType Leaf) -or
+    -not (Test-Path -LiteralPath $fmVideoLpfResponseTestOutputPath -PathType Leaf) -or
     -not (Test-Path -LiteralPath $syncPulseTestOutputPath -PathType Leaf) -or
     -not (Test-Path -LiteralPath $dropoutTestOutputPath -PathType Leaf) -or
     -not (Test-Path -LiteralPath $syntheticNtscTestOutputPath -PathType Leaf)) {
@@ -259,6 +262,12 @@ Write-Host "Running $cancellationTestOutputPath"
 & $cancellationTestOutputPath
 if ($LASTEXITCODE -ne 0) {
     throw "CUDA-fast parallel cancellation test failed with exit code $LASTEXITCODE."
+}
+
+Write-Host "Running $fmVideoLpfResponseTestOutputPath"
+& $fmVideoLpfResponseTestOutputPath
+if ($LASTEXITCODE -ne 0) {
+    throw "CUDA-fast FM video LPF response test failed with exit code $LASTEXITCODE."
 }
 
 Copy-Item -LiteralPath $cuFftPath -Destination (Join-Path $buildDirectoryFullPath $cuFftName) -Force

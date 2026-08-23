@@ -339,30 +339,9 @@ foreach(header_name IN LISTS CUVHS_FP32_PIPELINE_HEADERS)
         "${cuvhs_SOURCE_DIR}/src/pipeline/${header_name}")
 endforeach()
 
-# Preview can use the PAL profile's actual post-demodulation filter shape
-# without changing full CUDA-fast decode.  The pinned cuVHS implementation
-# otherwise treats every profile's video_lpf_freq as a Super-Gaussian width,
-# while PAL VHS specifies a Butterworth corner frequency.
-set(CUVHS_FM_DEMOD_HEADER_PATH
-    "${CMAKE_CURRENT_BINARY_DIR}/generated/include/pipeline/fm_demod.h")
-file(READ "${CUVHS_FM_DEMOD_HEADER_PATH}" CUVHS_FM_DEMOD_HEADER_SOURCE)
-set(CUVHS_FM_DEMOD_INIT_DECL [=[    bool init(const VideoFormat& fmt, int max_batch_size, int samples_per_field_override = 0);]=])
-string(FIND
-    "${CUVHS_FM_DEMOD_HEADER_SOURCE}"
-    "${CUVHS_FM_DEMOD_INIT_DECL}"
-    CUVHS_FM_DEMOD_INIT_DECL_INDEX)
-if(CUVHS_FM_DEMOD_INIT_DECL_INDEX EQUAL -1)
-    message(FATAL_ERROR
-        "Pinned cuVHS FM demod header no longer has the expected init declaration")
-endif()
-string(REPLACE
-    "${CUVHS_FM_DEMOD_INIT_DECL}"
-    [=[    bool init(const VideoFormat& fmt, int max_batch_size,
-              int samples_per_field_override = 0,
-              bool preview_profile_filter = false);]=]
-    CUVHS_FM_DEMOD_HEADER_SOURCE
-    "${CUVHS_FM_DEMOD_HEADER_SOURCE}")
-file(WRITE "${CUVHS_FM_DEMOD_HEADER_PATH}" "${CUVHS_FM_DEMOD_HEADER_SOURCE}")
+# PAL VHS specifies video_lpf_freq as a Butterworth corner frequency, while
+# NTSC VHS explicitly uses the pinned cuVHS Super-Gaussian interpretation.
+# Apply that profile distinction consistently to preview and full decode.
 
 # PAL fields do not share the same first output line: Exact starts the first
 # field at line 3 and the second field at line 4. Pass the already detected
@@ -644,23 +623,6 @@ string(REPLACE
     CUVHS_FM_DEMOD_SOURCE
     "${CUVHS_FM_DEMOD_SOURCE}")
 
-set(CUVHS_FM_DEMOD_INIT_DEFINITION [=[bool FMDemodState::init(const VideoFormat& fmt, int max_batch_size, int samples_per_field_override) {]=])
-string(FIND
-    "${CUVHS_FM_DEMOD_SOURCE}"
-    "${CUVHS_FM_DEMOD_INIT_DEFINITION}"
-    CUVHS_FM_DEMOD_INIT_DEFINITION_INDEX)
-if(CUVHS_FM_DEMOD_INIT_DEFINITION_INDEX EQUAL -1)
-    message(FATAL_ERROR
-        "Pinned cuVHS FM demod source no longer has the expected init definition")
-endif()
-string(REPLACE
-    "${CUVHS_FM_DEMOD_INIT_DEFINITION}"
-    [=[bool FMDemodState::init(const VideoFormat& fmt, int max_batch_size,
-                        int samples_per_field_override,
-                        bool preview_profile_filter) {]=]
-    CUVHS_FM_DEMOD_SOURCE
-    "${CUVHS_FM_DEMOD_SOURCE}")
-
 set(CUVHS_FM_DEMOD_VIDEO_FILTER_SETUP [=[    std::vector<cufftDoubleComplex> h_fv(freq_bins), h_fv05(freq_bins);
     const auto filter_deemp_ref = freqz_ba_cpp(
         make_fm_deemphasis_b_cpp(fs, deemph_gain, deemph_mid, deemph_q),
@@ -682,16 +644,19 @@ string(REPLACE
         make_fm_deemphasis_b_cpp(fs, deemph_gain, deemph_mid, deemph_q),
         static_cast<std::size_t>(reference_freq_bins),
         false);
-    const bool use_preview_pal_butterworth = preview_profile_filter
-        && fmt.profile == VideoProfile::PAL_625_50_VHS;
-    std::vector<std::complex<double>> preview_pal_video_lpf;
-    if (use_preview_pal_butterworth) {
-        preview_pal_video_lpf = zpk_freqz_cpp(
-            butter_digital_lowpass_zpk_cpp(video_lpf_order, video_lpf_freq, fs),
-            static_cast<std::size_t>(reference_fft_size),
-            true);
+    const auto video_lpf_response =
+        vhsdecode_cuda_fast::build_fm_video_lpf_half_spectrum(
+            fmt.profile,
+            video_lpf_order,
+            video_lpf_freq,
+            fs,
+            static_cast<std::size_t>(reference_fft_size));
+    const bool use_pal_butterworth =
+        vhsdecode_cuda_fast::fm_video_lpf_shape(fmt.profile) ==
+        vhsdecode_cuda_fast::FmVideoLpfShape::Butterworth;
+    if (use_pal_butterworth) {
         fprintf(stderr,
-                "  [FM demod] PAL preview luma LPF: %.3f MHz, Butterworth order %d\n",
+                "  [FM demod] PAL luma LPF: %.3f MHz, Butterworth order %d\n",
                 video_lpf_freq / 1.0e6,
                 video_lpf_order);
     }
@@ -711,9 +676,7 @@ if(CUVHS_FM_DEMOD_VIDEO_FILTER_MAGNITUDE_INDEX EQUAL -1)
 endif()
 string(REPLACE
     "${CUVHS_FM_DEMOD_VIDEO_FILTER_MAGNITUDE}"
-    [=[        double vlpf = use_preview_pal_butterworth
-            ? std::abs(preview_pal_video_lpf[static_cast<std::size_t>(k)])
-            : supergauss_mag(f_hz, video_lpf_freq, video_lpf_order);]=]
+    [=[        double vlpf = video_lpf_response[static_cast<std::size_t>(k)];]=]
     CUVHS_FM_DEMOD_SOURCE
     "${CUVHS_FM_DEMOD_SOURCE}")
 
@@ -1171,6 +1134,7 @@ string(REPLACE
 string(REPLACE
     [=[#include <complex>]=]
     [=[#include <complex>
+#include "fm_video_lpf_response.h"
 #include <chrono>
 #include <cstdlib>]=]
     CUVHS_FM_DEMOD_SOURCE
@@ -4287,25 +4251,6 @@ string(REPLACE
     CUVHS_PIPELINE_SOURCE
     "${CUVHS_PIPELINE_SOURCE}")
 
-set(CUVHS_FM_DEMOD_PIPELINE_INIT
-    "        if (ok) ok = demod_state.init(fmt, batch_size, (int)spf_padded);")
-string(FIND
-    "${CUVHS_PIPELINE_SOURCE}"
-    "${CUVHS_FM_DEMOD_PIPELINE_INIT}"
-    CUVHS_FM_DEMOD_PIPELINE_INIT_INDEX)
-if(CUVHS_FM_DEMOD_PIPELINE_INIT_INDEX EQUAL -1)
-    message(FATAL_ERROR
-        "Pinned cuVHS pipeline no longer has the expected FM demod init call")
-endif()
-string(REPLACE
-    "${CUVHS_FM_DEMOD_PIPELINE_INIT}"
-    [=[        if (ok) ok = demod_state.init(
-            fmt,
-            batch_size,
-            (int)spf_padded,
-            writer.accepts_device_fields());]=]
-    CUVHS_PIPELINE_SOURCE
-    "${CUVHS_PIPELINE_SOURCE}")
 file(WRITE
     "${CMAKE_CURRENT_BINARY_DIR}/generated/pipeline.cu"
     "${CUVHS_PIPELINE_SOURCE}")
@@ -4456,6 +4401,7 @@ target_compile_definitions(vhsdecode_cuda_fast PRIVATE
     _USE_MATH_DEFINES)
 target_include_directories(vhsdecode_cuda_fast PRIVATE
     "${CMAKE_CURRENT_SOURCE_DIR}/include"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src"
     "${CMAKE_CURRENT_BINARY_DIR}/generated/include"
     "${CMAKE_CURRENT_SOURCE_DIR}/overlay"
     "${cuvhs_SOURCE_DIR}/src"
@@ -4494,6 +4440,19 @@ if(MSVC)
         /O2 /W4 /permissive- /utf-8)
 else()
     target_compile_options(vhsdecode_cuda_fast_cancellation_test PRIVATE -O3)
+endif()
+
+add_executable(
+    vhsdecode_cuda_fast_fm_video_lpf_response_test
+    tests/fm_video_lpf_response_test.cpp)
+target_include_directories(vhsdecode_cuda_fast_fm_video_lpf_response_test PRIVATE
+    "${CMAKE_CURRENT_SOURCE_DIR}/src"
+    "${cuvhs_SOURCE_DIR}/src")
+if(MSVC)
+    target_compile_options(vhsdecode_cuda_fast_fm_video_lpf_response_test PRIVATE
+        /O2 /W4 /permissive- /utf-8)
+else()
+    target_compile_options(vhsdecode_cuda_fast_fm_video_lpf_response_test PRIVATE -O3)
 endif()
 
 add_executable(vhsdecode_cuda_fast_sync_pulses_test
@@ -4548,6 +4507,9 @@ add_test(NAME cuda_fast_probe COMMAND vhsdecode_cuda_fast_smoke)
 add_test(
     NAME cuda_fast_parallel_preview_cancellation
     COMMAND vhsdecode_cuda_fast_cancellation_test)
+add_test(
+    NAME cuda_fast_fm_video_lpf_response
+    COMMAND vhsdecode_cuda_fast_fm_video_lpf_response_test)
 add_test(
     NAME cuda_fast_parallel_sync_pulses
     COMMAND vhsdecode_cuda_fast_sync_pulses_test)

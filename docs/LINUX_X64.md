@@ -112,7 +112,7 @@ The builder fails unless all of the following pass:
 - host and output architecture are ELF64 x86-64 on glibc;
 - app-local libsndfile/libsoxr exports and dynamic dependencies match the
   required ABI, and their maximum GLIBC symbol version does not exceed 2.35;
-- the full solution builds and at least 1,551 xUnit v3 cases run after excluding
+- the full solution builds and at least 1,561 xUnit v3 cases run after excluding
   18 method-scoped (41-case) frozen-bit oracles tied to Windows UCRT, Windows
   libsoxr, or Windows-generated transcendental inputs; functional, structural,
   tolerance, native-loader, and final-artifact gates remain enabled;

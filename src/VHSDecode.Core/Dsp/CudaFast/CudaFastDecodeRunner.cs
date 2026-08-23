@@ -21,6 +21,9 @@ internal interface ICudaFastDecodeRunner
 
 internal sealed class CudaFastDecodeRunner : ICudaFastDecodeRunner
 {
+    internal const string DisableMappedIndexedFlacEnvironmentVariable =
+        "VHSDECODE_CUDA_FAST_DISABLE_MAPPED_INDEXED_FLAC";
+
     private const int MaximumManagedReadSamples = 1024 * 1024;
     private const int DeviceId = 0;
 
@@ -125,6 +128,17 @@ internal sealed class CudaFastDecodeRunner : ICudaFastDecodeRunner
             }
 
             loader = CreateInputLoader(command.InputFile);
+            if (loader is FfmpegPcm16InputAdapter containerLoader
+                && Path.GetExtension(command.InputFile).ToLowerInvariant()
+                    is ".ldf" or ".flac")
+            {
+                WriteDiagnostic(
+                    output,
+                    logPath,
+                    containerLoader.SeekMode == FfmpegPcm16SeekMode.MappedIndexedRawFlac
+                        ? "CUDA-fast RF seek: PyAV-mapped indexed raw FLAC."
+                        : "CUDA-fast RF seek: legacy exact container stream.");
+            }
             using var callbackContext = new ManagedReadContext(
                 loader,
                 command.InputFile,
@@ -486,21 +500,85 @@ internal sealed class CudaFastDecodeRunner : ICudaFastDecodeRunner
         string path,
         bool fastContainerSeeking = false,
         int fastContainerRewindSize = FfmpegPcm16SampleLoader.DefaultRewindSize)
+        => CreateInputLoaderCore(
+            path,
+            fastContainerSeeking,
+            fastContainerRewindSize,
+            Environment.GetEnvironmentVariable(
+                DisableMappedIndexedFlacEnvironmentVariable));
+
+    internal static IRfSampleLoader CreateInputLoaderCore(
+        string path,
+        bool fastContainerSeeking,
+        int fastContainerRewindSize,
+        string? disableMappedIndexedFlac)
     {
-        IRfSampleLoader loader = Path.GetExtension(path).ToLowerInvariant() switch
+        string extension = Path.GetExtension(path).ToLowerInvariant();
+        IRfSampleLoader loader;
+        if (extension is ".raw" or ".s16")
         {
-            ".raw" or ".s16" => new DirectInt16SampleLoader(),
-            ".s8" => new Int8SampleLoader(),
-            _ => RfLoaderFactory.CreateNative(
+            loader = new DirectInt16SampleLoader();
+        }
+        else if (extension == ".s8")
+        {
+            loader = new Int8SampleLoader();
+        }
+        else if (TryCreateMappedIndexedRawFlacLoader(
+            path,
+            fastContainerSeeking,
+            fastContainerRewindSize,
+            disableMappedIndexedFlac,
+            out FfmpegPcm16SampleLoader? mappedIndexedLoader))
+        {
+            loader = mappedIndexedLoader
+                ?? throw new InvalidOperationException(
+                    "Mapped indexed raw FLAC routing returned no loader.");
+        }
+        else
+        {
+            loader = RfLoaderFactory.CreateNative(
                 path,
                 preferPyAvMappedRawFlacSeeking: false,
                 fastContainerSeeking: fastContainerSeeking,
                 ignoreExtensionCase: true,
-                fastContainerRewindSize: fastContainerRewindSize)
-        };
+                fastContainerRewindSize: fastContainerRewindSize);
+        }
+
         return loader is FfmpegPcm16SampleLoader ffmpeg
             ? new FfmpegPcm16InputAdapter(ffmpeg)
             : loader;
+    }
+
+    private static bool TryCreateMappedIndexedRawFlacLoader(
+        string path,
+        bool fastContainerSeeking,
+        int rewindSize,
+        string? disableMappedIndexedFlac,
+        out FfmpegPcm16SampleLoader? loader)
+    {
+        loader = null;
+        string extension = Path.GetExtension(path).ToLowerInvariant();
+        if (fastContainerSeeking
+            || string.Equals(disableMappedIndexedFlac, "1", StringComparison.Ordinal)
+            || extension is not (".ldf" or ".flac")
+            || !RawFlacStreamInfo.TryRead(path, out RawFlacStreamInfo info)
+            || !info.SupportsPyAvMappedLibsndfileSeeking
+            || info.FixedBlockSize is not int blockSize
+            || !RawFlacFrameIndex.TryOpen(path, out RawFlacFrameIndex? frameIndex)
+            || frameIndex is null)
+        {
+            return false;
+        }
+
+        // Run bounds deliberately retain the existing physical sample total from
+        // TryGetInputSampleCount. Only restart coordinates are mapped; reaching
+        // physical EOF remains a short read instead of redefining global length.
+        loader = new FfmpegPcm16SampleLoader(
+            path,
+            frameIndex,
+            new PyAvRawFlacSampleMapper(info.SampleRateHz, blockSize),
+            rewindSize);
+        return true;
     }
 
     internal static int ReadInt16WithFallback(
@@ -674,6 +752,13 @@ internal sealed class CudaFastDecodeRunner : ICudaFastDecodeRunner
             => _loader.TryReadInt16(stream, sample, destination, out samplesRead);
 
         internal bool FastInputSeek => _loader.FastInputSeek;
+
+        internal FfmpegPcm16SeekMode SeekMode => _loader.SeekMode;
+
+        internal bool UsesRestartSampleMapping => _loader.UsesRestartSampleMapping;
+
+        internal bool TryResolveInputSample(long logicalSample, out long inputSample)
+            => _loader.TryResolveInputSample(logicalSample, out inputSample);
 
         internal int RewindSize => _loader.RewindSize;
 

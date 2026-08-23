@@ -50,7 +50,7 @@ public sealed partial class ReadmeLocalizationTests
 
     private const string FullCiTestCommand =
         "run: dotnet test --solution VHSDecodeDotNet.slnx --configuration Release " +
-        "--no-build --no-restore --minimum-expected-tests 1592";
+        "--no-build --no-restore --minimum-expected-tests 1602";
 
     private const string FinalRealRadix4AvxTestCommand =
         "run: dotnet test tests/VHSDecode.Tests/VHSDecode.Tests.csproj " +
@@ -285,7 +285,7 @@ public sealed partial class ReadmeLocalizationTests
         [
             "43155200da87c0d49eb37d8ec09b1372075ee8e4",
             PinnedDotNetSdkVersion,
-            "**1,592**",
+            "**1,602**",
             "--compat-version",
             "current",
             "--dsp-backend",
@@ -295,7 +295,7 @@ public sealed partial class ReadmeLocalizationTests
             "IPP-fast + v0.4.0",
             "IPP-fast + current",
             "--start 100",
-            "v0.4.0-2.5.0",
+            "v0.4.0-2.6.0",
             "52.811 s",
             "54.243 s",
             "13.977 s",
@@ -342,7 +342,7 @@ public sealed partial class ReadmeLocalizationTests
         string[] synchronizedFacts =
         [
             "43155200da87c0d49eb37d8ec09b1372075ee8e4",
-            "v0.4.0-2.5.0",
+            "v0.4.0-2.6.0",
             "2f21e8ed6018b14561396cc95f1f6828054470b8",
             "v0.4.0-40-g2f21e8ed",
             PinnedDotNetSdkVersion,
@@ -716,7 +716,7 @@ public sealed partial class ReadmeLocalizationTests
             "1.72%",
             "444.3 MiB",
             "406.0 MiB",
-            "**1,592**",
+            "**1,602**",
             "3.7935",
             "3.6182",
             "4.62%",
@@ -1492,7 +1492,7 @@ public sealed partial class ReadmeLocalizationTests
             "The shared compatibility evidence document is missing.");
         string compatibilityEvidence = File.ReadAllText(compatibilityEvidencePath);
         Assert.Contains(
-            "1,592 independently discoverable tests",
+            "1,602 independently discoverable tests",
             compatibilityEvidence,
             StringComparison.Ordinal);
         Assert.DoesNotContain(
@@ -1651,6 +1651,18 @@ public sealed partial class ReadmeLocalizationTests
             "--minimum-expected-tests 1376",
             workflow,
             StringComparison.Ordinal);
+        string linuxBuildScript = File.ReadAllText(Path.Combine(
+            RepositoryRoot(),
+            "tools",
+            "build-linux-x64-release.ps1"));
+        string linuxReadme = File.ReadAllText(Path.Combine(
+            RepositoryRoot(),
+            "docs",
+            "LINUX_X64.md"));
+        Assert.Contains("$minimumLinuxTestCount = 1561", linuxBuildScript, StringComparison.Ordinal);
+        Assert.Contains("at least 1,561 xUnit v3 cases", linuxReadme, StringComparison.Ordinal);
+        Assert.DoesNotContain("$minimumLinuxTestCount = 1551", linuxBuildScript, StringComparison.Ordinal);
+        Assert.DoesNotContain("at least 1,551 xUnit v3 cases", linuxReadme, StringComparison.Ordinal);
         foreach (string filename in DetailedReadmeFiles)
         {
             Assert.True(
