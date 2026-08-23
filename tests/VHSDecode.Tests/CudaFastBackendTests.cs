@@ -307,6 +307,33 @@ public sealed class CudaFastBackendTests
         Assert.True(directOutput >= 0 && regularDownload > directOutput);
     }
 
+    [Fact(DisplayName = "CUDA preview uses the PAL profile luma filter without changing full decode")]
+    public void NativePreviewUsesPalProfileLumaFilterOnly()
+    {
+        string cmake = ReadNativeBuildDefinition();
+        string normalizedCmake = cmake.Replace("\r\n", "\n", StringComparison.Ordinal);
+
+        Assert.Contains("bool preview_profile_filter = false", cmake, StringComparison.Ordinal);
+        Assert.Contains(
+            "const bool use_preview_pal_butterworth = preview_profile_filter\n"
+                + "        && fmt.profile == VideoProfile::PAL_625_50_VHS;",
+            normalizedCmake,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "butter_digital_lowpass_zpk_cpp(video_lpf_order, video_lpf_freq, fs)",
+            cmake,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            ": supergauss_mag(f_hz, video_lpf_freq, video_lpf_order);",
+            cmake,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "(int)spf_padded,\n"
+                + "            writer.accepts_device_fields());",
+            normalizedCmake,
+            StringComparison.Ordinal);
+    }
+
     [Fact(DisplayName = "CUDA preview uses fast container seeking without changing full decode")]
     public void PreviewInputLoaderUsesFastContainerSeekingOnlyWhenRequested()
     {
