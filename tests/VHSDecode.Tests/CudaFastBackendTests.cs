@@ -307,43 +307,87 @@ public sealed class CudaFastBackendTests
         Assert.True(directOutput >= 0 && regularDownload > directOutput);
     }
 
-    [Fact(DisplayName = "CUDA preview uses the PAL profile luma filter without changing full decode")]
-    public void NativePreviewUsesPalProfileLumaFilterOnly()
+    [Fact(DisplayName = "CUDA PAL full and preview decode use the profile Butterworth luma filter")]
+    public void NativePalDecodeUsesProfileButterworthForFullAndPreview()
     {
         string cmake = ReadNativeBuildDefinition();
         string normalizedCmake = cmake.Replace("\r\n", "\n", StringComparison.Ordinal);
 
-        Assert.Contains("bool preview_profile_filter = false", cmake, StringComparison.Ordinal);
+        Assert.DoesNotContain("preview_profile_filter", cmake, StringComparison.Ordinal);
         Assert.Contains(
-            "const bool use_preview_pal_butterworth = preview_profile_filter\n"
-                + "        && fmt.profile == VideoProfile::PAL_625_50_VHS;",
+            "#include \"fm_video_lpf_response.h\"",
+            cmake,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "double video_lpf_freq   = 3400000.0;",
             normalizedCmake,
             StringComparison.Ordinal);
         Assert.Contains(
-            "butter_digital_lowpass_zpk_cpp(video_lpf_order, video_lpf_freq, fs)",
+            "int    video_lpf_order  = 6;",
             cmake,
             StringComparison.Ordinal);
         Assert.Contains(
-            ": supergauss_mag(f_hz, video_lpf_freq, video_lpf_order);",
+            "vhsdecode_cuda_fast::build_fm_video_lpf_half_spectrum(",
             cmake,
             StringComparison.Ordinal);
         Assert.Contains(
+            "vhsdecode_cuda_fast::fm_video_lpf_shape(fmt.profile)",
+            normalizedCmake,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "vhsdecode_cuda_fast::FmVideoLpfShape::Butterworth",
+            cmake,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "double vlpf = video_lpf_response[static_cast<std::size_t>(k)];",
+            normalizedCmake,
+            StringComparison.Ordinal);
+        Assert.DoesNotContain(
             "(int)spf_padded,\n"
                 + "            writer.accepts_device_fields());",
             normalizedCmake,
             StringComparison.Ordinal);
     }
 
-    [Fact(DisplayName = "CUDA preview uses fast container seeking without changing full decode")]
+    [Fact(DisplayName = "CUDA NTSC full and preview decode retain the Super-Gaussian luma filter")]
+    public void NativeNtscDecodeRetainsSuperGaussianLumaFilter()
+    {
+        string cmake = ReadNativeBuildDefinition();
+        string normalizedCmake = cmake.Replace("\r\n", "\n", StringComparison.Ordinal);
+
+        Assert.Contains(
+            "vhsdecode_cuda_fast::fm_video_lpf_shape(fmt.profile)",
+            normalizedCmake,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "double vlpf = video_lpf_response[static_cast<std::size_t>(k)];",
+            normalizedCmake,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "NAME cuda_fast_fm_video_lpf_response",
+            normalizedCmake,
+            StringComparison.Ordinal);
+        Assert.DoesNotContain("NTSC luma LPF", cmake, StringComparison.Ordinal);
+    }
+
+    [Fact(DisplayName = "CUDA full preserves exact fallback while preview keeps fast seeking")]
     public void PreviewInputLoaderUsesFastContainerSeekingOnlyWhenRequested()
     {
         using var full = Assert.IsType<CudaFastDecodeRunner.FfmpegPcm16InputAdapter>(
-            CudaFastDecodeRunner.CreateInputLoader("capture.ldf"));
+            CudaFastDecodeRunner.CreateInputLoaderCore(
+                "capture.ldf",
+                fastContainerSeeking: false,
+                FfmpegPcm16SampleLoader.DefaultRewindSize,
+                disableMappedIndexedFlac: null));
         using var preview = Assert.IsType<CudaFastDecodeRunner.FfmpegPcm16InputAdapter>(
             CudaFastPreviewDecodeSession.CreatePreviewInputLoader("capture.ldf"));
 
         Assert.False(full.FastInputSeek);
         Assert.True(preview.FastInputSeek);
+        Assert.Equal(FfmpegPcm16SeekMode.Exact, full.SeekMode);
+        Assert.Equal(FfmpegPcm16SeekMode.FastInput, preview.SeekMode);
+        Assert.False(full.UsesRestartSampleMapping);
+        Assert.False(preview.UsesRestartSampleMapping);
         Assert.Equal(FfmpegPcm16SampleLoader.DefaultRewindSize, full.RewindSize);
         Assert.Equal(CudaFastPreviewDecodeSession.FastContainerRewindSize, preview.RewindSize);
         Assert.Throws<ArgumentOutOfRangeException>(() =>
@@ -351,6 +395,52 @@ public sealed class CudaFastBackendTests
                 "capture.ldf",
                 fastContainerSeeking: true,
                 fastContainerRewindSize: 0));
+    }
+
+    [Theory(DisplayName = "CUDA mapped-indexed FLAC falls back to the legacy loader when no index exists")]
+    [InlineData(null)]
+    [InlineData("")]
+    [InlineData("0")]
+    [InlineData("1")]
+    public void FullMappedIndexedFlacFallsBackWhenIndexIsUnavailable(
+        string? disableMappedIndexedFlac)
+    {
+        using var loader = Assert.IsType<CudaFastDecodeRunner.FfmpegPcm16InputAdapter>(
+            CudaFastDecodeRunner.CreateInputLoaderCore(
+                "capture.flac",
+                fastContainerSeeking: false,
+                FfmpegPcm16SampleLoader.DefaultRewindSize,
+                disableMappedIndexedFlac));
+
+        Assert.Equal(FfmpegPcm16SeekMode.Exact, loader.SeekMode);
+        Assert.False(loader.FastInputSeek);
+        Assert.False(loader.UsesRestartSampleMapping);
+    }
+
+    [Fact(DisplayName = "CUDA full mapped-indexed FLAC routing does not change other inputs or preview")]
+    public void FullMappedIndexedFlacRoutingDoesNotChangeOtherInputsOrPreview()
+    {
+        using var wave = Assert.IsType<CudaFastDecodeRunner.FfmpegPcm16InputAdapter>(
+            CudaFastDecodeRunner.CreateInputLoaderCore(
+                "capture.wav",
+                fastContainerSeeking: false,
+                FfmpegPcm16SampleLoader.DefaultRewindSize,
+                disableMappedIndexedFlac: null));
+        using var preview = Assert.IsType<CudaFastDecodeRunner.FfmpegPcm16InputAdapter>(
+            CudaFastDecodeRunner.CreateInputLoaderCore(
+                "capture.flac",
+                fastContainerSeeking: true,
+                CudaFastPreviewDecodeSession.FastContainerRewindSize,
+                disableMappedIndexedFlac: "1"));
+        IRfSampleLoader raw = CudaFastDecodeRunner.CreateInputLoaderCore(
+            "capture.s16",
+            fastContainerSeeking: false,
+            FfmpegPcm16SampleLoader.DefaultRewindSize,
+            disableMappedIndexedFlac: null);
+
+        Assert.Equal(FfmpegPcm16SeekMode.Exact, wave.SeekMode);
+        Assert.Equal(FfmpegPcm16SeekMode.FastInput, preview.SeekMode);
+        Assert.IsType<DirectInt16SampleLoader>(raw);
     }
 
     [Fact(DisplayName = "CUDA-fast reuses and releases its persistent chroma workspace")]

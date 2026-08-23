@@ -9,6 +9,13 @@ using System.Threading.Channels;
 
 namespace VHSDecode.Core.Rf;
 
+internal enum FfmpegPcm16SeekMode
+{
+    Exact,
+    FastInput,
+    MappedIndexedRawFlac
+}
+
 public sealed class FfmpegPcm16SampleLoader : IRfSampleLoader, IDisposable
 {
     public const int ContainerAudioSampleRateHz = 40_000;
@@ -20,7 +27,9 @@ public sealed class FfmpegPcm16SampleLoader : IRfSampleLoader, IDisposable
     private readonly Func<string, long, Stream>? _openOutput;
     private readonly Func<int?>? _exitCodeAfterOutputEnd;
     private readonly Func<string>? _stderrProvider;
-    private readonly bool _fastInputSeek;
+    private readonly FfmpegPcm16SeekMode _seekMode;
+    private readonly RawFlacFrameIndex? _indexedRawFlacFrameIndex;
+    private readonly PyAvRawFlacSampleMapper? _restartSampleMapper;
     private readonly FfmpegDiagnosticTailBuffer _stderr = new();
     private CancellationTokenSource? _rawFlacPumpCancellation;
     private Task? _rawFlacPumpTask;
@@ -52,11 +61,62 @@ public sealed class FfmpegPcm16SampleLoader : IRfSampleLoader, IDisposable
 
         _filename = filename;
         _openOutput = OpenFfmpegOutput;
-        _fastInputSeek = fastInputSeek;
+        _seekMode = fastInputSeek
+            ? FfmpegPcm16SeekMode.FastInput
+            : FfmpegPcm16SeekMode.Exact;
         RewindSize = rewindSize > 0
             ? rewindSize
             : throw new ArgumentOutOfRangeException(nameof(rewindSize));
         SeekThreshold = DefaultSeekThreshold;
+    }
+
+    internal FfmpegPcm16SampleLoader(
+        string filename,
+        RawFlacFrameIndex frameIndex,
+        PyAvRawFlacSampleMapper restartSampleMapper,
+        int rewindSize = DefaultRewindSize)
+    {
+        if (string.IsNullOrWhiteSpace(filename))
+        {
+            throw new ArgumentException("Input filename must not be empty.", nameof(filename));
+        }
+
+        _filename = filename;
+        _openOutput = OpenFfmpegOutput;
+        _seekMode = FfmpegPcm16SeekMode.MappedIndexedRawFlac;
+        _indexedRawFlacFrameIndex = frameIndex
+            ?? throw new ArgumentNullException(nameof(frameIndex));
+        _restartSampleMapper = restartSampleMapper
+            ?? throw new ArgumentNullException(nameof(restartSampleMapper));
+        RewindSize = rewindSize > 0
+            ? rewindSize
+            : throw new ArgumentOutOfRangeException(nameof(rewindSize));
+        SeekThreshold = DefaultSeekThreshold;
+    }
+
+    internal FfmpegPcm16SampleLoader(
+        string filename,
+        PyAvRawFlacSampleMapper restartSampleMapper,
+        Func<string, long, Stream> openOutput,
+        int rewindSize,
+        int seekThreshold)
+    {
+        if (string.IsNullOrWhiteSpace(filename))
+        {
+            throw new ArgumentException("Input filename must not be empty.", nameof(filename));
+        }
+
+        _filename = filename;
+        _openOutput = openOutput ?? throw new ArgumentNullException(nameof(openOutput));
+        _seekMode = FfmpegPcm16SeekMode.MappedIndexedRawFlac;
+        _restartSampleMapper = restartSampleMapper
+            ?? throw new ArgumentNullException(nameof(restartSampleMapper));
+        RewindSize = rewindSize > 0
+            ? rewindSize
+            : throw new ArgumentOutOfRangeException(nameof(rewindSize));
+        SeekThreshold = seekThreshold > 0
+            ? seekThreshold
+            : throw new ArgumentOutOfRangeException(nameof(seekThreshold));
     }
 
     public FfmpegPcm16SampleLoader(string filename, Func<string, long, int, byte[]?> readSegment)
@@ -102,7 +162,23 @@ public sealed class FfmpegPcm16SampleLoader : IRfSampleLoader, IDisposable
 
     public int SeekThreshold { get; }
 
-    internal bool FastInputSeek => _fastInputSeek;
+    internal bool FastInputSeek => _seekMode == FfmpegPcm16SeekMode.FastInput;
+
+    internal FfmpegPcm16SeekMode SeekMode => _seekMode;
+
+    internal bool UsesRestartSampleMapping => _restartSampleMapper is not null;
+
+    internal bool TryResolveInputSample(long logicalSample, out long inputSample)
+    {
+        inputSample = logicalSample;
+        if (logicalSample < 0)
+        {
+            return false;
+        }
+
+        return _restartSampleMapper?.TryMapRestartSample(logicalSample, out inputSample)
+            ?? true;
+    }
 
     public double[]? Read(Stream stream, long sample, int readLength)
     {
@@ -400,7 +476,13 @@ public sealed class FfmpegPcm16SampleLoader : IRfSampleLoader, IDisposable
         CloseProcess();
         Func<string, long, Stream> openOutput =
             _openOutput ?? throw new InvalidOperationException("Streaming ffmpeg output is not configured.");
-        _output = openOutput(_filename, sample);
+        if (!TryResolveInputSample(sample, out long inputSample))
+        {
+            throw new InvalidOperationException(
+                $"Could not map PyAV RF sample {sample} to a physical FLAC position.");
+        }
+
+        _output = openOutput(_filename, inputSample);
         _positionBytes = checked(sample * 2);
         _rewindStart = 0;
         _rewindCount = 0;
@@ -409,8 +491,22 @@ public sealed class FfmpegPcm16SampleLoader : IRfSampleLoader, IDisposable
     private Stream OpenFfmpegOutput(string filename, long sample)
     {
         _stderr.Clear();
-        if (_fastInputSeek)
+        if (_indexedRawFlacFrameIndex is not null)
         {
+            return OpenIndexedRawFlacOutput(
+                filename,
+                sample,
+                _indexedRawFlacFrameIndex);
+        }
+
+        if (_seekMode == FfmpegPcm16SeekMode.FastInput)
+        {
+            if (RawFlacFrameIndex.TryOpen(filename, out RawFlacFrameIndex? frameIndex)
+                && frameIndex is not null)
+            {
+                return OpenIndexedRawFlacOutput(filename, sample, frameIndex);
+            }
+
             return OpenFastFfmpegOutput(filename, sample);
         }
 
@@ -492,12 +588,6 @@ public sealed class FfmpegPcm16SampleLoader : IRfSampleLoader, IDisposable
 
     private Stream OpenFastFfmpegOutput(string filename, long sample)
     {
-        if (RawFlacFrameIndex.TryOpen(filename, out RawFlacFrameIndex? frameIndex)
-            && frameIndex is not null)
-        {
-            return OpenIndexedRawFlacOutput(filename, sample, frameIndex);
-        }
-
         var startInfo = new ProcessStartInfo("ffmpeg")
         {
             UseShellExecute = false,
@@ -922,13 +1012,19 @@ public sealed class FfmpegPcm16SampleLoader : IRfSampleLoader, IDisposable
 
     private void ThrowIfProcessFailed()
     {
+        _rawFlacPumpTask?.GetAwaiter().GetResult();
         int? exitCode = ProcessExitCodeAfterOutputEnd();
-        if (exitCode is not null and not 0)
+        if (HasStreamingFailure(exitCode, _rawFlacPumpException))
         {
             string detail = ErrorOutput();
             throw new InvalidOperationException($"FFmpeg failed while streaming '{_filename}': {detail}");
         }
     }
+
+    internal static bool HasStreamingFailure(
+        int? exitCode,
+        Exception? rawFlacPumpException)
+        => rawFlacPumpException is not null || exitCode is not null and not 0;
 
     private int? ProcessExitCodeAfterOutputEnd()
     {

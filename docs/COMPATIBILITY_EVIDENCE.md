@@ -2229,7 +2229,7 @@ dotnet test --solution VHSDecodeDotNet.slnx --no-build
 ```
 
 The current formal solution build completes with zero warnings and errors, and
-the xUnit v3 project exposes 1,592 independently discoverable tests
+the xUnit v3 project exposes 1,602 independently discoverable tests
 to `dotnet test` and Visual Studio Test Explorer. On the
 same Windows machine and fixtures, Release wall-clock measurements for one
 frame were 2.346 s versus 7.193 s for NTSC VHS and 1.651 s versus 5.865 s for
@@ -3325,6 +3325,72 @@ color, and motion and no longer showed the earlier severe diagonal/rainbow
 phase failure. A bypass of refined K4 horizontal sync reduced luma SSIM from
 0.949393 to 0.942450 and was rejected. Sync/TBC and pixel differences remain,
 so this is a viewing-quality gate, not Exact or IPP compatibility evidence.
+
+#### 2026-08-24 CUDA-full PAL quality and indexed-FLAC optimization
+
+The PAL VHS CUDA full-decode and preview profiles now use the profile-correct
+3.4 MHz sixth-order Butterworth post-demodulation luma low-pass response. NTSC
+and MPAL retain the preceding Super-Gaussian response. On the same private PAL
+40 MHz `.ldf`, `--start_fileloc 320000000 --length 80` gate above, the 79 aligned
+lossless exports with default dropout correction improved Exact-relative luma
+SSIM from 0.954905 to 0.970622 and all-plane SSIM from 0.972301 to 0.980161;
+average PSNR rose from 35.699053 to 35.894470 dB. Per-frame luma SSIM improved
+for 76 of 79 pairs with a median increase of 0.017761. With export dropout
+correction disabled, all-plane SSIM improved from 0.969222 to 0.977330, although
+average PSNR fell by 0.0579 dB. This remains a viewing-quality comparison rather
+than Exact numerical compatibility. The production response builder is shared
+with a native numerical test that checks finite coefficients, unit DC response,
+and the PAL 3.4 MHz -3 dB point at both 20 and 40 MSPS.
+
+Eligible CUDA full decodes of raw `.ldf`/`.flac` input now retain Python/PyAV
+logical sample coordinates while using the existing physical FLAC frame index.
+Every true stream restart maps the requested logical sample to the corresponding
+physical sample before starting the indexed FFmpeg PCM16 reader; in-window
+rewinds and sequential reads preserve the logical cursor. The route is enabled
+only when the raw-FLAC stream layout supports that mapping and a valid frame
+index opens. Otherwise it falls back to the preceding exact container stream.
+Exact, IPP-fast, WAV/other inputs, short or variable-block raw FLAC, and the
+preview path keep their existing readers. A hidden
+`VHSDECODE_CUDA_FAST_DISABLE_MAPPED_INDEXED_FLAC=1` switch exists only as an
+A/B rollback and diagnostic aid.
+
+A frozen-build A-B-B-A used the same final managed files, native DLL, input,
+`--start_fileloc 320000000 --length 500`, and output options. Legacy runs took
+14.079393 and 14.236030 seconds; mapped-indexed runs took 10.941080 and
+10.812677 seconds. The medians, 14.157712 versus 10.876878 seconds, establish
+23.173% less wall time and 30.163% more throughput. `decode.exe` parent CPU time
+fell from a 29.085938-second median to 10.195312 seconds; that CPU measurement
+does not include the FFmpeg child process. Median peak working set increased by
+7.219 MiB. All four runs emitted the same 1,000 fields, `fileLoc` sequence,
+luma/chroma/raw-JSON SHA-256 values, and normalized diagnostics. The shared
+output hashes are
+`2EFEBBB68726C1844D34791174395B8ABD339CC4369812C945A64FD329CB453C`,
+`03721E419200E2A42CDBF185C6834145AF079166519FA6EEC639AFA40CF1EE29`, and
+`A7223C818C518445DC622E02440FF8072C86FE1B72F6F7BEF596545022234C83`.
+
+A separate restart-heavy PCM16 trace covered 25 initial, sequential, rewind,
+40 MiB threshold, 320M/640M far-seek, and randomized operations. All 1,114,140
+requested samples and all 25 expected spawn/reuse/restart transitions matched
+the legacy reader; the 40 tracked FFmpeg processes left no residual process.
+The trace's 103.24x timing is intentionally not treated as an end-to-end decoder
+speed result. Direct physical indexed seeking was rejected despite a larger
+speedup because it changed Python logical time coordinates. A mapped-libsndfile
+variant remained byte-identical but increased wall time by 4.154%; predictive
+prefetch and persistent-workspace experiments also failed their performance
+gates and were removed.
+
+Managed regression tests additionally drive the non-identity
+500,000,000-to-483,632,384 mapping through initial, sequential, rewind,
+seek-threshold, and far-restart reads. A real indexed FFmpeg pump test removes
+the source after its frame location is cached and verifies that the resulting
+input failure propagates through output EOF instead of being hidden by a
+successful or independent FFmpeg exit.
+
+The final native Release build passed all 6 CTests on the local RTX 4070,
+including the numerical response test and synthetic NTSC integration test. The
+final managed Release build passed 1,600 of 1,602 tests with zero failures; the
+two skips are the expected PAL/NTSC AMF encoder cases on a machine without the
+AMD AMF runtime.
 
 The native integration test feeds one 48-field synthetic NTSC source through
 40 MSPS FP32 once and PCM16 twice, then through the new PCM16 40-to-20 MSPS

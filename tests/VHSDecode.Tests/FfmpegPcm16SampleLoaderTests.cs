@@ -25,6 +25,52 @@ public sealed class FfmpegPcm16SampleLoaderTests
         Assert.Equal("2", fast[fast.IndexOf("-ss") + 1]);
     }
 
+    [Fact(DisplayName = "FFmpeg PCM16 treats raw FLAC pump failures as fatal even after exit zero")]
+    public void RawFlacPumpFailureIsFatalAfterSuccessfulProcessExit()
+    {
+        Assert.False(FfmpegPcm16SampleLoader.HasStreamingFailure(null, null));
+        Assert.False(FfmpegPcm16SampleLoader.HasStreamingFailure(0, null));
+        Assert.True(FfmpegPcm16SampleLoader.HasStreamingFailure(1, null));
+        Assert.True(FfmpegPcm16SampleLoader.HasStreamingFailure(
+            0,
+            new IOException("simulated indexed input failure")));
+    }
+
+    [Fact(DisplayName = "Mapped indexed PCM16 maps restarts while preserving reuse and rewind")]
+    public void MappedIndexedReadsMapRestartsAndPreserveLogicalReuse()
+    {
+        const long FirstLogicalSample = 500_000_000;
+        const long FirstPhysicalSample = 483_632_384;
+        const long RestartLogicalSample = FirstLogicalSample + 27;
+        const long RestartPhysicalSample = FirstPhysicalSample + 27;
+        const long FarLogicalSample = 1_500_000_000;
+        const long FarPhysicalSample = 1_442_713_344;
+        var opens = new List<long>();
+        using var loader = new FfmpegPcm16SampleLoader(
+            "capture.ldf",
+            new PyAvRawFlacSampleMapper(
+                FfmpegPcm16SampleLoader.ContainerAudioSampleRateHz,
+                blockSize: 2_048),
+            (_, startSample) =>
+            {
+                opens.Add(startSample);
+                return new PatternPcmStream(startSample, 4_000_000_000 - startSample);
+            },
+            rewindSize: 16,
+            seekThreshold: 16);
+
+        AssertPattern(loader, FirstLogicalSample, FirstPhysicalSample, 4);
+        AssertPattern(loader, FirstLogicalSample + 4, FirstPhysicalSample + 4, 4);
+        AssertPattern(loader, FirstLogicalSample + 2, FirstPhysicalSample + 2, 3);
+        AssertPattern(loader, FirstLogicalSample + 16, FirstPhysicalSample + 16, 2);
+        AssertPattern(loader, RestartLogicalSample, RestartPhysicalSample, 2);
+        AssertPattern(loader, FarLogicalSample, FarPhysicalSample, 2);
+
+        Assert.Equal(
+            [FirstPhysicalSample, RestartPhysicalSample, FarPhysicalSample],
+            opens);
+    }
+
     [Fact(DisplayName = "FFmpeg PCM16 rewind remains exact across circular wrap and restart")]
     public void RewindRemainsExactAcrossCircularWrapAndRestart()
     {
@@ -167,6 +213,21 @@ public sealed class FfmpegPcm16SampleLoaderTests
         return hash * 1099511628211UL;
     }
 
+    private static void AssertPattern(
+        FfmpegPcm16SampleLoader loader,
+        long logicalSample,
+        long physicalSample,
+        int sampleCount)
+    {
+        double[] expected = Enumerable.Range(0, sampleCount)
+            .Select(offset => (double)PatternValue(physicalSample + offset))
+            .ToArray();
+        Assert.Equal(expected, loader.Read(Stream.Null, logicalSample, sampleCount));
+    }
+
+    private static short PatternValue(long sample)
+        => unchecked((short)((sample * 73) + 19));
+
     private static byte[] BuildPcm16Bytes(IEnumerable<short> samples)
     {
         short[] values = samples.ToArray();
@@ -279,7 +340,6 @@ public sealed class FfmpegPcm16SampleLoaderTests
 
         public override void Write(byte[] buffer, int offset, int count) => throw new NotSupportedException();
 
-        private static short SampleValue(long sample)
-            => unchecked((short)((sample * 73) + 19));
+        private static short SampleValue(long sample) => PatternValue(sample);
     }
 }

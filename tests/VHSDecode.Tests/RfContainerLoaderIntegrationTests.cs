@@ -5,6 +5,7 @@ using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using System.Text.RegularExpressions;
+using VHSDecode.Core.Dsp.CudaFast;
 using VHSDecode.Core.Rf;
 using Xunit;
 
@@ -74,8 +75,8 @@ public sealed class RfContainerLoaderIntegrationTests
         new(1_199_980, 30, "347903A86072AB2FE31C061E2AFBD0F94C334C81E8E807EEF81E75E39D82DC08")
     ];
 
-    [Fact(DisplayName = "Preview indexed raw FLAC seek starts at the target frame")]
-    public void PreviewIndexedRawFlacSeekStartsAtTargetFrame()
+    [Fact(DisplayName = "CUDA full maps PyAV coordinates before indexed raw FLAC reads")]
+    public void CudaFullMapsPyAvCoordinatesBeforeIndexedRawFlacReads()
     {
         Assert.SkipUnless(
             CommandIsAvailable("ffmpeg"),
@@ -87,6 +88,7 @@ public sealed class RfContainerLoaderIntegrationTests
             short[] samples = CreateSamples();
             string wavePath = Path.Combine(directory, "indexed source.wav");
             string flacPath = Path.Combine(directory, "indexed source.flac");
+            string mappedFlacPath = Path.Combine(directory, "mapped indexed source.ldf");
             WriteWave(wavePath, samples);
             EncodeFlac(
                 wavePath,
@@ -100,11 +102,123 @@ public sealed class RfContainerLoaderIntegrationTests
             Assert.InRange(1_100_000 - frame.StartSample, 0, frame.BlockSize - 1);
 
             using var loader = new FfmpegPcm16SampleLoader(flacPath, fastInputSeek: true);
-            using FileStream input = File.OpenRead(flacPath);
-            double[] actual = Assert.IsType<double[]>(loader.Read(input, 1_100_000, 31));
+            using (FileStream previewInput = File.OpenRead(flacPath))
+            {
+                double[] actual = Assert.IsType<double[]>(
+                    loader.Read(previewInput, 1_100_000, 31));
+                Assert.Equal(
+                    samples.AsSpan(1_100_000, 31).ToArray().Select(static value => (double)value),
+                    actual);
+            }
+
+            using IDisposable legacyShortRoute = (IDisposable)
+                CudaFastDecodeRunner.CreateInputLoaderCore(
+                    flacPath,
+                    fastContainerSeeking: false,
+                    FfmpegPcm16SampleLoader.DefaultRewindSize,
+                    disableMappedIndexedFlac: null);
+            Assert.IsType<LibsndfilePcm16SampleLoader>(legacyShortRoute);
+
+            File.Copy(flacPath, mappedFlacPath);
+            const long ReportedSamples = (long)int.MaxValue + 1_200_000L;
+            SetRawFlacTotalSamples(mappedFlacPath, ReportedSamples);
+            Assert.True(RawFlacStreamInfo.TryRead(
+                mappedFlacPath,
+                out RawFlacStreamInfo mappedInfo));
+            Assert.True(mappedInfo.SupportsPyAvMappedLibsndfileSeeking);
+
+            using var full = Assert.IsType<CudaFastDecodeRunner.FfmpegPcm16InputAdapter>(
+                CudaFastDecodeRunner.CreateInputLoaderCore(
+                    mappedFlacPath,
+                    fastContainerSeeking: false,
+                    FfmpegPcm16SampleLoader.DefaultRewindSize,
+                    disableMappedIndexedFlac: null));
+            Assert.Equal(FfmpegPcm16SeekMode.MappedIndexedRawFlac, full.SeekMode);
+            Assert.True(full.UsesRestartSampleMapping);
+            Assert.True(full.TryResolveInputSample(
+                500_000_000,
+                out long mappedPhysicalSample));
+            Assert.Equal(483_632_384, mappedPhysicalSample);
+
+            using FileStream input = File.OpenRead(mappedFlacPath);
+            var fullSamples = new short[31];
+            Assert.True(full.TryReadInt16(
+                input,
+                1_100_000,
+                fullSamples,
+                out int fullSamplesRead));
+            Assert.Equal(fullSamples.Length, fullSamplesRead);
             Assert.Equal(
-                samples.AsSpan(1_100_000, 31).ToArray().Select(static value => (double)value),
-                actual);
+                samples.AsSpan(1_100_000, fullSamples.Length).ToArray(),
+                fullSamples);
+
+            var logicalTail = new short[1];
+            Assert.True(full.TryReadInt16(
+                input,
+                ReportedSamples - 1,
+                logicalTail,
+                out int logicalTailRead));
+            Assert.Equal(0, logicalTailRead);
+
+            using var disabled = Assert.IsType<CudaFastDecodeRunner.FfmpegPcm16InputAdapter>(
+                CudaFastDecodeRunner.CreateInputLoaderCore(
+                    mappedFlacPath,
+                    fastContainerSeeking: false,
+                    FfmpegPcm16SampleLoader.DefaultRewindSize,
+                    disableMappedIndexedFlac: "1"));
+            Assert.Equal(FfmpegPcm16SeekMode.Exact, disabled.SeekMode);
+            Assert.False(disabled.UsesRestartSampleMapping);
+        }
+        finally
+        {
+            Directory.Delete(directory, recursive: true);
+        }
+    }
+
+    [Fact(DisplayName = "Indexed raw FLAC input pump failures propagate through EOF and cleanup")]
+    public void IndexedRawFlacPumpFailuresPropagateThroughEof()
+    {
+        Assert.SkipUnless(
+            CommandIsAvailable("ffmpeg"),
+            "ffmpeg must be available on PATH.");
+
+        string directory = CreateTestDirectory();
+        try
+        {
+            short[] samples = Enumerable.Range(0, 8_192)
+                .Select(index => unchecked((short)((index * 73) + 19)))
+                .ToArray();
+            string wavePath = Path.Combine(directory, "pump source.wav");
+            string flacPath = Path.Combine(directory, "deleted pump source.flac");
+            WriteWave(wavePath, samples);
+            EncodeFlac(
+                wavePath,
+                flacPath,
+                oggContainer: false,
+                frameSize: 2_048);
+
+            Assert.True(RawFlacFrameIndex.TryOpen(
+                flacPath,
+                out RawFlacFrameIndex? frameIndex));
+            Assert.NotNull(frameIndex);
+            Assert.True(RawFlacStreamInfo.TryRead(
+                flacPath,
+                out RawFlacStreamInfo streamInfo));
+            int blockSize = Assert.IsType<int>(streamInfo.FixedBlockSize);
+            Assert.Equal(0, frameIndex.LocateFrameAtOrBefore(0).StartSample);
+            using var loader = new FfmpegPcm16SampleLoader(
+                flacPath,
+                frameIndex,
+                new PyAvRawFlacSampleMapper(streamInfo.SampleRateHz, blockSize));
+
+            File.Delete(flacPath);
+            InvalidOperationException exception = Assert.Throws<InvalidOperationException>(
+                () => loader.Read(Stream.Null, 0, 1));
+
+            Assert.Contains(
+                "raw FLAC input pump failed",
+                exception.Message,
+                StringComparison.Ordinal);
         }
         finally
         {
@@ -983,6 +1097,30 @@ public sealed class RfContainerLoaderIntegrationTests
         output.Write((byte)value);
         output.Write((byte)(value >> 8));
         output.Write((byte)(value >> 16));
+    }
+
+    private static void SetRawFlacTotalSamples(string path, long totalSamples)
+    {
+        const ulong totalSamplesMask = 0x0000000FFFFFFFFFUL;
+        ArgumentOutOfRangeException.ThrowIfNegativeOrZero(totalSamples);
+        if ((ulong)totalSamples > totalSamplesMask)
+        {
+            throw new ArgumentOutOfRangeException(nameof(totalSamples));
+        }
+
+        using var stream = new FileStream(
+            path,
+            FileMode.Open,
+            FileAccess.ReadWrite,
+            FileShare.Read);
+        Span<byte> packedBytes = stackalloc byte[sizeof(ulong)];
+        stream.Position = 18;
+        stream.ReadExactly(packedBytes);
+        ulong packed = BinaryPrimitives.ReadUInt64BigEndian(packedBytes);
+        packed = (packed & ~totalSamplesMask) | (ulong)totalSamples;
+        BinaryPrimitives.WriteUInt64BigEndian(packedBytes, packed);
+        stream.Position = 18;
+        stream.Write(packedBytes);
     }
 
     private static void EncodeFlac(
