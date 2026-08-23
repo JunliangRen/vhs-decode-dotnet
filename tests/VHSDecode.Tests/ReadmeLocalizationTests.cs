@@ -1651,6 +1651,18 @@ public sealed partial class ReadmeLocalizationTests
             "--minimum-expected-tests 1376",
             workflow,
             StringComparison.Ordinal);
+        string linuxBuildScript = File.ReadAllText(Path.Combine(
+            RepositoryRoot(),
+            "tools",
+            "build-linux-x64-release.ps1"));
+        string linuxReadme = File.ReadAllText(Path.Combine(
+            RepositoryRoot(),
+            "docs",
+            "LINUX_X64.md"));
+        Assert.Contains("$minimumLinuxTestCount = 1561", linuxBuildScript, StringComparison.Ordinal);
+        Assert.Contains("at least 1,561 xUnit v3 cases", linuxReadme, StringComparison.Ordinal);
+        Assert.DoesNotContain("$minimumLinuxTestCount = 1551", linuxBuildScript, StringComparison.Ordinal);
+        Assert.DoesNotContain("at least 1,551 xUnit v3 cases", linuxReadme, StringComparison.Ordinal);
         foreach (string filename in DetailedReadmeFiles)
         {
             Assert.True(

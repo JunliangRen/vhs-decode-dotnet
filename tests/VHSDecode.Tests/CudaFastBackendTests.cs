@@ -354,6 +354,8 @@ public sealed class CudaFastBackendTests
     {
         string cmake = ReadNativeBuildDefinition();
         string normalizedCmake = cmake.Replace("\r\n", "\n", StringComparison.Ordinal);
+        string nativeBuildScript = File.ReadAllText(
+            Path.Combine(RepositoryRoot(), "tools", "build-cuda-fast-native.ps1"));
 
         Assert.Contains(
             "vhsdecode_cuda_fast::fm_video_lpf_shape(fmt.profile)",
@@ -367,6 +369,25 @@ public sealed class CudaFastBackendTests
             "NAME cuda_fast_fm_video_lpf_response",
             normalizedCmake,
             StringComparison.Ordinal);
+        Assert.Contains(
+            "$fmVideoLpfResponseTestName = 'vhsdecode_cuda_fast_fm_video_lpf_response_test.exe'",
+            nativeBuildScript,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "$fmVideoLpfResponseTestOutputPath = Join-Path $buildDirectoryFullPath $fmVideoLpfResponseTestName",
+            nativeBuildScript,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "-not (Test-Path -LiteralPath $fmVideoLpfResponseTestOutputPath -PathType Leaf)",
+            nativeBuildScript,
+            StringComparison.Ordinal);
+        int responseRun = nativeBuildScript.IndexOf(
+            "Running $fmVideoLpfResponseTestOutputPath",
+            StringComparison.Ordinal);
+        int runtimeGuard = nativeBuildScript.IndexOf(
+            "if (-not $SkipRuntimeTests)",
+            StringComparison.Ordinal);
+        Assert.True(responseRun >= 0 && runtimeGuard > responseRun);
         Assert.DoesNotContain("NTSC luma LPF", cmake, StringComparison.Ordinal);
     }
 
