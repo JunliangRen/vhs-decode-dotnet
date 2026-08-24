@@ -98,6 +98,13 @@ public sealed class PocketFftComplexStorageTests
             PocketFftComplex.Inverse(inPlace, inPlace);
             AssertDefinedSpecialValueBitsEqual(expectedInverse, inPlace);
 
+            Complex[] ownedInput = forward.ToArray();
+            var ownedScratch = new Complex[forward.Length];
+            Complex[] ownedInverse = PocketFftComplex.InverseOwned(
+                ownedInput,
+                ownedScratch);
+            AssertDefinedSpecialValueBitsEqual(expectedInverse, ownedInverse);
+
             var realInput = new double[64];
             realInput[0] = value;
             Complex[] expectedReal = PocketFftComplex.ForwardReal(realInput);
@@ -254,6 +261,39 @@ public sealed class PocketFftComplexStorageTests
                 Assert.Equal(Hash(expectedReal), Hash(output));
             }
         }
+
+        foreach ((int length, bool resultUsesScratch) in new[]
+                 {
+                     (2, true),
+                     (32, false),
+                     (64, false),
+                     (512, true),
+                     (32_768, true)
+                 })
+        {
+            Complex[] input = BuildInput(length);
+            Complex[] expected = PocketFftComplex.Inverse(input);
+            Complex[] ownedInput = input.ToArray();
+            var scratch = new Complex[length];
+            Array.Fill(
+                scratch,
+                new Complex(double.NaN, double.NegativeInfinity));
+
+            Complex[] actual = PocketFftComplex.InverseOwned(
+                ownedInput,
+                scratch);
+
+            Assert.Equal(Hash(expected), Hash(actual));
+            Assert.Equal(resultUsesScratch, ReferenceEquals(actual, scratch));
+        }
+
+        Complex[] aliased = BuildInput(64);
+        Assert.Throws<ArgumentException>(
+            () => PocketFftComplex.InverseOwned(aliased, aliased));
+        Assert.Throws<ArgumentException>(
+            () => PocketFftComplex.InverseOwned(
+                aliased,
+                new Complex[aliased.Length / 2]));
     }
 
     private static Complex[] BuildInput(int length)
