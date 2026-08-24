@@ -1824,18 +1824,26 @@ public sealed class DspWorkingBufferTests
                     0.4128016)
             ],
             IirFilterDesign.ButterworthBandPassSos(
+                order: 2,
+                normalizedLowCutoff: 0.1,
+                normalizedHighCutoff: 0.4),
+            IirFilterDesign.ButterworthBandPassSos(
                 order: 4,
                 normalizedLowCutoff: 0.1,
                 normalizedHighCutoff: 0.4),
             IirFilterDesign.ButterworthBandPassSos(
                 order: 5,
                 normalizedLowCutoff: 0.1,
-                normalizedHighCutoff: 0.4)
+                normalizedHighCutoff: 0.4),
+            Enumerable.Repeat(
+                    new SosSection(1.0, 0.0, 0.0, 1.0, 0.0, 0.0),
+                    33)
+                .ToArray()
         ];
 
         foreach (SosSection[] sections in cases)
         {
-            foreach (int? padLength in new int?[] { null, 0, 7 })
+            foreach (int? padLength in new int?[] { null, 0, 7, 300 })
             {
                 double[] expected = SosFilter.ApplyForwardBackwardFloat32(
                     sections,
@@ -1850,10 +1858,9 @@ public sealed class DspWorkingBufferTests
                     padLength);
                 AssertDoubleBitsEqual(expected, actual);
 
-                float[] expectedSingle = SosFilter.ApplyForwardBackwardFloat32ToSingle(
-                    sections,
-                    input,
-                    padLength);
+                float[] expectedSingle = Array.ConvertAll(
+                    expected,
+                    static value => (float)value);
                 var actualSingle = new float[length];
                 Array.Fill(actualSingle, float.NaN);
                 SosFilter.ApplyForwardBackwardFloat32ToSingle(
@@ -1864,6 +1871,15 @@ public sealed class DspWorkingBufferTests
                 AssertFloatBitsEqual(expectedSingle, actualSingle);
             }
         }
+
+        float[] allocationProbe = new float[length];
+        SosFilter.ApplyForwardBackwardFloat32ToSingle(cases[2], input, allocationProbe);
+        long before = GC.GetAllocatedBytesForCurrentThread();
+        SosFilter.ApplyForwardBackwardFloat32ToSingle(cases[2], input, allocationProbe);
+        long allocated = GC.GetAllocatedBytesForCurrentThread() - before;
+        Assert.True(
+            allocated < 64,
+            $"Warm direct-output float32 SOS allocated {allocated:N0} bytes.");
 
         Assert.Throws<ArgumentException>(() =>
             SosFilter.ApplyForwardBackwardFloat32(
