@@ -1,6 +1,7 @@
 using System.Runtime.InteropServices;
 using System.Runtime.Intrinsics.X86;
 using System.Security.Cryptography;
+using VHSDecode.Core.Dsp;
 using VHSDecode.Core.Tbc;
 using Xunit;
 
@@ -8,6 +9,89 @@ namespace VHSDecode.Tests;
 
 public sealed class TbcParallelResamplerTests
 {
+    [Theory(DisplayName = "Fused linear TBC level adjustment matches the two-pass oracle bit-exactly")]
+    [InlineData(0.0)]
+    [InlineData(1.5)]
+    [InlineData(double.NaN)]
+    public void FusedLinearTbcLevelAdjustmentMatchesTwoPassOracleBitExactly(
+        double smoothing)
+    {
+        const int OutputLineLength = 257;
+        const int FirstLine = 2;
+        const int LineCount = 17;
+        const double NominalLineLength = 2_000.125;
+        int scaledLineCount = FirstLine + LineCount;
+        var lineLocations = new double[scaledLineCount + 1];
+        lineLocations[0] = 123.25;
+        for (int line = 0; line < scaledLineCount; line++)
+        {
+            double delta = line == 9
+                ? 2_400.75
+                : NominalLineLength + (((line % 5) - 2) * 0.03125);
+            lineLocations[line + 1] = lineLocations[line] + delta;
+        }
+
+        var resampler = new TbcLineResampler(
+            OutputLineLength,
+            TbcLineInterpolationMethod.Linear,
+            smoothing,
+            NominalLineLength,
+            workerThreads: 8);
+        using TbcLineResampler.ResamplingPlan plan = resampler.PrepareLineResampling(
+            lineLocations,
+            FirstLine,
+            LineCount);
+
+        double inputScale = 1.0 / NominalLineLength;
+        var lineFactors = new double[scaledLineCount];
+        for (int line = 0; line < lineFactors.Length; line++)
+        {
+            lineFactors[line] = (lineLocations[line + 1] * inputScale)
+                - (lineLocations[line] * inputScale);
+        }
+
+        double median = NumpyReduction.MedianFloat64(lineFactors);
+        var deviations = new double[lineFactors.Length];
+        for (int line = 0; line < deviations.Length; line++)
+        {
+            deviations[line] = Math.Abs(lineFactors[line] - median);
+        }
+
+        double mad = NumpyReduction.MedianFloat64(deviations);
+        double threshold = mad > 0.0 ? 15.0 * mad : 0.001;
+        var expected = new double[scaledLineCount * OutputLineLength];
+        for (int line = 0; line < lineFactors.Length; line++)
+        {
+            double factor = lineFactors[line];
+            double adjustedFactor = Math.Abs(factor - median) > threshold
+                ? median
+                : factor;
+            Array.Fill(
+                expected,
+                adjustedFactor,
+                line * OutputLineLength,
+                OutputLineLength);
+        }
+
+        if (smoothing > 0.0)
+        {
+            double alpha = 1.0 / (smoothing * OutputLineLength);
+            for (int i = 1; i < expected.Length; i++)
+            {
+                double previous = expected[i - 1];
+                expected[i] = Math.FusedMultiplyAdd(
+                    expected[i] - previous,
+                    alpha,
+                    previous);
+            }
+        }
+
+        Assert.True(
+            MemoryMarshal.AsBytes(expected.AsSpan()).SequenceEqual(
+                MemoryMarshal.AsBytes(plan.LevelAdjusts.AsSpan(0, expected.Length))),
+            "Linear TBC level adjustments differ from the two-pass oracle at the bit level.");
+    }
+
     [Fact(DisplayName = "Batched linear TBC positions preserve upstream scaled coordinates")]
     public void BatchedLinearTbcPositionsPreserveUpstreamScaledCoordinates()
     {
