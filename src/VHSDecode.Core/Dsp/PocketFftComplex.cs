@@ -395,6 +395,26 @@ public static class PocketFftComplex
             .TransformReal(input, output);
     }
 
+    internal static void ForwardRealScalarStagingReference(
+        ReadOnlySpan<double> input,
+        Span<Complex> output)
+    {
+        ValidateLength(input.Length, nameof(input));
+        if (output.Length != input.Length)
+        {
+            throw new ArgumentException(
+                "FFT output length must match the input length.",
+                nameof(output));
+        }
+
+        Plans.GetOrAdd(input.Length, static length => new Plan(length))
+            .TransformReal(
+                input,
+                output,
+                permitStagingAvx: false,
+                permitTransformAvx: true);
+    }
+
     public static Complex[] Inverse(ReadOnlySpan<Complex> input)
         => Transform(input, forward: false);
 
@@ -612,6 +632,17 @@ public static class PocketFftComplex
         }
 
         public void TransformReal(ReadOnlySpan<double> input, Span<Complex> output)
+            => TransformReal(
+                input,
+                output,
+                permitStagingAvx: true,
+                permitTransformAvx: true);
+
+        public void TransformReal(
+            ReadOnlySpan<double> input,
+            Span<Complex> output,
+            bool permitStagingAvx,
+            bool permitTransformAvx)
         {
             if (input.Length != _length)
             {
@@ -637,17 +668,14 @@ public static class PocketFftComplex
             Span<Value> destination = source.Overlaps(outputValues)
                 ? scratch
                 : outputValues;
-            for (int i = 0; i < _length; i++)
-            {
-                source[i] = new Value(input[i], 0.0);
-            }
+            StageRealInput(input, source, permitStagingAvx);
 
             Span<Value> transformed = Execute(
                 source,
                 destination,
                 forward: true,
                 normalization: 1.0,
-                permitAvx: true);
+                permitTransformAvx);
             if (overlappingRealStorage)
             {
                 transformed.CopyTo(outputValues);
@@ -658,6 +686,41 @@ public static class PocketFftComplex
                     transformed.Overlaps(outputValues, out int outputOffset)
                     && outputOffset == 0
                     && transformed.Length == outputValues.Length);
+            }
+        }
+
+        private static unsafe void StageRealInput(
+            ReadOnlySpan<double> input,
+            Span<Value> output,
+            bool permitAvx)
+        {
+            int index = 0;
+            if (permitAvx && Avx.IsSupported)
+            {
+                Span<double> outputComponents = MemoryMarshal.Cast<Value, double>(output);
+                fixed (double* inputPointer = input)
+                fixed (double* outputPointer = outputComponents)
+                {
+                    Vector256<double> zero = Vector256<double>.Zero;
+                    for (; index <= input.Length - 4; index += 4)
+                    {
+                        Vector256<double> values = Avx.LoadVector256(inputPointer + index);
+                        Vector256<double> low = Avx.UnpackLow(values, zero);
+                        Vector256<double> high = Avx.UnpackHigh(values, zero);
+                        int outputIndex = 2 * index;
+                        Avx.Store(
+                            outputPointer + outputIndex,
+                            Avx.Permute2x128(low, high, 0x20));
+                        Avx.Store(
+                            outputPointer + outputIndex + 4,
+                            Avx.Permute2x128(low, high, 0x31));
+                    }
+                }
+            }
+
+            for (; index < input.Length; index++)
+            {
+                output[index] = new Value(input[index], 0.0);
             }
         }
 

@@ -1,5 +1,6 @@
 using System.Numerics;
 using System.Runtime.InteropServices;
+using System.Runtime.Intrinsics.X86;
 using System.Security.Cryptography;
 using VHSDecode.Core.Dsp;
 using Xunit;
@@ -11,6 +12,11 @@ public sealed class PocketFftComplexStorageTests
     [Fact(DisplayName = "Complex FFT direct output matches frozen power-of-two hashes")]
     public void ComplexFftDirectOutputMatchesFrozenPowerOfTwoHashes()
     {
+        if (Environment.GetEnvironmentVariable("VHSDECODE_REQUIRE_AVX_REAL_STAGING") == "1")
+        {
+            Assert.True(Avx.IsSupported, "The CI real-input staging run requires AVX support.");
+        }
+
         (int Length, string Forward, string Inverse, string RealForward)[] cases =
         [
             (2,
@@ -47,12 +53,16 @@ public sealed class PocketFftComplexStorageTests
         {
             Complex[] input = BuildInput(length);
             Complex[] forward = PocketFftComplex.Forward(input);
+            double[] realInput = input.Select(static value => value.Real).ToArray();
+            var scalarStagingRealForward = new Complex[length];
+            PocketFftComplex.ForwardRealScalarStagingReference(
+                realInput,
+                scalarStagingRealForward);
+            Complex[] realForward = PocketFftComplex.ForwardReal(realInput);
             Assert.Equal(forwardHash, Hash(forward));
             Assert.Equal(inverseHash, Hash(PocketFftComplex.Inverse(forward)));
-            Assert.Equal(
-                realForwardHash,
-                Hash(PocketFftComplex.ForwardReal(
-                    input.Select(static value => value.Real).ToArray())));
+            Assert.Equal(realForwardHash, Hash(realForward));
+            Assert.Equal(Hash(scalarStagingRealForward), Hash(realForward));
         }
 
         Complex[] repeatedSmall = PocketFftComplex.Forward(BuildInput(cases[0].Length));
@@ -107,7 +117,11 @@ public sealed class PocketFftComplexStorageTests
 
             var realInput = new double[64];
             realInput[0] = value;
-            Complex[] expectedReal = PocketFftComplex.ForwardReal(realInput);
+            var expectedReal = new Complex[realInput.Length];
+            PocketFftComplex.ForwardRealScalarStagingReference(realInput, expectedReal);
+            AssertDefinedSpecialValueBitsEqual(
+                expectedReal,
+                PocketFftComplex.ForwardReal(realInput));
             var realCallerOutput = new Complex[realInput.Length];
             PocketFftComplex.ForwardReal(realInput, realCallerOutput);
             AssertDefinedSpecialValueBitsEqual(expectedReal, realCallerOutput);
