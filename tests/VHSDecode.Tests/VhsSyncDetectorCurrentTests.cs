@@ -12,6 +12,24 @@ public sealed class VhsSyncDetectorCurrentTests
     private const string CoordinateHash =
         "D09201E5DA03460E830F3302A088524CEB3A1BDC7666B9252EE1D11946DAC37B";
 
+    [Theory(DisplayName = "Current VHS sync worker policy widens only eligible high-thread runs")]
+    [InlineData(0, true, 1)]
+    [InlineData(5, true, 4)]
+    [InlineData(8, true, 8)]
+    [InlineData(20, true, 8)]
+    [InlineData(20, false, 4)]
+    public void CurrentVhsSyncWorkerPolicyWidensOnlyEligibleHighThreadRuns(
+        int requestedWorkers,
+        bool useWideParallelPreprocessing,
+        int expectedWorkers)
+    {
+        Assert.Equal(
+            expectedWorkers,
+            VhsSyncDetector.ResolveParallelWorkerCount(
+                requestedWorkers,
+                useWideParallelPreprocessing));
+    }
+
     [Theory(DisplayName = "Current VHS sync detector matches the PR 341 multi-grid oracle")]
     [InlineData(false)]
     [InlineData(true)]
@@ -875,6 +893,7 @@ public sealed class VhsSyncDetectorCurrentTests
     [InlineData(2)]
     [InlineData(3)]
     [InlineData(4)]
+    [InlineData(8)]
     public void ParallelCurrentVhsSyncPreprocessingMatchesSerialDetectionAcrossPartitions(
         int workers)
     {
@@ -1026,6 +1045,7 @@ public sealed class VhsSyncDetectorCurrentTests
     [InlineData(2)]
     [InlineData(3)]
     [InlineData(4)]
+    [InlineData(8)]
     public void ParallelNineTapVhsBoxcarMatchesSerialOutputBitForBit(int workers)
     {
         foreach (int length in new[] { 9, 10, 10_003 })

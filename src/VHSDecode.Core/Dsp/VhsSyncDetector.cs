@@ -19,7 +19,8 @@ public sealed record VhsSyncDetectionResult(
 
 public sealed class VhsSyncDetector
 {
-    private const int MaximumParallelBoxcarWorkers = 4;
+    private const int ConservativeParallelBoxcarWorkers = 4;
+    private const int MaximumParallelBoxcarWorkers = 8;
     private const int MaximumBufferedThresholdCrossingsPerWorker = 16_384;
     private const int MinimumParallelBoxcarSamples = 65_536;
     private const int MinimumParallelEdgeScanSamples = 65_536;
@@ -68,7 +69,8 @@ public sealed class VhsSyncDetector
         double approximateTransition,
         int workerThreads,
         bool parallelizePreciseEdgeScan = true,
-        bool useCompactParallelRadix = true)
+        bool useCompactParallelRadix = true,
+        bool useWideParallelPreprocessing = true)
     {
         _hSyncLength = double.IsFinite(hSyncLength) && hSyncLength > 0.0
             ? hSyncLength
@@ -82,12 +84,22 @@ public sealed class VhsSyncDetector
         _approximateTransition = double.IsFinite(approximateTransition) && approximateTransition > 0.0
             ? approximateTransition
             : throw new ArgumentOutOfRangeException(nameof(approximateTransition));
-        _workerThreads = Math.Clamp(
+        _workerThreads = ResolveParallelWorkerCount(
             workerThreads,
-            1,
-            MaximumParallelBoxcarWorkers);
+            useWideParallelPreprocessing);
         _parallelizePreciseEdgeScan = parallelizePreciseEdgeScan;
         _useCompactParallelRadix = useCompactParallelRadix;
+    }
+
+    internal static int ResolveParallelWorkerCount(
+        int workerThreads,
+        bool useWideParallelPreprocessing)
+    {
+        int maximumWorkers = useWideParallelPreprocessing
+            && workerThreads >= MaximumParallelBoxcarWorkers
+                ? MaximumParallelBoxcarWorkers
+                : ConservativeParallelBoxcarWorkers;
+        return Math.Clamp(workerThreads, 1, maximumWorkers);
     }
 
     internal VhsSyncDetectionResult Detect(

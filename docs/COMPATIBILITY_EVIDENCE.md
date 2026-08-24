@@ -2229,7 +2229,7 @@ dotnet test --solution VHSDecodeDotNet.slnx --no-build
 ```
 
 The current formal solution build completes with zero warnings and errors, and
-the xUnit v3 project exposes 1,602 independently discoverable tests
+the xUnit v3 project exposes 1,609 independently discoverable tests
 to `dotnet test` and Visual Studio Test Explorer. On the
 same Windows machine and fixtures, Release wall-clock measurements for one
 frame were 2.346 s versus 7.193 s for NTSC VHS and 1.651 s versus 5.865 s for
@@ -3548,6 +3548,31 @@ upstream source:
 ```powershell
 python tools\generate_format_snapshot.py --upstream upstream-vhs-decode
 ```
+
+## Exact high-worker sync preprocessing gate (2026-08-24)
+
+The retained candidate raises the VHS boxcar/sync-preprocessing limit from four
+to eight workers only for Exact `current` requests with at least eight workers. Default
+five-worker operation and every IPP-fast path retain the previous four-worker
+limit. No DSP expression, arithmetic order, field state, ordered commit,
+metadata, or diagnostic behavior changed.
+
+A standalone sync-detector A/B moved median wall time from 651.775 to 404.724 ms
+(1.610x) with identical output. Six interleaved 160-frame Exact `current
+--threads 20` pairs reduced median wall time by about 2.4%. A 1,000-frame pair
+moved from 33.760 to 32.946 seconds (2.41% less wall time; 1.0247x, or 2.47%
+higher, throughput) while effective core use rose from 8.62 to 9.16. Luma,
+chroma, raw JSON, stdout, normalized stderr/logs, and every
+ordered `fileLoc` matched; peak working set increased by about 2.5 MiB and
+remained bounded. An initial IPP-fast cap-eight variant was 3.2% slower and was
+removed.
+
+The final fixed-window 60-run matrix covered Exact/IPP-fast, v0.4.0/`current`,
+and default, 1, 5, 10, and 20 workers with three runs per cell. Every cell
+retained one hash for all seven captured surfaces. The formal Release build
+completed with zero warnings and errors. With the pinned IPP runtime staged,
+the xUnit v3 suite discovered 1,609 tests: 1,606 passed and 3 CUDA/AMF
+environment cases were skipped as expected.
 
 ## License
 
