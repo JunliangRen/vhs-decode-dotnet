@@ -35,7 +35,7 @@
 - VHS 家族包括 VHS/S-VHS、Betamax、Video8/Hi8、U-matic、Type C、EIAJ
   以及上游支持的 PAL/NTSC 变体。
 - TBC 工具、双击启动的用户 GUI 和开发者绘图窗口明确不在范围内。
-- Visual Studio 2026 `.slnx` 包含 **1,612** 项标准 xUnit v3 测试；测试可在
+- Visual Studio 2026 `.slnx` 包含 **1,613** 项标准 xUnit v3 测试；测试可在
   Test Explorer 中查看，也可用 `dotnet test` 运行。
 
 <!-- SECTION: start -->
@@ -232,7 +232,7 @@ Y/U/V/All = 0.954905/0.988109/0.991285/0.972301，PSNR Y/U/V/平均值为
 | `--threads 10` | 52.965 s | 54.949 s | 9.298 s / 5.697x | 8.184 s / 6.714x | 8.442 s / 6.274x | 6.176 s / 8.897x |
 | `--threads 20` | 53.555 s | 54.842 s | 7.327 s / 7.309x | 6.847 s / 8.010x | 7.178 s / 7.461x | 4.890 s / 11.215x |
 <!-- LATEST_PERFORMANCE_END -->
-<!-- LATEST_PERFORMANCE_RUNS: performance-snapshot-runs=90 dotnet-matrix-runs=60 dotnet-current-runs=30 python-reference-runs=30 dotnet-repeats=3 python-reference-date=2026-08-12 dotnet-v040-date=2026-08-24 dotnet-current-date=2026-08-24 phase22-200-ab-pairs=20 phase22-long-ab-pairs=8 phase22-thread-backend-runs=60 phase22-gc-traces=2 phase22-tests=1438 phase24-short-ab-pairs=6 phase24-long-ab-pairs=4 phase24-thread-gate-runs=12 phase24-tests=1442 phase25-public-cell-runs=15 phase25-public-ab-pairs=15 phase25-long-ab-pairs=3 phase25-thread-gate-runs=12 phase25-tests=1446 phase26-kernel-ab-pairs=8 phase26-long-ab-pairs=4 phase26-thread-backend-runs=36 phase26-public-cell-runs=30 phase26-tests=1447 phase27-kernel-ab-pairs=8 phase27-long-ab-pairs=8 phase27-thread-backend-runs=24 phase27-public-cell-runs=60 phase27-tests=1448 phase28-kernel-ab-pairs=8 phase28-long-ab-pairs=6 phase28-thread-backend-runs=24 phase28-intrinsic-runs=3 phase28-public-cell-runs=60 phase28-tests=1448 phase30-burst-kernel-runs=14 phase30-long-ab-pairs=3 phase30-thread-gate-runs=6 phase30-memory-runs=2 phase30-public-cell-runs=60 phase30-tests=1448 phase31-interleaved-ab-pairs=9 phase31-long-gate-runs=8 phase31-thread-backend-runs=24 phase31-memory-runs=4 phase31-public-cell-runs=60 phase31-tests=1459 phase32-vblank-short-ab-pairs=6 phase32-vblank-long-ab-pairs=2 phase32-thread-backend-runs=24 phase32-gc-traces=2 phase32-counter-runs=2 phase32-tests=1460 phase33-sync-list-short-ab-pairs=6 phase33-sync-list-long-ab-pairs=2 phase33-thread-backend-runs=24 phase33-gc-traces=1 phase33-memory-runs=4 phase33-public-cell-runs=60 phase33-tests=1463 phase42-public-cell-runs=60 phase42-tests=1609 phase52-current-short-ab-pairs=8 phase52-v040-short-ab-pairs=4 phase52-long-ab-pairs=2 phase52-public-cell-runs=60 phase52-intrinsic-runs=3 phase52-tests=1610 phase59-short-ab-pairs=3 phase59-500-ab-pairs=3 phase59-1000-ab-pairs=3 phase59-public-cell-runs=60 phase59-intrinsic-runs=2 phase59-tests=1610 phase60-short-ab-pairs=3 phase60-500-ab-pairs=2 phase60-1000-ab-pairs=2 phase60-thread-gate-runs=4 phase60-memory-runs=1 phase60-public-cell-runs=60 phase60-tests=1612 python-v040-runs=15 python-v040-hashes=15 python-pr341-runs=15 python-pr341-hashes=1 -->
+<!-- LATEST_PERFORMANCE_RUNS: performance-snapshot-runs=90 dotnet-matrix-runs=60 dotnet-current-runs=30 python-reference-runs=30 dotnet-repeats=3 python-reference-date=2026-08-12 dotnet-v040-date=2026-08-24 dotnet-current-date=2026-08-24 phase22-200-ab-pairs=20 phase22-long-ab-pairs=8 phase22-thread-backend-runs=60 phase22-gc-traces=2 phase22-tests=1438 phase24-short-ab-pairs=6 phase24-long-ab-pairs=4 phase24-thread-gate-runs=12 phase24-tests=1442 phase25-public-cell-runs=15 phase25-public-ab-pairs=15 phase25-long-ab-pairs=3 phase25-thread-gate-runs=12 phase25-tests=1446 phase26-kernel-ab-pairs=8 phase26-long-ab-pairs=4 phase26-thread-backend-runs=36 phase26-public-cell-runs=30 phase26-tests=1447 phase27-kernel-ab-pairs=8 phase27-long-ab-pairs=8 phase27-thread-backend-runs=24 phase27-public-cell-runs=60 phase27-tests=1448 phase28-kernel-ab-pairs=8 phase28-long-ab-pairs=6 phase28-thread-backend-runs=24 phase28-intrinsic-runs=3 phase28-public-cell-runs=60 phase28-tests=1448 phase30-burst-kernel-runs=14 phase30-long-ab-pairs=3 phase30-thread-gate-runs=6 phase30-memory-runs=2 phase30-public-cell-runs=60 phase30-tests=1448 phase31-interleaved-ab-pairs=9 phase31-long-gate-runs=8 phase31-thread-backend-runs=24 phase31-memory-runs=4 phase31-public-cell-runs=60 phase31-tests=1459 phase32-vblank-short-ab-pairs=6 phase32-vblank-long-ab-pairs=2 phase32-thread-backend-runs=24 phase32-gc-traces=2 phase32-counter-runs=2 phase32-tests=1460 phase33-sync-list-short-ab-pairs=6 phase33-sync-list-long-ab-pairs=2 phase33-thread-backend-runs=24 phase33-gc-traces=1 phase33-memory-runs=4 phase33-public-cell-runs=60 phase33-tests=1463 phase42-public-cell-runs=60 phase42-tests=1609 phase52-current-short-ab-pairs=8 phase52-v040-short-ab-pairs=4 phase52-long-ab-pairs=2 phase52-public-cell-runs=60 phase52-intrinsic-runs=3 phase52-tests=1610 phase59-short-ab-pairs=3 phase59-500-ab-pairs=3 phase59-1000-ab-pairs=3 phase59-public-cell-runs=60 phase59-intrinsic-runs=2 phase59-tests=1610 phase60-short-ab-pairs=3 phase60-500-ab-pairs=2 phase60-1000-ab-pairs=2 phase60-thread-gate-runs=4 phase60-memory-runs=1 phase60-public-cell-runs=60 phase60-tests=1613 python-v040-runs=15 python-v040-hashes=15 python-pr341-runs=15 python-pr341-hashes=1 -->
 
 每个 .NET 单元格依次给出墙钟中位数和相对同 profile Python 列的倍速；默认实际
 使用 **5 个 workers**。三次运行范围见[详细性能说明](docs/README.detailed.zh-CN.md#性能)。
@@ -249,7 +249,7 @@ Y/U/V/All = 0.954905/0.988109/0.991285/0.972301，PSNR Y/U/V/平均值为
 1,000 帧候选运行观察到的 637.7 MiB，并包含 4 次超过 1 MiB 的内存回落。显式零、
 默认 5 和 20 workers 的 Exact 门禁，以及刷新后的 60 次 Exact/IPP-fast 矩阵，都在
 亮度、色度、原始 JSON、stdout、归一化 stderr/日志和有序 `fileLoc` 上只产生一套
-hash。最新标准 xUnit v3 套件共发现 **1,612** 项测试，其中 1,609 项通过、3 项因
+hash。最新标准 xUnit v3 套件共发现 **1,613** 项测试，其中 1,610 项通过、3 项因
 环境不可用按预期跳过。
 
 刷新后的每个 .NET profile/线程单元格在三轮内都保持确定性。固定参考集中的 Python
@@ -288,7 +288,7 @@ TBC、色度、JSON 和日志文件允许在解码期间并发读取，兼容的
 dotnet restore VHSDecodeDotNet.slnx
 dotnet build VHSDecodeDotNet.slnx -c Release --no-restore
 dotnet test --solution VHSDecodeDotNet.slnx -c Release `
-  --no-build --no-restore --minimum-expected-tests 1612
+  --no-build --no-restore --minimum-expected-tests 1613
 ```
 
 在 Visual Studio 2026 中打开 `VHSDecodeDotNet.slnx`，即可构建、调试并通过

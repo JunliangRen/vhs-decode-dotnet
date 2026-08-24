@@ -854,7 +854,7 @@ public sealed class TbcLineResampler
                 deviationScratch.AsSpan(0, lineCount),
                 medianScratch);
             double threshold = mad > 0.0 ? 15.0 * mad : 0.001;
-            if (WowLevelAdjustSmoothing <= 0.0)
+            if (!(WowLevelAdjustSmoothing > 0.0))
             {
                 for (int line = 0; line < lineCount; line++)
                 {

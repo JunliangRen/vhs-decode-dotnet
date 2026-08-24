@@ -12,6 +12,7 @@ public sealed class TbcParallelResamplerTests
     [Theory(DisplayName = "Fused linear TBC level adjustment matches the two-pass oracle bit-exactly")]
     [InlineData(0.0)]
     [InlineData(1.5)]
+    [InlineData(double.NaN)]
     public void FusedLinearTbcLevelAdjustmentMatchesTwoPassOracleBitExactly(
         double smoothing)
     {

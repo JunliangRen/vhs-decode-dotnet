@@ -54,13 +54,13 @@ public sealed partial class ReadmeLocalizationTests
         "phase60-short-ab-pairs=3 phase60-500-ab-pairs=2 " +
         "phase60-1000-ab-pairs=2 phase60-thread-gate-runs=4 " +
         "phase60-memory-runs=1 phase60-public-cell-runs=60 " +
-        "phase60-tests=1612 " +
+        "phase60-tests=1613 " +
         "python-v040-runs=15 python-v040-hashes=15 " +
         "python-pr341-runs=15 python-pr341-hashes=1 -->";
 
     private const string FullCiTestCommand =
         "run: dotnet test --solution VHSDecodeDotNet.slnx --configuration Release " +
-        "--no-build --no-restore --minimum-expected-tests 1612";
+        "--no-build --no-restore --minimum-expected-tests 1613";
 
     private const string FinalRealRadix4AvxTestCommand =
         "run: dotnet test tests/VHSDecode.Tests/VHSDecode.Tests.csproj " +
@@ -295,7 +295,7 @@ public sealed partial class ReadmeLocalizationTests
         [
             "43155200da87c0d49eb37d8ec09b1372075ee8e4",
             PinnedDotNetSdkVersion,
-            "**1,612**",
+            "**1,613**",
             "--compat-version",
             "current",
             "--dsp-backend",
@@ -319,7 +319,7 @@ public sealed partial class ReadmeLocalizationTests
             "281.703",
             "3.2%",
             "2.1%",
-            "1,609",
+            "1,610",
             "g4315520",
             "--threads 0",
             "41bfd92",
@@ -717,7 +717,7 @@ public sealed partial class ReadmeLocalizationTests
             "1.72%",
             "444.3 MiB",
             "406.0 MiB",
-            "**1,612**",
+            "**1,613**",
             "3.7935",
             "3.6182",
             "4.62%",
@@ -1397,7 +1397,7 @@ public sealed partial class ReadmeLocalizationTests
             "8.584",
             "5.85",
             "5.95",
-            "1,612",
+            "1,613",
             "651.775",
             "404.724",
             "1.610x",
@@ -1531,7 +1531,7 @@ public sealed partial class ReadmeLocalizationTests
             "The shared compatibility evidence document is missing.");
         string compatibilityEvidence = File.ReadAllText(compatibilityEvidencePath);
         Assert.Contains(
-            "1,612 independently discoverable tests",
+            "1,613 independently discoverable tests",
             compatibilityEvidence,
             StringComparison.Ordinal);
         Assert.DoesNotContain(
