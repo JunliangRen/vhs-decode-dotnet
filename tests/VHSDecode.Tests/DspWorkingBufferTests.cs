@@ -1185,12 +1185,13 @@ public sealed class DspWorkingBufferTests
 
     [Theory(DisplayName = "VHS inverse staging follows the bounded current-profile policy")]
     [InlineData(12, "current", false, false, false, "exact", 0)]
-    [InlineData(20, "current", false, false, true, "exact", 8)]
+    [InlineData(19, "current", false, false, true, "exact", 7)]
+    [InlineData(20, "current", false, false, true, "exact", 6)]
     [InlineData(20, "current", false, true, true, "exact", 1)]
     [InlineData(20, "v0.4.0", false, false, false, "exact", 0)]
     [InlineData(20, "current", true, false, false, "exact", 0)]
     [InlineData(12, "current", false, false, false, "ipp-fast", 0)]
-    [InlineData(20, "current", false, false, true, "ipp-fast", 8)]
+    [InlineData(20, "current", false, false, true, "ipp-fast", 6)]
     public void VhsInverseStagingFollowsHighWorkerPolicy(
         int workerThreads,
         string profile,
@@ -1239,6 +1240,18 @@ public sealed class DspWorkingBufferTests
         Assert.Equal(
             expectedCompanionWorkers,
             session.Pipeline.VhsInverseCompanionWorkerThreads);
+        if (!useGnrc && session.StreamDecoder.PrefetchBlocks > 0)
+        {
+            int expectedPrefetchWorkerLimit = expectedCompanionWorkers > 1
+                && workerThreads >= RfBlockStreamDecoder.MinimumExpandedCurrentVhsWorkerThreads
+                    ? RfBlockStreamDecoder.MaximumConcurrentCurrentVhsPrefetchBlocks
+                    : RfBlockStreamDecoder.MaximumConcurrentPrefetchBlocks;
+            int expectedPrefetchWorkers = Math.Min(
+                Math.Min(workerThreads, session.StreamDecoder.PrefetchBlocks),
+                expectedPrefetchWorkerLimit);
+            Assert.Equal(expectedPrefetchWorkers, session.StreamDecoder.PrefetchWorkerThreads);
+        }
+
         Assert.False(session.Pipeline.IsVhsInverseCompanionSchedulerCreated);
     }
 

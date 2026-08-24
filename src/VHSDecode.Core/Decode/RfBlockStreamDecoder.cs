@@ -36,6 +36,8 @@ public sealed class RfBlockStreamDecoder : IDisposable
     private const int CacheOperationOrdinary = 1;
     private const int CacheOperationStagedVhs = 2;
     internal const int MaximumConcurrentPrefetchBlocks = 12;
+    internal const int MaximumConcurrentCurrentVhsPrefetchBlocks = 14;
+    internal const int MinimumExpandedCurrentVhsWorkerThreads = 20;
     internal const int MaximumPrefetchBlocks = 32;
     private readonly RfBlockDecodePipeline _pipeline;
     private readonly Dictionary<long, RfPipelineBlock> _decodedBlockCache = [];
@@ -99,9 +101,14 @@ public sealed class RfBlockStreamDecoder : IDisposable
         PrefetchBlocks = workerThreads > 1 && !_pipeline.RequiresSequentialBlockDecode
             ? Math.Min(prefetchBlocks, MaximumPrefetchBlocks)
             : 0;
+        int prefetchWorkerLimit = _pipeline.ParallelizesVhsInverseStaging
+            && _pipeline.VhsInverseCompanionWorkerThreads > 1
+            && WorkerThreads >= MinimumExpandedCurrentVhsWorkerThreads
+                ? MaximumConcurrentCurrentVhsPrefetchBlocks
+                : MaximumConcurrentPrefetchBlocks;
         PrefetchWorkerThreads = Math.Min(
             Math.Min(WorkerThreads, PrefetchBlocks),
-            MaximumConcurrentPrefetchBlocks);
+            prefetchWorkerLimit);
         _decodedBlockCacheCapacity = checked(DecodedBlockCacheCapacity + PrefetchBlocks);
         _laserDiscCompatibilityPrefetchBlocks = laserDiscCompatibilityPrefetchBlocks;
     }
