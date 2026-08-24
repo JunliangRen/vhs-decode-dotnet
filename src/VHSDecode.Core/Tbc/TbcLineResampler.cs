@@ -854,17 +854,48 @@ public sealed class TbcLineResampler
                 deviationScratch.AsSpan(0, lineCount),
                 medianScratch);
             double threshold = mad > 0.0 ? 15.0 * mad : 0.001;
+            if (WowLevelAdjustSmoothing <= 0.0)
+            {
+                for (int line = 0; line < lineCount; line++)
+                {
+                    double factor = lineFactors[line];
+                    double adjustedFactor = Math.Abs(factor - median) > threshold
+                        ? median
+                        : factor;
+                    Array.Fill(
+                        levelAdjusts,
+                        adjustedFactor,
+                        line * OutputLineLength,
+                        OutputLineLength);
+                }
+
+                return;
+            }
+
+            double alpha = 1.0 / (WowLevelAdjustSmoothing * OutputLineLength);
+            double previous = 0.0;
+            int outputIndex = 0;
             for (int line = 0; line < lineCount; line++)
             {
                 double factor = lineFactors[line];
                 double adjustedFactor = Math.Abs(factor - median) > threshold
                     ? median
                     : factor;
-                Array.Fill(
-                    levelAdjusts,
-                    adjustedFactor,
-                    line * OutputLineLength,
-                    OutputLineLength);
+                int lineEnd = outputIndex + OutputLineLength;
+                if (outputIndex == 0)
+                {
+                    previous = adjustedFactor;
+                    levelAdjusts[outputIndex++] = previous;
+                }
+
+                while (outputIndex < lineEnd)
+                {
+                    previous = Math.FusedMultiplyAdd(
+                        adjustedFactor - previous,
+                        alpha,
+                        previous);
+                    levelAdjusts[outputIndex++] = previous;
+                }
             }
         }
         finally
@@ -873,8 +904,6 @@ public sealed class TbcLineResampler
             ArrayPool<double>.Shared.Return(medianScratch);
             ArrayPool<double>.Shared.Return(deviationScratch);
         }
-
-        SmoothLevelAdjusts(levelAdjusts.AsSpan(0, sampleCount));
     }
 
     private void BuildLinearPrefixLevelAdjusts(

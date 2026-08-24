@@ -2229,7 +2229,7 @@ dotnet test --solution VHSDecodeDotNet.slnx --no-build
 ```
 
 The current formal solution build completes with zero warnings and errors, and
-the xUnit v3 project exposes 1,610 independently discoverable tests
+the xUnit v3 project exposes 1,612 independently discoverable tests
 to `dotnet test` and Visual Studio Test Explorer. On the
 same Windows machine and fixtures, Release wall-clock measurements for one
 frame were 2.346 s versus 7.193 s for NTSC VHS and 1.651 s versus 5.865 s for
@@ -2741,9 +2741,10 @@ capture. Both retained visible colour. Those historical files used the former
 top-field-first 25/30000/1001 fps encoder path and are not evidence for the
 current progressive output contract.
 
-A final 2026-08-16 local Release/IPP-fast/CRF-31 validation used the private
-21,389,175,871-byte `test.ldf` PAL VHS 40 MHz raw-FLAC capture with 20 decoder
-workers. Startup selected `NVENC + CUDA YADIF x2` on an RTX 4070. FFprobe
+A final 2026-08-16 local Release/IPP-fast/CRF-31 validation used one private
+21,389,175,871-byte PAL VHS 40 MHz raw-FLAC `.ldf` capture with 20 decoder
+workers; its filename is intentionally not published. Startup selected
+`NVENC + CUDA YADIF x2` on an RTX 4070. FFprobe
 reported H.264 Main level 3.1, limited-range YUV420P, progressive 768x576/50
 fps, BT.470BG primaries/matrix, and BT.709 transfer. Window 5 began at the
 expected global PTS of 10.000000 seconds; FFprobe counted 100 frames and
@@ -3416,9 +3417,9 @@ SHA-256 was
 `CE054C2CD9EA1793080F39121C2AA154130FDF5F75C14F07667DD3F214435C6F`.
 The host was Windows build 26220, an Intel Core Ultra 7 265K with 20 physical
 and logical processors, and an RTX 4070 with 12,282 MiB on driver 581.57. The
-SDK was .NET 11.0.100-preview.7.26381.103. Input was the private real 40 MSPS
-PAL `F:\BmdFiles\DDD\test.ldf`, 21,389,175,871 bytes and approximately 631
-seconds long.
+SDK was .NET 11.0.100-preview.7.26381.103. Input was one private real 40 MSPS
+PAL `.ldf` capture, 21,389,175,871 bytes and approximately 631 seconds long;
+its filename is intentionally not published.
 
 Every full run used `--pal --start_fileloc 320000000 --length 500`; IPP also
 used explicit `--threads 20`, and rate-20 variants added
