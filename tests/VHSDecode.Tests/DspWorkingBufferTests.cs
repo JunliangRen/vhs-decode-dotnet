@@ -1242,12 +1242,13 @@ public sealed class DspWorkingBufferTests
             session.Pipeline.VhsInverseCompanionWorkerThreads);
         if (!useGnrc && session.StreamDecoder.PrefetchBlocks > 0)
         {
-            int expectedPrefetchWorkers = expectedCompanionWorkers > 1
+            int expectedPrefetchWorkerLimit = expectedCompanionWorkers > 1
                 && workerThreads >= RfBlockStreamDecoder.MinimumExpandedCurrentVhsWorkerThreads
                     ? RfBlockStreamDecoder.MaximumConcurrentCurrentVhsPrefetchBlocks
-                    : Math.Min(
-                        workerThreads,
-                        RfBlockStreamDecoder.MaximumConcurrentPrefetchBlocks);
+                    : RfBlockStreamDecoder.MaximumConcurrentPrefetchBlocks;
+            int expectedPrefetchWorkers = Math.Min(
+                Math.Min(workerThreads, session.StreamDecoder.PrefetchBlocks),
+                expectedPrefetchWorkerLimit);
             Assert.Equal(expectedPrefetchWorkers, session.StreamDecoder.PrefetchWorkerThreads);
         }
 
