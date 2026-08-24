@@ -1530,9 +1530,7 @@ public sealed class RfDemodulator : IDisposable
         VhsRealFftWorkspace workspace,
         int inputLength)
     {
-        PocketFftComplex.Inverse(
-            workspace.DiffedAnalytic.AsSpan(0, inputLength),
-            workspace.FullAnalytic.AsSpan(0, inputLength));
+        workspace.CompleteNumpyAnalyticInverse(inputLength);
     }
 
     private void RunParallelVhsInverseStaging(
@@ -2162,9 +2160,9 @@ public sealed class RfDemodulator : IDisposable
 
         public Complex[] HilbertHalf { get; }
 
-        public Complex[] DiffedAnalytic { get; }
+        public Complex[] DiffedAnalytic { get; private set; }
 
-        public Complex[] FullAnalytic { get; }
+        public Complex[] FullAnalytic { get; private set; }
 
         public Complex[] RfFilteredSpectrum =>
             _rfFilteredSpectrum ??= new Complex[RealLength];
@@ -2207,6 +2205,26 @@ public sealed class RfDemodulator : IDisposable
             }
 
             _ippFft.Inverse(input, output.AsSpan(0, RealLength));
+        }
+
+        public void CompleteNumpyAnalyticInverse(int inputLength)
+        {
+            if (inputLength != RealLength)
+            {
+                throw new ArgumentException(
+                    "Analytic FFT input length does not match the workspace length.",
+                    nameof(inputLength));
+            }
+
+            Complex[] spectrum = DiffedAnalytic;
+            Complex[] scratch = FullAnalytic;
+            Complex[] transformed = PocketFftComplex.InverseOwned(
+                spectrum,
+                scratch);
+            FullAnalytic = transformed;
+            DiffedAnalytic = ReferenceEquals(transformed, spectrum)
+                ? scratch
+                : spectrum;
         }
 
         public void InverseCompanion(

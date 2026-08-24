@@ -423,6 +423,31 @@ public static class PocketFftComplex
             .Transform(input, output, forward: false);
     }
 
+    internal static Complex[] InverseOwned(
+        Complex[] input,
+        Complex[] scratch)
+    {
+        ArgumentNullException.ThrowIfNull(input);
+        ArgumentNullException.ThrowIfNull(scratch);
+        ValidateLength(input.Length, nameof(input));
+        if (scratch.Length != input.Length)
+        {
+            throw new ArgumentException(
+                "FFT scratch length must match the input length.",
+                nameof(scratch));
+        }
+
+        if (ReferenceEquals(input, scratch))
+        {
+            throw new ArgumentException(
+                "Owned FFT input and scratch buffers must be distinct.",
+                nameof(scratch));
+        }
+
+        return Plans.GetOrAdd(input.Length, static length => new Plan(length))
+            .TransformOwned(input, scratch, forward: false);
+    }
+
     private static Complex[] Transform(ReadOnlySpan<Complex> input, bool forward)
     {
         ValidateLength(input.Length, nameof(input));
@@ -505,6 +530,48 @@ public static class PocketFftComplex
 
         public void Transform(ReadOnlySpan<Complex> input, Span<Complex> output, bool forward)
             => Transform(input, output, forward, permitAvx: true);
+
+        public Complex[] TransformOwned(
+            Complex[] input,
+            Complex[] scratch,
+            bool forward)
+        {
+            if (input.Length != _length)
+            {
+                throw new ArgumentException(
+                    "FFT input length does not match the plan length.",
+                    nameof(input));
+            }
+
+            if (scratch.Length != _length)
+            {
+                throw new ArgumentException(
+                    "FFT scratch length does not match the plan length.",
+                    nameof(scratch));
+            }
+
+            System.Diagnostics.Debug.Assert(
+                Unsafe.SizeOf<Complex>() == Unsafe.SizeOf<Value>());
+            Span<Value> inputValues = MemoryMarshal.Cast<Complex, Value>(input);
+            Span<Value> scratchValues = MemoryMarshal.Cast<Complex, Value>(scratch);
+            Span<Value> transformed = Execute(
+                inputValues,
+                scratchValues,
+                forward,
+                forward ? 1.0 : 1.0 / _length,
+                permitAvx: true);
+            if (transformed.Overlaps(inputValues, out int inputOffset)
+                && inputOffset == 0)
+            {
+                return input;
+            }
+
+            System.Diagnostics.Debug.Assert(
+                transformed.Overlaps(scratchValues, out int scratchOffset)
+                && scratchOffset == 0
+                && transformed.Length == scratchValues.Length);
+            return scratch;
+        }
 
         private void Transform(
             ReadOnlySpan<Complex> input,
