@@ -438,6 +438,12 @@ public static class SosFilter
             throw new ArgumentOutOfRangeException(nameof(padLength));
         }
 
+        if (ippFilter is null && sections.Count == 4)
+        {
+            ApplyForwardBackwardFloat32ToSingleDirect(sections, input, output, edge);
+            return;
+        }
+
         int extendedLength = checked(input.Length + (edge * 2));
         float[] rented = ArrayPool<float>.Shared.Rent(extendedLength);
         try
@@ -458,6 +464,144 @@ public static class SosFilter
         finally
         {
             ArrayPool<float>.Shared.Return(rented);
+        }
+    }
+
+    private static void ApplyForwardBackwardFloat32ToSingleDirect(
+        IReadOnlyList<SosSection> sections,
+        ReadOnlySpan<double> input,
+        Span<float> output,
+        int edge)
+    {
+        if (edge != 0 && input.Length <= edge)
+        {
+            throw new ArgumentException("Input length must be greater than pad length.");
+        }
+
+        Span<FloatSosSection> floatSections = stackalloc FloatSosSection[4];
+        ConvertToFloat32(sections, floatSections);
+        Span<float> zi = stackalloc float[8];
+        Span<float> state = stackalloc float[8];
+        SteadyStateInitialConditionsFloat32(floatSections, zi);
+
+        int edgeStorageLength = checked(edge * 2);
+        float[]? rentedEdges = null;
+        try
+        {
+            Span<float> edgeStorage = edgeStorageLength <= 512
+                ? stackalloc float[edgeStorageLength]
+                : (rentedEdges = ArrayPool<float>.Shared.Rent(edgeStorageLength))
+                    .AsSpan(0, edgeStorageLength);
+            Span<float> left = edgeStorage[..edge];
+            Span<float> right = edgeStorage[edge..];
+
+            if (edge != 0)
+            {
+                float first = (float)input[0];
+                for (int i = 0; i < edge; i++)
+                {
+                    left[i] = (2.0f * first) - (float)input[edge - i];
+                }
+            }
+
+            ConvertToFloat32(input, output);
+
+            if (edge != 0)
+            {
+                float last = (float)input[^1];
+                for (int i = 0; i < edge; i++)
+                {
+                    right[i] = (2.0f * last) - (float)input[input.Length - 2 - i];
+                }
+            }
+
+            ScaleInitialConditionsFloat32(zi, edge == 0 ? output[0] : left[0], state);
+            FloatSosSection firstSection = floatSections[0];
+            FloatSosSection secondSection = floatSections[1];
+            FloatSosSection thirdSection = floatSections[2];
+            FloatSosSection fourthSection = floatSections[3];
+            float firstZ1 = state[0];
+            float firstZ2 = state[1];
+            float secondZ1 = state[2];
+            float secondZ2 = state[3];
+            float thirdZ1 = state[4];
+            float thirdZ2 = state[5];
+            float fourthZ1 = state[6];
+            float fourthZ2 = state[7];
+            for (int segment = 0; segment < 3; segment++)
+            {
+                Span<float> values = segment == 0 ? left : segment == 1 ? output : right;
+                for (int sample = 0; sample < values.Length; sample++)
+                {
+                    float value = values[sample];
+                    float filtered = (firstSection.B0 * value) + firstZ1;
+                    firstZ1 = (firstSection.B1 * value) - (firstSection.A1 * filtered) + firstZ2;
+                    firstZ2 = (firstSection.B2 * value) - (firstSection.A2 * filtered);
+
+                    value = filtered;
+                    filtered = (secondSection.B0 * value) + secondZ1;
+                    secondZ1 = (secondSection.B1 * value) - (secondSection.A1 * filtered) + secondZ2;
+                    secondZ2 = (secondSection.B2 * value) - (secondSection.A2 * filtered);
+
+                    value = filtered;
+                    filtered = (thirdSection.B0 * value) + thirdZ1;
+                    thirdZ1 = (thirdSection.B1 * value) - (thirdSection.A1 * filtered) + thirdZ2;
+                    thirdZ2 = (thirdSection.B2 * value) - (thirdSection.A2 * filtered);
+
+                    value = filtered;
+                    filtered = (fourthSection.B0 * value) + fourthZ1;
+                    fourthZ1 = (fourthSection.B1 * value) - (fourthSection.A1 * filtered) + fourthZ2;
+                    fourthZ2 = (fourthSection.B2 * value) - (fourthSection.A2 * filtered);
+                    values[sample] = filtered;
+                }
+            }
+
+            ScaleInitialConditionsFloat32(
+                zi,
+                edge == 0 ? output[^1] : right[^1],
+                state);
+            firstZ1 = state[0];
+            firstZ2 = state[1];
+            secondZ1 = state[2];
+            secondZ2 = state[3];
+            thirdZ1 = state[4];
+            thirdZ2 = state[5];
+            fourthZ1 = state[6];
+            fourthZ2 = state[7];
+            for (int segment = 2; segment >= 0; segment--)
+            {
+                Span<float> values = segment == 0 ? left : segment == 1 ? output : right;
+                for (int sample = values.Length - 1; sample >= 0; sample--)
+                {
+                    float value = values[sample];
+                    float filtered = (firstSection.B0 * value) + firstZ1;
+                    firstZ1 = (firstSection.B1 * value) - (firstSection.A1 * filtered) + firstZ2;
+                    firstZ2 = (firstSection.B2 * value) - (firstSection.A2 * filtered);
+
+                    value = filtered;
+                    filtered = (secondSection.B0 * value) + secondZ1;
+                    secondZ1 = (secondSection.B1 * value) - (secondSection.A1 * filtered) + secondZ2;
+                    secondZ2 = (secondSection.B2 * value) - (secondSection.A2 * filtered);
+
+                    value = filtered;
+                    filtered = (thirdSection.B0 * value) + thirdZ1;
+                    thirdZ1 = (thirdSection.B1 * value) - (thirdSection.A1 * filtered) + thirdZ2;
+                    thirdZ2 = (thirdSection.B2 * value) - (thirdSection.A2 * filtered);
+
+                    value = filtered;
+                    filtered = (fourthSection.B0 * value) + fourthZ1;
+                    fourthZ1 = (fourthSection.B1 * value) - (fourthSection.A1 * filtered) + fourthZ2;
+                    fourthZ2 = (fourthSection.B2 * value) - (fourthSection.A2 * filtered);
+                    values[sample] = filtered;
+                }
+            }
+        }
+        finally
+        {
+            if (rentedEdges is not null)
+            {
+                ArrayPool<float>.Shared.Return(rentedEdges);
+            }
         }
     }
 
