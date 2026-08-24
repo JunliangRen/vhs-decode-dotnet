@@ -66,7 +66,7 @@ public sealed partial class ReadmeLocalizationTests
     private const string LatestPerformancePhase62Marker =
         "<!-- LATEST_PERFORMANCE_PHASE62: kernel-trials=8 short-ab-pairs=3 " +
         "500-ab-pairs=2 1000-ab-pairs=2 thread-gate-runs=7 memory-runs=1 " +
-        "public-cell-runs=60 intrinsic-runs=3 tests=1613 -->";
+        "public-cell-runs=60 intrinsic-runs=4 tests=1613 -->";
 
     private const string FullCiTestCommand =
         "run: dotnet test --solution VHSDecodeDotNet.slnx --configuration Release " +
@@ -83,6 +83,15 @@ public sealed partial class ReadmeLocalizationTests
 
     private const string FinalRealRadix4ScalarFallbackTestName =
         "Run final real PocketFFT radix-4 scalar fallback test";
+
+    private const string RealInputStagingAvxTestCommand =
+        "run: dotnet test tests/VHSDecode.Tests/VHSDecode.Tests.csproj " +
+        "--configuration Release --no-build --no-restore --filter-method " +
+        "'*ComplexFftDirectOutputMatchesFrozenPowerOfTwoHashes*' " +
+        "--minimum-expected-tests 1";
+
+    private const string RealInputStagingAvxRequirement =
+        "VHSDECODE_REQUIRE_AVX_REAL_STAGING: \"1\"";
 
     private const string SuperGaussianMaskAvxTestCommand =
         "run: dotnet test tests/VHSDecode.Tests/VHSDecode.Tests.csproj " +
@@ -1630,6 +1639,8 @@ public sealed partial class ReadmeLocalizationTests
         Assert.Contains(FullCiTestCommand, workflow, StringComparison.Ordinal);
         Assert.Contains(FinalRealRadix4AvxTestCommand, workflow, StringComparison.Ordinal);
         Assert.Contains(FinalRealRadix4AvxRequirement, workflow, StringComparison.Ordinal);
+        Assert.Contains(RealInputStagingAvxTestCommand, workflow, StringComparison.Ordinal);
+        Assert.Contains(RealInputStagingAvxRequirement, workflow, StringComparison.Ordinal);
         Assert.Contains(
             FinalRealRadix4ScalarFallbackTestName,
             workflow,

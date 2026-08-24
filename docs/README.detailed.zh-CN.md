@@ -833,7 +833,7 @@ v0.4.0、Exact `current`、IPP-fast v0.4.0 和 IPP-fast `current`。文件名不
 | `--threads 10` | 52.965 s | 54.949 s | 9.219 s / 5.745x / 82.59% | 7.822 s / 7.025x / 85.77% | 8.326 s / 6.361x / 84.28% | 5.940 s / 9.251x / 89.19% |
 | `--threads 20` | 53.555 s | 54.842 s | 7.456 s / 7.183x / 86.08% | 6.571 s / 8.346x / 88.02% | 7.116 s / 7.526x / 86.71% | 4.728 s / 11.600x / 91.38% |
 <!-- LATEST_PERFORMANCE_END -->
-<!-- LATEST_PERFORMANCE_PHASE62: kernel-trials=8 short-ab-pairs=3 500-ab-pairs=2 1000-ab-pairs=2 thread-gate-runs=7 memory-runs=1 public-cell-runs=60 intrinsic-runs=3 tests=1613 -->
+<!-- LATEST_PERFORMANCE_PHASE62: kernel-trials=8 short-ab-pairs=3 500-ab-pairs=2 1000-ab-pairs=2 thread-gate-runs=7 memory-runs=1 public-cell-runs=60 intrinsic-runs=4 tests=1613 -->
 <!-- LATEST_PERFORMANCE_RUNS: performance-snapshot-runs=90 dotnet-matrix-runs=60 dotnet-current-runs=30 python-reference-runs=30 dotnet-repeats=3 python-reference-date=2026-08-12 dotnet-v040-date=2026-08-24 dotnet-current-date=2026-08-24 phase22-200-ab-pairs=20 phase22-long-ab-pairs=8 phase22-thread-backend-runs=60 phase22-gc-traces=2 phase22-tests=1438 phase24-short-ab-pairs=6 phase24-long-ab-pairs=4 phase24-thread-gate-runs=12 phase24-tests=1442 phase25-public-cell-runs=15 phase25-public-ab-pairs=15 phase25-long-ab-pairs=3 phase25-thread-gate-runs=12 phase25-tests=1446 phase26-kernel-ab-pairs=8 phase26-long-ab-pairs=4 phase26-thread-backend-runs=36 phase26-public-cell-runs=30 phase26-tests=1447 phase27-kernel-ab-pairs=8 phase27-long-ab-pairs=8 phase27-thread-backend-runs=24 phase27-public-cell-runs=60 phase27-tests=1448 phase28-kernel-ab-pairs=8 phase28-long-ab-pairs=6 phase28-thread-backend-runs=24 phase28-intrinsic-runs=3 phase28-public-cell-runs=60 phase28-tests=1448 phase30-burst-kernel-runs=14 phase30-long-ab-pairs=3 phase30-thread-gate-runs=6 phase30-memory-runs=2 phase30-public-cell-runs=60 phase30-tests=1448 phase31-interleaved-ab-pairs=9 phase31-long-gate-runs=8 phase31-thread-backend-runs=24 phase31-memory-runs=4 phase31-public-cell-runs=60 phase31-tests=1459 phase32-vblank-short-ab-pairs=6 phase32-vblank-long-ab-pairs=2 phase32-thread-backend-runs=24 phase32-gc-traces=2 phase32-counter-runs=2 phase32-tests=1460 phase33-sync-list-short-ab-pairs=6 phase33-sync-list-long-ab-pairs=2 phase33-thread-backend-runs=24 phase33-gc-traces=1 phase33-memory-runs=4 phase33-public-cell-runs=60 phase33-tests=1463 phase42-public-cell-runs=60 phase42-tests=1609 phase52-current-short-ab-pairs=8 phase52-v040-short-ab-pairs=4 phase52-long-ab-pairs=2 phase52-public-cell-runs=60 phase52-intrinsic-runs=3 phase52-tests=1610 phase59-short-ab-pairs=3 phase59-500-ab-pairs=3 phase59-1000-ab-pairs=3 phase59-public-cell-runs=60 phase59-intrinsic-runs=2 phase59-tests=1610 phase60-short-ab-pairs=3 phase60-500-ab-pairs=2 phase60-1000-ab-pairs=2 phase60-thread-gate-runs=4 phase60-memory-runs=1 phase60-public-cell-runs=60 phase60-tests=1613 phase61-trace-runs=1 phase61-rejected-candidates=2 phase61-short-ab-pairs=3 phase61-500-ab-pairs=2 phase61-1000-ab-pairs=2 phase61-thread-gate-runs=6 phase61-memory-runs=1 phase61-public-cell-runs=60 phase61-intrinsic-runs=2 phase61-tests=1613 python-v040-runs=15 python-v040-hashes=15 python-pr341-runs=15 python-pr341-hashes=1 -->
 
 三次运行的墙钟范围如下：
@@ -942,9 +942,9 @@ twiddle、归一化或求值顺序；长度为二和尾部样本仍使用原标�
 跨模式都产生同一套七项 hash。一次 2,000 帧运行用时 60.957 秒，平均使用 8.94 个
 有效核；峰值 private memory 为 367.7 MiB，后半程范围为 365.8-367.5 MiB，并有
 3 次超过 1 MiB 的回落。刷新的 60 次 Exact/IPP-fast 矩阵在每个单元格内和跨 worker
-设置都保持确定。五项聚焦存储测试在原生、禁用 AVX、禁用全部硬件 Intrinsic 三种
-模式下均通过；标准 xUnit v3 共发现 1,613 项测试，其中 1,610 项通过，3 项依赖环境
-的测试按预期跳过。
+设置都保持确定。单独的 AVX-required 调用保证原生 staging 检查不能静默回退到标量；
+五项聚焦存储测试在禁用 AVX 和禁用全部硬件 Intrinsic 时也均通过。标准 xUnit v3
+共发现 1,613 项测试，其中 1,610 项通过，3 项依赖环境的测试按预期跳过。
 
 ### 四 section 托管 SOS 直接输出
 

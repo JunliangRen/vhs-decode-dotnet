@@ -1,5 +1,6 @@
 using System.Numerics;
 using System.Runtime.InteropServices;
+using System.Runtime.Intrinsics.X86;
 using System.Security.Cryptography;
 using VHSDecode.Core.Dsp;
 using Xunit;
@@ -11,6 +12,11 @@ public sealed class PocketFftComplexStorageTests
     [Fact(DisplayName = "Complex FFT direct output matches frozen power-of-two hashes")]
     public void ComplexFftDirectOutputMatchesFrozenPowerOfTwoHashes()
     {
+        if (Environment.GetEnvironmentVariable("VHSDECODE_REQUIRE_AVX_REAL_STAGING") == "1")
+        {
+            Assert.True(Avx.IsSupported, "The CI real-input staging run requires AVX support.");
+        }
+
         (int Length, string Forward, string Inverse, string RealForward)[] cases =
         [
             (2,
