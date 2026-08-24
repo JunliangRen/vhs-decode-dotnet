@@ -455,7 +455,8 @@ public sealed class TbcFieldDecodePipeline : IDisposable
                 syncAnalyzer.UsecToSamples(0.22),
                 workerThreads,
                 parallelizePreciseEdgeScan: dspBackend == DspBackend.Exact,
-                useCompactParallelRadix: dspBackend == DspBackend.Exact);
+                useCompactParallelRadix: dspBackend == DspBackend.Exact,
+                useWideParallelPreprocessing: dspBackend == DspBackend.Exact);
             _vhsVSyncLevelRefiner = new VhsVSyncLevelRefiner();
         }
 
