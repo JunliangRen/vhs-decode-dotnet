@@ -73,6 +73,15 @@ public sealed partial class ReadmeLocalizationTests
         "dotnet-matrix-runs=60 dotnet-repeats=3 " +
         "python-reference-date=2026-08-12 python-reference-runs=30 -->";
 
+    private const string LatestPerformancePhase63EvidenceMarker =
+        "<!-- LATEST_PERFORMANCE_PHASE63_EVIDENCE: 1000-pairs=3 " +
+        "1000-independent-wall-medians=30.213/29.576s " +
+        "1000-paired-wall-gain-median=1.35% " +
+        "1000-independent-cpu-medians=290.719/279.297s " +
+        "1000-paired-cpu-gain-median=3.93% t0-frames=160 t0-pairs=3 " +
+        "t0-independent-wall-medians=37.492/36.962s " +
+        "t0-paired-wall-gain-median=0.43% -->";
+
     private const string FullCiTestCommand =
         "run: dotnet test --solution VHSDecodeDotNet.slnx --configuration Release " +
         "--no-build --no-restore --minimum-expected-tests 1613";
@@ -1522,6 +1531,12 @@ public sealed partial class ReadmeLocalizationTests
             Assert.Contains(LatestPerformanceRunsMarker, content, StringComparison.Ordinal);
             Assert.Contains(LatestPerformancePhase63Marker, content, StringComparison.Ordinal);
             Assert.Contains(LatestPerformancePhase63RunsMarker, content, StringComparison.Ordinal);
+            Assert.True(
+                ContainsAdjacentLines(
+                    content,
+                    LatestPerformancePhase63RunsMarker,
+                    LatestPerformancePhase63EvidenceMarker),
+                $"{filename} does not bind the Phase63 evidence tuple to its run marker.");
             foreach (string fact in overviewFacts)
             {
                 Assert.Contains(fact, content, StringComparison.Ordinal);
@@ -1548,6 +1563,12 @@ public sealed partial class ReadmeLocalizationTests
             Assert.Contains(LatestPerformanceRunsMarker, content, StringComparison.Ordinal);
             Assert.Contains(LatestPerformancePhase63Marker, content, StringComparison.Ordinal);
             Assert.Contains(LatestPerformancePhase63RunsMarker, content, StringComparison.Ordinal);
+            Assert.True(
+                ContainsAdjacentLines(
+                    content,
+                    LatestPerformancePhase63RunsMarker,
+                    LatestPerformancePhase63EvidenceMarker),
+                $"{filename} does not bind the Phase63 evidence tuple to its run marker.");
             foreach (string fact in synchronizedFacts)
             {
                 Assert.Contains(fact, content, StringComparison.Ordinal);
@@ -1795,6 +1816,15 @@ public sealed partial class ReadmeLocalizationTests
 
         return directory?.FullName
             ?? throw new DirectoryNotFoundException("Could not locate the repository root.");
+    }
+
+    private static bool ContainsAdjacentLines(string content, string first, string second)
+    {
+        string normalized = content.ReplaceLineEndings("\n");
+        string block = $"{first}\n{second}";
+        int index = normalized.IndexOf(block, StringComparison.Ordinal);
+        return index >= 0
+            && index == normalized.LastIndexOf(block, StringComparison.Ordinal);
     }
 
     private static string SingleCapture(Regex regex, string input, string group)
