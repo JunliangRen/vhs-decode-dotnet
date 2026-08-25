@@ -818,8 +818,8 @@ JSON、有序 `fileLoc`、stdout、归一化 stderr 和日志均一致。新增�
 40 MHz PAL VHS `.ldf` 夹具上比较 Python v0.4.0、已合并的 Python PR341、Exact
 v0.4.0、Exact `current`、IPP-fast v0.4.0 和 IPP-fast `current`。文件名不会公开。
 当前表格保留了 2026-08-12 的 30 次固定 Python 参考测量。全部 60 次 .NET 测量已在
-2026-08-24 用基于 main commit `9dfc1d2` 并包含 AVX 实数到复数 FFT 输入 staging 的
-同一个 .NET 11 Preview 7 自包含候选二进制同时刷新。本次候选刷新不发布新标签或 Release。
+2026-08-26 用基于 main commit `763b4bb` 并包含标量 PocketFFT pair 内联的
+同一个 .NET 11 Preview 7 自包含候选二进制同时刷新。
 每个 .NET 单元格依次给出墙钟中位数、
 相对同 profile Python 列的倍速和墙钟缩短比例；使用其他批次、格式或夹具
 的历史矩阵不能直接横向比较：
@@ -827,13 +827,14 @@ v0.4.0、Exact `current`、IPP-fast v0.4.0 和 IPP-fast `current`。文件名不
 <!-- LATEST_PERFORMANCE_BEGIN -->
 | CLI 模式（workers） | Python v0.4.0 | Python PR341 | Exact + v0.4.0 | Exact + current | IPP-fast + v0.4.0 | IPP-fast + current |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| 默认（5） | 52.811 s | 54.243 s | 12.165 s / 4.341x / 76.96% | 11.233 s / 4.829x / 79.29% | 10.438 s / 5.059x / 80.23% | 8.089 s / 6.706x / 85.09% |
-| `--threads 1` | 57.067 s | 56.762 s | 33.216 s / 1.718x / 41.79% | 38.353 s / 1.480x / 32.43% | 23.280 s / 2.451x / 59.21% | 24.974 s / 2.273x / 56.00% |
-| `--threads 5` | 52.920 s | 55.722 s | 12.015 s / 4.404x / 77.30% | 11.180 s / 4.984x / 79.94% | 10.460 s / 5.059x / 80.24% | 8.011 s / 6.955x / 85.62% |
-| `--threads 10` | 52.965 s | 54.949 s | 9.219 s / 5.745x / 82.59% | 7.822 s / 7.025x / 85.77% | 8.326 s / 6.361x / 84.28% | 5.940 s / 9.251x / 89.19% |
-| `--threads 20` | 53.555 s | 54.842 s | 7.456 s / 7.183x / 86.08% | 6.571 s / 8.346x / 88.02% | 7.116 s / 7.526x / 86.71% | 4.728 s / 11.600x / 91.38% |
+| 默认（5） | 52.811 s | 54.243 s | 11.616 s / 4.546x / 78.00% | 11.357 s / 4.776x / 79.06% | 10.084 s / 5.237x / 80.90% | 7.985 s / 6.793x / 85.28% |
+| `--threads 1` | 57.067 s | 56.762 s | 32.821 s / 1.739x / 42.49% | 37.450 s / 1.516x / 34.02% | 22.508 s / 2.535x / 60.56% | 24.434 s / 2.323x / 56.95% |
+| `--threads 5` | 52.920 s | 55.722 s | 11.564 s / 4.576x / 78.15% | 10.734 s / 5.191x / 80.74% | 9.956 s / 5.315x / 81.19% | 7.866 s / 7.084x / 85.88% |
+| `--threads 10` | 52.965 s | 54.949 s | 8.912 s / 5.943x / 83.17% | 7.793 s / 7.051x / 85.82% | 8.257 s / 6.414x / 84.41% | 5.918 s / 9.286x / 89.23% |
+| `--threads 20` | 53.555 s | 54.842 s | 7.238 s / 7.399x / 86.48% | 6.330 s / 8.664x / 88.46% | 7.023 s / 7.625x / 86.89% | 4.876 s / 11.247x / 91.11% |
 <!-- LATEST_PERFORMANCE_END -->
-<!-- LATEST_PERFORMANCE_PHASE62: kernel-trials=8 short-ab-pairs=3 500-ab-pairs=2 1000-ab-pairs=2 thread-gate-runs=7 memory-runs=1 public-cell-runs=60 intrinsic-runs=4 tests=1613 -->
+<!-- LATEST_PERFORMANCE_PHASE63: trace-runs=1 rejected-candidates=6 short-ab-pairs=3 500-ab-pairs=3 1000-ab-pairs=3 thread-gate-runs=16 public-cell-runs=60 tests=1613 -->
+<!-- LATEST_PERFORMANCE_PHASE63_RUNS: dotnet-date=2026-08-26 dotnet-matrix-runs=60 dotnet-repeats=3 python-reference-date=2026-08-12 python-reference-runs=30 -->
 <!-- LATEST_PERFORMANCE_RUNS: performance-snapshot-runs=90 dotnet-matrix-runs=60 dotnet-current-runs=30 python-reference-runs=30 dotnet-repeats=3 python-reference-date=2026-08-12 dotnet-v040-date=2026-08-24 dotnet-current-date=2026-08-24 phase22-200-ab-pairs=20 phase22-long-ab-pairs=8 phase22-thread-backend-runs=60 phase22-gc-traces=2 phase22-tests=1438 phase24-short-ab-pairs=6 phase24-long-ab-pairs=4 phase24-thread-gate-runs=12 phase24-tests=1442 phase25-public-cell-runs=15 phase25-public-ab-pairs=15 phase25-long-ab-pairs=3 phase25-thread-gate-runs=12 phase25-tests=1446 phase26-kernel-ab-pairs=8 phase26-long-ab-pairs=4 phase26-thread-backend-runs=36 phase26-public-cell-runs=30 phase26-tests=1447 phase27-kernel-ab-pairs=8 phase27-long-ab-pairs=8 phase27-thread-backend-runs=24 phase27-public-cell-runs=60 phase27-tests=1448 phase28-kernel-ab-pairs=8 phase28-long-ab-pairs=6 phase28-thread-backend-runs=24 phase28-intrinsic-runs=3 phase28-public-cell-runs=60 phase28-tests=1448 phase30-burst-kernel-runs=14 phase30-long-ab-pairs=3 phase30-thread-gate-runs=6 phase30-memory-runs=2 phase30-public-cell-runs=60 phase30-tests=1448 phase31-interleaved-ab-pairs=9 phase31-long-gate-runs=8 phase31-thread-backend-runs=24 phase31-memory-runs=4 phase31-public-cell-runs=60 phase31-tests=1459 phase32-vblank-short-ab-pairs=6 phase32-vblank-long-ab-pairs=2 phase32-thread-backend-runs=24 phase32-gc-traces=2 phase32-counter-runs=2 phase32-tests=1460 phase33-sync-list-short-ab-pairs=6 phase33-sync-list-long-ab-pairs=2 phase33-thread-backend-runs=24 phase33-gc-traces=1 phase33-memory-runs=4 phase33-public-cell-runs=60 phase33-tests=1463 phase42-public-cell-runs=60 phase42-tests=1609 phase52-current-short-ab-pairs=8 phase52-v040-short-ab-pairs=4 phase52-long-ab-pairs=2 phase52-public-cell-runs=60 phase52-intrinsic-runs=3 phase52-tests=1610 phase59-short-ab-pairs=3 phase59-500-ab-pairs=3 phase59-1000-ab-pairs=3 phase59-public-cell-runs=60 phase59-intrinsic-runs=2 phase59-tests=1610 phase60-short-ab-pairs=3 phase60-500-ab-pairs=2 phase60-1000-ab-pairs=2 phase60-thread-gate-runs=4 phase60-memory-runs=1 phase60-public-cell-runs=60 phase60-tests=1613 phase61-trace-runs=1 phase61-rejected-candidates=2 phase61-short-ab-pairs=3 phase61-500-ab-pairs=2 phase61-1000-ab-pairs=2 phase61-thread-gate-runs=6 phase61-memory-runs=1 phase61-public-cell-runs=60 phase61-intrinsic-runs=2 phase61-tests=1613 python-v040-runs=15 python-v040-hashes=15 python-pr341-runs=15 python-pr341-hashes=1 -->
 
 三次运行的墙钟范围如下：
@@ -841,24 +842,24 @@ v0.4.0、Exact `current`、IPP-fast v0.4.0 和 IPP-fast `current`。文件名不
 <!-- LATEST_PERFORMANCE_RANGES_BEGIN -->
 | CLI 模式 | Python v0.4.0 | Python PR341 | Exact + v0.4.0 | Exact + current | IPP-fast + v0.4.0 | IPP-fast + current |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| 默认（5） | 52.583-62.222 s | 53.893-58.195 s | 11.712-12.714 s | 11.080-11.322 s | 9.873-10.518 s | 7.794-8.248 s |
-| `--threads 1` | 56.709-60.521 s | 56.335-58.991 s | 32.796-33.742 s | 37.116-38.506 s | 22.697-23.881 s | 24.425-25.720 s |
-| `--threads 5` | 52.845-53.977 s | 53.696-58.437 s | 11.869-12.069 s | 11.092-11.745 s | 10.223-10.781 s | 7.949-8.028 s |
-| `--threads 10` | 51.797-53.088 s | 52.649-56.775 s | 9.121-9.803 s | 7.710-8.178 s | 8.229-8.485 s | 5.883-6.040 s |
-| `--threads 20` | 52.967-55.987 s | 53.005-55.618 s | 7.111-7.676 s | 6.065-7.044 s | 6.802-7.188 s | 4.652-4.944 s |
+| 默认（5） | 52.583-62.222 s | 53.893-58.195 s | 11.350-11.662 s | 10.777-11.403 s | 10.083-10.156 s | 7.843-8.040 s |
+| `--threads 1` | 56.709-60.521 s | 56.335-58.991 s | 32.733-32.882 s | 36.901-37.693 s | 22.507-22.558 s | 24.258-24.541 s |
+| `--threads 5` | 52.845-53.977 s | 53.696-58.437 s | 11.535-11.692 s | 10.495-10.872 s | 9.954-10.212 s | 7.852-7.889 s |
+| `--threads 10` | 51.797-53.088 s | 52.649-56.775 s | 8.910-8.929 s | 7.383-7.840 s | 8.186-8.313 s | 5.882-6.056 s |
+| `--threads 20` | 52.967-55.987 s | 53.005-55.618 s | 7.151-7.366 s | 6.024-7.093 s | 6.950-7.091 s | 4.835-4.919 s |
 <!-- LATEST_PERFORMANCE_RANGES_END -->
 
 保留的 30 次 Python 测量来自 2026-08-12 固定条件活动。全部二十个 .NET 单元格来自
-同一个 .NET 11 Preview 7 候选二进制在 2026-08-24 完成的 60 次运行。每个三次运行
+同一个 .NET 11 Preview 7 候选二进制在 2026-08-26 完成的 60 次运行。每个三次运行
 单元格内都只有一套亮度、色度、原始 JSON、stdout、归一化 stderr、归一化日志和
 有序 `fileLoc` hash。Python v0.4.0 的 15 次运行产生了 15 套不同的亮度、色度、JSON 和
 归一化日志 hash，因此严格 oracle 仍为 `g4315520 --threads 0`。
 
-全部刷新的 .NET 单元格都使用基于 main commit `9dfc1d2` 并包含 AVX 实数到复数
-FFT 输入 staging 的 Preview 7 自包含候选二进制；其 product version 为
-`2.7.0+9dfc1d2d14d06f064a25c680d6d678d494800725`，137,280,308 字节单文件
+全部刷新的 .NET 单元格都使用基于 main commit `763b4bb` 并包含标量 PocketFFT pair
+内联的 Preview 7 自包含候选二进制；其 product version 为
+`2.7.0+763b4bb0787fbfd48e10bd58129ee34751f6d851`，137,280,308 字节单文件
 `decode.exe` 的 SHA-256 为
-`8615CE2BD39E45F4DF8AB40B5A6D05109967782A0D0603D1B649A36476991D1A`。
+`AC8375CD73786368DC0CF4B891604608564A1299F5FB50F8D0EFD14A18AAB610`。
 测试机为 Intel Core Ultra 7 265K（20 个逻辑处理器）、Windows 11 build 26220；仓库固定
 SDK 和主机 CLI .NET SDK 均为 `11.0.100-preview.7.26381.103`。原始目录含私有夹具路径，只保留在本地；
 这些是如实报告的本地测量，不是可公开独立复现的 benchmark corpus。
@@ -870,6 +871,25 @@ Preview 7 引起了性能提升或回退。
 三轮范围展示了正常的启动、温度、调度和系统波动。倍数会同时随 Python 分子和 .NET
 分母变化，不能用于判断版本因果回退或提升；下方同一时刻交错执行的版本 A/B 才是
 本候选的因果门禁。
+
+### 标量 PocketFFT pair 内联
+
+clean Exact `current --threads 20` trace 把 1.10% 的独占采样时间归到标量
+`PocketFftComplex.Pair` helper，且直接父调用全部是 `Pass8FirstIndex`。相邻的向量重载和
+原地 helper 已有 `AggressiveInlining`，本候选只为遗漏的标量 helper 补上同一提示。
+加减法及其顺序、数据类型、FFT plan、缓冲区所有权、worker 策略和异常行为均不改变。
+
+Exact `current --threads 20` 在 160、500、1,000 帧各完成三组交错配对；每次的退出码、
+亮度、色度、原始 JSON、stdout、归一化 stderr/日志和有序 `fileLoc` 均一致。1,000 帧
+配对墙钟中位数从 30.213 降至 29.576 秒（缩短 1.35%），进程 CPU 时间从 290.719
+降至 279.297 秒（缩短 3.93%），基线/候选峰值工作集为 425.4/388.6 MiB。另行三组
+显式零线程配对的墙钟中位数从 37.492 降至 36.962 秒（缩短 0.43%），高线程收益没有
+引入可测的低线程回退。
+
+profile/thread 门禁覆盖 `v0.4.0` 和 `current` 的省略 `--threads`、显式零与 20 workers。
+刷新的 60 次 Exact/IPP-fast 矩阵在每个单元格内部以及默认/1/5/10/20 workers 之间均
+保持确定。Release solution 以 0 warning、0 error 构建；标准 xUnit v3 共发现 1,613 项，
+其中 1,610 项通过，3 项按预期因环境不可用跳过。
 
 ### 线性 TBC level-adjust 单遍处理
 
