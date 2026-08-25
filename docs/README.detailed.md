@@ -1053,10 +1053,9 @@ snapshot comparing Python v0.4.0, merged Python PR341, Exact v0.4.0, Exact
 `current`, IPP-fast v0.4.0, and IPP-fast `current` on the same private local
 40 MHz PAL VHS `.ldf` fixture. The source filename is intentionally not
 published. The active table retains 30 fixed Python reference measurements from
-2026-08-12. All 60 .NET measurements were refreshed together on 2026-08-24
+2026-08-12. All 60 .NET measurements were refreshed together on 2026-08-26
 with one self-contained .NET 11 Preview 7 candidate based on main commit
-`9dfc1d2` plus AVX real-to-complex FFT input staging. This candidate
-refresh does not publish a new tag or release. Each
+`763b4bb` plus scalar PocketFFT pair inlining. Each
 .NET cell gives the median wall time, speedup, and wall-time reduction against
 its profile-matched Python column. Historical
 matrices that used another batch, format, or fixture are not directly comparable:
@@ -1064,13 +1063,15 @@ matrices that used another batch, format, or fixture are not directly comparable
 <!-- LATEST_PERFORMANCE_BEGIN -->
 | CLI mode (workers) | Python v0.4.0 | Python PR341 | Exact + v0.4.0 | Exact + current | IPP-fast + v0.4.0 | IPP-fast + current |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| default (5) | 52.811 s | 54.243 s | 12.165 s / 4.341x / 76.96% | 11.233 s / 4.829x / 79.29% | 10.438 s / 5.059x / 80.23% | 8.089 s / 6.706x / 85.09% |
-| `--threads 1` | 57.067 s | 56.762 s | 33.216 s / 1.718x / 41.79% | 38.353 s / 1.480x / 32.43% | 23.280 s / 2.451x / 59.21% | 24.974 s / 2.273x / 56.00% |
-| `--threads 5` | 52.920 s | 55.722 s | 12.015 s / 4.404x / 77.30% | 11.180 s / 4.984x / 79.94% | 10.460 s / 5.059x / 80.24% | 8.011 s / 6.955x / 85.62% |
-| `--threads 10` | 52.965 s | 54.949 s | 9.219 s / 5.745x / 82.59% | 7.822 s / 7.025x / 85.77% | 8.326 s / 6.361x / 84.28% | 5.940 s / 9.251x / 89.19% |
-| `--threads 20` | 53.555 s | 54.842 s | 7.456 s / 7.183x / 86.08% | 6.571 s / 8.346x / 88.02% | 7.116 s / 7.526x / 86.71% | 4.728 s / 11.600x / 91.38% |
+| default (5) | 52.811 s | 54.243 s | 11.616 s / 4.546x / 78.00% | 11.357 s / 4.776x / 79.06% | 10.084 s / 5.237x / 80.90% | 7.985 s / 6.793x / 85.28% |
+| `--threads 1` | 57.067 s | 56.762 s | 32.821 s / 1.739x / 42.49% | 37.450 s / 1.516x / 34.02% | 22.508 s / 2.535x / 60.56% | 24.434 s / 2.323x / 56.95% |
+| `--threads 5` | 52.920 s | 55.722 s | 11.564 s / 4.576x / 78.15% | 10.734 s / 5.191x / 80.74% | 9.956 s / 5.315x / 81.19% | 7.866 s / 7.084x / 85.88% |
+| `--threads 10` | 52.965 s | 54.949 s | 8.912 s / 5.943x / 83.17% | 7.793 s / 7.051x / 85.82% | 8.257 s / 6.414x / 84.41% | 5.918 s / 9.286x / 89.23% |
+| `--threads 20` | 53.555 s | 54.842 s | 7.238 s / 7.399x / 86.48% | 6.330 s / 8.664x / 88.46% | 7.023 s / 7.625x / 86.89% | 4.876 s / 11.247x / 91.11% |
 <!-- LATEST_PERFORMANCE_END -->
-<!-- LATEST_PERFORMANCE_PHASE62: kernel-trials=8 short-ab-pairs=3 500-ab-pairs=2 1000-ab-pairs=2 thread-gate-runs=7 memory-runs=1 public-cell-runs=60 intrinsic-runs=4 tests=1613 -->
+<!-- LATEST_PERFORMANCE_PHASE63: trace-runs=1 rejected-candidates=6 short-ab-pairs=3 500-ab-pairs=3 1000-ab-pairs=3 thread-gate-runs=16 public-cell-runs=60 tests=1613 -->
+<!-- LATEST_PERFORMANCE_PHASE63_RUNS: dotnet-date=2026-08-26 dotnet-matrix-runs=60 dotnet-repeats=3 python-reference-date=2026-08-12 python-reference-runs=30 -->
+<!-- LATEST_PERFORMANCE_PHASE63_EVIDENCE: 1000-pairs=3 1000-independent-wall-medians=30.213/29.576s 1000-paired-wall-gain-median=1.35% 1000-independent-cpu-medians=290.719/279.297s 1000-paired-cpu-gain-median=3.93% t0-frames=160 t0-pairs=3 t0-independent-wall-medians=37.492/36.962s t0-paired-wall-gain-median=0.43% -->
 <!-- LATEST_PERFORMANCE_RUNS: performance-snapshot-runs=90 dotnet-matrix-runs=60 dotnet-current-runs=30 python-reference-runs=30 dotnet-repeats=3 python-reference-date=2026-08-12 dotnet-v040-date=2026-08-24 dotnet-current-date=2026-08-24 phase22-200-ab-pairs=20 phase22-long-ab-pairs=8 phase22-thread-backend-runs=60 phase22-gc-traces=2 phase22-tests=1438 phase24-short-ab-pairs=6 phase24-long-ab-pairs=4 phase24-thread-gate-runs=12 phase24-tests=1442 phase25-public-cell-runs=15 phase25-public-ab-pairs=15 phase25-long-ab-pairs=3 phase25-thread-gate-runs=12 phase25-tests=1446 phase26-kernel-ab-pairs=8 phase26-long-ab-pairs=4 phase26-thread-backend-runs=36 phase26-public-cell-runs=30 phase26-tests=1447 phase27-kernel-ab-pairs=8 phase27-long-ab-pairs=8 phase27-thread-backend-runs=24 phase27-public-cell-runs=60 phase27-tests=1448 phase28-kernel-ab-pairs=8 phase28-long-ab-pairs=6 phase28-thread-backend-runs=24 phase28-intrinsic-runs=3 phase28-public-cell-runs=60 phase28-tests=1448 phase30-burst-kernel-runs=14 phase30-long-ab-pairs=3 phase30-thread-gate-runs=6 phase30-memory-runs=2 phase30-public-cell-runs=60 phase30-tests=1448 phase31-interleaved-ab-pairs=9 phase31-long-gate-runs=8 phase31-thread-backend-runs=24 phase31-memory-runs=4 phase31-public-cell-runs=60 phase31-tests=1459 phase32-vblank-short-ab-pairs=6 phase32-vblank-long-ab-pairs=2 phase32-thread-backend-runs=24 phase32-gc-traces=2 phase32-counter-runs=2 phase32-tests=1460 phase33-sync-list-short-ab-pairs=6 phase33-sync-list-long-ab-pairs=2 phase33-thread-backend-runs=24 phase33-gc-traces=1 phase33-memory-runs=4 phase33-public-cell-runs=60 phase33-tests=1463 phase42-public-cell-runs=60 phase42-tests=1609 phase52-current-short-ab-pairs=8 phase52-v040-short-ab-pairs=4 phase52-long-ab-pairs=2 phase52-public-cell-runs=60 phase52-intrinsic-runs=3 phase52-tests=1610 phase59-short-ab-pairs=3 phase59-500-ab-pairs=3 phase59-1000-ab-pairs=3 phase59-public-cell-runs=60 phase59-intrinsic-runs=2 phase59-tests=1610 phase60-short-ab-pairs=3 phase60-500-ab-pairs=2 phase60-1000-ab-pairs=2 phase60-thread-gate-runs=4 phase60-memory-runs=1 phase60-public-cell-runs=60 phase60-tests=1613 phase61-trace-runs=1 phase61-rejected-candidates=2 phase61-short-ab-pairs=3 phase61-500-ab-pairs=2 phase61-1000-ab-pairs=2 phase61-thread-gate-runs=6 phase61-memory-runs=1 phase61-public-cell-runs=60 phase61-intrinsic-runs=2 phase61-tests=1613 python-v040-runs=15 python-v040-hashes=15 python-pr341-runs=15 python-pr341-hashes=1 -->
 
 The three-run wall-time ranges were:
@@ -1078,15 +1079,15 @@ The three-run wall-time ranges were:
 <!-- LATEST_PERFORMANCE_RANGES_BEGIN -->
 | CLI mode | Python v0.4.0 | Python PR341 | Exact + v0.4.0 | Exact + current | IPP-fast + v0.4.0 | IPP-fast + current |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| default (5) | 52.583-62.222 s | 53.893-58.195 s | 11.712-12.714 s | 11.080-11.322 s | 9.873-10.518 s | 7.794-8.248 s |
-| `--threads 1` | 56.709-60.521 s | 56.335-58.991 s | 32.796-33.742 s | 37.116-38.506 s | 22.697-23.881 s | 24.425-25.720 s |
-| `--threads 5` | 52.845-53.977 s | 53.696-58.437 s | 11.869-12.069 s | 11.092-11.745 s | 10.223-10.781 s | 7.949-8.028 s |
-| `--threads 10` | 51.797-53.088 s | 52.649-56.775 s | 9.121-9.803 s | 7.710-8.178 s | 8.229-8.485 s | 5.883-6.040 s |
-| `--threads 20` | 52.967-55.987 s | 53.005-55.618 s | 7.111-7.676 s | 6.065-7.044 s | 6.802-7.188 s | 4.652-4.944 s |
+| default (5) | 52.583-62.222 s | 53.893-58.195 s | 11.350-11.662 s | 10.777-11.403 s | 10.083-10.156 s | 7.843-8.040 s |
+| `--threads 1` | 56.709-60.521 s | 56.335-58.991 s | 32.733-32.882 s | 36.901-37.693 s | 22.507-22.558 s | 24.258-24.541 s |
+| `--threads 5` | 52.845-53.977 s | 53.696-58.437 s | 11.535-11.692 s | 10.495-10.872 s | 9.954-10.212 s | 7.852-7.889 s |
+| `--threads 10` | 51.797-53.088 s | 52.649-56.775 s | 8.910-8.929 s | 7.383-7.840 s | 8.186-8.313 s | 5.882-6.056 s |
+| `--threads 20` | 52.967-55.987 s | 53.005-55.618 s | 7.151-7.366 s | 6.024-7.093 s | 6.950-7.091 s | 4.835-4.919 s |
 <!-- LATEST_PERFORMANCE_RANGES_END -->
 
 The 30 retained Python measurements come from the fixed-condition 2026-08-12
-campaign. All twenty .NET cells contain 60 complete 2026-08-24 runs from the
+campaign. All twenty .NET cells contain 60 complete 2026-08-26 runs from the
 same .NET 11 Preview 7 candidate. Within every three-run cell, the active runs
 produced one luma, chroma, raw-JSON, stdout, normalized-stderr, normalized-log,
 and ordered-`fileLoc` hash set.
@@ -1094,10 +1095,10 @@ Python v0.4.0 produced 15 distinct luma, chroma, JSON, and normalized-log hash
 sets in 15 runs; its strict oracle therefore remains `g4315520 --threads 0`.
 
 All refreshed .NET cells use the self-contained Preview 7 candidate based on
-main commit `9dfc1d2` plus AVX real-to-complex FFT input staging. Its
-product version is `2.7.0+9dfc1d2d14d06f064a25c680d6d678d494800725`, and its
+main commit `763b4bb` plus scalar PocketFFT pair inlining. Its product version
+is `2.7.0+763b4bb0787fbfd48e10bd58129ee34751f6d851`, and its
 137,280,308-byte single-file `decode.exe` SHA-256 is
-`8615CE2BD39E45F4DF8AB40B5A6D05109967782A0D0603D1B649A36476991D1A`.
+`AC8375CD73786368DC0CF4B891604608564A1299F5FB50F8D0EFD14A18AAB610`.
 The host was an Intel Core Ultra 7 265K with 20 logical processors, Windows 11
 build 26220, and the repository-pinned and host CLI .NET SDK
 `11.0.100-preview.7.26381.103`. Raw directories stay local because they contain
@@ -1113,6 +1114,31 @@ The three-run ranges expose ordinary startup, thermal, scheduler, and system
 variation. Ratio cells move when either the Python numerator or .NET denominator
 moves. They are not used to attribute a revision regression or speedup; the
 same-moment interleaved revision A/B evidence below is the causal gate.
+
+### Scalar PocketFFT pair inlining
+
+The clean Exact `current --threads 20` trace attributed 1.10% exclusive sampled
+time to the scalar `PocketFftComplex.Pair` helper, entirely below
+`Pass8FirstIndex`. The adjacent vector overload and in-place helpers already had
+`AggressiveInlining`; this candidate adds the missing hint to the scalar helper.
+The additions and subtractions, their order, data types, FFT plan, buffer
+ownership, worker policy, and exception behavior are unchanged.
+
+Three interleaved pairs at each of 160, 500, and 1,000 frames matched exit code,
+luma, chroma, raw JSON, stdout, normalized stderr/logs, and ordered `fileLoc` for
+Exact `current --threads 20`. At 1,000 frames, independent baseline/candidate
+medians were 30.213/29.576 wall seconds and 290.719/279.297 CPU seconds. The
+medians of the three per-pair gains were 1.35% wall and 3.93% CPU. Peak working
+set was 425.4/388.6 MiB for baseline/candidate. An additional three-pair
+explicit-zero run had independent baseline/candidate wall medians of
+37.492/36.962 seconds; the median per-pair gain was 0.43%, so the high-worker
+gain did not introduce a measured low-worker regression.
+
+Profile/thread gates covered omitted `--threads`, explicit zero, and 20 workers
+for both `v0.4.0` and `current`. The refreshed 60-run Exact/IPP-fast matrix was
+deterministic within every cell and across default/1/5/10/20 worker settings.
+The Release solution built with zero warnings and errors; the standard xUnit v3
+run discovered 1,613 tests, with 1,610 passing and 3 expected environment skips.
 
 ### Single-pass linear TBC level adjustment
 

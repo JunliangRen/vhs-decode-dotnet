@@ -63,10 +63,24 @@ public sealed partial class ReadmeLocalizationTests
         "python-v040-runs=15 python-v040-hashes=15 " +
         "python-pr341-runs=15 python-pr341-hashes=1 -->";
 
-    private const string LatestPerformancePhase62Marker =
-        "<!-- LATEST_PERFORMANCE_PHASE62: kernel-trials=8 short-ab-pairs=3 " +
-        "500-ab-pairs=2 1000-ab-pairs=2 thread-gate-runs=7 memory-runs=1 " +
-        "public-cell-runs=60 intrinsic-runs=4 tests=1613 -->";
+    private const string LatestPerformancePhase63Marker =
+        "<!-- LATEST_PERFORMANCE_PHASE63: trace-runs=1 rejected-candidates=6 " +
+        "short-ab-pairs=3 500-ab-pairs=3 1000-ab-pairs=3 " +
+        "thread-gate-runs=16 public-cell-runs=60 tests=1613 -->";
+
+    private const string LatestPerformancePhase63RunsMarker =
+        "<!-- LATEST_PERFORMANCE_PHASE63_RUNS: dotnet-date=2026-08-26 " +
+        "dotnet-matrix-runs=60 dotnet-repeats=3 " +
+        "python-reference-date=2026-08-12 python-reference-runs=30 -->";
+
+    private const string LatestPerformancePhase63EvidenceMarker =
+        "<!-- LATEST_PERFORMANCE_PHASE63_EVIDENCE: 1000-pairs=3 " +
+        "1000-independent-wall-medians=30.213/29.576s " +
+        "1000-paired-wall-gain-median=1.35% " +
+        "1000-independent-cpu-medians=290.719/279.297s " +
+        "1000-paired-cpu-gain-median=3.93% t0-frames=160 t0-pairs=3 " +
+        "t0-independent-wall-medians=37.492/36.962s " +
+        "t0-paired-wall-gain-median=0.43% -->";
 
     private const string FullCiTestCommand =
         "run: dotnet test --solution VHSDecodeDotNet.slnx --configuration Release " +
@@ -287,27 +301,27 @@ public sealed partial class ReadmeLocalizationTests
         Assert.Equal(3, expectedDetailedCommands.Length);
         string[] expectedOverviewPerformanceRows =
         [
-            "52.811 s | 54.243 s | 12.165 s | 4.341x | 11.233 s | 4.829x | 10.438 s | 5.059x | 8.089 s | 6.706x",
-            "57.067 s | 56.762 s | 33.216 s | 1.718x | 38.353 s | 1.480x | 23.280 s | 2.451x | 24.974 s | 2.273x",
-            "52.920 s | 55.722 s | 12.015 s | 4.404x | 11.180 s | 4.984x | 10.460 s | 5.059x | 8.011 s | 6.955x",
-            "52.965 s | 54.949 s | 9.219 s | 5.745x | 7.822 s | 7.025x | 8.326 s | 6.361x | 5.940 s | 9.251x",
-            "53.555 s | 54.842 s | 7.456 s | 7.183x | 6.571 s | 8.346x | 7.116 s | 7.526x | 4.728 s | 11.600x"
+            "52.811 s | 54.243 s | 11.616 s | 4.546x | 11.357 s | 4.776x | 10.084 s | 5.237x | 7.985 s | 6.793x",
+            "57.067 s | 56.762 s | 32.821 s | 1.739x | 37.450 s | 1.516x | 22.508 s | 2.535x | 24.434 s | 2.323x",
+            "52.920 s | 55.722 s | 11.564 s | 4.576x | 10.734 s | 5.191x | 9.956 s | 5.315x | 7.866 s | 7.084x",
+            "52.965 s | 54.949 s | 8.912 s | 5.943x | 7.793 s | 7.051x | 8.257 s | 6.414x | 5.918 s | 9.286x",
+            "53.555 s | 54.842 s | 7.238 s | 7.399x | 6.330 s | 8.664x | 7.023 s | 7.625x | 4.876 s | 11.247x"
         ];
         string[] expectedDetailedPerformanceRows =
         [
-            "52.811 s | 54.243 s | 12.165 s | 4.341x | 76.96% | 11.233 s | 4.829x | 79.29% | 10.438 s | 5.059x | 80.23% | 8.089 s | 6.706x | 85.09%",
-            "57.067 s | 56.762 s | 33.216 s | 1.718x | 41.79% | 38.353 s | 1.480x | 32.43% | 23.280 s | 2.451x | 59.21% | 24.974 s | 2.273x | 56.00%",
-            "52.920 s | 55.722 s | 12.015 s | 4.404x | 77.30% | 11.180 s | 4.984x | 79.94% | 10.460 s | 5.059x | 80.24% | 8.011 s | 6.955x | 85.62%",
-            "52.965 s | 54.949 s | 9.219 s | 5.745x | 82.59% | 7.822 s | 7.025x | 85.77% | 8.326 s | 6.361x | 84.28% | 5.940 s | 9.251x | 89.19%",
-            "53.555 s | 54.842 s | 7.456 s | 7.183x | 86.08% | 6.571 s | 8.346x | 88.02% | 7.116 s | 7.526x | 86.71% | 4.728 s | 11.600x | 91.38%"
+            "52.811 s | 54.243 s | 11.616 s | 4.546x | 78.00% | 11.357 s | 4.776x | 79.06% | 10.084 s | 5.237x | 80.90% | 7.985 s | 6.793x | 85.28%",
+            "57.067 s | 56.762 s | 32.821 s | 1.739x | 42.49% | 37.450 s | 1.516x | 34.02% | 22.508 s | 2.535x | 60.56% | 24.434 s | 2.323x | 56.95%",
+            "52.920 s | 55.722 s | 11.564 s | 4.576x | 78.15% | 10.734 s | 5.191x | 80.74% | 9.956 s | 5.315x | 81.19% | 7.866 s | 7.084x | 85.88%",
+            "52.965 s | 54.949 s | 8.912 s | 5.943x | 83.17% | 7.793 s | 7.051x | 85.82% | 8.257 s | 6.414x | 84.41% | 5.918 s | 9.286x | 89.23%",
+            "53.555 s | 54.842 s | 7.238 s | 7.399x | 86.48% | 6.330 s | 8.664x | 88.46% | 7.023 s | 7.625x | 86.89% | 4.876 s | 11.247x | 91.11%"
         ];
         string[] expectedDetailedPerformanceRangeRows =
         [
-            "default 5 | 52.583-62.222 s | 53.893-58.195 s | 11.712-12.714 s | 11.080-11.322 s | 9.873-10.518 s | 7.794-8.248 s",
-            "threads 1 | 56.709-60.521 s | 56.335-58.991 s | 32.796-33.742 s | 37.116-38.506 s | 22.697-23.881 s | 24.425-25.720 s",
-            "threads 5 | 52.845-53.977 s | 53.696-58.437 s | 11.869-12.069 s | 11.092-11.745 s | 10.223-10.781 s | 7.949-8.028 s",
-            "threads 10 | 51.797-53.088 s | 52.649-56.775 s | 9.121-9.803 s | 7.710-8.178 s | 8.229-8.485 s | 5.883-6.040 s",
-            "threads 20 | 52.967-55.987 s | 53.005-55.618 s | 7.111-7.676 s | 6.065-7.044 s | 6.802-7.188 s | 4.652-4.944 s"
+            "default 5 | 52.583-62.222 s | 53.893-58.195 s | 11.350-11.662 s | 10.777-11.403 s | 10.083-10.156 s | 7.843-8.040 s",
+            "threads 1 | 56.709-60.521 s | 56.335-58.991 s | 32.733-32.882 s | 36.901-37.693 s | 22.507-22.558 s | 24.258-24.541 s",
+            "threads 5 | 52.845-53.977 s | 53.696-58.437 s | 11.535-11.692 s | 10.495-10.872 s | 9.954-10.212 s | 7.852-7.889 s",
+            "threads 10 | 51.797-53.088 s | 52.649-56.775 s | 8.910-8.929 s | 7.383-7.840 s | 8.186-8.313 s | 5.882-6.056 s",
+            "threads 20 | 52.967-55.987 s | 53.005-55.618 s | 7.151-7.366 s | 6.024-7.093 s | 6.950-7.091 s | 4.835-4.919 s"
         ];
 
         string[] overviewFacts =
@@ -327,19 +341,19 @@ public sealed partial class ReadmeLocalizationTests
             "v0.4.0-2.7.0",
             "52.811 s",
             "54.243 s",
-            "12.165 s",
-            "11.233 s",
-            "8.346x",
-            "11.600x",
-            "9dfc1d2",
-            "34.711",
-            "33.171",
-            "294.758",
-            "290.016",
-            "4.4%",
-            "1.6%",
-            "60.957",
-            "367.7 MiB",
+            "11.616 s",
+            "11.357 s",
+            "8.664x",
+            "11.247x",
+            "763b4bb",
+            "30.213",
+            "29.576",
+            "290.719",
+            "279.297",
+            "1.35%",
+            "3.93%",
+            "425.4",
+            "388.6 MiB",
             "1,610",
             "g4315520",
             "--threads 0",
@@ -1400,9 +1414,15 @@ public sealed partial class ReadmeLocalizationTests
             "9.82",
             "588.6 MiB",
             "637.7 MiB",
-            "9dfc1d2",
-            "2.7.0+9dfc1d2d14d06f064a25c680d6d678d494800725",
-            "8615CE2BD39E45F4DF8AB40B5A6D05109967782A0D0603D1B649A36476991D1A",
+            "763b4bb",
+            "2.7.0+763b4bb0787fbfd48e10bd58129ee34751f6d851",
+            "AC8375CD73786368DC0CF4B891604608564A1299F5FB50F8D0EFD14A18AAB610",
+            "30.213",
+            "290.719",
+            "279.297",
+            "1.35%",
+            "3.93%",
+            "425.4/388.6 MiB",
             "137,280,308",
             "28.804",
             "28.549",
@@ -1509,7 +1529,14 @@ public sealed partial class ReadmeLocalizationTests
                 expectedOverviewPerformanceRows.SequenceEqual(PerformanceMetricRows(content)),
                 $"{filename} does not contain the expected profile-matched performance matrix.");
             Assert.Contains(LatestPerformanceRunsMarker, content, StringComparison.Ordinal);
-            Assert.Contains(LatestPerformancePhase62Marker, content, StringComparison.Ordinal);
+            Assert.Contains(LatestPerformancePhase63Marker, content, StringComparison.Ordinal);
+            Assert.Contains(LatestPerformancePhase63RunsMarker, content, StringComparison.Ordinal);
+            Assert.True(
+                ContainsAdjacentLines(
+                    content,
+                    LatestPerformancePhase63RunsMarker,
+                    LatestPerformancePhase63EvidenceMarker),
+                $"{filename} does not bind the Phase63 evidence tuple to its run marker.");
             foreach (string fact in overviewFacts)
             {
                 Assert.Contains(fact, content, StringComparison.Ordinal);
@@ -1534,7 +1561,14 @@ public sealed partial class ReadmeLocalizationTests
                     PerformanceRangeRows(content)),
                 $"{filename} does not contain the expected detailed performance ranges.");
             Assert.Contains(LatestPerformanceRunsMarker, content, StringComparison.Ordinal);
-            Assert.Contains(LatestPerformancePhase62Marker, content, StringComparison.Ordinal);
+            Assert.Contains(LatestPerformancePhase63Marker, content, StringComparison.Ordinal);
+            Assert.Contains(LatestPerformancePhase63RunsMarker, content, StringComparison.Ordinal);
+            Assert.True(
+                ContainsAdjacentLines(
+                    content,
+                    LatestPerformancePhase63RunsMarker,
+                    LatestPerformancePhase63EvidenceMarker),
+                $"{filename} does not bind the Phase63 evidence tuple to its run marker.");
             foreach (string fact in synchronizedFacts)
             {
                 Assert.Contains(fact, content, StringComparison.Ordinal);
@@ -1782,6 +1816,15 @@ public sealed partial class ReadmeLocalizationTests
 
         return directory?.FullName
             ?? throw new DirectoryNotFoundException("Could not locate the repository root.");
+    }
+
+    private static bool ContainsAdjacentLines(string content, string first, string second)
+    {
+        string normalized = content.ReplaceLineEndings("\n");
+        string block = $"{first}\n{second}";
+        int index = normalized.IndexOf(block, StringComparison.Ordinal);
+        return index >= 0
+            && index == normalized.LastIndexOf(block, StringComparison.Ordinal);
     }
 
     private static string SingleCapture(Regex regex, string input, string group)

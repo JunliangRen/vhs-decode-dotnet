@@ -1561,6 +1561,7 @@ public static class PocketFftComplex
     private static Value Scale(Value value, double scale)
         => new(value.Real * scale, value.Imaginary * scale);
 
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private static void Pair(out Value sum, out Value difference, Value left, Value right)
     {
         sum = Add(left, right);
