@@ -35,7 +35,7 @@
 - VHS 家族包括 VHS/S-VHS、Betamax、Video8/Hi8、U-matic、Type C、EIAJ
   以及上游支持的 PAL/NTSC 变体。
 - TBC 工具、双击启动的用户 GUI 和开发者绘图窗口明确不在范围内。
-- Visual Studio 2026 `.slnx` 包含 **1,614** 项标准 xUnit v3 测试；测试可在
+- Visual Studio 2026 `.slnx` 包含 **1,615** 项标准 xUnit v3 测试；测试可在
   Test Explorer 中查看，也可用 `dotnet test` 运行。
 
 <!-- SECTION: start -->
@@ -219,42 +219,44 @@ Y/U/V/All = 0.954905/0.988109/0.991285/0.972301，PSNR Y/U/V/平均值为
 这是同一份私有本地 40 MHz PAL VHS `.ldf` 夹具上使用
 `--start 100 --length 160` 的含启动开销快照，且不会公开源文件名。表中保留了
 2026-08-12 的 30 次固定 Python 参考测量。全部 60 次 .NET 测量已在 2026-08-26
-用基于 PR commit `e0777e2` 并包含下述 wrapped-tail 安全修正的同一个
+用基于 main commit `b893bf7` 并包含下述 current RF 色度 pass 优化的同一个
 .NET 11 Preview 7 自包含候选二进制同时刷新。每个单元格均有三次完整运行；
 兼容性结论与速度数据分开判断。
 
 <!-- LATEST_PERFORMANCE_BEGIN -->
 | CLI 模式（workers） | Python v0.4.0 | Python PR341 | Exact + v0.4.0 | Exact + current | IPP-fast + v0.4.0 | IPP-fast + current |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| 默认（5） | 52.811 s | 54.243 s | 11.763 s / 4.489x | 11.271 s / 4.813x | 10.394 s / 5.081x | 8.129 s / 6.673x |
-| `--threads 1` | 57.067 s | 56.762 s | 33.318 s / 1.713x | 37.392 s / 1.518x | 22.578 s / 2.528x | 24.406 s / 2.326x |
-| `--threads 5` | 52.920 s | 55.722 s | 11.746 s / 4.505x | 11.132 s / 5.006x | 10.215 s / 5.181x | 8.171 s / 6.820x |
-| `--threads 10` | 52.965 s | 54.949 s | 9.071 s / 5.839x | 8.090 s / 6.792x | 8.446 s / 6.271x | 6.089 s / 9.024x |
-| `--threads 20` | 53.555 s | 54.842 s | 7.267 s / 7.369x | 7.182 s / 7.636x | 7.024 s / 7.625x | 4.962 s / 11.052x |
+| 默认（5） | 52.811 s | 54.243 s | 11.598 s / 4.553x | 11.398 s / 4.759x | 10.230 s / 5.162x | 7.997 s / 6.783x |
+| `--threads 1` | 57.067 s | 56.762 s | 32.969 s / 1.731x | 37.599 s / 1.510x | 22.629 s / 2.522x | 24.415 s / 2.325x |
+| `--threads 5` | 52.920 s | 55.722 s | 11.773 s / 4.495x | 11.100 s / 5.020x | 10.101 s / 5.239x | 7.971 s / 6.991x |
+| `--threads 10` | 52.965 s | 54.949 s | 9.040 s / 5.859x | 8.122 s / 6.765x | 8.391 s / 6.312x | 5.813 s / 9.453x |
+| `--threads 20` | 53.555 s | 54.842 s | 7.310 s / 7.327x | 7.076 s / 7.751x | 6.919 s / 7.741x | 4.868 s / 11.265x |
 <!-- LATEST_PERFORMANCE_END -->
+<!-- LATEST_PERFORMANCE_PHASE159: kernel-ab-rounds=8 320-ab-pairs=3 1000-ab-pairs=3 public-cell-runs=60 tests=1615 -->
+<!-- LATEST_PERFORMANCE_PHASE159_RUNS: dotnet-date=2026-08-26 dotnet-matrix-runs=60 dotnet-repeats=3 python-reference-date=2026-08-12 python-reference-runs=30 -->
+<!-- LATEST_PERFORMANCE_PHASE159_EVIDENCE: kernel-old-new=28.025/16.166ms kernel-wall-gain=42.317% 1000-paired-wall-gain-median=0.5385% 1000-paired-cpu-gain-median=0.6860% compatibility-surfaces=8 -->
 <!-- LATEST_PERFORMANCE_PHASE66: trace-runs=2 rejected-candidates=4 160-ab-pairs=2 500-ab-pairs=2 1000-ab-pairs=2 screening-matrix-runs=60 public-cell-runs=60 tests=1614 -->
 <!-- LATEST_PERFORMANCE_PHASE66_RUNS: dotnet-date=2026-08-26 dotnet-matrix-runs=60 dotnet-repeats=3 python-reference-date=2026-08-12 python-reference-runs=30 -->
 <!-- LATEST_PERFORMANCE_PHASE66_EVIDENCE: 1000-pairs=2 1000-combined-wall=60.344/58.614s 1000-wall-gain=2.87% 1000-combined-cpu=575.500/555.969s 1000-cpu-gain=3.39% low-worker-json-regression-caught=1 wrapped-sinc-tail-guard=1 linux-allocation-ci-fix=1 -->
 <!-- LATEST_PERFORMANCE_PHASE63: trace-runs=1 rejected-candidates=6 short-ab-pairs=3 500-ab-pairs=3 1000-ab-pairs=3 thread-gate-runs=16 public-cell-runs=60 tests=1613 -->
 <!-- LATEST_PERFORMANCE_PHASE63_RUNS: dotnet-date=2026-08-26 dotnet-matrix-runs=60 dotnet-repeats=3 python-reference-date=2026-08-12 python-reference-runs=30 -->
 <!-- LATEST_PERFORMANCE_PHASE63_EVIDENCE: 1000-pairs=3 1000-independent-wall-medians=30.213/29.576s 1000-paired-wall-gain-median=1.35% 1000-independent-cpu-medians=290.719/279.297s 1000-paired-cpu-gain-median=3.93% t0-frames=160 t0-pairs=3 t0-independent-wall-medians=37.492/36.962s t0-paired-wall-gain-median=0.43% -->
-<!-- LATEST_PERFORMANCE_RUNS: performance-snapshot-runs=90 dotnet-matrix-runs=60 dotnet-current-runs=30 python-reference-runs=30 dotnet-repeats=3 python-reference-date=2026-08-12 dotnet-v040-date=2026-08-24 dotnet-current-date=2026-08-24 phase22-200-ab-pairs=20 phase22-long-ab-pairs=8 phase22-thread-backend-runs=60 phase22-gc-traces=2 phase22-tests=1438 phase24-short-ab-pairs=6 phase24-long-ab-pairs=4 phase24-thread-gate-runs=12 phase24-tests=1442 phase25-public-cell-runs=15 phase25-public-ab-pairs=15 phase25-long-ab-pairs=3 phase25-thread-gate-runs=12 phase25-tests=1446 phase26-kernel-ab-pairs=8 phase26-long-ab-pairs=4 phase26-thread-backend-runs=36 phase26-public-cell-runs=30 phase26-tests=1447 phase27-kernel-ab-pairs=8 phase27-long-ab-pairs=8 phase27-thread-backend-runs=24 phase27-public-cell-runs=60 phase27-tests=1448 phase28-kernel-ab-pairs=8 phase28-long-ab-pairs=6 phase28-thread-backend-runs=24 phase28-intrinsic-runs=3 phase28-public-cell-runs=60 phase28-tests=1448 phase30-burst-kernel-runs=14 phase30-long-ab-pairs=3 phase30-thread-gate-runs=6 phase30-memory-runs=2 phase30-public-cell-runs=60 phase30-tests=1448 phase31-interleaved-ab-pairs=9 phase31-long-gate-runs=8 phase31-thread-backend-runs=24 phase31-memory-runs=4 phase31-public-cell-runs=60 phase31-tests=1459 phase32-vblank-short-ab-pairs=6 phase32-vblank-long-ab-pairs=2 phase32-thread-backend-runs=24 phase32-gc-traces=2 phase32-counter-runs=2 phase32-tests=1460 phase33-sync-list-short-ab-pairs=6 phase33-sync-list-long-ab-pairs=2 phase33-thread-backend-runs=24 phase33-gc-traces=1 phase33-memory-runs=4 phase33-public-cell-runs=60 phase33-tests=1463 phase42-public-cell-runs=60 phase42-tests=1609 phase52-current-short-ab-pairs=8 phase52-v040-short-ab-pairs=4 phase52-long-ab-pairs=2 phase52-public-cell-runs=60 phase52-intrinsic-runs=3 phase52-tests=1610 phase59-short-ab-pairs=3 phase59-500-ab-pairs=3 phase59-1000-ab-pairs=3 phase59-public-cell-runs=60 phase59-intrinsic-runs=2 phase59-tests=1610 phase60-short-ab-pairs=3 phase60-500-ab-pairs=2 phase60-1000-ab-pairs=2 phase60-thread-gate-runs=4 phase60-memory-runs=1 phase60-public-cell-runs=60 phase60-tests=1613 phase61-trace-runs=1 phase61-rejected-candidates=2 phase61-short-ab-pairs=3 phase61-500-ab-pairs=2 phase61-1000-ab-pairs=2 phase61-thread-gate-runs=6 phase61-memory-runs=1 phase61-public-cell-runs=60 phase61-intrinsic-runs=2 phase61-tests=1613 python-v040-runs=15 python-v040-hashes=15 python-pr341-runs=15 python-pr341-hashes=1 -->
+<!-- LATEST_PERFORMANCE_RUNS: performance-snapshot-runs=90 dotnet-matrix-runs=60 dotnet-current-runs=30 python-reference-runs=30 dotnet-repeats=3 python-reference-date=2026-08-12 dotnet-v040-date=2026-08-26 dotnet-current-date=2026-08-26 phase22-200-ab-pairs=20 phase22-long-ab-pairs=8 phase22-thread-backend-runs=60 phase22-gc-traces=2 phase22-tests=1438 phase24-short-ab-pairs=6 phase24-long-ab-pairs=4 phase24-thread-gate-runs=12 phase24-tests=1442 phase25-public-cell-runs=15 phase25-public-ab-pairs=15 phase25-long-ab-pairs=3 phase25-thread-gate-runs=12 phase25-tests=1446 phase26-kernel-ab-pairs=8 phase26-long-ab-pairs=4 phase26-thread-backend-runs=36 phase26-public-cell-runs=30 phase26-tests=1447 phase27-kernel-ab-pairs=8 phase27-long-ab-pairs=8 phase27-thread-backend-runs=24 phase27-public-cell-runs=60 phase27-tests=1448 phase28-kernel-ab-pairs=8 phase28-long-ab-pairs=6 phase28-thread-backend-runs=24 phase28-intrinsic-runs=3 phase28-public-cell-runs=60 phase28-tests=1448 phase30-burst-kernel-runs=14 phase30-long-ab-pairs=3 phase30-thread-gate-runs=6 phase30-memory-runs=2 phase30-public-cell-runs=60 phase30-tests=1448 phase31-interleaved-ab-pairs=9 phase31-long-gate-runs=8 phase31-thread-backend-runs=24 phase31-memory-runs=4 phase31-public-cell-runs=60 phase31-tests=1459 phase32-vblank-short-ab-pairs=6 phase32-vblank-long-ab-pairs=2 phase32-thread-backend-runs=24 phase32-gc-traces=2 phase32-counter-runs=2 phase32-tests=1460 phase33-sync-list-short-ab-pairs=6 phase33-sync-list-long-ab-pairs=2 phase33-thread-backend-runs=24 phase33-gc-traces=1 phase33-memory-runs=4 phase33-public-cell-runs=60 phase33-tests=1463 phase42-public-cell-runs=60 phase42-tests=1609 phase52-current-short-ab-pairs=8 phase52-v040-short-ab-pairs=4 phase52-long-ab-pairs=2 phase52-public-cell-runs=60 phase52-intrinsic-runs=3 phase52-tests=1610 phase59-short-ab-pairs=3 phase59-500-ab-pairs=3 phase59-1000-ab-pairs=3 phase59-public-cell-runs=60 phase59-intrinsic-runs=2 phase59-tests=1610 phase60-short-ab-pairs=3 phase60-500-ab-pairs=2 phase60-1000-ab-pairs=2 phase60-thread-gate-runs=4 phase60-memory-runs=1 phase60-public-cell-runs=60 phase60-tests=1613 phase61-trace-runs=1 phase61-rejected-candidates=2 phase61-short-ab-pairs=3 phase61-500-ab-pairs=2 phase61-1000-ab-pairs=2 phase61-thread-gate-runs=6 phase61-memory-runs=1 phase61-public-cell-runs=60 phase61-intrinsic-runs=2 phase61-tests=1613 phase159-kernel-ab-rounds=8 phase159-320-ab-pairs=3 phase159-1000-ab-pairs=3 phase159-public-cell-runs=60 phase159-tests=1615 python-v040-runs=15 python-v040-hashes=15 python-pr341-runs=15 python-pr341-hashes=1 -->
 
 每个 .NET 单元格依次给出墙钟中位数和相对同 profile Python 列的倍速；默认实际
 使用 **5 个 workers**。三次运行范围见[详细性能说明](docs/README.detailed.zh-CN.md#性能)。
 倍数会随作为分子的 Python 时间和作为分母的 .NET 时间一起变化，使用其他夹具或窗口的历史表格
 也不能直接横向比较。判断因果回退时使用同一时刻的 .NET 版本配对 A/B，而不是旧表倍数。
 
-当前候选在现有 20-worker 分段 envelope 路径中，不再复制 staged VHS Video/Chroma
-payload 未使用的尾部；实际行位置需要更多数据时，再按完整源 block 扩展前缀。
-负 Python 坐标、16-tap sinc 绕回尾部、非线性 wow 插值、低 worker dropout 整段均值、
-raw metric 与 DC-adjust 都继续完整 materialization。两组正反顺序的 1,000 帧 Exact
-`current --threads 20` 配对把合计墙钟从 60.344 降到 58.614 秒（缩短 2.87%），CPU
-从 575.500 降到 555.969 秒（缩短 3.39%）。内存保持有界，但不声明降低。
+当前候选把第一次 float32 量化融合进既有的 `current` RF 色度 roll/DC pass，并将
+最终居中转换向量化。32,768 样本内核运行 1,000 次的耗时从 28.025 ms 降至
+16.166 ms（42.317%）。三组正反顺序的 1,000 帧 Exact `current --threads 20`
+配对保持全部八项兼容表面一致；配对墙钟与 CPU 中位提升分别为 0.5385% 和
+0.6860%。内存保持有界，但不宣称有所降低。
 
 刷新后的 60 次 Exact/IPP-fast 矩阵在每个单元格以及跨 worker 设置都只产生一套
 亮度、色度、原始 JSON、stdout、归一化 stderr/日志和有序 `fileLoc` hash。最新标准
-xUnit v3 套件共发现 **1,614** 项测试，其中 1,611 项通过、3 项因环境不可用按预期跳过。
+xUnit v3 套件共发现 **1,615** 项测试，其中 1,612 项通过、3 项因环境不可用按预期跳过。
 
 刷新后的每个 .NET profile/线程单元格在三轮内都保持确定性。固定参考集中的 Python
 PR341 保持确定；Python v0.4.0 的 15 次运行产生了 15 套不同的亮度、色度、JSON 和
@@ -292,7 +294,7 @@ TBC、色度、JSON 和日志文件允许在解码期间并发读取，兼容的
 dotnet restore VHSDecodeDotNet.slnx
 dotnet build VHSDecodeDotNet.slnx -c Release --no-restore
 dotnet test --solution VHSDecodeDotNet.slnx -c Release `
-  --no-build --no-restore --minimum-expected-tests 1614
+  --no-build --no-restore --minimum-expected-tests 1615
 ```
 
 在 Visual Studio 2026 中打开 `VHSDecodeDotNet.slnx`，即可构建、调试并通过

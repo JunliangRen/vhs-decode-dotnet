@@ -15,8 +15,8 @@ public sealed partial class ReadmeLocalizationTests
         "<!-- LATEST_PERFORMANCE_RUNS: performance-snapshot-runs=90 " +
         "dotnet-matrix-runs=60 dotnet-current-runs=30 " +
         "python-reference-runs=30 dotnet-repeats=3 " +
-        "python-reference-date=2026-08-12 dotnet-v040-date=2026-08-24 " +
-        "dotnet-current-date=2026-08-24 phase22-200-ab-pairs=20 " +
+        "python-reference-date=2026-08-12 dotnet-v040-date=2026-08-26 " +
+        "dotnet-current-date=2026-08-26 phase22-200-ab-pairs=20 " +
         "phase22-long-ab-pairs=8 phase22-thread-backend-runs=60 " +
         "phase22-gc-traces=2 phase22-tests=1438 " +
         "phase24-short-ab-pairs=6 phase24-long-ab-pairs=4 " +
@@ -60,6 +60,9 @@ public sealed partial class ReadmeLocalizationTests
         "phase61-1000-ab-pairs=2 phase61-thread-gate-runs=6 " +
         "phase61-memory-runs=1 phase61-public-cell-runs=60 " +
         "phase61-intrinsic-runs=2 phase61-tests=1613 " +
+        "phase159-kernel-ab-rounds=8 phase159-320-ab-pairs=3 " +
+        "phase159-1000-ab-pairs=3 phase159-public-cell-runs=60 " +
+        "phase159-tests=1615 " +
         "python-v040-runs=15 python-v040-hashes=15 " +
         "python-pr341-runs=15 python-pr341-hashes=1 -->";
 
@@ -99,9 +102,24 @@ public sealed partial class ReadmeLocalizationTests
         "low-worker-json-regression-caught=1 wrapped-sinc-tail-guard=1 " +
         "linux-allocation-ci-fix=1 -->";
 
+    private const string LatestPerformancePhase159Marker =
+        "<!-- LATEST_PERFORMANCE_PHASE159: kernel-ab-rounds=8 " +
+        "320-ab-pairs=3 1000-ab-pairs=3 public-cell-runs=60 tests=1615 -->";
+
+    private const string LatestPerformancePhase159RunsMarker =
+        "<!-- LATEST_PERFORMANCE_PHASE159_RUNS: dotnet-date=2026-08-26 " +
+        "dotnet-matrix-runs=60 dotnet-repeats=3 " +
+        "python-reference-date=2026-08-12 python-reference-runs=30 -->";
+
+    private const string LatestPerformancePhase159EvidenceMarker =
+        "<!-- LATEST_PERFORMANCE_PHASE159_EVIDENCE: " +
+        "kernel-old-new=28.025/16.166ms kernel-wall-gain=42.317% " +
+        "1000-paired-wall-gain-median=0.5385% " +
+        "1000-paired-cpu-gain-median=0.6860% compatibility-surfaces=8 -->";
+
     private const string FullCiTestCommand =
         "run: dotnet test --solution VHSDecodeDotNet.slnx --configuration Release " +
-        "--no-build --no-restore --minimum-expected-tests 1614";
+        "--no-build --no-restore --minimum-expected-tests 1615";
 
     private const string FinalRealRadix4AvxTestCommand =
         "run: dotnet test tests/VHSDecode.Tests/VHSDecode.Tests.csproj " +
@@ -168,6 +186,21 @@ public sealed partial class ReadmeLocalizationTests
         "--configuration Release --no-build --no-restore --filter-class " +
         "VHSDecode.Tests.VhsChromaAutomaticGainCurrentTests " +
         "--minimum-expected-tests 15";
+
+    private const string CurrentRfChromaShiftScalarFallbackTestCommand =
+        "run: dotnet test tests/VHSDecode.Tests/VHSDecode.Tests.csproj " +
+        "--configuration Release --no-build --no-restore --filter-class " +
+        "VHSDecode.Tests.ChromaReductionNumericsCompatibilityTests " +
+        "--minimum-expected-tests 4";
+
+    private const string CurrentRfChromaShiftAvxTestCommand =
+        "run: dotnet test tests/VHSDecode.Tests/VHSDecode.Tests.csproj " +
+        "--configuration Release --no-build --no-restore --filter-method " +
+        "'*CurrentRfFusedDoubleChromaShiftPreservesPinnedImplementationBits*' " +
+        "--minimum-expected-tests 1";
+
+    private const string CurrentRfChromaShiftAvxRequirement =
+        "VHSDECODE_REQUIRE_AVX_CURRENT_CHROMA_SHIFT: \"1\"";
 
     private const string PocketFftRadix8AvxDisabledTestCommand =
         "run: dotnet test tests/VHSDecode.Tests/VHSDecode.Tests.csproj " +
@@ -318,34 +351,34 @@ public sealed partial class ReadmeLocalizationTests
         Assert.Equal(3, expectedDetailedCommands.Length);
         string[] expectedOverviewPerformanceRows =
         [
-            "52.811 s | 54.243 s | 11.763 s | 4.489x | 11.271 s | 4.813x | 10.394 s | 5.081x | 8.129 s | 6.673x",
-            "57.067 s | 56.762 s | 33.318 s | 1.713x | 37.392 s | 1.518x | 22.578 s | 2.528x | 24.406 s | 2.326x",
-            "52.920 s | 55.722 s | 11.746 s | 4.505x | 11.132 s | 5.006x | 10.215 s | 5.181x | 8.171 s | 6.820x",
-            "52.965 s | 54.949 s | 9.071 s | 5.839x | 8.090 s | 6.792x | 8.446 s | 6.271x | 6.089 s | 9.024x",
-            "53.555 s | 54.842 s | 7.267 s | 7.369x | 7.182 s | 7.636x | 7.024 s | 7.625x | 4.962 s | 11.052x"
+            "52.811 s | 54.243 s | 11.598 s | 4.553x | 11.398 s | 4.759x | 10.230 s | 5.162x | 7.997 s | 6.783x",
+            "57.067 s | 56.762 s | 32.969 s | 1.731x | 37.599 s | 1.510x | 22.629 s | 2.522x | 24.415 s | 2.325x",
+            "52.920 s | 55.722 s | 11.773 s | 4.495x | 11.100 s | 5.020x | 10.101 s | 5.239x | 7.971 s | 6.991x",
+            "52.965 s | 54.949 s | 9.040 s | 5.859x | 8.122 s | 6.765x | 8.391 s | 6.312x | 5.813 s | 9.453x",
+            "53.555 s | 54.842 s | 7.310 s | 7.327x | 7.076 s | 7.751x | 6.919 s | 7.741x | 4.868 s | 11.265x"
         ];
         string[] expectedDetailedPerformanceRows =
         [
-            "52.811 s | 54.243 s | 11.763 s | 4.489x | 77.73% | 11.271 s | 4.813x | 79.22% | 10.394 s | 5.081x | 80.32% | 8.129 s | 6.673x | 85.01%",
-            "57.067 s | 56.762 s | 33.318 s | 1.713x | 41.62% | 37.392 s | 1.518x | 34.12% | 22.578 s | 2.528x | 60.44% | 24.406 s | 2.326x | 57.00%",
-            "52.920 s | 55.722 s | 11.746 s | 4.505x | 77.80% | 11.132 s | 5.006x | 80.02% | 10.215 s | 5.181x | 80.70% | 8.171 s | 6.820x | 85.34%",
-            "52.965 s | 54.949 s | 9.071 s | 5.839x | 82.87% | 8.090 s | 6.792x | 85.28% | 8.446 s | 6.271x | 84.05% | 6.089 s | 9.024x | 88.92%",
-            "53.555 s | 54.842 s | 7.267 s | 7.369x | 86.43% | 7.182 s | 7.636x | 86.90% | 7.024 s | 7.625x | 86.88% | 4.962 s | 11.052x | 90.95%"
+            "52.811 s | 54.243 s | 11.598 s | 4.553x | 78.04% | 11.398 s | 4.759x | 78.99% | 10.230 s | 5.162x | 80.63% | 7.997 s | 6.783x | 85.26%",
+            "57.067 s | 56.762 s | 32.969 s | 1.731x | 42.23% | 37.599 s | 1.510x | 33.76% | 22.629 s | 2.522x | 60.35% | 24.415 s | 2.325x | 56.99%",
+            "52.920 s | 55.722 s | 11.773 s | 4.495x | 77.75% | 11.100 s | 5.020x | 80.08% | 10.101 s | 5.239x | 80.91% | 7.971 s | 6.991x | 85.70%",
+            "52.965 s | 54.949 s | 9.040 s | 5.859x | 82.93% | 8.122 s | 6.765x | 85.22% | 8.391 s | 6.312x | 84.16% | 5.813 s | 9.453x | 89.42%",
+            "53.555 s | 54.842 s | 7.310 s | 7.327x | 86.35% | 7.076 s | 7.751x | 87.10% | 6.919 s | 7.741x | 87.08% | 4.868 s | 11.265x | 91.12%"
         ];
         string[] expectedDetailedPerformanceRangeRows =
         [
-            "default 5 | 52.583-62.222 s | 53.893-58.195 s | 11.729-11.789 s | 10.942-11.480 s | 10.361-10.490 s | 7.912-8.185 s",
-            "threads 1 | 56.709-60.521 s | 56.335-58.991 s | 32.869-33.513 s | 37.371-37.545 s | 22.568-22.627 s | 24.251-24.492 s",
-            "threads 5 | 52.845-53.977 s | 53.696-58.437 s | 11.598-11.870 s | 11.097-11.549 s | 10.152-10.425 s | 7.944-8.194 s",
-            "threads 10 | 51.797-53.088 s | 52.649-56.775 s | 8.825-9.485 s | 7.799-8.126 s | 8.426-8.571 s | 5.868-6.117 s",
-            "threads 20 | 52.967-55.987 s | 53.005-55.618 s | 7.229-7.670 s | 6.955-7.397 s | 6.807-7.247 s | 4.758-4.967 s"
+            "default 5 | 52.583-62.222 s | 53.893-58.195 s | 11.495-11.834 s | 10.811-11.412 s | 10.217-10.272 s | 7.899-8.057 s",
+            "threads 1 | 56.709-60.521 s | 56.335-58.991 s | 32.305-33.199 s | 37.596-37.621 s | 22.597-22.647 s | 24.266-24.460 s",
+            "threads 5 | 52.845-53.977 s | 53.696-58.437 s | 11.744-11.909 s | 11.090-11.226 s | 10.096-10.284 s | 7.944-8.053 s",
+            "threads 10 | 51.797-53.088 s | 52.649-56.775 s | 8.869-9.055 s | 7.717-8.239 s | 8.115-8.557 s | 5.769-5.889 s",
+            "threads 20 | 52.967-55.987 s | 53.005-55.618 s | 7.201-7.322 s | 6.711-7.348 s | 6.880-7.078 s | 4.828-4.970 s"
         ];
 
         string[] overviewFacts =
         [
             "43155200da87c0d49eb37d8ec09b1372075ee8e4",
             PinnedDotNetSdkVersion,
-            "**1,614**",
+            "**1,615**",
             "--compat-version",
             "current",
             "--dsp-backend",
@@ -358,18 +391,18 @@ public sealed partial class ReadmeLocalizationTests
             "v0.4.0-2.10.0",
             "52.811 s",
             "54.243 s",
-            "11.763 s",
-            "11.271 s",
-            "7.636x",
-            "11.052x",
-            "e0777e2",
+            "11.598 s",
+            "11.398 s",
+            "7.751x",
+            "11.265x",
+            "b893bf7",
             "60.344",
             "58.614",
             "575.500",
             "555.969",
             "2.87%",
             "3.39%",
-            "1,611",
+            "1,612",
             "g4315520",
             "--threads 0",
             "41bfd92",
@@ -394,10 +427,10 @@ public sealed partial class ReadmeLocalizationTests
         [
             "43155200da87c0d49eb37d8ec09b1372075ee8e4",
             "v0.4.0-2.10.0",
-            "e0777e2",
-            "2.9.0+e0777e2d3dc080652ebaff5de9e57d5cf5d2c253",
-            "D46E1266FED2C13CB408A2BBB123B95C4536FAEE769410D8E292B0E30091617F",
-            "137,284,404",
+            "b893bf7",
+            "2.10.0+b893bf7d39edf574609a7abc40237a4db32eaf9f",
+            "92481E633B4CD5C80DDD1CD6C26AD5D045B9046763CD8B1F84083F8EFBD73303",
+            "137,284,417",
             "60.344",
             "58.614",
             "575.500",
@@ -777,7 +810,7 @@ public sealed partial class ReadmeLocalizationTests
             "1.72%",
             "444.3 MiB",
             "406.0 MiB",
-            "**1,614**",
+            "**1,615**",
             "3.7935",
             "3.6182",
             "4.62%",
@@ -1554,6 +1587,8 @@ public sealed partial class ReadmeLocalizationTests
             Assert.Contains(LatestPerformancePhase63RunsMarker, content, StringComparison.Ordinal);
             Assert.Contains(LatestPerformancePhase66Marker, content, StringComparison.Ordinal);
             Assert.Contains(LatestPerformancePhase66RunsMarker, content, StringComparison.Ordinal);
+            Assert.Contains(LatestPerformancePhase159Marker, content, StringComparison.Ordinal);
+            Assert.Contains(LatestPerformancePhase159RunsMarker, content, StringComparison.Ordinal);
             Assert.True(
                 ContainsAdjacentLines(
                     content,
@@ -1566,6 +1601,12 @@ public sealed partial class ReadmeLocalizationTests
                     LatestPerformancePhase66RunsMarker,
                     LatestPerformancePhase66EvidenceMarker),
                 $"{filename} does not bind the Phase66 evidence tuple to its run marker.");
+            Assert.True(
+                ContainsAdjacentLines(
+                    content,
+                    LatestPerformancePhase159RunsMarker,
+                    LatestPerformancePhase159EvidenceMarker),
+                $"{filename} does not bind the Phase159 evidence tuple to its run marker.");
             foreach (string fact in overviewFacts)
             {
                 Assert.Contains(fact, content, StringComparison.Ordinal);
@@ -1594,6 +1635,8 @@ public sealed partial class ReadmeLocalizationTests
             Assert.Contains(LatestPerformancePhase63RunsMarker, content, StringComparison.Ordinal);
             Assert.Contains(LatestPerformancePhase66Marker, content, StringComparison.Ordinal);
             Assert.Contains(LatestPerformancePhase66RunsMarker, content, StringComparison.Ordinal);
+            Assert.Contains(LatestPerformancePhase159Marker, content, StringComparison.Ordinal);
+            Assert.Contains(LatestPerformancePhase159RunsMarker, content, StringComparison.Ordinal);
             Assert.True(
                 ContainsAdjacentLines(
                     content,
@@ -1606,6 +1649,12 @@ public sealed partial class ReadmeLocalizationTests
                     LatestPerformancePhase66RunsMarker,
                     LatestPerformancePhase66EvidenceMarker),
                 $"{filename} does not bind the Phase66 evidence tuple to its run marker.");
+            Assert.True(
+                ContainsAdjacentLines(
+                    content,
+                    LatestPerformancePhase159RunsMarker,
+                    LatestPerformancePhase159EvidenceMarker),
+                $"{filename} does not bind the Phase159 evidence tuple to its run marker.");
             foreach (string fact in synchronizedFacts)
             {
                 Assert.Contains(fact, content, StringComparison.Ordinal);
@@ -1651,7 +1700,7 @@ public sealed partial class ReadmeLocalizationTests
             "The shared compatibility evidence document is missing.");
         string compatibilityEvidence = File.ReadAllText(compatibilityEvidencePath);
         Assert.Contains(
-            "1,614 independently discoverable tests",
+            "1,615 independently discoverable tests",
             compatibilityEvidence,
             StringComparison.Ordinal);
         Assert.DoesNotContain(
@@ -1754,6 +1803,18 @@ public sealed partial class ReadmeLocalizationTests
             StringComparison.Ordinal);
         Assert.Contains(
             CurrentChromaAccAvxDisabledTestCommand,
+            workflow,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            CurrentRfChromaShiftScalarFallbackTestCommand,
+            workflow,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            CurrentRfChromaShiftAvxTestCommand,
+            workflow,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            CurrentRfChromaShiftAvxRequirement,
             workflow,
             StringComparison.Ordinal);
         Assert.Contains(

@@ -166,7 +166,7 @@ jobs:
         run: dotnet build VHSDecodeDotNet.slnx --configuration Release --no-restore
 
       - name: Run tests
-        run: dotnet test --solution VHSDecodeDotNet.slnx --configuration Release --no-build --no-restore --minimum-expected-tests 1614
+        run: dotnet test --solution VHSDecodeDotNet.slnx --configuration Release --no-build --no-restore --minimum-expected-tests 1615
 
       - name: Run NumPy reduction scalar fallback tests
         env:
@@ -197,6 +197,16 @@ jobs:
         env:
           DOTNET_EnableAVX: "0"
         run: dotnet test tests/VHSDecode.Tests/VHSDecode.Tests.csproj --configuration Release --no-build --no-restore --filter-class VHSDecode.Tests.VhsChromaAutomaticGainCurrentTests --minimum-expected-tests 15
+
+      - name: Run current RF chroma shift scalar fallback tests
+        env:
+          DOTNET_EnableAVX: "0"
+        run: dotnet test tests/VHSDecode.Tests/VHSDecode.Tests.csproj --configuration Release --no-build --no-restore --filter-class VHSDecode.Tests.ChromaReductionNumericsCompatibilityTests --minimum-expected-tests 4
+
+      - name: Run current RF chroma shift AVX equivalence test
+        env:
+          VHSDECODE_REQUIRE_AVX_CURRENT_CHROMA_SHIFT: "1"
+        run: dotnet test tests/VHSDecode.Tests/VHSDecode.Tests.csproj --configuration Release --no-build --no-restore --filter-method '*CurrentRfFusedDoubleChromaShiftPreservesPinnedImplementationBits*' --minimum-expected-tests 1
 
       - name: Run NumPy complex spectrum AVX2-disabled tests
         env:
