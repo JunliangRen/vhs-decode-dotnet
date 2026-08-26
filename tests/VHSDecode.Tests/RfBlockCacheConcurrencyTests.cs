@@ -489,6 +489,17 @@ public sealed class RfBlockCacheConcurrencyTests
         Assert.Throws<ArgumentOutOfRangeException>(() =>
             materializer.EnsurePayloadMaterializedThrough(length + 1));
 
+        int wrappedTailSampleCount = TbcFieldDecodePipeline.RequiredLinearVhsRenderPayloadSampleCount(
+            length,
+            [-4.25, 28.5],
+            firstLine: 0,
+            lineCount: 1,
+            sourcePositionShift: 0.0);
+        Assert.Equal(length, wrappedTailSampleCount);
+        materializer.EnsurePayloadMaterializedThrough(wrappedTailSampleCount);
+        AssertDoubleBitsEqual(eager.Video, staged.Video);
+        AssertDoubleBitsEqual(eager.Chroma, staged.Chroma);
+
         materializer.EnsurePayloadMaterialized();
 
         AssertDoubleBitsEqual(eager.Video, staged.Video);

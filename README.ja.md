@@ -242,22 +242,22 @@ numerical contract とも異なります。
 これは同じ private local 40 MHz PAL VHS `.ldf` fixture を使う、startup cost を含む
 `--start 100 --length 160` snapshot です。source filename は公開しません。
 2026-08-12 の固定 Python reference 30 run を保持します。全 60 回の .NET 測定は
-main commit `eb7ba6e` と後述する staged VHS payload optimization を基にした同じ
+PR commit `e0777e2` と後述する wrapped-tail safety adjustment を基にした同じ
 self-contained .NET 11 Preview 7 candidate で 2026-08-26 にまとめて更新しました。
 各 cell は 3 complete run を持ち、互換性と速度は別々に評価します。
 
 <!-- LATEST_PERFORMANCE_BEGIN -->
 | CLI mode（workers） | Python v0.4.0 | Python PR341 | Exact + v0.4.0 | Exact + current | IPP-fast + v0.4.0 | IPP-fast + current |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| default（5） | 52.811 s | 54.243 s | 11.546 s / 4.574x | 11.232 s / 4.829x | 10.378 s / 5.089x | 8.096 s / 6.700x |
-| `--threads 1` | 57.067 s | 56.762 s | 32.795 s / 1.740x | 37.402 s / 1.518x | 22.592 s / 2.526x | 24.759 s / 2.293x |
-| `--threads 5` | 52.920 s | 55.722 s | 11.820 s / 4.477x | 11.292 s / 4.935x | 10.363 s / 5.106x | 8.146 s / 6.840x |
-| `--threads 10` | 52.965 s | 54.949 s | 9.045 s / 5.855x | 8.248 s / 6.662x | 8.385 s / 6.317x | 5.869 s / 9.363x |
-| `--threads 20` | 53.555 s | 54.842 s | 7.193 s / 7.445x | 6.721 s / 8.159x | 7.038 s / 7.609x | 4.799 s / 11.427x |
+| default（5） | 52.811 s | 54.243 s | 11.763 s / 4.489x | 11.271 s / 4.813x | 10.394 s / 5.081x | 8.129 s / 6.673x |
+| `--threads 1` | 57.067 s | 56.762 s | 33.318 s / 1.713x | 37.392 s / 1.518x | 22.578 s / 2.528x | 24.406 s / 2.326x |
+| `--threads 5` | 52.920 s | 55.722 s | 11.746 s / 4.505x | 11.132 s / 5.006x | 10.215 s / 5.181x | 8.171 s / 6.820x |
+| `--threads 10` | 52.965 s | 54.949 s | 9.071 s / 5.839x | 8.090 s / 6.792x | 8.446 s / 6.271x | 6.089 s / 9.024x |
+| `--threads 20` | 53.555 s | 54.842 s | 7.267 s / 7.369x | 7.182 s / 7.636x | 7.024 s / 7.625x | 4.962 s / 11.052x |
 <!-- LATEST_PERFORMANCE_END -->
 <!-- LATEST_PERFORMANCE_PHASE66: trace-runs=2 rejected-candidates=4 160-ab-pairs=2 500-ab-pairs=2 1000-ab-pairs=2 screening-matrix-runs=60 public-cell-runs=60 tests=1614 -->
 <!-- LATEST_PERFORMANCE_PHASE66_RUNS: dotnet-date=2026-08-26 dotnet-matrix-runs=60 dotnet-repeats=3 python-reference-date=2026-08-12 python-reference-runs=30 -->
-<!-- LATEST_PERFORMANCE_PHASE66_EVIDENCE: 1000-pairs=2 1000-combined-wall=59.306/58.570s 1000-wall-gain=1.24% 1000-combined-cpu=558.547/552.453s 1000-cpu-gain=1.09% low-worker-json-regression-caught=1 -->
+<!-- LATEST_PERFORMANCE_PHASE66_EVIDENCE: 1000-pairs=2 1000-combined-wall=60.344/58.614s 1000-wall-gain=2.87% 1000-combined-cpu=575.500/555.969s 1000-cpu-gain=3.39% low-worker-json-regression-caught=1 wrapped-sinc-tail-guard=1 linux-allocation-ci-fix=1 -->
 <!-- LATEST_PERFORMANCE_PHASE63: trace-runs=1 rejected-candidates=6 short-ab-pairs=3 500-ab-pairs=3 1000-ab-pairs=3 thread-gate-runs=16 public-cell-runs=60 tests=1613 -->
 <!-- LATEST_PERFORMANCE_PHASE63_RUNS: dotnet-date=2026-08-26 dotnet-matrix-runs=60 dotnet-repeats=3 python-reference-date=2026-08-12 python-reference-runs=30 -->
 <!-- LATEST_PERFORMANCE_PHASE63_EVIDENCE: 1000-pairs=3 1000-independent-wall-medians=30.213/29.576s 1000-paired-wall-gain-median=1.35% 1000-independent-cpu-medians=290.719/279.297s 1000-paired-cpu-gain-median=3.93% t0-frames=160 t0-pairs=3 t0-independent-wall-medians=37.492/36.962s t0-paired-wall-gain-median=0.43% -->
@@ -272,11 +272,12 @@ revision A/B で判断します。
 
 current candidate は既存の 20-worker segmented-envelope path で、staged VHS
 Video/Chroma payload の未使用 tail をコピーしません。実際の line location が追加 data を
-必要とする場合だけ、source block 単位で prefix を拡張します。low-worker path は dropout
-threshold が full-span envelope mean に依存するため full materialization を維持し、raw metric
-と DC-adjust path も同様です。opposite-order 1,000-frame Exact `current --threads 20`
-2 pair は combined wall time を 59.306 から 58.570 秒へ 1.24%、CPU time を 558.547 から
-552.453 秒へ 1.09% 短縮しました。memory は bounded でしたが、削減は主張しません。
+必要とする場合だけ、source block 単位で prefix を拡張します。negative Python coordinate、
+16-tap sinc の tail wrap、non-linear wow interpolation、low-worker の full-span dropout mean、
+raw metric、DC-adjust path は full materialization を維持します。opposite-order 1,000-frame
+Exact `current --threads 20` 2 pair は combined wall time を 60.344 から 58.614 秒へ 2.87%、
+CPU time を 575.500 から 555.969 秒へ 3.39% 短縮しました。memory は bounded でしたが、
+削減は主張しません。
 
 更新した 60-run Exact/IPP-fast matrix は、各 cell と worker setting 間で luma、chroma、
 raw JSON、stdout、normalized stderr/log、ordered `fileLoc` の各 hash を 1 つに維持しました。

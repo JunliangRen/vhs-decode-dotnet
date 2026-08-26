@@ -22,7 +22,7 @@ public sealed class TbcLineResampler
 {
     private const int ParallelSampleThreshold = 64 * 1024;
     private const int MinimumParallelSamplesPerWorker = 16 * 1024;
-    private const int SincTapCount = 16;
+    internal const int SincTapCount = 16;
     private const int SincPhaseCount = 65536;
     private const double KaiserBeta = 5.0;
     private const string SincLookupResourceName = "VHSDecode.Core.Tbc.Resources.sinc_lut.npz";

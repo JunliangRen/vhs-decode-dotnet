@@ -1380,6 +1380,11 @@ public sealed class TbcFieldDecodePipeline : IDisposable
 
         int outputFirstLine = OutputFirstLine(parity.IsFirstField);
         double[] renderLineLocations = RenderLineLocations(lineLocations, outputFirstLine);
+        EnsureVhsRenderPayloadMaterialized(
+            span,
+            renderLineLocations,
+            outputFirstLine,
+            sourcePositionShift: 0.0);
         double[]? phaseAnalysisChroma = ResampleChromaBurst(
             span.Chroma,
             renderLineLocations,
@@ -1452,6 +1457,11 @@ public sealed class TbcFieldDecodePipeline : IDisposable
                         parity.IsFirstField,
                         fieldNumber)
                     : 0.0;
+            EnsureVhsRenderPayloadMaterialized(
+                span,
+                renderLineLocations,
+                outputFirstLine,
+                chromaSourcePositionShift);
             bool useVhsWavefront = deferVhsTail
                 && CanUseVhsWavefront
                 && isTape
@@ -1818,23 +1828,117 @@ public sealed class TbcFieldDecodePipeline : IDisposable
         }
     }
 
-    private static int RequiredVhsPayloadSampleCount(
+    internal static int RequiredVhsPayloadSampleCount(
         int availableSampleCount,
         double line0Location,
         ReadOnlySpan<double> lineLocations,
         double meanLineLength,
         int processedLines)
     {
+        if (!double.IsFinite(line0Location)
+            || !double.IsFinite(meanLineLength)
+            || meanLineLength <= 0.0
+            || line0Location < 0.0)
+        {
+            return availableSampleCount;
+        }
+
         double requiredEnd = line0Location + ((processedLines + 2.0) * meanLineLength);
         for (int i = 0; i < lineLocations.Length; i++)
         {
             double location = lineLocations[i];
             if (double.IsFinite(location))
             {
+                if (location < 0.0)
+                {
+                    return availableSampleCount;
+                }
+
                 requiredEnd = Math.Max(requiredEnd, location + meanLineLength);
             }
         }
 
+        if (!double.IsFinite(requiredEnd) || requiredEnd >= availableSampleCount)
+        {
+            return availableSampleCount;
+        }
+
+        return Math.Clamp((int)Math.Ceiling(requiredEnd), 0, availableSampleCount);
+    }
+
+    private void EnsureVhsRenderPayloadMaterialized(
+        RfDecodedSpan span,
+        IReadOnlyList<double> lineLocations,
+        int firstLine,
+        double sourcePositionShift)
+    {
+        RfBlockStreamDecoder.VhsPayloadMaterializer? materializer = span.DeferredVhsPayload;
+        if (materializer is null || !materializer.UsesSegmentedEnvelope)
+        {
+            return;
+        }
+
+        int requiredSampleCount = _renderer.InterpolationMethod == TbcLineInterpolationMethod.Linear
+            ? RequiredLinearVhsRenderPayloadSampleCount(
+                span.Video.Length,
+                lineLocations,
+                firstLine,
+                _renderer.FrameSpec.OutputLineCount,
+                sourcePositionShift)
+            : span.Video.Length;
+        materializer.EnsurePayloadMaterializedThrough(requiredSampleCount);
+    }
+
+    internal static int RequiredLinearVhsRenderPayloadSampleCount(
+        int availableSampleCount,
+        IReadOnlyList<double> lineLocations,
+        int firstLine,
+        int lineCount,
+        double sourcePositionShift)
+    {
+        ArgumentNullException.ThrowIfNull(lineLocations);
+        if (availableSampleCount < 0)
+        {
+            throw new ArgumentOutOfRangeException(nameof(availableSampleCount));
+        }
+
+        if (firstLine < 0
+            || lineCount < 0
+            || (long)firstLine + lineCount >= lineLocations.Count)
+        {
+            throw new ArgumentOutOfRangeException(nameof(firstLine));
+        }
+
+        if (!double.IsFinite(sourcePositionShift))
+        {
+            return availableSampleCount;
+        }
+
+        double minimumShift = Math.Min(0.0, sourcePositionShift);
+        double maximumShift = Math.Max(0.0, sourcePositionShift);
+        double minimumPosition = double.PositiveInfinity;
+        double maximumPosition = double.NegativeInfinity;
+        int lastLine = checked(firstLine + lineCount);
+        for (int line = firstLine; line <= lastLine; line++)
+        {
+            double position = lineLocations[line];
+            if (!double.IsFinite(position))
+            {
+                continue;
+            }
+
+            minimumPosition = Math.Min(minimumPosition, position + minimumShift);
+            maximumPosition = Math.Max(maximumPosition, position + maximumShift);
+        }
+
+        if (!double.IsFinite(minimumPosition)
+            || !double.IsFinite(maximumPosition)
+            || minimumPosition < TbcLineResampler.SincTapCount)
+        {
+            return availableSampleCount;
+        }
+
+        double requiredEnd = maximumPosition + TbcLineResampler.SincTapCount;
         if (!double.IsFinite(requiredEnd) || requiredEnd >= availableSampleCount)
         {
             return availableSampleCount;
