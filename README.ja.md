@@ -9,7 +9,7 @@
 upstream release `v0.4.0`、commit
 `43155200da87c0d49eb37d8ec09b1372075ee8e4` です。
 
-現在の .NET port release は `v0.4.0-2.8.0`（application version `2.8.0`）です。
+現在の .NET port release は `v0.4.0-2.9.0`（application version `2.9.0`）です。
 
 > [!IMPORTANT]
 > この互換移植は現在も開発中です。トップレベルのデコード経路は実装済みで
