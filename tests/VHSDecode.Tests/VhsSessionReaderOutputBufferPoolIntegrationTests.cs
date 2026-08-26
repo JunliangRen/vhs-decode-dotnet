@@ -17,12 +17,17 @@ public sealed class VhsSessionReaderOutputBufferPoolIntegrationTests
         try
         {
             string eagerOutput = Path.Combine(tempDirectory, "eager");
+            string midWorkerOutput = Path.Combine(tempDirectory, "mid-worker");
             string stagedOutput = Path.Combine(tempDirectory, "staged");
             using DecodeSession eagerSession = CreateSession(
                 eagerOutput,
                 compatibility,
                 threads: 1);
             byte[] inputBytes = BuildPalVhsRf(eagerSession);
+            using DecodeSession midWorkerSession = CreateSession(
+                midWorkerOutput,
+                compatibility,
+                threads: 5);
             using DecodeSession stagedSession = CreateSession(
                 stagedOutput,
                 compatibility,
@@ -30,26 +35,43 @@ public sealed class VhsSessionReaderOutputBufferPoolIntegrationTests
             Action<string, string>? stagedFieldLogger = stagedSession.TbcFieldDecoder.DiagnosticLogger;
             Action<string, string>? stagedRenderLogger = stagedSession.TbcRenderer.DiagnosticLogger;
             using var eagerInput = new MemoryStream(inputBytes, writable: false);
+            using var midWorkerInput = new MemoryStream(inputBytes, writable: false);
             using var stagedInput = new MemoryStream(inputBytes, writable: false);
 
             TbcFieldSequenceDecodeResult eager = new TbcFieldSequenceDecodeEngine()
                 .TryDecodeAndWrite(eagerSession, eagerInput, maxFields: 2);
+            TbcFieldSequenceDecodeResult midWorker = new TbcFieldSequenceDecodeEngine()
+                .TryDecodeAndWrite(midWorkerSession, midWorkerInput, maxFields: 2);
             TbcFieldSequenceDecodeResult staged = new TbcFieldSequenceDecodeEngine()
                 .TryDecodeAndWrite(stagedSession, stagedInput, maxFields: 2);
 
             Assert.True(eager.Success, eager.Message);
+            Assert.True(midWorker.Success, midWorker.Message);
             Assert.True(staged.Success, staged.Message);
             Assert.Equal(2, eager.WrittenFieldCount);
+            Assert.Equal(eager.WrittenFieldCount, midWorker.WrittenFieldCount);
             Assert.Equal(eager.WrittenFieldCount, staged.WrittenFieldCount);
+            Assert.Equal(
+                File.ReadAllBytes(eagerOutput + ".tbc"),
+                File.ReadAllBytes(midWorkerOutput + ".tbc"));
             Assert.Equal(
                 File.ReadAllBytes(eagerOutput + ".tbc"),
                 File.ReadAllBytes(stagedOutput + ".tbc"));
             Assert.Equal(
                 File.ReadAllBytes(eagerOutput + "_chroma.tbc"),
+                File.ReadAllBytes(midWorkerOutput + "_chroma.tbc"));
+            Assert.Equal(
+                File.ReadAllBytes(eagerOutput + "_chroma.tbc"),
                 File.ReadAllBytes(stagedOutput + "_chroma.tbc"));
             Assert.Equal(
                 File.ReadAllText(eagerOutput + ".tbc.json"),
+                File.ReadAllText(midWorkerOutput + ".tbc.json"));
+            Assert.Equal(
+                File.ReadAllText(eagerOutput + ".tbc.json"),
                 File.ReadAllText(stagedOutput + ".tbc.json"));
+            Assert.Equal(
+                NormalizeLog(File.ReadAllText(eagerOutput + ".log")),
+                NormalizeLog(File.ReadAllText(midWorkerOutput + ".log")));
             Assert.Equal(
                 NormalizeLog(File.ReadAllText(eagerOutput + ".log")),
                 NormalizeLog(File.ReadAllText(stagedOutput + ".log")));

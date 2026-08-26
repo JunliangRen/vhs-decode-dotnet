@@ -1788,6 +1788,8 @@ public sealed class RfBlockStreamDecoder : IDisposable
         private readonly int _windowOffset;
         private readonly int _workerThreads;
         private readonly bool _useSegmentedEnvelope;
+        private int _initialPayloadSampleCount;
+        private int _materializedPayloadBlockCount;
         private Task? _payloadMaterialization;
         private Task? _envelopeMaterialization;
         private int _ownsReadReservation = 1;
@@ -1812,6 +1814,7 @@ public sealed class RfBlockStreamDecoder : IDisposable
             _windowOffset = windowOffset;
             _workerThreads = workerThreads;
             _useSegmentedEnvelope = workerThreads >= MinimumSegmentedEnvelopeWorkerThreads;
+            _initialPayloadSampleCount = video.Length;
         }
 
         internal bool UsesSegmentedEnvelope => _useSegmentedEnvelope;
@@ -1850,23 +1853,59 @@ public sealed class RfBlockStreamDecoder : IDisposable
             }
         }
 
+        internal void ConfigureInitialPayloadSampleCount(int sampleCount)
+        {
+            lock (_gate)
+            {
+                ObjectDisposedException.ThrowIf(_disposed, this);
+                if (_payloadMaterialization is not null)
+                {
+                    throw new InvalidOperationException(
+                        "Initial VHS payload materialization cannot change after it starts.");
+                }
+
+                _initialPayloadSampleCount = Math.Clamp(sampleCount, 0, _video.Length);
+            }
+        }
+
         internal void EnsurePayloadMaterialized()
-            => BeginMaterialization().GetAwaiter().GetResult();
+            => EnsurePayloadMaterializedThrough(_video.Length);
+
+        internal void EnsurePayloadMaterializedThrough(int sampleCount)
+        {
+            if (sampleCount < 0 || sampleCount > _video.Length)
+            {
+                throw new ArgumentOutOfRangeException(nameof(sampleCount));
+            }
+
+            BeginMaterialization().GetAwaiter().GetResult();
+            int requiredBlockCount = PayloadBlockCount(sampleCount);
+            lock (_gate)
+            {
+                ObjectDisposedException.ThrowIf(_disposed, this);
+                int materializedBlockCount = _materializedPayloadBlockCount;
+                if (requiredBlockCount <= materializedBlockCount)
+                {
+                    return;
+                }
+
+                MaterializePayloadBlocks(materializedBlockCount, requiredBlockCount);
+                _materializedPayloadBlockCount = requiredBlockCount;
+            }
+        }
 
         internal void EnsureMaterialized()
         {
-            Task payloadMaterialization;
             Task? envelopeMaterialization;
             lock (_gate)
             {
                 ObjectDisposedException.ThrowIf(_disposed, this);
-                payloadMaterialization = _payloadMaterialization ??= Task.Run(MaterializePayload);
                 envelopeMaterialization = _useSegmentedEnvelope
                     ? _envelopeMaterialization ??= Task.Run(MaterializeEnvelope)
                     : null;
             }
 
-            payloadMaterialization.GetAwaiter().GetResult();
+            EnsurePayloadMaterialized();
             envelopeMaterialization?.GetAwaiter().GetResult();
         }
 
@@ -2016,12 +2055,25 @@ public sealed class RfBlockStreamDecoder : IDisposable
 
         private void MaterializePayload()
         {
+            int blockCount = PayloadBlockCount(_initialPayloadSampleCount);
+            MaterializePayloadBlocks(0, blockCount);
+            Volatile.Write(ref _materializedPayloadBlockCount, blockCount);
+        }
+
+        private void MaterializePayloadBlocks(int firstBlockIndex, int lastBlockIndex)
+        {
+            int blockCount = lastBlockIndex - firstBlockIndex;
+            if (blockCount <= 0)
+            {
+                return;
+            }
+
             Parallel.For(
-                0,
-                _blocks.Length,
+                firstBlockIndex,
+                lastBlockIndex,
                 new ParallelOptions
                 {
-                    MaxDegreeOfParallelism = Math.Min(_workerThreads, _blocks.Length)
+                    MaxDegreeOfParallelism = Math.Min(_workerThreads, blockCount)
                 },
                 blockIndex =>
                 {
@@ -2059,6 +2111,20 @@ public sealed class RfBlockStreamDecoder : IDisposable
                             _windowOffset);
                     }
                 });
+        }
+
+        private int PayloadBlockCount(int sampleCount)
+        {
+            if (sampleCount == 0)
+            {
+                return 0;
+            }
+
+            long absoluteEnd = checked((long)_windowOffset + sampleCount);
+            int blockCount = checked((int)(
+                (absoluteEnd + _owner.BlockStride - 1)
+                / _owner.BlockStride));
+            return Math.Min(blockCount, _blocks.Length);
         }
 
         private void MaterializeEnvelope()

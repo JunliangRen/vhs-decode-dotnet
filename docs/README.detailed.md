@@ -1055,7 +1055,7 @@ snapshot comparing Python v0.4.0, merged Python PR341, Exact v0.4.0, Exact
 published. The active table retains 30 fixed Python reference measurements from
 2026-08-12. All 60 .NET measurements were refreshed together on 2026-08-26
 with one self-contained .NET 11 Preview 7 candidate based on main commit
-`763b4bb` plus scalar PocketFFT pair inlining. Each
+`eb7ba6e` plus staged VHS payload-prefix materialization. Each
 .NET cell gives the median wall time, speedup, and wall-time reduction against
 its profile-matched Python column. Historical
 matrices that used another batch, format, or fixture are not directly comparable:
@@ -1063,12 +1063,15 @@ matrices that used another batch, format, or fixture are not directly comparable
 <!-- LATEST_PERFORMANCE_BEGIN -->
 | CLI mode (workers) | Python v0.4.0 | Python PR341 | Exact + v0.4.0 | Exact + current | IPP-fast + v0.4.0 | IPP-fast + current |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| default (5) | 52.811 s | 54.243 s | 11.616 s / 4.546x / 78.00% | 11.357 s / 4.776x / 79.06% | 10.084 s / 5.237x / 80.90% | 7.985 s / 6.793x / 85.28% |
-| `--threads 1` | 57.067 s | 56.762 s | 32.821 s / 1.739x / 42.49% | 37.450 s / 1.516x / 34.02% | 22.508 s / 2.535x / 60.56% | 24.434 s / 2.323x / 56.95% |
-| `--threads 5` | 52.920 s | 55.722 s | 11.564 s / 4.576x / 78.15% | 10.734 s / 5.191x / 80.74% | 9.956 s / 5.315x / 81.19% | 7.866 s / 7.084x / 85.88% |
-| `--threads 10` | 52.965 s | 54.949 s | 8.912 s / 5.943x / 83.17% | 7.793 s / 7.051x / 85.82% | 8.257 s / 6.414x / 84.41% | 5.918 s / 9.286x / 89.23% |
-| `--threads 20` | 53.555 s | 54.842 s | 7.238 s / 7.399x / 86.48% | 6.330 s / 8.664x / 88.46% | 7.023 s / 7.625x / 86.89% | 4.876 s / 11.247x / 91.11% |
+| default (5) | 52.811 s | 54.243 s | 11.546 s / 4.574x / 78.14% | 11.232 s / 4.829x / 79.29% | 10.378 s / 5.089x / 80.35% | 8.096 s / 6.700x / 85.08% |
+| `--threads 1` | 57.067 s | 56.762 s | 32.795 s / 1.740x / 42.53% | 37.402 s / 1.518x / 34.11% | 22.592 s / 2.526x / 60.41% | 24.759 s / 2.293x / 56.38% |
+| `--threads 5` | 52.920 s | 55.722 s | 11.820 s / 4.477x / 77.66% | 11.292 s / 4.935x / 79.73% | 10.363 s / 5.106x / 80.42% | 8.146 s / 6.840x / 85.38% |
+| `--threads 10` | 52.965 s | 54.949 s | 9.045 s / 5.855x / 82.92% | 8.248 s / 6.662x / 84.99% | 8.385 s / 6.317x / 84.17% | 5.869 s / 9.363x / 89.32% |
+| `--threads 20` | 53.555 s | 54.842 s | 7.193 s / 7.445x / 86.57% | 6.721 s / 8.159x / 87.74% | 7.038 s / 7.609x / 86.86% | 4.799 s / 11.427x / 91.25% |
 <!-- LATEST_PERFORMANCE_END -->
+<!-- LATEST_PERFORMANCE_PHASE66: trace-runs=2 rejected-candidates=4 160-ab-pairs=2 500-ab-pairs=2 1000-ab-pairs=2 screening-matrix-runs=60 public-cell-runs=60 tests=1614 -->
+<!-- LATEST_PERFORMANCE_PHASE66_RUNS: dotnet-date=2026-08-26 dotnet-matrix-runs=60 dotnet-repeats=3 python-reference-date=2026-08-12 python-reference-runs=30 -->
+<!-- LATEST_PERFORMANCE_PHASE66_EVIDENCE: 1000-pairs=2 1000-combined-wall=59.306/58.570s 1000-wall-gain=1.24% 1000-combined-cpu=558.547/552.453s 1000-cpu-gain=1.09% low-worker-json-regression-caught=1 -->
 <!-- LATEST_PERFORMANCE_PHASE63: trace-runs=1 rejected-candidates=6 short-ab-pairs=3 500-ab-pairs=3 1000-ab-pairs=3 thread-gate-runs=16 public-cell-runs=60 tests=1613 -->
 <!-- LATEST_PERFORMANCE_PHASE63_RUNS: dotnet-date=2026-08-26 dotnet-matrix-runs=60 dotnet-repeats=3 python-reference-date=2026-08-12 python-reference-runs=30 -->
 <!-- LATEST_PERFORMANCE_PHASE63_EVIDENCE: 1000-pairs=3 1000-independent-wall-medians=30.213/29.576s 1000-paired-wall-gain-median=1.35% 1000-independent-cpu-medians=290.719/279.297s 1000-paired-cpu-gain-median=3.93% t0-frames=160 t0-pairs=3 t0-independent-wall-medians=37.492/36.962s t0-paired-wall-gain-median=0.43% -->
@@ -1079,11 +1082,11 @@ The three-run wall-time ranges were:
 <!-- LATEST_PERFORMANCE_RANGES_BEGIN -->
 | CLI mode | Python v0.4.0 | Python PR341 | Exact + v0.4.0 | Exact + current | IPP-fast + v0.4.0 | IPP-fast + current |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| default (5) | 52.583-62.222 s | 53.893-58.195 s | 11.350-11.662 s | 10.777-11.403 s | 10.083-10.156 s | 7.843-8.040 s |
-| `--threads 1` | 56.709-60.521 s | 56.335-58.991 s | 32.733-32.882 s | 36.901-37.693 s | 22.507-22.558 s | 24.258-24.541 s |
-| `--threads 5` | 52.845-53.977 s | 53.696-58.437 s | 11.535-11.692 s | 10.495-10.872 s | 9.954-10.212 s | 7.852-7.889 s |
-| `--threads 10` | 51.797-53.088 s | 52.649-56.775 s | 8.910-8.929 s | 7.383-7.840 s | 8.186-8.313 s | 5.882-6.056 s |
-| `--threads 20` | 52.967-55.987 s | 53.005-55.618 s | 7.151-7.366 s | 6.024-7.093 s | 6.950-7.091 s | 4.835-4.919 s |
+| default (5) | 52.583-62.222 s | 53.893-58.195 s | 11.526-11.555 s | 10.850-11.233 s | 10.198-10.379 s | 7.911-8.141 s |
+| `--threads 1` | 56.709-60.521 s | 56.335-58.991 s | 32.578-33.142 s | 37.395-37.851 s | 22.527-22.647 s | 24.567-24.916 s |
+| `--threads 5` | 52.845-53.977 s | 53.696-58.437 s | 11.771-11.827 s | 11.077-11.748 s | 10.347-10.407 s | 8.126-8.314 s |
+| `--threads 10` | 51.797-53.088 s | 52.649-56.775 s | 9.000-9.306 s | 7.616-8.350 s | 8.328-8.682 s | 5.862-5.960 s |
+| `--threads 20` | 52.967-55.987 s | 53.005-55.618 s | 7.034-7.250 s | 5.863-6.760 s | 6.986-7.058 s | 4.781-4.938 s |
 <!-- LATEST_PERFORMANCE_RANGES_END -->
 
 The 30 retained Python measurements come from the fixed-condition 2026-08-12
@@ -1095,18 +1098,18 @@ Python v0.4.0 produced 15 distinct luma, chroma, JSON, and normalized-log hash
 sets in 15 runs; its strict oracle therefore remains `g4315520 --threads 0`.
 
 All refreshed .NET cells use the self-contained Preview 7 candidate based on
-main commit `763b4bb` plus scalar PocketFFT pair inlining. Its product version
-is `2.7.0+763b4bb0787fbfd48e10bd58129ee34751f6d851`, and its
+main commit `eb7ba6e` plus staged VHS payload-prefix materialization. Its product
+version is `2.9.0+eb7ba6efc6c894a85720d4e26970d89982f66d10`, and its
 137,280,308-byte single-file `decode.exe` SHA-256 is
-`AC8375CD73786368DC0CF4B891604608564A1299F5FB50F8D0EFD14A18AAB610`.
+`6C75525B3F5FCFE428BE5CCFC9CD787FE1CFC40EB4DF14263BDC2685ABD58640`.
 The host was an Intel Core Ultra 7 265K with 20 logical processors, Windows 11
 build 26220, and the repository-pinned and host CLI .NET SDK
 `11.0.100-preview.7.26381.103`. Raw directories stay local because they contain
 the private fixture path; these are reported local measurements, not an
 independently reproducible public corpus.
 
-The preceding Preview 6 release snapshot and this Preview 7 candidate were
-measured in separate campaigns. Their differences are descriptive only: run
+The preceding active matrix and this candidate were measured in separate
+campaigns. Their differences are descriptive only: run
 order, thermal/scheduler state, and background load were not controlled as a
 same-moment A/B, so no runtime-caused speedup or regression is claimed.
 
@@ -1115,7 +1118,35 @@ variation. Ratio cells move when either the Python numerator or .NET denominator
 moves. They are not used to attribute a revision regression or speedup; the
 same-moment interleaved revision A/B evidence below is the causal gate.
 
-### Scalar PocketFFT pair inlining
+### Staged VHS payload-prefix materialization
+
+The copy-attribution trace assigned about 40.8% of Exact sampled time to the VHS
+payload materializer. On the existing 20-worker segmented-envelope path, the
+candidate initially copies only the Video/Chroma prefix estimated from the field
+request and established line lookahead. If actual finite line locations require
+more, it extends ownership by complete source blocks while preserving the same
+arrays, copy expressions, padding, and sample order. Public full-materialization,
+raw-metric, and DC-adjust paths remain full-span operations.
+
+The first screening matrix exposed an invalid low-worker variant: its partial
+contiguous envelope changed the full-span mean used by tape-dropout thresholds,
+so raw JSON diverged even though luma, chroma, and `fileLoc` matched. That result
+was rejected. The final candidate restricts prefix materialization to the
+segmented-envelope path; default/1/5/10-worker paths retain full envelope and
+payload materialization. The final 60-run matrix produced one luma, chroma, raw
+JSON, stdout, normalized-stderr, normalized-log, ordered-`fileLoc`, and field-count
+value for every backend/profile across all five worker settings.
+
+Two opposite-order Exact `current --threads 20` pairs at each of 160, 500, and
+1,000 frames matched every compatibility surface. At 1,000 frames, combined
+baseline/candidate wall time was 59.306/58.570 seconds (1.24% lower), while CPU
+time was 558.547/552.453 seconds (1.09% lower). The two candidate memory traces
+did not grow progressively; one had a higher but flat 507.9 MiB peak, so this
+audit claims bounded memory rather than a memory reduction. Release build was
+zero-warning/zero-error, and the standard xUnit v3 run discovered 1,614 tests,
+with 1,611 passing and 3 expected environment skips.
+
+### Prior retained: scalar PocketFFT pair inlining
 
 The clean Exact `current --threads 20` trace attributed 1.10% exclusive sampled
 time to the scalar `PocketFftComplex.Pair` helper, entirely below
@@ -4699,7 +4730,7 @@ Requirements:
 .\tools\build-cuda-fast-native.ps1
 dotnet restore VHSDecodeDotNet.slnx
 dotnet build VHSDecodeDotNet.slnx -c Release --no-restore
-dotnet test --solution VHSDecodeDotNet.slnx -c Release --no-build --no-restore --minimum-expected-tests 1613
+dotnet test --solution VHSDecodeDotNet.slnx -c Release --no-build --no-restore --minimum-expected-tests 1614
 dotnet test --project tests\VHSDecode.Tests\VHSDecode.Tests.csproj -c Release --no-build --no-restore --coverage --coverage-output coverage.cobertura.xml --coverage-output-format cobertura
 ```
 
@@ -4729,7 +4760,7 @@ The default command runs every native GPU test. GPU-less CI may pass
 but is not GPU runtime validation.
 
 The current formal Release build has zero warnings and errors. The xUnit v3
-project exposes **1,613** independently discoverable tests to both
+project exposes **1,614** independently discoverable tests to both
 `dotnet test` and Visual Studio Test Explorer.
 
 <!-- SECTION: usage -->

@@ -716,6 +716,9 @@ public sealed class TbcFieldDecodePipeline : IDisposable
             * _syncAnalyzer.NominalLineLength));
     }
 
+    internal int EstimateVhsPayloadSampleCount()
+        => EstimateReadSampleCount(checked(LineLocationLookahead * 2));
+
     public int EstimateNominalFieldSampleCount()
     {
         if (_framesPerSecond.HasValue)
@@ -1297,7 +1300,17 @@ public sealed class TbcFieldDecodePipeline : IDisposable
 
         if (span.DeferredVhsPayload is { } deferredVhsPayload)
         {
-            deferredVhsPayload.EnsurePayloadMaterialized();
+            int requiredPayloadSampleCount = prepared.DeferredVideoDcOffset != 0.0
+                || _preserveRawMetricSources
+                || !deferredVhsPayload.UsesSegmentedEnvelope
+                    ? span.Video.Length
+                    : RequiredVhsPayloadSampleCount(
+                        span.Video.Length,
+                        line0.Location,
+                        lineLocations.Locations,
+                        meanLineLength,
+                        processedLines);
+            deferredVhsPayload.EnsurePayloadMaterializedThrough(requiredPayloadSampleCount);
             if (prepared.DeferredVideoDcOffset != 0.0)
             {
                 span = span with
@@ -1803,6 +1816,31 @@ public sealed class TbcFieldDecodePipeline : IDisposable
                 renderResamplingPlan?.Dispose();
             }
         }
+    }
+
+    private static int RequiredVhsPayloadSampleCount(
+        int availableSampleCount,
+        double line0Location,
+        ReadOnlySpan<double> lineLocations,
+        double meanLineLength,
+        int processedLines)
+    {
+        double requiredEnd = line0Location + ((processedLines + 2.0) * meanLineLength);
+        for (int i = 0; i < lineLocations.Length; i++)
+        {
+            double location = lineLocations[i];
+            if (double.IsFinite(location))
+            {
+                requiredEnd = Math.Max(requiredEnd, location + meanLineLength);
+            }
+        }
+
+        if (!double.IsFinite(requiredEnd) || requiredEnd >= availableSampleCount)
+        {
+            return availableSampleCount;
+        }
+
+        return Math.Clamp((int)Math.Ceiling(requiredEnd), 0, availableSampleCount);
     }
 
     private PendingVhsField BeginVhsWavefrontTail(

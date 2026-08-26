@@ -1365,13 +1365,17 @@ public sealed class TbcFieldSequenceDecodeEngine
                 input,
                 window.StartSample,
                 window.SampleCount);
-            return lease is null
-                ? null
-                : session.TbcFieldDecoder.DecodeVhsForSequence(
-                    lease.Span,
-                    fieldNumber,
-                    retainVhsChromaBurstSamples,
-                    usePooledOutputBuffers: !retainVhsChromaBurstSamples);
+            if (lease is null)
+            {
+                return null;
+            }
+
+            ConfigureInitialVhsPayload(session, lease.Span, begin);
+            return session.TbcFieldDecoder.DecodeVhsForSequence(
+                lease.Span,
+                fieldNumber,
+                retainVhsChromaBurstSamples,
+                usePooledOutputBuffers: !retainVhsChromaBurstSamples);
         }
 
         RfDecodedSpan? span = session.StreamDecoder.Read(input, window.StartSample, window.SampleCount);
@@ -1434,6 +1438,7 @@ public sealed class TbcFieldSequenceDecodeEngine
                 return VhsWavefrontReadSlot.Eof(begin, diagnostics);
             }
 
+            ConfigureInitialVhsPayload(session, lease.Span, begin);
             pending =
                 session.TbcFieldDecoder.BeginDecodeVhsForSequence(
                     lease.Span,
@@ -1473,6 +1478,30 @@ public sealed class TbcFieldSequenceDecodeEngine
                 session.TbcRenderer.DiagnosticLogger = renderDiagnosticSink;
             }
         }
+    }
+
+    private static void ConfigureInitialVhsPayload(
+        DecodeSession session,
+        RfDecodedSpan span,
+        long intendedStartSample)
+    {
+        RfBlockStreamDecoder.VhsPayloadMaterializer? materializer = span.DeferredVhsPayload;
+        if (materializer is null)
+        {
+            return;
+        }
+
+        long intendedOffset = intendedStartSample - span.StartSample;
+        if (intendedOffset < 0 || intendedOffset > int.MaxValue)
+        {
+            return;
+        }
+
+        long estimatedEnd = intendedOffset + session.TbcFieldDecoder.EstimateVhsPayloadSampleCount();
+        materializer.ConfigureInitialPayloadSampleCount(
+            estimatedEnd >= span.Video.Length
+                ? span.Video.Length
+                : checked((int)estimatedEnd));
     }
 
     private TbcDecodedField? ReadFieldWithContext(
