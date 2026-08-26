@@ -1,4 +1,5 @@
 using System.Numerics;
+using System.Runtime.Intrinsics.X86;
 using VHSDecode.Core.Decode;
 using VHSDecode.Core.Dsp;
 using VHSDecode.Core.Rf;
@@ -80,6 +81,74 @@ public sealed class ChromaReductionNumericsCompatibilityTests
             actual.Select(value => BitConverter.SingleToUInt32Bits((float)value)));
     }
 
+    [Fact(DisplayName = "Current RF fused double chroma shift preserves the pinned implementation bits")]
+    public void CurrentRfFusedDoubleChromaShiftPreservesPinnedImplementationBits()
+    {
+        if (Environment.GetEnvironmentVariable(
+                "VHSDECODE_REQUIRE_AVX_CURRENT_CHROMA_SHIFT") == "1")
+        {
+            Assert.True(
+                Avx.IsSupported,
+                "The CI current RF chroma shift run requires AVX support.");
+        }
+
+        int[] lengths = [0, 1, 2, 3, 4, 5, 7, 8, 31, 32, 33, 257, 521];
+        int[] moves = [-513, -23, -3, -1, 0, 1, 3, 23, 513];
+        foreach (int length in lengths)
+        {
+            double[] input = Enumerable.Range(0, length)
+                .Select(index => index % 11 switch
+                {
+                    0 => 1e20 + index,
+                    1 => -1e20 - index,
+                    2 => Math.PI * (index + 1),
+                    3 => -Math.E * (index + 1),
+                    _ => Math.Sin(index * 0.371) * 12_345.6789
+                })
+                .ToArray();
+            foreach (int move in moves)
+            {
+                double[] expected = PinnedCurrentDoubleChromaShift(input, move);
+                double[] actual = VhsChromaDecoder.ShiftChromaAndRemoveDcFloat32CurrentInPlace(
+                    input.ToArray(),
+                    move);
+
+                Assert.Equal(
+                    expected.Select(BitConverter.DoubleToUInt64Bits),
+                    actual.Select(BitConverter.DoubleToUInt64Bits));
+            }
+        }
+
+        double[][] specialInputs =
+        [
+            [double.NaN, 1.0, 2.0, 3.0],
+            [
+                BitConverter.UInt64BitsToDouble(0x7FF8_0000_0000_0001UL),
+                BitConverter.UInt64BitsToDouble(0x7FF8_0000_1000_0000UL),
+                BitConverter.UInt64BitsToDouble(0x7FF0_0000_0000_0001UL),
+                1.0
+            ],
+            [double.PositiveInfinity, 1.0, -2.0, 3.0],
+            [double.NegativeInfinity, -0.0, 0.0, 7.0],
+            [double.PositiveInfinity, double.NegativeInfinity, -0.0, 0.0],
+            [-0.0, 0.0, -0.0, 0.0]
+        ];
+        foreach (double[] input in specialInputs)
+        {
+            foreach (int move in moves)
+            {
+                double[] expected = PinnedCurrentDoubleChromaShift(input, move);
+                double[] actual = VhsChromaDecoder.ShiftChromaAndRemoveDcFloat32CurrentInPlace(
+                    input.ToArray(),
+                    move);
+
+                Assert.Equal(
+                    expected.Select(BitConverter.DoubleToUInt64Bits),
+                    actual.Select(BitConverter.DoubleToUInt64Bits));
+            }
+        }
+    }
+
     [Fact(DisplayName = "RF float64 chroma DC removal uses Numba fast-math mean")]
     public void RfFloat64ChromaDcRemovalUsesNumbaFastMathMean()
     {
@@ -131,5 +200,68 @@ public sealed class ChromaReductionNumericsCompatibilityTests
         Assert.Equal(
             expected.Select(BitConverter.DoubleToUInt64Bits),
             actual.Select(BitConverter.DoubleToUInt64Bits));
+    }
+
+    private static double[] PinnedCurrentDoubleChromaShift(double[] input, int move)
+    {
+        double[] chroma = input.ToArray();
+        if (chroma.Length == 0)
+        {
+            return chroma;
+        }
+
+        PinnedQuantizeToFloat32InPlace(chroma);
+        int normalizedMove = ((move % chroma.Length) + chroma.Length) % chroma.Length;
+        float[] wrapped = chroma
+            .AsSpan(chroma.Length - normalizedMove, normalizedMove)
+            .ToArray()
+            .Select(value => (float)value)
+            .ToArray();
+        int firstWrappedIndex = chroma.Length - normalizedMove;
+        double meanAccumulator = 0.0;
+        for (int index = firstWrappedIndex - 1; index >= 0; index--)
+        {
+            meanAccumulator += chroma[index];
+            chroma[index + normalizedMove] = chroma[index];
+        }
+
+        for (int index = 0; index < normalizedMove; index++)
+        {
+            meanAccumulator += wrapped[index];
+            chroma[index] = wrapped[index];
+        }
+
+        meanAccumulator /= chroma.Length;
+        for (int index = 0; index < chroma.Length; index++)
+        {
+            chroma[index] = (float)(chroma[index] - meanAccumulator);
+        }
+
+        return chroma;
+    }
+
+    private static unsafe void PinnedQuantizeToFloat32InPlace(Span<double> values)
+    {
+        int index = 0;
+        if (Avx.IsSupported)
+        {
+            fixed (double* valuesPointer = values)
+            {
+                int vectorizedEnd = values.Length - (values.Length % 4);
+                for (; index < vectorizedEnd; index += 4)
+                {
+                    Avx.Store(
+                        valuesPointer + index,
+                        Avx.ConvertToVector256Double(
+                            Avx.ConvertToVector128Single(
+                                Avx.LoadVector256(valuesPointer + index))));
+                }
+            }
+        }
+
+        for (; index < values.Length; index++)
+        {
+            values[index] = (float)values[index];
+        }
     }
 }

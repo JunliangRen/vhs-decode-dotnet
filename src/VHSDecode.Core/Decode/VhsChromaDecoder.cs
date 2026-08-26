@@ -2532,7 +2532,7 @@ public static class VhsChromaDecoder
         return chroma;
     }
 
-    internal static double[] ShiftChromaAndRemoveDcFloat32CurrentInPlace(
+    internal static unsafe double[] ShiftChromaAndRemoveDcFloat32CurrentInPlace(
         double[] chroma,
         int move)
     {
@@ -2542,7 +2542,6 @@ public static class VhsChromaDecoder
             return chroma;
         }
 
-        RfBlockDecodePipeline.QuantizeToFloat32InPlace(chroma);
         int normalizedMove = PositiveModulo(move, chroma.Length);
         Span<float> wrapped = normalizedMove <= 256
             ? stackalloc float[normalizedMove]
@@ -2554,10 +2553,31 @@ public static class VhsChromaDecoder
         }
 
         double meanAccumulator = 0.0;
-        for (int i = firstWrappedIndex - 1; i >= 0; i--)
+        int sourceIndex = firstWrappedIndex - 1;
+        if (Avx.IsSupported)
         {
-            meanAccumulator += chroma[i];
-            chroma[i + normalizedMove] = chroma[i];
+            fixed (double* chromaPointer = chroma)
+            {
+                for (; sourceIndex >= 3; sourceIndex -= 4)
+                {
+                    int sourceStart = sourceIndex - 3;
+                    Vector256<double> quantized = Avx.ConvertToVector256Double(
+                        Avx.ConvertToVector128Single(
+                            Avx.LoadVector256(chromaPointer + sourceStart)));
+                    meanAccumulator += quantized.GetElement(3);
+                    meanAccumulator += quantized.GetElement(2);
+                    meanAccumulator += quantized.GetElement(1);
+                    meanAccumulator += quantized.GetElement(0);
+                    Avx.Store(chromaPointer + sourceStart + normalizedMove, quantized);
+                }
+            }
+        }
+
+        for (; sourceIndex >= 0; sourceIndex--)
+        {
+            double quantized = (float)chroma[sourceIndex];
+            meanAccumulator += quantized;
+            chroma[sourceIndex + normalizedMove] = quantized;
         }
 
         for (int i = 0; i < normalizedMove; i++)
@@ -2567,9 +2587,29 @@ public static class VhsChromaDecoder
         }
 
         meanAccumulator /= chroma.Length;
-        for (int i = 0; i < chroma.Length; i++)
+        int outputIndex = 0;
+        if (Avx.IsSupported && double.IsFinite(meanAccumulator))
         {
-            chroma[i] = (float)(chroma[i] - meanAccumulator);
+            fixed (double* chromaPointer = chroma)
+            {
+                Vector256<double> mean = Vector256.Create(meanAccumulator);
+                int vectorizedEnd = chroma.Length - (chroma.Length % 4);
+                for (; outputIndex < vectorizedEnd; outputIndex += 4)
+                {
+                    Vector256<double> centered = Avx.Subtract(
+                        Avx.LoadVector256(chromaPointer + outputIndex),
+                        mean);
+                    Avx.Store(
+                        chromaPointer + outputIndex,
+                        Avx.ConvertToVector256Double(
+                            Avx.ConvertToVector128Single(centered)));
+                }
+            }
+        }
+
+        for (; outputIndex < chroma.Length; outputIndex++)
+        {
+            chroma[outputIndex] = (float)(chroma[outputIndex] - meanAccumulator);
         }
 
         return chroma;

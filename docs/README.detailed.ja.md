@@ -962,8 +962,8 @@ baseline には 628.7 MiB の GC peak があったため、大きい差は perce
 local 40 MHz PAL VHS `.ldf` fixture 上の Python v0.4.0、merge 済みの Python PR341、Exact
 v0.4.0、Exact `current`、IPP-fast v0.4.0、IPP-fast `current` を比較します。filename は
 公開しません。active table は 2026-08-12 の固定 Python reference 30 run を保持します。
-全 60 回の .NET 測定は 2026-08-26 に PR commit `e0777e2` と最終 wrapped-tail safety
-adjustment を含む同じ self-contained .NET 11 Preview 7 candidate でまとめて更新しました。
+全 60 回の .NET 測定は 2026-08-26 に main commit `b893bf7` と current RF chroma pass
+optimization を含む同じ self-contained .NET 11 Preview 7 candidate でまとめて更新しました。
 各 .NET cell は wall-time median、
 profile が対応する Python 列に対する speedup、wall-time reduction
 の順です。別 batch、format、fixture を使った過去の matrix とは直接比較できません。
@@ -971,30 +971,33 @@ profile が対応する Python 列に対する speedup、wall-time reduction
 <!-- LATEST_PERFORMANCE_BEGIN -->
 | CLI mode（workers） | Python v0.4.0 | Python PR341 | Exact + v0.4.0 | Exact + current | IPP-fast + v0.4.0 | IPP-fast + current |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| default（5） | 52.811 s | 54.243 s | 11.763 s / 4.489x / 77.73% | 11.271 s / 4.813x / 79.22% | 10.394 s / 5.081x / 80.32% | 8.129 s / 6.673x / 85.01% |
-| `--threads 1` | 57.067 s | 56.762 s | 33.318 s / 1.713x / 41.62% | 37.392 s / 1.518x / 34.12% | 22.578 s / 2.528x / 60.44% | 24.406 s / 2.326x / 57.00% |
-| `--threads 5` | 52.920 s | 55.722 s | 11.746 s / 4.505x / 77.80% | 11.132 s / 5.006x / 80.02% | 10.215 s / 5.181x / 80.70% | 8.171 s / 6.820x / 85.34% |
-| `--threads 10` | 52.965 s | 54.949 s | 9.071 s / 5.839x / 82.87% | 8.090 s / 6.792x / 85.28% | 8.446 s / 6.271x / 84.05% | 6.089 s / 9.024x / 88.92% |
-| `--threads 20` | 53.555 s | 54.842 s | 7.267 s / 7.369x / 86.43% | 7.182 s / 7.636x / 86.90% | 7.024 s / 7.625x / 86.88% | 4.962 s / 11.052x / 90.95% |
+| default（5） | 52.811 s | 54.243 s | 11.598 s / 4.553x / 78.04% | 11.398 s / 4.759x / 78.99% | 10.230 s / 5.162x / 80.63% | 7.997 s / 6.783x / 85.26% |
+| `--threads 1` | 57.067 s | 56.762 s | 32.969 s / 1.731x / 42.23% | 37.599 s / 1.510x / 33.76% | 22.629 s / 2.522x / 60.35% | 24.415 s / 2.325x / 56.99% |
+| `--threads 5` | 52.920 s | 55.722 s | 11.773 s / 4.495x / 77.75% | 11.100 s / 5.020x / 80.08% | 10.101 s / 5.239x / 80.91% | 7.971 s / 6.991x / 85.70% |
+| `--threads 10` | 52.965 s | 54.949 s | 9.040 s / 5.859x / 82.93% | 8.122 s / 6.765x / 85.22% | 8.391 s / 6.312x / 84.16% | 5.813 s / 9.453x / 89.42% |
+| `--threads 20` | 53.555 s | 54.842 s | 7.310 s / 7.327x / 86.35% | 7.076 s / 7.751x / 87.10% | 6.919 s / 7.741x / 87.08% | 4.868 s / 11.265x / 91.12% |
 <!-- LATEST_PERFORMANCE_END -->
+<!-- LATEST_PERFORMANCE_PHASE159: kernel-ab-rounds=8 320-ab-pairs=3 1000-ab-pairs=3 public-cell-runs=60 tests=1615 -->
+<!-- LATEST_PERFORMANCE_PHASE159_RUNS: dotnet-date=2026-08-26 dotnet-matrix-runs=60 dotnet-repeats=3 python-reference-date=2026-08-12 python-reference-runs=30 -->
+<!-- LATEST_PERFORMANCE_PHASE159_EVIDENCE: kernel-old-new=28.025/16.166ms kernel-wall-gain=42.317% 1000-paired-wall-gain-median=0.5385% 1000-paired-cpu-gain-median=0.6860% compatibility-surfaces=8 -->
 <!-- LATEST_PERFORMANCE_PHASE66: trace-runs=2 rejected-candidates=4 160-ab-pairs=2 500-ab-pairs=2 1000-ab-pairs=2 screening-matrix-runs=60 public-cell-runs=60 tests=1614 -->
 <!-- LATEST_PERFORMANCE_PHASE66_RUNS: dotnet-date=2026-08-26 dotnet-matrix-runs=60 dotnet-repeats=3 python-reference-date=2026-08-12 python-reference-runs=30 -->
 <!-- LATEST_PERFORMANCE_PHASE66_EVIDENCE: 1000-pairs=2 1000-combined-wall=60.344/58.614s 1000-wall-gain=2.87% 1000-combined-cpu=575.500/555.969s 1000-cpu-gain=3.39% low-worker-json-regression-caught=1 wrapped-sinc-tail-guard=1 linux-allocation-ci-fix=1 -->
 <!-- LATEST_PERFORMANCE_PHASE63: trace-runs=1 rejected-candidates=6 short-ab-pairs=3 500-ab-pairs=3 1000-ab-pairs=3 thread-gate-runs=16 public-cell-runs=60 tests=1613 -->
 <!-- LATEST_PERFORMANCE_PHASE63_RUNS: dotnet-date=2026-08-26 dotnet-matrix-runs=60 dotnet-repeats=3 python-reference-date=2026-08-12 python-reference-runs=30 -->
 <!-- LATEST_PERFORMANCE_PHASE63_EVIDENCE: 1000-pairs=3 1000-independent-wall-medians=30.213/29.576s 1000-paired-wall-gain-median=1.35% 1000-independent-cpu-medians=290.719/279.297s 1000-paired-cpu-gain-median=3.93% t0-frames=160 t0-pairs=3 t0-independent-wall-medians=37.492/36.962s t0-paired-wall-gain-median=0.43% -->
-<!-- LATEST_PERFORMANCE_RUNS: performance-snapshot-runs=90 dotnet-matrix-runs=60 dotnet-current-runs=30 python-reference-runs=30 dotnet-repeats=3 python-reference-date=2026-08-12 dotnet-v040-date=2026-08-24 dotnet-current-date=2026-08-24 phase22-200-ab-pairs=20 phase22-long-ab-pairs=8 phase22-thread-backend-runs=60 phase22-gc-traces=2 phase22-tests=1438 phase24-short-ab-pairs=6 phase24-long-ab-pairs=4 phase24-thread-gate-runs=12 phase24-tests=1442 phase25-public-cell-runs=15 phase25-public-ab-pairs=15 phase25-long-ab-pairs=3 phase25-thread-gate-runs=12 phase25-tests=1446 phase26-kernel-ab-pairs=8 phase26-long-ab-pairs=4 phase26-thread-backend-runs=36 phase26-public-cell-runs=30 phase26-tests=1447 phase27-kernel-ab-pairs=8 phase27-long-ab-pairs=8 phase27-thread-backend-runs=24 phase27-public-cell-runs=60 phase27-tests=1448 phase28-kernel-ab-pairs=8 phase28-long-ab-pairs=6 phase28-thread-backend-runs=24 phase28-intrinsic-runs=3 phase28-public-cell-runs=60 phase28-tests=1448 phase30-burst-kernel-runs=14 phase30-long-ab-pairs=3 phase30-thread-gate-runs=6 phase30-memory-runs=2 phase30-public-cell-runs=60 phase30-tests=1448 phase31-interleaved-ab-pairs=9 phase31-long-gate-runs=8 phase31-thread-backend-runs=24 phase31-memory-runs=4 phase31-public-cell-runs=60 phase31-tests=1459 phase32-vblank-short-ab-pairs=6 phase32-vblank-long-ab-pairs=2 phase32-thread-backend-runs=24 phase32-gc-traces=2 phase32-counter-runs=2 phase32-tests=1460 phase33-sync-list-short-ab-pairs=6 phase33-sync-list-long-ab-pairs=2 phase33-thread-backend-runs=24 phase33-gc-traces=1 phase33-memory-runs=4 phase33-public-cell-runs=60 phase33-tests=1463 phase42-public-cell-runs=60 phase42-tests=1609 phase52-current-short-ab-pairs=8 phase52-v040-short-ab-pairs=4 phase52-long-ab-pairs=2 phase52-public-cell-runs=60 phase52-intrinsic-runs=3 phase52-tests=1610 phase59-short-ab-pairs=3 phase59-500-ab-pairs=3 phase59-1000-ab-pairs=3 phase59-public-cell-runs=60 phase59-intrinsic-runs=2 phase59-tests=1610 phase60-short-ab-pairs=3 phase60-500-ab-pairs=2 phase60-1000-ab-pairs=2 phase60-thread-gate-runs=4 phase60-memory-runs=1 phase60-public-cell-runs=60 phase60-tests=1613 phase61-trace-runs=1 phase61-rejected-candidates=2 phase61-short-ab-pairs=3 phase61-500-ab-pairs=2 phase61-1000-ab-pairs=2 phase61-thread-gate-runs=6 phase61-memory-runs=1 phase61-public-cell-runs=60 phase61-intrinsic-runs=2 phase61-tests=1613 python-v040-runs=15 python-v040-hashes=15 python-pr341-runs=15 python-pr341-hashes=1 -->
+<!-- LATEST_PERFORMANCE_RUNS: performance-snapshot-runs=90 dotnet-matrix-runs=60 dotnet-current-runs=30 python-reference-runs=30 dotnet-repeats=3 python-reference-date=2026-08-12 dotnet-v040-date=2026-08-26 dotnet-current-date=2026-08-26 phase22-200-ab-pairs=20 phase22-long-ab-pairs=8 phase22-thread-backend-runs=60 phase22-gc-traces=2 phase22-tests=1438 phase24-short-ab-pairs=6 phase24-long-ab-pairs=4 phase24-thread-gate-runs=12 phase24-tests=1442 phase25-public-cell-runs=15 phase25-public-ab-pairs=15 phase25-long-ab-pairs=3 phase25-thread-gate-runs=12 phase25-tests=1446 phase26-kernel-ab-pairs=8 phase26-long-ab-pairs=4 phase26-thread-backend-runs=36 phase26-public-cell-runs=30 phase26-tests=1447 phase27-kernel-ab-pairs=8 phase27-long-ab-pairs=8 phase27-thread-backend-runs=24 phase27-public-cell-runs=60 phase27-tests=1448 phase28-kernel-ab-pairs=8 phase28-long-ab-pairs=6 phase28-thread-backend-runs=24 phase28-intrinsic-runs=3 phase28-public-cell-runs=60 phase28-tests=1448 phase30-burst-kernel-runs=14 phase30-long-ab-pairs=3 phase30-thread-gate-runs=6 phase30-memory-runs=2 phase30-public-cell-runs=60 phase30-tests=1448 phase31-interleaved-ab-pairs=9 phase31-long-gate-runs=8 phase31-thread-backend-runs=24 phase31-memory-runs=4 phase31-public-cell-runs=60 phase31-tests=1459 phase32-vblank-short-ab-pairs=6 phase32-vblank-long-ab-pairs=2 phase32-thread-backend-runs=24 phase32-gc-traces=2 phase32-counter-runs=2 phase32-tests=1460 phase33-sync-list-short-ab-pairs=6 phase33-sync-list-long-ab-pairs=2 phase33-thread-backend-runs=24 phase33-gc-traces=1 phase33-memory-runs=4 phase33-public-cell-runs=60 phase33-tests=1463 phase42-public-cell-runs=60 phase42-tests=1609 phase52-current-short-ab-pairs=8 phase52-v040-short-ab-pairs=4 phase52-long-ab-pairs=2 phase52-public-cell-runs=60 phase52-intrinsic-runs=3 phase52-tests=1610 phase59-short-ab-pairs=3 phase59-500-ab-pairs=3 phase59-1000-ab-pairs=3 phase59-public-cell-runs=60 phase59-intrinsic-runs=2 phase59-tests=1610 phase60-short-ab-pairs=3 phase60-500-ab-pairs=2 phase60-1000-ab-pairs=2 phase60-thread-gate-runs=4 phase60-memory-runs=1 phase60-public-cell-runs=60 phase60-tests=1613 phase61-trace-runs=1 phase61-rejected-candidates=2 phase61-short-ab-pairs=3 phase61-500-ab-pairs=2 phase61-1000-ab-pairs=2 phase61-thread-gate-runs=6 phase61-memory-runs=1 phase61-public-cell-runs=60 phase61-intrinsic-runs=2 phase61-tests=1613 phase159-kernel-ab-rounds=8 phase159-320-ab-pairs=3 phase159-1000-ab-pairs=3 phase159-public-cell-runs=60 phase159-tests=1615 python-v040-runs=15 python-v040-hashes=15 python-pr341-runs=15 python-pr341-hashes=1 -->
 
 3-run wall-time range は次のとおりです。
 
 <!-- LATEST_PERFORMANCE_RANGES_BEGIN -->
 | CLI mode | Python v0.4.0 | Python PR341 | Exact + v0.4.0 | Exact + current | IPP-fast + v0.4.0 | IPP-fast + current |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| default（5） | 52.583-62.222 s | 53.893-58.195 s | 11.729-11.789 s | 10.942-11.480 s | 10.361-10.490 s | 7.912-8.185 s |
-| `--threads 1` | 56.709-60.521 s | 56.335-58.991 s | 32.869-33.513 s | 37.371-37.545 s | 22.568-22.627 s | 24.251-24.492 s |
-| `--threads 5` | 52.845-53.977 s | 53.696-58.437 s | 11.598-11.870 s | 11.097-11.549 s | 10.152-10.425 s | 7.944-8.194 s |
-| `--threads 10` | 51.797-53.088 s | 52.649-56.775 s | 8.825-9.485 s | 7.799-8.126 s | 8.426-8.571 s | 5.868-6.117 s |
-| `--threads 20` | 52.967-55.987 s | 53.005-55.618 s | 7.229-7.670 s | 6.955-7.397 s | 6.807-7.247 s | 4.758-4.967 s |
+| default（5） | 52.583-62.222 s | 53.893-58.195 s | 11.495-11.834 s | 10.811-11.412 s | 10.217-10.272 s | 7.899-8.057 s |
+| `--threads 1` | 56.709-60.521 s | 56.335-58.991 s | 32.305-33.199 s | 37.596-37.621 s | 22.597-22.647 s | 24.266-24.460 s |
+| `--threads 5` | 52.845-53.977 s | 53.696-58.437 s | 11.744-11.909 s | 11.090-11.226 s | 10.096-10.284 s | 7.944-8.053 s |
+| `--threads 10` | 51.797-53.088 s | 52.649-56.775 s | 8.869-9.055 s | 7.717-8.239 s | 8.115-8.557 s | 5.769-5.889 s |
+| `--threads 20` | 52.967-55.987 s | 53.005-55.618 s | 7.201-7.322 s | 6.711-7.348 s | 6.880-7.078 s | 4.828-4.970 s |
 <!-- LATEST_PERFORMANCE_RANGES_END -->
 
 保持する 30 Python measurement は 2026-08-12 固定条件 campaign の reference です。
@@ -1004,22 +1007,40 @@ stderr/log、ordered `fileLoc` の hash set はそれぞれ 1 つでした。
 Python v0.4.0 は 15 run で 15 種類の luma、chroma、JSON、normalized-log hash set を
 生成したため、strict oracle は `g4315520 --threads 0` のままです。
 
-更新した全 .NET cell は PR commit `e0777e2` と最終 wrapped-tail safety adjustment を含む
+更新した全 .NET cell は main commit `b893bf7` と current RF chroma pass optimization を含む
 self-contained Preview 7 candidate を使いました。product version は
-`2.9.0+e0777e2d3dc080652ebaff5de9e57d5cf5d2c253`、137,284,404-byte single-file
+`2.10.0+b893bf7d39edf574609a7abc40237a4db32eaf9f`、137,284,417-byte single-file
 `decode.exe` の SHA-256 は
-`D46E1266FED2C13CB408A2BBB123B95C4536FAEE769410D8E292B0E30091617F` です。
+`92481E633B4CD5C80DDD1CD6C26AD5D045B9046763CD8B1F84083F8EFBD73303` です。
 host は Intel Core Ultra 7 265K（20 logical processor）、Windows 11 build 26220 です。
 repository pin と host CLI の .NET SDK はともに `11.0.100-preview.7.26381.103` です。raw directory は private fixture path を
 含むため local にのみ保持し、public に独立再現可能な benchmark corpus とは主張しません。
 
-直前の active matrix と今回の candidate は別々の campaign で測定しました。
-差は descriptive reference に限ります。run order、thermal/scheduler state、background load を
-same-moment A/B として制御していないため、Preview 7 が原因の speedup/regression とは主張しません。
-
 3-run range は通常の startup、thermal、scheduler、system variation を示します。ratio cell は
 Python numerator と .NET denominator の両方で動きます。revision の因果的な regression/speedup
 判断には使わず、以下の同時刻 interleaved revision A/B を gate とします。
+
+### Current RF chroma quantize/shift fusion
+
+`current` path は以前、double buffer 全体を float32 に quantize してから、source index の
+降順で DC mean を accumulate しながら roll し、最後に mean を引いて 2 回目の float32
+conversion を行っていました。retained candidate は最初の quantization を roll と
+accumulation に融合します。AVX loop は従来どおり `3, 2, 1, 0` lane 順で加算し、最後の
+centering loop は独立した subtraction/conversion だけを vectorize します。FMA も reduction
+の reassociation も行いません。AVX disabled または mean が non-finite の場合は scalar route
+を維持します。
+
+frozen old implementation test は 13 buffer length、9 positive/negative/oversized move、
+heap-backed wrapped buffer、distinct NaN payload、両 infinity、finite mean の signed zero、
+AVX-required/AVX-disabled run をカバーし、すべての output double bit が一致しました。
+8 interleaved microbenchmark round で、32,768-sample buffer の 1,000 call は
+28.025 から 16.166 ms へ 42.317% 短縮しました。opposite-order の 1,000-frame Exact
+`current --threads 20` 3 pair は exit status、luma、chroma、raw JSON、stdout、normalized
+stderr/log、ordered `fileLoc` が一致し、paired median wall/CPU gain は 0.5385%/0.6860%
+でした。60-run public matrix も 5 worker setting の各 profile/backend で 1 hash を維持しました。
+memory は通常の run noise 内で変動したため、削減は主張しません。Release build は
+0 warning/0 error、standard xUnit v3 は 1,615 tests を discover し、1,612 passed、expected
+environment skip は 3 でした。
 
 ### Staged VHS payload-prefix materialization
 
@@ -4385,7 +4406,7 @@ suite は全 1,448 test に成功しました。
 .\tools\build-cuda-fast-native.ps1
 dotnet restore VHSDecodeDotNet.slnx
 dotnet build VHSDecodeDotNet.slnx -c Release --no-restore
-dotnet test --solution VHSDecodeDotNet.slnx -c Release --no-build --no-restore --minimum-expected-tests 1614
+dotnet test --solution VHSDecodeDotNet.slnx -c Release --no-build --no-restore --minimum-expected-tests 1615
 dotnet test --project tests\VHSDecode.Tests\VHSDecode.Tests.csproj -c Release --no-build --no-restore --coverage --coverage-output coverage.cobertura.xml --coverage-output-format cobertura
 ```
 
@@ -4413,7 +4434,7 @@ default command はすべての native GPU test を実行します。GPU のな�
 
 現在の正式な Release build は warning 0、error 0 です。xUnit v3 project は
 `dotnet test` と Visual Studio Test Explorer の両方で個別に検出できる
-**1,614** tests を公開します。
+**1,615** tests を公開します。
 
 <!-- SECTION: usage -->
 
