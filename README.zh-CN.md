@@ -35,7 +35,7 @@
 - VHS 家族包括 VHS/S-VHS、Betamax、Video8/Hi8、U-matic、Type C、EIAJ
   以及上游支持的 PAL/NTSC 变体。
 - TBC 工具、双击启动的用户 GUI 和开发者绘图窗口明确不在范围内。
-- Visual Studio 2026 `.slnx` 包含 **1,613** 项标准 xUnit v3 测试；测试可在
+- Visual Studio 2026 `.slnx` 包含 **1,614** 项标准 xUnit v3 测试；测试可在
   Test Explorer 中查看，也可用 `dotnet test` 运行。
 
 <!-- SECTION: start -->
@@ -219,19 +219,22 @@ Y/U/V/All = 0.954905/0.988109/0.991285/0.972301，PSNR Y/U/V/平均值为
 这是同一份私有本地 40 MHz PAL VHS `.ldf` 夹具上使用
 `--start 100 --length 160` 的含启动开销快照，且不会公开源文件名。表中保留了
 2026-08-12 的 30 次固定 Python 参考测量。全部 60 次 .NET 测量已在 2026-08-26
-用基于 main commit `763b4bb` 并包含下述标量 PocketFFT pair 内联的同一个
+用基于 PR commit `e0777e2` 并包含下述 wrapped-tail 安全修正的同一个
 .NET 11 Preview 7 自包含候选二进制同时刷新。每个单元格均有三次完整运行；
 兼容性结论与速度数据分开判断。
 
 <!-- LATEST_PERFORMANCE_BEGIN -->
 | CLI 模式（workers） | Python v0.4.0 | Python PR341 | Exact + v0.4.0 | Exact + current | IPP-fast + v0.4.0 | IPP-fast + current |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| 默认（5） | 52.811 s | 54.243 s | 11.616 s / 4.546x | 11.357 s / 4.776x | 10.084 s / 5.237x | 7.985 s / 6.793x |
-| `--threads 1` | 57.067 s | 56.762 s | 32.821 s / 1.739x | 37.450 s / 1.516x | 22.508 s / 2.535x | 24.434 s / 2.323x |
-| `--threads 5` | 52.920 s | 55.722 s | 11.564 s / 4.576x | 10.734 s / 5.191x | 9.956 s / 5.315x | 7.866 s / 7.084x |
-| `--threads 10` | 52.965 s | 54.949 s | 8.912 s / 5.943x | 7.793 s / 7.051x | 8.257 s / 6.414x | 5.918 s / 9.286x |
-| `--threads 20` | 53.555 s | 54.842 s | 7.238 s / 7.399x | 6.330 s / 8.664x | 7.023 s / 7.625x | 4.876 s / 11.247x |
+| 默认（5） | 52.811 s | 54.243 s | 11.763 s / 4.489x | 11.271 s / 4.813x | 10.394 s / 5.081x | 8.129 s / 6.673x |
+| `--threads 1` | 57.067 s | 56.762 s | 33.318 s / 1.713x | 37.392 s / 1.518x | 22.578 s / 2.528x | 24.406 s / 2.326x |
+| `--threads 5` | 52.920 s | 55.722 s | 11.746 s / 4.505x | 11.132 s / 5.006x | 10.215 s / 5.181x | 8.171 s / 6.820x |
+| `--threads 10` | 52.965 s | 54.949 s | 9.071 s / 5.839x | 8.090 s / 6.792x | 8.446 s / 6.271x | 6.089 s / 9.024x |
+| `--threads 20` | 53.555 s | 54.842 s | 7.267 s / 7.369x | 7.182 s / 7.636x | 7.024 s / 7.625x | 4.962 s / 11.052x |
 <!-- LATEST_PERFORMANCE_END -->
+<!-- LATEST_PERFORMANCE_PHASE66: trace-runs=2 rejected-candidates=4 160-ab-pairs=2 500-ab-pairs=2 1000-ab-pairs=2 screening-matrix-runs=60 public-cell-runs=60 tests=1614 -->
+<!-- LATEST_PERFORMANCE_PHASE66_RUNS: dotnet-date=2026-08-26 dotnet-matrix-runs=60 dotnet-repeats=3 python-reference-date=2026-08-12 python-reference-runs=30 -->
+<!-- LATEST_PERFORMANCE_PHASE66_EVIDENCE: 1000-pairs=2 1000-combined-wall=60.344/58.614s 1000-wall-gain=2.87% 1000-combined-cpu=575.500/555.969s 1000-cpu-gain=3.39% low-worker-json-regression-caught=1 wrapped-sinc-tail-guard=1 linux-allocation-ci-fix=1 -->
 <!-- LATEST_PERFORMANCE_PHASE63: trace-runs=1 rejected-candidates=6 short-ab-pairs=3 500-ab-pairs=3 1000-ab-pairs=3 thread-gate-runs=16 public-cell-runs=60 tests=1613 -->
 <!-- LATEST_PERFORMANCE_PHASE63_RUNS: dotnet-date=2026-08-26 dotnet-matrix-runs=60 dotnet-repeats=3 python-reference-date=2026-08-12 python-reference-runs=30 -->
 <!-- LATEST_PERFORMANCE_PHASE63_EVIDENCE: 1000-pairs=3 1000-independent-wall-medians=30.213/29.576s 1000-paired-wall-gain-median=1.35% 1000-independent-cpu-medians=290.719/279.297s 1000-paired-cpu-gain-median=3.93% t0-frames=160 t0-pairs=3 t0-independent-wall-medians=37.492/36.962s t0-paired-wall-gain-median=0.43% -->
@@ -242,17 +245,16 @@ Y/U/V/All = 0.954905/0.988109/0.991285/0.972301，PSNR Y/U/V/平均值为
 倍数会随作为分子的 Python 时间和作为分母的 .NET 时间一起变化，使用其他夹具或窗口的历史表格
 也不能直接横向比较。判断因果回退时使用同一时刻的 .NET 版本配对 A/B，而不是旧表倍数。
 
-当前候选为 clean trace 中位于 `Pass8FirstIndex` 下方的标量 PocketFFT pair helper
-补上缺失的 `AggressiveInlining`。它不改变任何浮点表达式、求值顺序、分配或 worker
-策略。160、500、1,000 帧 Exact `current --threads 20` 三组配对门禁均在全部兼容面
-一致。在 1,000 帧门禁中，基线/候选各自的独立中位数为墙钟 30.213/29.576 秒、CPU
-290.719/279.297 秒；三组逐对改善率的中位数分别为墙钟 1.35%、CPU 3.93%，峰值
-工作集为 425.4/388.6 MiB。另行三组显式零线程门禁为持平到小幅提升，没有出现
-低线程回退。
+当前候选在现有 20-worker 分段 envelope 路径中，不再复制 staged VHS Video/Chroma
+payload 未使用的尾部；实际行位置需要更多数据时，再按完整源 block 扩展前缀。
+负 Python 坐标、16-tap sinc 绕回尾部、非线性 wow 插值、低 worker dropout 整段均值、
+raw metric 与 DC-adjust 都继续完整 materialization。两组正反顺序的 1,000 帧 Exact
+`current --threads 20` 配对把合计墙钟从 60.344 降到 58.614 秒（缩短 2.87%），CPU
+从 575.500 降到 555.969 秒（缩短 3.39%）。内存保持有界，但不声明降低。
 
 刷新后的 60 次 Exact/IPP-fast 矩阵在每个单元格以及跨 worker 设置都只产生一套
 亮度、色度、原始 JSON、stdout、归一化 stderr/日志和有序 `fileLoc` hash。最新标准
-xUnit v3 套件共发现 **1,613** 项测试，其中 1,610 项通过、3 项因环境不可用按预期跳过。
+xUnit v3 套件共发现 **1,614** 项测试，其中 1,611 项通过、3 项因环境不可用按预期跳过。
 
 刷新后的每个 .NET profile/线程单元格在三轮内都保持确定性。固定参考集中的 Python
 PR341 保持确定；Python v0.4.0 的 15 次运行产生了 15 套不同的亮度、色度、JSON 和
@@ -290,7 +292,7 @@ TBC、色度、JSON 和日志文件允许在解码期间并发读取，兼容的
 dotnet restore VHSDecodeDotNet.slnx
 dotnet build VHSDecodeDotNet.slnx -c Release --no-restore
 dotnet test --solution VHSDecodeDotNet.slnx -c Release `
-  --no-build --no-restore --minimum-expected-tests 1613
+  --no-build --no-restore --minimum-expected-tests 1614
 ```
 
 在 Visual Studio 2026 中打开 `VHSDecodeDotNet.slnx`，即可构建、调试并通过

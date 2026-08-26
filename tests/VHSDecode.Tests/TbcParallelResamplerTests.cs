@@ -1,6 +1,7 @@
 using System.Runtime.InteropServices;
 using System.Runtime.Intrinsics.X86;
 using System.Security.Cryptography;
+using VHSDecode.Core.Decode;
 using VHSDecode.Core.Dsp;
 using VHSDecode.Core.Tbc;
 using Xunit;
@@ -249,6 +250,30 @@ public sealed class TbcParallelResamplerTests
         Assert.Equal(
             "426959AEB3440862EF1B3148CF09D4AF143D5F4F21944E04C6AAA62214F4C0BC",
             Convert.ToHexString(SHA256.HashData(MemoryMarshal.AsBytes(output.AsSpan()))));
+        Assert.Equal(
+            64,
+            TbcFieldDecodePipeline.RequiredLinearVhsRenderPayloadSampleCount(
+                availableSampleCount: 64,
+                [-4.25, 28.5],
+                firstLine: 0,
+                lineCount: 1,
+                sourcePositionShift: 0.0));
+        Assert.Equal(
+            48,
+            TbcFieldDecodePipeline.RequiredLinearVhsRenderPayloadSampleCount(
+                availableSampleCount: 64,
+                [20.0, 28.0],
+                firstLine: 0,
+                lineCount: 1,
+                sourcePositionShift: 3.5));
+        Assert.Equal(
+            64,
+            TbcFieldDecodePipeline.RequiredVhsPayloadSampleCount(
+                availableSampleCount: 64,
+                line0Location: -1.0,
+                lineLocations: [20.0, 28.0],
+                meanLineLength: 8.0,
+                processedLines: 1));
     }
 
     [Fact(DisplayName = "TBC sinc bounds sources shorter than its tap window")]

@@ -177,8 +177,9 @@ public sealed class SyncAnalyzer
         List<ClassifiedSyncPulse> destination)
     {
         PreparePulseDestination(destination, rawPulses.Count);
-        foreach (Pulse pulse in rawPulses)
+        for (int index = 0; index < rawPulses.Count; index++)
         {
+            Pulse pulse = rawPulses[index];
             SyncPulseKind? kind = ClassifyPulse(pulse, timing);
 
             if (!kind.HasValue)

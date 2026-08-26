@@ -430,6 +430,82 @@ public sealed class RfBlockCacheConcurrencyTests
         Assert.Empty(staged.RfHighPass!);
     }
 
+    [Fact(DisplayName = "Staged VHS payload extends a configured prefix without touching its tail")]
+    public async Task StagedVhsPayloadExtendsConfiguredPrefixWithoutTouchingTail()
+    {
+        const int begin = 3;
+        const int length = (20 * 20) + 5;
+        const int initialSampleCount = 123;
+        const int extendedSampleCount = 250;
+        const int blockStride = TestBlockLength - 4;
+        using var eagerStream = new MemoryStream();
+        using var stagedStream = new MemoryStream();
+        using var eagerDecoder = BuildDecoder(
+            new CountingSampleLoader(),
+            workerThreads: RfBlockStreamDecoder.VhsPayloadMaterializer.MinimumSegmentedEnvelopeWorkerThreads,
+            retainRfDiagnosticChannels: false,
+            float32Chroma: true);
+        using var stagedDecoder = BuildDecoder(
+            new CountingSampleLoader(),
+            workerThreads: RfBlockStreamDecoder.VhsPayloadMaterializer.MinimumSegmentedEnvelopeWorkerThreads,
+            retainRfDiagnosticChannels: false,
+            float32Chroma: true);
+        using RfBlockStreamDecoder.RfDecodedSpanLease eagerLease = Assert.IsType<
+            RfBlockStreamDecoder.RfDecodedSpanLease>(
+            eagerDecoder.ReadLeased(eagerStream, begin, length));
+        using RfBlockStreamDecoder.RfDecodedSpanLease stagedLease = Assert.IsType<
+            RfBlockStreamDecoder.RfDecodedSpanLease>(
+            stagedDecoder.ReadVhsStagedLeased(stagedStream, begin, length));
+
+        RfDecodedSpan eager = eagerLease.Span;
+        RfDecodedSpan staged = stagedLease.Span;
+        RfBlockStreamDecoder.VhsPayloadMaterializer materializer = Assert.IsType<
+            RfBlockStreamDecoder.VhsPayloadMaterializer>(staged.DeferredVhsPayload);
+        Array.Fill(staged.Video, double.NaN);
+        Array.Fill(staged.Chroma!, double.NaN);
+        materializer.ConfigureInitialPayloadSampleCount(initialSampleCount);
+
+        await materializer.BeginMaterialization().WaitAsync(
+            TimeSpan.FromSeconds(5),
+            TestContext.Current.CancellationToken);
+
+        int initialEnd = ((((begin + initialSampleCount) + blockStride - 1) / blockStride) * blockStride) - begin;
+        AssertDoubleBitsEqual(eager.Video.AsSpan(0, initialEnd), staged.Video.AsSpan(0, initialEnd));
+        AssertDoubleBitsEqual(eager.Chroma!.AsSpan(0, initialEnd), staged.Chroma!.AsSpan(0, initialEnd));
+        Assert.All(staged.Video.AsSpan(initialEnd).ToArray(), static sample => Assert.True(double.IsNaN(sample)));
+        Assert.All(staged.Chroma.AsSpan(initialEnd).ToArray(), static sample => Assert.True(double.IsNaN(sample)));
+        Assert.Throws<InvalidOperationException>(() =>
+            materializer.ConfigureInitialPayloadSampleCount(initialSampleCount + 1));
+
+        materializer.EnsurePayloadMaterializedThrough(extendedSampleCount);
+
+        int extendedEnd = ((((begin + extendedSampleCount) + blockStride - 1) / blockStride) * blockStride) - begin;
+        AssertDoubleBitsEqual(eager.Video.AsSpan(0, extendedEnd), staged.Video.AsSpan(0, extendedEnd));
+        AssertDoubleBitsEqual(eager.Chroma.AsSpan(0, extendedEnd), staged.Chroma.AsSpan(0, extendedEnd));
+        Assert.All(staged.Video.AsSpan(extendedEnd).ToArray(), static sample => Assert.True(double.IsNaN(sample)));
+        Assert.All(staged.Chroma.AsSpan(extendedEnd).ToArray(), static sample => Assert.True(double.IsNaN(sample)));
+        Assert.Throws<ArgumentOutOfRangeException>(() =>
+            materializer.EnsurePayloadMaterializedThrough(-1));
+        Assert.Throws<ArgumentOutOfRangeException>(() =>
+            materializer.EnsurePayloadMaterializedThrough(length + 1));
+
+        int wrappedTailSampleCount = TbcFieldDecodePipeline.RequiredLinearVhsRenderPayloadSampleCount(
+            length,
+            [-4.25, 28.5],
+            firstLine: 0,
+            lineCount: 1,
+            sourcePositionShift: 0.0);
+        Assert.Equal(length, wrappedTailSampleCount);
+        materializer.EnsurePayloadMaterializedThrough(wrappedTailSampleCount);
+        AssertDoubleBitsEqual(eager.Video, staged.Video);
+        AssertDoubleBitsEqual(eager.Chroma, staged.Chroma);
+
+        materializer.EnsurePayloadMaterialized();
+
+        AssertDoubleBitsEqual(eager.Video, staged.Video);
+        AssertDoubleBitsEqual(eager.Chroma, staged.Chroma);
+    }
+
     [Fact(DisplayName = "Staged VHS segmented envelope matches eager reduction and dropout scanning")]
     public void StagedVhsSegmentedEnvelopeMatchesEagerReductionAndDropoutScanning()
     {
