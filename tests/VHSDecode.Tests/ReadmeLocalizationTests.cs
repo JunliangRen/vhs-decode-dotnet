@@ -355,7 +355,7 @@ public sealed partial class ReadmeLocalizationTests
             "IPP-fast + v0.4.0",
             "IPP-fast + current",
             "--start 100",
-            "v0.4.0-2.9.0",
+            "v0.4.0-2.10.0",
             "52.811 s",
             "54.243 s",
             "11.763 s",
@@ -393,7 +393,7 @@ public sealed partial class ReadmeLocalizationTests
         string[] synchronizedFacts =
         [
             "43155200da87c0d49eb37d8ec09b1372075ee8e4",
-            "v0.4.0-2.9.0",
+            "v0.4.0-2.10.0",
             "e0777e2",
             "2.9.0+e0777e2d3dc080652ebaff5de9e57d5cf5d2c253",
             "D46E1266FED2C13CB408A2BBB123B95C4536FAEE769410D8E292B0E30091617F",
