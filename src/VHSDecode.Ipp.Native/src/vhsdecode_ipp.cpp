@@ -12,6 +12,24 @@
 #include <utility>
 #include <vector>
 
+struct vhsdecode_ipp_fft32_context {
+    int32_t length = 0;
+    Ipp8u* spec_storage = nullptr;
+    const IppsFFTSpec_R_32f* spec = nullptr;
+    Ipp8u* work_buffer = nullptr;
+    std::mutex work_mutex;
+
+    ~vhsdecode_ipp_fft32_context()
+    {
+        if (work_buffer != nullptr) {
+            ippsFree(work_buffer);
+        }
+        if (spec_storage != nullptr) {
+            ippsFree(spec_storage);
+        }
+    }
+};
+
 struct vhsdecode_ipp_fft64_context {
     int32_t length = 0;
     Ipp8u* spec_storage = nullptr;
@@ -220,8 +238,8 @@ void copy_string(char (&destination)[N], const char* source) noexcept
 
 bool is_supported_fft_length(int32_t length) noexcept
 {
-    constexpr int32_t max_fft64_length = 1 << 27;
-    return length >= 2 && length <= max_fft64_length &&
+    constexpr int32_t max_fft_length = 1 << 27;
+    return length >= 2 && length <= max_fft_length &&
         (length & (length - 1)) == 0;
 }
 
@@ -501,6 +519,156 @@ const char* VHSDECODE_IPP_CALL vhsdecode_ipp_status_string(int32_t status)
         const char* description = ippGetStatusString(static_cast<IppStatus>(status));
         return description != nullptr ? description : "Unknown status code";
     }
+    }
+}
+
+int32_t VHSDECODE_IPP_CALL
+vhsdecode_ipp_fft32_create(int32_t length, vhsdecode_ipp_fft32_context** out_context)
+{
+    if (out_context == nullptr) {
+        return VHSDECODE_IPP_STATUS_NULL_POINTER;
+    }
+    *out_context = nullptr;
+    if (!is_supported_fft_length(length)) {
+        return VHSDECODE_IPP_STATUS_UNSUPPORTED_LENGTH;
+    }
+
+    const int32_t initialization_status = ensure_ipp_initialized();
+    if (initialization_status != VHSDECODE_IPP_STATUS_OK) {
+        return initialization_status;
+    }
+
+    try {
+        auto* context = new (std::nothrow) vhsdecode_ipp_fft32_context();
+        if (context == nullptr) {
+            return VHSDECODE_IPP_STATUS_OUT_OF_MEMORY;
+        }
+
+        context->length = length;
+        const int order = std::countr_zero(static_cast<uint32_t>(length));
+        int spec_size = 0;
+        int init_buffer_size = 0;
+        int work_buffer_size = 0;
+        IppStatus status = ippsFFTGetSize_R_32f(
+            order,
+            IPP_FFT_DIV_INV_BY_N,
+            ippAlgHintNone,
+            &spec_size,
+            &init_buffer_size,
+            &work_buffer_size);
+        if (status != ippStsNoErr) {
+            delete context;
+            return static_cast<int32_t>(status);
+        }
+
+        context->spec_storage = ippsMalloc_8u(spec_size);
+        if (context->spec_storage == nullptr) {
+            delete context;
+            return VHSDECODE_IPP_STATUS_OUT_OF_MEMORY;
+        }
+
+        Ipp8u* init_buffer = nullptr;
+        if (init_buffer_size > 0) {
+            init_buffer = ippsMalloc_8u(init_buffer_size);
+            if (init_buffer == nullptr) {
+                delete context;
+                return VHSDECODE_IPP_STATUS_OUT_OF_MEMORY;
+            }
+        }
+
+        IppsFFTSpec_R_32f* initialized_spec = nullptr;
+        status = ippsFFTInit_R_32f(
+            &initialized_spec,
+            order,
+            IPP_FFT_DIV_INV_BY_N,
+            ippAlgHintNone,
+            context->spec_storage,
+            init_buffer);
+        if (init_buffer != nullptr) {
+            ippsFree(init_buffer);
+        }
+        if (status != ippStsNoErr) {
+            delete context;
+            return static_cast<int32_t>(status);
+        }
+        context->spec = initialized_spec;
+
+        if (work_buffer_size > 0) {
+            context->work_buffer = ippsMalloc_8u(work_buffer_size);
+            if (context->work_buffer == nullptr) {
+                delete context;
+                return VHSDECODE_IPP_STATUS_OUT_OF_MEMORY;
+            }
+        }
+
+        *out_context = context;
+        return VHSDECODE_IPP_STATUS_OK;
+    }
+    catch (...) {
+        return VHSDECODE_IPP_STATUS_INTERNAL_ERROR;
+    }
+}
+
+int32_t VHSDECODE_IPP_CALL
+vhsdecode_ipp_fft32_destroy(vhsdecode_ipp_fft32_context* context)
+{
+    delete context;
+    return VHSDECODE_IPP_STATUS_OK;
+}
+
+int32_t VHSDECODE_IPP_CALL
+vhsdecode_ipp_fft32_forward_real(
+    vhsdecode_ipp_fft32_context* context,
+    const float* input,
+    int32_t input_length,
+    vhsdecode_ipp_complex32* output,
+    int32_t output_length)
+{
+    if (context == nullptr || input == nullptr || output == nullptr) {
+        return VHSDECODE_IPP_STATUS_NULL_POINTER;
+    }
+    if (input_length != context->length || output_length != (context->length / 2) + 1) {
+        return VHSDECODE_IPP_STATUS_INVALID_ARGUMENT;
+    }
+
+    try {
+        const std::lock_guard lock(context->work_mutex);
+        return static_cast<int32_t>(ippsFFTFwd_RToCCS_32f(
+            input,
+            reinterpret_cast<Ipp32f*>(output),
+            context->spec,
+            context->work_buffer));
+    }
+    catch (...) {
+        return VHSDECODE_IPP_STATUS_INTERNAL_ERROR;
+    }
+}
+
+int32_t VHSDECODE_IPP_CALL
+vhsdecode_ipp_fft32_inverse_real(
+    vhsdecode_ipp_fft32_context* context,
+    const vhsdecode_ipp_complex32* input,
+    int32_t input_length,
+    float* output,
+    int32_t output_length)
+{
+    if (context == nullptr || input == nullptr || output == nullptr) {
+        return VHSDECODE_IPP_STATUS_NULL_POINTER;
+    }
+    if (input_length != (context->length / 2) + 1 || output_length != context->length) {
+        return VHSDECODE_IPP_STATUS_INVALID_ARGUMENT;
+    }
+
+    try {
+        const std::lock_guard lock(context->work_mutex);
+        return static_cast<int32_t>(ippsFFTInv_CCSToR_32f(
+            reinterpret_cast<const Ipp32f*>(input),
+            output,
+            context->spec,
+            context->work_buffer));
+    }
+    catch (...) {
+        return VHSDECODE_IPP_STATUS_INTERNAL_ERROR;
     }
 }
 

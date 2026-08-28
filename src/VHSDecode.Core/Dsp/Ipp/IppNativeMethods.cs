@@ -6,12 +6,16 @@ namespace VHSDecode.Core.Dsp.Ipp;
 internal static partial class IppNativeMethods
 {
     internal const string LibraryName = "vhsdecode_ipp";
-    internal const uint RequiredAbiVersion = 0x0001_0003;
+    internal const uint RequiredAbiVersion = 0x0001_0004;
 
     internal static readonly string[] RequiredExports =
     [
         "vhsdecode_ipp_get_abi_version",
         "vhsdecode_ipp_get_runtime_info",
+        "vhsdecode_ipp_fft32_create",
+        "vhsdecode_ipp_fft32_destroy",
+        "vhsdecode_ipp_fft32_forward_real",
+        "vhsdecode_ipp_fft32_inverse_real",
         "vhsdecode_ipp_fft64_create",
         "vhsdecode_ipp_fft64_destroy",
         "vhsdecode_ipp_fft64_forward_real",
@@ -54,6 +58,32 @@ internal static partial class IppNativeMethods
     [LibraryImport(LibraryName, EntryPoint = "vhsdecode_ipp_get_runtime_info")]
     [UnmanagedCallConv(CallConvs = [typeof(CallConvCdecl)])]
     internal static unsafe partial int GetRuntimeInfo(IppRuntimeInfoNative* info);
+
+    [LibraryImport(LibraryName, EntryPoint = "vhsdecode_ipp_fft32_create")]
+    [UnmanagedCallConv(CallConvs = [typeof(CallConvCdecl)])]
+    internal static partial int Fft32Create(int length, out nint context);
+
+    [LibraryImport(LibraryName, EntryPoint = "vhsdecode_ipp_fft32_destroy")]
+    [UnmanagedCallConv(CallConvs = [typeof(CallConvCdecl)])]
+    internal static partial int Fft32Destroy(nint context);
+
+    [LibraryImport(LibraryName, EntryPoint = "vhsdecode_ipp_fft32_forward_real")]
+    [UnmanagedCallConv(CallConvs = [typeof(CallConvCdecl)])]
+    internal static unsafe partial int Fft32ForwardReal(
+        IppFft32SafeHandle context,
+        float* input,
+        int inputLength,
+        IppComplex32* output,
+        int outputLength);
+
+    [LibraryImport(LibraryName, EntryPoint = "vhsdecode_ipp_fft32_inverse_real")]
+    [UnmanagedCallConv(CallConvs = [typeof(CallConvCdecl)])]
+    internal static unsafe partial int Fft32InverseReal(
+        IppFft32SafeHandle context,
+        IppComplex32* input,
+        int inputLength,
+        float* output,
+        int outputLength);
 
     [LibraryImport(LibraryName, EntryPoint = "vhsdecode_ipp_fft64_create")]
     [UnmanagedCallConv(CallConvs = [typeof(CallConvCdecl)])]

@@ -20,7 +20,14 @@ public sealed record RfDecodedSpan(
 {
     internal int? AvailableSampleCountOverride { get; init; }
 
+    internal int SampleCount => AvailableSampleCountOverride
+        ?? (VideoFloat32?.Length ?? Video.Length);
+
     internal RfBlockStreamDecoder.VhsPayloadMaterializer? DeferredVhsPayload { get; init; }
+
+    internal float[]? VideoFloat32 { get; init; }
+
+    internal float[]? VideoLowPassFloat32 { get; init; }
 }
 
 public sealed class RfBlockStreamDecoder : IDisposable
@@ -56,6 +63,8 @@ public sealed class RfBlockStreamDecoder : IDisposable
     private int _cacheOperationState;
     private int _prefetchCancellationCount;
     private readonly ReusableSpanBuffers?[] _reusableSpanBuffers = new ReusableSpanBuffers?[ReusableSpanBufferSetCapacity];
+    private readonly bool _useApproxFloat32Sync;
+    private readonly bool _useApproxFloat32FieldPayloads;
     private bool _disposed;
 
     public RfBlockStreamDecoder(
@@ -65,7 +74,9 @@ public sealed class RfBlockStreamDecoder : IDisposable
         int blockCutEnd,
         int workerThreads = 1,
         int prefetchBlocks = 0,
-        int laserDiscCompatibilityPrefetchBlocks = 0)
+        int laserDiscCompatibilityPrefetchBlocks = 0,
+        bool useApproxFloat32Sync = false,
+        bool useApproxFloat32FieldPayloads = false)
     {
         if (blockLength <= 0)
         {
@@ -93,6 +104,8 @@ public sealed class RfBlockStreamDecoder : IDisposable
         }
 
         _pipeline = pipeline;
+        _useApproxFloat32Sync = useApproxFloat32Sync;
+        _useApproxFloat32FieldPayloads = useApproxFloat32FieldPayloads;
         BlockLength = blockLength;
         BlockCut = blockCut;
         BlockCutEnd = blockCutEnd;
@@ -456,15 +469,26 @@ public sealed class RfBlockStreamDecoder : IDisposable
         int totalDecoded = checked((int)((lastBlock - firstBlock + 1) * BlockStride));
         int offset = checked((int)(begin - (firstBlock * BlockStride)));
         bool retainRfDiagnosticChannels = _pipeline.RetainsRfDiagnosticChannels;
+        bool useFloat32Video = _useApproxFloat32FieldPayloads && reusableBuffers is not null;
         double[] input = retainRfDiagnosticChannels
             ? reusableBuffers?.Input ?? new double[length]
             : [];
-        double[] video = reusableBuffers?.Video ?? new double[length];
+        double[] video = useFloat32Video
+            ? []
+            : reusableBuffers?.Video ?? new double[length];
+        float[]? videoFloat32 = useFloat32Video
+            ? reusableBuffers?.VideoFloat32 ?? new float[length]
+            : null;
         double[] demodRaw = retainRfDiagnosticChannels
             ? reusableBuffers?.DemodRaw ?? new double[length]
             : [];
         double[] envelope = reusableBuffers?.Envelope ?? new double[length];
-        double[] videoLowPass = reusableBuffers?.VideoLowPass ?? new double[length];
+        double[] videoLowPass = _useApproxFloat32Sync
+            ? []
+            : reusableBuffers?.VideoLowPass ?? new double[length];
+        float[]? videoLowPassFloat32 = _useApproxFloat32Sync
+            ? reusableBuffers?.VideoLowPassFloat32 ?? new float[length]
+            : null;
         double[] rfHighPass = retainRfDiagnosticChannels
             ? reusableBuffers?.RfHighPass ?? new double[length]
             : [];
@@ -515,9 +539,35 @@ public sealed class RfBlockStreamDecoder : IDisposable
                     BlockCut - _pipeline.RfHighPassOffset);
             }
 
-            CopyTrimmedWindow(pipelineBlock.Demodulated.Video, video, destination, offset);
-            CopyTrimmedWindow(pipelineBlock.Demodulated.Envelope, envelope, destination, offset);
-            CopyTrimmedWindow(pipelineBlock.Demodulated.VideoLowPass, videoLowPass, destination, offset);
+            if (videoFloat32 is null)
+            {
+                CopyVideoWindow(pipelineBlock.Demodulated, video, destination, offset);
+            }
+            else
+            {
+                CopyVideoWindow(pipelineBlock.Demodulated, videoFloat32, destination, offset);
+            }
+            CopyEnvelopeWindow(
+                pipelineBlock.Demodulated,
+                envelope,
+                destination,
+                offset);
+            if (videoLowPass.Length > 0)
+            {
+                CopyVideoLowPassWindow(
+                    pipelineBlock.Demodulated,
+                    videoLowPass,
+                    destination,
+                    offset);
+            }
+            if (videoLowPassFloat32 is not null)
+            {
+                CopyVideoLowPassWindow(
+                    pipelineBlock.Demodulated,
+                    videoLowPassFloat32,
+                    destination,
+                    offset);
+            }
             if (pipelineBlock.Demodulated.Chroma is not null)
             {
                 chroma ??= reusableBuffers?.GetChroma() ?? new double[length];
@@ -591,11 +641,22 @@ public sealed class RfBlockStreamDecoder : IDisposable
                 int blockDestination = checked(blockIndex * BlockStride);
                 RfPipelineBlock pipelineBlock = pipelineBlocks[blockIndex];
                 RfDemodulatedBlock demodulated = pipelineBlock.Demodulated;
-                CopyTrimmedWindow(
-                    demodulated.VideoLowPass,
-                    videoLowPass,
-                    blockDestination,
-                    offset);
+                if (videoLowPass.Length > 0)
+                {
+                    CopyVideoLowPassWindow(
+                        demodulated,
+                        videoLowPass,
+                        blockDestination,
+                        offset);
+                }
+                if (videoLowPassFloat32 is not null)
+                {
+                    CopyVideoLowPassWindow(
+                        demodulated,
+                        videoLowPassFloat32,
+                        blockDestination,
+                        offset);
+                }
                 if (syncOnly)
                 {
                     return;
@@ -613,8 +674,19 @@ public sealed class RfBlockStreamDecoder : IDisposable
                         BlockCut - _pipeline.RfHighPassOffset);
                 }
 
-                CopyTrimmedWindow(demodulated.Video, video, blockDestination, offset);
-                CopyTrimmedWindow(demodulated.Envelope, envelope, blockDestination, offset);
+                if (videoFloat32 is null)
+                {
+                    CopyVideoWindow(demodulated, video, blockDestination, offset);
+                }
+                else
+                {
+                    CopyVideoWindow(demodulated, videoFloat32, blockDestination, offset);
+                }
+                CopyEnvelopeWindow(
+                    demodulated,
+                    envelope,
+                    blockDestination,
+                    offset);
                 if (chroma is not null && demodulated.Chroma is { } blockChroma)
                 {
                     CopyTrimmedWindow(blockChroma, chroma, blockDestination, offset);
@@ -893,6 +965,7 @@ public sealed class RfBlockStreamDecoder : IDisposable
                         ?? throw new InvalidOperationException("Staged VHS blocks were not retained."),
                     stagedDeferredBlocks ?? [],
                     video,
+                    videoFloat32,
                     envelope,
                     chroma,
                     offset,
@@ -936,7 +1009,7 @@ public sealed class RfBlockStreamDecoder : IDisposable
                 video,
                 demodRaw,
                 envelope,
-                videoLowPass,
+                _useApproxFloat32Sync ? null : videoLowPass,
                 rfHighPass,
                 efm,
                 audioSpan,
@@ -945,7 +1018,9 @@ public sealed class RfBlockStreamDecoder : IDisposable
                 videoPilot)
             {
                 AvailableSampleCountOverride = length,
-                DeferredVhsPayload = stagedMaterializer
+                DeferredVhsPayload = stagedMaterializer,
+                VideoFloat32 = videoFloat32,
+                VideoLowPassFloat32 = videoLowPassFloat32
             };
         }
         catch
@@ -1035,7 +1110,11 @@ public sealed class RfBlockStreamDecoder : IDisposable
             }
         }
 
-        return new ReusableSpanBuffers(length, _pipeline.RetainsRfDiagnosticChannels);
+        return new ReusableSpanBuffers(
+            length,
+            _pipeline.RetainsRfDiagnosticChannels,
+            _useApproxFloat32Sync,
+            _useApproxFloat32FieldPayloads);
     }
 
     private void ReturnReusableSpanBuffers(ReusableSpanBuffers buffers)
@@ -1583,6 +1662,104 @@ public sealed class RfBlockStreamDecoder : IDisposable
         }
     }
 
+    private void CopyVideoWindow(
+        RfDemodulatedBlock source,
+        double[] destination,
+        int blockDestinationOffset,
+        int windowOffset)
+    {
+        if (source.VideoFloat32 is { } compactSource)
+        {
+            CopyTrimmedWindow(
+                compactSource,
+                destination,
+                blockDestinationOffset,
+                windowOffset);
+            return;
+        }
+
+        CopyTrimmedWindow(
+            source.Video,
+            destination,
+            blockDestinationOffset,
+            windowOffset);
+    }
+
+    private void CopyVideoLowPassWindow(
+        RfDemodulatedBlock source,
+        double[] destination,
+        int blockDestinationOffset,
+        int windowOffset)
+    {
+        if (source.VideoLowPassFloat32 is { } compactSource)
+        {
+            CopyTrimmedWindow(
+                compactSource,
+                destination,
+                blockDestinationOffset,
+                windowOffset);
+            return;
+        }
+
+        CopyTrimmedWindow(
+            source.VideoLowPass,
+            destination,
+            blockDestinationOffset,
+            windowOffset);
+    }
+
+    private void CopyEnvelopeWindow(
+        RfDemodulatedBlock source,
+        double[] destination,
+        int blockDestinationOffset,
+        int windowOffset)
+    {
+        CopyTrimmedWindow(
+            source.Envelope,
+            destination,
+            blockDestinationOffset,
+            windowOffset);
+    }
+
+    private void CopyVideoWindow(
+        RfDemodulatedBlock source,
+        float[] destination,
+        int blockDestinationOffset,
+        int windowOffset)
+    {
+        float[] compactSource = source.VideoFloat32
+            ?? throw new InvalidOperationException(
+                "The aggressive Approx field payload contract did not provide a float32 video block; no down-conversion fallback was performed.");
+        CopyTrimmedWindow(
+            compactSource,
+            destination,
+            blockDestinationOffset,
+            windowOffset);
+    }
+
+    private void CopyVideoLowPassWindow(
+        RfDemodulatedBlock source,
+        float[] destination,
+        int blockDestinationOffset,
+        int windowOffset)
+    {
+        if (source.VideoLowPassFloat32 is { } compactSource)
+        {
+            CopyTrimmedWindow(
+                compactSource,
+                destination,
+                blockDestinationOffset,
+                windowOffset);
+            return;
+        }
+
+        CopyTrimmedWindow(
+            source.VideoLowPass,
+            destination,
+            blockDestinationOffset,
+            windowOffset);
+    }
+
     private void CopyTrimmedWindow(
         double[] source,
         double[] destination,
@@ -1661,6 +1838,62 @@ public sealed class RfBlockStreamDecoder : IDisposable
         for (; index < count; index++)
         {
             destination[destinationStart + index] = source[sourceStart + index];
+        }
+    }
+
+    private void CopyTrimmedWindow(
+        float[] source,
+        float[] destination,
+        int blockDestinationOffset,
+        int windowOffset)
+    {
+        if (source.Length != BlockLength)
+        {
+            throw new ArgumentException("Decoded block length did not match the configured block length.", nameof(source));
+        }
+
+        int copyStart = Math.Max(blockDestinationOffset, windowOffset);
+        int copyEnd = Math.Min(
+            checked(blockDestinationOffset + BlockStride),
+            checked(windowOffset + destination.Length));
+        if (copyStart >= copyEnd)
+        {
+            return;
+        }
+
+        Array.Copy(
+            source,
+            BlockCut + (copyStart - blockDestinationOffset),
+            destination,
+            copyStart - windowOffset,
+            copyEnd - copyStart);
+    }
+
+    private void CopyTrimmedWindow(
+        double[] source,
+        float[] destination,
+        int blockDestinationOffset,
+        int windowOffset)
+    {
+        if (source.Length != BlockLength)
+        {
+            throw new ArgumentException("Decoded block length did not match the configured block length.", nameof(source));
+        }
+
+        int copyStart = Math.Max(blockDestinationOffset, windowOffset);
+        int copyEnd = Math.Min(
+            checked(blockDestinationOffset + BlockStride),
+            checked(windowOffset + destination.Length));
+        if (copyStart >= copyEnd)
+        {
+            return;
+        }
+
+        int sourceStart = BlockCut + (copyStart - blockDestinationOffset);
+        int destinationStart = copyStart - windowOffset;
+        for (int index = 0; index < copyEnd - copyStart; index++)
+        {
+            destination[destinationStart + index] = (float)source[sourceStart + index];
         }
     }
 
@@ -1783,6 +2016,8 @@ public sealed class RfBlockStreamDecoder : IDisposable
         private readonly RfPipelineBlock[] _blocks;
         private readonly RfPipelineBlock[] _deferredBlocks;
         private readonly double[] _video;
+        private readonly float[]? _videoFloat32;
+        private readonly int _payloadSampleCount;
         private readonly double[] _envelope;
         private readonly double[]? _chroma;
         private readonly int _windowOffset;
@@ -1800,6 +2035,7 @@ public sealed class RfBlockStreamDecoder : IDisposable
             RfPipelineBlock[] blocks,
             RfPipelineBlock[] deferredBlocks,
             double[] video,
+            float[]? videoFloat32,
             double[] envelope,
             double[]? chroma,
             int windowOffset,
@@ -1809,12 +2045,21 @@ public sealed class RfBlockStreamDecoder : IDisposable
             _blocks = blocks;
             _deferredBlocks = deferredBlocks;
             _video = video;
+            _videoFloat32 = videoFloat32;
+            _payloadSampleCount = videoFloat32?.Length ?? video.Length;
+            if (_payloadSampleCount == 0
+                || (videoFloat32 is not null && video.Length != 0))
+            {
+                throw new ArgumentException(
+                    "A staged VHS payload must provide exactly one non-empty video representation.",
+                    nameof(video));
+            }
             _envelope = envelope;
             _chroma = chroma;
             _windowOffset = windowOffset;
             _workerThreads = workerThreads;
             _useSegmentedEnvelope = workerThreads >= MinimumSegmentedEnvelopeWorkerThreads;
-            _initialPayloadSampleCount = video.Length;
+            _initialPayloadSampleCount = _payloadSampleCount;
         }
 
         internal bool UsesSegmentedEnvelope => _useSegmentedEnvelope;
@@ -1864,16 +2109,16 @@ public sealed class RfBlockStreamDecoder : IDisposable
                         "Initial VHS payload materialization cannot change after it starts.");
                 }
 
-                _initialPayloadSampleCount = Math.Clamp(sampleCount, 0, _video.Length);
+                _initialPayloadSampleCount = Math.Clamp(sampleCount, 0, _payloadSampleCount);
             }
         }
 
         internal void EnsurePayloadMaterialized()
-            => EnsurePayloadMaterializedThrough(_video.Length);
+            => EnsurePayloadMaterializedThrough(_payloadSampleCount);
 
         internal void EnsurePayloadMaterializedThrough(int sampleCount)
         {
-            if (sampleCount < 0 || sampleCount > _video.Length)
+            if (sampleCount < 0 || sampleCount > _payloadSampleCount)
             {
                 throw new ArgumentOutOfRangeException(nameof(sampleCount));
             }
@@ -2080,11 +2325,22 @@ public sealed class RfBlockStreamDecoder : IDisposable
                     int blockDestination = checked(blockIndex * _owner.BlockStride);
                     RfDemodulatedBlock demodulated = _blocks[blockIndex].Demodulated;
                     ValidateEnvelopeLength(demodulated.Envelope);
-                    _owner.CopyTrimmedWindow(
-                        demodulated.Video,
-                        _video,
-                        blockDestination,
-                        _windowOffset);
+                    if (_videoFloat32 is null)
+                    {
+                        _owner.CopyVideoWindow(
+                            demodulated,
+                            _video,
+                            blockDestination,
+                            _windowOffset);
+                    }
+                    else
+                    {
+                        _owner.CopyVideoWindow(
+                            demodulated,
+                            _videoFloat32,
+                            blockDestination,
+                            _windowOffset);
+                    }
                     if (!_useSegmentedEnvelope)
                     {
                         _owner.CopyTrimmedWindow(
@@ -2235,14 +2491,20 @@ public sealed class RfBlockStreamDecoder : IDisposable
         private double[]? _videoBurst;
         private double[]? _videoPilot;
 
-        internal ReusableSpanBuffers(int length, bool retainRfDiagnosticChannels)
+        internal ReusableSpanBuffers(
+            int length,
+            bool retainRfDiagnosticChannels,
+            bool retainApproxFloat32Sync = false,
+            bool retainApproxFloat32FieldPayloads = false)
         {
             Length = length;
             Input = retainRfDiagnosticChannels ? new double[length] : [];
-            Video = new double[length];
+            Video = retainApproxFloat32FieldPayloads ? [] : new double[length];
+            VideoFloat32 = retainApproxFloat32FieldPayloads ? new float[length] : null;
             DemodRaw = retainRfDiagnosticChannels ? new double[length] : [];
             Envelope = new double[length];
-            VideoLowPass = new double[length];
+            VideoLowPass = retainApproxFloat32Sync ? [] : new double[length];
+            VideoLowPassFloat32 = retainApproxFloat32Sync ? new float[length] : null;
             RfHighPass = retainRfDiagnosticChannels ? new double[length] : [];
         }
 
@@ -2252,11 +2514,15 @@ public sealed class RfBlockStreamDecoder : IDisposable
 
         internal double[] Video { get; }
 
+        internal float[]? VideoFloat32 { get; }
+
         internal double[] DemodRaw { get; }
 
         internal double[] Envelope { get; }
 
         internal double[] VideoLowPass { get; }
+
+        internal float[]? VideoLowPassFloat32 { get; }
 
         internal double[] RfHighPass { get; }
 

@@ -146,6 +146,18 @@ public sealed class DecodeRunner
             {
                 DspBackend dspBackend = DspBackendParser.Parse(
                     command.Get<string>("dsp_backend"));
+                ApproxProviderResolver.EnsureOptionCompatible(
+                    dspBackend,
+                    command.GetSource("approx_provider")
+                        != ParsedOptionSource.Default);
+                ApproxResamplerResolver.EnsureOptionCompatible(
+                    dspBackend,
+                    command.GetSource("approx_resampler")
+                        != ParsedOptionSource.Default);
+                ApproxPrecisionResolver.EnsureOptionCompatible(
+                    dspBackend,
+                    command.GetSource("approx_precision")
+                        != ParsedOptionSource.Default);
                 TbcFieldSequenceDecodeResult result;
                 if (dspBackend == DspBackend.CudaFast)
                 {
@@ -171,7 +183,19 @@ public sealed class DecodeRunner
                                 ? "VHS decode rate: anti-aliased 40-to-20 MSPS."
                                 : "VHS decode rate: native 20 MSPS input.");
                     }
-                    if (dspBackend == DspBackend.IppFast)
+                    if (dspBackend == DspBackend.ApproxFast)
+                    {
+                        DecodeSessionLogWriter.Append(
+                            session,
+                            session.ExecutionOptions.ApproxProviderFellBackFromIpp
+                                ? "WARNING"
+                                : "INFO",
+                            FormatApproxDiagnostic(session.ExecutionOptions));
+                    }
+
+                    if (DspBackendKernelPolicy.UsesIpp(
+                        dspBackend,
+                        session.ExecutionOptions.ApproxProvider))
                     {
                         DecodeSessionLogWriter.Append(
                             session,
@@ -259,6 +283,47 @@ public sealed class DecodeRunner
         return string.Create(
             CultureInfo.InvariantCulture,
             $"Intel IPP DSP backend: {info.IppVersion} (target={info.IppTargetCpu}, enabled-features=0x{info.EnabledCpuFeatures:X16}, bridge-abi=0x{info.AbiVersion:X8})");
+    }
+
+    internal static string FormatApproxDiagnostic(
+        DecodeExecutionOptions executionOptions)
+    {
+        ArgumentNullException.ThrowIfNull(executionOptions);
+        if (executionOptions.DspBackend != DspBackend.ApproxFast
+            || executionOptions.ApproxProvider is not { } provider
+            || executionOptions.ApproxResampler is not { } resampler
+            || executionOptions.ApproxPrecision is not { } precision)
+        {
+            throw new ArgumentException(
+                "Approx diagnostics require a resolved approx-fast execution selection.",
+                nameof(executionOptions));
+        }
+
+        string selection = executionOptions.ApproxProviderIsExplicit
+            ? "explicit"
+            : "automatic";
+        string precisionDiagnostic = executionOptions.ApproxPrecisionIsExplicit
+            || precision == ApproxPrecision.Aggressive
+                ? $", precision={ApproxPrecisionParser.ToCommandLineValue(precision)}"
+                : string.Empty;
+        string message =
+            $"Approx-fast DSP backend: contract={ApproximationContract.ForSelection(resampler, precision)}, provider={ApproxProviderParser.ToCommandLineValue(provider)}, resampler={ApproxResamplerParser.ToCommandLineValue(resampler)}{precisionDiagnostic}, selection={selection}, architecture={executionOptions.ApproxProviderProcessArchitecture}.";
+        if (executionOptions.ApproxProviderFellBackFromIpp)
+        {
+            message += " Intel IPP was unavailable before decode initialization"
+                + (string.IsNullOrWhiteSpace(executionOptions.ApproxProviderDiagnostic)
+                    ? string.Empty
+                    : $" ({executionOptions.ApproxProviderDiagnostic})")
+                + "; fell back to the managed provider.";
+        }
+        else if (!executionOptions.ApproxProviderIsExplicit
+            && provider == ApproxProvider.Managed
+            && !string.IsNullOrWhiteSpace(executionOptions.ApproxProviderDiagnostic))
+        {
+            message += $" {executionOptions.ApproxProviderDiagnostic}";
+        }
+
+        return message;
     }
 
     private static void ValidateRequiredPositionals(ParsedCommand command)

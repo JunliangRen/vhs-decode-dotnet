@@ -21,6 +21,7 @@ internal sealed class VhsVSyncLevelRefiner
     private const double MinimumAcceptableSnr = 9.0;
     private const double SnrThreshold = 20.0;
     private readonly ConcurrentBag<VhsVSyncLevelWorkspace> _workspaces = [];
+    private readonly ConcurrentBag<VhsVSyncFloatInputWorkspace> _floatInputWorkspaces = [];
 
     // Upstream: oyvindln/vhs-decode
     // Baseline: 2f21e8ed6018b14561396cc95f1f6828054470b8
@@ -28,6 +29,30 @@ internal sealed class VhsVSyncLevelRefiner
     // Port policy: preserve the emitted Numba fastmath reduction and FMA order.
     public VhsVSyncLevelRefinementResult RefineField(
         ReadOnlySpan<double> demodulated,
+        double line0Location,
+        double meanLineLength,
+        double originalSyncTip,
+        double originalBlank)
+    {
+        int start = checked((int)Math.Round(
+            line0Location + meanLineLength,
+            MidpointRounding.ToEven));
+        int end = checked((int)Math.Round(
+            start + (meanLineLength * 8.5),
+            MidpointRounding.ToEven));
+        start = NormalizePythonSliceIndex(start, demodulated.Length);
+        end = NormalizePythonSliceIndex(end, demodulated.Length);
+        return end > start
+            ? Refine(demodulated[start..end], originalSyncTip, originalBlank)
+            : new VhsVSyncLevelRefinementResult(
+                originalSyncTip,
+                originalBlank,
+                SyncSampleCount: 0,
+                BlankSampleCount: 0);
+    }
+
+    public VhsVSyncLevelRefinementResult RefineField(
+        ReadOnlySpan<float> demodulated,
         double line0Location,
         double meanLineLength,
         double originalSyncTip,
@@ -161,6 +186,41 @@ internal sealed class VhsVSyncLevelRefiner
         finally
         {
             _workspaces.Add(workspace);
+        }
+    }
+
+    public VhsVSyncLevelRefinementResult Refine(
+        ReadOnlySpan<float> vSync,
+        double originalSyncTip,
+        double originalBlank)
+    {
+        if (vSync.IsEmpty)
+        {
+            return new VhsVSyncLevelRefinementResult(
+                originalSyncTip,
+                originalBlank,
+                SyncSampleCount: 0,
+                BlankSampleCount: 0);
+        }
+
+        VhsVSyncFloatInputWorkspace workspace = _floatInputWorkspaces.TryTake(
+            out VhsVSyncFloatInputWorkspace? available)
+            ? available
+            : new VhsVSyncFloatInputWorkspace();
+        try
+        {
+            workspace.EnsureLength(vSync.Length);
+            Span<double> widened = workspace.Widened.AsSpan(0, vSync.Length);
+            for (int index = 0; index < vSync.Length; index++)
+            {
+                widened[index] = vSync[index];
+            }
+
+            return Refine(widened, originalSyncTip, originalBlank);
+        }
+        finally
+        {
+            _floatInputWorkspaces.Add(workspace);
         }
     }
 
@@ -363,6 +423,19 @@ internal sealed class VhsVSyncLevelRefiner
             BlankSamples = blankSamples;
             Deviations = deviations;
             MedianScratch = medianScratch;
+        }
+    }
+
+    private sealed class VhsVSyncFloatInputWorkspace
+    {
+        public double[] Widened { get; private set; } = [];
+
+        public void EnsureLength(int length)
+        {
+            if (Widened.Length < length)
+            {
+                Widened = GC.AllocateUninitializedArray<double>(length);
+            }
         }
     }
 }

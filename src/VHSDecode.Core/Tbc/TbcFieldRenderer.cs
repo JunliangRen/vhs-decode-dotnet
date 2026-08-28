@@ -54,8 +54,15 @@ public sealed class TbcFieldRenderer
         TbcLineInterpolationMethod interpolationMethod = TbcLineInterpolationMethod.Linear,
         double wowLevelAdjustSmoothing = 0.0,
         double? nominalInputLineLength = null,
-        int workerThreads = 1)
+        int workerThreads = 1,
+        TbcSampleResamplingKernel sampleResamplingKernel =
+            TbcSampleResamplingKernel.KaiserSinc16)
     {
+        if (!Enum.IsDefined(sampleResamplingKernel))
+        {
+            throw new ArgumentOutOfRangeException(nameof(sampleResamplingKernel));
+        }
+
         FrameSpec = frameSpec;
         _converter = converter;
         _resampler = new TbcLineResampler(
@@ -71,6 +78,7 @@ public sealed class TbcFieldRenderer
         TrackPhaseIre0Offset = trackPhaseIre0Offset;
         InterpolationMethod = interpolationMethod;
         WowLevelAdjustSmoothing = Math.Max(0.0, wowLevelAdjustSmoothing);
+        SampleResamplingKernel = sampleResamplingKernel;
     }
 
     public TbcFrameSpec FrameSpec { get; }
@@ -88,6 +96,8 @@ public sealed class TbcFieldRenderer
     public TbcLineInterpolationMethod InterpolationMethod { get; }
 
     public double WowLevelAdjustSmoothing { get; }
+
+    public TbcSampleResamplingKernel SampleResamplingKernel { get; }
 
     public (double SyncLevel, double BlankLevel)? LastCvbsSyncLevels { get; private set; }
 
@@ -126,7 +136,9 @@ public sealed class TbcFieldRenderer
             throw new ArgumentException("Rendered line count must match the configured TBC field height.", nameof(lineCount));
         }
 
-        return _resampler.ResampleLines(videoHz, lineLocations, firstLine, lines);
+        using TbcLineResampler.ResamplingPlan plan =
+            _resampler.PrepareLineResampling(lineLocations, firstLine, lines);
+        return _resampler.ResamplePrepared(videoHz, plan, SampleResamplingKernel);
     }
 
     internal TbcLineResampler.ResamplingPlan PrepareFieldResampling(
@@ -148,8 +160,12 @@ public sealed class TbcFieldRenderer
         TbcLineResampler.ResamplingPlan plan,
         double sourcePositionShift = 0.0)
         => sourcePositionShift == 0.0
-            ? _resampler.ResamplePrepared(videoHz, plan)
-            : _resampler.ResamplePreparedShifted(videoHz, plan, sourcePositionShift);
+            ? _resampler.ResamplePrepared(videoHz, plan, SampleResamplingKernel)
+            : _resampler.ResamplePreparedShifted(
+                videoHz,
+                plan,
+                sourcePositionShift,
+                SampleResamplingKernel);
 
     internal void ResamplePreparedField(
         ReadOnlySpan<double> videoHz,
@@ -159,7 +175,11 @@ public sealed class TbcFieldRenderer
     {
         if (sourcePositionShift == 0.0)
         {
-            _resampler.ResamplePrepared(videoHz, plan, destination);
+            _resampler.ResamplePrepared(
+                videoHz,
+                plan,
+                destination,
+                SampleResamplingKernel);
         }
         else
         {
@@ -167,9 +187,25 @@ public sealed class TbcFieldRenderer
                 videoHz,
                 plan,
                 sourcePositionShift,
-                destination);
+                destination,
+                SampleResamplingKernel);
         }
     }
+
+    internal double[] ResamplePreparedField(
+        ReadOnlySpan<float> videoHz,
+        TbcLineResampler.ResamplingPlan plan)
+        => _resampler.ResamplePrepared(videoHz, plan, SampleResamplingKernel);
+
+    internal void ResamplePreparedField(
+        ReadOnlySpan<float> videoHz,
+        TbcLineResampler.ResamplingPlan plan,
+        double[] destination)
+        => _resampler.ResamplePrepared(
+            videoHz,
+            plan,
+            destination,
+            SampleResamplingKernel);
 
     internal void ResampleFieldInto(
         ReadOnlySpan<double> videoHz,
@@ -191,7 +227,11 @@ public sealed class TbcFieldRenderer
             firstLine);
         if (sourcePositionShift == 0.0)
         {
-            _resampler.ResamplePrepared(videoHz, plan, destination);
+            _resampler.ResamplePrepared(
+                videoHz,
+                plan,
+                destination,
+                SampleResamplingKernel);
         }
         else
         {
@@ -199,7 +239,8 @@ public sealed class TbcFieldRenderer
                 videoHz,
                 plan,
                 sourcePositionShift,
-                destination);
+                destination,
+                SampleResamplingKernel);
         }
     }
 
@@ -208,8 +249,15 @@ public sealed class TbcFieldRenderer
         IReadOnlyList<double> lineLocations,
         int firstLine,
         int samplesPerLine,
-        double[] destination)
+        double[] destination,
+        TbcSampleResamplingKernel sampleResamplingKernel =
+            TbcSampleResamplingKernel.KaiserSinc16)
     {
+        if (!Enum.IsDefined(sampleResamplingKernel))
+        {
+            throw new ArgumentOutOfRangeException(nameof(sampleResamplingKernel));
+        }
+
         ArgumentNullException.ThrowIfNull(destination);
         if (destination.Length != FrameSpec.FieldSampleCount)
         {
@@ -224,7 +272,8 @@ public sealed class TbcFieldRenderer
             firstLine,
             FrameSpec.OutputLineCount,
             samplesPerLine,
-            destination);
+            destination,
+            sampleResamplingKernel);
     }
 
     public TbcRenderedField RenderFieldPayload(
@@ -304,14 +353,19 @@ public sealed class TbcFieldRenderer
                     videoHz,
                     plan,
                     activeConverter,
-                    outputDestination);
+                    outputDestination,
+                    SampleResamplingKernel);
                 return new TbcRenderedField(
                     outputDestination,
                     OutputConverter: activeConverter);
             }
 
             return new TbcRenderedField(
-                _resampler.ResamplePreparedToUInt16(videoHz, plan, activeConverter),
+                _resampler.ResamplePreparedToUInt16(
+                    videoHz,
+                    plan,
+                    activeConverter,
+                    SampleResamplingKernel),
                 OutputConverter: activeConverter);
         }
 
@@ -359,6 +413,102 @@ public sealed class TbcFieldRenderer
                 trackPhaseOverride,
                 resamplingWorkspace,
                 outputDestination);
+        }
+
+        double[] resampled;
+        if (resamplingWorkspace is null)
+        {
+            resampled = ResamplePreparedField(videoHz, plan);
+        }
+        else
+        {
+            ResamplePreparedField(videoHz, plan, resamplingWorkspace);
+            resampled = resamplingWorkspace;
+        }
+
+        return RenderResampledFieldPayload(
+            resampled,
+            fieldNumber,
+            converterOverride,
+            converterProvider: null,
+            trackPhaseOverride,
+            outputDestination,
+            diagnosticLogger);
+    }
+
+    internal TbcRenderedField RenderPreparedFieldPayload(
+        ReadOnlySpan<float> videoHz,
+        TbcLineResampler.ResamplingPlan plan,
+        int fieldNumber = 0,
+        VideoOutputConverter? converterOverride = null,
+        int? trackPhaseOverride = null,
+        double[]? resamplingWorkspace = null,
+        ushort[]? outputDestination = null)
+        => RenderPreparedFloat32FieldPayloadCore(
+            videoHz,
+            plan,
+            fieldNumber,
+            converterOverride,
+            trackPhaseOverride,
+            resamplingWorkspace,
+            outputDestination,
+            diagnosticLogger: null);
+
+    internal TbcRenderedField RenderPreparedFieldPayloadWithDiagnosticLogger(
+        ReadOnlySpan<float> videoHz,
+        TbcLineResampler.ResamplingPlan plan,
+        int fieldNumber,
+        VideoOutputConverter? converterOverride,
+        int? trackPhaseOverride,
+        double[]? resamplingWorkspace,
+        ushort[]? outputDestination,
+        Action<string, string> diagnosticLogger)
+    {
+        ArgumentNullException.ThrowIfNull(diagnosticLogger);
+        return RenderPreparedFloat32FieldPayloadCore(
+            videoHz,
+            plan,
+            fieldNumber,
+            converterOverride,
+            trackPhaseOverride,
+            resamplingWorkspace,
+            outputDestination,
+            diagnosticLogger);
+    }
+
+    private TbcRenderedField RenderPreparedFloat32FieldPayloadCore(
+        ReadOnlySpan<float> videoHz,
+        TbcLineResampler.ResamplingPlan plan,
+        int fieldNumber,
+        VideoOutputConverter? converterOverride,
+        int? trackPhaseOverride,
+        double[]? resamplingWorkspace,
+        ushort[]? outputDestination,
+        Action<string, string>? diagnosticLogger)
+    {
+        if (CanConvertPreparedFieldDirectly())
+        {
+            VideoOutputConverter activeConverter = converterOverride ?? _converter;
+            if (outputDestination is not null)
+            {
+                _resampler.ResamplePreparedToUInt16(
+                    videoHz,
+                    plan,
+                    activeConverter,
+                    outputDestination,
+                    SampleResamplingKernel);
+                return new TbcRenderedField(
+                    outputDestination,
+                    OutputConverter: activeConverter);
+            }
+
+            return new TbcRenderedField(
+                _resampler.ResamplePreparedToUInt16(
+                    videoHz,
+                    plan,
+                    activeConverter,
+                    SampleResamplingKernel),
+                OutputConverter: activeConverter);
         }
 
         double[] resampled;

@@ -83,6 +83,635 @@ public sealed class VhsSyncDetectorCurrentTests
             BitConverter.DoubleToInt64Bits(result.BlankLevel));
     }
 
+    [Theory(DisplayName = "Approx float32 VHS sync detection preserves widened-input structure")]
+    [InlineData(false, false)]
+    [InlineData(false, true)]
+    [InlineData(true, false)]
+    [InlineData(true, true)]
+    public void ApproxFloat32VhsSyncDetectionPreservesWidenedInputStructure(
+        bool detectLevels,
+        bool allowAvx)
+    {
+        float[] signal = BuildPeriodicSignal(300_000, 2_560, 188)
+            .Select(static value => (float)value)
+            .ToArray();
+        double[] widened = signal.Select(static value => (double)value).ToArray();
+        var expectedDetector = new VhsSyncDetector(188.0, 152.0, 2_560, 8.8);
+        var actualDetector = new VhsSyncDetector(188.0, 152.0, 2_560, 8.8);
+
+        VhsSyncDetectionResult expected = expectedDetector.Detect(
+            widened,
+            detectLevels,
+            syncTipEstimate: -2.0,
+            blankingEstimate: 100.0);
+        VhsSyncDetectionResult actual = actualDetector.DetectApproxFloat32(
+            signal,
+            detectLevels,
+            syncTipEstimate: -2.0,
+            blankingEstimate: 100.0,
+            allowAvx);
+
+        Assert.NotEmpty(expected.Pulses);
+        Assert.Equal(expected.Pulses.Count, actual.Pulses.Count);
+        Assert.InRange(Math.Abs(expected.SyncTipLevel - actual.SyncTipLevel), 0.0, 0.001);
+        Assert.InRange(Math.Abs(expected.BlankLevel - actual.BlankLevel), 0.0, 0.001);
+        for (int index = 0; index < expected.Pulses.Count; index++)
+        {
+            VhsMeasuredSyncPulse expectedPulse = expected.Pulses[index];
+            VhsMeasuredSyncPulse actualPulse = actual.Pulses[index];
+            Assert.Equal(expectedPulse.Start, actualPulse.Start);
+            Assert.Equal(expectedPulse.Length, actualPulse.Length);
+            Assert.InRange(
+                Math.Abs(expectedPulse.Transition - actualPulse.Transition),
+                0.0,
+                0.001);
+            Assert.InRange(
+                Math.Abs(expectedPulse.SyncLevel - actualPulse.SyncLevel),
+                0.0,
+                0.001);
+            Assert.InRange(
+                Math.Abs(expectedPulse.BlankLevel - actualPulse.BlankLevel),
+                0.0,
+                0.001);
+        }
+    }
+
+    [Theory(DisplayName = "Parallel Approx float32 VHS sync detection matches serial bits")]
+    [InlineData(false, 2, true, true, true)]
+    [InlineData(false, 20, true, true, true)]
+    [InlineData(false, 20, true, false, false)]
+    [InlineData(true, 20, true, true, true)]
+    [InlineData(true, 20, false, true, true)]
+    [InlineData(true, 20, true, false, false)]
+    public void ParallelApproxFloat32VhsSyncDetectionMatchesSerialBits(
+        bool detectLevels,
+        int workerThreads,
+        bool allowAvx,
+        bool parallelizePreciseEdgeScan,
+        bool useCompactParallelRadix)
+    {
+        int signalLength = detectLevels ? 600_000 : 300_000;
+        float[] signal = BuildPeriodicSignal(signalLength, 2_560, 188)
+            .Select(static value => (float)value)
+            .ToArray();
+        var serial = new VhsSyncDetector(
+            188.0,
+            152.0,
+            2_560,
+            8.8,
+            workerThreads: 1);
+        var parallel = new VhsSyncDetector(
+            188.0,
+            152.0,
+            2_560,
+            8.8,
+            workerThreads,
+            parallelizePreciseEdgeScan,
+            useCompactParallelRadix);
+
+        VhsSyncDetectionResult expected = serial.DetectApproxFloat32(
+            signal.AsSpan(),
+            detectLevels,
+            syncTipEstimate: -2.0,
+            blankingEstimate: 100.0,
+            allowAvx);
+        VhsSyncDetectionResult first = parallel.DetectApproxFloat32(
+            signal,
+            detectLevels,
+            syncTipEstimate: -2.0,
+            blankingEstimate: 100.0,
+            allowAvx);
+        VhsSyncDetectionResult second = parallel.DetectApproxFloat32(
+            signal,
+            detectLevels,
+            syncTipEstimate: -2.0,
+            blankingEstimate: 100.0,
+            allowAvx);
+
+        Assert.NotEmpty(expected.Pulses);
+        AssertDetectionBitsEqual(expected, first);
+        AssertDetectionBitsEqual(first, second);
+    }
+
+    [Fact(DisplayName = "Approx float32 radix quantiles match exact widening bit for bit")]
+    public void ApproxFloat32RadixQuantilesMatchExactWideningBitForBit()
+    {
+        var random = new Random(431_552);
+        int[] highHistogram = new int[VhsSyncDetector.RadixHistogramWidth];
+        int[] middleHistograms = new int[VhsSyncDetector.RadixHistogramWidth * 2];
+        foreach (int length in new[] { 33, 257, 1_024, 8_193 })
+        {
+            for (int iteration = 0; iteration < 32; iteration++)
+            {
+                var source = new float[length];
+                for (int index = 0; index < source.Length; index++)
+                {
+                    source[index] = index % 17 == 0
+                        ? 4_100_000.0f
+                        : (random.Next(2) == 0 ? -1.0f : 1.0f)
+                            * (1.0f + (random.NextSingle() * 10_000_000.0f));
+                }
+
+                double[] widened = Array.ConvertAll(
+                    source,
+                    static value => (double)value);
+                int syncTarget = (int)(length * 0.05);
+                int blankingTarget = (int)(length * 0.25);
+                (double expectedSync, double expectedBlanking) =
+                    VhsSyncDetector.SelectLevelQuantilesRadix(
+                        widened,
+                        new double[length],
+                        highHistogram,
+                        middleHistograms,
+                        syncTarget,
+                        blankingTarget);
+                (double actualSync, double actualBlanking) =
+                    VhsSyncDetector.SelectLevelQuantilesRadixFloat32(
+                        source,
+                        new double[length],
+                        new double[length],
+                        highHistogram,
+                        middleHistograms,
+                        syncTarget,
+                        blankingTarget);
+
+                Assert.Equal(
+                    BitConverter.DoubleToInt64Bits(expectedSync),
+                    BitConverter.DoubleToInt64Bits(actualSync));
+                Assert.Equal(
+                    BitConverter.DoubleToInt64Bits(expectedBlanking),
+                    BitConverter.DoubleToInt64Bits(actualBlanking));
+            }
+        }
+    }
+
+    [Fact(DisplayName = "Approx float32 radix quantiles preserve signed parent and child boundaries bit for bit")]
+    public void ApproxFloat32RadixQuantilesPreserveSignedParentAndChildBoundariesBitForBit()
+    {
+        const int Length = 4_096;
+        uint[] bitPatterns =
+        [
+            0xFF7F_FFFFU,
+            0xC080_0800U,
+            0xC080_07FFU,
+            0xC080_0400U,
+            0xC080_03FFU,
+            0xBF80_0800U,
+            0xBF80_07FFU,
+            0xBF80_0400U,
+            0xBF80_03FFU,
+            0xBF80_0000U,
+            0x8080_0000U,
+            0x807F_FFFFU,
+            0x8000_0001U,
+            0x0000_0001U,
+            0x007F_FFFFU,
+            0x0080_0000U,
+            0x3F7F_FFFFU,
+            0x3F80_0000U,
+            0x3F80_03FFU,
+            0x3F80_0400U,
+            0x3F80_07FFU,
+            0x3F80_0800U,
+            0x4080_03FFU,
+            0x4080_0400U,
+            0x4080_07FFU,
+            0x4080_0800U,
+            0x7F7F_FFFFU
+        ];
+        float[] source = Enumerable.Range(0, Length)
+            .Select(index => BitConverter.UInt32BitsToSingle(
+                bitPatterns[(index * 17) % bitPatterns.Length]))
+            .ToArray();
+        double[] widened = Array.ConvertAll(source, static value => (double)value);
+
+        foreach ((int syncTarget, int blankingTarget) in new[]
+        {
+            (0, 1),
+            (Length / 8, (Length / 8) + 1),
+            (Length / 4, (Length * 3) / 4),
+            ((Length / 2) - 1, Length / 2),
+            (Length - 2, Length - 1)
+        })
+        {
+            (double expectedSync, double expectedBlanking) =
+                VhsSyncDetector.SelectLevelQuantilesRadix(
+                    widened,
+                    new double[Length],
+                    new int[VhsSyncDetector.RadixHistogramWidth],
+                    new int[VhsSyncDetector.RadixHistogramWidth * 2],
+                    syncTarget,
+                    blankingTarget);
+            (double actualSync, double actualBlanking) =
+                VhsSyncDetector.SelectLevelQuantilesRadixFloat32(
+                    source,
+                    new double[Length],
+                    new double[Length],
+                    new int[VhsSyncDetector.RadixHistogramWidth],
+                    new int[VhsSyncDetector.RadixHistogramWidth * 2],
+                    syncTarget,
+                    blankingTarget);
+
+            Assert.Equal(
+                BitConverter.DoubleToInt64Bits(expectedSync),
+                BitConverter.DoubleToInt64Bits(actualSync));
+            Assert.Equal(
+                BitConverter.DoubleToInt64Bits(expectedBlanking),
+                BitConverter.DoubleToInt64Bits(actualBlanking));
+        }
+    }
+
+    [Fact(DisplayName = "Parallel Approx float32 radix quantiles match exact widening and remain deterministic")]
+    public void ParallelApproxFloat32RadixQuantilesMatchExactWideningAndRemainDeterministic()
+    {
+        const int Length = 600_013;
+        const int MaximumWorkers = 20;
+        var random = new Random(34_104_315);
+        float[] source = Enumerable.Range(0, Length)
+            .Select(index => index % 19 == 0
+                ? 4_100_000.0f
+                : (random.Next(2) == 0 ? -1.0f : 1.0f)
+                    * (1.0f + (random.NextSingle() * 10_000_000.0f)))
+            .ToArray();
+        double[] widened = Array.ConvertAll(source, static value => (double)value);
+        int syncTarget = (int)(Length * 0.05);
+        int blankingTarget = (int)(Length * 0.25);
+        (double expectedSync, double expectedBlanking) =
+            VhsSyncDetector.SelectLevelQuantilesRadix(
+                widened,
+                new double[Length],
+                new int[VhsSyncDetector.RadixHistogramWidth],
+                new int[VhsSyncDetector.RadixHistogramWidth * 2],
+                syncTarget,
+                blankingTarget);
+        var workerHistograms = new int[MaximumWorkers * 4_096];
+        var workerFlags = new int[MaximumWorkers];
+
+        foreach (int workers in new[] { 2, 4, 8, 20 })
+        {
+            (double firstSync, double firstBlanking) =
+                VhsSyncDetector.SelectLevelQuantilesRadixFloat32Parallel(
+                    source,
+                    source.Length,
+                    new double[Length],
+                    new double[Length],
+                    new int[VhsSyncDetector.RadixHistogramWidth],
+                    new int[VhsSyncDetector.RadixHistogramWidth * 2],
+                    workerHistograms,
+                    workerFlags,
+                    syncTarget,
+                    blankingTarget,
+                    workers);
+            (double secondSync, double secondBlanking) =
+                VhsSyncDetector.SelectLevelQuantilesRadixFloat32Parallel(
+                    source,
+                    source.Length,
+                    new double[Length],
+                    new double[Length],
+                    new int[VhsSyncDetector.RadixHistogramWidth],
+                    new int[VhsSyncDetector.RadixHistogramWidth * 2],
+                    workerHistograms,
+                    workerFlags,
+                    syncTarget,
+                    blankingTarget,
+                    workers);
+
+            Assert.Equal(
+                BitConverter.DoubleToInt64Bits(expectedSync),
+                BitConverter.DoubleToInt64Bits(firstSync));
+            Assert.Equal(
+                BitConverter.DoubleToInt64Bits(expectedBlanking),
+                BitConverter.DoubleToInt64Bits(firstBlanking));
+            Assert.Equal(
+                BitConverter.DoubleToInt64Bits(firstSync),
+                BitConverter.DoubleToInt64Bits(secondSync));
+            Assert.Equal(
+                BitConverter.DoubleToInt64Bits(firstBlanking),
+                BitConverter.DoubleToInt64Bits(secondBlanking));
+            Assert.All(
+                workerFlags.AsSpan(0, workers).ToArray(),
+                flag => Assert.Equal(0, flag));
+        }
+    }
+
+    [Theory(DisplayName = "Approx float32 radix quantiles preserve exceptional-value fallback")]
+    [InlineData(0x00000000U)]
+    [InlineData(0x80000000U)]
+    [InlineData(0x7F800000U)]
+    [InlineData(0xFF800000U)]
+    [InlineData(0x7FC00042U)]
+    [InlineData(0xFFC00042U)]
+    public void ApproxFloat32RadixQuantilesPreserveExceptionalValueFallback(
+        uint exceptionalBits)
+    {
+        const int Length = 2_048;
+        float[] source = Enumerable.Range(0, Length)
+            .Select(index => 3_700_000.0f + (index * 0.125f))
+            .ToArray();
+        source[1_023] = BitConverter.UInt32BitsToSingle(exceptionalBits);
+        double[] widened = Array.ConvertAll(source, static value => (double)value);
+        int syncTarget = (int)(Length * 0.05);
+        int blankingTarget = (int)(Length * 0.25);
+        (double expectedSync, double expectedBlanking) =
+            VhsSyncDetector.SelectLevelQuantilesRadix(
+                widened,
+                new double[Length],
+                new int[VhsSyncDetector.RadixHistogramWidth],
+                new int[VhsSyncDetector.RadixHistogramWidth * 2],
+                syncTarget,
+                blankingTarget);
+        (double sequentialSync, double sequentialBlanking) =
+            VhsSyncDetector.SelectLevelQuantilesRadixFloat32(
+                source,
+                new double[Length],
+                new double[Length],
+                new int[VhsSyncDetector.RadixHistogramWidth],
+                new int[VhsSyncDetector.RadixHistogramWidth * 2],
+                syncTarget,
+                blankingTarget);
+        (double parallelSync, double parallelBlanking) =
+            VhsSyncDetector.SelectLevelQuantilesRadixFloat32Parallel(
+                source,
+                source.Length,
+                new double[Length],
+                new double[Length],
+                new int[VhsSyncDetector.RadixHistogramWidth],
+                new int[VhsSyncDetector.RadixHistogramWidth * 2],
+                new int[4 * 4_096],
+                new int[4],
+                syncTarget,
+                blankingTarget,
+                workerThreads: 4);
+
+        Assert.Equal(
+            BitConverter.DoubleToInt64Bits(expectedSync),
+            BitConverter.DoubleToInt64Bits(sequentialSync));
+        Assert.Equal(
+            BitConverter.DoubleToInt64Bits(expectedBlanking),
+            BitConverter.DoubleToInt64Bits(sequentialBlanking));
+        Assert.Equal(
+            BitConverter.DoubleToInt64Bits(expectedSync),
+            BitConverter.DoubleToInt64Bits(parallelSync));
+        Assert.Equal(
+            BitConverter.DoubleToInt64Bits(expectedBlanking),
+            BitConverter.DoubleToInt64Bits(parallelBlanking));
+    }
+
+    [Theory(DisplayName = "Parallel Approx float32 nine-tap VHS boxcar matches serial bits")]
+    [InlineData(2, false)]
+    [InlineData(2, true)]
+    [InlineData(4, true)]
+    [InlineData(8, true)]
+    public void ParallelApproxFloat32NineTapVhsBoxcarMatchesSerialBits(
+        int workers,
+        bool allowAvx)
+    {
+        const int Length = 100_003;
+        var input = new float[Length];
+        for (int index = 0; index < input.Length; index++)
+        {
+            input[index] =
+                MathF.Sin(index * 0.017f)
+                + (MathF.Cos(index * 0.031f) * 0.25f)
+                + (((index * 37) % 23) * 0.125f);
+        }
+
+        float[] expected = VhsSyncDetector.ConvolveBoxcarSameFloat32(
+            input,
+            windowSize: 9,
+            allowAvx);
+        var actual = new float[expected.Length];
+        VhsSyncDetector.ConvolveBoxcarSameParallelFloat32(
+            input,
+            windowSize: 9,
+            actual,
+            actual.Length,
+            workers,
+            allowAvx);
+
+        Assert.Equal(
+            expected.Select(BitConverter.SingleToInt32Bits),
+            actual.Select(BitConverter.SingleToInt32Bits));
+    }
+
+    [Theory(DisplayName = "Approx float32 nine-tap VHS boxcar SIMD matches scalar bits")]
+    [InlineData(9)]
+    [InlineData(17)]
+    [InlineData(4_099)]
+    public void ApproxFloat32NineTapVhsBoxcarSimdMatchesScalarBits(int length)
+    {
+        var random = new Random(4_315_520 + length);
+        var input = new float[length];
+        for (int index = 0; index < input.Length; index++)
+        {
+            input[index] = index % 97 switch
+            {
+                0 => -0.0f,
+                1 => 0.0f,
+                2 => float.NaN,
+                3 => float.PositiveInfinity,
+                4 => float.NegativeInfinity,
+                _ => (random.NextSingle() * 8.0f) - 4.0f
+            };
+        }
+
+        float[] expected = VhsSyncDetector.ConvolveBoxcarSameFloat32(
+            input,
+            windowSize: 9,
+            allowAvx: false);
+        float[] actual = VhsSyncDetector.ConvolveBoxcarSameFloat32(
+            input,
+            windowSize: 9,
+            allowAvx: true);
+
+        Assert.Equal(
+            expected.Select(BitConverter.SingleToInt32Bits),
+            actual.Select(BitConverter.SingleToInt32Bits));
+    }
+
+    [Theory(DisplayName = "Approx float32 VHS edge scan matches widened threshold semantics")]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void ApproxFloat32VhsEdgeScanMatchesWidenedThresholdSemantics(bool allowAvx)
+    {
+        const int Length = 4_099;
+        var random = new Random(4_315_520);
+        var filtered = new float[Length];
+        for (int index = 0; index < filtered.Length; index++)
+        {
+            filtered[index] = index % 71 switch
+            {
+                0 => float.NaN,
+                1 => float.PositiveInfinity,
+                2 => float.NegativeInfinity,
+                _ => (random.NextSingle() * 8.0f) - 4.0f
+            };
+        }
+
+        int[] falls = Enumerable.Range(0, 64)
+            .Select(index => 17 + (index * 97))
+            .ToArray();
+        bool[] finalMask = Enumerable.Range(0, falls.Length)
+            .Select(index => index % 5 != 1)
+            .ToArray();
+        double[] widened = filtered.Select(static value => (double)value).ToArray();
+        double positiveBoundary =
+            ((double)BitConverter.Int32BitsToSingle(0x3EAAAAAA)
+             + BitConverter.Int32BitsToSingle(0x3EAAAAAB))
+            * 0.5;
+        double negativeBoundary =
+            ((double)BitConverter.Int32BitsToSingle(unchecked((int)0xBEAAAAAB))
+             + BitConverter.Int32BitsToSingle(unchecked((int)0xBEAAAAAA)))
+            * 0.5;
+        foreach (double preciseMidpoint in new[]
+                 {
+                     positiveBoundary,
+                     negativeBoundary,
+                     0.5,
+                     -0.0,
+                     double.PositiveInfinity,
+                     double.NegativeInfinity,
+                     double.NaN
+                 })
+        {
+            var expectedFalls = new List<int>();
+            var expectedRises = new List<int>();
+            var actualFalls = new List<int>();
+            var actualRises = new List<int>();
+
+            VhsSyncDetector.FindPreciseEdgesOnValidGrid(
+                widened,
+                preciseMidpoint,
+                falls,
+                finalMask,
+                falls.Length,
+                effectiveLineLength: 111.55,
+                jitterTolerance: 10.75,
+                expectedFalls,
+                expectedRises,
+                allowAvx: false);
+            VhsSyncDetector.FindPreciseEdgesOnValidGridFloat32(
+                filtered,
+                preciseMidpoint,
+                falls,
+                finalMask,
+                falls.Length,
+                effectiveLineLength: 111.55,
+                jitterTolerance: 10.75,
+                actualFalls,
+                actualRises,
+                allowAvx);
+
+            Assert.Equal(expectedFalls, actualFalls);
+            Assert.Equal(expectedRises, actualRises);
+        }
+    }
+
+    [Theory(DisplayName = "Approx initial float32 VHS edge SIMD matches scalar ordering")]
+    [InlineData(0)]
+    [InlineData(1)]
+    [InlineData(7)]
+    [InlineData(8)]
+    [InlineData(9)]
+    [InlineData(10)]
+    [InlineData(17)]
+    [InlineData(18)]
+    [InlineData(4_099)]
+    public void ApproxInitialFloat32VhsEdgeSimdMatchesScalarOrdering(int length)
+    {
+        var random = new Random(4_315_520 + length);
+        var filtered = new float[length];
+        for (int index = 0; index < filtered.Length; index++)
+        {
+            filtered[index] = index % 71 switch
+            {
+                0 => -0.0f,
+                1 => 0.0f,
+                2 => float.NaN,
+                3 => float.PositiveInfinity,
+                4 => float.NegativeInfinity,
+                _ => (random.NextSingle() * 8.0f) - 4.0f
+            };
+        }
+
+        double positiveBoundary =
+            ((double)BitConverter.Int32BitsToSingle(0x3EAAAAAA)
+             + BitConverter.Int32BitsToSingle(0x3EAAAAAB))
+            * 0.5;
+        double negativeBoundary =
+            ((double)BitConverter.Int32BitsToSingle(unchecked((int)0xBEAAAAAB))
+             + BitConverter.Int32BitsToSingle(unchecked((int)0xBEAAAAAA)))
+            * 0.5;
+        foreach (double slicerLevel in new[]
+                 {
+                     positiveBoundary,
+                     negativeBoundary,
+                     0.5,
+                     -0.0,
+                     double.PositiveInfinity,
+                     double.NegativeInfinity,
+                     double.NaN
+                 })
+        {
+            (int[] expectedFalls, int[] expectedRises) =
+                VhsSyncDetector.FindInitialEdgesSequentialFloat32(
+                    filtered,
+                    slicerLevel,
+                    minimumWidth: 2.25,
+                    maximumWidth: 45.75,
+                    initialCapacity: 4,
+                    allowAvx: false);
+            (int[] actualFalls, int[] actualRises) =
+                VhsSyncDetector.FindInitialEdgesSequentialFloat32(
+                    filtered,
+                    slicerLevel,
+                    minimumWidth: 2.25,
+                    maximumWidth: 45.75,
+                    initialCapacity: 4,
+                    allowAvx: true);
+
+            Assert.Equal(expectedFalls, actualFalls);
+            Assert.Equal(expectedRises, actualRises);
+        }
+    }
+
+    [Fact(DisplayName = "Approx initial edge SIMD preserves full serial detection bits")]
+    public void ApproxInitialEdgeSimdPreservesFullSerialDetectionBits()
+    {
+        float[] signal = BuildPeriodicSignal(300_003, 2_560, 188)
+            .Select(static value => (float)value)
+            .ToArray();
+        var detector = new VhsSyncDetector(
+            188.0,
+            152.0,
+            2_560,
+            8.8,
+            workerThreads: 1);
+
+        VhsSyncDetectionResult expected = detector.DetectApproxFloat32(
+            signal,
+            detectLevels: false,
+            syncTipEstimate: -2.0,
+            blankingEstimate: 100.0,
+            allowAvx: false);
+        VhsSyncDetectionResult first = detector.DetectApproxFloat32(
+            signal,
+            detectLevels: false,
+            syncTipEstimate: -2.0,
+            blankingEstimate: 100.0,
+            allowAvx: true);
+        VhsSyncDetectionResult second = detector.DetectApproxFloat32(
+            signal,
+            detectLevels: false,
+            syncTipEstimate: -2.0,
+            blankingEstimate: 100.0,
+            allowAvx: true);
+
+        Assert.NotEmpty(expected.Pulses);
+        AssertDetectionBitsEqual(expected, first);
+        AssertDetectionBitsEqual(first, second);
+    }
+
     [Fact(DisplayName = "Current VHS sync detector uses the estimate for an empty porch window")]
     public void CurrentVhsSyncDetectorUsesEstimateForEmptyPorchWindow()
     {
@@ -1149,6 +1778,7 @@ public sealed class VhsSyncDetectorCurrentTests
     private static void AssertParallelNineTapMatchesScalar(double[] input, int workers)
     {
         double[] expected = ConvolveBoxcarNineTapScalar(input);
+        double[] serial = VhsSyncDetector.ConvolveBoxcarSame(input, windowSize: 9);
         var actual = new double[expected.Length];
         VhsSyncDetector.ConvolveBoxcarSameParallel(
             input,
@@ -1157,6 +1787,9 @@ public sealed class VhsSyncDetectorCurrentTests
             actual.Length,
             workers);
 
+        Assert.Equal(
+            expected.Select(BitConverter.DoubleToInt64Bits),
+            serial.Select(BitConverter.DoubleToInt64Bits));
         Assert.Equal(
             expected.Select(BitConverter.DoubleToInt64Bits),
             actual.Select(BitConverter.DoubleToInt64Bits));

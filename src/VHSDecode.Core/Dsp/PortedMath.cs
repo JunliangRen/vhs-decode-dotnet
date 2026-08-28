@@ -114,6 +114,23 @@ public static class PortedMath
         FillVhsRustFrequencyDifferences(real, imaginary, frequencyHz, output);
     }
 
+    internal static unsafe void UnwrapHilbertVhsRustApproximation(
+        ReadOnlySpan<float> real,
+        ReadOnlySpan<float> imaginary,
+        double frequencyHz,
+        Span<float> output)
+    {
+        ValidateVhsRustSplitInput(real, imaginary);
+        if (output.Length != real.Length)
+        {
+            throw new ArgumentException(
+                "Output length must match the real and imaginary inputs.",
+                nameof(output));
+        }
+
+        FillVhsRustFrequencyDifferences(real, imaginary, frequencyHz, output);
+    }
+
     private static unsafe void FillVhsRustFrequencyDifferences(
         ReadOnlySpan<double> real,
         ReadOnlySpan<double> imaginary,
@@ -212,9 +229,121 @@ public static class PortedMath
         }
     }
 
+    private static unsafe void FillVhsRustFrequencyDifferences(
+        ReadOnlySpan<float> real,
+        ReadOnlySpan<float> imaginary,
+        double frequencyHz,
+        Span<float> output)
+    {
+        float frequency = (float)frequencyHz;
+        float previous = VhsRustAtan2Approximation(imaginary[0], real[0]);
+        output[0] = 0.0f;
+        int i = 1;
+        if (Avx.IsSupported && Sse.IsSupported)
+        {
+            fixed (float* realPointer = real)
+            fixed (float* imaginaryPointer = imaginary)
+            fixed (float* outputPointer = output)
+            {
+                float* angles = stackalloc float[4];
+                if (Sse41.IsSupported)
+                {
+                    int avxEnd = real.Length - ((real.Length - i) % 8);
+                    for (; i < avxEnd; i += 8)
+                    {
+                        if (TryVhsRustAtan2Approximation8(
+                            realPointer + i,
+                            imaginaryPointer + i,
+                            out Vector256<float> currentAngles))
+                        {
+                            previous = StoreVhsRustFrequencyDifferences8(
+                                currentAngles,
+                                previous,
+                                frequency,
+                                outputPointer + i);
+                        }
+                        else
+                        {
+                            for (int lane = 0; lane < 8; lane++)
+                            {
+                                float current = VhsRustAtan2Approximation(
+                                    imaginaryPointer[i + lane],
+                                    realPointer[i + lane]);
+                                outputPointer[i + lane] = VhsRustFrequencyDifference(current, previous, frequency);
+                                previous = current;
+                            }
+                        }
+                    }
+                }
+
+                int vectorizedEnd = real.Length - ((real.Length - i) % 4);
+                for (; i < vectorizedEnd; i += 4)
+                {
+                    if (TryVhsRustAtan2Approximation4(
+                        realPointer + i,
+                        imaginaryPointer + i,
+                        out Vector128<float> currentAngles))
+                    {
+                        if (Sse41.IsSupported)
+                        {
+                            previous = StoreVhsRustFrequencyDifferences4(
+                                currentAngles,
+                                previous,
+                                frequency,
+                                outputPointer + i);
+                        }
+                        else
+                        {
+                            Sse.Store(angles, currentAngles);
+                            for (int lane = 0; lane < 4; lane++)
+                            {
+                                float current = angles[lane];
+                                outputPointer[i + lane] = VhsRustFrequencyDifference(current, previous, frequency);
+                                previous = current;
+                            }
+                        }
+                    }
+                    else
+                    {
+                        for (int lane = 0; lane < 4; lane++)
+                        {
+                            float current = VhsRustAtan2Approximation(
+                                imaginaryPointer[i + lane],
+                                realPointer[i + lane]);
+                            outputPointer[i + lane] = VhsRustFrequencyDifference(current, previous, frequency);
+                            previous = current;
+                        }
+                    }
+                }
+            }
+        }
+
+        for (; i < real.Length; i++)
+        {
+            float current = VhsRustAtan2Approximation(imaginary[i], real[i]);
+            output[i] = VhsRustFrequencyDifference(current, previous, frequency);
+            previous = current;
+        }
+    }
+
     private static void ValidateVhsRustSplitInput(
         ReadOnlySpan<double> real,
         ReadOnlySpan<double> imaginary)
+    {
+        if (real.IsEmpty)
+        {
+            throw new ArgumentException("Input must not be empty.", nameof(real));
+        }
+
+        if (imaginary.Length != real.Length)
+        {
+            throw new ArgumentException("Real and imaginary inputs must have matching lengths.", nameof(imaginary));
+        }
+    }
+
+    private static void ValidateVhsRustSplitInput(
+        ReadOnlySpan<float> real,
+        ReadOnlySpan<float> imaginary)
     {
         if (real.IsEmpty)
         {
@@ -570,6 +699,25 @@ public static class PortedMath
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private static unsafe float StoreVhsRustFrequencyDifferences4(
+        Vector128<float> current,
+        float previous,
+        float frequency,
+        float* output)
+    {
+        Vector128<float> previousAngles = Sse2.ShiftLeftLogical128BitLane(current.AsByte(), 4).AsSingle();
+        previousAngles = Sse.MoveScalar(previousAngles, Vector128.CreateScalar(previous));
+        Vector128<float> difference = Sse.Subtract(current, previousAngles);
+        Vector128<float> periods = Sse41.Floor(Sse.Divide(difference, VhsRustTau));
+        difference = Sse.Subtract(difference, Sse.Multiply(periods, VhsRustTau));
+        Vector128<float> frequencies = Sse.Divide(
+            Sse.Multiply(difference, Vector128.Create(frequency)),
+            VhsRustTau);
+        Sse.Store(output, frequencies);
+        return current.GetElement(3);
+    }
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private static unsafe float StoreVhsRustFrequencyDifferences8(
         Vector256<float> current,
         float previous,
@@ -596,6 +744,32 @@ public static class PortedMath
         return currentUpper.GetElement(3);
     }
 
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private static unsafe float StoreVhsRustFrequencyDifferences8(
+        Vector256<float> current,
+        float previous,
+        float frequency,
+        float* output)
+    {
+        Vector128<float> currentLower = current.GetLower();
+        Vector128<float> previousLower = Sse2.ShiftLeftLogical128BitLane(currentLower.AsByte(), 4).AsSingle();
+        previousLower = Sse.MoveScalar(previousLower, Vector128.CreateScalar(previous));
+
+        Vector128<float> currentUpper = current.GetUpper();
+        Vector128<float> previousUpper = Sse2.ShiftLeftLogical128BitLane(currentUpper.AsByte(), 4).AsSingle();
+        previousUpper = Sse.MoveScalar(previousUpper, Vector128.CreateScalar(currentLower.GetElement(3)));
+
+        Vector256<float> previousAngles = Vector256.Create(previousLower, previousUpper);
+        Vector256<float> difference = Avx.Subtract(current, previousAngles);
+        Vector256<float> periods = Avx.RoundToNegativeInfinity(Avx.Divide(difference, VhsRustTau256));
+        difference = Avx.Subtract(difference, Avx.Multiply(periods, VhsRustTau256));
+        Vector256<float> frequencies = Avx.Divide(
+            Avx.Multiply(difference, Vector256.Create(frequency)),
+            VhsRustTau256);
+        Avx.Store(output, frequencies);
+        return currentUpper.GetElement(3);
+    }
+
     private static unsafe bool TryVhsRustAtan2Approximation8(
         double* real,
         double* imaginary,
@@ -607,6 +781,16 @@ public static class PortedMath
         Vector256<float> y = Vector256.Create(
             Avx.ConvertToVector128Single(Avx.LoadVector256(imaginary)),
             Avx.ConvertToVector128Single(Avx.LoadVector256(imaginary + 4)));
+        return TryVhsRustAtan2Approximation8(x, y, out result);
+    }
+
+    private static unsafe bool TryVhsRustAtan2Approximation8(
+        float* real,
+        float* imaginary,
+        out Vector256<float> result)
+    {
+        Vector256<float> x = Avx.LoadVector256(real);
+        Vector256<float> y = Avx.LoadVector256(imaginary);
         return TryVhsRustAtan2Approximation8(x, y, out result);
     }
 
@@ -709,6 +893,16 @@ public static class PortedMath
     {
         Vector128<float> x = Avx.ConvertToVector128Single(Avx.LoadVector256(real));
         Vector128<float> y = Avx.ConvertToVector128Single(Avx.LoadVector256(imaginary));
+        return TryVhsRustAtan2Approximation4(x, y, out result);
+    }
+
+    private static unsafe bool TryVhsRustAtan2Approximation4(
+        float* real,
+        float* imaginary,
+        out Vector128<float> result)
+    {
+        Vector128<float> x = Sse.LoadVector128(real);
+        Vector128<float> y = Sse.LoadVector128(imaginary);
         return TryVhsRustAtan2Approximation4(x, y, out result);
     }
 

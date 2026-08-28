@@ -112,7 +112,7 @@ IPP-to-managed CPU order. Standard 40 MSPS VHS preview also applies a fixed anti
 decodes its internal RF stream at 20 MSPS. Native 20 MSPS VHS input stays at
 20 MSPS. In other words, supported VHS preview routes force the same behavior as
 the full-decode `--decode-at-20msps` switch. Full VHS decode can opt into that
-switch with `ipp-fast` or `cuda-fast`; Exact, S-VHS, other tape formats, and
+switch with `ipp-fast`, `cuda-fast`, or `approx-fast`; Exact, S-VHS, other tape formats, and
 LaserDisc retain their existing sample-rate behavior. Startup reports the selected video pipeline, IPP-FAST initialization,
 active decoder thread count, and separate in-place window-ID and real-time-FPS
 lines. A matching
@@ -197,6 +197,7 @@ multithreaded Python runs are used for speed measurements only.
 | `exact` | Default managed path for compatibility-sensitive decoding. |
 | `ipp-fast` | Experimental Windows x64 VHS and LaserDisc real-RF paths using Intel IPP. It can change floating-point bits and never silently falls back to `exact`. |
 | `cuda-fast` | Experimental Windows x64 NVIDIA CUDA 13 full-signal VHS path. It has an independent numerical contract, supports PAL/NTSC VHS at 40 MSPS normally or GPU 40-to-20/native-20 MSPS with `--decode-at-20msps`, and never silently falls back to a CPU backend. |
+| `approx-fast` | Experimental VHS-only FP32 path with selectable TBC resampler and precision contract. The default `balanced` precision keeps the existing v1/v2 behavior; explicit `aggressive` selects the faster, deliberately lossy field-FP32/burst-IQ-prefix/chroma-FFT v6 contract. Nonzero RF high boost is not supported. |
 
 ```powershell
 decode.exe vhs --compat-version current --dsp-backend ipp-fast `
@@ -205,7 +206,49 @@ decode.exe vhs --dsp-backend ipp-fast --decode-at-20msps `
   --pal input.lds output-20msps
 decode.exe vhs --dsp-backend cuda-fast --pal `
   --decode-at-20msps --start 100 --length 20 input.ldf output
+decode.exe vhs --dsp-backend approx-fast `
+  --pal input.lds output-approx-balanced
+decode.exe vhs --dsp-backend approx-fast `
+  --approx-resampler catmull-rom4 --pal input.lds output-approx-catmull
+decode.exe vhs --compat-version current --dsp-backend approx-fast `
+  --approx-resampler catmull-rom4 `
+  --approx-precision aggressive --pal input.lds output-approx-aggressive
 ```
+
+`--approx-resampler sinc16|catmull-rom4` and
+`--approx-precision balanced|aggressive` apply only to `approx-fast`; using any
+of them with another backend is rejected rather than ignored. Approx is a
+separate numerical contract from both `exact` and `ipp-fast`; use `exact` when
+release-compatible or byte-sensitive output is required.
+
+If `--approx-precision` is omitted, `balanced` is selected. Balanced behavior is
+unchanged: omitted or explicit `sinc16` retains `vhs-rf-transform-f32-v1`, while
+explicit `catmull-rom4` selects `vhs-rf-transform-f32-catmull-rom4-v2` and uses
+four-tap float32 Catmull-Rom for final luma/chroma TBC resampling; sync and
+phase-analysis prefix resampling remain sinc-based.
+
+Explicit `aggressive` selects
+`vhs-rf-transform-field-f32-catmull-rom4-burst-iq-prefix-chroma-fft-v6`. It
+requires `--compat-version current`, `--approx-resampler catmull-rom4`, and a
+40 MSPS decode. The route keeps field-sync `VideoLowPass`, its nine-tap boxcar,
+and the edge scan in FP32. It also skips `current`'s 32-iteration nonlinear
+chroma-burst Tune, directly uses float32-derived I/Q phase, amplitude, and DC
+initial estimates, keeps the nominal burst frequency, and resamples chroma
+phase-analysis line prefixes with four-tap Catmull-Rom instead of the 16-tap
+sinc kernel.
+
+The v6 chroma stage reuses the resident input RFFT, multiplies its half-spectrum
+by the zero-phase `ChromaBurst |H|²` response, and runs an IRFFT directly into
+the float32 chroma buffer. Relative to the older SOS forward/backward `filtfilt`
+path, this is an intentionally lossy numerical contract, including different
+FP32 rounding and block-edge behavior. Exact and Balanced remain unchanged.
+AFC/`--cafc`, chroma or video notches, `--export_raw_tbc`, non-color-under
+formats, configurations without the standard chroma filter, and other options
+that require the older chroma path fail closed; no partial fallback to that
+older path is performed. Aggressive precision does not disable CTI:
+`--cti_mix 0` is a separate option. No fixed speedup or visual-equivalence claim
+is implied; compare complete same-input balanced/aggressive decodes, including
+TBC/chroma/JSON, ordered fields, and `fileLoc`, with the intended thread count.
 
 `--decode-at-20msps` is a VHS preview-quality mode, not an Exact-equivalence
 mode. A 40 MSPS source is anti-alias filtered and decoded internally at 20

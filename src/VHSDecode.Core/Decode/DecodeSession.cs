@@ -1,4 +1,5 @@
 using System.Numerics;
+using System.Runtime.InteropServices;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using VHSDecode.Core.CommandLine;
@@ -124,6 +125,22 @@ public sealed record DecodeExecutionOptions(
     public BigInteger RequestedThreadsInteger { get; init; } = new(RequestedThreads);
 
     public bool SuppressFileOutputs { get; init; }
+
+    public ApproxProvider? ApproxProvider { get; init; }
+
+    public ApproxResampler? ApproxResampler { get; init; }
+
+    public ApproxPrecision? ApproxPrecision { get; init; }
+
+    public bool ApproxPrecisionIsExplicit { get; init; }
+
+    public bool ApproxProviderIsExplicit { get; init; }
+
+    public bool ApproxProviderFellBackFromIpp { get; init; }
+
+    public Architecture? ApproxProviderProcessArchitecture { get; init; }
+
+    public string? ApproxProviderDiagnostic { get; init; }
 }
 
 internal sealed class DecodeThreadInitializationException(string message) : ArgumentException(message);
@@ -147,17 +164,36 @@ public static class DecodeSessionFactory
     public const int DefaultBlockLength = 32 * 1024;
 
     public static DecodeSession Create(ParsedCommand command, int blockLength = DefaultBlockLength)
-        => Create(command, blockLength, enforceVhsFieldClass: true);
+        => Create(
+            command,
+            blockLength,
+            enforceVhsFieldClass: true,
+            pinnedApproxProviderSelection: null);
+
+    internal static DecodeSession CreateForPreview(
+        ParsedCommand command,
+        ApproxProviderSelection? pinnedApproxProviderSelection,
+        int blockLength = DefaultBlockLength)
+        => Create(
+            command,
+            blockLength,
+            enforceVhsFieldClass: true,
+            pinnedApproxProviderSelection);
 
     internal static DecodeSession CreateForRfParameterProbe(
         ParsedCommand command,
         int blockLength = DefaultBlockLength)
-        => Create(command, blockLength, enforceVhsFieldClass: false);
+        => Create(
+            command,
+            blockLength,
+            enforceVhsFieldClass: false,
+            pinnedApproxProviderSelection: null);
 
     private static DecodeSession Create(
         ParsedCommand command,
         int blockLength,
-        bool enforceVhsFieldClass)
+        bool enforceVhsFieldClass,
+        ApproxProviderSelection? pinnedApproxProviderSelection)
     {
         bool previewServer = IsPreviewServer(command);
         if (command.Positionals.Count < (previewServer ? 1 : 2))
@@ -174,6 +210,75 @@ public static class DecodeSessionFactory
 
         DspBackend dspBackend = DspBackendParser.Parse(command.Get<string>("dsp_backend"));
         DspBackendSupport.EnsureCommandSupported(dspBackend, command.Spec.Name);
+        bool approxProviderIsExplicit =
+            command.GetSource("approx_provider") != ParsedOptionSource.Default;
+        bool approxResamplerIsExplicit =
+            command.GetSource("approx_resampler") != ParsedOptionSource.Default;
+        bool approxPrecisionIsExplicit =
+            command.GetSource("approx_precision") != ParsedOptionSource.Default;
+        ApproxProviderResolver.EnsureOptionCompatible(
+            dspBackend,
+            approxProviderIsExplicit);
+        ApproxResamplerResolver.EnsureOptionCompatible(
+            dspBackend,
+            approxResamplerIsExplicit);
+        ApproxPrecisionResolver.EnsureOptionCompatible(
+            dspBackend,
+            approxPrecisionIsExplicit);
+        if (pinnedApproxProviderSelection is { } pinnedSelection)
+        {
+            if (dspBackend != DspBackend.ApproxFast)
+            {
+                throw new ArgumentException(
+                    "A pinned Approx provider selection requires the approx-fast DSP backend.",
+                    nameof(pinnedApproxProviderSelection));
+            }
+
+            if (!Enum.IsDefined(pinnedSelection.Provider))
+            {
+                throw new ArgumentOutOfRangeException(
+                    nameof(pinnedApproxProviderSelection),
+                    pinnedSelection.Provider,
+                    "The pinned Approx provider is invalid.");
+            }
+
+            if (approxProviderIsExplicit
+                && ApproxProviderParser.Parse(command.Get<string>("approx_provider"))
+                    != pinnedSelection.Provider)
+            {
+                throw new ArgumentException(
+                    "The pinned Approx provider does not match the explicit command-line provider.",
+                    nameof(pinnedApproxProviderSelection));
+            }
+        }
+
+        ApproxProviderSelection? approxProviderSelection =
+            dspBackend == DspBackend.ApproxFast
+                ? pinnedApproxProviderSelection ?? ApproxProviderResolver.Resolve(
+                    command.Get<string>("approx_provider"),
+                    approxProviderIsExplicit,
+                    RuntimeInformation.ProcessArchitecture)
+                : null;
+        ApproxResampler? approxResampler =
+            dspBackend == DspBackend.ApproxFast
+                ? ApproxResamplerResolver.Resolve(
+                    command.Get<string>("approx_resampler"),
+                    approxResamplerIsExplicit)
+                : null;
+        ApproxPrecision? approxPrecision =
+            dspBackend == DspBackend.ApproxFast
+                ? ApproxPrecisionResolver.Resolve(
+                    command.Get<string>("approx_precision"),
+                    approxPrecisionIsExplicit)
+                : null;
+        if (approxResampler is { } resolvedResampler
+            && approxPrecision is { } resolvedPrecision)
+        {
+            ApproxPrecisionResolver.EnsureSelectionSupported(
+                resolvedResampler,
+                resolvedPrecision,
+                SelectedUpstreamBehaviorProfile(command));
+        }
         if (dspBackend == DspBackend.IppFast)
         {
             _ = IppRuntime.RequireAvailable();
@@ -181,7 +286,13 @@ public static class DecodeSessionFactory
 
         return command.Spec.Name switch
         {
-            "vhs" => CreateVhs(command, blockLength, enforceVhsFieldClass),
+            "vhs" => CreateVhs(
+                command,
+                blockLength,
+                enforceVhsFieldClass,
+                approxProviderSelection,
+                approxResampler,
+                approxPrecision),
             "cvbs" => CreateCvbs(command, blockLength),
             "ld" => CreateLaserDisc(command, blockLength),
             _ => throw new NotSupportedException($"Unsupported decode command '{command.Spec.Name}'.")
@@ -191,7 +302,10 @@ public static class DecodeSessionFactory
     private static DecodeSession CreateVhs(
         ParsedCommand command,
         int blockLength,
-        bool enforceFieldClass)
+        bool enforceFieldClass,
+        ApproxProviderSelection? approxProviderSelection,
+        ApproxResampler? approxResampler,
+        ApproxPrecision? approxPrecision)
     {
         string system = VideoSystemSelector.Select(command);
         double selectedSampleRateMHz = SelectCommonSampleFrequencyMHz(command);
@@ -212,6 +326,12 @@ public static class DecodeSessionFactory
             : noResample
                 ? selectedSampleRateMHz
                 : FrequencyParser.DddMHz;
+        if (approxPrecision == ApproxPrecision.Aggressive
+            && Math.Abs(decodeSampleRateMHz - FrequencyParser.DddMHz) > 1e-9)
+        {
+            throw new NotSupportedException(
+                "The aggressive Approx precision contract currently requires a 40 MSPS decode rate; no partial fallback was performed.");
+        }
         bool nativeFortyMegahertzContainer = Math.Abs(selectedSampleRateMHz - FrequencyParser.DddMHz) <= 1e-9
             && (command.InputFile.EndsWith(".lds", StringComparison.Ordinal)
                 || command.InputFile.EndsWith(".ldf", StringComparison.Ordinal));
@@ -259,7 +379,10 @@ public static class DecodeSessionFactory
             blockCut: 1024,
             blockCutEnd: 1024,
             loader,
-            sourceSamplesPerDecodeSample: halfRateInput ? 2 : 1);
+            sourceSamplesPerDecodeSample: halfRateInput ? 2 : 1,
+            approxProviderSelection: approxProviderSelection,
+            approxResampler: approxResampler,
+            approxPrecision: approxPrecision);
         session.VhsParamsFileDiagnostics = paramsOverride.Diagnostics;
         if (!enforceFieldClass
             || !VhsInitializationDiagnostics.IsUnsupportedFieldClassCombination(system, parameters.TapeFormat))
@@ -319,7 +442,10 @@ public static class DecodeSessionFactory
         int blockCut,
         int blockCutEnd,
         IRfSampleLoader loader,
-        int sourceSamplesPerDecodeSample = 1)
+        int sourceSamplesPerDecodeSample = 1,
+        ApproxProviderSelection? approxProviderSelection = null,
+        ApproxResampler? approxResampler = null,
+        ApproxPrecision? approxPrecision = null)
     {
         double sampleRateHz = sampleRateMHz * 1_000_000.0;
         bool suppressFileOutputs = IsPreviewServer(command);
@@ -343,9 +469,21 @@ public static class DecodeSessionFactory
 
         ChromaDecodeOptions? chromaOptions = BuildChromaOptions(command, system, parameters, sampleRateMHz);
         DecodeFilterOptions filterOptions = BuildFilterOptions(command, system, parameters, chromaOptions);
+        if (approxProviderSelection is not null
+            && filterOptions.RfHighBoost is { Multiplier: not 0.0 })
+        {
+            throw new NotSupportedException(
+                "The approx-fast contract does not yet support non-zero VHS RF high boost because that option requires the full-spectrum complex RF path. "
+                + "Use '--high_boost 0', or select an Exact/ipp-fast backend; no partial Approx fallback was performed.");
+        }
+
         DecodeFilterSet filters = DecodeFilterSetBuilder.BuildBasic(parameters, sampleRateHz, blockLength, filterOptions);
         VideoOutputConverter videoOutput = VideoOutputConverter.FromParameters(parameters);
-        DecodeExecutionOptions executionOptions = BuildExecutionOptions(command);
+        DecodeExecutionOptions executionOptions = BuildExecutionOptions(
+            command,
+            approxProviderSelection,
+            approxResampler,
+            approxPrecision);
         CvbsDecodeOptions? cvbsOptions = BuildCvbsDecodeOptions(command, videoOutput);
         IRfInputProcessor? inputProcessor = BuildRfInputProcessor(command);
         bool parallelizeVhsInverseStaging = command.Spec.Name == "vhs"
@@ -378,9 +516,33 @@ public static class DecodeSessionFactory
             WriteDiagnostic,
             retainRfDiagnosticChannels: command.Spec.Name != "vhs",
             dspBackend: executionOptions.DspBackend,
+            approxProvider: executionOptions.ApproxProvider,
             upstreamBehaviorProfile: executionOptions.UpstreamBehaviorProfile,
             parallelizeVhsInverseStaging,
-            vhsInverseCompanionWorkerThreads);
+            vhsInverseCompanionWorkerThreads,
+            useImmutableApproxFilterBank: command.Spec.Name == "vhs"
+                && executionOptions.DspBackend == DspBackend.ApproxFast,
+            useCompactApproxFloat32Outputs: command.Spec.Name == "vhs"
+                && executionOptions.DspBackend == DspBackend.ApproxFast
+                && executionOptions.ApproxResampler == ApproxResampler.CatmullRom4,
+            useDirectStreamOutputBufferLease: command.Spec.Name == "vhs"
+                && executionOptions.DspBackend == DspBackend.ApproxFast
+                && executionOptions.ApproxPrecision == ApproxPrecision.Aggressive
+                && executionOptions.ApproxResampler == ApproxResampler.CatmullRom4
+                && executionOptions.WorkerThreads <= 1,
+            useApproxFrequencyDomainChroma: command.Spec.Name == "vhs"
+                && executionOptions.DspBackend == DspBackend.ApproxFast
+                && executionOptions.ApproxPrecision == ApproxPrecision.Aggressive
+                && executionOptions.ApproxResampler == ApproxResampler.CatmullRom4);
+        if (executionOptions.ApproxPrecision == ApproxPrecision.Aggressive
+            && !pipeline.UsesApproxFrequencyDomainChroma)
+        {
+            pipeline.Dispose();
+            throw new NotSupportedException(
+                "The aggressive Approx v6 contract cannot use the requested chroma options; "
+                + "no partial v6-to-v5 fallback was performed.");
+        }
+
         var streamDecoder = new RfBlockStreamDecoder(
             pipeline,
             blockLength,
@@ -398,7 +560,11 @@ public static class DecodeSessionFactory
                         sampleRateHz,
                         JsonRequiredDouble(parameters.SysParams, "FPS"),
                         blockLength - blockCut - blockCutEnd)
-                    : 0);
+                    : 0,
+            useApproxFloat32Sync:
+                executionOptions.ApproxPrecision == ApproxPrecision.Aggressive,
+            useApproxFloat32FieldPayloads:
+                executionOptions.ApproxPrecision == ApproxPrecision.Aggressive);
         streamDecoder.UpdateLaserDiscCompatibilityMtf(filters.RfMtf);
         TbcFrameSpec tbcFrameSpec = TbcFrameSpec.FromParameters(parameters);
         var tbcRenderer = new TbcFieldRenderer(
@@ -414,7 +580,11 @@ public static class DecodeSessionFactory
             nominalInputLineLength: Math.Round(
                 JsonRequiredDouble(parameters.SysParams, "line_period") * sampleRateMHz,
                 MidpointRounding.ToEven),
-            workerThreads: executionOptions.WorkerThreads);
+            workerThreads: executionOptions.WorkerThreads,
+            sampleResamplingKernel: executionOptions.ApproxResampler
+                == ApproxResampler.CatmullRom4
+                    ? TbcSampleResamplingKernel.CatmullRom4Float32
+                    : TbcSampleResamplingKernel.KaiserSinc16);
         TbcDropoutDetectionOptions dropoutOptions = BuildDropoutOptions(command, sampleRateMHz);
         TbcFieldOrderOptions fieldOrderOptions = BuildFieldOrderOptions(command, parameters);
         LaserDiscAudioOptions? laserDiscAudioOptions = BuildLaserDiscAudioOptions(command, system);
@@ -454,7 +624,10 @@ public static class DecodeSessionFactory
                 workerThreads: executionOptions.WorkerThreads,
                 upstreamBehaviorProfile:
                     executionOptions.UpstreamBehaviorProfile,
-                dspBackend: executionOptions.DspBackend),
+                dspBackend: executionOptions.DspBackend,
+                approxProvider: executionOptions.ApproxProvider,
+                useApproximateBurstFit:
+                    executionOptions.ApproxPrecision == ApproxPrecision.Aggressive),
             TbcFieldDecodePipeline.BuildLaserDiscPilotRefineOptions(command.Spec.Name, system, parameters),
             TbcFieldDecodePipeline.BuildLaserDiscNtscBurstRefineOptions(command.Spec.Name, system, parameters),
             command.Spec.Name,
@@ -483,7 +656,11 @@ public static class DecodeSessionFactory
                         .First()
                         .GetDouble()
                     : null,
-            dspBackend: executionOptions.DspBackend);
+            dspBackend: executionOptions.DspBackend,
+            useApproxFloat32Sync:
+                executionOptions.ApproxPrecision == ApproxPrecision.Aggressive,
+            useApproxFloat32FieldPayloads:
+                executionOptions.ApproxPrecision == ApproxPrecision.Aggressive);
         DecodeRunBounds runBounds = DecodeRunBounds.FromCommand(
             command,
             tbcFieldDecoder.EstimateNominalFieldSampleCount(),
@@ -539,10 +716,12 @@ public static class DecodeSessionFactory
         }
 
         if (!IsPreviewServer(command)
-            && dspBackend is not (DspBackend.IppFast or DspBackend.CudaFast))
+            && dspBackend is not (DspBackend.IppFast
+                or DspBackend.CudaFast
+                or DspBackend.ApproxFast))
         {
             throw new NotSupportedException(
-                "--decode-at-20msps is available for complete ipp-fast and cuda-fast VHS decode; Exact complete decode was not changed.");
+                "--decode-at-20msps is available for complete ipp-fast, cuda-fast, and approx-fast VHS decode; Exact complete decode was not changed.");
         }
 
         bool supportedInputRate = Math.Abs(
@@ -708,7 +887,11 @@ public static class DecodeSessionFactory
         };
     }
 
-    private static DecodeExecutionOptions BuildExecutionOptions(ParsedCommand command)
+    private static DecodeExecutionOptions BuildExecutionOptions(
+        ParsedCommand command,
+        ApproxProviderSelection? approxProviderSelection,
+        ApproxResampler? approxResampler,
+        ApproxPrecision? approxPrecision)
     {
         BigInteger requestedThreadsInteger = command.Get<BigInteger>("threads");
         string? debugPlotPath = NullableString(command, "debug_plot");
@@ -749,7 +932,18 @@ public static class DecodeSessionFactory
             UpstreamBehaviorProfile: SelectedUpstreamBehaviorProfile(command))
         {
             RequestedThreadsInteger = requestedThreadsInteger,
-            SuppressFileOutputs = IsPreviewServer(command)
+            SuppressFileOutputs = IsPreviewServer(command),
+            ApproxProvider = approxProviderSelection?.Provider,
+            ApproxResampler = approxResampler,
+            ApproxPrecision = approxPrecision,
+            ApproxPrecisionIsExplicit =
+                command.GetSource("approx_precision") != ParsedOptionSource.Default,
+            ApproxProviderIsExplicit = approxProviderSelection?.IsExplicit ?? false,
+            ApproxProviderFellBackFromIpp =
+                approxProviderSelection?.FellBackFromIpp ?? false,
+            ApproxProviderProcessArchitecture =
+                approxProviderSelection?.ProcessArchitecture,
+            ApproxProviderDiagnostic = approxProviderSelection?.Diagnostic
         };
     }
 

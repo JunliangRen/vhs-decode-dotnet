@@ -173,6 +173,9 @@ public sealed record VhsChromaFieldOptions(
 
     internal int SyncTipLength { get; init; }
 
+    internal int ChromaBurstFitMaximumIterations { get; init; } =
+        CurrentChromaBurstFitter.DefaultMaximumIterations;
+
     internal double CtiMix { get; init; }
 
     internal long CtiWidth { get; init; } = 2;
@@ -668,6 +671,7 @@ public static class VhsChromaDecoder
                         options.FscMHz * 1_000_000.0,
                         effectiveBurstFilter,
                         useFloat32Samples,
+                        options.ChromaBurstFitMaximumIterations,
                         burstFilter is null ? carrierTableCache : null)
                     : ProbeUpconvertedBurstValue(
                         chromaField,
@@ -1740,6 +1744,7 @@ public static class VhsChromaDecoder
             fscHz,
             burstFilter,
             useFloat32Samples,
+            CurrentChromaBurstFitter.DefaultMaximumIterations,
             carrierTableCache: null).ToPublicResult();
 
     private static ChromaBurstDemodulationValue ProbeUpconvertedBurstCurrentCore(
@@ -1756,6 +1761,7 @@ public static class VhsChromaDecoder
         double fscHz,
         Func<double[], double[]>? burstFilter,
         bool useFloat32Samples,
+        int maximumFitIterations,
         VhsChromaCarrierTableCache? carrierTableCache)
     {
         ArgumentOutOfRangeException.ThrowIfNegative(lineOffset);
@@ -1811,7 +1817,8 @@ public static class VhsChromaDecoder
                 globalBurstStart,
                 burstSin,
                 burstCos,
-                fscHz);
+                fscHz,
+                maximumFitIterations);
             return new ChromaBurstDemodulationValue(
                 fit.PhaseDegrees,
                 PhaseOffsetDegrees: 0.0,
@@ -2632,11 +2639,11 @@ public static class VhsChromaDecoder
         int firstWrappedIndex = chroma.Length - normalizedMove;
         chroma.AsSpan(firstWrappedIndex, normalizedMove).CopyTo(wrapped);
 
+        chroma.AsSpan(0, firstWrappedIndex).CopyTo(chroma.AsSpan(normalizedMove));
         double meanAccumulator = 0.0;
-        for (int i = firstWrappedIndex - 1; i >= 0; i--)
+        for (int i = chroma.Length - 1; i >= normalizedMove; i--)
         {
             meanAccumulator += chroma[i];
-            chroma[i + normalizedMove] = chroma[i];
         }
 
         for (int i = 0; i < normalizedMove; i++)
@@ -2646,9 +2653,33 @@ public static class VhsChromaDecoder
         }
 
         meanAccumulator /= chroma.Length;
-        for (int i = 0; i < chroma.Length; i++)
+        int outputIndex = 0;
+        if (Avx.IsSupported && double.IsFinite(meanAccumulator))
         {
-            chroma[i] = (float)(chroma[i] - meanAccumulator);
+            ref float chromaReference = ref MemoryMarshal.GetArrayDataReference(chroma);
+            Vector256<double> mean = Vector256.Create(meanAccumulator);
+            int vectorizedEnd = chroma.Length & ~7;
+            for (; outputIndex < vectorizedEnd; outputIndex += 8)
+            {
+                Vector256<float> values = Vector256.LoadUnsafe(
+                    ref chromaReference,
+                    (nuint)outputIndex);
+                Vector128<float> centeredLower = Avx.ConvertToVector128Single(
+                    Avx.Subtract(
+                        Avx.ConvertToVector256Double(values.GetLower()),
+                        mean));
+                Vector128<float> centeredUpper = Avx.ConvertToVector128Single(
+                    Avx.Subtract(
+                        Avx.ConvertToVector256Double(values.GetUpper()),
+                        mean));
+                centeredLower.StoreUnsafe(ref chromaReference, (nuint)outputIndex);
+                centeredUpper.StoreUnsafe(ref chromaReference, (nuint)(outputIndex + 4));
+            }
+        }
+
+        for (; outputIndex < chroma.Length; outputIndex++)
+        {
+            chroma[outputIndex] = (float)(chroma[outputIndex] - meanAccumulator);
         }
 
         return chroma;

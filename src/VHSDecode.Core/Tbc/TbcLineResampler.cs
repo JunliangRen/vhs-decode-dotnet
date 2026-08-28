@@ -18,6 +18,12 @@ public enum TbcLineInterpolationMethod
     Cubic
 }
 
+public enum TbcSampleResamplingKernel
+{
+    KaiserSinc16,
+    CatmullRom4Float32
+}
+
 public sealed class TbcLineResampler
 {
     private const int ParallelSampleThreshold = 64 * 1024;
@@ -169,6 +175,23 @@ public sealed class TbcLineResampler
         int lineCount,
         int samplesPerLine,
         double[] destination)
+        => ResampleLinePrefixes(
+            source,
+            lineLocations,
+            firstLine,
+            lineCount,
+            samplesPerLine,
+            destination,
+            TbcSampleResamplingKernel.KaiserSinc16);
+
+    internal void ResampleLinePrefixes(
+        ReadOnlySpan<double> source,
+        IReadOnlyList<double> lineLocations,
+        int firstLine,
+        int lineCount,
+        int samplesPerLine,
+        double[] destination,
+        TbcSampleResamplingKernel sampleKernel)
     {
         if (source.IsEmpty)
         {
@@ -206,7 +229,12 @@ public sealed class TbcLineResampler
                 interpolator,
                 firstLine,
                 destinationLength);
-            ResamplePreparedLinePrefixes(source, plan, samplesPerLine, destination);
+            ResamplePreparedLinePrefixes(
+                source,
+                plan,
+                samplesPerLine,
+                destination,
+                sampleKernel);
             return;
         }
 
@@ -255,7 +283,8 @@ public sealed class TbcLineResampler
                 levelAdjusts,
                 lineCount,
                 samplesPerLine,
-                destination);
+                destination,
+                sampleKernel);
         }
         finally
         {
@@ -285,6 +314,12 @@ public sealed class TbcLineResampler
     }
 
     internal double[] ResamplePrepared(ReadOnlySpan<double> source, ResamplingPlan plan)
+        => ResamplePrepared(source, plan, TbcSampleResamplingKernel.KaiserSinc16);
+
+    internal double[] ResamplePrepared(
+        ReadOnlySpan<double> source,
+        ResamplingPlan plan,
+        TbcSampleResamplingKernel sampleKernel)
     {
         if (source.IsEmpty)
         {
@@ -294,7 +329,12 @@ public sealed class TbcLineResampler
         ArgumentNullException.ThrowIfNull(plan);
         plan.ValidateOwner(this);
         var output = new double[plan.DestinationLength];
-        ResampleSamples(source, plan, output);
+        ResamplePreparedCore(
+            source,
+            plan,
+            sourcePositionShift: 0.0,
+            output,
+            sampleKernel);
         return output;
     }
 
@@ -302,12 +342,18 @@ public sealed class TbcLineResampler
         ReadOnlySpan<double> source,
         ResamplingPlan plan,
         double sourcePositionShift)
-    {
-        if (sourcePositionShift == 0.0)
-        {
-            return ResamplePrepared(source, plan);
-        }
+        => ResamplePreparedShifted(
+            source,
+            plan,
+            sourcePositionShift,
+            TbcSampleResamplingKernel.KaiserSinc16);
 
+    internal double[] ResamplePreparedShifted(
+        ReadOnlySpan<double> source,
+        ResamplingPlan plan,
+        double sourcePositionShift,
+        TbcSampleResamplingKernel sampleKernel)
+    {
         if (source.IsEmpty)
         {
             throw new ArgumentException("Source must contain at least one sample.", nameof(source));
@@ -321,7 +367,12 @@ public sealed class TbcLineResampler
         ArgumentNullException.ThrowIfNull(plan);
         plan.ValidateOwner(this);
         var output = new double[plan.DestinationLength];
-        ResampleSamplesShifted(source, plan, sourcePositionShift, output);
+        ResamplePreparedCore(
+            source,
+            plan,
+            sourcePositionShift,
+            output,
+            sampleKernel);
         return output;
     }
 
@@ -329,6 +380,17 @@ public sealed class TbcLineResampler
         ReadOnlySpan<double> source,
         ResamplingPlan plan,
         VideoOutputConverter converter)
+        => ResamplePreparedToUInt16(
+            source,
+            plan,
+            converter,
+            TbcSampleResamplingKernel.KaiserSinc16);
+
+    internal ushort[] ResamplePreparedToUInt16(
+        ReadOnlySpan<double> source,
+        ResamplingPlan plan,
+        VideoOutputConverter converter,
+        TbcSampleResamplingKernel sampleKernel)
     {
         if (source.IsEmpty)
         {
@@ -339,7 +401,7 @@ public sealed class TbcLineResampler
         ArgumentNullException.ThrowIfNull(converter);
         plan.ValidateOwner(this);
         var output = new ushort[plan.DestinationLength];
-        ResampleSamplesToUInt16(source, plan, converter, output);
+        ResamplePreparedToUInt16Core(source, plan, converter, output, sampleKernel);
         return output;
     }
 
@@ -348,6 +410,19 @@ public sealed class TbcLineResampler
         ResamplingPlan plan,
         VideoOutputConverter converter,
         ushort[] destination)
+        => ResamplePreparedToUInt16(
+            source,
+            plan,
+            converter,
+            destination,
+            TbcSampleResamplingKernel.KaiserSinc16);
+
+    internal void ResamplePreparedToUInt16(
+        ReadOnlySpan<double> source,
+        ResamplingPlan plan,
+        VideoOutputConverter converter,
+        ushort[] destination,
+        TbcSampleResamplingKernel sampleKernel)
     {
         if (source.IsEmpty)
         {
@@ -365,13 +440,29 @@ public sealed class TbcLineResampler
                 nameof(destination));
         }
 
-        ResampleSamplesToUInt16(source, plan, converter, destination);
+        ResamplePreparedToUInt16Core(
+            source,
+            plan,
+            converter,
+            destination,
+            sampleKernel);
     }
 
     internal void ResamplePrepared(
         ReadOnlySpan<double> source,
         ResamplingPlan plan,
         double[] destination)
+        => ResamplePrepared(
+            source,
+            plan,
+            destination,
+            TbcSampleResamplingKernel.KaiserSinc16);
+
+    internal void ResamplePrepared(
+        ReadOnlySpan<double> source,
+        ResamplingPlan plan,
+        double[] destination,
+        TbcSampleResamplingKernel sampleKernel)
     {
         if (source.IsEmpty)
         {
@@ -388,7 +479,106 @@ public sealed class TbcLineResampler
                 nameof(destination));
         }
 
-        ResampleSamples(source, plan, destination);
+        ResamplePreparedCore(
+            source,
+            plan,
+            sourcePositionShift: 0.0,
+            destination,
+            sampleKernel);
+    }
+
+    internal void ResamplePrepared(
+        ReadOnlySpan<float> source,
+        ResamplingPlan plan,
+        double[] destination,
+        TbcSampleResamplingKernel sampleKernel)
+    {
+        if (source.IsEmpty)
+        {
+            throw new ArgumentException("Source must contain at least one sample.", nameof(source));
+        }
+
+        ArgumentNullException.ThrowIfNull(plan);
+        ArgumentNullException.ThrowIfNull(destination);
+        plan.ValidateOwner(this);
+        if (destination.Length != plan.DestinationLength)
+        {
+            throw new ArgumentException(
+                "Destination length must match the prepared resampling plan.",
+                nameof(destination));
+        }
+
+        if (sampleKernel != TbcSampleResamplingKernel.CatmullRom4Float32)
+        {
+            throw new NotSupportedException(
+                "A float32 TBC source is supported only by the Catmull-Rom4 Approx kernel; no widening fallback was performed.");
+        }
+
+        ResampleCatmullRom4(
+            source,
+            plan,
+            sourcePositionShift: 0.0,
+            destination);
+    }
+
+    internal double[] ResamplePrepared(
+        ReadOnlySpan<float> source,
+        ResamplingPlan plan,
+        TbcSampleResamplingKernel sampleKernel)
+    {
+        ArgumentNullException.ThrowIfNull(plan);
+        var output = new double[plan.DestinationLength];
+        ResamplePrepared(source, plan, output, sampleKernel);
+        return output;
+    }
+
+    internal ushort[] ResamplePreparedToUInt16(
+        ReadOnlySpan<float> source,
+        ResamplingPlan plan,
+        VideoOutputConverter converter,
+        TbcSampleResamplingKernel sampleKernel)
+    {
+        ArgumentNullException.ThrowIfNull(plan);
+        var output = new ushort[plan.DestinationLength];
+        ResamplePreparedToUInt16(
+            source,
+            plan,
+            converter,
+            output,
+            sampleKernel);
+        return output;
+    }
+
+    internal void ResamplePreparedToUInt16(
+        ReadOnlySpan<float> source,
+        ResamplingPlan plan,
+        VideoOutputConverter converter,
+        ushort[] destination,
+        TbcSampleResamplingKernel sampleKernel)
+    {
+        if (source.IsEmpty)
+        {
+            throw new ArgumentException("Source must contain at least one sample.", nameof(source));
+        }
+
+        ArgumentNullException.ThrowIfNull(plan);
+        ArgumentNullException.ThrowIfNull(converter);
+        ArgumentNullException.ThrowIfNull(destination);
+        plan.ValidateOwner(this);
+        if (destination.Length != plan.DestinationLength)
+        {
+            throw new ArgumentException(
+                "Destination length must match the prepared resampling plan.",
+                nameof(destination));
+        }
+
+        if (sampleKernel != TbcSampleResamplingKernel.CatmullRom4Float32)
+        {
+            throw new NotSupportedException(
+                "A float32 TBC source is supported only by the Catmull-Rom4 Approx kernel; no widening fallback was performed.");
+        }
+
+        ResampleCatmullRom4ToUInt16(source, plan, converter, destination);
     }
 
     internal void ResamplePreparedLinePrefixes(
@@ -396,6 +586,19 @@ public sealed class TbcLineResampler
         ResamplingPlan plan,
         int samplesPerLine,
         double[] destination)
+        => ResamplePreparedLinePrefixes(
+            source,
+            plan,
+            samplesPerLine,
+            destination,
+            TbcSampleResamplingKernel.KaiserSinc16);
+
+    internal void ResamplePreparedLinePrefixes(
+        ReadOnlySpan<double> source,
+        ResamplingPlan plan,
+        int samplesPerLine,
+        double[] destination,
+        TbcSampleResamplingKernel sampleKernel)
     {
         if (source.IsEmpty)
         {
@@ -424,7 +627,12 @@ public sealed class TbcLineResampler
                 nameof(plan));
         }
 
-        ResampleLinePrefixes(source, plan, samplesPerLine, destination);
+        ResampleLinePrefixes(
+            source,
+            plan,
+            samplesPerLine,
+            destination,
+            sampleKernel);
     }
 
     internal void ResamplePreparedShifted(
@@ -432,13 +640,20 @@ public sealed class TbcLineResampler
         ResamplingPlan plan,
         double sourcePositionShift,
         double[] destination)
-    {
-        if (sourcePositionShift == 0.0)
-        {
-            ResamplePrepared(source, plan, destination);
-            return;
-        }
+        => ResamplePreparedShifted(
+            source,
+            plan,
+            sourcePositionShift,
+            destination,
+            TbcSampleResamplingKernel.KaiserSinc16);
 
+    internal void ResamplePreparedShifted(
+        ReadOnlySpan<double> source,
+        ResamplingPlan plan,
+        double sourcePositionShift,
+        double[] destination,
+        TbcSampleResamplingKernel sampleKernel)
+    {
         if (source.IsEmpty)
         {
             throw new ArgumentException("Source must contain at least one sample.", nameof(source));
@@ -459,7 +674,228 @@ public sealed class TbcLineResampler
                 nameof(destination));
         }
 
-        ResampleSamplesShifted(source, plan, sourcePositionShift, destination);
+        ResamplePreparedCore(
+            source,
+            plan,
+            sourcePositionShift,
+            destination,
+            sampleKernel);
+    }
+
+    private void ResamplePreparedCore(
+        ReadOnlySpan<double> source,
+        ResamplingPlan plan,
+        double sourcePositionShift,
+        double[] destination,
+        TbcSampleResamplingKernel sampleKernel)
+    {
+        switch (sampleKernel)
+        {
+            case TbcSampleResamplingKernel.KaiserSinc16:
+                if (sourcePositionShift == 0.0)
+                {
+                    ResampleSamples(source, plan, destination);
+                }
+                else
+                {
+                    ResampleSamplesShifted(
+                        source,
+                        plan,
+                        sourcePositionShift,
+                        destination);
+                }
+
+                break;
+            case TbcSampleResamplingKernel.CatmullRom4Float32:
+                ResampleCatmullRom4(
+                    source,
+                    plan,
+                    sourcePositionShift,
+                    destination);
+                break;
+            default:
+                throw new ArgumentOutOfRangeException(nameof(sampleKernel));
+        }
+    }
+
+    private void ResamplePreparedToUInt16Core(
+        ReadOnlySpan<double> source,
+        ResamplingPlan plan,
+        VideoOutputConverter converter,
+        ushort[] destination,
+        TbcSampleResamplingKernel sampleKernel)
+    {
+        switch (sampleKernel)
+        {
+            case TbcSampleResamplingKernel.KaiserSinc16:
+                ResampleSamplesToUInt16(source, plan, converter, destination);
+                break;
+            case TbcSampleResamplingKernel.CatmullRom4Float32:
+                ResampleCatmullRom4ToUInt16(
+                    source,
+                    plan,
+                    converter,
+                    destination);
+                break;
+            default:
+                throw new ArgumentOutOfRangeException(nameof(sampleKernel));
+        }
+    }
+
+    private unsafe void ResampleCatmullRom4(
+        ReadOnlySpan<double> source,
+        ResamplingPlan plan,
+        double sourcePositionShift,
+        double[] destination)
+    {
+        if (_workerThreads <= 1 || destination.Length < ParallelSampleThreshold)
+        {
+            ApproxCatmullRom4Resampler.Resample(
+                source,
+                plan.SourcePositions.AsSpan(0, plan.DestinationLength),
+                plan.LevelAdjusts.AsSpan(plan.PrefixSamples, plan.DestinationLength),
+                sourcePositionShift,
+                destination);
+            return;
+        }
+
+        fixed (double* sourcePointer = source)
+        {
+            nint sourceAddress = (nint)sourcePointer;
+            int sourceLength = source.Length;
+            Parallel.ForEach(
+                Partitioner.Create(0, destination.Length),
+                new ParallelOptions { MaxDegreeOfParallelism = _workerThreads },
+                range =>
+                {
+                    int rangeLength = range.Item2 - range.Item1;
+                    ApproxCatmullRom4Resampler.Resample(
+                        new ReadOnlySpan<double>((void*)sourceAddress, sourceLength),
+                        plan.SourcePositions.AsSpan(range.Item1, rangeLength),
+                        plan.LevelAdjusts.AsSpan(
+                            plan.PrefixSamples + range.Item1,
+                            rangeLength),
+                        sourcePositionShift,
+                        destination.AsSpan(range.Item1, rangeLength));
+                });
+        }
+    }
+
+    private unsafe void ResampleCatmullRom4(
+        ReadOnlySpan<float> source,
+        ResamplingPlan plan,
+        double sourcePositionShift,
+        double[] destination)
+    {
+        if (_workerThreads <= 1 || destination.Length < ParallelSampleThreshold)
+        {
+            ApproxCatmullRom4Resampler.Resample(
+                source,
+                plan.SourcePositions.AsSpan(0, plan.DestinationLength),
+                plan.LevelAdjusts.AsSpan(plan.PrefixSamples, plan.DestinationLength),
+                sourcePositionShift,
+                destination);
+            return;
+        }
+
+        fixed (float* sourcePointer = source)
+        {
+            nint sourceAddress = (nint)sourcePointer;
+            int sourceLength = source.Length;
+            Parallel.ForEach(
+                Partitioner.Create(0, destination.Length),
+                new ParallelOptions { MaxDegreeOfParallelism = _workerThreads },
+                range =>
+                {
+                    int rangeLength = range.Item2 - range.Item1;
+                    ApproxCatmullRom4Resampler.Resample(
+                        new ReadOnlySpan<float>((void*)sourceAddress, sourceLength),
+                        plan.SourcePositions.AsSpan(range.Item1, rangeLength),
+                        plan.LevelAdjusts.AsSpan(
+                            plan.PrefixSamples + range.Item1,
+                            rangeLength),
+                        sourcePositionShift,
+                        destination.AsSpan(range.Item1, rangeLength));
+                });
+        }
+    }
+
+    private unsafe void ResampleCatmullRom4ToUInt16(
+        ReadOnlySpan<double> source,
+        ResamplingPlan plan,
+        VideoOutputConverter converter,
+        ushort[] destination)
+    {
+        if (_workerThreads <= 1 || destination.Length < ParallelSampleThreshold)
+        {
+            ApproxCatmullRom4Resampler.ResampleToUInt16(
+                source,
+                plan.SourcePositions.AsSpan(0, plan.DestinationLength),
+                plan.LevelAdjusts.AsSpan(plan.PrefixSamples, plan.DestinationLength),
+                converter,
+                destination);
+            return;
+        }
+
+        fixed (double* sourcePointer = source)
+        {
+            nint sourceAddress = (nint)sourcePointer;
+            int sourceLength = source.Length;
+            Parallel.ForEach(
+                Partitioner.Create(0, destination.Length),
+                new ParallelOptions { MaxDegreeOfParallelism = _workerThreads },
+                range =>
+                {
+                    int rangeLength = range.Item2 - range.Item1;
+                    ApproxCatmullRom4Resampler.ResampleToUInt16(
+                        new ReadOnlySpan<double>((void*)sourceAddress, sourceLength),
+                        plan.SourcePositions.AsSpan(range.Item1, rangeLength),
+                        plan.LevelAdjusts.AsSpan(
+                            plan.PrefixSamples + range.Item1,
+                            rangeLength),
+                        converter,
+                        destination.AsSpan(range.Item1, rangeLength));
+                });
+        }
+    }
+
+    private unsafe void ResampleCatmullRom4ToUInt16(
+        ReadOnlySpan<float> source,
+        ResamplingPlan plan,
+        VideoOutputConverter converter,
+        ushort[] destination)
+    {
+        if (_workerThreads <= 1 || destination.Length < ParallelSampleThreshold)
+        {
+            ApproxCatmullRom4Resampler.ResampleToUInt16(
+                source,
+                plan.SourcePositions.AsSpan(0, plan.DestinationLength),
+                plan.LevelAdjusts.AsSpan(plan.PrefixSamples, plan.DestinationLength),
+                converter,
+                destination);
+            return;
+        }
+
+        fixed (float* sourcePointer = source)
+        {
+            nint sourceAddress = (nint)sourcePointer;
+            int sourceLength = source.Length;
+            Parallel.ForEach(
+                Partitioner.Create(0, destination.Length),
+                new ParallelOptions { MaxDegreeOfParallelism = _workerThreads },
+                range =>
+                {
+                    int rangeLength = range.Item2 - range.Item1;
+                    ApproxCatmullRom4Resampler.ResampleToUInt16(
+                        new ReadOnlySpan<float>((void*)sourceAddress, sourceLength),
+                        plan.SourcePositions.AsSpan(range.Item1, rangeLength),
+                        plan.LevelAdjusts.AsSpan(
+                            plan.PrefixSamples + range.Item1,
+                            rangeLength),
+                        converter,
+                        destination.AsSpan(range.Item1, rangeLength));
+                });
+        }
     }
 
     private void ResampleLine(
@@ -1043,8 +1479,24 @@ public sealed class TbcLineResampler
         ReadOnlySpan<double> source,
         ResamplingPlan preparation,
         int samplesPerLine,
-        double[] destination)
+        double[] destination,
+        TbcSampleResamplingKernel sampleKernel)
     {
+        if (sampleKernel == TbcSampleResamplingKernel.CatmullRom4Float32)
+        {
+            ResampleCatmullRom4LinePrefixes(
+                source,
+                preparation,
+                samplesPerLine,
+                destination);
+            return;
+        }
+
+        if (sampleKernel != TbcSampleResamplingKernel.KaiserSinc16)
+        {
+            throw new ArgumentOutOfRangeException(nameof(sampleKernel));
+        }
+
         preparation.ValidateOwner(this);
         double[] sourcePositions = preparation.SourcePositions;
         double[] levelAdjusts = preparation.LevelAdjusts;
@@ -1113,8 +1565,26 @@ public sealed class TbcLineResampler
         double[] levelAdjusts,
         int lineCount,
         int samplesPerLine,
-        double[] destination)
+        double[] destination,
+        TbcSampleResamplingKernel sampleKernel)
     {
+        if (sampleKernel == TbcSampleResamplingKernel.CatmullRom4Float32)
+        {
+            ResampleCompactCatmullRom4LinePrefixes(
+                source,
+                sourcePositions,
+                levelAdjusts,
+                lineCount,
+                samplesPerLine,
+                destination);
+            return;
+        }
+
+        if (sampleKernel != TbcSampleResamplingKernel.KaiserSinc16)
+        {
+            throw new ArgumentOutOfRangeException(nameof(sampleKernel));
+        }
+
         int compactLength = checked(lineCount * samplesPerLine);
         float[] sincLookup = SincLookup.Value;
         fixed (double* sourcePointer = source)
@@ -1174,6 +1644,124 @@ public sealed class TbcLineResampler
                                     parallelSincLookup)
                                 * levelAdjusts[compactIndex]);
                         }
+                    }
+                });
+        }
+    }
+
+    private unsafe void ResampleCatmullRom4LinePrefixes(
+        ReadOnlySpan<double> source,
+        ResamplingPlan preparation,
+        int samplesPerLine,
+        double[] destination)
+    {
+        preparation.ValidateOwner(this);
+        double[] sourcePositions = preparation.SourcePositions;
+        double[] levelAdjusts = preparation.LevelAdjusts;
+        int prefixSamples = preparation.PrefixSamples;
+        int lineCount = destination.Length / OutputLineLength;
+        int resampledSampleCount = checked(lineCount * samplesPerLine);
+        if (_workerThreads <= 1 || resampledSampleCount < ParallelSampleThreshold)
+        {
+            for (int line = 0; line < lineCount; line++)
+            {
+                int lineStart = line * OutputLineLength;
+                ApproxCatmullRom4Resampler.Resample(
+                    source,
+                    sourcePositions.AsSpan(lineStart, samplesPerLine),
+                    levelAdjusts.AsSpan(prefixSamples + lineStart, samplesPerLine),
+                    destination.AsSpan(lineStart, samplesPerLine));
+            }
+
+            return;
+        }
+
+        fixed (double* sourcePointer = source)
+        {
+            nint sourceAddress = (nint)sourcePointer;
+            int sourceLength = source.Length;
+            int workerCount = Math.Min(_workerThreads, lineCount);
+            Parallel.For(
+                0,
+                workerCount,
+                new ParallelOptions { MaxDegreeOfParallelism = workerCount },
+                workerIndex =>
+                {
+                    var parallelSource = new ReadOnlySpan<double>(
+                        (void*)sourceAddress,
+                        sourceLength);
+                    int firstLine = (lineCount * workerIndex) / workerCount;
+                    int lastLine = (lineCount * (workerIndex + 1)) / workerCount;
+                    for (int line = firstLine; line < lastLine; line++)
+                    {
+                        int lineStart = line * OutputLineLength;
+                        ApproxCatmullRom4Resampler.Resample(
+                            parallelSource,
+                            sourcePositions.AsSpan(lineStart, samplesPerLine),
+                            levelAdjusts.AsSpan(
+                                prefixSamples + lineStart,
+                                samplesPerLine),
+                            destination.AsSpan(lineStart, samplesPerLine));
+                    }
+                });
+        }
+    }
+
+    private unsafe void ResampleCompactCatmullRom4LinePrefixes(
+        ReadOnlySpan<double> source,
+        double[] sourcePositions,
+        double[] levelAdjusts,
+        int lineCount,
+        int samplesPerLine,
+        double[] destination)
+    {
+        int compactLength = checked(lineCount * samplesPerLine);
+        int maximumUsefulWorkers = compactLength == 0
+            ? 1
+            : 1 + ((compactLength - 1) / MinimumParallelSamplesPerWorker);
+        int workerCount = Math.Min(
+            Math.Min(_workerThreads, lineCount),
+            maximumUsefulWorkers);
+        if (workerCount <= 1 || compactLength < ParallelSampleThreshold)
+        {
+            for (int line = 0; line < lineCount; line++)
+            {
+                int compactStart = line * samplesPerLine;
+                int destinationStart = line * OutputLineLength;
+                ApproxCatmullRom4Resampler.Resample(
+                    source,
+                    sourcePositions.AsSpan(compactStart, samplesPerLine),
+                    levelAdjusts.AsSpan(compactStart, samplesPerLine),
+                    destination.AsSpan(destinationStart, samplesPerLine));
+            }
+
+            return;
+        }
+
+        fixed (double* sourcePointer = source)
+        {
+            nint sourceAddress = (nint)sourcePointer;
+            int sourceLength = source.Length;
+            Parallel.For(
+                0,
+                workerCount,
+                new ParallelOptions { MaxDegreeOfParallelism = workerCount },
+                workerIndex =>
+                {
+                    var parallelSource = new ReadOnlySpan<double>(
+                        (void*)sourceAddress,
+                        sourceLength);
+                    int firstWorkerLine = (lineCount * workerIndex) / workerCount;
+                    int lastWorkerLine = (lineCount * (workerIndex + 1)) / workerCount;
+                    for (int line = firstWorkerLine; line < lastWorkerLine; line++)
+                    {
+                        int compactStart = line * samplesPerLine;
+                        int destinationStart = line * OutputLineLength;
+                        ApproxCatmullRom4Resampler.Resample(
+                            parallelSource,
+                            sourcePositions.AsSpan(compactStart, samplesPerLine),
+                            levelAdjusts.AsSpan(compactStart, samplesPerLine),
+                            destination.AsSpan(destinationStart, samplesPerLine));
                     }
                 });
         }

@@ -15,7 +15,7 @@
 #  define VHSDECODE_IPP_CALL
 #endif
 
-#define VHSDECODE_IPP_ABI_VERSION 0x00010003u
+#define VHSDECODE_IPP_ABI_VERSION 0x00010004u
 #define VHSDECODE_IPP_NAME_CAPACITY 64u
 #define VHSDECODE_IPP_VERSION_CAPACITY 64u
 #define VHSDECODE_IPP_BUILD_DATE_CAPACITY 32u
@@ -88,6 +88,7 @@ typedef struct vhsdecode_ipp_runtime_info_v1 {
     char ipp_target_cpu[VHSDECODE_IPP_TARGET_CPU_CAPACITY];
 } vhsdecode_ipp_runtime_info_v1;
 
+typedef struct vhsdecode_ipp_fft32_context vhsdecode_ipp_fft32_context;
 typedef struct vhsdecode_ipp_fft64_context vhsdecode_ipp_fft64_context;
 typedef struct vhsdecode_ipp_cfft64_context vhsdecode_ipp_cfft64_context;
 typedef struct vhsdecode_ipp_dft32_context vhsdecode_ipp_dft32_context;
@@ -104,6 +105,44 @@ vhsdecode_ipp_get_runtime_info(vhsdecode_ipp_runtime_info_v1* info);
 /* Returns a process-lifetime string owned by the bridge/IPP. */
 VHSDECODE_IPP_API const char* VHSDECODE_IPP_CALL
 vhsdecode_ipp_status_string(int32_t status);
+
+/*
+ * Creates a power-of-two, single-precision real FFT context. The supported
+ * length range is 2 through 2^27. The context owns an immutable IPP FFT spec
+ * and a private scratch buffer. Calls on the same context are serialized;
+ * different contexts can execute concurrently.
+ */
+VHSDECODE_IPP_API int32_t VHSDECODE_IPP_CALL
+vhsdecode_ipp_fft32_create(int32_t length, vhsdecode_ipp_fft32_context** out_context);
+
+/* Destroying NULL succeeds. A non-NULL handle may be destroyed only once. */
+VHSDECODE_IPP_API int32_t VHSDECODE_IPP_CALL
+vhsdecode_ipp_fft32_destroy(vhsdecode_ipp_fft32_context* context);
+
+/*
+ * Forward R2C transform. input_length must equal N and output_length must
+ * equal N/2+1. The output is ordinary interleaved complex data, including
+ * the DC and Nyquist bins. The forward transform is not normalized.
+ */
+VHSDECODE_IPP_API int32_t VHSDECODE_IPP_CALL
+vhsdecode_ipp_fft32_forward_real(
+    vhsdecode_ipp_fft32_context* context,
+    const float* input,
+    int32_t input_length,
+    vhsdecode_ipp_complex32* output,
+    int32_t output_length);
+
+/*
+ * Inverse C2R transform. input_length must equal N/2+1 and output_length must
+ * equal N. The inverse result is normalized by 1/N.
+ */
+VHSDECODE_IPP_API int32_t VHSDECODE_IPP_CALL
+vhsdecode_ipp_fft32_inverse_real(
+    vhsdecode_ipp_fft32_context* context,
+    const vhsdecode_ipp_complex32* input,
+    int32_t input_length,
+    float* output,
+    int32_t output_length);
 
 /*
  * Creates a power-of-two, double-precision real FFT context. The supported

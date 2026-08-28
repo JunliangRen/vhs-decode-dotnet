@@ -28,6 +28,23 @@ internal static class IppComplexLayout
 {
     static IppComplexLayout()
     {
+        if (Marshal.SizeOf<Complex32>() != Marshal.SizeOf<IppComplex32>())
+        {
+            throw new PlatformNotSupportedException(
+                "Complex32 does not have the 8-byte ABI layout required by vhsdecode_ipp.");
+        }
+
+        Complex32 singleSample = new(1.25F, -2.5F);
+        ReadOnlySpan<float> singleComponents = MemoryMarshal.Cast<Complex32, float>(
+            MemoryMarshal.CreateReadOnlySpan(ref singleSample, 1));
+        if (singleComponents.Length != 2
+            || singleComponents[0] != singleSample.Real
+            || singleComponents[1] != singleSample.Imaginary)
+        {
+            throw new PlatformNotSupportedException(
+                "Complex32 does not have the two-float ABI ordering required by vhsdecode_ipp.");
+        }
+
         if (Marshal.SizeOf<Complex>() != Marshal.SizeOf<IppComplex64>())
         {
             throw new PlatformNotSupportedException(

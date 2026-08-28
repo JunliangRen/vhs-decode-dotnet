@@ -18,6 +18,7 @@ public sealed class RfBlockDecodePipeline : IDisposable
     private readonly DecodeFilterSet _filters;
     private readonly DecodeFilterOptions _filterOptions;
     private readonly RfDemodulator _demodulator;
+    private readonly ApproxRfFilterBank? _approxFilterBank;
     private readonly RfVideoReferenceFilterSet? _referenceFilters;
     private readonly CvbsDecodeOptions? _cvbsOptions;
     private readonly IRfInputProcessor? _inputProcessor;
@@ -25,6 +26,9 @@ public sealed class RfBlockDecodePipeline : IDisposable
     private readonly Action<string, string>? _diagnosticLogger;
     private readonly AsyncLocal<Action<string, string>?> _diagnosticLoggerOverride = new();
     private readonly bool _retainRfDiagnosticChannels;
+    private readonly bool _useCompactApproxFloat32Outputs;
+    private readonly bool _useDirectStreamOutputBufferLease;
+    private readonly bool _useApproxFrequencyDomainChroma;
     private readonly bool _useCurrentChromaShiftDc;
     private readonly bool _useNumpyComplexVhsAnalytic;
     private readonly IppSos32FilterPool? _chromaBurstIppSos;
@@ -32,6 +36,7 @@ public sealed class RfBlockDecodePipeline : IDisposable
     private readonly ConcurrentStack<StreamBlockOutputBuffers> _streamOutputBufferPool = new();
     private readonly ConditionalWeakTable<RfPipelineBlock, StreamBlockOutputBuffers>
         _streamOutputBufferLeases = new();
+    private readonly object _streamOutputBufferLeaseOwner = new();
     private int _retainedStreamOutputBufferSetCount;
     private int _createdStreamOutputBufferSetCount;
     private int _streamOutputBufferPoolDisposed;
@@ -58,7 +63,8 @@ public sealed class RfBlockDecodePipeline : IDisposable
             diagnosticLogger,
             retainRfDiagnosticChannels,
             dspBackend,
-            upstreamBehaviorProfile,
+            approxProvider: null,
+            upstreamBehaviorProfile: upstreamBehaviorProfile,
             parallelizeVhsInverseStaging: false)
     {
     }
@@ -73,9 +79,14 @@ public sealed class RfBlockDecodePipeline : IDisposable
         Action<string, string>? diagnosticLogger,
         bool retainRfDiagnosticChannels,
         DspBackend dspBackend,
+        ApproxProvider? approxProvider,
         UpstreamBehaviorProfile upstreamBehaviorProfile,
         bool parallelizeVhsInverseStaging,
-        int vhsInverseCompanionWorkerThreads = 1)
+        int vhsInverseCompanionWorkerThreads = 1,
+        bool useImmutableApproxFilterBank = false,
+        bool useCompactApproxFloat32Outputs = false,
+        bool useDirectStreamOutputBufferLease = false,
+        bool useApproxFrequencyDomainChroma = false)
     {
         _loader = loader;
         _filters = filters;
@@ -85,7 +96,12 @@ public sealed class RfBlockDecodePipeline : IDisposable
             dspBackend,
             parallelizeVhsInverseStaging,
             companionIppFftFactory: null,
-            vhsInverseCompanionWorkerThreads);
+            vhsInverseCompanionWorkerThreads: vhsInverseCompanionWorkerThreads,
+            approxProvider: approxProvider);
+        _approxFilterBank = useImmutableApproxFilterBank
+            && dspBackend == DspBackend.ApproxFast
+            ? ApproxRfFilterBank.Create(filters, filters.RfVideo.Length)
+            : null;
         _referenceFilters = filters.LdVideoBurst is null && filters.LdVideoPilot is null && !_filterOptions.LdClipDemodForVideo
             ? null
             : new RfVideoReferenceFilterSet(
@@ -102,14 +118,37 @@ public sealed class RfBlockDecodePipeline : IDisposable
             : null;
         _diagnosticLogger = diagnosticLogger;
         _retainRfDiagnosticChannels = retainRfDiagnosticChannels;
+        _useCompactApproxFloat32Outputs = useCompactApproxFloat32Outputs
+            && dspBackend == DspBackend.ApproxFast
+            && !retainRfDiagnosticChannels
+            && !_filterOptions.ExportRawTbc
+            && !_filters.ChromaBurstUsesDemodulatedVideo;
+        _useDirectStreamOutputBufferLease = useDirectStreamOutputBufferLease
+            && _useCompactApproxFloat32Outputs;
+        _useApproxFrequencyDomainChroma = useApproxFrequencyDomainChroma
+            && _useCompactApproxFloat32Outputs
+            && upstreamBehaviorProfile == UpstreamBehaviorProfile.Current
+            && _approxFilterBank is not null
+            && !_approxFilterBank.ChromaBurst.IsEmpty
+            && _filters.ChromaBurstSos is not null
+            && _filterOptions.FmDemodulatorMode == RfFmDemodulatorMode.VhsRustApproximation
+            && (_filterOptions.RfHighBoost is null
+                || _filterOptions.RfHighBoost.Multiplier == 0.0)
+            && !_filterOptions.UseChromaAfc
+            && !_filters.ChromaBurstUsesDemodulatedVideo
+            && _filters.ChromaBurstAudioNotch is null
+            && _filters.ChromaBurstVideoNotch is null;
         _useCurrentChromaShiftDc =
             upstreamBehaviorProfile == UpstreamBehaviorProfile.Current;
         _useNumpyComplexVhsAnalytic = dspBackend == DspBackend.Exact;
-        if (dspBackend == DspBackend.IppFast)
+        if (DspBackendKernelPolicy.UsesIpp(dspBackend, approxProvider))
         {
-            _chromaBurstIppSos = IppSos32FilterPool.TryCreate(filters.ChromaBurstSos);
+            _chromaBurstIppSos = _useApproxFrequencyDomainChroma
+                ? null
+                : IppSos32FilterPool.TryCreate(filters.ChromaBurstSos);
             _vhsEnvelopeIppSos = IppSos32FilterPool.TryCreate(filters.VhsEnvelopeSos);
         }
+
     }
 
     public IRfInputProcessor? InputProcessor => _inputProcessor;
@@ -142,6 +181,12 @@ public sealed class RfBlockDecodePipeline : IDisposable
 
     internal int CreatedStreamOutputBufferSetCount =>
         Volatile.Read(ref _createdStreamOutputBufferSetCount);
+
+    internal bool UsesDirectStreamOutputBufferLease =>
+        _useDirectStreamOutputBufferLease;
+
+    internal bool UsesApproxFrequencyDomainChroma =>
+        _useApproxFrequencyDomainChroma;
 
     internal IDisposable PushDiagnosticLogger(Action<string, string> diagnosticLogger)
     {
@@ -260,6 +305,11 @@ public sealed class RfBlockDecodePipeline : IDisposable
         StreamBlockOutputBuffers? streamOutputBuffers = reuseStreamOutputBuffers
             ? RentStreamOutputBuffers(input.Length)
             : null;
+        bool useApproxFrequencyDomainChroma = _useApproxFrequencyDomainChroma
+            && !retainRfDiagnosticChannels;
+        float[]? approxFrequencyDomainChroma = useApproxFrequencyDomainChroma
+            ? streamOutputBuffers?.Chroma ?? new float[input.Length]
+            : null;
         try
         {
             Complex[]? inputSpectrum = _filters.LdEfm is not null || _filters.LdAnalogAudio is not null
@@ -294,7 +344,15 @@ public sealed class RfBlockDecodePipeline : IDisposable
                 vhsEnvelopeIppFilter: _vhsEnvelopeIppSos,
                 ownedInput: input,
                 ownedRfVideoFilter: _filters.RfVideo,
-                ownedRfMtfFilter: rfMtfOverride ?? _filters.RfMtf);
+                ownedRfMtfFilter: rfMtfOverride ?? _filters.RfMtf,
+                approxFilterBank: _approxFilterBank,
+                useApproxRfMtfFilter: rfMtfOverride is null,
+                approxChromaFilter: useApproxFrequencyDomainChroma
+                    ? _approxFilterBank!.ChromaBurst
+                    : default,
+                approxChromaDestination: approxFrequencyDomainChroma,
+                useApproxDirectFloat32DiffRepair:
+                    useApproxFrequencyDomainChroma && _useDirectStreamOutputBufferLease);
             if (reportDiagnostics)
             {
                 ReportDiagnostics(demodulated);
@@ -316,12 +374,17 @@ public sealed class RfBlockDecodePipeline : IDisposable
                 demodulated = keepCompactFloat32
                     ? demodulated with
                     {
-                        ChromaFloat32 = DecodeChromaBurstFloat32(
-                            input,
-                            _filters,
-                            _useCurrentChromaShiftDc,
-                            streamOutputBuffers?.Chroma,
-                            _chromaBurstIppSos)
+                        ChromaFloat32 = approxFrequencyDomainChroma is not null
+                            ? ShiftApproxFrequencyDomainChroma(
+                                approxFrequencyDomainChroma,
+                                _filters,
+                                _useCurrentChromaShiftDc)
+                            : DecodeChromaBurstFloat32(
+                                input,
+                                _filters,
+                                _useCurrentChromaShiftDc,
+                                streamOutputBuffers?.Chroma,
+                                _chromaBurstIppSos)
                     }
                     : demodulated with
                     {
@@ -365,7 +428,15 @@ public sealed class RfBlockDecodePipeline : IDisposable
                 demodulated);
             if (streamOutputBuffers is not null)
             {
-                _streamOutputBufferLeases.Add(pipelineBlock, streamOutputBuffers);
+                if (_useDirectStreamOutputBufferLease)
+                {
+                    pipelineBlock.AttachStreamOutputBufferLease(streamOutputBuffers);
+                }
+                else
+                {
+                    _streamOutputBufferLeases.Add(pipelineBlock, streamOutputBuffers);
+                }
+
                 streamOutputBuffers = null;
             }
 
@@ -391,10 +462,18 @@ public sealed class RfBlockDecodePipeline : IDisposable
     internal void ReleaseStreamBlock(RfPipelineBlock block)
     {
         ArgumentNullException.ThrowIfNull(block);
-        if (_streamOutputBufferLeases.TryGetValue(
-                block,
-                out StreamBlockOutputBuffers? buffers)
-            && _streamOutputBufferLeases.Remove(block))
+        if (_useDirectStreamOutputBufferLease)
+        {
+            if (block.TryTakeStreamOutputBufferLease(
+                    _streamOutputBufferLeaseOwner) is { } directBuffers)
+            {
+                ReturnStreamOutputBuffers(directBuffers);
+            }
+        }
+        else if (_streamOutputBufferLeases.TryGetValue(
+                     block,
+                     out StreamBlockOutputBuffers? buffers)
+                 && _streamOutputBufferLeases.Remove(block))
         {
             ReturnStreamOutputBuffers(buffers);
         }
@@ -442,7 +521,10 @@ public sealed class RfBlockDecodePipeline : IDisposable
         }
 
         Interlocked.Increment(ref _createdStreamOutputBufferSetCount);
-        return new StreamBlockOutputBuffers(length);
+        return new StreamBlockOutputBuffers(
+            length,
+            _useCompactApproxFloat32Outputs,
+            _streamOutputBufferLeaseOwner);
     }
 
     private void ReturnStreamOutputBuffers(StreamBlockOutputBuffers buffers)
@@ -535,6 +617,18 @@ public sealed class RfBlockDecodePipeline : IDisposable
             chroma,
             filters.ChromaOffsetSamples);
     }
+
+    private static float[] ShiftApproxFrequencyDomainChroma(
+        float[] chroma,
+        DecodeFilterSet filters,
+        bool useCurrentChromaShiftDc)
+        => useCurrentChromaShiftDc
+            ? VhsChromaDecoder.ShiftChromaAndRemoveDcFloat32CurrentInPlace(
+                chroma,
+                filters.ChromaOffsetSamples)
+            : VhsChromaDecoder.ShiftChromaAndRemoveDcFloat32InPlace(
+                chroma,
+                filters.ChromaOffsetSamples);
 
     private static float[] DecodeChromaBurstFloat32(
         ReadOnlySpan<double> input,
@@ -822,13 +916,22 @@ public sealed class RfBlockDecodePipeline : IDisposable
         }
     }
 
-    private sealed class StreamBlockOutputBuffers
+    internal sealed class StreamBlockOutputBuffers
     {
-        internal StreamBlockOutputBuffers(int length)
+        private readonly object _leaseOwner;
+
+        internal StreamBlockOutputBuffers(
+            int length,
+            bool useCompactApproxFloat32Outputs,
+            object leaseOwner)
         {
             ArgumentOutOfRangeException.ThrowIfNegative(length);
+            ArgumentNullException.ThrowIfNull(leaseOwner);
+            _leaseOwner = leaseOwner;
             Length = length;
-            Demodulated = new RfDemodulatedBlockOutputBuffers(length);
+            Demodulated = new RfDemodulatedBlockOutputBuffers(
+                length,
+                useCompactApproxFloat32Outputs);
             Chroma = new float[length];
         }
 
@@ -837,7 +940,78 @@ public sealed class RfBlockDecodePipeline : IDisposable
         internal RfDemodulatedBlockOutputBuffers Demodulated { get; }
 
         internal float[] Chroma { get; }
+
+        internal bool IsOwnedBy(object leaseOwner) =>
+            ReferenceEquals(_leaseOwner, leaseOwner);
     }
 }
 
-public sealed record RfPipelineBlock(double[] Input, RfDemodulatedBlock Demodulated);
+public sealed record RfPipelineBlock(double[] Input, RfDemodulatedBlock Demodulated)
+{
+    private RfBlockDecodePipeline.StreamBlockOutputBuffers?
+        _streamOutputBufferLease;
+
+    private RfPipelineBlock(RfPipelineBlock original)
+    {
+        Input = original.Input;
+        Demodulated = original.Demodulated;
+    }
+
+    internal void AttachStreamOutputBufferLease(
+        RfBlockDecodePipeline.StreamBlockOutputBuffers buffers)
+    {
+        ArgumentNullException.ThrowIfNull(buffers);
+        if (Interlocked.CompareExchange(
+                ref _streamOutputBufferLease,
+                buffers,
+                comparand: null) is not null)
+        {
+            throw new InvalidOperationException(
+                "The RF pipeline block already owns a stream output buffer lease.");
+        }
+    }
+
+    internal RfBlockDecodePipeline.StreamBlockOutputBuffers?
+        TryTakeStreamOutputBufferLease(object leaseOwner)
+    {
+        ArgumentNullException.ThrowIfNull(leaseOwner);
+        RfBlockDecodePipeline.StreamBlockOutputBuffers? observed =
+            Volatile.Read(ref _streamOutputBufferLease);
+        if (observed is null || !observed.IsOwnedBy(leaseOwner))
+        {
+            return null;
+        }
+
+        return ReferenceEquals(
+                Interlocked.CompareExchange(
+                    ref _streamOutputBufferLease,
+                    null,
+                    observed),
+                observed)
+            ? observed
+            : null;
+    }
+
+    public bool Equals(RfPipelineBlock? other) =>
+        ReferenceEquals(this, other)
+        || (other is not null
+            && EqualityContract == other.EqualityContract
+            && EqualityComparer<double[]>.Default.Equals(Input, other.Input)
+            && EqualityComparer<RfDemodulatedBlock>.Default.Equals(
+                Demodulated,
+                other.Demodulated));
+
+    public override int GetHashCode()
+    {
+        int hashCode = EqualityComparer<Type>.Default.GetHashCode(
+            EqualityContract);
+        hashCode = (hashCode * -1521134295)
+            + EqualityComparer<double[]>.Default.GetHashCode(Input);
+        return (hashCode * -1521134295)
+            + EqualityComparer<RfDemodulatedBlock>.Default.GetHashCode(
+                Demodulated);
+    }
+
+    public override string ToString() =>
+        $"RfPipelineBlock {{ Input = {Input}, Demodulated = {Demodulated} }}";
+}

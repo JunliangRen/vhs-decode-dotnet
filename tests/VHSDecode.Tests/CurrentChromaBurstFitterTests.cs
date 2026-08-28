@@ -154,6 +154,74 @@ public sealed class CurrentChromaBurstFitterTests
             "40AD7FD4747C9B92;40B12418440EC559;4069314B65D578DC;4046525ADAD9E99C;40B668AD35B4C386;40505FF47F817C23;414B4F4C7FFFFD92;3FEB2A8A49782D8C;404852073431F542");
     }
 
+    [Fact(DisplayName = "Current chroma burst fitting validates the explicit iteration budget")]
+    public void CurrentChromaBurstFittingValidatesIterationBudget()
+    {
+        double[] burst = [1.0, -1.0, 1.0, -1.0];
+        double[] sine = new double[8];
+        double[] cosine = new double[8];
+
+        Assert.Throws<ArgumentOutOfRangeException>(
+            () => CurrentChromaBurstFitter.Fit(
+                burst,
+                burstStart: 0,
+                sine,
+                cosine,
+                fscHz: 3_579_545.0,
+                maximumIterations: -1));
+        Assert.Throws<ArgumentOutOfRangeException>(
+            () => CurrentChromaBurstFitter.Fit(
+                burst,
+                burstStart: 0,
+                sine,
+                cosine,
+                fscHz: 3_579_545.0,
+                maximumIterations:
+                    CurrentChromaBurstFitter.DefaultMaximumIterations + 1));
+    }
+
+    [Fact(DisplayName = "Zero-iteration chroma burst fitting keeps the pinned direct I/Q estimate")]
+    public void ZeroIterationChromaBurstFittingMatchesPinnedDirectEstimate()
+    {
+        const int BurstStart = 3;
+        const double FscHz = 3_579_545.0;
+        double[] burst =
+        [
+            12.5, -3.25, 7.75, -9.5, 4.125, 11.0,
+            -6.875, 2.5, 8.25, -1.75, -12.0, 5.625
+        ];
+        (double[] sine, double[] cosine) = VhsChromaDecoder.BuildCarrierTables(
+            sampleCount: 64,
+            carrierMHz: FscHz / 1_000_000.0,
+            outputSampleRateMHz: (FscHz * 4.0) / 1_000_000.0);
+
+        CurrentChromaBurstFit fit = CurrentChromaBurstFitter.Fit(
+            burst,
+            BurstStart,
+            sine,
+            cosine,
+            FscHz,
+            maximumIterations: 0);
+        string actualBits = string.Join(
+            ';',
+            new[]
+            {
+                fit.I,
+                fit.Q,
+                fit.Center,
+                fit.Amplitude,
+                fit.Magnitude,
+                fit.Dc,
+                fit.FrequencyHz,
+                fit.PhaseRadians,
+                fit.PhaseDegrees
+            }.Select(static value => BitConverter.DoubleToUInt64Bits(value).ToString("X16")));
+
+        Assert.Equal(
+            "401D8000F45CEF20;C041FFFFC2177242;402741DCF3C2951C;40187F998B84FAA5;40425FB328A3BBFC;3FF8800000000000;414B4F4C80000000;BFF5E6525AE55592;4071993D6D934360",
+            actualBits);
+    }
+
     private static void AssertBoundaryFit(
         int length,
         ReadOnlySpan<double> sine,

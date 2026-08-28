@@ -346,6 +346,34 @@ public static class SosFilter
         ApplyForwardBackwardFloat32Core(sections, input, output, edge, ippFilter);
     }
 
+    internal static void ApplyForwardBackwardFloat32(
+        IReadOnlyList<SosSection> sections,
+        ReadOnlySpan<float> input,
+        Span<double> output,
+        int? padLength = null,
+        IppSos32FilterPool? ippFilter = null)
+    {
+        if (output.Length != input.Length)
+        {
+            throw new ArgumentException(
+                "Float32 forward/backward output length must match the input length.",
+                nameof(output));
+        }
+
+        if (input.IsEmpty)
+        {
+            return;
+        }
+
+        int edge = padLength ?? DefaultPadLength(sections);
+        if (edge < 0)
+        {
+            throw new ArgumentOutOfRangeException(nameof(padLength));
+        }
+
+        ApplyForwardBackwardFloat32Core(sections, input, output, edge, ippFilter);
+    }
+
     internal static void ApplyForwardBackwardFloat32InPlace(
         IReadOnlyList<SosSection> sections,
         Span<double> samples,
@@ -381,6 +409,37 @@ public static class SosFilter
             if (edge == 0)
             {
                 ConvertToFloat32(input, extended);
+            }
+            else
+            {
+                WriteOddExtensionFloat32(input, edge, extended);
+            }
+
+            ApplyForwardBackwardFloat32InPlace(sections, extended, ippFilter);
+
+            ConvertToFloat64(extended.Slice(edge, input.Length), output);
+        }
+        finally
+        {
+            ArrayPool<float>.Shared.Return(rented);
+        }
+    }
+
+    private static void ApplyForwardBackwardFloat32Core(
+        IReadOnlyList<SosSection> sections,
+        ReadOnlySpan<float> input,
+        Span<double> output,
+        int edge,
+        IppSos32FilterPool? ippFilter = null)
+    {
+        int extendedLength = checked(input.Length + (edge * 2));
+        float[] rented = ArrayPool<float>.Shared.Rent(extendedLength);
+        try
+        {
+            Span<float> extended = rented.AsSpan(0, extendedLength);
+            if (edge == 0)
+            {
+                input.CopyTo(extended);
             }
             else
             {

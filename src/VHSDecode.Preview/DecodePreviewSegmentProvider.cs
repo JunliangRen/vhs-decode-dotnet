@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using System.Globalization;
 using System.Numerics;
+using System.Runtime.InteropServices;
 using VHSDecode.Core.CommandLine;
 using VHSDecode.Core.Decode;
 using VHSDecode.Core.Dsp;
@@ -19,6 +20,7 @@ public sealed class DecodePreviewSegmentProvider : IPreviewSegmentProvider
     private readonly double _decodeSampleRateHz;
     private readonly PreviewEncoderBackend _encoderBackend;
     private readonly CudaFastPreviewDecodeSession? _cudaSession;
+    private readonly ApproxProviderSelection? _approxProviderSelection;
     private readonly SemaphoreSlim _windowConcurrency;
     private bool _disposed;
 
@@ -32,7 +34,8 @@ public sealed class DecodePreviewSegmentProvider : IPreviewSegmentProvider
         PreviewEncoderBackend encoderBackend,
         CudaFastPreviewDecodeSession? cudaSession,
         int decoderThreads,
-        bool ippFastEnabled,
+        bool ippAccelerationEnabled,
+        ApproxProviderSelection? approxProviderSelection,
         double sourceSampleRateHz)
     {
         _template = template;
@@ -41,10 +44,17 @@ public sealed class DecodePreviewSegmentProvider : IPreviewSegmentProvider
         _decodeSampleRateHz = decodeSampleRateHz;
         _encoderBackend = encoderBackend;
         _cudaSession = cudaSession;
+        _approxProviderSelection = approxProviderSelection;
         Timeline = timeline;
         MediaInfo = mediaInfo;
         DecoderThreads = decoderThreads;
-        IppFastEnabled = ippFastEnabled;
+        IppAccelerationEnabled = ippAccelerationEnabled;
+        ApproxProvider = approxProviderSelection?.Provider;
+        ApproxProviderIsExplicit = approxProviderSelection?.IsExplicit ?? false;
+        ApproxProviderFellBackFromIpp =
+            approxProviderSelection?.FellBackFromIpp ?? false;
+        ApproxProviderArchitecture = approxProviderSelection?.ProcessArchitecture;
+        ApproxProviderDiagnostic = approxProviderSelection?.Diagnostic;
         SourceSampleRateHz = sourceSampleRateHz;
         DecodeSampleRateHz = decodeSampleRateHz;
         _windowConcurrency = new SemaphoreSlim(
@@ -58,7 +68,21 @@ public sealed class DecodePreviewSegmentProvider : IPreviewSegmentProvider
 
     public int DecoderThreads { get; }
 
-    public bool IppFastEnabled { get; }
+    public bool IppAccelerationEnabled { get; }
+
+    public bool IppFastEnabled => IppAccelerationEnabled && !ApproxFastEnabled;
+
+    public bool ApproxFastEnabled => ApproxProvider is not null;
+
+    public ApproxProvider? ApproxProvider { get; }
+
+    public bool ApproxProviderIsExplicit { get; }
+
+    public bool ApproxProviderFellBackFromIpp { get; }
+
+    public Architecture? ApproxProviderArchitecture { get; }
+
+    public string? ApproxProviderDiagnostic { get; }
 
     public bool CudaFastEnabled => _cudaSession is not null;
 
@@ -196,6 +220,16 @@ public sealed class DecodePreviewSegmentProvider : IPreviewSegmentProvider
         }
         string backendValue = DspBackendParser.ToCommandLineValue(
             session.ExecutionOptions.DspBackend);
+        ApproxProviderSelection? approxProviderSelection =
+            session.ExecutionOptions.ApproxProvider is { } provider
+                ? new ApproxProviderSelection(
+                    provider,
+                    session.ExecutionOptions.ApproxProviderIsExplicit,
+                    session.ExecutionOptions.ApproxProviderFellBackFromIpp,
+                    session.ExecutionOptions.ApproxProviderProcessArchitecture
+                        ?? RuntimeInformation.ProcessArchitecture,
+                    session.ExecutionOptions.ApproxProviderDiagnostic)
+                : null;
         bool twentyMspsRf = Math.Abs(
             session.DecodeSampleRateHz - 20_000_000.0) <= 1e-6;
         var mediaInfo = new PreviewMediaInfo(
@@ -225,7 +259,10 @@ public sealed class DecodePreviewSegmentProvider : IPreviewSegmentProvider
             encoderBackend,
             cudaSession,
             session.ExecutionOptions.WorkerThreads,
-            session.ExecutionOptions.DspBackend == DspBackend.IppFast,
+            DspBackendKernelPolicy.UsesIpp(
+                session.ExecutionOptions.DspBackend,
+                session.ExecutionOptions.ApproxProvider),
+            approxProviderSelection,
             inputSampleRateHz);
     }
 
@@ -322,7 +359,9 @@ public sealed class DecodePreviewSegmentProvider : IPreviewSegmentProvider
             decodeStartSeconds,
             SourceSampleRateHz,
             decodedFrameCount + prerollFrameCount + 8);
-        using DecodeSession session = DecodeSessionFactory.Create(windowCommand);
+        using DecodeSession session = DecodeSessionFactory.CreateForPreview(
+            windowCommand,
+            _approxProviderSelection);
         using FileStream input = new(
             session.InputFile,
             FileMode.Open,

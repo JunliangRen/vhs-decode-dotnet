@@ -17,6 +17,8 @@ public sealed class IppBackendInteropTests
     [InlineData("IPP-FAST", DspBackend.IppFast)]
     [InlineData("cuda-fast", DspBackend.CudaFast)]
     [InlineData("CUDA-FAST", DspBackend.CudaFast)]
+    [InlineData("approx-fast", DspBackend.ApproxFast)]
+    [InlineData("APPROX-FAST", DspBackend.ApproxFast)]
     public void DspBackendParserRecognizesSupportedValues(
         string value,
         DspBackend expected)
@@ -29,6 +31,7 @@ public sealed class IppBackendInteropTests
             DspBackend.Exact => "exact",
             DspBackend.IppFast => "ipp-fast",
             DspBackend.CudaFast => "cuda-fast",
+            DspBackend.ApproxFast => "approx-fast",
             _ => throw new ArgumentOutOfRangeException(nameof(expected))
         };
         Assert.Equal(expectedValue, DspBackendParser.ToCommandLineValue(expected));
@@ -45,6 +48,7 @@ public sealed class IppBackendInteropTests
         Assert.Contains("exact", exception.Message, StringComparison.Ordinal);
         Assert.Contains("ipp-fast", exception.Message, StringComparison.Ordinal);
         Assert.Contains("cuda-fast", exception.Message, StringComparison.Ordinal);
+        Assert.Contains("approx-fast", exception.Message, StringComparison.Ordinal);
     }
 
     [Fact(DisplayName = "Selecting exact in an isolated core assembly performs no native load")]
@@ -154,7 +158,7 @@ public sealed class IppBackendInteropTests
         }
 
         Assert.NotNull(runtimeInfo);
-        Assert.Equal(0x0001_0003U, runtimeInfo.AbiVersion);
+        Assert.Equal(0x0001_0004U, runtimeInfo.AbiVersion);
 
         double[] input = BuildFiniteInput(length);
         Complex[] expectedSpectrum = PocketFftReal.Forward(input);

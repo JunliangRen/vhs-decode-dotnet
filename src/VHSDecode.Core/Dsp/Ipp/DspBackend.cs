@@ -4,7 +4,8 @@ public enum DspBackend
 {
     Exact = 0,
     IppFast = 1,
-    CudaFast = 2
+    CudaFast = 2,
+    ApproxFast = 3
 }
 
 public static class DspBackendParser
@@ -12,6 +13,7 @@ public static class DspBackendParser
     public const string ExactValue = "exact";
     public const string IppFastValue = "ipp-fast";
     public const string CudaFastValue = "cuda-fast";
+    public const string ApproxFastValue = "approx-fast";
 
     public static DspBackend Parse(string value)
     {
@@ -32,8 +34,13 @@ public static class DspBackendParser
             return DspBackend.CudaFast;
         }
 
+        if (value.Equals(ApproxFastValue, StringComparison.OrdinalIgnoreCase))
+        {
+            return DspBackend.ApproxFast;
+        }
+
         throw new ArgumentException(
-            $"Unknown DSP backend '{value}'. Expected '{ExactValue}', '{IppFastValue}', or '{CudaFastValue}'.",
+            $"Unknown DSP backend '{value}'. Expected '{ExactValue}', '{IppFastValue}', '{CudaFastValue}', or '{ApproxFastValue}'.",
             nameof(value));
     }
 
@@ -58,6 +65,12 @@ public static class DspBackendParser
                 backend = DspBackend.CudaFast;
                 return true;
             }
+
+            if (value.Equals(ApproxFastValue, StringComparison.OrdinalIgnoreCase))
+            {
+                backend = DspBackend.ApproxFast;
+                return true;
+            }
         }
 
         backend = default;
@@ -70,6 +83,7 @@ public static class DspBackendParser
             DspBackend.Exact => ExactValue,
             DspBackend.IppFast => IppFastValue,
             DspBackend.CudaFast => CudaFastValue,
+            DspBackend.ApproxFast => ApproxFastValue,
             _ => throw new ArgumentOutOfRangeException(nameof(backend))
         };
 }
@@ -100,5 +114,23 @@ public static class DspBackendSupport
                 $"The explicit '{DspBackendParser.CudaFastValue}' DSP backend currently supports only the 'vhs' command, not '{commandName}'. "
                 + "Use '--dsp-backend exact' explicitly if CPU Exact decoding is required; no silent fallback was performed.");
         }
+
+        if (backend == DspBackend.ApproxFast
+            && !commandName.Equals("vhs", StringComparison.Ordinal))
+        {
+            throw new NotSupportedException(
+                $"The experimental '{DspBackendParser.ApproxFastValue}' DSP backend currently supports only the 'vhs' command, not '{commandName}'. "
+                + "Use '--dsp-backend exact' explicitly for other decoders; no silent Exact fallback was performed.");
+        }
     }
+}
+
+public static class DspBackendKernelPolicy
+{
+    public static bool UsesIpp(
+        DspBackend backend,
+        ApproxProvider? approxProvider = null)
+        => backend == DspBackend.IppFast
+            || (backend == DspBackend.ApproxFast
+                && approxProvider == ApproxProvider.Ipp);
 }

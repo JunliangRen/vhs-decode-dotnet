@@ -215,6 +215,135 @@ public sealed class VhsSyncDetector
         }
     }
 
+    // Experimental Approx island. Production callers remain on Detect(double).
+    // The float32 boxcar and scans intentionally form a separate numerical contract.
+    internal VhsSyncDetectionResult DetectApproxFloat32(
+        float[] demodulated,
+        bool detectLevels,
+        double syncTipEstimate,
+        double blankingEstimate,
+        bool allowAvx = true)
+    {
+        ArgumentNullException.ThrowIfNull(demodulated);
+        if (_workerThreads == 1
+            || demodulated.Length < MinimumParallelBoxcarSamples)
+        {
+            return DetectApproxFloat32(
+                demodulated.AsSpan(),
+                detectLevels,
+                syncTipEstimate,
+                blankingEstimate,
+                allowAvx);
+        }
+
+        int windowSize = Math.Max(3, (int)_approximateTransition);
+        if ((windowSize & 1) == 0)
+        {
+            windowSize++;
+        }
+
+        if (windowSize != 9)
+        {
+            throw new InvalidOperationException(
+                "The Approx float32 sync specialization requires a nine-tap boxcar.");
+        }
+
+        VhsSyncWorkspace workspace =
+            _workspaces.TryTake(out VhsSyncWorkspace? available)
+                ? available
+                : new VhsSyncWorkspace();
+        try
+        {
+            int filteredLength = Math.Max(demodulated.Length, windowSize);
+            float[] filtered = workspace.EnsureFloat32FilteredLength(filteredLength);
+            ConvolveBoxcarSameParallelFloat32(
+                demodulated,
+                windowSize,
+                filtered,
+                filteredLength,
+                _workerThreads,
+                allowAvx);
+            if (detectLevels)
+            {
+                (syncTipEstimate, blankingEstimate) = EstimateLevelsParallelFloat32(
+                    filtered,
+                    filteredLength,
+                    workspace,
+                    _workerThreads,
+                    _useCompactParallelRadix);
+            }
+
+            return DetectFilteredFloat32(
+                filtered.AsSpan(0, filteredLength),
+                syncTipEstimate,
+                blankingEstimate,
+                workspace,
+                allowAvx,
+                filtered,
+                _workerThreads);
+        }
+        finally
+        {
+            _workspaces.Add(workspace);
+        }
+    }
+
+    internal VhsSyncDetectionResult DetectApproxFloat32(
+        ReadOnlySpan<float> demodulated,
+        bool detectLevels,
+        double syncTipEstimate,
+        double blankingEstimate,
+        bool allowAvx = true)
+    {
+        if (demodulated.IsEmpty)
+        {
+            return new VhsSyncDetectionResult([], syncTipEstimate, blankingEstimate);
+        }
+
+        int windowSize = Math.Max(3, (int)_approximateTransition);
+        if ((windowSize & 1) == 0)
+        {
+            windowSize++;
+        }
+
+        if (windowSize != 9)
+        {
+            throw new InvalidOperationException(
+                "The Approx float32 sync specialization requires a nine-tap boxcar.");
+        }
+
+        VhsSyncWorkspace workspace = _workspaces.TryTake(out VhsSyncWorkspace? available)
+            ? available
+            : new VhsSyncWorkspace();
+        try
+        {
+            int filteredLength = Math.Max(demodulated.Length, windowSize);
+            float[] filtered = workspace.EnsureFloat32FilteredLength(filteredLength);
+            ConvolveBoxcarSameFloat32(
+                demodulated,
+                windowSize,
+                filtered.AsSpan(0, filteredLength),
+                allowAvx);
+            if (detectLevels)
+            {
+                (syncTipEstimate, blankingEstimate) = EstimateLevelsFloat32(
+                    filtered.AsSpan(0, filteredLength),
+                    workspace);
+            }
+
+            return DetectFilteredFloat32(
+                filtered.AsSpan(0, filteredLength),
+                syncTipEstimate,
+                blankingEstimate,
+                workspace,
+                allowAvx);
+        }
+        finally
+        {
+            _workspaces.Add(workspace);
+        }
+    }
+
     internal static void ConvolveBoxcarSameParallel(
         double[] values,
         int windowSize,
@@ -255,6 +384,92 @@ public sealed class VhsSyncDetector
             });
     }
 
+    internal static void ConvolveBoxcarSameParallelFloat32(
+        float[] values,
+        int windowSize,
+        float[] output,
+        int outputLength,
+        int workerThreads,
+        bool allowAvx)
+    {
+        ArgumentNullException.ThrowIfNull(values);
+        ArgumentNullException.ThrowIfNull(output);
+        if ((uint)outputLength > (uint)output.Length)
+        {
+            throw new ArgumentOutOfRangeException(
+                nameof(outputLength),
+                outputLength,
+                "The output length must fit within the destination array.");
+        }
+
+        int workerCount = Math.Min(workerThreads, outputLength);
+        Parallel.For(
+            fromInclusive: 0,
+            toExclusive: workerCount,
+            new ParallelOptions
+            {
+                MaxDegreeOfParallelism = workerCount
+            },
+            worker =>
+            {
+                int start = (int)(
+                    ((long)outputLength * worker)
+                    / workerCount);
+                int end = (int)(
+                    ((long)outputLength * (worker + 1))
+                    / workerCount);
+                ConvolveBoxcarRangeFloat32(
+                    values,
+                    windowSize,
+                    output,
+                    start,
+                    end,
+                    allowAvx);
+            });
+    }
+
+    private static void WidenFloat32Parallel(
+        float[] values,
+        double[] output,
+        int length,
+        int workerThreads)
+    {
+        int workerCount = Math.Min(workerThreads, length);
+        Parallel.For(
+            fromInclusive: 0,
+            toExclusive: workerCount,
+            new ParallelOptions
+            {
+                MaxDegreeOfParallelism = workerCount
+            },
+            worker =>
+            {
+                int start = (int)(((long)length * worker) / workerCount);
+                int end = (int)(((long)length * (worker + 1)) / workerCount);
+                for (int index = start; index < end; index++)
+                {
+                    output[index] = values[index];
+                }
+            });
+    }
+
+    private static void WidenFloat32(
+        ReadOnlySpan<float> values,
+        double[] output)
+    {
+        if (output.Length < values.Length)
+        {
+            throw new ArgumentException(
+                "The float32 level workspace is too small.",
+                nameof(output));
+        }
+
+        for (int index = 0; index < values.Length; index++)
+        {
+            output[index] = values[index];
+        }
+    }
+
     private static void ConvolveBoxcarRange(
         double[] values,
         int windowSize,
@@ -292,9 +507,45 @@ public sealed class VhsSyncDetector
         }
     }
 
+    private static void ConvolveBoxcarRangeFloat32(
+        float[] values,
+        int windowSize,
+        float[] output,
+        int start,
+        int end,
+        bool allowAvx)
+    {
+        if (windowSize == 9 && values.Length >= 9)
+        {
+            ConvolveBoxcarRange9Float32(values, output, start, end, allowAvx);
+            return;
+        }
+
+        int firstFullIndex =
+            (Math.Min(values.Length, windowSize) - 1) / 2;
+        float scale = 1.0f / windowSize;
+        for (int outputIndex = start; outputIndex < end; outputIndex++)
+        {
+            int fullIndex = firstFullIndex + outputIndex;
+            int sourceStart = Math.Max(
+                0,
+                fullIndex - (windowSize - 1));
+            int sourceEnd = Math.Min(values.Length - 1, fullIndex);
+            float sum = 0.0f;
+            for (int sourceIndex = sourceStart;
+                sourceIndex <= sourceEnd;
+                sourceIndex++)
+            {
+                sum += values[sourceIndex] * scale;
+            }
+
+            output[outputIndex] = sum;
+        }
+    }
+
     private static unsafe void ConvolveBoxcarRange9(
-        double[] values,
-        double[] output,
+        ReadOnlySpan<double> values,
+        Span<double> output,
         int start,
         int end)
     {
@@ -325,33 +576,37 @@ public sealed class VhsSyncDetector
                     sum = Avx.Add(sum, Avx.Multiply(Avx.LoadVector256(source + 6), scale));
                     sum = Avx.Add(sum, Avx.Multiply(Avx.LoadVector256(source + 7), scale));
                     sum = Avx.Add(sum, Avx.Multiply(Avx.LoadVector256(source + 8), scale));
-                    Avx.Store(outputPointer + outputIndex, sum);
+                    Vector256<double> unordered = Avx.Compare(
+                        sum,
+                        sum,
+                        FloatComparisonMode.UnorderedNotEqualNonSignaling);
+                    if (Avx.MoveMask(unordered) == 0)
+                    {
+                        Avx.Store(outputPointer + outputIndex, sum);
+                    }
+                    else
+                    {
+                        // SIMD NaN propagation can select a different payload than the
+                        // scalar upstream order. Recompute only the affected quartet;
+                        // finite RF data remains on the vector path.
+                        ConvolveBoxcarRangeEdge9(
+                            values,
+                            output,
+                            outputIndex,
+                            outputIndex + 4);
+                    }
                 }
             }
 
-            for (; outputIndex < interiorEnd; outputIndex++)
-            {
-                double* source = valuesPointer + outputIndex - HalfWindow;
-                double sum = 0.0;
-                sum += source[0] * Scale;
-                sum += source[1] * Scale;
-                sum += source[2] * Scale;
-                sum += source[3] * Scale;
-                sum += source[4] * Scale;
-                sum += source[5] * Scale;
-                sum += source[6] * Scale;
-                sum += source[7] * Scale;
-                sum += source[8] * Scale;
-                outputPointer[outputIndex] = sum;
-            }
+            ConvolveBoxcarRangeEdge9(values, output, outputIndex, interiorEnd);
         }
 
         ConvolveBoxcarRangeEdge9(values, output, Math.Max(start, interiorEnd), end);
     }
 
     private static void ConvolveBoxcarRangeEdge9(
-        double[] values,
-        double[] output,
+        ReadOnlySpan<double> values,
+        Span<double> output,
         int start,
         int end)
     {
@@ -389,6 +644,159 @@ public sealed class VhsSyncDetector
         return output;
     }
 
+    internal static float[] ConvolveBoxcarSameFloat32(
+        ReadOnlySpan<float> values,
+        int windowSize,
+        bool allowAvx)
+    {
+        ArgumentOutOfRangeException.ThrowIfNegativeOrZero(windowSize);
+        if ((windowSize & 1) == 0)
+        {
+            throw new ArgumentException(
+                "The boxcar window must have odd length.",
+                nameof(windowSize));
+        }
+
+        if (values.IsEmpty)
+        {
+            return [];
+        }
+
+        var output = new float[Math.Max(values.Length, windowSize)];
+        ConvolveBoxcarSameFloat32(values, windowSize, output, allowAvx);
+        return output;
+    }
+
+    private static void ConvolveBoxcarSameFloat32(
+        ReadOnlySpan<float> values,
+        int windowSize,
+        Span<float> output,
+        bool allowAvx)
+    {
+        int outputLength = Math.Max(values.Length, windowSize);
+        if (output.Length != outputLength)
+        {
+            throw new ArgumentException(
+                "The output length must match NumPy same-mode convolution.",
+                nameof(output));
+        }
+
+        if (windowSize == 9 && values.Length >= 9)
+        {
+            ConvolveBoxcarRange9Float32(values, output, 0, outputLength, allowAvx);
+            return;
+        }
+
+        int firstFullIndex = (Math.Min(values.Length, windowSize) - 1) / 2;
+        float scale = 1.0f / windowSize;
+        for (int outputIndex = 0; outputIndex < outputLength; outputIndex++)
+        {
+            int fullIndex = firstFullIndex + outputIndex;
+            int sourceStart = Math.Max(0, fullIndex - (windowSize - 1));
+            int sourceEnd = Math.Min(values.Length - 1, fullIndex);
+            float sum = 0.0f;
+            for (int sourceIndex = sourceStart; sourceIndex <= sourceEnd; sourceIndex++)
+            {
+                sum += values[sourceIndex] * scale;
+            }
+
+            output[outputIndex] = sum;
+        }
+    }
+
+    private static unsafe void ConvolveBoxcarRange9Float32(
+        ReadOnlySpan<float> values,
+        Span<float> output,
+        int start,
+        int end,
+        bool allowAvx)
+    {
+        const int HalfWindow = 4;
+        const float Scale = 1.0f / 9.0f;
+        int interiorStart = Math.Max(start, HalfWindow);
+        int interiorEnd = Math.Min(end, values.Length - HalfWindow);
+        ConvolveBoxcarRangeEdge9Float32(
+            values,
+            output,
+            start,
+            Math.Min(end, interiorStart));
+
+        fixed (float* valuesPointer = values)
+        fixed (float* outputPointer = output)
+        {
+            int outputIndex = interiorStart;
+            if (allowAvx && Avx.IsSupported)
+            {
+                Vector256<float> scale = Vector256.Create(Scale);
+                int vectorEnd = interiorEnd - ((interiorEnd - outputIndex) & 7);
+                for (; outputIndex < vectorEnd; outputIndex += 8)
+                {
+                    float* source = valuesPointer + outputIndex - HalfWindow;
+                    Vector256<float> sum = Vector256<float>.Zero;
+                    sum = Avx.Add(sum, Avx.Multiply(Avx.LoadVector256(source), scale));
+                    sum = Avx.Add(sum, Avx.Multiply(Avx.LoadVector256(source + 1), scale));
+                    sum = Avx.Add(sum, Avx.Multiply(Avx.LoadVector256(source + 2), scale));
+                    sum = Avx.Add(sum, Avx.Multiply(Avx.LoadVector256(source + 3), scale));
+                    sum = Avx.Add(sum, Avx.Multiply(Avx.LoadVector256(source + 4), scale));
+                    sum = Avx.Add(sum, Avx.Multiply(Avx.LoadVector256(source + 5), scale));
+                    sum = Avx.Add(sum, Avx.Multiply(Avx.LoadVector256(source + 6), scale));
+                    sum = Avx.Add(sum, Avx.Multiply(Avx.LoadVector256(source + 7), scale));
+                    sum = Avx.Add(sum, Avx.Multiply(Avx.LoadVector256(source + 8), scale));
+                    Vector256<float> unordered = Avx.Compare(
+                        sum,
+                        sum,
+                        FloatComparisonMode.UnorderedNotEqualNonSignaling);
+                    if (Avx.MoveMask(unordered) == 0)
+                    {
+                        Avx.Store(outputPointer + outputIndex, sum);
+                    }
+                    else
+                    {
+                        ConvolveBoxcarRangeEdge9Float32(
+                            values,
+                            output,
+                            outputIndex,
+                            outputIndex + 8);
+                    }
+                }
+            }
+
+            ConvolveBoxcarRangeEdge9Float32(
+                values,
+                output,
+                outputIndex,
+                interiorEnd);
+        }
+
+        ConvolveBoxcarRangeEdge9Float32(
+            values,
+            output,
+            Math.Max(start, interiorEnd),
+            end);
+    }
+
+    private static void ConvolveBoxcarRangeEdge9Float32(
+        ReadOnlySpan<float> values,
+        Span<float> output,
+        int start,
+        int end)
+    {
+        const int HalfWindow = 4;
+        const float Scale = 1.0f / 9.0f;
+        for (int outputIndex = start; outputIndex < end; outputIndex++)
+        {
+            int sourceStart = Math.Max(0, outputIndex - HalfWindow);
+            int sourceEnd = Math.Min(values.Length - 1, outputIndex + HalfWindow);
+            float sum = 0.0f;
+            for (int sourceIndex = sourceStart; sourceIndex <= sourceEnd; sourceIndex++)
+            {
+                sum += values[sourceIndex] * Scale;
+            }
+
+            output[outputIndex] = sum;
+        }
+    }
+
     private static void ConvolveBoxcarSame(
         ReadOnlySpan<double> values,
         int windowSize,
@@ -400,6 +808,12 @@ public sealed class VhsSyncDetector
             throw new ArgumentException(
                 "The output length must match NumPy same-mode convolution.",
                 nameof(output));
+        }
+
+        if (windowSize == 9 && values.Length >= 9)
+        {
+            ConvolveBoxcarRange9(values, output, 0, outputLength);
+            return;
         }
 
         int firstFullIndex = (Math.Min(values.Length, windowSize) - 1) / 2;
@@ -732,6 +1146,302 @@ public sealed class VhsSyncDetector
             backPorchLevel);
     }
 
+    private VhsSyncDetectionResult DetectFilteredFloat32(
+        ReadOnlySpan<float> filtered,
+        double syncTipEstimate,
+        double blankingEstimate,
+        VhsSyncWorkspace workspace,
+        bool allowAvx,
+        float[]? parallelFiltered = null,
+        int parallelWorkerThreads = 1)
+    {
+        int sampleCount = filtered.Length;
+        double slicerLevelEstimate = (syncTipEstimate + blankingEstimate) / 2.0;
+        int candidateStride = Math.Max(10, _lineLength / 2);
+        int initialCapacity = Math.Max(4, sampleCount / candidateStride);
+        double minimumWidth = _hSyncLength * 0.6;
+        double maximumWidth = _hSyncLength * 1.4;
+        int fallingIndex = -1;
+        int[] falls;
+        int[] rises;
+        if (parallelFiltered is not null
+            && parallelWorkerThreads > 1
+            && sampleCount >= MinimumParallelEdgeScanSamples)
+        {
+            (falls, rises) = FindInitialEdgesParallelFloat32(
+                parallelFiltered,
+                sampleCount,
+                slicerLevelEstimate,
+                minimumWidth,
+                maximumWidth,
+                parallelWorkerThreads,
+                initialCapacity);
+        }
+        else
+        {
+            (falls, rises) = FindInitialEdgesSequentialFloat32(
+                filtered,
+                slicerLevelEstimate,
+                minimumWidth,
+                maximumWidth,
+                initialCapacity,
+                allowAvx);
+        }
+
+        if (falls.Length == 0)
+        {
+            return new VhsSyncDetectionResult([], syncTipEstimate, blankingEstimate);
+        }
+
+        int candidateCount = falls.Length;
+        double[] candidateSyncLevels = workspace.EnsureCandidateSyncLevels(candidateCount);
+        double[] candidatePorchLevels = workspace.EnsureCandidatePorchLevels(candidateCount);
+        for (int candidate = 0; candidate < candidateCount; candidate++)
+        {
+            int middle = (falls[candidate] + rises[candidate]) / 2;
+            candidateSyncLevels[candidate] = UpperMedianOfWindowFloat32(
+                filtered,
+                Math.Max(0, middle - 2),
+                Math.Min(sampleCount, middle + 3),
+                syncTipEstimate);
+
+            int porchCenter = (int)(rises[candidate] + (_backPorchLength * 0.5));
+            candidatePorchLevels[candidate] = UpperMedianOfWindowFloat32(
+                filtered,
+                Math.Max(0, porchCenter - 2),
+                Math.Min(sampleCount, porchCenter + 3),
+                blankingEstimate);
+        }
+
+        double[] statisticsScratch = workspace.EnsureStatisticsScratch(candidateCount);
+        candidateSyncLevels.AsSpan(0, candidateCount).CopyTo(statisticsScratch);
+        Array.Sort(
+            statisticsScratch,
+            0,
+            candidateCount,
+            NumpyDoubleComparer.Instance);
+        double medianSync = statisticsScratch[candidateCount / 2];
+        for (int index = 0; index < candidateCount; index++)
+        {
+            statisticsScratch[index] = Math.Abs(candidateSyncLevels[index] - medianSync);
+        }
+
+        Array.Sort(
+            statisticsScratch,
+            0,
+            candidateCount,
+            NumpyDoubleComparer.Instance);
+        double medianAbsoluteDeviation = statisticsScratch[candidateCount / 2];
+        if (!(medianAbsoluteDeviation > 0.0))
+        {
+            medianAbsoluteDeviation = 1.0;
+        }
+
+        int amplitudeCount = 0;
+        for (int index = 0; index < candidateCount; index++)
+        {
+            if (Math.Abs(candidateSyncLevels[index] - medianSync)
+                <= 2.5 * medianAbsoluteDeviation)
+            {
+                falls[amplitudeCount] = falls[index];
+                rises[amplitudeCount] = rises[index];
+                candidateSyncLevels[amplitudeCount] = candidateSyncLevels[index];
+                candidatePorchLevels[amplitudeCount] = candidatePorchLevels[index];
+                amplitudeCount++;
+            }
+        }
+
+        if (amplitudeCount == 0)
+        {
+            return new VhsSyncDetectionResult([], syncTipEstimate, blankingEstimate);
+        }
+
+        double effectiveLineLength = _lineLength * (1.0 + SyncSpacingTolerance);
+        double jitterTolerance = _lineLength * 0.1;
+        int[] gridSupportCount = workspace.EnsureGridSupportCounts(amplitudeCount);
+        FillOrderedGridSupportCounts(
+            falls,
+            amplitudeCount,
+            effectiveLineLength,
+            jitterTolerance,
+            gridSupportCount);
+
+        bool[] finalMask = workspace.PrepareFinalMask(amplitudeCount);
+        int hSyncFitCount = 0;
+        for (int index = 0; index < amplitudeCount; index++)
+        {
+            if (gridSupportCount[index] >= MinimumGridLength)
+            {
+                finalMask[index] = true;
+                hSyncFitCount++;
+            }
+        }
+
+        double syncTipLevel = syncTipEstimate;
+        double backPorchLevel = blankingEstimate;
+        if (hSyncFitCount > 0)
+        {
+            (double syncSum, double porchSum) = SumSelectedLevelsInUpstreamOrder(
+                candidateSyncLevels,
+                candidatePorchLevels,
+                finalMask,
+                amplitudeCount);
+            double reciprocalFitCount = 1.0 / hSyncFitCount;
+            syncTipLevel = syncSum * reciprocalFitCount;
+            backPorchLevel = porchSum * reciprocalFitCount;
+        }
+        else
+        {
+            return new VhsSyncDetectionResult([], syncTipLevel, backPorchLevel);
+        }
+
+        double preciseMidpoint = (syncTipLevel + backPorchLevel) / 2.0;
+        var fallingEdges = new List<int>(initialCapacity);
+        var risingEdges = new List<int>(initialCapacity);
+        bool preciseScanCompleted = false;
+        if (_parallelizePreciseEdgeScan
+            && parallelFiltered is not null
+            && parallelWorkerThreads > 1
+            && sampleCount >= MinimumParallelEdgeScanSamples)
+        {
+            (List<int>[] crossingsByWorker, int workerCount, bool overflowed) =
+                FindThresholdCrossingsParallelFloat32(
+                    parallelFiltered,
+                    sampleCount,
+                    preciseMidpoint,
+                    parallelWorkerThreads,
+                    initialCapacity,
+                    workspace);
+            if (!overflowed)
+            {
+                fallingIndex = -1;
+                for (int worker = 0; worker < workerCount; worker++)
+                {
+                    List<int> crossings = crossingsByWorker[worker];
+                    for (int index = 0; index < crossings.Count; index++)
+                    {
+                        int crossing = crossings[index];
+                        if (crossing >= 0)
+                        {
+                            fallingIndex = crossing;
+                        }
+                        else if (fallingIndex != -1)
+                        {
+                            if (IsOnValidGrid(
+                                fallingIndex,
+                                falls,
+                                finalMask,
+                                amplitudeCount,
+                                effectiveLineLength,
+                                jitterTolerance))
+                            {
+                                fallingEdges.Add(fallingIndex);
+                                risingEdges.Add(~crossing);
+                            }
+
+                            fallingIndex = -1;
+                        }
+                    }
+                }
+
+                preciseScanCompleted = true;
+            }
+        }
+
+        if (!preciseScanCompleted)
+        {
+            FindPreciseEdgesOnValidGridFloat32(
+                filtered,
+                preciseMidpoint,
+                falls,
+                finalMask,
+                amplitudeCount,
+                effectiveLineLength,
+                jitterTolerance,
+                fallingEdges,
+                risingEdges,
+                allowAvx);
+        }
+
+        if (fallingEdges.Count == 0)
+        {
+            return new VhsSyncDetectionResult([], syncTipLevel, backPorchLevel);
+        }
+
+        double[] slopes = workspace.EnsureStatisticsScratch(fallingEdges.Count);
+        int slopeCount = 0;
+        for (int index = 0; index < fallingEdges.Count; index++)
+        {
+            int rise = risingEdges[index];
+            if (10 < rise && rise < sampleCount - 10)
+            {
+                slopes[slopeCount++] = Math.Abs(
+                    (double)filtered[rise + 1] - filtered[rise - 1]);
+            }
+        }
+
+        double transition;
+        if (slopeCount > 0)
+        {
+            Array.Sort(slopes, 0, slopeCount, NumpyDoubleComparer.Instance);
+            double fitSharpness = Math.Max(
+                0.1,
+                slopes[slopeCount / 2] / Math.Max(1e-5, backPorchLevel - syncTipLevel));
+            transition = 1.0 / fitSharpness;
+        }
+        else
+        {
+            transition = _approximateTransition;
+        }
+
+        var pulses = new VhsMeasuredSyncPulse[fallingEdges.Count];
+        int pulseCount = 0;
+        for (int index = 0; index < fallingEdges.Count; index++)
+        {
+            int fall = fallingEdges[index];
+            int rise = risingEdges[index];
+            double fallingFirst = (double)filtered[fall] - preciseMidpoint;
+            double fallingSecond = (double)filtered[fall + 1] - preciseMidpoint;
+            double fallingDifference = fallingFirst - fallingSecond;
+            double subpixelFall = fall + (fallingDifference != 0.0
+                ? fallingFirst / fallingDifference
+                : 0.0);
+
+            double risingFirst = (double)filtered[rise] - preciseMidpoint;
+            double risingSecond = (double)filtered[rise + 1] - preciseMidpoint;
+            double risingDifference = risingSecond - risingFirst;
+            double subpixelRise = rise + (risingDifference != 0.0
+                ? Math.Abs(risingFirst) / risingDifference
+                : 0.0);
+
+            double calculatedLength = subpixelRise - subpixelFall;
+            if (calculatedLength <= 0.0)
+            {
+                continue;
+            }
+
+            int syncIndex = (int)(subpixelFall + (calculatedLength * 0.5));
+            int porchIndex = (int)(subpixelRise + (_backPorchLength * 0.5));
+            double pulseSyncLevel = syncIndex >= 0 && syncIndex < sampleCount
+                ? filtered[syncIndex]
+                : syncTipLevel;
+            double pulseBlankLevel = porchIndex >= 0 && porchIndex < sampleCount
+                ? filtered[porchIndex]
+                : backPorchLevel;
+            pulses[pulseCount++] = new VhsMeasuredSyncPulse(
+                checked((int)Math.Round(subpixelFall, MidpointRounding.ToEven)),
+                checked((int)Math.Round(calculatedLength, MidpointRounding.ToEven)),
+                transition * 2.0,
+                pulseSyncLevel,
+                pulseBlankLevel);
+        }
+
+        return new VhsSyncDetectionResult(
+            pulseCount == pulses.Length ? pulses : pulses[..pulseCount],
+            syncTipLevel,
+            backPorchLevel);
+    }
+
     private static (int[] Falls, int[] Rises) FindInitialEdgesParallel(
         double[] filtered,
         int sampleCount,
@@ -812,6 +1522,183 @@ public sealed class VhsSyncDetector
         return (falls, rises);
     }
 
+    private static (int[] Falls, int[] Rises) FindInitialEdgesParallelFloat32(
+        float[] filtered,
+        int sampleCount,
+        double slicerLevel,
+        double minimumWidth,
+        double maximumWidth,
+        int workerThreads,
+        int initialCapacity)
+    {
+        int scanLimit = sampleCount - 1;
+        int workerCount = Math.Min(workerThreads, scanLimit);
+        int overlap = maximumWidth >= scanLimit - 2.0
+            ? scanLimit
+            : (int)Math.Ceiling(maximumWidth) + 2;
+        float slicerThreshold = CeilingToFloatThreshold(slicerLevel);
+        var fallsByWorker = new List<int>[workerCount];
+        var risesByWorker = new List<int>[workerCount];
+        Parallel.For(
+            0,
+            workerCount,
+            new ParallelOptions { MaxDegreeOfParallelism = workerCount },
+            worker =>
+            {
+                int coreStart = (int)(((long)scanLimit * worker) / workerCount);
+                int coreEnd = (int)(((long)scanLimit * (worker + 1)) / workerCount);
+                int scanStart = Math.Max(0, coreStart - overlap);
+                int scanEnd = (int)Math.Min(scanLimit, (long)coreEnd + overlap);
+                int partitionCapacity = Math.Max(4, (initialCapacity / workerCount) + 2);
+                var localFalls = new List<int>(partitionCapacity);
+                var localRises = new List<int>(partitionCapacity);
+                int fallingIndex = -1;
+                for (int index = scanStart; index < scanEnd; index++)
+                {
+                    if (filtered[index] >= slicerThreshold
+                        && filtered[index + 1] < slicerThreshold)
+                    {
+                        fallingIndex = index;
+                    }
+                    else if (fallingIndex != -1
+                             && filtered[index] < slicerThreshold
+                             && filtered[index + 1] >= slicerThreshold)
+                    {
+                        int width = index - fallingIndex;
+                        if (fallingIndex >= coreStart
+                            && fallingIndex < coreEnd
+                            && minimumWidth < width
+                            && width < maximumWidth)
+                        {
+                            localFalls.Add(fallingIndex);
+                            localRises.Add(index);
+                        }
+
+                        fallingIndex = -1;
+                    }
+                }
+
+                fallsByWorker[worker] = localFalls;
+                risesByWorker[worker] = localRises;
+            });
+
+        int candidateCount = 0;
+        for (int worker = 0; worker < workerCount; worker++)
+        {
+            candidateCount = checked(candidateCount + fallsByWorker[worker].Count);
+        }
+
+        var falls = new int[candidateCount];
+        var rises = new int[candidateCount];
+        int destination = 0;
+        for (int worker = 0; worker < workerCount; worker++)
+        {
+            List<int> localFalls = fallsByWorker[worker];
+            List<int> localRises = risesByWorker[worker];
+            localFalls.CopyTo(falls, destination);
+            localRises.CopyTo(rises, destination);
+            destination += localFalls.Count;
+        }
+
+        return (falls, rises);
+    }
+
+    internal static unsafe (int[] Falls, int[] Rises) FindInitialEdgesSequentialFloat32(
+        ReadOnlySpan<float> filtered,
+        double slicerLevel,
+        double minimumWidth,
+        double maximumWidth,
+        int initialCapacity,
+        bool allowAvx)
+    {
+        ArgumentOutOfRangeException.ThrowIfNegative(initialCapacity);
+        var falls = new List<int>(initialCapacity);
+        var rises = new List<int>(initialCapacity);
+        int comparisonCount = Math.Max(0, filtered.Length - 1);
+        float slicerThreshold = CeilingToFloatThreshold(slicerLevel);
+        int fallingIndex = -1;
+        int index = 0;
+        if (allowAvx && Avx.IsSupported && comparisonCount >= 8)
+        {
+            fixed (float* filteredPointer = filtered)
+            {
+                Vector256<float> threshold = Vector256.Create(slicerThreshold);
+                int vectorizedEnd = comparisonCount & ~7;
+                for (; index < vectorizedEnd; index += 8)
+                {
+                    Vector256<float> current = Avx.LoadVector256(filteredPointer + index);
+                    Vector256<float> next = Avx.LoadVector256(filteredPointer + index + 1);
+                    int fallingMask = Avx.MoveMask(Avx.And(
+                        Avx.Compare(
+                            threshold,
+                            current,
+                            FloatComparisonMode.OrderedLessThanOrEqualNonSignaling),
+                        Avx.Compare(
+                            next,
+                            threshold,
+                            FloatComparisonMode.OrderedLessThanNonSignaling)));
+                    int risingMask = Avx.MoveMask(Avx.And(
+                        Avx.Compare(
+                            current,
+                            threshold,
+                            FloatComparisonMode.OrderedLessThanNonSignaling),
+                        Avx.Compare(
+                            threshold,
+                            next,
+                            FloatComparisonMode.OrderedLessThanOrEqualNonSignaling)));
+                    int crossingMask = fallingMask | risingMask;
+                    while (crossingMask != 0)
+                    {
+                        int lane = BitOperations.TrailingZeroCount((uint)crossingMask);
+                        int bit = 1 << lane;
+                        int crossingIndex = index + lane;
+                        if ((fallingMask & bit) != 0)
+                        {
+                            fallingIndex = crossingIndex;
+                        }
+                        else if (fallingIndex != -1)
+                        {
+                            int width = crossingIndex - fallingIndex;
+                            if (minimumWidth < width && width < maximumWidth)
+                            {
+                                falls.Add(fallingIndex);
+                                rises.Add(crossingIndex);
+                            }
+
+                            fallingIndex = -1;
+                        }
+
+                        crossingMask &= crossingMask - 1;
+                    }
+                }
+            }
+        }
+
+        for (; index < comparisonCount; index++)
+        {
+            if (filtered[index] >= slicerThreshold
+                && filtered[index + 1] < slicerThreshold)
+            {
+                fallingIndex = index;
+            }
+            else if (fallingIndex != -1
+                     && filtered[index] < slicerThreshold
+                     && filtered[index + 1] >= slicerThreshold)
+            {
+                int width = index - fallingIndex;
+                if (minimumWidth < width && width < maximumWidth)
+                {
+                    falls.Add(fallingIndex);
+                    rises.Add(index);
+                }
+
+                fallingIndex = -1;
+            }
+        }
+
+        return (falls.ToArray(), rises.ToArray());
+    }
+
     private static (List<int>[] CrossingsByWorker, int WorkerCount, bool Overflowed)
         FindThresholdCrossingsParallel(
         double[] filtered,
@@ -857,6 +1744,52 @@ public sealed class VhsSyncDetector
         return (crossingsByWorker, workerCount, overflowed);
     }
 
+    private static (List<int>[] CrossingsByWorker, int WorkerCount, bool Overflowed)
+        FindThresholdCrossingsParallelFloat32(
+        float[] filtered,
+        int sampleCount,
+        double threshold,
+        int workerThreads,
+        int initialCapacity,
+        VhsSyncWorkspace workspace)
+    {
+        int scanLimit = sampleCount - 1;
+        int workerCount = Math.Min(workerThreads, scanLimit);
+        int partitionCapacity = Math.Min(
+            MaximumBufferedThresholdCrossingsPerWorker,
+            Math.Max(
+                8,
+                checked((int)((((long)initialCapacity * 2) / workerCount) + 2))));
+        List<int>[] crossingsByWorker = workspace.PrepareThresholdCrossingLists(
+            workerCount,
+            partitionCapacity);
+        int[] overflowFlags = workspace.PrepareThresholdCrossingOverflowFlags(workerCount);
+        float thresholdBoundary = CeilingToFloatThreshold(threshold);
+        Parallel.For(
+            0,
+            workerCount,
+            new ParallelOptions { MaxDegreeOfParallelism = workerCount },
+            worker =>
+            {
+                int start = (int)(((long)scanLimit * worker) / workerCount);
+                int end = (int)(((long)scanLimit * (worker + 1)) / workerCount);
+                List<int> crossings = crossingsByWorker[worker];
+                if (!TryFillThresholdCrossingsPartitionFloat32(
+                    filtered,
+                    start,
+                    end,
+                    thresholdBoundary,
+                    MaximumBufferedThresholdCrossingsPerWorker,
+                    crossings))
+                {
+                    overflowFlags[worker] = 1;
+                }
+            });
+
+        bool overflowed = Array.IndexOf(overflowFlags, 1, 0, workerCount) >= 0;
+        return (crossingsByWorker, workerCount, overflowed);
+    }
+
     internal static bool TryFillThresholdCrossingsPartition(
         double[] filtered,
         int start,
@@ -878,6 +1811,44 @@ public sealed class VhsSyncDetector
                      && filtered[index + 1] >= threshold)
             {
                 // Complements keep rising index zero distinct in the shared event list.
+                crossing = ~index;
+            }
+            else
+            {
+                continue;
+            }
+
+            if (crossings.Count >= maximumCrossings)
+            {
+                return false;
+            }
+
+            crossings.Add(crossing);
+        }
+
+        return true;
+    }
+
+    internal static bool TryFillThresholdCrossingsPartitionFloat32(
+        float[] filtered,
+        int start,
+        int end,
+        float threshold,
+        int maximumCrossings,
+        List<int> crossings)
+    {
+        ArgumentOutOfRangeException.ThrowIfNegativeOrZero(maximumCrossings);
+        for (int index = start; index < end; index++)
+        {
+            int crossing;
+            if (filtered[index] >= threshold
+                && filtered[index + 1] < threshold)
+            {
+                crossing = index;
+            }
+            else if (filtered[index] < threshold
+                     && filtered[index + 1] >= threshold)
+            {
                 crossing = ~index;
             }
             else
@@ -1012,6 +1983,136 @@ public sealed class VhsSyncDetector
                 fallingIndex = -1;
             }
         }
+    }
+
+    internal static unsafe void FindPreciseEdgesOnValidGridFloat32(
+        ReadOnlySpan<float> filtered,
+        double preciseMidpoint,
+        int[] falls,
+        bool[] finalMask,
+        int amplitudeCount,
+        double effectiveLineLength,
+        double jitterTolerance,
+        List<int> fallingEdges,
+        List<int> risingEdges,
+        bool allowAvx)
+    {
+        ArgumentNullException.ThrowIfNull(falls);
+        ArgumentNullException.ThrowIfNull(finalMask);
+        ArgumentNullException.ThrowIfNull(fallingEdges);
+        ArgumentNullException.ThrowIfNull(risingEdges);
+        if ((uint)amplitudeCount > (uint)falls.Length
+            || (uint)amplitudeCount > (uint)finalMask.Length)
+        {
+            throw new ArgumentOutOfRangeException(nameof(amplitudeCount));
+        }
+
+        int comparisonCount = Math.Max(0, filtered.Length - 1);
+        float midpointBoundary = CeilingToFloatThreshold(preciseMidpoint);
+        int fallingIndex = -1;
+        int index = 0;
+        if (allowAvx && Avx.IsSupported && comparisonCount >= 8)
+        {
+            fixed (float* filteredPointer = filtered)
+            {
+                Vector256<float> midpoint = Vector256.Create(midpointBoundary);
+                int vectorizedEnd = comparisonCount & ~7;
+                for (; index < vectorizedEnd; index += 8)
+                {
+                    Vector256<float> current = Avx.LoadVector256(
+                        filteredPointer + index);
+                    Vector256<float> next = Avx.LoadVector256(
+                        filteredPointer + index + 1);
+                    int fallingMask = Avx.MoveMask(Avx.And(
+                        Avx.Compare(
+                            midpoint,
+                            current,
+                            FloatComparisonMode.OrderedLessThanOrEqualNonSignaling),
+                        Avx.Compare(
+                            next,
+                            midpoint,
+                            FloatComparisonMode.OrderedLessThanNonSignaling)));
+                    int risingMask = Avx.MoveMask(Avx.And(
+                        Avx.Compare(
+                            current,
+                            midpoint,
+                            FloatComparisonMode.OrderedLessThanNonSignaling),
+                        Avx.Compare(
+                            midpoint,
+                            next,
+                            FloatComparisonMode.OrderedLessThanOrEqualNonSignaling)));
+                    int crossingMask = fallingMask | risingMask;
+                    while (crossingMask != 0)
+                    {
+                        int lane = BitOperations.TrailingZeroCount((uint)crossingMask);
+                        int bit = 1 << lane;
+                        int crossingIndex = index + lane;
+                        if ((fallingMask & bit) != 0)
+                        {
+                            fallingIndex = crossingIndex;
+                        }
+                        else if (fallingIndex != -1)
+                        {
+                            if (IsOnValidGrid(
+                                fallingIndex,
+                                falls,
+                                finalMask,
+                                amplitudeCount,
+                                effectiveLineLength,
+                                jitterTolerance))
+                            {
+                                fallingEdges.Add(fallingIndex);
+                                risingEdges.Add(crossingIndex);
+                            }
+
+                            fallingIndex = -1;
+                        }
+
+                        crossingMask &= crossingMask - 1;
+                    }
+                }
+            }
+        }
+
+        for (; index < comparisonCount; index++)
+        {
+            if (filtered[index] >= midpointBoundary
+                && filtered[index + 1] < midpointBoundary)
+            {
+                fallingIndex = index;
+            }
+            else if (fallingIndex != -1
+                     && filtered[index] < midpointBoundary
+                     && filtered[index + 1] >= midpointBoundary)
+            {
+                if (IsOnValidGrid(
+                    fallingIndex,
+                    falls,
+                    finalMask,
+                    amplitudeCount,
+                    effectiveLineLength,
+                    jitterTolerance))
+                {
+                    fallingEdges.Add(fallingIndex);
+                    risingEdges.Add(index);
+                }
+
+                fallingIndex = -1;
+            }
+        }
+    }
+
+    private static float CeilingToFloatThreshold(double value)
+    {
+        // For a float sample f, comparing f against this boundary is equivalent
+        // to first widening f to double and comparing it against value.
+        float rounded = (float)value;
+        if (float.IsNaN(rounded) || (double)rounded >= value)
+        {
+            return rounded;
+        }
+
+        return MathF.BitIncrement(rounded);
     }
 
     private static bool IsOnValidGrid(
@@ -1190,6 +2291,56 @@ public sealed class VhsSyncDetector
             useCompactParallelRadix);
     }
 
+    private static (double SyncTip, double Blanking) EstimateLevelsFloat32(
+        ReadOnlySpan<float> filtered,
+        VhsSyncWorkspace workspace)
+    {
+        int syncIndex = (int)(filtered.Length * 0.05);
+        int blankingIndex = (int)(filtered.Length * 0.25);
+        return SelectLevelQuantilesRadixFloat32(
+            filtered,
+            workspace.EnsureFloat32LevelValuesLength(filtered.Length),
+            workspace.EnsurePartitionedLength(filtered.Length),
+            workspace.EnsureHighHistogram(),
+            workspace.EnsureMiddleHistograms(),
+            syncIndex,
+            blankingIndex);
+    }
+
+    private static (double SyncTip, double Blanking) EstimateLevelsParallelFloat32(
+        float[] filtered,
+        int filteredLength,
+        VhsSyncWorkspace workspace,
+        int workerThreads,
+        bool useCompactParallelRadix)
+    {
+        if (workerThreads <= 1
+            || filteredLength < MinimumParallelRadixSamples)
+        {
+            return EstimateLevelsFloat32(
+                filtered.AsSpan(0, filteredLength),
+                workspace);
+        }
+
+        int syncIndex = (int)(filteredLength * 0.05);
+        int blankingIndex = (int)(filteredLength * 0.25);
+        return SelectLevelQuantilesRadixFloat32Parallel(
+            filtered,
+            filteredLength,
+            workspace.EnsureFloat32LevelValuesLength(filteredLength),
+            workspace.EnsurePartitionedLength(filteredLength),
+            workspace.EnsureHighHistogram(),
+            workspace.EnsureMiddleHistograms(),
+            workspace.EnsureWorkerHistograms(
+                workerThreads,
+                useCompactParallelRadix),
+            workspace.EnsureWorkerFlags(workerThreads),
+            syncIndex,
+            blankingIndex,
+            workerThreads,
+            useCompactParallelRadix);
+    }
+
     private static double UpperMedianOfWindow(
         ReadOnlySpan<double> values,
         int start,
@@ -1204,6 +2355,41 @@ public sealed class VhsSyncDetector
 
         Span<double> window = stackalloc double[5];
         values[start..end].CopyTo(window);
+        for (int index = 1; index < length; index++)
+        {
+            double value = window[index];
+            int insertion = index - 1;
+            while (insertion >= 0
+                   && NumpyDoubleComparer.Instance.Compare(window[insertion], value) > 0)
+            {
+                window[insertion + 1] = window[insertion];
+                insertion--;
+            }
+
+            window[insertion + 1] = value;
+        }
+
+        return window[length / 2];
+    }
+
+    private static double UpperMedianOfWindowFloat32(
+        ReadOnlySpan<float> values,
+        int start,
+        int end,
+        double fallback)
+    {
+        int length = end - start;
+        if (length <= 0)
+        {
+            return fallback;
+        }
+
+        Span<double> window = stackalloc double[5];
+        for (int index = 0; index < length; index++)
+        {
+            window[index] = values[start + index];
+        }
+
         for (int index = 1; index < length; index++)
         {
             double value = window[index];
@@ -1276,6 +2462,271 @@ public sealed class VhsSyncDetector
             blankingTarget,
             workerThreads,
             useCompactParallelRadix);
+    }
+
+    internal static (double SyncTip, double Blanking) SelectLevelQuantilesRadixFloat32(
+        ReadOnlySpan<float> values,
+        double[] widenedValues,
+        double[] scratch,
+        int[] highHistogram,
+        int[] middleHistograms,
+        int syncTarget,
+        int blankingTarget)
+    {
+        ValidateFloat32QuantileArguments(
+            values.Length,
+            widenedValues,
+            scratch,
+            highHistogram,
+            middleHistograms,
+            syncTarget,
+            blankingTarget);
+
+        bool finiteNonZero = FillFirstHistogramSequentialFloat32(
+            values,
+            highHistogram);
+        if (!finiteNonZero)
+        {
+            WidenFloat32(values, widenedValues);
+            return SelectLevelQuantilesRadix(
+                widenedValues.AsSpan(0, values.Length),
+                scratch,
+                highHistogram,
+                middleHistograms,
+                syncTarget,
+                blankingTarget);
+        }
+
+        BucketSelection syncFirst = LocateBucket(
+            highHistogram.AsSpan(0, ParallelRadixFirstWidth),
+            syncTarget);
+        BucketSelection blankingFirst = LocateBucket(
+            highHistogram.AsSpan(0, ParallelRadixFirstWidth),
+            blankingTarget);
+        int secondHistogramOffset = syncFirst.Bucket == blankingFirst.Bucket
+            ? 0
+            : ParallelRadixSecondWidth;
+        int secondHistogramLength = secondHistogramOffset + ParallelRadixSecondWidth;
+        FillSecondHistogramsSequentialFloat32(
+            values,
+            middleHistograms,
+            syncFirst.Bucket,
+            blankingFirst.Bucket,
+            secondHistogramOffset,
+            secondHistogramLength);
+
+        BucketSelection syncSecond = LocateBucket(
+            middleHistograms.AsSpan(0, ParallelRadixSecondWidth),
+            syncFirst.RankWithinBucket);
+        BucketSelection blankingSecond = LocateBucket(
+            middleHistograms.AsSpan(secondHistogramOffset, ParallelRadixSecondWidth),
+            blankingFirst.RankWithinBucket);
+        int syncSecondPrefix =
+            (syncFirst.Bucket << 11) | syncSecond.Bucket;
+        int blankingSecondPrefix =
+            (blankingFirst.Bucket << 11) | blankingSecond.Bucket;
+        int thirdHistogramOffset = syncSecondPrefix == blankingSecondPrefix
+            ? 0
+            : ParallelRadixThirdWidth;
+        int thirdHistogramLength = thirdHistogramOffset + ParallelRadixThirdWidth;
+        FillThirdHistogramsSequentialFloat32(
+            values,
+            highHistogram,
+            syncSecondPrefix,
+            blankingSecondPrefix,
+            thirdHistogramOffset,
+            thirdHistogramLength);
+
+        BucketSelection syncThird = LocateBucket(
+            highHistogram.AsSpan(0, ParallelRadixThirdWidth),
+            syncSecond.RankWithinBucket);
+        BucketSelection blankingThird = LocateBucket(
+            highHistogram.AsSpan(thirdHistogramOffset, ParallelRadixThirdWidth),
+            blankingSecond.RankWithinBucket);
+        uint syncKey = ((uint)syncSecondPrefix << 10) | (uint)syncThird.Bucket;
+        uint blankingKey =
+            ((uint)blankingSecondPrefix << 10) | (uint)blankingThird.Bucket;
+        return (
+            SortableKeyToFloat32(syncKey),
+            SortableKeyToFloat32(blankingKey));
+    }
+
+    internal static (double SyncTip, double Blanking) SelectLevelQuantilesRadixFloat32Parallel(
+        float[] values,
+        int valueCount,
+        double[] widenedValues,
+        double[] scratch,
+        int[] firstAndThirdHistograms,
+        int[] secondHistograms,
+        int[] workerHistograms,
+        int[] workerFlags,
+        int syncTarget,
+        int blankingTarget,
+        int workerThreads,
+        bool useCompactParallelRadix = true)
+    {
+        ArgumentNullException.ThrowIfNull(values);
+        ArgumentOutOfRangeException.ThrowIfNegativeOrZero(valueCount);
+        if (valueCount > values.Length)
+        {
+            throw new ArgumentOutOfRangeException(nameof(valueCount));
+        }
+
+        ArgumentOutOfRangeException.ThrowIfNegativeOrZero(workerThreads);
+        ValidateFloat32QuantileArguments(
+            valueCount,
+            widenedValues,
+            scratch,
+            firstAndThirdHistograms,
+            secondHistograms,
+            syncTarget,
+            blankingTarget);
+        ArgumentNullException.ThrowIfNull(workerHistograms);
+        ArgumentNullException.ThrowIfNull(workerFlags);
+
+        if (!useCompactParallelRadix)
+        {
+            WidenFloat32Parallel(
+                values,
+                widenedValues,
+                valueCount,
+                workerThreads);
+            return SelectLevelQuantilesRadixParallel(
+                widenedValues,
+                valueCount,
+                scratch,
+                firstAndThirdHistograms,
+                secondHistograms,
+                workerHistograms,
+                workerFlags,
+                syncTarget,
+                blankingTarget,
+                workerThreads,
+                useCompactParallelRadix: false);
+        }
+
+        bool finiteNonZero = FillParallelFirstHistogramFloat32(
+            values,
+            valueCount,
+            firstAndThirdHistograms,
+            workerHistograms,
+            workerFlags,
+            workerThreads);
+        if (!finiteNonZero)
+        {
+            WidenFloat32Parallel(
+                values,
+                widenedValues,
+                valueCount,
+                workerThreads);
+            return SelectLevelQuantilesRadixParallel(
+                widenedValues,
+                valueCount,
+                scratch,
+                firstAndThirdHistograms,
+                secondHistograms,
+                workerHistograms,
+                workerFlags,
+                syncTarget,
+                blankingTarget,
+                workerThreads,
+                useCompactParallelRadix: true);
+        }
+
+        BucketSelection syncFirst = LocateBucket(
+            firstAndThirdHistograms.AsSpan(0, ParallelRadixFirstWidth),
+            syncTarget);
+        BucketSelection blankingFirst = LocateBucket(
+            firstAndThirdHistograms.AsSpan(0, ParallelRadixFirstWidth),
+            blankingTarget);
+        int secondHistogramOffset = syncFirst.Bucket == blankingFirst.Bucket
+            ? 0
+            : ParallelRadixSecondWidth;
+        int secondHistogramLength = secondHistogramOffset + ParallelRadixSecondWidth;
+        FillParallelChildHistogramsFloat32(
+            values,
+            valueCount,
+            secondHistograms,
+            workerHistograms,
+            syncFirst.Bucket,
+            blankingFirst.Bucket,
+            secondHistogramOffset,
+            secondHistogramLength,
+            parentShift: ParallelRadixFirstShift,
+            childShift: ParallelRadixSecondShift,
+            childMask: ParallelRadixSecondWidth - 1,
+            workerThreads);
+
+        BucketSelection syncSecond = LocateBucket(
+            secondHistograms.AsSpan(0, ParallelRadixSecondWidth),
+            syncFirst.RankWithinBucket);
+        BucketSelection blankingSecond = LocateBucket(
+            secondHistograms.AsSpan(secondHistogramOffset, ParallelRadixSecondWidth),
+            blankingFirst.RankWithinBucket);
+        int syncSecondPrefix =
+            (syncFirst.Bucket << 11) | syncSecond.Bucket;
+        int blankingSecondPrefix =
+            (blankingFirst.Bucket << 11) | blankingSecond.Bucket;
+        int thirdHistogramOffset = syncSecondPrefix == blankingSecondPrefix
+            ? 0
+            : ParallelRadixThirdWidth;
+        int thirdHistogramLength = thirdHistogramOffset + ParallelRadixThirdWidth;
+        FillParallelChildHistogramsFloat32(
+            values,
+            valueCount,
+            firstAndThirdHistograms,
+            workerHistograms,
+            syncSecondPrefix,
+            blankingSecondPrefix,
+            thirdHistogramOffset,
+            thirdHistogramLength,
+            parentShift: ParallelRadixSecondShift,
+            childShift: 0,
+            childMask: ParallelRadixThirdWidth - 1,
+            workerThreads);
+
+        BucketSelection syncThird = LocateBucket(
+            firstAndThirdHistograms.AsSpan(0, ParallelRadixThirdWidth),
+            syncSecond.RankWithinBucket);
+        BucketSelection blankingThird = LocateBucket(
+            firstAndThirdHistograms.AsSpan(thirdHistogramOffset, ParallelRadixThirdWidth),
+            blankingSecond.RankWithinBucket);
+        uint syncKey = ((uint)syncSecondPrefix << 10) | (uint)syncThird.Bucket;
+        uint blankingKey =
+            ((uint)blankingSecondPrefix << 10) | (uint)blankingThird.Bucket;
+        return (
+            SortableKeyToFloat32(syncKey),
+            SortableKeyToFloat32(blankingKey));
+    }
+
+    private static void ValidateFloat32QuantileArguments(
+        int valueCount,
+        double[] widenedValues,
+        double[] scratch,
+        int[] highHistogram,
+        int[] middleHistograms,
+        int syncTarget,
+        int blankingTarget)
+    {
+        ArgumentOutOfRangeException.ThrowIfNegativeOrZero(valueCount);
+        ArgumentNullException.ThrowIfNull(widenedValues);
+        ArgumentNullException.ThrowIfNull(scratch);
+        ArgumentNullException.ThrowIfNull(highHistogram);
+        ArgumentNullException.ThrowIfNull(middleHistograms);
+        if ((uint)syncTarget >= (uint)valueCount
+            || (uint)blankingTarget >= (uint)valueCount
+            || syncTarget > blankingTarget)
+        {
+            throw new ArgumentOutOfRangeException(nameof(syncTarget));
+        }
+
+        if (widenedValues.Length < valueCount
+            || scratch.Length < valueCount
+            || highHistogram.Length < RadixHistogramWidth
+            || middleHistograms.Length < RadixHistogramWidth * 2)
+        {
+            throw new ArgumentException("The float32 radix quantile workspaces are too small.");
+        }
     }
 
     private static (double SyncTip, double Blanking) SelectLevelQuantilesRadixCore(
@@ -1757,6 +3208,140 @@ public sealed class VhsSyncDetector
         return true;
     }
 
+    private static unsafe bool FillFirstHistogramSequentialFloat32(
+        ReadOnlySpan<float> values,
+        int[] firstHistogram)
+    {
+        Array.Clear(firstHistogram, 0, ParallelRadixFirstWidth);
+        fixed (float* valuesPointer = values)
+        fixed (int* histogramPointer = firstHistogram)
+        {
+            float* end = valuesPointer + values.Length;
+            for (float* valuePointer = valuesPointer;
+                valuePointer < end;
+                valuePointer++)
+            {
+                uint bits = *(uint*)valuePointer;
+                uint absoluteBits = bits & 0x7FFF_FFFFU;
+                if (absoluteBits - 1U >= 0x7F7F_FFFFU)
+                {
+                    return false;
+                }
+
+                histogramPointer[
+                    SortableKey(bits) >> ParallelRadixFirstShift]++;
+            }
+        }
+
+        return true;
+    }
+
+    private static unsafe void FillSecondHistogramsSequentialFloat32(
+        ReadOnlySpan<float> values,
+        int[] childHistograms,
+        int firstParentBucket,
+        int secondParentBucket,
+        int secondHistogramOffset,
+        int histogramLength)
+    {
+        const uint ParentSignBit = 1U << (31 - ParallelRadixFirstShift);
+        const uint ParentMask = ParallelRadixFirstWidth - 1;
+        const uint ChildMask = ParallelRadixSecondWidth - 1;
+        uint firstSortableParent = (uint)firstParentBucket;
+        uint secondSortableParent = (uint)secondParentBucket;
+        uint firstRawParent = (firstSortableParent & ParentSignBit) != 0
+            ? firstSortableParent ^ ParentSignBit
+            : ~firstSortableParent & ParentMask;
+        uint secondRawParent = (secondSortableParent & ParentSignBit) != 0
+            ? secondSortableParent ^ ParentSignBit
+            : ~secondSortableParent & ParentMask;
+        uint firstChildXor = (firstSortableParent & ParentSignBit) == 0
+            ? ChildMask
+            : 0U;
+        uint secondChildXor = (secondSortableParent & ParentSignBit) == 0
+            ? ChildMask
+            : 0U;
+
+        Array.Clear(childHistograms, 0, histogramLength);
+        fixed (float* valuesPointer = values)
+        fixed (int* histogramPointer = childHistograms)
+        {
+            float* end = valuesPointer + values.Length;
+            for (float* valuePointer = valuesPointer;
+                valuePointer < end;
+                valuePointer++)
+            {
+                uint bits = *(uint*)valuePointer;
+                uint parent = bits >> ParallelRadixFirstShift;
+                if (parent == firstRawParent)
+                {
+                    int child = (int)(
+                        ((bits >> ParallelRadixSecondShift) & ChildMask)
+                        ^ firstChildXor);
+                    histogramPointer[child]++;
+                }
+                else if (parent == secondRawParent)
+                {
+                    int child = (int)(
+                        ((bits >> ParallelRadixSecondShift) & ChildMask)
+                        ^ secondChildXor);
+                    histogramPointer[secondHistogramOffset + child]++;
+                }
+            }
+        }
+    }
+
+    private static unsafe void FillThirdHistogramsSequentialFloat32(
+        ReadOnlySpan<float> values,
+        int[] childHistograms,
+        int firstParentBucket,
+        int secondParentBucket,
+        int secondHistogramOffset,
+        int histogramLength)
+    {
+        const uint ParentSignBit = 1U << (31 - ParallelRadixSecondShift);
+        const uint ParentMask = (1U << (32 - ParallelRadixSecondShift)) - 1U;
+        const uint ChildMask = ParallelRadixThirdWidth - 1;
+        uint firstSortableParent = (uint)firstParentBucket;
+        uint secondSortableParent = (uint)secondParentBucket;
+        uint firstRawParent = (firstSortableParent & ParentSignBit) != 0
+            ? firstSortableParent ^ ParentSignBit
+            : ~firstSortableParent & ParentMask;
+        uint secondRawParent = (secondSortableParent & ParentSignBit) != 0
+            ? secondSortableParent ^ ParentSignBit
+            : ~secondSortableParent & ParentMask;
+        uint firstChildXor = (firstSortableParent & ParentSignBit) == 0
+            ? ChildMask
+            : 0U;
+        uint secondChildXor = (secondSortableParent & ParentSignBit) == 0
+            ? ChildMask
+            : 0U;
+
+        Array.Clear(childHistograms, 0, histogramLength);
+        fixed (float* valuesPointer = values)
+        fixed (int* histogramPointer = childHistograms)
+        {
+            float* end = valuesPointer + values.Length;
+            for (float* valuePointer = valuesPointer;
+                valuePointer < end;
+                valuePointer++)
+            {
+                uint bits = *(uint*)valuePointer;
+                uint parent = bits >> ParallelRadixSecondShift;
+                if (parent == firstRawParent)
+                {
+                    int child = (int)((bits & ChildMask) ^ firstChildXor);
+                    histogramPointer[child]++;
+                }
+                else if (parent == secondRawParent)
+                {
+                    int child = (int)((bits & ChildMask) ^ secondChildXor);
+                    histogramPointer[secondHistogramOffset + child]++;
+                }
+            }
+        }
+    }
+
     private static bool FillParallelFirstHistogram(
         double[] values,
         int valueCount,
@@ -1841,6 +3426,95 @@ public sealed class VhsSyncDetector
 
                 uint prefix = SortablePrefix(value);
                 workerHistogram[prefix >> ParallelRadixFirstShift]++;
+            }
+        }
+
+        return exceptionalValueFound;
+    }
+
+    private static bool FillParallelFirstHistogramFloat32(
+        float[] values,
+        int valueCount,
+        int[] firstHistogram,
+        int[] workerHistograms,
+        int[] workerFlags,
+        int workerThreads)
+    {
+        int workerHistogramLength = checked(
+            workerThreads * ParallelRadixFirstWidth);
+        if (workerHistograms.Length < workerHistogramLength
+            || workerFlags.Length < workerThreads)
+        {
+            throw new ArgumentException(
+                "The parallel float32 radix workspaces are too small.");
+        }
+
+        Array.Clear(workerHistograms, 0, workerHistogramLength);
+        Array.Clear(workerFlags, 0, workerThreads);
+        Parallel.For(
+            fromInclusive: 0,
+            toExclusive: workerThreads,
+            new ParallelOptions
+            {
+                MaxDegreeOfParallelism = workerThreads
+            },
+            worker =>
+            {
+                int start = (int)(((long)valueCount * worker) / workerThreads);
+                int end = (int)(((long)valueCount * (worker + 1)) / workerThreads);
+                int histogramOffset = worker * ParallelRadixFirstWidth;
+                if (FillFirstHistogramRangeFloat32(
+                        values,
+                        start,
+                        end,
+                        workerHistograms,
+                        histogramOffset))
+                {
+                    workerFlags[worker] = 1;
+                }
+            });
+
+        for (int worker = 0; worker < workerThreads; worker++)
+        {
+            if (workerFlags[worker] != 0)
+            {
+                return false;
+            }
+        }
+
+        MergeWorkerHistograms(
+            workerHistograms,
+            workerThreads,
+            ParallelRadixFirstWidth,
+            firstHistogram);
+        return true;
+    }
+
+    private static unsafe bool FillFirstHistogramRangeFloat32(
+        float[] values,
+        int start,
+        int end,
+        int[] workerHistograms,
+        int histogramOffset)
+    {
+        bool exceptionalValueFound = false;
+        fixed (float* valuesPointer = values)
+        fixed (int* histogramPointer = workerHistograms)
+        {
+            int* workerHistogram = histogramPointer + histogramOffset;
+            for (float* valuePointer = valuesPointer + start;
+                valuePointer < valuesPointer + end;
+                valuePointer++)
+            {
+                float value = *valuePointer;
+                if (!float.IsFinite(value) || value == 0.0f)
+                {
+                    exceptionalValueFound = true;
+                    continue;
+                }
+
+                uint key = SortableKey(value);
+                workerHistogram[key >> ParallelRadixFirstShift]++;
             }
         }
 
@@ -2084,6 +3758,97 @@ public sealed class VhsSyncDetector
         }
     }
 
+    private static void FillParallelChildHistogramsFloat32(
+        float[] values,
+        int valueCount,
+        int[] histograms,
+        int[] workerHistograms,
+        int firstParentBucket,
+        int secondParentBucket,
+        int secondHistogramOffset,
+        int histogramLength,
+        int parentShift,
+        int childShift,
+        int childMask,
+        int workerThreads)
+    {
+        int workerHistogramLength = checked(workerThreads * histogramLength);
+        if (workerHistograms.Length < workerHistogramLength)
+        {
+            throw new ArgumentException(
+                "The parallel float32 radix histogram workspace is too small.",
+                nameof(workerHistograms));
+        }
+
+        Array.Clear(workerHistograms, 0, workerHistogramLength);
+        Parallel.For(
+            fromInclusive: 0,
+            toExclusive: workerThreads,
+            new ParallelOptions
+            {
+                MaxDegreeOfParallelism = workerThreads
+            },
+            worker =>
+            {
+                int start = (int)(((long)valueCount * worker) / workerThreads);
+                int end = (int)(((long)valueCount * (worker + 1)) / workerThreads);
+                FillChildHistogramRangeFloat32(
+                    values,
+                    start,
+                    end,
+                    workerHistograms,
+                    worker * histogramLength,
+                    firstParentBucket,
+                    secondParentBucket,
+                    secondHistogramOffset,
+                    parentShift,
+                    childShift,
+                    childMask);
+            });
+
+        MergeWorkerHistograms(
+            workerHistograms,
+            workerThreads,
+            histogramLength,
+            histograms);
+    }
+
+    private static unsafe void FillChildHistogramRangeFloat32(
+        float[] values,
+        int start,
+        int end,
+        int[] workerHistograms,
+        int workerOffset,
+        int firstParentBucket,
+        int secondParentBucket,
+        int secondHistogramOffset,
+        int parentShift,
+        int childShift,
+        int childMask)
+    {
+        fixed (float* valuesPointer = values)
+        fixed (int* histogramPointer = workerHistograms)
+        {
+            int* workerHistogram = histogramPointer + workerOffset;
+            for (float* valuePointer = valuesPointer + start;
+                valuePointer < valuesPointer + end;
+                valuePointer++)
+            {
+                uint key = SortableKey(*valuePointer);
+                int parent = (int)(key >> parentShift);
+                int child = (int)((key >> childShift) & (uint)childMask);
+                if (parent == firstParentBucket)
+                {
+                    workerHistogram[child]++;
+                }
+                else if (parent == secondParentBucket)
+                {
+                    workerHistogram[secondHistogramOffset + child]++;
+                }
+            }
+        }
+    }
+
     private static unsafe void MergeWorkerHistograms(
         int[] workerHistograms,
         int workerCount,
@@ -2135,6 +3900,23 @@ public sealed class VhsSyncDetector
             ? ~bits
             : bits ^ 0x8000_0000_0000_0000UL;
         return (uint)(key >> 32);
+    }
+
+    private static uint SortableKey(float value)
+    {
+        uint bits = BitConverter.SingleToUInt32Bits(value);
+        return SortableKey(bits);
+    }
+
+    private static uint SortableKey(uint bits)
+        => bits ^ ((uint)((int)bits >> 31) | 0x8000_0000U);
+
+    private static float SortableKeyToFloat32(uint key)
+    {
+        uint bits = (key & 0x8000_0000U) != 0
+            ? key ^ 0x8000_0000U
+            : ~key;
+        return BitConverter.UInt32BitsToSingle(bits);
     }
 
     private static BucketSelection LocateBucket(ReadOnlySpan<int> histogram, int target)
@@ -2343,6 +4125,8 @@ public sealed class VhsSyncDetector
     private sealed class VhsSyncWorkspace
     {
         private double[] _filtered = [];
+        private float[] _float32Filtered = [];
+        private double[] _float32LevelValues = [];
         private double[] _partitioned = [];
         private double[] _candidateSyncLevels = [];
         private double[] _candidatePorchLevels = [];
@@ -2364,6 +4148,26 @@ public sealed class VhsSyncDetector
             }
 
             return _filtered;
+        }
+
+        public float[] EnsureFloat32FilteredLength(int length)
+        {
+            if (_float32Filtered.Length < length)
+            {
+                _float32Filtered = GC.AllocateUninitializedArray<float>(length);
+            }
+
+            return _float32Filtered;
+        }
+
+        public double[] EnsureFloat32LevelValuesLength(int length)
+        {
+            if (_float32LevelValues.Length < length)
+            {
+                _float32LevelValues = GC.AllocateUninitializedArray<double>(length);
+            }
+
+            return _float32LevelValues;
         }
 
         public double[] EnsurePartitionedLength(int length)

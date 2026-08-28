@@ -182,7 +182,7 @@ stderr 只去除耗时行后逐行一致，日志去除时间戳后逐行一致�
 
 性能优化是实现的一部分，但确定性输出和 release 兼容性始终是首要约束。
 
-DSP 后端通过 `--dsp-backend exact|ipp-fast|cuda-fast` 显式选择。该参数是本 .NET 移植
+DSP 后端通过 `--dsp-backend exact|ipp-fast|cuda-fast|approx-fast` 显式选择。该参数是本 .NET 移植
 新增的实验扩展，不属于上游 `oyvindln/vhs-decode` v0.4.0 CLI。`exact` 是默认值，
 保留现有托管兼容路径，并且不会探测或加载 Intel IPP。`ipp-fast` 是 Windows x64
 可选后端：Intel CPU 是官方支持目标，兼容的非 Intel x64 CPU 则是本项目的
@@ -191,13 +191,53 @@ non-Intel vendor warning。后端会加载静态链接的 `vhsdecode_ipp.dll`，
 版本和实际选择的 ISA，并在桥接 DLL、ABI 或 CPU 不可用时明确失败，不会静默
 回退到 `exact`。当前 IPP 路由包括 VHS real-RF FFT、`current` profile 下的
 color-under Super-Gaussian DFT，以及 LaserDisc 视频、EFM 和模拟音频所用的
-2 的幂长度 double-precision full-complex FFT；LD 路径使用 native bridge ABI v1.3。
+2 的幂长度 double-precision full-complex FFT；LD 路径使用 native bridge ABI v1.4。
 CVBS 和 HiFi 会明确拒绝不支持的 `ipp-fast`，不会悄悄改跑 Exact 内核而产生虚假基准。
 
-对于 PAL/NTSC VHS，完整 `ipp-fast` 与 `cuda-fast` 解码还接受
+`approx-fast` 是另一个仅支持 VHS 的实验 FP32 数值路径，其变换与频谱乘法有意
+使用 FP32。公开控制项包括最终 TBC 重采样器
+`--approx-resampler sinc16|catmull-rom4`，以及数值精度契约
+`--approx-precision balanced|aggressive`。两项都只允许与 `approx-fast` 搭配；
+若与其他后端组合会明确 fail-closed，不会忽略。Approx 是独立于 `exact` 和
+`ipp-fast` 的数值契约，不是 release 兼容模式，也不保证与 Exact 逐字节相同。
+
+省略 `--approx-precision` 时默认选择 `balanced`，既有行为不变：省略重采样器或
+显式选择 `sinc16` 时，最终 TBC 重采样继续采用 16-tap sinc，并保持
+`vhs-rf-transform-f32-v1`；显式选择 `catmull-rom4` 时，仅最终亮度/色度 TBC
+重采样改用 4-tap FP32 Catmull-Rom，并选择
+`vhs-rf-transform-f32-catmull-rom4-v2`。同步与相位分析使用的行 prefix 仍采用 sinc，
+因此不会静默替换这些判定输入。
+
+显式 `aggressive` 选择独立的
+`vhs-rf-transform-field-f32-catmull-rom4-burst-iq-prefix-chroma-fft-v6`
+契约。它要求 `--compat-version current`、
+`--approx-resampler catmull-rom4` 和 40 MSPS 解码。场同步路径会让
+`VideoLowPass`、其 9-tap boxcar 和边缘扫描保持 FP32。它还会舍弃
+`current` 色度 burst Tune 的 32 次非线性迭代，直接采用由 float32 乘积导出的
+I/Q 相位、幅度和 DC 初估，将 burst 频率保持在标称值，并让色度相位分析的逐行前缀
+使用 4-tap Catmull-Rom，而不是 16-tap sinc。
+
+v6 色度阶段会复用已驻留的输入 RFFT，将其 half-spectrum 与零相位
+`ChromaBurst |H|²` 响应相乘，再通过 IRFFT 直接写入 float32 色度缓冲区。
+相对旧的 SOS 前后向 `filtfilt` 路径，这是明确的有损数值契约，包括不同的
+FP32 舍入和块边界行为；Exact 与 Balanced 保持不变。AFC/`--cafc`、
+色度或视频 notch、`--export_raw_tbc`、非 color-under 格式、缺少标准色度滤波器的
+配置，以及其他必须走旧色度路径的选项都会 fail closed，不会局部回退。
+Aggressive 精度不会改变 CTI 设置；`--cti_mix 0` 仍是独立的显式选项。Approx
+路径仅支持 VHS，并会拒绝非零 RF high boost。这里不承诺 v6 的固定提速或主观
+画质等价；应按目标线程数对同一输入执行完整的 balanced/aggressive A/B，同时
+检查 TBC、色度、JSON、有序场和 `fileLoc`。
+
+```text
+decode.exe vhs --dsp-backend approx-fast --pal input.lds output-balanced
+decode.exe vhs --dsp-backend approx-fast --approx-resampler catmull-rom4 --pal input.lds output-catmull-rom4
+decode.exe vhs --compat-version current --dsp-backend approx-fast --approx-resampler catmull-rom4 --approx-precision aggressive --pal input.lds output-aggressive
+```
+
+对于 PAL/NTSC VHS，完整 `ipp-fast`、`cuda-fast` 与 `approx-fast` 解码还接受
 `--decode-at-20msps`（别名 `--decode_at_20msps`）。40 MSPS 输入会先经过固定的
 抗混叠 2:1 滤波，再让后续 DSP 以 20 MSPS 工作；原生 20 MSPS 输入则直接进入该
-DSP 速率。IPP 在输入 loader 中降采样，CUDA 在完整信号图之前于 GPU 上降采样。
+DSP 速率。Approx 在输入 loader 中降采样，CUDA 在完整信号图之前于 GPU 上降采样。
 Exact 完整解码会拒绝该参数；受支持的 VHS preview 路径会自动强制同一模式。
 输出元数据中的 `fileLoc` 仍保留原始输入采样点坐标。
 

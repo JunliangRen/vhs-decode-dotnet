@@ -58,6 +58,46 @@ bool check_round_trip(vhsdecode_ipp_fft64_context* context, int32_t length, doub
     return true;
 }
 
+bool check_fft32_round_trip(
+    vhsdecode_ipp_fft32_context* context,
+    int32_t length,
+    float seed)
+{
+    std::vector<float> input(static_cast<size_t>(length));
+    std::vector<vhsdecode_ipp_complex32> spectrum(
+        static_cast<size_t>(length / 2 + 1));
+    std::vector<float> output(static_cast<size_t>(length));
+
+    for (int32_t i = 0; i < length; ++i) {
+        const float phase = static_cast<float>(
+            (2.0 * std::numbers::pi * static_cast<double>(i)) /
+            static_cast<double>(length));
+        input[static_cast<size_t>(i)] =
+            std::sin((3.0F + seed) * phase) +
+            (0.25F * std::cos((17.0F + seed) * phase));
+    }
+
+    if (!expect_status(vhsdecode_ipp_fft32_forward_real(
+            context, input.data(), length, spectrum.data(), length / 2 + 1),
+            "FFT32 forward") ||
+        !expect_status(vhsdecode_ipp_fft32_inverse_real(
+            context, spectrum.data(), length / 2 + 1, output.data(), length),
+            "FFT32 inverse")) {
+        return false;
+    }
+
+    float max_error = 0.0F;
+    for (int32_t i = 0; i < length; ++i) {
+        max_error = (std::max)(max_error, std::abs(
+            input[static_cast<size_t>(i)] - output[static_cast<size_t>(i)]));
+    }
+    if (max_error > 2.0e-5F) {
+        std::cerr << "FFT32 round-trip error too large: " << max_error << '\n';
+        return false;
+    }
+    return true;
+}
+
 bool check_complex_round_trip(
     vhsdecode_ipp_cfft64_context* context,
     int32_t length)
@@ -629,6 +669,82 @@ int main()
               << " target=" << runtime.ipp_target_cpu
               << " enabled-features=0x" << std::hex << runtime.enabled_cpu_features
               << std::dec << '\n';
+
+    if (vhsdecode_ipp_fft32_create(12, nullptr) != VHSDECODE_IPP_STATUS_NULL_POINTER) {
+        std::cerr << "FFT32 null output-context validation failed\n";
+        return 1;
+    }
+    vhsdecode_ipp_fft32_context* invalid_fft32_context = nullptr;
+    if (vhsdecode_ipp_fft32_create(12, &invalid_fft32_context) !=
+        VHSDECODE_IPP_STATUS_UNSUPPORTED_LENGTH) {
+        std::cerr << "Invalid FFT32 length validation failed\n";
+        return 1;
+    }
+
+    constexpr int32_t fft32_length = 1024;
+    vhsdecode_ipp_fft32_context* fft32_context = nullptr;
+    if (!expect_status(
+            vhsdecode_ipp_fft32_create(fft32_length, &fft32_context),
+            "FFT32 create")) {
+        return 1;
+    }
+
+    std::vector<float> fft32_impulse(static_cast<size_t>(fft32_length));
+    std::vector<vhsdecode_ipp_complex32> fft32_impulse_spectrum(
+        static_cast<size_t>(fft32_length / 2 + 1));
+    fft32_impulse[0] = 1.0F;
+    if (!expect_status(vhsdecode_ipp_fft32_forward_real(
+            fft32_context,
+            fft32_impulse.data(),
+            fft32_length,
+            fft32_impulse_spectrum.data(),
+            fft32_length / 2 + 1),
+            "FFT32 impulse forward")) {
+        vhsdecode_ipp_fft32_destroy(fft32_context);
+        return 1;
+    }
+    for (const auto& bin : fft32_impulse_spectrum) {
+        if (std::abs(bin.real - 1.0F) > 1.0e-6F ||
+            std::abs(bin.imag) > 1.0e-6F) {
+            std::cerr << "FFT32 CCS-to-complex layout check failed\n";
+            vhsdecode_ipp_fft32_destroy(fft32_context);
+            return 1;
+        }
+    }
+
+    if (!check_fft32_round_trip(fft32_context, fft32_length, 0.0F)) {
+        vhsdecode_ipp_fft32_destroy(fft32_context);
+        return 1;
+    }
+
+    std::atomic<bool> fft32_concurrent_ok{true};
+    std::vector<std::thread> fft32_workers;
+    for (int worker = 0; worker < 4; ++worker) {
+        fft32_workers.emplace_back(
+            [fft32_context, worker, &fft32_concurrent_ok]() {
+                for (int iteration = 0; iteration < 20; ++iteration) {
+                    if (!check_fft32_round_trip(
+                            fft32_context,
+                            fft32_length,
+                            static_cast<float>(worker + iteration) * 0.01F)) {
+                        fft32_concurrent_ok.store(false, std::memory_order_relaxed);
+                        return;
+                    }
+                }
+            });
+    }
+    for (auto& worker : fft32_workers) {
+        worker.join();
+    }
+    if (!fft32_concurrent_ok.load(std::memory_order_relaxed)) {
+        vhsdecode_ipp_fft32_destroy(fft32_context);
+        return 1;
+    }
+
+    if (!expect_status(vhsdecode_ipp_fft32_destroy(fft32_context), "FFT32 destroy") ||
+        !expect_status(vhsdecode_ipp_fft32_destroy(nullptr), "FFT32 destroy NULL")) {
+        return 1;
+    }
 
     if (vhsdecode_ipp_fft64_create(12, nullptr) != VHSDECODE_IPP_STATUS_NULL_POINTER) {
         std::cerr << "Null output-context validation failed\n";
