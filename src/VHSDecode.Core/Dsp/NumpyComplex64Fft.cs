@@ -1,8 +1,10 @@
 using System.Numerics;
+using System.Runtime.InteropServices;
 
 namespace VHSDecode.Core.Dsp;
 
 // Modified NumPy compatibility adaptation; see THIRD-PARTY-NOTICES.md.
+[StructLayout(LayoutKind.Sequential, Pack = sizeof(float))]
 internal readonly record struct Complex32(float Real, float Imaginary);
 
 internal static class NumpyComplex64Fft

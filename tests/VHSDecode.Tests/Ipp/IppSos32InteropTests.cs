@@ -169,6 +169,41 @@ public sealed class IppSos32InteropTests
         AssertClose(expected, actual, 5.0e-5);
     }
 
+    [Fact(DisplayName = "IPP SOS32 float input to double matches widened input bits")]
+    public void IppSos32FloatInputToDoubleMatchesWidenedInputBits()
+    {
+        if (!IppRuntime.TryProbe(out _))
+        {
+            return;
+        }
+
+        float[] input = BuildFloatInput(16_384);
+        double[] widenedInput = Array.ConvertAll(input, static value => (double)value);
+        using IppSos32FilterPool pool = IppSos32FilterPool.TryCreate(PoolSections)!;
+
+        foreach (int? padLength in new int?[] { null, 0, 7, 300 })
+        {
+            var expected = new double[input.Length];
+            SosFilter.ApplyForwardBackwardFloat32(
+                PoolSections,
+                widenedInput,
+                expected,
+                padLength,
+                pool);
+            var actual = new double[input.Length];
+            SosFilter.ApplyForwardBackwardFloat32(
+                PoolSections,
+                input,
+                actual,
+                padLength,
+                pool);
+
+            Assert.Equal(
+                MemoryMarshal.AsBytes(expected.AsSpan()).ToArray(),
+                MemoryMarshal.AsBytes(actual.AsSpan()).ToArray());
+        }
+    }
+
     [Fact(DisplayName = "Disposed SOS32 context and pool reject further work")]
     public void DisposedSos32ObjectsRejectCalls()
     {

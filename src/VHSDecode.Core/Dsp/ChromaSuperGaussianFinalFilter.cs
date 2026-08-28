@@ -26,7 +26,8 @@ internal sealed class ChromaSuperGaussianFinalFilter : IDisposable
         int inputLength,
         double fscHz,
         double colorUnderCarrierHz,
-        DspBackend dspBackend = DspBackend.Exact)
+        DspBackend dspBackend = DspBackend.Exact,
+        ApproxProvider? approxProvider = null)
     {
         ArgumentOutOfRangeException.ThrowIfNegativeOrZero(inputLength);
         ArgumentOutOfRangeException.ThrowIfNegativeOrZero(fscHz);
@@ -46,6 +47,9 @@ internal sealed class ChromaSuperGaussianFinalFilter : IDisposable
             DspBackend.Exact => null,
             DspBackend.IppFast => new IppRealDft32(_paddedLength),
             DspBackend.CudaFast => null,
+            DspBackend.ApproxFast when approxProvider == ApproxProvider.Ipp
+                => new IppRealDft32(_paddedLength),
+            DspBackend.ApproxFast => null,
             _ => throw new ArgumentOutOfRangeException(
                 nameof(dspBackend),
                 dspBackend,

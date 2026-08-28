@@ -1,3 +1,4 @@
+using System.Buffers;
 using System.Buffers.Binary;
 using System.Runtime.InteropServices;
 
@@ -63,8 +64,15 @@ public sealed class Int8SampleLoader : IRfSampleLoader
     }
 }
 
-public sealed class Int16SampleLoader : IRfSampleLoader
+public sealed class Int16SampleLoader : IReusableRfSampleLoader
 {
+    internal const int MaximumRetainedDecodedBufferLength = 32 * 1024;
+    internal const int MaximumRetainedDecodedBufferCount = 48;
+    private readonly object _decodedBufferLock = new();
+    private readonly double[]?[] _decodedBuffers =
+        new double[]?[MaximumRetainedDecodedBufferCount];
+    private int _decodedBufferCount;
+
     public double[]? Read(Stream stream, long sample, int readLength)
     {
         byte[] buffer = UInt8SampleLoader.ReadExactOrNull(stream, sample, readLength, 2);
@@ -80,6 +88,119 @@ public sealed class Int16SampleLoader : IRfSampleLoader
         }
 
         return output;
+    }
+
+    bool IReusableRfSampleLoader.ReuseForSequentialDecode => true;
+
+    internal double[]? ReadReusable(Stream stream, long sample, int readLength)
+    {
+        ArgumentNullException.ThrowIfNull(stream);
+        ArgumentOutOfRangeException.ThrowIfNegative(sample);
+        ArgumentOutOfRangeException.ThrowIfNegative(readLength);
+
+        long byteOffset = checked(sample * sizeof(short));
+        int byteCount = checked(readLength * sizeof(short));
+        stream.Seek(byteOffset, SeekOrigin.Begin);
+        if (readLength == 0)
+        {
+            return [];
+        }
+
+        byte[] readBuffer = ArrayPool<byte>.Shared.Rent(byteCount);
+        double[]? output = null;
+        bool completed = false;
+        try
+        {
+            int bytesRead = stream.ReadAtLeast(
+                readBuffer.AsSpan(0, byteCount),
+                byteCount,
+                throwOnEndOfStream: false);
+            if (bytesRead != byteCount)
+            {
+                return null;
+            }
+
+            output = TakeDecodedBuffer(readLength);
+            if (BitConverter.IsLittleEndian)
+            {
+                LibsndfilePcm16SampleLoader.ConvertPcm16ToDouble(
+                    MemoryMarshal.Cast<byte, short>(readBuffer.AsSpan(0, byteCount)),
+                    output);
+            }
+            else
+            {
+                for (int i = 0; i < output.Length; i++)
+                {
+                    output[i] = BinaryPrimitives.ReadInt16LittleEndian(
+                        readBuffer.AsSpan(i * sizeof(short), sizeof(short)));
+                }
+            }
+
+            completed = true;
+            return output;
+        }
+        finally
+        {
+            if (output is not null && !completed)
+            {
+                ReturnReusable(output);
+            }
+
+            ArrayPool<byte>.Shared.Return(readBuffer);
+        }
+    }
+
+    double[]? IReusableRfSampleLoader.ReadReusable(
+        Stream stream,
+        long sample,
+        int readLength)
+        => ReadReusable(stream, sample, readLength);
+
+    internal int CachedReusableDecodedBufferCount
+    {
+        get
+        {
+            lock (_decodedBufferLock)
+            {
+                return _decodedBufferCount;
+            }
+        }
+    }
+
+    internal void ReturnReusable(double[] buffer)
+    {
+        ArgumentNullException.ThrowIfNull(buffer);
+        lock (_decodedBufferLock)
+        {
+            if (buffer.Length <= MaximumRetainedDecodedBufferLength
+                && _decodedBufferCount < _decodedBuffers.Length)
+            {
+                _decodedBuffers[_decodedBufferCount++] = buffer;
+            }
+        }
+    }
+
+    void IReusableRfSampleLoader.ReturnReusable(double[] buffer)
+        => ReturnReusable(buffer);
+
+    private double[] TakeDecodedBuffer(int length)
+    {
+        lock (_decodedBufferLock)
+        {
+            for (int i = _decodedBufferCount - 1; i >= 0; i--)
+            {
+                double[] candidate = _decodedBuffers[i]!;
+                if (candidate.Length == length)
+                {
+                    int last = --_decodedBufferCount;
+                    _decodedBuffers[i] = _decodedBuffers[last];
+                    _decodedBuffers[last] = null;
+                    return candidate;
+                }
+            }
+        }
+
+        return GC.AllocateUninitializedArray<double>(length);
     }
 }
 

@@ -52,7 +52,10 @@ public sealed class VhsVSyncLevelRefinerCurrentTests
     {
         var refiner = new VhsVSyncLevelRefiner();
 
-        VhsVSyncLevelRefinementResult empty = refiner.Refine([], -40.0, 0.0);
+        VhsVSyncLevelRefinementResult empty = refiner.Refine(
+            ReadOnlySpan<double>.Empty,
+            -40.0,
+            0.0);
         VhsVSyncLevelRefinementResult tooFew = refiner.Refine(
             [-40.0, -39.9, 0.0, 0.1, -40.1, -0.1],
             -40.0,
@@ -134,6 +137,114 @@ public sealed class VhsVSyncLevelRefinerCurrentTests
 
         Assert.True(result.SyncSampleCount > 0);
         Assert.True(result.BlankSampleCount > 0);
+        Assert.InRange(allocated, 0, 64 * 1024);
+    }
+
+    [Fact(DisplayName = "Current VHS VSync float input matches exact widening bit for bit")]
+    public void CurrentVhsVSyncFloatInputMatchesExactWideningBitForBit()
+    {
+        var refiner = new VhsVSyncLevelRefiner();
+        foreach (int length in new[] { 1, 5, 6, 15, 16, 17, 127, 257, 1_023 })
+        {
+            float[] values = BuildFloatVSync(length);
+            double[] widened = Widen(values);
+
+            VhsVSyncLevelRefinementResult expected = refiner.Refine(
+                widened,
+                originalSyncTip: -40.0,
+                originalBlank: 0.0);
+            VhsVSyncLevelRefinementResult actual = refiner.Refine(
+                values,
+                originalSyncTip: -40.0,
+                originalBlank: 0.0);
+
+            AssertRefinementBitsEqual(expected, actual);
+        }
+    }
+
+    [Fact(DisplayName = "Current VHS VSync float field window matches exact widening")]
+    public void CurrentVhsVSyncFloatFieldWindowMatchesExactWidening()
+    {
+        float[] field = BuildFloatVSync(400);
+        double[] widened = Widen(field);
+        var refiner = new VhsVSyncLevelRefiner();
+
+        foreach ((double line0, double lineLength) in new[]
+        {
+            (10.5, 20.0),
+            (-40.5, 20.0),
+            (220.5, 20.0),
+            (398.5, 0.25)
+        })
+        {
+            VhsVSyncLevelRefinementResult expected = refiner.RefineField(
+                widened,
+                line0,
+                lineLength,
+                originalSyncTip: -40.0,
+                originalBlank: 0.0);
+            VhsVSyncLevelRefinementResult actual = refiner.RefineField(
+                field,
+                line0,
+                lineLength,
+                originalSyncTip: -40.0,
+                originalBlank: 0.0);
+
+            AssertRefinementBitsEqual(expected, actual);
+        }
+    }
+
+    [Fact(DisplayName = "Current VHS VSync float input preserves exceptional semantics")]
+    public void CurrentVhsVSyncFloatInputPreservesExceptionalSemantics()
+    {
+        float negativeNaN = BitConverter.Int32BitsToSingle(
+            unchecked((int)0xFFC12345U));
+        float[] values =
+        [
+            -40.0f, -39.75f, -40.25f, -39.875f, -40.125f, -40.0f,
+            0.0f, -0.0f, 0.25f, -0.25f, 0.125f, -0.125f,
+            float.NaN, negativeNaN, float.PositiveInfinity, float.NegativeInfinity,
+            float.MaxValue, float.MinValue, float.Epsilon, -float.Epsilon
+        ];
+        int[] originalBits = values
+            .Select(BitConverter.SingleToInt32Bits)
+            .ToArray();
+        double[] widened = Widen(values);
+        var refiner = new VhsVSyncLevelRefiner();
+
+        VhsVSyncLevelRefinementResult expected = refiner.Refine(
+            widened,
+            originalSyncTip: -40.0,
+            originalBlank: 0.0);
+        VhsVSyncLevelRefinementResult actual = refiner.Refine(
+            values,
+            originalSyncTip: -40.0,
+            originalBlank: 0.0);
+
+        AssertRefinementBitsEqual(expected, actual);
+        Assert.Equal(
+            originalBits,
+            values.Select(BitConverter.SingleToInt32Bits));
+    }
+
+    [Fact(DisplayName = "Current VHS VSync float input is deterministic and reuses its workspace")]
+    public void CurrentVhsVSyncFloatInputIsDeterministicAndReusesItsWorkspace()
+    {
+        float[] vSync = BuildFloatVSync(100_000);
+        var refiner = new VhsVSyncLevelRefiner();
+        VhsVSyncLevelRefinementResult expected = refiner.Refine(vSync, -40.0, 0.0);
+
+        long before = GC.GetAllocatedBytesForCurrentThread();
+        for (int iteration = 0; iteration < 8; iteration++)
+        {
+            VhsVSyncLevelRefinementResult actual = refiner.Refine(
+                vSync,
+                -40.0,
+                0.0);
+            AssertRefinementBitsEqual(expected, actual);
+        }
+
+        long allocated = GC.GetAllocatedBytesForCurrentThread() - before;
         Assert.InRange(allocated, 0, 64 * 1024);
     }
 
@@ -302,5 +413,57 @@ public sealed class VhsVSyncLevelRefinerCurrentTests
         }
 
         return values;
+    }
+
+    private static float[] BuildFloatVSync(int length)
+    {
+        var values = new float[length];
+        for (int index = 0; index < values.Length; index++)
+        {
+            values[index] = (index & 1) == 0
+                ? -40.0f + ((((index * 37) % 23) - 11) * 0.01f)
+                : ((((index * 29) % 19) - 9) * 0.01f);
+        }
+
+        if (values.Length > 48)
+        {
+            values[12] = -25.0f;
+            values[48] = -24.0f;
+        }
+
+        if (values.Length > 231)
+        {
+            values[87] = -15.0f;
+            values[131] = -14.0f;
+            values[206] = -16.0f;
+            values[231] = -17.0f;
+        }
+
+        return values;
+    }
+
+    private static double[] Widen(ReadOnlySpan<float> values)
+    {
+        var widened = new double[values.Length];
+        for (int index = 0; index < values.Length; index++)
+        {
+            widened[index] = values[index];
+        }
+
+        return widened;
+    }
+
+    private static void AssertRefinementBitsEqual(
+        VhsVSyncLevelRefinementResult expected,
+        VhsVSyncLevelRefinementResult actual)
+    {
+        Assert.Equal(expected.SyncSampleCount, actual.SyncSampleCount);
+        Assert.Equal(expected.BlankSampleCount, actual.BlankSampleCount);
+        Assert.Equal(
+            BitConverter.DoubleToInt64Bits(expected.SyncTipLevel),
+            BitConverter.DoubleToInt64Bits(actual.SyncTipLevel));
+        Assert.Equal(
+            BitConverter.DoubleToInt64Bits(expected.BlankLevel),
+            BitConverter.DoubleToInt64Bits(actual.BlankLevel));
     }
 }

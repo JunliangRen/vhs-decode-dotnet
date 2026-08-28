@@ -314,14 +314,14 @@ public void DecodeRunnerPrintsCommandHelpBeforeValidation()
 {
     var standaloneHashes = new Dictionary<string, string>(StringComparer.Ordinal)
     {
-        ["vhs"] = "022F7BD2B63A819F629CDB4FF5D0ECE89E64B68710A0C7E1101A650B84371A52",
+        ["vhs"] = "764DFFD7F4856BDEE5753DCF4F8B93F011A74DAF84AD3720A2D708DB54D16E81",
         ["cvbs"] = "F036A673C78445AB14039B0EE2F59E219D756EFFE6C0D8EB1872CAAEF71E9B7A",
         ["ld"] = "9916635440C1BC2A4113527F99D75B0EF1A06060A871F83F4CCEB235141B4166",
         ["hifi"] = "D7AEBC4B2CA236292979EBD92CA38454ECE0C2049C3E49A8F5E4E91397ACB658"
     };
     var facadeHashes = new Dictionary<string, string>(StringComparer.Ordinal)
     {
-        ["vhs"] = "E27145398EF3CF2EB45F0737AEF8AB6575A7DBF8EA600969804ACA3AC9B96F43",
+        ["vhs"] = "05473C8E04D6B6C23EE5A2DE39421E165E0FA6796B386188C9F7449C313E4BD4",
         ["cvbs"] = "A585456B93F91B40313AEE069314AA448B43E97F6E94B0307F7F3926F234FFA3",
         ["ld"] = "F20AD9B0BAB11557BE8C9EC7CF9C0C0524C9909209A87A7FFA41D0FA1ED6D4C6",
         ["hifi"] = "3089FE4A8CE563A00F082770194434DF6629EE98C633664EF8DEB170A5C74D84"
@@ -347,6 +347,10 @@ public void DecodeRunnerPrintsCommandHelpBeforeValidation()
             AssertContains(output.ToString(), "-h, --help");
             AssertContains(output.ToString(), "infile");
             AssertContains(output.ToString(), "outfile");
+            if (spec.Name == "vhs")
+            {
+                AssertFalse(output.ToString().Contains("--approx-provider", StringComparison.Ordinal));
+            }
             AssertEqual(standaloneHashes[spec.Name], Utf8LfSha256(output.ToString()));
             AssertEqual(string.Empty, error.ToString());
         }
@@ -360,6 +364,10 @@ public void DecodeRunnerPrintsCommandHelpBeforeValidation()
             TestContext.Current.CancellationToken));
         AssertContains(facadeOutput.ToString(), "usage: decode.py ");
         AssertFalse(facadeOutput.ToString().Contains($"usage: decode.py {spec.Name}", StringComparison.Ordinal));
+        if (spec.Name == "vhs")
+        {
+            AssertFalse(facadeOutput.ToString().Contains("--approx-provider", StringComparison.Ordinal));
+        }
         AssertEqual(facadeHashes[spec.Name], Utf8LfSha256(facadeOutput.ToString()));
     }
 

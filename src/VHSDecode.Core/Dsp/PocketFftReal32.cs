@@ -17,6 +17,27 @@ internal static class PocketFftReal32
             static length => new Plan(length)).Forward(input);
     }
 
+    internal static void ForwardPowerOfTwo(
+        ReadOnlySpan<float> input,
+        float[] packedWorkspace,
+        Span<Complex32> output)
+    {
+        ArgumentNullException.ThrowIfNull(packedWorkspace);
+        ValidateLength(input.Length, nameof(input));
+        ValidateWorkspaceLength(
+            packedWorkspace.Length,
+            input.Length,
+            nameof(packedWorkspace));
+        ValidateWorkspaceLength(
+            output.Length,
+            (input.Length / 2) + 1,
+            nameof(output));
+        Plans.GetOrAdd(
+                input.Length,
+                static length => new Plan(length))
+            .Forward(input, packedWorkspace, output);
+    }
+
     internal static Complex32[] ForwardDucc(ReadOnlySpan<float> input)
     {
         ValidateLength(input.Length, nameof(input));
@@ -41,6 +62,25 @@ internal static class PocketFftReal32
         return Plans.GetOrAdd(
             outputLength,
             static length => new Plan(length)).Inverse(input);
+    }
+
+    internal static void InversePowerOfTwo(
+        ReadOnlySpan<Complex32> input,
+        float[] output)
+    {
+        ArgumentNullException.ThrowIfNull(output);
+        ValidateLength(output.Length, nameof(output));
+        if (input.Length != (output.Length / 2) + 1)
+        {
+            throw new ArgumentException(
+                "Half-spectrum length does not match the requested real output length.",
+                nameof(input));
+        }
+
+        Plans.GetOrAdd(
+                output.Length,
+                static length => new Plan(length))
+            .Inverse(input, output);
     }
 
     internal static Complex32[] ForwardAnyLength(
@@ -239,6 +279,24 @@ internal static class PocketFftReal32
             }
         }
 
+        internal void Forward(
+            ReadOnlySpan<float> input,
+            float[] packed,
+            Span<Complex32> output)
+        {
+            input.CopyTo(packed);
+            ExecuteForward(packed);
+            output[0] = new Complex32(packed[0], 0.0f);
+            for (int i = 1; i < output.Length - 1; i++)
+            {
+                output[i] = new Complex32(
+                    packed[(2 * i) - 1],
+                    packed[2 * i]);
+            }
+
+            output[^1] = new Complex32(packed[_length - 1], 0.0f);
+        }
+
         internal Complex32[] ForwardDucc(
             ReadOnlySpan<float> input,
             int workerThreads = 1)
@@ -398,6 +456,21 @@ internal static class PocketFftReal32
             packed[^1] = input[^1].Real;
             ExecuteBackward(packed, 1.0f / _length);
             return packed;
+        }
+
+        internal void Inverse(
+            ReadOnlySpan<Complex32> input,
+            float[] output)
+        {
+            output[0] = input[0].Real;
+            for (int i = 1; i < input.Length - 1; i++)
+            {
+                output[(2 * i) - 1] = input[i].Real;
+                output[2 * i] = input[i].Imaginary;
+            }
+
+            output[^1] = input[^1].Real;
+            ExecuteBackward(output, 1.0f / _length);
         }
 
         internal float[] InverseDucc(

@@ -806,6 +806,49 @@ public static class TbcOutputMetadataWriter
             videoParameters["tapeFormat"] = session.Parameters.TapeFormat;
         }
 
+        if (session.ExecutionOptions.DspBackend == DspBackend.ApproxFast)
+        {
+            ApproxProvider provider = session.ExecutionOptions.ApproxProvider
+                ?? throw new InvalidOperationException(
+                    "The approx-fast backend did not resolve an Approx provider.");
+            ApproxResampler resampler = session.ExecutionOptions.ApproxResampler
+                ?? throw new InvalidOperationException(
+                    "The approx-fast backend did not resolve an Approx resampler.");
+            ApproxPrecision precision = session.ExecutionOptions.ApproxPrecision
+                ?? throw new InvalidOperationException(
+                    "The approx-fast backend did not resolve an Approx precision contract.");
+            videoParameters["dspBackend"] = DspBackendParser.ApproxFastValue;
+            videoParameters["approximationContract"] =
+                ApproximationContract.ForSelection(resampler, precision);
+            videoParameters["approxProvider"] =
+                ApproxProviderParser.ToCommandLineValue(provider);
+            videoParameters["approxResampler"] =
+                ApproxResamplerParser.ToCommandLineValue(resampler);
+            if (session.ExecutionOptions.ApproxPrecisionIsExplicit
+                || precision == ApproxPrecision.Aggressive)
+            {
+                videoParameters["approxPrecision"] =
+                    ApproxPrecisionParser.ToCommandLineValue(precision);
+            }
+            videoParameters["approxProviderSelection"] =
+                session.ExecutionOptions.ApproxProviderIsExplicit
+                    ? "explicit"
+                    : "automatic";
+            videoParameters["approxProviderFallback"] =
+                session.ExecutionOptions.ApproxProviderFellBackFromIpp;
+            if (session.ExecutionOptions.ApproxProviderFellBackFromIpp
+                && !string.IsNullOrWhiteSpace(
+                    session.ExecutionOptions.ApproxProviderDiagnostic))
+            {
+                videoParameters["approxProviderFallbackReason"] =
+                    session.ExecutionOptions.ApproxProviderDiagnostic;
+            }
+            if (session.ExecutionOptions.ApproxProviderProcessArchitecture is { } architecture)
+            {
+                videoParameters["approxProviderArchitecture"] = architecture.ToString();
+            }
+        }
+
         return videoParameters;
     }
 

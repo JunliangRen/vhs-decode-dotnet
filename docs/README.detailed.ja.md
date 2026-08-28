@@ -196,7 +196,7 @@ extended oracle を使用しました。この release gate では IPP を除外
 
 性能改善は実装の一部ですが、決定的な出力と release 互換性を最優先します。
 
-DSP backend は `--dsp-backend exact|ipp-fast|cuda-fast` で明示的に選択します。この
+DSP backend は `--dsp-backend exact|ipp-fast|cuda-fast|approx-fast` で明示的に選択します。この
 parameter はこの .NET port の experimental extension であり、upstream
 `oyvindln/vhs-decode` v0.4.0 CLI には含まれません。`exact` が default で、
 既存の managed 互換経路を維持し、Intel IPP の probe や load は行いません。
@@ -209,13 +209,57 @@ bridge、ABI、CPU が利用できない場合は明確に失敗し、`exact` �
 しません。現在の IPP routing は VHS real-RF FFT、`current` profile の
 color-under Super-Gaussian DFT、および LaserDisc video、EFM、analog audio が使う
 power-of-two double-precision full-complex FFT stage を含みます。LD path は native
-bridge ABI v1.3 を使用します。CVBS と HiFi は未対応の `ipp-fast` を明示的に拒否し、
+bridge ABI v1.4 を使用します。CVBS と HiFi は未対応の `ipp-fast` を明示的に拒否し、
 Exact kernel を実行した結果を誤って benchmark として扱うことはありません。
 
-PAL/NTSC VHS の full `ipp-fast` と `cuda-fast` decode は
+`approx-fast` は VHS のみを対象とする別の experimental numerical contract です。
+default の `vhs-rf-transform-f32-v1` は transform と spectrum multiplication に意図的に
+FP32 を使用します。公開 control は final TBC sample resampler の
+`--approx-resampler sinc16|catmull-rom4` と、numerical precision contract の
+`--approx-precision balanced|aggressive` です。どちらも `approx-fast` でのみ有効で、
+他の backend と組み合わせた場合は無視せず fail-closed します。Approx は `exact` と
+`ipp-fast` のどちらとも異なる numerical contract で、release 互換 mode でも Exact の
+byte-equivalent replacement でもありません。
+
+`--approx-precision` を省略すると `balanced` となり、既存 behavior は変わりません。
+resampler の省略または明示的な `sinc16` は `vhs-rf-transform-f32-v1` を保持します。
+明示的な `catmull-rom4` は `vhs-rf-transform-f32-catmull-rom4-v2` を選択し、final
+luma/chroma TBC resampling のみ 4-tap FP32 Catmull-Rom kernel を使用します。
+sync/phase-analysis prefix は sinc のままで、これらの decision input を暗黙に置き換えません。
+
+明示的な `aggressive` は独立した
+`vhs-rf-transform-field-f32-catmull-rom4-burst-iq-prefix-chroma-fft-v6`
+contract を選択します。`--compat-version current`、
+`--approx-resampler catmull-rom4`、40 MSPS decode が必須です。field-sync path は
+`VideoLowPass`、その 9-tap boxcar、edge scan を FP32 のまま処理します。また、
+`current` chroma-burst Tune の 32-iteration nonlinear optimization を省略し、float32 積から
+導いた I/Q の phase/amplitude/DC initial estimate を直接採用して、burst frequency を公称値に
+保ち、chroma phase-analysis の各 line prefix を 16-tap sinc ではなく 4-tap
+Catmull-Rom で resample します。
+
+v6 chroma stage は resident input RFFT を再利用し、その half-spectrum に zero-phase
+`ChromaBurst |H|²` response を乗算し、IRFFT で float32 chroma buffer に直接出力します。
+従来の SOS forward/backward `filtfilt` path と比較して、異なる FP32 rounding と
+block-edge behavior を含む意図的な lossy numerical contract です。Exact/Balanced は
+変更されません。AFC/`--cafc`、chroma/video notch、`--export_raw_tbc`、
+non-color-under format、standard chroma filter を持たない configuration、その他従来の chroma
+path が必要な option は fail closed し、部分的に fallback しません。Aggressive
+precision は CTI setting を変更せず、`--cti_mix 0` は別の明示 option です。Approx
+path は VHS のみをサポートし、nonzero RF high boost を拒否します。v6 の固定 speedup
+や主観的な画質等価性は保証しません。対象 thread 数で同一 input の complete
+balanced/aggressive A/B decode を実行し、TBC、chroma、JSON、field order、`fileLoc`
+を確認してください。
+
+```text
+decode.exe vhs --dsp-backend approx-fast --pal input.lds output-balanced
+decode.exe vhs --dsp-backend approx-fast --approx-resampler catmull-rom4 --pal input.lds output-catmull
+decode.exe vhs --compat-version current --dsp-backend approx-fast --approx-resampler catmull-rom4 --approx-precision aggressive --pal input.lds output-aggressive
+```
+
+PAL/NTSC VHS の full `ipp-fast`、`cuda-fast`、`approx-fast` decode は
 `--decode-at-20msps`（alias `--decode_at_20msps`）も受け付けます。40 MSPS input は
 固定 anti-alias 2:1 filter を通してから downstream DSP を 20 MSPS で実行し、native
-20 MSPS input はその DSP rate に直接入ります。IPP は input loader、CUDA は full
+20 MSPS input はその DSP rate に直接入ります。Approx は input loader、CUDA は full
 signal graph の前段 GPU で reduction を行います。Exact full decode はこの switch を
 拒否します。supported VHS preview route は同じ mode を自動的に強制し、output metadata
 の `fileLoc` は元の source-sample 座標を維持します。

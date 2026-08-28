@@ -45,6 +45,66 @@ public sealed class ChromaReductionNumericsCompatibilityTests
             actual.Select(BitConverter.SingleToUInt32Bits));
     }
 
+    [Fact(DisplayName = "Current RF float32 chroma shift preserves pinned bits across vector boundaries")]
+    public void CurrentRfFloat32ChromaShiftPreservesPinnedBitsAcrossVectorBoundaries()
+    {
+        int[] lengths = [0, 1, 2, 3, 4, 5, 7, 8, 9, 15, 16, 17, 31, 32, 33, 257, 521];
+        int[] moves = [-513, -23, -3, -1, 0, 1, 3, 23, 513];
+        foreach (int length in lengths)
+        {
+            float[] input = Enumerable.Range(0, length)
+                .Select(index => index % 11 switch
+                {
+                    0 => 1e20f + index,
+                    1 => -1e20f - index,
+                    2 => MathF.PI * (index + 1),
+                    3 => -MathF.E * (index + 1),
+                    _ => MathF.Sin(index * 0.371f) * 12_345.6789f
+                })
+                .ToArray();
+            foreach (int move in moves)
+            {
+                float[] expected = PinnedCurrentFloatChromaShift(input, move);
+                float[] actual = VhsChromaDecoder.ShiftChromaAndRemoveDcFloat32CurrentInPlace(
+                    input.ToArray(),
+                    move);
+
+                Assert.Equal(
+                    expected.Select(BitConverter.SingleToUInt32Bits),
+                    actual.Select(BitConverter.SingleToUInt32Bits));
+            }
+        }
+
+        float[][] specialInputs =
+        [
+            [float.NaN, 1.0f, 2.0f, 3.0f],
+            [
+                BitConverter.UInt32BitsToSingle(0x7FC0_0001U),
+                BitConverter.UInt32BitsToSingle(0x7FC1_0000U),
+                BitConverter.UInt32BitsToSingle(0x7F80_0001U),
+                1.0f
+            ],
+            [float.PositiveInfinity, 1.0f, -2.0f, 3.0f],
+            [float.NegativeInfinity, -0.0f, 0.0f, 7.0f],
+            [float.PositiveInfinity, float.NegativeInfinity, -0.0f, 0.0f],
+            [-0.0f, 0.0f, -0.0f, 0.0f]
+        ];
+        foreach (float[] input in specialInputs)
+        {
+            foreach (int move in moves)
+            {
+                float[] expected = PinnedCurrentFloatChromaShift(input, move);
+                float[] actual = VhsChromaDecoder.ShiftChromaAndRemoveDcFloat32CurrentInPlace(
+                    input.ToArray(),
+                    move);
+
+                Assert.Equal(
+                    expected.Select(BitConverter.SingleToUInt32Bits),
+                    actual.Select(BitConverter.SingleToUInt32Bits));
+            }
+        }
+    }
+
     [Fact(DisplayName = "Current RF double storage preserves float32 shift semantics")]
     public void CurrentRfDoubleStoragePreservesFloat32ShiftSemantics()
     {
@@ -216,6 +276,41 @@ public sealed class ChromaReductionNumericsCompatibilityTests
             .AsSpan(chroma.Length - normalizedMove, normalizedMove)
             .ToArray()
             .Select(value => (float)value)
+            .ToArray();
+        int firstWrappedIndex = chroma.Length - normalizedMove;
+        double meanAccumulator = 0.0;
+        for (int index = firstWrappedIndex - 1; index >= 0; index--)
+        {
+            meanAccumulator += chroma[index];
+            chroma[index + normalizedMove] = chroma[index];
+        }
+
+        for (int index = 0; index < normalizedMove; index++)
+        {
+            meanAccumulator += wrapped[index];
+            chroma[index] = wrapped[index];
+        }
+
+        meanAccumulator /= chroma.Length;
+        for (int index = 0; index < chroma.Length; index++)
+        {
+            chroma[index] = (float)(chroma[index] - meanAccumulator);
+        }
+
+        return chroma;
+    }
+
+    private static float[] PinnedCurrentFloatChromaShift(float[] input, int move)
+    {
+        float[] chroma = input.ToArray();
+        if (chroma.Length == 0)
+        {
+            return chroma;
+        }
+
+        int normalizedMove = ((move % chroma.Length) + chroma.Length) % chroma.Length;
+        float[] wrapped = chroma
+            .AsSpan(chroma.Length - normalizedMove, normalizedMove)
             .ToArray();
         int firstWrappedIndex = chroma.Length - normalizedMove;
         double meanAccumulator = 0.0;

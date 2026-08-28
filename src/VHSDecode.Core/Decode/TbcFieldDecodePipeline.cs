@@ -256,6 +256,8 @@ public sealed class TbcFieldDecodePipeline : IDisposable
     private readonly VhsFieldLevelState? _vhsFieldLevelState;
     private readonly UpstreamBehaviorProfile _upstreamBehaviorProfile;
     private readonly DspBackend _dspBackend;
+    private readonly bool _useApproxFloat32Sync;
+    private readonly bool _useApproxFloat32FieldPayloads;
     private readonly ExactLengthDoubleWorkspaceCache _dcOffsetLowPassWorkspaces =
         new(DcOffsetLowPassWorkspaceCapacity);
     private readonly ExactLengthDoubleWorkspaceCache _chromaPhaseAnalysisWorkspaces = new(1);
@@ -404,7 +406,9 @@ public sealed class TbcFieldDecodePipeline : IDisposable
         int workerThreads = 1,
         UpstreamBehaviorProfile upstreamBehaviorProfile = UpstreamBehaviorProfile.V040,
         double? activeVideoStartUs = null,
-        DspBackend dspBackend = DspBackend.Exact)
+        DspBackend dspBackend = DspBackend.Exact,
+        bool useApproxFloat32Sync = false,
+        bool useApproxFloat32FieldPayloads = false)
     {
         _syncAnalyzer = syncAnalyzer;
         _renderer = renderer;
@@ -443,6 +447,8 @@ public sealed class TbcFieldDecodePipeline : IDisposable
         _decodeType = decodeType;
         _upstreamBehaviorProfile = upstreamBehaviorProfile;
         _dspBackend = dspBackend;
+        _useApproxFloat32Sync = useApproxFloat32Sync;
+        _useApproxFloat32FieldPayloads = useApproxFloat32FieldPayloads;
         if (upstreamBehaviorProfile == UpstreamBehaviorProfile.Current
             && string.Equals(decodeType, "vhs", StringComparison.Ordinal))
         {
@@ -455,9 +461,31 @@ public sealed class TbcFieldDecodePipeline : IDisposable
                 syncAnalyzer.UsecToSamples(0.22),
                 workerThreads,
                 parallelizePreciseEdgeScan: dspBackend == DspBackend.Exact,
-                useCompactParallelRadix: dspBackend == DspBackend.Exact,
+                useCompactParallelRadix:
+                    dspBackend == DspBackend.Exact || useApproxFloat32Sync,
                 useWideParallelPreprocessing: dspBackend == DspBackend.Exact);
             _vhsVSyncLevelRefiner = new VhsVSyncLevelRefiner();
+        }
+
+        if (_useApproxFloat32Sync && _vhsSyncDetector is null)
+        {
+            throw new NotSupportedException(
+                "The aggressive Approx float32 sync path requires current VHS sync detection.");
+        }
+
+        if (_useApproxFloat32Sync && _syncDetectionOptions.UseFallbackVSync)
+        {
+            throw new NotSupportedException(
+                "The aggressive Approx float32 sync path does not support fallback VSync; no partial fallback was performed.");
+        }
+
+        if (_useApproxFloat32FieldPayloads
+            && (!_useApproxFloat32Sync
+                || _renderer.SampleResamplingKernel
+                    != TbcSampleResamplingKernel.CatmullRom4Float32))
+        {
+            throw new NotSupportedException(
+                "The aggressive Approx float32 field payload path requires float32 sync and the Catmull-Rom4 resampler.");
         }
 
         _framesPerSecond = framesPerSecond is > 0.0 ? framesPerSecond : null;
@@ -491,6 +519,15 @@ public sealed class TbcFieldDecodePipeline : IDisposable
     internal bool CurrentVhsVSyncLevelRefinementEnabled
         => _vhsVSyncLevelRefiner is not null
             && !_syncDetectionOptions.UseSavedLevels;
+
+    internal bool UsesApproxFloat32Sync => _useApproxFloat32Sync;
+
+    internal bool UsesApproxFloat32FieldPayloads => _useApproxFloat32FieldPayloads;
+
+    internal TbcSampleResamplingKernel ChromaBurstResamplingKernel
+        => _useApproxFloat32FieldPayloads
+            ? TbcSampleResamplingKernel.CatmullRom4Float32
+            : TbcSampleResamplingKernel.KaiserSinc16;
 
     internal bool CurrentVhsChromaGroupDelayEnabled
         => _upstreamBehaviorProfile == UpstreamBehaviorProfile.Current
@@ -672,7 +709,10 @@ public sealed class TbcFieldDecodePipeline : IDisposable
                 workerThreads: session.ExecutionOptions.WorkerThreads,
                 upstreamBehaviorProfile:
                     session.ExecutionOptions.UpstreamBehaviorProfile,
-                dspBackend: session.ExecutionOptions.DspBackend),
+                dspBackend: session.ExecutionOptions.DspBackend,
+                approxProvider: session.ExecutionOptions.ApproxProvider,
+                useApproximateBurstFit:
+                    session.ExecutionOptions.ApproxPrecision == ApproxPrecision.Aggressive),
             BuildLaserDiscPilotRefineOptions(session.Spec.Name, session.System, session.Parameters),
             BuildLaserDiscNtscBurstRefineOptions(session.Spec.Name, session.System, session.Parameters),
             session.Spec.Name,
@@ -701,7 +741,11 @@ public sealed class TbcFieldDecodePipeline : IDisposable
                         .First()
                         .GetDouble()
                     : null,
-            dspBackend: session.ExecutionOptions.DspBackend);
+            dspBackend: session.ExecutionOptions.DspBackend,
+            useApproxFloat32Sync:
+                session.ExecutionOptions.ApproxPrecision == ApproxPrecision.Aggressive,
+            useApproxFloat32FieldPayloads:
+                session.ExecutionOptions.ApproxPrecision == ApproxPrecision.Aggressive);
     }
 
     public int EstimateReadSampleCount(int extraLines = 3)
@@ -1090,6 +1134,11 @@ public sealed class TbcFieldDecodePipeline : IDisposable
         }
 
         double threshold = prepared.Threshold;
+        if (_useApproxFloat32Sync && prepared.ExplicitThreshold)
+        {
+            throw new NotSupportedException(
+                "The aggressive Approx float32 sync path does not support an explicit sync threshold; no partial fallback was performed.");
+        }
         VideoOutputConverter activeVideoOutput = prepared.ConverterOverride
             ?? _laserDiscAgcConverter
             ?? _laserDiscSyncConverter
@@ -1099,11 +1148,31 @@ public sealed class TbcFieldDecodePipeline : IDisposable
         IReadOnlyList<Pulse> rawPulses;
         if (_vhsSyncDetector is not null && !prepared.ExplicitThreshold)
         {
-            currentVhsSync = _vhsSyncDetector.Detect(
-                pulseReference,
-                detectLevels: !prepared.UsedSavedLevels,
-                syncTipEstimate: activeVideoOutput.Ire0,
-                blankingEstimate: activeVideoOutput.IreToHz(activeVideoOutput.VSyncIre));
+            if (_useApproxFloat32Sync)
+            {
+                float[] float32PulseReference = span.VideoLowPassFloat32
+                    ?? throw new InvalidOperationException(
+                        "The aggressive Approx sync contract did not provide a float32 low-pass field buffer.");
+                if (float32PulseReference.Length != span.SampleCount)
+                {
+                    throw new InvalidOperationException(
+                        "The aggressive Approx float32 sync buffer length did not match the decoded field span.");
+                }
+
+                currentVhsSync = _vhsSyncDetector.DetectApproxFloat32(
+                    float32PulseReference,
+                    detectLevels: !prepared.UsedSavedLevels,
+                    syncTipEstimate: activeVideoOutput.Ire0,
+                    blankingEstimate: activeVideoOutput.IreToHz(activeVideoOutput.VSyncIre));
+            }
+            else
+            {
+                currentVhsSync = _vhsSyncDetector.Detect(
+                    pulseReference,
+                    detectLevels: !prepared.UsedSavedLevels,
+                    syncTipEstimate: activeVideoOutput.Ire0,
+                    blankingEstimate: activeVideoOutput.IreToHz(activeVideoOutput.VSyncIre));
+            }
             rawPulses = currentVhsSync.Pulses
                 .Select(static pulse => new Pulse(pulse.Start, pulse.Length))
                 .ToArray();
@@ -1243,7 +1312,6 @@ public sealed class TbcFieldDecodePipeline : IDisposable
             refinedPulses,
             fallbackRawPulses,
             timing,
-            span.VideoLowPass ?? span.Video,
             span.StartSample,
             meanLineLength,
             parity.IsFirstField,
@@ -1303,9 +1371,9 @@ public sealed class TbcFieldDecodePipeline : IDisposable
             int requiredPayloadSampleCount = prepared.DeferredVideoDcOffset != 0.0
                 || _preserveRawMetricSources
                 || !deferredVhsPayload.UsesSegmentedEnvelope
-                    ? span.Video.Length
+                    ? span.SampleCount
                     : RequiredVhsPayloadSampleCount(
-                        span.Video.Length,
+                        span.SampleCount,
                         line0.Location,
                         lineLocations.Locations,
                         meanLineLength,
@@ -1325,12 +1393,19 @@ public sealed class TbcFieldDecodePipeline : IDisposable
             && !prepared.ExplicitThreshold)
         {
             VhsVSyncLevelRefinementResult refinedLevels =
-                _vhsVSyncLevelRefiner!.RefineField(
-                    span.Video,
-                    line0.Location,
-                    meanLineLength,
-                    currentVhsSync.SyncTipLevel,
-                    currentVhsSync.BlankLevel);
+                _useApproxFloat32FieldPayloads
+                    ? _vhsVSyncLevelRefiner!.RefineField(
+                        RequireApproxFloat32Video(span),
+                        line0.Location,
+                        meanLineLength,
+                        currentVhsSync.SyncTipLevel,
+                        currentVhsSync.BlankLevel)
+                    : _vhsVSyncLevelRefiner!.RefineField(
+                        span.Video,
+                        line0.Location,
+                        meanLineLength,
+                        currentVhsSync.SyncTipLevel,
+                        currentVhsSync.BlankLevel);
             activeVideoOutput = ApplyCurrentVhsVSyncLevels(
                 refinedLevels,
                 activeVideoOutput);
@@ -1442,7 +1517,7 @@ public sealed class TbcFieldDecodePipeline : IDisposable
         }
 
         TbcLineResampler.ResamplingPlan? renderResamplingPlan =
-            span.Chroma is { Length: > 0 }
+            span.Chroma is { Length: > 0 } || _useApproxFloat32FieldPayloads
                 ? _renderer.PrepareFieldResampling(renderLineLocations, outputFirstLine)
                 : null;
         bool renderResamplingPlanTransferred = false;
@@ -1639,14 +1714,23 @@ public sealed class TbcFieldDecodePipeline : IDisposable
                                 ? null
                                 : _videoFieldResamplingWorkspaces.Get(
                                     renderResamplingPlan.DestinationLength);
-                        rendered = _renderer.RenderPreparedFieldPayload(
-                            span.Video,
-                            renderResamplingPlan,
-                            fieldNumber,
-                            fieldConverter,
-                            chromaPhase?.NextChromaRotationIndex,
-                            videoResamplingWorkspace,
-                            outputBufferLease?.Luma);
+                        rendered = _useApproxFloat32FieldPayloads
+                            ? _renderer.RenderPreparedFieldPayload(
+                                RequireApproxFloat32Video(span),
+                                renderResamplingPlan,
+                                fieldNumber,
+                                fieldConverter,
+                                chromaPhase?.NextChromaRotationIndex,
+                                videoResamplingWorkspace,
+                                outputBufferLease?.Luma)
+                            : _renderer.RenderPreparedFieldPayload(
+                                span.Video,
+                                renderResamplingPlan,
+                                fieldNumber,
+                                fieldConverter,
+                                chromaPhase?.NextChromaRotationIndex,
+                                videoResamplingWorkspace,
+                                outputBufferLease?.Luma);
                     }
                     else
                     {
@@ -1880,12 +1964,12 @@ public sealed class TbcFieldDecodePipeline : IDisposable
 
         int requiredSampleCount = _renderer.InterpolationMethod == TbcLineInterpolationMethod.Linear
             ? RequiredLinearVhsRenderPayloadSampleCount(
-                span.Video.Length,
+                span.SampleCount,
                 lineLocations,
                 firstLine,
                 _renderer.FrameSpec.OutputLineCount,
                 sourcePositionShift)
-            : span.Video.Length;
+            : span.SampleCount;
         materializer.EnsurePayloadMaterializedThrough(requiredSampleCount);
     }
 
@@ -1983,15 +2067,25 @@ public sealed class TbcFieldDecodePipeline : IDisposable
             {
                 try
                 {
-                    return _renderer.RenderPreparedFieldPayloadWithDiagnosticLogger(
-                        span.Video,
-                        renderResamplingPlan,
-                        fieldNumber,
-                        fieldConverter,
-                        chromaPhase?.NextChromaRotationIndex,
-                        videoWorkspaceLease?.Buffer,
-                        outputBufferLease.Luma,
-                        renderDiagnosticLogger);
+                    return _useApproxFloat32FieldPayloads
+                        ? _renderer.RenderPreparedFieldPayloadWithDiagnosticLogger(
+                            RequireApproxFloat32Video(span),
+                            renderResamplingPlan,
+                            fieldNumber,
+                            fieldConverter,
+                            chromaPhase?.NextChromaRotationIndex,
+                            videoWorkspaceLease?.Buffer,
+                            outputBufferLease.Luma,
+                            renderDiagnosticLogger)
+                        : _renderer.RenderPreparedFieldPayloadWithDiagnosticLogger(
+                            span.Video,
+                            renderResamplingPlan,
+                            fieldNumber,
+                            fieldConverter,
+                            chromaPhase?.NextChromaRotationIndex,
+                            videoWorkspaceLease?.Buffer,
+                            outputBufferLease.Luma,
+                            renderDiagnosticLogger);
                 }
                 finally
                 {
@@ -2666,7 +2760,8 @@ public sealed class TbcFieldDecodePipeline : IDisposable
                 lineLocations,
                 outputFirstLine,
                 phasePrefixSamples,
-                output);
+                output,
+                ChromaBurstResamplingKernel);
         }
         else
         {
@@ -2777,7 +2872,9 @@ public sealed class TbcFieldDecodePipeline : IDisposable
         int workerThreads = 1,
         UpstreamBehaviorProfile upstreamBehaviorProfile =
             UpstreamBehaviorProfile.V040,
-        DspBackend dspBackend = DspBackend.Exact)
+        DspBackend dspBackend = DspBackend.Exact,
+        ApproxProvider? approxProvider = null,
+        bool useApproximateBurstFit = false)
     {
         if (chromaOptions?.WriteChroma != true
             || !parameters.SysParams.TryGetProperty("colorBurstUS", out JsonElement colorBurstRange)
@@ -2853,7 +2950,8 @@ public sealed class TbcFieldDecodePipeline : IDisposable
                         JsonDouble(
                             parameters.RfParams,
                             "color_under_carrier"),
-                        dspBackend)
+                        dspBackend,
+                        approxProvider)
                     : null,
             ChromaDeemphasisFilter = chromaOptions.ChromaDeemphasisFilter
                 ? DecodeFilterSetBuilder.BuildChromaDeemphasisFilter(parameters, chromaSampleRateHz)
@@ -2897,6 +2995,9 @@ public sealed class TbcFieldDecodePipeline : IDisposable
             InitialChromaRotationIndex = initialChromaRotationIndex,
             WorkerThreads = Math.Max(0, workerThreads),
             UseCurrentChromaProcessing = useCurrentChromaProcessing,
+            ChromaBurstFitMaximumIterations = useApproximateBurstFit
+                ? 0
+                : CurrentChromaBurstFitter.DefaultMaximumIterations,
             SyncTipLength = checked((int)Math.Floor(
                 JsonDouble(parameters.SysParams, "hsyncPulseUS")
                 * outputSamplesPerUsec)),
@@ -4721,6 +4822,29 @@ public sealed class TbcFieldDecodePipeline : IDisposable
             return RefineLaserDiscLineLocationsFromHSync(span, lineLocations, converter);
         }
 
+        if (_useApproxFloat32Sync)
+        {
+            if (!_hSyncRefineOptions.Enabled)
+            {
+                return lineLocations;
+            }
+
+            float[] float32SyncReference = span.VideoLowPassFloat32
+                ?? throw new InvalidOperationException(
+                    "The aggressive Approx sync contract did not provide a float32 low-pass field buffer.");
+            if (float32SyncReference.Length != span.SampleCount)
+            {
+                throw new InvalidOperationException(
+                    "The aggressive Approx float32 HSync buffer length did not match the decoded field span.");
+            }
+
+            return RefineLineLocationsFromHSyncFloat32(
+                float32SyncReference,
+                lineLocations,
+                converter,
+                detectedSyncThreshold);
+        }
+
         if (!_hSyncRefineOptions.Enabled
             || span.VideoLowPass is not { Length: > 0 } syncReference
             || syncReference.Length != span.Video.Length)
@@ -4824,6 +4948,123 @@ public sealed class TbcFieldDecodePipeline : IDisposable
         }
 
         return new LineLocationResult(refined, filled);
+    }
+
+    private LineLocationResult RefineLineLocationsFromHSyncFloat32(
+        ReadOnlySpan<float> syncReference,
+        LineLocationResult lineLocations,
+        VideoOutputConverter converter,
+        double detectedSyncThreshold)
+    {
+        int oneMicrosecond = Math.Max(1, (int)_syncAnalyzer.SampleRateMHz);
+        int normalHSyncLength = Math.Max(1, (int)_syncAnalyzer.UsecToSamples(_syncAnalyzer.HSyncPulseUs));
+        int searchCount = Math.Max(1, oneMicrosecond * 2);
+        double[] refined = lineLocations.Locations.ToArray();
+        bool[] filled = lineLocations.Filled.ToArray();
+        double previousPorchLevel = -1.0;
+
+        for (int line = 0; line < refined.Length; line++)
+        {
+            if (IsVSyncLine(line))
+            {
+                filled[line] = true;
+                continue;
+            }
+
+            if (!double.IsFinite(refined[line]))
+            {
+                continue;
+            }
+
+            int searchStart = (int)Math.Round(
+                refined[line] - oneMicrosecond,
+                MidpointRounding.AwayFromZero);
+            if (searchStart < 0 || searchStart >= syncReference.Length - 1)
+            {
+                continue;
+            }
+
+            double? crossing = PulseDetection.CalculateZeroCrossing(
+                syncReference,
+                searchStart,
+                detectedSyncThreshold,
+                count: Math.Min(searchCount, syncReference.Length - searchStart - 1));
+            double originalLocation = refined[line];
+            double rightReferenceLocation = originalLocation;
+            if (crossing.HasValue && !filled[line])
+            {
+                bool leftRefined = TryRefineLeftHSync(
+                    syncReference,
+                    searchStart,
+                    crossing.Value,
+                    oneMicrosecond,
+                    previousPorchLevel,
+                    converter,
+                    out double refinedLocation,
+                    out double porchLevel,
+                    out bool preserveProvisionalLocation);
+                if (leftRefined)
+                {
+                    refined[line] = refinedLocation;
+                    rightReferenceLocation = refinedLocation;
+                    filled[line] = lineLocations.Filled[line];
+                    if (porchLevel > 0.0)
+                    {
+                        previousPorchLevel = porchLevel;
+                    }
+                }
+                else
+                {
+                    filled[line] = true;
+                    refined[line] = originalLocation;
+                    if (preserveProvisionalLocation)
+                    {
+                        rightReferenceLocation = refinedLocation;
+                    }
+                }
+            }
+            else
+            {
+                filled[line] = true;
+                refined[line] = originalLocation;
+            }
+
+            if (_hSyncRefineOptions.UseRightHSync
+                && TryRefineFromRightHSync(
+                    syncReference,
+                    searchStart,
+                    detectedSyncThreshold,
+                    normalHSyncLength,
+                    oneMicrosecond,
+                    rightReferenceLocation,
+                    converter,
+                    out double rightRefinedLocation,
+                    out double rightPorchLevel))
+            {
+                refined[line] = rightRefinedLocation;
+                filled[line] = false;
+                if (rightPorchLevel > 0.0)
+                {
+                    previousPorchLevel = rightPorchLevel;
+                }
+            }
+        }
+
+        return new LineLocationResult(refined, filled);
+    }
+
+    private static float[] RequireApproxFloat32Video(RfDecodedSpan span)
+    {
+        float[] video = span.VideoFloat32
+            ?? throw new InvalidOperationException(
+                "The aggressive Approx field payload contract did not provide a float32 video field buffer.");
+        if (video.Length != span.SampleCount)
+        {
+            throw new InvalidOperationException(
+                "The aggressive Approx float32 video buffer length did not match the decoded field span.");
+        }
+
+        return video;
     }
 
     private LineLocationResult RefineLaserDiscLineLocationsFromHSync(
@@ -5010,6 +5251,67 @@ public sealed class TbcFieldDecodePipeline : IDisposable
         return true;
     }
 
+    private bool TryRefineFromRightHSync(
+        ReadOnlySpan<float> syncReference,
+        int leftSearchStart,
+        double threshold,
+        int normalHSyncLength,
+        int oneMicrosecond,
+        double referenceLocation,
+        VideoOutputConverter converter,
+        out double refinedLocation,
+        out double porchLevel)
+    {
+        refinedLocation = 0.0;
+        porchLevel = 0.0;
+        int rightSearchStart = leftSearchStart + normalHSyncLength - oneMicrosecond;
+        if (rightSearchStart < 0 || rightSearchStart >= syncReference.Length - 1)
+        {
+            return false;
+        }
+
+        if (syncReference[rightSearchStart] > threshold)
+        {
+            return false;
+        }
+
+        int rightSearchCount = Math.Max(1, normalHSyncLength * 2);
+        double? rightCrossing = PulseDetection.CalculateZeroCrossing(
+            syncReference,
+            rightSearchStart,
+            threshold,
+            edge: 1,
+            count: Math.Min(rightSearchCount, syncReference.Length - rightSearchStart - 1));
+        if (!rightCrossing.HasValue)
+        {
+            return false;
+        }
+
+        if (!TryConfirmRightHSync(
+                syncReference,
+                rightSearchStart,
+                rightCrossing.Value,
+                normalHSyncLength,
+                oneMicrosecond,
+                converter,
+                out porchLevel))
+        {
+            return false;
+        }
+
+        double sampleRateMHz = (float)_syncAnalyzer.SampleRateMHz;
+        double candidate = rightCrossing.Value
+            - normalHSyncLength
+            + (2.25 * (sampleRateMHz / 40.0));
+        if (Math.Abs(candidate - referenceLocation) >= oneMicrosecond * 2.0)
+        {
+            return false;
+        }
+
+        refinedLocation = candidate;
+        return true;
+    }
+
     private static bool TryRefineLeftHSync(
         ReadOnlySpan<double> syncReference,
         int searchStart,
@@ -5090,6 +5392,83 @@ public sealed class TbcFieldDecodePipeline : IDisposable
         return true;
     }
 
+    private static bool TryRefineLeftHSync(
+        ReadOnlySpan<float> syncReference,
+        int searchStart,
+        double crossing,
+        int oneMicrosecond,
+        double previousPorchLevel,
+        VideoOutputConverter converter,
+        out double refinedLocation,
+        out double porchLevel,
+        out bool preserveProvisionalLocation)
+    {
+        refinedLocation = crossing;
+        porchLevel = 0.0;
+        preserveProvisionalLocation = false;
+        if (!HSyncAreaLooksValid(
+                syncReference,
+                crossing,
+                oneMicrosecond,
+                endUsec: 3.5,
+                minimumIre: -65.0,
+                maximumIre: 110.0,
+                converter)
+            || !TryMeanRange(
+                syncReference,
+                crossing + oneMicrosecond,
+                crossing + (2.5 * oneMicrosecond),
+                out double syncLevel))
+        {
+            return false;
+        }
+
+        preserveProvisionalLocation = true;
+        if (previousPorchLevel > 0.0)
+        {
+            porchLevel = previousPorchLevel;
+        }
+        else if (!TryMeanRange(
+            syncReference,
+            crossing - oneMicrosecond,
+            crossing - (0.5 * oneMicrosecond),
+            out porchLevel))
+        {
+            return false;
+        }
+
+        double midpoint = (porchLevel + syncLevel) / 2.0;
+        double? refinedCrossing = PulseDetection.CalculateZeroCrossing(
+            syncReference,
+            searchStart,
+            midpoint,
+            count: Math.Min(400, syncReference.Length - searchStart - 1));
+        if (!refinedCrossing.HasValue
+            || Math.Abs(refinedCrossing.Value - crossing) >= oneMicrosecond / 2.0)
+        {
+            if (previousPorchLevel <= 0.0)
+            {
+                return false;
+            }
+
+            refinedCrossing = PulseDetection.CalculateZeroCrossing(
+                syncReference,
+                searchStart,
+                (previousPorchLevel + syncLevel) / 2.0,
+                count: Math.Min(400, syncReference.Length - searchStart - 1));
+            if (!refinedCrossing.HasValue
+                || Math.Abs(refinedCrossing.Value - crossing) >= oneMicrosecond / 2.0)
+            {
+                return false;
+            }
+
+            porchLevel = previousPorchLevel;
+        }
+
+        refinedLocation = refinedCrossing.Value;
+        return true;
+    }
+
     private static bool TryConfirmRightHSync(
         ReadOnlySpan<double> syncReference,
         int rightSearchStart,
@@ -5110,6 +5489,49 @@ public sealed class TbcFieldDecodePipeline : IDisposable
                 maximumIre: 30.0,
                 converter)
             || !TryMeanRange(syncReference, rightDerivedStart + oneMicrosecond, rightDerivedStart + (2.5 * oneMicrosecond), out double syncLevel)
+            || !TryMeanRange(
+                syncReference,
+                rightDerivedStart + normalHSyncLength + oneMicrosecond,
+                rightDerivedStart + normalHSyncLength + (2.0 * oneMicrosecond),
+                out porchLevel))
+        {
+            return false;
+        }
+
+        double midpoint = (porchLevel + syncLevel) / 2.0;
+        double? refinedRightCrossing = PulseDetection.CalculateZeroCrossing(
+            syncReference,
+            rightSearchStart,
+            midpoint,
+            count: Math.Min(400, syncReference.Length - rightSearchStart - 1));
+        return refinedRightCrossing.HasValue
+            && Math.Abs(refinedRightCrossing.Value - rightCrossing) < oneMicrosecond / 2.0;
+    }
+
+    private static bool TryConfirmRightHSync(
+        ReadOnlySpan<float> syncReference,
+        int rightSearchStart,
+        double rightCrossing,
+        int normalHSyncLength,
+        int oneMicrosecond,
+        VideoOutputConverter converter,
+        out double porchLevel)
+    {
+        porchLevel = 0.0;
+        double rightDerivedStart = rightCrossing - normalHSyncLength;
+        if (!HSyncAreaLooksValid(
+                syncReference,
+                rightDerivedStart,
+                oneMicrosecond,
+                endUsec: 8.0,
+                minimumIre: -65.0,
+                maximumIre: 30.0,
+                converter)
+            || !TryMeanRange(
+                syncReference,
+                rightDerivedStart + oneMicrosecond,
+                rightDerivedStart + (2.5 * oneMicrosecond),
+                out double syncLevel)
             || !TryMeanRange(
                 syncReference,
                 rightDerivedStart + normalHSyncLength + oneMicrosecond,
@@ -5169,6 +5591,40 @@ public sealed class TbcFieldDecodePipeline : IDisposable
             && maximum <= converter.IreToHz(maximumIre);
     }
 
+    private static bool HSyncAreaLooksValid(
+        ReadOnlySpan<float> syncReference,
+        double crossing,
+        int oneMicrosecond,
+        double endUsec,
+        double minimumIre,
+        double maximumIre,
+        VideoOutputConverter converter)
+    {
+        int start = Math.Clamp(
+            (int)Math.Round(crossing - (0.75 * oneMicrosecond), MidpointRounding.AwayFromZero),
+            0,
+            syncReference.Length);
+        int end = Math.Clamp(
+            (int)Math.Round(crossing + (endUsec * oneMicrosecond), MidpointRounding.AwayFromZero),
+            start,
+            syncReference.Length);
+        if (end <= start)
+        {
+            return false;
+        }
+
+        double minimum = double.PositiveInfinity;
+        double maximum = double.NegativeInfinity;
+        for (int i = start; i < end; i++)
+        {
+            minimum = Math.Min(minimum, syncReference[i]);
+            maximum = Math.Max(maximum, syncReference[i]);
+        }
+
+        return minimum >= converter.IreToHz(minimumIre)
+            && maximum <= converter.IreToHz(maximumIre);
+    }
+
     private static bool TryMeanRange(
         ReadOnlySpan<double> source,
         double start,
@@ -5177,6 +5633,36 @@ public sealed class TbcFieldDecodePipeline : IDisposable
     {
         int startIndex = Math.Clamp((int)Math.Round(start, MidpointRounding.AwayFromZero), 0, source.Length);
         int endIndex = Math.Clamp((int)Math.Round(end, MidpointRounding.AwayFromZero), startIndex, source.Length);
+        if (endIndex <= startIndex)
+        {
+            mean = 0.0;
+            return false;
+        }
+
+        double sum = 0.0;
+        for (int i = startIndex; i < endIndex; i++)
+        {
+            sum += source[i];
+        }
+
+        mean = sum / (endIndex - startIndex);
+        return true;
+    }
+
+    private static bool TryMeanRange(
+        ReadOnlySpan<float> source,
+        double start,
+        double end,
+        out double mean)
+    {
+        int startIndex = Math.Clamp(
+            (int)Math.Round(start, MidpointRounding.AwayFromZero),
+            0,
+            source.Length);
+        int endIndex = Math.Clamp(
+            (int)Math.Round(end, MidpointRounding.AwayFromZero),
+            startIndex,
+            source.Length);
         if (endIndex <= startIndex)
         {
             mean = 0.0;
@@ -5597,7 +6083,6 @@ public sealed class TbcFieldDecodePipeline : IDisposable
         IReadOnlyList<ClassifiedSyncPulse> refinedPulses,
         IReadOnlyList<Pulse> rawPulses,
         SyncTiming timing,
-        ReadOnlySpan<double> demodLowPass,
         long spanStartSample,
         double meanLineLength,
         bool? detectedFirstField,
@@ -6738,10 +7223,13 @@ public sealed class TbcFieldDecodePipeline : IDisposable
         LineLocationResult lineLocations,
         bool? isFirstField)
     {
-        if (span.Envelope is not { Length: > 0 } envelope)
+        double[]? envelope = span.Envelope;
+        if (envelope is null || envelope.Length == 0)
         {
             return TbcDropoutMap.Empty;
         }
+
+        int envelopeLength = envelope.Length;
 
         int lineOffset = LaserDiscLineOffset(isFirstField);
         int startLine = lineOffset + 1;
@@ -6753,8 +7241,8 @@ public sealed class TbcFieldDecodePipeline : IDisposable
             return TbcDropoutMap.Empty;
         }
 
-        int startSample = Math.Clamp((int)Math.Floor(lineLocations.Locations[startLine]), 0, envelope.Length);
-        int endSample = Math.Clamp((int)Math.Ceiling(lineLocations.Locations[endLine]), startSample, envelope.Length);
+        int startSample = Math.Clamp((int)Math.Floor(lineLocations.Locations[startLine]), 0, envelopeLength);
+        int endSample = Math.Clamp((int)Math.Ceiling(lineLocations.Locations[endLine]), startSample, envelopeLength);
         if (endSample <= startSample)
         {
             return TbcDropoutMap.Empty;
@@ -6764,18 +7252,18 @@ public sealed class TbcFieldDecodePipeline : IDisposable
             span.DeferredVhsPayload is { UsesSegmentedEnvelope: true } materializer
                 ? materializer
                 : null;
+        float envelopeMean = deferredEnvelope?.MeanEnvelopeFloat32()
+            ?? NumpyReduction.MeanFloat32(envelope);
         double threshold = _dropoutOptions.AbsoluteThreshold
-            ?? (deferredEnvelope?.MeanEnvelopeFloat32()
-                ?? NumpyReduction.MeanFloat32(envelope))
-            * (float)_dropoutOptions.ThresholdFraction;
-        IReadOnlyList<RfDropoutRange> ranges = deferredEnvelope is null
-            ? RfDropoutDetector.FindDropouts(
-                envelope,
+            ?? envelopeMean * (float)_dropoutOptions.ThresholdFraction;
+        IReadOnlyList<RfDropoutRange> ranges = deferredEnvelope is not null
+            ? deferredEnvelope.FindEnvelopeDropouts(
                 startSample,
                 endSample,
                 threshold,
                 _dropoutOptions.Hysteresis)
-            : deferredEnvelope.FindEnvelopeDropouts(
+            : RfDropoutDetector.FindDropouts(
+                envelope,
                 startSample,
                 endSample,
                 threshold,

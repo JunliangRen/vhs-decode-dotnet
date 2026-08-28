@@ -208,6 +208,154 @@ public sealed class RfBlockCacheConcurrencyTests
         Assert.NotSame(secondAlternateLease.Span.Video, concurrentLease.Span.Video);
     }
 
+    [Fact(DisplayName = "Approx float32 field payloads preserve public reads and reuse leased sidecars")]
+    public void ApproxFloat32FieldPayloadsPreservePublicReadsAndReuseLeasedSidecars()
+    {
+        using var stream = new MemoryStream();
+        using var decoder = BuildDecoder(
+            new CountingSampleLoader(),
+            workerThreads: 4,
+            weakRfDiagnostics: true,
+            retainRfDiagnosticChannels: false,
+            useApproxFloat32FieldPayloads: true,
+            useCompactApproxFloat32Outputs: true);
+
+        RfDecodedSpan publicFirst = Assert.IsType<RfDecodedSpan>(
+            decoder.Read(stream, begin: 0, length: 24));
+        RfDecodedSpan publicSecond = Assert.IsType<RfDecodedSpan>(
+            decoder.Read(stream, begin: 12, length: 24));
+        Assert.Equal(24, publicFirst.SampleCount);
+        Assert.Equal(24, publicFirst.Video.Length);
+        Assert.Null(publicFirst.VideoFloat32);
+
+        RfBlockStreamDecoder.RfDecodedSpanLease firstLease = Assert.IsType<
+            RfBlockStreamDecoder.RfDecodedSpanLease>(
+            decoder.ReadLeased(stream, begin: 0, length: 24));
+        RfDecodedSpan first = firstLease.Span;
+        float[] firstVideo = Assert.IsType<float[]>(first.VideoFloat32);
+        Assert.Empty(first.Video);
+        Assert.Equal(24, first.SampleCount);
+        AssertExpandedFloat32Equal(publicFirst.Video, firstVideo);
+
+        Array.Fill(firstVideo, float.NaN);
+        firstLease.Dispose();
+        Assert.Equal(1, decoder.CachedReusableSpanBufferSetCount);
+
+        using RfBlockStreamDecoder.RfDecodedSpanLease secondLease = Assert.IsType<
+            RfBlockStreamDecoder.RfDecodedSpanLease>(
+            decoder.ReadLeased(stream, begin: 12, length: 24));
+        RfDecodedSpan second = secondLease.Span;
+        float[] secondVideo = Assert.IsType<float[]>(second.VideoFloat32);
+        Assert.Same(firstVideo, secondVideo);
+        Assert.Empty(second.Video);
+        Assert.Equal(24, second.SampleCount);
+        AssertExpandedFloat32Equal(publicSecond.Video, secondVideo);
+        Assert.DoesNotContain(secondVideo, float.IsNaN);
+    }
+
+    [Fact(DisplayName = "Staged Approx float32 field payloads materialize the leased sidecar")]
+    public void StagedApproxFloat32FieldPayloadsMaterializeTheLeasedSidecar()
+    {
+        using var referenceStream = new MemoryStream();
+        using var referenceDecoder = BuildDecoder(
+            new CountingSampleLoader(),
+            workerThreads: 4,
+            weakRfDiagnostics: true,
+            retainRfDiagnosticChannels: false,
+            useApproxFloat32Sync: true,
+            useApproxFloat32FieldPayloads: true,
+            useCompactApproxFloat32Outputs: true);
+        using var stagedStream = new MemoryStream();
+        using var stagedDecoder = BuildDecoder(
+            new CountingSampleLoader(),
+            workerThreads: 4,
+            weakRfDiagnostics: true,
+            retainRfDiagnosticChannels: false,
+            useApproxFloat32Sync: true,
+            useApproxFloat32FieldPayloads: true,
+            useCompactApproxFloat32Outputs: true);
+
+        RfDecodedSpan reference = Assert.IsType<RfDecodedSpan>(
+            referenceDecoder.Read(referenceStream, begin: 3, length: 24));
+        using RfBlockStreamDecoder.RfDecodedSpanLease lease = Assert.IsType<
+            RfBlockStreamDecoder.RfDecodedSpanLease>(
+            stagedDecoder.ReadVhsStagedLeased(stagedStream, begin: 3, length: 24));
+        RfDecodedSpan staged = lease.Span;
+        float[] stagedVideo = Assert.IsType<float[]>(staged.VideoFloat32);
+        RfBlockStreamDecoder.VhsPayloadMaterializer materializer = Assert.IsType<
+            RfBlockStreamDecoder.VhsPayloadMaterializer>(staged.DeferredVhsPayload);
+
+        Assert.Empty(staged.Video);
+        Assert.Equal(24, staged.SampleCount);
+        Array.Fill(stagedVideo, float.NaN);
+
+        materializer.EnsurePayloadMaterialized();
+
+        AssertExpandedFloat32Equal(reference.Video, stagedVideo);
+        Assert.DoesNotContain(stagedVideo, float.IsNaN);
+    }
+
+    [Fact(DisplayName = "Approx float32 field payloads fail closed when a block lacks float32 video")]
+    public void ApproxFloat32FieldPayloadsFailClosedWhenBlockLacksFloat32Video()
+    {
+        using var stream = new MemoryStream();
+        using var decoder = BuildDecoder(
+            new CountingSampleLoader(),
+            workerThreads: 1,
+            retainRfDiagnosticChannels: false,
+            useApproxFloat32FieldPayloads: true);
+
+        InvalidOperationException first = Assert.Throws<InvalidOperationException>(() =>
+            decoder.ReadLeased(stream, begin: 0, length: 24));
+        Assert.Contains("did not provide a float32 video block", first.Message, StringComparison.Ordinal);
+        Assert.Equal(1, decoder.CachedReusableSpanBufferSetCount);
+
+        InvalidOperationException second = Assert.Throws<InvalidOperationException>(() =>
+            decoder.ReadLeased(stream, begin: 12, length: 24));
+        Assert.Contains("no down-conversion fallback", second.Message, StringComparison.Ordinal);
+        Assert.Equal(1, decoder.CachedReusableSpanBufferSetCount);
+    }
+
+    [Fact(DisplayName = "Default and sync-only leases keep the double video payload contract")]
+    public void DefaultAndSyncOnlyLeasesKeepTheDoubleVideoPayloadContract()
+    {
+        using var defaultStream = new MemoryStream();
+        using var defaultDecoder = BuildDecoder(
+            new CountingSampleLoader(),
+            workerThreads: 4,
+            weakRfDiagnostics: true,
+            retainRfDiagnosticChannels: false,
+            useCompactApproxFloat32Outputs: true);
+        using var syncStream = new MemoryStream();
+        using var syncDecoder = BuildDecoder(
+            new CountingSampleLoader(),
+            workerThreads: 4,
+            weakRfDiagnostics: true,
+            retainRfDiagnosticChannels: false,
+            useApproxFloat32Sync: true,
+            useCompactApproxFloat32Outputs: true);
+
+        using RfBlockStreamDecoder.RfDecodedSpanLease defaultLease = Assert.IsType<
+            RfBlockStreamDecoder.RfDecodedSpanLease>(
+            defaultDecoder.ReadLeased(defaultStream, begin: 0, length: 24));
+        using RfBlockStreamDecoder.RfDecodedSpanLease syncLease = Assert.IsType<
+            RfBlockStreamDecoder.RfDecodedSpanLease>(
+            syncDecoder.ReadLeased(syncStream, begin: 0, length: 24));
+
+        Assert.Equal(24, defaultLease.Span.Video.Length);
+        Assert.Null(defaultLease.Span.VideoFloat32);
+        Assert.NotNull(defaultLease.Span.VideoLowPass);
+        Assert.Null(defaultLease.Span.VideoLowPassFloat32);
+        Assert.Equal(24, defaultLease.Span.SampleCount);
+
+        Assert.Equal(24, syncLease.Span.Video.Length);
+        Assert.Null(syncLease.Span.VideoFloat32);
+        Assert.Null(syncLease.Span.VideoLowPass);
+        Assert.NotNull(syncLease.Span.VideoLowPassFloat32);
+        Assert.Equal(24, syncLease.Span.SampleCount);
+        AssertDoubleBitsEqual(defaultLease.Span.Video, syncLease.Span.Video);
+    }
+
     [Fact(DisplayName = "Compact VHS RF spans retain only field-consumed channels")]
     public void CompactVhsRfSpansRetainOnlyFieldConsumedChannels()
     {
@@ -843,6 +991,138 @@ public sealed class RfBlockCacheConcurrencyTests
         Assert.Equal(2, pipeline.RetainedStreamOutputBufferSetCount);
     }
 
+    [Fact(DisplayName = "Direct compact VHS leases ignore foreign pipelines under concurrent release")]
+    public void DirectCompactVhsLeasesIgnoreForeignPipelinesUnderConcurrentRelease()
+    {
+        using RfBlockDecodePipeline owner = BuildPipeline(
+            new CountingSampleLoader(),
+            weakRfDiagnostics: true,
+            retainRfDiagnosticChannels: false,
+            float32Chroma: true,
+            fmDemodulatorMode: RfFmDemodulatorMode.VhsRustApproximation,
+            useCompactApproxFloat32Outputs: true,
+            useDirectStreamOutputBufferLease: true);
+        using RfBlockDecodePipeline foreign = BuildPipeline(
+            new CountingSampleLoader(),
+            weakRfDiagnostics: true,
+            retainRfDiagnosticChannels: false,
+            float32Chroma: true,
+            fmDemodulatorMode: RfFmDemodulatorMode.VhsRustApproximation,
+            useCompactApproxFloat32Outputs: true,
+            useDirectStreamOutputBufferLease: true);
+        double[] input = Enumerable.Range(0, TestBlockLength)
+            .Select(index => Math.Sin(index * 0.19) + (0.2 * Math.Cos(index * 0.31)))
+            .ToArray();
+        RfPipelineBlock block = owner.DecodePreparedStreamBlock(
+            input,
+            reportDiagnostics: false);
+
+        Assert.True(owner.UsesDirectStreamOutputBufferLease);
+        Parallel.For(0, 64, _ => foreign.ReleaseStreamBlock(block));
+        Assert.Equal(0, owner.RetainedStreamOutputBufferSetCount);
+        Assert.Equal(0, foreign.RetainedStreamOutputBufferSetCount);
+
+        Parallel.Invoke(
+            () => Parallel.For(0, 64, _ => owner.ReleaseStreamBlock(block)),
+            () => Parallel.For(0, 64, _ => foreign.ReleaseStreamBlock(block)));
+        Assert.Equal(1, owner.RetainedStreamOutputBufferSetCount);
+        Assert.Equal(0, foreign.RetainedStreamOutputBufferSetCount);
+    }
+
+    [Fact(DisplayName = "Direct compact VHS record clones preserve value identity without copying leases")]
+    public void DirectCompactVhsRecordClonesPreserveValueIdentityWithoutCopyingLeases()
+    {
+        using RfBlockDecodePipeline pipeline = BuildPipeline(
+            new CountingSampleLoader(),
+            weakRfDiagnostics: true,
+            retainRfDiagnosticChannels: false,
+            float32Chroma: true,
+            fmDemodulatorMode: RfFmDemodulatorMode.VhsRustApproximation,
+            useCompactApproxFloat32Outputs: true,
+            useDirectStreamOutputBufferLease: true);
+        double[] input = Enumerable.Range(0, TestBlockLength)
+            .Select(index => Math.Sin(index * 0.19) + (0.2 * Math.Cos(index * 0.31)))
+            .ToArray();
+        RfPipelineBlock original = pipeline.DecodePreparedStreamBlock(
+            input,
+            reportDiagnostics: false);
+        int activeHashCode = original.GetHashCode();
+        string activeDescription = original.ToString();
+        RfPipelineBlock clone = original with { };
+        var blocks = new HashSet<RfPipelineBlock> { original };
+
+        Assert.NotSame(original, clone);
+        Assert.Same(original.Demodulated.Video, clone.Demodulated.Video);
+        Assert.Equal(original, clone);
+        Assert.Equal(activeHashCode, clone.GetHashCode());
+        Assert.Equal(activeDescription, clone.ToString());
+        Assert.DoesNotContain("StreamBlockOutputBuffers", activeDescription, StringComparison.Ordinal);
+        Assert.Contains(clone, blocks);
+        Parallel.For(0, 64, _ => pipeline.ReleaseStreamBlock(clone));
+        Assert.Equal(0, pipeline.RetainedStreamOutputBufferSetCount);
+
+        Parallel.Invoke(
+            () => Parallel.For(0, 64, _ => pipeline.ReleaseStreamBlock(original)),
+            () => Parallel.For(0, 64, _ => pipeline.ReleaseStreamBlock(clone)));
+        pipeline.ReleaseStreamBlock(original);
+        pipeline.ReleaseStreamBlock(clone);
+        Assert.Equal(1, pipeline.RetainedStreamOutputBufferSetCount);
+        Assert.Equal(activeHashCode, original.GetHashCode());
+        Assert.Equal(activeDescription, original.ToString());
+        Assert.Equal(original, clone);
+        Assert.Contains(original, blocks);
+        Assert.Contains(clone, blocks);
+    }
+
+    [Fact(DisplayName = "Direct and table compact VHS leases preserve identical decoded samples")]
+    public void DirectAndTableCompactVhsLeasesPreserveIdenticalDecodedSamples()
+    {
+        using RfBlockDecodePipeline tablePipeline = BuildPipeline(
+            new CountingSampleLoader(),
+            weakRfDiagnostics: true,
+            retainRfDiagnosticChannels: false,
+            float32Chroma: true,
+            fmDemodulatorMode: RfFmDemodulatorMode.VhsRustApproximation,
+            useCompactApproxFloat32Outputs: true);
+        using RfBlockDecodePipeline directPipeline = BuildPipeline(
+            new CountingSampleLoader(),
+            weakRfDiagnostics: true,
+            retainRfDiagnosticChannels: false,
+            float32Chroma: true,
+            fmDemodulatorMode: RfFmDemodulatorMode.VhsRustApproximation,
+            useCompactApproxFloat32Outputs: true,
+            useDirectStreamOutputBufferLease: true);
+        double[] input = Enumerable.Range(0, TestBlockLength)
+            .Select(index => Math.Sin(index * 0.19) + (0.2 * Math.Cos(index * 0.31)))
+            .ToArray();
+        RfPipelineBlock table = tablePipeline.DecodePreparedStreamBlock(
+            input,
+            reportDiagnostics: false);
+        RfPipelineBlock direct = directPipeline.DecodePreparedStreamBlock(
+            input,
+            reportDiagnostics: false);
+        try
+        {
+            Assert.False(tablePipeline.UsesDirectStreamOutputBufferLease);
+            Assert.True(directPipeline.UsesDirectStreamOutputBufferLease);
+            AssertDoubleBitsEqual(table.Demodulated.Video, direct.Demodulated.Video);
+            AssertDoubleBitsEqual(
+                table.Demodulated.Envelope,
+                direct.Demodulated.Envelope);
+            AssertDoubleBitsEqual(
+                table.Demodulated.VideoLowPass,
+                direct.Demodulated.VideoLowPass);
+            AssertFloatBitsEqual(
+                Assert.IsType<float[]>(table.Demodulated.ChromaFloat32),
+                Assert.IsType<float[]>(direct.Demodulated.ChromaFloat32));
+        }
+        finally
+        {
+            tablePipeline.ReleaseStreamBlock(table);
+            directPipeline.ReleaseStreamBlock(direct);
+        }
+    }
+
     [Fact(DisplayName = "Compact VHS cache invalidation returns stream output buffers")]
     public void CompactVhsCacheInvalidationReturnsStreamOutputBuffers()
     {
@@ -1418,7 +1698,11 @@ public sealed class RfBlockCacheConcurrencyTests
         bool float32Chroma = false,
         RfFmDemodulatorMode? fmDemodulatorMode = null,
         bool analogAudio = false,
-        int laserDiscCompatibilityPrefetchBlocks = 0)
+        int laserDiscCompatibilityPrefetchBlocks = 0,
+        bool useApproxFloat32Sync = false,
+        bool useApproxFloat32FieldPayloads = false,
+        bool useCompactApproxFloat32Outputs = false,
+        bool useDirectStreamOutputBufferLease = false)
     {
         RfBlockDecodePipeline pipeline = BuildPipeline(
             loader,
@@ -1428,7 +1712,9 @@ public sealed class RfBlockCacheConcurrencyTests
             retainRfDiagnosticChannels,
             float32Chroma,
             fmDemodulatorMode,
-            analogAudio);
+            analogAudio,
+            useCompactApproxFloat32Outputs,
+            useDirectStreamOutputBufferLease);
         return new RfBlockStreamDecoder(
             pipeline,
             TestBlockLength,
@@ -1436,7 +1722,9 @@ public sealed class RfBlockCacheConcurrencyTests
             blockCutEnd: 2,
             workerThreads,
             prefetchBlocks,
-            laserDiscCompatibilityPrefetchBlocks);
+            laserDiscCompatibilityPrefetchBlocks,
+            useApproxFloat32Sync,
+            useApproxFloat32FieldPayloads);
     }
 
     private static RfBlockDecodePipeline BuildPipeline(
@@ -1447,7 +1735,9 @@ public sealed class RfBlockCacheConcurrencyTests
         bool retainRfDiagnosticChannels = true,
         bool float32Chroma = false,
         RfFmDemodulatorMode? fmDemodulatorMode = null,
-        bool analogAudio = false)
+        bool analogAudio = false,
+        bool useCompactApproxFloat32Outputs = false,
+        bool useDirectStreamOutputBufferLease = false)
     {
         Complex[] identity = RfDemodulator.IdentityFilter(TestBlockLength);
         double[] ones = Enumerable.Repeat(1.0, TestBlockLength).ToArray();
@@ -1518,17 +1808,38 @@ public sealed class RfBlockCacheConcurrencyTests
             };
         }
 
-        var pipeline = new RfBlockDecodePipeline(
+        DecodeFilterOptions? filterOptions = weakRfDiagnostics || fmDemodulatorMode.HasValue
+            ? new DecodeFilterOptions(
+                FmDemodulatorMode: fmDemodulatorMode ?? RfFmDemodulatorMode.VhsRustApproximation)
+            : null;
+        if (!useCompactApproxFloat32Outputs)
+        {
+            return new RfBlockDecodePipeline(
+                loader,
+                filters,
+                sampleRateHz: 16.0,
+                filterOptions: filterOptions,
+                diagnosticLogger: diagnosticLogger,
+                retainRfDiagnosticChannels: retainRfDiagnosticChannels);
+        }
+
+        return new RfBlockDecodePipeline(
             loader,
             filters,
             sampleRateHz: 16.0,
-            filterOptions: weakRfDiagnostics || fmDemodulatorMode.HasValue
-                ? new DecodeFilterOptions(
-                    FmDemodulatorMode: fmDemodulatorMode ?? RfFmDemodulatorMode.VhsRustApproximation)
-                : null,
+            filterOptions: filterOptions,
+            cvbsOptions: null,
+            inputProcessor: null,
             diagnosticLogger: diagnosticLogger,
-            retainRfDiagnosticChannels: retainRfDiagnosticChannels);
-        return pipeline;
+            retainRfDiagnosticChannels: retainRfDiagnosticChannels,
+            dspBackend: DspBackend.ApproxFast,
+            approxProvider: ApproxProvider.Managed,
+            upstreamBehaviorProfile: UpstreamBehaviorProfile.Current,
+            parallelizeVhsInverseStaging: false,
+            vhsInverseCompanionWorkerThreads: 1,
+            useImmutableApproxFilterBank: false,
+            useCompactApproxFloat32Outputs: true,
+            useDirectStreamOutputBufferLease: useDirectStreamOutputBufferLease);
     }
 
     private static void WaitForReadCount(CountingSampleLoader loader, int expected)
@@ -1580,6 +1891,17 @@ public sealed class RfBlockCacheConcurrencyTests
         Assert.True(
             MemoryMarshal.AsBytes(expected).SequenceEqual(MemoryMarshal.AsBytes(actual)),
             "Float sequences differ at the bit level.");
+    }
+
+    private static void AssertExpandedFloat32Equal(
+        ReadOnlySpan<double> expected,
+        ReadOnlySpan<float> actual)
+    {
+        Assert.Equal(expected.Length, actual.Length);
+        for (int index = 0; index < expected.Length; index++)
+        {
+            Assert.Equal(expected[index], actual[index]);
+        }
     }
 
     private sealed class CountingSampleLoader : IRfSampleLoader

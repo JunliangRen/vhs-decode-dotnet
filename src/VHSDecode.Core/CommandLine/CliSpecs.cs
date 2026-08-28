@@ -34,7 +34,13 @@ public static class CliSpecs
 
     public static readonly string[] VideoSystems = ["PAL", "PAL_M", "PALM", "NTSC", "MESECAM", "405", "819", "NLINHA"];
 
-    public static readonly string[] DspBackends = ["exact", "ipp-fast", "cuda-fast"];
+    public static readonly string[] DspBackends = ["exact", "ipp-fast", "cuda-fast", "approx-fast"];
+
+    public static readonly string[] ApproxProviders = ["managed", "ipp"];
+
+    public static readonly string[] ApproxResamplers = ["sinc16", "catmull-rom4"];
+
+    public static readonly string[] ApproxPrecisions = ["balanced", "aggressive"];
 
     public static readonly string[] CompatibilityVersions = ["v0.4.0", "current"];
 
@@ -108,6 +114,9 @@ public static class CliSpecs
             DecodeAt20MspsDestination,
             ["--decode-at-20msps", "--decode_at_20msps"]);
         yield return CompatibilityVersion();
+        yield return ApproxProvider();
+        yield return ApproxResampler();
+        yield return ApproxPrecision();
         yield return Str("tape_format", ["--tf", "--tape_format"], "VHS", SupportedTapeFormats, Upper);
         yield return Str("tape_speed", ["--ts", "--tape_speed"], "sp", TapeSpeeds, Lower);
         yield return Str("params_file", ["--params_file"], null, validationError: ValidateParamsFile);
@@ -317,7 +326,8 @@ public static class CliSpecs
         string? defaultValue,
         string[]? choices = null,
         Func<string, string>? normalize = null,
-        Func<string, string?>? validationError = null)
+        Func<string, string?>? validationError = null,
+        bool hidden = false)
         => new()
         {
             Destination = dest,
@@ -329,7 +339,8 @@ public static class CliSpecs
             Choices = choices,
             NormalizeString = normalize,
             ParseErrorTypeName = "str",
-            ValidationError = validationError
+            ValidationError = validationError,
+            Hidden = hidden
         };
 
     private static OptionSpec OptionalStr(
@@ -424,6 +435,21 @@ public static class CliSpecs
 
     private static OptionSpec DspBackend()
         => Str("dsp_backend", ["--dsp-backend"], "exact", DspBackends, Lower);
+
+    private static OptionSpec ApproxProvider()
+        => Str(
+            "approx_provider",
+            ["--approx-provider"],
+            null,
+            ApproxProviders,
+            Lower,
+            hidden: true);
+
+    private static OptionSpec ApproxResampler()
+        => Str("approx_resampler", ["--approx-resampler"], null, ApproxResamplers, Lower);
+
+    private static OptionSpec ApproxPrecision()
+        => Str("approx_precision", ["--approx-precision"], null, ApproxPrecisions, Lower);
 
     private static OptionSpec CompatibilityVersion()
         => Str("compat_version", ["--compat-version"], "v0.4.0", CompatibilityVersions, Lower);

@@ -1,4 +1,5 @@
 using VHSDecode.Core.CommandLine;
+using VHSDecode.Core.Dsp;
 
 namespace VHSDecode.Preview;
 
@@ -59,9 +60,20 @@ public sealed class PreviewCommandRunner
                 }
                 else
                 {
-                    output.WriteLine(provider.IppFastEnabled
-                        ? "IPP-FAST: enabled (runtime initialization succeeded)"
-                        : "IPP-FAST: disabled (Exact backend active)");
+                    if (provider.ApproxFastEnabled)
+                    {
+                        output.WriteLine(
+                            $"APPROX-FAST: provider={ApproxProviderParser.ToCommandLineValue(provider.ApproxProvider!.Value)}, "
+                            + (provider.IppAccelerationEnabled
+                                ? "IPP acceleration enabled"
+                                : "managed kernels active"));
+                    }
+                    else
+                    {
+                        output.WriteLine(provider.IppFastEnabled
+                            ? "IPP-FAST: enabled (runtime initialization succeeded)"
+                            : "IPP-FAST: disabled (Exact backend active)");
+                    }
                 }
                 output.WriteLine(
                     $"Preview RF rate: {provider.SourceSampleRateHz / 1_000_000.0:0.###}"

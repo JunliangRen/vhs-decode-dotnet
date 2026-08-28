@@ -199,7 +199,7 @@ Performance work is part of the implementation, while deterministic output and
 release compatibility remain the first constraint.
 
 The DSP backend is selected explicitly with
-`--dsp-backend exact|ipp-fast|cuda-fast`. This option is an experimental extension in
+`--dsp-backend exact|ipp-fast|cuda-fast|approx-fast`. This option is an experimental extension in
 this .NET port and is not part of the upstream `oyvindln/vhs-decode` v0.4.0
 CLI. `exact` is the default and retains the existing managed compatibility
 path without probing or loading Intel IPP. `ipp-fast` is an opt-in Windows x64
@@ -212,14 +212,63 @@ if the bridge, ABI, or CPU is unavailable. It never silently falls back to
 `exact`. Current IPP routing covers the VHS real-RF FFT, the `current` profile's
 color-under Super-Gaussian DFT, and the power-of-two double-precision
 full-complex FFT stages used by LaserDisc video, EFM, and analog audio. The LD
-route uses native bridge ABI v1.3. CVBS and HiFi reject `ipp-fast` as unsupported
+route uses native bridge ABI v1.4. CVBS and HiFi reject `ipp-fast` as unsupported
 instead of quietly benchmarking their Exact kernels.
 
-For PAL/NTSC VHS, complete `ipp-fast` and `cuda-fast` decode also accept
+`approx-fast` is a separate VHS-only experimental FP32 path for transform and
+spectrum multiplication work. Its public controls are the final TBC resampler,
+selected with `--approx-resampler sinc16|catmull-rom4`, and the numerical
+precision contract, selected with `--approx-precision balanced|aggressive`.
+Both options are valid only with `approx-fast`; using either with another
+backend fails closed instead of being ignored. Approx is a distinct numerical
+contract from both `exact` and `ipp-fast`, so it is not a release-compatibility
+mode or a byte-equivalent replacement for Exact.
+
+Omitting `--approx-precision` selects `balanced`. Its behavior is unchanged:
+omitting `--approx-resampler`, or selecting `sinc16`, retains the existing
+`vhs-rf-transform-f32-v1` contract. Explicit `catmull-rom4` selects
+`vhs-rf-transform-f32-catmull-rom4-v2` and uses four-tap float32 Catmull-Rom for
+the final luma/chroma TBC resampling. Sync detection and phase analysis continue
+to use the sinc-based prefix resampler, so the option does not silently replace
+those decision inputs.
+
+Explicit `aggressive` selects the separate
+`vhs-rf-transform-field-f32-catmull-rom4-burst-iq-prefix-chroma-fft-v6`
+contract. It requires `--compat-version current`,
+`--approx-resampler catmull-rom4`, and a 40 MSPS decode. The field-sync route
+keeps `VideoLowPass`, its nine-tap boxcar, and the edge scan in FP32. It also
+skips `current`'s 32-iteration nonlinear chroma-burst Tune, directly uses
+float32-derived I/Q phase, amplitude, and DC initial estimates, keeps the
+nominal burst frequency, and resamples chroma phase-analysis line prefixes with
+four-tap Catmull-Rom instead of the 16-tap sinc kernel.
+
+The v6 chroma stage reuses the resident input RFFT, multiplies its half-spectrum
+by the zero-phase `ChromaBurst |H|²` response, and runs an IRFFT directly into
+the float32 chroma buffer. Relative to the older SOS forward/backward `filtfilt`
+path, this is an intentionally lossy numerical contract, including different
+FP32 rounding and block-edge behavior. Exact and Balanced remain unchanged.
+AFC/`--cafc`, chroma or video notches, `--export_raw_tbc`, non-color-under
+formats, configurations without the standard chroma filter, and other options
+that require the older chroma path fail closed; no partial fallback is
+performed. Aggressive precision does not change the CTI setting; `--cti_mix 0`
+remains a separate explicit option. The Approx path supports only VHS and
+rejects nonzero RF high boost. No fixed speedup or visual-equivalence claim is
+promised for v6: compare complete same-input balanced/aggressive decodes with
+the intended thread count, including TBC/chroma/JSON, ordered fields, and
+`fileLoc`, before drawing a conclusion.
+
+```text
+decode.exe vhs --dsp-backend approx-fast --pal input.lds output-balanced
+decode.exe vhs --dsp-backend approx-fast --approx-resampler sinc16 --pal input.lds output-sinc
+decode.exe vhs --dsp-backend approx-fast --approx-resampler catmull-rom4 --pal input.lds output-catmull
+decode.exe vhs --compat-version current --dsp-backend approx-fast --approx-resampler catmull-rom4 --approx-precision aggressive --pal input.lds output-aggressive
+```
+
+For PAL/NTSC VHS, complete `ipp-fast`, `cuda-fast`, and `approx-fast` decode also accept
 `--decode-at-20msps` (alias `--decode_at_20msps`). A 40 MSPS input is passed
 through the fixed anti-alias 2:1 filter before the downstream DSP runs at 20
-MSPS; native 20 MSPS input enters that DSP rate directly. IPP performs the
-reduction in its input loader, while CUDA performs it on the GPU before the
+MSPS; native 20 MSPS input enters that DSP rate directly. Approx performs the
+reduction in the input loader, while CUDA performs it on the GPU before the
 full signal graph. Exact complete decode rejects the switch. Supported VHS
 preview routes force the same mode automatically, and output metadata keeps
 `fileLoc` in original source-sample coordinates.

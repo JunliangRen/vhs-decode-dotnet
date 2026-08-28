@@ -18,7 +18,7 @@ internal readonly record struct CurrentChromaBurstFit(
 internal static class CurrentChromaBurstFitter
 {
     private const int ParameterCount = 4;
-    private const int MaximumIterations = 32;
+    internal const int DefaultMaximumIterations = 32;
     private const double FrequencyWeight = 1e4;
     private const double MaximumPrecision = 1e-10;
     private const double DiagonalRegularization = 1e-6;
@@ -28,7 +28,8 @@ internal static class CurrentChromaBurstFitter
         int burstStart,
         ReadOnlySpan<double> burstSin,
         ReadOnlySpan<double> burstCos,
-        double fscHz)
+        double fscHz,
+        int maximumIterations = DefaultMaximumIterations)
     {
         if (burst.Length == 0)
         {
@@ -37,6 +38,14 @@ internal static class CurrentChromaBurstFitter
 
         ArgumentOutOfRangeException.ThrowIfNegative(burstStart);
         ArgumentOutOfRangeException.ThrowIfNegativeOrZero(fscHz);
+        ArgumentOutOfRangeException.ThrowIfNegative(maximumIterations);
+        if (maximumIterations > DefaultMaximumIterations)
+        {
+            throw new ArgumentOutOfRangeException(
+                nameof(maximumIterations),
+                $"Current chroma burst fitting supports at most {DefaultMaximumIterations} iterations.");
+        }
+
         if (burstStart > burstSin.Length - burst.Length
             || burstStart > burstCos.Length - burst.Length)
         {
@@ -69,7 +78,8 @@ internal static class CurrentChromaBurstFitter
             ref amplitude,
             ref phase,
             ref dc,
-            ref frequency);
+            ref frequency,
+            maximumIterations);
 
         double positivePhase = PositiveModulo(phase, Math.Tau);
         double center = burstStart
@@ -94,7 +104,8 @@ internal static class CurrentChromaBurstFitter
         ref double amplitude,
         ref double phase,
         ref double dc,
-        ref double frequency)
+        ref double frequency,
+        int maximumIterations)
     {
         Span<double> time = burst.Length <= 256
             ? stackalloc double[burst.Length]
@@ -120,7 +131,7 @@ internal static class CurrentChromaBurstFitter
         Span<double> rhs = stackalloc double[ParameterCount];
         Span<double> delta = stackalloc double[ParameterCount];
         double frequencyTarget = fscHz;
-        for (int iteration = 0; iteration < MaximumIterations; iteration++)
+        for (int iteration = 0; iteration < maximumIterations; iteration++)
         {
             normal.Clear();
             rhs.Clear();

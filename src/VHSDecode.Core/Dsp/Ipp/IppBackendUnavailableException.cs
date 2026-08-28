@@ -19,7 +19,10 @@ public sealed class IppBackendUnavailableException : InvalidOperationException
         : base($"The explicit '{DspBackendParser.IppFastValue}' DSP backend is unavailable: {detail}", innerException)
     {
         FailureKind = failureKind;
+        Detail = detail;
     }
 
     public IppBackendFailureKind FailureKind { get; }
+
+    public string Detail { get; }
 }

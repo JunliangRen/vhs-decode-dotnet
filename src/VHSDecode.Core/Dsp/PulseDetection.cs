@@ -42,6 +42,39 @@ public static class PulseDetection
         return CalculateZeroCrossingForward(data, startOffset, target, edge, count);
     }
 
+    internal static double? CalculateZeroCrossing(
+        ReadOnlySpan<float> data,
+        int startOffset,
+        double target,
+        int edge = 0,
+        int count = 16,
+        bool reverse = false)
+    {
+        if (startOffset < 0 || startOffset >= data.Length)
+        {
+            throw new ArgumentOutOfRangeException(nameof(startOffset));
+        }
+
+        if (reverse)
+        {
+            float[] reversed = new float[startOffset + 1];
+            for (int i = 0; i <= startOffset; i++)
+            {
+                reversed[i] = data[startOffset - i];
+            }
+
+            double? reverseCrossing = CalculateZeroCrossingForward(
+                reversed,
+                0,
+                target,
+                edge,
+                count);
+            return reverseCrossing is null ? null : startOffset - reverseCrossing.Value;
+        }
+
+        return CalculateZeroCrossingForward(data, startOffset, target, edge, count);
+    }
+
     public static IReadOnlyList<Pulse> FindPulses(
         ReadOnlySpan<double> syncReference,
         double high,
@@ -248,7 +281,63 @@ public static class PulseDetection
         return x - 1 + y;
     }
 
+    private static double? CalculateZeroCrossingForward(
+        ReadOnlySpan<float> data,
+        int startOffset,
+        double target,
+        int edge,
+        int count)
+    {
+        int actualEdge = edge;
+        if (actualEdge == 0)
+        {
+            actualEdge = data[startOffset] < target ? 1 : -1;
+        }
+
+        int searchEnd = Math.Min(data.Length, startOffset + count + 1);
+        int? location = FindFirstCrossing(
+            data[startOffset..searchEnd],
+            target,
+            actualEdge == 1);
+        if (location is null)
+        {
+            return null;
+        }
+
+        int x = startOffset + location.Value;
+        double a = data[x - 1] - target;
+        double b = data[x] - target;
+        double y = b - a != 0.0 ? -a / (-a + b) : 0.0;
+        return x - 1 + y;
+    }
+
     private static int? FindFirstCrossing(ReadOnlySpan<double> data, double target, bool rising)
+    {
+        if (rising)
+        {
+            for (int i = 1; i < data.Length; i++)
+            {
+                if (data[i - 1] < target && data[i] >= target)
+                {
+                    return i;
+                }
+            }
+        }
+        else
+        {
+            for (int i = 1; i < data.Length; i++)
+            {
+                if (data[i - 1] > target && data[i] <= target)
+                {
+                    return i;
+                }
+            }
+        }
+
+        return null;
+    }
+
+    private static int? FindFirstCrossing(ReadOnlySpan<float> data, double target, bool rising)
     {
         if (rising)
         {

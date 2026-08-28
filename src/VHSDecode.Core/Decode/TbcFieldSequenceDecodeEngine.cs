@@ -1499,8 +1499,8 @@ public sealed class TbcFieldSequenceDecodeEngine
 
         long estimatedEnd = intendedOffset + session.TbcFieldDecoder.EstimateVhsPayloadSampleCount();
         materializer.ConfigureInitialPayloadSampleCount(
-            estimatedEnd >= span.Video.Length
-                ? span.Video.Length
+            estimatedEnd >= span.SampleCount
+                ? span.SampleCount
                 : checked((int)estimatedEnd));
     }
 
