@@ -79,8 +79,8 @@ public sealed class RfContainerLoaderIntegrationTests
     public void CudaFullMapsPyAvCoordinatesBeforeIndexedRawFlacReads()
     {
         Assert.SkipUnless(
-            CommandIsAvailable("ffmpeg"),
-            "ffmpeg must be available on PATH.");
+            CommandIsAvailable("ffmpeg") && CommandIsAvailable("ffprobe"),
+            "ffmpeg and ffprobe must be available on PATH.");
 
         string directory = CreateTestDirectory();
         try
@@ -179,8 +179,8 @@ public sealed class RfContainerLoaderIntegrationTests
     public void IndexedRawFlacPumpFailuresPropagateThroughEof()
     {
         Assert.SkipUnless(
-            CommandIsAvailable("ffmpeg"),
-            "ffmpeg must be available on PATH.");
+            CommandIsAvailable("ffmpeg") && CommandIsAvailable("ffprobe"),
+            "ffmpeg and ffprobe must be available on PATH.");
 
         string directory = CreateTestDirectory();
         try
@@ -827,7 +827,7 @@ public sealed class RfContainerLoaderIntegrationTests
         int[] frameLengths = ProbeAudioFrameLengths(path);
         short[] decoded = DecodePcm16(path);
         short[] expected = BuildPaddedSamples(decoded, frameLengths);
-        bool enforceReleaseHashes = ProbeFfmpegMajorVersion() >= 8;
+        bool enforceReleaseHashes = ProbeFfmpegReleaseHashRequirement();
         using var loader = new FfmpegPcm16SampleLoader(path);
         using FileStream input = File.OpenRead(path);
         foreach (ReadCase readCase in readCases)
@@ -853,7 +853,32 @@ public sealed class RfContainerLoaderIntegrationTests
         }
     }
 
-    private static int ProbeFfmpegMajorVersion()
+    [Theory(DisplayName = "RF hash gates recognize release and nightly FFmpeg banners")]
+    [InlineData("ffmpeg version 7.1.2 Copyright", false)]
+    [InlineData("ffmpeg version n8.0 Copyright", true)]
+    [InlineData("ffmpeg version 8.1.2-essentials_build Copyright", true)]
+    [InlineData("ffmpeg version 10.0 Copyright", true)]
+    [InlineData("ffmpeg version N-120000-gabcdef\nlibavformat 61. 7.100 / 61. 7.100\n", false)]
+    [InlineData("ffmpeg version N-125000-gabcdef\r\nlibavformat 62. 3.100 / 62. 3.100\r\n", true)]
+    [InlineData("ffmpeg version N-126455-gecc7eb519e-20260907\nlibavformat 63. 6.100 / 63. 6.100\n", true)]
+    [InlineData("ffmpeg version git-abcdef\nlibavformat  62.3.100 / 62.3.100\n", true)]
+    [InlineData("ffmpeg version git-abcdef\nlibavformat 61.7.100 / 62.3.100\n", true)]
+    [InlineData("ffmpeg version git-abcdef\nlibavformat 62.3.100 / 61.7.100\n", false)]
+    public void FfmpegReleaseHashRequirementRecognizesVersionBanners(string banner, bool expected)
+    {
+        Assert.Equal(expected, GetFfmpegReleaseHashRequirement(banner));
+    }
+
+    [Theory(DisplayName = "Unrecognized FFmpeg banners cannot silently disable RF hash gates")]
+    [InlineData("")]
+    [InlineData("ffmpeg version N-126455-gecc7eb519e")]
+    [InlineData("ffmpeg version unknown\nlibavformat unknown\n")]
+    public void FfmpegReleaseHashRequirementRejectsUnknownVersion(string banner)
+    {
+        Assert.Throws<InvalidOperationException>(() => GetFfmpegReleaseHashRequirement(banner));
+    }
+
+    private static bool ProbeFfmpegReleaseHashRequirement()
     {
         ProcessStartInfo startInfo = CreateProcessStartInfo("ffmpeg", ["-version"]);
         using Process process = Process.Start(startInfo)
@@ -866,14 +891,35 @@ public sealed class RfContainerLoaderIntegrationTests
             process.ExitCode == 0,
             $"ffmpeg exited with {process.ExitCode}: {standardError.Result}");
 
+        return GetFfmpegReleaseHashRequirement(standardOutput.Result);
+    }
+
+    private static bool GetFfmpegReleaseHashRequirement(string versionOutput)
+    {
         Match match = Regex.Match(
-            standardOutput.Result,
+            versionOutput,
             @"^ffmpeg version\s+(?:n)?(?<major>\d+)",
             RegexOptions.CultureInvariant);
-        Assert.True(match.Success, $"Unable to parse ffmpeg version from: {standardOutput.Result}");
+        if (match.Success)
+        {
+            return int.Parse(
+                match.Groups["major"].Value,
+                System.Globalization.CultureInfo.InvariantCulture) >= 8;
+        }
+
+        // Nightly banners have no release number. FFmpeg 8 introduced libavformat 62.
+        match = Regex.Match(
+            versionOutput,
+            @"^libavformat\s+\d+\s*\.\s*\d+\s*\.\s*\d+\s*/\s*(?<major>\d+)\s*\.",
+            RegexOptions.CultureInvariant | RegexOptions.Multiline);
+        if (!match.Success)
+        {
+            throw new InvalidOperationException($"Unable to identify ffmpeg version from: {versionOutput}");
+        }
+
         return int.Parse(
             match.Groups["major"].Value,
-            System.Globalization.CultureInfo.InvariantCulture);
+            System.Globalization.CultureInfo.InvariantCulture) >= 62;
     }
 
     private static void VerifyNativeReads(string path, short[] source)
@@ -1127,7 +1173,7 @@ public sealed class RfContainerLoaderIntegrationTests
         string inputPath,
         string outputPath,
         bool oggContainer,
-        int? frameSize = null)
+        int frameSize = 4_096)
     {
         var arguments = new List<string>
         {
@@ -1146,16 +1192,19 @@ public sealed class RfContainerLoaderIntegrationTests
             arguments.AddRange(["-f", "ogg", "-compression_level", "6"]);
         }
 
-        if (frameSize.HasValue)
-        {
-            arguments.AddRange([
-                "-frame_size",
-                frameSize.Value.ToString(System.Globalization.CultureInfo.InvariantCulture)
-            ]);
-        }
+        // The frozen hashes include PyAV padding per FLAC frame, so pin fixture geometry.
+        arguments.AddRange([
+            "-frame_size",
+            frameSize.ToString(System.Globalization.CultureInfo.InvariantCulture)
+        ]);
 
         arguments.Add(outputPath);
         RunFfmpeg(arguments);
+
+        int[] frameLengths = ProbeAudioFrameLengths(outputPath);
+        Assert.NotEmpty(frameLengths);
+        Assert.All(frameLengths.SkipLast(1), length => Assert.Equal(frameSize, length));
+        Assert.InRange(frameLengths[^1], 1, frameSize);
     }
 
     private static void EncodeAlac(string inputPath, string outputPath)
