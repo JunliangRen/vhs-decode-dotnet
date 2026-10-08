@@ -4,14 +4,14 @@
 
 [English](README.detailed.md) | [简体中文](README.detailed.zh-CN.md) | **[日本語](README.detailed.ja.md)**
 
-<!-- README_SYNC: 2026-08-21.01 -->
+<!-- README_SYNC: 2026-10-09.01 -->
 
 [`oyvindln/vhs-decode`](https://github.com/oyvindln/vhs-decode) の
 デコード関連部分を .NET 11 で再実装するプロジェクトです。現在は release
 `v0.4.0`、commit `43155200da87c0d49eb37d8ec09b1372075ee8e4`
 を互換性の基準としています。
 
-現在の .NET port release は `v0.4.0-2.10.0`（application version `2.10.0`）です。
+現在の .NET port release は `v0.4.0-2.11.0`（application version `2.11.0`）です。
 
 > [!IMPORTANT]
 > この互換移植は現在も開発中です。トップレベルのデコード経路は実装済みで
@@ -4434,7 +4434,7 @@ suite は全 1,448 test に成功しました。
 
 必要条件：
 
-- `.NET SDK 11.0.100-preview.7.26381.103`（`global.json` で固定）
+- `.NET SDK 11.0.100-rc.1.26425.128`（RC1、`global.json` で固定）
 - IDE として使用する場合は Visual Studio 2026
 - optional Intel IPP bridge の build には Visual Studio C++ Build Tools と Windows SDK
 - 厳密に限定した direct 40 kHz mono PCM16 raw-FLAC native-input route 以外

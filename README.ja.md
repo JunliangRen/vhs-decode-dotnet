@@ -2,14 +2,14 @@
 
 [English](README.md) | [简体中文](README.zh-CN.md) | **[日本語](README.ja.md)**
 
-<!-- README_SYNC: 2026-08-21.01 -->
+<!-- README_SYNC: 2026-10-09.01 -->
 
 [`oyvindln/vhs-decode`](https://github.com/oyvindln/vhs-decode) の
 デコード関連部分を .NET 11 で再実装するプロジェクトです。互換性の対象は
 upstream release `v0.4.0`、commit
 `43155200da87c0d49eb37d8ec09b1372075ee8e4` です。
 
-現在の .NET port release は `v0.4.0-2.10.0`（application version `2.10.0`）です。
+現在の .NET port release は `v0.4.0-2.11.0`（application version `2.11.0`）です。
 
 > [!IMPORTANT]
 > この互換移植は現在も開発中です。トップレベルのデコード経路は実装済みで
@@ -360,7 +360,7 @@ header は FFmpeg を維持します。
 
 ## Build と test
 
-固定 SDK は .NET `11.0.100-preview.7.26381.103` です。
+固定 SDK は .NET `11.0.100-rc.1.26425.128`（RC1）です。
 
 ```powershell
 dotnet restore VHSDecodeDotNet.slnx
