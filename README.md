@@ -2,14 +2,14 @@
 
 **[English](README.md)** | [简体中文](README.zh-CN.md) | [日本語](README.ja.md)
 
-<!-- README_SYNC: 2026-08-21.01 -->
+<!-- README_SYNC: 2026-10-09.01 -->
 
 A .NET 11 rewrite of the decode-facing parts of
 [`oyvindln/vhs-decode`](https://github.com/oyvindln/vhs-decode), targeting
 upstream release `v0.4.0` at commit
 `43155200da87c0d49eb37d8ec09b1372075ee8e4`.
 
-The current .NET port release is `v0.4.0-2.10.0` (application version `2.10.0`).
+The current .NET port release is `v0.4.0-2.11.0` (application version `2.11.0`).
 
 > [!IMPORTANT]
 > This remains a compatibility work in progress. The top-level decode paths are
@@ -381,7 +381,7 @@ other sample rates, and unfinished or ineligible headers retain FFmpeg.
 
 ## Build and test
 
-The pinned SDK is .NET `11.0.100-preview.7.26381.103`.
+The pinned SDK is .NET `11.0.100-rc.1.26425.128` (RC1).
 
 ```powershell
 dotnet restore VHSDecodeDotNet.slnx

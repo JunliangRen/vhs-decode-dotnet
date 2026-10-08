@@ -4,14 +4,14 @@
 
 **[English](README.detailed.md)** | [简体中文](README.detailed.zh-CN.md) | [日本語](README.detailed.ja.md)
 
-<!-- README_SYNC: 2026-08-21.01 -->
+<!-- README_SYNC: 2026-10-09.01 -->
 
 .NET 11 rewrite of the decode-facing parts of
 [`oyvindln/vhs-decode`](https://github.com/oyvindln/vhs-decode), focused on
 release `v0.4.0` at commit
 `43155200da87c0d49eb37d8ec09b1372075ee8e4`.
 
-The current .NET port release is `v0.4.0-2.10.0` (application version `2.10.0`).
+The current .NET port release is `v0.4.0-2.11.0` (application version `2.11.0`).
 
 > [!IMPORTANT]
 > This is a work-in-progress compatibility port. The top-level decode paths are
@@ -4790,7 +4790,7 @@ v3 suite passed all 1,448 tests.
 
 Requirements:
 
-- .NET SDK `11.0.100-preview.7.26381.103` (pinned by `global.json`)
+- .NET SDK `11.0.100-rc.1.26425.128` (RC1, pinned by `global.json`)
 - Visual Studio 2026 for IDE use
 - Visual Studio C++ Build Tools and a Windows SDK when building the optional
   Intel IPP bridge

@@ -152,15 +152,15 @@ archive.
 
 ## NetMQ, AsyncIO, and NaCl.Net
 
-The GNU Radio RF AFE and HiFi transport paths use NetMQ 4.0.4.3 as a separate
+The GNU Radio RF AFE and HiFi transport paths use NetMQ 4.0.4.4 as a separate
 managed assembly, from source commit
-`ca87d32d5ca5d8a2675fb7a9925e4b3dc8c35010`. NetMQ is licensed under
+`eb5eaa573eff8d9aadbf2049b185aea5a60874b8`. NetMQ is licensed under
 the GNU Lesser General Public License version 3 with the NetMQ static-linking
 exception. The Linux archive carries the complete license and exception text at
-`licenses/managed-nuget/NetMQ-4.0.4.3-COPYING.LESSER`; the project's GPLv3
+`licenses/managed-nuget/NetMQ-4.0.4.4-COPYING.LESSER`; the project's GPLv3
 license is at the archive root. The complete corresponding source for the exact
 NetMQ commit is included beside its license as
-`NetMQ-ca87d32d5ca5d8a2675fb7a9925e4b3dc8c35010-source.tar.gz`.
+`NetMQ-eb5eaa573eff8d9aadbf2049b185aea5a60874b8-source.tar.gz`.
 
 NetMQ depends on AsyncIO 0.1.69 and NaCl.Net 0.1.13. Both are licensed under
 the Mozilla Public License 2.0. The Linux archive records their exact source

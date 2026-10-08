@@ -94,14 +94,14 @@ $sources = [ordered]@{
 
 $managedLicenseSources = [ordered]@{
     NetMQ = [pscustomobject]@{
-        FileName = 'NetMQ-4.0.4.3-COPYING.LESSER'
-        Url = 'https://raw.githubusercontent.com/zeromq/netmq/ca87d32d5ca5d8a2675fb7a9925e4b3dc8c35010/COPYING.LESSER'
+        FileName = 'NetMQ-4.0.4.4-COPYING.LESSER'
+        Url = 'https://raw.githubusercontent.com/zeromq/netmq/eb5eaa573eff8d9aadbf2049b185aea5a60874b8/COPYING.LESSER'
         Sha256 = '5c435f899811e8e93e055a4dfaa0782fdd1f6b1e67a1f695a23eb610b74e9e57'
     }
     NetMQSource = [pscustomobject]@{
-        FileName = 'NetMQ-ca87d32d5ca5d8a2675fb7a9925e4b3dc8c35010-source.tar.gz'
-        Url = 'https://codeload.github.com/zeromq/netmq/tar.gz/ca87d32d5ca5d8a2675fb7a9925e4b3dc8c35010'
-        Sha256 = '066138b4e15ebf517a32431f3f1a61cdd95218e67f2953b9879d0309f7062764'
+        FileName = 'NetMQ-eb5eaa573eff8d9aadbf2049b185aea5a60874b8-source.tar.gz'
+        Url = 'https://codeload.github.com/zeromq/netmq/tar.gz/eb5eaa573eff8d9aadbf2049b185aea5a60874b8'
+        Sha256 = '6635c29bf0e6d78016959afd45d53e90fda146bf160e90bc3cde77f87dc0ce39'
     }
     Mpl20 = [pscustomobject]@{
         FileName = 'MPL-2.0.txt'
@@ -512,16 +512,16 @@ function Assert-PublishLayout {
             'licenses/aspnetcore-runtime/ThirdPartyNotices.txt',
             'licenses/managed-nuget/MANIFEST.txt',
             'licenses/managed-nuget/SHA256SUMS.txt',
-            'licenses/managed-nuget/NetMQ-4.0.4.3-COPYING.LESSER',
-            'licenses/managed-nuget/NetMQ-ca87d32d5ca5d8a2675fb7a9925e4b3dc8c35010-source.tar.gz',
+            'licenses/managed-nuget/NetMQ-4.0.4.4-COPYING.LESSER',
+            'licenses/managed-nuget/NetMQ-eb5eaa573eff8d9aadbf2049b185aea5a60874b8-source.tar.gz',
             'licenses/managed-nuget/MPL-2.0.txt',
             'licenses/managed-nuget/SQLitePCLRaw-3.0.5-LICENSE.txt',
             'licenses/managed-nuget/SQLitePCLRaw-3.0.5-NOTICE.txt',
             'licenses/managed-nuget/SQLite-3.53.4-LICENSE.txt',
             'licenses/managed-nuget/Microsoft-dotnet-MIT.txt',
             'licenses/managed-nuget/Microsoft.Extensions.ObjectPool-10.0.0-THIRD-PARTY-NOTICES.txt',
-            'licenses/managed-nuget/System.Security.Cryptography.Pkcs-11.0.0-preview.7.26381.103-THIRD-PARTY-NOTICES.txt',
-            'licenses/managed-nuget/System.Security.Cryptography.Xml-11.0.0-preview.7.26381.103-THIRD-PARTY-NOTICES.txt',
+            'licenses/managed-nuget/System.Security.Cryptography.Pkcs-11.0.0-rc.1.26425.128-THIRD-PARTY-NOTICES.txt',
+            'licenses/managed-nuget/System.Security.Cryptography.Xml-11.0.0-rc.1.26425.128-THIRD-PARTY-NOTICES.txt',
             'licenses/managed-nuget/System.ServiceModel.Primitives-10.0.652802-LICENSE.txt',
             'licenses/managed-nuget/System.ServiceModel.Primitives-10.0.652802-THIRD-PARTY-NOTICES.txt'
         )
@@ -1149,17 +1149,17 @@ if ($targetFrameworks.Count -ne 1) {
 
 [string[]]$expectedManagedPackages = @(
     'AsyncIO/0.1.69',
-    'Microsoft.Data.Sqlite.Core/11.0.0-preview.7.26381.103',
+    'Microsoft.Data.Sqlite.Core/11.0.0-rc.1.26425.128',
     'Microsoft.Extensions.ObjectPool/10.0.0',
     'NaCl.Net/0.1.13',
-    'NetMQ/4.0.4.3',
+    'NetMQ/4.0.4.4',
     'SQLite/3.53.4',
     'SQLitePCLRaw.bundle_e_sqlite3/3.0.5',
     'SQLitePCLRaw.config.e_sqlite3/3.0.5',
     'SQLitePCLRaw.core/3.0.5',
     'SQLitePCLRaw.provider.e_sqlite3/3.0.5',
-    'System.Security.Cryptography.Pkcs/11.0.0-preview.7.26381.103',
-    'System.Security.Cryptography.Xml/11.0.0-preview.7.26381.103',
+    'System.Security.Cryptography.Pkcs/11.0.0-rc.1.26425.128',
+    'System.Security.Cryptography.Xml/11.0.0-rc.1.26425.128',
     'System.ServiceModel.Primitives/10.0.652802')
 [string[]]$actualManagedPackages = @(
     $cliAssets['libraries'].GetEnumerator() |
@@ -1192,14 +1192,14 @@ foreach ($entry in $managedLicenseSources.GetEnumerator()) {
         Destination = 'Microsoft.Extensions.ObjectPool-10.0.0-THIRD-PARTY-NOTICES.txt'
     },
     [pscustomobject]@{
-        Identity = 'System.Security.Cryptography.Pkcs/11.0.0-preview.7.26381.103'
+        Identity = 'System.Security.Cryptography.Pkcs/11.0.0-rc.1.26425.128'
         Source = 'THIRD-PARTY-NOTICES.TXT'
-        Destination = 'System.Security.Cryptography.Pkcs-11.0.0-preview.7.26381.103-THIRD-PARTY-NOTICES.txt'
+        Destination = 'System.Security.Cryptography.Pkcs-11.0.0-rc.1.26425.128-THIRD-PARTY-NOTICES.txt'
     },
     [pscustomobject]@{
-        Identity = 'System.Security.Cryptography.Xml/11.0.0-preview.7.26381.103'
+        Identity = 'System.Security.Cryptography.Xml/11.0.0-rc.1.26425.128'
         Source = 'THIRD-PARTY-NOTICES.TXT'
-        Destination = 'System.Security.Cryptography.Xml-11.0.0-preview.7.26381.103-THIRD-PARTY-NOTICES.txt'
+        Destination = 'System.Security.Cryptography.Xml-11.0.0-rc.1.26425.128-THIRD-PARTY-NOTICES.txt'
     },
     [pscustomobject]@{
         Identity = 'System.ServiceModel.Primitives/10.0.652802'
@@ -1235,12 +1235,12 @@ foreach ($file in $restoredManagedNoticeFiles) {
     'Managed NuGet dependency license manifest',
     'This is the complete package graph restored for the Linux x64 CLI publish.',
     '',
-    'NetMQ 4.0.4.3',
+    'NetMQ 4.0.4.4',
     'License: LGPL-3.0 with the NetMQ static-linking exception',
-    'Source commit: ca87d32d5ca5d8a2675fb7a9925e4b3dc8c35010',
-    'Source: https://github.com/zeromq/netmq/tree/ca87d32d5ca5d8a2675fb7a9925e4b3dc8c35010',
-    'License file: NetMQ-4.0.4.3-COPYING.LESSER',
-    'Corresponding source: NetMQ-ca87d32d5ca5d8a2675fb7a9925e4b3dc8c35010-source.tar.gz',
+    'Source commit: eb5eaa573eff8d9aadbf2049b185aea5a60874b8',
+    'Source: https://github.com/zeromq/netmq/tree/eb5eaa573eff8d9aadbf2049b185aea5a60874b8',
+    'License file: NetMQ-4.0.4.4-COPYING.LESSER',
+    'Corresponding source: NetMQ-eb5eaa573eff8d9aadbf2049b185aea5a60874b8-source.tar.gz',
     'The archive keeps NetMQ.dll as a separate managed assembly.',
     '',
     'AsyncIO 0.1.69',
@@ -1255,15 +1255,15 @@ foreach ($file in $restoredManagedNoticeFiles) {
     'Source: https://github.com/somdoron/NaCl.net/tree/aee0c42faf09e7c4f4eea66a395aa77b2c30ce6d',
     'License file: MPL-2.0.txt',
     '',
-    'Microsoft.Data.Sqlite.Core 11.0.0-preview.7.26381.103',
-    'System.Security.Cryptography.Pkcs 11.0.0-preview.7.26381.103',
-    'System.Security.Cryptography.Xml 11.0.0-preview.7.26381.103',
+    'Microsoft.Data.Sqlite.Core 11.0.0-rc.1.26425.128',
+    'System.Security.Cryptography.Pkcs 11.0.0-rc.1.26425.128',
+    'System.Security.Cryptography.Xml 11.0.0-rc.1.26425.128',
     'License: MIT',
-    'Source commit: e2c1e00b3d0f96afb892fb261d5921565b400246',
-    'Source: https://github.com/dotnet/dotnet/tree/e2c1e00b3d0f96afb892fb261d5921565b400246',
+    'Source commit: 3551975be08744f0418857c5bed8ab1545c5dd47',
+    'Source: https://github.com/dotnet/dotnet/tree/3551975be08744f0418857c5bed8ab1545c5dd47',
     'License file: Microsoft-dotnet-MIT.txt',
-    'Package notices: System.Security.Cryptography.Pkcs-11.0.0-preview.7.26381.103-THIRD-PARTY-NOTICES.txt',
-    '                 System.Security.Cryptography.Xml-11.0.0-preview.7.26381.103-THIRD-PARTY-NOTICES.txt',
+    'Package notices: System.Security.Cryptography.Pkcs-11.0.0-rc.1.26425.128-THIRD-PARTY-NOTICES.txt',
+    '                 System.Security.Cryptography.Xml-11.0.0-rc.1.26425.128-THIRD-PARTY-NOTICES.txt',
     '',
     'Microsoft.Extensions.ObjectPool 10.0.0',
     'License: MIT',

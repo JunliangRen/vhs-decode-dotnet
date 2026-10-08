@@ -5,9 +5,9 @@ namespace VHSDecode.Tests;
 
 public sealed partial class ReadmeLocalizationTests
 {
-    private const string PinnedDotNetSdkVersion = "11.0.100-preview.7.26381.103";
+    private const string PinnedDotNetSdkVersion = "11.0.100-rc.1.26425.128";
 
-    private const string SetupDotNetStepName = "Set up .NET 11 Preview 7";
+    private const string SetupDotNetStepName = "Set up .NET 11 RC1";
 
     private const string VerifyPinnedDotNetSdkStepName = "Verify pinned .NET SDK";
 
@@ -388,7 +388,7 @@ public sealed partial class ReadmeLocalizationTests
             "IPP-fast + v0.4.0",
             "IPP-fast + current",
             "--start 100",
-            "v0.4.0-2.10.0",
+            "v0.4.0-2.11.0",
             "52.811 s",
             "54.243 s",
             "11.598 s",
@@ -426,7 +426,7 @@ public sealed partial class ReadmeLocalizationTests
         string[] synchronizedFacts =
         [
             "43155200da87c0d49eb37d8ec09b1372075ee8e4",
-            "v0.4.0-2.10.0",
+            "v0.4.0-2.11.0",
             "b893bf7",
             "2.10.0+b893bf7d39edf574609a7abc40237a4db32eaf9f",
             "92481E633B4CD5C80DDD1CD6C26AD5D045B9046763CD8B1F84083F8EFBD73303",

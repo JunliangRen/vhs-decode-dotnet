@@ -3543,6 +3543,47 @@ The direct GPU dropout test additionally
 covers dynamic source offsets, parity geometry, hysteresis, merging, and the
 strict minimum-run contract.
 
+### .NET 11 RC1 toolchain upgrade
+
+The 2026-10-09 toolchain upgrade for application `2.11.0` pins SDK
+`11.0.100-rc.1.26425.128` in `global.json`; all four solution projects continue
+to target `net11.0`. The upgrade is based on the latest merged `main` commit
+`584864c345f6ae3f882ffefa587afc1b3c880905`.
+Microsoft.Data.Sqlite.Core and System.Security.Cryptography.Xml use
+`11.0.0-rc.1.26425.128`, with the matching transitive Pkcs package. NetMQ is
+updated to `4.0.4.4`, Microsoft.NET.Test.Sdk to `18.10.1`,
+Microsoft.Testing.Extensions.CodeCoverage to `18.12.0`, and xunit.v3 to `4.0.1`.
+The NuGet top-level outdated audit, including prereleases, reports no available
+updates in any solution project. Current build instructions in all six READMEs,
+both CI setup steps, and the localization assertions use the RC1 SDK pin.
+
+The Windows Release solution build passed with no warnings or errors. With
+the CI-pinned FFmpeg `8.1.2` archive verified against its recorded SHA-256, the
+full xUnit v3 suite discovered 1,862 cases: 1,858 passed, none failed, and four
+PAL/NTSC AMF and QSV preview encoder cases were skipped because those backends
+were unavailable. All 35 existing focused CI checks also passed, including
+AVX/AVX2-disabled and scalar fallback runs. The full-suite run uses the pinned
+FFmpeg and FFprobe beside the test executable. The matching IPP native bridge
+rebuild and smoke checks and the CUDA bridge's native runtime checks passed.
+
+The Windows x64 self-contained single-file publish and `vhs --help` startup
+check passed. Inspection of the extracted runtime configuration confirms that
+both Microsoft.NETCore.App and Microsoft.AspNetCore.App are
+`11.0.0-rc.1.26425.128`. The existing full-content extraction setting is retained
+because CUDA bridge discovery uses the managed assembly directory; RC1 emits
+the corresponding compatibility warning `NETSDK1244` at publish.
+
+The Linux packaging script's 13-package managed dependency manifest matches
+the restored CLI graph, and all referenced package notice files exist. Its
+updated Microsoft source commit is taken from the restored RC1 package
+metadata. The NetMQ source commit, archive identity, license paths, and archive
+SHA-256 are updated to match the restored `4.0.4.4` package, with the exact
+source archive and license downloaded and hashed. The script passes PowerShell
+syntax validation. Linux native builds and the final-tar smoke are gated by
+the release workflow before publication. This toolchain refresh did not repeat
+the historical real-capture performance campaigns; their recorded Preview 6/7
+versions remain unchanged, and no new decoder speed or quality claim is made.
+
 To regenerate the embedded format parameter snapshot from the checked-out
 upstream source:
 
