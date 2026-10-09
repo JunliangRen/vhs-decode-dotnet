@@ -57,7 +57,7 @@ $windowsFrozenBitOracleMethods = @(
     'PalLdPilotCircularMeanMatchesNumpyComplex128Bits',
     'MtfPowersMatchReleaseFour',
     'ComplexFftDirectOutputMatchesFrozenPowerOfTwoHashes')
-$minimumLinuxTestCount = 1561
+$minimumLinuxTestCount = 1569
 
 $sources = [ordered]@{
     libogg = [pscustomobject]@{
@@ -1069,7 +1069,11 @@ if (-not $SkipTests) {
         '--configuration', 'Release',
         '--no-build',
         '--no-restore',
-        '--artifacts-path', $dotnetArtifactsRoot)
+        '--artifacts-path', $dotnetArtifactsRoot,
+        '--timeout', '15m',
+        '--results-directory', (Join-Path $artifactsRoot 'test-results\linux-x64'),
+        '--results-directory-layout', 'per-module',
+        '--report-trx')
     foreach ($method in $windowsFrozenBitOracleMethods) {
         $testArguments += @('--filter-not-method', "*$method*")
     }

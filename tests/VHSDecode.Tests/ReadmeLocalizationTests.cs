@@ -119,7 +119,9 @@ public sealed partial class ReadmeLocalizationTests
 
     private const string FullCiTestCommand =
         "run: dotnet test --solution VHSDecodeDotNet.slnx --configuration Release " +
-        "--no-build --no-restore --minimum-expected-tests 1615";
+        "--no-build --no-restore --timeout 15m " +
+        "--results-directory artifacts/test-results/windows --results-directory-layout per-module " +
+        "--report-trx --minimum-expected-tests 1623";
 
     private const string FinalRealRadix4AvxTestCommand =
         "run: dotnet test tests/VHSDecode.Tests/VHSDecode.Tests.csproj " +
@@ -1881,8 +1883,8 @@ public sealed partial class ReadmeLocalizationTests
             RepositoryRoot(),
             "docs",
             "LINUX_X64.md"));
-        Assert.Contains("$minimumLinuxTestCount = 1561", linuxBuildScript, StringComparison.Ordinal);
-        Assert.Contains("at least 1,561 xUnit v3 cases", linuxReadme, StringComparison.Ordinal);
+        Assert.Contains("$minimumLinuxTestCount = 1569", linuxBuildScript, StringComparison.Ordinal);
+        Assert.Contains("at least 1,567 xUnit v3 cases", linuxReadme, StringComparison.Ordinal);
         Assert.DoesNotContain("$minimumLinuxTestCount = 1551", linuxBuildScript, StringComparison.Ordinal);
         Assert.DoesNotContain("at least 1,551 xUnit v3 cases", linuxReadme, StringComparison.Ordinal);
         foreach (string filename in DetailedReadmeFiles)

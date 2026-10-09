@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using System.Runtime.InteropServices;
+using VHSDecode.Core.Processes;
 
 namespace VHSDecode.Core.Decode;
 
@@ -50,7 +51,7 @@ public static class DecodeVersionInfo
     {
         try
         {
-            using var process = Process.Start(new ProcessStartInfo
+            ProcessTextOutput result = ExternalToolProcess.Capture(new ProcessStartInfo
             {
                 FileName = "uname",
                 Arguments = argument,
@@ -58,17 +59,11 @@ public static class DecodeVersionInfo
                 RedirectStandardError = true,
                 UseShellExecute = false,
                 CreateNoWindow = true
-            });
-            if (process is null)
-            {
-                return null;
-            }
-
-            string value = process.StandardOutput.ReadToEnd().Trim();
-            process.WaitForExit();
-            return process.ExitCode == 0 && value.Length > 0 ? value : null;
+            }, TimeSpan.FromSeconds(5));
+            string value = result.StandardOutput.Trim();
+            return result.ExitStatus.ExitCode == 0 && value.Length > 0 ? value : null;
         }
-        catch (Exception ex) when (ex is InvalidOperationException or System.ComponentModel.Win32Exception)
+        catch (Exception ex) when (ex is InvalidOperationException or System.ComponentModel.Win32Exception or TimeoutException)
         {
             return null;
         }

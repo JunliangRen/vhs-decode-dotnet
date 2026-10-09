@@ -6,6 +6,7 @@ using System.Runtime.InteropServices;
 using System.Text;
 using System.Text.Json;
 using System.Threading.Channels;
+using VHSDecode.Core.Processes;
 
 namespace VHSDecode.Core.Rf;
 
@@ -535,6 +536,7 @@ public sealed class FfmpegPcm16SampleLoader : IRfSampleLoader, IDisposable
             RedirectStandardError = true,
             CreateNoWindow = true
         };
+        ExternalToolProcess.Configure(startInfo);
 
         IReadOnlyList<string> arguments = BuildPyAvFramedFfmpegArguments(
             filename,
@@ -595,6 +597,7 @@ public sealed class FfmpegPcm16SampleLoader : IRfSampleLoader, IDisposable
             RedirectStandardError = true,
             CreateNoWindow = true
         };
+        ExternalToolProcess.Configure(startInfo);
         foreach (string argument in BuildFfmpegArguments(
             filename,
             sample,
@@ -644,6 +647,7 @@ public sealed class FfmpegPcm16SampleLoader : IRfSampleLoader, IDisposable
             RedirectStandardError = true,
             CreateNoWindow = true
         };
+        ExternalToolProcess.Configure(startInfo);
         foreach (string argument in new[]
         {
             "-hide_banner",
@@ -833,6 +837,7 @@ public sealed class FfmpegPcm16SampleLoader : IRfSampleLoader, IDisposable
             RedirectStandardError = true,
             CreateNoWindow = true
         };
+        ExternalToolProcess.Configure(startInfo);
         foreach (string argument in new[]
         {
             "-v", "error",
@@ -847,18 +852,9 @@ public sealed class FfmpegPcm16SampleLoader : IRfSampleLoader, IDisposable
 
         try
         {
-            using var process = new Process { StartInfo = startInfo };
-            if (!process.Start())
-            {
-                return null;
-            }
-
-            Task<string> standardOutput = process.StandardOutput.ReadToEndAsync();
-            Task<string> standardError = process.StandardError.ReadToEndAsync();
-            process.WaitForExit();
-            Task.WhenAll(standardOutput, standardError).GetAwaiter().GetResult();
-            return process.ExitCode == 0
-                ? ParseContainerAudioInfo(standardOutput.Result)
+            ProcessTextOutput result = ExternalToolProcess.Capture(startInfo);
+            return result.ExitStatus.ExitCode == 0
+                ? ParseContainerAudioInfo(result.StandardOutput)
                 : null;
         }
         catch (Exception ex) when (ex is Win32Exception
@@ -1128,6 +1124,8 @@ public sealed class FfmpegPcm16SampleLoader : IRfSampleLoader, IDisposable
                 CreateNoWindow = true
             }
         };
+
+        ExternalToolProcess.Configure(process.StartInfo);
 
         foreach (string argument in BuildFfmpegArguments(filename, sample))
         {

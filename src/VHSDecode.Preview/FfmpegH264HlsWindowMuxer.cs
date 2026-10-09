@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using System.Globalization;
+using VHSDecode.Core.Processes;
 
 namespace VHSDecode.Preview;
 
@@ -38,23 +39,25 @@ internal sealed class FfmpegH264HlsWindowMuxer
                 segmentPattern,
                 windowIndex);
             Task<string> stderr = process.StandardError.ReadToEndAsync(cancellationToken);
+            ProcessExitStatus exitStatus;
             try
             {
                 writeH264(process.StandardInput.BaseStream);
                 process.StandardInput.Close();
-                process.WaitForExitAsync(cancellationToken).GetAwaiter().GetResult();
+                exitStatus = process.WaitForExitStatusAsync(cancellationToken).GetAwaiter().GetResult();
+                cancellationToken.ThrowIfCancellationRequested();
             }
             catch
             {
-                TryKill(process);
+                ExternalToolProcess.Stop(process);
                 throw;
             }
 
             string diagnostic = stderr.GetAwaiter().GetResult();
-            if (process.ExitCode != 0)
+            if (exitStatus.ExitCode != 0)
             {
                 throw new InvalidOperationException(
-                    $"FFmpeg H.264 copy-mux failed with exit code {process.ExitCode}: {diagnostic.Trim()}");
+                    $"FFmpeg H.264 copy-mux failed with {ExternalToolProcess.DescribeFailure(exitStatus)}: {diagnostic.Trim()}");
             }
             if (!File.Exists(initPath) || !File.Exists(playlistPath))
             {
@@ -163,6 +166,7 @@ internal sealed class FfmpegH264HlsWindowMuxer
             RedirectStandardInput = true,
             RedirectStandardError = true
         };
+        ExternalToolProcess.Configure(startInfo);
         foreach (string argument in BuildArguments(
             playlistPath,
             initPath,
@@ -190,23 +194,6 @@ internal sealed class FfmpegH264HlsWindowMuxer
         }
 
         return process;
-    }
-
-    private static void TryKill(Process process)
-    {
-        try
-        {
-            if (!process.HasExited)
-            {
-                process.Kill(entireProcessTree: true);
-                process.WaitForExit();
-            }
-        }
-        catch (Exception ex) when (ex is InvalidOperationException
-            or System.ComponentModel.Win32Exception)
-        {
-            // Best effort after decode/mux failure.
-        }
     }
 
     private static void DeleteTemporaryDirectory(string path)

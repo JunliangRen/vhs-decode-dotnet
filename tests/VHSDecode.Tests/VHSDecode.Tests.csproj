@@ -3,6 +3,7 @@
   <ItemGroup>
     <ProjectReference Include="..\..\src\VHSDecode.Core\VHSDecode.Core.csproj" />
     <ProjectReference Include="..\..\src\VHSDecode.Preview\VHSDecode.Preview.csproj" />
+    <ProjectReference Include="..\VHSDecode.ProcessTestHost\VHSDecode.ProcessTestHost.csproj" ReferenceOutputAssembly="false" OutputItemType="ProcessTestHostAssembly" />
     <EmbeddedResource Include="Fixtures\tape-family-v0.4.0.json" />
   </ItemGroup>
 
@@ -14,6 +15,7 @@
   <ItemGroup>
     <PackageReference Include="Microsoft.NET.Test.Sdk" Version="18.10.1" />
     <PackageReference Include="Microsoft.Testing.Extensions.CodeCoverage" Version="18.12.0" />
+    <PackageReference Include="Microsoft.Testing.Extensions.TrxReport" Version="2.5.0" />
     <PackageReference Include="xunit.v3" Version="4.0.1" />
     <PackageReference Include="xunit.runner.visualstudio" Version="4.0.0">
       <PrivateAssets>all</PrivateAssets>
@@ -31,5 +33,15 @@
     <IsTestProject>true</IsTestProject>
     <UseMicrosoftTestingPlatformRunner>true</UseMicrosoftTestingPlatformRunner>
   </PropertyGroup>
+
+  <Target Name="CopyProcessTestHost" AfterTargets="Build">
+    <PropertyGroup>
+      <ProcessTestHostDirectory>@(ProcessTestHostAssembly->'%(RootDir)%(Directory)')</ProcessTestHostDirectory>
+    </PropertyGroup>
+    <ItemGroup>
+      <ProcessTestHostFile Include="$(ProcessTestHostDirectory)*" />
+    </ItemGroup>
+    <Copy SourceFiles="@(ProcessTestHostFile)" DestinationFolder="$(OutDir)process-test-host/" SkipUnchangedFiles="true" />
+  </Target>
 
 </Project>

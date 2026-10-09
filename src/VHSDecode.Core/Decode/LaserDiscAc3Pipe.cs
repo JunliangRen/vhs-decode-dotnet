@@ -1,5 +1,6 @@
 using System.ComponentModel;
 using System.Diagnostics;
+using VHSDecode.Core.Processes;
 
 namespace VHSDecode.Core.Decode;
 
@@ -156,6 +157,7 @@ public static class LaserDiscAc3Pipe
                 RedirectStandardError = spec.RedirectErrorToLog,
                 CreateNoWindow = true
             };
+            ExternalToolProcess.Configure(startInfo);
 
             foreach (string argument in spec.Arguments)
             {

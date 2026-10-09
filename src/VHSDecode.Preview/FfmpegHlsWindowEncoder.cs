@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using System.Globalization;
 using VHSDecode.Core.Formats;
+using VHSDecode.Core.Processes;
 
 namespace VHSDecode.Preview;
 
@@ -56,23 +57,25 @@ internal sealed class FfmpegHlsWindowEncoder
                 _timeline.FrameCountInWindow(windowIndex),
                 windowIndex);
             Task<string> stderr = process.StandardError.ReadToEndAsync(cancellationToken);
+            ProcessExitStatus exitStatus;
             try
             {
                 writeFrames(process.StandardInput.BaseStream);
                 process.StandardInput.Close();
-                process.WaitForExitAsync(cancellationToken).GetAwaiter().GetResult();
+                exitStatus = process.WaitForExitStatusAsync(cancellationToken).GetAwaiter().GetResult();
+                cancellationToken.ThrowIfCancellationRequested();
             }
             catch
             {
-                TryKill(process);
+                ExternalToolProcess.Stop(process);
                 throw;
             }
 
             string diagnostic = stderr.GetAwaiter().GetResult();
-            if (process.ExitCode != 0)
+            if (exitStatus.ExitCode != 0)
             {
                 throw new InvalidOperationException(
-                    $"FFmpeg HLS encoder failed with exit code {process.ExitCode}: {diagnostic.Trim()}");
+                    $"FFmpeg HLS encoder failed with {ExternalToolProcess.DescribeFailure(exitStatus)}: {diagnostic.Trim()}");
             }
 
             if (!File.Exists(initPath) || !File.Exists(playlistPath))
@@ -149,6 +152,7 @@ internal sealed class FfmpegHlsWindowEncoder
             RedirectStandardInput = true,
             RedirectStandardError = true
         };
+        ExternalToolProcess.Configure(startInfo);
         string[] arguments = BuildArguments(
             playlistPath,
             initPath,
@@ -300,22 +304,6 @@ internal sealed class FfmpegHlsWindowEncoder
             ],
             _ => throw new ArgumentOutOfRangeException(nameof(_encoderBackend))
         };
-
-    private static void TryKill(Process process)
-    {
-        try
-        {
-            if (!process.HasExited)
-            {
-                process.Kill(entireProcessTree: true);
-                process.WaitForExit();
-            }
-        }
-        catch (Exception ex) when (ex is InvalidOperationException or System.ComponentModel.Win32Exception)
-        {
-            // Best effort after an encoder/decode failure.
-        }
-    }
 
     private static void DeleteTemporaryDirectory(string path)
     {

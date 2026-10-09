@@ -3,6 +3,7 @@ using System.Buffers.Binary;
 using System.ComponentModel;
 using System.Diagnostics;
 using System.Text;
+using VHSDecode.Core.Processes;
 using VHSDecode.Core.Rf;
 
 namespace VHSDecode.Core.HiFi;
@@ -51,6 +52,7 @@ internal sealed class SystemHiFiInputProcessHost : IHiFiInputProcessHost
             RedirectStandardError = true,
             CreateNoWindow = true
         };
+        ExternalToolProcess.Configure(startInfo);
         foreach (string argument in arguments)
         {
             startInfo.ArgumentList.Add(argument);
@@ -409,6 +411,7 @@ internal static class HiFiInputReader
             RedirectStandardError = true,
             CreateNoWindow = true
         };
+        ExternalToolProcess.Configure(startInfo);
         foreach (string argument in arguments)
         {
             startInfo.ArgumentList.Add(argument);

@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using System.Globalization;
 using System.Text.Json;
+using VHSDecode.Core.Processes;
 using VHSDecode.Core.Rf;
 
 namespace VHSDecode.Preview;
@@ -69,7 +70,7 @@ internal static class PreviewSourceProbe
         string ffprobePath,
         CancellationToken cancellationToken)
     {
-        ProcessResult result = await RunAsync(
+        ProcessTextOutput result = await RunAsync(
             ffprobePath,
             [
                 "-v", "error",
@@ -78,7 +79,7 @@ internal static class PreviewSourceProbe
                 path
             ],
             cancellationToken).ConfigureAwait(false);
-        if (result.ExitCode != 0)
+        if (result.ExitStatus.ExitCode != 0)
         {
             throw new InvalidOperationException(
                 $"ffprobe could not determine the RF input duration: {result.StandardError.Trim()}");
@@ -145,7 +146,7 @@ internal static class PreviewSourceProbe
             && double.IsFinite(value);
     }
 
-    private static async Task<ProcessResult> RunAsync(
+    private static async Task<ProcessTextOutput> RunAsync(
         string executable,
         IReadOnlyList<string> arguments,
         CancellationToken cancellationToken)
@@ -163,13 +164,9 @@ internal static class PreviewSourceProbe
             startInfo.ArgumentList.Add(argument);
         }
 
-        using var process = new Process { StartInfo = startInfo };
         try
         {
-            if (!process.Start())
-            {
-                throw new InvalidOperationException($"Could not start '{executable}'.");
-            }
+            return await ExternalToolProcess.CaptureAsync(startInfo, cancellationToken).ConfigureAwait(false);
         }
         catch (Exception ex) when (ex is InvalidOperationException or System.ComponentModel.Win32Exception)
         {
@@ -177,42 +174,5 @@ internal static class PreviewSourceProbe
                 $"Could not start '{executable}'. Install FFmpeg and ensure it is on PATH, or set VHSDECODE_FFMPEG and VHSDECODE_FFPROBE.",
                 ex);
         }
-
-        Task<string> stdout = process.StandardOutput.ReadToEndAsync(cancellationToken);
-        Task<string> stderr = process.StandardError.ReadToEndAsync(cancellationToken);
-        try
-        {
-            await process.WaitForExitAsync(cancellationToken).ConfigureAwait(false);
-        }
-        catch (OperationCanceledException)
-        {
-            TryKill(process);
-            throw;
-        }
-
-        return new ProcessResult(
-            process.ExitCode,
-            await stdout.ConfigureAwait(false),
-            await stderr.ConfigureAwait(false));
     }
-
-    private static void TryKill(Process process)
-    {
-        try
-        {
-            if (!process.HasExited)
-            {
-                process.Kill(entireProcessTree: true);
-            }
-        }
-        catch (Exception ex) when (ex is InvalidOperationException or System.ComponentModel.Win32Exception)
-        {
-            // Best effort during cancellation.
-        }
-    }
-
-    private readonly record struct ProcessResult(
-        int ExitCode,
-        string StandardOutput,
-        string StandardError);
 }
