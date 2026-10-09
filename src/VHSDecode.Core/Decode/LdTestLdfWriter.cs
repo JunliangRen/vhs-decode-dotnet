@@ -3,6 +3,7 @@ using System.ComponentModel;
 using System.Diagnostics;
 using System.Runtime.InteropServices;
 using System.Text;
+using VHSDecode.Core.Processes;
 using VHSDecode.Core.Rf;
 
 namespace VHSDecode.Core.Decode;
@@ -507,6 +508,8 @@ public sealed class FfmpegLdTestLdfWriter(
             RedirectStandardError = true,
             CreateNoWindow = true
         };
+
+        ExternalToolProcess.Configure(startInfo);
 
         foreach (string argument in BuildFfmpegArguments(outputFilename))
         {

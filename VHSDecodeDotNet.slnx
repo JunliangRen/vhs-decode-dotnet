@@ -5,6 +5,7 @@
     <Project Path="src/VHSDecode.Preview/VHSDecode.Preview.csproj" />
   </Folder>
   <Folder Name="/tests/">
+    <Project Path="tests/VHSDecode.ProcessTestHost/VHSDecode.ProcessTestHost.csproj" />
     <Project Path="tests/VHSDecode.Tests/VHSDecode.Tests.csproj" />
   </Folder>
 </Solution>

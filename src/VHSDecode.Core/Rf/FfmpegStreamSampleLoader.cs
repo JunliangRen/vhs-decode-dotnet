@@ -2,6 +2,7 @@ using System.Buffers.Binary;
 using System.ComponentModel;
 using System.Diagnostics;
 using System.Text;
+using VHSDecode.Core.Processes;
 
 namespace VHSDecode.Core.Rf;
 
@@ -188,6 +189,7 @@ public sealed class FfmpegStreamSampleLoader : IRfSampleLoader, IDisposable
             RedirectStandardError = true,
             CreateNoWindow = true
         };
+        ExternalToolProcess.Configure(startInfo);
 
         foreach (string argument in BuildFfmpegArguments(InputArguments, OutputArguments))
         {

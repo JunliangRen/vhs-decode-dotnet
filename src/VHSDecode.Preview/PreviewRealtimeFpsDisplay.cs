@@ -3,51 +3,33 @@ using System.Globalization;
 
 namespace VHSDecode.Preview;
 
-internal enum PreviewWindowGenerationState
+internal closed record PreviewWindowGenerationUpdate(int WindowIndex, long StartedTimestamp)
 {
-    Started,
-    Completed,
-    Abandoned
-}
+    internal sealed record StartedUpdate(int WindowIndex, long StartedTimestamp)
+        : PreviewWindowGenerationUpdate(WindowIndex, StartedTimestamp);
 
-internal readonly record struct PreviewWindowGenerationUpdate(
-    int WindowIndex,
-    PreviewWindowGenerationState State,
-    int FrameCount,
-    long StartedTimestamp,
-    long CompletedTimestamp)
-{
+    internal sealed record CompletedUpdate(int WindowIndex, int FrameCount, long StartedTimestamp, long CompletedTimestamp)
+        : PreviewWindowGenerationUpdate(WindowIndex, StartedTimestamp);
+
+    internal sealed record AbandonedUpdate(int WindowIndex, long StartedTimestamp)
+        : PreviewWindowGenerationUpdate(WindowIndex, StartedTimestamp);
+
     internal static PreviewWindowGenerationUpdate Started(
         int windowIndex,
         long startedTimestamp)
-        => new(
-            windowIndex,
-            PreviewWindowGenerationState.Started,
-            0,
-            startedTimestamp,
-            0);
+        => new StartedUpdate(windowIndex, startedTimestamp);
 
     internal static PreviewWindowGenerationUpdate Completed(
         int windowIndex,
         int frameCount,
         long startedTimestamp,
         long completedTimestamp)
-        => new(
-            windowIndex,
-            PreviewWindowGenerationState.Completed,
-            frameCount,
-            startedTimestamp,
-            completedTimestamp);
+        => new CompletedUpdate(windowIndex, frameCount, startedTimestamp, completedTimestamp);
 
     internal static PreviewWindowGenerationUpdate Abandoned(
         int windowIndex,
         long startedTimestamp)
-        => new(
-            windowIndex,
-            PreviewWindowGenerationState.Abandoned,
-            0,
-            startedTimestamp,
-            0);
+        => new AbandonedUpdate(windowIndex, startedTimestamp);
 }
 
 internal sealed class PreviewRealtimeFpsDisplay
@@ -98,6 +80,7 @@ internal sealed class PreviewRealtimeFpsDisplay
 
     internal void Report(PreviewWindowGenerationUpdate update)
     {
+        ArgumentNullException.ThrowIfNull(update);
         lock (_gate)
         {
             if (_completed)
@@ -145,11 +128,11 @@ internal sealed class PreviewRealtimeFpsDisplay
 
     private void Apply(PreviewWindowGenerationUpdate update)
     {
-        switch (update.State)
+        switch (update)
         {
-            case PreviewWindowGenerationState.Started:
+            case PreviewWindowGenerationUpdate.StartedUpdate:
                 foreach (int completedWindow in _windows
-                    .Where(pair => pair.Value.State == PreviewWindowGenerationState.Completed)
+                    .Where(pair => pair.Value is PreviewWindowGenerationUpdate.CompletedUpdate)
                     .Select(pair => pair.Key)
                     .ToArray())
                 {
@@ -158,19 +141,17 @@ internal sealed class PreviewRealtimeFpsDisplay
 
                 _windows[update.WindowIndex] = update;
                 break;
-            case PreviewWindowGenerationState.Completed:
-                if (update.FrameCount > 0
-                    && update.CompletedTimestamp > update.StartedTimestamp)
+            case PreviewWindowGenerationUpdate.CompletedUpdate completed:
+                if (completed.FrameCount > 0
+                    && completed.CompletedTimestamp > completed.StartedTimestamp)
                 {
                     _windows[update.WindowIndex] = update;
                 }
 
                 break;
-            case PreviewWindowGenerationState.Abandoned:
+            case PreviewWindowGenerationUpdate.AbandonedUpdate:
                 _windows.Remove(update.WindowIndex);
                 break;
-            default:
-                throw new ArgumentOutOfRangeException(nameof(update));
         }
     }
 
@@ -190,24 +171,28 @@ internal sealed class PreviewRealtimeFpsDisplay
                 CultureInfo.InvariantCulture,
                 "W{0}",
                 update.WindowIndex));
-        IEnumerable<string> fpsText = windows.Select(update =>
-            update.State == PreviewWindowGenerationState.Completed
-                ? string.Format(
+        IEnumerable<string> fpsText = windows.Select(update => update switch
+        {
+            PreviewWindowGenerationUpdate.CompletedUpdate completed => string.Format(
                     CultureInfo.InvariantCulture,
                     "{0:0.00}",
-                    WindowFramesPerSecond(update))
-                : "decoding...");
-        bool allCompleted = windows.All(update =>
-            update.State == PreviewWindowGenerationState.Completed);
-        string total = allCompleted
-            ? BuildTotalText(windows)
+                    WindowFramesPerSecond(completed)),
+            PreviewWindowGenerationUpdate.StartedUpdate => "decoding...",
+            PreviewWindowGenerationUpdate.AbandonedUpdate => throw new InvalidOperationException(
+                "An abandoned preview window cannot remain in the display.")
+        });
+        PreviewWindowGenerationUpdate.CompletedUpdate[] completedWindows = windows
+            .OfType<PreviewWindowGenerationUpdate.CompletedUpdate>()
+            .ToArray();
+        string total = completedWindows.Length == windows.Length
+            ? BuildTotalText(completedWindows)
             : "Total pending";
         return (
             $"Preview windows: {string.Join(" | ", windowText)}",
             $"Realtime FPS: {string.Join(" | ", fpsText)} | {total}");
     }
 
-    private string BuildTotalText(PreviewWindowGenerationUpdate[] windows)
+    private string BuildTotalText(PreviewWindowGenerationUpdate.CompletedUpdate[] windows)
     {
         long start = windows.Min(update => update.StartedTimestamp);
         long end = windows.Max(update => update.CompletedTimestamp);
@@ -221,7 +206,7 @@ internal sealed class PreviewRealtimeFpsDisplay
             totalFps / _sourceFramesPerSecond);
     }
 
-    private static double WindowFramesPerSecond(PreviewWindowGenerationUpdate update)
+    private static double WindowFramesPerSecond(PreviewWindowGenerationUpdate.CompletedUpdate update)
         => update.FrameCount
             / Stopwatch.GetElapsedTime(
                 update.StartedTimestamp,

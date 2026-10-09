@@ -112,7 +112,7 @@ The builder fails unless all of the following pass:
 - host and output architecture are ELF64 x86-64 on glibc;
 - app-local libsndfile/libsoxr exports and dynamic dependencies match the
   required ABI, and their maximum GLIBC symbol version does not exceed 2.35;
-- the full solution builds and at least 1,561 xUnit v3 cases run after excluding
+- the full solution builds and at least 1,567 xUnit v3 cases run after excluding
   18 method-scoped (41-case) frozen-bit oracles tied to Windows UCRT, Windows
   libsoxr, or Windows-generated transcendental inputs; functional, structural,
   tolerance, native-loader, and final-artifact gates remain enabled;
@@ -133,3 +133,36 @@ These gates establish build, fixture, native-loader, packaging, determinism,
 and synthetic Exact/SQLite coverage. They do not claim that every real RF
 capture has been certified on Linux; real-capture parity remains a separate
 evidence requirement.
+
+## Process cleanup and crash diagnostics
+
+FFmpeg, ffprobe, and LD AC3 tools use .NET 11 `KillOnParentExit` on Linux and
+Windows. If the decoder terminates unexpectedly, its directly launched tools
+also terminate. Preview cancellation on Unix first sends SIGTERM, then kills
+the process tree if the tool does not exit within 250 ms. Normal RF seek and
+decode completion retain their existing behavior.
+
+To collect .NET 11 in-process crash reports on Linux, set these variables
+before starting the decoder:
+
+```bash
+export DOTNET_EnableCrashReport=1
+export DOTNET_CrashReportRootPath="$(pwd)"
+./decode vhs --ntsc -f 20 input.flac output
+```
+
+The root path must be an existing writable absolute directory. RC1 writes
+reports under `$DOTNET_CrashReportRootPath/.dotnet/crash-reports/` using
+`report-*.crashreport.json` names, and also writes diagnostic information to
+stderr. These reports describe fatal runtime failures; ordinary command errors
+continue to use the existing console/log diagnostics. Enabling
+`DOTNET_DbgEnableMiniDump` selects the existing `createdump` path instead.
+Windows continues to use its existing crash diagnostics.
+
+Linux CI enables the reporter before launching .NET, collects available crash
+reports, and preserves TRX test results. Both release test runs have a 15-minute
+execution timeout and use the SDK's `per-module` results layout. The additional
+process fixtures cover parent death, cancellation, pipe EOF, concurrent stdout
+and stderr capture, Unix signal termination, and structured Linux crash reports.
+See [.NET 11 runtime diagnostics](https://learn.microsoft.com/en-us/dotnet/core/whats-new/dotnet-11/runtime#in-process-crash-report-logging)
+and the [RC1 report lifecycle implementation](https://github.com/dotnet/runtime/blob/v11.0.0-rc.1.26425.128/src/coreclr/debug/crashreport/inproccrashreportlifecycle.cpp).

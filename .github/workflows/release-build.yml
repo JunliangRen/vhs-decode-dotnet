@@ -166,182 +166,191 @@ jobs:
         run: dotnet build VHSDecodeDotNet.slnx --configuration Release --no-restore
 
       - name: Run tests
-        run: dotnet test --solution VHSDecodeDotNet.slnx --configuration Release --no-build --no-restore --minimum-expected-tests 1615
+        run: dotnet test --solution VHSDecodeDotNet.slnx --configuration Release --no-build --no-restore --timeout 15m --results-directory artifacts/test-results/windows --results-directory-layout per-module --report-trx --minimum-expected-tests 1621
+
+      - name: Upload Windows test reports
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: test-results-windows-${{ github.sha }}
+          path: artifacts/test-results/windows/
+          if-no-files-found: warn
+          retention-days: 14
 
       - name: Run NumPy reduction scalar fallback tests
         env:
           DOTNET_EnableHWIntrinsic: "0"
-        run: dotnet test tests/VHSDecode.Tests/VHSDecode.Tests.csproj --configuration Release --no-build --no-restore --filter-class VHSDecode.Tests.NumpyReductionMeanTests --minimum-expected-tests 13
+        run: dotnet test tests/VHSDecode.Tests/VHSDecode.Tests.csproj --configuration Release --no-build --no-restore --filter-class VHSDecode.Tests.NumpyReductionMeanTests --minimum-expected-tests 13 --timeout 5m
 
       - name: Run current VHS sync scalar fallback tests
         env:
           DOTNET_EnableHWIntrinsic: "0"
-        run: dotnet test tests/VHSDecode.Tests/VHSDecode.Tests.csproj --configuration Release --no-build --no-restore --filter-class VHSDecode.Tests.VhsSyncDetectorCurrentTests --minimum-expected-tests 43
+        run: dotnet test tests/VHSDecode.Tests/VHSDecode.Tests.csproj --configuration Release --no-build --no-restore --filter-class VHSDecode.Tests.VhsSyncDetectorCurrentTests --minimum-expected-tests 43 --timeout 5m
 
       - name: Run current CTI AVX2 reciprocal gather tests
         env:
           VHSDECODE_REQUIRE_AVX_CTI_GATHER: "1"
-        run: dotnet test tests/VHSDecode.Tests/VHSDecode.Tests.csproj --configuration Release --no-build --no-restore --filter-method '*PinnedCurrentCtiAvx2ReciprocalGatherPreservesScalarBits*' --minimum-expected-tests 1
+        run: dotnet test tests/VHSDecode.Tests/VHSDecode.Tests.csproj --configuration Release --no-build --no-restore --filter-method '*PinnedCurrentCtiAvx2ReciprocalGatherPreservesScalarBits*' --minimum-expected-tests 1 --timeout 5m
 
       - name: Run current CTI AVX2-disabled tests
         env:
           DOTNET_EnableAVX2: "0"
-        run: dotnet test tests/VHSDecode.Tests/VHSDecode.Tests.csproj --configuration Release --no-build --no-restore --filter-class VHSDecode.Tests.ChromaTransientImprovementCurrentTests --minimum-expected-tests 19
+        run: dotnet test tests/VHSDecode.Tests/VHSDecode.Tests.csproj --configuration Release --no-build --no-restore --filter-class VHSDecode.Tests.ChromaTransientImprovementCurrentTests --minimum-expected-tests 19 --timeout 5m
 
       - name: Run current CTI scalar fallback tests
         env:
           DOTNET_EnableAVX: "0"
-        run: dotnet test tests/VHSDecode.Tests/VHSDecode.Tests.csproj --configuration Release --no-build --no-restore --filter-class VHSDecode.Tests.ChromaTransientImprovementCurrentTests --minimum-expected-tests 19
+        run: dotnet test tests/VHSDecode.Tests/VHSDecode.Tests.csproj --configuration Release --no-build --no-restore --filter-class VHSDecode.Tests.ChromaTransientImprovementCurrentTests --minimum-expected-tests 19 --timeout 5m
 
       - name: Run current chroma ACC AVX-disabled tests
         env:
           DOTNET_EnableAVX: "0"
-        run: dotnet test tests/VHSDecode.Tests/VHSDecode.Tests.csproj --configuration Release --no-build --no-restore --filter-class VHSDecode.Tests.VhsChromaAutomaticGainCurrentTests --minimum-expected-tests 15
+        run: dotnet test tests/VHSDecode.Tests/VHSDecode.Tests.csproj --configuration Release --no-build --no-restore --filter-class VHSDecode.Tests.VhsChromaAutomaticGainCurrentTests --minimum-expected-tests 15 --timeout 5m
 
       - name: Run current RF chroma shift scalar fallback tests
         env:
           DOTNET_EnableAVX: "0"
-        run: dotnet test tests/VHSDecode.Tests/VHSDecode.Tests.csproj --configuration Release --no-build --no-restore --filter-class VHSDecode.Tests.ChromaReductionNumericsCompatibilityTests --minimum-expected-tests 4
+        run: dotnet test tests/VHSDecode.Tests/VHSDecode.Tests.csproj --configuration Release --no-build --no-restore --filter-class VHSDecode.Tests.ChromaReductionNumericsCompatibilityTests --minimum-expected-tests 4 --timeout 5m
 
       - name: Run current RF chroma shift AVX equivalence test
         env:
           VHSDECODE_REQUIRE_AVX_CURRENT_CHROMA_SHIFT: "1"
-        run: dotnet test tests/VHSDecode.Tests/VHSDecode.Tests.csproj --configuration Release --no-build --no-restore --filter-method '*CurrentRfFusedDoubleChromaShiftPreservesPinnedImplementationBits*' --minimum-expected-tests 1
+        run: dotnet test tests/VHSDecode.Tests/VHSDecode.Tests.csproj --configuration Release --no-build --no-restore --filter-method '*CurrentRfFusedDoubleChromaShiftPreservesPinnedImplementationBits*' --minimum-expected-tests 1 --timeout 5m
 
       - name: Run NumPy complex spectrum AVX2-disabled tests
         env:
           DOTNET_EnableAVX2: "0"
-        run: dotnet test tests/VHSDecode.Tests/VHSDecode.Tests.csproj --configuration Release --no-build --no-restore --filter-class VHSDecode.Tests.NumpyComplexMultiplyTests --minimum-expected-tests 28
+        run: dotnet test tests/VHSDecode.Tests/VHSDecode.Tests.csproj --configuration Release --no-build --no-restore --filter-class VHSDecode.Tests.NumpyComplexMultiplyTests --minimum-expected-tests 28 --timeout 5m
 
       - name: Run NumPy complex spectrum scalar fallback tests
         env:
           DOTNET_EnableHWIntrinsic: "0"
-        run: dotnet test tests/VHSDecode.Tests/VHSDecode.Tests.csproj --configuration Release --no-build --no-restore --filter-class VHSDecode.Tests.NumpyComplexMultiplyTests --minimum-expected-tests 28
+        run: dotnet test tests/VHSDecode.Tests/VHSDecode.Tests.csproj --configuration Release --no-build --no-restore --filter-class VHSDecode.Tests.NumpyComplexMultiplyTests --minimum-expected-tests 28 --timeout 5m
 
       - name: Run VHS Rust FM scalar fallback tests
         env:
           DOTNET_EnableHWIntrinsic: "0"
-        run: dotnet test tests/VHSDecode.Tests/VHSDecode.Tests.csproj --configuration Release --no-build --no-restore --filter-class VHSDecode.Tests.VhsRustUnwrapSimdTests --minimum-expected-tests 13
+        run: dotnet test tests/VHSDecode.Tests/VHSDecode.Tests.csproj --configuration Release --no-build --no-restore --filter-class VHSDecode.Tests.VhsRustUnwrapSimdTests --minimum-expected-tests 13 --timeout 5m
 
       - name: Run PocketFFT scalar fallback tests
         env:
           DOTNET_EnableAVX: "0"
-        run: dotnet test tests/VHSDecode.Tests/VHSDecode.Tests.csproj --configuration Release --no-build --no-restore --filter-method '*PocketComplexFft*' --minimum-expected-tests 2
+        run: dotnet test tests/VHSDecode.Tests/VHSDecode.Tests.csproj --configuration Release --no-build --no-restore --filter-method '*PocketComplexFft*' --minimum-expected-tests 2 --timeout 5m
 
       - name: Run complex FFT real-input staging AVX equivalence test
         env:
           VHSDECODE_REQUIRE_AVX_REAL_STAGING: "1"
-        run: dotnet test tests/VHSDecode.Tests/VHSDecode.Tests.csproj --configuration Release --no-build --no-restore --filter-method '*ComplexFftDirectOutputMatchesFrozenPowerOfTwoHashes*' --minimum-expected-tests 1
+        run: dotnet test tests/VHSDecode.Tests/VHSDecode.Tests.csproj --configuration Release --no-build --no-restore --filter-method '*ComplexFftDirectOutputMatchesFrozenPowerOfTwoHashes*' --minimum-expected-tests 1 --timeout 5m
 
       - name: Run complex FFT direct-output AVX-disabled tests
         env:
           DOTNET_EnableAVX: "0"
-        run: dotnet test tests/VHSDecode.Tests/VHSDecode.Tests.csproj --configuration Release --no-build --no-restore --filter-class VHSDecode.Tests.PocketFftComplexStorageTests --minimum-expected-tests 5
+        run: dotnet test tests/VHSDecode.Tests/VHSDecode.Tests.csproj --configuration Release --no-build --no-restore --filter-class VHSDecode.Tests.PocketFftComplexStorageTests --minimum-expected-tests 5 --timeout 5m
 
       - name: Run complex FFT direct-output scalar fallback tests
         env:
           DOTNET_EnableHWIntrinsic: "0"
-        run: dotnet test tests/VHSDecode.Tests/VHSDecode.Tests.csproj --configuration Release --no-build --no-restore --filter-class VHSDecode.Tests.PocketFftComplexStorageTests --minimum-expected-tests 5
+        run: dotnet test tests/VHSDecode.Tests/VHSDecode.Tests.csproj --configuration Release --no-build --no-restore --filter-class VHSDecode.Tests.PocketFftComplexStorageTests --minimum-expected-tests 5 --timeout 5m
 
       - name: Run large PocketFFT second-pass scalar fallback tests
         env:
           DOTNET_EnableHWIntrinsic: "0"
-        run: dotnet test tests/VHSDecode.Tests/VHSDecode.Tests.csproj --configuration Release --no-build --no-restore --filter-method '*LargeComplexFft*' --minimum-expected-tests 4
+        run: dotnet test tests/VHSDecode.Tests/VHSDecode.Tests.csproj --configuration Release --no-build --no-restore --filter-method '*LargeComplexFft*' --minimum-expected-tests 4 --timeout 5m
 
       - name: Run real PocketFFT radix-4 scalar fallback tests
         env:
           DOTNET_EnableAVX: "0"
-        run: dotnet test tests/VHSDecode.Tests/VHSDecode.Tests.csproj --configuration Release --no-build --no-restore --filter-method '*RealFftRadix4AvxStagesPreserveScalarBitPatterns*' --minimum-expected-tests 4
+        run: dotnet test tests/VHSDecode.Tests/VHSDecode.Tests.csproj --configuration Release --no-build --no-restore --filter-method '*RealFftRadix4AvxStagesPreserveScalarBitPatterns*' --minimum-expected-tests 4 --timeout 5m
 
       - name: Run final real PocketFFT radix-4 AVX equivalence test
         env:
           VHSDECODE_REQUIRE_AVX_REAL_RADIX4: "1"
-        run: dotnet test tests/VHSDecode.Tests/VHSDecode.Tests.csproj --configuration Release --no-build --no-restore --filter-method '*RealInverseFftFinalRadix4AvxStagePreservesScalarSpecialValueBits*' --minimum-expected-tests 1
+        run: dotnet test tests/VHSDecode.Tests/VHSDecode.Tests.csproj --configuration Release --no-build --no-restore --filter-method '*RealInverseFftFinalRadix4AvxStagePreservesScalarSpecialValueBits*' --minimum-expected-tests 1 --timeout 5m
 
       - name: Run final real PocketFFT radix-4 scalar fallback test
         env:
           DOTNET_EnableAVX: "0"
-        run: dotnet test tests/VHSDecode.Tests/VHSDecode.Tests.csproj --configuration Release --no-build --no-restore --filter-method '*RealInverseFftFinalRadix4AvxStagePreservesScalarSpecialValueBits*' --minimum-expected-tests 1
+        run: dotnet test tests/VHSDecode.Tests/VHSDecode.Tests.csproj --configuration Release --no-build --no-restore --filter-method '*RealInverseFftFinalRadix4AvxStagePreservesScalarSpecialValueBits*' --minimum-expected-tests 1 --timeout 5m
 
       - name: Run PocketFFT radix-8 AVX-disabled hash test
         env:
           DOTNET_EnableAVX: "0"
-        run: dotnet test tests/VHSDecode.Tests/VHSDecode.Tests.csproj --configuration Release --no-build --no-restore --filter-method '*AvxRadix8StagesPreserveScalarSpecialValueBits*' --minimum-expected-tests 1
+        run: dotnet test tests/VHSDecode.Tests/VHSDecode.Tests.csproj --configuration Release --no-build --no-restore --filter-method '*AvxRadix8StagesPreserveScalarSpecialValueBits*' --minimum-expected-tests 1 --timeout 5m
 
       - name: Run PocketFFT radix-5 AVX-disabled equivalence test
         env:
           DOTNET_EnableAVX: "0"
-        run: dotnet test tests/VHSDecode.Tests/VHSDecode.Tests.csproj --configuration Release --no-build --no-restore --filter-method '*AvxRadix5StagesPreserveScalarSpecialValueBits*' --minimum-expected-tests 1
+        run: dotnet test tests/VHSDecode.Tests/VHSDecode.Tests.csproj --configuration Release --no-build --no-restore --filter-method '*AvxRadix5StagesPreserveScalarSpecialValueBits*' --minimum-expected-tests 1 --timeout 5m
 
       - name: Run PocketFFT radix-5 scalar fallback equivalence test
         env:
           DOTNET_EnableHWIntrinsic: "0"
-        run: dotnet test tests/VHSDecode.Tests/VHSDecode.Tests.csproj --configuration Release --no-build --no-restore --filter-method '*AvxRadix5StagesPreserveScalarSpecialValueBits*' --minimum-expected-tests 1
+        run: dotnet test tests/VHSDecode.Tests/VHSDecode.Tests.csproj --configuration Release --no-build --no-restore --filter-method '*AvxRadix5StagesPreserveScalarSpecialValueBits*' --minimum-expected-tests 1 --timeout 5m
 
       - name: Run PocketFFT radix-3 AVX equivalence test
         env:
           VHSDECODE_REQUIRE_AVX_RADIX3: "1"
-        run: dotnet test tests/VHSDecode.Tests/VHSDecode.Tests.csproj --configuration Release --no-build --no-restore --filter-method '*AvxRadix3StagesPreserveScalarSpecialValueBits*' --minimum-expected-tests 1
+        run: dotnet test tests/VHSDecode.Tests/VHSDecode.Tests.csproj --configuration Release --no-build --no-restore --filter-method '*AvxRadix3StagesPreserveScalarSpecialValueBits*' --minimum-expected-tests 1 --timeout 5m
 
       - name: Run PocketFFT radix-3 AVX-disabled equivalence test
         env:
           DOTNET_EnableAVX: "0"
-        run: dotnet test tests/VHSDecode.Tests/VHSDecode.Tests.csproj --configuration Release --no-build --no-restore --filter-method '*AvxRadix3StagesPreserveScalarSpecialValueBits*' --minimum-expected-tests 1
+        run: dotnet test tests/VHSDecode.Tests/VHSDecode.Tests.csproj --configuration Release --no-build --no-restore --filter-method '*AvxRadix3StagesPreserveScalarSpecialValueBits*' --minimum-expected-tests 1 --timeout 5m
 
       - name: Run PocketFFT radix-3 scalar fallback equivalence test
         env:
           DOTNET_EnableHWIntrinsic: "0"
-        run: dotnet test tests/VHSDecode.Tests/VHSDecode.Tests.csproj --configuration Release --no-build --no-restore --filter-method '*AvxRadix3StagesPreserveScalarSpecialValueBits*' --minimum-expected-tests 1
+        run: dotnet test tests/VHSDecode.Tests/VHSDecode.Tests.csproj --configuration Release --no-build --no-restore --filter-method '*AvxRadix3StagesPreserveScalarSpecialValueBits*' --minimum-expected-tests 1 --timeout 5m
 
       - name: Run PocketFFT radix-11 AVX2 equivalence test
         env:
           VHSDECODE_REQUIRE_AVX_RADIX11: "1"
-        run: dotnet test tests/VHSDecode.Tests/VHSDecode.Tests.csproj --configuration Release --no-build --no-restore --filter-method '*Avx2Radix11PacketStagesPreserveScalarSpecialValueBits*' --minimum-expected-tests 1
+        run: dotnet test tests/VHSDecode.Tests/VHSDecode.Tests.csproj --configuration Release --no-build --no-restore --filter-method '*Avx2Radix11PacketStagesPreserveScalarSpecialValueBits*' --minimum-expected-tests 1 --timeout 5m
 
       - name: Run PocketFFT radix-11 AVX2-disabled equivalence test
         env:
           DOTNET_EnableAVX2: "0"
-        run: dotnet test tests/VHSDecode.Tests/VHSDecode.Tests.csproj --configuration Release --no-build --no-restore --filter-method '*Avx2Radix11PacketStagesPreserveScalarSpecialValueBits*' --minimum-expected-tests 1
+        run: dotnet test tests/VHSDecode.Tests/VHSDecode.Tests.csproj --configuration Release --no-build --no-restore --filter-method '*Avx2Radix11PacketStagesPreserveScalarSpecialValueBits*' --minimum-expected-tests 1 --timeout 5m
 
       - name: Run PocketFFT radix-11 AVX-disabled equivalence test
         env:
           DOTNET_EnableAVX: "0"
-        run: dotnet test tests/VHSDecode.Tests/VHSDecode.Tests.csproj --configuration Release --no-build --no-restore --filter-method '*Avx2Radix11PacketStagesPreserveScalarSpecialValueBits*' --minimum-expected-tests 1
+        run: dotnet test tests/VHSDecode.Tests/VHSDecode.Tests.csproj --configuration Release --no-build --no-restore --filter-method '*Avx2Radix11PacketStagesPreserveScalarSpecialValueBits*' --minimum-expected-tests 1 --timeout 5m
 
       - name: Run PocketFFT radix-11 scalar fallback equivalence test
         env:
           DOTNET_EnableHWIntrinsic: "0"
-        run: dotnet test tests/VHSDecode.Tests/VHSDecode.Tests.csproj --configuration Release --no-build --no-restore --filter-method '*Avx2Radix11PacketStagesPreserveScalarSpecialValueBits*' --minimum-expected-tests 1
+        run: dotnet test tests/VHSDecode.Tests/VHSDecode.Tests.csproj --configuration Release --no-build --no-restore --filter-method '*Avx2Radix11PacketStagesPreserveScalarSpecialValueBits*' --minimum-expected-tests 1 --timeout 5m
 
       - name: Run Float32 SOS common-section AVX-disabled hash test
         env:
           DOTNET_EnableAVX: "0"
-        run: dotnet test tests/VHSDecode.Tests/VHSDecode.Tests.csproj --configuration Release --no-build --no-restore --filter-method '*Float32SosCommonSectionKernelsRemainBitExact*' --minimum-expected-tests 1
+        run: dotnet test tests/VHSDecode.Tests/VHSDecode.Tests.csproj --configuration Release --no-build --no-restore --filter-method '*Float32SosCommonSectionKernelsRemainBitExact*' --minimum-expected-tests 1 --timeout 5m
 
       - name: Run Float32 SOS checked-reference scalar fallback test
         env:
           DOTNET_EnableHWIntrinsic: "0"
-        run: dotnet test tests/VHSDecode.Tests/VHSDecode.Tests.csproj --configuration Release --no-build --no-restore --filter-method '*Float32SosGenericStateAccessMatchesCheckedReference*' --minimum-expected-tests 1
+        run: dotnet test tests/VHSDecode.Tests/VHSDecode.Tests.csproj --configuration Release --no-build --no-restore --filter-method '*Float32SosGenericStateAccessMatchesCheckedReference*' --minimum-expected-tests 1 --timeout 5m
 
       - name: Run managed Super-Gaussian mask AVX equivalence test
         env:
           VHSDECODE_REQUIRE_AVX_SUPER_GAUSSIAN_MASK: "1"
-        run: dotnet test tests/VHSDecode.Tests/VHSDecode.Tests.csproj --configuration Release --no-build --no-restore --filter-method '*SuperGaussianMaskSimdPreservesScalarComplexBits*' --minimum-expected-tests 1
+        run: dotnet test tests/VHSDecode.Tests/VHSDecode.Tests.csproj --configuration Release --no-build --no-restore --filter-method '*SuperGaussianMaskSimdPreservesScalarComplexBits*' --minimum-expected-tests 1 --timeout 5m
 
       - name: Run managed Super-Gaussian mask AVX-disabled equivalence test
         env:
           DOTNET_EnableAVX: "0"
-        run: dotnet test tests/VHSDecode.Tests/VHSDecode.Tests.csproj --configuration Release --no-build --no-restore --filter-method '*SuperGaussianMaskSimdPreservesScalarComplexBits*' --minimum-expected-tests 1
+        run: dotnet test tests/VHSDecode.Tests/VHSDecode.Tests.csproj --configuration Release --no-build --no-restore --filter-method '*SuperGaussianMaskSimdPreservesScalarComplexBits*' --minimum-expected-tests 1 --timeout 5m
 
       - name: Run IPP Super-Gaussian scalar fallback tests
         env:
           DOTNET_EnableHWIntrinsic: "0"
-        run: dotnet test tests/VHSDecode.Tests/VHSDecode.Tests.csproj --configuration Release --no-build --no-restore --filter-class VHSDecode.Tests.Ipp.IppRealDft32Tests --minimum-expected-tests 15
+        run: dotnet test tests/VHSDecode.Tests/VHSDecode.Tests.csproj --configuration Release --no-build --no-restore --filter-class VHSDecode.Tests.Ipp.IppRealDft32Tests --minimum-expected-tests 15 --timeout 5m
 
       - name: Run PCM16 scalar fallback tests
         env:
           DOTNET_EnableAVX2: "0"
-        run: dotnet test tests/VHSDecode.Tests/VHSDecode.Tests.csproj --configuration Release --no-build --no-restore --filter FullyQualifiedName~LibsndfilePcm16SampleLoaderTests --minimum-expected-tests 64
+        run: dotnet test tests/VHSDecode.Tests/VHSDecode.Tests.csproj --configuration Release --no-build --no-restore --filter FullyQualifiedName~LibsndfilePcm16SampleLoaderTests --minimum-expected-tests 64 --timeout 5m
 
       - name: Restore Windows x64 publish assets
         run: dotnet restore src/VHSDecode.Cli/VHSDecode.Cli.csproj --runtime win-x64
@@ -377,6 +386,9 @@ jobs:
     name: Build, test, and package Linux x64 release
     runs-on: ubuntu-22.04
     timeout-minutes: 90
+    env:
+      DOTNET_EnableCrashReport: "1"
+      DOTNET_CrashReportRootPath: ${{ github.workspace }}
 
     steps:
       - name: Check out repository
@@ -409,6 +421,18 @@ jobs:
       - name: Build, test, and verify final Linux x64 tar
         shell: pwsh
         run: ./tools/build-linux-x64-release.ps1
+
+      - name: Upload Linux test and crash reports
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: test-results-linux-x64-${{ github.sha }}
+          path: |
+            artifacts/test-results/linux-x64/
+            .dotnet/crash-reports/
+          include-hidden-files: true
+          if-no-files-found: warn
+          retention-days: 14
 
       - name: Upload Linux x64 release archive
         if: github.event_name == 'push'
