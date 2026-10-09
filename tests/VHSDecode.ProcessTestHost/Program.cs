@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Runtime.InteropServices;
 using VHSDecode.Core.Processes;
 
 switch (args[0])
@@ -15,20 +16,37 @@ switch (args[0])
         await Task.Delay(TimeSpan.FromMinutes(5));
         return 0;
     case "parent":
-        var startInfo = new ProcessStartInfo(Environment.ProcessPath!)
+    case "launcher":
+        using (PosixSignalRegistration? signal = args[0] == "launcher" && !OperatingSystem.IsWindows()
+            ? PosixSignalRegistration.Create(PosixSignal.SIGTERM, context =>
+            {
+                context.Cancel = true;
+                Environment.Exit(0);
+            })
+            : null)
         {
-            UseShellExecute = false
-        };
-        if (Path.GetFileNameWithoutExtension(Environment.ProcessPath) == "dotnet")
-        {
-            startInfo.ArgumentList.Add(typeof(Program).Assembly.Location);
-        }
-        startInfo.ArgumentList.Add("sleep");
-        startInfo.ArgumentList.Add(args[1]);
-        ExternalToolProcess.Configure(startInfo);
-        using (Process child = Process.Start(startInfo)!)
-        {
-            await Task.Delay(TimeSpan.FromMinutes(5));
+            var startInfo = new ProcessStartInfo(Environment.ProcessPath!)
+            {
+                UseShellExecute = false
+            };
+            if (Path.GetFileNameWithoutExtension(Environment.ProcessPath) == "dotnet")
+            {
+                startInfo.ArgumentList.Add(typeof(Program).Assembly.Location);
+            }
+            startInfo.ArgumentList.Add("sleep");
+            startInfo.ArgumentList.Add(args[1]);
+            if (args[0] == "parent")
+            {
+                ExternalToolProcess.Configure(startInfo);
+            }
+            else
+            {
+                File.WriteAllText(args[1] + ".launcher", Environment.ProcessId.ToString());
+            }
+            using (Process child = Process.Start(startInfo)!)
+            {
+                await Task.Delay(TimeSpan.FromMinutes(5));
+            }
         }
         return 0;
     case "copy":

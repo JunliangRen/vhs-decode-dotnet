@@ -57,7 +57,7 @@ $windowsFrozenBitOracleMethods = @(
     'PalLdPilotCircularMeanMatchesNumpyComplex128Bits',
     'MtfPowersMatchReleaseFour',
     'ComplexFftDirectOutputMatchesFrozenPowerOfTwoHashes')
-$minimumLinuxTestCount = 1567
+$minimumLinuxTestCount = 1569
 
 $sources = [ordered]@{
     libogg = [pscustomobject]@{

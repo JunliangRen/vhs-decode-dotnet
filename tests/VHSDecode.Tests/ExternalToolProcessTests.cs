@@ -43,6 +43,56 @@ public sealed class ExternalToolProcessTests
     }
 
     [Fact]
+    public async Task CaptureCancellationTerminatesLauncherAndDescendant()
+    {
+        string pidPath = Path.GetTempFileName();
+        using var cancellation = CancellationTokenSource.CreateLinkedTokenSource(TestContext.Current.CancellationToken);
+        int launcherId = 0;
+        int childId = 0;
+        try
+        {
+            Task<ProcessTextOutput> capture = ExternalToolProcess.CaptureAsync(
+                CreateStartInfo("launcher", pidPath, capture: true), cancellation.Token);
+            launcherId = await ReadChildIdAsync(pidPath + ".launcher");
+            childId = await ReadChildIdAsync(pidPath);
+            cancellation.Cancel();
+            await Assert.ThrowsAnyAsync<OperationCanceledException>(() => capture);
+            await AssertExitedAsync(launcherId);
+            await AssertExitedAsync(childId);
+        }
+        finally
+        {
+            cancellation.Cancel();
+            StopChild(launcherId);
+            StopChild(childId);
+            File.Delete(pidPath);
+            File.Delete(pidPath + ".launcher");
+        }
+    }
+
+    [Fact]
+    public async Task StopTerminatesLauncherAndDescendant()
+    {
+        string pidPath = Path.GetTempFileName();
+        int childId = 0;
+        using Process launcher = Process.Start(CreateStartInfo("launcher", pidPath))!;
+        try
+        {
+            childId = await ReadChildIdAsync(pidPath);
+            ExternalToolProcess.Stop(launcher);
+            Assert.True(launcher.HasExited);
+            await AssertExitedAsync(childId);
+        }
+        finally
+        {
+            ExternalToolProcess.Stop(launcher);
+            StopChild(childId);
+            File.Delete(pidPath);
+            File.Delete(pidPath + ".launcher");
+        }
+    }
+
+    [Fact]
     public async Task ParentTerminationDoesNotLeaveChildRunning()
     {
         Assert.SkipUnless(OperatingSystem.IsWindows() || OperatingSystem.IsLinux(),
@@ -214,7 +264,11 @@ public sealed class ExternalToolProcessTests
         try
         {
             using Process process = Process.GetProcessById(pid);
-            ExternalToolProcess.Stop(process);
+            if (!process.HasExited)
+            {
+                process.Kill(entireProcessTree: true);
+                process.WaitForExit(15000);
+            }
         }
         catch (ArgumentException) { }
     }

@@ -1,6 +1,5 @@
 using System.ComponentModel;
 using System.Diagnostics;
-using System.Runtime.InteropServices;
 
 namespace VHSDecode.Core.Processes;
 
@@ -30,11 +29,23 @@ internal static class ExternalToolProcess
     {
         cancellationToken.ThrowIfCancellationRequested();
         Configure(startInfo);
-        ProcessTextOutput result = await Process.RunAndCaptureTextAsync(
-            startInfo,
-            cancellationToken).ConfigureAwait(false);
-        cancellationToken.ThrowIfCancellationRequested();
-        return result;
+        using Process process = Process.Start(startInfo)
+            ?? throw new InvalidOperationException("External tool did not start.");
+        try
+        {
+            (string standardOutput, string standardError) = await process.ReadAllTextAsync(
+                cancellationToken).ConfigureAwait(false);
+            ProcessExitStatus status = await process.WaitForExitStatusAsync(
+                cancellationToken).ConfigureAwait(false);
+            cancellationToken.ThrowIfCancellationRequested();
+            return new ProcessTextOutput(status, standardOutput, standardError, process.Id);
+        }
+        catch
+        {
+            // The static capture helper kills only the launcher on cancellation.
+            Stop(process);
+            throw;
+        }
     }
 
     internal static void Stop(Process process)
@@ -46,22 +57,7 @@ internal static class ExternalToolProcess
                 return;
             }
 
-            if (OperatingSystem.IsLinux() || OperatingSystem.IsMacOS())
-            {
-                try
-                {
-                    process.Signal(PosixSignal.SIGTERM);
-                    if (process.TryWaitForExitStatus(TimeSpan.FromMilliseconds(250), out _))
-                    {
-                        return;
-                    }
-                }
-                catch (Win32Exception)
-                {
-                    // Fall back to tree termination if the signal could not be sent.
-                }
-            }
-
+            // Kill descendants while their launcher is still alive and identifiable.
             process.Kill(entireProcessTree: true);
             process.WaitForExitStatus();
         }

@@ -138,9 +138,10 @@ evidence requirement.
 
 FFmpeg, ffprobe, and LD AC3 tools use .NET 11 `KillOnParentExit` on Linux and
 Windows. If the decoder terminates unexpectedly, its directly launched tools
-also terminate. Preview cancellation on Unix first sends SIGTERM, then kills
-the process tree if the tool does not exit within 250 ms. Normal RF seek and
-decode completion retain their existing behavior.
+also terminate. Preview cancellation terminates the process tree while the
+launcher is still alive, including workers started by configured FFmpeg or
+ffprobe wrappers. Normal RF seek and decode completion retain their existing
+behavior.
 
 To collect .NET 11 in-process crash reports on Linux, set these variables
 before starting the decoder:

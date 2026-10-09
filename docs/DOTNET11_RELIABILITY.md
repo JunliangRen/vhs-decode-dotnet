@@ -7,12 +7,13 @@ The SDK remains pinned to `11.0.100-rc.1.26425.128`, with runtime
   inherited-handle list. Windows and Linux tool starts also use
   `KillOnParentExit`, so a decoder that terminates unexpectedly does not leave
   its directly launched tools running.
-- ffprobe and uname use `Process.RunAndCaptureText` / `RunAndCaptureTextAsync`
-  to drain stdout and stderr together. Cancellation still propagates to callers;
+- ffprobe and uname use `Process.RunAndCaptureText` / `ReadAllTextAsync` to
+  drain stdout and stderr together. Async capture owns the process and terminates
+  its tree on cancellation, including workers started by configured wrappers;
   uname has a five-second fallback timeout.
 - Preview encoder and muxer failures use `ProcessExitStatus`, including Unix
-  signal information. Unix cleanup sends SIGTERM and allows 250 ms to finish
-  before falling back to terminating the process tree.
+  signal information. Cancellation terminates the process tree while the launcher
+  is still alive, so its descendants remain identifiable for cleanup.
 - The Windows LD AC3 pipeline uses `SafeFileHandle.CreateAnonymousPipe`, typed
   standard handles, `ArgumentList`, and managed process lifetime handling.
   This removes the custom Win32 process creation, argument quoting, and handle
@@ -33,16 +34,18 @@ For Linux crash report configuration, see [LINUX_X64.md](LINUX_X64.md#process-cl
 
 - Release solution build: no warnings or errors. Self-contained Windows publish
   succeeds with the existing `NETSDK1244` extraction-mode warning.
-- Windows full suite: 1,868 discovered; 1,863 passed, 5 skipped, 0 failed.
+- Windows full suite: 1,870 discovered; 1,865 passed, 5 skipped, 0 failed.
   Skips cover the Linux crash reporter and unavailable AMF/QSV preview backends.
-- Linux full suite under local Ubuntu 26.04 WSL: 1,827 discovered; 1,806 passed,
+- Linux full suite under local Ubuntu 26.04 WSL: 1,829 discovered; 1,808 passed,
   21 skipped, 0 failed. It uses the existing Linux release script's 18
   method-scoped Windows bit-oracle exclusions and verified Linux native sidecars.
   Optional IPP/CUDA/hardware encoder cases follow their existing skip conditions.
   This is functional WSL validation, not Ubuntu 22.04 release certification.
-- Six process fixtures exercise concurrent stdout/stderr capture, cancellation,
+- Eight process fixtures exercise concurrent stdout/stderr capture, cancellation,
   parent termination, binary anonymous pipes and EOF, Unix termination status,
   and an intentionally failing Linux helper that produces a parseable crash JSON.
+  Two fixtures cover cancellation and termination of a launcher with an
+  unprotected worker; the Unix launcher exits on SIGTERM without stopping its worker.
 - The existing Windows AC3 test runs real sox and LD AC3 executables and compares
   the new native pipeline with the OS binary pipeline, including paths with spaces.
 - The final preview hierarchy also passes the focused preview suite: 61 passed,

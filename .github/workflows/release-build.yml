@@ -166,7 +166,7 @@ jobs:
         run: dotnet build VHSDecodeDotNet.slnx --configuration Release --no-restore
 
       - name: Run tests
-        run: dotnet test --solution VHSDecodeDotNet.slnx --configuration Release --no-build --no-restore --timeout 15m --results-directory artifacts/test-results/windows --results-directory-layout per-module --report-trx --minimum-expected-tests 1621
+        run: dotnet test --solution VHSDecodeDotNet.slnx --configuration Release --no-build --no-restore --timeout 15m --results-directory artifacts/test-results/windows --results-directory-layout per-module --report-trx --minimum-expected-tests 1623
 
       - name: Upload Windows test reports
         if: always()
