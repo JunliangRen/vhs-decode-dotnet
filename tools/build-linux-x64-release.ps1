@@ -1442,7 +1442,7 @@ $glibcCeilingEnforced = -not $AllowNewerGlibc.IsPresent
     'Additional VHS/LD DSP backend: ipp-fast (static PIC sequential IPP, system libstdc++)',
     "IPP package version: $($ippManifest.packageVersion); library version: $($ippManifest.runtimeVersion)",
     "IPP bridge SHA256: $($ippManifest.bridgeSha256)",
-    'Every shipped ELF audited: GLIBC <= 2.34, GLIBCXX <= 3.4.29, CXXABI <= 1.3.13, GCC <= 4.2.0',
+    "Every shipped ELF audited: GLIBC <= $maximumIppGlibc, GLIBCXX <= 3.4.29, CXXABI <= 1.3.13, GCC <= 4.2.0",
     'Native codecs linked into libsndfile: libogg 1.3.5, libvorbis 1.3.7, opus 1.4, FLAC 1.4.2',
     'libsoxr source commit: a66f3eeeeb62a32403ff143b756eed92b1ec6b62')
 [System.IO.File]::WriteAllLines(
