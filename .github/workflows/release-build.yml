@@ -422,6 +422,9 @@ jobs:
         shell: pwsh
         run: ./tools/build-linux-x64-release.ps1
 
+      - name: Test Linux ELF audit and RF smoke tooling
+        run: python3 -B -m unittest discover -s tools/tests -v
+
       - name: Upload Linux test and crash reports
         if: always()
         uses: actions/upload-artifact@v7
@@ -435,7 +438,6 @@ jobs:
           retention-days: 14
 
       - name: Upload Linux x64 release archive
-        if: github.event_name == 'push'
         uses: actions/upload-artifact@v7
         with:
           name: vhs-decode-dotnet-linux-x64-${{ github.sha }}
@@ -444,3 +446,64 @@ jobs:
             artifacts/release/vhs-decode-dotnet-linux-x64.tar.gz.sha256
           if-no-files-found: error
           retention-days: 30
+
+  linux-distributions:
+    name: Verify final Linux tar on ${{ matrix.image }}
+    needs: linux-x64
+    runs-on: ubuntu-22.04
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - image: ubuntu:22.04
+            id: ubuntu-22
+            install: apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y python3 binutils libicu70 libssl3 libstdc++6 libgssapi-krb5-2 zlib1g
+          - image: debian:12
+            id: debian-12
+            install: apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y python3 binutils libicu72 libssl3 libstdc++6 libgssapi-krb5-2 zlib1g
+          - image: debian:13
+            id: debian-13
+            install: apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y python3 binutils libicu76 libssl3t64 libstdc++6 libgssapi-krb5-2 zlib1g
+          - image: fedora:44
+            id: fedora-44
+            install: dnf install -y python3 binutils libicu openssl-libs libstdc++ krb5-libs zlib
+          - image: almalinux:9
+            id: alma-9
+            install: dnf install -y python3 binutils libicu openssl-libs libstdc++ krb5-libs zlib
+    steps:
+      - name: Check out verification tools
+        uses: actions/checkout@v6
+
+      - name: Download the exact Linux tar built by this workflow
+        uses: actions/download-artifact@v8
+        with:
+          name: vhs-decode-dotnet-linux-x64-${{ github.sha }}
+          path: artifacts/distribution-input
+
+      - name: Verify checksum and run the final package in a clean distribution
+        env:
+          IMAGE: ${{ matrix.image }}
+          INSTALL_COMMAND: ${{ matrix.install }}
+        run: |
+          cd artifacts/distribution-input
+          sha256sum -c vhs-decode-dotnet-linux-x64.tar.gz.sha256
+          cd ../..
+          mkdir -p artifacts/distribution-results
+          docker run --rm \
+            -v "$PWD:/repo:ro" \
+            -v "$PWD/artifacts/distribution-results:/report" \
+            "$IMAGE" bash -lc "$INSTALL_COMMAND && \
+              cd /tmp && \
+              tar -xzf /repo/artifacts/distribution-input/vhs-decode-dotnet-linux-x64.tar.gz && \
+              python3 -B /repo/tools/verify-linux-native.py package /tmp/vhs-decode-dotnet-linux-x64 --output /report/ELF-ABI.json && \
+              python3 -B /repo/tools/verify-linux-release.py /tmp/vhs-decode-dotnet-linux-x64 /report/rf"
+
+      - name: Upload distribution ABI and decode evidence
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: linux-ipp-${{ matrix.id }}-${{ github.sha }}
+          path: artifacts/distribution-results/
+          if-no-files-found: warn
+          retention-days: 14

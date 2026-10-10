@@ -7,16 +7,27 @@ Source repository: <https://github.com/JunliangRen/vhs-decode-dotnet>
 The Linux package targets only 64-bit x86 Linux:
 
 - .NET runtime identifier: `linux-x64`
-- C library: glibc, with Ubuntu 22.04 / glibc 2.35 as the release-build ceiling
+- C library: glibc; built on Ubuntu 22.04, with every shipped ELF requiring
+  GLIBC 2.34 or older, GLIBCXX 3.4.29 or older, CXXABI 1.3.13 or older, and
+  GCC 4.2.0 or older
 - deployment: self-contained, multi-file `tar.gz`
-- compatibility backend: `exact`
+- default compatibility backend: `exact`; additional VHS/LD backend: `ipp-fast`
 - bundled native sidecars: `libsndfile.so`, `libsoxr.so`, and the SQLite
-  `libe_sqlite3.so` asset selected by the pinned NuGet graph
+  `libe_sqlite3.so` asset selected by the pinned NuGet graph, plus
+  `libvhsdecode_ipp.so`
 
 The package does not target 32-bit x86, ARM/ARM64, or musl distributions. The
-Windows-only `ipp-fast` and `cuda-fast` backends and their DLLs are deliberately
-absent. Linux GPU acceleration is not part of this release gate. The external
+`cuda-fast` backend and Windows DLLs are absent. Linux GPU acceleration is not
+part of this release gate. The external
 FFmpeg CPU/libx264 preview fallback is exercised when FFmpeg is available.
+
+The package is independent of Ubuntu's package manager. CI runs the same final
+tar on Ubuntu 22.04, Debian 12/13, Fedora 44 and AlmaLinux 9, including IPP
+initialization, VHS/LD RF decode, and Approx provider selection. AlmaLinux 9
+supplies the RHEL 9 family compatibility check; this is not a separate RHEL
+hardware certification. RHEL 8's glibc 2.28 is below this package's baseline.
+Alpine/musl and ARM64 require separate native builds. NixOS needs a compatible
+loader environment such as `nix-ld` or a Nix wrapper and has no dedicated gate.
 
 ## Runtime requirements
 
@@ -29,6 +40,13 @@ sudo apt-get install -y \
   ca-certificates ffmpeg libc6 libgcc-s1 libgssapi-krb5-2 libicu70 \
   libssl3 libstdc++6 tzdata zlib1g
 ```
+
+On Fedora or RHEL 9 family systems, the corresponding runtime libraries are
+`glibc`, `libgcc`, `libstdc++`, `libicu`, `openssl-libs`, `krb5-libs`, `zlib`,
+`ca-certificates`, and `tzdata` (install with `dnf`). FFmpeg availability varies
+by distribution and enabled repositories. On Arch Linux the corresponding
+packages include `glibc`, `gcc-libs`, `icu`, `openssl`, `krb5`, `zlib`,
+`ca-certificates`, `tzdata`, and `ffmpeg`; Arch has no dedicated CI gate.
 
 Both `ffmpeg` and `ffprobe` must be available on `PATH`. They remain necessary
 for container inputs and fallback paths outside the narrowly gated direct raw
@@ -65,7 +83,19 @@ The `decode` facade is also included, for example:
 
 ```bash
 ./decode vhs --pal --dsp-backend exact input.lds output
+./decode vhs --pal --dsp-backend ipp-fast input.lds output-ipp
+./decode ld --pal --dsp-backend ipp-fast input.lds output-ld
 ```
+
+IPP is linked into the app-local bridge using PIC sequential static libraries;
+users do not install oneAPI or configure `LD_LIBRARY_PATH`. The system C++
+runtime remains a dependency. IPP needs an x86-64 CPU with SSE4.2 support, and
+the loader reports an explicit failure if an explicitly selected IPP backend
+cannot initialize. Normal decode still defaults to Exact. `approx-fast`
+automatically selects its IPP provider when available; use
+`--approx-provider managed` to select managed float32 transforms. Automatic
+CPU preview also selects IPP when available; `--dsp-backend exact` pins Exact.
+IPP and Exact have a numerical compatibility contract, not a bit-for-bit one.
 
 Keep the extracted files together. This is intentionally a multi-file package;
 moving only an apphost such as `vhs-decode` will leave its managed runtime and
@@ -94,11 +124,16 @@ builds:
   disabled;
 - unmodified libsoxr commit
   `a66f3eeeeb62a32403ff143b756eed92b1ec6b62` as an app-local shared library,
-  without OpenMP.
+  without OpenMP;
+- the C++ IPP bridge from the SHA-256 pinned Intel APT packages in
+  `tools/linux-ipp-packages.json`, with no IPP, OpenMP, or TBB shared dependency.
 
 The resulting archive and checksum are written to `artifacts/release/`. The tar
 contains the corresponding source archives, LGPL texts, source hashes, and a
 build-provenance manifest.
+It also includes the original Intel license, third-party notices, package and
+bridge hashes, and separate package/library version records. The Linux package
+`2026.0.1-51` reports IPP library version `2026.0.0`; this is checked at runtime.
 
 `-AllowNewerGlibc` exists only for local functional investigation. Output built
 with that switch is not certified for the Ubuntu 22.04 baseline. `-SkipTests`
@@ -110,19 +145,32 @@ candidate.
 The builder fails unless all of the following pass:
 
 - host and output architecture are ELF64 x86-64 on glibc;
-- app-local libsndfile/libsoxr exports and dynamic dependencies match the
-  required ABI, and their maximum GLIBC symbol version does not exceed 2.35;
-- the full solution builds and at least 1,567 xUnit v3 cases run after excluding
+- all shipped ELF files, including .NET and SQLite, satisfy the GLIBC,
+  GLIBCXX, CXXABI and GCC ceilings above; imports resolve, and RPATH/RUNPATH
+  cannot contain a build-machine or current-directory search path;
+- IPP exports match the complete C ABI, runtime-info layout is 240 bytes,
+  initialization and CPU dispatch succeed, and only allowed system libraries
+  remain as dynamic dependencies;
+- the full solution builds and the full portable xUnit v3 suite runs after excluding
   18 method-scoped (41-case) frozen-bit oracles tied to Windows UCRT, Windows
   libsoxr, or Windows-generated transcendental inputs; functional, structural,
   tolerance, native-loader, and final-artifact gates remain enabled;
-- the multi-file publish contains the Linux SQLite, libsndfile, and libsoxr
-  assets, the project license, the complete application NuGet graph manifest
+- `VHSDECODE_REQUIRE_IPP=1` makes missing IPP fail the suite instead of silently
+  skipping native tests; loader fixtures exercise missing exports, wrong ABI,
+  wrong structure size, runtime/initialization rejection, invalid ELF, and
+  nonfatal warnings, alongside FFT, IIR/SOS, state, concurrency and DSP tests;
+- the multi-file publish contains the Linux SQLite, libsndfile, libsoxr and
+  IPP assets, the project license, the complete application NuGet graph manifest
   and its license/notice files, the third-party license texts explicitly
   referenced by this repository, and the exact .NET and ASP.NET Core runtime
   pack licenses/notices, while containing no Windows
   sndfile/soxr/IPP/CUDA/cuFFT binaries;
 - every command alias starts from the final extracted tar;
+- that same tar performs complete synthetic PAL VHS/LD Exact and IPP decodes,
+  with deterministic repeated IPP output, compatible field geometry and bounded
+  pixel differences; automatic/explicit IPP and explicit managed Approx
+  providers are exercised from an unrelated directory containing spaces, with
+  SDK and oneAPI loader overrides removed;
 - the final extracted tar performs two one-frame PAL `exact` decodes with
   SQLite output, producing identical TBC, database, JSON, and normalized
   console/log results; the fixed input, TBC, SQLite database, and OS-normalized
@@ -130,7 +178,7 @@ The builder fails unless all of the following pass:
 - two independent tar constructions have the same SHA-256.
 
 These gates establish build, fixture, native-loader, packaging, determinism,
-and synthetic Exact/SQLite coverage. They do not claim that every real RF
+and synthetic Exact/IPP/SQLite coverage. They do not claim that every real RF
 capture has been certified on Linux; real-capture parity remains a separate
 evidence requirement.
 

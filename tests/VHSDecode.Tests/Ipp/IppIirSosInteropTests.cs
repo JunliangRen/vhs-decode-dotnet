@@ -51,7 +51,7 @@ public sealed class IppIirSosInteropTests
     [Fact(DisplayName = "IPP direct IIR matches managed scalar output and final state")]
     public void IppDirectIirMatchesManagedScalarOutputAndState()
     {
-        if (!IppRuntime.TryProbe(out _))
+        if (!IppTestRuntime.TryProbe(out _))
         {
             return;
         }
@@ -76,7 +76,7 @@ public sealed class IppIirSosInteropTests
     [Fact(DisplayName = "IPP direct IIR preserves split state, reset, set-state and in-place semantics")]
     public void IppDirectIirPreservesStateControlsAndInPlaceSemantics()
     {
-        if (!IppRuntime.TryProbe(out _))
+        if (!IppTestRuntime.TryProbe(out _))
         {
             return;
         }
@@ -126,7 +126,7 @@ public sealed class IppIirSosInteropTests
     [Fact(DisplayName = "IPP SOS matches managed scalar cascade output and final state")]
     public void IppSosMatchesManagedScalarOutputAndState()
     {
-        if (!IppRuntime.TryProbe(out _))
+        if (!IppTestRuntime.TryProbe(out _))
         {
             return;
         }
@@ -150,7 +150,7 @@ public sealed class IppIirSosInteropTests
     [Fact(DisplayName = "IPP SOS preserves split state, reset, set-state and in-place semantics")]
     public void IppSosPreservesStateControlsAndInPlaceSemantics()
     {
-        if (!IppRuntime.TryProbe(out _))
+        if (!IppTestRuntime.TryProbe(out _))
         {
             return;
         }
@@ -192,7 +192,7 @@ public sealed class IppIirSosInteropTests
     [Fact(DisplayName = "Separate IPP IIR and SOS contexts remain deterministic in parallel")]
     public void SeparateFilterContextsRemainDeterministicInParallel()
     {
-        if (!IppRuntime.TryProbe(out _))
+        if (!IppTestRuntime.TryProbe(out _))
         {
             return;
         }
@@ -230,7 +230,7 @@ public sealed class IppIirSosInteropTests
     [Fact(DisplayName = "One IPP IIR context serializes concurrent stateful blocks")]
     public void OneIirContextSerializesConcurrentStatefulBlocks()
     {
-        if (!IppRuntime.TryProbe(out _))
+        if (!IppTestRuntime.TryProbe(out _))
         {
             return;
         }
@@ -273,7 +273,7 @@ public sealed class IppIirSosInteropTests
     [Fact(DisplayName = "One IPP SOS context serializes concurrent stateful blocks")]
     public void OneSosContextSerializesConcurrentStatefulBlocks()
     {
-        if (!IppRuntime.TryProbe(out _))
+        if (!IppTestRuntime.TryProbe(out _))
         {
             return;
         }
@@ -320,7 +320,7 @@ public sealed class IppIirSosInteropTests
     [Fact(DisplayName = "Disposed IPP filter contexts reject state and process calls")]
     public void DisposedFilterContextsRejectCalls()
     {
-        if (!IppRuntime.TryProbe(out _))
+        if (!IppTestRuntime.TryProbe(out _))
         {
             return;
         }

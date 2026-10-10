@@ -27,7 +27,7 @@ public sealed class IppComplexFft64Tests
     [InlineData(32_768)]
     public void AgreesNumericallyAndRoundTrips(int length)
     {
-        if (!IppRuntime.TryProbe(out _))
+        if (!IppTestRuntime.TryProbe(out _))
         {
             return;
         }
@@ -48,7 +48,7 @@ public sealed class IppComplexFft64Tests
     [Fact(DisplayName = "IPP complex FFT supports deterministic in-place reuse")]
     public void SupportsDeterministicInPlaceReuse()
     {
-        if (!IppRuntime.TryProbe(out _))
+        if (!IppTestRuntime.TryProbe(out _))
         {
             return;
         }
@@ -71,7 +71,7 @@ public sealed class IppComplexFft64Tests
     [Fact(DisplayName = "IPP complex FFT rejects partial input-output overlap")]
     public void RejectsPartialInputOutputOverlap()
     {
-        if (!IppRuntime.TryProbe(out _))
+        if (!IppTestRuntime.TryProbe(out _))
         {
             return;
         }
@@ -89,7 +89,7 @@ public sealed class IppComplexFft64Tests
     [Fact(DisplayName = "IPP complex FFT pool is bounded across lengths and parallel callers")]
     public void PoolIsBoundedAcrossLengthsAndParallelCallers()
     {
-        if (!IppRuntime.TryProbe(out _))
+        if (!IppTestRuntime.TryProbe(out _))
         {
             return;
         }

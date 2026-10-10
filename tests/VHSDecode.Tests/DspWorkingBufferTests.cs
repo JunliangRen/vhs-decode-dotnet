@@ -1081,7 +1081,7 @@ public sealed class DspWorkingBufferTests
     public void ParallelIppVhsInverseStagingRemainsBitExactUnderLoad()
     {
         Assert.SkipUnless(
-            IppRuntime.TryProbe(out _),
+            IppTestRuntime.TryProbe(out _),
             "The Intel IPP native runtime is unavailable.");
 
         const int length = DecodeSessionFactory.DefaultBlockLength;
@@ -1136,7 +1136,7 @@ public sealed class DspWorkingBufferTests
     public void IppVhsInverseStagingFallsBackWhenCompanionPlanIsUnavailable()
     {
         Assert.SkipUnless(
-            IppRuntime.TryProbe(out _),
+            IppTestRuntime.TryProbe(out _),
             "The Intel IPP native runtime is unavailable.");
 
         const int length = DecodeSessionFactory.DefaultBlockLength;
@@ -1202,7 +1202,7 @@ public sealed class DspWorkingBufferTests
         int expectedCompanionWorkers)
     {
         Assert.SkipUnless(
-            backend != "ipp-fast" || IppRuntime.TryProbe(out _),
+            backend != "ipp-fast" || IppTestRuntime.TryProbe(out _),
             "The Intel IPP native runtime is unavailable.");
 
         List<string> arguments =

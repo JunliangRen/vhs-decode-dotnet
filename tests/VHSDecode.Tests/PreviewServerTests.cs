@@ -630,7 +630,7 @@ public sealed class PreviewServerTests
     public void IppCompleteDecodeCanOptIntoTwentyMsps()
     {
         Assert.SkipUnless(
-            IppRuntime.TryProbe(out _),
+            IppTestRuntime.TryProbe(out _),
             "The optional IPP runtime was not staged for this test build.");
 
         ParsedCommand fortyMsps = new CommandLineParser().Parse(
@@ -682,7 +682,7 @@ public sealed class PreviewServerTests
         if (backend == "ipp-fast")
         {
             Assert.SkipUnless(
-                IppRuntime.TryProbe(out _),
+                IppTestRuntime.TryProbe(out _),
                 "The optional IPP runtime was not staged for this test build.");
         }
 

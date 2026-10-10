@@ -60,7 +60,7 @@ public sealed class ApproxFastBackendTests
     [Fact(DisplayName = "Approx IPP VHS RF transform satisfies the same float32 contract as managed")]
     public void IppRfTransformSatisfiesManagedFloat32Contract()
     {
-        if (!IppRuntime.TryProbe(out _))
+        if (!IppTestRuntime.TryProbe(out _))
         {
             return;
         }
@@ -108,7 +108,7 @@ public sealed class ApproxFastBackendTests
     public void ResidentSpectraPreserveV1BlockAndClearReusedWorkspaceState(
         ApproxProvider provider)
     {
-        if (provider == ApproxProvider.Ipp && !IppRuntime.TryProbe(out _))
+        if (provider == ApproxProvider.Ipp && !IppTestRuntime.TryProbe(out _))
         {
             return;
         }
@@ -163,7 +163,7 @@ public sealed class ApproxFastBackendTests
     public void ResidentSpectraMatchLegacyAcrossSubDeemphasisMaterialization(
         ApproxProvider provider)
     {
-        if (provider == ApproxProvider.Ipp && !IppRuntime.TryProbe(out _))
+        if (provider == ApproxProvider.Ipp && !IppTestRuntime.TryProbe(out _))
         {
             return;
         }
@@ -762,7 +762,7 @@ public sealed class ApproxFastBackendTests
     public async Task BlockOutputIsDeterministicAcrossConcurrentWorkspaceLeases(
         ApproxProvider provider)
     {
-        if (provider == ApproxProvider.Ipp && !IppRuntime.TryProbe(out _))
+        if (provider == ApproxProvider.Ipp && !IppTestRuntime.TryProbe(out _))
         {
             return;
         }
@@ -795,7 +795,7 @@ public sealed class ApproxFastBackendTests
     public void AnalyticHilbertPathRejectsDcAndNyquistImaginaryLeakage(
         ApproxProvider provider)
     {
-        if (provider == ApproxProvider.Ipp && !IppRuntime.TryProbe(out _))
+        if (provider == ApproxProvider.Ipp && !IppTestRuntime.TryProbe(out _))
         {
             return;
         }
@@ -1414,7 +1414,7 @@ public sealed class ApproxFastBackendTests
         if (provider == ApproxProvider.Ipp)
         {
             Assert.SkipUnless(
-                IppRuntime.TryProbe(out _),
+                IppTestRuntime.TryProbe(out _),
                 "The Intel IPP native runtime is unavailable.");
         }
     }

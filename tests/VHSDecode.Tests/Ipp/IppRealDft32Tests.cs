@@ -28,7 +28,7 @@ public sealed class IppRealDft32Tests
     [InlineData(3_564)]
     public void AgreesNumericallyAndRoundTrips(int length)
     {
-        if (!IppRuntime.TryProbe(out _))
+        if (!IppTestRuntime.TryProbe(out _))
         {
             return;
         }
@@ -71,7 +71,7 @@ public sealed class IppRealDft32Tests
     [Fact(DisplayName = "IPP mixed-radix real DFT32 is deterministic across dirty reuse")]
     public void IsDeterministicAcrossDirtyReuse()
     {
-        if (!IppRuntime.TryProbe(out _))
+        if (!IppTestRuntime.TryProbe(out _))
         {
             return;
         }
@@ -98,7 +98,7 @@ public sealed class IppRealDft32Tests
     [Fact(DisplayName = "IPP current Super-Gaussian filter remains numerically close to Exact")]
     public void SuperGaussianFilterRemainsNumericallyCloseToExact()
     {
-        if (!IppRuntime.TryProbe(out _))
+        if (!IppTestRuntime.TryProbe(out _))
         {
             return;
         }
@@ -276,7 +276,7 @@ public sealed class IppRealDft32Tests
     [Fact(DisplayName = "IPP Super-Gaussian contexts are released by repeated pipeline disposal")]
     public void PipelineDisposalReleasesRepeatedSuperGaussianContexts()
     {
-        if (!IppRuntime.TryProbe(out _))
+        if (!IppTestRuntime.TryProbe(out _))
         {
             return;
         }

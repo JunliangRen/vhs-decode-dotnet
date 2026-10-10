@@ -1,0 +1,45 @@
+// Loader-only negative fixtures. Transform exports are intentionally inert;
+// the real bridge and its native/managed DSP tests supply functional coverage.
+#include <cstdint>
+#include <cstring>
+
+struct RuntimeInfo {
+    uint32_t size;
+    uint32_t abi;
+    int32_t init_status;
+    int32_t major;
+    int32_t minor;
+    int32_t patch;
+    int32_t build;
+    uint32_t reserved;
+    uint64_t cpu_features;
+    uint64_t enabled_features;
+    char name[64];
+    char version[64];
+    char date[32];
+    char cpu[32];
+};
+static_assert(sizeof(RuntimeInfo) == 240);
+
+extern "C" __attribute__((visibility("default"))) uint32_t vhsdecode_ipp_get_abi_version() {
+    return FIXTURE_ABI;
+}
+extern "C" __attribute__((visibility("default"))) int32_t vhsdecode_ipp_get_runtime_info(RuntimeInfo* info) {
+    RuntimeInfo result{};
+    result.size = FIXTURE_SIZE;
+    result.abi = FIXTURE_INFO_ABI;
+    result.init_status = FIXTURE_INIT_STATUS;
+    result.major = 2026;
+    result.cpu_features = 1;
+    result.enabled_features = 1;
+    std::strcpy(result.name, "loader-fixture");
+    std::strcpy(result.version, "2026.0.0");
+    std::strcpy(result.cpu, "fixture");
+    *info = result;
+    return FIXTURE_STATUS;
+}
+extern "C" __attribute__((visibility("default"))) const char* vhsdecode_ipp_status_string(int32_t) {
+    return "fixture runtime rejected";
+}
+
+@FIXTURE_EXPORTS@
