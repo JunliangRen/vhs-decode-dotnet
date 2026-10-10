@@ -60,8 +60,8 @@ decode.exe hifi [upstream options] input.lds output.wav
 完全な互換 option は `decode.exe <command> --help` で確認してください。
 
 release workflow は self-contained、multi-file の glibc `linux-x64` tar も
-生成します。Linux package は portable `exact` backend のみを対象とし、Linux 用
-SQLite、libsndfile、libsoxr native asset を同梱して Windows IPP/CUDA DLL を除外します。
+生成します。Linux package は既定の `exact` と VHS/LD 用 `ipp-fast` をサポートし、
+Linux 用 SQLite、libsndfile、libsoxr、IPP native asset を同梱して Windows DLL を除外します。
 FFmpeg と文書化された OS library をインストールした後に実行できます。
 
 ```bash
@@ -70,8 +70,8 @@ cd vhs-decode-dotnet-linux-x64
 ./vhs-decode --pal --dsp-backend exact input.lds output
 ```
 
-Ubuntu 22.04/glibc 2.35 baseline、runtime package、checksum、build provenance、
-release gate は [Linux x64 release](docs/LINUX_X64.md) を参照してください。
+GLIBC 2.34 baseline、system C++ runtime、Ubuntu 以外の distribution gate、
+checksum と provenance は [Linux x64 release](docs/LINUX_X64.md) を参照してください。
 32-bit x86、ARM/ARM64、musl は対象外です。
 
 ### Seek 可能な RF preview server

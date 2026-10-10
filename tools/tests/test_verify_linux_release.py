@@ -13,6 +13,57 @@ spec.loader.exec_module(release)
 
 
 class LinuxReleaseSmokeTests(unittest.TestCase):
+    def test_decode_modes_use_their_supported_cli_options(self):
+        root = Path("package")
+        for mode in ("vhs", "ld"):
+            arguments = release.decode_arguments(root, mode, "ipp-fast", "input.s16", "out")
+            self.assertEqual(root / f"{mode}-decode", arguments[0])
+            self.assertEqual(mode == "vhs", "--write_db" in arguments)
+            self.assertEqual(mode == "vhs", "--overwrite" in arguments)
+            self.assertEqual("ipp-fast", arguments[arguments.index("--dsp-backend") + 1])
+
+    def test_sqlite_output_uses_production_tbc_db_suffix_for_both_modes(self):
+        with tempfile.TemporaryDirectory() as directory:
+            prefix = Path(directory) / "decode"
+            metadata = {"videoParameters": {"numberOfSequentialFields": 2, "fieldWidth": 2, "fieldHeight": 1}, "fields": [{}, {}]}
+            for suffix in (".tbc", ".log", ".tbc.db"):
+                Path(str(prefix) + suffix).write_bytes(b"nonempty")
+            Path(str(prefix) + ".tbc.json").write_text(__import__("json").dumps(metadata))
+            Path(str(prefix) + "_chroma.tbc").write_bytes(b"\0" * 8)
+            for mode in ("vhs", "ld"):
+                self.assertEqual(metadata, release.read_result(prefix, "exact", mode=mode))
+            Path(str(prefix) + ".tbc.db").unlink()
+            Path(str(prefix) + ".db").write_bytes(b"wrong suffix")
+            with self.assertRaisesRegex(ValueError, "tbc.db"):
+                release.read_result(prefix, "exact")
+
+    def test_chroma_requires_complete_nonempty_field_geometry(self):
+        video = {"fieldWidth": 2, "fieldHeight": 3, "numberOfSequentialFields": 2}
+        with tempfile.TemporaryDirectory() as directory:
+            prefix = Path(directory) / "vhs"
+            path = Path(str(prefix) + "_chroma.tbc")
+            with self.assertRaisesRegex(ValueError, "chroma output"):
+                release.verify_chroma(prefix, video)
+            for size in (0, 23, 25):
+                path.write_bytes(b"\0" * size)
+                with self.assertRaisesRegex(ValueError, "chroma output"):
+                    release.verify_chroma(prefix, video)
+            path.write_bytes(b"\0" * 24)
+            self.assertEqual(release.sha256(path), release.verify_chroma(prefix, video))
+
+    def test_ire_gate_rejects_active_picture_change_and_incorrect_geometry(self):
+        video = {"fieldWidth": 4, "fieldHeight": 1, "numberOfSequentialFields": 1,
+                 "activeVideoStart": 1, "activeVideoEnd": 3, "black16bIre": 1000, "white16bIre": 11000}
+        with tempfile.TemporaryDirectory() as directory:
+            first, second = Path(directory) / "a", Path(directory) / "b"
+            Path(str(first) + ".tbc").write_bytes(struct.pack("<4H", 1000, 2000, 2000, 1000))
+            Path(str(second) + ".tbc").write_bytes(struct.pack("<4H", 1000, 3000, 2000, 1000))
+            with self.assertRaisesRegex(ValueError, "compatibility gate failed"):
+                release.compare_tbc(first, second, video)
+            video["fieldWidth"] = 5
+            with self.assertRaisesRegex(ValueError, "metadata field geometry"):
+                release.compare_tbc(first, second, video)
+
     def test_regular_line_has_pal_sync_and_active_video(self):
         line = release.pal_line(0)
         self.assertEqual(2560, len(line))

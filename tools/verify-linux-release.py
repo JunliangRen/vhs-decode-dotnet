@@ -74,8 +74,10 @@ def run(arguments, cwd, environment):
     return result.stdout + result.stderr
 
 
-def read_result(prefix, backend, provider=None):
-    for suffix in (".tbc", ".tbc.json", ".log", ".db"):
+def read_result(prefix, backend, provider=None, mode="vhs"):
+    # The production writer uses .tbc.db for both VHS --write_db and LD output.
+    suffixes = (".tbc", ".tbc.json", ".log", ".tbc.db")
+    for suffix in suffixes:
         path = Path(str(prefix) + suffix)
         if not path.is_file() or not path.stat().st_size:
             raise ValueError(f"Decode omitted nonempty output {path}")
@@ -87,10 +89,20 @@ def read_result(prefix, backend, provider=None):
     # IPP selection is checked against the runtime diagnostic by the caller.
     if provider and video.get("approxProvider") != provider:
         raise ValueError(f"Decode metadata did not select provider {provider}: {video}")
+    if mode == "vhs":
+        verify_chroma(prefix, video)
     return metadata
 
 
-def compare_tbc(reference, candidate):
+def verify_chroma(prefix, video):
+    path = Path(str(prefix) + "_chroma.tbc")
+    expected = video["fieldWidth"] * video["fieldHeight"] * video["numberOfSequentialFields"] * 2
+    if not path.is_file() or path.stat().st_size != expected or expected == 0:
+        raise ValueError(f"VHS chroma output does not match metadata field geometry: {path}")
+    return sha256(path)
+
+
+def compare_tbc(reference, candidate, video=None):
     left = array("H", Path(str(reference) + ".tbc").read_bytes())
     right = array("H", Path(str(candidate) + ".tbc").read_bytes())
     if len(left) != len(right) or not left:
@@ -98,9 +110,36 @@ def compare_tbc(reference, candidate):
     deltas = [abs(a - b) for a, b in zip(left, right)]
     maximum = max(deltas)
     rms = (sum(value * value for value in deltas) / len(deltas)) ** 0.5
-    if maximum > 8 or rms > 1:
-        raise ValueError(f"Exact/IPP TBC mismatch: maximum={maximum}, rms={rms}")
-    return {"samples": len(left), "maximum_delta": maximum, "rms_delta": rms}
+    metrics = {"samples": len(left), "maximum_delta": maximum, "rms_delta": rms}
+    if video is None:
+        if maximum > 8 or rms > 1:
+            raise ValueError(f"Exact/IPP TBC mismatch: maximum={maximum}, rms={rms}")
+        return metrics
+    width = video["fieldWidth"]
+    expected_samples = width * video["fieldHeight"] * video["numberOfSequentialFields"]
+    if len(left) != expected_samples:
+        raise ValueError("TBC byte count does not match metadata field geometry")
+    start, end = video["activeVideoStart"], video["activeVideoEnd"]
+    if not 0 <= start < end <= width:
+        raise ValueError("Invalid active video geometry")
+    active = [value for index, value in enumerate(deltas) if start <= index % width < end]
+    ire_scale = (video["white16bIre"] - video["black16bIre"]) / 100
+    if ire_scale <= 0:
+        raise ValueError("Invalid IRE calibration")
+    metrics.update(active_maximum_ire=max(active) / ire_scale,
+                   active_rms_ire=(sum(value * value for value in active) / len(active)) ** 0.5 / ire_scale)
+    # Full decode can make discrete sync/interpolation decisions at RF block edges.
+    # Gate picture quality in calibrated IRE, while bounding the whole sync-bearing raster.
+    if maximum > 8192 or rms > ire_scale * 0.1 or metrics["active_maximum_ire"] > 2 or metrics["active_rms_ire"] > 0.05:
+        raise ValueError(f"Exact/IPP TBC compatibility gate failed: {metrics}")
+    return metrics
+
+
+def decode_arguments(root, mode, backend, input_path, prefix):
+    # LaserDisc does not accept the VHS overwrite/write_db command surface.
+    mode_options = ["--overwrite", "--write_db"] if mode == "vhs" else ["--noEFM", "--disable_analog_audio"]
+    return [root / f"{mode}-decode", "--pal", "--length", "1", "--threads", "2",
+            *mode_options, "--dsp-backend", backend, input_path, prefix]
 
 
 def verify(root, work):
@@ -117,26 +156,30 @@ def verify(root, work):
         input_path = (work / f"pal-{mode}.s16").resolve()
         generate_pal_rf(input_path, mode)
         prefixes = {}
+        metadata_by_label = {}
         for label, backend, extra, provider in (
             ("exact", "exact", [], None),
             ("ipp", "ipp-fast", [], None),
             ("ipp-repeat", "ipp-fast", [], None),
         ):
             prefix = (work / f"{mode}-{label}").resolve()
-            output = run([root / f"{mode}-decode", "--pal", "--length", "1", "--threads", "2",
-                          "--overwrite", "--write_db", "--dsp-backend", backend,
-                          *extra, input_path, prefix], cwd, environment)
+            output = run(decode_arguments(root, mode, backend, input_path, prefix), cwd, environment)
             if backend == "ipp-fast" and "Intel IPP DSP backend: 2026.0.0" not in Path(str(prefix) + ".log").read_text():
                 raise ValueError(f"Decode did not initialize the pinned Linux IPP runtime: {prefix}")
             (work / f"{mode}-{label}.console.txt").write_bytes(output.replace("\r\n", "\n").replace("\n", "\r\n").encode())
-            read_result(prefix, backend, provider)
+            metadata_by_label[label] = read_result(prefix, backend, provider, mode)
             prefixes[label] = prefix
-        for suffix in (".tbc", ".db", ".tbc.json"):
+        repeated_suffixes = (".tbc", ".tbc.db", ".tbc.json") + (("_chroma.tbc",) if mode == "vhs" else ())
+        for suffix in repeated_suffixes:
             if sha256(Path(str(prefixes["ipp"]) + suffix)) != sha256(Path(str(prefixes["ipp-repeat"]) + suffix)):
                 raise ValueError(f"IPP repeated decode is nondeterministic: {mode}{suffix}")
+        if metadata_by_label["exact"] != metadata_by_label["ipp"]:
+            raise ValueError(f"Exact/IPP field timing, geometry or metadata differs: {mode}")
         results[mode] = {"input_sha256": sha256(input_path),
-                         "exact_vs_ipp": compare_tbc(prefixes["exact"], prefixes["ipp"]),
+                         "exact_vs_ipp": compare_tbc(prefixes["exact"], prefixes["ipp"], metadata_by_label["exact"]["videoParameters"]),
                          "ipp_tbc_sha256": sha256(Path(str(prefixes["ipp"]) + ".tbc"))}
+        if mode == "vhs":
+            results[mode]["ipp_chroma_sha256"] = verify_chroma(prefixes["ipp"], metadata_by_label["ipp"]["videoParameters"])
     # Automatic and explicit float32 providers must both work with the packaged runtime.
     for label, extra, provider in (
         ("auto", [], "ipp"), ("managed", ["--approx-provider", "managed"], "managed"),

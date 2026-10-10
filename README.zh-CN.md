@@ -55,8 +55,9 @@ decode.exe hifi [upstream options] input.lds output.wav
 同时支持 `vhs-decode.exe`、`ld-decode.exe` 等独立命令别名。使用
 `decode.exe <command> --help` 查看完整兼容参数。
 
-发布工作流还会生成自包含、多文件的 glibc `linux-x64` tar。Linux 包只支持可移植的
-`exact` 后端，内置 Linux 版 SQLite、libsndfile 和 libsoxr 原生资产，并明确排除
+发布工作流还会生成自包含、多文件的 glibc `linux-x64` tar。Linux 包默认使用
+`exact`，也支持 VHS/LD 的 `ipp-fast`，内置 Linux 版 SQLite、libsndfile、libsoxr
+和 IPP 原生资产，并明确排除
 Windows IPP/CUDA DLL。安装 FFmpeg 与文档列出的系统库后即可运行：
 
 ```bash
@@ -65,7 +66,7 @@ cd vhs-decode-dotnet-linux-x64
 ./vhs-decode --pal --dsp-backend exact input.lds output
 ```
 
-Ubuntu 22.04/glibc 2.35 基线、运行依赖、校验值、构建来源和发布门禁见
+GLIBC 2.34 基线、系统 C++ 运行库、非 Ubuntu 发行版门禁、校验值和构建来源见
 [Linux x64 发布说明](docs/LINUX_X64.md)。不支持 32 位 x86、ARM/ARM64 或 musl。
 
 ### 可拖动的 RF 预览服务器

@@ -1883,8 +1883,8 @@ public sealed partial class ReadmeLocalizationTests
             RepositoryRoot(),
             "docs",
             "LINUX_X64.md"));
-        Assert.Contains("$minimumLinuxTestCount = 1569", linuxBuildScript, StringComparison.Ordinal);
-        Assert.Contains("at least 1,567 xUnit v3 cases", linuxReadme, StringComparison.Ordinal);
+        Assert.Contains("$minimumLinuxTestCount = 1857", linuxBuildScript, StringComparison.Ordinal);
+        Assert.Contains("at least 1,857 xUnit v3 cases", linuxReadme, StringComparison.Ordinal);
         Assert.DoesNotContain("$minimumLinuxTestCount = 1551", linuxBuildScript, StringComparison.Ordinal);
         Assert.DoesNotContain("at least 1,551 xUnit v3 cases", linuxReadme, StringComparison.Ordinal);
         foreach (string filename in DetailedReadmeFiles)

@@ -21,6 +21,10 @@ IPP_SYSTEM_LIBRARIES = {
     "libc.so.6", "libm.so.6", "libpthread.so.0", "libdl.so.2", "librt.so.1",
     "libstdc++.so.6", "libgcc_s.so.1", "ld-linux-x86-64.so.2",
 }
+# CoreCLR loads this provider opportunistically; its absence disables LTTng
+# tracing, not decoding. All symbol-version limits still apply to the provider.
+# https://github.com/dotnet/runtime/blob/v11.0.0-rc.1.26425.128/src/coreclr/pal/src/misc/tracepointprovider.cpp
+OPTIONAL_DEPENDENCIES = {"libcoreclrtraceptprovider.so": {"liblttng-ust.so.0"}}
 
 
 def run_tool(*arguments):
@@ -95,11 +99,16 @@ def audit_elf(path, limits):
     needed, paths = parse_dynamic_section(dynamic)
     requirements = parse_version_requirements(run_tool("readelf", "--wide", "--version-info", str(path)))
     enforce_version_limits(requirements, limits)
+    optional_missing = []
     if needed:
         resolved = run_tool("ldd", str(path.resolve()))
         if "not found" in resolved:
-            raise ValueError(f"Unresolved ELF dependencies: {resolved.strip()}")
-    return {"needed": needed, "search_paths": paths, "required_versions": requirements}
+            missing = set(re.findall(r"^\s*(\S+)\s+=> not found", resolved, re.MULTILINE))
+            if not missing or missing - OPTIONAL_DEPENDENCIES.get(path.name, set()):
+                raise ValueError(f"Unresolved ELF dependencies: {resolved.strip()}")
+            optional_missing = sorted(missing)
+    return {"needed": needed, "search_paths": paths, "required_versions": requirements,
+            "optional_missing": optional_missing}
 
 
 class IppRuntimeInfo(ctypes.Structure):

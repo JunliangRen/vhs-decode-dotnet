@@ -63,8 +63,8 @@ also supported. Use `decode.exe <command> --help` for the complete compatible
 option set.
 
 The release workflow also builds a self-contained, multi-file glibc
-`linux-x64` tar. It supports only the portable `exact` backend and bundles the
-Linux SQLite, libsndfile, and libsoxr native assets; Windows IPP/CUDA DLLs are
+`linux-x64` tar. It supports the default `exact` and VHS/LD `ipp-fast` backends
+and bundles Linux SQLite, libsndfile, libsoxr and IPP native assets; Windows DLLs are
 excluded. After installing FFmpeg and the documented OS libraries:
 
 ```bash
@@ -73,8 +73,8 @@ cd vhs-decode-dotnet-linux-x64
 ./vhs-decode --pal --dsp-backend exact input.lds output
 ```
 
-See [Linux x64 release](docs/LINUX_X64.md) for the Ubuntu 22.04/glibc 2.35
-baseline, runtime packages, checksums, build provenance, and release gates.
+See [Linux x64 release](docs/LINUX_X64.md) for the GLIBC 2.34 baseline, system
+C++ runtime requirements, non-Ubuntu distribution gates, checksums and provenance.
 
 ### Seekable RF preview server
 

@@ -2,7 +2,9 @@ import ctypes
 import importlib.util
 from pathlib import Path
 import struct
+import tempfile
 import unittest
+from unittest.mock import patch
 
 spec = importlib.util.spec_from_file_location("linux_native", Path(__file__).resolve().parents[1] / "verify-linux-native.py")
 native = importlib.util.module_from_spec(spec)
@@ -10,6 +12,61 @@ spec.loader.exec_module(native)
 
 
 class LinuxNativeAuditTests(unittest.TestCase):
+    def test_optional_lttng_is_scoped_to_coreclr_provider_only(self):
+        header = bytearray(64)
+        header[:7] = b"\x7fELF\x02\x01\x01"
+        struct.pack_into("<HH", header, 16, 3, 62)
+        with tempfile.TemporaryDirectory() as directory:
+            for filename, missing, accepted in (
+                ("libcoreclrtraceptprovider.so", "liblttng-ust.so.0", True),
+                ("libvhsdecode_ipp.so", "liblttng-ust.so.0", False),
+                ("libcoreclrtraceptprovider.so", "libstdc++.so.6", False),
+            ):
+                path = Path(directory) / filename
+                path.write_bytes(header)
+                with patch.object(native, "run_tool", side_effect=[f"(NEEDED) Shared library: [{missing}]", "", f"{missing} => not found"]):
+                    if accepted:
+                        self.assertEqual([missing], native.audit_elf(path, native.DEFAULT_LIMITS)["optional_missing"])
+                    else:
+                        with self.assertRaises(ValueError):
+                            native.audit_elf(path, native.DEFAULT_LIMITS)
+
+    def test_missing_system_dependency_fails_elf_audit(self):
+        header = bytearray(64)
+        header[:7] = b"\x7fELF\x02\x01\x01"
+        struct.pack_into("<HH", header, 16, 3, 62)
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "missing.so"
+            path.write_bytes(header)
+            with patch.object(native, "run_tool", side_effect=[
+                "(NEEDED) Shared library: [libstdc++.so.6]", "", "libstdc++.so.6 => not found"]):
+                with self.assertRaisesRegex(ValueError, "Unresolved ELF dependencies"):
+                    native.audit_elf(path, native.DEFAULT_LIMITS)
+
+    def test_package_checks_nested_elf_before_accepting_root_assets(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            for name in ("decode", "libcoreclr.so", "libe_sqlite3.so", "libsndfile.so", "libsoxr.so", "libvhsdecode_ipp.so"):
+                (root / name).write_bytes(b"\x7fELF")
+            (root / "nested").mkdir()
+            nested = root / "nested/newer.so"
+            nested.write_bytes(b"\x7fELF")
+            def audit(path, limits):
+                if path == nested:
+                    raise ValueError("Requires GLIBC_2.35")
+                return {}
+            with patch.object(native, "audit_elf", side_effect=audit):
+                with self.assertRaisesRegex(ValueError, "nested.*Requires GLIBC_2.35"):
+                    native.audit_package(root, native.DEFAULT_LIMITS, Path("unused"))
+
+    def test_package_cannot_omit_required_runtime_elf(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / "decode").write_bytes(b"\x7fELF")
+            with patch.object(native, "audit_elf", return_value={}):
+                with self.assertRaisesRegex(ValueError, "missing required ELF: libcoreclr"):
+                    native.audit_package(root, native.DEFAULT_LIMITS, Path("unused"))
+
     def test_runtime_info_layout_matches_real_c_abi(self):
         self.assertEqual(240, ctypes.sizeof(native.IppRuntimeInfo))
         self.assertEqual(32, native.IppRuntimeInfo.cpu_features.offset)

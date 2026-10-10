@@ -146,12 +146,12 @@ The builder fails unless all of the following pass:
 
 - host and output architecture are ELF64 x86-64 on glibc;
 - all shipped ELF files, including .NET and SQLite, satisfy the GLIBC,
-  GLIBCXX, CXXABI and GCC ceilings above; imports resolve, and RPATH/RUNPATH
+  GLIBCXX, CXXABI and GCC ceilings above; required imports resolve, and RPATH/RUNPATH
   cannot contain a build-machine or current-directory search path;
 - IPP exports match the complete C ABI, runtime-info layout is 240 bytes,
   initialization and CPU dispatch succeed, and only allowed system libraries
   remain as dynamic dependencies;
-- the full solution builds and the full portable xUnit v3 suite runs after excluding
+- the full solution builds and at least 1,857 xUnit v3 cases run after excluding
   18 method-scoped (41-case) frozen-bit oracles tied to Windows UCRT, Windows
   libsoxr, or Windows-generated transcendental inputs; functional, structural,
   tolerance, native-loader, and final-artifact gates remain enabled;
@@ -181,6 +181,20 @@ These gates establish build, fixture, native-loader, packaging, determinism,
 and synthetic Exact/IPP/SQLite coverage. They do not claim that every real RF
 capture has been certified on Linux; real-capture parity remains a separate
 evidence requirement.
+
+The synthetic VHS fixture gates active-picture luminance at a maximum of 2 IRE
+and RMS of 0.05 IRE, with separate whole-raster limits (8192 code values maximum
+and 0.1 IRE RMS). IPP's existing FFT/SOS evaluation differences can change an
+HSync decision at an RF block boundary; whole-raster pixel identity is therefore
+not its contract. Metadata must match and repeated IPP luminance, chroma, JSON
+and SQLite outputs must be identical. Chroma byte count must match the field
+geometry. This fixture has no color burst and does not certify real color quality.
+
+CoreCLR's optional LTTng tracing provider is audited against the same ABI
+ceilings. Its `liblttng-ust.so.0` dependency may be absent and is explicitly
+recorded in `ELF-ABI.json`; the runtime skips that provider when unavailable.
+Decoding and EventPipe diagnostics do not require LTTng. See the pinned
+[CoreCLR provider loader](https://github.com/dotnet/runtime/blob/v11.0.0-rc.1.26425.128/src/coreclr/pal/src/misc/tracepointprovider.cpp).
 
 ## Process cleanup and crash diagnostics
 
