@@ -195,7 +195,7 @@ multithreaded Python runs are used for speed measurements only.
 | Value | Meaning |
 | --- | --- |
 | `exact` | Default managed path for compatibility-sensitive decoding. |
-| `ipp-fast` | Experimental Windows x64 VHS and LaserDisc real-RF paths using Intel IPP. It can change floating-point bits and never silently falls back to `exact`. |
+| `ipp-fast` | Experimental Windows x64 and Linux x64/glibc VHS and LaserDisc real-RF paths using Intel IPP. It can change floating-point bits and never silently falls back to `exact`. |
 | `cuda-fast` | Experimental Windows x64 NVIDIA CUDA 13 full-signal VHS path. It has an independent numerical contract, supports PAL/NTSC VHS at 40 MSPS normally or GPU 40-to-20/native-20 MSPS with `--decode-at-20msps`, and never silently falls back to a CPU backend. |
 | `approx-fast` | Experimental VHS-only FP32 path with selectable TBC resampler and precision contract. The default `balanced` precision keeps the existing v1/v2 behavior; explicit `aggressive` selects the faster, deliberately lossy field-FP32/burst-IQ-prefix/chroma-FFT v6 contract. Nonzero RF high boost is not supported. |
 

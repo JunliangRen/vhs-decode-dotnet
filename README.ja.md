@@ -182,7 +182,7 @@ stabilization を同時に無効化した場合は 0.922357 で、default は全
 | 値 | 意味 |
 | --- | --- |
 | `exact` | default の managed path。互換性を重視する decode に使用します。 |
-| `ipp-fast` | Intel IPP を使う experimental Windows x64 VHS / LaserDisc real-RF path。浮動小数点 bit が変化する可能性があり、`exact` へ silent fallback しません。 |
+| `ipp-fast` | Intel IPP を使う experimental Windows x64 / Linux x64/glibc VHS / LaserDisc real-RF path。浮動小数点 bit が変化する可能性があり、`exact` へ silent fallback しません。 |
 | `cuda-fast` | NVIDIA CUDA 13 を使う experimental Windows x64 full-signal VHS path。独立した numerical contract を持ち、PAL/NTSC VHS を通常は 40 MSPS、`--decode-at-20msps` 指定時は GPU 40→20 または native 20 MSPS で decode し、CPU backend へ silent fallback しません。 |
 | `approx-fast` | VHS-only の experimental FP32 path。TBC resampler と precision contract を選択できます。default の `balanced` は既存の v1/v2 behavior を維持し、明示的な `aggressive` は高速化のため一部の数値精度を意図的に省く field-FP32/burst-IQ-prefix/chroma-FFT v6 contract を選択します。nonzero RF high boost は未対応です。 |
 

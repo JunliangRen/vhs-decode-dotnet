@@ -167,7 +167,7 @@ Python 原版在不同 worker 数下的输出哈希并不稳定，因此 Python 
 | 值 | 含义 |
 | --- | --- |
 | `exact` | 默认托管路径，适合兼容性敏感的解码。 |
-| `ipp-fast` | 实验性的 Windows x64 VHS 与 LaserDisc real-RF 路径，使用 Intel IPP；可能改变浮点位，并且绝不会静默回退到 `exact`。 |
+| `ipp-fast` | 实验性的 Windows x64 和 Linux x64/glibc VHS 与 LaserDisc real-RF 路径，使用 Intel IPP；可能改变浮点位，并且绝不会静默回退到 `exact`。 |
 | `cuda-fast` | 实验性的 Windows x64 NVIDIA CUDA 13 全信号 VHS 路径；采用独立数值契约，PAL/NTSC VHS 默认按 40 MSPS 解码，也可用 `--decode-at-20msps` 在 GPU 上执行 40→20 或直接解码原生 20 MSPS 输入，并且绝不会静默回退到 CPU 后端。 |
 | `approx-fast` | 仅支持 VHS 的实验 FP32 路径，可选择 TBC 重采样器和精度契约。默认 `balanced` 保持既有 v1/v2 行为；显式 `aggressive` 使用更快、但有意舍弃部分数值精度的 field-FP32/burst-IQ-prefix/chroma-FFT v6 契约。暂不支持非零 RF high boost。 |
 
