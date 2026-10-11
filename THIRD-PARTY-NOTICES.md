@@ -2,16 +2,22 @@
 
 ## Intel Integrated Performance Primitives
 
-The optional `vhsdecode_ipp.dll` acceleration backend statically links selected
-functions from Intel Integrated Performance Primitives (Intel IPP)
-`2026.0.1.52`. The bridge uses the sequential static libraries and does not
-redistribute the package's OpenMP, oneTBB, or shared IPP runtime DLLs.
+The `vhsdecode_ipp.dll` and Linux x64 `libvhsdecode_ipp.so` acceleration backends
+statically link selected functions from Intel Integrated Performance Primitives
+(Intel IPP). Windows uses NuGet package `2026.0.1.52`. Linux uses Intel's official
+APT packages `2026.0.1-51`, whose library reports version `2026.0.0`, with exact
+URLs and SHA-256 hashes in `tools/linux-ipp-packages.json`. Both bridges use
+sequential static libraries without OpenMP, oneTBB, or shared IPP runtimes.
+The Linux bridge dynamically uses the operating system's `libstdc++`.
 
 Copyright (C) 1997 Intel Corporation
 
 Intel IPP is redistributed under the Intel Simplified Software License
 (Version October 2022). The complete license text copied from the pinned NuGet
 package is in `third_party/intel-ipp/LICENSE.txt`.
+The Linux archive also includes the original license and third-party notices
+from its exact Intel packages under `licenses/intel-ipp/`, together with the
+package hashes, binary hash, linkage description, and ELF ABI audit.
 
 ## pocketfft / DUCC FFT
 

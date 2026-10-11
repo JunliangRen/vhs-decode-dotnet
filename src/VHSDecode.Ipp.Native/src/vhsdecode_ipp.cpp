@@ -3,6 +3,7 @@
 #include <ipp/ippcore.h>
 #include <ipp/ipps.h>
 
+#include <algorithm>
 #include <bit>
 #include <cstddef>
 #include <cstring>

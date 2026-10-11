@@ -18,3 +18,4 @@ scratch/
 /.artifacts/
 /artifacts/
 /out.log
+__pycache__/

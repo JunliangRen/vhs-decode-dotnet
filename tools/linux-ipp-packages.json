@@ -1,0 +1,27 @@
+{
+  "ippVersion": "2026.0.1",
+  "runtimeVersion": "2026.0.0",
+  "packages": [
+    {
+      "name": "intel-oneapi-ipp-devel-2026.0",
+      "version": "2026.0.1-51",
+      "fileName": "intel-oneapi-ipp-devel-2026.0-2026.0.1-51_amd64.deb",
+      "url": "https://apt.repos.intel.com/oneapi/pool/main/intel-oneapi-ipp-devel-2026.0-2026.0.1-51_amd64.deb",
+      "sha256": "5fbbe566fb133e906f33d79abf40377929b8e02469b9c1af9f88dba51bb0f94b"
+    },
+    {
+      "name": "intel-oneapi-ipp-2026.0",
+      "version": "2026.0.1-51",
+      "fileName": "intel-oneapi-ipp-2026.0-2026.0.1-51_amd64.deb",
+      "url": "https://apt.repos.intel.com/oneapi/pool/main/intel-oneapi-ipp-2026.0-2026.0.1-51_amd64.deb",
+      "sha256": "2202a73e2c013442680a05cd84d73a9cb813a2285d9deb1e9d10d3c8f69d7446"
+    },
+    {
+      "name": "intel-oneapi-common-licensing-2026.0",
+      "version": "2026.0.0-235",
+      "fileName": "intel-oneapi-common-licensing-2026.0-2026.0.0-235_all.deb",
+      "url": "https://apt.repos.intel.com/oneapi/pool/main/intel-oneapi-common-licensing-2026.0-2026.0.0-235_all.deb",
+      "sha256": "6f85b5c530236545cce55fdf8eef38249c03a3e529252208d60c4627417fac85"
+    }
+  ]
+}

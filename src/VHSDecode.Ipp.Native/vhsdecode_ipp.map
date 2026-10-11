@@ -1,0 +1,4 @@
+{
+    global: vhsdecode_ipp_*;
+    local: *;
+};

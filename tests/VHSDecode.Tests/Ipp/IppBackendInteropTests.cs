@@ -152,7 +152,7 @@ public sealed class IppBackendInteropTests
     [InlineData(32_768)]
     public void IppRealFftAgreesNumericallyAndRoundTripsFiniteData(int length)
     {
-        if (!IppRuntime.TryProbe(out IppRuntimeInfo? runtimeInfo))
+        if (!IppTestRuntime.TryProbe(out IppRuntimeInfo? runtimeInfo))
         {
             return;
         }
@@ -178,7 +178,7 @@ public sealed class IppBackendInteropTests
     [Fact(DisplayName = "IPP real FFT accepts NaN and infinity as a no-crash smoke case")]
     public void IppRealFftAcceptsNonFiniteSmokeInput()
     {
-        if (!IppRuntime.TryProbe(out _))
+        if (!IppTestRuntime.TryProbe(out _))
         {
             return;
         }
@@ -204,7 +204,7 @@ public sealed class IppBackendInteropTests
     [Fact(DisplayName = "IPP real FFT serializes parallel calls on one context")]
     public void IppRealFftSerializesParallelCallsOnOneContext()
     {
-        if (!IppRuntime.TryProbe(out _))
+        if (!IppTestRuntime.TryProbe(out _))
         {
             return;
         }
@@ -232,7 +232,7 @@ public sealed class IppBackendInteropTests
     [Fact(DisplayName = "Separate IPP real FFT contexts execute correctly in parallel")]
     public void SeparateIppRealFftContextsExecuteInParallel()
     {
-        if (!IppRuntime.TryProbe(out _))
+        if (!IppTestRuntime.TryProbe(out _))
         {
             return;
         }
@@ -272,7 +272,7 @@ public sealed class IppBackendInteropTests
     [Fact(DisplayName = "Disposed IPP real FFT rejects further calls")]
     public void DisposedIppRealFftRejectsCalls()
     {
-        if (!IppRuntime.TryProbe(out _))
+        if (!IppTestRuntime.TryProbe(out _))
         {
             return;
         }

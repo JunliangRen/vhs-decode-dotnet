@@ -57,7 +57,7 @@ $windowsFrozenBitOracleMethods = @(
     'PalLdPilotCircularMeanMatchesNumpyComplex128Bits',
     'MtfPowersMatchReleaseFour',
     'ComplexFftDirectOutputMatchesFrozenPowerOfTwoHashes')
-$minimumLinuxTestCount = 1569
+$minimumLinuxTestCount = 1857
 
 $sources = [ordered]@{
     libogg = [pscustomobject]@{
@@ -494,7 +494,8 @@ function Assert-PublishLayout {
         'libhostfxr.so',
         'libe_sqlite3.so',
         'libsndfile.so',
-        'libsoxr.so'
+        'libsoxr.so',
+        'libvhsdecode_ipp.so'
     )
     if ($RequireDistributionMetadata) {
         $required += @(
@@ -502,6 +503,10 @@ function Assert-PublishLayout {
             'README-LINUX-X64.md',
             'THIRD-PARTY-NOTICES.md',
             'BUILD-PROVENANCE.txt',
+            'ELF-ABI.json',
+            'licenses/intel-ipp/BUILD-MANIFEST.json',
+            'licenses/intel-ipp/Intel-2026-license.htm',
+            'licenses/intel-ipp/third-party-programs.txt',
             'third_party/licenses/numpy-LICENSE.txt',
             'third_party/licenses/scipy-LICENSE.txt',
             'third_party/licenses/x86-simd-sort-LICENSE.md',
@@ -565,11 +570,17 @@ function Assert-PublishLayout {
         'hifi-decode',
         'libe_sqlite3.so',
         'libsndfile.so',
-        'libsoxr.so')) {
+        'libsoxr.so',
+        'libvhsdecode_ipp.so')) {
         $candidate = Join-Path $Path $name
         Assert-ElfX64 $candidate
         Assert-DynamicDependencies $candidate | Out-Null
     }
+    $maximumPackageGlibc = if ($AllowNewerGlibc) { [string]$hostGlibc } else { '2.34' }
+    Invoke-Native python3 @(
+        (Join-Path $scriptDirectory 'verify-linux-native.py'), 'package', $Path,
+        '--max-glibc', $maximumPackageGlibc,
+        '--output', (Join-Path $Path 'ELF-ABI.json'))
 }
 
 function Copy-DirectoryContents {
@@ -737,6 +748,9 @@ function Invoke-FinalTarSmoke {
     Invoke-Native tar @('-xzf', $Archive, '-C', $smokeRoot)
     $packageRoot = Join-Path $smokeRoot $packageName
     Assert-PublishLayout $packageRoot -RequireDistributionMetadata
+    Invoke-Native python3 @(
+        (Join-Path $scriptDirectory 'verify-linux-release.py'), $packageRoot,
+        (Join-Path $smokeRoot 'ipp-rf-smoke'))
 
     foreach ($alias in @('vhs-decode', 'cvbs-decode', 'ld-decode', 'hifi-decode')) {
         Invoke-Native (Join-Path $packageRoot $alias) @('--help')
@@ -1019,6 +1033,33 @@ if (-not $SkipNativeBuild) {
     Invoke-Native strip @('--strip-unneeded', (Join-Path $nativeStage 'libsoxr.so'))
 }
 
+if (-not $SkipNativeBuild) {
+    # The codec build resets nativeStage. Stage IPP only after that reset.
+    & (Join-Path $scriptDirectory 'build-ipp-native-linux.ps1') -AllowNewerGlibc:$AllowNewerGlibc
+}
+$ippStagePath = Join-Path $nativeStage 'libvhsdecode_ipp.so'
+$ippLicenseRoot = Join-Path $nativeStage 'intel-ipp'
+$ippManifestPath = Join-Path $ippLicenseRoot 'BUILD-MANIFEST.json'
+if (-not (Test-Path -LiteralPath $ippManifestPath -PathType Leaf)) {
+    throw 'Staged IPP build manifest is missing. Build IPP before using -SkipNativeBuild.'
+}
+$ippManifest = Get-Content -LiteralPath $ippManifestPath -Raw | ConvertFrom-Json
+$ippConfiguration = Get-Content -LiteralPath (Join-Path $scriptDirectory 'linux-ipp-packages.json') -Raw | ConvertFrom-Json
+if ($ippManifest.bridgeSha256 -cne (Get-Sha256 $ippStagePath) -or
+    $ippManifest.packageVersion -cne $ippConfiguration.ippVersion -or
+    $ippManifest.runtimeVersion -cne $ippConfiguration.runtimeVersion -or
+    ($ippManifest.packages | ConvertTo-Json -Depth 8 -Compress) -cne
+        ($ippConfiguration.packages | ConvertTo-Json -Depth 8 -Compress)) {
+    throw 'Staged IPP binary or package provenance does not match the pinned build.'
+}
+if (-not $AllowNewerGlibc -and -not $ippManifest.releaseBuildHost) {
+    throw 'Staged IPP was not built on the release baseline. Rebuild without -AllowNewerGlibc.'
+}
+$maximumIppGlibc = if ($AllowNewerGlibc) { [string]$hostGlibc } else { '2.34' }
+Invoke-Native python3 @(
+    (Join-Path $scriptDirectory 'verify-linux-native.py'), 'ipp', $ippStagePath,
+    '--max-glibc', $maximumIppGlibc)
+
 $sndfileStagePath = Join-Path $nativeStage 'libsndfile.so'
 $soxrStagePath = Join-Path $nativeStage 'libsoxr.so'
 foreach ($candidate in @($sndfileStagePath, $soxrStagePath)) {
@@ -1056,6 +1097,9 @@ if ($LASTEXITCODE -ne 0 -or $actualSdk -cne $expectedSdk) {
 }
 Invoke-Native dotnet @('--info')
 
+$previousIppRequirement = $env:VHSDECODE_REQUIRE_IPP
+$env:VHSDECODE_REQUIRE_IPP = '1'
+try {
 Invoke-Native dotnet @('restore', $solutionPath, '--artifacts-path', $dotnetArtifactsRoot)
 Invoke-Native dotnet @(
     'build', $solutionPath,
@@ -1086,6 +1130,10 @@ if (-not $SkipTests) {
 }
 else {
     Write-Warning 'Skipping the full test suite. This output is not release-certified.'
+}
+}
+finally {
+    $env:VHSDECODE_REQUIRE_IPP = $previousIppRequirement
 }
 
 Invoke-Native dotnet @(
@@ -1127,6 +1175,7 @@ $codecSourceRoot = Join-Path $licenseRoot 'codec-sources'
 $dotnetRuntimeLicenseRoot = Join-Path $licenseRoot 'dotnet-runtime'
 $aspnetCoreRuntimeLicenseRoot = Join-Path $licenseRoot 'aspnetcore-runtime'
 $managedNugetLicenseRoot = Join-Path $licenseRoot 'managed-nuget'
+Copy-DirectoryContents $ippLicenseRoot (Join-Path $licenseRoot 'intel-ipp')
 New-Item -ItemType Directory -Path $sndfileLicenseRoot, $soxrLicenseRoot, $codecSourceRoot, $dotnetRuntimeLicenseRoot, $aspnetCoreRuntimeLicenseRoot, $managedNugetLicenseRoot -Force | Out-Null
 Copy-Item -LiteralPath (Join-Path $repositoryRoot 'third_party\libsndfile\COPYING.LGPL') -Destination $sndfileLicenseRoot
 Copy-Item -LiteralPath (Join-Path $repositoryRoot 'third_party\libsndfile\README.md') -Destination $sndfileLicenseRoot
@@ -1357,6 +1406,9 @@ foreach ($entry in $runtimePackDestinations.GetEnumerator()) {
         "$($entry.Value.Sha256)  $($entry.Value.FileName)"
     }
     "$soxrSourceSha256  $(Split-Path -Leaf $soxrSourcePath)"
+    foreach ($package in $ippConfiguration.packages) {
+        "$($package.sha256)  $($package.fileName)"
+    }
 )
 [System.IO.File]::WriteAllLines(
     (Join-Path $licenseRoot 'SOURCE-SHA256SUMS.txt'),
@@ -1387,6 +1439,10 @@ $glibcCeilingEnforced = -not $AllowNewerGlibc.IsPresent
     'ReadyToRun: false',
     'Trimmed: false',
     'DSP release contract: exact',
+    'Additional VHS/LD DSP backend: ipp-fast (static PIC sequential IPP, system libstdc++)',
+    "IPP package version: $($ippManifest.packageVersion); library version: $($ippManifest.runtimeVersion)",
+    "IPP bridge SHA256: $($ippManifest.bridgeSha256)",
+    "Every shipped ELF audited: GLIBC <= $maximumIppGlibc, GLIBCXX <= 3.4.29, CXXABI <= 1.3.13, GCC <= 4.2.0",
     'Native codecs linked into libsndfile: libogg 1.3.5, libvorbis 1.3.7, opus 1.4, FLAC 1.4.2',
     'libsoxr source commit: a66f3eeeeb62a32403ff143b756eed92b1ec6b62')
 [System.IO.File]::WriteAllLines(

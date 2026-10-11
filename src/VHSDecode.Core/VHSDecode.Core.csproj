@@ -42,6 +42,7 @@
   <ItemGroup Condition="'$(RuntimeIdentifier)' == 'linux-x64' Or ('$(RuntimeIdentifier)' == '' And $([MSBuild]::IsOSPlatform('Linux')))">
     <None Include="..\..\artifacts\native\Release\linux-x64\libsndfile.so" Condition="Exists('..\..\artifacts\native\Release\linux-x64\libsndfile.so')" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" Link="libsndfile.so" TargetPath="libsndfile.so" />
     <None Include="..\..\artifacts\native\Release\linux-x64\libsoxr.so" Condition="Exists('..\..\artifacts\native\Release\linux-x64\libsoxr.so')" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" Link="libsoxr.so" TargetPath="libsoxr.so" />
+    <None Include="..\..\artifacts\native\Release\linux-x64\libvhsdecode_ipp.so" Condition="Exists('..\..\artifacts\native\Release\linux-x64\libvhsdecode_ipp.so')" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" Link="libvhsdecode_ipp.so" TargetPath="libvhsdecode_ipp.so" />
   </ItemGroup>
 
 </Project>

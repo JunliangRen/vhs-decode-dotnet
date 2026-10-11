@@ -10,7 +10,12 @@
   <Target Name="ValidateLinuxX64NativeTestAssets" BeforeTargets="Build" Condition="$([MSBuild]::IsOSPlatform('Linux')) And '$(RuntimeIdentifier)' != 'linux-arm64'">
     <Error Condition="!Exists('..\..\artifacts\native\Release\linux-x64\libsndfile.so')" Text="Missing Linux x64 libsndfile test sidecar. Run tools/build-linux-x64-release.ps1 before testing." />
     <Error Condition="!Exists('..\..\artifacts\native\Release\linux-x64\libsoxr.so')" Text="Missing Linux x64 libsoxr test sidecar. Run tools/build-linux-x64-release.ps1 before testing." />
+    <Error Condition="'$(VHSDECODE_REQUIRE_IPP)' == '1' And !Exists('..\..\artifacts\native\Release\linux-x64\libvhsdecode_ipp.so')" Text="Required Linux IPP library is missing. Run tools/build-ipp-native-linux.ps1 before testing." />
   </Target>
+
+  <ItemGroup Condition="$([MSBuild]::IsOSPlatform('Linux'))">
+    <None Include="..\..\artifacts\native\Tests\linux-x64\ipp-probe-fixtures\*.so" CopyToOutputDirectory="PreserveNewest" Link="ipp-probe-fixtures\%(Filename)%(Extension)" />
+  </ItemGroup>
 
   <ItemGroup>
     <PackageReference Include="Microsoft.NET.Test.Sdk" Version="18.10.1" />

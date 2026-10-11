@@ -18,7 +18,7 @@ public sealed class IppRfDemodulatorDifferentialTests
     [Fact(DisplayName = "IPP fast 32768-point VHS real RF path remains numerically close to exact")]
     public void IppFastVhsRealRfPathRemainsNumericallyCloseToExact()
     {
-        if (!IppRuntime.TryProbe(out _))
+        if (!IppTestRuntime.TryProbe(out _))
         {
             return;
         }
@@ -81,15 +81,20 @@ public sealed class IppRfDemodulatorDifferentialTests
                 + Environment.NewLine
                 + $"exactBlockSha256={Hash(exact)}, ippBlockSha256={Hash(ipp)}");
 
-        Assert.Equal(
-            "2CE4D907DD94BE3ACB7A0412EB4921CD869DE4E56C751BB0AD498CF0028D0834",
-            Hash(exact));
+        // This frozen oracle includes Windows libm-generated input bits.
+        // The numerical Exact/IPP differential assertions above run on every OS.
+        if (OperatingSystem.IsWindows())
+        {
+            Assert.Equal(
+                "2CE4D907DD94BE3ACB7A0412EB4921CD869DE4E56C751BB0AD498CF0028D0834",
+                Hash(exact));
+        }
     }
 
     [Fact(DisplayName = "IPP fast RF pipeline pools and deterministically applies the VHS envelope SOS filter")]
     public void IppFastRfPipelinePoolsVhsEnvelopeSosFilter()
     {
-        if (!IppRuntime.TryProbe(out _))
+        if (!IppTestRuntime.TryProbe(out _))
         {
             return;
         }
@@ -206,7 +211,7 @@ public sealed class IppRfDemodulatorDifferentialTests
     [Fact(DisplayName = "IPP fast 32768-point LaserDisc complex RF path remains numerically close to exact")]
     public void IppFastLaserDiscComplexRfPathRemainsNumericallyCloseToExact()
     {
-        if (!IppRuntime.TryProbe(out _))
+        if (!IppTestRuntime.TryProbe(out _))
         {
             return;
         }

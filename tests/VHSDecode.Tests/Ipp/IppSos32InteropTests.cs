@@ -51,7 +51,7 @@ public sealed class IppSos32InteropTests
     [Fact(DisplayName = "IPP SOS32 matches scalar float output and final state")]
     public void IppSos32MatchesScalarOutputAndState()
     {
-        if (!IppRuntime.TryProbe(out _))
+        if (!IppTestRuntime.TryProbe(out _))
         {
             return;
         }
@@ -75,7 +75,7 @@ public sealed class IppSos32InteropTests
     [Fact(DisplayName = "IPP SOS32 preserves split, reset, state and in-place semantics")]
     public void IppSos32PreservesStateControlsAndInPlaceSemantics()
     {
-        if (!IppRuntime.TryProbe(out _))
+        if (!IppTestRuntime.TryProbe(out _))
         {
             return;
         }
@@ -117,7 +117,7 @@ public sealed class IppSos32InteropTests
     [Fact(DisplayName = "IPP SOS32 pool is deterministic in parallel and bounds retained contexts")]
     public void IppSos32PoolIsDeterministicAndBounded()
     {
-        if (!IppRuntime.TryProbe(out _))
+        if (!IppTestRuntime.TryProbe(out _))
         {
             return;
         }
@@ -151,7 +151,7 @@ public sealed class IppSos32InteropTests
     [Fact(DisplayName = "IPP SOS32 forward-backward pool stays numerically close to managed float32")]
     public void IppSos32PoolStaysCloseToManagedFloat32()
     {
-        if (!IppRuntime.TryProbe(out _))
+        if (!IppTestRuntime.TryProbe(out _))
         {
             return;
         }
@@ -172,7 +172,7 @@ public sealed class IppSos32InteropTests
     [Fact(DisplayName = "IPP SOS32 float input to double matches widened input bits")]
     public void IppSos32FloatInputToDoubleMatchesWidenedInputBits()
     {
-        if (!IppRuntime.TryProbe(out _))
+        if (!IppTestRuntime.TryProbe(out _))
         {
             return;
         }
@@ -207,7 +207,7 @@ public sealed class IppSos32InteropTests
     [Fact(DisplayName = "Disposed SOS32 context and pool reject further work")]
     public void DisposedSos32ObjectsRejectCalls()
     {
-        if (!IppRuntime.TryProbe(out _))
+        if (!IppTestRuntime.TryProbe(out _))
         {
             return;
         }

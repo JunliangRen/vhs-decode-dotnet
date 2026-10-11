@@ -60,8 +60,8 @@ decode.exe hifi [upstream options] input.lds output.wav
 完全な互換 option は `decode.exe <command> --help` で確認してください。
 
 release workflow は self-contained、multi-file の glibc `linux-x64` tar も
-生成します。Linux package は portable `exact` backend のみを対象とし、Linux 用
-SQLite、libsndfile、libsoxr native asset を同梱して Windows IPP/CUDA DLL を除外します。
+生成します。Linux package は既定の `exact` と VHS/LD 用 `ipp-fast` をサポートし、
+Linux 用 SQLite、libsndfile、libsoxr、IPP native asset を同梱して Windows DLL を除外します。
 FFmpeg と文書化された OS library をインストールした後に実行できます。
 
 ```bash
@@ -70,8 +70,8 @@ cd vhs-decode-dotnet-linux-x64
 ./vhs-decode --pal --dsp-backend exact input.lds output
 ```
 
-Ubuntu 22.04/glibc 2.35 baseline、runtime package、checksum、build provenance、
-release gate は [Linux x64 release](docs/LINUX_X64.md) を参照してください。
+GLIBC 2.34 baseline、system C++ runtime、Ubuntu 以外の distribution gate、
+checksum と provenance は [Linux x64 release](docs/LINUX_X64.md) を参照してください。
 32-bit x86、ARM/ARM64、musl は対象外です。
 
 ### Seek 可能な RF preview server
@@ -182,7 +182,7 @@ stabilization を同時に無効化した場合は 0.922357 で、default は全
 | 値 | 意味 |
 | --- | --- |
 | `exact` | default の managed path。互換性を重視する decode に使用します。 |
-| `ipp-fast` | Intel IPP を使う experimental Windows x64 VHS / LaserDisc real-RF path。浮動小数点 bit が変化する可能性があり、`exact` へ silent fallback しません。 |
+| `ipp-fast` | Intel IPP を使う experimental Windows x64 / Linux x64/glibc VHS / LaserDisc real-RF path。浮動小数点 bit が変化する可能性があり、`exact` へ silent fallback しません。 |
 | `cuda-fast` | NVIDIA CUDA 13 を使う experimental Windows x64 full-signal VHS path。独立した numerical contract を持ち、PAL/NTSC VHS を通常は 40 MSPS、`--decode-at-20msps` 指定時は GPU 40→20 または native 20 MSPS で decode し、CPU backend へ silent fallback しません。 |
 | `approx-fast` | VHS-only の experimental FP32 path。TBC resampler と precision contract を選択できます。default の `balanced` は既存の v1/v2 behavior を維持し、明示的な `aggressive` は高速化のため一部の数値精度を意図的に省く field-FP32/burst-IQ-prefix/chroma-FFT v6 contract を選択します。nonzero RF high boost は未対応です。 |
 

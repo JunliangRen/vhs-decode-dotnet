@@ -29,7 +29,7 @@ public sealed class IppRealFft32Tests
     [InlineData(32_768)]
     public void AgreesNumericallyAndRoundTrips(int length)
     {
-        if (!IppRuntime.TryProbe(out IppRuntimeInfo? runtimeInfo))
+        if (!IppTestRuntime.TryProbe(out IppRuntimeInfo? runtimeInfo))
         {
             return;
         }
@@ -55,7 +55,7 @@ public sealed class IppRealFft32Tests
     [Fact(DisplayName = "IPP real FFT32 is deterministic across dirty reuse")]
     public void IsDeterministicAcrossDirtyReuse()
     {
-        if (!IppRuntime.TryProbe(out _))
+        if (!IppTestRuntime.TryProbe(out _))
         {
             return;
         }
@@ -82,7 +82,7 @@ public sealed class IppRealFft32Tests
     [Fact(DisplayName = "IPP real FFT32 serializes parallel calls on one context")]
     public void SerializesParallelCallsOnOneContext()
     {
-        if (!IppRuntime.TryProbe(out _))
+        if (!IppTestRuntime.TryProbe(out _))
         {
             return;
         }
@@ -110,7 +110,7 @@ public sealed class IppRealFft32Tests
     [Fact(DisplayName = "Separate IPP real FFT32 contexts execute correctly in parallel")]
     public void SeparateContextsExecuteCorrectlyInParallel()
     {
-        if (!IppRuntime.TryProbe(out _))
+        if (!IppTestRuntime.TryProbe(out _))
         {
             return;
         }
@@ -150,7 +150,7 @@ public sealed class IppRealFft32Tests
     [Fact(DisplayName = "Disposed IPP real FFT32 rejects further calls")]
     public void DisposedObjectRejectsFurtherCalls()
     {
-        if (!IppRuntime.TryProbe(out _))
+        if (!IppTestRuntime.TryProbe(out _))
         {
             return;
         }

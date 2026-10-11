@@ -10,7 +10,7 @@ public sealed class IppComplex64VectorTests
     [Fact(DisplayName = "IPP complex multiply matches scalar math on unaligned slices")]
     public void ComplexMultiplyMatchesScalarOnUnalignedSlices()
     {
-        if (!IppRuntime.TryProbe(out _))
+        if (!IppTestRuntime.TryProbe(out _))
         {
             return;
         }
@@ -36,7 +36,7 @@ public sealed class IppComplex64VectorTests
     [Fact(DisplayName = "IPP complex magnitude and phase match scalar math on unaligned slices")]
     public void ComplexMagnitudePhaseMatchesScalarOnUnalignedSlices()
     {
-        if (!IppRuntime.TryProbe(out _))
+        if (!IppTestRuntime.TryProbe(out _))
         {
             return;
         }
@@ -82,7 +82,7 @@ public sealed class IppComplex64VectorTests
     [Fact(DisplayName = "IPP complex vector functions accept IEEE special values without bit claims")]
     public void ComplexVectorFunctionsAcceptSpecialValuesAsSmokeCoverage()
     {
-        if (!IppRuntime.TryProbe(out _))
+        if (!IppTestRuntime.TryProbe(out _))
         {
             return;
         }
@@ -153,7 +153,7 @@ public sealed class IppComplex64VectorTests
     [Fact(DisplayName = "IPP complex vector functions remain deterministic under parallel calls")]
     public void ComplexVectorFunctionsRemainDeterministicInParallel()
     {
-        if (!IppRuntime.TryProbe(out _))
+        if (!IppTestRuntime.TryProbe(out _))
         {
             return;
         }

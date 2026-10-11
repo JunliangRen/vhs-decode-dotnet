@@ -55,8 +55,9 @@ decode.exe hifi [upstream options] input.lds output.wav
 同时支持 `vhs-decode.exe`、`ld-decode.exe` 等独立命令别名。使用
 `decode.exe <command> --help` 查看完整兼容参数。
 
-发布工作流还会生成自包含、多文件的 glibc `linux-x64` tar。Linux 包只支持可移植的
-`exact` 后端，内置 Linux 版 SQLite、libsndfile 和 libsoxr 原生资产，并明确排除
+发布工作流还会生成自包含、多文件的 glibc `linux-x64` tar。Linux 包默认使用
+`exact`，也支持 VHS/LD 的 `ipp-fast`，内置 Linux 版 SQLite、libsndfile、libsoxr
+和 IPP 原生资产，并明确排除
 Windows IPP/CUDA DLL。安装 FFmpeg 与文档列出的系统库后即可运行：
 
 ```bash
@@ -65,7 +66,7 @@ cd vhs-decode-dotnet-linux-x64
 ./vhs-decode --pal --dsp-backend exact input.lds output
 ```
 
-Ubuntu 22.04/glibc 2.35 基线、运行依赖、校验值、构建来源和发布门禁见
+GLIBC 2.34 基线、系统 C++ 运行库、非 Ubuntu 发行版门禁、校验值和构建来源见
 [Linux x64 发布说明](docs/LINUX_X64.md)。不支持 32 位 x86、ARM/ARM64 或 musl。
 
 ### 可拖动的 RF 预览服务器
@@ -166,7 +167,7 @@ Python 原版在不同 worker 数下的输出哈希并不稳定，因此 Python 
 | 值 | 含义 |
 | --- | --- |
 | `exact` | 默认托管路径，适合兼容性敏感的解码。 |
-| `ipp-fast` | 实验性的 Windows x64 VHS 与 LaserDisc real-RF 路径，使用 Intel IPP；可能改变浮点位，并且绝不会静默回退到 `exact`。 |
+| `ipp-fast` | 实验性的 Windows x64 和 Linux x64/glibc VHS 与 LaserDisc real-RF 路径，使用 Intel IPP；可能改变浮点位，并且绝不会静默回退到 `exact`。 |
 | `cuda-fast` | 实验性的 Windows x64 NVIDIA CUDA 13 全信号 VHS 路径；采用独立数值契约，PAL/NTSC VHS 默认按 40 MSPS 解码，也可用 `--decode-at-20msps` 在 GPU 上执行 40→20 或直接解码原生 20 MSPS 输入，并且绝不会静默回退到 CPU 后端。 |
 | `approx-fast` | 仅支持 VHS 的实验 FP32 路径，可选择 TBC 重采样器和精度契约。默认 `balanced` 保持既有 v1/v2 行为；显式 `aggressive` 使用更快、但有意舍弃部分数值精度的 field-FP32/burst-IQ-prefix/chroma-FFT v6 契约。暂不支持非零 RF high boost。 |
 
