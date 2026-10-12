@@ -293,7 +293,7 @@ Y/U/V/All = 0.954905/0.988109/0.991285/0.972301，PSNR Y/U/V/平均值为
 0.6860%。内存保持有界，但不宣称有所降低。
 
 刷新后的 60 次 Exact/IPP-fast 矩阵在每个单元格以及跨 worker 设置都只产生一套
-亮度、色度、原始 JSON、stdout、归一化 stderr/日志和有序 `fileLoc` hash。最新标准
+亮度、色度、原始 JSON、stdout、归一化 stderr/日志和有序 `fileLoc` hash。
 该性能检查点的 xUnit v3 套件共发现 **1,615** 项测试，其中 1,612 项通过、3 项因环境不可用按预期跳过。
 
 刷新后的每个 .NET profile/线程单元格在三轮内都保持确定性。固定参考集中的 Python
