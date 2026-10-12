@@ -2,14 +2,14 @@
 
 **[English](README.md)** | [简体中文](README.zh-CN.md) | [日本語](README.ja.md)
 
-<!-- README_SYNC: 2026-10-09.01 -->
+<!-- README_SYNC: 2026-10-12.01 -->
 
 A .NET 11 rewrite of the decode-facing parts of
 [`oyvindln/vhs-decode`](https://github.com/oyvindln/vhs-decode), targeting
 upstream release `v0.4.0` at commit
 `43155200da87c0d49eb37d8ec09b1372075ee8e4`.
 
-The current .NET port release is `v0.4.0-2.11.0` (application version `2.11.0`).
+The current .NET port release is `v0.4.0-2.12.0` (application version `2.12.0`).
 
 > [!IMPORTANT]
 > This remains a compatibility work in progress. The top-level decode paths are
@@ -40,7 +40,7 @@ evidence, and remaining gaps.
   EIAJ, and supported PAL/NTSC variants.
 - TBC utility tools, the double-click GUI, and developer plotting windows are
   intentionally out of scope.
-- The Visual Studio 2026 `.slnx` solution has **1,615** standard xUnit v3 tests
+- The Visual Studio 2026 `.slnx` solution has **1,898** standard xUnit v3 tests
   that are visible in Test Explorer and runnable with `dotnet test`.
 
 <!-- SECTION: start -->
@@ -342,7 +342,7 @@ eight compatibility surfaces; paired median wall and CPU gains were 0.5385% and
 
 The refreshed 60-run Exact/IPP-fast matrix retained one hash for luma, chroma,
 raw JSON, stdout, normalized stderr/logs, and ordered `fileLoc` in every cell and
-across worker counts. The latest standard xUnit v3 **1,615**-test suite passed
+across worker counts. At that performance checkpoint, the standard xUnit v3 **1,615**-test suite passed
 with 1,612 successes and 3 expected environment skips.
 
 Every .NET profile/thread cell was deterministic across its three refreshed
