@@ -2,14 +2,14 @@
 
 [English](README.md) | [简体中文](README.zh-CN.md) | **[日本語](README.ja.md)**
 
-<!-- README_SYNC: 2026-10-09.01 -->
+<!-- README_SYNC: 2026-10-12.01 -->
 
 [`oyvindln/vhs-decode`](https://github.com/oyvindln/vhs-decode) の
 デコード関連部分を .NET 11 で再実装するプロジェクトです。互換性の対象は
 upstream release `v0.4.0`、commit
 `43155200da87c0d49eb37d8ec09b1372075ee8e4` です。
 
-現在の .NET port release は `v0.4.0-2.11.0`（application version `2.11.0`）です。
+現在の .NET port release は `v0.4.0-2.12.0`（application version `2.12.0`）です。
 
 > [!IMPORTANT]
 > この互換移植は現在も開発中です。トップレベルのデコード経路は実装済みで
@@ -38,7 +38,7 @@ upstream release `v0.4.0`、commit
 - VHS family には VHS/S-VHS、Betamax、Video8/Hi8、U-matic、Type C、EIAJ、
   upstream が対応する PAL/NTSC variant が含まれます。
 - TBC utility、ダブルクリック GUI、開発者向け plot window は対象外です。
-- Visual Studio 2026 の `.slnx` には **1,615** 件の標準 xUnit v3 test があり、
+- Visual Studio 2026 の `.slnx` には **1,898** 件の標準 xUnit v3 test があり、
   Test Explorer と `dotnet test` の両方で実行できます。
 
 <!-- SECTION: start -->
@@ -324,7 +324,7 @@ paired median の wall/CPU gain は 0.5385%/0.6860% でした。memory は bound
 
 更新した 60-run Exact/IPP-fast matrix は、各 cell と worker setting 間で luma、chroma、
 raw JSON、stdout、normalized stderr/log、ordered `fileLoc` の各 hash を 1 つに維持しました。
-最新の標準 xUnit v3 suite は **1,615** tests を discover し、1,612 passed、expected
+当時の標準 xUnit v3 suite は **1,615** tests を discover し、1,612 passed、expected
 environment skip は 3 でした。
 
 更新した各 .NET profile/thread cell は 3 run 内で deterministic でした。固定 reference の

@@ -2,13 +2,13 @@
 
 [English](README.md) | **[简体中文](README.zh-CN.md)** | [日本語](README.ja.md)
 
-<!-- README_SYNC: 2026-10-09.01 -->
+<!-- README_SYNC: 2026-10-12.01 -->
 
 这是 [`oyvindln/vhs-decode`](https://github.com/oyvindln/vhs-decode)
 中解码相关部分的 .NET 11 重写，兼容目标为上游 release `v0.4.0`、commit
 `43155200da87c0d49eb37d8ec09b1372075ee8e4`。
 
-当前 .NET 移植版发布为 `v0.4.0-2.11.0`（应用版本 `2.11.0`）。
+当前 .NET 移植版发布为 `v0.4.0-2.12.0`（应用版本 `2.12.0`）。
 
 > [!IMPORTANT]
 > 这仍是持续进行中的兼容性移植。顶层解码路径已经实现并经过大量测试，但尚未声称
@@ -35,7 +35,7 @@
 - VHS 家族包括 VHS/S-VHS、Betamax、Video8/Hi8、U-matic、Type C、EIAJ
   以及上游支持的 PAL/NTSC 变体。
 - TBC 工具、双击启动的用户 GUI 和开发者绘图窗口明确不在范围内。
-- Visual Studio 2026 `.slnx` 包含 **1,615** 项标准 xUnit v3 测试；测试可在
+- Visual Studio 2026 `.slnx` 包含 **1,898** 项标准 xUnit v3 测试；测试可在
   Test Explorer 中查看，也可用 `dotnet test` 运行。
 
 <!-- SECTION: start -->
@@ -294,7 +294,7 @@ Y/U/V/All = 0.954905/0.988109/0.991285/0.972301，PSNR Y/U/V/平均值为
 
 刷新后的 60 次 Exact/IPP-fast 矩阵在每个单元格以及跨 worker 设置都只产生一套
 亮度、色度、原始 JSON、stdout、归一化 stderr/日志和有序 `fileLoc` hash。最新标准
-xUnit v3 套件共发现 **1,615** 项测试，其中 1,612 项通过、3 项因环境不可用按预期跳过。
+该性能检查点的 xUnit v3 套件共发现 **1,615** 项测试，其中 1,612 项通过、3 项因环境不可用按预期跳过。
 
 刷新后的每个 .NET profile/线程单元格在三轮内都保持确定性。固定参考集中的 Python
 PR341 保持确定；Python v0.4.0 的 15 次运行产生了 15 套不同的亮度、色度、JSON 和
