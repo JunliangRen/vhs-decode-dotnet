@@ -172,9 +172,11 @@ The builder fails unless all of the following pass:
   providers are exercised from an unrelated directory containing spaces, with
   SDK and oneAPI loader overrides removed;
 - the final extracted tar performs two one-frame PAL `exact` decodes with
-  SQLite output, producing identical TBC, database, JSON, and normalized
-  console/log results; the fixed input, TBC, SQLite database, and OS-normalized
-  JSON are also checked against pinned SHA-256 oracles;
+  SQLite output, producing identical TBC, JSON, and normalized console/log results;
+  databases must pass integrity checks and have identical schemas (including
+  user_version) and canonical SQL exports. Fixed input, TBC, OS-normalized JSON,
+  database schema and SQL-export digests are checked against pinned SHA-256
+  oracles derived from the released fixture; database file bytes may differ;
 - two independent tar constructions have the same SHA-256.
 
 These gates establish build, fixture, native-loader, packaging, determinism,
@@ -186,8 +188,9 @@ The synthetic VHS fixture gates active-picture luminance at a maximum of 2 IRE
 and RMS of 0.05 IRE, with separate whole-raster limits (8192 code values maximum
 and 0.1 IRE RMS). IPP's existing FFT/SOS evaluation differences can change an
 HSync decision at an RF block boundary; whole-raster pixel identity is therefore
-not its contract. Metadata must match and repeated IPP luminance, chroma, JSON
-and SQLite outputs must be identical. Chroma byte count must match the field
+not its contract. Metadata must match and repeated IPP luminance, chroma and JSON
+must be identical. SQLite schema and canonical SQL contents must match, with
+successful integrity checks; physical database bytes may differ. Chroma byte count must match the field
 geometry. This fixture has no color burst and does not certify real color quality.
 
 CoreCLR's optional LTTng tracing provider is audited against the same ABI

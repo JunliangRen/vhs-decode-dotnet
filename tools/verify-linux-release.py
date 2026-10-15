@@ -4,12 +4,19 @@
 import argparse
 from array import array
 import hashlib
+import importlib.util
 import json
 import os
 from pathlib import Path
 import struct
+import sqlite3
 import subprocess
 import sys
+
+_sqlite_spec = importlib.util.spec_from_file_location(
+    "sqlite_compatibility", Path(__file__).with_name("sqlite_compatibility.py"))
+sqlite_compatibility = importlib.util.module_from_spec(_sqlite_spec)
+_sqlite_spec.loader.exec_module(sqlite_compatibility)
 
 # Frozen integer carrier table: signal generation is independent of libm.
 CARRIER = (
@@ -81,6 +88,7 @@ def read_result(prefix, backend, provider=None, mode="vhs"):
         path = Path(str(prefix) + suffix)
         if not path.is_file() or not path.stat().st_size:
             raise ValueError(f"Decode omitted nonempty output {path}")
+    sqlite_compatibility.snapshot(Path(str(prefix) + ".tbc.db"))
     metadata = json.loads(Path(str(prefix) + ".tbc.json").read_text())
     video = metadata["videoParameters"]
     if video["numberOfSequentialFields"] != 2 or len(metadata["fields"]) != 2:
@@ -169,13 +177,17 @@ def verify(root, work):
             (work / f"{mode}-{label}.console.txt").write_bytes(output.replace("\r\n", "\n").replace("\n", "\r\n").encode())
             metadata_by_label[label] = read_result(prefix, backend, provider, mode)
             prefixes[label] = prefix
-        repeated_suffixes = (".tbc", ".tbc.db", ".tbc.json") + (("_chroma.tbc",) if mode == "vhs" else ())
+        repeated_suffixes = (".tbc", ".tbc.json") + (("_chroma.tbc",) if mode == "vhs" else ())
         for suffix in repeated_suffixes:
             if sha256(Path(str(prefixes["ipp"]) + suffix)) != sha256(Path(str(prefixes["ipp-repeat"]) + suffix)):
                 raise ValueError(f"IPP repeated decode is nondeterministic: {mode}{suffix}")
+        database = sqlite_compatibility.compare_databases(
+            Path(str(prefixes["ipp"]) + ".tbc.db"),
+            Path(str(prefixes["ipp-repeat"]) + ".tbc.db"))
         if metadata_by_label["exact"] != metadata_by_label["ipp"]:
             raise ValueError(f"Exact/IPP field timing, geometry or metadata differs: {mode}")
         results[mode] = {"input_sha256": sha256(input_path),
+                         "ipp_database": database,
                          "exact_vs_ipp": compare_tbc(prefixes["exact"], prefixes["ipp"], metadata_by_label["exact"]["videoParameters"]),
                          "ipp_tbc_sha256": sha256(Path(str(prefixes["ipp"]) + ".tbc"))}
         if mode == "vhs":
@@ -204,7 +216,7 @@ def main():
         text = json.dumps(result, indent=2, sort_keys=True) + "\n"
         (options.work / "IPP-SMOKE.json").write_bytes(text.replace("\n", "\r\n").encode())
         print(text, end="")
-    except (ValueError, OSError, subprocess.TimeoutExpired) as error:
+    except (ValueError, OSError, sqlite3.Error, subprocess.TimeoutExpired) as error:
         print(f"Linux IPP package smoke failed: {error}", file=sys.stderr)
         return 1
     return 0

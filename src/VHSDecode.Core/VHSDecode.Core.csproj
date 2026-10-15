@@ -27,8 +27,7 @@
     <PackageReference Include="Microsoft.Data.Sqlite.Core" Version="11.0.0-rc.2.26504.105" />
     <PackageReference Include="NetMQ" Version="4.0.4.4" />
     <PackageReference Include="SQLitePCLRaw.bundle_e_sqlite3" Version="3.0.5" />
-    <!-- SQLite 3.54.0 changes the frozen TBC database bytes; retain the byte-compatible engine. -->
-    <PackageReference Include="SQLite" Version="3.53.4" />
+    <PackageReference Include="SQLite" Version="3.54.0" />
     <!-- Align NetMQ's Microsoft dependencies with the pinned .NET 11 RC2 runtime. -->
     <PackageReference Include="Microsoft.Extensions.ObjectPool" Version="11.0.0-rc.2.26504.105" />
     <PackageReference Include="System.Security.Cryptography.Xml" Version="11.0.0-rc.2.26504.105" />

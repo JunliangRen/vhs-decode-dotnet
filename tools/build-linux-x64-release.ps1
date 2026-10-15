@@ -28,7 +28,9 @@ Set-Location -LiteralPath $repositoryRoot
 $expectedSmokeHashes = [ordered]@{
     Input = 'b92d1a345f7807850b0a6a45478275f5d6cb2fd9fd1062f2e49cc7ac7e677c98'
     Tbc = 'e2a6d06c5814946f756e3edb25aca0c8d4ae5d08bf0f451aa644edad6f0005b1'
-    Database = 'b41e0afa9324c6a0b9cd64ace03f1558e98514f4585befc013ab7ec78645e86b'
+    # Schema and canonical SQL are frozen from the released 3.53.4 fixture.
+    DatabaseSchema = '1029f249952c8aaf1ecec69aeb35df90ed4a1725864f8a708d102fccd8d590b7'
+    DatabaseSql = 'ae57400c2d87e46da8cac8d50a81b6b3d3995381444132da43b3eedae863532c'
     PortableJson = '44fe0da6b5ea1a0254c9807517c95f35610ef894af84fac6db73b439c574a784'
 }
 
@@ -522,7 +524,7 @@ function Assert-PublishLayout {
             'licenses/managed-nuget/MPL-2.0.txt',
             'licenses/managed-nuget/SQLitePCLRaw-3.0.5-LICENSE.txt',
             'licenses/managed-nuget/SQLitePCLRaw-3.0.5-NOTICE.txt',
-            'licenses/managed-nuget/SQLite-3.53.4-LICENSE.txt',
+            'licenses/managed-nuget/SQLite-3.54.0-LICENSE.txt',
             'licenses/managed-nuget/Microsoft-dotnet-MIT.txt',
             'licenses/managed-nuget/Microsoft.Extensions.ObjectPool-11.0.0-rc.2.26504.105-THIRD-PARTY-NOTICES.txt',
             'licenses/managed-nuget/System.Security.Cryptography.Pkcs-11.0.0-rc.2.26504.105-THIRD-PARTY-NOTICES.txt',
@@ -798,6 +800,11 @@ function Invoke-FinalTarSmoke {
             throw 'Final tar smoke database does not have a SQLite 3 header.'
         }
 
+        $snapshotPath = "$outputBase.sqlite-snapshot.json"
+        Invoke-Native python3 @(
+            (Join-Path $scriptDirectory 'sqlite_compatibility.py'),
+            "$outputBase.tbc.db", '--output', $snapshotPath)
+        $databaseSnapshot = Get-Content -LiteralPath $snapshotPath -Raw | ConvertFrom-Json
         $jsonText = [System.IO.File]::ReadAllText("$outputBase.tbc.json")
         $portableJson = [System.Text.RegularExpressions.Regex]::Replace(
             $jsonText,
@@ -805,7 +812,8 @@ function Invoke-FinalTarSmoke {
             '"osInfo":"<os>"').TrimEnd([char[]]"`r`n")
         $hashesByRun[$run] = [ordered]@{
             Tbc = Get-Sha256 "$outputBase.tbc"
-            Database = Get-Sha256 "$outputBase.tbc.db"
+            DatabaseSchema = $databaseSnapshot.schema_sha256
+            DatabaseSql = $databaseSnapshot.sql_dump_sha256
             Json = Get-Sha256 "$outputBase.tbc.json"
             PortableJson = Get-TextSha256 $portableJson
         }
@@ -813,7 +821,7 @@ function Invoke-FinalTarSmoke {
         $normalizedTextByRun[$run] = Get-NormalizedRuntimeText $runtimeText
     }
 
-    foreach ($key in @('Tbc', 'Database', 'Json', 'PortableJson')) {
+    foreach ($key in @('Tbc', 'DatabaseSchema', 'DatabaseSql', 'Json', 'PortableJson')) {
         if ($hashesByRun[1][$key] -cne $hashesByRun[2][$key]) {
             throw "Final tar smoke is non-deterministic for $key."
         }
@@ -822,7 +830,7 @@ function Invoke-FinalTarSmoke {
         throw 'Final tar smoke console/log output differs after normalization.'
     }
 
-    foreach ($key in @('Tbc', 'Database', 'PortableJson')) {
+    foreach ($key in @('Tbc', 'DatabaseSchema', 'DatabaseSql', 'PortableJson')) {
         if ($hashesByRun[1][$key] -cne $expectedSmokeHashes[$key]) {
             throw (
                 "Final tar smoke $key oracle mismatch: expected " +
@@ -832,7 +840,8 @@ function Invoke-FinalTarSmoke {
 
     Write-Host (
         "Final tar smoke hashes: TBC=$($hashesByRun[1].Tbc); " +
-        "SQLite=$($hashesByRun[1].Database); " +
+        "SQLite schema=$($hashesByRun[1].DatabaseSchema); " +
+        "SQLite SQL=$($hashesByRun[1].DatabaseSql); " +
         "portable JSON=$($hashesByRun[1].PortableJson); " +
         "raw JSON=$($hashesByRun[1].Json)")
 }
@@ -1206,7 +1215,7 @@ if ($targetFrameworks.Count -ne 1) {
     'Microsoft.Extensions.ObjectPool/11.0.0-rc.2.26504.105',
     'NaCl.Net/0.1.13',
     'NetMQ/4.0.4.4',
-    'SQLite/3.53.4',
+    'SQLite/3.54.0',
     'SQLitePCLRaw.bundle_e_sqlite3/3.0.5',
     'SQLitePCLRaw.config.e_sqlite3/3.0.5',
     'SQLitePCLRaw.core/3.0.5',
@@ -1235,9 +1244,9 @@ foreach ($entry in $managedLicenseSources.GetEnumerator()) {
 
 [object[]]$restoredManagedNoticeFiles = @(
     [pscustomobject]@{
-        Identity = 'SQLite/3.53.4'
+        Identity = 'SQLite/3.54.0'
         Source = 'LICENSE.txt'
-        Destination = 'SQLite-3.53.4-LICENSE.txt'
+        Destination = 'SQLite-3.54.0-LICENSE.txt'
     },
     [pscustomobject]@{
         Identity = 'Microsoft.Extensions.ObjectPool/11.0.0-rc.2.26504.105'
@@ -1343,10 +1352,10 @@ foreach ($file in $restoredManagedNoticeFiles) {
     'License file: SQLitePCLRaw-3.0.5-LICENSE.txt',
     'Notice file: SQLitePCLRaw-3.0.5-NOTICE.txt',
     '',
-    'SQLite 3.53.4',
+    'SQLite 3.54.0',
     'License: Public Domain',
     'Source: https://sqlite.org/',
-    'License file from the restored package: SQLite-3.53.4-LICENSE.txt')
+    'License file from the restored package: SQLite-3.54.0-LICENSE.txt')
 [System.IO.File]::WriteAllLines(
     (Join-Path $managedNugetLicenseRoot 'MANIFEST.txt'),
     $managedLicenseManifest,

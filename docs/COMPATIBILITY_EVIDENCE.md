@@ -3602,18 +3602,25 @@ The four RC2 Microsoft package nuspecs identify the same source commit,
 `820230c386db5b0106c5430b3e5aee92a7826bf5`. NuGet's known-vulnerability audit,
 including transitive dependencies, reports no findings at this checkpoint.
 
-SQLite is intentionally pinned to `3.53.4`. Testing `3.54.0` changed the final
-PAL CVBS fixture's database from the existing SHA-256
-`b41e0afa9324c6a0b9cd64ace03f1558e98514f4585befc013ab7ec78645e86b` to
-`6c98056b45e4efe0059f1d6a762e90b4d7ec0c9cf3391783d81d702a77dcd874`.
-Both databases are 69,632 bytes with identical logical SQL dumps; 168 bytes
-on four data pages differ, including integral REAL values stored with different
-record serial types. Their normalized SQLite headers are identical. An isolated
-RC2 package with only its native SQLite engine replaced by `3.53.4` restores
-the original hash. The existing byte-compatibility oracle is preserved, so the
-newer engine is deferred. The direct-package outdated audit therefore lists
-this one deliberate exception. Test-tool-owned transitive dependencies retain
-the versions selected by their current upstream test packages.
+SQLite is upgraded to `3.54.0`. A controlled comparison with `3.53.4`
+produced equal 69,632-byte databases with equal schemas and logical SQL contents,
+but 168 bytes on four data pages changed. Integral REAL values used different
+record serial types; the normalized SQLite headers were equal. Replacing only
+the native engine recovered the former binary hash, isolating the engine update.
+
+The maintainer explicitly accepts physical database differences. The current
+SQLite compatibility contract is equal schema (including user_version) and equal
+canonical SQL export, with a successful integrity check. The shared read-only
+`tools/sqlite_compatibility.py` checker excludes root-page/page-layout details,
+sorts exported INSERT statements independently of physical row order, preserves
+duplicate rows and value types, and escapes binary/NUL-containing data losslessly.
+The final-tar fixture freezes schema and SQL-export SHA-256 values from the released
+3.53.4 database. Repeated Exact/IPP databases use the same semantic contract;
+TBC/chroma/JSON and archive checksum gates retain their existing contracts.
+Earlier byte-exact database results remain historical observations. Existing
+SQLite header normalization and lifecycle tests are retained; they do not impose
+whole-file byte equality. The direct-package audit has no remaining version
+exception. Test-tool-owned transitive versions remain selected by their packages.
 
 The RC2 Windows and local Ubuntu 26.04 WSL Release solution builds completed
 with no warnings or errors. The final Windows suite discovered 1,898 cases:
@@ -3631,7 +3638,12 @@ The final Windows EXE was compared with published `v0.4.0-2.12.0` on the supplie
 Default 20-to-40 MSPS and native 20 MSPS (`--no_resample`) each decoded 320 frames
 per variant. Binary outputs, raw JSON, field coordinates/order, and normalized
 ordered logs matched in both modes; all four processes exited successfully
-without observed remaining tool children. These are bounded compatibility runs.
+without observed remaining tool children. After enabling `--write_db` for the
+SQLite 3.54 update, both 320-frame comparisons also have identical complete
+schema and canonical SQL-export contents, while physical database hashes differ.
+These are bounded compatibility runs. The shared semantic checker adds nine
+focused positive/negative tests; all 34 Python tooling tests pass on both
+Windows and Linux.
 
 Final test reports, package checks, and exact-media comparisons are retained
 under `artifacts/dotnet11-rc2-upgrade/`. Historical Preview/RC1 benchmark and

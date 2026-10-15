@@ -1,8 +1,10 @@
 from array import array
+from contextlib import closing
 import importlib.util
 import os
 from pathlib import Path
 import struct
+import sqlite3
 import tempfile
 import unittest
 from unittest.mock import patch
@@ -26,8 +28,10 @@ class LinuxReleaseSmokeTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             prefix = Path(directory) / "decode"
             metadata = {"videoParameters": {"numberOfSequentialFields": 2, "fieldWidth": 2, "fieldHeight": 1}, "fields": [{}, {}]}
-            for suffix in (".tbc", ".log", ".tbc.db"):
+            for suffix in (".tbc", ".log"):
                 Path(str(prefix) + suffix).write_bytes(b"nonempty")
+            with closing(sqlite3.connect(Path(str(prefix) + ".tbc.db"))) as connection, connection:
+                connection.execute("CREATE TABLE metadata(field_id INTEGER PRIMARY KEY)")
             Path(str(prefix) + ".tbc.json").write_text(__import__("json").dumps(metadata))
             Path(str(prefix) + "_chroma.tbc").write_bytes(b"\0" * 8)
             for mode in ("vhs", "ld"):
