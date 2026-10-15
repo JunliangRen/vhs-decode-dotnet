@@ -3770,7 +3770,7 @@ cuFFT，或采用固定且经过校验的首次下载；兼容的 NVIDIA 驱动�
 仍会编译、审计并暂存桥接，但不能算作 GPU runtime 验证。
 
 当前正式 Release 构建为零警告、零错误。xUnit v3 项目向
-`dotnet test` 和 Visual Studio Test Explorer 暴露 **1,898** 个可独立发现的测试。
+`dotnet test` 和 Visual Studio Test Explorer 暴露 **1,912** 个可独立发现的测试。
 
 <!-- SECTION: usage -->
 

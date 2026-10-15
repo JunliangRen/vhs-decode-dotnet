@@ -1,0 +1,11 @@
+<Project>
+  <PropertyGroup>
+    <DecodeSamplePath Condition="'$(DecodeSamplePath)' == ''">$([System.IO.Path]::GetFullPath('$(MSBuildThisFileDirectory)../../../artifacts/diagnostic-input.flac'))</DecodeSamplePath>
+    <DecodeObservationRoot Condition="'$(DecodeObservationRoot)' == ''">$([System.IO.Path]::GetFullPath('$(MSBuildThisFileDirectory)../../../artifacts/decode-observations'))</DecodeObservationRoot>
+    <DecodeObservationId Condition="'$(DecodeObservationId)' == ''">$([System.Guid]::NewGuid())</DecodeObservationId>
+    <DecodeFrames Condition="'$(DecodeFrames)' == ''">320</DecodeFrames>
+    <DecodeThreads Condition="'$(DecodeThreads)' == ''">20</DecodeThreads>
+    <DecodeStartFrame Condition="'$(DecodeStartFrame)' == ''">0</DecodeStartFrame>
+    <DecodeDiagnosticArguments>vhs --system NTSC --frequency 20 --tf VHS --compat-version current --threads $(DecodeThreads) --length $(DecodeFrames) --start $(DecodeStartFrame) --write_db</DecodeDiagnosticArguments>
+  </PropertyGroup>
+</Project>

@@ -121,7 +121,7 @@ public sealed partial class ReadmeLocalizationTests
         "run: dotnet test --solution VHSDecodeDotNet.slnx --configuration Release " +
         "--no-build --no-restore --timeout 15m " +
         "--results-directory artifacts/test-results/windows --results-directory-layout per-module " +
-        "--report-trx --minimum-expected-tests 1898";
+        "--report-trx --minimum-expected-tests 1912";
 
     private const string FinalRealRadix4AvxTestCommand =
         "run: dotnet test tests/VHSDecode.Tests/VHSDecode.Tests.csproj " +
@@ -380,7 +380,7 @@ public sealed partial class ReadmeLocalizationTests
         [
             "43155200da87c0d49eb37d8ec09b1372075ee8e4",
             PinnedDotNetSdkVersion,
-            "**1,898**",
+            "**1,912**",
             "--compat-version",
             "current",
             "--dsp-backend",
@@ -812,7 +812,7 @@ public sealed partial class ReadmeLocalizationTests
             "1.72%",
             "444.3 MiB",
             "406.0 MiB",
-            "**1,898**",
+            "**1,912**",
             "3.7935",
             "3.6182",
             "4.62%",
@@ -1883,8 +1883,8 @@ public sealed partial class ReadmeLocalizationTests
             RepositoryRoot(),
             "docs",
             "LINUX_X64.md"));
-        Assert.Contains("$minimumLinuxTestCount = 1857", linuxBuildScript, StringComparison.Ordinal);
-        Assert.Contains("at least 1,857 xUnit v3 cases", linuxReadme, StringComparison.Ordinal);
+        Assert.Contains("$minimumLinuxTestCount = 1871", linuxBuildScript, StringComparison.Ordinal);
+        Assert.Contains("at least 1,871 xUnit v3 cases", linuxReadme, StringComparison.Ordinal);
         Assert.DoesNotContain("$minimumLinuxTestCount = 1551", linuxBuildScript, StringComparison.Ordinal);
         Assert.DoesNotContain("at least 1,551 xUnit v3 cases", linuxReadme, StringComparison.Ordinal);
         foreach (string filename in DetailedReadmeFiles)

@@ -4478,7 +4478,7 @@ default command はすべての native GPU test を実行します。GPU のな�
 
 現在の正式な Release build は warning 0、error 0 です。xUnit v3 project は
 `dotnet test` と Visual Studio Test Explorer の両方で個別に検出できる
-**1,898** tests を公開します。
+**1,912** tests を公開します。
 
 <!-- SECTION: usage -->
 

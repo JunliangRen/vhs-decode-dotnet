@@ -1,5 +1,7 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
+  <Import Project="Properties/DecodeDiagnostics.props" />
+
   <ItemGroup>
     <ProjectReference Include="..\VHSDecode.Core\VHSDecode.Core.csproj" />
     <ProjectReference Include="..\VHSDecode.Preview\VHSDecode.Preview.csproj" />
