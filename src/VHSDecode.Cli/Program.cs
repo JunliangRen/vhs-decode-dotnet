@@ -69,7 +69,9 @@ namespace VHSDecode.Cli
                 }
                 command = parser.Parse(spec, remaining, programName, output);
             }
-            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+            catch (Exception ex) when (
+                Environment.GetEnvironmentVariable("VHSDECODE_PROCESS_DIAGNOSTICS") == "1"
+                && ex is IOException or UnauthorizedAccessException)
             {
                 error.WriteLine($"Unable to prepare process diagnostics: {ex.Message}");
                 return 2;
