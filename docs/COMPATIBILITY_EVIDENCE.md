@@ -3584,6 +3584,60 @@ the release workflow before publication. This toolchain refresh did not repeat
 the historical real-capture performance campaigns; their recorded Preview 6/7
 versions remain unchanged, and no new decoder speed or quality claim is made.
 
+### .NET 11 RC2 toolchain upgrade
+
+The 2026-10-15 refresh moves the pinned SDK to `11.0.100-rc.2.26504.105`
+and the runtime/Microsoft.Data.Sqlite.Core/System.Security.Cryptography.Xml
+packages to `11.0.0-rc.2.26504.105`, with matching transitive Pkcs.
+Microsoft.Extensions.ObjectPool is explicitly aligned with RC2, and
+Microsoft.NET.Test.Sdk moves to `18.11.0`. NetMQ, SQLitePCLRaw, the xUnit/MTP
+packages, and the native IPP pins were audited and retain their current versions.
+All five managed solution projects still target `net11.0`. Both CI SDK steps,
+all six localized build instructions, Linux runtime-source links, and their
+existing localization assertions use the RC2 pin. The SDK retains runtime async.
+
+The Linux release script's complete 13-package restored application graph,
+notice filenames, and source provenance are synchronized with the upgrade.
+The four RC2 Microsoft package nuspecs identify the same source commit,
+`820230c386db5b0106c5430b3e5aee92a7826bf5`. NuGet's known-vulnerability audit,
+including transitive dependencies, reports no findings at this checkpoint.
+
+SQLite is intentionally pinned to `3.53.4`. Testing `3.54.0` changed the final
+PAL CVBS fixture's database from the existing SHA-256
+`b41e0afa9324c6a0b9cd64ace03f1558e98514f4585befc013ab7ec78645e86b` to
+`6c98056b45e4efe0059f1d6a762e90b4d7ec0c9cf3391783d81d702a77dcd874`.
+Both databases are 69,632 bytes with identical logical SQL dumps; 168 bytes
+on four data pages differ, including integral REAL values stored with different
+record serial types. Their normalized SQLite headers are identical. An isolated
+RC2 package with only its native SQLite engine replaced by `3.53.4` restores
+the original hash. The existing byte-compatibility oracle is preserved, so the
+newer engine is deferred. The direct-package outdated audit therefore lists
+this one deliberate exception. Test-tool-owned transitive dependencies retain
+the versions selected by their current upstream test packages.
+
+The RC2 Windows and local Ubuntu 26.04 WSL Release solution builds completed
+with no warnings or errors. The final Windows suite discovered 1,898 cases:
+1,884 passed, 14 platform/hardware cases skipped, none failed. The Linux portable
+suite discovered 1,857 cases: 1,851 passed, six optional platform/hardware cases
+skipped, none failed. The existing 18 method-scoped exclusions cover 41 frozen
+Windows-oracle cases separately from runtime skips. All 35 focused Windows CI
+checks passed on RC2, including SIMD-disabled and scalar fallback variants.
+The Windows self-contained single EXE starts successfully and contains both
+RC2 runtime frameworks and the verified IPP/CUDA bridges, with no bundled cuFFT.
+The existing `NETSDK1244` extraction-mode warning is retained at publish.
+
+The final Windows EXE was compared with published `v0.4.0-2.12.0` on the supplied
+20 MSPS NTSC FLAC at RF time 4.25 seconds, using Exact/current and 20 workers.
+Default 20-to-40 MSPS and native 20 MSPS (`--no_resample`) each decoded 320 frames
+per variant. Binary outputs, raw JSON, field coordinates/order, and normalized
+ordered logs matched in both modes; all four processes exited successfully
+without observed remaining tool children. These are bounded compatibility runs.
+
+Final test reports, package checks, and exact-media comparisons are retained
+under `artifacts/dotnet11-rc2-upgrade/`. Historical Preview/RC1 benchmark and
+lifecycle results above and in DOTNET11_RELIABILITY.md retain their original
+labels. This refresh makes no new decoder performance or quality claim.
+
 To regenerate the embedded format parameter snapshot from the checked-out
 upstream source:
 

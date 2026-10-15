@@ -1,7 +1,8 @@
-# .NET 11 RC1 process lifecycle and diagnostics
+# .NET 11 process lifecycle and diagnostics
 
-The SDK remains pinned to `11.0.100-rc.1.26425.128`, with runtime
-`11.0.0-rc.1.26425.128`. This change adopts the following RC1 capabilities:
+The current SDK is pinned to `11.0.100-rc.2.26504.105`, with runtime
+`11.0.0-rc.2.26504.105`. The following capabilities were introduced during
+the RC1 adoption and are retained on RC2:
 
 - All production FFmpeg, ffprobe, uname, and LD AC3 starts share an explicit
   inherited-handle list. Windows and Linux tool starts also use
@@ -26,11 +27,16 @@ The SDK remains pinned to `11.0.100-rc.1.26425.128`, with runtime
   focused Windows fallback runs also have timeouts. Linux CI enables the runtime
   crash reporter before starting .NET and uploads available JSON crash reports.
 
-The production NuGet graph, CLI arguments, DSP selection, sampling defaults,
-and TBC JSON format are unchanged. The TRX extension is a test-only dependency.
+Those RC1 process-lifecycle changes did not alter the production NuGet graph,
+CLI arguments, DSP selection, sampling defaults, or TBC JSON format. The TRX
+extension is a test-only dependency. The subsequent RC2 package updates and
+their validation are recorded in COMPATIBILITY_EVIDENCE.md.
 For Linux crash report configuration, see [LINUX_X64.md](LINUX_X64.md#process-cleanup-and-crash-diagnostics).
 
-## Validation
+## Historical RC1 validation
+
+The results below were measured on RC1. RC2 upgrade results are recorded separately
+in [COMPATIBILITY_EVIDENCE.md](COMPATIBILITY_EVIDENCE.md#net-11-rc2-toolchain-upgrade).
 
 - Release solution build: no warnings or errors. Self-contained Windows publish
   succeeds with the existing `NETSDK1244` extraction-mode warning.

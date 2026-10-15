@@ -4,7 +4,7 @@
 
 **[English](README.detailed.md)** | [简体中文](README.detailed.zh-CN.md) | [日本語](README.detailed.ja.md)
 
-<!-- README_SYNC: 2026-10-12.01 -->
+<!-- README_SYNC: 2026-10-15.01 -->
 
 .NET 11 rewrite of the decode-facing parts of
 [`oyvindln/vhs-decode`](https://github.com/oyvindln/vhs-decode), focused on
@@ -4790,7 +4790,7 @@ v3 suite passed all 1,448 tests.
 
 Requirements:
 
-- .NET SDK `11.0.100-rc.1.26425.128` (RC1, pinned by `global.json`)
+- .NET SDK `11.0.100-rc.2.26504.105` (RC2, pinned by `global.json`)
 - Visual Studio 2026 for IDE use
 - Visual Studio C++ Build Tools and a Windows SDK when building the optional
   Intel IPP bridge

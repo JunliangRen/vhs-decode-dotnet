@@ -194,7 +194,7 @@ CoreCLR's optional LTTng tracing provider is audited against the same ABI
 ceilings. Its `liblttng-ust.so.0` dependency may be absent and is explicitly
 recorded in `ELF-ABI.json`; the runtime skips that provider when unavailable.
 Decoding and EventPipe diagnostics do not require LTTng. See the pinned
-[CoreCLR provider loader](https://github.com/dotnet/runtime/blob/v11.0.0-rc.1.26425.128/src/coreclr/pal/src/misc/tracepointprovider.cpp).
+[CoreCLR provider loader](https://github.com/dotnet/runtime/blob/v11.0.0-rc.2.26504.105/src/coreclr/pal/src/misc/tracepointprovider.cpp).
 
 ## Process cleanup and crash diagnostics
 
@@ -214,7 +214,7 @@ export DOTNET_CrashReportRootPath="$(pwd)"
 ./decode vhs --ntsc -f 20 input.flac output
 ```
 
-The root path must be an existing writable absolute directory. RC1 writes
+The root path must be an existing writable absolute directory. RC2 writes
 reports under `$DOTNET_CrashReportRootPath/.dotnet/crash-reports/` using
 `report-*.crashreport.json` names, and also writes diagnostic information to
 stderr. These reports describe fatal runtime failures; ordinary command errors
@@ -228,4 +228,4 @@ execution timeout and use the SDK's `per-module` results layout. The additional
 process fixtures cover parent death, cancellation, pipe EOF, concurrent stdout
 and stderr capture, Unix signal termination, and structured Linux crash reports.
 See [.NET 11 runtime diagnostics](https://learn.microsoft.com/en-us/dotnet/core/whats-new/dotnet-11/runtime#in-process-crash-report-logging)
-and the [RC1 report lifecycle implementation](https://github.com/dotnet/runtime/blob/v11.0.0-rc.1.26425.128/src/coreclr/debug/crashreport/inproccrashreportlifecycle.cpp).
+and the [RC2 report lifecycle implementation](https://github.com/dotnet/runtime/blob/v11.0.0-rc.2.26504.105/src/coreclr/debug/crashreport/inproccrashreportlifecycle.cpp).

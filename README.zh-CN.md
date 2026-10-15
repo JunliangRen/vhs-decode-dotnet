@@ -2,7 +2,7 @@
 
 [English](README.md) | **[简体中文](README.zh-CN.md)** | [日本語](README.ja.md)
 
-<!-- README_SYNC: 2026-10-12.01 -->
+<!-- README_SYNC: 2026-10-15.01 -->
 
 这是 [`oyvindln/vhs-decode`](https://github.com/oyvindln/vhs-decode)
 中解码相关部分的 .NET 11 重写，兼容目标为上游 release `v0.4.0`、commit
@@ -326,7 +326,7 @@ TBC、色度、JSON 和日志文件允许在解码期间并发读取，兼容的
 
 ## 构建与测试
 
-项目固定使用 .NET SDK `11.0.100-rc.1.26425.128`（RC1）。
+项目固定使用 .NET SDK `11.0.100-rc.2.26504.105`（RC2）。
 
 ```powershell
 dotnet restore VHSDecodeDotNet.slnx

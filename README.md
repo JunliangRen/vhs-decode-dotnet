@@ -2,7 +2,7 @@
 
 **[English](README.md)** | [简体中文](README.zh-CN.md) | [日本語](README.ja.md)
 
-<!-- README_SYNC: 2026-10-12.01 -->
+<!-- README_SYNC: 2026-10-15.01 -->
 
 A .NET 11 rewrite of the decode-facing parts of
 [`oyvindln/vhs-decode`](https://github.com/oyvindln/vhs-decode), targeting
@@ -381,7 +381,7 @@ other sample rates, and unfinished or ineligible headers retain FFmpeg.
 
 ## Build and test
 
-The pinned SDK is .NET `11.0.100-rc.1.26425.128` (RC1).
+The pinned SDK is .NET `11.0.100-rc.2.26504.105` (RC2).
 
 ```powershell
 dotnet restore VHSDecodeDotNet.slnx

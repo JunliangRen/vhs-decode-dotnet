@@ -4,7 +4,7 @@
 
 [English](README.detailed.md) | **[简体中文](README.detailed.zh-CN.md)** | [日本語](README.detailed.ja.md)
 
-<!-- README_SYNC: 2026-10-12.01 -->
+<!-- README_SYNC: 2026-10-15.01 -->
 
 这是 [`oyvindln/vhs-decode`](https://github.com/oyvindln/vhs-decode)
 中解码相关部分的 .NET 11 重写，当前以 release `v0.4.0`、commit
@@ -3731,7 +3731,7 @@ destination API，把最终 burst SOS 写回这块独占 buffer，从而在该 A
 
 要求：
 
-- `.NET SDK 11.0.100-rc.1.26425.128`（RC1，由 `global.json` 锁定）
+- `.NET SDK 11.0.100-rc.2.26504.105`（RC2，由 `global.json` 锁定）
 - 使用 IDE 时需要 Visual Studio 2026
 - 构建可选 Intel IPP 桥接 DLL 时需要 Visual Studio C++ Build Tools 和 Windows SDK
 - 对不属于严格门控的直接 40 kHz 单声道 PCM16 raw-FLAC 原生输入路径的容器
