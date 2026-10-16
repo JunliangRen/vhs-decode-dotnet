@@ -3584,6 +3584,72 @@ the release workflow before publication. This toolchain refresh did not repeat
 the historical real-capture performance campaigns; their recorded Preview 6/7
 versions remain unchanged, and no new decoder speed or quality claim is made.
 
+### .NET 11 RC2 toolchain upgrade
+
+The 2026-10-15 refresh moves the pinned SDK to `11.0.100-rc.2.26504.105`
+and the runtime/Microsoft.Data.Sqlite.Core/System.Security.Cryptography.Xml
+packages to `11.0.0-rc.2.26504.105`, with matching transitive Pkcs.
+Microsoft.Extensions.ObjectPool is explicitly aligned with RC2, and
+Microsoft.NET.Test.Sdk moves to `18.11.0`. NetMQ, SQLitePCLRaw, the xUnit/MTP
+packages, and the native IPP pins were audited and retain their current versions.
+All five managed solution projects still target `net11.0`. Both CI SDK steps,
+all six localized build instructions, Linux runtime-source links, and their
+existing localization assertions use the RC2 pin. The SDK retains runtime async.
+
+The Linux release script's complete 13-package restored application graph,
+notice filenames, and source provenance are synchronized with the upgrade.
+The four RC2 Microsoft package nuspecs identify the same source commit,
+`820230c386db5b0106c5430b3e5aee92a7826bf5`. NuGet's known-vulnerability audit,
+including transitive dependencies, reports no findings at this checkpoint.
+
+SQLite is upgraded to `3.54.0`. A controlled comparison with `3.53.4`
+produced equal 69,632-byte databases with equal schemas and logical SQL contents,
+but 168 bytes on four data pages changed. Integral REAL values used different
+record serial types; the normalized SQLite headers were equal. Replacing only
+the native engine recovered the former binary hash, isolating the engine update.
+
+The maintainer explicitly accepts physical database differences. The current
+SQLite compatibility contract is equal schema (including user_version) and equal
+canonical SQL export, with a successful integrity check. The shared read-only
+`tools/sqlite_compatibility.py` checker excludes root-page/page-layout details,
+sorts exported INSERT statements independently of physical row order, preserves
+duplicate rows and value types, and escapes binary/NUL-containing data losslessly.
+The final-tar fixture freezes schema and SQL-export SHA-256 values from the released
+3.53.4 database. Repeated Exact/IPP databases use the same semantic contract;
+TBC/chroma/JSON and archive checksum gates retain their existing contracts.
+Earlier byte-exact database results remain historical observations. Existing
+SQLite header normalization and lifecycle tests are retained; they do not impose
+whole-file byte equality. The direct-package audit has no remaining version
+exception. Test-tool-owned transitive versions remain selected by their packages.
+
+The RC2 Windows and local Ubuntu 26.04 WSL Release solution builds completed
+with no warnings or errors. The final Windows suite discovered 1,898 cases:
+1,884 passed, 14 platform/hardware cases skipped, none failed. The Linux portable
+suite discovered 1,857 cases: 1,851 passed, six optional platform/hardware cases
+skipped, none failed. The existing 18 method-scoped exclusions cover 41 frozen
+Windows-oracle cases separately from runtime skips. All 35 focused Windows CI
+checks passed on RC2, including SIMD-disabled and scalar fallback variants.
+The Windows self-contained single EXE starts successfully and contains both
+RC2 runtime frameworks and the verified IPP/CUDA bridges, with no bundled cuFFT.
+The existing `NETSDK1244` extraction-mode warning is retained at publish.
+
+The final Windows EXE was compared with published `v0.4.0-2.12.0` on the supplied
+20 MSPS NTSC FLAC at RF time 4.25 seconds, using Exact/current and 20 workers.
+Default 20-to-40 MSPS and native 20 MSPS (`--no_resample`) each decoded 320 frames
+per variant. Binary outputs, raw JSON, field coordinates/order, and normalized
+ordered logs matched in both modes; all four processes exited successfully
+without observed remaining tool children. After enabling `--write_db` for the
+SQLite 3.54 update, both 320-frame comparisons also have identical complete
+schema and canonical SQL-export contents, while physical database hashes differ.
+These are bounded compatibility runs. The shared semantic checker adds nine
+focused positive/negative tests; all 34 Python tooling tests pass on both
+Windows and Linux.
+
+Final test reports, package checks, and exact-media comparisons are retained
+under `artifacts/dotnet11-rc2-upgrade/`. Historical Preview/RC1 benchmark and
+lifecycle results above and in DOTNET11_RELIABILITY.md retain their original
+labels. This refresh makes no new decoder performance or quality claim.
+
 To regenerate the embedded format parameter snapshot from the checked-out
 upstream source:
 

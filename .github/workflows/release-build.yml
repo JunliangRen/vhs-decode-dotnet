@@ -28,7 +28,7 @@ jobs:
       - name: Set up MSBuild
         uses: microsoft/setup-msbuild@v3
 
-      - name: Set up .NET 11 RC1
+      - name: Set up .NET 11 RC2
         uses: actions/setup-dotnet@v5
         with:
           global-json-file: global.json
@@ -166,7 +166,7 @@ jobs:
         run: dotnet build VHSDecodeDotNet.slnx --configuration Release --no-restore
 
       - name: Run tests
-        run: dotnet test --solution VHSDecodeDotNet.slnx --configuration Release --no-build --no-restore --timeout 15m --results-directory artifacts/test-results/windows --results-directory-layout per-module --report-trx --minimum-expected-tests 1898
+        run: dotnet test --solution VHSDecodeDotNet.slnx --configuration Release --no-build --no-restore --timeout 15m --results-directory artifacts/test-results/windows --results-directory-layout per-module --report-trx --minimum-expected-tests 1912
 
       - name: Upload Windows test reports
         if: always()
@@ -394,7 +394,7 @@ jobs:
       - name: Check out repository
         uses: actions/checkout@v6
 
-      - name: Set up .NET 11 RC1
+      - name: Set up .NET 11 RC2
         uses: actions/setup-dotnet@v5
         with:
           global-json-file: global.json

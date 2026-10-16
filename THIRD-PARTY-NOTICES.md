@@ -174,7 +174,7 @@ identities in `licenses/managed-nuget/MANIFEST.txt` and provides the complete
 MPL 2.0 text at `licenses/managed-nuget/MPL-2.0.txt`.
 
 The Linux archive's SQLite provider graph also includes SQLitePCLRaw 3.0.5,
-licensed under Apache-2.0, and SQLite 3.53.4, dedicated to the public domain.
+licensed under Apache-2.0, and SQLite 3.54.0, dedicated to the public domain.
 Their complete license/notice files are under `licenses/managed-nuget`.
 
 Microsoft.Data.Sqlite.Core, Microsoft.Extensions.ObjectPool,

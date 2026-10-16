@@ -2,7 +2,7 @@
 
 [English](README.md) | [简体中文](README.zh-CN.md) | **[日本語](README.ja.md)**
 
-<!-- README_SYNC: 2026-10-12.01 -->
+<!-- README_SYNC: 2026-10-15.01 -->
 
 [`oyvindln/vhs-decode`](https://github.com/oyvindln/vhs-decode) の
 デコード関連部分を .NET 11 で再実装するプロジェクトです。互換性の対象は
@@ -38,7 +38,7 @@ upstream release `v0.4.0`、commit
 - VHS family には VHS/S-VHS、Betamax、Video8/Hi8、U-matic、Type C、EIAJ、
   upstream が対応する PAL/NTSC variant が含まれます。
 - TBC utility、ダブルクリック GUI、開発者向け plot window は対象外です。
-- Visual Studio 2026 の `.slnx` には **1,898** 件の標準 xUnit v3 test があり、
+- Visual Studio 2026 の `.slnx` には **1,912** 件の標準 xUnit v3 test があり、
   Test Explorer と `dotnet test` の両方で実行できます。
 
 <!-- SECTION: start -->
@@ -360,7 +360,7 @@ header は FFmpeg を維持します。
 
 ## Build と test
 
-固定 SDK は .NET `11.0.100-rc.1.26425.128`（RC1）です。
+固定 SDK は .NET `11.0.100-rc.2.26504.105`（RC2）です。
 
 ```powershell
 dotnet restore VHSDecodeDotNet.slnx

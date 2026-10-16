@@ -1,0 +1,29 @@
+{
+  "$schema": "http://json.schemastore.org/launchsettings.json",
+  "profiles": {
+    "Default": {
+      "commandName": "Project"
+    },
+    "Exact40": {
+      "commandName": "Project",
+      "commandLineArgs": "$(DecodeDiagnosticArguments) --dsp-backend exact \"$(DecodeSamplePath)\" \"$(DecodeObservationRoot)/Exact40-$(DecodeObservationId)/capture\"",
+      "environmentVariables": {
+        "VHSDECODE_PROCESS_DIAGNOSTICS": "1"
+      }
+    },
+    "Exact20": {
+      "commandName": "Project",
+      "commandLineArgs": "$(DecodeDiagnosticArguments) --dsp-backend exact --no_resample \"$(DecodeSamplePath)\" \"$(DecodeObservationRoot)/Exact20-$(DecodeObservationId)/capture\"",
+      "environmentVariables": {
+        "VHSDECODE_PROCESS_DIAGNOSTICS": "1"
+      }
+    },
+    "Ipp40": {
+      "commandName": "Project",
+      "commandLineArgs": "$(DecodeDiagnosticArguments) --dsp-backend ipp-fast \"$(DecodeSamplePath)\" \"$(DecodeObservationRoot)/Ipp40-$(DecodeObservationId)/capture\"",
+      "environmentVariables": {
+        "VHSDECODE_PROCESS_DIAGNOSTICS": "1"
+      }
+    }
+  }
+}

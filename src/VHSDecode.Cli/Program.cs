@@ -57,7 +57,24 @@ namespace VHSDecode.Cli
             try
             {
                 var parser = new CommandLineParser();
+                if (Environment.GetEnvironmentVariable("VHSDECODE_PROCESS_DIAGNOSTICS") == "1")
+                {
+                    // Legacy VHS I/O validation requires the profile's output directory to exist.
+                    ParsedCommand diagnosticCommand = parser.Parse(spec, remaining, programName);
+                    if (!diagnosticCommand.Get<bool>("help") && diagnosticCommand.OutputBase.Length != 0)
+                    {
+                        Directory.CreateDirectory(Path.GetDirectoryName(
+                            Path.GetFullPath(diagnosticCommand.OutputBase))!);
+                    }
+                }
                 command = parser.Parse(spec, remaining, programName, output);
+            }
+            catch (Exception ex) when (
+                Environment.GetEnvironmentVariable("VHSDECODE_PROCESS_DIAGNOSTICS") == "1"
+                && ex is IOException or UnauthorizedAccessException)
+            {
+                error.WriteLine($"Unable to prepare process diagnostics: {ex.Message}");
+                return 2;
             }
             catch (CommandLineParseException ex)
             {
@@ -68,16 +85,26 @@ namespace VHSDecode.Cli
 
             try
             {
-                if (PreviewCommandRunner.IsRequested(command))
+                DecodeProcessObservation? observation;
+                try
                 {
-                    return new PreviewCommandRunner().RunAsync(
-                        command,
-                        output,
-                        error,
-                        cancellationToken).GetAwaiter().GetResult();
+                    observation = DecodeProcessObservation.StartIfRequested(command);
+                }
+                catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+                {
+                    error.WriteLine($"Unable to start process diagnostics: {ex.Message}");
+                    return 2;
                 }
 
-                return new DecodeRunner().Run(command, output, error, cancellationToken);
+                using (observation)
+                {
+                    int exitCode = PreviewCommandRunner.IsRequested(command)
+                        ? new PreviewCommandRunner().RunAsync(
+                            command, output, error, cancellationToken).GetAwaiter().GetResult()
+                        : new DecodeRunner().Run(command, output, error, cancellationToken);
+                    observation?.SetExitCode(exitCode);
+                    return exitCode;
+                }
             }
             catch (Exception ex) when (ex is ArgumentException or FormatException or OverflowException)
             {

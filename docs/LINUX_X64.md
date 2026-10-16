@@ -151,7 +151,7 @@ The builder fails unless all of the following pass:
 - IPP exports match the complete C ABI, runtime-info layout is 240 bytes,
   initialization and CPU dispatch succeed, and only allowed system libraries
   remain as dynamic dependencies;
-- the full solution builds and at least 1,857 xUnit v3 cases run after excluding
+- the full solution builds and at least 1,871 xUnit v3 cases run after excluding
   18 method-scoped (41-case) frozen-bit oracles tied to Windows UCRT, Windows
   libsoxr, or Windows-generated transcendental inputs; functional, structural,
   tolerance, native-loader, and final-artifact gates remain enabled;
@@ -172,9 +172,11 @@ The builder fails unless all of the following pass:
   providers are exercised from an unrelated directory containing spaces, with
   SDK and oneAPI loader overrides removed;
 - the final extracted tar performs two one-frame PAL `exact` decodes with
-  SQLite output, producing identical TBC, database, JSON, and normalized
-  console/log results; the fixed input, TBC, SQLite database, and OS-normalized
-  JSON are also checked against pinned SHA-256 oracles;
+  SQLite output, producing identical TBC, JSON, and normalized console/log results;
+  databases must pass integrity checks and have identical schemas (including
+  user_version) and canonical SQL exports. Fixed input, TBC, OS-normalized JSON,
+  database schema and SQL-export digests are checked against pinned SHA-256
+  oracles derived from the released fixture; database file bytes may differ;
 - two independent tar constructions have the same SHA-256.
 
 These gates establish build, fixture, native-loader, packaging, determinism,
@@ -186,15 +188,16 @@ The synthetic VHS fixture gates active-picture luminance at a maximum of 2 IRE
 and RMS of 0.05 IRE, with separate whole-raster limits (8192 code values maximum
 and 0.1 IRE RMS). IPP's existing FFT/SOS evaluation differences can change an
 HSync decision at an RF block boundary; whole-raster pixel identity is therefore
-not its contract. Metadata must match and repeated IPP luminance, chroma, JSON
-and SQLite outputs must be identical. Chroma byte count must match the field
+not its contract. Metadata must match and repeated IPP luminance, chroma and JSON
+must be identical. SQLite schema and canonical SQL contents must match, with
+successful integrity checks; physical database bytes may differ. Chroma byte count must match the field
 geometry. This fixture has no color burst and does not certify real color quality.
 
 CoreCLR's optional LTTng tracing provider is audited against the same ABI
 ceilings. Its `liblttng-ust.so.0` dependency may be absent and is explicitly
 recorded in `ELF-ABI.json`; the runtime skips that provider when unavailable.
 Decoding and EventPipe diagnostics do not require LTTng. See the pinned
-[CoreCLR provider loader](https://github.com/dotnet/runtime/blob/v11.0.0-rc.1.26425.128/src/coreclr/pal/src/misc/tracepointprovider.cpp).
+[CoreCLR provider loader](https://github.com/dotnet/runtime/blob/v11.0.0-rc.2.26504.105/src/coreclr/pal/src/misc/tracepointprovider.cpp).
 
 ## Process cleanup and crash diagnostics
 
@@ -214,7 +217,7 @@ export DOTNET_CrashReportRootPath="$(pwd)"
 ./decode vhs --ntsc -f 20 input.flac output
 ```
 
-The root path must be an existing writable absolute directory. RC1 writes
+The root path must be an existing writable absolute directory. RC2 writes
 reports under `$DOTNET_CrashReportRootPath/.dotnet/crash-reports/` using
 `report-*.crashreport.json` names, and also writes diagnostic information to
 stderr. These reports describe fatal runtime failures; ordinary command errors
@@ -228,4 +231,4 @@ execution timeout and use the SDK's `per-module` results layout. The additional
 process fixtures cover parent death, cancellation, pipe EOF, concurrent stdout
 and stderr capture, Unix signal termination, and structured Linux crash reports.
 See [.NET 11 runtime diagnostics](https://learn.microsoft.com/en-us/dotnet/core/whats-new/dotnet-11/runtime#in-process-crash-report-logging)
-and the [RC1 report lifecycle implementation](https://github.com/dotnet/runtime/blob/v11.0.0-rc.1.26425.128/src/coreclr/debug/crashreport/inproccrashreportlifecycle.cpp).
+and the [RC2 report lifecycle implementation](https://github.com/dotnet/runtime/blob/v11.0.0-rc.2.26504.105/src/coreclr/debug/crashreport/inproccrashreportlifecycle.cpp).
