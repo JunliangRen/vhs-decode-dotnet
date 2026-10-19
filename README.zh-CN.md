@@ -8,7 +8,7 @@
 中解码相关部分的 .NET 11 重写，兼容目标为上游 release `v0.4.0`、commit
 `43155200da87c0d49eb37d8ec09b1372075ee8e4`。
 
-当前 .NET 移植版发布为 `v0.4.0-2.13.0`（应用版本 `2.13.0`）。
+当前 .NET 移植版发布为 `v0.4.0-2.14.0`（应用版本 `2.14.0`）。
 
 > [!IMPORTANT]
 > 这仍是持续进行中的兼容性移植。顶层解码路径已经实现并经过大量测试，但尚未声称
@@ -35,7 +35,7 @@
 - VHS 家族包括 VHS/S-VHS、Betamax、Video8/Hi8、U-matic、Type C、EIAJ
   以及上游支持的 PAL/NTSC 变体。
 - TBC 工具、双击启动的用户 GUI 和开发者绘图窗口明确不在范围内。
-- Visual Studio 2026 `.slnx` 包含 **1,938** 项标准 xUnit v3 测试；测试可在
+- Visual Studio 2026 `.slnx` 包含 **2,209** 项标准 xUnit v3 测试；测试可在
   Test Explorer 中查看，也可用 `dotnet test` 运行。
 
 <!-- SECTION: start -->
@@ -51,6 +51,10 @@ decode.exe cvbs [upstream options] input.lds output
 decode.exe ld [upstream options] input.lds output
 decode.exe hifi [upstream options] input.lds output.wav
 ```
+
+NTSC Betamax HiFi 使用 `decode.exe hifi --betamax --ntsc -f 40 input.flac output.flac`。
+默认 48kHz 输出已启用实验频响与动态补偿；输入采样率和可选控制见
+[NTSC Betamax HiFi 说明](docs/ntsc-betamax-hifi.md)。
 
 同时支持 `vhs-decode.exe`、`ld-decode.exe` 等独立命令别名。使用
 `decode.exe <command> --help` 查看完整兼容参数。

@@ -9,7 +9,7 @@
 upstream release `v0.4.0`、commit
 `43155200da87c0d49eb37d8ec09b1372075ee8e4` です。
 
-現在の .NET port release は `v0.4.0-2.13.0`（application version `2.13.0`）です。
+現在の .NET port release は `v0.4.0-2.14.0`（application version `2.14.0`）です。
 
 > [!IMPORTANT]
 > この互換移植は現在も開発中です。トップレベルのデコード経路は実装済みで
@@ -38,7 +38,7 @@ upstream release `v0.4.0`、commit
 - VHS family には VHS/S-VHS、Betamax、Video8/Hi8、U-matic、Type C、EIAJ、
   upstream が対応する PAL/NTSC variant が含まれます。
 - TBC utility、ダブルクリック GUI、開発者向け plot window は対象外です。
-- Visual Studio 2026 の `.slnx` には **1,938** 件の標準 xUnit v3 test があり、
+- Visual Studio 2026 の `.slnx` には **2,209** 件の標準 xUnit v3 test があり、
   Test Explorer と `dotnet test` の両方で実行できます。
 
 <!-- SECTION: start -->

@@ -168,3 +168,13 @@ Deemphasis tuning options (advanced):
                         Sets the noise reduction deemphasis low-pass shelf filter high point in tau 
                           5.6e-05 	[VHS default]
                           1.9e-05	[8mm default]
+NTSC Betamax HiFi options:
+  --betamax             Four-carrier NTSC Beta HiFi; default sample-16 compensation.
+                        Physical RF input: -f 20 or -f 40 MHz; output: 48000 Hz.
+                        Uses offline RF context and temporary audio disk files.
+                        --deemphasis on and --expander on are already the defaults.
+                        --gain and --normalize follow Beta compensation.
+  --beta-reference-offset
+                        Optional detector-reference offset in dB (-12 to +12; default 0).
+                        This adjusts the Beta working point, not output volume.
+                        See docs/ntsc-betamax-hifi.md for scope and diagnostics.

@@ -10,7 +10,7 @@
 中解码相关部分的 .NET 11 重写，当前以 release `v0.4.0`、commit
 `43155200da87c0d49eb37d8ec09b1372075ee8e4` 为兼容基线。
 
-当前 .NET 移植版发布为 `v0.4.0-2.13.0`（应用版本 `2.13.0`）。
+当前 .NET 移植版发布为 `v0.4.0-2.14.0`（应用版本 `2.14.0`）。
 
 > [!IMPORTANT]
 > 这是仍在进行中的兼容性移植。顶层解码路径已经实现并经过大量测试，
@@ -3770,7 +3770,7 @@ cuFFT，或采用固定且经过校验的首次下载；兼容的 NVIDIA 驱动�
 仍会编译、审计并暂存桥接，但不能算作 GPU runtime 验证。
 
 当前正式 Release 构建为零警告、零错误。xUnit v3 项目向
-`dotnet test` 和 Visual Studio Test Explorer 暴露 **1,938** 个可独立发现的测试。
+`dotnet test` 和 Visual Studio Test Explorer 暴露 **2,209** 个可独立发现的测试。
 
 <!-- SECTION: usage -->
 

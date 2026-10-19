@@ -9,7 +9,7 @@ A .NET 11 rewrite of the decode-facing parts of
 upstream release `v0.4.0` at commit
 `43155200da87c0d49eb37d8ec09b1372075ee8e4`.
 
-The current .NET port release is `v0.4.0-2.13.0` (application version `2.13.0`).
+The current .NET port release is `v0.4.0-2.14.0` (application version `2.14.0`).
 
 > [!IMPORTANT]
 > This remains a compatibility work in progress. The top-level decode paths are
@@ -40,7 +40,7 @@ evidence, and remaining gaps.
   EIAJ, and supported PAL/NTSC variants.
 - TBC utility tools, the double-click GUI, and developer plotting windows are
   intentionally out of scope.
-- The Visual Studio 2026 `.slnx` solution has **1,938** standard xUnit v3 tests
+- The Visual Studio 2026 `.slnx` solution has **2,209** standard xUnit v3 tests
   that are visible in Test Explorer and runnable with `dotnet test`.
 
 <!-- SECTION: start -->
@@ -57,6 +57,10 @@ decode.exe cvbs [upstream options] input.lds output
 decode.exe ld [upstream options] input.lds output
 decode.exe hifi [upstream options] input.lds output.wav
 ```
+
+NTSC Betamax HiFi uses `decode.exe hifi --betamax --ntsc -f 40 input.flac output.flac`.
+Its default 48 kHz path includes the experimental frequency and dynamic compensation;
+see [NTSC Betamax HiFi](docs/ntsc-betamax-hifi.md) for supported input rates and controls.
 
 Standalone command aliases such as `vhs-decode.exe` and `ld-decode.exe` are
 also supported. Use `decode.exe <command> --help` for the complete compatible

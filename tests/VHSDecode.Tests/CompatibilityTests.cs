@@ -351,7 +351,13 @@ public void DecodeRunnerPrintsCommandHelpBeforeValidation()
             {
                 AssertFalse(output.ToString().Contains("--approx-provider", StringComparison.Ordinal));
             }
-            AssertEqual(standaloneHashes[spec.Name], Utf8LfSha256(output.ToString()));
+            string standaloneHelp = output.ToString();
+            if (spec.Name == "hifi")
+            {
+                AssertContains(standaloneHelp, "--betamax");
+                standaloneHelp = standaloneHelp[..standaloneHelp.IndexOf("NTSC Betamax HiFi options:", StringComparison.Ordinal)];
+            }
+            AssertEqual(standaloneHashes[spec.Name], Utf8LfSha256(standaloneHelp));
             AssertEqual(string.Empty, error.ToString());
         }
 
@@ -368,7 +374,13 @@ public void DecodeRunnerPrintsCommandHelpBeforeValidation()
         {
             AssertFalse(facadeOutput.ToString().Contains("--approx-provider", StringComparison.Ordinal));
         }
-        AssertEqual(facadeHashes[spec.Name], Utf8LfSha256(facadeOutput.ToString()));
+        string facadeHelp = facadeOutput.ToString();
+        if (spec.Name == "hifi")
+        {
+            AssertContains(facadeHelp, "--beta-reference-offset");
+            facadeHelp = facadeHelp[..facadeHelp.IndexOf("NTSC Betamax HiFi options:", StringComparison.Ordinal)];
+        }
+        AssertEqual(facadeHashes[spec.Name], Utf8LfSha256(facadeHelp));
     }
 
     AssertEqual("vhs-decode", DecodeDispatcher.InvocationProgramName("C:\\tools\\vhs-decode.exe"));
