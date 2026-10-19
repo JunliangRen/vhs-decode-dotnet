@@ -153,7 +153,19 @@ internal sealed class HiFiHeadSwitchProcessor
 
         foreach (HiFiSampleRange boundary in boundaries)
         {
-            int smoothingSize = 1 + boundary.End - boundary.Start;
+            if (boundary.Start >= boundary.End
+                || boundary.End <= 0
+                || boundary.Start >= audio.Length)
+            {
+                continue;
+            }
+
+            // With no reference sample on either side, preserve this block's audio.
+            if (boundary.Start <= 0 && boundary.End >= audio.Length)
+            {
+                continue;
+            }
+
             if (boundary.Start < 0)
             {
                 int end = Math.Min(boundary.End, output.Length);
@@ -187,9 +199,31 @@ internal sealed class HiFiHeadSwitchProcessor
                 right++;
             }
 
+            // Match interp1d(fill_value="extrapolate"): use the first or last two
+            // unmasked input samples when the gap reaches an exact block edge.
+            if (left < 0)
+            {
+                left = right;
+                right = left + 1;
+                while (right < audio.Length && !valid[right])
+                {
+                    right++;
+                }
+            }
+            else if (right >= audio.Length)
+            {
+                right = left;
+                left = right - 1;
+                while (left >= 0 && !valid[left])
+                {
+                    left--;
+                }
+            }
+
             if (left < 0 || right >= audio.Length)
             {
-                throw new InvalidOperationException("Head-switch interpolation has no samples outside the requested gap.");
+                // With fewer than two reference samples, no line can be defined.
+                continue;
             }
 
             double denominator = right - left;
@@ -201,6 +235,7 @@ internal sealed class HiFiHeadSwitchProcessor
                     + (leftWeight * interpolatorInput[left]));
             }
 
+            int smoothingSize = 1 + boundary.End - boundary.Start;
             int sliceStart = NormalizeSliceIndex(boundary.Start - smoothingSize, output.Length);
             int sliceEnd = NormalizeSliceIndex(boundary.End + smoothingSize, output.Length);
             if (sliceStart >= sliceEnd)
