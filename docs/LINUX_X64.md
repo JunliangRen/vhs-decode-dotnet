@@ -151,7 +151,7 @@ The builder fails unless all of the following pass:
 - IPP exports match the complete C ABI, runtime-info layout is 240 bytes,
   initialization and CPU dispatch succeed, and only allowed system libraries
   remain as dynamic dependencies;
-- the full solution builds and at least 1,897 xUnit v3 cases run after excluding
+- the full solution builds and at least 2,168 xUnit v3 cases run after excluding
   18 method-scoped (41-case) frozen-bit oracles tied to Windows UCRT, Windows
   libsoxr, or Windows-generated transcendental inputs; functional, structural,
   tolerance, native-loader, and final-artifact gates remain enabled;

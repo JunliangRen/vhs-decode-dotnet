@@ -134,6 +134,20 @@ internal static class HiFiInputReader
             : HiFiSampleNormalizer.ParseFormat(options.InputFormatOverride);
         HiFiRawSampleFormat format = overrideFormat ?? extensionFormat;
 
+        // RF captures often retain an .ldf suffix even when their bytes are
+        // ordinary FLAC. Beta must not send those through a video LDF reader or
+        // FFmpeg's nobuffer path, which can discard the beginning of the RF.
+        if (options.TapeFormat == "betamax" && inputPath != "-" && !isRaw
+            && TryReadBetaFlacHeader(inputPath, out long? betaSamples))
+        {
+            if (overrideFormat is not null and not (HiFiRawSampleFormat.S10Le
+                or HiFiRawSampleFormat.S12Le or HiFiRawSampleFormat.S16Le))
+                throw new ArgumentException("Beta RF FLAC precision overrides must use signed 16-bit storage (s10le, s12le or s16le).");
+            return OpenFfmpeg(processHost, inputPath,
+                overrideFormat ?? HiFiRawSampleFormat.S16Le,
+                useNoBuffer: false, totalSamples: betaSamples);
+        }
+
         if (isRaw || inputPath == "-")
         {
             if (inputPath == "-" && !overrideFormat.HasValue)
@@ -328,6 +342,29 @@ internal static class HiFiInputReader
         }
 
         return null;
+    }
+
+    private static bool TryReadBetaFlacHeader(string path, out long? totalSamples)
+    {
+        totalSamples = null;
+        using var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read);
+        Span<byte> signature = stackalloc byte[4];
+        if (stream.Read(signature) != 4 || !signature.SequenceEqual("fLaC"u8))
+            return false;
+        Span<byte> header = stackalloc byte[4];
+        stream.ReadExactly(header);
+        int length = (header[1] << 16) | (header[2] << 8) | header[3];
+        if ((header[0] & 0x7f) != 0 || length != 34)
+            throw new InvalidDataException("Beta RF FLAC has no valid STREAMINFO header.");
+        Span<byte> info = stackalloc byte[34];
+        stream.ReadExactly(info);
+        ulong packed = BinaryPrimitives.ReadUInt64BigEndian(info[10..]);
+        int channels = checked((int)((packed >> 41) & 7)) + 1;
+        if (channels != 1)
+            throw new InvalidDataException("Betamax HiFi input must contain one RF channel, not multichannel audio.");
+        long frames = checked((long)(packed & 0x0000000FFFFFFFFFUL));
+        totalSamples = frames > 0 ? frames : null;
+        return true;
     }
 
     private static IHiFiSampleReader OpenWave(string path, HiFiRawSampleFormat format)

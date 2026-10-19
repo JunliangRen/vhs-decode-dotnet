@@ -66,7 +66,7 @@ public sealed class HiFiCompatibilityTests
             "-h", "--help", "--frequency", "-f", "--overwrite", "--threads", "-t",
             "--dsp-backend",
             "--preview", "--gui", "--gnuradio", "--raw_format", "--pal", "-p", "--ntsc", "-n",
-            "--8mm", "--demod", "--bias_guess", "--bg", "--auto_fine_tune",
+            "--8mm", "--betamax", "--beta-reference-offset", "--demod", "--bias_guess", "--bg", "--auto_fine_tune",
             "--AFE_left_carrier", "--AFE_left_carrier_deviation", "--AFE_right_carrier",
             "--AFE_right_carrier_deviation", "--normalize", "--gain", "--audio_mode", "--audio_rate",
             "--ar", "--resampler_quality", "--head_switching_interpolation", "--doc",
@@ -78,7 +78,7 @@ public sealed class HiFiCompatibilityTests
             "--nr_deemphasis_high_tau"
         ];
 
-        Assert.Equal(43, CliSpecs.HiFi.Options.Length);
+        Assert.Equal(45, CliSpecs.HiFi.Options.Length);
         Assert.Equal(expectedNames, CliSpecs.HiFi.Options.SelectMany(option => option.Names));
         Assert.Equal(0, CliSpecs.HiFi.MinimumPositionals);
         Assert.Equal(2, CliSpecs.HiFi.MaximumPositionals);
@@ -273,8 +273,11 @@ public sealed class HiFiCompatibilityTests
         Assert.StartsWith("usage: decode.py ", facade, StringComparison.Ordinal);
         Assert.Contains("Expander tuning options (advanced):", standalone, StringComparison.Ordinal);
         Assert.Contains("Deemphasis tuning options (advanced):", standalone, StringComparison.Ordinal);
-        Assert.Equal("D7AEBC4B2CA236292979EBD92CA38454ECE0C2049C3E49A8F5E4E91397ACB658", Utf8LfSha256(standalone));
-        Assert.Equal("3089FE4A8CE563A00F082770194434DF6629EE98C633664EF8DEB170A5C74D84", Utf8LfSha256(facade));
+        const string betaHeading = "NTSC Betamax HiFi options:";
+        Assert.Contains("--betamax", standalone, StringComparison.Ordinal);
+        Assert.Contains("--beta-reference-offset", facade, StringComparison.Ordinal);
+        Assert.Equal("D7AEBC4B2CA236292979EBD92CA38454ECE0C2049C3E49A8F5E4E91397ACB658", Utf8LfSha256(standalone[..standalone.IndexOf(betaHeading, StringComparison.Ordinal)]));
+        Assert.Equal("3089FE4A8CE563A00F082770194434DF6629EE98C633664EF8DEB170A5C74D84", Utf8LfSha256(facade[..facade.IndexOf(betaHeading, StringComparison.Ordinal)]));
     }
 
     [Theory(DisplayName = "HiFi AFE standards match v0.4.0")]

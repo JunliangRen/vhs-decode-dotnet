@@ -116,7 +116,8 @@ internal sealed partial class HiFiOutputWriter : IDisposable
                     leftPeak,
                     1,
                     _options.AudioRateHz,
-                    output);
+                    output,
+                    preserveDigitalSilence: _options.TapeFormat == "betamax");
             }
 
             output.Write($"{Environment.NewLine}Channel 2: Peak gain is {(rightPeak * 100.0f):F2}%.");
@@ -128,7 +129,8 @@ internal sealed partial class HiFiOutputWriter : IDisposable
                     rightPeak,
                     1,
                     _options.AudioRateHz,
-                    output);
+                    output,
+                    preserveDigitalSilence: _options.TapeFormat == "betamax");
             }
         }
         else
@@ -143,7 +145,8 @@ internal sealed partial class HiFiOutputWriter : IDisposable
                     peak,
                     2,
                     _options.AudioRateHz,
-                    output);
+                    output,
+                    preserveDigitalSilence: _options.TapeFormat == "betamax");
             }
         }
     }
@@ -221,11 +224,14 @@ internal sealed partial class HiFiOutputWriter : IDisposable
         float peak,
         int channels,
         int sampleRate,
-        TextWriter output)
+        TextWriter output,
+        bool preserveDigitalSilence = false)
     {
         try
         {
-            float gain = (float)((1.0 / peak) - (1.0 / 1024.0));
+            float gain = preserveDigitalSilence && peak == 0
+                ? 1.0f
+                : (float)((1.0 / peak) - (1.0 / 1024.0));
             output.Write(string.Create(
                 CultureInfo.InvariantCulture,
                 $" Adjusting to {(gain * 100.0f):F2}%, please wait..."));

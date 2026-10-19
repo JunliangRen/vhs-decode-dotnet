@@ -52,6 +52,7 @@ public sealed record HiFiDecodeOptions
     public required bool Overwrite { get; init; }
     public required bool Gui { get; init; }
     public DspBackend DspBackend { get; init; } = DspBackend.Exact;
+    public double BetaReferenceOffsetDb { get; init; }
 
     public static HiFiDecodeOptions FromCommand(ParsedCommand command)
     {
@@ -61,6 +62,11 @@ public sealed record HiFiDecodeOptions
         }
 
         bool is8Mm = command.Get<bool>("format_8mm");
+        bool isBetamax = command.Get<bool>("format_betamax");
+        if (isBetamax && is8Mm)
+        {
+            throw new ArgumentException("--betamax and --8mm are mutually exclusive.");
+        }
         bool preview = command.Get<bool>("preview");
         BigInteger requestedAudioRate = command.Get<BigInteger>("rate");
         BigInteger audioRate = preview
@@ -114,12 +120,12 @@ public sealed record HiFiDecodeOptions
             ? HiFiConstants.Default8MmAudioMode
             : HiFiConstants.DefaultVhsAudioMode;
 
-        return new HiFiDecodeOptions
+        var options = new HiFiDecodeOptions
         {
             InputRateHz = command.Get<double>("inputfreq") * 1_000_000.0,
             InputFormatOverride = command.Get<string?>("raw_format"),
             Standard = command.Get<bool>("pal") ? "p" : "n",
-            TapeFormat = is8Mm ? "8mm" : "vhs",
+            TapeFormat = isBetamax ? "betamax" : is8Mm ? "8mm" : "vhs",
             Preview = preview,
             DemodType = command.Get<string>("demod_type"),
             AfeLeftCarrierDeviationHz = command.Get<double>("afe_left_carrier_deviation") * 1_000_000.0,
@@ -169,8 +175,60 @@ public sealed record HiFiDecodeOptions
             ThreadsInteger = command.Get<BigInteger>("threads"),
             Overwrite = command.Get<bool>("overwrite"),
             Gui = command.Get<bool>("UI"),
-            DspBackend = DspBackendParser.Parse(command.Get<string>("dsp_backend"))
+            DspBackend = DspBackendParser.Parse(command.Get<string>("dsp_backend")),
+            BetaReferenceOffsetDb = command.Get<double>("beta_reference_offset")
         };
+        if (isBetamax)
+        {
+            ValidateBetamax(options, command);
+        }
+        else if (options.BetaReferenceOffsetDb != 0.0)
+        {
+            throw new ArgumentException("--beta-reference-offset requires --betamax.");
+        }
+
+        return options;
+    }
+
+    private static void ValidateBetamax(HiFiDecodeOptions options, ParsedCommand command)
+    {
+        if (options.Standard != "n")
+            throw new ArgumentException("Betamax HiFi currently supports NTSC only; use --ntsc.");
+        if (options.InputRateHz is not (20_000_000.0 or 40_000_000.0))
+            throw new ArgumentException("Betamax HiFi requires a physical RF sample rate of 20 or 40 MHz (-f 20 or -f 40).");
+        if (options.AudioRateInteger != 48_000 || options.Preview)
+            throw new ArgumentException("Betamax HiFi currently requires 48000 Hz output and does not support --preview.");
+        if (options.GnuRadio || options.BiasGuess || options.AutoFineTune)
+            throw new ArgumentException("Betamax HiFi calibrates its own four carriers; --gnuradio, --bias_guess and --auto_fine_tune are unsupported.");
+        if (options.DemodType != HiFiConstants.DemodQuadrature || options.DspBackend != DspBackend.Exact)
+            throw new ArgumentException("Betamax HiFi currently requires quadrature demodulation and --dsp-backend exact.");
+        if (options.SpectralNoiseReductionAmount != 0.0)
+            throw new ArgumentException("Betamax HiFi uses its default dynamic compensation; --NR_spectral_amount must be zero.");
+        if (options.ThreadsInteger <= 0 || options.ThreadsInteger > int.MaxValue)
+            throw new ArgumentException("Betamax HiFi requires a positive --threads value within Int32 range.");
+        if (!double.IsFinite(options.Gain) || options.Gain < 0.0)
+            throw new ArgumentException("Betamax HiFi --gain must be finite and nonnegative; it is applied after compensation.");
+        if (!double.IsFinite(options.BetaReferenceOffsetDb) || Math.Abs(options.BetaReferenceOffsetDb) > 12.0)
+            throw new ArgumentException("--beta-reference-offset must be finite and between -12 and 12 dB.");
+        if (options.AudioMode is not ("s" or "d" or "ms" or "dms" or "l" or "r" or "sum"))
+            throw new ArgumentException("Unsupported Betamax HiFi --audio_mode.");
+        if (command.Get<string>("enable_deemphasis") is not ("on" or "off")
+            || command.Get<string>("enable_expander") is not ("on" or "off")
+            || command.Get<string>("head_switching_interpolation") is not ("on" or "off")
+            || options.DropoutCompensation is not ("full" or "mute" or "off"))
+            throw new ArgumentException("Betamax HiFi switches require on/off and --doc requires full/mute/off.");
+        foreach (string name in new[] { "afe_left_carrier", "afe_right_carrier", "afe_left_carrier_deviation", "afe_right_carrier_deviation" })
+        {
+            if (command.Get<double>(name) != 0.0)
+                throw new ArgumentException("Betamax HiFi uses four fixed NTSC carriers; legacy AFE overrides are unsupported.");
+        }
+        foreach (string name in new[] { "expander_gain", "expander_ratio", "expander_attack_tau", "expander_hold_tau", "expander_release_tau", "expander_weighting_low_tau", "expander_weighting_high_tau", "expander_weighting_low_pass", "expander_weighting_low_pass_transition", "deemphasis_low_tau", "deemphasis_high_tau", "nr_deemphasis_low_tau", "nr_deemphasis_high_tau" })
+        {
+            if (command.Get<double?>(name).HasValue)
+                throw new ArgumentException("Betamax HiFi uses its frozen default compensation; legacy VHS/8mm tuning parameters are unsupported.");
+        }
+        if (!string.IsNullOrEmpty(command.Get<string?>("expander_env_detection")))
+            throw new ArgumentException("Betamax HiFi uses its own stereo-linked power detectors.");
     }
 
     private static double PythonOr(double? value, double fallback)

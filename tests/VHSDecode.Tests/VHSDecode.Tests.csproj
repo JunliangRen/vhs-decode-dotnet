@@ -5,6 +5,7 @@
     <ProjectReference Include="..\..\src\VHSDecode.Preview\VHSDecode.Preview.csproj" />
     <ProjectReference Include="..\VHSDecode.ProcessTestHost\VHSDecode.ProcessTestHost.csproj" ReferenceOutputAssembly="false" OutputItemType="ProcessTestHostAssembly" />
     <EmbeddedResource Include="Fixtures\tape-family-v0.4.0.json" />
+    <EmbeddedResource Include="Fixtures\beta-hifi-backend-v1.bin.gz" WithCulture="false" LogicalName="VHSDecode.Tests.Fixtures.beta-hifi-backend-v1.bin.gz" />
   </ItemGroup>
 
   <Target Name="ValidateLinuxX64NativeTestAssets" BeforeTargets="Build" Condition="$([MSBuild]::IsOSPlatform('Linux')) And '$(RuntimeIdentifier)' != 'linux-arm64'">

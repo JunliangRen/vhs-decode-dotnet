@@ -253,6 +253,8 @@ public static class CliSpecs
         yield return Flag("pal", ["--pal", "-p"]);
         yield return Flag("ntsc", ["--ntsc", "-n"]);
         yield return Flag("format_8mm", ["--8mm"]);
+        yield return Flag("format_betamax", ["--betamax"]);
+        yield return Dbl("beta_reference_offset", ["--beta-reference-offset"], 0.0);
         yield return Str("demod_type", ["--demod"], HiFiConstants.DefaultDemod, normalize: Lower);
         yield return Flag("bias_guess", ["--bias_guess", "--bg"]);
         yield return Str("auto_fine_tune", ["--auto_fine_tune"], "off", normalize: Lower);

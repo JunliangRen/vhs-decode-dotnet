@@ -94,15 +94,26 @@ internal sealed class HiFiDecodeRunner : IHiFiCommandRunner
         }
 
         string system = options.Standard == "p" ? "PAL" : "NTSC";
-        string format = options.TapeFormat == "vhs" ? "VHS" : "8mm";
+        string format = options.TapeFormat == "betamax" ? "Betamax HiFi" : options.TapeFormat == "vhs" ? "VHS" : "8mm";
         output.WriteLine($"{system} {format} format selected, Audio mode is {options.AudioMode}");
-        HiFiDecodePreflightResult preflight = HiFiDecodePreflight.Build(options);
-        if (preflight.HasRateSyncWarning)
+        if (options.TapeFormat == "betamax")
         {
-            output.WriteLine(HiFiDecodePreflight.FormatRateSyncWarning(options));
+            output.WriteLine(string.Create(CultureInfo.InvariantCulture,
+                $"Beta HiFi: capture-local four-carrier calibration (48 kHz); "
+                + $"deemphasis {(options.EnableDeemphasis ? "on" : "off")}, "
+                + $"dynamics {(options.EnableExpander ? "on" : "off")}, "
+                + $"reference offset {options.BetaReferenceOffsetDb:F2} dB."));
         }
+        else
+        {
+            HiFiDecodePreflightResult preflight = HiFiDecodePreflight.Build(options);
+            if (preflight.HasRateSyncWarning)
+            {
+                output.WriteLine(HiFiDecodePreflight.FormatRateSyncWarning(options));
+            }
 
-        HiFiDecodePreflight.ValidateSharedMemorySize(preflight);
+            HiFiDecodePreflight.ValidateSharedMemorySize(preflight);
+        }
         _ = options.AudioRateHz;
         if (options.BiasGuess)
         {

@@ -69,6 +69,11 @@ internal sealed class HiFiStreamingDecoder
         ArgumentNullException.ThrowIfNull(input);
         ArgumentNullException.ThrowIfNull(output);
         ArgumentNullException.ThrowIfNull(diagnostics);
+        if (options.TapeFormat == "betamax")
+        {
+            return new BetaHiFiStreamingDecoder().Decode(
+                options, input, output, diagnostics, cancellationToken, elapsedProvider);
+        }
         HiFiDecodePlan plan = HiFiDecodePlan.FromOptions(options);
         var progressReporter = new HiFiProgressReporter(
             diagnostics,
