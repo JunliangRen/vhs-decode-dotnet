@@ -31,20 +31,18 @@ public static class LaserDiscAnalogAudioPhase2
             return fieldAudio;
         }
 
-        var left = new double[fieldAudio.Left.Length];
-        var right = new double[fieldAudio.Right.Length];
         (double[] firstLeft, double[] firstRight) = FilterBlock(fieldAudio, filters, 0, blockLength);
-        if (firstLeft.Length >= left.Length)
+        if (firstLeft.Length >= fieldAudio.Left.Length)
         {
-            Array.Copy(firstLeft, left, left.Length);
-            Array.Copy(firstRight, right, right.Length);
             return new LaserDiscAnalogAudioBlock(
-                left,
-                right,
+                firstLeft,
+                firstRight,
                 fieldAudio.DecimationFactor,
                 UsesFloat32Storage: false);
         }
 
+        var left = new double[fieldAudio.Left.Length];
+        var right = new double[fieldAudio.Right.Length];
         CopyAsFloat32(firstLeft, 0, left, 0, firstLeft.Length);
         CopyAsFloat32(firstRight, 0, right, 0, firstRight.Length);
         int jump = blockLength - OverlapSkip;

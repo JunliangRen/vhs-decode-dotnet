@@ -48,8 +48,48 @@ public sealed class LaserDiscAudioPhase2BufferTests
             .SequenceEqual(MemoryMarshal.AsBytes(actual.Left.AsSpan())));
         Assert.True(MemoryMarshal.AsBytes(expectedRight.AsSpan())
             .SequenceEqual(MemoryMarshal.AsBytes(actual.Right.AsSpan())));
-        // Allow FFT/runtime overhead, but catch redundant real padding or spectrum copies.
-        Assert.True(allocated < 1_650_000, $"Short-field audio allocated {allocated:N0} bytes.");
+        // Allow FFT/runtime overhead, but catch redundant real padding, spectrum or output copies.
+        Assert.True(allocated < 1_300_000, $"Short-field audio allocated {allocated:N0} bytes.");
+    }
+
+    [Theory(DisplayName = "LD short-field audio returns independently owned channel buffers")]
+    [InlineData(1)]
+    [InlineData(8)]
+    [InlineData(1_023)]
+    [InlineData(1_024)]
+    public void ShortFieldReturnsIndependentlyOwnedChannelBuffers(int length)
+    {
+        const int blockLength = 1_024;
+        Complex[] identity = Enumerable.Repeat(Complex.One, blockLength).ToArray();
+        var channel = new LaserDiscAnalogAudioChannelFilter(
+            LowBin: 0,
+            BinCount: blockLength,
+            SliceSampleRateHz: 1_250_000.0,
+            LowFrequencyHz: 0.0,
+            CenterFrequencyHz: 1_000.0,
+            Stage1Filter: [],
+            Stage2Filter: identity);
+        var filters = new LaserDiscAnalogAudioFilterSet(channel, channel, 32);
+        double[] source = Enumerable.Range(0, length).Select(i => 1_000.0 + i).ToArray();
+        double[] original = source.ToArray();
+        var input = new LaserDiscAnalogAudioBlock(source, source, 32);
+
+        LaserDiscAnalogAudioBlock first = LaserDiscAnalogAudioPhase2.Apply(input, filters);
+        Assert.False(first.UsesFloat32Storage);
+        Assert.NotSame(source, first.Left);
+        Assert.NotSame(source, first.Right);
+        Assert.NotSame(first.Left, first.Right);
+        double[] expected = first.Right.ToArray();
+        first.Left[0] = -123.0;
+        Assert.Equal(expected, first.Right);
+        Assert.Equal(original, source);
+
+        LaserDiscAnalogAudioBlock second = LaserDiscAnalogAudioPhase2.Apply(input, filters);
+        Assert.NotSame(first.Left, second.Left);
+        Assert.NotSame(first.Right, second.Right);
+        Assert.NotSame(second.Left, second.Right);
+        Assert.Equal(expected, second.Left);
+        Assert.Equal(expected, second.Right);
     }
 
     private static double[] FilterScalarWithRealPadding(double[] input, Complex[] filter)

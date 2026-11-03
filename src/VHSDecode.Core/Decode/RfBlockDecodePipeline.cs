@@ -1,7 +1,9 @@
 using System.Collections.Concurrent;
 using System.Numerics;
 using System.Runtime.CompilerServices;
+using System.Runtime.Intrinsics;
 using System.Runtime.Intrinsics.X86;
+using System.Runtime.InteropServices;
 using VHSDecode.Core.Dsp;
 using VHSDecode.Core.Rf;
 using VHSDecode.Core.Tbc;
@@ -275,7 +277,8 @@ public sealed class RfBlockDecodePipeline : IDisposable
             input,
             reportDiagnostics,
             retainRfDiagnosticChannels: true,
-            reuseStreamOutputBuffers: false);
+            reuseStreamOutputBuffers: false,
+            includeAnalyticOutput: true);
 
     internal RfPipelineBlock DecodePreparedStreamBlock(
         double[] input,
@@ -286,6 +289,7 @@ public sealed class RfBlockDecodePipeline : IDisposable
             reportDiagnostics,
             _retainRfDiagnosticChannels,
             reuseStreamOutputBuffers: !_retainRfDiagnosticChannels,
+            includeAnalyticOutput: !_filterOptions.LdClipDemodForVideo,
             rfMtfOverride);
 
     private RfPipelineBlock DecodePreparedBlockCore(
@@ -293,6 +297,7 @@ public sealed class RfBlockDecodePipeline : IDisposable
         bool reportDiagnostics,
         bool retainRfDiagnosticChannels,
         bool reuseStreamOutputBuffers,
+        bool includeAnalyticOutput,
         Complex[]? rfMtfOverride = null)
     {
         ArgumentNullException.ThrowIfNull(input);
@@ -337,7 +342,7 @@ public sealed class RfBlockDecodePipeline : IDisposable
                 _filters.VhsRfTopSos,
                 inputSpectrum,
                 includeRfHighPassOutput: retainRfDiagnosticChannels,
-                includeAnalyticOutput: retainRfDiagnosticChannels,
+                includeAnalyticOutput: retainRfDiagnosticChannels && includeAnalyticOutput,
                 includeDemodRawOutput: retainRfDiagnosticChannels || _filterOptions.ExportRawTbc,
                 useNumpyComplexVhsAnalytic: _useNumpyComplexVhsAnalytic,
                 outputBuffers: streamOutputBuffers?.Demodulated,
@@ -803,12 +808,51 @@ public sealed class RfBlockDecodePipeline : IDisposable
 
     private short[] DecodeEfmBlock(ReadOnlySpan<Complex> spectrum, ReadOnlySpan<Complex> efmFilter)
     {
-        double[] filtered = FilterLaserDiscSignal(spectrum, efmFilter);
+        Complex[] filtered = FilterLaserDiscSignal(spectrum, efmFilter);
+        return ConvertEfmSamplesToInt16(filtered);
+    }
+
+    internal static short[] ConvertEfmSamplesToInt16(ReadOnlySpan<Complex> filtered)
+    {
         var output = new short[filtered.Length];
-        for (int i = 0; i < output.Length; i++)
+        int index = 0;
+        if (Avx2.IsSupported)
         {
-            double clipped = Math.Clamp(filtered[i], short.MinValue, short.MaxValue);
-            output[i] = (short)clipped;
+            Vector256<double> minimum = Vector256.Create((double)short.MinValue);
+            Vector256<double> maximum = Vector256.Create((double)short.MaxValue);
+            ReadOnlySpan<double> components = MemoryMarshal.Cast<Complex, double>(filtered);
+            ref double source = ref MemoryMarshal.GetReference(components);
+            ref short destination = ref MemoryMarshal.GetArrayDataReference(output);
+            int vectorizedEnd = output.Length - (output.Length % 4);
+            for (; index < vectorizedEnd; index += 4)
+            {
+                nuint offset = (nuint)(index * 2);
+                Vector256<double> lower = Vector256.LoadUnsafe(ref source, offset);
+                Vector256<double> upper = Vector256.LoadUnsafe(ref source, offset + 4);
+                Vector256<double> real = Avx2.Permute4x64(Avx.UnpackLow(lower, upper), 0xD8);
+                if (Avx.MoveMask(Avx.Compare(real, real, FloatComparisonMode.UnorderedNonSignaling)) != 0)
+                {
+                    // Preserve Math.Clamp and unchecked cast behavior for every
+                    // real NaN lane; imaginary components never affect EFM.
+                    for (int lane = 0; lane < 4; lane++)
+                    {
+                        double clipped = Math.Clamp(filtered[index + lane].Real, short.MinValue, short.MaxValue);
+                        output[index + lane] = (short)clipped;
+                    }
+                    continue;
+                }
+
+                real = Avx.Min(Avx.Max(real, minimum), maximum);
+                Vector128<int> converted = Avx.ConvertToVector128Int32WithTruncation(real);
+                Sse2.PackSignedSaturate(converted, Vector128<int>.Zero)
+                    .GetLower().StoreUnsafe(ref destination, (nuint)index);
+            }
+        }
+
+        for (; index < output.Length; index++)
+        {
+            double clipped = Math.Clamp(filtered[index].Real, short.MinValue, short.MaxValue);
+            output[index] = (short)clipped;
         }
 
         return output;
@@ -845,7 +889,7 @@ public sealed class RfBlockDecodePipeline : IDisposable
         return demodulated;
     }
 
-    private double[] FilterLaserDiscSignal(
+    private Complex[] FilterLaserDiscSignal(
         ReadOnlySpan<Complex> spectrum,
         ReadOnlySpan<Complex> filter)
     {
@@ -865,13 +909,7 @@ public sealed class RfBlockDecodePipeline : IDisposable
         _demodulator.InverseLaserDiscFullSpectrumInPlace(
             filtered,
             useDuccExact: false);
-        var real = new double[filtered.Length];
-        for (int i = 0; i < real.Length; i++)
-        {
-            real[i] = filtered[i].Real;
-        }
-
-        return real;
+        return filtered;
     }
 
     private static void QuantizeLaserDiscVideoChannels(RfDemodulatedBlock block)

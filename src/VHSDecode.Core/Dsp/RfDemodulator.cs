@@ -826,9 +826,10 @@ public sealed class RfDemodulator : IDisposable
                     nameof(precomputedInputSpectrum));
             }
 
+            Complex[]? rfHighPassSpectrum = null;
             if (includeRfHighPassOutput)
             {
-                Complex[] rfHighPassSpectrum = ApplyFrequencyFilter(spectrum, rfHighPassFilter);
+                rfHighPassSpectrum = ApplyFrequencyFilter(spectrum, rfHighPassFilter);
                 InverseLaserDiscFullSpectrumInPlace(rfHighPassSpectrum);
                 rfHighPass = new double[rfHighPassSpectrum.Length];
                 for (int i = 0; i < rfHighPass.Length; i++)
@@ -846,14 +847,24 @@ public sealed class RfDemodulator : IDisposable
                 spectrum = RemoveLdPalV4300DSpur(spectrum, SampleRateHz);
             }
 
-            rfFilteredSpectrum = ApplyFrequencyFilter(spectrum, rfVideoFilter);
+            // The extracted high-pass channel owns its real output; its complex
+            // inverse buffer is now free for the RF video filter.
+            rfFilteredSpectrum = rfHighPassSpectrum ?? new Complex[spectrum.Length];
+            ApplyFrequencyFilter(spectrum, rfVideoFilter, rfFilteredSpectrum);
             if (!rfMtfFilter.IsEmpty)
             {
                 MultiplyFrequencyFilterInPlace(rfFilteredSpectrum, rfMtfFilter);
             }
 
             hilbertMultiplier = GetVhsHilbertMultiplier(rfFilteredSpectrum.Length);
-            Complex[] analyticSpectrum = rfFilteredSpectrum.ToArray();
+            // Streaming LD does not retain the analytic signal. Without RF boost,
+            // no later stage needs this filtered spectrum before video replaces it.
+            bool reuseFilteredSpectrum = !useVhsRealFft
+                && !includeAnalyticOutput
+                && (rfHighBoost is null || rfHighBoost.Multiplier == 0.0);
+            Complex[] analyticSpectrum = reuseFilteredSpectrum
+                ? rfFilteredSpectrum
+                : rfFilteredSpectrum.ToArray();
             ApplyHilbertMultiplierInPlace(analyticSpectrum, hilbertMultiplier);
             InverseLaserDiscFullSpectrumInPlace(analyticSpectrum);
             analytic = analyticSpectrum;
