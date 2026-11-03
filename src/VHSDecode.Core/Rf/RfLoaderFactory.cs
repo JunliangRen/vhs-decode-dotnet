@@ -12,7 +12,8 @@ public static class RfLoaderFactory
         bool preferPyAvMappedRawFlacSeeking,
         bool fastContainerSeeking = false,
         bool ignoreExtensionCase = false,
-        int fastContainerRewindSize = FfmpegPcm16SampleLoader.DefaultRewindSize)
+        int fastContainerRewindSize = FfmpegPcm16SampleLoader.DefaultRewindSize,
+        bool preferIndexedStaleRawFlacFallback = false)
     {
         string routingFilename = ignoreExtensionCase
             ? filename.ToLowerInvariant()
@@ -69,7 +70,9 @@ public static class RfLoaderFactory
 
                 if (info.SupportsExactLibsndfileSeeking)
                 {
-                    return new LibsndfilePcm16SampleLoader(filename);
+                    return new LibsndfilePcm16SampleLoader(
+                        filename,
+                        preferIndexedStaleRawFlacFallback);
                 }
 
                 if (preferPyAvMappedRawFlacSeeking
@@ -80,6 +83,11 @@ public static class RfLoaderFactory
                         new PyAvRawFlacSampleMapper(
                             info.SampleRateHz,
                             info.FixedBlockSize!.Value));
+                }
+
+                if (preferIndexedStaleRawFlacFallback && info.IsNativeRfPcm16)
+                {
+                    return new StaleRawFlacFallbackSampleLoader(filename);
                 }
             }
 

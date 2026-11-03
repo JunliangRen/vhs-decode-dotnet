@@ -426,7 +426,8 @@ public static class DecodeSessionFactory
             inputFrequencyMHz.HasValue,
             inputFrequencyMHz,
             preferPyAvMappedRawFlacSeeking: IsPreviewServer(command),
-            fastContainerSeeking: IsPreviewServer(command));
+            fastContainerSeeking: IsPreviewServer(command),
+            preferIndexedStaleRawFlacFallback: true);
         string system = pal ? "PAL" : "NTSC";
         FormatParameterSet parameters = FormatCatalog.Default.GetLaserDiscParameters(system, command.Get<bool>("lowband"));
         parameters = ApplyLaserDiscOverrides(parameters, command);
@@ -1092,7 +1093,8 @@ public static class DecodeSessionFactory
         bool needsResampling,
         double? inputFrequencyMHz = null,
         bool preferPyAvMappedRawFlacSeeking = false,
-        bool fastContainerSeeking = false)
+        bool fastContainerSeeking = false,
+        bool preferIndexedStaleRawFlacFallback = false)
     {
         if (needsResampling)
         {
@@ -1102,7 +1104,8 @@ public static class DecodeSessionFactory
         return RfLoaderFactory.CreateNative(
             inputFile,
             preferPyAvMappedRawFlacSeeking,
-            fastContainerSeeking);
+            fastContainerSeeking,
+            preferIndexedStaleRawFlacFallback: preferIndexedStaleRawFlacFallback);
     }
 
     private static bool ShouldUseParallelMappedRawFlacSeeking(ParsedCommand command)

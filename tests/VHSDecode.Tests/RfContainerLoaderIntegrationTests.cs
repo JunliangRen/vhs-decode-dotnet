@@ -75,6 +75,177 @@ public sealed class RfContainerLoaderIntegrationTests
         new(1_199_980, 30, "347903A86072AB2FE31C061E2AFBD0F94C334C81E8E807EEF81E75E39D82DC08")
     ];
 
+    [Fact(DisplayName = "LD stale-header fallback keeps the native prefix and legacy boundary reads")]
+    public void LdStaleHeaderFallbackKeepsNativePrefixAndLegacyBoundaryReads()
+    {
+        Assert.SkipUnless(
+            CommandIsAvailable("ffmpeg") && CommandIsAvailable("ffprobe"),
+            "ffmpeg and ffprobe must be available on PATH.");
+        string directory = CreateTestDirectory();
+        try
+        {
+            short[] samples = CreateSamples(196_608);
+            string wave = Path.Combine(directory, "source.wav");
+            string flac = Path.Combine(directory, "stale.flac");
+            WriteWave(wave, samples);
+            EncodeFlac(wave, flac, oggContainer: false, frameSize: 2_048);
+            SetRawFlacTotalSamples(flac, 131_072);
+            using var legacy = new LibsndfilePcm16SampleLoader(flac);
+            using var fallback = new StaleRawFlacFallbackSampleLoader(flac);
+            using var candidate = new LibsndfilePcm16SampleLoader(
+                flac, LibsndfilePcm16Source.Open, fallback);
+            Assert.Null(fallback.SelectedSeekMode);
+            Assert.Equal(legacy.Read(Stream.Null, 10, 32), candidate.Read(Stream.Null, 10, 32));
+            Assert.Null(fallback.SelectedSeekMode);
+            foreach (long sample in new long[] { 131_060, 131_080, 131_070, 50_000, 190_000 })
+            {
+                Assert.Equal(legacy.Read(Stream.Null, sample, 32), candidate.Read(Stream.Null, sample, 32));
+            }
+            // A small underreported header is outside the observed 32-bit-wrap gate.
+            Assert.Equal(FfmpegPcm16SeekMode.Exact, fallback.SelectedSeekMode);
+
+            using var ordinary = Assert.IsType<LibsndfilePcm16SampleLoader>(RfLoaderFactory.CreateNative(flac));
+            using var ld = Assert.IsType<LibsndfilePcm16SampleLoader>(RfLoaderFactory.CreateNative(
+                flac, preferPyAvMappedRawFlacSeeking: false, preferIndexedStaleRawFlacFallback: true));
+            var field = typeof(LibsndfilePcm16SampleLoader).GetField(
+                "_fallback", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!;
+            Assert.IsType<FfmpegPcm16SampleLoader>(field.GetValue(ordinary));
+            Assert.IsType<StaleRawFlacFallbackSampleLoader>(field.GetValue(ld));
+        }
+        finally
+        {
+            Directory.Delete(directory, recursive: true);
+        }
+    }
+
+    [Fact(DisplayName = "LD indexed fallback rejects a truncated final FLAC payload and keeps legacy EOF behavior")]
+    public void LdIndexedFallbackRejectsTruncatedTailAndKeepsLegacyEof()
+    {
+        Assert.SkipUnless(
+            CommandIsAvailable("ffmpeg") && CommandIsAvailable("ffprobe"),
+            "ffmpeg and ffprobe must be available on PATH.");
+        string directory = CreateTestDirectory();
+        try
+        {
+            string wave = Path.Combine(directory, "source.wav");
+            string flac = Path.Combine(directory, "truncated.flac");
+            WriteWave(wave, CreateSamples(196_608));
+            EncodeFlac(wave, flac, oggContainer: false, frameSize: 2_048);
+            Assert.True(RawFlacFrameIndex.TryOpen(flac, out RawFlacFrameIndex? complete));
+            Assert.NotNull(complete);
+            Assert.True(StaleRawFlacFallbackSampleLoader.HasValidTailChecksum(flac, complete));
+            Assert.True(StaleRawFlacFallbackSampleLoader.HasDecodableTail(flac, complete));
+            using (FileStream output = File.Open(flac, FileMode.Open, FileAccess.Write))
+            {
+                output.SetLength(output.Length - 17);
+            }
+            SetRawFlacTotalSamples(flac, 131_072);
+            Assert.True(RawFlacFrameIndex.TryOpen(flac, out RawFlacFrameIndex? truncated));
+            Assert.NotNull(truncated);
+            Assert.False(StaleRawFlacFallbackSampleLoader.HasValidTailChecksum(flac, truncated));
+            Assert.False(StaleRawFlacFallbackSampleLoader.HasDecodableTail(flac, truncated));
+            using var legacy = new LibsndfilePcm16SampleLoader(flac);
+            using var fallback = new StaleRawFlacFallbackSampleLoader(flac);
+            using var candidate = new LibsndfilePcm16SampleLoader(flac, LibsndfilePcm16Source.Open, fallback);
+            double[]? expected = null;
+            double[]? actual = null;
+            Exception? expectedError = Record.Exception(() => expected = legacy.Read(Stream.Null, 196_580, 64));
+            Exception? actualError = Record.Exception(() => actual = candidate.Read(Stream.Null, 196_580, 64));
+            Assert.Equal(expectedError?.GetType(), actualError?.GetType());
+            Assert.Equal(expected, actual);
+            Assert.Equal(FfmpegPcm16SeekMode.Exact, fallback.SelectedSeekMode);
+        }
+        finally
+        {
+            Directory.Delete(directory, recursive: true);
+        }
+    }
+
+    [Fact(DisplayName = "LD guarded fallback retains legacy EOF when the final zero CRC byte is absent")]
+    public void LdGuardedFallbackKeepsLegacyEofWithMissingFinalZeroCrcByte()
+    {
+        Assert.SkipUnless(
+            CommandIsAvailable("ffmpeg") && CommandIsAvailable("ffprobe"),
+            "ffmpeg and ffprobe must be available on PATH.");
+        string directory = CreateTestDirectory();
+        try
+        {
+            string flac = Path.Combine(directory, "missing-zero-crc.ldf");
+            byte[] encoded = BuildConstantFlacWithFinalZeroCrcByte();
+            Assert.Equal(0, encoded[^1]);
+            File.WriteAllBytes(flac, encoded[..^1]);
+            Assert.True(RawFlacFrameIndex.TryOpen(flac, out RawFlacFrameIndex? index));
+            Assert.NotNull(index);
+            // CRC residue alone is not a parser: removing a final zero CRC byte
+            // can retain residue zero. Verify the existing decoder's behavior.
+            Assert.True(StaleRawFlacFallbackSampleLoader.HasValidTailChecksum(flac, index));
+            Assert.False(StaleRawFlacFallbackSampleLoader.HasDecodableTail(flac, index));
+            foreach ((long sample, int length) in new[] { (6_100L, 32), (6_140L, 16) })
+            {
+                using var legacy = new FfmpegPcm16SampleLoader(flac);
+                using var guarded = new StaleRawFlacFallbackSampleLoader(flac);
+                double[]? expected = null;
+                double[]? actual = null;
+                Exception? expectedError = Record.Exception(() => expected = legacy.Read(Stream.Null, sample, length));
+                Exception? actualError = Record.Exception(() => actual = guarded.Read(Stream.Null, sample, length));
+                Assert.Equal(expectedError?.GetType(), actualError?.GetType());
+                Assert.Equal(expected, actual);
+                Assert.Equal(FfmpegPcm16SeekMode.Exact, guarded.SelectedSeekMode);
+            }
+        }
+        finally
+        {
+            Directory.Delete(directory, recursive: true);
+        }
+    }
+
+    private static byte[] BuildConstantFlacWithFinalZeroCrcByte()
+    {
+        using var output = new MemoryStream();
+        output.Write("fLaC"u8);
+        output.Write(new byte[] { 0x80, 0, 0, 34 });
+        var info = new byte[34];
+        BinaryPrimitives.WriteUInt16BigEndian(info, 2_048);
+        BinaryPrimitives.WriteUInt16BigEndian(info.AsSpan(2), 2_048);
+        BinaryPrimitives.WriteUInt64BigEndian(info.AsSpan(10),
+            (40_000UL << 44) | (15UL << 36) | 6_144UL);
+        output.Write(info);
+        for (int frameNumber = 0; frameNumber < 3; frameNumber++)
+        {
+            var frame = new byte[] { 0xff, 0xf8, 0xb0, 0x08, (byte)frameNumber, 0, 0, 0, 0, 0, 0 };
+            byte crc8 = 0;
+            foreach (byte value in frame.AsSpan(0, 5))
+            {
+                crc8 ^= value;
+                for (int bit = 0; bit < 8; bit++)
+                {
+                    crc8 = (byte)((crc8 << 1) ^ ((crc8 & 0x80) != 0 ? 0x07 : 0));
+                }
+            }
+            frame[5] = crc8;
+            for (int constant = 0; constant <= ushort.MaxValue; constant++)
+            {
+                BinaryPrimitives.WriteUInt16BigEndian(frame.AsSpan(7), (ushort)constant);
+                ushort crc16 = 0;
+                foreach (byte value in frame.AsSpan(0, 9))
+                {
+                    crc16 ^= (ushort)(value << 8);
+                    for (int bit = 0; bit < 8; bit++)
+                    {
+                        crc16 = (ushort)((crc16 << 1) ^ ((crc16 & 0x8000) != 0 ? 0x8005 : 0));
+                    }
+                }
+                if (frameNumber != 2 || (crc16 & 0xff) == 0)
+                {
+                    BinaryPrimitives.WriteUInt16BigEndian(frame.AsSpan(9), crc16);
+                    break;
+                }
+            }
+            output.Write(frame);
+        }
+        return output.ToArray();
+    }
+
     [Fact(DisplayName = "CUDA full maps PyAV coordinates before indexed raw FLAC reads")]
     public void CudaFullMapsPyAvCoordinatesBeforeIndexedRawFlacReads()
     {
