@@ -45,10 +45,19 @@ internal sealed class LibsndfilePcm16SampleLoader :
     private bool _disposed;
 
     internal LibsndfilePcm16SampleLoader(string filename)
+        : this(filename, preferIndexedStaleRawFlacFallback: false)
+    {
+    }
+
+    internal LibsndfilePcm16SampleLoader(
+        string filename,
+        bool preferIndexedStaleRawFlacFallback)
         : this(
             filename,
             LibsndfilePcm16Source.Open,
-            new FfmpegPcm16SampleLoader(filename))
+            preferIndexedStaleRawFlacFallback
+                ? new StaleRawFlacFallbackSampleLoader(filename)
+                : new FfmpegPcm16SampleLoader(filename))
     {
     }
 

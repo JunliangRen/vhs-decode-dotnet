@@ -281,6 +281,88 @@ public sealed class TbcDirectConversionTests
             $"Workspace-backed prepared TBC rendering allocated {allocated:N0} bytes.");
     }
 
+    [Theory(DisplayName = "LD field rendering direct conversion preserves interpolation and AGC bits")]
+    [InlineData(TbcLineInterpolationMethod.Linear, 0.0, 1)]
+    [InlineData(TbcLineInterpolationMethod.Linear, 0.0, 4)]
+    [InlineData(TbcLineInterpolationMethod.Linear, 2.5, 1)]
+    [InlineData(TbcLineInterpolationMethod.Linear, 2.5, 4)]
+    [InlineData(TbcLineInterpolationMethod.Quadratic, 0.0, 1)]
+    [InlineData(TbcLineInterpolationMethod.Quadratic, 2.5, 4)]
+    [InlineData(TbcLineInterpolationMethod.Cubic, 0.0, 1)]
+    [InlineData(TbcLineInterpolationMethod.Cubic, 2.5, 4)]
+    public void LdFieldRenderingDirectConversionPreservesInterpolationAndAgcBits(
+        TbcLineInterpolationMethod interpolation,
+        double wowSmoothing,
+        int workerThreads)
+    {
+        const int outputLineLength = 1_024;
+        const int lineCount = 70;
+        const double nominalInputLineLength = 2_000.125;
+        var frameSpec = new TbcFrameSpec(
+            "NTSC",
+            outputLineLength,
+            lineCount,
+            OutputSampleRateHz: 14_318_181.818181818,
+            ColourBurstStart: null,
+            ColourBurstEnd: null,
+            ActiveVideoStart: null,
+            ActiveVideoEnd: null);
+        var converter = new VideoOutputConverter(
+            ire0: 8_100_000.25,
+            hzIre: 17_000.125,
+            outputZero: 1_024,
+            vsyncIre: -40.0,
+            outputScale: VideoOutputConverter.ComputeOutputScale(false, -40.0));
+        var agcConverter = new VideoOutputConverter(
+            ire0: 8_050_000.125,
+            hzIre: 17_010.25,
+            outputZero: converter.OutputZero,
+            vsyncIre: converter.VSyncIre,
+            outputScale: converter.OutputScale);
+        var renderer = new TbcFieldRenderer(
+            frameSpec,
+            converter,
+            interpolationMethod: interpolation,
+            wowLevelAdjustSmoothing: wowSmoothing,
+            nominalInputLineLength: nominalInputLineLength,
+            workerThreads: workerThreads);
+        double[] source = Enumerable.Range(0, 170_000)
+            .Select(index => 8_100_000.0
+                + (1_800_000.0 * Math.Sin(index * 0.0031))
+                + (250_000.0 * Math.Cos(index * 0.0007)))
+            .ToArray();
+        double[] lineLocations = Enumerable.Range(0, lineCount + 5)
+            .Select(line => 1_000.25 + (line * nominalInputLineLength) + (0.01 * line * line))
+            .ToArray();
+        lineLocations[40] += 30.0;
+
+        ushort[] expected = agcConverter.ConvertHz(renderer.ResampleField(
+            source,
+            lineLocations,
+            firstLine: 2));
+        TbcRenderedField actual = renderer.RenderFieldPayload(
+            source,
+            lineLocations,
+            firstLine: 2,
+            fieldNumber: 17,
+            converterOverride: agcConverter);
+
+        Assert.Equal(expected, actual.Samples);
+        Assert.Same(agcConverter, actual.OutputConverter);
+        Assert.Null(actual.OutputPayload);
+
+        if (workerThreads == 1 && interpolation == TbcLineInterpolationMethod.Linear)
+        {
+            _ = renderer.RenderFieldPayload(source, lineLocations, firstLine: 2);
+            long before = GC.GetAllocatedBytesForCurrentThread();
+            _ = renderer.RenderFieldPayload(source, lineLocations, firstLine: 2);
+            long allocated = GC.GetAllocatedBytesForCurrentThread() - before;
+            Assert.True(
+                allocated < frameSpec.FieldSampleCount * 3L,
+                $"Ordinary direct TBC rendering allocated {allocated:N0} bytes.");
+        }
+    }
+
     private static double[] BuildLegacyLinearLevelAdjusts(
         IReadOnlyList<double> lineLocations,
         int outputLineLength,

@@ -276,12 +276,21 @@ public sealed class RfDemodulator : IDisposable
         return output;
     }
 
-    internal void InverseLaserDiscFullSpectrumInPlace(Complex[] values)
+    internal void InverseLaserDiscFullSpectrumInPlace(
+        Complex[] values,
+        bool useDuccExact = true)
     {
         ArgumentNullException.ThrowIfNull(values);
         if (_ippComplexFftPool is null)
         {
-            PocketFftComplex.InverseDuccInPlace(values);
+            if (useDuccExact)
+            {
+                PocketFftComplex.InverseDuccInPlace(values);
+            }
+            else
+            {
+                PocketFftComplex.Inverse(values, values);
+            }
             return;
         }
 
@@ -1200,7 +1209,10 @@ public sealed class RfDemodulator : IDisposable
         else
         {
             demodSpectrum = ForwardLaserDiscFullSpectrum(demodVideoSource);
-            videoSpectrum = ApplyFrequencyFilter(demodSpectrum, videoFilter);
+            // The RF spectrum is dead after analytic demodulation. Keep this
+            // block-local storage for the video and reference inverse transforms.
+            videoSpectrum = rfFilteredSpectrum!;
+            ApplyFrequencyFilter(demodSpectrum, videoFilter, videoSpectrum);
             activeSpectrumLength = demodSpectrum.Length;
             Complex[] videoComplex;
             if (nonlinearDeemphasis is null && subDeemphasis is null)
@@ -1305,7 +1317,8 @@ public sealed class RfDemodulator : IDisposable
         }
         else
         {
-            Complex[] videoLowPassSpectrum = ApplyFrequencyFilter(demodSpectrum, videoLowPassFilter);
+            Complex[] videoLowPassSpectrum = videoSpectrum!;
+            ApplyFrequencyFilter(demodSpectrum!, videoLowPassFilter, videoLowPassSpectrum);
             InverseLaserDiscFullSpectrumInPlace(videoLowPassSpectrum);
             videoLowPass = new double[videoLowPassSpectrum.Length];
             for (int i = 0; i < videoLowPass.Length; i++)
@@ -1353,7 +1366,8 @@ public sealed class RfDemodulator : IDisposable
             : DecodeReferenceIfPresent(
                 demodSpectrum!,
                 referenceFilters?.VideoBurst,
-                referenceFilters?.VideoBurstOffset ?? 0);
+                referenceFilters?.VideoBurstOffset ?? 0,
+                videoSpectrum!);
         double[]? videoPilot = useVhsRealFft
             ? DecodeRealReferenceIfPresent(
                 referenceSpectrum,
@@ -1363,7 +1377,8 @@ public sealed class RfDemodulator : IDisposable
             : DecodeReferenceIfPresent(
                 demodSpectrum!,
                 referenceFilters?.VideoPilot,
-                offset: 0);
+                offset: 0,
+                videoSpectrum!);
 
         return new RfDemodulatedBlock(
             video,
@@ -1816,9 +1831,25 @@ public sealed class RfDemodulator : IDisposable
 
     private static Complex[] ApplyFrequencyFilter(ReadOnlySpan<Complex> spectrum, ReadOnlySpan<Complex> filter)
     {
+        var output = new Complex[spectrum.Length];
+        ApplyFrequencyFilter(spectrum, filter, output);
+        return output;
+    }
+
+    private static void ApplyFrequencyFilter(
+        ReadOnlySpan<Complex> spectrum,
+        ReadOnlySpan<Complex> filter,
+        Span<Complex> output)
+    {
+        if (output.Length != spectrum.Length)
+        {
+            throw new ArgumentException("Frequency output length must match input block length.", nameof(output));
+        }
+
         if (filter.IsEmpty)
         {
-            return spectrum.ToArray();
+            spectrum.CopyTo(output);
+            return;
         }
 
         if (filter.Length != spectrum.Length)
@@ -1826,10 +1857,7 @@ public sealed class RfDemodulator : IDisposable
             throw new ArgumentException("Frequency filter length must match input block length.", nameof(filter));
         }
 
-        var output = new Complex[spectrum.Length];
         NumpyComplexMultiply.Apply(spectrum, filter, output);
-
-        return output;
     }
 
     private static Complex[] ApplyNumpyRealFrequencyFilter(
@@ -2490,14 +2518,15 @@ public sealed class RfDemodulator : IDisposable
     private double[]? DecodeReferenceIfPresent(
         ReadOnlySpan<Complex> spectrum,
         Complex[]? filter,
-        int offset)
+        int offset,
+        Complex[] filteredSpectrum)
     {
         if (filter is null)
         {
             return null;
         }
 
-        Complex[] filteredSpectrum = ApplyFrequencyFilter(spectrum, filter);
+        ApplyFrequencyFilter(spectrum, filter, filteredSpectrum);
         InverseLaserDiscFullSpectrumInPlace(filteredSpectrum);
         var output = new double[filteredSpectrum.Length];
         for (int i = 0; i < output.Length; i++)

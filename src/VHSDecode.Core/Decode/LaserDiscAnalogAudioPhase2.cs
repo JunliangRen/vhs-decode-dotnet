@@ -184,29 +184,17 @@ public static class LaserDiscAnalogAudioPhase2
         }
         else
         {
-            var padded = new double[filter.Length];
+            var padded = new Complex[filter.Length];
             for (int i = 0; i < raw.Length; i++)
             {
-                padded[i] = raw[i];
+                padded[i] = new Complex(raw[i], 0.0);
             }
 
-            spectrum = PocketFftComplex.ForwardDucc(padded);
+            PocketFftComplex.ForwardDuccInPlace(padded);
+            spectrum = padded;
         }
 
-        for (int i = 0; i < spectrum.Length; i++)
-        {
-            Complex left = spectrum[i];
-            Complex right = filter[i];
-            spectrum[i] = new Complex(
-                Math.FusedMultiplyAdd(
-                    left.Real,
-                    right.Real,
-                    -(left.Imaginary * right.Imaginary)),
-                Math.FusedMultiplyAdd(
-                    left.Real,
-                    right.Imaginary,
-                    left.Imaginary * right.Real));
-        }
+        NumpyComplexMultiply.ApplyInPlace(spectrum, filter);
 
         PocketFftComplex.InverseDuccInPlace(spectrum);
         var output = new double[raw.Length];
