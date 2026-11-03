@@ -1,3 +1,7 @@
+using System.Runtime.InteropServices;
+using System.Runtime.Intrinsics;
+using System.Runtime.Intrinsics.X86;
+
 namespace VHSDecode.Core.Dsp;
 
 internal static class NumbaReduction
@@ -76,9 +80,31 @@ internal static class NumbaReduction
 
         // Numba keeps float32 deltas and products but widens the sum and result.
         double squaredDistanceSum = 0.0;
-        for (int i = 0; i < values.Length; i++)
+        int index = 0;
+        if (Avx.IsSupported && float.IsFinite(mean))
         {
-            float distance = (float)values[i] - mean;
+            // A finite sequential mean implies all converted inputs were finite.
+            // Float differences/products may still overflow, as in the scalar path.
+            ref double first = ref MemoryMarshal.GetReference(values);
+            int vectorEnd = values.Length - (values.Length % 4);
+            Vector128<float> meanVector = Vector128.Create(mean);
+            for (; index < vectorEnd; index += 4)
+            {
+                Vector128<float> samples = Avx.ConvertToVector128Single(
+                    Vector256.LoadUnsafe(ref first, (nuint)index));
+                Vector128<float> distances = Sse.Subtract(samples, meanVector);
+                Vector128<float> squares = Sse.Multiply(distances, distances);
+
+                // Widen each float product, retaining the original double sum order.
+                squaredDistanceSum += (double)squares.GetElement(0);
+                squaredDistanceSum += (double)squares.GetElement(1);
+                squaredDistanceSum += (double)squares.GetElement(2);
+                squaredDistanceSum += (double)squares.GetElement(3);
+            }
+        }
+        for (; index < values.Length; index++)
+        {
+            float distance = (float)values[index] - mean;
             squaredDistanceSum += distance * distance;
         }
 
