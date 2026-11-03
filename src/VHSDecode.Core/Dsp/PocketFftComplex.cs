@@ -30,8 +30,6 @@ public static class PocketFftComplex
     [ThreadStatic]
     private static Complex[]? _packetFirst;
     [ThreadStatic]
-    private static Complex[]? _packetSecond;
-    [ThreadStatic]
     private static Complex[]? _realInput;
     [ThreadStatic]
     private static Value[]? _planScratch;
@@ -98,16 +96,31 @@ public static class PocketFftComplex
             }
         }
 
-        Complex[] secondPacketBuffer = EnsureCapacity(ref _packetSecond, secondPacketLength);
-        Span<Complex> secondPacket = secondPacketBuffer.AsSpan(0, secondPacketLength);
+        // The first pass consumed all input, so each stage row can now be reused,
+        // including when the caller's input and output alias.
         for (int k = 0; k < firstPacketLength; k++)
         {
-            int offset = secondPacketLength * k;
-            stage.AsSpan(offset, secondPacketLength).CopyTo(secondPacket);
-            packetPlan.SecondPlan.Transform(secondPacket, secondPacket, forward);
-            for (int m = 0; m < secondPacketLength; m++)
+            Span<Complex> row = stage.AsSpan(k * secondPacketLength, secondPacketLength);
+            packetPlan.SecondPlan.Transform(row, row, forward);
+        }
+
+        // Tile the final copy for contiguous output writes. Use active packet
+        // dimensions: retained TLS stage capacity can belong to a larger FFT.
+        const int tileLength = 16;
+        for (int rowStart = 0; rowStart < secondPacketLength; rowStart += tileLength)
+        {
+            int rowEnd = Math.Min(rowStart + tileLength, secondPacketLength);
+            for (int columnStart = 0; columnStart < firstPacketLength; columnStart += tileLength)
             {
-                output[k + (firstPacketLength * m)] = secondPacket[m];
+                int columnEnd = Math.Min(columnStart + tileLength, firstPacketLength);
+                for (int row = rowStart; row < rowEnd; row++)
+                {
+                    int outputOffset = row * firstPacketLength;
+                    for (int column = columnStart; column < columnEnd; column++)
+                    {
+                        output[outputOffset + column] = stage[column * secondPacketLength + row];
+                    }
+                }
             }
         }
 
