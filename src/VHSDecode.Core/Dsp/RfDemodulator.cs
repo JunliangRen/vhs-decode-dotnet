@@ -826,11 +826,7 @@ public sealed class RfDemodulator : IDisposable
             {
                 rfHighPassSpectrum = ApplyFrequencyFilter(spectrum, rfHighPassFilter);
                 InverseLaserDiscFullSpectrumInPlace(rfHighPassSpectrum);
-                rfHighPass = new double[rfHighPassSpectrum.Length];
-                for (int i = 0; i < rfHighPass.Length; i++)
-                {
-                    rfHighPass[i] = rfHighPassSpectrum[i].Real;
-                }
+                rfHighPass = ExtractReal(rfHighPassSpectrum);
             }
             else
             {
@@ -1231,11 +1227,7 @@ public sealed class RfDemodulator : IDisposable
                 videoComplex = InverseLaserDiscFullSpectrum(videoSpectrum);
             }
 
-            video = new double[videoComplex.Length];
-            for (int i = 0; i < video.Length; i++)
-            {
-                video[i] = videoComplex[i].Real;
-            }
+            video = ExtractReal(videoComplex);
         }
 
         ReadOnlySpan<Complex> activeVideoSpectrum;
@@ -1326,11 +1318,7 @@ public sealed class RfDemodulator : IDisposable
             Complex[] videoLowPassSpectrum = videoSpectrum!;
             ApplyFrequencyFilter(demodSpectrum!, videoLowPassFilter, videoLowPassSpectrum);
             InverseLaserDiscFullSpectrumInPlace(videoLowPassSpectrum);
-            videoLowPass = new double[videoLowPassSpectrum.Length];
-            for (int i = 0; i < videoLowPass.Length; i++)
-            {
-                videoLowPass[i] = videoLowPassSpectrum[i].Real;
-            }
+            videoLowPass = ExtractReal(videoLowPassSpectrum);
         }
 
         if (videoLowPassOffset != 0)
@@ -2290,11 +2278,7 @@ public sealed class RfDemodulator : IDisposable
             static size => PortedMath.BuildHilbertMultiplier(size));
 
     private static double[] ExtractReal(ReadOnlySpan<Complex> values)
-    {
-        var output = new double[values.Length];
-        ExtractReal(values, output);
-        return output;
-    }
+        => ComplexRealExtractor.Create(values);
 
     private static void ExtractReal(
         ReadOnlySpan<Complex> values,
@@ -2534,11 +2518,7 @@ public sealed class RfDemodulator : IDisposable
 
         ApplyFrequencyFilter(spectrum, filter, filteredSpectrum);
         InverseLaserDiscFullSpectrumInPlace(filteredSpectrum);
-        var output = new double[filteredSpectrum.Length];
-        for (int i = 0; i < output.Length; i++)
-        {
-            output[i] = filteredSpectrum[i].Real;
-        }
+        double[] output = ExtractReal(filteredSpectrum);
 
         if (offset != 0)
         {

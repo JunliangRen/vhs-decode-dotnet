@@ -369,7 +369,9 @@ jobs:
           --filter-class VHSDecode.Tests.LaserDiscComplexFilterCompatibilityTests
           --filter-class VHSDecode.Tests.NumbaMixedPrecisionStandardDeviationTests
           --filter-class VHSDecode.Tests.LaserDiscDropoutNumericsCompatibilityTests
-          --minimum-expected-tests 73 --timeout 5m
+          --filter-class VHSDecode.Tests.ComplexRealExtractorTests
+          --filter-class VHSDecode.Tests.LaserDiscDemodDropoutComparisonTests
+          --minimum-expected-tests 135 --timeout 5m
 
       - name: Restore Windows x64 publish assets
         run: dotnet restore src/VHSDecode.Cli/VHSDecode.Cli.csproj --runtime win-x64
