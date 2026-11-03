@@ -7359,42 +7359,19 @@ public sealed class TbcFieldDecodePipeline : IDisposable
             ? (float)(NumbaReduction.StandardDeviationFloat32InputToFloat64(span.RfHighPass!) * 3.0)
             : float.PositiveInfinity;
 
-        for (int i = startSample; i < endSample; i++)
-        {
-            float minimum = syncArea[i] ? syncMin : validMin;
-            float video = (float)span.Video[i];
-            bool videoOutOfRange = video < minimum || video > validMax;
-            bool rawDemodOutOfRange = hasRawDemod && (float)span.DemodRaw[i] > rawDemodMaximum;
-            bool videoLowPassOutOfRange = false;
-            if (hasVideoLowPass)
-            {
-                float lowPassMinimum = syncArea[i] ? syncMin05 : validMin05;
-                float lowPassVideo = (float)span.VideoLowPass![i];
-                videoLowPassOutOfRange = lowPassVideo < lowPassMinimum || lowPassVideo > validMax05;
-            }
-
-            errorMap[i] = videoOutOfRange || rawDemodOutOfRange || videoLowPassOutOfRange;
-        }
-
-        if (hasRfHighPass)
-        {
-            for (int i = startSample; i < endSample; i++)
-            {
-                // Upstream compares a float32 array with a Python scalar, which NumPy
-                // resolves back to a float32 comparison threshold.
-                float value = (float)span.RfHighPass![i];
-                if (!(value < -rfHighPassMaximum || value > rfHighPassMaximum))
-                {
-                    continue;
-                }
-
-                int mapped = i + _rfHighPassOffset;
-                if (mapped >= startSample && mapped < endSample)
-                {
-                    errorMap[mapped] = true;
-                }
-            }
-        }
+        LaserDiscDemodDropoutComparison.FillErrorMap(
+            span,
+            syncArea,
+            errorMap,
+            startSample,
+            endSample,
+            new LaserDiscDemodDropoutComparison.Thresholds(
+                validMin, validMax, syncMin, validMin05, validMax05, syncMin05,
+                rawDemodMaximum, rfHighPassMaximum),
+            hasRawDemod,
+            hasVideoLowPass,
+            hasRfHighPass,
+            _rfHighPassOffset);
 
         return LaserDiscDropoutDetector.BuildErrorRanges(
             errorMap,
