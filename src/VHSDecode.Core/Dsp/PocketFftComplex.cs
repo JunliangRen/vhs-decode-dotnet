@@ -78,7 +78,7 @@ public static class PocketFftComplex
                 firstPacket[m] = input[i + (secondPacketLength * m)];
             }
 
-            packetPlan.FirstPlan.Transform(firstPacket, firstPacket, forward);
+            packetPlan.FirstPlan.TransformPacket(firstPacket, firstPacket, forward);
             for (int m = 0; m < firstPacketLength; m++)
             {
                 Complex value = firstPacket[m];
@@ -101,7 +101,7 @@ public static class PocketFftComplex
         for (int k = 0; k < firstPacketLength; k++)
         {
             Span<Complex> row = stage.AsSpan(k * secondPacketLength, secondPacketLength);
-            packetPlan.SecondPlan.Transform(row, row, forward);
+            packetPlan.SecondPlan.TransformPacket(row, row, forward);
         }
 
         // Tile the final copy for contiguous output writes. Use active packet
@@ -644,6 +644,59 @@ public static class PocketFftComplex
                 transformed.Overlaps(scratchValues, out int scratchOffset)
                 && scratchOffset == 0
                 && transformed.Length == scratchValues.Length);
+            return scratch;
+        }
+
+        // Only128-point packet plans use the fixed three-stage schedule.
+        // Ordinary FFTs and all larger packet plans keep the generic executor.
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        internal void TransformPacket(ReadOnlySpan<Complex> input, Span<Complex> output, bool forward)
+        {
+            if (_length == 128) TransformPacket128(input, output, forward);
+            else Transform(input, output, forward);
+        }
+
+        private void TransformPacket128(ReadOnlySpan<Complex> input, Span<Complex> output, bool forward)
+        {
+            if (input.Length != 128)
+                throw new ArgumentException("FFT input length does not match the plan length.", nameof(input));
+            if (output.Length != 128)
+                throw new ArgumentException("FFT output length does not match the plan length.", nameof(output));
+            System.Diagnostics.Debug.Assert(_factors.Length == 3
+                && _factors[0].Radix == 2 && _factors[1].Radix == 8 && _factors[2].Radix == 8);
+            Value[] scratchBuffer = EnsureCapacity(ref _planScratch, 128);
+            System.Diagnostics.Debug.Assert(Unsafe.SizeOf<Complex>() == Unsafe.SizeOf<Value>());
+            Span<Value> outputValues = MemoryMarshal.Cast<Complex, Value>(output);
+            Span<Value> source = scratchBuffer.AsSpan(0, 128);
+            // Plan128 has three passes, so old Transform selects TLS source and
+            // caller output as destination. Retain its exact initial CopyTo.
+            MemoryMarshal.Cast<Complex, Value>(input).CopyTo(source);
+            Span<Value> transformed = ExecutePacket128(
+                source, outputValues, forward, forward ? 1.0 : 1.0 / _length);
+            System.Diagnostics.Debug.Assert(transformed.Overlaps(outputValues, out int offset)
+                && offset == 0 && transformed.Length == outputValues.Length);
+        }
+
+        private Span<Value> ExecutePacket128(
+            Span<Value> data, Span<Value> scratch, bool forward, double normalization)
+        {
+            System.Diagnostics.Debug.Assert(_length == 128 && data.Length == 128 && scratch.Length == 128);
+            System.Diagnostics.Debug.Assert(!data.Overlaps(scratch));
+            bool allowPass8Avx = CanUsePass8Avx(data);
+            // Original Factorize128 order, input/destination swap and twiddles.
+            Pass2(64, 1, data, scratch, _factors[0].Twiddles, forward);
+            Pass8(8, 2, scratch, data, _factors[1].Twiddles, forward, allowPass8Avx);
+            if (allowPass8Avx)
+            {
+                if (forward) Pass8Terminal128<ForwardPass8Direction>(data, scratch);
+                else Pass8Terminal128<BackwardPass8Direction>(data, scratch);
+            }
+            else
+            {
+                Pass8(1, 16, data, scratch, _factors[2].Twiddles, forward, allowAvx: false);
+            }
+            if (normalization != 1.0)
+                ScaleInPlace(scratch, normalization, permitAvx: true);
             return scratch;
         }
 
@@ -1272,6 +1325,72 @@ public static class PocketFftComplex
                 TDirection.SpecialMultiply(
                     Subtract(a6, a7),
                     Unsafe.Add(ref twiddleStart, TwiddleIndex(6, i, ido)));
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveOptimization)]
+        private static void Pass8Terminal128<TDirection>(
+            ReadOnlySpan<Value> input,
+            Span<Value> output)
+            where TDirection : struct, IPass8Direction
+        {
+            System.Diagnostics.Debug.Assert(input.Length == 128 && output.Length == 128);
+            ref Value inputStart = ref MemoryMarshal.GetReference(input);
+            ref Value outputStart = ref MemoryMarshal.GetReference(output);
+            for (int k = 0; k < 16; k += 2)
+            {
+                int inputBase = 8 * k;
+                // Keep the scalar Pass8FirstIndex arithmetic sequence. Independent
+                // butterflies occupy the two128-bit halves; ido1 has no twiddles.
+                Pair(
+                    out Vector256<double> a1,
+                    out Vector256<double> a5,
+                    LoadAcrossButterflies(ref inputStart, inputBase + 1),
+                    LoadAcrossButterflies(ref inputStart, inputBase + 5));
+                Pair(
+                    out Vector256<double> a3,
+                    out Vector256<double> a7,
+                    LoadAcrossButterflies(ref inputStart, inputBase + 3),
+                    LoadAcrossButterflies(ref inputStart, inputBase + 7));
+                PairInPlace(ref a1, ref a3);
+                a3 = TDirection.RotateX90(a3);
+                a7 = TDirection.RotateX90(a7);
+                PairInPlace(ref a5, ref a7);
+                a5 = TDirection.RotateX45(a5);
+                a7 = TDirection.RotateX135(a7);
+                Pair(
+                    out Vector256<double> a0,
+                    out Vector256<double> a4,
+                    LoadAcrossButterflies(ref inputStart, inputBase),
+                    LoadAcrossButterflies(ref inputStart, inputBase + 4));
+                Pair(
+                    out Vector256<double> a2,
+                    out Vector256<double> a6,
+                    LoadAcrossButterflies(ref inputStart, inputBase + 2),
+                    LoadAcrossButterflies(ref inputStart, inputBase + 6));
+                Pair(out Vector256<double> output0, out Vector256<double> output4, Avx.Add(a0, a2), a1);
+                Pair(out Vector256<double> output2, out Vector256<double> output6, Avx.Subtract(a0, a2), a3);
+                a6 = TDirection.RotateX90(a6);
+                Pair(out Vector256<double> output1, out Vector256<double> output5, Avx.Add(a4, a6), a5);
+                Pair(out Vector256<double> output3, out Vector256<double> output7, Avx.Subtract(a4, a6), a7);
+                StoreTwoValues(ref outputStart, k, output0);
+                StoreTwoValues(ref outputStart, k + 16, output1);
+                StoreTwoValues(ref outputStart, k + 32, output2);
+                StoreTwoValues(ref outputStart, k + 48, output3);
+                StoreTwoValues(ref outputStart, k + 64, output4);
+                StoreTwoValues(ref outputStart, k + 80, output5);
+                StoreTwoValues(ref outputStart, k + 96, output6);
+                StoreTwoValues(ref outputStart, k + 112, output7);
+            }
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        private static Vector256<double> LoadAcrossButterflies(ref Value start, int firstIndex)
+        {
+            ref byte lowerAddress = ref Unsafe.As<Value, byte>(ref Unsafe.Add(ref start, firstIndex));
+            ref byte upperAddress = ref Unsafe.As<Value, byte>(ref Unsafe.Add(ref start, firstIndex + 8));
+            Vector128<double> lower = Unsafe.ReadUnaligned<Vector128<double>>(ref lowerAddress);
+            Vector128<double> upper = Unsafe.ReadUnaligned<Vector128<double>>(ref upperAddress);
+            return Vector256.Create(lower, upper);
         }
 
         private static void Pass8FirstIndex<TDirection>(

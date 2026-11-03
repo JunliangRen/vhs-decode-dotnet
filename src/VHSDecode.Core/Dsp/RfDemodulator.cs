@@ -2553,16 +2553,7 @@ public sealed class RfDemodulator : IDisposable
     }
 
     private static double[] ClipDemodForVideo(ReadOnlySpan<double> demod, double sampleRateHz)
-    {
-        double upper = sampleRateHz * 0.75;
-        var output = new double[demod.Length];
-        for (int i = 0; i < output.Length; i++)
-        {
-            output[i] = Math.Clamp(demod[i], 1_500_000.0, upper);
-        }
-
-        return output;
-    }
+        => DemodVideoClipper.Create(demod, sampleRateHz);
 
     private static void MultiplyFrequencyFilterInPlace(Complex[] spectrum, ReadOnlySpan<Complex> filter)
     {

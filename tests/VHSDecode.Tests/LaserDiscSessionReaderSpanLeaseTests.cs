@@ -103,6 +103,143 @@ public sealed class LaserDiscSessionReaderSpanLeaseTests
         }
     }
 
+    [Theory(DisplayName = "LD Envelope projection follows actual decoder options and never escapes a field")]
+    [InlineData(true)]
+    [InlineData(false)]
+    public void EnvelopeProjectionUsesActualOptionsAcrossDivergentSessionRecords(bool actualDemod)
+    {
+        string directory = CreateTempDirectory();
+        try
+        {
+            using DecodeSession owner = CreateSession(Path.Combine(directory, "projection"), verboseVits: false);
+            TbcFieldDecodePipeline actualDecoder = actualDemod
+                ? owner.TbcFieldDecoder
+                : new TbcFieldDecodePipeline(
+                    VHSDecode.Core.Dsp.SyncAnalyzer.FromParameters(owner.Parameters, owner.DecodeSampleRateHz),
+                    owner.TbcRenderer, owner.VideoOutput, owner.System,
+                    TbcDropoutDetectionOptions.DefaultDdd, decodeType: "ld");
+            DecodeSession session = owner with
+            {
+                TbcFieldDecoder = actualDecoder,
+                DropoutOptions = actualDemod
+                    ? TbcDropoutDetectionOptions.DefaultDdd
+                    : TbcDropoutDetectionOptions.LaserDisc
+            };
+            Assert.Equal(actualDemod, session.TbcFieldDecoder.CanOmitEnvelopeForImmediateLaserDiscField);
+            // Only owner is disposed: the record copy shares all its RF resources.
+            using var input = new MemoryStream(BuildPalLaserDiscRf(), writable: false);
+            int readLength = DecodeReadWindowPlanner.EstimateReadSampleCount(session, extraReadLines: 3);
+            DecodeReadWindow window = DecodeReadWindowPlanner.Resolve(session, 0, readLength);
+            double[] pooledEnvelope;
+            double[] expectedEnvelope;
+            const long poisonBits = 0x7FF8_0123_4567_89AB;
+            double poison = BitConverter.Int64BitsToDouble(poisonBits);
+            using (var warmup = session.StreamDecoder.ReadLeased(input, window.StartSample, window.SampleCount)!)
+            {
+                pooledEnvelope = warmup.Span.Envelope!;
+                expectedEnvelope = pooledEnvelope.ToArray();
+                Array.Fill(pooledEnvelope, poison);
+            }
+            TbcDecodedField field = Assert.IsType<TbcDecodedField>(ReadSessionField(session, input, readLength));
+            if (actualDemod)
+                Assert.All(pooledEnvelope, sample => Assert.Equal(poisonBits, BitConverter.DoubleToInt64Bits(sample)));
+            else
+                Assert.True(System.Runtime.InteropServices.MemoryMarshal.AsBytes(expectedEnvelope.AsSpan())
+                    .SequenceEqual(System.Runtime.InteropServices.MemoryMarshal.AsBytes(pooledEnvelope.AsSpan())));
+            ushort[] samples = field.Samples.ToArray();
+            short[]? efm = field.Efm?.ToArray(), pcm = field.AudioPcm?.ToArray(), rf = field.RfTbc?.ToArray();
+            string description = DescribeField(field);
+            using (var next = session.StreamDecoder.ReadLeased(input, window.StartSample, window.SampleCount)!)
+            {
+                Assert.Same(pooledEnvelope, next.Span.Envelope);
+                Assert.True(System.Runtime.InteropServices.MemoryMarshal.AsBytes(expectedEnvelope.AsSpan())
+                    .SequenceEqual(System.Runtime.InteropServices.MemoryMarshal.AsBytes(next.Span.Envelope!.AsSpan())));
+                Array.Fill(next.Span.Video, poison);
+                Array.Fill(next.Span.Input, poison);
+                Array.Fill(next.Span.Envelope!, poison);
+                if (next.Span.Efm is { } nextEfm) Array.Fill(nextEfm, (short)-321);
+            }
+            Assert.Equal(samples, field.Samples);
+            Assert.Equal(efm, field.Efm);
+            Assert.Equal(pcm, field.AudioPcm);
+            Assert.Equal(rf, field.RfTbc);
+            Assert.Equal(description, DescribeField(field));
+        }
+        finally
+        {
+            Directory.Delete(directory, recursive: true);
+        }
+    }
+
+    [Fact(DisplayName = "LD first-field owned read ignores poisoned lease buffers and retains independent payloads")]
+    public void FirstFieldOwnedReadIgnoresPoisonedLeaseBuffersAndRetainsIndependentPayloads()
+    {
+        string directory = CreateTempDirectory();
+        try
+        {
+            using DecodeSession eagerSession = CreateSession(Path.Combine(directory, "first-eager"), verboseVits: false);
+            using DecodeSession actualSession = CreateSession(Path.Combine(directory, "first-poisoned"), verboseVits: false);
+            byte[] bytes = BuildPalLaserDiscRf();
+            using var eagerInput = new MemoryStream(bytes, writable: false);
+            using var actualInput = new MemoryStream(bytes, writable: false);
+            int readLength = DecodeReadWindowPlanner.EstimateReadSampleCount(actualSession, extraReadLines: 3);
+            DecodeReadWindow window = DecodeReadWindowPlanner.Resolve(actualSession, 0, readLength);
+            const long poisonBits = 0x7FF8_0123_4567_89AB;
+            double poison = BitConverter.Int64BitsToDouble(poisonBits);
+            // Match both readers' RF/cache/MTF histories; only the released pool bytes differ.
+            using (var warmup = eagerSession.StreamDecoder.ReadLeased(
+                eagerInput, window.StartSample, window.SampleCount)!)
+                Assert.NotNull(warmup.Span.Envelope);
+            double[] pooledEnvelope, pooledVideo;
+            using (var warmup = actualSession.StreamDecoder.ReadLeased(
+                actualInput, window.StartSample, window.SampleCount)!)
+            {
+                pooledEnvelope = warmup.Span.Envelope!;
+                pooledVideo = warmup.Span.Video;
+                Array.Fill(pooledEnvelope, poison);
+                Array.Fill(pooledVideo, poison);
+            }
+
+            var engine = new TbcFirstFieldDecodeEngine();
+            TbcDecodedField expected = engine.DecodeFirstField(eagerSession, eagerInput);
+            TbcDecodedField actual = engine.DecodeFirstField(actualSession, actualInput);
+            Assert.Equal(expected.Samples, actual.Samples);
+            Assert.Equal(expected.Efm, actual.Efm);
+            Assert.Equal(expected.AudioPcm, actual.AudioPcm);
+            Assert.Equal(expected.RfTbc, actual.RfTbc);
+            Assert.Equal(DescribeField(expected), DescribeField(actual));
+            Assert.All(pooledEnvelope, value => Assert.Equal(poisonBits, BitConverter.DoubleToInt64Bits(value)));
+            Assert.All(pooledVideo, value => Assert.Equal(poisonBits, BitConverter.DoubleToInt64Bits(value)));
+            ushort[] samples = actual.Samples.ToArray();
+            short[]? efm = actual.Efm?.ToArray(), pcm = actual.AudioPcm?.ToArray(), rf = actual.RfTbc?.ToArray();
+            string description = DescribeField(actual);
+
+            using (var expectedC = eagerSession.StreamDecoder.ReadLeased(
+                eagerInput, window.StartSample, window.SampleCount)!)
+            using (var actualC = actualSession.StreamDecoder.ReadLeased(
+                actualInput, window.StartSample, window.SampleCount)!)
+            {
+                Assert.Same(pooledEnvelope, actualC.Span.Envelope);
+                Assert.True(System.Runtime.InteropServices.MemoryMarshal.AsBytes(expectedC.Span.Envelope!.AsSpan())
+                    .SequenceEqual(System.Runtime.InteropServices.MemoryMarshal.AsBytes(actualC.Span.Envelope!.AsSpan())));
+                Assert.All(actualC.Span.Envelope!, value => Assert.NotEqual(poisonBits, BitConverter.DoubleToInt64Bits(value)));
+                Array.Fill(actualC.Span.Input, poison);
+                Array.Fill(actualC.Span.Video, poison);
+                Array.Fill(actualC.Span.Envelope!, poison);
+                if (actualC.Span.Efm is { } sourceEfm) Array.Fill(sourceEfm, (short)-321);
+            }
+            Assert.Equal(samples, actual.Samples);
+            Assert.Equal(efm, actual.Efm);
+            Assert.Equal(pcm, actual.AudioPcm);
+            Assert.Equal(rf, actual.RfTbc);
+            Assert.Equal(description, DescribeField(actual));
+        }
+        finally
+        {
+            Directory.Delete(directory, recursive: true);
+        }
+    }
+
     private static TbcDecodedField? ReadEagerField(
         DecodeSession session,
         Stream input,

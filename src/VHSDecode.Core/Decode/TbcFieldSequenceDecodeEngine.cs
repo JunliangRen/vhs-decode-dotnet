@@ -1382,13 +1382,20 @@ public sealed class TbcFieldSequenceDecodeEngine
         {
             // LD materializes every field payload before Decode returns. Verbose
             // VITS retains raw input/video arrays and must keep owning its span.
-            using RfBlockStreamDecoder.RfDecodedSpanLease? lease = session.StreamDecoder.ReadLeased(
-                input,
-                window.StartSample,
-                window.SampleCount);
+            TbcFieldDecodePipeline fieldDecoder = session.TbcFieldDecoder;
+            using RfBlockStreamDecoder.RfDecodedSpanLease? lease =
+                fieldDecoder.CanOmitEnvelopeForImmediateLaserDiscField
+                    ? session.StreamDecoder.ReadLeasedForImmediateLaserDiscField(
+                        input,
+                        window.StartSample,
+                        window.SampleCount)
+                    : session.StreamDecoder.ReadLeased(
+                        input,
+                        window.StartSample,
+                        window.SampleCount);
             return lease is null
                 ? null
-                : session.TbcFieldDecoder.Decode(lease.Span, fieldNumber: fieldNumber);
+                : fieldDecoder.Decode(lease.Span, fieldNumber: fieldNumber);
         }
 
         RfDecodedSpan? span = session.StreamDecoder.Read(input, window.StartSample, window.SampleCount);
