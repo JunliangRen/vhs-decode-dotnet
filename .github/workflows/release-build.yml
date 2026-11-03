@@ -352,6 +352,11 @@ jobs:
           DOTNET_EnableAVX2: "0"
         run: dotnet test tests/VHSDecode.Tests/VHSDecode.Tests.csproj --configuration Release --no-build --no-restore --filter FullyQualifiedName~LibsndfilePcm16SampleLoaderTests --minimum-expected-tests 64 --timeout 5m
 
+      - name: Run LaserDisc EFM scalar fallback tests
+        env:
+          DOTNET_EnableAVX2: "0"
+        run: dotnet test tests/VHSDecode.Tests/VHSDecode.Tests.csproj --configuration Release --no-build --no-restore --filter-class VHSDecode.Tests.LaserDiscEfmQuantizationTests --minimum-expected-tests 20 --timeout 5m
+
       - name: Restore Windows x64 publish assets
         run: dotnet restore src/VHSDecode.Cli/VHSDecode.Cli.csproj --runtime win-x64
 
