@@ -833,10 +833,10 @@ public sealed class RfBlockDecodePipeline : IDisposable
             sliced[i] *= filter.Stage1Filter[i];
         }
 
-        Complex[] analytic = _demodulator.InverseLaserDiscFullSpectrum(
+        _demodulator.InverseLaserDiscFullSpectrumInPlace(
             sliced,
             useDuccExact: false);
-        double[] demodulated = PortedMath.UnwrapHilbert(analytic, filter.SliceSampleRateHz);
+        double[] demodulated = PortedMath.UnwrapHilbert(sliced, filter.SliceSampleRateHz);
         for (int i = 0; i < demodulated.Length; i++)
         {
             demodulated[i] = (float)(demodulated[i] + filter.LowFrequencyHz);
@@ -862,13 +862,13 @@ public sealed class RfBlockDecodePipeline : IDisposable
             filtered[i] = spectrum[i] * filter[i];
         }
 
-        Complex[] complex = _demodulator.InverseLaserDiscFullSpectrum(
+        _demodulator.InverseLaserDiscFullSpectrumInPlace(
             filtered,
             useDuccExact: false);
-        var real = new double[complex.Length];
+        var real = new double[filtered.Length];
         for (int i = 0; i < real.Length; i++)
         {
-            real[i] = complex[i].Real;
+            real[i] = filtered[i].Real;
         }
 
         return real;

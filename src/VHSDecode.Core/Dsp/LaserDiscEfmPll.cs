@@ -34,23 +34,26 @@ public sealed class LaserDiscEfmPll
         }
 
         _pllResultCount = 0;
+        short prev = _zcPreviousInput;
+        double delta = _delta;
         foreach (short curr in input)
         {
-            short prev = _zcPreviousInput;
-            if ((prev < 0 && curr >= 0) || (prev >= 0 && curr < 0))
+            if ((prev ^ curr) < 0)
             {
                 double fraction = (double)-prev / (curr - prev);
-                PushEdge(_delta + fraction);
-                _delta = 1.0 - fraction;
+                PushEdge(delta + fraction);
+                delta = 1.0 - fraction;
             }
             else
             {
-                _delta += 1.0;
+                delta += 1.0;
             }
 
-            _zcPreviousInput = curr;
+            prev = curr;
         }
 
+        _zcPreviousInput = prev;
+        _delta = delta;
         var output = new byte[_pllResultCount];
         Array.Copy(_pllResult, output, output.Length);
         return output;

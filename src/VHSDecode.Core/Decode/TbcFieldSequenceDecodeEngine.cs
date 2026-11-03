@@ -1378,6 +1378,19 @@ public sealed class TbcFieldSequenceDecodeEngine
                 usePooledOutputBuffers: !retainVhsChromaBurstSamples);
         }
 
+        if (session.Spec.Name == "ld" && !session.TbcFieldDecoder.PreservesRawMetricSources)
+        {
+            // LD materializes every field payload before Decode returns. Verbose
+            // VITS retains raw input/video arrays and must keep owning its span.
+            using RfBlockStreamDecoder.RfDecodedSpanLease? lease = session.StreamDecoder.ReadLeased(
+                input,
+                window.StartSample,
+                window.SampleCount);
+            return lease is null
+                ? null
+                : session.TbcFieldDecoder.Decode(lease.Span, fieldNumber: fieldNumber);
+        }
+
         RfDecodedSpan? span = session.StreamDecoder.Read(input, window.StartSample, window.SampleCount);
         if (span is null)
         {

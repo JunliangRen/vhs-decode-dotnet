@@ -326,6 +326,18 @@ public sealed class TbcFieldRenderer
         Func<VideoOutputConverter?>? converterProvider,
         int? trackPhaseOverride)
     {
+        if (converterProvider is null && CanConvertPreparedFieldDirectly())
+        {
+            using TbcLineResampler.ResamplingPlan plan =
+                PrepareFieldResampling(lineLocations, firstLine, lineCount);
+            return RenderPreparedFieldPayload(
+                videoHz,
+                plan,
+                fieldNumber,
+                converterOverride,
+                trackPhaseOverride);
+        }
+
         double[] resampled = ResampleField(videoHz, lineLocations, firstLine, lineCount);
         return RenderResampledFieldPayload(
             resampled,

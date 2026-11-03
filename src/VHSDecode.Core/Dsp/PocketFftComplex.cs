@@ -24,6 +24,7 @@ public static class PocketFftComplex
     private static readonly SingleCreationCache<int, Plan> Plans = new();
     private static readonly SingleCreationCache<(int Length, int RootLength), Plan> RootedPlans = new();
     private static readonly SingleCreationCache<int, SinCos2PiByN> Roots = new();
+    private static readonly SingleCreationCache<int, DuccPacketPlan> DuccPacketPlans = new();
     [ThreadStatic]
     private static Complex[]? _packetStage;
     [ThreadStatic]
@@ -37,19 +38,6 @@ public static class PocketFftComplex
 
     public static Complex[] Forward(ReadOnlySpan<Complex> input)
         => Transform(input, forward: true);
-
-    private static void TransformWithRootLength(
-        ReadOnlySpan<Complex> input,
-        int rootLength,
-        bool forward,
-        Span<Complex> output)
-    {
-        ValidateLength(input.Length, nameof(input));
-        RootedPlans.GetOrAdd(
-                (input.Length, rootLength),
-                static key => new Plan(key.Length, key.RootLength))
-            .Transform(input, output, forward);
-    }
 
     private static Complex[] TransformDuccPacketized(ReadOnlySpan<Complex> input, bool forward)
     {
@@ -76,22 +64,12 @@ public static class PocketFftComplex
             throw new ArgumentException("FFT output length must match the input length.", nameof(output));
         }
 
-        int firstPacketLength = 1;
-        int secondPacketLength = 1;
-        for (int remaining = input.Length; remaining > 1; remaining >>= 1)
-        {
-            if (firstPacketLength > secondPacketLength)
-            {
-                secondPacketLength <<= 1;
-            }
-            else
-            {
-                firstPacketLength <<= 1;
-            }
-        }
-
         int length = input.Length;
-        SinCos2PiByN roots = Roots.GetOrAdd(length, static value => new SinCos2PiByN(value));
+        DuccPacketPlan packetPlan = DuccPacketPlans.GetOrAdd(
+            length,
+            static value => new DuccPacketPlan(value));
+        int firstPacketLength = packetPlan.FirstPacketLength;
+        int secondPacketLength = packetPlan.SecondPacketLength;
         Complex[] stage = EnsureCapacity(ref _packetStage, length);
         Complex[] firstPacketBuffer = EnsureCapacity(ref _packetFirst, firstPacketLength);
         Span<Complex> firstPacket = firstPacketBuffer.AsSpan(0, firstPacketLength);
@@ -102,13 +80,13 @@ public static class PocketFftComplex
                 firstPacket[m] = input[i + (secondPacketLength * m)];
             }
 
-            TransformWithRootLength(firstPacket, length, forward, firstPacket);
+            packetPlan.FirstPlan.Transform(firstPacket, firstPacket, forward);
             for (int m = 0; m < firstPacketLength; m++)
             {
                 Complex value = firstPacket[m];
                 if (i != 0 && m != 0)
                 {
-                    Value root = roots.Get(m * i);
+                    Value root = packetPlan.Twiddles[(i * firstPacketLength) + m];
                     Value multiplied = SpecialMultiply(
                         new Value(value.Real, value.Imaginary),
                         root,
@@ -126,7 +104,7 @@ public static class PocketFftComplex
         {
             int offset = secondPacketLength * k;
             stage.AsSpan(offset, secondPacketLength).CopyTo(secondPacket);
-            TransformWithRootLength(secondPacket, length, forward, secondPacket);
+            packetPlan.SecondPlan.Transform(secondPacket, secondPacket, forward);
             for (int m = 0; m < secondPacketLength; m++)
             {
                 output[k + (firstPacketLength * m)] = secondPacket[m];
@@ -141,6 +119,21 @@ public static class PocketFftComplex
         return input.Length > 10_000
             ? TransformDuccPacketized(input, forward: true)
             : Forward(input);
+    }
+
+    internal static void ForwardDuccInPlace(Complex[] values)
+    {
+        ArgumentNullException.ThrowIfNull(values);
+        ValidateLength(values.Length, nameof(values));
+        if (values.Length > 10_000)
+        {
+            TransformDuccPacketized(values, forward: true, values);
+        }
+        else
+        {
+            Plans.GetOrAdd(values.Length, static length => new Plan(length))
+                .Transform(values, values, forward: true);
+        }
     }
 
     internal static Complex[] ForwardDucc(ReadOnlySpan<double> input)
@@ -493,6 +486,57 @@ public static class PocketFftComplex
         }
 
         return buffer;
+    }
+
+    private sealed class DuccPacketPlan
+    {
+        internal DuccPacketPlan(int length)
+        {
+            int firstPacketLength = 1;
+            int secondPacketLength = 1;
+            for (int remaining = length; remaining > 1; remaining >>= 1)
+            {
+                if (firstPacketLength > secondPacketLength)
+                {
+                    secondPacketLength <<= 1;
+                }
+                else
+                {
+                    firstPacketLength <<= 1;
+                }
+            }
+
+            FirstPacketLength = firstPacketLength;
+            SecondPacketLength = secondPacketLength;
+            FirstPlan = RootedPlans.GetOrAdd(
+                (firstPacketLength, length),
+                static key => new Plan(key.Length, key.RootLength));
+            SecondPlan = RootedPlans.GetOrAdd(
+                (secondPacketLength, length),
+                static key => new Plan(key.Length, key.RootLength));
+            SinCos2PiByN roots = Roots.GetOrAdd(length, static value => new SinCos2PiByN(value));
+            // Use the same scalar root construction as DUCC's packet path once,
+            // then share these immutable values across transforms and workers.
+            Twiddles = new Value[length];
+            for (int i = 1; i < secondPacketLength; i++)
+            {
+                int offset = i * firstPacketLength;
+                for (int m = 1; m < firstPacketLength; m++)
+                {
+                    Twiddles[offset + m] = roots.Get(m * i);
+                }
+            }
+        }
+
+        internal int FirstPacketLength { get; }
+
+        internal int SecondPacketLength { get; }
+
+        internal Plan FirstPlan { get; }
+
+        internal Plan SecondPlan { get; }
+
+        internal Value[] Twiddles { get; }
     }
 
     private sealed class Plan

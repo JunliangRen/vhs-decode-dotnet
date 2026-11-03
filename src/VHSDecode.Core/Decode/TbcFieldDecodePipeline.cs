@@ -510,6 +510,8 @@ public sealed class TbcFieldDecodePipeline : IDisposable
 
     internal int WorkerThreads => _workerThreads;
 
+    internal bool PreservesRawMetricSources => _preserveRawMetricSources;
+
     internal UpstreamBehaviorProfile UpstreamBehaviorProfile => _upstreamBehaviorProfile;
 
     internal bool CanUseVhsWavefront
