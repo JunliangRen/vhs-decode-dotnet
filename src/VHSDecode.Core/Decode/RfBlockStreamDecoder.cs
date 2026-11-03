@@ -297,7 +297,27 @@ public sealed class RfBlockStreamDecoder : IDisposable
         }
     }
 
-    private RfDecodedSpanLease? ReadLeasedCore(Stream stream, long begin, int length)
+    // Only the immediate LD sequence reader may request this partial span after
+    // checking the actual field decoder's capability. Default reads stay complete.
+    internal RfDecodedSpanLease? ReadLeasedForImmediateLaserDiscField(Stream stream, long begin, int length)
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+        EnterOrdinaryCacheOperation();
+        try
+        {
+            return ReadLeasedCore(stream, begin, length, includeEnvelope: false);
+        }
+        finally
+        {
+            ExitOrdinaryCacheOperation();
+        }
+    }
+
+    private RfDecodedSpanLease? ReadLeasedCore(
+        Stream stream,
+        long begin,
+        int length,
+        bool includeEnvelope = true)
     {
         if (begin < 0)
         {
@@ -326,7 +346,8 @@ public sealed class RfBlockStreamDecoder : IDisposable
                 length,
                 buffers,
                 stageVhsPayload: false,
-                out _);
+                out _,
+                includeEnvelope);
             if (span is null)
             {
                 ReturnReusableSpanBuffers(buffers);
@@ -442,7 +463,8 @@ public sealed class RfBlockStreamDecoder : IDisposable
         int length,
         ReusableSpanBuffers? reusableBuffers,
         bool stageVhsPayload,
-        out VhsPayloadMaterializer? stagedMaterializer)
+        out VhsPayloadMaterializer? stagedMaterializer,
+        bool includeEnvelope = true)
     {
         stagedMaterializer = null;
         ObjectDisposedException.ThrowIf(_disposed, this);
@@ -551,7 +573,8 @@ public sealed class RfBlockStreamDecoder : IDisposable
                 pipelineBlock.Demodulated,
                 envelope,
                 destination,
-                offset);
+                offset,
+                includeEnvelope);
             if (videoLowPass.Length > 0)
             {
                 CopyVideoLowPassWindow(
@@ -686,7 +709,8 @@ public sealed class RfBlockStreamDecoder : IDisposable
                     demodulated,
                     envelope,
                     blockDestination,
-                    offset);
+                    offset,
+                    includeEnvelope);
                 if (chroma is not null && demodulated.Chroma is { } blockChroma)
                 {
                     CopyTrimmedWindow(blockChroma, chroma, blockDestination, offset);
@@ -1008,7 +1032,7 @@ public sealed class RfBlockStreamDecoder : IDisposable
                 input,
                 video,
                 demodRaw,
-                envelope,
+                includeEnvelope ? envelope : null,
                 _useApproxFloat32Sync ? null : videoLowPass,
                 rfHighPass,
                 efm,
@@ -1712,13 +1736,15 @@ public sealed class RfBlockStreamDecoder : IDisposable
         RfDemodulatedBlock source,
         double[] destination,
         int blockDestinationOffset,
-        int windowOffset)
+        int windowOffset,
+        bool includeOutput = true)
     {
         CopyTrimmedWindow(
             source.Envelope,
             destination,
             blockDestinationOffset,
-            windowOffset);
+            windowOffset,
+            copyOutput: includeOutput);
     }
 
     private void CopyVideoWindow(
@@ -1765,7 +1791,8 @@ public sealed class RfBlockStreamDecoder : IDisposable
         double[] destination,
         int blockDestinationOffset,
         int windowOffset,
-        int? sourceOffset = null)
+        int? sourceOffset = null,
+        bool copyOutput = true)
     {
         if (source.Length != BlockLength)
         {
@@ -1785,6 +1812,22 @@ public sealed class RfBlockStreamDecoder : IDisposable
         if (copyStart >= copyEnd)
         {
             return;
+        }
+
+        if (!copyOutput)
+        {
+            int sourceIndex = actualSourceOffset + (copyStart - blockDestinationOffset);
+            int destinationIndex = copyStart - windowOffset;
+            int count = copyEnd - copyStart;
+            if ((uint)sourceIndex <= (uint)source.Length
+                && (uint)destinationIndex <= (uint)destination.Length
+                && (uint)count <= (uint)(source.Length - sourceIndex)
+                && (uint)count <= (uint)(destination.Length - destinationIndex))
+            {
+                return;
+            }
+
+            // Invalid ranges still use Array.Copy's original validation and errors.
         }
 
         Array.Copy(

@@ -512,6 +512,15 @@ public sealed class TbcFieldDecodePipeline : IDisposable
 
     internal bool PreservesRawMetricSources => _preserveRawMetricSources;
 
+    internal bool CanOmitEnvelopeForImmediateLaserDiscField
+        => string.Equals(_decodeType, "ld", StringComparison.Ordinal)
+            && !_preserveRawMetricSources
+            && _dropoutOptions is
+            {
+                Enabled: true,
+                Mode: TbcDropoutDetectionMode.LaserDiscDemod
+            };
+
     internal UpstreamBehaviorProfile UpstreamBehaviorProfile => _upstreamBehaviorProfile;
 
     internal bool CanUseVhsWavefront
@@ -7350,7 +7359,9 @@ public sealed class TbcFieldDecodePipeline : IDisposable
         float validMax05 = (float)videoOutput.IreToHz(115.0);
         float syncMin05 = (float)videoOutput.IreToHz(videoOutput.VSyncIre - 10.0);
         bool[] syncArea = BuildSyncAreaMask(span.Video.Length, lineLocations, timing, isFirstField);
-        bool[] errorMap = new bool[span.Video.Length];
+        // FillErrorMap writes every active entry, including false;
+        // BuildErrorRanges reads only that completely overwritten interval.
+        bool[] errorMap = GC.AllocateUninitializedArray<bool>(span.Video.Length);
         bool hasRawDemod = span.DemodRaw.Length == span.Video.Length;
         bool hasVideoLowPass = span.VideoLowPass?.Length == span.Video.Length;
         bool hasRfHighPass = span.RfHighPass?.Length == span.Video.Length;
