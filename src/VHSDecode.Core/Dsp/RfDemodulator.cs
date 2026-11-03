@@ -250,12 +250,7 @@ public sealed class RfDemodulator : IDisposable
             return PocketFftComplex.ForwardDuccRealFull(input);
         }
 
-        var output = new Complex[input.Length];
-        for (int i = 0; i < output.Length; i++)
-        {
-            output[i] = new Complex(input[i], 0.0);
-        }
-
+        Complex[] output = IppComplexInputStager.Create(input);
         _ippComplexFftPool.Forward(output, output);
         return output;
     }

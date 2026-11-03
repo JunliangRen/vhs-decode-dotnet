@@ -357,6 +357,20 @@ jobs:
           DOTNET_EnableAVX2: "0"
         run: dotnet test tests/VHSDecode.Tests/VHSDecode.Tests.csproj --configuration Release --no-build --no-restore --filter-class VHSDecode.Tests.LaserDiscEfmQuantizationTests --minimum-expected-tests 20 --timeout 5m
 
+      - name: Run LaserDisc DSP scalar fallback tests
+        env:
+          DOTNET_EnableAVX: "0"
+          VHSDECODE_REQUIRE_IPP: "1"
+        run: >-
+          dotnet test tests/VHSDecode.Tests/VHSDecode.Tests.csproj
+          --configuration Release --no-build --no-restore
+          --filter-class VHSDecode.Tests.ComplexMultiplyTests
+          --filter-class VHSDecode.Tests.IppComplexInputStagerTests
+          --filter-class VHSDecode.Tests.LaserDiscComplexFilterCompatibilityTests
+          --filter-class VHSDecode.Tests.NumbaMixedPrecisionStandardDeviationTests
+          --filter-class VHSDecode.Tests.LaserDiscDropoutNumericsCompatibilityTests
+          --minimum-expected-tests 73 --timeout 5m
+
       - name: Restore Windows x64 publish assets
         run: dotnet restore src/VHSDecode.Cli/VHSDecode.Cli.csproj --runtime win-x64
 

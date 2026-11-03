@@ -872,9 +872,17 @@ public sealed class RfBlockDecodePipeline : IDisposable
         LaserDiscAnalogAudioChannelFilter filter)
     {
         Complex[] sliced = DecodeFilterSetBuilder.SliceSpectrum(spectrum, filter.LowBin, filter.BinCount, spectrum.Length);
-        for (int i = 0; i < sliced.Length; i++)
+        if (filter.Stage1Filter is { } stage1 && stage1.Length == sliced.Length)
         {
-            sliced[i] *= filter.Stage1Filter[i];
+            ComplexMultiply.ApplyInPlace(sliced, stage1);
+        }
+        else
+        {
+            // Preserve the original prefix/exception behavior for malformed lengths.
+            for (int i = 0; i < sliced.Length; i++)
+            {
+                sliced[i] *= filter.Stage1Filter[i];
+            }
         }
 
         _demodulator.InverseLaserDiscFullSpectrumInPlace(
@@ -901,10 +909,7 @@ public sealed class RfBlockDecodePipeline : IDisposable
         }
 
         var filtered = new Complex[spectrum.Length];
-        for (int i = 0; i < filtered.Length; i++)
-        {
-            filtered[i] = spectrum[i] * filter[i];
-        }
+        ComplexMultiply.Apply(spectrum, filter, filtered);
 
         _demodulator.InverseLaserDiscFullSpectrumInPlace(
             filtered,
