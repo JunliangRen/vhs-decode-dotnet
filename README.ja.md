@@ -2,14 +2,14 @@
 
 [English](README.md) | [简体中文](README.zh-CN.md) | **[日本語](README.ja.md)**
 
-<!-- README_SYNC: 2026-11-04.02 -->
+<!-- README_SYNC: 2026-11-05.01 -->
 
 [`oyvindln/vhs-decode`](https://github.com/oyvindln/vhs-decode) の
 デコード関連部分を .NET 11 で再実装するプロジェクトです。互換性の対象は
 upstream release `v0.4.0`、commit
 `43155200da87c0d49eb37d8ec09b1372075ee8e4` です。
 
-現在の .NET port release は [`v0.4.0-2.15.0`](https://github.com/JunliangRen/vhs-decode-dotnet/releases/tag/v0.4.0-2.15.0)（application version `2.15.0`）です。
+現在の .NET port release は [`v0.4.0-2.16.0`](https://github.com/JunliangRen/vhs-decode-dotnet/releases/tag/v0.4.0-2.16.0)（application version `2.16.0`）です。
 
 > [!IMPORTANT]
 > この互換移植は現在も開発中です。トップレベルのデコード経路は実装済みで
