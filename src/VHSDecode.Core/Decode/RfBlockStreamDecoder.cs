@@ -1015,7 +1015,8 @@ public sealed class RfBlockStreamDecoder : IDisposable
             if (audioLeft is not null && audioRight is not null)
             {
                 LaserDiscAnalogAudioBlock assembledAudio = _pipeline.ApplyLaserDiscAnalogAudioPhase2(
-                    new LaserDiscAnalogAudioBlock(audioLeft, audioRight, audioDecimationFactor));
+                    new LaserDiscAnalogAudioBlock(audioLeft, audioRight, audioDecimationFactor),
+                    WorkerThreads);
                 int audioOffset = offset / audioDecimationFactor;
                 int audioLength = Math.Min(
                     assembledAudio.Left.Length - audioOffset,

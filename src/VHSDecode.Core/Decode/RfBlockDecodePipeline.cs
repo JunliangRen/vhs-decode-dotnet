@@ -210,6 +210,16 @@ public sealed class RfBlockDecodePipeline : IDisposable
             : LaserDiscAnalogAudioPhase2.Apply(fieldAudio, _filters.LdAnalogAudio);
     }
 
+
+    internal LaserDiscAnalogAudioBlock ApplyLaserDiscAnalogAudioPhase2(
+        LaserDiscAnalogAudioBlock fieldAudio,
+        int workerBudget)
+    {
+        return _filters.LdAnalogAudio is null
+            ? fieldAudio
+            : LaserDiscAnalogAudioPhase2.ApplyForDecode(fieldAudio, _filters.LdAnalogAudio, workerBudget);
+    }
+
     public RfPipelineBlock? DecodeBlockWithInput(Stream stream, long sample, int blockLength)
     {
         double[]? input = LoadBlockInput(stream, sample, blockLength);

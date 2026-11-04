@@ -374,7 +374,8 @@ jobs:
           --filter-class VHSDecode.Tests.DemodVideoClipperTests
           --filter-class VHSDecode.Tests.LaserDiscUninitializedErrorMapTests
           --filter-class VHSDecode.Tests.PocketFftTerminal128Tests
-          --minimum-expected-tests 182 --timeout 5m
+          --filter-class VHSDecode.Tests.LaserDiscAudioPhase2SchedulingTests
+          --minimum-expected-tests 232 --timeout 5m
 
       - name: Restore Windows x64 publish assets
         run: dotnet restore src/VHSDecode.Cli/VHSDecode.Cli.csproj --runtime win-x64

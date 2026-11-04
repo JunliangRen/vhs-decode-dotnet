@@ -1,4 +1,6 @@
 using System.Numerics;
+using System.Runtime.ExceptionServices;
+using System.Runtime.Intrinsics.X86;
 using VHSDecode.Core.Dsp;
 
 namespace VHSDecode.Core.Decode;
@@ -202,5 +204,140 @@ public static class LaserDiscAnalogAudioPhase2
         }
 
         return output;
+    }
+
+    // Decode-only single padded field; public Apply retains the original serial path.
+    internal static LaserDiscAnalogAudioBlock ApplyForDecode(
+        LaserDiscAnalogAudioBlock fieldAudio,
+        LaserDiscAnalogAudioFilterSet filters,
+        int workerBudget)
+    {
+        const int parallelBlockLength = 32 * 1024;
+        if (workerBudget < 2 || !Avx2.IsSupported
+            || fieldAudio is null || filters is null
+            || fieldAudio.Left is null || fieldAudio.Right is null
+            || filters.Left is null || filters.Right is null
+            || filters.Left.Stage2Filter is null || filters.Right.Stage2Filter is null
+            || fieldAudio.Left.Length == 0
+            || fieldAudio.Left.Length >= parallelBlockLength
+            || fieldAudio.Right.Length != fieldAudio.Left.Length
+            || filters.Left.Stage2Filter.Length != parallelBlockLength
+            || filters.Right.Stage2Filter.Length != parallelBlockLength)
+        {
+            return Apply(fieldAudio!, filters!);
+        }
+
+        int count = fieldAudio.Left.Length;
+        float[] left = PrepareChannel(
+            fieldAudio.Left,
+            0,
+            count,
+            filters.Left.CenterFrequencyHz);
+        int[] peaks = FindPeaks(left, PeakThresholdHz);
+        SuppressPeaks(left, peaks);
+        float[] right = PrepareChannel(
+            fieldAudio.Right,
+            0,
+            count,
+            filters.Right.CenterFrequencyHz);
+        SuppressPeaks(right, peaks);
+
+        double[] leftOutput;
+        double[] rightOutput;
+        if (HasBoundedPreparedAudio(
+                left,
+                right,
+                filters.Left.Stage2Filter,
+                filters.Right.Stage2Filter,
+                filters.Left.CenterFrequencyHz,
+                filters.Right.CenterFrequencyHz))
+        {
+            (leftOutput, rightOutput) = FilterPreparedChannelsParallel(
+                left,
+                right,
+                filters.Left.Stage2Filter,
+                filters.Right.Stage2Filter,
+                filters.Left.CenterFrequencyHz,
+                filters.Right.CenterFrequencyHz);
+        }
+        else
+        {
+            // Preparation already ran once in the same order as FilterBlock.
+            leftOutput = FilterChannel(left, filters.Left.Stage2Filter, filters.Left.CenterFrequencyHz);
+            rightOutput = FilterChannel(right, filters.Right.Stage2Filter, filters.Right.CenterFrequencyHz);
+        }
+
+        return new LaserDiscAnalogAudioBlock(
+            leftOutput,
+            rightOutput,
+            fieldAudio.DecimationFactor,
+            UsesFloat32Storage: false);
+    }
+
+    private static bool HasBoundedPreparedAudio(
+        float[] left,
+        float[] right,
+        Complex[] leftFilter,
+        Complex[] rightFilter,
+        double leftCenter,
+        double rightCenter)
+    {
+        // Exact 2^32 limits keep this fixed 32K graph far from double overflow.
+        // Integer tests reject special values without quieting their NaN bits.
+        if (!IsBoundedAudioValue(leftCenter) || !IsBoundedAudioValue(rightCenter))
+        {
+            return false;
+        }
+
+        foreach (float value in left) if (!IsBoundedAudioValue(value)) return false;
+        foreach (float value in right) if (!IsBoundedAudioValue(value)) return false;
+        foreach (Complex value in leftFilter)
+            if (!IsBoundedAudioValue(value.Real) || !IsBoundedAudioValue(value.Imaginary)) return false;
+        foreach (Complex value in rightFilter)
+            if (!IsBoundedAudioValue(value.Real) || !IsBoundedAudioValue(value.Imaginary)) return false;
+        return true;
+    }
+
+    private static bool IsBoundedAudioValue(float value)
+        => (BitConverter.SingleToUInt32Bits(value) & 0x7FFF_FFFFU) <= 0x4F80_0000U;
+
+    private static bool IsBoundedAudioValue(double value)
+        => (BitConverter.DoubleToUInt64Bits(value) & 0x7FFF_FFFF_FFFF_FFFFUL) <= 0x41F0_0000_0000_0000UL;
+
+    private static (double[] Left, double[] Right) FilterPreparedChannelsParallel(
+        float[] left,
+        float[] right,
+        Complex[] leftFilter,
+        Complex[] rightFilter,
+        double leftCenter,
+        double rightCenter)
+    {
+        // Keep the task closure out of every public/serial fallback entry.
+        Task<double[]> rightTask = Task.Run(() => FilterChannel(right, rightFilter, rightCenter));
+        double[]? leftOutput = null;
+        double[]? rightOutput = null;
+        ExceptionDispatchInfo? leftError = null;
+        ExceptionDispatchInfo? rightError = null;
+        try
+        {
+            leftOutput = FilterChannel(left, leftFilter, leftCenter);
+        }
+        catch (Exception error)
+        {
+            leftError = ExceptionDispatchInfo.Capture(error);
+        }
+
+        try
+        {
+            rightOutput = rightTask.GetAwaiter().GetResult();
+        }
+        catch (Exception error)
+        {
+            rightError = ExceptionDispatchInfo.Capture(error);
+        }
+
+        leftError?.Throw();
+        rightError?.Throw();
+        return (leftOutput!, rightOutput!);
     }
 }
