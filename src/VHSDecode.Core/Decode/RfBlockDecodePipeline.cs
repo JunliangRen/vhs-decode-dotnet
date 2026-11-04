@@ -159,6 +159,14 @@ public sealed class RfBlockDecodePipeline : IDisposable
 
     internal bool RetainsRfDiagnosticChannels => _retainRfDiagnosticChannels;
 
+    internal bool CanOmitEnvelopeForOwnedImmediateLaserDisc =>
+        _filterOptions.LdClipDemodForVideo
+        && _retainRfDiagnosticChannels
+        && _cvbsOptions is null
+        && _demodulator.DspBackend is DspBackend.Exact or DspBackend.IppFast
+        && _filterOptions.FmDemodulatorMode == RfFmDemodulatorMode.ConjugateProduct
+        && (_filterOptions.RfHighBoost is null || _filterOptions.RfHighBoost.Multiplier == 0.0);
+
     internal bool ParallelizesVhsInverseStaging =>
         _demodulator.ParallelizesVhsInverseStaging;
 
@@ -235,7 +243,8 @@ public sealed class RfBlockDecodePipeline : IDisposable
         Stream stream,
         long sample,
         int blockLength,
-        Complex[]? rfMtfOverride = null)
+        Complex[]? rfMtfOverride = null,
+        double[]? ownedImmediateEnvelopeShape = null)
     {
         double[]? input = LoadStreamBlockInput(stream, sample, blockLength);
         if (input is null)
@@ -245,7 +254,8 @@ public sealed class RfBlockDecodePipeline : IDisposable
 
         try
         {
-            return DecodePreparedStreamBlock(input, rfMtfOverride: rfMtfOverride);
+            return DecodePreparedStreamBlock(input, rfMtfOverride: rfMtfOverride,
+                ownedImmediateEnvelopeShape: ownedImmediateEnvelopeShape);
         }
         finally
         {
@@ -293,14 +303,16 @@ public sealed class RfBlockDecodePipeline : IDisposable
     internal RfPipelineBlock DecodePreparedStreamBlock(
         double[] input,
         bool reportDiagnostics = true,
-        Complex[]? rfMtfOverride = null)
+        Complex[]? rfMtfOverride = null,
+        double[]? ownedImmediateEnvelopeShape = null)
         => DecodePreparedBlockCore(
             input,
             reportDiagnostics,
             _retainRfDiagnosticChannels,
             reuseStreamOutputBuffers: !_retainRfDiagnosticChannels,
             includeAnalyticOutput: !_filterOptions.LdClipDemodForVideo,
-            rfMtfOverride);
+            rfMtfOverride,
+            ownedImmediateEnvelopeShape);
 
     private RfPipelineBlock DecodePreparedBlockCore(
         double[] input,
@@ -308,7 +320,8 @@ public sealed class RfBlockDecodePipeline : IDisposable
         bool retainRfDiagnosticChannels,
         bool reuseStreamOutputBuffers,
         bool includeAnalyticOutput,
-        Complex[]? rfMtfOverride = null)
+        Complex[]? rfMtfOverride = null,
+        double[]? ownedImmediateEnvelopeShape = null)
     {
         ArgumentNullException.ThrowIfNull(input);
 
@@ -367,7 +380,9 @@ public sealed class RfBlockDecodePipeline : IDisposable
                     : default,
                 approxChromaDestination: approxFrequencyDomainChroma,
                 useApproxDirectFloat32DiffRepair:
-                    useApproxFrequencyDomainChroma && _useDirectStreamOutputBufferLease);
+                    useApproxFrequencyDomainChroma && _useDirectStreamOutputBufferLease,
+                ownedImmediateLaserDiscEnvelopeShape: CanOmitEnvelopeForOwnedImmediateLaserDisc
+                    ? ownedImmediateEnvelopeShape : null);
             if (reportDiagnostics)
             {
                 ReportDiagnostics(demodulated);
