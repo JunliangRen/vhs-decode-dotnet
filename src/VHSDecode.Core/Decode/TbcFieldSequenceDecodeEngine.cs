@@ -290,6 +290,22 @@ public sealed class TbcFieldSequenceDecodeEngine
                 readField(session, input, begin, readLength, fieldNumber);
     }
 
+    private TbcFieldSequenceDecodeEngine(
+        RfBlockStreamDecoder.OwnedImmediateLaserDiscFieldReader ownedReader,
+        CancellationToken cancellationToken)
+        : this(cancellationToken: cancellationToken)
+    {
+        // Preserve _usesSessionReader=true and every default writer/option.
+        // Only this read closure receives the private cache-domain capability.
+        _readField = (session, input, begin, length, number, _) =>
+            ReadOwnedImmediateLaserDiscField(session, input, begin, length, number, ownedReader);
+    }
+
+    internal static TbcFieldSequenceDecodeEngine CreateForOwnedDefaultImmediateLaserDisc(
+        RfBlockStreamDecoder.OwnedImmediateLaserDiscFieldReader ownedReader,
+        CancellationToken cancellationToken)
+        => new(ownedReader, cancellationToken);
+
     public int ExtraReadLines { get; }
 
     internal bool EnableWorkerPrefetchForCustomReader { get; init; }
@@ -1348,6 +1364,34 @@ public sealed class TbcFieldSequenceDecodeEngine
         {
             session.StreamDecoder.InvalidateCachedBlocks();
         }
+    }
+
+    // Only the private default Runner's closure can call this LD-only route.
+    // Ordinary/public/custom readers keep their original six-argument body.
+    private static TbcDecodedField? ReadOwnedImmediateLaserDiscField(
+        DecodeSession session,
+        Stream input,
+        long begin,
+        int readLength,
+        int fieldNumber,
+        RfBlockStreamDecoder.OwnedImmediateLaserDiscFieldReader ownedReader)
+    {
+        DecodeReadWindow window = DecodeReadWindowPlanner.Resolve(session, begin, readLength);
+        TbcFieldDecodePipeline fieldDecoder = session.TbcFieldDecoder;
+        if (!ownedReader.IsFor(session.StreamDecoder)
+            || session.Spec.Name != "ld"
+            || !fieldDecoder.CanOmitEnvelopeForImmediateLaserDiscField)
+        {
+            throw new InvalidOperationException("The private LD reader's immutable field capability changed.");
+        }
+
+        using RfBlockStreamDecoder.RfDecodedSpanLease? lease = ownedReader.Read(
+            input,
+            window.StartSample,
+            window.SampleCount);
+        return lease is null
+            ? null
+            : fieldDecoder.Decode(lease.Span, fieldNumber: fieldNumber);
     }
 
     private static TbcDecodedField? ReadFieldFromSession(

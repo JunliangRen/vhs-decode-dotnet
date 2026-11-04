@@ -66,6 +66,8 @@ public sealed class RfBlockStreamDecoder : IDisposable
     private readonly bool _useApproxFloat32Sync;
     private readonly bool _useApproxFloat32FieldPayloads;
     private bool _disposed;
+    private int _hasStartedRead;
+    private OwnedImmediateLaserDiscFieldReader? _ownedImmediateReader;
 
     public RfBlockStreamDecoder(
         RfBlockDecodePipeline pipeline,
@@ -124,6 +126,91 @@ public sealed class RfBlockStreamDecoder : IDisposable
             prefetchWorkerLimit);
         _decodedBlockCacheCapacity = checked(DecodedBlockCacheCapacity + PrefetchBlocks);
         _laserDiscCompatibilityPrefetchBlocks = laserDiscCompatibilityPrefetchBlocks;
+    }
+
+    // One-way private lifetime. Cache invalidation must never reset this mode.
+    internal OwnedImmediateLaserDiscFieldReader? TryCreateOwnedImmediateLaserDiscFieldReader()
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+        if (PrefetchBlocks != 0 || !_pipeline.CanOmitEnvelopeForOwnedImmediateLaserDisc)
+        {
+            return null;
+        }
+        if (Interlocked.CompareExchange(ref _cacheOperationState, CacheOperationOrdinary, CacheOperationIdle)
+            != CacheOperationIdle)
+        {
+            return null;
+        }
+        try
+        {
+            if (Volatile.Read(ref _hasStartedRead) != 0
+                || _ownedImmediateReader is not null
+                || _decodedBlockCacheStream is not null
+                || _lastReadFirstBlock is not null
+                || _lastSequentialDecodedBlock is not null
+                || _prefetchOperation is not null
+                || _activeVhsPayload is not null
+                || _decodedBlockCache.Count != 0
+                || _prefetchedBlockCache.Count != 0
+                || _sequentialBlockCache.Count != 0
+                || _laserDiscCompatibilityMtfByBlock.Count != 0
+                || _serialDeferredReleases.Count != 0
+                || _reusableSpanBuffers.Any(static buffers => buffers is not null))
+            {
+                return null;
+            }
+            var reader = new OwnedImmediateLaserDiscFieldReader(this, new double[BlockLength]);
+            Volatile.Write(ref _ownedImmediateReader, reader);
+            return reader;
+        }
+        finally
+        {
+            ExitOrdinaryCacheOperation();
+        }
+    }
+
+    private void GuardExistingRead()
+    {
+        Interlocked.Exchange(ref _hasStartedRead, 1);
+        GuardOwnedDomain(reader: null);
+    }
+
+    private void GuardOwnedDomain(OwnedImmediateLaserDiscFieldReader? reader)
+    {
+        if (!ReferenceEquals(Volatile.Read(ref _ownedImmediateReader), reader))
+        {
+            throw new InvalidOperationException("A private LD RF cache can only be read by its owning field closure.");
+        }
+    }
+
+    internal sealed class OwnedImmediateLaserDiscFieldReader
+    {
+        private readonly RfBlockStreamDecoder _owner;
+        internal readonly double[] EnvelopeShape;
+
+        internal OwnedImmediateLaserDiscFieldReader(RfBlockStreamDecoder owner, double[] envelopeShape)
+        {
+            _owner = owner;
+            EnvelopeShape = envelopeShape;
+        }
+
+        internal bool IsFor(RfBlockStreamDecoder owner) => ReferenceEquals(_owner, owner);
+
+        internal RfDecodedSpanLease? Read(Stream stream, long begin, int length)
+        {
+            ObjectDisposedException.ThrowIf(_owner._disposed, _owner);
+            _owner.GuardOwnedDomain(this);
+            Interlocked.Exchange(ref _owner._hasStartedRead, 1);
+            _owner.EnterOrdinaryCacheOperation();
+            try
+            {
+                return _owner.ReadLeasedCore(stream, begin, length, includeEnvelope: false, ownedReader: this);
+            }
+            finally
+            {
+                _owner.ExitOrdinaryCacheOperation();
+            }
+        }
     }
 
     public int BlockLength { get; }
@@ -266,6 +353,7 @@ public sealed class RfBlockStreamDecoder : IDisposable
     public RfDecodedSpan? Read(Stream stream, long begin, int length)
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
+        GuardExistingRead();
         EnterOrdinaryCacheOperation();
         try
         {
@@ -286,6 +374,7 @@ public sealed class RfBlockStreamDecoder : IDisposable
     internal RfDecodedSpanLease? ReadLeased(Stream stream, long begin, int length)
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
+        GuardExistingRead();
         EnterOrdinaryCacheOperation();
         try
         {
@@ -302,6 +391,7 @@ public sealed class RfBlockStreamDecoder : IDisposable
     internal RfDecodedSpanLease? ReadLeasedForImmediateLaserDiscField(Stream stream, long begin, int length)
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
+        GuardExistingRead();
         EnterOrdinaryCacheOperation();
         try
         {
@@ -317,8 +407,10 @@ public sealed class RfBlockStreamDecoder : IDisposable
         Stream stream,
         long begin,
         int length,
-        bool includeEnvelope = true)
+        bool includeEnvelope = true,
+        OwnedImmediateLaserDiscFieldReader? ownedReader = null)
     {
+        GuardOwnedDomain(ownedReader);
         if (begin < 0)
         {
             throw new ArgumentOutOfRangeException(nameof(begin));
@@ -347,7 +439,8 @@ public sealed class RfBlockStreamDecoder : IDisposable
                 buffers,
                 stageVhsPayload: false,
                 out _,
-                includeEnvelope);
+                includeEnvelope,
+                ownedReader);
             if (span is null)
             {
                 ReturnReusableSpanBuffers(buffers);
@@ -365,6 +458,7 @@ public sealed class RfBlockStreamDecoder : IDisposable
 
     internal RfDecodedSpanLease? ReadVhsStagedLeased(Stream stream, long begin, int length)
     {
+        GuardExistingRead();
         if (WorkerThreads <= 1
             || _pipeline.RequiresSequentialBlockDecode
             || _pipeline.RetainsRfDiagnosticChannels)
@@ -464,10 +558,12 @@ public sealed class RfBlockStreamDecoder : IDisposable
         ReusableSpanBuffers? reusableBuffers,
         bool stageVhsPayload,
         out VhsPayloadMaterializer? stagedMaterializer,
-        bool includeEnvelope = true)
+        bool includeEnvelope = true,
+        OwnedImmediateLaserDiscFieldReader? ownedReader = null)
     {
         stagedMaterializer = null;
         ObjectDisposedException.ThrowIf(_disposed, this);
+        GuardOwnedDomain(ownedReader);
         if (begin < 0)
         {
             throw new ArgumentOutOfRangeException(nameof(begin));
@@ -775,7 +871,8 @@ public sealed class RfBlockStreamDecoder : IDisposable
                             RfPipelineBlock? warmed = _pipeline.DecodeStreamBlockWithInput(
                                 stream,
                                 warmSample,
-                                BlockLength);
+                                BlockLength,
+                                ownedImmediateEnvelopeShape: _ownedImmediateReader?.EnvelopeShape);
                             if (warmed is null)
                             {
                                 return null;
@@ -805,7 +902,8 @@ public sealed class RfBlockStreamDecoder : IDisposable
                             stream,
                             sample,
                             BlockLength,
-                            LaserDiscCompatibilityMtfForBlock(block));
+                            LaserDiscCompatibilityMtfForBlock(block),
+                            ownedImmediateEnvelopeShape: _ownedImmediateReader?.EnvelopeShape);
                         if (pipelineBlock is not null && _pipeline.RequiresSequentialBlockDecode)
                         {
                             _sequentialBlockCache[block] = pipelineBlock;
@@ -903,7 +1001,8 @@ public sealed class RfBlockStreamDecoder : IDisposable
                             int blockIndex = missingBlocks[missingIndex];
                             decodedBlocks[blockIndex] = _pipeline.DecodePreparedStreamBlock(
                                 preparedInputs[blockIndex],
-                                rfMtfOverride: laserDiscCompatibilityMtf?[blockIndex]);
+                                rfMtfOverride: laserDiscCompatibilityMtf?[blockIndex],
+                                ownedImmediateEnvelopeShape: _ownedImmediateReader?.EnvelopeShape);
                         });
                     missingBlocksDecoded = true;
                 }
@@ -1521,7 +1620,8 @@ public sealed class RfBlockStreamDecoder : IDisposable
                             cancellationToken.ThrowIfCancellationRequested();
                             RfPipelineBlock decoded = _pipeline.DecodePreparedStreamBlock(
                                 workerInput,
-                                reportDiagnostics: false);
+                                reportDiagnostics: false,
+                                ownedImmediateEnvelopeShape: _ownedImmediateReader?.EnvelopeShape);
                             slot.Completion.TrySetResult(decoded);
                         }
                         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)

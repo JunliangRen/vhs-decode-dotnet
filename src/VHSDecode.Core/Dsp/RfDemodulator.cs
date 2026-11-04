@@ -415,7 +415,8 @@ public sealed class RfDemodulator : IDisposable
         bool useApproxRfMtfFilter = false,
         ReadOnlySpan<Complex32> approxChromaFilter = default,
         float[]? approxChromaDestination = null,
-        bool useApproxDirectFloat32DiffRepair = false)
+        bool useApproxDirectFloat32DiffRepair = false,
+        double[]? ownedImmediateLaserDiscEnvelopeShape = null)
     {
         ObjectDisposedException.ThrowIf(Volatile.Read(ref _disposed) != 0, this);
         bool produceApproxChroma = !approxChromaFilter.IsEmpty
@@ -887,7 +888,22 @@ public sealed class RfDemodulator : IDisposable
         double[]? reusableEnvelope = outputBuffers?.Envelope is { Length: > 0 } candidate
             ? candidate
             : null;
-        double[] envelope = useResidentApproxTimeDomain
+        // The shape belongs to a closed LD cache domain, never an output pool.
+        // A declined block computes its own original full Envelope instead.
+        bool useOwnedEnvelopeShape = ownedImmediateLaserDiscEnvelopeShape is { Length: > 0 }
+            && ownedImmediateLaserDiscEnvelopeShape.Length == input.Length
+            && analytic is not null && analytic.Length == input.Length
+            && outputBuffers is null
+            && !includeAnalyticOutput
+            && DspBackend is VHSDecode.Core.Dsp.DspBackend.Exact or VHSDecode.Core.Dsp.DspBackend.IppFast
+            && referenceFilters?.ClipDemodForVideo == true
+            && fmDemodulatorMode == RfFmDemodulatorMode.ConjugateProduct
+            && !useResidentApproxTimeDomain && vhsEnvelopeSource is null
+            && !vhsAnalyticComponentsReady
+            && (rfHighBoost is null || rfHighBoost.Multiplier == 0.0);
+        double[] envelope = useOwnedEnvelopeShape
+            ? ownedImmediateLaserDiscEnvelopeShape!
+            : useResidentApproxTimeDomain
             ? BuildVhsEnvelope(
                     vhsRealFftWorkspace!.ApproxRealInput,
                     vhsEnvelopeFilter!,

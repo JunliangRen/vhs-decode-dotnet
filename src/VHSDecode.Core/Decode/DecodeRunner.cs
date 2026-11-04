@@ -12,14 +12,15 @@ namespace VHSDecode.Core.Decode;
 
 public sealed class DecodeRunner
 {
+    private static readonly Func<CancellationToken, TbcFieldSequenceDecodeEngine> DefaultEngineFactory =
+        cancellationToken => new TbcFieldSequenceDecodeEngine(cancellationToken: cancellationToken);
     private readonly Func<CancellationToken, TbcFieldSequenceDecodeEngine> _engineFactory;
     private readonly IHiFiCommandRunner _hiFiRunner;
     private readonly ICudaFastDecodeRunner _cudaFastRunner;
 
     public DecodeRunner()
         : this(
-            cancellationToken => new TbcFieldSequenceDecodeEngine(
-                cancellationToken: cancellationToken),
+            DefaultEngineFactory,
             new HiFiDecodeRunner(),
             new CudaFastDecodeRunner())
     {
@@ -48,6 +49,32 @@ public sealed class DecodeRunner
         _engineFactory = engineFactory;
         _hiFiRunner = hiFiRunner;
         _cudaFastRunner = cudaFastRunner;
+    }
+
+    // Only the public default Runner has this factory identity. Ordinary
+    // construction finishes first; no publicly obtainable session is changed.
+    private static DecodeSession CreatePrivateDefaultRunnerSession(
+        ParsedCommand command,
+        out RfBlockStreamDecoder.OwnedImmediateLaserDiscFieldReader? ownedReader)
+    {
+        ownedReader = null;
+        DecodeSession session = DecodeSessionFactory.Create(command);
+        try
+        {
+            if (session.Spec.Name == "ld"
+                && !session.ExecutionOptions.SuppressFileOutputs
+                && session.TbcFieldDecoder.CanOmitEnvelopeForImmediateLaserDiscField)
+            {
+                ownedReader = session.StreamDecoder.TryCreateOwnedImmediateLaserDiscFieldReader();
+            }
+            return session;
+        }
+        catch
+        {
+            try { session.Dispose(); }
+            catch { /* Preserve private setup's primary failure. */ }
+            throw;
+        }
     }
 
     public int Run(
@@ -168,7 +195,10 @@ public sealed class DecodeRunner
                 }
                 else
                 {
-                    session = DecodeSessionFactory.Create(command);
+                    RfBlockStreamDecoder.OwnedImmediateLaserDiscFieldReader? ownedReader = null;
+                    session = ReferenceEquals(_engineFactory, DefaultEngineFactory)
+                        ? CreatePrivateDefaultRunnerSession(command, out ownedReader)
+                        : DecodeSessionFactory.Create(command);
                     session.RuntimeReporter = runtimeReporter;
                     DecodeSessionLogWriter.Write(
                         session,
@@ -203,7 +233,11 @@ public sealed class DecodeRunner
                             FormatIppDiagnostic(IppRuntime.RequireAvailable()));
                     }
 
-                    result = _engineFactory(cancellationToken).TryDecodeAndWrite(session);
+                    TbcFieldSequenceDecodeEngine engine = ownedReader is null
+                        ? _engineFactory(cancellationToken)
+                        : TbcFieldSequenceDecodeEngine.CreateForOwnedDefaultImmediateLaserDisc(
+                            ownedReader, cancellationToken);
+                    result = engine.TryDecodeAndWrite(session);
                 }
 
                 if (result.Success && command.Spec == CliSpecs.Cvbs)
