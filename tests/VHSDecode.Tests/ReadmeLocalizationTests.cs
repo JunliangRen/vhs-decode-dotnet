@@ -5,9 +5,9 @@ namespace VHSDecode.Tests;
 
 public sealed partial class ReadmeLocalizationTests
 {
-    private const string PinnedDotNetSdkVersion = "11.0.100-rc.2.26504.105";
+    private const string PinnedDotNetSdkVersion = "11.0.100-rc.3.26522.148";
 
-    private const string SetupDotNetStepName = "Set up .NET 11 RC2";
+    private const string SetupDotNetStepName = "Set up .NET 11 RC3";
 
     private const string VerifyPinnedDotNetSdkStepName = "Verify pinned .NET SDK";
 
