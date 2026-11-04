@@ -234,17 +234,20 @@ public sealed class VhsVSyncLevelRefinerCurrentTests
         var refiner = new VhsVSyncLevelRefiner();
         VhsVSyncLevelRefinementResult expected = refiner.Refine(vSync, -40.0, 0.0);
 
+        Span<VhsVSyncLevelRefinementResult> results =
+            stackalloc VhsVSyncLevelRefinementResult[8];
         long before = GC.GetAllocatedBytesForCurrentThread();
-        for (int iteration = 0; iteration < 8; iteration++)
+        for (int iteration = 0; iteration < results.Length; iteration++)
         {
-            VhsVSyncLevelRefinementResult actual = refiner.Refine(
-                vSync,
-                -40.0,
-                0.0);
-            AssertRefinementBitsEqual(expected, actual);
+            results[iteration] = refiner.Refine(vSync, -40.0, 0.0);
         }
 
+        // Measure the refiner without first-use allocations from xUnit assertions.
         long allocated = GC.GetAllocatedBytesForCurrentThread() - before;
+        foreach (VhsVSyncLevelRefinementResult actual in results)
+        {
+            AssertRefinementBitsEqual(expected, actual);
+        }
         Assert.InRange(allocated, 0, 64 * 1024);
     }
 
