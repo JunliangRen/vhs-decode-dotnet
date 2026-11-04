@@ -6,6 +6,9 @@ Both versions used the same native IPP bridge and Release build settings.
 Input: `D:\BmdFiles\DDD\10e_lxm_side1.ldf` (75,165,807,979 bytes), NTSC,
 with analog audio, EFM, dropout detection, AGC and automatic MTF enabled.
 
+For measured settings on the merged V6 binary, see [LD thread tuning](LD_THREAD_TUNING.md).
+That study validates the existing thread option on this host and sample.
+
 ## Complete change: repeated continuous decode
 
 With the kernel/buffer changes and guarded indexed fallback together, one
