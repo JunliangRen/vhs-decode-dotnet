@@ -1,5 +1,8 @@
 # LaserDisc performance validation — 2026-11-04
 
+Later incremental measurements: [V6 packet/field changes](LD_PERFORMANCE_V6.md)
+and [V7 bounded audio scheduling](LD_PERFORMANCE_V7.md).
+
 Baseline: `ff03b9b` on `main`. Windows x64, .NET 11 RC2
 (`11.0.0-rc.2.26504.105`), 20 logical processors, Intel IPP 2026.0.0.
 Both versions used the same native IPP bridge and Release build settings.
