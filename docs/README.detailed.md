@@ -4,14 +4,14 @@
 
 **[English](README.detailed.md)** | [简体中文](README.detailed.zh-CN.md) | [日本語](README.detailed.ja.md)
 
-<!-- README_SYNC: 2026-11-04.02 -->
+<!-- README_SYNC: 2026-11-05.01 -->
 
 .NET 11 rewrite of the decode-facing parts of
 [`oyvindln/vhs-decode`](https://github.com/oyvindln/vhs-decode), focused on
 release `v0.4.0` at commit
 `43155200da87c0d49eb37d8ec09b1372075ee8e4`.
 
-The current .NET port release is [`v0.4.0-2.15.0`](https://github.com/JunliangRen/vhs-decode-dotnet/releases/tag/v0.4.0-2.15.0) (application version `2.15.0`).
+The current .NET port release is [`v0.4.0-2.16.0`](https://github.com/JunliangRen/vhs-decode-dotnet/releases/tag/v0.4.0-2.16.0) (application version `2.16.0`).
 
 > [!IMPORTANT]
 > This is a work-in-progress compatibility port. The top-level decode paths are
