@@ -138,6 +138,7 @@ public sealed class DecodeRunner
                 command.Get<string>("dsp_backend"),
                 DspBackendParser.CudaFastValue,
                 StringComparison.OrdinalIgnoreCase);
+        bool cudaFastLaserDiscVideoOnly = cudaFastLaserDisc && command.Get<bool>("noefm");
         if (cudaFastLaserDisc && command.Get<bool>("preview_server"))
         {
             error.WriteLine("'cuda-fast' does not support LaserDisc preview.");
@@ -225,18 +226,30 @@ public sealed class DecodeRunner
                     session = cudaFastLaserDisc || ReferenceEquals(_engineFactory, DefaultEngineFactory)
                         ? CreatePrivateDefaultRunnerSession(sessionCommand, out ownedReader)
                         : DecodeSessionFactory.Create(sessionCommand);
-                    using ILaserDiscCudaEfm? cudaEfm = cudaFastLaserDisc
-                        ? AttachLaserDiscCudaEfm(session, ownedReader, output, cancellationToken)
+                    if (cudaFastLaserDisc)
+                    {
+                        ownedReader = RequireLaserDiscCudaReader(session, ownedReader);
+                        cancellationToken.ThrowIfCancellationRequested();
+                    }
+
+                    using ILaserDiscCudaEfm? cudaEfm = cudaFastLaserDisc && !cudaFastLaserDiscVideoOnly
+                        ? ownedReader!.AttachCudaEfm(filter => _laserDiscCudaEfmFactory(filter, output, cancellationToken))
                         : null;
                     if (cudaEfm is not null)
                     {
                         output.WriteLine(cudaEfm.Diagnostic);
                     }
 
-                    using ILaserDiscCudaVideo? cudaVideo = cudaEfm is not null
+                    bool requireCudaVideo = cudaFastLaserDiscVideoOnly && !session.RunBounds.RequestedFieldCount.IsZero;
+                    using ILaserDiscCudaVideo? cudaVideo = cudaEfm is not null || requireCudaVideo
                         ? ownedReader!.AttachCudaVideoIfSupported(() => _laserDiscCudaVideoFactory(
                             session.Filters, output, cancellationToken))
                         : null;
+                    if (requireCudaVideo && cudaVideo is null)
+                    {
+                        throw new NotSupportedException(
+                            "'cuda-fast' LaserDisc with --noEFM requires compatible NTSC video filters and AVX2/FMA.");
+                    }
                     if (cudaVideo is not null)
                     {
                         output.WriteLine("CUDA-fast LD video: post-FM filtering in eligible RF batches.");
@@ -279,9 +292,22 @@ public sealed class DecodeRunner
                     TbcFieldSequenceDecodeEngine engine = ownedReader is null
                         ? _engineFactory(cancellationToken)
                         : TbcFieldSequenceDecodeEngine.CreateForOwnedDefaultImmediateLaserDisc(
-                            ownedReader, cancellationToken);
+                            ownedReader, cancellationToken, deferCompletionReport: cudaFastLaserDiscVideoOnly);
                     result = engine.TryDecodeAndWrite(session);
-                    if (cudaEfm is not null && result.Success)
+                    if (cudaFastLaserDiscVideoOnly && result.Success)
+                    {
+                        long processedBlocks = cudaVideo?.ProcessedBlocks ?? 0;
+                        output.WriteLine(string.Create(CultureInfo.InvariantCulture, $"CUDA LD video blocks: {processedBlocks}"));
+                        if (requireCudaVideo && processedBlocks == 0)
+                        {
+                            result = result with
+                            {
+                                Success = false,
+                                Message = "CUDA-fast LaserDisc with --noEFM found no eligible RF batch for GPU video."
+                            };
+                        }
+                    }
+                    else if (cudaEfm is not null && result.Success)
                     {
                         long processedBlocks = cudaEfm.ProcessedBlocks;
                         if (result.WrittenFieldCount > 0 && processedBlocks == 0)
@@ -382,11 +408,6 @@ public sealed class DecodeRunner
             throw new NotSupportedException("'cuda-fast' LaserDisc currently supports NTSC only.");
         }
 
-        if (command.Get<bool>("noefm"))
-        {
-            throw new NotSupportedException("'cuda-fast' LaserDisc requires EFM output and cannot be used with --noEFM.");
-        }
-
         if (command.Values["inputfreq"] is double inputFrequency && inputFrequency != FrequencyParser.DddMHz)
         {
             throw new NotSupportedException("'cuda-fast' LaserDisc requires 40 MSPS RF input.");
@@ -404,11 +425,9 @@ public sealed class DecodeRunner
         return new ParsedCommand(command.Spec, values, [.. command.Positionals], command.ProgramName, command.OptionSources);
     }
 
-    private ILaserDiscCudaEfm AttachLaserDiscCudaEfm(
+    private static RfBlockStreamDecoder.OwnedImmediateLaserDiscFieldReader RequireLaserDiscCudaReader(
         DecodeSession session,
-        RfBlockStreamDecoder.OwnedImmediateLaserDiscFieldReader? ownedReader,
-        TextWriter output,
-        CancellationToken cancellationToken)
+        RfBlockStreamDecoder.OwnedImmediateLaserDiscFieldReader? ownedReader)
     {
         if (session.System != "NTSC"
             || session.DecodeSampleRateHz != 40_000_000.0
@@ -421,8 +440,7 @@ public sealed class DecodeRunner
                 "'cuda-fast' LaserDisc requires the NTSC 40 MSPS immediate field path with at least two RF worker threads.");
         }
 
-        cancellationToken.ThrowIfCancellationRequested();
-        return ownedReader.AttachCudaEfm(filter => _laserDiscCudaEfmFactory(filter, output, cancellationToken));
+        return ownedReader;
     }
 
     internal static string FormatIppDiagnostic(IppRuntimeInfo info)

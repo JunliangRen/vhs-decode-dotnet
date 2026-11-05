@@ -202,9 +202,13 @@ public sealed class RfBlockStreamDecoder : IDisposable
 
         internal ILaserDiscCudaVideo? AttachCudaVideoIfSupported(Func<ILaserDiscCudaVideo> factory)
         {
-            if (CudaEfm is null || CudaVideo is not null || Volatile.Read(ref _owner._hasStartedRead) != 0)
+            if (CudaVideo is not null || Volatile.Read(ref _owner._hasStartedRead) != 0)
             {
                 throw new InvalidOperationException("CUDA LD video must be attached before the first RF read.");
+            }
+            if (CudaEfm is null && _owner._pipeline.HasLaserDiscEfm)
+            {
+                throw new InvalidOperationException("CUDA LD video requires the CUDA EFM provider when EFM is enabled.");
             }
 
             if (!_owner._pipeline.CanDeferOwnedLaserDiscPostFmVideo
@@ -226,7 +230,7 @@ public sealed class RfBlockStreamDecoder : IDisposable
                 if (block.DemodRaw.Length != BlockLengthForCudaVideo
                     || block.Video.Length != 0 || block.VideoLowPass.Length != 0 || HasVideoBurst(block)
                     || block.VideoFloat32 is not null || block.VideoLowPassFloat32 is not null
-                    || block.Efm is not { Length: BlockLengthForCudaVideo })
+                    || (CudaEfm is null ? block.Efm is not null : block.Efm is not { Length: BlockLengthForCudaVideo }))
                 {
                     throw new InvalidOperationException("CUDA LD video received an invalid deferred RF block.");
                 }
@@ -1124,19 +1128,23 @@ public sealed class RfBlockStreamDecoder : IDisposable
                         seedTask = null;
                     }
 
-                    int[]? cudaOrdinals = null;
+                    ILaserDiscCudaEfm? cudaEfm = ownedReader?.CudaEfm;
                     int firstCudaOrdinal = seedBlockIndex >= 0 ? 1 : 0;
-                    if (seedFailure is null && ownedReader?.CudaEfm is { } cudaEfm && missingBlockCount > firstCudaOrdinal)
+                    int cudaBlockCount = missingBlockCount - firstCudaOrdinal;
+                    bool deferEfm = seedFailure is null && cudaEfm is not null && cudaBlockCount > 0;
+                    bool deferPostFmVideo = seedFailure is null && ownedReader?.CudaVideo is not null
+                        && cudaBlockCount is >= LaserDiscCudaVideo.MinBatchSize and <= LaserDiscCudaVideo.BatchCapacity;
+                    int[]? cudaOrdinals = null;
+                    if (deferEfm || deferPostFmVideo)
                     {
-                        // The first miss may already contain CPU EFM from the seed task.
+                        // The first miss may already have been decoded by the CPU seed task.
                         int[] ordinals = missingBlocks[firstCudaOrdinal..missingBlockCount];
                         cudaOrdinals = ordinals;
-                        efmTask = Task.Run(() => cudaEfm.Process(preparedInputs, ordinals, ordinals.Length));
+                        if (deferEfm)
+                        {
+                            efmTask = Task.Run(() => cudaEfm!.Process(preparedInputs, ordinals, ordinals.Length));
+                        }
                     }
-
-                    bool deferEfm = efmTask is not null;
-                    bool deferPostFmVideo = ownedReader?.CudaVideo is not null
-                        && cudaOrdinals is { Length: >= LaserDiscCudaVideo.MinBatchSize and <= LaserDiscCudaVideo.BatchCapacity };
                     parallelOptions = new ParallelOptions
                     {
                         MaxDegreeOfParallelism = Math.Min(WorkerThreads, blockCount)

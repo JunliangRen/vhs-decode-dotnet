@@ -41,6 +41,7 @@ public sealed class TbcFieldSequenceDecodeEngine
     private readonly ILdTestLdfWriter _testLdfWriter;
     private readonly ILaserDiscEfmOutputWriter _efmOutputWriter;
     private readonly SequenceReadField _readField;
+    private readonly bool _deferCompletionReport;
     private readonly VhsDiskSpaceGuard _vhsDiskSpaceGuard;
     private readonly CancellationToken _cancellationToken;
     private readonly bool _usesSessionReader;
@@ -292,9 +293,11 @@ public sealed class TbcFieldSequenceDecodeEngine
 
     private TbcFieldSequenceDecodeEngine(
         RfBlockStreamDecoder.OwnedImmediateLaserDiscFieldReader ownedReader,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        bool deferCompletionReport)
         : this(cancellationToken: cancellationToken)
     {
+        _deferCompletionReport = deferCompletionReport;
         // Preserve _usesSessionReader=true and every default writer/option.
         // Only this read closure receives the private cache-domain capability.
         _readField = (session, input, begin, length, number, _) =>
@@ -303,8 +306,9 @@ public sealed class TbcFieldSequenceDecodeEngine
 
     internal static TbcFieldSequenceDecodeEngine CreateForOwnedDefaultImmediateLaserDisc(
         RfBlockStreamDecoder.OwnedImmediateLaserDiscFieldReader ownedReader,
-        CancellationToken cancellationToken)
-        => new(ownedReader, cancellationToken);
+        CancellationToken cancellationToken,
+        bool deferCompletionReport = false)
+        => new(ownedReader, cancellationToken, deferCompletionReport);
 
     public int ExtraReadLines { get; }
 
@@ -396,7 +400,7 @@ public sealed class TbcFieldSequenceDecodeEngine
             {
                 session.RuntimeReporter?.WriteCvbsCompletion(session.TbcRenderer.CvbsAgcStatistics);
             }
-            else
+            else if (!_deferCompletionReport)
             {
                 session.RuntimeReporter?.WriteCompletionMessage(output.WrittenFieldCount);
             }

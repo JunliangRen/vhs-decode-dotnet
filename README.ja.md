@@ -194,7 +194,7 @@ NTSC LaserDisc の完全デコードでは CUDA で EFM デジタル音声と対
 decode.exe ld --dsp-backend cuda-fast --ntsc input.ldf output
 ```
 
-ファイルへのデコードで利用できます。標準 NTSC の 40 MSPS RF 入力、EFM とドロップアウト検出の有効化、2 本以上のデコードスレッド、対応する NVIDIA GPU と CUDA ブリッジが必要です。CUDA は対象となる 20–22 ブロックのバッチで FM 復調後の映像フィルターを処理します。RF 復調、アナログ音声、フィールド処理、対象外の映像は CPU Exact が担当します。起動時にデバイス、正常終了時に EFM と映像それぞれの GPU 処理ブロック数を表示します。両方の GPU 処理に FP64 cuFFT を使うため、丸め境界で値が異なる場合があります。
+ファイルへのデコードで利用できます。標準 NTSC の 40 MSPS RF 入力、ドロップアウト検出の有効化、2 本以上のデコードスレッド、対応する NVIDIA GPU と CUDA ブリッジが必要です。CUDA は対象となる 20–22 ブロックのバッチで FM 復調後の映像フィルターを処理します。`--noEFM` で長さが 0 より大きいデコードには、少なくとも 1 つの CUDA 映像バッチが必要です。RF 復調、アナログ音声、フィールド処理、対象外の映像は CPU Exact が担当します。正常終了時には映像の GPU 処理ブロック数と、有効な場合は EFM の GPU 処理ブロック数を表示します。両方の GPU 処理に FP64 cuFFT を使うため、丸め境界で値が異なる場合があります。
 
 ```powershell
 decode.exe vhs --compat-version current --dsp-backend ipp-fast `
