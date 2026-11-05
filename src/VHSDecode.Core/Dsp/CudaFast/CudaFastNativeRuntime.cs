@@ -207,6 +207,13 @@ internal sealed class CudaFastNativeRuntime : ICudaFastNativeRuntime, ICudaFastP
         return LaserDiscCudaEfm.Create(runtime._libraryHandle, filter, runtime.GetRuntimeInfo(), cancellationToken);
     }
 
+    internal static ILaserDiscCudaVideo CreateLaserDiscVideo(
+        DecodeFilterSet filters, TextWriter output, CancellationToken cancellationToken)
+    {
+        CudaFastNativeRuntime runtime = RequireAvailableCore(output, cancellationToken, allowDownload: true);
+        return LaserDiscCudaVideo.Create(runtime._libraryHandle, filters, cancellationToken);
+    }
+
     internal static ICudaFastPreviewNativeRuntime RequirePreviewAvailable(
         TextWriter output,
         CancellationToken cancellationToken)

@@ -316,7 +316,7 @@ SSIM：CUDA 为 0.978718/0.991624，IPP 为 0.977307/0.995722。四组输出都�
 不是跨采集保证。
 
 标准 NTSC 40 MSPS LaserDisc 文件解码可用 `cuda-fast` 通过 FP64 CUDA 处理
-EFM 数字音频。视频和模拟音频使用 CPU Exact。[LD 命令示例](../README.zh-CN.md)
+EFM 数字音频和符合条件的 FM 解调后视频滤波。RF 解调、模拟音频和场处理使用 CPU Exact。[LD 命令示例](../README.zh-CN.md)
 
 对于 VHS，`cuda-fast` 是独立的 Windows x64 NVIDIA CUDA 13 全信号后端。它加载
 `vhsdecode_cuda_fast.dll` 与 cuFFT，并运行固定在 cuVHS commit

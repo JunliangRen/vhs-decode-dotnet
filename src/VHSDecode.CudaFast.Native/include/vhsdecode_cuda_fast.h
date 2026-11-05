@@ -200,6 +200,36 @@ vhsdecode_cuda_fast_ld_efm_process_v1(
 VHSDECODE_CUDA_FAST_API void VHSDECODE_CUDA_FAST_CALL
 vhsdecode_cuda_fast_ld_efm_destroy_v1(void* context);
 
+/*
+ * Optional NTSC LaserDisc post-FM video extension. Create copies three
+ * 32768-element interleaved complex filters in video, low-pass, burst order.
+ * Process consumes block_count consecutive double RF blocks of preclip FM
+ * and writes three consecutive float planes of block_count * 32768 samples.
+ * Each plane uses the NTSC roll for that filter. The capacity is 22 blocks.
+ * The context owns both pinned buffers. Serialize calls and buffer access.
+ * Process returns after device access finishes. Output is valid on success.
+ * Destroy accepts null.
+ */
+VHSDECODE_CUDA_FAST_API int32_t VHSDECODE_CUDA_FAST_CALL
+vhsdecode_cuda_fast_ld_video_create_v1(
+    int32_t device_id,
+    const double* filters_interleaved,
+    void** context,
+    double** pinned_input,
+    float** pinned_output,
+    char* error,
+    size_t error_capacity);
+
+VHSDECODE_CUDA_FAST_API int32_t VHSDECODE_CUDA_FAST_CALL
+vhsdecode_cuda_fast_ld_video_process_v1(
+    void* context,
+    int32_t block_count,
+    char* error,
+    size_t error_capacity);
+
+VHSDECODE_CUDA_FAST_API void VHSDECODE_CUDA_FAST_CALL
+vhsdecode_cuda_fast_ld_video_destroy_v1(void* context);
+
 VHSDECODE_CUDA_FAST_API const char* VHSDECODE_CUDA_FAST_CALL
 vhsdecode_cuda_fast_get_last_error(void);
 

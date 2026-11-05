@@ -5,6 +5,7 @@ using System.Runtime.Intrinsics;
 using System.Runtime.Intrinsics.X86;
 using System.Runtime.InteropServices;
 using VHSDecode.Core.Dsp;
+using VHSDecode.Core.Dsp.CudaFast;
 using VHSDecode.Core.Rf;
 using VHSDecode.Core.Tbc;
 
@@ -177,6 +178,25 @@ public sealed class RfBlockDecodePipeline : IDisposable
             ? filter
             : null;
 
+    internal bool CanDeferOwnedLaserDiscPostFmVideo =>
+        LaserDiscCudaEfmFilter is not null
+        && _demodulator.SampleRateHz == 40_000_000.0
+        && Avx2.IsSupported && Fma.IsSupported
+        && !_filterOptions.LdPalV4300DNotch
+        && !_filterOptions.ExportRawTbc
+        && _filterOptions.NonlinearDeemphasis is null
+        && _filterOptions.SubDeemphasis is null
+        && _filterOptions.BetamaxFscNotchHz is null
+        && _filters.ChromaBurst is null && _filters.ChromaBurstSos is null
+        && LaserDiscCudaVideo.SupportsFilters(_filters)
+        && _referenceFilters is
+        {
+            ClipDemodForVideo: true,
+            VideoBurst: { Length: LaserDiscEfmScratchHandoff.BlockLength },
+            VideoBurstOffset: 40,
+            VideoPilot: null
+        };
+
     internal bool ParallelizesVhsInverseStaging =>
         _demodulator.ParallelizesVhsInverseStaging;
 
@@ -315,7 +335,8 @@ public sealed class RfBlockDecodePipeline : IDisposable
         bool reportDiagnostics = true,
         Complex[]? rfMtfOverride = null,
         double[]? ownedImmediateEnvelopeShape = null,
-        bool deferEfm = false)
+        bool deferEfm = false,
+        bool deferPostFmVideo = false)
         => DecodePreparedBlockCore(
             input,
             reportDiagnostics,
@@ -324,7 +345,8 @@ public sealed class RfBlockDecodePipeline : IDisposable
             includeAnalyticOutput: !_filterOptions.LdClipDemodForVideo,
             rfMtfOverride,
             ownedImmediateEnvelopeShape,
-            deferEfm);
+            deferEfm,
+            deferPostFmVideo);
 
     private RfPipelineBlock DecodePreparedBlockCore(
         double[] input,
@@ -334,9 +356,18 @@ public sealed class RfBlockDecodePipeline : IDisposable
         bool includeAnalyticOutput,
         Complex[]? rfMtfOverride = null,
         double[]? ownedImmediateEnvelopeShape = null,
-        bool deferEfm = false)
+        bool deferEfm = false,
+        bool deferPostFmVideo = false)
     {
         ArgumentNullException.ThrowIfNull(input);
+        if (deferPostFmVideo
+            && (!deferEfm || !retainRfDiagnosticChannels
+                || reuseStreamOutputBuffers || includeAnalyticOutput || !CanDeferOwnedLaserDiscPostFmVideo
+                || input.Length != LaserDiscEfmScratchHandoff.BlockLength
+                || ownedImmediateEnvelopeShape is not { Length: LaserDiscEfmScratchHandoff.BlockLength }))
+        {
+            throw new InvalidOperationException("Post-FM video requires the private LD CUDA EFM block path.");
+        }
 
         if (_cvbsOptions is not null)
         {
@@ -404,14 +435,20 @@ public sealed class RfBlockDecodePipeline : IDisposable
                 useApproxDirectFloat32DiffRepair:
                     useApproxFrequencyDomainChroma && _useDirectStreamOutputBufferLease,
                 ownedImmediateLaserDiscEnvelopeShape: CanOmitEnvelopeForOwnedImmediateLaserDisc
-                    ? ownedImmediateEnvelopeShape : null);
+                    ? ownedImmediateEnvelopeShape : null,
+                deferPostFmVideo: deferPostFmVideo);
             Complex[]? efmScratch = efmScratchHandoff?.Take(_demodulator);
             if (reportDiagnostics)
             {
                 ReportDiagnostics(demodulated);
             }
 
-            if (_filterOptions.LdClipDemodForVideo)
+            if (deferPostFmVideo)
+            {
+                // The CUDA wave consumes DemodRaw before field assembly quantizes it.
+                QuantizeToFloat32InPlace(demodulated.RfHighPass);
+            }
+            else if (_filterOptions.LdClipDemodForVideo)
             {
                 QuantizeLaserDiscVideoChannels(demodulated);
             }

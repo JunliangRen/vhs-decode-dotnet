@@ -202,7 +202,7 @@ multithreaded Python runs are used for speed measurements only.
 | --- | --- |
 | `exact` | Default managed path for compatibility-sensitive decoding. |
 | `ipp-fast` | Experimental Windows x64 and Linux x64/glibc VHS and LaserDisc real-RF paths using Intel IPP. It can change floating-point bits and never silently falls back to `exact`. |
-| `cuda-fast` | Experimental Windows x64 NVIDIA CUDA 13 backend. VHS has an independent full-signal GPU path for PAL/NTSC. Full NTSC LaserDisc decode can use CUDA for EFM digital audio with CPU Exact video and analog audio. |
+| `cuda-fast` | Experimental Windows x64 NVIDIA CUDA 13 backend. VHS has an independent full-signal GPU path for PAL/NTSC. Standard NTSC LaserDisc uses CUDA for EFM digital audio and eligible post-FM video filtering. |
 | `approx-fast` | Experimental VHS-only FP32 path with selectable TBC resampler and precision contract. The default `balanced` precision keeps the existing v1/v2 behavior; explicit `aggressive` selects the faster, deliberately lossy field-FP32/burst-IQ-prefix/chroma-FFT v6 contract. Nonzero RF high boost is not supported. |
 
 To use CUDA for a complete NTSC LaserDisc decode with EFM enabled:
@@ -211,7 +211,7 @@ To use CUDA for a complete NTSC LaserDisc decode with EFM enabled:
 decode.exe ld --dsp-backend cuda-fast --ntsc input.ldf output
 ```
 
-This mode requires standard NTSC 40 MSPS RF, normal dropout detection, at least two decode threads, and a compatible NVIDIA GPU and CUDA bridge. It is available for file decode. The normal LD writers still produce the outputs. Startup reports the selected device, and successful decode reports how many RF blocks used CUDA. CPU Exact handles the remaining work, including RF blocks outside a parallel batch. EFM uses FP64 cuFFT and may differ at quantization boundaries.
+This file-decode mode requires standard NTSC 40 MSPS RF, EFM, normal dropout detection, at least two decode threads, and a compatible NVIDIA GPU and CUDA bridge. CUDA filters video after FM demodulation in eligible 20–22-block batches. CPU Exact handles RF demodulation, analog audio, field processing, and video outside those batches. Startup reports the device, and successful decode reports separate GPU block counts for EFM and video. Both GPU stages use FP64 cuFFT and may differ at rounding boundaries.
 
 ```powershell
 decode.exe vhs --compat-version current --dsp-backend ipp-fast `

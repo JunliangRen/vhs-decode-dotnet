@@ -493,7 +493,8 @@ public sealed class RfDemodulator : IDisposable
         ReadOnlySpan<Complex32> approxChromaFilter = default,
         float[]? approxChromaDestination = null,
         bool useApproxDirectFloat32DiffRepair = false,
-        double[]? ownedImmediateLaserDiscEnvelopeShape = null)
+        double[]? ownedImmediateLaserDiscEnvelopeShape = null,
+        bool deferPostFmVideo = false)
     {
         ObjectDisposedException.ThrowIf(Volatile.Read(ref _disposed) != 0, this);
         bool produceApproxChroma = !approxChromaFilter.IsEmpty
@@ -1201,6 +1202,22 @@ public sealed class RfDemodulator : IDisposable
         if (chromaTrap is not null)
         {
             demodRaw = ApplyChromaTrap(demodRaw, SampleRateHz, chromaTrap.FscHz);
+        }
+
+        if (deferPostFmVideo)
+        {
+            // The owned stream retains the pre-clip FM samples until its CUDA wave completes.
+            if (!useOwnedEnvelopeShape || DspBackend != DspBackend.Exact
+                || !includeDemodRawOutput || !includeRfHighPassOutput
+                || demodRaw.Length != LaserDiscEfmScratchHandoff.BlockLength
+                || outputBuffers is not null || efmScratchHandoff is not null)
+            {
+                throw new InvalidOperationException("Invalid private LD post-FM deferred block.");
+            }
+
+            return new RfDemodulatedBlock(
+                [], demodRaw, analyticOutput, envelope, [], rfHighPass,
+                VhsWeakRfSignal: vhsWeakRfSignal);
         }
 
         ReadOnlySpan<double> demodVideoSource = demodRaw;
@@ -4821,6 +4838,9 @@ public sealed record RfDemodulatedBlock(
     internal float[]? ChromaFloat32 { get; init; }
 
     internal float[]? VideoLowPassFloat32 { get; init; }
+
+    // The private LD CUDA cache retains burst as float32 until field assembly.
+    internal float[]? LdVideoBurstFloat32 { get; init; }
 }
 
 public sealed record LaserDiscAnalogAudioBlock(

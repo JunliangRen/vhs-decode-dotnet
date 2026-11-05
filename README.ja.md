@@ -188,13 +188,13 @@ stabilization を同時に無効化した場合は 0.922357 で、default は全
 | `cuda-fast` | NVIDIA CUDA 13 を使う experimental Windows x64 full-signal VHS path。独立した numerical contract を持ち、PAL/NTSC VHS を通常は 40 MSPS、`--decode-at-20msps` 指定時は GPU 40→20 または native 20 MSPS で decode し、CPU backend へ silent fallback しません。 |
 | `approx-fast` | VHS-only の experimental FP32 path。TBC resampler と precision contract を選択できます。default の `balanced` は既存の v1/v2 behavior を維持し、明示的な `aggressive` は高速化のため一部の数値精度を意図的に省く field-FP32/burst-IQ-prefix/chroma-FFT v6 contract を選択します。nonzero RF high boost は未対応です。 |
 
-NTSC LaserDisc の完全デコードでは CUDA で EFM デジタル音声を処理できます。
+NTSC LaserDisc の完全デコードでは CUDA で EFM デジタル音声と対象の FM 復調後の映像フィルターを処理できます。
 
 ```powershell
 decode.exe ld --dsp-backend cuda-fast --ntsc input.ldf output
 ```
 
-ファイルへのデコードで利用できます。標準 NTSC の 40 MSPS RF 入力、EFM とドロップアウト検出の有効化、2 本以上のデコードスレッド、対応する NVIDIA GPU と CUDA ブリッジが必要です。映像とアナログ音声は CPU Exact で処理し、通常の LD 形式で出力します。起動時にデバイス、完了時に GPU で処理した RF ブロック数を表示します。並列バッチに含まれない RF ブロックは CPU Exact で処理します。EFM には FP64 cuFFT を使うため、量子化境界で値が異なる場合があります。
+ファイルへのデコードで利用できます。標準 NTSC の 40 MSPS RF 入力、EFM とドロップアウト検出の有効化、2 本以上のデコードスレッド、対応する NVIDIA GPU と CUDA ブリッジが必要です。CUDA は対象となる 20–22 ブロックのバッチで FM 復調後の映像フィルターを処理します。RF 復調、アナログ音声、フィールド処理、対象外の映像は CPU Exact が担当します。起動時にデバイス、正常終了時に EFM と映像それぞれの GPU 処理ブロック数を表示します。両方の GPU 処理に FP64 cuFFT を使うため、丸め境界で値が異なる場合があります。
 
 ```powershell
 decode.exe vhs --compat-version current --dsp-backend ipp-fast `

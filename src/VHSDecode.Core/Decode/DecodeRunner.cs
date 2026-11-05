@@ -19,6 +19,7 @@ public sealed class DecodeRunner
     private readonly IHiFiCommandRunner _hiFiRunner;
     private readonly ICudaFastDecodeRunner _cudaFastRunner;
     private readonly Func<Complex[], TextWriter, CancellationToken, ILaserDiscCudaEfm> _laserDiscCudaEfmFactory;
+    private readonly Func<DecodeFilterSet, TextWriter, CancellationToken, ILaserDiscCudaVideo> _laserDiscCudaVideoFactory;
 
     public DecodeRunner()
         : this(
@@ -44,7 +45,8 @@ public sealed class DecodeRunner
         Func<CancellationToken, TbcFieldSequenceDecodeEngine> engineFactory,
         IHiFiCommandRunner hiFiRunner,
         ICudaFastDecodeRunner cudaFastRunner,
-        Func<Complex[], TextWriter, CancellationToken, ILaserDiscCudaEfm>? laserDiscCudaEfmFactory = null)
+        Func<Complex[], TextWriter, CancellationToken, ILaserDiscCudaEfm>? laserDiscCudaEfmFactory = null,
+        Func<DecodeFilterSet, TextWriter, CancellationToken, ILaserDiscCudaVideo>? laserDiscCudaVideoFactory = null)
     {
         ArgumentNullException.ThrowIfNull(engineFactory);
         ArgumentNullException.ThrowIfNull(hiFiRunner);
@@ -53,6 +55,7 @@ public sealed class DecodeRunner
         _hiFiRunner = hiFiRunner;
         _cudaFastRunner = cudaFastRunner;
         _laserDiscCudaEfmFactory = laserDiscCudaEfmFactory ?? CudaFastNativeRuntime.CreateLaserDiscEfm;
+        _laserDiscCudaVideoFactory = laserDiscCudaVideoFactory ?? CudaFastNativeRuntime.CreateLaserDiscVideo;
     }
 
     // Only the public default Runner has this factory identity. Ordinary
@@ -230,6 +233,15 @@ public sealed class DecodeRunner
                         output.WriteLine(cudaEfm.Diagnostic);
                     }
 
+                    using ILaserDiscCudaVideo? cudaVideo = cudaEfm is not null
+                        ? ownedReader!.AttachCudaVideoIfSupported(() => _laserDiscCudaVideoFactory(
+                            session.Filters, output, cancellationToken))
+                        : null;
+                    if (cudaVideo is not null)
+                    {
+                        output.WriteLine("CUDA-fast LD video: post-FM filtering in eligible RF batches.");
+                    }
+
                     session.RuntimeReporter = runtimeReporter;
                     DecodeSessionLogWriter.Write(
                         session,
@@ -285,6 +297,9 @@ public sealed class DecodeRunner
                             output.WriteLine(string.Create(
                                 CultureInfo.InvariantCulture,
                                 $"CUDA LD EFM blocks: {processedBlocks}"));
+                            output.WriteLine(string.Create(
+                                CultureInfo.InvariantCulture,
+                                $"CUDA LD video blocks: {cudaVideo?.ProcessedBlocks ?? 0}"));
                         }
                     }
                 }
