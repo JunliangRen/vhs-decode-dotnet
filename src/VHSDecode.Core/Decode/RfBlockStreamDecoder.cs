@@ -200,9 +200,48 @@ public sealed class RfBlockStreamDecoder : IDisposable
 
         internal ILaserDiscCudaVideo? CudaVideo { get; private set; }
 
+        internal bool CompactCpuPostFmVideo { get; private set; }
+
+        internal void EnableCompactCpuPostFmVideoIfSupported()
+        {
+            if (CudaEfm is not null || CudaVideo is not null || Volatile.Read(ref _owner._hasStartedRead) != 0)
+            {
+                throw new InvalidOperationException("CPU compact LD video must be selected before the first RF read.");
+            }
+
+            CompactCpuPostFmVideo = _owner.WorkerThreads >= 2
+                && _owner.BlockLength == LaserDiscEfmScratchHandoff.BlockLength
+                && _owner.BlockStride == 31_712 && !_owner._useApproxFloat32FieldPayloads && !_owner._useApproxFloat32Sync
+                && _owner._pipeline.CanCompactOwnedLaserDiscPostFmVideo;
+        }
+
+        internal void ValidateCompactCpuPostFmVideoWave(RfPipelineBlock[] decodedBlocks, int[] missingBlocks, int missingCount)
+        {
+            for (int i = 0; i < missingCount; i++)
+            {
+                RfDemodulatedBlock block = decodedBlocks[missingBlocks[i]].Demodulated;
+                if (block.VideoFloat32 is null && block.VideoLowPassFloat32 is null && block.LdVideoBurstFloat32 is null)
+                {
+                    continue;
+                }
+
+                if (block.Video.Length != 0 || block.VideoLowPass.Length != 0 || block.VideoBurst is not null
+                    || block.VideoPilot is not null
+                    || block.VideoFloat32 is not { Length: LaserDiscEfmScratchHandoff.BlockLength }
+                    || block.VideoLowPassFloat32 is not { Length: LaserDiscEfmScratchHandoff.BlockLength }
+                    || block.LdVideoBurstFloat32 is not { Length: LaserDiscEfmScratchHandoff.BlockLength }
+                    || ReferenceEquals(block.VideoFloat32, block.VideoLowPassFloat32)
+                    || ReferenceEquals(block.VideoFloat32, block.LdVideoBurstFloat32)
+                    || ReferenceEquals(block.VideoLowPassFloat32, block.LdVideoBurstFloat32))
+                {
+                    throw new InvalidOperationException("Invalid private LD compact CPU video channels.");
+                }
+            }
+        }
+
         internal ILaserDiscCudaVideo? AttachCudaVideoIfSupported(Func<ILaserDiscCudaVideo> factory)
         {
-            if (CudaVideo is not null || Volatile.Read(ref _owner._hasStartedRead) != 0)
+            if (CudaVideo is not null || CompactCpuPostFmVideo || Volatile.Read(ref _owner._hasStartedRead) != 0)
             {
                 throw new InvalidOperationException("CUDA LD video must be attached before the first RF read.");
             }
@@ -277,7 +316,7 @@ public sealed class RfBlockStreamDecoder : IDisposable
         // The runner owns the accelerator until its last field read has completed.
         internal ILaserDiscCudaEfm AttachCudaEfm(Func<Complex[], ILaserDiscCudaEfm> factory)
         {
-            if (CudaEfm is not null || Volatile.Read(ref _owner._hasStartedRead) != 0
+            if (CudaEfm is not null || CompactCpuPostFmVideo || Volatile.Read(ref _owner._hasStartedRead) != 0
                 || _owner.WorkerThreads < 2 || _owner.BlockLength != LaserDiscEfmScratchHandoff.BlockLength
                 || _owner._pipeline.LaserDiscCudaEfmFilter is not { } filter)
             {
@@ -1052,6 +1091,7 @@ public sealed class RfBlockStreamDecoder : IDisposable
             Task<short[][]>? efmTask = null;
             int seedBlockIndex = -1;
             ExceptionDispatchInfo? seedFailure = null;
+            bool compactPostFmVideo = ownedReader?.CompactCpuPostFmVideo == true;
             bool missingBlocksDecoded = false;
             int cachedMissingBlockCount = 0;
             List<RfPipelineBlock> deferredReleases = [];
@@ -1167,7 +1207,8 @@ public sealed class RfBlockStreamDecoder : IDisposable
                                 rfMtfOverride: laserDiscCompatibilityMtf?[blockIndex],
                                 ownedImmediateEnvelopeShape: _ownedImmediateReader?.EnvelopeShape,
                                 deferEfm: deferEfm,
-                                deferPostFmVideo: deferPostFmVideo);
+                                deferPostFmVideo: deferPostFmVideo,
+                                compactPostFmVideo: compactPostFmVideo);
                         });
                     if (efmTask is not null)
                     {
@@ -1179,6 +1220,11 @@ public sealed class RfBlockStreamDecoder : IDisposable
                     if (deferPostFmVideo)
                     {
                         ownedReader!.CompleteCudaVideoWave(cudaOrdinals!, decodedBlocks);
+                    }
+
+                    if (compactPostFmVideo)
+                    {
+                        ownedReader!.ValidateCompactCpuPostFmVideoWave(decodedBlocks, missingBlocks, missingBlockCount);
                     }
 
                     missingBlocksDecoded = true;

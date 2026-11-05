@@ -185,7 +185,20 @@ public sealed class RfBlockDecodePipeline : IDisposable
 
     internal bool CanDeferOwnedLaserDiscPostFmVideo =>
         CanUseOwnedLaserDiscCuda
-        && _demodulator.SampleRateHz == 40_000_000.0
+        && HasOwnedLaserDiscPostFmVideoGeometry
+        && LaserDiscCudaVideo.SupportsFilters(_filters);
+
+    internal bool CanCompactOwnedLaserDiscPostFmVideo =>
+        ActiveDspBackend == DspBackend.IppFast
+        && CanOmitEnvelopeForOwnedImmediateLaserDisc
+        && !RequiresSequentialBlockDecode
+        && HasOwnedLaserDiscPostFmVideoGeometry
+        && _filters.Video.Length == LaserDiscEfmScratchHandoff.BlockLength
+        && _filters.VideoLowPass05.Length == LaserDiscEfmScratchHandoff.BlockLength
+        && _filters.VideoLowPass05Offset == 32;
+
+    private bool HasOwnedLaserDiscPostFmVideoGeometry =>
+        _demodulator.SampleRateHz == 40_000_000.0
         && Avx2.IsSupported && Fma.IsSupported
         && !_filterOptions.LdPalV4300DNotch
         && !_filterOptions.ExportRawTbc
@@ -193,7 +206,6 @@ public sealed class RfBlockDecodePipeline : IDisposable
         && _filterOptions.SubDeemphasis is null
         && _filterOptions.BetamaxFscNotchHz is null
         && _filters.ChromaBurst is null && _filters.ChromaBurstSos is null
-        && LaserDiscCudaVideo.SupportsFilters(_filters)
         && _referenceFilters is
         {
             ClipDemodForVideo: true,
@@ -341,7 +353,8 @@ public sealed class RfBlockDecodePipeline : IDisposable
         Complex[]? rfMtfOverride = null,
         double[]? ownedImmediateEnvelopeShape = null,
         bool deferEfm = false,
-        bool deferPostFmVideo = false)
+        bool deferPostFmVideo = false,
+        bool compactPostFmVideo = false)
         => DecodePreparedBlockCore(
             input,
             reportDiagnostics,
@@ -351,7 +364,8 @@ public sealed class RfBlockDecodePipeline : IDisposable
             rfMtfOverride,
             ownedImmediateEnvelopeShape,
             deferEfm,
-            deferPostFmVideo);
+            deferPostFmVideo,
+            compactPostFmVideo);
 
     private RfPipelineBlock DecodePreparedBlockCore(
         double[] input,
@@ -362,9 +376,19 @@ public sealed class RfBlockDecodePipeline : IDisposable
         Complex[]? rfMtfOverride = null,
         double[]? ownedImmediateEnvelopeShape = null,
         bool deferEfm = false,
-        bool deferPostFmVideo = false)
+        bool deferPostFmVideo = false,
+        bool compactPostFmVideo = false)
     {
         ArgumentNullException.ThrowIfNull(input);
+        if (compactPostFmVideo
+            && (deferEfm || deferPostFmVideo || !retainRfDiagnosticChannels
+                || reuseStreamOutputBuffers || includeAnalyticOutput || !CanCompactOwnedLaserDiscPostFmVideo
+                || input.Length != LaserDiscEfmScratchHandoff.BlockLength
+                || ownedImmediateEnvelopeShape is not { Length: LaserDiscEfmScratchHandoff.BlockLength }))
+        {
+            throw new InvalidOperationException("Compact post-FM video requires a compatible private LD CPU block.");
+        }
+
         if (deferPostFmVideo
             && (deferEfm != HasLaserDiscEfm || !retainRfDiagnosticChannels
                 || reuseStreamOutputBuffers || includeAnalyticOutput || !CanDeferOwnedLaserDiscPostFmVideo
@@ -441,7 +465,8 @@ public sealed class RfBlockDecodePipeline : IDisposable
                     useApproxFrequencyDomainChroma && _useDirectStreamOutputBufferLease,
                 ownedImmediateLaserDiscEnvelopeShape: CanOmitEnvelopeForOwnedImmediateLaserDisc
                     ? ownedImmediateEnvelopeShape : null,
-                deferPostFmVideo: deferPostFmVideo);
+                deferPostFmVideo: deferPostFmVideo,
+                compactPostFmVideo: compactPostFmVideo);
             Complex[]? efmScratch = efmScratchHandoff?.Take(_demodulator);
             if (reportDiagnostics)
             {
