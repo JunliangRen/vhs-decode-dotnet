@@ -494,7 +494,8 @@ public sealed class RfDemodulator : IDisposable
         float[]? approxChromaDestination = null,
         bool useApproxDirectFloat32DiffRepair = false,
         double[]? ownedImmediateLaserDiscEnvelopeShape = null,
-        bool deferPostFmVideo = false)
+        bool deferPostFmVideo = false,
+        bool compactPostFmVideo = false)
     {
         ObjectDisposedException.ThrowIf(Volatile.Read(ref _disposed) != 0, this);
         bool produceApproxChroma = !approxChromaFilter.IsEmpty
@@ -1204,6 +1205,25 @@ public sealed class RfDemodulator : IDisposable
             demodRaw = ApplyChromaTrap(demodRaw, SampleRateHz, chromaTrap.FscHz);
         }
 
+        if (compactPostFmVideo
+            && (deferPostFmVideo || !useOwnedEnvelopeShape || useVhsRealFft
+                || DspBackend is not (DspBackend.Exact or DspBackend.IppFast)
+                || !Avx2.IsSupported || outputBuffers is not null
+                || !includeDemodRawOutput || !includeRfHighPassOutput || includeAnalyticOutput
+                || input.Length != LaserDiscEfmScratchHandoff.BlockLength
+                || SampleRateHz != 40_000_000.0
+                || nonlinearDeemphasis is not null || subDeemphasis is not null || betamaxFscNotchHz is not null
+                || referenceFilters is not
+                {
+                    ClipDemodForVideo: true,
+                    VideoBurst: { Length: LaserDiscEfmScratchHandoff.BlockLength },
+                    VideoBurstOffset: 40,
+                    VideoPilot: null
+                }))
+        {
+            throw new InvalidOperationException("Compact post-FM video requires a compatible private LD CPU block.");
+        }
+
         if (deferPostFmVideo)
         {
             // The owned stream retains the pre-clip FM samples until its CUDA wave completes.
@@ -1337,7 +1357,15 @@ public sealed class RfDemodulator : IDisposable
                 videoComplex = InverseLaserDiscFullSpectrum(videoSpectrum);
             }
 
-            video = ExtractReal(videoComplex);
+            if (compactPostFmVideo)
+            {
+                videoFloat32 = LdCompactVideoExtractor.Create(videoComplex);
+                video = [];
+            }
+            else
+            {
+                video = ExtractReal(videoComplex);
+            }
         }
 
         ReadOnlySpan<Complex> activeVideoSpectrum;
@@ -1428,7 +1456,15 @@ public sealed class RfDemodulator : IDisposable
             Complex[] videoLowPassSpectrum = videoSpectrum!;
             ApplyFrequencyFilter(demodSpectrum!, videoLowPassFilter, videoLowPassSpectrum);
             InverseLaserDiscFullSpectrumInPlace(videoLowPassSpectrum);
-            videoLowPass = ExtractReal(videoLowPassSpectrum);
+            if (compactPostFmVideo)
+            {
+                videoLowPassFloat32 = LdCompactVideoExtractor.Create(videoLowPassSpectrum);
+                videoLowPass = [];
+            }
+            else
+            {
+                videoLowPass = ExtractReal(videoLowPassSpectrum);
+            }
         }
 
         if (videoLowPassOffset != 0)
@@ -1461,17 +1497,33 @@ public sealed class RfDemodulator : IDisposable
             referenceSpectrum = demodSpectrum!.AsSpan(0, activeSpectrumLength);
         }
 
-        double[]? videoBurst = useVhsRealFft
-            ? DecodeRealReferenceIfPresent(
-                referenceSpectrum,
-                referenceFilters?.VideoBurst,
-                referenceFilters?.VideoBurstOffset ?? 0,
-                demodVideoLength)
-            : DecodeReferenceIfPresent(
-                demodSpectrum!,
-                referenceFilters?.VideoBurst,
-                referenceFilters?.VideoBurstOffset ?? 0,
-                videoSpectrum!);
+        float[]? ldVideoBurstFloat32 = null;
+        double[]? videoBurst;
+        if (compactPostFmVideo)
+        {
+            RfVideoReferenceFilterSet ldReference = referenceFilters!;
+            Complex[] filteredBurst = videoSpectrum!;
+            ApplyFrequencyFilter(demodSpectrum!, ldReference.VideoBurst!, filteredBurst);
+            InverseLaserDiscFullSpectrumInPlace(filteredBurst);
+            ldVideoBurstFloat32 = LdCompactVideoExtractor.Create(filteredBurst);
+            FrequencyDomainFilter.RollInPlace(ldVideoBurstFloat32, -ldReference.VideoBurstOffset);
+            videoBurst = null;
+        }
+        else
+        {
+            videoBurst = useVhsRealFft
+                ? DecodeRealReferenceIfPresent(
+                    referenceSpectrum,
+                    referenceFilters?.VideoBurst,
+                    referenceFilters?.VideoBurstOffset ?? 0,
+                    demodVideoLength)
+                : DecodeReferenceIfPresent(
+                    demodSpectrum!,
+                    referenceFilters?.VideoBurst,
+                    referenceFilters?.VideoBurstOffset ?? 0,
+                    videoSpectrum!);
+        }
+
         double[]? videoPilot = useVhsRealFft
             ? DecodeRealReferenceIfPresent(
                 referenceSpectrum,
@@ -1496,7 +1548,8 @@ public sealed class RfDemodulator : IDisposable
             VhsWeakRfSignal: vhsWeakRfSignal)
         {
             VideoFloat32 = videoFloat32,
-            VideoLowPassFloat32 = videoLowPassFloat32
+            VideoLowPassFloat32 = videoLowPassFloat32,
+            LdVideoBurstFloat32 = ldVideoBurstFloat32
         };
 
         // The final LPF/Burst/Pilot readers and result construction completed.
@@ -4839,7 +4892,7 @@ public sealed record RfDemodulatedBlock(
 
     internal float[]? VideoLowPassFloat32 { get; init; }
 
-    // The private LD CUDA cache retains burst as float32 until field assembly.
+    // Private owned LD cache channel. Public field consumers still get doubles.
     internal float[]? LdVideoBurstFloat32 { get; init; }
 }
 

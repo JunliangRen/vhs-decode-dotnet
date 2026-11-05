@@ -226,6 +226,13 @@ public sealed class DecodeRunner
                     session = cudaFastLaserDisc || ReferenceEquals(_engineFactory, DefaultEngineFactory)
                         ? CreatePrivateDefaultRunnerSession(sessionCommand, out ownedReader)
                         : DecodeSessionFactory.Create(sessionCommand);
+                    // The original requested backend distinguishes CPU Exact from the CUDA complement.
+                    if (ownedReader is not null && command.Spec == CliSpecs.LaserDisc
+                        && !command.Get<bool>("preview_server") && session.System == "NTSC"
+                        && dspBackend == DspBackend.IppFast)
+                    {
+                        ownedReader.EnableCompactCpuPostFmVideoIfSupported();
+                    }
                     if (cudaFastLaserDisc)
                     {
                         ownedReader = RequireLaserDiscCudaReader(session, ownedReader);

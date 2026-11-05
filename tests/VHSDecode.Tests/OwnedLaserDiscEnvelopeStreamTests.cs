@@ -1,6 +1,8 @@
 using System.Numerics;
 using System.Reflection;
 using System.Runtime.InteropServices;
+using System.Runtime.Intrinsics.X86;
+using VHSDecode.Core.CommandLine;
 using VHSDecode.Core.Decode;
 using VHSDecode.Core.Dsp;
 using VHSDecode.Core.Rf;
@@ -347,6 +349,94 @@ public sealed class OwnedLaserDiscEnvelopeStreamTests
         Assert.Equal(allCalls, owned.Loader.Calls);
         Assert.Empty(CachedBlocks(full.Decoder));
         Assert.Empty(CachedBlocks(owned.Decoder));
+    }
+
+    [Theory]
+    [InlineData(DspBackend.Exact, false)]
+    [InlineData(DspBackend.IppFast, false)]
+    [InlineData(DspBackend.IppFast, true)]
+    public void CpuVideoStorageCompactsOnlyIppAndPreservesBits(DspBackend backend, bool noEfm)
+    {
+        Assert.SkipUnless(Avx2.IsSupported && Fma.IsSupported, "Compact LD video requires AVX2 and FMA.");
+        if (backend == DspBackend.IppFast)
+            Assert.SkipUnless(IppTestRuntime.TryProbe(out _), "Intel IPP runtime is unavailable.");
+
+        var arguments = new List<string> { "--NTSC", "--threads", "4", "--dsp-backend",
+            backend == DspBackend.Exact ? "exact" : "ipp-fast" };
+        if (noEfm) arguments.Add("--noEFM");
+        arguments.AddRange(["capture.s16", "unused"]);
+        var command = new CommandLineParser().Parse(CliSpecs.LaserDisc, arguments.ToArray());
+        using DecodeSession wide = DecodeSessionFactory.Create(command);
+        using DecodeSession candidate = DecodeSessionFactory.Create(command);
+        Assert.Equal(noEfm, candidate.Filters.LdEfm is null);
+        var wideReader = Assert.IsType<RfBlockStreamDecoder.OwnedImmediateLaserDiscFieldReader>(
+            wide.StreamDecoder.TryCreateOwnedImmediateLaserDiscFieldReader());
+        var compactReader = Assert.IsType<RfBlockStreamDecoder.OwnedImmediateLaserDiscFieldReader>(
+            candidate.StreamDecoder.TryCreateOwnedImmediateLaserDiscFieldReader());
+        bool expectedCompact = backend == DspBackend.IppFast;
+        Assert.Equal(expectedCompact, candidate.Pipeline.CanCompactOwnedLaserDiscPostFmVideo);
+        compactReader.EnableCompactCpuPostFmVideoIfSupported();
+        Assert.Equal(expectedCompact, compactReader.CompactCpuPostFmVideo);
+        Assert.False(wideReader.CompactCpuPostFmVideo);
+
+        int stride = candidate.StreamDecoder.BlockStride;
+        int blockLength = candidate.StreamDecoder.BlockLength;
+        Assert.Equal(31_712, stride);
+        Assert.Equal(32_768, blockLength);
+        var samples = new short[(2 * stride) + blockLength];
+        for (int i = 0; i < samples.Length; i++)
+        {
+            double phase = Math.Tau * 8_300_000.0 * i / candidate.DecodeSampleRateHz + 3 * Math.Sin(i * 0.003);
+            samples[i] = (short)Math.Round(19_000 * Math.Cos(phase) + 2_000 * Math.Sin(i * 0.173));
+        }
+        byte[] bytes = MemoryMarshal.AsBytes(samples.AsSpan()).ToArray();
+        using var wideStream = new MemoryStream(bytes, writable: false);
+        using var compactStream = new MemoryStream(bytes, writable: false);
+
+        Compare(11, 17); // Serial miss caches a wide block.
+        RfDemodulatedBlock initial = Assert.Single(CachedBlocks(candidate.StreamDecoder)).Demodulated;
+        Assert.Equal(blockLength, initial.Video.Length);
+        Assert.Null(initial.VideoFloat32);
+
+        Compare(stride - 7, stride + 23); // Cached wide block plus two parallel misses.
+        RfPipelineBlock[] mixed = CachedBlocks(candidate.StreamDecoder);
+        Assert.Equal(3, mixed.Length);
+        Assert.Contains(mixed, block => ReferenceEquals(initial, block.Demodulated));
+        Assert.Equal(expectedCompact ? 1 : 3, mixed.Count(block => block.Demodulated.VideoFloat32 is null));
+        var storage = new HashSet<float[]>(ReferenceEqualityComparer.Instance);
+        foreach (RfPipelineBlock block in mixed.Where(block => block.Demodulated.VideoFloat32 is not null))
+        {
+            RfDemodulatedBlock compact = block.Demodulated;
+            Assert.Empty(compact.Video);
+            Assert.Empty(compact.VideoLowPass);
+            Assert.Null(compact.VideoBurst);
+            foreach (float[]? channel in new[] { compact.VideoFloat32, compact.VideoLowPassFloat32, compact.LdVideoBurstFloat32 })
+            {
+                float[] owned = Assert.IsType<float[]>(channel);
+                Assert.Equal(blockLength, owned.Length);
+                Assert.True(storage.Add(owned), "A compact channel is shared with another channel or block.");
+            }
+        }
+        Assert.Equal(expectedCompact ? 6 : 0, storage.Count);
+
+        Compare(stride + 11, 17); // The serial append path reads a cached block.
+        Assert.Throws<InvalidOperationException>(compactReader.EnableCompactCpuPostFmVideoIfSupported);
+
+        void Compare(long begin, int length)
+        {
+            using var expected = Required(wideReader.Read(wideStream, begin, length));
+            using var actual = Required(compactReader.Read(compactStream, begin, length));
+            EqualExceptEnvelope(expected.Span, actual.Span);
+            Assert.Equal(length, actual.Span.SampleCount);
+            Assert.Equal(noEfm, actual.Span.Efm is null);
+            Assert.Equal(length, Assert.IsType<double[]>(actual.Span.VideoLowPass).Length);
+            Assert.Equal(length, Assert.IsType<double[]>(actual.Span.VideoBurst).Length);
+            LaserDiscAnalogAudioBlock expectedAudio = Assert.IsType<LaserDiscAnalogAudioBlock>(expected.Span.AnalogAudio);
+            LaserDiscAnalogAudioBlock actualAudio = Assert.IsType<LaserDiscAnalogAudioBlock>(actual.Span.AnalogAudio);
+            Assert.Equal(expectedAudio.DecimationFactor, actualAudio.DecimationFactor);
+            Bits(expectedAudio.Left, actualAudio.Left);
+            Bits(expectedAudio.Right, actualAudio.Right);
+        }
     }
 
     private static RfBlockStreamDecoder.OwnedImmediateLaserDiscFieldReader Activate(Fixture fixture)
