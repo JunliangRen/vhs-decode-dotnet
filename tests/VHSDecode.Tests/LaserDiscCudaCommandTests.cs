@@ -1,6 +1,8 @@
 using System.Numerics;
+using System.Runtime.Intrinsics.X86;
 using VHSDecode.Core.CommandLine;
 using VHSDecode.Core.Decode;
+using VHSDecode.Core.Dsp;
 using VHSDecode.Core.Dsp.CudaFast;
 using VHSDecode.Core.HiFi;
 using VHSDecode.Preview;
@@ -75,6 +77,32 @@ public sealed class LaserDiscCudaCommandTests
     }
 
     [Fact]
+    public void UnavailableLaserDiscGpuVideoDisposesEfmAndFailsBeforeOpeningOutputs()
+    {
+        Assert.SkipUnless(Avx2.IsSupported && Fma.IsSupported, "LD CUDA video requires AVX2 and FMA.");
+        using var input = new TestFiles();
+        using var error = new StringWriter();
+        var efm = new EmptyLaserDiscCudaEfm();
+        int videoFactoryCalls = 0;
+        var runner = CreateRunner((_, _, _) => efm, (filters, _, _) =>
+        {
+            videoFactoryCalls++;
+            Assert.Equal(32_768, filters.Video.Length);
+            Assert.Equal(32_768, filters.VideoLowPass05.Length);
+            Assert.Equal(32_768, Assert.IsType<Complex[]>(filters.LdVideoBurst).Length);
+            Assert.Equal(32, filters.VideoLowPass05Offset);
+            Assert.Equal(40, filters.LdVideoBurstOffset);
+            throw new CudaFastBackendUnavailableException("test LD video native capability is unavailable");
+        });
+
+        Assert.Equal(1, runner.Run(input.Parse(), TextWriter.Null, error, TestContext.Current.CancellationToken));
+        Assert.Equal(1, videoFactoryCalls);
+        Assert.Equal(1, efm.DisposeCalls);
+        Assert.Contains("test LD video native capability is unavailable", error.ToString(), StringComparison.Ordinal);
+        input.AssertNoOutputs();
+    }
+
+    [Fact]
     public void LaserDiscCudaUsesOwnedLaserDiscWriterAndDisposesGpu()
     {
         using var input = new TestFiles();
@@ -82,7 +110,9 @@ public sealed class LaserDiscCudaCommandTests
         using var error = new StringWriter();
         using var cancellation = new CancellationTokenSource();
         var gpu = new EmptyLaserDiscCudaEfm();
+        var video = new EmptyLaserDiscCudaVideo();
         int factoryCalls = 0;
+        int videoFactoryCalls = 0;
         var runner = CreateRunner((filter, writer, token) =>
         {
             factoryCalls++;
@@ -90,6 +120,12 @@ public sealed class LaserDiscCudaCommandTests
             Assert.Same(output, writer);
             Assert.Equal(cancellation.Token, token);
             return gpu;
+        }, (_, writer, token) =>
+        {
+            videoFactoryCalls++;
+            Assert.Same(output, writer);
+            Assert.Equal(cancellation.Token, token);
+            return video;
         });
         ParsedCommand command = input.Parse("--length", "0");
 
@@ -98,6 +134,10 @@ public sealed class LaserDiscCudaCommandTests
         Assert.Equal(1, gpu.DisposeCalls);
         Assert.Contains(gpu.Diagnostic, output.ToString(), StringComparison.Ordinal);
         Assert.Contains("CUDA LD EFM blocks: 0", output.ToString(), StringComparison.Ordinal);
+        Assert.Contains("CUDA LD video blocks: 0", output.ToString(), StringComparison.Ordinal);
+        int expectedVideoCalls = Avx2.IsSupported && Fma.IsSupported ? 1 : 0;
+        Assert.Equal(expectedVideoCalls, videoFactoryCalls);
+        Assert.Equal(expectedVideoCalls, video.DisposeCalls);
         Assert.Equal("cuda-fast", command.Get<string>("dsp_backend"));
         foreach (string suffix in new[] { ".tbc", ".efm", ".pcm", ".tbc.db" })
         {
@@ -106,12 +146,14 @@ public sealed class LaserDiscCudaCommandTests
     }
 
     private static DecodeRunner CreateRunner(
-        Func<Complex[], TextWriter, CancellationToken, ILaserDiscCudaEfm> factory)
+        Func<Complex[], TextWriter, CancellationToken, ILaserDiscCudaEfm> factory,
+        Func<DecodeFilterSet, TextWriter, CancellationToken, ILaserDiscCudaVideo>? videoFactory = null)
         => new(
             _ => throw new Xunit.Sdk.XunitException("Ordinary CPU engine must not be selected."),
             new HiFiDecodeRunner(),
             new UnexpectedVhsCudaRunner(),
-            factory);
+            factory,
+            videoFactory ?? ((_, _, _) => throw new Xunit.Sdk.XunitException("GPU video must not be opened.")));
 
     private sealed class UnexpectedVhsCudaRunner : ICudaFastDecodeRunner
     {
@@ -128,6 +170,17 @@ public sealed class LaserDiscCudaCommandTests
 
         public short[][] Process(double[][] preparedInputs, int[] ordinals, int count)
             => throw new Xunit.Sdk.XunitException("Empty decode must not dispatch EFM blocks.");
+
+        public void Dispose() => DisposeCalls++;
+    }
+
+    private sealed class EmptyLaserDiscCudaVideo : ILaserDiscCudaVideo
+    {
+        public long ProcessedBlocks => 0;
+        public int DisposeCalls { get; private set; }
+
+        public LaserDiscCudaVideoChannels[] Process(double[][] rawByBlock, int[] ordinals)
+            => throw new Xunit.Sdk.XunitException("Empty decode must not dispatch video blocks.");
 
         public void Dispose() => DisposeCalls++;
     }

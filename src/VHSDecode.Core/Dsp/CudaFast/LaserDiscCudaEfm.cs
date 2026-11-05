@@ -66,7 +66,7 @@ internal sealed unsafe class LaserDiscCudaEfm : ILaserDiscCudaEfm
             }
 
             return new LaserDiscCudaEfm(context, input, output, process, destroy,
-                $"CUDA-fast LD EFM: {info.DeviceName} (compute {info.ComputeMajor}.{info.ComputeMinor}, bridge ABI 0x{info.AbiVersion:X8}). Video and analog audio use CPU Exact.",
+                $"CUDA-fast LD EFM: {info.DeviceName} (compute {info.ComputeMajor}.{info.ComputeMinor}, bridge ABI 0x{info.AbiVersion:X8}).",
                 cancellationToken);
         }
     }

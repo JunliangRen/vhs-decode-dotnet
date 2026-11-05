@@ -1,5 +1,6 @@
 using System.Numerics;
 using System.Runtime.InteropServices;
+using System.Runtime.Intrinsics.X86;
 using System.Security.Cryptography;
 using VHSDecode.Core.CommandLine;
 using VHSDecode.Core.Decode;
@@ -13,6 +14,32 @@ namespace VHSDecode.Tests;
 public sealed class LaserDiscRfScratchOwnershipTests
 {
     private const int Length = 32_768;
+
+    [Fact]
+    public void OwnedLaserDiscDefersPostFmVideoWithDefaultDiagnostics()
+    {
+        Assert.SkipUnless(Avx2.IsSupported && Fma.IsSupported, "LD CUDA video requires AVX2 and FMA.");
+        using DecodeSession session = CreateSession("NTSC", DspBackend.Exact);
+        Assert.True(session.Pipeline.CanDeferOwnedLaserDiscPostFmVideo);
+        var reader = Assert.IsType<RfBlockStreamDecoder.OwnedImmediateLaserDiscFieldReader>(
+            session.StreamDecoder.TryCreateOwnedImmediateLaserDiscFieldReader());
+
+        RfDemodulatedBlock deferred = session.Pipeline.DecodePreparedStreamBlock(
+            BuildInput(session),
+            ownedImmediateEnvelopeShape: reader.EnvelopeShape,
+            deferEfm: true,
+            deferPostFmVideo: true).Demodulated;
+
+        Assert.Empty(deferred.Video);
+        Assert.Empty(deferred.VideoLowPass);
+        Assert.Null(deferred.VideoBurst);
+        Assert.Null(deferred.Efm);
+        Assert.NotNull(deferred.AnalogAudio);
+        Assert.Same(reader.EnvelopeShape, deferred.Envelope);
+        Assert.Equal(Length, deferred.RfHighPass.Length);
+        Assert.Equal(Length, deferred.DemodRaw.Length);
+        Assert.Contains(deferred.DemodRaw, sample => double.IsFinite(sample) && sample != (double)(float)sample);
+    }
 
     [Theory(DisplayName = "LD streaming omits only analytic output and keeps public RF diagnostics")]
     [InlineData("PAL", DspBackend.Exact)]

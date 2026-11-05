@@ -365,8 +365,9 @@ each backend's 40 and 20 MSPS output was 0.978718/0.991624 for CUDA and
 fields and source-coordinate `fileLoc` values. These are local, short-run
 directional results, not cross-capture guarantees.
 
-For LaserDisc, `cuda-fast` uses FP64 CUDA for EFM digital audio on the standard
-NTSC 40 MSPS file-decode path. CPU Exact handles video and analog audio. See the
+For LaserDisc, `cuda-fast` uses FP64 CUDA for EFM digital audio and eligible
+post-FM video filtering on the standard NTSC 40 MSPS file-decode path. CPU Exact
+handles RF demodulation, analog audio, and field processing. See the
 [LD command example](../README.md#profiles-and-backends).
 
 For VHS, `cuda-fast` is a separate Windows x64 NVIDIA CUDA 13 full-signal backend.

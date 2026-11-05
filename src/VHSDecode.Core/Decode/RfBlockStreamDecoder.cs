@@ -2,6 +2,7 @@ using System.Numerics;
 using System.Runtime.ExceptionServices;
 using System.Runtime.Intrinsics.X86;
 using VHSDecode.Core.Dsp;
+using VHSDecode.Core.Dsp.CudaFast;
 
 namespace VHSDecode.Core.Decode;
 
@@ -196,6 +197,78 @@ public sealed class RfBlockStreamDecoder : IDisposable
         }
 
         internal ILaserDiscCudaEfm? CudaEfm { get; private set; }
+
+        internal ILaserDiscCudaVideo? CudaVideo { get; private set; }
+
+        internal ILaserDiscCudaVideo? AttachCudaVideoIfSupported(Func<ILaserDiscCudaVideo> factory)
+        {
+            if (CudaEfm is null || CudaVideo is not null || Volatile.Read(ref _owner._hasStartedRead) != 0)
+            {
+                throw new InvalidOperationException("CUDA LD video must be attached before the first RF read.");
+            }
+
+            if (!_owner._pipeline.CanDeferOwnedLaserDiscPostFmVideo
+                || _owner._useApproxFloat32FieldPayloads || _owner._useApproxFloat32Sync)
+            {
+                return null;
+            }
+
+            CudaVideo = factory();
+            return CudaVideo;
+        }
+
+        internal void CompleteCudaVideoWave(int[] ordinals, RfPipelineBlock[] decodedBlocks)
+        {
+            var rawByBlock = new double[decodedBlocks.Length][];
+            foreach (int ordinal in ordinals)
+            {
+                RfDemodulatedBlock block = decodedBlocks[ordinal].Demodulated;
+                if (block.DemodRaw.Length != BlockLengthForCudaVideo
+                    || block.Video.Length != 0 || block.VideoLowPass.Length != 0 || HasVideoBurst(block)
+                    || block.VideoFloat32 is not null || block.VideoLowPassFloat32 is not null
+                    || block.Efm is not { Length: BlockLengthForCudaVideo })
+                {
+                    throw new InvalidOperationException("CUDA LD video received an invalid deferred RF block.");
+                }
+                rawByBlock[ordinal] = block.DemodRaw;
+            }
+
+            LaserDiscCudaVideoChannels[] channels = CudaVideo!.Process(rawByBlock, ordinals);
+            if (channels.Length != ordinals.Length)
+            {
+                throw new InvalidOperationException("CUDA returned an incomplete LD video wave.");
+            }
+            foreach (LaserDiscCudaVideoChannels output in channels)
+            {
+                if (output.Video is not { Length: BlockLengthForCudaVideo }
+                    || output.LowPass is not { Length: BlockLengthForCudaVideo }
+                    || output.Burst is not { Length: BlockLengthForCudaVideo }
+                    || ReferenceEquals(output.Video, output.LowPass) || ReferenceEquals(output.Video, output.Burst)
+                    || ReferenceEquals(output.LowPass, output.Burst))
+                {
+                    throw new InvalidOperationException("CUDA returned invalid LD video channels.");
+                }
+            }
+
+            for (int i = 0; i < ordinals.Length; i++)
+            {
+                int ordinal = ordinals[i];
+                RfPipelineBlock block = decodedBlocks[ordinal];
+                LaserDiscCudaVideoChannels output = channels[i];
+                RfBlockDecodePipeline.QuantizeToFloat32InPlace(block.Demodulated.DemodRaw);
+                decodedBlocks[ordinal] = block with
+                {
+                    Demodulated = block.Demodulated with
+                    {
+                        VideoFloat32 = output.Video,
+                        VideoLowPassFloat32 = output.LowPass,
+                        LdVideoBurstFloat32 = output.Burst
+                    }
+                };
+            }
+        }
+
+        private const int BlockLengthForCudaVideo = LaserDiscEfmScratchHandoff.BlockLength;
 
         // The runner owns the accelerator until its last field read has completed.
         internal ILaserDiscCudaEfm AttachCudaEfm(Func<Complex[], ILaserDiscCudaEfm> factory)
@@ -716,10 +789,10 @@ public sealed class RfBlockStreamDecoder : IDisposable
                 CopyTrimmedWindow(pipelineBlock.Demodulated.ChromaFloat32, chroma, destination, offset);
             }
 
-            if (pipelineBlock.Demodulated.VideoBurst is not null)
+            if (HasVideoBurst(pipelineBlock.Demodulated))
             {
                 videoBurst ??= reusableBuffers?.GetVideoBurst() ?? new double[length];
-                CopyTrimmedWindow(pipelineBlock.Demodulated.VideoBurst, videoBurst, destination, offset);
+                CopyVideoBurstWindow(pipelineBlock.Demodulated, videoBurst, destination, offset);
             }
 
             if (pipelineBlock.Demodulated.VideoPilot is not null)
@@ -756,7 +829,7 @@ public sealed class RfBlockStreamDecoder : IDisposable
                 RfDemodulatedBlock demodulated = pipelineBlocks[i].Demodulated;
                 hasChroma |= demodulated.Chroma is not null || demodulated.ChromaFloat32 is not null;
                 hasEfm |= demodulated.Efm is not null;
-                hasVideoBurst |= demodulated.VideoBurst is not null;
+                hasVideoBurst |= HasVideoBurst(demodulated);
                 hasVideoPilot |= demodulated.VideoPilot is not null;
             }
 
@@ -839,9 +912,9 @@ public sealed class RfBlockStreamDecoder : IDisposable
                     CopyTrimmedWindow(blockEfm, efm, blockDestination, offset);
                 }
 
-                if (videoBurst is not null && demodulated.VideoBurst is { } blockVideoBurst)
+                if (videoBurst is not null)
                 {
-                    CopyTrimmedWindow(blockVideoBurst, videoBurst, blockDestination, offset);
+                    CopyVideoBurstWindow(demodulated, videoBurst, blockDestination, offset);
                 }
 
                 if (videoPilot is not null && demodulated.VideoPilot is { } blockVideoPilot)
@@ -1062,6 +1135,8 @@ public sealed class RfBlockStreamDecoder : IDisposable
                     }
 
                     bool deferEfm = efmTask is not null;
+                    bool deferPostFmVideo = ownedReader?.CudaVideo is not null
+                        && cudaOrdinals is { Length: >= LaserDiscCudaVideo.MinBatchSize and <= LaserDiscCudaVideo.BatchCapacity };
                     parallelOptions = new ParallelOptions
                     {
                         MaxDegreeOfParallelism = Math.Min(WorkerThreads, blockCount)
@@ -1083,13 +1158,19 @@ public sealed class RfBlockStreamDecoder : IDisposable
                                 preparedInputs[blockIndex],
                                 rfMtfOverride: laserDiscCompatibilityMtf?[blockIndex],
                                 ownedImmediateEnvelopeShape: _ownedImmediateReader?.EnvelopeShape,
-                                deferEfm: deferEfm);
+                                deferEfm: deferEfm,
+                                deferPostFmVideo: deferPostFmVideo);
                         });
                     if (efmTask is not null)
                     {
                         Task<short[][]> completedEfm = efmTask;
                         efmTask = null;
                         CompleteCudaEfmWave(completedEfm.GetAwaiter().GetResult(), cudaOrdinals!, decodedBlocks);
+                    }
+
+                    if (deferPostFmVideo)
+                    {
+                        ownedReader!.CompleteCudaVideoWave(cudaOrdinals!, decodedBlocks);
                     }
 
                     missingBlocksDecoded = true;
@@ -1966,6 +2047,25 @@ public sealed class RfBlockStreamDecoder : IDisposable
             destination,
             blockDestinationOffset,
             windowOffset);
+    }
+
+    private static bool HasVideoBurst(RfDemodulatedBlock block) =>
+        block.VideoBurst is not null || block.LdVideoBurstFloat32 is not null;
+
+    private void CopyVideoBurstWindow(
+        RfDemodulatedBlock source,
+        double[] destination,
+        int blockDestinationOffset,
+        int windowOffset)
+    {
+        if (source.VideoBurst is { } wideSource)
+        {
+            CopyTrimmedWindow(wideSource, destination, blockDestinationOffset, windowOffset);
+        }
+        else if (source.LdVideoBurstFloat32 is { } compactSource)
+        {
+            CopyTrimmedWindow(compactSource, destination, blockDestinationOffset, windowOffset);
+        }
     }
 
     private void CopyEnvelopeWindow(
