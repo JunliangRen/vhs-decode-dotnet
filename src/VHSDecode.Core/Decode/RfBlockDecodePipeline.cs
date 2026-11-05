@@ -170,16 +170,21 @@ public sealed class RfBlockDecodePipeline : IDisposable
         && _filterOptions.FmDemodulatorMode == RfFmDemodulatorMode.ConjugateProduct
         && (_filterOptions.RfHighBoost is null || _filterOptions.RfHighBoost.Multiplier == 0.0);
 
-    internal Complex[]? LaserDiscCudaEfmFilter =>
+    private bool CanUseOwnedLaserDiscCuda =>
         CanOmitEnvelopeForOwnedImmediateLaserDisc
         && ActiveDspBackend == DspBackend.Exact
-        && !RequiresSequentialBlockDecode
+        && !RequiresSequentialBlockDecode;
+
+    internal bool HasLaserDiscEfm => _filters.LdEfm is not null;
+
+    internal Complex[]? LaserDiscCudaEfmFilter =>
+        CanUseOwnedLaserDiscCuda
         && _filters.LdEfm is { Length: LaserDiscEfmScratchHandoff.BlockLength } filter
             ? filter
             : null;
 
     internal bool CanDeferOwnedLaserDiscPostFmVideo =>
-        LaserDiscCudaEfmFilter is not null
+        CanUseOwnedLaserDiscCuda
         && _demodulator.SampleRateHz == 40_000_000.0
         && Avx2.IsSupported && Fma.IsSupported
         && !_filterOptions.LdPalV4300DNotch
@@ -361,12 +366,12 @@ public sealed class RfBlockDecodePipeline : IDisposable
     {
         ArgumentNullException.ThrowIfNull(input);
         if (deferPostFmVideo
-            && (!deferEfm || !retainRfDiagnosticChannels
+            && (deferEfm != HasLaserDiscEfm || !retainRfDiagnosticChannels
                 || reuseStreamOutputBuffers || includeAnalyticOutput || !CanDeferOwnedLaserDiscPostFmVideo
                 || input.Length != LaserDiscEfmScratchHandoff.BlockLength
                 || ownedImmediateEnvelopeShape is not { Length: LaserDiscEfmScratchHandoff.BlockLength }))
         {
-            throw new InvalidOperationException("Post-FM video requires the private LD CUDA EFM block path.");
+            throw new InvalidOperationException("Post-FM video requires a compatible private LD CUDA block.");
         }
 
         if (_cvbsOptions is not null)

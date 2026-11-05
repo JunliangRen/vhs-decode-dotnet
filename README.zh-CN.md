@@ -177,13 +177,13 @@ Python 原版在不同 worker 数下的输出哈希并不稳定，因此 Python 
 | `cuda-fast` | 实验性的 Windows x64 NVIDIA CUDA 13 全信号 VHS 路径；采用独立数值契约，PAL/NTSC VHS 默认按 40 MSPS 解码，也可用 `--decode-at-20msps` 在 GPU 上执行 40→20 或直接解码原生 20 MSPS 输入，并且绝不会静默回退到 CPU 后端。 |
 | `approx-fast` | 仅支持 VHS 的实验 FP32 路径，可选择 TBC 重采样器和精度契约。默认 `balanced` 保持既有 v1/v2 行为；显式 `aggressive` 使用更快、但有意舍弃部分数值精度的 field-FP32/burst-IQ-prefix/chroma-FFT v6 契约。暂不支持非零 RF high boost。 |
 
-完整 NTSC LaserDisc 解码可用 CUDA 处理 EFM 数字音频和符合条件的 FM 解调后视频滤波：
+完整 NTSC LaserDisc 文件解码可用 CUDA 处理 EFM 数字音频和符合条件的 FM 解调后视频滤波。
 
 ```powershell
 decode.exe ld --dsp-backend cuda-fast --ntsc input.ldf output
 ```
 
-此模式用于文件解码，要求标准 NTSC 40 MSPS RF、启用 EFM 和掉码检测、至少两个解码线程，以及兼容的 NVIDIA GPU 和 CUDA 桥接。CUDA 在符合条件的 20–22 块批次中执行 FM 解调后的视频滤波。RF 解调、模拟音频、场处理和批次以外的视频由 CPU Exact 处理。启动时报告设备，成功完成后分别报告 EFM 和视频使用 GPU 处理的 RF 块数。两条 GPU 路径均使用 FP64 cuFFT，舍入边界处的样本可能不同。
+此模式要求标准 NTSC 40 MSPS RF、启用掉码检测、至少两个解码线程，以及兼容的 NVIDIA GPU 和 CUDA 桥接。CUDA 在符合条件的 20–22 块批次中执行 FM 解调后的视频滤波。使用 `--noEFM` 时，非空解码需要至少一个 CUDA 视频批次。RF 解调、模拟音频、场处理和批次以外的视频由 CPU Exact 处理。成功完成后报告视频的 GPU 块数，并在启用 EFM 时报告 EFM 的 GPU 块数。两条 GPU 路径均使用 FP64 cuFFT，舍入边界处的样本可能不同。
 
 ```powershell
 decode.exe vhs --compat-version current --dsp-backend ipp-fast `
