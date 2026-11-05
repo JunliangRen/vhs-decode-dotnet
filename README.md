@@ -2,16 +2,16 @@
 
 **[English](README.md)** | [简体中文](README.zh-CN.md) | [日本語](README.ja.md)
 
-<!-- README_SYNC: 2026-11-05.02 -->
+<!-- README_SYNC: 2026-11-05.03 -->
 
 A .NET 11 rewrite of the decode-facing parts of
 [`oyvindln/vhs-decode`](https://github.com/oyvindln/vhs-decode), targeting
 upstream release `v0.4.0` at commit
 `43155200da87c0d49eb37d8ec09b1372075ee8e4`.
 
-The current .NET port release is [`v0.4.0-2.17.0`](https://github.com/JunliangRen/vhs-decode-dotnet/releases/tag/v0.4.0-2.17.0) (application version `2.17.0`).
+The current .NET port release is [`v0.4.0-2.18.0`](https://github.com/JunliangRen/vhs-decode-dotnet/releases/tag/v0.4.0-2.18.0) (application version `2.18.0`).
 
-[Measured results and limits of the LD default-runner Envelope optimization](docs/LD_PERFORMANCE_V14.md).
+[LD EFM buffer reuse measurements and limits](docs/LD_PERFORMANCE_V16.md).
 
 > [!IMPORTANT]
 > This remains a compatibility work in progress. The top-level decode paths are
@@ -42,7 +42,7 @@ evidence, and remaining gaps.
   EIAJ, and supported PAL/NTSC variants.
 - TBC utility tools, the double-click GUI, and developer plotting windows are
   intentionally out of scope.
-- The Visual Studio 2026 `.slnx` solution has **2,613** standard xUnit v3 tests
+- The Visual Studio 2026 `.slnx` solution has **2,660** standard xUnit v3 tests
   that are visible in Test Explorer and runnable with `dotnet test`.
 
 <!-- SECTION: start -->

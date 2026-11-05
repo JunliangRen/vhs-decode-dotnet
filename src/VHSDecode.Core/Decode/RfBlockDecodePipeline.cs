@@ -343,7 +343,16 @@ public sealed class RfBlockDecodePipeline : IDisposable
             Complex[]? inputSpectrum = _filters.LdEfm is not null || _filters.LdAnalogAudio is not null
                 ? _demodulator.ForwardLaserDiscFullSpectrum(input)
                 : null;
-            RfDemodulatedBlock demodulated = _demodulator.DemodulateCore(
+            // A new call-local holder never enters an output record or pool.
+            // The original shared input Forward still precedes this allocation.
+            LaserDiscEfmScratchHandoff? efmScratchHandoff = _filters.LdEfm is not null
+                && input.Length == LaserDiscEfmScratchHandoff.BlockLength
+                && ownedImmediateEnvelopeShape is { Length: LaserDiscEfmScratchHandoff.BlockLength }
+                && CanOmitEnvelopeForOwnedImmediateLaserDisc
+                    ? new LaserDiscEfmScratchHandoff(_demodulator)
+                    : null;
+            RfDemodulatedBlock demodulated = _demodulator.DemodulateCoreForOwnedEfmScratch(
+                efmScratchHandoff,
                 input,
                 _filters.RfVideo,
                 _filters.RfHighPass,
@@ -383,6 +392,7 @@ public sealed class RfBlockDecodePipeline : IDisposable
                     useApproxFrequencyDomainChroma && _useDirectStreamOutputBufferLease,
                 ownedImmediateLaserDiscEnvelopeShape: CanOmitEnvelopeForOwnedImmediateLaserDisc
                     ? ownedImmediateEnvelopeShape : null);
+            Complex[]? efmScratch = efmScratchHandoff?.Take(_demodulator);
             if (reportDiagnostics)
             {
                 ReportDiagnostics(demodulated);
@@ -433,7 +443,12 @@ public sealed class RfBlockDecodePipeline : IDisposable
             if (_filters.LdEfm is not null)
             {
                 inputSpectrum ??= _demodulator.ForwardLaserDiscFullSpectrum(input);
-                demodulated = demodulated with { Efm = DecodeEfmBlock(inputSpectrum, _filters.LdEfm) };
+                demodulated = demodulated with
+                {
+                    Efm = efmScratch is null
+                        ? DecodeEfmBlock(inputSpectrum, _filters.LdEfm)
+                        : DecodeEfmBlockWithOwnedScratch(inputSpectrum, _filters.LdEfm, efmScratch)
+                };
             }
 
             if (_filters.LdAnalogAudio is not null)
@@ -835,6 +850,29 @@ public sealed class RfBlockDecodePipeline : IDisposable
     {
         Complex[] filtered = FilterLaserDiscSignal(spectrum, efmFilter);
         return ConvertEfmSamplesToInt16(filtered);
+    }
+
+    private short[] DecodeEfmBlockWithOwnedScratch(
+        ReadOnlySpan<Complex> spectrum,
+        ReadOnlySpan<Complex> efmFilter,
+        Complex[]? scratch)
+    {
+        // Decline before any write; the old path retains its length exception.
+        // Even same-start aliases would corrupt S0 before analog phase1 reads it.
+        if (scratch is not { Length: LaserDiscEfmScratchHandoff.BlockLength }
+            || scratch.Length != spectrum.Length
+            || efmFilter.Length != spectrum.Length
+            || MemoryMarshal.AsBytes(spectrum).Overlaps(MemoryMarshal.AsBytes(scratch.AsSpan()))
+            || MemoryMarshal.AsBytes(efmFilter).Overlaps(MemoryMarshal.AsBytes(scratch.AsSpan())))
+        {
+            return DecodeEfmBlock(spectrum, efmFilter);
+        }
+
+        ComplexMultiply.Apply(spectrum, efmFilter, scratch);
+        _demodulator.InverseLaserDiscFullSpectrumInPlace(
+            scratch,
+            useDuccExact: false);
+        return ConvertEfmSamplesToInt16(scratch);
     }
 
     internal static short[] ConvertEfmSamplesToInt16(ReadOnlySpan<Complex> filtered)
