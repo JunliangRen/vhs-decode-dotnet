@@ -243,7 +243,11 @@ public sealed class DecodeOutputSharingCompatibilityTests
             Assert.True(SpinWait.SpinUntil(
                 () => File.Exists(outputBase + ".tbc.json"),
                 TimeSpan.FromSeconds(10)));
-            using (JsonDocument document = JsonDocument.Parse(File.ReadAllBytes(outputBase + ".tbc.json")))
+            using (FileStream jsonPreview = OpenPreviewEventually(
+                       outputBase + ".tbc.json",
+                       TimeSpan.FromSeconds(10),
+                       cancellationToken))
+            using (JsonDocument document = JsonDocument.Parse(jsonPreview))
             {
                 Assert.Equal(1, document.RootElement.GetProperty("fields").GetArrayLength());
             }
