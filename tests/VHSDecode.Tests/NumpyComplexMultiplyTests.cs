@@ -1,4 +1,5 @@
 using System.Numerics;
+using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using VHSDecode.Core.Dsp;
 using Xunit;
@@ -128,16 +129,16 @@ public sealed class NumpyComplexMultiplyTests
         Complex[] left = BuildValues(4_096, 0xD1B54A32D192ED03UL);
         Complex[] right = BuildValues(4_096, 0x94D049BB133111EBUL);
         var output = new Complex[left.Length];
-        NumpyComplexMultiply.Apply(left, right, output);
-
-        long before = GC.GetAllocatedBytesForCurrentThread();
-        for (int iteration = 0; iteration < 32; iteration++)
+        // Warm the kernel and the exact measurement frame before checking the
+        // steady-state contract. Every measured batch still has a zero-byte budget.
+        for (int iteration = 0; iteration < 128; iteration++)
         {
             NumpyComplexMultiply.Apply(left, right, output);
         }
 
-        long after = GC.GetAllocatedBytesForCurrentThread();
-        Assert.Equal(before, after);
+        _ = MeasureComplexMultiplyAllocation(left, right, output);
+        long allocated = MeasureComplexMultiplyAllocation(left, right, output);
+        Assert.Equal(0, allocated);
     }
 
     [Fact(DisplayName = "SIMD complex-real multiply matches scalar bits")]
@@ -372,6 +373,21 @@ public sealed class NumpyComplexMultiplyTests
             actualReal);
 
         AssertComplexBitsEqual(expected, actual);
+    }
+
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private static long MeasureComplexMultiplyAllocation(
+        Complex[] left,
+        Complex[] right,
+        Complex[] output)
+    {
+        long before = GC.GetAllocatedBytesForCurrentThread();
+        for (int iteration = 0; iteration < 32; iteration++)
+        {
+            NumpyComplexMultiply.Apply(left, right, output);
+        }
+
+        return GC.GetAllocatedBytesForCurrentThread() - before;
     }
 
     private static Complex[] BuildValues(int length, ulong state)

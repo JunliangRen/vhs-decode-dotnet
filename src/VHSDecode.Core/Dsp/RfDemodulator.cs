@@ -418,6 +418,83 @@ public sealed class RfDemodulator : IDisposable
         bool useApproxDirectFloat32DiffRepair = false,
         double[]? ownedImmediateLaserDiscEnvelopeShape = null)
     {
+        return DemodulateCoreForOwnedEfmScratch(
+            efmScratchHandoff: null,
+            input: input,
+            rfVideoFilter: rfVideoFilter,
+            rfHighPassFilter: rfHighPassFilter,
+            rfMtfFilter: rfMtfFilter,
+            videoFilter: videoFilter,
+            videoLowPassFilter: videoLowPassFilter,
+            videoLowPassOffset: videoLowPassOffset,
+            removeLdPalV4300DSpur: removeLdPalV4300DSpur,
+            rfHighBoost: rfHighBoost,
+            diffDemodRepair: diffDemodRepair,
+            chromaTrap: chromaTrap,
+            sharpnessEq: sharpnessEq,
+            nonlinearDeemphasis: nonlinearDeemphasis,
+            subDeemphasis: subDeemphasis,
+            betamaxFscNotchHz: betamaxFscNotchHz,
+            referenceFilters: referenceFilters,
+            fmDemodulatorMode: fmDemodulatorMode,
+            vhsEnvelopeFilter: vhsEnvelopeFilter,
+            vhsRfTopFilter: vhsRfTopFilter,
+            precomputedInputSpectrum: precomputedInputSpectrum,
+            includeRfHighPassOutput: includeRfHighPassOutput,
+            includeAnalyticOutput: includeAnalyticOutput,
+            includeDemodRawOutput: includeDemodRawOutput,
+            useNumpyComplexVhsAnalytic: useNumpyComplexVhsAnalytic,
+            outputBuffers: outputBuffers,
+            vhsEnvelopeIppFilter: vhsEnvelopeIppFilter,
+            ownedInput: ownedInput,
+            ownedRfVideoFilter: ownedRfVideoFilter,
+            ownedRfMtfFilter: ownedRfMtfFilter,
+            approxFilterBank: approxFilterBank,
+            useApproxRfMtfFilter: useApproxRfMtfFilter,
+            approxChromaFilter: approxChromaFilter,
+            approxChromaDestination: approxChromaDestination,
+            useApproxDirectFloat32DiffRepair: useApproxDirectFloat32DiffRepair,
+            ownedImmediateLaserDiscEnvelopeShape: ownedImmediateLaserDiscEnvelopeShape);
+    }
+
+    internal RfDemodulatedBlock DemodulateCoreForOwnedEfmScratch(
+        LaserDiscEfmScratchHandoff? efmScratchHandoff,
+        ReadOnlySpan<double> input,
+        ReadOnlySpan<Complex> rfVideoFilter,
+        ReadOnlySpan<Complex> rfHighPassFilter,
+        ReadOnlySpan<Complex> rfMtfFilter,
+        ReadOnlySpan<Complex> videoFilter,
+        ReadOnlySpan<Complex> videoLowPassFilter,
+        int videoLowPassOffset,
+        bool removeLdPalV4300DSpur,
+        RfHighBoostOptions? rfHighBoost,
+        DiffDemodRepairOptions? diffDemodRepair,
+        ChromaTrapOptions? chromaTrap,
+        SharpnessEqOptions? sharpnessEq,
+        NonlinearDeemphasisOptions? nonlinearDeemphasis,
+        SubDeemphasisOptions? subDeemphasis,
+        double? betamaxFscNotchHz,
+        RfVideoReferenceFilterSet? referenceFilters,
+        RfFmDemodulatorMode fmDemodulatorMode,
+        IReadOnlyList<SosSection>? vhsEnvelopeFilter,
+        IReadOnlyList<SosSection>? vhsRfTopFilter,
+        Complex[]? precomputedInputSpectrum,
+        bool includeRfHighPassOutput,
+        bool includeAnalyticOutput,
+        bool includeDemodRawOutput,
+        bool useNumpyComplexVhsAnalytic,
+        RfDemodulatedBlockOutputBuffers? outputBuffers = null,
+        IppSos32FilterPool? vhsEnvelopeIppFilter = null,
+        double[]? ownedInput = null,
+        Complex[]? ownedRfVideoFilter = null,
+        Complex[]? ownedRfMtfFilter = null,
+        ApproxRfFilterBank? approxFilterBank = null,
+        bool useApproxRfMtfFilter = false,
+        ReadOnlySpan<Complex32> approxChromaFilter = default,
+        float[]? approxChromaDestination = null,
+        bool useApproxDirectFloat32DiffRepair = false,
+        double[]? ownedImmediateLaserDiscEnvelopeShape = null)
+    {
         ObjectDisposedException.ThrowIf(Volatile.Read(ref _disposed) != 0, this);
         bool produceApproxChroma = !approxChromaFilter.IsEmpty
             || approxChromaDestination is not null;
@@ -1390,7 +1467,7 @@ public sealed class RfDemodulator : IDisposable
                 offset: 0,
                 videoSpectrum!);
 
-        return new RfDemodulatedBlock(
+        var result = new RfDemodulatedBlock(
             video,
             includeDemodRawOutput ? demodRaw : [],
             analyticOutput,
@@ -1404,6 +1481,19 @@ public sealed class RfDemodulator : IDisposable
             VideoFloat32 = videoFloat32,
             VideoLowPassFloat32 = videoLowPassFloat32
         };
+
+        // The final LPF/Burst/Pilot readers and result construction completed.
+        // Only this invocation's fresh full-complex D can become EFM storage.
+        if (efmScratchHandoff is not null
+            && useOwnedEnvelopeShape
+            && !useVhsRealFft
+            && input.Length == LaserDiscEfmScratchHandoff.BlockLength
+            && demodSpectrum is { Length: LaserDiscEfmScratchHandoff.BlockLength })
+        {
+            efmScratchHandoff.Publish(this, demodSpectrum);
+        }
+
+        return result;
     }
 
     public static Complex[] RemoveLdPalV4300DSpur(ReadOnlySpan<Complex> spectrum, double sampleRateHz)
