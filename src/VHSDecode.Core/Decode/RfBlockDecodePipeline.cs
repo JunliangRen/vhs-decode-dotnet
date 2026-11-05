@@ -1,3 +1,4 @@
+using System.Buffers;
 using System.Collections.Concurrent;
 using System.Numerics;
 using System.Runtime.CompilerServices;
@@ -197,6 +198,17 @@ public sealed class RfBlockDecodePipeline : IDisposable
         && _filters.VideoLowPass05.Length == LaserDiscEfmScratchHandoff.BlockLength
         && _filters.VideoLowPass05Offset == 32;
 
+    internal bool CanReuseOwnedExactLaserDiscS0 =>
+        ActiveDspBackend == DspBackend.Exact
+        && CanOmitEnvelopeForOwnedImmediateLaserDisc
+        && !RequiresSequentialBlockDecode
+        && HasOwnedLaserDiscPostFmVideoGeometry
+        && _filters.Video.Length == LaserDiscEfmScratchHandoff.BlockLength
+        && _filters.VideoLowPass05.Length == LaserDiscEfmScratchHandoff.BlockLength
+        && _filters.VideoLowPass05Offset == 32
+        && _filters.LdEfm is { Length: LaserDiscEfmScratchHandoff.BlockLength }
+        && _filters.LdAnalogAudio is not null;
+
     private bool HasOwnedLaserDiscPostFmVideoGeometry =>
         _demodulator.SampleRateHz == 40_000_000.0
         && Avx2.IsSupported && Fma.IsSupported
@@ -354,7 +366,8 @@ public sealed class RfBlockDecodePipeline : IDisposable
         double[]? ownedImmediateEnvelopeShape = null,
         bool deferEfm = false,
         bool deferPostFmVideo = false,
-        bool compactPostFmVideo = false)
+        bool compactPostFmVideo = false,
+        bool reuseOwnedLaserDiscS0 = false)
         => DecodePreparedBlockCore(
             input,
             reportDiagnostics,
@@ -365,7 +378,8 @@ public sealed class RfBlockDecodePipeline : IDisposable
             ownedImmediateEnvelopeShape,
             deferEfm,
             deferPostFmVideo,
-            compactPostFmVideo);
+            compactPostFmVideo,
+            reuseOwnedLaserDiscS0);
 
     private RfPipelineBlock DecodePreparedBlockCore(
         double[] input,
@@ -377,7 +391,8 @@ public sealed class RfBlockDecodePipeline : IDisposable
         double[]? ownedImmediateEnvelopeShape = null,
         bool deferEfm = false,
         bool deferPostFmVideo = false,
-        bool compactPostFmVideo = false)
+        bool compactPostFmVideo = false,
+        bool reuseOwnedLaserDiscS0 = false)
     {
         ArgumentNullException.ThrowIfNull(input);
         if (compactPostFmVideo
@@ -411,11 +426,28 @@ public sealed class RfBlockDecodePipeline : IDisposable
         float[]? approxFrequencyDomainChroma = useApproxFrequencyDomainChroma
             ? streamOutputBuffers?.Chroma ?? new float[input.Length]
             : null;
+        Complex[]? leasedInputSpectrum = null;
         try
         {
-            Complex[]? inputSpectrum = _filters.LdEfm is not null || _filters.LdAnalogAudio is not null
-                ? _demodulator.ForwardLaserDiscFullSpectrum(input)
-                : null;
+            Complex[]? inputSpectrum = null;
+            if (_filters.LdEfm is not null || _filters.LdAnalogAudio is not null)
+            {
+                if (reuseOwnedLaserDiscS0 && !deferEfm && !deferPostFmVideo && !compactPostFmVideo
+                    && retainRfDiagnosticChannels && !reuseStreamOutputBuffers && !includeAnalyticOutput
+                    && CanReuseOwnedExactLaserDiscS0
+                    && input.Length == LaserDiscEfmScratchHandoff.BlockLength
+                    && ownedImmediateEnvelopeShape is { Length: LaserDiscEfmScratchHandoff.BlockLength })
+                {
+                    leasedInputSpectrum = ArrayPool<Complex>.Shared.Rent(input.Length);
+                    if (leasedInputSpectrum.Length == input.Length)
+                    {
+                        PocketFftComplex.ForwardDuccRealFull(input, leasedInputSpectrum);
+                        inputSpectrum = leasedInputSpectrum;
+                    }
+                }
+
+                inputSpectrum ??= _demodulator.ForwardLaserDiscFullSpectrum(input);
+            }
             // A new call-local holder never enters an output record or pool.
             // The original shared input Forward still precedes this allocation.
             LaserDiscEfmScratchHandoff? efmScratchHandoff = !deferEfm && _filters.LdEfm is not null
@@ -575,6 +607,15 @@ public sealed class RfBlockDecodePipeline : IDisposable
             }
 
             throw;
+        }
+        finally
+        {
+            // S0 is read through CPU EFM and both analog channels. No output
+            // record retains it, and another block must get its own lease.
+            if (leasedInputSpectrum is not null)
+            {
+                ArrayPool<Complex>.Shared.Return(leasedInputSpectrum);
+            }
         }
     }
 

@@ -202,9 +202,26 @@ public sealed class RfBlockStreamDecoder : IDisposable
 
         internal bool CompactCpuPostFmVideo { get; private set; }
 
+        internal bool ReuseExactLaserDiscS0 { get; private set; }
+
+        internal void EnableExactLaserDiscS0ReuseIfSupported()
+        {
+            if (CudaEfm is not null || CudaVideo is not null || CompactCpuPostFmVideo
+                || Volatile.Read(ref _owner._hasStartedRead) != 0)
+            {
+                throw new InvalidOperationException("CPU Exact LD S0 reuse must be selected before the first RF read.");
+            }
+
+            ReuseExactLaserDiscS0 = _owner.WorkerThreads >= 2
+                && _owner.BlockLength == LaserDiscEfmScratchHandoff.BlockLength
+                && _owner.BlockStride == 31_712 && !_owner._useApproxFloat32FieldPayloads && !_owner._useApproxFloat32Sync
+                && _owner._pipeline.CanReuseOwnedExactLaserDiscS0;
+        }
+
         internal void EnableCompactCpuPostFmVideoIfSupported()
         {
-            if (CudaEfm is not null || CudaVideo is not null || Volatile.Read(ref _owner._hasStartedRead) != 0)
+            if (CudaEfm is not null || CudaVideo is not null || ReuseExactLaserDiscS0
+                || Volatile.Read(ref _owner._hasStartedRead) != 0)
             {
                 throw new InvalidOperationException("CPU compact LD video must be selected before the first RF read.");
             }
@@ -241,7 +258,8 @@ public sealed class RfBlockStreamDecoder : IDisposable
 
         internal ILaserDiscCudaVideo? AttachCudaVideoIfSupported(Func<ILaserDiscCudaVideo> factory)
         {
-            if (CudaVideo is not null || CompactCpuPostFmVideo || Volatile.Read(ref _owner._hasStartedRead) != 0)
+            if (CudaVideo is not null || CompactCpuPostFmVideo || ReuseExactLaserDiscS0
+                || Volatile.Read(ref _owner._hasStartedRead) != 0)
             {
                 throw new InvalidOperationException("CUDA LD video must be attached before the first RF read.");
             }
@@ -316,7 +334,8 @@ public sealed class RfBlockStreamDecoder : IDisposable
         // The runner owns the accelerator until its last field read has completed.
         internal ILaserDiscCudaEfm AttachCudaEfm(Func<Complex[], ILaserDiscCudaEfm> factory)
         {
-            if (CudaEfm is not null || CompactCpuPostFmVideo || Volatile.Read(ref _owner._hasStartedRead) != 0
+            if (CudaEfm is not null || CompactCpuPostFmVideo || ReuseExactLaserDiscS0
+                || Volatile.Read(ref _owner._hasStartedRead) != 0
                 || _owner.WorkerThreads < 2 || _owner.BlockLength != LaserDiscEfmScratchHandoff.BlockLength
                 || _owner._pipeline.LaserDiscCudaEfmFilter is not { } filter)
             {
@@ -1092,6 +1111,7 @@ public sealed class RfBlockStreamDecoder : IDisposable
             int seedBlockIndex = -1;
             ExceptionDispatchInfo? seedFailure = null;
             bool compactPostFmVideo = ownedReader?.CompactCpuPostFmVideo == true;
+            bool reuseExactLaserDiscS0 = ownedReader?.ReuseExactLaserDiscS0 == true;
             bool canSeedCpuBlock = _pipeline.ActiveDspBackend == DspBackend.Exact
                 || (compactPostFmVideo && !_pipeline.HasLaserDiscEfm);
             bool missingBlocksDecoded = false;
@@ -1145,7 +1165,8 @@ public sealed class RfBlockStreamDecoder : IDisposable
                                         seedInput,
                                         rfMtfOverride: seedFilter,
                                         ownedImmediateEnvelopeShape: seedEnvelopeShape,
-                                        compactPostFmVideo: compactPostFmVideo));
+                                        compactPostFmVideo: compactPostFmVideo,
+                                        reuseOwnedLaserDiscS0: reuseExactLaserDiscS0));
                                     seedBlockIndex = i;
                                 }
                                 catch (TaskSchedulerException)
@@ -1211,7 +1232,8 @@ public sealed class RfBlockStreamDecoder : IDisposable
                                 ownedImmediateEnvelopeShape: _ownedImmediateReader?.EnvelopeShape,
                                 deferEfm: deferEfm,
                                 deferPostFmVideo: deferPostFmVideo,
-                                compactPostFmVideo: compactPostFmVideo);
+                                compactPostFmVideo: compactPostFmVideo,
+                                reuseOwnedLaserDiscS0: reuseExactLaserDiscS0);
                         });
                     if (efmTask is not null)
                     {

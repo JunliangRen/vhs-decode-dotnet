@@ -240,6 +240,15 @@ public static class PocketFftComplex
         return output;
     }
 
+    internal static void ForwardDuccRealFull(ReadOnlySpan<double> input, Span<Complex> output)
+    {
+        ValidateLength(input.Length, nameof(input));
+        int packedLength = input.Length / 2;
+        ValidateLength(packedLength, nameof(input));
+        Complex[] packed = EnsureCapacity(ref _realInput, packedLength);
+        ForwardDuccRealFull(input, output, packed.AsSpan(0, packedLength));
+    }
+
     internal static void ForwardDuccRealFull(
         ReadOnlySpan<double> input,
         Span<Complex> output,

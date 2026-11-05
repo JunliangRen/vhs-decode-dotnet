@@ -228,10 +228,16 @@ public sealed class DecodeRunner
                         : DecodeSessionFactory.Create(sessionCommand);
                     // The original requested backend distinguishes CPU Exact from the CUDA complement.
                     if (ownedReader is not null && command.Spec == CliSpecs.LaserDisc
-                        && !command.Get<bool>("preview_server") && session.System == "NTSC"
-                        && dspBackend == DspBackend.IppFast)
+                        && !command.Get<bool>("preview_server") && session.System == "NTSC")
                     {
-                        ownedReader.EnableCompactCpuPostFmVideoIfSupported();
+                        if (dspBackend == DspBackend.IppFast)
+                        {
+                            ownedReader.EnableCompactCpuPostFmVideoIfSupported();
+                        }
+                        else if (dspBackend == DspBackend.Exact)
+                        {
+                            ownedReader.EnableExactLaserDiscS0ReuseIfSupported();
+                        }
                     }
                     if (cudaFastLaserDisc)
                     {
