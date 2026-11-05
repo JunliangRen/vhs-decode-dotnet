@@ -220,6 +220,135 @@ public sealed class OwnedLaserDiscEnvelopeStreamTests
         Assert.Equal(full.Loader.Calls, owned.Loader.Calls);
     }
 
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void ParallelOwned32KReadReloadsBothBlocksAfterLaterEofOrFailure(bool throws)
+    {
+        const int blockLength = 32_768;
+        using var full = new Fixture(4, blockLength: blockLength);
+        using var owned = new Fixture(4, blockLength: blockLength);
+        var reader = Activate(owned);
+        Poison(reader.EnvelopeShape);
+        double[] shapeBefore = reader.EnvelopeShape.ToArray();
+        int nextSample = owned.Decoder.BlockStride;
+        int length = nextSample + 1;
+
+        if (throws)
+        {
+            full.Loader.ThrowAt = owned.Loader.ThrowAt = nextSample;
+            IOException expected = Assert.Throws<IOException>(() => full.Decoder.ReadLeased(full.Stream, 0, length)?.Dispose());
+            IOException actual = Assert.Throws<IOException>(() => reader.Read(owned.Stream, 0, length)?.Dispose());
+            Assert.Equal(expected.Message, actual.Message);
+        }
+        else
+        {
+            full.Loader.EofAt = owned.Loader.EofAt = nextSample;
+            Assert.Null(full.Decoder.ReadLeased(full.Stream, 0, length));
+            Assert.Null(reader.Read(owned.Stream, 0, length));
+        }
+
+        ReadCall[] failedCalls =
+        [
+            new(0, 0, blockLength, "data"),
+            new(0, nextSample, blockLength, throws ? "throw" : "eof")
+        ];
+        Assert.Equal(failedCalls, full.Loader.Calls);
+        Assert.Equal(failedCalls, owned.Loader.Calls);
+        Assert.Empty(CachedBlocks(full.Decoder));
+        Assert.Empty(CachedBlocks(owned.Decoder));
+        Bits(shapeBefore, reader.EnvelopeShape);
+
+        full.Loader.ThrowAt = owned.Loader.ThrowAt = null;
+        full.Loader.EofAt = owned.Loader.EofAt = long.MaxValue;
+        // A different active MTF must not replace the compatibility response already captured for these blocks.
+        Complex[] updatedMtf = new Complex[blockLength];
+        full.Decoder.UpdateLaserDiscCompatibilityMtf(updatedMtf);
+        owned.Decoder.UpdateLaserDiscCompatibilityMtf(updatedMtf);
+        using var expectedRetry = Required(full.Decoder.ReadLeased(full.Stream, 0, length));
+        using var actualRetry = Required(reader.Read(owned.Stream, 0, length));
+        Assert.IsType<double[]>(expectedRetry.Span.Envelope);
+        Assert.Null(actualRetry.Span.Envelope);
+        EqualExceptEnvelope(expectedRetry.Span, actualRetry.Span);
+
+        ReadCall[] allCalls = [.. failedCalls, new(0, 0, blockLength, "data"), new(0, nextSample, blockLength, "data")];
+        Assert.Equal(allCalls, full.Loader.Calls);
+        Assert.Equal(allCalls, owned.Loader.Calls);
+        RfPipelineBlock[] blocks = CachedBlocks(owned.Decoder);
+        Assert.Equal(2, blocks.Length);
+        Assert.All(blocks, block => Assert.Same(reader.EnvelopeShape, block.Demodulated.Envelope));
+        Bits(shapeBefore, reader.EnvelopeShape);
+    }
+
+    [Theory]
+    [InlineData(DspBackend.Exact, 1)]
+    [InlineData(DspBackend.IppFast, 0)]
+    public void ParallelOwned32KReadOnlySeedsExactBeforeLaterEof(DspBackend backend, int expectedPlanBuilds)
+    {
+        if (backend == DspBackend.IppFast)
+        {
+            Assert.SkipUnless(IppTestRuntime.TryProbe(out _), "Intel IPP runtime is unavailable.");
+        }
+
+        using var fixture = new Fixture(4, blockLength: 32_768, backend: backend,
+            nonlinear: new NonlinearDeemphasisOptions(2_000_000.0, null, 2, -250_000.0, 250_000.0));
+        var demodulator = Assert.IsType<RfDemodulator>(typeof(RfBlockDecodePipeline)
+            .GetField("_demodulator", BindingFlags.Instance | BindingFlags.NonPublic)!
+            .GetValue(fixture.Pipeline));
+        var reader = Activate(fixture);
+        int nextSample = fixture.Decoder.BlockStride;
+        int length = nextSample + 1;
+        Assert.Equal(0, demodulator.NonlinearDeemphasisFilterPlanBuildCount);
+
+        fixture.Loader.EofAt = nextSample;
+        Assert.Null(reader.Read(fixture.Stream, 0, length));
+        Assert.Empty(CachedBlocks(fixture.Decoder));
+        Assert.Equal(expectedPlanBuilds, demodulator.NonlinearDeemphasisFilterPlanBuildCount);
+
+        fixture.Loader.EofAt = long.MaxValue;
+        using var retry = Required(reader.Read(fixture.Stream, 0, length));
+        Assert.Equal(1, demodulator.NonlinearDeemphasisFilterPlanBuildCount);
+    }
+
+    [Fact]
+    public void ParallelOwned32KReadPreservesLaterLoaderExceptionOverRfFilterFailure()
+    {
+        const int blockLength = 32_768;
+        using var full = new Fixture(4, blockLength: blockLength, malformedRfVideo: true);
+        using var owned = new Fixture(4, blockLength: blockLength, malformedRfVideo: true);
+        var reader = Activate(owned);
+        int nextSample = owned.Decoder.BlockStride;
+        int length = nextSample + 1;
+        full.Loader.ThrowAt = owned.Loader.ThrowAt = nextSample;
+
+        IOException expected = Assert.Throws<IOException>(() => full.Decoder.ReadLeased(full.Stream, 0, length)?.Dispose());
+        IOException actual = Assert.Throws<IOException>(() => reader.Read(owned.Stream, 0, length)?.Dispose());
+        Assert.Equal(expected.Message, actual.Message);
+        ReadCall[] failedCalls = [new(0, 0, blockLength, "data"), new(0, nextSample, blockLength, "throw")];
+        Assert.Equal(failedCalls, full.Loader.Calls);
+        Assert.Equal(failedCalls, owned.Loader.Calls);
+        Assert.Empty(CachedBlocks(full.Decoder));
+        Assert.Empty(CachedBlocks(owned.Decoder));
+
+        // Let both loads complete to prove the RF error is real and still reaches the caller.
+        full.Loader.ThrowAt = owned.Loader.ThrowAt = null;
+        AggregateException expectedRf = Assert.Throws<AggregateException>(() => full.Decoder.ReadLeased(full.Stream, 0, length)?.Dispose());
+        AggregateException actualRf = Assert.Throws<AggregateException>(() => reader.Read(owned.Stream, 0, length)?.Dispose());
+        var expectedErrors = expectedRf.Flatten().InnerExceptions;
+        var actualErrors = actualRf.Flatten().InnerExceptions;
+        Assert.NotEmpty(expectedErrors);
+        Assert.NotEmpty(actualErrors);
+        ArgumentException expectedFilter = Assert.IsType<ArgumentException>(expectedErrors[0]);
+        Assert.Equal("filter", expectedFilter.ParamName);
+        Assert.All(actualErrors, error => Assert.Equal(Describe(expectedFilter), Describe(error)));
+
+        ReadCall[] allCalls = [.. failedCalls, new(0, 0, blockLength, "data"), new(0, nextSample, blockLength, "data")];
+        Assert.Equal(allCalls, full.Loader.Calls);
+        Assert.Equal(allCalls, owned.Loader.Calls);
+        Assert.Empty(CachedBlocks(full.Decoder));
+        Assert.Empty(CachedBlocks(owned.Decoder));
+    }
+
     private static RfBlockStreamDecoder.OwnedImmediateLaserDiscFieldReader Activate(Fixture fixture)
         => Assert.IsType<RfBlockStreamDecoder.OwnedImmediateLaserDiscFieldReader>(fixture.Decoder.TryCreateOwnedImmediateLaserDiscFieldReader());
 
@@ -278,19 +407,24 @@ public sealed class OwnedLaserDiscEnvelopeStreamTests
         internal readonly RfBlockDecodePipeline Pipeline;
         internal readonly RfBlockStreamDecoder Decoder;
 
-        internal Fixture(int workers, bool sequential = false, long eofAt = long.MaxValue, int prefetch = 0, bool blockFirstRead = false)
+        internal Fixture(int workers, bool sequential = false, long eofAt = long.MaxValue, int prefetch = 0,
+            bool blockFirstRead = false, int blockLength = BlockLength, bool malformedRfVideo = false,
+            DspBackend backend = DspBackend.Exact, NonlinearDeemphasisOptions? nonlinear = null)
         {
             Loader = new RecordingLoader(eofAt, blockFirstRead);
-            Complex[] identity = RfDemodulator.IdentityFilter(BlockLength);
-            double[] ones = Enumerable.Repeat(1.0, BlockLength).ToArray();
-            var filters = new DecodeFilterSet(identity, identity, identity, identity, identity, identity,
+            Complex[] identity = RfDemodulator.IdentityFilter(blockLength);
+            double[] ones = Enumerable.Repeat(1.0, blockLength).ToArray();
+            Complex[] rfVideo = malformedRfVideo ? new Complex[blockLength - 1] : identity;
+            var filters = new DecodeFilterSet(rfVideo, identity, identity, identity, identity, identity,
                 identity, ones, ones, ones, ones, ones, ones, ones,
                 ChromaBurst: identity, ChromaBurstMagnitude: ones, LdVideoBurst: identity,
                 LdVideoBurstMagnitude: ones, LdVideoPilot: identity, LdVideoPilotMagnitude: ones);
             var options = new DecodeFilterOptions(LdClipDemodForVideo: true,
-                SharpnessEq: sequential ? new SharpnessEqOptions(0.0, 2.0, 1.0, 2) : null);
-            Pipeline = new RfBlockDecodePipeline(Loader, filters, sampleRateHz: 40_000_000.0, filterOptions: options);
-            Decoder = new RfBlockStreamDecoder(Pipeline, BlockLength, 2, 2,
+                SharpnessEq: sequential ? new SharpnessEqOptions(0.0, 2.0, 1.0, 2) : null,
+                NonlinearDeemphasis: nonlinear);
+            Pipeline = new RfBlockDecodePipeline(Loader, filters, sampleRateHz: 40_000_000.0,
+                filterOptions: options, dspBackend: backend);
+            Decoder = new RfBlockStreamDecoder(Pipeline, blockLength, 2, 2,
                 workerThreads: workers, prefetchBlocks: prefetch, laserDiscCompatibilityPrefetchBlocks: 2);
             Decoder.UpdateLaserDiscCompatibilityMtf(identity);
         }
@@ -310,6 +444,7 @@ public sealed class OwnedLaserDiscEnvelopeStreamTests
         internal readonly ManualResetEventSlim Entered = new();
         internal readonly ManualResetEventSlim Release = new();
         internal long? ThrowAt;
+        internal long EofAt = eofAt;
         internal ReadCall[] Calls { get { lock (_gate) return _calls.ToArray(); } }
 
         public double[]? Read(Stream stream, long sample, int readLength)
@@ -319,7 +454,7 @@ public sealed class OwnedLaserDiscEnvelopeStreamTests
             {
                 if (!_streams.TryGetValue(stream, out int id)) _streams.Add(stream, id = _streams.Count);
                 sequence = _calls.Count;
-                _calls.Add(new ReadCall(id, sample, readLength, sample == ThrowAt ? "throw" : sample >= eofAt ? "eof" : "data"));
+                _calls.Add(new ReadCall(id, sample, readLength, sample == ThrowAt ? "throw" : sample >= EofAt ? "eof" : "data"));
             }
             if (blockFirstRead && sequence == 0)
             {
@@ -327,9 +462,9 @@ public sealed class OwnedLaserDiscEnvelopeStreamTests
                 if (!Release.Wait(TimeSpan.FromSeconds(10))) throw new TimeoutException("Test loader was not released.");
             }
             if (sample == ThrowAt) throw new IOException("Synthetic loader failure at sample " + sample + ".");
-            if (sample >= eofAt) return null;
+            if (sample >= EofAt) return null;
             var result = new double[readLength];
-            for (int index = 0; index < readLength && sample + index < eofAt; index++) result[index] = sample + index + 1.0;
+            for (int index = 0; index < readLength && sample + index < EofAt; index++) result[index] = sample + index + 1.0;
             return result;
         }
 
