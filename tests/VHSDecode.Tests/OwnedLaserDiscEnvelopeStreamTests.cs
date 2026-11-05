@@ -391,14 +391,25 @@ public sealed class OwnedLaserDiscEnvelopeStreamTests
         }
         byte[] bytes = MemoryMarshal.AsBytes(samples.AsSpan()).ToArray();
         using var wideStream = new MemoryStream(bytes, writable: false);
-        using var compactStream = new MemoryStream(bytes, writable: false);
+        using var compactStream = new LaterReadFailureStream(bytes);
+
+        if (expectedCompact && noEfm)
+        {
+            // The first miss can start before the second read fails. Retry on the same reader.
+            compactStream.FailureOffset = (long)stride * sizeof(short);
+            IOException failure = Assert.Throws<IOException>(() => compactReader.Read(compactStream, 0, stride + 1)?.Dispose());
+            Assert.Equal("Synthetic later block read failure.", failure.Message);
+            Assert.Empty(CachedBlocks(candidate.StreamDecoder));
+            compactStream.FailureOffset = null;
+        }
 
         Compare(11, 17); // Serial miss caches a wide block.
         RfDemodulatedBlock initial = Assert.Single(CachedBlocks(candidate.StreamDecoder)).Demodulated;
         Assert.Equal(blockLength, initial.Video.Length);
         Assert.Null(initial.VideoFloat32);
 
-        Compare(stride - 7, stride + 23); // Cached wide block plus two parallel misses.
+        // Cached wide block plus two parallel misses. No-EFM IPP can seed the first compact miss.
+        Compare(stride - 7, stride + 23);
         RfPipelineBlock[] mixed = CachedBlocks(candidate.StreamDecoder);
         Assert.Equal(3, mixed.Length);
         Assert.Contains(mixed, block => ReferenceEquals(initial, block.Demodulated));
@@ -489,6 +500,21 @@ public sealed class OwnedLaserDiscEnvelopeStreamTests
         => error is null ? null : $"{error.GetType().FullName}|{(error as ArgumentException)?.ParamName}|{error.Message}|"
             + (error is AggregateException aggregate
                 ? string.Join(";", aggregate.InnerExceptions.Select(Describe)) : Describe(error.InnerException));
+
+    private sealed class LaterReadFailureStream(byte[] data) : MemoryStream(data, writable: false)
+    {
+        internal long? FailureOffset { get; set; }
+
+        public override long Seek(long offset, SeekOrigin loc)
+        {
+            if (loc == SeekOrigin.Begin && offset == FailureOffset)
+            {
+                throw new IOException("Synthetic later block read failure.");
+            }
+
+            return base.Seek(offset, loc);
+        }
+    }
 
     private sealed class Fixture : IDisposable
     {
