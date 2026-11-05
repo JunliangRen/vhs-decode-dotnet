@@ -177,6 +177,14 @@ Python 原版在不同 worker 数下的输出哈希并不稳定，因此 Python 
 | `cuda-fast` | 实验性的 Windows x64 NVIDIA CUDA 13 全信号 VHS 路径；采用独立数值契约，PAL/NTSC VHS 默认按 40 MSPS 解码，也可用 `--decode-at-20msps` 在 GPU 上执行 40→20 或直接解码原生 20 MSPS 输入，并且绝不会静默回退到 CPU 后端。 |
 | `approx-fast` | 仅支持 VHS 的实验 FP32 路径，可选择 TBC 重采样器和精度契约。默认 `balanced` 保持既有 v1/v2 行为；显式 `aggressive` 使用更快、但有意舍弃部分数值精度的 field-FP32/burst-IQ-prefix/chroma-FFT v6 契约。暂不支持非零 RF high boost。 |
 
+完整 NTSC LaserDisc 解码也可使用 CUDA 处理 EFM 数字音频：
+
+```powershell
+decode.exe ld --dsp-backend cuda-fast --ntsc input.ldf output
+```
+
+此模式仅用于文件解码，要求标准 NTSC 40 MSPS RF、启用 EFM 和掉码检测、至少两个解码线程，以及兼容的 NVIDIA GPU 和 CUDA 桥接。视频和模拟音频仍使用 CPU Exact，沿用常规 LD 输出。程序启动时报告设备，完成时报告 GPU 处理的 RF 块数。并行批次之外的 RF 块由 CPU Exact 处理。EFM 使用 FP64 cuFFT，量化边界处的样本可能不同。
+
 ```powershell
 decode.exe vhs --compat-version current --dsp-backend ipp-fast `
   --threads 20 input.lds output

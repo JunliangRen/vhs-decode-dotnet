@@ -365,7 +365,11 @@ each backend's 40 and 20 MSPS output was 0.978718/0.991624 for CUDA and
 fields and source-coordinate `fileLoc` values. These are local, short-run
 directional results, not cross-capture guarantees.
 
-`cuda-fast` is a separate Windows x64 NVIDIA CUDA 13 full-signal VHS backend.
+For LaserDisc, `cuda-fast` uses FP64 CUDA for EFM digital audio on the standard
+NTSC 40 MSPS file-decode path. CPU Exact handles video and analog audio. See the
+[LD command example](../README.md#profiles-and-backends).
+
+For VHS, `cuda-fast` is a separate Windows x64 NVIDIA CUDA 13 full-signal backend.
 It loads `vhsdecode_cuda_fast.dll` and cuFFT, then runs the RF demodulation,
 sync/line-location, time-base correction, color-under, and dropout graph from
 cuVHS commit `c55e72073f44b27e8839efb842e4345af39887f7`. CPU code still owns

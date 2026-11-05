@@ -1,5 +1,7 @@
+using System.Numerics;
 using System.Runtime.InteropServices;
 using System.Text;
+using VHSDecode.Core.Decode;
 
 namespace VHSDecode.Core.Dsp.CudaFast;
 
@@ -196,6 +198,13 @@ internal sealed class CudaFastNativeRuntime : ICudaFastNativeRuntime, ICudaFastP
     {
         ArgumentNullException.ThrowIfNull(output);
         return RequireAvailableCore(output, cancellationToken, allowDownload: true);
+    }
+
+    internal static ILaserDiscCudaEfm CreateLaserDiscEfm(
+        Complex[] filter, TextWriter output, CancellationToken cancellationToken)
+    {
+        CudaFastNativeRuntime runtime = RequireAvailableCore(output, cancellationToken, allowDownload: true);
+        return LaserDiscCudaEfm.Create(runtime._libraryHandle, filter, runtime.GetRuntimeInfo(), cancellationToken);
     }
 
     internal static ICudaFastPreviewNativeRuntime RequirePreviewAvailable(

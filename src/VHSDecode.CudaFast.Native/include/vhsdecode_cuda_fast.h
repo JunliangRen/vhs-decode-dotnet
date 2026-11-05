@@ -18,6 +18,8 @@
 
 #define VHSDECODE_CUDA_FAST_ABI_VERSION 0x00060000u
 #define VHSDECODE_CUDA_FAST_NAME_CAPACITY 128u
+#define VHSDECODE_CUDA_FAST_LD_EFM_BLOCK_LENGTH 32768
+#define VHSDECODE_CUDA_FAST_LD_EFM_BATCH_CAPACITY 22
 
 #ifdef __cplusplus
 extern "C" {
@@ -169,6 +171,34 @@ vhsdecode_cuda_fast_preview_decode_window(
 VHSDECODE_CUDA_FAST_API void VHSDECODE_CUDA_FAST_CALL
 vhsdecode_cuda_fast_preview_destroy(
     vhsdecode_cuda_fast_preview_context* context);
+
+/*
+ * Optional LaserDisc EFM extension. Create copies BLOCK_LENGTH interleaved
+ * real/imaginary double pairs and exposes context-owned pinned buffers with
+ * BATCH_CAPACITY * BLOCK_LENGTH samples each. Calls and buffer access on a
+ * context must be serialized. Process consumes and produces the first
+ * block_count complete blocks, and returns after device access to both
+ * buffers has finished. Output is valid only on success. Destroy accepts null.
+ */
+VHSDECODE_CUDA_FAST_API int32_t VHSDECODE_CUDA_FAST_CALL
+vhsdecode_cuda_fast_ld_efm_create_v1(
+    int32_t device_id,
+    const double* filter_interleaved,
+    void** context,
+    double** pinned_input,
+    int16_t** pinned_output,
+    char* error,
+    size_t error_capacity);
+
+VHSDECODE_CUDA_FAST_API int32_t VHSDECODE_CUDA_FAST_CALL
+vhsdecode_cuda_fast_ld_efm_process_v1(
+    void* context,
+    int32_t block_count,
+    char* error,
+    size_t error_capacity);
+
+VHSDECODE_CUDA_FAST_API void VHSDECODE_CUDA_FAST_CALL
+vhsdecode_cuda_fast_ld_efm_destroy_v1(void* context);
 
 VHSDECODE_CUDA_FAST_API const char* VHSDECODE_CUDA_FAST_CALL
 vhsdecode_cuda_fast_get_last_error(void);

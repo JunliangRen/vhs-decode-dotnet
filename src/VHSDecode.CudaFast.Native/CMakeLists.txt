@@ -4389,6 +4389,7 @@ set(CUVHS_SOURCES
 add_library(vhsdecode_cuda_fast SHARED
     src/vhsdecode_cuda_fast.cpp
     src/cuda_fast_decimator.cu
+    src/cuda_fast_ld_efm.cu
     src/cuda_preview_output.cu
     src/raw_reader.cpp
     src/tbc_writer.cpp
@@ -4409,6 +4410,9 @@ target_include_directories(vhsdecode_cuda_fast PRIVATE
 target_link_libraries(
     vhsdecode_cuda_fast
     PRIVATE CUDA::cudart CUDA::cuda_driver CUDA::cufft)
+
+set_source_files_properties(src/cuda_fast_ld_efm.cu PROPERTIES
+    COMPILE_OPTIONS "--fmad=false;--ftz=false")
 
 if(MSVC)
     set_property(TARGET vhsdecode_cuda_fast PROPERTY

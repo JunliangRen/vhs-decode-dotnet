@@ -169,6 +169,14 @@ public sealed class RfBlockDecodePipeline : IDisposable
         && _filterOptions.FmDemodulatorMode == RfFmDemodulatorMode.ConjugateProduct
         && (_filterOptions.RfHighBoost is null || _filterOptions.RfHighBoost.Multiplier == 0.0);
 
+    internal Complex[]? LaserDiscCudaEfmFilter =>
+        CanOmitEnvelopeForOwnedImmediateLaserDisc
+        && ActiveDspBackend == DspBackend.Exact
+        && !RequiresSequentialBlockDecode
+        && _filters.LdEfm is { Length: LaserDiscEfmScratchHandoff.BlockLength } filter
+            ? filter
+            : null;
+
     internal bool ParallelizesVhsInverseStaging =>
         _demodulator.ParallelizesVhsInverseStaging;
 
@@ -306,7 +314,8 @@ public sealed class RfBlockDecodePipeline : IDisposable
         double[] input,
         bool reportDiagnostics = true,
         Complex[]? rfMtfOverride = null,
-        double[]? ownedImmediateEnvelopeShape = null)
+        double[]? ownedImmediateEnvelopeShape = null,
+        bool deferEfm = false)
         => DecodePreparedBlockCore(
             input,
             reportDiagnostics,
@@ -314,7 +323,8 @@ public sealed class RfBlockDecodePipeline : IDisposable
             reuseStreamOutputBuffers: !_retainRfDiagnosticChannels,
             includeAnalyticOutput: !_filterOptions.LdClipDemodForVideo,
             rfMtfOverride,
-            ownedImmediateEnvelopeShape);
+            ownedImmediateEnvelopeShape,
+            deferEfm);
 
     private RfPipelineBlock DecodePreparedBlockCore(
         double[] input,
@@ -323,7 +333,8 @@ public sealed class RfBlockDecodePipeline : IDisposable
         bool reuseStreamOutputBuffers,
         bool includeAnalyticOutput,
         Complex[]? rfMtfOverride = null,
-        double[]? ownedImmediateEnvelopeShape = null)
+        double[]? ownedImmediateEnvelopeShape = null,
+        bool deferEfm = false)
     {
         ArgumentNullException.ThrowIfNull(input);
 
@@ -347,7 +358,7 @@ public sealed class RfBlockDecodePipeline : IDisposable
                 : null;
             // A new call-local holder never enters an output record or pool.
             // The original shared input Forward still precedes this allocation.
-            LaserDiscEfmScratchHandoff? efmScratchHandoff = _filters.LdEfm is not null
+            LaserDiscEfmScratchHandoff? efmScratchHandoff = !deferEfm && _filters.LdEfm is not null
                 && input.Length == LaserDiscEfmScratchHandoff.BlockLength
                 && ownedImmediateEnvelopeShape is { Length: LaserDiscEfmScratchHandoff.BlockLength }
                 && CanOmitEnvelopeForOwnedImmediateLaserDisc
@@ -442,7 +453,7 @@ public sealed class RfBlockDecodePipeline : IDisposable
                     };
             }
 
-            if (_filters.LdEfm is not null)
+            if (!deferEfm && _filters.LdEfm is not null)
             {
                 inputSpectrum ??= _demodulator.ForwardLaserDiscFullSpectrum(input);
                 demodulated = demodulated with
