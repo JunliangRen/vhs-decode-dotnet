@@ -1092,6 +1092,8 @@ public sealed class RfBlockStreamDecoder : IDisposable
             int seedBlockIndex = -1;
             ExceptionDispatchInfo? seedFailure = null;
             bool compactPostFmVideo = ownedReader?.CompactCpuPostFmVideo == true;
+            bool canSeedCpuBlock = _pipeline.ActiveDspBackend == DspBackend.Exact
+                || (compactPostFmVideo && !_pipeline.HasLaserDiscEfm);
             bool missingBlocksDecoded = false;
             int cachedMissingBlockCount = 0;
             List<RfPipelineBlock> deferredReleases = [];
@@ -1127,7 +1129,7 @@ public sealed class RfBlockStreamDecoder : IDisposable
                         missingBlocks[missingBlockCount++] = i;
                         if (missingBlockCount == 1 && i + 1 < blockCount
                             && ownedReader is not null
-                            && _pipeline.ActiveDspBackend == DspBackend.Exact
+                            && canSeedCpuBlock
                             && BlockLength == 32_768 && preparedInput.Length == BlockLength
                             && ownedReader.EnvelopeShape.Length == BlockLength)
                         {
@@ -1142,7 +1144,8 @@ public sealed class RfBlockStreamDecoder : IDisposable
                                     seedTask = Task.Run(() => _pipeline.DecodePreparedStreamBlock(
                                         seedInput,
                                         rfMtfOverride: seedFilter,
-                                        ownedImmediateEnvelopeShape: seedEnvelopeShape));
+                                        ownedImmediateEnvelopeShape: seedEnvelopeShape,
+                                        compactPostFmVideo: compactPostFmVideo));
                                     seedBlockIndex = i;
                                 }
                                 catch (TaskSchedulerException)
