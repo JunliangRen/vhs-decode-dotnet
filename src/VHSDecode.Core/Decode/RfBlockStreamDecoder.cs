@@ -1,4 +1,5 @@
 using System.Numerics;
+using System.Runtime.ExceptionServices;
 using System.Runtime.Intrinsics.X86;
 using VHSDecode.Core.Dsp;
 
@@ -953,6 +954,9 @@ public sealed class RfBlockStreamDecoder : IDisposable
             }
 
             ParallelOptions? parallelOptions = null;
+            Task<RfPipelineBlock>? seedTask = null;
+            int seedBlockIndex = -1;
+            ExceptionDispatchInfo? seedFailure = null;
             bool missingBlocksDecoded = false;
             int cachedMissingBlockCount = 0;
             List<RfPipelineBlock> deferredReleases = [];
@@ -986,6 +990,47 @@ public sealed class RfBlockStreamDecoder : IDisposable
 
                         preparedInputs[i] = preparedInput;
                         missingBlocks[missingBlockCount++] = i;
+                        if (missingBlockCount == 1 && i + 1 < blockCount
+                            && ownedReader is not null
+                            && _pipeline.ActiveDspBackend == DspBackend.Exact
+                            && BlockLength == 32_768 && preparedInput.Length == BlockLength
+                            && ownedReader.EnvelopeShape.Length == BlockLength)
+                        {
+                            Complex[]? seedMtf = laserDiscCompatibilityMtf?[i];
+                            if (seedMtf is null || seedMtf.Length == BlockLength)
+                            {
+                                double[] seedInput = preparedInput;
+                                Complex[]? seedFilter = seedMtf;
+                                double[] seedEnvelopeShape = ownedReader.EnvelopeShape;
+                                try
+                                {
+                                    seedTask = Task.Run(() => _pipeline.DecodePreparedStreamBlock(
+                                        seedInput,
+                                        rfMtfOverride: seedFilter,
+                                        ownedImmediateEnvelopeShape: seedEnvelopeShape));
+                                    seedBlockIndex = i;
+                                }
+                                catch (TaskSchedulerException)
+                                {
+                                    // Optional early submission failed. The normal wave still owns this miss.
+                                }
+                            }
+                        }
+                    }
+
+                    if (seedTask is not null)
+                    {
+                        try
+                        {
+                            decodedBlocks[seedBlockIndex] = seedTask.GetAwaiter().GetResult();
+                        }
+                        catch (Exception exception)
+                        {
+                            // Report the fault from its original ordinal only after all reads succeeded.
+                            seedFailure = ExceptionDispatchInfo.Capture(exception);
+                        }
+
+                        seedTask = null;
                     }
 
                     parallelOptions = new ParallelOptions
@@ -999,6 +1044,12 @@ public sealed class RfBlockStreamDecoder : IDisposable
                         missingIndex =>
                         {
                             int blockIndex = missingBlocks[missingIndex];
+                            if (blockIndex == seedBlockIndex)
+                            {
+                                seedFailure?.Throw();
+                                return;
+                            }
+
                             decodedBlocks[blockIndex] = _pipeline.DecodePreparedStreamBlock(
                                 preparedInputs[blockIndex],
                                 rfMtfOverride: laserDiscCompatibilityMtf?[blockIndex],
@@ -1008,6 +1059,18 @@ public sealed class RfBlockStreamDecoder : IDisposable
                 }
                 finally
                 {
+                    if (seedTask is not null)
+                    {
+                        try
+                        {
+                            decodedBlocks[seedBlockIndex] = seedTask.GetAwaiter().GetResult();
+                        }
+                        catch
+                        {
+                            // A later read failed or returned null. Keep that outcome and observe the seed fault.
+                        }
+                    }
+
                     for (int i = 0; i < missingBlockCount; i++)
                     {
                         _pipeline.ReturnStreamBlockInput(
