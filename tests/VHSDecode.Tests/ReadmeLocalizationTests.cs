@@ -345,7 +345,8 @@ public sealed partial class ReadmeLocalizationTests
             PowerShellBlockRegex(),
             overviews["README.md"],
             "body");
-        Assert.Equal(4, expectedOverviewCommands.Length);
+        Assert.Equal(5, expectedOverviewCommands.Length);
+        Assert.Contains("decode.exe ld --dsp-backend cuda-fast --ntsc input.ldf output", expectedOverviewCommands);
         string[] expectedDetailedCommands = Captures(
             PowerShellBlockRegex(),
             details[Path.Combine("docs", "README.detailed.md")],

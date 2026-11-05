@@ -195,6 +195,23 @@ public sealed class RfBlockStreamDecoder : IDisposable
             EnvelopeShape = envelopeShape;
         }
 
+        internal ILaserDiscCudaEfm? CudaEfm { get; private set; }
+
+        // The runner owns the accelerator until its last field read has completed.
+        internal ILaserDiscCudaEfm AttachCudaEfm(Func<Complex[], ILaserDiscCudaEfm> factory)
+        {
+            if (CudaEfm is not null || Volatile.Read(ref _owner._hasStartedRead) != 0
+                || _owner.WorkerThreads < 2 || _owner.BlockLength != LaserDiscEfmScratchHandoff.BlockLength
+                || _owner._pipeline.LaserDiscCudaEfmFilter is not { } filter)
+            {
+                throw new NotSupportedException(
+                    "LD cuda-fast requires the private parallel RF reader with a 32768-sample EFM filter.");
+            }
+
+            CudaEfm = factory(filter);
+            return CudaEfm;
+        }
+
         internal bool IsFor(RfBlockStreamDecoder owner) => ReferenceEquals(_owner, owner);
 
         internal RfDecodedSpanLease? Read(Stream stream, long begin, int length)
@@ -955,6 +972,7 @@ public sealed class RfBlockStreamDecoder : IDisposable
 
             ParallelOptions? parallelOptions = null;
             Task<RfPipelineBlock>? seedTask = null;
+            Task<short[][]>? efmTask = null;
             int seedBlockIndex = -1;
             ExceptionDispatchInfo? seedFailure = null;
             bool missingBlocksDecoded = false;
@@ -1033,6 +1051,17 @@ public sealed class RfBlockStreamDecoder : IDisposable
                         seedTask = null;
                     }
 
+                    int[]? cudaOrdinals = null;
+                    int firstCudaOrdinal = seedBlockIndex >= 0 ? 1 : 0;
+                    if (seedFailure is null && ownedReader?.CudaEfm is { } cudaEfm && missingBlockCount > firstCudaOrdinal)
+                    {
+                        // The first miss may already contain CPU EFM from the seed task.
+                        int[] ordinals = missingBlocks[firstCudaOrdinal..missingBlockCount];
+                        cudaOrdinals = ordinals;
+                        efmTask = Task.Run(() => cudaEfm.Process(preparedInputs, ordinals, ordinals.Length));
+                    }
+
+                    bool deferEfm = efmTask is not null;
                     parallelOptions = new ParallelOptions
                     {
                         MaxDegreeOfParallelism = Math.Min(WorkerThreads, blockCount)
@@ -1053,8 +1082,16 @@ public sealed class RfBlockStreamDecoder : IDisposable
                             decodedBlocks[blockIndex] = _pipeline.DecodePreparedStreamBlock(
                                 preparedInputs[blockIndex],
                                 rfMtfOverride: laserDiscCompatibilityMtf?[blockIndex],
-                                ownedImmediateEnvelopeShape: _ownedImmediateReader?.EnvelopeShape);
+                                ownedImmediateEnvelopeShape: _ownedImmediateReader?.EnvelopeShape,
+                                deferEfm: deferEfm);
                         });
+                    if (efmTask is not null)
+                    {
+                        Task<short[][]> completedEfm = efmTask;
+                        efmTask = null;
+                        CompleteCudaEfmWave(completedEfm.GetAwaiter().GetResult(), cudaOrdinals!, decodedBlocks);
+                    }
+
                     missingBlocksDecoded = true;
                 }
                 finally
@@ -1068,6 +1105,18 @@ public sealed class RfBlockStreamDecoder : IDisposable
                         catch
                         {
                             // A later read failed or returned null. Keep that outcome and observe the seed fault.
+                        }
+                    }
+
+                    if (efmTask is not null)
+                    {
+                        try
+                        {
+                            _ = efmTask.GetAwaiter().GetResult();
+                        }
+                        catch
+                        {
+                            // Keep the RF failure primary and drain CUDA before returning its inputs.
                         }
                     }
 
@@ -1369,6 +1418,29 @@ public sealed class RfBlockStreamDecoder : IDisposable
         }
 
         deferredReleases.Clear();
+    }
+
+    private static void CompleteCudaEfmWave(
+        short[][] efm, int[] ordinals, RfPipelineBlock[] decodedBlocks)
+    {
+        if (efm.Length != ordinals.Length)
+        {
+            throw new InvalidOperationException("CUDA returned an incomplete LD EFM batch.");
+        }
+
+        for (int i = 0; i < ordinals.Length; i++)
+        {
+            int ordinal = ordinals[i];
+            RfPipelineBlock block = decodedBlocks[ordinal];
+            if (efm[i] is not { Length: LaserDiscEfmScratchHandoff.BlockLength }
+                || block.Demodulated.Efm is not null)
+            {
+                throw new InvalidOperationException("CUDA returned invalid LD EFM block data.");
+            }
+
+            // The owned LD path retains RF channels and has no stream buffer lease.
+            decodedBlocks[ordinal] = block with { Demodulated = block.Demodulated with { Efm = efm[i] } };
+        }
     }
 
     private void PrepareDecodedBlockCache(Stream stream, long firstBlock)

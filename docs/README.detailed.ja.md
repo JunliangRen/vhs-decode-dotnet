@@ -347,7 +347,10 @@ reversal を後続 code だけに帰属させません。
 200 field と source-coordinate `fileLoc` を保持しました。これは local short-run の
 方向性 evidence であり、capture をまたぐ保証ではありません。
 
-`cuda-fast` は独立した Windows x64 NVIDIA CUDA 13 full-signal VHS backend です。
+標準 NTSC 40 MSPS LaserDisc のファイルデコードでは、`cuda-fast` が EFM デジタル音声を
+FP64 CUDA で処理します。映像とアナログ音声は CPU Exact を使用します。[LD のコマンド例](../README.ja.md)
+
+VHS の `cuda-fast` は独立した Windows x64 NVIDIA CUDA 13 の全信号バックエンドです。
 `vhsdecode_cuda_fast.dll` と cuFFT を load し、cuVHS commit
 `c55e72073f44b27e8839efb842e4345af39887f7` に固定した RF demodulation、
 sync/line location、time-base correction、color-under、dropout graph を実行します。

@@ -315,7 +315,10 @@ SSIM：CUDA 为 0.978718/0.991624，IPP 为 0.977307/0.995722。四组输出都�
 200 个严格递增的场，`fileLoc` 保持源采样点坐标。这只是本机短片段的方向性结果，
 不是跨采集保证。
 
-`cuda-fast` 是独立的 Windows x64 NVIDIA CUDA 13 全信号 VHS 后端。它加载
+标准 NTSC 40 MSPS LaserDisc 文件解码可用 `cuda-fast` 通过 FP64 CUDA 处理
+EFM 数字音频。视频和模拟音频使用 CPU Exact。[LD 命令示例](../README.zh-CN.md)
+
+对于 VHS，`cuda-fast` 是独立的 Windows x64 NVIDIA CUDA 13 全信号后端。它加载
 `vhsdecode_cuda_fast.dll` 与 cuFFT，并运行固定在 cuVHS commit
 `c55e72073f44b27e8839efb842e4345af39887f7` 的 RF 解调、同步/行定位、时基校正、
 color-under 和 dropout 图。CPU 仍负责输入回调、少量控制/元数据工作与输出发布，

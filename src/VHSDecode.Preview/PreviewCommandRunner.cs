@@ -21,6 +21,12 @@ public sealed class PreviewCommandRunner
         ArgumentNullException.ThrowIfNull(error);
         try
         {
+            if (command.Spec == CliSpecs.LaserDisc
+                && DspBackendParser.Parse(command.Get<string>("dsp_backend")) == DspBackend.CudaFast)
+            {
+                throw new NotSupportedException("'cuda-fast' does not support LaserDisc preview.");
+            }
+
             var options = new PreviewServerOptions
             {
                 Port = command.Get<int>("preview_port"),

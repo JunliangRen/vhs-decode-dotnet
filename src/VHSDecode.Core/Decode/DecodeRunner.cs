@@ -7,6 +7,7 @@ using VHSDecode.Core.HiFi;
 using VHSDecode.Core.Tbc;
 using System.Diagnostics;
 using System.Globalization;
+using System.Numerics;
 
 namespace VHSDecode.Core.Decode;
 
@@ -17,6 +18,7 @@ public sealed class DecodeRunner
     private readonly Func<CancellationToken, TbcFieldSequenceDecodeEngine> _engineFactory;
     private readonly IHiFiCommandRunner _hiFiRunner;
     private readonly ICudaFastDecodeRunner _cudaFastRunner;
+    private readonly Func<Complex[], TextWriter, CancellationToken, ILaserDiscCudaEfm> _laserDiscCudaEfmFactory;
 
     public DecodeRunner()
         : this(
@@ -41,7 +43,8 @@ public sealed class DecodeRunner
     internal DecodeRunner(
         Func<CancellationToken, TbcFieldSequenceDecodeEngine> engineFactory,
         IHiFiCommandRunner hiFiRunner,
-        ICudaFastDecodeRunner cudaFastRunner)
+        ICudaFastDecodeRunner cudaFastRunner,
+        Func<Complex[], TextWriter, CancellationToken, ILaserDiscCudaEfm>? laserDiscCudaEfmFactory = null)
     {
         ArgumentNullException.ThrowIfNull(engineFactory);
         ArgumentNullException.ThrowIfNull(hiFiRunner);
@@ -49,6 +52,7 @@ public sealed class DecodeRunner
         _engineFactory = engineFactory;
         _hiFiRunner = hiFiRunner;
         _cudaFastRunner = cudaFastRunner;
+        _laserDiscCudaEfmFactory = laserDiscCudaEfmFactory ?? CudaFastNativeRuntime.CreateLaserDiscEfm;
     }
 
     // Only the public default Runner has this factory identity. Ordinary
@@ -126,6 +130,17 @@ public sealed class DecodeRunner
             return WriteInputOutputArgumentFailure(command, output);
         }
 
+        bool cudaFastLaserDisc = command.Spec == CliSpecs.LaserDisc
+            && string.Equals(
+                command.Get<string>("dsp_backend"),
+                DspBackendParser.CudaFastValue,
+                StringComparison.OrdinalIgnoreCase);
+        if (cudaFastLaserDisc && command.Get<bool>("preview_server"))
+        {
+            error.WriteLine("'cuda-fast' does not support LaserDisc preview.");
+            return 1;
+        }
+
         ValidateRequiredPositionals(command);
         if (command.Spec == CliSpecs.LaserDisc
             && GetSystemConflict(command) is { } laserDiscSystemConflict)
@@ -160,6 +175,11 @@ public sealed class DecodeRunner
             if (command.Spec == CliSpecs.LaserDisc)
             {
                 DecodeOutputPreflight.Validate(command);
+                if (cudaFastLaserDisc)
+                {
+                    ValidateLaserDiscCudaOptions(command);
+                }
+
                 if (command.Get<bool>("pal") && command.Get<bool>("AC3"))
                 {
                     output.WriteLine("ERROR: AC3 audio decoding is only supported for NTSC");
@@ -186,7 +206,7 @@ public sealed class DecodeRunner
                     command.GetSource("approx_precision")
                         != ParsedOptionSource.Default);
                 TbcFieldSequenceDecodeResult result;
-                if (dspBackend == DspBackend.CudaFast)
+                if (dspBackend == DspBackend.CudaFast && !cudaFastLaserDisc)
                 {
                     result = _cudaFastRunner.TryDecodeAndWrite(
                         command,
@@ -196,9 +216,20 @@ public sealed class DecodeRunner
                 else
                 {
                     RfBlockStreamDecoder.OwnedImmediateLaserDiscFieldReader? ownedReader = null;
-                    session = ReferenceEquals(_engineFactory, DefaultEngineFactory)
-                        ? CreatePrivateDefaultRunnerSession(command, out ownedReader)
-                        : DecodeSessionFactory.Create(command);
+                    ParsedCommand sessionCommand = cudaFastLaserDisc
+                        ? CreateLaserDiscCudaCpuCommand(command)
+                        : command;
+                    session = cudaFastLaserDisc || ReferenceEquals(_engineFactory, DefaultEngineFactory)
+                        ? CreatePrivateDefaultRunnerSession(sessionCommand, out ownedReader)
+                        : DecodeSessionFactory.Create(sessionCommand);
+                    using ILaserDiscCudaEfm? cudaEfm = cudaFastLaserDisc
+                        ? AttachLaserDiscCudaEfm(session, ownedReader, output, cancellationToken)
+                        : null;
+                    if (cudaEfm is not null)
+                    {
+                        output.WriteLine(cudaEfm.Diagnostic);
+                    }
+
                     session.RuntimeReporter = runtimeReporter;
                     DecodeSessionLogWriter.Write(
                         session,
@@ -238,6 +269,24 @@ public sealed class DecodeRunner
                         : TbcFieldSequenceDecodeEngine.CreateForOwnedDefaultImmediateLaserDisc(
                             ownedReader, cancellationToken);
                     result = engine.TryDecodeAndWrite(session);
+                    if (cudaEfm is not null && result.Success)
+                    {
+                        long processedBlocks = cudaEfm.ProcessedBlocks;
+                        if (result.WrittenFieldCount > 0 && processedBlocks == 0)
+                        {
+                            result = result with
+                            {
+                                Success = false,
+                                Message = "CUDA-fast LaserDisc wrote fields without processing any EFM blocks on the GPU."
+                            };
+                        }
+                        else
+                        {
+                            output.WriteLine(string.Create(
+                                CultureInfo.InvariantCulture,
+                                $"CUDA LD EFM blocks: {processedBlocks}"));
+                        }
+                    }
                 }
 
                 if (result.Success && command.Spec == CliSpecs.Cvbs)
@@ -309,6 +358,56 @@ public sealed class DecodeRunner
             error.WriteLine(ex.Message);
             return 1;
         }
+    }
+
+    private static void ValidateLaserDiscCudaOptions(ParsedCommand command)
+    {
+        if (command.Get<bool>("pal") || command.Get<bool>("ntscj"))
+        {
+            throw new NotSupportedException("'cuda-fast' LaserDisc currently supports NTSC only.");
+        }
+
+        if (command.Get<bool>("noefm"))
+        {
+            throw new NotSupportedException("'cuda-fast' LaserDisc requires EFM output and cannot be used with --noEFM.");
+        }
+
+        if (command.Values["inputfreq"] is double inputFrequency && inputFrequency != FrequencyParser.DddMHz)
+        {
+            throw new NotSupportedException("'cuda-fast' LaserDisc requires 40 MSPS RF input.");
+        }
+    }
+
+    // Build the normal LD CPU complement. The private reader must attach its
+    // CUDA accelerator before the runner opens any output.
+    private static ParsedCommand CreateLaserDiscCudaCpuCommand(ParsedCommand command)
+    {
+        var values = new Dictionary<string, object?>(command.Values, StringComparer.Ordinal)
+        {
+            ["dsp_backend"] = DspBackendParser.ExactValue
+        };
+        return new ParsedCommand(command.Spec, values, [.. command.Positionals], command.ProgramName, command.OptionSources);
+    }
+
+    private ILaserDiscCudaEfm AttachLaserDiscCudaEfm(
+        DecodeSession session,
+        RfBlockStreamDecoder.OwnedImmediateLaserDiscFieldReader? ownedReader,
+        TextWriter output,
+        CancellationToken cancellationToken)
+    {
+        if (session.System != "NTSC"
+            || session.DecodeSampleRateHz != 40_000_000.0
+            || session.StreamDecoder.BlockLength != 32_768
+            || session.StreamDecoder.BlockStride != 31_712
+            || session.StreamDecoder.WorkerThreads < 2
+            || ownedReader is null)
+        {
+            throw new NotSupportedException(
+                "'cuda-fast' LaserDisc requires the NTSC 40 MSPS immediate field path with at least two RF worker threads.");
+        }
+
+        cancellationToken.ThrowIfCancellationRequested();
+        return ownedReader.AttachCudaEfm(filter => _laserDiscCudaEfmFactory(filter, output, cancellationToken));
     }
 
     internal static string FormatIppDiagnostic(IppRuntimeInfo info)
