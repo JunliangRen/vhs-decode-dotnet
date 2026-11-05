@@ -302,10 +302,27 @@ public sealed class DecodeRunner
                             FormatIppDiagnostic(IppRuntime.RequireAvailable()));
                     }
 
+                    bool overlapLaserDiscTail = ownedReader is not null
+                        && dspBackend == DspBackend.Exact && command.Spec == CliSpecs.LaserDisc
+                        && session.System == "NTSC" && session.InputFile != "-" && session.TestLdfOutputPath is null
+                        && session.DecodeSampleRateHz == 40_000_000.0 && session.BlockLength == 32_768
+                        && session.StreamDecoder.BlockStride == 31_712 && session.StreamDecoder.WorkerThreads == 4
+                        && session.ChromaOptions is null
+                        && session.ExecutionOptions is
+                        {
+                            SuppressFileOutputs: false, Debug: false, WriteDebugData: false,
+                            VerboseVits: false, UseProfiler: false
+                        }
+                        && session.LaserDiscAudioOptions is
+                        {
+                            DecodeDigitalAudio: true, DecodeAnalogAudio: true,
+                            WritePreEfm: false, WriteRfTbc: false, Ac3: false
+                        };
                     TbcFieldSequenceDecodeEngine engine = ownedReader is null
                         ? _engineFactory(cancellationToken)
                         : TbcFieldSequenceDecodeEngine.CreateForOwnedDefaultImmediateLaserDisc(
-                            ownedReader, cancellationToken, deferCompletionReport: cudaFastLaserDiscVideoOnly);
+                            ownedReader, cancellationToken, deferCompletionReport: cudaFastLaserDiscVideoOnly,
+                            overlapLaserDiscTail: overlapLaserDiscTail);
                     result = engine.TryDecodeAndWrite(session);
                     if (cudaFastLaserDiscVideoOnly && result.Success)
                     {

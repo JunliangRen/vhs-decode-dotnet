@@ -45,6 +45,7 @@ public sealed class TbcFieldSequenceDecodeEngine
     private readonly VhsDiskSpaceGuard _vhsDiskSpaceGuard;
     private readonly CancellationToken _cancellationToken;
     private readonly bool _usesSessionReader;
+    private readonly bool _overlapOwnedLaserDiscTail;
 
     private sealed class CvbsPrefetchSlot : IDisposable
     {
@@ -294,10 +295,12 @@ public sealed class TbcFieldSequenceDecodeEngine
     private TbcFieldSequenceDecodeEngine(
         RfBlockStreamDecoder.OwnedImmediateLaserDiscFieldReader ownedReader,
         CancellationToken cancellationToken,
-        bool deferCompletionReport)
+        bool deferCompletionReport,
+        bool overlapLaserDiscTail)
         : this(cancellationToken: cancellationToken)
     {
         _deferCompletionReport = deferCompletionReport;
+        _overlapOwnedLaserDiscTail = overlapLaserDiscTail;
         // Preserve _usesSessionReader=true and every default writer/option.
         // Only this read closure receives the private cache-domain capability.
         _readField = (session, input, begin, length, number, _) =>
@@ -307,8 +310,9 @@ public sealed class TbcFieldSequenceDecodeEngine
     internal static TbcFieldSequenceDecodeEngine CreateForOwnedDefaultImmediateLaserDisc(
         RfBlockStreamDecoder.OwnedImmediateLaserDiscFieldReader ownedReader,
         CancellationToken cancellationToken,
-        bool deferCompletionReport = false)
-        => new(ownedReader, cancellationToken, deferCompletionReport);
+        bool deferCompletionReport = false,
+        bool overlapLaserDiscTail = false)
+        => new(ownedReader, cancellationToken, deferCompletionReport, overlapLaserDiscTail);
 
     public int ExtraReadLines { get; }
 
@@ -369,6 +373,9 @@ public sealed class TbcFieldSequenceDecodeEngine
         Stream input,
         int? maxFields)
     {
+        // Early recovery snapshots serialize the initial short requests.
+        bool overlapLaserDiscTail = _overlapOwnedLaserDiscTail && input.CanSeek
+            && (maxFields.HasValue ? maxFields.Value > 100 : session.RunBounds.RequestedFieldCount > 100);
         var output = new StreamingOutputSession(
             session,
             _efmOutputWriter,
@@ -376,10 +383,13 @@ public sealed class TbcFieldSequenceDecodeEngine
             CreateMetadataWriter,
             parallelPayloadWrites: (_usesSessionReader || EnableParallelPayloadWritesForCustomReader)
                 && session.StreamDecoder.WorkerThreads > 1,
-            overlapPayloadWrites: session.Spec.Name == "vhs"
-                && session.StreamDecoder.WorkerThreads > 1
-                && (_usesSessionReader || EnablePayloadWriteOverlapForCustomReader));
+            overlapPayloadWrites: overlapLaserDiscTail
+                || (session.Spec.Name == "vhs"
+                    && session.StreamDecoder.WorkerThreads > 1
+                    && (_usesSessionReader || EnablePayloadWriteOverlapForCustomReader)),
+            overlapLaserDiscTail: overlapLaserDiscTail);
         bool outputCompleted = false;
+        ExceptionDispatchInfo? primaryFailure = null;
         try
         {
             SequenceDecodeSummary summary = DecodeSequence(
@@ -394,7 +404,8 @@ public sealed class TbcFieldSequenceDecodeEngine
                 writeMetadataSnapshot: () =>
                 {
                     output.WriteMetadataSnapshot();
-                });
+                },
+                orderedTailOutput: overlapLaserDiscTail ? output : null);
             output.DrainPendingWrites();
             if (session.Spec.Name == "cvbs")
             {
@@ -416,8 +427,15 @@ public sealed class TbcFieldSequenceDecodeEngine
                 }
                 : result;
         }
-        catch (Exception)
+        catch (Exception producerFailure)
         {
+            if (overlapLaserDiscTail)
+            {
+                // Pending LD writes were issued before the failing producer action.
+                // The ordered writer's primary fault takes precedence over that later fault.
+                primaryFailure = output.StopOutputWorker()
+                    ?? ExceptionDispatchInfo.Capture(producerFailure);
+            }
             if (!outputCompleted)
             {
                 try
@@ -426,15 +444,23 @@ public sealed class TbcFieldSequenceDecodeEngine
                 }
                 catch
                 {
-                    // Preserve the exception that interrupted decoding.
+                    // Preserve the primary writer or producer fault.
                 }
             }
 
+            primaryFailure?.Throw();
             throw;
         }
         finally
         {
-            output.Dispose();
+            try
+            {
+                output.Dispose();
+            }
+            catch when (primaryFailure is not null)
+            {
+                // Cleanup must preserve the earlier failure.
+            }
         }
     }
 
@@ -512,7 +538,8 @@ public sealed class TbcFieldSequenceDecodeEngine
         bool retainFields,
         Action<IReadOnlyList<(TbcDecodedField Field, TbcFieldOrderDecision Decision)>>? writeFields,
         Action? writeMetadataSnapshot,
-        Func<bool>? stopRequested = null)
+        Func<bool>? stopRequested = null,
+        StreamingOutputSession? orderedTailOutput = null)
     {
         if (session.ExecutionOptions.DspBackend == DspBackend.CudaFast)
         {
@@ -655,7 +682,10 @@ public sealed class TbcFieldSequenceDecodeEngine
                 if (writeFields is not null)
                 {
                     writeFields(writes);
-                    session.RuntimeReporter?.FieldsWritten(writes.Count);
+                    if (orderedTailOutput is null)
+                    {
+                        session.RuntimeReporter?.FieldsWritten(writes.Count);
+                    }
                 }
             }
 
@@ -668,6 +698,8 @@ public sealed class TbcFieldSequenceDecodeEngine
                 }
                 else if (firstLaserDiscField is not null)
                 {
+                    // Keep frame completion behind its own payload commit.
+                    orderedTailOutput?.WaitForLaserDiscTail();
                     int rawFrame = ComputeLaserDiscRawFileFrame(session, completedField);
                     int framesPerSecond = string.Equals(
                         session.System,
@@ -715,13 +747,30 @@ public sealed class TbcFieldSequenceDecodeEngine
             TbcFieldDecodeState? fieldState = autoMtf is null
                 ? null
                 : session.TbcFieldDecoder.CaptureState();
+            LaserDiscTailRead? overlappedRead = null;
+            if (orderedTailOutput?.ShouldReadWhileLaserDiscTailPending() == true)
+            {
+                overlappedRead = ReadFieldWhileLaserDiscTailPending(
+                    session, input, begin, readLength, decodedFieldCount,
+                    laserDiscSpeculativeWrittenFieldCount);
+                fieldOutputOwner.Replace(overlappedRead.Field);
+
+                // A previous writer fault wins over the later read and its
+                // diagnostics. Wait outside the read exception handlers.
+                orderedTailOutput.WaitForLaserDiscTail();
+            }
+
             try
             {
                 Task<TbcDecodedField?>? prefetchedField = cvbsPrefetch.Take();
                 int initialReadWrittenFieldCount = session.Spec.Name == "ld"
                     ? laserDiscSpeculativeWrittenFieldCount
                     : writePlanner.WrittenFieldCount;
-                if (useVhsWavefront)
+                if (overlappedRead is not null)
+                {
+                    field = overlappedRead.Complete();
+                }
+                else if (useVhsWavefront)
                 {
                     using VhsWavefrontReadSlot currentVhsSlot = vhsWavefront.Take()
                         ?? BeginVhsWavefrontRead(
@@ -1370,8 +1419,6 @@ public sealed class TbcFieldSequenceDecodeEngine
         }
     }
 
-    // Only the private default Runner's closure can call this LD-only route.
-    // Ordinary/public/custom readers keep their original six-argument body.
     private static TbcDecodedField? ReadOwnedImmediateLaserDiscField(
         DecodeSession session,
         Stream input,
@@ -1611,6 +1658,71 @@ public sealed class TbcFieldSequenceDecodeEngine
         catch (Exception ex)
         {
             throw new DecodeFieldReadException(begin, ex);
+        }
+    }
+
+    private sealed record LaserDiscTailRead(
+        TbcDecodedField? Field,
+        ExceptionDispatchInfo? Failure,
+        List<(Action<string, string> Sink, string Level, string Message)> Diagnostics)
+    {
+        internal TbcDecodedField? Complete()
+        {
+            foreach ((Action<string, string> sink, string level, string message) in Diagnostics)
+            {
+                sink(level, message);
+            }
+
+            Failure?.Throw();
+            return Field;
+        }
+    }
+
+    private LaserDiscTailRead ReadFieldWhileLaserDiscTailPending(
+        DecodeSession session,
+        Stream input,
+        long begin,
+        int readLength,
+        int fieldNumber,
+        int writtenFieldCount)
+    {
+        var diagnostics = new List<(Action<string, string> Sink, string Level, string Message)>();
+        void Capture(Action<string, string> sink, string level, string message)
+        {
+            lock (diagnostics)
+            {
+                diagnostics.Add((sink, level, message));
+            }
+        }
+
+        Action<string, string>? fieldSink = session.TbcFieldDecoder.DiagnosticLogger;
+        Action<string, string>? renderSink = session.TbcRenderer.DiagnosticLogger;
+        Action<string, string> rfSink =
+            (level, message) => DecodeSessionLogWriter.Append(session, level, message);
+        using IDisposable rfDiagnosticScope =
+            session.StreamDecoder.PushDiagnosticLogger((level, message) => Capture(rfSink, level, message));
+        try
+        {
+            session.TbcFieldDecoder.DiagnosticLogger =
+                fieldSink is null ? null : (level, message) => Capture(fieldSink, level, message);
+            session.TbcRenderer.DiagnosticLogger =
+                renderSink is null ? null : (level, message) => Capture(renderSink, level, message);
+            try
+            {
+                TbcDecodedField? field = ReadFieldWithContext(
+                    session, input, begin, readLength, fieldNumber, writtenFieldCount,
+                    retainVhsChromaBurstSamples: false);
+                return new LaserDiscTailRead(field, null, diagnostics);
+            }
+            catch (Exception exception)
+            {
+                return new LaserDiscTailRead(null, ExceptionDispatchInfo.Capture(exception), diagnostics);
+            }
+        }
+        finally
+        {
+            session.TbcFieldDecoder.DiagnosticLogger = fieldSink;
+            session.TbcRenderer.DiagnosticLogger = renderSink;
         }
     }
 
@@ -2076,7 +2188,16 @@ public sealed class TbcFieldSequenceDecodeEngine
         private sealed record OutputWorkItem(
             OutputWorkKind Kind,
             TbcDecodedField? Field = null,
-            TbcFieldOrderDecision? Decision = null);
+            TbcFieldOrderDecision? Decision = null,
+            int ReportFieldsWrittenCount = 0,
+            TaskCompletionSource? Completion = null,
+            PreparedField? Prepared = null);
+
+        private readonly record struct PreparedField(
+            TbcDecodedField MetadataField,
+            System.Text.Json.Nodes.JsonObject FieldInfo,
+            int FieldCount,
+            VideoOutputConverter? OutputConverter);
 
         private static readonly OutputWorkItem MetadataSnapshotWork = new(OutputWorkKind.MetadataSnapshot);
 
@@ -2088,10 +2209,12 @@ public sealed class TbcFieldSequenceDecodeEngine
         private readonly TbcOutputMetadataWriter.StreamingWriter _metadata;
         private readonly TbcSqliteMetadataWriter.SequenceWriter? _sqlite;
         private readonly bool _parallelPayloadWrites;
+        private readonly bool _overlapLaserDiscTail;
         private BlockingCollection<OutputWorkItem>? _outputQueue;
         private Thread? _outputThread;
         private ExceptionDispatchInfo? _outputFailure;
         private bool _outputWorkerStopped;
+        private TaskCompletionSource? _pendingLaserDiscTail;
         private bool _payloadsClosed;
         private bool _completed;
         private int _writtenFieldCount;
@@ -2102,15 +2225,44 @@ public sealed class TbcFieldSequenceDecodeEngine
 
         public int WrittenFieldCount => _writtenFieldCount;
 
+        public bool ShouldReadWhileLaserDiscTailPending()
+        {
+            ThrowIfOutputFailed();
+            if (_pendingLaserDiscTail is not { } pending)
+            {
+                return false;
+            }
+
+            if (!pending.Task.IsCompleted)
+            {
+                return true;
+            }
+
+            WaitForLaserDiscTail();
+            return false;
+        }
+
+        public void WaitForLaserDiscTail()
+        {
+            if (_pendingLaserDiscTail is { } pending)
+            {
+                pending.Task.GetAwaiter().GetResult();
+                _pendingLaserDiscTail = null;
+                ThrowIfOutputFailed();
+            }
+        }
+
         public StreamingOutputSession(
             DecodeSession session,
             ILaserDiscEfmOutputWriter efmOutputWriter,
             Func<string, Stream> createTbcOutput,
             Func<DecodeSession, string, TbcOutputMetadataWriter.StreamingWriter> createMetadataWriter,
             bool parallelPayloadWrites,
-            bool overlapPayloadWrites)
+            bool overlapPayloadWrites,
+            bool overlapLaserDiscTail)
         {
             _session = session;
+            _overlapLaserDiscTail = overlapLaserDiscTail;
             _paths = TbcFirstFieldDecodeEngine.BuildOutputPaths(session);
             Stream? tbc = null;
             Stream? chroma = null;
@@ -2171,11 +2323,33 @@ public sealed class TbcFieldSequenceDecodeEngine
         public void Write(IReadOnlyList<(TbcDecodedField Field, TbcFieldOrderDecision Decision)> writes)
         {
             ObjectDisposedException.ThrowIf(_payloadsClosed, this);
+            int remaining = writes.Count;
             foreach ((TbcDecodedField field, TbcFieldOrderDecision decision) in writes)
             {
                 if (_outputQueue is null)
                 {
                     WriteSynchronously(field, decision);
+                }
+                else if (_overlapLaserDiscTail)
+                {
+                    WaitForLaserDiscTail();
+                    if (TbcDecodedFieldOutputBufferRegistry.WasPooled(field)
+                        || field.RawInputSamples is not null || field.PreTbcVideoSamples is not null
+                        || field.DeferredRenderSource is not null || field.RfTbc is not null
+                        || field.ChromaSamples is not null)
+                    {
+                        throw new InvalidOperationException("Ordered LD output requires an owned field without auxiliary video output.");
+                    }
+
+                    PreparedField prepared = PrepareField(field, decision);
+                    var completion = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+                    int reportCount = --remaining == 0 ? writes.Count : 0;
+                    var work = new OutputWorkItem(
+                        OutputWorkKind.Field, field, ReportFieldsWrittenCount: reportCount,
+                        Completion: completion, Prepared: prepared);
+                    field.RetainOutputBuffers();
+                    EnqueueOutput(work);
+                    _pendingLaserDiscTail = completion;
                 }
                 else
                 {
@@ -2193,16 +2367,18 @@ public sealed class TbcFieldSequenceDecodeEngine
             {
                 _metadata.WriteSnapshot();
             }
+            else if (_overlapLaserDiscTail)
+            {
+                WaitForLaserDiscTail();
+                _metadata.WriteSnapshot();
+            }
             else
             {
                 EnqueueOutput(MetadataSnapshotWork);
             }
         }
 
-        public void DrainPendingWrites()
-        {
-            StopOutputWorker()?.Throw();
-        }
+        public void DrainPendingWrites() => StopOutputWorker()?.Throw();
 
         public TbcFieldSequenceDecodeResult Complete(bool validateOutputConsistency = true)
         {
@@ -2286,10 +2462,12 @@ public sealed class TbcFieldSequenceDecodeEngine
 
         private void ConsumeOutputWork()
         {
+            TaskCompletionSource? activeCompletion = null;
             try
             {
                 foreach (OutputWorkItem work in _outputQueue!.GetConsumingEnumerable())
                 {
+                    activeCompletion = work.Completion;
                     try
                     {
                         if (work.Kind == OutputWorkKind.MetadataSnapshot)
@@ -2298,19 +2476,36 @@ public sealed class TbcFieldSequenceDecodeEngine
                             continue;
                         }
 
-                        WriteSynchronously(
-                            work.Field ?? throw new InvalidOperationException("Field output work was missing its field."),
-                            work.Decision ?? throw new InvalidOperationException("Field output work was missing its decision."));
+                        TbcDecodedField field = work.Field
+                            ?? throw new InvalidOperationException("Field output work was missing its field.");
+                        if (work.Prepared is { } prepared)
+                        {
+                            WritePayload(field, prepared);
+                        }
+                        else
+                        {
+                            WriteSynchronously(field, work.Decision
+                                ?? throw new InvalidOperationException("Field output work was missing its decision."));
+                        }
+
+                        if (work.ReportFieldsWrittenCount != 0)
+                        {
+                            _session.RuntimeReporter?.FieldsWritten(work.ReportFieldsWrittenCount);
+                        }
                     }
                     finally
                     {
                         work.Field?.ReleaseOutputBuffers();
                     }
+
+                    activeCompletion?.TrySetResult();
+                    activeCompletion = null;
                 }
             }
             catch (Exception exception)
             {
                 Volatile.Write(ref _outputFailure, ExceptionDispatchInfo.Capture(exception));
+                activeCompletion?.TrySetResult();
                 try
                 {
                     _outputQueue!.CompleteAdding();
@@ -2323,6 +2518,7 @@ public sealed class TbcFieldSequenceDecodeEngine
                 while (_outputQueue!.TryTake(out OutputWorkItem? abandoned))
                 {
                     abandoned.Field?.ReleaseOutputBuffers();
+                    abandoned.Completion?.TrySetResult();
                 }
             }
         }
@@ -2361,7 +2557,7 @@ public sealed class TbcFieldSequenceDecodeEngine
             }
         }
 
-        private ExceptionDispatchInfo? StopOutputWorker()
+        public ExceptionDispatchInfo? StopOutputWorker()
         {
             if (_outputQueue is null || _outputWorkerStopped)
             {
@@ -2396,6 +2592,12 @@ public sealed class TbcFieldSequenceDecodeEngine
 
         private void WriteSynchronously(TbcDecodedField field, TbcFieldOrderDecision decision)
         {
+            PreparedField prepared = PrepareField(field, decision);
+            WritePayload(field, prepared);
+        }
+
+        private PreparedField PrepareField(TbcDecodedField field, TbcFieldOrderDecision decision)
+        {
             if (field.Samples.Length != _session.TbcFrameSpec.FieldSampleCount)
             {
                 throw new ArgumentException(
@@ -2404,7 +2606,13 @@ public sealed class TbcFieldSequenceDecodeEngine
 
             TbcDecodedField metadataField = _laserDiscOutput.WriteBeforeMetadata(field);
             System.Text.Json.Nodes.JsonObject fieldInfo = _metadata.Add(metadataField, decision, field);
-            _sqlite?.Add(fieldInfo, _metadata.FieldCount, _metadata.LastOutputConverter);
+            return new PreparedField(
+                metadataField, fieldInfo, _metadata.FieldCount, _metadata.LastOutputConverter);
+        }
+
+        private void WritePayload(TbcDecodedField field, PreparedField prepared)
+        {
+            _sqlite?.Add(prepared.FieldInfo, prepared.FieldCount, prepared.OutputConverter);
 
             if (_parallelPayloadWrites && _chroma is not null)
             {
@@ -2462,7 +2670,7 @@ public sealed class TbcFieldSequenceDecodeEngine
             }
 
             _writtenFieldCount++;
-            _laserDiscOutput.WriteAfterVideo(metadataField);
+            _laserDiscOutput.WriteAfterVideo(prepared.MetadataField);
         }
 
         private void WriteChromaFrame(TbcDecodedField field)
