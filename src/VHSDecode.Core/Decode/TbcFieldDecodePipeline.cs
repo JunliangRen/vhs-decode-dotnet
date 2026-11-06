@@ -7467,10 +7467,13 @@ public sealed class TbcFieldDecodePipeline : IDisposable
         bool[] errorMap = GC.AllocateUninitializedArray<bool>(span.Video.Length);
         bool hasRawDemod = span.DemodRaw.Length == span.Video.Length;
         bool hasVideoLowPass = span.VideoLowPass?.Length == span.Video.Length;
-        bool hasRfHighPass = span.RfHighPass?.Length == span.Video.Length;
+        float[]? compactHighPass = span.LdRfHighPassFloat32;
+        bool hasRfHighPass = (compactHighPass?.Length ?? span.RfHighPass?.Length) == span.Video.Length;
         double rawDemodMaximum = _syncAnalyzer.SampleRateHz / 2.0;
         float rfHighPassMaximum = hasRfHighPass
-            ? (float)(NumbaReduction.StandardDeviationFloat32InputToFloat64(span.RfHighPass!) * 3.0)
+            ? (float)((compactHighPass is null
+                ? NumbaReduction.StandardDeviationFloat32InputToFloat64(span.RfHighPass!)
+                : NumbaReduction.StandardDeviationOwnedRfHighPassFloat32(compactHighPass)) * 3.0)
             : float.PositiveInfinity;
 
         LaserDiscDemodDropoutComparison.FillErrorMap(

@@ -30,6 +30,7 @@ internal static class LaserDiscDemodDropoutComparison
         bool hasRfHighPass,
         int rfHighPassOffset)
     {
+        float[]? compactHighPass = span?.LdRfHighPassFloat32;
         // Keep malformed/short inputs on the checked scalar path. In particular,
         // do not add eager exceptions or change partial writes before an exception.
         if (!Avx.IsSupported || !BitConverter.IsLittleEndian
@@ -38,7 +39,7 @@ internal static class LaserDiscDemodDropoutComparison
             || endSample > span.Video.Length || endSample > syncArea.Length || endSample > errorMap.Length
             || (hasRawDemod && (span.DemodRaw is null || endSample > span.DemodRaw.Length))
             || (hasVideoLowPass && (span.VideoLowPass is null || endSample > span.VideoLowPass.Length))
-            || (hasRfHighPass && (span.RfHighPass is null || endSample > span.RfHighPass.Length)))
+            || (hasRfHighPass && endSample > (compactHighPass?.Length ?? span.RfHighPass?.Length ?? -1)))
         {
             FillScalar(span!, syncArea!, errorMap!, startSample, endSample, thresholds,
                 hasRawDemod, hasVideoLowPass, hasRfHighPass, rfHighPassOffset);
@@ -109,30 +110,71 @@ internal static class LaserDiscDemodDropoutComparison
         // target a later entry that would otherwise be overwritten with false.
         if (hasRfHighPass)
         {
-            ref double highFirst = ref MemoryMarshal.GetArrayDataReference(span.RfHighPass!);
-            Vector128<float> minimum = Vector128.Create(-thresholds.RfHighPassMaximum);
-            Vector128<float> maximum = Vector128.Create(thresholds.RfHighPassMaximum);
-            index = startSample;
-            for (; index <= endSample - 4; index += 4)
+            if (compactHighPass is not null)
             {
-                Vector128<float> samples = Avx.ConvertToVector128Single(
-                    Vector256.LoadUnsafe(ref highFirst, (nuint)index));
-                uint mask = (uint)Sse.MoveMask(Sse.Or(Sse.CompareLessThan(samples, minimum), Sse.CompareGreaterThan(samples, maximum)));
-                while (mask != 0)
+                OverlayCompactHighPass(compactHighPass, errorMap, startSample, endSample,
+                    thresholds.RfHighPassMaximum, rfHighPassOffset);
+            }
+            else
+            {
+                ref double highFirst = ref MemoryMarshal.GetArrayDataReference(span.RfHighPass!);
+                Vector128<float> minimum = Vector128.Create(-thresholds.RfHighPassMaximum);
+                Vector128<float> maximum = Vector128.Create(thresholds.RfHighPassMaximum);
+                index = startSample;
+                for (; index <= endSample - 4; index += 4)
                 {
-                    int lane = BitOperations.TrailingZeroCount(mask);
-                    int mapped = index + lane + rfHighPassOffset;
+                    Vector128<float> samples = Avx.ConvertToVector128Single(
+                        Vector256.LoadUnsafe(ref highFirst, (nuint)index));
+                    uint mask = (uint)Sse.MoveMask(Sse.Or(Sse.CompareLessThan(samples, minimum), Sse.CompareGreaterThan(samples, maximum)));
+                    while (mask != 0)
+                    {
+                        int lane = BitOperations.TrailingZeroCount(mask);
+                        int mapped = index + lane + rfHighPassOffset;
+                        if (mapped >= startSample && mapped < endSample) errorMap[mapped] = true;
+                        mask &= mask - 1;
+                    }
+                }
+                for (; index < endSample; index++)
+                {
+                    float value = (float)span.RfHighPass![index];
+                    if (!(value < -thresholds.RfHighPassMaximum || value > thresholds.RfHighPassMaximum)) continue;
+                    int mapped = index + rfHighPassOffset;
                     if (mapped >= startSample && mapped < endSample) errorMap[mapped] = true;
-                    mask &= mask - 1;
                 }
             }
-            for (; index < endSample; index++)
+        }
+    }
+
+    private static void OverlayCompactHighPass(
+        float[] highPass,
+        bool[] errorMap,
+        int startSample,
+        int endSample,
+        float maximumValue,
+        int rfHighPassOffset)
+    {
+        ref float first = ref MemoryMarshal.GetArrayDataReference(highPass);
+        Vector128<float> minimum = Vector128.Create(-maximumValue);
+        Vector128<float> maximum = Vector128.Create(maximumValue);
+        int index = startSample;
+        for (; index <= endSample - 4; index += 4)
+        {
+            Vector128<float> samples = Vector128.LoadUnsafe(ref first, (nuint)index);
+            uint mask = (uint)Sse.MoveMask(Sse.Or(Sse.CompareLessThan(samples, minimum), Sse.CompareGreaterThan(samples, maximum)));
+            while (mask != 0)
             {
-                float value = (float)span.RfHighPass![index];
-                if (!(value < -thresholds.RfHighPassMaximum || value > thresholds.RfHighPassMaximum)) continue;
-                int mapped = index + rfHighPassOffset;
+                int lane = BitOperations.TrailingZeroCount(mask);
+                int mapped = index + lane + rfHighPassOffset;
                 if (mapped >= startSample && mapped < endSample) errorMap[mapped] = true;
+                mask &= mask - 1;
             }
+        }
+        for (; index < endSample; index++)
+        {
+            float value = highPass[index];
+            if (!(value < -maximumValue || value > maximumValue)) continue;
+            int mapped = index + rfHighPassOffset;
+            if (mapped >= startSample && mapped < endSample) errorMap[mapped] = true;
         }
     }
 
@@ -180,7 +222,8 @@ internal static class LaserDiscDemodDropoutComparison
         {
             for (int i = startSample; i < endSample; i++)
             {
-                float value = (float)span.RfHighPass![i];
+                float value = span.LdRfHighPassFloat32 is { } compactHighPass
+                    ? compactHighPass[i] : (float)span.RfHighPass![i];
                 if (!(value < -thresholds.RfHighPassMaximum || value > thresholds.RfHighPassMaximum)) continue;
                 int mapped = i + rfHighPassOffset;
                 if (mapped >= startSample && mapped < endSample) errorMap[mapped] = true;

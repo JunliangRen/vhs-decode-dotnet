@@ -111,6 +111,51 @@ internal static class NumbaReduction
         return Math.Sqrt(squaredDistanceSum / values.Length);
     }
 
+    internal static double StandardDeviationOwnedRfHighPassFloat32(ReadOnlySpan<float> values)
+    {
+        float mean = 0.0f;
+        for (int index = 0; index < values.Length; index++)
+        {
+            mean += values[index];
+        }
+        mean /= values.Length;
+
+        // Retain the stock scalar expression and NaN payload behavior when its
+        // SIMD path declines. The admitted real route uses AVX2.
+        if (!Avx.IsSupported || !float.IsFinite(mean))
+        {
+            double[] widened = GC.AllocateUninitializedArray<double>(values.Length);
+            for (int index = 0; index < values.Length; index++)
+            {
+                widened[index] = values[index];
+            }
+            return StandardDeviationFloat32InputToFloat64(widened);
+        }
+
+        double squaredDistanceSum = 0.0;
+        ref float first = ref MemoryMarshal.GetReference(values);
+        int vectorEnd = values.Length - (values.Length % 4);
+        Vector128<float> meanVector = Vector128.Create(mean);
+        int i = 0;
+        for (; i < vectorEnd; i += 4)
+        {
+            Vector128<float> samples = Vector128.LoadUnsafe(ref first, (nuint)i);
+            Vector128<float> distances = Sse.Subtract(samples, meanVector);
+            Vector128<float> squares = Sse.Multiply(distances, distances);
+            squaredDistanceSum += (double)squares.GetElement(0);
+            squaredDistanceSum += (double)squares.GetElement(1);
+            squaredDistanceSum += (double)squares.GetElement(2);
+            squaredDistanceSum += (double)squares.GetElement(3);
+        }
+        for (; i < values.Length; i++)
+        {
+            float distance = values[i] - mean;
+            squaredDistanceSum += distance * distance;
+        }
+
+        return Math.Sqrt(squaredDistanceSum / values.Length);
+    }
+
     public static double StandardDeviationFloat64(ReadOnlySpan<double> values)
     {
         double mean = MeanFloat64(values);
