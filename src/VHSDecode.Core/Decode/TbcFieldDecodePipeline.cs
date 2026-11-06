@@ -522,8 +522,14 @@ public sealed class TbcFieldDecodePipeline : IDisposable
             };
 
     internal bool CanOverlapOwnedLaserDiscRenderDropout
-        => _dspBackend == DspBackend.Exact && _system == "NTSC" && _workerThreads == 4
-            && CanOmitEnvelopeForImmediateLaserDiscField
+        => _dspBackend == DspBackend.Exact && HasOwnedLaserDiscRenderDropoutGeometry;
+
+    internal bool CanOverlapOwnedIppLaserDiscRenderDropout
+        => _dspBackend == DspBackend.IppFast && _upstreamBehaviorProfile == UpstreamBehaviorProfile.V040
+            && HasOwnedLaserDiscRenderDropoutGeometry;
+
+    private bool HasOwnedLaserDiscRenderDropoutGeometry
+        => _system == "NTSC" && _workerThreads == 4 && CanOmitEnvelopeForImmediateLaserDiscField
             && _renderer.CanConvertPreparedFieldDirectly()
             && _renderer.SampleResamplingKernel == TbcSampleResamplingKernel.KaiserSinc16;
 
@@ -1734,7 +1740,14 @@ public sealed class TbcFieldDecodePipeline : IDisposable
                         fieldConverter ?? _videoOutput))
                     : null;
                 LaserDiscRenderDropoutResult? renderDropoutResult =
-                    overlapLaserDiscRenderDropout && CanOverlapOwnedLaserDiscRenderDropout
+                    overlapLaserDiscRenderDropout
+                    && (CanOverlapOwnedLaserDiscRenderDropout
+                        || (CanOverlapOwnedIppLaserDiscRenderDropout
+                            && span.LdRfHighPassFloat32 is { Length: > 0 } compactRfHighPass
+                            && compactRfHighPass.Length == span.Video.Length
+                            && span.DemodRaw.Length == span.Video.Length
+                            && span.LdRawDemodNyquistMask is null
+                            && span.VideoLowPass?.Length == span.Video.Length))
                     && deferredRenderSource is null && renderResamplingPlan is null
                     && outputBufferLease is null && chromaDecodeTask is null && dropoutDetectionTask is null
                         ? RenderWithLaserDiscDropoutOverlap(
