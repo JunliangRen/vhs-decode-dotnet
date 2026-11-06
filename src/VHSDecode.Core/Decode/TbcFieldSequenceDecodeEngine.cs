@@ -569,6 +569,11 @@ public sealed class TbcFieldSequenceDecodeEngine
             && session.StreamDecoder.PrefetchBlocks == 0
             && (session.TbcFieldDecoder.CanOverlapOwnedLaserDiscRenderDropout
                 || session.TbcFieldDecoder.CanOverlapOwnedIppLaserDiscRenderDropout);
+        // The active mapped fallback below is selected by the standard owned
+        // Windows x64 IPP route.
+        bool allowSecondFieldTailRead = overlapLaserDiscRenderDropout && _usesSessionReader
+            && !retainFields && stopRequested is null
+            && session.ExecutionOptions.DspBackend == DspBackend.IppFast;
         BigInteger requestedFields = maxFields.HasValue
             ? new BigInteger(maxFields.Value)
             : session.RunBounds.RequestedFieldCount;
@@ -598,6 +603,7 @@ public sealed class TbcFieldSequenceDecodeEngine
         TbcDecodedField? firstLaserDiscField = null;
         bool laserDiscLeadIn = false;
         bool laserDiscLeadOut = false;
+        (TbcDecodedField Field, int PriorFields, LaserDiscVbiInterpretation Vbi)? pendingLaserDiscFrameStatus = null;
         bool haveFirstTapeField = false;
         string? pendingTapeFrameStatus = null;
         IReadOnlyList<(string Level, string Message)>? pendingTapeFieldOrderDiagnostics = null;
@@ -683,6 +689,47 @@ public sealed class TbcFieldSequenceDecodeEngine
             }
         }
 
+        LaserDiscVbiInterpretation InterpretLaserDiscFrame(TbcDecodedField first, TbcDecodedField second)
+        {
+            int framesPerSecond = string.Equals(
+                session.System,
+                "PAL",
+                StringComparison.OrdinalIgnoreCase) ? 25 : 30;
+            return LaserDiscVbiInterpreter.Interpret(
+                (first.VbiData ?? []).Concat(second.VbiData ?? []),
+                framesPerSecond);
+        }
+
+        void PublishLaserDiscFrameStatus(
+            int priorFields, int rawFrame, LaserDiscVbiInterpretation interpretation)
+        {
+            laserDiscLeadIn |= interpretation.LeadIn;
+            laserDiscLeadOut |= interpretation.LeadOut;
+            DecodeSessionLogWriter.Status(
+                session,
+                FormatLaserDiscFrameStatus(
+                    priorFields,
+                    session.RunBounds.RequestedFieldCount / 2,
+                    rawFrame,
+                    interpretation,
+                    laserDiscLeadIn,
+                    laserDiscLeadOut));
+        }
+
+        void FlushPendingLaserDiscFrameStatus()
+        {
+            if (pendingLaserDiscFrameStatus is not { } pending)
+            {
+                return;
+            }
+
+            pendingLaserDiscFrameStatus = null;
+            orderedTailOutput!.WaitForLaserDiscTail();
+            int rawFrame = ComputeLaserDiscRawFileFrame(session, pending.Field);
+            PublishLaserDiscFrameStatus(pending.PriorFields, rawFrame, pending.Vbi);
+            autoMtf?.ObserveAcceptedField(pending.Field, session.System);
+        }
+
         TbcFieldOrderDecision? CompleteField(TbcDecodedField completedField, int decodedIndex)
         {
             fields?.Add(completedField);
@@ -720,27 +767,29 @@ public sealed class TbcFieldSequenceDecodeEngine
                 }
                 else if (firstLaserDiscField is not null)
                 {
+                    if (allowSecondFieldTailRead && writes.Count == 1 && writes[0].Decision.DecodeFaults == 0
+                        && !_cancellationToken.IsCancellationRequested && !laserDiscLeadOut
+                        && !TbcOutputMetadataWriter.ShouldWriteRecoverySnapshot(writePlanner.WrittenFieldCount)
+                        && (maxFields.HasValue ? decodedFieldCount < requestedFields
+                            : writePlanner.WrittenFieldCount < requestedFields)
+                        && StaleRawFlacFallbackSampleLoader.GetMappedFallback(session.Loader)
+                            ?.ActiveMappedReadAhead is not null)
+                    {
+                        // Interpret owned VBI values without changing frame or MTF state.
+                        LaserDiscVbiInterpretation interpretation =
+                            InterpretLaserDiscFrame(firstLaserDiscField, completedField);
+                        if (!interpretation.LeadOut)
+                        {
+                            pendingLaserDiscFrameStatus = (completedField, fieldsWrittenBeforeAdd, interpretation);
+                            return writePlanner.LastDecision;
+                        }
+                    }
+
                     // Keep frame completion behind its own payload commit.
                     orderedTailOutput?.WaitForLaserDiscTail();
                     int rawFrame = ComputeLaserDiscRawFileFrame(session, completedField);
-                    int framesPerSecond = string.Equals(
-                        session.System,
-                        "PAL",
-                        StringComparison.OrdinalIgnoreCase) ? 25 : 30;
-                    LaserDiscVbiInterpretation interpretation = LaserDiscVbiInterpreter.Interpret(
-                        (firstLaserDiscField.VbiData ?? []).Concat(completedField.VbiData ?? []),
-                        framesPerSecond);
-                    laserDiscLeadIn |= interpretation.LeadIn;
-                    laserDiscLeadOut |= interpretation.LeadOut;
-                    DecodeSessionLogWriter.Status(
-                        session,
-                        FormatLaserDiscFrameStatus(
-                            fieldsWrittenBeforeAdd,
-                            session.RunBounds.RequestedFieldCount / 2,
-                            rawFrame,
-                            interpretation,
-                            laserDiscLeadIn,
-                            laserDiscLeadOut));
+                    PublishLaserDiscFrameStatus(
+                        fieldsWrittenBeforeAdd, rawFrame, InterpretLaserDiscFrame(firstLaserDiscField, completedField));
                 }
 
                 autoMtf?.ObserveAcceptedField(completedField, session.System);
@@ -761,25 +810,56 @@ public sealed class TbcFieldSequenceDecodeEngine
             ? decodedFieldCount < requestedFields
             : writePlanner.WrittenFieldCount < requestedFields)
         {
-            _cancellationToken.ThrowIfCancellationRequested();
+            bool hasPendingFrameStatus = pendingLaserDiscFrameStatus.HasValue;
+            if (_cancellationToken.IsCancellationRequested)
+            {
+                if (hasPendingFrameStatus)
+                {
+                    FlushPendingLaserDiscFrameStatus();
+                }
+
+                _cancellationToken.ThrowIfCancellationRequested();
+            }
+
             using var fieldOutputOwner = new PooledFieldOutputOwner();
             TbcDecodedField? field;
             DeferredDiagnosticBatch? deferredVhsFieldDiagnostics = null;
             long? vhsSpeculativeNextBegin = null;
-            TbcFieldDecodeState? fieldState = autoMtf is null
-                ? null
-                : session.TbcFieldDecoder.CaptureState();
+            TbcFieldDecodeState? fieldState;
             LaserDiscTailRead? overlappedRead = null;
-            if (orderedTailOutput?.ShouldReadWhileLaserDiscTailPending() == true)
+            // A completed writer fault must escape before the finally can publish status.
+            bool readBeforeFrameStatus =
+                hasPendingFrameStatus && orderedTailOutput!.ShouldReadWhileLaserDiscTailPending();
+            try
             {
-                overlappedRead = ReadFieldWhileLaserDiscTailPending(
-                    session, input, begin, readLength, decodedFieldCount,
-                    laserDiscSpeculativeWrittenFieldCount, overlapLaserDiscRenderDropout);
-                fieldOutputOwner.Replace(overlappedRead.Field);
+                fieldState = autoMtf is null ? null : session.TbcFieldDecoder.CaptureState();
+                if (readBeforeFrameStatus
+                    || (!hasPendingFrameStatus && orderedTailOutput?.ShouldReadWhileLaserDiscTailPending() == true))
+                {
+                    overlappedRead = ReadFieldWhileLaserDiscTailPending(
+                        session, input, begin, readLength, decodedFieldCount,
+                        laserDiscSpeculativeWrittenFieldCount, overlapLaserDiscRenderDropout);
+                    fieldOutputOwner.Replace(overlappedRead.Field);
 
-                // A previous writer fault wins over the later read and its
-                // diagnostics. Wait outside the read exception handlers.
-                orderedTailOutput.WaitForLaserDiscTail();
+                    if (!hasPendingFrameStatus)
+                    {
+                        // Keep a previous writer fault outside the read exception handlers.
+                        orderedTailOutput!.WaitForLaserDiscTail();
+                    }
+                }
+            }
+            finally
+            {
+                if (hasPendingFrameStatus)
+                {
+                    // Commit and report the prior field before the next read is accepted.
+                    FlushPendingLaserDiscFrameStatus();
+                }
+            }
+
+            if (hasPendingFrameStatus)
+            {
+                _cancellationToken.ThrowIfCancellationRequested();
             }
 
             try
