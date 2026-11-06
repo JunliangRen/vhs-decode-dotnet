@@ -347,6 +347,21 @@ public sealed class TbcFieldRenderer
             trackPhaseOverride);
     }
 
+    internal TbcRenderedField RenderDirectLaserDiscFieldWithWorkerLimit(
+        ReadOnlySpan<double> videoHz,
+        IReadOnlyList<double> lineLocations,
+        int firstLine,
+        VideoOutputConverter? converterOverride,
+        int maxWorkerThreads)
+    {
+        using TbcLineResampler.ResamplingPlan plan = PrepareFieldResampling(lineLocations, firstLine);
+        VideoOutputConverter converter = converterOverride ?? _converter;
+        return new TbcRenderedField(
+            _resampler.ResamplePreparedToUInt16(
+                videoHz, plan, converter, TbcSampleResamplingKernel.KaiserSinc16, maxWorkerThreads),
+            OutputConverter: converter);
+    }
+
     internal TbcRenderedField RenderPreparedFieldPayload(
         ReadOnlySpan<double> videoHz,
         TbcLineResampler.ResamplingPlan plan,

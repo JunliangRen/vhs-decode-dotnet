@@ -259,7 +259,7 @@ public sealed class LaserDiscSessionReaderSpanLeaseTests
             BindingFlags.NonPublic | BindingFlags.Static)!;
         try
         {
-            return (TbcDecodedField?)reader.Invoke(null, [session, input, 0L, readLength, 0, true]);
+            return (TbcDecodedField?)reader.Invoke(null, [session, input, 0L, readLength, 0, true, false]);
         }
         catch (TargetInvocationException exception) when (exception.InnerException is not null)
         {

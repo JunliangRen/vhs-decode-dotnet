@@ -35,7 +35,8 @@ public sealed class TbcFieldSequenceDecodeEngine
         long begin,
         int readLength,
         int fieldNumber,
-        bool retainVhsChromaBurstSamples);
+        bool retainVhsChromaBurstSamples,
+        bool overlapLaserDiscRenderDropout);
 
     private const int TestLdfLookaheadSamples = 1_100_000;
     private readonly ILdTestLdfWriter _testLdfWriter;
@@ -288,7 +289,7 @@ public sealed class TbcFieldSequenceDecodeEngine
         _usesSessionReader = readField is null;
         _readField = readField is null
             ? ReadFieldFromSession
-            : (session, input, begin, readLength, fieldNumber, _) =>
+            : (session, input, begin, readLength, fieldNumber, _, _) =>
                 readField(session, input, begin, readLength, fieldNumber);
     }
 
@@ -303,8 +304,9 @@ public sealed class TbcFieldSequenceDecodeEngine
         _overlapOwnedLaserDiscTail = overlapLaserDiscTail;
         // Preserve _usesSessionReader=true and every default writer/option.
         // Only this read closure receives the private cache-domain capability.
-        _readField = (session, input, begin, length, number, _) =>
-            ReadOwnedImmediateLaserDiscField(session, input, begin, length, number, ownedReader);
+        _readField = (session, input, begin, length, number, _, overlapLaserDiscRenderDropout) =>
+            ReadOwnedImmediateLaserDiscField(
+                session, input, begin, length, number, ownedReader, overlapLaserDiscRenderDropout);
     }
 
     internal static TbcFieldSequenceDecodeEngine CreateForOwnedDefaultImmediateLaserDisc(
@@ -547,6 +549,9 @@ public sealed class TbcFieldSequenceDecodeEngine
                 "The explicit 'cuda-fast' backend must be executed by DecodeRunner's independent full-CUDA path; no managed CPU decode fallback was performed.");
         }
 
+        bool overlapLaserDiscRenderDropout = orderedTailOutput is not null
+            && session.StreamDecoder.PrefetchBlocks == 0
+            && session.TbcFieldDecoder.CanOverlapOwnedLaserDiscRenderDropout;
         BigInteger requestedFields = maxFields.HasValue
             ? new BigInteger(maxFields.Value)
             : session.RunBounds.RequestedFieldCount;
@@ -752,7 +757,7 @@ public sealed class TbcFieldSequenceDecodeEngine
             {
                 overlappedRead = ReadFieldWhileLaserDiscTailPending(
                     session, input, begin, readLength, decodedFieldCount,
-                    laserDiscSpeculativeWrittenFieldCount);
+                    laserDiscSpeculativeWrittenFieldCount, overlapLaserDiscRenderDropout);
                 fieldOutputOwner.Replace(overlappedRead.Field);
 
                 // A previous writer fault wins over the later read and its
@@ -814,7 +819,8 @@ public sealed class TbcFieldSequenceDecodeEngine
                         decodedFieldCount,
                         initialReadWrittenFieldCount,
                         retainVhsChromaBurstSamples: retainFields,
-                        out deferredVhsFieldDiagnostics));
+                        out deferredVhsFieldDiagnostics,
+                        overlapLaserDiscRenderDropout));
                 }
                 else
                 {
@@ -863,7 +869,8 @@ public sealed class TbcFieldSequenceDecodeEngine
                             begin,
                             readLength,
                             decodedFieldCount,
-                            writePlanner.WrittenFieldCount));
+                            writePlanner.WrittenFieldCount,
+                            overlapLaserDiscRenderDropout: overlapLaserDiscRenderDropout));
                         laserDiscSpeculativeWrittenFieldCount = writePlanner.WrittenFieldCount;
                     }
                 }
@@ -1155,7 +1162,8 @@ public sealed class TbcFieldSequenceDecodeEngine
                         decodedFieldCount,
                         writePlanner.WrittenFieldCount,
                         retainVhsChromaBurstSamples: false,
-                        out terminalLookaheadDiagnostics));
+                        out terminalLookaheadDiagnostics,
+                        overlapLaserDiscRenderDropout));
                 }
 
                 terminalLookaheadDiagnostics?.FlushFieldDiagnostics();
@@ -1425,7 +1433,8 @@ public sealed class TbcFieldSequenceDecodeEngine
         long begin,
         int readLength,
         int fieldNumber,
-        RfBlockStreamDecoder.OwnedImmediateLaserDiscFieldReader ownedReader)
+        RfBlockStreamDecoder.OwnedImmediateLaserDiscFieldReader ownedReader,
+        bool overlapLaserDiscRenderDropout)
     {
         DecodeReadWindow window = DecodeReadWindowPlanner.Resolve(session, begin, readLength);
         TbcFieldDecodePipeline fieldDecoder = session.TbcFieldDecoder;
@@ -1440,8 +1449,13 @@ public sealed class TbcFieldSequenceDecodeEngine
             input,
             window.StartSample,
             window.SampleCount);
-        return lease is null
-            ? null
+        if (lease is null)
+        {
+            return null;
+        }
+
+        return overlapLaserDiscRenderDropout
+            ? fieldDecoder.DecodeOwnedLaserDiscWithRenderDropoutOverlap(lease.Span, fieldNumber)
             : fieldDecoder.Decode(lease.Span, fieldNumber: fieldNumber);
     }
 
@@ -1451,7 +1465,8 @@ public sealed class TbcFieldSequenceDecodeEngine
         long begin,
         int readLength,
         int fieldNumber,
-        bool retainVhsChromaBurstSamples)
+        bool retainVhsChromaBurstSamples,
+        bool overlapLaserDiscRenderDropout)
     {
         DecodeReadWindow window = DecodeReadWindowPlanner.Resolve(session, begin, readLength);
         if (session.Spec.Name == "vhs")
@@ -1626,7 +1641,8 @@ public sealed class TbcFieldSequenceDecodeEngine
         int readLength,
         int fieldNumber,
         int? writtenFieldCount = null,
-        bool retainVhsChromaBurstSamples = true)
+        bool retainVhsChromaBurstSamples = true,
+        bool overlapLaserDiscRenderDropout = false)
     {
         try
         {
@@ -1641,7 +1657,8 @@ public sealed class TbcFieldSequenceDecodeEngine
                 begin,
                 readLength,
                 effectiveFieldNumber,
-                retainVhsChromaBurstSamples);
+                retainVhsChromaBurstSamples,
+                overlapLaserDiscRenderDropout);
         }
         catch (TbcFieldDecodeRecoveryException)
         {
@@ -1684,7 +1701,8 @@ public sealed class TbcFieldSequenceDecodeEngine
         long begin,
         int readLength,
         int fieldNumber,
-        int writtenFieldCount)
+        int writtenFieldCount,
+        bool overlapLaserDiscRenderDropout)
     {
         var diagnostics = new List<(Action<string, string> Sink, string Level, string Message)>();
         void Capture(Action<string, string> sink, string level, string message)
@@ -1711,7 +1729,8 @@ public sealed class TbcFieldSequenceDecodeEngine
             {
                 TbcDecodedField? field = ReadFieldWithContext(
                     session, input, begin, readLength, fieldNumber, writtenFieldCount,
-                    retainVhsChromaBurstSamples: false);
+                    retainVhsChromaBurstSamples: false,
+                    overlapLaserDiscRenderDropout: overlapLaserDiscRenderDropout);
                 return new LaserDiscTailRead(field, null, diagnostics);
             }
             catch (Exception exception)
@@ -1734,7 +1753,8 @@ public sealed class TbcFieldSequenceDecodeEngine
         int fieldNumber,
         int? writtenFieldCount,
         bool retainVhsChromaBurstSamples,
-        out DeferredDiagnosticBatch? diagnostics)
+        out DeferredDiagnosticBatch? diagnostics,
+        bool overlapLaserDiscRenderDropout)
     {
         diagnostics = null;
         Action<string, string>? diagnosticSink = session.TbcFieldDecoder.DiagnosticLogger;
@@ -1747,7 +1767,8 @@ public sealed class TbcFieldSequenceDecodeEngine
                 readLength,
                 fieldNumber,
                 writtenFieldCount,
-                retainVhsChromaBurstSamples);
+                retainVhsChromaBurstSamples,
+                overlapLaserDiscRenderDropout);
         }
 
         var fieldMessages = new List<(string Level, string Message)>();

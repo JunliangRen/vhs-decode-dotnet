@@ -13,7 +13,8 @@ public sealed class OwnedLaserDiscDefaultRunnerTests
 {
     private delegate DecodeSession OwnedSessionFactory(ParsedCommand command, out OwnedReader? reader);
     private delegate TbcDecodedField? FieldRead(
-        DecodeSession session, Stream input, long begin, int length, int number, bool retainChroma);
+        DecodeSession session, Stream input, long begin, int length, int number, bool retainChroma,
+        bool overlapLaserDiscRenderDropout);
     private static readonly OwnedSessionFactory CreateOwned = typeof(DecodeRunner)
         .GetMethod("CreatePrivateDefaultRunnerSession", BindingFlags.NonPublic | BindingFlags.Static)!
         .CreateDelegate<OwnedSessionFactory>();
@@ -26,7 +27,7 @@ public sealed class OwnedLaserDiscDefaultRunnerTests
         Assert.Same(expected, field.GetValue(new DecodeRunner()));
         Assert.NotSame(expected, field.GetValue(new DecodeRunner(ct => new TbcFieldSequenceDecodeEngine(cancellationToken: ct))));
         MethodInfo ordinary = typeof(TbcFieldSequenceDecodeEngine).GetMethod("ReadFieldFromSession", BindingFlags.NonPublic | BindingFlags.Static)!;
-        Assert.Equal(6, ordinary.GetParameters().Length);
+        Assert.Equal(7, ordinary.GetParameters().Length);
     }
 
     [Theory(DisplayName = "Private default factory uses constructed preview and actual field capability")]
@@ -218,10 +219,14 @@ public sealed class OwnedLaserDiscDefaultRunnerTests
         FieldRead read = GetActualReadDelegate(engine);
         using var input = new CountingInput();
         int length = DecodeReadWindowPlanner.EstimateReadSampleCount(owner, extraReadLines: 3);
-        InvalidOperationException error = Assert.Throws<InvalidOperationException>(() => read(changed, input, 0, length, 0, true));
-        Assert.Equal("The private LD reader's immutable field capability changed.", error.Message);
-        Assert.Equal(0, input.ReadCalls);
-        Assert.Equal(0, input.SeekCalls);
+        foreach (bool overlapLaserDiscRenderDropout in new[] { false, true })
+        {
+            InvalidOperationException error = Assert.Throws<InvalidOperationException>(
+                () => read(changed, input, 0, length, 0, true, overlapLaserDiscRenderDropout));
+            Assert.Equal("The private LD reader's immutable field capability changed.", error.Message);
+            Assert.Equal(0, input.ReadCalls);
+            Assert.Equal(0, input.SeekCalls);
+        }
         // Only the original owner and other are disposed, never their sharing record copy.
     }
 

@@ -521,6 +521,12 @@ public sealed class TbcFieldDecodePipeline : IDisposable
                 Mode: TbcDropoutDetectionMode.LaserDiscDemod
             };
 
+    internal bool CanOverlapOwnedLaserDiscRenderDropout
+        => _dspBackend == DspBackend.Exact && _system == "NTSC" && _workerThreads == 4
+            && CanOmitEnvelopeForImmediateLaserDiscField
+            && _renderer.CanConvertPreparedFieldDirectly()
+            && _renderer.SampleResamplingKernel == TbcSampleResamplingKernel.KaiserSinc16;
+
     internal UpstreamBehaviorProfile UpstreamBehaviorProfile => _upstreamBehaviorProfile;
 
     internal bool CanUseVhsWavefront
@@ -932,6 +938,16 @@ public sealed class TbcFieldDecodePipeline : IDisposable
             : previousFieldNumber.Value;
     }
 
+    internal TbcDecodedField DecodeOwnedLaserDiscWithRenderDropoutOverlap(RfDecodedSpan span, int fieldNumber)
+        => DecodeCore(
+            span,
+            syncThresholdHz: null,
+            fieldNumber,
+            deferCvbsOutputConversion: false,
+            retainChromaBurstSamples: true,
+            usePooledOutputBuffers: false,
+            overlapLaserDiscRenderDropout: true);
+
     internal TbcDecodedField DecodeForSequence(RfDecodedSpan span, int fieldNumber)
         => DecodeCore(
             span,
@@ -1014,7 +1030,8 @@ public sealed class TbcFieldDecodePipeline : IDisposable
         int fieldNumber,
         bool deferCvbsOutputConversion,
         bool retainChromaBurstSamples,
-        bool usePooledOutputBuffers)
+        bool usePooledOutputBuffers,
+        bool overlapLaserDiscRenderDropout = false)
     {
         RfBlockStreamDecoder.VhsPayloadMaterializer? deferredVhsPayload = span.DeferredVhsPayload;
         _ = deferredVhsPayload?.BeginMaterialization();
@@ -1026,7 +1043,8 @@ public sealed class TbcFieldDecodePipeline : IDisposable
                 fieldNumber,
                 deferCvbsOutputConversion,
                 retainChromaBurstSamples,
-                usePooledOutputBuffers);
+                usePooledOutputBuffers,
+                overlapLaserDiscRenderDropout);
         }
         catch
         {
@@ -1068,7 +1086,8 @@ public sealed class TbcFieldDecodePipeline : IDisposable
         int fieldNumber,
         bool deferCvbsOutputConversion,
         bool retainChromaBurstSamples,
-        bool usePooledOutputBuffers)
+        bool usePooledOutputBuffers,
+        bool overlapLaserDiscRenderDropout)
         => StartDecodeCoreAfterPayloadStart(
             span,
             syncThresholdHz,
@@ -1076,7 +1095,8 @@ public sealed class TbcFieldDecodePipeline : IDisposable
             deferCvbsOutputConversion,
             retainChromaBurstSamples,
             usePooledOutputBuffers,
-            deferVhsTail: false).Complete();
+            deferVhsTail: false,
+            overlapLaserDiscRenderDropout: overlapLaserDiscRenderDropout).Complete();
 
     private FieldDecodeStart StartDecodeCoreAfterPayloadStart(
         RfDecodedSpan span,
@@ -1085,7 +1105,8 @@ public sealed class TbcFieldDecodePipeline : IDisposable
         bool deferCvbsOutputConversion,
         bool retainChromaBurstSamples,
         bool usePooledOutputBuffers,
-        bool deferVhsTail)
+        bool deferVhsTail,
+        bool overlapLaserDiscRenderDropout = false)
     {
         (double SyncLevel, double BlankLevel)? previouslyRenderedCvbsLevels = _renderer.LastCvbsSyncLevels;
         SyncPreparedSpan prepared = PrepareSyncSpan(span, syncThresholdHz);
@@ -1098,7 +1119,8 @@ public sealed class TbcFieldDecodePipeline : IDisposable
                 deferCvbsOutputConversion && CanDeferCvbsOutputConversion,
                 retainChromaBurstSamples,
                 usePooledOutputBuffers,
-                deferVhsTail);
+                deferVhsTail,
+                overlapLaserDiscRenderDropout);
         }
         catch (InvalidOperationException ex) when (prepared.UsedSavedLevels && IsSyncLocationFailure(ex))
         {
@@ -1114,7 +1136,8 @@ public sealed class TbcFieldDecodePipeline : IDisposable
                 deferCvbsOutputConversion && CanDeferCvbsOutputConversion,
                 retainChromaBurstSamples,
                 usePooledOutputBuffers,
-                deferVhsTail);
+                deferVhsTail,
+                overlapLaserDiscRenderDropout);
         }
 
         if (_syncDetectionOptions.CvbsAutoSync && _renderer.CvbsClampAgc is not null)
@@ -1133,7 +1156,8 @@ public sealed class TbcFieldDecodePipeline : IDisposable
         bool deferCvbsOutputConversion,
         bool retainChromaBurstSamples,
         bool usePooledOutputBuffers,
-        bool deferVhsTail)
+        bool deferVhsTail,
+        bool overlapLaserDiscRenderDropout)
     {
         RfDecodedSpan span = prepared.Span;
         bool isVhs = string.Equals(_decodeType, "vhs", StringComparison.Ordinal);
@@ -1709,12 +1733,25 @@ public sealed class TbcFieldDecodePipeline : IDisposable
                         parity.IsFirstField,
                         fieldConverter ?? _videoOutput))
                     : null;
+                LaserDiscRenderDropoutResult? renderDropoutResult =
+                    overlapLaserDiscRenderDropout && CanOverlapOwnedLaserDiscRenderDropout
+                    && deferredRenderSource is null && renderResamplingPlan is null
+                    && outputBufferLease is null && chromaDecodeTask is null && dropoutDetectionTask is null
+                        ? RenderWithLaserDiscDropoutOverlap(
+                            span, renderLineLocations, lineLocations, timing, outputFirstLine,
+                            fieldNumber, parity.IsFirstField, fieldConverter, chromaPhase?.NextChromaRotationIndex)
+                        : null;
                 VhsChromaFieldResult? chroma = null;
                 TbcDropoutMap? dropouts = null;
                 TbcRenderedField rendered;
                 try
                 {
-                    if (deferredRenderSource is not null)
+                    if (renderDropoutResult is { } overlapped)
+                    {
+                        rendered = overlapped.Rendered;
+                        dropouts = overlapped.Dropouts;
+                    }
+                    else if (deferredRenderSource is not null)
                     {
                         rendered = new TbcRenderedField([]);
                     }
@@ -1797,13 +1834,15 @@ public sealed class TbcFieldDecodePipeline : IDisposable
                     renderResamplingPlan?.Dispose();
                 }
 
-                double? blackToWhiteRfRatio = ComputeLaserDiscBlackToWhiteRfRatio(
-                    span.Input,
-                    rendered.Samples,
-                    lineLocations.Locations,
-                    parity.IsFirstField == true,
-                    fieldConverter ?? _videoOutput);
-                if (dropoutDetectionTask is null)
+                double? blackToWhiteRfRatio = renderDropoutResult is { } overlap
+                    ? overlap.BlackToWhiteRfRatio
+                    : ComputeLaserDiscBlackToWhiteRfRatio(
+                        span.Input,
+                        rendered.Samples,
+                        lineLocations.Locations,
+                        parity.IsFirstField == true,
+                        fieldConverter ?? _videoOutput);
+                if (dropoutDetectionTask is null && !renderDropoutResult.HasValue)
                 {
                     dropouts = DetectDropouts(
                         span,
@@ -7205,6 +7244,70 @@ public sealed class TbcFieldDecodePipeline : IDisposable
         }
 
         return null;
+    }
+
+    private readonly record struct LaserDiscRenderDropoutResult(
+        TbcRenderedField Rendered,
+        double? BlackToWhiteRfRatio,
+        TbcDropoutMap? Dropouts);
+
+    private LaserDiscRenderDropoutResult RenderWithLaserDiscDropoutOverlap(
+        RfDecodedSpan span,
+        IReadOnlyList<double> renderLineLocations,
+        LineLocationResult lineLocations,
+        SyncTiming timing,
+        int outputFirstLine,
+        int fieldNumber,
+        bool? isFirstField,
+        VideoOutputConverter? fieldConverter,
+        int? trackPhase)
+    {
+        VideoOutputConverter converter = fieldConverter ?? _videoOutput;
+        TbcDropoutMap? DetectCurrentDropouts()
+            => DetectDropouts(span, lineLocations, timing, isFirstField, converter);
+
+        Task<TbcDropoutMap?>? dropoutTask = null;
+        try
+        {
+            dropoutTask = Task.Run(DetectCurrentDropouts);
+        }
+        catch (TaskSchedulerException)
+        {
+            // If scheduling failed, run dropout detection at its original point.
+        }
+
+        bool observedDropout = false;
+        try
+        {
+            TbcRenderedField rendered = dropoutTask is { IsCompleted: false }
+                ? _renderer.RenderDirectLaserDiscFieldWithWorkerLimit(
+                    span.Video, renderLineLocations, outputFirstLine, fieldConverter, maxWorkerThreads: 3)
+                : _renderer.RenderFieldPayload(
+                    span.Video, renderLineLocations, firstLine: outputFirstLine,
+                    fieldNumber: fieldNumber, converterOverride: fieldConverter, trackPhaseOverride: trackPhase);
+            double? ratio = ComputeLaserDiscBlackToWhiteRfRatio(
+                span.Input, rendered.Samples, lineLocations.Locations, isFirstField == true, converter);
+            observedDropout = true;
+            TbcDropoutMap? dropouts = dropoutTask is null
+                ? DetectCurrentDropouts()
+                : dropoutTask.GetAwaiter().GetResult();
+            return new LaserDiscRenderDropoutResult(rendered, ratio, dropouts);
+        }
+        finally
+        {
+            if (!observedDropout && dropoutTask is not null)
+            {
+                // The owned RF span may be released only after the worker stops reading it.
+                try
+                {
+                    _ = dropoutTask.GetAwaiter().GetResult();
+                }
+                catch
+                {
+                    // Preserve the earlier render or RF-level-metric failure.
+                }
+            }
+        }
     }
 
     private TbcDropoutMap? DetectDropouts(
