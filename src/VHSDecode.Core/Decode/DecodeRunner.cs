@@ -286,6 +286,7 @@ public sealed class DecodeRunner
                         output.WriteLine("CUDA-fast LD video: post-FM filtering in eligible RF batches.");
                     }
 
+                    bool completeCudaMappedReadAhead = false;
                     if (standardCudaLdOutput && ReferenceEquals(_engineFactory, DefaultEngineFactory)
                         && OperatingSystem.IsWindows() && RuntimeInformation.ProcessArchitecture == Architecture.X64
                         && !command.Get<bool>("lowband")
@@ -296,7 +297,14 @@ public sealed class DecodeRunner
                             || (session.LaserDiscAudioOptions is { DecodeDigitalAudio: true }
                                 && ownedReader.CanPrepareCudaEfmIppRfFft)))
                     {
-                        ownedReader.PrepareCudaIppRfFftOnFirstRead(cancellationToken);
+                        StaleRawFlacFallbackSampleLoader? cudaMappedFallback = null;
+                        if (ownedReader.CanPrepareCudaEfmIppRfFft && HasStandardLaserDiscReadAheadOptions(command))
+                        {
+                            cudaMappedFallback = StaleRawFlacFallbackSampleLoader.GetMappedFallback(session.Loader);
+                        }
+
+                        ownedReader.PrepareCudaIppRfFftOnFirstRead(cancellationToken, cudaMappedFallback);
+                        completeCudaMappedReadAhead = cudaMappedFallback is not null;
                     }
 
                     session.RuntimeReporter = runtimeReporter;
@@ -381,7 +389,8 @@ public sealed class DecodeRunner
                         ? _engineFactory(cancellationToken)
                         : TbcFieldSequenceDecodeEngine.CreateForOwnedDefaultImmediateLaserDisc(
                             ownedReader, cancellationToken, deferCompletionReport: cudaFastLaserDiscVideoOnly,
-                            overlapLaserDiscTail: overlapLaserDiscTail);
+                            overlapLaserDiscTail: overlapLaserDiscTail,
+                            completeCudaMappedReadAhead: completeCudaMappedReadAhead);
                     result = engine.TryDecodeAndWrite(session);
                     if (cudaFastLaserDiscVideoOnly && result.Success)
                     {

@@ -48,6 +48,7 @@ public sealed class TbcFieldSequenceDecodeEngine
     private readonly CancellationToken _cancellationToken;
     private readonly bool _usesSessionReader;
     private readonly bool _overlapOwnedLaserDiscTail;
+    private readonly bool _completeCudaMappedReadAhead;
 
     private sealed class CvbsPrefetchSlot : IDisposable
     {
@@ -298,11 +299,13 @@ public sealed class TbcFieldSequenceDecodeEngine
         RfBlockStreamDecoder.OwnedImmediateLaserDiscFieldReader ownedReader,
         CancellationToken cancellationToken,
         bool deferCompletionReport,
-        bool overlapLaserDiscTail)
+        bool overlapLaserDiscTail,
+        bool completeCudaMappedReadAhead)
         : this(cancellationToken: cancellationToken)
     {
         _deferCompletionReport = deferCompletionReport;
         _overlapOwnedLaserDiscTail = overlapLaserDiscTail;
+        _completeCudaMappedReadAhead = completeCudaMappedReadAhead;
         // Preserve _usesSessionReader=true and every default writer/option.
         // Only this read closure receives the private cache-domain capability.
         _readField = (session, input, begin, length, number, _, overlapLaserDiscRenderDropout) =>
@@ -314,8 +317,9 @@ public sealed class TbcFieldSequenceDecodeEngine
         RfBlockStreamDecoder.OwnedImmediateLaserDiscFieldReader ownedReader,
         CancellationToken cancellationToken,
         bool deferCompletionReport = false,
-        bool overlapLaserDiscTail = false)
-        => new(ownedReader, cancellationToken, deferCompletionReport, overlapLaserDiscTail);
+        bool overlapLaserDiscTail = false,
+        bool completeCudaMappedReadAhead = false)
+        => new(ownedReader, cancellationToken, deferCompletionReport, overlapLaserDiscTail, completeCudaMappedReadAhead);
 
     public int ExtraReadLines { get; }
 
@@ -410,8 +414,8 @@ public sealed class TbcFieldSequenceDecodeEngine
                 },
                 orderedTailOutput: overlapLaserDiscTail ? output : null);
             output.DrainPendingWrites();
-            FfmpegPcm16SampleLoader? mappedInput = _overlapOwnedLaserDiscTail
-                && session.ExecutionOptions.DspBackend == DspBackend.IppFast
+            FfmpegPcm16SampleLoader? mappedInput = _completeCudaMappedReadAhead
+                || (_overlapOwnedLaserDiscTail && session.ExecutionOptions.DspBackend == DspBackend.IppFast)
                 ? StaleRawFlacFallbackSampleLoader.GetMappedFallback(session.Loader)?.ActiveMappedReadAhead
                 : null;
             if (session.Spec.Name == "cvbs")
@@ -427,6 +431,12 @@ public sealed class TbcFieldSequenceDecodeEngine
             TbcFieldSequenceDecodeResult result = output.Complete();
             outputCompleted = true;
             mappedInput?.CompleteMappedReadAhead();
+            if (_completeCudaMappedReadAhead && mappedInput is not null && result.Success)
+            {
+                // Report once, after the real close and before the caller's CUDA block diagnostics.
+                session.RuntimeReporter?.WriteCompletionMessage(output.WrittenFieldCount);
+            }
+
             return testLdf.HasValue
                 ? result with
                 {
