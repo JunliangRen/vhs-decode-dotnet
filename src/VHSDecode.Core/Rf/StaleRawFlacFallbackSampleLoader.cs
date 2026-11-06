@@ -10,6 +10,7 @@ internal sealed class StaleRawFlacFallbackSampleLoader : IRfSampleLoader, IDispo
     private readonly object _gate = new();
     private readonly Lazy<IRfSampleLoader> _loader;
     private bool _disposed;
+    private CancellationToken? _readAheadToken;
 
     internal StaleRawFlacFallbackSampleLoader(string filename)
         : this(() => CreateFallback(filename))
@@ -38,6 +39,41 @@ internal sealed class StaleRawFlacFallbackSampleLoader : IRfSampleLoader, IDispo
         }
     }
 
+    internal void EnableMappedReadAhead(CancellationToken cancellationToken)
+    {
+        lock (_gate)
+        {
+            ObjectDisposedException.ThrowIf(_disposed, this);
+            if (_loader.IsValueCreated)
+            {
+                throw new InvalidOperationException("Mapped PCM read-ahead must be selected before opening the fallback.");
+            }
+
+            _readAheadToken = cancellationToken;
+        }
+    }
+
+    internal static StaleRawFlacFallbackSampleLoader? GetMappedFallback(IRfSampleLoader loader)
+        => loader switch
+        {
+            LibsndfilePcm16SampleLoader native => native.MappedReadAheadFallback,
+            StaleRawFlacFallbackSampleLoader mapped => mapped,
+            _ => null
+        };
+
+    internal FfmpegPcm16SampleLoader? ActiveMappedReadAhead
+    {
+        get
+        {
+            lock (_gate)
+            {
+                return _loader.IsValueCreated && _loader.Value is FfmpegPcm16SampleLoader { HasActiveMappedReadAhead: true } mapped
+                    ? mapped
+                    : null;
+            }
+        }
+    }
+
     public double[]? Read(Stream stream, long sample, int readLength)
     {
         lock (_gate)
@@ -45,7 +81,22 @@ internal sealed class StaleRawFlacFallbackSampleLoader : IRfSampleLoader, IDispo
             ObjectDisposedException.ThrowIf(_disposed, this);
             ArgumentOutOfRangeException.ThrowIfNegative(sample);
             ArgumentOutOfRangeException.ThrowIfNegative(readLength);
-            return readLength == 0 ? [] : _loader.Value.Read(stream, sample, readLength);
+            if (readLength == 0)
+            {
+                return [];
+            }
+
+            IRfSampleLoader loader = _loader.Value;
+            if (_readAheadToken is { } cancellationToken)
+            {
+                _readAheadToken = null;
+                if (loader is FfmpegPcm16SampleLoader { SeekMode: FfmpegPcm16SeekMode.MappedIndexedRawFlac } mapped)
+                {
+                    mapped.EnableMappedReadAhead(cancellationToken);
+                }
+            }
+
+            return loader.Read(stream, sample, readLength);
         }
     }
 

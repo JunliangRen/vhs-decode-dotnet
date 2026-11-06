@@ -44,6 +44,9 @@ public sealed class FfmpegPcm16SampleLoader : IRfSampleLoader, IDisposable
     private int _rewindStart;
     private int _rewindCount;
     private bool _disposed;
+    private CancellationToken? _readAheadToken;
+    private BoundedPcmReadAheadStream? _readAheadOutput;
+    private Task<Exception?>? _readAheadClose;
 
     public FfmpegPcm16SampleLoader(string filename)
         : this(filename, fastInputSeek: false)
@@ -100,7 +103,9 @@ public sealed class FfmpegPcm16SampleLoader : IRfSampleLoader, IDisposable
         PyAvRawFlacSampleMapper restartSampleMapper,
         Func<string, long, Stream> openOutput,
         int rewindSize,
-        int seekThreshold)
+        int seekThreshold,
+        Func<int?>? exitCodeAfterOutputEnd = null,
+        Func<string>? stderrProvider = null)
     {
         if (string.IsNullOrWhiteSpace(filename))
         {
@@ -109,6 +114,8 @@ public sealed class FfmpegPcm16SampleLoader : IRfSampleLoader, IDisposable
 
         _filename = filename;
         _openOutput = openOutput ?? throw new ArgumentNullException(nameof(openOutput));
+        _exitCodeAfterOutputEnd = exitCodeAfterOutputEnd;
+        _stderrProvider = stderrProvider;
         _seekMode = FfmpegPcm16SeekMode.MappedIndexedRawFlac;
         _restartSampleMapper = restartSampleMapper
             ?? throw new ArgumentNullException(nameof(restartSampleMapper));
@@ -168,6 +175,17 @@ public sealed class FfmpegPcm16SampleLoader : IRfSampleLoader, IDisposable
     internal FfmpegPcm16SeekMode SeekMode => _seekMode;
 
     internal bool UsesRestartSampleMapping => _restartSampleMapper is not null;
+
+    internal void EnableMappedReadAhead(CancellationToken cancellationToken)
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+        if (_seekMode != FfmpegPcm16SeekMode.MappedIndexedRawFlac || _output is not null)
+        {
+            throw new InvalidOperationException("PCM read-ahead requires an unused mapped indexed loader.");
+        }
+
+        _readAheadToken = cancellationToken;
+    }
 
     internal bool TryResolveInputSample(long logicalSample, out long inputSample)
     {
@@ -474,7 +492,7 @@ public sealed class FfmpegPcm16SampleLoader : IRfSampleLoader, IDisposable
 
     private void OpenAt(long sample)
     {
-        CloseProcess();
+        CloseProcess(restarting: true);
         Func<string, long, Stream> openOutput =
             _openOutput ?? throw new InvalidOperationException("Streaming ffmpeg output is not configured.");
         if (!TryResolveInputSample(sample, out long inputSample))
@@ -944,6 +962,14 @@ public sealed class FfmpegPcm16SampleLoader : IRfSampleLoader, IDisposable
 
         _positionBytes += total;
         AppendRewind(destination[..total]);
+        if (total == destination.Length && _readAheadOutput is null && _readAheadToken is { } cancellationToken)
+        {
+            // The first full foreground read has consumed any indexed prefix
+            // and committed the original rewind. Continue this exact pipe.
+            _readAheadOutput = new BoundedPcmReadAheadStream(output, cancellationToken);
+            _output = _readAheadOutput;
+        }
+
         return total;
     }
 
@@ -1059,8 +1085,18 @@ public sealed class FfmpegPcm16SampleLoader : IRfSampleLoader, IDisposable
         return captured.Length == 0 ? "no ffmpeg error output was captured" : captured;
     }
 
-    private void CloseProcess()
+    private void CloseProcess(bool restarting = false)
     {
+        if (_readAheadOutput is { } buffered)
+        {
+            if (CloseReadAheadProcess(buffered, requireCompletion: restarting) is { } failure && restarting)
+            {
+                throw new IOException("Could not close the previous mapped FFmpeg PCM stream before seeking.", failure);
+            }
+
+            return;
+        }
+
         try
         {
             _rawFlacPumpCancellation?.Cancel();
@@ -1096,17 +1132,194 @@ public sealed class FfmpegPcm16SampleLoader : IRfSampleLoader, IDisposable
             }
 
             _rawFlacPumpCancellation?.Dispose();
-            _rawFlacPumpCancellation = null;
-            _rawFlacPumpTask = null;
-            _rawFlacPumpException = null;
-            _process = null;
-            _output = null;
-            _positionBytes = 0;
-            _rewindStart = 0;
-            _rewindCount = 0;
-            _rewindBuffer = null;
-            _discardBuffer = null;
+            ResetProcessState();
         }
+    }
+
+    internal bool HasActiveMappedReadAhead => _readAheadOutput is not null;
+
+    internal void CompleteMappedReadAhead()
+    {
+        if (_readAheadOutput is not { } output)
+        {
+            return;
+        }
+
+        int? processId = _readAheadClose is null ? _process?.Id : null;
+        if (CloseReadAheadProcess(output, requireCompletion: true) is { } failure)
+        {
+            string process = processId.HasValue ? $" (PID {processId.Value})" : string.Empty;
+            throw new IOException($"Could not close the mapped FFmpeg PCM stream{process}: {failure.Message}", failure);
+        }
+    }
+
+    private Exception? CloseReadAheadProcess(BoundedPcmReadAheadStream output, bool requireCompletion)
+    {
+        output.RequestStop();
+        Task<Exception?>? close = _readAheadClose;
+        if (close is null)
+        {
+            // Only this generation owns the process and its pipes until it exits.
+            Process? process = _process;
+            CancellationTokenSource? inputCancellation = _rawFlacPumpCancellation;
+            Task? inputPump = _rawFlacPumpTask;
+            close = _readAheadClose = Task.Run(() => FinishReadAheadProcessAsync(output, process, inputCancellation, inputPump));
+        }
+        else if (!requireCompletion && !close.IsCompleted)
+        {
+            // Disposal after a failed read or finish must preserve the primary
+            // result and leave the already-started cleanup in charge.
+            return null;
+        }
+
+        Exception? failure;
+        try
+        {
+            failure = close.WaitAsync(TimeSpan.FromSeconds(5)).GetAwaiter().GetResult();
+        }
+        catch (Exception error) when (error is TimeoutException or IOException or InvalidOperationException
+            or Win32Exception or AggregateException)
+        {
+            failure = error;
+        }
+
+        if (close.IsCompletedSuccessfully && (failure is null || !requireCompletion))
+        {
+            ResetProcessState();
+        }
+
+        return failure;
+    }
+
+    private static async Task<Exception?> FinishReadAheadProcessAsync(
+        BoundedPcmReadAheadStream output, Process? process, CancellationTokenSource? inputCancellation, Task? inputPump)
+    {
+        Exception? failure = null;
+        try
+        {
+            inputCancellation?.Cancel();
+        }
+        catch (Exception error) when (error is AggregateException or ObjectDisposedException)
+        {
+            failure = error;
+        }
+
+        try
+        {
+            if (process is { HasExited: false })
+            {
+                process.Kill(entireProcessTree: true);
+            }
+        }
+        catch (Exception error) when (error is Win32Exception or InvalidOperationException or AggregateException)
+        {
+            if (!ReadAheadProcessHasExited(process) || error is AggregateException)
+            {
+                failure ??= error;
+                // Tree enumeration can fail even when the direct child still
+                // accepts termination. Do not signal another process.
+                try
+                {
+                    if (process is { HasExited: false })
+                    {
+                        process.Kill();
+                    }
+                }
+                catch (Exception retryError) when (retryError is Win32Exception or InvalidOperationException)
+                {
+                    // The existing failure records the failed tree stop.
+                }
+            }
+        }
+
+        try
+        {
+            output.Dispose();
+        }
+        catch (Exception error) when (error is IOException or InvalidOperationException)
+        {
+            failure ??= error;
+        }
+
+        try
+        {
+            await output.Producer.ConfigureAwait(false);
+            if (inputPump is not null)
+            {
+                await inputPump.ConfigureAwait(false);
+            }
+        }
+        catch (Exception error) when (error is IOException or InvalidOperationException or OperationCanceledException or Win32Exception)
+        {
+            failure ??= error;
+        }
+        finally
+        {
+            if (process is not null)
+            {
+                try
+                {
+                    await WaitForReadAheadProcessExitAsync(process).ConfigureAwait(false);
+                }
+                catch (Exception error) when (error is Win32Exception or InvalidOperationException)
+                {
+                    failure ??= error;
+                }
+
+                process.Dispose();
+            }
+
+            inputCancellation?.Dispose();
+        }
+
+        return failure;
+    }
+
+    private static async Task WaitForReadAheadProcessExitAsync(Process process)
+    {
+        while (true)
+        {
+            try
+            {
+                // Keep the original child owned after a foreground timeout.
+                // This also drains the old stderr reader before releasing it.
+                await process.WaitForExitAsync().ConfigureAwait(false);
+                return;
+            }
+            catch (Exception error) when ((error is Win32Exception or InvalidOperationException)
+                && !ReadAheadProcessHasExited(process))
+            {
+                await Task.Delay(250).ConfigureAwait(false);
+            }
+        }
+    }
+
+    private static bool ReadAheadProcessHasExited(Process? process)
+    {
+        try
+        {
+            return process is { HasExited: true };
+        }
+        catch (Exception error) when (error is Win32Exception or InvalidOperationException)
+        {
+            return false;
+        }
+    }
+
+    private void ResetProcessState()
+    {
+        _rawFlacPumpCancellation = null;
+        _rawFlacPumpTask = null;
+        _rawFlacPumpException = null;
+        _process = null;
+        _output = null;
+        _readAheadOutput = null;
+        _readAheadClose = null;
+        _positionBytes = 0;
+        _rewindStart = 0;
+        _rewindCount = 0;
+        _rewindBuffer = null;
+        _discardBuffer = null;
     }
 
     private static byte[]? ReadSegmentWithFfmpeg(string filename, long sample, int readLength)

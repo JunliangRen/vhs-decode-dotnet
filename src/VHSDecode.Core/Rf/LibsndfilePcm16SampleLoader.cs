@@ -85,6 +85,9 @@ internal sealed class LibsndfilePcm16SampleLoader :
         _sampleMapper = sampleMapper;
     }
 
+    internal StaleRawFlacFallbackSampleLoader? MappedReadAheadFallback
+        => _fallback as StaleRawFlacFallbackSampleLoader;
+
     public double[]? Read(Stream stream, long sample, int readLength)
         => ReadCore(stream, sample, readLength, reuseDecodedBuffer: false);
 

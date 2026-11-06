@@ -4,6 +4,7 @@ using VHSDecode.Core.Dsp.CudaFast;
 using VHSDecode.Core.Dsp.Ipp;
 using VHSDecode.Core.Formats;
 using VHSDecode.Core.HiFi;
+using VHSDecode.Core.Rf;
 using VHSDecode.Core.Tbc;
 using System.Diagnostics;
 using System.Globalization;
@@ -357,6 +358,14 @@ public sealed class DecodeRunner
                         && session.DropoutOptions is { Enabled: true, Mode: TbcDropoutDetectionMode.LaserDiscDemod })
                     {
                         ownedReader!.EnableCompactRfHighPass();
+                        if (OperatingSystem.IsWindows() && RuntimeInformation.ProcessArchitecture == Architecture.X64
+                            && session.ExecutionOptions.UpstreamBehaviorProfile == UpstreamBehaviorProfile.V040
+                            && session.StreamDecoder.PrefetchBlocks == 0
+                            && HasStandardLaserDiscReadAheadOptions(command))
+                        {
+                            StaleRawFlacFallbackSampleLoader.GetMappedFallback(session.Loader)
+                                ?.EnableMappedReadAhead(cancellationToken);
+                        }
                     }
 
                     if (overlapLaserDiscTail && dspBackend == DspBackend.Exact
@@ -504,6 +513,15 @@ public sealed class DecodeRunner
         };
         return new ParsedCommand(command.Spec, values, [.. command.Positionals], command.ProgramName, command.OptionSources);
     }
+
+    internal static bool HasStandardLaserDiscReadAheadOptions(ParsedCommand command)
+        => command.Spec == CliSpecs.LaserDisc
+            && command.Spec.Options.All(option =>
+                option.Destination is "ntsc" or "start" or "start_fileloc" or "length"
+                    or "threads" or "dsp_backend" or "ignoreleadout"
+                || (command.GetSource(option.Destination) == ParsedOptionSource.Default
+                    && command.Values.TryGetValue(option.Destination, out object? value)
+                    && Equals(value, option.DefaultValue)));
 
     private static RfBlockStreamDecoder.OwnedImmediateLaserDiscFieldReader RequireLaserDiscCudaReader(
         DecodeSession session,
