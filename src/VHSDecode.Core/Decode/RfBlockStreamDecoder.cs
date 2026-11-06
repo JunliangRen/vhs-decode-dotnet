@@ -256,7 +256,10 @@ public sealed class RfBlockStreamDecoder : IDisposable
             }
         }
 
-        internal ILaserDiscCudaVideo? AttachCudaVideoIfSupported(Func<ILaserDiscCudaVideo> factory)
+        internal CancellationToken? CudaRfHighPassOverlapToken { get; private set; }
+
+        internal ILaserDiscCudaVideo? AttachCudaVideoIfSupported(
+            Func<ILaserDiscCudaVideo> factory, CancellationToken? highPassOverlapToken = null)
         {
             if (CudaVideo is not null || CompactCpuPostFmVideo || ReuseExactLaserDiscS0
                 || Volatile.Read(ref _owner._hasStartedRead) != 0)
@@ -275,10 +278,19 @@ public sealed class RfBlockStreamDecoder : IDisposable
             }
 
             CudaVideo = factory();
+            if (highPassOverlapToken.HasValue && CudaVideo is LaserDiscCudaVideo && CudaEfm is null
+                && _owner.WorkerThreads == 4 && _owner.BlockLength == BlockLengthForCudaVideo
+                && _owner.BlockStride == 31_712 && _owner._pipeline.CanDeferOwnedCudaRfHighPass)
+            {
+                CudaRfHighPassOverlapToken = highPassOverlapToken;
+            }
             return CudaVideo;
         }
 
         internal void CompleteCudaVideoWave(int[] ordinals, RfPipelineBlock[] decodedBlocks)
+            => PublishCudaVideoWave(ordinals, decodedBlocks, DecodeCudaVideoWave(ordinals, decodedBlocks));
+
+        internal LaserDiscCudaVideoChannels[] DecodeCudaVideoWave(int[] ordinals, RfPipelineBlock[] decodedBlocks)
         {
             var rawByBlock = new double[decodedBlocks.Length][];
             foreach (int ordinal in ordinals)
@@ -311,6 +323,12 @@ public sealed class RfBlockStreamDecoder : IDisposable
                 }
             }
 
+            return channels;
+        }
+
+        internal static void PublishCudaVideoWave(int[] ordinals, RfPipelineBlock[] decodedBlocks,
+            LaserDiscCudaVideoChannels[] channels, double[][]? highPass = null)
+        {
             for (int i = 0; i < ordinals.Length; i++)
             {
                 int ordinal = ordinals[i];
@@ -323,7 +341,8 @@ public sealed class RfBlockStreamDecoder : IDisposable
                     {
                         VideoFloat32 = output.Video,
                         VideoLowPassFloat32 = output.LowPass,
-                        LdVideoBurstFloat32 = output.Burst
+                        LdVideoBurstFloat32 = output.Burst,
+                        RfHighPass = highPass is null ? block.Demodulated.RfHighPass : highPass[i]
                     }
                 };
             }
@@ -1198,6 +1217,10 @@ public sealed class RfBlockStreamDecoder : IDisposable
                     bool deferEfm = seedFailure is null && cudaEfm is not null && cudaBlockCount > 0;
                     bool deferPostFmVideo = seedFailure is null && ownedReader?.CudaVideo is not null
                         && cudaBlockCount is >= LaserDiscCudaVideo.MinBatchSize and <= LaserDiscCudaVideo.BatchCapacity;
+                    CancellationToken? highPassToken = deferPostFmVideo && stream.CanSeek
+                        ? ownedReader!.CudaRfHighPassOverlapToken : null;
+                    RfDemodulator.DeferredLaserDiscHighPass[]? highPassJobs = highPassToken.HasValue
+                        ? new RfDemodulator.DeferredLaserDiscHighPass[decodedBlocks.Length] : null;
                     int[]? cudaOrdinals = null;
                     if (deferEfm || deferPostFmVideo)
                     {
@@ -1233,7 +1256,9 @@ public sealed class RfBlockStreamDecoder : IDisposable
                                 deferEfm: deferEfm,
                                 deferPostFmVideo: deferPostFmVideo,
                                 compactPostFmVideo: compactPostFmVideo,
-                                reuseOwnedLaserDiscS0: reuseExactLaserDiscS0);
+                                reuseOwnedLaserDiscS0: reuseExactLaserDiscS0,
+                                deferredHighPass: highPassJobs,
+                                deferredHighPassOrdinal: blockIndex);
                         });
                     if (efmTask is not null)
                     {
@@ -1244,7 +1269,15 @@ public sealed class RfBlockStreamDecoder : IDisposable
 
                     if (deferPostFmVideo)
                     {
-                        ownedReader!.CompleteCudaVideoWave(cudaOrdinals!, decodedBlocks);
+                        if (highPassJobs is not null && highPassToken is { } cancellationToken)
+                        {
+                            CompleteCudaVideoAndHighPassWave(
+                                ownedReader!, highPassJobs, cudaOrdinals!, decodedBlocks, parallelOptions, cancellationToken);
+                        }
+                        else
+                        {
+                            ownedReader!.CompleteCudaVideoWave(cudaOrdinals!, decodedBlocks);
+                        }
                     }
 
                     if (compactPostFmVideo)
@@ -1578,6 +1611,66 @@ public sealed class RfBlockStreamDecoder : IDisposable
         }
 
         deferredReleases.Clear();
+    }
+
+    private void CompleteCudaVideoAndHighPassWave(
+        OwnedImmediateLaserDiscFieldReader reader,
+        RfDemodulator.DeferredLaserDiscHighPass[] jobs,
+        int[] ordinals,
+        RfPipelineBlock[] decodedBlocks,
+        ParallelOptions parallelOptions,
+        CancellationToken cancellationToken)
+    {
+        double[][] ComputeHighPass()
+        {
+            var results = new double[ordinals.Length][];
+            var failures = new ExceptionDispatchInfo?[ordinals.Length];
+            Parallel.For(0, ordinals.Length, parallelOptions, index =>
+            {
+                try
+                {
+                    results[index] = _pipeline.CompleteDeferredCudaRfHighPass(jobs[ordinals[index]]);
+                }
+                catch (Exception exception)
+                {
+                    failures[index] = ExceptionDispatchInfo.Capture(exception);
+                }
+            });
+
+            foreach (ExceptionDispatchInfo? failure in failures)
+            {
+                failure?.Throw();
+            }
+            return results;
+        }
+
+        Task<double[][]>? highPassTask = null;
+        double[][]? highPass = null;
+        try
+        {
+            highPassTask = Task.Run(ComputeHighPass);
+        }
+        catch (TaskSchedulerException)
+        {
+            highPass = ComputeHighPass();
+        }
+
+        LaserDiscCudaVideoChannels[]? channels = null;
+        ExceptionDispatchInfo? videoFailure = null;
+        try
+        {
+            channels = reader.DecodeCudaVideoWave(ordinals, decodedBlocks);
+        }
+        catch (Exception exception)
+        {
+            videoFailure = ExceptionDispatchInfo.Capture(exception);
+        }
+
+        // High-pass precedes CUDA in the serial wave. Drain accepted work before any publication.
+        highPass ??= highPassTask!.GetAwaiter().GetResult();
+        videoFailure?.Throw();
+        cancellationToken.ThrowIfCancellationRequested();
+        OwnedImmediateLaserDiscFieldReader.PublishCudaVideoWave(ordinals, decodedBlocks, channels!, highPass);
     }
 
     private static void CompleteCudaEfmWave(

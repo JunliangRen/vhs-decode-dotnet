@@ -254,9 +254,24 @@ public sealed class DecodeRunner
                     }
 
                     bool requireCudaVideo = cudaFastLaserDiscVideoOnly && !session.RunBounds.RequestedFieldCount.IsZero;
+                    bool overlapCudaRfHighPass = requireCudaVideo
+                        && session.RunBounds.RequestedFieldCount > 100
+                        && session.InputFile != "-" && session.TestLdfOutputPath is null
+                        && session.StreamDecoder.WorkerThreads == 4 && session.ChromaOptions is null
+                        && session.ExecutionOptions is
+                        {
+                            SuppressFileOutputs: false, Debug: false, WriteDebugData: false,
+                            VerboseVits: false, UseProfiler: false
+                        }
+                        && session.LaserDiscAudioOptions is
+                        {
+                            DecodeDigitalAudio: false, DecodeAnalogAudio: true,
+                            WritePreEfm: false, WriteRfTbc: false, Ac3: false
+                        };
                     using ILaserDiscCudaVideo? cudaVideo = cudaEfm is not null || requireCudaVideo
-                        ? ownedReader!.AttachCudaVideoIfSupported(() => _laserDiscCudaVideoFactory(
-                            session.Filters, output, cancellationToken))
+                        ? ownedReader!.AttachCudaVideoIfSupported(
+                            () => _laserDiscCudaVideoFactory(session.Filters, output, cancellationToken),
+                            overlapCudaRfHighPass ? cancellationToken : null)
                         : null;
                     if (requireCudaVideo && cudaVideo is null)
                     {
