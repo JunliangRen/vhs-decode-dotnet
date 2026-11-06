@@ -390,7 +390,8 @@ public sealed class TbcLineResampler
         ReadOnlySpan<double> source,
         ResamplingPlan plan,
         VideoOutputConverter converter,
-        TbcSampleResamplingKernel sampleKernel)
+        TbcSampleResamplingKernel sampleKernel,
+        int? maxWorkerThreads = null)
     {
         if (source.IsEmpty)
         {
@@ -401,7 +402,7 @@ public sealed class TbcLineResampler
         ArgumentNullException.ThrowIfNull(converter);
         plan.ValidateOwner(this);
         var output = new ushort[plan.DestinationLength];
-        ResamplePreparedToUInt16Core(source, plan, converter, output, sampleKernel);
+        ResamplePreparedToUInt16Core(source, plan, converter, output, sampleKernel, maxWorkerThreads);
         return output;
     }
 
@@ -723,12 +724,14 @@ public sealed class TbcLineResampler
         ResamplingPlan plan,
         VideoOutputConverter converter,
         ushort[] destination,
-        TbcSampleResamplingKernel sampleKernel)
+        TbcSampleResamplingKernel sampleKernel,
+        int? maxWorkerThreads = null)
     {
         switch (sampleKernel)
         {
             case TbcSampleResamplingKernel.KaiserSinc16:
-                ResampleSamplesToUInt16(source, plan, converter, destination);
+                ResampleSamplesToUInt16(
+                    source, plan, converter, destination, maxWorkerThreads ?? _workerThreads);
                 break;
             case TbcSampleResamplingKernel.CatmullRom4Float32:
                 ResampleCatmullRom4ToUInt16(
@@ -1107,7 +1110,8 @@ public sealed class TbcLineResampler
         ReadOnlySpan<double> source,
         ResamplingPlan preparation,
         VideoOutputConverter converter,
-        ushort[] destination)
+        ushort[] destination,
+        int workerThreads)
     {
         preparation.ValidateOwner(this);
         if (destination.Length != preparation.DestinationLength)
@@ -1125,7 +1129,7 @@ public sealed class TbcLineResampler
         fixed (double* sourcePointer = source)
         fixed (float* sincLookupPointer = sincLookup)
         {
-            if (_workerThreads <= 1 || destination.Length < ParallelSampleThreshold)
+            if (workerThreads <= 1 || destination.Length < ParallelSampleThreshold)
             {
                 for (int i = 0; i < destination.Length; i++)
                 {
@@ -1146,7 +1150,7 @@ public sealed class TbcLineResampler
             int sourceLength = source.Length;
             Parallel.ForEach(
                 Partitioner.Create(0, destination.Length),
-                new ParallelOptions { MaxDegreeOfParallelism = _workerThreads },
+                new ParallelOptions { MaxDegreeOfParallelism = workerThreads },
                 range =>
                 {
                     var parallelSource = (double*)sourceAddress;
