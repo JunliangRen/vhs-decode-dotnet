@@ -488,7 +488,7 @@ public sealed class PocketFftMixedRadixCompatibilityTests
         return transformed;
     }
 
-    [Fact(DisplayName = "AVX radix-3 stages preserve scalar special-value bits")]
+    [Fact(DisplayName = "AVX radix-3 stages preserve scalar defined bits and NaN class")]
     public void AvxRadix3StagesPreserveScalarSpecialValueBits()
     {
         if (string.Equals(
@@ -501,9 +501,9 @@ public sealed class PocketFftMixedRadixCompatibilityTests
                 "The CI radix-3 vector-coverage run requires AVX support.");
         }
 
-        uint[][] patternSets =
+        (uint[] Values, bool AllowComputedNaNVariation)[] patternSets =
         [
-            [
+            ([
                 0x3F800000,
                 0xBF800000,
                 0x00000000,
@@ -512,8 +512,8 @@ public sealed class PocketFftMixedRadixCompatibilityTests
                 0x80000001,
                 0x00800000,
                 0x80800000
-            ],
-            [
+            ], false),
+            ([
                 0x3F800000,
                 0xBF800000,
                 0x7F7FFFFF,
@@ -522,28 +522,55 @@ public sealed class PocketFftMixedRadixCompatibilityTests
                 0xFF800000,
                 0x7FC00001,
                 0xFFC12345
-            ]
+            ], true)
         ];
         foreach (int length in new[] { 33, 726, 990 })
         {
-            foreach (uint[] patterns in patternSets)
+            foreach ((uint[] patterns, bool allowComputedNaNVariation) in patternSets)
             {
                 Complex32[] input = BuildBitPatternInput(length, patterns);
                 Complex32[] expectedForward =
                     PocketFftComplex32.TransformDirectScalarReference(input);
                 Complex32[] actualForward =
                     PocketFftComplex32.ForwardAnyLengthDucc(input);
-                Assert.True(
-                    MemoryMarshal.AsBytes(expectedForward.AsSpan())
-                        .SequenceEqual(MemoryMarshal.AsBytes(actualForward.AsSpan())));
+                AssertSameOutput(expectedForward, actualForward, allowComputedNaNVariation, "forward");
 
                 Complex32[] expectedBackward =
                     BackwardDirectScalarReference(expectedForward);
                 Complex32[] actualBackward =
                     PocketFftComplex32.BackwardAnyLengthDucc(actualForward);
+                AssertSameOutput(expectedBackward, actualBackward, allowComputedNaNVariation, "backward");
+            }
+        }
+
+        static void AssertSameOutput(
+            Complex32[] expected, Complex32[] actual, bool allowComputedNaNVariation, string direction)
+        {
+            ReadOnlySpan<uint> expectedBits = MemoryMarshal.Cast<Complex32, uint>(expected);
+            ReadOnlySpan<uint> actualBits = MemoryMarshal.Cast<Complex32, uint>(actual);
+            if (!allowComputedNaNVariation)
+            {
+                Assert.True(expectedBits.SequenceEqual(actualBits),
+                    $"AVX and scalar {direction} differed for length {expected.Length}.");
+                return;
+            }
+
+            // Computed NaN sign and payload can vary across JIT tiers.
+            const uint MagnitudeMask = 0x7fff_ffffU;
+            const uint InfinityBits = 0x7f80_0000U;
+            const uint QuietNaNBit = 0x0040_0000U;
+            Assert.Equal(expectedBits.Length, actualBits.Length);
+            for (int index = 0; index < expectedBits.Length; index++)
+            {
+                uint left = expectedBits[index];
+                uint right = actualBits[index];
+                if (left == right)
+                    continue;
+
                 Assert.True(
-                    MemoryMarshal.AsBytes(expectedBackward.AsSpan())
-                        .SequenceEqual(MemoryMarshal.AsBytes(actualBackward.AsSpan())));
+                    (left & MagnitudeMask) > InfinityBits && (right & MagnitudeMask) > InfinityBits
+                        && ((left ^ right) & QuietNaNBit) == 0,
+                    $"AVX and scalar {direction} differed at component {index} for length {expected.Length}: {left:X8} != {right:X8}.");
             }
         }
     }

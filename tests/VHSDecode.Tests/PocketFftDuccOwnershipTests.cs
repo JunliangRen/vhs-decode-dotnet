@@ -7,7 +7,7 @@ namespace VHSDecode.Tests;
 
 public sealed class PocketFftDuccOwnershipTests
 {
-    [Theory(DisplayName = "In-place DUCC forward retains allocating bits and avoids output allocation")]
+    [Theory(DisplayName = "In-place DUCC forward retains allocating defined bits and avoids output allocation")]
     [InlineData(2)]
     [InlineData(1_024)]
     [InlineData(16_384)]
@@ -31,7 +31,7 @@ public sealed class PocketFftDuccOwnershipTests
         Check(new Complex[length]);
         input[0] = new Complex(BitConverter.UInt64BitsToDouble(0x7ff8_0000_0000_0123), double.PositiveInfinity);
         input[^1] = new Complex(double.NegativeInfinity, BitConverter.UInt64BitsToDouble(0xfff8_0000_0000_0456));
-        Check(input);
+        Check(input, allowComputedNaNVariation: true);
 
         var disposable = new Complex[length];
         for (int warmup = 0; warmup < 8; warmup++)
@@ -51,13 +51,38 @@ public sealed class PocketFftDuccOwnershipTests
         Assert.True(minimumAllocatedBytes < 256,
             $"Warmed in-place forward allocated at least {minimumAllocatedBytes} bytes per call.");
 
-        static void Check(Complex[] original)
+        static void Check(Complex[] original, bool allowComputedNaNVariation = false)
         {
             Complex[] expected = PocketFftComplex.ForwardDucc(original);
             Complex[] actual = original.ToArray();
             PocketFftComplex.ForwardDuccInPlace(actual);
-            Assert.True(MemoryMarshal.AsBytes(expected.AsSpan()).SequenceEqual(MemoryMarshal.AsBytes(actual.AsSpan())),
-                $"Allocating and in-place DUCC forward differed for length {original.Length}.");
+
+            ReadOnlySpan<ulong> expectedBits = MemoryMarshal.Cast<Complex, ulong>(expected);
+            ReadOnlySpan<ulong> actualBits = MemoryMarshal.Cast<Complex, ulong>(actual);
+            if (!allowComputedNaNVariation)
+            {
+                Assert.True(expectedBits.SequenceEqual(actualBits),
+                    $"Allocating and in-place DUCC forward differed for length {original.Length}.");
+                return;
+            }
+
+            // Computed NaN sign and payload can vary across JIT tiers.
+            const ulong MagnitudeMask = 0x7fff_ffff_ffff_ffffUL;
+            const ulong InfinityBits = 0x7ff0_0000_0000_0000UL;
+            const ulong QuietNaNBit = 0x0008_0000_0000_0000UL;
+            Assert.Equal(expectedBits.Length, actualBits.Length);
+            for (int index = 0; index < expectedBits.Length; index++)
+            {
+                ulong left = expectedBits[index];
+                ulong right = actualBits[index];
+                if (left == right)
+                    continue;
+
+                Assert.True(
+                    (left & MagnitudeMask) > InfinityBits && (right & MagnitudeMask) > InfinityBits
+                        && ((left ^ right) & QuietNaNBit) == 0,
+                    $"DUCC forward differed at component {index} for length {original.Length}: {left:X16} != {right:X16}.");
+            }
         }
     }
 }
