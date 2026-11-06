@@ -954,6 +954,17 @@ public sealed class TbcFieldDecodePipeline : IDisposable
             usePooledOutputBuffers: false,
             overlapLaserDiscRenderDropout: true);
 
+    internal TbcDecodedField DecodeOwnedIppLaserDiscWithParallelLines(RfDecodedSpan span, int fieldNumber)
+        => DecodeCore(
+            span,
+            syncThresholdHz: null,
+            fieldNumber,
+            deferCvbsOutputConversion: false,
+            retainChromaBurstSamples: true,
+            usePooledOutputBuffers: false,
+            overlapLaserDiscRenderDropout: true,
+            parallelizeLaserDiscLines: true);
+
     internal TbcDecodedField DecodeForSequence(RfDecodedSpan span, int fieldNumber)
         => DecodeCore(
             span,
@@ -1037,7 +1048,8 @@ public sealed class TbcFieldDecodePipeline : IDisposable
         bool deferCvbsOutputConversion,
         bool retainChromaBurstSamples,
         bool usePooledOutputBuffers,
-        bool overlapLaserDiscRenderDropout = false)
+        bool overlapLaserDiscRenderDropout = false,
+        bool parallelizeLaserDiscLines = false)
     {
         RfBlockStreamDecoder.VhsPayloadMaterializer? deferredVhsPayload = span.DeferredVhsPayload;
         _ = deferredVhsPayload?.BeginMaterialization();
@@ -1050,7 +1062,8 @@ public sealed class TbcFieldDecodePipeline : IDisposable
                 deferCvbsOutputConversion,
                 retainChromaBurstSamples,
                 usePooledOutputBuffers,
-                overlapLaserDiscRenderDropout);
+                overlapLaserDiscRenderDropout,
+                parallelizeLaserDiscLines);
         }
         catch
         {
@@ -1093,7 +1106,8 @@ public sealed class TbcFieldDecodePipeline : IDisposable
         bool deferCvbsOutputConversion,
         bool retainChromaBurstSamples,
         bool usePooledOutputBuffers,
-        bool overlapLaserDiscRenderDropout)
+        bool overlapLaserDiscRenderDropout,
+        bool parallelizeLaserDiscLines)
         => StartDecodeCoreAfterPayloadStart(
             span,
             syncThresholdHz,
@@ -1102,7 +1116,8 @@ public sealed class TbcFieldDecodePipeline : IDisposable
             retainChromaBurstSamples,
             usePooledOutputBuffers,
             deferVhsTail: false,
-            overlapLaserDiscRenderDropout: overlapLaserDiscRenderDropout).Complete();
+            overlapLaserDiscRenderDropout: overlapLaserDiscRenderDropout,
+            parallelizeLaserDiscLines: parallelizeLaserDiscLines).Complete();
 
     private FieldDecodeStart StartDecodeCoreAfterPayloadStart(
         RfDecodedSpan span,
@@ -1112,7 +1127,8 @@ public sealed class TbcFieldDecodePipeline : IDisposable
         bool retainChromaBurstSamples,
         bool usePooledOutputBuffers,
         bool deferVhsTail,
-        bool overlapLaserDiscRenderDropout = false)
+        bool overlapLaserDiscRenderDropout = false,
+        bool parallelizeLaserDiscLines = false)
     {
         (double SyncLevel, double BlankLevel)? previouslyRenderedCvbsLevels = _renderer.LastCvbsSyncLevels;
         SyncPreparedSpan prepared = PrepareSyncSpan(span, syncThresholdHz);
@@ -1126,7 +1142,8 @@ public sealed class TbcFieldDecodePipeline : IDisposable
                 retainChromaBurstSamples,
                 usePooledOutputBuffers,
                 deferVhsTail,
-                overlapLaserDiscRenderDropout);
+                overlapLaserDiscRenderDropout,
+                parallelizeLaserDiscLines);
         }
         catch (InvalidOperationException ex) when (prepared.UsedSavedLevels && IsSyncLocationFailure(ex))
         {
@@ -1143,7 +1160,8 @@ public sealed class TbcFieldDecodePipeline : IDisposable
                 retainChromaBurstSamples,
                 usePooledOutputBuffers,
                 deferVhsTail,
-                overlapLaserDiscRenderDropout);
+                overlapLaserDiscRenderDropout,
+                parallelizeLaserDiscLines);
         }
 
         if (_syncDetectionOptions.CvbsAutoSync && _renderer.CvbsClampAgc is not null)
@@ -1163,7 +1181,8 @@ public sealed class TbcFieldDecodePipeline : IDisposable
         bool retainChromaBurstSamples,
         bool usePooledOutputBuffers,
         bool deferVhsTail,
-        bool overlapLaserDiscRenderDropout)
+        bool overlapLaserDiscRenderDropout,
+        bool parallelizeLaserDiscLines)
     {
         RfDecodedSpan span = prepared.Span;
         bool isVhs = string.Equals(_decodeType, "vhs", StringComparison.Ordinal);
@@ -1471,11 +1490,9 @@ public sealed class TbcFieldDecodePipeline : IDisposable
             lineLocations = LaserDiscLineLocationRepair.MarkDerivativeErrors(lineLocations);
         }
 
-        lineLocations = RefineLineLocationsFromHSync(
-            span,
-            lineLocations,
-            activeVideoOutput,
-            threshold);
+        lineLocations = parallelizeLaserDiscLines
+            ? RefineLaserDiscLineLocationsFromHSyncParallel(span, lineLocations, activeVideoOutput)
+            : RefineLineLocationsFromHSync(span, lineLocations, activeVideoOutput, threshold);
         if (_decodeLaserDiscVbi)
         {
             lineLocations = LaserDiscLineLocationRepair.MarkDerivativeErrors(lineLocations);
@@ -1539,7 +1556,8 @@ public sealed class TbcFieldDecodePipeline : IDisposable
             span,
             lineLocations,
             parity.IsFirstField,
-            activeVideoOutput);
+            activeVideoOutput,
+            parallelizeLaserDiscLines);
         if (_decodeLaserDiscVbi
             && _laserDiscNtscBurstRefineOptions is not null
             && FormatCatalog.ParentSystem(_system) == "NTSC"
@@ -4204,7 +4222,8 @@ public sealed class TbcFieldDecodePipeline : IDisposable
         RfDecodedSpan span,
         LineLocationResult lineLocations,
         bool? isFirstField,
-        VideoOutputConverter converter)
+        VideoOutputConverter converter,
+        bool parallelizeLaserDiscLines = false)
     {
         if (_laserDiscNtscBurstRefineOptions is null
             || FormatCatalog.ParentSystem(_system) != "NTSC"
@@ -4225,27 +4244,56 @@ public sealed class TbcFieldDecodePipeline : IDisposable
         int risingEvenLineCount = 0;
         int fieldLineBoundary = CurrentFieldLineCount(isFirstField);
         double previousPhaseAdjustment = _laserDiscNtscPhaseAdjustMedian;
-        for (int line = 0; line < lineLimit; line++)
+        if (parallelizeLaserDiscLines && lineLocations.Locations.Length == 273 && lineLocations.Filled.Length == 273)
         {
-            if (!TryComputeLaserDiscLineBurst(
-                 span.Video,
-                 burst,
-                 lineLocations.Locations,
-                 line,
-                 previousPhaseAdjustment,
-                 fieldLineBoundary,
-                 _laserDiscNtscBurstRefineOptions.FscMHz,
-                 converter.HzIre,
-                 out bool rising,
-                 out double phaseAdjustment))
+            var results = SearchLaserDiscBurstLinesInParallel(
+                span.Video,
+                burst,
+                lineLocations.Locations,
+                lineLimit,
+                previousPhaseAdjustment,
+                fieldLineBoundary,
+                _laserDiscNtscBurstRefineOptions.FscMHz,
+                converter.HzIre);
+            for (int line = 0; line < lineLimit; line++)
             {
-                continue;
-            }
+                (bool found, bool rising, double phaseAdjustment) = results[line];
+                if (!found)
+                {
+                    continue;
+                }
 
-            phaseAdjustments[line] = phaseAdjustment / 2.0;
-            if ((line & 1) == 0 && rising)
+                phaseAdjustments[line] = phaseAdjustment / 2.0;
+                if ((line & 1) == 0 && rising)
+                {
+                    risingEvenLineCount++;
+                }
+            }
+        }
+        else
+        {
+            for (int line = 0; line < lineLimit; line++)
             {
-                risingEvenLineCount++;
+                if (!TryComputeLaserDiscLineBurst(
+                     span.Video,
+                     burst,
+                     lineLocations.Locations,
+                     line,
+                     previousPhaseAdjustment,
+                     fieldLineBoundary,
+                     _laserDiscNtscBurstRefineOptions.FscMHz,
+                     converter.HzIre,
+                     out bool rising,
+                     out double phaseAdjustment))
+                {
+                    continue;
+                }
+
+                phaseAdjustments[line] = phaseAdjustment / 2.0;
+                if ((line & 1) == 0 && rising)
+                {
+                    risingEvenLineCount++;
+                }
             }
         }
 
@@ -4321,6 +4369,106 @@ public sealed class TbcFieldDecodePipeline : IDisposable
             ? LaserDiscNtscFieldPhaseId(isFirstField.Value, field14)
             : null;
         return (ApplyLaserDiscNtscFscPhaseShift(burstLineLocations with { Locations = refined }), fieldPhaseId);
+    }
+
+    private (bool Found, bool Rising, double PhaseAdjustment)[] SearchLaserDiscBurstLinesInParallel(
+        double[] video,
+        double[] burst,
+        double[] lineLocations,
+        int lineLimit,
+        double previousPhaseAdjustment,
+        int fieldLineBoundary,
+        double fscMHz,
+        double hzIre)
+    {
+        var results = new (bool Found, bool Rising, double PhaseAdjustment)[lineLimit];
+        RunFourLaserDiscLineRanges(lineLimit, (start, end) =>
+        {
+            for (int line = start; line < end; line++)
+            {
+                bool found = TryComputeLaserDiscLineBurst(
+                    video,
+                    burst,
+                    lineLocations,
+                    line,
+                    previousPhaseAdjustment,
+                    fieldLineBoundary,
+                    fscMHz,
+                    hzIre,
+                    out bool rising,
+                    out double phaseAdjustment);
+                results[line] = (found, rising, phaseAdjustment);
+            }
+        });
+        return results;
+    }
+
+    private static void RunFourLaserDiscLineRanges(int count, Action<int, int> process)
+    {
+        const int rangeCount = 4;
+        var failures = new ExceptionDispatchInfo?[rangeCount];
+        var workers = new Task[rangeCount - 1];
+        ExceptionDispatchInfo? dispatchFailure = null;
+        ExceptionDispatchInfo? joinFailure = null;
+        int queued = 0;
+        try
+        {
+            for (int range = 1; range < rangeCount; range++)
+            {
+                int ordinal = range;
+                workers[queued] = Task.Run(() => Run(ordinal));
+                queued++;
+            }
+
+            Run(0);
+        }
+        catch (Exception error)
+        {
+            dispatchFailure = ExceptionDispatchInfo.Capture(error);
+        }
+
+        // Keep the borrowed field arrays live until every queued range ends,
+        // even if the caller was interrupted while waiting for one of them.
+        for (int index = 0; index < queued; index++)
+        {
+            Task worker = workers[index];
+            while (true)
+            {
+                try
+                {
+                    worker.GetAwaiter().GetResult();
+                    break;
+                }
+                catch (ThreadInterruptedException error) when (!worker.IsCompleted)
+                {
+                    joinFailure ??= ExceptionDispatchInfo.Capture(error);
+                }
+                catch (Exception error)
+                {
+                    joinFailure ??= ExceptionDispatchInfo.Capture(error);
+                    break;
+                }
+            }
+        }
+
+        dispatchFailure?.Throw();
+        joinFailure?.Throw();
+        foreach (ExceptionDispatchInfo? failure in failures)
+        {
+            failure?.Throw();
+        }
+
+        void Run(int range)
+        {
+            try
+            {
+                process(count * range / rangeCount, count * (range + 1) / rangeCount);
+            }
+            catch (Exception error)
+            {
+                failures[range] = ExceptionDispatchInfo.Capture(error);
+            }
+        }
     }
 
     private LineLocationResult ApplyLaserDiscNtscFscPhaseShift(LineLocationResult lineLocations)
@@ -5204,6 +5352,88 @@ public sealed class TbcFieldDecodePipeline : IDisposable
                 refined[line] = originalLocation;
             }
         }
+
+        return new LineLocationResult(refined, filled);
+    }
+
+    private LineLocationResult RefineLaserDiscLineLocationsFromHSyncParallel(
+        RfDecodedSpan span,
+        LineLocationResult lineLocations,
+        VideoOutputConverter converter)
+    {
+        if (lineLocations.Locations.Length != 273 || lineLocations.Filled.Length != 273
+            || span.VideoLowPass is not { Length: > 0 } syncReference
+            || syncReference.Length != span.Video.Length)
+        {
+            return RefineLaserDiscLineLocationsFromHSync(span, lineLocations, converter);
+        }
+
+        double sampleRateMHz = _syncAnalyzer.SampleRateMHz;
+        double threshold = converter.IreToHz(converter.VSyncIre / 2.0);
+        int searchCount = Math.Max(1, (int)(sampleRateMHz * 2.0));
+        var refined = lineLocations.Locations.ToArray();
+        var filled = lineLocations.Filled.ToArray();
+        RunFourLaserDiscLineRanges(refined.Length, (start, end) =>
+        {
+            for (int line = start; line < end; line++)
+            {
+                if (IsVSyncLine(line))
+                {
+                    filled[line] = true;
+                    continue;
+                }
+
+                double originalLocation = refined[line];
+                int searchStart = (int)(originalLocation - sampleRateMHz);
+                double? crossing = searchStart >= 0 && searchStart < syncReference.Length
+                    ? PulseDetection.CalculateZeroCrossing(
+                        syncReference,
+                        searchStart,
+                        threshold,
+                        count: Math.Min(searchCount, syncReference.Length - searchStart - 1))
+                    : null;
+                if (!crossing.HasValue || filled[line])
+                {
+                    filled[line] = true;
+                    refined[line] = originalLocation;
+                    continue;
+                }
+
+                refined[line] = crossing.Value;
+                if (!LaserDiscHSyncAreaLooksValid(syncReference, crossing.Value, sampleRateMHz, converter)
+                    || !TryTruncatedMedianRange(
+                        syncReference,
+                        crossing.Value + (8.0 * sampleRateMHz),
+                        crossing.Value + (9.0 * sampleRateMHz),
+                        out double porchLevel)
+                    || !TryTruncatedMedianRange(
+                        syncReference,
+                        crossing.Value + sampleRateMHz,
+                        crossing.Value + (2.5 * sampleRateMHz),
+                        out double syncLevel))
+                {
+                    filled[line] = true;
+                    refined[line] = originalLocation;
+                    continue;
+                }
+
+                double? refinedCrossing = PulseDetection.CalculateZeroCrossing(
+                    syncReference,
+                    searchStart,
+                    (porchLevel + syncLevel) / 2.0,
+                    count: Math.Min(400, syncReference.Length - searchStart - 1));
+                if (refinedCrossing.HasValue
+                    && Math.Abs(refinedCrossing.Value - crossing.Value) < sampleRateMHz / 2.0)
+                {
+                    refined[line] = refinedCrossing.Value;
+                }
+                else
+                {
+                    filled[line] = true;
+                    refined[line] = originalLocation;
+                }
+            }
+        });
 
         return new LineLocationResult(refined, filled);
     }
