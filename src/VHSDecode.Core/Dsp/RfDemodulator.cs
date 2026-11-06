@@ -9,6 +9,8 @@ namespace VHSDecode.Core.Dsp;
 
 public sealed class RfDemodulator : IDisposable
 {
+    internal readonly record struct DeferredLaserDiscHighPass(Complex[]? InputSpectrum, Complex[]? Scratch);
+
     private static readonly Vector128<float> FloatAbsoluteValueMask =
         Vector128.Create(BitConverter.UInt32BitsToSingle(0x7FFFFFFFU));
     private static readonly Vector256<float> FloatAbsoluteValueMask256 =
@@ -495,7 +497,9 @@ public sealed class RfDemodulator : IDisposable
         bool useApproxDirectFloat32DiffRepair = false,
         double[]? ownedImmediateLaserDiscEnvelopeShape = null,
         bool deferPostFmVideo = false,
-        bool compactPostFmVideo = false)
+        bool compactPostFmVideo = false,
+        DeferredLaserDiscHighPass[]? deferredHighPass = null,
+        int deferredHighPassOrdinal = -1)
     {
         ObjectDisposedException.ThrowIf(Volatile.Read(ref _disposed) != 0, this);
         bool produceApproxChroma = !approxChromaFilter.IsEmpty
@@ -902,11 +906,10 @@ public sealed class RfDemodulator : IDisposable
             }
 
             Complex[]? rfHighPassSpectrum = null;
-            if (includeRfHighPassOutput)
+            if (includeRfHighPassOutput && deferredHighPass is null)
             {
                 rfHighPassSpectrum = ApplyFrequencyFilter(spectrum, rfHighPassFilter);
-                InverseLaserDiscFullSpectrumInPlace(rfHighPassSpectrum);
-                rfHighPass = ExtractReal(rfHighPassSpectrum);
+                rfHighPass = InverseAndExtractLaserDiscHighPass(rfHighPassSpectrum);
             }
             else
             {
@@ -1233,6 +1236,19 @@ public sealed class RfDemodulator : IDisposable
                 || outputBuffers is not null || efmScratchHandoff is not null)
             {
                 throw new InvalidOperationException("Invalid private LD post-FM deferred block.");
+            }
+
+            if (deferredHighPass is not null)
+            {
+                if (precomputedInputSpectrum is not { Length: LaserDiscEfmScratchHandoff.BlockLength } source
+                    || rfFilteredSpectrum is not { Length: LaserDiscEfmScratchHandoff.BlockLength } scratch
+                    || !ReferenceEquals(analytic, scratch) || analyticOutput.Length != 0)
+                {
+                    throw new InvalidOperationException("Invalid owned RF high-pass scratch handoff.");
+                }
+
+                // FM is independent and analytic output is absent. Hand off the original arrays.
+                deferredHighPass[deferredHighPassOrdinal] = new DeferredLaserDiscHighPass(source, scratch);
             }
 
             return new RfDemodulatedBlock(
@@ -1997,6 +2013,25 @@ public sealed class RfDemodulator : IDisposable
         var output = new Complex[length];
         Array.Fill(output, Complex.One);
         return output;
+    }
+
+    internal double[] CompleteDeferredLaserDiscHighPass(DeferredLaserDiscHighPass work, ReadOnlySpan<Complex> filter)
+    {
+        if (work.InputSpectrum is not { Length: LaserDiscEfmScratchHandoff.BlockLength } source
+            || work.Scratch is not { Length: LaserDiscEfmScratchHandoff.BlockLength } scratch
+            || ReferenceEquals(source, scratch))
+        {
+            throw new InvalidOperationException("Invalid deferred RF high-pass input.");
+        }
+
+        ApplyFrequencyFilter(source, filter, scratch);
+        return InverseAndExtractLaserDiscHighPass(scratch);
+    }
+
+    private double[] InverseAndExtractLaserDiscHighPass(Complex[] spectrum)
+    {
+        InverseLaserDiscFullSpectrumInPlace(spectrum);
+        return ExtractReal(spectrum);
     }
 
     private static Complex[] ApplyFrequencyFilter(ReadOnlySpan<Complex> spectrum, ReadOnlySpan<Complex> filter)

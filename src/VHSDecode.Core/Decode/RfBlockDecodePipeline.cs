@@ -198,6 +198,10 @@ public sealed class RfBlockDecodePipeline : IDisposable
         && _filters.VideoLowPass05.Length == LaserDiscEfmScratchHandoff.BlockLength
         && _filters.VideoLowPass05Offset == 32;
 
+    internal bool CanDeferOwnedCudaRfHighPass =>
+        CanDeferOwnedLaserDiscPostFmVideo && !HasLaserDiscEfm && _filters.LdAnalogAudio is not null
+        && _filters.RfHighPass.Length == LaserDiscEfmScratchHandoff.BlockLength;
+
     internal bool CanReuseOwnedExactLaserDiscS0 =>
         ActiveDspBackend == DspBackend.Exact
         && CanOmitEnvelopeForOwnedImmediateLaserDisc
@@ -367,7 +371,9 @@ public sealed class RfBlockDecodePipeline : IDisposable
         bool deferEfm = false,
         bool deferPostFmVideo = false,
         bool compactPostFmVideo = false,
-        bool reuseOwnedLaserDiscS0 = false)
+        bool reuseOwnedLaserDiscS0 = false,
+        RfDemodulator.DeferredLaserDiscHighPass[]? deferredHighPass = null,
+        int deferredHighPassOrdinal = -1)
         => DecodePreparedBlockCore(
             input,
             reportDiagnostics,
@@ -379,7 +385,9 @@ public sealed class RfBlockDecodePipeline : IDisposable
             deferEfm,
             deferPostFmVideo,
             compactPostFmVideo,
-            reuseOwnedLaserDiscS0);
+            reuseOwnedLaserDiscS0,
+            deferredHighPass,
+            deferredHighPassOrdinal);
 
     private RfPipelineBlock DecodePreparedBlockCore(
         double[] input,
@@ -392,9 +400,17 @@ public sealed class RfBlockDecodePipeline : IDisposable
         bool deferEfm = false,
         bool deferPostFmVideo = false,
         bool compactPostFmVideo = false,
-        bool reuseOwnedLaserDiscS0 = false)
+        bool reuseOwnedLaserDiscS0 = false,
+        RfDemodulator.DeferredLaserDiscHighPass[]? deferredHighPass = null,
+        int deferredHighPassOrdinal = -1)
     {
         ArgumentNullException.ThrowIfNull(input);
+        if (deferredHighPass is not null
+            && (!deferPostFmVideo || deferEfm || reuseOwnedLaserDiscS0 || !CanDeferOwnedCudaRfHighPass
+                || (uint)deferredHighPassOrdinal >= (uint)deferredHighPass.Length))
+        {
+            throw new InvalidOperationException("RF high-pass deferral requires an owned CUDA video-only block.");
+        }
         if (compactPostFmVideo
             && (deferEfm || deferPostFmVideo || !retainRfDiagnosticChannels
                 || reuseStreamOutputBuffers || includeAnalyticOutput || !CanCompactOwnedLaserDiscPostFmVideo
@@ -498,7 +514,9 @@ public sealed class RfBlockDecodePipeline : IDisposable
                 ownedImmediateLaserDiscEnvelopeShape: CanOmitEnvelopeForOwnedImmediateLaserDisc
                     ? ownedImmediateEnvelopeShape : null,
                 deferPostFmVideo: deferPostFmVideo,
-                compactPostFmVideo: compactPostFmVideo);
+                compactPostFmVideo: compactPostFmVideo,
+                deferredHighPass: deferredHighPass,
+                deferredHighPassOrdinal: deferredHighPassOrdinal);
             Complex[]? efmScratch = efmScratchHandoff?.Take(_demodulator);
             if (reportDiagnostics)
             {
@@ -617,6 +635,13 @@ public sealed class RfBlockDecodePipeline : IDisposable
                 ArrayPool<Complex>.Shared.Return(leasedInputSpectrum);
             }
         }
+    }
+
+    internal double[] CompleteDeferredCudaRfHighPass(RfDemodulator.DeferredLaserDiscHighPass work)
+    {
+        double[] result = _demodulator.CompleteDeferredLaserDiscHighPass(work, _filters.RfHighPass);
+        QuantizeToFloat32InPlace(result);
+        return result;
     }
 
     internal void ReportDeferredDiagnostics(RfPipelineBlock block)
