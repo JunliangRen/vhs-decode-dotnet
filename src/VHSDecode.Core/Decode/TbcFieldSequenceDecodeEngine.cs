@@ -1470,6 +1470,17 @@ public sealed class TbcFieldSequenceDecodeEngine
                 && session.ExecutionOptions.SeekFrame == -BigInteger.One
                 && !session.ExecutionOptions.IgnoreLeadOut))
             && input.CanSeek && fieldDecoder.CanOverlapOwnedLaserDiscRenderDropout;
+        if (overlapOwnedCpuRenderDropout && !overlapCudaRenderDropout
+            && ownedReader.CompactRfHighPass && ownedReader.CudaEfm is null && ownedReader.CudaVideo is null
+            && session.ExecutionOptions.DspBackend == DspBackend.IppFast && input.CanSeek
+            && session.DecodeSampleRateHz == 40_000_000.0 && session.BlockLength == 32_768
+            && session.StreamDecoder.BlockStride == 31_712 && session.StreamDecoder.PrefetchBlocks == 0
+            && session.LaserDiscAudioOptions is { DecodeDigitalAudio: true, DecodeAnalogAudio: true }
+            && StaleRawFlacFallbackSampleLoader.GetMappedFallback(session.Loader)?.ActiveMappedReadAhead is not null)
+        {
+            return fieldDecoder.DecodeOwnedIppLaserDiscWithParallelLines(lease.Span, fieldNumber);
+        }
+
         return overlapOwnedCpuRenderDropout || overlapCudaRenderDropout
             ? fieldDecoder.DecodeOwnedLaserDiscWithRenderDropoutOverlap(lease.Span, fieldNumber)
             : fieldDecoder.Decode(lease.Span, fieldNumber: fieldNumber);
