@@ -202,6 +202,16 @@ public sealed class RfBlockDecodePipeline : IDisposable
         CanDeferOwnedLaserDiscPostFmVideo && !HasLaserDiscEfm && _filters.LdAnalogAudio is not null
         && _filters.RfHighPass.Length == LaserDiscEfmScratchHandoff.BlockLength;
 
+    internal void EnableCudaIppRfFftIfAvailable(int workerThreads, CancellationToken cancellationToken)
+    {
+        const int audioFftLength = 1024;
+        if (_filters.LdAnalogAudio is { Left.BinCount: audioFftLength, Right.BinCount: audioFftLength })
+        {
+            _demodulator.EnableCudaIppRfFftIfAvailable(
+                LaserDiscEfmScratchHandoff.BlockLength, audioFftLength, workerThreads, cancellationToken);
+        }
+    }
+
     internal bool CanReuseOwnedExactLaserDiscS0 =>
         ActiveDspBackend == DspBackend.Exact
         && CanOmitEnvelopeForOwnedImmediateLaserDisc

@@ -8,6 +8,7 @@ using VHSDecode.Core.Tbc;
 using System.Diagnostics;
 using System.Globalization;
 using System.Numerics;
+using System.Runtime.InteropServices;
 
 namespace VHSDecode.Core.Decode;
 
@@ -281,6 +282,16 @@ public sealed class DecodeRunner
                     if (cudaVideo is not null)
                     {
                         output.WriteLine("CUDA-fast LD video: post-FM filtering in eligible RF batches.");
+                    }
+
+                    if (overlapCudaRfHighPass && ReferenceEquals(_engineFactory, DefaultEngineFactory)
+                        && OperatingSystem.IsWindows() && RuntimeInformation.ProcessArchitecture == Architecture.X64
+                        && !command.Get<bool>("lowband")
+                        && session.ExecutionOptions.UpstreamBehaviorProfile == UpstreamBehaviorProfile.V040
+                        && session.TbcFieldDecoder.CanOverlapOwnedLaserDiscRenderDropout
+                        && ownedReader is { CudaRfHighPassOverlapToken: not null })
+                    {
+                        ownedReader.PrepareCudaIppRfFftOnFirstRead();
                     }
 
                     session.RuntimeReporter = runtimeReporter;

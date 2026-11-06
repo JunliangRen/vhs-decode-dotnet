@@ -10,6 +10,33 @@ internal sealed class IppComplexFft64Pool : IDisposable
     private int _retainedContextCount;
     private bool _disposed;
 
+    internal static IppComplexFft64Pool CreatePrepared(
+        ReadOnlySpan<int> lengths, int contextsPerLength, CancellationToken cancellationToken)
+    {
+        var pool = new IppComplexFft64Pool();
+        try
+        {
+            foreach (int length in lengths)
+            {
+                var contexts = new Stack<IppComplexFft64>(contextsPerLength);
+                pool._available.Add(length, contexts);
+                for (int i = 0; i < contextsPerLength; i++)
+                {
+                    cancellationToken.ThrowIfCancellationRequested();
+                    contexts.Push(new IppComplexFft64(length));
+                    pool._retainedContextCount++;
+                }
+            }
+
+            return pool;
+        }
+        catch
+        {
+            pool.Dispose();
+            throw;
+        }
+    }
+
     internal int RetainedContextCount
     {
         get

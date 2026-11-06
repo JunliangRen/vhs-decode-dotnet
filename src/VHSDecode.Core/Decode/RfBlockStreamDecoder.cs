@@ -192,6 +192,7 @@ public sealed class RfBlockStreamDecoder : IDisposable
     internal sealed class OwnedImmediateLaserDiscFieldReader
     {
         private readonly RfBlockStreamDecoder _owner;
+        private bool _prepareCudaIppRfFft;
         internal readonly double[] EnvelopeShape;
 
         internal OwnedImmediateLaserDiscFieldReader(RfBlockStreamDecoder owner, double[] envelopeShape)
@@ -400,6 +401,19 @@ public sealed class RfBlockStreamDecoder : IDisposable
 
         internal bool IsFor(RfBlockStreamDecoder owner) => ReferenceEquals(_owner, owner);
 
+        internal void PrepareCudaIppRfFftOnFirstRead()
+        {
+            _owner.GuardOwnedDomain(this);
+            if (CudaRfHighPassOverlapToken is null || CompactCpuPostFmVideo || CompactRfHighPass
+                || ReuseExactLaserDiscS0 || ProjectExactRawDemod
+                || Volatile.Read(ref _owner._hasStartedRead) != 0)
+            {
+                throw new InvalidOperationException("The CUDA LD RF FFT provider must be selected before the first read.");
+            }
+
+            _prepareCudaIppRfFft = true;
+        }
+
         internal RfDecodedSpanLease? Read(Stream stream, long begin, int length)
         {
             ObjectDisposedException.ThrowIf(_owner._disposed, _owner);
@@ -408,6 +422,15 @@ public sealed class RfBlockStreamDecoder : IDisposable
             _owner.EnterOrdinaryCacheOperation();
             try
             {
+                if (_prepareCudaIppRfFft)
+                {
+                    _prepareCudaIppRfFft = false;
+                    if (stream.CanSeek && CudaRfHighPassOverlapToken is { } cancellationToken)
+                    {
+                        _owner._pipeline.EnableCudaIppRfFftIfAvailable(_owner.WorkerThreads, cancellationToken);
+                    }
+                }
+
                 return _owner.ReadLeasedCore(stream, begin, length, includeEnvelope: false, ownedReader: this);
             }
             finally
