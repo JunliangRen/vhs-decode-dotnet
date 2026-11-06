@@ -192,7 +192,7 @@ public sealed class RfBlockStreamDecoder : IDisposable
     internal sealed class OwnedImmediateLaserDiscFieldReader
     {
         private readonly RfBlockStreamDecoder _owner;
-        private bool _prepareCudaIppRfFft;
+        private CancellationToken? _cudaIppRfFftPreparationToken;
         internal readonly double[] EnvelopeShape;
 
         internal OwnedImmediateLaserDiscFieldReader(RfBlockStreamDecoder owner, double[] envelopeShape)
@@ -401,17 +401,22 @@ public sealed class RfBlockStreamDecoder : IDisposable
 
         internal bool IsFor(RfBlockStreamDecoder owner) => ReferenceEquals(_owner, owner);
 
-        internal void PrepareCudaIppRfFftOnFirstRead()
+        internal bool CanPrepareCudaEfmIppRfFft =>
+            CudaEfm is LaserDiscCudaEfm && CudaVideo is LaserDiscCudaVideo
+            && _owner.WorkerThreads == 4 && _owner.PrefetchBlocks == 0
+            && _owner.BlockLength == BlockLengthForCudaVideo && _owner.BlockStride == 31_712;
+
+        internal void PrepareCudaIppRfFftOnFirstRead(CancellationToken cancellationToken)
         {
             _owner.GuardOwnedDomain(this);
-            if (CudaRfHighPassOverlapToken is null || CompactCpuPostFmVideo || CompactRfHighPass
-                || ReuseExactLaserDiscS0 || ProjectExactRawDemod
+            if ((CudaRfHighPassOverlapToken is null && !CanPrepareCudaEfmIppRfFft)
+                || CompactCpuPostFmVideo || CompactRfHighPass || ReuseExactLaserDiscS0 || ProjectExactRawDemod
                 || Volatile.Read(ref _owner._hasStartedRead) != 0)
             {
                 throw new InvalidOperationException("The CUDA LD RF FFT provider must be selected before the first read.");
             }
 
-            _prepareCudaIppRfFft = true;
+            _cudaIppRfFftPreparationToken = cancellationToken;
         }
 
         internal RfDecodedSpanLease? Read(Stream stream, long begin, int length)
@@ -422,10 +427,10 @@ public sealed class RfBlockStreamDecoder : IDisposable
             _owner.EnterOrdinaryCacheOperation();
             try
             {
-                if (_prepareCudaIppRfFft)
+                if (_cudaIppRfFftPreparationToken is { } cancellationToken)
                 {
-                    _prepareCudaIppRfFft = false;
-                    if (stream.CanSeek && CudaRfHighPassOverlapToken is { } cancellationToken)
+                    _cudaIppRfFftPreparationToken = null;
+                    if (stream.CanSeek)
                     {
                         _owner._pipeline.EnableCudaIppRfFftIfAvailable(_owner.WorkerThreads, cancellationToken);
                     }
