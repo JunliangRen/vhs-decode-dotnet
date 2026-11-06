@@ -1459,7 +1459,10 @@ public sealed class TbcFieldSequenceDecodeEngine
             && (fieldDecoder.CanOverlapOwnedLaserDiscRenderDropout
                 || (ownedReader.CompactRfHighPass && ownedReader.CudaEfm is null && ownedReader.CudaVideo is null
                     && fieldDecoder.CanOverlapOwnedIppLaserDiscRenderDropout));
-        bool overlapCudaRenderDropout = ownedReader.CudaRfHighPassOverlapToken.HasValue
+        bool overlapCudaRenderDropout = (ownedReader.CudaRfHighPassOverlapToken.HasValue
+            || (ownedReader.UsesCudaEfmIppRfFft
+                && session.ExecutionOptions.SeekFrame == -BigInteger.One
+                && !session.ExecutionOptions.IgnoreLeadOut))
             && input.CanSeek && fieldDecoder.CanOverlapOwnedLaserDiscRenderDropout;
         return overlapOwnedCpuRenderDropout || overlapCudaRenderDropout
             ? fieldDecoder.DecodeOwnedLaserDiscWithRenderDropoutOverlap(lease.Span, fieldNumber)

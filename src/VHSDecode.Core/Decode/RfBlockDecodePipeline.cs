@@ -163,6 +163,8 @@ public sealed class RfBlockDecodePipeline : IDisposable
 
     internal DspBackend ActiveDspBackend => _demodulator.DspBackend;
 
+    internal bool UsesIppComplexFft => _demodulator.UsesIppComplexFft;
+
     internal bool CanOmitEnvelopeForOwnedImmediateLaserDisc =>
         _filterOptions.LdClipDemodForVideo
         && _retainRfDiagnosticChannels
