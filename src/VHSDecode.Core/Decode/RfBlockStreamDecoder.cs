@@ -22,6 +22,8 @@ public sealed record RfDecodedSpan(
 {
     internal float[]? LdRfHighPassFloat32 { get; init; }
 
+    internal byte[]? LdRawDemodNyquistMask { get; init; }
+
     internal int? AvailableSampleCountOverride { get; init; }
 
     internal int SampleCount => AvailableSampleCountOverride
@@ -215,6 +217,21 @@ public sealed class RfBlockStreamDecoder : IDisposable
             }
 
             CompactRfHighPass = true;
+        }
+
+        internal bool ProjectExactRawDemod { get; private set; }
+
+        internal void EnableExactRawDemodMask()
+        {
+            if (!ReuseExactLaserDiscS0 || !_owner._pipeline.CanProjectOwnedExactLdRawDemod
+                || _owner.WorkerThreads != 4 || _owner.PrefetchBlocks != 0
+                || CompactCpuPostFmVideo || CompactRfHighPass || CudaEfm is not null || CudaVideo is not null
+                || ProjectExactRawDemod || Volatile.Read(ref _owner._hasStartedRead) != 0)
+            {
+                throw new InvalidOperationException("A raw demod mask requires an unused private Exact LD reader.");
+            }
+
+            ProjectExactRawDemod = true;
         }
 
         internal bool ReuseExactLaserDiscS0 { get; private set; }
@@ -617,7 +634,7 @@ public sealed class RfBlockStreamDecoder : IDisposable
         }
 
         ReusableSpanBuffers buffers = TakeReusableSpanBuffers(
-            length, ownedReader?.CompactRfHighPass == true);
+            length, ownedReader?.CompactRfHighPass == true, ownedReader?.ProjectExactRawDemod == true);
         try
         {
             RfDecodedSpan? span = ReadCore(
@@ -785,9 +802,14 @@ public sealed class RfBlockStreamDecoder : IDisposable
         float[]? videoFloat32 = useFloat32Video
             ? reusableBuffers?.VideoFloat32 ?? new float[length]
             : null;
-        double[] demodRaw = retainRfDiagnosticChannels
+        bool projectRawDemod = ownedReader?.ProjectExactRawDemod == true;
+        double[] demodRaw = retainRfDiagnosticChannels && !projectRawDemod
             ? reusableBuffers?.DemodRaw ?? new double[length]
             : [];
+        byte[]? rawDemodMask = !projectRawDemod
+            ? null
+            : reusableBuffers?.LdRawDemodNyquistMask
+                ?? throw new InvalidOperationException("A raw demod mask requires the private field lease.");
         double[] envelope = reusableBuffers?.Envelope ?? new double[length];
         double[] videoLowPass = _useApproxFloat32Sync
             ? []
@@ -836,6 +858,19 @@ public sealed class RfBlockStreamDecoder : IDisposable
             audioDestination += AudioBlockStride(audioDecimationFactor);
         }
 
+        void AppendRawDemod(RfDemodulatedBlock demodulated, int blockDestination)
+        {
+            if (rawDemodMask is null)
+            {
+                CopyTrimmedWindow(demodulated.DemodRaw, demodRaw, blockDestination, offset);
+                return;
+            }
+
+            byte[] blockMask = demodulated.LdRawDemodNyquistMask
+                ?? throw new InvalidOperationException("The private Exact block lost its raw demod mask.");
+            CopyTrimmedMaskWindow(blockMask, rawDemodMask, blockDestination, offset);
+        }
+
         void AppendHighPass(RfDemodulatedBlock demodulated, int blockDestination)
         {
             int sourceOffset = BlockCut - _pipeline.RfHighPassOffset;
@@ -855,7 +890,7 @@ public sealed class RfBlockStreamDecoder : IDisposable
             if (retainRfDiagnosticChannels)
             {
                 CopyTrimmedWindow(pipelineBlock.Input, input, destination, offset);
-                CopyTrimmedWindow(pipelineBlock.Demodulated.DemodRaw, demodRaw, destination, offset);
+                AppendRawDemod(pipelineBlock.Demodulated, destination);
                 AppendHighPass(pipelineBlock.Demodulated, destination);
             }
 
@@ -986,7 +1021,7 @@ public sealed class RfBlockStreamDecoder : IDisposable
                 if (retainRfDiagnosticChannels)
                 {
                     CopyTrimmedWindow(pipelineBlock.Input, input, blockDestination, offset);
-                    CopyTrimmedWindow(demodulated.DemodRaw, demodRaw, blockDestination, offset);
+                    AppendRawDemod(demodulated, blockDestination);
                     AppendHighPass(demodulated, blockDestination);
                 }
 
@@ -1070,7 +1105,8 @@ public sealed class RfBlockStreamDecoder : IDisposable
                                 warmSample,
                                 BlockLength,
                                 ownedImmediateEnvelopeShape: _ownedImmediateReader?.EnvelopeShape,
-                                compactRfHighPass: compactRfHighPass);
+                                compactRfHighPass: compactRfHighPass,
+                                projectRawDemod: projectRawDemod);
                             if (warmed is null)
                             {
                                 return null;
@@ -1102,7 +1138,8 @@ public sealed class RfBlockStreamDecoder : IDisposable
                             BlockLength,
                             LaserDiscCompatibilityMtfForBlock(block),
                             ownedImmediateEnvelopeShape: _ownedImmediateReader?.EnvelopeShape,
-                            compactRfHighPass: compactRfHighPass);
+                            compactRfHighPass: compactRfHighPass,
+                            projectRawDemod: projectRawDemod);
                         if (pipelineBlock is not null && _pipeline.RequiresSequentialBlockDecode)
                         {
                             _sequentialBlockCache[block] = pipelineBlock;
@@ -1213,7 +1250,8 @@ public sealed class RfBlockStreamDecoder : IDisposable
                                         ownedImmediateEnvelopeShape: seedEnvelopeShape,
                                         compactPostFmVideo: compactPostFmVideo,
                                         reuseOwnedLaserDiscS0: reuseExactLaserDiscS0,
-                                        compactRfHighPass: compactRfHighPass));
+                                        compactRfHighPass: compactRfHighPass,
+                                        projectRawDemod: projectRawDemod));
                                     seedBlockIndex = i;
                                 }
                                 catch (TaskSchedulerException)
@@ -1287,7 +1325,8 @@ public sealed class RfBlockStreamDecoder : IDisposable
                                 reuseOwnedLaserDiscS0: reuseExactLaserDiscS0,
                                 deferredHighPass: highPassJobs,
                                 deferredHighPassOrdinal: blockIndex,
-                                compactRfHighPass: compactRfHighPass);
+                                compactRfHighPass: compactRfHighPass,
+                                projectRawDemod: projectRawDemod);
                         });
                     if (efmTask is not null)
                     {
@@ -1478,6 +1517,7 @@ public sealed class RfBlockStreamDecoder : IDisposable
                 AvailableSampleCountOverride = length,
                 DeferredVhsPayload = stagedMaterializer,
                 LdRfHighPassFloat32 = rfHighPassFloat32,
+                LdRawDemodNyquistMask = rawDemodMask,
                 VideoFloat32 = videoFloat32,
                 VideoLowPassFloat32 = videoLowPassFloat32
             };
@@ -1557,13 +1597,15 @@ public sealed class RfBlockStreamDecoder : IDisposable
 
     private ReusableSpanBuffers TakeReusableSpanBuffers(
         int length,
-        bool compactRfHighPass = false)
+        bool compactRfHighPass = false,
+        bool projectRawDemod = false)
     {
         for (int i = 0; i < _reusableSpanBuffers.Length; i++)
         {
             ReusableSpanBuffers? candidate = Volatile.Read(ref _reusableSpanBuffers[i]);
             if (candidate?.Length == length
                 && (candidate.LdRfHighPassFloat32 is not null) == compactRfHighPass
+                && (candidate.LdRawDemodNyquistMask is not null) == projectRawDemod
                 && ReferenceEquals(
                     Interlocked.CompareExchange(ref _reusableSpanBuffers[i], null, candidate),
                     candidate))
@@ -1577,7 +1619,8 @@ public sealed class RfBlockStreamDecoder : IDisposable
             _pipeline.RetainsRfDiagnosticChannels,
             _useApproxFloat32Sync,
             _useApproxFloat32FieldPayloads,
-            compactRfHighPass);
+            compactRfHighPass,
+            projectRawDemod);
     }
 
     private void ReturnReusableSpanBuffers(ReusableSpanBuffers buffers)
@@ -2517,6 +2560,22 @@ public sealed class RfBlockStreamDecoder : IDisposable
             copyEnd - copyStart);
     }
 
+    private void CopyTrimmedMaskWindow(byte[] source, byte[] destination, int blockDestination, int offset)
+    {
+        if (source.Length != BlockLength)
+        {
+            throw new ArgumentException("Decoded block length did not match the configured block length.", nameof(source));
+        }
+
+        int copyStart = Math.Max(blockDestination, offset);
+        int copyEnd = Math.Min(checked(blockDestination + BlockStride), checked(offset + destination.Length));
+        if (copyStart < copyEnd)
+        {
+            Array.Copy(source, BlockCut + (copyStart - blockDestination), destination,
+                copyStart - offset, copyEnd - copyStart);
+        }
+    }
+
     private void CopyTrimmed(
         LaserDiscAnalogAudioBlock source,
         double[] leftDestination,
@@ -3088,13 +3147,15 @@ public sealed class RfBlockStreamDecoder : IDisposable
             bool retainRfDiagnosticChannels,
             bool retainApproxFloat32Sync = false,
             bool retainApproxFloat32FieldPayloads = false,
-            bool compactRfHighPass = false)
+            bool compactRfHighPass = false,
+            bool projectRawDemod = false)
         {
             Length = length;
             Input = retainRfDiagnosticChannels ? new double[length] : [];
             Video = retainApproxFloat32FieldPayloads ? [] : new double[length];
             VideoFloat32 = retainApproxFloat32FieldPayloads ? new float[length] : null;
-            DemodRaw = retainRfDiagnosticChannels ? new double[length] : [];
+            DemodRaw = retainRfDiagnosticChannels && !projectRawDemod ? new double[length] : [];
+            LdRawDemodNyquistMask = projectRawDemod ? new byte[length] : null;
             Envelope = new double[length];
             VideoLowPass = retainApproxFloat32Sync ? [] : new double[length];
             VideoLowPassFloat32 = retainApproxFloat32Sync ? new float[length] : null;
@@ -3112,6 +3173,8 @@ public sealed class RfBlockStreamDecoder : IDisposable
         internal float[]? VideoFloat32 { get; }
 
         internal double[] DemodRaw { get; }
+
+        internal byte[]? LdRawDemodNyquistMask { get; }
 
         internal double[] Envelope { get; }
 

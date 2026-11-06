@@ -1,3 +1,5 @@
+using System.Runtime.CompilerServices;
+using System.Runtime.InteropServices;
 using System.Runtime.Intrinsics;
 using System.Runtime.Intrinsics.X86;
 
@@ -11,6 +13,39 @@ internal static class DemodVideoClipper
         // The output owns its storage, and every slot is written before return.
         double[] output = GC.AllocateUninitializedArray<double>(demod.Length);
         Fill(demod, output, upper);
+        return output;
+    }
+
+    internal const double OwnedLdNyquist = 20_000_000.0;
+
+    internal static byte[] ProjectNyquistAndClipOwned(double[] demod, double sampleRateHz)
+    {
+        byte[] output = GC.AllocateUninitializedArray<byte>(demod.Length);
+        int index = 0;
+        if (Avx.IsSupported && BitConverter.IsLittleEndian)
+        {
+            ref double first = ref MemoryMarshal.GetArrayDataReference(demod);
+            Vector256<double> maximum = Vector256.Create(OwnedLdNyquist);
+            for (; index <= demod.Length - 4; index += 4)
+            {
+                Vector128<float> rounded = Avx.ConvertToVector128Single(
+                    Vector256.LoadUnsafe(ref first, (nuint)index));
+                // Same ordered double comparison after the original FP32 rounding.
+                int mask = Avx.MoveMask(Avx.Compare(Avx.ConvertToVector256Double(rounded), maximum,
+                    FloatComparisonMode.OrderedGreaterThanNonSignaling));
+                uint packed = (uint)((mask & 1) | ((mask & 2) << 7) | ((mask & 4) << 14) | ((mask & 8) << 21));
+                Unsafe.WriteUnaligned(ref output[index], packed);
+            }
+        }
+
+        for (; index < demod.Length; index++)
+        {
+            output[index] = (float)demod[index] > OwnedLdNyquist ? (byte)1 : (byte)0;
+        }
+
+        // The raw array is private and every source vector is loaded before its
+        // matching destination is written. Use the unchanged FP64 clip body.
+        Fill(demod, demod, sampleRateHz * 0.75);
         return output;
     }
 

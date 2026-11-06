@@ -344,6 +344,15 @@ public sealed class DecodeRunner
                         ownedReader!.EnableCompactRfHighPass();
                     }
 
+                    if (overlapLaserDiscTail && dspBackend == DspBackend.Exact
+                        && ownedReader is { ReuseExactLaserDiscS0: true }
+                        && session.Pipeline.CanProjectOwnedExactLdRawDemod
+                        && session.RunBounds.RequestedFieldCount > 100
+                        && session.DropoutOptions is { Enabled: true, Mode: TbcDropoutDetectionMode.LaserDiscDemod })
+                    {
+                        ownedReader.EnableExactRawDemodMask();
+                    }
+
                     TbcFieldSequenceDecodeEngine engine = ownedReader is null
                         ? _engineFactory(cancellationToken)
                         : TbcFieldSequenceDecodeEngine.CreateForOwnedDefaultImmediateLaserDisc(

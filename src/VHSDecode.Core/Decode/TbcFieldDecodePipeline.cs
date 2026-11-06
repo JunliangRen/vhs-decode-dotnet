@@ -7465,7 +7465,7 @@ public sealed class TbcFieldDecodePipeline : IDisposable
         // FillErrorMap writes every active entry, including false;
         // BuildErrorRanges reads only that completely overwritten interval.
         bool[] errorMap = GC.AllocateUninitializedArray<bool>(span.Video.Length);
-        bool hasRawDemod = span.DemodRaw.Length == span.Video.Length;
+        bool hasRawDemod = (span.LdRawDemodNyquistMask?.Length ?? span.DemodRaw.Length) == span.Video.Length;
         bool hasVideoLowPass = span.VideoLowPass?.Length == span.Video.Length;
         float[]? compactHighPass = span.LdRfHighPassFloat32;
         bool hasRfHighPass = (compactHighPass?.Length ?? span.RfHighPass?.Length) == span.Video.Length;
