@@ -255,7 +255,7 @@ public sealed class DecodeRunner
                     }
 
                     bool requireCudaVideo = cudaFastLaserDiscVideoOnly && !session.RunBounds.RequestedFieldCount.IsZero;
-                    bool overlapCudaRfHighPass = requireCudaVideo
+                    bool standardCudaLdOutput = (requireCudaVideo || cudaEfm is LaserDiscCudaEfm)
                         && session.RunBounds.RequestedFieldCount > 100
                         && session.InputFile != "-" && session.TestLdfOutputPath is null
                         && session.StreamDecoder.WorkerThreads == 4 && session.ChromaOptions is null
@@ -266,9 +266,10 @@ public sealed class DecodeRunner
                         }
                         && session.LaserDiscAudioOptions is
                         {
-                            DecodeDigitalAudio: false, DecodeAnalogAudio: true,
-                            WritePreEfm: false, WriteRfTbc: false, Ac3: false
+                            DecodeAnalogAudio: true, WritePreEfm: false, WriteRfTbc: false, Ac3: false
                         };
+                    bool overlapCudaRfHighPass = requireCudaVideo && standardCudaLdOutput
+                        && session.LaserDiscAudioOptions is { DecodeDigitalAudio: false };
                     using ILaserDiscCudaVideo? cudaVideo = cudaEfm is not null || requireCudaVideo
                         ? ownedReader!.AttachCudaVideoIfSupported(
                             () => _laserDiscCudaVideoFactory(session.Filters, output, cancellationToken),
@@ -284,14 +285,17 @@ public sealed class DecodeRunner
                         output.WriteLine("CUDA-fast LD video: post-FM filtering in eligible RF batches.");
                     }
 
-                    if (overlapCudaRfHighPass && ReferenceEquals(_engineFactory, DefaultEngineFactory)
+                    if (standardCudaLdOutput && ReferenceEquals(_engineFactory, DefaultEngineFactory)
                         && OperatingSystem.IsWindows() && RuntimeInformation.ProcessArchitecture == Architecture.X64
                         && !command.Get<bool>("lowband")
                         && session.ExecutionOptions.UpstreamBehaviorProfile == UpstreamBehaviorProfile.V040
                         && session.TbcFieldDecoder.CanOverlapOwnedLaserDiscRenderDropout
-                        && ownedReader is { CudaRfHighPassOverlapToken: not null })
+                        && ownedReader is not null
+                        && (ownedReader.CudaRfHighPassOverlapToken.HasValue
+                            || (session.LaserDiscAudioOptions is { DecodeDigitalAudio: true }
+                                && ownedReader.CanPrepareCudaEfmIppRfFft)))
                     {
-                        ownedReader.PrepareCudaIppRfFftOnFirstRead();
+                        ownedReader.PrepareCudaIppRfFftOnFirstRead(cancellationToken);
                     }
 
                     session.RuntimeReporter = runtimeReporter;
