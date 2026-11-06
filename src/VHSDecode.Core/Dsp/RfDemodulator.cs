@@ -940,6 +940,9 @@ public sealed class RfDemodulator : IDisposable
                     nameof(precomputedInputSpectrum));
             }
 
+            bool usePairedRfInverse = projectRawDemod
+                && DspBackend == DspBackend.Exact && _ippComplexFftPool is null
+                && input.Length == LaserDiscEfmScratchHandoff.BlockLength;
             Complex[]? rfHighPassSpectrum = null;
             if (includeRfHighPassOutput && deferredHighPass is null)
             {
@@ -949,6 +952,10 @@ public sealed class RfDemodulator : IDisposable
                     InverseLaserDiscFullSpectrumInPlace(rfHighPassSpectrum);
                     rfHighPassFloat32 = ComplexRealExtractor.CreateFloat32(rfHighPassSpectrum);
                     rfHighPass = [];
+                }
+                else if (usePairedRfInverse && PocketFftComplex.TryInverseDuccFirstPacketPairs32K(rfHighPassSpectrum))
+                {
+                    rfHighPass = ExtractReal(rfHighPassSpectrum);
                 }
                 else
                 {
@@ -984,7 +991,11 @@ public sealed class RfDemodulator : IDisposable
                 ? rfFilteredSpectrum
                 : rfFilteredSpectrum.ToArray();
             ApplyHilbertMultiplierInPlace(analyticSpectrum, hilbertMultiplier);
-            InverseLaserDiscFullSpectrumInPlace(analyticSpectrum);
+            if (!usePairedRfInverse || !reuseFilteredSpectrum
+                || !PocketFftComplex.TryInverseDuccFirstPacketPairs32K(analyticSpectrum))
+            {
+                InverseLaserDiscFullSpectrumInPlace(analyticSpectrum);
+            }
             analytic = analyticSpectrum;
         }
 
