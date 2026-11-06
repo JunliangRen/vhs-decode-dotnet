@@ -41,7 +41,7 @@ public sealed class RfDemodulator : IDisposable
     private int _nonlinearDeemphasisFilterPlanBuildCount;
     private int _subDeemphasisFilterPlanBuildCount;
     private readonly VhsRealFftWorkspacePool _vhsRealFftWorkspacePool;
-    private readonly IppComplexFft64Pool? _ippComplexFftPool;
+    private IppComplexFft64Pool? _ippComplexFftPool;
     private readonly Lazy<VhsInverseCompanionScheduler?>? _vhsInverseCompanionScheduler;
     private readonly int _vhsInverseCompanionWorkerThreads;
     private readonly bool _parallelizeVhsInverseStaging;
@@ -180,6 +180,38 @@ public sealed class RfDemodulator : IDisposable
             && _vhsInverseCompanionScheduler.Value is not null;
 
     internal bool UsesIppComplexFft => _ippComplexFftPool is not null;
+
+    internal void EnableCudaIppRfFftIfAvailable(
+        int blockLength, int audioFftLength, int workerThreads, CancellationToken cancellationToken)
+    {
+        ObjectDisposedException.ThrowIf(Volatile.Read(ref _disposed) != 0, this);
+        if (DspBackend != DspBackend.Exact || SampleRateHz != 40_000_000.0
+            || _parallelizeVhsInverseStaging || _ippComplexFftPool is not null)
+        {
+            throw new InvalidOperationException("The CUDA LD RF FFT provider requires the Exact CPU complement.");
+        }
+
+        cancellationToken.ThrowIfCancellationRequested();
+        if (IppRuntime.TryProbe(out _))
+        {
+            try
+            {
+                _ippComplexFftPool = IppComplexFft64Pool.CreatePrepared(
+                    [blockLength, audioFftLength], workerThreads, cancellationToken);
+            }
+            catch (Exception exception) when (exception is IppBackendUnavailableException
+                || exception is IppNativeException
+                {
+                    Operation: "cfft64_create",
+                    StatusCode: IppStatus.UnsupportedLength or IppStatus.UnsupportedCpu
+                })
+            {
+                // Optional IPP setup could not complete. The first RF read still uses DUCC.
+            }
+        }
+
+        cancellationToken.ThrowIfCancellationRequested();
+    }
 
     internal int NonlinearDeemphasisFilterPlanBuildCount =>
         Volatile.Read(ref _nonlinearDeemphasisFilterPlanBuildCount);

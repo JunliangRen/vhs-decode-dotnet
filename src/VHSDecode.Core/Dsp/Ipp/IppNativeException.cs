@@ -20,6 +20,8 @@ public sealed class IppNativeException : InvalidOperationException
 internal static class IppStatus
 {
     internal const int Success = 0;
+    internal const int UnsupportedLength = -10002;
+    internal const int UnsupportedCpu = -10006;
 
     internal static void ThrowIfFailed(int statusCode, string operation)
     {
