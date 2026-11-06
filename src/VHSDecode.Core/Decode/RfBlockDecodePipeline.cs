@@ -213,6 +213,13 @@ public sealed class RfBlockDecodePipeline : IDisposable
         && _filters.LdEfm is { Length: LaserDiscEfmScratchHandoff.BlockLength }
         && _filters.LdAnalogAudio is not null;
 
+    internal bool CanProjectOwnedExactLdRawDemod =>
+        CanReuseOwnedExactLaserDiscS0
+        && _filterOptions.FmDemodulatorMode == RfFmDemodulatorMode.ConjugateProduct
+        && _filterOptions.DiffDemodRepair is null
+        && _filterOptions.SharpnessEq is null
+        && _filterOptions.ChromaTrap is null;
+
     private bool HasOwnedLaserDiscPostFmVideoGeometry =>
         _demodulator.SampleRateHz == 40_000_000.0
         && Avx2.IsSupported && Fma.IsSupported
@@ -308,7 +315,8 @@ public sealed class RfBlockDecodePipeline : IDisposable
         int blockLength,
         Complex[]? rfMtfOverride = null,
         double[]? ownedImmediateEnvelopeShape = null,
-        bool compactRfHighPass = false)
+        bool compactRfHighPass = false,
+        bool projectRawDemod = false)
     {
         double[]? input = LoadStreamBlockInput(stream, sample, blockLength);
         if (input is null)
@@ -320,7 +328,8 @@ public sealed class RfBlockDecodePipeline : IDisposable
         {
             return DecodePreparedStreamBlock(input, rfMtfOverride: rfMtfOverride,
                 ownedImmediateEnvelopeShape: ownedImmediateEnvelopeShape,
-                compactRfHighPass: compactRfHighPass);
+                compactRfHighPass: compactRfHighPass,
+                projectRawDemod: projectRawDemod);
         }
         finally
         {
@@ -376,7 +385,8 @@ public sealed class RfBlockDecodePipeline : IDisposable
         bool reuseOwnedLaserDiscS0 = false,
         RfDemodulator.DeferredLaserDiscHighPass[]? deferredHighPass = null,
         int deferredHighPassOrdinal = -1,
-        bool compactRfHighPass = false)
+        bool compactRfHighPass = false,
+        bool projectRawDemod = false)
         => DecodePreparedBlockCore(
             input,
             reportDiagnostics,
@@ -391,7 +401,8 @@ public sealed class RfBlockDecodePipeline : IDisposable
             reuseOwnedLaserDiscS0,
             deferredHighPass,
             deferredHighPassOrdinal,
-            compactRfHighPass);
+            compactRfHighPass,
+            projectRawDemod);
 
     private RfPipelineBlock DecodePreparedBlockCore(
         double[] input,
@@ -407,7 +418,8 @@ public sealed class RfBlockDecodePipeline : IDisposable
         bool reuseOwnedLaserDiscS0 = false,
         RfDemodulator.DeferredLaserDiscHighPass[]? deferredHighPass = null,
         int deferredHighPassOrdinal = -1,
-        bool compactRfHighPass = false)
+        bool compactRfHighPass = false,
+        bool projectRawDemod = false)
     {
         ArgumentNullException.ThrowIfNull(input);
         if (deferredHighPass is not null
@@ -432,6 +444,16 @@ public sealed class RfBlockDecodePipeline : IDisposable
                 || ownedImmediateEnvelopeShape is not { Length: LaserDiscEfmScratchHandoff.BlockLength }))
         {
             throw new InvalidOperationException("Compact RF high-pass requires a compatible private IPP LD block.");
+        }
+
+        if (projectRawDemod
+            && (!CanProjectOwnedExactLdRawDemod || !retainRfDiagnosticChannels || includeAnalyticOutput
+                || reuseStreamOutputBuffers || deferEfm || deferPostFmVideo || deferredHighPass is not null
+                || compactPostFmVideo || compactRfHighPass
+                || input.Length != LaserDiscEfmScratchHandoff.BlockLength
+                || ownedImmediateEnvelopeShape is not { Length: LaserDiscEfmScratchHandoff.BlockLength }))
+        {
+            throw new InvalidOperationException("Raw demod projection requires a compatible private Exact LD block.");
         }
 
         if (deferPostFmVideo
@@ -531,7 +553,8 @@ public sealed class RfBlockDecodePipeline : IDisposable
                 compactPostFmVideo: compactPostFmVideo,
                 deferredHighPass: deferredHighPass,
                 deferredHighPassOrdinal: deferredHighPassOrdinal,
-                compactRfHighPass: compactRfHighPass);
+                compactRfHighPass: compactRfHighPass,
+                projectRawDemod: projectRawDemod);
             Complex[]? efmScratch = efmScratchHandoff?.Take(_demodulator);
             if (reportDiagnostics)
             {

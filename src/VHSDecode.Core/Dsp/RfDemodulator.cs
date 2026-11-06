@@ -500,7 +500,8 @@ public sealed class RfDemodulator : IDisposable
         bool compactPostFmVideo = false,
         DeferredLaserDiscHighPass[]? deferredHighPass = null,
         int deferredHighPassOrdinal = -1,
-        bool compactRfHighPass = false)
+        bool compactRfHighPass = false,
+        bool projectRawDemod = false)
     {
         ObjectDisposedException.ThrowIf(Volatile.Read(ref _disposed) != 0, this);
         bool produceApproxChroma = !approxChromaFilter.IsEmpty
@@ -1238,6 +1239,17 @@ public sealed class RfDemodulator : IDisposable
             throw new InvalidOperationException("Compact post-FM video requires a compatible private LD CPU block.");
         }
 
+        if (projectRawDemod
+            && (DspBackend != DspBackend.Exact || useVhsRealFft || !useOwnedEnvelopeShape
+                || !includeDemodRawOutput || includeAnalyticOutput || outputBuffers is not null
+                || deferPostFmVideo || compactPostFmVideo || compactRfHighPass || deferredHighPass is not null
+                || SampleRateHz != 40_000_000.0 || referenceFilters?.ClipDemodForVideo != true
+                || fmDemodulatorMode != RfFmDemodulatorMode.ConjugateProduct
+                || diffDemodRepair is not null || sharpnessEq is not null || chromaTrap is not null))
+        {
+            throw new InvalidOperationException("Raw demod projection requires a fresh private Exact LD FM array.");
+        }
+
         if (deferPostFmVideo)
         {
             // The owned stream retains the pre-clip FM samples until its CUDA wave completes.
@@ -1271,7 +1283,12 @@ public sealed class RfDemodulator : IDisposable
         int demodVideoLength = demodRawFloat32?.Length
             ?? demodVideoSource.Length;
         double[]? clippedDemod = null;
-        if (referenceFilters?.ClipDemodForVideo == true)
+        byte[]? rawDemodMask = null;
+        if (projectRawDemod)
+        {
+            rawDemodMask = DemodVideoClipper.ProjectNyquistAndClipOwned(demodRaw, SampleRateHz);
+        }
+        else if (referenceFilters?.ClipDemodForVideo == true)
         {
             clippedDemod = ClipDemodForVideo(demodRaw, SampleRateHz);
             demodVideoSource = clippedDemod;
@@ -1565,7 +1582,7 @@ public sealed class RfDemodulator : IDisposable
 
         var result = new RfDemodulatedBlock(
             video,
-            includeDemodRawOutput ? demodRaw : [],
+            includeDemodRawOutput && rawDemodMask is null ? demodRaw : [],
             analyticOutput,
             envelope,
             videoLowPass,
@@ -1577,7 +1594,8 @@ public sealed class RfDemodulator : IDisposable
             VideoFloat32 = videoFloat32,
             VideoLowPassFloat32 = videoLowPassFloat32,
             LdVideoBurstFloat32 = ldVideoBurstFloat32,
-            LdRfHighPassFloat32 = rfHighPassFloat32
+            LdRfHighPassFloat32 = rfHighPassFloat32,
+            LdRawDemodNyquistMask = rawDemodMask
         };
 
         // The final LPF/Burst/Pilot readers and result construction completed.
@@ -4942,6 +4960,8 @@ public sealed record RfDemodulatedBlock(
     // Private owned LD cache channel. Public field consumers still get doubles.
     internal float[]? LdVideoBurstFloat32 { get; init; }
     internal float[]? LdRfHighPassFloat32 { get; init; }
+
+    internal byte[]? LdRawDemodNyquistMask { get; init; }
 }
 
 public sealed record LaserDiscAnalogAudioBlock(

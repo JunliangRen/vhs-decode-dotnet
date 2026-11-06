@@ -3,6 +3,7 @@ using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using System.Runtime.Intrinsics;
 using System.Runtime.Intrinsics.X86;
+using VHSDecode.Core.Dsp;
 
 namespace VHSDecode.Core.Decode;
 
@@ -31,13 +32,18 @@ internal static class LaserDiscDemodDropoutComparison
         int rfHighPassOffset)
     {
         float[]? compactHighPass = span?.LdRfHighPassFloat32;
+        byte[]? rawMask = hasRawDemod ? span?.LdRawDemodNyquistMask : null;
+        if (rawMask is not null && thresholds.RawDemodMaximum != DemodVideoClipper.OwnedLdNyquist)
+        {
+            throw new InvalidOperationException("A private LD raw demod mask requires its original Nyquist limit.");
+        }
         // Keep malformed/short inputs on the checked scalar path. In particular,
         // do not add eager exceptions or change partial writes before an exception.
         if (!Avx.IsSupported || !BitConverter.IsLittleEndian
             || startSample < 0 || endSample < startSample || endSample - startSample < 4
             || span is null || span.Video is null || syncArea is null || errorMap is null
             || endSample > span.Video.Length || endSample > syncArea.Length || endSample > errorMap.Length
-            || (hasRawDemod && (span.DemodRaw is null || endSample > span.DemodRaw.Length))
+            || (hasRawDemod && endSample > (rawMask?.Length ?? span.DemodRaw?.Length ?? -1))
             || (hasVideoLowPass && (span.VideoLowPass is null || endSample > span.VideoLowPass.Length))
             || (hasRfHighPass && endSample > (compactHighPass?.Length ?? span.RfHighPass?.Length ?? -1)))
         {
@@ -50,6 +56,8 @@ internal static class LaserDiscDemodDropoutComparison
         ReadOnlySpan<double> lowPass = span.VideoLowPass;
         ref double videoFirst = ref MemoryMarshal.GetArrayDataReference(span.Video);
         ref double rawFirst = ref MemoryMarshal.GetReference(raw);
+        ref byte rawMaskFirst = ref MemoryMarshal.GetReference(rawMask.AsSpan());
+        bool hasWideRawDemod = hasRawDemod && rawMask is null;
         ref double lowFirst = ref MemoryMarshal.GetReference(lowPass);
         ref byte syncFirst = ref MemoryMarshal.GetReference(MemoryMarshal.AsBytes(syncArea.AsSpan()));
         ref byte errorFirst = ref MemoryMarshal.GetReference(MemoryMarshal.AsBytes(errorMap.AsSpan()));
@@ -69,7 +77,7 @@ internal static class LaserDiscDemodDropoutComparison
             Vector128<float> video = Avx.ConvertToVector128Single(
                 Vector256.LoadUnsafe(ref videoFirst, (nuint)index));
             int mask = Sse.MoveMask(Sse.Or(Sse.CompareLessThan(video, minimum), Sse.CompareGreaterThan(video, validMax)));
-            if (hasRawDemod)
+            if (hasWideRawDemod)
             {
                 Vector128<float> rounded = Avx.ConvertToVector128Single(
                     Vector256.LoadUnsafe(ref rawFirst, (nuint)index));
@@ -88,6 +96,10 @@ internal static class LaserDiscDemodDropoutComparison
             // AVX runs on little-endian hardware here; expand four bits into four
             // canonical bool bytes. False entries overwrite previous map contents.
             uint packed = (uint)((mask & 1) | ((mask & 2) << 7) | ((mask & 4) << 14) | ((mask & 8) << 21));
+            if (rawMask is not null)
+            {
+                packed |= Unsafe.ReadUnaligned<uint>(ref Unsafe.Add(ref rawMaskFirst, index));
+            }
             Unsafe.WriteUnaligned(ref Unsafe.Add(ref errorFirst, index), packed);
         }
         for (; index < endSample; index++)
@@ -95,7 +107,8 @@ internal static class LaserDiscDemodDropoutComparison
             float minimum = syncArea[index] ? thresholds.SyncMinimum : thresholds.ValidMinimum;
             float video = (float)span.Video[index];
             bool videoOutOfRange = video < minimum || video > thresholds.ValidMaximum;
-            bool rawDemodOutOfRange = hasRawDemod && (float)span.DemodRaw[index] > thresholds.RawDemodMaximum;
+            bool rawDemodOutOfRange = hasRawDemod && (rawMask is not null
+                ? rawMask[index] != 0 : (float)raw[index] > thresholds.RawDemodMaximum);
             bool videoLowPassOutOfRange = false;
             if (hasVideoLowPass)
             {
@@ -208,7 +221,8 @@ internal static class LaserDiscDemodDropoutComparison
             float minimum = syncArea[i] ? thresholds.SyncMinimum : thresholds.ValidMinimum;
             float video = (float)span.Video[i];
             bool videoOutOfRange = video < minimum || video > thresholds.ValidMaximum;
-            bool rawDemodOutOfRange = hasRawDemod && (float)span.DemodRaw[i] > thresholds.RawDemodMaximum;
+            bool rawDemodOutOfRange = hasRawDemod && (span.LdRawDemodNyquistMask is { } rawMask
+                ? rawMask[i] != 0 : (float)span.DemodRaw[i] > thresholds.RawDemodMaximum);
             bool videoLowPassOutOfRange = false;
             if (hasVideoLowPass)
             {
