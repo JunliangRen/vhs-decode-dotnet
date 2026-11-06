@@ -303,7 +303,11 @@ public sealed class DecodeRunner
                     }
 
                     bool overlapLaserDiscTail = ownedReader is not null
-                        && dspBackend == DspBackend.Exact && command.Spec == CliSpecs.LaserDisc
+                        && (dspBackend == DspBackend.Exact
+                            || (dspBackend == DspBackend.IppFast && ownedReader.CompactCpuPostFmVideo
+                                && session.Filters.LdEfm is { Length: 32_768 }
+                                && session.Filters.LdAnalogAudio is not null))
+                        && command.Spec == CliSpecs.LaserDisc
                         && session.System == "NTSC" && session.InputFile != "-" && session.TestLdfOutputPath is null
                         && session.DecodeSampleRateHz == 40_000_000.0 && session.BlockLength == 32_768
                         && session.StreamDecoder.BlockStride == 31_712 && session.StreamDecoder.WorkerThreads == 4
