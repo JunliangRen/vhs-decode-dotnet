@@ -1454,7 +1454,9 @@ public sealed class TbcFieldSequenceDecodeEngine
             return null;
         }
 
-        return overlapLaserDiscRenderDropout
+        bool overlapCudaRenderDropout = ownedReader.CudaRfHighPassOverlapToken.HasValue
+            && input.CanSeek && fieldDecoder.CanOverlapOwnedLaserDiscRenderDropout;
+        return overlapLaserDiscRenderDropout || overlapCudaRenderDropout
             ? fieldDecoder.DecodeOwnedLaserDiscWithRenderDropoutOverlap(lease.Span, fieldNumber)
             : fieldDecoder.Decode(lease.Span, fieldNumber: fieldNumber);
     }
