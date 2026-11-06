@@ -337,6 +337,13 @@ public sealed class DecodeRunner
                             DecodeDigitalAudio: true, DecodeAnalogAudio: true,
                             WritePreEfm: false, WriteRfTbc: false, Ac3: false
                         };
+                    if (overlapLaserDiscTail && dspBackend == DspBackend.IppFast
+                        && session.RunBounds.RequestedFieldCount > 100
+                        && session.DropoutOptions is { Enabled: true, Mode: TbcDropoutDetectionMode.LaserDiscDemod })
+                    {
+                        ownedReader!.EnableCompactRfHighPass();
+                    }
+
                     TbcFieldSequenceDecodeEngine engine = ownedReader is null
                         ? _engineFactory(cancellationToken)
                         : TbcFieldSequenceDecodeEngine.CreateForOwnedDefaultImmediateLaserDisc(

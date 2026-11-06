@@ -499,7 +499,8 @@ public sealed class RfDemodulator : IDisposable
         bool deferPostFmVideo = false,
         bool compactPostFmVideo = false,
         DeferredLaserDiscHighPass[]? deferredHighPass = null,
-        int deferredHighPassOrdinal = -1)
+        int deferredHighPassOrdinal = -1,
+        bool compactRfHighPass = false)
     {
         ObjectDisposedException.ThrowIf(Volatile.Read(ref _disposed) != 0, this);
         bool produceApproxChroma = !approxChromaFilter.IsEmpty
@@ -551,6 +552,7 @@ public sealed class RfDemodulator : IDisposable
         bool vhsAnalyticComponentsReady = false;
         bool vhsWorkspaceComplexAnalyticReady = false;
         double[] rfHighPass;
+        float[]? rfHighPassFloat32 = null;
         Complex[]? rfFilteredSpectrum = null;
         double[]? hilbertMultiplier = null;
         Complex[]? vhsRfFilteredHalf = null;
@@ -909,7 +911,16 @@ public sealed class RfDemodulator : IDisposable
             if (includeRfHighPassOutput && deferredHighPass is null)
             {
                 rfHighPassSpectrum = ApplyFrequencyFilter(spectrum, rfHighPassFilter);
-                rfHighPass = InverseAndExtractLaserDiscHighPass(rfHighPassSpectrum);
+                if (compactRfHighPass)
+                {
+                    InverseLaserDiscFullSpectrumInPlace(rfHighPassSpectrum);
+                    rfHighPassFloat32 = ComplexRealExtractor.CreateFloat32(rfHighPassSpectrum);
+                    rfHighPass = [];
+                }
+                else
+                {
+                    rfHighPass = InverseAndExtractLaserDiscHighPass(rfHighPassSpectrum);
+                }
             }
             else
             {
@@ -1565,7 +1576,8 @@ public sealed class RfDemodulator : IDisposable
         {
             VideoFloat32 = videoFloat32,
             VideoLowPassFloat32 = videoLowPassFloat32,
-            LdVideoBurstFloat32 = ldVideoBurstFloat32
+            LdVideoBurstFloat32 = ldVideoBurstFloat32,
+            LdRfHighPassFloat32 = rfHighPassFloat32
         };
 
         // The final LPF/Burst/Pilot readers and result construction completed.
@@ -4929,6 +4941,7 @@ public sealed record RfDemodulatedBlock(
 
     // Private owned LD cache channel. Public field consumers still get doubles.
     internal float[]? LdVideoBurstFloat32 { get; init; }
+    internal float[]? LdRfHighPassFloat32 { get; init; }
 }
 
 public sealed record LaserDiscAnalogAudioBlock(

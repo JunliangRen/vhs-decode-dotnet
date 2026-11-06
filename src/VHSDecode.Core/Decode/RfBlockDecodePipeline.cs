@@ -307,7 +307,8 @@ public sealed class RfBlockDecodePipeline : IDisposable
         long sample,
         int blockLength,
         Complex[]? rfMtfOverride = null,
-        double[]? ownedImmediateEnvelopeShape = null)
+        double[]? ownedImmediateEnvelopeShape = null,
+        bool compactRfHighPass = false)
     {
         double[]? input = LoadStreamBlockInput(stream, sample, blockLength);
         if (input is null)
@@ -318,7 +319,8 @@ public sealed class RfBlockDecodePipeline : IDisposable
         try
         {
             return DecodePreparedStreamBlock(input, rfMtfOverride: rfMtfOverride,
-                ownedImmediateEnvelopeShape: ownedImmediateEnvelopeShape);
+                ownedImmediateEnvelopeShape: ownedImmediateEnvelopeShape,
+                compactRfHighPass: compactRfHighPass);
         }
         finally
         {
@@ -373,7 +375,8 @@ public sealed class RfBlockDecodePipeline : IDisposable
         bool compactPostFmVideo = false,
         bool reuseOwnedLaserDiscS0 = false,
         RfDemodulator.DeferredLaserDiscHighPass[]? deferredHighPass = null,
-        int deferredHighPassOrdinal = -1)
+        int deferredHighPassOrdinal = -1,
+        bool compactRfHighPass = false)
         => DecodePreparedBlockCore(
             input,
             reportDiagnostics,
@@ -387,7 +390,8 @@ public sealed class RfBlockDecodePipeline : IDisposable
             compactPostFmVideo,
             reuseOwnedLaserDiscS0,
             deferredHighPass,
-            deferredHighPassOrdinal);
+            deferredHighPassOrdinal,
+            compactRfHighPass);
 
     private RfPipelineBlock DecodePreparedBlockCore(
         double[] input,
@@ -402,7 +406,8 @@ public sealed class RfBlockDecodePipeline : IDisposable
         bool compactPostFmVideo = false,
         bool reuseOwnedLaserDiscS0 = false,
         RfDemodulator.DeferredLaserDiscHighPass[]? deferredHighPass = null,
-        int deferredHighPassOrdinal = -1)
+        int deferredHighPassOrdinal = -1,
+        bool compactRfHighPass = false)
     {
         ArgumentNullException.ThrowIfNull(input);
         if (deferredHighPass is not null
@@ -418,6 +423,15 @@ public sealed class RfBlockDecodePipeline : IDisposable
                 || ownedImmediateEnvelopeShape is not { Length: LaserDiscEfmScratchHandoff.BlockLength }))
         {
             throw new InvalidOperationException("Compact post-FM video requires a compatible private LD CPU block.");
+        }
+
+        if (compactRfHighPass
+            && (deferEfm || deferPostFmVideo || deferredHighPass is not null || !retainRfDiagnosticChannels
+                || reuseStreamOutputBuffers || includeAnalyticOutput || !CanCompactOwnedLaserDiscPostFmVideo
+                || input.Length != LaserDiscEfmScratchHandoff.BlockLength
+                || ownedImmediateEnvelopeShape is not { Length: LaserDiscEfmScratchHandoff.BlockLength }))
+        {
+            throw new InvalidOperationException("Compact RF high-pass requires a compatible private IPP LD block.");
         }
 
         if (deferPostFmVideo
@@ -516,7 +530,8 @@ public sealed class RfBlockDecodePipeline : IDisposable
                 deferPostFmVideo: deferPostFmVideo,
                 compactPostFmVideo: compactPostFmVideo,
                 deferredHighPass: deferredHighPass,
-                deferredHighPassOrdinal: deferredHighPassOrdinal);
+                deferredHighPassOrdinal: deferredHighPassOrdinal,
+                compactRfHighPass: compactRfHighPass);
             Complex[]? efmScratch = efmScratchHandoff?.Take(_demodulator);
             if (reportDiagnostics)
             {
@@ -1131,7 +1146,10 @@ public sealed class RfBlockDecodePipeline : IDisposable
         QuantizeToFloat32InPlace(block.Video);
         QuantizeToFloat32InPlace(block.DemodRaw);
         QuantizeToFloat32InPlace(block.VideoLowPass);
-        QuantizeToFloat32InPlace(block.RfHighPass);
+        if (block.LdRfHighPassFloat32 is null)
+        {
+            QuantizeToFloat32InPlace(block.RfHighPass);
+        }
         if (block.VideoBurst is not null)
         {
             QuantizeToFloat32InPlace(block.VideoBurst);
