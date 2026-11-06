@@ -551,7 +551,8 @@ public sealed class TbcFieldSequenceDecodeEngine
 
         bool overlapLaserDiscRenderDropout = orderedTailOutput is not null
             && session.StreamDecoder.PrefetchBlocks == 0
-            && session.TbcFieldDecoder.CanOverlapOwnedLaserDiscRenderDropout;
+            && (session.TbcFieldDecoder.CanOverlapOwnedLaserDiscRenderDropout
+                || session.TbcFieldDecoder.CanOverlapOwnedIppLaserDiscRenderDropout);
         BigInteger requestedFields = maxFields.HasValue
             ? new BigInteger(maxFields.Value)
             : session.RunBounds.RequestedFieldCount;
@@ -1454,9 +1455,13 @@ public sealed class TbcFieldSequenceDecodeEngine
             return null;
         }
 
+        bool overlapOwnedCpuRenderDropout = overlapLaserDiscRenderDropout
+            && (fieldDecoder.CanOverlapOwnedLaserDiscRenderDropout
+                || (ownedReader.CompactRfHighPass && ownedReader.CudaEfm is null && ownedReader.CudaVideo is null
+                    && fieldDecoder.CanOverlapOwnedIppLaserDiscRenderDropout));
         bool overlapCudaRenderDropout = ownedReader.CudaRfHighPassOverlapToken.HasValue
             && input.CanSeek && fieldDecoder.CanOverlapOwnedLaserDiscRenderDropout;
-        return overlapLaserDiscRenderDropout || overlapCudaRenderDropout
+        return overlapOwnedCpuRenderDropout || overlapCudaRenderDropout
             ? fieldDecoder.DecodeOwnedLaserDiscWithRenderDropoutOverlap(lease.Span, fieldNumber)
             : fieldDecoder.Decode(lease.Span, fieldNumber: fieldNumber);
     }
