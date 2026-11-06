@@ -7289,7 +7289,6 @@ public sealed class TbcFieldDecodePipeline : IDisposable
             // If scheduling failed, run dropout detection at its original point.
         }
 
-        bool observedDropout = false;
         try
         {
             TbcRenderedField rendered = dropoutTask is { IsCompleted: false }
@@ -7300,26 +7299,36 @@ public sealed class TbcFieldDecodePipeline : IDisposable
                     fieldNumber: fieldNumber, converterOverride: fieldConverter, trackPhaseOverride: trackPhase);
             double? ratio = ComputeLaserDiscBlackToWhiteRfRatio(
                 span.Input, rendered.Samples, lineLocations.Locations, isFirstField == true, converter);
-            observedDropout = true;
             TbcDropoutMap? dropouts = dropoutTask is null
                 ? DetectCurrentDropouts()
                 : dropoutTask.GetAwaiter().GetResult();
             return new LaserDiscRenderDropoutResult(rendered, ratio, dropouts);
         }
-        finally
+        catch
         {
-            if (!observedDropout && dropoutTask is not null)
+            if (dropoutTask is not null)
             {
-                // The owned RF span may be released only after the worker stops reading it.
-                try
+                // Keep the RF span alive through interruptions of the producer's wait.
+                while (true)
                 {
-                    _ = dropoutTask.GetAwaiter().GetResult();
-                }
-                catch
-                {
-                    // Preserve the earlier render or RF-level-metric failure.
+                    try
+                    {
+                        _ = dropoutTask.GetAwaiter().GetResult();
+                        break;
+                    }
+                    catch (ThreadInterruptedException) when (!dropoutTask.IsCompleted)
+                    {
+                        // The producer's wait was interrupted; the worker can still be reading.
+                    }
+                    catch
+                    {
+                        // Observe the worker fault without replacing the original failure.
+                        break;
+                    }
                 }
             }
+
+            throw;
         }
     }
 

@@ -406,6 +406,8 @@ public sealed class RfBlockStreamDecoder : IDisposable
             && _owner.WorkerThreads == 4 && _owner.PrefetchBlocks == 0
             && _owner.BlockLength == BlockLengthForCudaVideo && _owner.BlockStride == 31_712;
 
+        internal bool UsesCudaEfmIppRfFft => CanPrepareCudaEfmIppRfFft && _owner._pipeline.UsesIppComplexFft;
+
         internal void PrepareCudaIppRfFftOnFirstRead(CancellationToken cancellationToken)
         {
             _owner.GuardOwnedDomain(this);
