@@ -3,6 +3,7 @@ using System.Runtime.ExceptionServices;
 using System.Runtime.Intrinsics.X86;
 using VHSDecode.Core.Dsp;
 using VHSDecode.Core.Dsp.CudaFast;
+using VHSDecode.Core.Rf;
 
 namespace VHSDecode.Core.Decode;
 
@@ -193,6 +194,7 @@ public sealed class RfBlockStreamDecoder : IDisposable
     {
         private readonly RfBlockStreamDecoder _owner;
         private CancellationToken? _cudaIppRfFftPreparationToken;
+        private StaleRawFlacFallbackSampleLoader? _cudaMappedReadAheadFallback;
         internal readonly double[] EnvelopeShape;
 
         internal OwnedImmediateLaserDiscFieldReader(RfBlockStreamDecoder owner, double[] envelopeShape)
@@ -408,10 +410,12 @@ public sealed class RfBlockStreamDecoder : IDisposable
 
         internal bool UsesCudaEfmIppRfFft => CanPrepareCudaEfmIppRfFft && _owner._pipeline.UsesIppComplexFft;
 
-        internal void PrepareCudaIppRfFftOnFirstRead(CancellationToken cancellationToken)
+        internal void PrepareCudaIppRfFftOnFirstRead(
+            CancellationToken cancellationToken, StaleRawFlacFallbackSampleLoader? mappedReadAheadFallback = null)
         {
             _owner.GuardOwnedDomain(this);
-            if ((CudaRfHighPassOverlapToken is null && !CanPrepareCudaEfmIppRfFft)
+            if (((CudaRfHighPassOverlapToken is null || mappedReadAheadFallback is not null)
+                    && !CanPrepareCudaEfmIppRfFft)
                 || CompactCpuPostFmVideo || CompactRfHighPass || ReuseExactLaserDiscS0 || ProjectExactRawDemod
                 || Volatile.Read(ref _owner._hasStartedRead) != 0)
             {
@@ -419,6 +423,7 @@ public sealed class RfBlockStreamDecoder : IDisposable
             }
 
             _cudaIppRfFftPreparationToken = cancellationToken;
+            _cudaMappedReadAheadFallback = mappedReadAheadFallback;
         }
 
         internal RfDecodedSpanLease? Read(Stream stream, long begin, int length)
@@ -432,9 +437,16 @@ public sealed class RfBlockStreamDecoder : IDisposable
                 if (_cudaIppRfFftPreparationToken is { } cancellationToken)
                 {
                     _cudaIppRfFftPreparationToken = null;
+                    StaleRawFlacFallbackSampleLoader? mappedReadAheadFallback = _cudaMappedReadAheadFallback;
+                    _cudaMappedReadAheadFallback = null;
                     if (stream.CanSeek)
                     {
                         _owner._pipeline.EnableCudaIppRfFftIfAvailable(_owner.WorkerThreads, cancellationToken);
+                        if (mappedReadAheadFallback is not null && UsesCudaEfmIppRfFft)
+                        {
+                            // Arm before this stream's first RF load, after the real complement was prepared.
+                            mappedReadAheadFallback.EnableMappedReadAhead(cancellationToken);
+                        }
                     }
                 }
 
