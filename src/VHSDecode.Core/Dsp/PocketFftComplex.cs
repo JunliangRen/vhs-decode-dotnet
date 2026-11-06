@@ -1545,6 +1545,21 @@ public static class PocketFftComplex
 
         private static int OutputIndex(int a, int b, int c, int ido, int l1)
             => a + (ido * (b + (l1 * c)));
+
+        internal bool TryRunInverse256BeforeTerminal(Span<Value> packet, Span<Value> scratch)
+        {
+            System.Diagnostics.Debug.Assert(_length == 256 && packet.Length == 256 && scratch.Length == 256);
+            System.Diagnostics.Debug.Assert(!packet.Overlaps(scratch) && _factors.Length == 3
+                && _factors[0].Radix == 8 && _factors[1].Radix == 8 && _factors[2].Radix == 4);
+            if (!CanUsePass8Avx(packet))
+            {
+                return false;
+            }
+
+            Pass8(32, 1, packet, scratch, _factors[0].Twiddles, forward: false, allowAvx: true);
+            Pass8(4, 8, scratch, packet, _factors[1].Twiddles, forward: false, allowAvx: true);
+            return true;
+        }
     }
 
     private readonly record struct Factor(int Radix, Value[] Twiddles);
@@ -1951,4 +1966,141 @@ public static class PocketFftComplex
                 -Math.Sin((2 * length - x) * angle));
         }
     }
+
+    [ThreadStatic]
+    private static Complex[]? _pairedInverseFirstInputs;
+
+    // A decline leaves the input intact for the ordinary inverse. The final
+    // copy is the first write to the caller's array.
+    internal static bool TryInverseDuccFirstPacketPairs32K(Complex[] values)
+    {
+        ArgumentNullException.ThrowIfNull(values);
+        if (values.Length != 32_768 || !Avx.IsSupported || !OperatingSystem.IsWindows()
+            || RuntimeInformation.ProcessArchitecture != Architecture.X64)
+        {
+            return false;
+        }
+
+        const int firstLength = 256;
+        const int secondLength = 128;
+        DuccPacketPlan plan = DuccPacketPlans.GetOrAdd(
+            values.Length, static length => new DuccPacketPlan(length));
+        System.Diagnostics.Debug.Assert(plan.FirstPacketLength == firstLength && plan.SecondPacketLength == secondLength);
+        Complex[] stage = EnsureCapacity(ref _packetStage, values.Length);
+        Complex[] paired = EnsureCapacity(ref _pairedInverseFirstInputs, 2 * firstLength);
+        Complex[] scratch = EnsureCapacity(ref _packetFirst, firstLength);
+        Span<Value> first = MemoryMarshal.Cast<Complex, Value>(paired.AsSpan(0, firstLength));
+        Span<Value> second = MemoryMarshal.Cast<Complex, Value>(paired.AsSpan(firstLength, firstLength));
+        Span<Value> packetScratch = MemoryMarshal.Cast<Complex, Value>(scratch.AsSpan(0, firstLength));
+        ref Value inputStart = ref MemoryMarshal.GetReference(MemoryMarshal.Cast<Complex, Value>(values.AsSpan()));
+        ref Value stageStart = ref MemoryMarshal.GetReference(MemoryMarshal.Cast<Complex, Value>(stage.AsSpan()));
+        ref Value firstStart = ref MemoryMarshal.GetReference(first);
+        ref Value secondStart = ref MemoryMarshal.GetReference(second);
+        ref Value twiddleStart = ref MemoryMarshal.GetArrayDataReference(plan.Twiddles);
+
+        for (int packet = 0; packet < secondLength; packet += 2)
+        {
+            for (int m = 0; m < firstLength; m++)
+            {
+                Vector256<double> valuesAtM = LoadTwoValues(ref inputStart, packet + (secondLength * m));
+                WriteInverseValue(ref firstStart, m, valuesAtM.GetLower());
+                WriteInverseValue(ref secondStart, m, valuesAtM.GetUpper());
+            }
+
+            if (!plan.FirstPlan.TryRunInverse256BeforeTerminal(first, packetScratch)
+                || !plan.FirstPlan.TryRunInverse256BeforeTerminal(second, packetScratch))
+            {
+                return false;
+            }
+
+            WriteInversePacketPairTerminal(ref firstStart, ref secondStart, ref stageStart, ref twiddleStart, packet);
+        }
+
+        for (int k = 0; k < firstLength; k++)
+        {
+            Span<Complex> row = stage.AsSpan(k * secondLength, secondLength);
+            plan.SecondPlan.TransformPacket(row, row, forward: false);
+        }
+
+        // Same second-pass output permutation as the ordinary inverse.
+        const int tileLength = 16;
+        for (int rowStart = 0; rowStart < secondLength; rowStart += tileLength)
+        {
+            int rowEnd = Math.Min(rowStart + tileLength, secondLength);
+            for (int columnStart = 0; columnStart < firstLength; columnStart += tileLength)
+            {
+                int columnEnd = Math.Min(columnStart + tileLength, firstLength);
+                for (int row = rowStart; row < rowEnd; row++)
+                {
+                    int outputOffset = row * firstLength;
+                    for (int column = columnStart; column < columnEnd; column++)
+                    {
+                        values[outputOffset + column] = stage[column * secondLength + row];
+                    }
+                }
+            }
+        }
+
+        return true;
+    }
+
+    private static void WriteInversePacketPairTerminal(
+        ref Value first, ref Value second, ref Value stage, ref Value twiddles, int packet)
+    {
+        const int radix4Groups = 64;
+        Vector256<double> inverse256 = Vector256.Create(1.0 / 256);
+        for (int k = 0; k < radix4Groups; k++)
+        {
+            int start = 4 * k;
+            Pair(out Vector256<double> t2, out Vector256<double> t1,
+                ReadInversePair(ref first, ref second, start), ReadInversePair(ref first, ref second, start + 2));
+            Pair(out Vector256<double> t3, out Vector256<double> t4,
+                ReadInversePair(ref first, ref second, start + 1), ReadInversePair(ref first, ref second, start + 3));
+            t4 = BackwardPass8Direction.RotateX90(t4);
+            Pair(out Vector256<double> output0, out Vector256<double> output2, t2, t3);
+            Pair(out Vector256<double> output1, out Vector256<double> output3, t1, t4);
+            StoreInversePacketPair(ref stage, ref twiddles, packet, k, Avx.Multiply(output0, inverse256));
+            StoreInversePacketPair(ref stage, ref twiddles, packet, k + radix4Groups, Avx.Multiply(output1, inverse256));
+            StoreInversePacketPair(ref stage, ref twiddles, packet, k + 2 * radix4Groups, Avx.Multiply(output2, inverse256));
+            StoreInversePacketPair(ref stage, ref twiddles, packet, k + 3 * radix4Groups, Avx.Multiply(output3, inverse256));
+        }
+    }
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private static void StoreInversePacketPair(
+        ref Value stage, ref Value twiddles, int packet, int m, Vector256<double> value)
+    {
+        if (m != 0)
+        {
+            int root = (packet * 256) + m;
+            if (packet != 0)
+            {
+                value = BackwardPass8Direction.SpecialMultiply(
+                    value, Vector256.Create(ReadInverseValue(ref twiddles, root), ReadInverseValue(ref twiddles, root + 256)));
+            }
+            else
+            {
+                Vector128<double> upper = value.GetUpper();
+                Value rotated = SpecialMultiply(
+                    new Value(upper.GetElement(0), upper.GetElement(1)),
+                    Unsafe.Add(ref twiddles, root + 256),
+                    forward: false);
+                value = Vector256.Create(value.GetLower(), Vector128.Create(rotated.Real, rotated.Imaginary));
+            }
+        }
+
+        StoreTwoValues(ref stage, packet + (m * 128), value);
+    }
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private static Vector256<double> ReadInversePair(ref Value first, ref Value second, int index)
+        => Vector256.Create(ReadInverseValue(ref first, index), ReadInverseValue(ref second, index));
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private static Vector128<double> ReadInverseValue(ref Value start, int index)
+        => Unsafe.ReadUnaligned<Vector128<double>>(ref Unsafe.As<Value, byte>(ref Unsafe.Add(ref start, index)));
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private static void WriteInverseValue(ref Value start, int index, Vector128<double> value)
+        => Unsafe.WriteUnaligned(ref Unsafe.As<Value, byte>(ref Unsafe.Add(ref start, index)), value);
 }
