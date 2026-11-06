@@ -2,6 +2,7 @@ using System.Collections.Concurrent;
 using System.Numerics;
 using System.Runtime.ExceptionServices;
 using VHSDecode.Core.Dsp;
+using VHSDecode.Core.Rf;
 using VHSDecode.Core.Tbc;
 
 namespace VHSDecode.Core.Decode;
@@ -409,11 +410,15 @@ public sealed class TbcFieldSequenceDecodeEngine
                 },
                 orderedTailOutput: overlapLaserDiscTail ? output : null);
             output.DrainPendingWrites();
+            FfmpegPcm16SampleLoader? mappedInput = _overlapOwnedLaserDiscTail
+                && session.ExecutionOptions.DspBackend == DspBackend.IppFast
+                ? StaleRawFlacFallbackSampleLoader.GetMappedFallback(session.Loader)?.ActiveMappedReadAhead
+                : null;
             if (session.Spec.Name == "cvbs")
             {
                 session.RuntimeReporter?.WriteCvbsCompletion(session.TbcRenderer.CvbsAgcStatistics);
             }
-            else if (!_deferCompletionReport)
+            else if (!_deferCompletionReport && mappedInput is null)
             {
                 session.RuntimeReporter?.WriteCompletionMessage(output.WrittenFieldCount);
             }
@@ -421,6 +426,7 @@ public sealed class TbcFieldSequenceDecodeEngine
             LdTestLdfWriteResult? testLdf = WriteOptionalTestLdf(session, input, summary);
             TbcFieldSequenceDecodeResult result = output.Complete();
             outputCompleted = true;
+            mappedInput?.CompleteMappedReadAhead();
             return testLdf.HasValue
                 ? result with
                 {
