@@ -74,6 +74,47 @@ internal sealed class StaleRawFlacFallbackSampleLoader : IRfSampleLoader, IDispo
         }
     }
 
+    internal bool HasExactFifoWithoutWait()
+    {
+        if (!Monitor.TryEnter(_gate))
+        {
+            return false;
+        }
+
+        try
+        {
+            return !_disposed && _loader.IsValueCreated
+                && _loader.Value is FfmpegPcm16SampleLoader
+                {
+                    SeekMode: FfmpegPcm16SeekMode.MappedIndexedRawFlac,
+                    HasActiveMappedReadAhead: true
+                };
+        }
+        finally
+        {
+            Monitor.Exit(_gate);
+        }
+    }
+
+    internal bool TryConsumeExact(long sample, int readLength, out double[]? result)
+    {
+        result = null;
+        if (!Monitor.TryEnter(_gate))
+        {
+            return false;
+        }
+
+        try
+        {
+            return !_disposed && _loader.IsValueCreated
+                && _loader.Value is FfmpegPcm16SampleLoader ffmpeg && ffmpeg.TryConsumeExact(sample, readLength, out result);
+        }
+        finally
+        {
+            Monitor.Exit(_gate);
+        }
+    }
+
     public double[]? Read(Stream stream, long sample, int readLength)
     {
         lock (_gate)

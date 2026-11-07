@@ -700,6 +700,25 @@ internal sealed class LibsndfilePcm16SampleLoader :
         return GC.AllocateUninitializedArray<double>(length);
     }
 
+    internal bool TryConsumeExact(long sample, int readLength, out double[]? result)
+    {
+        result = null;
+        if (!Monitor.TryEnter(_gate))
+        {
+            return false;
+        }
+
+        try
+        {
+            return !_disposed && _fallbackActive && _fallback is StaleRawFlacFallbackSampleLoader fallback
+                && fallback.TryConsumeExact(sample, readLength, out result);
+        }
+        finally
+        {
+            Monitor.Exit(_gate);
+        }
+    }
+
     private double[]? ReadFallback(
         Stream stream,
         long sample,

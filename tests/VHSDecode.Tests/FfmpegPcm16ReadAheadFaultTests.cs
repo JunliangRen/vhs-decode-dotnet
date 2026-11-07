@@ -101,6 +101,40 @@ public sealed class FfmpegPcm16ReadAheadFaultTests
     }
 
     [Fact]
+    public async Task DeclinedExactConsumePreservesRewindAndEveryBufferedSample()
+    {
+        CancellationToken cancellationToken = TestContext.Current.CancellationToken;
+        var source = new BlockingSource(Pcm(71, -32768, 32767, -9));
+        int opens = 0;
+        using var loader = OpenMapped((_, _) =>
+        {
+            Assert.Equal(1, ++opens);
+            return source;
+        }, rewindSize: 8, seekThreshold: 16);
+        loader.EnableMappedReadAhead(cancellationToken);
+        Assert.Equal(new double[] { 71, -32768 }, loader.Read(Stream.Null, 0, 2));
+        await source.Blocked.Task.WaitAsync(Watchdog, cancellationToken);
+
+        // One sample is in rewind and two are ready in the live ring. The
+        // fourth requested sample cannot be supplied without blocking.
+        var decline = await Task.Run(() =>
+        {
+            bool loaded = loader.TryConsumeExact(1, 4, out double[]? samples);
+            return (loaded, samples);
+        }, cancellationToken).WaitAsync(Watchdog, cancellationToken);
+        Assert.False(decline.loaded);
+        Assert.Null(decline.samples);
+        Assert.False(source.ReadExited.Task.IsCompleted);
+
+        double[]? ordinary = await Task.Run(() => loader.Read(Stream.Null, 1, 2), cancellationToken).WaitAsync(Watchdog, cancellationToken);
+        Assert.Equal(new double[] { -32768, 32767 }, ordinary);
+        Assert.True(loader.TryConsumeExact(2, 2, out double[]? buffered));
+        Assert.Equal(new double[] { 32767, -9 }, buffered);
+        Assert.Equal(new double[] { 71, -32768, 32767, -9 }, loader.Read(Stream.Null, 0, 4));
+        Assert.Equal(1, opens);
+    }
+
+    [Fact]
     public async Task CancellationWakesForegroundWhileBlockedSourceStopsOnClose()
     {
         using var cancellation = new CancellationTokenSource();

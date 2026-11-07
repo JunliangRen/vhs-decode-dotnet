@@ -385,12 +385,28 @@ public sealed class DecodeRunner
                         ownedReader.EnableExactRawDemodMask();
                     }
 
+                    bool overlapExactBufferedCpuTail = false;
+                    if (overlapLaserDiscTail
+                        && dspBackend == DspBackend.Exact && ownedReader is { ReuseExactLaserDiscS0: true }
+                        && OperatingSystem.IsWindows() && RuntimeInformation.ProcessArchitecture == Architecture.X64
+                        && session.RunBounds.RequestedFieldCount > 100
+                        && session.ExecutionOptions.UpstreamBehaviorProfile == UpstreamBehaviorProfile.V040
+                        && session.StreamDecoder.PrefetchBlocks == 0
+                        && session.DropoutOptions is { Enabled: true, Mode: TbcDropoutDetectionMode.LaserDiscDemod }
+                        && HasStandardLaserDiscReadAheadOptions(command)
+                        && StaleRawFlacFallbackSampleLoader.GetMappedFallback(session.Loader) is { } exactMappedFallback)
+                    {
+                        exactMappedFallback.EnableMappedReadAhead(cancellationToken);
+                        overlapExactBufferedCpuTail = true;
+                    }
+
                     TbcFieldSequenceDecodeEngine engine = ownedReader is null
                         ? _engineFactory(cancellationToken)
                         : TbcFieldSequenceDecodeEngine.CreateForOwnedDefaultImmediateLaserDisc(
                             ownedReader, cancellationToken, deferCompletionReport: cudaFastLaserDiscVideoOnly,
                             overlapLaserDiscTail: overlapLaserDiscTail,
-                            completeCudaMappedReadAhead: completeCudaMappedReadAhead);
+                            completeCudaMappedReadAhead: completeCudaMappedReadAhead,
+                            overlapExactBufferedCpuTail: overlapExactBufferedCpuTail);
                     result = engine.TryDecodeAndWrite(session);
                     if (cudaFastLaserDiscVideoOnly && result.Success)
                     {
