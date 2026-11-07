@@ -10,6 +10,7 @@ using System.Diagnostics;
 using System.Globalization;
 using System.Numerics;
 using System.Runtime.InteropServices;
+using System.Runtime.Intrinsics.X86;
 
 namespace VHSDecode.Core.Decode;
 
@@ -65,9 +66,24 @@ public sealed class DecodeRunner
     private static DecodeSession CreatePrivateDefaultRunnerSession(
         ParsedCommand command,
         out RfBlockStreamDecoder.OwnedImmediateLaserDiscFieldReader? ownedReader)
+        => CreatePrivateDefaultRunnerSessionCore(command, isRequestedExact: false, out ownedReader);
+
+    private static DecodeSession CreatePrivateDefaultRunnerSessionCore(
+        ParsedCommand command,
+        bool isRequestedExact,
+        out RfBlockStreamDecoder.OwnedImmediateLaserDiscFieldReader? ownedReader)
     {
         ownedReader = null;
-        DecodeSession session = DecodeSessionFactory.Create(command);
+        bool considerExactRfSix = isRequestedExact && command.Spec == CliSpecs.LaserDisc
+            && command.GetSource("threads") == ParsedOptionSource.ExplicitValue
+            && command.Get<BigInteger>("threads") == 6 && command.Get<BigInteger>("length") > 50
+            && command.GetSource("ignoreleadout") == ParsedOptionSource.Default && !command.Get<bool>("ignoreleadout")
+            && command.InputFile != "-" && OperatingSystem.IsWindows()
+            && RuntimeInformation.ProcessArchitecture == Architecture.X64 && Avx2.IsSupported && Fma.IsSupported
+            && HasStandardLaserDiscReadAheadOptions(command);
+        DecodeSession session = considerExactRfSix
+            ? DecodeSessionFactory.CreateForPrivateExactLaserDiscRfSix(command)
+            : DecodeSessionFactory.Create(command);
         try
         {
             if (session.Spec.Name == "ld"
@@ -226,7 +242,7 @@ public sealed class DecodeRunner
                         ? CreateLaserDiscCudaCpuCommand(command)
                         : command;
                     session = cudaFastLaserDisc || ReferenceEquals(_engineFactory, DefaultEngineFactory)
-                        ? CreatePrivateDefaultRunnerSession(sessionCommand, out ownedReader)
+                        ? CreatePrivateDefaultRunnerSessionCore(sessionCommand, dspBackend == DspBackend.Exact, out ownedReader)
                         : DecodeSessionFactory.Create(sessionCommand);
                     // The original requested backend distinguishes CPU Exact from the CUDA complement.
                     if (ownedReader is not null && command.Spec == CliSpecs.LaserDisc
@@ -401,6 +417,10 @@ public sealed class DecodeRunner
                         if (ownedReader.ProjectExactRawDemod)
                         {
                             session.Pipeline.EnableOwnedExactPostDemodPairedInverse();
+                            if (session.ExecutionOptions.RequestedThreads == 6)
+                            {
+                                ownedReader.EnableExactMappedRfSix(exactMappedFallback);
+                            }
                         }
                     }
 

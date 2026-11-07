@@ -164,6 +164,27 @@ internal sealed class StaleRawFlacFallbackSampleLoader : IRfSampleLoader, IDispo
             && indexedTotal > info.TotalSamples
             && (indexedTotal & uint.MaxValue) == info.TotalSamples;
 
+    internal static bool HasVerifiedWrappedIndex(string filename, RawFlacStreamInfo info, FileStream input)
+    {
+        if (!IsFixedNativeFlac(info))
+        {
+            return false;
+        }
+
+        try
+        {
+            RawFlacFrameIndex? index = RawFlacFrameIndex.ProbeOpened(filename, input, MaximumTailBytes);
+            return index is not null && HasWrappedSampleCount(info, index.TotalSamples)
+                && TryGetTailLength(index, out int tailLength) && HasValidTailChecksumFromStream(input, index, tailLength);
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException
+            or ArgumentException or NotSupportedException or OverflowException)
+        {
+            // Optional admission cannot alter ordinary metadata or fallback routing.
+            return false;
+        }
+    }
+
     private static bool IsFixedNativeFlac(RawFlacStreamInfo info)
         => info.IsNativeRfPcm16
             && info.FixedBlockSize.HasValue
@@ -222,8 +243,7 @@ internal sealed class StaleRawFlacFallbackSampleLoader : IRfSampleLoader, IDispo
 
     internal static bool HasValidTailChecksum(string filename, RawFlacFrameIndex index)
     {
-        long tailLength = index.FileLength - index.LastFrame.ByteOffset;
-        if (tailLength < 2 || tailLength > MaximumTailBytes)
+        if (!TryGetTailLength(index, out int tailLength))
         {
             return false;
         }
@@ -235,27 +255,7 @@ internal sealed class StaleRawFlacFallbackSampleLoader : IRfSampleLoader, IDispo
                 FileMode.Open,
                 FileAccess.Read,
                 FileShare.ReadWrite | FileShare.Delete);
-            if (input.Length != index.FileLength)
-            {
-                return false;
-            }
-
-            var tail = new byte[(int)tailLength];
-            input.Position = index.LastFrame.ByteOffset;
-            input.ReadExactly(tail);
-            // Complete FLAC frames, including their CRC16, have a zero residue.
-            // This checksum screen declines ordinary damaged or partial tails.
-            ushort crc = 0;
-            foreach (byte value in tail)
-            {
-                crc ^= (ushort)(value << 8);
-                for (int bit = 0; bit < 8; bit++)
-                {
-                    crc = (ushort)((crc << 1) ^ ((crc & 0x8000) != 0 ? 0x8005 : 0));
-                }
-            }
-
-            return crc == 0;
+            return HasValidTailChecksumFromStream(input, index, tailLength);
         }
         catch (Exception exception) when (exception is IOException
             or UnauthorizedAccessException
@@ -264,5 +264,43 @@ internal sealed class StaleRawFlacFallbackSampleLoader : IRfSampleLoader, IDispo
         {
             return false;
         }
+    }
+
+    private static bool TryGetTailLength(RawFlacFrameIndex index, out int length)
+    {
+        long available = index.FileLength - index.LastFrame.ByteOffset;
+        if (available is < 2 or > MaximumTailBytes)
+        {
+            length = 0;
+            return false;
+        }
+
+        length = (int)available;
+        return true;
+    }
+
+    private static bool HasValidTailChecksumFromStream(FileStream input, RawFlacFrameIndex index, int tailLength)
+    {
+        if (input.Length != index.FileLength)
+        {
+            return false;
+        }
+
+        var tail = new byte[tailLength];
+        input.Position = index.LastFrame.ByteOffset;
+        input.ReadExactly(tail);
+        // Complete FLAC frames, including their CRC16, have a zero residue.
+        // This checksum screen declines ordinary damaged or partial tails.
+        ushort crc = 0;
+        foreach (byte value in tail)
+        {
+            crc ^= (ushort)(value << 8);
+            for (int bit = 0; bit < 8; bit++)
+            {
+                crc = (ushort)((crc << 1) ^ ((crc & 0x8000) != 0 ? 0x8005 : 0));
+            }
+        }
+
+        return crc == 0;
     }
 }

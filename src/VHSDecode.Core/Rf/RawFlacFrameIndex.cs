@@ -175,6 +175,11 @@ internal sealed class RawFlacFrameIndex
         }
     }
 
+    // A borrowed handle is independent of a current lookup of the path.
+    // Never publish an index from this optional probe to the path cache.
+    internal static RawFlacFrameIndex? ProbeOpened(string path, FileStream input, int maximumMetadataBytes)
+        => CreateFromStream(path, input, maximumMetadataBytes);
+
     private static RawFlacFrameIndex? Create(string path)
     {
         using var input = new FileStream(
@@ -184,7 +189,12 @@ internal sealed class RawFlacFrameIndex
             FileShare.ReadWrite | FileShare.Delete,
             bufferSize: 1024 * 1024,
             FileOptions.RandomAccess);
-        if (!TryReadMetadata(input, out FlacStreamInfo streamInfo, out byte[] metadata)
+        return CreateFromStream(path, input, int.MaxValue);
+    }
+
+    private static RawFlacFrameIndex? CreateFromStream(string path, FileStream input, int maximumMetadataBytes)
+    {
+        if (!TryReadMetadata(input, out FlacStreamInfo streamInfo, out byte[] metadata, maximumMetadataBytes)
             || streamInfo.MinimumBlockSize != streamInfo.MaximumBlockSize
             || streamInfo.SampleRate != FfmpegPcm16SampleLoader.ContainerAudioSampleRateHz
             || streamInfo.Channels != 1
@@ -340,7 +350,8 @@ internal sealed class RawFlacFrameIndex
     private static bool TryReadMetadata(
         FileStream input,
         out FlacStreamInfo info,
-        out byte[] metadata)
+        out byte[] metadata,
+        int maximumMetadataBytes)
     {
         info = default;
         metadata = [];
@@ -389,7 +400,8 @@ internal sealed class RawFlacFrameIndex
 
             isLast = (blockHeader[0] & 0x80) != 0;
             length = (blockHeader[1] << 16) | (blockHeader[2] << 8) | blockHeader[3];
-            if (length < 0 || input.Position > input.Length - length)
+            if (length < 0 || input.Position > input.Length - length
+                || input.Position > maximumMetadataBytes - length)
             {
                 return false;
             }
@@ -397,7 +409,7 @@ internal sealed class RawFlacFrameIndex
             input.Position += length;
         }
 
-        if (input.Position > int.MaxValue)
+        if (input.Position > maximumMetadataBytes)
         {
             return false;
         }

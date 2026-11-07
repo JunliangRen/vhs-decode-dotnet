@@ -44,7 +44,12 @@ internal readonly record struct RawFlacStreamInfo(
             && !HasSeekTable;
 
     internal static bool TryRead(string path, out RawFlacStreamInfo info)
+        => TryReadWithWrappedProbe(path, verifyWrappedInput: false, out info, out _);
+
+    internal static bool TryReadWithWrappedProbe(
+        string path, bool verifyWrappedInput, out RawFlacStreamInfo info, out bool verifiedWrappedInput)
     {
+        verifiedWrappedInput = false;
         try
         {
             using var input = new FileStream(
@@ -52,7 +57,10 @@ internal readonly record struct RawFlacStreamInfo(
                 FileMode.Open,
                 FileAccess.Read,
                 FileShare.ReadWrite | FileShare.Delete);
-            return TryRead(input, out info);
+            bool read = TryRead(input, out info);
+            verifiedWrappedInput = read && verifyWrappedInput
+                && StaleRawFlacFallbackSampleLoader.HasVerifiedWrappedIndex(path, info, input);
+            return read;
         }
         catch (Exception ex) when (ex is IOException
             or UnauthorizedAccessException

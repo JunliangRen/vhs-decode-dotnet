@@ -170,6 +170,10 @@ public static class DecodeSessionFactory
             enforceVhsFieldClass: true,
             pinnedApproxProviderSelection: null);
 
+    internal static DecodeSession CreateForPrivateExactLaserDiscRfSix(ParsedCommand command)
+        => Create(command, DefaultBlockLength, enforceVhsFieldClass: true,
+            pinnedApproxProviderSelection: null, verifyExactLaserDiscRfSixInput: true);
+
     internal static DecodeSession CreateForPreview(
         ParsedCommand command,
         ApproxProviderSelection? pinnedApproxProviderSelection,
@@ -193,7 +197,8 @@ public static class DecodeSessionFactory
         ParsedCommand command,
         int blockLength,
         bool enforceVhsFieldClass,
-        ApproxProviderSelection? pinnedApproxProviderSelection)
+        ApproxProviderSelection? pinnedApproxProviderSelection,
+        bool verifyExactLaserDiscRfSixInput = false)
     {
         bool previewServer = IsPreviewServer(command);
         if (command.Positionals.Count < (previewServer ? 1 : 2))
@@ -294,7 +299,7 @@ public static class DecodeSessionFactory
                 approxResampler,
                 approxPrecision),
             "cvbs" => CreateCvbs(command, blockLength),
-            "ld" => CreateLaserDisc(command, blockLength),
+            "ld" => CreateLaserDisc(command, blockLength, verifyExactLaserDiscRfSixInput),
             _ => throw new NotSupportedException($"Unsupported decode command '{command.Spec.Name}'.")
         };
     }
@@ -405,7 +410,8 @@ public static class DecodeSessionFactory
         return Build(command, system, parameters, FrequencyParser.DddMHz, blockLength, blockCut: 1024, blockCutEnd: 1024, loader);
     }
 
-    private static DecodeSession CreateLaserDisc(ParsedCommand command, int blockLength)
+    private static DecodeSession CreateLaserDisc(
+        ParsedCommand command, int blockLength, bool verifyExactLaserDiscRfSixInput)
     {
         bool pal = command.Get<bool>("pal");
         bool ntsc = command.Get<bool>("ntsc");
@@ -421,17 +427,19 @@ public static class DecodeSessionFactory
         }
 
         double? inputFrequencyMHz = NullableDouble(command, "inputfreq");
-        IRfSampleLoader loader = CreateLoader(
-            command.InputFile,
-            inputFrequencyMHz.HasValue,
-            inputFrequencyMHz,
-            preferPyAvMappedRawFlacSeeking: IsPreviewServer(command),
-            fastContainerSeeking: IsPreviewServer(command),
-            preferIndexedStaleRawFlacFallback: true);
+        bool verifiedWrappedInput = false;
+        IRfSampleLoader loader = verifyExactLaserDiscRfSixInput && !pal && !inputFrequencyMHz.HasValue
+            ? RfLoaderFactory.CreateNativeWithWrappedProbe(command.InputFile, verifyWrappedInput: true, out verifiedWrappedInput,
+                preferPyAvMappedRawFlacSeeking: false, preferIndexedStaleRawFlacFallback: true)
+            : CreateLoader(command.InputFile, inputFrequencyMHz.HasValue, inputFrequencyMHz,
+                preferPyAvMappedRawFlacSeeking: IsPreviewServer(command),
+                fastContainerSeeking: IsPreviewServer(command),
+                preferIndexedStaleRawFlacFallback: true);
         string system = pal ? "PAL" : "NTSC";
         FormatParameterSet parameters = FormatCatalog.Default.GetLaserDiscParameters(system, command.Get<bool>("lowband"));
         parameters = ApplyLaserDiscOverrides(parameters, command);
-        return Build(command, system, parameters, FrequencyParser.DddMHz, blockLength, blockCut: 1024, blockCutEnd: 32, loader);
+        return Build(command, system, parameters, FrequencyParser.DddMHz, blockLength, blockCut: 1024, blockCutEnd: 32,
+            loader, verifiedExactLaserDiscRfSixInput: verifiedWrappedInput);
     }
 
     private static DecodeSession Build(
@@ -446,7 +454,8 @@ public static class DecodeSessionFactory
         int sourceSamplesPerDecodeSample = 1,
         ApproxProviderSelection? approxProviderSelection = null,
         ApproxResampler? approxResampler = null,
-        ApproxPrecision? approxPrecision = null)
+        ApproxPrecision? approxPrecision = null,
+        bool verifiedExactLaserDiscRfSixInput = false)
     {
         double sampleRateHz = sampleRateMHz * 1_000_000.0;
         bool suppressFileOutputs = IsPreviewServer(command);
@@ -542,6 +551,18 @@ public static class DecodeSessionFactory
             throw new NotSupportedException(
                 "The aggressive Approx v6 contract cannot use the requested chroma options; "
                 + "no partial v6-to-v5 fallback was performed.");
+        }
+
+        // Keep the tuned downstream budget for the private wrapped-input route.
+        // The requested six is retained for the owned RF compute wave.
+        if (verifiedExactLaserDiscRfSixInput && blockLength == 32_768 && blockLength - blockCut - blockCutEnd == 31_712
+            && sampleRateHz == 40_000_000.0 && system == "NTSC" && !suppressFileOutputs && chromaOptions is null
+            && executionOptions is { DspBackend: DspBackend.Exact, RequestedThreads: 6, WorkerThreads: 6,
+                UpstreamBehaviorProfile: UpstreamBehaviorProfile.V040 }
+            && pipeline.CanProjectOwnedExactLdRawDemod
+            && StaleRawFlacFallbackSampleLoader.GetMappedFallback(loader) is not null)
+        {
+            executionOptions = executionOptions with { WorkerThreads = 4 };
         }
 
         var streamDecoder = new RfBlockStreamDecoder(
