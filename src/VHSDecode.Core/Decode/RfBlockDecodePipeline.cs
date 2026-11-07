@@ -232,6 +232,9 @@ public sealed class RfBlockDecodePipeline : IDisposable
         && _filterOptions.SharpnessEq is null
         && _filterOptions.ChromaTrap is null;
 
+    internal void EnableOwnedExactPostDemodPairedInverse()
+        => _demodulator.EnableOwnedExactPostDemodPairedInverse();
+
     private bool HasOwnedLaserDiscPostFmVideoGeometry =>
         _demodulator.SampleRateHz == 40_000_000.0
         && Avx2.IsSupported && Fma.IsSupported
