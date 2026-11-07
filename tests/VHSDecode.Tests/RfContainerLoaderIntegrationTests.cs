@@ -335,15 +335,17 @@ public sealed class RfContainerLoaderIntegrationTests
         out VHSDecode.Core.Decode.RfBlockStreamDecoder.OwnedImmediateLaserDiscFieldReader? reader);
 
     [Theory(DisplayName = "Explicit Exact LD six retains its request and changes only the admitted downstream worker profile")]
-    [InlineData("wrapped", 6, null, true)]
-    [InlineData("wrapped", 4, null, false)]
-    [InlineData("wrapped", null, null, false)]
-    [InlineData("wrapped", 6, "--noEFM", false)]
-    [InlineData("wrapped", 6, "--ignoreleadout", false)]
-    [InlineData("native", 6, null, false)]
-    [InlineData("raw", 6, null, false)]
+    [InlineData("wrapped", 6, null, null, true)]
+    [InlineData("wrapped", 4, null, null, false)]
+    [InlineData("wrapped", null, null, null, false)]
+    [InlineData("wrapped", 6, "--noEFM", null, false)]
+    [InlineData("wrapped", 6, "--ignoreleadout", null, false)]
+    [InlineData("wrapped", 6, null, "missing", false)]
+    [InlineData("wrapped", 6, null, "invalid", false)]
+    [InlineData("native", 6, null, null, false)]
+    [InlineData("raw", 6, null, null, false)]
     public void ExactRfSixPrivateFactoryRetainsUnsupportedWorkerBudgets(
-        string inputKind, int? threads, string? alteredOption, bool structurallyEligible)
+        string inputKind, int? threads, string? alteredOption, string? manualLeadOut, bool structurallyEligible)
     {
         string directory = CreateTestDirectory();
         try
@@ -368,6 +370,21 @@ public sealed class RfContainerLoaderIntegrationTests
             argv.AddRange([path, Path.Combine(directory, "out")]);
             var command = new VHSDecode.Core.CommandLine.CommandLineParser().Parse(
                 VHSDecode.Core.CommandLine.CliSpecs.LaserDisc, argv);
+            if (manualLeadOut is not null)
+            {
+                var values = new Dictionary<string, object?>(command.Values, StringComparer.Ordinal);
+                if (manualLeadOut == "missing")
+                {
+                    values.Remove("ignoreleadout");
+                }
+                else
+                {
+                    values["ignoreleadout"] = manualLeadOut;
+                }
+
+                command = new VHSDecode.Core.CommandLine.ParsedCommand(
+                    command.Spec, values, [.. command.Positionals], command.ProgramName, command.OptionSources);
+            }
 
             int requested = threads ?? 4;
             bool supported = OperatingSystem.IsWindows()

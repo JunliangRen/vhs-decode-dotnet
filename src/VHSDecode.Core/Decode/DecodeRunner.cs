@@ -77,7 +77,8 @@ public sealed class DecodeRunner
         bool considerExactRfSix = isRequestedExact && command.Spec == CliSpecs.LaserDisc
             && command.GetSource("threads") == ParsedOptionSource.ExplicitValue
             && command.Get<BigInteger>("threads") == 6 && command.Get<BigInteger>("length") > 50
-            && command.GetSource("ignoreleadout") == ParsedOptionSource.Default && !command.Get<bool>("ignoreleadout")
+            && command.GetSource("ignoreleadout") == ParsedOptionSource.Default
+            && command.Values.TryGetValue("ignoreleadout", out object? ignoreLeadOut) && ignoreLeadOut is false
             && command.InputFile != "-" && OperatingSystem.IsWindows()
             && RuntimeInformation.ProcessArchitecture == Architecture.X64 && Avx2.IsSupported && Fma.IsSupported
             && HasStandardLaserDiscReadAheadOptions(command);
