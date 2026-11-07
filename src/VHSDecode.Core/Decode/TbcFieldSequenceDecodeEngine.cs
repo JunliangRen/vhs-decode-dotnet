@@ -49,6 +49,7 @@ public sealed class TbcFieldSequenceDecodeEngine
     private readonly bool _usesSessionReader;
     private readonly bool _overlapOwnedLaserDiscTail;
     private readonly bool _completeCudaMappedReadAhead;
+    private readonly bool _overlapExactBufferedCpuTail;
 
     private sealed class CvbsPrefetchSlot : IDisposable
     {
@@ -300,12 +301,14 @@ public sealed class TbcFieldSequenceDecodeEngine
         CancellationToken cancellationToken,
         bool deferCompletionReport,
         bool overlapLaserDiscTail,
-        bool completeCudaMappedReadAhead)
+        bool completeCudaMappedReadAhead,
+        bool overlapExactBufferedCpuTail)
         : this(cancellationToken: cancellationToken)
     {
         _deferCompletionReport = deferCompletionReport;
         _overlapOwnedLaserDiscTail = overlapLaserDiscTail;
         _completeCudaMappedReadAhead = completeCudaMappedReadAhead;
+        _overlapExactBufferedCpuTail = overlapExactBufferedCpuTail;
         // Preserve _usesSessionReader=true and every default writer/option.
         // Only this read closure receives the private cache-domain capability.
         _readField = (session, input, begin, length, number, _, overlapLaserDiscRenderDropout) =>
@@ -318,8 +321,10 @@ public sealed class TbcFieldSequenceDecodeEngine
         CancellationToken cancellationToken,
         bool deferCompletionReport = false,
         bool overlapLaserDiscTail = false,
-        bool completeCudaMappedReadAhead = false)
-        => new(ownedReader, cancellationToken, deferCompletionReport, overlapLaserDiscTail, completeCudaMappedReadAhead);
+        bool completeCudaMappedReadAhead = false,
+        bool overlapExactBufferedCpuTail = false)
+        => new(ownedReader, cancellationToken, deferCompletionReport, overlapLaserDiscTail,
+            completeCudaMappedReadAhead, overlapExactBufferedCpuTail);
 
     public int ExtraReadLines { get; }
 
@@ -414,7 +419,8 @@ public sealed class TbcFieldSequenceDecodeEngine
                 },
                 orderedTailOutput: overlapLaserDiscTail ? output : null);
             output.DrainPendingWrites();
-            FfmpegPcm16SampleLoader? mappedInput = _completeCudaMappedReadAhead
+            bool closeMappedInputBeforeCompletion = _completeCudaMappedReadAhead || _overlapExactBufferedCpuTail;
+            FfmpegPcm16SampleLoader? mappedInput = closeMappedInputBeforeCompletion
                 || (_overlapOwnedLaserDiscTail && session.ExecutionOptions.DspBackend == DspBackend.IppFast)
                 ? StaleRawFlacFallbackSampleLoader.GetMappedFallback(session.Loader)?.ActiveMappedReadAhead
                 : null;
@@ -431,7 +437,7 @@ public sealed class TbcFieldSequenceDecodeEngine
             TbcFieldSequenceDecodeResult result = output.Complete();
             outputCompleted = true;
             mappedInput?.CompleteMappedReadAhead();
-            if (_completeCudaMappedReadAhead && mappedInput is not null && result.Success)
+            if (closeMappedInputBeforeCompletion && mappedInput is not null && result.Success)
             {
                 // Report once, after the real close and before the caller's CUDA block diagnostics.
                 session.RuntimeReporter?.WriteCompletionMessage(output.WrittenFieldCount);
@@ -574,6 +580,9 @@ public sealed class TbcFieldSequenceDecodeEngine
         bool allowSecondFieldTailRead = overlapLaserDiscRenderDropout && _usesSessionReader
             && !retainFields && stopRequested is null
             && session.ExecutionOptions.DspBackend == DspBackend.IppFast;
+        bool allowExactBufferedCpuTail = _overlapExactBufferedCpuTail && overlapLaserDiscRenderDropout
+            && _usesSessionReader && !retainFields && stopRequested is null && maxFields is null
+            && session.ExecutionOptions.DspBackend == DspBackend.Exact;
         BigInteger requestedFields = maxFields.HasValue
             ? new BigInteger(maxFields.Value)
             : session.RunBounds.RequestedFieldCount;
@@ -604,6 +613,7 @@ public sealed class TbcFieldSequenceDecodeEngine
         bool laserDiscLeadIn = false;
         bool laserDiscLeadOut = false;
         (TbcDecodedField Field, int PriorFields, LaserDiscVbiInterpretation Vbi)? pendingLaserDiscFrameStatus = null;
+        bool pendingExactBufferedCpuTail = false;
         bool haveFirstTapeField = false;
         string? pendingTapeFrameStatus = null;
         IReadOnlyList<(string Level, string Message)>? pendingTapeFieldOrderDiagnostics = null;
@@ -724,6 +734,7 @@ public sealed class TbcFieldSequenceDecodeEngine
             }
 
             pendingLaserDiscFrameStatus = null;
+            pendingExactBufferedCpuTail = false;
             orderedTailOutput!.WaitForLaserDiscTail();
             int rawFrame = ComputeLaserDiscRawFileFrame(session, pending.Field);
             PublishLaserDiscFrameStatus(pending.PriorFields, rawFrame, pending.Vbi);
@@ -767,13 +778,15 @@ public sealed class TbcFieldSequenceDecodeEngine
                 }
                 else if (firstLaserDiscField is not null)
                 {
-                    if (allowSecondFieldTailRead && writes.Count == 1 && writes[0].Decision.DecodeFaults == 0
+                    if ((allowSecondFieldTailRead || allowExactBufferedCpuTail)
+                        && writes.Count == 1 && writes[0].Decision.DecodeFaults == 0
                         && !_cancellationToken.IsCancellationRequested && !laserDiscLeadOut
                         && !TbcOutputMetadataWriter.ShouldWriteRecoverySnapshot(writePlanner.WrittenFieldCount)
                         && (maxFields.HasValue ? decodedFieldCount < requestedFields
                             : writePlanner.WrittenFieldCount < requestedFields)
-                        && StaleRawFlacFallbackSampleLoader.GetMappedFallback(session.Loader)
-                            ?.ActiveMappedReadAhead is not null)
+                        && (allowExactBufferedCpuTail
+                            ? StaleRawFlacFallbackSampleLoader.GetMappedFallback(session.Loader)?.HasExactFifoWithoutWait() == true
+                            : StaleRawFlacFallbackSampleLoader.GetMappedFallback(session.Loader)?.ActiveMappedReadAhead is not null))
                     {
                         // Interpret owned VBI values without changing frame or MTF state.
                         LaserDiscVbiInterpretation interpretation =
@@ -781,6 +794,7 @@ public sealed class TbcFieldSequenceDecodeEngine
                         if (!interpretation.LeadOut)
                         {
                             pendingLaserDiscFrameStatus = (completedField, fieldsWrittenBeforeAdd, interpretation);
+                            pendingExactBufferedCpuTail = allowExactBufferedCpuTail;
                             return writePlanner.LastDecision;
                         }
                     }
@@ -827,6 +841,7 @@ public sealed class TbcFieldSequenceDecodeEngine
             long? vhsSpeculativeNextBegin = null;
             TbcFieldDecodeState? fieldState;
             LaserDiscTailRead? overlappedRead = null;
+            ExactBufferedCpuTail.Scope? exactFifo = null;
             // A completed writer fault must escape before the finally can publish status.
             bool readBeforeFrameStatus =
                 hasPendingFrameStatus && orderedTailOutput!.ShouldReadWhileLaserDiscTailPending();
@@ -836,11 +851,14 @@ public sealed class TbcFieldSequenceDecodeEngine
                 if (readBeforeFrameStatus
                     || (!hasPendingFrameStatus && orderedTailOutput?.ShouldReadWhileLaserDiscTailPending() == true))
                 {
+                    using var exactScope = exactFifo = readBeforeFrameStatus && pendingExactBufferedCpuTail
+                        ? ExactBufferedCpuTail.Open(orderedTailOutput!.ShouldReadWhileLaserDiscTailPending,
+                            FlushPendingLaserDiscFrameStatus, _cancellationToken)
+                        : null;
                     overlappedRead = ReadFieldWhileLaserDiscTailPending(
                         session, input, begin, readLength, decodedFieldCount,
                         laserDiscSpeculativeWrittenFieldCount, overlapLaserDiscRenderDropout);
                     fieldOutputOwner.Replace(overlappedRead.Field);
-
                     if (!hasPendingFrameStatus)
                     {
                         // Keep a previous writer fault outside the read exception handlers.
@@ -852,6 +870,8 @@ public sealed class TbcFieldSequenceDecodeEngine
             {
                 if (hasPendingFrameStatus)
                 {
+                    // An earlier writer/status failure can have crossed the nested read wrapper.
+                    exactFifo?.PriorFailure?.Throw();
                     // Commit and report the prior field before the next read is accepted.
                     FlushPendingLaserDiscFrameStatus();
                 }

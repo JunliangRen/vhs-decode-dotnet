@@ -90,14 +90,48 @@ internal sealed class BoundedPcmReadAheadStream : Stream
             }
 
             int length = Math.Min(destination.Length, _count);
-            int first = Math.Min(length, _buffer.Length - _head);
-            _buffer.AsSpan(_head, first).CopyTo(destination);
-            _buffer.AsSpan(0, length - first).CopyTo(destination[first..]);
-            _head = (_head + length) % _buffer.Length;
-            _count -= length;
-            Monitor.PulseAll(_gate);
+            Consume(destination[..length]);
             return length;
         }
+    }
+
+    internal bool TryConsumeExact(Span<byte> destination)
+    {
+        if (!Monitor.TryEnter(_gate))
+        {
+            return false;
+        }
+
+        try
+        {
+            if (Volatile.Read(ref _disposed) != 0 || _stopping || _ended || _failure is not null
+                || _token.IsCancellationRequested || _count < destination.Length)
+            {
+                return false;
+            }
+
+            if (!destination.IsEmpty)
+            {
+                Consume(destination);
+            }
+
+            return true;
+        }
+        finally
+        {
+            Monitor.Exit(_gate);
+        }
+    }
+
+    private void Consume(Span<byte> destination)
+    {
+        int length = destination.Length;
+        int first = Math.Min(length, _buffer.Length - _head);
+        _buffer.AsSpan(_head, first).CopyTo(destination);
+        _buffer.AsSpan(0, length - first).CopyTo(destination[first..]);
+        _head = (_head + length) % _buffer.Length;
+        _count -= length;
+        Monitor.PulseAll(_gate);
     }
 
     internal void RequestStop()

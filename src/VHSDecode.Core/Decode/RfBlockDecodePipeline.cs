@@ -351,6 +351,7 @@ public sealed class RfBlockDecodePipeline : IDisposable
 
     internal double[]? LoadBlockInput(Stream stream, long sample, int blockLength)
     {
+        ExactBufferedCpuTail.Fence();
         double[]? loadedInput = _loader.Read(stream, sample, blockLength);
         return loadedInput is null
             ? null
@@ -362,9 +363,23 @@ public sealed class RfBlockDecodePipeline : IDisposable
         long sample,
         int blockLength,
         bool parallelDecode = false)
-        => !CanReuseStreamBlockInput(parallelDecode)
+    {
+        bool reuse = CanReuseStreamBlockInput(parallelDecode);
+        if (ExactBufferedCpuTail.IsActive)
+        {
+            if (!reuse && _inputProcessor is null
+                && ExactBufferedCpuTail.TryLoad(_loader, sample, blockLength, out double[]? input))
+            {
+                return input;
+            }
+
+            ExactBufferedCpuTail.Fence();
+        }
+
+        return !reuse
             ? LoadBlockInput(stream, sample, blockLength)
             : _reusableStreamInputLoader!.ReadReusable(stream, sample, blockLength);
+    }
 
     internal void ReturnStreamBlockInput(double[] input, bool parallelDecode = false)
     {

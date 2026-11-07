@@ -1138,6 +1138,43 @@ public sealed class FfmpegPcm16SampleLoader : IRfSampleLoader, IDisposable
 
     internal bool HasActiveMappedReadAhead => _readAheadOutput is not null;
 
+    internal bool TryConsumeExact(long sample, int readLength, out double[]? result)
+    {
+        result = null;
+        if (_disposed || _seekMode != FfmpegPcm16SeekMode.MappedIndexedRawFlac || _readAheadClose is not null
+            || _readAheadOutput is not { } ring || !ReferenceEquals(_output, ring)
+            || sample < 0 || readLength is <= 0 or > 32_768
+            || sample > (long.MaxValue - readLength * sizeof(short)) / sizeof(short))
+        {
+            return false;
+        }
+
+        long start = sample * sizeof(short);
+        long rewindStart = _positionBytes - _rewindCount;
+        if (start < rewindStart || start > _positionBytes)
+        {
+            return false;
+        }
+
+        byte[] data = GC.AllocateUninitializedArray<byte>(readLength * sizeof(short));
+        int rewound = (int)Math.Min(data.Length, _positionBytes - start);
+        if (rewound != 0)
+        {
+            CopyRewind((int)(start - rewindStart), data.AsSpan(0, rewound));
+        }
+
+        Span<byte> fresh = data.AsSpan(rewound);
+        if (!ring.TryConsumeExact(fresh))
+        {
+            return false;
+        }
+
+        _positionBytes += fresh.Length;
+        AppendRewind(fresh);
+        result = DecodePcm16(data, readLength);
+        return true;
+    }
+
     internal void CompleteMappedReadAhead()
     {
         if (_readAheadOutput is not { } output)
