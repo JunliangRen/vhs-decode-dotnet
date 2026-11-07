@@ -398,6 +398,10 @@ public sealed class DecodeRunner
                     {
                         exactMappedFallback.EnableMappedReadAhead(cancellationToken);
                         overlapExactBufferedCpuTail = true;
+                        if (ownedReader.ProjectExactRawDemod)
+                        {
+                            session.Pipeline.EnableOwnedExactPostDemodPairedInverse();
+                        }
                     }
 
                     TbcFieldSequenceDecodeEngine engine = ownedReader is null

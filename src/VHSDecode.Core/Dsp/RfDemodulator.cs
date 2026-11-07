@@ -42,6 +42,7 @@ public sealed class RfDemodulator : IDisposable
     private int _subDeemphasisFilterPlanBuildCount;
     private readonly VhsRealFftWorkspacePool _vhsRealFftWorkspacePool;
     private IppComplexFft64Pool? _ippComplexFftPool;
+    private bool _pairOwnedExactPostDemodInverse;
     private readonly Lazy<VhsInverseCompanionScheduler?>? _vhsInverseCompanionScheduler;
     private readonly int _vhsInverseCompanionWorkerThreads;
     private readonly bool _parallelizeVhsInverseStaging;
@@ -303,6 +304,18 @@ public sealed class RfDemodulator : IDisposable
         var output = new Complex[input.Length];
         _ippComplexFftPool.Inverse(input, output);
         return output;
+    }
+
+    // Set by the standard private Exact runner before its first owned read.
+    internal void EnableOwnedExactPostDemodPairedInverse()
+        => _pairOwnedExactPostDemodInverse = true;
+
+    private void InversePostDemodInPlace(Complex[] values, bool pairPackets)
+    {
+        if (!pairPackets || !PocketFftComplex.TryInverseDuccFirstPacketPairs32K(values))
+        {
+            InverseLaserDiscFullSpectrumInPlace(values);
+        }
     }
 
     internal void InverseLaserDiscFullSpectrumInPlace(
@@ -1322,6 +1335,13 @@ public sealed class RfDemodulator : IDisposable
                 VhsWeakRfSignal: vhsWeakRfSignal);
         }
 
+        bool pairOwnedPostDemodInverse = _pairOwnedExactPostDemodInverse
+            && projectRawDemod && DspBackend == DspBackend.Exact && _ippComplexFftPool is null
+            && input.Length == LaserDiscEfmScratchHandoff.BlockLength && !useVhsRealFft && !compactPostFmVideo
+            && nonlinearDeemphasis is null && subDeemphasis is null && videoLowPassOffset == 32
+            && referenceFilters is { VideoBurst: { Length: LaserDiscEfmScratchHandoff.BlockLength },
+                VideoBurstOffset: 40, VideoPilot: null };
+
         ReadOnlySpan<double> demodVideoSource = demodRaw;
         int demodVideoLength = demodRawFloat32?.Length
             ?? demodVideoSource.Length;
@@ -1436,7 +1456,7 @@ public sealed class RfDemodulator : IDisposable
             Complex[] videoComplex;
             if (nonlinearDeemphasis is null && subDeemphasis is null)
             {
-                InverseLaserDiscFullSpectrumInPlace(videoSpectrum);
+                InversePostDemodInPlace(videoSpectrum, pairOwnedPostDemodInverse);
                 videoComplex = videoSpectrum;
             }
             else
@@ -1542,7 +1562,7 @@ public sealed class RfDemodulator : IDisposable
         {
             Complex[] videoLowPassSpectrum = videoSpectrum!;
             ApplyFrequencyFilter(demodSpectrum!, videoLowPassFilter, videoLowPassSpectrum);
-            InverseLaserDiscFullSpectrumInPlace(videoLowPassSpectrum);
+            InversePostDemodInPlace(videoLowPassSpectrum, pairOwnedPostDemodInverse);
             if (compactPostFmVideo)
             {
                 videoLowPassFloat32 = LdCompactVideoExtractor.Create(videoLowPassSpectrum);
@@ -1608,7 +1628,8 @@ public sealed class RfDemodulator : IDisposable
                     demodSpectrum!,
                     referenceFilters?.VideoBurst,
                     referenceFilters?.VideoBurstOffset ?? 0,
-                    videoSpectrum!);
+                    videoSpectrum!,
+                    pairOwnedPostDemodInverse);
         }
 
         double[]? videoPilot = useVhsRealFft
@@ -2793,7 +2814,8 @@ public sealed class RfDemodulator : IDisposable
         ReadOnlySpan<Complex> spectrum,
         Complex[]? filter,
         int offset,
-        Complex[] filteredSpectrum)
+        Complex[] filteredSpectrum,
+        bool pairPackets = false)
     {
         if (filter is null)
         {
@@ -2801,7 +2823,7 @@ public sealed class RfDemodulator : IDisposable
         }
 
         ApplyFrequencyFilter(spectrum, filter, filteredSpectrum);
-        InverseLaserDiscFullSpectrumInPlace(filteredSpectrum);
+        InversePostDemodInPlace(filteredSpectrum, pairPackets);
         double[] output = ExtractReal(filteredSpectrum);
 
         if (offset != 0)
