@@ -199,6 +199,223 @@ public sealed class RfContainerLoaderIntegrationTests
         }
     }
 
+    [Fact(DisplayName = "Borrowed FLAC index neither reads nor seeds the path cache")]
+    public void BorrowedFlacIndexUsesOnlyItsOpenHandle()
+    {
+        string directory = CreateTestDirectory();
+        try
+        {
+            string path = Path.Combine(directory, "same-name.ldf");
+            string moved = Path.Combine(directory, "old.ldf");
+            byte[] previous = BuildConstantFlacWithFinalZeroCrcByte();
+            byte[] replacement = previous.ToArray();
+            // The STREAMINFO MD5 distinguishes the metadata without changing frame offsets.
+            replacement[26] ^= 0x5a;
+            File.WriteAllBytes(path, previous);
+            DateTime timestamp = File.GetLastWriteTimeUtc(path);
+            using var input = new FileStream(path, FileMode.Open, FileAccess.Read,
+                FileShare.ReadWrite | FileShare.Delete);
+            File.Move(path, moved);
+            File.WriteAllBytes(path, replacement);
+            File.SetLastWriteTimeUtc(path, timestamp);
+            Assert.Equal(timestamp, File.GetLastWriteTimeUtc(path));
+            Assert.Equal(input.Length, new FileInfo(path).Length);
+
+            const int metadataBytes = 42;
+            Assert.Null(RawFlacFrameIndex.ProbeOpened(path, input, metadataBytes - 1));
+            var borrowed = Assert.IsType<RawFlacFrameIndex>(RawFlacFrameIndex.ProbeOpened(path, input, metadataBytes));
+            Assert.Equal(previous[..metadataBytes], borrowed.Metadata);
+            Assert.True(RawFlacFrameIndex.TryOpen(path, out RawFlacFrameIndex? byPath));
+            Assert.NotNull(byPath);
+            Assert.Equal(replacement[..metadataBytes], byPath.Metadata);
+            var borrowedAgain = Assert.IsType<RawFlacFrameIndex>(RawFlacFrameIndex.ProbeOpened(path, input, metadataBytes));
+            Assert.Equal(previous[..metadataBytes], borrowedAgain.Metadata);
+            Assert.True(RawFlacFrameIndex.TryOpen(path, out RawFlacFrameIndex? reused));
+            Assert.Same(byPath, reused);
+            Assert.True(input.CanRead);
+        }
+        finally
+        {
+            Directory.Delete(directory, recursive: true);
+        }
+    }
+
+    [Fact(DisplayName = "Structurally wrapped FLAC with a truncated zero-CRC byte keeps the generic reader")]
+    public void StructurallyWrappedFlacCanStillDeclineMappedFallback()
+    {
+        Assert.SkipUnless(CommandIsAvailable("ffmpeg") && CommandIsAvailable("ffprobe"),
+            "ffmpeg and ffprobe must be available on PATH.");
+        string directory = CreateTestDirectory();
+        try
+        {
+            string path = Path.Combine(directory, "wrapped-missing-zero-crc.ldf");
+            File.WriteAllBytes(path, BuildWrappedMissingZeroCrcFixture());
+            Assert.True(RawFlacStreamInfo.TryReadWithWrappedProbe(path, verifyWrappedInput: true,
+                out RawFlacStreamInfo info, out bool verifiedWrappedInput));
+            Assert.True(verifiedWrappedInput);
+            Assert.Equal<long?>(6_144L, info.TotalSamples);
+            Assert.True(RawFlacFrameIndex.TryOpen(path, out RawFlacFrameIndex? index));
+            Assert.NotNull(index);
+            Assert.Equal(4_294_973_440L, index.TotalSamples);
+            Assert.True(StaleRawFlacFallbackSampleLoader.HasWrappedSampleCount(info, index.TotalSamples));
+            Assert.True(StaleRawFlacFallbackSampleLoader.HasValidTailChecksum(path, index));
+            Assert.False(StaleRawFlacFallbackSampleLoader.HasDecodableTail(path, index));
+
+            using var stock = new FfmpegPcm16SampleLoader(path);
+            using var fallback = new StaleRawFlacFallbackSampleLoader(path);
+            fallback.EnableMappedReadAhead(TestContext.Current.CancellationToken);
+            double[] expected = Assert.IsType<double[]>(stock.Read(Stream.Null, 0, 2_048));
+            Assert.Equal(2_048, expected.Length);
+            Assert.Equal(expected, Assert.IsType<double[]>(fallback.Read(Stream.Null, 0, 2_048)));
+            Assert.Equal(FfmpegPcm16SeekMode.Exact, fallback.SelectedSeekMode);
+            Assert.Null(fallback.ActiveMappedReadAhead);
+
+            double[]? expectedTail = null;
+            double[]? actualTail = null;
+            Exception? expectedError = Record.Exception(() => expectedTail = stock.Read(Stream.Null, 6_140, 16));
+            Exception? actualError = Record.Exception(() => actualTail = fallback.Read(Stream.Null, 6_140, 16));
+            Assert.Equal(expectedError?.GetType(), actualError?.GetType());
+            Assert.Equal(expectedTail, actualTail);
+        }
+        finally
+        {
+            Directory.Delete(directory, recursive: true);
+        }
+    }
+
+    private static byte[] BuildWrappedMissingZeroCrcFixture()
+    {
+        using var output = new MemoryStream();
+        // A complete 6144-sample prefix plus three consecutive fixed headers beginning at 2^32.
+        output.Write(BuildConstantFlacWithFinalZeroCrcByte());
+        for (byte lateFrame = 0; lateFrame < 3; lateFrame++)
+        {
+            // Fixed 2048-sample frame, 16-bit mono. 2^21 + lateFrame uses five FLAC coded bytes.
+            byte[] frame = [0xff, 0xf8, 0xb0, 0x08, 0xf8, 0x88, 0x80, 0x80,
+                (byte)(0x80 + lateFrame), 0, 0, 0, 0, 0, 0];
+            frame[9] = (byte)CalculateWrappedFixtureCrc(frame.AsSpan(0, 9), width: 8, polynomial: 0x07);
+            if (lateFrame == 2)
+            {
+                // Constant 233 makes the low byte of the last complete frame CRC zero.
+                BinaryPrimitives.WriteUInt16BigEndian(frame.AsSpan(11), 233);
+            }
+            ushort crc = CalculateWrappedFixtureCrc(frame.AsSpan(0, 13), width: 16, polynomial: 0x8005);
+            BinaryPrimitives.WriteUInt16BigEndian(frame.AsSpan(13), crc);
+            if (lateFrame == 2)
+            {
+                Assert.Equal(0, frame[^1]);
+            }
+
+            output.Write(frame.AsSpan(0, lateFrame == 2 ? frame.Length - 1 : frame.Length));
+        }
+
+        return output.ToArray();
+    }
+
+    private static ushort CalculateWrappedFixtureCrc(ReadOnlySpan<byte> bytes, int width, int polynomial)
+    {
+        int crc = 0;
+        int top = 1 << (width - 1);
+        int mask = (top << 1) - 1;
+        foreach (byte value in bytes)
+        {
+            crc ^= value << (width - 8);
+            for (int i = 0; i < 8; i++)
+            {
+                crc = ((crc << 1) ^ ((crc & top) != 0 ? polynomial : 0)) & mask;
+            }
+        }
+
+        return (ushort)crc;
+    }
+
+    private delegate VHSDecode.Core.Decode.DecodeSession ExactRfSixOwnedFactory(
+        VHSDecode.Core.CommandLine.ParsedCommand command,
+        bool isRequestedExact,
+        out VHSDecode.Core.Decode.RfBlockStreamDecoder.OwnedImmediateLaserDiscFieldReader? reader);
+
+    [Theory(DisplayName = "Explicit Exact LD six retains its request and changes only the admitted downstream worker profile")]
+    [InlineData("wrapped", 6, null, null, true)]
+    [InlineData("wrapped", 4, null, null, false)]
+    [InlineData("wrapped", null, null, null, false)]
+    [InlineData("wrapped", 6, "--noEFM", null, false)]
+    [InlineData("wrapped", 6, "--ignoreleadout", null, false)]
+    [InlineData("wrapped", 6, null, "missing", false)]
+    [InlineData("wrapped", 6, null, "invalid", false)]
+    [InlineData("native", 6, null, null, false)]
+    [InlineData("raw", 6, null, null, false)]
+    public void ExactRfSixPrivateFactoryRetainsUnsupportedWorkerBudgets(
+        string inputKind, int? threads, string? alteredOption, string? manualLeadOut, bool structurallyEligible)
+    {
+        string directory = CreateTestDirectory();
+        try
+        {
+            string path = Path.Combine(directory, inputKind == "raw" ? "input.s16" : "input.ldf");
+            byte[] bytes = inputKind switch
+            {
+                "wrapped" => BuildWrappedMissingZeroCrcFixture(),
+                "native" => BuildConstantFlacWithFinalZeroCrcByte(),
+                _ => new byte[64],
+            };
+            File.WriteAllBytes(path, bytes);
+            List<string> argv = ["--NTSC", "--length", "480", "--dsp-backend", "exact"];
+            if (threads is int explicitThreads)
+            {
+                argv.AddRange(["--threads", explicitThreads.ToString(System.Globalization.CultureInfo.InvariantCulture)]);
+            }
+            if (alteredOption is not null)
+            {
+                argv.Add(alteredOption);
+            }
+            argv.AddRange([path, Path.Combine(directory, "out")]);
+            var command = new VHSDecode.Core.CommandLine.CommandLineParser().Parse(
+                VHSDecode.Core.CommandLine.CliSpecs.LaserDisc, argv);
+            if (manualLeadOut is not null)
+            {
+                var values = new Dictionary<string, object?>(command.Values, StringComparer.Ordinal);
+                if (manualLeadOut == "missing")
+                {
+                    values.Remove("ignoreleadout");
+                }
+                else
+                {
+                    values["ignoreleadout"] = manualLeadOut;
+                }
+
+                command = new VHSDecode.Core.CommandLine.ParsedCommand(
+                    command.Spec, values, [.. command.Positionals], command.ProgramName, command.OptionSources);
+            }
+
+            int requested = threads ?? 4;
+            bool supported = OperatingSystem.IsWindows()
+                && System.Runtime.InteropServices.RuntimeInformation.ProcessArchitecture
+                    == System.Runtime.InteropServices.Architecture.X64
+                && System.Runtime.Intrinsics.X86.Avx2.IsSupported && System.Runtime.Intrinsics.X86.Fma.IsSupported;
+            int expected = supported && structurallyEligible ? 4 : requested;
+            var factory = typeof(VHSDecode.Core.Decode.DecodeRunner)
+                .GetMethod("CreatePrivateDefaultRunnerSessionCore",
+                    System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static)!
+                .CreateDelegate<ExactRfSixOwnedFactory>();
+
+            using VHSDecode.Core.Decode.DecodeSession privateSession = factory(command, true, out _);
+            Assert.Equal(requested, privateSession.ExecutionOptions.RequestedThreads);
+            Assert.Equal(expected, privateSession.ExecutionOptions.WorkerThreads);
+            Assert.Equal(expected, privateSession.StreamDecoder.WorkerThreads);
+            Assert.Equal(expected, privateSession.TbcFieldDecoder.WorkerThreads);
+
+            using VHSDecode.Core.Decode.DecodeSession publicSession =
+                VHSDecode.Core.Decode.DecodeSessionFactory.Create(command);
+            Assert.Equal(requested, publicSession.ExecutionOptions.RequestedThreads);
+            Assert.Equal(requested, publicSession.ExecutionOptions.WorkerThreads);
+            Assert.Equal(requested, publicSession.StreamDecoder.WorkerThreads);
+            Assert.Equal(requested, publicSession.TbcFieldDecoder.WorkerThreads);
+        }
+        finally
+        {
+            Directory.Delete(directory, recursive: true);
+        }
+    }
+
     private static byte[] BuildConstantFlacWithFinalZeroCrcByte()
     {
         using var output = new MemoryStream();

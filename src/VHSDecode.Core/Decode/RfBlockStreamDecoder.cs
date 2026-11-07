@@ -195,6 +195,8 @@ public sealed class RfBlockStreamDecoder : IDisposable
         private readonly RfBlockStreamDecoder _owner;
         private CancellationToken? _cudaIppRfFftPreparationToken;
         private StaleRawFlacFallbackSampleLoader? _cudaMappedReadAheadFallback;
+        private StaleRawFlacFallbackSampleLoader? _exactRfSixMappedFallback;
+        private static readonly ParallelOptions ExactRfSixOptions = new() { MaxDegreeOfParallelism = 6 };
         internal readonly double[] EnvelopeShape;
 
         internal OwnedImmediateLaserDiscFieldReader(RfBlockStreamDecoder owner, double[] envelopeShape)
@@ -236,6 +238,20 @@ public sealed class RfBlockStreamDecoder : IDisposable
 
             ProjectExactRawDemod = true;
         }
+
+        internal void EnableExactMappedRfSix(StaleRawFlacFallbackSampleLoader mappedFallback)
+        {
+            if (!ProjectExactRawDemod || _exactRfSixMappedFallback is not null
+                || Volatile.Read(ref _owner._hasStartedRead) != 0)
+            {
+                throw new InvalidOperationException("Exact RF width requires an unused projected LD reader.");
+            }
+
+            _exactRfSixMappedFallback = mappedFallback;
+        }
+
+        internal ParallelOptions? ActiveExactMappedRfSixOptions
+            => _exactRfSixMappedFallback?.ActiveMappedReadAhead is not null ? ExactRfSixOptions : null;
 
         internal bool ReuseExactLaserDiscS0 { get; private set; }
 
@@ -1344,10 +1360,15 @@ public sealed class RfBlockStreamDecoder : IDisposable
                     {
                         MaxDegreeOfParallelism = Math.Min(WorkerThreads, blockCount)
                     };
+                    ParallelOptions computeOptions = missingBlockCount >= 7 && blockCount <= 64 && stream.CanSeek
+                        && seedBlockIndex >= 0 && seedBlockIndex == missingBlocks[0] && seedFailure is null
+                        && !deferEfm && !deferPostFmVideo
+                        && ownedReader?.ActiveExactMappedRfSixOptions is { } exactRfSixOptions
+                            ? exactRfSixOptions : parallelOptions;
                     Parallel.For(
                         0,
                         missingBlockCount,
-                        parallelOptions,
+                        computeOptions,
                         missingIndex =>
                         {
                             int blockIndex = missingBlocks[missingIndex];

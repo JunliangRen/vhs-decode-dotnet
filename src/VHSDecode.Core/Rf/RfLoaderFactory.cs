@@ -14,7 +14,20 @@ public static class RfLoaderFactory
         bool ignoreExtensionCase = false,
         int fastContainerRewindSize = FfmpegPcm16SampleLoader.DefaultRewindSize,
         bool preferIndexedStaleRawFlacFallback = false)
+        => CreateNativeWithWrappedProbe(filename, verifyWrappedInput: false, out _, preferPyAvMappedRawFlacSeeking,
+            fastContainerSeeking, ignoreExtensionCase, fastContainerRewindSize, preferIndexedStaleRawFlacFallback);
+
+    internal static IRfSampleLoader CreateNativeWithWrappedProbe(
+        string filename,
+        bool verifyWrappedInput,
+        out bool verifiedWrappedInput,
+        bool preferPyAvMappedRawFlacSeeking,
+        bool fastContainerSeeking = false,
+        bool ignoreExtensionCase = false,
+        int fastContainerRewindSize = FfmpegPcm16SampleLoader.DefaultRewindSize,
+        bool preferIndexedStaleRawFlacFallback = false)
     {
+        verifiedWrappedInput = false;
         string routingFilename = ignoreExtensionCase
             ? filename.ToLowerInvariant()
             : filename;
@@ -58,7 +71,8 @@ public static class RfLoaderFactory
         {
             if ((routingFilename.EndsWith(".ldf", StringComparison.Ordinal)
                     || routingFilename.EndsWith(".flac", StringComparison.Ordinal))
-                && RawFlacStreamInfo.TryRead(filename, out RawFlacStreamInfo info))
+                && RawFlacStreamInfo.TryReadWithWrappedProbe(filename, verifyWrappedInput && preferIndexedStaleRawFlacFallback
+                    && !fastContainerSeeking, out RawFlacStreamInfo info, out verifiedWrappedInput))
             {
                 if (fastContainerSeeking)
                 {
