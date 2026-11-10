@@ -17,8 +17,8 @@
     {
       "name": "current",
       "release": null,
-      "commit": "2f21e8ed6018b14561396cc95f1f6828054470b8",
-      "source": "pull/341",
+      "commit": "1bc3ab4f02d1c0af624129ba3dd62f25d1c159c8",
+      "source": "commit/1bc3ab4f02d1c0af624129ba3dd62f25d1c159c8",
       "algorithms": {
         "vhsSync": "current",
         "vhsVsyncLevels": "current",

@@ -9,7 +9,7 @@ A .NET 11 rewrite of the decode-facing parts of
 upstream release `v0.4.0` at commit
 `43155200da87c0d49eb37d8ec09b1372075ee8e4`.
 
-The current .NET port release is [`v0.4.0-2.18.0`](https://github.com/JunliangRen/vhs-decode-dotnet/releases/tag/v0.4.0-2.18.0) (application version `2.18.0`).
+The current .NET port release is [`v0.4.0-2.19.0`](https://github.com/JunliangRen/vhs-decode-dotnet/releases/tag/v0.4.0-2.19.0) (application version `2.19.0`).
 
 [LD EFM buffer reuse measurements and limits](docs/LD_PERFORMANCE_V16.md).
 
@@ -190,7 +190,11 @@ not Exact-equivalence claims.
 | Value | Meaning |
 | --- | --- |
 | `v0.4.0` | Default. Targets the pinned Python release behavior. |
-| `current` | Opt-in staged behavior from upstream PR 341, including newer VHS sync and color-under processing. |
+| `current` | Opt-in VHS sync and color-under behavior targeting upstream `1bc3ab4`. |
+
+For PAL and NTSC VHS and S-VHS file decoding with 20 or 40 MSPS RF input,
+`cuda-fast` with `current` uses CUDA FP64 RF transforms and the shared managed
+sync, TBC, and chroma pipeline.
 
 The strict compatibility oracle is Python v0.4.0 commit `g4315520` with
 `--threads 0`. Python output hashes are not stable across its worker counts, so
@@ -202,7 +206,7 @@ multithreaded Python runs are used for speed measurements only.
 | --- | --- |
 | `exact` | Default managed path for compatibility-sensitive decoding. |
 | `ipp-fast` | Experimental Windows x64 and Linux x64/glibc VHS and LaserDisc real-RF paths using Intel IPP. It can change floating-point bits and never silently falls back to `exact`. |
-| `cuda-fast` | Experimental Windows x64 NVIDIA CUDA 13 backend. VHS has an independent full-signal GPU path for PAL/NTSC. Standard NTSC LaserDisc uses CUDA for EFM digital audio and eligible post-FM video filtering. |
+| `cuda-fast` | Experimental Windows x64 NVIDIA CUDA 13 backend. PAL/NTSC VHS uses a full-signal GPU path under `v0.4.0` and CUDA FP64 RF transforms with managed field processing under `current`. Standard NTSC LaserDisc uses CUDA for EFM digital audio and eligible post-FM video filtering. |
 | `approx-fast` | Experimental VHS-only FP32 path with selectable TBC resampler and precision contract. The default `balanced` precision keeps the existing v1/v2 behavior; explicit `aggressive` selects the faster, deliberately lossy field-FP32/burst-IQ-prefix/chroma-FFT v6 contract. Nonzero RF high boost is not supported. |
 
 For a complete NTSC LaserDisc file decode, select the CUDA backend.

@@ -4,6 +4,7 @@ using System.Text.Json;
 using System.Text.Json.Nodes;
 using VHSDecode.Core.CommandLine;
 using VHSDecode.Core.Dsp;
+using VHSDecode.Core.Dsp.CudaFast;
 using VHSDecode.Core.Dsp.Ipp;
 using VHSDecode.Core.Formats;
 using VHSDecode.Core.Rf;
@@ -43,6 +44,7 @@ public sealed record DecodeSession(
     string? TestLdfOutputPath) : IDisposable
 {
     internal DecodeRuntimeReporter? RuntimeReporter { get; set; }
+    internal bool UsesVhsCudaCurrentFft { get; init; }
     internal IReadOnlyList<DecodeInitializationDiagnostic> VhsParamsFileDiagnostics { get; set; } = [];
 
     public int SourceSamplesPerDecodeSample { get; init; } = 1;
@@ -174,6 +176,20 @@ public static class DecodeSessionFactory
         => Create(command, DefaultBlockLength, enforceVhsFieldClass: true,
             pinnedApproxProviderSelection: null, verifyExactLaserDiscRfSixInput: true);
 
+    internal static DecodeSession CreateForVhsCudaCurrent(ParsedCommand exactComplementCommand, IVhsCudaRealFft fft)
+    {
+        ArgumentNullException.ThrowIfNull(fft);
+        if (exactComplementCommand.Spec.Name != "vhs"
+            || SelectedUpstreamBehaviorProfile(exactComplementCommand) != UpstreamBehaviorProfile.Current
+            || DspBackendParser.Parse(exactComplementCommand.Get<string>("dsp_backend")) != DspBackend.Exact)
+        {
+            throw new ArgumentException("The CUDA FFT requires the managed VHS Current pipeline.", nameof(exactComplementCommand));
+        }
+
+        return Create(exactComplementCommand, fft.RealLength, enforceVhsFieldClass: true,
+            pinnedApproxProviderSelection: null, vhsCudaFft: fft);
+    }
+
     internal static DecodeSession CreateForPreview(
         ParsedCommand command,
         ApproxProviderSelection? pinnedApproxProviderSelection,
@@ -198,7 +214,8 @@ public static class DecodeSessionFactory
         int blockLength,
         bool enforceVhsFieldClass,
         ApproxProviderSelection? pinnedApproxProviderSelection,
-        bool verifyExactLaserDiscRfSixInput = false)
+        bool verifyExactLaserDiscRfSixInput = false,
+        IVhsCudaRealFft? vhsCudaFft = null)
     {
         bool previewServer = IsPreviewServer(command);
         if (command.Positionals.Count < (previewServer ? 1 : 2))
@@ -297,7 +314,8 @@ public static class DecodeSessionFactory
                 enforceVhsFieldClass,
                 approxProviderSelection,
                 approxResampler,
-                approxPrecision),
+                approxPrecision,
+                vhsCudaFft),
             "cvbs" => CreateCvbs(command, blockLength),
             "ld" => CreateLaserDisc(command, blockLength, verifyExactLaserDiscRfSixInput),
             _ => throw new NotSupportedException($"Unsupported decode command '{command.Spec.Name}'.")
@@ -310,7 +328,8 @@ public static class DecodeSessionFactory
         bool enforceFieldClass,
         ApproxProviderSelection? approxProviderSelection,
         ApproxResampler? approxResampler,
-        ApproxPrecision? approxPrecision)
+        ApproxPrecision? approxPrecision,
+        IVhsCudaRealFft? vhsCudaFft)
     {
         string system = VideoSystemSelector.Select(command);
         double selectedSampleRateMHz = SelectCommonSampleFrequencyMHz(command);
@@ -321,7 +340,8 @@ public static class DecodeSessionFactory
         DspBackend dspBackend = DspBackendParser.Parse(command.Get<string>("dsp_backend"));
         if (decodeAt20Msps)
         {
-            ValidateTwentyMspsVhsMode(command, selectedSampleRateMHz, dspBackend);
+            ValidateTwentyMspsVhsMode(command, selectedSampleRateMHz,
+                vhsCudaFft is null ? dspBackend : DspBackend.CudaFast);
         }
 
         bool halfRateInput = decodeAt20Msps
@@ -341,19 +361,28 @@ public static class DecodeSessionFactory
             && (command.InputFile.EndsWith(".lds", StringComparison.Ordinal)
                 || command.InputFile.EndsWith(".ldf", StringComparison.Ordinal));
         bool useFfmpegInputPath = !noResample && !nativeFortyMegahertzContainer;
+        UpstreamBehaviorProfile profile = SelectedUpstreamBehaviorProfile(command);
+        bool scaleSigned8ToPcm16 = profile == UpstreamBehaviorProfile.Current;
         IRfSampleLoader loader;
         if (halfRateInput)
         {
             IRfSampleLoader sourceLoader = RfLoaderFactory.CreateVhsNativeSource(
                 command.InputFile,
-                fastContainerSeeking: IsPreviewServer(command));
+                fastContainerSeeking: IsPreviewServer(command),
+                scaleSigned8ToPcm16: scaleSigned8ToPcm16);
             loader = new HalfRateSampleLoader(sourceLoader);
         }
         else if (decodeAt20Msps)
         {
             loader = RfLoaderFactory.CreateVhsNativeSource(
                 command.InputFile,
-                fastContainerSeeking: IsPreviewServer(command));
+                fastContainerSeeking: IsPreviewServer(command),
+                scaleSigned8ToPcm16: scaleSigned8ToPcm16);
+        }
+        else if (scaleSigned8ToPcm16 && !useFfmpegInputPath
+            && command.InputFile.EndsWith(".s8", StringComparison.Ordinal))
+        {
+            loader = new Int8SampleLoader(scaleToPcm16: true);
         }
         else
         {
@@ -368,9 +397,7 @@ public static class DecodeSessionFactory
             system,
             command.Get<string>("tape_format"),
             command.Get<string>("tape_speed"));
-        parameters = ApplyUpstreamBehaviorFormatDefaults(
-            parameters,
-            SelectedUpstreamBehaviorProfile(command));
+        parameters = ApplyUpstreamBehaviorFormatDefaults(parameters, profile);
         VhsParamsFileOverrideResult paramsOverride = VhsParamsFileOverride.ApplyWithDiagnostics(
             parameters,
             NullableString(command, "params_file"));
@@ -387,7 +414,8 @@ public static class DecodeSessionFactory
             sourceSamplesPerDecodeSample: halfRateInput ? 2 : 1,
             approxProviderSelection: approxProviderSelection,
             approxResampler: approxResampler,
-            approxPrecision: approxPrecision);
+            approxPrecision: approxPrecision,
+            vhsCudaFft: vhsCudaFft);
         session.VhsParamsFileDiagnostics = paramsOverride.Diagnostics;
         if (!enforceFieldClass
             || !VhsInitializationDiagnostics.IsUnsupportedFieldClassCombination(system, parameters.TapeFormat))
@@ -455,7 +483,8 @@ public static class DecodeSessionFactory
         ApproxProviderSelection? approxProviderSelection = null,
         ApproxResampler? approxResampler = null,
         ApproxPrecision? approxPrecision = null,
-        bool verifiedExactLaserDiscRfSixInput = false)
+        bool verifiedExactLaserDiscRfSixInput = false,
+        IVhsCudaRealFft? vhsCudaFft = null)
     {
         double sampleRateHz = sampleRateMHz * 1_000_000.0;
         bool suppressFileOutputs = IsPreviewServer(command);
@@ -496,7 +525,7 @@ public static class DecodeSessionFactory
             approxPrecision);
         CvbsDecodeOptions? cvbsOptions = BuildCvbsDecodeOptions(command, videoOutput);
         IRfInputProcessor? inputProcessor = BuildRfInputProcessor(command);
-        bool parallelizeVhsInverseStaging = command.Spec.Name == "vhs"
+        bool parallelizeVhsInverseStaging = vhsCudaFft is null && command.Spec.Name == "vhs"
             && executionOptions.UpstreamBehaviorProfile
                 == UpstreamBehaviorProfile.Current
             && inputProcessor is null
@@ -543,7 +572,8 @@ public static class DecodeSessionFactory
             useApproxFrequencyDomainChroma: command.Spec.Name == "vhs"
                 && executionOptions.DspBackend == DspBackend.ApproxFast
                 && executionOptions.ApproxPrecision == ApproxPrecision.Aggressive
-                && executionOptions.ApproxResampler == ApproxResampler.CatmullRom4);
+                && executionOptions.ApproxResampler == ApproxResampler.CatmullRom4,
+            vhsCudaFft: vhsCudaFft);
         if (executionOptions.ApproxPrecision == ApproxPrecision.Aggressive
             && !pipeline.UsesApproxFrequencyDomainChroma)
         {
@@ -608,7 +638,7 @@ public static class DecodeSessionFactory
                     ? TbcSampleResamplingKernel.CatmullRom4Float32
                     : TbcSampleResamplingKernel.KaiserSinc16);
         TbcDropoutDetectionOptions dropoutOptions = BuildDropoutOptions(command, sampleRateMHz);
-        TbcFieldOrderOptions fieldOrderOptions = BuildFieldOrderOptions(command, parameters);
+        TbcFieldOrderOptions fieldOrderOptions = BuildFieldOrderOptions(command, parameters, executionOptions.UpstreamBehaviorProfile);
         LaserDiscAudioOptions? laserDiscAudioOptions = BuildLaserDiscAudioOptions(command, system);
         HSyncRefineOptions hSyncRefineOptions = BuildHSyncRefineOptions(command);
         SyncDetectionOptions syncDetectionOptions = BuildSyncDetectionOptions(
@@ -718,12 +748,13 @@ public static class DecodeSessionFactory
             laserDiscAudioOptions,
             NullableString(command, "write_test_ldf"))
         {
-            SourceSamplesPerDecodeSample = sourceSamplesPerDecodeSample
+            SourceSamplesPerDecodeSample = sourceSamplesPerDecodeSample,
+            UsesVhsCudaCurrentFft = vhsCudaFft is not null
         };
         return activeSession;
     }
 
-    private static void ValidateTwentyMspsVhsMode(
+    internal static void ValidateTwentyMspsVhsMode(
         ParsedCommand command,
         double selectedSampleRateMHz,
         DspBackend dspBackend)
@@ -987,15 +1018,39 @@ public static class DecodeSessionFactory
         FormatParameterSet parameters,
         UpstreamBehaviorProfile profile)
     {
-        if (profile != UpstreamBehaviorProfile.Current
-            || FormatCatalog.NormalizeSystem(parameters.System) != "NTSC")
+        if (profile != UpstreamBehaviorProfile.Current)
         {
             return parameters;
         }
 
+        JsonElement rfParams = parameters.RfParams;
+        if (parameters.TapeFormat is "SVHS" or "SVHS_ET")
+        {
+            JsonObject rf = JsonNode.Parse(rfParams.GetRawText())!.AsObject();
+            if (rf["video_custom_luma_filters"] is JsonArray filters)
+            {
+                for (int index = 0; index < filters.Count; index++)
+                {
+                    if (filters[index]?["filename"]?.GetValue<string>() == "svhs-sp-linear-subdeemphasis")
+                    {
+                        filters[index] = new JsonObject
+                        {
+                            ["type"] = "analog",
+                            ["zeros_tau"] = new JsonArray(JsonValue.Create(1.305e-6), JsonValue.Create(63.83e-9)),
+                            ["poles_tau"] = new JsonArray(JsonValue.Create(882.5e-9), JsonValue.Create(88.76e-9), JsonValue.Create(17.18e-9))
+                        };
+                    }
+                }
+            }
+
+            rfParams = JsonSerializer.SerializeToElement(rf);
+        }
+
         string tapeSpeed = FormatCatalog.NormalizeTapeSpeedName(
             parameters.TapeSpeed ?? "sp");
-        JsonNode? burstAbsRef = parameters.TapeFormat.ToUpperInvariant() switch
+        JsonNode? burstAbsRef = FormatCatalog.NormalizeSystem(parameters.System) != "NTSC"
+            ? null
+            : parameters.TapeFormat.ToUpperInvariant() switch
         {
             "VHS" or "VHSHQ" => tapeSpeed switch
             {
@@ -1006,22 +1061,20 @@ public static class DecodeSessionFactory
             "SVHS" or "SVHS_ET" => JsonValue.Create(5_730),
             _ => null
         };
-        if (burstAbsRef is null)
+        JsonElement sysParams = parameters.SysParams;
+        if (burstAbsRef is not null)
         {
-            return parameters;
+            JsonObject sys = JsonNode.Parse(sysParams.GetRawText())!.AsObject();
+            sys["burst_abs_ref"] = burstAbsRef;
+            sysParams = JsonSerializer.SerializeToElement(sys);
         }
 
-        JsonObject sysParams =
-            JsonNode.Parse(parameters.SysParams.GetRawText())!.AsObject();
-        sysParams["burst_abs_ref"] = burstAbsRef;
-        using JsonDocument sysDocument =
-            JsonDocument.Parse(sysParams.ToJsonString());
         return new FormatParameterSet(
             parameters.System,
             parameters.TapeFormat,
             parameters.TapeSpeed,
-            sysDocument.RootElement,
-            parameters.RfParams,
+            sysParams,
+            rfParams,
             parameters.Warnings);
     }
 
@@ -1144,7 +1197,7 @@ public static class DecodeSessionFactory
             && Environment.ProcessorCount > 1;
     }
 
-    private static double SelectCommonSampleFrequencyMHz(ParsedCommand command)
+    internal static double SelectCommonSampleFrequencyMHz(ParsedCommand command)
     {
         if (command.Get<bool>("cxadc"))
         {
@@ -1275,7 +1328,10 @@ public static class DecodeSessionFactory
             : 0.0;
     }
 
-    private static TbcFieldOrderOptions BuildFieldOrderOptions(ParsedCommand command, FormatParameterSet parameters)
+    private static TbcFieldOrderOptions BuildFieldOrderOptions(
+        ParsedCommand command,
+        FormatParameterSet parameters,
+        UpstreamBehaviorProfile profile)
     {
         TbcFieldOrderAction action = TbcFieldOrderOptions.Default.Action;
         int confidence = TbcFieldOrderOptions.Default.Confidence;
@@ -1294,13 +1350,16 @@ public static class DecodeSessionFactory
                     : (int)parsedConfidence.Value;
         }
 
-        bool allowProgressiveFlip = parameters.TapeFormat != "TYPEC";
-        if (!allowProgressiveFlip)
+        bool isTypeC = parameters.TapeFormat == "TYPEC";
+        if (isTypeC)
         {
             action = TbcFieldOrderAction.None;
         }
 
-        return TbcFieldOrderOptions.Create(action, confidence, allowProgressiveFlip);
+        return TbcFieldOrderOptions.Create(
+            action,
+            confidence,
+            allowProgressiveFlip: !isTypeC || profile == UpstreamBehaviorProfile.Current);
     }
 
     private static DecodeFilterOptions BuildFilterOptions(
@@ -1344,7 +1403,11 @@ public static class DecodeSessionFactory
             UseChromaAfc: chromaOptions?.UseChromaAfc == true,
             FmDemodulatorMode: command.Spec.Name == "vhs"
                 ? RfFmDemodulatorMode.VhsRustApproximation
-                : RfFmDemodulatorMode.ConjugateProduct);
+                : RfFmDemodulatorMode.ConjugateProduct)
+        {
+            UseCurrentVhsFilters = command.Spec.Name == "vhs"
+                && SelectedUpstreamBehaviorProfile(command) == UpstreamBehaviorProfile.Current
+        };
     }
 
     private static bool IsExportRawTbc(ParsedCommand command)
@@ -1524,7 +1587,8 @@ public static class DecodeSessionFactory
             return TbcDropoutDetectionOptions.LaserDisc;
         }
 
-        double defaultFraction = Math.Floor(sampleRateMHz) == 28.0
+        double defaultFraction = SelectedUpstreamBehaviorProfile(command) == UpstreamBehaviorProfile.V040
+            && Math.Floor(sampleRateMHz) == 28.0
             ? TbcDropoutDetectionOptions.DefaultCxAdc.ThresholdFraction
             : TbcDropoutDetectionOptions.DefaultDdd.ThresholdFraction;
         double thresholdFraction = NullableDouble(command, "dod_threshold_p") ?? defaultFraction;

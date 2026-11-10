@@ -391,7 +391,7 @@ public sealed partial class ReadmeLocalizationTests
             "IPP-fast + v0.4.0",
             "IPP-fast + current",
             "--start 100",
-            "v0.4.0-2.18.0",
+            "v0.4.0-2.19.0",
             "52.811 s",
             "54.243 s",
             "11.598 s",
@@ -429,7 +429,7 @@ public sealed partial class ReadmeLocalizationTests
         string[] synchronizedFacts =
         [
             "43155200da87c0d49eb37d8ec09b1372075ee8e4",
-            "v0.4.0-2.18.0",
+            "v0.4.0-2.19.0",
             "b893bf7",
             "2.10.0+b893bf7d39edf574609a7abc40237a4db32eaf9f",
             "92481E633B4CD5C80DDD1CD6C26AD5D045B9046763CD8B1F84083F8EFBD73303",
@@ -441,6 +441,7 @@ public sealed partial class ReadmeLocalizationTests
             "407.0",
             "381.7 MiB",
             "2f21e8ed6018b14561396cc95f1f6828054470b8",
+            "1bc3ab4f02d1c0af624129ba3dd62f25d1c159c8",
             "v0.4.0-40-g2f21e8ed",
             PinnedDotNetSdkVersion,
             "41bfd923e2a47f926db3d4ea3c3ff70adbecaa48",

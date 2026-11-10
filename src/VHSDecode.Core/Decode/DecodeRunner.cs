@@ -212,6 +212,7 @@ public sealed class DecodeRunner
 
             var runtimeReporter = new DecodeRuntimeReporter(output, error);
             DecodeSession? session = null;
+            IVhsCudaRealFft? currentVhsCudaFft = null;
             try
             {
                 DspBackend dspBackend = DspBackendParser.Parse(
@@ -228,8 +229,10 @@ public sealed class DecodeRunner
                     dspBackend,
                     command.GetSource("approx_precision")
                         != ParsedOptionSource.Default);
+                bool cudaFastVhsCurrent = dspBackend == DspBackend.CudaFast
+                    && CudaFastDecodeRunner.IsCurrentVhsCommand(command);
                 TbcFieldSequenceDecodeResult result;
-                if (dspBackend == DspBackend.CudaFast && !cudaFastLaserDisc)
+                if (dspBackend == DspBackend.CudaFast && !cudaFastLaserDisc && !cudaFastVhsCurrent)
                 {
                     result = _cudaFastRunner.TryDecodeAndWrite(
                         command,
@@ -239,12 +242,23 @@ public sealed class DecodeRunner
                 else
                 {
                     RfBlockStreamDecoder.OwnedImmediateLaserDiscFieldReader? ownedReader = null;
-                    ParsedCommand sessionCommand = cudaFastLaserDisc
-                        ? CreateLaserDiscCudaCpuCommand(command)
+                    ParsedCommand sessionCommand = cudaFastLaserDisc || cudaFastVhsCurrent
+                        ? CreateManagedCudaComplementCommand(command)
                         : command;
-                    session = cudaFastLaserDisc || ReferenceEquals(_engineFactory, DefaultEngineFactory)
-                        ? CreatePrivateDefaultRunnerSessionCore(sessionCommand, dspBackend == DspBackend.Exact, out ownedReader)
-                        : DecodeSessionFactory.Create(sessionCommand);
+                    if (cudaFastVhsCurrent)
+                    {
+                        CudaFastDecodeRunner.ValidateCurrentCommand(command);
+                        currentVhsCudaFft = CudaFastNativeRuntime.CreateVhsRealFft(
+                            DecodeSessionFactory.DefaultBlockLength, output, cancellationToken);
+                        session = DecodeSessionFactory.CreateForVhsCudaCurrent(sessionCommand, currentVhsCudaFft);
+                        output.WriteLine("CUDA-fast VHS Current: FP64 cuFFT real transforms with managed Current sync, TBC and chroma.");
+                    }
+                    else
+                    {
+                        session = cudaFastLaserDisc || ReferenceEquals(_engineFactory, DefaultEngineFactory)
+                            ? CreatePrivateDefaultRunnerSessionCore(sessionCommand, dspBackend == DspBackend.Exact, out ownedReader)
+                            : DecodeSessionFactory.Create(sessionCommand);
+                    }
                     // The original requested backend distinguishes CPU Exact from the CUDA complement.
                     if (ownedReader is not null && command.Spec == CliSpecs.LaserDisc
                         && !command.Get<bool>("preview_server") && session.System == "NTSC")
@@ -469,6 +483,22 @@ public sealed class DecodeRunner
                     }
                 }
 
+                if (result.Success && currentVhsCudaFft is not null)
+                {
+                    long forward = currentVhsCudaFft.ForwardCalls;
+                    long inverse = currentVhsCudaFft.InverseCalls;
+                    output.WriteLine(string.Create(CultureInfo.InvariantCulture,
+                        $"CUDA VHS Current FP64 FFTs: {forward} forward, {inverse} inverse."));
+                    if (result.WrittenFieldCount > 0 && (forward == 0 || inverse == 0))
+                    {
+                        result = result with
+                        {
+                            Success = false,
+                            Message = "CUDA-fast VHS Current wrote fields without completing its required GPU FFT stage."
+                        };
+                    }
+                }
+
                 if (result.Success && command.Spec == CliSpecs.Cvbs)
                 {
                     runtimeReporter.WriteCvbsCompletion(
@@ -501,7 +531,14 @@ public sealed class DecodeRunner
             }
             finally
             {
-                session?.Dispose();
+                try
+                {
+                    session?.Dispose();
+                }
+                finally
+                {
+                    currentVhsCudaFft?.Dispose();
+                }
                 runtimeReporter.WriteStatistics();
             }
         }
@@ -553,9 +590,8 @@ public sealed class DecodeRunner
         }
     }
 
-    // Build the normal LD CPU complement. The private reader must attach its
-    // CUDA accelerator before the runner opens any output.
-    private static ParsedCommand CreateLaserDiscCudaCpuCommand(ParsedCommand command)
+    // Use the managed Exact signal semantics for the stages outside the required CUDA provider.
+    private static ParsedCommand CreateManagedCudaComplementCommand(ParsedCommand command)
     {
         var values = new Dictionary<string, object?>(command.Values, StringComparer.Ordinal)
         {

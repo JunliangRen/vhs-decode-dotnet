@@ -25,12 +25,15 @@ public static class PocketFftComplex
     private static readonly SingleCreationCache<(int Length, int RootLength), Plan> RootedPlans = new();
     private static readonly SingleCreationCache<int, SinCos2PiByN> Roots = new();
     private static readonly SingleCreationCache<int, DuccPacketPlan> DuccPacketPlans = new();
+    private static readonly Lazy<Value[]> DuccReal32KRoots = new(CreateDuccReal32KRoots);
     [ThreadStatic]
     private static Complex[]? _packetStage;
     [ThreadStatic]
     private static Complex[]? _packetFirst;
     [ThreadStatic]
     private static Complex[]? _realInput;
+    [ThreadStatic]
+    private static Complex[]? _realHalfSpectrum;
     [ThreadStatic]
     private static Value[]? _planScratch;
 
@@ -71,14 +74,17 @@ public static class PocketFftComplex
         Complex[] stage = EnsureCapacity(ref _packetStage, length);
         Complex[] firstPacketBuffer = EnsureCapacity(ref _packetFirst, firstPacketLength);
         Span<Complex> firstPacket = firstPacketBuffer.AsSpan(0, firstPacketLength);
+        Span<Complex> firstInput = firstPacketLength == 128
+            ? MemoryMarshal.Cast<Value, Complex>(EnsureCapacity(ref _planScratch, 128).AsSpan(0, 128))
+            : firstPacket;
         for (int i = 0; i < secondPacketLength; i++)
         {
             for (int m = 0; m < firstPacketLength; m++)
             {
-                firstPacket[m] = input[i + (secondPacketLength * m)];
+                firstInput[m] = input[i + (secondPacketLength * m)];
             }
 
-            packetPlan.FirstPlan.TransformPacket(firstPacket, firstPacket, forward);
+            packetPlan.FirstPlan.TransformPacket(firstInput, firstPacket, forward);
             for (int m = 0; m < firstPacketLength; m++)
             {
                 Complex value = firstPacket[m];
@@ -189,19 +195,24 @@ public static class PocketFftComplex
     internal static Complex[] ForwardDuccReal(ReadOnlySpan<double> input)
     {
         ValidateLength(input.Length, nameof(input));
+        var output = new Complex[(input.Length / 2) + 1];
+        ForwardDuccReal(input, output);
+        return output;
+    }
+
+    private static void ForwardDuccReal(ReadOnlySpan<double> input, Span<Complex> output)
+    {
         int length = input.Length;
         int complexLength = length / 2;
-        Complex[] complexInput = EnsureCapacity(ref _realInput, complexLength);
+        Span<Complex> transformed = EnsureCapacity(ref _realInput, complexLength).AsSpan(0, complexLength);
         for (int i = 0; i < complexLength; i++)
         {
-            complexInput[i] = new Complex(input[2 * i], input[(2 * i) + 1]);
+            transformed[i] = new Complex(input[2 * i], input[(2 * i) + 1]);
         }
 
-        Complex[] transformed = complexLength > 10_000
-            ? TransformDuccPacketized(complexInput.AsSpan(0, complexLength), forward: true)
-            : Forward(complexInput.AsSpan(0, complexLength));
+        TransformDuccRealPackedInPlace(transformed, forward: true);
         SinCos2PiByN roots = Roots.GetOrAdd(length, static value => new SinCos2PiByN(value));
-        var output = new Complex[complexLength + 1];
+        Value[]? cachedRoots = length == 32_768 ? DuccReal32KRoots.Value : null;
         output[0] = new Complex(transformed[0].Real + transformed[0].Imaginary, 0.0);
         for (int i = 1, xi = complexLength - 1; i <= xi; i++, xi--)
         {
@@ -213,7 +224,7 @@ public static class PocketFftComplex
             Value odd = new(
                 left.Imaginary + right.Imaginary,
                 right.Real - left.Real);
-            Value root = roots.Get(i);
+            Value root = cachedRoots is null ? roots.Get(i) : cachedRoots[i];
             Value rotated = SpecialMultiply(odd, root, forward: true);
             output[i] = new Complex(
                 0.5 * (even.Real + rotated.Real),
@@ -224,7 +235,6 @@ public static class PocketFftComplex
         }
 
         output[^1] = new Complex(transformed[0].Real - transformed[0].Imaginary, 0.0);
-        return output;
     }
 
     internal static Complex[] ForwardDuccRealFull(ReadOnlySpan<double> input)
@@ -336,6 +346,47 @@ public static class PocketFftComplex
 
     internal static double[] InverseDuccReal(ReadOnlySpan<Complex> input, int outputLength)
     {
+        ReadOnlySpan<Complex> transformed = InverseDuccRealPacked(input, outputLength);
+        var output = new double[outputLength];
+        for (int i = 0; i < transformed.Length; i++)
+        {
+            output[2 * i] = transformed[i].Real;
+            output[(2 * i) + 1] = transformed[i].Imaginary;
+        }
+
+        return output;
+    }
+
+    internal static void FilterDuccRealToSingle(
+        ReadOnlySpan<double> input,
+        ReadOnlySpan<Complex> gain,
+        Span<float> output)
+    {
+        ValidateLength(input.Length, nameof(input));
+        int halfLength = (input.Length / 2) + 1;
+        if (gain.Length < halfLength)
+        {
+            throw new ArgumentException("Frequency filter is shorter than the real half-spectrum.", nameof(gain));
+        }
+
+        if (output.Length != input.Length)
+        {
+            throw new ArgumentException("Filter output length must match the real input length.", nameof(output));
+        }
+
+        Span<Complex> spectrum = EnsureCapacity(ref _realHalfSpectrum, halfLength).AsSpan(0, halfLength);
+        ForwardDuccReal(input, spectrum);
+        NumpyComplexMultiply.ApplyInPlace(spectrum, gain[..halfLength]);
+        ReadOnlySpan<Complex> transformed = InverseDuccRealPacked(spectrum, input.Length);
+        for (int i = 0; i < transformed.Length; i++)
+        {
+            output[2 * i] = (float)transformed[i].Real;
+            output[(2 * i) + 1] = (float)transformed[i].Imaginary;
+        }
+    }
+
+    private static ReadOnlySpan<Complex> InverseDuccRealPacked(ReadOnlySpan<Complex> input, int outputLength)
+    {
         ValidateLength(outputLength, nameof(outputLength));
         if (input.Length != (outputLength / 2) + 1)
         {
@@ -345,11 +396,12 @@ public static class PocketFftComplex
         }
 
         int complexLength = outputLength / 2;
-        var packedSpectrum = new Complex[complexLength];
+        Span<Complex> packedSpectrum = EnsureCapacity(ref _realInput, complexLength).AsSpan(0, complexLength);
         packedSpectrum[0] = new Complex(
             0.5 * (input[0].Real + input[^1].Real),
             0.5 * (input[0].Real - input[^1].Real));
         SinCos2PiByN roots = Roots.GetOrAdd(outputLength, static value => new SinCos2PiByN(value));
+        Value[]? cachedRoots = outputLength == 32_768 ? DuccReal32KRoots.Value : null;
         for (int i = 1, xi = complexLength - 1; i <= xi; i++, xi--)
         {
             Complex left = input[i];
@@ -360,7 +412,8 @@ public static class PocketFftComplex
             Value rotated = new(
                 left.Real - right.Real,
                 left.Imaginary + right.Imaginary);
-            Value odd = SpecialMultiply(rotated, roots.Get(i), forward: false);
+            Value root = cachedRoots is null ? roots.Get(i) : cachedRoots[i];
+            Value odd = SpecialMultiply(rotated, root, forward: false);
             packedSpectrum[i] = new Complex(
                 0.5 * (even.Real - odd.Imaginary),
                 0.5 * (even.Imaginary + odd.Real));
@@ -369,17 +422,33 @@ public static class PocketFftComplex
                 0.5 * (odd.Real - even.Imaginary));
         }
 
-        Complex[] transformed = complexLength > 10_000
-            ? TransformDuccPacketized(packedSpectrum, forward: false)
-            : Inverse(packedSpectrum);
-        var output = new double[outputLength];
-        for (int i = 0; i < transformed.Length; i++)
+        TransformDuccRealPackedInPlace(packedSpectrum, forward: false);
+        return packedSpectrum;
+    }
+
+    private static void TransformDuccRealPackedInPlace(Span<Complex> packed, bool forward)
+    {
+        if (packed.Length > 10_000)
         {
-            output[2 * i] = transformed[i].Real;
-            output[(2 * i) + 1] = transformed[i].Imaginary;
+            TransformDuccPacketized(packed, forward, packed);
+        }
+        else
+        {
+            ValidateLength(packed.Length, nameof(packed));
+            Plans.GetOrAdd(packed.Length, static length => new Plan(length)).Transform(packed, packed, forward);
+        }
+    }
+
+    private static Value[] CreateDuccReal32KRoots()
+    {
+        SinCos2PiByN roots = Roots.GetOrAdd(32_768, static length => new SinCos2PiByN(length));
+        var values = new Value[(32_768 / 4) + 1];
+        for (int i = 1; i < values.Length; i++)
+        {
+            values[i] = roots.Get(i);
         }
 
-        return output;
+        return values;
     }
 
     public static Complex[] ForwardReal(ReadOnlySpan<double> input)
@@ -693,7 +762,22 @@ public static class PocketFftComplex
             System.Diagnostics.Debug.Assert(!data.Overlaps(scratch));
             bool allowPass8Avx = CanUsePass8Avx(data);
             // Original Factorize128 order, input/destination swap and twiddles.
-            Pass2(64, 1, data, scratch, _factors[0].Twiddles, forward);
+            if (allowPass8Avx)
+            {
+                if (forward)
+                {
+                    Pass2Packet128<ForwardPass8Direction>(data, scratch, _factors[0].Twiddles);
+                }
+                else
+                {
+                    Pass2Packet128<BackwardPass8Direction>(data, scratch, _factors[0].Twiddles);
+                }
+            }
+            else
+            {
+                Pass2(64, 1, data, scratch, _factors[0].Twiddles, forward);
+            }
+
             Pass8(8, 2, scratch, data, _factors[1].Twiddles, forward, allowPass8Avx);
             if (allowPass8Avx)
             {
@@ -979,6 +1063,35 @@ public static class PocketFftComplex
             }
 
             return true;
+        }
+
+        private static void Pass2Packet128<TDirection>(
+            ReadOnlySpan<Value> input,
+            Span<Value> output,
+            Value[] twiddles)
+            where TDirection : struct, IPass8Direction
+        {
+            const int halfLength = 64;
+            Pair(out Value firstSum, out Value firstDifference, input[0], input[halfLength]);
+            output[0] = firstSum;
+            output[halfLength] = firstDifference;
+
+            ref Value source = ref MemoryMarshal.GetReference(input);
+            ref Value destination = ref MemoryMarshal.GetReference(output);
+            ref Value roots = ref MemoryMarshal.GetArrayDataReference(twiddles);
+            for (int i = 1; i < halfLength - 1; i += 2)
+            {
+                Vector256<double> left = LoadTwoValues(ref source, i);
+                Vector256<double> right = LoadTwoValues(ref source, i + halfLength);
+                StoreTwoValues(ref destination, i, Avx.Add(left, right));
+                StoreTwoValues(ref destination, i + halfLength,
+                    TDirection.SpecialMultiply(Avx.Subtract(left, right), LoadTwoValues(ref roots, i - 1)));
+            }
+
+            Value lastLeft = input[halfLength - 1];
+            Value lastRight = input[^1];
+            output[halfLength - 1] = Add(lastLeft, lastRight);
+            output[^1] = TDirection.SpecialMultiply(Subtract(lastLeft, lastRight), twiddles[^1]);
         }
 
         private static void Pass2(

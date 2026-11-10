@@ -46,6 +46,17 @@ public sealed class UInt8SampleLoader : IRfSampleLoader
 
 public sealed class Int8SampleLoader : IRfSampleLoader
 {
+    private readonly int _scale;
+
+    public Int8SampleLoader() : this(scaleToPcm16: false)
+    {
+    }
+
+    internal Int8SampleLoader(bool scaleToPcm16)
+    {
+        _scale = scaleToPcm16 ? 256 : 1;
+    }
+
     public double[]? Read(Stream stream, long sample, int readLength)
     {
         byte[] buffer = UInt8SampleLoader.ReadExactOrNull(stream, sample, readLength, 1);
@@ -57,7 +68,7 @@ public sealed class Int8SampleLoader : IRfSampleLoader
         var output = new double[readLength];
         for (int i = 0; i < output.Length; i++)
         {
-            output[i] = unchecked((sbyte)buffer[i]);
+            output[i] = unchecked((sbyte)buffer[i]) * _scale;
         }
 
         return output;

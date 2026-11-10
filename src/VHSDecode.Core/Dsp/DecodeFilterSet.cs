@@ -54,6 +54,8 @@ public sealed record DecodeFilterSet(
     public double LdVideoSyncOffset { get; init; }
 
     public bool ChromaBurstUsesDemodulatedVideo { get; init; }
+
+    internal Complex[]? CurrentChromaBlockGain { get; init; }
 }
 
 public sealed record DecodeFilterOptions(
@@ -79,7 +81,10 @@ public sealed record DecodeFilterOptions(
     SubDeemphasisOptions? SubDeemphasis = null,
     bool ExportRawTbc = false,
     bool UseChromaAfc = false,
-    RfFmDemodulatorMode FmDemodulatorMode = RfFmDemodulatorMode.ConjugateProduct);
+    RfFmDemodulatorMode FmDemodulatorMode = RfFmDemodulatorMode.ConjugateProduct)
+{
+    internal bool UseCurrentVhsFilters { get; init; }
+}
 
 public enum RfFmDemodulatorMode
 {
@@ -178,6 +183,9 @@ public static class DecodeFilterSetBuilder
         TransferFunction? chromaBurstVideoNotch = chromaBurstSos is null
             ? null
             : BuildChromaVideoNotchFilter(options, sampleRateHz);
+        Complex[]? currentChromaBlockGain = options.UseCurrentVhsFilters && !options.UseChromaAfc && chromaBurst is not null
+            ? CombineChromaBlockGain(chromaBurst, chromaBurstAudioNotch, chromaBurstVideoNotch)
+            : null;
         SosSection[]? vhsEnvelopeSos = BuildVhsEnvelopeSos(parameters, nyquistHz);
         SosSection[]? vhsRfTopSos = BuildVhsRfTopSos(parameters, nyquistHz);
         Complex[] videoLowPass = BuildVideoLowPass(
@@ -241,6 +249,7 @@ public static class DecodeFilterSetBuilder
         {
             VideoLowPass05Offset = DecodeFilterSet.DefaultVideoLowPass05Offset,
             LdVideoBurstOffset = ldVideoBurst is null ? 0 : DecodeFilterSet.DefaultLdVideoBurstOffset,
+            CurrentChromaBlockGain = currentChromaBlockGain,
             ChromaBurstUsesDemodulatedVideo = isVhsRfDecode
                 && !FormatCatalog.IsColorUnder(parameters.TapeFormat)
         };
@@ -658,6 +667,35 @@ public static class DecodeFilterSetBuilder
         MakeZeroPhaseMagnitudeSquared(response);
 
         return response;
+    }
+
+    private static Complex[] CombineChromaBlockGain(
+        Complex[] burstGain,
+        TransferFunction? audioNotch,
+        TransferFunction? videoNotch)
+    {
+        if (audioNotch is null && videoNotch is null)
+        {
+            return burstGain;
+        }
+
+        Complex[] gain = burstGain.ToArray();
+        foreach (TransferFunction? notch in new[] { audioNotch, videoNotch })
+        {
+            if (notch is null)
+            {
+                continue;
+            }
+
+            Complex[] response = IirFilterDesign.FrequencyResponse(notch, gain.Length);
+            MakeZeroPhaseMagnitudeSquared(response);
+            for (int i = 0; i < gain.Length; i++)
+            {
+                gain[i] = new Complex(gain[i].Real * response[i].Real, 0.0);
+            }
+        }
+
+        return gain;
     }
 
     public static TransferFunction? BuildChromaFinalFilter(
@@ -1086,7 +1124,7 @@ public static class DecodeFilterSetBuilder
             }
         }
 
-        ApplyCustomVideoFilters(video, rfParams, sampleRateHz, blockLength);
+        ApplyCustomVideoFilters(video, rfParams, sampleRateHz, blockLength, options.UseCurrentVhsFilters);
         return video;
     }
 
@@ -1557,7 +1595,8 @@ public static class DecodeFilterSetBuilder
         return output;
     }
 
-    private static void ApplyCustomVideoFilters(Complex[] target, JsonElement rfParams, double sampleRateHz, int blockLength)
+    private static void ApplyCustomVideoFilters(
+        Complex[] target, JsonElement rfParams, double sampleRateHz, int blockLength, bool useCurrentVhsFilters)
     {
         if (!rfParams.TryGetProperty("video_custom_luma_filters", out JsonElement filtersElement)
             || filtersElement.ValueKind != JsonValueKind.Array)
@@ -1574,6 +1613,8 @@ public static class DecodeFilterSetBuilder
                     filterElement.GetProperty("filename").GetString() ?? string.Empty,
                     sampleRateHz,
                     blockLength),
+                "analog" when useCurrentVhsFilters => BuildAnalogCustomVideoFilter(
+                    filterElement, sampleRateHz, blockLength),
                 "highshelf" => IirFilterDesign.FrequencyResponse(
                     IirFilterDesign.Shelf(
                         filterElement.GetProperty("midfreq").GetDouble(),
@@ -1603,6 +1644,35 @@ public static class DecodeFilterSetBuilder
                 target[i] *= response[i];
             }
         }
+    }
+
+    private static Complex[] BuildAnalogCustomVideoFilter(JsonElement filter, double sampleRateHz, int blockLength)
+    {
+        double[] zeros = filter.GetProperty("zeros_tau").EnumerateArray().Select(value => value.GetDouble()).ToArray();
+        double[] poles = filter.GetProperty("poles_tau").EnumerateArray().Select(value => value.GetDouble()).ToArray();
+        var response = new Complex[blockLength];
+        for (int i = 0; i <= blockLength / 2; i++)
+        {
+            double angularFrequency = 2.0 * Math.PI * (i * (sampleRateHz / blockLength));
+            Complex gain = Complex.One;
+            foreach (double zero in zeros)
+            {
+                gain *= new Complex(1.0, angularFrequency * zero);
+            }
+
+            foreach (double pole in poles)
+            {
+                gain /= new Complex(1.0, angularFrequency * pole);
+            }
+
+            response[i] = gain;
+            if (i > 0 && i < blockLength / 2)
+            {
+                response[blockLength - i] = Complex.Conjugate(gain);
+            }
+        }
+
+        return response;
     }
 
     private static void ApplyRfInputNotchIfPresent(Complex[] target, DecodeFilterOptions options, double nyquistHz, int blockLength)

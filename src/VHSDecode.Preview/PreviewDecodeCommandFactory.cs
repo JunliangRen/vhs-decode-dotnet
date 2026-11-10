@@ -1,5 +1,6 @@
 using System.Numerics;
 using VHSDecode.Core.CommandLine;
+using VHSDecode.Core.Decode;
 using VHSDecode.Core.Dsp;
 
 namespace VHSDecode.Preview;
@@ -38,6 +39,12 @@ internal static class PreviewDecodeCommandFactory
                 "CUDA-fast preview currently supports the VHS command only; no CPU preview fallback was performed.");
         }
 
+        if (cudaFast && command.GetSource("compat_version") != ParsedOptionSource.Default
+            && UpstreamBehaviorProfileParser.Parse(command.Get<string>("compat_version")) == UpstreamBehaviorProfile.Current)
+        {
+            throw new NotSupportedException("CUDA-fast VHS Current supports file decode only.");
+        }
+
         var values = new Dictionary<string, object?>(command.Values, StringComparer.Ordinal);
         var sources = new Dictionary<string, ParsedOptionSource>(command.OptionSources, StringComparer.Ordinal);
         Set(values, sources, "write_db", false);
@@ -65,7 +72,7 @@ internal static class PreviewDecodeCommandFactory
             Set(values, sources, "disable_comb", true);
             Set(values, sources, "detect_chroma_track_phase", false);
             Set(values, sources, "cti_mix", 0.0);
-            if (command.GetSource("compat_version") == ParsedOptionSource.Default)
+            if (!cudaFast && command.GetSource("compat_version") == ParsedOptionSource.Default)
             {
                 Set(values, sources, "compat_version", "current");
             }

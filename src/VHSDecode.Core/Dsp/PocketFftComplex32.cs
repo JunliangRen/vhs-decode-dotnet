@@ -19,6 +19,8 @@ internal static class PocketFftComplex32
         Vector256.Create(float.MaxValue / 16.0f);
     private static readonly Vector256<float> FloatPass11MaximumSafeMagnitude =
         Vector256.Create(float.MaxValue / 64.0f);
+    private static readonly Vector256<int> Pass5PacketGatherIndices =
+        Vector256.Create(0, 1, 10, 11, 20, 21, 30, 31);
     private static readonly Vector256<int> Pass11PacketGatherIndices =
         Vector256.Create(0, 1, 22, 23, 44, 45, 66, 67);
     private static readonly Vector256<float> NegateEvenComponents =
@@ -1091,7 +1093,23 @@ internal static class PocketFftComplex32
             Value[] twiddles,
             bool permitPass5Avx)
         {
-            for (int k = 0; k < l1; k++)
+            int k = 0;
+            if (permitPass5Avx && ido == 1 && Avx2.IsSupported)
+            {
+                int vectorizedEnd = l1 & ~3;
+                for (; k < vectorizedEnd; k += 4)
+                {
+                    if (!Pass5VectorIndex(ido, l1, input, output, twiddles, k, i: 0))
+                    {
+                        for (int scalar = k; scalar < k + 4; scalar++)
+                        {
+                            Pass5Index(0, scalar, ido, l1, input, output, twiddles, applyTwiddle: false);
+                        }
+                    }
+                }
+            }
+
+            for (; k < l1; k++)
             {
                 Pass5Index(
                     0,
@@ -1148,7 +1166,7 @@ internal static class PocketFftComplex32
             }
         }
 
-        private static bool Pass5VectorIndex(
+        private static unsafe bool Pass5VectorIndex(
             int ido,
             int l1,
             Value[] input,
@@ -1167,15 +1185,32 @@ internal static class PocketFftComplex32
                 -0.5877852522924731291687059546390728f;
 
             int inputBase = i + (ido * 5 * k);
-            Vector256<float> t0 = LoadValueVector(input, inputBase);
-            Vector256<float> input1 =
-                LoadValueVector(input, inputBase + ido);
-            Vector256<float> input4 =
-                LoadValueVector(input, inputBase + (4 * ido));
-            Vector256<float> input2 =
-                LoadValueVector(input, inputBase + (2 * ido));
-            Vector256<float> input3 =
-                LoadValueVector(input, inputBase + (3 * ido));
+            Vector256<float> t0;
+            Vector256<float> input1;
+            Vector256<float> input4;
+            Vector256<float> input2;
+            Vector256<float> input3;
+            if (ido == 1)
+            {
+                fixed (Value* inputPointer = input)
+                {
+                    float* components = (float*)(inputPointer + inputBase);
+                    t0 = Avx2.GatherVector256(components, Pass5PacketGatherIndices, 4);
+                    input1 = Avx2.GatherVector256(components + 2, Pass5PacketGatherIndices, 4);
+                    input4 = Avx2.GatherVector256(components + 8, Pass5PacketGatherIndices, 4);
+                    input2 = Avx2.GatherVector256(components + 4, Pass5PacketGatherIndices, 4);
+                    input3 = Avx2.GatherVector256(components + 6, Pass5PacketGatherIndices, 4);
+                }
+            }
+            else
+            {
+                t0 = LoadValueVector(input, inputBase);
+                input1 = LoadValueVector(input, inputBase + ido);
+                input4 = LoadValueVector(input, inputBase + (4 * ido));
+                input2 = LoadValueVector(input, inputBase + (2 * ido));
+                input3 = LoadValueVector(input, inputBase + (3 * ido));
+            }
+
             if (!AreSafeForPass5Vector(t0, input1, input2, input3, input4))
             {
                 return false;
@@ -1195,13 +1230,14 @@ internal static class PocketFftComplex32
             int outputBase = i + (ido * k);
             int outputStride = ido * l1;
             int twiddleStride = ido - 1;
+            Value[]? appliedTwiddles = ido == 1 ? null : twiddles;
             StoreValueVector(
                 output,
                 outputBase,
                 Avx.Add(Avx.Add(t0, t1), t2));
             StorePass5VectorPair(
                 output,
-                twiddles,
+                appliedTwiddles,
                 outputBase,
                 outputStride,
                 twiddleStride,
@@ -1219,7 +1255,7 @@ internal static class PocketFftComplex32
                 Twiddle2Imaginary);
             StorePass5VectorPair(
                 output,
-                twiddles,
+                appliedTwiddles,
                 outputBase,
                 outputStride,
                 twiddleStride,
@@ -1240,7 +1276,7 @@ internal static class PocketFftComplex32
 
         private static void StorePass5VectorPair(
             Value[] output,
-            Value[] twiddles,
+            Value[]? twiddles,
             int outputBase,
             int outputStride,
             int twiddleStride,
@@ -1275,29 +1311,25 @@ internal static class PocketFftComplex32
                     t3));
             Vector256<float> cb = Avx.Xor(
                 Avx.Permute(imaginarySum, 0xB1),
-                Vector256.Create(
-                    -0.0f, 0.0f,
-                    -0.0f, 0.0f,
-                    -0.0f, 0.0f,
-                    -0.0f, 0.0f));
+                NegateEvenComponents);
             Vector256<float> first = Avx.Add(ca, cb);
             Vector256<float> second = Avx.Subtract(ca, cb);
-            StoreValueVector(
-                output,
-                outputBase + (firstOutput * outputStride),
-                SpecialMultiplyVector(
+            if (twiddles is not null)
+            {
+                first = SpecialMultiplyVector(
                     first,
                     LoadValueVector(
                         twiddles,
-                        (i - 1) + ((firstOutput - 1) * twiddleStride))));
-            StoreValueVector(
-                output,
-                outputBase + (secondOutput * outputStride),
-                SpecialMultiplyVector(
+                        (i - 1) + ((firstOutput - 1) * twiddleStride)));
+                second = SpecialMultiplyVector(
                     second,
                     LoadValueVector(
                         twiddles,
-                        (i - 1) + ((secondOutput - 1) * twiddleStride))));
+                        (i - 1) + ((secondOutput - 1) * twiddleStride)));
+            }
+
+            StoreValueVector(output, outputBase + (firstOutput * outputStride), first);
+            StoreValueVector(output, outputBase + (secondOutput * outputStride), second);
         }
 
         private static void Pass5Index(

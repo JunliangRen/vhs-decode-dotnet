@@ -201,6 +201,14 @@ public sealed class PreviewServerTests
 
         Assert.Equal("cuda-fast", template.Get<string>("dsp_backend"));
         Assert.True(template.Get<bool>(PreviewDecodeCommandFactory.DecodeAt20MspsOption));
+        Assert.Equal("v0.4.0", template.Get<string>("compat_version"));
+
+        ParsedCommand current = new CommandLineParser().Parse(
+            CliSpecs.Vhs,
+            ["--preview-server", "--dsp-backend", "cuda-fast", "--compat-version", "current", "capture.ldf"]);
+        NotSupportedException currentFailure = Assert.Throws<NotSupportedException>(
+            () => PreviewDecodeCommandFactory.CreateFastTemplate(current));
+        Assert.Contains("supports file decode only", currentFailure.Message, StringComparison.Ordinal);
 
         ParsedCommand laserDisc = new CommandLineParser().Parse(
             CliSpecs.LaserDisc,

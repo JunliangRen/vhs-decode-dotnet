@@ -356,10 +356,12 @@ public sealed class PocketFftMixedRadixCompatibilityTests
             ExpectedBackwardSha256);
     }
 
-    [Fact(DisplayName = "AVX radix-5 stages preserve scalar special-value bits")]
-    public void AvxRadix5StagesPreserveScalarSpecialValueBits()
+    [Theory(DisplayName = "AVX radix-5 stages preserve scalar special-value bits")]
+    [InlineData(55)]
+    [InlineData(40)]
+    [InlineData(75)]
+    public void AvxRadix5StagesPreserveScalarSpecialValueBits(int length)
     {
-        const int Length = 55;
         uint[][] patternSets =
         [
             [
@@ -385,7 +387,7 @@ public sealed class PocketFftMixedRadixCompatibilityTests
         ];
         foreach (uint[] patterns in patternSets)
         {
-            Complex32[] input = BuildBitPatternInput(Length, patterns);
+            Complex32[] input = BuildBitPatternInput(length, patterns);
             Complex32[] expectedForward =
                 PocketFftComplex32.TransformDirectScalarReference(input);
             Complex32[] actualForward = PocketFftComplex32.ForwardAnyLengthDucc(input);

@@ -768,6 +768,18 @@ possible capture has already been proven byte-for-byte identical.
   This independently corroborates the fixed-RF gate on a real capture.
   `current` remains opt-in because it targets a newer upstream behavior profile
   rather than the release-default v0.4.0 contract
+- the updated VHS `current` target is upstream commit
+  `1bc3ab4f02d1c0af624129ba3dd62f25d1c159c8`. A fresh build of that upstream
+  commit was compared on three 10-frame RF windows: a native NTSC 20 MSPS
+  capture, its resampled 40 MSPS derivative, and a native PAL S-VHS 40 MSPS
+  capture. All three backends matched the 20 ordered field records and the
+  luma TBC in each window. Exact also matched each chroma TBC byte-for-byte.
+  IPP's largest chroma difference was 41 of 65,535 code values, with at most
+  0.404% of samples different in a window. CUDA's FP64 RF path produced
+  identical chroma for the native captures and differed by one code value
+  at 17 samples in the resampled NTSC window. MESECAM carrier conversion and
+  its matching post-TBC filter, along with SECAM method 1, remain open
+  compatibility gaps.
 - VHS `--track_phase 0|1` now seeds the first field's chroma rotation index as
   well as the track-dependent luma `ire0` adjustment, with each rendered field
   consuming the same detected/alternated next-track index that v0.4.0 stores

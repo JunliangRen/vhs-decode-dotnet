@@ -806,6 +806,11 @@ public static class TbcOutputMetadataWriter
             videoParameters["tapeFormat"] = session.Parameters.TapeFormat;
         }
 
+        if (session.UsesVhsCudaCurrentFft)
+        {
+            videoParameters["dspBackend"] = DspBackendParser.CudaFastValue;
+        }
+
         if (session.ExecutionOptions.DspBackend == DspBackend.ApproxFast)
         {
             ApproxProvider provider = session.ExecutionOptions.ApproxProvider

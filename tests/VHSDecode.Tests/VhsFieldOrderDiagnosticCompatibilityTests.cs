@@ -74,12 +74,28 @@ public sealed class VhsFieldOrderDiagnosticCompatibilityTests : IDisposable
         Assert.False(File.Exists(session.OutputBase + ".log"));
     }
 
+    [Theory(DisplayName = "TYPEC progressive detection follows the selected VHS profile")]
+    [InlineData("v0.4.0", false)]
+    [InlineData("current", true)]
+    public void TypeCProgressiveDetectionFollowsSelectedProfile(string profile, bool expected)
+    {
+        using DecodeSession session = CreateSession("duplicate", "TYPEC", profile);
+        var error = new StringWriter();
+        session.RuntimeReporter = new DecodeRuntimeReporter(TextWriter.Null, error);
+
+        Decode(session, [true, true, true, true]);
+
+        Assert.Equal(TbcFieldOrderAction.None, session.FieldOrderOptions.Action);
+        Assert.Equal(expected, session.FieldOrderOptions.AllowProgressiveFlip);
+        Assert.Equal(expected ? ProgressiveMessage + Environment.NewLine : string.Empty, error.ToString());
+    }
+
     public void Dispose()
     {
         Directory.Delete(_tempDirectory, recursive: true);
     }
 
-    private DecodeSession CreateSession(string action, string? tapeFormat)
+    private DecodeSession CreateSession(string action, string? tapeFormat, string? profile = null)
     {
         string outputBase = Path.Combine(
             _tempDirectory,
@@ -97,6 +113,12 @@ public sealed class VhsFieldOrderDiagnosticCompatibilityTests : IDisposable
         {
             arguments.Add("--tf");
             arguments.Add(tapeFormat);
+        }
+
+        if (profile is not null)
+        {
+            arguments.Add("--compat-version");
+            arguments.Add(profile);
         }
 
         arguments.Add("input.s16");

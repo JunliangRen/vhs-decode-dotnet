@@ -266,7 +266,7 @@ public sealed class VhsVSyncLevelRefinerCurrentTests
         Assert.False(v040.TbcFieldDecoder.CurrentVhsVSyncLevelRefinementEnabled);
     }
 
-    [Fact(DisplayName = "Current VHS VSync back-porch assignment matches pinned upstream")]
+    [Fact(DisplayName = "Current VHS VSync uses the refined blanking level for back-porch adjustment")]
     public void CurrentVhsVSyncBackPorchAssignmentMatchesPinnedUpstream()
     {
         using DecodeSession session = CreateSession(
@@ -289,7 +289,7 @@ public sealed class VhsVSyncLevelRefinerCurrentTests
         VideoOutputConverter adjusted =
             session.TbcFieldDecoder.ApplyCurrentVhsVSyncLevels(refinement, current);
 
-        Assert.Equal(-40.0, adjusted.Ire0);
+        Assert.Equal(0.0, adjusted.Ire0);
         Assert.Equal(1.0, adjusted.HzIre);
     }
 

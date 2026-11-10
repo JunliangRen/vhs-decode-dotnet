@@ -258,6 +258,20 @@ if ($forbiddenDependencies.Count -gt 0) {
     throw "The CUDA-fast bridge has unstaged CUDA Runtime or Visual C++ runtime DLL dependencies: $($forbiddenDependencies -join ', ')"
 }
 
+Write-Host "Checking Current VHS CUDA FFT exports in $nativeOutputPath"
+$exportListing = @(& $dumpbinPath /nologo /exports $nativeOutputPath 2>&1)
+if ($LASTEXITCODE -ne 0) {
+    $exportListing | ForEach-Object { Write-Host $_ }
+    throw "dumpbin.exe could not list the CUDA-fast exports (exit code $LASTEXITCODE)."
+}
+
+foreach ($operation in 'create', 'transform', 'destroy') {
+    $symbol = "vhsdecode_cuda_fast_vhs_fft64_${operation}_v1"
+    if (-not ($exportListing | Select-String -Pattern ("\b" + [regex]::Escape($symbol) + "\s*$") -Quiet)) {
+        throw "The CUDA-fast bridge is missing the Current VHS FFT export $symbol."
+    }
+}
+
 Write-Host "Running $cancellationTestOutputPath"
 & $cancellationTestOutputPath
 if ($LASTEXITCODE -ne 0) {
