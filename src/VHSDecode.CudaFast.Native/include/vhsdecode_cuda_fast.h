@@ -230,6 +230,33 @@ vhsdecode_cuda_fast_ld_video_process_v1(
 VHSDECODE_CUDA_FAST_API void VHSDECODE_CUDA_FAST_CALL
 vhsdecode_cuda_fast_ld_video_destroy_v1(void* context);
 
+/*
+ * Optional VHS managed-Current FP64 real FFT. A context owns the pinned real
+ * and interleaved half-spectrum buffers. Serialize calls and buffer access.
+ * Forward consumes the real buffer; inverse consumes the half-spectrum.
+ * Inverse scales by 1/length. A successful transform has completed all
+ * device work and made the corresponding output buffer available.
+ */
+VHSDECODE_CUDA_FAST_API int32_t VHSDECODE_CUDA_FAST_CALL
+vhsdecode_cuda_fast_vhs_fft64_create_v1(
+    int32_t device_id,
+    int32_t length,
+    void** context,
+    double** pinned_real,
+    double** pinned_interleaved_spectrum,
+    char* error,
+    size_t error_capacity);
+
+VHSDECODE_CUDA_FAST_API int32_t VHSDECODE_CUDA_FAST_CALL
+vhsdecode_cuda_fast_vhs_fft64_transform_v1(
+    void* context,
+    int32_t inverse,
+    char* error,
+    size_t error_capacity);
+
+VHSDECODE_CUDA_FAST_API void VHSDECODE_CUDA_FAST_CALL
+vhsdecode_cuda_fast_vhs_fft64_destroy_v1(void* context);
+
 VHSDECODE_CUDA_FAST_API const char* VHSDECODE_CUDA_FAST_CALL
 vhsdecode_cuda_fast_get_last_error(void);
 

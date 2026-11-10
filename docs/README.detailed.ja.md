@@ -11,7 +11,7 @@
 `v0.4.0`、commit `43155200da87c0d49eb37d8ec09b1372075ee8e4`
 を互換性の基準としています。
 
-現在の .NET port release は [`v0.4.0-2.18.0`](https://github.com/JunliangRen/vhs-decode-dotnet/releases/tag/v0.4.0-2.18.0)（application version `2.18.0`）です。
+現在の .NET port release は [`v0.4.0-2.19.0`](https://github.com/JunliangRen/vhs-decode-dotnet/releases/tag/v0.4.0-2.19.0)（application version `2.19.0`）です。
 
 [LD EFM バッファー再利用の測定結果と適用範囲](LD_PERFORMANCE_V16.md)。
 
@@ -78,7 +78,7 @@
 | --- | --- | --- |
 | ソリューションとテスト | 実装済み | .NET 11 `.slnx`。標準 xUnit v3 テストは Visual Studio Test Explorer と `dotnet test` で利用できます。 |
 | CLI と引数 | 実装済み、スナップショットテストあり | facade とスタンドアロンの help、alias、default、validation、diagnostic、exit 動作は v0.4.0 を対象とします。 |
-| 上流動作プロファイル | 段階的に実装 | `v0.4.0` が引き続き default です。`current` は opt-in で、merged PR 341 の 5 stage、VHS HSync detection、VSync level refinement、NTSC chroma group-delay correction、asymmetric Super-Gaussian final filtering、current color-under burst/ACC/CTI chain を実装しています。 |
+| 上流動作プロファイル | 段階的に実装 | `v0.4.0` が引き続き既定です。明示的に選択する `current` は upstream `1bc3ab4` の VHS sync と color-under processing を対象とします。 |
 | VHS とテープ形式 | 実装済み。まれなキャプチャ差分あり | VHS、S-VHS、Betamax、Video8/Hi8、U-matic、Type C、EIAJ、および対応 PAL/NTSC 形式は release 互換経路を共有します。 |
 | CVBS | release 対応システムを実装済み | PAL/NTSC 経路は動作します。まれな vblank とオプション間のケースには実キャプチャ fixture の追加が必要です。 |
 | LaserDisc | 実装済み。まれなキャプチャ差分あり | Video、VBI、EFM、analog audio、AC3、RF-TBC、metadata、recovery、PAL/NTSC 経路を接続済みです。 |
@@ -139,7 +139,7 @@ VHS decode は `--compat-version v0.4.0|current` を受け付けます。
 | Profile | Default | 固定した upstream source | 現在有効な動作 |
 | --- | --- | --- | --- |
 | `v0.4.0` | はい | release v0.4.0、commit `43155200da87c0d49eb37d8ec09b1372075ee8e4` | 既存の release 互換 decode path。 |
-| `current` | いいえ | merged PR 341、commit `2f21e8ed6018b14561396cc95f1f6828054470b8` | exact-first VHS HSync candidate extraction、MAD rejection、multi-grid lock、level calibration、subpixel pulse synthesis、robust VSync level refinement、NTSC chroma group-delay correction、asymmetric zero-phase Super-Gaussian final filtering、fitted burst frequency/DC tracking、phase-compensated upconversion、current ACC/noise estimation、four-pass CTI。 |
+| `current` | いいえ | upstream commit `1bc3ab4f02d1c0af624129ba3dd62f25d1c159c8` | PR 341 の同期と color-under 処理に加え、HSync タイミング、VSync ブランキングレベル、フィールド状態、ブロック色フィルタ、PAL ヘッド切り替えと色 AGC の修正。 |
 
 `current` は段階導入される opt-in profile です。color-under format では
 PR 341 の official CTI default、`--cti_mix 1` と `--cti_width 2` を
@@ -261,14 +261,15 @@ decode.exe vhs --compat-version current --dsp-backend approx-fast --approx-resam
 PAL/NTSC VHS の full `ipp-fast`、`cuda-fast`、`approx-fast` decode は
 `--decode-at-20msps`（alias `--decode_at_20msps`）も受け付けます。40 MSPS input は
 固定 anti-alias 2:1 filter を通してから downstream DSP を 20 MSPS で実行し、native
-20 MSPS input はその DSP rate に直接入ります。Approx は input loader、CUDA は full
-signal graph の前段 GPU で reduction を行います。Exact full decode はこの switch を
+20 MSPS input はその DSP rate に直接入ります。Approx と `current` の CUDA は input
+loader で、`v0.4.0` の CUDA は full signal graph の前段 GPU で reduction を行います。
+Exact full decode はこの switch を
 拒否します。supported VHS preview route は同じ mode を自動的に強制し、output metadata
 の `fileLoc` は元の source-sample 座標を維持します。
 
 ### Current IPP/CUDA resource matrix
 
-current sustained local matrix は 2026-08-20 に source commit
+この matrix の CUDA 測定は `v0.4.0` profile を対象としています。2026-08-20 に source commit
 `41bfd923e2a47f926db3d4ea3c3ff70adbecaa48` の fresh build から測定しました。tested `decode.exe`
 の file version は 2.4.0.0、SHA-256 は
 `EF07E96D224A4BBEADBDE44EAEDB439C50D1646FA173FD57479255367B9A8868` です。
@@ -350,7 +351,15 @@ reversal を後続 code だけに帰属させません。
 標準 NTSC 40 MSPS LaserDisc のファイルデコードでは、`cuda-fast` が EFM デジタル音声と対象の
 FM 復調後の映像フィルターを FP64 CUDA で処理します。RF 復調、アナログ音声、フィールド処理は CPU Exact を使用します。[LD のコマンド例](../README.ja.md)
 
-VHS の `cuda-fast` は独立した Windows x64 NVIDIA CUDA 13 の全信号バックエンドです。
+Windows x64 では、PAL・NTSC の VHS と S-VHS のファイルデコードに
+`--compat-version current` と `--dsp-backend cuda-fast` を指定でき、20 または 40 MSPS の
+RF 入力に対応します。RF 変換は CUDA FP64 の実数 FFT、同期、TBC、色処理は共通の
+managed Current pipeline を使います。native 20 MSPS の入力レートを維持するには
+`--frequency 20 --no_resample` を指定します。Current の CUDA はファイルデコード専用で、
+Current の preview で CUDA を明示的に指定するとエラーになります。
+
+デフォルトの `v0.4.0` profile で VHS の `cuda-fast` を使うと、独立した Windows x64
+NVIDIA CUDA 13 の全信号バックエンドが動作します。
 `vhsdecode_cuda_fast.dll` と cuFFT を load し、cuVHS commit
 `c55e72073f44b27e8839efb842e4345af39887f7` に固定した RF demodulation、
 sync/line location、time-base correction、color-under、dropout graph を実行します。
@@ -374,9 +383,9 @@ K4 source reconstruction は compile 時に無効化され、この route は常
 backend へ fallback しません。full-decode contract は Windows x64 の PAL/NTSC VHS
 SP/LP/EP を通常の native 40 MSPS、または明示 switch により 40/native-20 MSPS input
 から内部 20 MSPS で処理するものです。CVBS、LaserDisc、HiFi、S-VHS、その他の
-video system、packed `.lds`、明示的な compatibility profile selection は近似処理しません。
+video system、packed `.lds` はこの全信号バックエンドの対応範囲外です。
 
-default native-rate 40 MSPS PAL/NTSC VHS preview は、まず NVIDIA driver API だけを
+`v0.4.0` の native-rate 40 MSPS PAL/NTSC VHS preview は、まず NVIDIA driver API だけを
 load して `cuInit` を呼び、CUDA 13、device 0、compute capability 7.5+ を確認します。
 この軽量 preflight は cuFFT を load せず、CUDA context や NVENC も初期化しません。
 通過した device だけが ABI v6 GPU preview route の完全起動を一度試し、preflight または
@@ -3937,9 +3946,9 @@ slowdown はありませんでした。
 final six-path table は `d526ef5` から build した executable
 `7F3434744E2120282C9888CF66AF730A184A103465561DE5A2B3F63B0022202F`
 を使用します。final 60 run はすべて complete profile/backend reference と一致
-しました。Python column は同じ固定 host の測定値を維持し、v0.4.0 の strict
-oracle は引き続き `g4315520 --threads 0`、merged Python PR341 は `current` の
-profile peer です。
+しました。Python column は同じ固定 host の測定値を使用します。v0.4.0 の strict
+oracle は `g4315520 --threads 0` で、この snapshot の `current` の参照は
+merged Python PR341 です。
 
 ### Double PocketFFT packet buffer の再利用
 

@@ -90,7 +90,8 @@ public sealed class RfBlockDecodePipeline : IDisposable
         bool useImmutableApproxFilterBank = false,
         bool useCompactApproxFloat32Outputs = false,
         bool useDirectStreamOutputBufferLease = false,
-        bool useApproxFrequencyDomainChroma = false)
+        bool useApproxFrequencyDomainChroma = false,
+        IVhsCudaRealFft? vhsCudaFft = null)
     {
         _loader = loader;
         _filters = filters;
@@ -101,7 +102,8 @@ public sealed class RfBlockDecodePipeline : IDisposable
             parallelizeVhsInverseStaging,
             companionIppFftFactory: null,
             vhsInverseCompanionWorkerThreads: vhsInverseCompanionWorkerThreads,
-            approxProvider: approxProvider);
+            approxProvider: approxProvider,
+            vhsCudaFft: vhsCudaFft);
         _approxFilterBank = useImmutableApproxFilterBank
             && dspBackend == DspBackend.ApproxFast
             ? ApproxRfFilterBank.Create(filters, filters.RfVideo.Length)
@@ -508,6 +510,18 @@ public sealed class RfBlockDecodePipeline : IDisposable
         float[]? approxFrequencyDomainChroma = useApproxFrequencyDomainChroma
             ? streamOutputBuffers?.Chroma ?? new float[input.Length]
             : null;
+        bool keepCompactChroma = !retainRfDiagnosticChannels
+            && !_filterOptions.UseChromaAfc
+            && _filters.ChromaBurstSos is not null
+            && !_filters.ChromaBurstUsesDemodulatedVideo
+            && _filters.ChromaBurstAudioNotch is null
+            && _filters.ChromaBurstVideoNotch is null;
+        float[]? currentIppChromaDestination = keepCompactChroma
+            && _useCurrentChromaShiftDc
+            && ActiveDspBackend == DspBackend.IppFast
+            && _filters.CurrentChromaBlockGain is not null
+            ? streamOutputBuffers?.Chroma ?? new float[input.Length]
+            : null;
         Complex[]? leasedInputSpectrum = null;
         try
         {
@@ -584,7 +598,9 @@ public sealed class RfBlockDecodePipeline : IDisposable
                 deferredHighPass: deferredHighPass,
                 deferredHighPassOrdinal: deferredHighPassOrdinal,
                 compactRfHighPass: compactRfHighPass,
-                projectRawDemod: projectRawDemod);
+                projectRawDemod: projectRawDemod,
+                currentIppChromaGain: _filters.CurrentChromaBlockGain,
+                currentIppChromaDestination: currentIppChromaDestination);
             Complex[]? efmScratch = efmScratchHandoff?.Take(_demodulator);
             if (reportDiagnostics)
             {
@@ -603,18 +619,21 @@ public sealed class RfBlockDecodePipeline : IDisposable
 
             if (_filters.ChromaBurst is not null || _filters.ChromaBurstSos is not null)
             {
-                bool keepCompactFloat32 = !retainRfDiagnosticChannels
-                    && !_filterOptions.UseChromaAfc
-                    && _filters.ChromaBurstSos is not null
-                    && !_filters.ChromaBurstUsesDemodulatedVideo
-                    && _filters.ChromaBurstAudioNotch is null
-                    && _filters.ChromaBurstVideoNotch is null;
-                demodulated = keepCompactFloat32
+                float[]? frequencyDomainChroma = demodulated.ChromaFloat32 ?? approxFrequencyDomainChroma;
+                float[]? currentChroma = frequencyDomainChroma is null
+                    && _filters.CurrentChromaBlockGain is { } blockGain
+                    ? DecodeCurrentChromaBlock(
+                        _filters.ChromaBurstUsesDemodulatedVideo ? demodulated.Video : input,
+                        blockGain,
+                        _filters.ChromaOffsetSamples,
+                        streamOutputBuffers?.Chroma)
+                    : null;
+                demodulated = keepCompactChroma
                     ? demodulated with
                     {
-                        ChromaFloat32 = approxFrequencyDomainChroma is not null
-                            ? ShiftApproxFrequencyDomainChroma(
-                                approxFrequencyDomainChroma,
+                        ChromaFloat32 = currentChroma ?? (frequencyDomainChroma is not null
+                            ? ShiftFrequencyDomainChroma(
+                                frequencyDomainChroma,
                                 _filters,
                                 _useCurrentChromaShiftDc)
                             : DecodeChromaBurstFloat32(
@@ -622,11 +641,13 @@ public sealed class RfBlockDecodePipeline : IDisposable
                                 _filters,
                                 _useCurrentChromaShiftDc,
                                 streamOutputBuffers?.Chroma,
-                                _chromaBurstIppSos)
+                                _chromaBurstIppSos))
                     }
                     : demodulated with
                     {
-                        Chroma = _filterOptions.UseChromaAfc
+                        Chroma = currentChroma is not null
+                        ? Array.ConvertAll(currentChroma, static value => (double)value)
+                        : _filterOptions.UseChromaAfc
                         ? input.ToArray()
                         : DecodeChromaBurst(
                             _filters.ChromaBurstUsesDemodulatedVideo
@@ -877,7 +898,15 @@ public sealed class RfBlockDecodePipeline : IDisposable
             filters.ChromaOffsetSamples);
     }
 
-    private static float[] ShiftApproxFrequencyDomainChroma(
+    internal static float[] DecodeCurrentChromaBlock(
+        ReadOnlySpan<double> input, ReadOnlySpan<Complex> gain, int offset, float[]? destination = null)
+    {
+        float[] chroma = destination ?? new float[input.Length];
+        PocketFftComplex.FilterDuccRealToSingle(input, gain, chroma.AsSpan(0, input.Length));
+        return VhsChromaDecoder.ShiftChromaAndRemoveDcFloat32CurrentInPlace(chroma, offset);
+    }
+
+    private static float[] ShiftFrequencyDomainChroma(
         float[] chroma,
         DecodeFilterSet filters,
         bool useCurrentChromaShiftDc)

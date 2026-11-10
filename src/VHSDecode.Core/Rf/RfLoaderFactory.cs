@@ -116,7 +116,8 @@ public static class RfLoaderFactory
 
     internal static IRfSampleLoader CreateVhsNativeSource(
         string filename,
-        bool fastContainerSeeking)
+        bool fastContainerSeeking,
+        bool scaleSigned8ToPcm16 = false)
     {
         if (filename.EndsWith(".raw", StringComparison.OrdinalIgnoreCase))
         {
@@ -125,7 +126,7 @@ public static class RfLoaderFactory
 
         if (filename.EndsWith(".s8", StringComparison.OrdinalIgnoreCase))
         {
-            return new Int8SampleLoader();
+            return new Int8SampleLoader(scaleSigned8ToPcm16);
         }
 
         return CreateNative(

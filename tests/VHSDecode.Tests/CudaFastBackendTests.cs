@@ -1,7 +1,9 @@
+using System.Numerics;
 using System.Runtime.InteropServices;
 using System.Text.Json;
 using VHSDecode.Core.CommandLine;
 using VHSDecode.Core.Decode;
+using VHSDecode.Core.Dsp;
 using VHSDecode.Core.Dsp.CudaFast;
 using VHSDecode.Core.HiFi;
 using VHSDecode.Core.Rf;
@@ -738,30 +740,93 @@ public sealed class CudaFastBackendTests
         }
     }
 
-    [Fact(DisplayName = "CUDA-fast rejects an explicit CPU compatibility profile")]
-    public void ExplicitCompatibilityProfileIsRejected()
+    [Theory]
+    [InlineData("PAL")]
+    [InlineData("NTSC")]
+    public void CurrentVhsUsesItsOwnCudaFileAdmission(string system)
     {
-        string directory = CreateTemporaryDirectory();
-        try
+        ParsedCommand current = Parse("input.u8", "output", "--no_resample",
+            "--system", system, "--compat-version", "current");
+        ParsedCommand legacy = Parse("input.u8", "output", "--no_resample",
+            "--system", system, "--compat-version", "v0.4.0");
+
+        Assert.True(CudaFastDecodeRunner.IsCurrentVhsCommand(current));
+        CudaFastDecodeRunner.ValidateCurrentCommand(current);
+        Assert.False(CudaFastDecodeRunner.IsCurrentVhsCommand(legacy));
+        _ = CudaFastDecodeRunner.ValidateCommand(legacy);
+        NotSupportedException exception = Assert.Throws<NotSupportedException>(
+            () => CudaFastDecodeRunner.ValidateCommand(current));
+        Assert.Contains("--compat-version current", exception.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void CurrentCudaVhsFileAdmissionAcceptsManagedTwentyMspsOptions()
+    {
+        ParsedCommand current = Parse("input.u8", "output",
+            "--compat-version", "current", "--frequency", "20", "--no_resample",
+            "--ire0_adjust", "--dctp");
+
+        CudaFastDecodeRunner.ValidateCurrentCommand(current);
+    }
+
+    [Theory]
+    [InlineData("20", 1)]
+    [InlineData("40", 2)]
+    [InlineData(null, 2)]
+    public void CurrentCudaVhsDecodeAt20MspsBuildsManagedComplement(
+        string? inputRate,
+        int sourceSamplesPerDecodeSample)
+    {
+        string[] rateOptions = inputRate is null ? [] : ["--frequency", inputRate];
+        ParsedCommand current = Parse("input.u8", "output",
+            ["--compat-version", "current", "--decode-at-20msps", .. rateOptions]);
+        CudaFastDecodeRunner.ValidateCurrentCommand(current);
+
+        var values = new Dictionary<string, object?>(current.Values, StringComparer.Ordinal)
         {
-            string inputPath = Path.Combine(directory, "input.u8");
-            File.WriteAllBytes(inputPath, new byte[16]);
-            ParsedCommand command = Parse(
-                inputPath,
-                Path.Combine(directory, "output"),
-                "--no_resample",
-                "--compat-version",
-                "current");
+            ["dsp_backend"] = DspBackendParser.ExactValue
+        };
+        var complement = new ParsedCommand(
+            current.Spec, values, [.. current.Positionals], current.ProgramName, current.OptionSources);
 
-            NotSupportedException exception = Assert.Throws<NotSupportedException>(
-                () => CudaFastDecodeRunner.ValidateCommand(command));
-
-            Assert.Contains("--compat-version", exception.Message, StringComparison.Ordinal);
-            Assert.Contains("was not ignored", exception.Message, StringComparison.Ordinal);
+        Assert.Throws<NotSupportedException>(() => DecodeSessionFactory.Create(complement));
+        using var fft = new TestVhsCudaRealFft();
+        using DecodeSession session = DecodeSessionFactory.CreateForVhsCudaCurrent(complement, fft);
+        Assert.True(session.UsesVhsCudaCurrentFft);
+        Assert.Equal(DspBackend.Exact, session.ExecutionOptions.DspBackend);
+        Assert.Equal(20_000_000, session.DecodeSampleRateHz);
+        Assert.Equal(sourceSamplesPerDecodeSample, session.SourceSamplesPerDecodeSample);
+        if (sourceSamplesPerDecodeSample == 2)
+        {
+            Assert.IsType<HalfRateSampleLoader>(session.Loader);
         }
-        finally
+    }
+
+    [Fact]
+    public void CurrentCudaVhsFileAdmissionRejectsCxAdcRateOverride()
+    {
+        ParsedCommand current = Parse("input.u8", "output",
+            "--compat-version", "current", "--frequency", "20", "--cxadc", "--no_resample");
+
+        var error = Assert.Throws<NotSupportedException>(
+            () => CudaFastDecodeRunner.ValidateCurrentCommand(current));
+        Assert.Contains("20 or 40 MSPS", error.Message, StringComparison.Ordinal);
+    }
+
+    private sealed class TestVhsCudaRealFft : IVhsCudaRealFft
+    {
+        public int RealLength => DecodeSessionFactory.DefaultBlockLength;
+        public long ForwardCalls => 0;
+        public long InverseCalls => 0;
+
+        public void Forward(ReadOnlySpan<double> input, Span<Complex> output)
+            => throw new NotSupportedException();
+
+        public void Inverse(ReadOnlySpan<Complex> input, Span<double> output)
+            => throw new NotSupportedException();
+
+        public void Dispose()
         {
-            Directory.Delete(directory, recursive: true);
         }
     }
 

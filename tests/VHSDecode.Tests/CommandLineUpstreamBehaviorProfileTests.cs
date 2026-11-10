@@ -90,8 +90,8 @@ public sealed class CommandLineUpstreamBehaviorProfileTests
         Assert.Equal("oyvindln/vhs-decode", catalog.Repository);
         Assert.Equal("43155200da87c0d49eb37d8ec09b1372075ee8e4", v040.Commit);
         Assert.Equal("v0.4.0", v040.Algorithms["vhsSync"]);
-        Assert.Equal("2f21e8ed6018b14561396cc95f1f6828054470b8", current.Commit);
-        Assert.Equal("pull/341", current.Source);
+        Assert.Equal("1bc3ab4f02d1c0af624129ba3dd62f25d1c159c8", current.Commit);
+        Assert.Equal("commit/1bc3ab4f02d1c0af624129ba3dd62f25d1c159c8", current.Source);
         Assert.Equal("current", current.Algorithms["vhsSync"]);
         Assert.Equal("current", current.Algorithms["vhsVsyncLevels"]);
         Assert.Equal("current", current.Algorithms["chromaGroupDelay"]);
@@ -117,6 +117,7 @@ public sealed class CommandLineUpstreamBehaviorProfileTests
 
         Assert.Equal(expected, session.ExecutionOptions.UpstreamBehaviorProfile);
         Assert.Equal(expected, session.TbcFieldDecoder.UpstreamBehaviorProfile);
+        Assert.Equal(expected == UpstreamBehaviorProfile.Current, session.Filters.CurrentChromaBlockGain is not null);
         Assert.Equal(
             expected == UpstreamBehaviorProfile.Current,
             session.TbcFieldDecoder.ChromaFieldOptions!

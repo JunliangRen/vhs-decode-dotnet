@@ -17,11 +17,12 @@ internal enum FfmpegPcm16SeekMode
     MappedIndexedRawFlac
 }
 
-public sealed class FfmpegPcm16SampleLoader : IRfSampleLoader, IDisposable
+public sealed class FfmpegPcm16SampleLoader : IReusableRfSampleLoader, IDisposable
 {
     public const int ContainerAudioSampleRateHz = 40_000;
     public const int DefaultRewindSize = 2 * 1024 * 1024;
     public const int DefaultSeekThreshold = 40 * 1024 * 1024;
+    private const int ReusableBlockLength = 32 * 1024;
 
     private readonly string _filename;
     private readonly Func<string, long, int, byte[]?>? _readSegment;
@@ -41,6 +42,8 @@ public sealed class FfmpegPcm16SampleLoader : IRfSampleLoader, IDisposable
     private long _positionBytes;
     private byte[]? _rewindBuffer;
     private byte[]? _discardBuffer;
+    private byte[]? _blockPcmBuffer;
+    private double[]? _returnedBlock;
     private int _rewindStart;
     private int _rewindCount;
     private bool _disposed;
@@ -200,6 +203,22 @@ public sealed class FfmpegPcm16SampleLoader : IRfSampleLoader, IDisposable
     }
 
     public double[]? Read(Stream stream, long sample, int readLength)
+        => ReadCore(sample, readLength, reuseBlock: false);
+
+    bool IReusableRfSampleLoader.ReuseForSequentialDecode => true;
+
+    double[]? IReusableRfSampleLoader.ReadReusable(Stream stream, long sample, int readLength)
+        => ReadCore(sample, readLength, reuseBlock: readLength == ReusableBlockLength);
+
+    void IReusableRfSampleLoader.ReturnReusable(double[] buffer)
+    {
+        if (buffer.Length == ReusableBlockLength && _readSegment is null)
+        {
+            Interlocked.CompareExchange(ref _returnedBlock, buffer, null);
+        }
+    }
+
+    private double[]? ReadCore(long sample, int readLength, bool reuseBlock)
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
         if (sample < 0)
@@ -222,7 +241,7 @@ public sealed class FfmpegPcm16SampleLoader : IRfSampleLoader, IDisposable
             return ReadSegment(sample, readLength);
         }
 
-        return ReadStreaming(sample, readLength);
+        return ReadStreaming(sample, readLength, reuseBlock);
     }
 
     internal bool TryReadInt16(
@@ -273,6 +292,8 @@ public sealed class FfmpegPcm16SampleLoader : IRfSampleLoader, IDisposable
         }
 
         _disposed = true;
+        _blockPcmBuffer = null;
+        Interlocked.Exchange(ref _returnedBlock, null);
         CloseProcess();
         GC.SuppressFinalize(this);
     }
@@ -401,16 +422,20 @@ public sealed class FfmpegPcm16SampleLoader : IRfSampleLoader, IDisposable
         return DecodePcm16(buffer, readLength);
     }
 
-    private double[]? ReadStreaming(long sample, int readLength)
+    private double[]? ReadStreaming(long sample, int readLength, bool reuseBlock)
     {
-        byte[] data = GC.AllocateUninitializedArray<byte>(checked(readLength * sizeof(short)));
+        int byteCount = checked(readLength * sizeof(short));
+        byte[] data = reuseBlock
+            ? _blockPcmBuffer ??= GC.AllocateUninitializedArray<byte>(byteCount)
+            : GC.AllocateUninitializedArray<byte>(byteCount);
         int bytesRead = ReadStreamingPcm16Bytes(sample, data);
         if (bytesRead < data.Length)
         {
             return null;
         }
 
-        return DecodePcm16(data, readLength);
+        double[]? output = reuseBlock ? Interlocked.Exchange(ref _returnedBlock, null) : null;
+        return DecodePcm16(data, readLength, output);
     }
 
     private int ReadStreamingPcm16Bytes(long sample, Span<byte> destination)
@@ -464,9 +489,15 @@ public sealed class FfmpegPcm16SampleLoader : IRfSampleLoader, IDisposable
         return bufferedBytes + freshBytes;
     }
 
-    private static double[] DecodePcm16(byte[] buffer, int sampleCount)
+    private static double[] DecodePcm16(byte[] buffer, int sampleCount, double[]? output = null)
     {
-        var output = new double[sampleCount];
+        if (output is not null && BitConverter.IsLittleEndian)
+        {
+            LibsndfilePcm16SampleLoader.ConvertPcm16ToDouble(MemoryMarshal.Cast<byte, short>(buffer), output);
+            return output;
+        }
+
+        output ??= new double[sampleCount];
         for (int i = 0; i < output.Length; i++)
         {
             output[i] = BinaryPrimitives.ReadInt16LittleEndian(buffer.AsSpan(i * 2, 2));

@@ -91,6 +91,8 @@ public sealed record ChromaPhaseLine(
     public double BurstDc { get; init; }
 
     public double BurstFrequencyHz { get; init; }
+
+    internal double PhaseCorrectionRadians { get; init; }
 }
 
 public sealed record ChromaPhaseSequenceResult(
@@ -269,14 +271,16 @@ internal sealed class VhsChromaCarrierTableCache
         int sampleCount,
         double carrierMHz,
         double outputSampleRateMHz,
-        int workerThreads)
+        int workerThreads,
+        bool useDoubleAngles = false)
     {
         lock (_gate)
         {
             if (_carrier is { } cached
                 && cached.SampleCount == sampleCount
                 && cached.CarrierMHz == carrierMHz
-                && cached.OutputSampleRateMHz == outputSampleRateMHz)
+                && cached.OutputSampleRateMHz == outputSampleRateMHz
+                && cached.UseDoubleAngles == useDoubleAngles)
             {
                 return (cached.Sin, cached.Cos);
             }
@@ -285,11 +289,13 @@ internal sealed class VhsChromaCarrierTableCache
                 sampleCount,
                 carrierMHz,
                 outputSampleRateMHz,
-                workerThreads);
+                workerThreads,
+                useDoubleAngles);
             _carrier = new CarrierEntry(
                 sampleCount,
                 carrierMHz,
                 outputSampleRateMHz,
+                useDoubleAngles,
                 sin,
                 cos);
             return (sin, cos);
@@ -345,6 +351,7 @@ internal sealed class VhsChromaCarrierTableCache
         int SampleCount,
         double CarrierMHz,
         double OutputSampleRateMHz,
+        bool UseDoubleAngles,
         double[] Sin,
         double[] Cos);
 }
@@ -641,12 +648,14 @@ public static class VhsChromaDecoder
                 chromaField.Length,
                 options.FscMHz,
                 outputSampleRateMHz,
-                options.WorkerThreads)
+                options.WorkerThreads,
+                options.UseCurrentChromaProcessing)
             ?? BuildCarrierTables(
                 chromaField.Length,
                 options.FscMHz,
                 outputSampleRateMHz,
-                options.WorkerThreads);
+                options.WorkerThreads,
+                options.UseCurrentChromaProcessing);
         ChromaPhaseSequenceResult result = GetPhaseRotationSequenceCore(
             options.ChromaRotation,
             chromaRotationIndex,
@@ -697,7 +706,8 @@ public static class VhsChromaDecoder
             options.EnableColorKiller,
             previousBurstDetectedLine,
             options.ColorSystem,
-            options.UseCurrentChromaProcessing ? options.WorkerThreads : 1);
+            options.UseCurrentChromaProcessing ? options.WorkerThreads : 1,
+            fitPalHeadSwitch: options.UseCurrentChromaProcessing);
         return new VhsChromaPhaseAnalysis(
             result,
             heterodyne,
@@ -1077,18 +1087,20 @@ public static class VhsChromaDecoder
                     lineOffset,
                     options.OutputLineLength,
                     phase.PhaseSequence,
-                    heterodyne!))
+                    heterodyne!,
+                    options.UseCurrentChromaProcessing))
             {
                 upconverted = mutableChromaField;
             }
             else
             {
-                upconverted = UpconvertChroma(
+                upconverted = UpconvertChromaCore(
                     chromaField,
                     lineOffset,
                     options.OutputLineLength,
                     phase.PhaseSequence,
-                    heterodyne!);
+                    heterodyne!,
+                    options.UseCurrentChromaProcessing);
             }
         }
 
@@ -1166,7 +1178,9 @@ public static class VhsChromaDecoder
                     phase.PhaseSequence,
                     phase.BurstDetectedLine,
                     options.SyncTipLength,
-                    workerThreads: options.WorkerThreads);
+                    workerThreads: options.WorkerThreads,
+                    lineOffset: lineOffset,
+                    lineLength: options.OutputLineLength);
             if (options.CtiMix != 0.0)
             {
                 ChromaTransientImprovement.ApplyInPlace(
@@ -1881,7 +1895,8 @@ public static class VhsChromaDecoder
         bool enableColorKiller,
         int prevBurstDetectedLine,
         string colorSystem,
-        int workerThreads)
+        int workerThreads,
+        bool fitPalHeadSwitch = false)
     {
         ArgumentOutOfRangeException.ThrowIfNegative(lineOffset);
         ArgumentOutOfRangeException.ThrowIfNegative(linesOut);
@@ -1905,7 +1920,8 @@ public static class VhsChromaDecoder
             enableColorKiller,
             prevBurstDetectedLine,
             colorSystem,
-            workerThreads);
+            workerThreads,
+            fitPalHeadSwitch);
     }
 
     private static ChromaPhaseSequenceResult GetPhaseRotationSequenceCore(
@@ -1921,7 +1937,8 @@ public static class VhsChromaDecoder
         bool enableColorKiller,
         int prevBurstDetectedLine,
         string colorSystem,
-        int workerThreads)
+        int workerThreads,
+        bool fitPalHeadSwitch = false)
     {
         ArgumentOutOfRangeException.ThrowIfNegative(lineOffset);
         ArgumentOutOfRangeException.ThrowIfNegative(linesOut);
@@ -1945,7 +1962,8 @@ public static class VhsChromaDecoder
             detectChromaTrackPhase,
             rotationCheckStartLine,
             colorSystem,
-            workerThreads);
+            workerThreads,
+            fitPalHeadSwitch);
 
         if (ShouldFlipTrackPhase(chromaRotation, phaseSequence, end, colorSystem))
         {
@@ -1960,7 +1978,8 @@ public static class VhsChromaDecoder
                 detectChromaTrackPhase,
                 rotationCheckStartLine,
                 colorSystem,
-                workerThreads);
+                workerThreads,
+                fitPalHeadSwitch);
         }
 
         return SummarizePhaseSequence(
@@ -2019,6 +2038,21 @@ public static class VhsChromaDecoder
         int lineLength,
         IReadOnlyList<ChromaPhaseLine> phaseRotationSequence,
         IReadOnlyList<double[]> chromaHeterodyne)
+        => UpconvertChromaCore(
+            chroma,
+            lineOffset,
+            lineLength,
+            phaseRotationSequence,
+            chromaHeterodyne,
+            useCurrentChromaProcessing: false);
+
+    internal static double[] UpconvertChromaCore(
+        ReadOnlySpan<double> chroma,
+        int lineOffset,
+        int lineLength,
+        IReadOnlyList<ChromaPhaseLine> phaseRotationSequence,
+        IReadOnlyList<double[]> chromaHeterodyne,
+        bool useCurrentChromaProcessing)
     {
         ArgumentOutOfRangeException.ThrowIfNegative(lineOffset);
         ArgumentOutOfRangeException.ThrowIfNegativeOrZero(lineLength);
@@ -2026,6 +2060,11 @@ public static class VhsChromaDecoder
         double[] output = new double[chroma.Length];
         foreach (ChromaPhaseLine phaseLine in phaseRotationSequence)
         {
+            if (useCurrentChromaProcessing && phaseLine.LineNumber < lineOffset)
+            {
+                continue;
+            }
+
             (int lineStart, int lineEnd) = GetNumpySliceRange(
                 chroma.Length,
                 lineOffset,
@@ -2037,15 +2076,20 @@ public static class VhsChromaDecoder
             }
 
             double[] heterodyne = chromaHeterodyne[phaseLine.PhaseRotation];
-            if (heterodyne.Length < chroma.Length)
+            double[]? quadrature = GetChromaQuadrature(phaseLine, chromaHeterodyne, useCurrentChromaProcessing);
+            if (heterodyne.Length < chroma.Length || (quadrature is not null && quadrature.Length < chroma.Length))
             {
                 throw new ArgumentException("Chroma heterodyne table is shorter than the chroma field.", nameof(chromaHeterodyne));
             }
 
-            for (int i = lineStart; i < lineEnd; i++)
-            {
-                output[i] = (double)(float)(chroma[i] * heterodyne[i]);
-            }
+            MixChromaLine(
+                chroma,
+                output,
+                lineStart,
+                lineEnd,
+                heterodyne,
+                quadrature,
+                phaseLine.PhaseCorrectionRadians);
         }
 
         return output;
@@ -2056,7 +2100,8 @@ public static class VhsChromaDecoder
         int lineOffset,
         int lineLength,
         IReadOnlyList<ChromaPhaseLine> phaseRotationSequence,
-        IReadOnlyList<double[]> chromaHeterodyne)
+        IReadOnlyList<double[]> chromaHeterodyne,
+        bool useCurrentChromaProcessing = false)
     {
         ArgumentNullException.ThrowIfNull(chroma);
         ArgumentNullException.ThrowIfNull(phaseRotationSequence);
@@ -2071,6 +2116,11 @@ public static class VhsChromaDecoder
         for (int phaseIndex = 0; phaseIndex < phaseRotationSequence.Count; phaseIndex++)
         {
             ChromaPhaseLine phaseLine = phaseRotationSequence[phaseIndex];
+            if (useCurrentChromaProcessing && phaseLine.LineNumber < lineOffset)
+            {
+                continue;
+            }
+
             (int lineStart, int lineEnd) = GetNumpySliceRange(
                 chroma.Length,
                 lineOffset,
@@ -2085,14 +2135,15 @@ public static class VhsChromaDecoder
             }
 
             double[] heterodyne = chromaHeterodyne[phaseLine.PhaseRotation];
-            if (heterodyne.Length < chroma.Length)
+            double[]? quadrature = GetChromaQuadrature(phaseLine, chromaHeterodyne, useCurrentChromaProcessing);
+            if (heterodyne.Length < chroma.Length || (quadrature is not null && quadrature.Length < chroma.Length))
             {
                 throw new ArgumentException(
                     "Chroma heterodyne table is shorter than the chroma field.",
                     nameof(chromaHeterodyne));
             }
 
-            if (ReferenceEquals(heterodyne, chroma))
+            if (ReferenceEquals(heterodyne, chroma) || ReferenceEquals(quadrature, chroma))
             {
                 return false;
             }
@@ -2127,16 +2178,24 @@ public static class VhsChromaDecoder
 
         foreach (ChromaPhaseLine phaseLine in phaseRotationSequence)
         {
+            if (useCurrentChromaProcessing && phaseLine.LineNumber < lineOffset)
+            {
+                continue;
+            }
+
             (int lineStart, int lineEnd) = GetNumpySliceRange(
                 chroma.Length,
                 lineOffset,
                 lineLength,
                 phaseLine.LineNumber);
-            double[] heterodyne = chromaHeterodyne[phaseLine.PhaseRotation];
-            for (int index = lineStart; index < lineEnd; index++)
-            {
-                chroma[index] = (double)(float)(chroma[index] * heterodyne[index]);
-            }
+            MixChromaLine(
+                chroma,
+                chroma,
+                lineStart,
+                lineEnd,
+                chromaHeterodyne[phaseLine.PhaseRotation],
+                GetChromaQuadrature(phaseLine, chromaHeterodyne, useCurrentChromaProcessing),
+                phaseLine.PhaseCorrectionRadians);
         }
 
         int clearCursor = 0;
@@ -2155,6 +2214,11 @@ public static class VhsChromaDecoder
             for (int phaseIndex = startIndex; phaseIndex < endIndex; phaseIndex++)
             {
                 ChromaPhaseLine phaseLine = phaseRotationSequence[phaseIndex];
+                if (useCurrentChromaProcessing && phaseLine.LineNumber < lineOffset)
+                {
+                    continue;
+                }
+
                 (int lineStart, int lineEnd) = GetNumpySliceRange(
                     chroma.Length,
                     lineOffset,
@@ -2168,6 +2232,41 @@ public static class VhsChromaDecoder
                 chroma.AsSpan(cursor, lineStart - cursor).Clear();
                 cursor = lineEnd;
             }
+        }
+    }
+
+    private static double[]? GetChromaQuadrature(
+        ChromaPhaseLine phaseLine,
+        IReadOnlyList<double[]> chromaHeterodyne,
+        bool useCurrentChromaProcessing)
+        => useCurrentChromaProcessing && phaseLine.PhaseCorrectionRadians != 0.0
+            ? chromaHeterodyne[(phaseLine.PhaseRotation + 1) % 4]
+            : null;
+
+    private static void MixChromaLine(
+        ReadOnlySpan<double> chroma,
+        Span<double> output,
+        int lineStart,
+        int lineEnd,
+        double[] heterodyne,
+        double[]? quadrature,
+        double correction)
+    {
+        if (quadrature is null)
+        {
+            for (int index = lineStart; index < lineEnd; index++)
+            {
+                output[index] = (float)(chroma[index] * heterodyne[index]);
+            }
+
+            return;
+        }
+
+        (double sin, double cos) = Math.SinCos(correction);
+        for (int index = lineStart; index < lineEnd; index++)
+        {
+            double wave = (heterodyne[index] * cos) + (quadrature[index] * sin);
+            output[index] = (float)(chroma[index] * wave);
         }
     }
 
@@ -2286,6 +2385,11 @@ public static class VhsChromaDecoder
         {
             ChromaPhaseLine currentBurst =
                 phaseRotationSequence[phaseIndex];
+            if (currentBurst.LineNumber < lineOffset)
+            {
+                continue;
+            }
+
             double currentFrequencyRatio =
                 currentBurst.BurstFrequencyHz / fscHz;
             double currentHeterodyneHz =
@@ -2859,7 +2963,9 @@ public static class VhsChromaDecoder
         int syncTipLength,
         int workerThreads,
         int smoothingWindow = 8,
-        double madScale = 2.0)
+        double madScale = 2.0,
+        int lineOffset = 0,
+        int lineLength = 0)
         => ApplyCurrentAutomaticChromaGainInPlaceCore(
             chroma,
             burstAbsRef,
@@ -2868,7 +2974,9 @@ public static class VhsChromaDecoder
             syncTipLength,
             workerThreads,
             smoothingWindow,
-            madScale);
+            madScale,
+            lineOffset,
+            lineLength);
 
     private static CurrentAutomaticChromaGainResult ApplyCurrentAutomaticChromaGainInPlaceCore(
         Span<double> chroma,
@@ -2878,10 +2986,14 @@ public static class VhsChromaDecoder
         int syncTipLength,
         int workerThreads,
         int smoothingWindow,
-        double madScale)
+        double madScale,
+        int lineOffset = 0,
+        int lineLength = 0)
     {
         ArgumentNullException.ThrowIfNull(phaseSequence);
         ArgumentOutOfRangeException.ThrowIfNegative(smoothingWindow);
+        ArgumentOutOfRangeException.ThrowIfNegative(lineOffset);
+        ArgumentOutOfRangeException.ThrowIfNegative(lineLength);
         int burstCount = phaseSequence.Count;
         if (burstCount == 0)
         {
@@ -2964,14 +3076,18 @@ public static class VhsChromaDecoder
                     phaseLines,
                     burstDetectedLine,
                     syncTipLength,
-                    workerThreads)
+                    workerThreads,
+                    lineOffset,
+                    lineLength)
                     ? ApplyCurrentAutomaticChromaGainSegmentsParallel(
                         chroma,
                         smoothedGains,
                         phaseLines,
                         burstDetectedLine,
                         syncTipLength,
-                        workerThreads)
+                        workerThreads,
+                        lineOffset,
+                        lineLength)
                     : ApplyCurrentAutomaticChromaGainSegmentsSerial(
                         chroma,
                         smoothedGains,
@@ -2979,7 +3095,9 @@ public static class VhsChromaDecoder
                         burstDetectedLine,
                         syncTipLength,
                         medianScratch,
-                        deviationScratch);
+                        deviationScratch,
+                        lineOffset,
+                        lineLength);
 
             double noiseFloor = noiseSamples > 0
                 ? noiseSum / noiseSamples
@@ -3034,16 +3152,23 @@ public static class VhsChromaDecoder
             int burstDetectedLine,
             int syncTipLength,
             double[] medianScratch,
-            double[] deviationScratch)
+            double[] deviationScratch,
+            int lineOffset,
+            int lineLength)
     {
         double noiseSum = 0.0;
         int noiseSamples = 0;
         for (int index = 0; index < phaseSequence.Count; index++)
         {
             ChromaPhaseLine burst = phaseSequence[index];
-            int currentStart = burst.BurstStart;
+            if (lineLength != 0 && burst.LineNumber < lineOffset)
+            {
+                continue;
+            }
+
+            int currentStart = CurrentChromaGainStart(burst, lineOffset, lineLength);
             int nextStart = index < phaseSequence.Count - 1
-                ? phaseSequence[index + 1].BurstStart
+                ? CurrentChromaGainStart(phaseSequence[index + 1], lineOffset, lineLength)
                 : chroma.Length;
             (int segmentStart, int segmentEnd) = GetNumpySliceRange(
                 chroma.Length,
@@ -3109,7 +3234,9 @@ public static class VhsChromaDecoder
             ChromaPhaseLine[] phaseSequence,
             int burstDetectedLine,
             int syncTipLength,
-            int workerThreads)
+            int workerThreads,
+            int lineOffset,
+            int lineLength)
     {
         int workerCount = Math.Min(
             Math.Min(workerThreads, phaseSequence.Length),
@@ -3154,9 +3281,14 @@ public static class VhsChromaDecoder
                             for (int index = firstIndex; index < lastIndex; index++)
                             {
                                 ChromaPhaseLine burst = phaseSequence[index];
-                                int currentStart = burst.BurstStart;
+                                if (lineLength != 0 && burst.LineNumber < lineOffset)
+                                {
+                                    continue;
+                                }
+
+                                int currentStart = CurrentChromaGainStart(burst, lineOffset, lineLength);
                                 int nextStart = index < phaseSequence.Length - 1
-                                    ? phaseSequence[index + 1].BurstStart
+                                    ? CurrentChromaGainStart(phaseSequence[index + 1], lineOffset, lineLength)
                                     : chromaLength;
                                 (int segmentStart, int segmentEnd) = GetNumpySliceRange(
                                     chromaLength,
@@ -3230,10 +3362,11 @@ public static class VhsChromaDecoder
             {
                 ChromaPhaseLine burst = phaseSequence[index];
                 int nextStart = index < phaseSequence.Length - 1
-                    ? phaseSequence[index + 1].BurstStart
+                    ? CurrentChromaGainStart(phaseSequence[index + 1], lineOffset, lineLength)
                     : chroma.Length;
                 if (burst.LineNumber < burstDetectedLine
-                    || nextStart - burst.BurstStart <= 0)
+                    || (lineLength != 0 && burst.LineNumber < lineOffset)
+                    || nextStart - CurrentChromaGainStart(burst, lineOffset, lineLength) <= 0)
                 {
                     continue;
                 }
@@ -3279,7 +3412,9 @@ public static class VhsChromaDecoder
         ChromaPhaseLine[] phaseSequence,
         int burstDetectedLine,
         int syncTipLength,
-        int workerThreads)
+        int workerThreads,
+        int lineOffset,
+        int lineLength)
     {
         if (workerThreads <= 1
             || chromaLength < CurrentAccParallelSampleThreshold
@@ -3293,7 +3428,8 @@ public static class VhsChromaDecoder
         {
             if (phaseSequence[index] is null
                 || phaseSequence[index - 1] is null
-                || phaseSequence[index].BurstStart < phaseSequence[index - 1].BurstStart)
+                || CurrentChromaGainStart(phaseSequence[index], lineOffset, lineLength)
+                    < CurrentChromaGainStart(phaseSequence[index - 1], lineOffset, lineLength))
             {
                 return false;
             }
@@ -3307,22 +3443,23 @@ public static class VhsChromaDecoder
         for (int index = 0; index < phaseSequence.Length; index++)
         {
             ChromaPhaseLine burst = phaseSequence[index];
-            if (burst.LineNumber < burstDetectedLine)
+            if (burst.LineNumber < burstDetectedLine || (lineLength != 0 && burst.LineNumber < lineOffset))
             {
                 continue;
             }
 
+            int currentStart = CurrentChromaGainStart(burst, lineOffset, lineLength);
             int nextStart = index < phaseSequence.Length - 1
-                ? phaseSequence[index + 1].BurstStart
+                ? CurrentChromaGainStart(phaseSequence[index + 1], lineOffset, lineLength)
                 : chromaLength;
-            if (nextStart - burst.BurstStart <= 0)
+            if (nextStart - currentStart <= 0)
             {
                 continue;
             }
 
             (int segmentStart, int segmentEnd) = GetNumpySliceRange(
                 chromaLength,
-                burst.BurstStart,
+                currentStart,
                 nextStart);
             (int syncStart, int syncEnd) = GetNumpySliceRange(
                 chromaLength,
@@ -3336,6 +3473,9 @@ public static class VhsChromaDecoder
 
         return true;
     }
+
+    private static int CurrentChromaGainStart(ChromaPhaseLine line, int lineOffset, int lineLength)
+        => lineLength == 0 ? line.BurstStart : checked((line.LineNumber - lineOffset) * lineLength);
 
     internal static void ApplyCurrentAutomaticChromaGainSegmentInPlace(
         Span<double> chroma,
@@ -3865,7 +4005,8 @@ public static class VhsChromaDecoder
         int sampleCount,
         double carrierMHz,
         double outputSampleRateMHz,
-        int workerThreads = 1)
+        int workerThreads = 1,
+        bool useDoubleAngles = false)
     {
         ArgumentOutOfRangeException.ThrowIfNegative(sampleCount);
         ArgumentOutOfRangeException.ThrowIfNegativeOrZero(outputSampleRateMHz);
@@ -3877,9 +4018,17 @@ public static class VhsChromaDecoder
         {
             for (int i = start; i < end; i++)
             {
-                float theta = (float)(Math.Tau * waveScale * i);
-                sine[i] = NumpyTrigFloat32(theta, cosine: false);
-                cosine[i] = NumpyTrigFloat32(theta, cosine: true);
+                double theta = Math.Tau * waveScale * i;
+                if (useDoubleAngles)
+                {
+                    sine[i] = (float)Math.Sin(theta);
+                    cosine[i] = (float)Math.Cos(theta);
+                }
+                else
+                {
+                    sine[i] = NumpyTrigFloat32((float)theta, cosine: false);
+                    cosine[i] = NumpyTrigFloat32((float)theta, cosine: true);
+                }
             }
         }
 
@@ -4006,10 +4155,15 @@ public static class VhsChromaDecoder
         bool detectChromaTrackPhase,
         int rotationCheckStartLine,
         string colorSystem,
-        int workerThreads)
+        int workerThreads,
+        bool fitPalHeadSwitch)
     {
         bool hasRotation = chromaRotation is { Count: > 0 };
         bool doPhaseRotationCheck = detectChromaTrackPhase && hasRotation;
+        fitPalHeadSwitch = fitPalHeadSwitch && doPhaseRotationCheck
+            && chromaRotation is { Count: 2 }
+            && string.Equals(colorSystem, "PAL", StringComparison.Ordinal);
+        doPhaseRotationCheck &= !fitPalHeadSwitch;
         int startingIndex = chromaRotationStartingIndex ?? 0;
         int chromaRotationIndex;
         int trackRotation;
@@ -4095,6 +4249,19 @@ public static class VhsChromaDecoder
             phaseSequence[prefixIndex] = currentLine;
         }
 
+        if (fitPalHeadSwitch)
+        {
+            chromaRotationIndex = FitPalHeadSwitch(
+                phaseSequence,
+                chromaRotation!,
+                chromaRotationIndex,
+                rotationCheckStartLine,
+                lineLocations,
+                inputLineLength,
+                lastLine,
+                phaseLineProbe);
+        }
+
         if (hasRotation && chromaRotationIndex == startingIndex)
         {
             chromaRotationIndex = PositiveModulo(chromaRotationIndex + 1, 2);
@@ -4102,6 +4269,213 @@ public static class VhsChromaDecoder
 
         return (chromaRotationIndex, phaseSequence);
     }
+
+    private static int FitPalHeadSwitch(
+        ChromaPhaseLine[] phaseSequence,
+        IReadOnlyList<int> chromaRotation,
+        int rotationIndex,
+        int rotationCheckStartLine,
+        IReadOnlyList<double> lineLocations,
+        int inputLineLength,
+        int lastLine,
+        ChromaPhaseLineProbe probe)
+    {
+        const int referenceLines = 24;
+        const double switchMargin = 0.5;
+        const double degreesToRadians = Math.PI / 180.0;
+        const double phaseStep = Math.PI / 2.0;
+        if (phaseSequence.Length == 0)
+        {
+            return rotationIndex;
+        }
+
+        int regionStart = Math.Max(0, rotationCheckStartLine - phaseSequence[0].LineNumber);
+        int regionLength = phaseSequence.Length - regionStart;
+        if (regionLength < 2 || regionStart < referenceLines)
+        {
+            return rotationIndex;
+        }
+
+        ReadOnlySpan<ChromaPhaseLine> reference = phaseSequence.AsSpan(regionStart - referenceLines, referenceLines);
+        Span<double> magnitudes = stackalloc double[referenceLines];
+        for (int index = 0; index < reference.Length; index++)
+        {
+            magnitudes[index] = reference[index].BurstMagnitude;
+        }
+
+        double magnitudeReference = NumpyReduction.MedianFloat64(magnitudes);
+        if (magnitudeReference <= 0.0)
+        {
+            return rotationIndex;
+        }
+
+        // The PAL V switch gives the even and odd lines separate burst phase trends.
+        (double evenSlope, double evenIntercept) = FitPalBurstTrend(reference, parity: 0);
+        (double oddSlope, double oddIntercept) = FitPalBurstTrend(reference, parity: 1);
+        var weights = new double[regionLength];
+        var residuals = new double[regionLength];
+        var candidates = new double[regionLength * 4];
+        var currentScore = new double[regionLength + 1];
+        var phases = new int[regionLength];
+        for (int index = 0; index < regionLength; index++)
+        {
+            ChromaPhaseLine line = phaseSequence[regionStart + index];
+            double expected = (line.LineNumber & 1) == 0
+                ? (evenSlope * line.LineNumber) + evenIntercept
+                : (oddSlope * line.LineNumber) + oddIntercept;
+            double weight = Math.Clamp(line.BurstMagnitude / magnitudeReference, 0.0, 1.5);
+            weights[index] = weight < 0.3 ? 0.0 : weight;
+            double unrotated = (line.BurstPhaseDegrees * degreesToRadians) + (line.PhaseRotation * phaseStep);
+            residuals[index] = unrotated - expected;
+            for (int phase = 0; phase < 4; phase++)
+            {
+                candidates[(index * 4) + phase] = Math.Cos(unrotated - (phase * phaseStep) - expected) * weights[index];
+            }
+
+            phases[index] = line.PhaseRotation;
+            currentScore[index + 1] = currentScore[index] + candidates[(index * 4) + line.PhaseRotation];
+        }
+
+        int nextRotationIndex = (rotationIndex + 1) % 2;
+        int nextTrackRotation = chromaRotation[nextRotationIndex];
+        double bestScore = currentScore[^1] + switchMargin;
+        int switchLine = -1;
+        int startingPhase = 0;
+        for (int candidate = 0; candidate < regionLength; candidate++)
+        {
+            for (int phase = 0; phase < 4; phase++)
+            {
+                double score = 0.0;
+                for (int index = candidate; index < regionLength; index++)
+                {
+                    int nextPhase = PositiveModulo(phase + (nextTrackRotation * (index - candidate)), 4);
+                    score += candidates[(index * 4) + nextPhase];
+                }
+
+                score += currentScore[candidate];
+                if (score > bestScore)
+                {
+                    bestScore = score;
+                    switchLine = candidate;
+                    startingPhase = phase;
+                }
+            }
+        }
+
+        if (switchLine < 0)
+        {
+            return rotationIndex;
+        }
+
+        for (int index = switchLine; index < regionLength; index++)
+        {
+            phases[index] = PositiveModulo(startingPhase + (nextTrackRotation * (index - switchLine)), 4);
+        }
+
+        // A mid-line head switch can leave a strong burst that follows neither track.
+        int firstReprobe = Math.Max(0, switchLine - 2);
+        double correctionSin = 0.0;
+        double correctionCos = 0.0;
+        int correctionCount = 0;
+        for (int index = firstReprobe; index < regionLength; index++)
+        {
+            double weight = weights[index];
+            if (weight < 0.5)
+            {
+                continue;
+            }
+
+            double residual = residuals[index];
+            if (Math.Abs(WrapPhaseRadians(residual - (phases[index] * phaseStep))) > 67.5 * degreesToRadians)
+            {
+                double minimumError = 45.0 * degreesToRadians;
+                for (int phase = 0; phase < 4; phase++)
+                {
+                    double error = Math.Abs(WrapPhaseRadians(residual - (phase * phaseStep)));
+                    if (error < minimumError)
+                    {
+                        minimumError = error;
+                        phases[index] = phase;
+                    }
+                }
+            }
+
+            if (index >= switchLine)
+            {
+                (double sin, double cos) = Math.SinCos(residual - (phases[index] * phaseStep));
+                correctionSin += weight * sin;
+                correctionCos += weight * cos;
+                correctionCount++;
+            }
+        }
+
+        double correction = correctionCount >= 2 ? Math.Atan2(correctionSin, correctionCos) : 0.0;
+        if (Math.Abs(correction) < 3.0 * degreesToRadians)
+        {
+            correction = 0.0;
+        }
+
+        for (int index = firstReprobe; index < regionLength; index++)
+        {
+            int absoluteIndex = regionStart + index;
+            ChromaPhaseLine line = phaseSequence[absoluteIndex];
+            if (index < switchLine && phases[index] == line.PhaseRotation)
+            {
+                continue;
+            }
+
+            phaseSequence[absoluteIndex] = probe(
+                line.LineNumber,
+                phases[index],
+                ComputeLineScale(lineLocations, line.LineNumber, inputLineLength, lastLine)) with
+            {
+                PhaseCorrectionRadians = index >= switchLine ? correction : 0.0
+            };
+        }
+
+        return nextRotationIndex;
+    }
+
+    private static (double Slope, double Intercept) FitPalBurstTrend(
+        ReadOnlySpan<ChromaPhaseLine> reference,
+        int parity)
+    {
+        // Both parities have twelve consecutive samples in the reference region.
+        int first = (reference[0].LineNumber & 1) == parity ? 0 : 1;
+        double meanLine = (reference[first].LineNumber + reference[reference.Length - 2 + first].LineNumber) / 2.0;
+        double phase = 0.0;
+        double phaseSum = 0.0;
+        double sumCross = 0.0;
+        double sumLineSquares = 0.0;
+        double previousPhase = 0.0;
+        for (int index = first; index < reference.Length; index += 2)
+        {
+            ChromaPhaseLine line = reference[index];
+            double currentPhase = line.BurstPhaseDegrees * (Math.PI / 180.0);
+            if (index == first)
+            {
+                phase = currentPhase;
+            }
+            else
+            {
+                double delta = currentPhase - previousPhase;
+                double wrapped = WrapPhaseRadians(delta);
+                phase += wrapped == -Math.PI && delta > 0.0 ? Math.PI : wrapped;
+            }
+
+            previousPhase = currentPhase;
+            double centeredLine = line.LineNumber - meanLine;
+            sumCross += centeredLine * phase;
+            sumLineSquares += centeredLine * centeredLine;
+            phaseSum += phase;
+        }
+
+        double slope = sumCross / sumLineSquares;
+        return (slope, (phaseSum / (reference.Length / 2)) - (slope * meanLine));
+    }
+
+    private static double WrapPhaseRadians(double phase)
+        => phase - (Math.Tau * Math.Floor((phase + Math.PI) / Math.Tau));
 
     private static int FillPhasePrefixParallel(
         IReadOnlyList<double> lineLocations,

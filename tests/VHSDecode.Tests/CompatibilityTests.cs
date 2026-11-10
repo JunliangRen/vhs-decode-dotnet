@@ -16921,6 +16921,34 @@ public void FfmpegPcm16LoaderReadsContainerSegments()
     AssertEqual(null, shortReader.Read(Stream.Null, 0, 1));
 }
 
+[Fact(DisplayName = "FFmpeg PCM16 loader reuses only returned stream blocks")]
+public void FfmpegPcm16LoaderReusesOnlyReturnedStreamBlocks()
+{
+    const int blockLength = 32 * 1024;
+    var samples = new short[(2 * blockLength) + 1];
+    samples[0] = short.MinValue;
+    samples[blockLength] = short.MaxValue;
+    byte[] pcm = BuildPcm16Bytes(samples);
+    using var loader = new FfmpegPcm16SampleLoader("capture.flac", (_, _) => new MemoryStream(pcm));
+    IReusableRfSampleLoader reusable = loader;
+
+    double[] first = reusable.ReadReusable(Stream.Null, 0, blockLength)!;
+    double[] second = reusable.ReadReusable(Stream.Null, blockLength, blockLength)!;
+    Assert.NotSame(first, second);
+    reusable.ReturnReusable(first);
+
+    double[] rewound = reusable.ReadReusable(Stream.Null, 0, blockLength)!;
+    Assert.Same(first, rewound);
+    AssertEqual((double)short.MinValue, rewound[0]);
+    AssertEqual((double)short.MaxValue, second[0]);
+    reusable.ReturnReusable(rewound);
+    Assert.Null(reusable.ReadReusable(Stream.Null, 2 * blockLength, blockLength));
+    double[] ordinary = Assert.IsType<double[]>(loader.Read(Stream.Null, 0, blockLength));
+    Assert.NotSame(first, ordinary);
+    AssertEqual((double)short.MinValue, ordinary[0]);
+    reusable.ReturnReusable(second);
+}
+
 [Fact(DisplayName = "FFmpeg PCM16 loader builds upstream LDF seek arguments")]
 public void FfmpegPcm16LoaderBuildsUpstreamLdfSeekArguments()
 {

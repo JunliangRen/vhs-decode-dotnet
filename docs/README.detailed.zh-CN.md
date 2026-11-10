@@ -10,7 +10,7 @@
 中解码相关部分的 .NET 11 重写，当前以 release `v0.4.0`、commit
 `43155200da87c0d49eb37d8ec09b1372075ee8e4` 为兼容基线。
 
-当前 .NET 移植版发布为 [`v0.4.0-2.18.0`](https://github.com/JunliangRen/vhs-decode-dotnet/releases/tag/v0.4.0-2.18.0)（应用版本 `2.18.0`）。
+当前 .NET 移植版发布为 [`v0.4.0-2.19.0`](https://github.com/JunliangRen/vhs-decode-dotnet/releases/tag/v0.4.0-2.19.0)（应用版本 `2.19.0`）。
 
 [LD EFM 缓冲区复用的测量与边界](LD_PERFORMANCE_V16.md)。
 
@@ -72,7 +72,7 @@
 | --- | --- | --- |
 | 解决方案和测试 | 已实现 | .NET 11 `.slnx`；标准 xUnit v3 测试可在 Visual Studio Test Explorer 和 `dotnet test` 中使用。 |
 | CLI 和参数 | 已实现并做快照测试 | facade 与独立命令的帮助、别名、默认值、校验、诊断和退出行为以 v0.4.0 为目标。 |
-| 上游行为配置 | 分阶段实现 | `v0.4.0` 仍是默认值；`current` 是显式启用的配置，已实现已合并 PR 341 的五个阶段：VHS HSync 检测、VSync 电平精修、NTSC 色度群延迟校正、非对称 Super-Gaussian 最终滤波，以及 current color-under burst/ACC/CTI 链。 |
+| 上游行为配置 | 分阶段实现 | `v0.4.0` 仍是默认值。显式启用的 `current` 配置以上游 `1bc3ab4` 的 VHS 同步和 color-under 处理为目标。 |
 | VHS 与磁带格式 | 已实现；仍有罕见采集差距 | VHS、S-VHS、Betamax、Video8/Hi8、U-matic、Type C、EIAJ 及支持的 PAL/NTSC 变体共用 release 兼容解码路径。 |
 | CVBS | 已实现 release 支持的系统 | PAL 和 NTSC 路径可运行；少见的 vblank 与跨参数组合仍需更多真实采集夹具。 |
 | LaserDisc | 已实现；仍有罕见采集差距 | 视频、VBI、EFM、模拟音频、AC3、RF-TBC、元数据、恢复和 PAL/NTSC 路径均已连接。 |
@@ -132,7 +132,7 @@ VHS 解码支持 `--compat-version v0.4.0|current`：
 | 配置 | 默认 | 固定的上游来源 | 当前启用的行为 |
 | --- | --- | --- | --- |
 | `v0.4.0` | 是 | release v0.4.0，commit `43155200da87c0d49eb37d8ec09b1372075ee8e4` | 现有 release 兼容解码路径。 |
-| `current` | 否 | 已合并的 PR 341，commit `2f21e8ed6018b14561396cc95f1f6828054470b8` | exact-first VHS HSync 候选提取、MAD 异常值剔除、多网格锁定、电平校准、亚采样脉冲合成、稳健 VSync 电平精修、NTSC 色度群延迟校正、非对称零相位 Super-Gaussian 最终滤波、拟合 burst 频率/DC 跟踪、相位补偿上变频、current ACC/噪声估计和四遍 CTI。 |
+| `current` | 否 | 上游提交 `1bc3ab4f02d1c0af624129ba3dd62f25d1c159c8` | PR 341 的同步和 color-under 处理，加上后续的 HSync 时序、VSync 消隐电平、场状态、块色度滤波、PAL 换头和色度 AGC 修正。 |
 
 `current` 仍按阶段推进且必须显式启用。对 color-under 格式，它现在采用 PR 341
 的正式 CTI 默认值：`--cti_mix 1`、`--cti_width 2`。`--cti_mix 0`
@@ -239,13 +239,14 @@ decode.exe vhs --compat-version current --dsp-backend approx-fast --approx-resam
 对于 PAL/NTSC VHS，完整 `ipp-fast`、`cuda-fast` 与 `approx-fast` 解码还接受
 `--decode-at-20msps`（别名 `--decode_at_20msps`）。40 MSPS 输入会先经过固定的
 抗混叠 2:1 滤波，再让后续 DSP 以 20 MSPS 工作；原生 20 MSPS 输入则直接进入该
-DSP 速率。Approx 在输入 loader 中降采样，CUDA 在完整信号图之前于 GPU 上降采样。
+DSP 速率。Approx 和 `current` 的 CUDA 路径在输入 loader 中降采样。`v0.4.0` 的 CUDA
+路径在 GPU 上降采样，再进入完整信号图。
 Exact 完整解码会拒绝该参数；受支持的 VHS preview 路径会自动强制同一模式。
 输出元数据中的 `fileLoc` 仍保留原始输入采样点坐标。
 
 ### 当前 IPP/CUDA 资源矩阵
 
-当前本机持续矩阵于 2026-08-20 使用源提交
+此矩阵中的 CUDA 数据对应 `v0.4.0` 配置。测试于 2026-08-20 使用源提交
 `41bfd923e2a47f926db3d4ea3c3ff70adbecaa48` 的全新构建测得。被测 `decode.exe` 的文件版本为
 2.4.0.0，SHA-256 为
 `EF07E96D224A4BBEADBDE44EAEDB439C50D1646FA173FD57479255367B9A8868`。
@@ -318,7 +319,14 @@ SSIM：CUDA 为 0.978718/0.991624，IPP 为 0.977307/0.995722。四组输出都�
 标准 NTSC 40 MSPS LaserDisc 文件解码可用 `cuda-fast` 通过 FP64 CUDA 处理
 EFM 数字音频和符合条件的 FM 解调后视频滤波。RF 解调、模拟音频和场处理使用 CPU Exact。[LD 命令示例](../README.zh-CN.md)
 
-对于 VHS，`cuda-fast` 是独立的 Windows x64 NVIDIA CUDA 13 全信号后端。它加载
+在 Windows x64 上，PAL 和 NTSC 的 VHS、S-VHS 文件解码可组合使用
+`--compat-version current` 和 `--dsp-backend cuda-fast`，支持 20 或 40 MSPS RF 输入。
+RF 变换使用 CUDA FP64 实数 FFT，同步、TBC 和色度使用共用的托管 Current 管线。
+用 `--frequency 20 --no_resample` 可保留原生 20 MSPS 输入速率。Current 的 CUDA
+路径仅支持文件解码，显式请求 CUDA 的 Current 预览会报错。
+
+对于默认 `v0.4.0` 配置的 VHS，`cuda-fast` 使用独立的 Windows x64 NVIDIA CUDA 13
+全信号后端。它加载
 `vhsdecode_cuda_fast.dll` 与 cuFFT，并运行固定在 cuVHS commit
 `c55e72073f44b27e8839efb842e4345af39887f7` 的 RF 解调、同步/行定位、时基校正、
 color-under 和 dropout 图。CPU 仍负责输入回调、少量控制/元数据工作与输出发布，
@@ -337,9 +345,9 @@ K4 source reconstruction 已在编译期关闭，因此该路径始终使用 GPU
 参数、profile 或缺失的 CUDA 组件都会明确失败，绝不会切换到其他 DSP 后端。完整解码
 契约为 Windows x64 上默认按原生 40 MSPS 解码的 PAL/NTSC VHS SP/LP/EP，或通过
 显式参数从 40/原生 20 MSPS 输入按内部 20 MSPS 解码；CVBS、
-LaserDisc、HiFi、S-VHS、其他制式、packed `.lds` 以及显式兼容 profile 都不会被近似处理。
+LaserDisc、HiFi、S-VHS、其他制式和 packed `.lds` 均不属于此全信号路径的支持范围。
 
-默认的原生 40 MSPS PAL/NTSC VHS 预览会先做轻量探测：只加载 NVIDIA driver API，调用
+`v0.4.0` 的原生 40 MSPS PAL/NTSC VHS 预览会先做轻量探测：只加载 NVIDIA driver API，调用
 `cuInit`，并检查 CUDA 13、设备 0 与 compute capability 7.5+；不会加载 cuFFT、创建
 CUDA 上下文或初始化 NVENC。设备通过后才尝试一次 ABI v6 GPU 预览完整启动；探测或完整
 启动不可用时依次回退 IPP、Exact。将 `--preview-server` 与显式
@@ -3317,8 +3325,8 @@ JSON、stdout、归一化 stderr/日志及有序 `fileLoc` 全部一致，并包
 最终六路径表使用从 `d526ef5` 构建的可执行文件
 `7F3434744E2120282C9888CF66AF730A184A103465561DE5A2B3F63B0022202F`。
 最终 60 次运行全部匹配完整 profile/backend 参考。Python 列沿用同一固定主机的
-实测：v0.4.0 的严格 oracle 仍是 `g4315520 --threads 0`，已合并的 Python PR341
-仍是 `current` 的 profile 对应版本。
+实测。v0.4.0 的严格对照是 `g4315520 --threads 0`，这份快照中 `current` 的参考
+版本是已合并的 Python PR341。
 
 ### Double PocketFFT packet buffer 复用
 

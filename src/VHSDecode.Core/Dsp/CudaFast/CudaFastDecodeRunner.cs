@@ -31,6 +31,7 @@ internal sealed class CudaFastDecodeRunner : ICudaFastDecodeRunner
         StringComparer.Ordinal)
     {
         "dsp_backend",
+        "compat_version",
         CliSpecs.DecodeAt20MspsDestination,
         "inputfreq",
         "length",
@@ -243,7 +244,53 @@ internal sealed class CudaFastDecodeRunner : ICudaFastDecodeRunner
             $"CUDA-fast full DSP backend: {info.DeviceName} (compute {info.ComputeMajor}.{info.ComputeMinor}, {gibibytes:F1} GiB VRAM, bridge-abi=0x{info.AbiVersion:X8})");
     }
 
+    internal static bool IsCurrentVhsCommand(ParsedCommand command)
+        => command.Spec == CliSpecs.Vhs
+            && UpstreamBehaviorProfileParser.Parse(command.Get<string>("compat_version")) == UpstreamBehaviorProfile.Current;
+
     internal static CudaFastProfile ValidateCommand(ParsedCommand command)
+    {
+        if (IsCurrentVhsCommand(command))
+        {
+            throw new NotSupportedException("CUDA-fast VHS --compat-version current requires the managed Current file decode path.");
+        }
+
+        return ValidateSupportedVhsCommand(command);
+    }
+
+    internal static void ValidateCurrentCommand(ParsedCommand command)
+    {
+        if (!IsCurrentVhsCommand(command))
+        {
+            throw new ArgumentException("The CUDA VHS FFT route requires --compat-version current.", nameof(command));
+        }
+
+        if (command.Get<bool>("preview_server"))
+        {
+            throw new NotSupportedException("CUDA-fast VHS Current supports file decode only.");
+        }
+
+        _ = ResolveProfile(VideoSystemSelector.Select(command));
+        string tapeFormat = command.Get<string>("tape_format").ToUpperInvariant();
+        if (tapeFormat is not ("VHS" or "SVHS"))
+        {
+            throw new NotSupportedException("CUDA-fast Current file decode supports VHS and S-VHS tape formats.");
+        }
+
+        double inputRate = DecodeSessionFactory.SelectCommonSampleFrequencyMHz(command);
+        if (!(Math.Abs(inputRate - FrequencyParser.DddMHz) <= 0.0000005
+            || Math.Abs(inputRate - (FrequencyParser.DddMHz / 2.0)) <= 0.0000005))
+        {
+            throw new NotSupportedException("CUDA-fast Current file decode supports 20 or 40 MSPS RF input.");
+        }
+
+        if (command.Get<bool>(CliSpecs.DecodeAt20MspsDestination))
+        {
+            DecodeSessionFactory.ValidateTwentyMspsVhsMode(command, inputRate, DspBackend.CudaFast);
+        }
+    }
+
+    private static CudaFastProfile ValidateSupportedVhsCommand(ParsedCommand command)
     {
         if (command.Spec != CliSpecs.Vhs)
         {

@@ -3,6 +3,7 @@ using System.Numerics;
 using System.Runtime.ExceptionServices;
 using System.Runtime.Intrinsics;
 using System.Runtime.Intrinsics.X86;
+using VHSDecode.Core.Dsp.CudaFast;
 using VHSDecode.Core.Dsp.Ipp;
 
 namespace VHSDecode.Core.Dsp;
@@ -95,7 +96,8 @@ public sealed class RfDemodulator : IDisposable
         int vhsInverseCompanionWorkerThreads = 1,
         ApproxProvider? approxProvider = null,
         bool useResidentApproxSpectra = true,
-        bool useResidentApproxTimeDomain = true)
+        bool useResidentApproxTimeDomain = true,
+        IVhsCudaRealFft? vhsCudaFft = null)
     {
         if (sampleRateHz <= 0)
         {
@@ -117,6 +119,11 @@ public sealed class RfDemodulator : IDisposable
             throw new ArgumentException(
                 "An Approx provider can be supplied only for the approx-fast DSP backend.",
                 nameof(approxProvider));
+        }
+
+        if (vhsCudaFft is not null && dspBackend != DspBackend.Exact)
+        {
+            throw new ArgumentException("VHS Current CUDA FFT requires the Exact managed complement.", nameof(vhsCudaFft));
         }
 
         ApproxProvider? effectiveApproxProvider = dspBackend == DspBackend.ApproxFast
@@ -151,7 +158,8 @@ public sealed class RfDemodulator : IDisposable
             dspBackend,
             parallelizeVhsInverseStaging,
             companionIppFftFactory,
-            effectiveApproxProvider);
+            effectiveApproxProvider,
+            vhsCudaFft);
         _vhsInverseCompanionWorkerThreads = parallelizeVhsInverseStaging
             ? vhsInverseCompanionWorkerThreads
             : 0;
@@ -546,7 +554,9 @@ public sealed class RfDemodulator : IDisposable
         DeferredLaserDiscHighPass[]? deferredHighPass = null,
         int deferredHighPassOrdinal = -1,
         bool compactRfHighPass = false,
-        bool projectRawDemod = false)
+        bool projectRawDemod = false,
+        ReadOnlySpan<Complex> currentIppChromaGain = default,
+        float[]? currentIppChromaDestination = null)
     {
         ObjectDisposedException.ThrowIf(Volatile.Read(ref _disposed) != 0, this);
         bool produceApproxChroma = !approxChromaFilter.IsEmpty
@@ -599,6 +609,7 @@ public sealed class RfDemodulator : IDisposable
         bool vhsWorkspaceComplexAnalyticReady = false;
         double[] rfHighPass;
         float[]? rfHighPassFloat32 = null;
+        float[]? currentIppChroma = null;
         Complex[]? rfFilteredSpectrum = null;
         double[]? hilbertMultiplier = null;
         Complex[]? vhsRfFilteredHalf = null;
@@ -783,6 +794,17 @@ public sealed class RfDemodulator : IDisposable
                 {
                     workspace.Forward(input, workspace.First);
                     Span<Complex> inputSpectrum = workspace.First.AsSpan(0, vhsRealSpectrumLength);
+                    if (currentIppChromaDestination is not null && DspBackend == DspBackend.IppFast)
+                    {
+                        // Borrow these buffers before the subsequent RF stages fill them.
+                        Span<Complex> filteredChroma = workspace.HilbertHalf.AsSpan(0, vhsRealSpectrumLength);
+                        ApplyNumpyRealFrequencyFilter(inputSpectrum, currentIppChromaGain, input.Length, filteredChroma);
+                        double[] chromaScratch = workspace.RawEnvelope;
+                        workspace.Inverse(filteredChroma, chromaScratch);
+                        workspace.NarrowTimeDomain(chromaScratch, currentIppChromaDestination);
+                        currentIppChroma = currentIppChromaDestination;
+                    }
+
                     if (includeRfHighPassOutput)
                     {
                         Span<Complex> rfHighPassSpectrum = workspace.Second.AsSpan(0, vhsRealSpectrumLength);
@@ -1657,6 +1679,7 @@ public sealed class RfDemodulator : IDisposable
         {
             VideoFloat32 = videoFloat32,
             VideoLowPassFloat32 = videoLowPassFloat32,
+            ChromaFloat32 = currentIppChroma,
             LdVideoBurstFloat32 = ldVideoBurstFloat32,
             LdRfHighPassFloat32 = rfHighPassFloat32,
             LdRawDemodNyquistMask = rawDemodMask
@@ -3081,6 +3104,7 @@ public sealed class RfDemodulator : IDisposable
 
     private sealed class VhsRealFftWorkspace : IDisposable
     {
+        private readonly IVhsCudaRealFft? _cudaFft;
         private readonly IppRealFft? _ippFft;
         private readonly IppRealFft? _companionIppFft;
         private readonly IppRealFft32? _ippFft32;
@@ -3107,8 +3131,15 @@ public sealed class RfDemodulator : IDisposable
             DspBackend dspBackend,
             bool parallelizeInverseStaging,
             Func<int, IppRealFft>? companionIppFftFactory,
-            ApproxProvider? approxProvider)
+            ApproxProvider? approxProvider,
+            IVhsCudaRealFft? cudaFft)
         {
+            if (cudaFft is not null && cudaFft.RealLength != realLength)
+            {
+                throw new InvalidOperationException("VHS Current CUDA FFT does not support this RF block length.");
+            }
+
+            _cudaFft = cudaFft;
             RealLength = realLength;
             SpectrumLength = (realLength / 2) + 1;
             if (dspBackend != DspBackend.ApproxFast)
@@ -3212,6 +3243,12 @@ public sealed class RfDemodulator : IDisposable
 
         public void Forward(ReadOnlySpan<double> input, Complex[] output)
         {
+            if (_cudaFft is not null)
+            {
+                _cudaFft.Forward(input, output.AsSpan(0, SpectrumLength));
+                return;
+            }
+
             if (_approxProvider is not null)
             {
                 ForwardApprox(input, output);
@@ -3229,6 +3266,12 @@ public sealed class RfDemodulator : IDisposable
 
         public void ForwardOwned(double[] input, Complex[] output)
         {
+            if (_cudaFft is not null)
+            {
+                _cudaFft.Forward(input, output.AsSpan(0, SpectrumLength));
+                return;
+            }
+
             if (_approxProvider is not null)
             {
                 ForwardApprox(input, output);
@@ -3246,6 +3289,12 @@ public sealed class RfDemodulator : IDisposable
 
         public void Inverse(ReadOnlySpan<Complex> input, double[] output)
         {
+            if (_cudaFft is not null)
+            {
+                _cudaFft.Inverse(input[..SpectrumLength], output.AsSpan(0, RealLength));
+                return;
+            }
+
             if (_approxProvider is not null)
             {
                 InverseApprox(input, output);
@@ -3687,14 +3736,14 @@ public sealed class RfDemodulator : IDisposable
             CopyFloat32ToFloat64(input, output[..RealLength]);
         }
 
-        public void NarrowApproxTimeDomain(
+        public void NarrowTimeDomain(
             ReadOnlySpan<double> input,
             Span<float> output)
         {
             if (input.Length < RealLength || output.Length != RealLength)
             {
                 throw new ArgumentException(
-                    "Approx time-domain buffers must match the workspace length.");
+                    "Time-domain buffers must match the workspace length.");
             }
 
             CopyFloat64ToFloat32(input[..RealLength], output);
@@ -3784,6 +3833,7 @@ public sealed class RfDemodulator : IDisposable
         private readonly bool _parallelizeInverseStaging;
         private readonly Func<int, IppRealFft>? _companionIppFftFactory;
         private readonly ApproxProvider? _approxProvider;
+        private readonly IVhsCudaRealFft? _cudaFft;
         private int _retainedCount;
         private int _disposed;
 
@@ -3791,8 +3841,10 @@ public sealed class RfDemodulator : IDisposable
             DspBackend dspBackend,
             bool parallelizeInverseStaging,
             Func<int, IppRealFft>? companionIppFftFactory,
-            ApproxProvider? approxProvider)
+            ApproxProvider? approxProvider,
+            IVhsCudaRealFft? cudaFft)
         {
+            _cudaFft = cudaFft;
             _dspBackend = dspBackend;
             _parallelizeInverseStaging = parallelizeInverseStaging;
             _companionIppFftFactory = companionIppFftFactory;
@@ -3820,7 +3872,8 @@ public sealed class RfDemodulator : IDisposable
                     _dspBackend,
                     _parallelizeInverseStaging,
                     _companionIppFftFactory,
-                    _approxProvider));
+                    _approxProvider,
+                    _cudaFft));
         }
 
         public void Return(VhsRealFftWorkspace workspace)
@@ -4219,7 +4272,7 @@ public sealed class RfDemodulator : IDisposable
             RfFmDemodulatorMode.VhsRustApproximation,
             workspace,
             preserveAnalyticComponents: false);
-        workspace.NarrowApproxTimeDomain(demodFloat64, demod);
+        workspace.NarrowTimeDomain(demodFloat64, demod);
     }
 
     private void ApplyDiffDemodRepairIfPresent(

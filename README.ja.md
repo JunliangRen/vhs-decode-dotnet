@@ -9,7 +9,7 @@
 upstream release `v0.4.0`、commit
 `43155200da87c0d49eb37d8ec09b1372075ee8e4` です。
 
-現在の .NET port release は [`v0.4.0-2.18.0`](https://github.com/JunliangRen/vhs-decode-dotnet/releases/tag/v0.4.0-2.18.0)（application version `2.18.0`）です。
+現在の .NET port release は [`v0.4.0-2.19.0`](https://github.com/JunliangRen/vhs-decode-dotnet/releases/tag/v0.4.0-2.19.0)（application version `2.19.0`）です。
 
 [LD EFM バッファー再利用の測定結果と適用範囲](docs/LD_PERFORMANCE_V16.md)。
 
@@ -173,7 +173,10 @@ stabilization を同時に無効化した場合は 0.922357 で、default は全
 | 値 | 意味 |
 | --- | --- |
 | `v0.4.0` | default。固定した Python release behavior を対象にします。 |
-| `current` | upstream PR 341 の段階的 behavior を opt-in し、新しい VHS sync と color-under processing を含みます。 |
+| `current` | upstream `1bc3ab4` を対象とする VHS sync と color-under processing を明示的に有効にします。 |
+
+PAL と NTSC の VHS、S-VHS のファイルデコードでは、20 または 40 MSPS の RF 入力で
+`cuda-fast` と `current` を組み合わせられます。RF 変換は CUDA FP64 を使い、同期、TBC、色処理は共通の managed pipeline を使います。
 
 厳密な互換性 oracle は Python v0.4.0 commit `g4315520` の
 `--threads 0` 出力です。Python upstream は worker 数によって output hash が
@@ -185,7 +188,7 @@ stabilization を同時に無効化した場合は 0.922357 で、default は全
 | --- | --- |
 | `exact` | default の managed path。互換性を重視する decode に使用します。 |
 | `ipp-fast` | Intel IPP を使う experimental Windows x64 / Linux x64/glibc VHS / LaserDisc real-RF path。浮動小数点 bit が変化する可能性があり、`exact` へ silent fallback しません。 |
-| `cuda-fast` | NVIDIA CUDA 13 を使う experimental Windows x64 full-signal VHS path。独立した numerical contract を持ち、PAL/NTSC VHS を通常は 40 MSPS、`--decode-at-20msps` 指定時は GPU 40→20 または native 20 MSPS で decode し、CPU backend へ silent fallback しません。 |
+| `cuda-fast` | NVIDIA CUDA 13 を使う実験的な Windows x64 バックエンド。PAL/NTSC VHS の `v0.4.0` は全信号 GPU 経路を使い、`--decode-at-20msps` の 40→20 変換も GPU で行います。`current` は CUDA FP64 RF 変換とマネージドのフィールド処理を使い、40→20 変換はマネージド入力経路で行います。 |
 | `approx-fast` | VHS-only の experimental FP32 path。TBC resampler と precision contract を選択できます。default の `balanced` は既存の v1/v2 behavior を維持し、明示的な `aggressive` は高速化のため一部の数値精度を意図的に省く field-FP32/burst-IQ-prefix/chroma-FFT v6 contract を選択します。nonzero RF high boost は未対応です。 |
 
 NTSC LaserDisc の完全デコードでは CUDA で EFM デジタル音声と対象の FM 復調後の映像フィルターを処理できます。

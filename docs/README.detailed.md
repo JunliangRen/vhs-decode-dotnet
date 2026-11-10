@@ -11,7 +11,7 @@
 release `v0.4.0` at commit
 `43155200da87c0d49eb37d8ec09b1372075ee8e4`.
 
-The current .NET port release is [`v0.4.0-2.18.0`](https://github.com/JunliangRen/vhs-decode-dotnet/releases/tag/v0.4.0-2.18.0) (application version `2.18.0`).
+The current .NET port release is [`v0.4.0-2.19.0`](https://github.com/JunliangRen/vhs-decode-dotnet/releases/tag/v0.4.0-2.19.0) (application version `2.19.0`).
 
 [LD EFM buffer reuse measurements and limits](LD_PERFORMANCE_V16.md).
 
@@ -76,7 +76,7 @@ CLI compatibility requires it.
 | --- | --- | --- |
 | Solution and tests | Implemented | .NET 11 `.slnx`; standard xUnit v3 tests work in Visual Studio Test Explorer and with `dotnet test`. |
 | CLI and arguments | Implemented and snapshot-tested | Facade and standalone help, aliases, defaults, validation, diagnostics, and exit behavior target v0.4.0. |
-| Upstream behavior profiles | Staged | `v0.4.0` remains the default; `current` is an opt-in profile with five merged PR 341 stages: VHS HSync detection, VSync level refinement, NTSC chroma group-delay correction, asymmetric Super-Gaussian final filtering, and the current color-under burst/ACC/CTI chain. |
+| Upstream behavior profiles | Staged | `v0.4.0` remains the default. The opt-in `current` profile targets upstream `1bc3ab4` for VHS sync and color-under processing. |
 | VHS and tape families | Implemented; rare capture gaps remain | VHS, S-VHS, Betamax, Video8/Hi8, U-matic, Type C, EIAJ, and supported PAL/NTSC variants share the release-compatible decode path. |
 | CVBS | Implemented for release-supported systems | PAL and NTSC paths run; uncommon vblank and cross-option cases need more real-capture fixtures. |
 | LaserDisc | Implemented; rare capture gaps remain | Video, VBI, EFM, analog audio, AC3, RF-TBC, metadata, recovery, and PAL/NTSC paths are connected. |
@@ -139,7 +139,7 @@ VHS decode accepts `--compat-version v0.4.0|current`:
 | Profile | Default | Pinned upstream source | Active behavior |
 | --- | --- | --- | --- |
 | `v0.4.0` | Yes | release v0.4.0, commit `43155200da87c0d49eb37d8ec09b1372075ee8e4` | Existing release-compatible decode path. |
-| `current` | No | merged PR 341, commit `2f21e8ed6018b14561396cc95f1f6828054470b8` | Exact-first VHS HSync candidate extraction, MAD rejection, multi-grid lock, calibrated levels, subpixel pulse synthesis, robust VSync level refinement, NTSC chroma group-delay correction, asymmetric zero-phase Super-Gaussian final filtering, fitted burst frequency/DC tracking, phase-compensated upconversion, current ACC/noise estimation, and four-pass CTI. |
+| `current` | No | upstream commit `1bc3ab4f02d1c0af624129ba3dd62f25d1c159c8` | PR 341 sync and color-under processing with later upstream fixes for HSync timing, VSync blanking level, field-local state, block chroma filtering, PAL head switching, and chroma AGC. |
 
 `current` is deliberately staged and opt-in. For color-under formats it now
 uses the official PR 341 CTI defaults, `--cti_mix 1` and `--cti_width 2`.
@@ -269,15 +269,16 @@ decode.exe vhs --compat-version current --dsp-backend approx-fast --approx-resam
 For PAL/NTSC VHS, complete `ipp-fast`, `cuda-fast`, and `approx-fast` decode also accept
 `--decode-at-20msps` (alias `--decode_at_20msps`). A 40 MSPS input is passed
 through the fixed anti-alias 2:1 filter before the downstream DSP runs at 20
-MSPS; native 20 MSPS input enters that DSP rate directly. Approx performs the
-reduction in the input loader, while CUDA performs it on the GPU before the
-full signal graph. Exact complete decode rejects the switch. Supported VHS
-preview routes force the same mode automatically, and output metadata keeps
-`fileLoc` in original source-sample coordinates.
+MSPS; native 20 MSPS input enters that DSP rate directly. Approx and
+`cuda-fast` with `current` perform the reduction in the input loader. The
+`v0.4.0` CUDA profile performs it on the GPU before the full signal graph.
+Exact complete decode rejects the switch. Supported VHS preview routes force
+the same mode automatically, and output metadata keeps `fileLoc` in original
+source-sample coordinates.
 
 ### Current IPP/CUDA resource matrix
 
-The current sustained local matrix was measured on 2026-08-20 from a fresh build
+This matrix covers the `v0.4.0` CUDA profile. It was measured on 2026-08-20 from a fresh build
 of source commit `41bfd923e2a47f926db3d4ea3c3ff70adbecaa48`. The tested `decode.exe` reported
 file version 2.4.0.0 and SHA-256
 `EF07E96D224A4BBEADBDE44EAEDB439C50D1646FA173FD57479255367B9A8868`.
@@ -370,8 +371,16 @@ post-FM video filtering on the standard NTSC 40 MSPS file-decode path. CPU Exact
 handles RF demodulation, analog audio, and field processing. See the
 [LD command example](../README.md#profiles-and-backends).
 
-For VHS, `cuda-fast` is a separate Windows x64 NVIDIA CUDA 13 full-signal backend.
-It loads `vhsdecode_cuda_fast.dll` and cuFFT, then runs the RF demodulation,
+For PAL and NTSC VHS and S-VHS file decoding, `--compat-version current` with
+`--dsp-backend cuda-fast` supports 20 or 40 MSPS RF input on Windows x64.
+It uses CUDA FP64 real FFTs for RF transforms and the shared managed Current
+pipeline for sync, TBC, and chroma. To preserve a native 20 MSPS input rate, use
+`--frequency 20 --no_resample`. The Current CUDA route supports file decoding
+only. An explicit CUDA request with Current preview fails.
+
+For VHS with the default `v0.4.0` profile, `cuda-fast` uses the separate Windows
+x64 NVIDIA CUDA 13 full-signal backend. It loads `vhsdecode_cuda_fast.dll`
+and cuFFT, then runs the RF demodulation,
 sync/line-location, time-base correction, color-under, and dropout graph from
 cuVHS commit `c55e72073f44b27e8839efb842e4345af39887f7`. CPU code still owns
 input callbacks, small control/metadata work, and output publication; it does
@@ -397,10 +406,9 @@ Unsupported options, profiles, or missing CUDA components fail explicitly and
 never select another DSP backend. The full-decode contract is PAL/NTSC VHS
 SP/LP/EP on Windows x64 at native 40 MSPS, or at internal 20 MSPS through the
 explicit switch from 40/native-20 MSPS input; CVBS, LaserDisc, HiFi, S-VHS,
-other video systems, packed `.lds`, and explicit compatibility profile
-selection are not approximated.
+other video systems, and packed `.lds` are outside this full-signal contract.
 
-For a default native-rate 40 MSPS PAL/NTSC VHS preview, a lightweight preflight
+For a `v0.4.0` native-rate 40 MSPS PAL/NTSC VHS preview, a lightweight preflight
 first loads only the NVIDIA driver API, calls `cuInit`, and checks CUDA 13,
 device 0, and compute capability 7.5 or newer. It does not load cuFFT, create a
 CUDA context, or initialize NVENC. A passing device gets one attempt to start
@@ -4255,8 +4263,8 @@ The final six-path table uses executable
 `7F3434744E2120282C9888CF66AF730A184A103465561DE5A2B3F63B0022202F`
 built from `d526ef5`. All 60 final runs passed their complete profile/backend
 references. The Python columns retain the same fixed-host measurements:
-v0.4.0 remains the strict `g4315520 --threads 0` oracle, and merged Python
-PR341 remains the profile peer for `current`.
+the v0.4.0 oracle is `g4315520 --threads 0`, and merged Python PR341
+was the reference for `current` in this snapshot.
 
 ### Double PocketFFT packet-buffer reuse
 

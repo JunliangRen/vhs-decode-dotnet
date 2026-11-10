@@ -78,6 +78,32 @@ public sealed class VhsChromaAutomaticGainCurrentTests
             BitConverter.DoubleToInt64Bits(result.NoiseFloor));
     }
 
+    [Theory]
+    [InlineData(1)]
+    [InlineData(4)]
+    public void CurrentChromaAccUsesOutputLineCoordinates(int workerThreads)
+    {
+        const int lineCount = 300;
+        const int width = 1024;
+        const int outputFirstLine = 3;
+        double[] samples = Enumerable.Repeat(2.0, lineCount * width).ToArray();
+        ChromaPhaseLine[] phase = Enumerable.Range(1, lineCount + outputFirstLine - 1)
+            .Select(line => new ChromaPhaseLine(line, 0)
+            {
+                BurstAmplitude = 2.0,
+                BurstStart = ((line - 1) * width) + 7
+            })
+            .ToArray();
+
+        CurrentAutomaticChromaGainResult result = VhsChromaDecoder.ApplyCurrentAutomaticChromaGainInPlace(
+            samples, 6.0, phase, outputFirstLine + 1, 20, workerThreads, lineOffset: outputFirstLine, lineLength: width);
+
+        Assert.Equal(2.0, result.MeanBurstAmplitude);
+        Assert.Equal(0.0, result.NoiseFloor);
+        Assert.All(samples[..width], sample => Assert.Equal(0.0, sample));
+        Assert.All(samples[width..], sample => Assert.Equal(6.0, sample));
+    }
+
     [Fact(DisplayName = "Current chroma ACC rejects negative smoothing windows")]
     public void CurrentChromaAccRejectsNegativeSmoothingWindows()
     {

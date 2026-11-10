@@ -8,7 +8,7 @@
 中解码相关部分的 .NET 11 重写，兼容目标为上游 release `v0.4.0`、commit
 `43155200da87c0d49eb37d8ec09b1372075ee8e4`。
 
-当前 .NET 移植版发布为 [`v0.4.0-2.18.0`](https://github.com/JunliangRen/vhs-decode-dotnet/releases/tag/v0.4.0-2.18.0)（应用版本 `2.18.0`）。
+当前 .NET 移植版发布为 [`v0.4.0-2.19.0`](https://github.com/JunliangRen/vhs-decode-dotnet/releases/tag/v0.4.0-2.19.0)（应用版本 `2.19.0`）。
 
 [LD EFM 缓冲区复用的测量与边界](docs/LD_PERFORMANCE_V16.md)。
 
@@ -162,7 +162,10 @@ FFmpeg 仅负责将 H.264 copy-mux 为 HLS/fMP4。显式指定
 | 值 | 含义 |
 | --- | --- |
 | `v0.4.0` | 默认值，目标是固定的 Python release 行为。 |
-| `current` | 显式启用上游 PR 341 的分阶段行为，包括较新的 VHS 同步和 color-under 处理。 |
+| `current` | 显式启用以上游 `1bc3ab4` 为目标的 VHS 同步和 color-under 处理。 |
+
+PAL 和 NTSC 的 VHS、S-VHS 文件解码可将 `cuda-fast` 与 `current` 一起使用，支持
+20 或 40 MSPS RF 输入。RF 变换在 CUDA 上以 FP64 执行，同步、TBC 和色度共用托管管线。
 
 严格兼容基准是 Python v0.4.0 commit `g4315520` 的 `--threads 0` 输出。
 Python 原版在不同 worker 数下的输出哈希并不稳定，因此 Python 多线程结果只用于
@@ -174,7 +177,7 @@ Python 原版在不同 worker 数下的输出哈希并不稳定，因此 Python 
 | --- | --- |
 | `exact` | 默认托管路径，适合兼容性敏感的解码。 |
 | `ipp-fast` | 实验性的 Windows x64 和 Linux x64/glibc VHS 与 LaserDisc real-RF 路径，使用 Intel IPP；可能改变浮点位，并且绝不会静默回退到 `exact`。 |
-| `cuda-fast` | 实验性的 Windows x64 NVIDIA CUDA 13 全信号 VHS 路径；采用独立数值契约，PAL/NTSC VHS 默认按 40 MSPS 解码，也可用 `--decode-at-20msps` 在 GPU 上执行 40→20 或直接解码原生 20 MSPS 输入，并且绝不会静默回退到 CPU 后端。 |
+| `cuda-fast` | 实验性的 Windows x64 NVIDIA CUDA 13 后端。PAL/NTSC VHS 在 `v0.4.0` 下使用全信号 GPU 路径，`--decode-at-20msps` 可在 GPU 上执行 40→20。新版 `current` 使用 CUDA FP64 RF 变换和托管场处理，40→20 由托管输入路径完成。 |
 | `approx-fast` | 仅支持 VHS 的实验 FP32 路径，可选择 TBC 重采样器和精度契约。默认 `balanced` 保持既有 v1/v2 行为；显式 `aggressive` 使用更快、但有意舍弃部分数值精度的 field-FP32/burst-IQ-prefix/chroma-FFT v6 契约。暂不支持非零 RF high boost。 |
 
 完整 NTSC LaserDisc 文件解码可用 CUDA 处理 EFM 数字音频和符合条件的 FM 解调后视频滤波。
