@@ -526,9 +526,9 @@ function Assert-PublishLayout {
             'licenses/managed-nuget/SQLitePCLRaw-3.0.5-NOTICE.txt',
             'licenses/managed-nuget/SQLite-3.54.0-LICENSE.txt',
             'licenses/managed-nuget/Microsoft-dotnet-MIT.txt',
-            'licenses/managed-nuget/Microsoft.Extensions.ObjectPool-11.0.0-rc.3.26522.148-THIRD-PARTY-NOTICES.txt',
-            'licenses/managed-nuget/System.Security.Cryptography.Pkcs-11.0.0-rc.3.26522.148-THIRD-PARTY-NOTICES.txt',
-            'licenses/managed-nuget/System.Security.Cryptography.Xml-11.0.0-rc.3.26522.148-THIRD-PARTY-NOTICES.txt',
+            'licenses/managed-nuget/Microsoft.Extensions.ObjectPool-11.0.0-THIRD-PARTY-NOTICES.txt',
+            'licenses/managed-nuget/System.Security.Cryptography.Pkcs-11.0.0-THIRD-PARTY-NOTICES.txt',
+            'licenses/managed-nuget/System.Security.Cryptography.Xml-11.0.0-THIRD-PARTY-NOTICES.txt',
             'licenses/managed-nuget/System.ServiceModel.Primitives-10.0.652802-LICENSE.txt',
             'licenses/managed-nuget/System.ServiceModel.Primitives-10.0.652802-THIRD-PARTY-NOTICES.txt'
         )
@@ -1211,8 +1211,8 @@ if ($targetFrameworks.Count -ne 1) {
 
 [string[]]$expectedManagedPackages = @(
     'AsyncIO/0.1.69',
-    'Microsoft.Data.Sqlite.Core/11.0.0-rc.3.26522.148',
-    'Microsoft.Extensions.ObjectPool/11.0.0-rc.3.26522.148',
+    'Microsoft.Data.Sqlite.Core/11.0.0',
+    'Microsoft.Extensions.ObjectPool/11.0.0',
     'NaCl.Net/0.1.13',
     'NetMQ/4.0.4.4',
     'SQLite/3.54.0',
@@ -1220,8 +1220,8 @@ if ($targetFrameworks.Count -ne 1) {
     'SQLitePCLRaw.config.e_sqlite3/3.0.5',
     'SQLitePCLRaw.core/3.0.5',
     'SQLitePCLRaw.provider.e_sqlite3/3.0.5',
-    'System.Security.Cryptography.Pkcs/11.0.0-rc.3.26522.148',
-    'System.Security.Cryptography.Xml/11.0.0-rc.3.26522.148',
+    'System.Security.Cryptography.Pkcs/11.0.0',
+    'System.Security.Cryptography.Xml/11.0.0',
     'System.ServiceModel.Primitives/10.0.652802')
 [string[]]$actualManagedPackages = @(
     $cliAssets['libraries'].GetEnumerator() |
@@ -1249,19 +1249,19 @@ foreach ($entry in $managedLicenseSources.GetEnumerator()) {
         Destination = 'SQLite-3.54.0-LICENSE.txt'
     },
     [pscustomobject]@{
-        Identity = 'Microsoft.Extensions.ObjectPool/11.0.0-rc.3.26522.148'
+        Identity = 'Microsoft.Extensions.ObjectPool/11.0.0'
         Source = 'THIRD-PARTY-NOTICES.TXT'
-        Destination = 'Microsoft.Extensions.ObjectPool-11.0.0-rc.3.26522.148-THIRD-PARTY-NOTICES.txt'
+        Destination = 'Microsoft.Extensions.ObjectPool-11.0.0-THIRD-PARTY-NOTICES.txt'
     },
     [pscustomobject]@{
-        Identity = 'System.Security.Cryptography.Pkcs/11.0.0-rc.3.26522.148'
+        Identity = 'System.Security.Cryptography.Pkcs/11.0.0'
         Source = 'THIRD-PARTY-NOTICES.TXT'
-        Destination = 'System.Security.Cryptography.Pkcs-11.0.0-rc.3.26522.148-THIRD-PARTY-NOTICES.txt'
+        Destination = 'System.Security.Cryptography.Pkcs-11.0.0-THIRD-PARTY-NOTICES.txt'
     },
     [pscustomobject]@{
-        Identity = 'System.Security.Cryptography.Xml/11.0.0-rc.3.26522.148'
+        Identity = 'System.Security.Cryptography.Xml/11.0.0'
         Source = 'THIRD-PARTY-NOTICES.TXT'
-        Destination = 'System.Security.Cryptography.Xml-11.0.0-rc.3.26522.148-THIRD-PARTY-NOTICES.txt'
+        Destination = 'System.Security.Cryptography.Xml-11.0.0-THIRD-PARTY-NOTICES.txt'
     },
     [pscustomobject]@{
         Identity = 'System.ServiceModel.Primitives/10.0.652802'
@@ -1317,22 +1317,22 @@ foreach ($file in $restoredManagedNoticeFiles) {
     'Source: https://github.com/somdoron/NaCl.net/tree/aee0c42faf09e7c4f4eea66a395aa77b2c30ce6d',
     'License file: MPL-2.0.txt',
     '',
-    'Microsoft.Data.Sqlite.Core 11.0.0-rc.3.26522.148',
-    'System.Security.Cryptography.Pkcs 11.0.0-rc.3.26522.148',
-    'System.Security.Cryptography.Xml 11.0.0-rc.3.26522.148',
+    'Microsoft.Data.Sqlite.Core 11.0.0',
+    'System.Security.Cryptography.Pkcs 11.0.0',
+    'System.Security.Cryptography.Xml 11.0.0',
     'License: MIT',
-    'Source commit: 5254d8bcf59917edc1e1abc33bdf2442b77b1c70',
-    'Source: https://github.com/dotnet/dotnet/tree/5254d8bcf59917edc1e1abc33bdf2442b77b1c70',
+    'Source commit: 297acf930fb0f5c07fd4e51d78e521b4ad2e5d1f',
+    'Source: https://github.com/dotnet/dotnet/tree/297acf930fb0f5c07fd4e51d78e521b4ad2e5d1f',
     'License file: Microsoft-dotnet-MIT.txt',
-    'Package notices: System.Security.Cryptography.Pkcs-11.0.0-rc.3.26522.148-THIRD-PARTY-NOTICES.txt',
-    '                 System.Security.Cryptography.Xml-11.0.0-rc.3.26522.148-THIRD-PARTY-NOTICES.txt',
+    'Package notices: System.Security.Cryptography.Pkcs-11.0.0-THIRD-PARTY-NOTICES.txt',
+    '                 System.Security.Cryptography.Xml-11.0.0-THIRD-PARTY-NOTICES.txt',
     '',
-    'Microsoft.Extensions.ObjectPool 11.0.0-rc.3.26522.148',
+    'Microsoft.Extensions.ObjectPool 11.0.0',
     'License: MIT',
-    'Source commit: 5254d8bcf59917edc1e1abc33bdf2442b77b1c70',
-    'Source: https://github.com/dotnet/dotnet/tree/5254d8bcf59917edc1e1abc33bdf2442b77b1c70',
+    'Source commit: 297acf930fb0f5c07fd4e51d78e521b4ad2e5d1f',
+    'Source: https://github.com/dotnet/dotnet/tree/297acf930fb0f5c07fd4e51d78e521b4ad2e5d1f',
     'License file: Microsoft-dotnet-MIT.txt',
-    'Package notice: Microsoft.Extensions.ObjectPool-11.0.0-rc.3.26522.148-THIRD-PARTY-NOTICES.txt',
+    'Package notice: Microsoft.Extensions.ObjectPool-11.0.0-THIRD-PARTY-NOTICES.txt',
     '',
     'System.ServiceModel.Primitives 10.0.652802',
     'License: MIT',

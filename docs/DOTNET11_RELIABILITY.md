@@ -1,8 +1,8 @@
 # .NET 11 process lifecycle and diagnostics
 
-The current SDK is pinned to `11.0.100-rc.3.26522.148`, with runtime
-`11.0.0-rc.3.26522.148`. The following capabilities were introduced during
-the RC1 adoption and are retained on RC3:
+The current SDK is pinned to `11.0.100`, with runtime
+`11.0.0`. The following capabilities were introduced during
+the RC1 adoption and are retained in the final release:
 
 - All production FFmpeg, ffprobe, uname, and LD AC3 starts share an explicit
   inherited-handle list. Windows and Linux tool starts also use
