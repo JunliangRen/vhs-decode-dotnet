@@ -96,14 +96,14 @@ $sources = [ordered]@{
 
 $managedLicenseSources = [ordered]@{
     NetMQ = [pscustomobject]@{
-        FileName = 'NetMQ-4.0.4.4-COPYING.LESSER'
-        Url = 'https://raw.githubusercontent.com/zeromq/netmq/eb5eaa573eff8d9aadbf2049b185aea5a60874b8/COPYING.LESSER'
+        FileName = 'NetMQ-4.0.4.5-COPYING.LESSER'
+        Url = 'https://raw.githubusercontent.com/zeromq/netmq/42ac47eb11b02cadaa77fff1c8b3c5edabfc924f/COPYING.LESSER'
         Sha256 = '5c435f899811e8e93e055a4dfaa0782fdd1f6b1e67a1f695a23eb610b74e9e57'
     }
     NetMQSource = [pscustomobject]@{
-        FileName = 'NetMQ-eb5eaa573eff8d9aadbf2049b185aea5a60874b8-source.tar.gz'
-        Url = 'https://codeload.github.com/zeromq/netmq/tar.gz/eb5eaa573eff8d9aadbf2049b185aea5a60874b8'
-        Sha256 = '6635c29bf0e6d78016959afd45d53e90fda146bf160e90bc3cde77f87dc0ce39'
+        FileName = 'NetMQ-42ac47eb11b02cadaa77fff1c8b3c5edabfc924f-source.tar.gz'
+        Url = 'https://codeload.github.com/zeromq/netmq/tar.gz/42ac47eb11b02cadaa77fff1c8b3c5edabfc924f'
+        Sha256 = '74dafb8e6e69b270a9e0cc6e892ca49cb746b0cace8b283808fa673cc4b94617'
     }
     Mpl20 = [pscustomobject]@{
         FileName = 'MPL-2.0.txt'
@@ -519,12 +519,12 @@ function Assert-PublishLayout {
             'licenses/aspnetcore-runtime/ThirdPartyNotices.txt',
             'licenses/managed-nuget/MANIFEST.txt',
             'licenses/managed-nuget/SHA256SUMS.txt',
-            'licenses/managed-nuget/NetMQ-4.0.4.4-COPYING.LESSER',
-            'licenses/managed-nuget/NetMQ-eb5eaa573eff8d9aadbf2049b185aea5a60874b8-source.tar.gz',
+            'licenses/managed-nuget/NetMQ-4.0.4.5-COPYING.LESSER',
+            'licenses/managed-nuget/NetMQ-42ac47eb11b02cadaa77fff1c8b3c5edabfc924f-source.tar.gz',
             'licenses/managed-nuget/MPL-2.0.txt',
             'licenses/managed-nuget/SQLitePCLRaw-3.0.5-LICENSE.txt',
             'licenses/managed-nuget/SQLitePCLRaw-3.0.5-NOTICE.txt',
-            'licenses/managed-nuget/SQLite-3.54.0-LICENSE.txt',
+            'licenses/managed-nuget/SQLite-3.54.1-LICENSE.txt',
             'licenses/managed-nuget/Microsoft-dotnet-MIT.txt',
             'licenses/managed-nuget/Microsoft.Extensions.ObjectPool-11.0.0-THIRD-PARTY-NOTICES.txt',
             'licenses/managed-nuget/System.Security.Cryptography.Pkcs-11.0.0-THIRD-PARTY-NOTICES.txt',
@@ -1214,8 +1214,8 @@ if ($targetFrameworks.Count -ne 1) {
     'Microsoft.Data.Sqlite.Core/11.0.0',
     'Microsoft.Extensions.ObjectPool/11.0.0',
     'NaCl.Net/0.1.13',
-    'NetMQ/4.0.4.4',
-    'SQLite/3.54.0',
+    'NetMQ/4.0.4.5',
+    'SQLite/3.54.1',
     'SQLitePCLRaw.bundle_e_sqlite3/3.0.5',
     'SQLitePCLRaw.config.e_sqlite3/3.0.5',
     'SQLitePCLRaw.core/3.0.5',
@@ -1244,9 +1244,9 @@ foreach ($entry in $managedLicenseSources.GetEnumerator()) {
 
 [object[]]$restoredManagedNoticeFiles = @(
     [pscustomobject]@{
-        Identity = 'SQLite/3.54.0'
+        Identity = 'SQLite/3.54.1'
         Source = 'LICENSE.txt'
-        Destination = 'SQLite-3.54.0-LICENSE.txt'
+        Destination = 'SQLite-3.54.1-LICENSE.txt'
     },
     [pscustomobject]@{
         Identity = 'Microsoft.Extensions.ObjectPool/11.0.0'
@@ -1297,12 +1297,12 @@ foreach ($file in $restoredManagedNoticeFiles) {
     'Managed NuGet dependency license manifest',
     'This is the complete package graph restored for the Linux x64 CLI publish.',
     '',
-    'NetMQ 4.0.4.4',
+    'NetMQ 4.0.4.5',
     'License: LGPL-3.0 with the NetMQ static-linking exception',
-    'Source commit: eb5eaa573eff8d9aadbf2049b185aea5a60874b8',
-    'Source: https://github.com/zeromq/netmq/tree/eb5eaa573eff8d9aadbf2049b185aea5a60874b8',
-    'License file: NetMQ-4.0.4.4-COPYING.LESSER',
-    'Corresponding source: NetMQ-eb5eaa573eff8d9aadbf2049b185aea5a60874b8-source.tar.gz',
+    'Source commit: 42ac47eb11b02cadaa77fff1c8b3c5edabfc924f',
+    'Source: https://github.com/zeromq/netmq/tree/42ac47eb11b02cadaa77fff1c8b3c5edabfc924f',
+    'License file: NetMQ-4.0.4.5-COPYING.LESSER',
+    'Corresponding source: NetMQ-42ac47eb11b02cadaa77fff1c8b3c5edabfc924f-source.tar.gz',
     'The archive keeps NetMQ.dll as a separate managed assembly.',
     '',
     'AsyncIO 0.1.69',
@@ -1352,10 +1352,10 @@ foreach ($file in $restoredManagedNoticeFiles) {
     'License file: SQLitePCLRaw-3.0.5-LICENSE.txt',
     'Notice file: SQLitePCLRaw-3.0.5-NOTICE.txt',
     '',
-    'SQLite 3.54.0',
+    'SQLite 3.54.1',
     'License: Public Domain',
     'Source: https://sqlite.org/',
-    'License file from the restored package: SQLite-3.54.0-LICENSE.txt')
+    'License file from the restored package: SQLite-3.54.1-LICENSE.txt')
 [System.IO.File]::WriteAllLines(
     (Join-Path $managedNugetLicenseRoot 'MANIFEST.txt'),
     $managedLicenseManifest,

@@ -158,15 +158,15 @@ archive.
 
 ## NetMQ, AsyncIO, and NaCl.Net
 
-The GNU Radio RF AFE and HiFi transport paths use NetMQ 4.0.4.4 as a separate
+The GNU Radio RF AFE and HiFi transport paths use NetMQ 4.0.4.5 as a separate
 managed assembly, from source commit
-`eb5eaa573eff8d9aadbf2049b185aea5a60874b8`. NetMQ is licensed under
+`42ac47eb11b02cadaa77fff1c8b3c5edabfc924f`. NetMQ is licensed under
 the GNU Lesser General Public License version 3 with the NetMQ static-linking
 exception. The Linux archive carries the complete license and exception text at
-`licenses/managed-nuget/NetMQ-4.0.4.4-COPYING.LESSER`; the project's GPLv3
+`licenses/managed-nuget/NetMQ-4.0.4.5-COPYING.LESSER`; the project's GPLv3
 license is at the archive root. The complete corresponding source for the exact
 NetMQ commit is included beside its license as
-`NetMQ-eb5eaa573eff8d9aadbf2049b185aea5a60874b8-source.tar.gz`.
+`NetMQ-42ac47eb11b02cadaa77fff1c8b3c5edabfc924f-source.tar.gz`.
 
 NetMQ depends on AsyncIO 0.1.69 and NaCl.Net 0.1.13. Both are licensed under
 the Mozilla Public License 2.0. The Linux archive records their exact source
@@ -174,7 +174,7 @@ identities in `licenses/managed-nuget/MANIFEST.txt` and provides the complete
 MPL 2.0 text at `licenses/managed-nuget/MPL-2.0.txt`.
 
 The Linux archive's SQLite provider graph also includes SQLitePCLRaw 3.0.5,
-licensed under Apache-2.0, and SQLite 3.54.0, dedicated to the public domain.
+licensed under Apache-2.0, and SQLite 3.54.1, dedicated to the public domain.
 Their complete license/notice files are under `licenses/managed-nuget`.
 
 Microsoft.Data.Sqlite.Core, Microsoft.Extensions.ObjectPool,
