@@ -2,13 +2,14 @@
 
 [English](README.md) | **[简体中文](README.zh-CN.md)** | [日本語](README.ja.md)
 
-<!-- README_SYNC: 2026-11-05.03 -->
+<!-- README_SYNC: 2026-11-13.01 -->
 
 这是 [`oyvindln/vhs-decode`](https://github.com/oyvindln/vhs-decode)
 中解码相关部分的 .NET 11 重写，兼容目标为上游 release `v0.4.0`、commit
 `43155200da87c0d49eb37d8ec09b1372075ee8e4`。
 
-当前 .NET 移植版发布为 [`v0.4.0-2.19.0`](https://github.com/JunliangRen/vhs-decode-dotnet/releases/tag/v0.4.0-2.19.0)（应用版本 `2.19.0`）。
+当前 .NET 移植版发布为 [`v0.4.0-2.20.0`](https://github.com/JunliangRen/vhs-decode-dotnet/releases/tag/v0.4.0-2.20.0)（应用版本 `2.20.0`）。
+x64 二进制文件需要支持 SSE4.2 和 POPCNT 的 [x86-64-v2 CPU](https://learn.microsoft.com/en-us/dotnet/core/whats-new/dotnet-11/runtime#updated-minimum-hardware-requirements)。
 
 [LD EFM 缓冲区复用的测量与边界](docs/LD_PERFORMANCE_V16.md)。
 
@@ -343,7 +344,7 @@ TBC、色度、JSON 和日志文件允许在解码期间并发读取，兼容的
 
 ## 构建与测试
 
-项目固定使用 .NET SDK `11.0.100-rc.3.26522.148`（RC3）。
+项目固定使用 .NET SDK `11.0.100`。
 
 ```powershell
 dotnet restore VHSDecodeDotNet.slnx

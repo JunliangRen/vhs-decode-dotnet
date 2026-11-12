@@ -23,7 +23,7 @@ IPP_SYSTEM_LIBRARIES = {
 }
 # CoreCLR loads this provider opportunistically; its absence disables LTTng
 # tracing, not decoding. All symbol-version limits still apply to the provider.
-# https://github.com/dotnet/runtime/blob/v11.0.0-rc.3.26522.148/src/coreclr/pal/src/misc/tracepointprovider.cpp
+# https://github.com/dotnet/runtime/blob/v11.0.0/src/coreclr/pal/src/misc/tracepointprovider.cpp
 OPTIONAL_DEPENDENCIES = {"libcoreclrtraceptprovider.so": {"liblttng-ust.so.0"}}
 
 

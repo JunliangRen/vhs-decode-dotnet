@@ -7,6 +7,7 @@ Source repository: <https://github.com/JunliangRen/vhs-decode-dotnet>
 The Linux package targets only 64-bit x86 Linux:
 
 - .NET runtime identifier: `linux-x64`
+- CPU: [x86-64-v2](https://learn.microsoft.com/en-us/dotnet/core/whats-new/dotnet-11/runtime#updated-minimum-hardware-requirements), including SSE4.2 and POPCNT
 - C library: glibc; built on Ubuntu 22.04, with every shipped ELF requiring
   GLIBC 2.34 or older, GLIBCXX 3.4.29 or older, CXXABI 1.3.13 or older, and
   GCC 4.2.0 or older
@@ -89,9 +90,8 @@ The `decode` facade is also included, for example:
 
 IPP is linked into the app-local bridge using PIC sequential static libraries;
 users do not install oneAPI or configure `LD_LIBRARY_PATH`. The system C++
-runtime remains a dependency. IPP needs an x86-64 CPU with SSE4.2 support, and
-the loader reports an explicit failure if an explicitly selected IPP backend
-cannot initialize. Normal decode still defaults to Exact. `approx-fast`
+runtime remains a dependency. The loader reports an error if an explicitly
+selected IPP backend cannot initialize. Normal decode still defaults to Exact. `approx-fast`
 automatically selects its IPP provider when available; use
 `--approx-provider managed` to select managed float32 transforms. Automatic
 CPU preview also selects IPP when available; `--dsp-backend exact` pins Exact.
@@ -197,7 +197,7 @@ CoreCLR's optional LTTng tracing provider is audited against the same ABI
 ceilings. Its `liblttng-ust.so.0` dependency may be absent and is explicitly
 recorded in `ELF-ABI.json`; the runtime skips that provider when unavailable.
 Decoding and EventPipe diagnostics do not require LTTng. See the pinned
-[CoreCLR provider loader](https://github.com/dotnet/runtime/blob/v11.0.0-rc.3.26522.148/src/coreclr/pal/src/misc/tracepointprovider.cpp).
+[CoreCLR provider loader](https://github.com/dotnet/runtime/blob/v11.0.0/src/coreclr/pal/src/misc/tracepointprovider.cpp).
 
 ## Process cleanup and crash diagnostics
 
@@ -217,7 +217,7 @@ export DOTNET_CrashReportRootPath="$(pwd)"
 ./decode vhs --ntsc -f 20 input.flac output
 ```
 
-The root path must be an existing writable absolute directory. RC3 writes
+The root path must be an existing writable absolute directory. .NET 11 writes
 reports under `$DOTNET_CrashReportRootPath/.dotnet/crash-reports/` using
 `report-*.crashreport.json` names, and also writes diagnostic information to
 stderr. These reports describe fatal runtime failures; ordinary command errors
@@ -231,4 +231,4 @@ execution timeout and use the SDK's `per-module` results layout. The additional
 process fixtures cover parent death, cancellation, pipe EOF, concurrent stdout
 and stderr capture, Unix signal termination, and structured Linux crash reports.
 See [.NET 11 runtime diagnostics](https://learn.microsoft.com/en-us/dotnet/core/whats-new/dotnet-11/runtime#in-process-crash-report-logging)
-and the [RC3 report lifecycle implementation](https://github.com/dotnet/runtime/blob/v11.0.0-rc.3.26522.148/src/coreclr/debug/crashreport/inproccrashreportlifecycle.cpp).
+and the [.NET 11 report lifecycle implementation](https://github.com/dotnet/runtime/blob/v11.0.0/src/coreclr/debug/crashreport/inproccrashreportlifecycle.cpp).

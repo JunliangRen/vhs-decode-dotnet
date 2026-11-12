@@ -2,14 +2,15 @@
 
 [English](README.md) | [简体中文](README.zh-CN.md) | **[日本語](README.ja.md)**
 
-<!-- README_SYNC: 2026-11-05.03 -->
+<!-- README_SYNC: 2026-11-13.01 -->
 
 [`oyvindln/vhs-decode`](https://github.com/oyvindln/vhs-decode) の
 デコード関連部分を .NET 11 で再実装するプロジェクトです。互換性の対象は
 upstream release `v0.4.0`、commit
 `43155200da87c0d49eb37d8ec09b1372075ee8e4` です。
 
-現在の .NET port release は [`v0.4.0-2.19.0`](https://github.com/JunliangRen/vhs-decode-dotnet/releases/tag/v0.4.0-2.19.0)（application version `2.19.0`）です。
+現在の .NET port release は [`v0.4.0-2.20.0`](https://github.com/JunliangRen/vhs-decode-dotnet/releases/tag/v0.4.0-2.20.0)（application version `2.20.0`）です。
+x64 バイナリには SSE4.2 と POPCNT を備えた [x86-64-v2 CPU](https://learn.microsoft.com/en-us/dotnet/core/whats-new/dotnet-11/runtime#updated-minimum-hardware-requirements) が必要です。
 
 [LD EFM バッファー再利用の測定結果と適用範囲](docs/LD_PERFORMANCE_V16.md)。
 
@@ -373,7 +374,7 @@ header は FFmpeg を維持します。
 
 ## Build と test
 
-固定 SDK は .NET `11.0.100-rc.3.26522.148`（RC3）です。
+固定 SDK は .NET `11.0.100` です。
 
 ```powershell
 dotnet restore VHSDecodeDotNet.slnx
