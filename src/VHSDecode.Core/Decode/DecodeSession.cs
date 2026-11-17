@@ -362,6 +362,11 @@ public static class DecodeSessionFactory
                 || command.InputFile.EndsWith(".ldf", StringComparison.Ordinal));
         bool useFfmpegInputPath = !noResample && !nativeFortyMegahertzContainer;
         UpstreamBehaviorProfile profile = SelectedUpstreamBehaviorProfile(command);
+        if (command.Get<bool>("skip_vbi_dod") && profile != UpstreamBehaviorProfile.Current)
+        {
+            throw new NotSupportedException("--skip_vbi_dod requires --compat-version current.");
+        }
+
         bool scaleSigned8ToPcm16 = profile == UpstreamBehaviorProfile.Current;
         IRfSampleLoader loader;
         if (halfRateInput)
@@ -637,7 +642,7 @@ public static class DecodeSessionFactory
                 == ApproxResampler.CatmullRom4
                     ? TbcSampleResamplingKernel.CatmullRom4Float32
                     : TbcSampleResamplingKernel.KaiserSinc16);
-        TbcDropoutDetectionOptions dropoutOptions = BuildDropoutOptions(command, sampleRateMHz);
+        TbcDropoutDetectionOptions dropoutOptions = BuildDropoutOptions(command, sampleRateMHz, parameters);
         TbcFieldOrderOptions fieldOrderOptions = BuildFieldOrderOptions(command, parameters, executionOptions.UpstreamBehaviorProfile);
         LaserDiscAudioOptions? laserDiscAudioOptions = BuildLaserDiscAudioOptions(command, system);
         HSyncRefineOptions hSyncRefineOptions = BuildHSyncRefineOptions(command);
@@ -1570,7 +1575,10 @@ public static class DecodeSessionFactory
         return string.Equals(system, "NTSC", StringComparison.Ordinal) && !ntscJapan ? 7.5 : 0.0;
     }
 
-    private static TbcDropoutDetectionOptions BuildDropoutOptions(ParsedCommand command, double sampleRateMHz)
+    private static TbcDropoutDetectionOptions BuildDropoutOptions(
+        ParsedCommand command,
+        double sampleRateMHz,
+        FormatParameterSet parameters)
     {
         if (command.Spec.Name == "cvbs")
         {
@@ -1599,7 +1607,12 @@ public static class DecodeSessionFactory
             thresholdFraction,
             absoluteThreshold,
             hysteresis,
-            TbcDropoutDetectionMode.TapeEnvelope);
+            TbcDropoutDetectionMode.TapeEnvelope)
+        {
+            FirstDetectionLine = command.Get<bool>("skip_vbi_dod")
+                ? (JsonRequiredDouble(parameters.SysParams, "frame_lines") == 625.0 ? 23 : 21)
+                : 1
+        };
     }
 
     private static FormatParameterSet ApplyLaserDiscOverrides(FormatParameterSet parameters, ParsedCommand command)

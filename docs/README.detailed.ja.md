@@ -11,7 +11,7 @@
 `v0.4.0`、commit `43155200da87c0d49eb37d8ec09b1372075ee8e4`
 を互換性の基準としています。
 
-現在の .NET port release は [`v0.4.0-2.20.0`](https://github.com/JunliangRen/vhs-decode-dotnet/releases/tag/v0.4.0-2.20.0)（application version `2.20.0`）です。
+現在の .NET port release は [`v0.4.0-2.21.0`](https://github.com/JunliangRen/vhs-decode-dotnet/releases/tag/v0.4.0-2.21.0)（application version `2.21.0`）です。
 
 [LD EFM バッファー再利用の測定結果と適用範囲](LD_PERFORMANCE_V16.md)。
 
@@ -78,7 +78,7 @@
 | --- | --- | --- |
 | ソリューションとテスト | 実装済み | .NET 11 `.slnx`。標準 xUnit v3 テストは Visual Studio Test Explorer と `dotnet test` で利用できます。 |
 | CLI と引数 | 実装済み、スナップショットテストあり | facade とスタンドアロンの help、alias、default、validation、diagnostic、exit 動作は v0.4.0 を対象とします。 |
-| 上流動作プロファイル | 段階的に実装 | `v0.4.0` が引き続き既定です。明示的に選択する `current` は upstream `1bc3ab4` の VHS sync と color-under processing を対象とします。 |
+| 上流動作プロファイル | 段階的に実装 | `v0.4.0` が引き続き既定です。明示的に選択する `current` は upstream `a801063` の VHS sync と color-under processing を対象とします。 |
 | VHS とテープ形式 | 実装済み。まれなキャプチャ差分あり | VHS、S-VHS、Betamax、Video8/Hi8、U-matic、Type C、EIAJ、および対応 PAL/NTSC 形式は release 互換経路を共有します。 |
 | CVBS | release 対応システムを実装済み | PAL/NTSC 経路は動作します。まれな vblank とオプション間のケースには実キャプチャ fixture の追加が必要です。 |
 | LaserDisc | 実装済み。まれなキャプチャ差分あり | Video、VBI、EFM、analog audio、AC3、RF-TBC、metadata、recovery、PAL/NTSC 経路を接続済みです。 |
@@ -139,7 +139,7 @@ VHS decode は `--compat-version v0.4.0|current` を受け付けます。
 | Profile | Default | 固定した upstream source | 現在有効な動作 |
 | --- | --- | --- | --- |
 | `v0.4.0` | はい | release v0.4.0、commit `43155200da87c0d49eb37d8ec09b1372075ee8e4` | 既存の release 互換 decode path。 |
-| `current` | いいえ | upstream commit `1bc3ab4f02d1c0af624129ba3dd62f25d1c159c8` | PR 341 の同期と color-under 処理に加え、HSync タイミング、VSync ブランキングレベル、フィールド状態、ブロック色フィルタ、PAL ヘッド切り替えと色 AGC の修正。 |
+| `current` | いいえ | upstream commit `a80106300e175387124634e21e833aa4e57c0738` | PR 341 の同期と color-under 処理に加え、HSync タイミング、VSync ブランキングレベル、フィールド状態、ブロック色フィルタ、PAL ヘッド切り替えと色 AGC の修正。入力サンプルレートでの NTSC 色度群遅延補正と、VBI をドロップアウト検出から除外するオプションも含みます。 |
 
 `current` は段階導入される opt-in profile です。color-under format では
 PR 341 の official CTI default、`--cti_mix 1` と `--cti_width 2` を
@@ -200,15 +200,15 @@ extended oracle を使用しました。この release gate では IPP を除外
 
 DSP backend は `--dsp-backend exact|ipp-fast|cuda-fast|approx-fast` で明示的に選択します。この
 parameter はこの .NET port の experimental extension であり、upstream
-`oyvindln/vhs-decode` v0.4.0 CLI には含まれません。`exact` が default で、
-既存の managed 互換経路を維持し、Intel IPP の probe や load は行いません。
-`ipp-fast` は opt-in Windows x64 backend です。Intel CPU が official support
+`oyvindln/vhs-decode` v0.4.0 CLI には含まれません。VHS と LaserDisc のファイル
+デコードでは `ipp-fast` を優先し、起動時に IPP が利用できなければ `exact` を使用します。
+CVBS と HiFi の既定値は `exact` です。`ipp-fast` は Windows x64 と Linux x64/glibc に対応します。Intel CPU が official support
 target であり、compatible non-Intel x64 CPU はこの project の best-effort
 experimental path です。IPP が返す feature mask に SSE4.2 が含まれる場合のみ、
 正の non-Intel vendor warning を受け入れます。静的 link 済みの
 `vhsdecode_ipp.dll` を load し、IPP version と選択された ISA を表示します。
-bridge、ABI、CPU が利用できない場合は明確に失敗し、`exact` へ暗黙に fallback
-しません。現在の IPP routing は VHS real-RF FFT、`current` profile の
+`ipp-fast` を明示した場合、bridge、ABI、CPU が利用できなければエラーになります。
+現在の IPP routing は VHS real-RF FFT、`current` profile の
 color-under Super-Gaussian DFT、および LaserDisc video、EFM、analog audio が使う
 power-of-two double-precision full-complex FFT stage を含みます。LD path は native
 bridge ABI v1.4 を使用します。CVBS と HiFi は未対応の `ipp-fast` を明示的に拒否し、

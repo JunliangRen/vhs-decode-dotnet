@@ -210,6 +210,7 @@ public sealed class DecodeRunner
                 }
             }
 
+            command = ResolveDefaultDspBackend(command);
             var runtimeReporter = new DecodeRuntimeReporter(output, error);
             DecodeSession? session = null;
             IVhsCudaRealFft? currentVhsCudaFft = null;
@@ -590,12 +591,28 @@ public sealed class DecodeRunner
         }
     }
 
+    private static ParsedCommand ResolveDefaultDspBackend(ParsedCommand command)
+    {
+        if (command.Spec.Name is not ("vhs" or "ld")
+            || command.GetSource("dsp_backend") != ParsedOptionSource.Default
+            || command.Get<bool>("preview_server")
+            || !IppRuntime.TryProbe(out _))
+        {
+            return command;
+        }
+
+        return WithDspBackend(command, DspBackendParser.IppFastValue);
+    }
+
     // Use the managed Exact signal semantics for the stages outside the required CUDA provider.
     private static ParsedCommand CreateManagedCudaComplementCommand(ParsedCommand command)
+        => WithDspBackend(command, DspBackendParser.ExactValue);
+
+    private static ParsedCommand WithDspBackend(ParsedCommand command, string backend)
     {
         var values = new Dictionary<string, object?>(command.Values, StringComparer.Ordinal)
         {
-            ["dsp_backend"] = DspBackendParser.ExactValue
+            ["dsp_backend"] = backend
         };
         return new ParsedCommand(command.Spec, values, [.. command.Positionals], command.ProgramName, command.OptionSources);
     }

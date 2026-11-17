@@ -10,7 +10,7 @@
 中解码相关部分的 .NET 11 重写，当前以 release `v0.4.0`、commit
 `43155200da87c0d49eb37d8ec09b1372075ee8e4` 为兼容基线。
 
-当前 .NET 移植版发布为 [`v0.4.0-2.20.0`](https://github.com/JunliangRen/vhs-decode-dotnet/releases/tag/v0.4.0-2.20.0)（应用版本 `2.20.0`）。
+当前 .NET 移植版发布为 [`v0.4.0-2.21.0`](https://github.com/JunliangRen/vhs-decode-dotnet/releases/tag/v0.4.0-2.21.0)（应用版本 `2.21.0`）。
 
 [LD EFM 缓冲区复用的测量与边界](LD_PERFORMANCE_V16.md)。
 
@@ -25,7 +25,7 @@
 > `fileLoc`、stdout 和归一化日志均为 0 差异；PAL 的 JSON 和全部 800 个
 > `fileLoc` 也为 0 差异，但亮度有 0.000794%、色度有 0.003226% 的样本不同
 > （合计约 0.00201%），且所有差异都集中在 800 个场中的一个严重损坏场。
-> 兼容性敏感的使用场景仍默认并应继续使用 `exact`。
+> 兼容性敏感的解码可显式使用 `--dsp-backend exact`。
 
 ## 目录
 
@@ -72,7 +72,7 @@
 | --- | --- | --- |
 | 解决方案和测试 | 已实现 | .NET 11 `.slnx`；标准 xUnit v3 测试可在 Visual Studio Test Explorer 和 `dotnet test` 中使用。 |
 | CLI 和参数 | 已实现并做快照测试 | facade 与独立命令的帮助、别名、默认值、校验、诊断和退出行为以 v0.4.0 为目标。 |
-| 上游行为配置 | 分阶段实现 | `v0.4.0` 仍是默认值。显式启用的 `current` 配置以上游 `1bc3ab4` 的 VHS 同步和 color-under 处理为目标。 |
+| 上游行为配置 | 分阶段实现 | `v0.4.0` 仍是默认值。显式启用的 `current` 配置以上游 `a801063` 的 VHS 同步和 color-under 处理为目标。 |
 | VHS 与磁带格式 | 已实现；仍有罕见采集差距 | VHS、S-VHS、Betamax、Video8/Hi8、U-matic、Type C、EIAJ 及支持的 PAL/NTSC 变体共用 release 兼容解码路径。 |
 | CVBS | 已实现 release 支持的系统 | PAL 和 NTSC 路径可运行；少见的 vblank 与跨参数组合仍需更多真实采集夹具。 |
 | LaserDisc | 已实现；仍有罕见采集差距 | 视频、VBI、EFM、模拟音频、AC3、RF-TBC、元数据、恢复和 PAL/NTSC 路径均已连接。 |
@@ -132,7 +132,7 @@ VHS 解码支持 `--compat-version v0.4.0|current`：
 | 配置 | 默认 | 固定的上游来源 | 当前启用的行为 |
 | --- | --- | --- | --- |
 | `v0.4.0` | 是 | release v0.4.0，commit `43155200da87c0d49eb37d8ec09b1372075ee8e4` | 现有 release 兼容解码路径。 |
-| `current` | 否 | 上游提交 `1bc3ab4f02d1c0af624129ba3dd62f25d1c159c8` | PR 341 的同步和 color-under 处理，加上后续的 HSync 时序、VSync 消隐电平、场状态、块色度滤波、PAL 换头和色度 AGC 修正。 |
+| `current` | 否 | 上游提交 `a80106300e175387124634e21e833aa4e57c0738` | PR 341 的同步和 color-under 处理，加上后续的 HSync 时序、VSync 消隐电平、场状态、块色度滤波、PAL 换头和色度 AGC 修正，也包含按输入采样率计算的 NTSC 色度群延迟以及可选的 VBI dropout 跳过。 |
 
 `current` 仍按阶段推进且必须显式启用。对 color-under 格式，它现在采用 PR 341
 的正式 CTI 默认值：`--cti_mix 1`、`--cti_width 2`。`--cti_mix 0`
@@ -185,13 +185,14 @@ stderr 只去除耗时行后逐行一致，日志去除时间戳后逐行一致�
 性能优化是实现的一部分，但确定性输出和 release 兼容性始终是首要约束。
 
 DSP 后端通过 `--dsp-backend exact|ipp-fast|cuda-fast|approx-fast` 显式选择。该参数是本 .NET 移植
-新增的实验扩展，不属于上游 `oyvindln/vhs-decode` v0.4.0 CLI。`exact` 是默认值，
-保留现有托管兼容路径，并且不会探测或加载 Intel IPP。`ipp-fast` 是 Windows x64
-可选后端：Intel CPU 是官方支持目标，兼容的非 Intel x64 CPU 则是本项目的
+新增的实验扩展，不属于上游 `oyvindln/vhs-decode` v0.4.0 CLI。VHS 和 LaserDisc 文件解码优先使用 `ipp-fast`，
+IPP 启动探测失败时回退到 `exact`。CVBS 和 HiFi 默认使用 `exact`。
+显式选择 `exact` 会使用托管兼容路径。`ipp-fast` 支持 Windows x64 和 Linux x64/glibc。
+Intel CPU 是官方支持目标，兼容的非 Intel x64 CPU 则是本项目的
 best-effort 实验路径。只有 IPP 返回的特征掩码包含 SSE4.2 时，才会接受其正值
 non-Intel vendor warning。后端会加载静态链接的 `vhsdecode_ipp.dll`，报告 IPP
-版本和实际选择的 ISA，并在桥接 DLL、ABI 或 CPU 不可用时明确失败，不会静默
-回退到 `exact`。当前 IPP 路由包括 VHS real-RF FFT、`current` profile 下的
+版本和实际选择的 ISA。显式选择 `ipp-fast` 时，桥接库、ABI 或 CPU 不可用会报错。
+当前 IPP 路由包括 VHS real-RF FFT、`current` profile 下的
 color-under Super-Gaussian DFT，以及 LaserDisc 视频、EFM 和模拟音频所用的
 2 的幂长度 double-precision full-complex FFT；LD 路径使用 native bridge ABI v1.4。
 CVBS 和 HiFi 会明确拒绝不支持的 `ipp-fast`，不会悄悄改跑 Exact 内核而产生虚假基准。

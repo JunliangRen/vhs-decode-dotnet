@@ -34,7 +34,7 @@ internal static class PythonNamespaceFormatter
                 continue;
             }
 
-            if (option.Destination is "cti_mix" or "cti_width"
+            if (option.Destination is "cti_mix" or "cti_width" or "skip_vbi_dod"
                 && command.Values.TryGetValue("compat_version", out object? compatibilityVersion)
                 && compatibilityVersion is string profile
                 && profile.Equals("v0.4.0", StringComparison.OrdinalIgnoreCase))

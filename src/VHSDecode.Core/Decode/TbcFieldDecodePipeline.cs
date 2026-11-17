@@ -1594,6 +1594,7 @@ public sealed class TbcFieldDecodePipeline : IDisposable
                 && chromaAnalysis?.Phase.BurstDetectedLine != -1
                     ? VhsChromaDecoder.CurrentNtscChromaGroupDelayShiftSamples(
                         _chromaFieldOptions!,
+                        _syncAnalyzer.SampleRateHz,
                         parity.IsFirstField,
                         fieldNumber)
                     : 0.0;
@@ -7632,10 +7633,11 @@ public sealed class TbcFieldDecodePipeline : IDisposable
         int envelopeLength = envelope.Length;
 
         int lineOffset = LaserDiscLineOffset(isFirstField);
-        int startLine = lineOffset + 1;
+        // Skipping the VBI moves only the start of the scan.
         int endLine = Math.Min(
             lineLocations.Locations.Length - 1,
-            CurrentFieldLineCount(isFirstField) + startLine + 1);
+            CurrentFieldLineCount(isFirstField) + lineOffset + 2);
+        int startLine = lineOffset + _dropoutOptions.FirstDetectionLine;
         if (startLine < 0 || endLine <= startLine || startLine >= lineLocations.Locations.Length)
         {
             return TbcDropoutMap.Empty;

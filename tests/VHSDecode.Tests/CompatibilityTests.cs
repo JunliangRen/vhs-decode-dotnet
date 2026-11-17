@@ -314,16 +314,16 @@ public void DecodeRunnerPrintsCommandHelpBeforeValidation()
 {
     var standaloneHashes = new Dictionary<string, string>(StringComparer.Ordinal)
     {
-        ["vhs"] = "764DFFD7F4856BDEE5753DCF4F8B93F011A74DAF84AD3720A2D708DB54D16E81",
+        ["vhs"] = "05BE0703DFA76E9BB86D52037AD1599FE916BA7C8700A93D9F93D8EC9AD0B909",
         ["cvbs"] = "F036A673C78445AB14039B0EE2F59E219D756EFFE6C0D8EB1872CAAEF71E9B7A",
-        ["ld"] = "9916635440C1BC2A4113527F99D75B0EF1A06060A871F83F4CCEB235141B4166",
+        ["ld"] = "768DDF7BC0C62AE16B44A4ED58ABFEA0980ECA94FAF094347CC9DD939A1F292C",
         ["hifi"] = "D7AEBC4B2CA236292979EBD92CA38454ECE0C2049C3E49A8F5E4E91397ACB658"
     };
     var facadeHashes = new Dictionary<string, string>(StringComparer.Ordinal)
     {
-        ["vhs"] = "05473C8E04D6B6C23EE5A2DE39421E165E0FA6796B386188C9F7449C313E4BD4",
+        ["vhs"] = "00837F0975E6BD670BA169DCA88439C6A1ADA230A50FFBF673848EF9C9F51AAF",
         ["cvbs"] = "A585456B93F91B40313AEE069314AA448B43E97F6E94B0307F7F3926F234FFA3",
-        ["ld"] = "F20AD9B0BAB11557BE8C9EC7CF9C0C0524C9909209A87A7FFA41D0FA1ED6D4C6",
+        ["ld"] = "592939EA91373AD0CF47108C769BA369B434CB7FCE41B4D3CBA04367D4F1A7C9",
         ["hifi"] = "3089FE4A8CE563A00F082770194434DF6629EE98C633664EF8DEB170A5C74D84"
     };
 
@@ -10360,6 +10360,7 @@ public void DecodeCancellationFinalizesPartialOutputAndMatchesUpstreamStreams()
         ParsedCommand command = Parse(CliSpecs.Vhs, [
             "--pal",
             "--no_resample",
+            "--dsp-backend", "exact",
             "--length", "1",
             inputPath,
             runnerBase
@@ -10504,6 +10505,7 @@ public void DecodeReadErrorsReportContextAndFinalizePartialOutput()
         ParsedCommand command = Parse(CliSpecs.Vhs, [
             "--pal",
             "--no_resample",
+            "--dsp-backend", "exact",
             "--write_db",
             "--length", "1",
             inputPath,

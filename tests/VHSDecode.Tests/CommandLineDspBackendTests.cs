@@ -14,9 +14,9 @@ public sealed class CommandLineDspBackendTests
         CliSpecs.HiFi
     };
 
-    [Theory(DisplayName = "DSP backend defaults to exact for every decoder")]
+    [Theory(DisplayName = "Parser retains Exact as its unresolved backend value")]
     [MemberData(nameof(Commands))]
-    public void DspBackendDefaultsToExact(DecodeCommandSpec spec)
+    public void UnspecifiedBackendIsMarkedAsDefault(DecodeCommandSpec spec)
     {
         ParsedCommand command = Parse(spec);
 

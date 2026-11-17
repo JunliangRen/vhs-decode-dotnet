@@ -167,6 +167,7 @@ public static class CliSpecs
         yield return Dbl("dod_threshold_p", ["-D", "--dod_t", "--dod_threshold_p"], null);
         yield return Dbl("dod_threshold_a", ["--dod_t_abs", "--dod_threshold_abs"], null);
         yield return Dbl("dod_hysteresis", ["--dod_h", "--dod_hysteresis"], 1.25);
+        yield return Flag("skip_vbi_dod", ["--skip_vbi_dod"]);
         yield return Flag("gnrc_afe", ["--gnrc", "--gnuradio_rf_afe"]);
     }
 
