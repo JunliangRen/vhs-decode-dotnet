@@ -1448,7 +1448,7 @@ $glibcCeilingEnforced = -not $AllowNewerGlibc.IsPresent
     'ReadyToRun: false',
     'Trimmed: false',
     'DSP release contract: exact',
-    'Additional VHS/LD DSP backend: ipp-fast (static PIC sequential IPP, system libstdc++)',
+    'Default VHS/LD DSP backend: ipp-fast when available (static PIC sequential IPP, system libstdc++)',
     "IPP package version: $($ippManifest.packageVersion); library version: $($ippManifest.runtimeVersion)",
     "IPP bridge SHA256: $($ippManifest.bridgeSha256)",
     "Every shipped ELF audited: GLIBC <= $maximumIppGlibc, GLIBCXX <= 3.4.29, CXXABI <= 1.3.13, GCC <= 4.2.0",

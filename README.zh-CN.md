@@ -8,7 +8,7 @@
 中解码相关部分的 .NET 11 重写，兼容目标为上游 release `v0.4.0`、commit
 `43155200da87c0d49eb37d8ec09b1372075ee8e4`。
 
-当前 .NET 移植版发布为 [`v0.4.0-2.20.0`](https://github.com/JunliangRen/vhs-decode-dotnet/releases/tag/v0.4.0-2.20.0)（应用版本 `2.20.0`）。
+当前 .NET 移植版发布为 [`v0.4.0-2.21.0`](https://github.com/JunliangRen/vhs-decode-dotnet/releases/tag/v0.4.0-2.21.0)（应用版本 `2.21.0`）。
 x64 二进制文件需要支持 SSE4.2 和 POPCNT 的 [x86-64-v2 CPU](https://learn.microsoft.com/en-us/dotnet/core/whats-new/dotnet-11/runtime#updated-minimum-hardware-requirements)。
 
 [LD EFM 缓冲区复用的测量与边界](docs/LD_PERFORMANCE_V16.md)。
@@ -62,8 +62,7 @@ NTSC Betamax HiFi 使用 `decode.exe hifi --betamax --ntsc -f 40 input.flac outp
 同时支持 `vhs-decode.exe`、`ld-decode.exe` 等独立命令别名。使用
 `decode.exe <command> --help` 查看完整兼容参数。
 
-发布工作流还会生成自包含、多文件的 glibc `linux-x64` tar。Linux 包默认使用
-`exact`，也支持 VHS/LD 的 `ipp-fast`，内置 Linux 版 SQLite、libsndfile、libsoxr
+发布工作流还会生成自包含、多文件的 glibc `linux-x64` tar。Linux 包支持 `ipp-fast` 和 `exact`，并内置 Linux 版 SQLite、libsndfile、libsoxr
 和 IPP 原生资产，并明确排除
 Windows IPP/CUDA DLL。安装 FFmpeg 与文档列出的系统库后即可运行：
 
@@ -163,7 +162,7 @@ FFmpeg 仅负责将 H.264 copy-mux 为 HLS/fMP4。显式指定
 | 值 | 含义 |
 | --- | --- |
 | `v0.4.0` | 默认值，目标是固定的 Python release 行为。 |
-| `current` | 显式启用以上游 `1bc3ab4` 为目标的 VHS 同步和 color-under 处理。 |
+| `current` | 显式启用以上游 `a801063` 为目标的 VHS 同步和 color-under 处理。 |
 
 PAL 和 NTSC 的 VHS、S-VHS 文件解码可将 `cuda-fast` 与 `current` 一起使用，支持
 20 或 40 MSPS RF 输入。RF 变换在 CUDA 上以 FP64 执行，同步、TBC 和色度共用托管管线。
@@ -172,12 +171,14 @@ PAL 和 NTSC 的 VHS、S-VHS 文件解码可将 `cuda-fast` 与 `current` 一起
 Python 原版在不同 worker 数下的输出哈希并不稳定，因此 Python 多线程结果只用于
 速度比较，不作为逐字节 oracle。
 
-`--dsp-backend` 选择 DSP 实现：
+VHS 和 LaserDisc 文件解码在启动时优先使用 `ipp-fast`，IPP 探测失败时回退到
+`exact`。CVBS 和 HiFi 默认使用 `exact`。显式指定 `--dsp-backend ipp-fast` 要求 IPP
+可用。VHS 的 `current` 配置可使用 `--skip_vbi_dod`，从场的第一条有效行开始检测 dropout。
 
 | 值 | 含义 |
 | --- | --- |
-| `exact` | 默认托管路径，适合兼容性敏感的解码。 |
-| `ipp-fast` | 实验性的 Windows x64 和 Linux x64/glibc VHS 与 LaserDisc real-RF 路径，使用 Intel IPP；可能改变浮点位，并且绝不会静默回退到 `exact`。 |
+| `exact` | 适合兼容性敏感解码的托管路径。 |
+| `ipp-fast` | 实验性的 Windows x64 和 Linux x64/glibc VHS 与 LaserDisc real-RF 路径，使用 Intel IPP；可能改变浮点位。 |
 | `cuda-fast` | 实验性的 Windows x64 NVIDIA CUDA 13 后端。PAL/NTSC VHS 在 `v0.4.0` 下使用全信号 GPU 路径，`--decode-at-20msps` 可在 GPU 上执行 40→20。新版 `current` 使用 CUDA FP64 RF 变换和托管场处理，40→20 由托管输入路径完成。 |
 | `approx-fast` | 仅支持 VHS 的实验 FP32 路径，可选择 TBC 重采样器和精度契约。默认 `balanced` 保持既有 v1/v2 行为；显式 `aggressive` 使用更快、但有意舍弃部分数值精度的 field-FP32/burst-IQ-prefix/chroma-FFT v6 契约。暂不支持非零 RF high boost。 |
 

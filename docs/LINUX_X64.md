@@ -12,7 +12,7 @@ The Linux package targets only 64-bit x86 Linux:
   GLIBC 2.34 or older, GLIBCXX 3.4.29 or older, CXXABI 1.3.13 or older, and
   GCC 4.2.0 or older
 - deployment: self-contained, multi-file `tar.gz`
-- default compatibility backend: `exact`; additional VHS/LD backend: `ipp-fast`
+- VHS/LD file decode: `ipp-fast` when IPP is available at startup, `exact` otherwise
 - bundled native sidecars: `libsndfile.so`, `libsoxr.so`, and the SQLite
   `libe_sqlite3.so` asset selected by the pinned NuGet graph, plus
   `libvhsdecode_ipp.so`

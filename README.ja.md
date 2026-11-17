@@ -9,7 +9,7 @@
 upstream release `v0.4.0`、commit
 `43155200da87c0d49eb37d8ec09b1372075ee8e4` です。
 
-現在の .NET port release は [`v0.4.0-2.20.0`](https://github.com/JunliangRen/vhs-decode-dotnet/releases/tag/v0.4.0-2.20.0)（application version `2.20.0`）です。
+現在の .NET port release は [`v0.4.0-2.21.0`](https://github.com/JunliangRen/vhs-decode-dotnet/releases/tag/v0.4.0-2.21.0)（application version `2.21.0`）です。
 x64 バイナリには SSE4.2 と POPCNT を備えた [x86-64-v2 CPU](https://learn.microsoft.com/en-us/dotnet/core/whats-new/dotnet-11/runtime#updated-minimum-hardware-requirements) が必要です。
 
 [LD EFM バッファー再利用の測定結果と適用範囲](docs/LD_PERFORMANCE_V16.md)。
@@ -63,7 +63,7 @@ decode.exe hifi [upstream options] input.lds output.wav
 完全な互換 option は `decode.exe <command> --help` で確認してください。
 
 release workflow は self-contained、multi-file の glibc `linux-x64` tar も
-生成します。Linux package は既定の `exact` と VHS/LD 用 `ipp-fast` をサポートし、
+生成します。Linux package は `ipp-fast` と `exact` をサポートし、
 Linux 用 SQLite、libsndfile、libsoxr、IPP native asset を同梱して Windows DLL を除外します。
 FFmpeg と文書化された OS library をインストールした後に実行できます。
 
@@ -174,7 +174,7 @@ stabilization を同時に無効化した場合は 0.922357 で、default は全
 | 値 | 意味 |
 | --- | --- |
 | `v0.4.0` | default。固定した Python release behavior を対象にします。 |
-| `current` | upstream `1bc3ab4` を対象とする VHS sync と color-under processing を明示的に有効にします。 |
+| `current` | upstream `a801063` を対象とする VHS sync と color-under processing を明示的に有効にします。 |
 
 PAL と NTSC の VHS、S-VHS のファイルデコードでは、20 または 40 MSPS の RF 入力で
 `cuda-fast` と `current` を組み合わせられます。RF 変換は CUDA FP64 を使い、同期、TBC、色処理は共通の managed pipeline を使います。
@@ -183,12 +183,15 @@ PAL と NTSC の VHS、S-VHS のファイルデコードでは、20 または 40
 `--threads 0` 出力です。Python upstream は worker 数によって output hash が
 安定しないため、Python の multithread run は速度測定にだけ使用します。
 
-`--dsp-backend` は DSP implementation を選択します。
+VHS と LaserDisc のファイルデコードでは、起動時に IPP が利用可能なら `ipp-fast`、
+利用できなければ `exact` を使用します。CVBS と HiFi の既定値は `exact` です。
+`--dsp-backend ipp-fast` を明示した場合は IPP が必要です。VHS の `current`
+プロファイルでは `--skip_vbi_dod` でドロップアウト検出をフィールドの最初の有効行から開始できます。
 
 | 値 | 意味 |
 | --- | --- |
-| `exact` | default の managed path。互換性を重視する decode に使用します。 |
-| `ipp-fast` | Intel IPP を使う experimental Windows x64 / Linux x64/glibc VHS / LaserDisc real-RF path。浮動小数点 bit が変化する可能性があり、`exact` へ silent fallback しません。 |
+| `exact` | managed path。互換性を重視する decode に使用します。 |
+| `ipp-fast` | Intel IPP を使う experimental Windows x64 / Linux x64/glibc VHS / LaserDisc real-RF path。浮動小数点 bit が変化する可能性があります。 |
 | `cuda-fast` | NVIDIA CUDA 13 を使う実験的な Windows x64 バックエンド。PAL/NTSC VHS の `v0.4.0` は全信号 GPU 経路を使い、`--decode-at-20msps` の 40→20 変換も GPU で行います。`current` は CUDA FP64 RF 変換とマネージドのフィールド処理を使い、40→20 変換はマネージド入力経路で行います。 |
 | `approx-fast` | VHS-only の experimental FP32 path。TBC resampler と precision contract を選択できます。default の `balanced` は既存の v1/v2 behavior を維持し、明示的な `aggressive` は高速化のため一部の数値精度を意図的に省く field-FP32/burst-IQ-prefix/chroma-FFT v6 contract を選択します。nonzero RF high boost は未対応です。 |
 

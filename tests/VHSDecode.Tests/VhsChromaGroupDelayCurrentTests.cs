@@ -12,25 +12,26 @@ public sealed class VhsChromaGroupDelayCurrentTests
     private const string ShiftedOracleHash =
         "D7370B06FFB6AA869C8A88FB612E82D433FD1683369341F1FDB1C7BE4A5EFEEE";
 
-    [Theory(DisplayName = "Current NTSC chroma group delay preserves pinned phase truthiness")]
-    [InlineData(true, 0)]
-    [InlineData(false, 0)]
-    [InlineData(true, 2)]
-    [InlineData(false, 2)]
+    [Theory(DisplayName = "Current NTSC chroma group delay uses the input sample rate")]
+    [InlineData(true, 0, 40_000_000.0)]
+    [InlineData(false, 0, 40_000_000.0)]
+    [InlineData(true, 2, 20_000_000.0)]
+    [InlineData(false, 2, 20_000_000.0)]
     public void CurrentNtscChromaGroupDelayPreservesPinnedPhaseTruthiness(
         bool isFirstField,
-        int fieldNumber)
+        int fieldNumber,
+        double inputSampleRateHz)
     {
         VhsChromaFieldOptions options = CreateOptions();
 
         double shift = VhsChromaDecoder.CurrentNtscChromaGroupDelayShiftSamples(
             options,
+            inputSampleRateHz,
             isFirstField,
             fieldNumber);
 
-        Assert.Equal(
-            unchecked((long)0x400CF758DC1AE919UL),
-            BitConverter.DoubleToInt64Bits(shift));
+        const double DelayAt40Msps = 10.115180827618238;
+        Assert.Equal(DelayAt40Msps * (inputSampleRateHz / 40_000_000.0), shift, precision: 12);
     }
 
     [Fact(DisplayName = "Current chroma group delay follows upstream phase-correction gates")]
@@ -43,12 +44,14 @@ public sealed class VhsChromaGroupDelayCurrentTests
             0.0,
             VhsChromaDecoder.CurrentNtscChromaGroupDelayShiftSamples(
                 pal,
+                inputSampleRateHz: 40_000_000.0,
                 isFirstField: true,
                 fieldNumber: 0));
         Assert.Equal(
             0.0,
             VhsChromaDecoder.CurrentNtscChromaGroupDelayShiftSamples(
                 disabled,
+                inputSampleRateHz: 40_000_000.0,
                 isFirstField: true,
                 fieldNumber: 0));
     }
@@ -68,10 +71,8 @@ public sealed class VhsChromaGroupDelayCurrentTests
             [40.25, 72.75, 105.25, 137.75],
             firstLine: 1,
             lineCount: 2);
-        double shift = VhsChromaDecoder.CurrentNtscChromaGroupDelayShiftSamples(
-            CreateOptions(),
-            isFirstField: true,
-            fieldNumber: 0);
+        // The frozen oracle isolates the resampler at its original shift.
+        double shift = BitConverter.Int64BitsToDouble(0x400CF758DC1AE919L);
 
         double[] actual = resampler.ResamplePreparedShifted(source, plan, shift);
 
@@ -125,6 +126,7 @@ public sealed class VhsChromaGroupDelayCurrentTests
             LineCount);
         double shift = VhsChromaDecoder.CurrentNtscChromaGroupDelayShiftSamples(
             CreateOptions(),
+            inputSampleRateHz: 40_000_000.0,
             isFirstField: false,
             fieldNumber: 2);
         double[] expected = serial.ResamplePreparedShifted(source, serialPlan, shift);

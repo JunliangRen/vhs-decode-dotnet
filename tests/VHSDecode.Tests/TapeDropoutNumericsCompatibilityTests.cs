@@ -67,13 +67,15 @@ public sealed class TapeDropoutNumericsCompatibilityTests
         Assert.Equal([2], decoded.Dropouts.EndX);
     }
 
-    [Fact(DisplayName = "VHS parallel dropout detection matches the serial field result")]
-    public void VhsParallelDropoutDetectionMatchesSerialFieldResult()
+    [Theory(DisplayName = "VHS dropout detection can skip VBI in serial and parallel decode")]
+    [InlineData(1)]
+    [InlineData(21)]
+    public void VhsParallelDropoutDetectionMatchesSerialFieldResult(int firstDetectionLine)
     {
         var spec = new TbcFrameSpec(
             "NTSC",
             OutputLineLength: 4,
-            OutputLineCount: 2,
+            OutputLineCount: 263,
             OutputSampleRateHz: 14_318_180.0,
             ColourBurstStart: null,
             ColourBurstEnd: null,
@@ -90,7 +92,10 @@ public sealed class TapeDropoutNumericsCompatibilityTests
             ThresholdFraction: 0.18,
             AbsoluteThreshold: 2.0,
             Hysteresis: 2.0,
-            Mode: TbcDropoutDetectionMode.TapeEnvelope);
+            Mode: TbcDropoutDetectionMode.TapeEnvelope)
+        {
+            FirstDetectionLine = firstDetectionLine
+        };
 
         TbcFieldDecodePipeline CreatePipeline(int workerThreads)
             => new(
@@ -120,12 +125,14 @@ public sealed class TapeDropoutNumericsCompatibilityTests
 
         double[] envelope = Enumerable.Repeat(10.0, video.Length).ToArray();
         Array.Fill(envelope, 1.0, 125, 16);
+        Array.Fill(envelope, 1.0, 5125, 16);
+        Array.Fill(envelope, 1.0, 27225, 16);
         var span = new RfDecodedSpan(0, video, video, video, Envelope: envelope);
         TbcDecodedField serial = CreatePipeline(workerThreads: 1).Decode(span);
         TbcDecodedField parallel = CreatePipeline(workerThreads: 2).Decode(span);
 
         Assert.NotNull(serial.Dropouts);
-        Assert.True(serial.Dropouts.Count > 0);
+        Assert.Equal(firstDetectionLine == 1 ? [1, 51] : new[] { 51 }, serial.Dropouts.FieldLine);
         Assert.NotNull(parallel.Dropouts);
         Assert.Equal(serial.Dropouts.FieldLine, parallel.Dropouts.FieldLine);
         Assert.Equal(serial.Dropouts.StartX, parallel.Dropouts.StartX);

@@ -40,8 +40,8 @@ public sealed class CommandLineUpstreamBehaviorProfileTests
             exception.Message);
     }
 
-    [Fact(DisplayName = "Only current profile adds CTI to the Python namespace")]
-    public void OnlyCurrentProfileAddsCtiToPythonNamespace()
+    [Fact(DisplayName = "Only current profile adds CTI and VBI dropout settings to the Python namespace")]
+    public void OnlyCurrentProfileAddsNewOptionsToPythonNamespace()
     {
         string v040 = PythonNamespaceFormatter.Format(
             Parse(CliSpecs.Vhs, "--compat-version", "v0.4.0"));
@@ -63,9 +63,26 @@ public sealed class CommandLineUpstreamBehaviorProfileTests
             "detect_chroma_track_phase=False, cti_mix=1, cti_width=2, disable_phase_correction=False",
             current,
             StringComparison.Ordinal);
+        Assert.Contains("skip_vbi_dod=False", current, StringComparison.Ordinal);
         Assert.Equal(
             v040,
-            current.Replace(", cti_mix=1, cti_width=2", string.Empty, StringComparison.Ordinal));
+            current.Replace(", cti_mix=1, cti_width=2", string.Empty, StringComparison.Ordinal)
+                .Replace(", skip_vbi_dod=False", string.Empty, StringComparison.Ordinal));
+    }
+
+    [Theory(DisplayName = "Current VHS skips to the first active line when requested")]
+    [InlineData("--pal", 23)]
+    [InlineData("--ntsc", 21)]
+    public void CurrentVhsCanSkipVbiDropouts(string system, int firstActiveLine)
+    {
+        ParsedCommand command = Parse(CliSpecs.Vhs, system, "--compat-version", "current", "--skip_vbi_dod", "input.s16", "output");
+        using DecodeSession session = DecodeSessionFactory.Create(command);
+
+        Assert.Equal(firstActiveLine, session.DropoutOptions.FirstDetectionLine);
+        Assert.Contains("skip_vbi_dod=True", PythonNamespaceFormatter.Format(command), StringComparison.Ordinal);
+
+        ParsedCommand legacy = Parse(CliSpecs.Vhs, system, "--skip_vbi_dod", "input.s16", "output");
+        Assert.Throws<NotSupportedException>(() => DecodeSessionFactory.Create(legacy));
     }
 
     [Theory(DisplayName = "Upstream behavior parser round-trips supported profiles")]
@@ -90,8 +107,8 @@ public sealed class CommandLineUpstreamBehaviorProfileTests
         Assert.Equal("oyvindln/vhs-decode", catalog.Repository);
         Assert.Equal("43155200da87c0d49eb37d8ec09b1372075ee8e4", v040.Commit);
         Assert.Equal("v0.4.0", v040.Algorithms["vhsSync"]);
-        Assert.Equal("1bc3ab4f02d1c0af624129ba3dd62f25d1c159c8", current.Commit);
-        Assert.Equal("commit/1bc3ab4f02d1c0af624129ba3dd62f25d1c159c8", current.Source);
+        Assert.Equal("a80106300e175387124634e21e833aa4e57c0738", current.Commit);
+        Assert.Equal("commit/a80106300e175387124634e21e833aa4e57c0738", current.Source);
         Assert.Equal("current", current.Algorithms["vhsSync"]);
         Assert.Equal("current", current.Algorithms["vhsVsyncLevels"]);
         Assert.Equal("current", current.Algorithms["chromaGroupDelay"]);

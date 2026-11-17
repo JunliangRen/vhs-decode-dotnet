@@ -77,7 +77,7 @@ options:
   -t threads, --threads threads
                         number of CPU threads to use
   --dsp-backend {exact,ipp-fast,cuda-fast}
-                        DSP implementation to use (default: exact)
+                        DSP implementation for file decode (default: ipp-fast if available, exact otherwise)
   -f FREQ, --frequency FREQ
                         RF sampling frequency in source file (default is 40MHz)
   --analog_audio_frequency AFREQ

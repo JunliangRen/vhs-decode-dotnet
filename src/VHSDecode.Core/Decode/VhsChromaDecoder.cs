@@ -4114,6 +4114,7 @@ public static class VhsChromaDecoder
 
     internal static double CurrentNtscChromaGroupDelayShiftSamples(
         VhsChromaFieldOptions options,
+        double inputSampleRateHz,
         bool isFirstField,
         int fieldNumber)
     {
@@ -4127,9 +4128,8 @@ public static class VhsChromaDecoder
         // The pinned upstream expression tests phase-value truthiness. Both mapped
         // phases are non-zero, so every NTSC color-frame state uses the positive shift.
         int shiftDirection = targetPhaseDegrees != 0.0 ? 1 : -1;
-        double delayCycles = (options.FscMHz * 1_000_000.0)
-            / ((2.0 * Math.PI) * options.ColorUnderCarrierHz);
-        return (delayCycles * 4.0) * shiftDirection;
+        double delaySeconds = 1.0 / (2.0 * Math.PI * options.ColorUnderCarrierHz);
+        return (delaySeconds * inputSampleRateHz) * shiftDirection;
     }
 
     private static (int FieldPhaseId, double TargetPhaseDegrees) NtscFieldPhaseTarget(bool isFirstField, int fieldNumber)

@@ -9,7 +9,7 @@ A .NET 11 rewrite of the decode-facing parts of
 upstream release `v0.4.0` at commit
 `43155200da87c0d49eb37d8ec09b1372075ee8e4`.
 
-The current .NET port release is [`v0.4.0-2.20.0`](https://github.com/JunliangRen/vhs-decode-dotnet/releases/tag/v0.4.0-2.20.0) (application version `2.20.0`).
+The current .NET port release is [`v0.4.0-2.21.0`](https://github.com/JunliangRen/vhs-decode-dotnet/releases/tag/v0.4.0-2.21.0) (application version `2.21.0`).
 The x64 binaries require an [x86-64-v2 CPU](https://learn.microsoft.com/en-us/dotnet/core/whats-new/dotnet-11/runtime#updated-minimum-hardware-requirements), including SSE4.2 and POPCNT.
 
 [LD EFM buffer reuse measurements and limits](docs/LD_PERFORMANCE_V16.md).
@@ -70,9 +70,9 @@ also supported. Use `decode.exe <command> --help` for the complete compatible
 option set.
 
 The release workflow also builds a self-contained, multi-file glibc
-`linux-x64` tar. It supports the default `exact` and VHS/LD `ipp-fast` backends
-and bundles Linux SQLite, libsndfile, libsoxr and IPP native assets; Windows DLLs are
-excluded. After installing FFmpeg and the documented OS libraries:
+`linux-x64` tar with `ipp-fast` and `exact` support. It bundles Linux SQLite,
+libsndfile, libsoxr and IPP native assets. After installing FFmpeg and the
+documented OS libraries:
 
 ```bash
 tar -xzf vhs-decode-dotnet-linux-x64.tar.gz
@@ -191,7 +191,7 @@ not Exact-equivalence claims.
 | Value | Meaning |
 | --- | --- |
 | `v0.4.0` | Default. Targets the pinned Python release behavior. |
-| `current` | Opt-in VHS sync and color-under behavior targeting upstream `1bc3ab4`. |
+| `current` | Opt-in VHS sync and color-under behavior targeting upstream `a801063`. |
 
 For PAL and NTSC VHS and S-VHS file decoding with 20 or 40 MSPS RF input,
 `cuda-fast` with `current` uses CUDA FP64 RF transforms and the shared managed
@@ -201,12 +201,15 @@ The strict compatibility oracle is Python v0.4.0 commit `g4315520` with
 `--threads 0`. Python output hashes are not stable across its worker counts, so
 multithreaded Python runs are used for speed measurements only.
 
-`--dsp-backend` selects the DSP implementation:
+VHS and LaserDisc file decode default to `ipp-fast` when the IPP runtime
+passes startup checks and fall back to `exact` otherwise. CVBS and HiFi default to `exact`.
+An explicit `--dsp-backend ipp-fast` requires IPP. The `current` VHS profile
+accepts `--skip_vbi_dod` to start dropout detection at the first active field line.
 
 | Value | Meaning |
 | --- | --- |
-| `exact` | Default managed path for compatibility-sensitive decoding. |
-| `ipp-fast` | Experimental Windows x64 and Linux x64/glibc VHS and LaserDisc real-RF paths using Intel IPP. It can change floating-point bits and never silently falls back to `exact`. |
+| `exact` | Managed path for compatibility-sensitive decoding. |
+| `ipp-fast` | Experimental Windows x64 and Linux x64/glibc VHS and LaserDisc real-RF paths using Intel IPP. It can change floating-point bits. |
 | `cuda-fast` | Experimental Windows x64 NVIDIA CUDA 13 backend. PAL/NTSC VHS uses a full-signal GPU path under `v0.4.0` and CUDA FP64 RF transforms with managed field processing under `current`. Standard NTSC LaserDisc uses CUDA for EFM digital audio and eligible post-FM video filtering. |
 | `approx-fast` | Experimental VHS-only FP32 path with selectable TBC resampler and precision contract. The default `balanced` precision keeps the existing v1/v2 behavior; explicit `aggressive` selects the faster, deliberately lossy field-FP32/burst-IQ-prefix/chroma-FFT v6 contract. Nonzero RF high boost is not supported. |
 

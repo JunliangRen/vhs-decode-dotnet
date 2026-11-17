@@ -22,7 +22,7 @@ usage: decode.py [-h] [--preview-server] [--preview-port port] [--preview-crf cr
                  [--fallback_vsync] [--relaxed_line0]
                  [--field_order_confidence value] [--field_order_action value]
                  [--use_saved_levels] [--export_raw_tbc] [--noDOD] [-D value]
-                 [--dod_t_abs value] [--dod_h value] [--gnrc]
+                 [--dod_t_abs value] [--dod_h value] [--skip_vbi_dod] [--gnrc]
                  [infile] [outfile]
 
 Extracts video from RAW RF captures of colour-under & composite modulated tapes
@@ -41,7 +41,7 @@ options:
   -t threads, --threads threads
                         number of CPU threads to use
   --dsp-backend {exact,ipp-fast,cuda-fast,approx-fast}
-                        DSP implementation to use (default: exact)
+                        DSP implementation for file decode (default: ipp-fast if available, exact otherwise)
   --decode-at-20msps, --decode_at_20msps
                         decode PAL/NTSC VHS internally at 20 MSPS with ipp-fast,
                         cuda-fast, or approx-fast (preview enables this automatically)
@@ -182,6 +182,7 @@ Dropout detection options:
                         RF level threshold absolute value. Note that RF levels vary greatly between tapes and recording setups.
   --dod_h value, --dod_hysteresis value
                         Dropout detection hysteresis, the rf level needs to go above the dropout threshold multiplied by this for a dropout to end.
+  --skip_vbi_dod        Skip VBI lines in dropout detection (requires --compat-version current).
   --gnrc, --gnuradio_rf_afe
                         Open a ZMQ pipe back and forth to GNU Radio for RF AFE/EQ/Group delay measurements. (WIP)
                         You might want to use this with -t 1

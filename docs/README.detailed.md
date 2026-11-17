@@ -11,7 +11,7 @@
 release `v0.4.0` at commit
 `43155200da87c0d49eb37d8ec09b1372075ee8e4`.
 
-The current .NET port release is [`v0.4.0-2.20.0`](https://github.com/JunliangRen/vhs-decode-dotnet/releases/tag/v0.4.0-2.20.0) (application version `2.20.0`).
+The current .NET port release is [`v0.4.0-2.21.0`](https://github.com/JunliangRen/vhs-decode-dotnet/releases/tag/v0.4.0-2.21.0) (application version `2.21.0`).
 
 [LD EFM buffer reuse measurements and limits](LD_PERFORMANCE_V16.md).
 
@@ -28,7 +28,7 @@ The current .NET port release is [`v0.4.0-2.20.0`](https://github.com/JunliangRe
 > differences. PAL JSON and all 800 `fileLoc` values also had zero differences,
 > while 0.000794% of luma samples and 0.003226% of chroma samples differed
 > (0.00201% combined); every changed sample was confined to one heavily damaged
-> field out of 800. `exact` remains the default for compatibility-sensitive use.
+> field out of 800. Use `--dsp-backend exact` for compatibility-sensitive decoding.
 
 ## Contents
 
@@ -76,7 +76,7 @@ CLI compatibility requires it.
 | --- | --- | --- |
 | Solution and tests | Implemented | .NET 11 `.slnx`; standard xUnit v3 tests work in Visual Studio Test Explorer and with `dotnet test`. |
 | CLI and arguments | Implemented and snapshot-tested | Facade and standalone help, aliases, defaults, validation, diagnostics, and exit behavior target v0.4.0. |
-| Upstream behavior profiles | Staged | `v0.4.0` remains the default. The opt-in `current` profile targets upstream `1bc3ab4` for VHS sync and color-under processing. |
+| Upstream behavior profiles | Staged | `v0.4.0` remains the default. The opt-in `current` profile targets upstream `a801063` for VHS sync and color-under processing. |
 | VHS and tape families | Implemented; rare capture gaps remain | VHS, S-VHS, Betamax, Video8/Hi8, U-matic, Type C, EIAJ, and supported PAL/NTSC variants share the release-compatible decode path. |
 | CVBS | Implemented for release-supported systems | PAL and NTSC paths run; uncommon vblank and cross-option cases need more real-capture fixtures. |
 | LaserDisc | Implemented; rare capture gaps remain | Video, VBI, EFM, analog audio, AC3, RF-TBC, metadata, recovery, and PAL/NTSC paths are connected. |
@@ -139,7 +139,7 @@ VHS decode accepts `--compat-version v0.4.0|current`:
 | Profile | Default | Pinned upstream source | Active behavior |
 | --- | --- | --- | --- |
 | `v0.4.0` | Yes | release v0.4.0, commit `43155200da87c0d49eb37d8ec09b1372075ee8e4` | Existing release-compatible decode path. |
-| `current` | No | upstream commit `1bc3ab4f02d1c0af624129ba3dd62f25d1c159c8` | PR 341 sync and color-under processing with later upstream fixes for HSync timing, VSync blanking level, field-local state, block chroma filtering, PAL head switching, and chroma AGC. |
+| `current` | No | upstream commit `a80106300e175387124634e21e833aa4e57c0738` | PR 341 sync and color-under processing with later upstream fixes for HSync timing, VSync blanking level, field-local state, block chroma filtering, PAL head switching, and chroma AGC, plus input-rate NTSC chroma group delay and optional VBI dropout exclusion. |
 
 `current` is deliberately staged and opt-in. For color-under formats it now
 uses the official PR 341 CTI defaults, `--cti_mix 1` and `--cti_width 2`.
@@ -203,15 +203,16 @@ release compatibility remain the first constraint.
 The DSP backend is selected explicitly with
 `--dsp-backend exact|ipp-fast|cuda-fast|approx-fast`. This option is an experimental extension in
 this .NET port and is not part of the upstream `oyvindln/vhs-decode` v0.4.0
-CLI. `exact` is the default and retains the existing managed compatibility
-path without probing or loading Intel IPP. `ipp-fast` is an opt-in Windows x64
-backend; Intel CPUs are the officially supported target, while compatible
-non-Intel x64 CPUs are a best-effort experimental path in this project. A
+CLI. VHS and LaserDisc file decode prefer `ipp-fast` and use `exact` if the IPP
+startup probe fails. CVBS and HiFi default to `exact`. Explicit `exact` uses the
+managed compatibility path without loading IPP. `ipp-fast` runs on Windows x64
+and Linux x64/glibc. Intel CPUs are the officially supported target, with
+experimental support for compatible non-Intel x64 CPUs. A
 positive IPP non-Intel vendor warning is accepted only when the reported
 feature mask includes SSE4.2. The backend loads the statically linked
-`vhsdecode_ipp.dll`, reports the IPP version and selected ISA, and fails clearly
-if the bridge, ABI, or CPU is unavailable. It never silently falls back to
-`exact`. Current IPP routing covers the VHS real-RF FFT, the `current` profile's
+IPP bridge and reports the IPP version and selected ISA. An explicit `ipp-fast`
+request returns an error if the bridge, ABI, or CPU is unavailable. IPP routing
+covers the VHS real-RF FFT, the `current` profile's
 color-under Super-Gaussian DFT, and the power-of-two double-precision
 full-complex FFT stages used by LaserDisc video, EFM, and analog audio. The LD
 route uses native bridge ABI v1.4. CVBS and HiFi reject `ipp-fast` as unsupported

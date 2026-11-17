@@ -25,6 +25,8 @@ public sealed record TbcDropoutDetectionOptions(
     double Hysteresis,
     TbcDropoutDetectionMode Mode = TbcDropoutDetectionMode.TapeEnvelope)
 {
+    internal int FirstDetectionLine { get; init; } = 1;
+
     public static TbcDropoutDetectionOptions Disabled { get; } = new(
         false,
         0.18,
