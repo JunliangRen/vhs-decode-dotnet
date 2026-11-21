@@ -61,6 +61,15 @@ decode.exe ld [upstream options] input.lds output
 decode.exe hifi [upstream options] input.lds output.wav
 ```
 
+For CVBS captured through a 50-ohm RF front end, use
+`decode.exe cvbs -n -f 40 --50ohms input.flac output`. The receiver combines
+sync acquisition, NTSC burst recovery, and both stages of brightness baseline
+restoration. Use `-p` for PAL or add `--NTSCJ` for NTSC with 0 IRE black.
+
+For NTSC CVBS from a VHD player, `decode.exe cvbs -n -f 40 --tf VHD input.flac output`
+also enables an offline rolling-brightness correction after decoding. It
+checks each segment for coherent interference before applying the correction.
+
 NTSC Betamax HiFi uses `decode.exe hifi --betamax --ntsc -f 40 input.flac output.flac`.
 Its default 48 kHz path includes the experimental frequency and dynamic compensation;
 see [NTSC Betamax HiFi](docs/ntsc-betamax-hifi.md) for supported input rates and controls.
