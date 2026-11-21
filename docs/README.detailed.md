@@ -11,7 +11,7 @@
 release `v0.4.0` at commit
 `43155200da87c0d49eb37d8ec09b1372075ee8e4`.
 
-The current .NET port release is [`v0.4.0-2.21.0`](https://github.com/JunliangRen/vhs-decode-dotnet/releases/tag/v0.4.0-2.21.0) (application version `2.21.0`).
+The current .NET port release is [`v0.4.0-2.22.0`](https://github.com/JunliangRen/vhs-decode-dotnet/releases/tag/v0.4.0-2.22.0) (application version `2.22.0`).
 
 [LD EFM buffer reuse measurements and limits](LD_PERFORMANCE_V16.md).
 
