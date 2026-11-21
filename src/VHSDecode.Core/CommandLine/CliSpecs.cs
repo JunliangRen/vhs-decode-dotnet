@@ -173,6 +173,8 @@ public static class CliSpecs
 
     private static IEnumerable<OptionSpec> CvbsOptions()
     {
+        yield return Flag("cvbs_50ohms", ["--50ohms"], hidden: true);
+        yield return Str("cvbs_tape_format", ["--tf", "--tape_format"], null, ["VHD"], Upper, hidden: true);
         yield return Int("seek", ["-S", "--seek"], -1);
         yield return Flag("auto_sync", ["-A", "--auto_sync"], hidden: true);
         yield return Flag("no_auto_sync", ["--no_auto_sync"]);

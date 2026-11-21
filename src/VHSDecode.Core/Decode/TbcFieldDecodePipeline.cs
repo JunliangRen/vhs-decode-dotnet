@@ -46,6 +46,7 @@ public sealed record TbcDecodedField(
     bool LaserDiscAgcAdjusted = false)
 {
     internal TbcDeferredRenderSource? DeferredRenderSource { get; init; }
+    internal float[]? CvbsBlanking { get; init; }
 
     private TbcDecodedField(TbcDecodedField original)
         : base()
@@ -89,6 +90,7 @@ public sealed record TbcDecodedField(
         BlackToWhiteRfRatio = original.BlackToWhiteRfRatio;
         LaserDiscAgcAdjusted = original.LaserDiscAgcAdjusted;
         DeferredRenderSource = original.DeferredRenderSource;
+        CvbsBlanking = original.CvbsBlanking;
     }
 
     internal TbcFieldOutputBufferPool.TbcFieldOutputBufferLease? OutputBufferLease
@@ -171,7 +173,10 @@ internal sealed record SyncPreparedSpan(
     bool UsedSavedLevels = false,
     VideoOutputConverter? ConverterOverride = null,
     bool ExplicitThreshold = false,
-    double DeferredVideoDcOffset = 0.0);
+    double DeferredVideoDcOffset = 0.0)
+{
+    internal CvbsReceiver.Sync? ReceiverSync { get; init; }
+}
 
 internal sealed record Line0Resolution(
     double Location,
@@ -1029,7 +1034,8 @@ public sealed class TbcFieldDecodePipeline : IDisposable
     internal bool CanDeferCvbsOutputConversion
         => string.Equals(_decodeType, "cvbs", StringComparison.Ordinal)
             && _syncDetectionOptions.CvbsAutoSync
-            && _renderer.CvbsClampAgc is null;
+            && _renderer.CvbsClampAgc is null
+            && !_renderer.UseCvbsReceiver;
 
     internal VideoOutputConverter CurrentCvbsOutputConverter
     {
@@ -1206,7 +1212,11 @@ public sealed class TbcFieldDecodePipeline : IDisposable
         double[] pulseReference = span.VideoLowPass ?? span.Video;
         VhsSyncDetectionResult? currentVhsSync = null;
         IReadOnlyList<Pulse> rawPulses;
-        if (_vhsSyncDetector is not null && !prepared.ExplicitThreshold)
+        if (prepared.ReceiverSync is { } receiverSync)
+        {
+            rawPulses = receiverSync.Pulses;
+        }
+        else if (_vhsSyncDetector is not null && !prepared.ExplicitThreshold)
         {
             if (_useApproxFloat32Sync)
             {
@@ -1261,7 +1271,22 @@ public sealed class TbcFieldDecodePipeline : IDisposable
             rawPulses = FindRawPulses(pulseReference, threshold);
         }
 
-        if (string.Equals(_decodeType, "cvbs", StringComparison.Ordinal))
+        double? trackedCvbsLineZero = null;
+        bool? trackedParity = null;
+        if (_renderer.UseCvbsReceiver && _previousCvbsEndLineAbsoluteSample is { } expected
+            && _previousDetectedFirstField is { } previousParity)
+        {
+            double syncSpan = prepared.ReceiverSync is { } receiverLevels ? receiverLevels.Blank - receiverLevels.Tip : 0;
+            trackedCvbsLineZero = CvbsReceiver.TrackLineZero(pulseReference, expected - span.StartSample,
+                _syncAnalyzer.NominalLineLength, _syncAnalyzer.SampleRateHz, CurrentFieldLineCount(!previousParity), syncSpan);
+            if (trackedCvbsLineZero.HasValue)
+            {
+                trackedParity = !previousParity;
+            }
+        }
+
+        if (string.Equals(_decodeType, "cvbs", StringComparison.Ordinal) && prepared.ReceiverSync is null
+            && !trackedCvbsLineZero.HasValue)
         {
             CvbsPulseDetectionResult? cvbsPulses = CvbsPulseDetector.Refine(
                 pulseReference,
@@ -1284,7 +1309,7 @@ public sealed class TbcFieldDecodePipeline : IDisposable
             threshold = laserDiscPulses?.Threshold ?? threshold;
         }
 
-        if (rawPulses.Count == 0)
+        if (rawPulses.Count == 0 && !trackedCvbsLineZero.HasValue)
         {
             bool recoverAsMissingFieldStart = string.Equals(
                     _decodeType,
@@ -1313,7 +1338,7 @@ public sealed class TbcFieldDecodePipeline : IDisposable
             rawPulses,
             timing,
             _classifiedPulseWorkspace);
-        if (classified.Count == 0 && !isVhs)
+        if (classified.Count == 0 && !isVhs && !trackedCvbsLineZero.HasValue)
         {
             throw BuildRecoveryException(
                 TbcFieldDecodeRecoveryKind.NoFirstHSync,
@@ -1346,7 +1371,8 @@ public sealed class TbcFieldDecodePipeline : IDisposable
                 _refinedPulseWorkspace);
         }
 
-        double meanLineLength = _syncAnalyzer.ComputeMeanLineLength(refinedPulses);
+        double meanLineLength = trackedCvbsLineZero.HasValue ? _syncAnalyzer.NominalLineLength
+            : _syncAnalyzer.ComputeMeanLineLength(refinedPulses);
         Line0FallbackCandidate? fallback = TryResolveFallbackLine0(
             refinedPulses,
             fallbackRawPulses,
@@ -1354,7 +1380,9 @@ public sealed class TbcFieldDecodePipeline : IDisposable
             timing,
             span.StartSample,
             meanLineLength);
-        FieldParityDetection parity = FieldParityDetector.ResolveCadence(
+        FieldParityDetection parity = trackedParity is { } tracked
+            ? new FieldParityDetection(tracked, 100, "CVBS horizontal cadence")
+            : FieldParityDetector.ResolveCadence(
             refinedPulses,
             meanLineLength,
             _system,
@@ -1367,7 +1395,9 @@ public sealed class TbcFieldDecodePipeline : IDisposable
             fallback?.ExpectedFirstFieldConfidence ?? -1);
         // Upstream advances field cadence even when line-zero recovery later rejects this span.
         _previousDetectedFirstField = parity.IsFirstField;
-        Line0Resolution line0 = ResolveLine0Location(
+        Line0Resolution line0 = trackedCvbsLineZero is { } trackedLine
+            ? new Line0Resolution(trackedLine, false, parity.IsFirstField, parity.Confidence)
+            : ResolveLine0Location(
             refinedPulses,
             refinedPulses,
             fallbackRawPulses,
@@ -1392,7 +1422,13 @@ public sealed class TbcFieldDecodePipeline : IDisposable
                 _renderer.FrameSpec.OutputLineCount);
         ThrowIfInsufficientFieldData(span, rawPulses, line0.Location, meanLineLength, processedLines);
         LineLocationResult lineLocations;
-        if (_decodeLaserDiscVbi)
+        if (trackedCvbsLineZero.HasValue)
+        {
+            lineLocations = new LineLocationResult(
+                Enumerable.Range(0, processedLines).Select(i => line0.Location + i * meanLineLength).ToArray(),
+                new bool[processedLines]);
+        }
+        else if (_decodeLaserDiscVbi)
         {
             double? nextVBlankLocation = FindNextVBlankEqualizing1(refinedPulses, line0.Location, meanLineLength);
             lineLocations = LaserDiscLineLocationBuilder.Build(
@@ -1490,9 +1526,19 @@ public sealed class TbcFieldDecodePipeline : IDisposable
             lineLocations = LaserDiscLineLocationRepair.MarkDerivativeErrors(lineLocations);
         }
 
-        lineLocations = parallelizeLaserDiscLines
-            ? RefineLaserDiscLineLocationsFromHSyncParallel(span, lineLocations, activeVideoOutput)
-            : RefineLineLocationsFromHSync(span, lineLocations, activeVideoOutput, threshold);
+        if (_renderer.UseCvbsReceiver && _hSyncRefineOptions.Enabled)
+        {
+            lineLocations = lineLocations with
+            {
+                Locations = CvbsReceiver.RefineHSync(pulseReference, lineLocations.Locations, _syncAnalyzer.SampleRateHz)
+            };
+        }
+        else
+        {
+            lineLocations = parallelizeLaserDiscLines
+                ? RefineLaserDiscLineLocationsFromHSyncParallel(span, lineLocations, activeVideoOutput)
+                : RefineLineLocationsFromHSync(span, lineLocations, activeVideoOutput, threshold);
+        }
         if (_decodeLaserDiscVbi)
         {
             lineLocations = LaserDiscLineLocationRepair.MarkDerivativeErrors(lineLocations);
@@ -1558,12 +1604,10 @@ public sealed class TbcFieldDecodePipeline : IDisposable
         }
 
         int? laserDiscFieldPhaseId = null;
-        (LineLocationResult ntscBurstLineLocations, laserDiscFieldPhaseId) = RefineLaserDiscNtscLineLocationsFromBurst(
-            span,
-            lineLocations,
-            parity.IsFirstField,
-            activeVideoOutput,
-            parallelizeLaserDiscLines);
+        (LineLocationResult ntscBurstLineLocations, laserDiscFieldPhaseId) = _renderer.UseCvbsReceiver
+            ? (lineLocations, null)
+            : RefineLaserDiscNtscLineLocationsFromBurst(
+                span, lineLocations, parity.IsFirstField, activeVideoOutput, parallelizeLaserDiscLines);
         if (_decodeLaserDiscVbi
             && _laserDiscNtscBurstRefineOptions is not null
             && FormatCatalog.ParentSystem(_system) == "NTSC"
@@ -1948,6 +1992,11 @@ public sealed class TbcFieldDecodePipeline : IDisposable
                 _previousSyncConfidence = syncConfidence;
                 UpdatePalLaserDiscEndLineHistory(span.StartSample, lineLocations, currentFieldLineCount);
                 UpdateCvbsEndLineHistory(span.StartSample, lineLocations, currentFieldLineCount);
+                if (_renderer.UseCvbsReceiver)
+                {
+                    _previousCvbsEndLineAbsoluteSample = span.StartSample + line0.Location
+                        + currentFieldLineCount * meanLineLength;
+                }
 
                 TbcDecodedField decodedField = new(
                     span.StartSample,
@@ -1965,8 +2014,8 @@ public sealed class TbcFieldDecodePipeline : IDisposable
                     efm,
                     audioPcm,
                     rfTbc,
-                    FieldPhaseId: chroma?.FieldPhaseId ?? laserDiscFieldPhaseId,
-                    MedianBurstIre: medianBurstIre,
+                    FieldPhaseId: chroma?.FieldPhaseId ?? rendered.CvbsFieldPhaseId ?? laserDiscFieldPhaseId,
+                    MedianBurstIre: rendered.CvbsBurstIre ?? medianBurstIre,
                     VbiData: vbiData,
                     ChromaBurstSamples: retainChromaBurstSamples ? chromaBurstSamples : null,
                     ChromaSamples: chroma?.Samples,
@@ -1980,7 +2029,8 @@ public sealed class TbcFieldDecodePipeline : IDisposable
                     BlackToWhiteRfRatio: blackToWhiteRfRatio,
                     LaserDiscAgcAdjusted: laserDiscAgcAdjusted)
                 {
-                    DeferredRenderSource = deferredRenderSource
+                    DeferredRenderSource = deferredRenderSource,
+                    CvbsBlanking = rendered.CvbsBlanking
                 };
                 if (outputBufferLease is not null)
                 {
@@ -2581,6 +2631,12 @@ public sealed class TbcFieldDecodePipeline : IDisposable
         int currentFieldLines,
         bool isFirstField)
     {
+        if (_renderer.UseCvbsReceiver)
+        {
+            // Leave a consistent lead-in for the following vertical interval.
+            // A spurious broad pulse later in this span must not move the read.
+            return Math.Max(1, line0Location + (currentFieldLines - 13) * meanLineLength + _inputBlockCutSamples);
+        }
         if (string.Equals(_decodeType, "vhs", StringComparison.Ordinal)
             && double.IsFinite(firstHSyncLocation))
         {
@@ -3128,6 +3184,19 @@ public sealed class TbcFieldDecodePipeline : IDisposable
             return new SyncPreparedSpan(span, explicitThreshold.Value, ExplicitThreshold: true);
         }
 
+        if (_renderer.UseCvbsReceiver && CvbsReceiver.AcquireSync(span.VideoLowPass ?? span.Video,
+            _syncAnalyzer.SampleRateHz, _syncAnalyzer.NominalLineLength,
+            _previousCvbsEndLineAbsoluteSample is null ? FirstCvbsBlanking : null) is { } receiverSync)
+        {
+            var converter = new VideoOutputConverter(receiverSync.Blank,
+                (receiverSync.Blank - receiverSync.Tip) / -_videoOutput.VSyncIre,
+                _videoOutput.OutputZero, _videoOutput.VSyncIre, _videoOutput.OutputScale);
+            return new SyncPreparedSpan(span, receiverSync.Threshold, ConverterOverride: converter)
+            {
+                ReceiverSync = receiverSync
+            };
+        }
+
         VideoOutputConverter? converterOverride = null;
         if (_syncDetectionOptions.CvbsAutoSync)
         {
@@ -3530,6 +3599,13 @@ public sealed class TbcFieldDecodePipeline : IDisposable
         return fallbackToSavedLevels && _lastDetectedSyncLevels.HasValue
             ? PrepareSyncSpanFromLevels(span, _lastDetectedSyncLevels.Value, usedSavedLevels: true)
             : new SyncPreparedSpan(span, defaultThreshold);
+    }
+
+    private double? FirstCvbsBlanking(IReadOnlyList<Pulse> pulses)
+    {
+        SyncTiming timing = _syncAnalyzer.EstimateTiming(pulses);
+        IReadOnlyList<ClassifiedSyncPulse> refined = _syncAnalyzer.RefinePulses(pulses, timing);
+        return FindValidVBlankGroup(refined, _syncAnalyzer.NominalLineLength)?.Equalizing1Start;
     }
 
     internal static bool ShouldLogVhsSerrationFallback(int detectorFieldCount)
@@ -6927,7 +7003,7 @@ public sealed class TbcFieldDecodePipeline : IDisposable
         }
 
         bool tape = string.Equals(_decodeType, "vhs", StringComparison.Ordinal);
-        double availableEnd = tape
+        double availableEnd = tape || _renderer.UseCvbsReceiver
             ? span.AvailableSampleCountOverride ?? span.Input.Length
             : rawPulses[^1].Start;
         double lastLine = tape
@@ -6936,6 +7012,12 @@ public sealed class TbcFieldDecodePipeline : IDisposable
         if (lastLine >= processedLines)
         {
             return;
+        }
+
+        if (_renderer.UseCvbsReceiver && _debug)
+        {
+            _diagnosticLogger?.Invoke("DEBUG", FormattableString.Invariant(
+                $"CVBS short field window at {span.StartSample}: line zero {line0Location:F1}, available samples {availableEnd:F0}, required lines {processedLines}, available lines {lastLine:F1}."));
         }
 
         if (tape && _previousVhsFieldNumber.HasValue)

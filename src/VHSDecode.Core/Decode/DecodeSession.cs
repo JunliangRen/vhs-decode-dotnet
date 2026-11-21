@@ -45,6 +45,7 @@ public sealed record DecodeSession(
 {
     internal DecodeRuntimeReporter? RuntimeReporter { get; set; }
     internal bool UsesVhsCudaCurrentFft { get; init; }
+    internal bool RestoreVhdCvbsLuma { get; init; }
     internal IReadOnlyList<DecodeInitializationDiagnostic> VhsParamsFileDiagnostics { get; set; } = [];
 
     public int SourceSamplesPerDecodeSample { get; init; } = 1;
@@ -437,10 +438,26 @@ public static class DecodeSessionFactory
     private static DecodeSession CreateCvbs(ParsedCommand command, int blockLength)
     {
         string system = VideoSystemSelector.Select(command);
+        bool vhd = command.Get<string?>("cvbs_tape_format") == "VHD";
+        bool receiver = vhd || BoolValueOrDefault(command, "cvbs_50ohms");
+        if (receiver && (BoolValueOrDefault(command, "no_auto_sync")
+            || BoolValueOrDefault(command, "clamp_agc")))
+        {
+            throw new ArgumentException("The CVBS receiver supplies sync and clamp; omit --no_auto_sync and --clamp_agc.");
+        }
+        if (receiver && system is not ("NTSC" or "PAL"))
+        {
+            throw new ArgumentException("--50ohms supports NTSC and PAL CVBS.");
+        }
+        if (vhd && system != "NTSC")
+        {
+            throw new ArgumentException("CVBS --tf VHD requires NTSC.");
+        }
         double selectedSampleRateMHz = SelectCommonSampleFrequencyMHz(command);
         IRfSampleLoader loader = RfLoaderFactory.CreateResampling(command.InputFile, selectedSampleRateMHz);
         FormatParameterSet parameters = FormatCatalog.Default.GetCvbsParameters(system);
-        return Build(command, system, parameters, FrequencyParser.DddMHz, blockLength, blockCut: 1024, blockCutEnd: 1024, loader);
+        return Build(command, system, parameters, FrequencyParser.DddMHz, blockLength, blockCut: 1024, blockCutEnd: 1024, loader)
+            with { RestoreVhdCvbsLuma = vhd };
     }
 
     private static DecodeSession CreateLaserDisc(
@@ -641,7 +658,12 @@ public static class DecodeSessionFactory
             sampleResamplingKernel: executionOptions.ApproxResampler
                 == ApproxResampler.CatmullRom4
                     ? TbcSampleResamplingKernel.CatmullRom4Float32
-                    : TbcSampleResamplingKernel.KaiserSinc16);
+                    : TbcSampleResamplingKernel.KaiserSinc16)
+        {
+            UseCvbsReceiver = command.Spec.Name == "cvbs" && (BoolValueOrDefault(command, "cvbs_50ohms")
+                || command.Get<string?>("cvbs_tape_format") == "VHD"),
+            CaptureCvbsBlanking = command.Spec.Name == "cvbs" && command.Get<string?>("cvbs_tape_format") == "VHD"
+        };
         TbcDropoutDetectionOptions dropoutOptions = BuildDropoutOptions(command, sampleRateMHz, parameters);
         TbcFieldOrderOptions fieldOrderOptions = BuildFieldOrderOptions(command, parameters, executionOptions.UpstreamBehaviorProfile);
         LaserDiscAudioOptions? laserDiscAudioOptions = BuildLaserDiscAudioOptions(command, system);

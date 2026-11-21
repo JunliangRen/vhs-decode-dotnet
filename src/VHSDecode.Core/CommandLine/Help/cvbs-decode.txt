@@ -4,6 +4,7 @@ usage: cvbs-decode [-h] [--system system] [-s start]
                    [--dsp-backend {exact,ipp-fast,cuda-fast}] [--ct] [--sl sharpness]
                    [--notch notch] [--notch_q notch_q] [-p] [-n] [--pm]
                    [--NTSCJ] [--debug] [--skip_hsync_refine] [-S seek]
+                   [--50ohms] [--tf VHD]
                    [--no_auto_sync] [-C] [--agc_speed speed]
                    [--agc_gain_factor factor] [--agc_set_gain gain]
                    [--right_hand_hsync]
@@ -25,6 +26,9 @@ options:
   --dsp-backend {exact,ipp-fast,cuda-fast}
                         DSP implementation to use (default: exact)
   -S seek, --seek seek  seek to frame n of capture
+  --50ohms              Enable the 50-ohm CVBS receiver for NTSC or PAL.
+  --tf VHD, --tape_format VHD
+                        Use the CVBS receiver and offline VHD luma restoration (NTSC).
   --no_auto_sync        Disable auto sync level detection.
   -C, --clamp_agc       Clamp signal (black level) and enable automatic gain control.
   --agc_speed speed     sets how fast the AGC should react (0 = never, 1 = immediate).

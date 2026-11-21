@@ -35,13 +35,19 @@ public sealed record TrackPhaseIre0OffsetOptions(
 public sealed record TbcRenderedField(
     ushort[] Samples,
     TbcOutputPayload? OutputPayload = null,
-    VideoOutputConverter? OutputConverter = null);
+    VideoOutputConverter? OutputConverter = null)
+{
+    internal int? CvbsFieldPhaseId { get; init; }
+    internal double? CvbsBurstIre { get; init; }
+    internal float[]? CvbsBlanking { get; init; }
+}
 
 public sealed class TbcFieldRenderer
 {
     private readonly TbcLineResampler _resampler;
     private readonly VideoOutputConverter _converter;
     private double? _cvbsAgcGain;
+    private double? _cvbsAcCorner;
 
     public TbcFieldRenderer(
         TbcFrameSpec frameSpec,
@@ -104,6 +110,8 @@ public sealed class TbcFieldRenderer
     public CvbsAgcStatistics? CvbsAgcStatistics { get; private set; }
 
     internal Action<string, string>? DiagnosticLogger { get; set; }
+    internal bool UseCvbsReceiver { get; init; }
+    internal bool CaptureCvbsBlanking { get; init; }
 
     public ushort[] RenderField(
         ReadOnlySpan<double> videoHz,
@@ -561,6 +569,7 @@ public sealed class TbcFieldRenderer
 
     internal bool CanConvertPreparedFieldDirectly()
         => YCombLimitHz == 0.0
+            && !UseCvbsReceiver
             && !ExportRawTbc
             && CvbsClampAgc is null
             && Ire0Adjust is null
@@ -594,6 +603,37 @@ public sealed class TbcFieldRenderer
         VideoOutputConverter activeConverter = converterProvider?.Invoke()
             ?? converterOverride
             ?? _converter;
+        if (UseCvbsReceiver)
+        {
+            CvbsReceiver.Gates gates = CvbsReceiver.MeasureGates(resampled, FrameSpec);
+            float[]? blanking = CaptureCvbsBlanking
+                ? CvbsReceiver.MeasureBlanking(resampled, FrameSpec, gates)
+                : null;
+            double? measured = CvbsReceiver.EstimateCorner(resampled, FrameSpec, gates);
+            if (measured is { } corner)
+            {
+                _cvbsAcCorner = _cvbsAcCorner is { } previous ? previous + .08 * (corner - previous) : corner;
+            }
+            if (CvbsReceiver.RestoreLevels(resampled, FrameSpec, gates, _cvbsAcCorner ?? 0, activeConverter))
+            {
+                VideoOutputConverter ireConverter = new(0, 1, _converter.OutputZero,
+                    _converter.VSyncIre, _converter.OutputScale);
+                int? phase = null;
+                double? burst = null;
+                if (FrameSpec.System == "NTSC")
+                {
+                    (phase, burst) = CvbsReceiver.RestoreNtscBurst(resampled, gates, fieldNumber);
+                }
+                ushort[] result = outputDestination ?? new ushort[resampled.Length];
+                ireConverter.ConvertHz(resampled, result);
+                return new TbcRenderedField(result, rawPayload, ireConverter)
+                {
+                    CvbsFieldPhaseId = phase,
+                    CvbsBurstIre = burst,
+                    CvbsBlanking = blanking
+                };
+            }
+        }
         VideoOutputConverter fieldConverter = diagnosticLogger is null
             ? BuildFieldConverter(
                 resampled,

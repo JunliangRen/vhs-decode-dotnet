@@ -388,6 +388,9 @@ public sealed class TbcFieldSequenceDecodeEngine
         // Early recovery snapshots serialize the initial short requests.
         bool overlapLaserDiscTail = _overlapOwnedLaserDiscTail && input.CanSeek
             && (maxFields.HasValue ? maxFields.Value > 100 : session.RunBounds.RequestedFieldCount > 100);
+        using CvbsVhdLumaRestoration? vhdRestoration = session.RestoreVhdCvbsLuma
+            ? new CvbsVhdLumaRestoration(session, TbcFirstFieldDecodeEngine.BuildOutputPaths(session).TbcPath, _cancellationToken)
+            : null;
         var output = new StreamingOutputSession(
             session,
             _efmOutputWriter,
@@ -399,7 +402,8 @@ public sealed class TbcFieldSequenceDecodeEngine
                 || (session.Spec.Name == "vhs"
                     && session.StreamDecoder.WorkerThreads > 1
                     && (_usesSessionReader || EnablePayloadWriteOverlapForCustomReader)),
-            overlapLaserDiscTail: overlapLaserDiscTail);
+            overlapLaserDiscTail: overlapLaserDiscTail,
+            vhdRestoration: vhdRestoration);
         bool outputCompleted = false;
         ExceptionDispatchInfo? primaryFailure = null;
         try
@@ -436,6 +440,11 @@ public sealed class TbcFieldSequenceDecodeEngine
             LdTestLdfWriteResult? testLdf = WriteOptionalTestLdf(session, input, summary);
             TbcFieldSequenceDecodeResult result = output.Complete();
             outputCompleted = true;
+            if (result.Success && vhdRestoration is not null)
+            {
+                string restoration = vhdRestoration.Apply(output.WrittenFieldCount);
+                DecodeSessionLogWriter.Append(session, "INFO", restoration);
+            }
             mappedInput?.CompleteMappedReadAhead();
             if (closeMappedInputBeforeCompletion && mappedInput is not null && result.Success)
             {
@@ -2368,6 +2377,7 @@ public sealed class TbcFieldSequenceDecodeEngine
         private readonly TbcSqliteMetadataWriter.SequenceWriter? _sqlite;
         private readonly bool _parallelPayloadWrites;
         private readonly bool _overlapLaserDiscTail;
+        private readonly CvbsVhdLumaRestoration? _vhdRestoration;
         private BlockingCollection<OutputWorkItem>? _outputQueue;
         private Thread? _outputThread;
         private ExceptionDispatchInfo? _outputFailure;
@@ -2417,10 +2427,12 @@ public sealed class TbcFieldSequenceDecodeEngine
             Func<DecodeSession, string, TbcOutputMetadataWriter.StreamingWriter> createMetadataWriter,
             bool parallelPayloadWrites,
             bool overlapPayloadWrites,
-            bool overlapLaserDiscTail)
+            bool overlapLaserDiscTail,
+            CvbsVhdLumaRestoration? vhdRestoration)
         {
             _session = session;
             _overlapLaserDiscTail = overlapLaserDiscTail;
+            _vhdRestoration = vhdRestoration;
             _paths = TbcFirstFieldDecodeEngine.BuildOutputPaths(session);
             Stream? tbc = null;
             Stream? chroma = null;
@@ -2828,6 +2840,7 @@ public sealed class TbcFieldSequenceDecodeEngine
             }
 
             _writtenFieldCount++;
+            _vhdRestoration?.Add(field);
             _laserDiscOutput.WriteAfterVideo(prepared.MetadataField);
         }
 
