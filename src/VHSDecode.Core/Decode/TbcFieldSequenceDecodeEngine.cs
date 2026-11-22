@@ -1011,7 +1011,9 @@ public sealed class TbcFieldSequenceDecodeEngine
                     && ex.Kind == TbcFieldDecodeRecoveryKind.NoSyncPulses;
                 bool directVideoNoSyncAfterOutput = directVideoNoSync
                     && writePlanner.WrittenFieldCount > 0;
-                LogRecovery(session, ex, directVideoNoSyncAfterOutput);
+                bool useShortNoSyncRecovery = directVideoNoSyncAfterOutput
+                    || (directVideoNoSync && session.Spec.Name == "cvbs" && session.TbcRenderer.UseCvbsReceiver);
+                LogRecovery(session, ex, useShortNoSyncRecovery);
                 pendingVhsRenderDiagnostics?.FlushRenderDiagnostics();
                 pendingVhsRenderDiagnostics = null;
                 FlushPendingTapeOutput();
@@ -1042,7 +1044,7 @@ public sealed class TbcFieldSequenceDecodeEngine
                     break;
                 }
 
-                long recoveryOffset = directVideoNoSyncAfterOutput
+                long recoveryOffset = useShortNoSyncRecovery
                     ? DirectVideoNoSyncAfterOutputOffsetSamples(session)
                     : ex.SuggestedOffsetSamples;
                 begin = Math.Max(0L, checked(begin + recoveryOffset));
@@ -1500,7 +1502,7 @@ public sealed class TbcFieldSequenceDecodeEngine
     private static void LogRecovery(
         DecodeSession session,
         TbcFieldDecodeRecoveryException exception,
-        bool directVideoNoSyncAfterOutput = false)
+        bool shortDirectVideoRetry = false)
     {
         string? message = (session.Spec.Name, exception.Kind) switch
         {
@@ -1508,7 +1510,7 @@ public sealed class TbcFieldSequenceDecodeEngine
                 "Unable to find any sync pulses, jumping 100 ms",
             ("vhs" or "cvbs" or "ld", TbcFieldDecodeRecoveryKind.NoFirstHSync) =>
                 "Unable to determine start of field - dropping field",
-            ("cvbs" or "ld", TbcFieldDecodeRecoveryKind.NoSyncPulses) when directVideoNoSyncAfterOutput =>
+            ("cvbs" or "ld", TbcFieldDecodeRecoveryKind.NoSyncPulses) when shortDirectVideoRetry =>
                 "Unable to find any sync pulses, skipping one field",
             ("cvbs" or "ld", TbcFieldDecodeRecoveryKind.NoSyncPulses) =>
                 "Unable to find any sync pulses, skipping one second",

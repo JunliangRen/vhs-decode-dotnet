@@ -669,6 +669,10 @@ public sealed class TbcFieldDecodePipeline : IDisposable
 
     internal void DiscardCvbsPreviousFieldContextAfterRecovery()
     {
+        if (_renderer.UseCvbsReceiver)
+        {
+            _previousDetectedFirstField = null;
+        }
         _previousFirstHSyncLocation = null;
         _previousFirstHSyncReadLocation = null;
         _previousSyncConfidence = null;
@@ -1271,8 +1275,9 @@ public sealed class TbcFieldDecodePipeline : IDisposable
             rawPulses = FindRawPulses(pulseReference, threshold);
         }
 
-        double? trackedCvbsLineZero = null;
-        bool? trackedParity = null;
+        CvbsReceiver.VBlankAcquisition? acquisition = prepared.ReceiverSync?.Acquisition;
+        double? trackedCvbsLineZero = acquisition?.LineZero;
+        bool? trackedParity = acquisition?.IsFirstField;
         if (_renderer.UseCvbsReceiver && _previousCvbsEndLineAbsoluteSample is { } expected
             && _previousDetectedFirstField is { } previousParity)
         {
@@ -1282,6 +1287,17 @@ public sealed class TbcFieldDecodePipeline : IDisposable
             if (trackedCvbsLineZero.HasValue)
             {
                 trackedParity = !previousParity;
+            }
+            else if (CvbsReceiver.AcquireSync(pulseReference, _syncAnalyzer.SampleRateHz, _syncAnalyzer.NominalLineLength,
+                FirstCvbsBlanking, RecoverCvbsBlanking) is { } reacquired)
+            {
+                // Once the horizontal clock loses lock, select the separator
+                // for vertical acquisition instead of trusting the last field.
+                rawPulses = reacquired.Pulses;
+                threshold = reacquired.Threshold;
+                acquisition = reacquired.Acquisition;
+                trackedCvbsLineZero = acquisition?.LineZero;
+                trackedParity = acquisition?.IsFirstField;
             }
         }
 
@@ -1381,7 +1397,8 @@ public sealed class TbcFieldDecodePipeline : IDisposable
             span.StartSample,
             meanLineLength);
         FieldParityDetection parity = trackedParity is { } tracked
-            ? new FieldParityDetection(tracked, 100, "CVBS horizontal cadence")
+            ? new FieldParityDetection(tracked, 100,
+                acquisition is null ? "CVBS horizontal cadence" : "CVBS vertical pulse cadence")
             : FieldParityDetector.ResolveCadence(
             refinedPulses,
             meanLineLength,
@@ -3186,7 +3203,8 @@ public sealed class TbcFieldDecodePipeline : IDisposable
 
         if (_renderer.UseCvbsReceiver && CvbsReceiver.AcquireSync(span.VideoLowPass ?? span.Video,
             _syncAnalyzer.SampleRateHz, _syncAnalyzer.NominalLineLength,
-            _previousCvbsEndLineAbsoluteSample is null ? FirstCvbsBlanking : null) is { } receiverSync)
+            _previousCvbsEndLineAbsoluteSample is null ? FirstCvbsBlanking : null,
+            _previousCvbsEndLineAbsoluteSample is null ? RecoverCvbsBlanking : null) is { } receiverSync)
         {
             var converter = new VideoOutputConverter(receiverSync.Blank,
                 (receiverSync.Blank - receiverSync.Tip) / -_videoOutput.VSyncIre,
@@ -3600,6 +3618,9 @@ public sealed class TbcFieldDecodePipeline : IDisposable
             ? PrepareSyncSpanFromLevels(span, _lastDetectedSyncLevels.Value, usedSavedLevels: true)
             : new SyncPreparedSpan(span, defaultThreshold);
     }
+
+    private CvbsReceiver.VBlankAcquisition? RecoverCvbsBlanking(IReadOnlyList<Pulse> pulses)
+        => CvbsReceiver.RecoverBlanking(pulses, _syncAnalyzer, _system);
 
     private double? FirstCvbsBlanking(IReadOnlyList<Pulse> pulses)
     {
@@ -6598,12 +6619,17 @@ public sealed class TbcFieldDecodePipeline : IDisposable
                 : vBlankConsensus with { Last = palLaserDiscNextEstimate, Combined = null };
         }
 
-        Line0Resolution? previousEstimate = TryEstimateLine0FromPrevious(
-            classified,
-            spanStartSample,
-            meanLineLength,
-            currentFieldLines,
-            estimatedFirstField);
+        // The receiver has already tested the previous line clock against the
+        // waveform. A blind projection after that test fails can keep emitting
+        // fields at the wrong vertical position across a source switch.
+        Line0Resolution? previousEstimate = _renderer.UseCvbsReceiver
+            ? null
+            : TryEstimateLine0FromPrevious(
+                classified,
+                spanStartSample,
+                meanLineLength,
+                currentFieldLines,
+                estimatedFirstField);
         if (UsesLegacyThreeWayLine0Consensus(_decodeType)
             && vBlankConsensus?.First is { } first
             && vBlankConsensus.Last is { } next

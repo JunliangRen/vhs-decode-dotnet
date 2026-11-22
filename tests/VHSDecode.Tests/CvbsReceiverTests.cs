@@ -120,6 +120,58 @@ public sealed class CvbsReceiverTests
         Assert.Same(earlier, Assert.IsType<CvbsReceiver.Sync>(result).Pulses);
     }
 
+    [Theory]
+    [InlineData("NTSC", 6, true)]
+    [InlineData("NTSC", 6, false)]
+    [InlineData("PAL", 5, true)]
+    [InlineData("PAL", 5, false)]
+    public void BlankingRecoveryUsesIndependentPulseWidthsAndFieldPhase(string system, int count, bool isFirstField)
+    {
+        const int period = 2542;
+        const int lineZero = 8 * period;
+        int half = period / 2;
+        double beforeGap = isFirstField != (system == "PAL") ? 1 : 0.5;
+        double afterGap = isFirstField ? 0.5 : 1;
+        int equalizingStart = lineZero + (int)(beforeGap * period);
+        int firstHSync = equalizingStart + ((3 * count - 1) * half) + (int)(afterGap * period);
+        var analyzer = new SyncAnalyzer(40e6, period / 40.0, 4.7, 2.4, 27, count);
+        var pulses = new List<Pulse>();
+        for (int i = 7; i >= 0; i--)
+        {
+            pulses.Add(new Pulse(lineZero - i * period, 264));
+        }
+        for (int group = 0; group < 3; group++)
+        {
+            for (int i = 0; i < count; i++)
+            {
+                if (group == 0 && i == 1)
+                {
+                    continue;
+                }
+
+                pulses.Add(new Pulse(equalizingStart + (group * count + i) * half, group == 1 ? 1072 : 112));
+            }
+        }
+        for (int i = 0; i < 8; i++)
+        {
+            pulses.Add(new Pulse(firstHSync + i * period, 264));
+        }
+
+        var oldTiming = analyzer.EstimateTiming(pulses);
+        Assert.DoesNotContain(analyzer.ClassifyPulses(pulses, oldTiming), p => p.Kind == SyncPulseKind.Equalizing);
+
+        CvbsReceiver.VBlankAcquisition recovered = Assert.IsType<CvbsReceiver.VBlankAcquisition>(
+            CvbsReceiver.RecoverBlanking(pulses, analyzer, system));
+        Assert.Equal(equalizingStart, recovered.EqualizingStart);
+        Assert.Equal(lineZero, recovered.LineZero);
+        Assert.Equal(isFirstField, recovered.IsFirstField);
+
+        // One broad pulse train is insufficient without adjacent half-line
+        // equalizers and a consistent horizontal phase.
+        Assert.Null(CvbsReceiver.RecoverBlanking(pulses.Where(p => p.Length != 112).ToArray(), analyzer, system));
+        Assert.Null(CvbsReceiver.RecoverBlanking(pulses.Where(p => p.Start < firstHSync).ToArray(), analyzer, system));
+    }
+
     private static ParsedCommand Parse(DecodeCommandSpec spec, params string[] args)
         => new CommandLineParser().Parse(spec, [.. args, "input.s16", "output"], spec.Aliases[0]);
 }

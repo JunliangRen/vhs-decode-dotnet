@@ -4,10 +4,14 @@ namespace VHSDecode.Core.Tbc;
 
 internal static partial class CvbsReceiver
 {
-    internal sealed record Sync(double Threshold, double Tip, double Blank, IReadOnlyList<Pulse> Pulses);
+    internal sealed record Sync(double Threshold, double Tip, double Blank, IReadOnlyList<Pulse> Pulses)
+    {
+        internal VBlankAcquisition? Acquisition { get; init; }
+    }
 
     internal static Sync? AcquireSync(double[] video, double rate, double lineLength,
-        Func<IReadOnlyList<Pulse>, double?>? findFirstBlanking = null)
+        Func<IReadOnlyList<Pulse>, double?>? findFirstBlanking = null,
+        Func<IReadOnlyList<Pulse>, VBlankAcquisition?>? recoverBlanking = null)
     {
         int samplesPerUsec = (int)Math.Round(rate / 1e6);
         var integral = new double[video.Length];
@@ -22,6 +26,7 @@ internal static partial class CvbsReceiver
         Sync? best = null;
         double bestScore = 0;
         double bestBlanking = double.PositiveInfinity;
+        Sync? recovered = null;
         var corrected = new double[video.Length];
         var quantiles = new double[(video.Length + 15) / 16];
         foreach (int corner in new[] { 0, 2000, 4000, 6000, 8000, 10000 })
@@ -100,6 +105,13 @@ internal static partial class CvbsReceiver
                 return new(threshold, tip, blank, pulses);
             }
             double blanking = findFirstBlanking?.Invoke(pulses) ?? double.PositiveInfinity;
+            if (recoverBlanking?.Invoke(pulses) is { } acquisition
+                && (recovered?.Acquisition is not { } previous
+                    || acquisition.EqualizingStart < previous.EqualizingStart - lineLength / 2))
+            {
+                recovered = new Sync(threshold, tip, blank, pulses) { Acquisition = acquisition };
+            }
+
             // At acquisition, a complete earlier blanking group takes precedence
             // over a better-looking separator that only finds a later field.
             if (blanking < bestBlanking - lineLength / 2
@@ -110,7 +122,9 @@ internal static partial class CvbsReceiver
                 bestBlanking = blanking;
             }
         }
-        return best;
+        return recovered?.Acquisition is { } early && early.EqualizingStart < bestBlanking - lineLength / 2
+            ? recovered
+            : best;
     }
 
     internal static double[] RefineHSync(double[] video, double[] locations, double inputRate)
@@ -289,6 +303,7 @@ internal static partial class CvbsReceiver
         {
             return null;
         }
+
         int n = (int)usec;
         int valid = 0;
         for (int line = 20; line < lineCount - 12; line++)

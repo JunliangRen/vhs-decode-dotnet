@@ -717,7 +717,7 @@ public static class VBlankSyncResolver
             unalignedFirstHSyncLocation);
     }
 
-    private static (double FirstHSyncLength, double SecondEqualizingLength) ExpectedBoundaryLengths(
+    internal static (double FirstHSyncLength, double SecondEqualizingLength) ExpectedBoundaryLengths(
         string parentSystem,
         bool isFirstField)
     {

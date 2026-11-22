@@ -415,6 +415,47 @@ public sealed class CvbsFieldStateCompatibilityTests
         }
     }
 
+    [Fact]
+    public void ReceiverDoesNotFlagAnUnmeasuredNtscBurstAsAFieldSequenceError()
+    {
+        string tempDirectory = CreateTempDirectory();
+        try
+        {
+            string outputBase = Path.Combine(tempDirectory, "cvbs-unlocked-burst");
+            ParsedCommand command = new CommandLineParser().Parse(CliSpecs.Cvbs, [
+                "--ntsc", "--50ohms", "input.s16", outputBase
+            ]);
+            using DecodeSession session = DecodeSessionFactory.Create(command);
+            var builder = new TbcOutputMetadataWriter.FieldObjectBuilder(session);
+
+            var start = Add(1, phase: 3);
+            var unlocked = Add(2, phase: null);
+            var lockedAgain = Add(3, phase: 1);
+            var genuineMismatch = Add(4, phase: 4);
+
+            Assert.Equal(0, start["decodeFaults"]!.GetValue<int>());
+            Assert.Equal(1, unlocked["fieldPhaseID"]!.GetValue<int>());
+            Assert.Equal(0, unlocked["decodeFaults"]!.GetValue<int>());
+            Assert.Equal(0, lockedAgain["decodeFaults"]!.GetValue<int>());
+            Assert.Equal(2, genuineMismatch["decodeFaults"]!.GetValue<int>());
+            Assert.Single(File.ReadLines(outputBase + ".log"), line => line.Contains("Field phaseID sequence mismatch"));
+
+            System.Text.Json.Nodes.JsonObject Add(int sequence, int? phase)
+            {
+                bool first = sequence % 2 == 1;
+                TbcDecodedField field = BuildOutputCvbsField(
+                    session, (sequence - 1) * 667_333L, first, phase ?? 1, sequence - 1)
+                    with { FieldPhaseId = phase };
+                return builder.Add(field, new TbcFieldOrderDecision(sequence, first, first,
+                    IsDuplicateField: false, WriteField: true, SyncConfidence: 100, DecodeFaults: 0));
+            }
+        }
+        finally
+        {
+            Directory.Delete(tempDirectory, recursive: true);
+        }
+    }
+
     private static TbcFieldDecodePipeline CreatePipeline(
         out SyncAnalyzer analyzer,
         string decodeType = "cvbs")
