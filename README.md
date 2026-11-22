@@ -9,7 +9,7 @@ A .NET 11 rewrite of the decode-facing parts of
 upstream release `v0.4.0` at commit
 `43155200da87c0d49eb37d8ec09b1372075ee8e4`.
 
-The current .NET port release is [`v0.4.0-2.22.0`](https://github.com/JunliangRen/vhs-decode-dotnet/releases/tag/v0.4.0-2.22.0) (application version `2.22.0`).
+The current .NET port release is [`v0.4.0-2.23.0`](https://github.com/JunliangRen/vhs-decode-dotnet/releases/tag/v0.4.0-2.23.0) (application version `2.23.0`).
 The x64 binaries require an [x86-64-v2 CPU](https://learn.microsoft.com/en-us/dotnet/core/whats-new/dotnet-11/runtime#updated-minimum-hardware-requirements), including SSE4.2 and POPCNT.
 
 [LD EFM buffer reuse measurements and limits](docs/LD_PERFORMANCE_V16.md).
