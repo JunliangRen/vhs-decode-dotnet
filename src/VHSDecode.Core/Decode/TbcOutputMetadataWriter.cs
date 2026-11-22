@@ -1093,11 +1093,17 @@ public static class TbcOutputMetadataWriter
                 };
                 AddDropouts(session, field, fieldInfo);
                 fieldInfo["fieldPhaseID"] = fieldPhaseId;
+                // The NTSC receiver leaves an unlocked burst as captured. Its
+                // required metadata default carries no measured phase evidence.
+                int? verifiedPhaseId = session.TbcRenderer.UseCvbsReceiver && session.System == "NTSC"
+                    ? field.FieldPhaseId
+                    : fieldPhaseId;
                 if (!decision.IsDuplicateField
+                    && verifiedPhaseId is int currentPhase
                     && _previousLaserDiscFieldPhaseId.HasValue
                     && !IsExpectedLaserDiscFieldPhase(
                         _previousLaserDiscFieldPhaseId.Value,
-                        fieldPhaseId,
+                        currentPhase,
                         LaserDiscFieldPhaseCount(session)))
                 {
                     decodeFaults |= 2;
@@ -1115,7 +1121,7 @@ public static class TbcOutputMetadataWriter
                         ["vbiData"] = ToJsonArray(field.VbiData ?? [])
                     };
                 }
-                _previousLaserDiscFieldPhaseId = fieldPhaseId;
+                _previousLaserDiscFieldPhaseId = verifiedPhaseId;
             }
             else
             {
