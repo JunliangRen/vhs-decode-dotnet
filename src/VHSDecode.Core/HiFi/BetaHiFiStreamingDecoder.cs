@@ -24,8 +24,8 @@ internal sealed class BetaHiFiStreamingDecoder
             options.DropoutCompensation != HiFiConstants.DropoutCompensationDisabled,
             options.DropoutCompensation == HiFiConstants.DropoutCompensationMute);
         var framer = new BetaHiFiBlockFramer(checked((int)options.InputRateHz), input);
-        var reporter = new HiFiProgressReporter(diagnostics, options.InputRateHz,
-            48_000, input.TotalSamples, elapsedProvider);
+        using var reporter = new HiFiProgressReporter(diagnostics, options.InputRateHz,
+            48_000, input.TotalSamples, elapsedProvider, HiFiTerminalProgress.TryCreate(diagnostics));
         using FileStream native = CreateTemporaryFile();
         using FileStream compensated = CreateTemporaryFile();
         var calibrationBlocks = new List<BetaHiFiIqBlock>(3);
@@ -44,7 +44,7 @@ internal sealed class BetaHiFiStreamingDecoder
             throw new InvalidDataException("Betamax HiFi input contains no RF samples.");
 
         BetaHiFiRfCalibration calibration = decoder.Calibrate(calibrationBlocks, calibrationLengths);
-        diagnostics.WriteLine(string.Create(CultureInfo.InvariantCulture,
+        reporter.ReportMessage(string.Create(CultureInfo.InvariantCulture,
             $"Beta HiFi: calibration complete; {calibration.TimingAnchorGroup} timing anchor, "
             + $"A/B gaps {calibration.AToBGap.Right - calibration.AToBGap.Left}/"
             + $"{calibration.BToAGap.Right - calibration.BToAGap.Left} samples at 500 kHz."));
@@ -83,7 +83,7 @@ internal sealed class BetaHiFiStreamingDecoder
         if (frames != expectedFrames)
             throw new InvalidDataException("Beta HiFi RF/audio frame accounting does not match.");
 
-        diagnostics.WriteLine("Beta HiFi: applying continuous default compensation (offline audio pass).");
+        reporter.ReportMessage("Beta HiFi: applying continuous default compensation (offline audio pass).");
         native.Position = 0;
         float processedPeak = 0;
         long processedFrames = 0;

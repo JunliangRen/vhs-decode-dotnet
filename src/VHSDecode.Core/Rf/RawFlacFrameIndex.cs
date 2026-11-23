@@ -177,8 +177,12 @@ internal sealed class RawFlacFrameIndex
 
     // A borrowed handle is independent of a current lookup of the path.
     // Never publish an index from this optional probe to the path cache.
-    internal static RawFlacFrameIndex? ProbeOpened(string path, FileStream input, int maximumMetadataBytes)
-        => CreateFromStream(path, input, maximumMetadataBytes);
+    internal static RawFlacFrameIndex? ProbeOpened(
+        string path,
+        FileStream input,
+        int maximumMetadataBytes,
+        int sampleRateHz = FfmpegPcm16SampleLoader.ContainerAudioSampleRateHz)
+        => CreateFromStream(path, input, maximumMetadataBytes, sampleRateHz);
 
     private static RawFlacFrameIndex? Create(string path)
     {
@@ -189,14 +193,15 @@ internal sealed class RawFlacFrameIndex
             FileShare.ReadWrite | FileShare.Delete,
             bufferSize: 1024 * 1024,
             FileOptions.RandomAccess);
-        return CreateFromStream(path, input, int.MaxValue);
+        return CreateFromStream(path, input, int.MaxValue, FfmpegPcm16SampleLoader.ContainerAudioSampleRateHz);
     }
 
-    private static RawFlacFrameIndex? CreateFromStream(string path, FileStream input, int maximumMetadataBytes)
+    private static RawFlacFrameIndex? CreateFromStream(
+        string path, FileStream input, int maximumMetadataBytes, int sampleRateHz)
     {
         if (!TryReadMetadata(input, out FlacStreamInfo streamInfo, out byte[] metadata, maximumMetadataBytes)
             || streamInfo.MinimumBlockSize != streamInfo.MaximumBlockSize
-            || streamInfo.SampleRate != FfmpegPcm16SampleLoader.ContainerAudioSampleRateHz
+            || streamInfo.SampleRate != sampleRateHz
             || streamInfo.Channels != 1
             || streamInfo.BitsPerSample != 16
             || input.Length <= metadata.Length)

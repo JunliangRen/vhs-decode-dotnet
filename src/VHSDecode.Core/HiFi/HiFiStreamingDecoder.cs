@@ -75,12 +75,15 @@ internal sealed class HiFiStreamingDecoder
                 options, input, output, diagnostics, cancellationToken, elapsedProvider);
         }
         HiFiDecodePlan plan = HiFiDecodePlan.FromOptions(options);
-        var progressReporter = new HiFiProgressReporter(
+        using var progressReporter = new HiFiProgressReporter(
             diagnostics,
             plan.InputRateHz,
             plan.FinalAudioRateHz,
             input.TotalSamples,
-            elapsedProvider);
+            elapsedProvider,
+            options.ThreadsInteger > 0 && !options.GnuRadio && !options.Preview && previewSink is null
+                ? HiFiTerminalProgress.TryCreate(diagnostics)
+                : null);
         if (options.ThreadsInteger <= 0)
         {
             return await WaitWithoutDecoderWorkers(
