@@ -138,7 +138,7 @@ internal static class HiFiInputReader
         // ordinary FLAC. Beta must not send those through a video LDF reader or
         // FFmpeg's nobuffer path, which can discard the beginning of the RF.
         if (options.TapeFormat == "betamax" && inputPath != "-" && !isRaw
-            && TryReadBetaFlacHeader(inputPath, out long? betaSamples))
+            && TryReadBetaFlacHeader(inputPath, options.InputRateHz, out long? betaSamples))
         {
             if (overrideFormat is not null and not (HiFiRawSampleFormat.S10Le
                 or HiFiRawSampleFormat.S12Le or HiFiRawSampleFormat.S16Le))
@@ -258,7 +258,7 @@ internal static class HiFiInputReader
                     inputPath,
                     overrideFormat ?? HiFiRawSampleFormat.S16Le,
                     useNoBuffer: false,
-                    TryReadFlacTotalSamples(inputPath));
+                    TryReadFlacTotalSamples(inputPath, options.InputRateHz));
             }
             catch (Win32Exception ex)
             {
@@ -305,7 +305,7 @@ internal static class HiFiInputReader
             .Replace("32", "32le", StringComparison.Ordinal);
     }
 
-    internal static long? TryReadFlacTotalSamples(string path)
+    internal static long? TryReadFlacTotalSamples(string path, double inputRateHz = 0)
     {
         try
         {
@@ -330,8 +330,7 @@ internal static class HiFiInputReader
                     Span<byte> streamInfo = stackalloc byte[18];
                     stream.ReadExactly(streamInfo);
                     ulong packed = BinaryPrimitives.ReadUInt64BigEndian(streamInfo[10..]);
-                    long totalSamples = checked((long)(packed & 0x0000000FFFFFFFFFUL));
-                    return totalSamples == 0 ? null : totalSamples;
+                    return GetFlacProgressTotal(path, stream, packed, inputRateHz);
                 }
 
                 stream.Seek(blockLength, SeekOrigin.Current);
@@ -344,7 +343,7 @@ internal static class HiFiInputReader
         return null;
     }
 
-    private static bool TryReadBetaFlacHeader(string path, out long? totalSamples)
+    private static bool TryReadBetaFlacHeader(string path, double inputRateHz, out long? totalSamples)
     {
         totalSamples = null;
         using var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read);
@@ -362,9 +361,39 @@ internal static class HiFiInputReader
         int channels = checked((int)((packed >> 41) & 7)) + 1;
         if (channels != 1)
             throw new InvalidDataException("Betamax HiFi input must contain one RF channel, not multichannel audio.");
-        long frames = checked((long)(packed & 0x0000000FFFFFFFFFUL));
-        totalSamples = frames > 0 ? frames : null;
+        totalSamples = GetFlacProgressTotal(path, stream, packed, inputRateHz);
         return true;
+    }
+
+    private static long? GetFlacProgressTotal(string path, FileStream input, ulong streamInfo, double inputRateHz)
+    {
+        long totalSamples = (long)(streamInfo & 0x0000000FFFFFFFFFUL);
+        if (totalSamples == 0)
+        {
+            return null;
+        }
+
+        int containerRate = (int)(streamInfo >> 44);
+        const int rateScale = 1_000;
+        const int metadataAllowance = 1024 * 1024;
+        const int maximumMetadataBytes = 8 * 1024 * 1024;
+        const ulong pcm16MonoFlags = 15UL << 36;
+        const ulong channelAndDepthMask = 0xffUL << 36;
+        if (containerRate == 0 || inputRateHz != containerRate * (double)rateScale
+            || (streamInfo & channelAndDepthMask) != pcm16MonoFlags
+            || input.Length <= totalSamples * (2L * sizeof(short)) + metadataAllowance)
+        {
+            return totalSamples;
+        }
+
+        // Some DdD files store the RF rate in kHz and also divide STREAMINFO's
+        // sample total by 1,000. Trust the correction only if the frames confirm it.
+        long correctedTotal = totalSamples * rateScale;
+        RawFlacFrameIndex? index = RawFlacFrameIndex.ProbeOpened(path, input, maximumMetadataBytes, containerRate);
+        return index is not null && index.TotalSamples == correctedTotal
+            && StaleRawFlacFallbackSampleLoader.HasValidTailChecksum(path, index)
+            ? correctedTotal
+            : null;
     }
 
     private static IHiFiSampleReader OpenWave(string path, HiFiRawSampleFormat format)

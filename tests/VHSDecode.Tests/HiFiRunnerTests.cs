@@ -1376,6 +1376,146 @@ public sealed class HiFiRunnerTests
         }
     }
 
+    [Fact]
+    public void HiFiProgressUsesVerifiedFlacTailWhenDddHeaderCountIsScaled()
+    {
+        Assert.SkipUnless(CanRunFfmpeg(), "ffmpeg is not available on PATH.");
+        string directory = CreateTempDirectory();
+        try
+        {
+            const int sampleCount = 1_024_000;
+            const int rfRate = 8_000_000;
+            string raw = Path.Combine(directory, "capture.s16");
+            string flac = Path.Combine(directory, "capture.flac");
+            var samples = new byte[sampleCount * sizeof(short)];
+            new Random(73).NextBytes(samples);
+            File.WriteAllBytes(raw, samples);
+
+            var startInfo = new ProcessStartInfo("ffmpeg")
+            {
+                UseShellExecute = false,
+                RedirectStandardError = true,
+                CreateNoWindow = true
+            };
+            string[] arguments = ["-nostdin", "-v", "error", "-f", "s16le", "-ar", "8000",
+                "-ac", "1", "-i", raw, "-c:a", "flac", "-frame_size", "4096", flac];
+            foreach (string argument in arguments)
+            {
+                startInfo.ArgumentList.Add(argument);
+            }
+
+            using var process = Process.Start(startInfo)!;
+            string error = process.StandardError.ReadToEnd();
+            process.WaitForExit();
+            Assert.True(process.ExitCode == 0, error);
+            Assert.Equal(sampleCount, HiFiInputReader.TryReadFlacTotalSamples(flac, rfRate));
+
+            using (var stream = new FileStream(flac, FileMode.Open, FileAccess.ReadWrite))
+            {
+                Span<byte> info = stackalloc byte[8];
+                stream.Position = 18;
+                stream.ReadExactly(info);
+                ulong packed = BinaryPrimitives.ReadUInt64BigEndian(info);
+                const ulong totalMask = (1UL << 36) - 1;
+                BinaryPrimitives.WriteUInt64BigEndian(info, (packed & ~totalMask) | (sampleCount / 1_000));
+                stream.Position = 18;
+                stream.Write(info);
+            }
+
+            Assert.Equal(sampleCount / 1_000, HiFiInputReader.TryReadFlacTotalSamples(flac));
+            Assert.Equal(sampleCount, HiFiInputReader.TryReadFlacTotalSamples(flac, rfRate));
+
+            using (var stream = new FileStream(flac, FileMode.Open, FileAccess.ReadWrite))
+            {
+                stream.Position = stream.Length - 1;
+                int checksum = stream.ReadByte();
+                stream.Position--;
+                stream.WriteByte((byte)(checksum ^ 1));
+            }
+
+            Assert.Null(HiFiInputReader.TryReadFlacTotalSamples(flac, rfRate));
+        }
+        finally
+        {
+            Directory.Delete(directory, recursive: true);
+        }
+    }
+
+    [Fact]
+    public void HiFiProgressBoundsOversizedBarsAndKeepsReportingPositions()
+    {
+        Assert.Equal("Progress [########################################] 100.00%",
+            HiFiProgressReporter.FormatProgressBar(long.MaxValue, 1));
+
+        using var log = new StringWriter();
+        var reporter = new HiFiProgressReporter(log, 8_000_000, 48_000, 128,
+            () => TimeSpan.FromSeconds(1));
+        reporter.ReportInput(8_000_000, 2);
+        Assert.DoesNotContain("Progress [", log.ToString(), StringComparison.Ordinal);
+        Assert.Contains("- Input position: 0:00:01.000", log.ToString(), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void HiFiTerminalProgressRefreshesInPlaceAndRetainsWarnings()
+    {
+        using var log = new StringWriter();
+        Assert.Null(HiFiTerminalProgress.TryCreate(log));
+        int width = 120;
+        bool restored = false;
+        TimeSpan elapsed = TimeSpan.FromSeconds(1);
+        var terminal = new HiFiTerminalProgress(log, () => width, () => restored = true);
+        var reporter = new HiFiProgressReporter(log, 8_000_000, 48_000, 200, () => elapsed, terminal);
+        HiFiAfeParameters afe = HiFiAfeParameters.FromOptions(DefaultOptions());
+        const string rewind = "\u001b[7F";
+        const string clear = rewind + "\u001b[2K";
+
+        reporter.ReportInput(100, 2);
+        string first = log.ToString();
+        Assert.Contains("50.00%", first, StringComparison.Ordinal);
+        Assert.Equal(7, first.Count(ch => ch == '\n'));
+
+        elapsed += TimeSpan.FromMilliseconds(5);
+        reporter.ReportBias(new HiFiDecodedBlock([], [], 0, 0), "s", afe);
+        reporter.ReportOutput(95, 100, 1);
+        Assert.Equal(first, log.ToString());
+
+        elapsed += TimeSpan.FromMilliseconds(125);
+        reporter.ReportOutput(95, 101, 1);
+        string refreshed = log.ToString()[first.Length..];
+        Assert.StartsWith(rewind + "Progress [", refreshed, StringComparison.Ordinal);
+        Assert.Contains("50.00%\u001b[K", refreshed, StringComparison.Ordinal);
+        Assert.DoesNotContain("\u001b[2K", refreshed, StringComparison.Ordinal);
+        Assert.Contains("50.00%", refreshed, StringComparison.Ordinal);
+        Assert.Contains("2 blocks enqueued", refreshed, StringComparison.Ordinal);
+        Assert.Contains("(good player/recorder calibration)", refreshed, StringComparison.Ordinal);
+
+        int start = log.GetStringBuilder().Length;
+        reporter.ReportBias(new HiFiDecodedBlock([], [], 0, -1), "s", afe);
+        string warning = log.ToString()[start..];
+        Assert.StartsWith(clear, warning, StringComparison.Ordinal);
+        Assert.Contains("WARN:", warning, StringComparison.Ordinal);
+
+        start = log.GetStringBuilder().Length;
+        elapsed += TimeSpan.FromMilliseconds(125);
+        reporter.ReportInput(150, 3);
+        Assert.StartsWith("Progress [", log.ToString()[start..], StringComparison.Ordinal);
+
+        start = log.GetStringBuilder().Length;
+        width = 32;
+        elapsed += TimeSpan.FromMilliseconds(125);
+        reporter.ReportInput(175, 4);
+        string narrow = log.ToString()[start..];
+        Assert.DoesNotContain(rewind, narrow, StringComparison.Ordinal);
+        Assert.All(narrow.Split(Environment.NewLine, StringSplitOptions.RemoveEmptyEntries),
+            line => Assert.True(line.Length < width));
+
+        width = 120;
+        reporter.ReportInput(200, 5);
+        reporter.Dispose();
+        Assert.Contains("100.00%", log.ToString(), StringComparison.Ordinal);
+        Assert.True(restored);
+    }
+
     [Fact(DisplayName = "HiFi short 24-bit FLAC input matches Release 4.0 libsndfile samples")]
     public void HiFiShort24BitFlacInputMatchesRelease40LibsndfileSamples()
     {

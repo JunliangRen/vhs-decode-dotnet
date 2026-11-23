@@ -4,9 +4,10 @@ using System.Text;
 
 namespace VHSDecode.Core.HiFi;
 
-internal sealed class HiFiProgressReporter
+internal sealed class HiFiProgressReporter : IDisposable
 {
     private const int ProgressWidth = 40;
+    private static readonly TimeSpan RefreshInterval = TimeSpan.FromMilliseconds(125);
 
     private readonly TextWriter _output;
     private readonly double _inputRateHz;
@@ -14,14 +15,21 @@ internal sealed class HiFiProgressReporter
     private readonly long? _totalInputSamples;
     private readonly Func<TimeSpan> _elapsedProvider;
     private readonly object _writeLock = new();
+    private readonly HiFiTerminalProgress? _terminal;
     private long _audioFrames;
+    private long _inputSamples;
+    private int _blocksEnqueued;
+    private string? _latestBias;
+    private TimeSpan? _lastRefresh;
+    private bool _statusPending;
 
     public HiFiProgressReporter(
         TextWriter output,
         double inputRateHz,
         int audioRateHz,
         long? totalInputSamples,
-        Func<TimeSpan>? elapsedProvider = null)
+        Func<TimeSpan>? elapsedProvider = null,
+        HiFiTerminalProgress? terminal = null)
     {
         ArgumentNullException.ThrowIfNull(output);
         ArgumentOutOfRangeException.ThrowIfNegativeOrZero(inputRateHz);
@@ -31,6 +39,7 @@ internal sealed class HiFiProgressReporter
         _inputRateHz = inputRateHz;
         _audioRateHz = audioRateHz;
         _totalInputSamples = totalInputSamples;
+        _terminal = terminal;
         if (elapsedProvider is null)
         {
             long startTimestamp = Stopwatch.GetTimestamp();
@@ -46,7 +55,13 @@ internal sealed class HiFiProgressReporter
     {
         lock (_writeLock)
         {
-            if (_totalInputSamples is > 0)
+            if (_terminal is not null)
+            {
+                UpdateTerminal(inputSamples, blocksEnqueued);
+                return;
+            }
+
+            if (_totalInputSamples is > 0 && inputSamples <= _totalInputSamples.Value)
             {
                 _output.WriteLine(FormatProgressBar(inputSamples, _totalInputSamples.Value));
             }
@@ -66,6 +81,12 @@ internal sealed class HiFiProgressReporter
         lock (_writeLock)
         {
             _audioFrames = audioFrames;
+            if (_terminal is not null)
+            {
+                UpdateTerminal(inputSamples, blocksEnqueued);
+                return;
+            }
+
             _output.Write(FormatStatus(
                 inputSamples,
                 audioFrames,
@@ -88,21 +109,89 @@ internal sealed class HiFiProgressReporter
                 HiFiConstants.AudioModeMonoRight => $"Bias R {rightKhz:F2} kHz ",
                 _ => $"Bias L {leftKhz:F2} kHz, R {rightKhz:F2} kHz "
             };
-            _output.Write(bias);
-            if (Math.Abs(leftKhz) < 9.0 && Math.Abs(rightKhz) < 9.0)
+            bool calibrated = Math.Abs(leftKhz) < 9.0 && Math.Abs(rightKhz) < 9.0;
+            if (calibrated)
             {
-                _output.WriteLine("(good player/recorder calibration)");
+                string status = bias + "(good player/recorder calibration)";
+                if (_terminal is not null)
+                {
+                    _latestBias = status;
+                    _statusPending = true;
+                    return;
+                }
+
+                _output.WriteLine(status);
+                return;
             }
-            else if ((Math.Abs(leftKhz) is >= 9.0 and < 10.0)
+
+            _terminal?.Clear();
+            _latestBias = bias.TrimEnd();
+            if ((Math.Abs(leftKhz) is >= 9.0 and < 10.0)
                 || (Math.Abs(rightKhz) is >= 9.0 and < 10.0))
             {
-                _output.WriteLine("(maybe marginal player/recorder calibration)");
+                _output.WriteLine(bias + "(maybe marginal player/recorder calibration)");
             }
             else
             {
-                _output.WriteLine();
+                _output.WriteLine(bias);
                 _output.WriteLine("WARN: the player or the recorder may be uncalibrated and/or");
                 _output.WriteLine("the standard and/or the sample rate specified are wrong");
+            }
+        }
+    }
+
+    internal void ReportMessage(string message)
+    {
+        lock (_writeLock)
+        {
+            _terminal?.Clear();
+            _output.WriteLine(message);
+        }
+    }
+
+    private void UpdateTerminal(long inputSamples, int blocksEnqueued)
+    {
+        _inputSamples = Math.Max(_inputSamples, inputSamples);
+        _blocksEnqueued = Math.Max(_blocksEnqueued, blocksEnqueued);
+        _statusPending = true;
+        RefreshTerminal(force: false);
+    }
+
+    private void RefreshTerminal(bool force)
+    {
+        if (_terminal is null || !_statusPending)
+        {
+            return;
+        }
+
+        TimeSpan elapsed = _elapsedProvider();
+        if (!force && _lastRefresh is { } last && elapsed - last < RefreshInterval)
+        {
+            return;
+        }
+
+        string progress = _totalInputSamples is > 0 && _inputSamples <= _totalInputSamples.Value
+            ? FormatProgressBar(_inputSamples, _totalInputSamples.Value)
+            : "Progress (total unknown)";
+        _terminal.Render(progress + Environment.NewLine
+            + FormatStatus(_inputSamples, _audioFrames, _blocksEnqueued,
+                _inputRateHz, _audioRateHz, elapsed)
+            + (_latestBias ?? "Bias --") + Environment.NewLine);
+        _lastRefresh = elapsed;
+        _statusPending = false;
+    }
+
+    public void Dispose()
+    {
+        lock (_writeLock)
+        {
+            try
+            {
+                RefreshTerminal(force: true);
+            }
+            finally
+            {
+                _terminal?.Dispose();
             }
         }
     }
@@ -115,16 +204,17 @@ internal sealed class HiFiProgressReporter
         ArgumentOutOfRangeException.ThrowIfNegative(value);
         ArgumentOutOfRangeException.ThrowIfNegativeOrZero(maximum);
         ArgumentException.ThrowIfNullOrEmpty(label);
-        int completed = checked((int)Math.Round(
-            value * (double)ProgressWidth / maximum,
-            MidpointRounding.ToEven));
+        double fraction = Math.Min(value, maximum) / (double)maximum;
+        int completed = (int)Math.Round(
+            fraction * ProgressWidth,
+            MidpointRounding.ToEven);
         int remaining = ProgressWidth - completed;
-        string percentage = (value * 100.0 / maximum).ToString(
+        string percentage = (fraction * 100.0).ToString(
             "F2",
             CultureInfo.InvariantCulture);
         return label + " ["
-            + new string('#', Math.Max(0, completed))
-            + new string(' ', Math.Max(0, remaining))
+            + new string('#', completed)
+            + new string(' ', remaining)
             + "] " + percentage + "%";
     }
 
