@@ -8,7 +8,7 @@
 中解码相关部分的 .NET 11 重写，兼容目标为上游 release `v0.4.0`、commit
 `43155200da87c0d49eb37d8ec09b1372075ee8e4`。
 
-当前 .NET 移植版发布为 [`v0.4.0-2.24.0`](https://github.com/JunliangRen/vhs-decode-dotnet/releases/tag/v0.4.0-2.24.0)（应用版本 `2.24.0`）。
+当前 .NET 移植版发布为 [`v0.4.0-2.25.0`](https://github.com/JunliangRen/vhs-decode-dotnet/releases/tag/v0.4.0-2.25.0)（应用版本 `2.25.0`）。
 x64 二进制文件需要支持 SSE4.2 和 POPCNT 的 [x86-64-v2 CPU](https://learn.microsoft.com/en-us/dotnet/core/whats-new/dotnet-11/runtime#updated-minimum-hardware-requirements)。
 
 [LD EFM 缓冲区复用的测量与边界](docs/LD_PERFORMANCE_V16.md)。

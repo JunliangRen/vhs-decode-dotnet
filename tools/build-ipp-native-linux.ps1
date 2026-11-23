@@ -74,7 +74,7 @@ foreach ($package in $configuration.packages) {
     Invoke-Checked dpkg-deb @('--extract', $archive, $extractedRoot)
 }
 
-$ippRoot = Join-Path $extractedRoot 'opt/intel/oneapi/ipp/2026.0'
+$ippRoot = Join-Path $extractedRoot 'opt/intel/oneapi/ipp/2026.1'
 $buildRoot = Join-Path $workRoot 'build'
 Invoke-Checked cmake @(
     '-S', (Join-Path $repositoryRoot 'src/VHSDecode.Ipp.Native'),
@@ -98,7 +98,7 @@ Invoke-Checked python3 @(
     '--max-glibc', $maximumGlibc, '--output', $auditPath)
 
 # Keep the actual license and notices from these exact Linux packages.
-$vendorLicense = Join-Path $extractedRoot 'opt/intel/oneapi/licensing/2026.0/licensing/2026.0/license.htm'
+$vendorLicense = Join-Path $extractedRoot 'opt/intel/oneapi/licensing/2026.2/licensing/2026.2/license.htm'
 $vendorNotices = Join-Path $ippRoot 'share/doc/ipp/licensing/third-party-programs.txt'
 foreach ($source in @($vendorLicense, $vendorNotices)) {
     if (-not (Test-Path -LiteralPath $source -PathType Leaf)) {

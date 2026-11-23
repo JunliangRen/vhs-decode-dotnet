@@ -4,8 +4,8 @@
 
 The `vhsdecode_ipp.dll` and Linux x64 `libvhsdecode_ipp.so` acceleration backends
 statically link selected functions from Intel Integrated Performance Primitives
-(Intel IPP). Windows uses NuGet package `2026.0.1.52`. Linux uses Intel's official
-APT packages `2026.0.1-51`, whose library reports version `2026.0.0`, with exact
+(Intel IPP). Windows uses NuGet package `2026.1.0.761`. Linux uses Intel's official
+APT packages `2026.1.0-760`, whose library reports version `2026.1.0`, with exact
 URLs and SHA-256 hashes in `tools/linux-ipp-packages.json`. Both bridges use
 sequential static libraries without OpenMP, oneTBB, or shared IPP runtimes.
 The Linux bridge dynamically uses the operating system's `libstdc++`.
