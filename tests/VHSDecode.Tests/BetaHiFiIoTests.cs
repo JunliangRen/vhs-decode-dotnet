@@ -7,15 +7,18 @@ namespace VHSDecode.Tests;
 
 public sealed class BetaHiFiIoTests
 {
-    [Theory(DisplayName = "Betamax zero gain remains digital silence through stereo and dual-mono normalization")]
-    [InlineData("s", 2)]
-    [InlineData("d", 1)]
-    public void ZeroGainAndNormalizePreserveDigitalSilence(string mode, int channels)
+    [Theory(DisplayName = "Zero gain remains digital silence through stereo and dual-mono HiFi normalization")]
+    [InlineData("s", 2, "betamax")]
+    [InlineData("s", 2, "vhs")]
+    [InlineData("d", 1, "betamax")]
+    [InlineData("d", 1, "vhs")]
+    public void ZeroGainAndNormalizePreserveDigitalSilence(string mode, int channels, string tapeFormat)
     {
         using var directory = new TemporaryDirectory();
         string outputPath = Path.Combine(directory.Path, "normalized.wav");
         HiFiDecodeOptions options = Options(
-            "input.s16", outputPath, "--gain", "0", "--normalize", "--audio_mode", mode);
+            "input.s16", outputPath, "--gain", "0", "--normalize", "--audio_mode", mode)
+            with { TapeFormat = tapeFormat };
         string[] paths = mode == "d"
             ? [HiFiOutputWriter.GetDualMonoFilename(outputPath, "channel_1"),
                HiFiOutputWriter.GetDualMonoFilename(outputPath, "channel_2")]
@@ -40,9 +43,9 @@ public sealed class BetaHiFiIoTests
                 Assert.Equal(1, BinaryPrimitives.ReadUInt16LittleEndian(bytes.AsSpan(20, 2)));
                 Assert.Equal(channels, BinaryPrimitives.ReadUInt16LittleEndian(bytes.AsSpan(22, 2)));
                 Assert.Equal(48_000u, BinaryPrimitives.ReadUInt32LittleEndian(bytes.AsSpan(24, 4)));
-                Assert.Equal(16, BinaryPrimitives.ReadUInt16LittleEndian(bytes.AsSpan(34, 2)));
-                Assert.Equal(100 * channels * sizeof(short), bytes.Length - 44);
-                Assert.Equal((uint)(100 * channels * sizeof(short)),
+                Assert.Equal(24, BinaryPrimitives.ReadUInt16LittleEndian(bytes.AsSpan(34, 2)));
+                Assert.Equal(100 * channels * 3, bytes.Length - 44);
+                Assert.Equal((uint)(100 * channels * 3),
                     BinaryPrimitives.ReadUInt32LittleEndian(bytes.AsSpan(40, 4)));
                 Assert.All(bytes[44..], sampleByte => Assert.Equal(0, sampleByte));
                 Assert.False(File.Exists(HiFiOutputWriter.GetNormalizeFilename(path, 48_000)));

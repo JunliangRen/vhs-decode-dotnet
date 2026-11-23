@@ -392,8 +392,8 @@ public sealed class HiFiRunnerTests
         Assert.Equal(-1_200.0f, wrapped.Right[0]);
     }
 
-    [Fact(DisplayName = "HiFi runner matches Release 4.0 PAL VHS synthetic RF WAV")]
-    public void HiFiRunnerMatchesRelease40PalVhsSyntheticRfWave()
+    [Fact(DisplayName = "HiFi runner matches the PAL VHS synthetic RF PCM24 baseline")]
+    public void HiFiRunnerMatchesPalVhsSyntheticRfPcm24()
     {
         string directory = CreateTempDirectory();
         try
@@ -428,10 +428,11 @@ public sealed class HiFiRunnerTests
             bool hasIppPhase = IppRuntime.TryProbe(out var runtime) && runtime is { SupportsAtan2: true };
             Assert.Equal(hasIppPhase, output.ToString().Contains("Intel IPP DSP backend:", StringComparison.Ordinal));
             byte[] wave = File.ReadAllBytes(outputPath);
-            Assert.Equal(91_228, wave.Length);
+            Assert.Equal(136_820, wave.Length);
+            // Raw PCM24 from the 2.24.0 FLAC output of the same fixture.
             WindowsFrozenBitOracle.Equal(
-                "325A4ABFB4922FE814338BAB377A94E6C2FD96277244813433A72F6ED5723553",
-                Convert.ToHexString(SHA256.HashData(wave)));
+                "F407B548B1C3A80A3EE701596F34E8DA7322990413CB6C61F267683E1BFC23FF",
+                Convert.ToHexString(SHA256.HashData(wave.AsSpan(44))));
         }
         finally
         {
@@ -439,8 +440,8 @@ public sealed class HiFiRunnerTests
         }
     }
 
-    [Fact(DisplayName = "HiFi runner matches Release 4.0 NTSC 8mm synthetic RF WAV")]
-    public void HiFiRunnerMatchesRelease40Ntsc8mmSyntheticRfWave()
+    [Fact(DisplayName = "HiFi runner matches the NTSC 8mm synthetic RF PCM24 baseline")]
+    public void HiFiRunnerMatchesNtsc8mmSyntheticRfPcm24()
     {
         string directory = CreateTempDirectory();
         try
@@ -473,10 +474,11 @@ public sealed class HiFiRunnerTests
             Assert.Equal(0, exitCode);
             Assert.Equal(string.Empty, error.ToString());
             byte[] wave = File.ReadAllBytes(outputPath);
-            Assert.Equal(91_228, wave.Length);
+            Assert.Equal(136_820, wave.Length);
+            // Raw PCM24 from the 2.24.0 FLAC output of the same fixture.
             WindowsFrozenBitOracle.Equal(
-                "E1AAF3F68DF1392617BC28D162D2E3DD2AFE6251E91E06D4D3191540C3EFA83F",
-                Convert.ToHexString(SHA256.HashData(wave)));
+                "BDAA3252424E44A211B17AB391F06D491F09D7D3E8BDCC773576CEE624F109DF",
+                Convert.ToHexString(SHA256.HashData(wave.AsSpan(44))));
         }
         finally
         {
@@ -521,8 +523,8 @@ public sealed class HiFiRunnerTests
             Assert.Equal(0.0f, result.LeftPeak);
             Assert.Equal(0.0f, result.RightPeak);
             byte[] wave = File.ReadAllBytes(path);
-            Assert.Equal(1_584u, BinaryPrimitives.ReadUInt32LittleEndian(wave.AsSpan(40, 4)));
-            Assert.All(ReadPcm16(wave), value => Assert.Equal((short)0, value));
+            Assert.Equal(2_376u, BinaryPrimitives.ReadUInt32LittleEndian(wave.AsSpan(40, 4)));
+            Assert.All(ReadPcm24(wave), value => Assert.Equal(0, value));
             Assert.Contains(
                 "Progress [########################################] 100.00%",
                 diagnostics.ToString(),
@@ -1154,50 +1156,54 @@ public sealed class HiFiRunnerTests
         }
     }
 
-    [Fact(DisplayName = "HiFi WAV output matches libsndfile PCM16 quantization and padding")]
-    public void HiFiWaveOutputMatchesLibsndfilePcm16QuantizationAndPadding()
+    [Theory(DisplayName = "HiFi WAV and FLAC use the same PCM24 samples and padding")]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void HiFiWaveAndFlacUseTheSamePcm24Samples(bool normalize)
     {
-        Assert.Equal((short)0, HiFiOutputWriter.QuantizeWavePcm16(-1.0f / 4_294_967_296.0f));
-        Assert.Equal((short)-1, HiFiOutputWriter.QuantizeWavePcm16(-3.0f / 4_294_967_296.0f));
-        Assert.Equal((short)0, HiFiOutputWriter.QuantizeWavePcm16(3.0f / 4_294_967_296.0f));
-        Assert.Equal((short)-2, HiFiOutputWriter.QuantizeWavePcm16(-65_537.0f / 2_147_483_648.0f));
-        Assert.Equal((short)-1, HiFiOutputWriter.QuantizeWavePcm16(-65_536.0f / 2_147_483_648.0f));
-        Assert.Equal((short)0, HiFiOutputWriter.QuantizeWavePcm16(65_535.0f / 2_147_483_648.0f));
-        Assert.Equal((short)1, HiFiOutputWriter.QuantizeWavePcm16(65_536.0f / 2_147_483_648.0f));
-        Assert.Equal(short.MinValue, HiFiOutputWriter.QuantizeWavePcm16(float.NaN));
-        Assert.Equal(short.MinValue, HiFiOutputWriter.QuantizeWavePcm16(float.NegativeInfinity));
-        Assert.Equal(short.MaxValue, HiFiOutputWriter.QuantizeWavePcm16(float.PositiveInfinity));
-
         string directory = CreateTempDirectory();
         try
         {
-            string path = Path.Combine(directory, "decode.wav");
-            HiFiDecodeOptions options = DefaultOptions(path);
-            var diagnostics = new StringWriter();
-            using (var writer = new HiFiOutputWriter(options))
+            string wavePath = Path.Combine(directory, "decode.WAV");
+            string flacPath = Path.Combine(directory, "decode.wav.flac");
+            float[] samples =
+            [
+                -2.0f, -1.0f / 16_777_216.0f, 1.0f / 16_777_216.0f, 0.75f,
+                -3.0f / 16_777_216.0f, 3.0f / 16_777_216.0f, 0.05601511150598526f, -0.4354589283466339f,
+                float.NaN, float.PositiveInfinity
+            ];
+            foreach (string path in new[] { wavePath, flacPath })
             {
+                HiFiDecodeOptions options = HiFiDecodeOptions.FromCommand(
+                    ParseHiFi(["--audio_rate", "96000", "-", path])) with { Normalize = normalize };
+                using var writer = new HiFiOutputWriter(options);
                 writer.WriteInitialPadding(5);
-                writer.Write(new HiFiPostProcessedBlock(
-                    [],
-                    [],
-                    [-2.0f, -1.0f / 65536.0f, 1.0f / 65536.0f, 0.99999f, float.NaN, float.PositiveInfinity],
-                    0.0f,
-                    0.0f));
-                writer.Complete(0.75f, 0.5f, diagnostics);
+                writer.Write(new HiFiPostProcessedBlock([], [], samples, 0.75f, 0.5f));
+                writer.Complete(0.75f, 0.5f, TextWriter.Null);
+                Assert.False(File.Exists(HiFiOutputWriter.GetNormalizeFilename(path, 96_000)));
             }
 
-            byte[] bytes = File.ReadAllBytes(path);
+            byte[] bytes = File.ReadAllBytes(wavePath);
+            int[] waveSamples = ReadPcm24(bytes);
+            LibsndfileReadResult flac = LibsndfileTestReader.ReadPcm32(flacPath);
             Assert.Equal("RIFF", ReadAscii(bytes, 0));
             Assert.Equal("WAVE", ReadAscii(bytes, 8));
             Assert.Equal((ushort)2, BinaryPrimitives.ReadUInt16LittleEndian(bytes.AsSpan(22, 2)));
-            Assert.Equal(48_000u, BinaryPrimitives.ReadUInt32LittleEndian(bytes.AsSpan(24, 4)));
-            Assert.Equal(20u, BinaryPrimitives.ReadUInt32LittleEndian(bytes.AsSpan(40, 4)));
-            Assert.Equal(
-                [0, 0, 0, 0, -32768, -1, 0, 32767, -32768, 32767],
-                ReadPcm16(bytes));
-            Assert.Equal(
-                Environment.NewLine + "Peak gain is 75.00%.",
-                diagnostics.ToString());
+            Assert.Equal(96_000u, BinaryPrimitives.ReadUInt32LittleEndian(bytes.AsSpan(24, 4)));
+            Assert.Equal(576_000u, BinaryPrimitives.ReadUInt32LittleEndian(bytes.AsSpan(28, 4)));
+            Assert.Equal((ushort)6, BinaryPrimitives.ReadUInt16LittleEndian(bytes.AsSpan(32, 2)));
+            Assert.Equal(42u, BinaryPrimitives.ReadUInt32LittleEndian(bytes.AsSpan(40, 4)));
+            Assert.Equal(96_000, flac.SampleRate);
+            Assert.Equal(2, flac.Channels);
+            Assert.Equal(0x170003, flac.Format);
+            Assert.Equal(7, flac.Frames);
+            Assert.Equal(waveSamples, flac.Samples.Select(sample => sample >> 8).ToArray());
+            if (!normalize)
+            {
+                Assert.Equal(
+                    [0, 0, 0, 0, -8_388_608, 0, 0, 6_291_456, -2, 2, 469_889, -3_652_894, -8_388_608, 8_388_607],
+                    waveSamples);
+            }
         }
         finally
         {
@@ -1268,8 +1274,8 @@ public sealed class HiFiRunnerTests
             {
                 writer.WriteInitialPadding(5);
                 writer.Write(new HiFiPostProcessedBlock(
-                    [0.5f, -0.5f],
-                    [0.25f, -0.25f],
+                    [0.5f, -0.5f, 0.0f],
+                    [0.25f, -0.25f, 0.0f],
                     [],
                     0.5f,
                     0.25f));
@@ -1280,8 +1286,13 @@ public sealed class HiFiRunnerTests
             string rightPath = Path.Combine(directory, "decode.test_channel_2.wav");
             Assert.True(File.Exists(leftPath));
             Assert.True(File.Exists(rightPath));
-            Assert.Equal([0, 0, 0, 0, 16384, -16384], ReadPcm16(File.ReadAllBytes(leftPath)));
-            Assert.Equal([0, 0, 0, 0, 8192, -8192], ReadPcm16(File.ReadAllBytes(rightPath)));
+            byte[] left = File.ReadAllBytes(leftPath);
+            Assert.Equal(66, left.Length);
+            Assert.Equal(58u, BinaryPrimitives.ReadUInt32LittleEndian(left.AsSpan(4, 4)));
+            Assert.Equal(21u, BinaryPrimitives.ReadUInt32LittleEndian(left.AsSpan(40, 4)));
+            Assert.Equal(0, left[^1]);
+            Assert.Equal([0, 0, 0, 0, 4_194_304, -4_194_304, 0], ReadPcm24(left));
+            Assert.Equal([0, 0, 0, 0, 2_097_152, -2_097_152, 0], ReadPcm24(File.ReadAllBytes(rightPath)));
         }
         finally
         {
@@ -1308,7 +1319,7 @@ public sealed class HiFiRunnerTests
                 writer.Complete(0.5f, 0.5f, TextWriter.Null);
             }
 
-            Assert.Equal([16376, -32752, 32752, -16376], ReadPcm16(File.ReadAllBytes(path)));
+            Assert.Equal([4_192_256, -8_384_512, 8_384_512, -4_192_256], ReadPcm24(File.ReadAllBytes(path)));
             Assert.False(File.Exists(HiFiOutputWriter.GetNormalizeFilename(path, 48_000)));
         }
         finally
@@ -1879,15 +1890,18 @@ public sealed class HiFiRunnerTests
         Assert.Null(opened.TotalSamples);
     }
 
-    private static short[] ReadPcm16(byte[] wave)
+    private static int[] ReadPcm24(byte[] wave)
     {
         Assert.Equal("data", ReadAscii(wave, 36));
+        Assert.Equal((ushort)24, BinaryPrimitives.ReadUInt16LittleEndian(wave.AsSpan(34, 2)));
         int dataLength = checked((int)BinaryPrimitives.ReadUInt32LittleEndian(wave.AsSpan(40, 4)));
-        var samples = new short[dataLength / sizeof(short)];
+        Assert.Equal(0, dataLength % 3);
+        var samples = new int[dataLength / 3];
         for (int i = 0; i < samples.Length; i++)
         {
-            samples[i] = BinaryPrimitives.ReadInt16LittleEndian(
-                wave.AsSpan(44 + (i * sizeof(short)), sizeof(short)));
+            int offset = 44 + (i * 3);
+            int bits = wave[offset] | (wave[offset + 1] << 8) | (wave[offset + 2] << 16);
+            samples[i] = (bits << 8) >> 8;
         }
 
         return samples;
