@@ -183,8 +183,9 @@ PAL と NTSC の VHS、S-VHS のファイルデコードでは、20 または 40
 `--threads 0` 出力です。Python upstream は worker 数によって output hash が
 安定しないため、Python の multithread run は速度測定にだけ使用します。
 
-VHS と LaserDisc のファイルデコードでは、起動時に IPP が利用可能なら `ipp-fast`、
-利用できなければ `exact` を使用します。CVBS と HiFi の既定値は `exact` です。
+VHS と LaserDisc のファイルデコード、および直交復調を使う VHS/8mm HiFi では、
+対応する IPP 機能が利用可能なら `ipp-fast`、利用できなければ `exact` を使用します。
+CVBS、Betamax HiFi、Hilbert 復調を使う HiFi の既定値は `exact` です。
 `--dsp-backend ipp-fast` を明示した場合は IPP が必要です。VHS の `current`
 プロファイルでは `--skip_vbi_dod` でドロップアウト検出をフィールドの最初の有効行から開始できます。
 
@@ -276,8 +277,8 @@ offline/system runtime は `VHSDECODE_CUDA_RUNTIME_PATH`、cache root は
 download の無効化は `VHSDECODE_CUDA_AUTO_DOWNLOAD=0` で指定できます。
 
 LaserDisc の video、EFM、analog-audio full-complex FFT stage は IPP に接続済みです。
-CVBS と HiFi は引き続き `ipp-fast` を拒否します。release-compatible な動作が
-必要な場合は `exact` を使用してください。互換性を重視する用途では
+VHS/8mm HiFi の `ipp-fast` はルックアップテーブルと IPP カーネルで FM 位相角を高速化し、搬送波フィルターはマネージド実装を使います。
+互換性を重視する用途では
 [backend の詳細](docs/README.detailed.ja.md#パフォーマンス)を先に確認してください。
 tested RTX 4070 と 1 本の real PAL capture では、画質修正後の FP32 CUDA-full path は
 Exact の見え方に大幅に近づきました。上の sustained matrix では、40 MSPS は CUDA

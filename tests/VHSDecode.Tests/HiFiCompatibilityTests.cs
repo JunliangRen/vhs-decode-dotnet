@@ -375,6 +375,8 @@ public sealed class HiFiCompatibilityTests
         float[] input = CreateDeterministicFloatInput(2048);
         float[] output = filter.Apply(input);
 
+        float[] reference = SosFilter.ApplyForwardBackwardFloat32(sections, input);
+        Assert.True(MemoryMarshal.AsBytes(reference.AsSpan()).SequenceEqual(MemoryMarshal.AsBytes(output.AsSpan())));
         Assert.Equal(22, sections.Length);
         Assert.Equal(expectedSosHash, BinarySha256(flattened));
         Assert.Equal(expectedOutputHash, BinarySha256(output));

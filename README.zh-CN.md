@@ -171,8 +171,9 @@ PAL 和 NTSC 的 VHS、S-VHS 文件解码可将 `cuda-fast` 与 `current` 一起
 Python 原版在不同 worker 数下的输出哈希并不稳定，因此 Python 多线程结果只用于
 速度比较，不作为逐字节 oracle。
 
-VHS 和 LaserDisc 文件解码在启动时优先使用 `ipp-fast`，IPP 探测失败时回退到
-`exact`。CVBS 和 HiFi 默认使用 `exact`。显式指定 `--dsp-backend ipp-fast` 要求 IPP
+VHS 和 LaserDisc 文件解码，以及采用正交解调的 VHS/8mm HiFi，在运行库支持对应路径时
+优先使用 `ipp-fast`，否则回退到 `exact`。CVBS、Betamax HiFi 和 Hilbert HiFi 默认
+使用 `exact`。显式指定 `--dsp-backend ipp-fast` 要求 IPP
 可用。VHS 的 `current` 配置可使用 `--skip_vbi_dod`，从场的第一条有效行开始检测 dropout。
 
 | 值 | 含义 |
@@ -255,7 +256,7 @@ TBC 元数据的 `fileLoc` 仍使用原始输入采样点坐标。
 `VHSDECODE_CUDA_AUTO_DOWNLOAD=0` 可关闭自动下载。
 
 LaserDisc 的视频、EFM 与模拟音频 full-complex FFT 阶段现已接入 IPP。
-CVBS 和 HiFi 仍会拒绝 `ipp-fast`；需要 release 兼容行为时应使用 `exact`。
+VHS/8mm HiFi 的 `ipp-fast` 通过查表和 IPP 内核加速 FM 相位，载波滤波继续使用托管实现。
 兼容性敏感场景启用 IPP 或 CUDA 前请阅读
 [详细后端说明](docs/README.detailed.zh-CN.md#性能)。在本机 RTX 4070 和一份真实 PAL
 采集上，修正画质后的 FP32 CUDA-full 路径在观感上已明显接近 Exact。上面的持续矩阵中，

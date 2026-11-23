@@ -30,6 +30,19 @@ public static unsafe class IppRuntime
         return info is not null;
     }
 
+    internal static IppRuntimeInfo RequireHiFiQuadrature()
+    {
+        IppRuntimeInfo info = RequireAvailable();
+        if (!info.SupportsAtan2)
+        {
+            throw new IppBackendUnavailableException(
+                IppBackendFailureKind.MissingExport,
+                $"the IPP bridge does not export '{IppNativeMethods.Atan2Export}'. Install the matching runtime to use HiFi ipp-fast.");
+        }
+
+        return info;
+    }
+
     internal static IppRuntimeInfo ProbeRequiredForLibraryName(string nativeLibrary)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(nativeLibrary);
@@ -121,7 +134,9 @@ public static unsafe class IppRuntime
                     $"Intel IPP initialization failed with status {nativeInfo.IppInitStatus}. The CPU may not be supported by this IPP build.");
             }
 
-            return ProbeResult.Succeeded(new IppRuntimeInfo(nativeLibrary, in nativeInfo));
+            // The phase kernel is an additive export. Older v1.4 bridges still support VHS and LD.
+            bool supportsAtan2 = NativeLibrary.TryGetExport(libraryHandle, IppNativeMethods.Atan2Export, out _);
+            return ProbeResult.Succeeded(new IppRuntimeInfo(nativeLibrary, in nativeInfo, supportsAtan2));
         }
         catch (Exception exception) when (exception is BadImageFormatException
             or DllNotFoundException

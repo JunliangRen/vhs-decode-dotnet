@@ -273,6 +273,10 @@ vhsdecode_ipp_complex64_magnitude_phase(
  * initial_state_length=0 requests an all-zero delay line and initial_state may
  * be NULL. Otherwise its length must equal N and it must be non-NULL.
  */
+/* Optional export for bridge ABI v1.4. Imaginary is atan2's first input. */
+VHSDECODE_IPP_API int32_t VHSDECODE_IPP_CALL
+vhsdecode_ipp_atan2_64f(const double* imaginary, const double* real, double* result, int32_t length);
+
 VHSDECODE_IPP_API int32_t VHSDECODE_IPP_CALL
 vhsdecode_ipp_iir64_create(
     const double* numerator,

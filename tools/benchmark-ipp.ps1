@@ -20,9 +20,8 @@ collect an EventPipe or ETW trace.
 Path to the decode.exe binary under test.
 
 .PARAMETER Subcommand
-Decode facade subcommand: vhs, cvbs, ld, or hifi. The current v1 ipp-fast
-implementation supports only the VHS real-RF FFT path; unsupported commands are
-expected to fail clearly rather than silently run Exact kernels.
+Decode facade subcommand: vhs, cvbs, ld, or hifi. IPP supports VHS and LD,
+and accelerates FM phase for VHS/8mm HiFi using quadrature demodulation.
 
 .PARAMETER InputPath
 Path to the capture used by every run.

@@ -185,8 +185,9 @@ stderr 只去除耗时行后逐行一致，日志去除时间戳后逐行一致�
 性能优化是实现的一部分，但确定性输出和 release 兼容性始终是首要约束。
 
 DSP 后端通过 `--dsp-backend exact|ipp-fast|cuda-fast|approx-fast` 显式选择。该参数是本 .NET 移植
-新增的实验扩展，不属于上游 `oyvindln/vhs-decode` v0.4.0 CLI。VHS 和 LaserDisc 文件解码优先使用 `ipp-fast`，
-IPP 启动探测失败时回退到 `exact`。CVBS 和 HiFi 默认使用 `exact`。
+新增的实验扩展，不属于上游 `oyvindln/vhs-decode` v0.4.0 CLI。VHS 和 LaserDisc 文件解码，
+以及采用正交解调的 VHS/8mm HiFi，在运行库支持对应路径时优先使用 `ipp-fast`，否则回退到
+`exact`。CVBS、Betamax HiFi 和 Hilbert HiFi 默认使用 `exact`。
 显式选择 `exact` 会使用托管兼容路径。`ipp-fast` 支持 Windows x64 和 Linux x64/glibc。
 Intel CPU 是官方支持目标，兼容的非 Intel x64 CPU 则是本项目的
 best-effort 实验路径。只有 IPP 返回的特征掩码包含 SSE4.2 时，才会接受其正值
@@ -195,7 +196,9 @@ non-Intel vendor warning。后端会加载静态链接的 `vhsdecode_ipp.dll`，
 当前 IPP 路由包括 VHS real-RF FFT、`current` profile 下的
 color-under Super-Gaussian DFT，以及 LaserDisc 视频、EFM 和模拟音频所用的
 2 的幂长度 double-precision full-complex FFT；LD 路径使用 native bridge ABI v1.4。
-CVBS 和 HiFi 会明确拒绝不支持的 `ipp-fast`，不会悄悄改跑 Exact 内核而产生虚假基准。
+采用正交解调的 VHS/8mm HiFi 利用查表加速 FM 相位。表项相同时可用 AVX2，本振周期较长时使用
+双精度 IPP 内核。载波滤波继续使用托管实现。旧版桥接库
+即使缺少相位角导出，也能继续加速 VHS 和 LaserDisc 视频解码。
 
 `approx-fast` 是另一个仅支持 VHS 的实验 FP32 数值路径，其变换与频谱乘法有意
 使用 FP32。公开控制项包括最终 TBC 重采样器

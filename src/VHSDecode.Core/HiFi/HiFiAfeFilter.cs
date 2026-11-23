@@ -45,7 +45,7 @@ public sealed class HiFiAfeFilter
     public ReadOnlyMemory<SosSection> Sections => _sections;
 
     public float[] Apply(ReadOnlySpan<float> input)
-        => SosFilter.ApplyForwardBackwardFloat32(_sections, input);
+        => SosFilter.ApplyForwardBackwardFloat32InGroupsOfSix(_sections, input);
 
     public static (HiFiAfeFilter Left, HiFiAfeFilter Right) FromPlan(HiFiDecodePlan plan)
     {
