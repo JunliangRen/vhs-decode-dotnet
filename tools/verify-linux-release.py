@@ -24,6 +24,7 @@ CARRIER = (
 )
 LINE_SAMPLES = 2560
 TOTAL_LINES = 2003
+IPP_VERSION = json.loads(Path(__file__).with_name("linux-ipp-packages.json").read_text(encoding="utf-8"))["runtimeVersion"]
 
 
 def pal_line(line_number):
@@ -172,7 +173,7 @@ def verify(root, work):
         ):
             prefix = (work / f"{mode}-{label}").resolve()
             output = run(decode_arguments(root, mode, backend, input_path, prefix), cwd, environment)
-            if backend == "ipp-fast" and "Intel IPP DSP backend: 2026.0.0" not in Path(str(prefix) + ".log").read_text():
+            if backend == "ipp-fast" and f"Intel IPP DSP backend: {IPP_VERSION} " not in Path(str(prefix) + ".log").read_text():
                 raise ValueError(f"Decode did not initialize the pinned Linux IPP runtime: {prefix}")
             (work / f"{mode}-{label}.console.txt").write_bytes(output.replace("\r\n", "\n").replace("\n", "\r\n").encode())
             metadata_by_label[label] = read_result(prefix, backend, provider, mode)

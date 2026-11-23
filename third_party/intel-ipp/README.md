@@ -11,8 +11,8 @@ extraction and links the PIC sequential `libipps.a`, `libippvm.a` and
 requires all symbols to resolve at link time. The shipped bridge needs the
 system C++ runtime; it has no oneAPI, IPP, OpenMP or TBB shared dependency.
 
-The Linux package version is `2026.0.1-51`; its IPP runtime-info reports
-`2026.0.0`. These are separately recorded and checked. The original licensing
+The Linux package version is `2026.1.0-760`; its IPP runtime-info reports
+`2026.1.0`. These are separately recorded and checked. The original licensing
 package's `license.htm`, IPP package's `third-party-programs.txt`, this
 repository's `LICENSE.txt`, build manifest and ELF audit are staged beside the
 bridge and included under `licenses/intel-ipp/` in the final archive.

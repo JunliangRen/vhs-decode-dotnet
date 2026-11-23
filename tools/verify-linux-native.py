@@ -14,9 +14,7 @@ import sys
 
 DEFAULT_LIMITS = {"GLIBC": "2.34", "GLIBCXX": "3.4.29", "CXXABI": "1.3.13", "GCC": "4.2.0"}
 IPP_ABI = 0x00010004
-# The pinned 2026.0.1-51 Linux packages identify the IPP library as 2026.0.0.
-# Package and library version numbers are recorded separately in provenance.
-IPP_VERSION = (2026, 0, 0)
+IPP_VERSION = json.loads(Path(__file__).with_name("linux-ipp-packages.json").read_text(encoding="utf-8"))["runtimeVersion"]
 IPP_SYSTEM_LIBRARIES = {
     "libc.so.6", "libm.so.6", "libpthread.so.0", "libdl.so.2", "librt.so.1",
     "libstdc++.so.6", "libgcc_s.so.1", "ld-linux-x86-64.so.2",
@@ -155,14 +153,14 @@ def probe_ipp(path, contract):
         raise ValueError(f"IPP initialization rejected CPU/runtime: status={status}, init={info.ipp_init_status}")
     if info.struct_size != 240 or info.abi_version != IPP_ABI:
         raise ValueError("IPP runtime-info ABI/layout mismatch")
-    version = (info.ipp_major, info.ipp_minor, info.ipp_update)
+    version = f"{info.ipp_major}.{info.ipp_minor}.{info.ipp_update}"
     if version != IPP_VERSION:
         raise ValueError(f"IPP version {version} differs from pinned {IPP_VERSION}")
     if not info.cpu_features or not info.enabled_cpu_features:
         raise ValueError("IPP did not report CPU dispatch features")
     return {
         "abi": f"0x{info.abi_version:08X}", "struct_size": info.struct_size,
-        "version": ".".join(str(part) for part in version), "build": info.ipp_build,
+        "version": version, "build": info.ipp_build,
         "target_cpu": info.ipp_target_cpu.decode("utf-8"), "exports": sorted(exports),
         "cpu_features": info.cpu_features, "enabled_cpu_features": info.enabled_cpu_features,
     }

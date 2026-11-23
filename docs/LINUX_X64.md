@@ -133,7 +133,7 @@ contains the corresponding source archives, LGPL texts, source hashes, and a
 build-provenance manifest.
 It also includes the original Intel license, third-party notices, package and
 bridge hashes, and separate package/library version records. The Linux package
-`2026.0.1-51` reports IPP library version `2026.0.0`; this is checked at runtime.
+`2026.1.0-760` reports IPP library version `2026.1.0`; this is checked at runtime.
 
 `-AllowNewerGlibc` exists only for local functional investigation. Output built
 with that switch is not certified for the Ubuntu 22.04 baseline. `-SkipTests`
