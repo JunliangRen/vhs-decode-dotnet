@@ -88,9 +88,24 @@ internal sealed class HiFiDecodeRunner : IHiFiCommandRunner
             return 1;
         }
 
+        bool supportsIpp = options.TapeFormat != "betamax"
+            && options.DemodType == HiFiConstants.DemodQuadrature;
+        if (supportsIpp
+            && command.GetSource("dsp_backend") == ParsedOptionSource.Default
+            && IppRuntime.TryProbe(out var ippInfo)
+            && ippInfo is { SupportsAtan2: true })
+        {
+            options = options with { DspBackend = DspBackend.IppFast };
+        }
+
         if (options.DspBackend == DspBackend.IppFast)
         {
-            output.WriteLine(DecodeRunner.FormatIppDiagnostic(IppRuntime.RequireAvailable()));
+            if (!supportsIpp)
+            {
+                throw new NotSupportedException("HiFi ipp-fast requires quadrature demodulation.");
+            }
+
+            output.WriteLine(DecodeRunner.FormatIppDiagnostic(IppRuntime.RequireHiFiQuadrature()));
         }
 
         string system = options.Standard == "p" ? "PAL" : "NTSC";

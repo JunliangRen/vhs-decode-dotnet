@@ -203,8 +203,9 @@ release compatibility remain the first constraint.
 The DSP backend is selected explicitly with
 `--dsp-backend exact|ipp-fast|cuda-fast|approx-fast`. This option is an experimental extension in
 this .NET port and is not part of the upstream `oyvindln/vhs-decode` v0.4.0
-CLI. VHS and LaserDisc file decode prefer `ipp-fast` and use `exact` if the IPP
-startup probe fails. CVBS and HiFi default to `exact`. Explicit `exact` uses the
+CLI. VHS and LaserDisc file decode and quadrature VHS/8mm HiFi prefer
+`ipp-fast` and fall back to `exact` when the bridge lacks the required capability.
+CVBS, Betamax HiFi, and Hilbert HiFi default to `exact`. Explicit `exact` uses the
 managed compatibility path without loading IPP. `ipp-fast` runs on Windows x64
 and Linux x64/glibc. Intel CPUs are the officially supported target, with
 experimental support for compatible non-Intel x64 CPUs. A
@@ -215,8 +216,12 @@ request returns an error if the bridge, ABI, or CPU is unavailable. IPP routing
 covers the VHS real-RF FFT, the `current` profile's
 color-under Super-Gaussian DFT, and the power-of-two double-precision
 full-complex FFT stages used by LaserDisc video, EFM, and analog audio. The LD
-route uses native bridge ABI v1.4. CVBS and HiFi reject `ipp-fast` as unsupported
-instead of quietly benchmarking their Exact kernels.
+route uses native bridge ABI v1.4. Quadrature VHS/8mm HiFi uses a guarded FM
+phase lookup table and AVX2 when the table entries are uniform. Long oscillator
+periods use the bridge's double-precision phase-angle kernel. The carrier
+filter stays on the managed path.
+An older bridge without the phase-angle export can still accelerate VHS and
+LaserDisc video decode.
 
 `approx-fast` is a separate VHS-only experimental FP32 path for transform and
 spectrum multiplication work. Its public controls are the final TBC resampler,

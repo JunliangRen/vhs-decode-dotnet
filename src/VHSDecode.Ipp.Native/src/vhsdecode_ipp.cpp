@@ -2,6 +2,7 @@
 
 #include <ipp/ippcore.h>
 #include <ipp/ipps.h>
+#include <ipp/ippvm.h>
 
 #include <algorithm>
 #include <bit>
@@ -1203,6 +1204,22 @@ vhsdecode_ipp_complex64_magnitude_phase(
         return static_cast<int32_t>(ippsPhase_64fc(as_ipp_complex(input), phase, length));
     }
     return VHSDECODE_IPP_STATUS_OK;
+}
+
+int32_t VHSDECODE_IPP_CALL
+vhsdecode_ipp_atan2_64f(const double* imaginary, const double* real, double* result, int32_t length)
+{
+    if (imaginary == nullptr || real == nullptr || result == nullptr) {
+        return VHSDECODE_IPP_STATUS_NULL_POINTER;
+    }
+    if (length <= 0) {
+        return VHSDECODE_IPP_STATUS_INVALID_ARGUMENT;
+    }
+    const int32_t initialization_status = ensure_ipp_initialized();
+    if (initialization_status != VHSDECODE_IPP_STATUS_OK) {
+        return initialization_status;
+    }
+    return static_cast<int32_t>(ippsAtan2_64f_A53(imaginary, real, result, length));
 }
 
 int32_t VHSDECODE_IPP_CALL

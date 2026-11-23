@@ -668,6 +668,18 @@ public static class SosFilter
         IReadOnlyList<SosSection> sections,
         ReadOnlySpan<float> input,
         int? padLength = null)
+        => ApplyForwardBackwardFloat32(sections, input, padLength, groupInSixes: false);
+
+    internal static float[] ApplyForwardBackwardFloat32InGroupsOfSix(
+        IReadOnlyList<SosSection> sections,
+        ReadOnlySpan<float> input)
+        => ApplyForwardBackwardFloat32(sections, input, padLength: null, groupInSixes: true);
+
+    private static float[] ApplyForwardBackwardFloat32(
+        IReadOnlyList<SosSection> sections,
+        ReadOnlySpan<float> input,
+        int? padLength,
+        bool groupInSixes)
     {
         if (input.IsEmpty)
         {
@@ -683,7 +695,7 @@ public static class SosFilter
         if (edge == 0)
         {
             float[] output = input.ToArray();
-            ApplyForwardBackwardFloat32InPlace(sections, output);
+            ApplyForwardBackwardFloat32InPlace(sections, output, groupInSixes: groupInSixes);
             return output;
         }
 
@@ -693,7 +705,7 @@ public static class SosFilter
         {
             Span<float> extended = rented.AsSpan(0, extendedLength);
             WriteOddExtensionFloat32(input, edge, extended);
-            ApplyForwardBackwardFloat32InPlace(sections, extended);
+            ApplyForwardBackwardFloat32InPlace(sections, extended, groupInSixes: groupInSixes);
             return extended.Slice(edge, input.Length).ToArray();
         }
         finally
@@ -705,7 +717,8 @@ public static class SosFilter
     private static void ApplyForwardBackwardFloat32InPlace(
         IReadOnlyList<SosSection> sections,
         Span<float> values,
-        IppSos32FilterPool? ippFilter = null)
+        IppSos32FilterPool? ippFilter = null,
+        bool groupInSixes = false)
     {
         if (ippFilter is not null)
         {
@@ -718,12 +731,13 @@ public static class SosFilter
             ? stackalloc FloatSosSection[sections.Count]
             : new FloatSosSection[sections.Count];
         ConvertToFloat32(sections, floatSections);
-        ApplyForwardBackwardFloat32InPlace(floatSections, values);
+        ApplyForwardBackwardFloat32InPlace(floatSections, values, groupInSixes);
     }
 
     private static void ApplyForwardBackwardFloat32InPlace(
         ReadOnlySpan<FloatSosSection> floatSections,
-        Span<float> values)
+        Span<float> values,
+        bool groupInSixes)
     {
         const int MaxStackSections = 32;
         int stateLength = checked(floatSections.Length * 2);
@@ -735,9 +749,31 @@ public static class SosFilter
             : new float[stateLength];
         SteadyStateInitialConditionsFloat32(floatSections, zi);
         ScaleInitialConditionsFloat32(zi, values[0], scaledZi);
-        ApplyForwardFloat32InPlace(floatSections, values, scaledZi);
+        const int GroupSize = 6;
+        if (!groupInSixes || floatSections.Length <= GroupSize)
+        {
+            ApplyForwardFloat32InPlace(floatSections, values, scaledZi);
+            ScaleInitialConditionsFloat32(zi, values[^1], scaledZi);
+            ApplyBackwardFloat32InPlace(floatSections, values, scaledZi);
+            return;
+        }
+
+        // Keep the cascade order and precomputed initial states for each pass.
+        // Specialized kernels reuse local state for each group.
+        for (int section = 0; section < floatSections.Length; section += GroupSize)
+        {
+            int count = Math.Min(GroupSize, floatSections.Length - section);
+            ApplyForwardFloat32InPlace(
+                floatSections.Slice(section, count), values, scaledZi.Slice(2 * section, 2 * count));
+        }
+
         ScaleInitialConditionsFloat32(zi, values[^1], scaledZi);
-        ApplyBackwardFloat32InPlace(floatSections, values, scaledZi);
+        for (int section = 0; section < floatSections.Length; section += GroupSize)
+        {
+            int count = Math.Min(GroupSize, floatSections.Length - section);
+            ApplyBackwardFloat32InPlace(
+                floatSections.Slice(section, count), values, scaledZi.Slice(2 * section, 2 * count));
+        }
     }
 
     public static int DefaultPadLength(IReadOnlyList<SosSection> sections)
@@ -877,6 +913,63 @@ public static class SosFilter
             return;
         }
 
+        if (sections.Length == 6)
+        {
+            FloatSosSection first = sections[0];
+            FloatSosSection second = sections[1];
+            FloatSosSection third = sections[2];
+            FloatSosSection fourth = sections[3];
+            FloatSosSection fifth = sections[4];
+            FloatSosSection sixth = sections[5];
+            float firstZ1 = initialConditions[0];
+            float firstZ2 = initialConditions[1];
+            float secondZ1 = initialConditions[2];
+            float secondZ2 = initialConditions[3];
+            float thirdZ1 = initialConditions[4];
+            float thirdZ2 = initialConditions[5];
+            float fourthZ1 = initialConditions[6];
+            float fourthZ2 = initialConditions[7];
+            float fifthZ1 = initialConditions[8];
+            float fifthZ2 = initialConditions[9];
+            float sixthZ1 = initialConditions[10];
+            float sixthZ2 = initialConditions[11];
+            for (int sample = 0; sample < values.Length; sample++)
+            {
+                float value = values[sample];
+                float filtered = (first.B0 * value) + firstZ1;
+                firstZ1 = (first.B1 * value) - (first.A1 * filtered) + firstZ2;
+                firstZ2 = (first.B2 * value) - (first.A2 * filtered);
+
+                value = filtered;
+                filtered = (second.B0 * value) + secondZ1;
+                secondZ1 = (second.B1 * value) - (second.A1 * filtered) + secondZ2;
+                secondZ2 = (second.B2 * value) - (second.A2 * filtered);
+
+                value = filtered;
+                filtered = (third.B0 * value) + thirdZ1;
+                thirdZ1 = (third.B1 * value) - (third.A1 * filtered) + thirdZ2;
+                thirdZ2 = (third.B2 * value) - (third.A2 * filtered);
+
+                value = filtered;
+                filtered = (fourth.B0 * value) + fourthZ1;
+                fourthZ1 = (fourth.B1 * value) - (fourth.A1 * filtered) + fourthZ2;
+                fourthZ2 = (fourth.B2 * value) - (fourth.A2 * filtered);
+
+                value = filtered;
+                filtered = (fifth.B0 * value) + fifthZ1;
+                fifthZ1 = (fifth.B1 * value) - (fifth.A1 * filtered) + fifthZ2;
+                fifthZ2 = (fifth.B2 * value) - (fifth.A2 * filtered);
+
+                value = filtered;
+                filtered = (sixth.B0 * value) + sixthZ1;
+                sixthZ1 = (sixth.B1 * value) - (sixth.A1 * filtered) + sixthZ2;
+                sixthZ2 = (sixth.B2 * value) - (sixth.A2 * filtered);
+                values[sample] = filtered;
+            }
+
+            return;
+        }
+
         // Two floats per section keep the stack branch bounded to 256 bytes.
         Span<float> states = sections.Length <= 32
             ? stackalloc float[sections.Length * 2]
@@ -997,6 +1090,63 @@ public static class SosFilter
                 filtered = (fourth.B0 * value) + fourthZ1;
                 fourthZ1 = (fourth.B1 * value) - (fourth.A1 * filtered) + fourthZ2;
                 fourthZ2 = (fourth.B2 * value) - (fourth.A2 * filtered);
+                values[sample] = filtered;
+            }
+
+            return;
+        }
+
+        if (sections.Length == 6)
+        {
+            FloatSosSection first = sections[0];
+            FloatSosSection second = sections[1];
+            FloatSosSection third = sections[2];
+            FloatSosSection fourth = sections[3];
+            FloatSosSection fifth = sections[4];
+            FloatSosSection sixth = sections[5];
+            float firstZ1 = initialConditions[0];
+            float firstZ2 = initialConditions[1];
+            float secondZ1 = initialConditions[2];
+            float secondZ2 = initialConditions[3];
+            float thirdZ1 = initialConditions[4];
+            float thirdZ2 = initialConditions[5];
+            float fourthZ1 = initialConditions[6];
+            float fourthZ2 = initialConditions[7];
+            float fifthZ1 = initialConditions[8];
+            float fifthZ2 = initialConditions[9];
+            float sixthZ1 = initialConditions[10];
+            float sixthZ2 = initialConditions[11];
+            for (int sample = values.Length - 1; sample >= 0; sample--)
+            {
+                float value = values[sample];
+                float filtered = (first.B0 * value) + firstZ1;
+                firstZ1 = (first.B1 * value) - (first.A1 * filtered) + firstZ2;
+                firstZ2 = (first.B2 * value) - (first.A2 * filtered);
+
+                value = filtered;
+                filtered = (second.B0 * value) + secondZ1;
+                secondZ1 = (second.B1 * value) - (second.A1 * filtered) + secondZ2;
+                secondZ2 = (second.B2 * value) - (second.A2 * filtered);
+
+                value = filtered;
+                filtered = (third.B0 * value) + thirdZ1;
+                thirdZ1 = (third.B1 * value) - (third.A1 * filtered) + thirdZ2;
+                thirdZ2 = (third.B2 * value) - (third.A2 * filtered);
+
+                value = filtered;
+                filtered = (fourth.B0 * value) + fourthZ1;
+                fourthZ1 = (fourth.B1 * value) - (fourth.A1 * filtered) + fourthZ2;
+                fourthZ2 = (fourth.B2 * value) - (fourth.A2 * filtered);
+
+                value = filtered;
+                filtered = (fifth.B0 * value) + fifthZ1;
+                fifthZ1 = (fifth.B1 * value) - (fifth.A1 * filtered) + fifthZ2;
+                fifthZ2 = (fifth.B2 * value) - (fifth.A2 * filtered);
+
+                value = filtered;
+                filtered = (sixth.B0 * value) + sixthZ1;
+                sixthZ1 = (sixth.B1 * value) - (sixth.A1 * filtered) + sixthZ2;
+                sixthZ2 = (sixth.B2 * value) - (sixth.A2 * filtered);
                 values[sample] = filtered;
             }
 

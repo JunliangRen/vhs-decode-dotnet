@@ -200,9 +200,10 @@ extended oracle を使用しました。この release gate では IPP を除外
 
 DSP backend は `--dsp-backend exact|ipp-fast|cuda-fast|approx-fast` で明示的に選択します。この
 parameter はこの .NET port の experimental extension であり、upstream
-`oyvindln/vhs-decode` v0.4.0 CLI には含まれません。VHS と LaserDisc のファイル
-デコードでは `ipp-fast` を優先し、起動時に IPP が利用できなければ `exact` を使用します。
-CVBS と HiFi の既定値は `exact` です。`ipp-fast` は Windows x64 と Linux x64/glibc に対応します。Intel CPU が official support
+`oyvindln/vhs-decode` v0.4.0 CLI には含まれません。VHS と LaserDisc のファイルデコード、
+および直交復調を使う VHS/8mm HiFi では、対応する IPP 機能が利用可能なら `ipp-fast`、
+利用できなければ `exact` を使用します。CVBS、Betamax HiFi、Hilbert 復調を使う HiFi の既定値は
+`exact` です。`ipp-fast` は Windows x64 と Linux x64/glibc に対応します。Intel CPU が official support
 target であり、compatible non-Intel x64 CPU はこの project の best-effort
 experimental path です。IPP が返す feature mask に SSE4.2 が含まれる場合のみ、
 正の non-Intel vendor warning を受け入れます。静的 link 済みの
@@ -211,8 +212,10 @@ experimental path です。IPP が返す feature mask に SSE4.2 が含まれる
 現在の IPP routing は VHS real-RF FFT、`current` profile の
 color-under Super-Gaussian DFT、および LaserDisc video、EFM、analog audio が使う
 power-of-two double-precision full-complex FFT stage を含みます。LD path は native
-bridge ABI v1.4 を使用します。CVBS と HiFi は未対応の `ipp-fast` を明示的に拒否し、
-Exact kernel を実行した結果を誤って benchmark として扱うことはありません。
+bridge ABI v1.4 を使用します。直交復調を使う VHS/8mm HiFi は FM 位相角の計算に
+ルックアップテーブルを使い、テーブルの値が一定なら AVX2 を使います。発振器の周期が長い場合は
+倍精度 IPP カーネルを使い、搬送波フィルターはマネージド実装を使います。位相角のシンボルを持たない
+旧版のブリッジでも、VHS と LaserDisc の映像デコードを引き続き加速できます。
 
 `approx-fast` は VHS のみを対象とする別の experimental numerical contract です。
 default の `vhs-rf-transform-f32-v1` は transform と spectrum multiplication に意図的に

@@ -1,3 +1,5 @@
+using VHSDecode.Core.Dsp;
+
 namespace VHSDecode.Core.HiFi;
 
 public sealed record HiFiDemodulatedBlock(
@@ -189,7 +191,7 @@ public sealed class HiFiBlockDecoder : IHiFiBlockDecoder
         var output = new float[filtered.Length];
         if (_leftQuadrature is not null)
         {
-            _leftQuadrature.Demodulate(filtered, output);
+            _leftQuadrature.Demodulate(filtered, output, Options.DspBackend == DspBackend.IppFast);
         }
         else
         {
@@ -204,7 +206,7 @@ public sealed class HiFiBlockDecoder : IHiFiBlockDecoder
         var output = new float[filtered.Length];
         if (_rightQuadrature is not null)
         {
-            _rightQuadrature.Demodulate(filtered, output);
+            _rightQuadrature.Demodulate(filtered, output, Options.DspBackend == DspBackend.IppFast);
         }
         else
         {

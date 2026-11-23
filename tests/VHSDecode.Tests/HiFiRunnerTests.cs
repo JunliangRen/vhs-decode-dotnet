@@ -7,6 +7,7 @@ using NetMQ;
 using NetMQ.Sockets;
 using VHSDecode.Core.CommandLine;
 using VHSDecode.Core.Decode;
+using VHSDecode.Core.Dsp;
 using VHSDecode.Core.HiFi;
 using Xunit;
 
@@ -132,6 +133,7 @@ public sealed class HiFiRunnerTests
                 "--raw_format", "s16le",
                 "--audio_rate", rate,
                 "--threads", "1",
+                "--dsp-backend", "exact",
                 "--overwrite",
                 inputPath,
                 outputPath
@@ -198,7 +200,7 @@ public sealed class HiFiRunnerTests
         {
             string outputPath = Path.Combine(directory, "stdin-bias.wav");
             ParsedCommand command = ParseHiFi(
-                ["--bias_guess", "--raw_format", "s16le", "-", outputPath]);
+                ["--bias_guess", "--raw_format", "s16le", "--dsp-backend", "exact", "-", outputPath]);
             var output = new StringWriter();
             var error = new StringWriter();
 
@@ -423,6 +425,8 @@ public sealed class HiFiRunnerTests
 
             Assert.Equal(0, exitCode);
             Assert.Equal(string.Empty, error.ToString());
+            bool hasIppPhase = IppRuntime.TryProbe(out var runtime) && runtime is { SupportsAtan2: true };
+            Assert.Equal(hasIppPhase, output.ToString().Contains("Intel IPP DSP backend:", StringComparison.Ordinal));
             byte[] wave = File.ReadAllBytes(outputPath);
             Assert.Equal(91_228, wave.Length);
             WindowsFrozenBitOracle.Equal(
@@ -674,6 +678,7 @@ public sealed class HiFiRunnerTests
                 "--raw_format", "s16le",
                 "--audio_rate", "48000",
                 "--threads", "0",
+                "--dsp-backend", "exact",
                 "--overwrite",
                 inputPath,
                 outputPath

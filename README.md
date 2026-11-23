@@ -210,8 +210,10 @@ The strict compatibility oracle is Python v0.4.0 commit `g4315520` with
 `--threads 0`. Python output hashes are not stable across its worker counts, so
 multithreaded Python runs are used for speed measurements only.
 
-VHS and LaserDisc file decode default to `ipp-fast` when the IPP runtime
-passes startup checks and fall back to `exact` otherwise. CVBS and HiFi default to `exact`.
+VHS and LaserDisc file decode and VHS/8mm HiFi with quadrature demodulation
+prefer `ipp-fast` when the runtime supports the requested path, with `exact` as
+the fallback. CVBS, Betamax HiFi, and HiFi with Hilbert demodulation default to
+`exact`.
 An explicit `--dsp-backend ipp-fast` requires IPP. The `current` VHS profile
 accepts `--skip_vbi_dod` to start dropout detection at the first active field line.
 
@@ -306,8 +308,8 @@ offline/system runtime, `VHSDECODE_CUDA_CACHE_PATH` for a different cache root,
 or `VHSDECODE_CUDA_AUTO_DOWNLOAD=0` to disable automatic downloads.
 
 LaserDisc now routes its video, EFM, and analog-audio full-complex FFT stages
-through IPP. CVBS and HiFi still reject `ipp-fast`; use `exact` whenever
-release-compatible behavior is required. See the
+through IPP. VHS/8mm HiFi accelerates FM phase in `ipp-fast` with a guarded lookup
+table and an IPP phase kernel. Carrier filtering stays on the managed path. See the
 [detailed backend notes](docs/README.detailed.md#performance) before using IPP
 or CUDA for compatibility-sensitive work. On the tested RTX 4070 and one real
 PAL capture, the quality-corrected FP32 CUDA-full path is now visually much

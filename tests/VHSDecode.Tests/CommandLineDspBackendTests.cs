@@ -316,7 +316,6 @@ public sealed class CommandLineDspBackendTests
 
     [Theory(DisplayName = "IPP fast rejects commands whose accelerated kernels are not implemented")]
     [InlineData("cvbs")]
-    [InlineData("hifi")]
     public void IppFastRejectsCommandsWithoutAcceleratedKernels(string commandName)
     {
         NotSupportedException exception = Assert.Throws<NotSupportedException>(
@@ -330,6 +329,7 @@ public sealed class CommandLineDspBackendTests
     [Theory(DisplayName = "IPP fast is enabled for implemented RF paths")]
     [InlineData("vhs")]
     [InlineData("ld")]
+    [InlineData("hifi")]
     public void IppFastSupportsImplementedRfPaths(string commandName)
         => DspBackendSupport.EnsureCommandSupported(DspBackend.IppFast, commandName);
 

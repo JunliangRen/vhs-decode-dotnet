@@ -6,6 +6,7 @@ namespace VHSDecode.Core.Dsp.Ipp;
 internal static partial class IppNativeMethods
 {
     internal const string LibraryName = "vhsdecode_ipp";
+    internal const string Atan2Export = "vhsdecode_ipp_atan2_64f";
     internal const uint RequiredAbiVersion = 0x0001_0004;
 
     internal static readonly string[] RequiredExports =
@@ -50,6 +51,10 @@ internal static partial class IppNativeMethods
         "vhsdecode_ipp_sos32_process",
         "vhsdecode_ipp_status_string"
     ];
+
+    [LibraryImport(LibraryName, EntryPoint = Atan2Export)]
+    [UnmanagedCallConv(CallConvs = [typeof(CallConvCdecl)])]
+    internal static unsafe partial int Atan2(double* imaginary, double* real, double* result, int length);
 
     [LibraryImport(LibraryName, EntryPoint = "vhsdecode_ipp_get_abi_version")]
     [UnmanagedCallConv(CallConvs = [typeof(CallConvCdecl)])]

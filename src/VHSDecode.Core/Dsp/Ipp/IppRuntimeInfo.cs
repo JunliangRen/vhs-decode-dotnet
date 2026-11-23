@@ -4,9 +4,10 @@ namespace VHSDecode.Core.Dsp.Ipp;
 
 public sealed record IppRuntimeInfo
 {
-    internal IppRuntimeInfo(string nativeLibrary, in IppRuntimeInfoNative native)
+    internal IppRuntimeInfo(string nativeLibrary, in IppRuntimeInfoNative native, bool supportsAtan2)
     {
         NativeLibrary = nativeLibrary;
+        SupportsAtan2 = supportsAtan2;
         AbiVersion = native.AbiVersion;
         IppInitStatus = native.IppInitStatus;
         IppMajor = native.IppMajor;
@@ -22,6 +23,7 @@ public sealed record IppRuntimeInfo
         ProcessArchitecture = RuntimeInformation.ProcessArchitecture;
     }
 
+    internal bool SupportsAtan2 { get; }
     public string NativeLibrary { get; }
     public uint AbiVersion { get; }
     public int IppInitStatus { get; }
