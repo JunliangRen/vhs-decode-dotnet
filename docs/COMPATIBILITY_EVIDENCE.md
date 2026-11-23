@@ -109,9 +109,13 @@ possible capture has already been proven byte-for-byte identical.
   Release 4.0 bias measurement behavior and per-block carrier progress, exact
   first/middle/final overlap framing, bounded parallel block decoding, ordered
   audio post-processing,
-  dual-mono naming and padding, WAV PCM16 or FLAC PCM24 output, normalization,
+  dual-mono naming and padding, WAV or FLAC PCM24 output, normalization,
   cancellation/error finalization, Release 4.0's per-block progress bar and
   five-line timing/buffer reports, and facade/standalone command dispatch
+- the WAV PCM16 hashes below record historical v0.4.0 comparisons. Current WAV
+  output shares FLAC's PCM24 quantizer. The PAL VHS and NTSC 8mm regression
+  tests compare the resulting WAV sample bytes to the prior release's decoded
+  PCM24 FLAC samples.
 - a full-command 2,800,000-sample, 6 MHz PAL VHS HiFi synthetic RF baseline
   reproduces Release 4.0's single first/final block and Numba negative-index
   worker copy behavior; the resulting 22,796-frame PCM16 WAV is byte-for-byte
@@ -133,8 +137,8 @@ possible capture has already been proven byte-for-byte identical.
   `7F74444F0D4FA80B63260BC731906E13293C48A75B2B38CD7303904BE202E2E1`.
   Their compressed container bytes are intentionally not a compatibility gate
   when libFLAC build details differ. The port bundles the official libsndfile
-  1.2.2 Windows DLL and reproduces Python SoundFile's `SFC_SET_CLIPPING` and
-  compression initialization sequence. A separate 10,000-sample deterministic
+  1.2.2 Windows DLL and preserves the clipped PCM24 conversion and compression
+  used in this comparison. A separate 10,000-sample deterministic
   gate has zero decoded PCM24 differences from the pinned Python environment.
   This preserves Python's sample conversion without starting FFmpeg and
   certifies the explicit-carrier artifacts for this bounded slice, not a

@@ -7,6 +7,8 @@ namespace VHSDecode.Core.HiFi;
 
 internal sealed partial class HiFiOutputWriter : IDisposable
 {
+    private const int Pcm24Scale = 1 << 23;
+    private const int Pcm24BytesPerSample = 3;
     private const string DefaultChannelSuffix = "channel";
     private const string NormalizeFileSuffix = "tmp_normalize.raw";
 
@@ -116,8 +118,7 @@ internal sealed partial class HiFiOutputWriter : IDisposable
                     leftPeak,
                     1,
                     _options.AudioRateHz,
-                    output,
-                    preserveDigitalSilence: _options.TapeFormat == "betamax");
+                    output);
             }
 
             output.Write($"{Environment.NewLine}Channel 2: Peak gain is {(rightPeak * 100.0f):F2}%.");
@@ -129,8 +130,7 @@ internal sealed partial class HiFiOutputWriter : IDisposable
                     rightPeak,
                     1,
                     _options.AudioRateHz,
-                    output,
-                    preserveDigitalSilence: _options.TapeFormat == "betamax");
+                    output);
             }
         }
         else
@@ -145,8 +145,7 @@ internal sealed partial class HiFiOutputWriter : IDisposable
                     peak,
                     2,
                     _options.AudioRateHz,
-                    output,
-                    preserveDigitalSilence: _options.TapeFormat == "betamax");
+                    output);
             }
         }
     }
@@ -183,23 +182,16 @@ internal sealed partial class HiFiOutputWriter : IDisposable
         return $"{root}_{channelSuffix}{extension}";
     }
 
-    internal static short QuantizeWavePcm16(float sample)
+    private static int QuantizePcm24(float sample)
     {
-        if (float.IsNaN(sample) || float.IsNegativeInfinity(sample) || sample <= -1.0f)
+        if (float.IsNaN(sample) || sample <= -1.0f)
         {
-            return short.MinValue;
+            return -Pcm24Scale;
         }
 
-        if (float.IsPositiveInfinity(sample) || sample >= 1.0f)
-        {
-            return short.MaxValue;
-        }
-
-        // libsndfile 1.2.2 rounds a signed 32-bit sample, then stores its high 16 bits.
-        int pcm32 = checked((int)MathF.Round(
-            sample * 2_147_483_648.0f,
-            MidpointRounding.ToEven));
-        return checked((short)(pcm32 >> 16));
+        // Match libsndfile's clipped FLAC conversion at half-sample ties.
+        float rounded = MathF.Round(MathF.Min(sample, 1.0f) * Pcm24Scale, MidpointRounding.ToEven);
+        return Math.Min((int)rounded, Pcm24Scale - 1);
     }
 
     private static IHiFiFloatWriter CreateWriter(
@@ -213,8 +205,8 @@ internal sealed partial class HiFiOutputWriter : IDisposable
             return new RawFloatWriter(GetNormalizeFilename(path, sampleRate));
         }
 
-        return path.Contains(".wav", StringComparison.OrdinalIgnoreCase)
-            ? new WavePcm16Writer(path, channels, sampleRate)
+        return string.Equals(Path.GetExtension(path), ".wav", StringComparison.OrdinalIgnoreCase)
+            ? new WavePcm24Writer(path, channels, sampleRate)
             : new LibsndfileFlacWriter(path, channels, sampleRate);
     }
 
@@ -224,12 +216,11 @@ internal sealed partial class HiFiOutputWriter : IDisposable
         float peak,
         int channels,
         int sampleRate,
-        TextWriter output,
-        bool preserveDigitalSilence = false)
+        TextWriter output)
     {
         try
         {
-            float gain = preserveDigitalSilence && peak == 0
+            float gain = peak == 0
                 ? 1.0f
                 : (float)((1.0 / peak) - (1.0 / 1024.0));
             output.Write(string.Create(
@@ -246,11 +237,22 @@ internal sealed partial class HiFiOutputWriter : IDisposable
             try
             {
                 int carry = 0;
+                int frameSize = channels * sizeof(float);
                 while (true)
                 {
                     int read = input.Read(bytes, carry, bytes.Length - carry);
+                    if (read == 0)
+                    {
+                        if (carry != 0)
+                        {
+                            throw new InvalidDataException("HiFi normalization input ends inside an audio frame.");
+                        }
+
+                        break;
+                    }
+
                     int available = carry + read;
-                    int completeBytes = available - (available % sizeof(float));
+                    int completeBytes = available - (available % frameSize);
                     Span<float> samples = MemoryMarshal.Cast<byte, float>(
                         bytes.AsSpan(0, completeBytes));
                     for (int i = 0; i < samples.Length; i++)
@@ -263,11 +265,6 @@ internal sealed partial class HiFiOutputWriter : IDisposable
                     if (carry > 0)
                     {
                         bytes.AsSpan(completeBytes, carry).CopyTo(bytes);
-                    }
-
-                    if (read == 0)
-                    {
-                        break;
                     }
                 }
 
@@ -355,7 +352,7 @@ internal sealed partial class HiFiOutputWriter : IDisposable
         public void Dispose() => _stream.Dispose();
     }
 
-    private sealed class WavePcm16Writer : IHiFiFloatWriter
+    private sealed class WavePcm24Writer : IHiFiFloatWriter
     {
         private const int HeaderLength = 44;
 
@@ -365,7 +362,7 @@ internal sealed partial class HiFiOutputWriter : IDisposable
         private long _sampleCount;
         private bool _completed;
 
-        public WavePcm16Writer(string path, int channels, int sampleRate)
+        public WavePcm24Writer(string path, int channels, int sampleRate)
         {
             _channels = channels;
             _sampleRate = sampleRate;
@@ -380,21 +377,33 @@ internal sealed partial class HiFiOutputWriter : IDisposable
                 throw new InvalidOperationException("Audio writer is already complete.");
             }
 
-            byte[] bytes = ArrayPool<byte>.Shared.Rent(Math.Min(
-                checked(samples.Length * sizeof(short)),
-                1024 * 1024));
+            if (samples.Length % _channels != 0)
+            {
+                throw new ArgumentException("Interleaved HiFi audio must contain complete frames.", nameof(samples));
+            }
+
+            if (samples.IsEmpty)
+            {
+                return;
+            }
+
+            const int bufferSize = 1024 * 1024;
+            int bufferSamples = Math.Min(samples.Length, bufferSize / Pcm24BytesPerSample);
+            byte[] bytes = ArrayPool<byte>.Shared.Rent(bufferSamples * Pcm24BytesPerSample);
             try
             {
                 int position = 0;
                 while (position < samples.Length)
                 {
-                    int count = Math.Min(samples.Length - position, bytes.Length / sizeof(short));
-                    Span<byte> destination = bytes.AsSpan(0, count * sizeof(short));
+                    int count = Math.Min(samples.Length - position, bytes.Length / Pcm24BytesPerSample);
+                    Span<byte> destination = bytes.AsSpan(0, count * Pcm24BytesPerSample);
                     for (int i = 0; i < count; i++)
                     {
-                        BinaryPrimitives.WriteInt16LittleEndian(
-                            destination.Slice(i * sizeof(short), sizeof(short)),
-                            QuantizeWavePcm16(samples[position + i]));
+                        int sample = QuantizePcm24(samples[position + i]);
+                        int offset = i * Pcm24BytesPerSample;
+                        destination[offset] = unchecked((byte)sample);
+                        destination[offset + 1] = unchecked((byte)(sample >> 8));
+                        destination[offset + 2] = unchecked((byte)(sample >> 16));
                     }
 
                     _stream.Write(destination);
@@ -417,27 +426,34 @@ internal sealed partial class HiFiOutputWriter : IDisposable
             }
 
             _completed = true;
-            long dataLength = checked(_sampleCount * sizeof(short));
-            if (dataLength > uint.MaxValue - 36L)
+            long dataLength = checked(_sampleCount * Pcm24BytesPerSample);
+            int padding = (int)(dataLength & 1);
+            long riffLength = 36 + dataLength + padding;
+            if (riffLength > uint.MaxValue)
             {
                 throw new IOException("HiFi PCM WAVE output exceeds the RIFF size limit.");
             }
 
+            if (padding != 0)
+            {
+                _stream.WriteByte(0);
+            }
+
             Span<byte> header = stackalloc byte[HeaderLength];
             WriteAscii(header[0..4], "RIFF");
-            BinaryPrimitives.WriteUInt32LittleEndian(header[4..8], checked((uint)(36 + dataLength)));
+            BinaryPrimitives.WriteUInt32LittleEndian(header[4..8], checked((uint)riffLength));
             WriteAscii(header[8..12], "WAVE");
             WriteAscii(header[12..16], "fmt ");
             BinaryPrimitives.WriteUInt32LittleEndian(header[16..20], 16);
             BinaryPrimitives.WriteUInt16LittleEndian(header[20..22], 1);
             BinaryPrimitives.WriteUInt16LittleEndian(header[22..24], checked((ushort)_channels));
             BinaryPrimitives.WriteUInt32LittleEndian(header[24..28], checked((uint)_sampleRate));
-            uint byteRate = checked((uint)(_sampleRate * _channels * sizeof(short)));
+            uint byteRate = checked((uint)(_sampleRate * _channels * Pcm24BytesPerSample));
             BinaryPrimitives.WriteUInt32LittleEndian(header[28..32], byteRate);
             BinaryPrimitives.WriteUInt16LittleEndian(
                 header[32..34],
-                checked((ushort)(_channels * sizeof(short))));
-            BinaryPrimitives.WriteUInt16LittleEndian(header[34..36], 16);
+                checked((ushort)(_channels * Pcm24BytesPerSample)));
+            BinaryPrimitives.WriteUInt16LittleEndian(header[34..36], Pcm24BytesPerSample * 8);
             WriteAscii(header[36..40], "data");
             BinaryPrimitives.WriteUInt32LittleEndian(header[40..44], checked((uint)dataLength));
             _stream.Position = 0;

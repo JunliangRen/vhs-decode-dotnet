@@ -1,3 +1,4 @@
+using System.Buffers;
 using System.Runtime.InteropServices;
 
 namespace VHSDecode.Core.HiFi;
@@ -7,9 +8,7 @@ internal sealed partial class HiFiOutputWriter
     private sealed unsafe partial class LibsndfileFlacWriter : IHiFiFloatWriter
     {
         private const int FlacPcm24Format = 0x170003;
-        private const int SetClippingCommand = 0x10c0;
         private const int SetCompressionLevelCommand = 0x1301;
-        private const int True = 1;
         private const int WriteMode = 0x20;
 
         private readonly int _channels;
@@ -45,20 +44,6 @@ internal sealed partial class HiFiOutputWriter
             {
                 throw new InvalidDataException(
                     $"libsndfile failed to open HiFi FLAC output: {ErrorText(0)}");
-            }
-
-            int clippingResult = NativeMethods.Command(
-                _file,
-                SetClippingCommand,
-                null,
-                True);
-            if (clippingResult != 1)
-            {
-                string error = ErrorText(_file);
-                NativeMethods.Close(_file);
-                _file = 0;
-                throw new InvalidDataException(
-                    $"libsndfile failed to enable HiFi FLAC clipping: {error}");
             }
 
             double compressionLevel = 1.0;
@@ -98,18 +83,36 @@ internal sealed partial class HiFiOutputWriter
                 return;
             }
 
-            long frames = samples.Length / _channels;
-            fixed (float* samplePointer = samples)
+            int[] buffer = ArrayPool<int>.Shared.Rent(Math.Min(samples.Length, 16_384));
+            try
             {
-                long written = NativeMethods.WriteFramesFloat(
-                    _file,
-                    samplePointer,
-                    frames);
-                if (written != frames)
+                int capacity = buffer.Length - (buffer.Length % _channels);
+                while (!samples.IsEmpty)
                 {
-                    throw new InvalidDataException(
-                        $"libsndfile failed while writing HiFi FLAC output: {ErrorText(_file)}");
+                    int count = Math.Min(samples.Length, capacity);
+                    for (int i = 0; i < count; i++)
+                    {
+                        // libsndfile takes left-aligned PCM for its integer write API.
+                        buffer[i] = QuantizePcm24(samples[i]) << 8;
+                    }
+
+                    long frames = count / _channels;
+                    fixed (int* samplePointer = buffer)
+                    {
+                        long written = NativeMethods.WriteFramesInt(_file, samplePointer, frames);
+                        if (written != frames)
+                        {
+                            throw new InvalidDataException(
+                                $"libsndfile failed while writing HiFi FLAC output: {ErrorText(_file)}");
+                        }
+                    }
+
+                    samples = samples[count..];
                 }
+            }
+            finally
+            {
+                ArrayPool<int>.Shared.Return(buffer);
             }
         }
 
@@ -208,10 +211,10 @@ internal sealed partial class HiFiOutputWriter
 
             [LibraryImport(
                 LibraryName,
-                EntryPoint = "sf_writef_float")]
-            internal static partial long WriteFramesFloat(
+                EntryPoint = "sf_writef_int")]
+            internal static partial long WriteFramesInt(
                 nint file,
-                float* samples,
+                int* samples,
                 long frames);
 
             [LibraryImport(
