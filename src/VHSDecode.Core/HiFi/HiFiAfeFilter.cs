@@ -47,6 +47,14 @@ public sealed class HiFiAfeFilter
     public float[] Apply(ReadOnlySpan<float> input)
         => SosFilter.ApplyForwardBackwardFloat32InGroupsOfSix(_sections, input);
 
+    internal (float[] Left, float[] Right)? TryApplyStereo(
+        HiFiAfeFilter right, ReadOnlySpan<float> input)
+        => SosFilter.TryApplyForwardBackwardFloat32Stereo(_sections, right._sections, input);
+
+    internal ((float[] Left, float[] Right) First, (float[] Left, float[] Right) Second)?
+        TryApplyStereoPair(HiFiAfeFilter right, ReadOnlySpan<float> first, ReadOnlySpan<float> second)
+        => SosFilter.TryApplyForwardBackwardFloat32StereoPair(_sections, right._sections, first, second);
+
     public static (HiFiAfeFilter Left, HiFiAfeFilter Right) FromPlan(HiFiDecodePlan plan)
     {
         ArgumentNullException.ThrowIfNull(plan);
