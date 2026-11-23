@@ -44,7 +44,6 @@ internal sealed class HiFiProgressReporter
 
     public void ReportInput(long inputSamples, int blocksEnqueued)
     {
-        long audioFrames = Interlocked.Read(ref _audioFrames);
         lock (_writeLock)
         {
             if (_totalInputSamples is > 0)
@@ -52,6 +51,21 @@ internal sealed class HiFiProgressReporter
                 _output.WriteLine(FormatProgressBar(inputSamples, _totalInputSamples.Value));
             }
 
+            _output.Write(FormatStatus(
+                inputSamples,
+                _audioFrames,
+                blocksEnqueued,
+                _inputRateHz,
+                _audioRateHz,
+                _elapsedProvider()));
+        }
+    }
+
+    public void ReportOutput(long inputSamples, long audioFrames, int blocksEnqueued)
+    {
+        lock (_writeLock)
+        {
+            _audioFrames = audioFrames;
             _output.Write(FormatStatus(
                 inputSamples,
                 audioFrames,
@@ -62,18 +76,34 @@ internal sealed class HiFiProgressReporter
         }
     }
 
-    public void ReportOutput(long inputSamples, long audioFrames, int blocksEnqueued)
+    internal void ReportBias(HiFiDecodedBlock block, string audioMode, HiFiAfeParameters afe)
     {
-        Interlocked.Exchange(ref _audioFrames, audioFrames);
         lock (_writeLock)
         {
-            _output.Write(FormatStatus(
-                inputSamples,
-                audioFrames,
-                blocksEnqueued,
-                _inputRateHz,
-                _audioRateHz,
-                _elapsedProvider()));
+            double leftKhz = block.LeftDc * afe.LeftCarrierDeviationHz / 1000.0;
+            double rightKhz = block.RightDc * afe.RightCarrierDeviationHz / 1000.0;
+            string bias = audioMode switch
+            {
+                HiFiConstants.AudioModeMonoLeft => $"Bias L {leftKhz:F2} kHz ",
+                HiFiConstants.AudioModeMonoRight => $"Bias R {rightKhz:F2} kHz ",
+                _ => $"Bias L {leftKhz:F2} kHz, R {rightKhz:F2} kHz "
+            };
+            _output.Write(bias);
+            if (Math.Abs(leftKhz) < 9.0 && Math.Abs(rightKhz) < 9.0)
+            {
+                _output.WriteLine("(good player/recorder calibration)");
+            }
+            else if ((Math.Abs(leftKhz) is >= 9.0 and < 10.0)
+                || (Math.Abs(rightKhz) is >= 9.0 and < 10.0))
+            {
+                _output.WriteLine("(maybe marginal player/recorder calibration)");
+            }
+            else
+            {
+                _output.WriteLine();
+                _output.WriteLine("WARN: the player or the recorder may be uncalibrated and/or");
+                _output.WriteLine("the standard and/or the sample rate specified are wrong");
+            }
         }
     }
 

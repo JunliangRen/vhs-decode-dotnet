@@ -285,23 +285,15 @@ public sealed class PocketFftMixedRadixCompatibilityTests
                 PocketFftComplex32.BackwardAnyLengthDucc(
                     nonFiniteForward,
                     workerThreads);
-            string nonFiniteForwardSha256 =
-                Sha256(MemoryMarshal.AsBytes(nonFiniteForward.AsSpan()));
-            string nonFiniteBackwardSha256 =
-                Sha256(MemoryMarshal.AsBytes(nonFiniteBackward.AsSpan()));
-
             Complex32[] nonFiniteOwnedForward =
                 PocketFftComplex32.ForwardAnyLengthDuccOwned(
                     (Complex32[])nonFiniteInput.Clone(),
                     workerThreads);
-            AssertTransformHashes(
-                $"nonfinite-owned-{workerThreads}",
-                nonFiniteOwnedForward,
+            AssertTransformValues($"nonfinite-owned-{workerThreads} forward", nonFiniteForward, nonFiniteOwnedForward);
+            AssertTransformValues($"nonfinite-owned-{workerThreads} backward", nonFiniteBackward,
                 PocketFftComplex32.BackwardAnyLengthDuccOwned(
                     (Complex32[])nonFiniteOwnedForward.Clone(),
-                    workerThreads),
-                nonFiniteForwardSha256,
-                nonFiniteBackwardSha256);
+                    workerThreads));
 
             var nonFiniteForwardScratch = new Complex32[Length];
             Complex32[] nonFiniteScratchForward =
@@ -310,15 +302,12 @@ public sealed class PocketFftMixedRadixCompatibilityTests
                     nonFiniteForwardScratch,
                     workerThreads);
             var nonFiniteBackwardScratch = new Complex32[Length];
-            AssertTransformHashes(
-                $"nonfinite-scratch-{workerThreads}",
-                nonFiniteScratchForward,
+            AssertTransformValues($"nonfinite-scratch-{workerThreads} forward", nonFiniteForward, nonFiniteScratchForward);
+            AssertTransformValues($"nonfinite-scratch-{workerThreads} backward", nonFiniteBackward,
                 PocketFftComplex32.BackwardAnyLengthDuccOwned(
                     (Complex32[])nonFiniteScratchForward.Clone(),
                     nonFiniteBackwardScratch,
-                    workerThreads),
-                nonFiniteForwardSha256,
-                nonFiniteBackwardSha256);
+                    workerThreads));
         }
     }
 
@@ -616,6 +605,24 @@ public sealed class PocketFftMixedRadixCompatibilityTests
         }
 
         return input;
+    }
+
+    private static void AssertTransformValues(string label, Complex32[] expected, Complex32[] actual)
+    {
+        Assert.Equal(expected.Length, actual.Length);
+        ReadOnlySpan<float> reference = MemoryMarshal.Cast<Complex32, float>(expected.AsSpan());
+        ReadOnlySpan<float> result = MemoryMarshal.Cast<Complex32, float>(actual.AsSpan());
+        for (int i = 0; i < reference.Length; i++)
+        {
+            uint expectedBits = BitConverter.SingleToUInt32Bits(reference[i]);
+            uint actualBits = BitConverter.SingleToUInt32Bits(result[i]);
+            // JIT register allocation can select a different NaN sign or payload.
+            // Keep exact bits for every defined value and require NaN on both sides.
+            if (expectedBits != actualBits && !(float.IsNaN(reference[i]) && float.IsNaN(result[i])))
+            {
+                Assert.Fail($"{label} component {i} was {actualBits:X8}, expected {expectedBits:X8}.");
+            }
+        }
     }
 
     private static void AssertTransformHashes(

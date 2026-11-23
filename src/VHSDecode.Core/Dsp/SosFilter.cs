@@ -28,7 +28,7 @@ public readonly record struct SosSection(
     public double DcGain => (B0 + B1 + B2) / (A0 + A1 + A2);
 }
 
-public static class SosFilter
+public static partial class SosFilter
 {
     private readonly record struct FloatSosSection(
         float B0,
@@ -1369,18 +1369,21 @@ public static class SosFilter
             throw new ArgumentException("Output span is shorter than the extended input.", nameof(output));
         }
 
-        float first = input[0];
-        for (int i = 0; i < edge; i++)
-        {
-            output[i] = (2.0f * first) - input[edge - i];
-        }
-
+        WriteOddExtensionEdgesFloat32(input, output[..edge], output.Slice(edge + input.Length, edge));
         input.CopyTo(output.Slice(edge, input.Length));
+    }
 
+    private static void WriteOddExtensionEdgesFloat32(
+        ReadOnlySpan<float> input,
+        Span<float> left,
+        Span<float> right)
+    {
+        float first = input[0];
         float last = input[^1];
-        for (int i = 0; i < edge; i++)
+        for (int i = 0; i < left.Length; i++)
         {
-            output[edge + input.Length + i] = (2.0f * last) - input[input.Length - 2 - i];
+            left[i] = (2.0f * first) - input[left.Length - i];
+            right[i] = (2.0f * last) - input[input.Length - 2 - i];
         }
     }
 

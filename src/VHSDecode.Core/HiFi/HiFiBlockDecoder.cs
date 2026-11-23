@@ -1,3 +1,5 @@
+using System.Buffers;
+using System.Runtime.Intrinsics.X86;
 using VHSDecode.Core.Dsp;
 
 namespace VHSDecode.Core.HiFi;
@@ -64,8 +66,27 @@ public sealed class HiFiBlockDecoder : IHiFiBlockDecoder
     public double RightCarrierHz => _rightCarrierHz;
 
     public HiFiDecodedBlock Decode(ReadOnlySpan<float> rfData)
+        => FinishBlock(DecodeDemodulated(rfData));
+
+    internal bool CanDecodeStereoPairs => Sse2.IsSupported && _decodeLeft && _decodeRight
+        && !Options.AutoFineTune && !Options.Preview && _gnuRadioSink is null
+        && _plan.IfRateHz == _plan.InputRateHz
+        && _plan.InitialBlockSizes.IfSamples <= SosFilter.MaximumStereoPairSamples;
+
+    internal (HiFiDecodedBlock First, HiFiDecodedBlock Second)? TryDecodeStereoPair(
+        ReadOnlySpan<float> first, ReadOnlySpan<float> second)
     {
-        HiFiDemodulatedBlock demodulated = DecodeDemodulated(rfData);
+        if (_leftAfe.TryApplyStereoPair(_rightAfe, first, second) is not { } rf)
+        {
+            return null;
+        }
+
+        return (FinishBlock(DemodulateFiltered(rf.First.Left, rf.First.Right)),
+            FinishBlock(DemodulateFiltered(rf.Second.Left, rf.Second.Right)));
+    }
+
+    private HiFiDecodedBlock FinishBlock(HiFiDemodulatedBlock demodulated)
+    {
         float[]? left = demodulated.Left;
         float[]? right = demodulated.Right;
 
@@ -124,22 +145,27 @@ public sealed class HiFiBlockDecoder : IHiFiBlockDecoder
             throw new ArgumentException("HiFi RF block must not be empty.", nameof(rfData));
         }
 
-        float[] ifData = _resamplers.ResampleInputToIf(rfData);
-        float[]? left = null;
-        float[]? right = null;
+        ReadOnlySpan<float> ifData = _plan.InputRateHz == _plan.IfRateHz
+            ? rfData
+            : _resamplers.ResampleInputToIf(rfData);
         float[]? filteredLeft = null;
         float[]? filteredRight = null;
-        float leftDc = 0.0f;
-        float rightDc = 0.0f;
 
-        if (_decodeLeft)
+        if (_decodeLeft && _decodeRight && _leftAfe.TryApplyStereo(_rightAfe, ifData) is { } stereo)
         {
-            filteredLeft = _leftAfe.Apply(ifData);
+            (filteredLeft, filteredRight) = stereo;
         }
-
-        if (_decodeRight)
+        else
         {
-            filteredRight = _rightAfe.Apply(ifData);
+            if (_decodeLeft)
+            {
+                filteredLeft = _leftAfe.Apply(ifData);
+            }
+
+            if (_decodeRight)
+            {
+                filteredRight = _rightAfe.Apply(ifData);
+            }
         }
 
         if (_gnuRadioSink is not null)
@@ -147,17 +173,25 @@ public sealed class HiFiBlockDecoder : IHiFiBlockDecoder
             _gnuRadioSink(SumFilteredChannels(filteredLeft, filteredRight));
         }
 
+        return DemodulateFiltered(filteredLeft, filteredRight);
+    }
+
+    private HiFiDemodulatedBlock DemodulateFiltered(float[]? filteredLeft, float[]? filteredRight)
+    {
+        float[]? left = null;
+        float[]? right = null;
+        float leftDc = 0.0f;
+        float rightDc = 0.0f;
+
         if (filteredLeft is not null)
         {
-            float[] demodulated = DemodulateLeft(filteredLeft);
-            left = _resamplers.ResampleLeftIfToAudio(demodulated);
+            left = DemodulateToAudio(filteredLeft, rightChannel: false);
             leftDc = HiFiAudioProcessing.CancelDcAndTrim(left, _plan.PreTrimSamples);
         }
 
         if (filteredRight is not null)
         {
-            float[] demodulated = DemodulateRight(filteredRight);
-            right = _resamplers.ResampleRightIfToAudio(demodulated);
+            right = DemodulateToAudio(filteredRight, rightChannel: true);
             rightDc = HiFiAudioProcessing.CancelDcAndTrim(right, _plan.PreTrimSamples);
         }
 
@@ -186,34 +220,37 @@ public sealed class HiFiBlockDecoder : IHiFiBlockDecoder
         GC.SuppressFinalize(this);
     }
 
-    private float[] DemodulateLeft(float[] filtered)
+    private float[] DemodulateToAudio(Span<float> filtered, bool rightChannel)
     {
-        var output = new float[filtered.Length];
-        if (_leftQuadrature is not null)
+        HiFiQuadratureDiscriminator? quadrature = rightChannel ? _rightQuadrature : _leftQuadrature;
+        float[] buffer = quadrature is null
+            ? new float[filtered.Length]
+            : ArrayPool<float>.Shared.Rent(filtered.Length);
+        try
         {
-            _leftQuadrature.Demodulate(filtered, output, Options.DspBackend == DspBackend.IppFast);
-        }
-        else
-        {
-            _leftHilbert!.Demodulate(filtered, output);
-        }
+            Span<float> demodulated = buffer.AsSpan(0, filtered.Length);
+            if (quadrature is not null)
+            {
+                // Quadrature demodulation writes one result per adjacent input pair.
+                demodulated[^1] = 0.0f;
+                quadrature.Demodulate(filtered, demodulated, Options.DspBackend == DspBackend.IppFast);
+            }
+            else
+            {
+                (rightChannel ? _rightHilbert! : _leftHilbert!).Demodulate(filtered, demodulated);
+            }
 
-        return output;
-    }
-
-    private float[] DemodulateRight(float[] filtered)
-    {
-        var output = new float[filtered.Length];
-        if (_rightQuadrature is not null)
-        {
-            _rightQuadrature.Demodulate(filtered, output, Options.DspBackend == DspBackend.IppFast);
+            return rightChannel
+                ? _resamplers.ResampleRightIfToAudio(demodulated)
+                : _resamplers.ResampleLeftIfToAudio(demodulated);
         }
-        else
+        finally
         {
-            _rightHilbert!.Demodulate(filtered, output);
+            if (quadrature is not null)
+            {
+                ArrayPool<float>.Shared.Return(buffer);
+            }
         }
-
-        return output;
     }
 
     private void AutoFineTune(float leftDc, float rightDc)

@@ -543,6 +543,69 @@ public sealed class HiFiRunnerTests
         }
     }
 
+    [Fact]
+    public async Task HiFiFileReaderAndDecodeWorkersCanStartConcurrently()
+    {
+        string directory = CreateTempDirectory();
+        try
+        {
+            string path = Path.Combine(directory, "startup.wav");
+            HiFiDecodeOptions options = DefaultOptions(path) with { ThreadsInteger = 2 };
+            using var workerStarted = new ManualResetEventSlim();
+            var cancellationToken = TestContext.Current.CancellationToken;
+            using var reader = new ArraySampleReader(new float[10], token =>
+            {
+                if (!workerStarted.Wait(TimeSpan.FromSeconds(10), token))
+                {
+                    throw new TimeoutException("The reader did not start alongside the decode workers.");
+                }
+            });
+            using var writer = new HiFiOutputWriter(options);
+            var decoder = new HiFiStreamingDecoder(activeOptions =>
+            {
+                workerStarted.Set();
+                return new ZeroBlockDecoder(activeOptions);
+            });
+
+            HiFiStreamingDecodeResult result = await Task.Run(
+                () => decoder.Decode(options, reader, writer, TextWriter.Null, cancellationToken),
+                cancellationToken);
+            Assert.Equal(1, result.BlockCount);
+            Assert.Equal(10, result.InputSamples);
+        }
+        finally
+        {
+            Directory.Delete(directory, recursive: true);
+        }
+    }
+
+    [Fact]
+    public void HiFiRejectsInvalidPostProcessorBeforeStartingInput()
+    {
+        string directory = CreateTempDirectory();
+        try
+        {
+            HiFiDecodeOptions options = DefaultOptions(Path.Combine(directory, "invalid.wav")) with
+            {
+                AutoFineTune = true,
+                ExpanderRatio = double.NaN
+            };
+            using var reader = new ArraySampleReader(new float[10], _ =>
+                throw new InvalidOperationException("RF input started before post-processor validation."));
+            using var output = new HiFiOutputWriter(options);
+            var decoder = new HiFiStreamingDecoder(_ =>
+                throw new InvalidOperationException("A worker started before post-processor validation."));
+
+            var ex = Assert.Throws<ArgumentOutOfRangeException>(() => decoder.Decode(
+                options, reader, output, TextWriter.Null, TestContext.Current.CancellationToken));
+            Assert.Equal("ratio", ex.ParamName);
+        }
+        finally
+        {
+            Directory.Delete(directory, recursive: true);
+        }
+    }
+
     [Theory(DisplayName = "HiFi zero-worker queues consume the v0.4.0 idle buffers then wait")]
     [InlineData("0", 2)]
     [InlineData("-1", 1)]
@@ -1709,7 +1772,8 @@ public sealed class HiFiRunnerTests
         }
     }
 
-    private sealed class ArraySampleReader(float[] samples) : IHiFiSampleReader
+    private sealed class ArraySampleReader(
+        float[] samples, Action<CancellationToken>? beforeRead = null) : IHiFiSampleReader
     {
         private int _position;
 
@@ -1718,6 +1782,7 @@ public sealed class HiFiRunnerTests
         public int Read(Span<float> destination, CancellationToken cancellationToken = default)
         {
             cancellationToken.ThrowIfCancellationRequested();
+            beforeRead?.Invoke(cancellationToken);
             int count = Math.Min(destination.Length, samples.Length - _position);
             samples.AsSpan(_position, count).CopyTo(destination);
             _position += count;

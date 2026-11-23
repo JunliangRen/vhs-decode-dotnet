@@ -110,12 +110,23 @@ internal sealed class HiFiStreamingDecoder
         CancellationToken stopToken = stopSource.Token;
 
         var framer = new HiFiBlockFramer(plan, input);
+        var postProcessor = new HiFiAudioPostProcessor(options);
+        // Start normal file decoding without filling the bounded queues on the
+        // caller before the ordered output loop can begin draining them.
+        bool startConcurrently = !options.AutoFineTune && !options.GnuRadio
+            && !options.Preview && previewSink is null
+            && SynchronizationContext.Current is null && TaskScheduler.Current == TaskScheduler.Default;
         Task producer = ProduceBlocks(
             framer,
             jobs.Writer,
             progressReporter,
             stopSource,
-            stopToken);
+            stopToken,
+            startConcurrently);
+        int firstOutputWritten = 0;
+        Func<bool>? canPairBlocks = previewSink is null
+            ? () => Volatile.Read(ref firstOutputWritten) != 0
+            : null;
         Task[] workers = Enumerable.Range(0, workerCount)
             .Select(_ => DecodeBlocks(
                 options,
@@ -123,12 +134,13 @@ internal sealed class HiFiStreamingDecoder
                 results.Writer,
                 diagnostics,
                 stopSource,
-                stopToken))
+                stopToken,
+                canPairBlocks,
+                startConcurrently))
             .ToArray();
         Task resultCompletion = CompleteResults(workers, results.Writer, stopSource);
 
         var pending = new SortedDictionary<int, HiFiDecodeBlockResult>();
-        var postProcessor = new HiFiAudioPostProcessor(options);
         int nextBlock = 0;
         long audioFrames = 0;
         bool wrotePadding = false;
@@ -136,10 +148,10 @@ internal sealed class HiFiStreamingDecoder
         {
             await foreach (HiFiDecodeBlockResult result in results.Reader.ReadAllAsync(stopToken))
             {
-                if (!pending.TryAdd(result.Job.BlockNumber, result))
+                if (!pending.TryAdd(result.BlockNumber, result))
                 {
                     throw new InvalidDataException(
-                        $"HiFi block {result.Job.BlockNumber} was decoded more than once.");
+                        $"HiFi block {result.BlockNumber} was decoded more than once.");
                 }
 
                 while (pending.Remove(nextBlock, out HiFiDecodeBlockResult? ordered))
@@ -150,11 +162,15 @@ internal sealed class HiFiStreamingDecoder
                         wrotePadding = true;
                     }
 
-                    WriteBias(ordered.Decoded, options, plan, diagnostics);
+                    progressReporter.ReportBias(ordered.Decoded, options.AudioMode, plan.Afe);
                     HiFiPostProcessedBlock processed = postProcessor.Process(
                         ordered.Decoded,
-                        ordered.Job.BlockNumber);
+                        ordered.BlockNumber);
                     output.Write(processed);
+                    if (nextBlock == 0)
+                    {
+                        Volatile.Write(ref firstOutputWritten, 1);
+                    }
                     previewSink?.Write(processed.Stereo, stopToken);
                     audioFrames = checked(audioFrames + processed.Left.Length);
                     progressReporter.ReportOutput(
@@ -239,8 +255,14 @@ internal sealed class HiFiStreamingDecoder
         ChannelWriter<HiFiDecodeJob> writer,
         HiFiProgressReporter progressReporter,
         CancellationTokenSource stopSource,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        bool startConcurrently)
     {
+        if (startConcurrently)
+        {
+            await Task.CompletedTask.ConfigureAwait(ConfigureAwaitOptions.ForceYielding);
+        }
+
         Exception? failure = null;
         try
         {
@@ -274,8 +296,15 @@ internal sealed class HiFiStreamingDecoder
         ChannelWriter<HiFiDecodeBlockResult> writer,
         TextWriter diagnostics,
         CancellationTokenSource stopSource,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        Func<bool>? canPairBlocks,
+        bool startConcurrently)
     {
+        if (startConcurrently)
+        {
+            await Task.CompletedTask.ConfigureAwait(ConfigureAwaitOptions.ForceYielding);
+        }
+
         try
         {
             using var gnuRadioSink = options.GnuRadio
@@ -287,14 +316,37 @@ internal sealed class HiFiStreamingDecoder
             using IHiFiBlockDecoder decoder = _decoderFactory(
                 options,
                 gnuRadioCallback);
+            HiFiBlockDecoder? pairDecoder = canPairBlocks is not null
+                && decoder is HiFiBlockDecoder { CanDecodeStereoPairs: true } stereo
+                ? stereo : null;
             await foreach (HiFiDecodeJob job in reader.ReadAllAsync(cancellationToken))
             {
-                HiFiDecodedBlock decoded = decoder.Decode(job.Samples);
-                HiFiDecodedBlock trimmed = TrimDecodedBlock(decoded, decoder.Plan, job);
-                await writer.WriteAsync(
-                    new HiFiDecodeBlockResult(job, trimmed),
-                    cancellationToken);
+                // Pair only after output starts, and only with a job already queued.
+                if (pairDecoder is not null && !job.IsLastBlock && canPairBlocks!()
+                    && reader.TryRead(out HiFiDecodeJob? next))
+                {
+                    if (!next.IsLastBlock
+                        && pairDecoder.TryDecodeStereoPair(job.Samples, next.Samples) is { } pair)
+                    {
+                        await WriteResult(job, pair.First);
+                        await WriteResult(next, pair.Second);
+                    }
+                    else
+                    {
+                        await WriteResult(job, decoder.Decode(job.Samples));
+                        await WriteResult(next, decoder.Decode(next.Samples));
+                    }
+
+                    continue;
+                }
+
+                await WriteResult(job, decoder.Decode(job.Samples));
             }
+
+            ValueTask WriteResult(HiFiDecodeJob job, HiFiDecodedBlock decoded)
+                => writer.WriteAsync(
+                    new HiFiDecodeBlockResult(job.BlockNumber, TrimDecodedBlock(decoded, decoder.Plan, job)),
+                    cancellationToken);
         }
         catch
         {
@@ -384,38 +436,6 @@ internal sealed class HiFiStreamingDecoder
         return destination;
     }
 
-    private static void WriteBias(
-        HiFiDecodedBlock block,
-        HiFiDecodeOptions options,
-        HiFiDecodePlan plan,
-        TextWriter output)
-    {
-        double leftKhz = block.LeftDc * plan.Afe.LeftCarrierDeviationHz / 1000.0;
-        double rightKhz = block.RightDc * plan.Afe.RightCarrierDeviationHz / 1000.0;
-        string bias = options.AudioMode switch
-        {
-            HiFiConstants.AudioModeMonoLeft => $"Bias L {leftKhz:F2} kHz ",
-            HiFiConstants.AudioModeMonoRight => $"Bias R {rightKhz:F2} kHz ",
-            _ => $"Bias L {leftKhz:F2} kHz, R {rightKhz:F2} kHz "
-        };
-        output.Write(bias);
-        if (Math.Abs(leftKhz) < 9.0 && Math.Abs(rightKhz) < 9.0)
-        {
-            output.WriteLine("(good player/recorder calibration)");
-        }
-        else if ((Math.Abs(leftKhz) is >= 9.0 and < 10.0)
-            || (Math.Abs(rightKhz) is >= 9.0 and < 10.0))
-        {
-            output.WriteLine("(maybe marginal player/recorder calibration)");
-        }
-        else
-        {
-            output.WriteLine();
-            output.WriteLine("WARN: the player or the recorder may be uncalibrated and/or");
-            output.WriteLine("the standard and/or the sample rate specified are wrong");
-        }
-    }
-
     private static async Task ObserveFailure(Task task)
     {
         try
@@ -454,7 +474,7 @@ internal sealed record HiFiDecodeJob(
     int PlanInputSamples);
 
 internal sealed record HiFiDecodeBlockResult(
-    HiFiDecodeJob Job,
+    int BlockNumber,
     HiFiDecodedBlock Decoded);
 
 internal sealed class HiFiBlockFramer

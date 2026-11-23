@@ -1,6 +1,8 @@
+using System.Buffers.Binary;
 using System.Globalization;
 using System.Numerics;
 using System.Runtime.InteropServices;
+using System.Runtime.Intrinsics.X86;
 using System.Security.Cryptography;
 using System.Text;
 using VHSDecode.Core.CommandLine;
@@ -38,6 +40,52 @@ public sealed class HiFiCompatibilityTests
             .ToArray();
 
         Assert.Equal(expectedBits, actualBits);
+    }
+
+    [Theory]
+    [InlineData(HiFiRawSampleFormat.S10Le, 512.0f)]
+    [InlineData(HiFiRawSampleFormat.S12Le, 2048.0f)]
+    [InlineData(HiFiRawSampleFormat.S16Le, 32768.0f)]
+    public void HiFiSigned16BitStorageNormalizationMatchesAllScalarBits(
+        HiFiRawSampleFormat format, float divisor)
+    {
+        const int sampleCount = 65539;
+        var bytes = new byte[2 * sampleCount + 2];
+        Span<byte> input = bytes.AsSpan(1);
+        for (int i = 0; i < sampleCount; i++)
+        {
+            BinaryPrimitives.WriteInt16LittleEndian(input.Slice(2 * i, 2), unchecked((short)i));
+        }
+
+        var output = new float[sampleCount + 1];
+        output[^1] = -123.0f;
+        Assert.Equal(sampleCount, HiFiSampleNormalizer.Normalize(input, output, format));
+        for (int i = 0; i < sampleCount; i++)
+        {
+            float expected = unchecked((short)i) / divisor;
+            Assert.Equal(BitConverter.SingleToInt32Bits(expected), BitConverter.SingleToInt32Bits(output[i]));
+        }
+
+        Assert.Equal(-123.0f, output[^1]);
+    }
+
+    [Fact]
+    public void HiFiSigned16BitNormalizationPreservesOverlappingBufferOrder()
+    {
+        int sampleCount = 2 * Vector<short>.Count + 3;
+        byte[] input = new byte[sampleCount * sizeof(float)];
+        new Random(17).NextBytes(input);
+        byte[] expected = input.ToArray();
+        Span<float> expectedOutput = MemoryMarshal.Cast<byte, float>(expected);
+        for (int i = 0; i < sampleCount; i++)
+        {
+            expectedOutput[i] = BinaryPrimitives.ReadInt16LittleEndian(expected.AsSpan(i * sizeof(short)))
+                * (1.0f / 32768.0f);
+        }
+
+        Assert.Equal(sampleCount, HiFiSampleNormalizer.Normalize(input.AsSpan(0, sampleCount * sizeof(short)),
+            MemoryMarshal.Cast<byte, float>(input), HiFiRawSampleFormat.S16Le));
+        Assert.Equal(expected, input);
     }
 
     [Fact(DisplayName = "HiFi sample format routing matches v0.4.0")]
@@ -382,6 +430,114 @@ public sealed class HiFiCompatibilityTests
         Assert.Equal(expectedOutputHash, BinarySha256(output));
     }
 
+    [Theory]
+    [InlineData(8_000_000, 1_300_000.0, 1_700_000.0, 371_506.25, 371_506.25)]
+    [InlineData(40_000_000, 1_400_000.0, 1_800_000.0, 371_506.25, 371_506.25)]
+    [InlineData(6_000_000, 1_500_000.0, 1_700_000.0, 240_000.0, 75_000.0)]
+    [InlineData(8_000_000, 1_300_001.0, 1_700_003.0, 371_506.25, 371_506.25)]
+    public void HiFiStereoAfeMatchesBothScalarChannelsBitwise(
+        int sampleRateHz, double leftCarrier, double rightCarrier, double leftWidth, double rightWidth)
+    {
+        var left = new HiFiAfeFilter(sampleRateHz, leftCarrier, leftWidth);
+        var right = new HiFiAfeFilter(sampleRateHz, rightCarrier, rightWidth);
+        float[] input = CreateDeterministicFloatInput(8193);
+        input[0] = -0.0f;
+        input[357] = float.Epsilon;
+        input[^1] = 0.0f;
+
+        var stereo = left.TryApplyStereo(right, input);
+        if (!Sse2.IsSupported)
+        {
+            Assert.Null(stereo);
+            return;
+        }
+
+        Assert.True(stereo.HasValue);
+        var (actualLeft, actualRight) = stereo.GetValueOrDefault();
+        Assert.True(MemoryMarshal.AsBytes(left.Apply(input).AsSpan())
+            .SequenceEqual(MemoryMarshal.AsBytes(actualLeft.AsSpan())));
+        Assert.True(MemoryMarshal.AsBytes(right.Apply(input).AsSpan())
+            .SequenceEqual(MemoryMarshal.AsBytes(actualRight.AsSpan())));
+    }
+
+    [Fact]
+    public void HiFiStereoAfeFallsBackForNonFiniteInput()
+    {
+        var left = new HiFiAfeFilter(8_000_000, 1_300_000, 371_506.25);
+        var right = new HiFiAfeFilter(8_000_000, 1_700_000, 371_506.25);
+        float[] input = CreateDeterministicFloatInput(2048);
+        input[1024] = float.NaN;
+
+        Assert.Null(left.TryApplyStereo(right, input));
+    }
+
+    [Fact]
+    public void HiFiPairedStereoAfeMatchesSingleBlockFiltersAcrossTileBoundaries()
+    {
+        var left = new HiFiAfeFilter(8_000_000, 1_300_000, 371_506.25);
+        var right = new HiFiAfeFilter(8_000_000, 1_700_000, 371_506.25);
+        float[] first = CreateDeterministicFloatInput(17_389);
+        float[] second = first.Reverse().ToArray();
+        second[8191] = -0.0f;
+        second[8192] = float.Epsilon;
+
+        var result = left.TryApplyStereoPair(right, first, second);
+        if (!Sse2.IsSupported)
+        {
+            Assert.Null(result);
+            return;
+        }
+
+        Assert.True(result.HasValue);
+        var (firstActual, secondActual) = result.GetValueOrDefault();
+        Check(left.Apply(first), firstActual.Left);
+        Check(right.Apply(first), firstActual.Right);
+        Check(left.Apply(second), secondActual.Left);
+        Check(right.Apply(second), secondActual.Right);
+
+        Assert.Null(left.TryApplyStereoPair(right, first, second.AsSpan(1)));
+        second[8192] = float.NaN;
+        Assert.Null(left.TryApplyStereoPair(right, first, second));
+
+        static void Check(float[] reference, float[] actual)
+            => Assert.True(MemoryMarshal.AsBytes(reference.AsSpan())
+                .SequenceEqual(MemoryMarshal.AsBytes(actual.AsSpan())));
+    }
+
+    [Fact]
+    public void HiFiStereoSosKeepsGeneralMultiplicationForNonUnitLanes()
+    {
+        if (!Sse2.IsSupported)
+        {
+            return;
+        }
+
+        SosSection[] left = new HiFiAfeFilter(8_000_000, 1_300_000, 371_506.25).Sections.ToArray();
+        SosSection[] right = new HiFiAfeFilter(8_000_000, 1_700_000, 371_506.25).Sections.ToArray();
+        left[3] = left[3] with { B2 = 0.875 };
+        right[20] = right[20] with { B0 = 1.125 };
+        float[] first = CreateDeterministicFloatInput(8205);
+        float[] second = first.Reverse().ToArray();
+
+        var stereo = SosFilter.TryApplyForwardBackwardFloat32Stereo(left, right, first);
+        Assert.True(stereo.HasValue);
+        Check(left, first, stereo.Value.Left);
+        Check(right, first, stereo.Value.Right);
+
+        var pair = SosFilter.TryApplyForwardBackwardFloat32StereoPair(left, right, first, second);
+        Assert.True(pair.HasValue);
+        Check(left, first, pair.Value.First.Left);
+        Check(right, first, pair.Value.First.Right);
+        Check(left, second, pair.Value.Second.Left);
+        Check(right, second, pair.Value.Second.Right);
+
+        static void Check(SosSection[] sections, float[] input, float[] actual)
+        {
+            float[] expected = SosFilter.ApplyForwardBackwardFloat32(sections, input);
+            Assert.True(MemoryMarshal.AsBytes(expected.AsSpan()).SequenceEqual(MemoryMarshal.AsBytes(actual.AsSpan())));
+        }
+    }
+
     [Fact(DisplayName = "HiFi quadrature block plan matches v0.4.0")]
     public void HiFiQuadratureBlockPlanMatchesV040()
     {
@@ -565,6 +721,66 @@ public sealed class HiFiCompatibilityTests
             BinarySha256(discriminator.QuadratureOscillator.Span));
         WindowsFrozenBitOracle.Equal(expectedOutputHash, BinarySha256(output));
         Assert.Equal(123.25f, output[^1]);
+    }
+
+    [Theory]
+    [InlineData(8_000_000, 1_300_000, 150_000)]
+    [InlineData(8_000_000, 1_700_000, 150_000)]
+    [InlineData(40_000_000, 1_400_000, 150_000)]
+    [InlineData(40_000_000, 1_800_000, 150_000)]
+    [InlineData(8_000_000, 1_700_000, 50_000)]
+    [InlineData(8_000_000, 1_399_997, 150_000)]
+    public void HiFiExactQuadratureMatchesScalarPhaseAcrossOscillatorPeriods(
+        int sampleRate, int carrier, int deviation)
+    {
+        const int sampleCount = 131_077;
+        var discriminator = new HiFiQuadratureDiscriminator(sampleRate, carrier, deviation, 8192);
+        var input = new float[sampleCount];
+        var output = new float[sampleCount];
+        var random = new Random(49);
+        int[] specialBits = [0, int.MinValue, 1, int.MinValue + 1,
+            0x7f7f_ffff, unchecked((int)0xff7f_ffff), 0x7f80_0000,
+            unchecked((int)0xff80_0000), 0x7fc0_0000];
+        for (int i = 0; i < input.Length; i++)
+        {
+            int bits = i % 257 < specialBits.Length
+                ? specialBits[i % 257]
+                : (int)random.NextInt64(int.MinValue, (long)int.MaxValue + 1);
+            input[i] = BitConverter.Int32BitsToSingle(bits);
+        }
+
+        output[^1] = -12.0f;
+        discriminator.Demodulate(input, output);
+        Assert.Equal(-12.0f, output[^1]);
+
+        ReadOnlySpan<double> oscI = discriminator.InPhaseOscillator.Span;
+        ReadOnlySpan<double> oscQ = discriminator.QuadratureOscillator.Span;
+        double phaseScale = sampleRate / (Math.Tau * deviation);
+        double previousI = input[0] * oscI[0];
+        double previousQ = input[0] * oscQ[0];
+        for (int i = 1; i < input.Length; i++)
+        {
+            int index = i % oscI.Length;
+            int sign = (i / oscI.Length & 1) == 0 ? 1 : -1;
+            double rf = input[i] * sign;
+            double currentI = rf * oscI[index];
+            double currentQ = rf * oscQ[index];
+            double imaginary = Math.FusedMultiplyAdd(currentQ, previousI, -(currentI * previousQ));
+            double real = Math.FusedMultiplyAdd(currentI, previousI, currentQ * previousQ);
+            double phase = Math.Atan2(imaginary, real) * phaseScale;
+            float expected = (float)Math.Min(Math.Max(phase, float.MinValue), float.MaxValue);
+            if (float.IsNaN(expected))
+            {
+                Assert.True(float.IsNaN(output[i - 1]));
+            }
+            else
+            {
+                Assert.Equal(BitConverter.SingleToInt32Bits(expected),
+                    BitConverter.SingleToInt32Bits(output[i - 1]));
+            }
+            previousI = currentI;
+            previousQ = currentQ;
+        }
     }
 
     [Fact(DisplayName = "HiFi quadrature carrier rounding matches v0.4.0")]

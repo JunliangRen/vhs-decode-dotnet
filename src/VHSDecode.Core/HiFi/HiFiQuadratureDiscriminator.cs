@@ -88,6 +88,13 @@ public sealed class HiFiQuadratureDiscriminator
             return;
         }
 
+        // Exact only uses a table when both rounded phases are uniform across the oscillator.
+        if (Avx2.IsSupported && !input.Overlaps(output)
+            && TryDemodulateLookup(input, output, requireUniform: true))
+        {
+            return;
+        }
+
         double phaseScale = SampleRateHz / (Math.Tau * DeviationHz);
         int oscillatorLength = _inPhaseOscillator.Length;
         double previousI = input[0] * _inPhaseOscillator[0];
@@ -262,20 +269,34 @@ public sealed class HiFiQuadratureDiscriminator
     }
 
 
+    private bool TryDemodulateLookup(ReadOnlySpan<float> input, Span<float> output, bool requireUniform)
+    {
+        if (DeviationHz <= 0 || _inPhaseOscillator.Length is 0 or > MaxLookupOscillatorLength)
+        {
+            return false;
+        }
+
+        double scale = SampleRateHz / (Math.Tau * DeviationHz);
+        float[] phases = _phaseLookup ??= BuildPhaseLookup(scale);
+        if (Avx2.IsSupported && HasUniformPhases(phases))
+        {
+            DemodulateUniformLookup(input, output, phases[0], phases[1], scale);
+            return true;
+        }
+
+        if (requireUniform)
+        {
+            return false;
+        }
+
+        DemodulateLookup(input, output, phases, scale);
+        return true;
+    }
+
     private unsafe void DemodulateIpp(ReadOnlySpan<float> input, Span<float> output)
     {
-        if (DeviationHz > 0 && _inPhaseOscillator.Length is > 0 and <= MaxLookupOscillatorLength)
+        if (TryDemodulateLookup(input, output, requireUniform: false))
         {
-            double scale = SampleRateHz / (Math.Tau * DeviationHz);
-            float[] phases = _phaseLookup ??= BuildPhaseLookup(scale);
-            if (Avx2.IsSupported && HasUniformPhases(phases))
-            {
-                DemodulateUniformLookup(input, output, phases[0], phases[1], scale);
-            }
-            else
-            {
-                DemodulateLookup(input, output, phases, scale);
-            }
             return;
         }
 
