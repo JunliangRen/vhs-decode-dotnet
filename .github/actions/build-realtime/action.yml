@@ -15,8 +15,8 @@ runs:
     - uses: msys2/setup-msys2@v2
       id: msys
       with:
-        msystem: UCRT64
-        install: mingw-w64-ucrt-x86_64-gcc make diffutils
+        msystem: MINGW64
+        install: mingw-w64-x86_64-gcc make diffutils
     - name: Build static FFmpeg DCA decoder (7.1.3)
       shell: msys2 {0}
       working-directory: build-deps/ffmpeg
@@ -33,4 +33,4 @@ runs:
       shell: pwsh
       env:
         MSYS_ROOT: ${{ steps.msys.outputs.msys2-location }}
-      run: ./tools/build-realtime-preview-native.ps1 -Compiler "$env:MSYS_ROOT/ucrt64/bin/gcc.exe" -FfmpegPrefix build-deps/prefix
+      run: ./tools/build-realtime-preview-native.ps1 -Compiler "$env:MSYS_ROOT/mingw64/bin/gcc.exe" -FfmpegPrefix build-deps/prefix
