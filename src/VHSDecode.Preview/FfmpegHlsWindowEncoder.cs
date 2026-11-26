@@ -14,6 +14,7 @@ internal sealed class FfmpegHlsWindowEncoder
     private readonly bool _isPalColorSystem;
     private readonly PreviewTimeline _timeline;
     private readonly PreviewEncoderBackend _encoderBackend;
+    private readonly string? _sampleAspectRatio;
 
     internal FfmpegHlsWindowEncoder(
         string ffmpegPath,
@@ -22,7 +23,8 @@ internal sealed class FfmpegHlsWindowEncoder
         int crf,
         string system,
         PreviewTimeline timeline,
-        PreviewEncoderBackend encoderBackend)
+        PreviewEncoderBackend encoderBackend,
+        string? sampleAspectRatio = null)
     {
         _ffmpegPath = PreviewServerOptions.NormalizeExecutablePath(ffmpegPath);
         _width = width;
@@ -33,6 +35,7 @@ internal sealed class FfmpegHlsWindowEncoder
             StringComparison.Ordinal);
         _timeline = timeline;
         _encoderBackend = encoderBackend;
+        _sampleAspectRatio = sampleAspectRatio;
     }
 
     internal PreviewSegmentWindow Encode(
@@ -227,7 +230,7 @@ internal sealed class FfmpegHlsWindowEncoder
         arguments.AddRange(
         [
             "-profile:v", "main",
-            "-level:v", "3.1",
+            "-level:v", _sampleAspectRatio is null ? "3.1" : "4.0",
             "-g", outputKeyFrameInterval.ToString(CultureInfo.InvariantCulture),
             "-keyint_min", outputKeyFrameInterval.ToString(CultureInfo.InvariantCulture),
             "-color_primaries", colorStandard,
@@ -251,12 +254,15 @@ internal sealed class FfmpegHlsWindowEncoder
         return [.. arguments];
     }
 
+    private string WithSampleAspectRatio(string filters)
+        => _sampleAspectRatio is null ? filters : $"setsar=sar={_sampleAspectRatio}:max=4096,{filters}";
+
     private string[] BuildBackendArguments(string x264Parameters)
         => _encoderBackend switch
         {
             PreviewEncoderBackend.Nvenc =>
             [
-                "-vf", "setfield=tff,format=nv12,hwupload_cuda,yadif_cuda=mode=send_field:parity=tff:deint=all",
+                "-vf", WithSampleAspectRatio("setfield=tff,format=nv12,hwupload_cuda,yadif_cuda=mode=send_field:parity=tff:deint=all"),
                 "-c:v", "h264_nvenc",
                 "-preset", "p1",
                 "-tune", "ull",
@@ -267,7 +273,7 @@ internal sealed class FfmpegHlsWindowEncoder
             ],
             PreviewEncoderBackend.Qsv =>
             [
-                "-vf", "setfield=tff,tpad=stop_mode=clone:stop=1,format=nv12,hwupload=extra_hw_frames=64,vpp_qsv=deinterlace=advanced:rate=field",
+                "-vf", WithSampleAspectRatio("setfield=tff,tpad=stop_mode=clone:stop=1,format=nv12,hwupload=extra_hw_frames=64,vpp_qsv=deinterlace=advanced:rate=field"),
                 "-c:v", "h264_qsv",
                 "-preset", "veryfast",
                 "-global_quality", Math.Max(1, _crf).ToString(CultureInfo.InvariantCulture),
@@ -279,7 +285,7 @@ internal sealed class FfmpegHlsWindowEncoder
             ],
             PreviewEncoderBackend.Amf =>
             [
-                "-vf", "setfield=tff,yadif=mode=send_field:parity=tff:deint=all",
+                "-vf", WithSampleAspectRatio("setfield=tff,yadif=mode=send_field:parity=tff:deint=all"),
                 "-c:v", "h264_amf",
                 "-usage", "ultralowlatency",
                 "-quality", "speed",
@@ -292,7 +298,7 @@ internal sealed class FfmpegHlsWindowEncoder
             ],
             PreviewEncoderBackend.Libx264 =>
             [
-                "-vf", "setfield=tff,yadif=mode=send_field:parity=tff:deint=all",
+                "-vf", WithSampleAspectRatio("setfield=tff,yadif=mode=send_field:parity=tff:deint=all"),
                 "-c:v", "libx264",
                 "-preset", "ultrafast",
                 "-tune", "zerolatency",

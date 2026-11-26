@@ -105,6 +105,8 @@ public sealed class PreviewHttpServer : IAsyncDisposable
                     provider.MediaInfo.DecodeBackend,
                     provider.MediaInfo.AccuracyProfile,
                     provider.MediaInfo.EncodeBackend,
+                    provider.MediaInfo.Region,
+                    provider.MediaInfo.AvcCodec,
                     provider.Timeline.SegmentCount,
                     provider.Timeline.WindowCount,
                     WindowSeconds = provider.Timeline.WindowCount > 1
@@ -262,7 +264,7 @@ public sealed class PreviewHttpServer : IAsyncDisposable
             const timeline = document.getElementById('timeline');
             const time = document.getElementById('time');
             const status = document.getElementById('status');
-            const codec = 'video/mp4; codecs="avc1.4d401f"';
+            const defaultAvcCodec = 'avc1.4d401f';
             const diagnostics = window.previewDiagnostics = {
               ready: false,
               lastRequestedWindow: -1,
@@ -450,6 +452,7 @@ public sealed class PreviewHttpServer : IAsyncDisposable
                 });
                 timeline.max = String(info.durationSeconds);
                 updateClock(0);
+                const codec = 'video/mp4; codecs="' + (info.avcCodec || defaultAvcCodec) + '"';
                 if ('MediaSource' in window && MediaSource.isTypeSupported(codec)) {
                   mediaSource = new MediaSource();
                   video.src = URL.createObjectURL(mediaSource);

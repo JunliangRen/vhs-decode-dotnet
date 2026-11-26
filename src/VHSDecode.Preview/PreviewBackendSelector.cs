@@ -40,7 +40,8 @@ internal static class PreviewBackendSelector
         TextWriter diagnosticOutput,
         CancellationToken cancellationToken,
         Func<CudaFastDriverProbeResult>? cudaPreflight = null,
-        Func<bool>? ippProbe = null)
+        Func<bool>? ippProbe = null,
+        bool allowAutomaticCuda = true)
     {
         ArgumentNullException.ThrowIfNull(command);
         ArgumentNullException.ThrowIfNull(createBackend);
@@ -53,7 +54,7 @@ internal static class PreviewBackendSelector
             return await createBackend(explicitBackend, cancellationToken).ConfigureAwait(false);
         }
 
-        if (!IsAutomaticCudaCandidate(command))
+        if (!allowAutomaticCuda || !IsAutomaticCudaCandidate(command))
         {
             DspBackend cpuBackend = ResolveCpuBackend(ippProbe);
             return await createBackend(cpuBackend, cancellationToken).ConfigureAwait(false);

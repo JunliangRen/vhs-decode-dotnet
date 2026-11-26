@@ -2,6 +2,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\VHSDecode.Core\VHSDecode.Core.csproj" />
+    <ProjectReference Include="..\VHSDecode.Preview.Frames\VHSDecode.Preview.Frames.csproj" />
     <FrameworkReference Include="Microsoft.AspNetCore.App" />
   </ItemGroup>
 

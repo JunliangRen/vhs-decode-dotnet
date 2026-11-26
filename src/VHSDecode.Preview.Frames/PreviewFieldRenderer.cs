@@ -1,5 +1,6 @@
 using VHSDecode.Core.Decode;
 using VHSDecode.Core.Formats;
+using VHSDecode.Core.Tbc;
 
 namespace VHSDecode.Preview;
 
@@ -23,6 +24,8 @@ internal sealed class PreviewFieldRenderer
     private readonly int _chromaHeight;
     private readonly int _sourceLineLength;
     private readonly int _sourceFirstLine;
+    private readonly int _activeStart;
+    private readonly int _activeEnd;
     private readonly int[] _sourceLines;
     private readonly int[] _sourceColumns;
     private readonly int[] _chromaStarts;
@@ -32,6 +35,8 @@ internal sealed class PreviewFieldRenderer
     private readonly int _burstStart;
     private readonly int _burstEnd;
     private readonly byte[] _lumaLut;
+    private readonly VideoOutputConverter _videoOutput;
+    private readonly bool _fullRaster;
     private readonly bool _palChroma;
     private readonly bool _ntscChroma;
     private readonly int[] _realPrefix0;
@@ -44,10 +49,12 @@ internal sealed class PreviewFieldRenderer
     internal PreviewFieldRenderer(
         DecodeSession session,
         int width,
-        int height)
+        int height,
+        bool fullRaster = false,
+        bool nativeChroma = false)
     {
         ArgumentNullException.ThrowIfNull(session);
-        if (width <= 0 || height <= 0 || (width & 1) != 0 || (height & 3) != 0)
+        if (width <= 0 || height <= 0 || (!nativeChroma && ((width & 1) != 0 || (height & 3) != 0)))
         {
             throw new ArgumentOutOfRangeException(
                 nameof(width),
@@ -56,18 +63,17 @@ internal sealed class PreviewFieldRenderer
 
         _width = width;
         _halfHeight = height / 2;
-        _chromaWidth = width / 2;
+        _chromaWidth = nativeChroma ? width : width / 2;
         _chromaHeight = height / 4;
         _sourceLineLength = session.TbcFrameSpec.OutputLineLength;
         string normalizedSystem = FormatCatalog.NormalizeSystem(session.System);
         string parentSystem = FormatCatalog.ParentSystem(session.System);
         bool ntscGeometry = normalizedSystem.StartsWith("NTSC", StringComparison.Ordinal)
             || parentSystem == "NTSC";
-        _sourceFirstLine = ntscGeometry ? 20 : 22;
-        _sourceLines = BuildSourceLines(
-            _halfHeight,
-            _sourceFirstLine,
-            session.TbcFrameSpec.OutputLineCount);
+        _sourceFirstLine = fullRaster ? 0 : ntscGeometry ? 20 : 22;
+        _sourceLines = fullRaster
+            ? Enumerable.Range(0, _halfHeight).ToArray()
+            : BuildSourceLines(_halfHeight, _sourceFirstLine, session.TbcFrameSpec.OutputLineCount);
         int activeStart = Math.Clamp(
             session.TbcFrameSpec.ActiveVideoStart ?? 0,
             0,
@@ -76,11 +82,15 @@ internal sealed class PreviewFieldRenderer
             session.TbcFrameSpec.ActiveVideoEnd ?? _sourceLineLength,
             activeStart + 1,
             _sourceLineLength);
-        _sourceColumns = BuildSourceColumns(width, activeStart, activeEnd);
-        (_chromaStarts, _chromaEnds) = BuildChromaRanges(
-            _chromaWidth,
-            activeStart,
-            activeEnd);
+        _activeStart = activeStart;
+        _activeEnd = activeEnd;
+        _sourceColumns = fullRaster
+            ? Enumerable.Range(0, width).ToArray()
+            : BuildSourceColumns(width, activeStart, activeEnd);
+        (_chromaStarts, _chromaEnds) = nativeChroma
+            ? BuildNativeChromaRanges(width, _sourceLineLength)
+            : BuildChromaRanges(_chromaWidth, fullRaster ? 2 : activeStart,
+                fullRaster ? _sourceLineLength : activeEnd);
         _chromaPrefixStart = _chromaStarts[0];
         _chromaPrefixEnd = _chromaEnds[^1];
         _burstStart = Math.Clamp(
@@ -91,7 +101,9 @@ internal sealed class PreviewFieldRenderer
             session.TbcFrameSpec.ColourBurstEnd ?? 0,
             _burstStart,
             _sourceLineLength);
-        _lumaLut = BuildLumaLut(session);
+        _fullRaster = fullRaster;
+        _videoOutput = session.VideoOutput;
+        _lumaLut = BuildLumaLut(_videoOutput);
 
         _palChroma = normalizedSystem.StartsWith("PAL", StringComparison.Ordinal);
         _ntscChroma = !_palChroma && ntscGeometry;
@@ -111,7 +123,7 @@ internal sealed class PreviewFieldRenderer
         bool separateChroma = field.ChromaSamples is { Length: > 0 } chroma
             && chroma.Length >= field.Samples.Length;
         var luma = new byte[checked(_width * _halfHeight)];
-        RenderLuma(field.Samples, separateChroma, luma);
+        RenderLuma(field, separateChroma, luma);
 
         var chromaU = new byte[checked(_chromaWidth * _chromaHeight)];
         var chromaV = new byte[chromaU.Length];
@@ -140,14 +152,66 @@ internal sealed class PreviewFieldRenderer
             chromaDropouts);
     }
 
+    internal byte[] RenderFullFieldBgra(TbcDecodedField field, bool isFirstField)
+    {
+        int pixelCount = checked(_width * _halfHeight);
+        var luma = new byte[pixelCount];
+        bool separateChroma = field.ChromaSamples is { Length: > 0 } chroma
+            && chroma.Length >= field.Samples.Length;
+        RenderLuma(field, separateChroma, luma);
+        var bgra = new byte[checked(pixelCount * 4)];
+        ReadOnlySpan<ushort> chromaSource = separateChroma ? field.ChromaSamples! : field.Samples;
+        BurstRotation[]? bursts = (_palChroma || _ntscChroma) && _burstEnd > _burstStart
+            ? BuildBurstRotations(chromaSource, separateChroma)
+            : null;
+        for (int y = 0; y < _halfHeight; y++)
+        {
+            bool hasColor = bursts is not null && bursts[y].Valid
+                && BuildDemodulatedPrefixes(chromaSource, y, separateChroma, _realPrefix0, _imaginaryPrefix0);
+            for (int x = 0; x < _width; x++)
+            {
+                double u = 128.0;
+                double v = 128.0;
+                // The porch and sync samples are useful as luma or TBC data, but
+                // converting their burst/sync transitions into hue is misleading.
+                if (hasColor && x >= _activeStart && x < _activeEnd)
+                {
+                    _ = TryDecodeChroma(_realPrefix0, _imaginaryPrefix0, y, bursts![y],
+                        isFirstField, field.FieldPhaseId, x, out u, out v);
+                }
+
+                int pixel = y * _width + x;
+                PreviewFrame.WriteBgra(bgra, pixel * 4, luma[pixel], ChromaByte(u), ChromaByte(v));
+            }
+        }
+
+        return bgra;
+    }
+
+    private static (int[] Starts, int[] Ends) BuildNativeChromaRanges(int width, int sourceWidth)
+    {
+        var starts = new int[width];
+        var ends = new int[width];
+        for (int x = 0; x < width; x++)
+        {
+            starts[x] = Math.Max(2, x - 4);
+            ends[x] = Math.Min(sourceWidth, x + 6);
+        }
+
+        return (starts, ends);
+    }
+
     private void RenderLuma(
-        ReadOnlySpan<ushort> samples,
+        TbcDecodedField field,
         bool separateChroma,
         Span<byte> destination)
     {
+        ReadOnlySpan<ushort> samples = field.Samples;
+        ReadOnlySpan<byte> luma = _fullRaster && field.OutputConverter is { } converter
+            && !ReferenceEquals(converter, _videoOutput) ? BuildLumaLut(converter) : _lumaLut;
         if (separateChroma)
         {
-            RenderSeparateLuma(samples, destination);
+            RenderSeparateLuma(samples, destination, luma);
             return;
         }
 
@@ -159,7 +223,7 @@ internal sealed class PreviewFieldRenderer
             {
                 int sourceColumn = _sourceColumns[x];
                 int index = sourceOffset + sourceColumn;
-                if ((uint)index >= (uint)samples.Length)
+                if (sourceColumn >= _sourceLineLength || (uint)index >= (uint)samples.Length)
                 {
                     destination[destinationOffset + x] = 16;
                     continue;
@@ -175,14 +239,15 @@ internal sealed class PreviewFieldRenderer
                     }
                 }
 
-                destination[destinationOffset + x] = _lumaLut[value];
+                destination[destinationOffset + x] = luma[value];
             }
         }
     }
 
     private void RenderSeparateLuma(
         ReadOnlySpan<ushort> samples,
-        Span<byte> destination)
+        Span<byte> destination,
+        ReadOnlySpan<byte> luma)
     {
         for (int y = 0; y < _halfHeight; y++)
         {
@@ -190,9 +255,10 @@ internal sealed class PreviewFieldRenderer
             int destinationOffset = checked(y * _width);
             for (int x = 0; x < _width; x++)
             {
-                int index = sourceOffset + _sourceColumns[x];
-                destination[destinationOffset + x] = (uint)index < (uint)samples.Length
-                    ? _lumaLut[samples[index]]
+                int sourceColumn = _sourceColumns[x];
+                int index = sourceOffset + sourceColumn;
+                destination[destinationOffset + x] = sourceColumn < _sourceLineLength && (uint)index < (uint)samples.Length
+                    ? luma[samples[index]]
                     : (byte)16;
             }
         }
@@ -230,6 +296,11 @@ internal sealed class PreviewFieldRenderer
             int destinationOffset = y * _chromaWidth;
             for (int x = 0; x < _chromaWidth; x++)
             {
+                if (_fullRaster && (x * 2 < _activeStart || x * 2 >= _activeEnd))
+                {
+                    continue;
+                }
+
                 double u0 = 128.0;
                 double v0 = 128.0;
                 bool valid0 = validPrefix0 && TryDecodeChroma(
@@ -280,7 +351,7 @@ internal sealed class PreviewFieldRenderer
             : firstActiveLine;
         int lastBurstLine = _palChroma
             ? Math.Min(lineCount - 1, lastActiveLine + 2)
-            : lastActiveLine;
+            : Math.Min(lineCount - 1, lastActiveLine);
         for (int sourceLine = firstBurstLine; sourceLine <= lastBurstLine; sourceLine++)
         {
             _burstVectors[sourceLine] = DetectBurstVector(
@@ -624,12 +695,12 @@ internal sealed class PreviewFieldRenderer
         return (starts, ends);
     }
 
-    private static byte[] BuildLumaLut(DecodeSession session)
+    private static byte[] BuildLumaLut(VideoOutputConverter converter)
     {
         var output = new byte[ushort.MaxValue + 1];
         for (int value = 0; value < output.Length; value++)
         {
-            double ire = session.VideoOutput.OutputToIre((ushort)value);
+            double ire = converter.OutputToIre((ushort)value);
             output[value] = (byte)Math.Clamp(
                 (int)Math.Round(16.0 + (ire * 2.19), MidpointRounding.AwayFromZero),
                 16,

@@ -110,6 +110,7 @@ public static class CliSpecs
         yield return Flag("preview_server", ["--preview-server"]);
         yield return Int("preview_port", ["--preview-port"], 8080);
         yield return Int("preview_crf", ["--preview-crf"], 31);
+        yield return Flag("preview_full_raster", ["--preview-full-raster"]);
         yield return Flag(
             DecodeAt20MspsDestination,
             ["--decode-at-20msps", "--decode_at_20msps"]);
@@ -198,6 +199,7 @@ public static class CliSpecs
         yield return Flag("preview_server", ["--preview-server"]);
         yield return Int("preview_port", ["--preview-port"], 8080);
         yield return Int("preview_crf", ["--preview-crf"], 31);
+        yield return Flag("preview_full_raster", ["--preview-full-raster"]);
         yield return Dbl("start", ["--start", "-s"], 0.0, pythonDefaultValue: 0);
         yield return Int("length", ["--length", "-l"], 110000);
         yield return Int("seek", ["--seek", "-S"], -1);

@@ -19,6 +19,7 @@ public sealed record PreviewServerOptions
     public int MaximumConcurrentWindowBuilds { get; init; } = 2;
 
     public int Crf { get; init; } = 31;
+    public PreviewRegion Region { get; init; } = PreviewRegion.ActiveVideo;
 
     public string FfmpegPath { get; init; } =
         Environment.GetEnvironmentVariable("VHSDECODE_FFMPEG") ?? "ffmpeg";
@@ -38,6 +39,11 @@ public sealed record PreviewServerOptions
 
     public void Validate()
     {
+        if (!Enum.IsDefined(Region))
+        {
+            throw new ArgumentOutOfRangeException(nameof(Region));
+        }
+
         if (Port is < 0 or > 65_535)
         {
             throw new ArgumentOutOfRangeException(nameof(Port), "Preview port must be between 0 and 65535.");

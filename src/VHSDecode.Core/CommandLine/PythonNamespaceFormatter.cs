@@ -29,6 +29,7 @@ internal static class PythonNamespaceFormatter
                 or "preview_server"
                 or "preview_port"
                 or "preview_crf"
+                or "preview_full_raster"
                 or "cvbs_50ohms"
                 or "cvbs_tape_format"
                 or CliSpecs.DecodeAt20MspsDestination)

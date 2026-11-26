@@ -92,6 +92,25 @@ cd vhs-decode-dotnet-linux-x64
 See [Linux x64 release](docs/LINUX_X64.md) for the GLIBC 2.34 baseline, system
 C++ runtime requirements, non-Ubuntu distribution gates, checksums and provenance.
 
+### Embedded RF file preview
+
+Reference `src/VHSDecode.Preview.Frames/VHSDecode.Preview.Frames.csproj` to
+decode seekable VHS or LaserDisc RF files without hosting the HTTP preview.
+`PreviewFileDecoder.DecodeFields` delivers owned BGRA fields before 4:2:0
+subsampling, including timestamps, field parity, and the active-picture
+rectangle. Use `CopyToBgra` with `ActiveVideo` or `FullRaster` to display the
+same field without decoding it again. Set `IncludeTbcSamples` to receive the
+16-bit samples and IRE calibration for waveform inspection.
+
+`DecodeFrames` (also available as `Decode`) returns woven YUV420 frames.
+Set `PreviewFileOptions.Region` to `FullRaster` to keep the full decoded
+raster. Full YUV420 frames can include edge padding for encoder alignment.
+Run the synchronous APIs on a worker thread with a cancellation token.
+Embedded preview defaults to Exact and can explicitly use IPP-fast.
+
+Callers own the choice of weaving, deinterlacing, or displaying each field.
+The field and frame APIs are available from the same Frames project reference.
+
 ### Seekable RF preview server
 
 VHS and LaserDisc can expose a local, seekable HTTP preview without an output
@@ -99,6 +118,9 @@ base name:
 
 Run `decode.exe vhs --preview-server --pal input.lds` for tape RF, or
 `decode.exe ld --preview-server --pal input.ldf` for LaserDisc RF.
+Add `--preview-full-raster` to include the decoded blanking and overscan regions.
+Full-raster preview uses a CPU decode backend. The encoder can still use
+hardware acceleration.
 
 The command prints a loopback player URL and a standard HLS/fMP4 playlist URL.
 The default address starts at `127.0.0.1:8080`; if occupied, startup increments

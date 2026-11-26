@@ -33,7 +33,8 @@ public sealed class PreviewCommandRunner
                 PortFallbackCount = command.GetSource("preview_port") == ParsedOptionSource.Default
                     ? PreviewServerOptions.DefaultPortFallbackCount
                     : 0,
-                Crf = command.Get<int>("preview_crf")
+                Crf = command.Get<int>("preview_crf"),
+                Region = command.Get<bool>("preview_full_raster") ? PreviewRegion.FullRaster : PreviewRegion.ActiveVideo
             };
             DecodePreviewSegmentProvider provider = await DecodePreviewSegmentProvider.CreateAsync(
                 command,
