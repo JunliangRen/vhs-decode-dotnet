@@ -1,0 +1,32 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net11.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <PackageId>VHSDecode.Preview.Realtime</PackageId>
+    <PackageVersion Condition="'$(PackageVersion)' == ''">$(Version)-preview.1</PackageVersion>
+    <Authors>JunliangRen and contributors</Authors>
+    <Description>Streaming RF video and stereo audio preview for Windows x64.</Description>
+    <RepositoryUrl>https://github.com/JunliangRen/vhs-decode-dotnet</RepositoryUrl>
+    <RepositoryType>git</RepositoryType>
+    <PackageLicenseFile>LICENSE</PackageLicenseFile>
+    <PackageReadmeFile>README.md</PackageReadmeFile>
+    <PreviewNative>$(MSBuildThisFileDirectory)../../artifacts/native/Release/win-x64/vhsdecode_realtime_preview.dll</PreviewNative>
+  </PropertyGroup>
+  <ItemGroup>
+    <InternalsVisibleTo Include="VHSDecode.Preview.Frames" />
+    <InternalsVisibleTo Include="VHSDecode.Tests" />
+    <None Include="../../LICENSE;../../THIRD-PARTY-NOTICES.md" Pack="true" PackagePath="" />
+    <None Update="README.md" Pack="true" PackagePath="" />
+    <None Include="../VHSDecode.Preview.Native/liba52/COPYING" Pack="true" PackagePath="licenses/liba52/" />
+    <None Update="licenses/COPYING.LGPLv2.1" Pack="true" PackagePath="licenses/FFmpeg/" />
+    <None Include="$(PreviewNative)" Condition="Exists('$(PreviewNative)')" Pack="true"
+          PackagePath="runtimes/win-x64/native/" Link="vhsdecode_realtime_preview.dll">
+      <CopyToOutputDirectory Condition="'$(RuntimeIdentifier)' == 'win-x64' Or ('$(RuntimeIdentifier)' == '' And $([MSBuild]::IsOSPlatform('Windows')))">PreserveNewest</CopyToOutputDirectory>
+    </None>
+  </ItemGroup>
+  <Target Name="RequireNativePreviewForPack" BeforeTargets="GenerateNuspec">
+    <Error Condition="!Exists('$(PreviewNative)')" Text="Build the win-x64 Realtime native DLL before packing." />
+  </Target>
+</Project>

@@ -3,6 +3,7 @@
     <Project Path="src/VHSDecode.Cli/VHSDecode.Cli.csproj" />
     <Project Path="src/VHSDecode.Core/VHSDecode.Core.csproj" />
     <Project Path="src/VHSDecode.Preview/VHSDecode.Preview.csproj" />
+    <Project Path="src/VHSDecode.Preview.Realtime/VHSDecode.Preview.Realtime.csproj" />
     <Project Path="src/VHSDecode.Preview.Frames/VHSDecode.Preview.Frames.csproj" />
   </Folder>
   <Folder Name="/tests/">

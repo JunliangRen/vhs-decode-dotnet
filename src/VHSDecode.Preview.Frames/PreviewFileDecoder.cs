@@ -7,8 +7,7 @@ using VHSDecode.Core.Tbc;
 
 namespace VHSDecode.Preview;
 
-public enum PreviewSourceFormat { Vhs, LaserDisc }
-public enum PreviewVideoStandard { Ntsc, Pal }
+public enum PreviewDecodeMode { Tbc, Realtime }
 
 public sealed record PreviewFileOptions(
     string Path,
@@ -20,6 +19,7 @@ public sealed record PreviewFileOptions(
     DspBackend Backend = DspBackend.Exact)
 {
     public PreviewRegion Region { get; init; } = PreviewRegion.ActiveVideo;
+    public int? DecodeThreads { get; init; }
 }
 
 public sealed record PreviewFieldOptions(
@@ -30,7 +30,20 @@ public sealed record PreviewFieldOptions(
     TimeSpan Start = default,
     int FieldCount = 1,
     DspBackend Backend = DspBackend.Exact,
-    bool IncludeTbcSamples = false);
+    bool IncludeTbcSamples = false)
+{
+    /// <summary>Selects the field decoding pipeline.</summary>
+    public PreviewDecodeMode DecodeMode { get; init; } = PreviewDecodeMode.Tbc;
+
+    /// <summary>Selects the NTSC Betamax video carrier profile in Realtime mode.</summary>
+    public BetamaxVideoProfile BetamaxProfile { get; init; }
+
+    /// <summary>Selects the BGRA region. Requested TBC planes always cover the full raster.</summary>
+    public PreviewRegion Region { get; init; } = PreviewRegion.FullRaster;
+
+    /// <summary>Decoder worker count. Null selects one thread for Realtime or automatic for TBC.</summary>
+    public int? DecodeThreads { get; init; }
+}
 
 /// <summary>Decodes video-only preview frames and fields from a seekable RF file.</summary>
 public static class PreviewFileDecoder
@@ -48,6 +61,8 @@ public static class PreviewFileDecoder
         ArgumentNullException.ThrowIfNull(options);
         ArgumentNullException.ThrowIfNull(frameSink);
         ArgumentOutOfRangeException.ThrowIfNegativeOrZero(options.FrameCount);
+        if (options.DecodeThreads is int threads)
+            ArgumentOutOfRangeException.ThrowIfNegativeOrZero(threads, nameof(options.DecodeThreads));
         if (!Enum.IsDefined(options.Region))
             throw new ArgumentOutOfRangeException(nameof(options.Region));
 
@@ -74,7 +89,7 @@ public static class PreviewFileDecoder
                     fps, active, raster));
                 return ++count == options.FrameCount;
             };
-        }, cancellationToken);
+        }, cancellationToken, options.DecodeThreads);
         return count;
     }
 
@@ -85,6 +100,18 @@ public static class PreviewFileDecoder
         ArgumentNullException.ThrowIfNull(options);
         ArgumentNullException.ThrowIfNull(fieldSink);
         ArgumentOutOfRangeException.ThrowIfNegativeOrZero(options.FieldCount);
+        if (!Enum.IsDefined(options.Region))
+            throw new ArgumentOutOfRangeException(nameof(options.Region));
+        if (options.DecodeThreads is int threads)
+            ArgumentOutOfRangeException.ThrowIfNegativeOrZero(threads, nameof(options.DecodeThreads));
+
+        if (!Enum.IsDefined(options.DecodeMode))
+            throw new ArgumentOutOfRangeException(nameof(options.DecodeMode));
+        if (options.DecodeMode == PreviewDecodeMode.Realtime)
+            return RealtimePreviewFileDecoder.Decode(options, fieldSink, cancellationToken);
+        if (options.BetamaxProfile != BetamaxVideoProfile.Standard)
+            throw new NotSupportedException("The Betamax video profile option requires Realtime mode.");
+
         int frames = options.FieldCount / 2 + options.FieldCount % 2;
         var input = new PreviewFileOptions(options.Path, options.SourceFormat, options.Standard,
             options.InputSampleRateHz, options.Start, frames, options.Backend);
@@ -94,6 +121,8 @@ public static class PreviewFileDecoder
             TbcFrameSpec spec = session.TbcFrameSpec;
             var raster = new PreviewRectangle(0, 0, spec.OutputLineLength, spec.OutputLineCount);
             PreviewRectangle active = ActiveFieldRectangle(session);
+            bool crop = options.Region == PreviewRegion.ActiveVideo;
+            PreviewRectangle output = crop ? new(0, 0, active.Width, active.Height) : raster;
             var renderer = new PreviewFieldRenderer(session, raster.Width, raster.Height * 2,
                 fullRaster: true, nativeChroma: true);
             return (field, order) =>
@@ -103,21 +132,22 @@ public static class PreviewFileDecoder
 
                 var converter = field.OutputConverter ?? session.VideoOutput;
                 double zeroIre = converter.OutputZero - converter.VSyncIre * converter.OutputScale;
-                fieldSink(new PreviewField(renderer.RenderFullFieldBgra(field, order.IsFirstField),
-                    raster, active, order.IsFirstField, TimeSpan.FromSeconds(field.StartSample / rate),
+                fieldSink(new PreviewField(renderer.RenderFieldBgra(field, order.IsFirstField,
+                        crop ? active : raster),
+                    output, crop ? output : active, order.IsFirstField, TimeSpan.FromSeconds(field.StartSample / rate),
                     fps * 2, options.IncludeTbcSamples ? field.Samples.AsSpan(0, spec.FieldSampleCount).ToArray() : default,
                     options.IncludeTbcSamples && field.ChromaSamples is { } chroma
                         ? chroma.AsSpan(0, spec.FieldSampleCount).ToArray() : default,
-                    spec.OutputSampleRateHz, zeroIre, converter.OutputScale));
+                    spec.OutputSampleRateHz, zeroIre, converter.OutputScale, raster));
                 return ++count == options.FieldCount;
             };
-        }, cancellationToken);
+        }, cancellationToken, options.DecodeThreads);
         return count;
     }
 
     private static void DecodeWindow(PreviewFileOptions options, int requestedFrames,
         Func<DecodeSession, double, double, long, Func<TbcDecodedField, TbcFieldOrderDecision, bool>> createConsumer,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken, int? decodeThreads = null)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(options.Path);
         ArgumentOutOfRangeException.ThrowIfNegative(options.Start.Ticks);
@@ -144,10 +174,20 @@ public static class PreviewFileDecoder
         };
 
         cancellationToken.ThrowIfCancellationRequested();
-        ParsedCommand command = new CommandLineParser().Parse(spec,
-            ["--preview-server", standard, "--frequency",
-                (options.InputSampleRateHz / 1_000_000).ToString("R", CultureInfo.InvariantCulture),
-                "--dsp-backend", backend, "--", Path.GetFullPath(options.Path)]);
+        List<string> arguments =
+        [
+            "--preview-server", standard, "--frequency",
+            (options.InputSampleRateHz / 1_000_000).ToString("R", CultureInfo.InvariantCulture),
+            "--dsp-backend", backend
+        ];
+        if (decodeThreads is int threads)
+        {
+            arguments.Add("--threads");
+            arguments.Add(threads.ToString(CultureInfo.InvariantCulture));
+        }
+        arguments.Add("--");
+        arguments.Add(Path.GetFullPath(options.Path));
+        ParsedCommand command = new CommandLineParser().Parse(spec, arguments);
         ParsedCommand template = PreviewDecodeCommandFactory.CreateFastTemplate(command);
         double targetSeconds = options.Start.TotalSeconds;
         double decodeStartSeconds = Math.Max(0, targetSeconds - PrerollSeconds);

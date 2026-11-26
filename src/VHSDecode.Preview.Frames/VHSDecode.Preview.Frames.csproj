@@ -3,9 +3,11 @@
     <TargetFramework>net11.0</TargetFramework>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
   </PropertyGroup>
   <ItemGroup>
     <ProjectReference Include="../VHSDecode.Core/VHSDecode.Core.csproj" />
+    <ProjectReference Include="../VHSDecode.Preview.Realtime/VHSDecode.Preview.Realtime.csproj" />
     <InternalsVisibleTo Include="VHSDecode.Preview" />
     <InternalsVisibleTo Include="VHSDecode.Tests" />
   </ItemGroup>
