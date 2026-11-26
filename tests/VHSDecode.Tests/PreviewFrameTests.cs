@@ -136,6 +136,50 @@ public sealed class PreviewFrameTests
         Assert.Throws<NotSupportedException>(() => new RealtimePreviewSession(audioOptions, _ => { }, _ => { }));
     }
 
+    [Theory]
+    [InlineData(PreviewSourceFormat.Vhs)]
+    [InlineData(PreviewSourceFormat.Betamax)]
+    [InlineData(PreviewSourceFormat.LaserDisc)]
+    public void RealtimeRejectsCvbsPresetForRf(PreviewSourceFormat source)
+    {
+        var options = new RealtimePreviewOptions(source, PreviewVideoStandard.Ntsc, 40_000_000) { Cvbs50Ohms = true };
+        Assert.Throws<NotSupportedException>(() => new RealtimePreviewSession(options, _ => { }));
+        var file = new PreviewFieldOptions("missing.flac", source, PreviewVideoStandard.Ntsc)
+        {
+            DecodeMode = PreviewDecodeMode.Realtime, Cvbs50Ohms = true
+        };
+        Assert.Throws<NotSupportedException>(() => PreviewFileDecoder.DecodeFields(file, _ => { }, TestContext.Current.CancellationToken));
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void RealtimeCvbsLocksDirectCompositeAfterDiscontinuity(bool pal)
+    {
+        Assert.SkipUnless(OperatingSystem.IsWindows()
+            && System.Runtime.InteropServices.RuntimeInformation.ProcessArchitecture == System.Runtime.InteropServices.Architecture.X64
+            && File.Exists(Path.Combine(AppContext.BaseDirectory, "vhsdecode_realtime_preview.dll")),
+            "The Windows x64 Realtime preview library was not staged.");
+        const int rate = 20_000_000;
+        var samples = CvbsTestSignal.Create(pal);
+        var options = new RealtimePreviewOptions(PreviewSourceFormat.Cvbs,
+            pal ? PreviewVideoStandard.Pal : PreviewVideoStandard.Ntsc, rate);
+        var fields = new List<(TimeSpan Time, bool Top)>();
+        using var decoder = new RealtimePreviewSession(options, f => fields.Add((f.Timestamp, f.IsTopField)));
+        decoder.Process(samples, 0, TestContext.Current.CancellationToken);
+        Assert.True(fields.Count >= 4);
+        var initial = fields.ToArray();
+        fields.Clear();
+        decoder.Process(samples, rate, TestContext.Current.CancellationToken);
+        Assert.Equal(initial.Length, fields.Count);
+        for (int i = 0; i < fields.Count; i++)
+        {
+            Assert.Equal(initial[i].Time + TimeSpan.FromSeconds(1), fields[i].Time);
+            Assert.Equal(initial[i].Top, fields[i].Top);
+            if (i > 0) Assert.NotEqual(fields[i - 1].Top, fields[i].Top);
+        }
+    }
+
     [Fact]
     public void RealtimeRejectsUnsupportedSettingsBeforeOpeningInput()
     {

@@ -9,7 +9,7 @@ A .NET 11 rewrite of the decode-facing parts of
 upstream release `v0.4.0` at commit
 `43155200da87c0d49eb37d8ec09b1372075ee8e4`.
 
-The current .NET port release is [`v0.4.0-2.28.0`](https://github.com/JunliangRen/vhs-decode-dotnet/releases/tag/v0.4.0-2.28.0) (application version `2.28.0`).
+The current .NET port release is [`v0.4.0-2.29.0`](https://github.com/JunliangRen/vhs-decode-dotnet/releases/tag/v0.4.0-2.29.0) (application version `2.29.0`).
 The x64 binaries require an [x86-64-v2 CPU](https://learn.microsoft.com/en-us/dotnet/core/whats-new/dotnet-11/runtime#updated-minimum-hardware-requirements), including SSE4.2 and POPCNT.
 
 [LD EFM buffer reuse measurements and limits](docs/LD_PERFORMANCE_V16.md).
@@ -119,7 +119,7 @@ Run the synchronous APIs on a worker thread with a cancellation token.
 Embedded TBC preview defaults to Exact and can explicitly use IPP-fast.
 
 Set `PreviewFieldOptions.DecodeMode` to `PreviewDecodeMode.Realtime` for the
-reduced-bandwidth file preview. On Windows x64 it accepts PAL/NTSC VHS,
+reduced-bandwidth file preview. On Windows x64 it accepts PAL/NTSC baseband CVBS, PAL/NTSC VHS,
 PAL/NTSC Betamax or NTSC LaserDisc at 20 or 40 MSPS from signed 16-bit RF or FLAC (FFmpeg required
 for FLAC). It returns owned, interlaced BGRA fields. Use `DecodeThreads` on either
 `RealtimePreviewOptions` or `PreviewFieldOptions` to set the session's total

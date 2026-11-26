@@ -15,3 +15,20 @@ preview.Process(samples, firstSourceSample);
 ```
 
 Supply signed 16-bit mono RF and the absolute sample index of each block. Call the session serially on a worker thread. Both callbacks run on that thread and receive owned data. Use the field timestamp and parity for interlaced BGRA, and the audio block presentation timestamp for interleaved stereo PCM. A discontinuous sample index triggers reacquisition.
+
+For 20 or 40 MSPS signed 16-bit PAL or NTSC composite video, select
+`PreviewSourceFormat.Cvbs` and pass only a field callback. Both regions and
+thread budgets apply as for RF preview. Realtime file decoding exposes the
+same preset on `PreviewFieldOptions`.
+
+```csharp
+var cvbs = new RealtimePreviewOptions(PreviewSourceFormat.Cvbs, PreviewVideoStandard.Ntsc, 40_000_000)
+{
+    Cvbs50Ohms = true
+};
+using var composite = new RealtimePreviewSession(cvbs, OnField);
+```
+
+`Cvbs50Ohms` defaults to false. Expose the option only for the CVBS source.
+It enables low-frequency restoration and back-porch clamping for AC-coupled
+DdD captures. The name follows the offline decoder preset.

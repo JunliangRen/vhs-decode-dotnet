@@ -4,6 +4,7 @@
     <ProjectReference Include="..\..\src\VHSDecode.Core\VHSDecode.Core.csproj" />
     <ProjectReference Include="..\..\src\VHSDecode.Preview\VHSDecode.Preview.csproj" />
     <ProjectReference Include="..\VHSDecode.ProcessTestHost\VHSDecode.ProcessTestHost.csproj" ReferenceOutputAssembly="false" OutputItemType="ProcessTestHostAssembly" />
+    <Compile Include="../../tools/RealtimePackageSmoke/CvbsTestSignal.cs" Link="Fixtures/CvbsTestSignal.cs" />
     <EmbeddedResource Include="Fixtures\tape-family-v0.4.0.json" />
     <EmbeddedResource Include="Fixtures\beta-hifi-backend-v1.bin.gz" WithCulture="false" LogicalName="VHSDecode.Tests.Fixtures.beta-hifi-backend-v1.bin.gz" />
   </ItemGroup>
