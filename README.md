@@ -9,7 +9,7 @@ A .NET 11 rewrite of the decode-facing parts of
 upstream release `v0.4.0` at commit
 `43155200da87c0d49eb37d8ec09b1372075ee8e4`.
 
-The current .NET port release is [`v0.4.0-2.27.0`](https://github.com/JunliangRen/vhs-decode-dotnet/releases/tag/v0.4.0-2.27.0) (application version `2.27.0`).
+The current .NET port release is [`v0.4.0-2.28.0`](https://github.com/JunliangRen/vhs-decode-dotnet/releases/tag/v0.4.0-2.28.0) (application version `2.28.0`).
 The x64 binaries require an [x86-64-v2 CPU](https://learn.microsoft.com/en-us/dotnet/core/whats-new/dotnet-11/runtime#updated-minimum-hardware-requirements), including SSE4.2 and POPCNT.
 
 [LD EFM buffer reuse measurements and limits](docs/LD_PERFORMANCE_V16.md).
@@ -94,19 +94,99 @@ C++ runtime requirements, non-Ubuntu distribution gates, checksums and provenanc
 
 ### Embedded RF file preview
 
+For live win-x64 input, reference the `VHSDecode.Preview.Realtime` NuGet package
+from a .NET 11 host. See the [streaming API example](src/VHSDecode.Preview.Realtime/README.md).
+The Realtime preview NuGet workflow packs and tests an isolated published consumer.
+Publishing a GitHub release uploads the tested prerelease package to the repository
+owner's GitHub Packages NuGet feed. Grant a consuming repository Read under the
+package's **Manage Actions access** and restore with its read-only Packages token.
+
 Reference `src/VHSDecode.Preview.Frames/VHSDecode.Preview.Frames.csproj` to
 decode seekable VHS or LaserDisc RF files without hosting the HTTP preview.
 `PreviewFileDecoder.DecodeFields` delivers owned BGRA fields before 4:2:0
 subsampling, including timestamps, field parity, and the active-picture
-rectangle. Use `CopyToBgra` with `ActiveVideo` or `FullRaster` to display the
-same field without decoding it again. Set `IncludeTbcSamples` to receive the
-16-bit samples and IRE calibration for waveform inspection.
+rectangle. Set `PreviewFieldOptions.Region` to `ActiveVideo` to render only
+the active area, or keep the default `FullRaster` to include blanking. Set
+`IncludeTbcSamples` to receive the full-raster 16-bit samples and IRE calibration
+for waveform inspection. Their geometry is available in `TbcRasterRect`.
+`PreviewFieldOptions.DecodeThreads` sets the decode worker count for hosts
+that need to reserve CPU for capture and display.
 
 `DecodeFrames` (also available as `Decode`) returns woven YUV420 frames.
 Set `PreviewFileOptions.Region` to `FullRaster` to keep the full decoded
 raster. Full YUV420 frames can include edge padding for encoder alignment.
 Run the synchronous APIs on a worker thread with a cancellation token.
-Embedded preview defaults to Exact and can explicitly use IPP-fast.
+Embedded TBC preview defaults to Exact and can explicitly use IPP-fast.
+
+Set `PreviewFieldOptions.DecodeMode` to `PreviewDecodeMode.Realtime` for the
+reduced-bandwidth file preview. On Windows x64 it accepts PAL/NTSC VHS,
+PAL/NTSC Betamax or NTSC LaserDisc at 20 or 40 MSPS from signed 16-bit RF or FLAC (FFmpeg required
+for FLAC). It returns owned, interlaced BGRA fields. Use `DecodeThreads` on either
+`RealtimePreviewOptions` or `PreviewFieldOptions` to set the session's total
+decode thread budget (1–64, including the caller; default 1). For example,
+`new RealtimePreviewOptions(PreviewSourceFormat.Betamax, PreviewVideoStandard.Pal, 40_000_000) { DecodeThreads = 4 }`.
+Workers share independent row pairs, overlap RF and audio processing where
+possible, and filter independent carrier samples for audio-only VHS HiFi.
+Field and audio callbacks run synchronously on the calling thread. The
+`--preview-server` CLI uses `--threads N` for its TBC decode workers. Realtime uses its own DSP.
+Leave `Backend` at its default and `IncludeTbcSamples` disabled.
+For PAL Betamax video (including recordings from a HiFi deck), select Betamax,
+PAL and the standard video profile. Each active field contains 768 × 288 pixels.
+For NTSC Betamax HiFi recordings, set `BetamaxProfile = BetamaxVideoProfile.HiFi`
+for the matching video carriers. The profile selects video processing.
+
+Use `RealtimePreviewSession` to submit mono signed 16-bit RF from memory.
+Pass a field callback for video, or select `PreviewAudioTrack.VhsHiFi` and
+pass only an audio callback for audio-only VHS HiFi. VHS HiFi supports both
+standards at 8, 8.192, 10, and 20 MSPS and returns owned 48 kHz float stereo
+with the ending RF sample position and lock status. Call `Process` serially
+on a worker thread with each block's absolute source sample position. An RF
+discontinuity or explicit `Reset` discards decoder history. Callbacks run on
+the caller's thread and the host owns audio playback.
+
+For simultaneous NTSC Betamax HiFi video and sound, select Betamax, NTSC,
+20 or 40 MSPS, and `PreviewAudioTrack.BetamaxHiFi`. Supply both callbacks.
+This track selects the HiFi video carrier profile automatically. Schedule
+fields and 48 kHz stereo by their RF timestamps. Video acquisition and audio
+lock are independent, and the audio timeline continues through muted RF.
+
+For NTSC LaserDisc RF at 20 or 40 MSPS, select LaserDisc and NTSC. Use a
+field sink alone for video, or select `PreviewAudioTrack.LaserDiscAnalog`
+and supply both sinks for video and 48 kHz interleaved analog L/R. Each
+carrier locks and mutes independently. The block lock flag means at least
+one channel is locked. Both timestamps use the input RF clock.
+
+For the NTSC LaserDisc digital track, use `PreviewAudioTrack.LaserDiscDigitalPcm`
+with both sinks. EFM clock recovery and CIRC decoding supply native 44,100 Hz
+interleaved float L/R. Read `PreviewAudioBlock.SampleRateHz` when opening
+the audio device. Digital audio carries RF-based media timestamps corrected
+for CIRC delay. Allow roughly 110 ms of buffering for CIRC, compressed-track
+detection and callback batching; schedule video and audio by timestamp.
+Digital RF loss can leave timestamp gaps, including buffered audio preceding
+the loss. Call `session.Finish()` at natural EOF to deliver the classified
+PCM tail and reset the stream. Use `Reset()` to discard pending data on seek.
+
+For NTSC AC-3 RF LaserDiscs, select `PreviewAudioTrack.LaserDiscAc3Rf` with both sinks.
+The decoder recovers AC-3 from the 2.88 MHz carrier and delivers stereo PCM at
+48 kHz in 1,536-frame blocks. Schedule audio using `PresentationEndTimestamp`.
+`EndTimestamp` and `EndSourceSample` expose the underlying RF clock. The default
+`LaserDiscAc3PresentationDelay` of 128 ms aligns the AC-3 program with the
+companion digital PCM tracks measured on two discs. Adjust it for other
+masterings or set it to zero to use RF timing. Call `Finish()` at EOF
+to drain the last recoverable block. AC-3 support is included in the native build.
+
+For NTSC DTS LaserDiscs, select `PreviewAudioTrack.LaserDiscDts` with both sinks.
+The same EFM/CIRC stage feeds the DTS core decoder. Audio callbacks deliver
+44.1 kHz interleaved stereo with RF timestamps. Incomplete packets are
+discarded across signal loss or reset. Enable DTS by passing `-FfmpegPrefix`
+(or setting `VHSDECODE_PREVIEW_FFMPEG_PREFIX`) to the build script. Use an
+x64 MinGW FFmpeg installation with static libavcodec and libavutil archives,
+public headers and the DCA decoder enabled.
+
+Build the native library before building an application that references the
+preview project. Run `./tools/build-realtime-preview-native.ps1` with x64
+MinGW-w64 GCC on PATH or pass its path using `-Compiler`. The project copies
+the staged DLL to the referencing app's output and publish directories.
 
 Callers own the choice of weaving, deinterlacing, or displaying each field.
 The field and frame APIs are available from the same Frames project reference.

@@ -198,3 +198,24 @@ terms of the GNU Lesser General Public License as published by the Free
 Software Foundation; either version 2.1 of the License, or (at your option)
 any later version. A shared copy of the complete LGPL 2.1 text is available at
 `third_party/libsoxr/COPYING.LGPL`; that file is not an FFmpeg-specific notice.
+
+## Realtime VHS preview
+
+The vendored C sources in src/VHSDecode.Preview.Native are derived from
+[MISRC-GUI](https://github.com/JunliangRen/MISRC-GUI) at revision
+3aba80729661176e05f1dee9aaa8eefc871e86e3 and retain the upstream GPL-3.0
+license. Local changes expose owned fields through a native bridge, add NTSC
+field-boundary recovery, wire the existing two-stage worker interface,
+and expose the streaming RF resampler, tape HiFi audio, and LaserDisc analog
+and digital audio. DTS-enabled builds statically link FFmpeg libavcodec and libavutil
+for DCA core decoding. See https://ffmpeg.org/legal.html for FFmpeg licensing.
+The EFM frontend, CIRC decoder and DTS packet reader come from
+the same MISRC-GUI revision. The EFM symbol table is from tbc-tools
+(Copyright (C) 2025 Simon Inns, GPL-3.0-or-later), as attributed in
+src/VHSDecode.Preview.Native/gui_ld_rf_efm_codes.h.
+The NTSC LaserDisc AC-3 RF demodulator, frame recovery and stereo wrapper
+come from the same MISRC-GUI revision, with upstream ld-decode and museLD
+attributions retained in source. The bundled portable liba52 0.8.0 includes
+MISRC-GUI's decoder patches. Its sources and GPL-2.0-or-later license are
+in src/VHSDecode.Preview.Native/liba52.
+The repository LICENSE contains the GPL-3.0 text.

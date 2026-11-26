@@ -36,6 +36,8 @@ internal sealed class PreviewFieldRenderer
     private readonly int _burstEnd;
     private readonly byte[] _lumaLut;
     private readonly VideoOutputConverter _videoOutput;
+    private VideoOutputConverter? _alternateLumaConverter;
+    private byte[]? _alternateLumaLut;
     private readonly bool _fullRaster;
     private readonly bool _palChroma;
     private readonly bool _ntscChroma;
@@ -152,40 +154,76 @@ internal sealed class PreviewFieldRenderer
             chromaDropouts);
     }
 
-    internal byte[] RenderFullFieldBgra(TbcDecodedField field, bool isFirstField)
+    internal byte[] RenderFieldBgra(TbcDecodedField field, bool isFirstField,
+        PreviewRectangle? region = null)
     {
-        int pixelCount = checked(_width * _halfHeight);
-        var luma = new byte[pixelCount];
+        PreviewRectangle bounds = region ?? new(0, 0, _width, _halfHeight);
+        int right = bounds.X + bounds.Width;
+        int bottom = bounds.Y + bounds.Height;
+        var bgra = GC.AllocateUninitializedArray<byte>(checked(bounds.Width * bounds.Height * 4));
+        ReadOnlySpan<ushort> samples = field.Samples;
         bool separateChroma = field.ChromaSamples is { Length: > 0 } chroma
-            && chroma.Length >= field.Samples.Length;
-        RenderLuma(field, separateChroma, luma);
-        var bgra = new byte[checked(pixelCount * 4)];
-        ReadOnlySpan<ushort> chromaSource = separateChroma ? field.ChromaSamples! : field.Samples;
+            && chroma.Length >= samples.Length;
+        ReadOnlySpan<byte> luma = GetLumaLut(field.OutputConverter);
+        ReadOnlySpan<ushort> chromaSource = separateChroma ? field.ChromaSamples! : samples;
         BurstRotation[]? bursts = (_palChroma || _ntscChroma) && _burstEnd > _burstStart
             ? BuildBurstRotations(chromaSource, separateChroma)
             : null;
-        for (int y = 0; y < _halfHeight; y++)
+        int stride = bounds.Width * 4;
+        int colorStart = Math.Max(bounds.X, _activeStart);
+        int colorEnd = Math.Min(right, _activeEnd);
+        for (int y = bounds.Y; y < bottom; y++)
         {
-            bool hasColor = bursts is not null && bursts[y].Valid
+            int lineOffset = y * _sourceLineLength;
+            ReadOnlySpan<ushort> line = samples.Slice(
+                Math.Min(samples.Length, lineOffset),
+                Math.Clamp(samples.Length - lineOffset, 0, _sourceLineLength));
+            Span<byte> row = bgra.AsSpan((y - bounds.Y) * stride, stride);
+            bool hasColor = colorStart < colorEnd && bursts is not null && bursts[y].Valid
                 && BuildDemodulatedPrefixes(chromaSource, y, separateChroma, _realPrefix0, _imaginaryPrefix0);
-            for (int x = 0; x < _width; x++)
+            int x = bounds.X;
+            if (hasColor)
             {
-                double u = 128.0;
-                double v = 128.0;
-                // The porch and sync samples are useful as luma or TBC data, but
-                // converting their burst/sync transitions into hue is misleading.
-                if (hasColor && x >= _activeStart && x < _activeEnd)
+                for (; x < colorStart; x++)
+                    WriteMonochrome(row, line, luma, bounds.X, x, separateChroma);
+
+                for (; x < colorEnd; x++)
                 {
                     _ = TryDecodeChroma(_realPrefix0, _imaginaryPrefix0, y, bursts![y],
-                        isFirstField, field.FieldPhaseId, x, out u, out v);
+                        isFirstField, field.FieldPhaseId, x, out double u, out double v);
+                    PreviewFrame.WriteBgra(row, (x - bounds.X) * 4, NativeLuma(line, luma, x, separateChroma),
+                        ChromaByte(u), ChromaByte(v));
                 }
-
-                int pixel = y * _width + x;
-                PreviewFrame.WriteBgra(bgra, pixel * 4, luma[pixel], ChromaByte(u), ChromaByte(v));
             }
+
+            for (; x < right; x++)
+                WriteMonochrome(row, line, luma, bounds.X, x, separateChroma);
         }
 
         return bgra;
+    }
+
+    private static byte NativeLuma(ReadOnlySpan<ushort> line, ReadOnlySpan<byte> luma, int x,
+        bool separateChroma)
+    {
+        if (x >= line.Length)
+            return 16;
+
+        int value = line[x];
+        if (!separateChroma && x >= 2)
+            value = (value + line[x - 2] + 1) / 2;
+        return luma[value];
+    }
+
+    private static void WriteMonochrome(Span<byte> row, ReadOnlySpan<ushort> line,
+        ReadOnlySpan<byte> luma, int firstColumn, int x, bool separateChroma)
+    {
+        int offset = (x - firstColumn) * 4;
+        byte gray = (byte)(((NativeLuma(line, luma, x, separateChroma) - 16) * 298 + 128) >> 8);
+        row[offset] = gray;
+        row[offset + 1] = gray;
+        row[offset + 2] = gray;
+        row[offset + 3] = 255;
     }
 
     private static (int[] Starts, int[] Ends) BuildNativeChromaRanges(int width, int sourceWidth)
@@ -207,8 +245,7 @@ internal sealed class PreviewFieldRenderer
         Span<byte> destination)
     {
         ReadOnlySpan<ushort> samples = field.Samples;
-        ReadOnlySpan<byte> luma = _fullRaster && field.OutputConverter is { } converter
-            && !ReferenceEquals(converter, _videoOutput) ? BuildLumaLut(converter) : _lumaLut;
+        ReadOnlySpan<byte> luma = GetLumaLut(field.OutputConverter);
         if (separateChroma)
         {
             RenderSeparateLuma(samples, destination, luma);
@@ -694,6 +731,23 @@ internal sealed class PreviewFieldRenderer
 
         return (starts, ends);
     }
+
+    private byte[] GetLumaLut(VideoOutputConverter? converter)
+    {
+        // Per-field RF calibration can change Ire0 and HzIre without changing the TBC output mapping.
+        if (!_fullRaster || converter is null || SameLumaMapping(converter, _videoOutput))
+            return _lumaLut;
+        if (_alternateLumaConverter is null || !SameLumaMapping(converter, _alternateLumaConverter))
+        {
+            _alternateLumaLut = BuildLumaLut(converter);
+            _alternateLumaConverter = converter;
+        }
+        return _alternateLumaLut!;
+    }
+
+    private static bool SameLumaMapping(VideoOutputConverter left, VideoOutputConverter right) =>
+        left.OutputZero == right.OutputZero && left.OutputScale == right.OutputScale
+        && left.VSyncIre == right.VSyncIre;
 
     private static byte[] BuildLumaLut(VideoOutputConverter converter)
     {

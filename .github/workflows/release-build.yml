@@ -159,6 +159,8 @@ jobs:
             Get-Item -LiteralPath $artifact
           }
 
+      - uses: ./.github/actions/build-realtime
+
       - name: Restore dependencies
         run: dotnet restore VHSDecodeDotNet.slnx
 

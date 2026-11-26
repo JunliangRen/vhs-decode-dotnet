@@ -4,12 +4,13 @@ public enum PreviewRegion { ActiveVideo, FullRaster }
 
 public readonly record struct PreviewRectangle(int X, int Y, int Width, int Height);
 
-/// <summary>An owned, full-raster BGRA field, rendered before 4:2:0 subsampling.</summary>
+/// <summary>An owned BGRA field, rendered before 4:2:0 subsampling.</summary>
 public sealed class PreviewField
 {
     internal PreviewField(byte[] bgra, PreviewRectangle raster, PreviewRectangle activeVideo, bool isTopField,
         TimeSpan timestamp, double fieldsPerSecond, ReadOnlyMemory<ushort> samples,
-        ReadOnlyMemory<ushort> chromaSamples, double tbcSampleRateHz, double tbcZeroIre, double tbcUnitsPerIre)
+        ReadOnlyMemory<ushort> chromaSamples, double tbcSampleRateHz, double tbcZeroIre, double tbcUnitsPerIre,
+        PreviewRectangle? tbcRaster = null)
     {
         Bgra = bgra;
         RasterRect = raster;
@@ -17,6 +18,7 @@ public sealed class PreviewField
         IsTopField = isTopField;
         Timestamp = timestamp;
         FieldsPerSecond = fieldsPerSecond;
+        TbcRasterRect = tbcRaster ?? raster;
         TbcSamples = samples;
         TbcChromaSamples = chromaSamples;
         TbcSampleRateHz = tbcSampleRateHz;
@@ -36,6 +38,9 @@ public sealed class PreviewField
     public TimeSpan Timestamp { get; }
     public double FieldsPerSecond { get; }
 
+    /// <summary>Full-raster dimensions of the optional TBC planes, independent of the BGRA crop.</summary>
+    public PreviewRectangle TbcRasterRect { get; }
+
     /// <summary>Owned, row-major TBC samples when requested. The main plane can contain composite video.</summary>
     public ReadOnlyMemory<ushort> TbcSamples { get; }
     /// <summary>Owned, row-major color carrier data when the decoder provides a separate plane.</summary>
@@ -44,7 +49,8 @@ public sealed class PreviewField
     public double TbcZeroIre { get; }
     public double TbcUnitsPerIre { get; }
 
-    /// <summary>Copies the selected rectangle to tightly packed BGRA without decoding again.</summary>
+    /// <summary>Copies the selected rectangle from the stored BGRA image.</summary>
+    /// <remarks>FullRaster copies the entire stored image, which may already be cropped by the decoder.</remarks>
     public void CopyToBgra(Span<byte> destination, PreviewRegion region)
     {
         PreviewRectangle bounds = region switch

@@ -463,6 +463,37 @@ public sealed class RfContainerLoaderIntegrationTests
         return output.ToArray();
     }
 
+    [Fact(DisplayName = "Fast FLAC seeking uses the STREAMINFO sample rate")]
+    public void FastFlacSeekingUsesStreamInfoSampleRate()
+    {
+        Assert.SkipUnless(CommandIsAvailable("ffmpeg"), "ffmpeg must be available on PATH.");
+
+        string directory = CreateTestDirectory();
+        try
+        {
+            short[] samples = CreateSamples();
+            string wavePath = Path.Combine(directory, "20 kHz source.wav");
+            string flacPath = Path.Combine(directory, "20 kHz source.flac");
+            WriteWave(wavePath, samples, sampleRate: 20_000);
+            EncodeFlac(wavePath, flacPath, oggContainer: false, frameSize: 2_048);
+
+            using var loader = new FfmpegPcm16SampleLoader(flacPath, fastInputSeek: true, rewindSize: 1_024);
+            using FileStream input = File.OpenRead(flacPath);
+            const int ReadLength = 31;
+            foreach (int offset in new[] { 1_100_013, 300_027 })
+            {
+                double[] actual = Assert.IsType<double[]>(loader.Read(input, offset, ReadLength));
+                Assert.Equal(
+                    samples.AsSpan(offset, ReadLength).ToArray().Select(static value => (double)value),
+                    actual);
+            }
+        }
+        finally
+        {
+            Directory.Delete(directory, recursive: true);
+        }
+    }
+
     [Fact(DisplayName = "CUDA full maps PyAV coordinates before indexed raw FLAC reads")]
     public void CudaFullMapsPyAvCoordinatesBeforeIndexedRawFlacReads()
     {

@@ -37,6 +37,7 @@ public sealed class FfmpegPcm16SampleLoader : IReusableRfSampleLoader, IDisposab
     private Task? _rawFlacPumpTask;
     private Exception? _rawFlacPumpException;
     private ContainerAudioInfo? _containerAudioInfo;
+    private int? _fastContainerSampleRateHz;
     private Stream? _output;
     private Process? _process;
     private long _positionBytes;
@@ -639,6 +640,12 @@ public sealed class FfmpegPcm16SampleLoader : IReusableRfSampleLoader, IDisposab
 
     private Stream OpenFastFfmpegOutput(string filename, long sample)
     {
+        // FFmpeg input seeking uses the FLAC container clock, even when the RF sample rate differs.
+        int sampleRateHz = _fastContainerSampleRateHz ??=
+            RawFlacStreamInfo.TryRead(filename, out RawFlacStreamInfo info) && info.SampleRateHz > 0
+                ? info.SampleRateHz
+                : ContainerAudioSampleRateHz;
+
         var startInfo = new ProcessStartInfo("ffmpeg")
         {
             UseShellExecute = false,
@@ -650,6 +657,7 @@ public sealed class FfmpegPcm16SampleLoader : IReusableRfSampleLoader, IDisposab
         foreach (string argument in BuildFfmpegArguments(
             filename,
             sample,
+            containerAudioSampleRateHz: sampleRateHz,
             fastInputSeek: true))
         {
             startInfo.ArgumentList.Add(argument);

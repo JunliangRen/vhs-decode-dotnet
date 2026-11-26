@@ -10,7 +10,7 @@
 中解码相关部分的 .NET 11 重写，当前以 release `v0.4.0`、commit
 `43155200da87c0d49eb37d8ec09b1372075ee8e4` 为兼容基线。
 
-当前 .NET 移植版发布为 [`v0.4.0-2.27.0`](https://github.com/JunliangRen/vhs-decode-dotnet/releases/tag/v0.4.0-2.27.0)（应用版本 `2.27.0`）。
+当前 .NET 移植版发布为 [`v0.4.0-2.28.0`](https://github.com/JunliangRen/vhs-decode-dotnet/releases/tag/v0.4.0-2.28.0)（应用版本 `2.28.0`）。
 
 [LD EFM 缓冲区复用的测量与边界](LD_PERFORMANCE_V16.md)。
 
