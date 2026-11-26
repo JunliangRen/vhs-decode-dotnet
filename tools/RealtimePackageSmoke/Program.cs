@@ -20,3 +20,30 @@ var ld = new RealtimePreviewOptions(PreviewSourceFormat.LaserDisc, PreviewVideoS
 };
 using var dts = new RealtimePreviewSession(ld, _ => { }, _ => { });
 dts.Process(new short[65_536], 0);
+
+foreach (bool pal in new[] { false, true })
+{
+    short[] samples = CvbsTestSignal.Create(pal);
+    double baseline = samples[0];
+    double alpha = 1 - Math.Exp(-2 * Math.PI * 6000 / 20_000_000);
+    for (int i = 0; i < samples.Length; i++)
+    {
+        double ac = samples[i] - baseline;
+        baseline += alpha * ac;
+        samples[i] = (short)Math.Round(ac);
+    }
+    var options = new RealtimePreviewOptions(PreviewSourceFormat.Cvbs,
+        pal ? PreviewVideoStandard.Pal : PreviewVideoStandard.Ntsc, 20_000_000) { Cvbs50Ohms = true };
+    int fields = 0;
+    bool? previousTop = null;
+    using var session = new RealtimePreviewSession(options, field =>
+    {
+        if (field.IsTopField == previousTop || field.Height != (pal ? 288 : 240) || field.Bgra.IsEmpty)
+            throw new InvalidDataException("Invalid CVBS field.");
+        previousTop = field.IsTopField;
+        fields++;
+    });
+    session.Process(samples, 0);
+    if (fields < 4) throw new InvalidDataException($"Only {fields} CVBS fields on {options.Standard}.");
+    Console.WriteLine($"{options.Standard} CVBS package preview produced {fields} fields.");
+}

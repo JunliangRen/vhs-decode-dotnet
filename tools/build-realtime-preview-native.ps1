@@ -13,6 +13,7 @@ $arguments = @(
     '-shared', '-std=c11', '-O3', '-ffast-math', '-funroll-loops', '-flto=auto', '-static-libgcc',
     '-o', (Join-Path $output 'vhsdecode_realtime_preview.dll'),
     (Join-Path $source 'gui_rf_preview.c'), (Join-Path $source 'gui_ld_rf_demod.c'),
+    (Join-Path $source 'cvbs_frontend.c'),
     (Join-Path $source 'gui_rf_resampler.c'), (Join-Path $source 'gui_vhs_hifi.c'),
     (Join-Path $source 'gui_beta_hifi.c'), (Join-Path $source 'gui_ld_rf_analog.c'),
     (Join-Path $source 'gui_ld_efm_frontend.c'), (Join-Path $source 'gui_ld_rf_digital.c'),

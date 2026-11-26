@@ -4,7 +4,7 @@ using Microsoft.Win32.SafeHandles;
 
 namespace VHSDecode.Preview;
 
-public enum PreviewSourceFormat { Vhs, LaserDisc, Betamax }
+public enum PreviewSourceFormat { Vhs, LaserDisc, Betamax, Cvbs }
 public enum PreviewVideoStandard { Ntsc, Pal }
 public enum PreviewAudioTrack { None, VhsHiFi, BetamaxHiFi, LaserDiscAnalog, LaserDiscDigitalPcm, LaserDiscDts, LaserDiscAc3Rf }
 public enum BetamaxVideoProfile { Standard, HiFi }
@@ -14,6 +14,8 @@ public sealed record RealtimePreviewOptions(
     PreviewVideoStandard Standard,
     int InputSampleRateHz)
 {
+    /// <summary>Enable baseline restoration for AC-coupled DdD composite input.</summary>
+    public bool Cvbs50Ohms { get; init; }
     public PreviewAudioTrack AudioTrack { get; init; }
     /// <summary>Playback delay relative to recovered AC-3 RF media time. The default was
     /// measured against the companion digital PCM tracks on two NTSC discs.</summary>
@@ -190,6 +192,8 @@ public sealed class RealtimePreviewSession : IDisposable
         if (options.DecodeThreads is < 1 or > 64)
             throw new ArgumentOutOfRangeException(nameof(options.DecodeThreads),
                 "Realtime preview supports 1 to 64 decode threads.");
+        if (options.Cvbs50Ohms && options.SourceFormat != PreviewSourceFormat.Cvbs)
+            throw new NotSupportedException("The 50 ohm preset requires CVBS input.");
         if (options.BetamaxProfile != BetamaxVideoProfile.Standard && options.SourceFormat != PreviewSourceFormat.Betamax)
             throw new NotSupportedException("The Betamax video profile applies only to Betamax.");
         if (options.AudioTrack == PreviewAudioTrack.VhsHiFi)
@@ -207,7 +211,7 @@ public sealed class RealtimePreviewSession : IDisposable
             throw new NotSupportedException("The Betamax HiFi carrier profile and HiFi audio require NTSC Betamax RF.");
         if (options.InputSampleRateHz is not (VideoRate or 40_000_000)
             || (options.SourceFormat == PreviewSourceFormat.LaserDisc && options.Standard != PreviewVideoStandard.Ntsc))
-            throw new NotSupportedException("Realtime video supports PAL/NTSC VHS, PAL/NTSC Betamax and NTSC LaserDisc at 20 or 40 MSPS.");
+            throw new NotSupportedException("Realtime video supports PAL/NTSC CVBS, VHS, Betamax and NTSC LaserDisc at 20 or 40 MSPS.");
     }
 
     private static NativeDecoder Open(RealtimePreviewOptions options)
@@ -220,7 +224,11 @@ public sealed class RealtimePreviewSession : IDisposable
             int source = options.SourceFormat == PreviewSourceFormat.LaserDisc ? 3
                 : options.SourceFormat != PreviewSourceFormat.Betamax ? 0
                 : (options.BetamaxProfile == BetamaxVideoProfile.HiFi || options.AudioTrack == PreviewAudioTrack.BetamaxHiFi) ? 2 : 1;
-            decoder = NativeOpen(source,
+            decoder = options.SourceFormat == PreviewSourceFormat.Cvbs
+                ? NativeOpenCvbs(options.Standard == PreviewVideoStandard.Pal ? 1 : 0,
+                    options.Region == PreviewRegion.FullRaster ? 1 : 0, (uint)options.InputSampleRateHz,
+                    options.Cvbs50Ohms ? 1 : 0)
+                : NativeOpen(source,
                 options.Standard == PreviewVideoStandard.Pal ? 1 : 0,
                 options.Region == PreviewRegion.FullRaster ? 1 : 0, (uint)options.InputSampleRateHz, (int)options.AudioTrack);
         }
@@ -357,6 +365,9 @@ public sealed class RealtimePreviewSession : IDisposable
 
     [DllImport(LibraryName, EntryPoint = "realtime_has_dts", CallingConvention = CallingConvention.Cdecl)]
     private static extern int NativeHasDts();
+
+    [DllImport(LibraryName, EntryPoint = "realtime_open_cvbs", CallingConvention = CallingConvention.Cdecl)]
+    private static extern NativeDecoder NativeOpenCvbs(int pal, int full, uint rate, int restore);
 
     [DllImport(LibraryName, EntryPoint = "realtime_open_v8", CallingConvention = CallingConvention.Cdecl)]
     private static extern NativeDecoder NativeOpen(int source, int pal, int full, uint inputRate, int audioTrack);

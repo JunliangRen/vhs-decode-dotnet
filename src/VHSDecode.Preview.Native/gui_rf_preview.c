@@ -15,6 +15,7 @@
  */
 #include "gui_rf_preview.h"
 #include "gui_ld_rf_demod.h"
+#include "cvbs_frontend.h"
 #include "gui_rf_preview_filters.h"
 #include "gui_rf_preview_geometry.h"
 #include <float.h>
@@ -208,6 +209,8 @@ struct gui_rf_decoder {
     double raw_rate;
     unsigned raw_decimation;
     gui_ld_rf_demod_t ld_demod;
+    int cvbs_mode; /* 0: RF, 1: direct composite, 2: DdD AC restoration */
+    cvbs_frontend_t cvbs;
     bool full_frame;   /* Active/Full display mode (see set_frame_mode). */
     float *storage, *luma, *sync, *ci, *cq, *envelope, *sync_luma, *secam_fm;
     uint8_t *rgba;
@@ -1463,6 +1466,7 @@ typedef struct {
     double start, first_offset, pixel_step, rotate_re, rotate_im, step_re, step_im, gain, wow;
     int vswitch;
     bool color;
+    double blank;
 } rf_draw_line;
 
 typedef struct {
@@ -1495,7 +1499,7 @@ static void rf_draw_pairs(void *context,int first_pair,int end_pair) {
                 luminance=rf_clamp((hz*line->wow-d->display_blank_hz)
                                    /(100.0*d->display_hz_ire),0.0,1.0);
             } else {
-                double ire=(hz*line->wow-d->display_blank_hz)/d->display_hz_ire;
+                double ire=(hz*line->wow-line->blank)/d->display_hz_ire;
                 luminance=leveled ? rf_display_level(ire/100.0)
                     : rf_clamp((ire-d->p.hybrid_black_ire)/d->p.hybrid_span_ire,0.0,1.0);
             }
@@ -1802,7 +1806,13 @@ static bool rf_render_field(gui_rf_decoder_t *d, double field_start, int parity,
         }
 
         draw.lines[y]=(rf_draw_line){lines[y], first_offset, pixel_step, rotate_re, rotate_im,
-            step_re, step_im, gain[y], luma_wow[y], vswitch, color && (svhs ? render_valid[y] : valid[y])};
+            step_re, step_im, gain[y], luma_wow[y], vswitch, color && (svhs ? render_valid[y] : valid[y]), d->display_blank_hz};
+        if (d->cvbs_mode==2 && anchors[y] && line_first+y>=d->p.active_first) {
+            double porch=0;
+            double origin=lines[y]+d->luma_delay-d->sync_delay;
+            for (int k=0;k<5;k++) porch+=rf_read(d,d->luma,origin+41+k);
+            draw.lines[y].blank=rf_clamp(porch*.2,-25,25);
+        }
     }
     if (d->parallel) d->parallel(d->draw_context,rf_draw_pairs,&draw,(rows+1)/2,4);
     else rf_draw_pairs(&draw, 0, (rows+1)/2);
@@ -2285,7 +2295,9 @@ void gui_rf_decoder_reset_profile(gui_rf_decoder_t *d, gui_rf_profile_t profile)
     bool have_lane_runner=d->have_lane_runner;
     float *lane_buf=d->lane_buf;
     size_t lane_cap=d->lane_cap;
+    int cvbs_mode=d->cvbs_mode;
     memset(d,0,sizeof(*d));
+    d->cvbs_mode=cvbs_mode;
     d->storage=storage; d->rgba=rgba;
     d->svhs_scratch = scratch;
     d->parallel=parallel; d->draw_context=draw_context;
@@ -2311,9 +2323,16 @@ void gui_rf_decoder_reset_profile(gui_rf_decoder_t *d, gui_rf_profile_t profile)
     d->display_blank_hz=d->p.blank_hz;d->display_hz_ire=d->p.hz_ire;
     d->luma_wow=1.0;
     if (rf_laserdisc(d)) {
-        gui_ld_rf_demod_reset(&d->ld_demod,d->format==GUI_RF_NTSC ? GUI_LD_RF_NTSC : GUI_LD_RF_PAL);
-        d->luma_delay=gui_ld_rf_demod_luma_delay(&d->ld_demod);
-        d->chroma_delay=gui_ld_rf_demod_chroma_delay(&d->ld_demod);
+        if (d->cvbs_mode) {
+            cvbs_frontend_reset(&d->cvbs,d->format==GUI_RF_PAL,d->cvbs_mode==2);
+            d->luma_delay=d->cvbs.luma_delay;
+            d->sync_luma_delay=d->luma_delay;
+            d->chroma_delay=d->cvbs.chroma_delay;
+        } else {
+            gui_ld_rf_demod_reset(&d->ld_demod,d->format==GUI_RF_NTSC ? GUI_LD_RF_NTSC : GUI_LD_RF_PAL);
+            d->luma_delay=gui_ld_rf_demod_luma_delay(&d->ld_demod);
+            d->chroma_delay=gui_ld_rf_demod_chroma_delay(&d->ld_demod);
+        }
         d->sync_alpha=(float)exp(-2.0*RF_PI*500000.0/RF_VIDEO_RATE);
         d->sync_delay=d->luma_delay+d->sync_alpha/(1.0-d->sync_alpha);
         memset(d->rgba,0,(size_t)GUI_RF_FRAME_MAX_WIDTH*GUI_RF_FRAME_MAX_HEIGHT*4u);
@@ -2447,15 +2466,20 @@ void gui_rf_decoder_reset(gui_rf_decoder_t *d, gui_rf_format_t format) {
     gui_rf_decoder_reset_profile(d,format==GUI_RF_NTSC ? GUI_RF_PROFILE_NTSC_VHS : GUI_RF_PROFILE_PAL_VHS);
 }
 
-gui_rf_decoder_t *gui_rf_decoder_create_profile(gui_rf_profile_t profile) {
+static gui_rf_decoder_t *rf_create_profile(gui_rf_profile_t profile, int cvbs_mode) {
     if (!rf_profile_valid(profile) || gui_rf_profile_is_audio_only(profile)) return NULL;
     gui_rf_decoder_t *d=calloc(1,sizeof(*d));
     if (!d) return NULL;
     d->storage=calloc(RF_RING_SIZE*9u,sizeof(float));
     d->rgba=calloc((size_t)GUI_RF_FRAME_MAX_WIDTH*GUI_RF_FRAME_MAX_HEIGHT,4u);
     if (!d->storage || !d->rgba) { gui_rf_decoder_destroy(d); return NULL; }
+    d->cvbs_mode=cvbs_mode;
     gui_rf_decoder_reset_profile(d,profile);
     return d;
+}
+
+gui_rf_decoder_t *gui_rf_decoder_create_profile(gui_rf_profile_t profile) {
+    return rf_create_profile(profile,0);
 }
 
 gui_rf_decoder_t *gui_rf_decoder_create(gui_rf_format_t format) {
@@ -2509,7 +2533,8 @@ static void rf_process_laserdisc(gui_rf_decoder_t *d, const float *samples, size
         size_t block=count-offset;
         if (block>block_size) block=block_size;
         uint64_t first=first_sample+offset;
-        size_t produced=gui_ld_rf_demod_process(&d->ld_demod,samples+offset,block,first,
+        size_t produced=d->cvbs_mode ? cvbs_frontend_process(&d->cvbs,samples+offset,block,first,
+            luma,chroma_i,chroma_q) : gui_ld_rf_demod_process(&d->ld_demod,samples+offset,block,first,
             luma,chroma_i,chroma_q,sizeof(luma)/sizeof(luma[0]));
         uint64_t pos=first/GUI_LD_RF_DECIMATION+(first%GUI_LD_RF_DECIMATION!=0u);
         for (size_t n=0; n<produced; ++n,++pos) {
@@ -3203,8 +3228,8 @@ __declspec(dllexport) int realtime_has_dts(void) {
     return gui_ld_dts_available();
 }
 
-__declspec(dllexport) preview_handle *realtime_open_v8(int source, int pal, int full,
-                                                    uint32_t input_rate, int audio_track) {
+static preview_handle *preview_open(int source, int pal, int full, uint32_t input_rate,
+                                    int audio_track, int cvbs_mode) {
     preview_handle *handle = calloc(1, sizeof(*handle));
     if (!handle) return NULL;
     if (audio_track == 1) {
@@ -3216,7 +3241,8 @@ __declspec(dllexport) preview_handle *realtime_open_v8(int source, int pal, int 
         return handle;
     }
 
-    gui_rf_profile_t profile = source == 3 ? GUI_RF_PROFILE_NTSC_LASERDISC
+    gui_rf_profile_t profile = cvbs_mode ? (pal ? GUI_RF_PROFILE_PAL_LASERDISC : GUI_RF_PROFILE_NTSC_LASERDISC)
+        : source == 3 ? GUI_RF_PROFILE_NTSC_LASERDISC
         : source == 2 ? GUI_RF_PROFILE_NTSC_BETAMAX_HIFI
         : source == 1 ? (pal ? GUI_RF_PROFILE_PAL_BETAMAX : GUI_RF_PROFILE_NTSC_BETAMAX)
         : pal ? GUI_RF_PROFILE_PAL_VHS : GUI_RF_PROFILE_NTSC_VHS;
@@ -3227,7 +3253,7 @@ __declspec(dllexport) preview_handle *realtime_open_v8(int source, int pal, int 
             return NULL;
         }
     }
-    handle->core = gui_rf_decoder_create_profile(profile);
+    handle->core = rf_create_profile(profile,cvbs_mode);
     if (audio_track == 2) handle->beta_audio = gui_beta_hifi_create();
     if (audio_track == 3) handle->ld_audio = gui_ld_rf_analog_create();
     if (audio_track == 6) handle->ld_ac3 = gui_ld_rf_ac3_create();
@@ -3245,6 +3271,17 @@ __declspec(dllexport) preview_handle *realtime_open_v8(int source, int pal, int 
     }
     gui_rf_decoder_set_frame_mode(handle->core, full != 0);
     return handle;
+}
+
+__declspec(dllexport) preview_handle *realtime_open_v8(int source, int pal, int full,
+                                                    uint32_t input_rate, int audio_track) {
+    return preview_open(source,pal,full,input_rate,audio_track,0);
+}
+
+/* Direct baseband reuses the composite field renderer and bypasses all RF demodulation. */
+__declspec(dllexport) preview_handle *realtime_open_cvbs(int pal, int full, uint32_t rate, int restore) {
+    if (rate!=20000000 && rate!=40000000) return NULL;
+    return preview_open(0,pal,full,rate,0,restore ? 2 : 1);
 }
 
 enum { PREVIEW_MAX_THREADS=64 };
