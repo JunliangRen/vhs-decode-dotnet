@@ -11,7 +11,7 @@ public static class HlsPlaylistBuilder
         return string.Join('\n',
             "#EXTM3U",
             "#EXT-X-VERSION:7",
-            $"#EXT-X-STREAM-INF:BANDWIDTH=3000000,AVERAGE-BANDWIDTH=1600000,CODECS=\"avc1.4d401f\",RESOLUTION={mediaInfo.Width}x{mediaInfo.Height}",
+            $"#EXT-X-STREAM-INF:BANDWIDTH=3000000,AVERAGE-BANDWIDTH=1600000,CODECS=\"{mediaInfo.AvcCodec}\",RESOLUTION={mediaInfo.Width}x{mediaInfo.Height}",
             "index.m3u8",
             string.Empty);
     }

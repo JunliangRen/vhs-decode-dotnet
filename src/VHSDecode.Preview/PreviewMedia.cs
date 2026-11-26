@@ -11,7 +11,11 @@ public sealed record PreviewMediaInfo(
     bool Interlaced,
     string DecodeBackend,
     string AccuracyProfile,
-    string EncodeBackend = "unspecified");
+    string EncodeBackend = "unspecified")
+{
+    public PreviewRegion Region { get; init; }
+    public string AvcCodec => Region == PreviewRegion.FullRaster ? "avc1.4d4028" : "avc1.4d401f";
+}
 
 public sealed record PreviewMediaSegment(
     int GlobalIndex,

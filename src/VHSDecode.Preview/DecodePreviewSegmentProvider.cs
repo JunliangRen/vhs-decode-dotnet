@@ -6,14 +6,13 @@ using VHSDecode.Core.CommandLine;
 using VHSDecode.Core.Decode;
 using VHSDecode.Core.Dsp;
 using VHSDecode.Core.Dsp.CudaFast;
-using VHSDecode.Core.Formats;
 using VHSDecode.Core.Rf;
 
 namespace VHSDecode.Preview;
 
 public sealed class DecodePreviewSegmentProvider : IPreviewSegmentProvider
 {
-    private const double PrerollSeconds = 0.12;
+    private const double PrerollSeconds = PreviewFileDecoder.PrerollSeconds;
     private readonly ParsedCommand _template;
     private readonly PreviewServerOptions _options;
     private readonly double _baseStartSeconds;
@@ -101,6 +100,11 @@ public sealed class DecodePreviewSegmentProvider : IPreviewSegmentProvider
         ArgumentNullException.ThrowIfNull(command);
         ArgumentNullException.ThrowIfNull(options);
         options.Validate();
+        if (options.Region == PreviewRegion.FullRaster && command.GetSource("dsp_backend") != ParsedOptionSource.Default
+            && DspBackendParser.Parse(command.Get<string>("dsp_backend")) == DspBackend.CudaFast)
+        {
+            throw new NotSupportedException("Full-raster preview requires a CPU decode backend.");
+        }
         TextWriter output = diagnosticOutput ?? TextWriter.Null;
         return await PreviewBackendSelector.SelectAsync(
             command,
@@ -111,7 +115,8 @@ public sealed class DecodePreviewSegmentProvider : IPreviewSegmentProvider
                 output,
                 token),
             output,
-            cancellationToken).ConfigureAwait(false);
+            cancellationToken,
+            allowAutomaticCuda: options.Region != PreviewRegion.FullRaster).ConfigureAwait(false);
     }
 
     private static async Task<DecodePreviewSegmentProvider> CreateForBackendAsync(
@@ -160,7 +165,7 @@ public sealed class DecodePreviewSegmentProvider : IPreviewSegmentProvider
             framesPerSecond,
             options.SegmentSeconds,
             options.SegmentsPerWindow);
-        (int width, int height) = PreviewDimensions(session.System);
+        (int width, int height) = PreviewFileDecoder.Dimensions(session, options.Region);
         bool cudaPreview = session.ExecutionOptions.DspBackend == DspBackend.CudaFast;
         PreviewEncoderBackend encoderBackend = cudaPreview
             ? PreviewEncoderBackend.Nvenc
@@ -248,7 +253,7 @@ public sealed class DecodePreviewSegmentProvider : IPreviewSegmentProvider
                     + "fast-color/full-frame-motion/dropout-conceal/no-audio",
             cudaPreview
                 ? "NVENC block-linear CUDA array + FFmpeg copy-mux"
-                : PreviewEncoderSelector.DisplayName(encoderBackend));
+                : PreviewEncoderSelector.DisplayName(encoderBackend)) { Region = options.Region };
         return new DecodePreviewSegmentProvider(
             template,
             options,
@@ -367,6 +372,8 @@ public sealed class DecodePreviewSegmentProvider : IPreviewSegmentProvider
             FileMode.Open,
             FileAccess.Read,
             FileShare.ReadWrite | FileShare.Delete);
+        PreviewRectangle? activeField = _options.Region == PreviewRegion.FullRaster
+            ? PreviewFileDecoder.ActiveFieldRectangle(session) : null;
         var encoder = new FfmpegHlsWindowEncoder(
             _options.FfmpegPath,
             MediaInfo.Width,
@@ -374,7 +381,8 @@ public sealed class DecodePreviewSegmentProvider : IPreviewSegmentProvider
             MediaInfo.Crf,
             MediaInfo.System,
             Timeline,
-            _encoderBackend);
+            _encoderBackend,
+            activeField is { } active ? $"{8 * active.Height}/{3 * active.Width}" : null);
         return encoder.Encode(
             windowIndex,
             rawVideo =>
@@ -385,7 +393,7 @@ public sealed class DecodePreviewSegmentProvider : IPreviewSegmentProvider
                     MediaInfo.Width,
                     MediaInfo.Height,
                     targetSample,
-                    outputFrameCount);
+                    outputFrameCount, _options.Region == PreviewRegion.FullRaster);
                 var engine = new TbcFieldSequenceDecodeEngine(cancellationToken: cancellationToken);
                 _ = engine.DecodeToSink(
                     session,
@@ -448,10 +456,7 @@ public sealed class DecodePreviewSegmentProvider : IPreviewSegmentProvider
     }
 
     internal static (int Width, int Height) PreviewDimensions(string system)
-        => (FormatCatalog.NormalizeSystem(system).StartsWith("NTSC", StringComparison.Ordinal)
-            || FormatCatalog.ParentSystem(system) == "NTSC")
-            ? (640, 480)
-            : (768, 576);
+        => PreviewFileDecoder.Dimensions(system);
 
     internal static double ResolveBaseStartSeconds(
         ParsedCommand command,
