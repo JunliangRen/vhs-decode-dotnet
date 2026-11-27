@@ -17,7 +17,8 @@ foreach (int threads in new[] { 4, 8 })
 var palLd = new RealtimePreviewOptions(PreviewSourceFormat.LaserDisc, PreviewVideoStandard.Pal, 40_000_000);
 if (!RealtimePreviewCapabilities.IsSupported(palLd)
     || !RealtimePreviewCapabilities.IsSupported(palLd with { AudioTrack = PreviewAudioTrack.LaserDiscAnalog })
-    || RealtimePreviewCapabilities.IsSupported(palLd with { AudioTrack = PreviewAudioTrack.LaserDiscDigitalPcm }))
+    || !RealtimePreviewCapabilities.IsSupported(palLd with { AudioTrack = PreviewAudioTrack.LaserDiscDigitalPcm })
+    || RealtimePreviewCapabilities.IsSupported(palLd with { AudioTrack = PreviewAudioTrack.LaserDiscDts }))
     throw new InvalidDataException("Unexpected PAL LD capabilities.");
 using (var session = new RealtimePreviewSession(palLd, _ => throw new InvalidDataException("Field on silence")))
 {
@@ -25,6 +26,18 @@ using (var session = new RealtimePreviewSession(palLd, _ => throw new InvalidDat
     if (session.LockStatus != new PreviewLockStatus(false, false, false, null))
         throw new InvalidDataException("PAL LD unexpectedly locked on silence.");
 }
+foreach (int rate in new[] { 20_000_000, 40_000_000 })
+{
+    var digital = palLd with { AudioTrack = PreviewAudioTrack.LaserDiscDigitalPcm, InputSampleRateHz = rate };
+    using var receiver = new RealtimePreviewSession(digital,
+        _ => throw new InvalidDataException("PAL LD field on silence."),
+        _ => throw new InvalidDataException("PAL LD digital PCM on silence."));
+    receiver.Process(new short[65_536], 0);
+    if (receiver.LockStatus.AudioLocked != false)
+        throw new InvalidDataException("Unexpected PAL LD digital audio lock on silence.");
+    receiver.Finish();
+}
+
 // Exercise both PAL carriers after a reset, which must preserve the audio standard.
 var analog = palLd with { AudioTrack = PreviewAudioTrack.LaserDiscAnalog, InputSampleRateHz = 20_000_000 };
 var analogPcm = new List<float>();

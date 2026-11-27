@@ -3307,7 +3307,7 @@ __declspec(dllexport) preview_handle *realtime_open_v8(int source, int pal, int 
 /* A new entry point prevents an older DLL from interpreting an extended source as VHS. */
 __declspec(dllexport) preview_handle *realtime_open_v9(int source, int pal, int full,
                                                      uint32_t rate, int audio_track) {
-    if (source < 0 || source > 10 || (source == 10 && (!pal || (audio_track != 0 && audio_track != 3)))) return NULL;
+    if (source < 0 || source > 10 || (source == 10 && (!pal || (audio_track != 0 && audio_track != 3 && audio_track != 4)))) return NULL;
     return preview_open(source,pal,full,rate,audio_track,0);
 }
 

@@ -9,7 +9,7 @@ A .NET 11 rewrite of the decode-facing parts of
 upstream release `v0.4.0` at commit
 `43155200da87c0d49eb37d8ec09b1372075ee8e4`.
 
-The current .NET port release is [`v0.4.0-2.32.0`](https://github.com/JunliangRen/vhs-decode-dotnet/releases/tag/v0.4.0-2.32.0) (application version `2.32.0`).
+The current .NET port release is [`v0.4.0-2.33.0`](https://github.com/JunliangRen/vhs-decode-dotnet/releases/tag/v0.4.0-2.33.0) (application version `2.33.0`).
 The x64 binaries require an [x86-64-v2 CPU](https://learn.microsoft.com/en-us/dotnet/core/whats-new/dotnet-11/runtime#updated-minimum-hardware-requirements), including SSE4.2 and POPCNT.
 
 [LD EFM buffer reuse measurements and limits](docs/LD_PERFORMANCE_V16.md).
@@ -156,7 +156,7 @@ and supply both sinks for video and 48 kHz interleaved analog L/R. Each
 carrier locks and mutes independently. The block lock flag means at least
 one channel is locked. Both timestamps use the input RF clock.
 
-For the NTSC LaserDisc digital track, use `PreviewAudioTrack.LaserDiscDigitalPcm`
+For the PAL or NTSC LaserDisc digital PCM track, use `PreviewAudioTrack.LaserDiscDigitalPcm`
 with both sinks. EFM clock recovery and CIRC decoding supply native 44,100 Hz
 interleaved float L/R. Read `PreviewAudioBlock.SampleRateHz` when opening
 the audio device. Digital audio carries RF-based media timestamps corrected
