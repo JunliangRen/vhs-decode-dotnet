@@ -50,6 +50,7 @@ public static class RealtimePreviewCapabilities
                 if (standard == PreviewVideoStandard.Pal)
                 {
                     yield return new(PreviewSourceFormat.LaserDisc, standard, rate, normal, silent);
+                    yield return new(PreviewSourceFormat.LaserDisc, standard, rate, normal, PreviewAudioTrack.LaserDiscAnalog);
                     continue;
                 }
                 foreach (var profile in new[] { normal, BetamaxVideoProfile.HiFi,

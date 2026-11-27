@@ -68,8 +68,9 @@ static double ld_audio_window(int offset, int half, double beta, double normaliz
     return ld_audio_i0(beta * sqrt(1.0 - x * x)) / normalization;
 }
 
-void gui_ld_rf_analog_reset(gui_ld_rf_analog_t *demod, gui_ld_rf_system_t system) {
+void gui_ld_rf_analog_reset(gui_ld_rf_analog_t *demod) {
     if (!demod) return;
+    gui_ld_rf_system_t system = demod->system;
     memset(demod, 0, sizeof(*demod));
     demod->system = system;
 
@@ -110,9 +111,11 @@ void gui_ld_rf_analog_reset(gui_ld_rf_analog_t *demod, gui_ld_rf_system_t system
     }
 }
 
-gui_ld_rf_analog_t *gui_ld_rf_analog_create(void) {
+gui_ld_rf_analog_t *gui_ld_rf_analog_create(gui_ld_rf_system_t system) {
     gui_ld_rf_analog_t *demod = malloc(sizeof(*demod));
-    gui_ld_rf_analog_reset(demod, GUI_LD_RF_NTSC);
+    if (!demod) return NULL;
+    demod->system = system;
+    gui_ld_rf_analog_reset(demod);
     return demod;
 }
 
@@ -275,7 +278,7 @@ void gui_ld_rf_analog_process(gui_ld_rf_analog_t *demod, const float *samples, s
                               void *context) {
     if (!demod || !samples || !count || count > UINT64_MAX - first_sample) return;
     if (demod->have_input && first_sample != demod->next_sample)
-        gui_ld_rf_analog_reset(demod, demod->system);
+        gui_ld_rf_analog_reset(demod);
     if (!demod->have_input) {
         uint64_t first_iq = first_sample / LD_AUDIO_DECIMATION + (first_sample % LD_AUDIO_DECIMATION != 0u);
         demod->pcm_phase = (unsigned)(first_iq % 625u) * 48u % 625u;

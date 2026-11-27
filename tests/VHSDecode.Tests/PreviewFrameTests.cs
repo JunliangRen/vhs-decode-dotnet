@@ -388,7 +388,7 @@ public sealed class PreviewFrameTests
     [InlineData(PreviewAudioTrack.LaserDiscDigitalPcm)]
     [InlineData(PreviewAudioTrack.LaserDiscDts)]
     [InlineData(PreviewAudioTrack.LaserDiscAc3Rf)]
-    public void LaserDiscAudioRequiresNtscVideoAndBothSinks(PreviewAudioTrack track)
+    public void LaserDiscAudioRequiresSupportedStandardAndBothSinks(PreviewAudioTrack track)
     {
         var options = new RealtimePreviewOptions(PreviewSourceFormat.LaserDisc, PreviewVideoStandard.Ntsc, 40_000_000)
         {
@@ -396,7 +396,11 @@ public sealed class PreviewFrameTests
         };
         Assert.Throws<ArgumentException>(() => new RealtimePreviewSession(options, fieldSink: _ => { }));
         Assert.Throws<ArgumentException>(() => new RealtimePreviewSession(options, audioSink: _ => { }));
-        Assert.Throws<NotSupportedException>(() => new RealtimePreviewSession(options with { Standard = PreviewVideoStandard.Pal }));
+        var pal = options with { Standard = PreviewVideoStandard.Pal };
+        if (track == PreviewAudioTrack.LaserDiscAnalog)
+            Assert.Throws<ArgumentException>(() => new RealtimePreviewSession(pal, fieldSink: _ => { }));
+        else
+            Assert.Throws<NotSupportedException>(() => new RealtimePreviewSession(pal));
         Assert.Throws<NotSupportedException>(() => new RealtimePreviewSession(options with { SourceFormat = PreviewSourceFormat.Vhs }));
     }
 

@@ -12,9 +12,9 @@ typedef struct gui_ld_rf_analog gui_ld_rf_analog_t;
 typedef void (*gui_ld_rf_analog_pcm_callback_t)(void *context, const float *stereo,
                                                size_t frames, uint64_t end_sample);
 
-gui_ld_rf_analog_t *gui_ld_rf_analog_create(void);
+gui_ld_rf_analog_t *gui_ld_rf_analog_create(gui_ld_rf_system_t system);
 void gui_ld_rf_analog_destroy(gui_ld_rf_analog_t *demod);
-void gui_ld_rf_analog_reset(gui_ld_rf_analog_t *demod, gui_ld_rf_system_t system);
+void gui_ld_rf_analog_reset(gui_ld_rf_analog_t *demod);
 bool gui_ld_rf_analog_locked(const gui_ld_rf_analog_t *demod);
 
 /* Causal fixed-memory processing of normalized 20 MSPS RF. A gap resets

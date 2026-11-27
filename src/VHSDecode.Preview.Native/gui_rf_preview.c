@@ -3281,7 +3281,7 @@ static preview_handle *preview_open(int source, int pal, int full, uint32_t inpu
     }
     handle->core = rf_create_profile(profile,cvbs_mode);
     if (audio_track == 2) handle->beta_audio = gui_beta_hifi_create();
-    if (audio_track == 3) handle->ld_audio = gui_ld_rf_analog_create();
+    if (audio_track == 3) handle->ld_audio = gui_ld_rf_analog_create(pal ? GUI_LD_RF_PAL : GUI_LD_RF_NTSC);
     if (audio_track == 6) handle->ld_ac3 = gui_ld_rf_ac3_create();
     bool digital = audio_track == 4 || audio_track == 5;
     if (digital) handle->ld_digital = gui_ld_rf_digital_create(audio_track == 5);
@@ -3307,7 +3307,7 @@ __declspec(dllexport) preview_handle *realtime_open_v8(int source, int pal, int 
 /* A new entry point prevents an older DLL from interpreting an extended source as VHS. */
 __declspec(dllexport) preview_handle *realtime_open_v9(int source, int pal, int full,
                                                      uint32_t rate, int audio_track) {
-    if (source < 0 || source > 10 || (source == 10 && (!pal || audio_track != 0))) return NULL;
+    if (source < 0 || source > 10 || (source == 10 && (!pal || (audio_track != 0 && audio_track != 3)))) return NULL;
     return preview_open(source,pal,full,rate,audio_track,0);
 }
 
@@ -3439,7 +3439,7 @@ __declspec(dllexport) void realtime_reset(preview_handle *handle) {
     handle->have_source_sample = false;
     gui_ld_rf_digital_reset(handle->ld_digital);
     gui_ld_rf_ac3_reset(handle->ld_ac3);
-    if (handle->ld_audio) gui_ld_rf_analog_reset(handle->ld_audio, GUI_LD_RF_NTSC);
+    if (handle->ld_audio) gui_ld_rf_analog_reset(handle->ld_audio);
     if (handle->core) gui_rf_decoder_reset_profile(handle->core, handle->core->profile);
     gui_beta_hifi_reset(handle->beta_audio);
     if (handle->audio) gui_vhs_hifi_reset(handle->audio);

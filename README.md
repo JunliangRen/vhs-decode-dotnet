@@ -150,7 +150,7 @@ This track selects the HiFi video carrier profile automatically. Schedule
 fields and 48 kHz stereo by their RF timestamps. Video acquisition and audio
 lock are independent, and the audio timeline continues through muted RF.
 
-For NTSC LaserDisc RF at 20 or 40 MSPS, select LaserDisc and NTSC. Use a
+For PAL or NTSC LaserDisc RF at 20 or 40 MSPS, select LaserDisc and the matching standard. Use a
 field sink alone for video, or select `PreviewAudioTrack.LaserDiscAnalog`
 and supply both sinks for video and 48 kHz interleaved analog L/R. Each
 carrier locks and mutes independently. The block lock flag means at least
