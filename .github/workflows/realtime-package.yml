@@ -1,111 +1,57 @@
-name: Realtime preview NuGet
-
+name: Verify released Realtime package
 on:
-  pull_request:
-    paths:
-      - 'src/VHSDecode.Preview.Realtime/**'
-      - 'src/VHSDecode.Preview.Native/**'
-      - '.github/actions/build-realtime/**'
-      - 'tools/RealtimePackageSmoke/**'
-      - 'tools/build-realtime-preview-native.ps1'
-      - '.github/workflows/realtime-package.yml'
-      - 'global.json'
-      - 'Directory.Build.props'
-  release:
-    types: [published]
   workflow_dispatch:
     inputs:
-      publish_preview:
-        description: Publish the verified prerelease to GitHub Packages
-        type: boolean
-        default: false
-
+      package_version:
+        description: Released NuGet version
+        required: true
+        type: string
 permissions:
   contents: read
-
+  packages: read
 jobs:
-  pack:
+  restore-and-publish:
     runs-on: windows-latest
-    outputs:
-      version: ${{ steps.pack.outputs.version }}
     steps:
       - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
       - uses: actions/setup-dotnet@v5
         with:
           global-json-file: global.json
-      - uses: ./.github/actions/build-realtime
-      - name: Pack native and managed assets
-        id: pack
+      - name: Restore only from GitHub Packages and publish the media test host
         shell: pwsh
+        env:
+          VERSION: ${{ inputs.package_version }}
+          READER: ${{ github.actor }}
+          PACKAGE_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          $base = ([xml](Get-Content Directory.Build.props -Raw)).Project.PropertyGroup.Version
-          $version = "$base-preview.ci.$env:GITHUB_RUN_NUMBER"
-          "version=$version" >> $env:GITHUB_OUTPUT
-          "PREVIEW_VERSION=$version" >> $env:GITHUB_ENV
-          dotnet pack src/VHSDecode.Preview.Realtime -c Release -o feed "-p:PackageVersion=$version"
-      - name: Publish and run an isolated package consumer
-        shell: pwsh
-        run: |
-          $hostDir = Join-Path $env:RUNNER_TEMP 'consumer'
-          Copy-Item tools/RealtimePackageSmoke $hostDir -Recurse
-          Copy-Item global.json $hostDir
-          $feed = (Resolve-Path feed).Path
-          Push-Location $hostDir
-          dotnet restore --source $feed --packages ./cache "-p:PreviewPackageVersion=$env:PREVIEW_VERSION"
-          if ($LASTEXITCODE) { exit $LASTEXITCODE }
-          dotnet publish -c Release --no-restore -o published "-p:PreviewPackageVersion=$env:PREVIEW_VERSION"
-          if ($LASTEXITCODE) { exit $LASTEXITCODE }
-          ./published/RealtimePackageSmoke.exe
+          $ErrorActionPreference = 'Stop'
+          $PSNativeCommandUseErrorActionPreference = $true
+          if ($env:VERSION -notmatch '^2\.34\.0-preview\.ci\.[0-9]+$') { throw 'Unexpected package version' }
+          $root = Join-Path $env:RUNNER_TEMP 'consumer'
+          New-Item -ItemType Directory $root | Out-Null
+          Copy-Item tools/RegistryReleaseValidation/Host.csproj,tools/RegistryReleaseValidation/Program.cs,global.json $root
+          Set-Location $root
+          $env:NUGET_PACKAGES = "$root/cache"
+          $env:NUGET_HTTP_CACHE_PATH = "$root/http"
+          $feed = 'https://nuget.pkg.github.com/JunliangRen/index.json'
+          "<configuration><packageSources><clear/><add key='github' value='$feed'/></packageSources><fallbackPackageFolders><clear/></fallbackPackageFolders></configuration>" | Set-Content NuGet.Config
+          $env:NuGetPackageSourceCredentials_github = "Username=$env:READER;Password=$env:PACKAGE_TOKEN"
+          dotnet restore Host.csproj --configfile NuGet.Config --packages "$root/cache" --no-http-cache "-p:PreviewVersion=$env:VERSION" -p:NuGetAudit=false
+          dotnet publish Host.csproj -c Release --no-restore -o published --self-contained false "-p:PreviewVersion=$env:VERSION"
+          $dir = "$root/cache/vhsdecode.preview.realtime/$env:VERSION"
+          $metadata = Get-Content "$dir/.nupkg.metadata" -Raw | ConvertFrom-Json
+          if ($metadata.source -ne $feed) { throw "Unexpected source $($metadata.source)" }
+          foreach ($file in @('lib/net11.0/VHSDecode.Preview.Realtime.dll', 'runtimes/win-x64/native/vhsdecode_realtime_preview.dll')) {
+            if ((Get-FileHash "$dir/$file").Hash -ne (Get-FileHash ("published/" + (Split-Path -Leaf $file))).Hash) { throw "Published DLL mismatch for $file" }
+          }
+          $nupkg = @(Get-ChildItem -Path "$root/cache" -Recurse -Filter '*.nupkg')
+          if ($nupkg.Count -ne 1) { throw 'Expected only the Realtime package' }
+          @{ version=$env:VERSION; source=$metadata.source; sha256=(Get-FileHash $nupkg[0].FullName).Hash } | ConvertTo-Json | Set-Content published/registry.json
       - uses: actions/upload-artifact@v4
         with:
-          name: realtime-nuget
-          path: feed/*.nupkg
+          name: registry-host-win-x64
+          path: ${{ runner.temp }}/consumer/published/
           if-no-files-found: error
-
-  publish:
-    if: github.event_name == 'release' || (github.event_name == 'workflow_dispatch' && inputs.publish_preview)
-    needs: pack
-    runs-on: windows-latest
-    permissions:
-      contents: read
-      packages: write
-    steps:
-      - uses: actions/checkout@v6
-      - uses: actions/setup-dotnet@v5
-        with:
-          global-json-file: global.json
-      - uses: actions/download-artifact@v4
-        with:
-          name: realtime-nuget
-          path: feed
-      - name: Publish tested package to the producer's GitHub Packages feed
-        env:
-          GH_PACKAGES_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          PREVIEW_VERSION: ${{ needs.pack.outputs.version }}
-        shell: pwsh
-        run: |
-          $feed = "https://nuget.pkg.github.com/$env:GITHUB_REPOSITORY_OWNER/index.json"
-          $package = Get-Item "feed/VHSDecode.Preview.Realtime.$env:PREVIEW_VERSION.nupkg"
-          dotnet nuget push $package.FullName --source $feed --api-key $env:GH_PACKAGES_TOKEN
-          if ($LASTEXITCODE) { exit $LASTEXITCODE }
-          $consumer = Join-Path $env:RUNNER_TEMP 'registry-consumer'
-          Copy-Item tools/RealtimePackageSmoke $consumer -Recurse
-          Copy-Item global.json $consumer
-          Push-Location $consumer
-          '<configuration><packageSources><clear /></packageSources></configuration>' | Set-Content NuGet.Config
-          dotnet nuget add source $feed -n github --configfile NuGet.Config
-          if ($LASTEXITCODE) { exit $LASTEXITCODE }
-          $env:NuGetPackageSourceCredentials_github = "Username=$env:GITHUB_ACTOR;Password=$env:GH_PACKAGES_TOKEN"
-          for ($i = 1; $i -le 5; $i++) {
-            dotnet restore --configfile NuGet.Config --packages ./cache "-p:PreviewPackageVersion=$env:PREVIEW_VERSION"
-            if (!$LASTEXITCODE) { break }
-            if ($i -eq 5) { exit $LASTEXITCODE }
-            Start-Sleep -Seconds 10
-          }
-          $download = Get-ChildItem ./cache -Recurse -Filter '*.nupkg' -File
-          if ($download.Count -ne 1 -or (Get-FileHash $download.FullName).Hash -ne (Get-FileHash $package.FullName).Hash) {
-            throw "Registry package differs from the release artifact"
-          }
-          dotnet publish -c Release --no-restore -o published "-p:PreviewPackageVersion=$env:PREVIEW_VERSION"
-          if ($LASTEXITCODE) { exit $LASTEXITCODE }
-          ./published/RealtimePackageSmoke.exe
+          retention-days: 7
