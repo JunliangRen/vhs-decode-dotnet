@@ -38,6 +38,8 @@ public sealed record PreviewFieldOptions(
     /// <summary>Enable baseline restoration for AC-coupled DdD composite input.</summary>
     public bool Cvbs50Ohms { get; init; }
 
+    public bool IncludeSignalScopes { get; init; }
+
     /// <summary>Selects the NTSC Betamax video carrier profile in Realtime mode.</summary>
     public BetamaxVideoProfile BetamaxProfile { get; init; }
 
@@ -112,6 +114,8 @@ public static class PreviewFileDecoder
             throw new ArgumentOutOfRangeException(nameof(options.DecodeMode));
         if (options.DecodeMode == PreviewDecodeMode.Realtime)
             return RealtimePreviewFileDecoder.Decode(options, fieldSink, cancellationToken);
+        if (options.IncludeSignalScopes)
+            throw new NotSupportedException("Signal scopes require Realtime mode.");
         if (options.Cvbs50Ohms || options.SourceFormat == PreviewSourceFormat.Cvbs)
             throw new NotSupportedException("CVBS field preview requires Realtime mode.");
         if (options.BetamaxProfile != BetamaxVideoProfile.Standard)

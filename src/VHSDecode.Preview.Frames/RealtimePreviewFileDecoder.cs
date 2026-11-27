@@ -19,6 +19,7 @@ internal static class RealtimePreviewFileDecoder
         var streamOptions = new RealtimePreviewOptions(options.SourceFormat, options.Standard, (int)options.InputSampleRateHz)
         {
             Region = options.Region,
+            IncludeSignalScopes = options.IncludeSignalScopes,
             Cvbs50Ohms = options.Cvbs50Ohms,
             BetamaxProfile = options.BetamaxProfile,
             DecodeThreads = options.DecodeThreads ?? 1

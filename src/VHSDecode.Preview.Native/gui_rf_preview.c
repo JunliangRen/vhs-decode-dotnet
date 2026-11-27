@@ -214,6 +214,7 @@ struct gui_rf_decoder {
     bool full_frame;   /* Active/Full display mode (see set_frame_mode). */
     float *storage, *luma, *sync, *ci, *cq, *envelope, *sync_luma, *secam_fm;
     uint8_t *rgba;
+    int16_t *signal;
     uint64_t next_raw, low_first, low_last;
     bool have_raw, have_low;
     float *mesecam_i,*mesecam_q;
@@ -457,6 +458,14 @@ static uint8_t rf_byte(double value) {
     /* Three calls per preview pixel: clamp then add-and-truncate instead of
      * a libm lrint per call (same result except on exact .5 values). */
     return (uint8_t)(rf_clamp(value*255.0, 0.0, 255.0) + 0.5);
+}
+
+/* Scope samples retain pre-display level and per-pixel chroma before RGB clipping. */
+static void rf_store_signal(gui_rf_decoder_t *d, int x, int y, double ire, double u, double v) {
+    int16_t *pixel=d->signal+((size_t)y*d->p.width+x)*3;
+    pixel[0]=(int16_t)lrint(rf_clamp(ire*64,-32768,32767));
+    pixel[1]=(int16_t)lrint(rf_clamp(u*4096,-32768,32767));
+    pixel[2]=(int16_t)lrint(rf_clamp(v*4096,-32768,32767));
 }
 
 static int rf_compare_double(const void *a, const void *b) {
@@ -1133,6 +1142,7 @@ static bool rf_render_secam_field(gui_rf_decoder_t *d, const double *lines,
             if(count) other/=count;
             double own=d->secam_rows[y][x];
             double u=dr ? other : own,v=dr ? own : other;
+            if(d->signal) rf_store_signal(d,x,y,ire,u,v);
             d->rgba[row+x*4u]=rf_byte(luminance+1.140*v);
             d->rgba[row+x*4u+1u]=rf_byte(luminance-.395*u-.581*v);
             d->rgba[row+x*4u+2u]=rf_byte(luminance+2.032*u);
@@ -1516,6 +1526,7 @@ static void rf_draw_pairs(void *context,int first_pair,int end_pair) {
                 double imaginary=re*rotate_im+im*rotate_re;
                 v=imaginary*line->gain*line->vswitch*(!f->laserdisc && d->format==GUI_RF_NTSC ? -1.0 : 1.0);
             }
+            if(d->signal) rf_store_signal(d,x,y,(hz*line->wow-line->blank)/d->display_hz_ire,u,v);
             double next_re=rotate_re*line->step_re-rotate_im*line->step_im;
             rotate_im=rotate_im*line->step_re+rotate_re*line->step_im; rotate_re=next_re;
             field_rows[y&1][0][x]=(float)luminance;
@@ -2276,6 +2287,7 @@ void gui_rf_decoder_reset_profile(gui_rf_decoder_t *d, gui_rf_profile_t profile)
     if (!d || !rf_profile_valid(profile) || gui_rf_profile_is_audio_only(profile)) return;
     float *storage=d->storage;
     uint8_t *rgba=d->rgba;
+    int16_t *signal=d->signal;
     bool full_frame=d->full_frame;
     bool svhs = profile == GUI_RF_PROFILE_PAL_SVHS || profile == GUI_RF_PROFILE_NTSC_SVHS;
     rf_svhs_scratch_t *scratch = d->svhs_scratch;
@@ -2298,7 +2310,7 @@ void gui_rf_decoder_reset_profile(gui_rf_decoder_t *d, gui_rf_profile_t profile)
     int cvbs_mode=d->cvbs_mode;
     memset(d,0,sizeof(*d));
     d->cvbs_mode=cvbs_mode;
-    d->storage=storage; d->rgba=rgba;
+    d->storage=storage; d->rgba=rgba; d->signal=signal;
     d->svhs_scratch = scratch;
     d->parallel=parallel; d->draw_context=draw_context;
     d->lane_runner=lane_runner; d->have_lane_runner=have_lane_runner;
@@ -2490,7 +2502,7 @@ void gui_rf_decoder_destroy(gui_rf_decoder_t *d) {
     if (!d) return;
     free(d->svhs_scratch);
     free(d->lane_buf);
-    free(d->storage); free(d->rgba); free(d);
+    free(d->signal); free(d->storage); free(d->rgba); free(d);
 }
 
 void gui_rf_decoder_get_status(const gui_rf_decoder_t *d, gui_rf_decode_status_t *status) {
@@ -3233,8 +3245,15 @@ static preview_handle *preview_open(int source, int pal, int full, uint32_t inpu
     preview_handle *handle = calloc(1, sizeof(*handle));
     if (!handle) return NULL;
     if (audio_track == 1) {
-        handle->audio = gui_vhs_hifi_create(pal ? GUI_RF_PAL : GUI_RF_NTSC, input_rate);
+        uint32_t audio_rate = input_rate;
+        if (audio_rate == 40000000u) {
+            handle->resampler = gui_rf_resampler_create(input_rate);
+            if (!handle->resampler) { free(handle); return NULL; }
+            audio_rate = GUI_RF_DECODE_RATE_HZ;
+        }
+        handle->audio = gui_vhs_hifi_create(pal ? GUI_RF_PAL : GUI_RF_NTSC, audio_rate);
         if (!handle->audio) {
+            gui_rf_resampler_destroy(handle->resampler);
             free(handle);
             return NULL;
         }
@@ -3242,6 +3261,12 @@ static preview_handle *preview_open(int source, int pal, int full, uint32_t inpu
     }
 
     gui_rf_profile_t profile = cvbs_mode ? (pal ? GUI_RF_PROFILE_PAL_LASERDISC : GUI_RF_PROFILE_NTSC_LASERDISC)
+        : source == 9 ? GUI_RF_PROFILE_NTSC_ED_BETA
+        : source == 8 ? GUI_RF_PROFILE_MESECAM_VHS
+        : source == 7 ? GUI_RF_PROFILE_SECAM_VHS
+        : source == 6 ? GUI_RF_PROFILE_NTSC_SUPERBETA_HIFI
+        : source == 5 ? GUI_RF_PROFILE_NTSC_SUPERBETA
+        : source == 4 ? (pal ? GUI_RF_PROFILE_PAL_SVHS : GUI_RF_PROFILE_NTSC_SVHS)
         : source == 3 ? GUI_RF_PROFILE_NTSC_LASERDISC
         : source == 2 ? GUI_RF_PROFILE_NTSC_BETAMAX_HIFI
         : source == 1 ? (pal ? GUI_RF_PROFILE_PAL_BETAMAX : GUI_RF_PROFILE_NTSC_BETAMAX)
@@ -3278,10 +3303,28 @@ __declspec(dllexport) preview_handle *realtime_open_v8(int source, int pal, int 
     return preview_open(source,pal,full,input_rate,audio_track,0);
 }
 
+/* A new entry point prevents an older DLL from interpreting an extended source as VHS. */
+__declspec(dllexport) preview_handle *realtime_open_v9(int source, int pal, int full,
+                                                     uint32_t rate, int audio_track) {
+    if (source < 0 || source > 9) return NULL;
+    return preview_open(source,pal,full,rate,audio_track,0);
+}
+
 /* Direct baseband reuses the composite field renderer and bypasses all RF demodulation. */
 __declspec(dllexport) preview_handle *realtime_open_cvbs(int pal, int full, uint32_t rate, int restore) {
     if (rate!=20000000 && rate!=40000000) return NULL;
     return preview_open(0,pal,full,rate,0,restore ? 2 : 1);
+}
+
+__declspec(dllexport) int realtime_enable_signal(preview_handle *h) {
+    if (!h || !h->core) return 0;
+    if (!h->core->signal)
+        h->core->signal=calloc((size_t)GUI_RF_FRAME_MAX_WIDTH*((GUI_RF_FRAME_MAX_HEIGHT+1)/2)*3,sizeof(int16_t));
+    return h->core->signal!=NULL;
+}
+
+__declspec(dllexport) const int16_t *realtime_signal(preview_handle *h) {
+    return h->core->signal;
 }
 
 enum { PREVIEW_MAX_THREADS=64 };
@@ -3524,12 +3567,6 @@ __declspec(dllexport) int realtime_process(preview_handle *handle, const int16_t
 
     if (!handle->resampler)
         for (size_t i = 0; i < count; i++) handle->input[i] = input[i] * (1.0f / 32768.0f);
-    if (handle->audio) {
-        preview_pcm_context output = { audio_sink, context };
-        gui_vhs_hifi_process(handle->audio, handle->input, count, first_sample, preview_send_pcm, &output);
-        return 1;
-    }
-
     const float *video = handle->input;
     if (handle->resampler) {
         // Keep the decimator on the even source sample clock after every reset.
@@ -3546,6 +3583,12 @@ __declspec(dllexport) int realtime_process(preview_handle *handle, const int16_t
         count = length;
         first_sample = (first_sample + 1u) / 2u;
     }
+    if (handle->audio) {
+        preview_pcm_context output = { audio_sink, context };
+        gui_vhs_hifi_process(handle->audio, video, count, first_sample, preview_send_pcm, &output);
+        return 1;
+    }
+
     /* LD and four-carrier Betamax use dedicated video front ends. Their first
      * helper is available for audio even with a two-thread budget. */
     bool parallel_audio=handle->lane_count>0 &&

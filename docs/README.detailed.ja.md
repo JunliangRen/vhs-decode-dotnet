@@ -11,7 +11,7 @@
 `v0.4.0`、commit `43155200da87c0d49eb37d8ec09b1372075ee8e4`
 を互換性の基準としています。
 
-現在の .NET port release は [`v0.4.0-2.29.0`](https://github.com/JunliangRen/vhs-decode-dotnet/releases/tag/v0.4.0-2.29.0)（application version `2.29.0`）です。
+現在の .NET port release は [`v0.4.0-2.30.0`](https://github.com/JunliangRen/vhs-decode-dotnet/releases/tag/v0.4.0-2.30.0)（application version `2.30.0`）です。
 
 [LD EFM バッファー再利用の測定結果と適用範囲](LD_PERFORMANCE_V16.md)。
 

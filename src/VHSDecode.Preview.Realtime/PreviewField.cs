@@ -10,9 +10,10 @@ public sealed class PreviewField
     internal PreviewField(byte[] bgra, PreviewRectangle raster, PreviewRectangle activeVideo, bool isTopField,
         TimeSpan timestamp, double fieldsPerSecond, ReadOnlyMemory<ushort> samples,
         ReadOnlyMemory<ushort> chromaSamples, double tbcSampleRateHz, double tbcZeroIre, double tbcUnitsPerIre,
-        PreviewRectangle? tbcRaster = null)
+        PreviewRectangle? tbcRaster = null, ReadOnlyMemory<short> signalYuv = default)
     {
         Bgra = bgra;
+        SignalYuv = signalYuv;
         RasterRect = raster;
         ActiveVideoRect = activeVideo;
         IsTopField = isTopField;
@@ -26,6 +27,8 @@ public sealed class PreviewField
         TbcUnitsPerIre = tbcUnitsPerIre;
     }
 
+    /// <summary>Optional owned interleaved Y, U, V in raster order. Y uses 64 counts per IRE; U and V use 4096 counts per unit.</summary>
+    public ReadOnlyMemory<short> SignalYuv { get; }
     public ReadOnlyMemory<byte> Bgra { get; }
     public PreviewRectangle RasterRect { get; }
     public PreviewRectangle ActiveVideoRect { get; }
