@@ -40,7 +40,7 @@ function Reset-IppDirectory {
     return $resolved
 }
 
-foreach ($name in @('cmake', 'ninja', 'g++', 'dpkg-deb', 'python3', 'readelf', 'nm', 'strip', 'getconf')) {
+foreach ($name in @('curl', 'cmake', 'ninja', 'g++', 'dpkg-deb', 'python3', 'readelf', 'nm', 'strip', 'getconf')) {
     if ($null -eq (Get-Command $name -ErrorAction SilentlyContinue)) {
         throw "Required Linux IPP build command '$name' is missing."
     }
@@ -62,7 +62,9 @@ foreach ($package in $configuration.packages) {
     $archive = Join-Path $downloadRoot $package.fileName
     if (-not (Test-Path -LiteralPath $archive -PathType Leaf)) {
         $temporary = "$archive.download"
-        Invoke-WebRequest -Uri $package.url -OutFile $temporary
+        Invoke-Checked curl @('--fail', '--silent', '--show-error', '--location',
+            '--retry', '4', '--retry-all-errors', '--connect-timeout', '30',
+            '--output', $temporary, $package.url)
         if ((Get-FileHash -LiteralPath $temporary -Algorithm SHA256).Hash.ToLowerInvariant() -cne $package.sha256) {
             throw "Intel IPP package checksum mismatch: $($package.fileName)"
         }
