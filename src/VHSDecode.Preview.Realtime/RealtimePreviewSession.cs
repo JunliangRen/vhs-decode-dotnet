@@ -266,6 +266,12 @@ public sealed class RealtimePreviewSession : IDisposable
                 throw new InvalidOperationException("Could not initialize the Realtime preview decoder.");
             if (options.IncludeSignalScopes && NativeEnableScope(decoder) != 1)
                 throw new InvalidOperationException("Could not allocate the signal scope buffer.");
+            // Check the lock API before the first block can invoke a host callback.
+            try { _ = NativeLockFlags(decoder); }
+            catch (EntryPointNotFoundException ex)
+            {
+                throw new NotSupportedException("The native Realtime preview library does not support receiver lock status.", ex);
+            }
             return decoder;
         }
         catch
